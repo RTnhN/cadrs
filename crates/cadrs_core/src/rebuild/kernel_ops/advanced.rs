@@ -553,13 +553,14 @@ impl Rebuilder {
             SplitType::Part => {
                 for p in &x.parts {
                     let part = state.part(*p).ok_or("A selected part no longer exists")?;
-                    bodies.push((*p, part.body.ok_or_else(|| super::super::no_body(part))?));
+                    let Some(body) = self.body_or_skip(part) else { continue };
+                    bodies.push((*p, body));
                 }
             }
             SplitType::Face => {
                 for f in &x.faces {
                     let (part, ids) = face_ids(state, f).ok_or("A face to split no longer exists")?;
-                    let body = part.body.ok_or_else(|| super::super::no_body(part))?;
+                    let Some(body) = self.body_or_skip(part) else { continue };
                     match bodies.iter().position(|(p, _)| *p == part.part.id) {
                         Some(i) => faces[i].extend(ids),
                         None => {

@@ -37,6 +37,7 @@ impl Plugin for BoardInStudioPlugin {
         app.init_resource::<BoardEditing>()
             .init_resource::<OverlayCache>()
             .add_observer(on_edit_bar)
+            .add_observer(on_link_menu)
             .add_systems(Update, navigate3d.before(crate::eda::navigate).run_if(in_state(AppState::Document)))
             .add_systems(Update, (end_edit_when_gone, sync_board_views, sync_drag_ghosts, sync_overlays, sync_edit_bar, edit_keys).chain().after(crate::parts::PartsSet).run_if(in_state(AppState::Document)))
             .add_systems(OnExit(AppState::Document), |mut e: ResMut<BoardEditing>| e.target = None);
@@ -142,8 +143,46 @@ pub struct LayoutOverlay;
 /// The layout meshes on screen, by what they show.
 #[derive(Resource, Default)]
 pub struct OverlayCache {
-    /// By (feature, copy, top face).
-    shown: HashMap<(FeatureId, usize, bool), (u64, Entity)>,
+    /// By (feature, copy, top face, the changes in progress).
+    shown: HashMap<(FeatureId, usize, bool, bool), (u64, Entity)>,
+}
+
+/// How much of a layout an overlay shows.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum OverlayArea {
+    /// The board's area.
+    Board,
+    /// Everything drawn, the footprints off the board too.
+    Everything,
+    /// The edit in progress ([`preview_changes`]), over the picture of the stored layout.
+    Changes,
+}
+
+/// What a tool's preview `preview` has that `stored` hasn't (new or changed footprints, tracks,
+/// vias, zones, shapes and texts), as a layout of its own; `None` when nothing.
+pub fn preview_changes(stored: &cadrs_eda::board::Board, preview: &cadrs_eda::board::Board) -> Option<cadrs_eda::board::Board> {
+    fn changed<T: Clone + PartialEq>(old: &[T], new: &[T], id: impl Fn(&T) -> uuid::Uuid) -> Vec<T> {
+        let by_id: HashMap<uuid::Uuid, &T> = old.iter().map(|x| (id(x), x)).collect();
+        new.iter().filter(|x| by_id.get(&id(x)).is_none_or(|o| *o != *x)).cloned().collect()
+    }
+    let out = cadrs_eda::board::Board {
+        footprints: changed(&stored.footprints, &preview.footprints, |f| f.id),
+        tracks: changed(&stored.tracks, &preview.tracks, |t| t.id),
+        vias: changed(&stored.vias, &preview.vias, |v| v.id),
+        zones: changed(&stored.zones, &preview.zones, |z| z.id),
+        shapes: changed(&stored.shapes, &preview.shapes, |s| s.id),
+        texts: changed(&stored.texts, &preview.texts, |t| t.id),
+        copper_layers: preview.copper_layers,
+        thickness: preview.thickness,
+        nets: preview.nets.clone(),
+        groups: vec![],
+        rules: preview.rules.clone(),
+        stackup: preview.stackup.clone(),
+        paper: Default::default(),
+        title_block: Default::default(),
+    };
+    let empty = out.footprints.is_empty() && out.tracks.is_empty() && out.vias.is_empty() && out.zones.is_empty() && out.shapes.is_empty() && out.texts.is_empty();
+    (!empty).then_some(out)
 }
 
 /// Height of the layout above the board's top face (mm): clear of the face, close enough to
@@ -157,10 +196,9 @@ pub const OVERLAY_PX_PER_MM: f32 = 32.0;
 /// `thickness` mm thick), in Part Studio coordinates: a picture of the layout as the PCB Studio
 /// draws it ([`cadrs_eda::skin::raster`]) on one rectangle — on the top face the top layers and
 /// those of no side (the outline, drawings, inner copper), on the bottom face the bottom ones,
-/// in layout coordinates (so seen from below they read as the bottom does). Only the board's
-/// area unless `off_board` (then everything, clear where nothing is drawn). The mesh and its
-/// picture.
-pub fn overlay_mesh(layout: &cadrs_eda::board::Board, view: &OverlayView, frame: &PlaneFrame, thickness: f64, side: cadrs_eda::layer::Side, off_board: bool) -> Option<(Mesh, Image)> {
+/// in layout coordinates (so seen from below they read as the bottom does). `area` says how
+/// much of it (clear where nothing is drawn). The mesh and its picture.
+pub fn overlay_mesh(layout: &cadrs_eda::board::Board, view: &OverlayView, frame: &PlaneFrame, thickness: f64, side: cadrs_eda::layer::Side, area: OverlayArea) -> Option<(Mesh, Image)> {
     use cadrs_eda::layer::{Layer, Side};
     let mut v = cadrs_eda::render::BoardView::all(layout);
     let other = match side {
@@ -177,20 +215,19 @@ pub fn overlay_mesh(layout: &cadrs_eda::board::Board, view: &OverlayView, frame:
     let list = cadrs_eda::render::board(layout, &cadrs_eda::render::BoardTheme::default(), &v);
     let region = cadrs_eda::outline::board_region(layout);
     let of = |r: &cadrs_eda::poly::Region| r.iter().flatten().fold(None, |acc, p| Some(cadrs_eda::units::Bounds::union(acc, cadrs_eda::units::Bounds::of(*p))));
-    let (bounds, clip) = if off_board { (list.bounds.or_else(|| of(&region))?, None) } else { (of(&region)?, Some(&region)) };
+    let (bounds, clip) = match area {
+        OverlayArea::Board => (of(&region)?, Some(&region)),
+        OverlayArea::Everything | OverlayArea::Changes => (list.bounds.or_else(|| of(&region))?, None),
+    };
     let skin = cadrs_eda::skin::raster(&list, bounds, OVERLAY_PX_PER_MM, 4096, clip)?;
+    // The changes lie over the picture of the rest.
+    let lift = if area == OverlayArea::Changes { 2.0 * LIFT } else { LIFT };
     let n = frame.normal();
     let z = match side {
-        Side::Top => thickness + LIFT,
-        Side::Bottom => -LIFT,
+        Side::Top => thickness + lift,
+        Side::Bottom => -lift,
     };
-    let at = |x: f64, y: f64| {
-        [
-            (frame.origin[0] + frame.u[0] * x + frame.v[0] * y + n[0] * z) as f32,
-            (frame.origin[1] + frame.u[1] * x + frame.v[1] * y + n[1] * z) as f32,
-            (frame.origin[2] + frame.u[2] * x + frame.v[2] * y + n[2] * z) as f32,
-        ]
-    };
+    let at = |x: f64, y: f64| cadrs_core::pcb::frames::to_world(frame, [x, y, z]).map(|c| c as f32);
     let mm = |v: i64| v as f64 / 1e6;
     let (x0, y0, x1, y1) = (mm(bounds.min.x), mm(bounds.min.y), mm(bounds.max.x), mm(bounds.max.y));
     let positions = vec![at(x0, y0), at(x1, y0), at(x1, y1), at(x0, y1)];
@@ -226,8 +263,12 @@ pub fn sync_overlays(world: &mut World) {
     // Not editing: the layers panel's hidden layers still hold.
     let plain_view = OverlayView { hidden: world.resource::<crate::eda::layout_tools::LayoutState>().hidden.clone(), ..Default::default() };
     let cache = world.resource::<PartCache>();
-    // (key, signature, frame, thickness, name, what else it shows, edited, parts off the board)
-    type Want = ((FeatureId, usize, bool), u64, PlaneFrame, f64, String, OverlayView, bool, bool);
+    // (key: feature, copy, top face, the changes; signature, frame, thickness, name, what else it
+    // shows, edited, parts off the board). While a tool previews an edit (a drag) the picture of
+    // the stored layout stays and a small one of the changes lies over it: the whole layout is
+    // drawn again once, when the edit is done (`docs/PCB_IN_PART_STUDIO.md` §7.1).
+    type Key = (FeatureId, usize, bool, bool);
+    type Want = (Key, u64, PlaneFrame, f64, String, OverlayView, bool, bool);
     let mut want: Vec<Want> = vec![];
     for b in &boards {
         let Some(out) = cache.derived.get(&b.feature) else { continue };
@@ -240,18 +281,19 @@ pub fn sync_overlays(world: &mut World) {
             for top in [true, false] {
                 let mut h = std::collections::hash_map::DefaultHasher::new();
                 (b.hash, top).hash(&mut h);
-                if edited {
-                    (has_preview, preview_generation).hash(&mut h);
-                }
                 view.hash(&mut h);
                 format!("{:?}{}", copy.frame, copy.thickness).hash(&mut h);
                 b.off_board.hash(&mut h);
-                want.push(((b.feature, k, top), h.finish(), copy.frame, copy.thickness, b.name.clone(), view.clone(), edited, b.off_board));
+                let sig = h.finish();
+                want.push(((b.feature, k, top, false), sig, copy.frame, copy.thickness, b.name.clone(), view.clone(), edited, b.off_board));
+                if edited && has_preview {
+                    want.push(((b.feature, k, top, true), sig ^ preview_generation, copy.frame, copy.thickness, b.name.clone(), view.clone(), edited, b.off_board));
+                }
             }
         }
     }
-    let keys: HashSet<(FeatureId, usize, bool)> = want.iter().map(|w| w.0).collect();
-    let stale: Vec<((FeatureId, usize, bool), Entity)> = world.resource::<OverlayCache>().shown.iter().filter(|(k, _)| !keys.contains(k)).map(|(k, (_, e))| (*k, *e)).collect();
+    let keys: HashSet<Key> = want.iter().map(|w| w.0).collect();
+    let stale: Vec<(Key, Entity)> = world.resource::<OverlayCache>().shown.iter().filter(|(k, _)| !keys.contains(k)).map(|(k, (_, e))| (*k, *e)).collect();
     for (k, e) in stale {
         if let Ok(ec) = world.get_entity_mut(e) {
             ec.despawn();
@@ -269,10 +311,15 @@ pub fn sync_overlays(world: &mut World) {
         }
         let side = if key.2 { Side::Top } else { Side::Bottom };
         let made = {
-            let preview = world.resource::<crate::eda::Preview>().get().filter(|_| edited).map(|d| &d.board);
             let doc = world.resource::<ActiveDocument>();
-            let Some(layout) = preview.or_else(|| layout_of(doc, key.0)) else { continue };
-            overlay_mesh(layout, &view, &frame, thickness, side, off_board)
+            let Some(stored) = layout_of(doc, key.0) else { continue };
+            if key.3 {
+                let preview = world.resource::<crate::eda::Preview>().get().filter(|_| edited).map(|d| &d.board);
+                let Some(changes) = preview.and_then(|p| preview_changes(stored, p)) else { continue };
+                overlay_mesh(&changes, &view, &frame, thickness, side, OverlayArea::Changes)
+            } else {
+                overlay_mesh(stored, &view, &frame, thickness, side, if off_board { OverlayArea::Everything } else { OverlayArea::Board })
+            }
         };
         let Some((mesh, image)) = made else { continue };
         let mesh = world.resource_mut::<Assets<Mesh>>().add(mesh);
@@ -287,7 +334,7 @@ pub fn sync_overlays(world: &mut World) {
             depth_bias: 200.0,
             ..default()
         });
-        let label = format!("board-layout-{}{}", crate::pcb::slug(&name), if key.2 { "" } else { "-bottom" });
+        let label = format!("board-layout-{}{}{}", crate::pcb::slug(&name), if key.2 { "" } else { "-bottom" }, if key.3 { "-changes" } else { "" });
         let e = world.spawn((Name::new(label), LayoutOverlay, Mesh3d(mesh), MeshMaterial3d(material), Transform::IDENTITY, DespawnOnExit(AppState::Document))).id();
         world.resource_mut::<OverlayCache>().shown.insert(key, (sig, e));
     }
@@ -371,7 +418,7 @@ fn end_edit_when_gone(world: &mut World) {
     let Some(t) = world.resource::<BoardEditing>().target else { return };
     let gone = {
         let doc = world.resource::<ActiveDocument>();
-        doc.active_element().is_none_or(|e| e.id != t.studio) || crate::derived_ui::derived_in_active(world, t.feature).is_none_or(|d| d.board.is_none())
+        doc.active_element().is_none_or(|e| e.id != t.studio) || crate::derived_ui::derived_board_ref(world, t.feature).is_none()
     };
     if gone {
         end_edit(world);
@@ -382,14 +429,14 @@ fn end_edit_when_gone(world: &mut World) {
 #[derive(Component)]
 struct EditBar;
 
-/// Keeps the edit bar on screen while editing: "Editing the layout of <board> (<studio>)",
-/// Open in PCB Studio, Done.
+/// Keeps the edit bar on screen while editing: "Layout of <board> (<studio>)", the fit tools,
+/// Move by…, Open in PCB Studio, Done.
 fn sync_edit_bar(world: &mut World) {
     let want = world.resource::<crate::eda::Eda2d>().plane().map(|h| h.target);
     let title = want.and_then(|t| {
-        let d = crate::derived_ui::derived_in_active(world, t.feature)?;
-        let b = d.board?;
-        Some(format!("Editing the layout of {} ({})", b.board_name, d.source_name))
+        let d = crate::derived_ui::derived_ref(world, t.feature)?;
+        let b = d.board.as_ref()?;
+        Some(format!("Layout of {} ({})", b.board_name, d.source_name))
     });
     let mut q = world.query_filtered::<Entity, With<EditBar>>();
     let existing = q.iter(world).next();
@@ -398,33 +445,26 @@ fn sync_edit_bar(world: &mut World) {
             let mut qa = world.query_filtered::<Entity, With<crate::viewport::ViewportArea>>();
             let Some(area) = qa.iter(world).next() else { return };
             let t = world.resource::<cadrs_ui::Theme>().clone();
+            let fit = world.resource::<crate::board_fit::FitState>().context_alpha;
+            let t2 = t.clone();
             world.commands().entity(area).with_children(|vp| {
                 vp.spawn((
-                    Name::new("board-edit-bar"),
                     EditBar,
-                    Node {
-                        position_type: PositionType::Absolute,
-                        top: Val::Px(8.0),
-                        left: Val::Percent(50.0),
-                        margin: UiRect::left(Val::Px(-380.0)),
-                        column_gap: Val::Px(8.0),
-                        align_items: AlignItems::Center,
-                        padding: UiRect::new(Val::Px(10.0), Val::Px(4.0), Val::Px(4.0), Val::Px(4.0)),
-                        border_radius: BorderRadius::all(Val::Px(6.0)),
-                        ..default()
-                    },
-                    BackgroundColor(t.background),
-                    BoxShadow::default(),
-                ))
-                .with_children(|b| {
-                    b.spawn(cadrs_ui::icon("pcb-studio", 14.0, t.muted_foreground));
-                    b.spawn((Name::new("board-edit-title"), t.text(title, t.font_base, bevy::text::FontWeight::BOLD, t.foreground)));
-                    for (name, label, tip) in crate::board_fit::BUTTONS {
-                        b.spawn(cadrs_ui::Button::new(name).label(label).small().outline().tooltip(tip).build(&t));
-                    }
-                    b.spawn(cadrs_ui::Button::new("board-edit-open").label("Open in PCB Studio").small().outline().tooltip("Show the board in its PCB Studio").build(&t));
-                    b.spawn(cadrs_ui::Button::new("board-edit-done").label("Done").small().primary().tooltip("Stop editing the layout (Esc)").build(&t));
-                });
+                    cadrs_ui::FloatBar::new("board-edit-bar").top(8.0).build(&t, move |b| {
+                        let t = t2;
+                        b.spawn(cadrs_ui::icon("pcb-studio", 14.0, t.muted_foreground));
+                        b.spawn((Name::new("board-edit-title"), t.text(title, t.font_base, bevy::text::FontWeight::BOLD, t.foreground)));
+                        for (name, label, tip) in crate::board_fit::BUTTONS {
+                            b.spawn(cadrs_ui::Button::new(name).label(label).small().outline().tooltip(tip).build(&t));
+                            if name == "board-fit-context" {
+                                b.spawn(cadrs_ui::dialog_fields::Slider::new(crate::board_fit::CONTEXT_OPACITY).value((fit - 0.1) / 0.9).width(64.0).tooltip("How see-through the parts around are").build(&t));
+                            }
+                        }
+                        b.spawn(cadrs_ui::Button::new("board-edit-moveby").label("Move by…").small().outline().tooltip("Move the selected footprints by typed distances (Shift+M)").build(&t));
+                        b.spawn(cadrs_ui::Button::new("board-edit-open").label("Open in PCB Studio").small().outline().tooltip("Show the board in its PCB Studio").build(&t));
+                        b.spawn(cadrs_ui::Button::new("board-edit-done").label("Done").small().primary().tooltip("Stop editing the layout (Esc)").build(&t));
+                    }),
+                ));
             });
             world.flush();
         }
@@ -463,13 +503,11 @@ fn sync_fit_buttons(world: &mut World) {
             let mut qa = world.query_filtered::<Entity, With<crate::viewport::ViewportArea>>();
             let Some(area) = qa.iter(world).next() else { return };
             let t = world.resource::<cadrs_ui::Theme>().clone();
+            let t2 = t.clone();
             world.commands().entity(area).with_children(|vp| {
-                vp.spawn((
-                    Name::new("board-fit-status"),
-                    Node { position_type: PositionType::Absolute, top: Val::Px(44.0), left: Val::Percent(50.0), margin: UiRect::left(Val::Px(-160.0)), padding: UiRect::axes(Val::Px(10.0), Val::Px(4.0)), border_radius: BorderRadius::all(Val::Px(4.0)), ..default() },
-                    BackgroundColor(t.info_background),
-                    children![t.text(text, t.font_sm, bevy::text::FontWeight::NORMAL, t.foreground)],
-                ));
+                vp.spawn(cadrs_ui::FloatBar::new("board-fit-status").top(46.0).prompt().build(&t, move |b| {
+                    b.spawn(t2.text(text, t2.font_sm, bevy::text::FontWeight::NORMAL, t2.foreground));
+                }));
             });
             world.flush();
         }
@@ -483,7 +521,9 @@ fn sync_fit_buttons(world: &mut World) {
             }
         }
         (None, Some(e)) => {
-            world.entity_mut(e).despawn();
+            // The prompt's row with it.
+            let row = world.get::<ChildOf>(e).map(|c| c.parent()).unwrap_or(e);
+            world.entity_mut(row).despawn();
         }
         _ => {}
     }
@@ -494,15 +534,18 @@ fn on_edit_bar(a: On<bevy::ui_widgets::Activate>, q: Query<&Name>, mut commands:
     match n.as_str() {
         "board-edit-done" => commands.queue(end_edit),
         "board-edit-open" => commands.queue(open_in_pcb_studio),
+        "board-edit-moveby" => commands.queue(|w: &mut World| {
+            let ids: Vec<uuid::Uuid> = w.resource::<crate::eda::layout_tools::LayoutState>().selection.iter().filter_map(|i| if let cadrs_eda::board_edit::BoardItem::Footprint(id) = i { Some(*id) } else { None }).collect();
+            crate::eda::lay_dialogs::open_move_by(w, ids);
+        }),
         _ => {}
     }
 }
 
 /// Shows the edited board in its PCB Studio (and stops editing here).
 fn open_in_pcb_studio(world: &mut World) {
-    let Some(host) = world.resource::<crate::eda::Eda2d>().plane().copied() else { return };
-    let Some((pcb, board, _)) = world.resource::<crate::eda::Eda2d>().board() else { return };
-    let _ = host;
+    let eda = world.resource::<crate::eda::Eda2d>();
+    let Some((pcb, board, _)) = eda.board().filter(|_| eda.plane().is_some()) else { return };
     end_edit(world);
     world.resource_mut::<ActiveDocument>().set_active(pcb);
     crate::pcb::show_board(world, pcb, board);
@@ -528,21 +571,8 @@ fn edit_keys(world: &mut World, mut idle: Local<bool>) {
 /// Where a view ray meets the board face facing the camera: the layout point (nm). `None` when
 /// the ray runs along the board.
 pub fn ray_to_layout(host: &crate::eda::PlaneHost, origin: Vec3, dir: Vec3) -> Option<cadrs_eda::units::Pt> {
-    let f = &host.frame;
-    let n = f.normal();
-    let n = Vec3::new(n[0] as f32, n[1] as f32, n[2] as f32);
-    let (u, v) = (Vec3::new(f.u[0] as f32, f.u[1] as f32, f.u[2] as f32), Vec3::new(f.v[0] as f32, f.v[1] as f32, f.v[2] as f32));
-    let o = Vec3::new(f.origin[0] as f32, f.origin[1] as f32, f.origin[2] as f32);
-    // The top face seen from above, the bottom face from below.
-    let z = if dir.dot(n) < 0.0 { host.thickness as f32 } else { 0.0 };
-    let on = o + n * z;
-    let d = dir.dot(n);
-    if d.abs() < 1e-6 {
-        return None;
-    }
-    let t = (on - origin).dot(n) / d;
-    let p = origin + dir * t - o;
-    Some(cadrs_eda::units::Pt::mm(p.dot(u) as f64, p.dot(v) as f64))
+    let v = |a: Vec3| [a.x as f64, a.y as f64, a.z as f64];
+    cadrs_core::pcb::frames::ray_to_board(&host.frame, host.thickness, v(origin), v(dir)).map(cadrs_core::pcb::frames::board_to_layout)
 }
 
 /// The component under a view ray, of the edited board copy: its footprint's place on the
@@ -552,15 +582,14 @@ fn component_under(world: &World, host: &crate::eda::PlaneHost, origin: Vec3, di
     let cache = world.resource::<PartCache>();
     let out = cache.derived.get(&host.target.feature)?;
     let parts = component_parts(out, host.target.copy);
-    let layout = crate::derived_ui::derived_in_active(world, host.target.feature)?.board?.layout;
-    let plane_t = {
-        let n = host.frame.normal();
-        let n = Vec3::new(n[0] as f32, n[1] as f32, n[2] as f32);
-        let o = Vec3::new(host.frame.origin[0] as f32, host.frame.origin[1] as f32, host.frame.origin[2] as f32);
-        let z = if dir.dot(n) < 0.0 { host.thickness as f32 } else { 0.0 };
-        let d = dir.dot(n);
-        if d.abs() > 1e-6 { ((o + n * z) - origin).dot(n) / d } else { f32::MAX }
-    };
+    let layout = &crate::derived_ui::derived_board_ref(world, host.target.feature)?.layout;
+    // How far along the ray the board face it sees is (the parts must be nearer).
+    let plane_t = ray_to_layout(host, origin, dir).map_or(f32::MAX, |at| {
+        let [x, y] = cadrs_core::pcb::frames::layout_to_board(at);
+        let z = if dir.dot(Vec3::from_array(host.frame.normal().map(|c| c as f32))) < 0.0 { host.thickness } else { 0.0 };
+        let p = cadrs_core::pcb::frames::to_world(&host.frame, [x, y, z]);
+        (Vec3::new(p[0] as f32, p[1] as f32, p[2] as f32) - origin).dot(dir) / dir.length_squared()
+    });
     let mut best: Option<(f32, uuid::Uuid)> = None;
     for pid in parts {
         let Some(part) = cache.part(pid) else { continue };
@@ -694,13 +723,6 @@ struct Ghosts {
 }
 
 /// The motion of a footprint frame onto the Part Studio for a board copy (`frame`, `thickness`).
-fn footprint_world(frame: &PlaneFrame, thickness: f64, p: &cadrs_eda::footprint::FootprintPlacement) -> cadrs_kernel::Motion {
-    let n = frame.normal();
-    let col = |a: [f64; 3]| nalgebra::Vector3::new(a[0], a[1], a[2]);
-    let board = cadrs_kernel::Motion { linear: nalgebra::Matrix3::from_columns(&[col(frame.u), col(frame.v), col(n)]), translation: col(frame.origin) };
-    cadrs_core::pcb::model::footprint_motion(p, thickness).then(&board)
-}
-
 fn motion_transform(m: &cadrs_kernel::Motion) -> Transform {
     let l = m.linear;
     let mat = Mat4::from_cols(
@@ -716,11 +738,11 @@ fn motion_transform(m: &cadrs_kernel::Motion) -> Transform {
 /// (live 3D while dragging); the ghost stays after the drop until the rebuilt part is there.
 fn sync_drag_ghosts(world: &mut World, mut ghosts: Local<Ghosts>) {
     let host = world.resource::<crate::eda::Eda2d>().plane().copied();
-    let preview = world.resource::<crate::eda::Preview>().get().map(|d| d.board.footprints.clone());
+    let preview = world.resource::<crate::eda::Preview>().get();
     // Each moved footprint's part and motion (preview placement ∘ stored placement⁻¹).
     let mut moved: Vec<(PartId, uuid::Uuid, Transform)> = vec![];
-    if let (Some(h), Some(preview)) = (host, preview.as_ref())
-        && let Some(layout) = crate::derived_ui::derived_in_active(world, h.target.feature).and_then(|d| d.board).map(|b| b.layout)
+    if let (Some(h), Some(preview)) = (host, preview.map(|d| &d.board.footprints))
+        && let Some(layout) = crate::derived_ui::derived_board_ref(world, h.target.feature).map(|b| &b.layout)
     {
         let cache = world.resource::<PartCache>();
         if let Some(out) = cache.derived.get(&h.target.feature) {
@@ -730,7 +752,7 @@ fn sync_drag_ghosts(world: &mut World, mut ghosts: Local<Ghosts>) {
                 if old.placement == new.placement {
                     continue;
                 }
-                let m = footprint_world(&h.frame, h.thickness, &old.placement).inverse().then(&footprint_world(&h.frame, h.thickness, &new.placement));
+                let m = cadrs_core::pcb::frames::footprint_world(&h.frame, h.thickness, &old.placement).inverse().then(&cadrs_core::pcb::frames::footprint_world(&h.frame, h.thickness, &new.placement));
                 moved.push((*pid, *fp, motion_transform(&m)));
             }
         }
@@ -782,14 +804,116 @@ fn sync_drag_ghosts(world: &mut World, mut ghosts: Local<Ghosts>) {
 }
 
 // ---------------------------------------------------------------------------------------------
+// Board outlines from sketches (§8)
+
+/// The regions of the sketch `sketch` a board is made from: the ones selected in the view, else
+/// the largest (with its holes).
+fn sketch_regions(world: &World, sketch: FeatureId) -> Vec<cadrs_core::document::RegionRef> {
+    let doc = world.resource::<ActiveDocument>();
+    let Some(g) = doc.active_element().and_then(|e| e.feature(sketch)).and_then(|f| f.sketch()).map(|s| s.geometry.clone()) else { return vec![] };
+    let all = cadrs_sketch::region::regions_shared(&g);
+    let picked: Vec<usize> = world.resource::<crate::viewport::Selection>().0.iter().filter_map(|p| match p {
+        crate::viewport::Pick::Region(f, i) if *f == sketch => Some(*i as usize),
+        _ => None,
+    }).collect();
+    let chosen: Vec<&cadrs_sketch::region::Region> = if picked.is_empty() {
+        all.iter().max_by(|a, b| a.area().total_cmp(&b.area())).into_iter().collect()
+    } else {
+        picked.iter().filter_map(|i| all.get(*i)).collect()
+    };
+    chosen.into_iter().map(|r| cadrs_core::document::RegionRef::new(sketch, r)).collect()
+}
+
+/// The sketch row's Create PCB board: a board with the sketch's outline, in the document's first
+/// PCB Studio (a new one when it has none), derived onto the sketch (one undo step).
+pub fn create_from_sketch(world: &mut World, sketch: FeatureId) {
+    let regions = sketch_regions(world, sketch);
+    if regions.is_empty() {
+        crate::linked::error_toast(world, "The sketch has no closed region to make a board from");
+        return;
+    }
+    let doc = world.resource::<ActiveDocument>();
+    let Some(el) = doc.active_element() else { return };
+    let element = el.id;
+    let sketch_name = el.feature(sketch).map(|f| f.name.clone()).unwrap_or_default();
+    let pcb = doc.doc.elements.iter().find(|e| e.pcb().is_some()).map(|e| e.id);
+    let cmd = cadrs_core::pcb::outline_link::CreateBoardFromSketch { element, sketch, regions, pcb, new_pcb: ElementId::new(), name: format!("Board from {sketch_name}"), feature: FeatureId::new() };
+    if let Err(e) = world.resource_mut::<ActiveDocument>().execute(&cmd) {
+        crate::linked::error_toast(world, e.to_string());
+    }
+}
+
+/// The derived board `feature`'s source: its PCB Studio and board.
+fn board_of(world: &World, feature: FeatureId) -> Option<(ElementId, cadrs_core::pcb::BoardId)> {
+    let d = crate::derived_ui::derived_ref(world, feature)?;
+    Some((d.source?.element, d.board.as_ref()?.board))
+}
+
+/// Break outline link: the outline stays as it is, editable in the layout (one undo step).
+pub fn unlink_outline(world: &mut World, feature: FeatureId) {
+    let Some((pcb, board)) = board_of(world, feature) else { return };
+    if let Err(e) = world.resource_mut::<ActiveDocument>().execute(&cadrs_core::pcb::outline_link::SetOutlineLink { pcb, board, link: None }) {
+        crate::linked::error_toast(world, e.to_string());
+    }
+}
+
+/// Link outline to a sketch: a menu of the sketches before the feature with a closed region.
+pub fn link_outline_menu(world: &mut World, feature: FeatureId) {
+    let doc = world.resource::<ActiveDocument>();
+    let Some(el) = doc.active_element() else { return };
+    let before: Vec<(FeatureId, String)> = el.features().iter().take_while(|f| f.id != feature).filter(|f| f.sketch().is_some_and(|s| !cadrs_sketch::region::regions_shared(&s.geometry).is_empty())).map(|f| (f.id, f.name.clone())).collect();
+    if before.is_empty() {
+        crate::linked::error_toast(world, "No sketch with a closed region comes before the board");
+        return;
+    }
+    let pos = world.query_filtered::<&Window, With<bevy::window::PrimaryWindow>>().iter(world).next().and_then(|w| w.cursor_position()).unwrap_or(Vec2::new(400.0, 300.0));
+    let theme = world.resource::<cadrs_ui::Theme>().clone();
+    let mut menu = cadrs_ui::Menu::new("board-link-menu").min_width(180.0).item_height(22.0);
+    for (id, name) in &before {
+        menu = menu.item(cadrs_ui::MenuItem::new(format!("board-link-{}", id.0), name.clone()).icon("sketch"));
+    }
+    let pending = LinkMenu { feature, sketches: before.iter().map(|(id, _)| *id).collect() };
+    world.insert_resource(pending);
+    let mut commands = world.commands();
+    cadrs_ui::menu::open_context_menu(&mut commands, pos, menu.build(&theme));
+    world.flush();
+}
+
+/// The sketches Link outline to a sketch offered, for its menu's pick.
+#[derive(Resource, Debug, Clone)]
+struct LinkMenu {
+    feature: FeatureId,
+    sketches: Vec<FeatureId>,
+}
+
+fn on_link_menu(ev: On<cadrs_ui::MenuAction>, mut commands: Commands) {
+    let Some(rest) = ev.item.strip_prefix("board-link-") else { return };
+    let rest = rest.to_string();
+    commands.queue(move |world: &mut World| {
+        let Some(m) = world.get_resource::<LinkMenu>().cloned() else { return };
+        let Some(sketch) = m.sketches.iter().copied().find(|s| s.0.to_string() == rest) else { return };
+        let Some((pcb, board)) = board_of(world, m.feature) else { return };
+        let Some(element) = world.resource::<ActiveDocument>().active_element().map(|e| e.id) else { return };
+        let regions = sketch_regions(world, sketch);
+        let cmd = cadrs_core::pcb::outline_link::SetOutlineLink { pcb, board, link: Some((element, sketch, regions)) };
+        if let Err(e) = world.resource_mut::<ActiveDocument>().execute(&cmd) {
+            crate::linked::error_toast(world, e.to_string());
+        }
+    });
+}
+
+// ---------------------------------------------------------------------------------------------
 // Scenario set-ups
 
 /// The Derived feature `derive` makes.
 pub const DERIVED: FeatureId = FeatureId::from_u128(0x7e00_0000_0000_0000_0000_0000_0000_0e01);
+/// The sketch `outline-sketch` makes.
+pub const OUTLINE_SKETCH: FeatureId = FeatureId::from_u128(0x7e00_0000_0000_0000_0000_0000_0000_0e02);
 
 /// `setup`: the mains-sensor enclosure, stored and open on its Part Studio. `derive`: its
 /// board derived onto Board location. `layout` / `3d`: that board's view. `transparent a, b`:
-/// the parts named so see-through.
+/// the parts named so see-through. `outline-sketch`: "Board outline", a sketch on Top to make a
+/// board from; `outline-narrow`: its right side moved in.
 pub fn script(world: &mut World, arg: &str) {
     use cadrs_core::samples::pcb_enclosure as pe;
     match arg.trim() {
@@ -832,6 +956,55 @@ pub fn script(world: &mut World, arg: &str) {
             cache.transparent.extend(ids);
             cache.generation += 1;
         }
+        // A sketch on Top inside the tube: a 38 × 38 square from (−19, −19) with a ⌀3.2 mounting
+        // hole at (−15, 15).
+        "outline-sketch" => {
+            use cadrs_sketch::{SketchOp, Vec2};
+            let ops = [
+                SketchOp::AddPolyline { points: vec![Vec2::new(-19.0, -19.0), Vec2::new(19.0, -19.0), Vec2::new(19.0, 19.0), Vec2::new(-19.0, 19.0)], closed: true, construction: false, label: "Add rectangle" },
+                SketchOp::AddCircle { center: Vec2::new(-15.0, 15.0), radius: 1.6, construction: false },
+            ];
+            let mut doc = world.resource_mut::<ActiveDocument>();
+            let _ = doc.execute(&cadrs_core::commands::AddSketch { element: pe::STUDIO, feature: OUTLINE_SKETCH, plane: Some(cadrs_sketch::PlaneRef::Top) });
+            for op in ops {
+                let _ = doc.execute(&cadrs_core::commands::EditSketch { element: pe::STUDIO, feature: OUTLINE_SKETCH, op });
+            }
+            let _ = doc.execute(&cadrs_core::commands::RenameFeature { element: pe::STUDIO, feature: OUTLINE_SKETCH, name: "Board outline".into() });
+        }
+        // The sketch's right side in to x = 9 (its two right corners move).
+        "outline-narrow" => {
+            use cadrs_sketch::{SketchOp, Vec2};
+            let mut doc = world.resource_mut::<ActiveDocument>();
+            let Some(g) = doc.doc.element(pe::STUDIO).and_then(|e| e.feature(OUTLINE_SKETCH)).and_then(|f| f.sketch()).map(|s| s.geometry.clone()) else { return };
+            let corner = |x: f64, y: f64| g.point_at(Vec2::new(x, y), 1e-6);
+            let (Some(a), Some(b)) = (corner(19.0, -19.0), corner(19.0, 19.0)) else { return };
+            let _ = doc.execute(&cadrs_core::commands::EditSketch { element: pe::STUDIO, feature: OUTLINE_SKETCH, op: SketchOp::MovePoints { moves: vec![(a, Vec2::new(9.0, -19.0)), (b, Vec2::new(9.0, 19.0))] } });
+        }
+        // Where a footprint of the derived board is, as text a scenario can check
+        // (`ExpectText("board-check", "J4 at 15.50, 27.50 top 0°")`).
+        a if a.starts_with("check ") => {
+            let r = a["check ".len()..].trim().to_string();
+            let text = crate::derived_ui::derived_board_ref(world, DERIVED).and_then(|b| b.layout.footprints.iter().find(|f| f.reference() == r)).map_or_else(
+                || format!("{r}: no such footprint"),
+                |f| {
+                    let [x, y] = cadrs_core::pcb::frames::layout_to_board(f.placement.at);
+                    let side = if f.placement.side == cadrs_eda::layer::Side::Top { "top" } else { "bottom" };
+                    format!("{r} at {x:.2}, {y:.2} {side} {}°", f.placement.angle)
+                },
+            );
+            let mut q = world.query::<(Entity, &Name)>();
+            let existing = q.iter(world).find(|(_, n)| n.as_str() == "board-check").map(|(e, _)| e);
+            match existing {
+                Some(e) => {
+                    if let Some(mut t) = world.get_mut::<Text>(e) {
+                        t.0 = text;
+                    }
+                }
+                None => {
+                    world.spawn((Name::new("board-check"), Text::new(text), Node { display: Display::None, ..default() }, DespawnOnExit(AppState::Document)));
+                }
+            }
+        }
         "edit" => begin_edit(world, DERIVED, 0),
         "done" => end_edit(world),
         "layout" => set_view(world, DERIVED, BoardView::Layout),
@@ -850,7 +1023,7 @@ mod tests {
         let layout = cadrs_eda::ac_board::board(&lib);
         // A board frame standing up: x along world y, y along world z, the normal along +x.
         let frame = PlaneFrame { origin: [10.0, 0.0, 0.0], u: [0.0, 1.0, 0.0], v: [0.0, 0.0, 1.0] };
-        let (m, image) = overlay_mesh(&layout, &OverlayView::default(), &frame, 1.6, cadrs_eda::layer::Side::Top, false).unwrap();
+        let (m, image) = overlay_mesh(&layout, &OverlayView::default(), &frame, 1.6, cadrs_eda::layer::Side::Top, OverlayArea::Board).unwrap();
         let Some(bevy::mesh::VertexAttributeValues::Float32x3(p)) = m.attribute(Mesh::ATTRIBUTE_POSITION) else { panic!() };
         assert!(p.iter().all(|q| (q[0] - (10.0 + 1.6 + LIFT as f32)).abs() < 1e-4), "on the top face");
         // The board's box: 31 × 39 mm, from its corner at the layout's origin.
@@ -858,7 +1031,7 @@ mod tests {
         assert!(ymin.abs() < 1e-4 && (ymax - cadrs_eda::ac_board::WIDTH as f32).abs() < 1e-4, "{ymin} {ymax}");
         assert_eq!(image.width(), (cadrs_eda::ac_board::WIDTH as f32 * OVERLAY_PX_PER_MM).ceil() as u32);
         // The bottom face's picture lies under the board.
-        let (m, _) = overlay_mesh(&layout, &OverlayView::default(), &frame, 1.6, cadrs_eda::layer::Side::Bottom, false).unwrap();
+        let (m, _) = overlay_mesh(&layout, &OverlayView::default(), &frame, 1.6, cadrs_eda::layer::Side::Bottom, OverlayArea::Board).unwrap();
         let Some(bevy::mesh::VertexAttributeValues::Float32x3(p)) = m.attribute(Mesh::ATTRIBUTE_POSITION) else { panic!() };
         assert!(p.iter().all(|q| (q[0] - (10.0 - LIFT as f32)).abs() < 1e-4));
     }

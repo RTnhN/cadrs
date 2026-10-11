@@ -240,6 +240,10 @@ pub fn run_action(w: &mut World, action: &str) {
         "select" => set_tool(w, Tool::Select),
         "update" => super::lay_dialogs::open_update(w),
         "setup" => super::lay_dialogs::open_setup(w),
+        "outline" if !linked_outline(w).is_empty() => {
+            let note = outline_link_note(w);
+            ui::toast(w, &note);
+        }
         "outline" => set_tool(w, Tool::Outline(None)),
         "route" => {
             let at = w.resource::<EdaPointer>().at;
@@ -267,6 +271,23 @@ pub fn run_action(w: &mut World, action: &str) {
         "plot" => super::lay_dialogs::open_plot(w),
         _ => {}
     }
+}
+
+/// The shown board's outline shapes a sketch drives, if its outline follows one.
+fn linked_outline(w: &World) -> Vec<uuid::Uuid> {
+    let Some((el, b, _)) = w.resource::<super::Eda2d>().board() else { return vec![] };
+    let doc = w.resource::<crate::ActiveDocument>();
+    doc.doc.element(el).and_then(|e| e.pcb()).and_then(|s| s.board(b)).and_then(|b| b.outline_link.as_ref()).map(|l| l.shapes.clone()).unwrap_or_default()
+}
+
+/// "The outline follows Sketch 1 in Part Studio 1": edit it there, or break the link.
+fn outline_link_note(w: &World) -> String {
+    let Some((el, b, _)) = w.resource::<super::Eda2d>().board() else { return String::new() };
+    let doc = &w.resource::<crate::ActiveDocument>().doc;
+    let Some(link) = doc.element(el).and_then(|e| e.pcb()).and_then(|s| s.board(b)).and_then(|b| b.outline_link.clone()) else { return String::new() };
+    let studio = doc.element(link.element);
+    let sketch = studio.and_then(|e| e.feature(link.sketch)).map(|f| f.name.clone()).unwrap_or_default();
+    format!("The outline follows {sketch} in {}: edit the sketch, or break the link (the board's Derived feature's menu)", studio.map(|e| e.name.clone()).unwrap_or_default())
 }
 
 pub fn set_tool(w: &mut World, tool: Tool) {
@@ -604,6 +625,14 @@ fn handle_keys(world: &mut World, keys: Vec<KeyboardInput>) {
                     world.resource_mut::<LayoutState>().tool = Tool::Route { runs, vias, net };
                 }
             }
+            // Shift+M: Move by (typed distances), the selected footprints (else the one under
+            // the pointer).
+            KeyCode::KeyM if shift => {
+                let selected: Vec<uuid::Uuid> = world.resource::<LayoutState>().selection.iter().filter_map(|i| if let BoardItem::Footprint(id) = i { Some(*id) } else { None }).collect();
+                let ids = if selected.is_empty() { target_footprint(world, pointer).into_iter().collect() } else { selected };
+                world.resource_mut::<LayoutState>().moving = None;
+                super::lay_dialogs::open_move_by(world, ids);
+            }
             KeyCode::KeyM | KeyCode::KeyD => {
                 let fp = target_footprint(world, pointer);
                 // The footprint's anchor follows the pointer: it lands on the clicked grid point.
@@ -647,7 +676,14 @@ fn handle_keys(world: &mut World, keys: Vec<KeyboardInput>) {
                 }
             }
             KeyCode::Delete | KeyCode::Backspace => {
-                let sel = world.resource::<LayoutState>().selection.clone();
+                let mut sel = world.resource::<LayoutState>().selection.clone();
+                // The outline a sketch drives stays (`cadrs_core::pcb::outline_link`).
+                let linked = linked_outline(world);
+                let n = sel.len();
+                sel.retain(|i| !linked.contains(&i.id()));
+                if sel.len() < n {
+                    ui::toast(world, &outline_link_note(world));
+                }
                 if !sel.is_empty() {
                     ui::commit(world, "Delete", |d| {
                         be::delete_items(&mut d.board, &sel);

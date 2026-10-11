@@ -1,0 +1,66 @@
+// docs/PCB_IN_PART_STUDIO.md P5: a board's outline from a Part Studio sketch. The mains-sensor
+// enclosure (`board setup`) with "Board outline" (`board outline-sketch`), a sketch on Top
+// inside the tube: a 38 × 38 square from (−19, −19) with a ⌀3.2 mounting hole at (−15, 15).
+// 01 the sketch's menu: Create PCB board.
+// 02 Create PCB board: "Board from Board outline" in PCB Studio 1 and "Derived 1" in the
+//    Part Studio, the board lying on the sketch (its origin on the sketch's), 1.6 mm up from
+//    Top, the hole through it.
+// 03 the sketch's right side moved in to x 9 (`board outline-narrow`): the board follows at once
+//    (28 mm wide now).
+// 04 PCB Studio 1's Layout of the new board: the outline as the sketch has it.
+// 05 the outline tool there: refused, "The outline follows Board outline in Enclosure …".
+// 06 back in the Part Studio, Derived 1's menu: Break outline link.
+// 07 Break outline link: the board keeps its outline (now the layout's to edit); the menu
+//    offers Link outline to a sketch again.
+Scenario(
+    start: Some("document"),
+    steps: [
+        WaitFor("document-shell"),
+        Custom("board setup"),
+        Wait(10),
+        Custom("board outline-sketch"),
+        Custom("board transparent Tube, End plate, Plug"),
+        Custom("view -40 40 0 0 5 0.08"),
+        Wait(30),
+        RightClick(ui("feature-board-outline")),
+        WaitFor("feature-context-menu"),
+        Hover(ui("feature-create-board")),
+        Wait(10),
+        Screenshot("01-menu"),
+        Click(ui("feature-create-board")),
+        Wait(20),
+        MoveTo(1420, 780),
+        Wait(10),
+        Screenshot("02-created"),
+        Custom("board outline-narrow"),
+        Wait(20),
+        Screenshot("03-follows"),
+        Click(ui("tab-pcb-studio-1")),
+        WaitFor("pcb-tree"),
+        Click(ui("pcb-board-board-from-board-outline")),
+        Wait(10),
+        Click(ui("eda-mode-layout")),
+        WaitFor("eda-layout-tools"),
+        Key("F"),
+        Wait(10),
+        Screenshot("04-layout"),
+        Click(ui("pcb-outline")),
+        Wait(5),
+        Screenshot("05-refused"),
+        Click(ui("tab-enclosure")),
+        Wait(10),
+        RightClick(ui("feature-derived-1")),
+        WaitFor("feature-context-menu"),
+        Hover(ui("feature-board-unlink")),
+        Wait(10),
+        Screenshot("06-unlink-menu"),
+        Click(ui("feature-board-unlink")),
+        Wait(10),
+        RightClick(ui("feature-derived-1")),
+        WaitFor("feature-context-menu"),
+        Hover(ui("feature-board-link")),
+        Wait(10),
+        Screenshot("07-unlinked"),
+        Key("Escape"),
+    ],
+)

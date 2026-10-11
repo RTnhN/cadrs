@@ -240,6 +240,21 @@ pub struct PartOverride {
 pub struct PartGhosts {
     pub parts: Vec<PartId>,
     pub faces: Vec<Pick>,
+    /// Parts drawn at an opacity of their own (a board's layout edit: the parts around faded
+    /// by its slider).
+    pub alpha: Vec<(PartId, f32)>,
+}
+
+impl PartGhosts {
+    /// Whether `id` is drawn see-through.
+    pub fn faded(&self, id: PartId) -> bool {
+        self.parts.contains(&id) || self.alpha.iter().any(|(p, a)| *p == id && *a < 1.0)
+    }
+
+    /// What the parts' meshes are made for (the ghosts and the faded parts' opacities).
+    fn key(&self) -> (Vec<PartId>, Vec<(PartId, u32)>) {
+        (self.parts.clone(), self.alpha.iter().map(|(p, a)| (*p, a.to_bits())).collect())
+    }
 }
 
 /// A ghosted part's opacity.
@@ -266,6 +281,11 @@ fn ghosted_bases(cache: &PartCache, over: &PartOverride, ghosts: &PartGhosts, pa
     if ghosts.parts.contains(&part.id) {
         for b in &mut bases {
             b.alpha = b.alpha.min(GHOST_ALPHA);
+        }
+    }
+    if let Some((_, a)) = ghosts.alpha.iter().find(|(p, _)| *p == part.id) {
+        for b in &mut bases {
+            b.alpha = b.alpha.min(*a);
         }
     }
     if let Some(c) = cache.xray(part) {
@@ -891,8 +911,9 @@ impl PartCache {
         for (f, out) in build.derived.iter().filter(|(_, o)| !o.collisions.is_empty()) {
             let name = |p: PartId| build.part(p).map(|x| cadrs_core::parts::display_name(x, &self.props).to_string()).unwrap_or_default();
             let mut lines: Vec<String> = self.warnings.get(f).map(|w| w.split("; ").filter(|l| !l.contains(" runs into ")).map(String::from).collect()).unwrap_or_default();
-            lines.extend(out.collisions.iter().map(|(a, b, d)| format!("{} runs into {} (≈{d:.2} mm)", name(*a), name(*b))));
-            self.warnings.insert(*f, lines.join("; "));
+            // One line each (the tooltip shows them under one another).
+            lines.extend(out.collisions.iter().map(|c| cadrs_core::pcb::fit::collision_text(&name(c.component), &name(c.other), c)));
+            self.warnings.insert(*f, lines.join("\n"));
         }
         self.missing = build.missing.clone();
         // P3G.4: derived sketches are shown and picked like the list's; new ones mean the
@@ -1618,7 +1639,8 @@ struct PartMaterials {
 
 /// What the part meshes were last built for: the parts' generation, the edited extrude, the
 /// ghosted parts, the Translucent mode and the parts a section leaves whole.
-type MeshKey = (u64, Option<FeatureId>, Vec<PartId>, bool, Vec<PartId>);
+type GhostKey = (Vec<PartId>, Vec<(PartId, u32)>);
+type MeshKey = (u64, Option<FeatureId>, GhostKey, bool, Vec<PartId>);
 
 /// Keeps one mesh entity per part, rebuilt when the parts change.
 #[allow(clippy::too_many_arguments)]
@@ -1638,7 +1660,7 @@ fn sync_part_meshes(
     // P3E.3a: the Translucent render mode draws every part see-through.
     let see_through = view.view.render.translucent();
     let excluded = if section.plane.is_some() { section.excluded.clone() } else { Vec::new() };
-    let key = (cache.generation, over.editing, ghosts.parts.clone(), see_through, excluded.clone());
+    let key = (cache.generation, over.editing, ghosts.key(), see_through, excluded.clone());
     if last.as_ref() == Some(&key) && q.iter().count() == cache.shown().count() + cache.tool.len() {
         return;
     }
@@ -1739,7 +1761,7 @@ fn shade_parts(
     faces: Res<FaceSelection>,
     q: Query<(&PartMesh, &Mesh3d)>,
     mut meshes: ResMut<Assets<Mesh>>,
-    mut last: Local<Option<(u64, Option<FeatureId>, Vec<PartId>, Vec<PartId>, Vec<Pick>)>>,
+    mut last: Local<Option<(u64, Option<FeatureId>, Vec<PartId>, GhostKey, Vec<Pick>)>>,
 ) {
     let selected: Vec<PartId> = if cache.assembly.is_some() && selection.contains(Pick::Assembly) {
         // The assembly's root row: every instance (P3B.1).
@@ -1760,7 +1782,7 @@ fn shade_parts(
         }
         out
     };
-    let key = (cache.generation, over.editing, selected.clone(), ghosts.parts.clone(), faces.0.clone());
+    let key = (cache.generation, over.editing, selected.clone(), ghosts.key(), faces.0.clone());
     if last.as_ref() == Some(&key) {
         return;
     }
@@ -1914,7 +1936,7 @@ fn draw_part_edges(
         } else {
             // A see-through tint (a Part Studio's assembly context) shows its back edges, as a
             // transparent part does.
-            let opaque = !ghosts.parts.contains(&part.id) && !cache.transparent.contains(&part.id) && cache.tints.get(&part.id).is_none_or(|t| t.alpha >= 1.0);
+            let opaque = !ghosts.faded(part.id) && !cache.transparent.contains(&part.id) && cache.tints.get(&part.id).is_none_or(|t| t.alpha >= 1.0);
             // An outlined part (hovered, selected, failing) gets its edges in the outline's
             // colour below, at the same depth: not black under them too.
             let outlined = part_hovered || part_selected || (failed_parts.contains(&part.id) && failed.2.is_empty());
@@ -1985,7 +2007,7 @@ fn draw_part_edges(
             };
             // A see-through tint (a Part Studio's assembly context) shows its back edges, as a
             // transparent part does.
-            let opaque = !ghosts.parts.contains(&part.id) && !cache.transparent.contains(&part.id) && cache.tints.get(&part.id).is_none_or(|t| t.alpha >= 1.0);
+            let opaque = !ghosts.faded(part.id) && !cache.transparent.contains(&part.id) && cache.tints.get(&part.id).is_none_or(|t| t.alpha >= 1.0);
             for line in lines_of(part, &v, opaque).iter() {
                 strip(&mut outline_edges, clip, line.iter().copied(), color);
             }

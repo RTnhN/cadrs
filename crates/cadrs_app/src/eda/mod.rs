@@ -19,7 +19,7 @@ pub mod libraries;
 pub mod online;
 pub mod layers_panel;
 pub mod layout_tools;
-mod lay_dialogs;
+pub(crate) mod lay_dialogs;
 mod part_dialogs;
 pub mod part_tools;
 mod sch_dialogs;

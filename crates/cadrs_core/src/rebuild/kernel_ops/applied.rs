@@ -45,6 +45,10 @@ pub(super) fn edge_ids<'a>(state: &'a State, r: &EdgeRef) -> Option<(&'a PartSta
             if by_name && how == cadrs_kernel::naming::Match::Geometric {
                 continue;
             }
+            // A board component's edge (a mesh): found, nothing to change (see `face_ids`).
+            if by_name && part.body.is_none() {
+                return Some((part, Vec::new()));
+            }
             let ids = part.names.edges_named(&solid.edges[i].name);
             if !ids.is_empty() {
                 return Some((part, ids));
@@ -59,7 +63,7 @@ impl Rebuilder {
     fn entity_edges(&self, state: &State, entities: &[EdgeOrFace]) -> Result<Vec<PartEdges>, String> {
         let mut out: Vec<PartEdges> = Vec::new();
         let push = |part: &PartState, ids: Vec<EdgeId>, out: &mut Vec<PartEdges>| -> Result<(), String> {
-            let body = part.body.ok_or_else(|| super::super::no_body(part))?;
+            let Some(body) = self.body_or_skip(part) else { return Ok(()) };
             let i = match out.iter().position(|g| g.part == part.part.id) {
                 Some(i) => i,
                 None => {
@@ -83,7 +87,7 @@ impl Rebuilder {
                 },
                 EdgeOrFace::Face(f) => match face_ids(state, f) {
                     Some((part, faces)) => {
-                        let body = part.body.ok_or_else(|| super::super::no_body(part))?;
+                        let Some(body) = self.body_or_skip(part) else { continue };
                         let infos = self.kernel.edges(body).map_err(|e| e.to_string())?;
                         let ids: Vec<EdgeId> = infos
                             .iter()
@@ -456,12 +460,13 @@ impl Rebuilder {
         if x.hollow {
             for p in &x.parts {
                 let part = state.part(*p).ok_or("A selected part no longer exists")?;
-                groups.push((*p, part.body.ok_or_else(|| super::super::no_body(part))?, Vec::new()));
+                let Some(body) = self.body_or_skip(part) else { continue };
+                groups.push((*p, body, Vec::new()));
             }
         } else {
             for f in &x.faces {
                 let (part, ids) = face_ids(state, f).ok_or("A face to remove no longer exists")?;
-                let body = part.body.ok_or_else(|| super::super::no_body(part))?;
+                let Some(body) = self.body_or_skip(part) else { continue };
                 match groups.iter_mut().find(|g| g.0 == part.part.id) {
                     Some(g) => g.2.extend(ids.into_iter().filter(|i| !g.2.contains(i)).collect::<Vec<_>>()),
                     None => groups.push((part.part.id, body, ids)),
@@ -497,7 +502,7 @@ impl Rebuilder {
         let mut groups: Vec<(PartId, BodyId, Vec<cadrs_kernel::FaceId>)> = Vec::new();
         for f in &x.faces {
             let (part, ids) = face_ids(state, f).ok_or("A selected face no longer exists")?;
-            let body = part.body.ok_or_else(|| super::super::no_body(part))?;
+            let Some(body) = self.body_or_skip(part) else { continue };
             match groups.iter_mut().find(|g| g.0 == part.part.id) {
                 Some(g) => g.2.extend(ids.into_iter().filter(|i| !g.2.contains(i)).collect::<Vec<_>>()),
                 None => groups.push((part.part.id, body, ids)),

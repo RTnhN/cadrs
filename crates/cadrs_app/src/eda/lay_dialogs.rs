@@ -412,11 +412,16 @@ fn run_drc(w: &mut World) {
     }
     let Some((_, _, d)) = ui::current(w) else { return };
     let rep = cadrs_eda::drc::check(&d.board);
-    let errors = rep.errors().count();
-    let warnings = rep.violations.len() - errors;
-    let summary = format!("Violations ({}): {errors} errors, {warnings} warnings. Unconnected items: {}", rep.violations.len(), rep.unconnected.len());
+    let mechanical = mechanical_context(w);
+    let errors = rep.errors().count() + mechanical.len();
+    let total = rep.violations.len() + mechanical.len();
+    let warnings = total - errors;
+    let summary = format!("Violations ({total}): {errors} errors, {warnings} warnings. Unconnected items: {}", rep.unconnected.len());
     ui::set_label(w, "eda-drc-summary", &summary);
     let mut lines = vec![];
+    for m in mechanical {
+        lines.push((format!("Error: {m}"), true));
+    }
     for v in &rep.violations {
         lines.push((format!("{}: {}", if v.rule.is_warning() { "Warning" } else { "Error" }, v.message), true));
         lines.extend(v.items.iter().map(|i| (format!("    {i}"), false)));
@@ -425,6 +430,34 @@ fn run_drc(w: &mut World) {
         lines.push((format!("Unconnected: {} ({:.2}, {:.2}) – ({:.2}, {:.2})", a.net, to_mm(a.a.x), to_mm(a.a.y), to_mm(a.b.x), to_mm(a.b.y)), false));
     }
     list_lines(w, "eda-drc-list", lines);
+}
+
+/// The board's components running into parts of the Part Studios it is derived into
+/// (`docs/PCB_IN_PART_STUDIO.md` §7.3 item 8): "J1 AC inlet runs into Tube in Enclosure (0.80 mm
+/// in plan, 2.40 mm high)".
+fn mechanical_context(w: &World) -> Vec<String> {
+    let Some((pcb, board, _)) = w.resource::<super::Eda2d>().board() else { return vec![] };
+    let doc = &w.resource::<crate::ActiveDocument>().doc;
+    let mut out = vec![];
+    for el in &doc.elements {
+        let deriving: Vec<cadrs_core::FeatureId> = el
+            .features()
+            .iter()
+            .filter(|f| matches!(&f.kind, cadrs_core::FeatureKind::Derived(x) if x.source.is_some_and(|r| r.element == pcb && r.document.is_none_or(|d| d == doc.id)) && x.board.as_ref().is_some_and(|b| b.board == board)))
+            .map(|f| f.id)
+            .collect();
+        if deriving.is_empty() {
+            continue;
+        }
+        let build = cadrs_core::rebuild::build(el.features());
+        let name = |p: cadrs_core::PartId| build.part(p).map(|x| cadrs_core::parts::display_name(x, el.part_props()).to_string()).unwrap_or_default();
+        for f in deriving {
+            for c in build.derived.get(&f).map(|o| o.collisions.as_slice()).unwrap_or_default() {
+                out.push(cadrs_core::pcb::fit::collision_text(&name(c.component), &format!("{} in {}", name(c.other), el.name), c));
+            }
+        }
+    }
+    out
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -604,6 +637,63 @@ pub fn open_footprint(w: &mut World, id: uuid::Uuid) {
                 button(f, &tf, "eda-fprops-cancel", "Cancel", false, close_all);
             }),
     );
+}
+
+/// The footprints Move by moves.
+#[derive(Resource, Clone)]
+struct MoveByOf(Vec<uuid::Uuid>);
+
+/// Move by…: the selected footprints moved by a typed distance along x and y (a board fitted
+/// into a Part Studio: "0.5 mm further from the wall").
+pub fn open_move_by(w: &mut World, ids: Vec<uuid::Uuid>) {
+    if ids.is_empty() {
+        ui::toast(w, "Select the footprints to move");
+        return;
+    }
+    let what = match ui::current(w).map(|(_, _, d)| d.board.footprints.iter().filter(|f| ids.contains(&f.id)).map(|f| f.reference().to_string()).collect::<Vec<_>>()) {
+        Some(v) if v.len() <= 4 => v.join(", "),
+        Some(v) => format!("{} footprints", v.len()),
+        None => return,
+    };
+    w.insert_resource(MoveByOf(ids));
+    let t = w.resource::<Theme>().clone();
+    let tf = t.clone();
+    spawn_dialog(
+        w,
+        Dialog::new("eda-moveby-dialog")
+            .title(format!("Move by: {what}"))
+            .width(380.0)
+            .body(move |p| {
+                mm_row(p, &t, "Along X", "eda-moveby-x", 0);
+                mm_row(p, &t, "Along Y", "eda-moveby-y", 0);
+            })
+            .footer(move |f| {
+                button(f, &tf, "eda-moveby-ok", "OK", true, accept_move_by);
+                button(f, &tf, "eda-moveby-cancel", "Cancel", false, close_all);
+            }),
+    );
+}
+
+fn accept_move_by(w: &mut World) {
+    let Some(MoveByOf(ids)) = w.get_resource::<MoveByOf>().cloned() else { return };
+    let (x, y) = (read_mm(w, "eda-moveby-x"), read_mm(w, "eda-moveby-y"));
+    close_all(w);
+    let (Ok(x), Ok(y)) = (x, y) else {
+        ui::toast(w, "Type the distances as lengths (mm)");
+        return;
+    };
+    if x == 0 && y == 0 {
+        return;
+    }
+    ui::commit(w, "Move by", |d| {
+        use cadrs_eda::board_edit as be;
+        for id in &ids {
+            let i = be::footprint_by_id(&d.board, *id).ok_or("A footprint is gone")?;
+            let to = d.board.footprints[i].placement.at + Pt::new(x, y);
+            be::move_footprint(&mut d.board, i, to);
+        }
+        Ok(())
+    });
 }
 
 fn read_deg(w: &mut World, name: &str) -> Result<f64, String> {

@@ -42,7 +42,7 @@ impl Rebuilder {
                 missing += 1;
                 continue;
             };
-            let body = part.body.ok_or_else(|| super::super::no_body(part))?;
+            let Some(body) = self.body_or_skip(part) else { continue };
             match groups.iter_mut().find(|g| g.0 == part.part.id) {
                 Some(g) => g.2.extend(ids.into_iter().filter(|i| !g.2.contains(i)).collect::<Vec<_>>()),
                 None => groups.push((part.part.id, body, ids)),

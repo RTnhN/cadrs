@@ -380,6 +380,18 @@ impl Rebuilder {
                         p.part.solid = Arc::new(crate::pcb::board3d::moved(&p.part.solid, m));
                     }
                 }
+                // A derived board moved: its frame (where its layout is drawn and edited) too.
+                if st.derived.values().any(|o| o.boards.iter().any(|b| parts.contains(&b.part))) {
+                    let mut all = (*st.derived).clone();
+                    for b in all.values_mut().flat_map(|o| o.boards.iter_mut()).filter(|b| parts.contains(&b.part)) {
+                        let dir = |d: [f64; 3]| {
+                            let v = m.linear * nalgebra::Vector3::new(d[0], d[1], d[2]);
+                            [v.x, v.y, v.z]
+                        };
+                        b.frame = cadrs_sketch::PlaneFrame { origin: crate::pcb::board3d::apply(m, b.frame.origin), u: dir(b.frame.u), v: dir(b.frame.v) };
+                    }
+                    st.derived = Arc::new(all);
+                }
             }
         }
         if !left.is_empty() {

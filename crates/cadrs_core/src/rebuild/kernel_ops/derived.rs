@@ -284,12 +284,16 @@ impl Rebuilder {
         if !matches!(d.placement, DerivedPlacement::BaseOrigin) {
             return Err("A board is placed by its board point (Base origin): pick the point, a footprint say, in the dialog".into());
         }
-        let locations: Vec<PlaneFrame> = if d.locations.is_empty() {
+        let locations: Vec<PlaneFrame> = if let Some(s) = b.on_sketch {
+            // A board made from a sketch lies on the sketch's plane.
+            let plane = before.iter().find(|f| f.id == s).and_then(|f| f.sketch()).and_then(|sk| sk.plane).ok_or("The board's sketch is gone")?;
+            vec![plane.frame()]
+        } else if d.locations.is_empty() {
             vec![ORIGIN]
         } else {
             d.locations.iter().map(|c| super::super::connector_frame(before, state, c)).collect::<Result<Vec<_>, _>>()?
         };
-        let (body, curves, mut warnings) = board3d::board_body(&mut self.kernel, layout)?;
+        let (body, curves, mut warnings) = self.board_body_cached(layout)?;
         let (components, w) = board3d::components(layout, o);
         warnings.extend(w);
         let owner = cadrs_kernel::naming::stable_hash(id.0.as_bytes());
@@ -352,19 +356,18 @@ impl Rebuilder {
             out.boards.push(BoardCopy { part: pid, frame: PlaneFrame { origin: o3, u: [u.x, u.y, u.z], v: [v.x, v.y, v.z] }, thickness });
             // The components (mesh parts: no kernel body); those running into a part before
             // the feature are reported (on their meshes, §7.3).
-            let before_parts: Vec<(String, Arc<crate::solid::Solid>)> = state.parts.iter().map(|p| (p.part.id.feature.0.to_string() + "/" + &p.part.id.index.to_string(), p.part.solid.clone())).collect();
+            let before_parts: Vec<(PartId, Arc<crate::solid::Solid>)> = state.parts.iter().map(|p| (p.part.id, p.part.solid.clone())).collect();
             let frame = PlaneFrame { origin: board3d::apply(&m, [0.0; 3]), u: { let u = m.linear * Vector3::x(); [u.x, u.y, u.z] }, v: { let v = m.linear * Vector3::y(); [v.x, v.y, v.z] } };
-            // (Named by their part ids, to find them again below.)
-            let mut placed: Vec<(String, crate::solid::Solid)> = Vec::new();
+            let mut placed: Vec<(PartId, Arc<crate::solid::Solid>)> = Vec::new();
             for c in &components {
                 let place = c.motion.then(&m);
-                let solid = board3d::renamed_by(&board3d::moved(&c.solid, &place), |n| derived_face(id, &FaceName { op: c.footprint, ..n }, k));
+                let solid = self.placed_component(id, k, c, &place);
                 let name = unique(&label(&c.name), &taken);
                 taken.push(name.clone());
                 let pid = derived_part(id, PartId::new(FeatureId(c.footprint), 0), k);
-                placed.push((pid.feature.0.to_string() + "/" + &pid.index.to_string(), solid.clone()));
+                placed.push((pid, solid.clone()));
                 next.parts.push(PartState {
-                    part: Part { id: pid, feature: id, name, kind: PartKind::Solid, palette, solid: Arc::new(solid), mass: None, features: vec![id], source: None, derived: None },
+                    part: Part { id: pid, feature: id, name, kind: PartKind::Solid, palette, solid, mass: None, features: vec![id], source: None, derived: None },
                     body: None,
                     names: Arc::default(),
                 });
@@ -372,19 +375,11 @@ impl Rebuilder {
                 out.parts.push(pid);
                 out.footprints.push((pid, c.footprint));
             }
-            let comps: Vec<(&str, &crate::solid::Solid)> = placed.iter().map(|(n, s)| (n.as_str(), s)).collect();
-            let others: Vec<(&str, &crate::solid::Solid)> = before_parts.iter().map(|(n, s)| (n.as_str(), &**s)).collect();
-            let id_of = |s: &str| -> Option<PartId> {
-                let (f, i) = s.split_once('/')?;
-                Some(PartId::new(FeatureId(f.parse().ok()?), i.parse().ok()?))
-            };
-            for hit in crate::pcb::fit::collisions(&comps, &others, &frame) {
-                if let (Some(a), Some(b)) = (id_of(&hit.component), id_of(&hit.other)) {
-                    out.collisions.push((a, b, hit.depth));
-                }
-            }
+            let comps: Vec<(PartId, &crate::solid::Solid)> = placed.iter().map(|(n, s)| (*n, &**s)).collect();
+            let others: Vec<(PartId, &crate::solid::Solid)> = before_parts.iter().map(|(n, s)| (*n, &**s)).collect();
+            out.collisions.extend(crate::pcb::fit::collisions(&comps, &others, &frame));
         }
-        self.kernel.release(body);
+        // (The board's body stays: it is kept for the next rebuild, `board_body_cached`.)
         if let Some(e) = failure {
             for b in owned {
                 self.kernel.release(b);
@@ -394,8 +389,8 @@ impl Rebuilder {
         // The components in the way of a part before the feature (by their default names here;
         // the app names them as its Parts list does).
         let name = |p: PartId| next.parts.iter().find(|x| x.part.id == p).map(|x| x.part.name.clone()).unwrap_or_default();
-        for (a, b, depth) in &out.collisions {
-            warnings.push(format!("{} runs into {} (≈{depth:.2} mm)", name(*a), name(*b)));
+        for c in &out.collisions {
+            warnings.push(crate::pcb::fit::collision_text(&name(c.component), &name(c.other), c));
         }
         let mut all = (*next.derived).clone();
         all.insert(id, out);
@@ -413,4 +408,51 @@ impl Rebuilder {
             uses: Vec::new(),
         })
     }
+
+    /// The board's solid in the board frame, made once per outline, holes and thickness: a
+    /// footprint moved on the layout doesn't make the kernel extrude the board again
+    /// (`docs/PCB_IN_PART_STUDIO.md` decision 8). The body stays the cache's: callers copy it.
+    fn board_body_cached(&mut self, layout: &cadrs_eda::board::Board) -> Result<(BodyId, Vec<board3d::TaggedCurve>, Vec<String>), String> {
+        let plan = board3d::board_profile(layout)?;
+        // (The curves' tags too: the same holes made by other pads name their walls otherwise.)
+        let tags: Vec<u64> = plan.curves.iter().map(|c| c.tag).collect();
+        let key = cadrs_kernel::naming::stable_hash(format!("{:?}/{tags:?}/{}", plan.regions, board3d::thickness(layout)).as_bytes());
+        if let Some(i) = self.board_bodies.iter().position(|b| b.0 == key) {
+            let hit = self.board_bodies.remove(i);
+            let out = (hit.1, hit.2.clone(), hit.3.clone());
+            self.board_bodies.insert(0, hit);
+            return Ok(out);
+        }
+        let (body, curves, warnings) = board3d::board_body(&mut self.kernel, layout)?;
+        self.board_bodies.insert(0, (key, body, curves.clone(), warnings.clone()));
+        while self.board_bodies.len() > 8 {
+            if let Some((_, b, ..)) = self.board_bodies.pop() {
+                self.kernel.release(b);
+            }
+        }
+        Ok((body, curves, warnings))
+    }
+
+    /// A component's mesh part placed by `place` (footprint frame → Part Studio), its faces
+    /// named for copy `k` of the Derived feature `id`: kept while the component, its place and
+    /// its model are the same, so a rebuild after one footprint moved moves only that one.
+    fn placed_component(&mut self, id: FeatureId, k: usize, c: &board3d::Component, place: &cadrs_kernel::Motion) -> Arc<crate::solid::Solid> {
+        use std::hash::{Hash, Hasher};
+        let mut h = std::collections::hash_map::DefaultHasher::new();
+        (id, k, c.footprint).hash(&mut h);
+        place.linear.iter().chain(place.translation.iter()).for_each(|x| x.to_bits().hash(&mut h));
+        let key = h.finish();
+        if let Some((src, made)) = self.placed_components.get(&key)
+            && Arc::ptr_eq(src, &c.solid)
+        {
+            return made.clone();
+        }
+        let made = Arc::new(board3d::renamed_by(&board3d::moved(&c.solid, place), |n| derived_face(id, &FaceName { op: c.footprint, ..n }, k)));
+        if self.placed_components.len() > 4096 {
+            self.placed_components.clear();
+        }
+        self.placed_components.insert(key, (c.solid.clone(), made.clone()));
+        made
+    }
+
 }

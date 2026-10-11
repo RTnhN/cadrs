@@ -1664,7 +1664,7 @@ fn update_hover(
         Res<PickFilterOverride>,
         Option<Res<crate::assembly::triad::Triad>>,
     ),
-    (zoom_window, section_arrow): (Option<Res<crate::view_options::ZoomWindow>>, Res<crate::section_view::SectionArrow>),
+    (zoom_window, section_arrow, eda2d, fit): (Option<Res<crate::view_options::ZoomWindow>>, Res<crate::section_view::SectionArrow>, Res<crate::eda::Eda2d>, Res<crate::board_fit::FitState>),
     mut last: Local<Option<(Vec2, crate::parts::PickFilter, Option<Pick>)>>,
 ) {
     // While a sketch has its plane, planes no longer react to the pointer (the sketch tools
@@ -1673,7 +1673,9 @@ fn update_hover(
     let picking = filter.is_some();
     // Zoom to window's box and the section plane's arrow own the pointer: nothing under it
     // highlights (P3E.3a).
-    let over = pointer_over_viewport(&hover, &q_area) && zoom_window.is_none() && section_arrow.drag.is_none();
+    // A board's layout edited in the view owns the pointer too, unless Align waits for a pick.
+    let layout_edit = eda2d.plane().is_some() && fit.align == crate::board_fit::AlignStep::Off;
+    let over = pointer_over_viewport(&hover, &q_area) && zoom_window.is_none() && section_arrow.drag.is_none() && !layout_edit;
     let query = match filter {
         Some(f) if over && !drag.navigating && *kind == ActiveKind::PartStudio => Some(f),
         // No pre-highlight while a triad drag or its value box is active (P3H.6 judge).

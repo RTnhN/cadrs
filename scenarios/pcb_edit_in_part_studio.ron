@@ -2,7 +2,7 @@
 // mains-sensor enclosure with its board derived onto Board location (`board derive`), the tube
 // and end plate see-through. The board's outline centre (15.5, 19.5) is on (0, 0, 12): J4 (Live
 // in, layout (14, 3.5)) is at (−1.5, −16, 13.6), the Live pin at (0, 8).
-// 01 Edit layout (the feature's menu): the bar "Editing the layout of AC sensor (PCB Studio 1)"
+// 01 Edit layout (the feature's menu): the bar "Layout of AC sensor (PCB Studio 1)"
 //    with Open in PCB Studio and Done, the Layout's tool strip and layers button, the layout on
 //    the board's top face, the models as they are.
 // 02 J4 pressed and dragged toward the Live pin: its wire stub moves with the pointer in 3D
@@ -11,6 +11,7 @@
 //    rebuilt with J4 there (layout (15.5, 27.5)), the pin through its hole.
 // 04 Ctrl+Z from the Part Studio: J4 back where it was.
 // 05 Done: the bar and the strip gone, the board as 3D model again.
+// (`board check J4` puts J4's place where `ExpectText` reads it: after 01, 03 and 04.)
 Scenario(
     start: Some("document"),
     steps: [
@@ -29,6 +30,8 @@ Scenario(
         MoveTo(1420, 780),
         Wait(10),
         Screenshot("01-editing"),
+        Custom("board check J4"),
+        ExpectText("board-check", "J4 at 14.00, 3.50 top"),
         Press(xyz(-1.5, -16, 13.6)),
         Hover(xyz(-1, -4, 13.6)),
         Hover(xyz(0, 8, 13.6)),
@@ -39,9 +42,13 @@ Scenario(
         MoveTo(1420, 780),
         Wait(10),
         Screenshot("03-dropped"),
+        Custom("board check J4"),
+        ExpectText("board-check", "J4 at 15.50, 27.50 top"),
         Key("Ctrl+Z"),
         Wait(20),
         Screenshot("04-undone"),
+        Custom("board check J4"),
+        ExpectText("board-check", "J4 at 14.00, 3.50 top"),
         Click(ui("board-edit-done")),
         Wait(10),
         Screenshot("05-done"),

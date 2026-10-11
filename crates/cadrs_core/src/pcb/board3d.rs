@@ -83,10 +83,12 @@ pub enum BoardSeat {
 }
 
 /// Which point of the board goes onto the Derived feature's location.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 pub enum BoardAnchor {
+    /// Not chosen yet (a board just picked): taking its layout fixes the outline's centre as it
+    /// is then ([`BoardAnchor::At`]); until then the centre.
+    Pending,
     /// The layout's origin (0, 0): a board made from a sketch has the sketch's coordinates.
-    #[default]
     Origin,
     /// A fixed layout point (mm): where the outline's centre was when the board was derived,
     /// so later outline edits don't move the board's parts in the Part Studio.
@@ -113,7 +115,8 @@ pub struct BoardOptions {
     pub skins: bool,
     #[serde(default)]
     pub seat: BoardSeat,
-    #[serde(default)]
+    /// (Missing in documents from before anchors: those placed the origin.)
+    #[serde(default = "origin")]
     pub anchor: BoardAnchor,
     /// Footprints placed off the board (waiting to be placed) come in too.
     #[serde(default)]
@@ -124,9 +127,13 @@ fn yes() -> bool {
     true
 }
 
+fn origin() -> BoardAnchor {
+    BoardAnchor::Origin
+}
+
 impl Default for BoardOptions {
     fn default() -> Self {
-        BoardOptions { view: BoardView::ThreeD, components: ComponentFilter::All, exclude: vec![], skins: true, seat: BoardSeat::Bottom, anchor: BoardAnchor::Origin, off_board: false }
+        BoardOptions { view: BoardView::ThreeD, components: ComponentFilter::All, exclude: vec![], skins: true, seat: BoardSeat::Bottom, anchor: BoardAnchor::Pending, off_board: false }
     }
 }
 
@@ -149,7 +156,7 @@ pub fn anchor_point(b: &Board, o: &BoardOptions) -> [f64; 3] {
     let [x, y] = match o.anchor {
         BoardAnchor::Origin => [0.0, 0.0],
         BoardAnchor::At { x, y } => [x, y],
-        BoardAnchor::Center => outline_center(b),
+        BoardAnchor::Center | BoardAnchor::Pending => outline_center(b),
         BoardAnchor::Footprint(id) => b.footprints.iter().find(|f| f.id == id).map_or([0.0, 0.0], |f| [to_mm(f.placement.at.x), to_mm(f.placement.at.y)]),
     };
     let z = match o.seat {
@@ -540,8 +547,26 @@ pub fn skins(b: &Board, hash: u64, owner: u64) -> Vec<SolidImage> {
 
 /// A stable hash of a layout (the Derived feature's cache key sees it instead of the layout).
 pub fn layout_hash(b: &Board) -> u64 {
-    // Debug prints every field (floats in full); the FNV hash doesn't change between runs.
-    stable_hash(format!("{b:?}").as_bytes())
+    /// FNV-1a over the bytes written to it (no buffer: a layout with zone fills is megabytes).
+    struct Fnv(u64);
+    impl std::io::Write for Fnv {
+        fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+            for x in bytes {
+                self.0 ^= u64::from(*x);
+                self.0 = self.0.wrapping_mul(0x0000_0100_0000_01b3);
+            }
+            Ok(bytes.len())
+        }
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+    // The layout's bincode: every field, floats as bits; the hash doesn't change between runs.
+    let mut h = Fnv(0xcbf2_9ce4_8422_2325);
+    if bincode::serialize_into(&mut h, b).is_err() {
+        return stable_hash(format!("{b:?}").as_bytes());
+    }
+    h.0
 }
 
 /// The point `p` (board frame) moved by `m`.

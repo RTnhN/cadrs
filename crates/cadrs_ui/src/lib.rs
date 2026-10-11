@@ -34,6 +34,7 @@ pub mod ellipsis;
 pub mod entry_list;
 pub mod feature_dialog;
 pub mod file_picker;
+pub mod float_bar;
 pub mod floating_panel;
 pub mod fonts;
 pub mod glyphs;
@@ -45,6 +46,7 @@ pub mod list;
 pub mod quick_dim;
 pub mod radio;
 pub mod scrollbar;
+pub mod segmented;
 pub mod selection_field;
 pub mod selection_list;
 pub mod menu;
@@ -73,6 +75,8 @@ use bevy::prelude::*;
 
 pub use action_row::{ActionRow, ActionRowAction};
 pub use anim::{FadeIn, FinishAnimations};
+pub use float_bar::FloatBar;
+pub use segmented::{Segmented, SegmentedSelect, SegmentedState};
 pub use floating_panel::{FloatingPanel, FloatingPanelBody, FloatingPanelClose, panel_caption};
 pub use switch::{Switch, SwitchChange, SwitchState};
 pub use avatar::Avatar;
@@ -249,7 +253,7 @@ impl Plugin for CadrsUiPlugin {
             .add_plugins(radio::RadioPlugin)
             .add_plugins(entry_list::EntryListPlugin)
             .add_plugins(name_popup::NamePopupPlugin)
-            .add_plugins((floating_panel::FloatingPanelPlugin, switch::SwitchPlugin, version_graph::VersionGraphPlugin, splitter::SplitterPlugin))
+            .add_plugins((floating_panel::FloatingPanelPlugin, segmented::SegmentedPlugin, switch::SwitchPlugin, version_graph::VersionGraphPlugin, splitter::SplitterPlugin))
             .add_message::<ScriptCommand>();
     }
 }

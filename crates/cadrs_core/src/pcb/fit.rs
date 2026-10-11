@@ -24,25 +24,7 @@ use crate::solid::Solid;
 
 type V3 = [f64; 3];
 
-fn sub(a: V3, b: V3) -> V3 {
-    [a[0] - b[0], a[1] - b[1], a[2] - b[2]]
-}
-
-fn dot(a: V3, b: V3) -> f64 {
-    a[0] * b[0] + a[1] * b[1] + a[2] * b[2]
-}
-
-/// A point of the Part Studio in a board frame (x, y on the layout in mm, z up from the
-/// bottom face).
-pub fn to_board(frame: &PlaneFrame, p: V3) -> V3 {
-    let d = sub(p, frame.origin);
-    [dot(d, frame.u), dot(d, frame.v), dot(d, frame.normal())]
-}
-
-/// A direction of the Part Studio in a board frame.
-pub fn dir_to_board(frame: &PlaneFrame, d: V3) -> V3 {
-    [dot(d, frame.u), dot(d, frame.v), dot(d, frame.normal())]
-}
+pub use super::frames::{dir_to_board, to_board};
 
 /// The part of the triangle `t` (board frame) between heights `z0` and `z1`, if any.
 fn clip_slab(t: [V3; 3], z0: f64, z1: f64) -> Vec<V3> {
@@ -165,6 +147,17 @@ pub fn section(solids: &[&Solid], frame: &PlaneFrame, z0: f64, z1: f64, near: Op
         let p: Vec<V3> = s.positions.iter().map(|q| to_board(frame, *q)).collect();
         for t in s.indices.as_chunks::<3>().0 {
             let tri = [p[t[0] as usize], p[t[1] as usize], p[t[2] as usize]];
+            // Each triangle against the heights and the box first (a tube around a component
+            // has its box around it too, but few of its triangles near it).
+            let (tlo, thi) = tri.iter().fold(([f64::MAX; 3], [f64::MIN; 3]), |(lo, hi), q| (std::array::from_fn(|i| lo[i].min(q[i])), std::array::from_fn(|i| hi[i].max(q[i]))));
+            if thi[2] < z0 || tlo[2] > z1 {
+                continue;
+            }
+            if let Some([x0, y0, x1, y1]) = near
+                && (thi[0] < x0 || tlo[0] > x1 || thi[1] < y0 || tlo[1] > y1)
+            {
+                continue;
+            }
             if let Some(r) = ring_of(&clip_slab(tri, z0, z1)) {
                 rings.push(r);
             }
@@ -183,35 +176,123 @@ pub fn footprint_of(s: &Solid, frame: &PlaneFrame) -> Region {
     section(&[s], frame, -1e9, 1e9, None)
 }
 
-/// A component running into another part (named by the caller's names).
-#[derive(Clone, Debug, PartialEq)]
-pub struct Collision {
-    pub component: String,
-    pub other: String,
-    /// How far they overlap (mm): the narrower side of the overlap's box.
+/// A component running into another part (the caller's keys for them).
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct Collision<K> {
+    pub component: K,
+    pub other: K,
+    /// How far they overlap seen square to the board (mm): the narrower side of the overlap's
+    /// box, at the height band where it is largest.
     pub depth: f64,
+    /// Over how much height they overlap (mm).
+    pub height: f64,
 }
 
-/// Components (name, solid) whose shadow overlaps the section of another part (name, solid)
-/// over the component's own heights, in the board frame `frame`. Parts that only touch (at a face,
-/// or overlapping by less than 0.01 mm) don't count.
-pub fn collisions(components: &[(&str, &Solid)], others: &[(&str, &Solid)], frame: &PlaneFrame) -> Vec<Collision> {
+/// A collision as the feature's warning says it: "J1 runs into Tube (0.80 mm in plan, 2.40 mm
+/// high)".
+pub fn collision_text<K>(component: &str, other: &str, c: &Collision<K>) -> String {
+    format!("{component} runs into {other} ({:.2} mm in plan, {:.2} mm high)", c.depth, c.height)
+}
+
+/// The heights (board frame) of a solid's faces lying flat to the board, within `z0`…`z1`.
+fn flat_heights(s: &Solid, frame: &PlaneFrame, z0: f64, z1: f64) -> Vec<f64> {
+    s.faces.iter().filter_map(|f| face_heights(s, f, frame)).filter(|(lo, hi)| hi - lo < 1e-4 && *lo > z0 && *lo < z1).map(|(lo, _)| lo).collect()
+}
+
+/// A stable hash of a solid's triangles and a frame (the collision cache's key).
+fn shape_key(s: &Solid, frame: &PlaneFrame, h: &mut impl std::hash::Hasher) {
+    use std::hash::Hash;
+    for p in &s.positions {
+        p.map(f64::to_bits).hash(h);
+    }
+    s.indices.hash(h);
+    [frame.origin, frame.u, frame.v].map(|a| a.map(f64::to_bits)).hash(h);
+}
+
+/// Whether two solids overlap in the board frame `frame`, as (depth, height) (see
+/// [`Collision`]). They are compared in height bands, split where either has a face flat to the
+/// board (a connector's low body and its tall pin, a lid's ledge): a part over a component's
+/// low step but clear of its tall part doesn't collide. Parts that only touch (at a face, or by
+/// less than 0.01 mm) don't count.
+fn overlap(c: &Solid, o: &Solid, frame: &PlaneFrame) -> Option<(f64, f64)> {
+    let (lo, hi) = bounds_in(frame, c)?;
+    let (olo, ohi) = bounds_in(frame, o)?;
+    let eps = 1e-3;
+    if ohi[0] < lo[0] + eps || olo[0] > hi[0] - eps || ohi[1] < lo[1] + eps || olo[1] > hi[1] - eps || ohi[2] < lo[2] + eps || olo[2] > hi[2] - eps {
+        return None;
+    }
+    let mut cuts = vec![lo[2], hi[2]];
+    cuts.extend(flat_heights(c, frame, lo[2], hi[2]));
+    cuts.extend(flat_heights(o, frame, lo[2], hi[2]));
+    cuts.extend([olo[2], ohi[2]].into_iter().filter(|z| *z > lo[2] && *z < hi[2]));
+    cuts.sort_by(f64::total_cmp);
+    cuts.dedup_by(|a, b| (*a - *b).abs() < 0.05);
+    // Many steps (a finned heat sink): every other cut, until it is a handful.
+    while cuts.len() > 17 {
+        let last = *cuts.last().unwrap_or(&hi[2]);
+        cuts = cuts.into_iter().step_by(2).collect();
+        if cuts.last() != Some(&last) {
+            cuts.push(last);
+        }
+    }
+    let near = [lo[0], lo[1], hi[0], hi[1]];
+    let (mut depth, mut height) = (0.0_f64, 0.0);
+    for w in cuts.windows(2) {
+        let (a, b) = (w[0] + eps, w[1] - eps);
+        if b <= a {
+            continue;
+        }
+        let sec = section(&[o], frame, a, b, Some(near));
+        if sec.is_empty() {
+            continue;
+        }
+        let mine = section(&[c], frame, a, b, None);
+        let both = poly::intersection(&mine, &sec);
+        let Some(bb) = both.iter().flatten().fold(None, |acc, p| Some(cadrs_eda::units::Bounds::union(acc, cadrs_eda::units::Bounds::of(*p)))) else { continue };
+        let d = cadrs_eda::units::to_mm(bb.size().w.min(bb.size().h));
+        if d > 0.01 {
+            depth = depth.max(d);
+            height += w[1] - w[0];
+        }
+    }
+    (depth > 0.0).then_some((depth, height))
+}
+
+/// Components whose solids run into another part, in the board frame `frame` (see
+/// [`overlap`]). The answers are kept per pair of shapes, so a rebuild where only one
+/// footprint moved works out only that one's again.
+pub fn collisions<K: Clone>(components: &[(K, &Solid)], others: &[(K, &Solid)], frame: &PlaneFrame) -> Vec<Collision<K>> {
+    use std::collections::HashMap;
+    use std::hash::Hasher;
+    use std::sync::{Mutex, OnceLock};
+    /// (Pair of shapes → their overlap.)
+    type Overlaps = Mutex<HashMap<u64, Option<(f64, f64)>>>;
+    static CACHE: OnceLock<Overlaps> = OnceLock::new();
+    let cache = CACHE.get_or_init(Default::default);
+    let key = |s: &Solid| {
+        let mut h = std::collections::hash_map::DefaultHasher::new();
+        shape_key(s, frame, &mut h);
+        h.finish()
+    };
+    let other_keys: Vec<u64> = others.iter().map(|(_, o)| key(o)).collect();
     let mut out = vec![];
     for (name, c) in components {
-        let Some((lo, hi)) = bounds_in(frame, c) else { continue };
-        let shadow = footprint_of(c, frame);
-        for (other, o) in others {
-            let near = [lo[0], lo[1], hi[0], hi[1]];
-            // Inside the component's heights: a part ending where it starts only touches it.
-            let sec = section(&[o], frame, lo[2] + 1e-3, hi[2] - 1e-3, Some(near));
-            if sec.is_empty() {
-                continue;
-            }
-            let overlap = poly::intersection(&shadow, &sec);
-            let Some(bb) = overlap.iter().flatten().fold(None, |acc, p| Some(cadrs_eda::units::Bounds::union(acc, cadrs_eda::units::Bounds::of(*p)))) else { continue };
-            let depth = cadrs_eda::units::to_mm(bb.size().w.min(bb.size().h));
-            if depth > 0.01 {
-                out.push(Collision { component: name.to_string(), other: other.to_string(), depth });
+        let ck = key(c);
+        for ((other, o), ok) in others.iter().zip(&other_keys) {
+            let pair = ck.rotate_left(1) ^ ok;
+            let known = cache.lock().ok().and_then(|m| m.get(&pair).copied());
+            let hit = known.unwrap_or_else(|| {
+                let hit = overlap(c, o, frame);
+                if let Ok(mut m) = cache.lock() {
+                    if m.len() > 20_000 {
+                        m.clear();
+                    }
+                    m.insert(pair, hit);
+                }
+                hit
+            });
+            if let Some((depth, height)) = hit {
+                out.push(Collision { component: name.clone(), other: other.clone(), depth, height });
             }
         }
     }
@@ -219,20 +300,22 @@ pub fn collisions(components: &[(&str, &Solid)], others: &[(&str, &Solid)], fram
 }
 
 /// How far the region `of` (a component's shadow, nm) can move along +x, −x, +y and −y before it
-/// meets `around` (the parts around, nm), up to `limit` mm; `None` past that.
+/// meets `around` (the parts around, nm), up to `limit` mm; `None` past that. Exact for the
+/// polygons: every corner of each cast along the move onto the other's edges.
 pub fn gaps(of: &Region, around: &Region, limit: f64) -> [Option<f64>; 4] {
-    let Some(bb) = of.iter().flatten().fold(None, |acc, p| Some(cadrs_eda::units::Bounds::union(acc, cadrs_eda::units::Bounds::of(*p)))) else { return [None; 4] };
+    if of.is_empty() {
+        return [None; 4];
+    }
     // Already touching or overlapping: no room either way.
     if poly::overlaps(of, around) {
         return [Some(0.0); 4];
     }
-    let segments: Vec<(Pt, Pt)> = around.iter().flat_map(|r| (0..r.len()).map(move |i| (r[i], r[(i + 1) % r.len()]))).collect();
-    // From each side of the box, rays at five places across it.
-    let mut out = [None; 4];
-    let samples = |a: i64, b: i64| (0..5).map(move |k| a + (b - a) * k / 4);
-    let cast = |o: Pt, d: (f64, f64)| -> Option<f64> {
+    let edges = |r: &Region| -> Vec<(Pt, Pt)> { r.iter().flat_map(|ring| (0..ring.len()).map(move |i| (ring[i], ring[(i + 1) % ring.len()]))).collect() };
+    let (mine, theirs) = (edges(of), edges(around));
+    // How far from `o` along `d` the nearest of `segments` is (nm).
+    let cast = |o: Pt, d: (f64, f64), segments: &[(Pt, Pt)]| -> Option<f64> {
         let mut best: Option<f64> = None;
-        for (a, b) in &segments {
+        for (a, b) in segments {
             let (ax, ay, bx, by) = (a.x as f64, a.y as f64, b.x as f64, b.y as f64);
             let (ex, ey) = (bx - ax, by - ay);
             let den = d.0 * ey - d.1 * ex;
@@ -246,18 +329,65 @@ pub fn gaps(of: &Region, around: &Region, limit: f64) -> [Option<f64>; 4] {
                 best = Some(best.map_or(t, |x: f64| x.min(t)));
             }
         }
-        best.map(|t| t / 1e6)
+        best
     };
-    let sides: [(Vec<Pt>, (f64, f64)); 4] = [
-        (samples(bb.min.y, bb.max.y).map(|y| Pt::new(bb.max.x, y)).collect(), (1.0, 0.0)),
-        (samples(bb.min.y, bb.max.y).map(|y| Pt::new(bb.min.x, y)).collect(), (-1.0, 0.0)),
-        (samples(bb.min.x, bb.max.x).map(|x| Pt::new(x, bb.max.y)).collect(), (0.0, 1.0)),
-        (samples(bb.min.x, bb.max.x).map(|x| Pt::new(x, bb.min.y)).collect(), (0.0, -1.0)),
-    ];
-    for (i, (starts, d)) in sides.iter().enumerate() {
-        out[i] = starts.iter().filter_map(|o| cast(*o, *d)).fold(None, |acc: Option<f64>, t| Some(acc.map_or(t, |a| a.min(t)))).filter(|t| *t <= limit);
+    let mut out = [None; 4];
+    for (i, d) in [(1.0, 0.0), (-1.0, 0.0), (0.0, 1.0), (0.0, -1.0)].into_iter().enumerate() {
+        let back = (-d.0, -d.1);
+        let forward = of.iter().flatten().filter_map(|p| cast(*p, d, &theirs));
+        let backward = around.iter().flatten().filter_map(|p| cast(*p, back, &mine));
+        out[i] = forward.chain(backward).fold(None, |acc: Option<f64>, t| Some(acc.map_or(t, |a| a.min(t)))).map(|t| t / 1e6).filter(|t| *t <= limit);
     }
     out
+}
+
+/// The room over a component (mm, along the board's normal from its top `from` up to the
+/// first part of `solids` over its shadow `of`; `up` false: down from its bottom, under the
+/// board), up to `limit`; `None` past that. Looked for from the shadow's corners and a grid
+/// across it.
+pub fn headroom(of: &Region, solids: &[&Solid], frame: &PlaneFrame, from: f64, up: bool, limit: f64) -> Option<f64> {
+    let k = if up { 1.0 } else { -1.0 };
+    let bb = of.iter().flatten().fold(None, |acc, p| Some(cadrs_eda::units::Bounds::union(acc, cadrs_eda::units::Bounds::of(*p))))?;
+    let mut points: Vec<[f64; 2]> = of.iter().flatten().map(|p| [p.x as f64 / 1e6, p.y as f64 / 1e6]).collect();
+    let n = 6;
+    for i in 0..=n {
+        for j in 0..=n {
+            let x = bb.min.x + (bb.max.x - bb.min.x) * i / n;
+            let y = bb.min.y + (bb.max.y - bb.min.y) * j / n;
+            if poly::contains(of, Pt::new(x, y)) {
+                points.push([x as f64 / 1e6, y as f64 / 1e6]);
+            }
+        }
+    }
+    let mut best: Option<f64> = None;
+    for s in solids {
+        let Some((lo, hi)) = bounds_in(frame, s) else { continue };
+        if (up && hi[2] <= from) || (!up && lo[2] >= from) || lo[0] > bb.max.x as f64 / 1e6 || hi[0] < bb.min.x as f64 / 1e6 || lo[1] > bb.max.y as f64 / 1e6 || hi[1] < bb.min.y as f64 / 1e6 {
+            continue;
+        }
+        let p: Vec<V3> = s.positions.iter().map(|q| to_board(frame, *q)).collect();
+        for t in s.indices.as_chunks::<3>().0 {
+            let [a, b, c] = [p[t[0] as usize], p[t[1] as usize], p[t[2] as usize]];
+            for q in &points {
+                // Where the vertical line through q meets the triangle (barycentric in plan).
+                let den = (b[1] - c[1]) * (a[0] - c[0]) + (c[0] - b[0]) * (a[1] - c[1]);
+                if den.abs() < 1e-12 {
+                    continue;
+                }
+                let w0 = ((b[1] - c[1]) * (q[0] - c[0]) + (c[0] - b[0]) * (q[1] - c[1])) / den;
+                let w1 = ((c[1] - a[1]) * (q[0] - c[0]) + (a[0] - c[0]) * (q[1] - c[1])) / den;
+                let w2 = 1.0 - w0 - w1;
+                if w0 < -1e-9 || w1 < -1e-9 || w2 < -1e-9 {
+                    continue;
+                }
+                let d = k * (w0 * a[2] + w1 * b[2] + w2 * c[2] - from);
+                if d >= -1e-6 {
+                    best = Some(best.map_or(d, |x: f64| x.min(d)));
+                }
+            }
+        }
+    }
+    best.map(|d| d.max(0.0)).filter(|d| *d <= limit)
 }
 
 /// Round features of `solids` standing square to the board of `frame` (a cylinder whose axis
@@ -309,12 +439,31 @@ pub enum Entity {
     Plane(V3, V3),
 }
 
-/// The move in the board's plane (layout mm: dx, dy) that puts `from` (on a component) onto
-/// `to`: an axis or point onto an axis or point (their places on the board coincide, when the
-/// axes stand square to it; a face lying flat counts as its middle), a plane onto a plane
-/// (along their normal, when it lies in the board). `None` when the move can't be made in the board's plane (an axis lying in it, planes
-/// parallel to the board, or a plane and an axis).
-pub fn align(from: Entity, to: Entity, frame: &PlaneFrame) -> Option<[f64; 2]> {
+/// How a footprint moves to align (see [`align`]).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Alignment {
+    /// The turn about the footprint's origin (degrees, counter-clockwise on the layout), first.
+    pub turn: f64,
+    /// Then the move (layout mm).
+    pub shift: [f64; 2],
+    /// How far apart they still are out of the board's plane (mm, along its normal), when
+    /// that counts (two points; a flat end onto a point).
+    pub off_plane: Option<f64>,
+}
+
+/// How to move a footprint in the board's plane (frame `frame`; its origin at `pivot`, board
+/// frame mm) so the entity `from` of its part meets `to`:
+///
+/// - two axes square to the board (a pin into a hole), points, or an axis and a point: moved so
+///   they line up, seen square to the board;
+/// - two faces standing square to the board: turned (by at most a quarter turn) until they are
+///   parallel, then moved along their normal until they are in one plane (facing each other or
+///   flush);
+/// - a face lying flat to the board (a pin's or a wire's end) counts as its middle.
+///
+/// `None` when no move in the board's plane can do it (an axis lying in the board, a flat face
+/// onto an upright one).
+pub fn align(from: Entity, to: Entity, frame: &PlaneFrame, pivot: [f64; 2]) -> Option<Alignment> {
     let place = |e: Entity| -> Option<V3> {
         match e {
             Entity::Point(p) => Some(to_board(frame, p)),
@@ -334,20 +483,37 @@ pub fn align(from: Entity, to: Entity, frame: &PlaneFrame) -> Option<[f64; 2]> {
     match (from, to) {
         (Entity::Plane(p, n), Entity::Plane(q, m)) => {
             let (n, m) = (dir_to_board(frame, n), dir_to_board(frame, m));
-            // Normals in the board's plane and parallel (facing or not).
-            if n[2].abs() > 1e-3 || (n[0] * m[1] - n[1] * m[0]).abs() > 1e-3 {
+            // Both normals in the board's plane.
+            if n[2].abs() > 1e-3 || m[2].abs() > 1e-3 {
                 return None;
             }
-            let len = n[0].hypot(n[1]);
-            let (nx, ny) = (n[0] / len, n[1] / len);
-            let d = sub(to_board(frame, q), to_board(frame, p));
-            let along = d[0] * nx + d[1] * ny;
-            Some([nx * along, ny * along])
+            // The smallest turn making them parallel (either way round).
+            let mut turn = m[1].atan2(m[0]) - n[1].atan2(n[0]);
+            let half = std::f64::consts::PI;
+            while turn > half / 2.0 {
+                turn -= half;
+            }
+            while turn < -half / 2.0 {
+                turn += half;
+            }
+            if turn.abs() < 1e-9 {
+                turn = 0.0;
+            }
+            let (c, s) = (turn.cos(), turn.sin());
+            let p = to_board(frame, p);
+            let r = [p[0] - pivot[0], p[1] - pivot[1]];
+            let p2 = [pivot[0] + c * r[0] - s * r[1], pivot[1] + s * r[0] + c * r[1]];
+            let len = m[0].hypot(m[1]);
+            let (mx, my) = (m[0] / len, m[1] / len);
+            let q = to_board(frame, q);
+            let along = (q[0] - p2[0]) * mx + (q[1] - p2[1]) * my;
+            Some(Alignment { turn: turn.to_degrees(), shift: [mx * along, my * along], off_plane: None })
         }
         (Entity::Plane(..), _) | (_, Entity::Plane(..)) => None,
         (a, b) => {
             let (p, q) = (place(a)?, place(b)?);
-            Some([q[0] - p[0], q[1] - p[1]])
+            let off_plane = matches!((a, b), (Entity::Point(_), Entity::Point(_))).then(|| q[2] - p[2]);
+            Some(Alignment { turn: 0.0, shift: [q[0] - p[0], q[1] - p[1]], off_plane })
         }
     }
 }
@@ -400,6 +566,36 @@ mod tests {
     }
 
     #[test]
+    fn gaps_go_by_the_shapes_not_their_boxes() {
+        // A thin pin at x 5, y 0.9..1.1 between rays a box-sampled cast would miss, and an
+        // L-shaped part whose box reaches past its arm.
+        let comp = vec![vec![Pt::mm(0.0, 0.0), Pt::mm(2.0, 0.0), Pt::mm(2.0, 2.0), Pt::mm(0.0, 2.0)]];
+        let pin = vec![vec![Pt::mm(5.0, 0.95), Pt::mm(5.2, 0.95), Pt::mm(5.2, 1.05), Pt::mm(5.0, 1.05)]];
+        let g = gaps(&comp, &pin, 50.0);
+        assert!((g[0].unwrap() - 3.0).abs() < 1e-6, "{g:?}");
+        let ell = vec![vec![Pt::mm(0.0, 0.0), Pt::mm(4.0, 0.0), Pt::mm(4.0, 1.0), Pt::mm(1.0, 1.0), Pt::mm(1.0, 4.0), Pt::mm(0.0, 4.0)]];
+        // A post at (3.5, 3): the L's arm along x stops at y 1, so the room up is 2 from the
+        // arm's top, not from the box's.
+        let post = vec![vec![Pt::mm(3.0, 3.0), Pt::mm(3.8, 3.0), Pt::mm(3.8, 3.5), Pt::mm(3.0, 3.5)]];
+        let g = gaps(&ell, &post, 50.0);
+        assert!((g[2].unwrap() - 2.0).abs() < 1e-6, "{g:?}");
+    }
+
+    #[test]
+    fn headroom_is_up_to_the_first_part_over_the_shadow() {
+        let shadow = vec![vec![Pt::mm(0.0, 0.0), Pt::mm(2.0, 0.0), Pt::mm(2.0, 2.0), Pt::mm(0.0, 2.0)]];
+        // A lid 10..11 above the frame's origin (z 20..21 world), over it.
+        let lid = cube([-5.0, -5.0, 20.0], [5.0, 5.0, 21.0]);
+        let r = headroom(&shadow, &[&lid], &TOP, 4.0, true, 50.0).unwrap();
+        assert!((r - 6.0).abs() < 1e-9, "{r}");
+        assert_eq!(headroom(&shadow, &[&lid], &TOP, 4.0, true, 3.0), None);
+        // Under the board: a floor 3 below its bottom (z 7 world).
+        let floor = cube([-5.0, -5.0, 5.0], [5.0, 5.0, 7.0]);
+        let r = headroom(&shadow, &[&floor], &TOP, 0.0, false, 50.0).unwrap();
+        assert!((r - 3.0).abs() < 1e-9, "{r}");
+    }
+
+    #[test]
     fn a_component_in_a_wall_collides_by_its_overlap() {
         let comp = cube([0.0, 0.0, 11.6], [4.0, 4.0, 14.0]);
         let wall = cube([3.0, -5.0, 0.0], [10.0, 10.0, 30.0]);
@@ -408,21 +604,64 @@ mod tests {
         assert_eq!(c.len(), 1);
         assert_eq!(c[0].other, "Wall");
         assert!((c[0].depth - 1.0).abs() < 1e-6, "{}", c[0].depth);
+        assert!((c[0].height - 2.4).abs() < 1e-6, "{}", c[0].height);
+    }
+
+    /// Two boxes as one solid (a connector: a low body and a tall post at one end).
+    fn stepped() -> Solid {
+        let mut b = cadrs_eda::model3d::Body::default();
+        b.cuboid([0.0, 0.0, 0.0], [10.0, 4.0, 2.0], [1, 1, 1]);
+        b.cuboid([0.0, 0.0, 2.0], [2.0, 4.0, 12.0], [1, 1, 1]);
+        crate::pcb::mesh_solid::mesh_solid(&cadrs_eda::model3d::mesh(&b), uuid::Uuid::nil(), 1.0)
+    }
+
+    #[test]
+    fn a_part_over_a_low_step_of_a_tall_component_is_clear() {
+        let comp = stepped();
+        // A shelf at z 4..6 over the low body's far end, clear of the post (x 0..2).
+        let shelf = cube([5.0, -1.0, 4.0], [12.0, 5.0, 6.0]);
+        assert!(collisions(&[("J1", &comp)], &[("Shelf", &shelf)], &TOP).is_empty());
+        // Moved over the post it runs into it, by 1 mm (x 1..2) over its 2 mm.
+        let shelf = cube([1.0, -1.0, 4.0], [12.0, 5.0, 6.0]);
+        let c = collisions(&[("J1", &comp)], &[("Shelf", &shelf)], &TOP);
+        assert_eq!(c.len(), 1);
+        assert!((c[0].depth - 1.0).abs() < 1e-3 && (c[0].height - 2.0).abs() < 1e-2, "{c:?}");
     }
 
     #[test]
     fn a_pin_square_to_the_board_aligns_onto_a_hole() {
+        let shift = |a: Option<Alignment>| a.map(|a| a.shift);
         // A pin along z at (3, 4); a hole's axis along z at (10, 2): move (7, −2).
-        let d = align(Entity::Axis([3.0, 4.0, 11.0], [0.0, 0.0, 1.0]), Entity::Axis([10.0, 2.0, 0.0], [0.0, 0.0, -1.0]), &TOP).unwrap();
+        let d = shift(align(Entity::Axis([3.0, 4.0, 11.0], [0.0, 0.0, 1.0]), Entity::Axis([10.0, 2.0, 0.0], [0.0, 0.0, -1.0]), &TOP, [0.0; 2])).unwrap();
         assert!((d[0] - 7.0).abs() < 1e-9 && (d[1] + 2.0).abs() < 1e-9);
         // A face onto a face along x: only the x part of the offset moves.
-        let d = align(Entity::Plane([2.0, 5.0, 11.0], [1.0, 0.0, 0.0]), Entity::Plane([9.0, -3.0, 0.0], [-1.0, 0.0, 0.0]), &TOP).unwrap();
+        let d = shift(align(Entity::Plane([2.0, 5.0, 11.0], [1.0, 0.0, 0.0]), Entity::Plane([9.0, -3.0, 0.0], [-1.0, 0.0, 0.0]), &TOP, [0.0; 2])).unwrap();
         assert!((d[0] - 7.0).abs() < 1e-9 && d[1].abs() < 1e-9);
         // A wire's flat end (its middle) onto a pin's axis.
-        let d = align(Entity::Plane([1.0, 1.0, 15.0], [0.0, 0.0, 1.0]), Entity::Axis([4.0, -1.0, 0.0], [0.0, 0.0, 1.0]), &TOP).unwrap();
+        let d = shift(align(Entity::Plane([1.0, 1.0, 15.0], [0.0, 0.0, 1.0]), Entity::Axis([4.0, -1.0, 0.0], [0.0, 0.0, 1.0]), &TOP, [0.0; 2])).unwrap();
         assert!((d[0] - 3.0).abs() < 1e-9 && (d[1] + 2.0).abs() < 1e-9);
         // An axis lying in the board can't be met by a move in it.
-        assert!(align(Entity::Axis([0.0; 3], [1.0, 0.0, 0.0]), Entity::Point([1.0, 1.0, 1.0]), &TOP).is_none());
+        assert!(align(Entity::Axis([0.0; 3], [1.0, 0.0, 0.0]), Entity::Point([1.0, 1.0, 1.0]), &TOP, [0.0; 2]).is_none());
+        // Two points: how far apart they stay out of the board's plane.
+        let a = align(Entity::Point([0.0, 0.0, 12.0]), Entity::Point([1.0, 1.0, 15.0]), &TOP, [0.0; 2]).unwrap();
+        assert_eq!(a.off_plane, Some(3.0));
+    }
+
+    #[test]
+    fn a_face_turns_to_meet_a_face_then_moves_onto_it() {
+        // A connector's face at (2, 0) facing +x (its footprint's origin at (0, 0)); a wall's
+        // face at y = 10 facing −y: a quarter turn (+x → +y), the face then at (0, 2), moved
+        // 8 up to the wall.
+        let a = align(Entity::Plane([2.0, 0.0, 11.0], [1.0, 0.0, 0.0]), Entity::Plane([5.0, 10.0, 11.0], [0.0, -1.0, 0.0]), &TOP, [0.0, 0.0]).unwrap();
+        assert!((a.turn - 90.0).abs() < 1e-9 || (a.turn + 90.0).abs() < 1e-9, "{a:?}");
+        // Turned −90 the face would be at (0, −2) facing −y: 12 to go. Either way it ends on y 10.
+        let c = a.turn.to_radians();
+        let y = 2.0 * c.sin() + a.shift[1];
+        assert!((y - 10.0).abs() < 1e-9 && a.shift[0].abs() < 1e-9, "{a:?}");
+        // Slightly askew (10°): turned back by 10°.
+        let n = [(80.0f64).to_radians().cos(), (80.0f64).to_radians().sin(), 0.0];
+        let a = align(Entity::Plane([0.0, 2.0, 11.0], n), Entity::Plane([0.0, 9.0, 11.0], [0.0, -1.0, 0.0]), &TOP, [0.0, 0.0]).unwrap();
+        assert!((a.turn - 10.0).abs() < 1e-9, "{a:?}");
     }
 
     #[test]

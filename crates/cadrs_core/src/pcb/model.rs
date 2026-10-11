@@ -16,10 +16,8 @@
 use std::collections::HashMap;
 use std::sync::{Arc, OnceLock, RwLock};
 
-use cadrs_eda::footprint::{Footprint, FootprintPlacement, Model3d};
-use cadrs_eda::layer::Side;
+use cadrs_eda::footprint::{Footprint, Model3d};
 use cadrs_eda::model3d::Mesh;
-use cadrs_eda::units::to_mm;
 use cadrs_kernel::Motion;
 use nalgebra::{Matrix3, Rotation3, Vector3};
 
@@ -167,23 +165,14 @@ pub fn footprint_meshes(fp: &Footprint) -> Result<Option<(Vec<Mesh>, f64)>, Stri
     }
 }
 
-/// Where a footprint frame sits in the board frame (see the module docs): `thickness` in mm.
-pub fn footprint_motion(p: &FootprintPlacement, thickness: f64) -> Motion {
-    let rz = Rotation3::from_axis_angle(&Vector3::z_axis(), p.angle.to_radians());
-    let (x, y) = (to_mm(p.at.x), to_mm(p.at.y));
-    match p.side {
-        Side::Top => Motion { linear: *rz.matrix(), translation: Vector3::new(x, y, thickness) },
-        Side::Bottom => {
-            let over = Rotation3::from_axis_angle(&Vector3::x_axis(), std::f64::consts::PI);
-            Motion { linear: (rz * over).matrix().clone_owned(), translation: Vector3::new(x, y, 0.0) }
-        }
-    }
-}
+pub use super::frames::footprint_motion;
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use cadrs_eda::units::Pt;
+    use cadrs_eda::footprint::FootprintPlacement;
+    use cadrs_eda::layer::Side;
+    use cadrs_eda::units::{Pt, to_mm};
 
     fn apply(m: &Motion, p: [f64; 3]) -> [f64; 3] {
         let r = m.linear * Vector3::new(p[0], p[1], p[2]) + m.translation;

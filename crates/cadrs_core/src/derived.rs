@@ -129,18 +129,28 @@ pub struct DerivedBoard {
     pub hash: u64,
     #[serde(default)]
     pub options: crate::pcb::board3d::BoardOptions,
+    /// Placed on this sketch's plane (a board made from the sketch, [`crate::pcb::outline_link`])
+    /// rather than on the feature's locations.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub on_sketch: Option<FeatureId>,
 }
 
 impl DerivedBoard {
     pub fn new(board: crate::pcb::BoardId, name: &str, layout: cadrs_eda::board::Board) -> Self {
-        let mut d = DerivedBoard { board, board_name: name.to_string(), layout: Default::default(), hash: 0, options: Default::default() };
+        let mut d = DerivedBoard { board, board_name: name.to_string(), layout: Default::default(), hash: 0, options: Default::default(), on_sketch: None };
         d.set_layout(layout);
         d
     }
 
     /// Takes a new layout and its hash.
     pub fn set_layout(&mut self, layout: cadrs_eda::board::Board) {
-        self.hash = crate::pcb::board3d::layout_hash(&layout);
+        let hash = crate::pcb::board3d::layout_hash(&layout);
+        self.set_layout_hashed(layout, hash);
+    }
+
+    /// Takes a new layout whose hash is known (the PCB Studio board's).
+    pub fn set_layout_hashed(&mut self, layout: cadrs_eda::board::Board, hash: u64) {
+        self.hash = hash;
         self.layout = layout;
     }
 }
@@ -160,6 +170,7 @@ impl std::fmt::Debug for DerivedBoard {
             .field("seat", &o.seat)
             .field("anchor", &o.anchor)
             .field("off_board", &o.off_board)
+            .field("on_sketch", &self.on_sketch)
             .finish()
     }
 }
@@ -363,17 +374,20 @@ impl DerivedFeature {
         let want = self.board.as_ref().map(|b| b.board).or(studio.active).or(studio.boards.first().map(|b| b.id));
         let b = want.and_then(|id| studio.board(id)).ok_or_else(|| format!("{} has no such board", el.name))?;
         let design = b.design.as_ref().ok_or_else(|| format!("{} is not designed in cadrs (an IDF board has no layout to derive)", b.name()))?;
-        // A board taken for the first time comes in with its outline's centre where it is now
-        // on the location (fixed: later outline edits don't move it); one already derived keeps
-        // its options.
-        let fresh = self.board.as_ref().is_none_or(|x| x.board != b.id || x.hash == crate::pcb::board3d::layout_hash(&Default::default()));
+        // A board taken for the first time (or another board) comes in with its outline's centre
+        // where it is now on the location (fixed: later outline edits don't move it); one
+        // already derived keeps its options.
         let mut options = self.board.as_ref().map(|x| x.options.clone()).unwrap_or_default();
-        if fresh {
+        if self.board.as_ref().is_some_and(|x| x.board != b.id) {
+            options.anchor = crate::pcb::board3d::BoardAnchor::Pending;
+        }
+        if options.anchor == crate::pcb::board3d::BoardAnchor::Pending {
             let [x, y] = crate::pcb::board3d::outline_center(&design.board);
             options.anchor = crate::pcb::board3d::BoardAnchor::At { x, y };
         }
         let mut db = DerivedBoard::new(b.id, b.name(), design.board.clone());
         db.options = options;
+        db.on_sketch = self.board.as_ref().and_then(|x| x.on_sketch);
         self.board = Some(Box::new(db));
         self.studio = Vec::new();
         self.props = Vec::new();
@@ -497,10 +511,10 @@ pub struct DerivedOutput {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub footprints: Vec<(PartId, uuid::Uuid)>,
     /// A derived board's components that run into a part before the feature: the component's
-    /// part, the other part and how far (mm, [`crate::pcb::fit::collisions`]). The feature's
+    /// part, the other part and how far ([`crate::pcb::fit::collisions`]). The feature's
     /// warning says so; the app names them as the Parts list does.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub collisions: Vec<(PartId, PartId, f64)>,
+    pub collisions: Vec<crate::pcb::fit::Collision<PartId>>,
 }
 
 /// One copy of a derived board: its board part, and its **board frame** in the Part Studio (the
@@ -737,6 +751,8 @@ pub fn derived_of(doc: &Document, element: ElementId, feature: FeatureId) -> Opt
 pub fn refresh(doc: &mut Document) {
     // P3I.9: Form features that use a form Part Studio of this document follow it the same way.
     crate::sheetmetal_form::refresh(doc);
+    // Board outlines that follow a sketch, before the boards are taken into Part Studios.
+    crate::pcb::outline_link::refresh(doc);
     if !any_derived(doc) {
         return;
     }
@@ -787,7 +803,7 @@ pub fn refresh(doc: &mut Document) {
 fn refresh_boards(doc: &mut Document) {
     let this = doc.id;
     /// (tab, feature, the new layout if it changed, the board's name, the studio's name).
-    type Update = (usize, usize, Option<cadrs_eda::board::Board>, String, String);
+    type Update = (usize, usize, Option<(cadrs_eda::board::Board, u64)>, String, String);
     let mut updates: Vec<Update> = Vec::new();
     for (i, el) in doc.elements.iter().enumerate() {
         for (j, f) in el.features().iter().enumerate() {
@@ -800,8 +816,7 @@ fn refresh_boards(doc: &mut Document) {
             let Some(b) = src.pcb().and_then(|s| s.board(db.board)) else { continue };
             let Some(design) = &b.design else { continue };
             // The hash set with the layout when there is one, else the layouts themselves.
-            let changed = if b.layout_hash != 0 { b.layout_hash != db.hash } else { design.board != db.layout };
-            let layout = changed.then(|| design.board.clone());
+            let layout = (b.layout_hash() != db.hash).then(|| (design.board.clone(), b.layout_hash()));
             if layout.is_some() || b.name() != db.board_name || src.name != d.source_name {
                 updates.push((i, j, layout, b.name().to_string(), src.name.clone()));
             }
@@ -812,8 +827,8 @@ fn refresh_boards(doc: &mut Document) {
             && let FeatureKind::Derived(d) = &mut features[j].kind
             && let Some(db) = d.board.as_mut()
         {
-            if let Some(l) = layout {
-                db.set_layout(l);
+            if let Some((l, hash)) = layout {
+                db.set_layout_hashed(l, hash);
             }
             db.board_name = board_name;
             d.source_name = studio_name;

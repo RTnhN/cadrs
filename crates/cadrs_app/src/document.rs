@@ -3522,11 +3522,8 @@ fn rebuild_feature_rows(
                             let tip = if *shown { format!("Hide {label}") } else { format!("Show {label}") };
                             ci = ci.toggle(format!("{cname}-visibility"), "visible", "hidden", *shown).toggle_tooltip(tip);
                         }
-                        // The board's view: 3D model or layout, switched by its button.
-                        D::BoardView(_) => {
-                            let tip = if *shown { "Show the board's layout" } else { "Show the board's 3D model" };
-                            ci = ci.toggle(format!("{cname}-switch"), "pcb-studio", "board-3d", *shown).toggle_tooltip(tip).toggle_keeps_off();
-                        }
+                        // The board's view: 3D model or layout, a segmented control after it.
+                        D::BoardView(_) => {}
                         D::Components(f) => {
                             let open = components_open.0.contains(f);
                             let tip = if *shown { "Hide the components" } else { "Show the components" };
@@ -3539,6 +3536,17 @@ fn rebuild_feature_rows(
                         D::Sketch(s) | D::Plane(s) | D::Connector(s) | D::BoardView(s) | D::Components(s) => Pick::Feature(*s),
                     };
                     let mut crow = c.spawn((ci.build(&t), *child, PickRow(pick)));
+                    if let D::BoardView(_) = child {
+                        let seg = cadrs_ui::Segmented::new(format!("{cname}-segments"))
+                            .option("3D", None, "Show the board's 3D model: its solid and its components")
+                            .option("Layout", None, "Show the board's layout on its faces (its components hidden)")
+                            .selected(usize::from(!*shown))
+                            .build(&t);
+                        crow.with_children(|r| {
+                            r.spawn((Node { flex_grow: 1.0, ..default() }, Pickable::IGNORE));
+                            r.spawn((seg, *child));
+                        });
+                    }
                     if let Some(f) = folder {
                         crow.insert(crate::feature_folders::InFolder(f.id));
                     }
@@ -3732,9 +3740,15 @@ fn on_feature_context_menu(
         if let Some(b) = &d.board {
             let layout = b.options.view == cadrs_core::pcb::board3d::BoardView::Layout;
             let workspace = d.source.is_some_and(|r| r.at == cadrs_core::external::RefAt::Workspace && r.document.is_none());
+            let linked = d.source.and_then(|r| doc.as_ref()?.doc.element(r.element)).and_then(|e| e.pcb()).and_then(|s| s.board(b.board)).is_some_and(|sb| sb.outline_link.is_some());
             menu = menu
                 .separator()
                 .item(MenuItem::new("feature-board-edit", "Edit layout").icon("edit").disabled(!workspace || in_dialog))
+                .item(if linked {
+                    MenuItem::new("feature-board-unlink", "Break outline link").icon("link").disabled(!workspace)
+                } else {
+                    MenuItem::new("feature-board-link", "Link outline to a sketch").icon("link").disabled(!workspace || in_dialog)
+                })
                 .item(if layout {
                     MenuItem::new("feature-board-show-3d", "Show 3D model").icon("board-3d")
                 } else {
@@ -3743,6 +3757,8 @@ fn on_feature_context_menu(
         }
     }
     if is_sketch {
+        // `docs/PCB_IN_PART_STUDIO.md` §8: a board from the sketch's regions.
+        menu = menu.item(MenuItem::new("feature-create-board", "Create PCB board").icon("pcb-studio").disabled(editing || in_dialog));
         menu = menu.item(MenuItem::new("feature-copy-sketch", "Copy sketch")).item(if shown_dims.0.contains(&row.0) {
             MenuItem::new("feature-hide-dimensions", "Hide dimensions")
         } else {
@@ -3851,6 +3867,9 @@ fn on_feature_menu_action(
         }
         "feature-dependencies" => commands.queue(move |world: &mut World| crate::feature_list::show_dependencies(world, id)),
         "feature-board-edit" => commands.queue(move |world: &mut World| crate::board_in_studio::begin_edit(world, id, 0)),
+        "feature-create-board" => commands.queue(move |world: &mut World| crate::board_in_studio::create_from_sketch(world, id)),
+        "feature-board-unlink" => commands.queue(move |world: &mut World| crate::board_in_studio::unlink_outline(world, id)),
+        "feature-board-link" => commands.queue(move |world: &mut World| crate::board_in_studio::link_outline_menu(world, id)),
         "feature-board-show-layout" => commands.queue(move |world: &mut World| crate::board_in_studio::set_view(world, id, cadrs_core::pcb::board3d::BoardView::Layout)),
         "feature-board-show-3d" => commands.queue(move |world: &mut World| crate::board_in_studio::set_view(world, id, cadrs_core::pcb::board3d::BoardView::ThreeD)),
         // P3G.4: a Derived feature's reference.

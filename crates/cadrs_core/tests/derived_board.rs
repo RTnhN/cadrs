@@ -231,7 +231,7 @@ fn the_enclosure_board_derives_cleanly() {
     let out = &b.derived[&DERIVED];
     let props = doc.element(pe::STUDIO).unwrap().part_props();
     let name = |p: cadrs_core::PartId| b.part(p).map(|x| cadrs_core::parts::display_name(x, props).to_string()).unwrap_or_default();
-    let mut hits: Vec<(String, String)> = out.collisions.iter().map(|(a, o, _)| (name(*a), name(*o))).collect();
+    let mut hits: Vec<(String, String)> = out.collisions.iter().map(|c| (name(c.component), name(c.other))).collect();
     hits.sort();
     let want: Vec<(String, String)> = ["Earth pin", "End plate", "Live pin", "Neutral pin", "Plug"].iter().map(|o| ("PS1 HLK-PM01".to_string(), o.to_string())).collect();
     assert_eq!(hits, want);
@@ -389,6 +389,9 @@ fn a_transform_moves_the_board_and_its_components_together() {
         let moved = b1.part(p.id).unwrap();
         assert!((bounds(moved).0[2] - bounds(p).0[2] - 20.0).abs() < 1e-6, "{} moved up 20", p.name);
     }
+    // The board's frame (its layout's place) went with it.
+    let (f0, f1) = (b0.derived.values().next().unwrap().boards[0].frame, b1.derived.values().next().unwrap().boards[0].frame);
+    assert!((f1.origin[2] - f0.origin[2] - 20.0).abs() < 1e-9 && f1.u == f0.u && f1.v == f0.v, "{f0:?} → {f1:?}");
 }
 
 #[test]
@@ -449,4 +452,208 @@ fn the_fixed_point_keeps_the_parts_where_they_are_when_the_outline_changes() {
     set_design(&mut doc, &mut h, board, d);
     let now = d1(&doc);
     assert!((0..3).all(|k| (now[k] - at[k]).abs() < 1e-6), "{at:?} → {now:?}");
+}
+
+// ---------------------------------------------------------------------------------------------
+// P5: a board's outline from a Part Studio sketch
+
+const OUTLINE_SKETCH: FeatureId = FeatureId::from_u128(0x7c00_0000_0000_0000_0000_0000_0000_0010);
+const FROM_SKETCH: FeatureId = FeatureId::from_u128(0x7c00_0000_0000_0000_0000_0000_0000_0011);
+const NEW_PCB: ElementId = ElementId::from_u128(0x7c00_0000_0000_0000_0000_0000_0000_0012);
+
+/// A Part Studio with "Sketch 1" on Top: a 40 × 30 rectangle from (−20, −10) with a ⌀6 hole at
+/// (5, 5).
+fn sketched() -> (Document, History) {
+    use cadrs_core::commands::{AddSketch, EditSketch};
+    use cadrs_sketch::{SketchOp, Vec2};
+    let mut doc = Document::empty("Board from a sketch");
+    let mut ps = Element::part_studio("Part Studio 1");
+    ps.id = STUDIO;
+    doc.elements.push(ps);
+    let mut h = History::default();
+    run(&mut doc, &mut h, &AddSketch { element: STUDIO, feature: OUTLINE_SKETCH, plane: Some(cadrs_sketch::PlaneRef::Top) });
+    let rect = SketchOp::AddPolyline { points: vec![Vec2::new(-20.0, -10.0), Vec2::new(20.0, -10.0), Vec2::new(20.0, 20.0), Vec2::new(-20.0, 20.0)], closed: true, construction: false, label: "Add rectangle" };
+    run(&mut doc, &mut h, &EditSketch { element: STUDIO, feature: OUTLINE_SKETCH, op: rect });
+    run(&mut doc, &mut h, &EditSketch { element: STUDIO, feature: OUTLINE_SKETCH, op: SketchOp::AddCircle { center: Vec2::new(5.0, 5.0), radius: 3.0, construction: false } });
+    (doc, h)
+}
+
+fn outline_regions(doc: &Document) -> Vec<cadrs_core::document::RegionRef> {
+    let g = doc.element(STUDIO).unwrap().feature(OUTLINE_SKETCH).unwrap().sketch().unwrap().geometry.clone();
+    cadrs_core::samples::region_refs(OUTLINE_SKETCH, &g, &[cadrs_sketch::Vec2::new(-15.0, 0.0)])
+}
+
+fn create_from_sketch(doc: &mut Document, h: &mut History) {
+    let regions = outline_regions(doc);
+    run(doc, h, &cadrs_core::pcb::outline_link::CreateBoardFromSketch { element: STUDIO, sketch: OUTLINE_SKETCH, regions, pcb: None, new_pcb: NEW_PCB, name: "Main board".into(), feature: FROM_SKETCH });
+}
+
+fn board_area(doc: &Document) -> f64 {
+    let b = &doc.element(NEW_PCB).unwrap().pcb().unwrap().boards[0];
+    cadrs_eda::poly::area(&cadrs_eda::outline::board_region(&b.design.as_ref().unwrap().board)) / 1e12
+}
+
+#[test]
+fn a_board_made_from_a_sketch_lies_on_it() {
+    let (mut doc, mut h) = sketched();
+    create_from_sketch(&mut doc, &mut h);
+    // A new PCB Studio with the board: the rectangle less the hole.
+    let hole = std::f64::consts::PI * 9.0;
+    assert!((board_area(&doc) - (40.0 * 30.0 - hole)).abs() < 0.1, "{}", board_area(&doc));
+    assert_eq!(doc.element(NEW_PCB).unwrap().name, "PCB Studio 1");
+    // The Derived feature puts it on the sketch: x −20…20, y −10…20, z 0…1.6.
+    let b = cadrs_core::rebuild::build(doc.element(STUDIO).unwrap().features());
+    assert!(b.errors.is_empty(), "{:?}", b.errors);
+    let board = b.parts.iter().find(|p| p.feature == FROM_SKETCH).unwrap();
+    let (lo, hi) = bounds(board);
+    for (k, want) in [(0, -20.0), (1, -10.0), (2, 0.0)] {
+        assert!((lo[k] - want).abs() < 1e-6, "{lo:?}");
+    }
+    for (k, want) in [(0, 20.0), (1, 20.0), (2, 1.6)] {
+        assert!((hi[k] - want).abs() < 1e-6, "{hi:?}");
+    }
+    // One undo step takes it all back.
+    h.undo(&mut doc).unwrap();
+    assert!(doc.element(NEW_PCB).is_none());
+    assert!(doc.element(STUDIO).unwrap().feature(FROM_SKETCH).is_none());
+}
+
+#[test]
+fn the_outline_follows_the_sketch_until_the_link_is_broken() {
+    use cadrs_core::commands::EditSketch;
+    use cadrs_sketch::{SketchOp, Vec2};
+    let (mut doc, mut h) = sketched();
+    create_from_sketch(&mut doc, &mut h);
+    // Widen the rectangle 10 mm to the right: its two right corners move.
+    let g = doc.element(STUDIO).unwrap().feature(OUTLINE_SKETCH).unwrap().sketch().unwrap().geometry.clone();
+    let corner = |x: f64, y: f64| g.point_at(Vec2::new(x, y), 1e-6).unwrap();
+    let moves = vec![(corner(20.0, -10.0), Vec2::new(30.0, -10.0)), (corner(20.0, 20.0), Vec2::new(30.0, 20.0))];
+    run(&mut doc, &mut h, &EditSketch { element: STUDIO, feature: OUTLINE_SKETCH, op: SketchOp::MovePoints { moves } });
+    let hole = std::f64::consts::PI * 9.0;
+    assert!((board_area(&doc) - (50.0 * 30.0 - hole)).abs() < 0.1, "{}", board_area(&doc));
+    // The derived board follows in the same step.
+    let b = cadrs_core::rebuild::build(doc.element(STUDIO).unwrap().features());
+    let board = b.parts.iter().find(|p| p.feature == FROM_SKETCH).unwrap();
+    assert!((bounds(board).1[0] - 30.0).abs() < 1e-6);
+    // The linked shapes are locked in the layout.
+    let pcb = doc.element(NEW_PCB).unwrap().pcb().unwrap();
+    let sb = &pcb.boards[0];
+    let link = sb.outline_link.as_ref().unwrap();
+    assert!(sb.design.as_ref().unwrap().board.shapes.iter().filter(|s| link.shapes.contains(&s.id)).all(|s| s.locked));
+    // Break the link: the shapes stay, unlocked, and no longer follow.
+    let board_id = sb.id;
+    run(&mut doc, &mut h, &cadrs_core::pcb::outline_link::SetOutlineLink { pcb: NEW_PCB, board: board_id, link: None });
+    let g = doc.element(STUDIO).unwrap().feature(OUTLINE_SKETCH).unwrap().sketch().unwrap().geometry.clone();
+    let corner = |x: f64, y: f64| g.point_at(Vec2::new(x, y), 1e-6).unwrap();
+    let moves = vec![(corner(30.0, -10.0), Vec2::new(40.0, -10.0)), (corner(30.0, 20.0), Vec2::new(40.0, 20.0))];
+    run(&mut doc, &mut h, &EditSketch { element: STUDIO, feature: OUTLINE_SKETCH, op: SketchOp::MovePoints { moves } });
+    assert!((board_area(&doc) - (50.0 * 30.0 - hole)).abs() < 0.1, "no longer follows: {}", board_area(&doc));
+    let sb = &doc.element(NEW_PCB).unwrap().pcb().unwrap().boards[0];
+    assert!(sb.outline_link.is_none());
+    assert!(sb.design.as_ref().unwrap().board.shapes.iter().filter(|s| s.layer == cadrs_eda::layer::Layer::Outline).all(|s| !s.locked));
+}
+
+#[test]
+fn a_gone_region_keeps_the_last_outline_and_says_why() {
+    use cadrs_core::commands::EditSketch;
+    use cadrs_sketch::SketchOp;
+    let (mut doc, mut h) = sketched();
+    create_from_sketch(&mut doc, &mut h);
+    let before = board_area(&doc);
+    // Delete every curve of the sketch.
+    let g = doc.element(STUDIO).unwrap().feature(OUTLINE_SKETCH).unwrap().sketch().unwrap().geometry.clone();
+    let curves: Vec<_> = g.curves.keys().collect();
+    run(&mut doc, &mut h, &EditSketch { element: STUDIO, feature: OUTLINE_SKETCH, op: SketchOp::Delete { curves, points: vec![], dimensions: vec![], constraints: vec![] } });
+    assert!((board_area(&doc) - before).abs() < 1e-9);
+    let sb = &doc.element(NEW_PCB).unwrap().pcb().unwrap().boards[0];
+    assert!(sb.outline_link.as_ref().unwrap().problem.is_some());
+}
+
+#[test]
+fn an_outline_cant_follow_a_sketch_after_the_board() {
+    use cadrs_core::commands::AddSketch;
+    let (mut doc, mut h) = sketched();
+    create_from_sketch(&mut doc, &mut h);
+    // A second sketch after the Derived feature (it could be drawn on the board).
+    let late = FeatureId::new();
+    run(&mut doc, &mut h, &AddSketch { element: STUDIO, feature: late, plane: Some(cadrs_sketch::PlaneRef::Front) });
+    let board = doc.element(NEW_PCB).unwrap().pcb().unwrap().boards[0].id;
+    let e = h.execute(&mut doc, &cadrs_core::pcb::outline_link::SetOutlineLink { pcb: NEW_PCB, board, link: Some((STUDIO, late, vec![])) }).unwrap_err();
+    assert!(e.to_string().contains("comes after"), "{e}");
+}
+
+/// A face of `p` whose normal is `n` (the highest one along it).
+fn face_facing(p: &Part, n: [f64; 3]) -> cadrs_core::document::FaceRef {
+    let along = |f: &&cadrs_core::solid::SolidFace| f.center.map_or(f64::MIN, |c| c[0] * n[0] + c[1] * n[1] + c[2] * n[2]);
+    let f = p.solid.faces.iter().filter(|f| f.plane.is_some_and(|q| { let m = q.normal(); m[0] * n[0] + m[1] * n[1] + m[2] * n[2] > 0.99 })).max_by(|a, b| along(a).total_cmp(&along(b))).unwrap();
+    cadrs_core::document::FaceRef { part: p.id, face: f.name, seed: f.center.unwrap() }
+}
+
+#[test]
+fn a_mate_connector_on_a_component_turns_and_flips_with_it() {
+    let (mut doc, mut h, board) = document();
+    derive(&mut doc, &mut h, board, DerivedFeature::default()).unwrap();
+    let before = build(&doc);
+    let d1 = derived_parts(&before).into_iter().find(|p| p.name.starts_with("D1 ")).unwrap().clone();
+    let face = face_facing(&d1, [0.0, 0.0, 1.0]);
+    let on_d1 = FeatureId::new();
+    let mc = MateConnectorFeature { origin: Some(ConnectorOrigin::Face(face)), ..Default::default() };
+    run(&mut doc, &mut h, &AddFeature { element: STUDIO, feature: on_d1, base_name: "Mate connector".into(), kind: FeatureKind::MateConnector(mc) });
+    let at = build(&doc).connectors[&on_d1];
+    let mut d = design_of(&doc, board);
+    let i = cadrs_eda::board_edit::footprint_index(&d.board, "D1").unwrap();
+    let centre = d.board.footprints[i].placement.at;
+    // A quarter turn about the footprint's origin: the connector stays on the top face (up),
+    // its place turned about the footprint's.
+    cadrs_eda::board_edit::rotate_footprint(&mut d.board, i, 90.0);
+    set_design(&mut doc, &mut h, board, d.clone());
+    let b = build(&doc);
+    assert!(b.errors.is_empty() && b.warning(on_d1).is_none(), "{:?} {:?}", b.errors, b.warnings);
+    let turned = b.connectors[&on_d1];
+    let (cx, cy) = (to_mm(centre.x), to_mm(centre.y));
+    let o = |f: &cadrs_sketch::PlaneFrame| {
+        // The board's origin is the location's (0, 0, 100); its anchor the fixed outline centre.
+        let lay = b.derived[&DERIVED].boards[0].frame;
+        cadrs_core::pcb::frames::to_board(&lay, f.origin)
+    };
+    let (a0, a1) = (o(&at), o(&turned));
+    let r0 = [a0[0] - cx, a0[1] - cy];
+    let r1 = [a1[0] - cx, a1[1] - cy];
+    assert!((r1[0] + r0[1]).abs() < 1e-3 && (r1[1] - r0[0]).abs() < 1e-3 && (a1[2] - a0[2]).abs() < 1e-6, "{a0:?} → {a1:?} about ({cx}, {cy})");
+    assert!(turned.normal()[2] > 0.99);
+    // Flipped to the bottom: the face now looks down, under the board.
+    cadrs_eda::board_edit::flip_footprint(&mut d.board, i);
+    set_design(&mut doc, &mut h, board, d);
+    let b = build(&doc);
+    assert!(b.errors.is_empty() && b.warning(on_d1).is_none(), "{:?} {:?}", b.errors, b.warnings);
+    let flipped = b.connectors[&on_d1];
+    assert!(flipped.normal()[2] < -0.99, "{flipped:?}");
+    assert!(o(&flipped)[2] < 0.0, "under the board: {:?}", o(&flipped));
+}
+
+#[test]
+fn modelling_features_leave_components_alone_and_say_so() {
+    use cadrs_core::applied::{EdgeOrFace, FilletFeature};
+    let (mut doc, mut h, board) = document();
+    derive(&mut doc, &mut h, board, DerivedFeature::default()).unwrap();
+    let b = build(&doc);
+    let d1 = derived_parts(&b).into_iter().find(|p| p.name.starts_with("D1 ")).unwrap().clone();
+    let pcb = derived_parts(&b).into_iter().find(|p| p.solid.faces.len() > 6 && b.derived[&DERIVED].boards[0].part == p.id).unwrap().clone();
+    // Only a component's face: the fillet fails, saying why.
+    let only = FeatureId::new();
+    let f = FilletFeature { entities: vec![EdgeOrFace::Face(face_facing(&d1, [0.0, 0.0, 1.0]))], size: 0.2, size_expr: "0.2 mm".into(), ..Default::default() };
+    run(&mut doc, &mut h, &AddFeature { element: STUDIO, feature: only, base_name: "Fillet".into(), kind: FeatureKind::Fillet(f) });
+    let b = build(&doc);
+    let e = b.error(only).unwrap_or_default();
+    assert!(e.contains("D1") && e.contains("board component"), "{e:?}");
+    h.undo(&mut doc).unwrap();
+    // With the board's top face too: the board is rounded, D1 left alone with a warning.
+    let both = FeatureId::new();
+    let f = FilletFeature { entities: vec![EdgeOrFace::Face(face_facing(&pcb, [0.0, 0.0, 1.0])), EdgeOrFace::Face(face_facing(&d1, [0.0, 0.0, 1.0]))], size: 0.2, size_expr: "0.2 mm".into(), ..Default::default() };
+    run(&mut doc, &mut h, &AddFeature { element: STUDIO, feature: both, base_name: "Fillet".into(), kind: FeatureKind::Fillet(f) });
+    let b = build(&doc);
+    assert!(b.error(both).is_none(), "{:?}", b.error(both));
+    let w = b.warning(both).unwrap_or_default();
+    assert!(w.contains("Left alone") && w.contains("D1"), "{w:?}");
+    assert!(b.part(pcb.id).unwrap().solid.faces.len() > pcb.solid.faces.len(), "the board's top edges rounded");
 }

@@ -73,6 +73,11 @@ impl PcbMeshCache {
         if let Some(m) = self.models.get(hash) {
             return m.clone();
         }
+        // A file not loaded yet (still downloading, say) is looked for again next time; one
+        // that can't be read is remembered as such (and reported once).
+        if !cadrs_core::blobs::contains(hash) {
+            return None;
+        }
         let m = match cadrs_core::pcb::model::cached_file_meshes(hash, ext) {
             Ok(m) => Some(m),
             Err(e) => {
@@ -344,21 +349,23 @@ fn board_bodies(world: &mut World, el: ElementId, board_id: BoardId, board: &Pcb
     let t = board.thickness();
     type Shown = (Representation, Option<(Arc<Solid>, [u8; 4], PartTransform)>);
     let mut reps: HashMap<String, Shown> = HashMap::new();
-    // A native board's footprint models by reference (shown in place of the box); footprints
+    // A native board's footprint models (shown in place of the box), by footprint: the studio
+    // board's placements are the design's footprints in order (`cadrs_core::pcb::design`), so
+    // the k-th component is the k-th footprint (references can repeat, or be "R?"). Footprints
     // with no model show nothing, as in KiCad.
-    let mut models: HashMap<String, cadrs_eda::footprint::Model3d> = HashMap::new();
+    let mut models: HashMap<usize, cadrs_eda::footprint::Model3d> = HashMap::new();
     // Where each footprint sits (the Part Studio's placement, `cadrs_core::pcb::model`).
-    let mut places: HashMap<String, cadrs_eda::footprint::FootprintPlacement> = HashMap::new();
-    let mut bare: std::collections::HashSet<String> = Default::default();
-    for f in shown_design(world, el, board_id).iter().flat_map(|d| d.board.footprints.iter()) {
-        let r = f.reference().to_string();
-        places.insert(r.clone(), f.placement);
+    let mut places: HashMap<usize, cadrs_eda::footprint::FootprintPlacement> = HashMap::new();
+    let mut bare: std::collections::HashSet<usize> = Default::default();
+    for (k, f) in shown_design(world, el, board_id).iter().flat_map(|d| d.board.footprints.iter()).enumerate() {
+        places.insert(k, f.placement);
         if f.footprint.models.iter().all(|m| !m.visible) {
-            bare.insert(r);
+            bare.insert(k);
         } else if let Some(m) = f.footprint.models.iter().find(|m| m.visible && (m.body.is_some() || m.blob.is_some())) {
-            models.insert(r, m.clone());
+            models.insert(k, m.clone());
         }
     }
+    let index: HashMap<cadrs_core::pcb::board::ItemId, usize> = board.components().enumerate().map(|(k, (i, _))| (i, k)).collect();
     let mut out = Vec::with_capacity(mesh.bodies.len());
     for b in &mesh.bodies {
         let placement = b.item.filter(|_| b.class.is_component()).and_then(|i| board.component(i));
@@ -366,6 +373,7 @@ fn board_bodies(world: &mut World, el: ElementId, board_id: BoardId, board: &Pcb
             out.push(b.clone());
             continue;
         };
+        let k = b.item.and_then(|i| index.get(&i).copied()).unwrap_or(usize::MAX);
         if !reps.contains_key(&p.package) {
             let rep = representation(world, el, &p.package);
             let custom = custom_part(world, &rep);
@@ -379,12 +387,12 @@ fn board_bodies(world: &mut World, el: ElementId, board_id: BoardId, board: &Pcb
                 let m = cadrs_pcb::placement::custom_motion(p, t, tr);
                 out.push(cadrs_pcb::mesh::solid_body(solid, &b.name, b.class, *col, b.item).moved(&m));
             }
-            _ if bare.contains(&p.refdes) => {}
-            _ => match models.get(&p.refdes) {
+            _ if bare.contains(&k) => {}
+            _ => match models.get(&k) {
                 Some(model) => {
                     format!("{:?}{:?}{:?}{:?}{}", model.blob, model.offset, model.rotation, model.scale, model.opacity).hash(sig);
                     model.body.as_ref().map(|b| format!("{b:?}")).hash(sig);
-                    let m = places.get(&p.refdes).map_or_else(|| cadrs_pcb::placement::placement_motion(p, t), |pl| cadrs_core::pcb::model::footprint_motion(pl, t));
+                    let m = places.get(&k).map_or_else(|| cadrs_pcb::placement::placement_motion(p, t), |pl| cadrs_core::pcb::model::footprint_motion(pl, t));
                     // The model's file when it is loaded and readable, else its generated body.
                     let ext = std::path::Path::new(&model.source).extension().map(|e| e.to_string_lossy().into_owned()).unwrap_or_default();
                     let file = model.blob.as_ref().and_then(|h| world.resource_mut::<PcbMeshCache>().model(h, &ext));

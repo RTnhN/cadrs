@@ -22,12 +22,14 @@ pub mod bom;
 pub mod component_docs;
 pub mod design;
 pub mod fit;
+pub mod frames;
 pub mod generated;
 pub mod import;
 pub mod library;
 pub mod mesh_solid;
 pub mod model;
 pub mod names;
+pub mod outline_link;
 pub mod search;
 pub mod sync;
 
@@ -63,6 +65,7 @@ pub enum BoardSource {
 /// One board of a PCB Studio. (Equal when its contents are: the cached layout hash doesn't
 /// count.)
 #[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(from = "StudioBoardFile")]
 pub struct StudioBoard {
     pub id: BoardId,
     /// The mechanical board (outline, placements, packages). For a native board it is made
@@ -72,10 +75,33 @@ pub struct StudioBoard {
     /// A native board's schematic and layout.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub design: Option<Box<cadrs_eda::Design>>,
-    /// [`board3d::layout_hash`] of the design's layout, set with it (0: not worked out, as
-    /// after reading a document): Part Studios deriving the board compare it to tell a change.
+    /// [`board3d::layout_hash`] of the design's layout (0 without one), kept with it by
+    /// [`StudioBoard::set_design`] and worked out when a document is read: Part Studios
+    /// deriving the board compare it to tell a change.
     #[serde(skip)]
-    pub layout_hash: u64,
+    layout_hash: u64,
+    /// The sketch its outline follows, if any ([`outline_link`]).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub outline_link: Option<outline_link::OutlineLink>,
+}
+
+/// A [`StudioBoard`] as written: its layout hash is worked out on reading.
+#[derive(Deserialize)]
+struct StudioBoardFile {
+    id: BoardId,
+    board: PcbBoard,
+    source: BoardSource,
+    #[serde(default)]
+    design: Option<Box<cadrs_eda::Design>>,
+    #[serde(default)]
+    outline_link: Option<outline_link::OutlineLink>,
+}
+
+impl From<StudioBoardFile> for StudioBoard {
+    fn from(f: StudioBoardFile) -> Self {
+        let layout_hash = f.design.as_ref().map_or(0, |d| board3d::layout_hash(&d.board));
+        StudioBoard { id: f.id, board: f.board, source: f.source, design: f.design, layout_hash, outline_link: f.outline_link }
+    }
 }
 
 /// A component's id within its PCB Studio, stable while it exists.
@@ -91,13 +117,33 @@ pub struct StudioComponent {
 
 impl PartialEq for StudioBoard {
     fn eq(&self, o: &Self) -> bool {
-        self.id == o.id && self.board == o.board && self.source == o.source && self.design == o.design
+        self.id == o.id && self.board == o.board && self.source == o.source && self.design == o.design && self.outline_link == o.outline_link
     }
 }
 
 impl StudioBoard {
     pub fn name(&self) -> &str {
         self.board.name()
+    }
+
+    /// [`board3d::layout_hash`] of the design's layout (0 for a board not designed in cadrs).
+    pub fn layout_hash(&self) -> u64 {
+        self.layout_hash
+    }
+
+    /// Takes a new design: the mechanical board made from it and its layout's hash with it.
+    pub fn set_design(&mut self, design: Box<cadrs_eda::Design>) {
+        let name = self.board.name().to_string();
+        self.board = design::pcb_board(&name, &design);
+        self.layout_hash = board3d::layout_hash(&design.board);
+        self.design = Some(design);
+    }
+
+    /// The design changed in place ([`outline_link`]): the mechanical board and the hash follow.
+    pub(crate) fn design_changed(&mut self) {
+        if let Some(d) = self.design.take() {
+            self.set_design(d);
+        }
     }
 }
 
@@ -192,7 +238,7 @@ impl PcbStudio {
         let n = self.next_board.max(self.boards.iter().map(|b| b.id.0 + 1).max().unwrap_or(0));
         let id = BoardId(n);
         self.next_board = n + 1;
-        self.boards.push(StudioBoard { id, board, source, design: None, layout_hash: 0 });
+        self.boards.push(StudioBoard { id, board, source, design: None, layout_hash: 0, outline_link: None });
         id
     }
 
@@ -358,8 +404,7 @@ impl Command for AddBoard {
         let board = design::pcb_board(&name, &self.design);
         let id = s.add_board(board, BoardSource::Native { imported_from: self.imported_from.clone() });
         if let Some(b) = s.board_mut(id) {
-            b.design = Some(self.design.clone());
-            b.layout_hash = board3d::layout_hash(&self.design.board);
+            b.set_design(self.design.clone());
         }
         s.active = Some(id);
         Ok(())
@@ -505,10 +550,7 @@ impl Command for SetDesign {
         if b.design.is_none() {
             return Err(CommandError::Invalid(format!("{} is not designed in cadrs", b.name())));
         }
-        let name = b.name().to_string();
-        b.board = design::pcb_board(&name, &self.design);
-        b.design = Some(self.design.clone());
-        b.layout_hash = board3d::layout_hash(&self.design.board);
+        b.set_design(self.design.clone());
         Ok(())
     }
 }

@@ -155,6 +155,8 @@ pub fn sync_strip(world: &mut World, mode: Mode, spec: StripSpec) {
             let mut qa = world.query_filtered::<Entity, With<ViewportArea>>();
             let Some(area) = qa.iter(world).next() else { return };
             let t = world.resource::<Theme>().clone();
+            // On a board in a Part Studio: under the view cube.
+            let top = if world.resource::<Eda2d>().plane().is_some() { 232.0 } else { 48.0 };
             let name: Cow<'static, str> = match mode {
                 Mode::Schematic => "eda-schematic-tools".into(),
                 _ => "eda-layout-tools".into(),
@@ -165,7 +167,7 @@ pub fn sync_strip(world: &mut World, mode: Mode, spec: StripSpec) {
                     ToolStrip(mode),
                     Node {
                         position_type: PositionType::Absolute,
-                        top: Val::Px(48.0),
+                        top: Val::Px(top),
                         right: Val::Px(44.0),
                         flex_direction: FlexDirection::Column,
                         row_gap: Val::Px(2.0),

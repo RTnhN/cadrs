@@ -109,6 +109,28 @@ the 3D viewport, and (c) a sketch → outline link.
   side; the PCB Studio's DRC checks footprints against keep-outs, which is the mechanical
   DRC of §7.3 item 8), collision warnings on the Derived feature (named as the Parts list does).
   Exact distances are mesh-based (Q1).
+- **Second review's fixes.** One `pcb::frames` module converts layout ↔ board ↔ Part Studio
+  (with round-trip tests); the layout hash is bincode-streamed, kept by `StudioBoard::set_design`
+  and worked out on reading. Collisions are checked in height bands split at faces flat to the
+  board (a part over a low step of a tall component is clear), per triangle culled, cached per
+  pair of shapes, and say "(0.80 mm in plan, 2.40 mm high)"; gaps are exact polygon distances
+  plus "↑ room" over the part. Snapping goes to edges running beside the part's shadow. Align
+  turns a footprint (face to face, at most a quarter turn), says what is still off (out of the
+  board's plane, overlapping courtyards or pads). Keep-outs keep holes (cut into hole-free
+  pieces), replace their own on a second run, carry the room under the part in their name and
+  toast what they did. The rebuild keeps the board's solid per outline and the placed component
+  meshes per place; modelling features leave components alone with a warning (failing only when
+  nothing else was picked); a Transform moves the board's frame too. In edit mode components are
+  see-through (Solid parts turns that off), the parts around can be faded, Move by… (Shift+M)
+  takes typed distances, the PCB Studio's DRC lists the components running into Part Studio
+  parts, viewport hover is off (except for Align) and the bar is `cadrs_ui::FloatBar`. The
+  Feature list's view row is a 3D | Layout `cadrs_ui::Segmented`.
+- **P5 done.** `pcb::outline_link`: Create PCB board from a sketch's regions (a new PCB Studio
+  or an existing one; the board on the sketch's plane, its origin on the sketch's, one undo
+  step), Link outline to a sketch / Break outline link from the Derived feature's menu; the
+  linked shapes are locked (the outline tool and Delete refuse them, saying why); a gone region
+  keeps the last outline with a problem note; a link to a sketch after the board's Derived
+  feature is refused (it would be a cycle).
 
 ## 4. Data model changes
 

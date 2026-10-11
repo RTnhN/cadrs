@@ -57,6 +57,7 @@ impl Plugin for DerivedPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<DerivedOpen>()
             .init_resource::<ComponentsOpen>()
+            .add_observer(on_board_view_segment)
             .add_systems(
                 Update,
                 (derived_picks, derived_keys, read_search, sync_dialog, sync_source_list)
@@ -864,7 +865,7 @@ fn view(world: &World) -> Option<(View, bool)> {
                 skins: o.skins,
                 seat: usize::from(o.seat == BoardSeat::Top),
                 anchor: match o.anchor {
-                    A::At { .. } => 0,
+                    A::At { .. } | A::Pending => 0,
                     A::Origin => 1,
                     A::Center => 2,
                     A::Footprint(_) => 3,
@@ -1113,12 +1114,23 @@ fn spawn_board_options(p: &mut ChildSpawnerCommands, t: &Theme, v: &View, b: &Bo
     p.spawn(TabStrip::new("derived-board-view").compact().equal().tab("3D model").tab("Layout").selected(b.view).build(t));
     section(p, t, "derived-components-label", "Components");
     p.spawn(TabStrip::new("derived-board-components").compact().equal().tab("All").tab("Top").tab("Bottom").tab("None").selected(b.components).build(t));
-    p.spawn((Name::new("derived-footprints"), Node { flex_direction: FlexDirection::Column, padding: UiRect::new(Val::Px(4.0), Val::Px(4.0), Val::Px(4.0), Val::Px(0.0)), max_height: Val::Px(260.0), overflow: Overflow::scroll_y(), ..default() }))
-        .with_children(|c| {
-            for (id, label, on, blocked) in &b.footprints {
-                c.spawn((EntityRow(EntityKey::Footprint(*id)), OptionRow::new(format!("derived-footprint-{}", linked::slug(label)), label.clone()).icon("chip").checked(*on).disabled(*blocked).build(t)));
-            }
-        });
+    // A list scrolled with a scrollbar beside it (a board has dozens of footprints).
+    p.spawn(Node { flex_direction: FlexDirection::Column, max_height: Val::Px(260.0), ..default() }).with_children(|frame| {
+        let list = frame
+            .spawn((
+                Name::new("derived-footprints"),
+                bevy::ui_widgets::ScrollArea,
+                cadrs_ui::scrollbar::ScrollGutter(8.0),
+                Node { flex_direction: FlexDirection::Column, padding: UiRect::new(Val::Px(4.0), Val::Px(4.0), Val::Px(4.0), Val::Px(0.0)), max_height: Val::Px(260.0), overflow: Overflow::scroll_y(), ..default() },
+            ))
+            .with_children(|c| {
+                for (id, label, on, blocked) in &b.footprints {
+                    c.spawn((EntityRow(EntityKey::Footprint(*id)), OptionRow::new(format!("derived-footprint-{}", linked::slug(label)), label.clone()).icon("chip").checked(*on).disabled(*blocked).build(t)));
+                }
+            })
+            .id();
+        frame.spawn(cadrs_ui::vertical_scrollbar(t, "derived-footprints-scrollbar", list));
+    });
     p.spawn(Node { flex_direction: FlexDirection::Column, padding: UiRect::horizontal(Val::Px(4.0)), ..default() })
         .with_child(OptionRow::new("derived-board-off-board", "Include parts placed off the board").checked(b.off_board).build(t));
     section(p, t, "derived-locations-label", "Locations");
@@ -1133,7 +1145,13 @@ fn spawn_board_options(p: &mut ChildSpawnerCommands, t: &Theme, v: &View, b: &Bo
         2 => "The outline's centre: the board moves when the outline changes",
         _ => "A footprint's origin: the part lands on the location",
     };
-    p.spawn((Name::new("derived-board-anchor-hint"), t.text(hint, t.font_sm, FontWeight::NORMAL, t.muted_foreground), Node { margin: UiRect::new(Val::Px(8.0), Val::Px(6.0), Val::Px(3.0), Val::Px(0.0)), max_width: Val::Px(280.0), ..default() }));
+    // (Wrapped: the theme's text doesn't wrap.)
+    p.spawn((
+        Name::new("derived-board-anchor-hint"),
+        t.text(hint, t.font_sm, FontWeight::NORMAL, t.muted_foreground),
+        Node { margin: UiRect::new(Val::Px(8.0), Val::Px(6.0), Val::Px(3.0), Val::Px(0.0)), max_width: Val::Percent(100.0), ..default() },
+    ))
+    .insert(TextLayout::new(bevy::text::Justify::Left, bevy::text::LineBreak::WordBoundary));
     if b.anchor == 3 {
         p.spawn((Name::new("derived-board-anchor-footprints"), Node { flex_direction: FlexDirection::Column, padding: UiRect::new(Val::Px(4.0), Val::Px(4.0), Val::Px(3.0), Val::Px(0.0)), max_height: Val::Px(140.0), overflow: Overflow::scroll_y(), ..default() }))
             .with_children(|c| {
@@ -1227,13 +1245,10 @@ pub fn children(cache: &crate::parts::PartCache, feature: FeatureId, view: Optio
                 v.push((DerivedChild::Part(b.part), n, "pcb-studio"));
             }
         }
-        let label = match view {
-            BoardView::ThreeD => "3D model",
-            BoardView::Layout => "Layout",
-        };
-        v.push((DerivedChild::BoardView(feature), label.to_string(), if view == BoardView::Layout { "pcb-studio" } else { "board-3d" }));
+        v.push((DerivedChild::BoardView(feature), "View".to_string(), if view == BoardView::Layout { "pcb-studio" } else { "board-3d" }));
         if !out.footprints.is_empty() {
-            v.push((DerivedChild::Components(feature), format!("Components ({})", out.footprints.len()), "chip"));
+            // (Short: the row has its eye and chevron too.)
+            v.push((DerivedChild::Components(feature), format!("Parts ({})", out.footprints.len()), "chip"));
             if components_open {
                 for (p, _) in &out.footprints {
                     if let Some(n) = name(p) {
@@ -1300,6 +1315,18 @@ pub fn toggle_open(world: &mut World, feature: FeatureId) {
     }
 }
 
+/// A derived board's 3D | Layout segments in the Feature list.
+pub fn on_board_view_segment(e: On<cadrs_ui::SegmentedSelect>, q: Query<&DerivedChild>, mut commands: Commands) {
+    let Ok(DerivedChild::BoardView(f)) = q.get(e.entity).copied() else { return };
+    let view = if e.index == 1 { BoardView::Layout } else { BoardView::ThreeD };
+    commands.queue(move |w: &mut World| {
+        let now = derived_board_ref(w, f).map(|b| b.options.view);
+        if now.is_some_and(|v| v != view) {
+            crate::board_in_studio::set_view(w, f, view);
+        }
+    });
+}
+
 /// The eye of a derived part (hide or show it) or sketch (its visibility).
 pub fn toggle_child(world: &mut World, child: DerivedChild) {
     let Some(element) = world.resource::<ActiveDocument>().active_element().map(|e| e.id) else { return };
@@ -1345,9 +1372,19 @@ pub fn site(world: &World, feature: FeatureId) -> Option<cadrs_core::link_update
 
 /// The Derived feature `feature` of the active tab, if it is one.
 pub fn derived_in_active(world: &World, feature: FeatureId) -> Option<DerivedFeature> {
+    derived_ref(world, feature).cloned()
+}
+
+/// [`derived_in_active`] by reference (no copy of a board's layout, for per-frame systems).
+pub fn derived_ref(world: &World, feature: FeatureId) -> Option<&DerivedFeature> {
     let doc = world.resource::<ActiveDocument>();
     let el = doc.active_element()?;
-    cadrs_core::derived::derived_of(&doc.doc, el.id, feature).cloned()
+    cadrs_core::derived::derived_of(&doc.doc, el.id, feature)
+}
+
+/// The derived board of the Derived feature `feature` in the shown Part Studio.
+pub fn derived_board_ref(world: &World, feature: FeatureId) -> Option<&cadrs_core::derived::DerivedBoard> {
+    derived_ref(world, feature)?.board.as_deref()
 }
 
 // ---------------------------------------------------------------------------------------------

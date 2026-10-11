@@ -238,6 +238,43 @@ fn no_body(p: &PartState) -> String {
     format!("{} is a board component (a mesh, no solid): modelling features can't change it", p.part.name)
 }
 
+impl Rebuilder {
+    /// A part's kernel body; a board component (a mesh) has none, and is noted as left alone
+    /// (the feature then builds with a warning naming it, [`Self::compute_noting_meshes`]).
+    fn body_or_skip(&self, p: &PartState) -> Option<cadrs_kernel::BodyId> {
+        if p.body.is_none() {
+            let mut s = self.skipped_meshes.borrow_mut();
+            if !s.contains(&p.part.name) {
+                s.push(p.part.name.clone());
+            }
+        }
+        p.body
+    }
+
+    /// [`Self::compute`], and the board components it left alone: a warning when it built,
+    /// the reason when it failed (nothing else was picked).
+    fn compute_noting_meshes(&mut self, before: &[Feature], f: &Feature, state: &Arc<State>) -> Output {
+        self.skipped_meshes.borrow_mut().clear();
+        let mut o = self.compute(before, f, state);
+        let skipped = std::mem::take(&mut *self.skipped_meshes.borrow_mut());
+        if !skipped.is_empty() {
+            let (one, names) = (skipped.len() == 1, skipped.join(", "));
+            // Nothing but components picked: nothing changed, which is a failure.
+            let unchanged = o.state.parts.len() == state.parts.len() && o.state.parts.iter().zip(&state.parts).all(|(a, b)| a.part.id == b.part.id && Arc::ptr_eq(&a.part.solid, &b.part.solid));
+            if o.error.is_some() || unchanged {
+                o.error = Some(if one { format!("{names} is a board component (a mesh, no solid): modelling features can't change it") } else { format!("{names} are board components (meshes, no solids): modelling features can't change them") });
+            } else {
+                let why = format!("Left alone (board components are meshes): {names}");
+                o.warning = Some(match o.warning.take() {
+                    Some(w) => format!("{w}; {why}"),
+                    None => why,
+                });
+            }
+        }
+        o
+    }
+}
+
 impl State {
     fn part(&self, id: PartId) -> Option<&PartState> {
         self.parts.iter().find(|p| p.part.id == id)
@@ -321,6 +358,15 @@ pub struct Rebuilder {
     /// The generation of the last top-level rebuild: the outputs it used (its Derived sources'
     /// too) have `last_used` at or after it ([`Self::used_keys`]).
     top_generation: u64,
+    /// The board components (meshes) the feature being computed left alone
+    /// ([`Self::body_or_skip`]).
+    skipped_meshes: std::cell::RefCell<Vec<String>>,
+    /// Derived boards' solids, newest first: (outline key, body, its curves, warnings)
+    /// (`kernel_ops::derived`'s `board_body_cached`).
+    board_bodies: Vec<(u64, BodyId, Vec<crate::pcb::board3d::TaggedCurve>, Vec<String>)>,
+    /// Derived boards' placed component meshes, by feature, copy, footprint and place, with
+    /// the unplaced mesh they were made from.
+    placed_components: HashMap<u64, (Arc<crate::solid::Solid>, Arc<crate::solid::Solid>)>,
 }
 
 impl Default for Rebuilder {
@@ -439,6 +485,9 @@ impl Rebuilder {
             sketch_times: HashMap::new(),
             depth: 0,
             top_generation: 0,
+            skipped_meshes: Default::default(),
+            board_bodies: Vec::new(),
+            placed_components: HashMap::new(),
         }
     }
 
@@ -552,7 +601,7 @@ impl Rebuilder {
                         dots: None,
                         uses: Vec::new(),
                     },
-                    None => self.compute(&features[..i], f, &state),
+                    None => self.compute_noting_meshes(&features[..i], f, &state),
                 };
                 let sources = match &f.kind {
                     FeatureKind::Derived(_) => derived_source_keys(std::slice::from_ref(f)),
@@ -2618,6 +2667,11 @@ mod kernel_ops {
                 };
                 if by_name && how == cadrs_kernel::naming::Match::Geometric {
                     continue;
+                }
+                // A board component's face (a mesh, no kernel faces): found, with nothing the
+                // kernel can change (the feature leaves it alone, `Rebuilder::body_or_skip`).
+                if by_name && part.body.is_none() {
+                    return Some((part, Vec::new()));
                 }
                 let name = solid.faces[i].name;
                 let ids = part.names.faces_named(&name);
