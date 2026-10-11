@@ -8,6 +8,7 @@
 //! - [`Design`]: one board's schematic and layout together; [`Component`]: a part's symbol,
 //!   footprint and 3D model.
 
+pub mod ac_board;
 pub mod assign;
 pub mod board;
 pub mod board_edit;
@@ -37,6 +38,7 @@ pub mod library;
 pub mod poly;
 pub mod render;
 pub mod schematic;
+pub mod skin;
 pub mod symbol;
 pub mod units;
 pub mod view;

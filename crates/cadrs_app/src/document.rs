@@ -3701,6 +3701,15 @@ fn on_feature_context_menu(
             }
             None => {}
         }
+        // A PCB Studio board (`docs/PCB_IN_PART_STUDIO.md` §6): its 3D model or its layout.
+        if let Some(b) = &d.board {
+            let layout = b.options.view == cadrs_core::pcb::board3d::BoardView::Layout;
+            menu = menu.separator().item(if layout {
+                MenuItem::new("feature-board-show-3d", "Show 3D model").icon("board-3d")
+            } else {
+                MenuItem::new("feature-board-show-layout", "Show layout").icon("pcb-studio")
+            });
+        }
     }
     if is_sketch {
         menu = menu.item(MenuItem::new("feature-copy-sketch", "Copy sketch")).item(if shown_dims.0.contains(&row.0) {
@@ -3810,6 +3819,8 @@ fn on_feature_menu_action(
             commands.queue(move |world: &mut World| rename_feature(world, id));
         }
         "feature-dependencies" => commands.queue(move |world: &mut World| crate::feature_list::show_dependencies(world, id)),
+        "feature-board-show-layout" => commands.queue(move |world: &mut World| crate::board_in_studio::set_view(world, id, cadrs_core::pcb::board3d::BoardView::Layout)),
+        "feature-board-show-3d" => commands.queue(move |world: &mut World| crate::board_in_studio::set_view(world, id, cadrs_core::pcb::board3d::BoardView::ThreeD)),
         // P3G.4: a Derived feature's reference.
         "feature-open-linked" => commands.queue(move |world: &mut World| {
             if let Some(site) = crate::derived_ui::site(world, id) {

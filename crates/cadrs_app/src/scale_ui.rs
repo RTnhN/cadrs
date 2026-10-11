@@ -105,7 +105,12 @@ fn sync_scale_notice(
     mut q_text: Query<&mut Text, With<ScaleNoticeText>>,
 ) {
     let want = doc.as_ref().and_then(|d| d.active_element()).and_then(|e| match e.kind {
-        ElementKind::PartStudio { .. } => notice(e.features().len(), listed_parts(&cache.parts)),
+        // A derived board's components (mesh parts, `docs/PCB_IN_PART_STUDIO.md`) cost little
+        // and aren't modelled: they don't count.
+        ElementKind::PartStudio { .. } => {
+            let components = cache.derived.values().map(|o| o.footprints.len()).sum::<usize>();
+            notice(e.features().len(), listed_parts(&cache.parts).saturating_sub(components))
+        }
         _ => None,
     });
     for mut n in &mut q_row {

@@ -112,6 +112,56 @@ pub enum DerivedPlacement {
     BaseConnector(Option<ConnectorRef>),
 }
 
+/// A PCB Studio board as a Derived feature's source (`docs/PCB_IN_PART_STUDIO.md`): which
+/// board, its layout as at the reference (the schematic is left out: the 3D model, the skins and
+/// the layout view need only the layout) and how it comes in ([`BoardOptions`]). The rebuild
+/// makes the board's solid and a mesh part per component ([`crate::pcb::board3d`]).
+#[derive(Clone, PartialEq, Serialize, Deserialize)]
+pub struct DerivedBoard {
+    pub board: crate::pcb::BoardId,
+    #[serde(default)]
+    pub board_name: String,
+    pub layout: cadrs_eda::board::Board,
+    /// [`crate::pcb::board3d::layout_hash`] of `layout`: the rebuild's cache key sees it instead
+    /// of the layout (kept with it by [`DerivedBoard::set_layout`]).
+    #[serde(default)]
+    pub hash: u64,
+    #[serde(default)]
+    pub options: crate::pcb::board3d::BoardOptions,
+}
+
+impl DerivedBoard {
+    pub fn new(board: crate::pcb::BoardId, name: &str, layout: cadrs_eda::board::Board) -> Self {
+        let mut d = DerivedBoard { board, board_name: name.to_string(), layout: Default::default(), hash: 0, options: Default::default() };
+        d.set_layout(layout);
+        d
+    }
+
+    /// Takes a new layout and its hash.
+    pub fn set_layout(&mut self, layout: cadrs_eda::board::Board) {
+        self.hash = crate::pcb::board3d::layout_hash(&layout);
+        self.layout = layout;
+    }
+}
+
+/// What the rebuild's cache key sees: the board, the layout's hash and the options that change
+/// the parts (not the 3D / layout view, which only changes what is drawn).
+impl std::fmt::Debug for DerivedBoard {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let o = &self.options;
+        f.debug_struct("DerivedBoard")
+            .field("board", &self.board)
+            .field("board_name", &self.board_name)
+            .field("hash", &self.hash)
+            .field("components", &o.components)
+            .field("exclude", &o.exclude)
+            .field("skins", &o.skins)
+            .field("seat", &o.seat)
+            .field("anchor", &o.anchor)
+            .finish()
+    }
+}
+
 /// A Derived feature (see the module docs). It also reads main's pre-merge format (see the
 /// module docs).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -156,6 +206,9 @@ pub struct DerivedFeature {
     /// features after it in a saved document still find the derived parts, faces and edges.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub legacy_names: bool,
+    /// A PCB Studio board instead of a Part Studio (the source is then the PCB Studio tab).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub board: Option<Box<DerivedBoard>>,
 }
 
 fn yes() -> bool {
@@ -193,6 +246,8 @@ struct DerivedRepr {
     include_properties: bool,
     #[serde(default)]
     legacy_names: bool,
+    #[serde(default)]
+    board: Option<Box<DerivedBoard>>,
     // Main's pre-merge fields (not flattened: RON can't read flattened structs).
     #[serde(default)]
     document: Option<DocumentId>,
@@ -228,6 +283,7 @@ impl From<DerivedRepr> for DerivedFeature {
             include_connectors: r.include_connectors,
             include_properties: r.include_properties,
             legacy_names: r.legacy_names,
+            board: r.board,
         };
         let is_legacy = r.document.is_some() || r.element.is_some() || !r.parts.is_empty() || r.include_mate_connectors.is_some();
         if d.source.is_none() && is_legacy {
@@ -256,6 +312,7 @@ impl Default for DerivedFeature {
             include_connectors: false,
             include_properties: true,
             legacy_names: false,
+            board: None,
         }
     }
 }
@@ -264,7 +321,7 @@ impl DerivedFeature {
     /// Why it can't be built, if it can't.
     pub fn problem(&self) -> Option<&'static str> {
         if self.source.is_none() {
-            return Some("Select a Part Studio to derive");
+            return Some("Select a Part Studio or a board to derive");
         }
         if self.selection.is_empty() {
             return Some("Select parts, sketches, planes or mate connectors to derive");
@@ -282,11 +339,35 @@ impl DerivedFeature {
 
     /// "Block source › Block (V1)", "Block (this document)".
     pub fn describe(&self) -> String {
+        let source = match &self.board {
+            Some(b) => format!("{} › {}", self.source_name, b.board_name),
+            None => self.source_name.clone(),
+        };
         match (self.document_name.is_empty(), self.version_name.is_empty()) {
-            (true, _) => self.source_name.clone(),
-            (false, true) => format!("{} › {}", self.document_name, self.source_name),
-            (false, false) => format!("{} › {} ({})", self.document_name, self.source_name, self.version_name),
+            (true, _) => source,
+            (false, true) => format!("{} › {}", self.document_name, source),
+            (false, false) => format!("{} › {} ({})", self.document_name, source, self.version_name),
         }
+    }
+
+    /// Takes the board's layout and names from the PCB Studio `el` (the source tab, or its
+    /// copy): the board [`DerivedBoard::board`] names, else the studio's shown one. `Err` when
+    /// the studio has no such board, or it isn't designed in cadrs.
+    pub fn fill_board_from(&mut self, el: &Element, document: &str, version: &str) -> Result<(), String> {
+        let studio = el.pcb().ok_or_else(|| format!("The tab {} is not a PCB Studio", el.name))?;
+        let want = self.board.as_ref().map(|b| b.board).or(studio.active).or(studio.boards.first().map(|b| b.id));
+        let b = want.and_then(|id| studio.board(id)).ok_or_else(|| format!("{} has no such board", el.name))?;
+        let design = b.design.as_ref().ok_or_else(|| format!("{} is not designed in cadrs (an IDF board has no layout to derive)", b.name()))?;
+        let options = self.board.as_ref().map(|x| x.options.clone()).unwrap_or_default();
+        let mut db = DerivedBoard::new(b.id, b.name(), design.board.clone());
+        db.options = options;
+        self.board = Some(Box::new(db));
+        self.studio = Vec::new();
+        self.props = Vec::new();
+        self.source_name = el.name.clone();
+        self.document_name = document.to_string();
+        self.version_name = version.to_string();
+        Ok(())
     }
 
     pub fn includes_part(&self, p: PartId) -> bool {
@@ -395,6 +476,23 @@ pub struct DerivedOutput {
     pub sketches: Vec<(FeatureId, String)>,
     pub planes: Vec<(FeatureId, String)>,
     pub connectors: Vec<(FeatureId, String)>,
+    /// A derived board's copies (`docs/PCB_IN_PART_STUDIO.md`): each copy's board part and
+    /// where its board frame is.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub boards: Vec<BoardCopy>,
+    /// A derived board's component parts and the footprints they show.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub footprints: Vec<(PartId, uuid::Uuid)>,
+}
+
+/// One copy of a derived board: its board part, and its **board frame** in the Part Studio (the
+/// layout's origin with its x and y axes, on the board's bottom face; the top face is the
+/// board's thickness along `u × v`).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct BoardCopy {
+    pub part: PartId,
+    pub frame: cadrs_sketch::PlaneFrame,
+    pub thickness: f64,
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -417,9 +515,16 @@ pub fn resolve(res: &mut Resolver, doc: &Document, log: Option<&HistoryLog>, mut
             return Err(LinkError::NoVersion);
         }
         let el = doc.elements.iter().find(|e| e.id == r.element).ok_or_else(|| LinkError::NotFound("The Part Studio".into()))?;
+        if matches!(el.kind, ElementKind::PcbStudio(_)) {
+            d.fill_board_from(el, "", "").map_err(LinkError::NotLinkable)?;
+            d.source = Some(r);
+            d.copy = None;
+            return Ok(Resolved { derived: d, links: Vec::new() });
+        }
         if !matches!(el.kind, ElementKind::PartStudio { .. }) {
             return Err(LinkError::NotLinkable(format!("The tab {}", el.name)));
         }
+        d.board = None;
         d.fill_from(el, "", "");
         d.source = Some(r);
         d.copy = None;
@@ -427,10 +532,17 @@ pub fn resolve(res: &mut Resolver, doc: &Document, log: Option<&HistoryLog>, mut
     }
     let snap = res.resolve(r, doc, log)?;
     let root = snap.root_link().ok_or_else(|| LinkError::NotFound("The Part Studio".into()))?;
+    let doc_name = if this { doc.name.clone() } else { root.document_name.clone() };
+    if matches!(root.element.kind, ElementKind::PcbStudio(_)) {
+        d.fill_board_from(&root.element, &doc_name, &root.version_name).map_err(LinkError::NotLinkable)?;
+        d.source = Some(r);
+        d.copy = Some(snap.root);
+        return Ok(Resolved { derived: d, links: snap.links });
+    }
     if !matches!(root.element.kind, ElementKind::PartStudio { .. }) {
         return Err(LinkError::NotLinkable(format!("The tab {}", root.element.name)));
     }
-    let doc_name = if this { doc.name.clone() } else { root.document_name.clone() };
+    d.board = None;
     d.fill_from(&root.element, &doc_name, &root.version_name);
     d.source = Some(r);
     d.copy = Some(snap.root);
@@ -462,7 +574,11 @@ pub fn check(doc: &Document, element: ElementId, feature: FeatureId, d: &Derived
             && let Some(or) = o.source
             && or.document_or(doc.id) == source_doc
             && or.element == r.element
+            && o.board.as_ref().map(|b| b.board) == d.board.as_ref().map(|b| b.board)
         {
+            if let Some(b) = &d.board {
+                return Err(LinkError::Refused(format!("{} is derived already in {} by {}: a board can be derived only once in a Part Studio (add locations for more copies)", b.board_name, host.name, f.name)));
+            }
             let what = if d.source_name.is_empty() { "This Part Studio".to_string() } else { d.source_name.clone() };
             return Err(LinkError::Refused(format!("{what} is derived already in {} by {}: a Part Studio can be derived only once in a Part Studio", host.name, f.name)));
         }
@@ -606,6 +722,7 @@ pub fn refresh(doc: &mut Document) {
     if !any_derived(doc) {
         return;
     }
+    refresh_boards(doc);
     // The importer's workspace references to other documents (see the module docs).
     if let Some(l) = global_loader() {
         fill_other_documents(doc, &*l);
@@ -618,7 +735,7 @@ pub fn refresh(doc: &mut Document) {
             for (j, f) in el.features().iter().enumerate() {
                 let FeatureKind::Derived(d) = &f.kind else { continue };
                 let Some(r) = d.source else { continue };
-                if r.at != RefAt::Workspace || r.document_or(this) != this || r.element == el.id {
+                if d.board.is_some() || r.at != RefAt::Workspace || r.document_or(this) != this || r.element == el.id {
                     continue;
                 }
                 let Some(src) = doc.elements.iter().find(|e| e.id == r.element && matches!(e.kind, ElementKind::PartStudio { .. })) else { continue };
@@ -643,6 +760,44 @@ pub fn refresh(doc: &mut Document) {
     }
     for el in &mut doc.elements {
         sync_props(el);
+    }
+}
+
+/// Brings every same-document workspace board reference up to date with its board's layout
+/// and names (`docs/PCB_IN_PART_STUDIO.md` decision 2: a layout edit anywhere is one
+/// `SetDesign` on the PCB Studio, and every Part Studio deriving the board follows).
+fn refresh_boards(doc: &mut Document) {
+    let this = doc.id;
+    /// (tab, feature, the new layout if it changed, the board's name, the studio's name).
+    type Update = (usize, usize, Option<cadrs_eda::board::Board>, String, String);
+    let mut updates: Vec<Update> = Vec::new();
+    for (i, el) in doc.elements.iter().enumerate() {
+        for (j, f) in el.features().iter().enumerate() {
+            let FeatureKind::Derived(d) = &f.kind else { continue };
+            let (Some(r), Some(db)) = (d.source, d.board.as_ref()) else { continue };
+            if r.at != RefAt::Workspace || r.document_or(this) != this {
+                continue;
+            }
+            let Some(src) = doc.elements.iter().find(|e| e.id == r.element) else { continue };
+            let Some(b) = src.pcb().and_then(|s| s.board(db.board)) else { continue };
+            let Some(design) = &b.design else { continue };
+            let layout = (design.board != db.layout).then(|| design.board.clone());
+            if layout.is_some() || b.name() != db.board_name || src.name != d.source_name {
+                updates.push((i, j, layout, b.name().to_string(), src.name.clone()));
+            }
+        }
+    }
+    for (i, j, layout, board_name, studio_name) in updates {
+        if let ElementKind::PartStudio { features, .. } = &mut doc.elements[i].kind
+            && let FeatureKind::Derived(d) = &mut features[j].kind
+            && let Some(db) = d.board.as_mut()
+        {
+            if let Some(l) = layout {
+                db.set_layout(l);
+            }
+            db.board_name = board_name;
+            d.source_name = studio_name;
+        }
     }
 }
 

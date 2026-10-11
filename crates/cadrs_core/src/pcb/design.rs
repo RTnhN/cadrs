@@ -23,7 +23,12 @@ fn mm2(p: Pt) -> [f64; 2] {
 /// The layout's outline loops ([`cadrs_eda::outline::loops`]) as IDF loops: the largest is
 /// the outline (label 0, counter-clockwise), the rest cut-outs (labels 1…, clockwise).
 pub fn outline_loops(design: &Design) -> Vec<Loop> {
-    let mut loops: Vec<Loop> = cadrs_eda::outline::loops(&design.board)
+    board_outline_loops(&design.board)
+}
+
+/// [`outline_loops`] of a layout.
+pub fn board_outline_loops(board: &cadrs_eda::board::Board) -> Vec<Loop> {
+    let mut loops: Vec<Loop> = cadrs_eda::outline::loops(board)
         .iter()
         .map(|edges| {
             let start = mm2(edges[0].a);

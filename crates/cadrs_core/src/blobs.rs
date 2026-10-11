@@ -98,7 +98,17 @@ fn used_in(features: &[crate::document::Feature], out: &mut Vec<(String, String)
         match &f.kind {
             FeatureKind::Import(x) if !out.iter().any(|(h, _)| *h == x.blob) => out.push((x.blob.clone(), x.extension())),
             FeatureKind::Image(x) if !out.iter().any(|(h, _)| *h == x.blob) => out.push((x.blob.clone(), x.extension())),
-            FeatureKind::Derived(x) => used_in(&x.studio, out),
+            FeatureKind::Derived(x) => {
+                used_in(&x.studio, out);
+                // A derived board's model files (its layout's footprints).
+                for m in x.board.iter().flat_map(|b| b.layout.footprints.iter()).flat_map(|f| &f.footprint.models) {
+                    if let Some(h) = &m.blob
+                        && !out.iter().any(|(x, _)| x == h)
+                    {
+                        out.push((h.clone(), crate::pcb::model::model_ext(m)));
+                    }
+                }
+            }
             _ => {}
         }
     }

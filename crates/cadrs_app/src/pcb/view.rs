@@ -67,14 +67,14 @@ pub struct PcbMeshCache {
 }
 
 impl PcbMeshCache {
-    /// The meshes of a model file (by its blob hash; `ext` its type), read once.
+    /// The meshes of a model file (by its blob hash; `ext` its type), read once (the process'
+    /// cache the rebuild shares, [`cadrs_core::pcb::model::cached_file_meshes`]).
     pub fn model(&mut self, hash: &str, ext: &str) -> Option<ModelMeshes> {
         if let Some(m) = self.models.get(hash) {
             return m.clone();
         }
-        let bytes = cadrs_core::blobs::get(hash)?;
-        let m = match cadrs_pcb::mesh::file_meshes(&bytes, ext) {
-            Ok(m) => Some(Arc::new(m)),
+        let m = match cadrs_core::pcb::model::cached_file_meshes(hash, ext) {
+            Ok(m) => Some(m),
             Err(e) => {
                 warn!("3D model {hash}.{ext}: {e}");
                 None
@@ -593,28 +593,21 @@ fn spawn_skins(world: &mut World, design: &cadrs_eda::Design, thickness: f64) {
 /// what the document's thumbnail shows of a native board ([`crate::thumbnail`]).
 pub fn skins(world: &mut World, design: &cadrs_eda::Design, thickness: f64) -> Vec<(&'static str, Handle<Mesh>, Handle<StandardMaterial>)> {
     use cadrs_eda::layer::Side;
-    use resvg::{tiny_skia, usvg};
     let mut out = vec![];
     let region = cadrs_eda::outline::board_region(&design.board);
     let tris = cadrs_eda::poly::triangulate(&region);
-    let Some(bounds) = region.iter().flatten().fold(None, |acc, p| Some(cadrs_eda::units::Bounds::union(acc, cadrs_eda::units::Bounds::of(*p)))) else { return out };
     if tris.is_empty() {
         return out;
     }
-    let (x0, y1) = (bounds.min.x as f64 / 1e6, bounds.max.y as f64 / 1e6);
-    let (w, h) = (bounds.size().w as f64 / 1e6, bounds.size().h as f64 / 1e6);
     for (side, z, up) in [(Side::Top, thickness + 0.02, true), (Side::Bottom, -0.02, false)] {
-        let mut d = cadrs_eda::render::board_surface(&design.board, side);
-        d.bounds = Some(bounds);
-        let Ok(tree) = usvg::Tree::from_str(&cadrs_eda::render::to_svg(&d), &usvg::Options::default()) else { continue };
-        let (pw, ph) = ((w as f32 * SKIN_PX_PER_MM).ceil() as u32, (h as f32 * SKIN_PX_PER_MM).ceil() as u32);
-        let Some(mut pix) = tiny_skia::Pixmap::new(pw.max(1), ph.max(1)) else { continue };
-        let k = pw as f32 / tree.size().width();
-        resvg::render(&tree, tiny_skia::Transform::from_scale(k, k), &mut pix.as_mut());
+        let Some(skin) = cadrs_eda::skin::board_skin(&design.board, side, SKIN_PX_PER_MM, 8192) else { continue };
+        let b = skin.bounds;
+        let (x0, y1) = (b.min.x as f64 / 1e6, b.max.y as f64 / 1e6);
+        let (w, h) = (b.size().w as f64 / 1e6, b.size().h as f64 / 1e6);
         let image = Image::new(
-            bevy::render::render_resource::Extent3d { width: pw.max(1), height: ph.max(1), depth_or_array_layers: 1 },
+            bevy::render::render_resource::Extent3d { width: skin.width, height: skin.height, depth_or_array_layers: 1 },
             bevy::render::render_resource::TextureDimension::D2,
-            pix.take(),
+            skin.rgba,
             bevy::render::render_resource::TextureFormat::Rgba8UnormSrgb,
             RenderAssetUsages::RENDER_WORLD,
         );
