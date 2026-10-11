@@ -45,6 +45,47 @@ pub struct OutlineLink {
     /// Why the outline couldn't follow the sketch the last time it tried, if it couldn't.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub problem: Option<String>,
+    /// The sketch's circles inside the outline are mounting holes (non-plated hole footprints,
+    /// `holes`), not cut-outs of the outline.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub circles_as_holes: bool,
+    /// The mounting-hole footprints the link wrote (in order, so a hole keeps its footprint).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub holes: Vec<Uuid>,
+}
+
+impl OutlineLink {
+    /// A link to `regions` of the sketch `sketch` in the Part Studio `element`, before anything
+    /// is written.
+    pub fn new(element: ElementId, sketch: FeatureId, regions: Vec<RegionRef>, circles_as_holes: bool) -> Self {
+        OutlineLink { element, sketch, regions, shapes: vec![], problem: None, circles_as_holes, holes: vec![] }
+    }
+}
+
+/// A board outline taken from a sketch: the drawings and the round holes in it (centre, radius).
+#[derive(Clone, Debug, PartialEq)]
+pub struct SketchOutline {
+    pub geoms: Vec<Geom>,
+    pub circles: Vec<(Pt, cadrs_eda::units::Nm)>,
+}
+
+/// [`outline_of`] with the holes that are whole circles apart.
+pub fn outline_parts(geometry: &cadrs_sketch::Sketch, regions: &[RegionRef]) -> Result<SketchOutline, String> {
+    if regions.is_empty() {
+        return Err("No sketch regions to make the board from".into());
+    }
+    let mut out = SketchOutline { geoms: vec![], circles: vec![] };
+    for r in regions {
+        let region = r.resolve(geometry).ok_or("A region of the sketch is gone")?;
+        out.geoms.extend(region.outer_pieces.iter().map(piece_geom));
+        for hole in &region.hole_pieces {
+            match hole.iter().map(piece_geom).collect::<Vec<_>>().as_slice() {
+                [Geom::Circle { center, radius }] => out.circles.push((*center, *radius)),
+                g => out.geoms.extend(g.iter().cloned()),
+            }
+        }
+    }
+    Ok(out)
 }
 
 fn pt(v: cadrs_sketch::Vec2) -> Pt {
@@ -75,18 +116,12 @@ fn piece_geom(p: &cadrs_sketch::region::Piece) -> Geom {
 /// The outline drawings of `regions` of the sketch `geometry`: each region's outer boundary
 /// and its holes. `Err` when a region no longer resolves.
 pub fn outline_of(geometry: &cadrs_sketch::Sketch, regions: &[RegionRef]) -> Result<Vec<Geom>, String> {
-    if regions.is_empty() {
-        return Err("No sketch regions to make the board from".into());
-    }
-    let mut out = vec![];
-    for r in regions {
-        let region = r.resolve(geometry).ok_or("A region of the sketch is gone")?;
-        out.extend(region.outer_pieces.iter().map(piece_geom));
-        for hole in &region.hole_pieces {
-            out.extend(hole.iter().map(piece_geom));
-        }
-    }
-    Ok(out)
+    Ok(outline_geoms(&outline_parts(geometry, regions)?))
+}
+
+/// An outline's drawings with its round holes as circles (cut-outs).
+fn outline_geoms(o: &SketchOutline) -> Vec<Geom> {
+    o.geoms.iter().cloned().chain(o.circles.iter().map(|(center, radius)| Geom::Circle { center: *center, radius: *radius })).collect()
 }
 
 /// The outline shapes for `geoms`, locked.
@@ -101,16 +136,52 @@ fn sketch_of(doc: &Document, element: ElementId, sketch: FeatureId) -> Result<&c
     f.sketch().map(|s| &s.geometry).ok_or_else(|| "The board's outline isn't a sketch".to_string())
 }
 
-/// Replaces the board's linked outline shapes with `geoms` (and its mechanical board).
-fn apply_outline(b: &mut super::StudioBoard, geoms: Vec<Geom>) {
+/// Replaces the board's linked outline shapes (and mounting holes) with `o`'s (and its
+/// mechanical board).
+fn apply_outline(b: &mut super::StudioBoard, o: SketchOutline) {
     let Some(link) = b.outline_link.as_mut() else { return };
     let Some(design) = b.design.as_mut() else { return };
     let old = std::mem::take(&mut link.shapes);
     design.board.shapes.retain(|s| !old.contains(&s.id));
+    let mut geoms = o.geoms;
+    if link.circles_as_holes {
+        // Each circle a mounting hole footprint, the i-th keeping the i-th's id (and part).
+        let old_holes = std::mem::take(&mut link.holes);
+        design.board.footprints.retain(|f| !old_holes.contains(&f.id));
+        for (i, (center, radius)) in o.circles.iter().enumerate() {
+            let id = old_holes.get(i).copied().unwrap_or_else(Uuid::new_v4);
+            design.board.footprints.push(mounting_hole(id, i + 1, *center, *radius));
+            link.holes.push(id);
+        }
+    } else {
+        geoms.extend(o.circles.into_iter().map(|(center, radius)| Geom::Circle { center, radius }));
+    }
     let new = shapes_of(geoms);
     link.shapes = new.iter().map(|s| s.id).collect();
     design.board.shapes.extend(new);
     b.design_changed();
+}
+
+/// A mounting hole: a non-plated hole footprint `H<n>` of the circle's size at its centre.
+fn mounting_hole(id: Uuid, n: usize, center: Pt, radius: cadrs_eda::units::Nm) -> cadrs_eda::board::PlacedFootprint {
+    use cadrs_eda::footprint::{FootprintPlacement, MountKind, PadKind, PadShape, new_footprint, new_pad};
+    use cadrs_eda::units::{Size, to_mm};
+    let d = 2 * radius;
+    let mut f = new_footprint(&format!("MountingHole:MountingHole_{:.1}mm", to_mm(d)), "Mounting hole (from the outline's sketch)", MountKind::ThroughHole, Pt::new(0, radius + mm(1.0)), Pt::new(0, -radius - mm(1.0)), Pt::ZERO);
+    if let Some(r) = f.field_mut(cadrs_eda::symbol::fields::REFERENCE) {
+        r.text.text.text = format!("H{n}");
+    }
+    let mut pad = new_pad("", PadShape::Circle, Pt::ZERO, Size::new(d, d), Some(d));
+    pad.kind = PadKind::NonPlated;
+    pad.layers = cadrs_eda::layer::LayerSet::of(&[Layer::TopMask, Layer::BottomMask]);
+    f.pads.push(pad);
+    cadrs_eda::board::PlacedFootprint { id, footprint: f, placement: FootprintPlacement { at: center, ..Default::default() }, locked: true, symbol: None }
+}
+
+/// The linked mounting holes (centre, radius), in order.
+fn linked_holes(b: &super::StudioBoard) -> Vec<(Pt, cadrs_eda::units::Nm)> {
+    let (Some(link), Some(d)) = (&b.outline_link, b.design()) else { return vec![] };
+    link.holes.iter().filter_map(|id| d.board.footprints.iter().find(|f| f.id == *id)).filter_map(|f| f.footprint.pads.first().map(|p| (f.placement.at, p.size.w / 2))).collect()
 }
 
 /// The linked shapes' drawings, in order.
@@ -122,15 +193,22 @@ fn linked_geoms(b: &super::StudioBoard) -> Vec<Geom> {
 /// Brings every linked board outline up to date with its sketch (see the module docs).
 pub fn refresh(doc: &mut Document) {
     // (tab, board, the new outline or why not)
-    let mut updates: Vec<(usize, BoardId, Result<Vec<Geom>, String>)> = vec![];
+    let mut updates: Vec<(usize, BoardId, Result<SketchOutline, String>)> = vec![];
     for (i, el) in doc.elements.iter().enumerate() {
         let Some(s) = el.pcb() else { continue };
         for b in s.boards.iter().filter(|b| b.design().is_some()) {
             let Some(link) = &b.outline_link else { continue };
             // (Its sketch may have been moved below the board's Derived feature since.)
-            let want = check_order(doc, el.id, b.id, link.element, link.sketch).map_err(|e| e.to_string()).and_then(|()| sketch_of(doc, link.element, link.sketch)).and_then(|g| outline_of(g, &link.regions));
+            let want = check_order(doc, el.id, b.id, link.element, link.sketch).map_err(|e| e.to_string()).and_then(|()| sketch_of(doc, link.element, link.sketch)).and_then(|g| outline_parts(g, &link.regions));
+            let now = |o: &SketchOutline| {
+                if link.circles_as_holes {
+                    o.geoms == linked_geoms(b) && o.circles == linked_holes(b)
+                } else {
+                    outline_geoms(o) == linked_geoms(b)
+                }
+            };
             match &want {
-                Ok(g) if *g == linked_geoms(b) && link.problem.is_none() => {}
+                Ok(o) if now(o) && link.problem.is_none() => {}
                 Err(e) if link.problem.as_deref() == Some(e.as_str()) => {}
                 _ => updates.push((i, b.id, want)),
             }
@@ -143,9 +221,7 @@ pub fn refresh(doc: &mut Document) {
                 if let Some(l) = b.outline_link.as_mut() {
                     l.problem = None;
                 }
-                if g != linked_geoms(b) {
-                    apply_outline(b, g);
-                }
+                apply_outline(b, g);
             }
             Err(e) => {
                 if let Some(l) = b.outline_link.as_mut() {
@@ -197,14 +273,14 @@ impl Command for SetOutlineLink {
         match &self.link {
             Some((element, sketch, regions)) => {
                 check_order(doc, self.pcb, self.board, *element, *sketch)?;
-                let geoms = sketch_of(doc, *element, *sketch).and_then(|g| outline_of(g, regions)).map_err(CommandError::Invalid)?;
+                let geoms = sketch_of(doc, *element, *sketch).and_then(|g| outline_parts(g, regions)).map_err(CommandError::Invalid)?;
                 let s = studio_mut(doc, self.pcb)?;
                 let b = s.board_mut(self.board).ok_or_else(|| CommandError::Invalid("no such board".into()))?;
                 let design = b.design.as_mut().ok_or_else(|| CommandError::Invalid("The board isn't designed in cadrs".into()))?;
                 let before = super::board3d::outline_center(&design.board);
                 // The sketch's outline replaces the drawn one.
                 design.board.shapes.retain(|s| s.layer != Layer::Outline);
-                b.outline_link = Some(OutlineLink { element: *element, sketch: *sketch, regions: regions.clone(), shapes: vec![], problem: None });
+                b.outline_link = Some(OutlineLink::new(*element, *sketch, regions.clone(), false));
                 apply_outline(b, geoms);
                 if self.keep_parts
                     && let Some(design) = b.design.as_mut()
@@ -246,6 +322,9 @@ pub struct CreateBoardFromSketch {
     /// Its thickness (mm) and which of its faces lies on the sketch.
     pub thickness: f64,
     pub seat: super::board3d::BoardSeat,
+    /// The sketch's circles inside the outline as mounting holes (non-plated hole footprints),
+    /// else as cut-outs.
+    pub circles_as_holes: bool,
     /// The Derived feature to add.
     pub feature: FeatureId,
 }
@@ -258,7 +337,7 @@ impl Command for CreateBoardFromSketch {
         Scope::Whole
     }
     fn apply(&self, doc: &mut Document) -> Result<(), CommandError> {
-        let geoms = sketch_of(doc, self.element, self.sketch).and_then(|g| outline_of(g, &self.regions)).map_err(CommandError::Invalid)?;
+        let outline = sketch_of(doc, self.element, self.sketch).and_then(|g| outline_parts(g, &self.regions)).map_err(CommandError::Invalid)?;
         let pcb = match self.pcb {
             Some(p) => p,
             None => {
@@ -278,13 +357,12 @@ impl Command for CreateBoardFromSketch {
         let mut design = cadrs_eda::Design::new();
         design.board.thickness = cadrs_eda::units::mm(self.thickness);
         design.board.stackup = cadrs_eda::board::Stackup::standard(design.board.copper_layers, design.board.thickness);
-        design.board.shapes.extend(shapes_of(geoms));
-        let shapes: Vec<Uuid> = design.board.shapes.iter().map(|s| s.id).collect();
         super::AddBoard { element: pcb, name: Some(self.name.clone()), design: Box::new(design), imported_from: None }.apply(doc)?;
         let s = studio_mut(doc, pcb)?;
         let board = s.active.ok_or_else(|| CommandError::Invalid("no board".into()))?;
         let b = s.board_mut(board).ok_or_else(|| CommandError::Invalid("no board".into()))?;
-        b.outline_link = Some(OutlineLink { element: self.element, sketch: self.sketch, regions: self.regions.clone(), shapes, problem: None });
+        b.outline_link = Some(OutlineLink::new(self.element, self.sketch, self.regions.clone(), self.circles_as_holes));
+        apply_outline(b, outline);
         // The Derived feature: the board on its sketch's plane, its origin on the sketch's.
         let el = doc.element(pcb).cloned().ok_or(CommandError::ElementNotFound(pcb))?;
         let mut d = crate::derived::DerivedFeature { board: Some(Box::new(crate::derived::DerivedBoard::new(board, "", Default::default()))), ..Default::default() };

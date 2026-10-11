@@ -349,23 +349,31 @@ fn board_bodies(world: &mut World, el: ElementId, board_id: BoardId, board: &Pcb
     let t = board.thickness();
     type Shown = (Representation, Option<(Arc<Solid>, [u8; 4], PartTransform)>);
     let mut reps: HashMap<String, Shown> = HashMap::new();
-    // A native board's footprint models (shown in place of the box), by footprint: the studio
-    // board's placements are the design's footprints in order (`cadrs_core::pcb::design`), so
-    // the k-th component is the k-th footprint (references can repeat, or be "R?"). Footprints
-    // with no model show nothing, as in KiCad.
-    let mut models: HashMap<usize, cadrs_eda::footprint::Model3d> = HashMap::new();
+    // A native board's footprint models (shown in place of the box), by footprint id. Each
+    // component of the studio board is matched to its footprint by reference and place (the
+    // studio board is made from the design, `cadrs_core::pcb::design`; references can repeat,
+    // or be "R?", places not). Footprints with no model show nothing, as in KiCad.
+    let mut models: HashMap<uuid::Uuid, cadrs_eda::footprint::Model3d> = HashMap::new();
     // Where each footprint sits (the Part Studio's placement, `cadrs_core::pcb::model`).
-    let mut places: HashMap<usize, cadrs_eda::footprint::FootprintPlacement> = HashMap::new();
-    let mut bare: std::collections::HashSet<usize> = Default::default();
-    for (k, f) in shown_design(world, el, board_id).iter().flat_map(|d| d.board.footprints.iter()).enumerate() {
-        places.insert(k, f.placement);
+    let mut places: HashMap<uuid::Uuid, cadrs_eda::footprint::FootprintPlacement> = HashMap::new();
+    let mut bare: std::collections::HashSet<uuid::Uuid> = Default::default();
+    let design = shown_design(world, el, board_id);
+    let footprints: Vec<&cadrs_eda::board::PlacedFootprint> = design.iter().flat_map(|d| d.board.footprints.iter()).collect();
+    for f in &footprints {
+        places.insert(f.id, f.placement);
         if f.footprint.models.iter().all(|m| !m.visible) {
-            bare.insert(k);
+            bare.insert(f.id);
         } else if let Some(m) = f.footprint.models.iter().find(|m| m.visible && (m.body.is_some() || m.blob.is_some())) {
-            models.insert(k, m.clone());
+            models.insert(f.id, m.clone());
         }
     }
-    let index: HashMap<cadrs_core::pcb::board::ItemId, usize> = board.components().enumerate().map(|(k, (i, _))| (i, k)).collect();
+    let index: HashMap<cadrs_core::pcb::board::ItemId, uuid::Uuid> = board
+        .components()
+        .filter_map(|(i, p)| {
+            let mm = cadrs_eda::units::to_mm;
+            footprints.iter().find(|f| f.reference() == p.refdes && (mm(f.placement.at.x) - p.x).abs() < 1e-6 && (mm(f.placement.at.y) - p.y).abs() < 1e-6).map(|f| (i, f.id))
+        })
+        .collect();
     let mut out = Vec::with_capacity(mesh.bodies.len());
     for b in &mesh.bodies {
         let placement = b.item.filter(|_| b.class.is_component()).and_then(|i| board.component(i));
@@ -373,7 +381,7 @@ fn board_bodies(world: &mut World, el: ElementId, board_id: BoardId, board: &Pcb
             out.push(b.clone());
             continue;
         };
-        let k = b.item.and_then(|i| index.get(&i).copied()).unwrap_or(usize::MAX);
+        let k = b.item.and_then(|i| index.get(&i).copied()).unwrap_or_default();
         if !reps.contains_key(&p.package) {
             let rep = representation(world, el, &p.package);
             let custom = custom_part(world, &rep);

@@ -565,6 +565,8 @@ pub fn transform_solid(s: &Solid, pose: &Pose) -> Solid {
     for a in &mut out.face_aliases {
         a.plane = a.plane.map(|fr| pose.frame(&fr));
     }
+    // Its pictures (an Image feature's, a derived board's skins) with it.
+    out.images = s.images.iter().map(|i| i.mapped(|q| pose.apply(q))).collect();
     out
 }
 

@@ -243,10 +243,11 @@ pub struct PcbStudio {
     part_features: PartFeatures,
 }
 
-/// The cache of [`PcbStudio::part_features`]: not part of what the studio is (equal, not
-/// written, a copy keeps it since it is made from the boards the copy has too).
+/// The cache of [`PcbStudio::part_features`] and [`PcbStudio::board_parts`]: not part of what
+/// the studio is (equal, not written, a copy keeps it since it is made from the boards the copy
+/// has too).
 #[derive(Clone, Default)]
-struct PartFeatures(std::sync::OnceLock<Vec<crate::document::Feature>>);
+struct PartFeatures(std::sync::OnceLock<Vec<crate::document::Feature>>, std::sync::Arc<std::sync::Mutex<std::collections::HashMap<BoardId, Vec<crate::ids::PartId>>>>);
 
 impl PartialEq for PartFeatures {
     fn eq(&self, _: &Self) -> bool {
@@ -302,6 +303,18 @@ impl PcbStudio {
     /// rebuild (the ids follow from the footprints'). An assembly's instance of the board shows
     /// these, so a footprint added or removed later comes and goes with it.
     pub fn board_parts(&self, board: BoardId) -> Vec<crate::ids::PartId> {
+        // Asked for often (every listing of an assembly's occurrences): made once per change.
+        if let Some(v) = self.part_features.1.lock().ok().and_then(|m| m.get(&board).cloned()) {
+            return v;
+        }
+        let v = self.make_board_parts(board);
+        if let Ok(mut m) = self.part_features.1.lock() {
+            m.insert(board, v.clone());
+        }
+        v
+    }
+
+    fn make_board_parts(&self, board: BoardId) -> Vec<crate::ids::PartId> {
         let Some(b) = self.board(board) else { return vec![] };
         let f = board_feature(board);
         let (layout, _) = b.derived_layout();

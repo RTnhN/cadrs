@@ -159,3 +159,131 @@ fn the_export_dialog_path_writes_a_board_and_its_components() {
         }
     }
 }
+
+/// An assembly with the Enclosure's plug and the board, the board's layout origin at
+/// `offset` (the board's own origin is its layout's).
+fn assembly_with_board(offset: [f64; 3]) -> (Document, History, ElementId, InstanceId, InstanceId) {
+    let (mut doc, mut h, board) = derived();
+    let mut asm = Element::assembly("Assembly 1");
+    let asm_id = ElementId::new();
+    asm.id = asm_id;
+    doc.elements.push(asm);
+    let plug = cadrs_core::PartId::new(pe::PLUG, 0);
+    let (pi, bi) = (InstanceId::new(), InstanceId::new());
+    run(&mut doc, &mut h, &InsertInstance { element: asm_id, instance: Instance::new(pi, cadrs_core::assembly::InstanceSource::Part { element: pe::STUDIO, part: plug }, Pose::IDENTITY) });
+    let parts = doc.element(pe::PCB).unwrap().pcb().unwrap().board_parts(board);
+    let pose = Pose { translation: offset, ..Pose::IDENTITY };
+    run(&mut doc, &mut h, &InsertInstance { element: asm_id, instance: Instance::board(bi, pe::PCB, board, parts, pose) });
+    (doc, h, asm_id, pi, bi)
+}
+
+#[test]
+fn interference_finds_a_board_component_in_a_part() {
+    use cadrs_core::assembly::interference;
+    // The outline's centre (15.5, 19.5) over the plug: PS1, hanging 15 under the board, runs
+    // into the plug (z −12…0).
+    let (doc, _, asm_id, pi, bi) = assembly_with_board([-15.5, -19.5, 0.0]);
+    let items = interference::items(&doc, doc.element(asm_id).unwrap().assembly_model().unwrap());
+    let clashes = interference::check_now(items.clone(), vec![]).expect("checks");
+    let ps1 = clashes.iter().find(|c| (c.a.feature.0 == pi.0 || c.b.feature.0 == pi.0) && c.volume > 1.0);
+    assert!(ps1.is_some(), "{clashes:?}");
+    // Moved 40 mm aside, nothing.
+    let (doc, _, asm_id, ..) = assembly_with_board([40.0, -19.5, 0.0]);
+    let items = interference::items(&doc, doc.element(asm_id).unwrap().assembly_model().unwrap());
+    assert!(interference::check_now(items, vec![]).unwrap().is_empty());
+    let _ = bi;
+}
+
+#[test]
+fn an_assembly_export_places_the_board_instance() {
+    use cadrs_core::rebuild::exchange::{ExportItem, ExportRequest, ModelFormat};
+    let (doc, _, asm_id, _, bi) = assembly_with_board([100.0, 0.0, 50.0]);
+    let asm = doc.element(asm_id).unwrap().assembly_model().unwrap();
+    let pcb = std::sync::Arc::new(doc.element(pe::PCB).unwrap().active_part_features());
+    let items: Vec<ExportItem> = cadrs_core::assembly::structure::occurrences(&doc, asm)
+        .into_iter()
+        .filter(|o| o.top == bi)
+        .map(|o| ExportItem { features: pcb.clone(), part: o.part, name: format!("{:?}", o.part), pose: Some(o.pose), source: (o.element, o.part), source_name: String::new() })
+        .collect();
+    let files = cadrs_core::rebuild::exchange::export_files(ExportRequest::new(ModelFormat::Stl { binary: false }, "Board", items)).wait().expect("ends").expect("exports");
+    // Every vertex moved by the instance's pose: x around 100 + the layout's 0…31.
+    let text = String::from_utf8_lossy(&files[0].bytes);
+    let xs: Vec<f64> = text.lines().filter_map(|l| l.trim().strip_prefix("vertex ")).filter_map(|v| v.split_whitespace().next()?.parse().ok()).collect();
+    assert!(!xs.is_empty());
+    let (lo, hi) = xs.iter().fold((f64::MAX, f64::MIN), |(a, b), x| (a.min(*x), b.max(*x)));
+    assert!(lo > 90.0 && hi < 140.0, "{lo} … {hi}");
+}
+
+#[test]
+fn a_board_in_a_derived_part_studio_exports_as_faceted_solids() {
+    use cadrs_core::rebuild::exchange::{ExportItem, ExportRequest, ModelFormat};
+    let (mut doc, mut h, _) = derived();
+    // A second Part Studio deriving the Enclosure (its board and components with it).
+    let mut ps = Element::part_studio("Outer");
+    let outer = ElementId::new();
+    ps.id = outer;
+    doc.elements.push(ps);
+    let mut res = Resolver::new(Store::new(std::env::temp_dir().join("cadrs-board-ops-unused")));
+    let r = SourceRef { document: None, at: RefAt::Workspace, element: pe::STUDIO, pinned: false };
+    let got = cadrs_core::derived::resolve(&mut res, &doc, None, DerivedFeature::default(), r).unwrap();
+    let f = FeatureId::new();
+    run(&mut doc, &mut h, &AddDerived { element: outer, feature: f, derived: got.derived, links: got.links });
+    let features = std::sync::Arc::new(doc.element(outer).unwrap().active_features());
+    let b = cadrs_core::rebuild::build(&features);
+    let j4 = b.parts.iter().find(|p| p.name.starts_with("J4 ")).expect("J4 comes along");
+    let items = vec![ExportItem { features: features.clone(), part: j4.id, name: "J4".into(), pose: None, source: (outer, j4.id), source_name: "J4".into() }];
+    let files = cadrs_core::rebuild::exchange::export_files(ExportRequest::new(ModelFormat::Step, "J4", items)).wait().expect("ends").expect("a faceted solid of its mesh");
+    assert!(String::from_utf8_lossy(&files[0].bytes).contains("MANIFOLD_SOLID_BREP"));
+}
+
+#[test]
+fn a_mate_to_a_board_component_holds_when_the_layout_moves_it() {
+    use cadrs_core::assembly::connector::{EntityRef, ImplicitPoint, MateConnector, implicit_points};
+    use cadrs_core::assembly::mate::{Mate, MateFeature, MateId, MateKind, MateType};
+    let (mut doc, mut h, board) = derived();
+    let mut asm = Element::assembly("Assembly 1");
+    let asm_id = ElementId::new();
+    asm.id = asm_id;
+    doc.elements.push(asm);
+    // The Live pin, fixed; the board somewhere.
+    let studio = cadrs_core::rebuild::build(doc.element(pe::STUDIO).unwrap().features());
+    let props = doc.element(pe::STUDIO).unwrap().part_props().to_vec();
+    let live = studio.parts.iter().find(|p| cadrs_core::parts::display_name(p, &props) == "Live pin").unwrap().id;
+    let (pi, bi) = (InstanceId::new(), InstanceId::new());
+    let mut pin = Instance::new(pi, cadrs_core::assembly::InstanceSource::Part { element: pe::STUDIO, part: live }, Pose::IDENTITY);
+    pin.fixed = true;
+    run(&mut doc, &mut h, &InsertInstance { element: asm_id, instance: pin });
+    let parts = doc.element(pe::PCB).unwrap().pcb().unwrap().board_parts(board);
+    run(&mut doc, &mut h, &InsertInstance { element: asm_id, instance: Instance::board(bi, pe::PCB, board, parts, Pose { translation: [40.0, 0.0, 30.0], ..Pose::IDENTITY }) });
+    // J4's occurrence and its wire's end face (flat, facing up); the pin's top face.
+    let solids = cadrs_core::assembly::document_occurrence_solids(&doc, asm_id);
+    let pcb_build = cadrs_core::rebuild::build(doc.element(pe::PCB).unwrap().part_features());
+    let occ = occurrences(&doc, doc.element(asm_id).unwrap().assembly_model().unwrap());
+    let j4 = occ.iter().find(|o| o.top == bi && pcb_build.part(o.part).is_some_and(|p| p.name.starts_with("J4 "))).expect("J4's occurrence");
+    let top_face = |s: &cadrs_core::Solid| s.faces.iter().filter(|f| f.plane.is_some_and(|p| p.normal()[2] > 0.99)).max_by(|a, b| a.center.unwrap()[2].total_cmp(&b.center.unwrap()[2])).unwrap().name;
+    let centroid = |s: &cadrs_core::Solid, face| implicit_points(s, &EntityRef::Face(face)).into_iter().find(|p| matches!(p.point, ImplicitPoint::FaceCentroid(_))).unwrap();
+    let j4_solid = &solids[&j4.id];
+    let a = centroid(j4_solid, top_face(j4_solid));
+    let b = centroid(&solids[&pi], top_face(&solids[&pi]));
+    // J4's wire end on the pin's top: Fastened (the pin's face is flush with the board's top,
+    // J4's wire end 4 above it, so the board ends 4 lower; what counts is that it follows).
+    let m = Mate::new(MateType::Fastened, MateConnector::implicit(j4.id, &a), MateConnector::implicit(pi, &b));
+    run(&mut doc, &mut h, &cadrs_core::assembly::commands::AddMateFeature { element: asm_id, feature: MateFeature::new(MateId::from_u128(0x77), "J4 on the pin", MateKind::Mate(m)), poses: vec![] });
+    assert!(cadrs_core::assembly::resolve_after_update(&mut doc, asm_id).is_empty(), "the mate resolves");
+    let j4_xy = |doc: &Document| {
+        let solids = cadrs_core::assembly::document_occurrence_solids(doc, asm_id);
+        let occ = occurrences(doc, doc.element(asm_id).unwrap().assembly_model().unwrap());
+        let o = occ.iter().find(|o| o.top == bi && o.part == j4.part).unwrap();
+        let (lo, hi) = solids[&o.id].bounds().unwrap();
+        let c = o.pose.apply([(lo[0] + hi[0]) / 2.0, (lo[1] + hi[1]) / 2.0, hi[2]]);
+        [c[0], c[1]]
+    };
+    let at = j4_xy(&doc);
+    assert!(at[0].abs() < 1e-3 && (at[1] - 8.0).abs() < 1e-3, "J4 over the Live pin: {at:?}");
+    // J4 moved 3 mm on the layout: the mate still holds (its face is found by name), the board
+    // moves so J4 stays on the pin.
+    store(&mut doc, &mut h, board, |d| ops::place_footprint(d, "J4", Some([17.0, 3.5]), None, None));
+    assert!(cadrs_core::assembly::resolve_after_update(&mut doc, asm_id).is_empty(), "the mate still resolves");
+    let at = j4_xy(&doc);
+    assert!(at[0].abs() < 1e-3 && (at[1] - 8.0).abs() < 1e-3, "still over the Live pin: {at:?}");
+}

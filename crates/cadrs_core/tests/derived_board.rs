@@ -496,7 +496,7 @@ fn outline_regions(doc: &Document) -> Vec<cadrs_core::document::RegionRef> {
 
 fn create_from_sketch(doc: &mut Document, h: &mut History) {
     let regions = outline_regions(doc);
-    run(doc, h, &cadrs_core::pcb::outline_link::CreateBoardFromSketch { element: STUDIO, sketch: OUTLINE_SKETCH, regions, pcb: None, new_pcb: NEW_PCB, name: "Main board".into(), thickness: 1.6, seat: cadrs_core::pcb::board3d::BoardSeat::Bottom, feature: FROM_SKETCH });
+    run(doc, h, &cadrs_core::pcb::outline_link::CreateBoardFromSketch { element: STUDIO, sketch: OUTLINE_SKETCH, regions, pcb: None, new_pcb: NEW_PCB, name: "Main board".into(), thickness: 1.6, seat: cadrs_core::pcb::board3d::BoardSeat::Bottom, circles_as_holes: false, feature: FROM_SKETCH });
 }
 
 fn board_area(doc: &Document) -> f64 {
@@ -689,7 +689,7 @@ fn a_rounded_board_on_front_lies_on_its_sketch_with_arcs() {
     }
     let g = doc.element(STUDIO).unwrap().feature(OUTLINE_SKETCH).unwrap().sketch().unwrap().geometry.clone();
     let regions = cadrs_core::samples::region_refs(OUTLINE_SKETCH, &g, &[Vec2::new(15.0, 10.0)]);
-    run(&mut doc, &mut h, &cadrs_core::pcb::outline_link::CreateBoardFromSketch { element: STUDIO, sketch: OUTLINE_SKETCH, regions, pcb: None, new_pcb: NEW_PCB, name: "Rounded".into(), thickness: 1.0, seat: cadrs_core::pcb::board3d::BoardSeat::Top, feature: FROM_SKETCH });
+    run(&mut doc, &mut h, &cadrs_core::pcb::outline_link::CreateBoardFromSketch { element: STUDIO, sketch: OUTLINE_SKETCH, regions, pcb: None, new_pcb: NEW_PCB, name: "Rounded".into(), thickness: 1.0, seat: cadrs_core::pcb::board3d::BoardSeat::Top, circles_as_holes: false, feature: FROM_SKETCH });
     // The outline has the arcs (as arcs, not just their chords): 600 − (4 − π) 9.
     let want = 30.0 * 20.0 - (4.0 - std::f64::consts::PI) * 9.0;
     // (The region's arcs are polygons to 1 µm: a little under.)
@@ -843,4 +843,33 @@ fn a_drawing_view_shows_the_board_and_its_components_or_its_layout() {
     run(&mut doc, &mut h, &SetDerived { element: STUDIO, feature: DERIVED, derived: d, links: vec![], label: "Layout".into() });
     let g = views::project(&doc.element(STUDIO).unwrap().active_features(), request()).unwrap();
     assert_eq!(g.parts.len(), 1);
+}
+
+#[test]
+fn circles_can_be_mounting_holes_that_follow_the_sketch() {
+    use cadrs_core::commands::EditSketch;
+    use cadrs_sketch::{SketchOp, Vec2};
+    let (mut doc, mut h) = sketched();
+    let regions = outline_regions(&doc);
+    run(&mut doc, &mut h, &cadrs_core::pcb::outline_link::CreateBoardFromSketch { element: STUDIO, sketch: OUTLINE_SKETCH, regions, pcb: None, new_pcb: NEW_PCB, name: "Holes".into(), thickness: 1.6, seat: cadrs_core::pcb::board3d::BoardSeat::Bottom, circles_as_holes: true, feature: FROM_SKETCH });
+    let hole = |doc: &Document| {
+        let d = doc.element(NEW_PCB).unwrap().pcb().unwrap().boards[0].design().unwrap().clone();
+        let f = d.board.footprints.iter().find(|f| f.reference() == "H1").expect("a mounting hole H1").clone();
+        (f.id, f.placement.at, f.footprint.pads[0].clone(), d.board.shapes.iter().filter(|s| matches!(s.shape.geom, cadrs_eda::graphics::Geom::Circle { .. })).count())
+    };
+    // The ⌀6 circle at (5, 5): a ⌀6 non-plated hole there, no cut-out circle in the outline.
+    let (id, at, pad, cut) = hole(&doc);
+    assert_eq!(at, cadrs_eda::units::Pt::mm(5.0, 5.0));
+    assert_eq!((pad.kind, pad.drill.map(|d| d.size.w)), (cadrs_eda::footprint::PadKind::NonPlated, Some(mm(6.0))));
+    assert_eq!(cut, 0);
+    // The board still has the hole through it (the pad's drill) and its full outline area.
+    let b = cadrs_core::rebuild::build(doc.element(STUDIO).unwrap().features());
+    let v = b.parts.iter().find(|p| p.feature == FROM_SKETCH).unwrap().mass.unwrap().volume;
+    assert!((v - (40.0 * 30.0 - std::f64::consts::PI * 9.0) * 1.6).abs() < 0.5, "{v}");
+    // The circle moved in the sketch: the hole follows, keeping its footprint (and part).
+    let g = doc.element(STUDIO).unwrap().feature(OUTLINE_SKETCH).unwrap().sketch().unwrap().geometry.clone();
+    let c = g.point_at(Vec2::new(5.0, 5.0), 1e-6).unwrap();
+    run(&mut doc, &mut h, &EditSketch { element: STUDIO, feature: OUTLINE_SKETCH, op: SketchOp::MovePoints { moves: vec![(c, Vec2::new(-5.0, 10.0))] } });
+    let (id2, at2, ..) = hole(&doc);
+    assert_eq!((id2, at2), (id, cadrs_eda::units::Pt::mm(-5.0, 10.0)));
 }

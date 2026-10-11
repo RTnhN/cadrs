@@ -716,8 +716,10 @@ pub(crate) fn navigate3d(
                     let n = host.frame.normal();
                     let up = dir.dot(Vec3::new(n[0] as f32, n[1] as f32, n[2] as f32)) < 0.0;
                     world.resource_mut::<crate::eda::layout_tools::LayoutState>().facing = Some(if up { cadrs_eda::layer::Side::Top } else { cadrs_eda::layer::Side::Bottom });
-                    // A component's model under the pointer: press on its footprint.
-                    let at = component_under(world, &host, origin, dir).unwrap_or(at);
+                    // A component's model under the pointer: press on its footprint (to pick or move
+                    // it; a drawing tool's points stay where they are on the board).
+                    let selecting = matches!(world.resource::<crate::eda::layout_tools::LayoutState>().tool, crate::eda::layout_tools::Tool::Select);
+                    let at = if selecting { component_under(world, &host, origin, dir).unwrap_or(at) } else { at };
                     world.write_message(crate::eda::EdaClick::Press { at, shift, ctrl });
                     if double {
                         world.write_message(crate::eda::EdaClick::Double { at });
@@ -1044,7 +1046,11 @@ pub fn script(world: &mut World, arg: &str) {
             let text = if a == "count" {
                 board.map_or_else(String::new, |b| {
                     let l = &b.layout;
-                    format!("tracks {}, vias {}, zones {} (filled {})", l.tracks.len(), l.vias.len(), l.zones.len(), l.zones.iter().filter(|z| !z.filled.is_empty()).count())
+                    let area: f64 = l.zones.iter().flat_map(|z| z.filled.iter()).flat_map(|(_, ps)| ps.iter()).map(|p| {
+                        let a = |r: &Vec<cadrs_eda::units::Pt>| cadrs_eda::poly::ring_area(r).abs() / 1e12;
+                        a(&p.outer) - p.holes.iter().map(a).sum::<f64>()
+                    }).sum();
+                    format!("tracks {}, vias {}, zones {} (filled {}, {area:.0} mm²)", l.tracks.len(), l.vias.len(), l.zones.len(), l.zones.iter().filter(|z| !z.filled.is_empty()).count())
                 })
             } else if a == "size" {
                 let cache = world.resource::<PartCache>();

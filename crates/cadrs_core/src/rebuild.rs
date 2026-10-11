@@ -962,7 +962,9 @@ impl Rebuilder {
     #[cfg(feature = "occt")]
     fn model_bodies_cached(&mut self, m: &cadrs_eda::footprint::Model3d) -> Result<(Vec<BodyId>, f64), String> {
         use cadrs_kernel::Kernel;
-        let key = cadrs_kernel::naming::stable_hash(format!("{:?}|{}|{:?}", m.blob, m.source, m.body).as_bytes());
+        // (Whether its file is loaded too: until it is, the generated body stands in.)
+        let loaded = m.blob.as_ref().is_some_and(|h| crate::blobs::contains(h));
+        let key = cadrs_kernel::naming::stable_hash(format!("{:?}|{loaded}|{}|{:?}", m.blob, m.source, m.body).as_bytes());
         if let Some((_, bodies, unit)) = self.model_bodies.iter().find(|x| x.0 == key) {
             return Ok((bodies.clone(), *unit));
         }

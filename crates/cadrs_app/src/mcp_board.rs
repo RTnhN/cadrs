@@ -165,6 +165,7 @@ pub fn create_board_from_sketch(world: &mut World, p: &tools::CreateBoardFromSke
         name: p.name.clone(),
         thickness: p.thickness.unwrap_or(1.6),
         seat: seat(p.seat.as_deref())?,
+        circles_as_holes: p.circles_as_holes.unwrap_or(false),
         feature: FeatureId::new(),
     };
     let feature = cmd.feature;

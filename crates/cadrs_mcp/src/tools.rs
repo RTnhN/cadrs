@@ -445,6 +445,10 @@ pub struct CreateBoardFromSketch {
     /// Its face on the sketch: "bottom" (default) or "top".
     #[serde(default)]
     pub seat: Option<String>,
+    /// The sketch's circles inside the outline as mounting holes (non-plated hole footprints)
+    /// rather than cut-outs; default false.
+    #[serde(default)]
+    pub circles_as_holes: Option<bool>,
 }
 
 /// Moves a footprint on a board: to a place (mm, its origin), turned, flipped; or so one of its

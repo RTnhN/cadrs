@@ -681,7 +681,10 @@ pub fn open_create_board(w: &mut World, element: cadrs_core::ElementId, sketch: 
                 row(p, &t, "Face on the sketch", |r| {
                     r.spawn(Select::new("board-create-seat").bordered().width(Val::Px(220.0)).option("Bottom face (it stands on it)", true).option("Top face (it hangs under it)", true).selected(0).build(&t));
                 });
-                p.spawn(t.text("The outline follows the sketch; circles inside it are holes.", t.font_sm, FontWeight::NORMAL, t.muted_foreground));
+                row(p, &t, "Circles inside it", |r| {
+                    r.spawn(Select::new("board-create-circles").bordered().width(Val::Px(220.0)).option("Cut-outs of the outline", true).option("Mounting holes (NPTH)", true).selected(0).build(&t));
+                });
+                p.spawn(t.text("The outline (and the holes) follow the sketch.", t.font_sm, FontWeight::NORMAL, t.muted_foreground));
             })
             .footer(move |f| {
                 button(f, &tf, "board-create-ok", "Create", true, accept_create_board);
@@ -696,6 +699,7 @@ fn accept_create_board(w: &mut World) {
     let thickness = read_mm(w, "board-create-thickness");
     let studio = select_index(w, "board-create-studio").unwrap_or(0);
     let seat = if select_index(w, "board-create-seat") == Some(1) { cadrs_core::pcb::board3d::BoardSeat::Top } else { cadrs_core::pcb::board3d::BoardSeat::Bottom };
+    let circles_as_holes = select_index(w, "board-create-circles") == Some(1);
     let thickness = match thickness {
         Ok(t) if t > 0 => to_mm(t),
         _ => {
@@ -713,6 +717,7 @@ fn accept_create_board(w: &mut World) {
         name: if name.trim().is_empty() { "Board".into() } else { name.trim().to_string() },
         thickness,
         seat,
+        circles_as_holes,
         feature: cadrs_core::FeatureId::new(),
     };
     if let Err(e) = w.resource_mut::<crate::ActiveDocument>().execute(&cmd) {

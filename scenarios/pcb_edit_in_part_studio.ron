@@ -10,10 +10,10 @@
 // 03 let go over the Live pin: one undo step "Move J4" in the PCB Studio, the derived board
 //    rebuilt with J4 there (layout (15.5, 27.5)), the pin through its hole.
 // 04 Ctrl+Z from the Part Studio: J4 back where it was.
-// 05 X over J3, then a double-click on U2's pin 3: a track routed on the board (LOAD, two
-//    segments: a straight run and a 45° one), one step.
-// 06 the zone tool: its dialog's OK, four corners clicked between J1 and C1 (the last a
-//    double-click), B fills it.
+// 05 X over J3, then a click on U2's pin 3 (ending on a pad of its net ends the route): a
+//    track routed on the board (LOAD, two segments: a straight run and a 45° one), one step.
+// 06 the zone tool: its dialog's OK (GND), four corners clicked between J1 and C1, taking in
+//    C1's GND pad (the last a double-click); B fills it: 52 mm² of copper.
 // 07 Done: the bar and the strip gone, the board as 3D model again.
 // (`board check J4` puts J4's place where `ExpectText` reads it: after 01, 03 and 04;
 // `board count` the tracks and zones after 05 and 06.)
@@ -58,7 +58,7 @@ Scenario(
         Hover(xyz(6.5, -16, 13.6)),
         Key("X"),
         Wait(3),
-        DoubleClick(xyz(3.135, -11.475, 13.6)),
+        Click(xyz(3.135, -11.475, 13.6)),
         Wait(20),
         MoveTo(1420, 780),
         Wait(5),
@@ -70,10 +70,10 @@ Scenario(
         WaitFor("eda-zone-dialog"),
         Click(ui("eda-zone-ok")),
         Wait(3),
-        Click(xyz(-9.5, -11.5, 13.6)),
-        Click(xyz(-5.5, -11.5, 13.6)),
-        Click(xyz(-5.5, -5.5, 13.6)),
-        DoubleClick(xyz(-9.5, -5.5, 13.6)),
+        Click(xyz(-9.5, -7.5, 13.6)),
+        Click(xyz(-1.5, -7.5, 13.6)),
+        Click(xyz(-1.5, -0.5, 13.6)),
+        DoubleClick(xyz(-9.5, -0.5, 13.6)),
         Wait(10),
         Key("B"),
         Wait(20),
@@ -81,7 +81,7 @@ Scenario(
         Wait(5),
         Screenshot("06-zone"),
         Custom("board count"),
-        ExpectText("board-check", "zones 1 (filled 1)"),
+        ExpectText("board-check", "zones 1 (filled 1, 52 mm²)"),
         Click(ui("board-edit-done")),
         Wait(10),
         Screenshot("07-done"),
