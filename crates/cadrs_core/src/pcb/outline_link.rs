@@ -254,17 +254,39 @@ pub fn is_linked(b: &super::StudioBoard, id: Uuid) -> bool {
     b.outline_link.as_ref().is_some_and(|l| l.shapes.contains(&id))
 }
 
-/// Refuses a link whose sketch comes after a Derived feature of the same board in its Part
-/// Studio (the sketch could then be drawn on the board itself: a loop).
+/// Refuses a link whose sketch comes after a Derived feature that brings the board in, in its
+/// Part Studio or through a Part Studio it derives (the sketch could then be drawn on the board
+/// itself: a loop).
 fn check_order(doc: &Document, pcb: ElementId, board: BoardId, element: ElementId, sketch: FeatureId) -> Result<(), CommandError> {
     let el = doc.element(element).ok_or(CommandError::ElementNotFound(element))?;
     let features = el.features();
     let at = features.iter().position(|f| f.id == sketch).ok_or_else(|| CommandError::Invalid("The sketch is gone".into()))?;
-    let derived_before = features[..at].iter().any(|f| matches!(&f.kind, FeatureKind::Derived(d) if d.source.is_some_and(|r| r.element == pcb) && d.board.as_ref().is_some_and(|b| b.board == board)));
-    if derived_before {
-        return Err(CommandError::Invalid(format!("{} comes after the board's Derived feature: an outline can't follow a sketch that may be drawn on the board", features[at].name)));
+    let mut seen = vec![element];
+    let via = features[..at].iter().find_map(|f| brings_board(doc, f, pcb, board, &mut seen).map(|v| (f, v)));
+    match via {
+        None => Ok(()),
+        Some((_, None)) => Err(CommandError::Invalid(format!("{} comes after the board's Derived feature: an outline can't follow a sketch that may be drawn on the board", features[at].name))),
+        Some((f, Some(studio))) => Err(CommandError::Invalid(format!("{} comes after {}, which derives {studio} with the board in it: an outline can't follow a sketch that may be drawn on the board", features[at].name, f.name))),
     }
-    Ok(())
+}
+
+/// Whether the feature `f` brings the board in: `Some(None)` itself, `Some(Some(tab))` through
+/// the Part Studio `tab` it derives (at any depth); `seen`: the tabs already looked through.
+fn brings_board(doc: &Document, f: &crate::document::Feature, pcb: ElementId, board: BoardId, seen: &mut Vec<ElementId>) -> Option<Option<String>> {
+    let FeatureKind::Derived(d) = &f.kind else { return None };
+    let r = d.source?;
+    if r.document.is_some_and(|x| x != doc.id) {
+        return None;
+    }
+    if r.element == pcb {
+        return d.board.as_ref().is_some_and(|b| b.board == board).then_some(None);
+    }
+    if seen.contains(&r.element) {
+        return None;
+    }
+    seen.push(r.element);
+    let src = doc.element(r.element)?;
+    src.features().iter().any(|g| brings_board(doc, g, pcb, board, seen).is_some()).then(|| Some(src.name.clone()))
 }
 
 /// Links a board's outline to sketch regions (its outline replaced by theirs), or breaks the

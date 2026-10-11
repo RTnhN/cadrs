@@ -1025,3 +1025,29 @@ fn a_component_moved_apart_exports_where_it_was_moved() {
         assert!((lo[k] - mlo[k]).abs() < 0.3 && (hi[k] - mhi[k]).abs() < 0.3, "axis {k}: STEP {lo:?} … {hi:?}, mesh {mlo:?} … {mhi:?}");
     }
 }
+
+#[test]
+fn an_outline_cant_follow_a_sketch_after_a_derive_that_brings_the_board_in() {
+    use cadrs_core::commands::{AddSketch, EditSketch};
+    use cadrs_sketch::{SketchOp, Vec2};
+    // Part Studio 1 derives the board; Part Studio 2 derives Part Studio 1, then has a sketch.
+    let (mut doc, mut h, board) = document();
+    derive(&mut doc, &mut h, board, DerivedFeature::default()).unwrap();
+    let ps2 = ElementId::new();
+    let mut e = Element::part_studio("Part Studio 2");
+    e.id = ps2;
+    doc.elements.push(e);
+    let mut res = Resolver::new(Store::new(std::env::temp_dir().join("cadrs-derived-board-unused")));
+    let r = SourceRef { document: None, at: RefAt::Workspace, element: STUDIO, pinned: false };
+    let got = derived::resolve(&mut res, &doc, None, DerivedFeature::default(), r).unwrap();
+    run(&mut doc, &mut h, &AddDerived { element: ps2, feature: FeatureId::new(), derived: got.derived, links: got.links });
+    let sketch = FeatureId::new();
+    run(&mut doc, &mut h, &AddSketch { element: ps2, feature: sketch, plane: Some(cadrs_sketch::PlaneRef::Top) });
+    let rect = SketchOp::AddPolyline { points: vec![Vec2::new(0.0, 0.0), Vec2::new(30.0, 0.0), Vec2::new(30.0, 20.0), Vec2::new(0.0, 20.0)], closed: true, construction: false, label: "Add rectangle" };
+    run(&mut doc, &mut h, &EditSketch { element: ps2, feature: sketch, op: rect });
+    let g = doc.element(ps2).unwrap().feature(sketch).unwrap().sketch().unwrap().geometry.clone();
+    let regions = cadrs_core::samples::region_refs(sketch, &g, &[Vec2::new(15.0, 10.0)]);
+    let link = cadrs_core::pcb::outline_link::SetOutlineLink { pcb: PCB, board, link: Some((ps2, sketch, regions)), keep_parts: true };
+    let e = h.execute(&mut doc, &link).unwrap_err().to_string();
+    assert!(e.contains("which derives Part Studio 1"), "{e}");
+}
