@@ -9,13 +9,16 @@
 //    board and its components move there as one.
 // 04 the BOM: the enclosure's parts, then the board, its components under it (item 7
 //    expanded: 7.1 …).
-// 05 the board instance's menu, Edit layout ▸ In context: the layout on the board in the
-//    assembly, the bar "Layout of AC sensor (PCB Studio 1)", the Layout's tools.
-// 06 C1 (layout (13.5, 16.5), at (−0.5, 21, 9.6) after the mate) dragged 5 mm along x with
+// 05 the board instance's menu, Edit layout ▸ In context.
+// 06 the layout on the board in the assembly, the bar "Layout of AC sensor (PCB Studio 1)",
+//    the Layout's tools, the parts around; under the bar what runs into the other instances
+//    (J4's wire into the Live pin it is mated to, PS1 into the end plate, plug and pin).
+// 07 C1 (layout (13.5, 16.5), at (−0.5, 21, 9.6) after the mate) dragged 5 mm along x with
 //    Snap off: its ghost there, the room around it, the instance not rebuilt yet.
-// 07 let go: one undo step in PCB Studio 1, the instance rebuilt with C1 at layout (18.5, 16.5).
-// 08 the board instance's menu again: Edit layout ▸ In its PCB Studio.
-// 09 PCB Studio 1's Layout of AC sensor, C1 where it was moved.
+// 08 let go: one undo step in PCB Studio 1, the instance rebuilt with C1 at layout (18.5, 16.5)
+//    (Ctrl+Z from the assembly takes it back, Ctrl+Y again).
+// 09 Done, then Edit layout ▸ In its PCB Studio: PCB Studio 1's Layout of AC sensor, C1 where
+//    it was moved.
 Scenario(
     start: Some("document"),
     steps: [
@@ -89,6 +92,7 @@ Scenario(
         MoveTo(1420, 780),
         Wait(10),
         Screenshot("06-in-context"),
+        ExpectText("board-fit-status", "PS1 HLK-PM01 <1> runs into End plate <1>"),
         Custom("board check C1"),
         ExpectText("board-check", "C1 at 13.50, 16.50 top"),
         // (Snap off: an exact 5 mm.)
@@ -103,6 +107,15 @@ Scenario(
         MoveTo(1420, 780),
         Wait(10),
         Screenshot("08-moved"),
+        Custom("board check C1"),
+        ExpectText("board-check", "C1 at 18.50, 16.50 top"),
+        // Undone from the assembly: C1 back; redone.
+        Key("Ctrl+Z"),
+        Wait(20),
+        Custom("board check C1"),
+        ExpectText("board-check", "C1 at 13.50, 16.50 top"),
+        Key("Ctrl+Y"),
+        Wait(20),
         Custom("board check C1"),
         ExpectText("board-check", "C1 at 18.50, 16.50 top"),
         Click(ui("board-edit-done")),

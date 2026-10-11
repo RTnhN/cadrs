@@ -430,7 +430,7 @@ pub fn update_assembly_parts(doc: &ActiveDocument, el: &Element, cache: &mut Par
         let ids: HashMap<PartId, PartId> = occ.iter().filter(|o| o.top == i.id).map(|o| (o.part, o.view_part)).collect();
         let id = |p: &PartId| ids.get(p).copied();
         let p = i.pose;
-        let mine = cadrs_core::derived::DerivedOutput {
+        let mut mine = cadrs_core::derived::DerivedOutput {
             parts: out.parts.iter().filter_map(id).collect(),
             boards: out
                 .boards
@@ -444,6 +444,16 @@ pub fn update_assembly_parts(doc: &ActiveDocument, el: &Element, cache: &mut Par
             footprints: out.footprints.iter().filter_map(|(q, f)| Some((id(q)?, *f))).collect(),
             ..Default::default()
         };
+        // Its components running into the other instances (on their meshes, as a Part
+        // Studio's derived board checks them).
+        let solid = |p: &PartId| cache.parts.iter().find(|x| x.id == *p).map(|x| (x.id, x.solid.clone()));
+        let comps: Vec<(PartId, Arc<cadrs_core::solid::Solid>)> = mine.footprints.iter().filter_map(|(p, _)| solid(p)).collect();
+        let others: Vec<(PartId, Arc<cadrs_core::solid::Solid>)> = cache.parts.iter().filter(|x| !ids.values().any(|v| *v == x.id) && !cache.is_hidden(x.id)).map(|x| (x.id, x.solid.clone())).collect();
+        if let Some(frame) = mine.boards.first().map(|b| b.frame) {
+            let c: Vec<(PartId, &Arc<cadrs_core::solid::Solid>)> = comps.iter().map(|(p, s)| (*p, s)).collect();
+            let o: Vec<(PartId, &Arc<cadrs_core::solid::Solid>)> = others.iter().map(|(p, s)| (*p, s)).collect();
+            mine.collisions = cadrs_core::pcb::fit::collisions(&c, &o, &frame);
+        }
         boards.insert(FeatureId(i.id.0), mine);
     }
     if cache.derived != boards {

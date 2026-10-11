@@ -569,7 +569,34 @@ fn sync_fit_buttons(world: &mut World) {
             world.entity_mut(e).remove::<cadrs_ui::style::Selected>();
         }
     }
-    let prompt = crate::board_fit::align_prompt(&state).filter(|_| world.resource::<crate::eda::Eda2d>().plane().is_some());
+    let host = world.resource::<crate::eda::Eda2d>().plane().copied();
+    // Align's prompt; else, in an assembly, the edited board's components running into the
+    // other instances (a Part Studio's Derived feature says so in its warning).
+    let prompt: Option<String> = host.and_then(|h| {
+        crate::board_fit::align_prompt(&state).map(String::from).or_else(|| {
+            let doc = world.resource::<ActiveDocument>();
+            instance_board(doc, h.target.feature)?;
+            let cache = world.resource::<PartCache>();
+            let name = |p: PartId| cache.part(p).map(|x| cadrs_core::parts::display_name(x, &cache.props).to_string()).unwrap_or_default();
+            // One line: each component with what it runs into (at most three named).
+            let mut by: Vec<(PartId, Vec<String>)> = vec![];
+            for c in &cache.derived.get(&h.target.feature)?.collisions {
+                match by.iter_mut().find(|(p, _)| *p == c.component) {
+                    Some((_, o)) => o.push(name(c.other)),
+                    None => by.push((c.component, vec![name(c.other)])),
+                }
+            }
+            let lines: Vec<String> = by
+                .iter()
+                .map(|(p, o)| {
+                    let more = o.len().saturating_sub(3);
+                    let list = o.iter().take(3).cloned().collect::<Vec<_>>().join(", ");
+                    if more > 0 { format!("{} runs into {list} and {more} more", name(*p)) } else { format!("{} runs into {list}", name(*p)) }
+                })
+                .collect();
+            (!lines.is_empty()).then(|| format!("⚠ {}", lines.join("; ")))
+        })
+    });
     let mut q = world.query::<(Entity, &Name)>();
     let existing = q.iter(world).find(|(_, n)| n.as_str() == "board-fit-status").map(|(e, _)| e);
     match (prompt, existing) {
@@ -591,7 +618,7 @@ fn sync_fit_buttons(world: &mut World) {
                 && let Some(mut tx) = world.get_mut::<Text>(c)
                 && tx.0 != text
             {
-                tx.0 = text.to_string();
+                tx.0 = text;
             }
         }
         (None, Some(e)) => {
