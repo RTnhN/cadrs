@@ -426,7 +426,9 @@ impl OcctKernel {
         };
         let mut solids: Vec<Tagged> = Vec::new();
         if !profile.regions.is_empty() {
-            for (i, (face, region)) in profile_faces(&shifted, &profile.regions)?
+            // Circles about axes along the sweep, so its cylinders continue those of other
+            // extrudes about the same axis, whichever way they were sketched.
+            for (i, (face, region)) in super::swept_along(vec, || profile_faces(&shifted, &profile.regions))?
                 .iter()
                 .zip(&profile.regions)
                 .enumerate()
@@ -489,11 +491,7 @@ impl OcctKernel {
         };
         let mut out = Vec::new();
         let mut add = |curves: Vec<Curve2>, closed: bool, region: u64, lp: usize| -> Result<()> {
-            let wire = if closed {
-                super::loop_wire(&plane, &curves)?
-            } else {
-                chain_wire(&plane, &curves)?
-            };
+            let wire = super::swept_along(vec, || if closed { super::loop_wire(&plane, &curves) } else { chain_wire(&plane, &curves) })?;
             let (shape, h) = wire.try_extrude_h(to_glam(vec)).map_err(occt)?;
             let edges = wire.edges_geometry().map_err(occt)?;
             let ids: Vec<(u64, Vec<Point3<f64>>)> = curves

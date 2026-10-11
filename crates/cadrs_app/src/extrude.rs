@@ -145,14 +145,14 @@ pub struct ArrowState {
     pub drag: Option<ArrowDrag>,
     /// The next click was the end of an arrow drag (not a region pick).
     swallow_click: bool,
-    /// The extrude's direction (before its flip) and how far its end is along it (signed), for
-    /// a drag.
-    axis: Option<(Vec3, f64)>,
+    /// The extrude's direction (before its flip), how far its end is along it (signed) and
+    /// where the arrow sits, for a drag.
+    axis: Option<(Vec3, f64, Vec3)>,
     /// The second end's arrow (P3.5): where it is, whether the pointer is over it, and its
     /// direction (away from the first end) and depth.
     pub second_base_tip: Option<(Vec2, Vec2)>,
     pub second_hovered: bool,
-    second_axis: Option<(Vec3, f64)>,
+    second_axis: Option<(Vec3, f64, Vec3)>,
 }
 
 /// An arrow drag in progress.
@@ -167,6 +167,9 @@ pub struct ArrowDrag {
     pub extrude: ExtrudeFeature,
     /// The second end's arrow is dragged (its depth changes).
     second: bool,
+    /// Where the arrow sat when the drag began: it follows the pointer from there, ahead of
+    /// the rebuilt preview.
+    anchor: Vec3,
 }
 
 /// Arrow length on screen (px) and how close the pointer must be to grab it.
@@ -187,7 +190,7 @@ pub fn begin_extrude(world: &mut World) {
     if crate::flat_ui::extrude_redirect(world) {
         return;
     }
-    let Some(mut doc) = world.get_resource_mut::<ActiveDocument>() else {
+    let Some(doc) = world.get_resource::<ActiveDocument>() else {
         return;
     };
     let Some(element) = doc
@@ -197,17 +200,140 @@ pub fn begin_extrude(world: &mut World) {
     else {
         return;
     };
+    // Planar part faces, sketch regions and sketches selected before: they are what it
+    // extrudes, a short step the way it can be seen (see `preselected`).
+    let mut extrude = ExtrudeFeature::default();
+    let mut cut = false;
+    if let Some(pre) = preselected(world) {
+        extrude.faces = pre.faces;
+        extrude.regions = pre.regions;
+        extrude.sketches = pre.sketches;
+        extrude.depth = PRESELECTED_DEPTH;
+        extrude.depth_expr = world.resource::<crate::WorkspaceUnits>().0.with_unit(PRESELECTED_DEPTH, Quantity::Length);
+        // Material right beyond them: going that way would add nothing to see, so it goes the
+        // other way; with material there too (a part's own face), it cuts into it.
+        if pre.blocked_out {
+            extrude.flip = true;
+            if pre.blocked_in {
+                extrude.op = BooleanOp::Remove;
+                cut = true;
+            }
+        }
+    }
+    let Some(mut doc) = world.get_resource_mut::<ActiveDocument>() else {
+        return;
+    };
     let feature = FeatureId::new();
     let mark = doc.history.undo_len();
-    if let Err(e) = doc.execute(&AddExtrude {
-        element,
-        feature,
-        extrude: ExtrudeFeature::default(),
-    }) {
+    if let Err(e) = doc.execute(&AddExtrude { element, feature, extrude }) {
         warn!("cannot insert an extrude: {e}");
         return;
     }
     start_session(world, element, feature, true, mark, None);
+    if cut && let Some(mut s) = world.get_resource_mut::<ExtrudeSession>() {
+        // Not turned back into an Add or a New by what it touches.
+        s.op_auto = false;
+    }
+}
+
+/// The depth of an extrude of what was selected before it: a short step out of the part (or
+/// into it), so it shows without hiding what is around it.
+const PRESELECTED_DEPTH: f64 = 5.0;
+
+/// What a new extrude takes from the selection.
+struct Preselected {
+    faces: Vec<FaceRef>,
+    regions: Vec<RegionRef>,
+    sketches: Vec<FeatureId>,
+    /// Solid material lies right beyond every face and region, along its normal.
+    blocked_out: bool,
+    /// ... and right behind each, against it.
+    blocked_in: bool,
+}
+
+/// The planar part faces, sketch regions and whole sketches in the selection, and whether
+/// solid material lies right beyond (and behind) them. `None` when none is selected.
+fn preselected(world: &World) -> Option<Preselected> {
+    let cache = world.resource::<PartCache>();
+    let doc = world.get_resource::<ActiveDocument>();
+    let mut out = Preselected { faces: Vec::new(), regions: Vec::new(), sketches: Vec::new(), blocked_out: true, blocked_in: true };
+    let v = |p: [f64; 3]| Vec3::new(p[0] as f32, p[1] as f32, p[2] as f32);
+    // A point on each and its normal.
+    let mut probes: Vec<(Vec3, Vec3)> = Vec::new();
+    for pick in &world.resource::<Selection>().0 {
+        match *pick {
+            Pick::Face(part, face) => {
+                let Some(p) = cache.part(part) else { continue };
+                let Some(i) = p.solid.faces.iter().position(|f| f.name == face) else { continue };
+                if p.solid.faces[i].plane.is_none() {
+                    continue;
+                }
+                let (Some(seed), Some(n)) = (p.solid.face_point(i), p.solid.face_normal(i)) else { continue };
+                probes.push((v(seed), v(n).normalize_or_zero()));
+                out.faces.push(FaceRef { part, face, seed });
+            }
+            Pick::Region(sketch, index) => {
+                let Some(sr) = cache.sketch_regions(sketch) else { continue };
+                let Some(region) = sr.regions.get(index as usize) else { continue };
+                let r = RegionRef::new(sketch, region);
+                probes.push((v(sr.frame.to_world(r.seed)), v(sr.frame.normal()).normalize_or_zero()));
+                out.regions.push(r);
+            }
+            Pick::Feature(f) if doc.and_then(|d| d.active_element()?.feature(f)?.sketch()).is_some() => out.sketches.push(f),
+            _ => {}
+        }
+    }
+    // A whole sketch replaces its single regions.
+    out.regions.retain(|r| !out.sketches.contains(&r.sketch));
+    if out.faces.is_empty() && out.regions.is_empty() && out.sketches.is_empty() {
+        return None;
+    }
+    let solid = |at: Vec3| cache.parts.iter().filter(|q| q.kind == cadrs_core::PartKind::Solid).any(|q| inside(&q.solid, at));
+    out.blocked_out = !probes.is_empty() && probes.iter().all(|(p, n)| solid(*p + *n * 0.05));
+    out.blocked_in = probes.iter().all(|(p, n)| solid(*p - *n * 0.05));
+    Some(out)
+}
+
+/// True if `p` is inside the closed mesh of `s`: an odd number of its triangles across a ray
+/// from `p` (in a slanted direction, so it doesn't graze edges).
+fn inside(s: &cadrs_core::Solid, p: Vec3) -> bool {
+    if let Some((lo, hi)) = s.bounds() {
+        let (lo, hi) = (Vec3::new(lo[0] as f32, lo[1] as f32, lo[2] as f32), Vec3::new(hi[0] as f32, hi[1] as f32, hi[2] as f32));
+        if p.cmplt(lo).any() || p.cmpgt(hi).any() {
+            return false;
+        }
+    }
+    let d = Vec3::new(0.5773, 0.6127, 0.5397).normalize();
+    let v = |i: u32| {
+        let q = s.positions[i as usize];
+        Vec3::new(q[0] as f32, q[1] as f32, q[2] as f32)
+    };
+    let mut hits = 0;
+    for [i, j, k] in s.indices.as_chunks::<3>().0 {
+        let (a, b, c) = (v(*i), v(*j), v(*k));
+        // Möller–Trumbore.
+        let (e1, e2) = (b - a, c - a);
+        let h = d.cross(e2);
+        let det = e1.dot(h);
+        if det.abs() < 1e-9 {
+            continue;
+        }
+        let f = 1.0 / det;
+        let sv = p - a;
+        let u = f * sv.dot(h);
+        if !(0.0..=1.0).contains(&u) {
+            continue;
+        }
+        let q = sv.cross(e1);
+        let w = f * d.dot(q);
+        if w < 0.0 || u + w > 1.0 {
+            continue;
+        }
+        if f * e2.dot(q) > 0.0 {
+            hits += 1;
+        }
+    }
+    hits % 2 == 1
 }
 
 /// Opens an existing extrude for editing (double-click in the feature list, or Edit).
@@ -877,7 +1003,7 @@ fn arrow_pointer(
                         .second_base_tip
                         .is_some_and(|(a, b)| segment_distance(pos, a, b) <= ARROW_GRAB);
                 let axis = if hit { arrow.axis } else { arrow.second_axis };
-                if let (true, Some(p), Some((n, signed))) = (hit || hit2, params.clone(), axis) {
+                if let (true, Some(p), Some((n, signed, anchor))) = (hit || hit2, params.clone(), axis) {
                     let normal_px = view.view.project_vector(n);
                     if normal_px.length() > 0.05 {
                         arrow.drag = Some(ArrowDrag {
@@ -886,6 +1012,7 @@ fn arrow_pointer(
                             normal_px,
                             extrude: p,
                             second: hit2,
+                            anchor,
                         });
                     }
                 }
@@ -964,17 +1091,33 @@ fn sketch_origin_normal(doc: Option<&ActiveDocument>, cache: &PartCache, s: &Ext
         .and_then(|d| {
             let sketch = e.regions.first().map(|r| r.sketch).or(e.sketches.first().copied())?;
             Some(d.doc.element(s.element)?.feature(sketch)?.sketch()?.plane?.frame())
-        })
-        .or_else(|| face_frame(cache, e));
+        });
     let v = |p: [f64; 3]| Vec3::new(p[0] as f32, p[1] as f32, p[2] as f32);
     match frame {
         Some(f) => (v(f.origin), v(f.normal()).normalize()),
-        None => (Vec3::ZERO, sketch_normal(doc, cache, s, e)),
+        // A face profile: where the rebuild started the sweep.
+        None => match built_start(cache, s, e) {
+            Some((o, n)) => (o, n),
+            None => match face_frame(cache, e) {
+                Some(f) => (v(f.origin), v(f.normal()).normalize()),
+                None => (Vec3::ZERO, sketch_normal(doc, cache, s, e)),
+            },
+        },
     }
 }
 
+/// Where the last rebuild started this extrude's first sweep and the way it went before the
+/// flip (the faces a Remove starts from are gone from the parts after it, so they can't tell).
+fn built_start(cache: &PartCache, s: &ExtrudeSession, e: &ExtrudeFeature) -> Option<(Vec3, Vec3)> {
+    let (o, d) = cache.axes.get(&s.feature)?;
+    let v = |p: [f64; 3]| Vec3::new(p[0] as f32, p[1] as f32, p[2] as f32);
+    let d = v(*d).normalize_or_zero();
+    (d != Vec3::ZERO).then(|| (v(*o), if e.flip { -d } else { d }))
+}
+
 /// The plane of the first part face an extrude extrudes (its outward normal is the way the
-/// extrude goes, PS4.2), where the parts before it show it.
+/// extrude goes, PS4.2), where the parts on screen still show it (an Add's; a Remove consumes
+/// it, see [`built_start`]).
 fn face_frame(cache: &PartCache, e: &ExtrudeFeature) -> Option<cadrs_sketch::PlaneFrame> {
     let f = e.faces.first()?;
     cache.parts.iter().filter(|p| p.id == f.part).chain(cache.parts.iter()).find_map(|p| p.solid.face(&f.face)?.plane)
@@ -1022,12 +1165,18 @@ fn sketch_normal(doc: Option<&ActiveDocument>, cache: &PartCache, s: &ExtrudeSes
             let sketch = e.regions.first().map(|r| r.sketch).or(e.sketches.first().copied())?;
             d.doc.element(s.element)?.feature(sketch)?.sketch()?.plane
         })
-        .map(|p| p.frame().normal())
-        // A face profile (P3.11 fix round 1: the funnel's spout arrow pointed up, along +Z,
-        // while it extruded the loft's bottom face down): its outward normal.
-        .or_else(|| face_frame(cache, e).map(|f| f.normal()))
-        .unwrap_or([0.0, 0.0, 1.0]);
-    Vec3::new(n[0] as f32, n[1] as f32, n[2] as f32)
+        .map(|p| p.frame().normal());
+    if let Some(n) = n {
+        return Vec3::new(n[0] as f32, n[1] as f32, n[2] as f32);
+    }
+    // A face profile (P3.11 fix round 1: the funnel's spout arrow pointed up, along +Z, while it
+    // extruded the loft's bottom face down): its outward normal, as the rebuild swept it (a
+    // Remove's faces are gone from the parts after it: its arrow pointed along −Z), else as the
+    // parts show the face.
+    built_start(cache, s, e)
+        .map(|(_, n)| n)
+        .or_else(|| face_frame(cache, e).map(|f| Vec3::new(f.normal()[0] as f32, f.normal()[1] as f32, f.normal()[2] as f32)))
+        .unwrap_or(Vec3::Z)
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -1379,12 +1528,18 @@ fn place_arrow(
                 n += 1.0;
             }
         }
-        if n == 0.0 {
+        let dragged = arrow.drag.as_ref().filter(|d| !d.second);
+        if n == 0.0 && dragged.is_none() {
             return None;
         }
-        let anchor = sum / n;
         // How far the end is now, along the direction (signed; negative when flipped): the
         // depth of a Blind end, measured for the others (a drag makes them Blind).
+        // While dragged, the arrow moves from where it was by the depth's change (the cap moves
+        // along the direction), not waiting for the preview's rebuild.
+        let anchor = match dragged {
+            Some(d) => d.anchor + base * ((if e.flip { -e.depth } else { e.depth }) - d.start_signed) as f32,
+            None => sum / n,
+        };
         let signed = if e.end == EndType::Blind {
             if e.flip { -e.depth } else { e.depth }
         } else {
@@ -1424,11 +1579,15 @@ fn place_arrow(
                 }
             }
         }
-        if n == 0.0 {
+        let dragged = arrow.drag.as_ref().filter(|d| d.second);
+        if n == 0.0 && dragged.is_none() {
             return None;
         }
-        let anchor = sum / n;
         let dir2 = -dir;
+        let anchor = match dragged {
+            Some(d) => d.anchor + dir2 * (end.depth - d.start_signed) as f32,
+            None => sum / n,
+        };
         let signed = if end.end == EndType::Blind {
             end.depth
         } else {
@@ -1437,7 +1596,7 @@ fn place_arrow(
         };
         Some((anchor, dir2, signed))
     });
-    arrow.second_axis = second.map(|(_, d, signed)| (d, signed));
+    arrow.second_axis = second.map(|(anchor, d, signed)| (d, signed, anchor));
     arrow.second_base_tip = second.and_then(|(anchor, d, _)| {
         let p = view.view.project_vector(d);
         (p.length() >= 0.05).then(|| {
@@ -1447,7 +1606,7 @@ fn place_arrow(
     });
     let second_active = arrow.second_hovered || arrow.drag.as_ref().is_some_and(|d| d.second);
     let second_tip = arrow.second_base_tip;
-    arrow.axis = target.map(|(_, _, base, signed)| (base, signed));
+    arrow.axis = target.map(|(anchor, _, base, signed)| (base, signed, anchor));
     let Some((anchor, dir, _, _)) = target else {
         arrow.base_tip = None;
         for (e, ..) in &q {

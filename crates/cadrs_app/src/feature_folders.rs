@@ -6,8 +6,11 @@
 //!   folder button puts the selected features in a new folder.
 //! - Dragging a feature row (or a folder row, with its features) shows a blue line where it
 //!   will land; dropping moves it there ([`cadrs_core::commands::MoveFeatures`], one undo step).
-//!   Dropped between two features of an open folder it joins the folder; elsewhere it leaves
-//!   its folder. A feature dropped above a feature it uses fails (red, PS11.3).
+//!   Dragging a selected feature drags every selected feature, in list order. Dropped between two
+//!   features of an open folder they join the folder; elsewhere they leave their folders.
+//!   Dropped onto a folder's row they join it, keeping the order of operations: at its start
+//!   when they all come from above it, else at its end. A feature dropped above a feature it
+//!   uses fails (red, PS11.3).
 
 use bevy::prelude::*;
 use cadrs_core::commands::{CreateFolder, DeleteFolder, MoveFeatures, SetFolder, UnpackFolder};
@@ -247,13 +250,30 @@ fn on_drag_start(
     q_feature: Query<&FeatureRow>,
     q_folder: Query<&FolderRow>,
     doc: Option<Res<ActiveDocument>>,
+    sel: Res<Selection>,
     mut drag: ResMut<RowDrag>,
 ) {
     if ev.button != PointerButton::Primary {
         return;
     }
     let features = if let Ok(r) = q_feature.get(ev.entity) {
-        vec![r.0]
+        // A selected row drags the whole selection's features, in list order.
+        let picked: Vec<FeatureId> = sel
+            .0
+            .iter()
+            .filter_map(|p| match p {
+                Pick::Feature(f) => Some(*f),
+                _ => None,
+            })
+            .collect();
+        if picked.contains(&r.0) {
+            doc.as_ref()
+                .and_then(|d| d.active_element())
+                .map(|el| el.features().iter().map(|f| f.id).filter(|f| picked.contains(f)).collect())
+                .unwrap_or_else(|| vec![r.0])
+        } else {
+            vec![r.0]
+        }
     } else if let Ok(f) = q_folder.get(ev.entity) {
         doc.as_ref()
             .and_then(|d| d.active_element())
@@ -284,16 +304,24 @@ fn on_drag_end(ev: On<Pointer<DragEnd>>, q: Query<(), AnyRow>, mut commands: Com
         let Some(mut doc) = world.get_resource_mut::<ActiveDocument>() else { return };
         let Some(el) = doc.active_element() else { return };
         let element = el.id;
-        // Nothing moves: the same place and folder.
+        // Nothing moves: the same order, and every moved feature already in that folder.
         let order: Vec<FeatureId> = el.features().iter().map(|f| f.id).collect();
-        let first = order.iter().position(|f| Some(f) == drag.features.first());
-        let same_folder = drag.features.first().and_then(|f| el.folder_of(*f)).map(|f| f.id) == folder;
-        if first == Some(to) && same_folder {
+        let mut after: Vec<FeatureId> = order.iter().copied().filter(|f| !drag.features.contains(f)).collect();
+        if to > after.len() {
             return;
         }
+        for (k, f) in drag.features.iter().enumerate() {
+            after.insert(to + k, *f);
+        }
+        let same_folder = drag.features.iter().all(|f| el.folder_of(*f).map(|g| g.id) == folder);
+        if after == order && same_folder {
+            return;
+        }
+        let whole_folder = el.folders().iter().any(|g| !g.features.is_empty() && g.features == drag.features);
         let name = match drag.features.as_slice() {
             [one] => el.feature(*one).map(|f| f.name.clone()).unwrap_or_default(),
-            _ => "folder".to_string(),
+            _ if whole_folder => "folder".to_string(),
+            many => format!("{} features", many.len()),
         };
         let _ = doc.execute(&MoveFeatures { element, features: drag.features, to, folder, label: format!("Reorder {name}") });
     });
@@ -369,19 +397,26 @@ fn place_drop_line(
         Some((top, _, left, _)) => (*top, *left),
         None => (rows[rows.len() - 1].1, rows[rows.len() - 1].2),
     };
-    // P3.9 (PS3.2): dropped onto a folder's name, the features join it at its end; P3.11 (P3.9
+    // P3.9 (PS3.2): dropped onto a folder's name, the features join it, keeping the order of
+    // operations: at its start when they all come from above it, else at its end. P3.11 (P3.9
     // judge): the whole folder row is highlighted then, not a line under it.
     let mut onto: Option<(f32, f32)> = None;
     if let Some((top, bottom, _, Row::Folder(f))) = rows.iter().find(|(top, bottom, ..)| y > top + 5.0 && y < bottom - 5.0)
         && !drag.features.iter().all(|x| el.folder_of(*x).is_some_and(|g| g.id == *f))
+        && let Some(contents) = el.folders().iter().find(|g| g.id == *f).map(|g| g.features.iter().filter(|x| order.contains(x)).copied().collect::<Vec<_>>())
+        && let (Some(first), Some(last)) = (contents.first(), contents.last())
     {
-        let last = el.folders().iter().find(|g| g.id == *f).and_then(|g| g.features.iter().rev().find(|x| order.contains(x)).copied());
-        if let Some(last) = last {
-            to = order.iter().position(|x| *x == last).map_or(order.len(), |i| i + 1);
-            folder = Some(*f);
-            line_y = *bottom;
-            onto = Some((*top, *bottom));
-        }
+        let full: Vec<FeatureId> = el.features().iter().map(|x| x.id).collect();
+        let at = |x: &FeatureId| full.iter().position(|o| o == x).unwrap_or(usize::MAX);
+        let from_above = drag.features.iter().all(|x| at(x) < at(first));
+        to = if from_above {
+            order.iter().position(|x| x == first).unwrap_or(order.len())
+        } else {
+            order.iter().position(|x| x == last).map_or(order.len(), |i| i + 1)
+        };
+        folder = Some(*f);
+        line_y = *bottom;
+        onto = Some((*top, *bottom));
     }
     drag.target = Some((to, folder));
     let blue = Color::srgb_u8(0x2b, 0x64, 0xc0);

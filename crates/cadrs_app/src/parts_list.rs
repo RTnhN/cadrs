@@ -12,7 +12,8 @@
 //!   shown disabled until their milestones.
 //! - A right-click opens the menu without selecting the part (it does not turn orange in the
 //!   view, `ex2-step8.png`).
-//! - A hidden part's row is greyed, with a crossed eye.
+//! - A hidden part's row is greyed, with a crossed eye. A row's eye shows while it is hovered;
+//!   a click shows or hides the part.
 
 use bevy::prelude::*;
 use bevy::text::FontWeight;
@@ -43,6 +44,7 @@ impl Plugin for PartsListPlugin {
             .add_observer(on_part_menu_action)
             .add_observer(on_part_rename_commit)
             .add_observer(on_group_toggle)
+            .add_observer(on_part_eye)
             .add_observer(on_exit_isolate);
     }
 }
@@ -171,8 +173,14 @@ fn rebuild_part_list(
                     PartKind::Surface => "surface",
                 };
                 let row_name = tab_node_name(label).replacen("tab-", "part-row-", 1);
+                // The eye shows while the row is hovered (always, crossed, on a hidden part);
+                // a click shows or hides the part.
+                let tip = if *hidden { format!("Show {label}") } else { format!("Hide {label}") };
                 let mut row = c.spawn((
                     TreeItem::new(row_name.clone(), label.clone())
+                        .toggle(format!("{row_name}-visibility"), "visible", "hidden", !*hidden)
+                        .toggle_tooltip(tip)
+                        .toggle_keeps_off()
                         .icon(icon_name, 16.0)
                         .icon_color(if *hidden { Color::srgb_u8(0xc4, 0xc4, 0xc4) } else { t.muted_foreground })
                         .weight(if *bold { FontWeight::BOLD } else { FontWeight::MEDIUM })
@@ -189,27 +197,29 @@ fn rebuild_part_list(
                         n.height = Val::Px(22.0);
                         n.margin = UiRect::new(Val::Px(2.0), Val::Px(7.0), Val::Px(1.0), Val::Px(1.0));
                     });
-                if *hidden {
-                    row.with_children(|r| {
-                        r.spawn((
-                            Name::new(format!("{row_name}-hidden")),
-                            cadrs_ui::icon::icon_in(
-                                "hidden",
-                                14.0,
-                                Color::srgb_u8(0x8a, 0x8a, 0x8a),
-                                Node {
-                                    margin: UiRect::new(Val::Auto, Val::Px(4.0), Val::ZERO, Val::ZERO),
-                                    ..default()
-                                },
-                            ),
-                            Tooltip::new("Hidden"),
-                        ));
-                    });
-                }
             }
         }
     });
     *last = Some(key);
+}
+
+/// The eye on a part's row shows or hides that part, as an undoable step.
+fn on_part_eye(ev: On<cadrs_ui::TreeRowToggled>, q: Query<&PartRow>, mut commands: Commands) {
+    let Ok(row) = q.get(ev.entity) else {
+        return;
+    };
+    let part = row.0;
+    commands.queue(move |world: &mut World| {
+        let hidden = !world.resource::<PartCache>().is_hidden_part(part);
+        let parts = vec![part];
+        let Some(mut doc) = world.get_resource_mut::<ActiveDocument>() else {
+            return;
+        };
+        let Some(element) = doc.active_element().map(|e| e.id) else {
+            return;
+        };
+        let _ = doc.execute(&SetPartsHidden { element, parts, hidden });
+    });
 }
 
 fn on_group_toggle(ev: On<TreeToggle>, q: Query<&GroupHeader>, mut open: ResMut<GroupsOpen>) {

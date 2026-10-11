@@ -618,9 +618,11 @@ fn follow_pointer(world: &mut World, mut last: Local<Option<(Pt, u64)>>) {
             Tool::Wire(pts) if !pts.is_empty() => {
                 let mut all = pts.clone();
                 all.extend(se::manhattan(*pts.last().unwrap(), at).into_iter().skip(1));
+                // In the colour of the wires it joins (see `se::add_wire`).
+                let stroke = cadrs_eda::graphics::Stroke { color: se::joined_wire_color(&d.schematic, 0, &all).flatten(), ..Default::default() };
                 for s in all.windows(2) {
                     if s[0] != s[1] {
-                        d.schematic.sheets[0].wires.push(cadrs_eda::schematic::Wire { id: uuid::Uuid::nil(), a: s[0], b: s[1], stroke: Default::default() });
+                        d.schematic.sheets[0].wires.push(cadrs_eda::schematic::Wire { id: uuid::Uuid::nil(), a: s[0], b: s[1], stroke });
                     }
                 }
                 Some(d)

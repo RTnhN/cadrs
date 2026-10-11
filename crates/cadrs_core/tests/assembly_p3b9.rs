@@ -419,6 +419,8 @@ mod documents {
             .filter_map(|e| e.circle.filter(|c| (c.center[2] - 6.0).abs() < 1e-6).map(|c| [c.center[0], c.center[1]]))
             .collect();
         out.sort_by(|a, b| a[0].total_cmp(&b[0]));
+        // A hole's circle can be in two edges (split where it touches the Cover's side).
+        out.dedup_by(|a, b| (a[0] - b[0]).abs() < 1e-6 && (a[1] - b[1]).abs() < 1e-6);
         out
     }
 

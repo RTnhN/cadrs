@@ -34,6 +34,7 @@ pub fn type_label(kind: &FeatureKind) -> &'static str {
         FeatureKind::Fillet(_) => "Fillet",
         FeatureKind::Chamfer(_) => "Chamfer",
         FeatureKind::Shell(_) => "Shell",
+        FeatureKind::DirectEdit(x) => x.kind.label(),
         FeatureKind::Hole(_) => "Hole",
         FeatureKind::Plane(_) => "Plane",
         FeatureKind::Sweep(_) => "Sweep",
@@ -339,6 +340,7 @@ mod tests {
             u: [1.0, 0.0, 0.0],
             v: [0.0, 1.0, 0.0],
             seed: None,
+            upright: false,
         };
         let features = vec![
             sketch(s1, Some(cadrs_sketch::PlaneRef::Top)),

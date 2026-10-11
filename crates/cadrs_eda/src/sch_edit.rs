@@ -763,11 +763,30 @@ pub fn fix_junctions(sch: &mut Schematic, sheet: usize) {
     }
 }
 
+/// The colour a wire drawn through `pts` takes from the wires it joins (`None`: it joins none):
+/// the wire it starts on, else the one it ends on, else one it joins along the way.
+pub fn joined_wire_color(sch: &Schematic, sheet: usize, pts: &[Pt]) -> Option<Option<crate::graphics::Color>> {
+    use crate::connectivity::on_segment;
+    let ws = &sch.sheets[sheet].wires;
+    let (first, last) = (pts.first()?, pts.last()?);
+    let on_wire = |p: &Pt| ws.iter().find(|w| on_segment(*p, w.a, w.b));
+    let mut order = vec![first, last];
+    order.extend(&pts[1..pts.len() - 1]);
+    order.into_iter().find_map(on_wire)
+        // Another wire's end on the new wire's middle (a tee into it).
+        .or_else(|| ws.iter().find(|w| pts.windows(2).any(|s| on_segment(w.a, s[0], s[1]) || on_segment(w.b, s[0], s[1]))))
+        .map(|w| w.stroke.color)
+}
+
 /// Draws a wire through `pts` (W: click, click, … double-click), on the grid; zero-length
 /// segments are skipped. Junctions are added where the wire tees into others. Returns the new
 /// segments' ids.
+///
+/// Joined wires always share a colour: the new wire takes the colour of the wire it starts on
+/// ([`joined_wire_color`]), and every run it joins takes that colour too.
 pub fn add_wire(sch: &mut Schematic, sheet: usize, pts: &[Pt]) -> Vec<Uuid> {
     let pts: Vec<Pt> = pts.iter().map(|p| snap(*p, SCHEMATIC_GRID)).collect();
+    let color = joined_wire_color(sch, sheet, &pts);
     let mut ids = vec![];
     for w in pts.windows(2) {
         if w[0] == w[1] {
@@ -778,6 +797,12 @@ pub fn add_wire(sch: &mut Schematic, sheet: usize, pts: &[Pt]) -> Vec<Uuid> {
         ids.push(id);
     }
     fix_junctions(sch, sheet);
+    // The new wire may have been joined into one it overlaps; the run is found from its start.
+    let start = sch.sheets[sheet].wires.iter().find(|w| crate::connectivity::on_segment(pts[0], w.a, w.b)).map(|w| w.id);
+    if let (Some(color), Some(start), false) = (color, start, ids.is_empty()) {
+        let run = connected_wires(sch, sheet, start);
+        set_wire_color(sch, sheet, &run, color);
+    }
     ids
 }
 
@@ -1163,6 +1188,30 @@ mod tests {
         let colored = s.sheets[0].wires.iter().filter(|w| w.stroke.color == Some(orange)).count();
         assert_eq!(colored, run.len());
         assert_eq!(s.sheets[0].wires.iter().find(|w| w.id == apart[0]).unwrap().stroke.color, None);
+    }
+
+    #[test]
+    fn a_new_wire_takes_the_colour_of_the_wires_it_joins() {
+        let (mut s, _) = sch();
+        let orange = crate::graphics::Color { r: 255, g: 153, b: 0, a: 255 };
+        let blue = crate::graphics::Color { r: 0, g: 0, b: 255, a: 255 };
+        let color = |s: &Schematic, id: Uuid| s.sheets[0].wires.iter().find(|w| w.id == id).unwrap().stroke.color;
+        let a = add_wire(&mut s, 0, &[Pt::mm(0.0, 0.0), Pt::mm(25.4, 0.0)]);
+        set_wire_color(&mut s, 0, &a, Some(orange));
+        // Started on the orange wire.
+        let from = add_wire(&mut s, 0, &[Pt::mm(12.7, 0.0), Pt::mm(12.7, 12.7)]);
+        assert_eq!(color(&s, from[0]), Some(orange));
+        // Drawn from somewhere else onto it.
+        let to = add_wire(&mut s, 0, &[Pt::mm(50.8, 25.4), Pt::mm(25.4, 25.4), Pt::mm(25.4, 0.0)]);
+        assert!(to.iter().all(|w| color(&s, *w) == Some(orange)));
+        // Joining a blue run from the orange one: the blue run turns orange.
+        let b = add_wire(&mut s, 0, &[Pt::mm(0.0, 50.8), Pt::mm(25.4, 50.8)]);
+        set_wire_color(&mut s, 0, &b, Some(blue));
+        add_wire(&mut s, 0, &[Pt::mm(0.0, 0.0), Pt::mm(0.0, 50.8)]);
+        assert!(s.sheets[0].wires.iter().all(|w| w.stroke.color == Some(orange)), "{:?}", s.sheets[0].wires);
+        // A wire joining nothing keeps the theme's colour.
+        let alone = add_wire(&mut s, 0, &[Pt::mm(76.2, 0.0), Pt::mm(101.6, 0.0)]);
+        assert_eq!(color(&s, alone[0]), None);
     }
 
     #[test]

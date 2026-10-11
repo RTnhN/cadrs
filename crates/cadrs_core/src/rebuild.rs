@@ -75,7 +75,8 @@ pub struct Build {
     /// joins parts (Add): the dialog previews the body over the parts as they were.
     pub stage: Option<(FeatureId, Stage)>,
     /// Each revolve's axis: its origin and unit direction (after its flip; the first end turns
-    /// counter-clockwise about it), for the dialog's angle arrow.
+    /// counter-clockwise about it), for the dialog's angle arrow. Each extrude's start and
+    /// direction the same way (after its flip), for the dialog's depth arrow.
     pub axes: HashMap<FeatureId, (Vec3, Vec3)>,
     /// Each Plane feature's frame (P3.7), where it built.
     pub planes: HashMap<FeatureId, cadrs_sketch::PlaneFrame>,
@@ -133,6 +134,10 @@ pub struct Stage {
     /// translucent over the part it converts while its edges to bend are picked.
     #[serde(default)]
     pub more: Vec<Arc<crate::solid::Solid>>,
+    /// A Remove's preview: `before` are the parts after the cut, and `tool` with `more` the
+    /// material it removes from them (drawn red through the see-through parts).
+    #[serde(default)]
+    pub remove: bool,
 }
 
 /// The parts an extrude's new body meets (before its boolean).
@@ -246,7 +251,8 @@ struct Output {
     owned: Vec<BodyId>,
     /// An Add extrude's parts before it and its new body (for the dialog's preview).
     stage: Option<Stage>,
-    /// A revolve's axis (origin, unit direction; after its flip).
+    /// A revolve's axis, or where an extrude's first sweep starts and the way it goes (origin,
+    /// unit direction; after its flip).
     axis: Option<(Vec3, Vec3)>,
     /// A pattern's instances, for Skip instances (P3.8).
     dots: Option<Vec<crate::pattern::InstanceDot>>,
@@ -351,7 +357,7 @@ pub fn chain_keys(features: &[Feature]) -> Vec<u64> {
     let mut keys = Vec::new();
     for i in 0..last.map_or(0, |l| l + 1) {
         let f = &features[i];
-        key = chain_key(key, &f.kind);
+        key = chain_key(key, f);
         if !f.is_part_feature() {
             continue;
         }
@@ -396,11 +402,14 @@ impl std::fmt::Write for HashWriter<'_> {
 }
 
 /// The cache key of a feature: its parameters chained onto the key of the features before it.
-fn chain_key(before: u64, kind: &FeatureKind) -> u64 {
+/// The cache key after feature `f`: its id and every parameter. (The id too: outputs are filed
+/// under it, such as a Plane's frame, and two documents can hold features with equal parameters.)
+fn chain_key(before: u64, f: &Feature) -> u64 {
     let mut h = DefaultHasher::new();
     before.hash(&mut h);
+    f.id.0.hash(&mut h);
     // Every parameter is in the derived Debug output (floats in full precision).
-    let _ = write!(HashWriter(&mut h), "{kind:?}");
+    let _ = write!(HashWriter(&mut h), "{:?}", f.kind);
     h.finish()
 }
 
@@ -453,6 +462,27 @@ impl Rebuilder {
         Ok((build, state))
     }
 
+    /// The stage of feature `id` in `features` as its dialog shows it ([`Stage`]: the body an
+    /// Add adds over the parts before it, the material a Remove takes out of them), worked out
+    /// again on the cached parts before it; the cache and the last rebuild stay as they were.
+    /// `None` for a feature without one (a New, a failing feature).
+    pub fn stage_of(&mut self, features: &[Feature], id: FeatureId) -> Option<Stage> {
+        let i = features.iter().position(|f| f.id == id)?;
+        self.rebuild(&features[..i]);
+        let before = self.last.clone();
+        let stage_for = self.stage_for.replace(id);
+        let output = catch_unwind(AssertUnwindSafe(|| self.compute(&features[..i], &features[i], &before)));
+        self.stage_for = stage_for;
+        // The parts it made are nobody's: only the stage is kept.
+        if let Ok(o) = &output {
+            for b in &o.owned {
+                self.release(*b);
+            }
+        }
+        self.rebuild(features);
+        output.ok()?.stage
+    }
+
     /// How many feature outputs are cached.
     pub fn cached(&self) -> usize {
         self.entries.len()
@@ -486,7 +516,7 @@ impl Rebuilder {
         }
         for i in 0..last.map_or(0, |l| l + 1) {
             let f = &features[i];
-            key = chain_key(key, &f.kind);
+            key = chain_key(key, f);
             if !f.is_part_feature() {
                 continue;
             }
@@ -599,7 +629,7 @@ impl Rebuilder {
         // sketch being drawn at the end of the list costs nothing).
         for f in &features[..last.map_or(0, |l| l + 1)] {
             let Some(sk) = f.sketch() else { continue };
-            let k = chain_key(0, &f.kind);
+            let k = chain_key(0, f);
             let t = match self.sketch_times.get(&f.id) {
                 Some((key, t)) if *key == k => *t,
                 _ => {
@@ -1062,6 +1092,8 @@ impl Rebuilder {
             #[cfg(feature = "occt")]
             FeatureKind::Shell(x) => self.shell(f.id, x, state).unwrap_or_else(fail),
             #[cfg(feature = "occt")]
+            FeatureKind::DirectEdit(x) => self.direct_edit(f.id, x, state).unwrap_or_else(fail),
+            #[cfg(feature = "occt")]
             FeatureKind::Hole(x) => self.hole(before, f.id, x, state).unwrap_or_else(fail),
             #[cfg(feature = "occt")]
             FeatureKind::Plane(x) => self.plane(before, f.id, x, state).unwrap_or_else(fail),
@@ -1144,7 +1176,7 @@ impl Rebuilder {
                 fail("This feature needs the solid-modelling kernel".into())
             }
             #[cfg(not(feature = "occt"))]
-            FeatureKind::Fillet(_) | FeatureKind::Chamfer(_) | FeatureKind::Shell(_) | FeatureKind::Hole(_) => {
+            FeatureKind::Fillet(_) | FeatureKind::Chamfer(_) | FeatureKind::Shell(_) | FeatureKind::Hole(_) | FeatureKind::DirectEdit(_) => {
                 fail("This feature needs the solid-modelling kernel".into())
             }
             #[cfg(not(feature = "occt"))]
@@ -1533,6 +1565,10 @@ mod kernel_ops {
             }
             // The swept geometry of this extrude, for its faces' names, frames and silhouettes.
             let n0 = dir0.map_or([0.0, 0.0, 1.0], |d| [d.x, d.y, d.z]);
+            // Where the first sweep starts and the way it goes (after the flip), for the
+            // dialog's arrow: a Remove consumes the faces it starts from, so the parts after it
+            // can't tell.
+            let along = sweeps.first().zip(dir0).map(|((p, _), d)| ([p.plane.origin.x, p.plane.origin.y, p.plane.origin.z], [d.x, d.y, d.z]));
             let mut geoms = (*state.geoms).clone();
             geoms.insert(op, Arc::new(crate::brep::OpGeom::new(&groups, n0, e.depth)));
             let geoms = Arc::new(geoms);
@@ -1561,6 +1597,7 @@ mod kernel_ops {
             };
             self.combine(id, &merge, tool, state, geoms).map(|mut o| {
                 o.warning = o.warning.or(missing_error);
+                o.axis = along;
                 o
             })
         }
@@ -1582,6 +1619,9 @@ mod kernel_ops {
             } else {
                 self.contacts(tool.0, state)
             };
+            // The dialog's preview of a Remove: the material it takes out of the parts.
+            let removed = (self.stage_for == Some(id) && e.op == BooleanOp::Remove && !surface)
+                .then(|| self.removed_volume(id, &tool, &Self::scope(e, state, &contacts), state, &geoms));
             // The dialog's preview of an Add: the new body over the parts as they were.
             let joins = e.merge_all || !e.scope.is_empty() || !contacts.touches.is_empty();
             let stage = (self.stage_for == Some(id) && e.op == BooleanOp::Add && !surface && joins)
@@ -1591,13 +1631,80 @@ mod kernel_ops {
                     before: state.parts.iter().map(|p| p.part.clone()).collect(),
                     tool: Arc::new(s),
                     more: Vec::new(),
+                    remove: false,
                 });
             let result = self.apply_extrude_op(id, e, tool, state, &contacts, geoms);
             result.map(|mut o| {
-                o.stage = stage;
+                let cut = removed.and_then(|mut v| {
+                    let first = (!v.is_empty()).then(|| v.remove(0))?;
+                    Some(Stage {
+                        before: o.state.parts.iter().map(|p| p.part.clone()).collect(),
+                        tool: first,
+                        more: v,
+                        remove: true,
+                    })
+                });
+                o.stage = stage.or(cut);
                 o.contacts = Some(contacts);
                 o
             })
+        }
+
+        /// The parts a new body's boolean works on: all solids (Merge with all), the Merge
+        /// scope's, else the ones it touches (Add) or overlaps (Remove, Intersect).
+        fn scope(e: &Merge, state: &State, contacts: &Contacts) -> Vec<PartId> {
+            let solids: Vec<PartId> = state
+                .parts
+                .iter()
+                .filter(|p| p.part.kind == PartKind::Solid)
+                .map(|p| p.part.id)
+                .collect();
+            if e.merge_all {
+                solids
+            } else if !e.scope.is_empty() {
+                e.scope.iter().copied().filter(|p| solids.contains(p)).collect()
+            } else {
+                match e.op {
+                    BooleanOp::Add => contacts.touches.clone(),
+                    _ => contacts.overlaps.clone(),
+                }
+            }
+        }
+
+        /// What a Remove takes out of the `scope` parts: the tool's intersection with each, else
+        /// (none worked out) the whole tool.
+        fn removed_volume(
+            &mut self,
+            id: FeatureId,
+            tool: &(BodyId, BodyNames),
+            scope: &[PartId],
+            state: &State,
+            geoms: &crate::brep::Geoms,
+        ) -> Vec<Arc<crate::solid::Solid>> {
+            let mut out = Vec::new();
+            for part in scope {
+                let Some(p) = state.part(*part) else { continue };
+                let Some(body) = p.body else { continue };
+                let Ok(r) = self.kernel.boolean(BoolOp::Intersect, body, &[tool.0]) else { continue };
+                let inputs = [(body, &*p.names), (tool.0, &tool.1)];
+                for b in r.bodies {
+                    let solid = naming::name_body(&self.kernel, b, id.0, &r.history, &inputs)
+                        .map_err(|e| e.to_string())
+                        .and_then(|names| crate::brep::solid_of(&self.kernel, b, &names, geoms, Some(id.0)));
+                    if let Ok(s) = solid
+                        && !s.faces.is_empty()
+                    {
+                        out.push(Arc::new(s));
+                    }
+                    self.kernel.release(b);
+                }
+            }
+            if out.is_empty()
+                && let Ok(s) = crate::brep::solid_of(&self.kernel, tool.0, &tool.1, geoms, Some(id.0))
+            {
+                out.push(Arc::new(s));
+            }
+            out
         }
 
         /// Applies a new body's boolean to the parts (`tool` is released).
@@ -1612,22 +1719,7 @@ mod kernel_ops {
         ) -> Result<Output, String> {
             let op = id.0;
             let surface = e.surface;
-            let solids: Vec<PartId> = state
-                .parts
-                .iter()
-                .filter(|p| p.part.kind == PartKind::Solid)
-                .map(|p| p.part.id)
-                .collect();
-            let scope: Vec<PartId> = if e.merge_all {
-                solids.clone()
-            } else if !e.scope.is_empty() {
-                e.scope.iter().copied().filter(|p| solids.contains(p)).collect()
-            } else {
-                match e.op {
-                    BooleanOp::Add => contacts.touches.clone(),
-                    _ => contacts.overlaps.clone(),
-                }
-            };
+            let scope = Self::scope(e, state, contacts);
             let mut next = State {
                 geoms: geoms.clone(),
                 ..(**state).clone()
@@ -2952,6 +3044,12 @@ pub fn run_on_worker<T: Send + 'static>(f: impl FnOnce(&mut Rebuilder) -> T + Se
     }));
     let _ = worker().lock().map(|tx| tx.send(job));
     PendingJob { rx: Mutex::new(rx) }
+}
+
+/// Works out the stage of feature `id` (an Add's or a Remove's change, [`Rebuilder::stage_of`])
+/// on the kernel thread: the feature list's hover shows it.
+pub fn request_stage(features: Vec<Feature>, id: FeatureId) -> PendingJob<Option<Stage>> {
+    run_on_worker(move |r| r.stage_of(&features, id))
 }
 
 /// The Document menu's Full rebuild: drops everything the rebuild thread has cached (it starts
