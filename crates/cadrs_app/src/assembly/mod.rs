@@ -444,11 +444,11 @@ pub fn update_assembly_parts(doc: &ActiveDocument, el: &Element, cache: &mut Par
             footprints: out.footprints.iter().filter_map(|(q, f)| Some((id(q)?, *f))).collect(),
             ..Default::default()
         };
-        // Its components running into the other instances (on their meshes, as a Part
-        // Studio's derived board checks them).
+        // Its components running into the other instances, hidden or not (on their meshes, as
+        // a Part Studio's derived board checks them).
         let solid = |p: &PartId| cache.parts.iter().find(|x| x.id == *p).map(|x| (x.id, x.solid.clone()));
         let comps: Vec<(PartId, Arc<cadrs_core::solid::Solid>)> = mine.footprints.iter().filter_map(|(p, _)| solid(p)).collect();
-        let others: Vec<(PartId, Arc<cadrs_core::solid::Solid>)> = cache.parts.iter().filter(|x| !ids.values().any(|v| *v == x.id) && !cache.is_hidden(x.id)).map(|x| (x.id, x.solid.clone())).collect();
+        let others: Vec<(PartId, Arc<cadrs_core::solid::Solid>)> = cache.parts.iter().filter(|x| !ids.values().any(|v| *v == x.id)).map(|x| (x.id, x.solid.clone())).collect();
         if let Some(frame) = mine.boards.first().map(|b| b.frame) {
             let c: Vec<(PartId, &Arc<cadrs_core::solid::Solid>)> = comps.iter().map(|(p, s)| (*p, s)).collect();
             let o: Vec<(PartId, &Arc<cadrs_core::solid::Solid>)> = others.iter().map(|(p, s)| (*p, s)).collect();

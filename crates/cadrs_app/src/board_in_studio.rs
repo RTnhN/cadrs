@@ -578,23 +578,17 @@ fn sync_fit_buttons(world: &mut World) {
             instance_board(doc, h.target.feature)?;
             let cache = world.resource::<PartCache>();
             let name = |p: PartId| cache.part(p).map(|x| cadrs_core::parts::display_name(x, &cache.props).to_string()).unwrap_or_default();
-            // One line: each component with what it runs into (at most three named).
+            // One line: each part run into, with the components (by reference) in its way.
             let mut by: Vec<(PartId, Vec<String>)> = vec![];
             for c in &cache.derived.get(&h.target.feature)?.collisions {
-                match by.iter_mut().find(|(p, _)| *p == c.component) {
-                    Some((_, o)) => o.push(name(c.other)),
-                    None => by.push((c.component, vec![name(c.other)])),
+                let r = name(c.component).split_whitespace().next().unwrap_or_default().to_string();
+                match by.iter_mut().find(|(p, _)| *p == c.other) {
+                    Some((_, v)) => v.push(r),
+                    None => by.push((c.other, vec![r])),
                 }
             }
-            let lines: Vec<String> = by
-                .iter()
-                .map(|(p, o)| {
-                    let more = o.len().saturating_sub(3);
-                    let list = o.iter().take(3).cloned().collect::<Vec<_>>().join(", ");
-                    if more > 0 { format!("{} runs into {list} and {more} more", name(*p)) } else { format!("{} runs into {list}", name(*p)) }
-                })
-                .collect();
-            (!lines.is_empty()).then(|| format!("⚠ {}", lines.join("; ")))
+            let lines: Vec<String> = by.iter().map(|(p, v)| format!("{}: {}", name(*p), v.join(", "))).collect();
+            (!lines.is_empty()).then(|| format!("⚠ Components run into {}", lines.join(" · ")))
         })
     });
     let mut q = world.query::<(Entity, &Name)>();
@@ -1262,8 +1256,11 @@ mod tests {
         // From above, straight down onto C1 (on the top face): C1, at its origin.
         let down = component_under(&w, &host, at + Vec3::Z * 100.0, -Vec3::Z);
         assert_eq!(down, Some((c1.id, c1.placement.at)));
-        // From below at the same place: the board's bottom face comes first, nothing is picked.
-        assert_eq!(component_under(&w, &host, at - Vec3::Z * 100.0, Vec3::Z).map(|(id, _)| id).filter(|id| *id == c1.id), None);
+        // From below at the same place: the board's bottom face comes before C1; only a
+        // component on the bottom could be picked.
+        let up = component_under(&w, &host, at - Vec3::Z * 100.0, Vec3::Z);
+        let side = |id: uuid::Uuid| layout.footprints.iter().find(|f| f.id == id).map(|f| f.placement.side);
+        assert!(up.is_none_or(|(id, _)| side(id) == Some(cadrs_eda::layer::Side::Bottom)), "{up:?}");
         // Beside the board: nothing.
         assert_eq!(component_under(&w, &host, at + Vec3::new(200.0, 0.0, 100.0), -Vec3::Z), None);
     }

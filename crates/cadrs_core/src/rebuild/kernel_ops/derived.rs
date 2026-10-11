@@ -322,8 +322,9 @@ impl Rebuilder {
         let green = crate::appearance::Appearance::rgb(mask[0], mask[1], mask[2]);
         let mut palette = next.next_part;
         let mut failure = None;
-        // Each earlier copy's board and components.
+        // Each earlier copy's board and components; each copy's components and frame.
         let mut earlier: Vec<(PartId, Arc<crate::solid::Solid>)> = Vec::new();
+        let mut copies: Vec<(Vec<(PartId, Arc<crate::solid::Solid>)>, PlaneFrame)> = Vec::new();
         for (k, loc) in locations.iter().enumerate() {
             let m = motion_between(&base, loc);
             let label = |n: &str| if several { format!("{n} ({})", k + 1) } else { n.to_string() };
@@ -393,9 +394,20 @@ impl Rebuilder {
                 out.footprints.push((pid, c.footprint));
             }
             earlier.extend(placed.iter().cloned());
+            copies.push((placed.clone(), frame));
             let comps: Vec<(PartId, &Arc<crate::solid::Solid>)> = placed.iter().map(|(n, s)| (*n, s)).collect();
             let others: Vec<(PartId, &Arc<crate::solid::Solid>)> = before_parts.iter().map(|(n, s)| (*n, s)).collect();
             out.collisions.extend(crate::pcb::fit::collisions(&comps, &others, &frame));
+        }
+        // A copy's components into a later copy's board (the other way round, and component
+        // against component, the loop checked).
+        for (k, (comps, frame)) in copies.iter().enumerate() {
+            let later: Vec<(PartId, &Arc<crate::solid::Solid>)> = out.boards[k + 1..].iter().filter_map(|b| next.parts.iter().find(|p| p.part.id == b.part).map(|p| (b.part, &p.part.solid))).collect();
+            if later.is_empty() {
+                continue;
+            }
+            let c: Vec<(PartId, &Arc<crate::solid::Solid>)> = comps.iter().map(|(p, s)| (*p, s)).collect();
+            out.collisions.extend(crate::pcb::fit::collisions(&c, &later, frame));
         }
         // (The board's body stays: it is kept for the next rebuild, `board_body_cached`.)
         if let Some(e) = failure {
