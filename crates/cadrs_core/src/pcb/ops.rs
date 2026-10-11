@@ -278,6 +278,25 @@ pub fn axes_of_part(doc: &Document, studio: ElementId, feature: FeatureId, part:
     Ok(axes)
 }
 
+/// Where the mate connector `connector` (by its name in the Feature list) of the Part Studio
+/// `studio` stands on the board derived there by `feature` (copy `copy`): its origin on the
+/// board (layout mm), if its Z axis is square to the board (a connector on a pin's end, a
+/// socket's axis).
+pub fn connector_on_board(doc: &Document, studio: ElementId, feature: FeatureId, connector: &str, copy: usize) -> Result<[f64; 2], String> {
+    let el = doc.element(studio).ok_or("no such Part Studio")?;
+    let id = el.features().iter().find(|f| f.name == connector && matches!(f.kind, FeatureKind::MateConnector(_))).map(|f| f.id).ok_or_else(|| format!("no mate connector {connector:?} in {}", el.name))?;
+    let build = crate::rebuild::build(el.features());
+    let c = build.connectors.get(&id).ok_or_else(|| format!("{connector} didn't build"))?;
+    let b = build.derived.get(&feature).and_then(|o| o.boards.get(copy)).ok_or("the feature derives no such board copy")?;
+    match super::fit::connector_entity(c, &b.frame) {
+        super::fit::Entity::Axis(p, _) => {
+            let q = super::frames::to_board(&b.frame, p);
+            Ok([q[0], q[1]])
+        }
+        _ => Err(format!("{connector}'s Z axis isn't square to the board: a pad goes onto an axis through the board")),
+    }
+}
+
 /// The Derived feature of the Part Studio `studio` that derives the board `board` (the first).
 pub fn deriving_feature(doc: &Document, studio: ElementId, pcb: ElementId, board: BoardId) -> Option<FeatureId> {
     doc.element(studio)?.features().iter().find_map(|f| match &f.kind {

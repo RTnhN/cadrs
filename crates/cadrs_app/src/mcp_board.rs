@@ -211,8 +211,19 @@ pub fn move_footprint(world: &mut World, p: &tools::MoveFootprint) -> Result<Val
     };
     let side = side(p.side.as_deref())?;
     // A pad onto a part's pin: the axis nearest the pad (after any turn or flip asked for).
-    let onto = match &p.onto_part {
-        Some(part) => {
+    let onto = match (&p.onto_part, &p.onto_connector) {
+        (Some(_), Some(_)) => return Err("give onto_part or onto_connector, not both".into()),
+        (None, Some(c)) => {
+            let pad = p.pad.clone().ok_or("onto_connector needs the pad to centre")?;
+            let (pcb, id) = board(world, &p.board)?;
+            let ps = studio(world, p.part_studio.as_deref())?;
+            let d = &doc(world)?.doc;
+            let f = ops::deriving_feature(d, ps, pcb, id).ok_or("the board isn't derived into that Part Studio")?;
+            let copies = cadrs_core::rebuild::build(d.element(ps).ok_or("no Part Studio")?.features()).derived.get(&f).map_or(0, |o| o.boards.len());
+            let at = ops::connector_on_board(d, ps, f, c, copy_index(p.copy, copies)?)?;
+            Some((pad, vec![(at, 0.0)]))
+        }
+        (Some(part), None) => {
             let pad = p.pad.clone().ok_or("onto_part needs the pad to centre")?;
             let (pcb, id) = board(world, &p.board)?;
             let ps = studio(world, p.part_studio.as_deref())?;
@@ -222,7 +233,7 @@ pub fn move_footprint(world: &mut World, p: &tools::MoveFootprint) -> Result<Val
             let axes = ops::axes_of_part(d, ps, f, part, copy_index(p.copy, copies)?)?;
             Some((pad, axes))
         }
-        None => None,
+        (None, None) => None,
     };
     let label = format!("Move {}", p.reference);
     let reference = p.reference.clone();
@@ -332,6 +343,19 @@ mod tests {
         create_board_from_sketch(&mut w, &args(json!({ "sketch": "Sketch 2", "name": "Plate" }))).unwrap();
         let r3 = report(&w, board_of(&w, "Plate")).unwrap();
         assert_eq!(size(&r3), (44.0, 44.0));
+    }
+
+    #[test]
+    fn a_pad_goes_onto_a_mate_connectors_axis() {
+        // Board location (its Z up, square to the board) is where the outline's centre is:
+        // layout (15.5, 19.5).
+        let mut w = world();
+        derive_board(&mut w, &args(json!({ "board": "AC sensor", "location": "Board location 1" }))).unwrap();
+        let r = move_footprint(&mut w, &args(json!({ "board": "AC sensor", "reference": "J4", "pad": "1", "onto_connector": "Board location 1" }))).unwrap();
+        let pad = r["footprints"].as_array().unwrap().iter().find(|f| f["reference"] == "J4").unwrap()["pads"].as_array().unwrap().iter().find(|p| p["number"] == "1").unwrap()["at"].clone();
+        let at: Vec<f64> = pad.as_array().unwrap().iter().map(|v| v.as_f64().unwrap()).collect();
+        assert!((at[0] - 15.5).abs() < 1e-3 && (at[1] - 19.5).abs() < 1e-3, "{pad}");
+        assert!(move_footprint(&mut w, &args(json!({ "board": "AC sensor", "reference": "J4", "pad": "1", "onto_connector": "Nope" }))).unwrap_err().contains("no mate connector"));
     }
 
     fn board_of(w: &World, name: &str) -> (ElementId, BoardId) {

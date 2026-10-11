@@ -480,6 +480,10 @@ pub struct MoveFootprint {
     /// onto the axis nearest it (or `axis`, by its index in get_board_fit's list).
     #[serde(default)]
     pub onto_part: Option<String>,
+    /// Or a mate connector (its name in the Feature list) whose Z axis stands square to the
+    /// board: the pad goes onto that axis.
+    #[serde(default)]
+    pub onto_connector: Option<String>,
     /// Which of the part's axes (0 first); omitted: the nearest to the pad.
     #[serde(default)]
     pub axis: Option<usize>,
