@@ -447,7 +447,10 @@ pub fn update_assembly_parts(doc: &ActiveDocument, el: &Element, cache: &mut Par
         hosts.push((FeatureId(o.id.0), o.element, b, o.pose, ids));
     }
     if let Ok(mut t) = BOARD_HOSTS.write() {
-        t.get_or_insert_with(HashMap::new).insert(el.id, hosts.iter().map(|h| (h.0, h.1, h.2)).collect());
+        let t = t.get_or_insert_with(HashMap::new);
+        // (Only this document's assemblies: a closed one's entries go.)
+        t.retain(|a, _| doc.doc.element(*a).is_some());
+        t.insert(el.id, hosts.iter().map(|h| (h.0, h.1, h.2)).collect());
     }
     let mut boards = HashMap::new();
     for (key, element, b, p, ids) in hosts {
