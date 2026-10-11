@@ -53,22 +53,37 @@ the 3D viewport, and (c) a sketch → outline link.
 3. **Only workspace references in this document are editable.** A Derived board from a version
    or another document is read-only (as derived parts are), with "Open linked document" to edit
    it at the source.
-4. **Board geometry becomes real parts** (kernel bodies, named faces), so everything that works
-   on parts works on the board and its components: mates, mate connectors, Measure, sketch on a
-   face, Use edges, interference, section view, STEP export, drawings, BOM.
+4. **The board is a real part; components are display-mesh parts** (answer Q1). The board body
+   is a kernel solid (cheap: an extruded outline), so sketch on its face, Use its edges, mate to
+   it and Measure work. Each component is a part with a `Solid` built from its model's
+   triangles and **no kernel body** (`PartState::body = None`, already allowed): visible,
+   selectable, hideable, in the BOM, with mate connectors on its planar faces (found from the
+   mesh, 5), measurable by triangles, but left out of booleans and exact interference.
+   Rebuilds stay fast whatever the STEP files weigh.
 5. **Stable ids from the layout's ids.** The board part's id comes from (Derived feature,
    "board"); each component part's from (Derived feature, footprint `Uuid`, copy). Moving,
    rotating or re-annotating a footprint keeps its part id and face names, so a mate to J1's
    face, or a sketch that Uses an edge of the board, survives layout edits.
-6. **Move the board → B-rep builder into `cadrs_core`** (`rebuild/kernel_ops/board.rs`), with
-   `cadrs_pcb::step` calling it for STEP export. `cadrs_core` already depends on `cadrs_eda`
-   and the kernel, so no new dependency.
+6. **Move the board builder into `cadrs_core`** (`rebuild/kernel_ops/board.rs`: board solid +
+   component meshes), with `cadrs_pcb::step` keeping the STEP-export path (models as solids,
+   for export only) on top of it. `cadrs_core` already depends on `cadrs_eda` and the kernel,
+   so no new dependency.
 7. **The layout tools become host-agnostic.** They already work in board coordinates through
    `EdaClick { at: Pt }`; we lift "where am I and where do I commit" into a `LayoutHost`
    (2D PCB Studio view or a board plane in the 3D viewport) instead of copying them.
 8. **Dragging never touches the kernel.** During a drag the component's display meshes are
-   moved by the delta transform; the kernel rebuild happens once, on release, and is cheap
-   because model bodies are cached per model file + model transform.
+   moved by the delta transform; the rebuild happens once, on release, and is cheap because
+   component meshes are cached per model file + model transform and only re-placed.
+
+### 3.1 Answers to the questionnaire (2026-10-11)
+
+| # | Question | Answer | Where it changes the plan |
+|---|---|---|---|
+| Q1 | Component models: kernel solids or display meshes? | **Display meshes only** | Decision 4, sections 5 and 7.3 (mesh-based clearance, align), P1/P4, risks |
+| Q2 | What the Part Studio edit mode allows | **Everything** the PCB Studio layout does (route, vias, zones, text, graphics, outline, keep-outs, placement) | 7.1: the full tool strip and layers panel |
+| Q3 | Sketch-linked outline: live or one-shot | **Live** (Break link to edit by hand) | 8.3 as written |
+| Q4 | Default seat on the sketch plane / location | **Bottom face** (board grows along the normal) | `BoardSeat::Bottom` default, as written |
+| Q5 | Boards in Assemblies | **Direct insert and via a Part Studio** | Section 9 / P6 as written |
 
 ## 4. Data model changes
 
@@ -184,25 +199,31 @@ Moved from `cadrs_pcb::step` and extended:
 - **Board body**: outline loops (`pcb::design::outline_loops`) extruded by the stackup
   thickness, less cut-outs and plated/NPTH holes (option: drill holes ≥ 0.8 mm only, to keep
   face counts sane). One part, "Board [<board>]", PCB green appearance.
-- **Components**: per footprint with a visible model: the STEP file as kernel bodies, VRML/OBJ
-  as sewn solids (as Import does for STL), else the generated `model3d` body. One part per
-  footprint, named "`<ref> <value>`" (e.g. "J1 AC inlet"), with per-face appearances from the
-  model's colours. Placed with `placement_motion` (board frame: bottom face z = 0) then the
+- **Components (display meshes, Q1)**: per footprint with a visible model, its meshes exactly
+  as the PCB Studio's 3D view makes them (`cadrs_pcb::mesh::{file_bodies, generated_bodies}`,
+  moved down to core: STEP tessellated, VRML/OBJ as is, else the generated `model3d` body).
+  One part per footprint, named "`<ref> <value>`" (e.g. "J1 AC inlet"), a `Solid` with no
+  kernel body; its triangles grouped into **faces** by model shape and colour, and each group
+  split further into planar patches (coplanar triangles within 0.01°/1 µm) so a planar patch
+  gets a `PlaneFrame` (sketchable, implicit mate connector) and a circular-looking patch gets
+  a fitted axis (cylinder fit within 5 µm; implicit connector on its axis). Per-face colours
+  from the model. Placed with `placement_motion` (board frame: bottom face z = 0) then the
   Derived location motion.
-- **Mesh-only fallback**: a model that won't sew becomes a part with a `Solid` but no kernel
-  body (`PartState::body = None`, already allowed): visible, pickable, measurable by
-  triangles, excluded from booleans; flagged in the feature's warnings.
-- **Caching** (decision 8): `Rebuilder` keeps `model bodies` keyed by
+- **What mesh parts can't do** (shown as a tooltip, not an error): booleans, fillets and other
+  modelling features skip them with a message; mass properties use the closed mesh volume when
+  it is closed, else are left out; STEP export of the Part Studio writes them as faceted
+  shells (or, better, re-runs the `cadrs_pcb::step` solid path for export only).
+- **Caching** (decision 8): `Rebuilder` keeps component meshes keyed by
   (blob hash, model offset/rotation/scale) and the board body keyed by (outline + holes hash,
-  thickness). Moving a footprint then costs one `transform_motion` + `solid_of` for that part.
-  Parts whose footprint didn't change are reused from the previous output (diff by footprint
-  `Uuid` + placement).
+  thickness). Moving a footprint then costs one mesh transform for that part. Parts whose
+  footprint didn't change are reused from the previous output (diff by footprint `Uuid` +
+  placement).
 - **Skins**: generalise `SolidImage` to "a texture on a planar face region" (face name + UV
   frame) and attach the top/bottom `board_surface` renders (existing `skins()` code, moved to a
   non-app helper that produces RGBA + UV frame). Rendered at a resolution that follows board
   size, capped (e.g. 4k px), regenerated only when the copper/silk/mask hash changes, not when
   footprints move (pads are on the skin, models are parts).
-- **Ids** (decision 5): faces `FaceOrigin::Imported { body, face }` under
+- **Ids** (decision 5): faces `FaceOrigin::Imported { body: shape index, face: patch index }` under
   `derived_entity(feature, footprint id, copy)`, so per-component naming is independent of
   other components and of order.
 - **DerivedOutput** lists the board part, the component parts (grouped under "Components" in
@@ -242,9 +263,11 @@ Derived row's pencil) enters **board edit mode** for that copy. Esc / ✓ leaves
   (the in-context opacity slider, reused).
 - The board shows its layout on its plane plus the components' 3D models (ghosted by default,
   a toggle for solid).
-- The **layout tool strip** of the PCB Studio appears at the top (select/move, rotate, flip,
-  outline, keep-out, ruler; routing and zones too — they work, but the plan's focus is
-  placement), with the layers panel.
+- The **full layout tool strip** of the PCB Studio appears at the top (Q2: everything —
+  select/move, rotate, flip, route, vias, zones + fill, lines/rects/circles/text/graphics on
+  any layer, outline, keep-outs, ruler, DRC), with the layers panel, net highlight and the
+  same keys. Copper, silk and zones are drawn on the board plane while editing; the board
+  skin texture is regenerated when leaving the tool (or after an idle moment), not per stroke.
 - **N** looks normal to the board (top), **Shift+N** from the bottom; the camera keeps
   orbiting otherwise. Drawing in perspective works because the pointer is mapped through a
   ray-plane intersection (the same projective mapping sketches use since `b2a916d`).
@@ -283,13 +306,16 @@ Derived row's pencil) enters **board edit mode** for that copy. Esc / ✓ leaves
    (same inference style as sketches; hold Alt to disable).
 3. **Live gap readouts**: for the moving component, the free distance to the nearest part
    along ±X/±Y of the board and above it (Z), as dimension labels; red when < the clearance
-   setting. Computed on display meshes (BVH) per frame; exact (kernel distance) on release.
-4. **Collision highlight**: a component whose model intersects another part turns red during
-   the drag; on release, an exact interference check (kernel boolean/distance) is cached and
-   shown as a warning on the Derived feature ("J1 intersects End plate by 0.4 mm").
-5. **Align footprint** tool: pick an entity of the component (face, edge, cylinder axis, mate
-   connector of its model), then a target in the Part Studio (face, edge, axis, mate
-   connector). The footprint moves **in the board plane only** (and optionally turns by the
+   setting. Computed mesh-to-mesh (component triangles against the other parts' display
+   triangles, BVH) per frame and again on release; the precision is the tessellation's
+   (chord tolerance shown in the readout's tooltip; refine the other parts' tessellation
+   locally near the component when the gap is under 1 mm).
+4. **Collision highlight**: a component whose model's triangles intersect another part's turn
+   red during the drag; on release the result is cached and shown as a warning on the Derived
+   feature ("J1 intersects End plate by ≈0.4 mm"). Mesh-based (Q1), so no kernel booleans.
+5. **Align footprint** tool: pick an entity of the component (a planar patch, a fitted
+   cylinder axis, an edge of its mesh, a mate connector on it), then a target in the Part
+   Studio (exact face, edge, axis or mate connector). The footprint moves **in the board plane only** (and optionally turns by the
    in-plane angle) so the two coincide in the plane, with an offset field. This is the
    "connector to plug" operation in one step. Out-of-plane mismatch is reported (it is the
    board's placement that must change).
@@ -351,8 +377,10 @@ where it is visual. The acceptance model is the user's screenshot: a stand-in en
 native board with J1 (inlet connector), a large capacitor and a few SMD parts.
 
 **P0 — groundwork (no user-visible change)**
-- Move the board → kernel builder from `cadrs_pcb::step` into `cadrs_core::rebuild::kernel_ops::board`;
-  `cadrs_pcb::step` calls it. Test: STEP export unchanged (existing tests).
+- Move the board builder into `cadrs_core::rebuild::kernel_ops::board` (board solid from
+  `cadrs_pcb::step`, component meshes from `cadrs_pcb::mesh::{file_bodies, generated_bodies}`
+  and the VRML/OBJ/STEP model mesh loading from `cadrs_app::pcb::view::PcbMeshCache`);
+  `cadrs_pcb::step` keeps its solid-model export on top. Test: STEP export unchanged.
 - `Design` hash (stable, serialised) and `Board::origin`.
 - `LayoutHost` refactor of `eda::{mod, layout_tools, layers_panel}`; the PCB Studio keeps
   working through `Host::PcbStudio2d`. All existing EDA scenarios/goldens must still pass.
@@ -362,10 +390,12 @@ native board with J1 (inlet connector), a large capacitor and a few SMD parts.
 - `DerivedBoard`, refresh, check, Debug/hash; source picker lists PCB Studio boards
   ("Boards" section under Current document; versions and other documents through the existing
   browser). Board options in the dialog (components filter, skins, seat).
-- Rebuild: board + component parts with stable ids, caching, mesh-only fallback, warnings.
+- Rebuild: board solid + component mesh parts (planar patches and fitted axes as faces) with
+  stable ids, caching, warnings; modelling features skip mesh parts with a message.
 - Feature list children (Board, Components).
-- Tests: ids stable across footprint move/rotate/re-annotate; a mate connector on J1's face
-  survives a layout move; the refresh follows a `SetDesign` in the PCB Studio; version refs
+- Tests: ids stable across footprint move/rotate/re-annotate; a mate connector on a planar
+  patch of J1's mesh survives a layout move; patch/axis detection on a generated chip and pin
+  header body (known planes and pin axes); the refresh follows a `SetDesign` in the PCB Studio; version refs
   frozen; cycle refusals. Scenario `pcb_derived_board`.
 
 **P2 — 3D ↔ Layout toggle**
@@ -373,17 +403,21 @@ native board with J1 (inlet connector), a large capacitor and a few SMD parts.
   visibility. Golden `pcb_derived_board_layout` (same camera, both views).
 
 **P3 — Edit layout in the Part Studio**
-- Edit mode entry/exit, `navigate3d`, layout tool strip in the Part Studio, hit testing
+- Edit mode entry/exit, `navigate3d`, the full layout tool strip and layers panel in the Part
+  Studio (route, vias, zones, drawing, text, outline, keep-outs, DRC), hit testing
   (layout first, then model triangles), live drag preview of component meshes, rotate/flip,
   properties dialog, N/Shift+N. Commit via `SetDesign`; undo from the Part Studio.
 - Scenario `pcb_edit_in_part_studio`: move J1 with the mouse in a perspective view, check its
-  new board coordinates and that its part kept its id; undo restores both.
+  new board coordinates and that its part kept its id; undo restores both; route one track and
+  fill a zone on the board plane, check the design.
 
 **P4 — Fitting aids**
-- Projected context outlines, snapping, gap readouts, collision highlight + exact check on
-  release, **Align footprint** tool, Move by…, keep-outs from parts, mechanical-context DRC.
+- Projected context outlines, snapping, mesh-to-mesh gap readouts and collision highlight
+  (BVH), **Align footprint** tool, Move by…, keep-outs from parts, mechanical-context DRC.
 - Tests (pure core): slab section/projection of a box at known positions; align solves the
-  right in-plane translation/rotation for face–face, axis–axis and connector–connector picks.
+  right in-plane translation/rotation for face–face, axis–axis and connector–connector picks
+  (component side from mesh patches, target side exact); mesh gap of two boxes within the
+  tessellation tolerance.
 - Scenario `pcb_fit_connector`: align J1 to the plug, then fit the large capacitor between the
   wall and J1 with 0.5 mm gaps (readouts asserted).
 
@@ -405,15 +439,20 @@ native board with J1 (inlet connector), a large capacitor and a few SMD parts.
 - Drawings: a Derived board in a drawing view shows the 3D or the layout as chosen.
 - MCP tools (`cadrs_mcp`): `derive_board`, `create_board_from_sketch`, `move_footprint`
   (board coords or align-to target), `get_board` — so the agent workflow can do the fitting.
-- STEP export of a Part Studio includes the board parts (free once they are parts).
+- STEP export of a Part Studio writes the board solid and, for the component mesh parts,
+  re-runs the `cadrs_pcb::step` solid path (real STEP models), not faceted shells.
 - IDF boards (non-native) derive as board + package boxes, read-only, no layout view.
 
 ## 11. Risks and how the plan handles them
 
-- **Heavy STEP models** (connectors with thousands of faces): cache per blob; option to show
-  only the bounding box per component while editing; mesh-only fallback; build component
-  bodies on the kernel thread like other rebuilds (the Part Studio stays responsive and shows
-  the previous output).
+- **Heavy STEP models**: Q1 (display meshes) removes the kernel cost from rebuilds; the
+  one-off tessellation is cached per blob and done off the main thread (the previous output
+  stays shown meanwhile).
+- **Mesh parts are second-class** (Q1): no booleans, no exact interference, gaps only as
+  precise as the tessellation. Mitigations: planar patches and fitted axes make mating and
+  aligning exact enough; local tessellation refinement near tight gaps; the STEP-export path
+  still has the real solids if an exact check is ever needed (a later "Check interference
+  exactly" command could build them on demand).
 - **Rebuild cost per layout edit**: diff by footprint id; only moved components re-transform;
   skins don't change on moves; board body only on outline/hole change.
 - **Embedded design size** in the document file: strip the schematic; consider storing the
@@ -427,14 +466,6 @@ native board with J1 (inlet connector), a large capacitor and a few SMD parts.
 - **Undo scope**: commands that touch the PCB Studio and the Part Studio together (Create PCB
   board…, Link outline) use `Scope::Whole`; plain layout moves stay `Scope::Element(pcb)`.
 
-## 12. Open questions for you
+## 12. Open questions
 
-1. **Component models as kernel solids, or display-only?** Recommended: solids (mates, measure,
-   interference, cuts in the end plate all need them), with the mesh-only fallback. Costs build
-   time for big STEP files.
-2. **Routing/zones in the Part Studio edit mode**: allow everything the PCB Studio layout can
-   do, or limit it to placement + outline + keep-outs to keep the strip simple?
-3. **Outline link**: live (recommended) or one-shot "Update outline from sketch" button?
-4. **Seat default**: board's bottom face on the sketch plane (board grows along +normal), or
-   top face on it?
-5. **Assembly insert of boards** (P6) directly, or only via a Part Studio with a Derived board?
+All five were answered on 2026-10-11 (section 3.1). New questions go here.
