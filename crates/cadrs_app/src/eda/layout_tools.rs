@@ -111,6 +111,8 @@ pub struct Moving {
 
 #[derive(Resource, Debug)]
 pub struct LayoutState {
+    /// A board edited in a 3D view: the side it is seen from (its footprints are picked first).
+    pub facing: Option<cadrs_eda::layer::Side>,
     pub tool: Tool,
     pub selection: Vec<BoardItem>,
     pub moving: Option<Moving>,
@@ -139,7 +141,7 @@ pub struct LayoutState {
 
 impl Default for LayoutState {
     fn default() -> Self {
-        LayoutState { tool: Tool::Select, selection: vec![], moving: None, active: Layer::TopCopper, expanded: false, hidden: vec![], dim: false, layers_open: false, draw_layer: Layer::TopSilk, net: None, track_width: None, text_style: TextLook::default(), exact: None }
+        LayoutState { facing: None, tool: Tool::Select, selection: vec![], moving: None, active: Layer::TopCopper, expanded: false, hidden: vec![], dim: false, layers_open: false, draw_layer: Layer::TopSilk, net: None, track_width: None, text_style: TextLook::default(), exact: None }
     }
 }
 
@@ -381,7 +383,7 @@ fn press(w: &mut World, at: Pt, shift: bool) {
     let Some(d) = board_of(w) else { return };
     match tool {
         Tool::Select => {
-            let hit = be::hit(&d.board, at, tolerance(w));
+            let hit = be::hit_from(&d.board, at, tolerance(w), w.resource::<LayoutState>().facing);
             let mut s = w.resource_mut::<LayoutState>();
             s.expanded = false;
             match hit {
@@ -841,7 +843,7 @@ fn publish(s: Res<LayoutState>, eda: Res<super::Eda2d>, mut inputs: ResMut<Scene
 
 /// The footprint a key acts on: the one under the pointer, else the selected one.
 fn target_footprint(w: &World, pointer: Pt) -> Option<uuid::Uuid> {
-    let under = board_of(w).and_then(|d| match be::hit(&d.board, pointer, tolerance(w)) {
+    let under = board_of(w).and_then(|d| match be::hit_from(&d.board, pointer, tolerance(w), w.resource::<LayoutState>().facing) {
         Some(BoardItem::Footprint(id)) => Some(id),
         _ => None,
     });
@@ -851,7 +853,7 @@ fn target_footprint(w: &World, pointer: Pt) -> Option<uuid::Uuid> {
 /// E or a double-click: the properties of the footprint or shape at `at` (else the selected
 /// one).
 fn open_properties(w: &mut World, at: Pt) {
-    let under = board_of(w).and_then(|d| be::hit(&d.board, at, tolerance(w)));
+    let under = board_of(w).and_then(|d| be::hit_from(&d.board, at, tolerance(w), w.resource::<LayoutState>().facing));
     let target = under.or_else(|| w.resource::<LayoutState>().selection.first().copied());
     match target {
         Some(BoardItem::Footprint(id)) => {

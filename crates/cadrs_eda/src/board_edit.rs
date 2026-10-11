@@ -244,6 +244,16 @@ mod tests {
     use super::*;
 
     #[test]
+    fn a_board_seen_from_one_side_picks_that_sides_footprint() {
+        // The AC sensor sample: C1 on top, over PS1 (a large module) on the bottom.
+        let b = crate::ac_board::board(&crate::library::LibraryTable::builtin());
+        let id = |r: &str| b.footprints[footprint_index(&b, r).unwrap()].id;
+        let at = b.footprints[footprint_index(&b, "C1").unwrap()].placement.at;
+        assert_eq!(hit_from(&b, at, 0, Some(crate::layer::Side::Top)), Some(BoardItem::Footprint(id("C1"))));
+        assert_eq!(hit_from(&b, at, 0, Some(crate::layer::Side::Bottom)), Some(BoardItem::Footprint(id("PS1"))));
+    }
+
+    #[test]
     fn postures() {
         let p = Pt::mm;
         assert_eq!(posture(p(0.0, 0.0), p(10.0, 0.0), false).len(), 2);
@@ -285,17 +295,30 @@ fn seg_dist(p: Pt, a: Pt, b: Pt) -> f64 {
 /// The item under `p` (within `tol`): vias, then pads (their footprint), tracks, footprints
 /// by their courtyard or drawing, drawn shapes (the outline), then zones.
 pub fn hit(board: &Board, p: Pt, tol: Nm) -> Option<BoardItem> {
+    hit_from(board, p, tol, None)
+}
+
+/// [`hit`] seen from one side of the board (a 3D view of it from above or below): a footprint on
+/// that side wins over one on the other side under it.
+pub fn hit_from(board: &Board, p: Pt, tol: Nm, side: Option<crate::layer::Side>) -> Option<BoardItem> {
     if let Some(v) = board.vias.iter().find(|v| v.at.dist(p) <= (v.diameter / 2 + tol) as f64) {
         return Some(BoardItem::Via(v.id));
     }
-    // A pad wins over the track ending on it.
-    if let Some((fi, _)) = pad_at(board, p) {
-        return Some(BoardItem::Footprint(board.footprints[fi].id));
+    // A pad wins over the track ending on it (one of the side seen first).
+    let mut pads: Vec<usize> = (0..board.footprints.len()).collect();
+    pads.sort_by_key(|fi| side.is_some_and(|sd| board.footprints[*fi].placement.side != sd));
+    for fi in pads {
+        if (0..board.footprints[fi].footprint.pads.len()).any(|pi| poly::contains(&copper::pad_region(board, fi, pi, 0), p)) {
+            return Some(BoardItem::Footprint(board.footprints[fi].id));
+        }
     }
     if let Some(t) = board.tracks.iter().find(|t| seg_dist(p, t.a, t.b) <= (t.width / 2 + tol) as f64) {
         return Some(BoardItem::Track(t.id));
     }
-    for f in board.footprints.iter().rev() {
+    let order = |f: &&crate::board::PlacedFootprint| side.is_some_and(|sd| f.placement.side != sd);
+    let mut fps: Vec<&crate::board::PlacedFootprint> = board.footprints.iter().rev().collect();
+    fps.sort_by_key(order);
+    for f in fps {
         let mut b: Option<crate::units::Bounds> = None;
         for s in f.footprint.shapes.iter().filter(|s| matches!(s.layer, Layer::TopCourtyard | Layer::TopFab | Layer::TopSilk)) {
             for q in s.shape.geom.extent() {

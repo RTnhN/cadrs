@@ -431,6 +431,8 @@ pub fn end_edit(world: &mut World) {
     }
     crate::eda::layout_tools::set_tool(world, crate::eda::layout_tools::Tool::Select);
     world.resource_mut::<crate::eda::layout_tools::LayoutState>().selection.clear();
+    // (The PCB Studio's flat view picks either side.)
+    world.resource_mut::<crate::eda::layout_tools::LayoutState>().facing = None;
     world.resource_mut::<crate::board_fit::FitState>().align = crate::board_fit::AlignStep::Off;
     world.resource_mut::<BoardEditing>().target = None;
 }
@@ -710,6 +712,10 @@ pub(crate) fn navigate3d(
                 let double = last_press.is_some_and(|(t, p)| now - t < 0.4 && p.distance(pos) < 4.0);
                 *last_press = Some((now, pos));
                 commands.queue(move |world: &mut World| {
+                    // The side of the board seen: its footprints are picked first.
+                    let n = host.frame.normal();
+                    let up = dir.dot(Vec3::new(n[0] as f32, n[1] as f32, n[2] as f32)) < 0.0;
+                    world.resource_mut::<crate::eda::layout_tools::LayoutState>().facing = Some(if up { cadrs_eda::layer::Side::Top } else { cadrs_eda::layer::Side::Bottom });
                     // A component's model under the pointer: press on its footprint.
                     let at = component_under(world, &host, origin, dir).unwrap_or(at);
                     world.write_message(crate::eda::EdaClick::Press { at, shift, ctrl });

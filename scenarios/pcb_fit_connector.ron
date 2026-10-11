@@ -15,7 +15,8 @@
 // 06 the Neutral pin's axis mark picked: J5 moves onto it exactly (layout (15.5, 11.5)), one
 //    undo step "Align J5".
 // 07 Keep-outs: keep-out areas on the layout where the parts around stand over the board.
-// 08 Done; Derived 1's warning: PS1 HLK-PM01 runs into the end plate, the plug and the pins (by
+// 08 C1 moved 8 mm toward the tube's wall by Move by: its room that way 9.00 mm (was 17).
+// 09 Done; Derived 1's warning: PS1 HLK-PM01 runs into the end plate, the plug and the pins (by
 //    their names in the Parts list).
 Scenario(
     start: Some("document"),
@@ -73,11 +74,33 @@ Scenario(
         Click(ui("board-fit-keepouts")),
         Wait(20),
         Screenshot("07-keepouts"),
+        // C1 moved 8 mm toward the tube's wall: picked from above (over PS1 on the bottom),
+        // Move by −8 along x (its room that way was 17), then grabbed with Snap off to read the
+        // room: 9.00 mm.
+        Click(xyz(-2.0, -3.0, 13.6)),
+        Key("Shift+M"),
+        WaitFor("eda-moveby-dialog"),
+        Click(ui("eda-moveby-x")),
+        Key("Ctrl+A"),
+        Type("-8"),
+        Click(ui("eda-moveby-ok")),
+        Wait(20),
+        Custom("board check C1"),
+        ExpectText("board-check", "C1 at 5.50, 16.50 top"),
+        Click(ui("board-fit-snap")),
+        Press(xyz(-10.0, -3.0, 13.6)),
+        Hover(xyz(-10.0, -2.9, 13.6)),
+        Hover(xyz(-10.0, -3.0, 13.6)),
+        Wait(5),
+        Screenshot("08-fitted"),
+        ExpectText("board-gap-nx", "9.00 mm"),
+        Release,
+        Wait(10),
         Click(ui("board-edit-done")),
         Wait(10),
         Hover(ui("feature-derived-1")),
         Wait(40),
-        Screenshot("08-warning"),
+        Screenshot("09-warning"),
         ExpectText("tooltip", "PS1 HLK-PM01 runs into End plate"),
     ],
 )
