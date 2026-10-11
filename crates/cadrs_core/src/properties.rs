@@ -454,7 +454,7 @@ pub fn mass(doc: &Document, owner: PropertyOwner, build_of: &mut dyn FnMut(Eleme
                 match inst.source {
                     // A rigid Part Studio instance: its parts.
                     InstanceSource::Studio { element, .. } => {
-                        for part in &inst.parts {
+                        for part in inst.rigid_parts(doc).iter() {
                             total += mass(doc, PropertyOwner::Part { element, part: *part }, build_of)?;
                         }
                     }

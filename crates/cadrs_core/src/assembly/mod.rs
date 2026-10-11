@@ -313,6 +313,15 @@ impl Instance {
         Self { parts, ..Self::new(id, InstanceSource::Studio { element, board: None }, pose) }
     }
 
+    /// The parts a rigid instance moves as one: a Part Studio instance's listed parts; a
+    /// board's, the board's parts as they are now ([`crate::pcb::PcbStudio::board_parts`]).
+    pub fn rigid_parts<'a>(&'a self, doc: &Document) -> std::borrow::Cow<'a, [PartId]> {
+        match self.source {
+            InstanceSource::Studio { element, board: Some(b) } => std::borrow::Cow::Owned(doc.element(element).and_then(|e| e.pcb()).map(|s| s.board_parts(b)).unwrap_or_default()),
+            _ => std::borrow::Cow::Borrowed(&self.parts),
+        }
+    }
+
     /// A rigid instance of the board `board` of the PCB Studio `element` (§9): the board and
     /// its components.
     pub fn board(id: InstanceId, element: ElementId, board: crate::pcb::BoardId, parts: Vec<PartId>, pose: Pose) -> Self {

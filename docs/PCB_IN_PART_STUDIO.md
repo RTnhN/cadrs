@@ -150,8 +150,20 @@ the 3D viewport, and (c) a sketch → outline link.
   supplies its boards as Derived features (`PcbStudio::part_features`, cached, cleared on any
   change), so the rebuild, the occurrences, BOM rows (the board and each component) and in-context
   snapshots work as for a Part Studio. Insert ▸ Boards lists the document's boards. Edit layout
-  on the instance opens it in its PCB Studio (editing it in the assembly's 3D view, as in a Part
-  Studio, is not done); the Part Studio route remains for fitting against parts.
+  on the instance opens it in its PCB Studio; the Part Studio route remains for fitting against
+  parts. A board instance's parts are worked out from its layout each time
+  (`PcbStudio::board_parts`, the ids follow from the footprints'), so a footprint added or
+  removed later comes and goes in the assembly; the structured BOM lists the board with its
+  components under it. Export (STEP, IGES, meshes), Check interference and section caps make
+  components' solids from their models (`Rebuilder::placed_body`), and in-context snapshots go
+  stale when a board's layout changes. The studio places its boards at their layout's origin
+  (outline edits move no component).
+- **Deferred (P6): editing a board's layout in an assembly's 3D view.** Edit mode works on a
+  Part Studio's derived board (its board copy and component parts); an assembly shows
+  occurrences, so it needs its own host. Until then Edit layout on an instance opens the PCB
+  Studio, and fitting in 3D is done in a Part Studio that derives the board (then inserted).
+- **Not done (P7): a drawing view of a board shown as its layout draws the bare board**, not the
+  layout picture on it.
 - **P7 done.** MCP tools (`cadrs_mcp`, logic in `cadrs_core::pcb::ops`): `get_board` (outline,
   footprints with pads and nets, DRC errors, where it is derived), `get_board_fit` (the pins and
   holes of the parts square to the board, collisions), `derive_board`, `create_board_from_sketch`,

@@ -269,8 +269,8 @@ pub fn board_feature(board: BoardId) -> crate::ids::FeatureId {
 impl PcbStudio {
     /// The studio as a Part Studio for assemblies (`docs/PCB_IN_PART_STUDIO.md` §9, direct
     /// insert): one Derived feature per board (an IDF one as its outline and package boxes), the
-    /// board and its components at the origin (the outline's centre on it), named after the
-    /// board. An assembly's rigid
+    /// board and its components as the layout has them (its origin on the origin), named after
+    /// the board. An assembly's rigid
     /// instance of a board ([`crate::assembly::InstanceSource::Studio`] with its board) is that
     /// feature's parts.
     pub fn part_features(&self) -> &[crate::document::Feature] {
@@ -282,7 +282,8 @@ impl PcbStudio {
                     let (layout, hash) = b.derived_layout();
                     let mut db = crate::derived::DerivedBoard::new(b.id, b.name(), Default::default());
                     db.set_layout_hashed(layout.into_owned(), hash);
-                    db.options.anchor = board3d::BoardAnchor::Center;
+                    // At the layout's origin: an outline edit moves no component.
+                    db.options.anchor = board3d::BoardAnchor::Origin;
                     let d = crate::derived::DerivedFeature {
                         // (The source is this studio: no tab needs naming for the rebuild.)
                         source: Some(crate::external::SourceRef { document: None, at: crate::external::RefAt::Workspace, element: ElementId::from_u128(0), pinned: false }),
@@ -294,6 +295,22 @@ impl PcbStudio {
                 })
                 .collect()
         })
+    }
+
+    /// The parts of the board `board` as [`PcbStudio::part_features`] makes them: the board's,
+    /// then each component's (a footprint with a model on the board), in that order, without a
+    /// rebuild (the ids follow from the footprints'). An assembly's instance of the board shows
+    /// these, so a footprint added or removed later comes and goes with it.
+    pub fn board_parts(&self, board: BoardId) -> Vec<crate::ids::PartId> {
+        let Some(b) = self.board(board) else { return vec![] };
+        let f = board_feature(board);
+        let (layout, _) = b.derived_layout();
+        let options = board3d::BoardOptions { anchor: board3d::BoardAnchor::Origin, ..Default::default() };
+        let (components, _) = board3d::components(&layout, &options);
+        let src = |id: crate::ids::FeatureId| crate::ids::PartId::new(id, 0);
+        std::iter::once(crate::derived::derived_part(f, src(crate::ids::FeatureId(uuid::Uuid::nil())), 0))
+            .chain(components.iter().map(|c| crate::derived::derived_part(f, src(crate::ids::FeatureId(c.footprint)), 0)))
+            .collect()
     }
 
     /// The board a feature of [`PcbStudio::part_features`] stands for.
@@ -401,6 +418,15 @@ impl Element {
         match &self.kind {
             ElementKind::PcbStudio(p) => p.part_features(),
             _ => self.features(),
+        }
+    }
+
+    /// [`Element::active_features`] of a Part Studio (above its rollback bar, not suppressed), a
+    /// PCB Studio's boards as Derived features: what an assembly's occurrence of it rebuilds.
+    pub fn active_part_features(&self) -> Vec<crate::document::Feature> {
+        match &self.kind {
+            ElementKind::PcbStudio(p) => p.part_features().to_vec(),
+            _ => self.active_features(),
         }
     }
 }

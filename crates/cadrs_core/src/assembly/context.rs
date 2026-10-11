@@ -229,7 +229,11 @@ pub fn sources_fingerprint(doc: &Document, parts: &[ContextPart]) -> u64 {
     let mut h: u64 = 0xcbf2_9ce4_8422_2325;
     for e in els {
         let Some(el) = doc.element(e) else { continue };
-        let text = ron::to_string(el.features()).unwrap_or_default();
+        // A PCB Studio's boards by their layouts' hashes (the layouts themselves are big).
+        let text = match el.pcb() {
+            Some(p) => p.boards.iter().map(|b| format!("{:?}:{};", b.id, b.derived_layout().1)).collect(),
+            None => ron::to_string(el.features()).unwrap_or_default(),
+        };
         for b in e.to_string().bytes().chain(text.bytes()) {
             h ^= b as u64;
             h = h.wrapping_mul(0x0100_0000_01b3);
@@ -259,7 +263,7 @@ pub fn snapshot_with(doc: &Document, assembly: ElementId, studio: ElementId, ins
         let Some(src) = doc.element(o.element) else { continue };
         if !studios.iter().any(|s| s.element == o.element) {
             // A board's PCB Studio: its boards as Derived features.
-            let features = if src.pcb().is_some() { src.part_features().to_vec() } else { src.active_features() };
+            let features = src.active_part_features();
             studios.push(ContextSource { element: o.element, features });
         }
         parts.push(ContextPart {
@@ -346,7 +350,7 @@ pub fn status(doc: &Document, studio: ElementId, ctx: &StudioContext) -> Context
 pub fn source_features(doc: &Document, ctx: &StudioContext, element: ElementId) -> Option<Vec<Feature>> {
     match ctx.frozen(element) {
         Some(f) => Some(f.to_vec()),
-        None if ctx.studios.is_empty() => doc.element(element).map(|e| e.active_features()),
+        None if ctx.studios.is_empty() => doc.element(element).map(|e| e.active_part_features()),
         None => None,
     }
 }

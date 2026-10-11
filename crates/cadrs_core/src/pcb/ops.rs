@@ -118,15 +118,17 @@ pub fn board_report(doc: &Document, el: ElementId, board: BoardId) -> Result<Boa
     });
     let mut derived_in = vec![];
     for ps in &doc.elements {
-        for f in ps.features() {
-            if let FeatureKind::Derived(x) = &f.kind
-                && x.source.is_some_and(|r| r.element == el && r.document.is_none_or(|d| d == doc.id))
-                && x.board.as_ref().is_some_and(|db| db.board == board)
-            {
-                let build = crate::rebuild::build(ps.features());
-                derived_in.push(DerivedReport { part_studio: ps.name.clone(), feature: f.name.clone(), warning: build.warning(f.id).map(String::from) });
-            }
+        let deriving: Vec<&crate::document::Feature> = ps
+            .features()
+            .iter()
+            .filter(|f| matches!(&f.kind, FeatureKind::Derived(x) if x.source.is_some_and(|r| r.element == el && r.document.is_none_or(|d| d == doc.id)) && x.board.as_ref().is_some_and(|db| db.board == board)))
+            .collect();
+        if deriving.is_empty() {
+            continue;
         }
+        // (One rebuild per Part Studio.)
+        let build = crate::rebuild::build(ps.features());
+        derived_in.extend(deriving.iter().map(|f| DerivedReport { part_studio: ps.name.clone(), feature: f.name.clone(), warning: build.warning(f.id).map(String::from) }));
     }
     Ok(BoardReport {
         name: sb.name().to_string(),
@@ -198,7 +200,8 @@ pub fn remove_footprint(d: &mut Design, reference: &str) -> Result<(), String> {
 }
 
 /// Adds a copy of the footprint `from` as `reference` (with `value`), its origin at `at` (mm),
-/// its pads on `nets` (pad number, net; the others on none). Returns its id.
+/// its pads on `nets` (pad number, net; the others on none). Returns its id. It is a board-only
+/// footprint (no schematic symbol), which updating the layout from the schematic keeps.
 pub fn copy_footprint(d: &mut Design, from: &str, reference: &str, value: &str, at: [f64; 2], nets: &[(String, String)]) -> Result<Uuid, String> {
     if cadrs_eda::board_edit::footprint_index(&d.board, reference).is_some() {
         return Err(format!("{reference} is on the board already"));

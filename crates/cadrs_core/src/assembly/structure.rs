@@ -101,7 +101,7 @@ fn occurrences_at(doc: &Document, asm: &Assembly, depth: usize) -> Vec<Occurrenc
                 view_part: inst.id.part_id(),
             }),
             InstanceSource::Studio { element, .. } => {
-                for (k, part) in inst.parts.iter().enumerate() {
+                for (k, part) in inst.rigid_parts(doc).iter().enumerate() {
                     out.push(Occurrence {
                         id: derive(inst.id, studio_part_key(*part)),
                         top: inst.id,

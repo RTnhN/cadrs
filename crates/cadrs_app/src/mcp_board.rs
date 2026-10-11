@@ -72,10 +72,12 @@ pub fn get_board_fit(world: &mut World, p: &tools::BoardFit) -> Result<Value, St
     let f = ops::deriving_feature(d, ps, pcb, id).ok_or("the board isn't derived into that Part Studio: derive_board first")?;
     let el = d.element(ps).ok_or("no Part Studio")?;
     let build = cadrs_core::rebuild::build(el.features());
+    let frame = build.derived.get(&f).and_then(|o| o.boards.first()).map(|c| c.frame).ok_or("the feature derives no board")?;
     let mut parts = vec![];
     for part in build.parts.iter().filter(|x| x.feature != f) {
         let name = cadrs_core::parts::display_name(part, el.part_props()).to_string();
-        if let Ok(axes) = ops::axes_of_part(d, ps, f, &name) {
+        let axes = cadrs_core::pcb::fit::axes(&[&*part.solid], &frame, -1e6, 1e6);
+        if !axes.is_empty() {
             parts.push(json!({ "part": name, "axes": axes.iter().map(|(a, r)| json!({ "at": [round(a[0]), round(a[1])], "radius": round(*r) })).collect::<Vec<_>>() }));
         }
     }
@@ -165,12 +167,10 @@ pub fn create_board_from_sketch(world: &mut World, p: &tools::CreateBoardFromSke
         seat: seat(p.seat.as_deref())?,
         feature: FeatureId::new(),
     };
+    let feature = cmd.feature;
     execute(world, &cmd)?;
-    let b = ops::find_board(&doc(world)?.doc, None, &p.name).or_else(|_| {
-        // (Made unique in its studio: the newest board.)
-        let d = &doc(world)?.doc;
-        d.elements.iter().rev().find_map(|e| e.pcb().and_then(|s| s.active).map(|b| (e.id, b))).ok_or_else(|| "the board is gone".to_string())
-    })?;
+    // The board the new Derived feature derives (its name may have been made unique).
+    let b = cadrs_core::derived::derived_of(&doc(world)?.doc, ps, feature).and_then(|d| Some((d.source?.element, d.board.as_ref()?.board))).ok_or("the board is gone")?;
     report(world, b)
 }
 

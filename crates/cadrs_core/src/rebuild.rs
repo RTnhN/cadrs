@@ -371,6 +371,10 @@ pub struct Rebuilder {
     /// Derived boards' placed component meshes, by feature, copy, footprint and place, with
     /// the unplaced mesh they were made from.
     placed_components: HashMap<u64, PlacedComponent>,
+    /// Footprint models as kernel solids, unplaced (by model), for exports and drawing views of
+    /// derived boards (`model_bodies_cached`).
+    #[cfg(feature = "occt")]
+    model_bodies: Vec<(u64, Vec<BodyId>, f64)>,
 }
 
 impl Default for Rebuilder {
@@ -492,6 +496,8 @@ impl Rebuilder {
             skipped_meshes: Default::default(),
             board_bodies: Vec::new(),
             placed_components: HashMap::new(),
+            #[cfg(feature = "occt")]
+            model_bodies: Vec::new(),
         }
     }
 
@@ -884,24 +890,30 @@ impl Rebuilder {
     /// caller releases them); a component whose model can't be made is left out.
     #[cfg(feature = "occt")]
     fn view_solids(&mut self, features: &[Feature], state: &State, parts: &[&Part]) -> HashMap<PartId, BodyId> {
-        use cadrs_kernel::Kernel;
         let mut made = HashMap::new();
         for p in parts.iter().filter(|p| state.part(p.id).is_some_and(|s| s.body.is_none())) {
-            let Ok(bodies) = self.component_solids(features, state, p.id) else { continue };
-            let one = match bodies.len() {
-                0 => None,
-                1 => Some(bodies[0]),
-                _ => {
-                    let r = self.kernel.compound(&bodies).ok().and_then(|r| r.bodies.first().copied());
-                    bodies.iter().for_each(|b| self.kernel.release(*b));
-                    r
-                }
-            };
-            if let Some(b) = one {
+            if let Ok(b) = self.component_body(features, state, p.id) {
                 made.insert(p.id, b);
             }
         }
         made
+    }
+
+    /// A board component's model as one body (its solids made one compound), the caller's to
+    /// release ([`Self::component_solids`]).
+    #[cfg(feature = "occt")]
+    fn component_body(&mut self, features: &[Feature], state: &State, part: PartId) -> Result<BodyId, String> {
+        use cadrs_kernel::Kernel;
+        let bodies = self.component_solids(features, state, part)?;
+        match bodies.len() {
+            0 => Err("its model has no solids".into()),
+            1 => Ok(bodies[0]),
+            _ => {
+                let r = self.kernel.compound(&bodies).map_err(|e| e.to_string()).and_then(|r| r.bodies.first().copied().ok_or_else(|| "no body".into()));
+                bodies.iter().for_each(|b| self.kernel.release(*b));
+                r
+            }
+        }
     }
 
     #[cfg(not(feature = "occt"))]
@@ -922,15 +934,16 @@ impl Rebuilder {
                 FeatureKind::Derived(d) => d.board.as_ref().map(|b| &b.layout),
                 _ => None,
             });
-            let layout = layout.ok_or("its board comes from a derived Part Studio: export it there")?;
+            // (A board that came in with a derived Part Studio: its layout is there.)
+            let Some(layout) = layout else { return self.mesh_body(state, part).map(|b| vec![b]) };
             let f = layout.footprints.iter().find(|f| f.id == fp).ok_or("its footprint is gone")?;
             let m = crate::pcb::model::shown_model(&f.footprint).ok_or("its footprint shows no model")?;
-            let (made, unit) = crate::pcb::model_solids::model_bodies(&mut self.kernel, m)?;
+            let (made, unit) = self.model_bodies_cached(m)?;
             let motion = crate::pcb::model::model_motion(m, unit).then(&crate::pcb::frames::footprint_world(&copy.frame, copy.thickness, &f.placement));
             let mut out_bodies = vec![];
             for b in made {
+                // (Copies: the cache keeps its bodies.)
                 let r = self.kernel.transform_motion(b, &motion);
-                self.kernel.release(b);
                 match r.map_err(|e| e.to_string()).and_then(|r| r.bodies.into_iter().next().ok_or_else(|| "no body".to_string())) {
                     Ok(b) => out_bodies.push(b),
                     Err(e) => {
@@ -942,6 +955,37 @@ impl Rebuilder {
             return Ok(out_bodies);
         }
         Err("it has no solid model".into())
+    }
+
+    /// A model's solids, unplaced, made once (by the model) and kept for later views and exports
+    /// of its components: copy them, don't release them.
+    #[cfg(feature = "occt")]
+    fn model_bodies_cached(&mut self, m: &cadrs_eda::footprint::Model3d) -> Result<(Vec<BodyId>, f64), String> {
+        use cadrs_kernel::Kernel;
+        let key = cadrs_kernel::naming::stable_hash(format!("{:?}|{}|{:?}", m.blob, m.source, m.body).as_bytes());
+        if let Some((_, bodies, unit)) = self.model_bodies.iter().find(|x| x.0 == key) {
+            return Ok((bodies.clone(), *unit));
+        }
+        let (bodies, unit) = crate::pcb::model_solids::model_bodies(&mut self.kernel, m)?;
+        self.model_bodies.push((key, bodies.clone(), unit));
+        if self.model_bodies.len() > 256 {
+            let (_, old, _) = self.model_bodies.remove(0);
+            old.iter().for_each(|b| self.kernel.release(*b));
+        }
+        Ok((bodies, unit))
+    }
+
+    /// A mesh part as a faceted solid (its own triangles sewn), when its model can't be had.
+    #[cfg(feature = "occt")]
+    fn mesh_body(&mut self, state: &State, part: PartId) -> Result<BodyId, String> {
+        use cadrs_kernel::Kernel;
+        let s = &state.part(part).ok_or("it no longer exists")?.part.solid;
+        let p = |i: u32| {
+            let q = s.positions[i as usize];
+            nalgebra::Point3::new(q[0], q[1], q[2])
+        };
+        let tris: Vec<[nalgebra::Point3<f64>; 3]> = s.indices.as_chunks::<3>().0.iter().map(|t| [p(t[0]), p(t[1]), p(t[2])]).collect();
+        self.kernel.mesh_solid(&tris, 1e-4).map_err(|e| format!("its mesh doesn't make a solid: {e}"))
     }
 
     #[cfg(not(feature = "occt"))]
@@ -3248,12 +3292,21 @@ impl Rebuilder {
     pub fn placed_body(&mut self, features: &[Feature], part: PartId, rotation: [[f64; 3]; 3], translation: [f64; 3]) -> Result<BodyId, String> {
         use cadrs_kernel::Kernel;
         self.rebuild(features);
-        let body = self.last.part(part).and_then(|p| p.body).ok_or_else(|| "the part has no solid model".to_string())?;
+        let state = self.last.clone();
+        let p = state.part(part).ok_or_else(|| "the part no longer exists".to_string())?;
+        // A derived board's component (a mesh): its model's solids, made for this.
+        let (body, temp) = match p.body {
+            Some(b) => (b, false),
+            None => (self.component_body(features, &state, part).map_err(|e| format!("{}: {e}", p.part.name))?, true),
+        };
         let r = nalgebra::Matrix3::from_row_slice(&rotation.concat());
         let q = nalgebra::UnitQuaternion::from_matrix(&r);
         let iso = nalgebra::Isometry3::from_parts(nalgebra::Translation3::new(translation[0], translation[1], translation[2]), q);
-        let out = self.kernel.transform(body, &iso).map_err(|e| e.to_string())?;
-        out.bodies.first().copied().ok_or_else(|| "moving the part failed".to_string())
+        let out = self.kernel.transform(body, &iso).map_err(|e| e.to_string());
+        if temp {
+            self.kernel.release(body);
+        }
+        out?.bodies.first().copied().ok_or_else(|| "moving the part failed".to_string())
     }
 
     /// The kernel, for queries on bodies from [`Rebuilder::placed_body`] (P3H.5: PCB Studio's

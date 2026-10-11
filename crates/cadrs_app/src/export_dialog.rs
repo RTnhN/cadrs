@@ -639,7 +639,7 @@ fn items(world: &mut World, source: &ExportSource) -> Result<Vec<ExportItem>, St
                 let source_name = cadrs_core::assembly::source_part_name(&docs, &src, build.as_deref());
                 let name = names.iter().find(|(p, _)| *p == o.view_part).map(|(_, n)| n.clone()).unwrap_or_else(|| source_name.clone());
                 out.push(ExportItem {
-                    features: Arc::new(studio.active_features()),
+                    features: Arc::new(studio.active_part_features()),
                     part: o.part,
                     name,
                     pose: Some(o.pose),
