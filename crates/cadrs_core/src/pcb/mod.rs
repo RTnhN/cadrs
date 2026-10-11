@@ -29,6 +29,7 @@ pub mod import;
 pub mod library;
 pub mod mesh_solid;
 pub mod model;
+pub mod model_solids;
 pub mod names;
 pub mod outline_link;
 pub mod search;
@@ -131,6 +132,19 @@ impl StudioBoard {
     /// A native board's schematic and layout.
     pub fn design(&self) -> Option<&cadrs_eda::Design> {
         self.design.as_deref()
+    }
+
+    /// The layout a Part Studio derives: a native board's, or an IDF board's outline, holes and
+    /// package boxes ([`design::idf_layout`]); and its hash.
+    pub fn derived_layout(&self) -> (std::borrow::Cow<'_, cadrs_eda::board::Board>, u64) {
+        match &self.design {
+            Some(d) => (std::borrow::Cow::Borrowed(&d.board), self.layout_hash),
+            None => {
+                let l = design::idf_layout(&self.board);
+                let h = board3d::layout_hash(&l);
+                (std::borrow::Cow::Owned(l), h)
+            }
+        }
     }
 
     /// [`board3d::layout_hash`] of the design's layout (0 for a board not designed in cadrs).
@@ -254,18 +268,20 @@ pub fn board_feature(board: BoardId) -> crate::ids::FeatureId {
 
 impl PcbStudio {
     /// The studio as a Part Studio for assemblies (`docs/PCB_IN_PART_STUDIO.md` §9, direct
-    /// insert): one Derived feature per board designed in cadrs, the board and its components
-    /// at the origin (the outline's centre on it), named after the board. An assembly's rigid
+    /// insert): one Derived feature per board (an IDF one as its outline and package boxes), the
+    /// board and its components at the origin (the outline's centre on it), named after the
+    /// board. An assembly's rigid
     /// instance of a board ([`crate::assembly::InstanceSource::Studio`] with its board) is that
     /// feature's parts.
     pub fn part_features(&self) -> &[crate::document::Feature] {
         self.part_features.0.get_or_init(|| {
             self.boards
                 .iter()
-                .filter_map(|b| {
-                    let design = b.design()?;
+                .map(|b| {
+                    // (An IDF board: its outline and package boxes.)
+                    let (layout, hash) = b.derived_layout();
                     let mut db = crate::derived::DerivedBoard::new(b.id, b.name(), Default::default());
-                    db.set_layout_hashed(design.board.clone(), b.layout_hash());
+                    db.set_layout_hashed(layout.into_owned(), hash);
                     db.options.anchor = board3d::BoardAnchor::Center;
                     let d = crate::derived::DerivedFeature {
                         // (The source is this studio: no tab needs naming for the rebuild.)
@@ -274,7 +290,7 @@ impl PcbStudio {
                         board: Some(Box::new(db)),
                         ..Default::default()
                     };
-                    Some(crate::document::Feature::new(board_feature(b.id), b.name(), crate::document::FeatureKind::Derived(Box::new(d))))
+                    crate::document::Feature::new(board_feature(b.id), b.name(), crate::document::FeatureKind::Derived(Box::new(d)))
                 })
                 .collect()
         })

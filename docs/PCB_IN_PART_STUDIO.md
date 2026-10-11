@@ -152,6 +152,21 @@ the 3D viewport, and (c) a sketch → outline link.
   snapshots work as for a Part Studio. Insert ▸ Boards lists the document's boards. Edit layout
   on the instance opens it in its PCB Studio (editing it in the assembly's 3D view, as in a Part
   Studio, is not done); the Part Studio route remains for fitting against parts.
+- **P7 done.** MCP tools (`cadrs_mcp`, logic in `cadrs_core::pcb::ops`): `get_board` (outline,
+  footprints with pads and nets, DRC errors, where it is derived), `get_board_fit` (the pins and
+  holes of the parts square to the board, collisions), `derive_board`, `create_board_from_sketch`,
+  `move_footprint` (to a place, or a pad onto a part's pin), `add_footprint`, `remove_footprint`
+  (and its symbol), `link_outline` (keeping the parts' place on the board). A Part Studio's STEP
+  export writes components as their models' solids (`pcb::model_solids`, shared with the PCB
+  Studio's own STEP export), where the board copy has them. Drawing views project components the
+  same way; a board shown as its layout appears alone (its layout picture isn't drawn on the
+  sheet). IDF boards derive as their outline, drilled holes and a box per package
+  (`design::idf_layout`, stable ids), read-only (Edit layout says why), in the Derived picker,
+  the assembly Insert dialog and direct inserts.
+- **Since.** A board's skins and the layout overlay show only from outside their face (the far
+  face's picture showed through the board at an angle); a Transform of a board's part moves its
+  components; the Parts list shows a board as a folder of its components; a wire pad whose
+  footprint cuts a hole round itself counts as on the board.
 
 ## 4. Data model changes
 

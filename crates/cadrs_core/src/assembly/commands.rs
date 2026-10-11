@@ -61,8 +61,8 @@ impl Command for InsertInstance {
             }
             // A PCB Studio's board designed in cadrs (`docs/PCB_IN_PART_STUDIO.md` §9).
             super::InstanceSource::Studio { board: Some(b), .. } => {
-                if doc.element(src).and_then(|e| e.pcb()).and_then(|s| s.board(b)).and_then(|b| b.design()).is_none() {
-                    return Err(CommandError::Invalid("the source is not a board designed in a PCB Studio of this document".into()));
+                if doc.element(src).and_then(|e| e.pcb()).and_then(|s| s.board(b)).is_none() {
+                    return Err(CommandError::Invalid("the source is not a board of a PCB Studio of this document".into()));
                 }
                 if self.instance.parts.is_empty() {
                     return Err(CommandError::Invalid("a rigid Part Studio instance needs a part".into()));

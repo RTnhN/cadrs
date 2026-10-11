@@ -814,18 +814,31 @@ impl Rebuilder {
         let build = self.rebuild(features);
         let state = self.last.clone();
         let mut bodies = Vec::new();
+        // A derived board's components (mesh parts) go as their models' real solids, made here
+        // and released after.
+        let mut turned = Vec::new();
         for (id, name) in &req.parts {
-            let body = state
-                .part(*id)
-                .and_then(|p| p.body)
-                .ok_or_else(|| match build.part(*id) {
-                    Some(_) => format!("{name} has no solid model to export"),
-                    None => format!("{name} no longer exists"),
-                })?;
-            bodies.push((body, name.as_str()));
+            match state.part(*id).and_then(|p| p.body) {
+                Some(body) => bodies.push((body, name.as_str())),
+                None if build.part(*id).is_none() => return Err(format!("{name} no longer exists")),
+                None => match self.component_solids(features, &state, *id) {
+                    Ok(made) if !made.is_empty() => {
+                        for b in made {
+                            turned.push(b);
+                            bodies.push((b, name.as_str()));
+                        }
+                    }
+                    other => {
+                        turned.iter().for_each(|b| self.kernel.release(*b));
+                        return Err(match other {
+                            Err(e) => format!("{name}: {e}"),
+                            Ok(_) => format!("{name} has no solid model to export"),
+                        });
+                    }
+                },
+            }
         }
         // Y up: turn -90° about X, so +Z (the Top plane's normal) becomes +Y.
-        let mut turned = Vec::new();
         if req.y_up {
             let turn = cadrs_kernel::Transform::rotation(nalgebra::Vector3::x() * -std::f64::consts::FRAC_PI_2);
             for (body, _) in &mut bodies {
@@ -867,6 +880,70 @@ impl Rebuilder {
         files
     }
 
+    /// Solids for a drawing view of the board components among `parts` (one body each, the
+    /// caller releases them); a component whose model can't be made is left out.
+    #[cfg(feature = "occt")]
+    fn view_solids(&mut self, features: &[Feature], state: &State, parts: &[&Part]) -> HashMap<PartId, BodyId> {
+        use cadrs_kernel::Kernel;
+        let mut made = HashMap::new();
+        for p in parts.iter().filter(|p| state.part(p.id).is_some_and(|s| s.body.is_none())) {
+            let Ok(bodies) = self.component_solids(features, state, p.id) else { continue };
+            let one = match bodies.len() {
+                0 => None,
+                1 => Some(bodies[0]),
+                _ => {
+                    let r = self.kernel.compound(&bodies).ok().and_then(|r| r.bodies.first().copied());
+                    bodies.iter().for_each(|b| self.kernel.release(*b));
+                    r
+                }
+            };
+            if let Some(b) = one {
+                made.insert(p.id, b);
+            }
+        }
+        made
+    }
+
+    #[cfg(not(feature = "occt"))]
+    fn view_solids(&mut self, _features: &[Feature], _state: &State, _parts: &[&Part]) -> HashMap<PartId, BodyId> {
+        HashMap::new()
+    }
+
+    /// A derived board's component part as its model's solids (`docs/PCB_IN_PART_STUDIO.md` P7:
+    /// a STEP export carries real solids, not the mesh the Part Studio shows), where the board
+    /// copy puts it now. The caller releases them.
+    #[cfg(feature = "occt")]
+    fn component_solids(&mut self, features: &[Feature], state: &State, part: PartId) -> Result<Vec<BodyId>, String> {
+        use cadrs_kernel::Kernel;
+        for (fid, out) in state.derived.iter() {
+            let Some(fp) = out.footprints.iter().find(|(p, _)| *p == part).map(|(_, f)| *f) else { continue };
+            let copy = out.boards.iter().find(|b| out.components_of(b.part).contains(&part)).ok_or("its board is gone")?;
+            let layout = features.iter().find(|f| f.id == *fid).and_then(|f| match &f.kind {
+                FeatureKind::Derived(d) => d.board.as_ref().map(|b| &b.layout),
+                _ => None,
+            });
+            let layout = layout.ok_or("its board comes from a derived Part Studio: export it there")?;
+            let f = layout.footprints.iter().find(|f| f.id == fp).ok_or("its footprint is gone")?;
+            let m = crate::pcb::model::shown_model(&f.footprint).ok_or("its footprint shows no model")?;
+            let (made, unit) = crate::pcb::model_solids::model_bodies(&mut self.kernel, m)?;
+            let motion = crate::pcb::model::model_motion(m, unit).then(&crate::pcb::frames::footprint_world(&copy.frame, copy.thickness, &f.placement));
+            let mut out_bodies = vec![];
+            for b in made {
+                let r = self.kernel.transform_motion(b, &motion);
+                self.kernel.release(b);
+                match r.map_err(|e| e.to_string()).and_then(|r| r.bodies.into_iter().next().ok_or_else(|| "no body".to_string())) {
+                    Ok(b) => out_bodies.push(b),
+                    Err(e) => {
+                        out_bodies.iter().for_each(|b| self.kernel.release(*b));
+                        return Err(e);
+                    }
+                }
+            }
+            return Ok(out_bodies);
+        }
+        Err("it has no solid model".into())
+    }
+
     #[cfg(not(feature = "occt"))]
     pub fn export_step(&mut self, _features: &[Feature], _req: &StepRequest) -> Result<Vec<StepFile>, String> {
         Err("STEP export needs the solid-modelling kernel".into())
@@ -886,7 +963,17 @@ impl Rebuilder {
             return crate::flat_drawing::flat_geometry(&build.sheet_metal, req);
         }
         let state = self.last.clone();
-        let parts = crate::views::view_parts(&build.parts, req.part);
+        let mut parts = crate::views::view_parts(&build.parts, req.part);
+        // A derived board shown as its layout: its components stay out (as in the Part Studio).
+        for f in features {
+            if let FeatureKind::Derived(d) = &f.kind
+                && d.board.as_ref().is_some_and(|b| b.options.view == crate::pcb::board3d::BoardView::Layout)
+                && let Some(out) = build.derived.get(&f.id)
+            {
+                let hidden: Vec<PartId> = out.boards.iter().flat_map(|b| out.components_of(b.part)).collect();
+                parts.retain(|p| !hidden.contains(&p.id));
+            }
+        }
         if parts.is_empty() {
             return Err(match req.part {
                 Some(_) => "The part no longer exists".into(),
@@ -906,7 +993,17 @@ impl Rebuilder {
         if req.shaded {
             out.shaded = crate::views::shade(&parts, &req.frame, &req.props, &req.appearances);
         }
-        let (projection, hatch) = self.project_parts(&state, &parts, req)?;
+        // A derived board's components are meshes: projected as their models' solids, made for
+        // the view (one body each) and released after.
+        let made = self.view_solids(features, &state, &parts);
+        // (A component whose model can't be made stays out of the view.)
+        let parts: Vec<&Part> = parts.into_iter().filter(|p| state.part(p.id).is_some_and(|s| s.body.is_some()) || made.contains_key(&p.id)).collect();
+        out.parts = parts.iter().map(|p| p.id).collect();
+        let r = self.project_parts(&state, &parts, req, &made);
+        for b in made.values() {
+            self.release(*b);
+        }
+        let (projection, hatch) = r?;
         out.projection = projection;
         out.hatch = hatch;
         Ok(out)
@@ -1025,13 +1122,14 @@ impl Rebuilder {
         state: &State,
         parts: &[&Part],
         req: &crate::views::ViewRequest,
+        made: &std::collections::HashMap<PartId, BodyId>,
     ) -> Result<ProjectedParts, String> {
         use cadrs_kernel::Kernel;
         let mut bodies = Vec::new();
         let mut names = Vec::new();
         for p in parts {
             let s = state.part(p.id).ok_or("a part has no solid model")?;
-            bodies.push(s.body.ok_or_else(|| format!("{} has no solid model", p.name))?);
+            bodies.push(s.body.or_else(|| made.get(&p.id).copied()).ok_or_else(|| format!("{} has no solid model", p.name))?);
             names.push(s.names.clone());
         }
         // Section and broken-out views: project the bodies with the cut material removed
@@ -1069,6 +1167,7 @@ impl Rebuilder {
         _state: &State,
         _parts: &[&Part],
         _req: &crate::views::ViewRequest,
+        _made: &std::collections::HashMap<PartId, BodyId>,
     ) -> Result<ProjectedParts, String> {
         Err("Drawing views need the solid-modelling kernel".into())
     }

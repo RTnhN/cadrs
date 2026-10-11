@@ -404,6 +404,10 @@ pub fn editable(world: &World, feature: FeatureId) -> Result<(), String> {
     if r.at != RefAt::Workspace || r.document_or(doc.doc.id) != doc.doc.id {
         return Err(format!("{} is referenced at a version: open the linked document to edit its layout", b.board_name));
     }
+    // An IDF board (from another tool) shows its outline and package boxes, read-only.
+    if doc.doc.element(r.element).and_then(|e| e.pcb()).and_then(|s| s.board(b.board)).is_some_and(|x| x.design().is_none()) {
+        return Err(format!("{} came from IDF: it has no layout to edit here (edit it where it was designed, then import it again)", b.board_name));
+    }
     Ok(())
 }
 

@@ -375,7 +375,7 @@ fn tree_items(doc: &ActiveDocument, parts_of: &mut super::AssemblyParts, s: &Ins
         for el in doc.doc.elements.iter().filter(|e| e.pcb().is_some()) {
             let Some(build) = parts_of.build(&doc.doc, el.id) else { continue };
             for b in el.pcb().map(|p| p.boards.as_slice()).unwrap_or_default() {
-                if b.design().is_none() || !(b.name().to_lowercase().contains(&q) || el.name.to_lowercase().contains(&q)) {
+                if !(b.name().to_lowercase().contains(&q) || el.name.to_lowercase().contains(&q)) {
                     continue;
                 }
                 let f = cadrs_core::pcb::board_feature(b.id);
@@ -603,7 +603,7 @@ fn rebuild_tree(
                 if s.assemblies {
                     "No other assemblies"
                 } else if s.boards {
-                    "No boards designed in cadrs (a PCB Studio's Layout)"
+                    "No PCB Studio boards in this document"
                 } else {
                     "No Part Studios match"
                 },

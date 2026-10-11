@@ -731,8 +731,10 @@ fn studio_rows(world: &World, s: &DerivedSession) -> Vec<SourceRow> {
             d.elements.iter().filter(|e| matches!(e.kind, ElementKind::PartStudio { .. }) && e.id != s.element).map(|e| (e.id, e.name.clone(), None, String::new())).collect();
         for e in &d.elements {
             let Some(pcb) = e.pcb() else { continue };
-            for b in pcb.boards.iter().filter(|b| b.design().is_some()) {
-                v.push((e.id, b.name().to_string(), Some(b.id), e.name.clone()));
+            // (An IDF board comes too: its outline and package boxes, read-only.)
+            for b in &pcb.boards {
+                let studio = if b.design().is_some() { e.name.clone() } else { format!("{} · IDF, read-only", e.name) };
+                v.push((e.id, b.name().to_string(), Some(b.id), studio));
             }
         }
         v

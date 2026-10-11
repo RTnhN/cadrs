@@ -747,3 +747,100 @@ fn a_sketch_moved_below_the_board_breaks_the_link_and_says_why() {
     run(&mut doc, &mut h, &cadrs_core::commands::MoveFeature { element: STUDIO, feature: OUTLINE_SKETCH, to: 0, label: "Move".into() });
     assert!(doc.element(NEW_PCB).unwrap().pcb().unwrap().boards[0].outline_link.as_ref().unwrap().problem.is_none());
 }
+
+#[test]
+fn a_step_export_writes_the_components_as_solids() {
+    let (mut doc, mut h, board) = document();
+    derive(&mut doc, &mut h, board, DerivedFeature::default()).unwrap();
+    let b = build(&doc);
+    let parts: Vec<(cadrs_core::PartId, String)> = derived_parts(&b).into_iter().map(|p| (p.id, p.name.clone())).collect();
+    let req = cadrs_core::export::StepRequest { parts: parts.clone(), y_up: false, individual: false };
+    let files = cadrs_core::rebuild::export_step(doc.element(STUDIO).unwrap().active_features(), req).wait().expect("exports");
+    let text = String::from_utf8_lossy(&files[0].bytes).to_string();
+    // A product per part, by its name, and solids (not faceted shells) for the components.
+    for (_, name) in &parts {
+        assert!(text.contains(name.as_str()), "{name} in the STEP file");
+    }
+    assert!(text.matches("MANIFOLD_SOLID_BREP").count() > parts.len() / 2, "solids");
+    // The components where the Part Studio has them: read back, they span the heights the mesh
+    // parts do (the parts above the board and BT1 under it).
+    let mut res_doc = Document::empty("Read back");
+    let mut ps = Element::part_studio("Read");
+    let rid = ElementId::new();
+    ps.id = rid;
+    res_doc.elements.push(ps);
+    let mut h2 = History::default();
+    let f = FeatureId::new();
+    run(&mut res_doc, &mut h2, &cadrs_core::import::AddImport { element: rid, feature: f, file_name: "board.step".into(), bytes: std::sync::Arc::new(files[0].bytes.clone()), y_axis_up: false, units: None });
+    let back = cadrs_core::rebuild::build(res_doc.element(rid).unwrap().features());
+    assert!(back.errors.is_empty(), "{:?}", back.errors);
+    let span = |ps: &mut dyn Iterator<Item = &Part>| ps.fold((f64::MAX, f64::MIN), |(lo, hi), p| (lo.min(bounds(p).0[2]), hi.max(bounds(p).1[2])));
+    let (lo, hi) = span(&mut back.parts.iter());
+    let (mlo, mhi) = span(&mut derived_parts(&b).into_iter());
+    assert!((lo - mlo).abs() < 0.05 && (hi - mhi).abs() < 0.05, "STEP {lo} … {hi}, meshes {mlo} … {mhi}");
+    assert!(hi > 1.6 + 1.0 && lo < -1.0, "{lo} … {hi}");
+}
+
+#[test]
+fn an_idf_board_derives_as_its_outline_and_package_boxes() {
+    let dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../fixtures/idf/vision controller");
+    let read = |f: &str| std::fs::read_to_string(dir.join(f)).unwrap();
+    let pcb = cadrs_core::pcb::PcbBoard::read(&read("Vision PCB.emn"), &read("Vision PCB.emp")).unwrap();
+    let placed = pcb.board.placements.iter().filter(|p| pcb.library.package(&p.package, &p.part_number).is_some()).count();
+    let thickness = pcb.thickness();
+    let mut doc = Document::empty("IDF");
+    let mut ps = Element::part_studio("Part Studio 1");
+    ps.id = STUDIO;
+    let mut el = Element::pcb_studio("PCB Studio 1");
+    el.id = PCB;
+    doc.elements.push(ps);
+    doc.elements.push(el);
+    let mut h = History::default();
+    let name = pcb.name().to_string();
+    run(&mut doc, &mut h, &cadrs_core::pcb::ImportBoard { element: PCB, board: Box::new(pcb), source: cadrs_core::pcb::BoardSource::Idf { emn: format!("{name}.emn"), emp: None } });
+    let board = doc.element(PCB).unwrap().pcb().unwrap().boards[0].id;
+    derive(&mut doc, &mut h, board, DerivedFeature::default()).expect("an IDF board derives");
+    let b = build(&doc);
+    assert!(b.errors.is_empty(), "{:?}", b.errors);
+    let parts = derived_parts(&b);
+    // The board (its thickness from the file) and a box per placed package.
+    let board_part = parts.iter().find(|p| b.derived[&DERIVED].boards[0].part == p.id).unwrap();
+    let (lo, hi) = bounds(board_part);
+    assert!((hi[2] - lo[2] - thickness).abs() < 1e-6, "{lo:?} {hi:?}");
+    assert_eq!(parts.len(), placed + 1);
+    // Derived again (no change in the studio): the same parts, by id.
+    let ids: Vec<cadrs_core::PartId> = parts.iter().map(|p| p.id).collect();
+    let again = cadrs_core::pcb::design::idf_layout(&doc.element(PCB).unwrap().pcb().unwrap().boards[0].board);
+    assert_eq!(cadrs_core::pcb::board3d::layout_hash(&again), cadrs_core::derived::derived_of(&doc, STUDIO, DERIVED).unwrap().board.as_ref().unwrap().hash);
+    let b2 = build(&doc);
+    assert_eq!(derived_parts(&b2).iter().map(|p| p.id).collect::<Vec<_>>(), ids);
+}
+
+#[test]
+fn a_drawing_view_shows_the_board_and_its_components_or_its_layout() {
+    use cadrs_core::views::{self, ViewRequest};
+    let (mut doc, mut h, board) = document();
+    derive(&mut doc, &mut h, board, DerivedFeature::default()).unwrap();
+    let request = || ViewRequest {
+        part: None,
+        frame: cadrs_kernel::ViewFrame::new(nalgebra::Vector3::new(0.0, 1.0, 0.0), nalgebra::Vector3::x()),
+        options: cadrs_kernel::ProjectOptions::default(),
+        shaded: false,
+        props: Vec::new(),
+        appearances: Vec::new(),
+        cut: None,
+        intersections: false,
+        flat: false,
+    };
+    let features = doc.element(STUDIO).unwrap().active_features();
+    let g = views::project(&features, request()).expect("the view projects");
+    let parts = derived_parts(&build(&doc)).len();
+    assert_eq!(g.parts.len(), parts, "the board and every component with a model");
+    assert!(!g.projection.edges.is_empty());
+    // Shown as its layout: the board alone.
+    let mut d = cadrs_core::derived::derived_of(&doc, STUDIO, DERIVED).unwrap().clone();
+    d.board.as_mut().unwrap().options.view = cadrs_core::pcb::board3d::BoardView::Layout;
+    run(&mut doc, &mut h, &SetDerived { element: STUDIO, feature: DERIVED, derived: d, links: vec![], label: "Layout".into() });
+    let g = views::project(&doc.element(STUDIO).unwrap().active_features(), request()).unwrap();
+    assert_eq!(g.parts.len(), 1);
+}

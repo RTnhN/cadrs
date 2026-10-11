@@ -378,7 +378,8 @@ impl DerivedFeature {
         let studio = el.pcb().ok_or_else(|| format!("The tab {} is not a PCB Studio", el.name))?;
         let want = self.board.as_ref().map(|b| b.board).or(studio.active).or(studio.boards.first().map(|b| b.id));
         let b = want.and_then(|id| studio.board(id)).ok_or_else(|| format!("{} has no such board", el.name))?;
-        let design = b.design().ok_or_else(|| format!("{} is not designed in cadrs (an IDF board has no layout to derive)", b.name()))?;
+        // (An IDF board: its outline, holes and package boxes.)
+        let (layout, hash) = b.derived_layout();
         // A board taken for the first time (or another board) comes in with its outline's centre
         // where it is now on the location (fixed: later outline edits don't move it); one
         // already derived keeps its options.
@@ -387,10 +388,11 @@ impl DerivedFeature {
             options.anchor = crate::pcb::board3d::BoardAnchor::Pending;
         }
         if options.anchor == crate::pcb::board3d::BoardAnchor::Pending {
-            let [x, y] = crate::pcb::board3d::outline_center(&design.board);
+            let [x, y] = crate::pcb::board3d::outline_center(&layout);
             options.anchor = crate::pcb::board3d::BoardAnchor::At { x, y };
         }
-        let mut db = DerivedBoard::new(b.id, b.name(), design.board.clone());
+        let mut db = DerivedBoard::new(b.id, b.name(), Default::default());
+        db.set_layout_hashed(layout.into_owned(), hash);
         db.options = options;
         db.on_sketch = self.board.as_ref().and_then(|x| x.on_sketch);
         self.board = Some(Box::new(db));
@@ -829,9 +831,8 @@ fn refresh_boards(doc: &mut Document) {
             }
             let Some(src) = doc.elements.iter().find(|e| e.id == r.element) else { continue };
             let Some(b) = src.pcb().and_then(|s| s.board(db.board)) else { continue };
-            let Some(design) = b.design() else { continue };
-            // The hash set with the layout when there is one, else the layouts themselves.
-            let layout = (b.layout_hash() != db.hash).then(|| (design.board.clone(), b.layout_hash()));
+            let (layout, hash) = b.derived_layout();
+            let layout = (hash != db.hash).then(|| (layout.into_owned(), hash));
             let problem = b.outline_link.as_ref().and_then(|l| l.problem.clone());
             if layout.is_some() || b.name() != db.board_name || src.name != d.source_name || problem != db.outline_problem {
                 updates.push((i, j, layout, b.name().to_string(), src.name.clone(), problem));
