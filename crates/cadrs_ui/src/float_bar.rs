@@ -52,7 +52,19 @@ impl FloatBar {
             Children::spawn(SpawnWith(move |p: &mut ChildSpawner| {
                 let mut bar = p.spawn((
                     Name::new(name),
-                    Node { column_gap: Val::Px(8.0), align_items: AlignItems::Center, padding, border_radius: BorderRadius::all(Val::Px(radius)), ..default() },
+                    // In a narrow area it wraps onto a second row rather than run under what is at
+                    // the area's corners (the view cube).
+                    Node {
+                        column_gap: Val::Px(8.0),
+                        row_gap: Val::Px(4.0),
+                        align_items: AlignItems::Center,
+                        flex_wrap: FlexWrap::Wrap,
+                        justify_content: JustifyContent::Center,
+                        max_width: Val::Percent(72.0),
+                        padding,
+                        border_radius: BorderRadius::all(Val::Px(radius)),
+                        ..default()
+                    },
                     BackgroundColor(background),
                 ));
                 if shadow {

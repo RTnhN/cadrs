@@ -527,7 +527,7 @@ fn sync_fit_buttons(world: &mut World) {
             let t = world.resource::<cadrs_ui::Theme>().clone();
             let t2 = t.clone();
             world.commands().entity(area).with_children(|vp| {
-                vp.spawn(cadrs_ui::FloatBar::new("board-fit-status").top(46.0).prompt().build(&t, move |b| {
+                vp.spawn(cadrs_ui::FloatBar::new("board-fit-status").top(82.0).prompt().build(&t, move |b| {
                     b.spawn(t2.text(text, t2.font_sm, bevy::text::FontWeight::NORMAL, t2.foreground));
                 }));
             });
