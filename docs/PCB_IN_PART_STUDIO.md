@@ -185,6 +185,18 @@ the 3D viewport, and (c) a sketch → outline link.
   face's picture showed through the board at an angle); a Transform of a board's part moves its
   components; the Parts list shows a board as a folder of its components; a wire pad whose
   footprint cuts a hole round itself counts as on the board.
+- **Review fixes (2026-10-11, fourth review).** A dragged component keeps its place under the
+  pointer (the press picks its footprint by id at the pointer's point on the board); a release
+  off the board's plane still ends a drag. Mounting holes keep their ids through undo/redo and
+  added circles. A Derived board whose board or PCB Studio is deleted keeps its last layout
+  with a warning. A component moved apart from its board by a Transform exports there; a board
+  in a derived Part Studio exports its components' models (the layout found in the features
+  the Derived feature keeps). An outline can't follow a sketch after a derive that brings its
+  board in through another Part Studio. Align takes a mate connector as its target. The MCP
+  board tools take `inside` (which region) and `copy` (which board copy), and have tests.
+  pcb_fit_connector fits C1 0.50 mm from the tube's far wall; pcb_board_from_sketch uses the
+  tube's inner edges offset 1 mm in (Use + Offset on a used loop, which chains and closes; used
+  edges that jump move the sketch in steps so an offset keeps its side).
 - **Since (2).** Assembly instances carry their parts' pictures through their pose (a mated
   board's skins move with it); Create PCB board can make the sketch's circles NPTH holes; an
   in-context snapshot of a board goes stale when its layout changes (tested).
