@@ -287,3 +287,21 @@ fn a_mate_to_a_board_component_holds_when_the_layout_moves_it() {
     let at = j4_xy(&doc);
     assert!(at[0].abs() < 1e-3 && (at[1] - 8.0).abs() < 1e-3, "still over the Live pin: {at:?}");
 }
+
+#[test]
+fn an_in_context_snapshot_of_a_board_goes_stale_when_its_layout_changes() {
+    use cadrs_core::assembly::context::{self, ContextStatus};
+    let (mut doc, mut h, _, pi, _) = assembly_with_board([-15.5, -19.5, 0.0]);
+    let asm_id = doc.elements.iter().find(|e| e.assembly_model().is_some()).unwrap().id;
+    let ctx = context::snapshot(&doc, asm_id, pi).unwrap();
+    // The board's parts are in the plug's context, as of now.
+    assert!(ctx.parts.iter().any(|p| p.element == pe::PCB), "{:?}", ctx.parts);
+    assert_eq!(context::status(&doc, pe::STUDIO, &ctx), ContextStatus::UpToDate);
+    // A footprint moved in the PCB Studio puts it out of date.
+    let board = doc.element(pe::PCB).unwrap().pcb().unwrap().boards[0].id;
+    store(&mut doc, &mut h, board, |d| ops::place_footprint(d, "C1", Some([5.0, 5.0]), None, None));
+    assert_eq!(context::status(&doc, pe::STUDIO, &ctx), ContextStatus::OutOfDate);
+    // Updated, it is up to date again.
+    let now = context::resnapshot(&doc, pe::STUDIO, &ctx).unwrap();
+    assert_eq!(context::status(&doc, pe::STUDIO, &now), ContextStatus::UpToDate);
+}

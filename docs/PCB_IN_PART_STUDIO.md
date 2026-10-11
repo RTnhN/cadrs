@@ -162,8 +162,6 @@ the 3D viewport, and (c) a sketch → outline link.
   Part Studio's derived board (its board copy and component parts); an assembly shows
   occurrences, so it needs its own host. Until then Edit layout on an instance opens the PCB
   Studio, and fitting in 3D is done in a Part Studio that derives the board (then inserted).
-- **Not done (P7): a drawing view of a board shown as its layout draws the bare board**, not the
-  layout picture on it.
 - **P7 done.** MCP tools (`cadrs_mcp`, logic in `cadrs_core::pcb::ops`): `get_board` (outline,
   footprints with pads and nets, DRC errors, where it is derived), `get_board_fit` (the pins and
   holes of the parts square to the board, collisions), `derive_board`, `create_board_from_sketch`,
@@ -171,14 +169,22 @@ the 3D viewport, and (c) a sketch → outline link.
   (and its symbol), `link_outline` (keeping the parts' place on the board). A Part Studio's STEP
   export writes components as their models' solids (`pcb::model_solids`, shared with the PCB
   Studio's own STEP export), where the board copy has them. Drawing views project components the
-  same way; a board shown as its layout appears alone (its layout picture isn't drawn on the
-  sheet). IDF boards derive as their outline, drilled holes and a box per package
+  same way; a board shown as its layout appears alone. A view square to a board draws the
+  picture on the face it sees (`ViewGeometry::pictures`, any part's pictures: board skins and
+  Image features) under its lines, faded toward the paper in a line view so the lines read, in
+  a shaded view among the faces by depth (the components cover it); left out at a slant, in a
+  section, cropped, detail or broken view, or when a solid part lies in front of any of it.
+  Sheet pictures (`cadrs_drawing::export::Picture`) carry their edges, so PDF and PNG exports
+  draw them turned or mirrored. IDF boards derive as their outline, drilled holes and a box per package
   (`design::idf_layout`, stable ids), read-only (Edit layout says why), in the Derived picker,
   the assembly Insert dialog and direct inserts.
 - **Since.** A board's skins and the layout overlay show only from outside their face (the far
   face's picture showed through the board at an angle); a Transform of a board's part moves its
   components; the Parts list shows a board as a folder of its components; a wire pad whose
   footprint cuts a hole round itself counts as on the board.
+- **Since (2).** Assembly instances carry their parts' pictures through their pose (a mated
+  board's skins move with it); Create PCB board can make the sketch's circles NPTH holes; an
+  in-context snapshot of a board goes stale when its layout changes (tested).
 
 ## 4. Data model changes
 

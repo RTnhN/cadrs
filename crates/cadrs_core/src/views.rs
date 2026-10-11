@@ -74,6 +74,9 @@ pub struct ViewGeometry {
     pub chamfers: HashMap<uuid::Uuid, ChamferInfo>,
     /// A flat pattern view's bends (P3I.7).
     pub flat: Option<cadrs_drawing::flat_view::FlatData>,
+    /// The pictures on the parts seen square-on (a derived board's layout, an Image feature),
+    /// drawn under the lines.
+    pub pictures: Vec<cadrs_drawing::export::Picture>,
 }
 
 impl ViewModel for ViewGeometry {
@@ -97,6 +100,9 @@ impl ViewModel for ViewGeometry {
     }
     fn flat(&self) -> Option<&cadrs_drawing::flat_view::FlatData> {
         self.flat.as_ref()
+    }
+    fn pictures(&self) -> &[cadrs_drawing::export::Picture] {
+        &self.pictures
     }
 }
 
@@ -317,6 +323,75 @@ pub fn mesh_bounds(parts: &[&Part], frame: &ViewFrame) -> Option<([f64; 2], [f64
         }
     }
     out
+}
+
+/// The pictures on `parts` seen through `frame` (faded toward the paper in a line view, `faded`,
+/// so the black lines over them read): those lying square to the view (within half a
+/// degree; at a slant a picture would hide what it should not) and facing the viewer, with no
+/// triangle of `occluders` (other than the picture's own part) in front of any of it. (A
+/// picture partly covered is left out whole: the drawing has no depth to cut it by.)
+pub fn pictures(parts: &[&Part], occluders: &[&Part], frame: &ViewFrame, faded: bool) -> Vec<cadrs_drawing::export::Picture> {
+    let v3 = |a: [f64; 3]| nalgebra::Vector3::new(a[0], a[1], a[2]);
+    let p3 = |a: [f64; 3]| nalgebra::Point3::new(a[0], a[1], a[2]);
+    let to2 = |a: [f64; 3]| {
+        let q = frame.to_2d(&p3(a));
+        [q.x, q.y]
+    };
+    let mut out = Vec::new();
+    for p in parts {
+        for img in &p.solid.images {
+            let (u, v) = (v3(img.u), v3(img.v));
+            let n = img.facing.map(v3).unwrap_or_else(|| u.cross(&v)).normalize();
+            let square = n.dot(&frame.dir).abs() > (0.5f64).to_radians().cos();
+            if !square || img.facing.is_some_and(|f| v3(f).dot(&frame.dir) > 0.0) {
+                continue;
+            }
+            let Some(data) = crate::blobs::get(&img.blob) else { continue };
+            let c = img.corner;
+            let add = |a: [f64; 3], b: Vec3| [a[0] + b[0], a[1] + b[1], a[2] + b[2]];
+            let quad = [to2(c), to2(add(c, img.u)), to2(add(add(c, img.u), img.v)), to2(add(c, img.v))];
+            let depth = frame.depth(&p3(c));
+            let hidden = occluders.iter().filter(|o| o.id != p.id).any(|o| {
+                let s = &o.solid;
+                s.indices.as_chunks::<3>().0.iter().any(|t| {
+                    let pts = t.map(|i| s.positions[i as usize]);
+                    pts.iter().any(|q| frame.depth(&p3(*q)) < depth - 0.01) && convex_overlap(&pts.map(to2), &quad)
+                })
+            });
+            if !hidden {
+                let data = match faded {
+                    true => match cadrs_drawing::export::faded_png(&data, 0.45) {
+                        Ok(f) => Arc::new(f),
+                        Err(_) => continue,
+                    },
+                    false => data,
+                };
+                let d = |a: [f64; 2], b: [f64; 2]| [b[0] - a[0], b[1] - a[1]];
+                out.push(cadrs_drawing::export::Picture { at: quad[0], u: d(quad[0], quad[1]), v: d(quad[0], quad[3]), depth: Some(depth), data });
+            }
+        }
+    }
+    out
+}
+
+type Vec3 = [f64; 3];
+
+/// Whether two convex polygons overlap with some area (separating axes; touching is apart).
+fn convex_overlap(a: &[[f64; 2]], b: &[[f64; 2]]) -> bool {
+    let apart_along = |poly: &[[f64; 2]]| {
+        (0..poly.len()).any(|i| {
+            let (p, q) = (poly[i], poly[(i + 1) % poly.len()]);
+            let n = [p[1] - q[1], q[0] - p[0]];
+            if n[0] * n[0] + n[1] * n[1] < 1e-18 {
+                return false;
+            }
+            let range = |pts: &[[f64; 2]]| pts.iter().map(|r| r[0] * n[0] + r[1] * n[1]).fold((f64::MAX, f64::MIN), |(lo, hi), x| (lo.min(x), hi.max(x)));
+            let ((a0, a1), (b0, b1)) = (range(a), range(b));
+            let eps = 1e-9 * (n[0].abs() + n[1].abs());
+            a1 <= b0 + eps || b1 <= a0 + eps
+        })
+    };
+    !apart_along(a) && !apart_along(b)
 }
 
 fn srgb_to_linear(c: u8) -> f32 {

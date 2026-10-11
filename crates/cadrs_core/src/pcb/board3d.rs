@@ -500,7 +500,8 @@ pub fn moved(s: &Solid, m: &Motion) -> Solid {
 }
 
 /// Each owner's (a Derived feature's) last skins, per side: the layout hash they were made for
-/// and the blob. Only the latest is kept: an older one's PNG leaves the blob cache.
+/// and the blob. An older one's PNG leaves the blob cache once [`KEPT_SKINS`] newer ones are
+/// made.
 type SkinEntry = (u64, Option<(String, [f64; 4])>);
 
 fn skin_cache() -> &'static RwLock<HashMap<(u64, bool), SkinEntry>> {
@@ -525,14 +526,56 @@ fn skin_blob(b: &Board, hash: u64, owner: u64, side: Side) -> Option<(String, [f
         let bb = s.bounds;
         Some((crate::blobs::insert(png), [to_mm(bb.min.x), to_mm(bb.min.y), to_mm(bb.size().w), to_mm(bb.size().h)]))
     });
-    if let Ok(mut c) = skin_cache().write()
-        && let Some((_, Some((old, _)))) = c.insert(key, (hash, made.clone()))
-        && made.as_ref().is_none_or(|(new, _)| *new != old)
-        && !c.values().any(|(_, s)| s.as_ref().is_some_and(|(b, _)| *b == old))
+    if let Some((new, _)) = &made
+        && let Ok(mut f) = forgotten().write()
     {
-        crate::blobs::forget(&old);
+        f.remove(new);
+    }
+    if let Ok(mut c) = skin_cache().write() {
+        c.insert(key, (hash, made.clone()));
+        // The latest skins stay loaded (a solid made from an older layout, or another document
+        // with the same feature ids, may still show one); older ones leave the blob cache
+        // unless some owner's latest is the same picture.
+        let mut recent = recent_skins().lock().unwrap_or_else(|e| e.into_inner());
+        if let Some((new, _)) = &made {
+            recent.retain(|b| b != new);
+            recent.push_front(new.clone());
+        }
+        while recent.len() > KEPT_SKINS {
+            let Some(old) = recent.pop_back() else { break };
+            if !c.values().any(|(_, s)| s.as_ref().is_some_and(|(b, _)| *b == old)) {
+                crate::blobs::forget(&old);
+                if let Ok(mut f) = forgotten().write() {
+                    if f.len() > 4096 {
+                        f.clear();
+                    }
+                    f.insert(old);
+                }
+            }
+        }
     }
     made
+}
+
+/// The skins dropped from the blob cache (until made again).
+fn forgotten() -> &'static RwLock<std::collections::HashSet<String>> {
+    static F: OnceLock<RwLock<std::collections::HashSet<String>>> = OnceLock::new();
+    F.get_or_init(Default::default)
+}
+
+/// Whether any of `solid`'s pictures is a skin dropped from the blob cache: a rebuild's cached
+/// output showing it is made again (which makes the skin again).
+pub fn shows_forgotten_skin(solid: &Solid) -> bool {
+    let Ok(f) = forgotten().read() else { return false };
+    !f.is_empty() && solid.images.iter().any(|i| f.contains(&i.blob))
+}
+
+/// How many of the latest skins stay loaded whatever their owners show now.
+const KEPT_SKINS: usize = 16;
+
+fn recent_skins() -> &'static std::sync::Mutex<std::collections::VecDeque<String>> {
+    static RECENT: OnceLock<std::sync::Mutex<std::collections::VecDeque<String>>> = OnceLock::new();
+    RECENT.get_or_init(Default::default)
 }
 
 /// The board's top and bottom skins as pictures in the board frame, a hair off each face (made

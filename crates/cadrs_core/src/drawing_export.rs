@@ -159,7 +159,7 @@ pub fn pages(
             let shaded = if v.shaded {
                 g.shaded
                     .iter()
-                    .map(|t| ShadedTri { points: t.points, colors: t.colors.map(|c| [c[0], c[1], c[2]]) })
+                    .map(|t| ShadedTri { points: t.points, colors: t.colors.map(|c| [c[0], c[1], c[2]]), depth: t.depths.iter().sum::<f64>() / 3.0 })
                     .collect()
             } else {
                 Vec::new()

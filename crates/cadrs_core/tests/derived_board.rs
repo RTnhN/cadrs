@@ -843,6 +843,19 @@ fn a_drawing_view_shows_the_board_and_its_components_or_its_layout() {
     run(&mut doc, &mut h, &SetDerived { element: STUDIO, feature: DERIVED, derived: d, links: vec![], label: "Layout".into() });
     let g = views::project(&doc.element(STUDIO).unwrap().active_features(), request()).unwrap();
     assert_eq!(g.parts.len(), 1);
+    // Edge on, no picture; square on, the face seen carries the layout's picture (under the
+    // view's lines), the far face's none.
+    assert!(g.pictures.is_empty(), "{:?}", g.pictures.len());
+    for (dir, x) in [(-1.0, 1.0), (1.0, -1.0)] {
+        let r = ViewRequest { frame: cadrs_kernel::ViewFrame::new(nalgebra::Vector3::new(0.0, 0.0, dir), nalgebra::Vector3::new(x, 0.0, 0.0)), ..request() };
+        let g = views::project(&doc.element(STUDIO).unwrap().active_features(), r).unwrap();
+        assert_eq!(g.pictures.len(), 1, "looking along z {dir}");
+        let p = &g.pictures[0];
+        // It covers the board (40 × 30), its corners within the view's outline.
+        let area = (p.u[0] * p.v[1] - p.u[1] * p.v[0]).abs();
+        let (lo, hi) = g.bounds.unwrap();
+        assert!(area > 0.9 * (hi[0] - lo[0]) * (hi[1] - lo[1]), "{area} {lo:?} {hi:?}");
+    }
 }
 
 #[test]

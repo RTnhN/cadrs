@@ -223,10 +223,14 @@ pub struct Text {
 /// A picture on the page.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Picture {
-    /// Bottom-left corner and size (mm).
+    /// The image's bottom-left corner, and its bottom (`u`) and left (`v`) edges (mm): a
+    /// rectangle for an inserted image, turned or mirrored for a view's (a board's layout).
     pub at: P2,
-    pub width: f64,
-    pub height: f64,
+    pub u: P2,
+    pub v: P2,
+    /// A view's picture: how far its plane lies along the direction of sight (larger is
+    /// farther), to paint it among a shaded view's faces.
+    pub depth: Option<f64>,
     /// The file's bytes (PNG or JPEG).
     pub data: std::sync::Arc<Vec<u8>>,
 }
@@ -307,6 +311,9 @@ impl Page {
 pub struct ShadedTri {
     pub points: [P2; 3],
     pub colors: [[f32; 3]; 3],
+    /// Its mean depth along the direction of sight (larger is farther; triangles come farthest
+    /// first).
+    pub depth: f64,
 }
 
 /// What a view needs to be drawn: its projection with the model data annotations read, its
@@ -330,6 +337,30 @@ fn linear_to_srgb(c: f32) -> u8 {
     let c = c.clamp(0.0, 1.0);
     let s = if c <= 0.003_130_8 { c * 12.92 } else { 1.055 * c.powf(1.0 / 2.4) - 0.055 };
     (s * 255.0).round() as u8
+}
+
+/// A view's picture on the sheet.
+fn view_picture(page: &mut Page, v: &View, pic: &Picture) {
+    let at = v.to_sheet(pic.at);
+    let edge = |d: P2| {
+        let q = v.to_sheet([pic.at[0] + d[0], pic.at[1] + d[1]]);
+        [q[0] - at[0], q[1] - at[1]]
+    };
+    page.items.push(Item::Image(Picture { at, u: edge(pic.u), v: edge(pic.v), depth: None, data: pic.data.clone() }));
+}
+
+/// An image (PNG or JPEG) faded toward white paper, keeping `keep` of its ink, as PNG: a
+/// picture under a line view's black lines (a board's dark solder mask would hide them).
+pub fn faded_png(data: &[u8], keep: f32) -> Result<Vec<u8>, String> {
+    let mut img = decode_image(data)?;
+    for px in img.pixels_mut() {
+        for c in &mut px.0[..3] {
+            *c = (255.0 - (255.0 - *c as f32) * keep).round() as u8;
+        }
+    }
+    let mut out = std::io::Cursor::new(Vec::new());
+    img.write_to(&mut out, image::ImageFormat::Png).map_err(|e| e.to_string())?;
+    Ok(out.into_inner())
 }
 
 /// The page of sheet `index` of `d`.
@@ -369,16 +400,27 @@ pub fn sheet_page(d: &Drawing, index: usize, ctx: &PageContext) -> Page {
         }));
     }
     let views: Vec<&View> = sheet.views.iter().collect();
-    // Shaded views first (under every line).
+    // Shaded views first (under every line), with the views' pictures (a board's layout):
+    // in a shaded view each after the faces behind it and its own face. Not in a cropped,
+    // detail or broken view (they would spill out of it).
     for v in &views {
         let Some(input) = ctx.views.get(&v.id) else { continue };
-        if !v.shaded {
-            continue;
+        let mut pictures: Vec<&Picture> = if v.clipped() { Vec::new() } else { input.model.pictures().iter().collect() };
+        // Farthest first, as the triangles come.
+        pictures.sort_by(|a, b| b.depth.unwrap_or(0.0).total_cmp(&a.depth.unwrap_or(0.0)));
+        let mut pictures = pictures.into_iter().peekable();
+        if v.shaded {
+            for t in &input.shaded {
+                while let Some(p) = pictures.next_if(|p| p.depth.is_some_and(|pd| t.depth < pd - 1e-3)) {
+                    view_picture(&mut page, v, p);
+                }
+                let c = t.colors.iter().fold([0.0f32; 3], |a, c| [a[0] + c[0] / 3.0, a[1] + c[1] / 3.0, a[2] + c[2] / 3.0]);
+                let color = [linear_to_srgb(c[0]), linear_to_srgb(c[1]), linear_to_srgb(c[2])];
+                page.fill(t.points.iter().map(|p| v.to_sheet(*p)).collect(), color, Layer::Shaded);
+            }
         }
-        for t in &input.shaded {
-            let c = t.colors.iter().fold([0.0f32; 3], |a, c| [a[0] + c[0] / 3.0, a[1] + c[1] / 3.0, a[2] + c[2] / 3.0]);
-            let color = [linear_to_srgb(c[0]), linear_to_srgb(c[1]), linear_to_srgb(c[2])];
-            page.fill(t.points.iter().map(|p| v.to_sheet(*p)).collect(), color, Layer::Shaded);
+        for p in pictures {
+            view_picture(&mut page, v, p);
         }
     }
     // Images.
@@ -386,8 +428,9 @@ pub fn sheet_page(d: &Drawing, index: usize, ctx: &PageContext) -> Page {
         if let ItemKind::Image(img) = &it.kind {
             page.items.push(Item::Image(Picture {
                 at: img.at,
-                width: img.width,
-                height: img.height,
+                u: [img.width, 0.0],
+                v: [0.0, img.height],
+                depth: None,
                 data: std::sync::Arc::new(img.data.clone()),
             }));
         }

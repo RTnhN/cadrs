@@ -593,6 +593,13 @@ impl Rebuilder {
             if let Some(why) = &below {
                 key = chain_key_str(key, why);
             }
+            // A cached output showing a board's skin that has left the blob cache is made again
+            // (an older layout's, or another document's with the same feature ids).
+            if self.entries.get(&key).is_some_and(|e| e.output.state.parts.iter().any(|p| crate::pcb::board3d::shows_forgotten_skin(&p.part.solid)))
+                && let Some(e) = self.entries.remove(&key)
+            {
+                self.release_unheld(e.output.owned);
+            }
             if !self.entries.contains_key(&key) {
                 out.computed += 1;
                 // Only the last feature's stage is kept (the one a dialog edits).
@@ -788,6 +795,11 @@ impl Rebuilder {
                 released.extend(e.output.owned);
             }
         }
+        self.release_unheld(released);
+    }
+
+    /// Releases those of `released` (bodies of dropped outputs) no remaining output holds.
+    fn release_unheld(&mut self, released: Vec<BodyId>) {
         let held: HashSet<BodyId> = self
             .entries
             .values()
@@ -1039,6 +1051,12 @@ impl Rebuilder {
         if req.shaded {
             out.shaded = crate::views::shade(&parts, &req.frame, &req.props, &req.appearances);
         }
+        // Pictures (a board's layout) hidden by solids only: a board's components stand on it.
+        let solids: Vec<&Part> = parts.iter().copied().filter(|p| state.part(p.id).is_some_and(|s| s.body.is_some())).collect();
+        // (Not in a section: the cut would have to cut the picture too.)
+        if req.cut.is_none() {
+            out.pictures = crate::views::pictures(&parts, &solids, &req.frame, !req.shaded);
+        }
         // A derived board's components are meshes: projected as their models' solids, made for
         // the view (one body each) and released after.
         let made = self.view_solids(features, &state, &parts);
@@ -1124,6 +1142,10 @@ impl Rebuilder {
         }
         let refs: Vec<&Part> = moved.iter().collect();
         out.bounds = crate::views::mesh_bounds(&refs, &req.frame);
+        // (Only solids are here: a mesh part, such as a board's component, has no body to move.)
+        if req.cut.is_none() {
+            out.pictures = crate::views::pictures(&refs, &refs, &req.frame, !req.shaded);
+        }
         // Farthest first, over every studio's triangles (with their owners).
         let mean = |t: &crate::views::ShadedTriangle| (t.depths[0] + t.depths[1] + t.depths[2]) / 3.0;
         let mut paired: Vec<(crate::views::ShadedTriangle, Option<usize>)> = tris.into_iter().zip(owners).collect();

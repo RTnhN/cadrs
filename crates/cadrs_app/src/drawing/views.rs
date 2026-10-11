@@ -58,7 +58,7 @@ impl Plugin for ViewsPlugin {
             .add_systems(Startup, configure_view_gizmos)
             .add_systems(
                 Update,
-                (drive_view_cache, rebuild_view_scene, sync_view_entities, size_view_lines, draw_view_strokes)
+                (drive_view_cache, rebuild_view_scene, sync_view_entities, sync_view_pictures, size_view_lines, draw_view_strokes)
                     .chain()
                     .in_set(ViewsSet)
                     .after(super::size_sheet_texts)
@@ -547,6 +547,8 @@ pub struct ViewScene {
     placeholders: Vec<(ViewId, [f64; 2], [f64; 2], String)>,
     /// Shaded views to show: (view, geometry, placement).
     shaded: Vec<(View, Arc<ViewGeometry>)>,
+    /// Views with pictures (a board's layout) to show.
+    pictures: Vec<(View, Arc<ViewGeometry>)>,
 }
 
 #[derive(Clone, PartialEq)]
@@ -738,6 +740,7 @@ fn rebuild_view_scene(
     let mut strokes = Vec::new();
     let mut placeholders = Vec::new();
     let mut shaded = Vec::new();
+    let mut pictures = Vec::new();
     for ((v, g), err) in views.iter().zip(&geometry).zip(&errors) {
         let color = if ui.selected.contains(&v.id) {
             selected_color()
@@ -750,6 +753,10 @@ fn rebuild_view_scene(
             Some(g) => {
                 if v.shaded && !g.shaded.is_empty() {
                     shaded.push((v.clone(), g.clone()));
+                }
+                // (Not in a cropped, detail or broken view: they would spill out of it.)
+                if !g.pictures.is_empty() && !v.clipped() {
+                    pictures.push((v.clone(), g.clone()));
                 }
                 let sketches = sketch_polylines(&doc.doc, v);
                 let hl = ui.highlight_edge.filter(|(id, _)| *id == v.id).map(|(_, e)| e);
@@ -789,6 +796,88 @@ fn rebuild_view_scene(
     scene.strokes = strokes;
     scene.placeholders = placeholders;
     scene.shaded = shaded;
+    scene.pictures = pictures;
+}
+
+/// A view's picture's quad, and what it was built from.
+#[derive(Component)]
+struct ViewPictureMesh {
+    view: ViewId,
+    geometry: usize,
+}
+
+/// Spawns, moves and removes the views' pictures: textured quads under the lines; in a shaded
+/// view at their face's depth (as the shaded mesh places it), so parts in front cover them.
+fn sync_view_pictures(
+    scene: Res<ViewScene>,
+    mut images: ResMut<Assets<Image>>,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<ColorMaterial>>,
+    mut q: Query<(Entity, &ViewPictureMesh, &mut Transform)>,
+    mut commands: Commands,
+) {
+    use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
+    let mut keep = Vec::new();
+    for (e, m, mut t) in &mut q {
+        match scene.pictures.iter().find(|(v, g)| v.id == m.view && Arc::as_ptr(g) as usize == m.geometry) {
+            Some((v, _)) => {
+                keep.push(v.id);
+                let want = view_transform(v);
+                if *t != want {
+                    *t = want;
+                }
+            }
+            None => commands.entity(e).despawn(),
+        }
+    }
+    for (v, g) in &scene.pictures {
+        if keep.contains(&v.id) {
+            continue;
+        }
+        // The shaded mesh's depth scale (`sync_view_entities`).
+        let span = (v.shaded && !g.shaded.is_empty()).then(|| {
+            let (lo, hi) = g.shaded.iter().flat_map(|t| t.depths).fold((f64::MAX, f64::MIN), |(lo, hi), d| (lo.min(d), hi.max(d)));
+            (hi, (hi - lo).max(1e-9))
+        });
+        for (i, pic) in g.pictures.iter().enumerate() {
+            let Ok(rgba) = cadrs_drawing::export::decode_image(&pic.data) else { continue };
+            let (w, h) = rgba.dimensions();
+            let image = Image::new(
+                Extent3d { width: w, height: h, depth_or_array_layers: 1 },
+                TextureDimension::D2,
+                rgba.into_raw(),
+                TextureFormat::Rgba8UnormSrgb,
+                RenderAssetUsages::default(),
+            );
+            let z = match (span, pic.depth) {
+                (Some((hi, span)), Some(d)) => (0.4 * (hi - d) / span) as f32 + 0.002,
+                _ => 0.0,
+            };
+            let p = |a: [f64; 2], b: [f64; 2], c: [f64; 2]| [(a[0] + b[0] + c[0]) as f32, (a[1] + b[1] + c[1]) as f32, z];
+            let o = [0.0, 0.0];
+            // Corners: bottom-left, bottom-right, top-right, top-left (row 0 of the image at the top).
+            let positions = vec![p(pic.at, o, o), p(pic.at, pic.u, o), p(pic.at, pic.u, pic.v), p(pic.at, o, pic.v)];
+            let uvs = vec![[0.0f32, 1.0], [1.0, 1.0], [1.0, 0.0], [0.0, 0.0]];
+            let mut mesh = Mesh::new(PrimitiveTopology::TriangleList, RenderAssetUsages::default());
+            mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, positions);
+            mesh.insert_attribute(Mesh::ATTRIBUTE_UV_0, uvs);
+            // Both windings (a mirrored picture turns its triangles over).
+            mesh.insert_indices(Indices::U32(vec![0, 1, 2, 0, 2, 3, 0, 2, 1, 0, 3, 2]));
+            commands.spawn((
+                Name::new(format!("view-picture-{}-{i}", v.name.to_lowercase())),
+                ViewPictureMesh { view: v.id, geometry: Arc::as_ptr(g) as usize },
+                Mesh2d(meshes.add(mesh)),
+                MeshMaterial2d(materials.add(ColorMaterial {
+                    texture: Some(images.add(image)),
+                    // (Blended: drawn with the lines, which a masked quad would cover.)
+                    alpha_mode: bevy::sprite_render::AlphaMode2d::Blend,
+                    ..ColorMaterial::from(Color::WHITE)
+                })),
+                view_transform(v),
+                RenderLayers::layer(DRAWING_LAYER),
+            ));
+        }
+    }
 }
 
 /// A shaded view's mesh, and what it was built from.

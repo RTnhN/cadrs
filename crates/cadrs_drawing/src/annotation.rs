@@ -154,6 +154,10 @@ pub trait ViewModel {
     fn threads(&self) -> &[ThreadInfo] {
         &[]
     }
+    /// The pictures on the parts seen square-on (a board's layout), in the view's 2D frame.
+    fn pictures(&self) -> &[crate::export::Picture] {
+        &[]
+    }
     /// The Chamfer feature with this id (P3C.8).
     fn chamfer(&self, _feature: &Uuid) -> Option<&ChamferInfo> {
         None
