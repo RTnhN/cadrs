@@ -67,7 +67,7 @@ impl From<InstanceSource> for PropertyOwner {
             InstanceSource::Part { element, part } => PropertyOwner::Part { element, part },
             // A rigid Part Studio instance has no properties of its own (its parts do): the BOM
             // and the mass list its parts.
-            InstanceSource::Assembly { element } | InstanceSource::Studio { element } => PropertyOwner::Assembly { element },
+            InstanceSource::Assembly { element } | InstanceSource::Studio { element, .. } => PropertyOwner::Assembly { element },
         }
     }
 }
@@ -453,7 +453,7 @@ pub fn mass(doc: &Document, owner: PropertyOwner, build_of: &mut dyn FnMut(Eleme
             for inst in asm.instances.iter().filter(|i| !i.suppressed) {
                 match inst.source {
                     // A rigid Part Studio instance: its parts.
-                    InstanceSource::Studio { element } => {
+                    InstanceSource::Studio { element, .. } => {
                         for part in &inst.parts {
                             total += mass(doc, PropertyOwner::Part { element, part: *part }, build_of)?;
                         }

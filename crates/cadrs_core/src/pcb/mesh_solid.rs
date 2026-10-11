@@ -558,3 +558,59 @@ mod tests {
         assert!((cx - 2.0).abs() < 1e-9 && (cy + 1.0).abs() < 1e-9 && (r - 3.0).abs() < 1e-9 && rms < 1e-9);
     }
 }
+
+/// The volume properties of a closed mesh part (signed tetrahedra from the origin, Tonon's
+/// covariance for the inertia): its volume, area, centroid and inertia at unit density.
+/// `None` for a mesh enclosing (next to) nothing, an open shell say.
+pub fn mesh_mass(s: &Solid) -> Option<cadrs_kernel::MassProperties> {
+    use nalgebra::{Matrix3, Point3, Vector3};
+    let v = |i: u32| {
+        let p = s.positions[i as usize];
+        Vector3::new(p[0], p[1], p[2])
+    };
+    let canonical = Matrix3::new(2.0, 1.0, 1.0, 1.0, 2.0, 1.0, 1.0, 1.0, 2.0) / 120.0;
+    let (mut volume, mut area) = (0.0, 0.0);
+    let mut first = Vector3::zeros();
+    let mut cov = Matrix3::zeros();
+    for t in s.indices.as_chunks::<3>().0 {
+        let (a, b, c) = (v(t[0]), v(t[1]), v(t[2]));
+        area += (b - a).cross(&(c - a)).norm() / 2.0;
+        let m = Matrix3::from_columns(&[a, b, c]);
+        let det = m.determinant();
+        volume += det / 6.0;
+        first += det * (a + b + c) / 24.0;
+        cov += det * m * canonical * m.transpose();
+    }
+    // Wound inward: all signs flip.
+    if volume < 0.0 {
+        volume = -volume;
+        first = -first;
+        cov = -cov;
+    }
+    if volume < 1e-6 {
+        return None;
+    }
+    let com = first / volume;
+    let c = cov - volume * com * com.transpose();
+    let inertia = Matrix3::identity() * c.trace() - c;
+    Some(cadrs_kernel::MassProperties { volume, surface_area: area, center_of_mass: Point3::from(com), inertia })
+}
+
+#[cfg(test)]
+mod mass_tests {
+    use super::*;
+
+    #[test]
+    fn a_box_mesh_has_its_volume_centroid_and_inertia() {
+        let mut b = cadrs_eda::model3d::Body::default();
+        b.cuboid([1.0, 2.0, 3.0], [3.0, 5.0, 7.0], [1, 1, 1]);
+        let s = mesh_solid(&cadrs_eda::model3d::mesh(&b), uuid::Uuid::nil(), 1.0);
+        let m = mesh_mass(&s).unwrap();
+        // 2 × 3 × 4.
+        assert!((m.volume - 24.0).abs() < 1e-9, "{}", m.volume);
+        assert!((m.surface_area - 52.0).abs() < 1e-9);
+        assert!((m.center_of_mass - nalgebra::Point3::new(2.0, 3.5, 5.0)).norm() < 1e-9);
+        // Ixx = V (b² + c²) / 12 = 24 (9 + 16) / 12 = 50.
+        assert!((m.inertia[(0, 0)] - 50.0).abs() < 1e-9 && m.inertia[(0, 1)].abs() < 1e-9, "{}", m.inertia);
+    }
+}

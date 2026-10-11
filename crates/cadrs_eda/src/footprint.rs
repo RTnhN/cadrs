@@ -200,6 +200,17 @@ pub struct Footprint {
 }
 
 impl Footprint {
+    /// How far its shown 3D model's generated body stands off its face (mm), when it has one
+    /// and it isn't tipped over (a model turned about x or y, or a file model: unknown).
+    pub fn model_height(&self) -> Option<f64> {
+        let m = self.models.iter().find(|m| m.visible)?;
+        if m.rotation[0].abs() > 1e-9 || m.rotation[1].abs() > 1e-9 {
+            return None;
+        }
+        let (_, hi) = m.body.as_ref()?.bounds()?;
+        Some(hi[2] * m.scale[2] + m.offset[2])
+    }
+
     pub fn field(&self, name: &str) -> Option<&FpField> {
         self.fields.iter().find(|f| f.name == name)
     }

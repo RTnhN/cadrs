@@ -286,7 +286,7 @@ impl Rebuilder {
         }
         let locations: Vec<PlaneFrame> = if let Some(s) = b.on_sketch {
             // A board made from a sketch lies on the sketch's plane.
-            let plane = before.iter().find(|f| f.id == s).and_then(|f| f.sketch()).and_then(|sk| sk.plane).ok_or("The board's sketch is gone")?;
+            let plane = before.iter().find(|f| f.id == s).and_then(|f| f.sketch()).and_then(|sk| sk.plane).ok_or("The board lies on its outline's sketch, which must come before this feature (it was moved below it, or deleted)")?;
             vec![plane.frame()]
         } else if d.locations.is_empty() {
             vec![ORIGIN]
@@ -294,6 +294,9 @@ impl Rebuilder {
             d.locations.iter().map(|c| super::super::connector_frame(before, state, c)).collect::<Result<Vec<_>, _>>()?
         };
         let (body, curves, mut warnings) = self.board_body_cached(layout)?;
+        if let Some(p) = &b.outline_problem {
+            warnings.push(format!("The outline no longer follows its sketch: {p}"));
+        }
         let (components, w) = board3d::components(layout, o);
         warnings.extend(w);
         let owner = cadrs_kernel::naming::stable_hash(id.0.as_bytes());
@@ -361,13 +364,13 @@ impl Rebuilder {
             let mut placed: Vec<(PartId, Arc<crate::solid::Solid>)> = Vec::new();
             for c in &components {
                 let place = c.motion.then(&m);
-                let solid = self.placed_component(id, k, c, &place);
+                let (solid, mass) = self.placed_component(id, k, c, &place);
                 let name = unique(&label(&c.name), &taken);
                 taken.push(name.clone());
                 let pid = derived_part(id, PartId::new(FeatureId(c.footprint), 0), k);
                 placed.push((pid, solid.clone()));
                 next.parts.push(PartState {
-                    part: Part { id: pid, feature: id, name, kind: PartKind::Solid, palette, solid, mass: None, features: vec![id], source: None, derived: None },
+                    part: Part { id: pid, feature: id, name, kind: PartKind::Solid, palette, solid, mass, features: vec![id], source: None, derived: None },
                     body: None,
                     names: Arc::default(),
                 });
@@ -375,8 +378,8 @@ impl Rebuilder {
                 out.parts.push(pid);
                 out.footprints.push((pid, c.footprint));
             }
-            let comps: Vec<(PartId, &crate::solid::Solid)> = placed.iter().map(|(n, s)| (*n, &**s)).collect();
-            let others: Vec<(PartId, &crate::solid::Solid)> = before_parts.iter().map(|(n, s)| (*n, &**s)).collect();
+            let comps: Vec<(PartId, &Arc<crate::solid::Solid>)> = placed.iter().map(|(n, s)| (*n, s)).collect();
+            let others: Vec<(PartId, &Arc<crate::solid::Solid>)> = before_parts.iter().map(|(n, s)| (*n, s)).collect();
             out.collisions.extend(crate::pcb::fit::collisions(&comps, &others, &frame));
         }
         // (The board's body stays: it is kept for the next rebuild, `board_body_cached`.)
@@ -436,23 +439,25 @@ impl Rebuilder {
     /// A component's mesh part placed by `place` (footprint frame → Part Studio), its faces
     /// named for copy `k` of the Derived feature `id`: kept while the component, its place and
     /// its model are the same, so a rebuild after one footprint moved moves only that one.
-    fn placed_component(&mut self, id: FeatureId, k: usize, c: &board3d::Component, place: &cadrs_kernel::Motion) -> Arc<crate::solid::Solid> {
+    /// (With its volume properties, [`crate::pcb::mesh_solid::mesh_mass`].)
+    fn placed_component(&mut self, id: FeatureId, k: usize, c: &board3d::Component, place: &cadrs_kernel::Motion) -> (Arc<crate::solid::Solid>, Option<cadrs_kernel::MassProperties>) {
         use std::hash::{Hash, Hasher};
         let mut h = std::collections::hash_map::DefaultHasher::new();
         (id, k, c.footprint).hash(&mut h);
         place.linear.iter().chain(place.translation.iter()).for_each(|x| x.to_bits().hash(&mut h));
         let key = h.finish();
-        if let Some((src, made)) = self.placed_components.get(&key)
+        if let Some((src, made, mass)) = self.placed_components.get(&key)
             && Arc::ptr_eq(src, &c.solid)
         {
-            return made.clone();
+            return (made.clone(), *mass);
         }
         let made = Arc::new(board3d::renamed_by(&board3d::moved(&c.solid, place), |n| derived_face(id, &FaceName { op: c.footprint, ..n }, k)));
+        let mass = crate::pcb::mesh_solid::mesh_mass(&made);
         if self.placed_components.len() > 4096 {
             self.placed_components.clear();
         }
-        self.placed_components.insert(key, (c.solid.clone(), made.clone()));
-        made
+        self.placed_components.insert(key, (c.solid.clone(), made.clone(), mass));
+        (made, mass)
     }
 
 }

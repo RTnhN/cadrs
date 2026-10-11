@@ -244,7 +244,7 @@ fn reset(mut ui: ResMut<EdaUi>, mut scene: ResMut<EdaScene>, mut eda: ResMut<Eda
 
 /// The design of the board a view shows.
 pub fn design(doc: &ActiveDocument, el: ElementId, b: BoardId) -> Option<&Design> {
-    doc.doc.element(el)?.pcb()?.board(b)?.design.as_deref()
+    doc.doc.element(el)?.pcb()?.board(b)?.design()
 }
 
 /// The shown native board (or the component being edited) and its mode, this frame; or the
@@ -269,7 +269,7 @@ fn track_context(
                 return Some((el, subject, ui.mode(el, subject)));
             }
             let b = pcb.shown_board(el, s)?;
-            s.board(b)?.design.as_ref()?;
+            s.board(b)?.design()?;
             let subject = Subject::Board(b);
             Some((el, subject, ui.mode(el, subject)))
         }),
@@ -375,6 +375,11 @@ fn on_mode_button(a: On<Activate>, q: Query<&ModeButton>, eda: Res<Eda2d>, mut u
 }
 
 /// Switches a board's view (also the scenario command `eda-mode schematic|layout|3d`).
+/// Shows `mode` for the board `b` of the PCB Studio `el` (when it is next shown).
+pub fn set_mode_of(world: &mut World, el: ElementId, b: BoardId, mode: Mode) {
+    world.resource_mut::<EdaUi>().modes.insert((el, Subject::Board(b)), mode);
+}
+
 pub fn set_mode(world: &mut World, mode: Mode) {
     let ctx = world.resource::<Eda2d>().0;
     if let Some((el, b, _)) = ctx {
@@ -608,6 +613,11 @@ impl Preview {
 
     pub fn get(&self) -> Option<&Design> {
         self.design.as_deref()
+    }
+
+    /// Takes the shown design out to change it (put it back with [`Preview::set`]).
+    pub fn take(&mut self) -> Option<Design> {
+        self.design.take().map(|d| *d)
     }
 
     /// Shows `c` instead of the stored component (the component editors).

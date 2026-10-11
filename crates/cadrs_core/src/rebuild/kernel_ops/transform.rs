@@ -551,7 +551,7 @@ impl Rebuilder {
         let mut member_looks: Vec<(FaceName, crate::appearance::Appearance)> = Vec::new();
         for p in &x.parts {
             let ps = state.part(*p).ok_or("A selected part no longer exists")?;
-            let body = ps.body.ok_or("A selected part has no solid model")?;
+            let body = ps.body.ok_or_else(|| super::super::no_body(ps))?;
             inputs.push((body, ps.names.clone()));
             members.push(*p);
             member_looks.extend(ps.part.solid.looks.iter().copied());

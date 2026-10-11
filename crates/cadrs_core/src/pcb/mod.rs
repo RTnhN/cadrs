@@ -73,8 +73,9 @@ pub struct StudioBoard {
     pub board: PcbBoard,
     pub source: BoardSource,
     /// A native board's schematic and layout.
+    /// (Private: it changes through [`StudioBoard::set_design`], which keeps the hash.)
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub design: Option<Box<cadrs_eda::Design>>,
+    design: Option<Box<cadrs_eda::Design>>,
     /// [`board3d::layout_hash`] of the design's layout (0 without one), kept with it by
     /// [`StudioBoard::set_design`] and worked out when a document is read: Part Studios
     /// deriving the board compare it to tell a change.
@@ -124,6 +125,11 @@ impl PartialEq for StudioBoard {
 impl StudioBoard {
     pub fn name(&self) -> &str {
         self.board.name()
+    }
+
+    /// A native board's schematic and layout.
+    pub fn design(&self) -> Option<&cadrs_eda::Design> {
+        self.design.as_deref()
     }
 
     /// [`board3d::layout_hash`] of the design's layout (0 for a board not designed in cadrs).
@@ -217,9 +223,67 @@ pub struct PcbStudio {
     pub components: Vec<StudioComponent>,
     #[serde(default)]
     next_component: u64,
+    /// [`PcbStudio::part_features`], made on first use (cleared by [`Element::pcb_mut`]).
+    #[serde(skip)]
+    part_features: PartFeatures,
+}
+
+/// The cache of [`PcbStudio::part_features`]: not part of what the studio is (equal, not
+/// written, a copy keeps it since it is made from the boards the copy has too).
+#[derive(Clone, Default)]
+struct PartFeatures(std::sync::OnceLock<Vec<crate::document::Feature>>);
+
+impl PartialEq for PartFeatures {
+    fn eq(&self, _: &Self) -> bool {
+        true
+    }
+}
+
+impl std::fmt::Debug for PartFeatures {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("PartFeatures")
+    }
+}
+
+/// The feature that stands for the board `board` in [`PcbStudio::part_features`] (its parts are
+/// `PartId(this, k)`).
+pub fn board_feature(board: BoardId) -> crate::ids::FeatureId {
+    crate::ids::FeatureId::from_u128(0xb0a2_d000_0000_4000_8000_0000_0000_0000 + u128::from(board.0))
 }
 
 impl PcbStudio {
+    /// The studio as a Part Studio for assemblies (`docs/PCB_IN_PART_STUDIO.md` §9, direct
+    /// insert): one Derived feature per board designed in cadrs, the board and its components
+    /// at the origin (the outline's centre on it), named after the board. An assembly's rigid
+    /// instance of a board ([`crate::assembly::InstanceSource::Studio`] with its board) is that
+    /// feature's parts.
+    pub fn part_features(&self) -> &[crate::document::Feature] {
+        self.part_features.0.get_or_init(|| {
+            self.boards
+                .iter()
+                .filter_map(|b| {
+                    let design = b.design()?;
+                    let mut db = crate::derived::DerivedBoard::new(b.id, b.name(), Default::default());
+                    db.set_layout_hashed(design.board.clone(), b.layout_hash());
+                    db.options.anchor = board3d::BoardAnchor::Center;
+                    let d = crate::derived::DerivedFeature {
+                        // (The source is this studio: no tab needs naming for the rebuild.)
+                        source: Some(crate::external::SourceRef { document: None, at: crate::external::RefAt::Workspace, element: ElementId::from_u128(0), pinned: false }),
+                        source_name: b.name().to_string(),
+                        board: Some(Box::new(db)),
+                        ..Default::default()
+                    };
+                    Some(crate::document::Feature::new(board_feature(b.id), b.name(), crate::document::FeatureKind::Derived(Box::new(d))))
+                })
+                .collect()
+        })
+    }
+
+    /// The board a feature of [`PcbStudio::part_features`] stands for.
+    pub fn board_of_feature(&self, f: crate::ids::FeatureId) -> Option<&StudioBoard> {
+        self.boards.iter().find(|b| board_feature(b.id) == f)
+    }
+
     pub fn board(&self, id: BoardId) -> Option<&StudioBoard> {
         self.boards.iter().find(|b| b.id == id)
     }
@@ -303,10 +367,23 @@ impl Element {
         }
     }
 
+    /// (Its boards may change: the parts made from them are made again when next asked for.)
     pub fn pcb_mut(&mut self) -> Option<&mut PcbStudio> {
         match &mut self.kind {
-            ElementKind::PcbStudio(p) => Some(p),
+            ElementKind::PcbStudio(p) => {
+                p.part_features = PartFeatures::default();
+                Some(p)
+            }
             _ => None,
+        }
+    }
+
+    /// The features whose parts this tab has: a Part Studio's feature list, a PCB Studio's
+    /// boards as Derived features ([`PcbStudio::part_features`]).
+    pub fn part_features(&self) -> &[crate::document::Feature] {
+        match &self.kind {
+            ElementKind::PcbStudio(p) => p.part_features(),
+            _ => self.features(),
         }
     }
 }
@@ -547,7 +624,7 @@ impl Command for SetDesign {
     fn apply(&self, doc: &mut Document) -> Result<(), CommandError> {
         let s = studio_mut(doc, self.element)?;
         let b = s.board_mut(self.board).ok_or_else(|| CommandError::Invalid("no such board".into()))?;
-        if b.design.is_none() {
+        if b.design().is_none() {
             return Err(CommandError::Invalid(format!("{} is not designed in cadrs", b.name())));
         }
         b.set_design(self.design.clone());

@@ -40,6 +40,12 @@ Scenario(
         Hover(xyz(0.4, 7.6, 13.6)),
         Wait(5),
         Screenshot("02-snapped"),
+        // On the pin (r 1.5 shadow at (0, 8)) inside the 40 × 40 tube: 18.5 either side, 10.5
+        // up to the wall, 26.5 down to it.
+        ExpectText("board-gap-px", "18.50 mm"),
+        ExpectText("board-gap-nx", "18.50 mm"),
+        ExpectText("board-gap-py", "10.50 mm"),
+        ExpectText("board-gap-ny", "26.50 mm"),
         Release,
         Wait(20),
         MoveTo(1420, 780),

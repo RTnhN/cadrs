@@ -339,7 +339,7 @@ fn plus_creates_named_boards_and_components() {
     let o = b.board.board.outline.as_ref().unwrap();
     assert!((o.loops[0].area() - 8000.0).abs() < 1e-9);
     assert_eq!(b.board.thickness(), 1.6);
-    assert!(b.design.is_some());
+    assert!(b.design().is_some());
 
     // Renamed (as the inline edit after + does); names stay unique.
     let b1 = s.boards[0].id;
@@ -400,7 +400,7 @@ fn designs_and_components_edit_through_undo() {
     h.execute(&mut d, &SetDesign { element: id, board, design: Box::new(course.clone()), label: "Fill zones".into() }).unwrap();
     assert_eq!(h.undo_label(), Some("Fill zones"));
     let b = studio(&d, id).board(board).unwrap();
-    assert_eq!(b.design.as_deref(), Some(&course));
+    assert_eq!(b.design(), Some(&course));
     assert_eq!(b.board.board.placements.len(), 3);
     assert_eq!(b.name(), "Board 1");
     h.undo(&mut d);

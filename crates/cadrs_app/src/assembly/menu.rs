@@ -130,6 +130,11 @@ pub fn open_instance_menu(world: &mut World, at: Vec2, instance: InstanceId, han
         MenuItem::new("asm-hide", "Hide").icon("hidden")
     };
     let is_sub = inst.source.is_assembly();
+    // A PCB Studio's board (`docs/PCB_IN_PART_STUDIO.md` §9): its layout is edited in its studio.
+    let board = match inst.source {
+        cadrs_core::assembly::InstanceSource::Studio { element, board: Some(b) } => Some((element, b)),
+        _ => None,
+    };
     // P3B.5: a standard content instance (A19.8, A19.9); it has no tab to switch to.
     let is_std = cadrs_core::assembly::standard::standard_of(&world.resource::<ActiveDocument>().doc, &inst.source).is_some();
     let suppress = if inst.suppressed { MenuItem::new("asm-unsuppress", "Unsuppress") } else { MenuItem::new("asm-suppress", "Suppress") };
@@ -153,6 +158,8 @@ pub fn open_instance_menu(world: &mut World, at: Vec2, instance: InstanceId, han
         MenuItem::new("asm-switch-to", "Switch to Standard content").icon("standard-content").disabled(true)
     } else if is_linked {
         MenuItem::new("asm-switch-to", format!("Switch to {studio}")).icon(if is_sub { "assembly" } else { "part-studio" }).disabled(true).tooltip(LINKED)
+    } else if board.is_some() {
+        MenuItem::new("asm-switch-to", format!("Switch to {studio}")).icon("pcb-studio")
     } else {
         MenuItem::new("asm-switch-to", format!("Switch to {studio}")).icon(if is_sub { "assembly" } else { "part-studio" })
     };
@@ -190,7 +197,9 @@ pub fn open_instance_menu(world: &mut World, at: Vec2, instance: InstanceId, han
     let external = cadrs_core::assembly::context::linked_studio_of(&world.resource::<ActiveDocument>().doc, element, instance).is_some();
     let contexts = if external { super::linked_context::contexts_of(world, element, instance) } else { super::managed_context::contexts_of(world.resource::<ActiveDocument>(), element, instance) };
     let no_edit = is_sub || is_std || (is_linked && !external);
-    let in_context = if contexts.is_empty() || no_edit {
+    let in_context = if board.is_some() {
+        MenuItem::new("asm-board-edit-layout", "Edit layout").icon("pcb-studio").tooltip("Edit the board's layout in its PCB Studio (the instance follows)")
+    } else if contexts.is_empty() || no_edit {
         let mut item = MenuItem::new("asm-edit-in-context", "Edit in context").icon("part-studio").disabled(no_edit);
         if is_linked && !external {
             item = item.tooltip("A version of this document is edited at its tab");
@@ -671,6 +680,15 @@ fn act(world: &mut World, menu: &AsmMenu, handle: TriadHandle, item: &str) {
                 switch_to(world, i);
             }
         }
+        // A board instance: its PCB Studio's Layout of the board.
+        "asm-board-edit-layout" => {
+            let source = menu.instance.and_then(|i| world.resource::<ActiveDocument>().active_element()?.assembly_model()?.instance(i).map(|x| x.source));
+            if let Some(cadrs_core::assembly::InstanceSource::Studio { element, board: Some(b) }) = source {
+                world.resource_mut::<ActiveDocument>().set_active(element);
+                crate::pcb::show_board(world, element, b);
+                crate::eda::set_mode_of(world, element, b, crate::eda::Mode::Layout);
+            }
+        }
         "asm-find" => {
             if let Some(i) = menu.instance {
                 world.resource_mut::<Selection>().0 = vec![Pick::Part(i.part_id())];
@@ -700,7 +718,7 @@ fn act(world: &mut World, menu: &AsmMenu, handle: TriadHandle, item: &str) {
                     Some(cadrs_drawing::ObjectRef { element: e.0, part: Some((part.feature.0, part.index)) })
                 }
                 Some(cadrs_core::assembly::InstanceSource::Assembly { element: e })
-                | Some(cadrs_core::assembly::InstanceSource::Studio { element: e }) => Some(cadrs_drawing::ObjectRef { element: e.0, part: None }),
+                | Some(cadrs_core::assembly::InstanceSource::Studio { element: e, .. }) => Some(cadrs_drawing::ObjectRef { element: e.0, part: None }),
                 None => None,
             };
             if r.is_some() {

@@ -376,6 +376,7 @@ fn accept_keepout(w: &mut World) {
         pads: checkbox(w, "eda-keepout-pads"),
         copper_pour: checkbox(w, "eda-keepout-pour"),
         footprints: checkbox(w, "eda-keepout-footprints"),
+        max_height: None,
     };
     close_all(w);
     set_tool(w, Tool::Keepout { layers, rules, pts: vec![] });
@@ -637,6 +638,86 @@ pub fn open_footprint(w: &mut World, id: uuid::Uuid) {
                 button(f, &tf, "eda-fprops-cancel", "Cancel", false, close_all);
             }),
     );
+}
+
+/// What Create PCB board makes its board from: the Part Studio, its sketch and regions, and the
+/// PCB Studios it can go to (in the dialog's order, "New PCB Studio" last).
+#[derive(Resource, Clone)]
+struct CreateBoardOf {
+    element: cadrs_core::ElementId,
+    sketch: cadrs_core::FeatureId,
+    regions: Vec<cadrs_core::document::RegionRef>,
+    studios: Vec<cadrs_core::ElementId>,
+}
+
+/// Part Studio → a sketch's menu → **Create PCB board…** (`docs/PCB_IN_PART_STUDIO.md` §8.1):
+/// the board's name, the PCB Studio it goes to (or a new one), its thickness and which face lies
+/// on the sketch. The board's outline is the regions' (circles in them are holes) and follows
+/// the sketch.
+pub fn open_create_board(w: &mut World, element: cadrs_core::ElementId, sketch: cadrs_core::FeatureId, regions: Vec<cadrs_core::document::RegionRef>) {
+    let doc = &w.resource::<crate::ActiveDocument>().doc;
+    let sketch_name = doc.element(element).and_then(|e| e.feature(sketch)).map(|f| f.name.clone()).unwrap_or_default();
+    let studios: Vec<(cadrs_core::ElementId, String)> = doc.elements.iter().filter(|e| e.pcb().is_some()).map(|e| (e.id, e.name.clone())).collect();
+    w.insert_resource(CreateBoardOf { element, sketch, regions, studios: studios.iter().map(|s| s.0).collect() });
+    let t = w.resource::<Theme>().clone();
+    let tf = t.clone();
+    spawn_dialog(
+        w,
+        Dialog::new("board-create-dialog")
+            .title(format!("Create PCB board from {sketch_name}"))
+            .width(460.0)
+            .body(move |p| {
+                row(p, &t, "Name", |r| {
+                    r.spawn(TextInput::new("board-create-name").value(format!("Board from {sketch_name}")).width(Val::Px(220.0)).height(26.0).build(&t));
+                });
+                row(p, &t, "PCB Studio", |r| {
+                    let mut sel = Select::new("board-create-studio").bordered().width(Val::Px(220.0));
+                    for (_, n) in &studios {
+                        sel = sel.option(n.clone(), true);
+                    }
+                    r.spawn(sel.option("New PCB Studio", true).selected(0).build(&t));
+                });
+                mm_row(p, &t, "Thickness", "board-create-thickness", mm(1.6));
+                row(p, &t, "Face on the sketch", |r| {
+                    r.spawn(Select::new("board-create-seat").bordered().width(Val::Px(220.0)).option("Bottom face (it stands on it)", true).option("Top face (it hangs under it)", true).selected(0).build(&t));
+                });
+                p.spawn(t.text("The outline follows the sketch; circles inside it are holes.", t.font_sm, FontWeight::NORMAL, t.muted_foreground));
+            })
+            .footer(move |f| {
+                button(f, &tf, "board-create-ok", "Create", true, accept_create_board);
+                button(f, &tf, "board-create-cancel", "Cancel", false, close_all);
+            }),
+    );
+}
+
+fn accept_create_board(w: &mut World) {
+    let Some(of) = w.get_resource::<CreateBoardOf>().cloned() else { return };
+    let name = ui::text_value(w, "board-create-name");
+    let thickness = read_mm(w, "board-create-thickness");
+    let studio = select_index(w, "board-create-studio").unwrap_or(0);
+    let seat = if select_index(w, "board-create-seat") == Some(1) { cadrs_core::pcb::board3d::BoardSeat::Top } else { cadrs_core::pcb::board3d::BoardSeat::Bottom };
+    let thickness = match thickness {
+        Ok(t) if t > 0 => to_mm(t),
+        _ => {
+            ui::toast(w, "The thickness is a length above 0 (mm)");
+            return;
+        }
+    };
+    close_all(w);
+    let cmd = cadrs_core::pcb::outline_link::CreateBoardFromSketch {
+        element: of.element,
+        sketch: of.sketch,
+        regions: of.regions,
+        pcb: of.studios.get(studio).copied(),
+        new_pcb: cadrs_core::ElementId::new(),
+        name: if name.trim().is_empty() { "Board".into() } else { name.trim().to_string() },
+        thickness,
+        seat,
+        feature: cadrs_core::FeatureId::new(),
+    };
+    if let Err(e) = w.resource_mut::<crate::ActiveDocument>().execute(&cmd) {
+        crate::linked::error_toast(w, e.to_string());
+    }
 }
 
 /// The footprints Move by moves.

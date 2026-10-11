@@ -275,26 +275,7 @@ pub fn check(board: &Board) -> Report {
         }
     }
     // Courtyards on the same side.
-    let courtyards: Vec<(usize, Side, Region)> = board
-        .footprints
-        .iter()
-        .enumerate()
-        .map(|(i, f)| {
-            // Rectangles, or lines chained into loops (KiCad's courtyards are four lines).
-            let geoms = f.footprint.shapes.iter().filter(|s| s.layer == Layer::TopCourtyard).map(|s| &s.shape.geom);
-            let r: Vec<Region> = crate::outline::loops_of(geoms)
-                .iter()
-                .map(|l| {
-                    let mut ring: Vec<Pt> = crate::outline::ring(l).into_iter().map(|p| f.placement.apply(p)).collect();
-                    if poly::ring_area(&ring) < 0.0 {
-                        ring.reverse();
-                    }
-                    vec![ring]
-                })
-                .collect();
-            (i, f.placement.side, poly::union_all(&r))
-        })
-        .collect();
+    let courtyards: Vec<(usize, Side, Region)> = board.footprints.iter().enumerate().map(|(i, f)| (i, f.placement.side, courtyard(f))).collect();
     for a in 0..courtyards.len() {
         for b in a + 1..courtyards.len() {
             let (ia, sa, ra) = &courtyards[a];
@@ -361,7 +342,8 @@ pub fn check(board: &Board) -> Report {
             for (i, side, r) in &courtyards {
                 let f = &board.footprints[*i];
                 let on = if *side == Side::Top { Layer::TopCopper } else { Layer::BottomCopper };
-                if Some(f.id) != owner && layers.contains(on) && poly::overlaps(r, &region) {
+                let low_enough = rules.max_height.is_some_and(|h| f.footprint.model_height().is_some_and(|m| crate::units::mm(m) <= h));
+                if Some(f.id) != owner && layers.contains(on) && !low_enough && poly::overlaps(r, &region) {
                     v.push(Violation { rule: Rule::KeepoutViolation, message: "Footprint not allowed (keep-out)".into(), items: vec![f.reference().into()], at: f.placement.at });
                 }
             }
@@ -380,6 +362,23 @@ pub fn check(board: &Board) -> Report {
         }
     }
     Report { violations: v, unconnected: copper::ratsnest(board) }
+}
+
+/// A placed footprint's courtyard on the board (its rectangles, or lines chained into loops:
+/// KiCad's courtyards are four lines), empty when it has none.
+pub fn courtyard(f: &crate::board::PlacedFootprint) -> Region {
+    let geoms = f.footprint.shapes.iter().filter(|s| s.layer == Layer::TopCourtyard).map(|s| &s.shape.geom);
+    let r: Vec<Region> = crate::outline::loops_of(geoms)
+        .iter()
+        .map(|l| {
+            let mut ring: Vec<Pt> = crate::outline::ring(l).into_iter().map(|p| f.placement.apply(p)).collect();
+            if poly::ring_area(&ring) < 0.0 {
+                ring.reverse();
+            }
+            vec![ring]
+        })
+        .collect();
+    poly::union_all(&r)
 }
 
 /// For messages: millimetres with four decimals.
@@ -433,5 +432,24 @@ mod tests {
         let rules: Vec<Rule> = check(&b).violations.iter().map(|v| v.rule).collect();
         assert!(rules.contains(&Rule::SilkOverMask), "{rules:?}");
         assert!(rules.contains(&Rule::MissingCourtyard), "{rules:?}");
+    }
+
+    #[test]
+    fn a_keepout_with_room_lets_low_footprints_under() {
+        let lib = crate::library::LibraryTable::builtin();
+        let mut b = Board::with_rect_outline(crate::units::mm(20.0), crate::units::mm(20.0));
+        let f = lib.footprint("Resistor_SMD:R_0805_2012Metric").unwrap().clone();
+        let h = f.model_height().expect("the 0805 has a generated body");
+        b.footprints.push(PlacedFootprint { id: uuid::Uuid::new_v4(), footprint: f, placement: crate::footprint::FootprintPlacement { at: Pt::mm(10.0, 10.0), ..Default::default() }, locked: false, symbol: None });
+        let area = vec![Pt::mm(5.0, 5.0), Pt::mm(15.0, 5.0), Pt::mm(15.0, 15.0), Pt::mm(5.0, 15.0)];
+        let under = |room: Option<f64>| {
+            let mut b = b.clone();
+            let rules = crate::board::Keepout { footprints: true, max_height: room.map(crate::units::mm), ..Default::default() };
+            crate::zone::add_keepout(&mut b, crate::layer::LayerSet::of(&[Layer::TopCopper]), area.clone(), rules);
+            check(&b).violations.iter().any(|v| v.rule == Rule::KeepoutViolation)
+        };
+        assert!(under(None), "no room: refused");
+        assert!(!under(Some(h + 0.5)), "room enough ({h} mm tall)");
+        assert!(under(Some(h - 0.1)), "too tall");
     }
 }

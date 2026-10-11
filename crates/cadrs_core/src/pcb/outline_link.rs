@@ -115,7 +115,7 @@ fn apply_outline(b: &mut super::StudioBoard, geoms: Vec<Geom>) {
 
 /// The linked shapes' drawings, in order.
 fn linked_geoms(b: &super::StudioBoard) -> Vec<Geom> {
-    let (Some(link), Some(d)) = (&b.outline_link, &b.design) else { return vec![] };
+    let (Some(link), Some(d)) = (&b.outline_link, b.design()) else { return vec![] };
     link.shapes.iter().filter_map(|id| d.board.shapes.iter().find(|s| s.id == *id).map(|s| s.shape.geom.clone())).collect()
 }
 
@@ -125,9 +125,10 @@ pub fn refresh(doc: &mut Document) {
     let mut updates: Vec<(usize, BoardId, Result<Vec<Geom>, String>)> = vec![];
     for (i, el) in doc.elements.iter().enumerate() {
         let Some(s) = el.pcb() else { continue };
-        for b in s.boards.iter().filter(|b| b.design.is_some()) {
+        for b in s.boards.iter().filter(|b| b.design().is_some()) {
             let Some(link) = &b.outline_link else { continue };
-            let want = sketch_of(doc, link.element, link.sketch).and_then(|g| outline_of(g, &link.regions));
+            // (Its sketch may have been moved below the board's Derived feature since.)
+            let want = check_order(doc, el.id, b.id, link.element, link.sketch).map_err(|e| e.to_string()).and_then(|()| sketch_of(doc, link.element, link.sketch)).and_then(|g| outline_of(g, &link.regions));
             match &want {
                 Ok(g) if *g == linked_geoms(b) && link.problem.is_none() => {}
                 Err(e) if link.problem.as_deref() == Some(e.as_str()) => {}
@@ -231,6 +232,9 @@ pub struct CreateBoardFromSketch {
     pub new_pcb: ElementId,
     /// The board's name (made unique in its studio).
     pub name: String,
+    /// Its thickness (mm) and which of its faces lies on the sketch.
+    pub thickness: f64,
+    pub seat: super::board3d::BoardSeat,
     /// The Derived feature to add.
     pub feature: FeatureId,
 }
@@ -257,7 +261,12 @@ impl Command for CreateBoardFromSketch {
         if !matches!(doc.element(pcb).map(|e| &e.kind), Some(ElementKind::PcbStudio(_))) {
             return Err(CommandError::Invalid("not a PCB Studio".into()));
         }
+        if !(self.thickness > 0.0 && self.thickness < 100.0) {
+            return Err(CommandError::Invalid("A board's thickness is a length above 0".into()));
+        }
         let mut design = cadrs_eda::Design::new();
+        design.board.thickness = cadrs_eda::units::mm(self.thickness);
+        design.board.stackup = cadrs_eda::board::Stackup::standard(design.board.copper_layers, design.board.thickness);
         design.board.shapes.extend(shapes_of(geoms));
         let shapes: Vec<Uuid> = design.board.shapes.iter().map(|s| s.id).collect();
         super::AddBoard { element: pcb, name: Some(self.name.clone()), design: Box::new(design), imported_from: None }.apply(doc)?;
@@ -271,6 +280,7 @@ impl Command for CreateBoardFromSketch {
         d.fill_board_from(&el, "", "").map_err(CommandError::Invalid)?;
         if let Some(db) = d.board.as_mut() {
             db.options.anchor = super::board3d::BoardAnchor::Origin;
+            db.options.seat = self.seat;
             db.on_sketch = Some(self.sketch);
         }
         d.source = Some(crate::external::SourceRef { document: None, at: crate::external::RefAt::Workspace, element: pcb, pinned: false });

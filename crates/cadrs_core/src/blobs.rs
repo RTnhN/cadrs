@@ -86,7 +86,7 @@ pub fn used_by(doc: &Document) -> Vec<(String, String)> {
         used_in(el.features(), &mut out);
         // A PCB Studio's 3D model files (its boards' footprints and its components').
         if let Some(s) = el.pcb() {
-            let boards = s.boards.iter().filter_map(|b| b.design.as_ref()).flat_map(|d| d.board.footprints.iter().map(|f| &f.footprint));
+            let boards = s.boards.iter().filter_map(|b| b.design()).flat_map(|d| d.board.footprints.iter().map(|f| &f.footprint));
             let parts = s.components.iter().filter_map(|c| c.component.footprint.as_ref());
             for m in boards.chain(parts).flat_map(|f| &f.models) {
                 if let Some(h) = &m.blob

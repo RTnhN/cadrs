@@ -258,6 +258,14 @@ pub fn sync_overlays(world: &mut World) {
     let editing = world.resource::<BoardEditing>().clone();
     let preview = world.resource::<crate::eda::Preview>();
     let (has_preview, preview_generation) = (preview.get().is_some(), preview.generation());
+    // The footprints the preview moves: left out of the stored layout's picture while it lasts
+    // (drawn once when the drag starts), so a moved part shows only where it is going.
+    let masked: Vec<uuid::Uuid> = match (editing.target, preview.get()) {
+        (Some(t), Some(p)) => layout_of(world.resource::<ActiveDocument>(), t.feature)
+            .map(|stored| p.board.footprints.iter().filter(|f| stored.footprints.iter().find(|g| g.id == f.id).is_none_or(|g| g != *f)).map(|f| f.id).collect())
+            .unwrap_or_default(),
+        _ => vec![],
+    };
     let inputs = world.resource::<crate::eda::SceneInputs>().clone();
     let edit_view = OverlayView { hidden: inputs.hidden_layers.clone(), active: inputs.active_layer, selected: inputs.board_selected.clone(), net: inputs.board_net.clone(), dim: inputs.dim_inactive };
     // Not editing: the layers panel's hidden layers still hold.
@@ -284,6 +292,9 @@ pub fn sync_overlays(world: &mut World) {
                 view.hash(&mut h);
                 format!("{:?}{}", copy.frame, copy.thickness).hash(&mut h);
                 b.off_board.hash(&mut h);
+                if edited {
+                    masked.hash(&mut h);
+                }
                 let sig = h.finish();
                 want.push(((b.feature, k, top, false), sig, copy.frame, copy.thickness, b.name.clone(), view.clone(), edited, b.off_board));
                 if edited && has_preview {
@@ -317,6 +328,10 @@ pub fn sync_overlays(world: &mut World) {
                 let preview = world.resource::<crate::eda::Preview>().get().filter(|_| edited).map(|d| &d.board);
                 let Some(changes) = preview.and_then(|p| preview_changes(stored, p)) else { continue };
                 overlay_mesh(&changes, &view, &frame, thickness, side, OverlayArea::Changes)
+            } else if edited && !masked.is_empty() {
+                let mut rest = stored.clone();
+                rest.footprints.retain(|f| !masked.contains(&f.id));
+                overlay_mesh(&rest, &view, &frame, thickness, side, if off_board { OverlayArea::Everything } else { OverlayArea::Board })
             } else {
                 overlay_mesh(stored, &view, &frame, thickness, side, if off_board { OverlayArea::Everything } else { OverlayArea::Board })
             }
@@ -372,7 +387,7 @@ pub fn edited_board(doc: &ActiveDocument, editing: &BoardEditing, cache: &PartCa
     if r.at != RefAt::Workspace || r.document_or(doc.doc.id) != doc.doc.id {
         return None;
     }
-    doc.doc.element(r.element)?.pcb()?.board(b.board)?.design.as_ref()?;
+    doc.doc.element(r.element)?.pcb()?.board(b.board)?.design()?;
     let copy = cache.derived.get(&t.feature)?.boards.get(t.copy)?;
     Some((r.element, b.board, crate::eda::PlaneHost { target: t, frame: copy.frame, thickness: copy.thickness }))
 }
@@ -720,6 +735,9 @@ struct DragGhost {
 #[derive(Default)]
 struct Ghosts {
     parts: HashMap<PartId, (usize, uuid::Uuid)>,
+    /// The derived layout's hash while dragging: a drop that changed nothing (refused) leaves
+    /// it as it was, and the ghosts go at once rather than waiting for a rebuild.
+    dragged_from: Option<u64>,
 }
 
 /// The motion of a footprint frame onto the Part Studio for a board copy (`frame`, `thickness`).
@@ -757,12 +775,18 @@ fn sync_drag_ghosts(world: &mut World, mut ghosts: Local<Ghosts>) {
             }
         }
     }
-    // Keep a ghost whose part isn't rebuilt yet (the drop is being rebuilt).
+    // Keep a ghost whose part isn't rebuilt yet (the drop is being rebuilt), unless the drop
+    // didn't change the layout.
+    let hash_now = host.and_then(|h| crate::derived_ui::derived_board_ref(world, h.target.feature)).map(|b| b.hash);
+    if !moved.is_empty() {
+        ghosts.dragged_from = hash_now;
+    }
+    let changed = ghosts.dragged_from.is_some() && hash_now != ghosts.dragged_from;
     let cache = world.resource::<PartCache>();
     let pending: Vec<PartId> = ghosts
         .parts
         .iter()
-        .filter(|(pid, (ptr, _))| !moved.iter().any(|m| m.0 == **pid) && cache.part(**pid).is_some_and(|p| std::sync::Arc::as_ptr(&p.solid) as usize == *ptr) && host.is_some())
+        .filter(|(pid, (ptr, _))| changed && !moved.iter().any(|m| m.0 == **pid) && cache.part(**pid).is_some_and(|p| std::sync::Arc::as_ptr(&p.solid) as usize == *ptr) && host.is_some())
         .map(|(p, _)| *p)
         .collect();
     // The parts hidden for their ghosts.
@@ -824,23 +848,23 @@ fn sketch_regions(world: &World, sketch: FeatureId) -> Vec<cadrs_core::document:
     chosen.into_iter().map(|r| cadrs_core::document::RegionRef::new(sketch, r)).collect()
 }
 
-/// The sketch row's Create PCB board: a board with the sketch's outline, in the document's first
-/// PCB Studio (a new one when it has none), derived onto the sketch (one undo step).
+/// The largest region of a sketch (with its holes), as a board outline's.
+pub fn largest_region(g: &cadrs_sketch::Sketch, sketch: FeatureId) -> Vec<cadrs_core::document::RegionRef> {
+    let all = cadrs_sketch::region::regions_shared(g);
+    all.iter().max_by(|a, b| a.area().total_cmp(&b.area())).map(|r| cadrs_core::document::RegionRef::new(sketch, r)).into_iter().collect()
+}
+
+/// The sketch row's Create PCB board…: the dialog for a board with the sketch's outline (the
+/// regions picked in the view, else the largest), derived onto the sketch (one undo step,
+/// [`crate::eda::lay_dialogs::open_create_board`]).
 pub fn create_from_sketch(world: &mut World, sketch: FeatureId) {
     let regions = sketch_regions(world, sketch);
     if regions.is_empty() {
         crate::linked::error_toast(world, "The sketch has no closed region to make a board from");
         return;
     }
-    let doc = world.resource::<ActiveDocument>();
-    let Some(el) = doc.active_element() else { return };
-    let element = el.id;
-    let sketch_name = el.feature(sketch).map(|f| f.name.clone()).unwrap_or_default();
-    let pcb = doc.doc.elements.iter().find(|e| e.pcb().is_some()).map(|e| e.id);
-    let cmd = cadrs_core::pcb::outline_link::CreateBoardFromSketch { element, sketch, regions, pcb, new_pcb: ElementId::new(), name: format!("Board from {sketch_name}"), feature: FeatureId::new() };
-    if let Err(e) = world.resource_mut::<ActiveDocument>().execute(&cmd) {
-        crate::linked::error_toast(world, e.to_string());
-    }
+    let Some(element) = world.resource::<ActiveDocument>().active_element().map(|e| e.id) else { return };
+    crate::eda::lay_dialogs::open_create_board(world, element, sketch, regions);
 }
 
 /// The derived board `feature`'s source: its PCB Studio and board.
@@ -907,7 +931,8 @@ fn on_link_menu(ev: On<cadrs_ui::MenuAction>, mut commands: Commands) {
 
 /// The Derived feature `derive` makes.
 pub const DERIVED: FeatureId = FeatureId::from_u128(0x7e00_0000_0000_0000_0000_0000_0000_0e01);
-/// The sketch `outline-sketch` makes.
+/// The plane and the sketch on it `outline-sketch` makes.
+pub const OUTLINE_PLANE: FeatureId = FeatureId::from_u128(0x7e00_0000_0000_0000_0000_0000_0000_0e03);
 pub const OUTLINE_SKETCH: FeatureId = FeatureId::from_u128(0x7e00_0000_0000_0000_0000_0000_0000_0e02);
 
 /// `setup`: the mains-sensor enclosure, stored and open on its Part Studio. `derive`: its
@@ -965,7 +990,18 @@ pub fn script(world: &mut World, arg: &str) {
                 SketchOp::AddCircle { center: Vec2::new(-15.0, 15.0), radius: 1.6, construction: false },
             ];
             let mut doc = world.resource_mut::<ActiveDocument>();
-            let _ = doc.execute(&cadrs_core::commands::AddSketch { element: pe::STUDIO, feature: OUTLINE_SKETCH, plane: Some(cadrs_sketch::PlaneRef::Top) });
+            // On "Board plane", 4 mm up from Top inside the tube.
+            let plane = cadrs_core::plane::PlaneFeature {
+                kind: cadrs_core::plane::PlaneType::Offset,
+                entities: vec![cadrs_core::plane::PlaneEntity::Plane(cadrs_sketch::PlaneRef::Top)],
+                offset: 4.0,
+                offset_expr: "4 mm".into(),
+                ..Default::default()
+            };
+            let _ = doc.execute(&cadrs_core::commands::AddFeature { element: pe::STUDIO, feature: OUTLINE_PLANE, base_name: "Board plane".into(), kind: FeatureKind::Plane(plane) });
+            let features = doc.active_element().map(|e| e.features().to_vec()).unwrap_or_default();
+            let Some(on) = cadrs_core::parts::plane_feature_ref(&features, OUTLINE_PLANE) else { return };
+            let _ = doc.execute(&cadrs_core::commands::AddSketch { element: pe::STUDIO, feature: OUTLINE_SKETCH, plane: Some(on) });
             for op in ops {
                 let _ = doc.execute(&cadrs_core::commands::EditSketch { element: pe::STUDIO, feature: OUTLINE_SKETCH, op });
             }
@@ -981,17 +1017,35 @@ pub fn script(world: &mut World, arg: &str) {
             let _ = doc.execute(&cadrs_core::commands::EditSketch { element: pe::STUDIO, feature: OUTLINE_SKETCH, op: SketchOp::MovePoints { moves: vec![(a, Vec2::new(9.0, -19.0)), (b, Vec2::new(9.0, 19.0))] } });
         }
         // Where a footprint of the derived board is, as text a scenario can check
-        // (`ExpectText("board-check", "J4 at 15.50, 27.50 top 0°")`).
-        a if a.starts_with("check ") => {
-            let r = a["check ".len()..].trim().to_string();
-            let text = crate::derived_ui::derived_board_ref(world, DERIVED).and_then(|b| b.layout.footprints.iter().find(|f| f.reference() == r)).map_or_else(
-                || format!("{r}: no such footprint"),
-                |f| {
-                    let [x, y] = cadrs_core::pcb::frames::layout_to_board(f.placement.at);
-                    let side = if f.placement.side == cadrs_eda::layer::Side::Top { "top" } else { "bottom" };
-                    format!("{r} at {x:.2}, {y:.2} {side} {}°", f.placement.angle)
-                },
-            );
+        // (`ExpectText("board-check", "J4 at 15.50, 27.50 top 0°")`); `count`: its tracks,
+        // vias and zones; `size`: the first derived board part's size in its Part Studio.
+        a if a.starts_with("check ") || a == "count" || a == "size" => {
+            let r = a.strip_prefix("check ").unwrap_or("").trim().to_string();
+            let board = crate::derived_ui::derived_board_ref(world, DERIVED).or_else(|| {
+                let doc = world.resource::<ActiveDocument>();
+                doc.active_element()?.features().iter().find_map(|f| match &f.kind {
+                    FeatureKind::Derived(d) => d.board.as_deref(),
+                    _ => None,
+                })
+            });
+            let text = if a == "count" {
+                board.map_or_else(String::new, |b| {
+                    let l = &b.layout;
+                    format!("tracks {}, vias {}, zones {} (filled {})", l.tracks.len(), l.vias.len(), l.zones.len(), l.zones.iter().filter(|z| !z.filled.is_empty()).count())
+                })
+            } else if a == "size" {
+                let cache = world.resource::<PartCache>();
+                cache.derived.values().flat_map(|o| o.boards.first()).next().and_then(|c| cache.part(c.part).map(|p| (c.frame, p.solid.clone()))).and_then(|(frame, solid)| cadrs_core::pcb::fit::bounds_in(&frame, &solid)).map_or_else(String::new, |(lo, hi)| format!("board {:.2} × {:.2} × {:.2}", hi[0] - lo[0], hi[1] - lo[1], hi[2] - lo[2]))
+            } else {
+                board.and_then(|b| b.layout.footprints.iter().find(|f| f.reference() == r)).map_or_else(
+                    || format!("{r}: no such footprint"),
+                    |f| {
+                        let [x, y] = cadrs_core::pcb::frames::layout_to_board(f.placement.at);
+                        let side = if f.placement.side == cadrs_eda::layer::Side::Top { "top" } else { "bottom" };
+                        format!("{r} at {x:.2}, {y:.2} {side} {}°", f.placement.angle)
+                    },
+                )
+            };
             let mut q = world.query::<(Entity, &Name)>();
             let existing = q.iter(world).find(|(_, n)| n.as_str() == "board-check").map(|(e, _)| e);
             match existing {

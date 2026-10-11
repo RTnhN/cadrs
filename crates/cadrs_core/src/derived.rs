@@ -133,11 +133,15 @@ pub struct DerivedBoard {
     /// rather than on the feature's locations.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub on_sketch: Option<FeatureId>,
+    /// Why the board's outline no longer follows its sketch (the link's problem, kept in step by
+    /// the refresh): the feature's warning says it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub outline_problem: Option<String>,
 }
 
 impl DerivedBoard {
     pub fn new(board: crate::pcb::BoardId, name: &str, layout: cadrs_eda::board::Board) -> Self {
-        let mut d = DerivedBoard { board, board_name: name.to_string(), layout: Default::default(), hash: 0, options: Default::default(), on_sketch: None };
+        let mut d = DerivedBoard { board, board_name: name.to_string(), layout: Default::default(), hash: 0, options: Default::default(), on_sketch: None, outline_problem: None };
         d.set_layout(layout);
         d
     }
@@ -171,6 +175,7 @@ impl std::fmt::Debug for DerivedBoard {
             .field("anchor", &o.anchor)
             .field("off_board", &o.off_board)
             .field("on_sketch", &self.on_sketch)
+            .field("outline_problem", &self.outline_problem)
             .finish()
     }
 }
@@ -373,7 +378,7 @@ impl DerivedFeature {
         let studio = el.pcb().ok_or_else(|| format!("The tab {} is not a PCB Studio", el.name))?;
         let want = self.board.as_ref().map(|b| b.board).or(studio.active).or(studio.boards.first().map(|b| b.id));
         let b = want.and_then(|id| studio.board(id)).ok_or_else(|| format!("{} has no such board", el.name))?;
-        let design = b.design.as_ref().ok_or_else(|| format!("{} is not designed in cadrs (an IDF board has no layout to derive)", b.name()))?;
+        let design = b.design().ok_or_else(|| format!("{} is not designed in cadrs (an IDF board has no layout to derive)", b.name()))?;
         // A board taken for the first time (or another board) comes in with its outline's centre
         // where it is now on the location (fixed: later outline edits don't move it); one
         // already derived keeps its options.
@@ -802,8 +807,9 @@ pub fn refresh(doc: &mut Document) {
 /// `SetDesign` on the PCB Studio, and every Part Studio deriving the board follows).
 fn refresh_boards(doc: &mut Document) {
     let this = doc.id;
-    /// (tab, feature, the new layout if it changed, the board's name, the studio's name).
-    type Update = (usize, usize, Option<(cadrs_eda::board::Board, u64)>, String, String);
+    /// (tab, feature, the new layout if it changed, the board's name, the studio's name, the
+    /// outline link's problem).
+    type Update = (usize, usize, Option<(cadrs_eda::board::Board, u64)>, String, String, Option<String>);
     let mut updates: Vec<Update> = Vec::new();
     for (i, el) in doc.elements.iter().enumerate() {
         for (j, f) in el.features().iter().enumerate() {
@@ -814,15 +820,16 @@ fn refresh_boards(doc: &mut Document) {
             }
             let Some(src) = doc.elements.iter().find(|e| e.id == r.element) else { continue };
             let Some(b) = src.pcb().and_then(|s| s.board(db.board)) else { continue };
-            let Some(design) = &b.design else { continue };
+            let Some(design) = b.design() else { continue };
             // The hash set with the layout when there is one, else the layouts themselves.
             let layout = (b.layout_hash() != db.hash).then(|| (design.board.clone(), b.layout_hash()));
-            if layout.is_some() || b.name() != db.board_name || src.name != d.source_name {
-                updates.push((i, j, layout, b.name().to_string(), src.name.clone()));
+            let problem = b.outline_link.as_ref().and_then(|l| l.problem.clone());
+            if layout.is_some() || b.name() != db.board_name || src.name != d.source_name || problem != db.outline_problem {
+                updates.push((i, j, layout, b.name().to_string(), src.name.clone(), problem));
             }
         }
     }
-    for (i, j, layout, board_name, studio_name) in updates {
+    for (i, j, layout, board_name, studio_name, problem) in updates {
         if let ElementKind::PartStudio { features, .. } = &mut doc.elements[i].kind
             && let FeatureKind::Derived(d) = &mut features[j].kind
             && let Some(db) = d.board.as_mut()
@@ -831,6 +838,7 @@ fn refresh_boards(doc: &mut Document) {
                 db.set_layout_hashed(l, hash);
             }
             db.board_name = board_name;
+            db.outline_problem = problem;
             d.source_name = studio_name;
         }
     }

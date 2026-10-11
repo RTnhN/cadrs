@@ -7,7 +7,8 @@
 //!   with their axes.
 //! - **Snap** (on by default): a footprint being moved snaps its pads onto those axes (a wire pad
 //!   onto a plug's pin) and the sides of its part's shadow onto the edges of the parts around
-//!   running beside them (a module up against a wall), exactly, off the grid; the snap is marked.
+//!   and of the other footprints' courtyards running beside them (a module up against a wall,
+//!   or next to a connector), exactly, off the grid; the snap is marked.
 //! - **Room** while moving: the free distance from the part to what is around it along ±x and
 //!   ±y of the board, as dimension lines with their values, and up to what is over it ("↑ 3.20
 //!   mm"; under it on the bottom side); the part's shadow outlined red, and "In the way", where
@@ -101,7 +102,8 @@ struct Moving {
     fp: uuid::Uuid,
     shadow: Region,
     blockers: Region,
-    start: Pt,
+    /// Where the footprint was when the move started.
+    start: cadrs_eda::footprint::FootprintPlacement,
     /// The part's far face from the board (board frame z) and which way that is (up from the
     /// top face, down from the bottom).
     top: f64,
@@ -259,7 +261,7 @@ fn snap_move(world: &mut World) {
             }
             None => (Region::new(), Region::new(), 0.0),
         };
-        world.resource_mut::<FitState>().moving = Some(Moving { fp: m.fp, shadow, blockers, start: fp.placement.at, top, up });
+        world.resource_mut::<FitState>().moving = Some(Moving { fp: m.fp, shadow, blockers, start: fp.placement, top, up });
     }
     if !world.resource::<FitState>().snap {
         world.resource_mut::<FitState>().snapped = None;
@@ -292,7 +294,14 @@ fn snap_move(world: &mut World) {
         None => match bounds(&mv.shadow) {
             Some(bb) => {
                 let (x0, x1, y0, y1) = (mm(bb.min.x + raw.x), mm(bb.max.x + raw.x), mm(bb.min.y + raw.y), mm(bb.max.y + raw.y));
-                let (fx, fy) = edge_snap(&st.context.around, [x0, y0, x1, y1], reach);
+                // The parts around, and the other footprints' courtyards on its side.
+                let mut edges = st.context.around.clone();
+                if let Some(b) = crate::derived_ui::derived_board_ref(world, host.target.feature) {
+                    for f in b.layout.footprints.iter().filter(|f| f.id != m.fp && f.placement.side == fp.placement.side) {
+                        edges.extend(cadrs_eda::drc::courtyard(f));
+                    }
+                }
+                let (fx, fy) = edge_snap(&edges, [x0, y0, x1, y1], reach);
                 ((fx.is_some() || fy.is_some()).then(|| [fx.unwrap_or(0.0), fy.unwrap_or(0.0)]), None)
             }
             None => (None, None),
@@ -338,17 +347,36 @@ fn edge_snap(around: &Region, b: [f64; 4], reach: f64) -> (Option<f64>, Option<f
 }
 
 /// The room around the moved part this frame (see [`Room`]).
-fn room(eda: Res<crate::eda::Eda2d>, preview: Res<crate::eda::Preview>, cache: Res<PartCache>, mut state: ResMut<FitState>) {
+fn room(eda: Res<crate::eda::Eda2d>, preview: Res<crate::eda::Preview>, cache: Res<PartCache>, mut state: ResMut<FitState>, mut last: Local<Option<(uuid::Uuid, cadrs_eda::footprint::FootprintPlacement, u64)>>) {
     let (Some(_), Some(mv)) = (eda.plane(), state.moving.clone()) else {
         if state.room.is_some() {
             state.room = None;
         }
+        *last = None;
         return;
     };
-    // How far the footprint has moved in the preview (a turn or a flip isn't followed).
-    let now = preview.get().and_then(|d| d.board.footprints.iter().find(|f| f.id == mv.fp)).map(|f| f.placement.at);
-    let d = now.map_or(Pt::ZERO, |p| p - mv.start);
-    let shadow: Region = mv.shadow.iter().map(|r| r.iter().map(|p| *p + d).collect()).collect();
+    // Where the preview has the footprint now: worked out again only when that (or the parts)
+    // changed, not every frame of a drag.
+    let Some(now) = preview.get().and_then(|d| d.board.footprints.iter().find(|f| f.id == mv.fp)).map(|f| f.placement).or(Some(mv.start)) else { return };
+    let key = (mv.fp, now, cache.generation);
+    if last.as_ref() == Some(&key) && state.room.is_some() {
+        return;
+    }
+    *last = Some(key);
+    // Flipped to the other side: what is around there differs; no readings until it's dropped.
+    if now.side != mv.start.side {
+        state.room = None;
+        return;
+    }
+    // The shadow turned about the footprint's start and moved with it.
+    let turn = (now.angle - mv.start.angle).to_radians();
+    let (c, s_) = (turn.cos(), turn.sin());
+    let (o, to) = (mv.start.at, now.at);
+    let place = |p: Pt| {
+        let (x, y) = ((p.x - o.x) as f64, (p.y - o.y) as f64);
+        Pt::new(to.x + (c * x - s_ * y).round() as i64, to.y + (s_ * x + c * y).round() as i64)
+    };
+    let shadow: Region = mv.shadow.iter().map(|r| r.iter().map(|p| place(*p)).collect()).collect();
     let mut room = Room { colliding: cadrs_eda::poly::overlaps(&shadow, &mv.blockers), ..Default::default() };
     if let Some(frame) = state.context.frame {
         let others: Vec<&Solid> = state.context.others.iter().filter_map(|id| cache.part(*id)).map(|p| &*p.solid).collect();
@@ -754,10 +782,12 @@ pub fn keepouts_from_parts(world: &mut World) {
     }
     let (top, bottom) = (areas.iter().filter(|a| a.1 == Layer::TopCopper).count(), areas.iter().filter(|a| a.1 == Layer::BottomCopper).count());
     let rules = cadrs_eda::board::Keepout { footprints: true, ..Default::default() };
+    // (Each with the room there: footprints low enough to fit under the part are allowed.)
     let n = areas.len();
     crate::eda::ui::commit(world, &format!("Keep-outs from the parts around ({n})"), |d| {
         d.board.zones.retain(|z| !(z.keepout.is_some() && z.name.starts_with(KEEPOUT_NAME)));
         for (r, layer, room) in &areas {
+            let rules = cadrs_eda::board::Keepout { max_height: room.map(cadrs_eda::units::mm), ..rules };
             let id = cadrs_eda::zone::add_keepout(&mut d.board, LayerSet::of(&[*layer]), r.clone(), rules);
             if let Some(z) = d.board.zones.iter_mut().find(|z| z.id == id) {
                 z.name = match room {
@@ -771,7 +801,7 @@ pub fn keepouts_from_parts(world: &mut World) {
     let what = match (top, bottom) {
         (0, 0) => "the keep-outs from the parts around removed: nothing stands over or under the board now".to_string(),
         (t, 0) => format!("{t} keep-out{} on the top side", if t == 1 { "" } else { "s" }),
-        (0, b) => format!("{b} keep-out{} on the bottom side", if b == 1 { "" } else { "s" }),
+        (0, b) => format!("{b} keep-out{} on the bottom side (seen from below: Shift+N)", if b == 1 { "" } else { "s" }),
         (t, b) => format!("{t} keep-out{} on the top side, {b} on the bottom", if t == 1 { "" } else { "s" }),
     };
     let replaced = if had > 0 && n > 0 { format!(" (replacing {had})") } else { String::new() };

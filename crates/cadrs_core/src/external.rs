@@ -284,7 +284,7 @@ fn snap(source: &Document, r: SourceRef, version_name: &str, id: ElementId, out:
                 inst.source = match inst.source {
                     InstanceSource::Part { element, part } => InstanceSource::Part { element: m(element), part },
                     InstanceSource::Assembly { element } => InstanceSource::Assembly { element: m(element) },
-                    InstanceSource::Studio { element } => InstanceSource::Studio { element: m(element) },
+                    InstanceSource::Studio { element, board } => InstanceSource::Studio { element: m(element), board },
                 };
             }
         }

@@ -243,7 +243,7 @@ pub fn sources_fingerprint(doc: &Document, parts: &[ContextPart]) -> u64 {
 pub fn studio_of(doc: &Document, assembly: ElementId, instance: InstanceId) -> Option<ElementId> {
     let i = doc.element(assembly)?.assembly_model()?.instance(instance)?;
     match i.source {
-        InstanceSource::Part { element, .. } | InstanceSource::Studio { element } => Some(element),
+        InstanceSource::Part { element, .. } | InstanceSource::Studio { element, .. } => Some(element),
         InstanceSource::Assembly { .. } => None,
     }
 }
@@ -258,7 +258,9 @@ pub fn snapshot_with(doc: &Document, assembly: ElementId, studio: ElementId, ins
     for o in occurrences(doc, asm).into_iter().filter(|o| o.element != studio && !o.hidden) {
         let Some(src) = doc.element(o.element) else { continue };
         if !studios.iter().any(|s| s.element == o.element) {
-            studios.push(ContextSource { element: o.element, features: src.active_features() });
+            // A board's PCB Studio: its boards as Derived features.
+            let features = if src.pcb().is_some() { src.part_features().to_vec() } else { src.active_features() };
+            studios.push(ContextSource { element: o.element, features });
         }
         parts.push(ContextPart {
             id: context_id(id, o.id),
@@ -285,7 +287,7 @@ pub fn snapshot_as(doc: &Document, assembly: ElementId, instance: InstanceId, id
     let asm = doc.element(assembly).and_then(|e| e.assembly_model()).ok_or(CommandError::ElementNotFound(assembly))?;
     let inst = asm.instance(instance).ok_or(CommandError::Invalid(NO_PRIMARY.into()))?;
     let studio = match inst.source {
-        InstanceSource::Part { element, .. } | InstanceSource::Studio { element } => element,
+        InstanceSource::Part { element, .. } | InstanceSource::Studio { element, .. } => element,
         InstanceSource::Assembly { .. } => return Err(CommandError::Invalid("a subassembly is edited in its own tab".into())),
     };
     snapshot_with(doc, assembly, studio, instance, inst.pose.inverse(), id)

@@ -281,7 +281,7 @@ fn structured(doc: &Document, el: ElementId, asm: &Assembly, path: &[ElementId],
                 merge_into(&mut nodes, Node { owner, path: path.to_vec(), count: 1, instances: vec![top_id], occurrences: vec![wrap(inst.id)], children: None }, true);
             }
             // A rigid Part Studio instance (A2.4): each of its parts is an item.
-            InstanceSource::Studio { element } => {
+            InstanceSource::Studio { element, .. } => {
                 for n in studio_nodes(inst, element, path, top_id, wrap) {
                     merge_into(&mut nodes, n, true);
                 }
@@ -352,7 +352,7 @@ fn flattened(doc: &Document, el: ElementId, asm: &Assembly, top: Option<Instance
             InstanceSource::Part { .. } => {
                 merge_into(nodes, Node { owner, path: Vec::new(), count: 1, instances: vec![top_id], occurrences: vec![wrap(inst.id)], children: None }, true);
             }
-            InstanceSource::Studio { element } => {
+            InstanceSource::Studio { element, .. } => {
                 for n in studio_nodes(inst, element, &[], top_id, wrap) {
                     merge_into(nodes, n, true);
                 }

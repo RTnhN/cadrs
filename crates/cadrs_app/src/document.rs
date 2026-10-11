@@ -3758,7 +3758,7 @@ fn on_feature_context_menu(
     }
     if is_sketch {
         // `docs/PCB_IN_PART_STUDIO.md` §8: a board from the sketch's regions.
-        menu = menu.item(MenuItem::new("feature-create-board", "Create PCB board").icon("pcb-studio").disabled(editing || in_dialog));
+        menu = menu.item(MenuItem::new("feature-create-board", "Create PCB board…").icon("pcb-studio").disabled(editing || in_dialog));
         menu = menu.item(MenuItem::new("feature-copy-sketch", "Copy sketch")).item(if shown_dims.0.contains(&row.0) {
             MenuItem::new("feature-hide-dimensions", "Hide dimensions")
         } else {

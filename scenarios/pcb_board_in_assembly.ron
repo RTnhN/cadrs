@@ -1,0 +1,64 @@
+// docs/PCB_IN_PART_STUDIO.md P6: a PCB Studio board inserted straight into an assembly. The
+// mains-sensor document (`board setup`): a new assembly, the Enclosure's parts inserted, then
+// the board "AC sensor" from the Insert dialog's Boards tab.
+// 01 the Insert dialog's Boards tab: "AC sensor" (PCB Studio 1's board designed in cadrs), its
+//    thumbnail.
+// 02 inserted: one rigid instance "AC sensor <1>" (the board and its components move as one),
+//    its outline centred on the origin, inside the tube (hidden here).
+// 03 the BOM: the enclosure's parts, the board and its components, each a row.
+// 04 the board instance's menu: Switch to PCB Studio 1, Edit layout.
+// 05 Edit layout: PCB Studio 1's Layout of AC sensor.
+Scenario(
+    start: Some("document"),
+    steps: [
+        WaitFor("document-shell"),
+        Custom("board setup"),
+        Wait(10),
+        Click(ui("insert-tab")),
+        WaitFor("create-assembly"),
+        Click(ui("create-assembly")),
+        Wait(5),
+        Click(ui("insert")),
+        WaitFor("insert-dialog"),
+        Wait(5),
+        Click(ui("insert-studio-enclosure")),
+        Wait(3),
+        Click(ui("insert-dialog-accept")),
+        Wait(5),
+        Click(ui("insert")),
+        WaitFor("insert-dialog"),
+        Wait(5),
+        Click(ui("insert-kind-2")),
+        WaitFor("insert-board-ac-sensor"),
+        Wait(5),
+        Screenshot("01-boards-tab"),
+        Click(ui("insert-board-ac-sensor")),
+        Wait(3),
+        Click(ui("insert-dialog-accept")),
+        Wait(10),
+        RightClick(ui("instance-row-1")),
+        WaitFor("asm-hide"),
+        Click(ui("asm-hide")),
+        Wait(5),
+        Key("F"),
+        Wait(30),
+        MoveTo(1420, 780),
+        Screenshot("02-inserted"),
+        ExpectText("instances-pane", "AC sensor <1>"),
+        Click(ui("panel-bom")),
+        Wait(10),
+        Screenshot("03-bom"),
+        ExpectText("bom-panel", "J4 AC Live IN"),
+        Click(ui("panel-bom")),
+        Wait(5),
+        RightClick(ui("instance-row-7")),
+        WaitFor("asm-board-edit-layout"),
+        Hover(ui("asm-board-edit-layout")),
+        Wait(5),
+        Screenshot("04-instance-menu"),
+        Click(ui("asm-board-edit-layout")),
+        WaitFor("eda-layout-tools"),
+        Wait(10),
+        Screenshot("05-edit-layout"),
+    ],
+)

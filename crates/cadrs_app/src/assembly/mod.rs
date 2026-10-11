@@ -320,7 +320,8 @@ impl AssemblyParts {
         if el.assembly_model().is_some() {
             return (None, true);
         }
-        let features = el.features();
+        // (A PCB Studio's boards as Derived features: a board's instance.)
+        let features = el.part_features();
         if let Some((f, b)) = self.builds.get(&element)
             && f.as_slice() == features
         {
@@ -460,7 +461,7 @@ pub fn shown_points(doc: &ActiveDocument) -> Vec<Vec3> {
     let mut out = Vec::new();
     for o in cadrs_core::assembly::structure::occurrences(&doc.doc, model).iter().filter(|o| !o.hidden) {
         let Some(el) = doc.doc.element(o.element) else { continue };
-        let build = cadrs_core::rebuild::build(el.features());
+        let build = cadrs_core::rebuild::build(el.part_features());
         let Some(p) = build.part(o.part) else { continue };
         out.extend(p.solid.positions.iter().map(|q| {
             let w = o.pose.apply(*q);

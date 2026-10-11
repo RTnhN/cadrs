@@ -53,7 +53,7 @@ pub fn open(world: &mut World, instance: InstanceId) {
     let Some(doc) = world.get_resource::<ActiveDocument>() else { return };
     let Some(element) = super::active_assembly(doc) else { return };
     let Some(inst) = doc.active_element().and_then(|e| e.assembly_model()?.instance(instance).cloned()) else { return };
-    let cadrs_core::assembly::InstanceSource::Studio { element: studio } = inst.source else { return };
+    let cadrs_core::assembly::InstanceSource::Studio { element: studio, board: None } = inst.source else { return };
     let d = doc.doc.clone();
     let Some(el) = d.element(studio) else { return };
     let name = el.name.clone();

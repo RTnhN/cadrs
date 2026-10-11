@@ -72,7 +72,7 @@ fn a_rigid_part_studio_instance_moves_as_one() {
     let asm = doc.element(ss::ASSEMBLY).unwrap().assembly_model().unwrap().clone();
     let occ: Vec<_> = occurrences(&doc, &asm).into_iter().filter(|o| o.top == RIGID).collect();
     assert_eq!(occ.len(), 3, "one occurrence per part");
-    assert_eq!(asm.instance(RIGID).unwrap().name(&assembly::source_part_name(&doc, &InstanceSource::Studio { element: ss::BASE_STUDIO }, None)), "Base Frame Bar <1>");
+    assert_eq!(asm.instance(RIGID).unwrap().name(&assembly::source_part_name(&doc, &InstanceSource::Studio { element: ss::BASE_STUDIO, board: None }, None)), "Base Frame Bar <1>");
     // The solver holds its parts together: a rigid group.
     let (model, solids) = flat(&doc, ss::ASSEMBLY);
     assert!(model.mates.iter().any(|f| f.name == "Rigid Part Studio" && f.instances().len() == 3));

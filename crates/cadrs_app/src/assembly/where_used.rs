@@ -45,7 +45,11 @@ pub fn open(world: &mut World, instance: InstanceId) {
             let name = cadrs_core::assembly::source_part_name(&doc.doc, &inst.source, None);
             (format!("{name} (Part Studio {})", doc.doc.element(element).map(|e| e.name.clone()).unwrap_or_default()), where_used(&doc.doc, element, Some(part)))
         }
-        InstanceSource::Studio { element } => (format!("Part Studio {}", doc.doc.element(element).map(|e| e.name.clone()).unwrap_or_default()), where_used(&doc.doc, element, None)),
+        InstanceSource::Studio { element, board: None } => (format!("Part Studio {}", doc.doc.element(element).map(|e| e.name.clone()).unwrap_or_default()), where_used(&doc.doc, element, None)),
+        InstanceSource::Studio { element, board: Some(b) } => {
+            let name = doc.doc.element(element).and_then(|e| e.pcb()).and_then(|s| s.board(b)).map(|b| b.name().to_string()).unwrap_or_default();
+            (format!("Board {name}"), where_used(&doc.doc, element, None))
+        }
         InstanceSource::Assembly { element } => (format!("Assembly {}", doc.doc.element(element).map(|e| e.name.clone()).unwrap_or_default()), assembly_used_in(&doc.doc, element)),
     };
     // P3G.2 carried: a linked instance names its source document and version.

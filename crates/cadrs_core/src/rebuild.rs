@@ -238,6 +238,10 @@ fn no_body(p: &PartState) -> String {
     format!("{} is a board component (a mesh, no solid): modelling features can't change it", p.part.name)
 }
 
+/// A placed component mesh (`Rebuilder::placed_components`): the unplaced mesh it was made from,
+/// the placed one and its volume properties.
+type PlacedComponent = (Arc<crate::solid::Solid>, Arc<crate::solid::Solid>, Option<cadrs_kernel::MassProperties>);
+
 impl Rebuilder {
     /// A part's kernel body; a board component (a mesh) has none, and is noted as left alone
     /// (the feature then builds with a warning naming it, [`Self::compute_noting_meshes`]).
@@ -366,7 +370,7 @@ pub struct Rebuilder {
     board_bodies: Vec<(u64, BodyId, Vec<crate::pcb::board3d::TaggedCurve>, Vec<String>)>,
     /// Derived boards' placed component meshes, by feature, copy, footprint and place, with
     /// the unplaced mesh they were made from.
-    placed_components: HashMap<u64, (Arc<crate::solid::Solid>, Arc<crate::solid::Solid>)>,
+    placed_components: HashMap<u64, PlacedComponent>,
 }
 
 impl Default for Rebuilder {

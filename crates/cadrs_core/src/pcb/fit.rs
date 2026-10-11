@@ -16,6 +16,8 @@
 //! - [`align`]: the move in the board's plane that puts an entity of a component onto a target
 //!   (a pin's axis onto a hole's, a face onto a face).
 
+use std::sync::Arc;
+
 use cadrs_eda::poly::{self, Region};
 use cadrs_eda::units::{Pt, mm};
 use cadrs_sketch::PlaneFrame;
@@ -199,16 +201,6 @@ fn flat_heights(s: &Solid, frame: &PlaneFrame, z0: f64, z1: f64) -> Vec<f64> {
     s.faces.iter().filter_map(|f| face_heights(s, f, frame)).filter(|(lo, hi)| hi - lo < 1e-4 && *lo > z0 && *lo < z1).map(|(lo, _)| lo).collect()
 }
 
-/// A stable hash of a solid's triangles and a frame (the collision cache's key).
-fn shape_key(s: &Solid, frame: &PlaneFrame, h: &mut impl std::hash::Hasher) {
-    use std::hash::Hash;
-    for p in &s.positions {
-        p.map(f64::to_bits).hash(h);
-    }
-    s.indices.hash(h);
-    [frame.origin, frame.u, frame.v].map(|a| a.map(f64::to_bits)).hash(h);
-}
-
 /// Whether two solids overlap in the board frame `frame`, as (depth, height) (see
 /// [`Collision`]). They are compared in height bands, split where either has a face flat to the
 /// board (a connector's low body and its tall pin, a lid's ledge): a part over a component's
@@ -259,35 +251,36 @@ fn overlap(c: &Solid, o: &Solid, frame: &PlaneFrame) -> Option<(f64, f64)> {
 }
 
 /// Components whose solids run into another part, in the board frame `frame` (see
-/// [`overlap`]). The answers are kept per pair of shapes, so a rebuild where only one
-/// footprint moved works out only that one's again.
-pub fn collisions<K: Clone>(components: &[(K, &Solid)], others: &[(K, &Solid)], frame: &PlaneFrame) -> Vec<Collision<K>> {
+/// [`overlap`]). The answers are kept per pair of solids (and frame) while both live, so a
+/// rebuild where only one footprint moved works out only that one's again.
+pub fn collisions<K: Clone>(components: &[(K, &Arc<Solid>)], others: &[(K, &Arc<Solid>)], frame: &PlaneFrame) -> Vec<Collision<K>> {
     use std::collections::HashMap;
-    use std::hash::Hasher;
-    use std::sync::{Mutex, OnceLock};
-    /// (Pair of shapes → their overlap.)
-    type Overlaps = Mutex<HashMap<u64, Option<(f64, f64)>>>;
-    static CACHE: OnceLock<Overlaps> = OnceLock::new();
+    use std::hash::{Hash, Hasher};
+    use std::sync::{Mutex, OnceLock, Weak};
+    /// (The pair's solids, to tell a freed one's address reused, and their overlap.)
+    type Entry = (Weak<Solid>, Weak<Solid>, Option<(f64, f64)>);
+    type Cache = Mutex<HashMap<(usize, usize, u64), Entry>>;
+    static CACHE: OnceLock<Cache> = OnceLock::new();
     let cache = CACHE.get_or_init(Default::default);
-    let key = |s: &Solid| {
+    let frame_key = {
         let mut h = std::collections::hash_map::DefaultHasher::new();
-        shape_key(s, frame, &mut h);
+        [frame.origin, frame.u, frame.v].map(|a| a.map(f64::to_bits)).hash(&mut h);
         h.finish()
     };
-    let other_keys: Vec<u64> = others.iter().map(|(_, o)| key(o)).collect();
     let mut out = vec![];
     for (name, c) in components {
-        let ck = key(c);
-        for ((other, o), ok) in others.iter().zip(&other_keys) {
-            let pair = ck.rotate_left(1) ^ ok;
-            let known = cache.lock().ok().and_then(|m| m.get(&pair).copied());
+        for (other, o) in others {
+            let key = (Arc::as_ptr(c) as usize, Arc::as_ptr(o) as usize, frame_key);
+            let known = cache.lock().ok().and_then(|m| {
+                m.get(&key).filter(|(a, b, _)| a.upgrade().is_some_and(|a| Arc::ptr_eq(&a, c)) && b.upgrade().is_some_and(|b| Arc::ptr_eq(&b, o))).map(|e| e.2)
+            });
             let hit = known.unwrap_or_else(|| {
                 let hit = overlap(c, o, frame);
                 if let Ok(mut m) = cache.lock() {
                     if m.len() > 20_000 {
-                        m.clear();
+                        m.retain(|_, (a, b, _)| a.strong_count() > 0 && b.strong_count() > 0);
                     }
-                    m.insert(pair, hit);
+                    m.insert(key, (Arc::downgrade(c), Arc::downgrade(o), hit));
                 }
                 hit
             });
@@ -366,8 +359,15 @@ pub fn headroom(of: &Region, solids: &[&Solid], frame: &PlaneFrame, from: f64, u
             continue;
         }
         let p: Vec<V3> = s.positions.iter().map(|q| to_board(frame, *q)).collect();
+        let (x0, y0, x1, y1) = (bb.min.x as f64 / 1e6, bb.min.y as f64 / 1e6, bb.max.x as f64 / 1e6, bb.max.y as f64 / 1e6);
         for t in s.indices.as_chunks::<3>().0 {
             let [a, b, c] = [p[t[0] as usize], p[t[1] as usize], p[t[2] as usize]];
+            // Only triangles over the shadow (and on the right side of `from`).
+            let (tx0, tx1) = (a[0].min(b[0]).min(c[0]), a[0].max(b[0]).max(c[0]));
+            let (ty0, ty1) = (a[1].min(b[1]).min(c[1]), a[1].max(b[1]).max(c[1]));
+            if tx1 < x0 || tx0 > x1 || ty1 < y0 || ty0 > y1 {
+                continue;
+            }
             for q in &points {
                 // Where the vertical line through q meets the triangle (barycentric in plan).
                 let den = (b[1] - c[1]) * (a[0] - c[0]) + (c[0] - b[0]) * (a[1] - c[1]);
@@ -600,6 +600,7 @@ mod tests {
         let comp = cube([0.0, 0.0, 11.6], [4.0, 4.0, 14.0]);
         let wall = cube([3.0, -5.0, 0.0], [10.0, 10.0, 30.0]);
         let far = cube([30.0, 0.0, 0.0], [31.0, 1.0, 30.0]);
+        let (comp, wall, far) = (Arc::new(comp), Arc::new(wall), Arc::new(far));
         let c = collisions(&[("J1", &comp)], &[("Wall", &wall), ("Far", &far)], &TOP);
         assert_eq!(c.len(), 1);
         assert_eq!(c[0].other, "Wall");
@@ -617,12 +618,12 @@ mod tests {
 
     #[test]
     fn a_part_over_a_low_step_of_a_tall_component_is_clear() {
-        let comp = stepped();
+        let comp = Arc::new(stepped());
         // A shelf at z 4..6 over the low body's far end, clear of the post (x 0..2).
-        let shelf = cube([5.0, -1.0, 4.0], [12.0, 5.0, 6.0]);
+        let shelf = Arc::new(cube([5.0, -1.0, 4.0], [12.0, 5.0, 6.0]));
         assert!(collisions(&[("J1", &comp)], &[("Shelf", &shelf)], &TOP).is_empty());
         // Moved over the post it runs into it, by 1 mm (x 1..2) over its 2 mm.
-        let shelf = cube([1.0, -1.0, 4.0], [12.0, 5.0, 6.0]);
+        let shelf = Arc::new(cube([1.0, -1.0, 4.0], [12.0, 5.0, 6.0]));
         let c = collisions(&[("J1", &comp)], &[("Shelf", &shelf)], &TOP);
         assert_eq!(c.len(), 1);
         assert!((c[0].depth - 1.0).abs() < 1e-3 && (c[0].height - 2.0).abs() < 1e-2, "{c:?}");

@@ -240,9 +240,12 @@ pub fn run_action(w: &mut World, action: &str) {
         "select" => set_tool(w, Tool::Select),
         "update" => super::lay_dialogs::open_update(w),
         "setup" => super::lay_dialogs::open_setup(w),
+        // A linked outline: what is drawn now is a cut-out in it (the sketch keeps the outer
+        // edge; its shapes can't be changed here).
         "outline" if !linked_outline(w).is_empty() => {
-            let note = outline_link_note(w);
+            let note = format!("{}. A rectangle drawn now cuts out of the board", outline_link_note(w));
             ui::toast(w, &note);
+            set_tool(w, Tool::Outline(None));
         }
         "outline" => set_tool(w, Tool::Outline(None)),
         "route" => {
@@ -299,6 +302,12 @@ pub fn set_tool(w: &mut World, tool: Tool) {
 
 fn board_of(w: &World) -> Option<Design> {
     ui::current(w).map(|(_, _, d)| d)
+}
+
+/// A footprint of the shown board as stored (a copy of it alone).
+fn board_of_footprint(w: &World, fp: uuid::Uuid) -> Option<cadrs_eda::board::PlacedFootprint> {
+    let (el, b, _) = w.resource::<super::Eda2d>().board()?;
+    super::design(w.resource::<crate::ActiveDocument>(), el, b)?.board.footprints.iter().find(|f| f.id == fp).cloned()
 }
 
 /// A point snapped to a pad's centre when on a pad, else to the routing grid.
@@ -698,7 +707,7 @@ fn handle_keys(world: &mut World, keys: Vec<KeyboardInput>) {
 }
 
 /// Previews a move, a route or a zone in progress.
-fn follow_pointer(world: &mut World, mut last: Local<Option<Pt>>) {
+fn follow_pointer(world: &mut World, mut last: Local<Option<Pt>>, mut base: Local<Option<u64>>) {
     if !shown(world) {
         return;
     }
@@ -718,7 +727,29 @@ fn follow_pointer(world: &mut World, mut last: Local<Option<Pt>>) {
         return;
     }
     *last = Some(key);
-    let Some(mut d) = board_of(world) else { return };
+    // The stored board's layout hash: while it is the one the preview was made from, a moved
+    // footprint changes only its own place in the preview (no copy of the whole design each
+    // frame of a drag, a big zone fill and schematic included).
+    let stored = world.resource::<super::Eda2d>().board().and_then(|(el, b, _)| world.resource::<crate::ActiveDocument>().doc.element(el)?.pcb()?.board(b).map(|x| x.layout_hash()));
+    let reuse = moving.as_ref().is_some_and(|m| !m.drag) && stored.is_some() && *base == stored;
+    let preview = if reuse { world.resource_mut::<Preview>().take() } else { None };
+    let d = match preview {
+        Some(mut d) => {
+            // Back to the stored place first, then moved below.
+            let m = moving.as_ref().map(|m| m.fp);
+            let from = m.and_then(|fp| board_of_footprint(world, fp));
+            match (m.and_then(|fp| be::footprint_by_id(&d.board, fp)), from) {
+                (Some(i), Some(f)) => {
+                    d.board.footprints[i] = f;
+                    Some(d)
+                }
+                _ => board_of(world),
+            }
+        }
+        None => board_of(world),
+    };
+    let Some(mut d) = d else { return };
+    *base = stored;
     if let Some(m) = moving {
         let exact = world.resource::<LayoutState>().exact;
         let delta = exact.unwrap_or_else(|| snap(at, grid())) - m.from;

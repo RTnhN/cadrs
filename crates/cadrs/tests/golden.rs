@@ -2249,6 +2249,12 @@ fn golden_pcb_board_from_sketch() {
 
 #[test]
 #[ignore = "headless screenshots; run with: cargo test -r -p cadrs -F app-tests --test golden -- --ignored"]
+fn golden_pcb_board_in_assembly() {
+    run_scenario("pcb_board_in_assembly");
+}
+
+#[test]
+#[ignore = "headless screenshots; run with: cargo test -r -p cadrs -F app-tests --test golden -- --ignored"]
 fn golden_pcb_create_board_component() {
     run_scenario("pcb_create_board_component");
 }

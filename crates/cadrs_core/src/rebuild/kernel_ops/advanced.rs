@@ -116,7 +116,7 @@ impl Rebuilder {
                     return Ok(RefGeom::Plane(fr));
                 }
                 // A cylindrical or conical face (the Tangent type).
-                let body = part.body.ok_or_else(lost)?;
+                let body = part.body.ok_or_else(|| super::super::no_body(part))?;
                 let infos = self.kernel.faces(body).map_err(|e| e.to_string())?;
                 let info = ids.iter().find_map(|id| infos.iter().find(|i| i.id == *id)).ok_or_else(lost)?;
                 let axis = info.axis.ok_or("Select a planar, cylindrical or conical face")?;
@@ -412,7 +412,7 @@ impl Rebuilder {
             // P3.10 (PS20.1): any face, planar or not.
             LoftProfile::Face(f) => {
                 let (part, ids) = face_ids(state, f).ok_or_else(lost)?;
-                let body = part.body.ok_or_else(lost)?;
+                let body = part.body.ok_or_else(|| super::super::no_body(part))?;
                 let face = *ids.first().ok_or_else(lost)?;
                 let source = naming::stable_hash(format!("{:?}", f.face).as_bytes());
                 LoftSection::Face(cadrs_kernel::FaceInput { body, face, source })
@@ -581,7 +581,7 @@ impl Rebuilder {
                 // Trim to face boundaries: a planar face splits only within its edges.
                 match face_frame(part, f).filter(|_| !x.trim) {
                     Some(frame) => SplitTool::Plane(kernel_plane(&frame)),
-                    None => SplitTool::Face { body: part.body.ok_or_else(lost)?, face: *ids.first().ok_or_else(lost)? },
+                    None => SplitTool::Face { body: part.body.ok_or_else(|| super::super::no_body(part))?, face: *ids.first().ok_or_else(lost)? },
                 }
             }
             SplitToolRef::Sketch(s) => {

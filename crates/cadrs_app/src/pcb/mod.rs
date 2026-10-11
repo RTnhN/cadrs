@@ -556,6 +556,8 @@ type PackageInfo = (String, String, usize);
 struct TreeSnap {
     element: Option<ElementId>,
     boards: Vec<(BoardId, String, bool, Vec<PackageInfo>)>,
+    /// Each board's outline link: (the sketch it follows, why it doesn't now).
+    links: Vec<Option<(String, Option<String>)>>,
     components: Vec<(cadrs_core::pcb::ComponentId, String)>,
     open: Vec<BoardId>,
     viewing: Option<(BoardId, String)>,
@@ -594,6 +596,16 @@ fn rebuild_tree(
     let snap = TreeSnap {
         element: Some(el),
         boards: s.boards.iter().map(|b| (b.id, b.name().to_string(), shown == Some(b.id), packages(&b.board))).collect(),
+        links: s
+            .boards
+            .iter()
+            .map(|b| {
+                let l = b.outline_link.as_ref()?;
+                let studio = doc.doc.element(l.element);
+                let sketch = studio.and_then(|e| e.feature(l.sketch)).map(|f| f.name.clone()).unwrap_or_default();
+                Some((format!("{sketch} in {}", studio.map(|e| e.name.as_str()).unwrap_or_default()), l.problem.clone()))
+            })
+            .collect(),
         components: s.components.iter().map(|c| (c.id, c.component.name.clone())).collect(),
         open: s.boards.iter().filter(|b| open.0.contains(&(el, b.id))).map(|b| b.id).collect(),
         viewing: match &ui.view {
@@ -612,12 +624,24 @@ fn rebuild_tree(
         p.spawn(TreeItem::new("pcb-boards", "Boards").icon("board", 16.0).icon_color(t.foreground).left(4.0).height(24.0).build(&t))
             .insert(Pickable::IGNORE)
             .with_children(|h| header_add(h, &t, "pcb-add-board", "Create board"));
-        for (id, name, active, _) in &snap.boards {
+        for (k, (id, name, active, _)) in snap.boards.iter().enumerate() {
             let mut item = TreeItem::new(format!("pcb-board-{}", slug(name)), name.clone()).icon("board", 16.0).left(26.0).height(24.0).editable();
             if *active {
                 item = item.weight(FontWeight::BOLD).foreground(t.primary).icon_color(t.primary);
             }
-            let mut row = p.spawn((item.build(&t), BoardRow(el, *id), ContextMenuTarget, DoubleClickable, Tooltip::new(name.clone())));
+            // A board whose outline follows a sketch: a link glyph (a warning one when it can't
+            // follow it now), saying which sketch.
+            let link = snap.links.get(k).cloned().flatten();
+            let tip = match &link {
+                Some((sketch, None)) => format!("{name}: its outline follows {sketch}"),
+                Some((sketch, Some(why))) => format!("{name}: its outline no longer follows {sketch}: {why}"),
+                None => name.clone(),
+            };
+            let mut row = p.spawn((item.build(&t), BoardRow(el, *id), ContextMenuTarget, DoubleClickable, Tooltip::new(tip)));
+            if let Some((_, problem)) = &link {
+                let (glyph, color) = if problem.is_some() { ("warning-filled", t.warning_icon) } else { ("link", t.muted_foreground) };
+                row.with_child((Name::new(format!("pcb-board-{}-link", slug(name))), cadrs_ui::icon::icon_in(glyph, 13.0, color, Node { margin: UiRect::left(Val::Px(4.0)), ..default() }), Pickable::IGNORE));
+            }
             if *active {
                 row.with_child((
                     Name::new("pcb-board-active-bar"),
@@ -755,22 +779,66 @@ fn on_tree_toggle(ev: On<TreeToggle>, q: Query<&ComponentsRow>, mut open: ResMut
 #[derive(Component, Clone, Copy)]
 struct BoardMenuFor(ElementId, BoardId);
 
-/// Right-click a board → Delete this board (PCB3.6). The menu opens below the row, at the
-/// pointer's x, so it never covers the row (P3H.3 judge).
-fn on_board_menu(ev: On<ContextMenuRequested>, q: Query<(&BoardRow, &UiGlobalTransform, &ComputedNode)>, theme: Res<Theme>, mut commands: Commands) {
+/// Where a board's outline can follow: the Part Studios' sketches with a closed region, in
+/// the board menu's order.
+#[derive(Component, Clone, Default)]
+struct OutlineTargets(Vec<(ElementId, cadrs_core::FeatureId)>);
+
+/// Right-click a board → Delete this board (PCB3.6); for a board designed here, Link outline to
+/// a Part Studio sketch (each sketch with a closed region, `docs/PCB_IN_PART_STUDIO.md` §8.2), or
+/// Break outline link. The menu opens below the row, at the pointer's x, so it never covers the
+/// row (P3H.3 judge).
+fn on_board_menu(ev: On<ContextMenuRequested>, q: Query<(&BoardRow, &UiGlobalTransform, &ComputedNode)>, doc: Res<ActiveDocument>, theme: Res<Theme>, mut commands: Commands) {
     let Ok((r, tf, node)) = q.get(ev.entity) else { return };
     let s = node.inverse_scale_factor();
     let bottom = (tf.translation.y + node.size().y / 2.0) * s;
     let at = Vec2::new(ev.position.x + 2.0, bottom.max(ev.position.y) + 4.0);
-    let menu = Menu::new("pcb-board-menu").min_width(170.0).item(MenuItem::new("pcb-delete-board", "Delete this board").icon("delete"));
+    let mut menu = Menu::new("pcb-board-menu").min_width(170.0);
+    let board = doc.doc.element(r.0).and_then(|e| e.pcb()).and_then(|p| p.board(r.1));
+    let mut targets = OutlineTargets::default();
+    match board {
+        Some(b) if b.outline_link.is_some() => {
+            let note = b.outline_link.as_ref().and_then(|l| l.problem.clone());
+            menu = menu.item(MenuItem::new("pcb-unlink-outline", "Break outline link").icon("link"));
+            if let Some(p) = note {
+                menu = menu.item(MenuItem::new("pcb-outline-problem", format!("Outline link: {p}")).icon("warning-filled").disabled(true));
+            }
+        }
+        Some(b) if b.design().is_some() => {
+            for el in doc.doc.elements.iter().filter(|e| e.assembly_model().is_none() && e.pcb().is_none()) {
+                for f in el.features() {
+                    if f.sketch().is_some_and(|s| !cadrs_sketch::region::regions_shared(&s.geometry).is_empty()) {
+                        menu = menu.item(MenuItem::new(format!("pcb-link-outline-{}", targets.0.len()), format!("Link outline to {} ({})", f.name, el.name)).icon("sketch"));
+                        targets.0.push((el.id, f.id));
+                    }
+                }
+            }
+        }
+        _ => {}
+    }
+    menu = menu.item(MenuItem::new("pcb-delete-board", "Delete this board").icon("delete"));
     let anchor = open_context_menu(&mut commands, at, menu.build(&theme));
-    commands.entity(anchor).insert((BoardMenuFor(r.0, r.1), DespawnOnExit(AppState::Document)));
+    commands.entity(anchor).insert((BoardMenuFor(r.0, r.1), targets, DespawnOnExit(AppState::Document)));
 }
 
-fn on_board_menu_action(ev: On<MenuAction>, q: Query<&BoardMenuFor, With<ContextMenuAnchor>>, mut commands: Commands) {
-    let Ok(&BoardMenuFor(el, id)) = q.get(ev.entity) else { return };
-    if ev.item == "pcb-delete-board" {
-        commands.queue(move |w: &mut World| delete_board(w, el, id));
+fn on_board_menu_action(ev: On<MenuAction>, q: Query<(&BoardMenuFor, &OutlineTargets), With<ContextMenuAnchor>>, mut commands: Commands) {
+    let Ok((&BoardMenuFor(el, id), targets)) = q.get(ev.entity) else { return };
+    use cadrs_core::pcb::outline_link::SetOutlineLink;
+    let link = move |w: &mut World, link| {
+        if let Err(e) = w.resource_mut::<ActiveDocument>().execute(&SetOutlineLink { pcb: el, board: id, link }) {
+            crate::linked::error_toast(w, e.to_string());
+        }
+    };
+    match ev.item.as_str() {
+        "pcb-delete-board" => commands.queue(move |w: &mut World| delete_board(w, el, id)),
+        "pcb-unlink-outline" => commands.queue(move |w: &mut World| link(w, None)),
+        item => {
+            let Some(&(studio, sketch)) = item.strip_prefix("pcb-link-outline-").and_then(|i| i.parse::<usize>().ok()).and_then(|i| targets.0.get(i)) else { return };
+            commands.queue(move |w: &mut World| {
+                let regions = w.resource::<ActiveDocument>().doc.element(studio).and_then(|e| e.feature(sketch)).and_then(|f| f.sketch()).map(|s| crate::board_in_studio::largest_region(&s.geometry, sketch)).unwrap_or_default();
+                link(w, Some((studio, sketch, regions)));
+            });
+        }
     }
 }
 

@@ -72,6 +72,10 @@ pub struct Keepout {
     pub pads: bool,
     pub copper_pour: bool,
     pub footprints: bool,
+    /// With `footprints`: those whose model stands no taller than this are allowed (the room
+    /// under a part over the board, [`crate::footprint::Footprint::model_height`]); `None`: none.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_height: Option<Nm>,
 }
 
 /// How a copper zone fills.

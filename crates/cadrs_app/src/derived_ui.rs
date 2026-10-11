@@ -387,6 +387,10 @@ fn derived_picks(mut picks: MessageReader<PickRequest>, session: Option<Res<Deri
                 }
                 None => d.locations.push(c),
             }
+            // A location picked for a board made from a sketch: it goes there, off the sketch.
+            if let Some(b) = d.board.as_mut() {
+                b.on_sketch = None;
+            }
             set(world, d, Vec::new(), "Locations");
         });
     }
@@ -727,7 +731,7 @@ fn studio_rows(world: &World, s: &DerivedSession) -> Vec<SourceRow> {
             d.elements.iter().filter(|e| matches!(e.kind, ElementKind::PartStudio { .. }) && e.id != s.element).map(|e| (e.id, e.name.clone(), None, String::new())).collect();
         for e in &d.elements {
             let Some(pcb) = e.pcb() else { continue };
-            for b in pcb.boards.iter().filter(|b| b.design.is_some()) {
+            for b in pcb.boards.iter().filter(|b| b.design().is_some()) {
                 v.push((e.id, b.name().to_string(), Some(b.id), e.name.clone()));
             }
         }
@@ -767,6 +771,8 @@ struct BoardRows {
     footprints: Vec<(uuid::Uuid, String, bool, bool)>,
     /// The footprint the board is placed by (with anchor 3).
     anchor_footprint: Option<uuid::Uuid>,
+    /// The sketch a board made from a sketch lies on (instead of locations).
+    on_sketch: Option<String>,
 }
 
 /// Everything the dialog shows (it is rebuilt when this changes).
@@ -877,6 +883,7 @@ fn view(world: &World) -> Option<(View, bool)> {
                     A::Footprint(id) => Some(id),
                     _ => None,
                 },
+                on_sketch: b.on_sketch.map(|f| el.feature(f).map_or_else(|| "its sketch".to_string(), |f| f.name.clone())),
             }
         }),
         linked: d.source.is_some_and(|r| r.at != RefAt::Workspace),
@@ -1134,6 +1141,14 @@ fn spawn_board_options(p: &mut ChildSpawnerCommands, t: &Theme, v: &View, b: &Bo
     p.spawn(Node { flex_direction: FlexDirection::Column, padding: UiRect::horizontal(Val::Px(4.0)), ..default() })
         .with_child(OptionRow::new("derived-board-off-board", "Include parts placed off the board").checked(b.off_board).build(t));
     section(p, t, "derived-locations-label", "Locations");
+    if let Some(sk) = &b.on_sketch {
+        p.spawn((
+            Name::new("derived-board-on-sketch"),
+            t.text(format!("On {sk}'s plane, as the board was made from it. Pick a mate connector to place it elsewhere."), t.font_sm, FontWeight::NORMAL, t.muted_foreground),
+            Node { margin: UiRect::new(Val::Px(8.0), Val::Px(6.0), Val::Px(0.0), Val::Px(4.0)), max_width: Val::Percent(100.0), ..default() },
+        ))
+        .insert(TextLayout::new(bevy::text::Justify::Left, bevy::text::LineBreak::WordBoundary));
+    }
     p.spawn(Node { flex_direction: FlexDirection::Column, padding: UiRect::horizontal(Val::Px(4.0)), ..default() }).with_children(|c| {
         c.spawn(SelectionList::new("derived-locations").placeholder("Mate connectors (the origin when empty)").items(v.locations.clone()).active(v.locations_active).build(t));
     });

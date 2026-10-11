@@ -131,6 +131,27 @@ the 3D viewport, and (c) a sketch → outline link.
   linked shapes are locked (the outline tool and Delete refuse them, saying why); a gone region
   keeps the last outline with a problem note; a link to a sketch after the board's Derived
   feature is refused (it would be a cycle).
+- **Third review's fixes.** `StudioBoard::design` is private (only `set_design` changes it, so the
+  hash can't go stale); a drag moves only its footprint in the preview (no per-frame copy of the
+  design) and the stored layout's picture leaves the moved footprints out; a refused drop drops
+  its ghost; room readouts are worked out only when the place changes, follow a turn, and cull
+  triangles; snapping also goes to other footprints' courtyards; keep-outs from the parts around
+  carry the room under them (`Keepout::max_height`: the DRC lets a footprint whose model is low
+  enough under); component meshes have volume and mass (closed-mesh integration); collisions are
+  cached per pair of solids (by `Arc`); Composite, loft, fill and split name a board component
+  they can't use. P5: Create PCB board… is a dialog (name, PCB Studio or a new one, thickness,
+  which face lies on the sketch); a PCB Studio board's menu links its outline to any Part Studio
+  sketch, or breaks the link, and its Boards row shows the link (a warning when broken); a link
+  whose sketch moved below the board's Derived feature says so (refresh re-checks the order), as
+  the Derived feature's warning too; the Derived dialog says when a board lies on its sketch (a
+  picked location takes over); the Outline tool draws cut-outs on a linked board.
+- **P6 done (direct insert).** A rigid instance can be a PCB Studio's board
+  (`InstanceSource::Studio { element, board: Some(..) }` rather than a new variant): the studio
+  supplies its boards as Derived features (`PcbStudio::part_features`, cached, cleared on any
+  change), so the rebuild, the occurrences, BOM rows (the board and each component) and in-context
+  snapshots work as for a Part Studio. Insert ▸ Boards lists the document's boards. Edit layout
+  on the instance opens it in its PCB Studio (editing it in the assembly's 3D view, as in a Part
+  Studio, is not done); the Part Studio route remains for fitting against parts.
 
 ## 4. Data model changes
 
