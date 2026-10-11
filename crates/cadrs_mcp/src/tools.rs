@@ -449,6 +449,9 @@ pub struct CreateBoardFromSketch {
     /// rather than cut-outs; default false.
     #[serde(default)]
     pub circles_as_holes: Option<bool>,
+    /// A point (sketch x, y in mm) inside the region to take; omitted: the largest region.
+    #[serde(default)]
+    pub inside: Option<[f64; 2]>,
 }
 
 /// Moves a footprint on a board: to a place (mm, its origin), turned, flipped; or so one of its
@@ -483,6 +486,10 @@ pub struct MoveFootprint {
     /// The Part Studio for `onto_part`; omitted: the active tab.
     #[serde(default)]
     pub part_studio: Option<String>,
+    /// With `onto_part`, a board derived onto several locations: which copy's place the part's
+    /// axes are read against (1 first); omitted: 1.
+    #[serde(default)]
+    pub copy: Option<usize>,
 }
 
 /// Adds a footprint to a board: a copy of one already on it, with its own reference, value,
@@ -528,6 +535,9 @@ pub struct LinkOutline {
     /// keep their place on the board; default true.
     #[serde(default)]
     pub keep_parts: Option<bool>,
+    /// A point (sketch x, y in mm) inside the region to take; omitted: the largest region.
+    #[serde(default)]
+    pub inside: Option<[f64; 2]>,
 }
 
 /// A board and the Part Studio to fit it in: the pins and holes of the parts square to it.
@@ -538,4 +548,7 @@ pub struct BoardFit {
     /// The Part Studio the board is derived into; omitted: the active tab.
     #[serde(default)]
     pub part_studio: Option<String>,
+    /// A board derived onto several locations: which copy (1 first); omitted: 1.
+    #[serde(default)]
+    pub copy: Option<usize>,
 }

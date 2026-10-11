@@ -694,7 +694,13 @@ pub(crate) fn navigate3d(
     for input in events {
         let pos = input.location.position;
         let (origin, dir) = view.view.ray(rect.offset(pos));
-        let Some(at) = ray_to_layout(&host, origin, dir) else { continue };
+        // Off the board's plane (seen edge on, or beyond the horizon): a release still ends a
+        // drag, where the pointer last met the plane; anything else waits.
+        let at = match ray_to_layout(&host, origin, dir) {
+            Some(at) => at,
+            None if matches!(input.action, PointerAction::Release(PointerButton::Primary)) => pointer.at,
+            None => continue,
+        };
         pointer.screen = pos;
         pointer.at = at;
         pointer.over = over;

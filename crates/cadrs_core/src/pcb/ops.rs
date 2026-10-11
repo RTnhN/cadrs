@@ -263,12 +263,12 @@ pub fn shift_layout(b: &mut Board, d: [f64; 2]) {
 /// The round features of the part `part` (by its name in the Parts list) of the Part Studio
 /// `studio` that stand square to the board derived there by `feature`: where each axis meets
 /// the board (layout mm) and its radius. A plug's pins, a stand-off's
-/// hole.
-pub fn axes_of_part(doc: &Document, studio: ElementId, feature: FeatureId, part: &str) -> Result<Vec<([f64; 2], f64)>, String> {
+/// hole. `copy`: which of the feature's board copies (0 first: one per location).
+pub fn axes_of_part(doc: &Document, studio: ElementId, feature: FeatureId, part: &str, copy: usize) -> Result<Vec<([f64; 2], f64)>, String> {
     let el = doc.element(studio).ok_or("no such Part Studio")?;
     let build = crate::rebuild::build(el.features());
     let out = build.derived.get(&feature).ok_or("the feature derives no board")?;
-    let copy = out.boards.first().ok_or("the feature derives no board")?;
+    let copy = out.boards.get(copy).ok_or_else(|| format!("the feature derives {} cop{} of the board", out.boards.len(), if out.boards.len() == 1 { "y" } else { "ies" }))?;
     let p = build.parts.iter().find(|p| crate::parts::display_name(p, el.part_props()) == part).ok_or_else(|| format!("no part {part:?} in {}", el.name))?;
     // (The board copy's frame is the layout's: its origin is where the layout's (0, 0) is.)
     let axes = super::fit::axes(&[&p.solid], &copy.frame, -1e6, 1e6);

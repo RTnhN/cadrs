@@ -72,7 +72,9 @@ pub fn get_board_fit(world: &mut World, p: &tools::BoardFit) -> Result<Value, St
     let f = ops::deriving_feature(d, ps, pcb, id).ok_or("the board isn't derived into that Part Studio: derive_board first")?;
     let el = d.element(ps).ok_or("no Part Studio")?;
     let build = cadrs_core::rebuild::build(el.features());
-    let frame = build.derived.get(&f).and_then(|o| o.boards.first()).map(|c| c.frame).ok_or("the feature derives no board")?;
+    let copies = build.derived.get(&f).map_or(0, |o| o.boards.len());
+    let k = copy_index(p.copy, copies)?;
+    let frame = build.derived.get(&f).and_then(|o| o.boards.get(k)).map(|c| c.frame).ok_or("the feature derives no board")?;
     let mut parts = vec![];
     for part in build.parts.iter().filter(|x| x.feature != f) {
         let name = cadrs_core::parts::display_name(part, el.part_props()).to_string();
@@ -83,7 +85,24 @@ pub fn get_board_fit(world: &mut World, p: &tools::BoardFit) -> Result<Value, St
     }
     let name = |x: cadrs_core::PartId| build.part(x).map(|p| cadrs_core::parts::display_name(p, el.part_props()).to_string()).unwrap_or_default();
     let collisions: Vec<String> = build.derived.get(&f).map(|o| o.collisions.iter().map(|c| cadrs_core::pcb::fit::collision_text(&name(c.component), &name(c.other), c)).collect()).unwrap_or_default();
-    Ok(json!({ "feature": el.feature(f).map(|x| x.name.clone()), "pins_and_holes": parts, "collisions": collisions }))
+    Ok(json!({ "feature": el.feature(f).map(|x| x.name.clone()), "copy": k + 1, "copies": copies, "pins_and_holes": parts, "collisions": collisions }))
+}
+
+/// A board copy's index from the tools' 1-based `copy` (omitted: the first), among `copies`.
+fn copy_index(copy: Option<usize>, copies: usize) -> Result<usize, String> {
+    match copy.unwrap_or(1) {
+        k if (1..=copies.max(1)).contains(&k) => Ok(k - 1),
+        k => Err(format!("copy {k}: the board is derived {copies} time(s) there")),
+    }
+}
+
+/// The region of sketch `g` to make a board's outline of: the smallest holding `inside`, or
+/// the largest.
+fn region_of(g: &cadrs_sketch::Sketch, sketch: cadrs_core::FeatureId, inside: Option<[f64; 2]>) -> Result<Vec<cadrs_core::document::RegionRef>, String> {
+    let Some([x, y]) = inside else { return Ok(crate::board_in_studio::largest_region(g, sketch)) };
+    let all = cadrs_sketch::region::regions_shared(g);
+    let r = all.iter().filter(|r| r.contains(cadrs_sketch::Vec2::new(x, y))).min_by(|a, b| a.area().total_cmp(&b.area()));
+    r.map(|r| vec![cadrs_core::document::RegionRef::new(sketch, r)]).ok_or_else(|| format!("no closed region of the sketch holds ({x}, {y})"))
 }
 
 fn round(v: f64) -> f64 {
@@ -147,7 +166,7 @@ pub fn create_board_from_sketch(world: &mut World, p: &tools::CreateBoardFromSke
     let regions = {
         let d = doc(world)?;
         let g = d.doc.element(ps).and_then(|e| e.feature(sketch)).and_then(|f| f.sketch()).map(|s| s.geometry.clone()).ok_or("not a sketch")?;
-        crate::board_in_studio::largest_region(&g, sketch)
+        region_of(&g, sketch, p.inside)?
     };
     if regions.is_empty() {
         return Err("the sketch has no closed region".into());
@@ -199,7 +218,8 @@ pub fn move_footprint(world: &mut World, p: &tools::MoveFootprint) -> Result<Val
             let ps = studio(world, p.part_studio.as_deref())?;
             let d = &doc(world)?.doc;
             let f = ops::deriving_feature(d, ps, pcb, id).ok_or("the board isn't derived into that Part Studio")?;
-            let axes = ops::axes_of_part(d, ps, f, part)?;
+            let copies = cadrs_core::rebuild::build(d.element(ps).ok_or("no Part Studio")?.features()).derived.get(&f).map_or(0, |o| o.boards.len());
+            let axes = ops::axes_of_part(d, ps, f, part, copy_index(p.copy, copies)?)?;
             Some((pad, axes))
         }
         None => None,
@@ -246,11 +266,75 @@ pub fn link_outline(world: &mut World, p: &tools::LinkOutline) -> Result<Value, 
     let sketch = feature_id(world, ps, sketch_name)?;
     let d = &doc(world)?.doc;
     let g = d.element(ps).and_then(|e| e.feature(sketch)).and_then(|f| f.sketch()).map(|s| s.geometry.clone()).ok_or("not a sketch")?;
-    let regions = crate::board_in_studio::largest_region(&g, sketch);
+    let regions = region_of(&g, sketch, p.inside)?;
     if regions.is_empty() {
         return Err("the sketch has no closed region".into());
     }
     let link = cadrs_core::pcb::outline_link::SetOutlineLink { pcb, board: id, link: Some((ps, sketch, regions)), keep_parts: p.keep_parts.unwrap_or(true) };
     execute(world, &link)?;
     report(world, (pcb, id))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use cadrs_core::samples::pcb_enclosure as pe;
+
+    /// A world with the mains-sensor sample open on its Enclosure tab.
+    fn world() -> World {
+        let mut w = World::new();
+        w.insert_resource(crate::DocumentStore(cadrs_core::Store::new(std::env::temp_dir().join("cadrs-mcp-board-tests"))));
+        let mut d = ActiveDocument::new(pe::document().unwrap());
+        d.set_active(pe::STUDIO);
+        w.insert_resource(d);
+        w
+    }
+
+    fn args<T: serde::de::DeserializeOwned>(v: Value) -> T {
+        serde_json::from_value(v).unwrap()
+    }
+
+    #[test]
+    fn a_board_is_derived_fitted_by_its_copy_and_a_pad_put_on_a_pin() {
+        let mut w = world();
+        let got = derive_board(&mut w, &args(json!({ "board": "AC sensor", "location": "Board location 1" }))).unwrap();
+        assert!(got["error"].is_null(), "{got}");
+        assert!(got["parts"].as_array().unwrap().len() > 5, "{got}");
+        // The plug's pins square to the board, on its first (only) copy; a second is refused.
+        let fit = get_board_fit(&mut w, &args(json!({ "board": "AC sensor" }))).unwrap();
+        assert_eq!(fit["copies"], 1);
+        let parts: Vec<&str> = fit["pins_and_holes"].as_array().unwrap().iter().filter_map(|p| p["part"].as_str()).collect();
+        assert!(["Live pin", "Earth pin", "Neutral pin"].iter().all(|n| parts.contains(n)), "{parts:?}");
+        assert!(get_board_fit(&mut w, &args(json!({ "board": "AC sensor", "copy": 2 }))).unwrap_err().contains("derived 1 time"));
+        // J4's pad 1 onto the Live pin: one undo step, the pad on the pin's axis.
+        let live = fit["pins_and_holes"].as_array().unwrap().iter().find(|p| p["part"] == "Live pin").unwrap()["axes"][0]["at"].clone();
+        let r = move_footprint(&mut w, &args(json!({ "board": "AC sensor", "reference": "J4", "pad": "1", "onto_part": "Live pin" }))).unwrap();
+        let pad = r["footprints"].as_array().unwrap().iter().find(|f| f["reference"] == "J4").unwrap()["pads"].as_array().unwrap().iter().find(|p| p["number"] == "1").unwrap()["at"].clone();
+        let (a, b) = (live.as_array().unwrap(), pad.as_array().unwrap());
+        assert!((0..2).all(|k| (a[k].as_f64().unwrap() - b[k].as_f64().unwrap()).abs() < 1e-3), "{live} vs {pad}");
+        assert_eq!(w.resource::<ActiveDocument>().history.undo_label(), Some("Move J4"));
+    }
+
+    #[test]
+    fn a_board_from_a_sketch_takes_the_region_asked_for() {
+        // Sketch 2: the end plate, a 44 × 44 square round a 12 × 24 opening.
+        let mut w = world();
+        let size = |r: &Value| {
+            let o = r["outline"].as_array().unwrap().iter().map(|v| v.as_f64().unwrap()).collect::<Vec<_>>();
+            (o[2] - o[0], o[3] - o[1])
+        };
+        let r = create_board_from_sketch(&mut w, &args(json!({ "sketch": "Sketch 2", "name": "Opening", "inside": [0.0, 0.0] }))).unwrap();
+        let board = board(&w, &args(json!({ "board": "Opening" }))).unwrap();
+        let r2 = report(&w, board).unwrap();
+        assert_eq!(size(&r2), (12.0, 24.0), "{r}");
+        assert!(create_board_from_sketch(&mut w, &args(json!({ "sketch": "Sketch 2", "name": "Nowhere", "inside": [100.0, 0.0] }))).unwrap_err().contains("no closed region"));
+        // Omitted: the largest (the plate round the opening).
+        create_board_from_sketch(&mut w, &args(json!({ "sketch": "Sketch 2", "name": "Plate" }))).unwrap();
+        let r3 = report(&w, board_of(&w, "Plate")).unwrap();
+        assert_eq!(size(&r3), (44.0, 44.0));
+    }
+
+    fn board_of(w: &World, name: &str) -> (ElementId, BoardId) {
+        board(w, &args(json!({ "board": name }))).unwrap()
+    }
 }

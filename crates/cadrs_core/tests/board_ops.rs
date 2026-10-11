@@ -66,7 +66,7 @@ fn a_pad_goes_onto_a_pin_of_the_part_studio() {
     let (mut doc, mut h, board) = derived();
     // The Live pin's axis on the layout: the pin's (0, 8) with the board's outline centre
     // (15.5, 19.5) on the origin.
-    let axes = ops::axes_of_part(&doc, pe::STUDIO, DERIVED, "Live pin").unwrap();
+    let axes = ops::axes_of_part(&doc, pe::STUDIO, DERIVED, "Live pin", 0).unwrap();
     let at = axes[0].0;
     assert!((at[0] - 15.5).abs() < 1e-6 && (at[1] - 27.5).abs() < 1e-6, "{at:?}");
     store(&mut doc, &mut h, board, |d| ops::pad_onto(d, "J4", "1", at));
@@ -88,7 +88,7 @@ fn footprints_are_placed_copied_and_removed() {
     let r1 = r.footprints.iter().find(|f| f.reference == "R1").unwrap();
     assert_eq!((r1.at, r1.side), ([10.0, 12.0], "bottom"));
     // A copy of J4 as an Earth input on the Earth pin, on its own net.
-    let earth = ops::axes_of_part(&doc, pe::STUDIO, DERIVED, "Earth pin").unwrap()[0].0;
+    let earth = ops::axes_of_part(&doc, pe::STUDIO, DERIVED, "Earth pin", 0).unwrap()[0].0;
     let parts_before = cadrs_core::rebuild::build(doc.element(pe::STUDIO).unwrap().features()).parts.len();
     store(&mut doc, &mut h, board, |d| ops::copy_footprint(d, "J4", "J6", "AC Earth IN", earth, &[("1".into(), "EARTH".into())]).map(|_| ()));
     let r = ops::board_report(&doc, pe::PCB, board).unwrap();
