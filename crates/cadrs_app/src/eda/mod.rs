@@ -73,13 +73,31 @@ pub enum Subject {
 
 /// The board or component whose view is shown this frame, and in which mode (`None`: not a
 /// native board, or not the PCB Studio). Read by the 3D viewport to keep its hands off in 2D.
+/// The second field is set when the Layout's tools run **on a board in the 3D view** instead
+/// (a derived board's layout edited in a Part Studio, `docs/PCB_IN_PART_STUDIO.md` §7): the
+/// view stays 3D and the pointer is mapped onto the board's face
+/// ([`crate::board_in_studio`]).
 #[derive(Resource, Default, Clone, Copy, Debug, PartialEq)]
-pub struct Eda2d(pub Option<(ElementId, Subject, Mode)>);
+pub struct Eda2d(pub Option<(ElementId, Subject, Mode)>, pub Option<PlaneHost>);
+
+/// A board copy in a Part Studio whose layout the Layout's tools edit: the copy, its board
+/// frame (the layout's origin and axes on its bottom face) and its thickness (mm).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct PlaneHost {
+    pub target: crate::board_in_studio::BoardTarget,
+    pub frame: cadrs_sketch::PlaneFrame,
+    pub thickness: f64,
+}
 
 impl Eda2d {
     /// A 2D view (not the 3D one) is on screen.
     pub fn flat(&self) -> bool {
-        matches!(self.0, Some((_, _, m)) if m != Mode::ThreeD)
+        self.1.is_none() && matches!(self.0, Some((_, _, m)) if m != Mode::ThreeD)
+    }
+
+    /// The Layout's tools run on a board in a Part Studio's 3D view.
+    pub fn plane(&self) -> Option<&PlaneHost> {
+        self.1.as_ref()
     }
 
     /// The shown native board: (tab, board, mode).
@@ -229,21 +247,37 @@ pub fn design(doc: &ActiveDocument, el: ElementId, b: BoardId) -> Option<&Design
     doc.doc.element(el)?.pcb()?.board(b)?.design.as_deref()
 }
 
-/// The shown native board (or the component being edited) and its mode, this frame.
-fn track_context(doc: Option<Res<ActiveDocument>>, kind: Res<ActiveKind>, pcb: Res<PcbUi>, ui: Res<EdaUi>, mut eda: ResMut<Eda2d>) {
-    let now = doc.as_deref().filter(|_| *kind == ActiveKind::PcbStudio && pcb.view == PcbView::Board).and_then(|doc| {
-        let (el, s) = active_studio(doc)?;
-        if let Some(c) = ui.editing.get(&el).filter(|c| s.component(**c).is_some()) {
-            let subject = Subject::Component(*c);
-            return Some((el, subject, ui.mode(el, subject)));
-        }
-        let b = pcb.shown_board(el, s)?;
-        s.board(b)?.design.as_ref()?;
-        let subject = Subject::Board(b);
-        Some((el, subject, ui.mode(el, subject)))
-    });
-    if eda.0 != now {
+/// The shown native board (or the component being edited) and its mode, this frame; or the
+/// derived board copy whose layout is edited in the active Part Studio.
+#[allow(clippy::too_many_arguments)]
+fn track_context(
+    doc: Option<Res<ActiveDocument>>,
+    kind: Res<ActiveKind>,
+    pcb: Res<PcbUi>,
+    ui: Res<EdaUi>,
+    editing: Res<crate::board_in_studio::BoardEditing>,
+    cache: Res<crate::parts::PartCache>,
+    mut eda: ResMut<Eda2d>,
+) {
+    let plane = doc.as_deref().filter(|_| *kind == ActiveKind::PartStudio).and_then(|doc| crate::board_in_studio::edited_board(doc, &editing, &cache));
+    let now = match plane {
+        Some((el, b, _)) => Some((el, Subject::Board(b), Mode::Layout)),
+        None => doc.as_deref().filter(|_| *kind == ActiveKind::PcbStudio && pcb.view == PcbView::Board).and_then(|doc| {
+            let (el, s) = active_studio(doc)?;
+            if let Some(c) = ui.editing.get(&el).filter(|c| s.component(**c).is_some()) {
+                let subject = Subject::Component(*c);
+                return Some((el, subject, ui.mode(el, subject)));
+            }
+            let b = pcb.shown_board(el, s)?;
+            s.board(b)?.design.as_ref()?;
+            let subject = Subject::Board(b);
+            Some((el, subject, ui.mode(el, subject)))
+        }),
+    };
+    let host = plane.map(|(_, _, h)| h);
+    if eda.0 != now || eda.1 != host {
         eda.0 = now;
+        eda.1 = host;
     }
 }
 
@@ -275,7 +309,8 @@ fn sync_mode_bar(
     theme: Res<Theme>,
     mut commands: Commands,
 ) {
-    let want = eda.0.map(|(_, s, _)| matches!(s, Subject::Component(_)));
+    // No mode bar on a board edited in a Part Studio: it stays 3D.
+    let want = eda.0.filter(|_| eda.1.is_none()).map(|(_, s, _)| matches!(s, Subject::Component(_)));
     let mut bar = q_bar.single().ok().map(|(e, b)| (e, b.0));
     // The other kind's bar goes.
     if let Some((e, kind)) = bar
@@ -583,6 +618,11 @@ impl Preview {
 
     pub fn component(&self) -> Option<&cadrs_eda::Component> {
         self.component.as_deref()
+    }
+
+    /// Bumped by every change of what is previewed.
+    pub fn generation(&self) -> u64 {
+        self.generation
     }
 }
 

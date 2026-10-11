@@ -511,7 +511,7 @@ fn main_pre_merge_derived_format_loads_and_rebuilds() {
     assert!(!x.selection.all && x.selection.parts == vec![src[1].id] && !x.include_connectors && x.legacy_names);
     // A new feature that never picked a studio waits for one.
     let FeatureKind::Derived(x) = ron::from_str::<FeatureKind>("Derived((document: None, element: None, parts: [], include_mate_connectors: true, placement: AtOrigin))").unwrap() else { panic!() };
-    assert_eq!(x.problem(), Some("Select a Part Studio to derive"));
+    assert_eq!(x.problem(), Some("Select a Part Studio or a board to derive"));
     let _ = std::fs::remove_dir_all(store.root());
 }
 

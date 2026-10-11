@@ -455,6 +455,8 @@ pub struct PartCache {
     pub layout_hidden: HashSet<PartId>,
     /// Derived boards whose faces don't show their skins (shown as their layout).
     pub skinless: HashSet<PartId>,
+    /// Components drawn by a drag's ghost instead, while a board's layout is edited.
+    pub drag_hidden: HashSet<PartId>,
     /// The parts shown alone (Isolate), if any.
     pub isolated: Option<Vec<PartId>>,
     /// What each extrude's new body touches (the automatic Add, PS5.2).
@@ -626,7 +628,7 @@ impl PartCache {
 
     /// True if the part is hidden (Hide in the Parts list), or outside an isolation.
     pub fn is_hidden(&self, id: PartId) -> bool {
-        self.is_hidden_part(id) || self.isolated.as_ref().is_some_and(|iso| !iso.contains(&id)) || self.layout_hidden.contains(&id)
+        self.is_hidden_part(id) || self.isolated.as_ref().is_some_and(|iso| !iso.contains(&id)) || self.layout_hidden.contains(&id) || self.drag_hidden.contains(&id)
     }
 
     /// True if the part itself is hidden (Hide in the Parts list): its row is greyed. Isolate is
@@ -884,6 +886,14 @@ impl PartCache {
         self.parts = parts;
         self.errors = build.errors.iter().cloned().collect();
         self.warnings = build.warnings.iter().cloned().collect();
+        // A derived board's components in the way of other parts, named as the Parts list
+        // names them (the rebuild knows only default names).
+        for (f, out) in build.derived.iter().filter(|(_, o)| !o.collisions.is_empty()) {
+            let name = |p: PartId| build.part(p).map(|x| cadrs_core::parts::display_name(x, &self.props).to_string()).unwrap_or_default();
+            let mut lines: Vec<String> = self.warnings.get(f).map(|w| w.split("; ").filter(|l| !l.contains(" runs into ")).map(String::from).collect()).unwrap_or_default();
+            lines.extend(out.collisions.iter().map(|(a, b, d)| format!("{} runs into {} (≈{d:.2} mm)", name(*a), name(*b))));
+            self.warnings.insert(*f, lines.join("; "));
+        }
         self.missing = build.missing.clone();
         // P3G.4: derived sketches are shown and picked like the list's; new ones mean the
         // regions are worked out again (next frame).

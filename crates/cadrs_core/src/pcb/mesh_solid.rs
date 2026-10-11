@@ -4,8 +4,10 @@
 //!
 //! - Each mesh (one model shape, one colour) is welded (vertices within 0.1 µm) and split into
 //!   **smooth groups**: triangles joined across edges that bend less than [`SHARP_DEG`].
-//! - A group whose normals are all square to one direction is one **cylinder** (below), however
-//!   coarse its facets.
+//! - Before that, facets chained across edges along one direction, each bending at most
+//!   [`FACET_DEG`] and turning a quarter turn or more in all, are one **cylinder** (below), so
+//!   an 8-sided pin of a VRML model has its axis; so is a smooth group whose normals are all
+//!   square to one direction.
 //! - In other groups, every set of coplanar neighbours is a **planar face** when it is a real face
 //!   and not one facet of a tessellated curve: its area is at least [`MIN_FILL`] of the square
 //!   of its extent, so a box side counts and a cylinder's thin facet strips don't. A planar face
@@ -76,7 +78,7 @@ fn weld(m: &Mesh) -> Welded {
         map.push(i);
     }
     let mut w = Welded { pts, tris: vec![], normals: vec![], areas: vec![], corner_normals: vec![] };
-    for t in m.indices.chunks_exact(3) {
+    for t in m.indices.as_chunks::<3>().0 {
         let [a, b, c] = [map[t[0] as usize], map[t[1] as usize], map[t[2] as usize]];
         if a == b || b == c || a == c {
             continue;
@@ -253,15 +255,74 @@ fn chain(segs: &[(usize, usize)]) -> Vec<Vec<usize>> {
     out
 }
 
+/// Facets of a prism-like pin meet at up to this angle (degrees): an 8-sided one is a cylinder.
+pub const FACET_DEG: f64 = 46.0;
+
+/// Coarse cylinders (a pin of a few sides): triangles joined across edges that run along one
+/// direction, both square to it and bending at most [`FACET_DEG`], turning at least a quarter
+/// turn in all, that fit a circle. Each found is a face; the rest are `free`.
+fn prisms(w: &Welded, edges: &HashMap<(usize, usize), Vec<usize>>) -> (Vec<(Vec<usize>, Shape)>, Vec<bool>) {
+    let n = w.tris.len();
+    let bend = FACET_DEG.to_radians().cos();
+    let mut free = vec![true; n];
+    let mut tried = vec![false; n];
+    let mut out = vec![];
+    for seed in 0..n {
+        if tried[seed] {
+            continue;
+        }
+        let mut axis: Option<V3> = None;
+        let mut group = vec![seed];
+        let mut q = VecDeque::from([seed]);
+        tried[seed] = true;
+        while let Some(t) = q.pop_front() {
+            for k in 0..3 {
+                let (a, b) = (w.tris[t][k], w.tris[t][(k + 1) % 3]);
+                let dir = (w.pts[b] - w.pts[a]).normalize();
+                for &u in &edges[&(a.min(b), a.max(b))] {
+                    if u == t || tried[u] {
+                        continue;
+                    }
+                    let (nt, nu) = (w.normals[t], w.normals[u]);
+                    let along = axis.is_none_or(|ax| dir.dot(&ax).abs() > 0.999);
+                    // Coplanar halves of one facet join too (their diagonal isn't along the axis).
+                    let same = nt.dot(&nu) > 0.9999;
+                    if same || (along && nt.dot(&dir).abs() < 0.02 && nu.dot(&dir).abs() < 0.02 && nt.dot(&nu) >= bend) {
+                        if !same && axis.is_none() {
+                            axis = Some(dir);
+                        }
+                        tried[u] = true;
+                        group.push(u);
+                        q.push_back(u);
+                    }
+                }
+            }
+        }
+        let Some(ax) = axis else { continue };
+        // Every facet square to the axis, and they turn a quarter turn or more.
+        if group.iter().any(|&t| w.normals[t].dot(&ax).abs() > 0.02) {
+            continue;
+        }
+        let spread = group.iter().map(|&t| w.normals[t].dot(&w.normals[group[0]])).fold(1.0f64, f64::min);
+        if spread > 0.0 {
+            continue;
+        }
+        if let Some((point, dir, radius)) = cylinder(w, &group) {
+            group.iter().for_each(|&t| free[t] = false);
+            out.push((group, Shape::Cylinder { point, dir, radius }));
+        }
+    }
+    (out, free)
+}
+
 /// The faces of one welded mesh: each a list of triangles and its shape.
 fn faces_of(w: &Welded) -> Vec<(Vec<usize>, Shape)> {
     let n = w.tris.len();
     let edges = edge_map(&w.tris);
     let sharp = SHARP_DEG.to_radians().cos();
-    let all = vec![true; n];
-    let groups = flood(n, &edges, &w.tris, &all, |_, t, u| w.normals[t].dot(&w.normals[u]) >= sharp);
+    let (mut out, free) = prisms(w, &edges);
+    let groups = flood(n, &edges, &w.tris, &free, |_, t, u| w.normals[t].dot(&w.normals[u]) >= sharp);
     let flat = PLANAR_DEG.to_radians().cos();
-    let mut out = vec![];
     for g in groups {
         let mut in_group = vec![false; n];
         g.iter().for_each(|&t| in_group[t] = true);
@@ -357,7 +418,9 @@ pub fn mesh_solid(meshes: &[Mesh], op: OpId, opacity: f64) -> Solid {
         }
         // Edges: per pair of faces (or a face and nothing), the segments between them.
         let sharp = SHARP_DEG.to_radians().cos();
-        let mut by_pair: HashMap<(usize, usize), (Vec<(usize, usize)>, bool)> = HashMap::new();
+        // Per pair of faces: its segments, and whether they are all smooth.
+        type Segments = (Vec<(usize, usize)>, bool);
+        let mut by_pair: HashMap<(usize, usize), Segments> = HashMap::new();
         for (&(a, b), ts) in &edges {
             let (fa, fb, smooth) = match ts.as_slice() {
                 [t] => (face_of[*t], usize::MAX, false),
@@ -427,6 +490,48 @@ mod tests {
         assert!((side.radius.unwrap() - 0.5).abs() < 5e-3);
         // Two planar ends.
         assert_eq!(s.faces.iter().filter(|f| f.kind == Some(SurfaceKind::Plane)).count(), 2);
+    }
+
+    #[test]
+    fn an_eight_sided_pin_is_a_cylinder_too() {
+        // A VRML-style pin: an octagonal prism, r = 0.32 across its corners, along x.
+        let (r, len) = (0.32f32, 6.0f32);
+        let ring: Vec<(f32, f32)> = (0..8).map(|i| {
+            let t = std::f32::consts::TAU * i as f32 / 8.0;
+            (r * t.cos(), r * t.sin())
+        }).collect();
+        let mut m = Mesh { color: [200, 200, 200], ..Default::default() };
+        for i in 0..8 {
+            let (a, b) = (ring[i], ring[(i + 1) % 8]);
+            let base = m.positions.len() as u32;
+            m.positions.extend([[0.0, a.0, a.1], [0.0, b.0, b.1], [len, b.0, b.1], [len, a.0, a.1]]);
+            let mid = ((a.0 + b.0) / 2.0, (a.1 + b.1) / 2.0);
+            let l = (mid.0 * mid.0 + mid.1 * mid.1).sqrt();
+            m.normals.extend([[0.0, mid.0 / l, mid.1 / l]; 4]);
+            m.indices.extend([base, base + 1, base + 2, base, base + 2, base + 3]);
+        }
+        let s = mesh_solid(&[m], uuid::Uuid::nil(), 1.0);
+        let cyl: Vec<_> = s.faces.iter().filter(|f| f.kind == Some(SurfaceKind::Cylinder)).collect();
+        assert_eq!(cyl.len(), 1, "one cylinder, not eight strips: {:?}", s.faces.iter().map(|f| f.kind).collect::<Vec<_>>());
+        let (p, d) = cyl[0].axis.unwrap();
+        assert!(d[0].abs() > 0.999 && p[1].abs() < 1e-3 && p[2].abs() < 1e-3, "{p:?} {d:?}");
+        assert!((cyl[0].radius.unwrap() - 0.32).abs() < 1e-3);
+    }
+
+    #[test]
+    fn a_pin_header_has_a_top_face_per_pin() {
+        // The generated header's pins are square: each has a top face, centred on its pad, to
+        // sketch on or mate to.
+        let lib = cadrs_eda::library::LibraryTable::builtin();
+        let fp = lib.footprint("Connector_PinHeader_2.54mm:PinHeader_1x04_P2.54mm_Vertical").unwrap();
+        let (meshes, _) = crate::pcb::model::footprint_meshes(fp).unwrap().unwrap();
+        let s = mesh_solid(&meshes, uuid::Uuid::nil(), 1.0);
+        let top = s.faces.iter().filter_map(|f| f.plane.filter(|p| p.normal()[2] > 0.999)).map(|p| p.origin[2]).fold(f64::MIN, f64::max);
+        let tops: Vec<[f64; 3]> = s.faces.iter().filter_map(|f| f.plane).filter(|p| p.normal()[2] > 0.999 && (p.origin[2] - top).abs() < 1e-6).map(|p| p.origin).collect();
+        for pad in &fp.pads {
+            let (x, y) = (cadrs_eda::units::to_mm(pad.at.x), cadrs_eda::units::to_mm(pad.at.y));
+            assert!(tops.iter().any(|p| (p[0] - x).abs() < 1e-3 && (p[1] - y).abs() < 1e-3), "pin {} at ({x}, {y}): {tops:?}", pad.number);
+        }
     }
 
     #[test]

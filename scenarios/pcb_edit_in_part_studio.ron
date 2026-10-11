@@ -1,0 +1,49 @@
+// docs/PCB_IN_PART_STUDIO.md P3: a derived board's layout edited in the Part Studio. The
+// mains-sensor enclosure with its board derived onto Board location (`board derive`), the tube
+// and end plate see-through. The board's outline centre (15.5, 19.5) is on (0, 0, 12): J4 (Live
+// in, layout (14, 3.5)) is at (−1.5, −16, 13.6), the Live pin at (0, 8).
+// 01 Edit layout (the feature's menu): the bar "Editing the layout of AC sensor (PCB Studio 1)"
+//    with Open in PCB Studio and Done, the Layout's tool strip and layers button, the layout on
+//    the board's top face, the models as they are.
+// 02 J4 pressed and dragged toward the Live pin: its wire stub moves with the pointer in 3D
+//    (a ghost), the layout's J4 with it; nothing is rebuilt yet.
+// 03 let go over the Live pin: one undo step "Move J4" in the PCB Studio, the derived board
+//    rebuilt with J4 there (layout (15.5, 27.5)), the pin through its hole.
+// 04 Ctrl+Z from the Part Studio: J4 back where it was.
+// 05 Done: the bar and the strip gone, the board as 3D model again.
+Scenario(
+    start: Some("document"),
+    steps: [
+        WaitFor("document-shell"),
+        Custom("board setup"),
+        Wait(10),
+        Custom("board derive"),
+        Wait(10),
+        Custom("board transparent Tube, End plate, Plug"),
+        Custom("view -40 55 0 0 12 0.06"),
+        Wait(30),
+        RightClick(ui("feature-derived-1")),
+        WaitFor("feature-context-menu"),
+        Click(ui("feature-board-edit")),
+        WaitFor("board-edit-bar"),
+        MoveTo(1420, 780),
+        Wait(10),
+        Screenshot("01-editing"),
+        Press(xyz(-1.5, -16, 13.6)),
+        Hover(xyz(-1, -4, 13.6)),
+        Hover(xyz(0, 8, 13.6)),
+        Wait(5),
+        Screenshot("02-dragging"),
+        Release,
+        Wait(20),
+        MoveTo(1420, 780),
+        Wait(10),
+        Screenshot("03-dropped"),
+        Key("Ctrl+Z"),
+        Wait(20),
+        Screenshot("04-undone"),
+        Click(ui("board-edit-done")),
+        Wait(10),
+        Screenshot("05-done"),
+    ],
+)

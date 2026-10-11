@@ -13,9 +13,13 @@
 //    plug and the end plate.
 // 05 ✓, closer: "Derived 1" in the Feature list; the Parts list has the board and its components;
 //    the board's skins (mask, gold pads, silkscreen) and the parts' models.
-// 06 the chevron opened: AC sensor (board icon), J1 … U1 (chip icons) with their eyes.
-// 07 Show layout (the feature's menu): the board's layout on its top face, the components gone.
-// 08 Show 3D model again.
+// 06 the chevron opened: AC sensor (board icon), the view row "3D model", "Components (9)".
+// 07 Components opened: J1 … C1 (chip icons, indented) with their eyes; U1, parked off the
+//    board, isn't among them.
+// 08 Show layout (the feature's menu): the board's layout on its top face (and its bottom
+//    layers on its bottom face), the components gone and greyed in the lists, the view row
+//    "Layout".
+// 09 Show 3D model again.
 Scenario(
     start: Some("document"),
     steps: [
@@ -51,17 +55,21 @@ Scenario(
         MoveTo(1420, 780),
         Wait(3),
         Screenshot("06-children"),
+        Click(ui("feature-derived-1-components-chevron")),
+        MoveTo(1420, 780),
+        Wait(3),
+        Screenshot("07-components"),
         RightClick(ui("feature-derived-1")),
         WaitFor("feature-context-menu"),
         Click(ui("feature-board-show-layout")),
         MoveTo(1420, 780),
         Wait(10),
-        Screenshot("07-layout"),
+        Screenshot("08-layout"),
         RightClick(ui("feature-derived-1")),
         WaitFor("feature-context-menu"),
         Click(ui("feature-board-show-3d")),
         MoveTo(1420, 780),
         Wait(10),
-        Screenshot("08-3d-again"),
+        Screenshot("09-3d-again"),
     ],
 )

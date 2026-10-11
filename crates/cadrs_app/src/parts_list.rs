@@ -120,7 +120,8 @@ fn rebuild_part_list(
                 cache.part_name(p.id).unwrap_or(&p.name).to_string(),
                 p.kind,
                 over.previews(p) || (staged && over.staged.is_some_and(|f| p.features.contains(&f))),
-                cache.is_hidden_part(p.id),
+                // A board component hidden by its board's layout view greys as hidden.
+                cache.is_hidden_part(p.id) || cache.layout_hidden.contains(&p.id),
                 composite(p.id),
             )
         })

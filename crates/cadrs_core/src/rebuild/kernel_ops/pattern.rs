@@ -628,7 +628,7 @@ impl Rebuilder {
         let mut groups: Vec<(PartId, BodyId, Arc<BodyNames>, Vec<FaceId>)> = Vec::new();
         for f in faces {
             let (part, ids) = face_ids(state, f).ok_or("A selected face no longer exists")?;
-            let body = part.body.ok_or("A part has no body")?;
+            let body = part.body.ok_or_else(|| super::super::no_body(part))?;
             match groups.iter_mut().find(|g| g.0 == part.part.id) {
                 Some(g) => {
                     for i in ids {

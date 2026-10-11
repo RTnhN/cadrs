@@ -56,6 +56,7 @@ pub struct DerivedPlugin;
 impl Plugin for DerivedPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<DerivedOpen>()
+            .init_resource::<ComponentsOpen>()
             .add_systems(
                 Update,
                 (derived_picks, derived_keys, read_search, sync_dialog, sync_source_list)
@@ -77,7 +78,8 @@ impl Plugin for DerivedPlugin {
             .add_observer(on_list_activate)
             .add_observer(on_list_remove)
             .add_observer(on_rail_insert)
-            .add_observer(on_child_eye);
+            .add_observer(on_child_eye)
+            .add_observer(on_components_disclosure);
     }
 }
 
@@ -142,6 +144,10 @@ struct EntityRow(EntityKey);
 /// A source mate connector offered as the base.
 #[derive(Component, Debug, Clone, Copy)]
 struct BasePick(ConnectorRef);
+
+/// A footprint offered as the board's point on the location.
+#[derive(Component, Debug, Clone, Copy)]
+struct AnchorPick(uuid::Uuid);
 
 // ---------------------------------------------------------------------------------------------
 // Session
@@ -439,7 +445,19 @@ fn on_tab(ev: On<TabStripSelect>, q: Query<&Name>, mut commands: Commands) {
                         "Board face"
                     }
                     "derived-board-anchor" => {
-                        o.anchor = if i == 0 { BoardAnchor::Center } else { BoardAnchor::Origin };
+                        o.anchor = match i {
+                            0 => {
+                                let [x, y] = cadrs_core::pcb::board3d::outline_center(&b.layout);
+                                BoardAnchor::At { x, y }
+                            }
+                            1 => BoardAnchor::Origin,
+                            2 => BoardAnchor::Center,
+                            // The first footprint on the board, till another is picked.
+                            _ => match b.layout.footprints.iter().find(|f| cadrs_core::pcb::model::shown_model(&f.footprint).is_some()) {
+                                Some(f) => BoardAnchor::Footprint(f.id),
+                                None => return,
+                            },
+                        };
                         "Board point"
                     }
                     _ => {
@@ -496,6 +514,11 @@ fn on_check(ev: On<CheckboxChange>, q: Query<&Name>, q_parent: Query<&ChildOf>, 
                 d.include_properties = on;
                 "Include properties"
             }
+            ("derived-board-off-board-checkbox", _) => {
+                let Some(b) = d.board.as_mut() else { return };
+                b.options.off_board = on;
+                "Parts off the board"
+            }
             ("derived-board-skins-checkbox", _) => {
                 let Some(b) = d.board.as_mut() else { return };
                 b.options.skins = on;
@@ -527,8 +550,18 @@ fn on_check(ev: On<CheckboxChange>, q: Query<&Name>, q_parent: Query<&ChildOf>, 
     });
 }
 
-fn on_button(a: On<Activate>, q: Query<&Name>, q_studio: Query<&StudioPick>, q_base: Query<&BasePick>, session: Option<Res<DerivedSession>>, mut commands: Commands) {
+#[allow(clippy::too_many_arguments)]
+fn on_button(a: On<Activate>, q: Query<&Name>, q_studio: Query<&StudioPick>, q_base: Query<&BasePick>, q_anchor: Query<&AnchorPick>, session: Option<Res<DerivedSession>>, mut commands: Commands) {
     let Some(s) = session else { return };
+    if let Ok(p) = q_anchor.get(a.entity).copied() {
+        commands.queue(move |world: &mut World| {
+            let Some((_, _, mut d)) = current(world) else { return };
+            let Some(b) = d.board.as_mut() else { return };
+            b.options.anchor = BoardAnchor::Footprint(p.0);
+            set(world, d, Vec::new(), "Board point");
+        });
+        return;
+    }
     if let Ok(p) = q_studio.get(a.entity).copied() {
         commands.queue(move |world: &mut World| set_source(world, p.0, p.1));
         return;
@@ -724,8 +757,15 @@ struct BoardRows {
     components: usize,
     skins: bool,
     seat: usize,
+    /// 0 a fixed point, 1 the layout origin, 2 the outline centre, 3 a footprint.
     anchor: usize,
     view: usize,
+    off_board: bool,
+    /// Each footprint with a model: its id, "J1 MCU left (bottom)", whether it comes in, and
+    /// whether the side filter or its place off the board leaves it out regardless.
+    footprints: Vec<(uuid::Uuid, String, bool, bool)>,
+    /// The footprint the board is placed by (with anchor 3).
+    anchor_footprint: Option<uuid::Uuid>,
 }
 
 /// Everything the dialog shows (it is rebuilt when this changes).
@@ -763,14 +803,7 @@ fn view(world: &World) -> Option<(View, bool)> {
     let valid = f.is_valid() && !cache.errors.contains_key(&f.id) && !cache.rebuilding;
     // The source's parts, as the source builds them (its names).
     let mut entities: Vec<(EntityKey, String, &'static str, bool)> = Vec::new();
-    if let Some(b) = &d.board {
-        // Each footprint with a model: ticked when it comes in.
-        for f in b.layout.footprints.iter().filter(|f| cadrs_core::pcb::model::shown_model(&f.footprint).is_some()) {
-            let value = f.footprint.field(cadrs_eda::symbol::fields::VALUE).map(|v| v.text.text.text.clone()).unwrap_or_default();
-            let label = if value.is_empty() { f.reference().to_string() } else { format!("{} {value}", f.reference()) };
-            let shown = b.options.components.takes(f.placement.side) && !b.options.exclude.contains(&f.id);
-            entities.push((EntityKey::Footprint(f.id), label, "chip", shown));
-        }
+    if d.board.is_some() {
     } else if d.source.is_some() && !d.selection.all {
         let build = cadrs_core::rebuild::build(&d.studio);
         for p in &build.parts {
@@ -804,13 +837,45 @@ fn view(world: &World) -> Option<(View, bool)> {
         studios: if s.picking { studio_rows(world, &s) } else { Vec::new() },
         source: source_text(doc, &d),
         board: d.board.as_ref().map(|b| {
+            use cadrs_core::pcb::board3d::{BoardAnchor as A, on_board};
             let o = &b.options;
+            let region = cadrs_eda::outline::board_region(&b.layout);
+            let footprints = b
+                .layout
+                .footprints
+                .iter()
+                .filter(|f| cadrs_core::pcb::model::shown_model(&f.footprint).is_some())
+                .map(|f| {
+                    let value = f.footprint.field(cadrs_eda::symbol::fields::VALUE).map(|v| v.text.text.text.clone()).unwrap_or_default();
+                    let mut label = if value.is_empty() { f.reference().to_string() } else { format!("{} {value}", f.reference()) };
+                    if f.placement.side == cadrs_eda::layer::Side::Bottom {
+                        label.push_str(" (bottom)");
+                    }
+                    let off = !on_board(&region, f);
+                    if off {
+                        label.push_str(" (off the board)");
+                    }
+                    let blocked = !o.components.takes(f.placement.side) || (off && !o.off_board);
+                    (f.id, label, !blocked && !o.exclude.contains(&f.id), blocked)
+                })
+                .collect();
             BoardRows {
                 components: ComponentFilter::ALL.iter().position(|c| *c == o.components).unwrap_or(0),
                 skins: o.skins,
                 seat: usize::from(o.seat == BoardSeat::Top),
-                anchor: usize::from(o.anchor == BoardAnchor::Origin),
+                anchor: match o.anchor {
+                    A::At { .. } => 0,
+                    A::Origin => 1,
+                    A::Center => 2,
+                    A::Footprint(_) => 3,
+                },
                 view: usize::from(o.view == BoardView::Layout),
+                off_board: o.off_board,
+                footprints,
+                anchor_footprint: match o.anchor {
+                    A::Footprint(id) => Some(id),
+                    _ => None,
+                },
             }
         }),
         linked: d.source.is_some_and(|r| r.at != RefAt::Workspace),
@@ -1048,18 +1113,38 @@ fn spawn_board_options(p: &mut ChildSpawnerCommands, t: &Theme, v: &View, b: &Bo
     p.spawn(TabStrip::new("derived-board-view").compact().equal().tab("3D model").tab("Layout").selected(b.view).build(t));
     section(p, t, "derived-components-label", "Components");
     p.spawn(TabStrip::new("derived-board-components").compact().equal().tab("All").tab("Top").tab("Bottom").tab("None").selected(b.components).build(t));
-    p.spawn((Name::new("derived-footprints"), Node { flex_direction: FlexDirection::Column, padding: UiRect::new(Val::Px(4.0), Val::Px(4.0), Val::Px(4.0), Val::Px(0.0)), max_height: Val::Px(180.0), overflow: Overflow::scroll_y(), ..default() }))
+    p.spawn((Name::new("derived-footprints"), Node { flex_direction: FlexDirection::Column, padding: UiRect::new(Val::Px(4.0), Val::Px(4.0), Val::Px(4.0), Val::Px(0.0)), max_height: Val::Px(260.0), overflow: Overflow::scroll_y(), ..default() }))
         .with_children(|c| {
-            for (k, label, icon, on) in &v.entities {
-                c.spawn((EntityRow(*k), OptionRow::new(format!("derived-footprint-{}", linked::slug(label)), label.clone()).icon(icon).checked(*on).build(t)));
+            for (id, label, on, blocked) in &b.footprints {
+                c.spawn((EntityRow(EntityKey::Footprint(*id)), OptionRow::new(format!("derived-footprint-{}", linked::slug(label)), label.clone()).icon("chip").checked(*on).disabled(*blocked).build(t)));
             }
         });
+    p.spawn(Node { flex_direction: FlexDirection::Column, padding: UiRect::horizontal(Val::Px(4.0)), ..default() })
+        .with_child(OptionRow::new("derived-board-off-board", "Include parts placed off the board").checked(b.off_board).build(t));
     section(p, t, "derived-locations-label", "Locations");
     p.spawn(Node { flex_direction: FlexDirection::Column, padding: UiRect::horizontal(Val::Px(4.0)), ..default() }).with_children(|c| {
         c.spawn(SelectionList::new("derived-locations").placeholder("Mate connectors (the origin when empty)").items(v.locations.clone()).active(v.locations_active).build(t));
     });
     section(p, t, "derived-board-anchor-label", "Board point on the location");
-    p.spawn(TabStrip::new("derived-board-anchor").compact().equal().tab("Outline centre").tab("Layout origin").selected(b.anchor).build(t));
+    p.spawn(TabStrip::new("derived-board-anchor").compact().equal().tab("Fixed").tab("Origin").tab("Centre").tab("Footprint").selected(b.anchor).build(t));
+    let hint = match b.anchor {
+        0 => "Where the outline's centre was: outline edits don't move the board",
+        1 => "The layout's origin (0, 0)",
+        2 => "The outline's centre: the board moves when the outline changes",
+        _ => "A footprint's origin: the part lands on the location",
+    };
+    p.spawn((Name::new("derived-board-anchor-hint"), t.text(hint, t.font_sm, FontWeight::NORMAL, t.muted_foreground), Node { margin: UiRect::new(Val::Px(8.0), Val::Px(6.0), Val::Px(3.0), Val::Px(0.0)), max_width: Val::Px(280.0), ..default() }));
+    if b.anchor == 3 {
+        p.spawn((Name::new("derived-board-anchor-footprints"), Node { flex_direction: FlexDirection::Column, padding: UiRect::new(Val::Px(4.0), Val::Px(4.0), Val::Px(3.0), Val::Px(0.0)), max_height: Val::Px(140.0), overflow: Overflow::scroll_y(), ..default() }))
+            .with_children(|c| {
+                for (id, label, _, _) in &b.footprints {
+                    let mut row = c.spawn((cadrs_ui::location_row(format!("derived-anchor-{}", linked::slug(label)), "chip", label.clone(), t), AnchorPick(*id)));
+                    if b.anchor_footprint == Some(*id) {
+                        row.insert(cadrs_ui::style::Selected);
+                    }
+                }
+            });
+    }
     section(p, t, "derived-board-seat-label", "Board face on the location");
     p.spawn(TabStrip::new("derived-board-seat").compact().equal().tab("Bottom face").tab("Top face").selected(b.seat).build(t));
     p.spawn(Node { flex_direction: FlexDirection::Column, padding: UiRect::new(Val::Px(4.0), Val::Px(4.0), Val::Px(8.0), Val::Px(6.0)), ..default() }).with_children(|c| {
@@ -1076,7 +1161,14 @@ fn studio_list(c: &mut ChildSpawnerCommands, t: &Theme, rows: &[SourceRow]) {
         if rows.is_empty() {
             l.spawn((t.text("No other Part Studios or boards", t.font_sm, FontWeight::NORMAL, t.muted_foreground), Node { margin: UiRect::all(Val::Px(8.0)), ..default() }));
         }
+        let mut heading: Option<bool> = None;
         for (label, sub, r, board) in rows {
+            // "Part Studios", then "Boards".
+            if heading != Some(board.is_some()) {
+                heading = Some(board.is_some());
+                let (name, text) = if board.is_some() { ("derived-heading-boards", "Boards") } else { ("derived-heading-studios", "Part Studios") };
+                l.spawn((Name::new(name), t.text(text, t.font_sm, FontWeight::BOLD, t.muted_foreground), Node { margin: UiRect::new(Val::Px(6.0), Val::Px(4.0), Val::Px(6.0), Val::Px(2.0)), ..default() }));
+            }
             let (prefix, icon) = if board.is_some() { ("derived-board", "pcb-studio") } else { ("derived-studio", "part-studio") };
             l.spawn((
                 cadrs_ui::DocumentRow::new(format!("{prefix}-{}", linked::slug(label)), label.clone(), sub.clone()).icon(icon).tooltip(format!("Derive {label}")).build(t),
@@ -1121,21 +1213,40 @@ fn sync_source_list(world: &mut World, mut last: Local<Option<(Browse, u64)>>) {
 // ---------------------------------------------------------------------------------------------
 // The Feature list
 
-/// A Derived row's children (DV3.5): what the rebuild brought in, with names.
-pub fn children(cache: &crate::parts::PartCache, feature: FeatureId) -> Vec<(DerivedChild, String, &'static str)> {
+/// A Derived row's children (DV3.5): what the rebuild brought in, with names. A derived board
+/// (`docs/PCB_IN_PART_STUDIO.md` §6) lists each copy's board, then a row that switches it
+/// between its 3D model and its layout (`view`), then "Components (n)", open (`components_open`)
+/// with the components under it.
+pub fn children(cache: &crate::parts::PartCache, feature: FeatureId, view: Option<BoardView>, components_open: bool) -> Vec<(DerivedChild, String, &'static str)> {
     let Some(out) = cache.derived.get(&feature) else { return Vec::new() };
     let mut v = Vec::new();
-    for p in &out.parts {
-        if let Some(part) = cache.parts.iter().find(|x| x.id == *p) {
-            // A derived board's board and components.
-            let icon = if out.boards.iter().any(|b| b.part == *p) {
-                "pcb-studio"
-            } else if out.footprints.iter().any(|(q, _)| q == p) {
-                "chip"
-            } else {
-                "part"
-            };
-            v.push((DerivedChild::Part(*p), cadrs_core::parts::display_name(part, &cache.props).to_string(), icon));
+    let name = |p: &PartId| cache.parts.iter().find(|x| x.id == *p).map(|part| cadrs_core::parts::display_name(part, &cache.props).to_string());
+    if let Some(view) = view {
+        for b in &out.boards {
+            if let Some(n) = name(&b.part) {
+                v.push((DerivedChild::Part(b.part), n, "pcb-studio"));
+            }
+        }
+        let label = match view {
+            BoardView::ThreeD => "3D model",
+            BoardView::Layout => "Layout",
+        };
+        v.push((DerivedChild::BoardView(feature), label.to_string(), if view == BoardView::Layout { "pcb-studio" } else { "board-3d" }));
+        if !out.footprints.is_empty() {
+            v.push((DerivedChild::Components(feature), format!("Components ({})", out.footprints.len()), "chip"));
+            if components_open {
+                for (p, _) in &out.footprints {
+                    if let Some(n) = name(p) {
+                        v.push((DerivedChild::Component(*p), n, "chip"));
+                    }
+                }
+            }
+        }
+    } else {
+        for p in &out.parts {
+            if let Some(n) = name(p) {
+                v.push((DerivedChild::Part(*p), n, "part"));
+            }
         }
     }
     for (id, n) in &out.sketches {
@@ -1157,6 +1268,28 @@ pub enum DerivedChild {
     Sketch(FeatureId),
     Plane(FeatureId),
     Connector(FeatureId),
+    /// A derived board's view switch (3D model / layout).
+    BoardView(FeatureId),
+    /// A derived board's "Components (n)" group.
+    Components(FeatureId),
+    /// A derived board's component (under its group).
+    Component(PartId),
+}
+
+/// Derived boards whose "Components (n)" group is open in the Feature list.
+#[derive(Resource, Debug, Default, Clone, PartialEq)]
+pub struct ComponentsOpen(pub HashSet<FeatureId>);
+
+/// The "Components (n)" group's chevron.
+fn on_components_disclosure(ev: On<cadrs_ui::TreeToggle>, q: Query<&DerivedChild>, mut commands: Commands) {
+    if let Ok(DerivedChild::Components(f)) = q.get(ev.entity).copied() {
+        commands.queue(move |world: &mut World| {
+            let mut o = world.resource_mut::<ComponentsOpen>();
+            if !o.0.remove(&f) {
+                o.0.insert(f);
+            }
+        });
+    }
 }
 
 /// A Derived row's chevron: opens or closes its children.
@@ -1171,9 +1304,20 @@ pub fn toggle_open(world: &mut World, feature: FeatureId) {
 pub fn toggle_child(world: &mut World, child: DerivedChild) {
     let Some(element) = world.resource::<ActiveDocument>().active_element().map(|e| e.id) else { return };
     match child {
-        DerivedChild::Part(p) => {
+        DerivedChild::Part(p) | DerivedChild::Component(p) => {
             let hidden = world.resource::<ActiveDocument>().active_element().and_then(|e| e.part_prop(p)).is_some_and(|x| x.hidden);
             let _ = world.resource_mut::<ActiveDocument>().execute(&cadrs_core::commands::SetPartsHidden { element, parts: vec![p], hidden: !hidden });
+        }
+        DerivedChild::BoardView(f) => {
+            let layout = derived_in_active(world, f).and_then(|d| d.board).is_some_and(|b| b.options.view == BoardView::Layout);
+            crate::board_in_studio::set_view(world, f, if layout { BoardView::ThreeD } else { BoardView::Layout });
+        }
+        DerivedChild::Components(f) => {
+            // Hide them all, or show them all when they're all hidden.
+            let parts: Vec<PartId> = world.resource::<crate::parts::PartCache>().derived.get(&f).map(|o| o.footprints.iter().map(|(p, _)| *p).collect()).unwrap_or_default();
+            let el = world.resource::<ActiveDocument>().active_element();
+            let all_hidden = !parts.is_empty() && parts.iter().all(|p| el.and_then(|e| e.part_prop(*p)).is_some_and(|x| x.hidden));
+            let _ = world.resource_mut::<ActiveDocument>().execute(&cadrs_core::commands::SetPartsHidden { element, parts, hidden: !all_hidden });
         }
         DerivedChild::Plane(s) => {
             let shown = world.resource::<ActiveDocument>().active_element().is_none_or(|e| e.sketch_visibility(s) != Some(false));

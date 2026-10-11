@@ -10,7 +10,6 @@ use cadrs_kernel::{BodyId, Curve2, Extent, Kernel, Loop, Motion, Plane, Profile,
 use nalgebra::{Point2, Point3, Unit, Vector3};
 
 use crate::board::PcbBoard;
-use crate::placement::placement_motion;
 
 fn first(r: cadrs_kernel::OpResult) -> Result<BodyId, String> {
     r.bodies.into_iter().next().ok_or_else(|| "no body".to_string())
@@ -74,23 +73,16 @@ fn moved(k: &mut dyn Kernel, b: BodyId, m: &Motion) -> Result<BodyId, String> {
 pub type NamedBodies = Vec<(String, BodyId)>;
 
 /// The board and its parts' models as bodies (named), with warnings for models that couldn't
-/// be made. The caller releases the bodies.
+/// be made. The caller releases the bodies. The board and the placements are the Part Studio's
+/// ([`cadrs_core::pcb::board3d::board_body`], [`cadrs_core::pcb::model::footprint_motion`]), so
+/// an exported board and a derived one agree.
 pub fn native_board_bodies(k: &mut dyn Kernel, pcb: &PcbBoard, design: &cadrs_eda::Design) -> Result<(NamedBodies, Vec<String>), String> {
-    let g = crate::board_geometry(k, pcb).map_err(|e| e.to_string())?;
-    let mut out = vec![];
-    let mut warnings = g.warnings.clone();
-    for b in &g.bodies {
-        if b.class == crate::colors::BodyClass::Board {
-            out.push((b.name.clone(), b.body));
-        } else {
-            k.release(b.body);
-        }
-    }
-    let t = pcb.thickness();
+    let (board, _, mut warnings) = cadrs_core::pcb::board3d::board_body(k, &design.board)?;
+    let mut out = vec![(format!("Board [{}]", pcb.name()), board)];
+    let t = cadrs_core::pcb::board3d::thickness(&design.board);
     for f in &design.board.footprints {
-        let Some(m) = f.footprint.models.iter().find(|m| m.visible && (m.body.is_some() || m.blob.is_some())) else { continue };
-        let Some(p) = pcb.board.placements.iter().find(|p| p.refdes == f.reference()) else { continue };
-        let place = placement_motion(p, t);
+        let Some(m) = cadrs_core::pcb::model::shown_model(&f.footprint) else { continue };
+        let place = cadrs_core::pcb::model::footprint_motion(&f.placement, t);
         match part_bodies(k, m) {
             Ok((bodies, unit)) => {
                 let motion = crate::mesh::model_motion(m, unit).then(&place);

@@ -97,7 +97,22 @@ impl Rebuilder {
         let mut sketches: Vec<Feature> = Vec::new();
         for (k, m) in motions.iter().enumerate() {
             for sp in &selected {
-                let Some(body) = sp.body else { continue };
+                // A mesh part (a derived board's component in the source): its solid moved and
+                // renamed as this copy's.
+                let Some(body) = sp.body else {
+                    let base_name = crate::parts::display_name(&sp.part, &d.props).to_string();
+                    let name = unique(&base_name, &taken);
+                    taken.push(name.clone());
+                    let pid = d.part_of(id, sp.part.id, k);
+                    let solid = board3d::renamed_by(&board3d::moved(&sp.part.solid, m), |n| d.face_of(id, &n, k));
+                    next.parts.push(PartState {
+                        part: Part { id: pid, feature: id, name, solid: Arc::new(solid), mass: None, features: vec![id], source: None, derived: None, ..sp.part.clone() },
+                        body: None,
+                        names: Arc::default(),
+                    });
+                    out.parts.push(pid);
+                    continue;
+                };
                 let (b, h) = match self.kernel.transform_motion(body, m) {
                     Ok(r) => (r.bodies[0], r.history),
                     Err(e) => return fail(self, &owned, format!("Deriving {} failed: {e}", sp.part.name)),
@@ -184,6 +199,20 @@ impl Rebuilder {
                 out.connectors.push((cid, label(&f.name)));
             }
         }
+        // A derived board in the source comes across with its parts: each copy's board frame
+        // moved, its parts and footprints under this copy's ids (the layout view and the edit
+        // follow the source's Derived feature).
+        for (k, m) in motions.iter().enumerate() {
+            for src in sstate.derived.values() {
+                for bc in src.boards.iter().filter(|bc| d.includes_part(bc.part) && sstate.part(bc.part).is_some()) {
+                    let f = moved_frame(m, &bc.frame);
+                    out.boards.push(BoardCopy { part: d.part_of(id, bc.part, k), frame: f, thickness: bc.thickness });
+                }
+                for (p, fp) in src.footprints.iter().filter(|(p, _)| d.includes_part(*p) && sstate.part(*p).is_some()) {
+                    out.footprints.push((d.part_of(id, *p, k), *fp));
+                }
+            }
+        }
         // SM18.3 (P3I.8): sheet metal comes across with its parts. A copy at the source's own
         // place stays active sheet metal (its definition as it is: features after the Derived
         // feature can change it, the table and flat view show it); a copy placed elsewhere keeps
@@ -248,57 +277,27 @@ impl Rebuilder {
 
     /// A Derived feature of a PCB Studio board (`docs/PCB_IN_PART_STUDIO.md` §5): the board's
     /// solid and a mesh part per component, made in the board frame once and copied onto each
-    /// location.
+    /// location, the board's chosen point ([`board3d::BoardAnchor`]) and face on it.
     fn derived_board(&mut self, before: &[Feature], id: FeatureId, d: &DerivedFeature, b: &DerivedBoard, state: &Arc<State>) -> Result<Output, String> {
         let layout = &b.layout;
         let o = &b.options;
-        let (body, mut warnings) = board3d::board_body(&mut self.kernel, layout)?;
-        let (components, w) = board3d::components(layout, o);
-        warnings.extend(w);
-        let skins = if o.skins { board3d::skins(layout, b.hash) } else { Vec::new() };
-        let thickness = board3d::thickness(layout);
-        // The board's own ids: its part and faces stand for the nil footprint.
-        let board_src = PartId::new(FeatureId(uuid::Uuid::nil()), 0);
-        let base = match d.placement {
-            DerivedPlacement::BaseOrigin => PlaneFrame { origin: board3d::anchor_point(layout, o), u: [1.0, 0.0, 0.0], v: [0.0, 1.0, 0.0] },
-            DerivedPlacement::BaseConnector(Some(c)) => {
-                // A connector on the board as derived (board frame): its board and components
-                // named as the source parts.
-                let mut src: Vec<Part> = Vec::new();
-                let faces = board3d::board_face_names(&self.kernel, body, uuid::Uuid::nil(), Vector3::z())?;
-                let names = self.linked_names(body, faces)?;
-                if let Ok(solid) = crate::brep::solid_of(&self.kernel, body, &names, &state.geoms, Some(uuid::Uuid::nil())) {
-                    src.push(Part { id: board_src, feature: board_src.feature, name: b.board_name.clone(), kind: PartKind::Solid, palette: 0, solid: Arc::new(solid), mass: None, features: vec![], source: None, derived: None });
-                }
-                for c in &components {
-                    let pid = PartId::new(FeatureId(c.footprint), 0);
-                    let solid = board3d::renamed(&board3d::moved(&c.solid, &c.motion), c.footprint);
-                    src.push(Part { id: pid, feature: pid.feature, name: c.name.clone(), kind: PartKind::Solid, palette: 0, solid: Arc::new(solid), mass: None, features: vec![], source: None, derived: None });
-                }
-                match crate::mate::frame(&c, &[], &src, &HashMap::new()) {
-                    Ok(f) => f,
-                    Err(e) => {
-                        self.kernel.release(body);
-                        return Err(format!("The base mate connector: {e}"));
-                    }
-                }
-            }
-            DerivedPlacement::BaseConnector(None) => {
-                self.kernel.release(body);
-                return Err("Select the base mate connector".into());
-            }
-        };
+        if !matches!(d.placement, DerivedPlacement::BaseOrigin) {
+            return Err("A board is placed by its board point (Base origin): pick the point, a footprint say, in the dialog".into());
+        }
         let locations: Vec<PlaneFrame> = if d.locations.is_empty() {
             vec![ORIGIN]
         } else {
-            match d.locations.iter().map(|c| super::super::connector_frame(before, state, c)).collect::<Result<Vec<_>, _>>() {
-                Ok(l) => l,
-                Err(e) => {
-                    self.kernel.release(body);
-                    return Err(e);
-                }
-            }
+            d.locations.iter().map(|c| super::super::connector_frame(before, state, c)).collect::<Result<Vec<_>, _>>()?
         };
+        let (body, curves, mut warnings) = board3d::board_body(&mut self.kernel, layout)?;
+        let (components, w) = board3d::components(layout, o);
+        warnings.extend(w);
+        let owner = cadrs_kernel::naming::stable_hash(id.0.as_bytes());
+        let skins = if o.skins { board3d::skins(layout, b.hash, owner) } else { Vec::new() };
+        let thickness = board3d::thickness(layout);
+        // The board's own ids: its part and faces stand for the nil footprint.
+        let board_src = PartId::new(FeatureId(uuid::Uuid::nil()), 0);
+        let base = PlaneFrame { origin: board3d::anchor_point(layout, o), u: [1.0, 0.0, 0.0], v: [0.0, 1.0, 0.0] };
         let several = locations.len() > 1;
         let mut next = (**state).clone();
         let mut out = DerivedOutput::default();
@@ -306,58 +305,83 @@ impl Rebuilder {
         let mut taken: Vec<String> = next.parts.iter().map(|p| p.part.name.clone()).collect();
         let mask = cadrs_eda::render::made::MASK;
         let green = crate::appearance::Appearance::rgb(mask[0], mask[1], mask[2]);
+        let mut palette = next.next_part;
         let mut failure = None;
         for (k, loc) in locations.iter().enumerate() {
             let m = motion_between(&base, loc);
             let label = |n: &str| if several { format!("{n} ({})", k + 1) } else { n.to_string() };
             // The board: its faces named as the board's own (under the nil op), then as this
             // copy's, under the Derived feature (as a pattern instance's).
-            let made = (|| -> Result<(BodyId, cadrs_kernel::naming::BodyNames, crate::solid::Solid, cadrs_kernel::MassProperties), String> {
-                let r = self.kernel.transform_motion(body, &m).map_err(|e| e.to_string())?;
-                let b2 = r.bodies[0];
-                let own = board3d::board_face_names(&self.kernel, b2, uuid::Uuid::nil(), m.linear * Vector3::z())?;
-                let faces = own.iter().map(|n| derived_face(id, n, k)).collect();
-                let names = self.linked_names(b2, faces)?;
-                let solid = crate::brep::solid_of(&self.kernel, b2, &names, &state.geoms, Some(id.0))?;
-                let mass = self.kernel.mass_properties(b2).map_err(|e| e.to_string())?;
-                Ok((b2, names, solid, mass))
-            })();
-            let (b2, names, mut solid, mass) = match made {
-                Ok(x) => x,
+            let b2 = match self.kernel.transform_motion(body, &m) {
+                Ok(r) => r.bodies[0],
                 Err(e) => {
                     failure = Some(format!("Placing {} failed: {e}", b.board_name));
                     break;
                 }
             };
             owned.push(b2);
+            let made = (|| -> Result<(cadrs_kernel::naming::BodyNames, crate::solid::Solid, cadrs_kernel::MassProperties), String> {
+                let own = board3d::board_face_names(&self.kernel, b2, uuid::Uuid::nil(), &m, &curves)?;
+                let faces = own.iter().map(|n| derived_face(id, n, k)).collect();
+                let names = self.linked_names(b2, faces)?;
+                let solid = crate::brep::solid_of(&self.kernel, b2, &names, &state.geoms, Some(id.0))?;
+                let mass = self.kernel.mass_properties(b2).map_err(|e| e.to_string())?;
+                Ok((names, solid, mass))
+            })();
+            let (names, mut solid, mass) = match made {
+                Ok(x) => x,
+                Err(e) => {
+                    failure = Some(format!("Placing {} failed: {e}", b.board_name));
+                    break;
+                }
+            };
             solid.looks = solid.faces.iter().map(|f| (f.name, green)).collect();
             solid.images = skins.iter().map(|i| i.mapped(|p| board3d::apply(&m, p))).collect();
             let name = unique(&label(&b.board_name), &taken);
             taken.push(name.clone());
             let pid = derived_part(id, board_src, k);
             next.parts.push(PartState {
-                part: Part { id: pid, feature: id, name, kind: PartKind::Solid, palette: next.next_part, solid: Arc::new(solid), mass: Some(mass), features: vec![id], source: None, derived: None },
+                part: Part { id: pid, feature: id, name, kind: PartKind::Solid, palette, solid: Arc::new(solid), mass: Some(mass), features: vec![id], source: None, derived: None },
                 body: Some(b2),
                 names: Arc::new(names),
             });
+            palette += 1;
             out.parts.push(pid);
             let o3 = board3d::apply(&m, [0.0; 3]);
             let (u, v) = (m.linear * Vector3::x(), m.linear * Vector3::y());
             out.boards.push(BoardCopy { part: pid, frame: PlaneFrame { origin: o3, u: [u.x, u.y, u.z], v: [v.x, v.y, v.z] }, thickness });
-            // The components (mesh parts: no kernel body).
+            // The components (mesh parts: no kernel body); those running into a part before
+            // the feature are reported (on their meshes, §7.3).
+            let before_parts: Vec<(String, Arc<crate::solid::Solid>)> = state.parts.iter().map(|p| (p.part.id.feature.0.to_string() + "/" + &p.part.id.index.to_string(), p.part.solid.clone())).collect();
+            let frame = PlaneFrame { origin: board3d::apply(&m, [0.0; 3]), u: { let u = m.linear * Vector3::x(); [u.x, u.y, u.z] }, v: { let v = m.linear * Vector3::y(); [v.x, v.y, v.z] } };
+            // (Named by their part ids, to find them again below.)
+            let mut placed: Vec<(String, crate::solid::Solid)> = Vec::new();
             for c in &components {
                 let place = c.motion.then(&m);
                 let solid = board3d::renamed_by(&board3d::moved(&c.solid, &place), |n| derived_face(id, &FaceName { op: c.footprint, ..n }, k));
                 let name = unique(&label(&c.name), &taken);
                 taken.push(name.clone());
                 let pid = derived_part(id, PartId::new(FeatureId(c.footprint), 0), k);
+                placed.push((pid.feature.0.to_string() + "/" + &pid.index.to_string(), solid.clone()));
                 next.parts.push(PartState {
-                    part: Part { id: pid, feature: id, name, kind: PartKind::Solid, palette: next.next_part, solid: Arc::new(solid), mass: None, features: vec![id], source: None, derived: None },
+                    part: Part { id: pid, feature: id, name, kind: PartKind::Solid, palette, solid: Arc::new(solid), mass: None, features: vec![id], source: None, derived: None },
                     body: None,
                     names: Arc::default(),
                 });
+                palette += 1;
                 out.parts.push(pid);
                 out.footprints.push((pid, c.footprint));
+            }
+            let comps: Vec<(&str, &crate::solid::Solid)> = placed.iter().map(|(n, s)| (n.as_str(), s)).collect();
+            let others: Vec<(&str, &crate::solid::Solid)> = before_parts.iter().map(|(n, s)| (n.as_str(), &**s)).collect();
+            let id_of = |s: &str| -> Option<PartId> {
+                let (f, i) = s.split_once('/')?;
+                Some(PartId::new(FeatureId(f.parse().ok()?), i.parse().ok()?))
+            };
+            for hit in crate::pcb::fit::collisions(&comps, &others, &frame) {
+                if let (Some(a), Some(b)) = (id_of(&hit.component), id_of(&hit.other)) {
+                    out.collisions.push((a, b, hit.depth));
+                }
             }
         }
         self.kernel.release(body);
@@ -366,6 +390,12 @@ impl Rebuilder {
                 self.kernel.release(b);
             }
             return Err(e);
+        }
+        // The components in the way of a part before the feature (by their default names here;
+        // the app names them as its Parts list does).
+        let name = |p: PartId| next.parts.iter().find(|x| x.part.id == p).map(|x| x.part.name.clone()).unwrap_or_default();
+        for (a, b, depth) in &out.collisions {
+            warnings.push(format!("{} runs into {} (≈{depth:.2} mm)", name(*a), name(*b)));
         }
         let mut all = (*next.derived).clone();
         all.insert(id, out);

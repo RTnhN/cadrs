@@ -70,6 +70,7 @@ pub fn acdc_module(id: &str, l: f64, w: f64, h: f64, pitch: f64, color: [u8; 3])
     f
 }
 
+#[allow(clippy::too_many_arguments)]
 fn place(id: Uuid, mut fp: Footprint, reference: &str, value: &str, at: (f64, f64), angle: f64, side: Side, nets: &[(&str, &str)]) -> PlacedFootprint {
     if let Some(r) = fp.field_mut(fields::REFERENCE) {
         r.text.text.text = reference.into();

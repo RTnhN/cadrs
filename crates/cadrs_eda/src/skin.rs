@@ -72,6 +72,52 @@ pub fn board_skin(board: &Board, side: Side, px_per_mm: f32, max_px: u32) -> Opt
     Some(Skin { rgba, width: pw, height: ph, bounds })
 }
 
+/// A draw list rasterised over `bounds` at `px_per_mm` (at most `max_px` on the longer side),
+/// transparent where it draws nothing (its background is left out). With `clip`, only inside
+/// that region (the board's area) is kept.
+pub fn raster(list: &crate::render::DrawList, bounds: Bounds, px_per_mm: f32, max_px: u32, clip: Option<&crate::poly::Region>) -> Option<Skin> {
+    let (w, h) = (bounds.size().w as f64 / 1e6, bounds.size().h as f64 / 1e6);
+    if w <= 0.0 || h <= 0.0 {
+        return None;
+    }
+    let scale = px_per_mm.min(max_px as f32 / w.max(h) as f32);
+    let (pw, ph) = (((w as f32 * scale).ceil() as u32).max(1), ((h as f32 * scale).ceil() as u32).max(1));
+    let mut d = list.clone();
+    d.background = [0, 0, 0, 0];
+    d.bounds = Some(bounds);
+    let tree = usvg::Tree::from_str(&crate::render::to_svg(&d), &usvg::Options::default()).ok()?;
+    let mut pix = tiny_skia::Pixmap::new(pw, ph)?;
+    let k = pw as f32 / tree.size().width();
+    resvg::render(&tree, tiny_skia::Transform::from_scale(k, k), &mut pix.as_mut());
+    if let Some(region) = clip {
+        let mm = |v: Nm| v as f64 / 1e6;
+        let (x0, y1) = (mm(bounds.min.x), mm(bounds.max.y));
+        let to_px = |p: crate::units::Pt| (((mm(p.x) - x0) * pw as f64 / w) as f32, ((y1 - mm(p.y)) * ph as f64 / h) as f32);
+        let mut path = tiny_skia::PathBuilder::new();
+        for ring in region {
+            for (i, p) in ring.iter().enumerate() {
+                let (x, y) = to_px(*p);
+                if i == 0 { path.move_to(x, y) } else { path.line_to(x, y) }
+            }
+            path.close();
+        }
+        if let Some(path) = path.finish() {
+            let mut mask = tiny_skia::Mask::new(pw, ph)?;
+            mask.fill_path(&path, tiny_skia::FillRule::EvenOdd, true, tiny_skia::Transform::identity());
+            pix.apply_mask(&mask);
+        }
+    }
+    let rgba: Vec<u8> = pix
+        .pixels()
+        .iter()
+        .flat_map(|p| {
+            let c = p.demultiply();
+            [c.red(), c.green(), c.blue(), c.alpha()]
+        })
+        .collect();
+    Some(Skin { rgba, width: pw, height: ph, bounds })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -95,6 +141,12 @@ mod tests {
         assert_eq!(alpha(50, 150), 255);
         assert_eq!(alpha(150, 50), 0);
         assert!(s.png().is_some_and(|p| p.starts_with(&[0x89, b'P', b'N', b'G'])));
+        // A draw list: clear where it draws nothing.
+        let list = crate::render::DrawList { background: [9, 9, 9, 255], areas: vec![crate::render::Area { color: [200, 0, 0, 255], z: 0, tris: vec![[0.0, 0.0], [10e6, 0.0], [0.0, 10e6]] }], ..Default::default() };
+        let r = raster(&list, s.bounds, 10.0, 4096, None).unwrap();
+        let a = |x: u32, y: u32| r.rgba[((y * r.width + x) * 4 + 3) as usize];
+        assert_eq!(a(20, 180), 255);
+        assert_eq!(a(180, 20), 0);
         // Capped size.
         let small = board_skin(&b, Side::Bottom, 10.0, 64).unwrap();
         assert_eq!(small.width, 64);

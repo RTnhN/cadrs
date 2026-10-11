@@ -1,0 +1,614 @@
+//! Fitting a board into the parts around it while its layout is edited in a Part Studio
+//! (`docs/PCB_IN_PART_STUDIO.md` §7.3; the geometry is [`cadrs_core::pcb::fit`]):
+//!
+//! - **The parts around** (on by default, the bar's "Parts around"): what of the Part Studio's
+//!   other parts lies within the heights the board's components take, outlined in cyan on the
+//!   board's face, and the round features standing square to it (a plug's pins, a hole) marked
+//!   with their axes.
+//! - **Snap** (on by default): a footprint being moved snaps its pads onto those axes (a wire pad
+//!   onto a plug's pin) and the edges of its part's shadow onto the outlines (a module up against
+//!   a wall), exactly, off the grid; the snap is marked.
+//! - **Room** while moving: the free distance from the part to what is around it along ±x and
+//!   ±y of the board, as dimension lines with their values; the part's shadow outlined red, and
+//!   "In the way", where it runs into something at its heights.
+//! - **Align**: pick an entity of a component (a face, an edge, a pin's axis), then a target in
+//!   the Part Studio: the footprint moves in the board's plane so they meet
+//!   ([`cadrs_core::pcb::fit::align`]), one undo step.
+//! - **Keep-outs**: keep-out areas on the layout (no footprints) where the parts around stand —
+//!   on the top side over the board, on the bottom side under it — so the layout keeps clear of
+//!   them in the PCB Studio too, where its DRC checks footprints against them.
+//!
+//! Names: `board-fit-context`, `board-fit-snap`, `board-fit-align`, `board-fit-keepouts` (the
+//! bar's buttons), `board-fit-status` (Align's prompt), `board-gap-{px,nx,py,ny}` (the room's
+//! values), `board-fit-collision`.
+
+use std::hash::{Hash, Hasher};
+
+use bevy::prelude::*;
+use cadrs_core::pcb::fit::{self, Entity as FitEntity};
+use cadrs_core::{PartId, Solid};
+use cadrs_eda::poly::Region;
+use cadrs_eda::units::Pt;
+use cadrs_sketch::PlaneFrame;
+
+use crate::board_in_studio::{LIFT, component_parts};
+use crate::parts::PartCache;
+use crate::AppState;
+
+pub struct BoardFitPlugin;
+
+impl Plugin for BoardFitPlugin {
+    fn build(&self, app: &mut App) {
+        app.init_resource::<FitState>()
+            .init_gizmo_group::<FitGizmos>()
+            .add_systems(Startup, configure_gizmos)
+            .add_systems(Update, (sync_context, snap_move).chain().after(crate::board_in_studio::navigate3d).before(crate::eda::navigate).run_if(in_state(AppState::Document)))
+            .add_systems(Update, (room, draw_fit, sync_labels).chain().after(crate::parts::PartsSet).run_if(in_state(AppState::Document)))
+            .add_observer(on_fit_button)
+            .add_systems(OnExit(AppState::Document), |mut s: ResMut<FitState>| *s = FitState::default());
+    }
+}
+
+/// The fit lines: drawn over the board, 2 px.
+#[derive(Default, Reflect, GizmoConfigGroup)]
+pub struct FitGizmos;
+
+fn configure_gizmos(mut store: ResMut<GizmoConfigStore>) {
+    let (c, _) = store.config_mut::<FitGizmos>();
+    c.line.width = 2.0;
+    c.depth_bias = -0.5;
+}
+
+/// The Align tool's step.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub enum AlignStep {
+    #[default]
+    Off,
+    /// Pick the component's entity.
+    From,
+    /// Pick the target: the component's footprint and its entity.
+    To(uuid::Uuid, FitEntity),
+}
+
+/// The parts around the edited board copy, worked out once per rebuild and board placement.
+#[derive(Clone, Debug, Default)]
+pub struct Context {
+    key: u64,
+    /// The board frame and thickness it was made for.
+    pub frame: Option<PlaneFrame>,
+    pub thickness: f64,
+    /// The heights (board frame) the components take.
+    pub slab: (f64, f64),
+    /// The parts around within those heights, projected onto the board (layout nm).
+    pub around: Region,
+    /// Round features standing square to the board: their place (layout mm) and radius.
+    pub axes: Vec<([f64; 2], f64)>,
+    /// The parts around (for the room at a component's own heights).
+    others: Vec<PartId>,
+}
+
+/// While a footprint is moved: its part's shadow where it started (layout nm), what is around at
+/// its heights, and the layout point the footprint started at.
+#[derive(Clone, Debug)]
+struct Moving {
+    fp: uuid::Uuid,
+    shadow: Region,
+    blockers: Region,
+    start: Pt,
+}
+
+/// The room's reading this frame: per direction (+x, −x, +y, −y) where its line starts and ends
+/// (layout mm) and the distance; whether the part is in the way of something.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Room {
+    pub gaps: Vec<(usize, [f64; 2], [f64; 2], f64)>,
+    pub colliding: bool,
+    /// The shadow as it is now (layout nm), for the red outline.
+    pub shadow: Region,
+}
+
+#[derive(Resource, Debug, Clone)]
+pub struct FitState {
+    pub show: bool,
+    pub snap: bool,
+    pub align: AlignStep,
+    pub context: Context,
+    moving: Option<Moving>,
+    pub room: Option<Room>,
+    /// Where the moved footprint snapped (layout mm), for its mark.
+    pub snapped: Option<[f64; 2]>,
+}
+
+impl Default for FitState {
+    fn default() -> Self {
+        FitState { show: true, snap: true, align: AlignStep::Off, context: Context::default(), moving: None, room: None, snapped: None }
+    }
+}
+
+/// The edited board copy's parts (its board and components).
+fn own_parts(cache: &PartCache, host: &crate::eda::PlaneHost) -> Vec<PartId> {
+    let Some(out) = cache.derived.get(&host.target.feature) else { return vec![] };
+    let mut v = component_parts(out, host.target.copy);
+    if let Some(b) = out.boards.get(host.target.copy) {
+        v.push(b.part);
+    }
+    v
+}
+
+/// Works out the parts around the edited board (see [`Context`]) when the parts or the board's
+/// place change.
+fn sync_context(eda: Res<crate::eda::Eda2d>, cache: Res<PartCache>, mut state: ResMut<FitState>) {
+    let Some(host) = eda.plane().copied() else {
+        if state.context.frame.is_some() {
+            state.context = Context::default();
+        }
+        return;
+    };
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    (cache.generation, host.target.feature, host.target.copy).hash(&mut h);
+    format!("{:?}", host.frame).hash(&mut h);
+    let key = h.finish();
+    if state.context.key == key && state.context.frame.is_some() {
+        return;
+    }
+    let own = own_parts(&cache, &host);
+    let comps: Vec<&Solid> = own.iter().filter_map(|p| cache.part(*p)).map(|p| &*p.solid).collect();
+    // The heights the components take, and the board's own.
+    let (mut z0, mut z1) = (0.0f64, host.thickness);
+    for s in &comps {
+        if let Some((lo, hi)) = fit::bounds_in(&host.frame, s) {
+            z0 = z0.min(lo[2]);
+            z1 = z1.max(hi[2]);
+        }
+    }
+    let others: Vec<&cadrs_core::Part> = cache.shown().filter(|p| !own.contains(&p.id)).collect();
+    let solids: Vec<&Solid> = others.iter().map(|p| &*p.solid).collect();
+    let around = fit::section(&solids, &host.frame, z0, z1, None);
+    let axes = fit::axes(&solids, &host.frame, z0, z1);
+    state.context = Context { key, frame: Some(host.frame), thickness: host.thickness, slab: (z0, z1), around, axes, others: others.iter().map(|p| p.id).collect() };
+}
+
+/// The bounds of a region (layout nm).
+fn bounds(r: &Region) -> Option<cadrs_eda::units::Bounds> {
+    r.iter().flatten().fold(None, |acc, p| Some(cadrs_eda::units::Bounds::union(acc, cadrs_eda::units::Bounds::of(*p))))
+}
+
+/// How near (mm at the board) a pointer must come to snap: 12 px.
+fn snap_reach(world: &World) -> f64 {
+    let eda = world.resource::<crate::eda::Eda2d>();
+    let key = eda.0;
+    let scale = key.and_then(|k| world.resource::<crate::eda::EdaUi>().views.get(&k)).map_or(4.0, |v| v.0.scale);
+    12.0 / scale.max(1e-6)
+}
+
+/// While a footprint is moved on the board in the view: where it snaps (see the module docs),
+/// handed to the Layout's tools as their exact point ([`crate::eda::layout_tools::LayoutState`]).
+fn snap_move(world: &mut World) {
+    let host = world.resource::<crate::eda::Eda2d>().plane().copied();
+    let moving = world.resource::<crate::eda::layout_tools::LayoutState>().moving.clone();
+    let (Some(host), Some(m)) = (host, moving) else {
+        let mut st = world.resource_mut::<FitState>();
+        st.moving = None;
+        st.snapped = None;
+        world.resource_mut::<crate::eda::layout_tools::LayoutState>().exact = None;
+        return;
+    };
+    let Some(layout) = crate::derived_ui::derived_in_active(world, host.target.feature).and_then(|d| d.board).map(|b| b.layout) else { return };
+    let Some(fp) = layout.footprints.iter().find(|f| f.id == m.fp).cloned() else { return };
+    // The part's shadow and what is around at its heights, once per move.
+    if world.resource::<FitState>().moving.as_ref().is_none_or(|x| x.fp != m.fp) {
+        let cache = world.resource::<PartCache>();
+        let part = cache.derived.get(&host.target.feature).and_then(|o| o.footprints.iter().find(|(p, f)| *f == m.fp && component_parts(o, host.target.copy).contains(p))).and_then(|(p, _)| cache.part(*p));
+        let (shadow, blockers) = match part {
+            Some(p) => {
+                let shadow = fit::footprint_of(&p.solid, &host.frame);
+                let (lo, hi) = fit::bounds_in(&host.frame, &p.solid).map_or((0.0, 0.0), |(lo, hi)| (lo[2], hi[2]));
+                let others: Vec<&Solid> = world.resource::<FitState>().context.others.iter().filter_map(|id| cache.part(*id)).map(|p| &*p.solid).collect();
+                // Inside its heights: a part only touching it isn't in the way.
+                (shadow, fit::section(&others, &host.frame, lo + 1e-3, hi - 1e-3, None))
+            }
+            None => (Region::new(), Region::new()),
+        };
+        world.resource_mut::<FitState>().moving = Some(Moving { fp: m.fp, shadow, blockers, start: fp.placement.at });
+    }
+    if !world.resource::<FitState>().snap {
+        world.resource_mut::<FitState>().snapped = None;
+        world.resource_mut::<crate::eda::layout_tools::LayoutState>().exact = None;
+        return;
+    }
+    let at = world.resource::<crate::eda::EdaPointer>().at;
+    let reach = snap_reach(world);
+    let st = world.resource::<FitState>().clone();
+    let Some(mv) = st.moving.clone() else { return };
+    let mm = cadrs_eda::units::to_mm;
+    // How far the footprint has moved, unsnapped (nm).
+    let raw = at - m.from;
+    // 1. A pad onto an axis (the nearest within reach).
+    let mut best: Option<(f64, [f64; 2], [f64; 2])> = None;
+    for pad in &fp.footprint.pads {
+        let c = fp.placement.apply(pad.at) + raw;
+        let c = [mm(c.x), mm(c.y)];
+        for (a, _) in &st.context.axes {
+            let d = (a[0] - c[0]).hypot(a[1] - c[1]);
+            if d < reach && best.is_none_or(|b| d < b.0) {
+                best = Some((d, [a[0] - c[0], a[1] - c[1]], *a));
+            }
+        }
+    }
+    let (fix, mark) = match best {
+        Some((_, fix, mark)) => (Some(fix), Some(mark)),
+        // 2. The shadow's sides onto the outlines' corners, each way on its own.
+        None => match bounds(&mv.shadow) {
+            Some(bb) => {
+                let (x0, x1, y0, y1) = (mm(bb.min.x + raw.x), mm(bb.max.x + raw.x), mm(bb.min.y + raw.y), mm(bb.max.y + raw.y));
+                let mut fx: Option<f64> = None;
+                let mut fy: Option<f64> = None;
+                for p in st.context.around.iter().flatten() {
+                    let (px, py) = (mm(p.x), mm(p.y));
+                    for e in [x0, x1] {
+                        let d = px - e;
+                        if d.abs() < reach && fx.is_none_or(|f| d.abs() < f.abs()) {
+                            fx = Some(d);
+                        }
+                    }
+                    for e in [y0, y1] {
+                        let d = py - e;
+                        if d.abs() < reach && fy.is_none_or(|f| d.abs() < f.abs()) {
+                            fy = Some(d);
+                        }
+                    }
+                }
+                ((fx.is_some() || fy.is_some()).then(|| [fx.unwrap_or(0.0), fy.unwrap_or(0.0)]), None)
+            }
+            None => (None, None),
+        },
+    };
+    let exact = fix.map(|f| Pt::new(at.x + cadrs_eda::units::mm(f[0]), at.y + cadrs_eda::units::mm(f[1])));
+    world.resource_mut::<FitState>().snapped = mark;
+    world.resource_mut::<crate::eda::layout_tools::LayoutState>().exact = exact;
+}
+
+/// The room around the moved part this frame (see [`Room`]).
+fn room(eda: Res<crate::eda::Eda2d>, preview: Res<crate::eda::Preview>, mut state: ResMut<FitState>) {
+    let (Some(_), Some(mv)) = (eda.plane(), state.moving.clone()) else {
+        if state.room.is_some() {
+            state.room = None;
+        }
+        return;
+    };
+    // How far the footprint has moved in the preview (a turn or a flip isn't followed).
+    let now = preview.get().and_then(|d| d.board.footprints.iter().find(|f| f.id == mv.fp)).map(|f| f.placement.at);
+    let d = now.map_or(Pt::ZERO, |p| p - mv.start);
+    let shadow: Region = mv.shadow.iter().map(|r| r.iter().map(|p| *p + d).collect()).collect();
+    let mut room = Room { colliding: cadrs_eda::poly::overlaps(&shadow, &mv.blockers), ..Default::default() };
+    if let Some(bb) = bounds(&shadow) {
+        let g = fit::gaps(&shadow, &mv.blockers, 200.0);
+        let mm = cadrs_eda::units::to_mm;
+        let (cx, cy) = (mm((bb.min.x + bb.max.x) / 2), mm((bb.min.y + bb.max.y) / 2));
+        let starts = [[mm(bb.max.x), cy], [mm(bb.min.x), cy], [cx, mm(bb.max.y)], [cx, mm(bb.min.y)]];
+        let dirs = [[1.0, 0.0], [-1.0, 0.0], [0.0, 1.0], [0.0, -1.0]];
+        let colliding = room.colliding;
+        for (i, gap) in g.iter().enumerate().filter(|_| !colliding) {
+            if let Some(v) = gap.filter(|v| *v > 1e-3) {
+                let s = starts[i];
+                room.gaps.push((i, s, [s[0] + dirs[i][0] * v, s[1] + dirs[i][1] * v], v));
+            }
+        }
+    }
+    room.shadow = shadow;
+    if state.room.as_ref() != Some(&room) {
+        state.room = Some(room);
+    }
+}
+
+/// A layout point (mm) on the board's top face, a little over the layout, in the Part Studio.
+fn world_at(c: &Context, x: f64, y: f64) -> Vec3 {
+    let f = c.frame.unwrap_or(PlaneFrame { origin: [0.0; 3], u: [1.0, 0.0, 0.0], v: [0.0, 1.0, 0.0] });
+    let n = f.normal();
+    let z = c.thickness + 2.0 * LIFT;
+    Vec3::new(
+        (f.origin[0] + f.u[0] * x + f.v[0] * y + n[0] * z) as f32,
+        (f.origin[1] + f.u[1] * x + f.v[1] * y + n[1] * z) as f32,
+        (f.origin[2] + f.u[2] * x + f.v[2] * y + n[2] * z) as f32,
+    )
+}
+
+const AROUND: Color = Color::srgb(0.10, 0.80, 0.95);
+const ROOM: Color = Color::srgb(1.0, 0.62, 0.10);
+const IN_THE_WAY: Color = Color::srgb(0.95, 0.15, 0.15);
+
+/// Draws the parts around, the axes, the snap mark, the room and the collision.
+fn draw_fit(eda: Res<crate::eda::Eda2d>, state: Res<FitState>, mut g: Gizmos<FitGizmos>) {
+    if eda.plane().is_none() || state.context.frame.is_none() {
+        return;
+    }
+    let c = &state.context;
+    let mm = cadrs_eda::units::to_mm;
+    if state.show {
+        for ring in &c.around {
+            let pts: Vec<Vec3> = ring.iter().chain(ring.first()).map(|p| world_at(c, mm(p.x), mm(p.y))).collect();
+            g.linestrip(pts, AROUND);
+        }
+        for (a, r) in &c.axes {
+            let n = 24;
+            let pts: Vec<Vec3> = (0..=n).map(|i| {
+                let t = std::f64::consts::TAU * i as f64 / n as f64;
+                world_at(c, a[0] + r * t.cos(), a[1] + r * t.sin())
+            }).collect();
+            g.linestrip(pts, AROUND);
+            g.line(world_at(c, a[0] - r * 1.6, a[1]), world_at(c, a[0] + r * 1.6, a[1]), AROUND);
+            g.line(world_at(c, a[0], a[1] - r * 1.6), world_at(c, a[0], a[1] + r * 1.6), AROUND);
+        }
+    }
+    if let Some(m) = state.snapped {
+        for k in 0..4 {
+            let t = std::f64::consts::FRAC_PI_2 * k as f64 + std::f64::consts::FRAC_PI_4;
+            g.line(world_at(c, m[0], m[1]), world_at(c, m[0] + 1.2 * t.cos(), m[1] + 1.2 * t.sin()), ROOM);
+        }
+    }
+    if let Some(room) = &state.room {
+        for (_, a, b, _) in &room.gaps {
+            g.line(world_at(c, a[0], a[1]), world_at(c, b[0], b[1]), ROOM);
+            // End ticks across the line.
+            let (dx, dy) = (b[0] - a[0], b[1] - a[1]);
+            let l = dx.hypot(dy).max(1e-9);
+            let (nx, ny) = (-dy / l * 0.6, dx / l * 0.6);
+            for p in [a, b] {
+                g.line(world_at(c, p[0] - nx, p[1] - ny), world_at(c, p[0] + nx, p[1] + ny), ROOM);
+            }
+        }
+        if room.colliding {
+            for ring in &room.shadow {
+                let pts: Vec<Vec3> = ring.iter().chain(ring.first()).map(|p| world_at(c, mm(p.x), mm(p.y))).collect();
+                g.linestrip(pts, IN_THE_WAY);
+            }
+        }
+    }
+}
+
+/// A value label of the room (or the collision's), placed over the view.
+#[derive(Component)]
+struct FitLabel(usize);
+
+/// Keeps a label at the middle of each room line ("4.20 mm") and "In the way" at the part.
+fn sync_labels(world: &mut World) {
+    let state = world.resource::<FitState>().clone();
+    let view = world.resource::<crate::viewport::ViewportView>().view;
+    let rect = *world.resource::<crate::viewport::ViewportRect>();
+    // (index, text, screen position, colour)
+    let mut want: Vec<(usize, String, Vec2, Color)> = vec![];
+    if let (Some(room), Some(_)) = (&state.room, state.context.frame) {
+        for (i, a, b, v) in &room.gaps {
+            let mid = world_at(&state.context, (a[0] + b[0]) / 2.0, (a[1] + b[1]) / 2.0);
+            want.push((*i, format!("{v:.2} mm"), rect.to_screen(view.project(mid)), ROOM));
+        }
+        if room.colliding
+            && let Some(bb) = bounds(&room.shadow)
+        {
+            let mm = cadrs_eda::units::to_mm;
+            let p = world_at(&state.context, mm((bb.min.x + bb.max.x) / 2), mm(bb.max.y));
+            want.push((4, "In the way".into(), rect.to_screen(view.project(p)), IN_THE_WAY));
+        }
+    }
+    let names = ["board-gap-px", "board-gap-nx", "board-gap-py", "board-gap-ny", "board-fit-collision"];
+    let mut q = world.query::<(Entity, &FitLabel)>();
+    let have: Vec<(Entity, usize)> = q.iter(world).map(|(e, l)| (e, l.0)).collect();
+    for (e, i) in &have {
+        if !want.iter().any(|w| w.0 == *i) {
+            world.entity_mut(*e).despawn();
+        }
+    }
+    let theme = world.resource::<cadrs_ui::Theme>().clone();
+    for (i, text, at, color) in want {
+        let left = Val::Px(at.x + 6.0);
+        let top = Val::Px(at.y - 8.0);
+        match have.iter().find(|h| h.1 == i) {
+            Some((e, _)) => {
+                if let Some(mut n) = world.get_mut::<Node>(*e) {
+                    n.left = left;
+                    n.top = top;
+                }
+                let child = world.get::<Children>(*e).and_then(|c| c.first().copied());
+                if let Some(c) = child
+                    && let Some(mut t) = world.get_mut::<Text>(c)
+                    && t.0 != text
+                {
+                    t.0 = text;
+                }
+            }
+            None => {
+                world.spawn((
+                    Name::new(names[i]),
+                    FitLabel(i),
+                    Node { position_type: PositionType::Absolute, left, top, padding: UiRect::axes(Val::Px(4.0), Val::Px(1.0)), border_radius: BorderRadius::all(Val::Px(3.0)), ..default() },
+                    BackgroundColor(theme.background.with_alpha(0.9)),
+                    GlobalZIndex(20),
+                    Pickable::IGNORE,
+                    DespawnOnExit(AppState::Document),
+                    children![(theme.text(text, theme.font_sm, bevy::text::FontWeight::BOLD, color), Pickable::IGNORE)],
+                ));
+            }
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------------------------
+// The bar's buttons, Align and Keep-outs
+
+/// The edit bar's fit buttons (see the module docs), as (name, label, tooltip).
+pub const BUTTONS: [(&str, &str, &str); 4] = [
+    ("board-fit-context", "Parts around", "Show the parts around the board's components, and the pins and holes square to it"),
+    ("board-fit-snap", "Snap", "Snap a moved footprint's pads onto pins and its part's edges onto the parts around"),
+    ("board-fit-align", "Align", "Move a footprint so an entity of its part meets a target: pick the part's face, edge or pin, then the target"),
+    ("board-fit-keepouts", "Keep-outs", "Keep-out areas on the layout where the parts around stand"),
+];
+
+/// Whether a fit button shows as on.
+pub fn is_on(state: &FitState, name: &str) -> bool {
+    match name {
+        "board-fit-context" => state.show,
+        "board-fit-snap" => state.snap,
+        "board-fit-align" => state.align != AlignStep::Off,
+        _ => false,
+    }
+}
+
+fn on_fit_button(a: On<bevy::ui_widgets::Activate>, q: Query<&Name>, mut commands: Commands) {
+    let Ok(n) = q.get(a.entity) else { return };
+    let name = n.as_str().to_string();
+    match name.as_str() {
+        "board-fit-context" => commands.queue(|w: &mut World| {
+            let mut s = w.resource_mut::<FitState>();
+            s.show = !s.show;
+        }),
+        "board-fit-snap" => commands.queue(|w: &mut World| {
+            let mut s = w.resource_mut::<FitState>();
+            s.snap = !s.snap;
+        }),
+        "board-fit-align" => commands.queue(|w: &mut World| {
+            let mut s = w.resource_mut::<FitState>();
+            s.align = if s.align == AlignStep::Off { AlignStep::From } else { AlignStep::Off };
+        }),
+        "board-fit-keepouts" => commands.queue(keepouts_from_parts),
+        _ => {}
+    }
+}
+
+/// What Align says it waits for.
+pub fn align_prompt(state: &FitState) -> Option<&'static str> {
+    match state.align {
+        AlignStep::Off => None,
+        AlignStep::From => Some("Align: pick a face, edge or pin of a component"),
+        AlignStep::To(..) => Some("Align: pick where it goes (a face, edge, pin or hole)"),
+    }
+}
+
+/// The entity a pick is, for Align: a planar face's plane, a round face's axis, a circular
+/// edge's axis (its centre, square to its plane), another edge's middle, a vertex.
+fn entity_of(part: &cadrs_core::Part, pick: &crate::viewport::Pick) -> Option<FitEntity> {
+    use crate::viewport::Pick;
+    match pick {
+        Pick::Face(_, f) => {
+            let face = part.solid.face(f)?;
+            if let Some(p) = face.plane {
+                return Some(FitEntity::Plane(p.origin, p.normal()));
+            }
+            face.axis.map(|(p, d)| FitEntity::Axis(p, d)).or(face.center.map(FitEntity::Point))
+        }
+        Pick::Edge(_, e) => {
+            let edge = part.solid.edge(e)?;
+            match edge.circle {
+                Some(c) => Some(FitEntity::Axis(c.center, c.normal)),
+                // A mesh part's rim: the axis of the round face it bounds.
+                None => e.faces.iter().find_map(|f| part.solid.face(f)?.axis).map(|(p, d)| FitEntity::Axis(p, d)).or(Some(FitEntity::Point(edge.midpoint()))),
+            }
+        }
+        Pick::Vertex(_, v) => part.solid.vertex(v).map(|v| FitEntity::Point(v.point)),
+        _ => None,
+    }
+}
+
+/// A press in the view while Align waits for a pick: the first on a component of the edited
+/// board, the second anywhere; then the footprint moves (one undo step). Returns whether Align
+/// took the press.
+pub fn align_press(world: &mut World, offset: Vec2) -> bool {
+    let step = world.resource::<FitState>().align;
+    if step == AlignStep::Off {
+        return false;
+    }
+    let Some(host) = world.resource::<crate::eda::Eda2d>().plane().copied() else { return false };
+    let view = world.resource::<crate::viewport::ViewportView>().view;
+    // The target can be an axis mark of the parts around (a pin under the board).
+    if let AlignStep::To(fp, from) = step {
+        let c = world.resource::<FitState>().context.clone();
+        let mark = c.axes.iter().find(|(a, r)| {
+            let at = view.project(world_at(&c, a[0], a[1]));
+            at.distance(offset) < 12.0_f32.max((*r as f32) / view.scale.max(1e-6))
+        });
+        if let (Some((a, _)), Some(frame)) = (mark, c.frame) {
+            let n = frame.normal();
+            let p = [frame.origin[0] + frame.u[0] * a[0] + frame.v[0] * a[1], frame.origin[1] + frame.u[1] * a[0] + frame.v[1] * a[1], frame.origin[2] + frame.u[2] * a[0] + frame.v[2] * a[1]];
+            finish_align(world, host, fp, from, FitEntity::Axis(p, n));
+            return true;
+        }
+    }
+    let filter = crate::parts::PickFilter { faces: true, edges: true, ..crate::parts::PickFilter::none() };
+    let cache = world.resource::<PartCache>();
+    let Some(pick) = crate::parts::pick_scene(cache, &view, offset, filter) else { return true };
+    let part_id = match pick {
+        crate::viewport::Pick::Face(p, _) | crate::viewport::Pick::Edge(p, _) | crate::viewport::Pick::Vertex(p, _) => p,
+        _ => return true,
+    };
+    let Some(part) = cache.part(part_id).cloned() else { return true };
+    let Some(entity) = entity_of(&part, &pick) else { return true };
+    match step {
+        AlignStep::From => {
+            let out = cache.derived.get(&host.target.feature);
+            let comps = out.map(|o| component_parts(o, host.target.copy)).unwrap_or_default();
+            let fp = out.and_then(|o| o.footprints.iter().find(|(p, _)| *p == part_id && comps.contains(p)).map(|(_, f)| *f));
+            match fp {
+                Some(fp) => world.resource_mut::<FitState>().align = AlignStep::To(fp, entity),
+                None => crate::eda::ui::toast(world, "Pick a face, edge or pin of one of the board's components first"),
+            }
+        }
+        AlignStep::To(fp, from) => finish_align(world, host, fp, from, entity),
+        AlignStep::Off => {}
+    }
+    true
+}
+
+/// Moves the footprint `fp` so `from` (on its part) meets `to` (one undo step), and ends Align.
+fn finish_align(world: &mut World, host: crate::eda::PlaneHost, fp: uuid::Uuid, from: FitEntity, to: FitEntity) {
+    world.resource_mut::<FitState>().align = AlignStep::Off;
+    match fit::align(from, to, &host.frame) {
+        Some(d) => {
+            let label = format!("Align {}", footprint_reference(world, host.target.feature, fp));
+            crate::eda::ui::commit(world, &label, |des| {
+                let i = cadrs_eda::board_edit::footprint_by_id(&des.board, fp).ok_or("The footprint is gone")?;
+                let to = des.board.footprints[i].placement.at + fit::delta(d);
+                cadrs_eda::board_edit::move_footprint(&mut des.board, i, to);
+                Ok(())
+            });
+        }
+        None => crate::eda::ui::toast(world, "They can't meet by moving the footprint on the board: pick a pin or hole square to the board, or faces square to it facing each other"),
+    }
+}
+
+fn footprint_reference(world: &World, feature: cadrs_core::FeatureId, fp: uuid::Uuid) -> String {
+    crate::derived_ui::derived_in_active(world, feature).and_then(|d| d.board).and_then(|b| b.layout.footprints.iter().find(|f| f.id == fp).map(|f| f.reference().to_string())).unwrap_or_else(|| "footprint".into())
+}
+
+/// Keep-outs (no footprints) on the layout where the parts around stand within the
+/// components' heights: on the top side where they are above the board, on the bottom side where
+/// they are below it (one undo step).
+pub fn keepouts_from_parts(world: &mut World) {
+    use cadrs_eda::layer::{Layer, LayerSet};
+    let Some(host) = world.resource::<crate::eda::Eda2d>().plane().copied() else { return };
+    let c = world.resource::<FitState>().context.clone();
+    let Some(layout) = crate::derived_ui::derived_in_active(world, host.target.feature).and_then(|d| d.board).map(|b| b.layout) else { return };
+    let cache = world.resource::<PartCache>();
+    let others: Vec<&Solid> = c.others.iter().filter_map(|id| cache.part(*id)).map(|p| &*p.solid).collect();
+    let board = cadrs_eda::outline::board_region(&layout);
+    let eps = 1e-3;
+    let sides = [
+        (fit::section(&others, &host.frame, host.thickness + eps, c.slab.1.max(host.thickness + eps), None), Layer::TopCopper),
+        (fit::section(&others, &host.frame, c.slab.0.min(-eps), -eps, None), Layer::BottomCopper),
+    ];
+    let mut areas: Vec<(Vec<Pt>, Layer)> = vec![];
+    for (region, layer) in sides {
+        let inside = cadrs_eda::poly::intersection(&region, &board);
+        areas.extend(inside.into_iter().filter(|r| cadrs_eda::poly::ring_area(r) > 1e12).map(|r| (r, layer)));
+    }
+    if areas.is_empty() {
+        crate::eda::ui::toast(world, "Nothing around stands over or under the board");
+        return;
+    }
+    let n = areas.len();
+    let rules = cadrs_eda::board::Keepout { footprints: true, ..Default::default() };
+    crate::eda::ui::commit(world, &format!("Keep-outs from the parts around ({n})"), |d| {
+        for (r, layer) in &areas {
+            cadrs_eda::zone::add_keepout(&mut d.board, LayerSet::of(&[*layer]), r.clone(), rules);
+        }
+        Ok(())
+    });
+}

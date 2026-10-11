@@ -258,7 +258,7 @@ impl Rebuilder {
             match p {
                 PathRef::Edge(r) => {
                     let (part, ids) = edge_ids(state, r).ok_or_else(lost)?;
-                    let body = part.body.ok_or("A part has no body")?;
+                    let body = part.body.ok_or_else(|| super::super::no_body(part))?;
                     for edge in ids {
                         out.push(PathCurve::Edge { body, edge });
                     }
@@ -553,13 +553,13 @@ impl Rebuilder {
             SplitType::Part => {
                 for p in &x.parts {
                     let part = state.part(*p).ok_or("A selected part no longer exists")?;
-                    bodies.push((*p, part.body.ok_or("A part has no body")?));
+                    bodies.push((*p, part.body.ok_or_else(|| super::super::no_body(part))?));
                 }
             }
             SplitType::Face => {
                 for f in &x.faces {
                     let (part, ids) = face_ids(state, f).ok_or("A face to split no longer exists")?;
-                    let body = part.body.ok_or("A part has no body")?;
+                    let body = part.body.ok_or_else(|| super::super::no_body(part))?;
                     match bodies.iter().position(|(p, _)| *p == part.part.id) {
                         Some(i) => faces[i].extend(ids),
                         None => {

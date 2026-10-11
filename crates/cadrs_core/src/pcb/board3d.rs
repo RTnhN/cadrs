@@ -82,14 +82,20 @@ pub enum BoardSeat {
     Top,
 }
 
-/// Which point of the board goes onto the location (with Base origin).
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+/// Which point of the board goes onto the Derived feature's location.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub enum BoardAnchor {
-    /// The middle of the outline's box.
-    #[default]
-    Center,
     /// The layout's origin (0, 0): a board made from a sketch has the sketch's coordinates.
+    #[default]
     Origin,
+    /// A fixed layout point (mm): where the outline's centre was when the board was derived,
+    /// so later outline edits don't move the board's parts in the Part Studio.
+    At { x: f64, y: f64 },
+    /// The middle of the outline's box as it is now (it moves when the outline changes).
+    Center,
+    /// A footprint's place (its origin): the board goes where that part must be, a connector
+    /// lined up with its mating part, say.
+    Footprint(Uuid),
 }
 
 /// A derived board's options.
@@ -109,6 +115,9 @@ pub struct BoardOptions {
     pub seat: BoardSeat,
     #[serde(default)]
     pub anchor: BoardAnchor,
+    /// Footprints placed off the board (waiting to be placed) come in too.
+    #[serde(default)]
+    pub off_board: bool,
 }
 
 fn yes() -> bool {
@@ -117,7 +126,7 @@ fn yes() -> bool {
 
 impl Default for BoardOptions {
     fn default() -> Self {
-        BoardOptions { view: BoardView::ThreeD, components: ComponentFilter::All, exclude: vec![], skins: true, seat: BoardSeat::Bottom, anchor: BoardAnchor::Center }
+        BoardOptions { view: BoardView::ThreeD, components: ComponentFilter::All, exclude: vec![], skins: true, seat: BoardSeat::Bottom, anchor: BoardAnchor::Origin, off_board: false }
     }
 }
 
@@ -126,23 +135,33 @@ pub fn thickness(b: &Board) -> f64 {
     to_mm(b.thickness)
 }
 
+/// The middle of the board outline's box (mm), the origin without an outline.
+pub fn outline_center(b: &Board) -> [f64; 2] {
+    let r = cadrs_eda::outline::board_region(b);
+    match r.iter().flatten().fold(None, |acc, p| Some(cadrs_eda::units::Bounds::union(acc, cadrs_eda::units::Bounds::of(*p)))) {
+        Some(bb) => [to_mm((bb.min.x + bb.max.x) / 2), to_mm((bb.min.y + bb.max.y) / 2)],
+        None => [0.0, 0.0],
+    }
+}
+
 /// The point (board frame) that goes onto the location: the anchor, on the seat face.
 pub fn anchor_point(b: &Board, o: &BoardOptions) -> [f64; 3] {
-    let (x, y) = match o.anchor {
-        BoardAnchor::Origin => (0.0, 0.0),
-        BoardAnchor::Center => {
-            let r = cadrs_eda::outline::board_region(b);
-            match r.iter().flatten().fold(None, |acc, p| Some(cadrs_eda::units::Bounds::union(acc, cadrs_eda::units::Bounds::of(*p)))) {
-                Some(bb) => (to_mm((bb.min.x + bb.max.x) / 2), to_mm((bb.min.y + bb.max.y) / 2)),
-                None => (0.0, 0.0),
-            }
-        }
+    let [x, y] = match o.anchor {
+        BoardAnchor::Origin => [0.0, 0.0],
+        BoardAnchor::At { x, y } => [x, y],
+        BoardAnchor::Center => outline_center(b),
+        BoardAnchor::Footprint(id) => b.footprints.iter().find(|f| f.id == id).map_or([0.0, 0.0], |f| [to_mm(f.placement.at.x), to_mm(f.placement.at.y)]),
     };
     let z = match o.seat {
         BoardSeat::Bottom => 0.0,
         BoardSeat::Top => thickness(b),
     };
     [x, y, z]
+}
+
+/// Whether a footprint sits on the board (its origin inside the outline).
+pub fn on_board(region: &cadrs_eda::poly::Region, f: &cadrs_eda::board::PlacedFootprint) -> bool {
+    cadrs_eda::poly::contains(region, f.placement.at)
 }
 
 /// A converted IDF loop as exact kernel curves (lines, arcs from the included angle, circles).
@@ -188,86 +207,182 @@ fn slot(c: [f64; 2], w: f64, h: f64, angle: f64) -> Loop {
     }
 }
 
-/// The board's plan as kernel regions (board frame, z = 0): the outline with its cut-outs and
-/// the holes through it, and warnings for holes left out (outside the board, or overlapping
-/// another hole or a cut-out's edge).
-pub fn board_profile(b: &Board) -> Result<(Vec<Region>, Vec<String>), String> {
+/// One curve of a board's plan (board frame, mm) and the stable key its side face is named by
+/// ([`board_face_names`]): an outline or cut-out segment by its geometry (so editing one
+/// segment renames only its face), a hole's wall by its footprint and pad (or its via).
+#[derive(Clone, Debug, PartialEq)]
+pub struct TaggedCurve {
+    pub curve: Curve2,
+    pub tag: u64,
+}
+
+/// The board's plan: kernel regions (board frame, z = 0) with the outline and its cut-outs and
+/// the holes through it, every curve with its tag, and warnings for holes left out.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct BoardPlan {
+    pub regions: Vec<Region>,
+    pub curves: Vec<TaggedCurve>,
+    pub warnings: Vec<String>,
+}
+
+/// The key of an outline or cut-out curve: its kind and ends (either way round), to 0.1 µm.
+fn segment_tag(c: &Curve2) -> u64 {
+    let q = |v: f64| (v * 1e4).round() as i64;
+    let key = match c {
+        Curve2::Line { a, b, .. } => {
+            let (p, r) = ((q(a.x), q(a.y)), (q(b.x), q(b.y)));
+            format!("line{:?}", if p <= r { (p, r) } else { (r, p) })
+        }
+        Curve2::Arc { center, radius, start_angle, sweep, .. } => {
+            let at = |t: f64| (q(center.x + radius * t.cos()), q(center.y + radius * t.sin()));
+            let (p, r) = (at(*start_angle), at(start_angle + sweep));
+            format!("arc{:?}{}{:?}", (q(center.x), q(center.y)), q(*radius), if p <= r { (p, r) } else { (r, p) })
+        }
+        Curve2::Circle { center, radius, .. } => format!("circle{:?}{}", (q(center.x), q(center.y)), q(*radius)),
+        other => format!("{other:?}"),
+    };
+    stable_hash(key.as_bytes())
+}
+
+/// The board's plan (see [`BoardPlan`]): holes of [`MIN_HOLE`] or more, those fully inside
+/// the board and clear of each other; footprints waiting off the board don't count.
+pub fn board_profile(b: &Board) -> Result<BoardPlan, String> {
     let loops = crate::pcb::design::board_outline_loops(b);
     let Some((outer, cuts)) = loops.split_first() else { return Err("The board has no closed outline".into()) };
-    let mut warnings = vec![];
     let region = cadrs_eda::outline::board_region(b);
-    let inside = |x: f64, y: f64, r: f64| {
+    let inside = |at: cadrs_eda::units::Pt, r: f64| {
         // The hole and 0.05 mm round it within the board area.
-        let disc = cadrs_eda::poly::circle(cadrs_eda::units::Pt::mm(x, y), cadrs_eda::units::mm(r + 0.05));
+        let disc = cadrs_eda::poly::circle(at, cadrs_eda::units::mm(r + 0.05));
         cadrs_eda::poly::area(&cadrs_eda::poly::difference(&disc, &region)) < 1e6
     };
+    let mut plan = BoardPlan::default();
+    let outer = idf_loop_to_kernel(outer);
+    plan.curves.extend(outer.curves.iter().map(|c| TaggedCurve { curve: c.clone(), tag: segment_tag(c) }));
     let mut holes: Vec<Loop> = cuts.iter().map(idf_loop_to_kernel).collect();
+    for l in &holes {
+        plan.curves.extend(l.curves.iter().map(|c| TaggedCurve { curve: c.clone(), tag: segment_tag(c) }));
+    }
+    // Every hole with what names it: (centre, size, angle, key).
+    let mut all: Vec<(cadrs_eda::units::Pt, cadrs_eda::units::Size, f64, String)> = Vec::new();
+    for f in &b.footprints {
+        for p in &f.footprint.pads {
+            if let Some(d) = p.drill {
+                all.push((f.placement.apply(p.at + d.offset.rotated(p.angle)), d.size, f.placement.apply_angle(p.angle), format!("pad{}{}", f.id, p.number)));
+            }
+        }
+    }
+    for v in &b.vias {
+        all.push((v.at, cadrs_eda::units::Size::new(v.drill, v.drill), 0.0, format!("via{}", v.id)));
+    }
     let mut placed: Vec<([f64; 2], f64)> = vec![];
     let mut dropped = 0;
-    for h in cadrs_eda::fab::holes(b) {
-        let (w, hh) = (to_mm(h.size.w), to_mm(h.size.h));
+    for (at, size, angle, key) in all {
+        let (w, hh) = (to_mm(size.w), to_mm(size.h));
         if w.min(hh) < MIN_HOLE {
             continue;
         }
-        let c = [to_mm(h.at.x), to_mm(h.at.y)];
+        let c = [to_mm(at.x), to_mm(at.y)];
         let r = w.max(hh) / 2.0;
         // A footprint waiting off the board: its holes aren't the board's.
-        let disc = cadrs_eda::poly::circle(h.at, cadrs_eda::units::mm(r));
+        let disc = cadrs_eda::poly::circle(at, cadrs_eda::units::mm(r));
         if cadrs_eda::poly::area(&cadrs_eda::poly::intersection(&disc, &region)) < 1e6 {
             continue;
         }
-        if !inside(c[0], c[1], r) || placed.iter().any(|(q, s)| (q[0] - c[0]).hypot(q[1] - c[1]) < r + s + 0.01) {
+        if !inside(at, r) || placed.iter().any(|(q, s)| (q[0] - c[0]).hypot(q[1] - c[1]) < r + s + 0.01) {
             dropped += 1;
             continue;
         }
         placed.push((c, r));
-        holes.push(if (w - hh).abs() < 1e-6 {
+        let l = if (w - hh).abs() < 1e-6 {
             Loop { curves: vec![Curve2::Circle { center: Point2::new(c[0], c[1]), radius: w / 2.0, source: None }] }
         } else {
-            slot(c, w, hh, h.angle)
-        });
+            slot(c, w, hh, angle)
+        };
+        for (i, curve) in l.curves.iter().enumerate() {
+            plan.curves.push(TaggedCurve { curve: curve.clone(), tag: stable_hash(format!("{key}/{i}").as_bytes()) });
+        }
+        holes.push(l);
     }
     if dropped > 0 {
-        warnings.push(format!("{dropped} hole{} not cut (outside the board or overlapping)", if dropped == 1 { "" } else { "s" }));
+        plan.warnings.push(format!("{dropped} hole{} not cut (overlapping another or the board's edge)", if dropped == 1 { "" } else { "s" }));
     }
-    Ok((vec![Region { outer: idf_loop_to_kernel(outer), holes, source: None }], warnings))
+    plan.regions = vec![Region { outer, holes, source: None }];
+    Ok(plan)
 }
 
-/// The board as a kernel solid in the board frame, and warnings.
-pub fn board_body(k: &mut dyn Kernel, b: &Board) -> Result<(BodyId, Vec<String>), String> {
-    let (regions, warnings) = board_profile(b)?;
+/// The board as a kernel solid in the board frame, its plan's curves, and warnings.
+pub fn board_body(k: &mut dyn Kernel, b: &Board) -> Result<(BodyId, Vec<TaggedCurve>, Vec<String>), String> {
+    let plan = board_profile(b)?;
     let t = thickness(b).max(1e-3);
-    let r = k.extrude(&Profile::new(Plane::top(), regions.clone()), Extent::Blind(t));
+    let r = k.extrude(&Profile::new(Plane::top(), plan.regions.clone()), Extent::Blind(t));
     match r {
-        Ok(r) if !r.bodies.is_empty() => Ok((r.bodies[0], warnings)),
+        Ok(r) if !r.bodies.is_empty() => Ok((r.bodies[0], plan.curves, plan.warnings)),
         // A hole the kernel refuses: try the outline alone, and say so.
         _ => {
-            let bare = Region { outer: regions[0].outer.clone(), holes: vec![], source: None };
+            let bare = Region { outer: plan.regions[0].outer.clone(), holes: vec![], source: None };
             let r = k.extrude(&Profile::new(Plane::top(), vec![bare]), Extent::Blind(t)).map_err(|e| format!("The board outline doesn't make a solid: {e}"))?;
             let body = r.bodies.into_iter().next().ok_or("The board outline doesn't make a solid")?;
-            let mut w = warnings;
+            let mut w = plan.warnings;
             w.push("The board's holes and cut-outs couldn't be cut".into());
-            Ok((body, w))
+            Ok((body, plan.curves, w))
         }
     }
 }
 
-/// Names for the board solid's faces (in the kernel's order) under `op`: the planar faces
-/// facing +z and −z in the board frame `m` maps to the world are the top and bottom caps, the
-/// rest are named by their place.
-pub fn board_face_names(k: &dyn Kernel, body: BodyId, op: OpId, up: Vector3<f64>) -> Result<Vec<FaceName>, String> {
+/// The distance from `p` to a plan curve (in the board's plane).
+fn curve_distance(c: &Curve2, p: Point2<f64>) -> f64 {
+    match c {
+        Curve2::Line { a, b, .. } => {
+            let d = b - a;
+            let t = ((p - a).dot(&d) / d.norm_squared().max(1e-300)).clamp(0.0, 1.0);
+            (p - (a + d * t)).norm()
+        }
+        Curve2::Arc { center, radius, .. } | Curve2::Circle { center, radius, .. } => ((p - center).norm() - radius).abs(),
+        _ => f64::MAX,
+    }
+}
+
+/// Names for the board solid's faces (in the kernel's order) under `op`, the body placed by
+/// `m` (board frame → where it is): the planar faces facing the board's +z and −z are its top
+/// and bottom caps; a side face is named after the plan curve it was swept from
+/// (`FaceOrigin::Side` with its tag, [`TaggedCurve`]), so adding a hole or moving an outline
+/// segment renames no other face; anything else by its place.
+pub fn board_face_names(k: &dyn Kernel, body: BodyId, op: OpId, m: &Motion, curves: &[TaggedCurve]) -> Result<Vec<FaceName>, String> {
     let faces = k.faces(body).map_err(|e| e.to_string())?;
-    let mut side = 0u32;
+    let back = m.inverse();
+    let up = m.linear * Vector3::z();
+    let to_board = |p: &Point3<f64>| {
+        let q = back.point(p);
+        Point2::new(q.x, q.y)
+    };
+    let mut other = 0u32;
     Ok(faces
         .iter()
         .map(|f| {
-            let n = f.plane.as_ref().map(|pl| pl.normal.dot(&up));
-            match n {
-                Some(d) if d > 0.999 => FaceName::new(op, FaceOrigin::Cap { region: 0, end: true }),
-                Some(d) if d < -0.999 => FaceName::new(op, FaceOrigin::Cap { region: 0, end: false }),
+            match f.plane.as_ref().map(|pl| pl.normal.dot(&up)) {
+                Some(d) if d > 0.999 => return FaceName::new(op, FaceOrigin::Cap { region: 0, end: true }),
+                Some(d) if d < -0.999 => return FaceName::new(op, FaceOrigin::Cap { region: 0, end: false }),
+                _ => {}
+            }
+            // A wall: the plan curve under its middle (a cylinder's by its axis and radius).
+            let found = match (&f.axis, f.radius) {
+                (Some(axis), Some(r)) => {
+                    let c = to_board(&axis.origin);
+                    curves.iter().find(|tc| match &tc.curve {
+                        Curve2::Arc { center, radius, .. } | Curve2::Circle { center, radius, .. } => (center - c).norm() < 1e-3 && (radius - r).abs() < 1e-3,
+                        _ => false,
+                    })
+                }
                 _ => {
-                    side += 1;
-                    FaceName::new(op, FaceOrigin::Imported { body: 0, face: side })
+                    let c = to_board(&f.center);
+                    curves.iter().filter(|tc| matches!(tc.curve, Curve2::Line { .. })).min_by(|a, b| curve_distance(&a.curve, c).total_cmp(&curve_distance(&b.curve, c))).filter(|tc| curve_distance(&tc.curve, c) < 1e-3)
+                }
+            };
+            match found {
+                Some(tc) => FaceName::new(op, FaceOrigin::Side { region: 0, curve: tc.tag }),
+                None => {
+                    other += 1;
+                    FaceName::new(op, FaceOrigin::Imported { body: 0, face: other })
                 }
             }
         })
@@ -298,7 +413,10 @@ fn solid_cache() -> &'static RwLock<HashMap<SolidKey, Arc<Solid>>> {
 /// body, placement in the footprint and opacity).
 fn footprint_solid(fp: &cadrs_eda::footprint::Footprint) -> Result<Option<Arc<Solid>>, String> {
     let Some(m) = crate::pcb::model::shown_model(fp) else { return Ok(None) };
-    let key = stable_hash(format!("{:?}{:?}{:?}{:?}{}{:?}", m.blob, m.offset, m.rotation, m.scale, m.opacity, m.body).as_bytes());
+    // Whether the file is loaded too: a model shown by its generated body until its file
+    // arrives is made again then.
+    let loaded = m.blob.as_ref().is_some_and(|h| crate::blobs::contains(h));
+    let key = stable_hash(format!("{:?}{loaded}{:?}{:?}{:?}{}{:?}", m.blob, m.offset, m.rotation, m.scale, m.opacity, m.body).as_bytes());
     if let Some(s) = solid_cache().read().ok().and_then(|c| c.get(&key).cloned()) {
         return Ok(Some(s));
     }
@@ -320,8 +438,9 @@ pub fn components(b: &Board, o: &BoardOptions) -> (Vec<Component>, Vec<String>) 
     let t = thickness(b);
     let mut out = vec![];
     let mut warnings = vec![];
+    let region = cadrs_eda::outline::board_region(b);
     for f in &b.footprints {
-        if !o.components.takes(f.placement.side) || o.exclude.contains(&f.id) {
+        if !o.components.takes(f.placement.side) || o.exclude.contains(&f.id) || !(o.off_board || on_board(&region, f)) {
             continue;
         }
         let reference = f.reference().to_string();
@@ -371,19 +490,25 @@ pub fn moved(s: &Solid, m: &Motion) -> Solid {
     crate::assembly::transform_solid(s, &pose)
 }
 
-fn skin_cache() -> &'static RwLock<HashMap<(u64, bool), Option<(String, [f64; 4])>>> {
-    static CACHE: OnceLock<RwLock<HashMap<(u64, bool), Option<(String, [f64; 4])>>>> = OnceLock::new();
+/// Each owner's (a Derived feature's) last skins, per side: the layout hash they were made for
+/// and the blob. Only the latest is kept: an older one's PNG leaves the blob cache.
+type SkinEntry = (u64, Option<(String, [f64; 4])>);
+
+fn skin_cache() -> &'static RwLock<HashMap<(u64, bool), SkinEntry>> {
+    static CACHE: OnceLock<RwLock<HashMap<(u64, bool), SkinEntry>>> = OnceLock::new();
     CACHE.get_or_init(Default::default)
 }
 
 /// Pixels per mm of a board's skin.
 pub const SKIN_PX_PER_MM: f32 = 24.0;
 
-/// The skin of one face of `b` as a blob (made once per layout `hash` and side): its hash and
+/// The skin of one face of `b` as a blob, made once per layout `hash` for `owner`: its hash and
 /// the box it covers (x0, y0, w, h mm).
-fn skin_blob(b: &Board, hash: u64, side: Side) -> Option<(String, [f64; 4])> {
-    let key = (hash, side == Side::Top);
-    if let Some(s) = skin_cache().read().ok().and_then(|c| c.get(&key).cloned()) {
+fn skin_blob(b: &Board, hash: u64, owner: u64, side: Side) -> Option<(String, [f64; 4])> {
+    let key = (owner, side == Side::Top);
+    if let Some((h, s)) = skin_cache().read().ok().and_then(|c| c.get(&key).cloned())
+        && h == hash
+    {
         return s;
     }
     let made = cadrs_eda::skin::board_skin(b, side, SKIN_PX_PER_MM, 4096).and_then(|s| {
@@ -391,19 +516,23 @@ fn skin_blob(b: &Board, hash: u64, side: Side) -> Option<(String, [f64; 4])> {
         let bb = s.bounds;
         Some((crate::blobs::insert(png), [to_mm(bb.min.x), to_mm(bb.min.y), to_mm(bb.size().w), to_mm(bb.size().h)]))
     });
-    if let Ok(mut c) = skin_cache().write() {
-        c.insert(key, made.clone());
+    if let Ok(mut c) = skin_cache().write()
+        && let Some((_, Some((old, _)))) = c.insert(key, (hash, made.clone()))
+        && made.as_ref().is_none_or(|(new, _)| *new != old)
+        && !c.values().any(|(_, s)| s.as_ref().is_some_and(|(b, _)| *b == old))
+    {
+        crate::blobs::forget(&old);
     }
     made
 }
 
-/// The board's top and bottom skins as pictures in the board frame, a hair off each face (the
-/// layout `hash` keys the cache).
-pub fn skins(b: &Board, hash: u64) -> Vec<SolidImage> {
+/// The board's top and bottom skins as pictures in the board frame, a hair off each face (made
+/// once per layout `hash` for `owner`, a Derived feature).
+pub fn skins(b: &Board, hash: u64, owner: u64) -> Vec<SolidImage> {
     let t = thickness(b);
     let mut out = vec![];
     for (side, z) in [(Side::Top, t + 0.01), (Side::Bottom, -0.01)] {
-        let Some((blob, [x0, y0, w, h])) = skin_blob(b, hash, side) else { continue };
+        let Some((blob, [x0, y0, w, h])) = skin_blob(b, hash, owner, side) else { continue };
         out.push(SolidImage { blob, corner: [x0, y0, z], u: [w, 0.0, 0.0], v: [0.0, h, 0.0] });
     }
     out
@@ -434,7 +563,8 @@ mod tests {
     #[test]
     fn the_profile_has_the_outline_and_the_holes() {
         let b = course_board();
-        let (regions, warnings) = board_profile(&b).unwrap();
+        let plan = board_profile(&b).unwrap();
+        let (regions, warnings) = (plan.regions, plan.warnings);
         assert_eq!(regions.len(), 1);
         // The course board's through-hole parts: BT1's two pins, D1's two, R1's two.
         let holes = cadrs_eda::fab::holes(&b).iter().filter(|h| to_mm(h.size.w.min(h.size.h)) >= MIN_HOLE).count();
@@ -469,9 +599,12 @@ mod tests {
     #[test]
     fn anchors_and_seats() {
         let b = Board::with_rect_outline(mm(40.0), mm(20.0));
-        assert_eq!(anchor_point(&b, &BoardOptions::default()), [20.0, 10.0, 0.0]);
+        let centre = BoardOptions { anchor: BoardAnchor::Center, ..Default::default() };
+        assert_eq!(anchor_point(&b, &centre), [20.0, 10.0, 0.0]);
         let o = BoardOptions { anchor: BoardAnchor::Origin, seat: BoardSeat::Top, ..Default::default() };
         assert_eq!(anchor_point(&b, &o), [0.0, 0.0, 1.6]);
+        let o = BoardOptions { anchor: BoardAnchor::At { x: 3.0, y: -2.0 }, ..Default::default() };
+        assert_eq!(anchor_point(&b, &o), [3.0, -2.0, 0.0]);
     }
 
     #[test]

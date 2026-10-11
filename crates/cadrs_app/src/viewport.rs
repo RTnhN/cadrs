@@ -1057,10 +1057,13 @@ fn viewport_pointer(
                     // not a click that selects.
                     let grabbed = std::mem::take(&mut grab.0);
                     let down = drag.primary_down.take();
+                    // A board's layout edited in the view takes the clicks
+                    // (`crate::board_in_studio`).
                     if let Some(down) = down
                         && over
                         && !grabbed
                         && down.distance(pos) < 4.0
+                        && eda2d.plane().is_none()
                     {
                         // A click in the viewport: toggle what is under the cursor, or clear.
                         let picked = match (*kind, filter) {
@@ -1328,7 +1331,7 @@ pub fn pick_in(view: &ViewState, offset: Vec2, planes: bool) -> Option<Pick> {
 /// views, N normal to (the sketch plane, a selected plane or a selected sketch's plane), F zoom
 /// to fit, Z / Shift+Z zoom out / in, arrows rotate 15° (Shift 90°, Ctrl 5°), Ctrl+Shift+arrows
 /// pan, P shows or hides the default planes, Space clears the selection.
-#[allow(clippy::too_many_arguments)]
+#[allow(clippy::too_many_arguments, clippy::type_complexity)]
 fn view_shortcuts(
     mut keys_in: MessageReader<KeyboardInput>,
     keys: Res<ButtonInput<KeyCode>>,
@@ -1343,7 +1346,7 @@ fn view_shortcuts(
     doc: Option<Res<ActiveDocument>>,
     mut planes: ResMut<PlanesVisible>,
     inset: Res<DialogInset>,
-    (cache, asm_parts, pcb_scene, eda2d): (Res<crate::parts::PartCache>, Res<crate::assembly::AssemblyParts>, Option<Res<crate::pcb::view::PcbScene>>, Res<crate::eda::Eda2d>),
+    (cache, asm_parts, pcb_scene, eda2d, layout): (Res<crate::parts::PartCache>, Res<crate::assembly::AssemblyParts>, Option<Res<crate::pcb::view::PcbScene>>, Res<crate::eda::Eda2d>, Res<crate::eda::layout_tools::LayoutState>),
 ) {
     if kind.is_flat() || eda2d.flat() {
         // No 3D views on a sheet or a render; F and Ctrl+S are handled by `crate::drawing`.
@@ -1405,6 +1408,14 @@ fn view_shortcuts(
             continue;
         }
         match k.key_code {
+            // A board's layout edited in the view: normal to the board, from the top (N) or the
+            // bottom (Shift+N).
+            KeyCode::KeyN if *kind == ActiveKind::PartStudio && let Some(h) = eda2d.plane() => {
+                let n = h.frame.normal();
+                let n = Vec3::new(n[0] as f32, n[1] as f32, n[2] as f32);
+                let to = view.target().normal_to(if shift { -n } else { n });
+                view.animate_to(to);
+            }
             KeyCode::KeyN if !shift && *kind == ActiveKind::PartStudio => {
                 // In a sketch: normal to the sketch plane. Otherwise normal to the selected
                 // plane, or to the plane of the selected sketch.
@@ -1433,6 +1444,9 @@ fn view_shortcuts(
                     view.animate_to(to);
                 }
             }
+            // A board's layout edited in the view: F flips the selected footprint
+            // (`crate::eda::layout_tools`).
+            KeyCode::KeyF if !shift && eda2d.plane().is_some() && layout.selection.iter().any(|i| matches!(i, cadrs_eda::board_edit::BoardItem::Footprint(_))) => {}
             KeyCode::KeyF if !shift => {
                 let mut pts = scene_points(doc.as_deref(), *kind, planes.0);
                 // In an assembly with a mate dialog's or a drag's preview, the instances as drawn

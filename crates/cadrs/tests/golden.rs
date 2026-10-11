@@ -2225,6 +2225,18 @@ fn golden_course_pcb_component_documents() {
 
 #[test]
 #[ignore = "headless screenshots; run with: cargo test -r -p cadrs -F app-tests --test golden -- --ignored"]
+fn golden_pcb_derived_board() {
+    run_scenario("pcb_derived_board");
+}
+
+#[test]
+#[ignore = "headless screenshots; run with: cargo test -r -p cadrs -F app-tests --test golden -- --ignored"]
+fn golden_pcb_edit_in_part_studio() {
+    run_scenario("pcb_edit_in_part_studio");
+}
+
+#[test]
+#[ignore = "headless screenshots; run with: cargo test -r -p cadrs -F app-tests --test golden -- --ignored"]
 fn golden_pcb_create_board_component() {
     run_scenario("pcb_create_board_component");
 }

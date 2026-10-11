@@ -6,8 +6,7 @@
 //!   12 × 24 opening, the **Plug** body in the opening (10 × 22, z −12…0) and its three pins
 //!   standing up into the tube, ⌀2.4, z 0…14, at x = 0: **Live pin** at y = 8, **Earth pin** at
 //!   y = 0 and **Neutral pin** at y = −8. **Board location**, a mate connector at (0, 0, 12)
-//!   with the Part Studio's axes, is where a board goes (its bottom face 2 mm below the pins'
-//!   tips).
+//!   with the Part Studio's axes, is where a board goes (its top face flush with the pins' tips).
 //! - **PCB Studio 1** with the board **AC sensor** ([`cadrs_eda::ac_board`]), designed in cadrs.
 
 use cadrs_sketch::{PlaneRef, SketchOp, Vec2};
@@ -40,7 +39,8 @@ pub const BOARD_LOCATION: FeatureId = fid(9);
 /// The pins' centres (x, y) and names, top to bottom.
 pub const PIN_AT: [(f64, f64, &str); 3] = [(0.0, 8.0, "Live pin"), (0.0, 0.0, "Earth pin"), (0.0, -8.0, "Neutral pin")];
 pub const PIN_RADIUS: f64 = 1.2;
-pub const PIN_TOP: f64 = 14.0;
+/// Flush with the board's top face once the board is on Board location (12 + 1.6).
+pub const PIN_TOP: f64 = 13.6;
 /// The board location's height.
 pub const BOARD_Z: f64 = 12.0;
 

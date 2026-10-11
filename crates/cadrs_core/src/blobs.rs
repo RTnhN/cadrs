@@ -56,6 +56,14 @@ pub fn get(hash: &str) -> Option<Arc<Vec<u8>>> {
     cache().read().ok()?.get(hash).cloned()
 }
 
+/// Drops the bytes with this hash from the cache (a file made again from the document, such as
+/// a board's skin, whose older version nothing shows any more).
+pub fn forget(hash: &str) {
+    if let Ok(mut c) = cache().write() {
+        c.remove(hash);
+    }
+}
+
 /// Whether the bytes with this hash are loaded.
 pub fn contains(hash: &str) -> bool {
     cache().read().is_ok_and(|c| c.contains_key(hash))

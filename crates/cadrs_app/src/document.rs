@@ -3057,7 +3057,7 @@ fn rebuild_feature_rows(
         Res<crate::parts::PartOverride>,
         Option<Res<bevy::time::TimeUpdateStrategy>>,
     ),
-    (derived_open, link_status, derived_session): (Res<crate::derived_ui::DerivedOpen>, Res<crate::linked::LinkStatus>, Option<Res<crate::derived_ui::DerivedSession>>),
+    (derived_open, link_status, derived_session, components_open): (Res<crate::derived_ui::DerivedOpen>, Res<crate::linked::LinkStatus>, Option<Res<crate::derived_ui::DerivedSession>>, Res<crate::derived_ui::ComponentsOpen>),
     mut commands: Commands,
 ) {
     let Some(doc) = doc else {
@@ -3162,11 +3162,17 @@ fn rebuild_feature_rows(
             let cadrs_core::FeatureKind::Derived(d) = &f.kind else { return None };
             let open = derived_open.0.contains(&f.id);
             let children = if open {
-                crate::derived_ui::children(&cache, f.id)
+                let view = d.board.as_ref().map(|b| b.options.view);
+                let comps = components_open.0.contains(&f.id);
+                crate::derived_ui::children(&cache, f.id, view, comps)
                     .into_iter()
                     .map(|(c, n, i)| {
                         let shown = match c {
                             crate::derived_ui::DerivedChild::Part(p) => !el.part_prop(p).is_some_and(|x| x.hidden),
+                            // A component hidden by the layout view shows as hidden too.
+                            crate::derived_ui::DerivedChild::Component(p) => !el.part_prop(p).is_some_and(|x| x.hidden) && !cache.layout_hidden.contains(&p),
+                            crate::derived_ui::DerivedChild::BoardView(_) => view != Some(cadrs_core::pcb::board3d::BoardView::Layout),
+                            crate::derived_ui::DerivedChild::Components(_) => !cache.derived.get(&f.id).is_some_and(|o| !o.footprints.is_empty() && o.footprints.iter().all(|(p, _)| el.part_prop(*p).is_some_and(|x| x.hidden))),
                             crate::derived_ui::DerivedChild::Sketch(s) => !cache.hidden_sketches.contains(&s),
                             crate::derived_ui::DerivedChild::Plane(s) => el.sketch_visibility(s) != Some(false),
                             _ => true,
@@ -3494,22 +3500,43 @@ fn rebuild_feature_rows(
             });
             // P3G.4 (DV3.5): an open Derived row's children, with their eyes.
             if let Some((_, true, kids, _)) = derived {
+                use crate::derived_ui::DerivedChild as D;
                 for (child, label, icon, shown) in kids {
                     let kind = match child {
-                        crate::derived_ui::DerivedChild::Part(_) => "part",
-                        crate::derived_ui::DerivedChild::Sketch(_) => "sketch",
-                        crate::derived_ui::DerivedChild::Plane(_) => "plane",
-                        crate::derived_ui::DerivedChild::Connector(_) => "connector",
+                        D::Part(_) => "part",
+                        D::Sketch(_) => "sketch",
+                        D::Plane(_) => "plane",
+                        D::Connector(_) => "connector",
+                        D::BoardView(_) => "board-view",
+                        D::Components(_) => "components",
+                        D::Component(_) => "component",
                     };
-                    let cname = format!("{row_name}-{kind}-{}", crate::linked::slug(label));
-                    let mut ci = TreeItem::new(cname.clone(), label.clone()).icon(*icon, 14.0).left(if in_folder { 38.0 } else { 26.0 }).muted(!shown);
-                    if matches!(child, crate::derived_ui::DerivedChild::Part(_) | crate::derived_ui::DerivedChild::Sketch(_) | crate::derived_ui::DerivedChild::Plane(_)) {
-                        let tip = if *shown { format!("Hide {label}") } else { format!("Show {label}") };
-                        ci = ci.toggle(format!("{cname}-visibility"), "visible", "hidden", *shown).toggle_tooltip(tip);
+                    let cname = match child {
+                        D::BoardView(_) | D::Components(_) => format!("{row_name}-{kind}"),
+                        _ => format!("{row_name}-{kind}-{}", crate::linked::slug(label)),
+                    };
+                    let left = if in_folder { 38.0 } else { 26.0 } + if matches!(child, D::Component(_)) { 14.0 } else { 0.0 };
+                    let mut ci = TreeItem::new(cname.clone(), label.clone()).icon(*icon, 14.0).left(left).muted(!shown && !matches!(child, D::BoardView(_)));
+                    match child {
+                        D::Part(_) | D::Component(_) | D::Sketch(_) | D::Plane(_) => {
+                            let tip = if *shown { format!("Hide {label}") } else { format!("Show {label}") };
+                            ci = ci.toggle(format!("{cname}-visibility"), "visible", "hidden", *shown).toggle_tooltip(tip);
+                        }
+                        // The board's view: 3D model or layout, switched by its button.
+                        D::BoardView(_) => {
+                            let tip = if *shown { "Show the board's layout" } else { "Show the board's 3D model" };
+                            ci = ci.toggle(format!("{cname}-switch"), "pcb-studio", "board-3d", *shown).toggle_tooltip(tip).toggle_keeps_off();
+                        }
+                        D::Components(f) => {
+                            let open = components_open.0.contains(f);
+                            let tip = if *shown { "Hide the components" } else { "Show the components" };
+                            ci = ci.disclosure(Some(open)).toggle(format!("{cname}-visibility"), "visible", "hidden", *shown).toggle_tooltip(tip);
+                        }
+                        D::Connector(_) => {}
                     }
                     let pick = match child {
-                        crate::derived_ui::DerivedChild::Part(p) => Pick::Part(*p),
-                        crate::derived_ui::DerivedChild::Sketch(s) | crate::derived_ui::DerivedChild::Plane(s) | crate::derived_ui::DerivedChild::Connector(s) => Pick::Feature(*s),
+                        D::Part(p) | D::Component(p) => Pick::Part(*p),
+                        D::Sketch(s) | D::Plane(s) | D::Connector(s) | D::BoardView(s) | D::Components(s) => Pick::Feature(*s),
                     };
                     let mut crow = c.spawn((ci.build(&t), *child, PickRow(pick)));
                     if let Some(f) = folder {
@@ -3704,11 +3731,15 @@ fn on_feature_context_menu(
         // A PCB Studio board (`docs/PCB_IN_PART_STUDIO.md` §6): its 3D model or its layout.
         if let Some(b) = &d.board {
             let layout = b.options.view == cadrs_core::pcb::board3d::BoardView::Layout;
-            menu = menu.separator().item(if layout {
-                MenuItem::new("feature-board-show-3d", "Show 3D model").icon("board-3d")
-            } else {
-                MenuItem::new("feature-board-show-layout", "Show layout").icon("pcb-studio")
-            });
+            let workspace = d.source.is_some_and(|r| r.at == cadrs_core::external::RefAt::Workspace && r.document.is_none());
+            menu = menu
+                .separator()
+                .item(MenuItem::new("feature-board-edit", "Edit layout").icon("edit").disabled(!workspace || in_dialog))
+                .item(if layout {
+                    MenuItem::new("feature-board-show-3d", "Show 3D model").icon("board-3d")
+                } else {
+                    MenuItem::new("feature-board-show-layout", "Show layout").icon("pcb-studio")
+                });
         }
     }
     if is_sketch {
@@ -3819,6 +3850,7 @@ fn on_feature_menu_action(
             commands.queue(move |world: &mut World| rename_feature(world, id));
         }
         "feature-dependencies" => commands.queue(move |world: &mut World| crate::feature_list::show_dependencies(world, id)),
+        "feature-board-edit" => commands.queue(move |world: &mut World| crate::board_in_studio::begin_edit(world, id, 0)),
         "feature-board-show-layout" => commands.queue(move |world: &mut World| crate::board_in_studio::set_view(world, id, cadrs_core::pcb::board3d::BoardView::Layout)),
         "feature-board-show-3d" => commands.queue(move |world: &mut World| crate::board_in_studio::set_view(world, id, cadrs_core::pcb::board3d::BoardView::ThreeD)),
         // P3G.4: a Derived feature's reference.

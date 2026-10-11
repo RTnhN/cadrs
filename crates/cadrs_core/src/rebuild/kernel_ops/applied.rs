@@ -59,7 +59,7 @@ impl Rebuilder {
     fn entity_edges(&self, state: &State, entities: &[EdgeOrFace]) -> Result<Vec<PartEdges>, String> {
         let mut out: Vec<PartEdges> = Vec::new();
         let push = |part: &PartState, ids: Vec<EdgeId>, out: &mut Vec<PartEdges>| -> Result<(), String> {
-            let body = part.body.ok_or("A part has no body")?;
+            let body = part.body.ok_or_else(|| super::super::no_body(part))?;
             let i = match out.iter().position(|g| g.part == part.part.id) {
                 Some(i) => i,
                 None => {
@@ -83,7 +83,7 @@ impl Rebuilder {
                 },
                 EdgeOrFace::Face(f) => match face_ids(state, f) {
                     Some((part, faces)) => {
-                        let body = part.body.ok_or("A part has no body")?;
+                        let body = part.body.ok_or_else(|| super::super::no_body(part))?;
                         let infos = self.kernel.edges(body).map_err(|e| e.to_string())?;
                         let ids: Vec<EdgeId> = infos
                             .iter()
@@ -370,7 +370,7 @@ impl Rebuilder {
         let one = |refs: &[crate::document::FaceRef]| -> Result<(PartId, BodyId, FaceId), String> {
             let r = refs.first().ok_or("Select the side faces and the center face")?;
             let (part, faces) = face_ids(state, r).ok_or("A selected face no longer exists")?;
-            let body = part.body.ok_or("A part has no body")?;
+            let body = part.body.ok_or_else(|| super::super::no_body(part))?;
             let face = *faces.first().ok_or("A selected face no longer exists")?;
             Ok((part.part.id, body, face))
         };
@@ -456,12 +456,12 @@ impl Rebuilder {
         if x.hollow {
             for p in &x.parts {
                 let part = state.part(*p).ok_or("A selected part no longer exists")?;
-                groups.push((*p, part.body.ok_or("A part has no body")?, Vec::new()));
+                groups.push((*p, part.body.ok_or_else(|| super::super::no_body(part))?, Vec::new()));
             }
         } else {
             for f in &x.faces {
                 let (part, ids) = face_ids(state, f).ok_or("A face to remove no longer exists")?;
-                let body = part.body.ok_or("A part has no body")?;
+                let body = part.body.ok_or_else(|| super::super::no_body(part))?;
                 match groups.iter_mut().find(|g| g.0 == part.part.id) {
                     Some(g) => g.2.extend(ids.into_iter().filter(|i| !g.2.contains(i)).collect::<Vec<_>>()),
                     None => groups.push((part.part.id, body, ids)),
@@ -497,7 +497,7 @@ impl Rebuilder {
         let mut groups: Vec<(PartId, BodyId, Vec<cadrs_kernel::FaceId>)> = Vec::new();
         for f in &x.faces {
             let (part, ids) = face_ids(state, f).ok_or("A selected face no longer exists")?;
-            let body = part.body.ok_or("A part has no body")?;
+            let body = part.body.ok_or_else(|| super::super::no_body(part))?;
             match groups.iter_mut().find(|g| g.0 == part.part.id) {
                 Some(g) => g.2.extend(ids.into_iter().filter(|i| !g.2.contains(i)).collect::<Vec<_>>()),
                 None => groups.push((part.part.id, body, ids)),
@@ -584,7 +584,7 @@ impl Rebuilder {
                 let (part, ids) = face_ids(state, f).ok_or("The face to go up to no longer exists")?;
                 match face_frame(part, f) {
                     Some(fr) => Some(Target::Plane(fr)),
-                    None => Some(Target::Faces(part.body.ok_or("A part has no body")?, ids)),
+                    None => Some(Target::Faces(part.body.ok_or_else(|| super::super::no_body(part))?, ids)),
                 }
             }
             (HoleEnd::UpToEntity, Some(p)) => Some(Target::Plane(plane_frame(p, "entity to go up to")?)),

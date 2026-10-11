@@ -347,9 +347,12 @@ fn board_bodies(world: &mut World, el: ElementId, board_id: BoardId, board: &Pcb
     // A native board's footprint models by reference (shown in place of the box); footprints
     // with no model show nothing, as in KiCad.
     let mut models: HashMap<String, cadrs_eda::footprint::Model3d> = HashMap::new();
+    // Where each footprint sits (the Part Studio's placement, `cadrs_core::pcb::model`).
+    let mut places: HashMap<String, cadrs_eda::footprint::FootprintPlacement> = HashMap::new();
     let mut bare: std::collections::HashSet<String> = Default::default();
     for f in shown_design(world, el, board_id).iter().flat_map(|d| d.board.footprints.iter()) {
         let r = f.reference().to_string();
+        places.insert(r.clone(), f.placement);
         if f.footprint.models.iter().all(|m| !m.visible) {
             bare.insert(r);
         } else if let Some(m) = f.footprint.models.iter().find(|m| m.visible && (m.body.is_some() || m.blob.is_some())) {
@@ -381,7 +384,7 @@ fn board_bodies(world: &mut World, el: ElementId, board_id: BoardId, board: &Pcb
                 Some(model) => {
                     format!("{:?}{:?}{:?}{:?}{}", model.blob, model.offset, model.rotation, model.scale, model.opacity).hash(sig);
                     model.body.as_ref().map(|b| format!("{b:?}")).hash(sig);
-                    let m = cadrs_pcb::placement::placement_motion(p, t);
+                    let m = places.get(&p.refdes).map_or_else(|| cadrs_pcb::placement::placement_motion(p, t), |pl| cadrs_core::pcb::model::footprint_motion(pl, t));
                     // The model's file when it is loaded and readable, else its generated body.
                     let ext = std::path::Path::new(&model.source).extension().map(|e| e.to_string_lossy().into_owned()).unwrap_or_default();
                     let file = model.blob.as_ref().and_then(|h| world.resource_mut::<PcbMeshCache>().model(h, &ext));

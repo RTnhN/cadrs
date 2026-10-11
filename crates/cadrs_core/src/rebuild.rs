@@ -232,6 +232,12 @@ struct State {
     sheet_metal: Arc<Vec<crate::sheetmetal::SheetMetalContext>>,
 }
 
+/// Why a feature can't change a part with no kernel body: a derived board's component is a mesh
+/// (`docs/PCB_IN_PART_STUDIO.md` Q1), which modelling features leave alone.
+fn no_body(p: &PartState) -> String {
+    format!("{} is a board component (a mesh, no solid): modelling features can't change it", p.part.name)
+}
+
 impl State {
     fn part(&self, id: PartId) -> Option<&PartState> {
         self.parts.iter().find(|p| p.part.id == id)
@@ -2482,7 +2488,7 @@ mod kernel_ops {
                         tools.iter().filter_map(|t| Some((t.body?, &*t.names))).collect();
                     let r = self
                         .kernel
-                        .boolean(kind, first.body.ok_or("A part has no body")?, &rest)
+                        .boolean(kind, first.body.ok_or_else(|| no_body(first))?, &rest)
                         .map_err(|e| format!("{} failed: {e}", b.op.label()))?;
                     let mut pieces = self.split_result(r, op, &inputs)?;
                     if pieces.is_empty() {

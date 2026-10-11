@@ -21,6 +21,7 @@ pub mod board3d;
 pub mod bom;
 pub mod component_docs;
 pub mod design;
+pub mod fit;
 pub mod generated;
 pub mod import;
 pub mod library;
@@ -59,8 +60,9 @@ pub enum BoardSource {
     Native { imported_from: Option<String> },
 }
 
-/// One board of a PCB Studio.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+/// One board of a PCB Studio. (Equal when its contents are: the cached layout hash doesn't
+/// count.)
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct StudioBoard {
     pub id: BoardId,
     /// The mechanical board (outline, placements, packages). For a native board it is made
@@ -70,6 +72,10 @@ pub struct StudioBoard {
     /// A native board's schematic and layout.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub design: Option<Box<cadrs_eda::Design>>,
+    /// [`board3d::layout_hash`] of the design's layout, set with it (0: not worked out, as
+    /// after reading a document): Part Studios deriving the board compare it to tell a change.
+    #[serde(skip)]
+    pub layout_hash: u64,
 }
 
 /// A component's id within its PCB Studio, stable while it exists.
@@ -81,6 +87,12 @@ pub struct ComponentId(pub u64);
 pub struct StudioComponent {
     pub id: ComponentId,
     pub component: cadrs_eda::Component,
+}
+
+impl PartialEq for StudioBoard {
+    fn eq(&self, o: &Self) -> bool {
+        self.id == o.id && self.board == o.board && self.source == o.source && self.design == o.design
+    }
 }
 
 impl StudioBoard {
@@ -180,7 +192,7 @@ impl PcbStudio {
         let n = self.next_board.max(self.boards.iter().map(|b| b.id.0 + 1).max().unwrap_or(0));
         let id = BoardId(n);
         self.next_board = n + 1;
-        self.boards.push(StudioBoard { id, board, source, design: None });
+        self.boards.push(StudioBoard { id, board, source, design: None, layout_hash: 0 });
         id
     }
 
@@ -347,6 +359,7 @@ impl Command for AddBoard {
         let id = s.add_board(board, BoardSource::Native { imported_from: self.imported_from.clone() });
         if let Some(b) = s.board_mut(id) {
             b.design = Some(self.design.clone());
+            b.layout_hash = board3d::layout_hash(&self.design.board);
         }
         s.active = Some(id);
         Ok(())
@@ -495,6 +508,7 @@ impl Command for SetDesign {
         let name = b.name().to_string();
         b.board = design::pcb_board(&name, &self.design);
         b.design = Some(self.design.clone());
+        b.layout_hash = board3d::layout_hash(&self.design.board);
         Ok(())
     }
 }

@@ -85,6 +85,31 @@ the 3D viewport, and (c) a sketch → outline link.
 | Q4 | Default seat on the sketch plane / location | **Bottom face** (board grows along the normal) | `BoardSeat::Bottom` default, as written |
 | Q5 | Boards in Assemblies | **Direct insert and via a Part Studio** | Section 9 / P6 as written |
 
+### 3.2 Built so far, and where it differs from the plan (2026-10-11)
+
+- **P0–P2 done.** Core: `pcb::model` (model meshes, cached per process; footprint placement),
+  `pcb::mesh_solid` (model meshes as mesh parts: planar faces with frames, cylinders with axes,
+  coarse 8-sided pins included), `pcb::board3d` (board solid with holes and cut-outs, faces named
+  by the plan curve they come from — outline segment geometry, or footprint + pad — so a new hole
+  renames nothing), `derived::DerivedBoard`. The STEP export and the PCB Studio's 3D view use the
+  same board and placement code.
+- **Board point instead of `Board::origin` + base connector.** A derived board is placed by
+  `BoardAnchor`: *Fixed* (the outline's centre when derived — the default, so outline edits never
+  move the parts), *Origin* (layout 0, 0 — boards made from a sketch), *Centre* (follows the
+  outline) or *Footprint* (a footprint's origin, e.g. a connector, lands on the location). Base
+  mate connector is refused for boards; the Footprint point covers its use.
+- **Parts placed off the board** (a module waiting to be placed) stay out unless asked for.
+- **Layout view as a picture.** The layout on the board face is rasterised (32 px/mm) onto one
+  quad per face (`cadrs_eda::skin::raster`), not a triangle mesh: a 300 k-triangle overlay made
+  every frame take a second in Bevy.
+- **P3 done.** `LayoutHost` became a second field of `eda::Eda2d` (`PlaneHost`); all Layout tools
+  work on the board in the 3D view; drags show the component's part as a ghost.
+- **P4.** Parts around, snapping (pads onto pin axes, shadow edges onto outlines), room readouts,
+  "In the way", Align (incl. a pin's axis mark as target), keep-outs from the parts around (per
+  side; the PCB Studio's DRC checks footprints against keep-outs, which is the mechanical
+  DRC of §7.3 item 8), collision warnings on the Derived feature (named as the Parts list does).
+  Exact distances are mesh-based (Q1).
+
 ## 4. Data model changes
 
 ### 4.1 Derived: a board source (`cadrs_core::derived`)

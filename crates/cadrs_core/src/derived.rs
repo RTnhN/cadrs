@@ -123,8 +123,9 @@ pub struct DerivedBoard {
     pub board_name: String,
     pub layout: cadrs_eda::board::Board,
     /// [`crate::pcb::board3d::layout_hash`] of `layout`: the rebuild's cache key sees it instead
-    /// of the layout (kept with it by [`DerivedBoard::set_layout`]).
-    #[serde(default)]
+    /// of the layout (kept with it by [`DerivedBoard::set_layout`], worked out again when a
+    /// document is read).
+    #[serde(skip)]
     pub hash: u64,
     #[serde(default)]
     pub options: crate::pcb::board3d::BoardOptions,
@@ -158,6 +159,7 @@ impl std::fmt::Debug for DerivedBoard {
             .field("skins", &o.skins)
             .field("seat", &o.seat)
             .field("anchor", &o.anchor)
+            .field("off_board", &o.off_board)
             .finish()
     }
 }
@@ -283,7 +285,10 @@ impl From<DerivedRepr> for DerivedFeature {
             include_connectors: r.include_connectors,
             include_properties: r.include_properties,
             legacy_names: r.legacy_names,
-            board: r.board,
+            board: r.board.map(|mut b| {
+                b.hash = crate::pcb::board3d::layout_hash(&b.layout);
+                b
+            }),
         };
         let is_legacy = r.document.is_some() || r.element.is_some() || !r.parts.is_empty() || r.include_mate_connectors.is_some();
         if d.source.is_none() && is_legacy {
@@ -358,7 +363,15 @@ impl DerivedFeature {
         let want = self.board.as_ref().map(|b| b.board).or(studio.active).or(studio.boards.first().map(|b| b.id));
         let b = want.and_then(|id| studio.board(id)).ok_or_else(|| format!("{} has no such board", el.name))?;
         let design = b.design.as_ref().ok_or_else(|| format!("{} is not designed in cadrs (an IDF board has no layout to derive)", b.name()))?;
-        let options = self.board.as_ref().map(|x| x.options.clone()).unwrap_or_default();
+        // A board taken for the first time comes in with its outline's centre where it is now
+        // on the location (fixed: later outline edits don't move it); one already derived keeps
+        // its options.
+        let fresh = self.board.as_ref().is_none_or(|x| x.board != b.id || x.hash == crate::pcb::board3d::layout_hash(&Default::default()));
+        let mut options = self.board.as_ref().map(|x| x.options.clone()).unwrap_or_default();
+        if fresh {
+            let [x, y] = crate::pcb::board3d::outline_center(&design.board);
+            options.anchor = crate::pcb::board3d::BoardAnchor::At { x, y };
+        }
         let mut db = DerivedBoard::new(b.id, b.name(), design.board.clone());
         db.options = options;
         self.board = Some(Box::new(db));
@@ -483,6 +496,11 @@ pub struct DerivedOutput {
     /// A derived board's component parts and the footprints they show.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub footprints: Vec<(PartId, uuid::Uuid)>,
+    /// A derived board's components that run into a part before the feature: the component's
+    /// part, the other part and how far (mm, [`crate::pcb::fit::collisions`]). The feature's
+    /// warning says so; the app names them as the Parts list does.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub collisions: Vec<(PartId, PartId, f64)>,
 }
 
 /// One copy of a derived board: its board part, and its **board frame** in the Part Studio (the
@@ -781,7 +799,9 @@ fn refresh_boards(doc: &mut Document) {
             let Some(src) = doc.elements.iter().find(|e| e.id == r.element) else { continue };
             let Some(b) = src.pcb().and_then(|s| s.board(db.board)) else { continue };
             let Some(design) = &b.design else { continue };
-            let layout = (design.board != db.layout).then(|| design.board.clone());
+            // The hash set with the layout when there is one, else the layouts themselves.
+            let changed = if b.layout_hash != 0 { b.layout_hash != db.hash } else { design.board != db.layout };
+            let layout = changed.then(|| design.board.clone());
             if layout.is_some() || b.name() != db.board_name || src.name != d.source_name {
                 updates.push((i, j, layout, b.name().to_string(), src.name.clone()));
             }
@@ -1004,7 +1024,7 @@ mod tests {
     #[test]
     fn a_new_derived_feature_waits_for_a_source() {
         let d = DerivedFeature::default();
-        assert_eq!(d.problem(), Some("Select a Part Studio to derive"));
+        assert_eq!(d.problem(), Some("Select a Part Studio or a board to derive"));
         assert_eq!(d.copies(), 1);
         assert!(d.include_properties);
     }

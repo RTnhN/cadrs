@@ -131,11 +131,15 @@ pub struct LayoutState {
     pub track_width: Option<Nm>,
     /// How the Text tool writes: height and stroke width (mm), alignment.
     pub text_style: TextLook,
+    /// Where a moved footprint's grab point goes exactly, off the grid, this frame: set by a
+    /// board edited in a Part Studio when the footprint snaps onto the parts around it
+    /// (`crate::board_fit`).
+    pub exact: Option<Pt>,
 }
 
 impl Default for LayoutState {
     fn default() -> Self {
-        LayoutState { tool: Tool::Select, selection: vec![], moving: None, active: Layer::TopCopper, expanded: false, hidden: vec![], dim: false, layers_open: false, draw_layer: Layer::TopSilk, net: None, track_width: None, text_style: TextLook::default() }
+        LayoutState { tool: Tool::Select, selection: vec![], moving: None, active: Layer::TopCopper, expanded: false, hidden: vec![], dim: false, layers_open: false, draw_layer: Layer::TopSilk, net: None, track_width: None, text_style: TextLook::default(), exact: None }
     }
 }
 
@@ -501,7 +505,7 @@ fn release(w: &mut World, at: Pt) {
 }
 
 fn finish_move(w: &mut World, m: &Moving, at: Pt) {
-    let d = snap(at, grid()) - m.from;
+    let d = w.resource_mut::<LayoutState>().exact.take().unwrap_or_else(|| snap(at, grid())) - m.from;
     let (fp, drag) = (m.fp, m.drag);
     w.resource_mut::<LayoutState>().moving = None;
     w.resource_mut::<Preview>().set(None);
@@ -673,13 +677,15 @@ fn follow_pointer(world: &mut World, mut last: Local<Option<Pt>>) {
         }
         return;
     }
-    if *last == Some(at) {
+    let key = world.resource::<LayoutState>().exact.unwrap_or(at);
+    if *last == Some(key) {
         return;
     }
-    *last = Some(at);
+    *last = Some(key);
     let Some(mut d) = board_of(world) else { return };
     if let Some(m) = moving {
-        let delta = snap(at, grid()) - m.from;
+        let exact = world.resource::<LayoutState>().exact;
+        let delta = exact.unwrap_or_else(|| snap(at, grid())) - m.from;
         if let Some(i) = be::footprint_by_id(&d.board, m.fp) {
             if m.drag {
                 be::drag_footprint(&mut d.board, i, delta);

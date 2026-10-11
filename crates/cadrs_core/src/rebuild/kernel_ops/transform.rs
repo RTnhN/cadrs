@@ -296,11 +296,18 @@ impl Rebuilder {
                 this.kernel.release(p.body);
             }
         };
+        // A derived board's components (meshes, no body) move with a rigid motion; a scale
+        // leaves them (and says so).
+        let mut meshes: Vec<PartId> = Vec::new();
+        let mut left: Vec<String> = Vec::new();
         for pid in parts {
             let p = state.part(*pid).expect("present");
             let Some(body) = p.body else {
-                release(self, &placed);
-                return Err("A part to transform has no body".into());
+                match map {
+                    Map::Rigid(_) => meshes.push(*pid),
+                    Map::Scale { .. } => left.push(p.part.name.clone()),
+                }
+                continue;
             };
             let r = match self.mapped_copy(body, map) {
                 Ok(r) => r,
@@ -367,6 +374,16 @@ impl Rebuilder {
                     solid.images = old.images.iter().map(|i| i.mapped(|q| map.world(q))).collect();
                 }
             }
+            if let Map::Rigid(m) = map {
+                for pid in &meshes {
+                    if let Some(p) = st.parts.iter_mut().find(|q| q.part.id == *pid) {
+                        p.part.solid = Arc::new(crate::pcb::board3d::moved(&p.part.solid, m));
+                    }
+                }
+            }
+        }
+        if !left.is_empty() {
+            out.warning = Some(format!("Board components can't be scaled (meshes): {}", left.join(", ")));
         }
         Ok(out)
     }
@@ -385,11 +402,13 @@ impl Rebuilder {
                 this.kernel.release(p.body);
             }
         };
+        let mut left: Vec<String> = Vec::new();
         for pid in parts {
             let p = state.part(*pid).expect("present");
+            // A derived board's components (meshes) aren't copied: derive the board again.
             let Some(body) = p.body else {
-                release(self, &placed);
-                return Err("A part to transform has no body".into());
+                left.push(p.part.name.clone());
+                continue;
             };
             let r = match self.mapped_copy(body, map) {
                 Ok(r) => r,
@@ -501,6 +520,9 @@ impl Rebuilder {
                     }
                 }
             }
+        }
+        if !left.is_empty() {
+            out.warning = Some(format!("Board components aren't copied (meshes; derive the board again): {}", left.join(", ")));
         }
         Ok(out)
     }
