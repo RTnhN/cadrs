@@ -102,7 +102,7 @@ the 3D viewport, and (c) a sketch → outline link.
 - **Layout view as a picture.** The layout on the board face is rasterised (32 px/mm) onto one
   quad per face (`cadrs_eda::skin::raster`), not a triangle mesh: a 300 k-triangle overlay made
   every frame take a second in Bevy.
-- **P3 done.** `LayoutHost` became a second field of `eda::Eda2d` (`PlaneHost`); all Layout tools
+- **P3 done.** `eda::LayoutHost` (`Flat` | `Plane(PlaneHost)`) is the second field of `eda::Eda2d`; all Layout tools
   work on the board in the 3D view; drags show the component's part as a ghost.
 - **P4.** Parts around, snapping (pads onto pin axes, shadow edges onto outlines), room readouts,
   "In the way", Align (incl. a pin's axis mark as target), keep-outs from the parts around (per
@@ -202,6 +202,10 @@ the 3D viewport, and (c) a sketch → outline link.
   `onto_connector`; in context, the board's components running into the other instances show
   under the bar; undo from the assembly asserted; unit tests of `component_under` and of the
   assembly's board hosting. (Boards inside subassemblies are edited in their own tab.)
+- **Layout pictures off the main thread.** A whole layout's picture is rasterised on the async
+  compute pool (the old one shown until it is ready), so a commit on a big board doesn't stall
+  the view; a drag's small changes picture is still made at once. Pictures keep no CPU copy
+  (render-world only); 32 px/mm, at most 4096 px a side.
 - **Since (2).** Assembly instances carry their parts' pictures through their pose (a mated
   board's skins move with it); Create PCB board can make the sketch's circles NPTH holes; an
   in-context snapshot of a board goes stale when its layout changes (tested).

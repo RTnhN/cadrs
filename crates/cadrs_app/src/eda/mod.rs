@@ -78,7 +78,17 @@ pub enum Subject {
 /// view stays 3D and the pointer is mapped onto the board's face
 /// ([`crate::board_in_studio`]).
 #[derive(Resource, Default, Clone, Copy, Debug, PartialEq)]
-pub struct Eda2d(pub Option<(ElementId, Subject, Mode)>, pub Option<PlaneHost>);
+pub struct Eda2d(pub Option<(ElementId, Subject, Mode)>, pub LayoutHost);
+
+/// Where the Layout's tools work (`docs/PCB_IN_PART_STUDIO.md` §7.2): the PCB Studio's flat
+/// view, or a board in a 3D view (a Part Studio's derived board, an assembly's board instance),
+/// the pointer mapped onto its face. Either way they commit `SetDesign` on the PCB Studio.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub enum LayoutHost {
+    #[default]
+    Flat,
+    Plane(PlaneHost),
+}
 
 /// A board copy in a Part Studio whose layout the Layout's tools edit: the copy, its board
 /// frame (the layout's origin and axes on its bottom face) and its thickness (mm).
@@ -92,12 +102,15 @@ pub struct PlaneHost {
 impl Eda2d {
     /// A 2D view (not the 3D one) is on screen.
     pub fn flat(&self) -> bool {
-        self.1.is_none() && matches!(self.0, Some((_, _, m)) if m != Mode::ThreeD)
+        self.1 == LayoutHost::Flat && matches!(self.0, Some((_, _, m)) if m != Mode::ThreeD)
     }
 
     /// The Layout's tools run on a board in a Part Studio's 3D view.
     pub fn plane(&self) -> Option<&PlaneHost> {
-        self.1.as_ref()
+        match &self.1 {
+            LayoutHost::Plane(h) => Some(h),
+            LayoutHost::Flat => None,
+        }
     }
 
     /// The shown native board: (tab, board, mode).
@@ -274,7 +287,7 @@ fn track_context(
             Some((el, subject, ui.mode(el, subject)))
         }),
     };
-    let host = plane.map(|(_, _, h)| h);
+    let host = plane.map_or(LayoutHost::Flat, |(_, _, h)| LayoutHost::Plane(h));
     if eda.0 != now || eda.1 != host {
         eda.0 = now;
         eda.1 = host;
@@ -310,7 +323,7 @@ fn sync_mode_bar(
     mut commands: Commands,
 ) {
     // No mode bar on a board edited in a Part Studio: it stays 3D.
-    let want = eda.0.filter(|_| eda.1.is_none()).map(|(_, s, _)| matches!(s, Subject::Component(_)));
+    let want = eda.0.filter(|_| eda.1 == LayoutHost::Flat).map(|(_, s, _)| matches!(s, Subject::Component(_)));
     let mut bar = q_bar.single().ok().map(|(e, b)| (e, b.0));
     // The other kind's bar goes.
     if let Some((e, kind)) = bar

@@ -174,6 +174,10 @@ pub struct LayoutOverlay;
 pub struct OverlayCache {
     /// By (feature, copy, top face, the changes in progress).
     shown: HashMap<(FeatureId, usize, bool, bool), (u64, Entity)>,
+    /// Whole layouts being rasterised off the main thread (a commit of a big board would
+    /// stall the view): what each will show (its signature, name, face) once ready; the
+    /// picture it replaces stays meanwhile.
+    pending: HashMap<(FeatureId, usize, bool, bool), (u64, String, bevy::tasks::Task<Option<(Mesh, Image)>>)>,
 }
 
 /// How much of a layout an overlay shows.
@@ -341,16 +345,36 @@ pub fn sync_overlays(world: &mut World) {
         }
         world.resource_mut::<OverlayCache>().shown.remove(&k);
     }
-    for (key, sig, frame, thickness, name, view, edited, off_board) in want {
-        if world.resource::<OverlayCache>().shown.get(&key).is_some_and(|(s, _)| *s == sig) {
-            continue;
+    world.resource_mut::<OverlayCache>().pending.retain(|k, _| keys.contains(k));
+    // The pictures made off the main thread that are ready.
+    let ready: Vec<Key> = world.resource::<OverlayCache>().pending.keys().copied().collect();
+    let mut done: Vec<(Key, u64, String, Option<(Mesh, Image)>)> = vec![];
+    for k in ready {
+        let mut cache = world.resource_mut::<OverlayCache>();
+        let Some((_, _, task)) = cache.pending.get_mut(&k) else { continue };
+        if let Some(made) = bevy::tasks::futures::check_ready(task) {
+            let (sig, name, _) = cache.pending.remove(&k).expect("just polled");
+            done.push((k, sig, name, made));
         }
+    }
+    for (key, sig, name, made) in done {
         if let Some((_, e)) = world.resource_mut::<OverlayCache>().shown.remove(&key)
             && let Ok(ec) = world.get_entity_mut(e)
         {
             ec.despawn();
         }
+        if let Some((mesh, image)) = made {
+            spawn_overlay(world, key, sig, &name, mesh, image);
+        }
+    }
+    for (key, sig, frame, thickness, name, view, edited, off_board) in want {
+        if world.resource::<OverlayCache>().shown.get(&key).is_some_and(|(s, _)| *s == sig) || world.resource::<OverlayCache>().pending.get(&key).is_some_and(|(s, _, _)| *s == sig) {
+            continue;
+        }
         let side = if key.2 { Side::Top } else { Side::Bottom };
+        let area = if off_board { OverlayArea::Everything } else { OverlayArea::Board };
+        // A drag's changes (small, following the pointer): now. A whole layout: off the main
+        // thread, the old picture shown until it is ready.
         let made = {
             let doc = world.resource::<ActiveDocument>();
             let Some(stored) = layout_of(doc, key.0) else { continue };
@@ -358,33 +382,45 @@ pub fn sync_overlays(world: &mut World) {
                 let preview = world.resource::<crate::eda::Preview>().get().filter(|_| edited).map(|d| &d.board);
                 let Some(changes) = preview.and_then(|p| preview_changes(stored, p)) else { continue };
                 overlay_mesh(&changes, &view, &frame, thickness, side, OverlayArea::Changes)
-            } else if edited && !masked.is_empty() {
-                let mut rest = stored.clone();
-                rest.footprints.retain(|f| !masked.contains(&f.id));
-                overlay_mesh(&rest, &view, &frame, thickness, side, if off_board { OverlayArea::Everything } else { OverlayArea::Board })
             } else {
-                overlay_mesh(stored, &view, &frame, thickness, side, if off_board { OverlayArea::Everything } else { OverlayArea::Board })
+                let mut layout = stored.clone();
+                if edited && !masked.is_empty() {
+                    layout.footprints.retain(|f| !masked.contains(&f.id));
+                }
+                let task = bevy::tasks::AsyncComputeTaskPool::get().spawn(async move { overlay_mesh(&layout, &view, &frame, thickness, side, area) });
+                world.resource_mut::<OverlayCache>().pending.insert(key, (sig, name, task));
+                continue;
             }
         };
+        if let Some((_, e)) = world.resource_mut::<OverlayCache>().shown.remove(&key)
+            && let Ok(ec) = world.get_entity_mut(e)
+        {
+            ec.despawn();
+        }
         let Some((mesh, image)) = made else { continue };
-        let mesh = world.resource_mut::<Assets<Mesh>>().add(mesh);
-        let image = world.resource_mut::<Assets<Image>>().add(image);
-        let material = world.resource_mut::<Assets<StandardMaterial>>().add(StandardMaterial {
-            base_color_texture: Some(image),
-            unlit: true,
-            alpha_mode: AlphaMode::Blend,
-            // Seen only from outside its face: through the board the other face's would show
-            // (the bias lets it win over the board's own faces).
-            double_sided: false,
-            cull_mode: Some(bevy::render::render_resource::Face::Back),
-            // Over the board's own face.
-            depth_bias: 200.0,
-            ..default()
-        });
-        let label = format!("board-layout-{}{}{}", crate::pcb::slug(&name), if key.2 { "" } else { "-bottom" }, if key.3 { "-changes" } else { "" });
-        let e = world.spawn((Name::new(label), LayoutOverlay, Mesh3d(mesh), MeshMaterial3d(material), Transform::IDENTITY, DespawnOnExit(AppState::Document))).id();
-        world.resource_mut::<OverlayCache>().shown.insert(key, (sig, e));
+        spawn_overlay(world, key, sig, &name, mesh, image);
     }
+}
+
+/// Puts an overlay picture on screen for `key` (feature, copy, top face, changes).
+fn spawn_overlay(world: &mut World, key: (FeatureId, usize, bool, bool), sig: u64, name: &str, mesh: Mesh, image: Image) {
+    let mesh = world.resource_mut::<Assets<Mesh>>().add(mesh);
+    let image = world.resource_mut::<Assets<Image>>().add(image);
+    let material = world.resource_mut::<Assets<StandardMaterial>>().add(StandardMaterial {
+        base_color_texture: Some(image),
+        unlit: true,
+        alpha_mode: AlphaMode::Blend,
+        // Seen only from outside its face: through the board the other face's would show
+        // (the bias lets it win over the board's own faces).
+        double_sided: false,
+        cull_mode: Some(bevy::render::render_resource::Face::Back),
+        // Over the board's own face.
+        depth_bias: 200.0,
+        ..default()
+    });
+    let label = format!("board-layout-{}{}{}", crate::pcb::slug(name), if key.2 { "" } else { "-bottom" }, if key.3 { "-changes" } else { "" });
+    let e = world.spawn((Name::new(label), LayoutOverlay, Mesh3d(mesh), MeshMaterial3d(material), Transform::IDENTITY, DespawnOnExit(AppState::Document))).id();
+    world.resource_mut::<OverlayCache>().shown.insert(key, (sig, e));
 }
 
 /// Sets a derived board's view (the Feature list's menu): one undo step.
