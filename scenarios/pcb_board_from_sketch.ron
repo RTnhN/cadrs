@@ -1,13 +1,13 @@
 // docs/PCB_IN_PART_STUDIO.md P5: a board's outline from a Part Studio sketch. The mains-sensor
 // enclosure (`board setup`) with "Board outline" (`board outline-sketch`): a sketch on "Board
-// plane", 4 mm above Top inside the tube, a 38 × 38 square from (−19, −19) (1 mm in from the
-// tube's walls) with a ⌀3.2 mounting hole at (−15, 15).
+// plane", 4 mm above Top inside the tube, the tube's four inner edges used (Use) and offset 1 mm
+// in (Offset): a 38 × 38 square from (−19, −19), with a ⌀3.2 mounting hole at (−15, 15).
 // 01 the sketch's menu: Create PCB board….
 // 02 its dialog: the name, PCB Studio 1 (or a new one), 1.6 mm, bottom face on the sketch.
 // 03 Create: "Sensor board" in PCB Studio 1 and "Derived 1" in the Part Studio, the board on the
 //    sketch's plane (4 mm up), its origin on the sketch's, the hole through it: 38 × 38 × 1.6.
-// 04 the sketch's right side moved in to x 9 (`board outline-narrow`): the board follows at once,
-//    28 × 38.
+// 04 the tube's right inner wall moved in to x 10 (`board outline-narrow`): the used edges, their
+//    offset and the board follow at once, 28 × 38.
 // 05 PCB Studio 1's Layout of the new board: the outline as the sketch has it; its Boards row
 //    has a link glyph.
 // 06 the outline tool there: a note that the outline follows Board outline in Enclosure (what

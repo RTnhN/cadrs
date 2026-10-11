@@ -999,11 +999,7 @@ pub fn script(world: &mut World, arg: &str) {
         // A sketch on Top inside the tube: a 38 × 38 square from (−19, −19) with a ⌀3.2 mounting
         // hole at (−15, 15).
         "outline-sketch" => {
-            use cadrs_sketch::{SketchOp, Vec2};
-            let ops = [
-                SketchOp::AddPolyline { points: vec![Vec2::new(-19.0, -19.0), Vec2::new(19.0, -19.0), Vec2::new(19.0, 19.0), Vec2::new(-19.0, 19.0)], closed: true, construction: false, label: "Add rectangle" },
-                SketchOp::AddCircle { center: Vec2::new(-15.0, 15.0), radius: 1.6, construction: false },
-            ];
+            use cadrs_sketch::{Link, SketchOp, Vec2};
             let mut doc = world.resource_mut::<ActiveDocument>();
             // On "Board plane", 4 mm up from Top inside the tube.
             let plane = cadrs_core::plane::PlaneFeature {
@@ -1017,19 +1013,50 @@ pub fn script(world: &mut World, arg: &str) {
             let features = doc.active_element().map(|e| e.features().to_vec()).unwrap_or_default();
             let Some(on) = cadrs_core::parts::plane_feature_ref(&features, OUTLINE_PLANE) else { return };
             let _ = doc.execute(&cadrs_core::commands::AddSketch { element: pe::STUDIO, feature: OUTLINE_SKETCH, plane: Some(on) });
-            for op in ops {
+            let sketch = |doc: &ActiveDocument| doc.doc.element(pe::STUDIO).and_then(|e| e.feature(OUTLINE_SKETCH)).and_then(|f| f.sketch()).cloned();
+            let Some(frame) = sketch(&doc).and_then(|s| s.plane).map(|p| p.frame()) else { return };
+            // Use: the tube's four inner edges (on Top, seen on the board plane).
+            let build = cadrs_core::rebuild::build(&features);
+            let Some(tube) = build.parts.iter().find(|p| p.feature == pe::TUBE).map(|p| p.solid.clone()) else { return };
+            let ctx = cadrs_core::links::LinkContext { solids: vec![(pe::TUBE, &*tube)], features: &features };
+            let items: Vec<_> = tube
+                .edges
+                .iter()
+                .filter(|e| e.points.iter().all(|p| p[2].abs() < 1e-6 && (p[0].abs().max(p[1].abs()) - 20.0).abs() < 1e-6))
+                .filter_map(|e| {
+                    let link = Link::Edge { feature: pe::TUBE.0, edge: e.name };
+                    Some((ctx.shape(link, &frame)?, link))
+                })
+                .collect();
+            let _ = doc.execute(&cadrs_core::commands::EditSketch { element: pe::STUDIO, feature: OUTLINE_SKETCH, op: SketchOp::Use { items } });
+            // Offset 1 mm in from them (the side toward the middle), and a ⌀3.2 mounting hole.
+            let Some(g) = sketch(&doc).map(|s| s.geometry) else { return };
+            let Some(first) = g.curves.keys().next() else { return };
+            let (chain, _) = cadrs_sketch::edit::chain_of(&g, first);
+            let inward = |left: bool| {
+                cadrs_sketch::edit::offset_geometry(&g, &chain, 1.0, left)
+                    .ok()
+                    .and_then(|o| o.first().copied())
+                    .is_some_and(|o| matches!(o, cadrs_sketch::edit::OffsetShape::Line(a, b) if a.midpoint(b).length() < 19.5))
+            };
+            let left = inward(true);
+            for op in [
+                SketchOp::Offset { chain, distance: 1.0, left, label: (2.0, 0.0) },
+                SketchOp::AddCircle { center: Vec2::new(-15.0, 15.0), radius: 1.6, construction: false },
+            ] {
                 let _ = doc.execute(&cadrs_core::commands::EditSketch { element: pe::STUDIO, feature: OUTLINE_SKETCH, op });
             }
             let _ = doc.execute(&cadrs_core::commands::RenameFeature { element: pe::STUDIO, feature: OUTLINE_SKETCH, name: "Board outline".into() });
         }
-        // The sketch's right side in to x = 9 (its two right corners move).
+        // The tube's inside narrowed: its right wall in to x = 10 (the board, 1 mm in from it,
+        // follows).
         "outline-narrow" => {
             use cadrs_sketch::{SketchOp, Vec2};
             let mut doc = world.resource_mut::<ActiveDocument>();
-            let Some(g) = doc.doc.element(pe::STUDIO).and_then(|e| e.feature(OUTLINE_SKETCH)).and_then(|f| f.sketch()).map(|s| s.geometry.clone()) else { return };
+            let Some(g) = doc.doc.element(pe::STUDIO).and_then(|e| e.feature(pe::TUBE_SKETCH)).and_then(|f| f.sketch()).map(|s| s.geometry.clone()) else { return };
             let corner = |x: f64, y: f64| g.point_at(Vec2::new(x, y), 1e-6);
-            let (Some(a), Some(b)) = (corner(19.0, -19.0), corner(19.0, 19.0)) else { return };
-            let _ = doc.execute(&cadrs_core::commands::EditSketch { element: pe::STUDIO, feature: OUTLINE_SKETCH, op: SketchOp::MovePoints { moves: vec![(a, Vec2::new(9.0, -19.0)), (b, Vec2::new(9.0, 19.0))] } });
+            let (Some(a), Some(b)) = (corner(20.0, -20.0), corner(20.0, 20.0)) else { return };
+            let _ = doc.execute(&cadrs_core::commands::EditSketch { element: pe::STUDIO, feature: pe::TUBE_SKETCH, op: SketchOp::MovePoints { moves: vec![(a, Vec2::new(10.0, -20.0)), (b, Vec2::new(10.0, 20.0))] } });
         }
         // Where a footprint of the derived board is, as text a scenario can check
         // (`ExpectText("board-check", "J4 at 15.50, 27.50 top 0°")`); `count`: its tracks,
