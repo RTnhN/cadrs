@@ -238,7 +238,8 @@ pub fn overlay_mesh(layout: &cadrs_eda::board::Board, view: &OverlayView, frame:
         .with_inserted_attribute(Mesh::ATTRIBUTE_NORMAL, vec![normal; 4])
         // Row 0 of the picture is the board's highest y.
         .with_inserted_attribute(Mesh::ATTRIBUTE_UV_0, vec![[0.0f32, 1.0], [1.0, 1.0], [1.0, 0.0], [0.0, 0.0]])
-        .with_inserted_indices(Indices::U32(vec![0, 1, 2, 0, 2, 3]));
+        // Its front faces out of its face (the bottom one down).
+        .with_inserted_indices(Indices::U32(if side == Side::Top { vec![0, 1, 2, 0, 2, 3] } else { vec![0, 2, 1, 0, 3, 2] }));
     let image = Image::new(
         bevy::render::render_resource::Extent3d { width: skin.width, height: skin.height, depth_or_array_layers: 1 },
         bevy::render::render_resource::TextureDimension::D2,
@@ -343,8 +344,10 @@ pub fn sync_overlays(world: &mut World) {
             base_color_texture: Some(image),
             unlit: true,
             alpha_mode: AlphaMode::Blend,
-            double_sided: true,
-            cull_mode: None,
+            // Seen only from outside its face: through the board the other face's would show
+            // (the bias lets it win over the board's own faces).
+            double_sided: false,
+            cull_mode: Some(bevy::render::render_resource::Face::Back),
             // Over the board's own face.
             depth_bias: 200.0,
             ..default()
@@ -876,7 +879,7 @@ fn board_of(world: &World, feature: FeatureId) -> Option<(ElementId, cadrs_core:
 /// Break outline link: the outline stays as it is, editable in the layout (one undo step).
 pub fn unlink_outline(world: &mut World, feature: FeatureId) {
     let Some((pcb, board)) = board_of(world, feature) else { return };
-    if let Err(e) = world.resource_mut::<ActiveDocument>().execute(&cadrs_core::pcb::outline_link::SetOutlineLink { pcb, board, link: None }) {
+    if let Err(e) = world.resource_mut::<ActiveDocument>().execute(&cadrs_core::pcb::outline_link::SetOutlineLink { pcb, board, link: None, keep_parts: false }) {
         crate::linked::error_toast(world, e.to_string());
     }
 }
@@ -919,7 +922,7 @@ fn on_link_menu(ev: On<cadrs_ui::MenuAction>, mut commands: Commands) {
         let Some((pcb, board)) = board_of(world, m.feature) else { return };
         let Some(element) = world.resource::<ActiveDocument>().active_element().map(|e| e.id) else { return };
         let regions = sketch_regions(world, sketch);
-        let cmd = cadrs_core::pcb::outline_link::SetOutlineLink { pcb, board, link: Some((element, sketch, regions)) };
+        let cmd = cadrs_core::pcb::outline_link::SetOutlineLink { pcb, board, link: Some((element, sketch, regions)), keep_parts: true };
         if let Err(e) = world.resource_mut::<ActiveDocument>().execute(&cmd) {
             crate::linked::error_toast(world, e.to_string());
         }

@@ -11,7 +11,8 @@
 // 04 Board location picked in the Feature list: the board's outline centre at (0, 0, 12), its
 //    bottom face 2 mm below the pins' tips; PS1, the large module on the bottom, runs into the
 //    plug and the end plate.
-// 05 ✓, closer: "Derived 1" in the Feature list; the Parts list has the board and its components;
+// 05 ✓, closer: "Derived 1" in the Feature list; the Parts list has the board (a folder of its
+//    components, closed);
 //    the board's skins (mask, gold pads, silkscreen) and the parts' models.
 // 06 the chevron opened: AC sensor (board icon), the view row "View 3D | Layout", "Parts (9)".
 // 07 Parts opened: J1 … C1 (chip icons, indented) with their eyes; U1, parked off the

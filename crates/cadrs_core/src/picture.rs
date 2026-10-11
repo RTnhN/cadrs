@@ -136,7 +136,7 @@ impl ImageFeature {
         let at = |x: f64, y: f64| f.to_world(cadrs_sketch::Vec2::new(x, y));
         let corner = at(self.center[0] - self.width / 2.0, self.center[1] - self.height / 2.0);
         let s = |a: [f64; 3], k: f64| [a[0] * k, a[1] * k, a[2] * k];
-        crate::solid::SolidImage { blob: self.blob.clone(), corner, u: s(unit(f.u), self.width), v: s(unit(f.v), self.height) }
+        crate::solid::SolidImage { blob: self.blob.clone(), corner, u: s(unit(f.u), self.width), v: s(unit(f.v), self.height), facing: None }
     }
 }
 

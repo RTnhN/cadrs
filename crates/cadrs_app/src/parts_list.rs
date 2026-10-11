@@ -14,6 +14,8 @@
 //!   view, `ex2-step8.png`).
 //! - A hidden part's row is greyed, with a crossed eye. A row's eye shows while it is hovered;
 //!   a click shows or hides the part.
+//! - A derived PCB board is a folder: its board part's row has a chevron, and its components
+//!   are listed under it (closed at first).
 
 use bevy::prelude::*;
 use bevy::text::FontWeight;
@@ -34,6 +36,7 @@ pub struct PartsListPlugin;
 impl Plugin for PartsListPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<GroupsOpen>()
+            .init_resource::<BoardsOpen>()
             .add_systems(
                 Update,
                 (rebuild_part_list, sync_isolate_bar, exit_isolate_on_escape, mark_menu_row)
@@ -44,6 +47,7 @@ impl Plugin for PartsListPlugin {
             .add_observer(on_part_menu_action)
             .add_observer(on_part_rename_commit)
             .add_observer(on_group_toggle)
+            .add_observer(on_board_toggle)
             .add_observer(on_part_eye)
             .add_observer(on_exit_isolate);
     }
@@ -82,12 +86,20 @@ impl GroupsOpen {
     }
 }
 
+/// Derived boards whose components are shown under them (by the board part).
+#[derive(Resource, Debug, Clone, Default)]
+struct BoardsOpen(Vec<PartId>);
+
+/// A derived board's row: its chevron opens its components.
+#[derive(Component, Debug, Clone, Copy)]
+struct BoardFolder(PartId);
+
 /// The part a context menu is for.
 #[derive(Component, Debug, Clone, Copy)]
 struct PartMenuFor(PartId);
 
-/// What the rows were built from.
-type RowKey = (Vec<(PartId, String, PartKind, bool, bool, bool)>, bool, bool);
+/// What the rows were built from (and the boards with their components, and the open ones).
+type RowKey = (Vec<(PartId, String, PartKind, bool, bool, bool)>, bool, bool, Vec<(PartId, Vec<PartId>)>, Vec<PartId>);
 
 /// Rebuilds the groups and rows when the parts, their names or visibility change.
 #[allow(clippy::too_many_arguments)]
@@ -96,6 +108,7 @@ fn rebuild_part_list(
     doc: Option<Res<ActiveDocument>>,
     over: Res<PartOverride>,
     open: Res<GroupsOpen>,
+    boards_open: Res<BoardsOpen>,
     q_rows: Query<(Entity, Ref<PartRows>)>,
     theme: Res<Theme>,
     mut last: Local<Option<RowKey>>,
@@ -126,7 +139,9 @@ fn rebuild_part_list(
             )
         })
         .collect();
-    let key = (rows, open.parts, open.surfaces);
+    // Each derived board copy's part and its components.
+    let boards: Vec<(PartId, Vec<PartId>)> = cache.derived.values().flat_map(|o| o.boards.iter().map(move |b| (b.part, o.components_of(b.part)))).filter(|(_, c)| !c.is_empty()).collect();
+    let key = (rows, open.parts, open.surfaces, boards, boards_open.0.clone());
     if !added && last.as_ref() == Some(&key) {
         return;
     }
@@ -156,52 +171,73 @@ fn rebuild_part_list(
             if !is_open {
                 continue;
             }
-            for (id, label, _, bold, hidden, is_composite) in members {
-                let visuals = Visuals {
-                    background: StateColors::new(Color::NONE, t.list_hover, t.list_active, Color::NONE)
-                        .with_selected(t.list_selected),
-                    border: StateColors::all(Color::NONE),
-                    foreground: StateColors::all(if *hidden {
-                        Color::srgb_u8(0xa6, 0xa6, 0xa6)
-                    } else {
-                        t.foreground
-                    }),
-                    focus_ring: t.focus_ring,
-                };
-                let icon_name = match kind {
-                    PartKind::Solid if *is_composite => "composite-part",
-                    PartKind::Solid => "part",
-                    PartKind::Surface => "surface",
-                };
-                let row_name = tab_node_name(label).replacen("tab-", "part-row-", 1);
-                // The eye shows while the row is hovered (always, crossed, on a hidden part);
-                // a click shows or hides the part.
-                let tip = if *hidden { format!("Show {label}") } else { format!("Hide {label}") };
-                let mut row = c.spawn((
-                    TreeItem::new(row_name.clone(), label.clone())
-                        .toggle(format!("{row_name}-visibility"), "visible", "hidden", !*hidden)
-                        .toggle_tooltip(tip)
-                        .toggle_keeps_off()
-                        .icon(icon_name, 16.0)
-                        .icon_color(if *hidden { Color::srgb_u8(0xc4, 0xc4, 0xc4) } else { t.muted_foreground })
-                        .weight(if *bold { FontWeight::BOLD } else { FontWeight::MEDIUM })
-                        .left(22.0)
-                        .editable()
-                        .build(&t),
-                    PickRow(Pick::Part(*id)),
-                    PartRow(*id),
-                    ContextMenuTarget,
-                ));
-                row.insert(visuals)
-                    .entry::<Node>()
-                    .and_modify(|mut n| {
-                        n.height = Val::Px(22.0);
-                        n.margin = UiRect::new(Val::Px(2.0), Val::Px(7.0), Val::Px(1.0), Val::Px(1.0));
-                    });
+            let component = |id: &PartId| key.3.iter().any(|(_, c)| c.contains(id));
+            for m in members.iter().filter(|m| !component(&m.0)) {
+                let folder = key.3.iter().find(|(b, _)| *b == m.0);
+                let open = folder.is_some_and(|(b, _)| key.4.contains(b));
+                spawn_row(c, &t, m, kind, 22.0, folder.map(|_| open));
+                if let Some((_, comps)) = folder.filter(|_| open) {
+                    for cm in comps.iter().filter_map(|id| members.iter().find(|r| r.0 == *id)) {
+                        spawn_row(c, &t, cm, kind, 40.0, None);
+                    }
+                }
             }
         }
     });
     *last = Some(key);
+}
+
+/// A part's row: `left` its indent; `folder` a board's chevron (open or not).
+fn spawn_row(c: &mut ChildSpawnerCommands, t: &Theme, m: &(PartId, String, PartKind, bool, bool, bool), kind: PartKind, left: f32, folder: Option<bool>) {
+    let (id, label, _, bold, hidden, is_composite) = m;
+    let visuals = Visuals {
+        background: StateColors::new(Color::NONE, t.list_hover, t.list_active, Color::NONE).with_selected(t.list_selected),
+        border: StateColors::all(Color::NONE),
+        foreground: StateColors::all(if *hidden { Color::srgb_u8(0xa6, 0xa6, 0xa6) } else { t.foreground }),
+        focus_ring: t.focus_ring,
+    };
+    let icon_name = match kind {
+        PartKind::Solid if folder.is_some() => "pcb-studio",
+        PartKind::Solid if *is_composite => "composite-part",
+        PartKind::Solid => "part",
+        PartKind::Surface => "surface",
+    };
+    let row_name = tab_node_name(label).replacen("tab-", "part-row-", 1);
+    // The eye shows while the row is hovered (always, crossed, on a hidden part); a click shows
+    // or hides the part.
+    let tip = if *hidden { format!("Show {label}") } else { format!("Hide {label}") };
+    let mut item = TreeItem::new(row_name.clone(), label.clone())
+        .toggle(format!("{row_name}-visibility"), "visible", "hidden", !*hidden)
+        .toggle_tooltip(tip)
+        .toggle_keeps_off()
+        .icon(icon_name, 16.0)
+        .icon_color(if *hidden { Color::srgb_u8(0xc4, 0xc4, 0xc4) } else { t.muted_foreground })
+        .weight(if *bold { FontWeight::BOLD } else { FontWeight::MEDIUM })
+        .left(if folder.is_some() { left - 14.0 } else { left })
+        .editable();
+    if folder.is_some() {
+        item = item.disclosure(folder);
+    }
+    let mut row = c.spawn((item.build(t), PickRow(Pick::Part(*id)), PartRow(*id), ContextMenuTarget));
+    if folder.is_some() {
+        row.insert(BoardFolder(*id));
+    }
+    row.insert(visuals).entry::<Node>().and_modify(|mut n| {
+        n.height = Val::Px(22.0);
+        n.margin = UiRect::new(Val::Px(2.0), Val::Px(7.0), Val::Px(1.0), Val::Px(1.0));
+    });
+}
+
+/// A board's chevron opens or closes its components.
+fn on_board_toggle(ev: On<TreeToggle>, q: Query<&BoardFolder>, mut open: ResMut<BoardsOpen>) {
+    if let Ok(f) = q.get(ev.entity) {
+        match open.0.iter().position(|p| *p == f.0) {
+            Some(i) => {
+                open.0.remove(i);
+            }
+            None => open.0.push(f.0),
+        }
+    }
 }
 
 /// The eye on a part's row shows or hides that part, as an undoable step.

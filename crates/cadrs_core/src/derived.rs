@@ -522,6 +522,15 @@ pub struct DerivedOutput {
     pub collisions: Vec<crate::pcb::fit::Collision<PartId>>,
 }
 
+impl DerivedOutput {
+    /// The component parts of the derived board copy whose board part is `board` (they follow
+    /// it in [`DerivedOutput::parts`], up to the next copy's board part).
+    pub fn components_of(&self, board: PartId) -> Vec<PartId> {
+        let Some(start) = self.parts.iter().position(|p| *p == board) else { return vec![] };
+        self.parts[start + 1..].iter().take_while(|p| !self.boards.iter().any(|b| b.part == **p)).copied().collect()
+    }
+}
+
 /// One copy of a derived board: its board part, and its **board frame** in the Part Studio (the
 /// layout's origin with its x and y axes, on the board's bottom face; the top face is the
 /// board's thickness along `u × v`).

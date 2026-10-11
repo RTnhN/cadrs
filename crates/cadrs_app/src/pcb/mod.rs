@@ -788,8 +788,10 @@ struct OutlineTargets(Vec<(ElementId, cadrs_core::FeatureId)>);
 /// a Part Studio sketch (each sketch with a closed region, `docs/PCB_IN_PART_STUDIO.md` §8.2), or
 /// Break outline link. The menu opens below the row, at the pointer's x, so it never covers the
 /// row (P3H.3 judge).
-fn on_board_menu(ev: On<ContextMenuRequested>, q: Query<(&BoardRow, &UiGlobalTransform, &ComputedNode)>, doc: Res<ActiveDocument>, theme: Res<Theme>, mut commands: Commands) {
+fn on_board_menu(ev: On<ContextMenuRequested>, q: Query<(&BoardRow, &UiGlobalTransform, &ComputedNode)>, doc: Option<Res<ActiveDocument>>, theme: Res<Theme>, mut commands: Commands) {
+    // (Every right-click comes here, the document list's too, where no document is open.)
     let Ok((r, tf, node)) = q.get(ev.entity) else { return };
+    let Some(doc) = doc else { return };
     let s = node.inverse_scale_factor();
     let bottom = (tf.translation.y + node.size().y / 2.0) * s;
     let at = Vec2::new(ev.position.x + 2.0, bottom.max(ev.position.y) + 4.0);
@@ -824,8 +826,8 @@ fn on_board_menu(ev: On<ContextMenuRequested>, q: Query<(&BoardRow, &UiGlobalTra
 fn on_board_menu_action(ev: On<MenuAction>, q: Query<(&BoardMenuFor, &OutlineTargets), With<ContextMenuAnchor>>, mut commands: Commands) {
     let Ok((&BoardMenuFor(el, id), targets)) = q.get(ev.entity) else { return };
     use cadrs_core::pcb::outline_link::SetOutlineLink;
-    let link = move |w: &mut World, link| {
-        if let Err(e) = w.resource_mut::<ActiveDocument>().execute(&SetOutlineLink { pcb: el, board: id, link }) {
+    let link = move |w: &mut World, link: Option<(ElementId, cadrs_core::FeatureId, Vec<cadrs_core::document::RegionRef>)>| {
+        if let Err(e) = w.resource_mut::<ActiveDocument>().execute(&SetOutlineLink { pcb: el, board: id, keep_parts: link.is_some(), link }) {
             crate::linked::error_toast(w, e.to_string());
         }
     };

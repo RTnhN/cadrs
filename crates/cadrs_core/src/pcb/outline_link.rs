@@ -181,6 +181,9 @@ pub struct SetOutlineLink {
     pub pcb: ElementId,
     pub board: BoardId,
     pub link: Option<(ElementId, FeatureId, Vec<RegionRef>)>,
+    /// When linking: everything else on the layout moves with the outline's centre, so the
+    /// parts keep their place on the board (a layout drawn elsewhere taking a sketch's outline).
+    pub keep_parts: bool,
 }
 
 impl Command for SetOutlineLink {
@@ -198,10 +201,18 @@ impl Command for SetOutlineLink {
                 let s = studio_mut(doc, self.pcb)?;
                 let b = s.board_mut(self.board).ok_or_else(|| CommandError::Invalid("no such board".into()))?;
                 let design = b.design.as_mut().ok_or_else(|| CommandError::Invalid("The board isn't designed in cadrs".into()))?;
+                let before = super::board3d::outline_center(&design.board);
                 // The sketch's outline replaces the drawn one.
                 design.board.shapes.retain(|s| s.layer != Layer::Outline);
                 b.outline_link = Some(OutlineLink { element: *element, sketch: *sketch, regions: regions.clone(), shapes: vec![], problem: None });
                 apply_outline(b, geoms);
+                if self.keep_parts
+                    && let Some(design) = b.design.as_mut()
+                {
+                    let after = super::board3d::outline_center(&design.board);
+                    super::ops::shift_layout(&mut design.board, [after[0] - before[0], after[1] - before[1]]);
+                    b.design_changed();
+                }
                 Ok(())
             }
             None => {

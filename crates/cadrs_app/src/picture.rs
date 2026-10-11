@@ -45,9 +45,10 @@ impl Plugin for PicturePlugin {
     }
 }
 
-/// The decoded pictures, by blob hash: their texture and material (`None`: unreadable).
+/// The decoded pictures, by blob hash and whether one-sided: their texture and material
+/// (`None`: unreadable).
 #[derive(Resource, Default)]
-pub struct PictureTextures(HashMap<String, Option<Handle<StandardMaterial>>>);
+pub struct PictureTextures(HashMap<(String, bool), Option<Handle<StandardMaterial>>>);
 
 /// A picture drawn over its part.
 #[derive(Component)]
@@ -153,9 +154,11 @@ fn drop_pictures(
     }
 }
 
-/// The picture's texture as an unlit, two-sided material (`None` if it can't be read).
+/// The picture's texture as an unlit material, two-sided or (`one_sided`) seen only from the
+/// front (`None` if it can't be read).
 fn picture_material(
     blob: &str,
+    one_sided: bool,
     images: &mut Assets<Image>,
     materials: &mut Assets<StandardMaterial>,
 ) -> Option<Handle<StandardMaterial>> {
@@ -184,8 +187,10 @@ fn picture_material(
     Some(materials.add(StandardMaterial {
         base_color_texture: Some(images.add(texture)),
         unlit: true,
-        cull_mode: None,
-        double_sided: true,
+        // A board's skin: only from outside its face, or the other face's would show through
+        // the board at an angle (the depth bias below lets it win over the board's faces).
+        cull_mode: one_sided.then_some(bevy::render::render_resource::Face::Back),
+        double_sided: !one_sided,
         // Transparent pixels show the part's surface.
         alpha_mode: AlphaMode::Blend,
         // Over the part's own face, which it lies on.
@@ -194,16 +199,26 @@ fn picture_material(
     }))
 }
 
-/// The quad a picture covers, its texture upright (row 0 at the `v` end).
+/// The quad a picture covers, its texture upright (row 0 at the `v` end), its front the side
+/// it faces ([`SolidImage::facing`]; else `u × v`).
 fn picture_mesh(p: &SolidImage) -> Mesh {
     let v = |a: [f64; 3]| Vec3::new(a[0] as f32, a[1] as f32, a[2] as f32);
     let (c, u, w) = (v(p.corner), v(p.u), v(p.v));
-    let n = u.cross(w).normalize_or_zero();
+    let mut n = u.cross(w).normalize_or_zero();
+    // Wound so its front is the side it faces (a board's bottom skin, drawn as the layout has
+    // it, faces down).
+    let mut indices = vec![0, 1, 2, 0, 2, 3];
+    if let Some(f) = p.facing.map(v)
+        && f.dot(n) < 0.0
+    {
+        n = -n;
+        indices = vec![0, 2, 1, 0, 3, 2];
+    }
     Mesh::new(PrimitiveTopology::TriangleList, RenderAssetUsages::default())
         .with_inserted_attribute(Mesh::ATTRIBUTE_POSITION, vec![c, c + u, c + u + w, c + w])
         .with_inserted_attribute(Mesh::ATTRIBUTE_NORMAL, vec![n; 4])
         .with_inserted_attribute(Mesh::ATTRIBUTE_UV_0, vec![[0.0f32, 1.0], [1.0, 1.0], [1.0, 0.0], [0.0, 0.0]])
-        .with_inserted_indices(Indices::U32(vec![0, 1, 2, 0, 2, 3]))
+        .with_inserted_indices(Indices::U32(indices))
 }
 
 /// Keeps a textured quad over every shown part's pictures.
@@ -228,10 +243,11 @@ fn sync_pictures(
         commands.entity(e).try_despawn();
     }
     for (name, pic) in want {
+        let one_sided = pic.facing.is_some();
         let material = textures
             .0
-            .entry(pic.blob.clone())
-            .or_insert_with(|| picture_material(&pic.blob, &mut images, &mut materials))
+            .entry((pic.blob.clone(), one_sided))
+            .or_insert_with(|| picture_material(&pic.blob, one_sided, &mut images, &mut materials))
             .clone();
         let Some(material) = material else { continue };
         commands.spawn((

@@ -107,6 +107,19 @@ impl Rebuilder {
                 "The parts to transform no longer exist".into()
             });
         }
+        // A derived board moves as one: its components (mesh parts) go with its board part.
+        if !x.copies() {
+            let boards: Vec<PartId> = parts.clone();
+            for out in state.derived.values() {
+                for b in boards.iter().filter(|b| out.boards.iter().any(|c| c.part == **b)) {
+                    for c in out.components_of(*b) {
+                        if !parts.contains(&c) && state.part(c).is_some() {
+                            parts.push(c);
+                        }
+                    }
+                }
+            }
+        }
         let missing = x.parts.iter().filter(|p| state.part(**p).is_none()).count();
         let map = self.transform_map(before, x, state)?;
         let mut out = if parts.is_empty() && x.context.is_empty() {

@@ -166,9 +166,11 @@ pub fn anchor_point(b: &Board, o: &BoardOptions) -> [f64; 3] {
     [x, y, z]
 }
 
-/// Whether a footprint sits on the board (its origin inside the outline).
+/// Whether a footprint sits on the board: its origin inside the outline's outer edge (a
+/// cut-out doesn't count: a wire pad's footprint cuts a hole around its own origin).
 pub fn on_board(region: &cadrs_eda::poly::Region, f: &cadrs_eda::board::PlacedFootprint) -> bool {
-    cadrs_eda::poly::contains(region, f.placement.at)
+    let outer: cadrs_eda::poly::Region = region.iter().filter(|r| cadrs_eda::poly::ring_area(r) > 0.0).cloned().collect();
+    cadrs_eda::poly::contains(&outer, f.placement.at)
 }
 
 /// A converted IDF loop as exact kernel curves (lines, arcs from the included angle, circles).
@@ -538,9 +540,10 @@ fn skin_blob(b: &Board, hash: u64, owner: u64, side: Side) -> Option<(String, [f
 pub fn skins(b: &Board, hash: u64, owner: u64) -> Vec<SolidImage> {
     let t = thickness(b);
     let mut out = vec![];
-    for (side, z) in [(Side::Top, t + 0.01), (Side::Bottom, -0.01)] {
+    // Each seen only from outside its face: through the board, the other face's would show.
+    for (side, z, n) in [(Side::Top, t + 0.01, 1.0), (Side::Bottom, -0.01, -1.0)] {
         let Some((blob, [x0, y0, w, h])) = skin_blob(b, hash, owner, side) else { continue };
-        out.push(SolidImage { blob, corner: [x0, y0, z], u: [w, 0.0, 0.0], v: [0.0, h, 0.0] });
+        out.push(SolidImage { blob, corner: [x0, y0, z], u: [w, 0.0, 0.0], v: [0.0, h, 0.0], facing: Some([0.0, 0.0, n]) });
     }
     out
 }
@@ -619,6 +622,20 @@ mod tests {
         assert_eq!(components(&b, &top).0.len(), 2);
         let ex = BoardOptions { exclude: vec![d1.footprint], ..Default::default() };
         assert!(components(&b, &ex).0.iter().all(|c| c.reference != "D1"));
+    }
+
+    #[test]
+    fn a_pad_cutting_a_hole_round_itself_is_on_the_board() {
+        // A wire pad whose footprint cuts a ⌀4 hole round its origin, in the middle.
+        let mut b = Board::with_rect_outline(mm(40.0), mm(20.0));
+        let mut f = cadrs_eda::ac_board::wire_pad();
+        cadrs_eda::lib_edit::add_fp_shape(&mut f, cadrs_eda::graphics::Geom::Circle { center: cadrs_eda::units::Pt::ZERO, radius: mm(2.0) }, cadrs_eda::layer::Layer::Outline, mm(0.05));
+        b.footprints.push(cadrs_eda::board::PlacedFootprint { id: Uuid::new_v4(), footprint: f, placement: cadrs_eda::footprint::FootprintPlacement { at: cadrs_eda::units::Pt::mm(20.0, 10.0), ..Default::default() }, locked: false, symbol: None });
+        let region = cadrs_eda::outline::board_region(&b);
+        assert!(!cadrs_eda::poly::contains(&region, b.footprints[0].placement.at), "its origin is in its own hole");
+        assert!(on_board(&region, &b.footprints[0]));
+        b.footprints[0].placement.at = cadrs_eda::units::Pt::mm(50.0, 10.0);
+        assert!(!on_board(&cadrs_eda::outline::board_region(&b), &b.footprints[0]));
     }
 
     #[test]

@@ -23,6 +23,7 @@ pub mod component_docs;
 pub mod design;
 pub mod fit;
 pub mod frames;
+pub mod ops;
 pub mod generated;
 pub mod import;
 pub mod library;

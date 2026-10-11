@@ -282,6 +282,10 @@ pub struct SolidImage {
     pub corner: Vec3,
     pub u: Vec3,
     pub v: Vec3,
+    /// Shown only from this side (the outward normal of the face it is printed on: a board's
+    /// skin, which must not show through the board); `None`: from both sides.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub facing: Option<Vec3>,
 }
 
 impl SolidImage {
@@ -290,7 +294,12 @@ impl SolidImage {
         let add = |a: Vec3, b: Vec3| [a[0] + b[0], a[1] + b[1], a[2] + b[2]];
         let sub = |a: Vec3, b: Vec3| [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
         let corner = f(self.corner);
-        Self { blob: self.blob.clone(), corner, u: sub(f(add(self.corner, self.u)), corner), v: sub(f(add(self.corner, self.v)), corner) }
+        let facing = self.facing.map(|n| {
+            let d = sub(f(add(self.corner, n)), corner);
+            let l = (d[0] * d[0] + d[1] * d[1] + d[2] * d[2]).sqrt().max(1e-300);
+            [d[0] / l, d[1] / l, d[2] / l]
+        });
+        Self { blob: self.blob.clone(), corner, u: sub(f(add(self.corner, self.u)), corner), v: sub(f(add(self.corner, self.v)), corner), facing }
     }
 }
 

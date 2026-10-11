@@ -48,6 +48,7 @@ pub mod reference_manager;
 pub mod manipulator;
 pub mod mass_props;
 pub mod mcp;
+pub mod mcp_board;
 pub mod measure;
 pub mod material_dialog;
 pub mod panel_tab;

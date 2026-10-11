@@ -390,6 +390,16 @@ fn a_transform_moves_the_board_and_its_components_together() {
         let moved = b1.part(p.id).unwrap();
         assert!((bounds(moved).0[2] - bounds(p).0[2] - 20.0).abs() < 1e-6, "{} moved up 20", p.name);
     }
+    // Picking the board alone moves its components too (undo, then the board part only).
+    h.undo(&mut doc).unwrap();
+    let board_part = b0.derived[&DERIVED].boards[0].part;
+    let t = cadrs_core::transform::TransformFeature { transform_type: cadrs_core::transform::TransformType::TranslateXyz, parts: vec![board_part], dz: 20.0, dz_expr: "20 mm".into(), ..Default::default() };
+    run(&mut doc, &mut h, &AddFeature { element: STUDIO, feature: tf, base_name: "Transform".into(), kind: FeatureKind::Transform(t) });
+    let b1 = build(&doc);
+    for p in &parts {
+        let moved = b1.part(p.id).unwrap();
+        assert!((bounds(moved).0[2] - bounds(p).0[2] - 20.0).abs() < 1e-6, "{} moved up 20 with the board", p.name);
+    }
     // The board's frame (its layout's place) went with it.
     let (f0, f1) = (b0.derived.values().next().unwrap().boards[0].frame, b1.derived.values().next().unwrap().boards[0].frame);
     assert!((f1.origin[2] - f0.origin[2] - 20.0).abs() < 1e-9 && f1.u == f0.u && f1.v == f0.v, "{f0:?} → {f1:?}");
@@ -543,7 +553,7 @@ fn the_outline_follows_the_sketch_until_the_link_is_broken() {
     assert!(sb.design().unwrap().board.shapes.iter().filter(|s| link.shapes.contains(&s.id)).all(|s| s.locked));
     // Break the link: the shapes stay, unlocked, and no longer follow.
     let board_id = sb.id;
-    run(&mut doc, &mut h, &cadrs_core::pcb::outline_link::SetOutlineLink { pcb: NEW_PCB, board: board_id, link: None });
+    run(&mut doc, &mut h, &cadrs_core::pcb::outline_link::SetOutlineLink { pcb: NEW_PCB, board: board_id, link: None, keep_parts: false });
     let g = doc.element(STUDIO).unwrap().feature(OUTLINE_SKETCH).unwrap().sketch().unwrap().geometry.clone();
     let corner = |x: f64, y: f64| g.point_at(Vec2::new(x, y), 1e-6).unwrap();
     let moves = vec![(corner(30.0, -10.0), Vec2::new(40.0, -10.0)), (corner(30.0, 20.0), Vec2::new(40.0, 20.0))];
@@ -579,7 +589,7 @@ fn an_outline_cant_follow_a_sketch_after_the_board() {
     let late = FeatureId::new();
     run(&mut doc, &mut h, &AddSketch { element: STUDIO, feature: late, plane: Some(cadrs_sketch::PlaneRef::Front) });
     let board = doc.element(NEW_PCB).unwrap().pcb().unwrap().boards[0].id;
-    let e = h.execute(&mut doc, &cadrs_core::pcb::outline_link::SetOutlineLink { pcb: NEW_PCB, board, link: Some((STUDIO, late, vec![])) }).unwrap_err();
+    let e = h.execute(&mut doc, &cadrs_core::pcb::outline_link::SetOutlineLink { pcb: NEW_PCB, board, link: Some((STUDIO, late, vec![])), keep_parts: false }).unwrap_err();
     assert!(e.to_string().contains("comes after"), "{e}");
 }
 
