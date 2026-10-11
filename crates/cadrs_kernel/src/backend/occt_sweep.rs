@@ -29,7 +29,7 @@ use opencascade::safe::{LoftDerivative, SubKind, SweepMode};
 
 use super::extrude::{Tagged, chain_wire, edge_origins};
 use super::{
-    Edges, OcctKernel, curve_edge, face_count, faces_of, generated, loop_wire, occt, oriented, profile_faces,
+    Edges, OcctKernel, path_curve_edge, face_count, faces_of, generated, loop_wire, occt, oriented, profile_faces,
     select_edges, sweep_origins, to_glam, to_na, union_tagged,
 };
 use crate::loft::{SectionCurves, sample_sections, section_loop};
@@ -296,7 +296,7 @@ impl OcctKernel {
                     out.extend(select_edges(shape, &[*edge])?);
                 }
                 PathCurve::Sketch { plane, curve } => {
-                    out.push(curve_edge(plane, curve, curve.start(), curve.end(), curve.is_closed())?);
+                    out.push(path_curve_edge(plane, curve, curve.start(), curve.end(), curve.is_closed())?);
                 }
                 PathCurve::Bezier3 { poles, weights } => {
                     let pts: Vec<glam::DVec3> = poles.iter().map(|p| to_glam(p.coords)).collect();

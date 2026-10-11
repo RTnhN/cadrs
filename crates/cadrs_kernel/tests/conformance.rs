@@ -1473,6 +1473,59 @@ pub fn union_merges_flush_cylinders(k: &mut dyn Kernel) {
     assert_eq!((count(r), count(bore)), (1, 1), "one outer cylinder, one bore");
 }
 
+/// Cylinders about one axis from different sketches merge too, whichever way each sketch faces
+/// and each extrude goes (the d4 plug: a ribbed tube sketched facing -X and extruded back, an
+/// end tube sketched on its end facing +X; a hole cut back from a face and a boss's hole on it).
+pub fn union_merges_cylinders_across_sketches(k: &mut dyn Kernel) {
+    let (r, bore, h, w) = (3.0f64, 2.4f64, 0.75f64, 6.0f64);
+    let x = (r * r - h * h).sqrt();
+    let a0 = (h / r).asin();
+    let outer = Loop {
+        curves: vec![
+            arc(p(0.0, 0.0), r, a0, PI - 2.0 * a0),
+            line(p(-x, h), p(-w, h)),
+            line(p(-w, h), p(-w, -h)),
+            line(p(-w, -h), p(-x, -h)),
+            arc(p(0.0, 0.0), r, PI + a0, PI - 2.0 * a0),
+            line(p(x, -h), p(w, -h)),
+            line(p(w, -h), p(w, h)),
+            line(p(w, h), p(x, h)),
+        ],
+    };
+    let cylinders = |k: &mut dyn Kernel, body: BodyId, radius: f64| {
+        k.faces(body)
+            .unwrap()
+            .into_iter()
+            .filter(|f| f.kind == SurfaceKind::Cylinder && f.radius.is_some_and(|fr| (fr - radius).abs() < 1e-6))
+            .count()
+    };
+    // The ribbed tube's sketch faces -X (extruded back along +X) or +X; the end tube's +X or -X.
+    for (na, da, nb, db) in [(-1.0, -14.77, 1.0, 1.5), (1.0, 14.77, 1.0, 1.5), (-1.0, -14.77, -1.0, -1.5)] {
+        let plane = |sx: f64, ox: f64| Plane {
+            origin: Point3::new(ox, 0.0, 0.0),
+            x_dir: Vector3::y_axis(),
+            normal: nalgebra::Unit::new_normalize(Vector3::new(sx, 0.0, 0.0)),
+        };
+        let ribbed = Region { outer: outer.clone(), holes: vec![circle(p(0.0, 0.0), bore)], source: None };
+        let a = one(k.extrude(&Profile::new(plane(na, 0.0), vec![ribbed]), Extent::Blind(da)).unwrap());
+        let end = Region { outer: circle(p(0.0, 0.0), r), holes: vec![circle(p(0.0, 0.0), bore)], source: None };
+        let b = one(k.extrude(&Profile::new(plane(nb, 14.77), vec![end]), Extent::Blind(db)).unwrap());
+        let fused = one(k.boolean(BoolOp::Union, a, &[b]).unwrap());
+        assert_eq!((cylinders(k, fused, r), cylinders(k, fused, bore)), (1, 1), "sketches facing {na}, {nb}: one outer cylinder, one bore");
+    }
+    // A plate sketched facing -Y, a hole cut into it from its far face back, and a boss on that
+    // face (its own sketch, another x direction) with the same hole: one hole face.
+    let normal = -Vector3::y_axis();
+    let on = |d: f64, x_dir| Plane { origin: Point3::origin() + normal.into_inner() * d, x_dir, normal };
+    let plate = one(k.extrude(&Profile::new(on(0.0, Vector3::x_axis()), vec![region(rect(-10.0, -10.0, 10.0, 10.0))]), Extent::Blind(5.0)).unwrap());
+    let tool = one(k.extrude(&Profile::new(on(5.0, Vector3::x_axis()), vec![region(circle(p(0.0, 0.0), 1.7))]), Extent::Blind(-5.0)).unwrap());
+    let cut = one(k.boolean(BoolOp::Subtract, plate, &[tool]).unwrap());
+    let boss = Region { outer: circle(p(0.0, 0.0), 4.0), holes: vec![circle(p(0.0, 0.0), 1.7)], source: None };
+    let b = one(k.extrude(&Profile::new(on(5.0, Vector3::z_axis()), vec![boss]), Extent::Blind(5.0)).unwrap());
+    let fused = one(k.boolean(BoolOp::Union, cut, &[b]).unwrap());
+    assert_eq!(cylinders(k, fused, 1.7), 1, "one hole face through the plate and the boss");
+}
+
 // ---------------------------------------------------------------------------------------------
 // P3.4: the full revolve, face axes and edge circles
 
@@ -3184,7 +3237,7 @@ macro_rules! conformance {
                 extrude_up_to_face_parallel, extrude_up_to_face_oblique, extrude_up_to_face_through_origin,
                 extrude_up_to_part_conforms, extrude_up_to_next_from_a_face, extrude_through_all,
                 extrude_options, surface_extrude, thin_extrude, split_solids_rays_and_boxes, compound_gathers_bodies,
-                extrude_a_face, union_merges_coplanar_faces, union_merges_flush_cylinders, revolve_torus, revolve_types,
+                extrude_a_face, union_merges_coplanar_faces, union_merges_flush_cylinders, union_merges_cylinders_across_sketches, revolve_torus, revolve_types,
                 revolve_up_to, revolve_surface_and_thin, face_axes_and_edge_circles, revolve_a_face,
                 inertia_tensor, fillet_cube_all_edges, fillet_width, fillet_overflow,
                 chamfer_options, shell_options, shell_around_a_counterbore, edge_face_radius,

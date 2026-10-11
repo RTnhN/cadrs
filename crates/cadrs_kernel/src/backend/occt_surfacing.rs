@@ -15,7 +15,7 @@ use opencascade::primitives::{Edge, Face, Shape, Wire};
 use opencascade::safe::LoftDerivative;
 
 use super::sweep::chain;
-use super::{OcctKernel, curve_edge, face_count, faces_of, generated, occt, profile_faces, select_edges};
+use super::{OcctKernel, face_count, faces_of, generated, occt, path_curve_edge, profile_faces, select_edges};
 use crate::{FillCurve, FillSpec, KernelError, OpResult, Origin, Result, ThickenSpec};
 
 fn invalid(why: impl Into<String>) -> KernelError {
@@ -80,7 +80,7 @@ impl OcctKernel {
             match c {
                 FillCurve::Edge { body, edge } => edges.extend(select_edges(self.body(*body)?, &[*edge])?),
                 FillCurve::Sketch { plane, curve } => {
-                    edges.push(curve_edge(plane, curve, curve.start(), curve.end(), curve.is_closed())?)
+                    edges.push(path_curve_edge(plane, curve, curve.start(), curve.end(), curve.is_closed())?)
                 }
             }
         }

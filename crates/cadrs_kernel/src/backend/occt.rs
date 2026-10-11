@@ -926,7 +926,8 @@ impl Kernel for OcctKernel {
             origin: profile.plane.origin + profile.plane.normal.into_inner() * start,
             ..profile.plane
         };
-        let solids = profile_faces(&shifted, &profile.regions)?
+        // Circles about axes along the sweep (see `swept_along`).
+        let solids = swept_along(profile.plane.normal.into_inner() * depth, || profile_faces(&shifted, &profile.regions))?
             .iter()
             .zip(&profile.regions)
             .enumerate()
@@ -1091,7 +1092,17 @@ impl Kernel for OcctKernel {
             let (next, h) = match op {
                 // A face of the target and a face of the tool on one surface, meeting, become
                 // one face (no seam where the bodies met); `insert` then merges the rest.
-                BoolOp::Union => result.try_union_clean_h(shape),
+                BoolOp::Union => result.try_union_clean_h(shape).and_then(|(u, h)| {
+                    // Merging only across the two bodies can leave a face it couldn't merge
+                    // whole (a cylinder meeting two pieces of one split by ribs) invalid, and
+                    // the full merge in `insert` then goes wrong too: the plain union instead,
+                    // which `insert` merges whole.
+                    if u.is_valid().unwrap_or(true) || !result.is_valid().unwrap_or(false) || !shape.is_valid().unwrap_or(false) {
+                        Ok((u, h))
+                    } else {
+                        result.try_union_h(shape)
+                    }
+                }),
                 BoolOp::Subtract => result.try_subtract_h(shape),
                 BoolOp::Intersect => result.try_intersect_h(shape),
             }
@@ -2432,13 +2443,57 @@ fn loop_wire(plane: &Plane, curves: &[Curve2]) -> Result<Wire> {
 }
 
 /// The edge of one loop curve from `from` to `to` (the loop's joints). `alone`: the curve is
-/// the whole loop (a circle or an ellipse).
-fn curve_edge(
+/// the whole loop (a circle or an ellipse). A profile's circles and arcs are on frames of their
+/// axis lines (see [`Edge::try_circle_arc`]); `path` keeps a sweep path's (or a fill
+/// boundary's) on the sketch's frame, a whole circle starting at the plane's x direction.
+pub(crate) fn curve_edge(
     plane: &Plane,
     curve: &Curve2,
     from: Point2<f64>,
     to: Point2<f64>,
     alone: bool,
+) -> Result<Edge> {
+    curve_edge_on(plane, curve, from, to, alone, false)
+}
+
+thread_local! {
+    /// While an extrude builds its profile: the way the profile is swept ([`swept_along`]).
+    static SWEPT_ALONG: std::cell::Cell<Option<Vector3<f64>>> = const { std::cell::Cell::new(None) };
+}
+
+/// Runs `f` (which builds a profile) with its circles and arcs about axes that point along
+/// `dir`, the way it is then swept. Faces swept from circles about one axis line merge only when
+/// each circle's axis points the same way along its sweep (and their x directions agree, see
+/// [`Edge::try_circle_arc`]): a boss sketched on a face and extruded out continues a cylinder
+/// sketched the other way round and extruded back.
+pub(crate) fn swept_along<T>(dir: Vector3<f64>, f: impl FnOnce() -> T) -> T {
+    let before = SWEPT_ALONG.with(|c| c.replace(Some(dir)));
+    let out = f();
+    SWEPT_ALONG.with(|c| c.set(before));
+    out
+}
+
+/// The axis of a profile circle that goes counter-clockwise about `n`, and whether its edge
+/// runs against the axis (the circle is turned to point the way the profile is swept).
+fn circle_axis(n: DVec3) -> (DVec3, bool) {
+    match SWEPT_ALONG.with(|c| c.get()) {
+        Some(d) if n.dot(to_glam(d)) < 0.0 => (-n, true),
+        _ => (n, false),
+    }
+}
+
+/// [`curve_edge`] of a sweep path or a fill boundary: its circles and arcs on the sketch's frame.
+pub(crate) fn path_curve_edge(plane: &Plane, curve: &Curve2, from: Point2<f64>, to: Point2<f64>, alone: bool) -> Result<Edge> {
+    curve_edge_on(plane, curve, from, to, alone, true)
+}
+
+fn curve_edge_on(
+    plane: &Plane,
+    curve: &Curve2,
+    from: Point2<f64>,
+    to: Point2<f64>,
+    alone: bool,
+    path: bool,
 ) -> Result<Edge> {
     let at = |p: Point2<f64>| to_glam(plane.to_model(p).coords);
     let normal = to_glam(plane.normal.into_inner());
@@ -2459,31 +2514,40 @@ fn curve_edge(
             }
             Edge::try_bezier(&[at(from), at(poles[1]), at(poles[2]), at(to)], &[1.0; 4]).map_err(occt)
         }
-        Curve2::Arc {
-            center,
-            radius,
-            start_angle,
-            sweep,
-            ..
-        } => {
+        Curve2::Arc { center, radius, start_angle, sweep, .. } => {
             if radius <= LINEAR_EPS || sweep.abs() < 1e-12 {
                 return Err(KernelError::InvalidProfile("degenerate arc".into()));
             }
-            if alone || sweep.abs() >= TAU - 1e-9 {
-                let n = normal * sweep.signum();
-                return Edge::try_circle(at(center), n, x_dir_at(start_angle), radius).map_err(occt);
+            if path {
+                if alone || sweep.abs() >= TAU - 1e-9 {
+                    let n = normal * sweep.signum();
+                    return Edge::try_circle(at(center), n, x_dir_at(start_angle), radius).map_err(occt);
+                }
+                let t = start_angle + sweep / 2.0;
+                let mid = Point2::new(center.x + radius * t.cos(), center.y + radius * t.sin());
+                return Edge::try_arc(at(from), at(mid), at(to)).map_err(occt);
             }
-            let t = start_angle + sweep / 2.0;
-            let mid = Point2::new(center.x + radius * t.cos(), center.y + radius * t.sin());
-            Edge::try_arc(at(from), at(mid), at(to)).map_err(occt)
+            // On a frame of its axis line alone, not through three points (which starts the
+            // circle at the arc's first point) nor the sketch's x direction: arcs and circles
+            // about one axis, from any sketch, then sweep to faces on one surface, which merge
+            // (`merge_same_domain`).
+            let (axis, reversed) = circle_axis(normal * sweep.signum());
+            if alone || sweep.abs() >= TAU - 1e-9 {
+                return Edge::try_circle_arc(at(center), axis, radius, None, reversed).map_err(occt);
+            }
+            Edge::try_circle_arc(at(center), axis, radius, Some((at(from), at(to))), reversed).map_err(occt)
         }
         Curve2::Circle { center, radius, .. } => {
             if radius.abs() <= LINEAR_EPS {
                 return Err(KernelError::InvalidProfile("degenerate circle".into()));
             }
-            // Negative radius = clockwise (see `reversed`).
+            // Negative radius = clockwise (see `reversed`). On its axis line's frame, as arcs are.
             let n = normal * radius.signum();
-            Edge::try_circle(at(center), n, x_dir_at(0.0), radius.abs()).map_err(occt)
+            if path {
+                return Edge::try_circle(at(center), n, x_dir_at(0.0), radius.abs()).map_err(occt);
+            }
+            let (axis, reversed) = circle_axis(n);
+            Edge::try_circle_arc(at(center), axis, radius.abs(), None, reversed).map_err(occt)
         }
         Curve2::Ellipse {
             center,

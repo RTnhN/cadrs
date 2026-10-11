@@ -109,3 +109,7 @@ opt-level = 3
 # The path tracer too (P3F.6).
 [profile.dev.package.cadrs_render]
 opt-level = 3
+
+# TEMP: the local opencascade-rs fork while its circle-arc edges are tested.
+[patch."https://github.com/rvdende/opencascade-rs"]
+opencascade = { path = "../opencascade-rs/crates/opencascade" }

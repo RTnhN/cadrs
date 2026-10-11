@@ -5489,7 +5489,6 @@ dependencies = [
 [[package]]
 name = "occt-sys"
 version = "7.8.1"
-source = "git+https://github.com/rvdende/opencascade-rs?branch=main#8eb627302477d0e79164d591458ad1f99c21676e"
 dependencies = [
  "cmake",
 ]
@@ -5522,7 +5521,6 @@ checksum = "9f7c3e4beb33f85d45ae3e3a1792185706c8e16d043238c593331cc7cd313b50"
 [[package]]
 name = "opencascade"
 version = "0.3.0"
-source = "git+https://github.com/rvdende/opencascade-rs?branch=main#8eb627302477d0e79164d591458ad1f99c21676e"
 dependencies = [
  "cxx",
  "glam 0.24.2",
@@ -5534,7 +5532,6 @@ dependencies = [
 [[package]]
 name = "opencascade-kicad-parser"
 version = "0.3.0"
-source = "git+https://github.com/rvdende/opencascade-rs?branch=main#8eb627302477d0e79164d591458ad1f99c21676e"
 dependencies = [
  "sexp",
  "thiserror 1.0.69",
@@ -5543,7 +5540,6 @@ dependencies = [
 [[package]]
 name = "opencascade-sys"
 version = "0.3.0"
-source = "git+https://github.com/rvdende/opencascade-rs?branch=main#8eb627302477d0e79164d591458ad1f99c21676e"
 dependencies = [
  "cmake",
  "cxx",
