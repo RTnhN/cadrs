@@ -197,7 +197,12 @@ pub fn open_instance_menu(world: &mut World, at: Vec2, instance: InstanceId, han
     let external = cadrs_core::assembly::context::linked_studio_of(&world.resource::<ActiveDocument>().doc, element, instance).is_some();
     let contexts = if external { super::linked_context::contexts_of(world, element, instance) } else { super::managed_context::contexts_of(world.resource::<ActiveDocument>(), element, instance) };
     let no_edit = is_sub || is_std || (is_linked && !external);
-    let in_context = if board.is_some() {
+    // A subassembly with boards in it: each edited in context here.
+    let inner_boards = if is_sub { crate::board_in_studio::boards_inside(world.resource::<ActiveDocument>(), instance) } else { vec![] };
+    let in_context = if !inner_boards.is_empty() {
+        let items: Vec<cadrs_ui::MenuEntry> = inner_boards.iter().enumerate().map(|(k, (_, name))| MenuItem::new(format!("asm-board-ctx-{k}"), format!("{name} in context")).icon("pcb-studio").tooltip("Edit this board's layout here, among the parts around it").into()).collect();
+        MenuItem::new("asm-board-edit", "Edit layout").icon("pcb-studio").submenu(items)
+    } else if board.is_some() {
         // (`docs/PCB_IN_PART_STUDIO.md` §9: here, the assembly around it, or in its PCB Studio.)
         MenuItem::new("asm-board-edit", "Edit layout").icon("pcb-studio").submenu(vec![
             MenuItem::new("asm-board-edit-in-context", "In context").icon("assembly").tooltip("Edit the board's layout here, its components moved among the parts around it (the instance follows)").into(),
@@ -613,6 +618,13 @@ fn act(world: &mut World, menu: &AsmMenu, handle: TriadHandle, item: &str) {
                 && let Ok(id) = x.trim_start_matches("asm-update-context-").parse()
             {
                 super::in_context::update_context(world, studio, id);
+            }
+        }
+        x if x.starts_with("asm-board-ctx-") => {
+            let k: usize = x["asm-board-ctx-".len()..].parse().unwrap_or(usize::MAX);
+            let inner = menu.instance.map(|i| crate::board_in_studio::boards_inside(world.resource::<ActiveDocument>(), i)).unwrap_or_default();
+            if let Some((f, _)) = inner.get(k) {
+                crate::board_in_studio::begin_edit(world, *f, 0);
             }
         }
         x if x.starts_with("asm-edit-in-context") => {

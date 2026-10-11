@@ -423,13 +423,25 @@ pub fn update_assembly_parts(doc: &ActiveDocument, el: &Element, cache: &mut Par
     // Each board instance as a derived board's output (its frame where the instance puts it,
     // its parts the instance's), keyed by the instance's id: Edit layout in context works on it
     // as on a Part Studio's derived board (`crate::board_in_studio`).
-    let mut boards = HashMap::new();
+    // (Top-level instances by their own id; one inside a subassembly by its board part's
+    // occurrence, `crate::board_in_studio::instance_board`.)
+    // (key, PCB Studio, board, pose, source part → view part)
+    type Host = (FeatureId, ElementId, cadrs_core::pcb::BoardId, Pose, HashMap<PartId, PartId>);
+    let mut hosts: Vec<Host> = Vec::new();
     for i in &view.instances {
         let cadrs_core::assembly::InstanceSource::Studio { element, board: Some(b) } = i.source else { continue };
+        let ids = occ.iter().filter(|o| o.top == i.id).map(|o| (o.part, o.view_part)).collect();
+        hosts.push((FeatureId(i.id.0), element, b, i.pose, ids));
+    }
+    for o in occ.iter().filter(|o| o.child.is_some()) {
+        let Some(b) = crate::board_in_studio::board_of_occurrence(d, o) else { continue };
+        let ids = occ.iter().filter(|x| x.top == o.top && x.child == o.child && x.element == o.element && x.part.feature == o.part.feature).map(|x| (x.part, x.view_part)).collect();
+        hosts.push((FeatureId(o.id.0), o.element, b, o.pose, ids));
+    }
+    let mut boards = HashMap::new();
+    for (key, element, b, p, ids) in hosts {
         let Some(out) = builds.get(&element).and_then(|x| x.derived.get(&cadrs_core::pcb::board_feature(b))) else { continue };
-        let ids: HashMap<PartId, PartId> = occ.iter().filter(|o| o.top == i.id).map(|o| (o.part, o.view_part)).collect();
-        let id = |p: &PartId| ids.get(p).copied();
-        let p = i.pose;
+        let id = |q: &PartId| ids.get(q).copied();
         let mut mine = cadrs_core::derived::DerivedOutput {
             parts: out.parts.iter().filter_map(id).collect(),
             boards: out
@@ -454,7 +466,7 @@ pub fn update_assembly_parts(doc: &ActiveDocument, el: &Element, cache: &mut Par
             let o: Vec<(PartId, &Arc<cadrs_core::solid::Solid>)> = others.iter().map(|(p, s)| (*p, s)).collect();
             mine.collisions = cadrs_core::pcb::fit::collisions(&c, &o, &frame);
         }
-        boards.insert(FeatureId(i.id.0), mine);
+        boards.insert(key, mine);
     }
     if cache.derived != boards {
         cache.derived = boards;

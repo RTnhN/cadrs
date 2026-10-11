@@ -201,7 +201,8 @@ the 3D viewport, and (c) a sketch → outline link.
   several locations are checked against each other; MCP `move_footprint` takes
   `onto_connector`; in context, the board's components running into the other instances show
   under the bar; undo from the assembly asserted; unit tests of `component_under` and of the
-  assembly's board hosting. (Boards inside subassemblies are edited in their own tab.)
+  assembly's board hosting. A board inside a subassembly is edited in context too (the
+  subassembly's menu: Edit layout ▸ <board> in context; keyed by its board part's occurrence).
 - **Layout pictures off the main thread.** A whole layout's picture is rasterised on the async
   compute pool (the old one shown until it is ready), so a commit on a big board doesn't stall
   the view; a drag's small changes picture is still made at once. Pictures keep no CPU copy
