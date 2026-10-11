@@ -104,6 +104,7 @@ pub(super) fn box_select(
         Option<Res<super::connector_tool::ConnectorSession>>,
         Res<super::explode::ExplodeUi>,
         Res<super::drag::InstanceDrag>,
+        Res<crate::eda::Eda2d>,
     ),
     mut state: ResMut<AssemblyBox>,
     mut selection: ResMut<Selection>,
@@ -127,7 +128,7 @@ pub(super) fn box_select(
         }
         return;
     }
-    let blocked = busy.0.is_some() || busy.1.is_some() || busy.2.is_some() || busy.3.is_some() || busy.4.editing();
+    let blocked = busy.0.is_some() || busy.1.is_some() || busy.2.is_some() || busy.3.is_some() || busy.4.editing() || busy.6.plane().is_some();
     let over = pointer_over_viewport(&hover, &q_area);
     for input in inputs.read() {
         if input.pointer_id != PointerId::Mouse {

@@ -158,10 +158,13 @@ the 3D viewport, and (c) a sketch → outline link.
   components' solids from their models (`Rebuilder::placed_body`), and in-context snapshots go
   stale when a board's layout changes. The studio places its boards at their layout's origin
   (outline edits move no component).
-- **Deferred (P6): editing a board's layout in an assembly's 3D view.** Edit mode works on a
-  Part Studio's derived board (its board copy and component parts); an assembly shows
-  occurrences, so it needs its own host. Until then Edit layout on an instance opens the PCB
-  Studio, and fitting in 3D is done in a Part Studio that derives the board (then inserted).
+- **P6: Edit layout in context.** A board instance's menu: Edit layout ▸ In context (here) or
+  In its PCB Studio. In context the assembly hosts the Part Studio's edit mode: each top-level
+  board instance is given to the view as a derived board's output keyed by the instance's id
+  (its frame where the instance puts it, its parts the occurrences), and the layout is the PCB
+  Studio's own (`board_in_studio::instance_board`); the parts around are the other instances;
+  a drop is one `SetDesign` in the PCB Studio and the instance follows. Instance drags, box
+  selection and the triad keep off while editing. (Subassemblies' boards: in their own tab.)
 - **P7 done.** MCP tools (`cadrs_mcp`, logic in `cadrs_core::pcb::ops`): `get_board` (outline,
   footprints with pads and nets, DRC errors, where it is derived), `get_board_fit` (the pins and
   holes of the parts square to the board, collisions), `derive_board`, `create_board_from_sketch`,

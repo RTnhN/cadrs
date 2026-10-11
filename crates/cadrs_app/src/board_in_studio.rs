@@ -83,9 +83,35 @@ struct BoardRef {
     off_board: bool,
 }
 
-/// The derived boards of the active Part Studio (no layout copied: this runs every frame).
+/// A board instance of the active assembly, by its id taken as a feature's (Edit layout in
+/// context, `docs/PCB_IN_PART_STUDIO.md` §9): its PCB Studio, its board, and the board as the
+/// studio derives it for the assembly ([`cadrs_core::pcb::PcbStudio::part_features`]).
+pub fn instance_board(doc: &ActiveDocument, feature: FeatureId) -> Option<(ElementId, cadrs_core::pcb::BoardId, &DerivedFeature)> {
+    let model = doc.active_element()?.assembly_model()?;
+    let i = model.instance(cadrs_core::assembly::InstanceId(feature.0))?;
+    let cadrs_core::assembly::InstanceSource::Studio { element, board: Some(b) } = i.source else { return None };
+    let f = doc.doc.element(element)?.part_features().iter().find(|f| f.id == cadrs_core::pcb::board_feature(b))?;
+    match &f.kind {
+        FeatureKind::Derived(d) => Some((element, b, d)),
+        _ => None,
+    }
+}
+
+/// The derived boards of the active Part Studio, or the board instances of the active assembly
+/// (no layout copied: this runs every frame).
 fn boards_in(doc: &ActiveDocument) -> Vec<BoardRef> {
     let Some(el) = doc.active_element() else { return vec![] };
+    if let Some(model) = el.assembly_model() {
+        return model
+            .instances
+            .iter()
+            .filter_map(|i| {
+                let feature = FeatureId(i.id.0);
+                let b = instance_board(doc, feature)?.2.board.as_ref()?;
+                Some(BoardRef { studio: el.id, feature, view: BoardView::ThreeD, hash: b.hash, name: b.board_name.clone(), off_board: false })
+            })
+            .collect();
+    }
     el.features()
         .iter()
         .filter_map(|f| match &f.kind {
@@ -97,6 +123,9 @@ fn boards_in(doc: &ActiveDocument) -> Vec<BoardRef> {
 
 /// The layout of the derived board `feature` of the active Part Studio.
 fn layout_of(doc: &ActiveDocument, feature: FeatureId) -> Option<&cadrs_eda::board::Board> {
+    if let Some((_, _, d)) = instance_board(doc, feature) {
+        return d.board.as_ref().map(|b| &b.layout);
+    }
     match &doc.active_element()?.feature(feature)?.kind {
         FeatureKind::Derived(d) => d.board.as_ref().map(|b| &b.layout),
         _ => None,
@@ -385,20 +414,36 @@ pub fn set_view(world: &mut World, feature: FeatureId, view: BoardView) {
 pub fn edited_board(doc: &ActiveDocument, editing: &BoardEditing, cache: &PartCache) -> Option<(ElementId, cadrs_core::pcb::BoardId, crate::eda::PlaneHost)> {
     let t = editing.target?;
     let el = doc.active_element().filter(|e| e.id == t.studio)?;
-    let FeatureKind::Derived(d) = &el.feature(t.feature)?.kind else { return None };
-    let (r, b) = (d.source?, d.board.as_ref()?);
-    if r.at != RefAt::Workspace || r.document_or(doc.doc.id) != doc.doc.id {
-        return None;
-    }
-    doc.doc.element(r.element)?.pcb()?.board(b.board)?.design()?;
+    // A board instance of an assembly (in context), or a derived board of a Part Studio.
+    let (pcb, board) = match instance_board(doc, t.feature) {
+        Some((pcb, board, _)) => (pcb, board),
+        None => {
+            let FeatureKind::Derived(d) = &el.feature(t.feature)?.kind else { return None };
+            let (r, b) = (d.source?, d.board.as_ref()?);
+            if r.at != RefAt::Workspace || r.document_or(doc.doc.id) != doc.doc.id {
+                return None;
+            }
+            (r.element, b.board)
+        }
+    };
+    doc.doc.element(pcb)?.pcb()?.board(board)?.design()?;
     let copy = cache.derived.get(&t.feature)?.boards.get(t.copy)?;
-    Some((r.element, b.board, crate::eda::PlaneHost { target: t, frame: copy.frame, thickness: copy.thickness }))
+    Some((pcb, board, crate::eda::PlaneHost { target: t, frame: copy.frame, thickness: copy.thickness }))
 }
 
 /// Whether the derived board `feature` of the active Part Studio can have its layout edited
 /// here (a workspace reference of this document), and if not why.
 pub fn editable(world: &World, feature: FeatureId) -> Result<(), String> {
     let doc = world.resource::<ActiveDocument>();
+    // A board instance of an assembly: its PCB Studio's own board.
+    if let Some((pcb, board, d)) = instance_board(doc, feature) {
+        let name = d.board.as_ref().map(|b| b.board_name.clone()).unwrap_or_default();
+        return match doc.doc.element(pcb).and_then(|e| e.pcb()).and_then(|s| s.board(board)) {
+            Some(b) if b.design().is_some() => Ok(()),
+            Some(_) => Err(format!("{name} came from IDF: it has no layout to edit here (edit it where it was designed, then import it again)")),
+            None => Err(format!("{name} is gone")),
+        };
+    }
     let d = crate::derived_ui::derived_in_active(world, feature).ok_or("not a Derived feature")?;
     let (r, b) = (d.source.ok_or("no source")?, d.board.as_ref().ok_or("not a board")?);
     if r.at != RefAt::Workspace || r.document_or(doc.doc.id) != doc.doc.id {
@@ -422,6 +467,8 @@ pub fn begin_edit(world: &mut World, feature: FeatureId, copy: usize) {
     world.resource_mut::<BoardEditing>().target = Some(BoardTarget { studio, feature, copy });
     crate::eda::layout_tools::set_tool(world, crate::eda::layout_tools::Tool::Select);
     world.resource_mut::<crate::eda::layout_tools::LayoutState>().selection.clear();
+    // (What was selected in the view, an assembly's instance say, would be drawn over it.)
+    world.resource_mut::<crate::viewport::Selection>().0.clear();
 }
 
 /// Stops editing (Done, Esc with nothing going on, another tab).
@@ -460,7 +507,10 @@ fn sync_edit_bar(world: &mut World) {
     let title = want.and_then(|t| {
         let d = crate::derived_ui::derived_ref(world, t.feature)?;
         let b = d.board.as_ref()?;
-        Some(format!("Layout of {} ({})", b.board_name, d.source_name))
+        // (An assembly's board instance: its PCB Studio's tab name.)
+        let doc = world.resource::<ActiveDocument>();
+        let studio = instance_board(doc, t.feature).and_then(|(pcb, _, _)| doc.doc.element(pcb)).map_or_else(|| d.source_name.clone(), |e| e.name.clone());
+        Some(format!("Layout of {} ({studio})", b.board_name))
     });
     let mut q = world.query_filtered::<Entity, With<EditBar>>();
     let existing = q.iter(world).next();
@@ -1074,6 +1124,10 @@ pub fn script(world: &mut World, arg: &str) {
             let r = a.strip_prefix("check ").unwrap_or("").trim().to_string();
             let board = crate::derived_ui::derived_board_ref(world, DERIVED).or_else(|| {
                 let doc = world.resource::<ActiveDocument>();
+                // (An assembly: its first board instance.)
+                if let Some(b) = boards_in(doc).first() {
+                    return instance_board(doc, b.feature)?.2.board.as_deref();
+                }
                 doc.active_element()?.features().iter().find_map(|f| match &f.kind {
                     FeatureKind::Derived(d) => d.board.as_deref(),
                     _ => None,

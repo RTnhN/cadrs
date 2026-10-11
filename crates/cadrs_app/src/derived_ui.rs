@@ -1396,7 +1396,8 @@ pub fn derived_in_active(world: &World, feature: FeatureId) -> Option<DerivedFea
 pub fn derived_ref(world: &World, feature: FeatureId) -> Option<&DerivedFeature> {
     let doc = world.resource::<ActiveDocument>();
     let el = doc.active_element()?;
-    cadrs_core::derived::derived_of(&doc.doc, el.id, feature)
+    // (An assembly's board instance: its board as its PCB Studio derives it.)
+    cadrs_core::derived::derived_of(&doc.doc, el.id, feature).or_else(|| crate::board_in_studio::instance_board(doc, feature).map(|(_, _, d)| d))
 }
 
 /// The derived board of the Derived feature `feature` in the shown Part Studio.

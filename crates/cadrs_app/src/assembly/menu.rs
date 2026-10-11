@@ -23,7 +23,7 @@ use bevy::prelude::*;
 use cadrs_core::assembly::InstanceId;
 use cadrs_core::assembly::commands::{DeleteInstances, SetInstancesFixed, SetInstancesHidden};
 use cadrs_core::assembly::structure::{DissolveSubassembly, MoveToNewSubassembly, SetInstancesSuppressed, SetSubassemblyFlexible};
-use cadrs_core::ElementId;
+use cadrs_core::{ElementId, FeatureId};
 use cadrs_ui::menu::{ContextMenuAnchor, Menu, MenuAction, MenuEntry, MenuItem};
 use cadrs_ui::{Theme, open_context_menu};
 
@@ -198,7 +198,11 @@ pub fn open_instance_menu(world: &mut World, at: Vec2, instance: InstanceId, han
     let contexts = if external { super::linked_context::contexts_of(world, element, instance) } else { super::managed_context::contexts_of(world.resource::<ActiveDocument>(), element, instance) };
     let no_edit = is_sub || is_std || (is_linked && !external);
     let in_context = if board.is_some() {
-        MenuItem::new("asm-board-edit-layout", "Edit layout").icon("pcb-studio").tooltip("Edit the board's layout in its PCB Studio (the instance follows)")
+        // (`docs/PCB_IN_PART_STUDIO.md` §9: here, the assembly around it, or in its PCB Studio.)
+        MenuItem::new("asm-board-edit", "Edit layout").icon("pcb-studio").submenu(vec![
+            MenuItem::new("asm-board-edit-in-context", "In context").icon("assembly").tooltip("Edit the board's layout here, its components moved among the parts around it (the instance follows)").into(),
+            MenuItem::new("asm-board-edit-layout", "In its PCB Studio").icon("pcb-studio").tooltip("Edit the board's layout in its PCB Studio (the instance follows)").into(),
+        ])
     } else if contexts.is_empty() || no_edit {
         let mut item = MenuItem::new("asm-edit-in-context", "Edit in context").icon("part-studio").disabled(no_edit);
         if is_linked && !external {
@@ -687,6 +691,11 @@ fn act(world: &mut World, menu: &AsmMenu, handle: TriadHandle, item: &str) {
                 world.resource_mut::<ActiveDocument>().set_active(element);
                 crate::pcb::show_board(world, element, b);
                 crate::eda::set_mode_of(world, element, b, crate::eda::Mode::Layout);
+            }
+        }
+        "asm-board-edit-in-context" => {
+            if let Some(i) = menu.instance {
+                crate::board_in_studio::begin_edit(world, FeatureId(i.0), 0);
             }
         }
         "asm-find" => {

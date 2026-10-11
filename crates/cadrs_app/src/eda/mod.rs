@@ -259,7 +259,7 @@ fn track_context(
     cache: Res<crate::parts::PartCache>,
     mut eda: ResMut<Eda2d>,
 ) {
-    let plane = doc.as_deref().filter(|_| *kind == ActiveKind::PartStudio).and_then(|doc| crate::board_in_studio::edited_board(doc, &editing, &cache));
+    let plane = doc.as_deref().filter(|_| matches!(*kind, ActiveKind::PartStudio | ActiveKind::Assembly)).and_then(|doc| crate::board_in_studio::edited_board(doc, &editing, &cache));
     let now = match plane {
         Some((el, b, _)) => Some((el, Subject::Board(b), Mode::Layout)),
         None => doc.as_deref().filter(|_| *kind == ActiveKind::PcbStudio && pcb.view == PcbView::Board).and_then(|doc| {

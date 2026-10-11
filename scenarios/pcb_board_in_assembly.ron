@@ -9,8 +9,13 @@
 //    board and its components move there as one.
 // 04 the BOM: the enclosure's parts, then the board, its components under it (item 7
 //    expanded: 7.1 …).
-// 05 the board instance's menu: Switch to PCB Studio 1, Edit layout.
-// 06 Edit layout: PCB Studio 1's Layout of AC sensor.
+// 05 the board instance's menu, Edit layout ▸ In context: the layout on the board in the
+//    assembly, the bar "Layout of AC sensor (PCB Studio 1)", the Layout's tools.
+// 06 C1 (layout (13.5, 16.5), at (−0.5, 21, 9.6) after the mate) dragged 5 mm along x with
+//    Snap off: its ghost there, the room around it, the instance not rebuilt yet.
+// 07 let go: one undo step in PCB Studio 1, the instance rebuilt with C1 at layout (18.5, 16.5).
+// 08 the board instance's menu again: Edit layout ▸ In its PCB Studio.
+// 09 PCB Studio 1's Layout of AC sensor, C1 where it was moved.
 Scenario(
     start: Some("document"),
     steps: [
@@ -73,13 +78,42 @@ Scenario(
         Click(ui("panel-bom")),
         Wait(5),
         RightClick(ui("instance-row-7")),
-        WaitFor("asm-board-edit-layout"),
-        Hover(ui("asm-board-edit-layout")),
+        WaitFor("asm-board-edit"),
+        Hover(ui("asm-board-edit")),
+        WaitFor("asm-board-edit-in-context"),
+        Hover(ui("asm-board-edit-in-context")),
         Wait(5),
         Screenshot("05-instance-menu"),
+        Click(ui("asm-board-edit-in-context")),
+        WaitFor("board-edit-bar"),
+        MoveTo(1420, 780),
+        Wait(10),
+        Screenshot("06-in-context"),
+        Custom("board check C1"),
+        ExpectText("board-check", "C1 at 13.50, 16.50 top"),
+        // (Snap off: an exact 5 mm.)
+        Click(ui("board-fit-snap")),
+        Press(xyz(-0.5, 21, 9.6)),
+        Hover(xyz(2, 21, 9.6)),
+        Hover(xyz(4.5, 21, 9.6)),
+        Wait(5),
+        Screenshot("07-dragging"),
+        Release,
+        Wait(20),
+        MoveTo(1420, 780),
+        Wait(10),
+        Screenshot("08-moved"),
+        Custom("board check C1"),
+        ExpectText("board-check", "C1 at 18.50, 16.50 top"),
+        Click(ui("board-edit-done")),
+        Wait(10),
+        RightClick(ui("instance-row-7")),
+        WaitFor("asm-board-edit"),
+        Hover(ui("asm-board-edit")),
+        WaitFor("asm-board-edit-layout"),
         Click(ui("asm-board-edit-layout")),
         WaitFor("eda-layout-tools"),
         Wait(10),
-        Screenshot("06-edit-layout"),
+        Screenshot("09-edit-layout"),
     ],
 )

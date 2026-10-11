@@ -155,6 +155,8 @@ fn instance_drag(
         Option<Res<super::animate::Playback>>,
         Option<Res<super::connector_tool::ConnectorSession>>,
         Res<super::explode::ExplodeUi>,
+        // A board's layout edited in context takes the presses (`crate::board_in_studio`).
+        Res<crate::eda::Eda2d>,
     ),
     mut state: ResMut<InstanceDrag>,
     mut commands: Commands,
@@ -170,7 +172,7 @@ fn instance_drag(
     };
     let over = pointer_over_viewport(&hover, &q_area);
     // P3B.8: while an exploded view is edited, a press is the explode triad's.
-    let blocked = busy.0.is_some() || busy.1.is_some() || busy.2.is_some() || busy.3.is_some() || busy.4.is_some() || busy.5.editing();
+    let blocked = busy.0.is_some() || busy.1.is_some() || busy.2.is_some() || busy.3.is_some() || busy.4.is_some() || busy.5.editing() || busy.6.plane().is_some();
     let mut last_move: Option<Vec2> = None;
     for input in inputs.read() {
         if input.pointer_id != PointerId::Mouse {

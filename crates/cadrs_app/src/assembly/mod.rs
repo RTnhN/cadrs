@@ -78,7 +78,7 @@ use bevy::input_focus::InputFocus;
 use bevy::prelude::*;
 use cadrs_core::assembly::{Instance, InstanceId, Pose};
 use cadrs_core::rebuild::Build;
-use cadrs_core::{Element, ElementId, Feature, PartId};
+use cadrs_core::{Element, ElementId, Feature, FeatureId, PartId};
 use cadrs_ui::input::TextInputField;
 
 use crate::parts::{PartCache, PickFilter};
@@ -420,6 +420,35 @@ pub fn update_assembly_parts(doc: &ActiveDocument, el: &Element, cache: &mut Par
         }
     }
     cache.set_assembly_parts(el.id, parts, props, appearances);
+    // Each board instance as a derived board's output (its frame where the instance puts it,
+    // its parts the instance's), keyed by the instance's id: Edit layout in context works on it
+    // as on a Part Studio's derived board (`crate::board_in_studio`).
+    let mut boards = HashMap::new();
+    for i in &view.instances {
+        let cadrs_core::assembly::InstanceSource::Studio { element, board: Some(b) } = i.source else { continue };
+        let Some(out) = builds.get(&element).and_then(|x| x.derived.get(&cadrs_core::pcb::board_feature(b))) else { continue };
+        let ids: HashMap<PartId, PartId> = occ.iter().filter(|o| o.top == i.id).map(|o| (o.part, o.view_part)).collect();
+        let id = |p: &PartId| ids.get(p).copied();
+        let p = i.pose;
+        let mine = cadrs_core::derived::DerivedOutput {
+            parts: out.parts.iter().filter_map(id).collect(),
+            boards: out
+                .boards
+                .iter()
+                .filter_map(|c| {
+                    let f = c.frame;
+                    let frame = cadrs_sketch::PlaneFrame { origin: p.apply(f.origin), u: p.rotate(f.u), v: p.rotate(f.v) };
+                    Some(cadrs_core::derived::BoardCopy { part: id(&c.part)?, frame, thickness: c.thickness })
+                })
+                .collect(),
+            footprints: out.footprints.iter().filter_map(|(q, f)| Some((id(q)?, *f))).collect(),
+            ..Default::default()
+        };
+        boards.insert(FeatureId(i.id.0), mine);
+    }
+    if cache.derived != boards {
+        cache.derived = boards;
+    }
     // Sources still rebuilding: the Rebuilding… pill, and the first view's fit waits for them.
     cache.rebuilding = waiting;
     asm.key = Some(key);
