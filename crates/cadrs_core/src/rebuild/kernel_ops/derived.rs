@@ -324,7 +324,8 @@ impl Rebuilder {
         let mut failure = None;
         // Each earlier copy's board and components; each copy's components and frame.
         let mut earlier: Vec<(PartId, Arc<crate::solid::Solid>)> = Vec::new();
-        let mut copies: Vec<(Vec<(PartId, Arc<crate::solid::Solid>)>, PlaneFrame)> = Vec::new();
+        type Placed = Vec<(PartId, Arc<crate::solid::Solid>)>;
+        let mut copies: Vec<(Placed, PlaneFrame)> = Vec::new();
         for (k, loc) in locations.iter().enumerate() {
             let m = motion_between(&base, loc);
             let label = |n: &str| if several { format!("{n} ({})", k + 1) } else { n.to_string() };
