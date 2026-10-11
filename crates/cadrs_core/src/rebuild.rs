@@ -942,11 +942,13 @@ impl Rebuilder {
         for (fid, out) in state.derived.iter() {
             let Some(fp) = out.footprints.iter().find(|(p, _)| *p == part).map(|(_, f)| *f) else { continue };
             let copy = out.boards.iter().find(|b| out.components_of(b.part).contains(&part)).ok_or("its board is gone")?;
+            // (A board that came in with a derived Part Studio: its layout is in that studio's
+            // features, as the Derived feature keeps them, at any depth.)
             let layout = features.iter().find(|f| f.id == *fid).and_then(|f| match &f.kind {
-                FeatureKind::Derived(d) => d.board.as_ref().map(|b| &b.layout),
+                FeatureKind::Derived(d) => d.board.as_ref().map(|b| &b.layout).or_else(|| layout_with(&d.studio, fp)),
                 _ => None,
             });
-            // (A board that came in with a derived Part Studio: its layout is there.)
+            // (Not found: the mesh, faceted.)
             let Some(layout) = layout else { return self.mesh_body(state, part).map(|b| vec![b]) };
             let f = layout.footprints.iter().find(|f| f.id == fp).ok_or("its footprint is gone")?;
             let m = crate::pcb::model::shown_model(&f.footprint).ok_or("its footprint shows no model")?;
@@ -3766,3 +3768,13 @@ fn sub_polyline(pts: &[nalgebra::Point2<f64>], s0: f64, s1: f64) -> Vec<nalgebra
 
 /// A view's projection and its hatch loops (P3C.8).
 type ProjectedParts = (cadrs_kernel::Projection, Vec<Vec<[f64; 2]>>);
+
+/// The layout of a derived board among `features` (or in the features of Part Studios they
+/// derive, at any depth) that has the footprint `fp`.
+#[cfg(feature = "occt")]
+fn layout_with(features: &[Feature], fp: uuid::Uuid) -> Option<&cadrs_eda::board::Board> {
+    features.iter().find_map(|f| match &f.kind {
+        FeatureKind::Derived(d) => d.board.as_ref().map(|b| &b.layout).filter(|l| l.footprints.iter().any(|x| x.id == fp)).or_else(|| layout_with(&d.studio, fp)),
+        _ => None,
+    })
+}

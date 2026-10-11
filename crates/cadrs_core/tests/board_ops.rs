@@ -215,7 +215,7 @@ fn an_assembly_export_places_the_board_instance() {
 }
 
 #[test]
-fn a_board_in_a_derived_part_studio_exports_as_faceted_solids() {
+fn a_board_in_a_derived_part_studio_exports_its_components_models() {
     use cadrs_core::rebuild::exchange::{ExportItem, ExportRequest, ModelFormat};
     let (mut doc, mut h, _) = derived();
     // A second Part Studio deriving the Enclosure (its board and components with it).
@@ -232,8 +232,23 @@ fn a_board_in_a_derived_part_studio_exports_as_faceted_solids() {
     let b = cadrs_core::rebuild::build(&features);
     let j4 = b.parts.iter().find(|p| p.name.starts_with("J4 ")).expect("J4 comes along");
     let items = vec![ExportItem { features: features.clone(), part: j4.id, name: "J4".into(), pose: None, source: (outer, j4.id), source_name: "J4".into() }];
-    let files = cadrs_core::rebuild::exchange::export_files(ExportRequest::new(ModelFormat::Step, "J4", items)).wait().expect("ends").expect("a faceted solid of its mesh");
-    assert!(String::from_utf8_lossy(&files[0].bytes).contains("MANIFOLD_SOLID_BREP"));
+    let files = cadrs_core::rebuild::exchange::export_files(ExportRequest::new(ModelFormat::Step, "J4", items)).wait().expect("ends").expect("exports");
+    // Its model's solid (the layout found in the Enclosure's features the Derived feature
+    // keeps), not its mesh faceted: a round wire.
+    let text = String::from_utf8_lossy(&files[0].bytes).to_string();
+    assert!(text.contains("MANIFOLD_SOLID_BREP") && text.contains("CYLINDRICAL_SURFACE"), "{}", &text[..text.len().min(400)]);
+    // Where its mesh is.
+    let mut back = Document::empty("Read back");
+    let mut e = Element::part_studio("Read");
+    let rid = ElementId::new();
+    e.id = rid;
+    back.elements.push(e);
+    let mut h2 = History::default();
+    run(&mut back, &mut h2, &cadrs_core::import::AddImport { element: rid, feature: FeatureId::new(), file_name: "j4.step".into(), bytes: std::sync::Arc::new(files[0].bytes.clone()), y_axis_up: false, units: None });
+    let read = cadrs_core::rebuild::build(back.element(rid).unwrap().features());
+    let (lo, hi) = read.parts[0].solid.bounds().unwrap();
+    let (mlo, mhi) = j4.solid.bounds().unwrap();
+    assert!((0..3).all(|k| (lo[k] - mlo[k]).abs() < 0.3 && (hi[k] - mhi[k]).abs() < 0.3), "STEP {lo:?} … {hi:?}, mesh {mlo:?} … {mhi:?}");
 }
 
 #[test]
