@@ -587,7 +587,7 @@ pub fn align_prompt(state: &FitState) -> Option<&'static str> {
     match state.align {
         AlignStep::Off => None,
         AlignStep::From => Some("Align: pick a face, edge or pin of a component"),
-        AlignStep::To(..) => Some("Align: pick where it goes (a face, edge, pin or hole)"),
+        AlignStep::To(..) => Some("Align: pick where it goes (a face, edge, pin, hole or mate connector)"),
     }
 }
 
@@ -639,9 +639,17 @@ pub fn align_press(world: &mut World, offset: Vec2) -> bool {
             return true;
         }
     }
-    let filter = crate::parts::PickFilter { faces: true, edges: true, ..crate::parts::PickFilter::none() };
+    // (The target can also be a mate connector: its Z axis or the plane it is normal to.)
+    let to = matches!(step, AlignStep::To(..));
+    let filter = crate::parts::PickFilter { faces: true, edges: true, connectors: to, ..crate::parts::PickFilter::none() };
     let cache = world.resource::<PartCache>();
     let Some(pick) = crate::parts::pick_scene(cache, &view, offset, filter) else { return true };
+    if let (crate::viewport::Pick::Feature(id), AlignStep::To(fp, from)) = (&pick, step)
+        && let Some(c) = cache.connectors.get(id).copied()
+    {
+        finish_align(world, host, fp, from, fit::connector_entity(&c, &host.frame));
+        return true;
+    }
     let part_id = match pick {
         crate::viewport::Pick::Face(p, _) | crate::viewport::Pick::Edge(p, _) | crate::viewport::Pick::Vertex(p, _) => p,
         _ => return true,

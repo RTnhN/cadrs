@@ -439,6 +439,18 @@ pub enum Entity {
     Plane(V3, V3),
 }
 
+/// A mate connector (its frame) as an Align target for the board on `board`: its Z axis when
+/// that stands square to the board (a connector on a pin's end, say), else the plane its Z is
+/// normal to (a connector on a wall's face).
+pub fn connector_entity(connector: &PlaneFrame, board: &PlaneFrame) -> Entity {
+    let z = connector.normal();
+    if dot(z, board.normal()).abs() > 0.999 { Entity::Axis(connector.origin, z) } else { Entity::Plane(connector.origin, z) }
+}
+
+fn dot(a: V3, b: V3) -> f64 {
+    a[0] * b[0] + a[1] * b[1] + a[2] * b[2]
+}
+
 /// How a footprint moves to align (see [`align`]).
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Alignment {
@@ -534,6 +546,22 @@ mod tests {
     }
 
     const TOP: PlaneFrame = PlaneFrame { origin: [0.0, 0.0, 10.0], u: [1.0, 0.0, 0.0], v: [0.0, 1.0, 0.0] };
+
+    #[test]
+    fn a_mate_connector_is_an_axis_or_a_plane_to_align_to() {
+        // On a pin's end (its Z up, square to the board): a pin's axis goes onto its Z axis.
+        let on_pin = PlaneFrame { origin: [3.0, 4.0, 13.6], u: [1.0, 0.0, 0.0], v: [0.0, 1.0, 0.0] };
+        let to = connector_entity(&on_pin, &TOP);
+        assert!(matches!(to, Entity::Axis(..)));
+        let a = align(Entity::Axis([1.0, 1.0, 11.0], [0.0, 0.0, 1.0]), to, &TOP, [0.0, 0.0]).unwrap();
+        assert_eq!((a.turn, a.shift), (0.0, [2.0, 3.0]));
+        // On a wall's face (its Z along x): a component's face square to the board goes onto it.
+        let on_wall = PlaneFrame { origin: [20.0, 0.0, 12.0], u: [0.0, 1.0, 0.0], v: [0.0, 0.0, 1.0] };
+        let to = connector_entity(&on_wall, &TOP);
+        assert!(matches!(to, Entity::Plane(..)));
+        let a = align(Entity::Plane([5.0, 0.0, 11.0], [1.0, 0.0, 0.0]), to, &TOP, [0.0, 0.0]).unwrap();
+        assert!((a.shift[0] - 15.0).abs() < 1e-9 && a.shift[1].abs() < 1e-9, "{a:?}");
+    }
 
     #[test]
     fn a_section_is_what_lies_between_the_heights() {
