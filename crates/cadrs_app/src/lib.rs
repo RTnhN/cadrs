@@ -49,6 +49,7 @@ pub mod mcp;
 pub mod measure;
 pub mod material_dialog;
 pub mod panel_tab;
+pub mod change_preview;
 pub mod part_shading;
 pub mod parts;
 pub mod pattern;

@@ -52,6 +52,8 @@ pub struct TreeRowToggle {
     pub on: bool,
     on_icon: Cow<'static, str>,
     off_icon: Cow<'static, str>,
+    /// Shown while off even when the row isn't hovered ([`TreeItem::toggle_keeps_off`]).
+    keeps_off: bool,
 }
 
 /// A row's trailing toggle was clicked. Targets the row.
@@ -82,6 +84,7 @@ pub struct TreeItem {
     badge: Option<Color>,
     toggle: Option<RowToggleSpec>,
     toggle_tip: Option<String>,
+    toggle_keeps_off: bool,
     editable: bool,
     middle: bool,
     strikethrough: bool,
@@ -110,6 +113,7 @@ impl TreeItem {
             badge: None,
             toggle: None,
             toggle_tip: None,
+            toggle_keeps_off: false,
             editable: false,
             middle: false,
             strikethrough: false,
@@ -161,6 +165,12 @@ impl TreeItem {
         on: bool,
     ) -> Self {
         self.toggle = Some((name.into(), on_icon.into(), off_icon.into(), on));
+        self
+    }
+
+    /// The trailing toggle stays shown while off, hovered or not (a hidden part's crossed eye).
+    pub fn toggle_keeps_off(mut self) -> Self {
+        self.toggle_keeps_off = true;
         self
     }
 
@@ -268,6 +278,7 @@ impl TreeItem {
             badge,
             toggle,
             toggle_tip,
+            toggle_keeps_off,
             editable,
             middle,
             strikethrough,
@@ -431,6 +442,7 @@ impl TreeItem {
                             on,
                             on_icon,
                             off_icon,
+                            keeps_off: toggle_keeps_off,
                         },
                         Node {
                             width: Val::Px(20.0),
@@ -472,7 +484,8 @@ fn on_toggle_click(
     }
 }
 
-/// Shows each row toggle while its row is hovered, with the icon for its state.
+/// Shows each row toggle while its row is hovered (one that keeps its off state shown, always
+/// while off), with the icon for its state.
 fn sync_row_toggles(
     mut q: Query<(&TreeRowToggle, &mut Visibility, &Children)>,
     q_row: Query<&Hovered>,
@@ -480,7 +493,7 @@ fn sync_row_toggles(
 ) {
     for (t, mut vis, children) in &mut q {
         let hovered = q_row.get(t.row).is_ok_and(|h| h.get());
-        vis.set_if_neq(if hovered {
+        vis.set_if_neq(if hovered || (t.keeps_off && !t.on) {
             Visibility::Inherited
         } else {
             Visibility::Hidden

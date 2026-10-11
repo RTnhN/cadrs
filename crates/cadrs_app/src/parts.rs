@@ -67,6 +67,7 @@ impl Plugin for PartsPlugin {
             .init_resource::<HoverParts>()
             .init_gizmo_group::<PartEdgeGizmos>()
             .init_gizmo_group::<PreviewEdgeGizmos>()
+            .init_gizmo_group::<ChangeEdgeGizmos>()
             .init_gizmo_group::<FaceOutlineGizmos>()
             .init_gizmo_group::<FaceHoverGizmos>()
             .init_gizmo_group::<EdgeHighlightGizmos>()
@@ -80,12 +81,13 @@ impl Plugin for PartsPlugin {
             .add_systems(Update, set_snapshot_store.run_if(resource_changed::<crate::DocumentStore>))
             .add_systems(
                 Update,
-                (update_part_cache, crate::assembly::in_context::sync_context_parts, sync_part_meshes, shade_parts, draw_part_edges, draw_sketch_curve_picks, tint_selection)
+                (update_part_cache, crate::assembly::in_context::sync_context_parts, sync_part_meshes, shade_parts, draw_part_edges, draw_sketch_curve_picks, tint_selection, tint_sketch_plane)
                     .chain()
                     .in_set(PartsSet)
                     .after(crate::viewport::apply_view_to_camera)
                     .run_if(in_state(AppState::Document)),
             )
+            .add_plugins(crate::change_preview::ChangePreviewPlugin)
             .add_systems(OnExit(AppState::Document), clear_parts);
     }
 }
@@ -98,6 +100,10 @@ pub struct PartEdgeGizmos;
 /// The preview's edges: over the translucent preview, hidden ones fainter.
 #[derive(Default, Reflect, GizmoConfigGroup)]
 pub struct PreviewEdgeGizmos;
+
+/// The edges of an Add's or a Remove's preview ([`Change`]): over everything, with it.
+#[derive(Default, Reflect, GizmoConfigGroup)]
+pub struct ChangeEdgeGizmos;
 
 /// Outlines over everything (3 px): the Use tool's hover preview in a sketch.
 #[derive(Default, Reflect, GizmoConfigGroup)]
@@ -181,6 +187,10 @@ fn configure_gizmos(mut store: ResMut<GizmoConfigStore>) {
     // Hidden inside an opaque part the preview joins (Add), shown through the preview itself.
     config.depth_bias = -4e-5;
     config.render_layers = RenderLayers::layer(crate::viewport::OCCLUDED_LAYER);
+    let (config, _) = store.config_mut::<ChangeEdgeGizmos>();
+    config.line.width = 1.2;
+    config.line.joints = GizmoLineJoint::Round(4);
+    config.render_layers = RenderLayers::layer(crate::viewport::OVERLAY_LAYER);
     let (config, _) = store.config_mut::<FreeEdgeGizmos>();
     config.line.width = 2.6;
     config.line.joints = GizmoLineJoint::Round(4);
@@ -258,7 +268,37 @@ fn ghosted_bases(cache: &PartCache, over: &PartOverride, ghosts: &PartGhosts, pa
             b.alpha = b.alpha.min(GHOST_ALPHA);
         }
     }
+    if let Some(c) = cache.xray(part) {
+        bases = vec![c.base(); part.solid.faces.len()];
+    }
     bases
+}
+
+/// What an extrude's (or revolve's) preview shows over the parts, through their walls (x-ray).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Change {
+    /// The body an Add adds: green.
+    Add,
+    /// The material a Remove takes out: red.
+    Remove,
+}
+
+impl Change {
+    /// Its faces' colour, see-through enough that the walls in front of it still read.
+    pub(crate) fn base(self) -> FaceBase {
+        match self {
+            Change::Add => FaceBase { rgb: [80.0, 190.0, 96.0], alpha: 0.6 },
+            Change::Remove => FaceBase { rgb: [222.0, 72.0, 72.0], alpha: 0.6 },
+        }
+    }
+
+    /// Its edges' colour: a dark green or red.
+    pub(crate) fn edge(self) -> Color {
+        match self {
+            Change::Add => Color::srgb_u8(0x1e, 0x6e, 0x32),
+            Change::Remove => Color::srgb_u8(0x8c, 0x1e, 0x1e),
+        }
+    }
 }
 
 impl PartOverride {
@@ -357,6 +397,10 @@ pub type Arrow = ([f64; 3], [f64; 3]);
 pub struct PartCache {
     key: Option<(ElementId, Vec<Feature>, PartOverride, ActiveKey)>,
     pending: Option<PendingRebuild>,
+    /// The rebuild a newer one replaced while it ran: its parts show when it finishes before
+    /// the newer one, so a live drag's preview keeps up instead of waiting for the pointer to
+    /// rest.
+    superseded: Option<PendingRebuild>,
     pub parts: Vec<Part>,
     /// Features that failed to rebuild, with why (their feature-list rows are red).
     pub errors: HashMap<FeatureId, String>,
@@ -410,7 +454,8 @@ pub struct PartCache {
     pub isolated: Option<Vec<PartId>>,
     /// What each extrude's new body touches (the automatic Add, PS5.2).
     pub contacts: HashMap<FeatureId, cadrs_core::rebuild::Contacts>,
-    /// Each revolve's axis (origin, unit direction), for its angle arrow (P3.4).
+    /// Each revolve's axis (origin, unit direction), for its angle arrow (P3.4); each extrude's
+    /// start and direction (after its flip), for its depth arrow.
     pub axes: HashMap<FeatureId, ([f64; 3], [f64; 3])>,
     /// Each loft's picked directions (origin, unit direction), drawn as arrows while it is
     /// edited (P3.11, PS20.4).
@@ -443,6 +488,9 @@ pub struct PartCache {
     /// preview over the parts as they were before it (`ex1-step4.png`). Not a part: it is not
     /// listed, measured or picked.
     pub tool: Vec<Part>,
+    /// The Extrude dialog edits an Add or a Remove: [`Self::tool`] is the body it adds or the
+    /// material it takes out, drawn over the parts through their walls.
+    pub change: Option<Change>,
     /// While a Sheet metal model's edges are picked on the parts before it (`PartOverride::staged`):
     /// the parts it makes, which the Parts list shows (`t0101.0.png`) though the view shows
     /// the parts before it. Empty otherwise.
@@ -511,11 +559,18 @@ fn sectioned_hit<T>(section: Option<&SectionPick>, part: PartId, o: Vec3, d: Vec
 }
 
 impl PartCache {
+    /// The change `part` is, for the body an Add's preview adds or the material a Remove's
+    /// takes out: drawn over the parts, through their walls.
+    pub fn xray(&self, part: &Part) -> Option<Change> {
+        self.change.filter(|_| self.tool.iter().any(|t| t.id == part.id))
+    }
+
     /// Rebuilds the open Part Studio on the next frame though nothing changed (the Document
     /// menu's Full rebuild, after [`cadrs_core::rebuild::clear_cache`]).
     pub fn rebuild_again(&mut self) {
         self.key = None;
         self.pending = None;
+        self.superseded = None;
     }
 
     /// P3D.3: the Part Studio and features the parts on screen were rebuilt from, and the
@@ -764,6 +819,7 @@ impl PartCache {
         }
         self.key = None;
         self.pending = None;
+        self.superseded = None;
         self.assembly = Some(element);
         self.parts = parts;
         self.props = props;
@@ -785,6 +841,7 @@ impl PartCache {
         self.visibility.clear();
         self.names.clear();
         self.tool.clear();
+        self.change = None;
         self.staged_parts.clear();
         self.generation += 1;
     }
@@ -799,25 +856,7 @@ impl PartCache {
         }
         self.staged_parts = staged_parts;
         let (parts, tool) = match stage {
-            Some((f, st)) => (
-                st.before.clone(),
-                std::iter::once(&st.tool)
-                    .chain(&st.more)
-                    .enumerate()
-                    .map(|(k, solid)| Part {
-                        id: PartId::new(*f, u32::MAX - k as u32),
-                        feature: *f,
-                        name: String::new(),
-                        kind: cadrs_core::parts::PartKind::Solid,
-                        palette: 0,
-                        solid: solid.clone(),
-                        mass: None,
-                        features: vec![*f],
-                        source: None,
-                        derived: None,
-                    })
-                    .collect(),
-            ),
+            Some((f, st)) => (st.before.clone(), stage_bodies(*f, st, u32::MAX)),
             None => (build.parts.clone(), Vec::new()),
         };
         let same = self.parts.len() == parts.len()
@@ -829,6 +868,12 @@ impl PartCache {
         if !same {
             self.generation += 1;
             self.bounds = parts.iter().filter_map(|p| p.solid.bounds()).collect();
+        }
+        // Not a Sheet metal model's folded parts over the part it converts.
+        let change = stage.filter(|_| !staged).map(|(_, st)| if st.remove { Change::Remove } else { Change::Add });
+        if self.change != change {
+            self.change = change;
+            self.generation += 1;
         }
         self.tool = tool;
         self.parts = parts;
@@ -865,6 +910,27 @@ impl PartCache {
     }
 }
 
+/// A stage's bodies as parts of feature `f`, numbered down from `top`: not parts of the Part
+/// Studio (not listed, measured or picked), only drawn.
+pub(crate) fn stage_bodies(f: FeatureId, st: &cadrs_core::rebuild::Stage, top: u32) -> Vec<Part> {
+    std::iter::once(&st.tool)
+        .chain(&st.more)
+        .enumerate()
+        .map(|(k, solid)| Part {
+            id: PartId::new(f, top - k as u32),
+            feature: f,
+            name: String::new(),
+            kind: cadrs_core::parts::PartKind::Solid,
+            palette: 0,
+            solid: solid.clone(),
+            mass: None,
+            features: vec![f],
+            source: None,
+            derived: None,
+        })
+        .collect()
+}
+
 /// The feature whose stage (the parts before it and its new bodies) is shown: the one the
 /// override stages, else the edited one unless it is a Sheet metal model (its folded parts
 /// preview as parts while no edges are picked).
@@ -876,7 +942,7 @@ fn stage_feature(features: &[Feature], o: &PartOverride) -> Option<FeatureId> {
 }
 
 /// The features the parts are made from: the document's, with the override applied.
-fn effective_features(features: &[Feature], o: &PartOverride) -> Vec<Feature> {
+pub(crate) fn effective_features(features: &[Feature], o: &PartOverride) -> Vec<Feature> {
     let mut out = features.to_vec();
     if let Some((id, e)) = &o.extrude
         && let Some(f) = out.iter_mut().find(|f| f.id == *id)
@@ -1021,9 +1087,21 @@ fn update_part_cache(
         {
             let same_element = p.element == el.id;
             cache.pending = None;
+            cache.superseded = None;
             if same_element {
                 log.0.push((features.len(), build.computed, build.elapsed));
                 cache.apply(&build, stage_feature(features, &over), over.staged.is_some());
+            }
+        } else if let Some(p) = &mut cache.superseded
+            && let Some(build) = p.rebuild.poll()
+        {
+            // An older rebuild finished first: show it while the newer one runs.
+            let same_element = p.element == el.id;
+            cache.superseded = None;
+            if same_element {
+                log.0.push((features.len(), build.computed, build.elapsed));
+                cache.apply(&build, stage_feature(features, &over), over.staged.is_some());
+                cache.rebuilding = true;
             }
         }
         return;
@@ -1033,8 +1111,19 @@ fn update_part_cache(
     // Rebuild on the kernel thread; wait a little so quick rebuilds show in this frame.
     // Restored from the session snapshot of these features when the session doesn't have them
     // (a document opened again), and snapshotted afterwards.
+    // The rebuild running now keeps running (one at most; a queued one is cancelled), so its
+    // result can show before this one's.
+    if let Some(old) = cache.pending.take()
+        && old.element == el.id
+        && cache.superseded.is_none()
+    {
+        cache.superseded = Some(old);
+    }
     let mut rebuild = cadrs_core::rebuild::request_persisted(effective.clone());
-    match rebuild.wait(budget.0) {
+    // A live drag doesn't hold the frame for its rebuild: the preview follows when it's done.
+    let dragging = over.extrude.is_some() || over.revolve.is_some() || over.applied.is_some();
+    let wait = if dragging { budget.0.map(|_| std::time::Duration::ZERO) } else { budget.0 };
+    match rebuild.wait(wait) {
         Some(build) => {
             log.0.push((features.len(), build.computed, build.elapsed));
             if cache.key.as_ref().is_some_and(|(id, ..)| *id != el.id) {
@@ -1042,6 +1131,7 @@ fn update_part_cache(
             }
             cache.apply(&build, stage_feature(features, &over), over.staged.is_some());
             cache.pending = None;
+            cache.superseded = None;
         }
         None => {
             if cache.key.as_ref().is_some_and(|(id, ..)| *id != el.id) {
@@ -1590,6 +1680,11 @@ fn sync_part_meshes(
         if mat.0 != want {
             mat.0 = want;
         }
+        if cache.xray(part).is_some() {
+            commands.entity(e).insert(RenderLayers::layer(crate::viewport::OVERLAY_LAYER));
+        } else if !crate::assembly::standard::is_ghost(part.id) {
+            commands.entity(e).remove::<RenderLayers>();
+        }
         have.insert(pm.id, e);
     }
     for part in cache.shown().chain(cache.tool.iter()) {
@@ -1610,8 +1705,9 @@ fn sync_part_meshes(
             Transform::IDENTITY,
             DespawnOnExit(AppState::Document),
         ));
-        // The fastener being placed: drawn by the overlay camera, over the parts (P3B.5 judge).
-        if crate::assembly::standard::is_ghost(part.id) {
+        // The fastener being placed: drawn by the overlay camera, over the parts (P3B.5 judge);
+        // so is the material a Remove takes out.
+        if crate::assembly::standard::is_ghost(part.id) || cache.xray(part).is_some() {
             e.insert(RenderLayers::layer(crate::viewport::OVERLAY_LAYER));
         }
     }
@@ -1703,7 +1799,7 @@ fn draw_part_edges(
     highlight: Res<PlaneHighlight>,
     selection: Res<Selection>,
     mut edges: Gizmos<PartEdgeGizmos>,
-    mut preview_edges: Gizmos<PreviewEdgeGizmos>,
+    (mut preview_edges, mut change_edges): (Gizmos<PreviewEdgeGizmos>, Gizmos<ChangeEdgeGizmos>),
     mut hover: Gizmos<FaceHoverGizmos>,
     (mut highlight_edges, mut outline_edges): (Gizmos<EdgeHighlightGizmos>, Gizmos<PartOutlineGizmos>),
     mut reference_edges: Gizmos<ReferenceEdgeGizmos>,
@@ -1755,7 +1851,18 @@ fn draw_part_edges(
             || hover_parts.1.contains(&part.id)
             || hover_parts.2.contains(&part.id)
             || list_feature.is_some_and(|f| !feature_faces && part.features.contains(&f));
-        if preview {
+        if let Some(c) = cache.xray(part) {
+            // The body an Add adds or the material a Remove takes out: its edges over
+            // everything, as it is. An Add's start cap lies under the selected region's
+            // outline, which stays on top.
+            for e in part.solid.edges.iter().filter(|e| !e.smooth) {
+                let on_start = e.name.faces.iter().any(|f| matches!(f.origin, FaceOrigin::Cap { end: false, .. }));
+                if c == Change::Add && on_start {
+                    continue;
+                }
+                strip(&mut change_edges, clip, e.points.iter().map(|p| v3(*p)), c.edge());
+            }
+        } else if preview {
             // Edges between faces facing the viewer are dark; the others show faintly through.
             let back = v.back();
             let faces_viewer = |t: &FaceName| {
@@ -2104,6 +2211,85 @@ fn tint_selection(
             DespawnOnExit(AppState::Document),
         ));
     }
+}
+
+/// The faces of the parts lying on the plane of the sketch being edited.
+#[derive(Component)]
+struct SketchPlaneTint;
+
+/// A faint white over the faces on the sketch plane: shows where the sketch lies and which of
+/// the parts' faces, edges and points it can draw from.
+const SKETCH_PLANE_TINT: Color = Color::srgba(1.0, 1.0, 1.0, 0.35);
+
+/// While a sketch is edited, tints the part faces that lie on its plane ([`SKETCH_PLANE_TINT`]).
+#[allow(clippy::too_many_arguments)]
+fn tint_sketch_plane(
+    cache: Res<PartCache>,
+    session: Option<Res<crate::sketch::SketchSession>>,
+    doc: Option<Res<ActiveDocument>>,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+    mut last: Local<Option<(u64, Option<[u64; 9]>)>>,
+    q: Query<Entity, With<SketchPlaneTint>>,
+    mut commands: Commands,
+) {
+    let frame = session.as_deref().filter(|s| !s.waiting_for_plane).and_then(|s| {
+        doc.as_deref()?.doc.element(s.element)?.feature(s.feature)?.sketch()?.plane.map(|p| p.frame())
+    });
+    let bits = frame.map(|f| {
+        let [a, b, c] = [f.origin, f.u, f.v];
+        [a[0], a[1], a[2], b[0], b[1], b[2], c[0], c[1], c[2]].map(f64::to_bits)
+    });
+    let key = (cache.generation, bits);
+    if last.as_ref() == Some(&key) {
+        return;
+    }
+    *last = Some(key);
+    for e in &q {
+        commands.entity(e).try_despawn();
+    }
+    let Some(frame) = frame else { return };
+    let n = v3(frame.normal()).normalize_or_zero();
+    let o = v3(frame.origin);
+    // About a micron off the plane, and parallel to it (either way).
+    let tol = 1e-3 * (1.0 + o.length());
+    let mut positions: Vec<[f32; 3]> = Vec::new();
+    for part in cache.shown() {
+        let s = &part.solid;
+        for face in &s.faces {
+            let Some(p) = face.plane else { continue };
+            if v3(p.normal()).normalize_or_zero().dot(n).abs() < 0.9999 || (v3(p.origin) - o).dot(n).abs() > tol {
+                continue;
+            }
+            let idx = &s.indices[3 * face.first_triangle..3 * (face.first_triangle + face.triangle_count)];
+            positions.extend(idx.iter().map(|i| v3(s.positions[*i as usize]).to_array()));
+        }
+    }
+    if positions.is_empty() {
+        return;
+    }
+    let indices: Vec<u32> = (0..positions.len() as u32).collect();
+    let mesh = Mesh::new(PrimitiveTopology::TriangleList, RenderAssetUsages::default())
+        .with_inserted_attribute(Mesh::ATTRIBUTE_POSITION, positions)
+        .with_inserted_indices(Indices::U32(indices));
+    let material = materials.add(StandardMaterial {
+        base_color: SKETCH_PLANE_TINT,
+        unlit: true,
+        alpha_mode: AlphaMode::Blend,
+        cull_mode: None,
+        double_sided: true,
+        // Over the part's own faces.
+        depth_bias: 1000.0,
+        ..default()
+    });
+    commands.spawn((
+        Name::new("sketch-plane-tint"),
+        SketchPlaneTint,
+        Mesh3d(meshes.add(mesh)),
+        MeshMaterial3d(material),
+        Transform::IDENTITY,
+        DespawnOnExit(AppState::Document),
+    ));
 }
 
 fn clear_parts(mut cache: ResMut<PartCache>, mut over: ResMut<PartOverride>) {
