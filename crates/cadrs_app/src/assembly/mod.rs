@@ -255,6 +255,12 @@ type AssemblyKey = (ElementId, Vec<cadrs_core::assembly::structure::Occurrence>,
 type OccurrenceTable = (HashMap<PartId, InstanceId>, HashMap<InstanceId, PartId>);
 static OCCURRENCES: std::sync::RwLock<Option<OccurrenceTable>> = std::sync::RwLock::new(None);
 
+/// The board instances the active assembly's view hosts (Edit layout in context), at any depth:
+/// by assembly: [(id as a feature's, PCB Studio, board)]. Set with the view's parts, so the
+/// per-frame lookups ([`crate::board_in_studio::instance_board`]) don't walk the assembly.
+pub type BoardHosts = HashMap<ElementId, Vec<(FeatureId, ElementId, cadrs_core::pcb::BoardId)>>;
+pub static BOARD_HOSTS: std::sync::RwLock<Option<BoardHosts>> = std::sync::RwLock::new(None);
+
 /// The occurrence a part of the view stands for (the instance itself for a part instance).
 pub fn occurrence_of(part: PartId) -> InstanceId {
     OCCURRENCES
@@ -435,8 +441,13 @@ pub fn update_assembly_parts(doc: &ActiveDocument, el: &Element, cache: &mut Par
     }
     for o in occ.iter().filter(|o| o.child.is_some()) {
         let Some(b) = crate::board_in_studio::board_of_occurrence(d, o) else { continue };
-        let ids = occ.iter().filter(|x| x.top == o.top && x.child == o.child && x.element == o.element && x.part.feature == o.part.feature).map(|x| (x.part, x.view_part)).collect();
+        // Its parts: those of the same board instance (same subassembly instance, studio, board
+        // and place in it: deeper down, `child` is the innermost subassembly's instance).
+        let ids = occ.iter().filter(|x| x.top == o.top && x.child == o.child && x.element == o.element && x.part.feature == o.part.feature && x.in_top == o.in_top).map(|x| (x.part, x.view_part)).collect();
         hosts.push((FeatureId(o.id.0), o.element, b, o.pose, ids));
+    }
+    if let Ok(mut t) = BOARD_HOSTS.write() {
+        t.get_or_insert_with(HashMap::new).insert(el.id, hosts.iter().map(|h| (h.0, h.1, h.2)).collect());
     }
     let mut boards = HashMap::new();
     for (key, element, b, p, ids) in hosts {

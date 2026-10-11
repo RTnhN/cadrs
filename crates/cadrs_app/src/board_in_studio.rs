@@ -94,10 +94,12 @@ pub fn instance_board(doc: &ActiveDocument, feature: FeatureId) -> Option<(Eleme
             cadrs_core::assembly::InstanceSource::Studio { element, board: Some(b) } => (element, b),
             _ => return None,
         },
+        // (Inside a subassembly: as the view's parts were last set up.)
         None => {
-            let occ = cadrs_core::assembly::structure::occurrences(&doc.doc, model);
-            let o = occ.iter().find(|o| o.id.0 == feature.0 && o.child.is_some())?;
-            (o.element, board_of_occurrence(&doc.doc, o)?)
+            let el = doc.active_element()?.id;
+            let t = crate::assembly::BOARD_HOSTS.read().ok()?;
+            let (_, pcb, b) = t.as_ref()?.get(&el)?.iter().find(|h| h.0 == feature)?;
+            (*pcb, *b)
         }
     };
     let f = doc.doc.element(element)?.part_features().iter().find(|f| f.id == cadrs_core::pcb::board_feature(b))?;
@@ -117,11 +119,9 @@ pub fn board_of_occurrence(doc: &cadrs_core::Document, o: &cadrs_core::assembly:
 
 /// The board instances of the active assembly, at any depth: (id as a feature's, name).
 fn assembly_boards(doc: &ActiveDocument) -> Vec<(FeatureId, String)> {
-    let Some(model) = doc.active_element().and_then(|e| e.assembly_model()) else { return vec![] };
-    let mut out: Vec<FeatureId> = model.instances.iter().filter(|i| matches!(i.source, cadrs_core::assembly::InstanceSource::Studio { board: Some(_), .. })).map(|i| FeatureId(i.id.0)).collect();
-    if model.instances.iter().any(|i| i.source.is_composite()) {
-        out.extend(cadrs_core::assembly::structure::occurrences(&doc.doc, model).iter().filter(|o| o.child.is_some() && board_of_occurrence(&doc.doc, o).is_some()).map(|o| FeatureId(o.id.0)));
-    }
+    let Some(el) = doc.active_element().filter(|e| e.assembly_model().is_some()) else { return vec![] };
+    // (As the view's parts were last set up: no walk of the assembly every frame.)
+    let out: Vec<FeatureId> = crate::assembly::BOARD_HOSTS.read().ok().and_then(|t| t.as_ref()?.get(&el.id).map(|h| h.iter().map(|x| x.0).collect())).unwrap_or_default();
     out.into_iter().filter_map(|f| Some((f, instance_board(doc, f)?.2.board.as_ref()?.board_name.clone()))).collect()
 }
 
@@ -1409,6 +1409,46 @@ mod tests {
         let editing = BoardEditing { target: Some(BoardTarget { studio: top_id, feature: f, copy: 0 }) };
         let (pcb, b, host) = edited_board(&ad, &editing, &cache).expect("editable in context");
         assert_eq!((pcb, b, host.frame.origin), (pe::PCB, board, [10.0, 100.0, 0.0]));
+    }
+
+    #[test]
+    fn two_boards_two_levels_down_are_hosted_apart() {
+        use cadrs_core::assembly::{Instance, InstanceId, InstanceSource, Pose};
+        let mut doc = pe::document().unwrap();
+        let board = doc.element(pe::PCB).unwrap().pcb().unwrap().boards[0].id;
+        let at = |x: f64, y: f64| Pose { translation: [x, y, 0.0], ..Pose::IDENTITY };
+        // "Inner": the board twice, at x 0 and x 50; "Sub": Inner at x 10; "Top": Sub at y 100.
+        let parts = doc.element(pe::PCB).unwrap().pcb().unwrap().board_parts(board);
+        let (inner_id, sub_id, top_id) = (ElementId::new(), ElementId::new(), ElementId::new());
+        let mut inner = cadrs_core::Element::assembly("Inner");
+        inner.id = inner_id;
+        for x in [0.0, 50.0] {
+            inner.assembly_model_mut().unwrap().instances.push(Instance::board(InstanceId::new(), pe::PCB, board, parts.clone(), at(x, 0.0)));
+        }
+        let mut sub = cadrs_core::Element::assembly("Sub");
+        sub.id = sub_id;
+        sub.assembly_model_mut().unwrap().instances.push(Instance::new(InstanceId::new(), InstanceSource::Assembly { element: inner_id }, at(10.0, 0.0)));
+        let mut top = cadrs_core::Element::assembly("Top");
+        top.id = top_id;
+        let si = InstanceId::new();
+        top.assembly_model_mut().unwrap().instances.push(Instance::new(si, InstanceSource::Assembly { element: sub_id }, at(0.0, 100.0)));
+        doc.elements.extend([inner, sub, top]);
+        let mut ad = ActiveDocument::new(doc);
+        ad.set_active(top_id);
+        let el = ad.doc.element(top_id).unwrap().clone();
+        let mut cache = PartCache::default();
+        let mut parts = crate::assembly::AssemblyParts::default();
+        crate::assembly::update_assembly_parts(&ad, &el, &mut cache, &mut parts, None);
+        let inner = boards_inside(&ad, si);
+        assert_eq!(inner.len(), 2, "{inner:?}");
+        let outs: Vec<&cadrs_core::derived::DerivedOutput> = inner.iter().map(|(f, _)| &cache.derived[f]).collect();
+        let mut origins: Vec<[f64; 3]> = outs.iter().map(|o| o.boards[0].frame.origin).collect();
+        origins.sort_by(|a, b| a[0].total_cmp(&b[0]));
+        assert_eq!(origins, vec![[10.0, 100.0, 0.0], [60.0, 100.0, 0.0]]);
+        // Each its own parts.
+        assert!(outs[0].parts.iter().all(|p| !outs[1].parts.contains(p)));
+        assert_eq!(outs[0].parts.len(), outs[1].parts.len());
+        assert_eq!(assembly_boards(&ad).len(), 2);
     }
 
     #[test]

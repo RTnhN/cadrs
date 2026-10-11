@@ -20,6 +20,8 @@
 //    (Ctrl+Z from the assembly takes it back, Ctrl+Y again).
 // 09 Done, then Edit layout ▸ In its PCB Studio: PCB Studio 1's Layout of AC sensor, C1 where
 //    it was moved.
+// 10 back in the assembly, the board moved into a new subassembly (Move to new subassembly):
+//    the subassembly's Edit layout ▸ AC sensor in context edits it there, where it is.
 Scenario(
     start: Some("document"),
     steps: [
@@ -129,5 +131,25 @@ Scenario(
         WaitFor("eda-layout-tools"),
         Wait(10),
         Screenshot("09-edit-layout"),
+        // The board moved into a new subassembly: its menu edits it in context still.
+        Click(ui("tab-assembly-1")),
+        Wait(10),
+        RightClick(ui("instance-row-7")),
+        WaitFor("asm-move-to-new"),
+        Click(ui("asm-move-to-new")),
+        Wait(20),
+        RightClick(ui("instance-row-7")),
+        WaitFor("asm-board-edit"),
+        Hover(ui("asm-board-edit")),
+        WaitFor("asm-board-ctx-0"),
+        Click(ui("asm-board-ctx-0")),
+        WaitFor("board-edit-bar"),
+        MoveTo(1420, 780),
+        Wait(10),
+        Screenshot("10-nested-in-context"),
+        ExpectText("board-edit-title", "Layout of AC sensor (PCB Studio 1)"),
+        Custom("board check C1"),
+        ExpectText("board-check", "C1 at 18.50, 16.50 top"),
+        Click(ui("board-edit-done")),
     ],
 )
