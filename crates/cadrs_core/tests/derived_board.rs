@@ -886,3 +886,55 @@ fn circles_can_be_mounting_holes_that_follow_the_sketch() {
     let (id2, at2, ..) = hole(&doc);
     assert_eq!((id2, at2), (id, cadrs_eda::units::Pt::mm(-5.0, 10.0)));
 }
+
+#[test]
+fn a_board_outline_offset_from_the_tubes_inner_edges_follows_the_tube() {
+    use cadrs_core::commands::{AddSketch, EditSketch};
+    use cadrs_core::samples::pcb_enclosure as pe;
+    use cadrs_sketch::{Link, SketchOp, Vec2};
+    let mut doc = pe::document().unwrap();
+    let mut h = History::default();
+    let sketch = OUTLINE_SKETCH;
+    run(&mut doc, &mut h, &AddSketch { element: pe::STUDIO, feature: sketch, plane: Some(cadrs_sketch::PlaneRef::Top) });
+    // Use: the tube's four inner edges on Top (its inside is 40 × 40).
+    let features = doc.element(pe::STUDIO).unwrap().features().to_vec();
+    let build = cadrs_core::rebuild::build(&features);
+    let tube = build.parts.iter().find(|p| p.feature == pe::TUBE).unwrap().solid.clone();
+    let frame = doc.element(pe::STUDIO).unwrap().feature(sketch).unwrap().sketch().unwrap().plane.unwrap().frame();
+    let ctx = cadrs_core::links::LinkContext { solids: vec![(pe::TUBE, &*tube)], features: &features };
+    let inner = |e: &&cadrs_core::solid::SolidEdge| e.points.iter().all(|p| p[2].abs() < 1e-6 && (p[0].abs().max(p[1].abs()) - 20.0).abs() < 1e-6);
+    let items: Vec<_> = tube.edges.iter().filter(inner).map(|e| {
+        let link = Link::Edge { feature: pe::TUBE.0, edge: e.name };
+        (ctx.shape(link, &frame).unwrap(), link)
+    }).collect();
+    assert_eq!(items.len(), 4);
+    run(&mut doc, &mut h, &EditSketch { element: pe::STUDIO, feature: sketch, op: SketchOp::Use { items } });
+    // Offset 1 mm inward: whichever side makes a 38 × 38 square.
+    let g = |doc: &Document| doc.element(pe::STUDIO).unwrap().feature(sketch).unwrap().sketch().unwrap().geometry.clone();
+    let first = g(&doc).curves.keys().next().unwrap();
+    let (chain, _) = cadrs_sketch::edit::chain_of(&g(&doc), first);
+    let square = |doc: &Document| cadrs_core::samples::region_refs(sketch, &g(doc), &[Vec2::new(0.0, 0.0)]);
+    for left in [true, false] {
+        run(&mut doc, &mut h, &EditSketch { element: pe::STUDIO, feature: sketch, op: SketchOp::Offset { chain: chain.clone(), distance: 1.0, left, label: (0.0, 0.0) } });
+        let r = cadrs_sketch::region::regions(&g(&doc));
+        if r.iter().any(|r| (r.area() - 38.0 * 38.0).abs() < 1e-6) {
+            break;
+        }
+        h.undo(&mut doc);
+    }
+    let regions = square(&doc);
+    run(&mut doc, &mut h, &cadrs_core::pcb::outline_link::CreateBoardFromSketch { element: pe::STUDIO, sketch, regions, pcb: Some(pe::PCB), new_pcb: NEW_PCB, name: "Fitted".into(), thickness: 1.6, seat: BoardSeat::Bottom, circles_as_holes: false, feature: FROM_SKETCH });
+    let size = |doc: &Document| {
+        let b = cadrs_core::rebuild::build(doc.element(pe::STUDIO).unwrap().features());
+        assert!(b.errors.is_empty(), "{:?}", b.errors);
+        let (lo, hi) = bounds(b.parts.iter().find(|p| p.feature == FROM_SKETCH).unwrap());
+        [hi[0] - lo[0], hi[1] - lo[1]]
+    };
+    let close = |a: [f64; 2], b: [f64; 2]| (a[0] - b[0]).abs() < 1e-3 && (a[1] - b[1]).abs() < 1e-3;
+    assert!(close(size(&doc), [38.0, 38.0]), "{:?}", size(&doc));
+    // The tube's inside narrowed to 36 wide: the used edges, their offset and the board follow.
+    let tg = doc.element(pe::STUDIO).unwrap().feature(pe::TUBE_SKETCH).unwrap().sketch().unwrap().geometry.clone();
+    let moves: Vec<_> = [(20.0, 20.0), (20.0, -20.0)].iter().map(|&(x, y)| (tg.point_at(Vec2::new(x, y), 1e-6).unwrap(), Vec2::new(18.0, y))).collect();
+    run(&mut doc, &mut h, &EditSketch { element: pe::STUDIO, feature: pe::TUBE_SKETCH, op: SketchOp::MovePoints { moves } });
+    assert!(close(size(&doc), [36.0, 38.0]), "{:?}", size(&doc));
+}
