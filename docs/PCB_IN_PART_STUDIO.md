@@ -197,6 +197,11 @@ the 3D viewport, and (c) a sketch → outline link.
   pcb_fit_connector fits C1 0.50 mm from the tube's far wall; pcb_board_from_sketch uses the
   tube's inner edges offset 1 mm in (Use + Offset on a used loop, which chains and closes; used
   edges that jump move the sketch in steps so an offset keeps its side).
+- **Fifth review's fixes.** A nested derive carries components moved apart; copies on
+  several locations are checked against each other; MCP `move_footprint` takes
+  `onto_connector`; in context, the board's components running into the other instances show
+  under the bar; undo from the assembly asserted; unit tests of `component_under` and of the
+  assembly's board hosting. (Boards inside subassemblies are edited in their own tab.)
 - **Since (2).** Assembly instances carry their parts' pictures through their pose (a mated
   board's skins move with it); Create PCB board can make the sketch's circles NPTH holes; an
   in-context snapshot of a board goes stale when its layout changes (tested).

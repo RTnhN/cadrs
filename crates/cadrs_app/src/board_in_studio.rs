@@ -1206,6 +1206,7 @@ pub fn script(world: &mut World, arg: &str) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use cadrs_core::samples::pcb_enclosure as pe;
 
     #[test]
     fn the_overlay_lies_on_the_top_face_in_the_board_frame() {
@@ -1224,6 +1225,80 @@ mod tests {
         let (m, _) = overlay_mesh(&layout, &OverlayView::default(), &frame, 1.6, cadrs_eda::layer::Side::Bottom, OverlayArea::Board).unwrap();
         let Some(bevy::mesh::VertexAttributeValues::Float32x3(p)) = m.attribute(Mesh::ATTRIBUTE_POSITION) else { panic!() };
         assert!(p.iter().all(|q| (q[0] - (10.0 - LIFT as f32)).abs() < 1e-4));
+    }
+
+    /// The mains sensor with its board derived onto Board location, open on the Enclosure, and
+    /// the Parts cache as the view has it; the edit host of that board copy.
+    fn derived_world() -> (World, crate::eda::PlaneHost) {
+        let mut doc = pe::document().unwrap();
+        let board = doc.element(pe::PCB).unwrap().pcb().unwrap().boards[0].id;
+        let d = DerivedFeature { locations: vec![ConnectorRef::Feature(pe::BOARD_LOCATION)], board: Some(Box::new(DerivedBoard::new(board, "", Default::default()))), ..Default::default() };
+        let mut res = cadrs_core::external::Resolver::new(cadrs_core::Store::new(std::env::temp_dir().join("cadrs-board-in-studio-tests")));
+        let r = SourceRef { document: None, at: RefAt::Workspace, element: pe::PCB, pinned: false };
+        let got = cadrs_core::derived::resolve(&mut res, &doc, None, d, r).unwrap();
+        let mut h = cadrs_core::History::default();
+        h.execute(&mut doc, &AddDerived { element: pe::STUDIO, feature: DERIVED, derived: got.derived, links: got.links }).unwrap();
+        let build = cadrs_core::rebuild::build(doc.element(pe::STUDIO).unwrap().features());
+        let mut w = World::new();
+        let mut ad = ActiveDocument::new(doc);
+        ad.set_active(pe::STUDIO);
+        w.insert_resource(ad);
+        let mut cache = PartCache::default();
+        cache.parts = build.parts.clone();
+        cache.derived = build.derived.clone();
+        let copy = cache.derived[&DERIVED].boards[0].clone();
+        w.insert_resource(cache);
+        (w, crate::eda::PlaneHost { target: BoardTarget { studio: pe::STUDIO, feature: DERIVED, copy: 0 }, frame: copy.frame, thickness: copy.thickness })
+    }
+
+    #[test]
+    fn a_press_picks_the_component_whose_model_it_meets_first() {
+        let (w, host) = derived_world();
+        let layout = crate::derived_ui::derived_board_ref(&w, DERIVED).unwrap().layout.clone();
+        let c1 = layout.footprints.iter().find(|f| f.reference() == "C1").unwrap();
+        let [x, y] = cadrs_core::pcb::frames::layout_to_board(c1.placement.at);
+        let over = cadrs_core::pcb::frames::to_world(&host.frame, [x, y, 0.0]);
+        let at = Vec3::new(over[0] as f32, over[1] as f32, 0.0);
+        // From above, straight down onto C1 (on the top face): C1, at its origin.
+        let down = component_under(&w, &host, at + Vec3::Z * 100.0, -Vec3::Z);
+        assert_eq!(down, Some((c1.id, c1.placement.at)));
+        // From below at the same place: the board's bottom face comes first, nothing is picked.
+        assert_eq!(component_under(&w, &host, at - Vec3::Z * 100.0, Vec3::Z).map(|(id, _)| id).filter(|id| *id == c1.id), None);
+        // Beside the board: nothing.
+        assert_eq!(component_under(&w, &host, at + Vec3::new(200.0, 0.0, 100.0), -Vec3::Z), None);
+    }
+
+    #[test]
+    fn an_assembly_hosts_its_board_instance_where_the_instance_is() {
+        use cadrs_core::assembly::{Instance, InstanceId, Pose};
+        let mut doc = pe::document().unwrap();
+        let board = doc.element(pe::PCB).unwrap().pcb().unwrap().boards[0].id;
+        let mut asm = cadrs_core::Element::assembly("Assembly 1");
+        let asm_id = ElementId::new();
+        asm.id = asm_id;
+        let parts = doc.element(pe::PCB).unwrap().pcb().unwrap().board_parts(board);
+        let i = InstanceId::new();
+        let pose = Pose { translation: [100.0, 0.0, 50.0], ..Pose::IDENTITY };
+        asm.assembly_model_mut().unwrap().instances.push(Instance::board(i, pe::PCB, board, parts, pose));
+        doc.elements.push(asm);
+        let mut ad = ActiveDocument::new(doc);
+        ad.set_active(asm_id);
+        let el = ad.doc.element(asm_id).unwrap().clone();
+        let mut cache = PartCache::default();
+        let mut parts = crate::assembly::AssemblyParts::default();
+        crate::assembly::update_assembly_parts(&ad, &el, &mut cache, &mut parts, None);
+        // The instance as a derived board: its frame where the instance put the layout's origin,
+        // its components the instance's parts, each with its footprint.
+        let f = FeatureId(i.0);
+        let out = cache.derived.get(&f).expect("the board instance's output");
+        assert_eq!(out.boards[0].frame.origin, [100.0, 0.0, 50.0]);
+        assert!(!out.footprints.is_empty() && out.footprints.iter().all(|(p, _)| cache.parts.iter().any(|x| x.id == *p)));
+        // Edited in context: the host on that frame, the layout the PCB Studio's own.
+        let editing = BoardEditing { target: Some(BoardTarget { studio: asm_id, feature: f, copy: 0 }) };
+        let (pcb, b, host) = edited_board(&ad, &editing, &cache).expect("editable in context");
+        assert_eq!((pcb, b), (pe::PCB, board));
+        assert_eq!(host.frame.origin, [100.0, 0.0, 50.0]);
+        assert_eq!(layout_of(&ad, f).map(|l| l.footprints.len()), ad.doc.element(pe::PCB).unwrap().pcb().unwrap().board(board).unwrap().design().map(|d| d.board.footprints.len()));
     }
 
     #[test]
