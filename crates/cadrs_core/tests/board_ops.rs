@@ -218,6 +218,11 @@ fn an_assembly_export_places_the_board_instance() {
 fn a_board_in_a_derived_part_studio_exports_its_components_models() {
     use cadrs_core::rebuild::exchange::{ExportItem, ExportRequest, ModelFormat};
     let (mut doc, mut h, _) = derived();
+    // J4 moved apart from its board there (7 along x) by a Transform of its own.
+    let enc = cadrs_core::rebuild::build(doc.element(pe::STUDIO).unwrap().features());
+    let j4_there = enc.parts.iter().find(|p| p.name.starts_with("J4 ")).unwrap().id;
+    let t = cadrs_core::transform::TransformFeature { transform_type: cadrs_core::transform::TransformType::TranslateXyz, parts: vec![j4_there], dx: 7.0, dx_expr: "7 mm".into(), ..Default::default() };
+    run(&mut doc, &mut h, &cadrs_core::commands::AddFeature { element: pe::STUDIO, feature: FeatureId::new(), base_name: "Transform".into(), kind: cadrs_core::document::FeatureKind::Transform(t) });
     // A second Part Studio deriving the Enclosure (its board and components with it).
     let mut ps = Element::part_studio("Outer");
     let outer = ElementId::new();

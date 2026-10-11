@@ -158,7 +158,12 @@ fn apply_outline(b: &mut super::StudioBoard, o: SketchOutline) {
         let old_holes = std::mem::take(&mut link.holes);
         let at: Vec<(Uuid, Pt)> = old_holes.iter().filter_map(|id| design.board.footprints.iter().find(|f| f.id == *id).map(|f| (*id, f.placement.at))).collect();
         design.board.footprints.retain(|f| !old_holes.contains(&f.id));
-        let mut ids: Vec<Option<Uuid>> = o.circles.iter().map(|(c, _)| at.iter().find(|(_, p)| p == c).map(|(id, _)| *id)).collect();
+        // (Each old hole once: two circles at one place don't share it.)
+        let mut ids: Vec<Option<Uuid>> = Vec::new();
+        for (c, _) in &o.circles {
+            let id = at.iter().find(|(id, p)| p == c && !ids.contains(&Some(*id))).map(|(id, _)| *id);
+            ids.push(id);
+        }
         for i in 0..ids.len() {
             if ids[i].is_none() {
                 let free = |id: &Uuid| !ids.contains(&Some(*id));

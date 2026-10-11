@@ -211,6 +211,11 @@ impl Rebuilder {
                 for (p, fp) in src.footprints.iter().filter(|(p, _)| d.includes_part(*p) && sstate.part(*p).is_some()) {
                     out.footprints.push((d.part_of(id, *p, k), *fp));
                 }
+                // A component a Transform there moved apart from its board: the same move, seen
+                // from this copy.
+                for (p, e) in src.moved.iter().filter(|(p, _)| d.includes_part(*p) && sstate.part(*p).is_some()) {
+                    out.moved.push((d.part_of(id, *p, k), m.inverse().then(e).then(m)));
+                }
             }
         }
         // SM18.3 (P3I.8): sheet metal comes across with its parts. A copy at the source's own
@@ -317,6 +322,8 @@ impl Rebuilder {
         let green = crate::appearance::Appearance::rgb(mask[0], mask[1], mask[2]);
         let mut palette = next.next_part;
         let mut failure = None;
+        // Each earlier copy's board and components.
+        let mut earlier: Vec<(PartId, Arc<crate::solid::Solid>)> = Vec::new();
         for (k, loc) in locations.iter().enumerate() {
             let m = motion_between(&base, loc);
             let label = |n: &str| if several { format!("{n} ({})", k + 1) } else { n.to_string() };
@@ -361,8 +368,12 @@ impl Rebuilder {
             let (u, v) = (m.linear * Vector3::x(), m.linear * Vector3::y());
             out.boards.push(BoardCopy { part: pid, frame: PlaneFrame { origin: o3, u: [u.x, u.y, u.z], v: [v.x, v.y, v.z] }, thickness });
             // The components (mesh parts: no kernel body); those running into a part before
-            // the feature are reported (on their meshes, §7.3).
-            let before_parts: Vec<(PartId, Arc<crate::solid::Solid>)> = state.parts.iter().map(|p| (p.part.id, p.part.solid.clone())).collect();
+            // the feature, or into an earlier copy (the board placed on several locations too
+            // close together), are reported (on their meshes, §7.3).
+            let before_parts: Vec<(PartId, Arc<crate::solid::Solid>)> = state.parts.iter().map(|p| (p.part.id, p.part.solid.clone())).chain(earlier.iter().cloned()).collect();
+            if let Some(p) = next.parts.last() {
+                earlier.push((p.part.id, p.part.solid.clone()));
+            }
             let frame = PlaneFrame { origin: board3d::apply(&m, [0.0; 3]), u: { let u = m.linear * Vector3::x(); [u.x, u.y, u.z] }, v: { let v = m.linear * Vector3::y(); [v.x, v.y, v.z] } };
             let mut placed: Vec<(PartId, Arc<crate::solid::Solid>)> = Vec::new();
             for c in &components {
@@ -381,6 +392,7 @@ impl Rebuilder {
                 out.parts.push(pid);
                 out.footprints.push((pid, c.footprint));
             }
+            earlier.extend(placed.iter().cloned());
             let comps: Vec<(PartId, &Arc<crate::solid::Solid>)> = placed.iter().map(|(n, s)| (*n, s)).collect();
             let others: Vec<(PartId, &Arc<crate::solid::Solid>)> = before_parts.iter().map(|(n, s)| (*n, s)).collect();
             out.collisions.extend(crate::pcb::fit::collisions(&comps, &others, &frame));

@@ -1051,3 +1051,24 @@ fn an_outline_cant_follow_a_sketch_after_a_derive_that_brings_the_board_in() {
     let e = h.execute(&mut doc, &link).unwrap_err().to_string();
     assert!(e.contains("which derives Part Studio 1"), "{e}");
 }
+
+#[test]
+fn copies_on_locations_too_close_run_into_each_other() {
+    let (mut doc, mut h, board) = document();
+    let at = |doc: &mut Document, h: &mut History, z: f64, x: f64| {
+        let id = FeatureId::new();
+        let mc = MateConnectorFeature { origin: Some(ConnectorOrigin::Origin), offset: [x, 0.0, z], offset_expr: [format!("{x} mm"), "0 mm".into(), format!("{z} mm")], ..Default::default() };
+        run(doc, h, &AddFeature { element: STUDIO, feature: id, base_name: "Mate connector".into(), kind: FeatureKind::MateConnector(mc) });
+        id
+    };
+    // A second copy 3 mm over the first (z 100): the first's components stand into its board.
+    let close = at(&mut doc, &mut h, 103.0, 0.0);
+    derive(&mut doc, &mut h, board, DerivedFeature { locations: vec![ConnectorRef::Feature(LOC), ConnectorRef::Feature(close)], ..Default::default() }).unwrap();
+    let b = build(&doc);
+    assert!(b.warning(DERIVED).is_some_and(|w| w.contains("runs into") && w.contains("(2)")), "{:?}", b.warning(DERIVED));
+    // 500 mm aside: clear.
+    h.undo(&mut doc);
+    let far = at(&mut doc, &mut h, 100.0, 500.0);
+    derive(&mut doc, &mut h, board, DerivedFeature { locations: vec![ConnectorRef::Feature(LOC), ConnectorRef::Feature(far)], ..Default::default() }).unwrap();
+    assert!(build(&doc).warning(DERIVED).is_none_or(|w| !w.contains("runs into")), "{:?}", build(&doc).warning(DERIVED));
+}

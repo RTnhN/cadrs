@@ -941,7 +941,8 @@ impl Rebuilder {
         use cadrs_kernel::Kernel;
         for (fid, out) in state.derived.iter() {
             let Some(fp) = out.footprints.iter().find(|(p, _)| *p == part).map(|(_, f)| *f) else { continue };
-            let copy = out.boards.iter().find(|b| out.components_of(b.part).contains(&part)).ok_or("its board is gone")?;
+            // (Its board left out, a derive taking the components alone: its mesh, faceted.)
+            let Some(copy) = out.boards.iter().find(|b| out.components_of(b.part).contains(&part)) else { return self.mesh_body(state, part).map(|b| vec![b]) };
             // (A board that came in with a derived Part Studio: its layout is in that studio's
             // features, as the Derived feature keeps them, at any depth.)
             let layout = features.iter().find(|f| f.id == *fid).and_then(|f| match &f.kind {
