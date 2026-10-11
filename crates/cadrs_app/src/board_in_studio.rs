@@ -169,15 +169,21 @@ pub fn component_parts(out: &cadrs_core::derived::DerivedOutput, k: usize) -> Ve
 #[derive(Component)]
 pub struct LayoutOverlay;
 
+/// An overlay's key: (feature, copy, top face, the changes in progress).
+type OverlayKey = (FeatureId, usize, bool, bool);
+
+/// An overlay's mesh and picture.
+type OverlayMade = Option<(Mesh, Image)>;
+
 /// The layout meshes on screen, by what they show.
 #[derive(Resource, Default)]
 pub struct OverlayCache {
     /// By (feature, copy, top face, the changes in progress).
-    shown: HashMap<(FeatureId, usize, bool, bool), (u64, Entity)>,
+    shown: HashMap<OverlayKey, (u64, Entity)>,
     /// Whole layouts being rasterised off the main thread (a commit of a big board would
     /// stall the view): what each will show (its signature, name, face) once ready; the
     /// picture it replaces stays meanwhile.
-    pending: HashMap<(FeatureId, usize, bool, bool), (u64, String, bevy::tasks::Task<Option<(Mesh, Image)>>)>,
+    pending: HashMap<OverlayKey, (u64, String, bevy::tasks::Task<OverlayMade>)>,
 }
 
 /// How much of a layout an overlay shows.
@@ -348,7 +354,7 @@ pub fn sync_overlays(world: &mut World) {
     world.resource_mut::<OverlayCache>().pending.retain(|k, _| keys.contains(k));
     // The pictures made off the main thread that are ready.
     let ready: Vec<Key> = world.resource::<OverlayCache>().pending.keys().copied().collect();
-    let mut done: Vec<(Key, u64, String, Option<(Mesh, Image)>)> = vec![];
+    let mut done: Vec<(Key, u64, String, OverlayMade)> = vec![];
     for k in ready {
         let mut cache = world.resource_mut::<OverlayCache>();
         let Some((_, _, task)) = cache.pending.get_mut(&k) else { continue };
@@ -403,7 +409,7 @@ pub fn sync_overlays(world: &mut World) {
 }
 
 /// Puts an overlay picture on screen for `key` (feature, copy, top face, changes).
-fn spawn_overlay(world: &mut World, key: (FeatureId, usize, bool, bool), sig: u64, name: &str, mesh: Mesh, image: Image) {
+fn spawn_overlay(world: &mut World, key: OverlayKey, sig: u64, name: &str, mesh: Mesh, image: Image) {
     let mesh = world.resource_mut::<Assets<Mesh>>().add(mesh);
     let image = world.resource_mut::<Assets<Image>>().add(image);
     let material = world.resource_mut::<Assets<StandardMaterial>>().add(StandardMaterial {
