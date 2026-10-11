@@ -113,6 +113,9 @@ pub struct Moving {
 pub struct LayoutState {
     /// A board edited in a 3D view: the side it is seen from (its footprints are picked first).
     pub facing: Option<cadrs_eda::layer::Side>,
+    /// A board edited in a 3D view: the footprint whose model the next press is on (the press
+    /// is where the pointer meets the board, perhaps beside the footprint's pads); taken by it.
+    pub pick: Option<uuid::Uuid>,
     pub tool: Tool,
     pub selection: Vec<BoardItem>,
     pub moving: Option<Moving>,
@@ -141,7 +144,7 @@ pub struct LayoutState {
 
 impl Default for LayoutState {
     fn default() -> Self {
-        LayoutState { facing: None, tool: Tool::Select, selection: vec![], moving: None, active: Layer::TopCopper, expanded: false, hidden: vec![], dim: false, layers_open: false, draw_layer: Layer::TopSilk, net: None, track_width: None, text_style: TextLook::default(), exact: None }
+        LayoutState { facing: None, pick: None, tool: Tool::Select, selection: vec![], moving: None, active: Layer::TopCopper, expanded: false, hidden: vec![], dim: false, layers_open: false, draw_layer: Layer::TopSilk, net: None, track_width: None, text_style: TextLook::default(), exact: None }
     }
 }
 
@@ -374,6 +377,7 @@ fn on_click(mut reader: MessageReader<EdaClick>, mut commands: Commands) {
 }
 
 fn press(w: &mut World, at: Pt, shift: bool) {
+    let pick = w.resource_mut::<LayoutState>().pick.take();
     // A move started with M or D ends with a click.
     if let Some(m) = w.resource::<LayoutState>().moving.clone().filter(|m| !m.on_release) {
         finish_move(w, &m, at);
@@ -383,7 +387,8 @@ fn press(w: &mut World, at: Pt, shift: bool) {
     let Some(d) = board_of(w) else { return };
     match tool {
         Tool::Select => {
-            let hit = be::hit_from(&d.board, at, tolerance(w), w.resource::<LayoutState>().facing);
+            let pick = pick.filter(|id| d.board.footprints.iter().any(|f| f.id == *id));
+            let hit = pick.map(BoardItem::Footprint).or_else(|| be::hit_from(&d.board, at, tolerance(w), w.resource::<LayoutState>().facing));
             let mut s = w.resource_mut::<LayoutState>();
             s.expanded = false;
             match hit {

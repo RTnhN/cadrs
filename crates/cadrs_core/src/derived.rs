@@ -137,11 +137,15 @@ pub struct DerivedBoard {
     /// the refresh): the feature's warning says it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub outline_problem: Option<String>,
+    /// Why the board no longer follows its PCB Studio (the studio or the board deleted; kept
+    /// in step by the refresh): the feature keeps its last layout, and its warning says why.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source_problem: Option<String>,
 }
 
 impl DerivedBoard {
     pub fn new(board: crate::pcb::BoardId, name: &str, layout: cadrs_eda::board::Board) -> Self {
-        let mut d = DerivedBoard { board, board_name: name.to_string(), layout: Default::default(), hash: 0, options: Default::default(), on_sketch: None, outline_problem: None };
+        let mut d = DerivedBoard { board, board_name: name.to_string(), layout: Default::default(), hash: 0, options: Default::default(), on_sketch: None, outline_problem: None, source_problem: None };
         d.set_layout(layout);
         d
     }
@@ -176,6 +180,7 @@ impl std::fmt::Debug for DerivedBoard {
             .field("off_board", &o.off_board)
             .field("on_sketch", &self.on_sketch)
             .field("outline_problem", &self.outline_problem)
+            .field("source_problem", &self.source_problem)
             .finish()
     }
 }
@@ -522,9 +527,18 @@ pub struct DerivedOutput {
     /// warning says so; the app names them as the Parts list does.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub collisions: Vec<crate::pcb::fit::Collision<PartId>>,
+    /// Components a later Transform moved apart from their board: the motion after their
+    /// place on the layout (an export makes their solids there).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub moved: Vec<(PartId, cadrs_kernel::Motion)>,
 }
 
 impl DerivedOutput {
+    /// How a later Transform moved component `part` apart from its board, if it did.
+    pub fn moved_apart(&self, part: PartId) -> Option<cadrs_kernel::Motion> {
+        self.moved.iter().find(|(p, _)| *p == part).map(|(_, m)| *m)
+    }
+
     /// The component parts of the derived board copy whose board part is `board` (they follow
     /// it in [`DerivedOutput::parts`], up to the next copy's board part).
     pub fn components_of(&self, board: PartId) -> Vec<PartId> {
@@ -819,8 +833,8 @@ pub fn refresh(doc: &mut Document) {
 fn refresh_boards(doc: &mut Document) {
     let this = doc.id;
     /// (tab, feature, the new layout if it changed, the board's name, the studio's name, the
-    /// outline link's problem).
-    type Update = (usize, usize, Option<(cadrs_eda::board::Board, u64)>, String, String, Option<String>);
+    /// outline link's problem, why the source is gone).
+    type Update = (usize, usize, Option<(cadrs_eda::board::Board, u64)>, String, String, Option<String>, Option<String>);
     let mut updates: Vec<Update> = Vec::new();
     for (i, el) in doc.elements.iter().enumerate() {
         for (j, f) in el.features().iter().enumerate() {
@@ -829,17 +843,28 @@ fn refresh_boards(doc: &mut Document) {
             if r.at != RefAt::Workspace || r.document_or(this) != this {
                 continue;
             }
-            let Some(src) = doc.elements.iter().find(|e| e.id == r.element) else { continue };
-            let Some(b) = src.pcb().and_then(|s| s.board(db.board)) else { continue };
+            // Its studio or board gone: the last layout stays, with why.
+            let src = doc.elements.iter().find(|e| e.id == r.element);
+            let Some(b) = src.and_then(|s| s.pcb()).and_then(|s| s.board(db.board)) else {
+                let why = match src {
+                    None => format!("Its PCB Studio, {}, is gone: the board stays as it was", d.source_name),
+                    Some(s) => format!("{} is gone from {}: the board stays as it was", db.board_name, s.name),
+                };
+                if db.source_problem.as_ref() != Some(&why) {
+                    updates.push((i, j, None, db.board_name.clone(), d.source_name.clone(), db.outline_problem.clone(), Some(why)));
+                }
+                continue;
+            };
+            let src = src.expect("found with its board");
             let (layout, hash) = b.derived_layout();
             let layout = (hash != db.hash).then(|| (layout.into_owned(), hash));
             let problem = b.outline_link.as_ref().and_then(|l| l.problem.clone());
-            if layout.is_some() || b.name() != db.board_name || src.name != d.source_name || problem != db.outline_problem {
-                updates.push((i, j, layout, b.name().to_string(), src.name.clone(), problem));
+            if layout.is_some() || b.name() != db.board_name || src.name != d.source_name || problem != db.outline_problem || db.source_problem.is_some() {
+                updates.push((i, j, layout, b.name().to_string(), src.name.clone(), problem, None));
             }
         }
     }
-    for (i, j, layout, board_name, studio_name, problem) in updates {
+    for (i, j, layout, board_name, studio_name, problem, gone) in updates {
         if let ElementKind::PartStudio { features, .. } = &mut doc.elements[i].kind
             && let FeatureKind::Derived(d) = &mut features[j].kind
             && let Some(db) = d.board.as_mut()
@@ -849,6 +874,7 @@ fn refresh_boards(doc: &mut Document) {
             }
             db.board_name = board_name;
             db.outline_problem = problem;
+            db.source_problem = gone;
             d.source_name = studio_name;
         }
     }

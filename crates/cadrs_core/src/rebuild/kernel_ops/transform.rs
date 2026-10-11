@@ -393,15 +393,30 @@ impl Rebuilder {
                         p.part.solid = Arc::new(crate::pcb::board3d::moved(&p.part.solid, m));
                     }
                 }
-                // A derived board moved: its frame (where its layout is drawn and edited) too.
-                if st.derived.values().any(|o| o.boards.iter().any(|b| parts.contains(&b.part))) {
+                // A derived board moved: its frame (where its layout is drawn and edited) too. A
+                // component moved without its board: how, after its place on the layout.
+                if st.derived.values().any(|o| o.boards.iter().any(|b| parts.contains(&b.part)) || meshes.iter().any(|p| o.footprints.iter().any(|(q, _)| q == p))) {
                     let mut all = (*st.derived).clone();
-                    for b in all.values_mut().flat_map(|o| o.boards.iter_mut()).filter(|b| parts.contains(&b.part)) {
-                        let dir = |d: [f64; 3]| {
-                            let v = m.linear * nalgebra::Vector3::new(d[0], d[1], d[2]);
-                            [v.x, v.y, v.z]
-                        };
-                        b.frame = cadrs_sketch::PlaneFrame { origin: crate::pcb::board3d::apply(m, b.frame.origin), u: dir(b.frame.u), v: dir(b.frame.v) };
+                    for o in all.values_mut() {
+                        let moved: Vec<PartId> = o.boards.iter().filter(|b| parts.contains(&b.part)).flat_map(|b| o.components_of(b.part)).collect();
+                        for b in o.boards.iter_mut().filter(|b| parts.contains(&b.part)) {
+                            let dir = |d: [f64; 3]| {
+                                let v = m.linear * nalgebra::Vector3::new(d[0], d[1], d[2]);
+                                [v.x, v.y, v.z]
+                            };
+                            b.frame = cadrs_sketch::PlaneFrame { origin: crate::pcb::board3d::apply(m, b.frame.origin), u: dir(b.frame.u), v: dir(b.frame.v) };
+                        }
+                        for pid in meshes.iter().filter(|p| o.footprints.iter().any(|(q, _)| q == *p)) {
+                            let had = o.moved_apart(*pid);
+                            let now = if moved.contains(pid) {
+                                // With its board: the same move apart, seen from the moved board.
+                                had.map(|e| m.inverse().then(&e).then(m))
+                            } else {
+                                Some(had.map_or(*m, |e| e.then(m)))
+                            };
+                            o.moved.retain(|(p, _)| p != pid);
+                            o.moved.extend(now.map(|e| (*pid, e)));
+                        }
                     }
                     st.derived = Arc::new(all);
                 }

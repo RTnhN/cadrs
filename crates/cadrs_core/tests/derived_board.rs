@@ -938,3 +938,90 @@ fn a_board_outline_offset_from_the_tubes_inner_edges_follows_the_tube() {
     run(&mut doc, &mut h, &EditSketch { element: pe::STUDIO, feature: pe::TUBE_SKETCH, op: SketchOp::MovePoints { moves } });
     assert!(close(size(&doc), [36.0, 38.0]), "{:?}", size(&doc));
 }
+
+#[test]
+fn a_mounting_hole_keeps_its_id_through_undo_redo_and_a_new_circle() {
+    use cadrs_core::commands::EditSketch;
+    use cadrs_sketch::{SketchOp, Vec2};
+    let (mut doc, mut h) = sketched();
+    let regions = outline_regions(&doc);
+    run(&mut doc, &mut h, &cadrs_core::pcb::outline_link::CreateBoardFromSketch { element: STUDIO, sketch: OUTLINE_SKETCH, regions, pcb: None, new_pcb: NEW_PCB, name: "Holes".into(), thickness: 1.6, seat: BoardSeat::Bottom, circles_as_holes: true, feature: FROM_SKETCH });
+    let holes = |doc: &Document| {
+        let d = doc.element(NEW_PCB).unwrap().pcb().unwrap().boards[0].design().unwrap().clone();
+        let mut v: Vec<(i64, uuid::Uuid)> = d.board.footprints.iter().filter(|f| f.reference().starts_with('H')).map(|f| (f.placement.at.x, f.id)).collect();
+        v.sort();
+        v
+    };
+    let first = holes(&doc);
+    assert_eq!(first.len(), 1);
+    // A second circle (left of the first): the first hole keeps its id.
+    run(&mut doc, &mut h, &EditSketch { element: STUDIO, feature: OUTLINE_SKETCH, op: SketchOp::AddCircle { center: Vec2::new(-10.0, 5.0), radius: 1.5, construction: false } });
+    let two = holes(&doc);
+    assert_eq!(two.len(), 2);
+    assert_eq!(two[1], first[0], "{two:?}");
+    // Undone and redone: the new hole comes back with the same id (its part with it).
+    h.undo(&mut doc);
+    assert_eq!(holes(&doc), first);
+    h.redo(&mut doc);
+    assert_eq!(holes(&doc), two);
+}
+
+#[test]
+fn a_deleted_board_stays_as_it_was_with_a_warning() {
+    let (mut doc, mut h, board) = document();
+    derive(&mut doc, &mut h, board, DerivedFeature::default()).unwrap();
+    let parts = derived_parts(&build(&doc)).len();
+    assert!(build(&doc).warning(DERIVED).is_none_or(|w| !w.contains("is gone")));
+    run(&mut doc, &mut h, &cadrs_core::pcb::DeleteBoard { element: PCB, board });
+    // The parts stay (the last layout), the feature says why.
+    let b = build(&doc);
+    assert_eq!(derived_parts(&b).len(), parts);
+    assert!(b.warning(DERIVED).is_some_and(|w| w.contains("is gone from")), "{:?}", b.warnings);
+    // Undone: following its board again.
+    h.undo(&mut doc);
+    assert!(build(&doc).warning(DERIVED).is_none_or(|w| !w.contains("is gone")));
+}
+
+#[test]
+fn a_component_moved_apart_exports_where_it_was_moved() {
+    use cadrs_core::transform::{TransformFeature, TransformType};
+    let (mut doc, mut h, board) = document();
+    derive(&mut doc, &mut h, board, DerivedFeature::default()).unwrap();
+    let b0 = build(&doc);
+    let board_part = b0.derived[&DERIVED].boards[0].part;
+    let comp = derived_parts(&b0).into_iter().find(|p| p.id != board_part).unwrap().clone();
+    // The component alone 30 along x, then the board (with its components) turned a quarter
+    // about z and lifted 20.
+    let t1 = TransformFeature { transform_type: TransformType::TranslateXyz, parts: vec![comp.id], dx: 30.0, dx_expr: "30 mm".into(), ..Default::default() };
+    run(&mut doc, &mut h, &AddFeature { element: STUDIO, feature: FeatureId::new(), base_name: "Transform".into(), kind: FeatureKind::Transform(t1) });
+    let mut turn = TransformFeature::new(TransformType::Rotate);
+    turn.parts = vec![board_part];
+    turn.axis = Some(cadrs_core::document::AxisRef::Connector(ConnectorRef::Feature(LOC)));
+    turn.angle = 90.0;
+    turn.angle_expr = "90 deg".into();
+    let lift = TransformFeature { transform_type: TransformType::TranslateXyz, parts: vec![board_part], dz: 20.0, dz_expr: "20 mm".into(), ..Default::default() };
+    for t in [turn, lift] {
+        run(&mut doc, &mut h, &AddFeature { element: STUDIO, feature: FeatureId::new(), base_name: "Transform".into(), kind: FeatureKind::Transform(t) });
+    }
+    let b = build(&doc);
+    assert!(b.errors.is_empty(), "{:?}", b.errors);
+    let mesh = b.part(comp.id).unwrap().clone();
+    // (It did turn: its x and y spans swapped places, and it went up.)
+    assert!((bounds(&mesh).0[2] - bounds(&comp).0[2] - 20.0).abs() < 1e-6);
+    // Its STEP solid is where its mesh is.
+    let req = cadrs_core::export::StepRequest { parts: vec![(comp.id, comp.name.clone())], y_up: false, individual: false };
+    let files = cadrs_core::rebuild::export_step(doc.element(STUDIO).unwrap().active_features(), req).wait().expect("exports");
+    let mut back_doc = Document::empty("Read back");
+    let mut ps = Element::part_studio("Read");
+    let rid = ElementId::new();
+    ps.id = rid;
+    back_doc.elements.push(ps);
+    let mut h2 = History::default();
+    run(&mut back_doc, &mut h2, &cadrs_core::import::AddImport { element: rid, feature: FeatureId::new(), file_name: "c.step".into(), bytes: std::sync::Arc::new(files[0].bytes.clone()), y_axis_up: false, units: None });
+    let back = cadrs_core::rebuild::build(back_doc.element(rid).unwrap().features());
+    let (lo, hi) = back.parts.iter().map(bounds).fold(([f64::MAX; 3], [f64::MIN; 3]), |(a, b), (l, u)| (std::array::from_fn(|k| a[k].min(l[k])), std::array::from_fn(|k| b[k].max(u[k]))));
+    let (mlo, mhi) = bounds(&mesh);
+    for k in 0..3 {
+        assert!((lo[k] - mlo[k]).abs() < 0.3 && (hi[k] - mhi[k]).abs() < 0.3, "axis {k}: STEP {lo:?} … {hi:?}, mesh {mlo:?} … {mhi:?}");
+    }
+}

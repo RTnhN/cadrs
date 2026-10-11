@@ -297,6 +297,9 @@ impl Rebuilder {
         if let Some(p) = &b.outline_problem {
             warnings.push(format!("The outline no longer follows its sketch: {p}"));
         }
+        if let Some(p) = &b.source_problem {
+            warnings.push(p.clone());
+        }
         let (components, w) = board3d::components(layout, o);
         warnings.extend(w);
         let owner = cadrs_kernel::naming::stable_hash(id.0.as_bytes());

@@ -951,7 +951,11 @@ impl Rebuilder {
             let f = layout.footprints.iter().find(|f| f.id == fp).ok_or("its footprint is gone")?;
             let m = crate::pcb::model::shown_model(&f.footprint).ok_or("its footprint shows no model")?;
             let (made, unit) = self.model_bodies_cached(m)?;
-            let motion = crate::pcb::model::model_motion(m, unit).then(&crate::pcb::frames::footprint_world(&copy.frame, copy.thickness, &f.placement));
+            // (Then as a Transform of its own moved it.)
+            let mut motion = crate::pcb::model::model_motion(m, unit).then(&crate::pcb::frames::footprint_world(&copy.frame, copy.thickness, &f.placement));
+            if let Some(apart) = out.moved_apart(part) {
+                motion = motion.then(&apart);
+            }
             let mut out_bodies = vec![];
             for b in made {
                 // (Copies: the cache keeps its bodies.)

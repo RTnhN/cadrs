@@ -602,7 +602,7 @@ pub fn ray_to_layout(host: &crate::eda::PlaneHost, origin: Vec3, dir: Vec3) -> O
 /// The component under a view ray, of the edited board copy: its footprint's place on the
 /// layout, if the ray meets its model before the board face (a click on a tall part's top
 /// picks it).
-fn component_under(world: &World, host: &crate::eda::PlaneHost, origin: Vec3, dir: Vec3) -> Option<cadrs_eda::units::Pt> {
+fn component_under(world: &World, host: &crate::eda::PlaneHost, origin: Vec3, dir: Vec3) -> Option<(uuid::Uuid, cadrs_eda::units::Pt)> {
     let cache = world.resource::<PartCache>();
     let out = cache.derived.get(&host.target.feature)?;
     let parts = component_parts(out, host.target.copy);
@@ -633,7 +633,7 @@ fn component_under(world: &World, host: &crate::eda::PlaneHost, origin: Vec3, di
         }
     }
     let (_, fp) = best?;
-    layout.footprints.iter().find(|f| f.id == fp).map(|f| f.placement.at)
+    layout.footprints.iter().find(|f| f.id == fp).map(|f| (f.id, f.placement.at))
 }
 
 /// Möller–Trumbore: the distance along the ray to the triangle, if it meets it.
@@ -716,13 +716,16 @@ pub(crate) fn navigate3d(
                     let n = host.frame.normal();
                     let up = dir.dot(Vec3::new(n[0] as f32, n[1] as f32, n[2] as f32)) < 0.0;
                     world.resource_mut::<crate::eda::layout_tools::LayoutState>().facing = Some(if up { cadrs_eda::layer::Side::Top } else { cadrs_eda::layer::Side::Bottom });
-                    // A component's model under the pointer: press on its footprint (to pick or move
-                    // it; a drawing tool's points stay where they are on the board).
+                    // A component's model under the pointer: the press picks its footprint (to
+                    // select or move it, from where the pointer meets the board, so it keeps its
+                    // place under the pointer); a drawing tool's points stay where they are.
                     let selecting = matches!(world.resource::<crate::eda::layout_tools::LayoutState>().tool, crate::eda::layout_tools::Tool::Select);
-                    let at = if selecting { component_under(world, &host, origin, dir).unwrap_or(at) } else { at };
+                    let under = if selecting { component_under(world, &host, origin, dir) } else { None };
+                    world.resource_mut::<crate::eda::layout_tools::LayoutState>().pick = under.map(|(id, _)| id);
                     world.write_message(crate::eda::EdaClick::Press { at, shift, ctrl });
                     if double {
-                        world.write_message(crate::eda::EdaClick::Double { at });
+                        // (Its properties: at its origin, where the layout finds it.)
+                        world.write_message(crate::eda::EdaClick::Double { at: under.map_or(at, |(_, o)| o) });
                     }
                 });
                 if double {

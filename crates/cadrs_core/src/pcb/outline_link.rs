@@ -124,9 +124,16 @@ fn outline_geoms(o: &SketchOutline) -> Vec<Geom> {
     o.geoms.iter().cloned().chain(o.circles.iter().map(|(center, radius)| Geom::Circle { center: *center, radius: *radius })).collect()
 }
 
-/// The outline shapes for `geoms`, locked.
-fn shapes_of(geoms: Vec<Geom>) -> Vec<BoardShape> {
-    geoms.into_iter().map(|geom| BoardShape { id: Uuid::new_v4(), shape: Shape { geom, stroke: Stroke::width(mm(0.05)), fill: Fill::None }, layer: Layer::Outline, locked: true, net: String::new() }).collect()
+/// An id made from `what` (the same each time: redoing a step that made a hole or a shape gives
+/// it its id again, and its part keeps its id).
+fn stable_id(what: &str) -> Uuid {
+    let h = |seed: &str| cadrs_kernel::naming::stable_hash(format!("{seed}|{what}").as_bytes()) as u128;
+    Uuid::from_u128(h("a") << 64 | h("b"))
+}
+
+/// The outline shapes for `geoms`, locked, their ids from `key` and their order.
+fn shapes_of(geoms: Vec<Geom>, key: &str) -> Vec<BoardShape> {
+    geoms.into_iter().enumerate().map(|(i, geom)| BoardShape { id: stable_id(&format!("{key}|shape {i}")), shape: Shape { geom, stroke: Stroke::width(mm(0.05)), fill: Fill::None }, layer: Layer::Outline, locked: true, net: String::new() }).collect()
 }
 
 /// The sketch `sketch` of the Part Studio `element`, as it is.
@@ -141,22 +148,32 @@ fn sketch_of(doc: &Document, element: ElementId, sketch: FeatureId) -> Result<&c
 fn apply_outline(b: &mut super::StudioBoard, o: SketchOutline) {
     let Some(link) = b.outline_link.as_mut() else { return };
     let Some(design) = b.design.as_mut() else { return };
+    let key = format!("{:?}|{:?}|{:?}", b.id, link.element, link.sketch);
     let old = std::mem::take(&mut link.shapes);
     design.board.shapes.retain(|s| !old.contains(&s.id));
     let mut geoms = o.geoms;
     if link.circles_as_holes {
-        // Each circle a mounting hole footprint, the i-th keeping the i-th's id (and part).
+        // Each circle a mounting hole footprint keeping its id (and part): the one at the same
+        // place, else the i-th, else one made from its number.
         let old_holes = std::mem::take(&mut link.holes);
+        let at: Vec<(Uuid, Pt)> = old_holes.iter().filter_map(|id| design.board.footprints.iter().find(|f| f.id == *id).map(|f| (*id, f.placement.at))).collect();
         design.board.footprints.retain(|f| !old_holes.contains(&f.id));
-        for (i, (center, radius)) in o.circles.iter().enumerate() {
-            let id = old_holes.get(i).copied().unwrap_or_else(Uuid::new_v4);
+        let mut ids: Vec<Option<Uuid>> = o.circles.iter().map(|(c, _)| at.iter().find(|(_, p)| p == c).map(|(id, _)| *id)).collect();
+        for i in 0..ids.len() {
+            if ids[i].is_none() {
+                let free = |id: &Uuid| !ids.contains(&Some(*id));
+                ids[i] = old_holes.get(i).copied().filter(free).or_else(|| Some(stable_id(&format!("{key}|hole {i}"))).filter(free));
+            }
+        }
+        for (i, ((center, radius), id)) in o.circles.iter().zip(ids).enumerate() {
+            let id = id.unwrap_or_else(|| stable_id(&format!("{key}|hole {i}|{center:?}")));
             design.board.footprints.push(mounting_hole(id, i + 1, *center, *radius));
             link.holes.push(id);
         }
     } else {
         geoms.extend(o.circles.into_iter().map(|(center, radius)| Geom::Circle { center, radius }));
     }
-    let new = shapes_of(geoms);
+    let new = shapes_of(geoms, &key);
     link.shapes = new.iter().map(|s| s.id).collect();
     design.board.shapes.extend(new);
     b.design_changed();
