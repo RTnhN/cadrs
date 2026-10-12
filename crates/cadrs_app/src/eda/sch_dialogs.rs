@@ -1,12 +1,10 @@
-//! The Schematic view's dialogs (GS3, GS7, GS9–GS12): the label's name, a symbol's fields (E),
-//! page settings, footprint assignment, ERC, BOM.
+//! The Schematic view's dialogs (GS7, GS9–GS12): the label's name, a symbol's fields (E),
+//! footprint assignment, ERC, BOM.
 //!
 //! Names: `eda-label-dialog` (`eda-label-text`, `eda-label-ok`), `eda-props-dialog`
 //! (`eda-props-<field>`, `eda-props-footprint-choose`: the footprint browser, `eda-props-ok`),
 //! `eda-wire-dialog` (`eda-wire-default`, `eda-wire-swatch-<n>`, `eda-wire-hex`, `eda-wire-only`,
-//! `eda-wire-ok`),
-//! `eda-page-dialog` (`eda-page-paper`, `eda-page-title`,
-//! `eda-page-date`, `eda-page-rev`, `eda-page-company`, `eda-page-ok`), `eda-assign-dialog`
+//! `eda-wire-ok`), `eda-assign-dialog`
 //! (`eda-assign-sym-<ref>` rows, `eda-assign-fp-<slug>` candidates, the `eda-assign-by-symbol`,
 //! `eda-assign-by-pins` checkboxes, `eda-assign-filter`, `eda-assign-ok`), `eda-erc-dialog`
 //! (`eda-erc-run`, `eda-erc-list`, `eda-erc-summary`), `eda-bom-dialog` (`eda-bom-preview`,
@@ -19,7 +17,6 @@ use cadrs_eda::assign::{Filters, candidates};
 use cadrs_eda::sch_edit as se;
 use cadrs_eda::symbol::fields;
 use cadrs_ui::checkbox::CheckboxState;
-use cadrs_ui::dialog_fields::{Select, SelectState};
 use cadrs_ui::prelude::*;
 use cadrs_ui::{Checkbox, Dialog};
 use uuid::Uuid;
@@ -333,63 +330,6 @@ fn accept_wire(w: &mut World) {
     });
 }
 // ---------------------------------------------------------------------------------------------
-// Page settings (GS3)
-
-const PAPERS: [&str; 12] = ["A5", "A4", "A3", "A2", "A1", "A0", "A", "B", "C", "D", "E", "USLegal"];
-
-pub fn open_page(w: &mut World) {
-    let Some((_, _, d)) = ui::current(w) else { return };
-    let sh = d.schematic.sheets[0].clone();
-    let t = w.resource::<Theme>().clone();
-    let tf = t.clone();
-    spawn_dialog(
-        w,
-        Dialog::new("eda-page-dialog")
-            .title("Page settings")
-            .width(480.0)
-            .body(move |b| {
-                let selected = PAPERS.iter().position(|p| *p == sh.paper.name).unwrap_or(1);
-                row(b, &t, "Paper size", |r| {
-                    let mut s = Select::new("eda-page-paper").bordered().width(Val::Px(160.0));
-                    for p in PAPERS {
-                        s = s.option(p, true);
-                    }
-                    r.spawn(s.selected(selected).build(&t));
-                });
-                let tb = &sh.title_block;
-                text_row(b, &t, "Title", "eda-page-title", &tb.title);
-                text_row(b, &t, "Issue date", "eda-page-date", &tb.date);
-                text_row(b, &t, "Revision", "eda-page-rev", &tb.revision);
-                text_row(b, &t, "Company", "eda-page-company", &tb.company);
-            })
-            .footer(move |f| ok_cancel(f, &tf, "eda-page-ok", accept_page)),
-    );
-}
-
-fn select_index(w: &mut World, name: &str) -> Option<usize> {
-    let mut q = w.query::<(&Name, &SelectState)>();
-    q.iter(w).find(|(n, _)| n.as_str() == name).map(|(_, s)| s.selected)
-}
-
-fn accept_page(w: &mut World) {
-    let paper = select_index(w, "eda-page-paper").and_then(|i| PAPERS.get(i)).and_then(|p| se::paper(p));
-    let tb = cadrs_eda::schematic::TitleBlock {
-        title: ui::text_value(w, "eda-page-title"),
-        date: ui::text_value(w, "eda-page-date"),
-        revision: ui::text_value(w, "eda-page-rev"),
-        company: ui::text_value(w, "eda-page-company"),
-        comments: vec![],
-    };
-    close_all(w);
-    ui::commit(w, "Page settings", |d| {
-        let p = paper.unwrap_or_else(|| d.schematic.sheets[0].paper.clone());
-        let comments = d.schematic.sheets[0].title_block.comments.clone();
-        se::set_page(&mut d.schematic, 0, p, cadrs_eda::schematic::TitleBlock { comments, ..tb });
-        Ok(())
-    });
-}
-
-// ---------------------------------------------------------------------------------------------
 // Assign footprints (GS10)
 
 #[derive(Resource, Default, Clone, PartialEq)]
@@ -685,21 +625,19 @@ pub fn register(app: &mut App) {
 // ---------------------------------------------------------------------------------------------
 // Plot: the sheet as SVG or PDF, the netlist as CSV
 
-/// The sheet as a vector PDF page at its paper size (lines and fills; text as strokes).
+/// The sheet as a vector PDF page around what is drawn (lines and fills; text as strokes).
 pub fn schematic_pdf(d: &cadrs_eda::Design, title: &str) -> Vec<u8> {
     use cadrs_drawing::export::{Item, Layer, Page, Pen, Shape};
     use cadrs_eda::units::to_mm;
     let list = cadrs_eda::render::schematic(&d.schematic, 0, &cadrs_eda::render::SchematicTheme::default(), &cadrs_eda::render::Highlight::default());
-    let paper = &d.schematic.sheets[0].paper;
-    let mut page = Page { name: title.into(), width: to_mm(paper.size.w), height: to_mm(paper.size.h), items: vec![] };
-    let mm2 = |p: &cadrs_eda::units::Pt| [to_mm(p.x), to_mm(p.y)];
+    // The sheet is unbounded: the page is what is drawn, with its margin.
+    let b = list.bounds.unwrap_or(cadrs_eda::units::Bounds { min: cadrs_eda::units::Pt::ZERO, max: cadrs_eda::units::Pt::mm(297.0, 210.0) });
+    let (x0, y0) = (to_mm(b.min.x), to_mm(b.min.y));
+    let mut page = Page { name: title.into(), width: to_mm(b.size().w), height: to_mm(b.size().h), items: vec![] };
+    let mm2 = |p: &cadrs_eda::units::Pt| [to_mm(p.x) - x0, to_mm(p.y) - y0];
     for a in &list.areas {
-        // The paper's own colour stays the paper's.
-        if a.z == -10 {
-            continue;
-        }
         for t in a.tris.as_chunks::<3>().0 {
-            let points = t.iter().map(|q| [q[0] / 1e6, q[1] / 1e6]).collect();
+            let points = t.iter().map(|q| [q[0] / 1e6 - x0, q[1] / 1e6 - y0]).collect();
             page.items.push(Item::Fill { points, color: [a.color[0], a.color[1], a.color[2]], layer: Layer::Visible });
         }
     }

@@ -1,10 +1,10 @@
 // The Getting Started course's schematic (docs/PLAN.md GS3–GS12) drawn in cadrs: a new board,
 // its Schematic view. Points are sheet millimetres (`flat(x, y)`, Y up).
-// 01 Page settings (title, revision); 02 the symbol chooser filtered to "LED"; 03 LED, R_US
-// and Battery_Cell placed (annotated D1, R1, BT1); 04 R1 and D1 moved (M) and D1 turned (R);
-// 05 the loop wired (W); 06 VCC and GND ports (P) and the `led` label (L); 07 values set (E);
-// 08 ERC: the two "power input not driven" errors; 09 PWR_FLAGs added, ERC clean;
-// 10 footprints assigned; 11 the BOM.
+// 01 the symbol chooser filtered to "LED"; 02 LED, R_US and Battery_Cell placed (annotated
+// D1, R1, BT1); 03 R1 and D1 moved (M) and D1 turned (R); 04 the loop wired (W); 05 VCC and
+// GND ports (P) and the `led` label (L); 06 values set (E); 07 ERC: the two "power input not
+// driven" errors; 08 PWR_FLAGs added, ERC clean; 09 footprints assigned; 10 the BOM.
+// (The sheet is unbounded: no page settings.)
 Scenario(
     start: Some("document"),
     steps: [
@@ -15,16 +15,6 @@ Scenario(
         WaitFor("pcb-name-edit"),
         Key("Enter"),
         WaitFor("eda-mode-bar"),
-        // GS3: page settings.
-        Click(ui("sch-page")),
-        WaitFor("eda-page-dialog"),
-        Click(ui("eda-page-title-field")),
-        Key("Ctrl+A"),
-        Type("Getting Started"),
-        Click(ui("eda-page-rev-field")),
-        Type("0"),
-        Screenshot("01-page-settings"),
-        Click(ui("eda-page-ok")),
         // GS4: symbols.
         MoveTo(800, 500),
         Key("A"),

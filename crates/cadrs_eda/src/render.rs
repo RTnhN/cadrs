@@ -41,6 +41,13 @@ pub struct DrawList {
 }
 
 impl DrawList {
+    /// The box around every line and area.
+    pub fn drawn_bounds(&self) -> Option<Bounds> {
+        let pts = self.lines.iter().flat_map(|l| l.pts.iter().copied());
+        let tris = self.areas.iter().flat_map(|a| a.tris.iter().map(|t| Pt::new(t[0] as Nm, t[1] as Nm)));
+        pts.chain(tris).fold(None, |acc, p| Some(Bounds::union(acc, Bounds::of(p))))
+    }
+
     fn line(&mut self, color: Rgba, width: Nm, pts: Vec<Pt>) {
         if pts.len() >= 2 {
             self.lines.push(Line { color, width, pts });
@@ -230,39 +237,14 @@ pub enum PinEnds {
     Symbol(uuid::Uuid),
 }
 
-/// A schematic sheet: paper, frame and title block, symbols with pins and fields, wires,
-/// buses, junctions, no-connect flags, labels and notes; where wires join pins and labels
-/// marked ([`join_mark`]) where nothing joins them yet, and as [`Highlight`] asks.
+/// A schematic sheet, unbounded (no paper, frame or title block): symbols with pins and
+/// fields, wires, buses, junctions, no-connect flags, labels and notes; where wires join pins
+/// and labels marked ([`join_mark`]) where nothing joins them yet, and as [`Highlight`] asks.
 pub fn schematic(sch: &Schematic, sheet: usize, th: &SchematicTheme, hl: &Highlight) -> DrawList {
     use crate::sch_edit::SchItem;
-    let mut d = DrawList { background: th.background, ..Default::default() };
+    // No paper, frame or title block: the sheet is unbounded, the paper's colour all over.
+    let mut d = DrawList { background: th.paper, ..Default::default() };
     let Some(sh) = sch.sheets.get(sheet) else { return d };
-    let (w, h) = (sh.paper.size.w, sh.paper.size.h);
-    d.bounds = Some(Bounds { min: Pt::ZERO, max: Pt::new(w, h) });
-    d.region(th.paper, -10, &vec![vec![Pt::ZERO, Pt::new(w, 0), Pt::new(w, h), Pt::new(0, h)]]);
-    // Frame 10 mm in, title block bottom right.
-    let m = mm(10.0);
-    d.line(th.frame, WIRE_W, vec![Pt::new(m, m), Pt::new(w - m, m), Pt::new(w - m, h - m), Pt::new(m, h - m), Pt::new(m, m)]);
-    let (tw, tbh) = (mm(110.0), mm(32.0));
-    let (x0, y0) = (w - m - tw, m);
-    d.line(th.frame, WIRE_W, vec![Pt::new(x0, y0), Pt::new(x0, y0 + tbh), Pt::new(w - m, y0 + tbh)]);
-    for k in 1..4 {
-        let y = y0 + mm(8.0) * k;
-        d.line(th.frame, WIRE_W, vec![Pt::new(x0, y), Pt::new(w - m, y)]);
-    }
-    let tb = &sh.title_block;
-    let small = mm(1.5);
-    let rows = [
-        format!("Title: {}", tb.title),
-        format!("Size: {}   Date: {}   Rev: {}", sh.paper.name, tb.date, tb.revision),
-        tb.company.clone(),
-        format!("Sheet: /{}", if sh.name == "Root" { "" } else { &sh.name }),
-    ];
-    for (k, r) in rows.iter().enumerate() {
-        let y = y0 + tbh - mm(8.0) * (k as i64 + 1) + mm(3.0);
-        let size = if k == 0 { mm(2.5) } else { small };
-        d.text(&text_at(r, Pt::new(x0 + mm(2.0), y), 0.0, size, HAlign::Left, VAlign::Bottom), th.frame);
-    }
 
     let nl = netlist(sch);
     let lone: Vec<Pt> = nl.nets.iter().filter(|n| n.pins.len() == 1 && n.labels.is_empty() && !n.no_connect).map(|n| n.pins[0].at).collect();
@@ -400,6 +382,8 @@ pub fn schematic(sch: &Schematic, sheet: usize, th: &SchematicTheme, hl: &Highli
     for g in &sh.drawings {
         d.shape(&g.shape, th.note, None, WIRE_W, 0);
     }
+    // Fit shows what is drawn (an empty sheet: an A4's worth from the origin).
+    d.bounds = Some(d.drawn_bounds().map_or(Bounds { min: Pt::ZERO, max: Pt::mm(297.0, 210.0) }, |b| b.grow(mm(10.0))));
     d
 }
 

@@ -29,7 +29,7 @@
 //!   symbol's pins in Select), filled on the one a wire would join now.
 //! - **L** net label (its name asked first; **R** turns it while it follows the pointer),
 //!   **Q** no-connect flag.
-//! - The strip: those tools, Annotate, Assign footprints, ERC, BOM export, Page settings.
+//! - The strip: those tools, Annotate, Assign footprints, ERC, BOM export, Plot.
 //!
 //! Every change is one undo step (`ui::commit`).
 
@@ -62,7 +62,6 @@ const STRIP: ui::StripSpec = &[
     Some(("sch-erc", "erc", "Electrical rules check", "erc")),
     Some(("sch-fields", "custom-table", "Symbol fields table", "fields")),
     Some(("sch-bom", "bill-of-materials", "Bill of materials", "bom")),
-    Some(("sch-page", "properties", "Page settings", "page")),
     Some(("sch-plot", "file-export", "Plot the schematic (SVG, PDF) or export its netlist", "plot")),
 ];
 
@@ -249,7 +248,6 @@ pub fn run_action(w: &mut World, action: &str) {
         "assign" => dialogs::open_assign(w),
         "erc" => dialogs::open_erc(w),
         "bom" => dialogs::open_bom(w),
-        "page" => dialogs::open_page(w),
         "plot" => dialogs::open_plot(w),
         "fields" => dialogs::open_fields_table(w),
         _ => {}
