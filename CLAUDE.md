@@ -15,6 +15,9 @@ Onshape-style CAD in Rust + Bevy 0.19.1. Local notes in `docs/` (git-ignored: `P
 - Headless scenario: `cargo run -r -- --headless --scenario <name>` → `target/scenarios/<name>/`.
 - Windowed run from a shell with no display: prefix `WAYLAND_DISPLAY=wayland-1 XDG_RUNTIME_DIR=/run/user/1000`.
 - Windows exe: `cargo build -r --target x86_64-pc-windows-gnu` (MinGW is installed).
+- Autorouter GPU shader: after changing `crates/cadrs_router_kernels`, rebuild its SPIR-V with
+  `cargo gpu build --shader-crate crates/cadrs_router_kernels --output-dir crates/cadrs_router/shaders`
+  (rust-gpu; commit the `.spv`). Without one the router runs on the CPU.
 - Cold builds take 4+ minutes. Never run two cargo builds at once.
 
 ## Layout
