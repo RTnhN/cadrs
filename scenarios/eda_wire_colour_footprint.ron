@@ -36,7 +36,7 @@ Scenario(
         DoubleClick(flat(106.68, 110.49)),
         WaitFor("eda-wire-dialog"),
         Screenshot("01-wire-dialog"),
-        Click(ui("eda-wire-swatch-5")),
+        Click(ui("eda-wire-swatch-9")),
         Click(ui("eda-wire-ok")),
         MoveTo(1100, 900),
         Wait(2),

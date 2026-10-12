@@ -21,6 +21,7 @@ pub mod button;
 pub mod checkbox;
 pub mod collapsible;
 pub mod command_palette;
+pub mod color_editor;
 pub mod color_legend;
 pub mod color_picker;
 pub mod cursor;
@@ -81,6 +82,7 @@ pub use segmented::{Segmented, SegmentedSelect, SegmentedState};
 pub use floating_panel::{FloatingPanel, FloatingPanelBody, FloatingPanelClose, panel_caption};
 pub use switch::{Switch, SwitchChange, SwitchState};
 pub use avatar::Avatar;
+pub use color_editor::{ColorEditor, ColorEditorChange, ColorEditorCustom, ColorEditorDefault, ColorEditorSaveCustom, ColorEditorState, CustomColorSwatch};
 pub use color_legend::{ColorLegend, color_map};
 pub use color_picker::{ColorMixer, ColorMixerChange, ColorMixerState, ColorSwatch, SwatchColor, SwatchSelected};
 pub use command_palette::{CommandPalette, CommandPaletteClose, CommandPaletteLayer, CommandPaletteResults, palette_row};
@@ -254,7 +256,7 @@ impl Plugin for CadrsUiPlugin {
             .add_plugins(radio::RadioPlugin)
             .add_plugins(entry_list::EntryListPlugin)
             .add_plugins(name_popup::NamePopupPlugin)
-            .add_plugins((floating_panel::FloatingPanelPlugin, segmented::SegmentedPlugin, switch::SwitchPlugin, version_graph::VersionGraphPlugin, splitter::SplitterPlugin, selection_box::SelectionBoxPlugin))
+            .add_plugins((floating_panel::FloatingPanelPlugin, segmented::SegmentedPlugin, switch::SwitchPlugin, version_graph::VersionGraphPlugin, splitter::SplitterPlugin, selection_box::SelectionBoxPlugin, color_editor::ColorEditorPlugin))
             .add_message::<ScriptCommand>();
     }
 }

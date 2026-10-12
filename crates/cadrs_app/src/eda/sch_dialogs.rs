@@ -21,7 +21,7 @@ use cadrs_eda::symbol::fields;
 use cadrs_ui::checkbox::CheckboxState;
 use cadrs_ui::dialog_fields::{Select, SelectState};
 use cadrs_ui::prelude::*;
-use cadrs_ui::{Checkbox, ColorSwatch, Dialog};
+use cadrs_ui::{Checkbox, Dialog};
 use uuid::Uuid;
 
 use super::schematic_tools::{Tool, set_tool};
@@ -255,53 +255,33 @@ struct WireTarget {
     color: Option<cadrs_eda::graphics::Color>,
 }
 
-/// The swatches offered: the default, then a palette (the colours schematics commonly use).
-const WIRE_COLORS: [(u8, u8, u8); 12] = [(0, 132, 0), (46, 46, 46), (0, 0, 0), (132, 132, 132), (255, 19, 15), (255, 153, 0), (218, 210, 0), (15, 191, 95), (0, 194, 194), (0, 14, 255), (145, 0, 255), (194, 0, 194)];
-
-#[derive(Component, Clone, Copy)]
-struct WireSwatch(Option<(u8, u8, u8)>);
-
-fn hex(c: Option<cadrs_eda::graphics::Color>) -> String {
-    c.map(|c| format!("#{:02X}{:02X}{:02X}", c.r, c.g, c.b)).unwrap_or_default()
-}
-
-fn parse_hex(s: &str) -> Option<cadrs_eda::graphics::Color> {
-    let s = s.trim().trim_start_matches('#');
-    if s.len() != 6 {
-        return None;
-    }
-    let v = u32::from_str_radix(s, 16).ok()?;
-    Some(cadrs_eda::graphics::Color { r: (v >> 16) as u8, g: (v >> 8) as u8, b: v as u8, a: 255 })
-}
-
-/// The wire dialog: its colour (a swatch or a hex code), for its whole run of connected wires
-/// unless "Only this wire".
+/// The wire dialog: its colour in the same editor as Edit appearance (the preset swatches, the
+/// document's custom colours, the mixer, Hex and RGB; Default is the theme's wire colour), for
+/// its whole run of connected wires unless "Only this wire".
 pub fn open_wire(w: &mut World, wire: Uuid) {
     let Some((_, _, d)) = ui::current(w) else { return };
     let Some(cur) = d.schematic.sheets[0].wires.iter().find(|x| x.id == wire).map(|x| x.stroke.color) else { return };
     let run = se::connected_wires(&d.schematic, 0, wire).len();
+    let custom: Vec<[u8; 3]> = w.get_resource::<crate::ActiveDocument>().map(|d| d.doc.custom_colors.iter().map(|c| c.rgb).collect()).unwrap_or_default();
     w.insert_resource(WireTarget { wire, color: cur });
+    let shown = cur.map_or(theme_wire(), |c| [c.r, c.g, c.b, 255]);
     let t = w.resource::<Theme>().clone();
     let tf = t.clone();
     spawn_dialog(
         w,
         Dialog::new("eda-wire-dialog")
             .title("Wire colour")
-            .width(460.0)
+            .width(300.0)
             .body(move |b| {
-                b.spawn(Node { align_items: AlignItems::Center, column_gap: Val::Px(10.0), padding: UiRect::vertical(Val::Px(6.0)), ..default() }).with_children(|r| {
-                    r.spawn((t.text("Colour", t.font_base, FontWeight::MEDIUM, t.muted_foreground), Node { width: Val::Px(110.0), ..default() }));
-                    r.spawn(Node { column_gap: Val::Px(6.0), flex_wrap: FlexWrap::Wrap, width: Val::Px(300.0), row_gap: Val::Px(6.0), ..default() }).with_children(|s| {
-                        let sel = |c: Option<(u8, u8, u8)>| cur.map(|x| (x.r, x.g, x.b)) == c;
-                        s.spawn((cadrs_ui::Button::new("eda-wire-default").label("Default").small().build(&t), WireSwatch(None)));
-                        for (i, (r, g, bl)) in WIRE_COLORS.iter().enumerate() {
-                            let c = Some((*r, *g, *bl));
-                            s.spawn((ColorSwatch::new(format!("eda-wire-swatch-{i}"), Color::srgb_u8(*r, *g, *bl)).size(22.0).selected(sel(c)).build(&t), WireSwatch(c)));
-                        }
-                    });
-                });
-                text_row(b, &t, "Hex", "eda-wire-hex", &hex(cur));
-                b.spawn((Node { margin: UiRect::top(Val::Px(6.0)), ..default() },)).with_children(|r| {
+                b.spawn(
+                    cadrs_ui::ColorEditor::new("eda-wire")
+                        .presets(cadrs_core::appearance::SWATCHES.iter().map(|a| a.rgb))
+                        .custom(custom.clone())
+                        .color(shown)
+                        .default_button()
+                        .build(&t),
+                );
+                b.spawn((Node { margin: UiRect::top(Val::Px(8.0)), ..default() },)).with_children(|r| {
                     r.spawn(Checkbox::new("eda-wire-only").label(format!("Only this wire (else all {run} connected)")).checked(false).build(&t));
                 });
             })
@@ -309,27 +289,41 @@ pub fn open_wire(w: &mut World, wire: Uuid) {
     );
 }
 
-/// A swatch or Default picks the colour (shown in the hex field).
-fn on_wire_swatch(a: On<Activate>, q: Query<&WireSwatch>, mut commands: Commands) {
-    let Ok(&WireSwatch(c)) = q.get(a.entity) else { return };
+/// The theme's wire colour (what Default shows).
+fn theme_wire() -> [u8; 4] {
+    cadrs_eda::render::SchematicTheme::default().wire
+}
+
+/// A colour picked in the wire dialog.
+fn on_wire_color(ev: On<cadrs_ui::ColorEditorChange>, q: Query<&Name>, mut commands: Commands) {
+    if !q.get(ev.entity).is_ok_and(|n| n.as_str() == "eda-wire-editor") {
+        return;
+    }
+    let [r, g, b, _] = ev.rgba;
     commands.queue(move |w: &mut World| {
-        let color = c.map(|(r, g, b)| cadrs_eda::graphics::Color { r, g, b, a: 255 });
         if let Some(mut t) = w.get_resource_mut::<WireTarget>() {
-            t.color = color;
+            t.color = Some(cadrs_eda::graphics::Color { r, g, b, a: 255 });
         }
-        ui::set_text_value(w, "eda-wire-hex", &hex(color));
-        let mut q = w.query::<(&WireSwatch, &mut cadrs_ui::SwatchSelected)>();
-        for (s, mut sel) in q.iter_mut(w) {
-            sel.0 = s.0 == c && c.is_some();
+    });
+}
+
+/// Default: the theme's wire colour.
+fn on_wire_default(ev: On<cadrs_ui::ColorEditorDefault>, mut q: Query<(&Name, &mut cadrs_ui::ColorEditorState)>, mut commands: Commands) {
+    let Ok((n, mut st)) = q.get_mut(ev.entity) else { return };
+    if n.as_str() != "eda-wire-editor" {
+        return;
+    }
+    st.rgba = theme_wire();
+    commands.queue(|w: &mut World| {
+        if let Some(mut t) = w.get_resource_mut::<WireTarget>() {
+            t.color = None;
         }
     });
 }
 
 fn accept_wire(w: &mut World) {
     let Some(t) = w.get_resource::<WireTarget>().cloned() else { return };
-    let typed = ui::text_value(w, "eda-wire-hex");
-    // A typed code wins; an empty field is the default colour.
-    let color = if typed.trim().is_empty() { None } else { parse_hex(&typed).or(t.color) };
+    let color = t.color;
     let only = checkbox(w, "eda-wire-only");
     close_all(w);
     ui::commit(w, "Wire colour", |d| {
@@ -683,7 +677,8 @@ pub fn register(app: &mut App) {
     app.add_systems(Update, (refresh_assign, on_folder_picked).run_if(in_state(AppState::Document)))
         .add_observer(on_assign_row)
         .add_observer(on_assign_footprint)
-        .add_observer(on_wire_swatch);
+        .add_observer(on_wire_color)
+        .add_observer(on_wire_default);
 }
 
 

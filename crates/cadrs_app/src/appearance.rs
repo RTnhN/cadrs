@@ -28,8 +28,8 @@ use cadrs_sketch::{CurveId, FaceName};
 use cadrs_ui::menu::ContextMenuAnchor;
 use cadrs_ui::prelude::*;
 use cadrs_ui::{
-    ColorMixer, ColorMixerChange, ColorMixerState, ColorSwatch, FeatureDialogAccept, FeatureDialogCancel,
-    NumberField, NumberFieldCommit, NumberFieldState, Slider, SliderChange, SliderState, SwatchColor,
+    ColorEditor, ColorEditorChange, ColorEditorCustom, ColorEditorDefault, ColorEditorSaveCustom, ColorEditorState, CustomColorSwatch,
+    FeatureDialogAccept, FeatureDialogCancel,
 };
 
 use crate::parts::PartCache;
@@ -43,7 +43,7 @@ impl Plugin for AppearancePlugin {
         app.init_resource::<SidePanel>()
             .add_systems(
                 Update,
-                (appearance_keys, sync_appearance_dialog, sync_appearance_panel, sync_variables_panel, sync_custom_tables_panel, sync_panel_buttons)
+                (appearance_keys, sync_appearance_dialog, sync_custom_colors, sync_appearance_panel, sync_variables_panel, sync_custom_tables_panel, sync_panel_buttons)
                     .chain()
                     .after(crate::parts::PartsSet)
                     .run_if(in_state(AppState::Document)),
@@ -51,13 +51,11 @@ impl Plugin for AppearancePlugin {
             .add_systems(OnExit(AppState::Document), |mut commands: Commands| {
                 commands.remove_resource::<AppearanceSession>();
             })
-            .add_observer(on_swatch)
-            .add_observer(on_mixer)
-            .add_observer(on_field_commit)
-            .add_observer(on_opacity)
+            .add_observer(on_color)
+            .add_observer(on_default)
+            .add_observer(on_save_custom)
             .add_observer(on_accept)
             .add_observer(on_cancel)
-            .add_observer(on_button)
             .add_observer(on_custom_menu)
             .add_observer(on_custom_menu_action)
             .add_observer(on_panel_button)
@@ -147,34 +145,6 @@ pub struct AppearanceSession {
 
 #[derive(Component)]
 struct AppearanceDialog;
-
-/// A preset swatch.
-#[derive(Component, Debug, Clone, Copy)]
-struct Preset;
-
-/// A custom colour's swatch (its index in the document's list).
-#[derive(Component, Debug, Clone, Copy)]
-struct Custom(usize);
-
-/// The custom colours' row.
-#[derive(Component)]
-struct CustomRow;
-
-/// The swatch showing the current colour.
-#[derive(Component)]
-struct CurrentColor;
-
-/// The opacity readout ("100%").
-#[derive(Component)]
-struct OpacityText;
-
-#[derive(Component, Debug, Clone, Copy, PartialEq, Eq)]
-enum Field {
-    Hex,
-    R,
-    G,
-    B,
-}
 
 /// The appearance a target has now.
 fn current(world: &World, element: ElementId, target: &AppearanceTarget) -> Appearance {
@@ -281,75 +251,36 @@ fn with_session(commands: &mut Commands, f: impl FnOnce(&mut AppearanceSession) 
     });
 }
 
-/// A preset or custom swatch.
-type SwatchFilter = Or<(With<Preset>, With<Custom>)>;
-
-fn on_swatch(
-    a: On<Activate>,
-    q: Query<&SwatchColor, SwatchFilter>,
-    button: Res<cadrs_ui::menu::LastPointerButton>,
-    mut commands: Commands,
-) {
-    let Ok(c) = q.get(a.entity) else {
-        return;
-    };
-    // A right-click on a custom colour opens its menu; it doesn't pick the colour.
-    if button.0 == bevy::picking::pointer::PointerButton::Secondary {
-        return;
+/// A colour picked in the dialog's editor shows live.
+fn on_color(ev: On<ColorEditorChange>, q: Query<&Name>, mut commands: Commands) {
+    if q.get(ev.entity).is_ok_and(|n| n.as_str() == "appearance-editor") {
+        let [r, g, b, a] = ev.rgba;
+        with_session(&mut commands, move |s| s.color = Appearance { rgb: [r, g, b], alpha: a });
     }
-    let s = c.0.to_srgba();
-    let rgb = [s.red, s.green, s.blue].map(|v| (v * 255.0).round() as u8);
-    with_session(&mut commands, move |s| s.color.rgb = rgb);
 }
 
-fn on_mixer(ev: On<ColorMixerChange>, mut commands: Commands) {
-    let c = Appearance::from_hsv(ev.hue, ev.saturation, ev.value);
-    with_session(&mut commands, move |s| s.color.rgb = c.rgb);
-}
-
-fn on_field_commit(ev: On<NumberFieldCommit>, q: Query<&Field>, mut commands: Commands) {
-    let Ok(field) = q.get(ev.entity).copied() else {
-        return;
-    };
-    let text = ev.text.clone();
-    let enter = ev.enter;
+/// **+** in any colour editor saves its colour among the document's custom colours (one undo
+/// step).
+fn on_save_custom(ev: On<ColorEditorSaveCustom>, mut commands: Commands) {
+    let c = Appearance::rgb(ev.rgb[0], ev.rgb[1], ev.rgb[2]);
     commands.queue(move |world: &mut World| {
-        // Enter ends the edit: the field lets go of the focus and its caret (P3.5 judge).
-        if enter && let Some(mut f) = world.get_resource_mut::<bevy::input_focus::InputFocus>() {
-            f.clear();
-        }
-        let Some(mut s) = world.get_resource_mut::<AppearanceSession>() else {
-            return;
-        };
-        match field {
-            Field::Hex => {
-                if let Some(a) = Appearance::from_hex(&text) {
-                    s.color.rgb = a.rgb;
-                    s.reset = false;
-                }
-            }
-            Field::R | Field::G | Field::B => {
-                if let Ok(v) = text.trim().parse::<f64>() {
-                    let i = match field {
-                        Field::R => 0,
-                        Field::G => 1,
-                        _ => 2,
-                    };
-                    s.color.rgb[i] = v.round().clamp(0.0, 255.0) as u8;
-                    s.reset = false;
-                }
+        if let Some(mut doc) = world.get_resource_mut::<ActiveDocument>() {
+            let mut colors = doc.doc.custom_colors.clone();
+            if !colors.contains(&c) {
+                colors.push(c);
+                let _ = doc.execute(&SetCustomColors { colors });
             }
         }
-        // Invalid text goes back to the current value.
-        s.set_changed();
-        preview(world);
     });
 }
 
-fn on_opacity(ev: On<SliderChange>, q: Query<&Name>, mut commands: Commands) {
-    if q.get(ev.entity).is_ok_and(|n| n.as_str() == "appearance-opacity") {
-        let alpha = (ev.value * 255.0).round() as u8;
-        with_session(&mut commands, move |s| s.color.alpha = alpha);
+/// Every colour editor shows the document's custom colours.
+fn sync_custom_colors(doc: Option<Res<ActiveDocument>>, mut q: Query<&mut ColorEditorCustom>) {
+    let custom: Vec<[u8; 3]> = doc.map(|d| d.doc.custom_colors.iter().map(|c| c.rgb).collect()).unwrap_or_default();
+    for mut c in &mut q {
+        if c.0 != custom {
+            c.0 = custom.clone();
+        }
     }
 }
 
@@ -419,25 +350,12 @@ fn appearance_keys(
     }
 }
 
-/// **+** saves the current colour; **Default** takes the appearance off.
-fn on_button(a: On<Activate>, q: Query<&Name>, mut commands: Commands) {
-    let Ok(name) = q.get(a.entity) else {
+/// **Default** takes the appearance off.
+fn on_default(ev: On<ColorEditorDefault>, q: Query<&Name>, mut commands: Commands) {
+    if !q.get(ev.entity).is_ok_and(|n| n.as_str() == "appearance-editor") {
         return;
-    };
-    match name.as_str() {
-        "appearance-add-custom" => commands.queue(|world: &mut World| {
-            let Some(c) = world.get_resource::<AppearanceSession>().map(|s| s.color.with_alpha(255)) else {
-                return;
-            };
-            if let Some(mut doc) = world.get_resource_mut::<ActiveDocument>() {
-                let mut colors = doc.doc.custom_colors.clone();
-                if !colors.contains(&c) {
-                    colors.push(c);
-                    let _ = doc.execute(&SetCustomColors { colors });
-                }
-            }
-        }),
-        "appearance-reset" => commands.queue(|world: &mut World| {
+    }
+    commands.queue(|world: &mut World| {
             let default = world.get_resource::<AppearanceSession>().map(|s| {
                 let mut looks = world.resource::<PartCache>().looks();
                 apply_to(&s.target, None, &mut looks);
@@ -473,16 +391,14 @@ fn on_button(a: On<Activate>, q: Query<&Name>, mut commands: Commands) {
                 s.reset = true;
             }
             preview(world);
-        }),
-        _ => {}
-    }
+    });
 }
 
 /// The menu of a custom colour.
 #[derive(Component, Debug, Clone, Copy)]
-struct CustomMenuFor(usize);
+struct CustomMenuFor(CustomColorSwatch);
 
-fn on_custom_menu(ev: On<ContextMenuRequested>, q: Query<&Custom>, theme: Res<Theme>, mut commands: Commands) {
+fn on_custom_menu(ev: On<ContextMenuRequested>, q: Query<&CustomColorSwatch>, theme: Res<Theme>, mut commands: Commands) {
     let Ok(c) = q.get(ev.entity) else {
         return;
     };
@@ -495,17 +411,18 @@ fn on_custom_menu(ev: On<ContextMenuRequested>, q: Query<&Custom>, theme: Res<Th
         .item(MenuItem::new("custom-color-update", "Update color"))
         .item(MenuItem::new("custom-color-delete", "Delete"));
     let anchor = open_context_menu(&mut commands, ev.position, menu.build(&theme));
-    commands.entity(anchor).insert((CustomMenuFor(c.0), DespawnOnExit(AppState::Document)));
+    commands.entity(anchor).insert((CustomMenuFor(*c), DespawnOnExit(AppState::Document)));
 }
 
 fn on_custom_menu_action(ev: On<MenuAction>, q: Query<&CustomMenuFor, With<ContextMenuAnchor>>, mut commands: Commands) {
     let Ok(target) = q.get(ev.entity) else {
         return;
     };
-    let i = target.0;
+    let (i, editor) = (target.0.index, target.0.editor);
     let item = ev.item.clone();
     commands.queue(move |world: &mut World| {
-        let current = world.get_resource::<AppearanceSession>().map(|s| s.color.with_alpha(255));
+        // Update takes the colour of the editor the swatch is in.
+        let current = world.get(editor).map(|s: &ColorEditorState| Appearance::rgb(s.rgba[0], s.rgba[1], s.rgba[2]));
         let Some(mut doc) = world.get_resource_mut::<ActiveDocument>() else {
             return;
         };
@@ -527,37 +444,8 @@ fn on_custom_menu_action(ev: On<MenuAction>, q: Query<&CustomMenuFor, With<Conte
     });
 }
 
-fn section(p: &mut ChildSpawner, t: &Theme, label: &str) {
-    p.spawn((
-        t.text(label.to_string(), 11.0, FontWeight::MEDIUM, t.muted_foreground),
-        Node {
-            margin: UiRect::top(Val::Px(4.0)),
-            ..default()
-        },
-    ));
-}
-
 fn srgb(a: Appearance) -> Color {
     Color::srgb_u8(a.rgb[0], a.rgb[1], a.rgb[2])
-}
-
-fn spawn_custom_row(r: &mut ChildSpawner, t: &Theme, custom: &[Appearance], color: Appearance) {
-    for (i, c) in custom.iter().enumerate() {
-        r.spawn((
-            ColorSwatch::new(format!("appearance-custom-{i}"), srgb(*c))
-                .size(20.0)
-                .selected(c.rgb == color.rgb)
-                .tooltip(c.hex())
-                .build(t),
-            Custom(i),
-            ContextMenuTarget,
-        ));
-    }
-    r.spawn(
-        IconButton::new("appearance-add-custom", "plus")
-            .tooltip("Save this color")
-            .build(t),
-    );
 }
 
 fn appearance_dialog(t: &Theme, s: &AppearanceSession, custom: Vec<Appearance>) -> impl Bundle {
@@ -573,132 +461,15 @@ fn appearance_dialog(t: &Theme, s: &AppearanceSession, custom: Vec<Appearance>) 
             .width(292.0)
             .body(move |b| {
                 let t = &tb;
-                b.spawn(Node {
-                    flex_direction: FlexDirection::Column,
-                    row_gap: Val::Px(6.0),
-                    ..default()
-                })
-                .with_children(|c| {
-                    c.spawn((
-                        Name::new("appearance-target"),
-                        t.text(caption.clone(), 12.0, FontWeight::MEDIUM, t.foreground),
-                    ));
-                    section(c, t, "Colors");
-                    for row in SWATCHES.chunks(8).enumerate() {
-                        c.spawn(Node {
-                            column_gap: Val::Px(6.0),
-                            ..default()
-                        })
-                        .with_children(|r| {
-                            for (k, a) in row.1.iter().enumerate() {
-                                let i = row.0 * 8 + k;
-                                r.spawn((
-                                    ColorSwatch::new(format!("appearance-swatch-{i}"), srgb(*a))
-                                        .size(24.0)
-                                        .selected(a.rgb == color.rgb)
-                                        .tooltip(a.hex())
-                                        .build(t),
-                                    Preset,
-                                ));
-                            }
-                        });
-                    }
-                    section(c, t, "Custom colors");
-                    c.spawn((
-                        Name::new("appearance-custom-row"),
-                        CustomRow,
-                        Node {
-                            column_gap: Val::Px(6.0),
-                            align_items: AlignItems::Center,
-                            min_height: Val::Px(24.0),
-                            ..default()
-                        },
-                    ))
-                    .with_children(|r| spawn_custom_row(r, t, &custom, color));
-                    section(c, t, "Mixer");
-                    let [h, sat, v] = color.hsv();
-                    c.spawn(ColorMixer::new("appearance-mixer").size(270.0, 96.0).hsv(h, sat, v).build(t));
-                    c.spawn(Node {
-                        column_gap: Val::Px(8.0),
-                        align_items: AlignItems::Center,
-                        margin: UiRect::top(Val::Px(2.0)),
-                        ..default()
-                    })
-                    .with_children(|r| {
-                        r.spawn((
-                            Name::new("appearance-current"),
-                            CurrentColor,
-                            Node {
-                                width: Val::Px(30.0),
-                                height: Val::Px(30.0),
-                                flex_shrink: 0.0,
-                                border: UiRect::all(Val::Px(1.0)),
-                                border_radius: BorderRadius::all(Val::Px(3.0)),
-                                ..default()
-                            },
-                            BackgroundColor(srgb(color).with_alpha(color.alpha as f32 / 255.0)),
-                            BorderColor::all(Color::srgba(0.0, 0.0, 0.0, 0.25)),
-                        ));
-                        r.spawn((
-                            NumberField::new("appearance-hex", "Hex").label_width(26.0).text(color.hex()).build(t),
-                            Field::Hex,
-                        ))
-                        .entry::<Node>()
-                        .and_modify(|mut n| n.width = Val::Px(110.0));
-                    });
-                    c.spawn(Node {
-                        column_gap: Val::Px(8.0),
-                        ..default()
-                    })
-                    .with_children(|r| {
-                        for (name, label, f, v) in [
-                            ("appearance-r", "R", Field::R, color.rgb[0]),
-                            ("appearance-g", "G", Field::G, color.rgb[1]),
-                            ("appearance-b", "B", Field::B, color.rgb[2]),
-                        ] {
-                            r.spawn((NumberField::new(name, label).label_width(12.0).text(v.to_string()).build(t), f))
-                                .entry::<Node>()
-                                .and_modify(|mut n| {
-                                    n.flex_grow = 1.0;
-                                    n.flex_basis = Val::Px(0.0);
-                                });
-                        }
-                    });
-                    c.spawn(Node {
-                        column_gap: Val::Px(8.0),
-                        align_items: AlignItems::Center,
-                        height: Val::Px(24.0),
-                        ..default()
-                    })
-                    .with_children(|r| {
-                        r.spawn((
-                            t.text("Opacity", 11.0, FontWeight::NORMAL, Color::srgb_u8(0x6b, 0x6b, 0x6b)),
-                            Node {
-                                width: Val::Px(52.0),
-                                ..default()
-                            },
-                        ));
-                        r.spawn(
-                            Slider::new("appearance-opacity")
-                                .value(color.alpha as f32 / 255.0)
-                                .width(160.0)
-                                .tooltip("Opacity")
-                                .build(t),
-                        );
-                        r.spawn((
-                            Name::new("appearance-opacity-value"),
-                            OpacityText,
-                            t.text(format!("{}%", color.opacity_percent()), 12.0, FontWeight::MEDIUM, t.foreground),
-                        ));
-                    });
-                    c.spawn(Node {
-                        justify_content: JustifyContent::FlexEnd,
-                        ..default()
-                    })
-                    .with_child(
-                        cadrs_ui::Button::new("appearance-reset")
-                            .label("Default")
-                            .size(ButtonSize::Small)
+                b.spawn(Node { flex_direction: FlexDirection::Column, row_gap: Val::Px(6.0), ..default() }).with_children(|c| {
+                    c.spawn((Name::new("appearance-target"), t.text(caption.clone(), 12.0, FontWeight::MEDIUM, t.foreground)));
+                    c.spawn(
+                        ColorEditor::new("appearance")
+                            .presets(SWATCHES.iter().map(|a| a.rgb))
+                            .custom(custom.iter().map(|a| a.rgb).collect())
+                            .color([color.rgb[0], color.rgb[1], color.rgb[2], color.alpha])
+                            .opacity()
+                            .default_button()
                             .build(t),
                     );
                 });
@@ -707,22 +478,15 @@ fn appearance_dialog(t: &Theme, s: &AppearanceSession, custom: Vec<Appearance>) 
     )
 }
 
-/// Spawns, updates and removes the dialog with the session.
-#[allow(clippy::too_many_arguments, clippy::type_complexity)]
+/// Spawns, updates and removes the dialog with the session; its editor follows the session's
+/// colour (Default puts it back).
 fn sync_appearance_dialog(
     session: Option<Res<AppearanceSession>>,
     doc: Option<Res<ActiveDocument>>,
     theme: Res<Theme>,
     q_area: Query<Entity, With<ViewportArea>>,
     q_dialog: Query<Entity, With<AppearanceDialog>>,
-    mut q_fields: Query<(&Field, &mut NumberFieldState)>,
-    mut q_mixer: Query<&mut ColorMixerState>,
-    mut q_slider: Query<(&Name, &mut SliderState)>,
-    mut q_current: Query<&mut BackgroundColor, With<CurrentColor>>,
-    mut q_opacity: Query<&mut Text, With<OpacityText>>,
-    mut q_swatches: Query<(&SwatchColor, &mut cadrs_ui::SwatchSelected), Or<(With<Preset>, With<Custom>)>>,
-    q_custom_row: Query<Entity, With<CustomRow>>,
-    mut last_custom: Local<Vec<Appearance>>,
+    mut q_editor: Query<(&Name, &mut ColorEditorState)>,
     mut commands: Commands,
 ) {
     let Some(s) = session else {
@@ -731,77 +495,23 @@ fn sync_appearance_dialog(
         }
         return;
     };
-    let custom = doc.as_ref().map(|d| d.doc.custom_colors.clone()).unwrap_or_default();
     if q_dialog.is_empty() {
         let Some(area) = q_area.iter().next() else {
             return;
         };
-        let d = commands.spawn(appearance_dialog(&theme, &s, custom.clone())).id();
+        let custom = doc.as_ref().map(|d| d.doc.custom_colors.clone()).unwrap_or_default();
+        let d = commands.spawn(appearance_dialog(&theme, &s, custom)).id();
         commands.entity(area).add_child(d);
-        *last_custom = custom;
         return;
-    }
-    let c = s.color;
-    // The custom colours' row follows the document's list.
-    if *last_custom != custom
-        && let Some(row) = q_custom_row.iter().next()
-    {
-        let t = theme.clone();
-        let list = custom.clone();
-        commands.entity(row).despawn_children();
-        commands.queue(move |world: &mut World| {
-            if let Ok(mut e) = world.get_entity_mut(row) {
-                e.with_children(|r| spawn_custom_row(r, &t, &list, c));
-            }
-        });
-        *last_custom = custom;
     }
     if !s.is_changed() {
         return;
     }
-    for (f, mut st) in &mut q_fields {
-        let text = match f {
-            Field::Hex => c.hex(),
-            Field::R => c.rgb[0].to_string(),
-            Field::G => c.rgb[1].to_string(),
-            Field::B => c.rgb[2].to_string(),
-        };
-        if st.text != text {
-            st.text = text;
-        } else {
-            // Rewrite the shown text (an invalid entry goes back).
-            st.set_changed();
-        }
-    }
-    let [h, sat, v] = c.hsv();
-    for mut m in &mut q_mixer {
-        // Keep the hue while the colour is grey (it has none of its own).
-        let hue = if sat == 0.0 || v == 0.0 { m.hue } else { h };
-        let want = ColorMixerState { hue, saturation: sat, value: v };
-        let close = (m.hue - want.hue).abs() < 0.6 && (m.saturation - sat).abs() < 0.003 && (m.value - v).abs() < 0.003;
-        if !close {
-            *m = want;
-        }
-    }
-    for (n, mut sl) in &mut q_slider {
-        if n.as_str() == "appearance-opacity" {
-            let want = c.alpha as f32 / 255.0;
-            if (sl.value - want).abs() > 0.003 {
-                sl.value = want;
-            }
-        }
-    }
-    for mut bg in &mut q_current {
-        bg.0 = srgb(c).with_alpha(c.alpha as f32 / 255.0);
-    }
-    for mut t in &mut q_opacity {
-        t.0 = format!("{}%", c.opacity_percent());
-    }
-    // The ring follows the colour.
-    for (sc, mut sel) in &mut q_swatches {
-        let want = sc.0.to_srgba().to_u8_array()[..3] == c.rgb;
-        if sel.0 != want {
-            sel.0 = want;
+    let c = s.color;
+    let want = [c.rgb[0], c.rgb[1], c.rgb[2], c.alpha];
+    for (n, mut st) in &mut q_editor {
+        if n.as_str() == "appearance-editor" && st.rgba != want {
+            st.rgba = want;
         }
     }
 }
