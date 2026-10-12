@@ -483,6 +483,9 @@ fn bottom_keep_overlays(bodies: &[BodyMesh], thickness: f64) -> Vec<BodyMesh> {
 pub fn board_view_bodies(world: &mut World, e: ElementId, b: BoardId, board: &PcbBoard, sig: &mut impl Hasher) -> Vec<BodyMesh> {
     let mesh = world.resource_mut::<PcbMeshCache>().get_or_build((e, b), board);
     (Arc::as_ptr(&mesh) as usize).hash(sig);
+    // Tracks, vias and zones change only the layout, which the mesh doesn't see: the skins do.
+    let layout = world.resource::<ActiveDocument>().doc.element(e).and_then(|el| el.pcb()).and_then(|s| s.board(b)).map(|x| x.layout_hash());
+    layout.hash(sig);
     let mut v = board_bodies(world, e, b, board, &mesh, sig);
     v.extend(bottom_keep_overlays(&v, board.thickness()));
     // A native board is made: its edges the solder mask's green, as its faces.

@@ -30,6 +30,7 @@ pub mod gpu;
 pub mod grid;
 pub mod negotiate;
 pub mod search;
+pub mod smooth;
 
 use grid::Grid;
 use negotiate::{Job, Negotiation, Pricing, usable};
@@ -248,6 +249,7 @@ pub fn route(board: &Board, opts: &Options) -> Outcome {
         _ => neg.run_cpu(&pricing),
     };
     out.passes = neg.passes;
+    smooth::all(&mut neg);
     if trace {
         eprintln!("router: {} passes, {} stuck, {:.2} s in all", neg.passes, stuck.len(), t0.elapsed().as_secs_f64());
     }

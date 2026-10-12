@@ -5,7 +5,7 @@
 //! - Copper of a net (pads, tracks, vias) grown by the clearance and half a track width: only
 //!   that net (where two nets' grown copper meet, nobody). Copper on no net: nobody.
 //! - Holes, grown by the hole clearance: only the pad's own net, on every layer (nobody for a
-//!   hole on no net); no via near any hole.
+//!   hole on no net); no via near any hole, nor on or beside a surface-mount pad.
 //! - Off the board, or within the edge clearance of it: nobody.
 //! - Keep-outs forbidding tracks (vias): nobody on their layers (no via inside).
 //! - Via sites: the same, grown by a via's radius instead of half a track's, on every layer
@@ -228,7 +228,10 @@ impl Grid {
             on_any.push(r.clone());
         }
         if !on_any.is_empty() {
-            self.stamp_sites(&poly::inflate(&poly::union_all(&on_any), s.clearance + s.via / 2 + SLACK), net);
+            // No via on or beside a surface-mount pad, not even its own net's: a track leaves
+            // the pad first (a via in the pad wicks its solder away).
+            let smd = matches!(c.item, Item::Pad(..)) && c.hole.is_none();
+            self.stamp_sites(&poly::inflate(&poly::union_all(&on_any), s.clearance + s.via / 2 + SLACK), if smd { WALL } else { net });
         }
         if let Some(h) = &c.hole {
             // Other nets keep clear of a pad's hole; its own net's track may end on the pad.
