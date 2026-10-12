@@ -121,6 +121,23 @@ fn the_board_and_its_components_come_in_at_the_location() {
 }
 
 #[test]
+fn skins_missing_from_the_blob_cache_are_made_again() {
+    // A rebuild restored from the last run's snapshot names skins only that run made: the
+    // cached output showing them is made again, and the skins with it.
+    let (mut doc, mut h, board) = document();
+    derive(&mut doc, &mut h, board, DerivedFeature::default()).unwrap();
+    let skins_of = |b: &cadrs_core::rebuild::Build| derived_parts(b)[0].solid.images.iter().map(|i| i.blob.clone()).collect::<Vec<_>>();
+    let before = skins_of(&build(&doc));
+    assert_eq!(before.len(), 2);
+    for blob in &before {
+        cadrs_core::blobs::forget(blob);
+    }
+    let after = skins_of(&build(&doc));
+    assert_eq!(after, before, "the same pictures");
+    assert!(after.iter().all(|b| cadrs_core::blobs::contains(b)), "loaded again");
+}
+
+#[test]
 fn layout_edits_follow_and_keep_part_and_face_ids() {
     let (mut doc, mut h, board) = document();
     derive(&mut doc, &mut h, board, DerivedFeature::default()).unwrap();

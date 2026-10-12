@@ -518,6 +518,7 @@ fn skin_blob(b: &Board, hash: u64, owner: u64, side: Side) -> Option<(String, [f
     let key = (owner, side == Side::Top);
     if let Some((h, s)) = skin_cache().read().ok().and_then(|c| c.get(&key).cloned())
         && h == hash
+        && s.as_ref().is_none_or(|(b, _)| crate::blobs::contains(b))
     {
         return s;
     }
@@ -526,11 +527,6 @@ fn skin_blob(b: &Board, hash: u64, owner: u64, side: Side) -> Option<(String, [f
         let bb = s.bounds;
         Some((crate::blobs::insert(png), [to_mm(bb.min.x), to_mm(bb.min.y), to_mm(bb.size().w), to_mm(bb.size().h)]))
     });
-    if let Some((new, _)) = &made
-        && let Ok(mut f) = forgotten().write()
-    {
-        f.remove(new);
-    }
     if let Ok(mut c) = skin_cache().write() {
         c.insert(key, (hash, made.clone()));
         // The latest skins stay loaded (a solid made from an older layout, or another document
@@ -545,29 +541,17 @@ fn skin_blob(b: &Board, hash: u64, owner: u64, side: Side) -> Option<(String, [f
             let Some(old) = recent.pop_back() else { break };
             if !c.values().any(|(_, s)| s.as_ref().is_some_and(|(b, _)| *b == old)) {
                 crate::blobs::forget(&old);
-                if let Ok(mut f) = forgotten().write() {
-                    if f.len() > 4096 {
-                        f.clear();
-                    }
-                    f.insert(old);
-                }
             }
         }
     }
     made
 }
 
-/// The skins dropped from the blob cache (until made again).
-fn forgotten() -> &'static RwLock<std::collections::HashSet<String>> {
-    static F: OnceLock<RwLock<std::collections::HashSet<String>>> = OnceLock::new();
-    F.get_or_init(Default::default)
-}
-
-/// Whether any of `solid`'s pictures is a skin dropped from the blob cache: a rebuild's cached
-/// output showing it is made again (which makes the skin again).
+/// Whether any of `solid`'s pictures is a skin that isn't in the blob cache: dropped from it,
+/// or never made in this run (a rebuild restored from the last run's snapshot names skins only
+/// that run made). A rebuild's cached output showing it is made again (which makes the skin).
 pub fn shows_forgotten_skin(solid: &Solid) -> bool {
-    let Ok(f) = forgotten().read() else { return false };
-    !f.is_empty() && solid.images.iter().any(|i| f.contains(&i.blob))
+    solid.images.iter().any(|i| i.facing.is_some() && !crate::blobs::contains(&i.blob))
 }
 
 /// How many of the latest skins stay loaded whatever their owners show now.

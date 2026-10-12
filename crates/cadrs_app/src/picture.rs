@@ -251,8 +251,14 @@ fn sync_pictures(
     mut last: Local<Option<u64>>,
     mut commands: Commands,
 ) {
-    // A derived board shown as its layout hides its skins.
-    let want: Vec<(&str, &SolidImage)> = cache.shown().filter(|p| !cache.skinless.contains(&p.id)).flat_map(|p| p.solid.images.iter().map(move |i| (p.name.as_str(), i))).collect();
+    // A derived board shown as its layout hides its skins. A picture not loaded (yet) is left
+    // out, not remembered as unreadable: a board's skin made again has the same name.
+    let want: Vec<(&str, &SolidImage)> = cache
+        .shown()
+        .filter(|p| !cache.skinless.contains(&p.id))
+        .flat_map(|p| p.solid.images.iter().map(move |i| (p.name.as_str(), i)))
+        .filter(|(_, i)| cadrs_core::blobs::contains(&i.blob))
+        .collect();
     if *last == Some(cache.generation) && q.iter().count() == want.len() {
         return;
     }
