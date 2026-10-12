@@ -47,6 +47,7 @@ pub mod quick_dim;
 pub mod radio;
 pub mod scrollbar;
 pub mod segmented;
+pub mod selection_box;
 pub mod selection_field;
 pub mod selection_list;
 pub mod menu;
@@ -253,7 +254,7 @@ impl Plugin for CadrsUiPlugin {
             .add_plugins(radio::RadioPlugin)
             .add_plugins(entry_list::EntryListPlugin)
             .add_plugins(name_popup::NamePopupPlugin)
-            .add_plugins((floating_panel::FloatingPanelPlugin, segmented::SegmentedPlugin, switch::SwitchPlugin, version_graph::VersionGraphPlugin, splitter::SplitterPlugin))
+            .add_plugins((floating_panel::FloatingPanelPlugin, segmented::SegmentedPlugin, switch::SwitchPlugin, version_graph::VersionGraphPlugin, splitter::SplitterPlugin, selection_box::SelectionBoxPlugin))
             .add_message::<ScriptCommand>();
     }
 }

@@ -2348,3 +2348,15 @@ fn golden_eda_wire_colour_footprint() {
 fn golden_eda_layout_properties() {
     run_scenario("eda_layout_properties");
 }
+
+#[test]
+#[ignore = "headless screenshots; run with: cargo test -r -p cadrs -F app-tests --test golden -- --ignored"]
+fn golden_box_select_views() {
+    run_scenario("box_select_views");
+}
+
+#[test]
+#[ignore = "headless screenshots; run with: cargo test -r -p cadrs -F app-tests --test golden -- --ignored"]
+fn golden_box_select_part_studio() {
+    run_scenario("box_select_part_studio");
+}

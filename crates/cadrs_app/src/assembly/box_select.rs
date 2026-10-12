@@ -1,9 +1,11 @@
-//! **Box select in the assembly view** (P3H.6, for PCB8/PCB10 "Group, box-select all the
+//! **Box select in the assembly view and the Part Studio** (P3H.6, for PCB8/PCB10 "Group, box-select all the
 //! components"; the sketch's box select, `reference/onshape/box_select.md`): pressing on empty
 //! space and dragging draws a box. Left to right is a **window** (a blue box: the instances
 //! entirely inside it), right to left a **crossing** (a dashed yellow box: every instance it
 //! touches). Releasing selects them (Ctrl or Shift adds them to the selection). It works while
-//! the Group dialog is open, whose Instances field follows the selection.
+//! the Group dialog is open, whose Instances field follows the selection. In a Part Studio it
+//! selects parts: with no dialog open and no sketch edited, or into the Composite part's and
+//! the Transform's parts.
 //!
 //! Names: `asm-box-select` (the box).
 
@@ -29,18 +31,7 @@ impl AssemblyBox {
     }
 }
 
-#[derive(Component)]
-pub(super) struct BoxFill {
-    built: Option<(Vec2, bool)>,
-}
-
-#[derive(Component)]
-struct BoxDash;
-
-/// Whether the corners `a`, `b` (viewport offsets) are a crossing box (dragged right to left).
-fn crossing(a: Vec2, b: Vec2) -> bool {
-    b.x < a.x
-}
+use cadrs_ui::selection_box::crossing;
 
 /// The parts a box from `a` to `b` (viewport offsets) selects: every shown part's projected
 /// points inside the box (window), or its projected extent overlapping it (crossing), in the
@@ -114,13 +105,17 @@ pub(super) fn box_select(
         ResMut<crate::parts::HoverParts>,
         Commands,
     ),
+    (mode, q_dialogs): (Option<Res<State<crate::sketch::PartStudioMode>>>, Query<(), With<cadrs_ui::FeatureDialogState>>),
 ) {
     let in_assembly = doc.as_deref().is_some_and(|d| super::active_assembly(d).is_some());
     // P3H.6: in a Part Studio, the Composite part dialog and the Transform's Parts to transform
     // take a box's parts.
     let to_transform = applied.is_some_and(|s| s.field == crate::applied::AppliedField::TransformParts);
     let studio_box = !in_assembly && (composite.is_some() || to_transform);
-    if !in_assembly && !studio_box {
+    // In a Part Studio with no dialog open and no sketch edited, a box selects parts.
+    let in_studio = doc.as_deref().and_then(|d| d.active_element()).is_some_and(|e| matches!(e.kind, cadrs_core::ElementKind::PartStudio { .. }));
+    let plain_studio = !in_assembly && !studio_box && in_studio && mode.is_some_and(|m| *m.get() == crate::sketch::PartStudioMode::Modeling) && q_dialogs.is_empty();
+    if !in_assembly && !studio_box && !plain_studio {
         inputs.clear();
         *state = AssemblyBox::default();
         if !pre.2.is_empty() {
@@ -155,7 +150,7 @@ pub(super) fn box_select(
                     }
                     // P3H.6 judge: what the box will select is pre-highlighted while it is dragged.
                     if state.active {
-                        let want = preview_parts(&cache, &view.view, rect.offset(s), rect.offset(pos), studio_box);
+                        let want = preview_parts(&cache, &view.view, rect.offset(s), rect.offset(pos), !in_assembly);
                         if pre.2 != want {
                             pre.2 = want;
                         }
@@ -181,9 +176,20 @@ pub(super) fn box_select(
                     }
                     continue;
                 }
-                let found = instances_in_box(&cache, &view.view, rect.offset(s), rect.offset(pos));
                 let add = keys.any_pressed([KeyCode::ControlLeft, KeyCode::ControlRight, KeyCode::ShiftLeft, KeyCode::ShiftRight]);
                 let mut picks: Vec<Pick> = if add { selection.0.clone() } else { Vec::new() };
+                if plain_studio {
+                    for p in parts_in_box(&cache, &view.view, rect.offset(s), rect.offset(pos)) {
+                        if !picks.contains(&Pick::Part(p)) {
+                            picks.push(Pick::Part(p));
+                        }
+                    }
+                    if selection.0 != picks {
+                        selection.0 = picks;
+                    }
+                    continue;
+                }
+                let found = instances_in_box(&cache, &view.view, rect.offset(s), rect.offset(pos));
                 for i in found {
                     let p = Pick::Part(i.part_id());
                     if !picks.iter().any(|q| super::instance_of(q) == Some(i)) {
@@ -212,94 +218,17 @@ fn preview_parts(cache: &PartCache, view: &crate::camera::ViewState, a: Vec2, b:
     cache.shown().filter(|p| found.contains(&InstanceId::of_part(p.id))).map(|p| p.id).collect()
 }
 
-/// Draws the box: window a blue outline over a blue fill, crossing a dashed yellow outline over
-/// a yellow fill (the sketch box's colours).
-#[allow(clippy::type_complexity)]
+/// Draws the box ([`cadrs_ui::selection_box`]): window blue, crossing dashed yellow.
 pub(super) fn draw_box(
     state: Res<AssemblyBox>,
     rect: Res<ViewportRect>,
-    mut q: Query<(Entity, &mut BoxFill, &mut Node, &mut BackgroundColor, &mut BorderColor)>,
     q_area: Query<Entity, With<ViewportArea>>,
+    mut boxes: cadrs_ui::selection_box::Boxes,
     mut commands: Commands,
 ) {
-    let (Some(start), Some(cur), true) = (state.start, state.current, state.active) else {
-        for (e, ..) in &q {
-            commands.entity(e).try_despawn();
-        }
-        return;
+    let span = match (state.start, state.current, state.active) {
+        (Some(s), Some(c), true) => Some((s - rect.0.min, c - rect.0.min)),
+        _ => None,
     };
-    let cross = crossing(start, cur);
-    let lo = start.min(cur).round();
-    let hi = start.max(cur).round();
-    let size = hi - lo;
-    let (fill, stroke) = if cross {
-        (Color::srgba_u8(0xff, 0xe0, 0x45, 102), Color::srgb_u8(0xf0, 0xb4, 0x00))
-    } else {
-        (Color::srgba_u8(0x24, 0x93, 0xcc, 94), Color::srgb_u8(0x5a, 0x8c, 0xcb))
-    };
-    let local = lo - rect.0.min;
-    let node = Node {
-        position_type: PositionType::Absolute,
-        left: Val::Px(local.x),
-        top: Val::Px(local.y),
-        width: Val::Px(size.x),
-        height: Val::Px(size.y),
-        border: if cross { UiRect::ZERO } else { UiRect::all(Val::Px(1.0)) },
-        ..default()
-    };
-    let (e, rebuild) = match q.iter_mut().next() {
-        Some((e, mut b, mut n, mut bg, mut border)) => {
-            if *n != node {
-                *n = node;
-            }
-            bg.set_if_neq(BackgroundColor(fill));
-            border.set_if_neq(BorderColor::all(stroke));
-            let want = Some((size, cross));
-            let rebuild = b.built != want;
-            b.built = want;
-            (e, rebuild)
-        }
-        None => {
-            let Some(area) = q_area.iter().next() else { return };
-            let e = commands
-                .spawn((Name::new("asm-box-select"), BoxFill { built: Some((size, cross)) }, node, BackgroundColor(fill), BorderColor::all(stroke), Pickable::IGNORE))
-                .id();
-            commands.entity(area).add_child(e);
-            (e, true)
-        }
-    };
-    if !rebuild {
-        return;
-    }
-    commands.entity(e).despawn_related::<Children>();
-    if !cross {
-        return;
-    }
-    // Dashes: 4 px on, 3 px off, along each side.
-    let mut dashes: Vec<(f32, f32, f32, f32)> = Vec::new();
-    let run = |len: f32, place: &mut dyn FnMut(f32, f32)| {
-        let mut t = 0.0;
-        while t < len {
-            place(t, (len - t).min(4.0));
-            t += 7.0;
-        }
-    };
-    run(size.x, &mut |t, l| {
-        dashes.push((t, 0.0, l, 1.0));
-        dashes.push((t, size.y - 1.0, l, 1.0));
-    });
-    run(size.y, &mut |t, l| {
-        dashes.push((0.0, t, 1.0, l));
-        dashes.push((size.x - 1.0, t, 1.0, l));
-    });
-    commands.entity(e).with_children(|p| {
-        for (x, y, w, h) in dashes {
-            p.spawn((
-                BoxDash,
-                Node { position_type: PositionType::Absolute, left: Val::Px(x), top: Val::Px(y), width: Val::Px(w), height: Val::Px(h), ..default() },
-                BackgroundColor(stroke),
-                Pickable::IGNORE,
-            ));
-        }
-    });
+    cadrs_ui::selection_box::sync(&mut commands, &mut boxes, "asm-box-select", q_area.iter().next(), span);
 }

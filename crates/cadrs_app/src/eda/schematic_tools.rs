@@ -2,7 +2,9 @@
 //!
 //! - **Select** (Esc): click picks (a field alone when its text is clicked), Shift+click adds,
 //!   Ctrl+click toggles; dragging on empty paper boxes — left to right takes what is wholly
-//!   inside, right to left what the box touches; dragging an item moves it with its
+//!   inside (a blue box), right to left what the box touches (a dashed yellow box,
+//!   [`cadrs_ui::selection_box`]: `sch-box-select`), what it will take highlighted as it is
+//!   dragged; dragging an item moves it with its
 //!   wires attached (they stay on the pins and square: corners slide, bends are added).
 //!   **M** moves the selection (wires stay), **G** drags it (wires follow),
 //!   **R** rotates it and **X** / **Y** mirror it (wires on it follow, square), **Del**
@@ -110,6 +112,8 @@ pub struct SchState {
     pub moving: Option<Moving>,
     /// A box selection started here.
     pub boxing: Option<Pt>,
+    /// What the box being dragged will add to the selection, highlighted while it is dragged.
+    pub box_preview: Vec<SchItem>,
     /// What Ctrl+C copied.
     pub clipboard: Option<se::SchClip>,
     /// How the symbol or label being placed is turned (R: quarter turns) and mirrored (X, Y).
@@ -156,7 +160,7 @@ fn label_angle(o: Orient) -> f64 {
 pub fn register(app: &mut App) {
     app.init_resource::<SchState>().add_systems(
         Update,
-        (strip, on_strip, on_click, on_keys, follow_pointer, publish).chain().after(super::navigate).run_if(in_state(AppState::Document)),
+        (strip, on_strip, on_click, on_keys, follow_pointer, preview_box, publish, draw_box).chain().after(super::navigate).run_if(in_state(AppState::Document)),
     );
     super::sch_dialogs::register(app);
 }
@@ -165,6 +169,31 @@ fn strip(world: &mut World) {
     ui::sync_strip(world, Mode::Schematic, STRIP);
     let a = world.resource::<SchState>().tool.action();
     ui::mark_active(world, Mode::Schematic, a);
+}
+
+/// The box being dragged on empty paper, from its press to the pointer, once it has moved a
+/// few pixels.
+fn draw_box(
+    state: Res<SchState>,
+    eda: Res<super::Eda2d>,
+    ui_state: Res<super::EdaUi>,
+    pointer: Res<super::EdaPointer>,
+    rect: Res<crate::viewport::ViewportRect>,
+    q_area: Query<Entity, With<crate::viewport::ViewportArea>>,
+    mut boxes: cadrs_ui::selection_box::Boxes,
+    mut commands: Commands,
+) {
+    let shown = eda.0.is_some_and(|(_, _, m)| m == Mode::Schematic) && eda.flat();
+    let span = match (state.boxing, super::current_view(&ui_state, &eda)) {
+        (Some(start), Some(view)) if shown && matches!(state.tool, Tool::Select) => {
+            let s = view.to_screen([start.x as f64, start.y as f64]);
+            let start = Vec2::new(s[0] as f32, s[1] as f32);
+            let end = pointer.screen - rect.0.min;
+            (start.distance(end) >= 4.0).then_some((start, end))
+        }
+        _ => None,
+    };
+    cadrs_ui::selection_box::sync(&mut commands, &mut boxes, "sch-box-select", q_area.iter().next(), span);
 }
 
 fn snap(p: Pt) -> Pt {
@@ -653,9 +682,36 @@ fn follow_pointer(world: &mut World, mut last: Local<Option<(Pt, u64)>>) {
 }
 
 /// The selection shown highlighted.
+/// What the box being dragged will select ([`SchState::box_preview`]), as its release will take
+/// it: wholly inside left to right, touched right to left.
+fn preview_box(world: &mut World, mut last: Local<Option<(Pt, Pt)>>) {
+    let start = world.resource::<SchState>().boxing.filter(|_| shown(world));
+    let at = world.resource::<EdaPointer>().at;
+    let found = match start {
+        Some(start) if start.dist(at) >= tolerance(world) as f64 => {
+            if *last == Some((start, at)) {
+                return;
+            }
+            *last = Some((start, at));
+            let Some((_, _, d)) = ui::current(world) else { return };
+            let r = Bounds { min: Pt::new(start.x.min(at.x), start.y.min(at.y)), max: Pt::new(start.x.max(at.x), start.y.max(at.y)) };
+            se::box_select(&d.schematic, 0, r, at.x < start.x)
+        }
+        _ => {
+            *last = None;
+            Vec::new()
+        }
+    };
+    let mut s = world.resource_mut::<SchState>();
+    if s.box_preview != found {
+        s.box_preview = found;
+    }
+}
+
 fn publish(s: Res<SchState>, mut inputs: ResMut<SceneInputs>) {
-    // The selection, and the highlighted net.
+    // The selection, what the box being dragged will add to it, and the highlighted net.
     let mut hl = s.selection.clone();
+    hl.extend(s.box_preview.iter().filter(|i| !s.selection.contains(i)).cloned());
     if let Some((_, items)) = &s.net {
         hl.extend(items.iter().filter(|i| !s.selection.contains(i)).cloned());
     }
