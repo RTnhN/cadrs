@@ -24,8 +24,9 @@
 //!   **Ctrl+L** a global label, **T** a text note; **`** highlights the net under the pointer
 //!   (again, or Esc: off); **Ctrl+F** finds a symbol by reference or value. **Ctrl+C** holds
 //!   what it copies by its middle, so a paste lands centred on the pointer.
-//! - **Pin ends** show where wires join: a blue square on each while wiring, placing or
-//!   moving (on the hovered symbol's pins in Select), filled on the one under the pointer.
+//! - **Where wires join** pins and net labels: a blue square on a pin's end or label's anchor
+//!   that nothing joins yet, on every one while wiring, placing or moving (on the hovered
+//!   symbol's pins in Select), filled on the one a wire would join now.
 //! - **L** net label (its name asked first; **R** turns it while it follows the pointer),
 //!   **Q** no-connect flag.
 //! - The strip: those tools, Annotate, Assign footprints, ERC, BOM export, Page settings.
@@ -729,9 +730,10 @@ fn preview_box(world: &mut World, mut last: Local<Option<(Pt, Pt)>>) {
     }
 }
 
-/// Where wires join pins: while wiring, placing or moving, every pin's end is marked; in
-/// Select, the pins of the symbol under the pointer. The pin end under the pointer (where a
-/// wire would join) is filled.
+/// Where wires join pins and labels: while wiring, placing or moving, every pin's end and
+/// label's anchor is marked; in Select, the pins of the symbol under the pointer. The point a
+/// wire would join now (a pin's end or label's anchor under the pointer, or while wiring a wire
+/// there) is filled.
 fn mark_pins(world: &mut World, mut last: Local<Option<(Pt, u64)>>) {
     use cadrs_eda::render::PinEnds;
     let s = world.resource::<SchState>();
@@ -761,7 +763,13 @@ fn mark_pins(world: &mut World, mut last: Local<Option<(Pt, u64)>>) {
             _ => PinEnds::None,
         }
     };
-    let hot = pin.map(|p| p.2);
+    // The point a wire would join now: a pin's end, a label's anchor, or (wiring) a wire.
+    let near = |q: Pt| q.dist(at) <= tol as f64;
+    let sh = &d.schematic.sheets[0];
+    let hot = pin.map(|p| p.2).or_else(|| sh.labels.iter().map(|l| l.text.at).find(|p| near(*p))).or_else(|| {
+        let p = snap(at);
+        (wiring && sh.wires.iter().any(|w| cadrs_eda::connectivity::on_segment(p, w.a, w.b))).then_some(p)
+    });
     let mut s = world.resource_mut::<SchState>();
     if s.pin_ends != ends || s.hot_pin != hot {
         (s.pin_ends, s.hot_pin) = (ends, hot);

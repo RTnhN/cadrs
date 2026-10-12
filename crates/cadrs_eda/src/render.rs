@@ -188,6 +188,21 @@ impl Default for SchematicTheme {
 }
 
 const WIRE_W: Nm = 250_000;
+
+/// The mark where a wire joins (a pin's end, a label's anchor): a small square, filled where a
+/// wire would join now.
+fn join_mark(d: &mut DrawList, th: &SchematicTheme, at: Pt, filled: bool) {
+    let k = mm(0.5);
+    let sq = vec![at + Pt::new(-k, -k), at + Pt::new(k, -k), at + Pt::new(k, k), at + Pt::new(-k, k)];
+    if filled {
+        d.region(th.pin_end, 3, &vec![sq]);
+    } else {
+        let mut ring = sq.clone();
+        ring.push(sq[0]);
+        d.line(th.pin_end, mm(0.15), ring);
+    }
+}
+
 const BODY_W: Nm = 254_000;
 
 fn text_at(s: &str, at: Pt, angle: f64, size: Nm, h: HAlign, v: VAlign) -> Text {
@@ -216,7 +231,8 @@ pub enum PinEnds {
 }
 
 /// A schematic sheet: paper, frame and title block, symbols with pins and fields, wires,
-/// buses, junctions, no-connect flags, labels and notes; unconnected pin ends marked.
+/// buses, junctions, no-connect flags, labels and notes; where wires join pins and labels
+/// marked ([`join_mark`]) where nothing joins them yet, and as [`Highlight`] asks.
 pub fn schematic(sch: &Schematic, sheet: usize, th: &SchematicTheme, hl: &Highlight) -> DrawList {
     use crate::sch_edit::SchItem;
     let mut d = DrawList { background: th.background, ..Default::default() };
@@ -285,30 +301,23 @@ pub fn schematic(sch: &Schematic, sheet: usize, th: &SchematicTheme, hl: &Highli
                 let c = b - Pt::new(r, 0).rotated(dir);
                 d.shape(&Shape { geom: Geom::Circle { center: c, radius: r }, stroke: Default::default(), fill: Fill::None }, pin, None, WIRE_W, 1);
             }
-            if lone.contains(&a) {
-                if p.kind == crate::symbol::PinType::NoConnect {
-                    // A pin that connects to nothing by design: KiCad's small X at its end, in the
-                    // pin's colour.
-                    let k = mm(0.4);
-                    d.line(pin, WIRE_W, vec![a - Pt::new(k, k), a + Pt::new(k, k)]);
-                    d.line(pin, WIRE_W, vec![a - Pt::new(k, -k), a + Pt::new(k, -k)]);
-                } else {
-                    d.shape(&Shape { geom: Geom::Circle { center: a, radius: mm(0.35) }, stroke: Default::default(), fill: Fill::None }, pin, None, mm(0.12), 1);
-                }
-            }
-            // Where a wire joins the pin: a square on its end, filled where a wire would join now.
-            let marked = match hl.pin_ends {
-                PinEnds::None => false,
-                PinEnds::All => true,
-                PinEnds::Symbol(id) => id == s.id,
-            };
-            if (marked || hl.hot_pin == Some(a)) && p.kind != crate::symbol::PinType::NoConnect {
-                let k = mm(0.5);
-                let sq = vec![a + Pt::new(-k, -k), a + Pt::new(k, -k), a + Pt::new(k, k), a + Pt::new(-k, k), a + Pt::new(-k, -k)];
-                if hl.hot_pin == Some(a) {
-                    d.region(th.pin_end, 3, &vec![sq[..4].to_vec()]);
-                } else {
-                    d.line(th.pin_end, mm(0.15), sq);
+            if lone.contains(&a) && p.kind == crate::symbol::PinType::NoConnect {
+                // A pin that connects to nothing by design: KiCad's small X at its end, in the
+                // pin's colour.
+                let k = mm(0.4);
+                d.line(pin, WIRE_W, vec![a - Pt::new(k, k), a + Pt::new(k, k)]);
+                d.line(pin, WIRE_W, vec![a - Pt::new(k, -k), a + Pt::new(k, -k)]);
+            } else {
+                // Where a wire joins the pin: on its end when nothing joins it yet, while wiring
+                // (or on the hovered symbol), filled where a wire would join now.
+                let marked = lone.contains(&a)
+                    || match hl.pin_ends {
+                        PinEnds::None => false,
+                        PinEnds::All => true,
+                        PinEnds::Symbol(id) => id == s.id,
+                    };
+                if marked || hl.hot_pin == Some(a) {
+                    join_mark(&mut d, th, a, hl.hot_pin == Some(a));
                 }
             }
             if p.length == 0 || !p.visible {
@@ -358,6 +367,13 @@ pub fn schematic(sch: &Schematic, sheet: usize, th: &SchematicTheme, hl: &Highli
         d.line(th.no_connect, WIRE_W, vec![n.at - Pt::new(k, -k), n.at + Pt::new(k, -k)]);
     }
     for l in &sh.labels {
+        // Where the label joins a wire (its anchor): marked while it joins nothing, while
+        // wiring, and filled where it would join now.
+        let at = l.text.at;
+        let joined = sh.wires.iter().any(|w| crate::connectivity::on_segment(at, w.a, w.b)) || sh.symbols.iter().any(|s| sch.placed_pins(s).any(|(_, p)| p == at));
+        if !joined || hl.pin_ends == PinEnds::All || hl.hot_pin == Some(at) {
+            join_mark(&mut d, th, at, hl.hot_pin == Some(at));
+        }
         let c = if lit(&SchItem::Label(l.id)) { th.highlight } else { th.label };
         let mut t = l.text.clone();
         if matches!(l.kind, LabelKind::Local) {

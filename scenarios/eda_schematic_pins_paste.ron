@@ -5,7 +5,10 @@
 //    filled (the wire would join there).
 // 03 J1 selected, copied (Ctrl+C) with the pointer far off to the left, pasted (Ctrl+V) with
 //    the pointer at (70, 70): the copy follows the pointer centred on it, not offset.
-// 04 placed there with a click.
+// 04 placed there with a click; its pins, joined to nothing, marked.
+// 05 a net label (L, "NET1") following the pointer onto the level wire: its anchor's square
+//    filled where it will join.
+// 06 placed off any wire: its anchor marked (it joins nothing).
 Scenario(
     start: Some("document"),
     steps: [
@@ -39,5 +42,18 @@ Scenario(
         MoveTo(1100, 900),
         Wait(3),
         Screenshot("04-pasted"),
+        Key("L"),
+        WaitFor("eda-label-dialog"),
+        Click(ui("eda-label-text-field")),
+        Type("NET1"),
+        Click(ui("eda-label-ok")),
+        Hover(flat(35.56, 101.6)),
+        Wait(3),
+        Screenshot("05-label-on-wire"),
+        Click(flat(35.56, 91.44)),
+        Key("Escape"),
+        MoveTo(1100, 900),
+        Wait(3),
+        Screenshot("06-label-alone"),
     ],
 )
