@@ -175,6 +175,9 @@ Scenario(
         Click(ui("eda-mode-schematic")),
         WaitFor("sch-erc"),
         Custom("eda-zoom 70 60 230 140"),
+        // The flag (by its body), then the wire's pieces below and above where it was.
+        Click(flat(101.6, 118.4)),
+        Key("Delete"),
         Click(flat(101.6, 110.0)),
         Key("Delete"),
         Click(flat(101.6, 116.84)),

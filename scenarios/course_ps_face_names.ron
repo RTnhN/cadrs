@@ -23,7 +23,7 @@ Scenario(
         MoveTo(1420, 780),
         Wait(3),
         Screenshot("02-sketch-plane-face-of-extrude-1"),
-        Key("Escape"),
+        Click(ui("sketch-dialog-cancel")),
         Key("Shift+7"),
         ClickAt(1300, 300),
         // The left web's top face (Extrude 2, 25 mm).
@@ -33,7 +33,7 @@ Scenario(
         MoveTo(1420, 780),
         Wait(3),
         Screenshot("03-sketch-plane-face-of-extrude-2"),
-        Key("Escape"),
+        Click(ui("sketch-dialog-cancel")),
         Key("Shift+7"),
         ClickAt(1300, 300),
         // Rename Extrude 2.
