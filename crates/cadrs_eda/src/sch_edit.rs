@@ -1239,6 +1239,28 @@ impl SchClip {
     }
 }
 
+/// The middle of what `items` cover (symbols with their bodies and fields, wires, labels,
+/// notes), on the grid: where a copy of them is held from.
+pub fn items_center(sch: &Schematic, sheet: usize, items: &[SchItem]) -> Pt {
+    let sh = &sch.sheets[sheet];
+    let mut b: Option<Bounds> = None;
+    let mut add = |x: Bounds| b = Some(Bounds::union(b, x));
+    for it in items {
+        match it {
+            SchItem::Symbol(id) => sh.symbols.iter().filter(|s| s.id == *id).for_each(|s| add(symbol_bounds(sch, s))),
+            SchItem::Wire(id) => sh.wires.iter().filter(|w| w.id == *id).for_each(|w| add(Bounds::union(Some(Bounds::of(w.a)), Bounds::of(w.b)))),
+            SchItem::Bus(id) => sh.buses.iter().filter(|w| w.id == *id).for_each(|w| add(Bounds::union(Some(Bounds::of(w.a)), Bounds::of(w.b)))),
+            SchItem::Junction(id) => sh.junctions.iter().filter(|j| j.id == *id).for_each(|j| add(Bounds::of(j.at))),
+            SchItem::NoConnect(id) => sh.no_connects.iter().filter(|j| j.id == *id).for_each(|j| add(Bounds::of(j.at))),
+            SchItem::Label(id) => sh.labels.iter().filter(|l| l.id == *id).for_each(|l| add(label_bounds(l))),
+            SchItem::Note(id) => sh.notes.iter().filter(|n| n.id == *id).for_each(|n| add(crate::font::bounds(&n.text).unwrap_or(Bounds::of(n.text.at)))),
+            SchItem::Drawing(id) => sh.drawings.iter().filter(|n| n.id == *id).for_each(|n| n.shape.geom.extent().into_iter().for_each(|p| add(Bounds::of(p)))),
+            SchItem::Field(..) => {}
+        }
+    }
+    snap(b.map_or(Pt::ZERO, |b| b.center()), SCHEMATIC_GRID)
+}
+
 /// Copies `items`; their positions are kept relative to `origin` (on the grid).
 pub fn copy_items(sch: &Schematic, sheet: usize, items: &[SchItem], origin: Pt) -> SchClip {
     let mut c = SchClip::default();
@@ -1673,6 +1695,22 @@ mod tests {
         fix_junctions(&mut s, 0);
         assert!(s.sheets[0].wires.iter().any(|w| [w.a, w.b].contains(&Pt::mm(25.4, 15.24))));
         assert!(square_and_joined(&s, &[Pt::mm(-5.08, 0.0), Pt::mm(25.4, 15.24)]), "{:?}", s.sheets[0].wires);
+    }
+
+    #[test]
+    fn a_copy_pastes_centred_on_the_point() {
+        let (mut s, lib) = sch();
+        let r = lib.symbol("Device:R").unwrap();
+        let a = place_symbol(&mut s, 0, r, Pt::mm(10.16, 10.16), Uuid::new_v4());
+        let b = place_symbol(&mut s, 0, r, Pt::mm(30.48, 10.16), Uuid::new_v4());
+        let items = [SchItem::Symbol(a), SchItem::Symbol(b)];
+        let middle = items_center(&s, 0, &items);
+        // Copied wherever the pointer was, held by its middle.
+        let clip = copy_items(&s, 0, &items, middle);
+        let to = Pt::mm(101.6, 101.6);
+        let pasted = paste(&mut s, 0, &clip, to);
+        assert_eq!(pasted.iter().filter(|i| matches!(i, SchItem::Symbol(_))).count(), 2);
+        assert_eq!(items_center(&s, 0, &pasted), to);
     }
 
     #[test]

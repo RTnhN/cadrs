@@ -596,6 +596,9 @@ fn place_camera(eda: Res<Eda2d>, ui: Res<EdaUi>, rect: Res<ViewportRect>, surfac
 #[derive(Resource, Default, Clone, Debug, PartialEq, Hash)]
 pub struct SceneInputs {
     pub sch_highlight: Vec<cadrs_eda::sch_edit::SchItem>,
+    /// The schematic's pin ends marked where wires join, and the one a wire would join now.
+    pub sch_pin_ends: render::PinEnds,
+    pub sch_hot_pin: Option<cadrs_eda::units::Pt>,
     pub board_selected: Vec<uuid::Uuid>,
     /// The symbol editor's selection.
     pub sym_selected: Vec<cadrs_eda::lib_edit::SymbolPart>,
@@ -698,7 +701,7 @@ fn rebuild_scene(
             let Some(d) = preview_design.or_else(|| design(&doc, el, b)) else { return };
             match mode {
                 Mode::Schematic => {
-                    let hl = render::Highlight { items: inputs.sch_highlight.clone() };
+                    let hl = render::Highlight { items: inputs.sch_highlight.clone(), pin_ends: inputs.sch_pin_ends, hot_pin: inputs.sch_hot_pin };
                     if d.schematic.sheets.is_empty() {
                         // A board imported alone: its (first) sheet is blank until edited.
                         render::schematic(&Design::new().schematic, 0, &render::SchematicTheme::default(), &hl)

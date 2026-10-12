@@ -22,7 +22,10 @@
 //! - **X** / **Y** mirror the selection left for right / top for bottom; **Ctrl+C** copies,
 //!   **Ctrl+V** pastes and **Ctrl+D** duplicates (both follow the pointer to a click);
 //!   **Ctrl+L** a global label, **T** a text note; **`** highlights the net under the pointer
-//!   (again, or Esc: off); **Ctrl+F** finds a symbol by reference or value.
+//!   (again, or Esc: off); **Ctrl+F** finds a symbol by reference or value. **Ctrl+C** holds
+//!   what it copies by its middle, so a paste lands centred on the pointer.
+//! - **Pin ends** show where wires join: a blue square on each while wiring, placing or
+//!   moving (on the hovered symbol's pins in Select), filled on the one under the pointer.
 //! - **L** net label (its name asked first; **R** turns it while it follows the pointer),
 //!   **Q** no-connect flag.
 //! - The strip: those tools, Annotate, Assign footprints, ERC, BOM export, Page settings.
@@ -119,6 +122,9 @@ pub struct SchState {
     pub boxing: Option<Pt>,
     /// What the box being dragged will add to the selection, highlighted while it is dragged.
     pub box_preview: Vec<SchItem>,
+    /// The pin ends marked where wires join ([`mark_pins`]), and the one a wire would join now.
+    pub pin_ends: cadrs_eda::render::PinEnds,
+    pub hot_pin: Option<Pt>,
     /// What Ctrl+C copied.
     pub clipboard: Option<se::SchClip>,
     /// How the symbol or label being placed is turned (R: quarter turns) and mirrored (X, Y).
@@ -165,7 +171,7 @@ fn label_angle(o: Orient) -> f64 {
 pub fn register(app: &mut App) {
     app.init_resource::<SchState>().add_systems(
         Update,
-        (strip, on_strip, on_click, on_keys, follow_pointer, preview_box, publish, draw_box).chain().after(super::navigate).run_if(in_state(AppState::Document)),
+        (strip, on_strip, on_click, on_keys, follow_pointer, preview_box, mark_pins, publish, draw_box).chain().after(super::navigate).run_if(in_state(AppState::Document)),
     );
     super::sch_dialogs::register(app);
 }
@@ -502,11 +508,12 @@ fn handle_keys(world: &mut World, keys: Vec<KeyboardInput>) {
         let sel = world.resource::<SchState>().selection.clone();
         if ctrl {
             match k.key_code {
-                // Copy (from under the pointer); paste or duplicate follow the pointer.
+                // Copy (the selection, else what is under the pointer), held by its middle:
+                // paste or duplicate follow the pointer centred on it.
                 KeyCode::KeyC | KeyCode::KeyD => {
                     let items = if sel.is_empty() { hit_items(world, pointer) } else { sel };
                     let Some((_, _, d)) = ui::current(world) else { continue };
-                    let clip = se::copy_items(&d.schematic, 0, &items, pointer);
+                    let clip = se::copy_items(&d.schematic, 0, &items, se::items_center(&d.schematic, 0, &items));
                     if clip.is_empty() {
                         continue;
                     }
@@ -722,8 +729,51 @@ fn preview_box(world: &mut World, mut last: Local<Option<(Pt, Pt)>>) {
     }
 }
 
-/// The selection shown highlighted.
+/// Where wires join pins: while wiring, placing or moving, every pin's end is marked; in
+/// Select, the pins of the symbol under the pointer. The pin end under the pointer (where a
+/// wire would join) is filled.
+fn mark_pins(world: &mut World, mut last: Local<Option<(Pt, u64)>>) {
+    use cadrs_eda::render::PinEnds;
+    let s = world.resource::<SchState>();
+    let wiring = matches!(s.tool, Tool::Wire(_) | Tool::Label(_) | Tool::GlobalLabel(_) | Tool::NoConnect | Tool::Place(_) | Tool::Paste(_)) || s.moving.is_some();
+    let at = world.resource::<EdaPointer>().at;
+    let generation = world.resource::<ActiveDocument>().history.undo_len() as u64 ^ (wiring as u64) << 40;
+    if !shown(world) {
+        let mut s = world.resource_mut::<SchState>();
+        if s.pin_ends != PinEnds::None || s.hot_pin.is_some() {
+            (s.pin_ends, s.hot_pin) = (PinEnds::None, None);
+        }
+        return;
+    }
+    if *last == Some((at, generation)) {
+        return;
+    }
+    *last = Some((at, generation));
+    let tol = tolerance(world);
+    let Some((_, _, d)) = ui::current(world) else { return };
+    let pin = se::pin_at(&d.schematic, 0, if wiring { snap(at) } else { at }, tol);
+    let ends = if wiring {
+        PinEnds::All
+    } else {
+        match (pin.as_ref(), se::hit(&d.schematic, 0, at, tol)) {
+            (Some((id, _, _)), _) => PinEnds::Symbol(*id),
+            (None, Some(SchItem::Symbol(id) | SchItem::Field(id, _))) => PinEnds::Symbol(id),
+            _ => PinEnds::None,
+        }
+    };
+    let hot = pin.map(|p| p.2);
+    let mut s = world.resource_mut::<SchState>();
+    if s.pin_ends != ends || s.hot_pin != hot {
+        (s.pin_ends, s.hot_pin) = (ends, hot);
+    }
+}
+
+/// The selection shown highlighted, and the pin ends marked.
 fn publish(s: Res<SchState>, mut inputs: ResMut<SceneInputs>) {
+    if inputs.sch_pin_ends != s.pin_ends || inputs.sch_hot_pin != s.hot_pin {
+        inputs.sch_pin_ends = s.pin_ends;
+        inputs.sch_hot_pin = s.hot_pin;
+    }
     // The selection, what the box being dragged will add to it, and the highlighted net.
     let mut hl = s.selection.clone();
     hl.extend(s.box_preview.iter().filter(|i| !s.selection.contains(i)).cloned());

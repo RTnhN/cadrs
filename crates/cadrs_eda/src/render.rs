@@ -159,6 +159,8 @@ pub struct SchematicTheme {
     pub no_connect: Rgba,
     pub note: Rgba,
     pub highlight: Rgba,
+    /// The marks on pin ends where wires join ([`PinEnds`]).
+    pub pin_end: Rgba,
 }
 
 impl Default for SchematicTheme {
@@ -180,6 +182,7 @@ impl Default for SchematicTheme {
             no_connect: [0x00, 0x00, 0xc8, 0xff],
             note: [0x00, 0x00, 0xc8, 0xff],
             highlight: [0xf9, 0x7a, 0x16, 0xff],
+            pin_end: [0x1e, 0x6f, 0xd9, 0xff],
         }
     }
 }
@@ -195,6 +198,21 @@ fn text_at(s: &str, at: Pt, angle: f64, size: Nm, h: HAlign, v: VAlign) -> Text 
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Highlight {
     pub items: Vec<crate::sch_edit::SchItem>,
+    /// Which pins show where wires join them (a square on each pin's end).
+    pub pin_ends: PinEnds,
+    /// The pin end a wire would join now (under the pointer): its square filled.
+    pub hot_pin: Option<Pt>,
+}
+
+/// Which pins' ends are marked.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+pub enum PinEnds {
+    #[default]
+    None,
+    /// Every pin on the sheet (wiring, or moving something).
+    All,
+    /// One symbol's pins (the one under the pointer).
+    Symbol(uuid::Uuid),
 }
 
 /// A schematic sheet: paper, frame and title block, symbols with pins and fields, wires,
@@ -275,7 +293,22 @@ pub fn schematic(sch: &Schematic, sheet: usize, th: &SchematicTheme, hl: &Highli
                     d.line(pin, WIRE_W, vec![a - Pt::new(k, k), a + Pt::new(k, k)]);
                     d.line(pin, WIRE_W, vec![a - Pt::new(k, -k), a + Pt::new(k, -k)]);
                 } else {
-                    d.shape(&Shape { geom: Geom::Circle { center: a, radius: mm(0.25) }, stroke: Default::default(), fill: Fill::None }, pin, None, 0, 1);
+                    d.shape(&Shape { geom: Geom::Circle { center: a, radius: mm(0.35) }, stroke: Default::default(), fill: Fill::None }, pin, None, mm(0.12), 1);
+                }
+            }
+            // Where a wire joins the pin: a square on its end, filled where a wire would join now.
+            let marked = match hl.pin_ends {
+                PinEnds::None => false,
+                PinEnds::All => true,
+                PinEnds::Symbol(id) => id == s.id,
+            };
+            if (marked || hl.hot_pin == Some(a)) && p.kind != crate::symbol::PinType::NoConnect {
+                let k = mm(0.5);
+                let sq = vec![a + Pt::new(-k, -k), a + Pt::new(k, -k), a + Pt::new(k, k), a + Pt::new(-k, k), a + Pt::new(-k, -k)];
+                if hl.hot_pin == Some(a) {
+                    d.region(th.pin_end, 3, &vec![sq[..4].to_vec()]);
+                } else {
+                    d.line(th.pin_end, mm(0.15), sq);
                 }
             }
             if p.length == 0 || !p.visible {
