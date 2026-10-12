@@ -240,10 +240,13 @@ pub fn gs25() -> (Design, LibraryTable, forward::Report) {
     let s = &mut d.schematic;
     let bt_p = pin(s, "BT1", "1");
     let x = bt_p.to_mm()[0];
-    // The wire from the battery up to the corner, and the flag on it, make way.
-    let w = s.sheets[0].wires.iter().find(|w| w.a == bt_p || w.b == bt_p).unwrap().id;
+    // The flag on the wire from the battery up to the corner, then that wire (one again once
+    // nothing joins it on the way), make way.
     let flag = s.sheets[0].symbols.iter().find(|x| x.value() == "PWR_FLAG" && x.placement.at.y > bt_p.y).unwrap().id;
-    se::delete_items(s, 0, &[SchItem::Wire(w), SchItem::Symbol(flag)]);
+    se::delete_items(s, 0, &[SchItem::Symbol(flag)]);
+    se::fix_junctions(s, 0);
+    let w = s.sheets[0].wires.iter().find(|w| w.a == bt_p || w.b == bt_p).unwrap().id;
+    se::delete_items(s, 0, &[SchItem::Wire(w)]);
     let sw = se::place_symbol(s, 0, lib.symbol("getting-started:M2011S3A1W03").unwrap(), p(x, 115.57), Uuid::new_v4());
     let c = se::selection_center(s, 0, &[SchItem::Symbol(sw)]);
     se::rotate_items(s, 0, &[SchItem::Symbol(sw)], c);
@@ -273,3 +276,22 @@ pub fn gs25() -> (Design, LibraryTable, forward::Report) {
     (d, lib, rep)
 }
 
+
+/// For trying wire editing (not a course step): a 4-pin connector at (101.6, 101.6) whose pins
+/// each run left and then down in nested Ls (pin 1's outermost), and an upright wire at
+/// x 50.8 with a level wire teeing into it at y 101.6 and a stub past the tee.
+pub fn wire_editing(lib: &LibraryTable) -> Design {
+    let mut d = Design::new();
+    let s = &mut d.schematic;
+    se::place_symbol(s, 0, lib.symbol("Connector:Conn_01x04").unwrap(), p(101.6, 101.6), Uuid::new_v4());
+    let mut pins: Vec<Pt> = s.placed_pins(&s.sheets[0].symbols[0]).map(|(_, p)| p).collect();
+    pins.sort_by_key(|p| -p.y);
+    for (r, pin) in pins.iter().enumerate() {
+        let corner = *pin - Pt::mm(5.08 + 2.54 * (3 - r) as f64, 0.0);
+        se::add_wire(s, 0, &[*pin, corner, Pt::new(corner.x, pin.y - mm(30.48))]);
+    }
+    se::add_wire(s, 0, &[p(50.8, 106.68), p(50.8, 76.2)]);
+    se::add_wire(s, 0, &[p(30.48, 101.6), p(50.8, 101.6)]);
+    se::fix_junctions(s, 0);
+    d
+}

@@ -5,7 +5,10 @@
 //!   inside (a blue box), right to left what the box touches (a dashed yellow box,
 //!   [`cadrs_ui::selection_box`]: `sch-box-select`), what it will take highlighted as it is
 //!   dragged; dragging an item moves it with its
-//!   wires attached (they stay on the pins and square: corners slide, bends are added).
+//!   wires attached (they stay on the pins and square: corners slide, bends are added; a row
+//!   of pins that can't keep its wires' shape re-runs them nested). A wire is a piece between
+//!   joins (a click picks it up to the corner or tee); pressing on its end or a corner drags
+//!   that end alone.
 //!   **M** moves the selection (wires stay), **G** drags it (wires follow),
 //!   **R** rotates it and **X** / **Y** mirror it (wires on it follow, square), **Del**
 //!   deletes it, **E** (or a double-click) edits a symbol's fields (Footprint: Choose… browses
@@ -102,6 +105,8 @@ pub struct Moving {
     pub from: Pt,
     pub drag: bool,
     pub on_release: bool,
+    /// A wire end (or corner) being dragged on its own, where it was.
+    pub end: Option<Pt>,
 }
 
 /// The Schematic tools' state (view state: not saved, not undone).
@@ -173,6 +178,7 @@ fn strip(world: &mut World) {
 
 /// The box being dragged on empty paper, from its press to the pointer, once it has moved a
 /// few pixels.
+#[allow(clippy::too_many_arguments)]
 fn draw_box(
     state: Res<SchState>,
     eda: Res<super::Eda2d>,
@@ -287,6 +293,7 @@ fn press(w: &mut World, at: Pt, shift: bool, ctrl: bool) {
         Tool::Select => {
             let Some((_, _, d)) = ui::current(w) else { return };
             let hit = se::hit(&d.schematic, 0, at, tolerance(w));
+            let end = se::wire_end_at(&d.schematic, 0, at, tolerance(w));
             let mut s = w.resource_mut::<SchState>();
             match hit {
                 Some(item) => {
@@ -302,11 +309,13 @@ fn press(w: &mut World, at: Pt, shift: bool, ctrl: bool) {
                         }
                     } else {
                         if !s.selection.contains(&item) {
-                            s.selection = vec![item];
+                            s.selection = vec![item.clone()];
                         }
-                        // Pressing on a selected item starts dragging it.
+                        // Pressing on a wire's end or corner (not one of several selected) drags
+                        // that end alone; on a selected item, the selection.
+                        let end = (matches!(item, SchItem::Wire(_) | SchItem::Junction(_)) && s.selection.len() == 1).then_some(end).flatten();
                         let items = s.selection.clone();
-                        s.moving = Some(Moving { items, from: snap(at), drag: true, on_release: true });
+                        s.moving = Some(Moving { items, from: snap(at), drag: true, on_release: true, end });
                     }
                 }
                 None => {
@@ -456,14 +465,17 @@ fn double(w: &mut World, at: Pt) {
 
 fn finish_move(w: &mut World, m: &Moving, at: Pt) {
     let d = snap(at) - m.from;
-    let (items, drag) = (m.items.clone(), m.drag);
+    let (items, drag, end) = (m.items.clone(), m.drag, m.end);
     w.resource_mut::<SchState>().moving = None;
     w.resource_mut::<Preview>().set(None);
     if d == Pt::ZERO {
         return;
     }
-    ui::commit(w, if drag { "Drag" } else { "Move" }, |des| {
-        se::move_items(&mut des.schematic, 0, &items, d, drag);
+    ui::commit(w, if end.is_some() { "Drag wire end" } else if drag { "Drag" } else { "Move" }, |des| {
+        match end {
+            Some(p) => se::move_wire_end(&mut des.schematic, 0, p, p + d),
+            None => se::move_items(&mut des.schematic, 0, &items, d, drag),
+        }
         se::fix_junctions(&mut des.schematic, 0);
         Ok(())
     });
@@ -566,7 +578,7 @@ fn handle_keys(world: &mut World, keys: Vec<KeyboardInput>) {
                 let items = if sel.is_empty() { hit_items(world, pointer) } else { sel };
                 if !items.is_empty() {
                     world.resource_mut::<SchState>().selection = items.clone();
-                    world.resource_mut::<SchState>().moving = Some(Moving { items, from: snap(pointer), drag: k.key_code == KeyCode::KeyG, on_release: false });
+                    world.resource_mut::<SchState>().moving = Some(Moving { items, from: snap(pointer), drag: k.key_code == KeyCode::KeyG, on_release: false, end: None });
                 }
             }
             KeyCode::KeyR => {
@@ -636,7 +648,10 @@ fn follow_pointer(world: &mut World, mut last: Local<Option<(Pt, u64)>>) {
     let Some((_, _, mut d)) = ui::current(world) else { return };
     let preview: Option<Design> = if let Some(m) = moving {
         let delta = at - m.from;
-        se::move_items(&mut d.schematic, 0, &m.items, delta, m.drag);
+        match m.end {
+            Some(p) => se::move_wire_end(&mut d.schematic, 0, p, p + delta),
+            None => se::move_items(&mut d.schematic, 0, &m.items, delta, m.drag),
+        }
         Some(d)
     } else {
         match tool {
@@ -681,7 +696,6 @@ fn follow_pointer(world: &mut World, mut last: Local<Option<(Pt, u64)>>) {
     }
 }
 
-/// The selection shown highlighted.
 /// What the box being dragged will select ([`SchState::box_preview`]), as its release will take
 /// it: wholly inside left to right, touched right to left.
 fn preview_box(world: &mut World, mut last: Local<Option<(Pt, Pt)>>) {
@@ -708,6 +722,7 @@ fn preview_box(world: &mut World, mut last: Local<Option<(Pt, Pt)>>) {
     }
 }
 
+/// The selection shown highlighted.
 fn publish(s: Res<SchState>, mut inputs: ResMut<SceneInputs>) {
     // The selection, what the box being dragged will add to it, and the highlighted net.
     let mut hl = s.selection.clone();

@@ -867,8 +867,8 @@ fn draw_overlay(eda: Res<Eda2d>, ui: Res<EdaUi>, scene: Res<EdaScene>, cross: Re
 /// The `eda-…` scenario commands:
 /// - `eda-example <stage>`: adds an example as a board of the active PCB Studio and shows it:
 ///   the "Getting Started" course's design at a step (`gs04`, `gs07`, `gs11`, `gs14`, `gs16`,
-///   `gs17`, `gs18`, `gs25`), or `power-monitor` (the LoRa board redrawn, with its project
-///   parts as components);
+///   `gs17`, `gs18`, `gs25`), `wire-editing` ([`cadrs_eda::getting_started::wire_editing`]), or
+///   `power-monitor` (the LoRa board redrawn, with its project parts as components);
 /// - `eda-redraw power-monitor`: the shown board becomes the LoRa board (see
 ///   [`redraw_power_monitor`]);
 /// - `eda-mode schematic|layout|3d`; `eda-fit`; `eda-zoom x0 y0 x1 y1` (shows that box, mm);
@@ -893,6 +893,7 @@ fn course_stage(stage: &str) -> Option<(&'static str, Design, Vec<cadrs_eda::Com
         "gs17" => course(gs::gs17(&lib)),
         "gs18" => course(gs::gs18(&lib)),
         "gs25" => course(gs::gs25().0),
+        "wire-editing" => course(gs::wire_editing(&lib)),
         "power-monitor" => {
             use cadrs_eda::power_monitor as pm;
             let (d, lib) = pm::design();
