@@ -136,6 +136,9 @@ pub struct EdaUi {
     pub modes: HashMap<(ElementId, Subject), Mode>,
     /// Per subject and mode: the view, and whether it is still the fitted one.
     pub views: HashMap<(ElementId, Subject, Mode), (View, bool)>,
+    /// The box each fitted schematic view was fitted to: it stays fitted to that box (as the
+    /// area resizes) while what is drawn grows, until fit (F) takes the drawing's box again.
+    fit_boxes: HashMap<(ElementId, Subject, Mode), cadrs_eda::units::Bounds>,
     /// The component being edited in a studio (a click on it under Components); a click on a
     /// board goes back to the board.
     pub editing: HashMap<ElementId, cadrs_core::pcb::ComponentId>,
@@ -417,18 +420,28 @@ fn current_view(ui: &EdaUi, eda: &Eda2d) -> Option<View> {
     ui.views.get(&(el, b, m)).map(|v| v.0)
 }
 
-/// A view shown the first time is fitted; a fitted view stays fitted when the area resizes.
+/// A view shown the first time is fitted; a fitted view stays fitted when the area resizes
+/// (a schematic's to the box it was first fitted to: it doesn't jump as it is drawn on).
 fn fit_views(eda: Res<Eda2d>, rect: Res<ViewportRect>, scene: Res<EdaScene>, mut ui: ResMut<EdaUi>) {
     let Some(key @ (_, _, mode)) = eda.0 else { return };
     if mode == Mode::ThreeD || scene.key.is_none() {
         return;
     }
     let size = view_size(&rect);
+    let drawn = fit_box(&scene.list);
+    let ui = &mut *ui;
     let entry = ui.views.entry(key).or_insert((View::new(size), true));
     entry.0.size = size;
+    if !entry.1 || mode != Mode::Schematic {
+        ui.fit_boxes.remove(&key);
+    }
     if entry.1
-        && let Some(b) = fit_box(&scene.list)
+        && let Some(b) = ui.fit_boxes.get(&key).copied().or(drawn)
     {
+        // (The schematic is unbounded: its view keeps the box it was fitted to.)
+        if mode == Mode::Schematic {
+            ui.fit_boxes.insert(key, b);
+        }
         let mut v = entry.0;
         v.fit(b, 0.04);
         if v != entry.0 {
@@ -448,6 +461,10 @@ pub fn fit(world: &mut World) {
         entry.0.fit(b, 0.04);
     }
     entry.1 = true;
+    match b {
+        Some(b) if key.2 == Mode::Schematic => ui.fit_boxes.insert(key, b),
+        _ => ui.fit_boxes.remove(&key),
+    };
 }
 
 /// Where the pointer is on the shown 2D view (updated by [`navigate`]).
