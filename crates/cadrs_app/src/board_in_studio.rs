@@ -452,9 +452,10 @@ fn spawn_overlay(world: &mut World, key: OverlayKey, sig: u64, name: &str, mesh:
     let material = world.resource_mut::<Assets<StandardMaterial>>().add(StandardMaterial {
         base_color_texture: Some(image),
         unlit: true,
-        alpha_mode: AlphaMode::Blend,
-        // Seen only from outside its face: through the board the other face's would show
-        // (the bias lets it win over the board's own faces).
+        // Opaque, its pixels off the board left out, as the board's skin
+        // ([`crate::picture`]): not sorted against the board or the parts around.
+        alpha_mode: AlphaMode::Mask(0.5),
+        // Seen only from outside its face: through the board the other face's would show.
         double_sided: false,
         cull_mode: Some(bevy::render::render_resource::Face::Back),
         // Over the board's own face (it lies [`LIFT`] off it too), not over the components.

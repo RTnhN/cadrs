@@ -40,6 +40,7 @@ const DROP_GAP: f64 = 10.0;
 /// there (4.8 µm nearer than the view's centre): this many lift a picture a few hundredths of a
 /// millimetre. A large bias (1000 was 2.4 mm) hid whatever stood lower than that over the face,
 /// a board's SMD components first, and by how much changed with where the board was in depth.
+/// (Bevy also sorts blended meshes by it, in mm: it no longer puts a picture last.)
 pub const SURFACE_BIAS: f32 = 8.0;
 
 /// How far a board's skin lies off its face (mm), toward the side it faces.
@@ -198,11 +199,14 @@ fn picture_material(
         base_color_texture: Some(images.add(texture)),
         unlit: true,
         // A board's skin: only from outside its face, or the other face's would show through
-        // the board at an angle (the depth bias below lets it win over the board's faces).
+        // the board at an angle.
         cull_mode: one_sided.then_some(bevy::render::render_resource::Face::Back),
         double_sided: !one_sided,
-        // Transparent pixels show the part's surface.
-        alpha_mode: AlphaMode::Blend,
+        // A board's skin is drawn opaque, as the PCB Studio's 3D view draws it (its pixels off
+        // the outline left out): blended, it was sorted against the board and the parts around,
+        // and a translucent board drawn after it hid it. Other pictures' transparent pixels
+        // show the part's surface.
+        alpha_mode: if one_sided { AlphaMode::Mask(0.5) } else { AlphaMode::Blend },
         // Over the part's own face, which it lies on.
         depth_bias: SURFACE_BIAS,
         ..default()
