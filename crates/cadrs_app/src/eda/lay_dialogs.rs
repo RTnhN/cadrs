@@ -93,8 +93,9 @@ fn list_lines(w: &mut World, list: &str, lines: Vec<(String, bool)>) {
     w.flush();
 }
 
+/// A log or list that scrolls with the wheel when it runs past `h`.
 fn list_node(name: &'static str, h: f32) -> impl Bundle {
-    (Name::new(name), Node { flex_direction: FlexDirection::Column, height: Val::Px(h), overflow: Overflow::scroll_y(), margin: UiRect::top(Val::Px(6.0)), ..default() })
+    (Name::new(name), cadrs_ui::WheelScroll, Node { flex_direction: FlexDirection::Column, height: Val::Px(h), overflow: Overflow::scroll_y(), margin: UiRect::top(Val::Px(6.0)), ..default() })
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -113,7 +114,7 @@ pub fn open_update(w: &mut World) {
                 b.spawn(Checkbox::new("eda-update-replace").label("Replace footprints with those the symbols name").checked(true).build(&t));
                 b.spawn(Checkbox::new("eda-update-delete").label("Delete footprints with no symbol").checked(false).build(&t));
                 b.spawn(Checkbox::new("eda-update-fields").label("Update footprint fields from symbols").checked(true).build(&t));
-                b.spawn(list_node("eda-update-log", 220.0));
+                b.spawn(list_node("eda-update-log", 320.0));
             })
             .footer(move |f| {
                 button(f, &tf, "eda-update-run", "Update PCB", true, run_update);
@@ -144,6 +145,7 @@ fn run_update(w: &mut World) {
     });
     if let Some(r) = report {
         let mut lines: Vec<(String, bool)> = r.messages.into_iter().map(|m| (m, false)).collect();
+        lines.extend(r.warnings.into_iter().map(|e| (format!("Warning: {e}"), true)));
         lines.extend(r.errors.into_iter().map(|e| (format!("Error: {e}"), true)));
         list_lines(w, "eda-update-log", lines);
     }
@@ -237,14 +239,17 @@ fn accept_setup(w: &mut World) {
 #[derive(Resource, Default)]
 struct ZoneNets(Vec<String>);
 
-pub fn open_zone(w: &mut World) {
+/// A zone's properties (E or a double-click on it): its net (none: it takes the net of what is
+/// wired to it) and its layer. One undo step; the zone is poured again.
+pub fn open_zone(w: &mut World, id: uuid::Uuid) {
     let Some((_, _, d)) = ui::current(w) else { return };
-    let mut nets = d.board.nets.clone();
-    if let Some(i) = nets.iter().position(|n| n == "GND") {
-        nets.swap(0, i);
-    }
+    let Some(z) = d.board.zones.iter().find(|z| z.id == id).cloned() else { return };
+    let mut nets: Vec<String> = vec![String::new()];
+    nets.extend(d.board.nets.iter().filter(|n| !n.is_empty()).cloned());
+    let net_i = nets.iter().position(|n| *n == z.net).unwrap_or(0);
     w.insert_resource(ZoneNets(nets.clone()));
-    let active = w.resource::<LayoutState>().active;
+    w.insert_resource(PropsOf(cadrs_eda::board_edit::BoardItem::Zone(id)));
+    let bottom = z.layers.iter().any(|l| l == Layer::BottomCopper) && !z.layers.iter().any(|l| l == Layer::TopCopper);
     let t = w.resource::<Theme>().clone();
     let tf = t.clone();
     spawn_dialog(
@@ -254,15 +259,15 @@ pub fn open_zone(w: &mut World) {
             .width(440.0)
             .body(move |p| {
                 row(p, &t, "Net", |r| {
-                    let mut s = Select::new("eda-zone-net").bordered().width(Val::Px(200.0));
+                    let mut s = Select::new("eda-zone-net").bordered().width(Val::Px(240.0));
                     for n in &nets {
-                        s = s.option(n.clone(), true);
+                        s = s.option(if n.is_empty() { "(from what is wired to it)".to_string() } else { n.clone() }, true);
                     }
-                    r.spawn(s.build(&t));
+                    r.spawn(s.selected(net_i).build(&t));
                 });
                 row(p, &t, "Layer", |r| {
-                    let s = Select::new("eda-zone-layer").bordered().width(Val::Px(200.0)).option("Top copper", true).option("Bottom copper", true);
-                    r.spawn(s.selected(if active == Layer::BottomCopper { 1 } else { 0 }).build(&t));
+                    let s = Select::new("eda-zone-layer").bordered().width(Val::Px(240.0)).option("Top copper", true).option("Bottom copper", true);
+                    r.spawn(s.selected(usize::from(bottom)).build(&t));
                 });
             })
             .footer(move |f| {
@@ -273,14 +278,18 @@ pub fn open_zone(w: &mut World) {
 }
 
 fn accept_zone(w: &mut World) {
+    let Some(PropsOf(cadrs_eda::board_edit::BoardItem::Zone(id))) = w.get_resource::<PropsOf>().copied() else { return };
     let nets = w.resource::<ZoneNets>().0.clone();
     let net = select_index(w, "eda-zone-net").and_then(|i| nets.get(i).cloned()).unwrap_or_default();
     let layer = if select_index(w, "eda-zone-layer") == Some(1) { Layer::BottomCopper } else { Layer::TopCopper };
     close_all(w);
-    w.resource_mut::<LayoutState>().active = layer;
-    set_tool(w, Tool::Zone { net, layer, pts: vec![] });
+    ui::commit(w, "Zone properties", |d| {
+        let z = d.board.zones.iter_mut().find(|z| z.id == id).ok_or("The zone is gone")?;
+        z.net = net.clone();
+        z.layers = cadrs_eda::layer::LayerSet::of(&[layer]);
+        Ok(())
+    });
 }
-
 
 // ---------------------------------------------------------------------------------------------
 // Text and keep-outs
@@ -336,6 +345,60 @@ fn accept_text(w: &mut World) {
     if !text.is_empty() {
         set_tool(w, Tool::Text(text));
     }
+}
+
+/// A board text's properties (E or a double-click on it): its words, height and stroke width.
+/// One undo step.
+pub fn open_board_text(w: &mut World, id: uuid::Uuid) {
+    let Some((_, _, d)) = ui::current(w) else { return };
+    let Some(bt) = d.board.texts.iter().find(|t| t.id == id).cloned() else { return };
+    w.insert_resource(PropsOf(cadrs_eda::board_edit::BoardItem::Text(id)));
+    let t = w.resource::<Theme>().clone();
+    let tf = t.clone();
+    let thickness = bt.text.style.thickness.unwrap_or(bt.text.style.size.h / 8);
+    spawn_dialog(
+        w,
+        Dialog::new("eda-tprops-dialog")
+            .title(format!("Text on {}", bt.layer.name()))
+            .width(440.0)
+            .body(move |p| {
+                row(p, &t, "Text", |r| {
+                    r.spawn(TextInput::new("eda-tprops-text").value(bt.text.text.clone()).width(Val::Px(220.0)).height(26.0).build(&t));
+                });
+                mm_row(p, &t, "Height", "eda-tprops-height", bt.text.style.size.h);
+                mm_row(p, &t, "Stroke width", "eda-tprops-thickness", thickness);
+                p.spawn(t.text("Drag the text to move it (Select: press on it once selected).", t.font_sm, FontWeight::NORMAL, t.muted_foreground));
+            })
+            .footer(move |f| {
+                button(f, &tf, "eda-tprops-ok", "OK", true, accept_board_text);
+                button(f, &tf, "eda-tprops-cancel", "Cancel", false, close_all);
+            }),
+    );
+}
+
+fn accept_board_text(w: &mut World) {
+    let Some(PropsOf(cadrs_eda::board_edit::BoardItem::Text(id))) = w.get_resource::<PropsOf>().copied() else { return };
+    let text = ui::text_value(w, "eda-tprops-text");
+    let (h, th) = (read_mm(w, "eda-tprops-height"), read_mm(w, "eda-tprops-thickness"));
+    close_all(w);
+    let (Ok(h), Ok(th)) = (h, th) else {
+        ui::toast(w, "Height and stroke width are lengths in mm");
+        return;
+    };
+    if text.trim().is_empty() {
+        ui::toast(w, "The text is empty (Del removes it)");
+        return;
+    }
+    ui::commit(w, "Text properties", |d| {
+        let t = d.board.texts.iter_mut().find(|t| t.id == id).ok_or("The text is gone")?;
+        t.text.text = text.clone();
+        let h = h.max(mm(0.1));
+        // Its width scales with its height.
+        let k = h as f64 / t.text.style.size.h.max(1) as f64;
+        t.text.style.size = cadrs_eda::units::Size::new((t.text.style.size.w as f64 * k) as Nm, h);
+        t.text.style.thickness = Some(th.max(mm(0.01)));
+        Ok(())
+    });
 }
 
 /// A keep-out (rule area): its layers and what it forbids, then its corners (double-click ends).

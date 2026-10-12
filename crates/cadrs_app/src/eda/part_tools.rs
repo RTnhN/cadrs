@@ -252,7 +252,7 @@ fn on_click(mut reader: MessageReader<EdaClick>, mut commands: Commands) {
             match c {
                 EdaClick::Press { at, shift, .. } => press(world, m, at, shift),
                 EdaClick::Double { at } => double(world, m, at),
-                EdaClick::Release { .. } => {}
+                EdaClick::Release { .. } | EdaClick::Secondary { .. } => {}
             }
         }
     });

@@ -14,7 +14,7 @@
 // 05 X over J3, then a click on U2's pin 3 (ending on a pad of its net ends the route): a
 //    track routed on the board (LOAD, two segments: a straight run and a 45° one), one step.
 // 06 the zone tool: its dialog's OK (GND), four corners clicked between J1 and C1, taking in
-//    C1's GND pad (the last a double-click); B fills it: 52 mm² of copper.
+//    C1's GND pad (the last a double-click); it fills as it is added: 52 mm² of copper.
 // 07 Done: the bar and the strip gone, the board as 3D model again.
 // (`board check J4` puts J4's place where `ExpectText` reads it: after 01, 03 and 04;
 // `board count` the tracks and zones after 05 and 06.)
@@ -78,17 +78,14 @@ Scenario(
         Screenshot("05-routed"),
         Custom("board count"),
         ExpectText("board-check", "tracks 2,"),
-        // A zone between J1 and C1, its corners clicked on the board, then filled (B).
+        // A zone between J1 and C1, its corners clicked on the board (filled as it is added).
         Click(ui("pcb-zone")),
-        WaitFor("eda-zone-dialog"),
-        Click(ui("eda-zone-ok")),
         Wait(3),
         Click(xyz(-9.5, -7.5, 13.6)),
         Click(xyz(-1.5, -7.5, 13.6)),
         Click(xyz(-1.5, -0.5, 13.6)),
         DoubleClick(xyz(-9.5, -0.5, 13.6)),
         Wait(10),
-        Key("B"),
         Wait(20),
         MoveTo(1420, 780),
         Wait(5),

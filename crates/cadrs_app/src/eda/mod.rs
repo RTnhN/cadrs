@@ -460,12 +460,18 @@ pub struct EdaPointer {
     pub over: bool,
 }
 
+/// The last left press (when, where: a second one soon after is a double-click) and where the
+/// right button went down (let go there: a right-click, not a pan).
+type Presses<'a> = (Local<'a, Option<(f64, Vec2)>>, Local<'a, Option<Vec2>>);
+
 /// A left-button event on the 2D view, for the tools.
 #[derive(Message, Clone, Copy, Debug)]
 pub enum EdaClick {
     Press { at: cadrs_eda::units::Pt, shift: bool, ctrl: bool },
     Release { at: cadrs_eda::units::Pt },
     Double { at: cadrs_eda::units::Pt },
+    /// A right-click (pressed and let go without panning): ends what is being drawn.
+    Secondary { at: cadrs_eda::units::Pt },
 }
 
 /// Pans (right or middle drag), zooms about the pointer (wheel) and fits (F); records the
@@ -483,7 +489,7 @@ pub(crate) fn navigate(
     q_dialogs: Query<(), With<cadrs_ui::DialogRoot>>,
     mut pointer: ResMut<EdaPointer>,
     mut clicks: MessageWriter<EdaClick>,
-    mut last_press: Local<Option<(f64, Vec2)>>,
+    (mut last_press, mut right_press): Presses,
     time: Res<Time>,
     layout: Res<layout_tools::LayoutState>,
     mut ui: ResMut<EdaUi>,
@@ -516,7 +522,12 @@ pub(crate) fn navigate(
                 }
             }
             PointerAction::Press(b) => match b {
-                PointerButton::Secondary | PointerButton::Middle if over => ui.pan_from = Some(pos),
+                PointerButton::Secondary | PointerButton::Middle if over => {
+                    ui.pan_from = Some(pos);
+                    if b == PointerButton::Secondary {
+                        *right_press = Some(pos);
+                    }
+                }
                 PointerButton::Primary if over => {
                     let at = view.to_design_pt(local(pos));
                     let now = time.elapsed_secs_f64();
@@ -531,7 +542,13 @@ pub(crate) fn navigate(
                 _ => {}
             },
             PointerAction::Release(b) => match b {
-                PointerButton::Secondary | PointerButton::Middle => ui.pan_from = None,
+                PointerButton::Secondary | PointerButton::Middle => {
+                    ui.pan_from = None;
+                    // Let go where it was pressed (no pan): a right-click.
+                    if b == PointerButton::Secondary && right_press.take().is_some_and(|p| p.distance(pos) < 4.0) {
+                        clicks.write(EdaClick::Secondary { at: view.to_design_pt(local(pos)) });
+                    }
+                }
                 PointerButton::Primary => {
                     clicks.write(EdaClick::Release { at: view.to_design_pt(local(pos)) });
                 }
@@ -556,8 +573,8 @@ pub(crate) fn navigate(
     ui.views.insert(key, (view, fitted));
     let typing = focus.get().is_some() || !q_dialogs.is_empty();
     for k in key_events {
-        // In the Layout, F flips the selected footprint (`layout_tools`); with none, it fits.
-        let flips = key.2 == Mode::Layout && layout.selection.iter().any(|i| matches!(i, cadrs_eda::board_edit::BoardItem::Footprint(_)));
+        // In the Layout, F flips what is selected (`layout_tools`); with nothing, it fits.
+        let flips = key.2 == Mode::Layout && !layout.selection.is_empty();
         if k.state == bevy::input::ButtonState::Pressed && !typing && !flips && k.key_code == KeyCode::KeyF && !ctrl && !shift {
             commands.queue(fit);
         }
@@ -600,6 +617,11 @@ pub struct SceneInputs {
     pub sch_pin_ends: render::PinEnds,
     pub sch_hot_pin: Option<cadrs_eda::units::Pt>,
     pub board_selected: Vec<uuid::Uuid>,
+    /// The Layout's item under the pointer (drawn lighter), the zone or polygon corner under
+    /// it, and the corner handles' half size.
+    pub board_hover: Option<uuid::Uuid>,
+    pub board_hot_corner: Option<cadrs_eda::units::Pt>,
+    pub board_handle: cadrs_eda::units::Nm,
     /// The symbol editor's selection.
     pub sym_selected: Vec<cadrs_eda::lib_edit::SymbolPart>,
     pub hidden_layers: Vec<cadrs_eda::layer::Layer>,
@@ -718,6 +740,11 @@ fn rebuild_scene(
                         v.active = a;
                     }
                     v.selected = inputs.board_selected.clone();
+                    v.hovered = inputs.board_hover;
+                    v.hot_corner = inputs.board_hot_corner;
+                    if inputs.board_handle > 0 {
+                        v.handle = inputs.board_handle;
+                    }
                     render::board(&d.board, &render::BoardTheme::default(), &v)
                 }
                 _ => DrawList::default(),

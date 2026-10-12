@@ -113,7 +113,7 @@ pub fn board_surface(b: &Board, side: Side) -> DrawList {
     };
     // The silkscreen and the holes, as the layout draws them, in the made colours.
     let th = BoardTheme { background: made::MASK, board: made::MASK, top_silk: made::SILK, bottom_silk: made::SILK, via: made::MASK_OVER_COPPER, hole: made::HOLE, highlight: made::SILK, ..BoardTheme::default() };
-    let view = BoardView { visible: vec![silk], active: cu, selected: vec![], ratsnest: false, dim_inactive: false, highlight_net: None };
+    let view = BoardView { visible: vec![silk], active: cu, selected: vec![], hovered: None, hot_corner: None, handle: mm(0.25), ratsnest: false, dim_inactive: false, highlight_net: None };
     let mut d = board(b, &th, &view);
     let items = crate::copper::items(b);
     let pad_of = |c: &crate::copper::Copper| match c.item {
@@ -425,6 +425,10 @@ pub struct BoardTheme {
     pub ratsnest: Rgba,
     pub pad_text: Rgba,
     pub highlight: Rgba,
+    /// A zone's or polygon's corner handles: fill, edge, and the one under the pointer.
+    pub handle: Rgba,
+    pub handle_edge: Rgba,
+    pub handle_hot: Rgba,
 }
 
 impl Default for BoardTheme {
@@ -448,6 +452,9 @@ impl Default for BoardTheme {
             ratsnest: [0x00, 0xf8, 0xff, 0xff],
             pad_text: [0xd8, 0xd8, 0xd8, 0xe0],
             highlight: [0xf9, 0x7a, 0x16, 0xff],
+            handle: [0xff, 0xff, 0xff, 0xff],
+            handle_edge: [0x20, 0x20, 0x20, 0xff],
+            handle_hot: [0x1e, 0x6f, 0xd9, 0xff],
         }
     }
 }
@@ -477,8 +484,15 @@ pub struct BoardView {
     pub visible: Vec<Layer>,
     /// Drawn above the other copper.
     pub active: Layer,
-    /// Footprints, tracks and vias shown selected.
+    /// Items shown selected (footprints, tracks, vias, zones, drawn shapes, text), in the
+    /// highlight colour; a selected zone or polygon shows its corners.
     pub selected: Vec<uuid::Uuid>,
+    /// The item under the pointer, drawn lighter.
+    pub hovered: Option<uuid::Uuid>,
+    /// The corner of a zone or polygon under the pointer (its handle filled), and the handles'
+    /// half size (a few pixels at the view's zoom).
+    pub hot_corner: Option<Pt>,
+    pub handle: Nm,
     pub ratsnest: bool,
     /// Other layers than the active one drawn faint (KiCad's high-contrast mode).
     pub dim_inactive: bool,
@@ -490,8 +504,14 @@ impl BoardView {
     pub fn all(board: &Board) -> BoardView {
         let mut visible: Vec<Layer> = board.copper().collect();
         visible.extend([Layer::TopSilk, Layer::BottomSilk, Layer::TopCourtyard, Layer::BottomCourtyard, Layer::TopFab, Layer::BottomFab, Layer::Outline, Layer::Drawings, Layer::Comments]);
-        BoardView { visible, active: Layer::TopCopper, selected: vec![], ratsnest: true, dim_inactive: false, highlight_net: None }
+        BoardView { visible, active: Layer::TopCopper, selected: vec![], hovered: None, hot_corner: None, handle: mm(0.25), ratsnest: true, dim_inactive: false, highlight_net: None }
     }
+}
+
+/// A colour a little lighter (the item under the pointer).
+fn lighter(c: Rgba) -> Rgba {
+    let up = |v: u8| (v as u32 + (255 - v as u32) * 45 / 100) as u8;
+    [up(c[0]), up(c[1]), up(c[2]), c[3].max(0xc0)]
 }
 
 fn draw_order(board: &Board, active: Layer) -> Vec<Layer> {
@@ -518,8 +538,10 @@ pub fn board(b: &Board, th: &BoardTheme, view: &BoardView) -> DrawList {
     let items = crate::copper::items(b);
     let shown = |l: Layer| view.visible.contains(&l);
     for (z, layer) in draw_order(b, view.active).into_iter().enumerate() {
-        // Two depths a layer: its zone fills, then the rest of it.
-        let z = z as i32 * 2;
+        // Three depths a layer: its zone fills, the rest of it, and what is selected or under the
+        // pointer over both (at one depth with the copper they would be drawn under it as
+        // often as over it).
+        let z = z as i32 * 3;
         if !shown(layer) {
             continue;
         }
@@ -550,28 +572,32 @@ pub fn board(b: &Board, th: &BoardTheme, view: &BoardView) -> DrawList {
                     }
                 }
             }
-            // Selected copper on top, in the highlight colour.
-            let sel: Vec<Region> = items
-                .iter()
-                .filter(|c| match &c.item {
-                    crate::copper::Item::Pad(f, _) => view.selected.contains(f),
-                    crate::copper::Item::Track(t) | crate::copper::Item::Via(t) => view.selected.contains(t),
-                    _ => false,
-                })
-                .filter_map(|c| c.on(layer).cloned())
-                .collect();
+            // Selected copper on top, in the highlight colour; the copper under the pointer
+            // lighter.
+            let owner = |c: &crate::copper::Copper| match &c.item {
+                crate::copper::Item::Pad(f, _) | crate::copper::Item::FpShape(f, _) => *f,
+                crate::copper::Item::Track(t) | crate::copper::Item::Via(t) | crate::copper::Item::Shape(t) | crate::copper::Item::Zone(t, ..) => *t,
+            };
+            let of = |want: &dyn Fn(uuid::Uuid) -> bool| -> Vec<Region> { items.iter().filter(|c| want(owner(c))).filter_map(|c| c.on(layer).cloned()).collect() };
+            let sel = of(&|id| view.selected.contains(&id));
             if !sel.is_empty() {
-                d.region(th.highlight, z + 1, &poly::union_all(&sel));
+                d.region(th.highlight, z + 2, &poly::union_all(&sel));
+            }
+            let hov = of(&|id| view.hovered == Some(id) && !view.selected.contains(&id));
+            if !hov.is_empty() {
+                d.region(lighter(color), z + 2, &poly::union_all(&hov));
             }
         }
+        // The colour of an item on this layer: selected, under the pointer, or as the layer.
+        let tint = |id: uuid::Uuid| if view.selected.contains(&id) { th.highlight } else if view.hovered == Some(id) { lighter(color) } else { color };
         for f in &b.footprints {
-            let lit = view.selected.contains(&f.id);
+            let fc = tint(f.id);
             // Copper drawings are drawn as copper (above, from the copper items), not again as lines.
             for s in f.footprint.shapes.iter().filter(|s| f.placement.layer(s.layer) == layer && !layer.is_copper()) {
                 let geom = if f.placement.angle % 90.0 == 0.0 { s.shape.geom.clone() } else { s.shape.geom.rect_as_polyline() };
                 let shape = Shape { geom: geom.map(|p| f.placement.apply(p)), ..s.shape.clone() };
-                let fill = (s.shape.fill != crate::graphics::Fill::None).then_some(if lit { th.highlight } else { color });
-                d.shape(&shape, if lit { th.highlight } else { color }, fill, mm(0.1), z);
+                let fill = (s.shape.fill != crate::graphics::Fill::None).then_some(fc);
+                d.shape(&shape, fc, fill, mm(0.1), z);
             }
             let texts = f.footprint.fields.iter().map(|x| &x.text).chain(f.footprint.texts.iter());
             for t in texts.filter(|t| f.placement.layer(t.layer) == layer) {
@@ -582,19 +608,20 @@ pub fn board(b: &Board, th: &BoardTheme, view: &BoardView) -> DrawList {
                 if f.placement.side == Side::Bottom {
                     tt.style.mirrored = !tt.style.mirrored;
                 }
-                d.text(&tt, if lit { th.highlight } else { color });
+                d.text(&tt, fc);
             }
         }
         for s in b.shapes.iter().filter(|s| s.layer == layer && !layer.is_copper()) {
             // A filled shape (a logo, a copper area) is filled, the rest outlined.
-            let fill = (s.shape.fill != crate::graphics::Fill::None).then_some(color);
-            d.shape(&s.shape, color, fill, mm(0.1), z);
+            let c = tint(s.id);
+            let fill = (s.shape.fill != crate::graphics::Fill::None).then_some(c);
+            d.shape(&s.shape, c, fill, mm(0.1), z);
             for p in poly::geom_points(&s.shape.geom).0 {
                 bounds = Some(Bounds::union(bounds, Bounds::of(p)));
             }
         }
         for t in b.texts.iter().filter(|t| t.layer == layer) {
-            d.text(&t.text, color);
+            d.text(&t.text, tint(t.id));
         }
     }
     // The highlighted net's copper, on every shown layer, over the rest.
@@ -651,10 +678,32 @@ pub fn board(b: &Board, th: &BoardTheme, view: &BoardView) -> DrawList {
             }
         }
     }
+    // The corners of a selected or hovered zone or drawn polygon, to drag (Select: press on
+    // one): white squares edged dark, the one under the pointer filled blue.
+    let mut handled: Vec<uuid::Uuid> = view.selected.clone();
+    handled.extend(view.hovered);
+    handled.dedup();
+    for id in handled {
+        let item = if b.zones.iter().any(|z| z.id == id) {
+            crate::board_edit::BoardItem::Zone(id)
+        } else if b.shapes.iter().any(|s| s.id == id) {
+            crate::board_edit::BoardItem::Shape(id)
+        } else {
+            continue;
+        };
+        for (_, _, p) in crate::board_edit::corners(b, item) {
+            let k = view.handle.max(mm(0.1));
+            let sq = vec![p + Pt::new(-k, -k), p + Pt::new(k, -k), p + Pt::new(k, k), p + Pt::new(-k, k)];
+            d.region(if view.hot_corner == Some(p) { th.handle_hot } else { th.handle }, 110, &vec![sq.clone()]);
+            let mut ring = sq.clone();
+            ring.push(sq[0]);
+            d.line(th.handle_edge, k / 4, ring);
+        }
+    }
     // Vias and holes over the copper.
     let top = 100;
     for v in &b.vias {
-        let c = if view.selected.contains(&v.id) { th.highlight } else { th.via };
+        let c = if view.selected.contains(&v.id) { th.highlight } else if view.hovered == Some(v.id) { lighter(th.via) } else { th.via };
         d.region(c, top, &poly::circle(v.at, v.diameter / 2));
         d.region(th.hole, top + 1, &poly::circle(v.at, v.drill / 2));
     }

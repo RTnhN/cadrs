@@ -147,7 +147,7 @@ pub use dim_edit::{DimEdit, DimEditBox, DimEditCancel, DimEditCommit, DimEditFie
 pub use tooltip::{Tooltip, TooltipStyle};
 pub use name_popup::{NamePopup, NamePopupCancel, NamePopupCommit};
 pub use text_dialog::{TextDialog, TextDialogState};
-pub use scrollbar::{horizontal_scrollbar, vertical_scrollbar};
+pub use scrollbar::{WheelScroll, horizontal_scrollbar, vertical_scrollbar};
 pub use splitter::{HoverCursor, Splitter, SplitterMoved, horizontal_splitter};
 pub use cursor::{CursorKind, CursorRequest, CursorState};
 

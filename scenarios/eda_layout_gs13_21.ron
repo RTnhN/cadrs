@@ -78,13 +78,10 @@ Scenario(
         // GS18.
         Key("PageDown"),
         Click(ui("pcb-zone")),
-        WaitFor("eda-zone-dialog"),
-        Click(ui("eda-zone-ok")),
         Click(flat(0.0, 0.0)),
         Click(flat(45.0, 0.0)),
         Click(flat(45.0, 50.0)),
         DoubleClick(flat(0.0, 50.0)),
-        Key("B"),
         MoveTo(1100, 860),
         Screenshot("07-zone-filled"),
         // GS19.

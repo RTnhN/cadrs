@@ -1,10 +1,11 @@
-//! Copper zones (GS18): drawing one, and filling (B).
+//! Copper zones (GS18): drawing one, taking its net from what is wired to it, and filling
+//! (the app fills them again after every board change).
 //!
 //! A fill is the zone's outline, inside the board less its edge clearance, with copper of
 //! other nets (pads, tracks, vias, other zones' fills, every hole) cut away with clearance.
 //! Pads of the zone's own net join through thermal reliefs (a gap with spokes) or solidly;
 //! tracks and vias of its net join solidly. Necks thinner than the minimum width are removed,
-//! and islands touching nothing of the net are dropped.
+//! and islands touching nothing of the net are dropped (once some of the pour touches it).
 
 use crate::board::{Board, Polygon, Zone, ZoneFill};
 use crate::copper::{self, Item};
@@ -66,7 +67,13 @@ pub fn fill_zone(board: &Board, zone: &Zone) -> Vec<(Layer, Vec<Polygon>)> {
     if zone.keepout.is_some() {
         return vec![];
     }
-    let board_area = poly::inflate(&crate::outline::board_region(board), -board.rules.copper_edge_clearance);
+    // Inside the board, clear of its edge; a board with no outline yet doesn't clip.
+    let region = crate::outline::board_region(board);
+    let board_area = if region.is_empty() { None } else { Some(poly::inflate(&region, -board.rules.copper_edge_clearance)) };
+    let clip = |r: &Region| match &board_area {
+        Some(b) => poly::intersection(r, b),
+        None => r.clone(),
+    };
     let outline: Region = zone
         .outline
         .iter()
@@ -81,7 +88,7 @@ pub fn fill_zone(board: &Board, zone: &Zone) -> Vec<(Layer, Vec<Polygon>)> {
     let items = copper::items(board);
     let mut out = vec![];
     for layer in zone.layers.copper().iter() {
-        let mut area = poly::intersection(&outline, &board_area);
+        let mut area = clip(&outline);
         let keepouts = pour_keepouts(board, layer);
         if !keepouts.is_empty() {
             area = poly::difference(&area, &poly::union_all(&keepouts));
@@ -136,7 +143,7 @@ pub fn fill_zone(board: &Board, zone: &Zone) -> Vec<(Layer, Vec<Polygon>)> {
         area = poly::difference(&area, &poly::union_all(&cut));
         if !spokes.is_empty() {
             // Spokes reach back into the fill but stay inside the zone and clear of others.
-            let mut s = poly::intersection(&poly::union_all(&spokes), &poly::intersection(&outline, &board_area));
+            let mut s = poly::intersection(&poly::union_all(&spokes), &clip(&outline));
             let others: Vec<Region> = items
                 .iter()
                 .filter(|c| c.net != zone.net)
@@ -149,13 +156,23 @@ pub fn fill_zone(board: &Board, zone: &Zone) -> Vec<(Layer, Vec<Polygon>)> {
         let half = zone.fill.min_width / 2;
         area = poly::inflate(&poly::inflate(&area, -half), half);
         let mut polys = to_polygons(&area);
-        if zone.fill.remove_islands {
-            let mine: Vec<&Region> = items.iter().filter(|c| c.net == zone.net && !matches!(c.item, Item::Zone(..))).filter_map(|c| c.on(layer)).collect();
-            polys.retain(|pg| {
-                let mut r = vec![pg.outer.clone()];
-                r.extend(pg.holes.iter().cloned());
-                mine.iter().any(|m| poly::overlaps(&r, m))
-            });
+        // Islands go only when the net has copper here to keep: a zone on no net, or on a net with
+        // nothing on this layer yet, keeps its whole pour (else it would never show filled).
+        let mine: Vec<&Region> = items.iter().filter(|c| !zone.net.is_empty() && c.net == zone.net && !matches!(c.item, Item::Zone(..))).filter_map(|c| c.on(layer)).collect();
+        if zone.fill.remove_islands && !mine.is_empty() {
+            let touching: Vec<Polygon> = polys
+                .iter()
+                .filter(|pg| {
+                    let mut r = vec![pg.outer.clone()];
+                    r.extend(pg.holes.iter().cloned());
+                    mine.iter().any(|m| poly::overlaps(&r, m))
+                })
+                .cloned()
+                .collect();
+            // A zone that touches none of its net yet (just drawn) keeps its whole pour.
+            if !touching.is_empty() {
+                polys = touching;
+            }
         }
         out.push((layer, polys));
     }
@@ -173,6 +190,27 @@ pub fn fill_all(board: &mut Board) {
         let filled = fill_zone(board, &board.zones[i]);
         board.zones[i].filled = filled;
     }
+}
+
+/// Gives each copper zone drawn on no net the net of the copper it touches (a pad, track or
+/// via of a net on one of its layers): a zone takes its net from what is wired to it. Returns
+/// whether any zone took one.
+pub fn adopt_nets(board: &mut Board) -> bool {
+    let items = copper::items(board);
+    let mut changed = false;
+    for z in board.zones.iter_mut().filter(|z| z.keepout.is_none() && z.net.is_empty()) {
+        let outline: Region = z.outline.clone();
+        let net = items
+            .iter()
+            .filter(|c| !c.net.is_empty() && matches!(c.item, Item::Pad(..) | Item::Track(_) | Item::Via(_)))
+            .find(|c| z.layers.copper().iter().any(|l| c.on(l).is_some_and(|r| poly::overlaps(r, &outline))))
+            .map(|c| c.net.clone());
+        if let Some(n) = net {
+            z.net = n;
+            changed = true;
+        }
+    }
+    changed
 }
 
 /// Unfills every zone.

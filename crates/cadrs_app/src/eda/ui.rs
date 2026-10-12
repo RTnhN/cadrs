@@ -26,12 +26,28 @@ pub fn current(world: &World) -> Option<(ElementId, BoardId, Design)> {
 }
 
 /// Applies `f` to the shown board's design and stores the result as one undo step named
-/// `label`. Errors from `f` (and from the command) come back as a toast.
+/// `label`. Errors from `f` (and from the command) come back as a toast. Zones are poured
+/// again whenever the board changed (in the same step): they are always shown filled.
 pub fn commit(world: &mut World, label: &str, f: impl FnOnce(&mut Design) -> Result<(), String>) -> bool {
     let Some((element, board, mut d)) = current(world) else { return false };
+    let unfilled = |b: &cadrs_eda::board::Board| {
+        let mut b = b.clone();
+        cadrs_eda::zone::unfill_all(&mut b);
+        b
+    };
+    let before = (!d.board.zones.is_empty()).then(|| unfilled(&d.board));
     if let Err(e) = f(&mut d) {
         toast(world, &e);
         return false;
+    }
+    let changed = match &before {
+        Some(b) => *b != unfilled(&d.board),
+        None => !d.board.zones.is_empty(),
+    };
+    if changed && d.board.zones.iter().any(|z| z.keepout.is_none()) {
+        // A zone drawn on no net takes the net of what is now wired to it.
+        cadrs_eda::zone::adopt_nets(&mut d.board);
+        cadrs_eda::zone::fill_all(&mut d.board);
     }
     let cmd = SetDesign { element, board, design: Box::new(d), label: label.into() };
     let r = world.resource_mut::<ActiveDocument>().execute(&cmd);
@@ -94,6 +110,11 @@ pub fn libraries(world: &World) -> LibraryTable {
         }
     }
     t.add(lib);
+    // The footprints the shown board holds that no library has (a design brought in from
+    // KiCad with libraries cadrs doesn't ship).
+    if let Some((_, _, d)) = current(world) {
+        t.add_design_footprints(&d);
+    }
     t
 }
 

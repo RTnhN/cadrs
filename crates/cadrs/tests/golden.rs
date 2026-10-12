@@ -2321,6 +2321,12 @@ fn golden_eda_layout_drawing() {
 
 #[test]
 #[ignore = "headless screenshots; run with: cargo test -r -p cadrs -F app-tests --test golden -- --ignored"]
+fn golden_eda_layout_autoroute() {
+    run_scenario("eda_layout_autoroute");
+}
+
+#[test]
+#[ignore = "headless screenshots; run with: cargo test -r -p cadrs -F app-tests --test golden -- --ignored"]
 fn golden_eda_online_parts() {
     run_scenario("eda_online_parts");
 }
