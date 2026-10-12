@@ -35,6 +35,16 @@ pub const MAX_TEXTURE: u32 = 2048;
 /// The gap between pictures dropped together (mm).
 const DROP_GAP: f64 = 10.0;
 
+/// The depth bias that lets a picture win over the face it lies on. The views are orthographic
+/// with a depth range of [`crate::camera::CAMERA_FAR`], so one unit of bias is about 2.4 µm
+/// there (4.8 µm nearer than the view's centre): this many lift a picture a few hundredths of a
+/// millimetre. A large bias (1000 was 2.4 mm) hid whatever stood lower than that over the face,
+/// a board's SMD components first, and by how much changed with where the board was in depth.
+pub const SURFACE_BIAS: f32 = 8.0;
+
+/// How far a board's skin lies off its face (mm), toward the side it faces.
+pub const SKIN_LIFT: f32 = 0.01;
+
 pub struct PicturePlugin;
 
 impl Plugin for PicturePlugin {
@@ -194,16 +204,17 @@ fn picture_material(
         // Transparent pixels show the part's surface.
         alpha_mode: AlphaMode::Blend,
         // Over the part's own face, which it lies on.
-        depth_bias: 1000.0,
+        depth_bias: SURFACE_BIAS,
         ..default()
     }))
 }
 
 /// The quad a picture covers, its texture upright (row 0 at the `v` end), its front the side
-/// it faces ([`SolidImage::facing`]; else `u × v`).
+/// it faces ([`SolidImage::facing`]; else `u × v`). A board's skin lies [`SKIN_LIFT`] off its
+/// face, toward that side.
 fn picture_mesh(p: &SolidImage) -> Mesh {
     let v = |a: [f64; 3]| Vec3::new(a[0] as f32, a[1] as f32, a[2] as f32);
-    let (c, u, w) = (v(p.corner), v(p.u), v(p.v));
+    let (mut c, u, w) = (v(p.corner), v(p.u), v(p.v));
     let mut n = u.cross(w).normalize_or_zero();
     // Wound so its front is the side it faces (a board's bottom skin, drawn as the layout has
     // it, faces down).
@@ -213,6 +224,9 @@ fn picture_mesh(p: &SolidImage) -> Mesh {
     {
         n = -n;
         indices = vec![0, 2, 1, 0, 3, 2];
+    }
+    if p.facing.is_some() {
+        c += n * SKIN_LIFT;
     }
     Mesh::new(PrimitiveTopology::TriangleList, RenderAssetUsages::default())
         .with_inserted_attribute(Mesh::ATTRIBUTE_POSITION, vec![c, c + u, c + u + w, c + w])
@@ -264,6 +278,20 @@ fn sync_pictures(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_skin_lies_just_off_its_face_toward_its_side() {
+        let corners = |m: &Mesh| match m.attribute(Mesh::ATTRIBUTE_POSITION) {
+            Some(bevy::mesh::VertexAttributeValues::Float32x3(p)) => p.clone(),
+            _ => panic!(),
+        };
+        // A board's bottom skin at z 0, facing down: just under it.
+        let pic = SolidImage { blob: String::new(), corner: [0.0, 0.0, 0.0], u: [10.0, 0.0, 0.0], v: [0.0, 5.0, 0.0], facing: Some([0.0, 0.0, -1.0]) };
+        assert!(corners(&picture_mesh(&pic)).iter().all(|p| (p[2] + SKIN_LIFT).abs() < 1e-6));
+        // A picture seen from both sides stays on its face.
+        let pic = SolidImage { facing: None, ..pic };
+        assert!(corners(&picture_mesh(&pic)).iter().all(|p| p[2] == 0.0));
+    }
 
     #[test]
     fn pictures_go_on_the_plane_facing_the_view() {

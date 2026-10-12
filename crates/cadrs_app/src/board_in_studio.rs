@@ -457,8 +457,8 @@ fn spawn_overlay(world: &mut World, key: OverlayKey, sig: u64, name: &str, mesh:
         // (the bias lets it win over the board's own faces).
         double_sided: false,
         cull_mode: Some(bevy::render::render_resource::Face::Back),
-        // Over the board's own face.
-        depth_bias: 200.0,
+        // Over the board's own face (it lies [`LIFT`] off it too), not over the components.
+        depth_bias: crate::picture::SURFACE_BIAS,
         ..default()
     });
     let label = format!("board-layout-{}{}{}", crate::pcb::slug(name), if key.2 { "" } else { "-bottom" }, if key.3 { "-changes" } else { "" });
