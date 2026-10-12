@@ -2237,6 +2237,12 @@ fn golden_pcb_edit_in_part_studio() {
 
 #[test]
 #[ignore = "headless screenshots; run with: cargo test -r -p cadrs -F app-tests --test golden -- --ignored"]
+fn golden_pcb_grab_layout_in_part_studio() {
+    run_scenario("pcb_grab_layout_in_part_studio");
+}
+
+#[test]
+#[ignore = "headless screenshots; run with: cargo test -r -p cadrs -F app-tests --test golden -- --ignored"]
 fn golden_pcb_fit_connector() {
     run_scenario("pcb_fit_connector");
 }

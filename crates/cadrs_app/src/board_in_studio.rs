@@ -9,6 +9,10 @@
 //!   is the feature's (its dialog's Show, the Feature list's menu), saved and undone like any
 //!   option. [`sync_board_views`] keeps the Parts cache's hidden components and skinless boards
 //!   in step; [`sync_overlays`] the layout meshes.
+//! - **Grab to edit**: a press on a footprint or track of a board shown as its layout (in a
+//!   Part Studio with no dialog open and no sketch edited, the board face the nearest opaque
+//!   thing under the pointer) starts editing that layout and hands the press on ([`press_to_edit`]),
+//!   so a footprint or track drags straight away.
 //! - Scenario set-ups ([`script`]): `setup` opens the mains-sensor enclosure
 //!   ([`cadrs_core::samples::pcb_enclosure`]); `derive` derives its board onto Board location.
 //!
@@ -38,7 +42,7 @@ impl Plugin for BoardInStudioPlugin {
             .init_resource::<OverlayCache>()
             .add_observer(on_edit_bar)
             .add_observer(on_link_menu)
-            .add_systems(Update, navigate3d.before(crate::eda::navigate).run_if(in_state(AppState::Document)))
+            .add_systems(Update, (press_to_edit, navigate3d).chain().before(crate::eda::navigate).run_if(in_state(AppState::Document)))
             .add_systems(Update, (end_edit_when_gone, sync_board_views, sync_drag_ghosts, sync_overlays, sync_edit_bar, edit_keys).chain().after(crate::parts::PartsSet).run_if(in_state(AppState::Document)))
             .add_systems(OnExit(AppState::Document), |mut e: ResMut<BoardEditing>| e.target = None);
     }
@@ -785,6 +789,101 @@ fn component_under(world: &World, host: &crate::eda::PlaneHost, origin: Vec3, di
     }
     let (_, fp) = best?;
     layout.footprints.iter().find(|f| f.id == fp).map(|f| (f.id, f.placement.at))
+}
+
+/// The pointer input since a press started a board's edit, replayed to [`navigate3d`] once the
+/// Layout's tools work on the board (a frame or two later).
+#[derive(Default)]
+pub(crate) struct Replay {
+    inputs: Vec<bevy::picking::pointer::PointerInput>,
+    frames: u32,
+}
+
+/// A press on a footprint or track of a board shown as its layout starts editing it (see the
+/// module docs), the press and what follows it replayed to the Layout's tools.
+pub(crate) fn press_to_edit(world: &mut World, mut cursor: Local<bevy::ecs::message::MessageCursor<bevy::picking::pointer::PointerInput>>, mut replay: Local<Replay>) {
+    use bevy::picking::pointer::{PointerAction, PointerButton, PointerId, PointerInput};
+    let events: Vec<PointerInput> = cursor.read(world.resource::<Messages<PointerInput>>()).cloned().collect();
+    if !replay.inputs.is_empty() {
+        if world.resource::<crate::eda::Eda2d>().plane().is_some() {
+            for e in std::mem::take(&mut replay.inputs) {
+                world.write_message(e);
+            }
+            // (A release before now picked the board face in the view: the layout is edited.)
+            world.resource_mut::<crate::viewport::Selection>().0.clear();
+            // (Read here next frame: the edit is on by then, so they are let be.)
+        } else {
+            replay.inputs.extend(events);
+            replay.frames += 1;
+            if replay.frames > 30 {
+                *replay = Replay::default();
+            }
+        }
+        return;
+    }
+    if world.resource::<BoardEditing>().target.is_some() || world.resource::<crate::eda::Eda2d>().plane().is_some() {
+        return;
+    }
+    let modeling = world.get_resource::<State<crate::sketch::PartStudioMode>>().is_some_and(|m| *m.get() == crate::sketch::PartStudioMode::Modeling);
+    let dialogs = world.query_filtered::<(), With<cadrs_ui::FeatureDialogState>>().iter(world).next().is_some();
+    if !modeling || dialogs {
+        return;
+    }
+    let Some(k) = events.iter().position(|e| e.pointer_id == PointerId::Mouse && matches!(e.action, PointerAction::Press(PointerButton::Primary))) else { return };
+    let over = {
+        let areas: Vec<Entity> = world.query_filtered::<Entity, With<crate::viewport::ViewportArea>>().iter(world).collect();
+        world.resource::<bevy::picking::hover::HoverMap>().get(&PointerId::Mouse).is_some_and(|hits| areas.iter().any(|e| hits.contains_key(e)))
+    };
+    if !over {
+        return;
+    }
+    let Some((feature, copy)) = layout_item_under(world, events[k].location.position) else { return };
+    begin_edit(world, feature, copy);
+    if world.resource::<BoardEditing>().target.is_some() {
+        *replay = Replay { inputs: events[k..].to_vec(), frames: 0 };
+    }
+}
+
+/// The derived board shown as its layout (feature, copy) whose footprint or track is under the
+/// screen point, its board face the nearest face there of a part that isn't see-through.
+fn layout_item_under(world: &World, pos: Vec2) -> Option<(FeatureId, usize)> {
+    let doc = world.resource::<ActiveDocument>();
+    let el = doc.active_element()?;
+    if el.assembly_model().is_some() {
+        return None;
+    }
+    let view = &world.resource::<crate::viewport::ViewportView>().view;
+    let offset = world.resource::<crate::viewport::ViewportRect>().offset(pos);
+    let (origin, dir) = view.ray(offset);
+    let cache = world.resource::<PartCache>();
+    // (See-through parts let the press through, as they let the layout be seen.)
+    let nearest = crate::parts::pick_opaque_face(cache, view, offset, None).map(|(_, _, t)| t);
+    for b in boards_in(doc).into_iter().filter(|b| b.view == BoardView::Layout) {
+        let Some(layout) = layout_of(doc, b.feature) else { continue };
+        let Some(out) = cache.derived.get(&b.feature) else { continue };
+        for (copy, c) in out.boards.iter().enumerate() {
+            let host = crate::eda::PlaneHost { target: BoardTarget { studio: el.id, feature: b.feature, copy }, frame: c.frame, thickness: c.thickness };
+            let Some(at) = ray_to_layout(&host, origin, dir) else { continue };
+            // The face seen: how far along the ray, and which side's footprints come first.
+            let n = Vec3::from_array(host.frame.normal().map(|v| v as f32));
+            let up = dir.dot(n) < 0.0;
+            let [x, y] = cadrs_core::pcb::frames::layout_to_board(at);
+            let p = cadrs_core::pcb::frames::to_world(&host.frame, [x, y, if up { host.thickness } else { 0.0 }]);
+            let t = (Vec3::new(p[0] as f32, p[1] as f32, p[2] as f32) - origin).dot(dir) / dir.length_squared();
+            if nearest.is_some_and(|f| f < t - 0.05) {
+                continue;
+            }
+            // Pick tolerance: 5 px at the board.
+            let px_per_mm = (view.magnification(Vec3::new(p[0] as f32, p[1] as f32, p[2] as f32)) / view.scale.max(1e-6)) as f64;
+            let tol = (5.0 / px_per_mm.max(1e-6) * 1e6) as cadrs_eda::units::Nm;
+            let side = if up { cadrs_eda::layer::Side::Top } else { cadrs_eda::layer::Side::Bottom };
+            let hit = cadrs_eda::board_edit::hit_from(layout, at, tol, Some(side));
+            if matches!(hit, Some(cadrs_eda::board_edit::BoardItem::Footprint(_) | cadrs_eda::board_edit::BoardItem::Track(_) | cadrs_eda::board_edit::BoardItem::Via(_))) {
+                return Some((b.feature, copy));
+            }
+        }
+    }
+    None
 }
 
 /// Möller–Trumbore: the distance along the ray to the triangle, if it meets it.

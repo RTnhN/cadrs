@@ -2439,7 +2439,7 @@ fn visible_skipping(cache: &PartCache, view: &ViewState, p: Vec3, skip: Option<c
 /// How far along the pick ray the nearest face of an opaque part is: an edge seen through a
 /// clear part (the Pneumatic Cylinder's barrel, a part made transparent) stays pickable, as the
 /// eye sees it (`ex3-step14.png` picks the Rear Cap's rod holes through the barrel).
-fn pick_opaque_face(cache: &PartCache, view: &ViewState, offset: Vec2, skip: Option<cadrs_sketch::OpId>) -> Option<(PartId, FaceName, f32)> {
+pub fn pick_opaque_face(cache: &PartCache, view: &ViewState, offset: Vec2, skip: Option<cadrs_sketch::OpId>) -> Option<(PartId, FaceName, f32)> {
     let (o, d) = view.ray(offset);
     let mut best: Option<(PartId, FaceName, f32)> = None;
     for part in cache.shown() {
