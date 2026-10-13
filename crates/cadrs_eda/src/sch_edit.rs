@@ -1231,9 +1231,22 @@ pub struct SchClip {
     pub labels: Vec<Label>,
     pub notes: Vec<Note>,
     pub drawings: Vec<Drawing>,
+    /// The parts of the copied symbols that only the studio they came from has (its project
+    /// library's components, footprints only its board holds): a paste into another studio
+    /// adds the ones it lacks, so they place on its board with their 3D models.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub parts: Vec<crate::Component>,
+    /// That studio's project library (`<library>:<name>` names the parts).
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub library: String,
 }
 
 impl SchClip {
+    /// Renames the library ids its symbols and their Footprint fields use.
+    pub fn rename_parts(&mut self, sym: crate::rename::IdMap, fp: crate::rename::IdMap) {
+        crate::rename::rename_in_schematic(&mut self.definitions, self.symbols.iter_mut(), sym, fp);
+    }
+
     pub fn is_empty(&self) -> bool {
         self.symbols.is_empty() && self.wires.is_empty() && self.junctions.is_empty() && self.no_connects.is_empty() && self.labels.is_empty() && self.notes.is_empty() && self.drawings.is_empty()
     }

@@ -379,12 +379,19 @@ fn press(w: &mut World, at: Pt, shift: bool, ctrl: bool) {
             });
         }
         Tool::Paste(clip) => {
+            // From another studio: the parts it brings come into this one's Components, in the
+            // same undo step.
+            let (clip, mark) = ui::adopt_parts(w, &clip);
             let mut pasted = vec![];
-            ui::commit(w, "Paste", |d| {
+            let done = ui::commit(w, "Paste", |d| {
                 pasted = se::paste(&mut d.schematic, 0, &clip, at);
                 se::fix_junctions(&mut d.schematic, 0);
                 Ok(())
             });
+            let mut doc = w.resource_mut::<ActiveDocument>();
+            if doc.history.undo_len() > mark + 1 || (!done && doc.history.undo_len() > mark) {
+                doc.squash_since(mark, "Paste");
+            }
             set_tool(w, Tool::Select);
             w.resource_mut::<SchState>().selection = pasted;
         }
@@ -513,10 +520,11 @@ fn handle_keys(world: &mut World, keys: Vec<KeyboardInput>) {
                 KeyCode::KeyC | KeyCode::KeyD => {
                     let items = if sel.is_empty() { hit_items(world, pointer) } else { sel };
                     let Some((_, _, d)) = ui::current(world) else { continue };
-                    let clip = se::copy_items(&d.schematic, 0, &items, se::items_center(&d.schematic, 0, &items));
+                    let mut clip = se::copy_items(&d.schematic, 0, &items, se::items_center(&d.schematic, 0, &items));
                     if clip.is_empty() {
                         continue;
                     }
+                    ui::carry_parts(world, &mut clip);
                     if k.key_code == KeyCode::KeyD {
                         set_tool(world, Tool::Paste(Box::new(clip)));
                     } else {

@@ -37,6 +37,7 @@ pub mod layer;
 pub mod library;
 pub mod poly;
 pub mod render;
+pub mod rename;
 pub mod schematic;
 pub mod skin;
 pub mod symbol;

@@ -601,7 +601,17 @@ impl Command for AddComponent {
         let n = s.next_component.max(s.components.iter().map(|c| c.id.0 + 1).max().unwrap_or(0));
         s.next_component = n + 1;
         let mut component = self.value.as_deref().cloned().unwrap_or_else(|| cadrs_eda::Component::new(""));
-        component.name = name;
+        // Numbered (a pasted copy beside the original): its symbol and footprint, while they go
+        // by its name, take the new one, so the project library tells them apart.
+        let old = std::mem::replace(&mut component.name, name);
+        if !old.is_empty() && old != component.name {
+            if let Some(sym) = component.symbol.as_mut().filter(|x| x.name() == old) {
+                sym.id = component.name.clone();
+            }
+            if let Some(fp) = component.footprint.as_mut().filter(|x| x.name() == old) {
+                fp.id = component.name.clone();
+            }
+        }
         s.components.push(StudioComponent { id: ComponentId(n), component });
         Ok(())
     }
@@ -649,14 +659,53 @@ impl Command for RenameComponent {
         if name.is_empty() {
             return Err(CommandError::Invalid("A component name can't be empty".into()));
         }
+        let lib = project_library_name(&doc.element(self.element).ok_or(CommandError::ElementNotFound(self.element))?.name);
         let s = studio_mut(doc, self.element)?;
         if s.components.iter().any(|c| c.id != self.component && c.component.name == name) {
             return Err(CommandError::Invalid(format!("There is already a component named {name}")));
         }
         let c = s.components.iter_mut().find(|c| c.id == self.component).ok_or_else(|| CommandError::Invalid("no such component".into()))?;
-        c.component.name = name.to_string();
+        let old = std::mem::replace(&mut c.component.name, name.to_string());
+        // Its symbol and footprint go by the component's name while they carry it, and the
+        // boards' schematics and layouts that use them follow (as the project library has them:
+        // `<studio>:<name>`).
+        let mut renamed: Vec<(String, String, bool)> = vec![];
+        if let Some(sym) = c.component.symbol.as_mut().filter(|x| x.name() == old) {
+            sym.id = name.to_string();
+            renamed.push((format!("{lib}:{old}"), format!("{lib}:{name}"), true));
+        }
+        if let Some(fp) = c.component.footprint.as_mut().filter(|x| x.name() == old) {
+            fp.id = name.to_string();
+            renamed.push((format!("{lib}:{old}"), format!("{lib}:{name}"), false));
+        }
+        if renamed.is_empty() {
+            return Ok(());
+        }
+        let renamed = &renamed;
+        let map = |footprint: bool| move |id: &str| renamed.iter().find(|(o, _, s)| *s != footprint && o == id).map(|(_, n, _)| n.clone());
+        let (sym, fp) = (map(false), map(true));
+        for b in &mut s.boards {
+            if let Some(d) = b.design.as_deref_mut() {
+                cadrs_eda::rename::rename_parts(d, &sym, &fp);
+                // A part placed under the old name shows the new one.
+                for p in d.schematic.sheets.iter_mut().flat_map(|sh| sh.symbols.iter_mut()) {
+                    if p.symbol == format!("{lib}:{name}")
+                        && let Some(f) = p.field_mut(cadrs_eda::symbol::fields::VALUE).filter(|f| f.text.text == old)
+                    {
+                        f.text.text = name.to_string();
+                    }
+                }
+                b.design_changed();
+            }
+        }
         Ok(())
     }
+}
+
+/// A studio's name as the name of its project library (its components, as boards' schematics
+/// refer to them): "PCB Studio 1" → "PCB_Studio_1".
+pub fn project_library_name(studio: &str) -> String {
+    studio.chars().map(|c| if c.is_alphanumeric() || c == '-' { c } else { '_' }).collect()
 }
 
 /// An edit of a native board's schematic or layout: the editors compute the new design with

@@ -85,10 +85,7 @@ pub fn set_text_value(world: &mut World, name: &str, value: &str) {
 /// ([`super::libraries`]), and the studio's components as the project library named after the
 /// studio.
 pub fn libraries(world: &World) -> LibraryTable {
-    let mut t = LibraryTable::builtin();
-    if let Some(u) = world.get_resource::<super::libraries::UserLibraries>() {
-        u.add_to(&mut t);
-    }
+    let mut t = shared_libraries(world);
     let Some((el, _, _)) = world.resource::<Eda2d>().0 else { return t };
     let doc = world.resource::<ActiveDocument>();
     let Some(e) = doc.doc.element(el) else { return t };
@@ -116,6 +113,104 @@ pub fn libraries(world: &World) -> LibraryTable {
         t.add_design_footprints(&d);
     }
     t
+}
+
+/// The libraries every studio sees alike: the built-in ones and the user's.
+pub fn shared_libraries(world: &World) -> LibraryTable {
+    let mut t = LibraryTable::builtin();
+    if let Some(u) = world.get_resource::<super::libraries::UserLibraries>() {
+        u.add_to(&mut t);
+    }
+    t
+}
+
+/// A library id and what it becomes.
+type Renamed = (String, String);
+
+/// Gives a copy of schematic items the parts its symbols use that only the shown studio has
+/// (none of the built-in or user libraries does): the studio's components of those symbols or
+/// footprints (by name), and footprints only its board holds (as components of their own). The
+/// copy then names them all in the studio's project library.
+pub fn carry_parts(world: &World, clip: &mut cadrs_eda::sch_edit::SchClip) {
+    let Some((el, _, _)) = world.resource::<Eda2d>().0 else { return };
+    let doc = world.resource::<ActiveDocument>();
+    let Some(e) = doc.doc.element(el) else { return };
+    let Some(s) = e.pcb() else { return };
+    let lib = project_library_name(&e.name);
+    let (shared, here) = (shared_libraries(world), libraries(world));
+    let name_of = |id: &str| id.rsplit_once(':').map_or(id, |(_, n)| n).to_string();
+    let mut parts: Vec<cadrs_eda::Component> = vec![];
+    // (old id, new id) of symbols and of footprints.
+    let (mut syms, mut fps): (Vec<Renamed>, Vec<Renamed>) = (vec![], vec![]);
+    let mut take = |c: &cadrs_eda::Component| {
+        if !parts.iter().any(|p| p.name == c.name) {
+            parts.push(c.clone());
+        }
+    };
+    let used: Vec<(String, String)> = clip
+        .symbols
+        .iter()
+        .map(|p| (p.symbol.clone(), p.field(cadrs_eda::symbol::fields::FOOTPRINT).map(|f| f.value().to_string()).unwrap_or_default()))
+        .chain(clip.definitions.iter().map(|d| (d.id.clone(), d.field(cadrs_eda::symbol::fields::FOOTPRINT).map(|f| f.value().to_string()).unwrap_or_default())))
+        .collect();
+    for (sym, fp) in used {
+        if shared.symbol(&sym).is_none() {
+            let n = name_of(&sym);
+            if let Some(c) = s.components.iter().find(|c| c.component.symbol.as_ref().is_some_and(|x| x.name() == n)) {
+                take(&c.component);
+                syms.push((sym.clone(), format!("{lib}:{n}")));
+            }
+        }
+        if fp.is_empty() || shared.footprint(&fp).is_some() {
+            continue;
+        }
+        let n = name_of(&fp);
+        if let Some(c) = s.components.iter().find(|c| c.component.footprint.as_ref().is_some_and(|x| x.name() == n)) {
+            take(&c.component);
+        } else if let Some(f) = here.footprint(&fp) {
+            // A footprint only this board holds: a component of its own.
+            let mut f = f.clone();
+            f.id = n.clone();
+            take(&cadrs_eda::Component { name: n.clone(), symbol: None, footprint: Some(f) });
+        } else {
+            continue;
+        }
+        fps.push((fp.clone(), format!("{lib}:{n}")));
+    }
+    let map = |m: &[(String, String)], id: &str| m.iter().find(|(o, n)| o == id && o != n).map(|(_, n)| n.clone());
+    clip.rename_parts(&|id| map(&syms, id), &|id| map(&fps, id));
+    clip.parts = parts;
+    clip.library = lib;
+}
+
+/// Readies a copy for pasting into the shown studio: its parts named in this studio's project
+/// library, and the ones the studio lacks added to its Components (each an undo step; the
+/// caller folds them into the paste's). Returns the copy as it pastes here and the history
+/// length before any part was added.
+pub fn adopt_parts(world: &mut World, clip: &cadrs_eda::sch_edit::SchClip) -> (cadrs_eda::sch_edit::SchClip, usize) {
+    let mark = world.resource::<ActiveDocument>().history.undo_len();
+    let mut clip = clip.clone();
+    let Some((el, _, _)) = world.resource::<Eda2d>().0 else { return (clip, mark) };
+    let Some(e) = world.resource::<ActiveDocument>().doc.element(el) else { return (clip, mark) };
+    let Some(s) = e.pcb() else { return (clip, mark) };
+    let lib = project_library_name(&e.name);
+    let missing: Vec<cadrs_eda::Component> = clip.parts.iter().filter(|p| !s.components.iter().any(|c| c.component.name == p.name)).cloned().collect();
+    if !clip.library.is_empty() {
+        let from = clip.library.clone();
+        let map = |id: &str| cadrs_eda::rename::reprefix(id, &from, &lib);
+        clip.rename_parts(&map, &map);
+    }
+    for mut p in missing {
+        // Its symbol's default footprint: its own, as this studio's library has it.
+        if let (Some(sym), Some(fp)) = (p.symbol.as_mut(), &p.footprint) {
+            cadrs_eda::lib_edit::set_symbol_field(sym, cadrs_eda::symbol::fields::FOOTPRINT, &format!("{lib}:{}", fp.name()));
+        }
+        let cmd = cadrs_core::pcb::AddComponent { element: el, name: None, value: Some(Box::new(p)) };
+        if let Err(e) = world.resource_mut::<ActiveDocument>().execute(&cmd) {
+            warn!("paste: add component: {e}");
+        }
+    }
+    (clip, mark)
 }
 
 /// Adds a library part placed on a schematic to the studio's Components (its symbol, and its
@@ -147,7 +242,7 @@ pub fn add_library_component(world: &mut World, element: ElementId, sym: &cadrs_
 
 /// A studio's name as a library name: "PCB Studio 1" → "PCB_Studio_1".
 pub fn project_library_name(studio: &str) -> String {
-    studio.chars().map(|c| if c.is_alphanumeric() || c == '-' { c } else { '_' }).collect()
+    cadrs_core::pcb::project_library_name(studio)
 }
 
 // ---------------------------------------------------------------------------------------------

@@ -2384,3 +2384,15 @@ fn golden_eda_schematic_wire_editing() {
 fn golden_eda_schematic_pins_paste() {
     run_scenario("eda_schematic_pins_paste");
 }
+
+#[test]
+#[ignore = "headless screenshots; run with: cargo test -r -p cadrs -F app-tests --test golden -- --ignored"]
+fn golden_eda_power_ac() {
+    run_scenario("eda_power_ac");
+}
+
+#[test]
+#[ignore = "headless screenshots; run with: cargo test -r -p cadrs -F app-tests --test golden -- --ignored"]
+fn golden_eda_paste_between_studios() {
+    run_scenario("eda_paste_between_studios");
+}
