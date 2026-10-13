@@ -1,6 +1,7 @@
 // The power library's mains ports: AC_L_IN, AC_L_OUT, AC_N_IN and AC_N_OUT placed (P) on a new
 // board's schematic. Points are sheet millimetres (`flat(x, y)`, Y up).
-// 01 the chooser filtered to "AC_": the four ports; 02 them placed, in and out of each net.
+// 01 the chooser, its framed list wheeled down to its end (the scrollbar at its right): the
+// four ports; 02 them placed, in and out of each net.
 Scenario(
     start: Some("document"),
     steps: [
@@ -14,8 +15,9 @@ Scenario(
         MoveTo(800, 500),
         Key("P"),
         WaitFor("eda-chooser"),
-        Click(ui("eda-chooser-filter-field")),
-        Type("AC_"),
+        Click(ui("eda-chooser-lib-power")),
+        Wait(2),
+        Scroll(ui("eda-chooser-list"), -20.0),
         Wait(2),
         Screenshot("01-chooser"),
         Key("Escape"),
