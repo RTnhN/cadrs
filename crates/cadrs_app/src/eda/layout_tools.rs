@@ -465,7 +465,7 @@ fn on_click(mut reader: MessageReader<EdaClick>, mut commands: Commands) {
         for c in clicks {
             match c {
                 EdaClick::Press { at, shift, .. } => press(world, at, shift),
-                EdaClick::Double { at } => double(world, at),
+                EdaClick::Double { at, shift } => double(world, at, shift),
                 EdaClick::Release { at } => release(world, at),
                 EdaClick::Secondary { .. } => {
                     finish_drawing(world);
@@ -646,12 +646,12 @@ fn draw_geom(kind: DrawKind, a: Pt, b: Pt) -> cadrs_eda::graphics::Geom {
     }
 }
 
-fn double(w: &mut World, at: Pt) {
+fn double(w: &mut World, at: Pt, shift: bool) {
     if !matches!(w.resource::<LayoutState>().tool, Tool::Select) {
         finish_drawing(w);
         return;
     }
-    // On a track or via: every track and via of its net.
+    // On a track or via: every track and via of its net (with Shift, added to what is selected).
     if let Some(d) = board_of(w) {
         let under = be::hit_from(&d.board, at, tolerance(w), w.resource::<LayoutState>().facing);
         let net = match under {
@@ -663,7 +663,15 @@ fn double(w: &mut World, at: Pt) {
             let mut items: Vec<BoardItem> = d.board.tracks.iter().filter(|t| t.net == net).map(|t| BoardItem::Track(t.id)).collect();
             items.extend(d.board.vias.iter().filter(|v| v.net == net).map(|v| BoardItem::Via(v.id)));
             let mut s = w.resource_mut::<LayoutState>();
-            s.selection = items;
+            if shift {
+                for i in items {
+                    if !s.selection.contains(&i) {
+                        s.selection.push(i);
+                    }
+                }
+            } else {
+                s.selection = items;
+            }
             s.expanded = true;
             s.moving = None;
             return;

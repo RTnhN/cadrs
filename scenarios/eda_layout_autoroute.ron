@@ -4,6 +4,7 @@
 //    the toast says how long it took and on what.
 // 03 the routed course board (`eda-example gs17`), the led track double-clicked: every track
 //    and via of its net selected.
+// 03b the VCC via Shift+double-clicked: its net's tracks and via added to the led net's.
 // 04 the led track dragged 2 mm down: short tracks keep its ends on D1's and R1's pads.
 // 05 the VCC corner at the via dragged 1 mm right: the via and both tracks' ends with it.
 // 06 a box over the left half, R: what it selected turned together about its middle.
@@ -39,6 +40,13 @@ Scenario(
         MoveTo(1100, 900),
         Wait(3),
         Screenshot("03-net-selected"),
+        KeyDown("Shift"),
+        DoubleClick(flat(37.23, 20.0)),
+        KeyUp("Shift"),
+        Wait(3),
+        MoveTo(1100, 900),
+        Wait(3),
+        Screenshot("03b-nets-added"),
         Key("Escape"),
         Press(flat(16.0, 11.46)),
         Hover(flat(16.0, 10.5)),

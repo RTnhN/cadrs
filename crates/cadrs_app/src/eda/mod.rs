@@ -486,7 +486,8 @@ type Presses<'a> = (Local<'a, Option<(f64, Vec2)>>, Local<'a, Option<Vec2>>);
 pub enum EdaClick {
     Press { at: cadrs_eda::units::Pt, shift: bool, ctrl: bool },
     Release { at: cadrs_eda::units::Pt },
-    Double { at: cadrs_eda::units::Pt },
+    /// A second press soon after the first, at the same place (with Shift: adds to what is selected).
+    Double { at: cadrs_eda::units::Pt, shift: bool },
     /// A right-click (pressed and let go without panning): ends what is being drawn.
     Secondary { at: cadrs_eda::units::Pt },
 }
@@ -552,7 +553,7 @@ pub(crate) fn navigate(
                     *last_press = Some((now, pos));
                     clicks.write(EdaClick::Press { at, shift, ctrl });
                     if double {
-                        clicks.write(EdaClick::Double { at });
+                        clicks.write(EdaClick::Double { at, shift });
                         *last_press = None;
                     }
                 }

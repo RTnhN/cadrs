@@ -981,7 +981,7 @@ pub(crate) fn navigate3d(
                     world.write_message(crate::eda::EdaClick::Press { at, shift, ctrl });
                     if double {
                         // (Its properties: at its origin, where the layout finds it.)
-                        world.write_message(crate::eda::EdaClick::Double { at: under.map_or(at, |(_, o)| o) });
+                        world.write_message(crate::eda::EdaClick::Double { at: under.map_or(at, |(_, o)| o), shift });
                     }
                 });
                 if double {
