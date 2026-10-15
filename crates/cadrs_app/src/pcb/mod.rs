@@ -905,13 +905,13 @@ fn paste_item(clip: &PartClipboard) -> MenuItem {
 fn on_component_menu(
     ev: On<ContextMenuRequested>,
     q: Query<(&NativeComponentRow, &UiGlobalTransform, &ComputedNode)>,
-    doc: Res<ActiveDocument>,
+    doc: Option<Res<ActiveDocument>>,
     clip: Res<PartClipboard>,
     user: Option<Res<crate::eda::libraries::UserLibraries>>,
     theme: Res<Theme>,
     mut commands: Commands,
 ) {
-    let Ok((r, tf, node)) = q.get(ev.entity) else { return };
+    let (Ok((r, tf, node)), Some(doc)) = (q.get(ev.entity), doc) else { return };
     let at = below_row(&ev, tf, node);
     let part = doc.doc.element(r.0).and_then(|e| e.pcb()).and_then(|s| s.component(r.1)).map(|c| &c.component);
     let can_add = part.is_some_and(|c| (c.symbol.is_some() || c.footprint.is_some()) && user.as_ref().is_some_and(|u| u.dir.is_some() && !u.has_part(c)));
