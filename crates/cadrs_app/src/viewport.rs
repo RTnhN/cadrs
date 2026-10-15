@@ -411,6 +411,41 @@ impl Pick {
     }
 }
 
+/// The feature that controls how `pick` looks: the one that made a face (an edge's or a
+/// vertex's latest), the sketch of a sketch curve, point or region, the feature that made a part.
+pub fn feature_of(features: &[cadrs_core::Feature], pick: Pick) -> Option<FeatureId> {
+    let op = match pick {
+        Pick::Feature(f) | Pick::Region(f, _) | Pick::SketchCurve(f, _) | Pick::SketchPoint(f, _) => return Some(f),
+        Pick::Part(p) => return Some(p.feature),
+        Pick::Face(_, face) => face.op,
+        Pick::Edge(_, edge) => crate::parts::edge_maker(features, &edge),
+        Pick::Vertex(_, v) => {
+            let at = |op: cadrs_sketch::OpId| features.iter().position(|f| f.id.0 == op);
+            v.faces.iter().map(|f| f.op).max_by_key(|op| at(*op))?
+        }
+        _ => return None,
+    };
+    let id = FeatureId(op);
+    features.iter().any(|f| f.id == id).then_some(id).or_else(|| pick.part().map(|p| p.feature))
+}
+
+/// A double-click in the Part Studio: opens the feature behind what was clicked (its sketch,
+/// its extrude, …) and shows it in the feature list, unless a dialog or sketch is open
+/// already.
+fn edit_picked(world: &mut World, pick: Pick) {
+    if crate::history_panel::editing(world) {
+        return;
+    }
+    let feature = world
+        .get_resource::<crate::ActiveDocument>()
+        .and_then(|d| feature_of(d.active_element()?.features(), pick));
+    if let Some(id) = feature {
+        world.resource_mut::<Selection>().0.clear();
+        crate::document::reveal_feature(world, id);
+        crate::document::edit_feature(world, id);
+    }
+}
+
 /// A click that picks something (or nothing: `None` clears) in the viewport or the feature
 /// list. In modeling mode it toggles the [`Selection`]; while a sketch dialog is open the
 /// sketch uses it (to choose its plane).
@@ -565,6 +600,9 @@ pub struct ViewportDrag {
     /// Where the secondary button went down over the viewport (a right-click that does not
     /// move opens a context menu).
     secondary_down: Option<Vec2>,
+    /// The last click in the view: when (s), where, and what it picked (a second click on the
+    /// same thing soon after is a double-click).
+    last_click: Option<(f32, Vec2, Pick)>,
 }
 
 impl ViewportDrag {
@@ -960,11 +998,12 @@ fn viewport_pointer(
         Res<PickFilterOverride>,
         Res<crate::eda::Eda2d>,
     ),
-    (mut focus, q_number, mut grab, zoom_window): (
+    (mut focus, q_number, mut grab, zoom_window, time): (
         ResMut<bevy::input_focus::InputFocus>,
         Query<(), With<cadrs_ui::NumberFieldEdit>>,
         ResMut<crate::assembly::ViewportGrab>,
         Option<Res<crate::view_options::ZoomWindow>>,
+        Res<Time>,
     ),
     prefs: Res<crate::preferences_ui::LocalPreferences>,
     mut commands: Commands,
@@ -1082,7 +1121,24 @@ fn viewport_pointer(
                             ),
                             _ => None,
                         };
-                        picks.write(PickRequest(picked));
+                        // Double-clicking a face, edge, vertex, sketch or part edits the
+                        // feature that made it, as in Onshape. Its second click doesn't select
+                        // (the dialog would take what is selected as its own).
+                        let now = time.elapsed_secs();
+                        let again = drag.last_click.take().is_some_and(|(t, at, p)| {
+                            Some(p) == picked && now - t <= cadrs_ui::inline_edit::DOUBLE_CLICK_TIME && at.distance(pos) < 6.0
+                        });
+                        match picked {
+                            Some(p) if again && modeling && forced.is_none() && *kind == ActiveKind::PartStudio => {
+                                commands.queue(move |world: &mut World| edit_picked(world, p));
+                            }
+                            _ => {
+                                picks.write(PickRequest(picked));
+                                if !again {
+                                    drag.last_click = picked.map(|p| (now, pos, p));
+                                }
+                            }
+                        }
                     } else if let Some(down) = down
                         && applied.is_some()
                         && *kind == ActiveKind::PartStudio

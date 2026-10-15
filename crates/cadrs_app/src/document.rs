@@ -66,6 +66,7 @@ impl Plugin for DocumentPlugin {
                     crate::units_dialog::sync_units,
                     document_shortcuts,
                     auto_save,
+                    scroll_to_revealed.after(rebuild_feature_rows),
                 )
                     .run_if(in_state(AppState::Document)),
             )
@@ -3606,6 +3607,62 @@ fn on_feature_double_click(ev: On<cadrs_ui::DoubleClick>, q: Query<&FeatureRow>,
         let id = row.0;
         commands.queue(move |world: &mut World| edit_feature(world, id));
     }
+}
+
+/// A feature to bring into view in the feature list, once its row is laid out
+/// ([`reveal_feature`]).
+#[derive(Resource, Debug, Clone, Copy)]
+struct RevealFeature {
+    id: FeatureId,
+    frames: u32,
+}
+
+/// Shows feature `id` in the feature list: opens its folder if closed, and scrolls the list to
+/// its row (a feature opened from the view, which may be anywhere in a long list).
+pub fn reveal_feature(world: &mut World, id: FeatureId) {
+    let closed = world
+        .get_resource::<ActiveDocument>()
+        .and_then(|d| d.active_element())
+        .and_then(|el| Some((el.id, el.folder_of(id).filter(|f| !f.open)?.id)));
+    if let (Some((element, folder)), Some(mut doc)) = (closed, world.get_resource_mut::<ActiveDocument>()) {
+        let _ = doc.execute(&cadrs_core::commands::SetFolder { element, folder, open: Some(true), name: None });
+    }
+    world.insert_resource(RevealFeature { id, frames: 0 });
+}
+
+/// Scrolls the feature list so the revealed feature's row is in view, once the rows rebuilt
+/// for its open folder have their layout (given up after a second).
+fn scroll_to_revealed(
+    mut commands: Commands,
+    reveal: Option<ResMut<RevealFeature>>,
+    q_rows: Query<(&FeatureRow, &ComputedNode, &bevy::ui::UiGlobalTransform)>,
+    mut q_scroll: Query<(&Name, &ComputedNode, &bevy::ui::UiGlobalTransform, &mut ScrollPosition)>,
+) {
+    let Some(mut reveal) = reveal else { return };
+    reveal.frames += 1;
+    if reveal.frames > 60 {
+        commands.remove_resource::<RevealFeature>();
+        return;
+    }
+    // (A frame for the rows to be rebuilt and one for their layout.)
+    if reveal.frames < 3 {
+        return;
+    }
+    let Some((_, row, row_at)) = q_rows.iter().find(|(r, n, _)| r.0 == reveal.id && n.size().y > 0.0) else { return };
+    let Some((_, list, list_at, mut pos)) = q_scroll.iter_mut().find(|(n, ..)| n.as_str() == "feature-scroll") else { return };
+    let s = list.inverse_scale_factor();
+    let span = |n: &ComputedNode, at: &bevy::ui::UiGlobalTransform| {
+        let half = n.size().y * s / 2.0;
+        (at.translation.y * s - half, at.translation.y * s + half)
+    };
+    let ((top, bottom), (view_top, view_bottom)) = (span(row, row_at), span(list, list_at));
+    let max = ((list.content_size().y - list.size().y) * s).max(0.0);
+    if top < view_top {
+        pos.y = (pos.y - (view_top - top)).clamp(0.0, max);
+    } else if bottom > view_bottom {
+        pos.y = (pos.y + (bottom - view_bottom)).clamp(0.0, max);
+    }
+    commands.remove_resource::<RevealFeature>();
 }
 
 /// Opens a feature's dialog: a sketch, an extrude or a Boolean.
