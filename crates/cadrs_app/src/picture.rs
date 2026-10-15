@@ -2,10 +2,10 @@
 //! window inserts each as an Image feature, a flat surface part showing the picture, which
 //! moves and copies like any other part (Transform).
 //!
-//! - **Drop:** in a Part Studio (not while sketching), each dropped picture lies on the default
-//!   plane that faces the view most, centred where the pointer is on that plane (the view's
-//!   centre when the window doesn't know), the next ones of the same drop beside it. Each is one
-//!   undoable "Insert image". Other files are left alone, with a note.
+//! - **Drop** ([`crate::drop_import`] routes dropped files): in a Part Studio (not while
+//!   sketching), each dropped picture lies on the default plane that faces the view most,
+//!   centred where the pointer is on that plane (the view's centre when the window doesn't
+//!   know), the next ones of the same drop beside it. Each is one undoable "Insert image".
 //! - **Display:** each shown part's pictures ([`cadrs_core::solid::SolidImage`]) are drawn as an
 //!   unlit textured quad over the part's face, from both sides. Textures are decoded once per
 //!   picture (GIFs show their first frame), at most [`MAX_TEXTURE`] pixels on a side.
@@ -16,16 +16,13 @@ use bevy::asset::RenderAssetUsages;
 use bevy::mesh::{Indices, PrimitiveTopology};
 use bevy::prelude::*;
 use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
-use bevy::window::{FileDragAndDrop, PrimaryWindow};
 use cadrs_core::FeatureId;
-use cadrs_core::document::ElementKind;
-use cadrs_core::picture::{AddImage, ImageFormat};
+use cadrs_core::picture::AddImage;
 use cadrs_core::solid::SolidImage;
 use cadrs_sketch::PlaneRef;
 use cadrs_ui::{Theme, show_toast};
 
 use crate::parts::PartCache;
-use crate::sketch::PartStudioMode;
 use crate::viewport::{ViewportRect, ViewportView};
 use crate::{ActiveDocument, AppState};
 
@@ -51,7 +48,6 @@ pub struct PicturePlugin;
 impl Plugin for PicturePlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<PictureTextures>()
-            .add_systems(Update, drop_pictures.run_if(in_state(AppState::Document)))
             .add_systems(Update, sync_pictures.run_if(in_state(AppState::Document)));
     }
 }
@@ -92,58 +88,33 @@ fn on_plane(plane: PlaneRef, (origin, dir): (Vec3, Vec3)) -> Option<[f64; 2]> {
     Some([p.dot(v(f.u).normalize()) as f64, p.dot(v(f.v).normalize()) as f64])
 }
 
-#[allow(clippy::too_many_arguments)]
-fn drop_pictures(
-    mut drops: MessageReader<FileDragAndDrop>,
-    mut doc: Option<ResMut<ActiveDocument>>,
-    mode: Option<Res<State<PartStudioMode>>>,
-    view: Res<ViewportView>,
-    rect: Res<ViewportRect>,
-    windows: Query<&Window, With<PrimaryWindow>>,
-    mut dropped_at: ResMut<crate::file_drop::DropPosition>,
-    theme: Res<Theme>,
-    mut commands: Commands,
-) {
-    let paths: Vec<std::path::PathBuf> = drops
-        .read()
-        .filter_map(|d| match d {
-            FileDragAndDrop::DroppedFile { path_buf, .. } => Some(path_buf.clone()),
-            _ => None,
-        })
-        .collect();
-    if paths.is_empty() {
-        return;
-    }
-    let Some(doc) = doc.as_deref_mut() else { return };
-    let Some(element) = doc.active_element().filter(|e| matches!(e.kind, ElementKind::PartStudio { .. })).map(|e| e.id) else {
-        show_toast(&mut commands, &theme, "Drop pictures into a Part Studio");
-        return;
-    };
-    if mode.is_some_and(|m| *m.get() == PartStudioMode::Sketching) {
-        show_toast(&mut commands, &theme, "Close the sketch to drop pictures into the Part Studio");
-        return;
-    }
+/// Where a drop lands in a Part Studio: the default plane facing the view most, and the point
+/// on it under `at` (window position; the view's centre when outside the view or unknown).
+pub fn drop_spot(world: &World, at: Option<Vec2>) -> (PlaneRef, [f64; 2]) {
+    let view = world.resource::<ViewportView>();
+    let rect = world.resource::<ViewportRect>();
     let plane = facing_plane(view.view.back());
-    // Where the drag last was (Wayland says; the window's cursor doesn't follow a drag there),
-    // else the cursor.
-    let at = dropped_at.0.take().or_else(|| windows.single().ok().and_then(|w| w.cursor_position()));
-    let cursor = at.filter(|c| rect.0.contains(*c));
-    let offset = cursor.map_or(Vec2::ZERO, |c| rect.offset(c));
-    let mut center = on_plane(plane, view.view.ray(offset)).unwrap_or([0.0, 0.0]);
+    let offset = at.filter(|c| rect.0.contains(*c)).map_or(Vec2::ZERO, |c| rect.offset(c));
+    (plane, on_plane(plane, view.view.ray(offset)).unwrap_or([0.0, 0.0]))
+}
+
+/// Pictures dropped on a Part Studio (not sketching; [`crate::drop_import`] routes them here):
+/// each an "Insert image" step, the first centred at `at`, the next ones beside it.
+pub fn insert_pictures(world: &mut World, paths: Vec<std::path::PathBuf>, at: Option<Vec2>) {
+    let Some(element) = world.get_resource::<ActiveDocument>().and_then(|d| d.active_element()).map(|e| e.id) else { return };
+    let (plane, mut center) = drop_spot(world, at);
+    let mut notes = Vec::new();
     for path in paths {
         let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("picture").to_string();
-        if ImageFormat::of_path(&path).is_none() {
-            show_toast(&mut commands, &theme, format!("{name}: only PNG, JPEG and GIF pictures can be dropped here"));
-            continue;
-        }
         let bytes = match std::fs::read(&path) {
             Ok(b) => b,
             Err(e) => {
-                show_toast(&mut commands, &theme, format!("Cannot read {name}: {e}"));
+                notes.push(format!("Cannot read {name}: {e}"));
                 continue;
             }
         };
         let cmd = AddImage { element, feature: FeatureId::new(), file_name: name.clone(), bytes: std::sync::Arc::new(bytes), plane, center };
+        let mut doc = world.resource_mut::<ActiveDocument>();
         match doc.execute(&cmd) {
             // The next picture of this drop goes to the right of this one.
             Ok(()) => {
@@ -158,10 +129,16 @@ fn drop_pictures(
                     .unwrap_or(cadrs_core::picture::DEFAULT_SIZE);
                 center[0] += width + DROP_GAP;
             }
-            Err(e) => {
-                show_toast(&mut commands, &theme, format!("Cannot insert {name}: {e}"));
-            }
+            Err(e) => notes.push(format!("Cannot insert {name}: {e}")),
         }
+    }
+    if !notes.is_empty() {
+        let theme = world.resource::<Theme>().clone();
+        let mut commands = world.commands();
+        for n in notes {
+            show_toast(&mut commands, &theme, n);
+        }
+        world.flush();
     }
 }
 

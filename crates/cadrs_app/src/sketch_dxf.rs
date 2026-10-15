@@ -1,4 +1,4 @@
-//! The sketch toolbar's **Insert DXF or DWG** (P3I.6; exercise E1,
+//! The sketch toolbar's **Insert DXF or DWG** (P3I.6; exercise E1;
 //! `reference/onshape/sheetmetal/ex1-importing-dxf-bend/step-03.png`): the **Insert a DXF or
 //! DWG file** panel, floating over the view beside the sketch dialog as Onshape's:
 //!
@@ -6,6 +6,8 @@
 //!   files in folders, not in document tabs — each with a dark thumbnail of its drawing, as
 //!   Onshape's list shows them) and **Other folders** (the file picker);
 //! - **Search DXF or DWG files** (filters the list as typed);
+//! - the list and the picker also take vector drawings (SVG, EPS, PS, PDF, AI;
+//!   [`cadrs_core::vector_import`]), which come in at their own size (Units is for DXF and DWG);
 //! - **Units** (Meter … Yard; the document's length unit to start with) and **Use file origin
 //!   position** (on; off centres the drawing on the sketch origin);
 //! - **Import…** (the file picker).
@@ -27,6 +29,7 @@ use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
 use bevy::text::{EditableText, FontWeight};
 use bevy::ui_widgets::{Activate, observe};
 use cadrs_core::dxf_import::{DxfUnits, InsertDxf, read_file, sketch_of};
+use cadrs_core::vector_import::{InsertVector, VectorFormat};
 use cadrs_drawing::sheet_sketch::Entity as DxfEntity;
 use cadrs_ui::prelude::*;
 use cadrs_ui::{Button, CheckboxState, FilePicked, FloatingPanel, FloatingPanelClose, Notification, ScriptCommand, Select, SelectState, TabStrip, TabStripSelect, TextInputField, show_notification};
@@ -76,14 +79,14 @@ fn script_dir(mut msgs: MessageReader<ScriptCommand>, mut dir: ResMut<SketchDxfD
     }
 }
 
-/// The DXF and DWG files of a folder, by name.
+/// The DXF, DWG and other vector files of a folder, by name.
 fn files(dir: &Path) -> Vec<PathBuf> {
     let mut v: Vec<PathBuf> = std::fs::read_dir(dir)
         .into_iter()
         .flatten()
         .flatten()
         .map(|e| e.path())
-        .filter(|p| p.is_file() && p.extension().and_then(|e| e.to_str()).is_some_and(|e| e.eq_ignore_ascii_case("dxf") || e.eq_ignore_ascii_case("dwg")))
+        .filter(|p| p.is_file() && VectorFormat::of_path(p).is_some())
         .collect();
     v.sort();
     v.truncate(60);
@@ -96,10 +99,16 @@ fn thumbnail(path: &Path, w: u32, h: u32) -> Image {
     for c in px.chunks_mut(4) {
         c.copy_from_slice(&[0x10, 0x10, 0x10, 0xff]);
     }
-    let is_dxf = path.extension().and_then(|e| e.to_str()).is_some_and(|e| e.eq_ignore_ascii_case("dxf"));
-    let drawing = if is_dxf { std::fs::read_to_string(path).ok().and_then(|t| cadrs_drawing::dxf::read_dxf(&t).ok()) } else { None };
-    if let Some(d) = drawing {
-        let lines: Vec<Vec<[f64; 2]>> = d
+    let format = VectorFormat::of_path(path);
+    let drawing = if format == Some(VectorFormat::Dxf) { std::fs::read_to_string(path).ok().and_then(|t| cadrs_drawing::dxf::read_dxf(&t).ok()) } else { None };
+    // An SVG drawn from its sketch geometry (EPS and PDF would need their converters run for
+    // each thumbnail: they stay blank).
+    let svg = if format == Some(VectorFormat::Svg) { std::fs::read(path).ok().and_then(|b| cadrs_core::vector_import::sketch_of_svg(&b).ok()) } else { None };
+    let svg_lines = svg.map(|(s, _)| {
+        s.curves.keys().map(|id| cadrs_sketch::hit::curve_polyline(&s, id).into_iter().map(|p| [p.x, p.y]).collect()).collect::<Vec<Vec<[f64; 2]>>>()
+    });
+    if drawing.is_some() || svg_lines.is_some() {
+        let lines: Vec<Vec<[f64; 2]>> = drawing.map(|d| d
             .entities
             .iter()
             .filter_map(|e| match e {
@@ -116,7 +125,9 @@ fn thumbnail(path: &Path, w: u32, h: u32) -> Image {
                 e @ DxfEntity::Spline { .. } => Some(cadrs_drawing::dxf::spline_points(e)),
                 _ => None,
             })
-            .collect();
+            .collect())
+            .or(svg_lines)
+            .unwrap_or_default();
         let (mut lo, mut hi) = ([f64::MAX; 2], [f64::MIN; 2]);
         for p in lines.iter().flatten() {
             for k in 0..2 {
@@ -191,14 +202,14 @@ pub fn open(world: &mut World) {
                 b.spawn((Node { flex_direction: FlexDirection::Column, margin: UiRect::vertical(Val::Px(6.0)), ..default() },)).with_children(|h| {
                     h.spawn((Name::new("sketch-dxf-folder"), t.text(shown_dir, t.font_base, FontWeight::BOLD, t.foreground)));
                 });
-                b.spawn(TextInput::new("sketch-dxf-search").placeholder("Search DXF or DWG files").width(Val::Percent(100.0)).height(26.0).build(t));
+                b.spawn(TextInput::new("sketch-dxf-search").placeholder("Search DXF, DWG or vector files").width(Val::Percent(100.0)).height(26.0).build(t));
                 b.spawn((
                     Name::new("sketch-dxf-list"),
                     Node { flex_direction: FlexDirection::Column, row_gap: Val::Px(2.0), margin: UiRect::vertical(Val::Px(6.0)), height: Val::Px(list_h), overflow: Overflow::scroll_y(), ..default() },
                 ))
                 .with_children(|l| {
                     if thumbs.is_empty() {
-                        l.spawn(t.text("No DXF or DWG files here. Use Import… to pick one.", t.font_sm, FontWeight::NORMAL, t.muted_foreground));
+                        l.spawn(t.text("No DXF, DWG or vector files here. Use Import… to pick one.", t.font_sm, FontWeight::NORMAL, t.muted_foreground));
                     }
                     for (path, img) in thumbs {
                         let file = path.file_name().and_then(|n| n.to_str()).unwrap_or("file").to_string();
@@ -272,7 +283,7 @@ fn pick_other(world: &mut World) {
     let dir = folder(world);
     let theme = world.resource::<Theme>().clone();
     let mut commands = world.commands();
-    cadrs_ui::open_file_picker(&mut commands, &theme, "sketch-dxf-picker", "Insert a DXF or DWG file", "sketch-insert-dxf", dir, &["dxf", "dwg"]);
+    cadrs_ui::open_file_picker(&mut commands, &theme, "sketch-dxf-picker", "Insert a DXF, DWG or vector file", "sketch-insert-dxf", dir, &VectorFormat::EXTENSIONS);
     world.flush();
 }
 
@@ -327,6 +338,9 @@ fn insert(world: &mut World, path: &Path) {
     };
     close_panels(world);
     let Some((element, feature)) = world.get_resource::<SketchSession>().map(|s| (s.element, s.feature)) else { return };
+    if !matches!(VectorFormat::of_path(path), Some(VectorFormat::Dxf | VectorFormat::Dwg)) {
+        return insert_vector(world, path, element, feature, origin);
+    }
     let d = match read_file(path) {
         Ok(d) => d,
         Err(e) => return toast(world, Notification::warning(format!("Cannot insert {}: {e}", path.display()))),
@@ -343,6 +357,26 @@ fn insert(world: &mut World, path: &Path) {
             // Constraint glyphs only on hover and selection, as Onshape's sketch has them (Show
             // constraints off, `step-03.png`): an imported drawing's every shared corner had a
             // glyph.
+            world.resource_mut::<crate::sketch::SketchViewSettings>().show_constraints = false;
+            toast(world, Notification::info(format!("Inserted {name}: {} curves", report.curves())).seconds(5.0));
+        }
+        Err(e) => toast(world, Notification::warning(format!("Cannot insert: {e}"))),
+    }
+}
+
+/// A vector drawing other than DXF or DWG into the sketch being edited, at its own size.
+fn insert_vector(world: &mut World, path: &Path, element: cadrs_core::ElementId, feature: cadrs_core::FeatureId, origin: bool) {
+    let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("the file").to_string();
+    let (geometry, report) = match cadrs_core::vector_import::read_sketch(path, None, origin) {
+        Ok(g) => g,
+        Err(e) => return toast(world, Notification::warning(format!("Cannot insert {name}: {e}"))),
+    };
+    if report.curves() == 0 {
+        return toast(world, Notification::warning(format!("{name} has no lines or curves to insert")));
+    }
+    let cmd = InsertVector { element, feature, file_name: name.clone(), geometry, offset: cadrs_sketch::Vec2::ZERO };
+    match world.resource_mut::<ActiveDocument>().execute(&cmd) {
+        Ok(()) => {
             world.resource_mut::<crate::sketch::SketchViewSettings>().show_constraints = false;
             toast(world, Notification::info(format!("Inserted {name}: {} curves", report.curves())).seconds(5.0));
         }

@@ -29,7 +29,8 @@ bincode.workspace = true
 image.workspace = true
 directories.workspace = true
 slotmap.workspace = true
+# SVG drawings into sketches (vector_import).
+resvg.workspace = true
 
 [dev-dependencies]
 tiny-skia.workspace = true
-resvg.workspace = true
