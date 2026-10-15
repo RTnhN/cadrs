@@ -650,13 +650,16 @@ pub fn solid_of(
     // The display faces (one per name, in order of first appearance) and their kernel faces.
     let mut shown: Vec<FaceName> = Vec::new();
     let mut members: Vec<Vec<usize>> = Vec::new();
+    // By a map, not a scan of `shown`: an imported mesh's every facet is a face (issue #11).
+    let mut shown_at: HashMap<FaceName, usize> = HashMap::new();
     for (fi, name) in face_names.iter().enumerate() {
         if face_tris[fi].is_empty() {
             continue;
         }
-        match shown.iter().position(|n| n == name) {
-            Some(i) => members[i].push(fi),
+        match shown_at.get(name) {
+            Some(&i) => members[i].push(fi),
             None => {
+                shown_at.insert(*name, shown.len());
                 shown.push(*name);
                 members.push(vec![fi]);
             }
@@ -666,13 +669,11 @@ pub fn solid_of(
     // Edge names from the display faces (the history's names, unless a face was renamed from
     // geometry).
     let edge_names = naming::name_edges(&face_names, &edge_info, naming::joint_tolerance(&edge_info));
-    let polyline = |id: kernel::EdgeId| -> Vec<Vec3> {
-        mesh.edges
-            .iter()
-            .find(|(e, _)| *e == id)
-            .map(|(_, pts)| pts.iter().map(|p| [p.x, p.y, p.z]).collect())
-            .unwrap_or_default()
-    };
+    let mut polylines = HashMap::new();
+    for (e, pts) in &mesh.edges {
+        polylines.entry(*e).or_insert(pts);
+    }
+    let polyline = |id: kernel::EdgeId| -> Vec<Vec3> { polylines.get(&id).map(|pts| pts.iter().map(|p| [p.x, p.y, p.z]).collect()).unwrap_or_default() };
     // Tangent-connected groups of kernel edges (P3.7, X12 "Tangent connected"): edges meeting at
     // a vertex with parallel tangents (within the kernel's `TANGENT_ANGLE`) are one group.
     let groups = tangent_groups(&edge_info, &vertex_info);
@@ -863,8 +864,9 @@ pub fn solid_of(
             && (a.radius - b.radius).abs() < tol_piece
             && dot(a.normal, b.normal).abs() > 1.0 - 1e-9
     };
+    let mut edge_at: HashMap<EdgeName, usize> = HashMap::new();
     for (name, pts, circle, group) in named_edges {
-        match edge_order.iter().position(|n| *n == name) {
+        match edge_at.get(&name).copied() {
             Some(i) => {
                 edge_parts[i].push(pts);
                 let keep = matches!((&edge_circles[i], &circle), (Some(a), Some(b)) if same_circle(a, b));
@@ -873,6 +875,7 @@ pub fn solid_of(
                 }
             }
             None => {
+                edge_at.insert(name, edge_order.len());
                 edge_order.push(name);
                 edge_parts.push(vec![pts]);
                 edge_circles.push(circle);

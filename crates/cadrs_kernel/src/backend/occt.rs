@@ -2049,21 +2049,27 @@ impl Kernel for OcctKernel {
     fn mesh_solid(&mut self, triangles: &[[Point3<f64>; 3]], tol: f64) -> Result<BodyId> {
         let failed = |why: String| KernelError::OperationFailed(format!("mesh: {why}"));
         let g = |p: &Point3<f64>| dvec3(p.x, p.y, p.z);
-        let mut faces: Vec<Shape> = Vec::with_capacity(triangles.len());
-        for t in triangles {
+        let usable = |t: &[Point3<f64>; 3]| {
             let [a, b, c] = [g(&t[0]), g(&t[1]), g(&t[2])];
-            if (b - a).cross(c - a).length() <= LINEAR_EPS {
-                continue;
-            }
-            let edges = [Edge::try_segment(a, b), Edge::try_segment(b, c), Edge::try_segment(c, a)];
-            let Ok(edges) = edges.into_iter().collect::<std::result::Result<Vec<Edge>, _>>() else { continue };
-            let Ok(wire) = Wire::try_from_edges(edges.iter()) else { continue };
-            let Ok(face) = Face::try_from_wires(&wire, &[]) else { continue };
-            faces.push(Shape::from(&face));
-        }
-        if faces.len() < 4 {
+            (b - a).cross(c - a).length() > LINEAR_EPS
+        };
+        if triangles.iter().filter(|t| usable(t)).count() < 4 {
             return Err(failed("fewer than four usable triangles".into()));
         }
+        // A face of each triangle, for sewing: only made when it is needed (a seventh of the
+        // time of a 265 000-triangle import, issue #11).
+        let separate_faces = || -> Vec<Shape> {
+            let mut faces: Vec<Shape> = Vec::with_capacity(triangles.len());
+            for t in triangles.iter().filter(|t| usable(t)) {
+                let [a, b, c] = [g(&t[0]), g(&t[1]), g(&t[2])];
+                let edges = [Edge::try_segment(a, b), Edge::try_segment(b, c), Edge::try_segment(c, a)];
+                let Ok(edges) = edges.into_iter().collect::<std::result::Result<Vec<Edge>, _>>() else { continue };
+                let Ok(wire) = Wire::try_from_edges(edges.iter()) else { continue };
+                let Ok(face) = Face::try_from_wires(&wire, &[]) else { continue };
+                faces.push(Shape::from(&face));
+            }
+            faces
+        };
         // Closed: every edge (between corners welded within `tol`) is used by an even number of
         // triangles. OCCT makes a "solid" of an open shell too.
         let key = |p: &Point3<f64>| [p.x, p.y, p.z].map(|c| (c / tol.max(1e-12)).round() as i64);
@@ -2104,10 +2110,16 @@ impl Kernel for OcctKernel {
             }
             tris.extend(ids);
         }
-        let wound = directed.iter().all(|(&(a, b), n)| *n == 1 && directed.get(&(b, a)) == Some(&1));
+        // An edge where two parts of the surface touch has four triangles, two each way: still
+        // wound (sewing a 265 000-triangle STL with two such edges never finished: issue #11).
+        let wound = directed.iter().all(|(&(a, b), n)| directed.get(&(b, a)) == Some(n));
         let solid = match wound.then(|| Shape::try_mesh_solid(&points, &tris, tol)) {
             Some(Ok(s)) => s,
             _ => {
+                let faces = separate_faces();
+                if faces.len() < 4 {
+                    return Err(failed("fewer than four usable triangles".into()));
+                }
                 let refs: Vec<&Shape> = faces.iter().collect();
                 Shape::try_sew_solid(&refs, tol).map_err(|e| failed(e.to_string()))?
             }
