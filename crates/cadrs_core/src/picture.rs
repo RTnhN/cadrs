@@ -81,6 +81,13 @@ pub struct ImageFeature {
     /// Its size along the plane's u (width) and v (height) axes (mm).
     pub width: f64,
     pub height: f64,
+    /// Its turn about its centre, counter-clockwise from the plane's u axis (degrees).
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub rotation: f64,
+}
+
+fn is_zero(v: &f64) -> bool {
+    *v == 0.0
 }
 
 impl ImageFeature {
@@ -93,7 +100,7 @@ impl ImageFeature {
         let (w, h) = pixel_size(&bytes, format).map_err(|e| format!("{file_name}: {e}"))?;
         let k = DEFAULT_SIZE / w.max(h) as f64;
         let blob = crate::blobs::insert(bytes);
-        Ok(Self { blob, file_name: file_name.to_string(), format, plane, center, width: w as f64 * k, height: h as f64 * k })
+        Ok(Self { blob, file_name: file_name.to_string(), format, plane, center, width: w as f64 * k, height: h as f64 * k, rotation: 0.0 })
     }
 
     /// Why it can't be built, if it can't.
@@ -133,16 +140,20 @@ impl ImageFeature {
     /// Where the picture lies in space: its lower-left corner and its width and height vectors.
     pub fn placement(&self) -> crate::solid::SolidImage {
         let f = self.plane.frame();
-        let at = |x: f64, y: f64| f.to_world(cadrs_sketch::Vec2::new(x, y));
-        let corner = at(self.center[0] - self.width / 2.0, self.center[1] - self.height / 2.0);
-        let s = |a: [f64; 3], k: f64| [a[0] * k, a[1] * k, a[2] * k];
-        crate::solid::SolidImage { blob: self.blob.clone(), corner, u: s(unit(f.u), self.width), v: s(unit(f.v), self.height), facing: None }
+        let [c0, c1, c2, _] = self.corners();
+        let at = |[x, y]: [f64; 2]| f.to_world(cadrs_sketch::Vec2::new(x, y));
+        let (corner, right, top) = (at(c0), at(c1), at(c2));
+        let d = |a: [f64; 3], b: [f64; 3]| [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
+        crate::solid::SolidImage { blob: self.blob.clone(), corner, u: d(right, corner), v: d(top, right), facing: None }
     }
-}
 
-fn unit(a: [f64; 3]) -> [f64; 3] {
-    let l = (a[0] * a[0] + a[1] * a[1] + a[2] * a[2]).sqrt();
-    if l < 1e-15 { a } else { [a[0] / l, a[1] / l, a[2] / l] }
+    /// Its corners in the plane's coordinates, counter-clockwise from the lower left (turned by
+    /// [`Self::rotation`] about the centre).
+    pub fn corners(&self) -> [[f64; 2]; 4] {
+        let (s, c) = self.rotation.to_radians().sin_cos();
+        let (hw, hh) = (self.width / 2.0, self.height / 2.0);
+        [(-hw, -hh), (hw, -hh), (hw, hh), (-hw, hh)].map(|(x, y)| [self.center[0] + x * c - y * s, self.center[1] + x * s + y * c])
+    }
 }
 
 /// The format of a picture by its first bytes.
@@ -235,5 +246,17 @@ mod tests {
         // The bytes say what a misnamed file is.
         assert!(ImageFeature::from_file("logo.jpg", png(4, 4), PlaneRef::Top, [0.0, 0.0]).is_ok());
         assert!(ImageFeature::from_file("notes.png", b"not a picture".to_vec(), PlaneRef::Top, [0.0, 0.0]).is_err());
+    }
+
+    #[test]
+    fn a_turned_picture_turns_about_its_centre() {
+        let mut x = ImageFeature::from_file("logo.png", png(40, 20), PlaneRef::Top, [10.0, 0.0]).unwrap();
+        x.rotation = 90.0;
+        // On Top (u = +X, v = +Y): its width now runs along +Y, its height along -X.
+        let p = x.placement();
+        let near = |a: [f64; 3], b: [f64; 3]| (0..3).all(|i| (a[i] - b[i]).abs() < 1e-9);
+        assert!(near(p.u, [0.0, 100.0, 0.0]), "{:?}", p.u);
+        assert!(near(p.v, [-50.0, 0.0, 0.0]), "{:?}", p.v);
+        assert!(near(p.corner, [10.0 + 25.0, -50.0, 0.0]), "{:?}", p.corner);
     }
 }
