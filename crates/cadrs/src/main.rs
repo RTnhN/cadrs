@@ -142,9 +142,13 @@ fn main() -> AppExit {
             .insert_resource(user)
             .insert_resource(cadrs_app::parts::RebuildBudget(None));
     }
-    app.add_plugins((CadrsUiPlugin, CadrsAppPlugin))
+    let exit = app
+        .add_plugins((CadrsUiPlugin, CadrsAppPlugin))
         .add_systems(Last, (share_sketch_mapping, share_view_mapping, share_flat_mapping))
-        .run()
+        .run();
+    // The document histories still being written.
+    cadrs_core::history_log::flush_saves();
+    exit
 }
 
 /// Lets scenarios address sketch-plane points (`world(x, y)`): the harness reads the app's

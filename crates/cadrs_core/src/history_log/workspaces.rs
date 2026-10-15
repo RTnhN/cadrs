@@ -1,9 +1,11 @@
 //! P3E.4 (TD12.4–TD12.7): the history's workspaces, Main and the branches (see the parent
 //! module's docs). Kept apart from the log itself so the shared `history_log.rs` changes little.
 
+use std::sync::Arc;
+
 use serde::{Deserialize, Serialize};
 
-use super::{Delta, HealthyMark, HistoryLog, LogEntry, Version, VersionId, document_hash, track_state_at};
+use super::{HealthyMark, HistoryLog, LogEntry, Version, VersionId, document_hash, track_state_at};
 use crate::document::Document;
 use crate::library::Timestamp;
 
@@ -65,7 +67,7 @@ impl Workspace {
 pub(super) struct Track {
     pub(super) workspace: WorkspaceId,
     pub(super) entries: Vec<LogEntry>,
-    pub(super) snapshots: Vec<(usize, Document)>,
+    pub(super) snapshots: Vec<(usize, Arc<Document>)>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub(super) healthy: Vec<HealthyMark>,
 }
@@ -162,10 +164,10 @@ impl HistoryLog {
             feature_name: String::new(),
             label: format!("Branch from {version}"),
             hash: document_hash(&doc),
-            delta: Delta::default(),
+            delta: Arc::default(),
         };
         self.workspaces.push(Workspace { id, name, description: description.trim().to_string(), from_version: from, time, user: user.to_string() });
-        self.parked.push(Track { workspace: id, entries: vec![start], snapshots: vec![(0, doc)], healthy: Vec::new() });
+        self.parked.push(Track { workspace: id, entries: vec![start], snapshots: vec![(0, Arc::new(doc))], healthy: Vec::new() });
         self.sort_parked();
         Some(id)
     }
@@ -190,7 +192,7 @@ impl HistoryLog {
             if let Some(h) = head {
                 let n = old.entries.len() - 1;
                 if !old.snapshots.iter().any(|(i, _)| *i == n) {
-                    old.snapshots.push((n, h));
+                    old.snapshots.push((n, Arc::new(h)));
                 }
             }
             self.parked.push(old);

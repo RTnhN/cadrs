@@ -149,6 +149,83 @@ fn history_survives_save_and_reload() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// Saving reuses the RON of the entries and full copies it already wrote (a long log took
+/// seconds to write on every change), and the text is always what serializing it all makes:
+/// after more entries (past a full copy), a version, and a switch to a branch and back.
+#[test]
+fn saving_again_writes_the_same_text_as_serializing_it_all() {
+    let mut s = two_hundred_steps();
+    let same = |log: &HistoryLog, when: &str| assert!(log.to_ron().unwrap() == ron::to_string(log).unwrap(), "{when}");
+    same(&s.log, "first save");
+    same(&s.log, "saved again, all cached");
+    for i in 0..SNAPSHOT_EVERY + 3 {
+        s.run(&RenameDocument { name: format!("More {i}") });
+    }
+    same(&s.log, "more entries and a full copy");
+    let v = s.log.create_version("V1", "", s.time, "me");
+    same(&s.log, "a version");
+    let branch = s.log.branch(v, "Branch", "", s.time + 5, "me").unwrap();
+    s.doc = s.log.switch_to(branch).unwrap();
+    s.undo = History::default();
+    s.run(&RenameDocument { name: "On the branch".into() });
+    same(&s.log, "on a branch");
+    s.doc = s.log.switch_to(cadrs_core::history_log::WorkspaceId::MAIN).unwrap();
+    same(&s.log, "back on Main");
+    let copy = s.log.clone();
+    same(&copy, "a copy");
+}
+
+/// Closing a document compacts its log: only the entries versions point at and each workspace's
+/// last are kept, every state they stand for is the same, the oldest is Start, it stays compact
+/// when compacted again, and it reads back and goes on as before.
+#[test]
+fn compacting_keeps_the_versions_and_the_last_state() {
+    let mut s = two_hundred_steps();
+    let ps = s.doc.elements[0].id;
+    let v1 = s.log.create_version("V1", "", s.time, "me");
+    for i in 0..40 {
+        s.run(&RenameDocument { name: format!("Later {i}") });
+    }
+    let v2 = s.log.create_version("V2", "", s.time, "me");
+    let branch = s.log.branch(v1, "Branch", "", s.time + 1, "me").unwrap();
+    s.doc = s.log.switch_to(branch).unwrap();
+    s.undo = History::default();
+    for i in 0..20 {
+        s.run(&RenameElement { id: ps, name: format!("On the branch {i}") });
+    }
+    let on_branch = s.doc.clone();
+    s.doc = s.log.switch_to(cadrs_core::history_log::WorkspaceId::MAIN).unwrap();
+    s.run(&RenameDocument { name: "Last".into() });
+    s.log.note_healthy(ps, [FeatureId::from_u128(9)]);
+    let (at_v1, at_v2) = (s.log.document_at_version(v1).unwrap(), s.log.document_at_version(v2).unwrap());
+
+    let mut log = s.log.clone();
+    assert!(log.compact());
+    assert_eq!(log.len(), 3, "V1, V2 and the last");
+    assert_eq!((log.entries[0].label.as_str(), log.entries[0].action.as_str()), ("Start", "Start"));
+    assert_eq!(log.document_at_version(v1).unwrap(), at_v1);
+    assert_eq!(log.document_at_version(v2).unwrap(), at_v2);
+    assert_eq!(log.head(), &s.doc);
+    for k in 0..log.len() {
+        assert_eq!(document_hash(&log.state_at(k).unwrap()), log.entries[k].hash, "entry {k}");
+    }
+    assert_eq!(log.workspace_head(branch).unwrap(), on_branch);
+    assert_eq!(log.workspace_entries(branch).unwrap().len(), 1, "the branch's last only");
+    assert_eq!(log.last_healthy(ps, FeatureId::from_u128(9)), Some(log.head_index()));
+    assert!(!log.clone().compact(), "compact already");
+
+    let dir = std::env::temp_dir().join(format!("cadrs-compact-{}", std::process::id()));
+    let store = cadrs_core::Store::new(&dir);
+    s.log.clone().save_compacted_in_background(&store);
+    let mut back = HistoryLog::load(&store, log.document).unwrap().expect("the log is there");
+    assert_eq!(back.entries, log.entries);
+    assert_eq!(back.document_at_version(v2).unwrap(), at_v2);
+    s.doc.name = "After reopening".into();
+    let i = back.record(&s.doc, Origin::Command("Rename document".into()), s.time + 9, "me").unwrap();
+    assert_eq!(back.state_at(i).unwrap(), s.doc);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 /// Versions (P3D.3): a named pointer to an entry, whose document never changes after later
 /// edits (even a Restore to before it), and which survives a save and a reload.
 #[test]
@@ -208,8 +285,9 @@ fn a_version_1_log_is_rewritten_with_patches_on_load() {
     let mut old = s.log.clone();
     old.version = 1;
     for (k, e) in old.entries.iter_mut().enumerate().skip(1) {
-        for p in std::mem::take(&mut e.delta.studios) {
-            e.delta.elements.push(s.states[k].element(p.id).unwrap().clone());
+        let delta = std::sync::Arc::make_mut(&mut e.delta);
+        for p in std::mem::take(&mut delta.studios) {
+            delta.elements.push(s.states[k].element(p.id).unwrap().clone());
         }
     }
     assert!(old.entries.iter().all(|e| e.delta.studios.is_empty()));
