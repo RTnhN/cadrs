@@ -13,6 +13,10 @@
 //!   Part Studio with no dialog open and no sketch edited, the board face the nearest opaque
 //!   thing under the pointer) starts editing that layout and hands the press on ([`press_to_edit`]),
 //!   so a footprint or track drags straight away.
+//! - **Ratsnest while editing**: the edited board's unrouted connections are lines over its top
+//!   face drawn from the layout as it is now ([`draw_ratsnest`]), so they follow a footprint
+//!   being dragged as in the PCB Studio (the pictures leave them out: a drag redraws only the
+//!   moved footprints).
 //! - Scenario set-ups ([`script`]): `setup` opens the mains-sensor enclosure
 //!   ([`cadrs_core::samples::pcb_enclosure`]); `derive` derives its board onto Board location.
 //!
@@ -40,10 +44,12 @@ impl Plugin for BoardInStudioPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<BoardEditing>()
             .init_resource::<OverlayCache>()
+            .init_gizmo_group::<RatsnestGizmos>()
+            .add_systems(Startup, configure_gizmos)
             .add_observer(on_edit_bar)
             .add_observer(on_link_menu)
             .add_systems(Update, (press_to_edit, navigate3d).chain().before(crate::eda::navigate).run_if(in_state(AppState::Document)))
-            .add_systems(Update, (end_edit_when_gone, sync_board_views, sync_drag_ghosts, sync_overlays, sync_edit_bar, edit_keys).chain().after(crate::parts::PartsSet).run_if(in_state(AppState::Document)))
+            .add_systems(Update, (end_edit_when_gone, sync_board_views, sync_drag_ghosts, sync_overlays, draw_ratsnest, sync_edit_bar, edit_keys).chain().after(crate::parts::PartsSet).run_if(in_state(AppState::Document)))
             .add_systems(OnExit(AppState::Document), |mut e: ResMut<BoardEditing>| e.target = None);
     }
 }
@@ -73,6 +79,8 @@ pub struct OverlayView {
     pub selected: Vec<uuid::Uuid>,
     pub net: Option<String>,
     pub dim: bool,
+    /// The unrouted connections drawn in the picture (not while editing: [`draw_ratsnest`]).
+    pub ratsnest: bool,
 }
 
 /// A derived board of the active Part Studio, without its layout: its tab and feature, its view,
@@ -287,6 +295,7 @@ pub fn overlay_mesh(layout: &cadrs_eda::board::Board, view: &OverlayView, frame:
     };
     v.visible.retain(|l| !view.hidden.contains(l) && l.side() != Some(other) && (side == Side::Top || l.side() == Some(side) || *l == Layer::Outline));
     v.dim_inactive = view.dim;
+    v.ratsnest = view.ratsnest;
     v.highlight_net = view.net.clone();
     if let Some(a) = view.active {
         v.active = a;
@@ -348,9 +357,9 @@ pub fn sync_overlays(world: &mut World) {
         _ => vec![],
     };
     let inputs = world.resource::<crate::eda::SceneInputs>().clone();
-    let edit_view = OverlayView { hidden: inputs.hidden_layers.clone(), active: inputs.active_layer, selected: inputs.board_selected.clone(), net: inputs.board_net.clone(), dim: inputs.dim_inactive };
+    let edit_view = OverlayView { hidden: inputs.hidden_layers.clone(), active: inputs.active_layer, selected: inputs.board_selected.clone(), net: inputs.board_net.clone(), dim: inputs.dim_inactive, ratsnest: false };
     // Not editing: the layers panel's hidden layers still hold.
-    let plain_view = OverlayView { hidden: world.resource::<crate::eda::layout_tools::LayoutState>().hidden.clone(), ..Default::default() };
+    let plain_view = OverlayView { hidden: world.resource::<crate::eda::layout_tools::LayoutState>().hidden.clone(), ratsnest: true, ..Default::default() };
     let cache = world.resource::<PartCache>();
     // (key: feature, copy, top face, the changes; signature, frame, thickness, name, what else it
     // shows, edited, parts off the board). While a tool previews an edit (a drag) the picture of
@@ -447,6 +456,86 @@ pub fn sync_overlays(world: &mut World) {
         let Some((mesh, image)) = made else { continue };
         spawn_overlay(world, key, sig, &name, mesh, image);
     }
+}
+
+/// The edited board's ratsnest: thin lines just over its top face.
+#[derive(Default, Reflect, GizmoConfigGroup)]
+pub struct RatsnestGizmos;
+
+fn configure_gizmos(mut store: ResMut<GizmoConfigStore>) {
+    let (c, _) = store.config_mut::<RatsnestGizmos>();
+    c.line.width = 1.0;
+    // Over the layout picture it lies on, behind the parts in front of it.
+    c.depth_bias = -0.05;
+}
+
+/// Draws the edited board's ratsnest from the layout as it is now (the Layout tools' preview
+/// while they change it, else the stored layout), worked out again only when that changes.
+fn draw_ratsnest(
+    doc: Option<Res<ActiveDocument>>,
+    editing: Res<BoardEditing>,
+    preview: Res<crate::eda::Preview>,
+    cache: Res<PartCache>,
+    mut gizmos: Gizmos<RatsnestGizmos>,
+    mut lines: Local<(u64, Vec<[Vec3; 2]>)>,
+) {
+    let (Some(doc), Some(t)) = (doc, editing.target) else { return };
+    let Some(copy) = cache.derived.get(&t.feature).and_then(|out| out.boards.get(t.copy)) else { return };
+    if cache.is_hidden(copy.part) {
+        return;
+    }
+    let Some(b) = boards_in(&doc).into_iter().find(|b| b.feature == t.feature) else { return };
+    let layout = preview.get().map(|d| &d.board);
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    (t, b.hash, layout.is_some(), preview.generation()).hash(&mut h);
+    format!("{:?}{}", copy.frame, copy.thickness).hash(&mut h);
+    let key = h.finish();
+    if lines.0 != key {
+        let Some(board) = layout.or_else(|| layout_of(&doc, t.feature)) else { return };
+        let z = copy.thickness + 2.0 * LIFT;
+        let at = |p: cadrs_eda::units::Pt| {
+            let c = cadrs_core::pcb::frames::to_world(&copy.frame, [p.x as f64 / 1e6, p.y as f64 / 1e6, z]);
+            Vec3::new(c[0] as f32, c[1] as f32, c[2] as f32)
+        };
+        // As the picture: only on the board unless what is off it shows too.
+        let region = (!b.off_board).then(|| cadrs_eda::outline::board_region(board));
+        let mut out = vec![];
+        for a in cadrs_eda::copper::ratsnest(board) {
+            match &region {
+                None => out.push([at(a.a), at(a.b)]),
+                Some(r) => out.extend(inside(r, a.a, a.b).into_iter().map(|[p, q]| [at(p), at(q)])),
+            }
+        }
+        *lines = (key, out);
+    }
+    let [r, g, bl, a] = cadrs_eda::render::BoardTheme::default().ratsnest;
+    let color = Color::srgba_u8(r, g, bl, a);
+    for [a, b] in &lines.1 {
+        gizmos.line(*a, *b, color);
+    }
+}
+
+/// The pieces of the line from `a` to `b` inside `region`, to half a millimetre.
+fn inside(region: &cadrs_eda::poly::Region, a: cadrs_eda::units::Pt, b: cadrs_eda::units::Pt) -> Vec<[cadrs_eda::units::Pt; 2]> {
+    let len = ((b.x - a.x) as f64).hypot((b.y - a.y) as f64) / 1e6;
+    let n = ((len * 2.0).ceil() as usize).clamp(1, 1000);
+    let at = |k: usize| {
+        let t = k as f64 / n as f64;
+        cadrs_eda::units::Pt::new(a.x + ((b.x - a.x) as f64 * t) as i64, a.y + ((b.y - a.y) as f64 * t) as i64)
+    };
+    let mut out = vec![];
+    let mut run: Option<(cadrs_eda::units::Pt, cadrs_eda::units::Pt)> = None;
+    for k in 0..=n {
+        let p = at(k);
+        if cadrs_eda::poly::contains(region, p) {
+            run = Some((run.map_or(p, |r| r.0), p));
+        } else if let Some((p0, p1)) = run.take() {
+            out.push([p0, p1]);
+        }
+    }
+    out.extend(run.map(|(p0, p1)| [p0, p1]));
+    out.retain(|[p, q]| p != q);
+    out
 }
 
 /// Puts an overlay picture on screen for `key` (feature, copy, top face, changes).
