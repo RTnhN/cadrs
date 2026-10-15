@@ -1,7 +1,8 @@
 //! The document shell, laid out like Onshape's (see `reference/onshape/screens/05*`):
 //!
 //! - **Top bar** (36 px): the cadrs mark (back to documents), ☰, the document name (click to
-//!   rename in place), "Main", placeholder counters, and Share/help/account on the right.
+//!   rename in place), "Main", the versions and branches counters, Create version, and help
+//!   and settings on the right (what does nothing yet is left out: issue #13).
 //! - **Icon rail** (36 px) on the left, with the feature-list toggle at the top.
 //! - **Toolbar** (34 px): undo, redo, **Sketch** (the only text button) and the feature tools,
 //!   disabled until later milestones, then "Search tools… alt c". Assemblies get their own
@@ -233,7 +234,6 @@ fn spawn_shell(
     mut commands: Commands,
     theme: Res<Theme>,
     doc: Option<Res<ActiveDocument>>,
-    user: Res<UserProfile>,
     cube: Res<crate::view_cube::ViewCubeImage>,
     mut snapshot: ResMut<ShellSnapshot>,
 ) {
@@ -257,7 +257,7 @@ fn spawn_shell(
             Pickable::IGNORE,
         ))
         .with_children(|root| {
-            top_bar(root, &t, &doc_name, &user);
+            top_bar(root, &t, &doc_name);
             root.spawn((
                 Node {
                     flex_grow: 1.0,
@@ -364,7 +364,7 @@ fn spawn_shell(
         });
 }
 
-fn top_bar(root: &mut ChildSpawnerCommands, t: &Theme, doc_name: &str, user: &UserProfile) {
+fn top_bar(root: &mut ChildSpawnerCommands, t: &Theme, doc_name: &str) {
     root.spawn((
         Name::new("document-top-bar"),
         Node {
@@ -512,13 +512,11 @@ fn top_bar(root: &mut ChildSpawnerCommands, t: &Theme, doc_name: &str, user: &Us
             bevy::picking::hover::Hovered::default(),
             Tooltip::new("Workspaces"),
         ));
-        // Placeholder counters (link, public, versions, branches, likes).
+        // The versions and branches counters (`crate::linked` keeps them up to date). (Link,
+        // public and likes are left out until they do something: issue #13.)
         for (name, icon_name, count, tip) in [
-            ("document-link", "link", None, "Copy link"),
-            ("document-public", "public", None, "Public"),
             ("document-versions", "versions", Some("0"), "Versions"),
             ("document-branches", "branches", Some("0"), "Branches"),
-            ("document-likes", "likes", Some("0"), "Likes"),
         ] {
             bar.spawn((
                 Name::new(name),
@@ -553,54 +551,8 @@ fn top_bar(root: &mut ChildSpawnerCommands, t: &Theme, doc_name: &str, user: &Us
             ..default()
         })
         .with_children(|r| {
-            // Outlined like Onshape's "Explore Onshape" (26 px tall, 1 px #ccc border).
-            r.spawn(
-                Button::new("explore")
-                    .label("Explore cadrs")
-                    .icon("idea")
-                    .icon_size(16.0)
-                    .outline()
-                    .tooltip("Explore cadrs")
-                    .build(t),
-            )
-            .insert(explore_visuals(t))
-            .entry::<Node>()
-            .and_modify(|mut n| {
-                n.height = Val::Px(26.0);
-                n.padding = UiRect::new(Val::Px(5.0), Val::Px(7.0), Val::ZERO, Val::ZERO);
-                n.column_gap = Val::Px(3.0);
-                n.margin = UiRect::right(Val::Px(6.0));
-                n.border = UiRect::all(Val::Px(1.0));
-                n.border_radius = BorderRadius::all(Val::Px(3.0));
-            });
-            for (name, icon_name, tip) in [
-                ("notifications", "notifications", "Notifications"),
-                ("apps", "apps", "Apps"),
-            ] {
-                r.spawn(
-                    IconButton::new(name, icon_name)
-                        .icon_size(20.0)
-                        .tooltip(tip)
-                        .build(t),
-                )
-                .insert(dark.clone());
-            }
-            r.spawn((
-                Button::new("share")
-                    .label("Share")
-                    .primary()
-                    .tooltip("Share this document")
-                    .build(t),
-                observe(|_: On<Activate>, theme: Res<Theme>, mut commands: Commands| {
-                    show_toast(&mut commands, &theme, "Sharing is not available in cadrs");
-                }),
-            ))
-            .entry::<Node>()
-            .and_modify(|mut n| {
-                n.height = Val::Px(28.0);
-                n.padding = UiRect::horizontal(Val::Px(10.0));
-                n.margin = UiRect::horizontal(Val::Px(4.0));
-            });
+            // (Explore, notifications, apps and Share are left out until they do something:
+            // issue #13.)
             r.spawn((
                 Button::new("help")
                     .icon("help")
@@ -612,14 +564,14 @@ fn top_bar(root: &mut ChildSpawnerCommands, t: &Theme, doc_name: &str, user: &Us
                 observe(|a: On<Activate>, theme: Res<Theme>, mut commands: Commands| {
                     let menu = Menu::new("help-menu")
                         .min_width(200.0)
-                        .item(MenuItem::new("help-center", "Help center").icon("help").disabled(true))
+                        .item(MenuItem::new("help-center", "Help center").icon("help").planned())
                         .item(
                             MenuItem::new("help-shortcuts", "Keyboard shortcuts")
                                 .icon("keyboard")
                                 .shortcut("Shift+/"),
                         )
                         .separator()
-                        .item(MenuItem::new("help-about", "About cadrs").icon("info").disabled(true));
+                        .item(MenuItem::new("help-about", "About cadrs").icon("info").planned());
                     open_menu(&mut commands, a.entity, menu.build(&theme));
                 }),
                 observe(|ev: On<MenuAction>, mut commands: Commands| {
@@ -634,48 +586,17 @@ fn top_bar(root: &mut ChildSpawnerCommands, t: &Theme, doc_name: &str, user: &Us
                 n.padding = UiRect::horizontal(Val::Px(4.0));
                 n.column_gap = Val::Px(4.0);
             });
-            let mut account = r.spawn(
-                Button::new("account")
-                    .label(user.display_name.clone())
-                    .ghost()
-                    .dropdown_caret()
-                    .tooltip("Account")
-                    .build(t),
-            );
-            account.insert(dark.clone());
-            account.entry::<Node>().and_modify(|mut n| {
-                n.padding = UiRect::horizontal(Val::Px(4.0));
-                n.column_gap = Val::Px(6.0);
-            });
-            let account = account.id();
-            let avatar = r
-                .commands_mut()
-                .spawn((
-                    cadrs_ui::Avatar::new("account-avatar", user.display_name.clone())
-                        .size(22.0)
-                        .build(t),
-                    Pickable::IGNORE,
-                ))
-                .id();
-            r.commands_mut()
-                .entity(account)
-                .insert_children(0, &[avatar]);
+            // The settings menu (Preferences…). No profile name or avatar: there are no
+            // accounts yet (issue #13).
+            r.spawn(Button::new("account").icon("settings").icon_size(20.0).ghost().dropdown_caret().tooltip("Settings").build(t))
+                .insert(dark.clone())
+                .entry::<Node>()
+                .and_modify(|mut n| {
+                    n.padding = UiRect::horizontal(Val::Px(4.0));
+                    n.column_gap = Val::Px(4.0);
+                });
         });
     });
-}
-
-fn explore_visuals(t: &Theme) -> Visuals {
-    Visuals {
-        background: StateColors::new(t.background, t.ghost_hover, t.ghost_active, t.background),
-        border: StateColors::all(Color::srgb_u8(0xcc, 0xcc, 0xcc)),
-        foreground: StateColors::new(
-            t.tool_foreground,
-            t.foreground,
-            t.foreground,
-            t.disabled_foreground,
-        ),
-        focus_ring: t.focus_ring,
-    }
 }
 
 fn icon_rail(body: &mut ChildSpawnerCommands, t: &Theme) {
@@ -947,11 +868,11 @@ fn document_menu() -> Menu {
     Menu::new("document-menu-popup")
         .min_width(200.0)
         .item(MenuItem::new("document-menu-rename", "Rename document…").icon("edit"))
-        .item(MenuItem::new("document-menu-copy", "Copy workspace…").icon("copy").disabled(true))
+        .item(MenuItem::new("document-menu-copy", "Copy workspace…").icon("copy").planned())
         .item(
             MenuItem::new("document-menu-properties", "Properties…")
                 .icon("info")
-                .disabled(true),
+                .planned(),
         )
         .item(MenuItem::new("document-menu-create-version", "Create version…").icon("versions"))
         .separator()
@@ -959,7 +880,7 @@ fn document_menu() -> Menu {
         .separator()
         .item(MenuItem::new("document-menu-full-rebuild", "Full rebuild (clear cache)").icon("sync-document"))
         .separator()
-        .item(MenuItem::new("document-menu-print", "Print…").disabled(true))
+        .item(MenuItem::new("document-menu-print", "Print…").planned())
 }
 
 /// Document menu › Full rebuild: reloads the document from the store (a re-import made while it
@@ -1015,24 +936,24 @@ fn insert_menu(paste: Option<String>) -> Menu {
                 .icon("apps")
                 .submenu(vec![
                     MenuItem::new("insert-no-apps", "No applications installed")
-                        .disabled(true)
+                        .planned()
                         .into(),
                 ]),
         )
         .item(
             MenuItem::new("create-material-library", "Create Material Library")
                 .icon("material-library")
-                .disabled(true),
+                .planned(),
         )
         .item(
             MenuItem::new("create-feature-studio", "Create Feature Studio")
                 .icon("feature-studio")
-                .disabled(true),
+                .planned(),
         )
         .item(
             MenuItem::new("create-cam-studio", "Create CAM Studio")
                 .icon("cam-studio")
-                .disabled(true),
+                .planned(),
         )
         .item(
             // P3H.3: PCB Studio tabs.
@@ -1048,7 +969,7 @@ fn insert_menu(paste: Option<String>) -> Menu {
         .item(
             MenuItem::new("create-variable-studio", "Create Variable Studio")
                 .icon("variables")
-                .disabled(true),
+                .planned(),
         )
         // P3C.1: drawings.
         .item(MenuItem::new("create-drawing", "Create Drawing…").icon("details"))
@@ -2452,11 +2373,11 @@ fn on_tab_context_menu(
     let mut menu = menu
         .item(MenuItem::new("tab-delete", "Delete").icon("remove-circle").disabled(only_tab))
         .separator()
-        .item(MenuItem::new("tab-open-new", "Open in new window").disabled(true))
+        .item(MenuItem::new("tab-open-new", "Open in new window").planned())
         .item(MenuItem::new("tab-rename", "Rename…"))
         .item(MenuItem::new("tab-properties", "Properties…"));
     if is_part_studio {
-        menu = menu.item(MenuItem::new("tab-show-code", "Show code").disabled(true));
+        menu = menu.item(MenuItem::new("tab-show-code", "Show code").planned());
     }
     let menu = menu
         .separator()
@@ -2468,7 +2389,7 @@ fn on_tab_context_menu(
                 .disabled(is_drawing || is_pcb || is_render),
         )
         .separator()
-        .item(MenuItem::new("tab-thumbnail", "Select as document thumbnail").disabled(true))
+        .item(MenuItem::new("tab-thumbnail", "Select as document thumbnail").planned())
         .separator()
         .item(MenuItem::new("tab-move", "Move to document…"))
         // P3E.2 (TD5.3): into a tab folder, out to the top level, or a new folder.
@@ -2505,9 +2426,9 @@ fn on_tab_context_menu(
         // P3F.6 (P3.7): the tab's view as a PNG or JPEG.
         .item(MenuItem::new("tab-export-image", "Export image…").icon("image").disabled(is_drawing || is_render))
         .item(if is_assembly {
-            MenuItem::new("tab-create-task", "Create task…").disabled(true)
+            MenuItem::new("tab-create-task", "Create task…").planned()
         } else {
-            MenuItem::new("tab-release", "Release…").disabled(true)
+            MenuItem::new("tab-release", "Release…").planned()
         });
     // Opens above the tab bar, at the cursor's x.
     let bar_top = q_bar
@@ -3854,11 +3775,11 @@ fn on_feature_context_menu(
             if by_variable {
                 items.push(MenuItem::new("feature-remove-suppression-variable", "Remove suppression variable").disabled(in_dialog).into());
             }
-            items.push(MenuItem::new("feature-suppress-by-configuration", "Suppress by configuration…").disabled(true).into());
+            items.push(MenuItem::new("feature-suppress-by-configuration", "Suppress by configuration…").planned().into());
             items
         }))
         .separator()
-        .item(MenuItem::new("feature-add-comment", "Add comment").icon("comments").disabled(true))
+        .item(MenuItem::new("feature-add-comment", "Add comment").icon("comments").planned())
         .separator()
         .item(MenuItem::new("feature-zoom-to", "Zoom to selection"))
         .separator()
