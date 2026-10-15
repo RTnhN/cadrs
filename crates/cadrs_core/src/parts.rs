@@ -574,8 +574,46 @@ pub fn regenerate_with(features: &mut [Feature], context: &[(FeatureId, u32, std
         }
         g.broken = broken;
         if g != sk.geometry {
-            cadrs_sketch::solve::solve(&mut g);
-            sk.geometry = g;
+            sk.geometry = follow_links(&sk.geometry, g);
         }
     }
+}
+
+/// The sketch `old` with its used geometry where `moved` (`old` with its links updated, not
+/// solved) puts it, solved. When the used geometry jumps, it moves there in steps of at most
+/// half a millimetre (at most 64), the rest following as in a drag: an offset is held by its
+/// distance, not its side, so a used edge jumping further than the offset would otherwise
+/// leave the offset on its far side.
+fn follow_links(old: &cadrs_sketch::Sketch, moved: cadrs_sketch::Sketch) -> cadrs_sketch::Sketch {
+    use cadrs_sketch::CurveKind;
+    let changed: std::collections::HashMap<cadrs_sketch::PointId, (cadrs_sketch::Vec2, cadrs_sketch::Vec2)> = moved
+        .points
+        .iter()
+        .filter_map(|(k, p)| old.points.get(k).filter(|o| o.pos != p.pos).map(|o| (k, (o.pos, p.pos))))
+        .collect();
+    let far = changed.values().map(|(a, b)| a.distance(*b)).fold(0.0, f64::max);
+    let steps = ((far / 0.5).ceil() as usize).clamp(1, 64);
+    let mut prev = old.clone();
+    for k in 1..=steps {
+        let t = k as f64 / steps as f64;
+        let mut s = moved.clone();
+        for (id, p) in s.points.iter_mut() {
+            p.pos = match changed.get(&id) {
+                Some((a, b)) => *a + (*b - *a) * t,
+                None => prev.points.get(id).map_or(p.pos, |q| q.pos),
+            };
+        }
+        for (id, c) in s.curves.iter_mut() {
+            let (Some(o), Some(q)) = (old.curves.get(id), prev.curves.get(id)) else { continue };
+            c.kind = match (o.kind, c.kind) {
+                // A used circle's radius changes with its source.
+                (CurveKind::Circle { radius: r0, .. }, CurveKind::Circle { center, radius: r1 }) if r0 != r1 => CurveKind::Circle { center, radius: r0 + (r1 - r0) * t },
+                _ if o.kind == c.kind => q.kind,
+                (_, kind) => kind,
+            };
+        }
+        cadrs_sketch::solve::solve(&mut s);
+        prev = s;
+    }
+    prev
 }

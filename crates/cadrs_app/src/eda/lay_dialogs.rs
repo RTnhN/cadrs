@@ -93,8 +93,9 @@ fn list_lines(w: &mut World, list: &str, lines: Vec<(String, bool)>) {
     w.flush();
 }
 
+/// A log or list that scrolls with the wheel when it runs past `h`.
 fn list_node(name: &'static str, h: f32) -> impl Bundle {
-    (Name::new(name), Node { flex_direction: FlexDirection::Column, height: Val::Px(h), overflow: Overflow::scroll_y(), margin: UiRect::top(Val::Px(6.0)), ..default() })
+    (Name::new(name), cadrs_ui::WheelScroll, Node { flex_direction: FlexDirection::Column, height: Val::Px(h), overflow: Overflow::scroll_y(), margin: UiRect::top(Val::Px(6.0)), ..default() })
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -113,7 +114,7 @@ pub fn open_update(w: &mut World) {
                 b.spawn(Checkbox::new("eda-update-replace").label("Replace footprints with those the symbols name").checked(true).build(&t));
                 b.spawn(Checkbox::new("eda-update-delete").label("Delete footprints with no symbol").checked(false).build(&t));
                 b.spawn(Checkbox::new("eda-update-fields").label("Update footprint fields from symbols").checked(true).build(&t));
-                b.spawn(list_node("eda-update-log", 220.0));
+                b.spawn(list_node("eda-update-log", 320.0));
             })
             .footer(move |f| {
                 button(f, &tf, "eda-update-run", "Update PCB", true, run_update);
@@ -144,6 +145,7 @@ fn run_update(w: &mut World) {
     });
     if let Some(r) = report {
         let mut lines: Vec<(String, bool)> = r.messages.into_iter().map(|m| (m, false)).collect();
+        lines.extend(r.warnings.into_iter().map(|e| (format!("Warning: {e}"), true)));
         lines.extend(r.errors.into_iter().map(|e| (format!("Error: {e}"), true)));
         list_lines(w, "eda-update-log", lines);
     }
@@ -237,14 +239,17 @@ fn accept_setup(w: &mut World) {
 #[derive(Resource, Default)]
 struct ZoneNets(Vec<String>);
 
-pub fn open_zone(w: &mut World) {
+/// A zone's properties (E or a double-click on it): its net (none: it takes the net of what is
+/// wired to it) and its layer. One undo step; the zone is poured again.
+pub fn open_zone(w: &mut World, id: uuid::Uuid) {
     let Some((_, _, d)) = ui::current(w) else { return };
-    let mut nets = d.board.nets.clone();
-    if let Some(i) = nets.iter().position(|n| n == "GND") {
-        nets.swap(0, i);
-    }
+    let Some(z) = d.board.zones.iter().find(|z| z.id == id).cloned() else { return };
+    let mut nets: Vec<String> = vec![String::new()];
+    nets.extend(d.board.nets.iter().filter(|n| !n.is_empty()).cloned());
+    let net_i = nets.iter().position(|n| *n == z.net).unwrap_or(0);
     w.insert_resource(ZoneNets(nets.clone()));
-    let active = w.resource::<LayoutState>().active;
+    w.insert_resource(PropsOf(cadrs_eda::board_edit::BoardItem::Zone(id)));
+    let bottom = z.layers.iter().any(|l| l == Layer::BottomCopper) && !z.layers.iter().any(|l| l == Layer::TopCopper);
     let t = w.resource::<Theme>().clone();
     let tf = t.clone();
     spawn_dialog(
@@ -254,15 +259,15 @@ pub fn open_zone(w: &mut World) {
             .width(440.0)
             .body(move |p| {
                 row(p, &t, "Net", |r| {
-                    let mut s = Select::new("eda-zone-net").bordered().width(Val::Px(200.0));
+                    let mut s = Select::new("eda-zone-net").bordered().width(Val::Px(240.0));
                     for n in &nets {
-                        s = s.option(n.clone(), true);
+                        s = s.option(if n.is_empty() { "(from what is wired to it)".to_string() } else { n.clone() }, true);
                     }
-                    r.spawn(s.build(&t));
+                    r.spawn(s.selected(net_i).build(&t));
                 });
                 row(p, &t, "Layer", |r| {
-                    let s = Select::new("eda-zone-layer").bordered().width(Val::Px(200.0)).option("Top copper", true).option("Bottom copper", true);
-                    r.spawn(s.selected(if active == Layer::BottomCopper { 1 } else { 0 }).build(&t));
+                    let s = Select::new("eda-zone-layer").bordered().width(Val::Px(240.0)).option("Top copper", true).option("Bottom copper", true);
+                    r.spawn(s.selected(usize::from(bottom)).build(&t));
                 });
             })
             .footer(move |f| {
@@ -273,14 +278,18 @@ pub fn open_zone(w: &mut World) {
 }
 
 fn accept_zone(w: &mut World) {
+    let Some(PropsOf(cadrs_eda::board_edit::BoardItem::Zone(id))) = w.get_resource::<PropsOf>().copied() else { return };
     let nets = w.resource::<ZoneNets>().0.clone();
     let net = select_index(w, "eda-zone-net").and_then(|i| nets.get(i).cloned()).unwrap_or_default();
     let layer = if select_index(w, "eda-zone-layer") == Some(1) { Layer::BottomCopper } else { Layer::TopCopper };
     close_all(w);
-    w.resource_mut::<LayoutState>().active = layer;
-    set_tool(w, Tool::Zone { net, layer, pts: vec![] });
+    ui::commit(w, "Zone properties", |d| {
+        let z = d.board.zones.iter_mut().find(|z| z.id == id).ok_or("The zone is gone")?;
+        z.net = net.clone();
+        z.layers = cadrs_eda::layer::LayerSet::of(&[layer]);
+        Ok(())
+    });
 }
-
 
 // ---------------------------------------------------------------------------------------------
 // Text and keep-outs
@@ -338,6 +347,60 @@ fn accept_text(w: &mut World) {
     }
 }
 
+/// A board text's properties (E or a double-click on it): its words, height and stroke width.
+/// One undo step.
+pub fn open_board_text(w: &mut World, id: uuid::Uuid) {
+    let Some((_, _, d)) = ui::current(w) else { return };
+    let Some(bt) = d.board.texts.iter().find(|t| t.id == id).cloned() else { return };
+    w.insert_resource(PropsOf(cadrs_eda::board_edit::BoardItem::Text(id)));
+    let t = w.resource::<Theme>().clone();
+    let tf = t.clone();
+    let thickness = bt.text.style.thickness.unwrap_or(bt.text.style.size.h / 8);
+    spawn_dialog(
+        w,
+        Dialog::new("eda-tprops-dialog")
+            .title(format!("Text on {}", bt.layer.name()))
+            .width(440.0)
+            .body(move |p| {
+                row(p, &t, "Text", |r| {
+                    r.spawn(TextInput::new("eda-tprops-text").value(bt.text.text.clone()).width(Val::Px(220.0)).height(26.0).build(&t));
+                });
+                mm_row(p, &t, "Height", "eda-tprops-height", bt.text.style.size.h);
+                mm_row(p, &t, "Stroke width", "eda-tprops-thickness", thickness);
+                p.spawn(t.text("Drag the text to move it (Select: press on it once selected).", t.font_sm, FontWeight::NORMAL, t.muted_foreground));
+            })
+            .footer(move |f| {
+                button(f, &tf, "eda-tprops-ok", "OK", true, accept_board_text);
+                button(f, &tf, "eda-tprops-cancel", "Cancel", false, close_all);
+            }),
+    );
+}
+
+fn accept_board_text(w: &mut World) {
+    let Some(PropsOf(cadrs_eda::board_edit::BoardItem::Text(id))) = w.get_resource::<PropsOf>().copied() else { return };
+    let text = ui::text_value(w, "eda-tprops-text");
+    let (h, th) = (read_mm(w, "eda-tprops-height"), read_mm(w, "eda-tprops-thickness"));
+    close_all(w);
+    let (Ok(h), Ok(th)) = (h, th) else {
+        ui::toast(w, "Height and stroke width are lengths in mm");
+        return;
+    };
+    if text.trim().is_empty() {
+        ui::toast(w, "The text is empty (Del removes it)");
+        return;
+    }
+    ui::commit(w, "Text properties", |d| {
+        let t = d.board.texts.iter_mut().find(|t| t.id == id).ok_or("The text is gone")?;
+        t.text.text = text.clone();
+        let h = h.max(mm(0.1));
+        // Its width scales with its height.
+        let k = h as f64 / t.text.style.size.h.max(1) as f64;
+        t.text.style.size = cadrs_eda::units::Size::new((t.text.style.size.w as f64 * k) as Nm, h);
+        t.text.style.thickness = Some(th.max(mm(0.01)));
+        Ok(())
+    });
+}
+
 /// A keep-out (rule area): its layers and what it forbids, then its corners (double-click ends).
 pub fn open_keepout(w: &mut World) {
     let t = w.resource::<Theme>().clone();
@@ -376,6 +439,7 @@ fn accept_keepout(w: &mut World) {
         pads: checkbox(w, "eda-keepout-pads"),
         copper_pour: checkbox(w, "eda-keepout-pour"),
         footprints: checkbox(w, "eda-keepout-footprints"),
+        max_height: None,
     };
     close_all(w);
     set_tool(w, Tool::Keepout { layers, rules, pts: vec![] });
@@ -412,11 +476,16 @@ fn run_drc(w: &mut World) {
     }
     let Some((_, _, d)) = ui::current(w) else { return };
     let rep = cadrs_eda::drc::check(&d.board);
-    let errors = rep.errors().count();
-    let warnings = rep.violations.len() - errors;
-    let summary = format!("Violations ({}): {errors} errors, {warnings} warnings. Unconnected items: {}", rep.violations.len(), rep.unconnected.len());
+    let mechanical = mechanical_context(w);
+    let errors = rep.errors().count() + mechanical.len();
+    let total = rep.violations.len() + mechanical.len();
+    let warnings = total - errors;
+    let summary = format!("Violations ({total}): {errors} errors, {warnings} warnings. Unconnected items: {}", rep.unconnected.len());
     ui::set_label(w, "eda-drc-summary", &summary);
     let mut lines = vec![];
+    for m in mechanical {
+        lines.push((format!("Error: {m}"), true));
+    }
     for v in &rep.violations {
         lines.push((format!("{}: {}", if v.rule.is_warning() { "Warning" } else { "Error" }, v.message), true));
         lines.extend(v.items.iter().map(|i| (format!("    {i}"), false)));
@@ -425,6 +494,34 @@ fn run_drc(w: &mut World) {
         lines.push((format!("Unconnected: {} ({:.2}, {:.2}) – ({:.2}, {:.2})", a.net, to_mm(a.a.x), to_mm(a.a.y), to_mm(a.b.x), to_mm(a.b.y)), false));
     }
     list_lines(w, "eda-drc-list", lines);
+}
+
+/// The board's components running into parts of the Part Studios it is derived into
+/// (`docs/PCB_IN_PART_STUDIO.md` §7.3 item 8): "J1 AC inlet runs into Tube in Enclosure (0.80 mm
+/// in plan, 2.40 mm high)".
+fn mechanical_context(w: &World) -> Vec<String> {
+    let Some((pcb, board, _)) = w.resource::<super::Eda2d>().board() else { return vec![] };
+    let doc = &w.resource::<crate::ActiveDocument>().doc;
+    let mut out = vec![];
+    for el in &doc.elements {
+        let deriving: Vec<cadrs_core::FeatureId> = el
+            .features()
+            .iter()
+            .filter(|f| matches!(&f.kind, cadrs_core::FeatureKind::Derived(x) if x.source.is_some_and(|r| r.element == pcb && r.document.is_none_or(|d| d == doc.id)) && x.board.as_ref().is_some_and(|b| b.board == board)))
+            .map(|f| f.id)
+            .collect();
+        if deriving.is_empty() {
+            continue;
+        }
+        let build = cadrs_core::rebuild::build(el.features());
+        let name = |p: cadrs_core::PartId| build.part(p).map(|x| cadrs_core::parts::display_name(x, el.part_props()).to_string()).unwrap_or_default();
+        for f in deriving {
+            for c in build.derived.get(&f).map(|o| o.collisions.as_slice()).unwrap_or_default() {
+                out.push(cadrs_core::pcb::fit::collision_text(&name(c.component), &format!("{} in {}", name(c.other), el.name), c));
+            }
+        }
+    }
+    out
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -604,6 +701,148 @@ pub fn open_footprint(w: &mut World, id: uuid::Uuid) {
                 button(f, &tf, "eda-fprops-cancel", "Cancel", false, close_all);
             }),
     );
+}
+
+/// What Create PCB board makes its board from: the Part Studio, its sketch and regions, and the
+/// PCB Studios it can go to (in the dialog's order, "New PCB Studio" last).
+#[derive(Resource, Clone)]
+struct CreateBoardOf {
+    element: cadrs_core::ElementId,
+    sketch: cadrs_core::FeatureId,
+    regions: Vec<cadrs_core::document::RegionRef>,
+    studios: Vec<cadrs_core::ElementId>,
+}
+
+/// Part Studio → a sketch's menu → **Create PCB board…** (`docs/PCB_IN_PART_STUDIO.md` §8.1):
+/// the board's name, the PCB Studio it goes to (or a new one), its thickness and which face lies
+/// on the sketch. The board's outline is the regions' (circles in them are holes) and follows
+/// the sketch.
+pub fn open_create_board(w: &mut World, element: cadrs_core::ElementId, sketch: cadrs_core::FeatureId, regions: Vec<cadrs_core::document::RegionRef>) {
+    let doc = &w.resource::<crate::ActiveDocument>().doc;
+    let sketch_name = doc.element(element).and_then(|e| e.feature(sketch)).map(|f| f.name.clone()).unwrap_or_default();
+    let studios: Vec<(cadrs_core::ElementId, String)> = doc.elements.iter().filter(|e| e.pcb().is_some()).map(|e| (e.id, e.name.clone())).collect();
+    w.insert_resource(CreateBoardOf { element, sketch, regions, studios: studios.iter().map(|s| s.0).collect() });
+    let t = w.resource::<Theme>().clone();
+    let tf = t.clone();
+    spawn_dialog(
+        w,
+        Dialog::new("board-create-dialog")
+            .title(format!("Create PCB board from {sketch_name}"))
+            .width(460.0)
+            .body(move |p| {
+                row(p, &t, "Name", |r| {
+                    r.spawn(TextInput::new("board-create-name").value(format!("Board from {sketch_name}")).width(Val::Px(220.0)).height(26.0).build(&t));
+                });
+                row(p, &t, "PCB Studio", |r| {
+                    let mut sel = Select::new("board-create-studio").bordered().width(Val::Px(220.0));
+                    for (_, n) in &studios {
+                        sel = sel.option(n.clone(), true);
+                    }
+                    r.spawn(sel.option("New PCB Studio", true).selected(0).build(&t));
+                });
+                mm_row(p, &t, "Thickness", "board-create-thickness", mm(1.6));
+                row(p, &t, "Face on the sketch", |r| {
+                    r.spawn(Select::new("board-create-seat").bordered().width(Val::Px(220.0)).option("Bottom face (it stands on it)", true).option("Top face (it hangs under it)", true).selected(0).build(&t));
+                });
+                row(p, &t, "Circles inside it", |r| {
+                    r.spawn(Select::new("board-create-circles").bordered().width(Val::Px(220.0)).option("Cut-outs of the outline", true).option("Mounting holes (NPTH)", true).selected(0).build(&t));
+                });
+                p.spawn(t.text("The outline (and the holes) follow the sketch.", t.font_sm, FontWeight::NORMAL, t.muted_foreground));
+            })
+            .footer(move |f| {
+                button(f, &tf, "board-create-ok", "Create", true, accept_create_board);
+                button(f, &tf, "board-create-cancel", "Cancel", false, close_all);
+            }),
+    );
+}
+
+fn accept_create_board(w: &mut World) {
+    let Some(of) = w.get_resource::<CreateBoardOf>().cloned() else { return };
+    let name = ui::text_value(w, "board-create-name");
+    let thickness = read_mm(w, "board-create-thickness");
+    let studio = select_index(w, "board-create-studio").unwrap_or(0);
+    let seat = if select_index(w, "board-create-seat") == Some(1) { cadrs_core::pcb::board3d::BoardSeat::Top } else { cadrs_core::pcb::board3d::BoardSeat::Bottom };
+    let circles_as_holes = select_index(w, "board-create-circles") == Some(1);
+    let thickness = match thickness {
+        Ok(t) if t > 0 => to_mm(t),
+        _ => {
+            ui::toast(w, "The thickness is a length above 0 (mm)");
+            return;
+        }
+    };
+    close_all(w);
+    let cmd = cadrs_core::pcb::outline_link::CreateBoardFromSketch {
+        element: of.element,
+        sketch: of.sketch,
+        regions: of.regions,
+        pcb: of.studios.get(studio).copied(),
+        new_pcb: cadrs_core::ElementId::new(),
+        name: if name.trim().is_empty() { "Board".into() } else { name.trim().to_string() },
+        thickness,
+        seat,
+        circles_as_holes,
+        feature: cadrs_core::FeatureId::new(),
+    };
+    if let Err(e) = w.resource_mut::<crate::ActiveDocument>().execute(&cmd) {
+        crate::linked::error_toast(w, e.to_string());
+    }
+}
+
+/// The footprints Move by moves.
+#[derive(Resource, Clone)]
+struct MoveByOf(Vec<uuid::Uuid>);
+
+/// Move by…: the selected footprints moved by a typed distance along x and y (a board fitted
+/// into a Part Studio: "0.5 mm further from the wall").
+pub fn open_move_by(w: &mut World, ids: Vec<uuid::Uuid>) {
+    if ids.is_empty() {
+        ui::toast(w, "Select the footprints to move");
+        return;
+    }
+    let what = match ui::current(w).map(|(_, _, d)| d.board.footprints.iter().filter(|f| ids.contains(&f.id)).map(|f| f.reference().to_string()).collect::<Vec<_>>()) {
+        Some(v) if v.len() <= 4 => v.join(", "),
+        Some(v) => format!("{} footprints", v.len()),
+        None => return,
+    };
+    w.insert_resource(MoveByOf(ids));
+    let t = w.resource::<Theme>().clone();
+    let tf = t.clone();
+    spawn_dialog(
+        w,
+        Dialog::new("eda-moveby-dialog")
+            .title(format!("Move by: {what}"))
+            .width(380.0)
+            .body(move |p| {
+                mm_row(p, &t, "Along X", "eda-moveby-x", 0);
+                mm_row(p, &t, "Along Y", "eda-moveby-y", 0);
+            })
+            .footer(move |f| {
+                button(f, &tf, "eda-moveby-ok", "OK", true, accept_move_by);
+                button(f, &tf, "eda-moveby-cancel", "Cancel", false, close_all);
+            }),
+    );
+}
+
+fn accept_move_by(w: &mut World) {
+    let Some(MoveByOf(ids)) = w.get_resource::<MoveByOf>().cloned() else { return };
+    let (x, y) = (read_mm(w, "eda-moveby-x"), read_mm(w, "eda-moveby-y"));
+    close_all(w);
+    let (Ok(x), Ok(y)) = (x, y) else {
+        ui::toast(w, "Type the distances as lengths (mm)");
+        return;
+    };
+    if x == 0 && y == 0 {
+        return;
+    }
+    ui::commit(w, "Move by", |d| {
+        use cadrs_eda::board_edit as be;
+        for id in &ids {
+            let i = be::footprint_by_id(&d.board, *id).ok_or("A footprint is gone")?;
+            let to = d.board.footprints[i].placement.at + Pt::new(x, y);
+            be::move_footprint(&mut d.board, i, to);
+        }
+        Ok(())
+    });
 }
 
 fn read_deg(w: &mut World, name: &str) -> Result<f64, String> {

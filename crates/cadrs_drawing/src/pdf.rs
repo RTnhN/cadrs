@@ -386,7 +386,7 @@ pub fn write_pdf(pages: &[Page], opts: &PdfOptions) -> Vec<u8> {
                     let Ok(img) = crate::export::decode_image(&pic.data) else { continue };
                     let id = image_object(&mut w, &img, opts.color);
                     let name = format!("Im{}", images.len() + 1);
-                    let _ = writeln!(c, "q {} 0 0 {} {} {} cm /{name} Do Q", n(pic.width), n(pic.height), n(pic.at[0]), n(pic.at[1]));
+                    let _ = writeln!(c, "q {} {} {} {} {} {} cm /{name} Do Q", n(pic.u[0]), n(pic.u[1]), n(pic.v[0]), n(pic.v[1]), n(pic.at[0]), n(pic.at[1]));
                     images.push((name, id));
                 }
             }

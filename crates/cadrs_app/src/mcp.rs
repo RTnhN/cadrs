@@ -188,6 +188,14 @@ fn run(world: &mut World, call: &Call) -> Result<Value, String> {
         Call::CreateDrawing(p) => create_drawing(world, p),
         Call::AddAnnotation(p) => add_annotation(world, p),
         Call::RenameTab(p) => rename_tab(world, p),
+        Call::GetBoard(p) => crate::mcp_board::get_board(world, p),
+        Call::GetBoardFit(p) => crate::mcp_board::get_board_fit(world, p),
+        Call::DeriveBoard(p) => crate::mcp_board::derive_board(world, p),
+        Call::CreateBoardFromSketch(p) => crate::mcp_board::create_board_from_sketch(world, p),
+        Call::MoveFootprint(p) => crate::mcp_board::move_footprint(world, p),
+        Call::AddFootprint(p) => crate::mcp_board::add_footprint(world, p),
+        Call::RemoveFootprint(p) => crate::mcp_board::remove_footprint(world, p),
+        Call::LinkOutline(p) => crate::mcp_board::link_outline(world, p),
     }
 }
 

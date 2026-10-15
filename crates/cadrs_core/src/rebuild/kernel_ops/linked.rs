@@ -26,7 +26,7 @@ struct Linked {
 
 impl Rebuilder {
     /// Edge and vertex names for a body whose faces are named `faces`.
-    fn linked_names(&self, body: BodyId, faces: Vec<FaceName>) -> Result<BodyNames, String> {
+    pub(super) fn linked_names(&self, body: BodyId, faces: Vec<FaceName>) -> Result<BodyNames, String> {
         let edges = self.kernel.edges(body).map_err(|e| e.to_string())?;
         let vertices = self.kernel.vertices(body).map_err(|e| e.to_string())?;
         Ok(BodyNames {

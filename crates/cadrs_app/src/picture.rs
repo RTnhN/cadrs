@@ -35,6 +35,17 @@ pub const MAX_TEXTURE: u32 = 2048;
 /// The gap between pictures dropped together (mm).
 const DROP_GAP: f64 = 10.0;
 
+/// The depth bias that lets a picture win over the face it lies on. The views are orthographic
+/// with a depth range of [`crate::camera::CAMERA_FAR`], so one unit of bias is about 2.4 µm
+/// there (4.8 µm nearer than the view's centre): this many lift a picture a few hundredths of a
+/// millimetre. A large bias (1000 was 2.4 mm) hid whatever stood lower than that over the face,
+/// a board's SMD components first, and by how much changed with where the board was in depth.
+/// (Bevy also sorts blended meshes by it, in mm: it no longer puts a picture last.)
+pub const SURFACE_BIAS: f32 = 8.0;
+
+/// How far a board's skin lies off its face (mm), toward the side it faces.
+pub const SKIN_LIFT: f32 = 0.01;
+
 pub struct PicturePlugin;
 
 impl Plugin for PicturePlugin {
@@ -45,9 +56,10 @@ impl Plugin for PicturePlugin {
     }
 }
 
-/// The decoded pictures, by blob hash: their texture and material (`None`: unreadable).
+/// The decoded pictures, by blob hash and whether one-sided: their texture and material
+/// (`None`: unreadable).
 #[derive(Resource, Default)]
-pub struct PictureTextures(HashMap<String, Option<Handle<StandardMaterial>>>);
+pub struct PictureTextures(HashMap<(String, bool), Option<Handle<StandardMaterial>>>);
 
 /// A picture drawn over its part.
 #[derive(Component)]
@@ -153,9 +165,11 @@ fn drop_pictures(
     }
 }
 
-/// The picture's texture as an unlit, two-sided material (`None` if it can't be read).
+/// The picture's texture as an unlit material, two-sided or (`one_sided`) seen only from the
+/// front (`None` if it can't be read).
 fn picture_material(
     blob: &str,
+    one_sided: bool,
     images: &mut Assets<Image>,
     materials: &mut Assets<StandardMaterial>,
 ) -> Option<Handle<StandardMaterial>> {
@@ -184,26 +198,45 @@ fn picture_material(
     Some(materials.add(StandardMaterial {
         base_color_texture: Some(images.add(texture)),
         unlit: true,
-        cull_mode: None,
-        double_sided: true,
-        // Transparent pixels show the part's surface.
-        alpha_mode: AlphaMode::Blend,
+        // A board's skin: only from outside its face, or the other face's would show through
+        // the board at an angle.
+        cull_mode: one_sided.then_some(bevy::render::render_resource::Face::Back),
+        double_sided: !one_sided,
+        // A board's skin is drawn opaque, as the PCB Studio's 3D view draws it (its pixels off
+        // the outline left out): blended, it was sorted against the board and the parts around,
+        // and a translucent board drawn after it hid it. Other pictures' transparent pixels
+        // show the part's surface.
+        alpha_mode: if one_sided { AlphaMode::Mask(0.5) } else { AlphaMode::Blend },
         // Over the part's own face, which it lies on.
-        depth_bias: 1000.0,
+        depth_bias: SURFACE_BIAS,
         ..default()
     }))
 }
 
-/// The quad a picture covers, its texture upright (row 0 at the `v` end).
+/// The quad a picture covers, its texture upright (row 0 at the `v` end), its front the side
+/// it faces ([`SolidImage::facing`]; else `u × v`). A board's skin lies [`SKIN_LIFT`] off its
+/// face, toward that side.
 fn picture_mesh(p: &SolidImage) -> Mesh {
     let v = |a: [f64; 3]| Vec3::new(a[0] as f32, a[1] as f32, a[2] as f32);
-    let (c, u, w) = (v(p.corner), v(p.u), v(p.v));
-    let n = u.cross(w).normalize_or_zero();
+    let (mut c, u, w) = (v(p.corner), v(p.u), v(p.v));
+    let mut n = u.cross(w).normalize_or_zero();
+    // Wound so its front is the side it faces (a board's bottom skin, drawn as the layout has
+    // it, faces down).
+    let mut indices = vec![0, 1, 2, 0, 2, 3];
+    if let Some(f) = p.facing.map(v)
+        && f.dot(n) < 0.0
+    {
+        n = -n;
+        indices = vec![0, 2, 1, 0, 3, 2];
+    }
+    if p.facing.is_some() {
+        c += n * SKIN_LIFT;
+    }
     Mesh::new(PrimitiveTopology::TriangleList, RenderAssetUsages::default())
         .with_inserted_attribute(Mesh::ATTRIBUTE_POSITION, vec![c, c + u, c + u + w, c + w])
         .with_inserted_attribute(Mesh::ATTRIBUTE_NORMAL, vec![n; 4])
         .with_inserted_attribute(Mesh::ATTRIBUTE_UV_0, vec![[0.0f32, 1.0], [1.0, 1.0], [1.0, 0.0], [0.0, 0.0]])
-        .with_inserted_indices(Indices::U32(vec![0, 1, 2, 0, 2, 3]))
+        .with_inserted_indices(Indices::U32(indices))
 }
 
 /// Keeps a textured quad over every shown part's pictures.
@@ -218,7 +251,14 @@ fn sync_pictures(
     mut last: Local<Option<u64>>,
     mut commands: Commands,
 ) {
-    let want: Vec<(&str, &SolidImage)> = cache.shown().flat_map(|p| p.solid.images.iter().map(move |i| (p.name.as_str(), i))).collect();
+    // A derived board shown as its layout hides its skins. A picture not loaded (yet) is left
+    // out, not remembered as unreadable: a board's skin made again has the same name.
+    let want: Vec<(&str, &SolidImage)> = cache
+        .shown()
+        .filter(|p| !cache.skinless.contains(&p.id))
+        .flat_map(|p| p.solid.images.iter().map(move |i| (p.name.as_str(), i)))
+        .filter(|(_, i)| cadrs_core::blobs::contains(&i.blob))
+        .collect();
     if *last == Some(cache.generation) && q.iter().count() == want.len() {
         return;
     }
@@ -227,10 +267,11 @@ fn sync_pictures(
         commands.entity(e).try_despawn();
     }
     for (name, pic) in want {
+        let one_sided = pic.facing.is_some();
         let material = textures
             .0
-            .entry(pic.blob.clone())
-            .or_insert_with(|| picture_material(&pic.blob, &mut images, &mut materials))
+            .entry((pic.blob.clone(), one_sided))
+            .or_insert_with(|| picture_material(&pic.blob, one_sided, &mut images, &mut materials))
             .clone();
         let Some(material) = material else { continue };
         commands.spawn((
@@ -247,6 +288,20 @@ fn sync_pictures(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_skin_lies_just_off_its_face_toward_its_side() {
+        let corners = |m: &Mesh| match m.attribute(Mesh::ATTRIBUTE_POSITION) {
+            Some(bevy::mesh::VertexAttributeValues::Float32x3(p)) => p.clone(),
+            _ => panic!(),
+        };
+        // A board's bottom skin at z 0, facing down: just under it.
+        let pic = SolidImage { blob: String::new(), corner: [0.0, 0.0, 0.0], u: [10.0, 0.0, 0.0], v: [0.0, 5.0, 0.0], facing: Some([0.0, 0.0, -1.0]) };
+        assert!(corners(&picture_mesh(&pic)).iter().all(|p| (p[2] + SKIN_LIFT).abs() < 1e-6));
+        // A picture seen from both sides stays on its face.
+        let pic = SolidImage { facing: None, ..pic };
+        assert!(corners(&picture_mesh(&pic)).iter().all(|p| p[2] == 0.0));
+    }
 
     #[test]
     fn pictures_go_on_the_plane_facing_the_view() {

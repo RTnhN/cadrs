@@ -386,3 +386,173 @@ pub struct RenameTab {
     /// The new name.
     pub to: String,
 }
+
+/// A PCB Studio board, by name.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct BoardName {
+    /// The board's name (as its PCB Studio's Boards list shows it).
+    pub board: String,
+    /// The PCB Studio tab's name; omitted: any PCB Studio.
+    #[serde(default)]
+    pub pcb_studio: Option<String>,
+}
+
+/// Derives a PCB Studio board into a Part Studio: the board's solid and its components.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct DeriveBoard {
+    #[serde(flatten)]
+    pub board: BoardName,
+    /// The Part Studio tab; omitted: the active tab.
+    #[serde(default)]
+    pub part_studio: Option<String>,
+    /// Where the board goes: a mate connector feature's name; omitted (and no `on_sketch`): the
+    /// origin.
+    #[serde(default)]
+    pub location: Option<String>,
+    /// Or: a sketch whose plane the board lies on, its layout's (0, 0) on the sketch's origin.
+    #[serde(default)]
+    pub on_sketch: Option<String>,
+    /// The board's point on the location: "fixed" (its outline's centre now; the default with a
+    /// location), "origin" (the layout's 0, 0; the default on a sketch), "centre", or a
+    /// footprint's reference ("J1").
+    #[serde(default)]
+    pub anchor: Option<String>,
+    /// The board's face on the location: "bottom" (default) or "top".
+    #[serde(default)]
+    pub seat: Option<String>,
+    /// "3d" (default) or "layout" (the layout drawn on the board's faces).
+    #[serde(default)]
+    pub view: Option<String>,
+}
+
+/// Creates a PCB board whose outline is a Part Studio sketch's largest region (it keeps
+/// following the sketch), and derives it onto the sketch.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct CreateBoardFromSketch {
+    /// The sketch's name.
+    pub sketch: String,
+    /// The board's name.
+    pub name: String,
+    /// The Part Studio tab; omitted: the active tab.
+    #[serde(default)]
+    pub part_studio: Option<String>,
+    /// The PCB Studio to add it to; omitted: a new one.
+    #[serde(default)]
+    pub pcb_studio: Option<String>,
+    /// Its thickness (mm); omitted: 1.6.
+    #[serde(default)]
+    pub thickness: Option<f64>,
+    /// Its face on the sketch: "bottom" (default) or "top".
+    #[serde(default)]
+    pub seat: Option<String>,
+    /// The sketch's circles inside the outline as mounting holes (non-plated hole footprints)
+    /// rather than cut-outs; default false.
+    #[serde(default)]
+    pub circles_as_holes: Option<bool>,
+    /// A point (sketch x, y in mm) inside the region to take; omitted: the largest region.
+    #[serde(default)]
+    pub inside: Option<[f64; 2]>,
+}
+
+/// Moves a footprint on a board: to a place (mm, its origin), turned, flipped; or so one of its
+/// pads is centred on a pin or hole of a part, in a Part Studio the board is derived into.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct MoveFootprint {
+    #[serde(flatten)]
+    pub board: BoardName,
+    /// The footprint's reference ("J4").
+    pub reference: String,
+    /// Its origin's x and y on the layout (mm).
+    #[serde(default)]
+    pub x: Option<f64>,
+    #[serde(default)]
+    pub y: Option<f64>,
+    /// Its angle (degrees, counter-clockwise).
+    #[serde(default)]
+    pub angle: Option<f64>,
+    /// "top" or "bottom".
+    #[serde(default)]
+    pub side: Option<String>,
+    /// With `onto_part`: the pad to centre ("1").
+    #[serde(default)]
+    pub pad: Option<String>,
+    /// A part (its name in the Parts list) with pins or holes square to the board: the pad goes
+    /// onto the axis nearest it (or `axis`, by its index in get_board_fit's list).
+    #[serde(default)]
+    pub onto_part: Option<String>,
+    /// Or a mate connector (its name in the Feature list) whose Z axis stands square to the
+    /// board: the pad goes onto that axis.
+    #[serde(default)]
+    pub onto_connector: Option<String>,
+    /// Which of the part's axes (0 first); omitted: the nearest to the pad.
+    #[serde(default)]
+    pub axis: Option<usize>,
+    /// The Part Studio for `onto_part`; omitted: the active tab.
+    #[serde(default)]
+    pub part_studio: Option<String>,
+    /// With `onto_part`, a board derived onto several locations: which copy's place the part's
+    /// axes are read against (1 first); omitted: 1.
+    #[serde(default)]
+    pub copy: Option<usize>,
+}
+
+/// Adds a footprint to a board: a copy of one already on it, with its own reference, value,
+/// place and nets.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct AddFootprint {
+    #[serde(flatten)]
+    pub board: BoardName,
+    /// The footprint to copy ("J4").
+    pub copy_of: String,
+    /// The new reference ("J6") and value ("AC Earth IN").
+    pub reference: String,
+    #[serde(default)]
+    pub value: String,
+    /// Its origin on the layout (mm).
+    pub x: f64,
+    pub y: f64,
+    /// Its pads' nets: {"1": "EARTH"} (pads not named are on no net).
+    #[serde(default)]
+    pub nets: std::collections::BTreeMap<String, String>,
+}
+
+/// Removes a footprint from a board, and its symbol from the schematic.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct RemoveFootprint {
+    #[serde(flatten)]
+    pub board: BoardName,
+    pub reference: String,
+}
+
+/// Links a board's outline to a Part Studio sketch (its largest region), or breaks the link.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct LinkOutline {
+    #[serde(flatten)]
+    pub board: BoardName,
+    /// The sketch; omitted: break the link (the outline stays as it is).
+    #[serde(default)]
+    pub sketch: Option<String>,
+    /// The sketch's Part Studio; omitted: the active tab.
+    #[serde(default)]
+    pub part_studio: Option<String>,
+    /// Move everything on the layout by the outline's move (its box's centre), so the parts
+    /// keep their place on the board; default true.
+    #[serde(default)]
+    pub keep_parts: Option<bool>,
+    /// A point (sketch x, y in mm) inside the region to take; omitted: the largest region.
+    #[serde(default)]
+    pub inside: Option<[f64; 2]>,
+}
+
+/// A board and the Part Studio to fit it in: the pins and holes of the parts square to it.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct BoardFit {
+    #[serde(flatten)]
+    pub board: BoardName,
+    /// The Part Studio the board is derived into; omitted: the active tab.
+    #[serde(default)]
+    pub part_studio: Option<String>,
+    /// A board derived onto several locations: which copy (1 first); omitted: 1.
+    #[serde(default)]
+    pub copy: Option<usize>,
+}

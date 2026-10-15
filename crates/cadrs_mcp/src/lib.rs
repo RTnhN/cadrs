@@ -60,6 +60,14 @@ pub enum Call {
     CreateDrawing(CreateDrawing),
     AddAnnotation(AddAnnotation),
     RenameTab(RenameTab),
+    GetBoard(BoardName),
+    GetBoardFit(BoardFit),
+    DeriveBoard(DeriveBoard),
+    CreateBoardFromSketch(CreateBoardFromSketch),
+    MoveFootprint(MoveFootprint),
+    AddFootprint(AddFootprint),
+    RemoveFootprint(RemoveFootprint),
+    LinkOutline(LinkOutline),
 }
 
 /// What the app answers.
@@ -302,6 +310,57 @@ impl Cadrs {
         self.call(Call::RunScenario(p)).await
     }
 
+    #[tool(description = "A PCB Studio board: its outline's box, thickness, nets, every footprint (reference, \
+        value, place in mm, angle, side, on the board or not, its pads with their place, net and drill), \
+        counts of tracks, vias and zones, and the Part Studios it is derived into with their warnings \
+        (components running into parts).")]
+    async fn get_board(&self, Parameters(p): Parameters<BoardName>) -> Result<CallToolResult, ErrorData> {
+        self.call(Call::GetBoard(p)).await
+    }
+
+    #[tool(description = "Fitting a board derived into a Part Studio: for each part, the pins and holes \
+        standing square to the board (where their axes meet it, in the layout's mm, and radius), and the \
+        collisions of its components with the parts.")]
+    async fn get_board_fit(&self, Parameters(p): Parameters<BoardFit>) -> Result<CallToolResult, ErrorData> {
+        self.call(Call::GetBoardFit(p)).await
+    }
+
+    #[tool(description = "Derive a PCB Studio board into a Part Studio: the board's solid and its \
+        components' 3D models as parts, at a mate connector or on a sketch's plane. It follows the layout.")]
+    async fn derive_board(&self, Parameters(p): Parameters<DeriveBoard>) -> Result<CallToolResult, ErrorData> {
+        self.call(Call::DeriveBoard(p)).await
+    }
+
+    #[tool(description = "Create a PCB board from a Part Studio sketch: its outline is the sketch's largest \
+        region (holes included) and follows the sketch; the board is derived onto the sketch's plane.")]
+    async fn create_board_from_sketch(&self, Parameters(p): Parameters<CreateBoardFromSketch>) -> Result<CallToolResult, ErrorData> {
+        self.call(Call::CreateBoardFromSketch(p)).await
+    }
+
+    #[tool(description = "Move a footprint on a board (one undo step): to x, y (mm), angle, side; or with pad \
+        and onto_part, so the pad is centred on a pin or hole of that part (in a Part Studio the board is \
+        derived into). Its tracks' ends follow. Returns the board.")]
+    async fn move_footprint(&self, Parameters(p): Parameters<MoveFootprint>) -> Result<CallToolResult, ErrorData> {
+        self.call(Call::MoveFootprint(p)).await
+    }
+
+    #[tool(description = "Add a footprint to a board: a copy of one on it, with a new reference, value, place \
+        and pad nets.")]
+    async fn add_footprint(&self, Parameters(p): Parameters<AddFootprint>) -> Result<CallToolResult, ErrorData> {
+        self.call(Call::AddFootprint(p)).await
+    }
+
+    #[tool(description = "Remove a footprint from a board, and its symbol from the schematic.")]
+    async fn remove_footprint(&self, Parameters(p): Parameters<RemoveFootprint>) -> Result<CallToolResult, ErrorData> {
+        self.call(Call::RemoveFootprint(p)).await
+    }
+
+    #[tool(description = "Make a board's outline follow a Part Studio sketch (its largest region), moving the \
+        layout's parts with the outline's centre; or, without a sketch, break the link.")]
+    async fn link_outline(&self, Parameters(p): Parameters<LinkOutline>) -> Result<CallToolResult, ErrorData> {
+        self.call(Call::LinkOutline(p)).await
+    }
+
     #[tool(description = "Take a screenshot of the whole cadrs window (toolbar, feature list, 3D view, dialogs) \
         as it is now, scaled to fit max_size pixels. Use it to check what a change looks like.")]
     async fn screenshot(&self, Parameters(p): Parameters<Screenshot>) -> Result<CallToolResult, ErrorData> {
@@ -317,7 +376,8 @@ impl ServerHandler for Cadrs {
              Assemblies); a Part Studio has a feature list (sketches, extrudes, …) that rebuilds into parts. \
              Every change is an undoable step in the open document. Typical start: create_document, \
              add_sketch on Top, extrude its region, then get_document to check the parts and screenshot to see \
-             them.",
+             them. PCB Studio boards: get_board, derive_board into a Part Studio, get_board_fit for the pins \
+             and holes around, move_footprint (onto_part lines a pad up with a pin).",
         )
     }
 }

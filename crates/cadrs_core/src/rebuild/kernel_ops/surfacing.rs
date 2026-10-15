@@ -238,7 +238,7 @@ impl Rebuilder {
             match e {
                 FillEdge::Edge(r) => {
                     let (part, ids) = edge_ids(state, r).ok_or_else(lost)?;
-                    let body = part.body.ok_or_else(lost)?;
+                    let body = part.body.ok_or_else(|| super::super::no_body(part))?;
                     if part.part.kind == PartKind::Surface && !touched.contains(&part.part.id) {
                         touched.push(part.part.id);
                     }

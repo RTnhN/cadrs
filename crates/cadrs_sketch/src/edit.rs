@@ -191,6 +191,8 @@ fn free_end_near(s: &Sketch, m: Vec2, skip: &[CurveId], axis: CurveId) -> Option
 /// The chain through `curve`: the lines and arcs joined end to end with it (through points
 /// where exactly two of them meet), in order, each with whether it runs backwards (from its
 /// end to its start). A circle is a chain of its own. Also returns true if the chain is closed.
+/// Ends at the same place join even as separate points (used part edges keep their own points,
+/// so a used loop is one chain, to offset say).
 pub fn chain_of(s: &Sketch, curve: CurveId) -> (Vec<(CurveId, bool)>, bool) {
     let Some(c0) = s.curves.get(curve) else {
         return (Vec::new(), false);
@@ -199,14 +201,23 @@ pub fn chain_of(s: &Sketch, curve: CurveId) -> (Vec<(CurveId, bool)>, bool) {
         return (vec![(curve, false)], true);
     };
     let construction = c0.construction;
-    // The single other chain curve at a point, if exactly one continues there.
-    let next_at = |p: PointId, from: CurveId| -> Option<CurveId> {
-        let others: Vec<CurveId> = s
-            .curves_at(p)
-            .filter(|k| {
-                *k != from
-                    && s.curve_ends(*k).is_some_and(|(x, y)| x == p || y == p)
-                    && s.curves[*k].construction == construction
+    let joined = |p: PointId, q: PointId| p == q || s.pos(p).distance(s.pos(q)) < 1e-7;
+    // The single other chain curve at a point, if exactly one continues there: it, and whether
+    // it is its end (not its start) that is there.
+    let next_at = |p: PointId, from: CurveId| -> Option<(CurveId, bool)> {
+        let others: Vec<(CurveId, bool)> = s
+            .curves
+            .iter()
+            .filter(|(k, c)| *k != from && c.construction == construction)
+            .filter_map(|(k, _)| {
+                let (x, y) = s.curve_ends(k)?;
+                if joined(x, p) {
+                    Some((k, false))
+                } else if joined(y, p) {
+                    Some((k, true))
+                } else {
+                    None
+                }
             })
             .collect();
         (others.len() == 1).then(|| others[0])
@@ -215,7 +226,7 @@ pub fn chain_of(s: &Sketch, curve: CurveId) -> (Vec<(CurveId, bool)>, bool) {
     let mut forward: Vec<(CurveId, bool)> = vec![(curve, false)];
     let (mut at, mut from) = (b0, curve);
     let mut closed = false;
-    while let Some(k) = next_at(at, from) {
+    while let Some((k, at_end)) = next_at(at, from) {
         if k == curve {
             closed = true;
             break;
@@ -224,9 +235,9 @@ pub fn chain_of(s: &Sketch, curve: CurveId) -> (Vec<(CurveId, bool)>, bool) {
             break;
         }
         let (x, y) = s.curve_ends(k).unwrap_or((at, at));
-        let reversed = y == at;
-        forward.push((k, reversed));
-        at = if reversed { x } else { y };
+        // Its end is here: it runs backwards to carry on.
+        forward.push((k, at_end));
+        at = if at_end { x } else { y };
         from = k;
     }
     if closed {
@@ -234,13 +245,13 @@ pub fn chain_of(s: &Sketch, curve: CurveId) -> (Vec<(CurveId, bool)>, bool) {
     }
     let mut backward: Vec<(CurveId, bool)> = Vec::new();
     let (mut at, mut from) = (a0, curve);
-    while let Some(k) = next_at(at, from) {
+    while let Some((k, at_end)) = next_at(at, from) {
         if k == curve || forward.iter().chain(&backward).any(|(x, _)| *x == k) {
             break;
         }
         let (x, y) = s.curve_ends(k).unwrap_or((at, at));
         // Walking backwards: the curve should end where we are to run forwards.
-        let reversed = x == at;
+        let reversed = !at_end;
         backward.push((k, reversed));
         at = if reversed { y } else { x };
         from = k;
@@ -366,7 +377,11 @@ pub fn offset_geometry(
         let last = s.curve_ends(chain[n - 1].0);
         let start_of = |e: Option<(PointId, PointId)>, rev: bool| e.map(|(a, b)| if rev { b } else { a });
         let end_of = |e: Option<(PointId, PointId)>, rev: bool| e.map(|(a, b)| if rev { a } else { b });
-        start_of(first, chain[0].1).is_some() && start_of(first, chain[0].1) == end_of(last, chain[n - 1].1)
+        // (The same point, or separate ones at the same place: a used loop.)
+        match (start_of(first, chain[0].1), end_of(last, chain[n - 1].1)) {
+            (Some(p), Some(q)) => p == q || s.pos(p).distance(s.pos(q)) < 1e-7,
+            _ => false,
+        }
     };
     let joints = if closed { n } else { n.saturating_sub(1) };
     for i in 0..joints {

@@ -105,6 +105,9 @@ pub struct InsertSession {
     pub surfaces: bool,
     /// The Assemblies tab is chosen (A17.2).
     pub assemblies: bool,
+    /// The Boards tab is chosen (`docs/PCB_IN_PART_STUDIO.md` §9): the PCB Studios' boards,
+    /// each inserted as one rigid instance (the board and its components).
+    pub boards: bool,
     /// **Insert as rigid** (P3B.8, A2.4): a Part Studio row inserts one rigid instance.
     pub rigid: bool,
     /// The Standard content tab is chosen (P3B.5, A19.1).
@@ -184,6 +187,7 @@ pub fn open_insert_dialog(world: &mut World) {
         parts: true,
         surfaces: true,
         assemblies: false,
+        boards: false,
         rigid: false,
         standard: false,
         std_steps: 0,
@@ -284,7 +288,7 @@ fn dialog(t: &Theme, doc_name: String) -> impl Bundle {
                 let mut doc_panel = b.spawn((InsertDocPanel, Node { flex_direction: FlexDirection::Column, ..default() }));
                 let b = &mut doc_panel;
                 b.with_children(|b| {
-                b.spawn(TabStrip::new("insert-kind").compact().tab("Part Studios").tab("Assemblies").build(t));
+                b.spawn(TabStrip::new("insert-kind").compact().tab("Part Studios").tab("Assemblies").tab("Boards").build(t));
                 b.spawn(Node { padding: UiRect::new(Val::Px(6.0), Val::Px(6.0), Val::Px(6.0), Val::Px(4.0)), ..default() })
                     .with_children(|r| {
                         r.spawn(TextInput::new("insert-search").placeholder("Search Part Studios").height(26.0).width(Val::Percent(100.0)).build(t));
@@ -365,7 +369,26 @@ fn tree_items(doc: &ActiveDocument, parts_of: &mut super::AssemblyParts, s: &Ins
         }
         return out;
     }
-    for el in doc.doc.elements.iter().filter(|e| e.assembly_model().is_none()) {
+    if s.boards {
+        // Each PCB Studio's boards designed in cadrs: one rigid instance of the board and its
+        // components (the studio's boards as Derived features, `PcbStudio::part_features`).
+        for el in doc.doc.elements.iter().filter(|e| e.pcb().is_some()) {
+            let Some(build) = parts_of.build(&doc.doc, el.id) else { continue };
+            for b in el.pcb().map(|p| p.boards.as_slice()).unwrap_or_default() {
+                if !(b.name().to_lowercase().contains(&q) || el.name.to_lowercase().contains(&q)) {
+                    continue;
+                }
+                let f = cadrs_core::pcb::board_feature(b.id);
+                let parts: Vec<PartId> = build.parts.iter().filter(|p| p.feature == f).map(|p| p.id).collect();
+                let Some(first) = parts.first().copied() else { continue };
+                let source = InstanceSource::Studio { element: el.id, board: Some(b.id) };
+                out.push((Item { sources: vec![source], label: b.name().to_string(), rigid: parts, link: None }, Some((el.id, Some(first))), false));
+            }
+        }
+        return out;
+    }
+    // (A PCB Studio's boards are in the Boards tab.)
+    for el in doc.doc.elements.iter().filter(|e| e.assembly_model().is_none() && e.pcb().is_none()) {
         let Some(build) = parts_of.build(&doc.doc, el.id) else { continue };
         let parts: Vec<&cadrs_core::Part> = build
             .parts
@@ -388,7 +411,7 @@ fn tree_items(doc: &ActiveDocument, parts_of: &mut super::AssemblyParts, s: &Ins
         let all: Vec<InstanceSource> = parts.iter().map(|p| InstanceSource::Part { element: el.id, part: p.id }).collect();
         // A2.4: with Insert as rigid, the studio's row inserts all its parts as one instance.
         let studio_item = if s.rigid {
-            Item { sources: vec![InstanceSource::Studio { element: el.id }], label: el.name.clone(), rigid: parts.iter().map(|p| p.id).collect(), link: None }
+            Item { sources: vec![InstanceSource::Studio { element: el.id, board: None }], label: el.name.clone(), rigid: parts.iter().map(|p| p.id).collect(), link: None }
         } else {
             Item { sources: all, label: el.name.clone(), rigid: Vec::new(), link: None }
         };
@@ -512,8 +535,11 @@ fn rebuild_tree(
         n += 1;
         let img = k.and_then(|k| thumbnail(&mut thumbs, &mut images, &doc, &mut parts_of, k));
         let is_asm = item.sources.first().is_some_and(|s| s.is_assembly());
+        let is_board = item.sources.first().is_some_and(|s| matches!(s, InstanceSource::Studio { board: Some(_), .. }));
         let slug = slug(&item.label);
-        let name = if studio {
+        let name = if is_board {
+            format!("insert-board-{slug}")
+        } else if studio {
             format!("insert-studio-{slug}")
         } else if item.sources.first().is_some_and(|s| s.is_assembly()) {
             format!("insert-assembly-{slug}")
@@ -573,7 +599,18 @@ fn rebuild_tree(
     }
     if n == 0 {
         commands.spawn((
-            t.text(if s.assemblies { "No other assemblies" } else { "No Part Studios match" }, 11.5, FontWeight::NORMAL, t.muted_foreground),
+            t.text(
+                if s.assemblies {
+                    "No other assemblies"
+                } else if s.boards {
+                    "No PCB Studio boards in this document"
+                } else {
+                    "No Part Studios match"
+                },
+                11.5,
+                FontWeight::NORMAL,
+                t.muted_foreground,
+            ),
             Node { margin: UiRect::all(Val::Px(10.0)), ..default() },
             ChildOf(tree),
         ));
@@ -587,6 +624,7 @@ fn on_kind_tab(ev: On<cadrs_ui::TabStripSelect>, q: Query<&Name>, session: Optio
     match q.get(ev.entity).map(|n| n.as_str()) {
         Ok("insert-kind") => {
             s.assemblies = ev.index == 1;
+            s.boards = ev.index == 2;
             s.armed = None;
             s.pending = false;
         }
@@ -639,7 +677,7 @@ fn sync_panels(
         } else if std_panel {
             s.standard
         } else if filters {
-            !s.assemblies
+            !s.assemblies && !s.boards
         } else if other {
             s.other && !s.standard
         } else if header {
@@ -651,7 +689,13 @@ fn sync_panels(
             n.display = show(want);
         }
     }
-    let want = if s.assemblies { "Search assemblies" } else { "Search Part Studios" };
+    let want = if s.assemblies {
+        "Search assemblies"
+    } else if s.boards {
+        "Search boards"
+    } else {
+        "Search Part Studios"
+    };
     // The Current document's branch or version (ER3.2: "Main", or the version inserted from).
     let branch = s.current.as_ref().map(|o| o.version_label()).unwrap_or_else(|| "Main".into());
     for (name, mut t) in &mut q_text {
@@ -686,7 +730,8 @@ fn insert_item(world: &mut World, item: &Item, pose: Pose) {
             .sources
             .iter()
             .map(|src| match src {
-                InstanceSource::Studio { element: el } => Instance::studio(InstanceId::new(), *el, item.rigid.clone(), pose),
+                InstanceSource::Studio { element: el, board: None } => Instance::studio(InstanceId::new(), *el, item.rigid.clone(), pose),
+                InstanceSource::Studio { element: el, board: Some(b) } => Instance::board(InstanceId::new(), *el, *b, item.rigid.clone(), pose),
                 _ => Instance::new(InstanceId::new(), *src, pose),
             })
             .collect();
@@ -714,7 +759,8 @@ fn insert_item(world: &mut World, item: &Item, pose: Pose) {
     for src in &item.sources {
         let id = InstanceId::new();
         let instance = match src {
-            InstanceSource::Studio { element: el } => Instance::studio(id, *el, item.rigid.clone(), pose),
+            InstanceSource::Studio { element: el, board: None } => Instance::studio(id, *el, item.rigid.clone(), pose),
+            InstanceSource::Studio { element: el, board: Some(b) } => Instance::board(id, *el, *b, item.rigid.clone(), pose),
             _ => Instance::new(id, *src, pose),
         };
         if super::run(world, &InsertInstance { element, instance })
@@ -739,7 +785,7 @@ fn footprint_middle(world: &mut World, item: &Item) -> Vec3 {
         // A subassembly: its parts where they are in its tab.
         let placed: Vec<(ElementId, PartId, Pose)> = match src {
             InstanceSource::Part { element, part } => vec![(*element, *part, Pose::IDENTITY)],
-            InstanceSource::Studio { element } => item.rigid.iter().map(|p| (*element, *p, Pose::IDENTITY)).collect(),
+            InstanceSource::Studio { element, .. } => item.rigid.iter().map(|p| (*element, *p, Pose::IDENTITY)).collect(),
             InstanceSource::Assembly { element } => doc
                 .element(*element)
                 .and_then(|e| e.assembly_model())

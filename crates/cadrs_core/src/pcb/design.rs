@@ -23,7 +23,12 @@ fn mm2(p: Pt) -> [f64; 2] {
 /// The layout's outline loops ([`cadrs_eda::outline::loops`]) as IDF loops: the largest is
 /// the outline (label 0, counter-clockwise), the rest cut-outs (labels 1…, clockwise).
 pub fn outline_loops(design: &Design) -> Vec<Loop> {
-    let mut loops: Vec<Loop> = cadrs_eda::outline::loops(&design.board)
+    board_outline_loops(&design.board)
+}
+
+/// [`outline_loops`] of a layout.
+pub fn board_outline_loops(board: &cadrs_eda::board::Board) -> Vec<Loop> {
+    let mut loops: Vec<Loop> = cadrs_eda::outline::loops(board)
         .iter()
         .map(|edges| {
             let start = mm2(edges[0].a);
@@ -238,4 +243,69 @@ mod course {
             }
         }
     }
+}
+
+/// An IDF board (no layout of its own, imported from another tool) as a layout a Part Studio can
+/// derive (`docs/PCB_IN_PART_STUDIO.md` P7): its outline and cut-outs, its drilled holes, and
+/// each placed package as a footprint whose model is a box over the package's outline, its
+/// height tall. Read-only: there is nothing to edit it from.
+pub fn idf_layout(pcb: &PcbBoard) -> cadrs_eda::board::Board {
+    use cadrs_eda::board::{BoardShape, PlacedFootprint};
+    use cadrs_eda::footprint::{FootprintPlacement, Model3d, MountKind};
+    use cadrs_eda::graphics::{Fill, Geom, Shape, Stroke};
+    use cadrs_eda::units::mm;
+    let mut b = cadrs_eda::board::Board::default();
+    let pt = |p: [f64; 2]| Pt::mm(p[0], p[1]);
+    // Ids from what they are, so deriving the board again gives the same layout (and parts).
+    let id_of = |key: String| {
+        let h = cadrs_kernel::naming::stable_hash(key.as_bytes());
+        uuid::Uuid::from_u128((u128::from(h) << 64) | u128::from(cadrs_kernel::naming::stable_hash(format!("{key}/2").as_bytes())))
+    };
+    let shape = |geom: Geom| BoardShape { id: id_of(format!("shape {geom:?}")), shape: Shape { geom, stroke: Stroke::width(mm(0.05)), fill: Fill::None }, layer: Layer::Outline, locked: true, net: String::new() };
+    if let Some(o) = &pcb.board.outline {
+        b.thickness = mm(o.thickness);
+        b.stackup = cadrs_eda::board::Stackup::standard(b.copper_layers, b.thickness);
+        for l in &o.loops {
+            for s in l.segments() {
+                b.shapes.push(shape(match s {
+                    cadrs_idf::Segment::Line { start, end } => Geom::Line { a: pt(start), b: pt(end) },
+                    cadrs_idf::Segment::Circle { center, radius } => Geom::Circle { center: pt(center), radius: mm(radius) },
+                    cadrs_idf::Segment::Arc { start, end, center, radius, sweep } => {
+                        let a0 = (start[1] - center[1]).atan2(start[0] - center[0]) + sweep.to_radians() / 2.0;
+                        Geom::Arc { start: pt(start), mid: pt([center[0] + radius * a0.cos(), center[1] + radius * a0.sin()]), end: pt(end) }
+                    }
+                }));
+            }
+        }
+    }
+    for h in &pcb.board.holes {
+        b.shapes.push(shape(Geom::Circle { center: pt([h.x, h.y]), radius: mm(h.dia / 2.0) }));
+    }
+    for (k, p) in pcb.board.placements.iter().enumerate() {
+        let Some(pkg) = pcb.library.package(&p.package, &p.part_number) else { continue };
+        let pts: Vec<[f64; 2]> = pkg.loops.iter().flat_map(|l| l.points.iter().map(|q| [q.x, q.y])).collect();
+        let Some((lo, hi)) = pts.iter().fold(None, |acc: Option<([f64; 2], [f64; 2])>, q| Some(match acc {
+            None => (*q, *q),
+            Some((lo, hi)) => ([lo[0].min(q[0]), lo[1].min(q[1])], [hi[0].max(q[0]), hi[1].max(q[1])]),
+        })) else { continue };
+        let mut f = cadrs_eda::footprint::new_footprint(&p.package, "IDF package", MountKind::Unspecified, Pt::ZERO, Pt::ZERO, Pt::ZERO);
+        if let Some(r) = f.field_mut(cadrs_eda::symbol::fields::REFERENCE) {
+            r.text.text.text = p.refdes.clone();
+        }
+        if let Some(v) = f.field_mut(cadrs_eda::symbol::fields::VALUE) {
+            v.text.text.text = p.part_number.clone();
+        }
+        // (Its texts' ids too.)
+        for (i, t) in f.fields.iter_mut().map(|x| &mut x.text).chain(f.texts.iter_mut()).enumerate() {
+            t.id = id_of(format!("placement {k} text {i}"));
+        }
+        let mut body = cadrs_eda::model3d::Body::default();
+        body.cuboid([lo[0], lo[1], p.mount_offset], [hi[0], hi[1], p.mount_offset + pkg.height.max(0.1)], [120, 130, 140]);
+        f.models.push(Model3d { body: Some(body), ..Model3d::file("") });
+        let bottom = matches!(p.side, cadrs_idf::MountSide::Bottom);
+        // IDF mirrors bottom parts about their Y axis, cadrs about X: 180° apart ([`pcb_board`]).
+        let angle = if bottom { cadrs_eda::units::normalize_deg(180.0 - p.rotation) } else { p.rotation };
+        b.footprints.push(PlacedFootprint { id: id_of(format!("placement {k} {} {}", p.refdes, p.package)), footprint: f, placement: FootprintPlacement { at: Pt::mm(p.x, p.y), angle, side: if bottom { Side::Bottom } else { Side::Top } }, locked: true, symbol: None });
+    }
+    b
 }

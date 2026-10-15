@@ -2891,148 +2891,22 @@ fn crosses_axes(map: &ScreenMap, center: Vec2, size: Vec2) -> bool {
 // ---------------------------------------------------------------------------------------------
 // Box selection
 
-#[derive(Component)]
-struct BoxSelectFill {
-    /// Size and mode the dashes were built for.
-    built: Option<(Vec2, bool)>,
-}
-
-#[derive(Component)]
-struct BoxSelectDash;
-
-/// The box-selection rectangle (`box_select.md`), in screen space above the geometry: window
-/// (left to right) is a solid `#5a8ccb` 1 px outline over a blue fill that lands on `#d1dfee`
-/// over white; crossing (right to left) a dashed (4/3) `#f0b400` outline over a yellow fill
-/// that lands on `#fff3cf`. (The fills are chosen for Bevy's linear blending.)
-#[allow(clippy::type_complexity)]
+/// The box-selection rectangle (`box_select.md`, [`cadrs_ui::selection_box`]) while a box is
+/// dragged in the sketch.
 fn sync_box_select(
     draw: Res<SketchDraw>,
     viewport_rect: Res<ViewportRect>,
     sketch_area: Res<crate::sketch_tools::SketchArea>,
     q_area: Query<Entity, With<ViewportArea>>,
-    mut q: Query<(
-        Entity,
-        &mut BoxSelectFill,
-        &mut Node,
-        &mut BackgroundColor,
-        &mut BorderColor,
-    )>,
+    mut boxes: cadrs_ui::selection_box::Boxes,
     mut commands: Commands,
 ) {
-    let active = match (draw.state, draw.cursor_screen) {
-        (DrawState::BoxSelect { start }, Some(c)) => Some((start, c)),
+    let (host, r) = sketch_area.host(q_area.iter().next(), &viewport_rect);
+    let span = match (draw.state, draw.cursor_screen) {
+        (DrawState::BoxSelect { start }, Some(c)) => Some((start - r.min, c - r.min)),
         _ => None,
     };
-    let Some((start, cur)) = active else {
-        for (e, ..) in &q {
-            commands.entity(e).try_despawn();
-        }
-        return;
-    };
-    let (host, r) = sketch_area.host(q_area.iter().next(), &viewport_rect);
-    let rect = ViewportRect(r);
-    let crossing = cur.x < start.x;
-    let lo = start.min(cur).round();
-    let hi = start.max(cur).round();
-    let size = hi - lo;
-    let (fill, stroke) = if crossing {
-        (
-            Color::srgba_u8(0xff, 0xe0, 0x45, 102),
-            Color::srgb_u8(0xf0, 0xb4, 0x00),
-        )
-    } else {
-        (
-            Color::srgba_u8(0x24, 0x93, 0xcc, 94),
-            Color::srgb_u8(0x5a, 0x8c, 0xcb),
-        )
-    };
-    let local = lo - rect.0.min;
-    let node = Node {
-        position_type: PositionType::Absolute,
-        left: Val::Px(local.x),
-        top: Val::Px(local.y),
-        width: Val::Px(size.x),
-        height: Val::Px(size.y),
-        border: if crossing {
-            UiRect::ZERO
-        } else {
-            UiRect::all(Val::Px(1.0))
-        },
-        ..default()
-    };
-    let (e, rebuild) = match q.iter_mut().next() {
-        Some((e, mut b, mut n, mut bg, mut border)) => {
-            if *n != node {
-                *n = node;
-            }
-            bg.set_if_neq(BackgroundColor(fill));
-            border.set_if_neq(BorderColor::all(stroke));
-            let want = Some((size, crossing));
-            let rebuild = b.built != want;
-            b.built = want;
-            (e, rebuild)
-        }
-        None => {
-            let Some(area) = host else {
-                return;
-            };
-            let e = commands
-                .spawn((
-                    Name::new("sketch-box-select"),
-                    BoxSelectFill {
-                        built: Some((size, crossing)),
-                    },
-                    node,
-                    BackgroundColor(fill),
-                    BorderColor::all(stroke),
-                    Pickable::IGNORE,
-                ))
-                .id();
-            commands.entity(area).add_child(e);
-            (e, true)
-        }
-    };
-    if !rebuild {
-        return;
-    }
-    commands.entity(e).despawn_related::<Children>();
-    if !crossing {
-        return;
-    }
-    // Dashes: 4 px on, 3 px off, along each side.
-    let mut dashes: Vec<(f32, f32, f32, f32)> = Vec::new();
-    let run = |len: f32, place: &mut dyn FnMut(f32, f32)| {
-        let mut t = 0.0;
-        while t < len {
-            place(t, (len - t).min(4.0));
-            t += 7.0;
-        }
-    };
-    run(size.x, &mut |t, l| {
-        dashes.push((t, 0.0, l, 1.0));
-        dashes.push((t, size.y - 1.0, l, 1.0));
-    });
-    run(size.y, &mut |t, l| {
-        dashes.push((0.0, t, 1.0, l));
-        dashes.push((size.x - 1.0, t, 1.0, l));
-    });
-    commands.entity(e).with_children(|p| {
-        for (x, y, w, h) in dashes {
-            p.spawn((
-                BoxSelectDash,
-                Node {
-                    position_type: PositionType::Absolute,
-                    left: Val::Px(x),
-                    top: Val::Px(y),
-                    width: Val::Px(w),
-                    height: Val::Px(h),
-                    ..default()
-                },
-                BackgroundColor(stroke),
-                Pickable::IGNORE,
-            ));
-        }
-    });
+    cadrs_ui::selection_box::sync(&mut commands, &mut boxes, "sketch-box-select", host, span);
 }
 
 #[cfg(test)]

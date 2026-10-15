@@ -21,6 +21,7 @@ pub mod button;
 pub mod checkbox;
 pub mod collapsible;
 pub mod command_palette;
+pub mod color_editor;
 pub mod color_legend;
 pub mod color_picker;
 pub mod cursor;
@@ -34,6 +35,7 @@ pub mod ellipsis;
 pub mod entry_list;
 pub mod feature_dialog;
 pub mod file_picker;
+pub mod float_bar;
 pub mod floating_panel;
 pub mod fonts;
 pub mod glyphs;
@@ -45,6 +47,8 @@ pub mod list;
 pub mod quick_dim;
 pub mod radio;
 pub mod scrollbar;
+pub mod segmented;
+pub mod selection_box;
 pub mod selection_field;
 pub mod selection_list;
 pub mod menu;
@@ -73,9 +77,12 @@ use bevy::prelude::*;
 
 pub use action_row::{ActionRow, ActionRowAction};
 pub use anim::{FadeIn, FinishAnimations};
+pub use float_bar::FloatBar;
+pub use segmented::{Segmented, SegmentedSelect, SegmentedState};
 pub use floating_panel::{FloatingPanel, FloatingPanelBody, FloatingPanelClose, panel_caption};
 pub use switch::{Switch, SwitchChange, SwitchState};
 pub use avatar::Avatar;
+pub use color_editor::{ColorEditor, ColorEditorChange, ColorEditorCustom, ColorEditorDefault, ColorEditorSaveCustom, ColorEditorState, CustomColorSwatch};
 pub use color_legend::{ColorLegend, color_map};
 pub use color_picker::{ColorMixer, ColorMixerChange, ColorMixerState, ColorSwatch, SwatchColor, SwatchSelected};
 pub use command_palette::{CommandPalette, CommandPaletteClose, CommandPaletteLayer, CommandPaletteResults, palette_row};
@@ -140,7 +147,7 @@ pub use dim_edit::{DimEdit, DimEditBox, DimEditCancel, DimEditCommit, DimEditFie
 pub use tooltip::{Tooltip, TooltipStyle};
 pub use name_popup::{NamePopup, NamePopupCancel, NamePopupCommit};
 pub use text_dialog::{TextDialog, TextDialogState};
-pub use scrollbar::{horizontal_scrollbar, vertical_scrollbar};
+pub use scrollbar::{WheelScroll, horizontal_scrollbar, vertical_scrollbar};
 pub use splitter::{HoverCursor, Splitter, SplitterMoved, horizontal_splitter};
 pub use cursor::{CursorKind, CursorRequest, CursorState};
 
@@ -249,7 +256,7 @@ impl Plugin for CadrsUiPlugin {
             .add_plugins(radio::RadioPlugin)
             .add_plugins(entry_list::EntryListPlugin)
             .add_plugins(name_popup::NamePopupPlugin)
-            .add_plugins((floating_panel::FloatingPanelPlugin, switch::SwitchPlugin, version_graph::VersionGraphPlugin, splitter::SplitterPlugin))
+            .add_plugins((floating_panel::FloatingPanelPlugin, segmented::SegmentedPlugin, switch::SwitchPlugin, version_graph::VersionGraphPlugin, splitter::SplitterPlugin, selection_box::SelectionBoxPlugin, color_editor::ColorEditorPlugin))
             .add_message::<ScriptCommand>();
     }
 }

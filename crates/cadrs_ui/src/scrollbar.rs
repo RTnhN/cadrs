@@ -16,7 +16,8 @@ pub struct ScrollbarPlugin;
 impl Plugin for ScrollbarPlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(PostUpdate, (hide_unneeded, sync_gutters).after(bevy::ui::UiSystems::Layout))
-            .add_observer(on_step);
+            .add_observer(on_step)
+            .add_observer(on_wheel);
     }
 }
 
@@ -39,6 +40,26 @@ fn sync_gutters(mut q: Query<(&ScrollGutter, &ComputedNode, &mut Node)>) {
         if node.padding.right != want {
             node.padding.right = want;
         }
+    }
+}
+
+/// A scroll area (`overflow: scroll` on y) that the mouse wheel scrolls: the wheel over it or
+/// anything in it moves its [`ScrollPosition`], within its content.
+#[derive(Component, Debug, Clone, Copy, Default)]
+#[require(ScrollPosition)]
+pub struct WheelScroll;
+
+fn on_wheel(mut ev: On<Pointer<Scroll>>, mut q: Query<(&ComputedNode, &mut ScrollPosition), With<WheelScroll>>) {
+    let Ok((node, mut pos)) = q.get_mut(ev.entity) else { return };
+    ev.propagate(false);
+    let dy = match ev.unit {
+        bevy::input::mouse::MouseScrollUnit::Line => ev.y * 24.0,
+        bevy::input::mouse::MouseScrollUnit::Pixel => ev.y,
+    };
+    let max = (node.content_size().y - node.size().y).max(0.0) * node.inverse_scale_factor();
+    let y = (pos.y - dy).clamp(0.0, max);
+    if pos.y != y {
+        pos.y = y;
     }
 }
 

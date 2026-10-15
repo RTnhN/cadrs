@@ -230,6 +230,7 @@ pub mod inspection;
 pub mod linked_block;
 pub mod motor_mount;
 pub mod p3b9;
+pub mod pcb_enclosure;
 pub mod phone_case;
 pub mod piston;
 pub mod mates;

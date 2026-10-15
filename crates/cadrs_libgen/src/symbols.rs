@@ -544,6 +544,39 @@ fn more_power(lib: &mut Library) {
     }
     lib.put_symbol(port("GNDREF", Port::GroundRef));
     lib.put_symbol(port("Earth", Port::Earth));
+    for (net, what) in [("AC_L", "live"), ("AC_N", "neutral")] {
+        lib.put_symbol(ac_port(net, what, true));
+        lib.put_symbol(ac_port(net, what, false));
+    }
+}
+
+/// A mains port (`AC_L_IN`, `AC_N_OUT`, …) naming the net `net`: a flag with a sine wave in
+/// it on a short stem, pointing at the pin where the supply comes in (`input`) and away from it
+/// where it goes out. The in and out ports of a net share its name, so they join.
+fn ac_port(net: &str, what: &str, input: bool) -> Symbol {
+    let id = format!("{net}_{}", if input { "IN" } else { "OUT" });
+    let mut s = power_port(net, false);
+    s.id = id;
+    s.graphics.clear();
+    let dir = if input { "coming in" } else { "going out" };
+    s.fields[4].text.text = format!("AC {what} {dir}: power symbol creates a global label with name \"{net}\"");
+    s.keywords = format!("global power ac mains {what} {} {}", if what == "live" { "line phase L" } else { "N" }, if input { "input in" } else { "output out" });
+    s.graphics.push(line(&[(0.0, 0.0), (0.0, 1.27)], 0.254, Fill::None));
+    // The flag (closed by hand: an unfilled outline) and the wave across its wide part.
+    let flag: &[(f64, f64)] = if input {
+        &[(0.0, 1.27), (1.524, 2.54), (1.524, 4.064), (-1.524, 4.064), (-1.524, 2.54), (0.0, 1.27)]
+    } else {
+        &[(-1.524, 1.27), (1.524, 1.27), (1.524, 2.794), (0.0, 4.064), (-1.524, 2.794), (-1.524, 1.27)]
+    };
+    s.graphics.push(line(flag, 0.254, Fill::None));
+    let mid = if input { 3.302 } else { 2.032 };
+    let wave: Vec<(f64, f64)> = (0..=12).map(|i| {
+        let t = i as f64 / 12.0;
+        (-0.889 + 1.778 * t, mid + 0.381 * (t * std::f64::consts::TAU).sin())
+    }).collect();
+    s.graphics.push(line(&wave, 0.1524, Fill::None));
+    s.fields[1].text.at = p(0.0, 5.08);
+    s
 }
 
 // ---------------------------------------------------------------------------------------------

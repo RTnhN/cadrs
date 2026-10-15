@@ -107,6 +107,35 @@ impl LibraryTable {
         }
     }
 
+    /// Adds the footprints a design's board holds (each placed footprint carries a copy) that
+    /// the libraries don't have, under their own library names: a design brought in from
+    /// elsewhere (KiCad, with libraries cadrs doesn't ship) keeps finding its footprints when
+    /// the PCB is updated from the schematic, and the footprint chooser lists them.
+    pub fn add_design_footprints(&mut self, design: &crate::Design) {
+        for placed in &design.board.footprints {
+            let id = placed.footprint.id.as_str();
+            if id.is_empty() || self.footprint(id).is_some() {
+                continue;
+            }
+            let lib = match split(id).0 {
+                "" => "Design",
+                l => l,
+            };
+            // As a library holds it: no nets.
+            let mut f = placed.footprint.clone();
+            f.pads.iter_mut().for_each(|p| p.net = None);
+            match self.libraries.iter_mut().find(|l| l.enabled && l.name == lib) {
+                Some(l) => l.put_footprint(f),
+                None => {
+                    let mut l = Library::new(lib, Scope::Project);
+                    l.description = "Footprints this design holds".into();
+                    l.put_footprint(f);
+                    self.libraries.push(l);
+                }
+            }
+        }
+    }
+
     pub fn symbol(&self, id: &str) -> Option<&Symbol> {
         let (lib, name) = split(id);
         self.ordered().filter(|l| lib.is_empty() || l.name == lib).flat_map(|l| &l.symbols).find(|s| s.name() == name)

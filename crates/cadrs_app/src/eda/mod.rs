@@ -19,7 +19,7 @@ pub mod libraries;
 pub mod online;
 pub mod layers_panel;
 pub mod layout_tools;
-mod lay_dialogs;
+pub(crate) mod lay_dialogs;
 mod part_dialogs;
 pub mod part_tools;
 mod sch_dialogs;
@@ -73,13 +73,44 @@ pub enum Subject {
 
 /// The board or component whose view is shown this frame, and in which mode (`None`: not a
 /// native board, or not the PCB Studio). Read by the 3D viewport to keep its hands off in 2D.
+/// The second field is set when the Layout's tools run **on a board in the 3D view** instead
+/// (a derived board's layout edited in a Part Studio, `docs/PCB_IN_PART_STUDIO.md` §7): the
+/// view stays 3D and the pointer is mapped onto the board's face
+/// ([`crate::board_in_studio`]).
 #[derive(Resource, Default, Clone, Copy, Debug, PartialEq)]
-pub struct Eda2d(pub Option<(ElementId, Subject, Mode)>);
+pub struct Eda2d(pub Option<(ElementId, Subject, Mode)>, pub LayoutHost);
+
+/// Where the Layout's tools work (`docs/PCB_IN_PART_STUDIO.md` §7.2): the PCB Studio's flat
+/// view, or a board in a 3D view (a Part Studio's derived board, an assembly's board instance),
+/// the pointer mapped onto its face. Either way they commit `SetDesign` on the PCB Studio.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub enum LayoutHost {
+    #[default]
+    Flat,
+    Plane(PlaneHost),
+}
+
+/// A board copy in a Part Studio whose layout the Layout's tools edit: the copy, its board
+/// frame (the layout's origin and axes on its bottom face) and its thickness (mm).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct PlaneHost {
+    pub target: crate::board_in_studio::BoardTarget,
+    pub frame: cadrs_sketch::PlaneFrame,
+    pub thickness: f64,
+}
 
 impl Eda2d {
     /// A 2D view (not the 3D one) is on screen.
     pub fn flat(&self) -> bool {
-        matches!(self.0, Some((_, _, m)) if m != Mode::ThreeD)
+        self.1 == LayoutHost::Flat && matches!(self.0, Some((_, _, m)) if m != Mode::ThreeD)
+    }
+
+    /// The Layout's tools run on a board in a Part Studio's 3D view.
+    pub fn plane(&self) -> Option<&PlaneHost> {
+        match &self.1 {
+            LayoutHost::Plane(h) => Some(h),
+            LayoutHost::Flat => None,
+        }
     }
 
     /// The shown native board: (tab, board, mode).
@@ -105,6 +136,9 @@ pub struct EdaUi {
     pub modes: HashMap<(ElementId, Subject), Mode>,
     /// Per subject and mode: the view, and whether it is still the fitted one.
     pub views: HashMap<(ElementId, Subject, Mode), (View, bool)>,
+    /// The box each fitted schematic view was fitted to: it stays fitted to that box (as the
+    /// area resizes) while what is drawn grows, until fit (F) takes the drawing's box again.
+    fit_boxes: HashMap<(ElementId, Subject, Mode), cadrs_eda::units::Bounds>,
     /// The component being edited in a studio (a click on it under Components); a click on a
     /// board goes back to the board.
     pub editing: HashMap<ElementId, cadrs_core::pcb::ComponentId>,
@@ -226,24 +260,40 @@ fn reset(mut ui: ResMut<EdaUi>, mut scene: ResMut<EdaScene>, mut eda: ResMut<Eda
 
 /// The design of the board a view shows.
 pub fn design(doc: &ActiveDocument, el: ElementId, b: BoardId) -> Option<&Design> {
-    doc.doc.element(el)?.pcb()?.board(b)?.design.as_deref()
+    doc.doc.element(el)?.pcb()?.board(b)?.design()
 }
 
-/// The shown native board (or the component being edited) and its mode, this frame.
-fn track_context(doc: Option<Res<ActiveDocument>>, kind: Res<ActiveKind>, pcb: Res<PcbUi>, ui: Res<EdaUi>, mut eda: ResMut<Eda2d>) {
-    let now = doc.as_deref().filter(|_| *kind == ActiveKind::PcbStudio && pcb.view == PcbView::Board).and_then(|doc| {
-        let (el, s) = active_studio(doc)?;
-        if let Some(c) = ui.editing.get(&el).filter(|c| s.component(**c).is_some()) {
-            let subject = Subject::Component(*c);
-            return Some((el, subject, ui.mode(el, subject)));
-        }
-        let b = pcb.shown_board(el, s)?;
-        s.board(b)?.design.as_ref()?;
-        let subject = Subject::Board(b);
-        Some((el, subject, ui.mode(el, subject)))
-    });
-    if eda.0 != now {
+/// The shown native board (or the component being edited) and its mode, this frame; or the
+/// derived board copy whose layout is edited in the active Part Studio.
+#[allow(clippy::too_many_arguments)]
+fn track_context(
+    doc: Option<Res<ActiveDocument>>,
+    kind: Res<ActiveKind>,
+    pcb: Res<PcbUi>,
+    ui: Res<EdaUi>,
+    editing: Res<crate::board_in_studio::BoardEditing>,
+    cache: Res<crate::parts::PartCache>,
+    mut eda: ResMut<Eda2d>,
+) {
+    let plane = doc.as_deref().filter(|_| matches!(*kind, ActiveKind::PartStudio | ActiveKind::Assembly)).and_then(|doc| crate::board_in_studio::edited_board(doc, &editing, &cache));
+    let now = match plane {
+        Some((el, b, _)) => Some((el, Subject::Board(b), Mode::Layout)),
+        None => doc.as_deref().filter(|_| *kind == ActiveKind::PcbStudio && pcb.view == PcbView::Board).and_then(|doc| {
+            let (el, s) = active_studio(doc)?;
+            if let Some(c) = ui.editing.get(&el).filter(|c| s.component(**c).is_some()) {
+                let subject = Subject::Component(*c);
+                return Some((el, subject, ui.mode(el, subject)));
+            }
+            let b = pcb.shown_board(el, s)?;
+            s.board(b)?.design()?;
+            let subject = Subject::Board(b);
+            Some((el, subject, ui.mode(el, subject)))
+        }),
+    };
+    let host = plane.map_or(LayoutHost::Flat, |(_, _, h)| LayoutHost::Plane(h));
+    if eda.0 != now || eda.1 != host {
         eda.0 = now;
+        eda.1 = host;
     }
 }
 
@@ -275,7 +325,8 @@ fn sync_mode_bar(
     theme: Res<Theme>,
     mut commands: Commands,
 ) {
-    let want = eda.0.map(|(_, s, _)| matches!(s, Subject::Component(_)));
+    // No mode bar on a board edited in a Part Studio: it stays 3D.
+    let want = eda.0.filter(|_| eda.1 == LayoutHost::Flat).map(|(_, s, _)| matches!(s, Subject::Component(_)));
     let mut bar = q_bar.single().ok().map(|(e, b)| (e, b.0));
     // The other kind's bar goes.
     if let Some((e, kind)) = bar
@@ -340,6 +391,11 @@ fn on_mode_button(a: On<Activate>, q: Query<&ModeButton>, eda: Res<Eda2d>, mut u
 }
 
 /// Switches a board's view (also the scenario command `eda-mode schematic|layout|3d`).
+/// Shows `mode` for the board `b` of the PCB Studio `el` (when it is next shown).
+pub fn set_mode_of(world: &mut World, el: ElementId, b: BoardId, mode: Mode) {
+    world.resource_mut::<EdaUi>().modes.insert((el, Subject::Board(b)), mode);
+}
+
 pub fn set_mode(world: &mut World, mode: Mode) {
     let ctx = world.resource::<Eda2d>().0;
     if let Some((el, b, _)) = ctx {
@@ -364,18 +420,28 @@ fn current_view(ui: &EdaUi, eda: &Eda2d) -> Option<View> {
     ui.views.get(&(el, b, m)).map(|v| v.0)
 }
 
-/// A view shown the first time is fitted; a fitted view stays fitted when the area resizes.
+/// A view shown the first time is fitted; a fitted view stays fitted when the area resizes
+/// (a schematic's to the box it was first fitted to: it doesn't jump as it is drawn on).
 fn fit_views(eda: Res<Eda2d>, rect: Res<ViewportRect>, scene: Res<EdaScene>, mut ui: ResMut<EdaUi>) {
     let Some(key @ (_, _, mode)) = eda.0 else { return };
     if mode == Mode::ThreeD || scene.key.is_none() {
         return;
     }
     let size = view_size(&rect);
+    let drawn = fit_box(&scene.list);
+    let ui = &mut *ui;
     let entry = ui.views.entry(key).or_insert((View::new(size), true));
     entry.0.size = size;
+    if !entry.1 || mode != Mode::Schematic {
+        ui.fit_boxes.remove(&key);
+    }
     if entry.1
-        && let Some(b) = fit_box(&scene.list)
+        && let Some(b) = ui.fit_boxes.get(&key).copied().or(drawn)
     {
+        // (The schematic is unbounded: its view keeps the box it was fitted to.)
+        if mode == Mode::Schematic {
+            ui.fit_boxes.insert(key, b);
+        }
         let mut v = entry.0;
         v.fit(b, 0.04);
         if v != entry.0 {
@@ -395,6 +461,10 @@ pub fn fit(world: &mut World) {
         entry.0.fit(b, 0.04);
     }
     entry.1 = true;
+    match b {
+        Some(b) if key.2 == Mode::Schematic => ui.fit_boxes.insert(key, b),
+        _ => ui.fit_boxes.remove(&key),
+    };
 }
 
 /// Where the pointer is on the shown 2D view (updated by [`navigate`]).
@@ -407,12 +477,19 @@ pub struct EdaPointer {
     pub over: bool,
 }
 
+/// The last left press (when, where: a second one soon after is a double-click) and where the
+/// right button went down (let go there: a right-click, not a pan).
+type Presses<'a> = (Local<'a, Option<(f64, Vec2)>>, Local<'a, Option<Vec2>>);
+
 /// A left-button event on the 2D view, for the tools.
 #[derive(Message, Clone, Copy, Debug)]
 pub enum EdaClick {
     Press { at: cadrs_eda::units::Pt, shift: bool, ctrl: bool },
     Release { at: cadrs_eda::units::Pt },
-    Double { at: cadrs_eda::units::Pt },
+    /// A second press soon after the first, at the same place (with Shift: adds to what is selected).
+    Double { at: cadrs_eda::units::Pt, shift: bool },
+    /// A right-click (pressed and let go without panning): ends what is being drawn.
+    Secondary { at: cadrs_eda::units::Pt },
 }
 
 /// Pans (right or middle drag), zooms about the pointer (wheel) and fits (F); records the
@@ -430,7 +507,7 @@ pub(crate) fn navigate(
     q_dialogs: Query<(), With<cadrs_ui::DialogRoot>>,
     mut pointer: ResMut<EdaPointer>,
     mut clicks: MessageWriter<EdaClick>,
-    mut last_press: Local<Option<(f64, Vec2)>>,
+    (mut last_press, mut right_press): Presses,
     time: Res<Time>,
     layout: Res<layout_tools::LayoutState>,
     mut ui: ResMut<EdaUi>,
@@ -463,7 +540,12 @@ pub(crate) fn navigate(
                 }
             }
             PointerAction::Press(b) => match b {
-                PointerButton::Secondary | PointerButton::Middle if over => ui.pan_from = Some(pos),
+                PointerButton::Secondary | PointerButton::Middle if over => {
+                    ui.pan_from = Some(pos);
+                    if b == PointerButton::Secondary {
+                        *right_press = Some(pos);
+                    }
+                }
                 PointerButton::Primary if over => {
                     let at = view.to_design_pt(local(pos));
                     let now = time.elapsed_secs_f64();
@@ -471,14 +553,20 @@ pub(crate) fn navigate(
                     *last_press = Some((now, pos));
                     clicks.write(EdaClick::Press { at, shift, ctrl });
                     if double {
-                        clicks.write(EdaClick::Double { at });
+                        clicks.write(EdaClick::Double { at, shift });
                         *last_press = None;
                     }
                 }
                 _ => {}
             },
             PointerAction::Release(b) => match b {
-                PointerButton::Secondary | PointerButton::Middle => ui.pan_from = None,
+                PointerButton::Secondary | PointerButton::Middle => {
+                    ui.pan_from = None;
+                    // Let go where it was pressed (no pan): a right-click.
+                    if b == PointerButton::Secondary && right_press.take().is_some_and(|p| p.distance(pos) < 4.0) {
+                        clicks.write(EdaClick::Secondary { at: view.to_design_pt(local(pos)) });
+                    }
+                }
                 PointerButton::Primary => {
                     clicks.write(EdaClick::Release { at: view.to_design_pt(local(pos)) });
                 }
@@ -503,8 +591,8 @@ pub(crate) fn navigate(
     ui.views.insert(key, (view, fitted));
     let typing = focus.get().is_some() || !q_dialogs.is_empty();
     for k in key_events {
-        // In the Layout, F flips the selected footprint (`layout_tools`); with none, it fits.
-        let flips = key.2 == Mode::Layout && layout.selection.iter().any(|i| matches!(i, cadrs_eda::board_edit::BoardItem::Footprint(_)));
+        // In the Layout, F flips what is selected (`layout_tools`); with nothing, it fits.
+        let flips = key.2 == Mode::Layout && !layout.selection.is_empty();
         if k.state == bevy::input::ButtonState::Pressed && !typing && !flips && k.key_code == KeyCode::KeyF && !ctrl && !shift {
             commands.queue(fit);
         }
@@ -543,7 +631,15 @@ fn place_camera(eda: Res<Eda2d>, ui: Res<EdaUi>, rect: Res<ViewportRect>, surfac
 #[derive(Resource, Default, Clone, Debug, PartialEq, Hash)]
 pub struct SceneInputs {
     pub sch_highlight: Vec<cadrs_eda::sch_edit::SchItem>,
+    /// The schematic's pin ends marked where wires join, and the one a wire would join now.
+    pub sch_pin_ends: render::PinEnds,
+    pub sch_hot_pin: Option<cadrs_eda::units::Pt>,
     pub board_selected: Vec<uuid::Uuid>,
+    /// The Layout's item under the pointer (drawn lighter), the zone or polygon corner under
+    /// it, and the corner handles' half size.
+    pub board_hover: Option<uuid::Uuid>,
+    pub board_hot_corner: Option<cadrs_eda::units::Pt>,
+    pub board_handle: cadrs_eda::units::Nm,
     /// The symbol editor's selection.
     pub sym_selected: Vec<cadrs_eda::lib_edit::SymbolPart>,
     pub hidden_layers: Vec<cadrs_eda::layer::Layer>,
@@ -575,6 +671,11 @@ impl Preview {
         self.design.as_deref()
     }
 
+    /// Takes the shown design out to change it (put it back with [`Preview::set`]).
+    pub fn take(&mut self) -> Option<Design> {
+        self.design.take().map(|d| *d)
+    }
+
     /// Shows `c` instead of the stored component (the component editors).
     pub fn set_component(&mut self, c: Option<cadrs_eda::Component>) {
         self.component = c.map(Box::new);
@@ -583,6 +684,11 @@ impl Preview {
 
     pub fn component(&self) -> Option<&cadrs_eda::Component> {
         self.component.as_deref()
+    }
+
+    /// Bumped by every change of what is previewed.
+    pub fn generation(&self) -> u64 {
+        self.generation
     }
 }
 
@@ -635,7 +741,7 @@ fn rebuild_scene(
             let Some(d) = preview_design.or_else(|| design(&doc, el, b)) else { return };
             match mode {
                 Mode::Schematic => {
-                    let hl = render::Highlight { items: inputs.sch_highlight.clone() };
+                    let hl = render::Highlight { items: inputs.sch_highlight.clone(), pin_ends: inputs.sch_pin_ends, hot_pin: inputs.sch_hot_pin };
                     if d.schematic.sheets.is_empty() {
                         // A board imported alone: its (first) sheet is blank until edited.
                         render::schematic(&Design::new().schematic, 0, &render::SchematicTheme::default(), &hl)
@@ -652,6 +758,11 @@ fn rebuild_scene(
                         v.active = a;
                     }
                     v.selected = inputs.board_selected.clone();
+                    v.hovered = inputs.board_hover;
+                    v.hot_corner = inputs.board_hot_corner;
+                    if inputs.board_handle > 0 {
+                        v.handle = inputs.board_handle;
+                    }
                     render::board(&d.board, &render::BoardTheme::default(), &v)
                 }
                 _ => DrawList::default(),
@@ -804,8 +915,8 @@ fn draw_overlay(eda: Res<Eda2d>, ui: Res<EdaUi>, scene: Res<EdaScene>, cross: Re
 /// The `eda-…` scenario commands:
 /// - `eda-example <stage>`: adds an example as a board of the active PCB Studio and shows it:
 ///   the "Getting Started" course's design at a step (`gs04`, `gs07`, `gs11`, `gs14`, `gs16`,
-///   `gs17`, `gs18`, `gs25`), or `power-monitor` (the LoRa board redrawn, with its project
-///   parts as components);
+///   `gs17`, `gs18`, `gs25`), `wire-editing` ([`cadrs_eda::getting_started::wire_editing`]), or
+///   `power-monitor` (the LoRa board redrawn, with its project parts as components);
 /// - `eda-redraw power-monitor`: the shown board becomes the LoRa board (see
 ///   [`redraw_power_monitor`]);
 /// - `eda-mode schematic|layout|3d`; `eda-fit`; `eda-zoom x0 y0 x1 y1` (shows that box, mm);
@@ -830,6 +941,7 @@ fn course_stage(stage: &str) -> Option<(&'static str, Design, Vec<cadrs_eda::Com
         "gs17" => course(gs::gs17(&lib)),
         "gs18" => course(gs::gs18(&lib)),
         "gs25" => course(gs::gs25().0),
+        "wire-editing" => course(gs::wire_editing(&lib)),
         "power-monitor" => {
             use cadrs_eda::power_monitor as pm;
             let (d, lib) = pm::design();

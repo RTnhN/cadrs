@@ -184,6 +184,70 @@ fn gs14_update_pcb_from_schematic() {
 }
 
 #[test]
+fn updating_keeps_footprints_of_symbols_still_on_the_schematic() {
+    let lib = LibraryTable::builtin();
+    let (d, _) = gs14(&lib);
+    let delete = forward::Options { delete_unused: true, ..Default::default() };
+    // Footprints the libraries no longer have: kept, with a warning, not deleted.
+    let mut t = d.clone();
+    let rep = forward::update_pcb(&mut t, &LibraryTable::default(), &delete);
+    assert_eq!(t.board.footprints.len(), 3, "{:?}", rep.messages);
+    assert!(rep.messages.iter().all(|m| !m.starts_with("Remove")), "{:?}", rep.messages);
+    assert_eq!(rep.warnings.len(), 3, "{:?}", rep.warnings);
+    // D1 placed again (a new symbol, same reference and footprint): its footprint is kept and
+    // linked to the new symbol, not deleted and added again.
+    let mut t = d.clone();
+    let old = t.board.footprints.iter().find(|f| f.reference() == "D1").unwrap().id;
+    let s = t.schematic.sheets[0].symbols.iter_mut().find(|s| s.reference() == "D1").unwrap();
+    s.id = Uuid::new_v4();
+    let new_symbol = s.id;
+    let rep = forward::update_pcb(&mut t, &lib, &delete);
+    assert!(rep.messages.iter().all(|m| !m.starts_with("Remove") && !m.starts_with("Add")), "{:?}", rep.messages);
+    let d1 = t.board.footprints.iter().find(|f| f.reference() == "D1").unwrap();
+    assert_eq!((d1.id, d1.symbol), (old, Some(new_symbol)));
+}
+
+#[test]
+fn a_design_finds_the_footprints_its_board_holds() {
+    // A board brought in with a footprint from a library cadrs doesn't ship.
+    let lib = LibraryTable::builtin();
+    let (mut d, _) = gs14(&lib);
+    let i = be::footprint_index(&d.board, "D1").unwrap();
+    d.board.footprints[i].footprint.id = "Diode_SMD:D_0805_2012Metric".into();
+    let s = d.schematic.sheets[0].symbols.iter_mut().find(|s| s.reference() == "D1").unwrap().id;
+    se::set_field(&mut d.schematic, s, cadrs_eda::symbol::fields::FOOTPRINT, "Diode_SMD:D_0805_2012Metric");
+    assert!(lib.footprint("Diode_SMD:D_0805_2012Metric").is_none());
+    let mut with = lib.clone();
+    with.add_design_footprints(&d);
+    let f = with.footprint("Diode_SMD:D_0805_2012Metric").expect("found in the design");
+    assert!(f.pads.iter().all(|p| p.net.is_none()), "held as a library has it");
+    assert!(with.library("Diode_SMD").is_some_and(|l| l.footprints.iter().any(|f| f.id == "Diode_SMD:D_0805_2012Metric")));
+    // Updating from the schematic then finds it: no warning, nothing replaced.
+    let before = d.board.footprints[i].clone();
+    let rep = forward::update_pcb(&mut d, &with, &forward::Options { delete_unused: true, ..Default::default() });
+    assert!(rep.warnings.is_empty() && rep.errors.is_empty(), "{:?} {:?}", rep.warnings, rep.errors);
+    assert_eq!(d.board.footprints[i], before);
+}
+
+#[test]
+fn a_dragged_track_stays_joined() {
+    // The routed course board: the led track from D1 to R1, dragged 2 mm down. Its ends sat on
+    // the pads: short tracks keep them joined, and nothing comes loose.
+    let lib = LibraryTable::builtin();
+    let mut d = gs17(&lib);
+    assert_eq!(copper::ratsnest(&d.board), vec![]);
+    let id = d.board.tracks.iter().find(|t| t.net == "led").unwrap().id;
+    be::drag_track(&mut d.board, id, Pt::mm(0.0, -2.0));
+    assert_eq!(copper::ratsnest(&d.board), vec![], "the led net still joined");
+    assert_eq!(d.board.tracks.iter().filter(|t| t.net == "led").count(), 3);
+    // A track's end dragged on its own: the VCC corner at the via moves, both tracks with it.
+    let via = d.board.vias[0].at;
+    be::move_track_points(&mut d.board, "VCC", &[via], Pt::mm(1.0, 0.0));
+    assert_eq!(d.board.vias[0].at, via + Pt::mm(1.0, 0.0));
+    assert_eq!(copper::ratsnest(&d.board), vec![]);
+}
+
+#[test]
 fn gs15_16_outline_and_placement() {
     let lib = LibraryTable::builtin();
     let d = gs16(&lib);

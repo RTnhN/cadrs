@@ -202,15 +202,22 @@ pub enum InstanceSource {
     /// Another Assembly tab of this document: a **subassembly** (P3B.4, A17).
     Assembly { element: ElementId },
     /// A whole Part Studio inserted as one **rigid** instance (P3B.8, A2.4): the parts listed
-    /// on the instance ([`Instance::parts`]) move as one; its Edit adds or removes parts.
-    Studio { element: ElementId },
+    /// on the instance ([`Instance::parts`]) move as one; its Edit adds or removes parts. With
+    /// `board`, a PCB Studio's board (`docs/PCB_IN_PART_STUDIO.md` §9): `element` is the PCB
+    /// Studio, the parts the board's and its components'
+    /// ([`crate::pcb::PcbStudio::part_features`]).
+    Studio {
+        element: ElementId,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        board: Option<crate::pcb::BoardId>,
+    },
 }
 
 impl InstanceSource {
     /// The Part Studio or Assembly tab it comes from.
     pub fn element(&self) -> ElementId {
         match self {
-            InstanceSource::Part { element, .. } | InstanceSource::Assembly { element } | InstanceSource::Studio { element } => *element,
+            InstanceSource::Part { element, .. } | InstanceSource::Assembly { element } | InstanceSource::Studio { element, .. } => *element,
         }
     }
 
@@ -303,7 +310,22 @@ impl Instance {
 
     /// A rigid instance of the whole Part Studio `element` (A2.4) with `parts`.
     pub fn studio(id: InstanceId, element: ElementId, parts: Vec<PartId>, pose: Pose) -> Self {
-        Self { parts, ..Self::new(id, InstanceSource::Studio { element }, pose) }
+        Self { parts, ..Self::new(id, InstanceSource::Studio { element, board: None }, pose) }
+    }
+
+    /// The parts a rigid instance moves as one: a Part Studio instance's listed parts; a
+    /// board's, the board's parts as they are now ([`crate::pcb::PcbStudio::board_parts`]).
+    pub fn rigid_parts<'a>(&'a self, doc: &Document) -> std::borrow::Cow<'a, [PartId]> {
+        match self.source {
+            InstanceSource::Studio { element, board: Some(b) } => std::borrow::Cow::Owned(doc.element(element).and_then(|e| e.pcb()).map(|s| s.board_parts(b)).unwrap_or_default()),
+            _ => std::borrow::Cow::Borrowed(&self.parts),
+        }
+    }
+
+    /// A rigid instance of the board `board` of the PCB Studio `element` (§9): the board and
+    /// its components.
+    pub fn board(id: InstanceId, element: ElementId, board: crate::pcb::BoardId, parts: Vec<PartId>, pose: Pose) -> Self {
+        Self { parts, ..Self::new(id, InstanceSource::Studio { element, board: Some(board) }, pose) }
     }
 
     /// Its placement of its subassembly's instance `child` (an override when flexible).
@@ -460,11 +482,17 @@ fn identity(doc: crate::ids::DocumentId, inst: &Instance) -> (crate::ids::Docume
     let kind = match inst.source {
         InstanceSource::Part { .. } => 0,
         InstanceSource::Assembly { .. } => 1,
-        InstanceSource::Studio { .. } => 2,
+        InstanceSource::Studio { board: None, .. } => 2,
+        InstanceSource::Studio { board: Some(_), .. } => 3,
+    };
+    // A board's instances are numbered apart from the other boards' of its PCB Studio.
+    let part = match inst.source {
+        InstanceSource::Studio { board: Some(b), .. } => Some(PartId::new(crate::pcb::board_feature(b), 0)),
+        _ => inst.source.part(),
     };
     match inst.link {
-        Some(r) => (r.document_or(doc), r.element, inst.source.part(), kind),
-        None => (doc, inst.source.element(), inst.source.part(), kind),
+        Some(r) => (r.document_or(doc), r.element, part, kind),
+        None => (doc, inst.source.element(), part, kind),
     }
 }
 
@@ -476,8 +504,12 @@ pub fn source_part_name(doc: &Document, source: &InstanceSource, build: Option<&
         InstanceSource::Assembly { element } => {
             return doc.element(element).map(|e| e.name.clone()).unwrap_or_else(|| "Assembly".into());
         }
-        InstanceSource::Studio { element } => {
+        InstanceSource::Studio { element, board: None } => {
             return doc.element(element).map(|e| e.name.clone()).unwrap_or_else(|| "Part Studio".into());
+        }
+        // A board: its name.
+        InstanceSource::Studio { element, board: Some(b) } => {
+            return doc.element(element).and_then(|e| e.pcb()).and_then(|s| s.board(b)).map(|b| b.name().to_string()).unwrap_or_else(|| "Board".into());
         }
     };
     let props = doc.element(element).map(|e| e.part_props()).unwrap_or(&[]);
@@ -533,6 +565,8 @@ pub fn transform_solid(s: &Solid, pose: &Pose) -> Solid {
     for a in &mut out.face_aliases {
         a.plane = a.plane.map(|fr| pose.frame(&fr));
     }
+    // Its pictures (an Image feature's, a derived board's skins) with it.
+    out.images = s.images.iter().map(|i| i.mapped(|q| pose.apply(q))).collect();
     out
 }
 
@@ -676,7 +710,7 @@ pub fn document_occurrence_solids(doc: &Document, element: ElementId) -> std::co
         }
         let el = doc.element(e)?;
         el.assembly_model().is_none().then_some(())?;
-        let b = crate::rebuild::build(el.features());
+        let b = crate::rebuild::build(el.part_features());
         builds.insert(e, b.clone());
         Some(b)
     })

@@ -395,6 +395,7 @@ fn place_on_pick(
     mass: Option<Res<crate::mass_props::MassPanel>>,
     sessions: PickSessions,
     mut triad: ResMut<Triad>,
+    eda: Res<crate::eda::Eda2d>,
 ) {
     let Some(doc) = doc else { return };
     // Hidden while measuring; gone while inserting, mating or grouping.
@@ -402,7 +403,8 @@ fn place_on_pick(
     if triad.hidden != hidden {
         triad.hidden = hidden;
     }
-    if super::active_assembly(&doc).is_none() || insert.is_some() || sessions.0.is_some() || sessions.1.is_some() || sessions.2.is_some() || sessions.3.editing() || sessions.4.is_some() || sessions.5.is_some() {
+    // (Gone too while a board's layout is edited in context.)
+    if super::active_assembly(&doc).is_none() || eda.plane().is_some() || insert.is_some() || sessions.0.is_some() || sessions.1.is_some() || sessions.2.is_some() || sessions.3.editing() || sessions.4.is_some() || sessions.5.is_some() {
         if triad.frame.is_some() {
             *triad = Triad::default();
         }

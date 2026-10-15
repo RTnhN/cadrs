@@ -339,7 +339,7 @@ fn plus_creates_named_boards_and_components() {
     let o = b.board.board.outline.as_ref().unwrap();
     assert!((o.loops[0].area() - 8000.0).abs() < 1e-9);
     assert_eq!(b.board.thickness(), 1.6);
-    assert!(b.design.is_some());
+    assert!(b.design().is_some());
 
     // Renamed (as the inline edit after + does); names stay unique.
     let b1 = s.boards[0].id;
@@ -400,7 +400,7 @@ fn designs_and_components_edit_through_undo() {
     h.execute(&mut d, &SetDesign { element: id, board, design: Box::new(course.clone()), label: "Fill zones".into() }).unwrap();
     assert_eq!(h.undo_label(), Some("Fill zones"));
     let b = studio(&d, id).board(board).unwrap();
-    assert_eq!(b.design.as_deref(), Some(&course));
+    assert_eq!(b.design(), Some(&course));
     assert_eq!(b.board.board.placements.len(), 3);
     assert_eq!(b.name(), "Board 1");
     h.undo(&mut d);
@@ -422,4 +422,59 @@ fn designs_and_components_edit_through_undo() {
     // Saved and loaded.
     let back: Document = ron::from_str(&ron::to_string(&d).unwrap()).unwrap();
     assert_eq!(studio(&back, id), studio(&d, id));
+}
+
+/// Renaming a component renames its symbol and footprint (they carry its name) and the board
+/// schematics' symbols placed from them follow, with their Footprint fields and values.
+#[test]
+fn renaming_a_component_follows_on_schematics() {
+    let (mut d, mut h, id) = doc_with_studio();
+    h.execute(&mut d, &AddBoard::new_board(id)).unwrap();
+    let lib = project_library_name(&d.element(id).unwrap().name);
+    let mut part = cadrs_eda::Component::new("LDO");
+    part.symbol = Some(cadrs_eda::lib_edit::new_symbol("LDO", "U", true));
+    part.footprint = Some(cadrs_eda::lib_edit::new_footprint("LDO", "LDO", cadrs_eda::footprint::MountKind::Smd));
+    h.execute(&mut d, &AddComponent { element: id, name: None, value: Some(Box::new(part.clone())) }).unwrap();
+    // Placed from the project library, as the chooser offers it.
+    let s = studio(&d, id);
+    let board = s.boards[0].id;
+    let mut design = s.boards[0].design().unwrap().clone();
+    let mut def = part.symbol.clone().unwrap();
+    def.id = format!("{lib}:LDO");
+    cadrs_eda::lib_edit::set_symbol_field(&mut def, cadrs_eda::symbol::fields::FOOTPRINT, &format!("{lib}:LDO"));
+    cadrs_eda::sch_edit::place_symbol(&mut design.schematic, 0, &def, cadrs_eda::units::Pt::ZERO, uuid::Uuid::new_v4());
+    h.execute(&mut d, &SetDesign { element: id, board, design: Box::new(design), label: "Place".into() }).unwrap();
+
+    let c = studio(&d, id).components[0].id;
+    h.execute(&mut d, &RenameComponent { element: id, component: c, name: "AMS1117".into() }).unwrap();
+    let s = studio(&d, id);
+    let comp = &s.components[0].component;
+    assert_eq!(comp.symbol.as_ref().unwrap().name(), "AMS1117");
+    assert_eq!(comp.footprint.as_ref().unwrap().name(), "AMS1117");
+    let sch = &s.boards[0].design().unwrap().schematic;
+    let placed = &sch.sheets[0].symbols[0];
+    assert_eq!(placed.symbol, format!("{lib}:AMS1117"));
+    assert!(sch.symbol(&placed.symbol).is_some());
+    assert_eq!(placed.field(cadrs_eda::symbol::fields::FOOTPRINT).unwrap().value(), format!("{lib}:AMS1117"));
+    assert_eq!(placed.value(), "AMS1117");
+    // One step: undo puts every name back.
+    h.undo(&mut d);
+    assert_eq!(studio(&d, id).boards[0].design().unwrap().schematic.sheets[0].symbols[0].symbol, format!("{lib}:LDO"));
+}
+
+/// A part added under a name that is taken (pasted beside the original) is numbered, and so
+/// are its symbol and footprint when they carry its name.
+#[test]
+fn a_numbered_copy_renames_its_symbol() {
+    let (mut d, mut h, id) = doc_with_studio();
+    let mut part = cadrs_eda::Component::new("LoRa");
+    part.symbol = Some(cadrs_eda::lib_edit::new_symbol("LoRa", "U", true));
+    part.footprint = Some(cadrs_eda::lib_edit::new_footprint("SMD-16", "SMD-16", cadrs_eda::footprint::MountKind::Smd));
+    for _ in 0..2 {
+        h.execute(&mut d, &AddComponent { element: id, name: None, value: Some(Box::new(part.clone())) }).unwrap();
+    }
+    let c = &studio(&d, id).components[1].component;
+    assert_eq!(c.name, "LoRa (1)");
+    assert_eq!(c.symbol.as_ref().unwrap().name(), "LoRa (1)");
+    assert_eq!(c.footprint.as_ref().unwrap().name(), "SMD-16");
 }

@@ -78,7 +78,7 @@ use bevy::input_focus::InputFocus;
 use bevy::prelude::*;
 use cadrs_core::assembly::{Instance, InstanceId, Pose};
 use cadrs_core::rebuild::Build;
-use cadrs_core::{Element, ElementId, Feature, PartId};
+use cadrs_core::{Element, ElementId, Feature, FeatureId, PartId};
 use cadrs_ui::input::TextInputField;
 
 use crate::parts::{PartCache, PickFilter};
@@ -255,6 +255,12 @@ type AssemblyKey = (ElementId, Vec<cadrs_core::assembly::structure::Occurrence>,
 type OccurrenceTable = (HashMap<PartId, InstanceId>, HashMap<InstanceId, PartId>);
 static OCCURRENCES: std::sync::RwLock<Option<OccurrenceTable>> = std::sync::RwLock::new(None);
 
+/// The board instances the active assembly's view hosts (Edit layout in context), at any depth:
+/// by assembly: [(id as a feature's, PCB Studio, board)]. Set with the view's parts, so the
+/// per-frame lookups ([`crate::board_in_studio::instance_board`]) don't walk the assembly.
+pub type BoardHosts = HashMap<ElementId, Vec<(FeatureId, ElementId, cadrs_core::pcb::BoardId)>>;
+pub static BOARD_HOSTS: std::sync::RwLock<Option<BoardHosts>> = std::sync::RwLock::new(None);
+
 /// The occurrence a part of the view stands for (the instance itself for a part instance).
 pub fn occurrence_of(part: PartId) -> InstanceId {
     OCCURRENCES
@@ -320,7 +326,8 @@ impl AssemblyParts {
         if el.assembly_model().is_some() {
             return (None, true);
         }
-        let features = el.features();
+        // (A PCB Studio's boards as Derived features: a board's instance.)
+        let features = el.part_features();
         if let Some((f, b)) = self.builds.get(&element)
             && f.as_slice() == features
         {
@@ -419,6 +426,65 @@ pub fn update_assembly_parts(doc: &ActiveDocument, el: &Element, cache: &mut Par
         }
     }
     cache.set_assembly_parts(el.id, parts, props, appearances);
+    // Each board instance as a derived board's output (its frame where the instance puts it,
+    // its parts the instance's), keyed by the instance's id: Edit layout in context works on it
+    // as on a Part Studio's derived board (`crate::board_in_studio`).
+    // (Top-level instances by their own id; one inside a subassembly by its board part's
+    // occurrence, `crate::board_in_studio::instance_board`.)
+    // (key, PCB Studio, board, pose, source part → view part)
+    type Host = (FeatureId, ElementId, cadrs_core::pcb::BoardId, Pose, HashMap<PartId, PartId>);
+    let mut hosts: Vec<Host> = Vec::new();
+    for i in &view.instances {
+        let cadrs_core::assembly::InstanceSource::Studio { element, board: Some(b) } = i.source else { continue };
+        let ids = occ.iter().filter(|o| o.top == i.id).map(|o| (o.part, o.view_part)).collect();
+        hosts.push((FeatureId(i.id.0), element, b, i.pose, ids));
+    }
+    for o in occ.iter().filter(|o| o.child.is_some()) {
+        let Some(b) = crate::board_in_studio::board_of_occurrence(d, o) else { continue };
+        // Its parts: those of the same board instance (same subassembly instance, studio, board
+        // and place in it: deeper down, `child` is the innermost subassembly's instance).
+        let ids = occ.iter().filter(|x| x.top == o.top && x.child == o.child && x.element == o.element && x.part.feature == o.part.feature && x.in_top == o.in_top).map(|x| (x.part, x.view_part)).collect();
+        hosts.push((FeatureId(o.id.0), o.element, b, o.pose, ids));
+    }
+    if let Ok(mut t) = BOARD_HOSTS.write() {
+        let t = t.get_or_insert_with(HashMap::new);
+        // (Only this document's assemblies: a closed one's entries go.)
+        t.retain(|a, _| doc.doc.element(*a).is_some());
+        t.insert(el.id, hosts.iter().map(|h| (h.0, h.1, h.2)).collect());
+    }
+    let mut boards = HashMap::new();
+    for (key, element, b, p, ids) in hosts {
+        let Some(out) = builds.get(&element).and_then(|x| x.derived.get(&cadrs_core::pcb::board_feature(b))) else { continue };
+        let id = |q: &PartId| ids.get(q).copied();
+        let mut mine = cadrs_core::derived::DerivedOutput {
+            parts: out.parts.iter().filter_map(id).collect(),
+            boards: out
+                .boards
+                .iter()
+                .filter_map(|c| {
+                    let f = c.frame;
+                    let frame = cadrs_sketch::PlaneFrame { origin: p.apply(f.origin), u: p.rotate(f.u), v: p.rotate(f.v) };
+                    Some(cadrs_core::derived::BoardCopy { part: id(&c.part)?, frame, thickness: c.thickness })
+                })
+                .collect(),
+            footprints: out.footprints.iter().filter_map(|(q, f)| Some((id(q)?, *f))).collect(),
+            ..Default::default()
+        };
+        // Its components running into the other instances, hidden or not (on their meshes, as
+        // a Part Studio's derived board checks them).
+        let solid = |p: &PartId| cache.parts.iter().find(|x| x.id == *p).map(|x| (x.id, x.solid.clone()));
+        let comps: Vec<(PartId, Arc<cadrs_core::solid::Solid>)> = mine.footprints.iter().filter_map(|(p, _)| solid(p)).collect();
+        let others: Vec<(PartId, Arc<cadrs_core::solid::Solid>)> = cache.parts.iter().filter(|x| !ids.values().any(|v| *v == x.id)).map(|x| (x.id, x.solid.clone())).collect();
+        if let Some(frame) = mine.boards.first().map(|b| b.frame) {
+            let c: Vec<(PartId, &Arc<cadrs_core::solid::Solid>)> = comps.iter().map(|(p, s)| (*p, s)).collect();
+            let o: Vec<(PartId, &Arc<cadrs_core::solid::Solid>)> = others.iter().map(|(p, s)| (*p, s)).collect();
+            mine.collisions = cadrs_core::pcb::fit::collisions(&c, &o, &frame);
+        }
+        boards.insert(key, mine);
+    }
+    if cache.derived != boards {
+        cache.derived = boards;
+    }
     // Sources still rebuilding: the Rebuilding… pill, and the first view's fit waits for them.
     cache.rebuilding = waiting;
     asm.key = Some(key);
@@ -460,7 +526,7 @@ pub fn shown_points(doc: &ActiveDocument) -> Vec<Vec3> {
     let mut out = Vec::new();
     for o in cadrs_core::assembly::structure::occurrences(&doc.doc, model).iter().filter(|o| !o.hidden) {
         let Some(el) = doc.doc.element(o.element) else { continue };
-        let build = cadrs_core::rebuild::build(el.features());
+        let build = cadrs_core::rebuild::build(el.part_features());
         let Some(p) = build.part(o.part) else { continue };
         out.extend(p.solid.positions.iter().map(|q| {
             let w = o.pose.apply(*q);

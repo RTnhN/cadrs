@@ -10,8 +10,9 @@
 //! - The log is **append-only**: undo, redo and Restore are changes like any other and add
 //!   entries of their own. [`RestoreDocument`] is the command Restore runs (a whole-document
 //!   step, so it is undone as one).
-//! - Entry 0 is **Start**: the document as it was when the log began (created, or opened for
-//!   the first time with this version of cadrs), always with a full copy.
+//! - Entry 0 is **Start**: the document as it was when the log began (created, opened for the
+//!   first time with this version of cadrs, or the oldest state kept when it was last
+//!   compacted), always with a full copy.
 //! - It is stored next to the document, in `<store>/<id>/history.ron`
 //!   ([`HistoryLog::save`], [`HistoryLog::load`]).
 //! - **Versions** (P3D.3, T7, TD12.2): a [`Version`] is a named, immutable pointer to an entry
@@ -31,11 +32,16 @@
 //!   the workspace they were made in ([`Version::workspace`]). A log without branches (every
 //!   log before P3E.4) is Main only and is written exactly as before.
 //!
+//! - **Closing the document compacts it** ([`HistoryLog::compact`]): the changes are for the
+//!   History panel while the document is open; once it is closed only the entries versions
+//!   point at and each workspace's last are kept, and the oldest of them becomes Start.
+//!
 //! Commands are applied through snapshots (see [`crate::command`]), not replayed, so a delta
 //! is the element contents a change produced rather than the command: replaying a delta can
 //! never come out differently from the original change.
 
 use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex};
 
 use serde::{Deserialize, Serialize};
 
@@ -45,7 +51,10 @@ use crate::ids::{DocumentId, ElementId, FeatureId};
 use crate::library::Timestamp;
 use crate::store::{Store, StoreError};
 
+mod compact;
 mod workspaces;
+mod writer;
+pub use writer::flush as flush_saves;
 use workspaces::Track;
 pub use workspaces::{MAIN_NAME, Workspace, WorkspaceId};
 
@@ -230,7 +239,8 @@ pub struct LogEntry {
     pub label: String,
     /// [`document_hash`] of the state after it.
     pub hash: u64,
-    pub delta: Delta,
+    /// Shared by copies of the log (a copy is made for every save in the background).
+    pub delta: Arc<Delta>,
 }
 
 /// A version's id.
@@ -312,9 +322,10 @@ pub struct HealthyMark {
 pub struct HistoryLog {
     pub version: u32,
     pub document: DocumentId,
+    /// Recorded entries never change (their RON is kept for the next save, see [`RonCache`]).
     pub entries: Vec<LogEntry>,
     /// Full copies: (entry index, the state after it). Entry 0 always has one.
-    snapshots: Vec<(usize, Document)>,
+    snapshots: Vec<(usize, Arc<Document>)>,
     #[serde(default)]
     pub healthy: Vec<HealthyMark>,
     /// The versions, oldest first.
@@ -336,6 +347,77 @@ pub struct HistoryLog {
     /// Read from an older schema and rewritten in memory: save it to keep the new form.
     #[serde(skip)]
     upgraded: bool,
+    /// The RON of the entries and full copies already written (see [`RonCache`]).
+    #[serde(skip)]
+    ron: RonCache,
+}
+
+/// The RON text of each entry and full copy the log was last saved with, so saving a long log
+/// only serializes what changed since: entries and full copies never change once recorded, and
+/// serializing them all again took 1.6 s for a 200 MB log on every change. Each piece is kept
+/// with the key of its entry (its time, hash and label) and only reused while that entry is
+/// still there (a workspace switch swaps them all).
+#[derive(Default)]
+struct RonCache(Arc<Mutex<RonPieces>>);
+
+#[derive(Default)]
+struct RonPieces {
+    entries: Vec<(EntryKey, Box<ron::value::RawValue>)>,
+    snapshots: Vec<((usize, EntryKey), Box<ron::value::RawValue>)>,
+}
+
+#[derive(PartialEq)]
+struct EntryKey(Timestamp, u64, String);
+
+impl EntryKey {
+    fn of(e: &LogEntry) -> Self {
+        Self(e.time, e.hash, e.label.clone())
+    }
+}
+
+impl RonCache {
+    /// The same cache, for a copy of the log that is saved in its place.
+    fn shared(&self) -> Self {
+        Self(self.0.clone())
+    }
+}
+
+/// A copy starts empty (it fills on its first save): its entries may be changed in place.
+/// Every log's cache is equal.
+impl Clone for RonCache {
+    fn clone(&self) -> Self {
+        Self::default()
+    }
+}
+
+impl PartialEq for RonCache {
+    fn eq(&self, _: &Self) -> bool {
+        true
+    }
+}
+
+impl std::fmt::Debug for RonCache {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("RonCache")
+    }
+}
+
+/// [`HistoryLog`] as it is written, with its entries and full copies as RON already made:
+/// the same fields, in the same order and with the same rules, so the file is the same.
+#[derive(Serialize)]
+struct LogRon<'a> {
+    version: u32,
+    document: DocumentId,
+    entries: Vec<&'a ron::value::RawValue>,
+    snapshots: Vec<(usize, &'a ron::value::RawValue)>,
+    healthy: &'a [HealthyMark],
+    versions: &'a [Version],
+    #[serde(skip_serializing_if = "WorkspaceId::is_main")]
+    current: WorkspaceId,
+    #[serde(skip_serializing_if = "<[_]>::is_empty")]
+    workspaces: &'a [Workspace],
+    #[serde(skip_serializing_if = "<[_]>::is_empty")]
+    parked: &'a [Track],
 }
 
 /// How a change was made, for its action.
@@ -364,13 +446,13 @@ impl HistoryLog {
             feature_name: String::new(),
             label: "Start".into(),
             hash: document_hash(doc),
-            delta: Delta::default(),
+            delta: Arc::default(),
         };
         Self {
             version: HISTORY_VERSION,
             document: doc.id,
             entries: vec![entry],
-            snapshots: vec![(0, doc.clone())],
+            snapshots: vec![(0, Arc::new(doc.clone()))],
             healthy: Vec::new(),
             versions: Vec::new(),
             current: WorkspaceId::MAIN,
@@ -378,6 +460,7 @@ impl HistoryLog {
             parked: Vec::new(),
             head: Some(doc.clone()),
             upgraded: false,
+            ron: RonCache::default(),
         }
     }
 
@@ -440,11 +523,11 @@ impl HistoryLog {
             feature_name: what.feature_name.clone(),
             label,
             hash: document_hash(doc),
-            delta,
+            delta: Arc::new(delta),
         });
         let i = self.head_index();
         if i.is_multiple_of(SNAPSHOT_EVERY) {
-            self.snapshots.push((i, doc.clone()));
+            self.snapshots.push((i, Arc::new(doc.clone())));
         }
         self.head = Some(doc.clone());
         Some(i)
@@ -555,20 +638,66 @@ impl HistoryLog {
         self.save_path(&Self::path(store, self.document))
     }
 
-    /// Writes the log to `path`.
+    /// Writes the log to `path`, after the saves still being written in the background.
     pub fn save_path(&self, path: &Path) -> Result<(), StoreError> {
-        let text = ron::to_string(self).map_err(|e| StoreError::Parse(e.to_string()))?;
-        if let Some(dir) = path.parent() {
-            std::fs::create_dir_all(dir)?;
+        writer::flush();
+        let text = self.to_ron().map_err(|e| StoreError::Parse(e.to_string()))?;
+        writer::write(path, &text)
+    }
+
+    /// Writes the log next to its document on another thread, in order with every other save
+    /// of a log ([`Self::save`] and [`Self::load`] wait for it; [`flush_saves`] before the
+    /// process ends). A long log takes a while to write (100 ms for 200 MB, more the first
+    /// time), so the app saves this way after each change. Errors are printed.
+    pub fn save_in_background(&self, store: &Store) {
+        let mut log = self.clone();
+        log.head = None;
+        log.ron = self.ron.shared();
+        writer::queue(Self::path(store, self.document), move || log.to_ron());
+    }
+
+    /// The log as RON, the same as `ron::to_string(self)`, serializing only the entries and full
+    /// copies the last call didn't (see [`RonCache`]).
+    pub fn to_ron(&self) -> Result<String, ron::Error> {
+        let mut pieces = self.ron.0.lock().unwrap_or_else(|e| e.into_inner());
+        let RonPieces { entries, snapshots } = &mut *pieces;
+        entries.truncate(self.entries.len());
+        for (i, e) in self.entries.iter().enumerate() {
+            let key = EntryKey::of(e);
+            if entries.get(i).is_some_and(|(k, _)| *k == key) {
+                continue;
+            }
+            let raw = ron::value::RawValue::from_rust(e)?;
+            entries.truncate(i);
+            entries.push((key, raw));
         }
-        let tmp = path.with_extension("ron.tmp");
-        std::fs::write(&tmp, text.as_bytes())?;
-        std::fs::rename(&tmp, path)?;
-        Ok(())
+        snapshots.truncate(self.snapshots.len());
+        for (i, (at, doc)) in self.snapshots.iter().enumerate() {
+            let key = (*at, EntryKey::of(&self.entries[*at]));
+            if snapshots.get(i).is_some_and(|(k, _)| *k == key) {
+                continue;
+            }
+            let raw = ron::value::RawValue::from_rust(doc)?;
+            snapshots.truncate(i);
+            snapshots.push((key, raw));
+        }
+        ron::to_string(&LogRon {
+            version: self.version,
+            document: self.document,
+            entries: entries.iter().map(|(_, r)| &**r).collect(),
+            snapshots: snapshots.iter().map(|((at, _), r)| (*at, &**r)).collect(),
+            healthy: &self.healthy,
+            versions: &self.versions,
+            current: self.current,
+            workspaces: &self.workspaces,
+            parked: &self.parked,
+        })
     }
 
     /// Reads the log of document `id`, if it has one.
     pub fn load(store: &Store, id: DocumentId) -> Result<Option<Self>, StoreError> {
+        // (A first log may still be on its way.)
+        writer::flush();
         let path = Self::path(store, id);
         if !path.is_file() {
             return Ok(None);
@@ -576,8 +705,9 @@ impl HistoryLog {
         Self::load_path(&path).map(Some)
     }
 
-    /// Reads a log file.
+    /// Reads a log file (after the saves still being written in the background).
     pub fn load_path(path: &Path) -> Result<Self, StoreError> {
+        writer::flush();
         let text = std::fs::read_to_string(path)?;
         let mut log: Self = ron::from_str(&text).map_err(|e| StoreError::Parse(e.to_string()))?;
         if log.version > HISTORY_VERSION {
@@ -612,14 +742,14 @@ impl HistoryLog {
             let mut check = before.clone();
             delta.apply(&mut check);
             let snapshot = self.snapshots.iter().find(|(i, _)| *i == k).map(|(_, d)| d);
-            if check != after || snapshot.is_some_and(|d| *d != after) {
+            if check != after || snapshot.is_some_and(|d| **d != after) {
                 return;
             }
             deltas.push(delta);
             before = after;
         }
         for (e, d) in self.entries[1..].iter_mut().zip(deltas) {
-            e.delta = d;
+            e.delta = Arc::new(d);
         }
         self.version = HISTORY_VERSION;
         self.head = Some(before);
@@ -635,12 +765,12 @@ impl HistoryLog {
 
 /// The document as it was after entry `k` of a workspace's changes: the nearest full copy at or
 /// before it with the deltas after that applied.
-fn track_state_at(entries: &[LogEntry], snapshots: &[(usize, Document)], k: usize) -> Option<Document> {
+fn track_state_at(entries: &[LogEntry], snapshots: &[(usize, Arc<Document>)], k: usize) -> Option<Document> {
     if k >= entries.len() {
         return None;
     }
     let (at, snap) = snapshots.iter().filter(|(i, _)| *i <= k).max_by_key(|(i, _)| *i)?;
-    let mut doc = snap.clone();
+    let mut doc = (**snap).clone();
     for e in &entries[at + 1..=k] {
         e.delta.apply(&mut doc);
     }

@@ -107,6 +107,19 @@ impl Rebuilder {
                 "The parts to transform no longer exist".into()
             });
         }
+        // A derived board moves as one: its components (mesh parts) go with its board part.
+        if !x.copies() {
+            let boards: Vec<PartId> = parts.clone();
+            for out in state.derived.values() {
+                for b in boards.iter().filter(|b| out.boards.iter().any(|c| c.part == **b)) {
+                    for c in out.components_of(*b) {
+                        if !parts.contains(&c) && state.part(c).is_some() {
+                            parts.push(c);
+                        }
+                    }
+                }
+            }
+        }
         let missing = x.parts.iter().filter(|p| state.part(**p).is_none()).count();
         let map = self.transform_map(before, x, state)?;
         let mut out = if parts.is_empty() && x.context.is_empty() {
@@ -296,11 +309,18 @@ impl Rebuilder {
                 this.kernel.release(p.body);
             }
         };
+        // A derived board's components (meshes, no body) move with a rigid motion; a scale
+        // leaves them (and says so).
+        let mut meshes: Vec<PartId> = Vec::new();
+        let mut left: Vec<String> = Vec::new();
         for pid in parts {
             let p = state.part(*pid).expect("present");
             let Some(body) = p.body else {
-                release(self, &placed);
-                return Err("A part to transform has no body".into());
+                match map {
+                    Map::Rigid(_) => meshes.push(*pid),
+                    Map::Scale { .. } => left.push(p.part.name.clone()),
+                }
+                continue;
             };
             let r = match self.mapped_copy(body, map) {
                 Ok(r) => r,
@@ -367,6 +387,43 @@ impl Rebuilder {
                     solid.images = old.images.iter().map(|i| i.mapped(|q| map.world(q))).collect();
                 }
             }
+            if let Map::Rigid(m) = map {
+                for pid in &meshes {
+                    if let Some(p) = st.parts.iter_mut().find(|q| q.part.id == *pid) {
+                        p.part.solid = Arc::new(crate::pcb::board3d::moved(&p.part.solid, m));
+                    }
+                }
+                // A derived board moved: its frame (where its layout is drawn and edited) too. A
+                // component moved without its board: how, after its place on the layout.
+                if st.derived.values().any(|o| o.boards.iter().any(|b| parts.contains(&b.part)) || meshes.iter().any(|p| o.footprints.iter().any(|(q, _)| q == p))) {
+                    let mut all = (*st.derived).clone();
+                    for o in all.values_mut() {
+                        let moved: Vec<PartId> = o.boards.iter().filter(|b| parts.contains(&b.part)).flat_map(|b| o.components_of(b.part)).collect();
+                        for b in o.boards.iter_mut().filter(|b| parts.contains(&b.part)) {
+                            let dir = |d: [f64; 3]| {
+                                let v = m.linear * nalgebra::Vector3::new(d[0], d[1], d[2]);
+                                [v.x, v.y, v.z]
+                            };
+                            b.frame = cadrs_sketch::PlaneFrame { origin: crate::pcb::board3d::apply(m, b.frame.origin), u: dir(b.frame.u), v: dir(b.frame.v) };
+                        }
+                        for pid in meshes.iter().filter(|p| o.footprints.iter().any(|(q, _)| q == *p)) {
+                            let had = o.moved_apart(*pid);
+                            let now = if moved.contains(pid) {
+                                // With its board: the same move apart, seen from the moved board.
+                                had.map(|e| m.inverse().then(&e).then(m))
+                            } else {
+                                Some(had.map_or(*m, |e| e.then(m)))
+                            };
+                            o.moved.retain(|(p, _)| p != pid);
+                            o.moved.extend(now.map(|e| (*pid, e)));
+                        }
+                    }
+                    st.derived = Arc::new(all);
+                }
+            }
+        }
+        if !left.is_empty() {
+            out.warning = Some(format!("Board components can't be scaled (meshes): {}", left.join(", ")));
         }
         Ok(out)
     }
@@ -385,11 +442,13 @@ impl Rebuilder {
                 this.kernel.release(p.body);
             }
         };
+        let mut left: Vec<String> = Vec::new();
         for pid in parts {
             let p = state.part(*pid).expect("present");
+            // A derived board's components (meshes) aren't copied: derive the board again.
             let Some(body) = p.body else {
-                release(self, &placed);
-                return Err("A part to transform has no body".into());
+                left.push(p.part.name.clone());
+                continue;
             };
             let r = match self.mapped_copy(body, map) {
                 Ok(r) => r,
@@ -502,6 +561,9 @@ impl Rebuilder {
                 }
             }
         }
+        if !left.is_empty() {
+            out.warning = Some(format!("Board components aren't copied (meshes; derive the board again): {}", left.join(", ")));
+        }
         Ok(out)
     }
 
@@ -517,7 +579,7 @@ impl Rebuilder {
         let mut member_looks: Vec<(FaceName, crate::appearance::Appearance)> = Vec::new();
         for p in &x.parts {
             let ps = state.part(*p).ok_or("A selected part no longer exists")?;
-            let body = ps.body.ok_or("A selected part has no solid model")?;
+            let body = ps.body.ok_or_else(|| super::super::no_body(ps))?;
             inputs.push((body, ps.names.clone()));
             members.push(*p);
             member_looks.extend(ps.part.solid.looks.iter().copied());

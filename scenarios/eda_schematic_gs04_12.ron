@@ -1,10 +1,10 @@
 // The Getting Started course's schematic (docs/PLAN.md GS3–GS12) drawn in cadrs: a new board,
 // its Schematic view. Points are sheet millimetres (`flat(x, y)`, Y up).
-// 01 Page settings (title, revision); 02 the symbol chooser filtered to "LED"; 03 LED, R_US
-// and Battery_Cell placed (annotated D1, R1, BT1); 04 R1 and D1 moved (M) and D1 turned (R);
-// 05 the loop wired (W); 06 VCC and GND ports (P) and the `led` label (L); 07 values set (E);
-// 08 ERC: the two "power input not driven" errors; 09 PWR_FLAGs added, ERC clean;
-// 10 footprints assigned; 11 the BOM.
+// 01 the symbol chooser filtered to "LED"; 02 LED, R_US and Battery_Cell placed (annotated
+// D1, R1, BT1); 03 R1 and D1 moved (M) and D1 turned (R); 04 the loop wired (W); 05 VCC and
+// GND ports (P) and the `led` label (L); 06 values set (E); 07 ERC: the two "power input not
+// driven" errors; 08 PWR_FLAGs added, ERC clean; 09 footprints assigned; 10 the BOM.
+// (The sheet is unbounded: no page settings.)
 Scenario(
     start: Some("document"),
     steps: [
@@ -15,16 +15,6 @@ Scenario(
         WaitFor("pcb-name-edit"),
         Key("Enter"),
         WaitFor("eda-mode-bar"),
-        // GS3: page settings.
-        Click(ui("sch-page")),
-        WaitFor("eda-page-dialog"),
-        Click(ui("eda-page-title-field")),
-        Key("Ctrl+A"),
-        Type("Getting Started"),
-        Click(ui("eda-page-rev-field")),
-        Type("0"),
-        Screenshot("01-page-settings"),
-        Click(ui("eda-page-ok")),
         // GS4: symbols.
         MoveTo(800, 500),
         Key("A"),
@@ -32,7 +22,7 @@ Scenario(
         Click(ui("eda-chooser-filter-field")),
         Type("LED"),
         Wait(2),
-        Screenshot("02-chooser"),
+        Screenshot("01-chooser"),
         Key("Enter"),
         Click(flat(152.4, 101.6)),
         Key("A"),
@@ -49,7 +39,7 @@ Scenario(
         Click(flat(101.6, 101.6)),
         Custom("eda-zoom 70 60 230 140"),
         MoveTo(1100, 860),
-        Screenshot("03-symbols-placed"),
+        Screenshot("02-symbols-placed"),
         // GS5: R1 up, D1 under it, turned.
         Click(flat(203.2, 101.6)),
         Key("M"),
@@ -60,7 +50,7 @@ Scenario(
         Key("R"),
         Key("Escape"),
         MoveTo(1100, 860),
-        Screenshot("04-moved-and-rotated"),
+        Screenshot("03-moved-and-rotated"),
         // GS6: the loop.
         Key("W"),
         Click(flat(101.6, 105.41)),
@@ -75,7 +65,7 @@ Scenario(
         Click(flat(101.6, 97.79)),
         Key("Escape"),
         MoveTo(1100, 860),
-        Screenshot("05-wired"),
+        Screenshot("04-wired"),
         // GS7: power ports and the label.
         Key("P"),
         WaitFor("eda-chooser"),
@@ -102,7 +92,7 @@ Scenario(
         Click(ui("eda-label-ok")),
         Click(flat(203.2, 104.14)),
         MoveTo(1100, 860),
-        Screenshot("06-power-and-label"),
+        Screenshot("05-power-and-label"),
         // GS9: values.
         Hover(flat(203.2, 93.98)),
         Key("E"),
@@ -110,7 +100,7 @@ Scenario(
         Click(ui("eda-props-value-field")),
         Key("Ctrl+A"),
         Type("red"),
-        Screenshot("07-properties"),
+        Screenshot("06-properties"),
         Click(ui("eda-props-ok")),
         Hover(flat(203.2, 114.3)),
         Key("E"),
@@ -130,7 +120,7 @@ Scenario(
         Click(ui("sch-erc")),
         WaitFor("eda-erc-dialog"),
         ExpectText("eda-erc-summary", "Violations (2): 2 errors, 0 warnings"),
-        Screenshot("08-erc-power-errors"),
+        Screenshot("07-erc-power-errors"),
         Click(ui("eda-erc-close")),
         Key("P"),
         WaitFor("eda-chooser"),
@@ -147,7 +137,7 @@ Scenario(
         Click(ui("sch-erc")),
         WaitFor("eda-erc-dialog"),
         ExpectText("eda-erc-summary", "No violations"),
-        Screenshot("09-erc-clean"),
+        Screenshot("08-erc-clean"),
         Click(ui("eda-erc-close")),
         // GS10: footprints.
         Click(ui("sch-assign")),
@@ -167,12 +157,12 @@ Scenario(
         Wait(2),
         DoubleClick(ui("eda-assign-fp-resistor-tht-r-axial-din0309-l9-0mm-d3-2mm-p12-70mm-horizontal")),
         Wait(2),
-        Screenshot("10-footprints-assigned"),
+        Screenshot("09-footprints-assigned"),
         Click(ui("eda-assign-ok")),
         // GS12: the BOM.
         Click(ui("sch-bom")),
         WaitFor("eda-bom-dialog"),
-        Screenshot("11-bom"),
+        Screenshot("10-bom"),
         Click(ui("eda-bom-close")),
     ],
 )

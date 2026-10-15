@@ -281,8 +281,8 @@ fn structured(doc: &Document, el: ElementId, asm: &Assembly, path: &[ElementId],
                 merge_into(&mut nodes, Node { owner, path: path.to_vec(), count: 1, instances: vec![top_id], occurrences: vec![wrap(inst.id)], children: None }, true);
             }
             // A rigid Part Studio instance (A2.4): each of its parts is an item.
-            InstanceSource::Studio { element } => {
-                for n in studio_nodes(inst, element, path, top_id, wrap) {
+            InstanceSource::Studio { element, .. } => {
+                for n in studio_nodes(doc, inst, element, path, top_id, wrap, true) {
                     merge_into(&mut nodes, n, true);
                 }
             }
@@ -320,19 +320,31 @@ fn structured(doc: &Document, el: ElementId, asm: &Assembly, path: &[ElementId],
     nodes
 }
 
-/// The items of a rigid Part Studio instance: one per part.
-fn studio_nodes(inst: &super::Instance, element: ElementId, path: &[ElementId], top_id: InstanceId, wrap: &dyn Fn(InstanceId) -> InstanceId) -> Vec<Node> {
-    inst.parts
-        .iter()
-        .map(|part| Node {
-            owner: PropertyOwner::Part { element, part: *part },
-            path: path.to_vec(),
-            count: 1,
-            instances: vec![top_id],
-            occurrences: vec![wrap(derive(inst.id, super::structure::studio_part_key(*part)))],
-            children: None,
-        })
-        .collect()
+/// The items of a rigid Part Studio instance: one per part. A board's components, in a
+/// `structured` BOM, are the board's row's children (as a subassembly's).
+fn studio_nodes(doc: &Document, inst: &super::Instance, element: ElementId, path: &[ElementId], top_id: InstanceId, wrap: &dyn Fn(InstanceId) -> InstanceId, structured: bool) -> Vec<Node> {
+    let parts = inst.rigid_parts(doc);
+    let node = |part: &crate::ids::PartId| Node {
+        owner: PropertyOwner::Part { element, part: *part },
+        path: path.to_vec(),
+        count: 1,
+        instances: vec![top_id],
+        occurrences: vec![wrap(derive(inst.id, super::structure::studio_part_key(*part)))],
+        children: None,
+    };
+    match parts.split_first() {
+        Some((board, components)) if structured && matches!(inst.source, InstanceSource::Studio { board: Some(_), .. }) => {
+            let mut n = node(board);
+            n.occurrences.extend(components.iter().map(|p| wrap(derive(inst.id, super::structure::studio_part_key(*p)))));
+            let mut kids: Vec<Node> = Vec::new();
+            for c in components {
+                merge_into(&mut kids, node(c), true);
+            }
+            n.children = Some(kids);
+            vec![n]
+        }
+        _ => parts.iter().map(node).collect(),
+    }
 }
 
 /// The assembly `el`'s non-geometric Items (A1.7), with their quantities.
@@ -352,8 +364,8 @@ fn flattened(doc: &Document, el: ElementId, asm: &Assembly, top: Option<Instance
             InstanceSource::Part { .. } => {
                 merge_into(nodes, Node { owner, path: Vec::new(), count: 1, instances: vec![top_id], occurrences: vec![wrap(inst.id)], children: None }, true);
             }
-            InstanceSource::Studio { element } => {
-                for n in studio_nodes(inst, element, &[], top_id, wrap) {
+            InstanceSource::Studio { element, .. } => {
+                for n in studio_nodes(doc, inst, element, &[], top_id, wrap, false) {
                     merge_into(nodes, n, true);
                 }
             }

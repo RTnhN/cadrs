@@ -413,15 +413,79 @@ fn square_path(o: Pt, e: Pt, out: Option<Pt>, level: bool, bodies: &[Bounds]) ->
 /// follows it. A wire that would go slanted slides the free corner beyond it (the other wire
 /// of an L, so both stay square) when it then still comes into its pin from outside, or is
 /// re-run as a square path ([`square_path`]) clear of the moved symbols.
-fn follow_wires(sch: &mut Schematic, sheet: usize, items: &[SchItem], shifts: &[Shift], skip: &[Uuid]) {
+///
+/// Wires from a row of pins that can't stay as they were (a pin now pointing across its wire,
+/// or a corner that would slide back past the wire it is on) are re-run together
+/// ([`reroute_pin_rows`]). With `stubs_follow` (a wire, a symbol or a corner moved, not a free
+/// wire end), a wire whose other end is joined to nothing moves along whole instead of turning.
+fn follow_wires(sch: &mut Schematic, sheet: usize, items: &[SchItem], shifts: &[Shift], skip: &[Uuid], stubs_follow: bool) {
     if shifts.is_empty() {
         return;
     }
+    // Followed one wire at a time, the wires of a row of pins can end up on each other or on
+    // other pins (a symbol dragged to where its pins line up with its own wires' turns): then
+    // the rows are re-run whole, when that keeps every pin on its net.
+    let before = nets(sch);
+    let unchanged: Vec<Wire> = sch.sheets[sheet].wires.clone();
+    let mut plain = sch.clone();
+    follow_each(&mut plain, sheet, items, shifts, skip, stubs_follow, false);
+    if !messy(&plain, sheet, &before, &unchanged) {
+        *sch = plain;
+        return;
+    }
+    let mut rerun = sch.clone();
+    follow_each(&mut rerun, sheet, items, shifts, skip, stubs_follow, true);
+    *sch = if messy(&rerun, sheet, &before, &unchanged) { plain } else { rerun };
+}
+
+/// Each net's pins (reference and number) and labels, for telling whether an edit joined or
+/// split nets.
+fn nets(sch: &Schematic) -> Vec<Vec<String>> {
+    let mut out: Vec<Vec<String>> = crate::connectivity::netlist(sch)
+        .nets
+        .iter()
+        .map(|n| {
+            let mut v: Vec<String> = n.pins.iter().map(|p| format!("{}.{}", p.reference, p.number)).chain(n.labels.iter().cloned()).collect();
+            v.sort();
+            v
+        })
+        .filter(|v| v.len() > 1)
+        .collect();
+    out.sort();
+    out
+}
+
+/// Whether following left pins on other nets than `before`, or a moved or new wire lying
+/// along another wire.
+fn messy(sch: &Schematic, sheet: usize, before: &[Vec<String>], unchanged: &[Wire]) -> bool {
+    let ws = &sch.sheets[sheet].wires;
+    let moved = |w: &Wire| !unchanged.iter().any(|u| u.id == w.id && u.a == w.a && u.b == w.b);
+    let along = |a: &Wire, b: &Wire| {
+        let level = |w: &Wire| w.a.y == w.b.y;
+        if level(a) != level(b) || (level(a) && a.a.y != b.a.y) || (!level(a) && a.a.x != b.a.x) {
+            return false;
+        }
+        let span = |w: &Wire| if level(w) { (w.a.x.min(w.b.x), w.a.x.max(w.b.x)) } else { (w.a.y.min(w.b.y), w.a.y.max(w.b.y)) };
+        let ((a0, a1), (b0, b1)) = (span(a), span(b));
+        a0.max(b0) < a1.min(b1)
+    };
+    let overlap = ws.iter().enumerate().any(|(i, a)| moved(a) && ws.iter().enumerate().any(|(j, b)| i != j && along(a, b)));
+    overlap || nets(sch) != before
+}
+
+/// [`follow_wires`] one wire at a time; with `rerun_rows`, every row of moved pins is re-run
+/// whole ([`reroute_pin_rows`]).
+fn follow_each(sch: &mut Schematic, sheet: usize, items: &[SchItem], shifts: &[Shift], skip: &[Uuid], stubs_follow: bool, rerun_rows: bool) {
     // Where a corner can't slide from: pins (where they are now) and labels.
     let fixed: Vec<Pt> = sch.sheets[sheet].symbols.iter().flat_map(|s| sch.placed_pins(s).map(|(_, p)| p)).chain(sch.sheets[sheet].labels.iter().map(|l| l.text.at)).collect();
     let bodies: Vec<Bounds> = sch.sheets[sheet].symbols.iter().filter(|s| items.contains(&SchItem::Symbol(s.id))).filter_map(|s| body_box(sch, s)).collect();
     let sh = &mut sch.sheets[sheet];
     let shift_of = |p: Pt| shifts.iter().find(|s| s.0 == p).copied();
+    let mut skip = skip.to_vec();
+    // (A moved pin that lands on a corner of another pin's wire doesn't hold that corner: the
+    // wire is re-run clear of it.)
+    let held: Vec<Pt> = fixed.iter().copied().filter(|p| !shifts.iter().any(|s| s.1 == *p && s.2.is_some())).collect();
+    skip.extend(reroute_pin_rows(sh, shifts, &skip, &held, &bodies, rerun_rows));
     let ids: Vec<Uuid> = sh.wires.iter().filter(|w| !skip.contains(&w.id)).map(|w| w.id).collect();
     let mut slid: Vec<Uuid> = vec![];
     for id in ids {
@@ -443,6 +507,12 @@ fn follow_wires(sch: &mut Schematic, sheet: usize, items: &[SchItem], shifts: &[
         let e = s.1;
         let level = w.a.y == w.b.y && w.a.x != w.b.x;
         let upright = w.a.x == w.b.x && w.a.y != w.b.y;
+        // A stub joined to nothing at its other end, that would go slanted, moves along whole.
+        if stubs_follow && s.2.is_none() && o.x != e.x && o.y != e.y && dangling(sh, o, w.id, &fixed) {
+            let d = s.1 - s.0;
+            (sh.wires[i].a, sh.wires[i].b) = if w.a == s.0 { (e, o + d) } else { (o + d, e) };
+            continue;
+        }
         // From outside the pin (or no pin): the way in is fine.
         let enters_ok = |from: Pt| s.2.is_none_or(|d| ((from.x - e.x).signum(), (from.y - e.y).signum()) == (d.x, d.y));
         if (o.x == e.x || o.y == e.y || !(level || upright)) && enters_ok(o) {
@@ -479,6 +549,208 @@ fn follow_wires(sch: &mut Schematic, sheet: usize, items: &[SchItem], shifts: &[
         }
     }
     sh.wires.retain(|w| w.a != w.b);
+}
+
+/// Whether nothing but wire `wire` is at `p`: no other wire's end or middle, no pin or label.
+fn dangling(sh: &Sheet, p: Pt, wire: Uuid, fixed: &[Pt]) -> bool {
+    !fixed.contains(&p) && !sh.wires.iter().any(|v| v.id != wire && crate::connectivity::on_segment(p, v.a, v.b))
+}
+
+/// A corner two wires meet at and nothing else: it can be moved or dropped.
+fn free_corner(sh: &Sheet, p: Pt, fixed: &[Pt], shifts: &[Shift]) -> bool {
+    use crate::connectivity::on_segment;
+    let ends = sh.wires.iter().filter(|w| w.a == p || w.b == p).count();
+    ends == 2 && !fixed.contains(&p) && !shifts.iter().any(|s| s.0 == p) && !sh.wires.iter().any(|w| w.a != p && w.b != p && on_segment(p, w.a, w.b))
+}
+
+/// Re-runs the wires of rows of moved pins that can't keep their shape: a pin that now points
+/// across its wire (a turned symbol), or a corner that would slide back past the wire it is on
+/// (a symbol dragged past where its wires turn). Each such wire runs from its pin through its
+/// free corners to an anchor: the last of them, going off to whatever it joins. It becomes,
+/// with the corners between dropped:
+/// - anchor along the pin: out of the pin, across, onto the anchor (its end slides there);
+/// - anchor across the pin, in front of it: straight to it; in line with the pin: out of the pin
+///   and onto its end from the side;
+/// - anchor across the pin, behind the symbol: out of the pin, round the symbol on the side
+///   the anchor runs on, and back onto it.
+///
+/// Wires of one row turning the same way leave their pins (and pass the symbol) at staggered
+/// distances, a pin pitch apart, the pin nearest the way they turn the closest, so they nest
+/// instead of lying on top of each other; the next row out of the same side goes further. With `all`, every row is re-run. Returns the wires it
+/// re-ran.
+fn reroute_pin_rows(sh: &mut Sheet, shifts: &[Shift], skip: &[Uuid], fixed: &[Pt], bodies: &[Bounds], all: bool) -> Vec<Uuid> {
+    let g = SCHEMATIC_GRID;
+    #[derive(Clone, Copy, PartialEq)]
+    enum Way {
+        /// Out, across onto the anchor running along the pin: the anchor's coordinate across.
+        Along(Nm),
+        /// Straight onto the anchor across the pin, in front: its coordinate along the pin.
+        Ahead(Nm),
+        /// Onto the end of an anchor in line with the pin (it runs on along the pins' row):
+        /// out of the pin and in from the side, the anchor left as it is.
+        Side(Pt),
+        /// Round the symbol on side `s` (a unit step across the pin) to the anchor behind it.
+        Behind(Nm, Nm),
+    }
+    struct Run {
+        /// The pin (where it is now) and the way it points out.
+        e: Pt,
+        d: Pt,
+        /// The wires from the pin to the anchor (the anchor last), and where each starts.
+        chain: Vec<(Uuid, Pt)>,
+        way: Way,
+        needs: bool,
+    }
+    let wire = |sh: &Sheet, id: Uuid| sh.wires.iter().find(|w| w.id == id).cloned();
+    // A point's coordinates along a pin pointing `d` and across it.
+    let along = |d: Pt, p: Pt| if d.x != 0 { p.x } else { p.y };
+    let across = |d: Pt, p: Pt| if d.x != 0 { p.y } else { p.x };
+    let at = |d: Pt, al: Nm, ac: Nm| if d.x != 0 { Pt::new(al, ac) } else { Pt::new(ac, al) };
+    let mut runs: Vec<Run> = vec![];
+    for &(from, e, out) in shifts {
+        let Some(d) = out else { continue };
+        let at_pin: Vec<&Wire> = sh.wires.iter().filter(|w| w.a == from || w.b == from).collect();
+        let [w0] = at_pin[..] else { continue };
+        if skip.contains(&w0.id) {
+            continue;
+        }
+        // From the pin through free corners.
+        let mut chain: Vec<(Uuid, Pt)> = vec![(w0.id, from)];
+        let mut cur = if w0.a == from { w0.b } else { w0.a };
+        while chain.len() < 16 && free_corner(sh, cur, fixed, shifts) {
+            let Some(next) = sh.wires.iter().find(|w| (w.a == cur || w.b == cur) && !chain.iter().any(|c| c.0 == w.id)) else { break };
+            if skip.contains(&next.id) {
+                break;
+            }
+            chain.push((next.id, cur));
+            cur = if next.a == cur { next.b } else { next.a };
+        }
+        if chain.len() < 2 {
+            continue;
+        }
+        let along_d = |w: &Wire| if d.x != 0 { w.a.y == w.b.y && w.a.x != w.b.x } else { w.a.x == w.b.x && w.a.y != w.b.y };
+        let k = chain.len() - 1;
+        let anchor = wire(sh, chain[k].0).unwrap();
+        let near = chain[k].1;
+        let far = if anchor.a == near { anchor.b } else { anchor.a };
+        let way = if along_d(&anchor) {
+            Way::Along(across(d, near))
+        } else if along(d, near) == along(d, e) {
+            Way::Side(near)
+        } else if anchor.a == anchor.b || (along(d, near) - along(d, e)) * (d.x + d.y) > 0 {
+            Way::Ahead(along(d, near))
+        } else {
+            Way::Behind(along(d, near), (across(d, far) - across(d, near)).signum())
+        };
+        // What following would do: stay straight, or slide the corner beyond along the next wire.
+        let enters_ok = |from: Pt| ((from.x - e.x).signum(), (from.y - e.y).signum()) == (d.x, d.y);
+        let w0 = wire(sh, chain[0].0).unwrap();
+        let o = if w0.a == from { w0.b } else { w0.a };
+        let straight = (o.x == e.x || o.y == e.y) && enters_ok(o);
+        let slides = {
+            let level = w0.a.y == w0.b.y;
+            let o2 = if level { Pt::new(o.x, e.y) } else { Pt::new(e.x, o.y) };
+            let w1 = wire(sh, chain[1].0).unwrap();
+            let f = if w1.a == o { w1.b } else { w1.a };
+            let across = if level { w1.a.x == w1.b.x } else { w1.a.y == w1.b.y };
+            // Past the far end of the wire it slides along, the corner would double back.
+            let same_side = ((o.x - f.x).signum(), (o.y - f.y).signum()) == ((o2.x - f.x).signum(), (o2.y - f.y).signum());
+            across && o2 != e && enters_ok(o2) && same_side
+        };
+        runs.push(Run { e, d, chain, way, needs: all || (!straight && !slides) });
+    }
+    // Rows: pins pointing the same way whose wires turn the same way.
+    let side = |r: &Run| match r.way {
+        Way::Along(line) => (0, (line - across(r.d, r.e)).signum()),
+        Way::Ahead(_) => (1, 0),
+        Way::Side(n) => (3, (across(r.d, n) - across(r.d, r.e)).signum()),
+        Way::Behind(_, s) => (2, s),
+    };
+    let mut done: Vec<Uuid> = vec![];
+    let mut seen = vec![false; runs.len()];
+    // How far out of their pins earlier rows pointing each way went: the next row goes further,
+    // so no two wires out of one side share a corner.
+    let mut used: Vec<(Pt, Nm)> = vec![];
+    for i in 0..runs.len() {
+        if seen[i] {
+            continue;
+        }
+        let row: Vec<usize> = (i..runs.len()).filter(|&j| !seen[j] && runs[j].d == runs[i].d && side(&runs[j]) == side(&runs[i])).collect();
+        row.iter().for_each(|&j| seen[j] = true);
+        if !row.iter().any(|&j| runs[j].needs) {
+            continue;
+        }
+        // The pin furthest the way the wires turn goes the shortest way out.
+        let turn = side(&runs[i]).1;
+        let mut order = row.clone();
+        order.sort_by_key(|&j| -turn * across(runs[j].d, runs[j].e));
+        let mut pos: Vec<Nm> = order.iter().map(|&j| across(runs[j].d, runs[j].e)).collect();
+        pos.sort();
+        let step = pos.windows(2).map(|w| w[1] - w[0]).filter(|v| *v > 0).min().unwrap_or(2 * g).max(g);
+        let d0 = runs[i].d;
+        let before = used.iter().find(|u| u.0 == d0).map_or(0, |u| u.1);
+        let after = before + step * order.len() as Nm;
+        match used.iter_mut().find(|u| u.0 == d0) {
+            Some(u) => u.1 = after,
+            None => used.push((d0, after)),
+        }
+        for (rank, &j) in order.iter().enumerate() {
+            let r = &runs[j];
+            let (d, e) = (r.d, r.e);
+            let reach = before + step * (rank as Nm + 1);
+            let q = e + Pt::new(d.x * reach, d.y * reach);
+            // The path from the pin to the anchor, the anchor's end last.
+            let path: Vec<Pt> = match r.way {
+                Way::Along(line) => vec![e, q, at(d, along(d, q), line)],
+                Way::Ahead(v) => vec![e, at(d, v, across(d, e))],
+                Way::Side(n) => vec![e, q, at(d, along(d, q), across(d, n)), n],
+                Way::Behind(v, s) => {
+                    // Past the moved symbols' side `s`, then along to the anchor.
+                    let edge = bodies.iter().map(|b| across(d, if s > 0 { b.max } else { b.min }) * s).max().map_or(across(d, e), |m| m * s);
+                    let lane = if s > 0 { edge.max(across(d, e)) } else { edge.min(across(d, e)) } + s * reach;
+                    vec![e, q, at(d, along(d, q), lane), at(d, v, lane)]
+                }
+            };
+            let k = r.chain.len() - 1;
+            let (anchor, near) = r.chain[k];
+            let stroke = wire(sh, r.chain[0].0).map(|w| w.stroke).unwrap_or_default();
+            let end = *path.last().unwrap();
+            if let Some(a) = sh.wires.iter_mut().find(|w| w.id == anchor) {
+                if a.a == near {
+                    a.a = end;
+                } else {
+                    a.b = end;
+                }
+            }
+            // The pin's own wire becomes the first leg, the corners between go, new legs after.
+            let dropped: Vec<Uuid> = r.chain[1..k].iter().map(|c| c.0).collect();
+            sh.wires.retain(|w| !dropped.contains(&w.id));
+            if let Some(w) = sh.wires.iter_mut().find(|w| w.id == r.chain[0].0) {
+                (w.a, w.b) = (path[0], path[1]);
+            }
+            for leg in path[1..].windows(2) {
+                sh.wires.push(Wire { id: Uuid::new_v4(), a: leg[0], b: leg[1], stroke });
+            }
+            done.extend(r.chain.iter().map(|c| c.0));
+        }
+    }
+    done
+}
+
+/// Moves the wire ends at `from` to `to` (dragging a wire's end or a corner): the wires there
+/// follow, square ([`follow_wires`]). A free end goes where it is put; a corner takes along a
+/// leg whose far end is free.
+pub fn move_wire_end(sch: &mut Schematic, sheet: usize, from: Pt, to: Pt) {
+    if from == to {
+        return;
+    }
+    let corner = sch.sheets[sheet].wires.iter().filter(|w| w.a == from || w.b == from).count() >= 2;
+    follow_wires(sch, sheet, &[], &[(from, to, None)], &[], corner);
+}
+
+/// The wire end (or corner) within `tol` of `p`, if any: the nearest.
+pub fn wire_end_at(sch: &Schematic, sheet: usize, p: Pt, tol: Nm) -> Option<Pt> {
+    sch.sheets[sheet].wires.iter().flat_map(|w| [w.a, w.b]).filter(|e| e.dist(p) <= tol as f64).min_by(|a, b| a.dist(p).total_cmp(&b.dist(p)))
 }
 
 /// Moves items by `d`. With `drag` (G, or dragging with the mouse), unselected wires on the
@@ -537,7 +809,7 @@ pub fn move_items(sch: &mut Schematic, sheet: usize, items: &[SchItem], d: Pt, d
             }
         }
         let moved_wires: Vec<Uuid> = items.iter().filter_map(|i| if let SchItem::Wire(id) = i { Some(*id) } else { None }).collect();
-        follow_wires(sch, sheet, items, &shifts, &moved_wires);
+        follow_wires(sch, sheet, items, &shifts, &moved_wires, true);
     }
 }
 
@@ -620,7 +892,7 @@ fn keeping_wires(sch: &mut Schematic, sheet: usize, items: &[SchItem], edit: imp
             shifts.push((*from, to, None));
         }
     }
-    follow_wires(sch, sheet, items, &shifts, &wires);
+    follow_wires(sch, sheet, items, &shifts, &wires, true);
 }
 
 /// Rotates items a quarter turn counter-clockwise about `center`, leaving wires that aren't
@@ -749,10 +1021,56 @@ pub fn tidy_wires(sch: &mut Schematic, sheet: usize) {
     }
 }
 
+/// Keeps each wire a run between joins: a wire is cut where another wire's end, a pin or a
+/// label lies along it, and two straight pieces that meet with nothing else there (and are
+/// drawn alike) become one. A click then picks the piece up to the corner or tee, and dragging
+/// it leaves the rest where it is.
+pub fn split_at_joins(sch: &mut Schematic, sheet: usize) {
+    use crate::connectivity::on_segment;
+    let sh_ = &sch.sheets[sheet];
+    let joins: Vec<Pt> = sh_.symbols.iter().flat_map(|s| sch.placed_pins(s).map(|(_, p)| p)).chain(sh_.labels.iter().map(|l| l.text.at)).collect();
+    let wires = &mut sch.sheets[sheet].wires;
+    // Pieces in line that meet end to end with nothing else there become one.
+    'heal: loop {
+        for i in 0..wires.len() {
+            for j in i + 1..wires.len() {
+                let (a, b) = (&wires[i], &wires[j]);
+                let Some(p) = [a.a, a.b].into_iter().find(|p| *p == b.a || *p == b.b) else { continue };
+                let (fa, fb) = (if a.a == p { a.b } else { a.a }, if b.a == p { b.b } else { b.a });
+                // In line, on either side of `p`.
+                let cross = (fa.x - p.x) as i128 * (fb.y - p.y) as i128 - (fa.y - p.y) as i128 * (fb.x - p.x) as i128;
+                let dot = (fa.x - p.x) as i128 * (fb.x - p.x) as i128 + (fa.y - p.y) as i128 * (fb.y - p.y) as i128;
+                let alone = wires.iter().filter(|w| on_segment(p, w.a, w.b)).count() == 2;
+                if cross == 0 && dot < 0 && alone && a.stroke == b.stroke && !joins.contains(&p) {
+                    (wires[i].a, wires[i].b) = (fa, fb);
+                    wires.remove(j);
+                    continue 'heal;
+                }
+            }
+        }
+        break;
+    }
+    // Cut where something joins along a wire.
+    let ends: Vec<Pt> = wires.iter().flat_map(|w| [w.a, w.b]).chain(joins).collect();
+    let mut out: Vec<Wire> = Vec::with_capacity(wires.len());
+    for w in wires.iter() {
+        let mut cuts: Vec<Pt> = ends.iter().copied().filter(|p| *p != w.a && *p != w.b && on_segment(*p, w.a, w.b)).collect();
+        cuts.sort_by_key(|p| (p.x - w.a.x).abs() + (p.y - w.a.y).abs());
+        cuts.dedup();
+        let mut from = w.a;
+        for (k, p) in cuts.into_iter().chain([w.b]).enumerate() {
+            out.push(Wire { id: if k == 0 { w.id } else { Uuid::new_v4() }, a: from, b: p, stroke: w.stroke });
+            from = p;
+        }
+    }
+    *wires = out;
+}
+
 /// Adds the junctions [`junctions_needed`] lists that aren't there, and removes ones that no
 /// longer join anything. Wires on top of each other are joined first ([`tidy_wires`]).
 pub fn fix_junctions(sch: &mut Schematic, sheet: usize) {
     tidy_wires(sch, sheet);
+    split_at_joins(sch, sheet);
     let need = junctions_needed(sch, sheet);
     let sh = &mut sch.sheets[sheet];
     sh.junctions.retain(|j| need.contains(&j.at));
@@ -913,12 +1231,47 @@ pub struct SchClip {
     pub labels: Vec<Label>,
     pub notes: Vec<Note>,
     pub drawings: Vec<Drawing>,
+    /// The parts of the copied symbols that only the studio they came from has (its project
+    /// library's components, footprints only its board holds): a paste into another studio
+    /// adds the ones it lacks, so they place on its board with their 3D models.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub parts: Vec<crate::Component>,
+    /// That studio's project library (`<library>:<name>` names the parts).
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub library: String,
 }
 
 impl SchClip {
+    /// Renames the library ids its symbols and their Footprint fields use.
+    pub fn rename_parts(&mut self, sym: crate::rename::IdMap, fp: crate::rename::IdMap) {
+        crate::rename::rename_in_schematic(&mut self.definitions, self.symbols.iter_mut(), sym, fp);
+    }
+
     pub fn is_empty(&self) -> bool {
         self.symbols.is_empty() && self.wires.is_empty() && self.junctions.is_empty() && self.no_connects.is_empty() && self.labels.is_empty() && self.notes.is_empty() && self.drawings.is_empty()
     }
+}
+
+/// The middle of what `items` cover (symbols with their bodies and fields, wires, labels,
+/// notes), on the grid: where a copy of them is held from.
+pub fn items_center(sch: &Schematic, sheet: usize, items: &[SchItem]) -> Pt {
+    let sh = &sch.sheets[sheet];
+    let mut b: Option<Bounds> = None;
+    let mut add = |x: Bounds| b = Some(Bounds::union(b, x));
+    for it in items {
+        match it {
+            SchItem::Symbol(id) => sh.symbols.iter().filter(|s| s.id == *id).for_each(|s| add(symbol_bounds(sch, s))),
+            SchItem::Wire(id) => sh.wires.iter().filter(|w| w.id == *id).for_each(|w| add(Bounds::union(Some(Bounds::of(w.a)), Bounds::of(w.b)))),
+            SchItem::Bus(id) => sh.buses.iter().filter(|w| w.id == *id).for_each(|w| add(Bounds::union(Some(Bounds::of(w.a)), Bounds::of(w.b)))),
+            SchItem::Junction(id) => sh.junctions.iter().filter(|j| j.id == *id).for_each(|j| add(Bounds::of(j.at))),
+            SchItem::NoConnect(id) => sh.no_connects.iter().filter(|j| j.id == *id).for_each(|j| add(Bounds::of(j.at))),
+            SchItem::Label(id) => sh.labels.iter().filter(|l| l.id == *id).for_each(|l| add(label_bounds(l))),
+            SchItem::Note(id) => sh.notes.iter().filter(|n| n.id == *id).for_each(|n| add(crate::font::bounds(&n.text).unwrap_or(Bounds::of(n.text.at)))),
+            SchItem::Drawing(id) => sh.drawings.iter().filter(|n| n.id == *id).for_each(|n| n.shape.geom.extent().into_iter().for_each(|p| add(Bounds::of(p)))),
+            SchItem::Field(..) => {}
+        }
+    }
+    snap(b.map_or(Pt::ZERO, |b| b.center()), SCHEMATIC_GRID)
 }
 
 /// Copies `items`; their positions are kept relative to `origin` (on the grid).
@@ -1172,6 +1525,207 @@ mod tests {
         assert!(square_and_joined(&s, &[far, free]));
     }
 
+    /// Pairs of wires lying on top of each other (more than a point in common) or crossing
+    /// (each through the other's middle).
+    fn overlaps_and_crossings(s: &Schematic) -> Vec<(Wire, Wire)> {
+        let w = &s.sheets[0].wires;
+        let mut out = vec![];
+        for i in 0..w.len() {
+            for j in i + 1..w.len() {
+                let (a, b) = (&w[i], &w[j]);
+                let (ax0, ax1, ay0, ay1) = (a.a.x.min(a.b.x), a.a.x.max(a.b.x), a.a.y.min(a.b.y), a.a.y.max(a.b.y));
+                let (bx0, bx1, by0, by1) = (b.a.x.min(b.b.x), b.a.x.max(b.b.x), b.a.y.min(b.b.y), b.a.y.max(b.b.y));
+                let a_level = ay0 == ay1;
+                let b_level = by0 == by1;
+                let bad = if a_level == b_level {
+                    // In line: sharing more than an end.
+                    if a_level { ay0 == by0 && ax0.max(bx0) < ax1.min(bx1) } else { ax0 == bx0 && ay0.max(by0) < ay1.min(by1) }
+                } else {
+                    let (h, v) = if a_level { ((ax0, ax1, ay0), (bx0, by0, by1)) } else { ((bx0, bx1, by0), (ax0, ay0, ay1)) };
+                    h.0 < v.0 && v.0 < h.1 && v.1 < h.2 && h.2 < v.2
+                };
+                if bad {
+                    out.push((a.clone(), b.clone()));
+                }
+            }
+        }
+        out
+    }
+
+    /// A 4-pin connector whose pins (pointing left, pin 1 at the top) each run left and then
+    /// down in nested Ls, pin 1's outermost: (connector, the wires' far ends).
+    fn pin_row(s: &mut Schematic, lib: &LibraryTable) -> (Uuid, Vec<Pt>) {
+        let c = place_symbol(s, 0, lib.symbol("Connector:Conn_01x04").unwrap(), Pt::mm(101.6, 101.6), Uuid::new_v4());
+        let mut pins: Vec<Pt> = s.placed_pins(&s.sheets[0].symbols[0]).map(|(_, p)| p).collect();
+        pins.sort_by_key(|p| -p.y);
+        let mut far = vec![];
+        for (r, p) in pins.iter().enumerate() {
+            let corner = *p - Pt::mm(5.08 + 2.54 * (3 - r) as f64, 0.0);
+            let end = Pt::new(corner.x, p.y - crate::units::mm(30.48));
+            add_wire(s, 0, &[*p, corner, end]);
+            far.push(end);
+        }
+        (c, far)
+    }
+
+    /// Every pin of the connector has a wire on it, and no wire runs through its body.
+    fn pins_wired_clear_of_body(s: &Schematic) -> bool {
+        let sym = &s.sheets[0].symbols[0];
+        let body = body_box(s, sym).unwrap();
+        s.placed_pins(sym).all(|(_, p)| s.sheets[0].wires.iter().any(|w| w.a == p || w.b == p)) && s.sheets[0].wires.iter().all(|w| !crosses(w.a, w.b, &body))
+    }
+
+    #[test]
+    fn turning_a_row_of_pins_nests_its_wires() {
+        let (mut s, lib) = sch();
+        let (c, far) = pin_row(&mut s, &lib);
+        assert!(overlaps_and_crossings(&s).is_empty());
+        // Turned a quarter: the pins point down, each wire out of its pin, then across to its
+        // upright, at its own height (none on top of another, none crossing).
+        let at = selection_center(&s, 0, &[SchItem::Symbol(c)]);
+        rotate_items(&mut s, 0, &[SchItem::Symbol(c)], at);
+        fix_junctions(&mut s, 0);
+        assert!(square_and_joined(&s, &far), "{:?}", s.sheets[0].wires);
+        assert!(pins_wired_clear_of_body(&s));
+        assert!(overlaps_and_crossings(&s).is_empty(), "{:?}", overlaps_and_crossings(&s));
+        assert!(s.sheets[0].junctions.is_empty(), "{:?}", s.sheets[0].junctions);
+        // Each pin's wire leaves it straight down.
+        for (_, p) in s.placed_pins(&s.sheets[0].symbols[0]) {
+            assert!(s.sheets[0].wires.iter().any(|w| (w.a == p && w.b.x == p.x && w.b.y < p.y) || (w.b == p && w.a.x == p.x && w.a.y < p.y)), "{p:?}");
+        }
+        // Dragged left past the uprights: the wires now turn right, still nested, the old
+        // corners gone.
+        move_items(&mut s, 0, &[SchItem::Symbol(c)], Pt::mm(-50.8, 0.0), true);
+        fix_junctions(&mut s, 0);
+        assert!(square_and_joined(&s, &far), "{:?}", s.sheets[0].wires);
+        assert!(pins_wired_clear_of_body(&s));
+        assert!(overlaps_and_crossings(&s).is_empty(), "{:?}", overlaps_and_crossings(&s));
+        // Three wires per pin: out, across, the upright.
+        assert_eq!(s.sheets[0].wires.len(), 12, "{:?}", s.sheets[0].wires);
+    }
+
+    #[test]
+    fn dragging_a_row_anywhere_keeps_its_nets_apart() {
+        let (mut first, lib) = sch();
+        let (c, far) = pin_row(&mut first, &lib);
+        let mut turned = first.clone();
+        let at = selection_center(&turned, 0, &[SchItem::Symbol(c)]);
+        rotate_items(&mut turned, 0, &[SchItem::Symbol(c)], at);
+        fix_junctions(&mut turned, 0);
+        let overlapping = |s: &Schematic| overlaps_and_crossings(s).into_iter().filter(|(a, b)| (a.a.y == a.b.y) == (b.a.y == b.b.y)).collect::<Vec<_>>();
+        // As drawn (pins pointing left) and turned (down); across and past the wires' turns, a
+        // grid step at a time, and up and down.
+        for s in [first, turned] {
+            let before = nets(&s);
+            // The wires going off (to the far ends) stay where they run: a pin dropped onto one
+            // joins it, as anything put on a wire does.
+            let going_off: Vec<Wire> = s.sheets[0].wires.iter().filter(|w| far.contains(&w.a) || far.contains(&w.b)).cloned().collect();
+            let pins: Vec<Pt> = s.placed_pins(&s.sheets[0].symbols[0]).map(|(_, p)| p).collect();
+            for dy in [-12.7, -5.08, -2.54, 0.0, 1.27, 2.54, 5.08, 12.7] {
+            for k in -40..=20 {
+                let d = Pt::mm(1.27 * k as f64, dy);
+                if pins.iter().any(|p| going_off.iter().any(|w| crate::connectivity::on_segment(*p + d, w.a, w.b))) {
+                    continue;
+                }
+                let mut t = s.clone();
+                move_items(&mut t, 0, &[SchItem::Symbol(c)], d, true);
+                fix_junctions(&mut t, 0);
+                assert_eq!(nets(&t), before, "dragged by {d:?}: {:?}", t.sheets[0].wires);
+                assert!(overlapping(&t).is_empty(), "dragged by {d:?}: {:?}", overlapping(&t));
+                assert!(square_and_joined(&t, &far), "dragged by {d:?}: {:?}", t.sheets[0].wires);
+                assert!(pins_wired_clear_of_body(&t), "dragged by {d:?}");
+                // No loops left behind: at most out, round, back and the wire going off.
+                assert!(t.sheets[0].wires.len() <= 16, "dragged by {d:?}: {:?}", t.sheets[0].wires);
+            }
+            }
+            // Turned round and back, and mirrored either way.
+            let mut t = s.clone();
+            for turn in 0..4 {
+                let at = selection_center(&t, 0, &[SchItem::Symbol(c)]);
+                rotate_items(&mut t, 0, &[SchItem::Symbol(c)], at);
+                fix_junctions(&mut t, 0);
+                assert_eq!(nets(&t), before, "turn {turn}: {:?}", t.sheets[0].wires);
+                assert!(overlapping(&t).is_empty(), "turn {turn}: {:?}", overlapping(&t));
+                assert!(pins_wired_clear_of_body(&t), "turn {turn}");
+                assert!(t.sheets[0].wires.len() <= 16, "turn {turn}: {:?}", t.sheets[0].wires);
+            }
+            for up_down in [false, true] {
+                let mut t = s.clone();
+                let at = selection_center(&t, 0, &[SchItem::Symbol(c)]);
+                mirror_items(&mut t, 0, &[SchItem::Symbol(c)], at, up_down);
+                fix_junctions(&mut t, 0);
+                assert_eq!(nets(&t), before, "mirrored {up_down}: {:?}", t.sheets[0].wires);
+                assert!(overlapping(&t).is_empty(), "mirrored {up_down}: {:?}", overlapping(&t));
+            }
+        }
+    }
+
+    #[test]
+    fn a_stub_past_a_tee_is_its_own_piece_and_drags_clean() {
+        let (mut s, _) = sch();
+        // An upright with a level wire teeing into it, its top a stub past the tee.
+        add_wire(&mut s, 0, &[Pt::mm(12.7, 5.08), Pt::mm(12.7, -25.4)]);
+        add_wire(&mut s, 0, &[Pt::mm(-12.7, 0.0), Pt::mm(12.7, 0.0)]);
+        assert_eq!(s.sheets[0].wires.len(), 3, "the upright cut at the tee");
+        // A click on the part below the tee picks it alone.
+        let Some(SchItem::Wire(low)) = hit(&s, 0, Pt::mm(12.7, -12.7), crate::units::mm(0.5)) else { panic!() };
+        let w = s.sheets[0].wires.iter().find(|w| w.id == low).unwrap();
+        assert!([w.a, w.b].contains(&Pt::mm(12.7, 0.0)) && [w.a, w.b].contains(&Pt::mm(12.7, -25.4)));
+        // Dragged right: the level wire stretches to it, the stub above comes along whole.
+        let d = Pt::mm(5.08, 0.0);
+        move_items(&mut s, 0, &[SchItem::Wire(low)], d, true);
+        fix_junctions(&mut s, 0);
+        let x = Pt::mm(17.78, 0.0).x;
+        let sh = &s.sheets[0];
+        assert!(sh.wires.iter().all(|w| w.a.x == x && w.b.x == x || w.a.y == w.b.y), "{:?}", sh.wires);
+        assert!(sh.wires.iter().any(|w| [w.a, w.b].contains(&Pt::mm(-12.7, 0.0)) && [w.a, w.b].contains(&Pt::mm(17.78, 0.0))));
+        assert!(square_and_joined(&s, &[Pt::mm(-12.7, 0.0), Pt::mm(17.78, 5.08), Pt::mm(17.78, -25.4)]), "{:?}", sh.wires);
+        // With the tee deleted the upright is one wire again.
+        let tee = sh.wires.iter().find(|w| w.a.y == w.b.y).unwrap().id;
+        delete_items(&mut s, 0, &[SchItem::Wire(tee)]);
+        fix_junctions(&mut s, 0);
+        assert_eq!(s.sheets[0].wires.len(), 1, "{:?}", s.sheets[0].wires);
+    }
+
+    #[test]
+    fn a_wire_end_drags_on_its_own() {
+        let (mut s, _) = sch();
+        add_wire(&mut s, 0, &[Pt::mm(0.0, 0.0), Pt::mm(10.16, 0.0), Pt::mm(10.16, 10.16)]);
+        assert_eq!(wire_end_at(&s, 0, Pt::mm(10.0, 0.2), crate::units::mm(0.5)), Some(Pt::mm(10.16, 0.0)));
+        // The free end out along the wire: longer.
+        move_wire_end(&mut s, 0, Pt::mm(0.0, 0.0), Pt::mm(-5.08, 0.0));
+        assert!(s.sheets[0].wires.iter().any(|w| [w.a, w.b].contains(&Pt::mm(-5.08, 0.0)) && [w.a, w.b].contains(&Pt::mm(10.16, 0.0))));
+        // The corner out to the right: the level leg stretches, the upright (free at its top)
+        // comes along.
+        move_wire_end(&mut s, 0, Pt::mm(10.16, 0.0), Pt::mm(15.24, 0.0));
+        fix_junctions(&mut s, 0);
+        let w = &s.sheets[0].wires;
+        assert_eq!(w.len(), 2, "{w:?}");
+        assert!(w.iter().any(|w| [w.a, w.b].contains(&Pt::mm(-5.08, 0.0)) && [w.a, w.b].contains(&Pt::mm(15.24, 0.0))));
+        assert!(w.iter().any(|w| [w.a, w.b].contains(&Pt::mm(15.24, 10.16)) && [w.a, w.b].contains(&Pt::mm(15.24, 0.0))));
+        // A free end put off the wire's line: it gets there, square.
+        move_wire_end(&mut s, 0, Pt::mm(15.24, 10.16), Pt::mm(25.4, 15.24));
+        fix_junctions(&mut s, 0);
+        assert!(s.sheets[0].wires.iter().any(|w| [w.a, w.b].contains(&Pt::mm(25.4, 15.24))));
+        assert!(square_and_joined(&s, &[Pt::mm(-5.08, 0.0), Pt::mm(25.4, 15.24)]), "{:?}", s.sheets[0].wires);
+    }
+
+    #[test]
+    fn a_copy_pastes_centred_on_the_point() {
+        let (mut s, lib) = sch();
+        let r = lib.symbol("Device:R").unwrap();
+        let a = place_symbol(&mut s, 0, r, Pt::mm(10.16, 10.16), Uuid::new_v4());
+        let b = place_symbol(&mut s, 0, r, Pt::mm(30.48, 10.16), Uuid::new_v4());
+        let items = [SchItem::Symbol(a), SchItem::Symbol(b)];
+        let middle = items_center(&s, 0, &items);
+        // Copied wherever the pointer was, held by its middle.
+        let clip = copy_items(&s, 0, &items, middle);
+        let to = Pt::mm(101.6, 101.6);
+        let pasted = paste(&mut s, 0, &clip, to);
+        assert_eq!(pasted.iter().filter(|i| matches!(i, SchItem::Symbol(_))).count(), 2);
+        assert_eq!(items_center(&s, 0, &pasted), to);
+    }
+
     #[test]
     fn a_wire_run_takes_one_colour() {
         let (mut s, _) = sch();
@@ -1228,10 +1782,12 @@ mod tests {
         assert!(sh.junctions.is_empty(), "{:?}", sh.junctions);
         assert!(sh.wires.iter().any(|w| w.id == l[0] && [w.a, w.b].contains(&Pt::mm(0.0, 0.0)) && [w.a, w.b].contains(&Pt::mm(25.4, 0.0))));
         assert!(sh.wires.iter().any(|w| [w.a, w.b].contains(&Pt::mm(25.4, -38.1)) && [w.a, w.b].contains(&Pt::mm(25.4, 0.0))));
-        // Wires that only meet end to end, or cross, stay apart.
+        // A wire drawn on in line from another's end becomes part of it; one that crosses
+        // stays apart.
         add_wire(&mut s, 0, &[Pt::mm(0.0, 0.0), Pt::mm(-12.7, 0.0)]);
         add_wire(&mut s, 0, &[Pt::mm(12.7, 5.08), Pt::mm(12.7, -5.08)]);
-        assert_eq!(s.sheets[0].wires.len(), 4);
+        assert_eq!(s.sheets[0].wires.len(), 3, "{:?}", s.sheets[0].wires);
+        assert!(s.sheets[0].wires.iter().any(|w| w.id == l[0] && [w.a, w.b].contains(&Pt::mm(-12.7, 0.0))));
         // A tee's dot takes the wire's colour when it has none of its own.
         add_wire(&mut s, 0, &[Pt::mm(25.4, -12.7), Pt::mm(38.1, -12.7)]);
         let grey = crate::graphics::Color { r: 128, g: 128, b: 128, a: 255 };
@@ -1255,10 +1811,11 @@ mod tests {
         assert_eq!(s.sheets[0].junctions.len(), 1);
         let hit_wire = hit(&s, 0, Pt::mm(5.0, 0.2), crate::units::mm(0.5));
         assert!(matches!(hit_wire, Some(SchItem::Wire(_))));
+        // The tee cuts the wire it meets: the box holds the piece left of it and the tee.
         let enclosed = box_select(&s, 0, Bounds { min: Pt::mm(-1.0, -1.0), max: Pt::mm(14.0, 14.0) }, false);
-        assert_eq!(enclosed.iter().filter(|i| matches!(i, SchItem::Wire(_))).count(), 1);
+        assert_eq!(enclosed.iter().filter(|i| matches!(i, SchItem::Wire(_))).count(), 2);
         let crossing = box_select(&s, 0, Bounds { min: Pt::mm(-1.0, -1.0), max: Pt::mm(14.0, 14.0) }, true);
-        assert_eq!(crossing.iter().filter(|i| matches!(i, SchItem::Wire(_))).count(), 2);
+        assert_eq!(crossing.iter().filter(|i| matches!(i, SchItem::Wire(_))).count(), 3);
     }
 
     #[test]

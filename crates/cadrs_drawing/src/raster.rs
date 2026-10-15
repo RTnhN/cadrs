@@ -79,13 +79,15 @@ pub fn render(page: &Page, dpi: f64, color: bool) -> Result<Pixmap, String> {
                 }
                 let Some(size) = tiny_skia::IntSize::from_wh(iw, ih) else { continue };
                 let Some(src) = Pixmap::from_vec(data, size) else { continue };
+                // Pixel (x, y), row 0 at the top, to the page (y down).
+                let (iw, ih) = (iw as f64, ih as f64);
                 let t = Transform::from_row(
-                    (s * pic.width / iw as f64) as f32,
-                    0.0,
-                    0.0,
-                    (s * pic.height / ih as f64) as f32,
-                    (s * pic.at[0]) as f32,
-                    hh - (s * (pic.at[1] + pic.height)) as f32,
+                    (s * pic.u[0] / iw) as f32,
+                    (-s * pic.u[1] / iw) as f32,
+                    (-s * pic.v[0] / ih) as f32,
+                    (s * pic.v[1] / ih) as f32,
+                    (s * (pic.at[0] + pic.v[0])) as f32,
+                    hh - (s * (pic.at[1] + pic.v[1])) as f32,
                 );
                 let paint = PixmapPaint { quality: tiny_skia::FilterQuality::Bicubic, ..PixmapPaint::default() };
                 pm.draw_pixmap(0, 0, src.as_ref(), &paint, t, None);
@@ -188,5 +190,25 @@ mod tests {
         assert!(dark > 20, "{dark}");
         assert!(jpeg(&pm).unwrap().starts_with(&[0xff, 0xd8]));
         assert!(png(&pm).unwrap().starts_with(b"\x89PNG"));
+    }
+
+    #[test]
+    fn a_picture_turns_with_its_edges() {
+        // Two pixels, red then blue, turned a quarter left: its bottom edge runs up from
+        // (10, 10), its left edge to the left, so red is lower and blue higher, both left of x 10.
+        let mut img = image::RgbaImage::new(2, 1);
+        img.put_pixel(0, 0, image::Rgba([255, 0, 0, 255]));
+        img.put_pixel(1, 0, image::Rgba([0, 0, 255, 255]));
+        let mut data = std::io::Cursor::new(Vec::new());
+        img.write_to(&mut data, image::ImageFormat::Png).unwrap();
+        let pic = crate::export::Picture { at: [10.0, 10.0], u: [0.0, 20.0], v: [-10.0, 0.0], depth: None, data: std::sync::Arc::new(data.into_inner()) };
+        let page = Page { name: "S".into(), width: 50.0, height: 40.0, items: vec![Item::Image(pic)] };
+        let pm = render(&page, 25.4, true).unwrap();
+        let at = |x: f64, y: f64| pm.pixel(x as u32, (40.0 - y) as u32).unwrap();
+        let (red, blue) = (at(5.0, 13.0), at(5.0, 27.0));
+        assert!(red.red() > 200 && red.blue() < 50, "{red:?}");
+        assert!(blue.blue() > 200 && blue.red() < 50, "{blue:?}");
+        // Nothing right of its corner.
+        assert!(at(15.0, 20.0).red() > 200 && at(15.0, 20.0).blue() > 200);
     }
 }

@@ -265,7 +265,7 @@ fn with_element(s: InstanceSource, e: ElementId) -> InstanceSource {
     match s {
         InstanceSource::Part { part, .. } => InstanceSource::Part { element: e, part },
         InstanceSource::Assembly { .. } => InstanceSource::Assembly { element: e },
-        InstanceSource::Studio { .. } => InstanceSource::Studio { element: e },
+        InstanceSource::Studio { board, .. } => InstanceSource::Studio { element: e, board },
     }
 }
 

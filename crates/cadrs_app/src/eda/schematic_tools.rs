@@ -2,8 +2,13 @@
 //!
 //! - **Select** (Esc): click picks (a field alone when its text is clicked), Shift+click adds,
 //!   Ctrl+click toggles; dragging on empty paper boxes — left to right takes what is wholly
-//!   inside, right to left what the box touches; dragging an item moves it with its
-//!   wires attached (they stay on the pins and square: corners slide, bends are added).
+//!   inside (a blue box), right to left what the box touches (a dashed yellow box,
+//!   [`cadrs_ui::selection_box`]: `sch-box-select`), what it will take highlighted as it is
+//!   dragged; dragging an item moves it with its
+//!   wires attached (they stay on the pins and square: corners slide, bends are added; a row
+//!   of pins that can't keep its wires' shape re-runs them nested). A wire is a piece between
+//!   joins (a click picks it up to the corner or tee); pressing on its end or a corner drags
+//!   that end alone.
 //!   **M** moves the selection (wires stay), **G** drags it (wires follow),
 //!   **R** rotates it and **X** / **Y** mirror it (wires on it follow, square), **Del**
 //!   deletes it, **E** (or a double-click) edits a symbol's fields (Footprint: Choose… browses
@@ -17,10 +22,14 @@
 //! - **X** / **Y** mirror the selection left for right / top for bottom; **Ctrl+C** copies,
 //!   **Ctrl+V** pastes and **Ctrl+D** duplicates (both follow the pointer to a click);
 //!   **Ctrl+L** a global label, **T** a text note; **`** highlights the net under the pointer
-//!   (again, or Esc: off); **Ctrl+F** finds a symbol by reference or value.
+//!   (again, or Esc: off); **Ctrl+F** finds a symbol by reference or value. **Ctrl+C** holds
+//!   what it copies by its middle, so a paste lands centred on the pointer.
+//! - **Where wires join** pins and net labels: a blue square on a pin's end or label's anchor
+//!   that nothing joins yet, on every one while wiring, placing or moving (on the hovered
+//!   symbol's pins in Select), filled on the one a wire would join now.
 //! - **L** net label (its name asked first; **R** turns it while it follows the pointer),
 //!   **Q** no-connect flag.
-//! - The strip: those tools, Annotate, Assign footprints, ERC, BOM export, Page settings.
+//! - The strip: those tools, Annotate, Assign footprints, ERC, BOM export, Plot.
 //!
 //! Every change is one undo step (`ui::commit`).
 
@@ -53,7 +62,6 @@ const STRIP: ui::StripSpec = &[
     Some(("sch-erc", "erc", "Electrical rules check", "erc")),
     Some(("sch-fields", "custom-table", "Symbol fields table", "fields")),
     Some(("sch-bom", "bill-of-materials", "Bill of materials", "bom")),
-    Some(("sch-page", "properties", "Page settings", "page")),
     Some(("sch-plot", "file-export", "Plot the schematic (SVG, PDF) or export its netlist", "plot")),
 ];
 
@@ -100,6 +108,8 @@ pub struct Moving {
     pub from: Pt,
     pub drag: bool,
     pub on_release: bool,
+    /// A wire end (or corner) being dragged on its own, where it was.
+    pub end: Option<Pt>,
 }
 
 /// The Schematic tools' state (view state: not saved, not undone).
@@ -110,6 +120,11 @@ pub struct SchState {
     pub moving: Option<Moving>,
     /// A box selection started here.
     pub boxing: Option<Pt>,
+    /// What the box being dragged will add to the selection, highlighted while it is dragged.
+    pub box_preview: Vec<SchItem>,
+    /// The pin ends marked where wires join ([`mark_pins`]), and the one a wire would join now.
+    pub pin_ends: cadrs_eda::render::PinEnds,
+    pub hot_pin: Option<Pt>,
     /// What Ctrl+C copied.
     pub clipboard: Option<se::SchClip>,
     /// How the symbol or label being placed is turned (R: quarter turns) and mirrored (X, Y).
@@ -156,7 +171,7 @@ fn label_angle(o: Orient) -> f64 {
 pub fn register(app: &mut App) {
     app.init_resource::<SchState>().add_systems(
         Update,
-        (strip, on_strip, on_click, on_keys, follow_pointer, publish).chain().after(super::navigate).run_if(in_state(AppState::Document)),
+        (strip, on_strip, on_click, on_keys, follow_pointer, preview_box, mark_pins, publish, draw_box).chain().after(super::navigate).run_if(in_state(AppState::Document)),
     );
     super::sch_dialogs::register(app);
 }
@@ -165,6 +180,32 @@ fn strip(world: &mut World) {
     ui::sync_strip(world, Mode::Schematic, STRIP);
     let a = world.resource::<SchState>().tool.action();
     ui::mark_active(world, Mode::Schematic, a);
+}
+
+/// The box being dragged on empty paper, from its press to the pointer, once it has moved a
+/// few pixels.
+#[allow(clippy::too_many_arguments)]
+fn draw_box(
+    state: Res<SchState>,
+    eda: Res<super::Eda2d>,
+    ui_state: Res<super::EdaUi>,
+    pointer: Res<super::EdaPointer>,
+    rect: Res<crate::viewport::ViewportRect>,
+    q_area: Query<Entity, With<crate::viewport::ViewportArea>>,
+    mut boxes: cadrs_ui::selection_box::Boxes,
+    mut commands: Commands,
+) {
+    let shown = eda.0.is_some_and(|(_, _, m)| m == Mode::Schematic) && eda.flat();
+    let span = match (state.boxing, super::current_view(&ui_state, &eda)) {
+        (Some(start), Some(view)) if shown && matches!(state.tool, Tool::Select) => {
+            let s = view.to_screen([start.x as f64, start.y as f64]);
+            let start = Vec2::new(s[0] as f32, s[1] as f32);
+            let end = pointer.screen - rect.0.min;
+            (start.distance(end) >= 4.0).then_some((start, end))
+        }
+        _ => None,
+    };
+    cadrs_ui::selection_box::sync(&mut commands, &mut boxes, "sch-box-select", q_area.iter().next(), span);
 }
 
 fn snap(p: Pt) -> Pt {
@@ -207,7 +248,6 @@ pub fn run_action(w: &mut World, action: &str) {
         "assign" => dialogs::open_assign(w),
         "erc" => dialogs::open_erc(w),
         "bom" => dialogs::open_bom(w),
-        "page" => dialogs::open_page(w),
         "plot" => dialogs::open_plot(w),
         "fields" => dialogs::open_fields_table(w),
         _ => {}
@@ -240,7 +280,8 @@ fn on_click(mut reader: MessageReader<EdaClick>, mut commands: Commands) {
             match c {
                 EdaClick::Press { at, shift, ctrl } => press(world, at, shift, ctrl),
                 EdaClick::Release { at } => release(world, at),
-                EdaClick::Double { at } => double(world, at),
+                EdaClick::Secondary { .. } => {}
+                EdaClick::Double { at, .. } => double(world, at),
             }
         }
     });
@@ -258,6 +299,7 @@ fn press(w: &mut World, at: Pt, shift: bool, ctrl: bool) {
         Tool::Select => {
             let Some((_, _, d)) = ui::current(w) else { return };
             let hit = se::hit(&d.schematic, 0, at, tolerance(w));
+            let end = se::wire_end_at(&d.schematic, 0, at, tolerance(w));
             let mut s = w.resource_mut::<SchState>();
             match hit {
                 Some(item) => {
@@ -273,11 +315,13 @@ fn press(w: &mut World, at: Pt, shift: bool, ctrl: bool) {
                         }
                     } else {
                         if !s.selection.contains(&item) {
-                            s.selection = vec![item];
+                            s.selection = vec![item.clone()];
                         }
-                        // Pressing on a selected item starts dragging it.
+                        // Pressing on a wire's end or corner (not one of several selected) drags
+                        // that end alone; on a selected item, the selection.
+                        let end = (matches!(item, SchItem::Wire(_) | SchItem::Junction(_)) && s.selection.len() == 1).then_some(end).flatten();
                         let items = s.selection.clone();
-                        s.moving = Some(Moving { items, from: snap(at), drag: true, on_release: true });
+                        s.moving = Some(Moving { items, from: snap(at), drag: true, on_release: true, end });
                     }
                 }
                 None => {
@@ -335,12 +379,19 @@ fn press(w: &mut World, at: Pt, shift: bool, ctrl: bool) {
             });
         }
         Tool::Paste(clip) => {
+            // From another studio: the parts it brings come into this one's Components, in the
+            // same undo step.
+            let (clip, mark) = ui::adopt_parts(w, &clip);
             let mut pasted = vec![];
-            ui::commit(w, "Paste", |d| {
+            let done = ui::commit(w, "Paste", |d| {
                 pasted = se::paste(&mut d.schematic, 0, &clip, at);
                 se::fix_junctions(&mut d.schematic, 0);
                 Ok(())
             });
+            let mut doc = w.resource_mut::<ActiveDocument>();
+            if doc.history.undo_len() > mark + 1 || (!done && doc.history.undo_len() > mark) {
+                doc.squash_since(mark, "Paste");
+            }
             set_tool(w, Tool::Select);
             w.resource_mut::<SchState>().selection = pasted;
         }
@@ -427,14 +478,17 @@ fn double(w: &mut World, at: Pt) {
 
 fn finish_move(w: &mut World, m: &Moving, at: Pt) {
     let d = snap(at) - m.from;
-    let (items, drag) = (m.items.clone(), m.drag);
+    let (items, drag, end) = (m.items.clone(), m.drag, m.end);
     w.resource_mut::<SchState>().moving = None;
     w.resource_mut::<Preview>().set(None);
     if d == Pt::ZERO {
         return;
     }
-    ui::commit(w, if drag { "Drag" } else { "Move" }, |des| {
-        se::move_items(&mut des.schematic, 0, &items, d, drag);
+    ui::commit(w, if end.is_some() { "Drag wire end" } else if drag { "Drag" } else { "Move" }, |des| {
+        match end {
+            Some(p) => se::move_wire_end(&mut des.schematic, 0, p, p + d),
+            None => se::move_items(&mut des.schematic, 0, &items, d, drag),
+        }
         se::fix_junctions(&mut des.schematic, 0);
         Ok(())
     });
@@ -461,14 +515,16 @@ fn handle_keys(world: &mut World, keys: Vec<KeyboardInput>) {
         let sel = world.resource::<SchState>().selection.clone();
         if ctrl {
             match k.key_code {
-                // Copy (from under the pointer); paste or duplicate follow the pointer.
+                // Copy (the selection, else what is under the pointer), held by its middle:
+                // paste or duplicate follow the pointer centred on it.
                 KeyCode::KeyC | KeyCode::KeyD => {
                     let items = if sel.is_empty() { hit_items(world, pointer) } else { sel };
                     let Some((_, _, d)) = ui::current(world) else { continue };
-                    let clip = se::copy_items(&d.schematic, 0, &items, pointer);
+                    let mut clip = se::copy_items(&d.schematic, 0, &items, se::items_center(&d.schematic, 0, &items));
                     if clip.is_empty() {
                         continue;
                     }
+                    ui::carry_parts(world, &mut clip);
                     if k.key_code == KeyCode::KeyD {
                         set_tool(world, Tool::Paste(Box::new(clip)));
                     } else {
@@ -537,7 +593,7 @@ fn handle_keys(world: &mut World, keys: Vec<KeyboardInput>) {
                 let items = if sel.is_empty() { hit_items(world, pointer) } else { sel };
                 if !items.is_empty() {
                     world.resource_mut::<SchState>().selection = items.clone();
-                    world.resource_mut::<SchState>().moving = Some(Moving { items, from: snap(pointer), drag: k.key_code == KeyCode::KeyG, on_release: false });
+                    world.resource_mut::<SchState>().moving = Some(Moving { items, from: snap(pointer), drag: k.key_code == KeyCode::KeyG, on_release: false, end: None });
                 }
             }
             KeyCode::KeyR => {
@@ -607,7 +663,10 @@ fn follow_pointer(world: &mut World, mut last: Local<Option<(Pt, u64)>>) {
     let Some((_, _, mut d)) = ui::current(world) else { return };
     let preview: Option<Design> = if let Some(m) = moving {
         let delta = at - m.from;
-        se::move_items(&mut d.schematic, 0, &m.items, delta, m.drag);
+        match m.end {
+            Some(p) => se::move_wire_end(&mut d.schematic, 0, p, p + delta),
+            None => se::move_items(&mut d.schematic, 0, &m.items, delta, m.drag),
+        }
         Some(d)
     } else {
         match tool {
@@ -652,10 +711,87 @@ fn follow_pointer(world: &mut World, mut last: Local<Option<(Pt, u64)>>) {
     }
 }
 
-/// The selection shown highlighted.
+/// What the box being dragged will select ([`SchState::box_preview`]), as its release will take
+/// it: wholly inside left to right, touched right to left.
+fn preview_box(world: &mut World, mut last: Local<Option<(Pt, Pt)>>) {
+    let start = world.resource::<SchState>().boxing.filter(|_| shown(world));
+    let at = world.resource::<EdaPointer>().at;
+    let found = match start {
+        Some(start) if start.dist(at) >= tolerance(world) as f64 => {
+            if *last == Some((start, at)) {
+                return;
+            }
+            *last = Some((start, at));
+            let Some((_, _, d)) = ui::current(world) else { return };
+            let r = Bounds { min: Pt::new(start.x.min(at.x), start.y.min(at.y)), max: Pt::new(start.x.max(at.x), start.y.max(at.y)) };
+            se::box_select(&d.schematic, 0, r, at.x < start.x)
+        }
+        _ => {
+            *last = None;
+            Vec::new()
+        }
+    };
+    let mut s = world.resource_mut::<SchState>();
+    if s.box_preview != found {
+        s.box_preview = found;
+    }
+}
+
+/// Where wires join pins and labels: while wiring, placing or moving, every pin's end and
+/// label's anchor is marked; in Select, the pins of the symbol under the pointer. The point a
+/// wire would join now (a pin's end or label's anchor under the pointer, or while wiring a wire
+/// there) is filled.
+fn mark_pins(world: &mut World, mut last: Local<Option<(Pt, u64)>>) {
+    use cadrs_eda::render::PinEnds;
+    let s = world.resource::<SchState>();
+    let wiring = matches!(s.tool, Tool::Wire(_) | Tool::Label(_) | Tool::GlobalLabel(_) | Tool::NoConnect | Tool::Place(_) | Tool::Paste(_)) || s.moving.is_some();
+    let at = world.resource::<EdaPointer>().at;
+    let generation = world.resource::<ActiveDocument>().history.undo_len() as u64 ^ (wiring as u64) << 40;
+    if !shown(world) {
+        let mut s = world.resource_mut::<SchState>();
+        if s.pin_ends != PinEnds::None || s.hot_pin.is_some() {
+            (s.pin_ends, s.hot_pin) = (PinEnds::None, None);
+        }
+        return;
+    }
+    if *last == Some((at, generation)) {
+        return;
+    }
+    *last = Some((at, generation));
+    let tol = tolerance(world);
+    let Some((_, _, d)) = ui::current(world) else { return };
+    let pin = se::pin_at(&d.schematic, 0, if wiring { snap(at) } else { at }, tol);
+    let ends = if wiring {
+        PinEnds::All
+    } else {
+        match (pin.as_ref(), se::hit(&d.schematic, 0, at, tol)) {
+            (Some((id, _, _)), _) => PinEnds::Symbol(*id),
+            (None, Some(SchItem::Symbol(id) | SchItem::Field(id, _))) => PinEnds::Symbol(id),
+            _ => PinEnds::None,
+        }
+    };
+    // The point a wire would join now: a pin's end, a label's anchor, or (wiring) a wire.
+    let near = |q: Pt| q.dist(at) <= tol as f64;
+    let sh = &d.schematic.sheets[0];
+    let hot = pin.map(|p| p.2).or_else(|| sh.labels.iter().map(|l| l.text.at).find(|p| near(*p))).or_else(|| {
+        let p = snap(at);
+        (wiring && sh.wires.iter().any(|w| cadrs_eda::connectivity::on_segment(p, w.a, w.b))).then_some(p)
+    });
+    let mut s = world.resource_mut::<SchState>();
+    if s.pin_ends != ends || s.hot_pin != hot {
+        (s.pin_ends, s.hot_pin) = (ends, hot);
+    }
+}
+
+/// The selection shown highlighted, and the pin ends marked.
 fn publish(s: Res<SchState>, mut inputs: ResMut<SceneInputs>) {
-    // The selection, and the highlighted net.
+    if inputs.sch_pin_ends != s.pin_ends || inputs.sch_hot_pin != s.hot_pin {
+        inputs.sch_pin_ends = s.pin_ends;
+        inputs.sch_hot_pin = s.hot_pin;
+    }
+    // The selection, what the box being dragged will add to it, and the highlighted net.
     let mut hl = s.selection.clone();
+    hl.extend(s.box_preview.iter().filter(|i| !s.selection.contains(i)).cloned());
     if let Some((_, items)) = &s.net {
         hl.extend(items.iter().filter(|i| !s.selection.contains(i)).cloned());
     }

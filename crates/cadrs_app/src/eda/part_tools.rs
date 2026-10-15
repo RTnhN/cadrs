@@ -251,8 +251,8 @@ fn on_click(mut reader: MessageReader<EdaClick>, mut commands: Commands) {
         for c in clicks {
             match c {
                 EdaClick::Press { at, shift, .. } => press(world, m, at, shift),
-                EdaClick::Double { at } => double(world, m, at),
-                EdaClick::Release { .. } => {}
+                EdaClick::Double { at, .. } => double(world, m, at),
+                EdaClick::Release { .. } | EdaClick::Secondary { .. } => {}
             }
         }
     });

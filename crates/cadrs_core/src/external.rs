@@ -252,7 +252,8 @@ fn snap(source: &Document, r: SourceRef, version_name: &str, id: ElementId, out:
     let mut copy = el.clone();
     match &el.kind {
         ElementKind::Drawing(_) => return Err(LinkError::NotLinkable(format!("The drawing {}", el.name))),
-        ElementKind::PcbStudio(_) => return Err(LinkError::NotLinkable(format!("The PCB Studio {}", el.name))),
+        // A board derived at a version (`docs/PCB_IN_PART_STUDIO.md`): the studio as it was.
+        ElementKind::PcbStudio(_) => {}
         // P3F.6: a Render Studio renders its source here; it isn't linked elsewhere.
         ElementKind::Render(_) => return Err(LinkError::NotLinkable(format!("The Render Studio {}", el.name))),
         ElementKind::PartStudio { .. } => {
@@ -283,7 +284,7 @@ fn snap(source: &Document, r: SourceRef, version_name: &str, id: ElementId, out:
                 inst.source = match inst.source {
                     InstanceSource::Part { element, part } => InstanceSource::Part { element: m(element), part },
                     InstanceSource::Assembly { element } => InstanceSource::Assembly { element: m(element) },
-                    InstanceSource::Studio { element } => InstanceSource::Studio { element: m(element) },
+                    InstanceSource::Studio { element, board } => InstanceSource::Studio { element: m(element), board },
                 };
             }
         }

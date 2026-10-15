@@ -84,13 +84,24 @@ pub fn update_pcb(d: &mut Design, lib: &LibraryTable, opts: &Options) -> Report 
         }
         let (r, fpid) = (s.reference().to_string(), s.footprint().to_string());
         rep.messages.push(format!("Processing symbol '{r}:{fpid}'."));
+        // Its footprint on the board: linked to it, else (a symbol copied, pasted or placed
+        // again has a new id) one of the same reference whose symbol is gone.
+        let linked_to = |f: &PlacedFootprint| if opts.relink_by_reference { f.reference() == r } else { f.symbol == Some(s.id) };
+        let orphan = |f: &PlacedFootprint| f.reference() == r && f.symbol.is_none_or(|id| !symbols.iter().any(|x| x.id == id));
+        let existing = d.board.footprints.iter().position(linked_to).or_else(|| d.board.footprints.iter().position(|f| orphan(f) && !linked.contains(&f.id)));
+        // A symbol still on the schematic keeps its footprint, even when it can't be updated.
+        if let Some(i) = existing {
+            linked.insert(d.board.footprints[i].id);
+        }
         if fpid.is_empty() {
             rep.errors.push(format!("No footprint assigned to {r}."));
             continue;
         }
-        let existing = d.board.footprints.iter().position(|f| if opts.relink_by_reference { f.reference() == r } else { f.symbol == Some(s.id) });
         let Some(def_fp) = lib.footprint(&fpid) else {
-            rep.errors.push(format!("Cannot add {r} (no footprint '{fpid}' found)."));
+            match existing {
+                Some(_) => rep.warnings.push(format!("{r} kept as it is (no footprint '{fpid}' found in the libraries).")),
+                None => rep.errors.push(format!("Cannot add {r} (no footprint '{fpid}' found).")),
+            }
             continue;
         };
         // New footprints' nets aren't reported (their "Add" line says it).

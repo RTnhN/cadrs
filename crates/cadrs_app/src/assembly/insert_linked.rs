@@ -97,7 +97,7 @@ pub fn linked_tree_items(doc: &Document, parts_of: &mut super::AssemblyParts, s:
             continue;
         }
         let studio_item = if s.rigid {
-            Item { sources: vec![InstanceSource::Studio { element: root }], label: el.name.clone(), rigid: parts.iter().map(|p| p.id).collect(), link: Some(link.clone()) }
+            Item { sources: vec![InstanceSource::Studio { element: root, board: None }], label: el.name.clone(), rigid: parts.iter().map(|p| p.id).collect(), link: Some(link.clone()) }
         } else {
             Item { sources: parts.iter().map(|p| InstanceSource::Part { element: root, part: p.id }).collect(), label: el.name.clone(), rigid: Vec::new(), link: Some(link.clone()) }
         };

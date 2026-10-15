@@ -229,7 +229,11 @@ pub fn sources_fingerprint(doc: &Document, parts: &[ContextPart]) -> u64 {
     let mut h: u64 = 0xcbf2_9ce4_8422_2325;
     for e in els {
         let Some(el) = doc.element(e) else { continue };
-        let text = ron::to_string(el.features()).unwrap_or_default();
+        // A PCB Studio's boards by their layouts' hashes (the layouts themselves are big).
+        let text = match el.pcb() {
+            Some(p) => p.boards.iter().map(|b| format!("{:?}:{};", b.id, b.derived_layout().1)).collect(),
+            None => ron::to_string(el.features()).unwrap_or_default(),
+        };
         for b in e.to_string().bytes().chain(text.bytes()) {
             h ^= b as u64;
             h = h.wrapping_mul(0x0100_0000_01b3);
@@ -243,7 +247,7 @@ pub fn sources_fingerprint(doc: &Document, parts: &[ContextPart]) -> u64 {
 pub fn studio_of(doc: &Document, assembly: ElementId, instance: InstanceId) -> Option<ElementId> {
     let i = doc.element(assembly)?.assembly_model()?.instance(instance)?;
     match i.source {
-        InstanceSource::Part { element, .. } | InstanceSource::Studio { element } => Some(element),
+        InstanceSource::Part { element, .. } | InstanceSource::Studio { element, .. } => Some(element),
         InstanceSource::Assembly { .. } => None,
     }
 }
@@ -258,7 +262,9 @@ pub fn snapshot_with(doc: &Document, assembly: ElementId, studio: ElementId, ins
     for o in occurrences(doc, asm).into_iter().filter(|o| o.element != studio && !o.hidden) {
         let Some(src) = doc.element(o.element) else { continue };
         if !studios.iter().any(|s| s.element == o.element) {
-            studios.push(ContextSource { element: o.element, features: src.active_features() });
+            // A board's PCB Studio: its boards as Derived features.
+            let features = src.active_part_features();
+            studios.push(ContextSource { element: o.element, features });
         }
         parts.push(ContextPart {
             id: context_id(id, o.id),
@@ -285,7 +291,7 @@ pub fn snapshot_as(doc: &Document, assembly: ElementId, instance: InstanceId, id
     let asm = doc.element(assembly).and_then(|e| e.assembly_model()).ok_or(CommandError::ElementNotFound(assembly))?;
     let inst = asm.instance(instance).ok_or(CommandError::Invalid(NO_PRIMARY.into()))?;
     let studio = match inst.source {
-        InstanceSource::Part { element, .. } | InstanceSource::Studio { element } => element,
+        InstanceSource::Part { element, .. } | InstanceSource::Studio { element, .. } => element,
         InstanceSource::Assembly { .. } => return Err(CommandError::Invalid("a subassembly is edited in its own tab".into())),
     };
     snapshot_with(doc, assembly, studio, instance, inst.pose.inverse(), id)
@@ -344,7 +350,7 @@ pub fn status(doc: &Document, studio: ElementId, ctx: &StudioContext) -> Context
 pub fn source_features(doc: &Document, ctx: &StudioContext, element: ElementId) -> Option<Vec<Feature>> {
     match ctx.frozen(element) {
         Some(f) => Some(f.to_vec()),
-        None if ctx.studios.is_empty() => doc.element(element).map(|e| e.active_features()),
+        None if ctx.studios.is_empty() => doc.element(element).map(|e| e.active_part_features()),
         None => None,
     }
 }

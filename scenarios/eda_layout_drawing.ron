@@ -51,7 +51,6 @@ Scenario(
         DoubleClick(flat(30.0, 50.0)),
         MoveTo(1100, 900),
         Screenshot("03-keepout"),
-        Key("B"),
         MoveTo(1100, 900),
         Screenshot("04-refilled"),
         Click(ui("pcb-drc")),

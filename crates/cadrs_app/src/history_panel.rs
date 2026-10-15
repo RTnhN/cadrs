@@ -6,7 +6,8 @@
 //!   after every committed change, that is when the document changed and no dialog or sketch is
 //!   open (a dialog's steps become one entry when it is accepted, as they become one undo
 //!   step). Undo, redo and Restore are entries of their own. The log is written next to the
-//!   document after each entry.
+//!   document after each entry, and compacted when the document is closed (or the app quits):
+//!   only versions and the last state are kept ([`HistoryLog::compact`]).
 //! - **Last healthy regeneration** (IR3.3): when a rebuild of the current state settles, every
 //!   feature that built without error (and every sketch that solves) is noted as healthy at the
 //!   current entry.
@@ -53,7 +54,7 @@ impl Plugin for HistoryPlugin {
             .add_observer(on_row_menu)
             .add_observer(on_row_menu_action)
             .add_observer(on_version_commit)
-            .add_systems(Last, track_history.run_if(in_state(AppState::Document)))
+            .add_systems(Last, (track_history.run_if(in_state(AppState::Document)), close_on_exit).chain())
             .add_systems(
                 Update,
                 (note_healthy.after(crate::parts::PartsSet), sync_panel, sync_rail_button, refit_when_opened)
@@ -74,6 +75,8 @@ pub struct DocLog {
     noted: Option<(usize, u64)>,
     /// Bumped with every change of the log (for the panel).
     pub generation: u64,
+    /// Where the log is written (none for a document not stored yet or open read-only).
+    store: Option<cadrs_core::Store>,
 }
 
 impl DocLog {
@@ -87,6 +90,13 @@ impl DocLog {
         self.stacks = stacks;
         self.noted = None;
         self.generation += 1;
+    }
+
+    /// The document was closed: its log is written compacted, in the background.
+    fn close(&mut self) {
+        if let (Some(log), Some(store)) = (self.log.take(), self.store.take()) {
+            log.save_compacted_in_background(&store);
+        }
     }
 
     /// The label of entry `k` ("Conrod :: Edit : Sketch 2").
@@ -137,6 +147,7 @@ fn refit_when_opened(
 }
 
 fn reset(mut log: ResMut<DocLog>, mut panel: ResMut<HistoryPanel>) {
+    log.close();
     *log = DocLog::default();
     *panel = HistoryPanel::default();
 }
@@ -161,15 +172,19 @@ pub fn editing(world: &World) -> bool {
 
 /// Loads or starts the log of the document opened, and appends every committed change.
 fn track_history(world: &mut World) {
-    let Some(doc) = world.get_resource::<ActiveDocument>() else {
+    let Some(id) = world.get_resource::<ActiveDocument>().map(|d| d.doc.id) else {
         return;
     };
+    // Another document was opened in its place: the last one's log is done with.
+    if world.resource::<DocLog>().log.as_ref().is_some_and(|l| l.document != id) {
+        world.resource_mut::<DocLog>().close();
+    }
+    let doc = world.resource::<ActiveDocument>();
     let now = world.get_resource::<AppClock>().map_or(0, |c| c.now());
     let user = world.get_resource::<UserProfile>().map(|u| u.id.clone()).unwrap_or_default();
     let store = world.get_resource::<DocumentStore>().map(|s| s.0.clone());
     let stored = doc.meta.is_some();
     let stacks = (doc.history.undo_len(), doc.history.redo_len());
-    let id = doc.doc.id;
     let opened = world.resource::<DocLog>().log.as_ref().is_none_or(|l| l.document != id);
     // P3G.3: a linked document open read-only at a version shows its history as it is on disk
     // and never writes to it.
@@ -197,11 +212,13 @@ fn track_history(world: &mut World) {
             log.catch_up(&d, now, &user);
             changed = true;
         }
-        if changed && let Some(s) = store.as_ref().filter(|_| stored) {
-            let _ = log.save(s);
+        let store = store.filter(|_| stored);
+        if changed && let Some(s) = &store {
+            log.save_in_background(s);
         }
         let mut l = world.resource_mut::<DocLog>();
         l.log = Some(log);
+        l.store = store;
         l.stacks = stacks;
         l.noted = None;
         l.generation += 1;
@@ -237,9 +254,16 @@ fn track_history(world: &mut World) {
     }
     log.record(&d, origin, now, &user);
     if let Some(s) = store.as_ref().filter(|_| stored) {
-        let _ = log.save(s);
+        log.save_in_background(s);
     }
     l.generation += 1;
+}
+
+/// The app is quitting with a document open: its log is written compacted (`main` waits for it).
+fn close_on_exit(mut exit: MessageReader<AppExit>, mut log: ResMut<DocLog>) {
+    if exit.read().count() > 0 {
+        log.close();
+    }
 }
 
 /// IR3.3: notes the features that regenerated without error in the current state.
@@ -281,7 +305,7 @@ fn note_healthy(
     let before = l.healthy.clone();
     l.note_healthy(element, ok);
     if l.healthy != before && doc.meta.is_some() {
-        let _ = l.save(&store.0);
+        l.save_in_background(&store.0);
     }
 }
 

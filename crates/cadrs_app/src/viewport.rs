@@ -411,6 +411,41 @@ impl Pick {
     }
 }
 
+/// The feature that controls how `pick` looks: the one that made a face (an edge's or a
+/// vertex's latest), the sketch of a sketch curve, point or region, the feature that made a part.
+pub fn feature_of(features: &[cadrs_core::Feature], pick: Pick) -> Option<FeatureId> {
+    let op = match pick {
+        Pick::Feature(f) | Pick::Region(f, _) | Pick::SketchCurve(f, _) | Pick::SketchPoint(f, _) => return Some(f),
+        Pick::Part(p) => return Some(p.feature),
+        Pick::Face(_, face) => face.op,
+        Pick::Edge(_, edge) => crate::parts::edge_maker(features, &edge),
+        Pick::Vertex(_, v) => {
+            let at = |op: cadrs_sketch::OpId| features.iter().position(|f| f.id.0 == op);
+            v.faces.iter().map(|f| f.op).max_by_key(|op| at(*op))?
+        }
+        _ => return None,
+    };
+    let id = FeatureId(op);
+    features.iter().any(|f| f.id == id).then_some(id).or_else(|| pick.part().map(|p| p.feature))
+}
+
+/// A double-click in the Part Studio: opens the feature behind what was clicked (its sketch,
+/// its extrude, …) and shows it in the feature list, unless a dialog or sketch is open
+/// already.
+fn edit_picked(world: &mut World, pick: Pick) {
+    if crate::history_panel::editing(world) {
+        return;
+    }
+    let feature = world
+        .get_resource::<crate::ActiveDocument>()
+        .and_then(|d| feature_of(d.active_element()?.features(), pick));
+    if let Some(id) = feature {
+        world.resource_mut::<Selection>().0.clear();
+        crate::document::reveal_feature(world, id);
+        crate::document::edit_feature(world, id);
+    }
+}
+
 /// A click that picks something (or nothing: `None` clears) in the viewport or the feature
 /// list. In modeling mode it toggles the [`Selection`]; while a sketch dialog is open the
 /// sketch uses it (to choose its plane).
@@ -565,6 +600,9 @@ pub struct ViewportDrag {
     /// Where the secondary button went down over the viewport (a right-click that does not
     /// move opens a context menu).
     secondary_down: Option<Vec2>,
+    /// The last click in the view: when (s), where, and what it picked (a second click on the
+    /// same thing soon after is a double-click).
+    last_click: Option<(f32, Vec2, Pick)>,
 }
 
 impl ViewportDrag {
@@ -960,11 +998,12 @@ fn viewport_pointer(
         Res<PickFilterOverride>,
         Res<crate::eda::Eda2d>,
     ),
-    (mut focus, q_number, mut grab, zoom_window): (
+    (mut focus, q_number, mut grab, zoom_window, time): (
         ResMut<bevy::input_focus::InputFocus>,
         Query<(), With<cadrs_ui::NumberFieldEdit>>,
         ResMut<crate::assembly::ViewportGrab>,
         Option<Res<crate::view_options::ZoomWindow>>,
+        Res<Time>,
     ),
     prefs: Res<crate::preferences_ui::LocalPreferences>,
     mut commands: Commands,
@@ -1057,10 +1096,13 @@ fn viewport_pointer(
                     // not a click that selects.
                     let grabbed = std::mem::take(&mut grab.0);
                     let down = drag.primary_down.take();
+                    // A board's layout edited in the view takes the clicks
+                    // (`crate::board_in_studio`).
                     if let Some(down) = down
                         && over
                         && !grabbed
                         && down.distance(pos) < 4.0
+                        && eda2d.plane().is_none()
                     {
                         // A click in the viewport: toggle what is under the cursor, or clear.
                         let picked = match (*kind, filter) {
@@ -1079,7 +1121,24 @@ fn viewport_pointer(
                             ),
                             _ => None,
                         };
-                        picks.write(PickRequest(picked));
+                        // Double-clicking a face, edge, vertex, sketch or part edits the
+                        // feature that made it, as in Onshape. Its second click doesn't select
+                        // (the dialog would take what is selected as its own).
+                        let now = time.elapsed_secs();
+                        let again = drag.last_click.take().is_some_and(|(t, at, p)| {
+                            Some(p) == picked && now - t <= cadrs_ui::inline_edit::DOUBLE_CLICK_TIME && at.distance(pos) < 6.0
+                        });
+                        match picked {
+                            Some(p) if again && modeling && forced.is_none() && *kind == ActiveKind::PartStudio => {
+                                commands.queue(move |world: &mut World| edit_picked(world, p));
+                            }
+                            _ => {
+                                picks.write(PickRequest(picked));
+                                if !again {
+                                    drag.last_click = picked.map(|p| (now, pos, p));
+                                }
+                            }
+                        }
                     } else if let Some(down) = down
                         && applied.is_some()
                         && *kind == ActiveKind::PartStudio
@@ -1328,7 +1387,7 @@ pub fn pick_in(view: &ViewState, offset: Vec2, planes: bool) -> Option<Pick> {
 /// views, N normal to (the sketch plane, a selected plane or a selected sketch's plane), F zoom
 /// to fit, Z / Shift+Z zoom out / in, arrows rotate 15° (Shift 90°, Ctrl 5°), Ctrl+Shift+arrows
 /// pan, P shows or hides the default planes, Space clears the selection.
-#[allow(clippy::too_many_arguments)]
+#[allow(clippy::too_many_arguments, clippy::type_complexity)]
 fn view_shortcuts(
     mut keys_in: MessageReader<KeyboardInput>,
     keys: Res<ButtonInput<KeyCode>>,
@@ -1343,7 +1402,7 @@ fn view_shortcuts(
     doc: Option<Res<ActiveDocument>>,
     mut planes: ResMut<PlanesVisible>,
     inset: Res<DialogInset>,
-    (cache, asm_parts, pcb_scene, eda2d): (Res<crate::parts::PartCache>, Res<crate::assembly::AssemblyParts>, Option<Res<crate::pcb::view::PcbScene>>, Res<crate::eda::Eda2d>),
+    (cache, asm_parts, pcb_scene, eda2d, layout): (Res<crate::parts::PartCache>, Res<crate::assembly::AssemblyParts>, Option<Res<crate::pcb::view::PcbScene>>, Res<crate::eda::Eda2d>, Res<crate::eda::layout_tools::LayoutState>),
 ) {
     if kind.is_flat() || eda2d.flat() {
         // No 3D views on a sheet or a render; F and Ctrl+S are handled by `crate::drawing`.
@@ -1405,6 +1464,14 @@ fn view_shortcuts(
             continue;
         }
         match k.key_code {
+            // A board's layout edited in the view: normal to the board, from the top (N) or the
+            // bottom (Shift+N).
+            KeyCode::KeyN if *kind == ActiveKind::PartStudio && let Some(h) = eda2d.plane() => {
+                let n = h.frame.normal();
+                let n = Vec3::new(n[0] as f32, n[1] as f32, n[2] as f32);
+                let to = view.target().normal_to(if shift { -n } else { n });
+                view.animate_to(to);
+            }
             KeyCode::KeyN if !shift && *kind == ActiveKind::PartStudio => {
                 // In a sketch: normal to the sketch plane. Otherwise normal to the selected
                 // plane, or to the plane of the selected sketch.
@@ -1433,6 +1500,9 @@ fn view_shortcuts(
                     view.animate_to(to);
                 }
             }
+            // A board's layout edited in the view: F flips the selected footprint
+            // (`crate::eda::layout_tools`).
+            KeyCode::KeyF if !shift && eda2d.plane().is_some() && layout.selection.iter().any(|i| matches!(i, cadrs_eda::board_edit::BoardItem::Footprint(_))) => {}
             KeyCode::KeyF if !shift => {
                 let mut pts = scene_points(doc.as_deref(), *kind, planes.0);
                 // In an assembly with a mate dialog's or a drag's preview, the instances as drawn
@@ -1650,7 +1720,7 @@ fn update_hover(
         Res<PickFilterOverride>,
         Option<Res<crate::assembly::triad::Triad>>,
     ),
-    (zoom_window, section_arrow): (Option<Res<crate::view_options::ZoomWindow>>, Res<crate::section_view::SectionArrow>),
+    (zoom_window, section_arrow, eda2d, fit): (Option<Res<crate::view_options::ZoomWindow>>, Res<crate::section_view::SectionArrow>, Res<crate::eda::Eda2d>, Res<crate::board_fit::FitState>),
     mut last: Local<Option<(Vec2, crate::parts::PickFilter, Option<Pick>)>>,
 ) {
     // While a sketch has its plane, planes no longer react to the pointer (the sketch tools
@@ -1659,7 +1729,9 @@ fn update_hover(
     let picking = filter.is_some();
     // Zoom to window's box and the section plane's arrow own the pointer: nothing under it
     // highlights (P3E.3a).
-    let over = pointer_over_viewport(&hover, &q_area) && zoom_window.is_none() && section_arrow.drag.is_none();
+    // A board's layout edited in the view owns the pointer too, unless Align waits for a pick.
+    let layout_edit = eda2d.plane().is_some() && fit.align == crate::board_fit::AlignStep::Off;
+    let over = pointer_over_viewport(&hover, &q_area) && zoom_window.is_none() && section_arrow.drag.is_none() && !layout_edit;
     let query = match filter {
         Some(f) if over && !drag.navigating && *kind == ActiveKind::PartStudio => Some(f),
         // No pre-highlight while a triad drag or its value box is active (P3H.6 judge).

@@ -51,9 +51,18 @@ impl Command for InsertInstance {
             }
             // A17.2: another Assembly tab, which must not be (or contain) this one.
             // A2.4: a whole Part Studio as one rigid instance.
-            super::InstanceSource::Studio { .. } => {
+            super::InstanceSource::Studio { board: None, .. } => {
                 if !doc.element(src).is_some_and(|e| matches!(e.kind, crate::document::ElementKind::PartStudio { .. })) {
                     return Err(CommandError::Invalid("the source is not a Part Studio of this document".into()));
+                }
+                if self.instance.parts.is_empty() {
+                    return Err(CommandError::Invalid("a rigid Part Studio instance needs a part".into()));
+                }
+            }
+            // A PCB Studio's board designed in cadrs (`docs/PCB_IN_PART_STUDIO.md` §9).
+            super::InstanceSource::Studio { board: Some(b), .. } => {
+                if doc.element(src).and_then(|e| e.pcb()).and_then(|s| s.board(b)).is_none() {
+                    return Err(CommandError::Invalid("the source is not a board of a PCB Studio of this document".into()));
                 }
                 if self.instance.parts.is_empty() {
                     return Err(CommandError::Invalid("a rigid Part Studio instance needs a part".into()));

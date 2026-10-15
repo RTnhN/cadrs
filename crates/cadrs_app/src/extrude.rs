@@ -1325,7 +1325,18 @@ fn draw_regions(
     // The fill: one mesh, rebuilt when the selection changes.
     // Rebuilt when the selection changes, or when its regions become available (the frame an
     // edit opens, the used sketch's regions come back a frame later).
-    let key: FillKey = (selected.clone(), plain_key, tris.len() + usize::from(failed.0) * (1 << 40));
+    // The triangles' hash, not their count: a square moved to a rectangle keeps its two
+    // triangles (`pcb_board_from_sketch` 03 kept the square's fill).
+    let shape = {
+        use std::hash::{Hash, Hasher};
+        let mut h = std::collections::hash_map::DefaultHasher::new();
+        for t in &tris {
+            t.map(f32::to_bits).hash(&mut h);
+        }
+        failed.0.hash(&mut h);
+        h.finish()
+    };
+    let key: FillKey = (selected.clone(), plain_key, shape);
     let rebuild = fill.as_ref().is_none_or(|(.., k)| *k != key);
     if !rebuild {
         return;
@@ -1401,8 +1412,8 @@ type FillState = Option<(Entity, Handle<Mesh>, Handle<StandardMaterial>, FillKey
 type SelectedRegions = Vec<(FeatureId, Vec<cadrs_sketch::CurveId>, cadrs_sketch::Vec2)>;
 
 /// What a region fill was built from: the selected regions (the Extrude dialog's, and the plain
-/// selection's) and its triangle count.
-type FillKey = (SelectedRegions, Vec<(FeatureId, usize)>, usize);
+/// selection's) and its triangles' hash.
+type FillKey = (SelectedRegions, Vec<(FeatureId, usize)>, u64);
 
 /// The selected regions' fill.
 #[derive(Component)]

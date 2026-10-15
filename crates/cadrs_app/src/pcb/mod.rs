@@ -65,6 +65,7 @@ impl Plugin for PcbPlugin {
             .init_resource::<view::ShadeState>()
             .init_resource::<PcbUi>()
             .init_resource::<ComponentsOpen>()
+            .init_resource::<PartClipboard>()
             .init_resource::<dialogs::PcbDialogs>()
             .init_resource::<sync::PcbLibrarySync>()
             .init_gizmo_group::<view::PcbEdgeGizmos>()
@@ -108,6 +109,7 @@ impl Plugin for PcbPlugin {
             .add_observer(on_board_menu_action)
             .add_observer(on_component_menu)
             .add_observer(on_component_menu_action)
+            .add_observer(on_components_header_menu)
             .add_observer(on_search_submit)
             .add_observer(dialogs::on_path_browse);
         panes::register(app);
@@ -556,6 +558,8 @@ type PackageInfo = (String, String, usize);
 struct TreeSnap {
     element: Option<ElementId>,
     boards: Vec<(BoardId, String, bool, Vec<PackageInfo>)>,
+    /// Each board's outline link: (the sketch it follows, why it doesn't now).
+    links: Vec<Option<(String, Option<String>)>>,
     components: Vec<(cadrs_core::pcb::ComponentId, String)>,
     open: Vec<BoardId>,
     viewing: Option<(BoardId, String)>,
@@ -594,6 +598,16 @@ fn rebuild_tree(
     let snap = TreeSnap {
         element: Some(el),
         boards: s.boards.iter().map(|b| (b.id, b.name().to_string(), shown == Some(b.id), packages(&b.board))).collect(),
+        links: s
+            .boards
+            .iter()
+            .map(|b| {
+                let l = b.outline_link.as_ref()?;
+                let studio = doc.doc.element(l.element);
+                let sketch = studio.and_then(|e| e.feature(l.sketch)).map(|f| f.name.clone()).unwrap_or_default();
+                Some((format!("{sketch} in {}", studio.map(|e| e.name.as_str()).unwrap_or_default()), l.problem.clone()))
+            })
+            .collect(),
         components: s.components.iter().map(|c| (c.id, c.component.name.clone())).collect(),
         open: s.boards.iter().filter(|b| open.0.contains(&(el, b.id))).map(|b| b.id).collect(),
         viewing: match &ui.view {
@@ -612,12 +626,24 @@ fn rebuild_tree(
         p.spawn(TreeItem::new("pcb-boards", "Boards").icon("board", 16.0).icon_color(t.foreground).left(4.0).height(24.0).build(&t))
             .insert(Pickable::IGNORE)
             .with_children(|h| header_add(h, &t, "pcb-add-board", "Create board"));
-        for (id, name, active, _) in &snap.boards {
+        for (k, (id, name, active, _)) in snap.boards.iter().enumerate() {
             let mut item = TreeItem::new(format!("pcb-board-{}", slug(name)), name.clone()).icon("board", 16.0).left(26.0).height(24.0).editable();
             if *active {
                 item = item.weight(FontWeight::BOLD).foreground(t.primary).icon_color(t.primary);
             }
-            let mut row = p.spawn((item.build(&t), BoardRow(el, *id), ContextMenuTarget, DoubleClickable, Tooltip::new(name.clone())));
+            // A board whose outline follows a sketch: a link glyph (a warning one when it can't
+            // follow it now), saying which sketch.
+            let link = snap.links.get(k).cloned().flatten();
+            let tip = match &link {
+                Some((sketch, None)) => format!("{name}: its outline follows {sketch}"),
+                Some((sketch, Some(why))) => format!("{name}: its outline no longer follows {sketch}: {why}"),
+                None => name.clone(),
+            };
+            let mut row = p.spawn((item.build(&t), BoardRow(el, *id), ContextMenuTarget, DoubleClickable, Tooltip::new(tip)));
+            if let Some((_, problem)) = &link {
+                let (glyph, color) = if problem.is_some() { ("warning-filled", t.warning_icon) } else { ("link", t.muted_foreground) };
+                row.with_child((Name::new(format!("pcb-board-{}-link", slug(name))), cadrs_ui::icon::icon_in(glyph, 13.0, color, Node { margin: UiRect::left(Val::Px(4.0)), ..default() }), Pickable::IGNORE));
+            }
             if *active {
                 row.with_child((
                     Name::new("pcb-board-active-bar"),
@@ -641,8 +667,9 @@ fn rebuild_tree(
             BackgroundColor(t.separator),
             Pickable::IGNORE,
         ));
+        // (Right-click it to paste a component copied in a studio.)
         p.spawn(TreeItem::new("pcb-components", "Components").icon("chip", 16.0).icon_color(t.foreground).left(4.0).height(24.0).build(&t))
-            .insert(Pickable::IGNORE)
+            .insert((ComponentsHeader(el), ContextMenuTarget))
             .with_children(|h| header_add(h, &t, "pcb-add-component", "Create component"));
         for (id, name) in &snap.components {
             p.spawn((
@@ -755,22 +782,68 @@ fn on_tree_toggle(ev: On<TreeToggle>, q: Query<&ComponentsRow>, mut open: ResMut
 #[derive(Component, Clone, Copy)]
 struct BoardMenuFor(ElementId, BoardId);
 
-/// Right-click a board → Delete this board (PCB3.6). The menu opens below the row, at the
-/// pointer's x, so it never covers the row (P3H.3 judge).
-fn on_board_menu(ev: On<ContextMenuRequested>, q: Query<(&BoardRow, &UiGlobalTransform, &ComputedNode)>, theme: Res<Theme>, mut commands: Commands) {
+/// Where a board's outline can follow: the Part Studios' sketches with a closed region, in
+/// the board menu's order.
+#[derive(Component, Clone, Default)]
+struct OutlineTargets(Vec<(ElementId, cadrs_core::FeatureId)>);
+
+/// Right-click a board → Delete this board (PCB3.6); for a board designed here, Link outline to
+/// a Part Studio sketch (each sketch with a closed region, `docs/PCB_IN_PART_STUDIO.md` §8.2), or
+/// Break outline link. The menu opens below the row, at the pointer's x, so it never covers the
+/// row (P3H.3 judge).
+fn on_board_menu(ev: On<ContextMenuRequested>, q: Query<(&BoardRow, &UiGlobalTransform, &ComputedNode)>, doc: Option<Res<ActiveDocument>>, theme: Res<Theme>, mut commands: Commands) {
+    // (Every right-click comes here, the document list's too, where no document is open.)
     let Ok((r, tf, node)) = q.get(ev.entity) else { return };
+    let Some(doc) = doc else { return };
     let s = node.inverse_scale_factor();
     let bottom = (tf.translation.y + node.size().y / 2.0) * s;
     let at = Vec2::new(ev.position.x + 2.0, bottom.max(ev.position.y) + 4.0);
-    let menu = Menu::new("pcb-board-menu").min_width(170.0).item(MenuItem::new("pcb-delete-board", "Delete this board").icon("delete"));
+    let mut menu = Menu::new("pcb-board-menu").min_width(170.0);
+    let board = doc.doc.element(r.0).and_then(|e| e.pcb()).and_then(|p| p.board(r.1));
+    let mut targets = OutlineTargets::default();
+    match board {
+        Some(b) if b.outline_link.is_some() => {
+            let note = b.outline_link.as_ref().and_then(|l| l.problem.clone());
+            menu = menu.item(MenuItem::new("pcb-unlink-outline", "Break outline link").icon("link"));
+            if let Some(p) = note {
+                menu = menu.item(MenuItem::new("pcb-outline-problem", format!("Outline link: {p}")).icon("warning-filled").disabled(true));
+            }
+        }
+        Some(b) if b.design().is_some() => {
+            for el in doc.doc.elements.iter().filter(|e| e.assembly_model().is_none() && e.pcb().is_none()) {
+                for f in el.features() {
+                    if f.sketch().is_some_and(|s| !cadrs_sketch::region::regions_shared(&s.geometry).is_empty()) {
+                        menu = menu.item(MenuItem::new(format!("pcb-link-outline-{}", targets.0.len()), format!("Link outline to {} ({})", f.name, el.name)).icon("sketch"));
+                        targets.0.push((el.id, f.id));
+                    }
+                }
+            }
+        }
+        _ => {}
+    }
+    menu = menu.item(MenuItem::new("pcb-delete-board", "Delete this board").icon("delete"));
     let anchor = open_context_menu(&mut commands, at, menu.build(&theme));
-    commands.entity(anchor).insert((BoardMenuFor(r.0, r.1), DespawnOnExit(AppState::Document)));
+    commands.entity(anchor).insert((BoardMenuFor(r.0, r.1), targets, DespawnOnExit(AppState::Document)));
 }
 
-fn on_board_menu_action(ev: On<MenuAction>, q: Query<&BoardMenuFor, With<ContextMenuAnchor>>, mut commands: Commands) {
-    let Ok(&BoardMenuFor(el, id)) = q.get(ev.entity) else { return };
-    if ev.item == "pcb-delete-board" {
-        commands.queue(move |w: &mut World| delete_board(w, el, id));
+fn on_board_menu_action(ev: On<MenuAction>, q: Query<(&BoardMenuFor, &OutlineTargets), With<ContextMenuAnchor>>, mut commands: Commands) {
+    let Ok((&BoardMenuFor(el, id), targets)) = q.get(ev.entity) else { return };
+    use cadrs_core::pcb::outline_link::SetOutlineLink;
+    let link = move |w: &mut World, link: Option<(ElementId, cadrs_core::FeatureId, Vec<cadrs_core::document::RegionRef>)>| {
+        if let Err(e) = w.resource_mut::<ActiveDocument>().execute(&SetOutlineLink { pcb: el, board: id, keep_parts: link.is_some(), link }) {
+            crate::linked::error_toast(w, e.to_string());
+        }
+    };
+    match ev.item.as_str() {
+        "pcb-delete-board" => commands.queue(move |w: &mut World| delete_board(w, el, id)),
+        "pcb-unlink-outline" => commands.queue(move |w: &mut World| link(w, None)),
+        item => {
+            let Some(&(studio, sketch)) = item.strip_prefix("pcb-link-outline-").and_then(|i| i.parse::<usize>().ok()).and_then(|i| targets.0.get(i)) else { return };
+            commands.queue(move |w: &mut World| {
+                let regions = w.resource::<ActiveDocument>().doc.element(studio).and_then(|e| e.feature(sketch)).and_then(|f| f.sketch()).map(|s| crate::board_in_studio::largest_region(&s.geometry, sketch)).unwrap_or_default();
+                link(w, Some((studio, sketch, regions)));
+            });
+        }
     }
 }
 
@@ -802,29 +875,122 @@ pub fn delete_board(world: &mut World, el: ElementId, id: BoardId) {
 #[derive(Component, Clone, Copy)]
 struct ComponentMenuFor(ElementId, cadrs_core::pcb::ComponentId);
 
-/// Right-click a component → Edit, Rename, Delete.
-fn on_component_menu(ev: On<ContextMenuRequested>, q: Query<(&NativeComponentRow, &UiGlobalTransform, &ComputedNode)>, theme: Res<Theme>, mut commands: Commands) {
-    let Ok((r, tf, node)) = q.get(ev.entity) else { return };
+/// The Components header of a studio's tree (right-click: Paste).
+#[derive(Component, Clone, Copy)]
+struct ComponentsHeader(ElementId);
+
+/// A component copied with right-click → Copy (its symbol, footprint and 3D models), for
+/// Paste in this studio or another.
+#[derive(Resource, Default)]
+pub struct PartClipboard(pub Option<cadrs_eda::Component>);
+
+/// Where a context menu opens under a tree row.
+fn below_row(ev: &ContextMenuRequested, tf: &UiGlobalTransform, node: &ComputedNode) -> Vec2 {
     let s = node.inverse_scale_factor();
     let bottom = (tf.translation.y + node.size().y / 2.0) * s;
-    let at = Vec2::new(ev.position.x + 2.0, bottom.max(ev.position.y) + 4.0);
-    let menu = Menu::new("pcb-component-menu")
-        .min_width(170.0)
+    Vec2::new(ev.position.x + 2.0, bottom.max(ev.position.y) + 4.0)
+}
+
+/// The Paste item: what it would paste, greyed out with nothing copied.
+fn paste_item(clip: &PartClipboard) -> MenuItem {
+    match &clip.0 {
+        Some(c) => MenuItem::new("pcb-paste-component", "Paste").tooltip(format!("Adds a copy of {}", c.name)),
+        None => MenuItem::new("pcb-paste-component", "Paste").disabled(true),
+    }
+}
+
+/// Right-click a component → Edit, Copy, Paste, Add to my library (while no user library has
+/// it), Rename, Delete.
+#[allow(clippy::too_many_arguments)]
+fn on_component_menu(
+    ev: On<ContextMenuRequested>,
+    q: Query<(&NativeComponentRow, &UiGlobalTransform, &ComputedNode)>,
+    doc: Option<Res<ActiveDocument>>,
+    clip: Res<PartClipboard>,
+    user: Option<Res<crate::eda::libraries::UserLibraries>>,
+    theme: Res<Theme>,
+    mut commands: Commands,
+) {
+    let (Ok((r, tf, node)), Some(doc)) = (q.get(ev.entity), doc) else { return };
+    let at = below_row(&ev, tf, node);
+    let part = doc.doc.element(r.0).and_then(|e| e.pcb()).and_then(|s| s.component(r.1)).map(|c| &c.component);
+    let can_add = part.is_some_and(|c| (c.symbol.is_some() || c.footprint.is_some()) && user.as_ref().is_some_and(|u| u.dir.is_some() && !u.has_part(c)));
+    let mut menu = Menu::new("pcb-component-menu")
+        .min_width(190.0)
         .item(MenuItem::new("pcb-edit-component", "Edit").icon("edit"))
-        .item(MenuItem::new("pcb-rename-component", "Rename"))
-        .item(MenuItem::new("pcb-delete-component", "Delete").icon("delete"));
+        .separator()
+        .item(MenuItem::new("pcb-copy-component", "Copy").icon("copy"))
+        .item(paste_item(&clip));
+    if can_add {
+        menu = menu.item(MenuItem::new("pcb-add-component-to-library", "Add to my library").icon("books").tooltip(format!("Keeps it in {} for every studio", crate::eda::libraries::MY_LIBRARY)));
+    }
+    let menu = menu.separator().item(MenuItem::new("pcb-rename-component", "Rename")).item(MenuItem::new("pcb-delete-component", "Delete").icon("delete"));
     let anchor = open_context_menu(&mut commands, at, menu.build(&theme));
     commands.entity(anchor).insert((ComponentMenuFor(r.0, r.1), DespawnOnExit(AppState::Document)));
 }
 
-fn on_component_menu_action(ev: On<MenuAction>, q: Query<&ComponentMenuFor, With<ContextMenuAnchor>>, mut commands: Commands) {
+/// Right-click Components → Paste.
+fn on_components_header_menu(ev: On<ContextMenuRequested>, q: Query<(&ComponentsHeader, &UiGlobalTransform, &ComputedNode)>, clip: Res<PartClipboard>, theme: Res<Theme>, mut commands: Commands) {
+    let Ok((h, tf, node)) = q.get(ev.entity) else { return };
+    let menu = Menu::new("pcb-components-menu").min_width(170.0).item(paste_item(&clip));
+    let anchor = open_context_menu(&mut commands, below_row(&ev, tf, node), menu.build(&theme));
+    commands.entity(anchor).insert((ComponentsMenuFor(h.0), DespawnOnExit(AppState::Document)));
+}
+
+/// The context menu anchor of the Components header's menu.
+#[derive(Component, Clone, Copy)]
+struct ComponentsMenuFor(ElementId);
+
+fn on_component_menu_action(ev: On<MenuAction>, q: Query<&ComponentMenuFor, With<ContextMenuAnchor>>, q_head: Query<&ComponentsMenuFor, With<ContextMenuAnchor>>, mut commands: Commands) {
+    if let Ok(&ComponentsMenuFor(el)) = q_head.get(ev.entity) {
+        if ev.item.as_str() == "pcb-paste-component" {
+            commands.queue(move |w: &mut World| paste_component(w, el));
+        }
+        return;
+    }
     let Ok(&ComponentMenuFor(el, id)) = q.get(ev.entity) else { return };
     match ev.item.as_str() {
         "pcb-edit-component" => commands.queue(move |w: &mut World| crate::eda::edit_component(w, el, id)),
+        "pcb-copy-component" => commands.queue(move |w: &mut World| copy_component(w, el, id)),
+        "pcb-paste-component" => commands.queue(move |w: &mut World| paste_component(w, el)),
+        "pcb-add-component-to-library" => commands.queue(move |w: &mut World| add_component_to_library(w, el, id)),
         "pcb-rename-component" => commands.queue(move |w: &mut World| naming::rename_component(w, el, id)),
         "pcb-delete-component" => commands.queue(move |w: &mut World| delete_component(w, el, id)),
         _ => {}
     }
+}
+
+fn studio_component(world: &World, el: ElementId, id: cadrs_core::pcb::ComponentId) -> Option<cadrs_eda::Component> {
+    world.resource::<ActiveDocument>().doc.element(el)?.pcb()?.component(id).map(|c| c.component.clone())
+}
+
+/// Right-click a component → Copy.
+pub fn copy_component(world: &mut World, el: ElementId, id: cadrs_core::pcb::ComponentId) {
+    let Some(c) = studio_component(world, el, id) else { return };
+    let msg = format!("Copied {}: right-click Components in any studio to paste it.", c.name);
+    world.resource_mut::<PartClipboard>().0 = Some(c);
+    crate::eda::ui::toast(world, &msg);
+}
+
+/// Paste: the copied component added to this studio (under its name, numbered when taken).
+pub fn paste_component(world: &mut World, el: ElementId) {
+    let Some(c) = world.resource::<PartClipboard>().0.clone() else { return };
+    let cmd = cadrs_core::pcb::AddComponent { element: el, name: None, value: Some(Box::new(c)) };
+    if let Err(e) = world.resource_mut::<ActiveDocument>().execute(&cmd) {
+        crate::eda::ui::toast(world, &e.to_string());
+    }
+}
+
+/// Add to my library: the component's symbol, footprint and 3D model files written to the
+/// user's [`crate::eda::libraries::MY_LIBRARY`], where every studio's chooser finds them.
+pub fn add_component_to_library(world: &mut World, el: ElementId, id: cadrs_core::pcb::ComponentId) {
+    let Some(c) = studio_component(world, el, id) else { return };
+    let r = world.resource_mut::<crate::eda::libraries::UserLibraries>().add_part(&c);
+    let msg = match r {
+        Ok(id) => format!("Added {} to your library as {id}.", c.name),
+        Err(e) => format!("Couldn't add {} to your library: {e}", c.name),
+    };
+    crate::eda::ui::toast(world, &msg);
 }
 
 /// Deletes a component (undoable, Undo in a toast). Placed parts keep their copies.

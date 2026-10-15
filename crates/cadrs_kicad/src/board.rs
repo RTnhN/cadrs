@@ -234,7 +234,7 @@ fn read_shape(s: &Sexp, y: YAxis) -> Option<Shape> {
 fn read_zone(z: &Sexp, y: YAxis, net: &impl Fn(&Sexp) -> String) -> Zone {
     let keepout = z.find("keepout").map(|k| {
         let no = |name: &str| k.get(name) == Some("not_allowed");
-        Keepout { tracks: no("tracks"), vias: no("vias"), pads: no("pads"), copper_pour: no("copperpour"), footprints: no("footprints") }
+        Keepout { tracks: no("tracks"), vias: no("vias"), pads: no("pads"), copper_pour: no("copperpour"), footprints: no("footprints"), max_height: None }
     });
     let mut fill = ZoneFill::default();
     if let Some(c) = z.find("connect_pads") {

@@ -45,7 +45,7 @@ pub fn items(doc: &Document, asm: &Assembly) -> Vec<Item> {
     occurrences(doc, asm)
         .into_iter()
         .filter_map(|o| {
-            let features = doc.element(o.element)?.active_features();
+            let features = doc.element(o.element)?.active_part_features();
             Some(Item { occurrence: o.id, top: o.top, view_part: o.view_part, features, part: o.part, pose: o.pose })
         })
         .collect()

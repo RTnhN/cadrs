@@ -106,6 +106,12 @@ pub fn union(r: &Region) -> Region {
     from_paths(&union_subjects_64(&to_paths(r), FillRule::NonZero))
 }
 
+/// The rings' union by the even-odd rule (rings of any orientation, a hole inside its ring):
+/// what a solid's slice is.
+pub fn union_even_odd(r: &Region) -> Region {
+    from_paths(&union_subjects_64(&to_paths(r), FillRule::EvenOdd))
+}
+
 pub fn union_all(parts: &[Region]) -> Region {
     let all: Region = parts.iter().flatten().cloned().collect();
     union(&all)

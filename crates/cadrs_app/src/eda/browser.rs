@@ -139,11 +139,21 @@ pub fn open(w: &mut World, kind: Kind, purpose: Purpose) {
                                 });
                             }
                         });
-                        left.spawn((
-                            Name::new("eda-chooser-list"),
-                            ChooserList,
-                            Node { flex_direction: FlexDirection::Column, height: Val::Px(if online { 370.0 } else { 420.0 }), overflow: Overflow::scroll_y(), margin: UiRect::top(Val::Px(6.0)), ..default() },
-                        ));
+                        // The list in a thin frame, the wheel scrolling it and a scrollbar at its
+                        // right while it overflows.
+                        let frame = Node { flex_direction: FlexDirection::Column, height: Val::Px(if online { 370.0 } else { 420.0 }), margin: UiRect::top(Val::Px(6.0)), border: UiRect::all(Val::Px(1.0)), ..default() };
+                        left.spawn((Name::new("eda-chooser-frame"), frame, BorderColor::all(tb.border))).with_children(|frame| {
+                            let list = frame
+                                .spawn((
+                                    Name::new("eda-chooser-list"),
+                                    ChooserList,
+                                    cadrs_ui::WheelScroll,
+                                    cadrs_ui::scrollbar::ScrollGutter(12.0),
+                                    Node { flex_direction: FlexDirection::Column, height: Val::Percent(100.0), padding: UiRect::all(Val::Px(2.0)), overflow: Overflow::scroll_y(), ..default() },
+                                ))
+                                .id();
+                            frame.spawn(cadrs_ui::vertical_scrollbar(&tb, "eda-chooser-scrollbar", list));
+                        });
                         if online {
                             left.spawn((Name::new("eda-chooser-status"), tb.text("", tb.font_sm, FontWeight::NORMAL, tb.muted_foreground), Node { margin: UiRect::top(Val::Px(4.0)), ..default() }));
                         }

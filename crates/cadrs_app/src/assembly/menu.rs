@@ -23,7 +23,7 @@ use bevy::prelude::*;
 use cadrs_core::assembly::InstanceId;
 use cadrs_core::assembly::commands::{DeleteInstances, SetInstancesFixed, SetInstancesHidden};
 use cadrs_core::assembly::structure::{DissolveSubassembly, MoveToNewSubassembly, SetInstancesSuppressed, SetSubassemblyFlexible};
-use cadrs_core::ElementId;
+use cadrs_core::{ElementId, FeatureId};
 use cadrs_ui::menu::{ContextMenuAnchor, Menu, MenuAction, MenuEntry, MenuItem};
 use cadrs_ui::{Theme, open_context_menu};
 
@@ -130,6 +130,11 @@ pub fn open_instance_menu(world: &mut World, at: Vec2, instance: InstanceId, han
         MenuItem::new("asm-hide", "Hide").icon("hidden")
     };
     let is_sub = inst.source.is_assembly();
+    // A PCB Studio's board (`docs/PCB_IN_PART_STUDIO.md` §9): its layout is edited in its studio.
+    let board = match inst.source {
+        cadrs_core::assembly::InstanceSource::Studio { element, board: Some(b) } => Some((element, b)),
+        _ => None,
+    };
     // P3B.5: a standard content instance (A19.8, A19.9); it has no tab to switch to.
     let is_std = cadrs_core::assembly::standard::standard_of(&world.resource::<ActiveDocument>().doc, &inst.source).is_some();
     let suppress = if inst.suppressed { MenuItem::new("asm-unsuppress", "Unsuppress") } else { MenuItem::new("asm-suppress", "Suppress") };
@@ -153,6 +158,8 @@ pub fn open_instance_menu(world: &mut World, at: Vec2, instance: InstanceId, han
         MenuItem::new("asm-switch-to", "Switch to Standard content").icon("standard-content").disabled(true)
     } else if is_linked {
         MenuItem::new("asm-switch-to", format!("Switch to {studio}")).icon(if is_sub { "assembly" } else { "part-studio" }).disabled(true).tooltip(LINKED)
+    } else if board.is_some() {
+        MenuItem::new("asm-switch-to", format!("Switch to {studio}")).icon("pcb-studio")
     } else {
         MenuItem::new("asm-switch-to", format!("Switch to {studio}")).icon(if is_sub { "assembly" } else { "part-studio" })
     };
@@ -190,7 +197,18 @@ pub fn open_instance_menu(world: &mut World, at: Vec2, instance: InstanceId, han
     let external = cadrs_core::assembly::context::linked_studio_of(&world.resource::<ActiveDocument>().doc, element, instance).is_some();
     let contexts = if external { super::linked_context::contexts_of(world, element, instance) } else { super::managed_context::contexts_of(world.resource::<ActiveDocument>(), element, instance) };
     let no_edit = is_sub || is_std || (is_linked && !external);
-    let in_context = if contexts.is_empty() || no_edit {
+    // A subassembly with boards in it: each edited in context here.
+    let inner_boards = if is_sub { crate::board_in_studio::boards_inside(world.resource::<ActiveDocument>(), instance) } else { vec![] };
+    let in_context = if !inner_boards.is_empty() {
+        let items: Vec<cadrs_ui::MenuEntry> = inner_boards.iter().enumerate().map(|(k, (_, name))| MenuItem::new(format!("asm-board-ctx-{k}"), format!("{name} in context")).icon("pcb-studio").tooltip("Edit this board's layout here, among the parts around it").into()).collect();
+        MenuItem::new("asm-board-edit", "Edit layout").icon("pcb-studio").submenu(items)
+    } else if board.is_some() {
+        // (`docs/PCB_IN_PART_STUDIO.md` §9: here, the assembly around it, or in its PCB Studio.)
+        MenuItem::new("asm-board-edit", "Edit layout").icon("pcb-studio").submenu(vec![
+            MenuItem::new("asm-board-edit-in-context", "In context").icon("assembly").tooltip("Edit the board's layout here, its components moved among the parts around it (the instance follows)").into(),
+            MenuItem::new("asm-board-edit-layout", "In its PCB Studio").icon("pcb-studio").tooltip("Edit the board's layout in its PCB Studio (the instance follows)").into(),
+        ])
+    } else if contexts.is_empty() || no_edit {
         let mut item = MenuItem::new("asm-edit-in-context", "Edit in context").icon("part-studio").disabled(no_edit);
         if is_linked && !external {
             item = item.tooltip("A version of this document is edited at its tab");
@@ -602,6 +620,13 @@ fn act(world: &mut World, menu: &AsmMenu, handle: TriadHandle, item: &str) {
                 super::in_context::update_context(world, studio, id);
             }
         }
+        x if x.starts_with("asm-board-ctx-") => {
+            let k: usize = x["asm-board-ctx-".len()..].parse().unwrap_or(usize::MAX);
+            let inner = menu.instance.map(|i| crate::board_in_studio::boards_inside(world.resource::<ActiveDocument>(), i)).unwrap_or_default();
+            if let Some((f, _)) = inner.get(k) {
+                crate::board_in_studio::begin_edit(world, *f, 0);
+            }
+        }
         x if x.starts_with("asm-edit-in-context") => {
             let Some(i) = menu.instance else { return };
             let which = match x.trim_start_matches("asm-edit-in-context").trim_start_matches('-') {
@@ -671,6 +696,20 @@ fn act(world: &mut World, menu: &AsmMenu, handle: TriadHandle, item: &str) {
                 switch_to(world, i);
             }
         }
+        // A board instance: its PCB Studio's Layout of the board.
+        "asm-board-edit-layout" => {
+            let source = menu.instance.and_then(|i| world.resource::<ActiveDocument>().active_element()?.assembly_model()?.instance(i).map(|x| x.source));
+            if let Some(cadrs_core::assembly::InstanceSource::Studio { element, board: Some(b) }) = source {
+                world.resource_mut::<ActiveDocument>().set_active(element);
+                crate::pcb::show_board(world, element, b);
+                crate::eda::set_mode_of(world, element, b, crate::eda::Mode::Layout);
+            }
+        }
+        "asm-board-edit-in-context" => {
+            if let Some(i) = menu.instance {
+                crate::board_in_studio::begin_edit(world, FeatureId(i.0), 0);
+            }
+        }
         "asm-find" => {
             if let Some(i) = menu.instance {
                 world.resource_mut::<Selection>().0 = vec![Pick::Part(i.part_id())];
@@ -700,7 +739,7 @@ fn act(world: &mut World, menu: &AsmMenu, handle: TriadHandle, item: &str) {
                     Some(cadrs_drawing::ObjectRef { element: e.0, part: Some((part.feature.0, part.index)) })
                 }
                 Some(cadrs_core::assembly::InstanceSource::Assembly { element: e })
-                | Some(cadrs_core::assembly::InstanceSource::Studio { element: e }) => Some(cadrs_drawing::ObjectRef { element: e.0, part: None }),
+                | Some(cadrs_core::assembly::InstanceSource::Studio { element: e, .. }) => Some(cadrs_drawing::ObjectRef { element: e.0, part: None }),
                 None => None,
             };
             if r.is_some() {

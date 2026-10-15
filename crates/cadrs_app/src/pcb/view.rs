@@ -67,14 +67,19 @@ pub struct PcbMeshCache {
 }
 
 impl PcbMeshCache {
-    /// The meshes of a model file (by its blob hash; `ext` its type), read once.
+    /// The meshes of a model file (by its blob hash; `ext` its type), read once (the process'
+    /// cache the rebuild shares, [`cadrs_core::pcb::model::cached_file_meshes`]).
     pub fn model(&mut self, hash: &str, ext: &str) -> Option<ModelMeshes> {
         if let Some(m) = self.models.get(hash) {
             return m.clone();
         }
-        let bytes = cadrs_core::blobs::get(hash)?;
-        let m = match cadrs_pcb::mesh::file_meshes(&bytes, ext) {
-            Ok(m) => Some(Arc::new(m)),
+        // A file not loaded yet (still downloading, say) is looked for again next time; one
+        // that can't be read is remembered as such (and reported once).
+        if !cadrs_core::blobs::contains(hash) {
+            return None;
+        }
+        let m = match cadrs_core::pcb::model::cached_file_meshes(hash, ext) {
+            Ok(m) => Some(m),
             Err(e) => {
                 warn!("3D model {hash}.{ext}: {e}");
                 None
@@ -344,18 +349,31 @@ fn board_bodies(world: &mut World, el: ElementId, board_id: BoardId, board: &Pcb
     let t = board.thickness();
     type Shown = (Representation, Option<(Arc<Solid>, [u8; 4], PartTransform)>);
     let mut reps: HashMap<String, Shown> = HashMap::new();
-    // A native board's footprint models by reference (shown in place of the box); footprints
-    // with no model show nothing, as in KiCad.
-    let mut models: HashMap<String, cadrs_eda::footprint::Model3d> = HashMap::new();
-    let mut bare: std::collections::HashSet<String> = Default::default();
-    for f in shown_design(world, el, board_id).iter().flat_map(|d| d.board.footprints.iter()) {
-        let r = f.reference().to_string();
+    // A native board's footprint models (shown in place of the box), by footprint id. Each
+    // component of the studio board is matched to its footprint by reference and place (the
+    // studio board is made from the design, `cadrs_core::pcb::design`; references can repeat,
+    // or be "R?", places not). Footprints with no model show nothing, as in KiCad.
+    let mut models: HashMap<uuid::Uuid, cadrs_eda::footprint::Model3d> = HashMap::new();
+    // Where each footprint sits (the Part Studio's placement, `cadrs_core::pcb::model`).
+    let mut places: HashMap<uuid::Uuid, cadrs_eda::footprint::FootprintPlacement> = HashMap::new();
+    let mut bare: std::collections::HashSet<uuid::Uuid> = Default::default();
+    let design = shown_design(world, el, board_id);
+    let footprints: Vec<&cadrs_eda::board::PlacedFootprint> = design.iter().flat_map(|d| d.board.footprints.iter()).collect();
+    for f in &footprints {
+        places.insert(f.id, f.placement);
         if f.footprint.models.iter().all(|m| !m.visible) {
-            bare.insert(r);
+            bare.insert(f.id);
         } else if let Some(m) = f.footprint.models.iter().find(|m| m.visible && (m.body.is_some() || m.blob.is_some())) {
-            models.insert(r, m.clone());
+            models.insert(f.id, m.clone());
         }
     }
+    let index: HashMap<cadrs_core::pcb::board::ItemId, uuid::Uuid> = board
+        .components()
+        .filter_map(|(i, p)| {
+            let mm = cadrs_eda::units::to_mm;
+            footprints.iter().find(|f| f.reference() == p.refdes && (mm(f.placement.at.x) - p.x).abs() < 1e-6 && (mm(f.placement.at.y) - p.y).abs() < 1e-6).map(|f| (i, f.id))
+        })
+        .collect();
     let mut out = Vec::with_capacity(mesh.bodies.len());
     for b in &mesh.bodies {
         let placement = b.item.filter(|_| b.class.is_component()).and_then(|i| board.component(i));
@@ -363,6 +381,7 @@ fn board_bodies(world: &mut World, el: ElementId, board_id: BoardId, board: &Pcb
             out.push(b.clone());
             continue;
         };
+        let k = b.item.and_then(|i| index.get(&i).copied()).unwrap_or_default();
         if !reps.contains_key(&p.package) {
             let rep = representation(world, el, &p.package);
             let custom = custom_part(world, &rep);
@@ -376,12 +395,12 @@ fn board_bodies(world: &mut World, el: ElementId, board_id: BoardId, board: &Pcb
                 let m = cadrs_pcb::placement::custom_motion(p, t, tr);
                 out.push(cadrs_pcb::mesh::solid_body(solid, &b.name, b.class, *col, b.item).moved(&m));
             }
-            _ if bare.contains(&p.refdes) => {}
-            _ => match models.get(&p.refdes) {
+            _ if bare.contains(&k) => {}
+            _ => match models.get(&k) {
                 Some(model) => {
                     format!("{:?}{:?}{:?}{:?}{}", model.blob, model.offset, model.rotation, model.scale, model.opacity).hash(sig);
                     model.body.as_ref().map(|b| format!("{b:?}")).hash(sig);
-                    let m = cadrs_pcb::placement::placement_motion(p, t);
+                    let m = places.get(&k).map_or_else(|| cadrs_pcb::placement::placement_motion(p, t), |pl| cadrs_core::pcb::model::footprint_motion(pl, t));
                     // The model's file when it is loaded and readable, else its generated body.
                     let ext = std::path::Path::new(&model.source).extension().map(|e| e.to_string_lossy().into_owned()).unwrap_or_default();
                     let file = model.blob.as_ref().and_then(|h| world.resource_mut::<PcbMeshCache>().model(h, &ext));
@@ -464,6 +483,9 @@ fn bottom_keep_overlays(bodies: &[BodyMesh], thickness: f64) -> Vec<BodyMesh> {
 pub fn board_view_bodies(world: &mut World, e: ElementId, b: BoardId, board: &PcbBoard, sig: &mut impl Hasher) -> Vec<BodyMesh> {
     let mesh = world.resource_mut::<PcbMeshCache>().get_or_build((e, b), board);
     (Arc::as_ptr(&mesh) as usize).hash(sig);
+    // Tracks, vias and zones change only the layout, which the mesh doesn't see: the skins do.
+    let layout = world.resource::<ActiveDocument>().doc.element(e).and_then(|el| el.pcb()).and_then(|s| s.board(b)).map(|x| x.layout_hash());
+    layout.hash(sig);
     let mut v = board_bodies(world, e, b, board, &mesh, sig);
     v.extend(bottom_keep_overlays(&v, board.thickness()));
     // A native board is made: its edges the solder mask's green, as its faces.
@@ -593,28 +615,21 @@ fn spawn_skins(world: &mut World, design: &cadrs_eda::Design, thickness: f64) {
 /// what the document's thumbnail shows of a native board ([`crate::thumbnail`]).
 pub fn skins(world: &mut World, design: &cadrs_eda::Design, thickness: f64) -> Vec<(&'static str, Handle<Mesh>, Handle<StandardMaterial>)> {
     use cadrs_eda::layer::Side;
-    use resvg::{tiny_skia, usvg};
     let mut out = vec![];
     let region = cadrs_eda::outline::board_region(&design.board);
     let tris = cadrs_eda::poly::triangulate(&region);
-    let Some(bounds) = region.iter().flatten().fold(None, |acc, p| Some(cadrs_eda::units::Bounds::union(acc, cadrs_eda::units::Bounds::of(*p)))) else { return out };
     if tris.is_empty() {
         return out;
     }
-    let (x0, y1) = (bounds.min.x as f64 / 1e6, bounds.max.y as f64 / 1e6);
-    let (w, h) = (bounds.size().w as f64 / 1e6, bounds.size().h as f64 / 1e6);
     for (side, z, up) in [(Side::Top, thickness + 0.02, true), (Side::Bottom, -0.02, false)] {
-        let mut d = cadrs_eda::render::board_surface(&design.board, side);
-        d.bounds = Some(bounds);
-        let Ok(tree) = usvg::Tree::from_str(&cadrs_eda::render::to_svg(&d), &usvg::Options::default()) else { continue };
-        let (pw, ph) = ((w as f32 * SKIN_PX_PER_MM).ceil() as u32, (h as f32 * SKIN_PX_PER_MM).ceil() as u32);
-        let Some(mut pix) = tiny_skia::Pixmap::new(pw.max(1), ph.max(1)) else { continue };
-        let k = pw as f32 / tree.size().width();
-        resvg::render(&tree, tiny_skia::Transform::from_scale(k, k), &mut pix.as_mut());
+        let Some(skin) = cadrs_eda::skin::board_skin(&design.board, side, SKIN_PX_PER_MM, 8192) else { continue };
+        let b = skin.bounds;
+        let (x0, y1) = (b.min.x as f64 / 1e6, b.max.y as f64 / 1e6);
+        let (w, h) = (b.size().w as f64 / 1e6, b.size().h as f64 / 1e6);
         let image = Image::new(
-            bevy::render::render_resource::Extent3d { width: pw.max(1), height: ph.max(1), depth_or_array_layers: 1 },
+            bevy::render::render_resource::Extent3d { width: skin.width, height: skin.height, depth_or_array_layers: 1 },
             bevy::render::render_resource::TextureDimension::D2,
-            pix.take(),
+            skin.rgba,
             bevy::render::render_resource::TextureFormat::Rgba8UnormSrgb,
             RenderAssetUsages::RENDER_WORLD,
         );

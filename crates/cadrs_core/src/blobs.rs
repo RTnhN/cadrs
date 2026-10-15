@@ -56,6 +56,14 @@ pub fn get(hash: &str) -> Option<Arc<Vec<u8>>> {
     cache().read().ok()?.get(hash).cloned()
 }
 
+/// Drops the bytes with this hash from the cache (a file made again from the document, such as
+/// a board's skin, whose older version nothing shows any more).
+pub fn forget(hash: &str) {
+    if let Ok(mut c) = cache().write() {
+        c.remove(hash);
+    }
+}
+
 /// Whether the bytes with this hash are loaded.
 pub fn contains(hash: &str) -> bool {
     cache().read().is_ok_and(|c| c.contains_key(hash))
@@ -78,7 +86,7 @@ pub fn used_by(doc: &Document) -> Vec<(String, String)> {
         used_in(el.features(), &mut out);
         // A PCB Studio's 3D model files (its boards' footprints and its components').
         if let Some(s) = el.pcb() {
-            let boards = s.boards.iter().filter_map(|b| b.design.as_ref()).flat_map(|d| d.board.footprints.iter().map(|f| &f.footprint));
+            let boards = s.boards.iter().filter_map(|b| b.design()).flat_map(|d| d.board.footprints.iter().map(|f| &f.footprint));
             let parts = s.components.iter().filter_map(|c| c.component.footprint.as_ref());
             for m in boards.chain(parts).flat_map(|f| &f.models) {
                 if let Some(h) = &m.blob
@@ -98,7 +106,17 @@ fn used_in(features: &[crate::document::Feature], out: &mut Vec<(String, String)
         match &f.kind {
             FeatureKind::Import(x) if !out.iter().any(|(h, _)| *h == x.blob) => out.push((x.blob.clone(), x.extension())),
             FeatureKind::Image(x) if !out.iter().any(|(h, _)| *h == x.blob) => out.push((x.blob.clone(), x.extension())),
-            FeatureKind::Derived(x) => used_in(&x.studio, out),
+            FeatureKind::Derived(x) => {
+                used_in(&x.studio, out);
+                // A derived board's model files (its layout's footprints).
+                for m in x.board.iter().flat_map(|b| b.layout.footprints.iter()).flat_map(|f| &f.footprint.models) {
+                    if let Some(h) = &m.blob
+                        && !out.iter().any(|(x, _)| x == h)
+                    {
+                        out.push((h.clone(), crate::pcb::model::model_ext(m)));
+                    }
+                }
+            }
             _ => {}
         }
     }
