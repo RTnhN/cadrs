@@ -41,6 +41,10 @@ build parts from features, put them together in assemblies, and make drawings fr
   <img src=".github/images/render.png" width="49%" alt="A path-traced render of a two-part control arm">
 </p>
 
+[![From sketch to solid, then a PCB in the same Part Studio: schematic, board layout and the routed board in 3D](.github/images/pcb-demo.gif)](https://youtu.be/qT1FKZqUAxA)
+
+*From sketch to part to PCB, in one document. [Watch the 90-second demo](https://youtu.be/qT1FKZqUAxA).*
+
 ## Building
 
 You need a stable Rust toolchain ([rustup](https://rustup.rs)), CMake and a C++ compiler.
