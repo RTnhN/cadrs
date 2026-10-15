@@ -119,29 +119,35 @@ fn on_file_picked(mut msgs: MessageReader<cadrs_ui::FilePicked>, theme: Res<Them
             "import-here" => ImportTarget::ActiveDocument,
             _ => continue,
         };
-        let file_name = m.path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
         // An STL mesh as a new document: the documents page's undoable import (P3E.1).
         if matches!(target, ImportTarget::NewDocument) && m.path.extension().is_some_and(|e| e.eq_ignore_ascii_case("stl")) {
             let path = m.path.clone();
             commands.queue(move |w: &mut World| crate::landing::import_mesh_document(w, &path));
             continue;
         }
-        let Some(format) = ImportFormat::of_path(&m.path).filter(|f| f.kernel().is_some()) else {
-            show_notification(&mut commands, &theme, Notification::warning(format!("{file_name}: only STEP and IGES files can be imported")).name("import-toast"));
-            continue;
-        };
-        let bytes = match std::fs::read(&m.path) {
-            Ok(b) => b,
-            Err(e) => {
-                show_notification(&mut commands, &theme, Notification::warning(format!("{file_name}: {e}")).name("import-toast"));
-                continue;
-            }
-        };
-        let data = String::from_utf8_lossy(&bytes).into_owned();
-        let pending = cadrs_core::rebuild::exchange::plan_import(format, data.clone().into_bytes());
-        show_notification(&mut commands, &theme, Notification::info(format!("Reading {file_name}…")).seconds(4.0).name("import-reading"));
-        commands.spawn((Name::new("import-running"), Reading { pending, file: ReadFile { target, file_name, data } }));
+        read(&mut commands, &theme, target, &m.path);
     }
+}
+
+/// Reads a STEP or IGES file for an import to `target` (picked, or dropped on the window): the
+/// kernel reads it on its thread, then the Import dialog asks how to bring it in.
+pub fn read(commands: &mut Commands, theme: &Theme, target: ImportTarget, path: &std::path::Path) {
+    let file_name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+    let Some(format) = ImportFormat::of_path(path).filter(|f| f.kernel().is_some()) else {
+        show_notification(commands, theme, Notification::warning(format!("{file_name}: only STEP and IGES files can be imported")).name("import-toast"));
+        return;
+    };
+    let bytes = match std::fs::read(path) {
+        Ok(b) => b,
+        Err(e) => {
+            show_notification(commands, theme, Notification::warning(format!("{file_name}: {e}")).name("import-toast"));
+            return;
+        }
+    };
+    let data = String::from_utf8_lossy(&bytes).into_owned();
+    let pending = cadrs_core::rebuild::exchange::plan_import(format, data.clone().into_bytes());
+    show_notification(commands, theme, Notification::info(format!("Reading {file_name}…")).seconds(4.0).name("import-reading"));
+    commands.spawn((Name::new("import-running"), Reading { pending, file: ReadFile { target, file_name, data } }));
 }
 
 fn poll_reading(q: Query<(Entity, &Reading)>, theme: Res<Theme>, mut commands: Commands) {

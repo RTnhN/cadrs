@@ -67,32 +67,37 @@ pub struct ImportReport {
     pub arcs: usize,
     pub circles: usize,
     pub splines: usize,
+    /// Cubic Béziers (vector drawings' curves).
+    pub beziers: usize,
     /// Texts, fills and degenerate curves left out.
     pub skipped: usize,
 }
 
 impl ImportReport {
     pub fn curves(&self) -> usize {
-        self.lines + self.arcs + self.circles + self.splines
+        self.lines + self.arcs + self.circles + self.splines + self.beziers
     }
 }
 
 /// How close two ends must be to be one sketch point (mm): loose enough for files whose
 /// ends miss each other by rounding (CAM and older CAD exports write 4–6 decimals), far below
 /// any real feature.
-const JOIN: f64 = 5e-4;
+pub(crate) const JOIN: f64 = 5e-4;
 
-struct Builder {
-    s: Sketch,
-    r: ImportReport,
+/// Imported curves gathered into a sketch, joined where their ends meet (also the vector
+/// drawings' builder, [`crate::vector_import`]).
+#[derive(Default)]
+pub(crate) struct Builder {
+    pub(crate) s: Sketch,
+    pub(crate) r: ImportReport,
 }
 
 impl Builder {
-    fn pt(&mut self, p: Vec2) -> PointId {
+    pub(crate) fn pt(&mut self, p: Vec2) -> PointId {
         self.s.point_at(p, JOIN).unwrap_or_else(|| self.s.add_point(p))
     }
 
-    fn line(&mut self, a: Vec2, b: Vec2) {
+    pub(crate) fn line(&mut self, a: Vec2, b: Vec2) {
         if a.distance(b) <= JOIN {
             self.r.skipped += 1;
             return;
@@ -103,7 +108,7 @@ impl Builder {
     }
 
     /// Counter-clockwise about `c` from `a` to `b`.
-    fn arc(&mut self, c: Vec2, a: Vec2, b: Vec2) {
+    pub(crate) fn arc(&mut self, c: Vec2, a: Vec2, b: Vec2) {
         if a.distance(b) <= JOIN || c.distance(a) <= JOIN {
             self.r.skipped += 1;
             return;
@@ -114,7 +119,7 @@ impl Builder {
         self.r.arcs += 1;
     }
 
-    fn circle(&mut self, c: Vec2, radius: f64) {
+    pub(crate) fn circle(&mut self, c: Vec2, radius: f64) {
         if radius <= JOIN {
             self.r.skipped += 1;
             return;
@@ -122,6 +127,18 @@ impl Builder {
         let center = self.s.add_point(c);
         self.s.curves.insert(Curve { kind: CurveKind::Circle { center, radius }, construction: false });
         self.r.circles += 1;
+    }
+
+    /// A cubic Bézier from `a` to `b` with control points `c1` and `c2`.
+    pub(crate) fn bezier(&mut self, a: Vec2, c1: Vec2, c2: Vec2, b: Vec2) {
+        if a.distance(b) <= JOIN && a.distance(c1) <= JOIN && a.distance(c2) <= JOIN {
+            self.r.skipped += 1;
+            return;
+        }
+        let (a, b) = (self.pt(a), self.pt(b));
+        let (c1, c2) = (self.s.add_point(c1), self.s.add_point(c2));
+        self.s.curves.insert(Curve { kind: CurveKind::Bezier { a, c1, c2, b }, construction: false });
+        self.r.beziers += 1;
     }
 
     /// A polyline segment from `a` to `b` bent by `bulge` (tan of a quarter of its signed sweep).
