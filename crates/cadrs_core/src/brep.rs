@@ -677,8 +677,35 @@ pub fn solid_of(
     // Tangent-connected groups of kernel edges (P3.7, X12 "Tangent connected"): edges meeting at
     // a vertex with parallel tangents (within the kernel's `TANGENT_ANGLE`) are one group.
     let groups = tangent_groups(&edge_info, &vertex_info);
+    // A mesh's facets: flat kernel faces bounded by three straight edges, each with its normal
+    // (the mesh's, which faces out). An edge between two that turn by less than
+    // `FACET_SEAM_ANGLE` is a seam of the surface they approximate, not drawn.
+    let mut sides = vec![0u32; face_count];
+    for e in &edge_info {
+        for f in e.faces.iter().flatten() {
+            if let Some(n) = sides.get_mut(f.0 as usize) {
+                *n += if e.curve == kernel::CurveKind::Line { 1 } else { 4 };
+            }
+        }
+    }
+    let facet_normal = |f: kernel::FaceId| -> Option<Vec3> {
+        let fi = f.0 as usize;
+        if sides.get(fi) != Some(&3) || face_info.get(fi)?.plane.is_none() {
+            return None;
+        }
+        let t = *face_tris[fi].first()?;
+        Some(normalize(nrm[mesh.indices[t][0] as usize]))
+    };
+    let cos_seam = FACET_SEAM_ANGLE.cos();
+    let seam = |info: &kernel::EdgeInfo| match info.faces {
+        [Some(a), Some(b)] if a != b => match (facet_normal(a), facet_normal(b)) {
+            (Some(na), Some(nb)) => dot(na, nb) >= cos_seam,
+            _ => false,
+        },
+        _ => false,
+    };
     let mut outline: HashMap<FaceName, Vec<Vec<Vec3>>> = HashMap::new();
-    let mut named_edges: Vec<(EdgeName, Vec<Vec3>, Option<EdgeCircle>, u32)> = Vec::new();
+    let mut named_edges: Vec<(EdgeName, Vec<Vec3>, Option<EdgeCircle>, u32, bool)> = Vec::new();
     for (ei, (info, name)) in edge_info.iter().zip(&edge_names).enumerate() {
         let Some(name) = name else { continue };
         // A sliver (see `SLIVER`) isn't an edge anyone can see or pick: its neighbours meet.
@@ -698,7 +725,7 @@ pub fn solid_of(
                 normal: [c.normal.x, c.normal.y, c.normal.z],
                 radius: c.radius,
             });
-            named_edges.push((*name, pts, circle, groups[ei]));
+            named_edges.push((*name, pts, circle, groups[ei], seam(info)));
         }
     }
 
@@ -859,16 +886,19 @@ pub fn solid_of(
     // The exact circle of each name, if all its kernel edges lie on one.
     let mut edge_circles: Vec<Option<EdgeCircle>> = Vec::new();
     let mut edge_groups: Vec<u32> = Vec::new();
+    // Whether all its kernel edges are facet seams.
+    let mut edge_smooth: Vec<bool> = Vec::new();
     let same_circle = |a: &EdgeCircle, b: &EdgeCircle| {
         dist(a.center, b.center) < tol_piece
             && (a.radius - b.radius).abs() < tol_piece
             && dot(a.normal, b.normal).abs() > 1.0 - 1e-9
     };
     let mut edge_at: HashMap<EdgeName, usize> = HashMap::new();
-    for (name, pts, circle, group) in named_edges {
+    for (name, pts, circle, group, smooth) in named_edges {
         match edge_at.get(&name).copied() {
             Some(i) => {
                 edge_parts[i].push(pts);
+                edge_smooth[i] &= smooth;
                 let keep = matches!((&edge_circles[i], &circle), (Some(a), Some(b)) if same_circle(a, b));
                 if !keep {
                     edge_circles[i] = None;
@@ -880,12 +910,13 @@ pub fn solid_of(
                 edge_parts.push(vec![pts]);
                 edge_circles.push(circle);
                 edge_groups.push(group);
+                edge_smooth.push(smooth);
             }
         }
     }
-    for (((name, parts), circle), group) in edge_order.into_iter().zip(edge_parts).zip(edge_circles).zip(edge_groups) {
+    for ((((name, parts), circle), group), smooth) in edge_order.into_iter().zip(edge_parts).zip(edge_circles).zip(edge_groups).zip(edge_smooth) {
         for points in chain(parts, tol_piece) {
-            out.edges.push(SolidEdge { name, points, circle, tangent_group: Some(group), smooth: false });
+            out.edges.push(SolidEdge { name, points, circle, tangent_group: Some(group), smooth });
         }
     }
 
@@ -1252,6 +1283,11 @@ fn meridians(
 /// left out of the solid's edges and their two ends count as one vertex, so the edges on
 /// either side join (Onshape, with one face there, has no such edge).
 pub const SLIVER: f64 = 1e-4;
+
+/// The most two facets of a mesh (an imported STL's triangles) turn across the edge between them
+/// for it to be a seam of the surface they approximate, not drawn (20°). Without it a mesh of
+/// 265 000 triangles drew every one's edges: the part showed almost black, at 7 fps (issue #11).
+pub const FACET_SEAM_ANGLE: f64 = 20.0 * std::f64::consts::PI / 180.0;
 
 fn tangent_groups(edges: &[kernel::EdgeInfo], vertices: &[kernel::VertexInfo]) -> Vec<u32> {
     let n = edges.len();
