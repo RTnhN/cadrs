@@ -705,7 +705,9 @@ pub fn solid_of(
         _ => false,
     };
     let mut outline: HashMap<FaceName, Vec<Vec<Vec3>>> = HashMap::new();
-    let mut named_edges: Vec<(EdgeName, Vec<Vec3>, Option<EdgeCircle>, u32, bool)> = Vec::new();
+    // Each kernel edge's name, points, circle, tangent group and whether it is a facet seam.
+    type Named = (EdgeName, Vec<Vec3>, Option<EdgeCircle>, u32, bool);
+    let mut named_edges: Vec<Named> = Vec::new();
     for (ei, (info, name)) in edge_info.iter().zip(&edge_names).enumerate() {
         let Some(name) = name else { continue };
         // A sliver (see `SLIVER`) isn't an edge anyone can see or pick: its neighbours meet.
