@@ -304,7 +304,7 @@ fn on_part_context_menu(
         .item(MenuItem::new("part-material", "Assign material…"))
         .item(MenuItem::new("part-appearance", "Edit appearance…"))
         .separator()
-        .item(MenuItem::new("part-copy-here", "Copy here…").disabled(true))
+        .item(MenuItem::new("part-copy-here", "Copy here…").planned())
         .item(MenuItem::new("part-copy", format!("Copy {name}")).icon("copy").disabled(true))
         .item(MenuItem::new("part-drawing", format!("Create Drawing of {name}…")).icon("file-new"));
     // P3I.7 (SM16.1): a sheet metal part's flat pattern.
@@ -319,8 +319,8 @@ fn on_part_context_menu(
     };
     let menu = menu
         .item(MenuItem::new("part-export", "Export…").icon("file-export"))
-        .item(MenuItem::new("part-where-used", "Where used…").icon("tab-manager").disabled(true))
-        .item(MenuItem::new("part-task", "Create task…").disabled(true))
+        .item(MenuItem::new("part-where-used", "Where used…").icon("tab-manager").planned())
+        .item(MenuItem::new("part-task", "Create task…").planned())
         .separator()
         .item(if hidden {
             MenuItem::new("part-show", "Show").icon("visible")
@@ -334,7 +334,7 @@ fn on_part_context_menu(
             MenuItem::new("part-transparent", "Make transparent…")
         })
         .separator()
-        .item(MenuItem::new("part-comment", "Add comment").icon("comments").disabled(true))
+        .item(MenuItem::new("part-comment", "Add comment").icon("comments").planned())
         .item(MenuItem::new("part-zoom", "Zoom to selection"))
         .separator()
         .item(MenuItem::new("part-delete", "Delete…").icon("remove-circle"));
