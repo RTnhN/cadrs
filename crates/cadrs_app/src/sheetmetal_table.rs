@@ -1786,7 +1786,7 @@ fn open_flat_menu(world: &mut World, position: Vec2) {
     let empty = others_entries.is_empty();
     entries.push(MenuEntry::Item(MenuItem::new("smt-flat-select-other", "Select other…").submenu(others_entries).disabled(empty)));
     // Comments aren't in cadrs yet (the Parts list's Add comment is off too).
-    entries.push(MenuEntry::Item(MenuItem::new("smt-flat-comment", "Add comment").icon("comments").disabled(true)));
+    entries.push(MenuEntry::Item(MenuItem::new("smt-flat-comment", "Add comment").icon("comments").planned()));
     entries.push(MenuEntry::Separator);
     entries.push(MenuEntry::Item(MenuItem::new("smt-zoom-fit", "Zoom to fit")));
     entries.push(MenuEntry::Item(MenuItem::new("smt-zoom-selection", "Zoom to selection").disabled(off && world.resource::<Selection>().0.is_empty())));

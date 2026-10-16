@@ -1720,7 +1720,7 @@ pub fn sketch_toolbar(tb: &mut ChildSpawnerCommands, t: &Theme) {
                 "sketch-dxf",
                 "dxf-import",
                 true,
-                "Insert DXF or DWG",
+                "Insert DXF, DWG, SVG, EPS or PDF",
                 B::InsertDxf,
             ),
         ],

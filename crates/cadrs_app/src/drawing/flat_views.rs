@@ -227,12 +227,12 @@ pub fn open_flat_view_menu(world: &mut World, pos: Vec2, id: ViewId) {
             tangent(TangentEdges::Solid, "view-menu-tangent-solid", "Solid"),
             tangent(TangentEdges::Phantom, "view-menu-tangent-phantom", "Phantom"),
         ]))
-        .item(MenuItem::new("flat-menu-linestyle", "Adjust linestyle…").disabled(true))
+        .item(MenuItem::new("flat-menu-linestyle", "Adjust linestyle…").planned())
         .separator()
         .item(MenuItem::new("view-menu-properties", "View properties…"))
         .item(MenuItem::new("flat-menu-order", "Order").submenu(vec![
-            MenuEntry::Item(MenuItem::new("view-menu-front", "Bring to front").disabled(true)),
-            MenuEntry::Item(MenuItem::new("view-menu-back", "Send to back").disabled(true)),
+            MenuEntry::Item(MenuItem::new("view-menu-front", "Bring to front").planned()),
+            MenuEntry::Item(MenuItem::new("view-menu-back", "Send to back").planned()),
         ]))
         .item(MenuItem::new("flat-menu-align", "Align view").submenu(vec![
             MenuEntry::Item(MenuItem::new("view-menu-align-vertical", "Align view vertical")),
@@ -241,7 +241,7 @@ pub fn open_flat_view_menu(world: &mut World, pos: Vec2, id: ViewId) {
         .separator()
         .item(MenuItem::new("view-menu-switch", format!("Switch to {reference}")))
         .item(MenuItem::new("view-menu-move-to-sheet", "Move to sheet…"))
-        .item(MenuItem::new("flat-menu-copy", "Copy").disabled(true))
+        .item(MenuItem::new("flat-menu-copy", "Copy").planned())
         .separator()
         .item(MenuItem::new("view-menu-clear-selection", "Clear selection"))
         .item(MenuItem::new("view-menu-zoom", "Zoom to fit"))

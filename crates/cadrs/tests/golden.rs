@@ -2402,3 +2402,15 @@ fn golden_eda_paste_between_studios() {
 fn golden_part_studio_double_click_edit() {
     run_scenario("part_studio_double_click_edit");
 }
+
+#[test]
+#[ignore = "headless screenshots; run with: cargo test -r -p cadrs -F app-tests --test golden -- --ignored"]
+fn golden_vector_drop() {
+    run_scenario("vector_drop");
+}
+
+#[test]
+#[ignore = "headless screenshots; run with: cargo test -r -p cadrs -F app-tests --test golden -- --ignored"]
+fn golden_image_placement() {
+    run_scenario("image_placement");
+}

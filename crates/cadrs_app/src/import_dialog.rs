@@ -106,6 +106,19 @@ pub fn begin_import(world: &mut World) {
     open_picker(world);
 }
 
+/// A STEP, IGES or STL file dropped on the Part Studio ([`crate::drop_import`]): inserted as
+/// the toolbar's Import is once its file is picked, with its dialog open.
+pub fn import_dropped(world: &mut World, path: &std::path::Path) {
+    if world.contains_resource::<ImportSession>() {
+        finish(world);
+    }
+    if world.contains_resource::<crate::derived_ui::DerivedSession>() {
+        crate::derived_ui::finish(world);
+    }
+    close_other_sessions(world);
+    pick_file(world, path);
+}
+
 fn open_picker(world: &mut World) {
     let theme = world.resource::<Theme>().clone();
     let mut commands = world.commands();

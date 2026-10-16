@@ -201,6 +201,8 @@ pub struct MenuItem {
     tooltip: Option<String>,
     /// A colour dot in the icon column (a label's colour, P3E.2).
     dot: Option<Color>,
+    /// Not built yet: left out of the menu (issue #13).
+    planned: bool,
 }
 
 impl MenuItem {
@@ -216,7 +218,15 @@ impl MenuItem {
             checked: false,
             tooltip: None,
             dot: None,
+            planned: false,
         }
+    }
+
+    /// A feature not built yet: the menu leaves it out (issue #13: what does nothing isn't
+    /// shown), but the code keeps its place for when it is.
+    pub fn planned(mut self) -> Self {
+        self.planned = true;
+        self
     }
 
     /// Shows a colour dot in the icon column instead of an icon (a document label's colour).
@@ -421,7 +431,7 @@ impl Menu {
                 ]
             }
         };
-        let entries = self.entries;
+        let entries = shown(self.entries);
         let item_height = self.item_height.unwrap_or(theme.menu_item_height);
         let icon_column = self.icon_column;
         let look = self.look;
@@ -495,6 +505,36 @@ fn placement(side: PopoverSide, align: PopoverAlign, gap: f32) -> PopoverPlaceme
 #[derive(Component, Debug, Clone, Copy, Default)]
 pub struct MenuPopup;
 
+/// The entries a menu shows: [planned](MenuItem::planned) items left out (and a submenu left
+/// with none), with no separator first, last or twice in a row.
+fn shown(entries: Vec<MenuEntry>) -> Vec<MenuEntry> {
+    let mut out: Vec<MenuEntry> = Vec::with_capacity(entries.len());
+    for e in entries {
+        match e {
+            MenuEntry::Item(i) if i.planned => {}
+            MenuEntry::Item(mut i) => {
+                if let Some(sub) = i.submenu.take() {
+                    let sub = shown(sub);
+                    if sub.is_empty() {
+                        continue;
+                    }
+                    i.submenu = Some(sub);
+                }
+                out.push(MenuEntry::Item(i));
+            }
+            MenuEntry::Separator => {
+                if matches!(out.last(), Some(MenuEntry::Item(_))) {
+                    out.push(MenuEntry::Separator);
+                }
+            }
+        }
+    }
+    if matches!(out.last(), Some(MenuEntry::Separator)) {
+        out.pop();
+    }
+    out
+}
+
 /// Marks a menu item. Holds the submenu entries, if any.
 #[derive(Component, Debug, Clone)]
 pub struct MenuItemState {
@@ -537,6 +577,7 @@ fn item_bundle(
         checked,
         tooltip: _,
         dot,
+        planned: _,
     } = item;
     let check_color = theme.primary;
     let check_name = format!("{name}-check");
@@ -851,7 +892,29 @@ fn close_on_escape(
 
 #[cfg(test)]
 mod tests {
-    use super::menu_cap;
+
+    // Issue #13: planned items are left out, a submenu with only planned items goes, and the
+    // separators left around them don't pile up.
+    #[test]
+    fn planned_items_are_left_out() {
+        let names = |e: &[MenuEntry]| e.iter().map(|e| match e {
+            MenuEntry::Item(i) => i.name.to_string(),
+            MenuEntry::Separator => "-".into(),
+        }).collect::<Vec<_>>();
+        let entries = vec![
+            MenuItem::new("rename", "Rename").into(),
+            MenuEntry::Separator,
+            MenuItem::new("print", "Print").planned().into(),
+            MenuEntry::Separator,
+            MenuItem::new("apps", "Apps").submenu(vec![MenuItem::new("none", "None").planned().into()]).into(),
+            MenuItem::new("export", "Export").into(),
+            MenuEntry::Separator,
+            MenuItem::new("comment", "Comment").planned().into(),
+        ];
+        assert_eq!(names(&shown(entries)), ["rename", "-", "export"]);
+    }
+
+    use super::{MenuEntry, MenuItem, menu_cap, shown};
 
     #[test]
     fn a_long_menu_is_capped_and_stays_capped() {

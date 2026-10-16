@@ -98,7 +98,7 @@ fn on_account(a: On<Activate>, q: Query<&Name>, theme: Res<Theme>, mut commands:
         .min_width(180.0)
         .item(MenuItem::new("account-preferences", "Preferences…").icon("settings"))
         .separator()
-        .item(MenuItem::new("account-sign-out", "Sign out").disabled(true));
+        .item(MenuItem::new("account-sign-out", "Sign out").planned());
     open_menu(&mut commands, a.entity, menu.build(&theme));
 }
 

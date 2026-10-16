@@ -33,6 +33,9 @@ build parts from features, put them together in assemblies, and make drawings fr
 - **More**: versions and history, derived parts and linked documents, a variable table and
   expressions, measurement and mass properties, linear static simulation (FEA), a path-traced
   renderer, PCB Studio with IDF import and export, and STEP, IGES and STL import and export.
+- **Drag and drop**: drop SVG, EPS, PDF, DXF or DWG drawings onto a Part Studio or an open
+  sketch to get editable sketch curves, pictures to place them, and STEP, IGES or STL models to
+  import them (EPS and PDF need Ghostscript and Poppler installed).
 - **Onshape import**: bring your own Onshape documents across with their feature history
   instead of dead STEP geometry ([tools/onshape](tools/onshape/README.md)).
 
@@ -64,6 +67,9 @@ git clone https://github.com/rvdende/cadrs
 cd cadrs
 cargo run --release
 ```
+
+On macOS, CMake from Homebrew (`brew install cmake`) and the Xcode command line tools
+(`xcode-select --install`) are enough; it builds and runs natively on Apple Silicon (Metal).
 
 Documents are stored in your platform's data folder (on Linux, `~/.local/share/cadrs/`).
 

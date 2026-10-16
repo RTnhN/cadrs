@@ -32,6 +32,7 @@ pub mod import;
 pub mod picture;
 pub mod dxf_export;
 pub mod dxf_import;
+pub mod vector_import;
 pub mod flat_export;
 pub mod history_log;
 pub mod library;

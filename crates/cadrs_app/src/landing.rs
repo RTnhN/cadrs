@@ -1,9 +1,9 @@
 //! The documents page (`reference/onshape/screens/01*`–`04`).
 //!
-//! - Top bar: logo, search box ("Search in Owned by me"), notifications, apps, help and the
-//!   user's avatar and name.
+//! - Top bar: logo, search box ("Search in Owned by me"), help and the settings menu.
 //! - Sidebar: the blue **Create ▾** button (Document…, Folder…, Import files…, …), the filters
-//!   (Owned by me, Recently opened, Created by me, Shared with me, Teams, Labels, Public, Trash)
+//!   (Owned by me, Recently opened, Created by me, Labels, Trash; Shared with me, Teams and
+//!   Public are left out until there are accounts, issue #13)
 //!   and a storage note at the bottom.
 //! - Main area: a heading for the active filter, collapsible sections, and the document list
 //!   with sortable columns Name | Modified | Modified by | Owned by.
@@ -214,6 +214,8 @@ struct FilterItem(Filter);
 /// Teams / Labels expanders in the sidebar.
 #[derive(Component, Clone, Copy, PartialEq, Eq)]
 enum Disclosure {
+    /// Not shown until there are accounts (issue #13).
+    #[allow(dead_code)]
     Teams,
     Labels,
 }
@@ -359,7 +361,6 @@ fn thumbnail_image(images: &mut Assets<Image>, img: image::RgbaImage) -> Option<
 fn spawn_landing(
     mut commands: Commands,
     theme: Res<Theme>,
-    user: Res<UserProfile>,
     state: Res<LandingState>,
     details: Res<LandingDetails>,
 ) {
@@ -378,7 +379,7 @@ fn spawn_landing(
             BackgroundColor(t.background),
         ))
         .with_children(|root| {
-            top_bar(root, &t, &user, &state);
+            top_bar(root, &t, &state);
             root.spawn(Node {
                 flex_grow: 1.0,
                 min_height: Val::Px(0.0),
@@ -409,7 +410,7 @@ fn spawn_landing(
         });
 }
 
-fn top_bar(p: &mut ChildSpawnerCommands, t: &Theme, user: &UserProfile, state: &LandingState) {
+fn top_bar(p: &mut ChildSpawnerCommands, t: &Theme, state: &LandingState) {
     p.spawn((
         Name::new("top-bar"),
         Node {
@@ -525,18 +526,7 @@ fn top_bar(p: &mut ChildSpawnerCommands, t: &Theme, user: &UserProfile, state: &
         .with_children(|r| {
             let mut dark = cadrs_ui::button::visuals_for(t, cadrs_ui::ButtonVariant::Ghost);
             dark.foreground = cadrs_ui::StateColors::all(t.foreground);
-            for (name, icon_name, tip) in [
-                ("notifications", "notifications", "Notifications"),
-                ("apps", "apps", "Apps"),
-            ] {
-                r.spawn(
-                    IconButton::new(name, icon_name)
-                        .icon_size(20.0)
-                        .tooltip(tip)
-                        .build(t),
-                )
-                .insert(dark.clone());
-            }
+            // (Notifications and apps are left out until they do something: issue #13.)
             r.spawn(
                 Button::new("help")
                     .icon("help")
@@ -552,32 +542,15 @@ fn top_bar(p: &mut ChildSpawnerCommands, t: &Theme, user: &UserProfile, state: &
                 n.padding = UiRect::horizontal(Val::Px(4.0));
                 n.column_gap = Val::Px(4.0);
             });
-            let mut account = r.spawn(
-                Button::new("account")
-                    .label(user.display_name.clone())
-                    .ghost()
-                    .dropdown_caret()
-                    .tooltip("Account")
-                    .build(t),
-            );
-            account.insert(dark);
-            account.entry::<Node>().and_modify(|mut n| {
-                n.padding = UiRect::horizontal(Val::Px(4.0));
-                n.column_gap = Val::Px(6.0);
-            });
-            let account = account.id();
-            let avatar = r
-                .commands_mut()
-                .spawn((
-                    Avatar::new("account-avatar", user.display_name.clone())
-                        .size(22.0)
-                        .build(t),
-                    Pickable::IGNORE,
-                ))
-                .id();
-            r.commands_mut()
-                .entity(account)
-                .insert_children(0, &[avatar]);
+            // The settings menu (Preferences…). No profile name or avatar: there are no
+            // accounts yet (issue #13).
+            r.spawn(Button::new("account").icon("settings").icon_size(20.0).ghost().dropdown_caret().tooltip("Settings").build(t))
+                .insert(dark)
+                .entry::<Node>()
+                .and_modify(|mut n| {
+                    n.padding = UiRect::horizontal(Val::Px(4.0));
+                    n.column_gap = Val::Px(4.0);
+                });
         });
     });
 }
@@ -627,13 +600,9 @@ fn sidebar(p: &mut ChildSpawnerCommands, t: &Theme, state: &LandingState) {
                 .selection_indicator()
                 .weight(FontWeight::MEDIUM)
         };
-        let before = [
-            Filter::Explore,
-            Filter::OwnedByMe,
-            Filter::RecentlyOpened,
-            Filter::CreatedByMe,
-            Filter::SharedWithMe,
-        ];
+        // (Shared with me, Teams and Public are left out: documents are on this computer, with
+        // no accounts to share with yet. Issue #13.)
+        let before = [Filter::Explore, Filter::OwnedByMe, Filter::RecentlyOpened, Filter::CreatedByMe];
         let filter_item = |s: &mut ChildSpawnerCommands, f: Filter| {
             s.spawn((
                 item(filter_name(f), filter_icon(f), f.label())
@@ -650,10 +619,7 @@ fn sidebar(p: &mut ChildSpawnerCommands, t: &Theme, state: &LandingState) {
         for f in before {
             filter_item(s, f);
         }
-        for (d, name, icon_name, label, empty) in [
-            (Disclosure::Teams, "filter-teams", "users", "Teams", "No teams"),
-            (Disclosure::Labels, "filter-labels", "tag", "Labels", "No labels"),
-        ] {
+        for (d, name, icon_name, label, empty) in [(Disclosure::Labels, "filter-labels", "tag", "Labels", "No labels")] {
             let open = match d {
                 Disclosure::Teams => state.teams_open,
                 Disclosure::Labels => state.labels_open,
@@ -704,7 +670,6 @@ fn sidebar(p: &mut ChildSpawnerCommands, t: &Theme, state: &LandingState) {
             ))
             .with_child(t.text(empty, t.font_base, FontWeight::NORMAL, t.subtle_foreground));
         }
-        filter_item(s, Filter::Public);
         filter_item(s, Filter::Trash);
 
         // Bottom: where documents are kept.
@@ -1782,11 +1747,11 @@ fn create_menu(t: &Theme, name: &'static str) -> impl Bundle {
             MenuItem::new("import-from", "Import from")
                 .icon("cloud-upload")
                 .submenu(vec![
-                    MenuItem::new("import-from-dropbox", "Dropbox…").disabled(true).into(),
+                    MenuItem::new("import-from-dropbox", "Dropbox…").planned().into(),
                     MenuItem::new("import-from-google-drive", "Google Drive…")
-                        .disabled(true)
+                        .planned()
                         .into(),
-                    MenuItem::new("import-from-onedrive", "OneDrive…").disabled(true).into(),
+                    MenuItem::new("import-from-onedrive", "OneDrive…").planned().into(),
                 ]),
         )
         .item(MenuItem::new("new-label", "Label…").icon("tag-new"))
