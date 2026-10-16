@@ -68,6 +68,9 @@ cd cadrs
 cargo run --release
 ```
 
+On macOS, CMake from Homebrew (`brew install cmake`) and the Xcode command line tools
+(`xcode-select --install`) are enough; it builds and runs natively on Apple Silicon (Metal).
+
 Documents are stored in your platform's data folder (on Linux, `~/.local/share/cadrs/`).
 
 A Windows build can be cross-compiled from Linux with MinGW:
