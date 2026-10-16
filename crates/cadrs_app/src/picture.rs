@@ -76,7 +76,7 @@ fn facing_plane(back: Vec3) -> PlaneRef {
 }
 
 /// Where a view ray meets a plane, in the plane's coordinates.
-fn on_plane(plane: PlaneRef, (origin, dir): (Vec3, Vec3)) -> Option<[f64; 2]> {
+pub fn on_plane(plane: PlaneRef, (origin, dir): (Vec3, Vec3)) -> Option<[f64; 2]> {
     let f = plane.frame();
     let v = |a: [f64; 3]| Vec3::new(a[0] as f32, a[1] as f32, a[2] as f32);
     let (o, n) = (v(f.origin), v(f.normal()).normalize());

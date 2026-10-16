@@ -3607,7 +3607,13 @@ pub fn edit_feature(world: &mut World, id: FeatureId) {
     if !can_edit {
         return;
     }
-    if crate::applied::AppliedKind::of(&kind).is_some() {
+    if world.contains_resource::<crate::image_dialog::ImageSession>() {
+        crate::image_dialog::finish(world);
+    }
+    if matches!(kind, cadrs_core::FeatureKind::Image(_)) {
+        // Issue #10.
+        crate::image_dialog::edit_image(world, id);
+    } else if crate::applied::AppliedKind::of(&kind).is_some() {
         crate::applied::edit(world, id);
     } else if matches!(kind, cadrs_core::FeatureKind::Boolean(_)) {
         crate::boolean::edit_boolean(world, id);

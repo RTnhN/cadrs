@@ -20,8 +20,7 @@ impl Rebuilder {
             x_dir: Unit::new_normalize(Vector3::from(frame.u)),
             normal: Unit::new_normalize(Vector3::from(frame.normal())),
         };
-        let (cx, cy, hw, hh) = (x.center[0], x.center[1], x.width / 2.0, x.height / 2.0);
-        let corners = [Point2::new(cx - hw, cy - hh), Point2::new(cx + hw, cy - hh), Point2::new(cx + hw, cy + hh), Point2::new(cx - hw, cy + hh)];
+        let corners = x.corners().map(|[u, v]| Point2::new(u, v));
         let curves = (0..4)
             .map(|i| FillCurve::Sketch { plane, curve: Curve2::Line { a: corners[i], b: corners[(i + 1) % 4], source: Some(i as u64) } })
             .collect();
