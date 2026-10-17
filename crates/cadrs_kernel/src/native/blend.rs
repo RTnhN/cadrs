@@ -584,6 +584,32 @@ pub fn blend(k: &mut NativeKernel, body: BodyId, edges: &[(EdgeId, Box<dyn Fn(f6
                 }
             }
         }
+        // A concave tool adds material: cut its extensions off at the end faces (or square to
+        // the edge at its ends).
+        if !tool.convex {
+            for (end, v) in ed.v.iter().enumerate() {
+                let p = b.verts[*v].p;
+                let tv = ed.curve.tangent(ed.t[end]).normalize();
+                let out = if end == 0 { -tv } else { tv };
+                let [s1, s2] = edge_sides(&b, e)?;
+                let mut plane: Option<(P3, V3)> = None;
+                for (fi, f) in b.faces.iter().enumerate() {
+                    if fi == s1.0 || fi == s2.0 || !f.loops.iter().flatten().any(|c| b.edges[c.edge].v.contains(v)) {
+                        continue;
+                    }
+                    if let Surface::Plane { f: fr } = &f.surf {
+                        let n = fr.x.cross(&fr.y) * if f.sense { 1.0 } else { -1.0 };
+                        if n.dot(&out) > 1e-6 {
+                            plane = Some((p, n));
+                        }
+                    }
+                }
+                let (o, n) = plane.unwrap_or((p, out));
+                let (nb, ns) = trim_tool(&tb, &ts, o, n)?;
+                tb = nb;
+                ts = ns;
+            }
+        }
         let op = if tool.convex { BoolOp::Subtract } else { BoolOp::Union };
         cur = cur.apply(&tb, &ts, op)?;
     }
@@ -640,8 +666,13 @@ fn check_fits(b: &Body, e: usize, kind: &dyn Fn(f64) -> SectionKind) -> Result<(
         SectionKind::Chamfer { d1, d2 } => (d1, d2),
         SectionKind::Asymmetric { r1, r2 } => (r1 / (theta / 2.0).tan(), r2 / (theta / 2.0).tan()),
     };
+    // The contact lines must reach the faces somewhere along the edge (a fillet running into a
+    // hole beside the edge is the boolean's business, not a misfit).
+    let mut fits = [false, false];
+    for frac in [0.1, 0.3, 0.5, 0.7, 0.9] {
+    let tm = ed.t[0] + (ed.t[1] - ed.t[0]) * frac;
     let p = ed.point(tm);
-    for (s, w, a) in [(s1, w1, a1), (s2, w2, a2)] {
+    for (side, (s, w, a)) in [(s1, w1, a1), (s2, w2, a2)].into_iter().enumerate() {
         if !(a > 0.0) || !a.is_finite() {
             return Err(KernelError::InvalidParameter("The blend's size must be positive".into()));
         }
@@ -652,14 +683,19 @@ fn check_fits(b: &Body, e: usize, kind: &dyn Fn(f64) -> SectionKind) -> Result<(
         if (f.surf.eval(u, v) - q).norm() > 1e-6 * (1.0 + a) {
             // Curved across the edge: the contact point isn't on the face's surface; leave the
             // check to the boolean.
+            fits[side] = true;
             continue;
         }
         let inside = super::classify::periodic_candidates(&f.surf, u, v, &polys)
             .into_iter()
             .any(|uv| super::classify::in_face(&polys, &f.surf, uv, 1e-7) != super::classify::InFace::Outside);
-        if !inside {
-            return Err(KernelError::OperationFailed("the blend is too large for the faces at the edge".into()));
+        if inside {
+            fits[side] = true;
         }
+    }
+    }
+    if !(fits[0] && fits[1]) {
+        return Err(KernelError::OperationFailed("the blend is too large for the faces at the edge".into()));
     }
     Ok(())
 }

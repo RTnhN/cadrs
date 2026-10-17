@@ -305,3 +305,19 @@ fn debug_corner_face() {
         }
     }
 }
+
+#[test]
+fn debug_concave_conic() {
+    let mut k = NativeKernel::new();
+    let l = Loop { curves: {
+        let pts = [p(0.,0.), p(20.,0.), p(20.,5.), p(5.,5.), p(5.,20.), p(0.,20.)];
+        (0..6).map(|i| Curve2::Line { a: pts[i], b: pts[(i+1)%6], source: None }).collect()
+    } };
+    let lb = k.extrude(&Profile::new(Plane::top(), vec![reg(l)]), Extent::Blind(10.0)).unwrap().bodies[0];
+    let inner = k.edges(lb).unwrap().into_iter().find(|e| (e.mid - Point3::new(5.0, 5.0, 5.0)).norm() < 1e-9).unwrap().id;
+    for prof in [FilletProfile::Circular, FilletProfile::Conic { rho: 0.5 }] {
+        let spec = FilletSpec { profile: prof, ..FilletSpec::radius(2.0) };
+        let f = k.fillet_with(lb, &[inner], &spec).unwrap().bodies[0];
+        eprintln!("{prof:?}: added {:.9} per mm (circle {:.9}) solids {} faces {}", (k.mass_properties(f).unwrap().volume - 1750.0) / 10.0, 1.0 - std::f64::consts::PI / 4.0 * 4.0 / 4.0, k.solid_count(f).unwrap(), k.faces(f).unwrap().len());
+    }
+}
