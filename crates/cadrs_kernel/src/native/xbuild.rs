@@ -1,0 +1,1257 @@
+//! Rebuilding a [`Body`] from a neutral boundary description, as STEP and IGES files hold it:
+//! points, 3D edge curves between vertices, and faces as surfaces bounded by loops of oriented
+//! edges, without p-curves (files may carry some, but we compute our own).
+//!
+//! - **Edges.** An edge's parameter range comes from its vertices projected on its curve; it
+//!   runs from its first vertex to its second for increasing t (a curve running the other way is
+//!   turned round). A closed edge (one vertex) on a circle or ellipse spans a whole turn.
+//! - **p-curves.** Each loop's p-curves come from [`pcurve::pcurve`], each shifted by whole
+//!   periods so it starts where the previous one ended (as `unify` aligns them), so the loop is
+//!   continuous in (u, v) on periodic surfaces.
+//! - **Singular points.** Files leave out the point edges at a sphere's pole or a cone's apex,
+//!   which our loops need: where a loop's p-curves jump at a point where the surface collapses,
+//!   a degenerate edge is inserted. Its jump in u is free by whole periods: the loop must close,
+//!   and when that leaves a choice (a whole sphere's seam used both ways) the loop is made to run
+//!   the way the file's face sense says.
+//! - **Missing seams.** A face on a periodic surface whose loops wrap around it with no seam (a
+//!   cylinder band bounded by two circles, a spherical cap bounded by one, a whole sphere or
+//!   torus with no bounds) gets a seam edge along an iso line, splitting an edge where needed.
+//! - **Senses.** The outer loop is the one enclosing the largest uv area; it goes first, and its
+//!   orientation in uv sets the face's sense ([`super::build::fix_senses`]'s rule: loops run
+//!   counter-clockwise about the outward normal).
+
+use std::sync::Arc;
+
+use super::curve::Curve;
+use super::math::*;
+use super::nurbs::NurbsCurve;
+use super::pcurve;
+use super::surface::Surface;
+use super::topo::*;
+
+/// A face as a file describes it: a surface, the sense the file gives (used only to settle
+/// ambiguous loops) and loops of (edge, along the edge).
+#[derive(Debug, Clone)]
+pub struct XFace {
+    pub surf: Surface,
+    pub sense: bool,
+    pub loops: Vec<Vec<(usize, bool)>>,
+}
+
+/// Collects vertices, edges, faces, shells and solids, then builds the body ([`Self::finish`]).
+#[derive(Debug, Default)]
+pub struct XBuilder {
+    /// Vertices and edges as they are added (faces, shells and solids come at the end).
+    pub body: Body,
+    pub faces: Vec<XFace>,
+    shells: Vec<(Vec<usize>, bool)>,
+    solids: Vec<Vec<usize>>,
+    /// Problems met (faces dropped, gaps left), for diagnostics.
+    pub warnings: Vec<String>,
+}
+
+/// The distance under which two points of a file are the same point (files are written to about
+/// 1e-7 of their size; exporters' tolerances are often 1e-6 to 1e-5 mm).
+const JOIN: f64 = 1e-5;
+
+/// The period of periodic surface coordinates.
+const P: f64 = TAU;
+
+/// The parameter of a point on a curve (`near`: the range to prefer for NURBS).
+fn param_of(c: &Curve, p: &P3) -> f64 {
+    match c {
+        Curve::Line { o, d } => (p - o).dot(d) / d.norm_squared(),
+        Curve::Circle { c, x, y, .. } => {
+            let v = p - c;
+            v.dot(y).atan2(v.dot(x))
+        }
+        Curve::Ellipse { c, x, y, a, b } => {
+            let v = p - c;
+            (v.dot(y) / b).atan2(v.dot(x) / a)
+        }
+        Curve::Nurbs(n) => {
+            let (a, b) = n.range();
+            c.closest(p, a, b)
+        }
+    }
+}
+
+/// The parameter range of an edge from `p0` to `p1` on `c` (`closed`: one vertex, a whole
+/// curve). None when the edge would run against the curve (a non-periodic curve) or is empty.
+pub fn edge_range(c: &Curve, p0: &P3, p1: &P3, closed: bool) -> Option<(f64, f64)> {
+    match c {
+        Curve::Circle { .. } | Curve::Ellipse { .. } => {
+            let t0 = param_of(c, p0);
+            if closed {
+                return Some((t0, t0 + TAU));
+            }
+            let mut t1 = param_of(c, p1);
+            while t1 <= t0 + 1e-12 {
+                t1 += TAU;
+            }
+            while t1 > t0 + TAU {
+                t1 -= TAU;
+            }
+            Some((t0, t1))
+        }
+        Curve::Nurbs(n) if closed => Some(n.range()),
+        _ => {
+            let (t0, t1) = (param_of(c, p0), param_of(c, p1));
+            if t1 > t0 + 1e-12 { Some((t0, t1)) } else { None }
+        }
+    }
+}
+
+/// The analytic surface a surface of revolution or extrusion really is (exporters write tori as
+/// revolved circles, cylinders as extruded circles, ...): a revolved line is a cylinder, cone or
+/// plane, a revolved circle in a plane through the axis a torus or sphere; an extruded line is a
+/// plane and a circle extruded along its normal a cylinder. None when it is none of these.
+pub fn analytic(s: &Surface) -> Option<Surface> {
+    const EPS: f64 = 1e-9;
+    match s {
+        Surface::Revolution { f, m } => {
+            let z = f.z.normalize();
+            let foot = |p: &P3| f.o + z * (p - f.o).dot(&z);
+            match m {
+                Curve::Line { o, d } => {
+                    let d = d.normalize();
+                    let w = o - foot(o);
+                    let r = w.norm();
+                    if r < EPS {
+                        return None;
+                    }
+                    let x = w / r;
+                    if d.dot(&z.cross(&x)).abs() > EPS {
+                        return None; // skew: a hyperboloid
+                    }
+                    let (dr, dz) = (d.dot(&x), d.dot(&z));
+                    let fr = Frame::from_xz(foot(o), x, z);
+                    Some(if dr.abs() < EPS {
+                        Surface::Cylinder { f: fr, r }
+                    } else if dz.abs() < EPS {
+                        Surface::Plane { f: fr }
+                    } else {
+                        Surface::Cone { f: fr, r, a: dr.atan2(dz) }
+                    })
+                }
+                Curve::Circle { c, x, y, r } => {
+                    let n = x.cross(y);
+                    if n.dot(&z).abs() > EPS || (c - f.o).dot(&n).abs() > EPS * (1.0 + (c - f.o).norm()) {
+                        return None;
+                    }
+                    let w = c - foot(c);
+                    let rr = w.norm();
+                    if rr < EPS * (1.0 + r) {
+                        Some(Surface::Sphere { f: Frame::from_xz(foot(c), f.x, z), r: *r })
+                    } else {
+                        Some(Surface::Torus { f: Frame::from_xz(foot(c), w / rr, z), rmaj: rr, rmin: *r })
+                    }
+                }
+                _ => None,
+            }
+        }
+        Surface::Extrusion { c, d } => match c {
+            Curve::Line { o, d: ld } => {
+                let x = ld.normalize();
+                let y = d - x * d.dot(&x);
+                if y.norm() < EPS {
+                    return None;
+                }
+                Some(Surface::Plane { f: Frame::from_xz(*o, x, x.cross(&y.normalize())) })
+            }
+            Curve::Circle { c, x, y, r } => {
+                let n = x.cross(y).normalize();
+                if d.normalize().cross(&n).norm() > EPS {
+                    return None;
+                }
+                Some(Surface::Cylinder { f: Frame::from_xz(*c, *x, n), r: *r })
+            }
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
+/// The same surface re-expressed so that a face through `p` lies where our projections look,
+/// or None when it already does:
+/// - a face on a cone's far nappe (beyond the apex, where `r + v sin a < 0`) gets the cone
+///   opening the other way;
+/// - a face on the inner (lemon) part of a spindle torus (R < r, where `R + r cos v < 0`) gets a
+///   surface of revolution of the mirrored meridian circle.
+fn near_branch(s: &Surface, p: &P3) -> Option<Surface> {
+    match s {
+        Surface::Cone { f, r, a } => {
+            let l = f.local(p);
+            let (sa, ca) = a.sin_cos();
+            let radius = r + l.z * sa / ca;
+            if radius >= -JOIN {
+                return None;
+            }
+            Some(Surface::Cone { f: Frame::from_xz(f.o + f.z * l.z, f.x, -f.z), r: -radius, a: *a })
+        }
+        Surface::Torus { f, rmaj, rmin } if rmaj < rmin => {
+            let l = f.local(p);
+            let rho = l.x.hypot(l.y);
+            let apple = ((rho - rmaj).hypot(l.z) - rmin).abs();
+            let lemon = ((rho + rmaj).hypot(l.z) - rmin).abs();
+            if lemon >= apple {
+                return None;
+            }
+            let m = Curve::Circle { c: f.o - f.x * *rmaj, x: f.x, y: f.z, r: *rmin };
+            Some(Surface::Revolution { f: Frame::from_xz(f.o, f.x, f.z), m })
+        }
+        _ => None,
+    }
+}
+
+/// Distance (on the surface) from a p-curve's point at `t` to the projection of the curve's.
+fn pc_error(s: &Surface, c: &Curve, pc: &Curve, t: f64) -> f64 {
+    let q = pc.point(t);
+    let (u, v) = project(s, &c.point(t), Some((q.x, q.y)));
+    (s.eval(q.x, q.y) - s.eval(u, v)).norm()
+}
+
+/// [`Surface::project`] near `hint`, but from a fresh start when that lands farther from the
+/// point (Newton stuck where a spline surface collapses to a point, its Jacobian singular).
+fn project(s: &Surface, p: &P3, hint: Option<(f64, f64)>) -> (f64, f64) {
+    let (u, v) = s.project(p, hint);
+    if hint.is_none() || !matches!(s, Surface::Nurbs(_) | Surface::Extrusion { .. } | Surface::Revolution { .. }) {
+        return (u, v);
+    }
+    // Files' edges lie up to their tolerance (1e-4 mm and more) off their faces: only retry
+    // when clearly off.
+    let d = (s.eval(u, v) - p).norm();
+    if d < 5e-4 {
+        return (u, v);
+    }
+    let (u2, v2) = s.project(p, None);
+    if (s.eval(u2, v2) - p).norm() < d - 1e-9 { (u2, v2) } else { (u, v) }
+}
+
+/// [`pcurve::pcurve`], checked against the projection of the curve (files' edges can be
+/// degree-7 splines with C1 joints that its single fit doesn't follow); when it is off by more
+/// than the modelling tolerance, a fit of our own, piece by piece of the curve.
+pub fn pcurve_checked(s: &Surface, c: &Curve, t0: f64, t1: f64) -> Curve {
+    snap_tiny(pcurve_unsnapped(s, c, t0, t1))
+}
+
+/// Zeroes coefficients below 1e-20 (rounding residue of files' 1e-16 direction components):
+/// the triangulator rejects coordinates under ~1.8e-43 that products of them can reach.
+fn snap_tiny(c: Curve) -> Curve {
+    let z = |x: f64| if x.abs() < 1e-20 { 0.0 } else { x };
+    let p = |q: &P3| P3::new(z(q.x), z(q.y), z(q.z));
+    let v = |q: &V3| V3::new(z(q.x), z(q.y), z(q.z));
+    match c {
+        Curve::Line { o, d } => Curve::Line { o: p(&o), d: v(&d) },
+        Curve::Circle { c, x, y, r } => Curve::Circle { c: p(&c), x: v(&x), y: v(&y), r },
+        Curve::Ellipse { c, x, y, a, b } => Curve::Ellipse { c: p(&c), x: v(&x), y: v(&y), a, b },
+        Curve::Nurbs(n) => {
+            let mut n = (*n).clone();
+            for h in &mut n.cps {
+                h.x = z(h.x);
+                h.y = z(h.y);
+                h.z = z(h.z);
+            }
+            Curve::Nurbs(Arc::new(n))
+        }
+    }
+}
+
+fn pcurve_unsnapped(s: &Surface, c: &Curve, t0: f64, t1: f64) -> Curve {
+    let pieces = c.pieces(t0, t1);
+    // A spline on a curved surface, or anything on a spline surface, has no exact p-curve: fit
+    // it directly.
+    if (matches!(c, Curve::Nurbs(_)) && !matches!(s, Surface::Plane { .. })) || matches!(s, Surface::Nurbs(_)) {
+        if let Some(pc) = fit_pieces(s, c, &pieces) {
+            return pc;
+        }
+    }
+    let mut pc = pcurve::pcurve(s, c, t0, t1, None);
+    // A meridian arc past a sphere's pole is the same arc at u + π with v mirrored in the pole.
+    if let (Surface::Sphere { .. }, Curve::Line { o, d }) = (s, &pc) {
+        if d.x == 0.0 {
+            // v is periodic along a whole meridian: bring the arc's middle into (−π, π] first.
+            let vm = pc.point((t0 + t1) / 2.0).y;
+            let k = ((vm - wrap(vm, -PI, TAU)) / TAU).round() * TAU;
+            let (o, vm) = (P3::new(o.x, o.y - k, 0.0), vm - k);
+            pc = if vm.abs() > PI / 2.0 + 1e-9 {
+                let pole = if vm > 0.0 { PI } else { -PI };
+                Curve::Line { o: P3::new(o.x + PI, pole - o.y, 0.0), d: V3::new(0.0, -d.y, 0.0) }
+            } else {
+                Curve::Line { o, d: *d }
+            };
+        }
+    }
+    if matches!(s, Surface::Plane { .. }) {
+        return pc;
+    }
+    let samples = |pc: &Curve| pieces.windows(2).flat_map(|w| [0.0, 0.25, 0.5, 0.75, 1.0].map(|f| w[0] + (w[1] - w[0]) * f)).collect::<Vec<f64>>();
+    if !matches!(pc, Curve::Nurbs(_)) {
+        // An exact p-curve must put the surface on the curve.
+        let on = |pc: &Curve| samples(pc).iter().all(|&t| {
+            let q = pc.point(t);
+            (s.eval(q.x, q.y) - c.point(t)).norm() < 1e-6
+        });
+        if on(&pc) {
+            return pc;
+        }
+        if let Some(m) = torus_meridian(s, c) {
+            if on(&m) {
+                return m;
+            }
+        }
+    }
+    if samples(&pc).iter().all(|&t| pc_error(s, c, &pc, t) < TOL) {
+        return pc;
+    }
+    fit_pieces(s, c, &pieces).unwrap_or(pc)
+}
+
+/// The p-curve of a torus's meridian (a tube circle), in the half plane of the circle's
+/// centre: u constant, v = v0 ± t.
+fn torus_meridian(s: &Surface, c: &Curve) -> Option<Curve> {
+    let (Surface::Torus { f, rmaj, .. }, Curve::Circle { c: cc, x, y, .. }) = (s, c) else { return None };
+    let l = f.local(cc);
+    if l.z.abs() > 1e-7 || (l.x.hypot(l.y) - rmaj).abs() > 1e-7 || x.cross(y).dot(&f.z).abs() > 1e-9 {
+        return None;
+    }
+    let radial = (f.x * l.x + f.y * l.y).normalize();
+    let u = l.y.atan2(l.x);
+    let (xr, xz, yr, yz) = (x.dot(&radial), x.dot(&f.z), y.dot(&radial), y.dot(&f.z));
+    let sig = (xr * yz - xz * yr).signum();
+    Some(Curve::Line { o: P3::new(u, xz.atan2(xr), 0.0), d: V3::new(0.0, sig, 0.0) })
+}
+
+/// A piecewise cubic p-curve: per piece of the curve, a cubic through a dozen projected
+/// points, halved until its midpoints are within the tolerance; joined into one spline.
+fn fit_pieces(s: &Surface, c: &Curve, pieces: &[f64]) -> Option<Curve> {
+    let mut hint: Option<(f64, f64)> = None;
+    let mut segs: Vec<NurbsCurve> = Vec::new();
+    for w in pieces.windows(2) {
+        if w[1] - w[0] > 1e-14 {
+            fit_span(s, c, w[0], w[1], &mut hint, 0, &mut segs);
+        }
+    }
+    let mut it = segs.into_iter();
+    let mut out = it.next()?;
+    for fit in it {
+        // Join at the shared end: a knot of full multiplicity there.
+        let p = out.degree;
+        out.knots.pop();
+        out.knots.extend_from_slice(&fit.knots[p + 1..]);
+        out.cps.extend_from_slice(&fit.cps[1..]);
+    }
+    Some(Curve::Nurbs(Arc::new(out)))
+}
+
+fn fit_span(s: &Surface, c: &Curve, a: f64, b: f64, hint: &mut Option<(f64, f64)>, depth: usize, out: &mut Vec<NurbsCurve>) {
+    const N: usize = 12;
+    let mut h = *hint;
+    let ts: Vec<f64> = (0..=N).map(|i| a + (b - a) * i as f64 / N as f64).collect();
+    let pts: Vec<P3> = ts
+        .iter()
+        .map(|&t| {
+            let (u, v) = project(s, &c.point(t), h);
+            h = Some((u, v));
+            P3::new(u, v, 0.0)
+        })
+        .collect();
+    let f = NurbsCurve::interpolate(&pts, &ts, 3, None, None);
+    let fc = Curve::Nurbs(Arc::new(f));
+    let err = (0..N).map(|i| pc_error(s, c, &fc, (ts[i] + ts[i + 1]) / 2.0)).fold(0.0, f64::max);
+    if err < TOL || depth >= 12 {
+        *hint = h;
+        let Curve::Nurbs(f) = fc else { unreachable!() };
+        out.push(Arc::try_unwrap(f).unwrap_or_else(|a| (*a).clone()));
+        return;
+    }
+    let m = (a + b) / 2.0;
+    fit_span(s, c, a, m, hint, depth + 1, out);
+    fit_span(s, c, m, b, hint, depth + 1, out);
+}
+
+/// How a surface closes on itself: periods in u and v, and for spline surfaces (closed where
+/// their opposite boundaries meet, but not periodic in evaluation) the parameter range p-curves
+/// must stay in.
+struct Periods {
+    pu: Option<f64>,
+    pv: Option<f64>,
+    domain: Option<((f64, f64), (f64, f64))>,
+}
+
+fn periods(s: &Surface) -> Periods {
+    match s {
+        Surface::Nurbs(n) => {
+            let ((u0, u1), (v0, v1)) = n.range();
+            let closed_u = (0..=4).all(|k| {
+                let v = v0 + (v1 - v0) * k as f64 / 4.0;
+                (n.point(u0, v) - n.point(u1, v)).norm() < JOIN
+            });
+            let closed_v = (0..=4).all(|k| {
+                let u = u0 + (u1 - u0) * k as f64 / 4.0;
+                (n.point(u, v0) - n.point(u, v1)).norm() < JOIN
+            });
+            Periods { pu: closed_u.then_some(u1 - u0), pv: closed_v.then_some(v1 - v0), domain: Some(((u0, u1), (v0, v1))) }
+        }
+        Surface::Extrusion { c: Curve::Nurbs(n), .. } => {
+            let (a, b) = n.range();
+            let closed = (n.point(a) - n.point(b)).norm() < JOIN;
+            Periods { pu: closed.then_some(b - a), pv: None, domain: Some(((a, b), (f64::NEG_INFINITY, f64::INFINITY))) }
+        }
+        _ => Periods { pu: s.u_periodic().then_some(P), pv: s.v_periodic().then_some(P), domain: None },
+    }
+}
+
+/// The u = const iso line of a periodic surface, parametrized by v.
+fn iso_u(s: &Surface, u: f64) -> Option<Curve> {
+    match s {
+        Surface::Revolution { f, m } => {
+            let r = Frame { o: f.o, x: f.x * u.cos() + f.y * u.sin(), y: f.y * u.cos() - f.x * u.sin(), z: f.z };
+            // The meridian turned by u about the axis (in the frame's sense of rotation).
+            let to = nalgebra::Matrix3::from_columns(&[r.x, r.y, r.z]);
+            let from = nalgebra::Matrix3::from_columns(&[f.x, f.y, f.z]).transpose();
+            let m3 = to * from;
+            Some(m.transformed(&Affine { m: m3, t: f.o.coords - m3 * f.o.coords }))
+        }
+        Surface::Extrusion { c, d } => Some(Curve::Line { o: c.point(u), d: *d }),
+        _ => s.iso_u(u),
+    }
+}
+
+/// One loop traced in uv: per coedge its (aligned) p-curve, and per joint (joint j is where
+/// coedge j starts; joint 0 closes the loop) the gap from the previous end.
+struct Trace {
+    pcs: Vec<Curve>,
+    /// Start and end uv of each coedge.
+    ends: Vec<(P2, P2)>,
+    /// Per joint: the gap (start of j − end of j − 1, joint 0 reduced by whole periods), whether
+    /// the surface collapses there along u (a pole or apex), and the joint's vertex.
+    gaps: Vec<V2>,
+    free: Vec<bool>,
+    /// Net turns about u and v (with every free gap at its smallest).
+    wu: i64,
+    wv: i64,
+}
+
+impl XBuilder {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn vertex(&mut self, p: P3) -> usize {
+        self.body.add_vertex(p)
+    }
+
+    /// An edge from `v0` to `v1` along `curve` (turned round when it runs from `v1` to `v0`).
+    /// None for an empty edge.
+    pub fn edge(&mut self, curve: Curve, v0: usize, v1: usize) -> Option<usize> {
+        let (p0, p1) = (self.body.verts[v0].p, self.body.verts[v1].p);
+        let closed = v0 == v1;
+        let (curve, (t0, t1)) = match edge_range(&curve, &p0, &p1, closed) {
+            Some(r) => (curve, r),
+            None => {
+                if (p0 - p1).norm() < JOIN && !curve.is_periodic() && !matches!(curve, Curve::Nurbs(_)) {
+                    return None;
+                }
+                let (rc, _, _) = curve.reversed(0.0, 1.0);
+                let r = edge_range(&rc, &p0, &p1, closed)?;
+                (rc, r)
+            }
+        };
+        if curve.length(t0, t1) < 1e-9 {
+            return None;
+        }
+        // Rounding residue (atan2(1e-49, 1)) would reach the triangulator, which rejects it.
+        let small = 1e-12 * (1.0 + (t1 - t0).abs());
+        let z = |t: f64| if t.abs() < small { 0.0 } else { t };
+        let (t0, t1) = (z(t0), z(t1));
+        Some(self.body.add_edge(curve, t0, t1, v0, v1))
+    }
+
+    pub fn face(&mut self, f: XFace) -> usize {
+        self.faces.push(f);
+        self.faces.len() - 1
+    }
+
+    pub fn shell(&mut self, faces: Vec<usize>, closed: bool) -> usize {
+        self.shells.push((faces, closed));
+        self.shells.len() - 1
+    }
+
+    pub fn solid(&mut self, shells: Vec<usize>) {
+        self.solids.push(shells);
+    }
+
+    fn co_start(&self, e: usize, fwd: bool) -> usize {
+        let ed = &self.body.edges[e];
+        if fwd { ed.v[0] } else { ed.v[1] }
+    }
+
+    /// The p-curve of edge `e` on `s`, shifted by periods so its start (along `fwd`) is nearest
+    /// `at` (on a closed spline surface only within its parameter range: a seam's two uses lie
+    /// on its two boundaries).
+    fn pc_from(&self, s: &Surface, e: usize, fwd: bool, at: Option<P2>) -> Curve {
+        let ed = &self.body.edges[e];
+        let pc = pcurve_checked(s, &ed.curve, ed.t[0], ed.t[1]);
+        let Some(at) = at else { return pc };
+        let per = periods(s);
+        let (t0, _) = co_range(ed, fwd);
+        let p = pc.point(t0);
+        let mut du = per.pu.map_or(0.0, |pu| ((at.x - p.x) / pu).round() * pu);
+        let mut dv = per.pv.map_or(0.0, |pv| ((at.y - p.y) / pv).round() * pv);
+        if let Some(((u0, u1), (v0, v1))) = per.domain {
+            let inside = |x: f64, lo: f64, hi: f64| x >= lo - 1e-9 * (hi - lo).abs().max(1.0) && x <= hi + 1e-9 * (hi - lo).abs().max(1.0);
+            let ts = [ed.t[0], ed.mid_t(), ed.t[1]];
+            if !ts.iter().all(|&t| inside(pc.point(t).x + du, u0, u1)) {
+                du = 0.0;
+            }
+            if !ts.iter().all(|&t| inside(pc.point(t).y + dv, v0, v1)) {
+                dv = 0.0;
+            }
+        }
+        if du == 0.0 && dv == 0.0 { pc } else { pc.transformed(&Affine::translation(V3::new(du, dv, 0.0))) }
+    }
+
+    /// Whether moving along u at `uv` leaves the surface point in place (a pole or an apex).
+    fn collapsed_u(s: &Surface, uv: P2) -> bool {
+        let p = s.eval(uv.x, uv.y);
+        [PI / 2.0, PI, -PI / 2.0].iter().all(|du| (s.eval(uv.x + du, uv.y) - p).norm() < JOIN)
+    }
+
+    fn trace(&self, s: &Surface, l: &[(usize, bool)]) -> Trace {
+        let mut pcs = Vec::with_capacity(l.len());
+        let mut ends = Vec::with_capacity(l.len());
+        let mut at: Option<P2> = None;
+        for &(e, fwd) in l {
+            let pc = self.pc_from(s, e, fwd, at);
+            let ed = &self.body.edges[e];
+            let (a, b) = co_range(ed, fwd);
+            let (pa, pb) = (pc.point(a), pc.point(b));
+            ends.push((P2::new(pa.x, pa.y), P2::new(pb.x, pb.y)));
+            at = Some(P2::new(pb.x, pb.y));
+            pcs.push(pc);
+        }
+        let n = l.len();
+        let mut gaps = Vec::with_capacity(n);
+        let mut free = Vec::with_capacity(n);
+        let (mut wu, mut wv) = (0i64, 0i64);
+        for j in 0..n {
+            let prev = ends[(j + n - 1) % n].1;
+            let mut g = ends[j].0 - prev;
+            if j == 0 {
+                let per = periods(s);
+                if let Some(pu) = per.pu {
+                    let k = (g.x / pu).round();
+                    g.x -= k * pu;
+                    wu -= k as i64;
+                }
+                if let Some(pv) = per.pv {
+                    let k = (g.y / pv).round();
+                    g.y -= k * pv;
+                    wv -= k as i64;
+                }
+            }
+            gaps.push(g);
+            free.push(s.u_periodic() && Self::collapsed_u(s, prev));
+        }
+        Trace { pcs, ends, gaps, free, wu, wv }
+    }
+
+    /// Signed uv area (scaled by the surface metric) of a traced loop with per-coedge period
+    /// shifts `n` (in u).
+    fn trace_area(s: &Surface, body: &Body, l: &[(usize, bool)], t: &Trace, n: &[i64]) -> f64 {
+        let (mu, mv) = s.metric();
+        let mut pts = Vec::new();
+        for (k, &(e, fwd)) in l.iter().enumerate() {
+            let ed = &body.edges[e];
+            let (a, b) = co_range(ed, fwd);
+            let m = match t.pcs[k] {
+                Curve::Line { .. } => 1,
+                _ => 32,
+            };
+            let du = n[k] as f64 * P;
+            for i in 0..m {
+                let q = t.pcs[k].point(a + (b - a) * i as f64 / m as f64);
+                pts.push(P2::new((q.x + du) * mu, q.y * mv));
+            }
+        }
+        polygon_area(&pts)
+    }
+
+    /// Settles the free (pole) jumps of a traced loop: per coedge its shift in whole periods of
+    /// u. None when the loop wraps around the surface with nothing to absorb it (a seam is
+    /// missing).
+    fn resolve(&self, s: &Surface, l: &[(usize, bool)], t: &Trace, hint: bool) -> Option<Vec<i64>> {
+        if t.wv != 0 {
+            return None;
+        }
+        let n = l.len();
+        let free: Vec<usize> = (0..n).filter(|&j| t.free[j]).collect();
+        // Shifts from per-joint extra jumps m_j: coedge k is shifted by the sum of m_j, j in 1..=k.
+        let shifts = |m: &[i64]| -> Vec<i64> {
+            let mut acc = 0;
+            (0..n)
+                .map(|k| {
+                    if k > 0 {
+                        if let Some(i) = free.iter().position(|&j| j == k) {
+                            acc += m[i];
+                        }
+                    }
+                    acc
+                })
+                .collect()
+        };
+        if free.is_empty() {
+            return if t.wu == 0 { Some(vec![0; n]) } else { None };
+        }
+        // The jumps must add up to −wu (so the loop closes) and each stay within a period.
+        let mut best: Option<(bool, f64, Vec<i64>)> = None;
+        let nf = free.len().min(3);
+        let range: Vec<i64> = vec![-2, -1, 0, 1, 2];
+        let mut combos: Vec<Vec<i64>> = vec![vec![]];
+        for _ in 0..nf {
+            combos = combos.into_iter().flat_map(|c| range.iter().map(move |&x| [c.clone(), vec![x]].concat())).collect();
+        }
+        for mut m in combos {
+            m.resize(free.len(), 0);
+            if m.iter().sum::<i64>() != -t.wu {
+                continue;
+            }
+            let ok = free.iter().zip(&m).all(|(&j, &mj)| (t.gaps[j].x + mj as f64 * P).abs() <= P * (1.0 + 1e-9));
+            if !ok {
+                continue;
+            }
+            let sh = shifts(&m);
+            let a = Self::trace_area(s, &self.body, l, t, &sh);
+            if a.abs() < 1e-12 {
+                continue;
+            }
+            let matches = (a > 0.0) == hint;
+            let better = match &best {
+                None => true,
+                Some((bm, ba, _)) => (matches && !bm) || (matches == *bm && if matches { a.abs() < *ba } else { a.abs() > *ba }),
+            };
+            if better {
+                best = Some((matches, a.abs(), sh));
+            }
+        }
+        best.map(|b| b.2)
+    }
+
+    /// Whether two vertices are the same point.
+    fn same_vertex(&self, a: usize, b: usize) -> bool {
+        a == b || (self.body.verts[a].p - self.body.verts[b].p).norm() < JOIN
+    }
+
+    fn chains(&self, l: &[(usize, bool)]) -> bool {
+        let n = l.len();
+        (0..n).all(|k| {
+            let (e, f) = l[k];
+            let (e2, f2) = l[(k + 1) % n];
+            let end = self.co_start(e, !f);
+            self.same_vertex(end, self.co_start(e2, f2))
+        })
+    }
+
+    /// Makes a loop chain end to start, as some files' don't: coedges that only chain the other
+    /// way round are turned (wrong orientation flags), and failing that the loop is re-chained
+    /// from its first coedge by shared vertices (edges listed out of order). Returns whether the
+    /// loop chains.
+    fn repair_loop(&self, l: &mut Vec<(usize, bool)>) -> bool {
+        if l.len() < 2 || self.chains(l) {
+            return true;
+        }
+        for first in [l[0].1, !l[0].1] {
+            let mut m = l.clone();
+            m[0].1 = first;
+            for k in 1..m.len() {
+                let prev_end = self.co_start(m[k - 1].0, !m[k - 1].1);
+                if !self.same_vertex(prev_end, self.co_start(m[k].0, m[k].1)) && self.same_vertex(prev_end, self.co_start(m[k].0, !m[k].1)) {
+                    m[k].1 = !m[k].1;
+                }
+            }
+            if self.chains(&m) {
+                *l = m;
+                return true;
+            }
+        }
+        // Re-chain greedily.
+        let mut rest: Vec<(usize, bool)> = l[1..].to_vec();
+        let mut m = vec![l[0]];
+        while !rest.is_empty() {
+            let (e, f) = *m.last().unwrap();
+            let end = self.co_start(e, !f);
+            let Some((i, flip)) = rest.iter().enumerate().find_map(|(i, &(e2, f2))| {
+                if self.same_vertex(end, self.co_start(e2, f2)) {
+                    Some((i, false))
+                } else if self.same_vertex(end, self.co_start(e2, !f2)) {
+                    Some((i, true))
+                } else {
+                    None
+                }
+            }) else {
+                return false;
+            };
+            let (e2, f2) = rest.remove(i);
+            m.push((e2, f2 ^ flip));
+        }
+        if self.chains(&m) {
+            *l = m;
+            true
+        } else {
+            false
+        }
+    }
+
+    /// Splits edge `e` at `t` in every face description using it; returns the new vertex.
+    fn split_edge(&mut self, e: usize, t: f64) -> usize {
+        let p = self.body.edges[e].point(t);
+        let v = self.body.add_vertex(p);
+        let old = self.body.edges[e].clone();
+        self.body.edges[e] = Edge { t: [old.t[0], t], v: [old.v[0], v], ..old.clone() };
+        self.body.edges.push(Edge { t: [t, old.t[1]], v: [v, old.v[1]], ..old });
+        let e2 = self.body.edges.len() - 1;
+        for f in &mut self.faces {
+            for l in &mut f.loops {
+                let mut nl = Vec::with_capacity(l.len() + 1);
+                for &(x, fwd) in l.iter() {
+                    if x == e {
+                        if fwd {
+                            nl.push((e, true));
+                            nl.push((e2, true));
+                        } else {
+                            nl.push((e2, false));
+                            nl.push((e, false));
+                        }
+                    } else {
+                        nl.push((x, fwd));
+                    }
+                }
+                *l = nl;
+            }
+        }
+        v
+    }
+
+    /// A vertex at `p`: an existing one within the join distance, else a new one.
+    fn vertex_at(&mut self, p: P3) -> usize {
+        if let Some(i) = self.body.verts.iter().position(|v| (v.p - p).norm() < JOIN) {
+            return i;
+        }
+        self.body.add_vertex(p)
+    }
+
+    /// Where a loop reaches u ≡ `u` (mod 2π): a vertex (the index of the coedge starting there)
+    /// or a point inside a coedge (its index and edge parameter).
+    fn find_u(&self, l: &[(usize, bool)], t: &Trace, u: f64) -> Option<(usize, Option<f64>)> {
+        let off = |x: f64| wrap(x - u, -PI, P);
+        for (k, &(e, fwd)) in l.iter().enumerate() {
+            if off(t.ends[k].0.x).abs() < 1e-9 {
+                return Some((k, None));
+            }
+            let ed = &self.body.edges[e];
+            let (a, b) = co_range(ed, fwd);
+            let m = 64;
+            let f = |s: f64| off(t.pcs[k].point(a + (b - a) * s).x);
+            let mut prev = f(0.0);
+            for i in 1..=m {
+                let s1 = i as f64 / m as f64;
+                let cur = f(s1);
+                if prev.abs() < PI / 2.0 && cur.abs() < PI / 2.0 && prev * cur <= 0.0 {
+                    if cur.abs() < 1e-12 && i == m {
+                        break; // the next coedge's start
+                    }
+                    let (mut lo, mut hi) = ((i - 1) as f64 / m as f64, s1);
+                    for _ in 0..80 {
+                        let mid = (lo + hi) / 2.0;
+                        if (f(mid) > 0.0) == (f(lo) > 0.0) {
+                            lo = mid;
+                        } else {
+                            hi = mid;
+                        }
+                    }
+                    return Some((k, Some(a + (b - a) * (lo + hi) / 2.0)));
+                }
+                prev = cur;
+            }
+        }
+        None
+    }
+
+    /// Adds an edge along the iso line `c` (parametrized by v) between vertices at v = va and
+    /// v = vb; returns the coedge from a to b.
+    fn iso_edge(&mut self, c: Curve, a: usize, va: f64, b: usize, vb: f64) -> (usize, bool) {
+        if va <= vb {
+            (self.body.add_edge(c, va, vb, a, b), true)
+        } else {
+            (self.body.add_edge(c, vb, va, b, a), false)
+        }
+    }
+
+    /// Gives a face whose loops wrap around its surface a seam. Returns false when it can't.
+    fn add_seam(&mut self, fi: usize, wrapping: &[(usize, i64)]) -> bool {
+        let s = self.faces[fi].surf.clone();
+        let hint = self.faces[fi].sense;
+        let traces: Vec<Trace> = wrapping.iter().map(|&(li, _)| self.trace(&s, &self.faces[fi].loops[li])).collect();
+        if traces.iter().any(|t| t.wv != 0) {
+            return false;
+        }
+        let la = wrapping[0].0;
+        let a_loop = self.faces[fi].loops[la].clone();
+        let ta = &traces[0];
+        let qa = ta.ends[0].0;
+        let va = self.co_start(a_loop[0].0, a_loop[0].1);
+        let Some(seam) = iso_u(&s, qa.x) else { return false };
+        match wrapping.len() {
+            2 => {
+                let lb = wrapping[1].0;
+                if wrapping[0].1 != -wrapping[1].1 {
+                    return false;
+                }
+                let tb = &traces[1];
+                let Some((k, inner)) = self.find_u(&self.faces[fi].loops[lb].clone(), tb, qa.x) else { return false };
+                let (kb, vbv) = match inner {
+                    None => (k, self.co_start(self.faces[fi].loops[lb][k].0, self.faces[fi].loops[lb][k].1)),
+                    Some(t) => {
+                        let (e, fwd) = self.faces[fi].loops[lb][k];
+                        let nv = self.split_edge(e, t);
+                        // The piece starting at the new vertex follows in the loop.
+                        let _ = fwd;
+                        (k + 1, nv)
+                    }
+                };
+                let b_loop = self.faces[fi].loops[lb].clone();
+                let pb = self.body.verts[vbv].p;
+                let (_, vb_param) = s.project(&pb, Some((qa.x, qa.y)));
+                let va_param = qa.y;
+                let fwd_seam = self.iso_edge(seam, va, va_param, vbv, vb_param);
+                let mut nl: Vec<(usize, bool)> = a_loop.clone();
+                nl.push(fwd_seam);
+                let nb = b_loop.len();
+                for i in 0..nb {
+                    nl.push(b_loop[(kb + i) % nb]);
+                }
+                nl.push((fwd_seam.0, !fwd_seam.1));
+                let f = &mut self.faces[fi];
+                let (lo, hi) = if la < lb { (la, lb) } else { (lb, la) };
+                f.loops.remove(hi);
+                f.loops.remove(lo);
+                f.loops.insert(0, nl);
+                true
+            }
+            1 => {
+                // The face reaches a pole or apex on the side its material lies (left of the
+                // loop's direction in uv when the sense is natural).
+                let side = (wrapping[0].1.signum() as f64) * if hint { 1.0 } else { -1.0 };
+                let pole_v = match &s {
+                    Surface::Sphere { .. } => Some(PI / 2.0 * side),
+                    Surface::Cone { r, a, .. } => {
+                        let v = -r / a.sin();
+                        if (v - qa.y) * side > 0.0 { Some(v) } else { None }
+                    }
+                    _ => None,
+                };
+                let Some(pv) = pole_v else { return false };
+                let pole = self.vertex_at(s.eval(qa.x, pv));
+                let fwd_seam = self.iso_edge(seam, va, qa.y, pole, pv);
+                let mut nl = a_loop.clone();
+                nl.push(fwd_seam);
+                nl.push((fwd_seam.0, !fwd_seam.1));
+                self.faces[fi].loops[la] = nl;
+                true
+            }
+            _ => false,
+        }
+    }
+
+    /// Bounds a whole sphere or torus given with no loops by its seams.
+    fn close_whole(&mut self, fi: usize) -> bool {
+        let s = self.faces[fi].surf.clone();
+        let hint = self.faces[fi].sense;
+        let l = match &s {
+            Surface::Sphere { .. } => {
+                let (sp, np) = (self.vertex_at(s.eval(0.0, -PI / 2.0)), self.vertex_at(s.eval(0.0, PI / 2.0)));
+                let m = s.iso_u(0.0).unwrap();
+                let e = self.body.add_edge(m, -PI / 2.0, PI / 2.0, sp, np);
+                vec![(e, true), (e, false)]
+            }
+            Surface::Torus { .. } => {
+                let v = self.vertex_at(s.eval(0.0, 0.0));
+                let eu = self.body.add_edge(s.iso_v(0.0).unwrap(), 0.0, TAU, v, v);
+                let ev = self.body.add_edge(s.iso_u(0.0).unwrap(), 0.0, TAU, v, v);
+                // Counter-clockwise in uv: along u, up v, back along u, down v.
+                let l = vec![(eu, true), (ev, true), (eu, false), (ev, false)];
+                if hint { l } else { l.into_iter().rev().map(|(e, f)| (e, !f)).collect() }
+            }
+            _ => return false,
+        };
+        self.faces[fi].loops = vec![l];
+        true
+    }
+
+    /// Builds the body: seams where missing, p-curves, pole edges, outer loops and senses.
+    pub fn finish(mut self) -> (Body, Vec<String>) {
+        let nf = self.faces.len();
+        let mut dropped = vec![false; nf];
+        for fi in 0..nf {
+            self.faces[fi].loops.retain(|l| !l.is_empty());
+            for li in 0..self.faces[fi].loops.len() {
+                let mut l = std::mem::take(&mut self.faces[fi].loops[li]);
+                if !self.repair_loop(&mut l) {
+                    self.warnings.push(format!("face {fi}: loop {li} doesn't chain"));
+                }
+                self.faces[fi].loops[li] = l;
+            }
+            // A point of the face: the middle of an edge (vertices may sit on a cone's apex).
+            let p = match self.faces[fi].loops.first().and_then(|l| l.first()) {
+                Some(&(e, _)) => {
+                    let ed = &self.body.edges[e];
+                    ed.point(ed.mid_t())
+                }
+                None => {
+                    let ((u0, u1), (v0, v1)) = self.faces[fi].surf.param_box();
+                    self.faces[fi].surf.eval((u0 + u1) / 2.0 + 0.1, (v0 + v1) / 2.0 + 0.1)
+                }
+            };
+            for step in 0..2 {
+                let s = &self.faces[fi].surf;
+                let Some(new) = (if step == 0 { analytic(s) } else { near_branch(s, &p) }) else { continue };
+                // The file's sense is about the old surface's normal.
+                let (u0, v0) = s.project(&p, None);
+                let (u1, v1) = new.project(&p, None);
+                if s.normal(u0, v0).dot(&new.normal(u1, v1)) < 0.0 {
+                    self.faces[fi].sense = !self.faces[fi].sense;
+                }
+                self.faces[fi].surf = new;
+            }
+            if self.faces[fi].loops.is_empty() && !self.close_whole(fi) {
+                self.warnings.push(format!("face {fi}: no bounds"));
+                dropped[fi] = true;
+            }
+        }
+        // Seams (they may split edges of other faces, so trace again after each).
+        for _round in 0..4 {
+            let mut changed = false;
+            for fi in 0..nf {
+                if dropped[fi] {
+                    continue;
+                }
+                let s = self.faces[fi].surf.clone();
+                if !s.u_periodic() && !s.v_periodic() {
+                    continue;
+                }
+                let mut wrapping = Vec::new();
+                for (li, l) in self.faces[fi].loops.iter().enumerate() {
+                    let t = self.trace(&s, l);
+                    if self.resolve(&s, l, &t, self.faces[fi].sense).is_none() {
+                        if std::env::var("CADRS_XBUILD_TIMING").is_ok() {
+                            eprintln!("face {fi} loop {li} wraps (wu {} wv {}): {:?}", t.wu, t.wv, t.ends.iter().zip(&t.gaps).map(|(e, g)| format!("({:.4},{:.4})->({:.4},{:.4}) gap ({:.3},{:.3})", e.0.x, e.0.y, e.1.x, e.1.y, g.x, g.y)).collect::<Vec<_>>());
+                        }
+                        wrapping.push((li, if t.wu != 0 { t.wu } else { t.wv }));
+                    }
+                }
+                if wrapping.is_empty() {
+                    continue;
+                }
+                if self.add_seam(fi, &wrapping) {
+                    changed = true;
+                } else {
+                    self.warnings.push(format!("face {fi}: loops wrap around the surface and no seam could be added"));
+                    dropped[fi] = true;
+                }
+            }
+            if !changed {
+                break;
+            }
+        }
+        // Faces.
+        let mut new_index = vec![usize::MAX; nf];
+        let faces = std::mem::take(&mut self.faces);
+        for (fi, xf) in faces.iter().enumerate() {
+            if dropped[fi] {
+                continue;
+            }
+            let s = &xf.surf;
+            let timer = std::time::Instant::now();
+            let (mu, mv) = s.metric();
+            let mut loops: Vec<(f64, Vec<Coedge>)> = Vec::new();
+            for l in &xf.loops {
+                let t = self.trace(s, l);
+                let Some(shift) = self.resolve(s, l, &t, xf.sense) else {
+                    self.warnings.push(format!("face {fi}: a loop doesn't close"));
+                    continue;
+                };
+                let n = l.len();
+                let mut out: Vec<Coedge> = Vec::with_capacity(n + 2);
+                for k in 0..n {
+                    let du = shift[k] as f64 * P;
+                    let pc = if du == 0.0 { t.pcs[k].clone() } else { t.pcs[k].transformed(&Affine::translation(V3::new(du, 0.0, 0.0))) };
+                    // A degenerate edge across a jump at a pole or apex.
+                    let pk = (k + n - 1) % n;
+                    let prev = t.ends[pk].1 + V2::new(shift[pk] as f64 * P, 0.0);
+                    let start = t.ends[k].0 + V2::new(du, 0.0);
+                    let d = start - prev;
+                    let len = d.norm();
+                    let collapsed = || {
+                        let p0 = s.eval(prev.x, prev.y);
+                        let mid = prev + d * 0.5;
+                        (s.eval(start.x, start.y) - p0).norm() < JOIN && (s.eval(mid.x, mid.y) - p0).norm() < JOIN
+                    };
+                    if len > 1e-9 && (t.free[k] || collapsed()) {
+                        let vtx = self.co_start(l[k].0, l[k].1);
+                        let p = self.body.verts[vtx].p;
+                        let de = self.body.add_degenerate(p, 0.0, len, vtx);
+                        out.push(Coedge { edge: de, fwd: true, pc: Curve::Line { o: P3::new(prev.x, prev.y, 0.0), d: V3::new(d.x / len, d.y / len, 0.0) } });
+                    }
+                    out.push(Coedge { edge: l[k].0, fwd: l[k].1, pc });
+                }
+                // The closing joint's degenerate edge belongs at the loop's end.
+                if out.first().map_or(false, |c| self.body.edges[c.edge].degenerate) {
+                    let c = out.remove(0);
+                    out.push(c);
+                }
+                let area = {
+                    let mut pts = Vec::new();
+                    for c in &out {
+                        let e = &self.body.edges[c.edge];
+                        let (a, b) = co_range(e, c.fwd);
+                        let m = if matches!(c.pc, Curve::Line { .. }) { 1 } else { 32 };
+                        for i in 0..m {
+                            let q = c.pc.point(a + (b - a) * i as f64 / m as f64);
+                            pts.push(P2::new(q.x * mu, q.y * mv));
+                        }
+                    }
+                    polygon_area(&pts)
+                };
+                loops.push((area, out));
+            }
+            if loops.is_empty() {
+                continue;
+            }
+            let outer = (0..loops.len()).max_by(|&a, &b| loops[a].0.abs().total_cmp(&loops[b].0.abs())).unwrap();
+            let o = loops.remove(outer);
+            let sense = o.0 > 0.0;
+            if sense != xf.sense {
+                self.warnings.push(format!("face {fi}: the file's sense disagrees with its loops"));
+            }
+            let mut ls = vec![o.1];
+            ls.extend(loops.into_iter().map(|l| l.1));
+            if std::env::var("CADRS_XBUILD_TIMING").is_ok() && timer.elapsed().as_secs_f64() > 0.05 {
+                eprintln!("face {fi} ({:?}, {} coedges): {:.2}s", s.kind(), ls.iter().map(|l| l.len()).sum::<usize>(), timer.elapsed().as_secs_f64());
+            }
+            self.body.faces.push(Face { surf: s.clone(), sense, loops: ls });
+            new_index[fi] = self.body.faces.len() - 1;
+        }
+        let shells = std::mem::take(&mut self.shells);
+        let mut shell_index = Vec::new();
+        for (fs, closed) in &shells {
+            let faces: Vec<usize> = fs.iter().filter_map(|&f| new_index.get(f).copied().filter(|&i| i != usize::MAX)).collect();
+            let complete = faces.len() == fs.len();
+            if faces.is_empty() {
+                shell_index.push(None);
+                continue;
+            }
+            self.body.shells.push(Shell { faces, closed: *closed && complete });
+            shell_index.push(Some(self.body.shells.len() - 1));
+        }
+        for sh in std::mem::take(&mut self.solids) {
+            let ss: Vec<usize> = sh.iter().filter_map(|&s| shell_index.get(s).copied().flatten()).collect();
+            if ss.is_empty() || !self.body.shells[ss[0]].closed {
+                continue;
+            }
+            self.body.solids.push(Solid { shells: ss });
+        }
+        let flipped = orient_shells(&mut self.body);
+        if flipped > 0 {
+            self.warnings.push(format!("{flipped} faces turned round to orient their shells consistently"));
+        }
+        drop_unused(&mut self.body);
+        (self.body, self.warnings)
+    }
+}
+
+/// Makes each shell consistently oriented, as files don't always are (a face whose loops run
+/// the wrong way about it uses its edges the same way as its neighbours): orientation is
+/// propagated across edges shared by two faces, flipping the fewer faces; then (when that turned
+/// any) a solid's outer shell is turned to enclose a positive volume and its voids a negative
+/// one. Returns the number of faces turned round.
+pub fn orient_shells(b: &mut Body) -> usize {
+    let mut flipped_total = 0;
+    let void: std::collections::HashSet<usize> = b.solids.iter().flat_map(|s| s.shells.iter().skip(1).copied()).collect();
+    let in_solid: std::collections::HashSet<usize> = b.solids.iter().flat_map(|s| s.shells.iter().copied()).collect();
+    for si in 0..b.shells.len() {
+        let faces = b.shells[si].faces.clone();
+        // Edge → uses (face position in the shell, along the edge), seams within a face aside.
+        let mut uses: std::collections::HashMap<usize, Vec<(usize, bool)>> = std::collections::HashMap::new();
+        for (k, &fi) in faces.iter().enumerate() {
+            let mut own: std::collections::HashMap<usize, Vec<bool>> = std::collections::HashMap::new();
+            for c in b.faces[fi].loops.iter().flatten() {
+                if !b.edges[c.edge].degenerate {
+                    own.entry(c.edge).or_default().push(c.fwd);
+                }
+            }
+            for (e, dirs) in own {
+                if dirs.len() == 1 {
+                    uses.entry(e).or_default().push((k, dirs[0]));
+                }
+            }
+        }
+        let mut nbrs: Vec<Vec<(usize, bool)>> = vec![Vec::new(); faces.len()];
+        for us in uses.values() {
+            if let [(a, fa), (c, fc)] = us.as_slice() {
+                // Consistent when the two use the edge opposite ways.
+                let same_way = fa == fc;
+                nbrs[*a].push((*c, same_way));
+                nbrs[*c].push((*a, same_way));
+            }
+        }
+        let mut flip: Vec<Option<bool>> = vec![None; faces.len()];
+        for seed in 0..faces.len() {
+            if flip[seed].is_some() {
+                continue;
+            }
+            // One connected group: flip the smaller side.
+            let mut group = vec![seed];
+            flip[seed] = Some(false);
+            let mut i = 0;
+            while i < group.len() {
+                let f = group[i];
+                i += 1;
+                for &(g, same_way) in &nbrs[f] {
+                    if flip[g].is_none() {
+                        flip[g] = Some(flip[f].unwrap() ^ same_way);
+                        group.push(g);
+                    }
+                }
+            }
+            let n_flip = group.iter().filter(|&&f| flip[f] == Some(true)).count();
+            if 2 * n_flip > group.len() {
+                for &f in &group {
+                    flip[f] = flip[f].map(|x| !x);
+                }
+            }
+        }
+        let mut flipped = 0;
+        for (k, &fi) in faces.iter().enumerate() {
+            if flip[k] == Some(true) {
+                Body::reverse_face(&mut b.faces[fi]);
+                flipped += 1;
+            }
+        }
+        flipped_total += flipped;
+        // When faces were turned, outward (or, for voids, inward) by the enclosed volume.
+        if flipped > 0 && b.shells[si].closed && in_solid.contains(&si) {
+            let mut bb = Bbox::empty();
+            for &fi in &faces {
+                for c in b.faces[fi].loops.iter().flatten() {
+                    for v in b.edges[c.edge].v {
+                        bb.add(&b.verts[v].p);
+                    }
+                }
+            }
+            let shift = bb.center().coords;
+            let vol: f64 = faces.iter().map(|&fi| super::mass::face_integrals(b, &b.faces[fi], &shift)[4]).sum();
+            if (vol < 0.0) != void.contains(&si) {
+                for &fi in &faces {
+                    Body::reverse_face(&mut b.faces[fi]);
+                }
+                flipped_total += faces.len();
+            }
+        }
+    }
+    flipped_total
+}
+
+/// Removes vertices and edges no face uses (renumbering the rest).
+pub fn drop_unused(b: &mut Body) {
+    let mut used_e = vec![false; b.edges.len()];
+    for f in &b.faces {
+        for l in &f.loops {
+            for c in l {
+                used_e[c.edge] = true;
+            }
+        }
+    }
+    let mut emap = vec![usize::MAX; b.edges.len()];
+    let mut edges = Vec::new();
+    for (i, e) in b.edges.iter().enumerate() {
+        if used_e[i] {
+            emap[i] = edges.len();
+            edges.push(e.clone());
+        }
+    }
+    let mut used_v = vec![false; b.verts.len()];
+    for e in &edges {
+        used_v[e.v[0]] = true;
+        used_v[e.v[1]] = true;
+    }
+    let mut vmap = vec![usize::MAX; b.verts.len()];
+    let mut verts = Vec::new();
+    for (i, v) in b.verts.iter().enumerate() {
+        if used_v[i] {
+            vmap[i] = verts.len();
+            verts.push(v.clone());
+        }
+    }
+    for e in &mut edges {
+        e.v = [vmap[e.v[0]], vmap[e.v[1]]];
+    }
+    for f in &mut b.faces {
+        for l in &mut f.loops {
+            for c in l {
+                c.edge = emap[c.edge];
+            }
+        }
+    }
+    b.edges = edges;
+    b.verts = verts;
+}
+
+/// A NURBS curve's knots as distinct values with multiplicities.
+pub fn knot_mults(k: &[f64]) -> (Vec<f64>, Vec<usize>) {
+    let mut vals: Vec<f64> = Vec::new();
+    let mut mults: Vec<usize> = Vec::new();
+    for &x in k {
+        match vals.last() {
+            Some(&l) if (x - l).abs() <= 1e-14 * (1.0 + l.abs()) => *mults.last_mut().unwrap() += 1,
+            _ => {
+                vals.push(x);
+                mults.push(1);
+            }
+        }
+    }
+    (vals, mults)
+}
+
+/// Knots from distinct values and multiplicities.
+pub fn expand_knots(vals: &[f64], mults: &[usize]) -> Vec<f64> {
+    vals.iter().zip(mults).flat_map(|(v, m)| std::iter::repeat(*v).take(*m)).collect()
+}
+
+/// Wraps a NURBS curve in our curve type (for readers).
+pub fn nurbs_curve(n: super::nurbs::NurbsCurve) -> Curve {
+    Curve::Nurbs(Arc::new(n))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn meridian_arcs_stay_in_the_sphere_domain() {
+        let s = Surface::Sphere { f: Frame::world(), r: 10.0 };
+        for (x, y) in [(V3::x(), V3::z()), (V3::x(), -V3::z()), (-V3::y(), V3::z()), (V3::z(), V3::x())] {
+            let c = Curve::Circle { c: P3::origin(), x, y, r: 10.0 };
+            // Arcs ending at a pole or between poles (none crosses one).
+            for (t0, t1) in [(PI, 1.5 * PI), (0.0, 0.5 * PI), (0.2, 1.4), (1.7, 3.0), (3.3, 4.5), (4.8, 6.1), (-1.4, -0.2)] {
+                let pc = pcurve_checked(&s, &c, t0, t1);
+                for k in 0..=8 {
+                    let t = t0 + (t1 - t0) * k as f64 / 8.0;
+                    let q = pc.point(t);
+                    assert!(q.y.abs() <= PI / 2.0 + 1e-9, "{x:?} {y:?} {t0}..{t1}: v {}", q.y);
+                    assert!((s.eval(q.x, q.y) - c.point(t)).norm() < 1e-9);
+                }
+            }
+        }
+    }
+}
