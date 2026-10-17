@@ -562,6 +562,28 @@ fn cap_surface(k: &NativeKernel, s: &Sec) -> Option<(Surface, Option<FaceInput>)
 
 /// Exact skinning; None when the sections don't match.
 fn loft_exact(k: &NativeKernel, spec: &LoftSpec, secs: &mut Vec<Sec>, solid: bool) -> Result<Option<Built>> {
+    loft_exact_with(k, spec, secs, solid, true)
+}
+
+/// A solid loft through sections given as loops of profile pieces in their planes, whose
+/// pieces already correspond in order and direction (the same shape at stations along an
+/// edge): no alignment, no re-chaining.
+pub fn loft_pieces(k: &NativeKernel, sections: &[(Vec<super::profile::Piece>, Plane)], source: u64) -> Result<Built> {
+    let mut secs: Vec<Sec> = Vec::new();
+    for (pieces, plane) in sections {
+        let m = super::build::plane_map(plane, &V3::zeros(), 0.0);
+        let parts = pieces
+            .iter()
+            .enumerate()
+            .map(|(i, pc)| Part { c: pc.c.transformed(&m), t0: pc.t0, t1: pc.t1, rev: pc.rev, src: unsourced_curve(0, i) })
+            .collect();
+        secs.push(Sec::Loop { parts, plane: Some(*plane), face: None });
+    }
+    let spec = LoftSpec { body: BodyKind::Solid, sections: vec![], start: LoftEnd::default(), end: LoftEnd::default(), source };
+    loft_exact_with(k, &spec, &mut secs, true, false)?.ok_or_else(|| invalid("The sections don't match"))
+}
+
+fn loft_exact_with(k: &NativeKernel, spec: &LoftSpec, secs: &mut Vec<Sec>, solid: bool, align: bool) -> Result<Option<Built>> {
     let loops: Vec<usize> = secs.iter().filter_map(|s| if let Sec::Loop { parts, .. } = s { Some(parts.len()) } else { None }).collect();
     if loops.is_empty() || loops.iter().any(|n| *n != loops[0]) {
         return Ok(None);
@@ -574,7 +596,7 @@ fn loft_exact(k: &NativeKernel, spec: &LoftSpec, secs: &mut Vec<Sec>, solid: boo
         return Err(invalid("The loft's profiles lie on top of each other"));
     }
     // The same way round the axis, each started where it lines up with the previous one.
-    for s in secs.iter_mut() {
+    for s in secs.iter_mut().filter(|_| align) {
         if let Sec::Loop { parts, .. } = s {
             if turning(parts, &axis) < 0.0 {
                 *parts = reverse_parts(parts);
@@ -582,7 +604,7 @@ fn loft_exact(k: &NativeKernel, spec: &LoftSpec, secs: &mut Vec<Sec>, solid: boo
         }
     }
     let mut prev_dir: Option<V3> = None;
-    for i in 0..secs.len() {
+    for i in (0..secs.len()).filter(|_| align) {
         let c = centroid(&secs[i]);
         if let Sec::Loop { parts, .. } = &mut secs[i] {
             let perp = |d: V3| d - axis.normalize() * d.dot(&axis.normalize());

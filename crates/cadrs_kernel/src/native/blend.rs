@@ -1192,13 +1192,15 @@ pub fn fillet_variable(k: &mut NativeKernel, body: BodyId, laws: &[FilletLaw], _
             let o = p_start + t * *s;
             let plane = Plane { origin: o, x_dir: nalgebra::Unit::new_normalize(x), normal: nalgebra::Unit::new_normalize(t) };
             let (lp, _, _) = section_loop(&corner, SectionKind::Circle { r: *r }, Src::Edge { body: body.0, edge: e as u64 })?;
-            // Back to sketch curves: line, arc, line (all sections the same shape).
-            let curves: Vec<Curve2> = lp.iter().map(piece_to_curve2).collect::<Option<Vec<_>>>().ok_or_else(|| KernelError::Unsupported("this variable fillet section"))?;
-            sections.push(LoftSection::Profile(Profile::new(plane, vec![Region { outer: Loop { curves }, holes: vec![], source: Some(e as u64) }])));
+            sections.push((lp, plane));
         }
         let mut tk = NativeKernel::new();
-        let lr = super::loft_build::loft_with(&mut tk, &LoftSpec { body: BodyKind::Solid, sections, start: LoftEnd::default(), end: LoftEnd::default(), source: 0 })?;
-        let tool = (**tk.get(lr.bodies[0])?).clone();
+        let built = super::loft_build::loft_pieces(&tk, &sections, 0)?;
+        let lr = super::features::Tagged::from_built(built).into_result(&mut tk);
+        let mut tool = (**tk.get(lr.bodies[0])?).clone();
+        // The sides swept by the sections' straight pieces lie on the edge's faces: as planes,
+        // the boolean sees them coincide.
+        super::unify::planarize(&mut tool);
         // The face swept by the arcs is the fillet face.
         let mut src = vec![Vec::new(); tool.faces.len()];
         for (f, o) in &lr.history.generated {
@@ -1210,6 +1212,9 @@ pub fn fillet_variable(k: &mut NativeKernel, body: BodyId, laws: &[FilletLaw], _
             }
         }
         cur = cur.apply(&tool, &src, if convex { BoolOp::Subtract } else { BoolOp::Union })?;
+    }
+    if !b.solids.is_empty() && cur.body.solids.is_empty() {
+        return Err(KernelError::OperationFailed("the fillet left an open body".into()));
     }
     Ok(cur.into_result(k, body))
 }

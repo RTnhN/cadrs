@@ -599,3 +599,53 @@ pub fn merge_edges(b: &mut Body) {
         compact(b);
     }
 }
+
+/// B-spline faces that are flat (all control points in one plane: a loft or skin through
+/// coplanar curves) become planes, with their p-curves recomputed, so booleans see them
+/// coincide with other planar faces. True when any changed.
+pub fn planarize(b: &mut Body) -> bool {
+    let mut changed = false;
+    for fi in 0..b.faces.len() {
+        let Surface::Nurbs(ns) = &b.faces[fi].surf else { continue };
+        let pts: Vec<P3> = ns.cps.iter().flatten().map(super::nurbs::dehom).collect();
+        let c = P3::from(pts.iter().fold(V3::zeros(), |a, p| a + p.coords) / pts.len() as f64);
+        let size = pts.iter().map(|p| (p - c).norm()).fold(0.0, f64::max);
+        let ((u0, u1), (v0, v1)) = ns.range();
+        let (um, vm) = (0.5 * (u0 + u1), 0.5 * (v0 + v1));
+        let s = &b.faces[fi].surf;
+        let (o, su, sv) = s.d1(um, vm);
+        let n = su.cross(&sv);
+        if n.norm() < 1e-12 * (1.0 + size * size) {
+            continue;
+        }
+        let n = n.normalize();
+        // Sampled on the surface (exact for a flat skin), and the control net as well.
+        let mut dev = 0.0f64;
+        for i in 0..=8 {
+            for j in 0..=8 {
+                let q = s.eval(u0 + (u1 - u0) * i as f64 / 8.0, v0 + (v1 - v0) * j as f64 / 8.0);
+                dev = dev.max((q - o).dot(&n).abs());
+            }
+        }
+        if std::env::var("CADRS_BOOL_DEBUG").is_ok() {
+            let net = pts.iter().map(|p| (p - o).dot(&n).abs()).fold(0.0, f64::max);
+            eprintln!("planarize face {fi}: deviation {dev:e} (net {net:e}, size {size})");
+        }
+        if dev > 1e-10 * (1.0 + size) {
+            continue;
+        }
+        let x = su.normalize();
+        let y = n.cross(&x);
+        let plane = Surface::Plane { f: Frame { o, x, y, z: n } };
+        let edges = b.edges.clone();
+        for l in &mut b.faces[fi].loops {
+            for co in l.iter_mut() {
+                let e = &edges[co.edge];
+                co.pc = pcurve::pcurve(&plane, &e.curve, e.t[0], e.t[1], None);
+            }
+        }
+        b.faces[fi].surf = plane;
+        changed = true;
+    }
+    changed
+}

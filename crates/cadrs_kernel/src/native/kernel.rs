@@ -402,7 +402,9 @@ impl Kernel for NativeKernel {
     }
 
     fn fillet_variable(&mut self, body: BodyId, laws: &[FilletLaw], allow_overflow: bool) -> Result<OpResult> {
-        super::blend::fillet_variable(self, body, laws, allow_overflow)
+        dump("fillet_variable", self.get(body)?, &format!("{laws:?} overflow {allow_overflow}"));
+        let r = super::blend::fillet_variable(self, body, laws, allow_overflow);
+        self.dumped(&r)
     }
 
     fn full_round(&mut self, body: BodyId, side1: FaceId, center: FaceId, side2: FaceId) -> Result<OpResult> {

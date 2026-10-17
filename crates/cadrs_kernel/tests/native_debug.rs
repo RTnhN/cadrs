@@ -663,3 +663,18 @@ fn debug_repro_mass() {
         eprintln!("face {fi} {surf}: {:?} area {:.4} pcs {pcs:?}", t.elapsed(), q[0]);
     }
 }
+
+/// The 10 × 20 × 30 block's vertical edge with a linear R2 → R4 law sampled at nine points.
+#[test]
+fn debug_variable_nine() {
+    let mut k = NativeKernel::new();
+    let b = k.extrude(&Profile::new(Plane::top(), vec![reg(rect(0., 0., 10., 20.))]), Extent::Blind(30.0)).unwrap().bodies[0];
+    let edge = k.edges(b).unwrap().into_iter().find(|e| (e.start.x - 10.0).abs() < 1e-9 && (e.start.y - 20.0).abs() < 1e-9 && (e.end.x - 10.0).abs() < 1e-9 && (e.end.y - 20.0).abs() < 1e-9).unwrap();
+    let n = std::env::var("LAW_N").map(|s| s.parse().unwrap()).unwrap_or(9usize);
+    let radii: Vec<(f64, f64)> = (0..n).map(|i| { let f = i as f64 / (n - 1) as f64; (f, 2.0 + 2.0 * f) }).collect();
+    let r = k.fillet_variable(b, &[FilletLaw { edge: edge.id, radii }], true);
+    match r {
+        Ok(r) => eprintln!("volume {}", k.mass_properties(r.bodies[0]).unwrap().volume),
+        Err(e) => panic!("{e}"),
+    }
+}
