@@ -48,6 +48,22 @@ build parts from features, put them together in assemblies, and make drawings fr
 
 ![cadrs: a pneumatic cylinder assembly with its instances, subassemblies and fasteners](.github/images/assembly.png)
 
+## Native documents
+
+Use the document menu’s **Export document…** to write a **cadrs native document (`.cadrs`)**.
+It includes the current editable tabs, features, settings, and embedded source assets,
+including edits not yet autosaved. Saved versions, undo history, and rebuild caches are excluded.
+Frozen linked content is included; the original external documents are not bundled.
+
+On the documents page, choose **Create ▸ Import files…**, or drop a `.cadrs` file onto the
+page. Import creates and opens a new library copy; edits autosave to the library, not back to
+the imported file. Export again to share an updated copy.
+
+The file is a ZIP containing `manifest.ron` (archive format `cadrs`, version 1), the existing
+versioned `document.ron`, required assets in `blobs/`, and optional thumbnails. Readers limit
+packages to 16,384 entries and 512 MiB of uncompressed data. Legacy plain text `.cadrs`
+documents remain importable. Existing destination files are never overwritten.
+
 ## Building
 
 You need a stable Rust toolchain ([rustup](https://rustup.rs)), CMake and a C++ compiler.
