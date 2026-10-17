@@ -169,6 +169,11 @@ fn face_integrals_v(body: &Body, f: &Face, shift: &V3) -> Q {
                 r.push(hi);
                 ts = r;
             }
+            // And where the p-curve crosses the surface's knots (the integrand is only piecewise
+            // polynomial there: a straight p-curve across a loft's many spans).
+            if let Surface::Nurbs(ns) = &f.surf {
+                ts = split_at_knots(&c.pc, &ts, &ns.ku, &ns.kv);
+            }
             if t0 > t1 {
                 ts.reverse();
             }
@@ -342,6 +347,11 @@ pub fn face_integrals(body: &Body, f: &Face, shift: &V3) -> Q {
                 r.push(hi);
                 ts = r;
             }
+            // And where the p-curve crosses the surface's knots (the integrand is only piecewise
+            // polynomial there: a straight p-curve across a loft's many spans).
+            if let Surface::Nurbs(ns) = &f.surf {
+                ts = split_at_knots(&c.pc, &ts, &ns.ku, &ns.kv);
+            }
             if t0 > t1 {
                 ts.reverse();
             }
@@ -375,6 +385,48 @@ pub fn face_integrals(body: &Body, f: &Face, shift: &V3) -> Q {
         }
     }
     acc
+}
+
+/// `ts` (increasing) with the parameters where the p-curve crosses an interior knot of `ku`
+/// (in u) or `kv` (in v) added (by bisection; each piece taken as monotone).
+fn split_at_knots(pc: &Curve, ts: &[f64], ku: &[f64], kv: &[f64]) -> Vec<f64> {
+    let inner = |k: &[f64]| -> Vec<f64> {
+        let (a, b) = (k[0], k[k.len() - 1]);
+        let mut out: Vec<f64> = k.iter().copied().filter(|&x| x > a && x < b).collect();
+        out.dedup();
+        out
+    };
+    let (iu, iv) = (inner(ku), inner(kv));
+    let mut out = vec![ts[0]];
+    for w in ts.windows(2) {
+        let (a, b) = (w[0], w[1]);
+        let (pa, pb) = (pc.point(a), pc.point(b));
+        let mut cuts: Vec<f64> = Vec::new();
+        for (knots, coord) in [(&iu, 0usize), (&iv, 1usize)] {
+            let (ca, cb) = (pa[coord], pb[coord]);
+            let (lo, hi) = (ca.min(cb), ca.max(cb));
+            for &kn in knots.iter().filter(|&&kn| kn > lo + 1e-12 && kn < hi - 1e-12) {
+                let (mut x0, mut x1) = (a, b);
+                for _ in 0..60 {
+                    let m = 0.5 * (x0 + x1);
+                    if (pc.point(m)[coord] - kn) * (cb - ca) < 0.0 {
+                        x0 = m;
+                    } else {
+                        x1 = m;
+                    }
+                }
+                cuts.push(0.5 * (x0 + x1));
+            }
+        }
+        cuts.sort_by(f64::total_cmp);
+        for t in cuts {
+            if t - out.last().unwrap() > 1e-12 * (1.0 + t.abs()) && b - t > 1e-12 * (1.0 + t.abs()) {
+                out.push(t);
+            }
+        }
+        out.push(b);
+    }
+    out
 }
 
 /// Jobs below this many stay on the CPU (a dispatch costs about a millisecond).

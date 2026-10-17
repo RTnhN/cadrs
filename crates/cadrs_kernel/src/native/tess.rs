@@ -78,6 +78,22 @@ fn steps(s: &Surface, ub: (f64, f64), vb: (f64, f64), defl: f64, ang: f64) -> (f
     (step(cu, ku), step(cv, kv))
 }
 
+/// The mean |S_u| and |S_v| over a sample grid of the box.
+fn mean_speeds(s: &Surface, ub: (f64, f64), vb: (f64, f64)) -> Option<(f64, f64)> {
+    let n = 6;
+    let (mut su, mut sv, mut k) = (0.0, 0.0, 0usize);
+    for i in 0..=n {
+        for j in 0..=n {
+            let (_, du, dv) = s.d1(ub.0 + (ub.1 - ub.0) * i as f64 / n as f64, vb.0 + (vb.1 - vb.0) * j as f64 / n as f64);
+            su += du.norm();
+            sv += dv.norm();
+            k += 1;
+        }
+    }
+    let (su, sv) = (su / k as f64, sv / k as f64);
+    (su > 1e-12 && sv > 1e-12 && su.is_finite() && sv.is_finite()).then_some((su, sv))
+}
+
 /// Triangulates one face. `es` holds each edge's samples.
 pub fn mesh_face(body: &Body, f: &Face, es: &[(Vec<f64>, Vec<P3>)], defl: f64, ang: f64) -> FaceMesh {
     let t_start = std::time::Instant::now();
@@ -133,8 +149,15 @@ pub fn mesh_face(body: &Body, f: &Face, es: &[(Vec<f64>, Vec<P3>)], defl: f64, a
     if nb < 3 {
         return FaceMesh::default();
     }
+    // B-spline parameters carry no length: scale them by the surface's mean speeds over the
+    // face's box, so the grid's steps and the triangulation work in about true lengths (a long
+    // straight-along-v fillet strip with v in [0, 1] would otherwise get no interior rows).
+    let (mu, mv) = if matches!(f.surf, Surface::Nurbs(_)) { mean_speeds(&f.surf, ubox, vbox).unwrap_or((mu, mv)) } else { (mu, mv) };
     // Interior grid.
     let (hu, hv) = steps(&f.surf, ubox, vbox, defl, ang);
+    // A step longer than the face is no step (straight to rounding: a loft along a line).
+    let hu = if hu >= ubox.1 - ubox.0 { f64::INFINITY } else { hu };
+    let hv = if hv >= vbox.1 - vbox.0 { f64::INFINITY } else { hv };
     let mut grid: Vec<P2> = Vec::new();
     if hu.is_finite() || hv.is_finite() {
         let nu = if hu.is_finite() { (((ubox.1 - ubox.0) / hu).ceil() as usize).clamp(1, 400) } else { 1 };
@@ -144,12 +167,16 @@ pub fn mesh_face(body: &Body, f: &Face, es: &[(Vec<f64>, Vec<P3>)], defl: f64, a
         if !hv.is_finite() && hu.is_finite() {
             let du = (ubox.1 - ubox.0) / nu as f64 * mu;
             let ext = (vbox.1 - vbox.0) * mv;
-            nv = ((ext / (du * 64.0)).ceil() as usize).clamp(1, 400);
+            // Rows no further apart than half the face's width, or Delaunay bridges a narrow
+            // strip from rail to rail across its curve.
+            let width = (ubox.1 - ubox.0) * mu;
+            nv = ((ext / (du * 64.0).min(0.5 * width)).ceil() as usize).clamp(1, 400);
         }
         let nu = if !hu.is_finite() && hv.is_finite() {
             let dv = (vbox.1 - vbox.0) / nv as f64 * mv;
             let ext = (ubox.1 - ubox.0) * mu;
-            ((ext / (dv * 8.0)).ceil() as usize).clamp(1, 400)
+            let width = (vbox.1 - vbox.0) * mv;
+            ((ext / (dv * 8.0).min(0.5 * width)).ceil() as usize).clamp(1, 400)
         } else {
             nu
         };
@@ -223,7 +250,7 @@ pub fn mesh_face(body: &Body, f: &Face, es: &[(Vec<f64>, Vec<P3>)], defl: f64, a
         }
     }
     if prof {
-        eprintln!("tess face: boundary {nb}, grid {} in {:?}", grid.len(), t_start.elapsed());
+        eprintln!("tess face: boundary {nb}, grid {} in {:?}, steps {:?}, scale {:?}, box {ubox:?} {vbox:?}", grid.len(), t_start.elapsed(), steps(&f.surf, ubox, vbox, defl, ang), (mu, mv));
     }
     // Constrained Delaunay in scaled uv, bulk loaded (exact duplicates merged first, so the
     // triangulation's vertices are our points in order).

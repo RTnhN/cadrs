@@ -809,3 +809,131 @@ fn debug_cbore_across_bar() {
         Err(e) => panic!("{e}"),
     }
 }
+
+/// A dumped fillet's input (`CADRS_REPRO_FILLET=<body>`, edges `CADRS_REPRO_EDGES=9,…`, width
+/// `CADRS_REPRO_WIDTH` or radius `CADRS_REPRO_RADIUS`): the volume it removes and its new faces.
+#[test]
+fn debug_repro_fillet() {
+    let Ok(path) = std::env::var("CADRS_REPRO_FILLET") else { return };
+    let mut k = NativeKernel::new();
+    let b = k.insert(cadrs_kernel::native::bodyio::read(&std::fs::read(path).unwrap()).unwrap());
+    let edges: Vec<EdgeId> = std::env::var("CADRS_REPRO_EDGES").unwrap().split(',').map(|s| EdgeId(s.parse().unwrap())).collect();
+    let size = match std::env::var("CADRS_REPRO_WIDTH") {
+        Ok(w) => FilletSize::Width(w.parse().unwrap()),
+        Err(_) => FilletSize::Radius(std::env::var("CADRS_REPRO_RADIUS").unwrap().parse().unwrap()),
+    };
+    let spec = FilletSpec { size, ..FilletSpec::radius(1.0) };
+    let v0 = k.mass_properties(b).unwrap().volume;
+    let r = k.fillet_with(b, &edges, &spec).unwrap();
+    let f = r.bodies[0];
+    let mesh_vol = |k: &NativeKernel, b: BodyId| {
+        let m = k.tessellate(b, Tessellation { deflection: 0.01, angle: 0.1 }).unwrap();
+        m.indices.iter().map(|t| { let [a, b, c] = t.map(|i| m.positions[i as usize].coords); a.dot(&b.cross(&c)) / 6.0 }).sum::<f64>()
+    };
+    eprintln!("removed {} (mesh {})", v0 - k.mass_properties(f).unwrap().volume, mesh_vol(&k, b) - mesh_vol(&k, f));
+    // Each face's volume term, exact and from the mesh (about the bounding box's centre).
+    let body = k.get(f).unwrap().clone();
+    let shift = body.bbox().center().coords;
+    let m = k.tessellate(f, Tessellation { deflection: 0.01, angle: 0.1 }).unwrap();
+    let mut by_face = vec![0.0; body.faces.len()];
+    for (t, fid) in m.indices.iter().zip(&m.triangle_faces) {
+        let [a, b, c] = t.map(|i| m.positions[i as usize].coords - shift);
+        by_face[fid.0 as usize] += a.dot(&b.cross(&c)) / 6.0;
+    }
+    for (i, face) in body.faces.iter().enumerate() {
+        let q = cadrs_kernel::native::mass::face_integrals(&body, face, &shift);
+        let mesh_area: f64 = m.indices.iter().zip(&m.triangle_faces).filter(|(_, x)| x.0 as usize == i).map(|(t, _)| {
+            let [a, b, c] = t.map(|j| m.positions[j as usize]);
+            (b - a).cross(&(c - a)).norm() / 2.0
+        }).sum();
+        if (q[4] - by_face[i]).abs() > 1e-3 * q[4].abs().max(1.0) {
+            eprintln!("  area exact {:.4} mesh {mesh_area:.4}", q[0]);
+            eprintln!("face {i} {:?}: exact {:.4} mesh {:.4}", face.surf.kind(), q[4], by_face[i]);
+        }
+    }
+    // Mesh areas of the new faces at several deflections (they should converge on the exact).
+    for d in [0.1, 0.01, 0.001] {
+        let m = k.tessellate(f, Tessellation { deflection: d, angle: 0.1 }).unwrap();
+        let mut areas: Vec<(u64, f64)> = Vec::new();
+        for (fid, _) in &r.history.generated {
+            let a: f64 = m.indices.iter().zip(&m.triangle_faces).filter(|(_, x)| *x == fid).map(|(t, _)| {
+                let [a, b, c] = t.map(|j| m.positions[j as usize]);
+                (b - a).cross(&(c - a)).norm() / 2.0
+            }).sum();
+            areas.push((fid.0, a));
+        }
+        eprintln!("deflection {d}: {areas:.4?}");
+    }
+    if let Ok(fi) = std::env::var("CADRS_REPRO_MESH_FACE") {
+        let fi: usize = fi.parse().unwrap();
+        let es = cadrs_kernel::native::tess::edge_samples(&body, 0.01, 0.1);
+        unsafe { std::env::set_var("CADRS_TESS_PROFILE", "1") };
+        let fm = cadrs_kernel::native::tess::mesh_face(&body, &body.faces[fi], &es, 0.01, 0.1);
+        unsafe { std::env::remove_var("CADRS_TESS_PROFILE") };
+        eprintln!("face {fi}: {} triangles", fm.indices.len());
+    }
+    // The uv boundary of each new face as the mesher samples it: self-crossings and repeats.
+    let es = cadrs_kernel::native::tess::edge_samples(&body, 0.01, 0.1);
+    for (fid, _) in &r.history.generated {
+        let face = &body.faces[fid.0 as usize];
+        let mut pts: Vec<(f64, f64, usize)> = Vec::new();
+        for c in face.loops.iter().flatten() {
+            let (ts, _) = &es[c.edge];
+            let n = ts.len();
+            let idx: Vec<usize> = if c.fwd { (0..n - 1).collect() } else { (1..n).rev().collect() };
+            for i in idx {
+                let q = c.pc.point(ts[i]);
+                pts.push((q.x, q.y, c.edge));
+            }
+        }
+        let n = pts.len();
+        let mut crossings = 0;
+        let mut first = None;
+        let cross = |a: (f64, f64, usize), b: (f64, f64, usize), c: (f64, f64, usize), d: (f64, f64, usize)| {
+            let o = |p: (f64, f64, usize), q: (f64, f64, usize), r: (f64, f64, usize)| (q.0 - p.0) * (r.1 - p.1) - (q.1 - p.1) * (r.0 - p.0);
+            (o(a, b, c) > 0.0) != (o(a, b, d) > 0.0) && (o(c, d, a) > 0.0) != (o(c, d, b) > 0.0)
+        };
+        for i in 0..n {
+            for j in i + 2..n {
+                if (j + 1) % n == i {
+                    continue;
+                }
+                if cross(pts[i], pts[(i + 1) % n], pts[j], pts[(j + 1) % n]) {
+                    crossings += 1;
+                    first.get_or_insert((i, j, pts[i], pts[j]));
+                }
+            }
+        }
+        let mut dup = 0;
+        for i in 0..n {
+            for j in i + 1..n {
+                if (pts[i].0 - pts[j].0).abs() < 1e-12 && (pts[i].1 - pts[j].1).abs() < 1e-12 {
+                    dup += 1;
+                }
+            }
+        }
+        let area: f64 = (0..n).map(|i| { let (a, b) = (pts[i], pts[(i + 1) % n]); a.0 * b.1 - b.0 * a.1 }).sum::<f64>() / 2.0;
+        eprintln!("uv loop of face {}: {n} points, uv area {area:.6}, {crossings} self-crossings {first:?}, {dup} repeats", fid.0);
+    }
+    // The p-curves of the new faces against their edges.
+    for (fid, _) in &r.history.generated {
+        let face = &body.faces[fid.0 as usize];
+        for c in face.loops.iter().flatten() {
+            let e = &body.edges[c.edge];
+            let mut worst: f64 = 0.0;
+            for i in 0..=64 {
+                let t = e.t[0] + (e.t[1] - e.t[0]) * i as f64 / 64.0;
+                let uv = c.pc.point(t);
+                worst = worst.max((face.surf.eval(uv.x, uv.y) - e.point(t)).norm());
+            }
+            let kind = match &e.curve { cadrs_kernel::native::curve::Curve::Nurbs(n) => format!("nurbs {}", n.cps.len()), x => format!("{:?}", std::mem::discriminant(x)) };
+            let pk = match &c.pc { cadrs_kernel::native::curve::Curve::Nurbs(n) => format!("nurbs {}", n.cps.len()), _ => "line".into() };
+            eprintln!("face {} edge {} ({kind}, pc {pk}, deg {}): off {worst:.2e}", fid.0, c.edge, e.degenerate);
+        }
+    }
+    let faces = k.faces(f).unwrap();
+    for (fid, o) in &r.history.generated {
+        let fi = faces.iter().find(|x| x.id == *fid).unwrap();
+        eprintln!("new face {fid:?} {o:?}: area {:.4} at {:.2?}", fi.area, fi.center);
+    }
+}
