@@ -305,7 +305,7 @@ enum Class {
 pub struct BoolOut {
     pub body: Body,
     /// For each output face: (owner 0 = target / 1 = tool, its face in that input).
-    pub from: Vec<(usize, usize)>,
+    pub from: Vec<Vec<(usize, usize)>>,
 }
 
 /// The boolean of two bodies.
@@ -318,11 +318,11 @@ pub fn boolean_bodies(a: &Body, b: &Body, op: BoolOp) -> Result<BoolOut> {
                 let mut out = a.clone();
                 let n = a.faces.len();
                 out.append(b);
-                let mut from: Vec<(usize, usize)> = (0..n).map(|i| (0, i)).collect();
-                from.extend((0..b.faces.len()).map(|i| (1, i)));
+                let mut from: Vec<Vec<(usize, usize)>> = (0..n).map(|i| vec![(0, i)]).collect();
+                from.extend((0..b.faces.len()).map(|i| vec![(1, i)]));
                 Ok(BoolOut { body: out, from })
             }
-            BoolOp::Subtract => Ok(BoolOut { body: a.clone(), from: (0..a.faces.len()).map(|i| (0, i)).collect() }),
+            BoolOp::Subtract => Ok(BoolOut { body: a.clone(), from: (0..a.faces.len()).map(|i| vec![(0, i)]).collect() }),
             BoolOp::Intersect => Err(KernelError::OperationFailed("the result is empty".into())),
         };
     }
@@ -799,6 +799,12 @@ pub fn boolean_bodies(a: &Body, b: &Body, op: BoolOp) -> Result<BoolOut> {
         }
         eprintln!("check: {:?}", out.check());
     }
+    let mut from: Vec<Vec<(usize, usize)>> = from.into_iter().map(|x| vec![x]).collect();
+    if op == BoolOp::Union {
+        let owners: Vec<usize> = from.iter().map(|f| f[0].0).collect();
+        from = super::unify::unify_faces(&mut out, from, &|f, g| owners[f] != owners[g]);
+    }
+    super::unify::merge_edges(&mut out);
     assemble_shells(&mut out)?;
     Ok(BoolOut { body: out, from })
 }
@@ -851,6 +857,9 @@ pub fn assemble_shells(b: &mut Body) -> Result<()> {
         for (e, u) in &uses {
             if *u != 0 && !b.edges[*e].degenerate {
                 closed = false;
+                if std::env::var("CADRS_BOOL_DEBUG").is_ok() {
+                    eprintln!("open edge {e}: uses {u}, {:?}", b.edges[*e]);
+                }
             }
         }
         let si = b.shells.len();
@@ -901,23 +910,29 @@ pub fn assemble_shells(b: &mut Body) -> Result<()> {
 pub fn boolean(k: &mut NativeKernel, op: BoolOp, target: BodyId, tools: &[BodyId]) -> Result<OpResult> {
     let mut cur = (**k.get(target)?).clone();
     // For each face of `cur`: where it came from (body, face).
-    let mut origin: Vec<(BodyId, usize)> = (0..cur.faces.len()).map(|i| (target, i)).collect();
+    let mut origin: Vec<Vec<(BodyId, usize)>> = (0..cur.faces.len()).map(|i| vec![(target, i)]).collect();
     for &t in tools {
         let tb = (**k.get(t)?).clone();
         let r = boolean_bodies(&cur, &tb, op)?;
-        origin = r.from.iter().map(|&(o, f)| if o == 0 { origin[f] } else { (t, f) }).collect();
+        origin = r
+            .from
+            .iter()
+            .map(|srcs| srcs.iter().flat_map(|&(o, f)| if o == 0 { origin[f].clone() } else { vec![(t, f)] }).collect())
+            .collect();
         cur = r.body;
     }
     let mut history = History::default();
-    for (i, (bd, f)) in origin.iter().enumerate() {
-        history.modified.push((FaceId(i as u64), InputFace { body: *bd, face: FaceId(*f as u64) }));
+    for (i, srcs) in origin.iter().enumerate() {
+        for (bd, f) in srcs {
+            history.modified.push((FaceId(i as u64), InputFace { body: *bd, face: FaceId(*f as u64) }));
+        }
     }
     let mut inputs = vec![target];
     inputs.extend_from_slice(tools);
     for &ib in &inputs {
         let n = k.get(ib)?.faces.len();
         for f in 0..n {
-            if !origin.iter().any(|(b, g)| *b == ib && *g == f) {
+            if !origin.iter().flatten().any(|(b, g)| *b == ib && *g == f) {
                 history.deleted.push(InputFace { body: ib, face: FaceId(f as u64) });
             }
         }

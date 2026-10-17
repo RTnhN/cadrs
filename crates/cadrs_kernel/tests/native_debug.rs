@@ -22,3 +22,17 @@ fn debug_box_minus_cylinder() {
         Err(e) => println!("err {e}"),
     }
 }
+
+#[test]
+fn debug_mirror_union() {
+    let mut k = NativeKernel::new();
+    let half = Region { outer: Loop { curves: vec![Curve2::Arc { center: p(0., 0.), radius: 10.0, start_angle: 0.0, sweep: std::f64::consts::PI, source: None }, Curve2::Line { a: p(-10., 0.), b: p(10., 0.), source: None }] }, holes: vec![], source: None };
+    let hb = k.extrude(&Profile::new(Plane::top(), vec![half]), Extent::Blind(5.0)).unwrap().bodies[0];
+    let hm = k.transform_motion(hb, &Motion::reflection(Point3::origin(), Vector3::y_axis())).unwrap().bodies[0];
+    println!("mirror check {:?} vol {}", k.get(hm).unwrap().check(), k.mass_properties(hm).unwrap().volume);
+    let (a, b) = ((**k.get(hb).unwrap()).clone(), (**k.get(hm).unwrap()).clone());
+    match boolean::boolean_bodies(&a, &b, BoolOp::Union) {
+        Ok(r) => println!("ok faces {} solids {} shells {:?} check {:?}", r.body.faces.len(), r.body.solids.len(), r.body.shells, r.body.check()),
+        Err(e) => println!("err {e}"),
+    }
+}

@@ -315,7 +315,8 @@ impl Kernel for NativeKernel {
             return Err(KernelError::InvalidProfile("no regions".into()));
         }
         let faces = profile::merge_regions(&regions)?;
-        let b = build::prism(&profile.plane, &faces, dir, s0, s1)?;
+        let kind = super::sweep::Prism { plane: profile.plane, dir };
+        let b = super::sweep::sweep(&profile.plane, &faces, &kind, s0, s1, false)?;
         Ok(self.insert_result(b))
     }
 

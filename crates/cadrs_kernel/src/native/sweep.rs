@@ -222,7 +222,7 @@ pub fn sweep(_plane: &crate::Plane, faces: &[MergedFace], kind: &dyn SweepKind, 
         let face_start = b.faces.len();
         let mut bottom_loops: Vec<Vec<Coedge>> = Vec::new();
         let mut top_loops: Vec<Vec<Coedge>> = Vec::new();
-        let mut sides: Vec<(usize, (u64, u64))> = Vec::new();
+        let mut sides: Vec<(usize, Vec<(u64, u64)>)> = Vec::new();
         let loops: Vec<&Vec<Piece>> = std::iter::once(&mf.outer).chain(mf.holes.iter()).collect();
         for lp in loops {
             let k = lp.len();
@@ -284,7 +284,7 @@ pub fn sweep(_plane: &crate::Plane, faces: &[MergedFace], kind: &dyn SweepKind, 
                     }
                 }
                 b.faces.push(Face { surf: side.surf, sense: true, loops: vec![sl] });
-                sides.push((b.faces.len() - 1, p.src));
+                sides.push((b.faces.len() - 1, std::iter::once(p.src).chain(p.more.iter().copied()).collect()));
             }
             bottom_loops.push(bl);
             top_loops.push(tl);
@@ -312,8 +312,10 @@ pub fn sweep(_plane: &crate::Plane, faces: &[MergedFace], kind: &dyn SweepKind, 
                 out.origins.push((it, Origin::EndCap { region: *r }));
             }
         }
-        for (fi, (region, curve)) in sides {
-            out.origins.push((fi, Origin::ProfileCurve { region, curve }));
+        for (fi, srcs) in sides {
+            for (region, curve) in srcs {
+                out.origins.push((fi, Origin::ProfileCurve { region, curve }));
+            }
         }
         fix_senses(b, face_start..face_start + n_sides);
         let fs: Vec<usize> = (face_start..b.faces.len()).collect();

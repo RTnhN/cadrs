@@ -18,6 +18,8 @@ pub struct Piece {
     pub rev: bool,
     /// (region source, curve source) for naming the side face.
     pub src: (u64, u64),
+    /// Further origins when pieces of several regions were fused into this one.
+    pub more: Vec<(u64, u64)>,
 }
 
 impl Piece {
@@ -173,9 +175,9 @@ pub fn piece_of(c: &Curve2, src: (u64, u64)) -> Result<Piece> {
     let p3 = |p: P2| P3::new(p.x, p.y, 0.0);
     let arc = |c: Curve, start: f64, sweep: f64| {
         if sweep >= 0.0 {
-            Piece { c, t0: start, t1: start + sweep, rev: false, src }
+            Piece { c, t0: start, t1: start + sweep, rev: false, src, more: vec![] }
         } else {
-            Piece { c, t0: start + sweep, t1: start, rev: true, src }
+            Piece { c, t0: start + sweep, t1: start, rev: true, src, more: vec![] }
         }
     };
     let ellipse = |center: P2, major: f64, minor: f64, rotation: f64| {
@@ -191,7 +193,7 @@ pub fn piece_of(c: &Curve2, src: (u64, u64)) -> Result<Piece> {
             if l < TOL {
                 return Err(KernelError::InvalidProfile("a line shorter than the modelling tolerance".into()));
             }
-            Piece { c: Curve::Line { o: p3(a), d: e2(d / l) }, t0: 0.0, t1: l, rev: false, src }
+            Piece { c: Curve::Line { o: p3(a), d: e2(d / l) }, t0: 0.0, t1: l, rev: false, src, more: vec![] }
         }
         Curve2::Arc { center, radius, start_angle, sweep, .. } => {
             if radius < TOL || (radius * sweep).abs() < TOL {
@@ -203,13 +205,13 @@ pub fn piece_of(c: &Curve2, src: (u64, u64)) -> Result<Piece> {
             if radius < TOL {
                 return Err(KernelError::InvalidProfile("a degenerate circle".into()));
             }
-            Piece { c: Curve::Circle { c: p3(center), x: V3::x(), y: V3::y(), r: radius }, t0: 0.0, t1: TAU, rev: false, src }
+            Piece { c: Curve::Circle { c: p3(center), x: V3::x(), y: V3::y(), r: radius }, t0: 0.0, t1: TAU, rev: false, src, more: vec![] }
         }
         Curve2::Ellipse { center, major_radius, minor_radius, rotation, .. } => {
             if major_radius.abs() < TOL || minor_radius.abs() < TOL {
                 return Err(KernelError::InvalidProfile("a degenerate ellipse".into()));
             }
-            Piece { c: ellipse(center, major_radius, minor_radius, rotation), t0: 0.0, t1: TAU, rev: false, src }
+            Piece { c: ellipse(center, major_radius, minor_radius, rotation), t0: 0.0, t1: TAU, rev: false, src, more: vec![] }
         }
         Curve2::EllipseArc { center, major_radius, minor_radius, rotation, start, sweep, .. } => {
             if major_radius.abs() < TOL || minor_radius.abs() < TOL || sweep.abs() < 1e-12 {
@@ -228,14 +230,14 @@ pub fn piece_of(c: &Curve2, src: (u64, u64)) -> Result<Piece> {
             }
             let n = offset_ellipse_nurbs(center, major_radius, minor_radius, rotation, start, sweep, offset);
             if sweep >= 0.0 {
-                Piece { c: Curve::Nurbs(Arc::new(n)), t0: start, t1: start + sweep, rev: false, src }
+                Piece { c: Curve::Nurbs(Arc::new(n)), t0: start, t1: start + sweep, rev: false, src, more: vec![] }
             } else {
-                Piece { c: Curve::Nurbs(Arc::new(n)), t0: start + sweep, t1: start, rev: true, src }
+                Piece { c: Curve::Nurbs(Arc::new(n)), t0: start + sweep, t1: start, rev: true, src, more: vec![] }
             }
         }
         Curve2::Bezier { poles, .. } => {
             let n = NurbsCurve::bezier(&poles.map(p3), &[1.0; 4]);
-            Piece { c: Curve::Nurbs(Arc::new(n)), t0: 0.0, t1: 1.0, rev: false, src }
+            Piece { c: Curve::Nurbs(Arc::new(n)), t0: 0.0, t1: 1.0, rev: false, src, more: vec![] }
         }
     };
     Ok(piece)
@@ -483,7 +485,7 @@ pub fn merge_regions(regions: &[Region2]) -> Result<Vec<MergedFace>> {
                 return Err(KernelError::InvalidProfile("the regions' boundaries don't close after merging".into()));
             }
         }
-        traced.push(lp);
+        traced.push(fuse_pieces(lp, tol));
     }
     // Outer loops and holes.
     let mut outers: Vec<(Loop2, Vec<P2>, f64)> = Vec::new();
@@ -531,4 +533,52 @@ pub fn merge_regions(regions: &[Region2]) -> Result<Vec<MergedFace>> {
         faces[i].regions.push(r.source);
     }
     Ok(faces)
+}
+
+/// Fuses consecutive pieces of different regions that continue each other on one line or
+/// circle (Parasolid merges the side faces of touching regions).
+fn fuse_pieces(mut lp: Loop2, tol: f64) -> Loop2 {
+    let mut changed = true;
+    while changed && lp.len() > 1 {
+        changed = false;
+        let n = lp.len();
+        for i in 0..n {
+            let j = (i + 1) % n;
+            let (a, b) = (&lp[i], &lp[j]);
+            if a.src.0 == b.src.0 || !a.same_carrier(b, tol) || a.rev != b.rev {
+                continue;
+            }
+            if a.dir(1.0).dot(&b.dir(0.0)) < 1.0 - 1e-9 {
+                continue;
+            }
+            let mut more = a.more.clone();
+            more.push(b.src);
+            more.extend(b.more.iter().copied());
+            let fused = match &a.c {
+                Curve::Line { .. } => {
+                    let (s, e) = (a.start(), b.end());
+                    let d = e - s;
+                    let l = d.norm();
+                    Piece { c: Curve::Line { o: P3::new(s.x, s.y, 0.0), d: V3::new(d.x / l, d.y / l, 0.0) }, t0: 0.0, t1: l, rev: false, src: a.src, more }
+                }
+                Curve::Circle { .. } => {
+                    let span = b.t1 - b.t0;
+                    let (t0, t1) = if a.rev { (a.t0 - span, a.t1) } else { (a.t0, a.t1 + span) };
+                    if t1 - t0 > TAU + 1e-9 {
+                        continue;
+                    }
+                    Piece { c: a.c.clone(), t0, t1, rev: a.rev, src: a.src, more }
+                }
+                _ => continue,
+            };
+            lp[i] = fused;
+            lp.remove(j);
+            if j < i {
+                lp.rotate_left(0);
+            }
+            changed = true;
+            break;
+        }
+    }
+    lp
 }

@@ -18,5 +18,6 @@ pub mod surface;
 pub mod sweep;
 pub mod tess;
 pub mod topo;
+pub mod unify;
 
 pub use kernel::NativeKernel;
