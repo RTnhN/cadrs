@@ -33,6 +33,8 @@ repository = "https://github.com/rvdende/cadrs"
 
 [workspace.dependencies]
 bevy = { version = "0.19.1", features = ["bevy_dev_tools"] }
+# The native window icon uses the same winit instance as Bevy.
+winit = { version = "0.30.13", default-features = false }
 serde = { version = "1", features = ["derive", "rc"] }
 ron = "0.12"
 uuid = { version = "1", features = ["v4", "serde"] }

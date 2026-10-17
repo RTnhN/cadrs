@@ -25,6 +25,7 @@ use cadrs_ui::CadrsUiPlugin;
 /// "Now" in scenarios: 2026-09-24 15:30 UTC.
 const SCENARIO_NOW: i64 = 1_790_263_800;
 
+mod app_icon;
 mod batch;
 mod check;
 
@@ -43,6 +44,9 @@ Usage:
   cadrs --headless --jobs N (--scenarios a,b,... | --all)
       Renders many scenarios, N at a time, each in its own process.
 
+  cadrs --install-desktop
+      Installs the Linux app launcher and cube icon for this executable.
+
 Documents live in --data-dir, else $CADRS_DATA_DIR, else the platform data dir
 (~/.local/share/cadrs/documents on Linux).";
 
@@ -52,6 +56,12 @@ fn main() -> AppExit {
     if args.iter().any(|a| a == "-h" || a == "--help") {
         println!("{HELP}");
         return AppExit::Success;
+    }
+    if args.iter().any(|a| a == "--install-desktop") {
+        return match app_icon::install_desktop() {
+            Ok(()) => AppExit::Success,
+            Err(e) => { eprintln!("cannot install desktop launcher: {e}"); AppExit::from_code(1) }
+        };
     }
     // `--list-documents`: the store's documents with their ids, no window.
     if let Some(code) = check::list_documents(&args) {
@@ -93,7 +103,8 @@ fn main() -> AppExit {
     };
 
     let mut app = App::new();
-    app.add_plugins(cadrs_harness::default_plugins(&opts));
+    app.add_plugins(cadrs_harness::default_plugins(&opts))
+        .add_systems(Update, app_icon::set_window_icon);
     if let Some(start) = scenario.as_ref().and_then(|s| s.start.clone()) {
         app.insert_resource(StartState(start));
     }

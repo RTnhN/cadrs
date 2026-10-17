@@ -79,6 +79,15 @@ fn main() {
          pub const ACCENT: [u8; 3] = [{}, {}, {}];\n",
         a.0, a.1, a.2
     );
+    // Match the Documents badge: 22px blue square, 5px corners and a centered 16px
+    // icon-rs cube. Keep the cube itself supplied by icon-rs rather than duplicating its paths.
+    let cube = icon_rs::get("part").expect("icon-rs part icon");
+    let badge = format!(
+        r##"<svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 22 22"><rect width="22" height="22" rx="5" fill="#1655ad"/><g transform="translate(3 3) scale(0.6666666667)">{}</g></svg>"##,
+        cube.svg,
+    );
+    std::fs::write(out_dir.join("app-icon.rgba"), rasterize(&badge, 256, "app logo")).unwrap();
+    render(&badge, 256, "app logo").save_png(out_dir.join("app-icon.png")).unwrap();
     std::fs::write(out_dir.join("icons.rs"), code).unwrap();
 }
 
@@ -119,7 +128,7 @@ fn accent_layer(svg: &str) -> String {
     svg.replace(&format!("=\"{ink}\""), "=\"none\"").replace(&format!("=\"{accent}\""), "=\"#ffffff\"")
 }
 
-fn rasterize(svg: &str, size: u32, name: &str) -> Vec<u8> {
+fn render(svg: &str, size: u32, name: &str) -> tiny_skia::Pixmap {
     let tree = usvg::Tree::from_str(svg, &usvg::Options::default())
         .unwrap_or_else(|e| panic!("parsing icon {name}: {e}"));
     let mut pixmap = tiny_skia::Pixmap::new(size, size).unwrap();
@@ -130,6 +139,10 @@ fn rasterize(svg: &str, size: u32, name: &str) -> Vec<u8> {
         &mut pixmap.as_mut(),
     );
     pixmap
+}
+
+fn rasterize(svg: &str, size: u32, name: &str) -> Vec<u8> {
+    render(svg, size, name)
         .pixels()
         .iter()
         .flat_map(|p| {

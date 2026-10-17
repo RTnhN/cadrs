@@ -84,6 +84,15 @@ cd cadrs
 cargo run --release
 ```
 
+On Linux, register the app launcher and cube icon after building:
+
+```sh
+cargo run --release -- --install-desktop
+```
+
+This installs a user-local desktop entry for the current executable. Restart cadrs afterward
+so Wayland docks can match it to the launcher. Re-run the command if you move the executable.
+
 On macOS, CMake from Homebrew (`brew install cmake`) and the Xcode command line tools
 (`xcode-select --install`) are enough; it builds and runs natively on Apple Silicon (Metal).
 

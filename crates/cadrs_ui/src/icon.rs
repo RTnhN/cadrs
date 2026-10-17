@@ -18,6 +18,11 @@ mod data {
     include!(concat!(env!("OUT_DIR"), "/icons.rs"));
 }
 
+/// Native app identity: the same cube used by the Documents logo, rendered by build.rs.
+pub const APP_ICON_SIZE: u32 = 256;
+pub const APP_ICON_RGBA: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/app-icon.rgba"));
+pub const APP_ICON_PNG: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/app-icon.png"));
+
 pub struct IconPlugin;
 
 impl Plugin for IconPlugin {
