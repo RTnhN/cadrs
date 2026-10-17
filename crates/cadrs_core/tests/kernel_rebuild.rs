@@ -3,7 +3,7 @@
 //! The acceptance numbers of `reference/onshape/training/intro-to-part-studios-gaps.md` (P3.1):
 //! a 100 × 60 × 25 box, the Control Arm with both extrudes as New, and the time to rebuild a
 //! 20-feature studio.
-#![cfg(feature = "occt")]
+#![cfg(feature = "brep")]
 
 use std::f64::consts::PI;
 use std::time::{Duration, Instant};

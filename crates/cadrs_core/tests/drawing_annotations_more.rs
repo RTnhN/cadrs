@@ -6,7 +6,7 @@
 //! - the chamfer dimension reads the Chamfer feature: "1.00 x 45°";
 //! - the R8 round's quarter arc: ⌒ 8·π/2 = 12.566 → "⌒12.57";
 //! - every new annotation adds, undoes and round-trips through RON.
-#![cfg(feature = "occt")]
+#![cfg(feature = "brep")]
 
 use cadrs_core::commands::EditDrawing;
 use cadrs_core::samples::drawing_bar::{self as bar, views as bar_views};

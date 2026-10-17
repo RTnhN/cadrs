@@ -2,7 +2,7 @@
 //! pattern plane, extruded Remove across a bend (the cut keeps its exact flat size and the folded
 //! part loses exactly that material) and Add (a tab appears folded); an ordinary Extrude of a
 //! flat-pattern sketch fails (SM14.3).
-#![cfg(feature = "occt")]
+#![cfg(feature = "brep")]
 
 use cadrs_core::commands::{AddExtrude, AddFeature, AddSketch, EditSketch, SetExtrude};
 use cadrs_core::document::{Document, ExtrudeFeature, FeatureKind};

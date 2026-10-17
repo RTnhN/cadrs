@@ -19,6 +19,9 @@ pub use projection::{
 };
 pub use types::*;
 
+/// The kernel cadrs builds with: the native (pure Rust) B-rep kernel.
+pub use native::NativeKernel as DefaultKernel;
+
 use std::fmt;
 
 use nalgebra::{Point3, Vector3};

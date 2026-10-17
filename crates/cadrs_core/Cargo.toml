@@ -6,9 +6,10 @@ license.workspace = true
 repository.workspace = true
 
 [features]
-# Rebuild parts through the OpenCascade kernel (cadrs_kernel "occt"). Without it, extrudes fall
-# back to the triangulated prism of `solid::extrude`.
-default = ["occt"]
+# Rebuild parts through the B-rep kernel (the native pure-Rust one). Without it, extrudes fall
+# back to the old prism mesh. `occt` builds the OpenCascade backend too (for comparisons).
+default = ["brep"]
+brep = []
 occt = ["cadrs_kernel/occt"]
 
 [dependencies]

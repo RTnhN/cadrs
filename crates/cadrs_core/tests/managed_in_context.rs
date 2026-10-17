@@ -295,7 +295,7 @@ fn a_pending_context_is_committed_by_its_first_reference() {
     context::set_pending(doc.id, STUDIO, None);
 }
 
-#[cfg(feature = "occt")]
+#[cfg(feature = "brep")]
 #[test]
 fn a_linked_parts_context_is_updated_from_the_assembly_with_a_new_version() {
     // MC5: "Block source" (a 50 × 30 × 25 block, saved with V1) is linked into "Block
@@ -400,7 +400,7 @@ fn a_sketch_on_a_context_face_imprints_only_that_context() {
     assert!(imprint.iter().all(|i| i.link.is_none_or(|l| FeatureId(l.feature()) != pa)), "nothing from the other context");
 }
 
-#[cfg(feature = "occt")]
+#[cfg(feature = "brep")]
 #[test]
 fn the_in_context_fixtures_are_current() {
     // Regenerate with `CADRS_REGENERATE_FIXTURES=1 cargo test -p cadrs_core --test managed_in_context`.
@@ -431,7 +431,7 @@ fn the_in_context_fixtures_are_current() {
     }
 }
 
-#[cfg(feature = "occt")]
+#[cfg(feature = "brep")]
 #[test]
 fn the_slide_needs_a_primary_instance_after_carriage_1_is_deleted() {
     // MCX2 on the stand-in: Carriage <1>'s context; Carriage <1> deleted: no update until

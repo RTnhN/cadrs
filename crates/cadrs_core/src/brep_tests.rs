@@ -2,7 +2,7 @@
 //! agree with the P3.1 geometric tags).
 
 use super::*;
-use cadrs_kernel::backend::occt::OcctKernel;
+use cadrs_kernel::DefaultKernel;
 use cadrs_sketch::region::regions;
 use cadrs_sketch::{PlaneRef, Sketch, SketchOp};
 
@@ -62,7 +62,7 @@ fn same_as_prism_names(
     assert!(!rs.is_empty());
     let frame = plane.frame();
     let prism = crate::solid::extrude(OP, &frame, &rs, 12.0, flip);
-    let mut k = OcctKernel::new();
+    let mut k = DefaultKernel::new();
     let group = ProfileGroup::new(frame, rs);
     let part = extrude(&mut k, OP, &[group], 12.0, flip).unwrap();
     let kern = part.solid;
@@ -178,7 +178,7 @@ fn round_end_bar() {
     circle(&mut s, 50.0, 15.0, 12.0);
     let rs: Vec<(u64, Region)> = regions(&s).into_iter().enumerate().map(|(i, r)| (i as u64, r)).collect();
     assert_eq!(rs.len(), 3);
-    let mut k = OcctKernel::new();
+    let mut k = DefaultKernel::new();
     let frame = PlaneRef::Top.frame();
     let part = extrude(&mut k, OP, &[ProfileGroup::new(frame, rs.clone())], 25.0, false).unwrap();
     let area = 1500.0 + std::f64::consts::PI * 144.0 / 2.0;
@@ -209,7 +209,7 @@ fn touching_regions_merge() {
     assert_eq!(rs.len(), 2);
     let frame = PlaneRef::Top.frame();
     let prism = crate::solid::extrude(OP, &frame, &rs, 12.0, false);
-    let mut k = OcctKernel::new();
+    let mut k = DefaultKernel::new();
     let part = extrude(&mut k, OP, &[ProfileGroup::new(frame, rs)], 12.0, false).unwrap();
     let kern = part.solid;
     assert!((part.mass.volume - 2400.0).abs() < 1e-6, "{}", part.mass.volume);
@@ -244,7 +244,7 @@ fn ellipse_extrudes() {
     .apply(&mut s)
     .unwrap();
     let rs: Vec<(u64, Region)> = regions(&s).into_iter().map(|r| (0, r)).collect();
-    let mut k = OcctKernel::new();
+    let mut k = DefaultKernel::new();
     let group = ProfileGroup::new(PlaneRef::Top.frame(), rs);
     let part = extrude(&mut k, OP, &[group], 5.0, false).unwrap();
     let want = std::f64::consts::PI * 20.0 * 8.0 * 5.0;
@@ -271,7 +271,7 @@ fn silhouettes_match_prism() {
     let rs: Vec<(u64, Region)> = regions(&s).into_iter().map(|r| (0, r)).collect();
     let frame = PlaneRef::Top.frame();
     let prism = crate::solid::extrude(OP, &frame, &rs, 4.0, false);
-    let mut k = OcctKernel::new();
+    let mut k = DefaultKernel::new();
     let group = ProfileGroup::new(frame, rs);
     let kern = extrude(&mut k, OP, &[group], 4.0, false).unwrap().solid;
     let curved = prism.faces.iter().find(|f| f.plane.is_none()).unwrap().name;
@@ -299,7 +299,7 @@ fn profile_stages() {
         .map(|r| (0, r))
         .collect();
     let group = ProfileGroup::new(PlaneRef::Top.frame(), rs);
-    let mut k = OcctKernel::new();
+    let mut k = DefaultKernel::new();
     for _ in 0..3 {
         let t = Instant::now();
         let body = k

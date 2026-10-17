@@ -1521,6 +1521,6 @@ fn face_frame(g: &OpGeom, class: Class, kernel_plane: Option<kernel::Plane>) -> 
     }
 }
 
-#[cfg(all(test, feature = "occt"))]
+#[cfg(all(test, feature = "brep"))]
 #[path = "brep_tests.rs"]
 mod tests;

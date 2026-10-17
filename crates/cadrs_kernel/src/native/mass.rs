@@ -185,10 +185,99 @@ fn face_integrals_v(body: &Body, f: &Face, shift: &V3) -> Q {
     acc
 }
 
+/// The uv rectangle of a face bounded by one loop of iso-lines (an untrimmed patch: lofts,
+/// sweeps), with the loop's orientation (+1 counter-clockwise in uv).
+fn iso_rectangle(body: &Body, f: &Face) -> Option<([f64; 4], f64)> {
+    let [l] = f.loops.as_slice() else { return None };
+    let (mut u0, mut u1, mut v0, mut v1) = (f64::INFINITY, f64::NEG_INFINITY, f64::INFINITY, f64::NEG_INFINITY);
+    let mut twice = 0.0;
+    for c in l {
+        let e = &body.edges[c.edge];
+        let (t0, t1) = co_range(e, c.fwd);
+        let (a, b) = (c.pc.point(t0), c.pc.point(t1));
+        match &c.pc {
+            Curve::Line { d, .. } if d.x == 0.0 || d.y == 0.0 => {}
+            Curve::Nurbs(_) => {
+                // A fitted iso-line.
+                let tol = 1e-12 * (1.0 + a.x.abs().max(a.y.abs()));
+                let (same_u, same_v) = ((a.x - b.x).abs() < tol, (a.y - b.y).abs() < tol);
+                if same_u == same_v {
+                    return None;
+                }
+                for k in 1..8 {
+                    let q = c.pc.point(t0 + (t1 - t0) * k as f64 / 8.0);
+                    if (same_u && (q.x - a.x).abs() > tol) || (same_v && (q.y - a.y).abs() > tol) {
+                        return None;
+                    }
+                }
+            }
+            _ => return None,
+        }
+        for p in [a, b] {
+            u0 = u0.min(p.x);
+            u1 = u1.max(p.x);
+            v0 = v0.min(p.y);
+            v1 = v1.max(p.y);
+        }
+        twice += a.x * b.y - b.x * a.y;
+    }
+    let area = (u1 - u0) * (v1 - v0);
+    if !(area > 0.0) || ((twice.abs() * 0.5) - area).abs() > 1e-9 * area {
+        return None;
+    }
+    Some(([u0, u1, v0, v1], twice.signum()))
+}
+
+/// The face integrals over an iso-rectangle of a B-spline surface: a tensor Gauss rule on each
+/// knot span (the integrand is polynomial along polynomial directions, smooth along rational
+/// ones).
+fn rect_integrals(s: &Surface, ns: &super::nurbs::NurbsSurface, r: [f64; 4], shift: &V3) -> Q {
+    let mut acc = [0.0; NQ];
+    let (bu, bv) = ns.breaks();
+    let cut = |ks: Vec<f64>, a: f64, b: f64| -> Vec<f64> {
+        let mut out = vec![a];
+        out.extend(ks.into_iter().filter(|k| *k > a + 1e-14 && *k < b - 1e-14));
+        out.push(b);
+        out
+    };
+    let us = cut(bu, r[0], r[1]);
+    let vs = cut(bv, r[2], r[3]);
+    let rational = ns.cps.iter().flatten().any(|h| (h.w - 1.0).abs() > 1e-15);
+    let gu = if rational { &GAUSS16 } else { &GAUSS8 };
+    for wu in us.windows(2) {
+        let (mu, ru) = ((wu[0] + wu[1]) * 0.5, (wu[1] - wu[0]) * 0.5);
+        for wv in vs.windows(2) {
+            let (mv, rv) = ((wv[0] + wv[1]) * 0.5, (wv[1] - wv[0]) * 0.5);
+            for (x, gw) in gu.x.iter().zip(gu.w) {
+                for (y, hw) in GAUSS8.x.iter().zip(GAUSS8.w) {
+                    integrand(s, mu + ru * x, mv + rv * y, shift, &mut acc, gw * hw * ru * rv);
+                }
+            }
+        }
+    }
+    acc
+}
+
 /// The 14 face integrals of a face, relative to `shift`, oriented by its sense.
 pub fn face_integrals(body: &Body, f: &Face, shift: &V3) -> Q {
     if ruled_in_v(&f.surf) && !matches!(f.surf, Surface::Plane { .. }) {
         return face_integrals_v(body, f, shift);
+    }
+    if let Surface::Nurbs(ns) = &f.surf {
+        if ns.du <= 3 && ns.dv <= 3 {
+            if let Some((r, orient)) = iso_rectangle(body, f) {
+                let mut acc = rect_integrals(&f.surf, ns, r, shift);
+                for q in acc.iter_mut() {
+                    *q *= orient;
+                }
+                if !f.sense {
+                    for q in acc.iter_mut().take(4) {
+                        *q = -*q;
+                    }
+                }
+                return acc;
+            }
+        }
     }
     let mut acc = [0.0; NQ];
     let mut scratch = Vec::with_capacity(64);

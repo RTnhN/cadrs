@@ -6,7 +6,7 @@
 //! 2(1500 + 1250 + 750) = 7 000 mm², centroid (25, 15, 12.5), and about its own centroid
 //! Ixx = V(30² + 25²)/12, Iyy = V(50² + 25²)/12, Izz = V(50² + 30²)/12 (unit density). Every
 //! expected value is computed here from the dimensions, not read back from the model.
-#![cfg(feature = "occt")]
+#![cfg(feature = "brep")]
 
 use std::f64::consts::PI;
 

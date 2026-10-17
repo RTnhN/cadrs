@@ -80,7 +80,7 @@ pub fn check_now(items: Vec<Item>, among: Vec<InstanceId>) -> Result<Vec<Clash>,
     check(items, among).wait().unwrap_or_else(|| Err("The kernel thread stopped".into()))
 }
 
-#[cfg(feature = "occt")]
+#[cfg(feature = "brep")]
 fn run(r: &mut crate::rebuild::Rebuilder, items: &[Item], among: &[InstanceId]) -> Result<Vec<Clash>, String> {
     let pairs = pairs(items, among);
     let mut needed: Vec<usize> = pairs.iter().flat_map(|(a, b)| [*a, *b]).collect();
@@ -132,7 +132,7 @@ fn run(r: &mut crate::rebuild::Rebuilder, items: &[Item], among: &[InstanceId]) 
     Ok(out)
 }
 
-#[cfg(not(feature = "occt"))]
+#[cfg(not(feature = "brep"))]
 fn run(_r: &mut crate::rebuild::Rebuilder, _items: &[Item], _among: &[InstanceId]) -> Result<Vec<Clash>, String> {
     Err("Check interference needs the solid-modelling kernel".into())
 }
@@ -144,7 +144,7 @@ pub fn export_step(items: Vec<(Item, String)>, y_up: bool, individual: bool) -> 
     crate::rebuild::run_on_worker(move |r| export_run(r, &items, y_up, individual))
 }
 
-#[cfg(feature = "occt")]
+#[cfg(feature = "brep")]
 fn export_run(r: &mut crate::rebuild::Rebuilder, items: &[(Item, String)], y_up: bool, individual: bool) -> Result<Vec<crate::export::StepFile>, String> {
     if items.is_empty() {
         return Err("No parts to export".into());
@@ -180,7 +180,7 @@ fn export_run(r: &mut crate::rebuild::Rebuilder, items: &[(Item, String)], y_up:
     files
 }
 
-#[cfg(not(feature = "occt"))]
+#[cfg(not(feature = "brep"))]
 fn export_run(_r: &mut crate::rebuild::Rebuilder, _items: &[(Item, String)], _y_up: bool, _individual: bool) -> Result<Vec<crate::export::StepFile>, String> {
     Err("STEP export needs the solid-modelling kernel".into())
 }

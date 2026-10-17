@@ -1,6 +1,6 @@
 //! Direct edits: Delete face and Move face through the feature list. Expected values derived by
 //! hand in each test's comments.
-#![cfg(feature = "occt")]
+#![cfg(feature = "brep")]
 #![allow(clippy::field_reassign_with_default)]
 
 use std::f64::consts::PI;

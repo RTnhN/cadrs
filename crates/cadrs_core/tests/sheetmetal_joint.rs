@@ -1,7 +1,7 @@
 //! Modify joint and the Sheet metal table's edits through the document's commands (P3I.3,
 //! SM6.4, SM13.3, SM13.4): a converted open box whose bends are changed, made rips and back,
 //! reordered, and undone; the refolded parts keep their ids and their volumes follow the flat.
-#![cfg(feature = "occt")]
+#![cfg(feature = "brep")]
 
 use cadrs_core::applied::EdgeOrFace;
 use cadrs_core::commands::{AddExtrude, AddFeature, AddSketch, EditSketch, SetExtrude};

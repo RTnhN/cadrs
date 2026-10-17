@@ -353,6 +353,26 @@ impl Kernel for NativeKernel {
         super::blend::fillet(self, body, edges, spec)
     }
 
+    fn thicken_surfaces(&mut self, spec: &ThickenSpec) -> Result<OpResult> {
+        super::surfacing::thicken(self, spec)
+    }
+
+    fn fill(&mut self, spec: &FillSpec) -> Result<OpResult> {
+        super::surfacing::fill(self, spec)
+    }
+
+    fn sew_solid(&mut self, bodies: &[BodyId], tol: f64) -> Result<OpResult> {
+        super::surfacing::sew(self, bodies, tol)
+    }
+
+    fn simplify(&mut self, body: BodyId) -> Result<OpResult> {
+        super::surfacing::simplify(self, body)
+    }
+
+    fn delete_faces(&mut self, body: BodyId, faces: &[FaceId]) -> Result<OpResult> {
+        super::surfacing::delete_faces(self, body, faces)
+    }
+
     fn offset(&mut self, body: BodyId, spec: &OffsetSpec) -> Result<OpResult> {
         super::local::offset(self, body, spec)
     }

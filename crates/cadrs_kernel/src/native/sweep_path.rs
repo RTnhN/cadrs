@@ -3,8 +3,8 @@
 //! open path; a closed path is restarted there). Each path segment is swept exactly: a line
 //! is a prism of the profile as it is placed there, an arc a revolve about the arc's axis; the
 //! profile's placement is carried along rigidly, and the pieces are united (the caps at the
-//! joints cancel). Curves other than lines and arcs are swept with sampled frames (see
-//! `general`).
+//! joints cancel). Other curves (and arcs the profile isn't square to) are swept with
+//! sampled frames (see `sweep_general`).
 
 use super::curve::Curve;
 use super::features::{face_as_profile, Tagged};
@@ -245,7 +245,11 @@ fn sweep_spine(faces: &[MergedFace], chains: &[Vec<Piece>], plane: Plane, spine:
                 let f = Frame { o: *c, x: radial, y: axis.cross(&radial), z: axis };
                 // The axis must lie in the profile's plane.
                 if axis.dot(&place.normal).abs() > 1e-7 || (c - place.origin).dot(&place.normal).abs() > 1e-6 {
-                    return Err(KernelError::Unsupported("sweeping a profile that isn't square to an arc of the path"));
+                    // Not square to the arc: sampled frames.
+                    let (b, end) = super::sweep_general::sweep_seg(faces, chains, place, seg, control, solid)?;
+                    out.push(Tagged::from_built(b));
+                    place = end;
+                    continue;
                 }
                 let kind = Revolve { plane: place, f };
                 let whole = span >= TAU - 1e-9;
@@ -254,11 +258,11 @@ fn sweep_spine(faces: &[MergedFace], chains: &[Vec<Piece>], plane: Plane, spine:
                 let r = nalgebra::Rotation3::from_axis_angle(&nalgebra::Unit::new_normalize(axis), span).into_inner();
                 place = move_plane(&place, &Affine { m: r, t: c.coords - r * c.coords });
             }
-            (Curve::Circle { c, x, y, .. }, SweepControl::KeepOrientation) => {
-                let _ = (c, x, y);
-                return Err(KernelError::Unsupported("Keep profile orientation along an arc"));
+            _ => {
+                let (b, end) = super::sweep_general::sweep_seg(faces, chains, place, seg, control, solid)?;
+                out.push(Tagged::from_built(b));
+                place = end;
             }
-            _ => return Err(KernelError::Unsupported("sweeping along this kind of path curve")),
         }
     }
     Ok(out)
@@ -323,11 +327,7 @@ pub fn sweep_with(k: &mut NativeKernel, profile: &Profile, spec: &SweepSpec) -> 
     let center = profile_center(&faces, &chains, &plane);
     let mut pieces: Vec<Tagged> = Vec::new();
     for (spine, backward) in spines(path, closed, &plane, &center) {
-        let mut these = match sweep_spine(&faces, &chains, plane, &spine, spec.control, solid) {
-            Ok(t) => t,
-            Err(KernelError::Unsupported(_)) => vec![super::sweep_general::sweep_general(&faces, &chains, plane, &spine, spec.control, solid)?],
-            Err(e) => return Err(e),
-        };
+        let mut these = sweep_spine(&faces, &chains, plane, &spine, spec.control, solid)?;
         if backward {
             these.iter_mut().for_each(swap_caps);
         }

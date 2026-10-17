@@ -5,7 +5,7 @@ use std::path::PathBuf;
 use std::time::Instant;
 
 use cadrs_idf::{MountSide, Placement, Status};
-use cadrs_kernel::backend::occt::OcctKernel;
+use cadrs_kernel::DefaultKernel;
 use cadrs_kernel::{Curve2, Extent, Kernel, Loop, Motion, Plane, Profile, Region, SurfaceKind};
 use cadrs_pcb::*;
 use nalgebra::{Point2, Point3, Vector3};
@@ -36,7 +36,7 @@ fn close(a: f64, b: f64, tol: f64) -> bool {
 
 #[test]
 fn board_volume_is_area_times_thickness_minus_holes() {
-    let mut k = OcctKernel::new();
+    let mut k = DefaultKernel::new();
     // Cell phone: 81 × 146 R8, 0.062 thick, no holes.
     let g = board_geometry(&mut k, &cell_phone()).unwrap();
     let board = g.board().unwrap();
@@ -61,7 +61,7 @@ fn board_volume_is_area_times_thickness_minus_holes() {
 
 #[test]
 fn components_keep_areas_and_colours() {
-    let mut k = OcctKernel::new();
+    let mut k = DefaultKernel::new();
     let pcb = vision();
     let t0 = Instant::now();
     let g = board_geometry(&mut k, &pcb).unwrap();
@@ -99,7 +99,7 @@ fn components_keep_areas_and_colours() {
 
 #[test]
 fn keepouts_below_the_cell_phone_board() {
-    let mut k = OcctKernel::new();
+    let mut k = DefaultKernel::new();
     let g = board_geometry(&mut k, &cell_phone()).unwrap();
     let keeps: Vec<_> = g.keeps().collect();
     assert_eq!(keeps.iter().map(|b| b.name.as_str()).collect::<Vec<_>>(), ["Keep-out 1", "Keep-out 2"]);
@@ -110,7 +110,7 @@ fn keepouts_below_the_cell_phone_board() {
     }
 }
 
-fn bbox_xy(k: &OcctKernel, b: cadrs_kernel::BodyId) -> [f64; 6] {
+fn bbox_xy(k: &DefaultKernel, b: cadrs_kernel::BodyId) -> [f64; 6] {
     let bb = k.bounding_box(b).unwrap();
     [bb.min.x, bb.min.y, bb.min.z, bb.max.x, bb.max.y, bb.max.z]
 }
@@ -125,7 +125,7 @@ fn assert_box(got: [f64; 6], want: [f64; 6]) {
 fn rotated_component_footprint() {
     // Secondary board X2, uBGA48_7.4X7.1 at (4.064182376174947, −16.5), rotated 90°: its 7.4 × 7.1
     // outline covers [0.514, 7.614] × [−20.2, −12.8], from the top face up 1.2.
-    let mut k = OcctKernel::new();
+    let mut k = DefaultKernel::new();
     let pcb = secondary();
     let g = board_geometry(&mut k, &pcb).unwrap();
     let x2 = g.bodies.iter().find(|b| b.name.starts_with("X2 ")).unwrap();
@@ -136,7 +136,7 @@ fn rotated_component_footprint() {
 
 #[test]
 fn bottom_side_component_is_below_the_board() {
-    let mut k = OcctKernel::new();
+    let mut k = DefaultKernel::new();
     for pcb in [secondary(), vision()] {
         let g = board_geometry(&mut k, &pcb).unwrap();
         let t = pcb.thickness();
@@ -162,7 +162,7 @@ fn bottom_side_component_is_below_the_board() {
 
 #[test]
 fn missing_package_is_a_placeholder_with_a_warning() {
-    let mut k = OcctKernel::new();
+    let mut k = DefaultKernel::new();
     let mut pcb = cell_phone();
     pcb.board.placements.push(Placement {
         package: "NOPE".into(),
@@ -192,7 +192,7 @@ fn p(x: f64, y: f64) -> Point2<f64> {
 
 #[test]
 fn rounded_rect_projects_to_lines_and_90_degree_arcs() {
-    let mut k = OcctKernel::new();
+    let mut k = DefaultKernel::new();
     let g = board_geometry(&mut k, &cell_phone()).unwrap();
     let b = g.board().unwrap();
     let parts = [McadPart { name: "Mainboard".into(), body: b.body }];
@@ -218,7 +218,7 @@ fn rounded_rect_projects_to_lines_and_90_degree_arcs() {
 #[test]
 fn keepout_corner_profile_area() {
     // PCB10's keep-out: a 12.7 × 9.525 corner profile with an R6.35 fillet on its inner corner.
-    let mut k = OcctKernel::new();
+    let mut k = DefaultKernel::new();
     let (x0, y0, x1, y1, r) = (-5.20972, -22.74338, 7.49028, -13.21838, 6.35);
     let c = p(x1 - r, y0 + 9.525 - r);
     let l = |a, b| Curve2::Line { a, b, source: None };
@@ -254,7 +254,7 @@ fn keepout_corner_profile_area() {
 
 /// The forward geometry read back through Sync: board, holes, place keep areas, placements.
 fn round_trip(pcb: &PcbBoard, plane: SyncPlane) {
-    let mut k = OcctKernel::new();
+    let mut k = DefaultKernel::new();
     let g = board_geometry(&mut k, pcb).unwrap();
     // Everything in the board frame, then moved to the sync plane's frame (x, y in the plane).
     let pl = plane.plane();
@@ -262,7 +262,7 @@ fn round_trip(pcb: &PcbBoard, plane: SyncPlane) {
         linear: nalgebra::Matrix3::from_columns(&[pl.x_dir.into_inner(), pl.y_dir().into_inner(), pl.normal.into_inner()]),
         translation: pl.origin.coords + Vector3::new(1.0, 2.0, 3.0),
     };
-    let moved = |k: &mut OcctKernel, b| k.transform_motion(b, &to_model).unwrap().bodies[0];
+    let moved = |k: &mut DefaultKernel, b| k.transform_motion(b, &to_model).unwrap().bodies[0];
     let mut parts = Vec::new();
     let mut instances = Vec::new();
     for b in &g.bodies {
@@ -339,7 +339,7 @@ fn vision_controller_round_trip() {
 
 #[test]
 fn keep_in_is_a_place_region() {
-    let mut k = OcctKernel::new();
+    let mut k = DefaultKernel::new();
     let g = board_geometry(&mut k, &cell_phone()).unwrap();
     let sq = |x0: f64, y0: f64, x1: f64, y1: f64| {
         let pts = [p(x0, y0), p(x1, y0), p(x1, y1), p(x0, y1)];
@@ -362,7 +362,7 @@ fn keep_in_is_a_place_region() {
 fn v2_sample_cutout_and_every_keep_kind() {
     // 2000 × 1500 thou with a Ø200 thou cut-out written as two −180° arcs, two Ø125 and two Ø40
     // thou drilled holes, 62 thou thick; its library mixes THOU, MM and TNM.
-    let mut k = OcctKernel::new();
+    let mut k = DefaultKernel::new();
     let pcb = fixture("v2 sample", "v2 sample");
     let g = board_geometry(&mut k, &pcb).unwrap();
     let th = 62.0 * 0.0254;
@@ -400,7 +400,7 @@ fn l_package() -> cadrs_idf::Package {
 }
 
 /// The xy of a body's vertices on the plane z = `z` (to 1e-9), sorted.
-fn vertices_at(k: &OcctKernel, b: cadrs_kernel::BodyId, z: f64) -> Vec<(i64, i64)> {
+fn vertices_at(k: &DefaultKernel, b: cadrs_kernel::BodyId, z: f64) -> Vec<(i64, i64)> {
     let mut v: Vec<(i64, i64)> = k
         .vertices(b)
         .unwrap()
@@ -425,7 +425,7 @@ fn asymmetric_footprint_rotation_direction() {
     // (−3,1) (−3,0), so the long leg points +y and the short one −x. BOTTOM: the package is first
     // turned, then mirrored in x (the flip about its own y axis, seen from above): (x, y) →
     // (y, x): (0,0) (0,4) (1,4) (1,1) (3,1) (3,0), the short leg pointing +x.
-    let mut k = OcctKernel::new();
+    let mut k = DefaultKernel::new();
     let base = cell_phone();
     let t = base.thickness();
     let mut board = base.board.clone();
@@ -517,7 +517,7 @@ fn shaped_loops(b: &cadrs_idf::Board) -> Vec<cadrs_idf::Loop> {
 /// B-rep → MCAD (Sync) → IDF text → parsed board: the board that comes back has the same outline,
 /// openings, thickness, place keep-outs and placements.
 fn round_trip_through_idf(pcb: &PcbBoard) {
-    let mut k = OcctKernel::new();
+    let mut k = DefaultKernel::new();
     let g = board_geometry(&mut k, pcb).unwrap();
     let mut parts = Vec::new();
     let mut instances = Vec::new();
@@ -583,7 +583,7 @@ fn concave_notch_arc_round_trips_through_idf() {
     });
     let pcb = PcbBoard::new(&board, &cadrs_idf::Library::new(cadrs_idf::IdfVersion::V3));
     // The notch takes half a R10 disc out: area 2400 − 50π − 70.
-    let mut k = OcctKernel::new();
+    let mut k = DefaultKernel::new();
     let g = board_geometry(&mut k, &pcb).unwrap();
     let v = k.mass_properties(g.board().unwrap().body).unwrap().volume;
     assert!(close(v, (2400.0 - 50.0 * PI - 70.0) * 1.6, 1e-9), "{v}");

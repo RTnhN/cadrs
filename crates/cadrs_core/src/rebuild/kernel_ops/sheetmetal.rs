@@ -607,7 +607,7 @@ impl Rebuilder {
     pub(super) fn fold(&mut self, op_of: &dyn Fn(PieceSource) -> cadrs_kernel::OpId, op: cadrs_kernel::OpId, model: &Model, flat: &FlatPattern, slabs: &[WallId]) -> Result<Vec<Folded>, String> {
         let t = model.params.thickness;
         let mut out = Vec::new();
-        let release = |k: &mut cadrs_kernel::backend::occt::OcctKernel, made: &[(BodyId, BodyNames, f64)]| {
+        let release = |k: &mut cadrs_kernel::DefaultKernel, made: &[(BodyId, BodyNames, f64)]| {
             for (b, _, _) in made {
                 k.release(*b);
             }

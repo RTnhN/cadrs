@@ -2,7 +2,7 @@
 //! PCB Studio board inserted straight into an assembly (`docs/PCB_IN_PART_STUDIO.md` P6–P7), on
 //! the mains-sensor sample: its AC sensor board derived onto "Board location" in the
 //! Enclosure, whose plug's Live, Earth and Neutral pins stand at (0, 8), (0, 0) and (0, −8).
-#![cfg(feature = "occt")]
+#![cfg(feature = "brep")]
 
 use cadrs_core::assembly::bom::{self, BomOptions};
 use cadrs_core::assembly::commands::InsertInstance;

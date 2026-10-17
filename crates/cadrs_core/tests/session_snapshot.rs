@@ -3,7 +3,7 @@
 //! what building made (parts, their face, edge and vertex names, errors, planes, connectors,
 //! Derived features); an edit after restoring recomputes what it does in the session that built
 //! everything and makes the same; the same outputs always give the same bytes.
-#![cfg(feature = "occt")]
+#![cfg(feature = "brep")]
 
 use cadrs_core::commands::AddFeature;
 use cadrs_core::derived::{AddDerived, DerivedFeature, DerivedPlacement, DerivedSelection};

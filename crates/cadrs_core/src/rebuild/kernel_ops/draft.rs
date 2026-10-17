@@ -98,7 +98,7 @@ impl Rebuilder {
             }
         }
         let mut made: Vec<(cadrs_kernel::BodyId, Vec<(cadrs_kernel::FaceId, Origin)>)> = Vec::new();
-        let release = |k: &mut cadrs_kernel::backend::occt::OcctKernel, made: &[(cadrs_kernel::BodyId, Vec<(cadrs_kernel::FaceId, Origin)>)]| {
+        let release = |k: &mut cadrs_kernel::DefaultKernel, made: &[(cadrs_kernel::BodyId, Vec<(cadrs_kernel::FaceId, Origin)>)]| {
             for (b, _) in made {
                 k.release(*b);
             }

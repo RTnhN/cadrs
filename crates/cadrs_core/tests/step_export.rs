@@ -1,5 +1,5 @@
 //! STEP export of parts (`cadrs_core::export`, `Rebuilder::export_step` on the OCCT backend).
-#![cfg(feature = "occt")]
+#![cfg(feature = "brep")]
 
 use cadrs_core::document::{ExtrudeFeature, Feature, FeatureKind, RegionRef, SketchFeature};
 use cadrs_core::export::StepRequest;

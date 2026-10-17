@@ -5,7 +5,7 @@
 //! The board is the KiCad course's finished board ([`cadrs_eda::getting_started::gs18`]):
 //! a 45 × 50 mm outline, 1.6 mm thick, with BT1 on the bottom and D1, R1 on top. Expected
 //! values are worked out from the layout here, not read back from the model.
-#![cfg(feature = "occt")]
+#![cfg(feature = "brep")]
 
 use cadrs_core::command::Command;
 use cadrs_core::commands::AddFeature;

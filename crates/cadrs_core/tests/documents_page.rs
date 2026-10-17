@@ -4,7 +4,7 @@
 //!
 //! The block sample (`fixtures/linked_block_standin.cadrs`) is a 50 × 30 × 25 mm box, so its
 //! copy's volume is 50·30·25 = 37 500 mm³ (closed form, not read from the model).
-#![cfg(feature = "occt")]
+#![cfg(feature = "brep")]
 
 use cadrs_core::documents_page::{self, SAMPLES};
 use cadrs_core::history_log::HistoryLog;

@@ -5,7 +5,7 @@
 //! Timings are checked on this thread's CPU time where the OS reports it (other workers share the
 //! machine), with a loose wall-clock bound, as `kernel_rebuild.rs` does. The release budgets are
 //! the article's; a debug build gets 10× (the Rust side is unoptimised; OCCT is the same).
-#![cfg(feature = "occt")]
+#![cfg(feature = "brep")]
 #![allow(clippy::field_reassign_with_default)]
 
 use std::f64::consts::PI;

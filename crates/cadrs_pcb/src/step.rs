@@ -45,9 +45,9 @@ pub fn native_board_bodies(k: &mut dyn Kernel, pcb: &PcbBoard, design: &cadrs_ed
 }
 
 /// The board as STEP bytes (and the warnings).
-#[cfg(feature = "occt")]
+#[cfg(feature = "brep")]
 pub fn native_board_step(pcb: &PcbBoard, design: &cadrs_eda::Design) -> Result<(Vec<u8>, Vec<String>), String> {
-    let mut k = cadrs_kernel::backend::occt::OcctKernel::new();
+    let mut k = cadrs_kernel::DefaultKernel::new();
     let (bodies, warnings) = native_board_bodies(&mut k, pcb, design)?;
     let ids: Vec<BodyId> = bodies.iter().map(|(_, b)| *b).collect();
     let bytes = k.export_step(&ids).map_err(|e| e.to_string());
@@ -57,7 +57,7 @@ pub fn native_board_step(pcb: &PcbBoard, design: &cadrs_eda::Design) -> Result<(
     Ok((bytes?, warnings))
 }
 
-#[cfg(all(test, feature = "occt"))]
+#[cfg(all(test, feature = "brep"))]
 mod tests {
     use super::*;
 
@@ -66,7 +66,7 @@ mod tests {
         let lib = cadrs_eda::library::LibraryTable::builtin();
         let d = cadrs_eda::getting_started::gs18(&lib);
         let pcb = cadrs_core::pcb::design::pcb_board("course", &d);
-        let mut k = cadrs_kernel::backend::occt::OcctKernel::new();
+        let mut k = cadrs_kernel::DefaultKernel::new();
         let (bodies, warnings) = native_board_bodies(&mut k, &pcb, &d).unwrap();
         assert!(warnings.is_empty(), "{warnings:?}");
         // The board and the three parts' generated bodies (several primitives each).

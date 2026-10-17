@@ -8,7 +8,7 @@
 //!   instances were.
 //! - IGES keeps the box's area and volume (1e−3).
 //! - DXF of a planar face: the box's top is 4 lines, a cylinder's top 1 circle.
-#![cfg(feature = "occt")]
+#![cfg(feature = "brep")]
 
 use std::sync::Arc;
 

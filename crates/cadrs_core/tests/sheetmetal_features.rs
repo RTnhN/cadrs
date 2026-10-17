@@ -1,7 +1,7 @@
 //! Flange, Hem and Make joint through the document's commands (P3I.4): the edited model's folded
 //! parts from the kernel against the flat pattern and closed forms (see `tests/sheetmetal.rs`
 //! for the volume rule), and undo.
-#![cfg(feature = "occt")]
+#![cfg(feature = "brep")]
 #![allow(dead_code)]
 
 use std::f64::consts::{FRAC_PI_2, PI};

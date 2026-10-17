@@ -115,7 +115,7 @@ fn y_up_pose() -> Pose {
 
 impl Rebuilder {
     /// [`plan_import`], here.
-    #[cfg(feature = "occt")]
+    #[cfg(feature = "brep")]
     pub fn plan_import(&mut self, format: ImportFormat, bytes: &[u8]) -> Result<ImportPlan, String> {
         use cadrs_kernel::Kernel;
         let kernel_format = format.kernel().ok_or_else(|| format!("{} files have no assembly structure", format.label()))?;
@@ -128,7 +128,7 @@ impl Rebuilder {
     }
 
     /// What a model the kernel read holds (its bodies are kept).
-    #[cfg(feature = "occt")]
+    #[cfg(feature = "brep")]
     pub(crate) fn plan_of(&self, format: ImportFormat, model: &cadrs_kernel::exchange::ImportedModel) -> ImportPlan {
         use cadrs_kernel::Kernel;
         let parts = model
@@ -140,13 +140,13 @@ impl Rebuilder {
         ImportPlan { format, name: model.name.clone(), parts, occurrences }
     }
 
-    #[cfg(not(feature = "occt"))]
+    #[cfg(not(feature = "brep"))]
     pub fn plan_import(&mut self, _format: ImportFormat, _bytes: &[u8]) -> Result<ImportPlan, String> {
         Err("Importing needs the solid-modelling kernel".into())
     }
 
     /// [`export_files`], here.
-    #[cfg(feature = "occt")]
+    #[cfg(feature = "brep")]
     pub fn export_files(&mut self, req: &ExportRequest) -> Result<Vec<ExportFile>, String> {
         use cadrs_kernel::Kernel;
         use cadrs_kernel::exchange as x;
@@ -251,7 +251,7 @@ impl Rebuilder {
         result
     }
 
-    #[cfg(not(feature = "occt"))]
+    #[cfg(not(feature = "brep"))]
     pub fn export_files(&mut self, _req: &ExportRequest) -> Result<Vec<ExportFile>, String> {
         Err("Exporting needs the solid-modelling kernel".into())
     }

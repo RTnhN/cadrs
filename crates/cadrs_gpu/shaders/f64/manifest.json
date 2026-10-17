@@ -1,0 +1,17 @@
+[
+  {
+    "source_path": "../cadrs_gpu/shaders/f64/cadrs_gpu_kernels.spv",
+    "entry_point": "classify",
+    "wgsl_entry_point": "classify"
+  },
+  {
+    "source_path": "../cadrs_gpu/shaders/f64/cadrs_gpu_kernels.spv",
+    "entry_point": "nurbs_f32",
+    "wgsl_entry_point": "nurbs_f32"
+  },
+  {
+    "source_path": "../cadrs_gpu/shaders/f64/cadrs_gpu_kernels.spv",
+    "entry_point": "nurbs_f64",
+    "wgsl_entry_point": "nurbs_f64"
+  }
+]

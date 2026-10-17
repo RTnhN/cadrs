@@ -1,6 +1,6 @@
 //! Flat pattern drawing views (P3I.7, SM16) through the document: a sheet metal box's flat in a
 //! drawing, its bend notes, its DXF export and its update when the model changes.
-#![cfg(feature = "occt")]
+#![cfg(feature = "brep")]
 
 use std::collections::HashMap;
 

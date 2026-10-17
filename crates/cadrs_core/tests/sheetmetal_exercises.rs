@@ -5,7 +5,7 @@
 //!
 //! Regenerate the fixtures with `CADRS_WRITE_FIXTURES=1 cargo test -p cadrs_core --test
 //! sheetmetal_exercises`.
-#![cfg(feature = "occt")]
+#![cfg(feature = "brep")]
 
 use cadrs_core::command::History;
 use cadrs_core::rebuild::Build;

@@ -32,7 +32,7 @@ pub fn tessellation() -> cadrs_kernel::Tessellation {
 /// A model file's meshes (`ext`: `wrl`/`vrml`, `obj`, `step`/`stp`) and its unit in mm: KiCad's
 /// VRML is in 0.1 inch and coloured per shape; OBJ is in mm with its materials' colours; STEP
 /// is in mm, one mesh per solid in a neutral grey.
-#[cfg(feature = "occt")]
+#[cfg(feature = "brep")]
 pub fn file_meshes(bytes: &[u8], ext: &str) -> Result<(Vec<Mesh>, f64), String> {
     use cadrs_kernel::Kernel;
     match ext.to_ascii_lowercase().as_str() {
@@ -42,7 +42,7 @@ pub fn file_meshes(bytes: &[u8], ext: &str) -> Result<(Vec<Mesh>, f64), String> 
         }
         "obj" => Ok((cadrs_eda::obj::read(&String::from_utf8_lossy(bytes))?, 1.0)),
         "step" | "stp" => {
-            let mut k = cadrs_kernel::backend::occt::OcctKernel::new();
+            let mut k = cadrs_kernel::DefaultKernel::new();
             let bodies = k.import_step(bytes).map_err(|e| e.to_string())?;
             let mut out = vec![];
             for b in bodies {
@@ -68,7 +68,7 @@ pub fn file_meshes(bytes: &[u8], ext: &str) -> Result<(Vec<Mesh>, f64), String> 
 }
 
 /// Without the kernel only VRML and OBJ models can be read.
-#[cfg(not(feature = "occt"))]
+#[cfg(not(feature = "brep"))]
 pub fn file_meshes(bytes: &[u8], ext: &str) -> Result<(Vec<Mesh>, f64), String> {
     match ext.to_ascii_lowercase().as_str() {
         "wrl" | "vrml" => Ok((cadrs_eda::wrl::read(&String::from_utf8_lossy(bytes))?, cadrs_eda::wrl::KICAD_UNIT_MM)),

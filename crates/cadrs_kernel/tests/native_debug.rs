@@ -455,3 +455,34 @@ fn debug_width_chain() {
         }
     }
 }
+
+/// A Ø2 disc swept along a 3D cubic Bézier (rotation-minimizing frames): Pappus, V = A·length.
+#[test]
+fn debug_sweep_bezier() {
+    let mut k = NativeKernel::new();
+    let poles = vec![Point3::new(0.0, 0.0, 0.0), Point3::new(0.0, 0.0, 20.0), Point3::new(20.0, 10.0, 20.0), Point3::new(30.0, 30.0, 40.0)];
+    let path = vec![PathCurve::Bezier3 { poles: poles.clone(), weights: vec![] }];
+    let prof = Profile::new(Plane::top(), vec![reg(Loop { curves: vec![Curve2::Circle { center: p(0.0, 0.0), radius: 1.0, source: None }] })]);
+    for control in [SweepControl::None, SweepControl::KeepOrientation] {
+        let spec = SweepSpec { body: BodyKind::Solid, path: path.clone(), control, faces: vec![] };
+        let t = std::time::Instant::now();
+        let r = k.sweep_with(&prof, &spec).unwrap();
+        let b = r.bodies[0];
+        let ts = t.elapsed();
+        let m = k.mass_properties(b).unwrap();
+        eprintln!("sweep {ts:?} mass {:?}", t.elapsed() - ts);
+        // Arc length of the Bézier.
+        let bez = |t: f64| {
+            let u = 1.0 - t;
+            poles[0].coords * u * u * u + poles[1].coords * 3.0 * u * u * t + poles[2].coords * 3.0 * u * t * t + poles[3].coords * t * t * t
+        };
+        let mut len = 0.0;
+        for i in 0..20000 {
+            len += (bez((i + 1) as f64 / 20000.0) - bez(i as f64 / 20000.0)).norm();
+        }
+        eprintln!("{control:?}: volume {} want {} ({:?}) faces {}", m.volume, std::f64::consts::PI * len, t.elapsed(), k.faces(b).unwrap().len());
+        if control == SweepControl::None {
+            assert!((m.volume - std::f64::consts::PI * len).abs() < 1e-3 * std::f64::consts::PI * len, "{} vs {}", m.volume, std::f64::consts::PI * len);
+        }
+    }
+}

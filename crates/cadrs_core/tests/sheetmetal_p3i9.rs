@@ -1,7 +1,7 @@
 //! P3I.9 through the document's commands: the Sheet metal loft (its flat against its folded
 //! volume), the Form (placement on sketch points, the flat's form outlines, the rule that forms
 //! keep clear of edges and joints) and the forms library.
-#![cfg(feature = "occt")]
+#![cfg(feature = "brep")]
 
 use cadrs_core::commands::{AddFeature, AddSketch, EditSketch, SetFeature};
 use cadrs_core::document::{Document, FaceRef, FeatureKind, RegionRef};

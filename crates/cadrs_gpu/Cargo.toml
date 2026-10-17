@@ -1,0 +1,21 @@
+[package]
+name = "cadrs_gpu"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+# Feasibility spike: runs cadrs_gpu_kernels (rust-gpu SPIR-V, `shaders/*.spv`) through wgpu
+# on Vulkan and benchmarks it against the same Rust on the CPU (one thread and rayon).
+#   cargo run -r -p cadrs_gpu
+[dependencies]
+cadrs_gpu_kernels = { path = "../cadrs_gpu_kernels" }
+wgpu.workspace = true
+futures-lite.workspace = true
+bytemuck.workspace = true
+rayon.workspace = true
+
+[features]
+# Also run the f64 NURBS kernel (needs shaders/f64/cadrs_gpu_kernels.spv).
+f64 = []

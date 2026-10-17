@@ -1,7 +1,7 @@
 //! The Transform feature (Onshape's Transform) through the feature list: each type moves the
 //! parts' volume and centroid as derived by hand in its test, the moved parts keep their ids and
 //! face names (a fillet or a sketch on a moved face still finds it), and copies are new parts.
-#![cfg(feature = "occt")]
+#![cfg(feature = "brep")]
 
 use cadrs_core::applied::{EdgeOrFace, FilletFeature};
 use cadrs_core::commands::{AddExtrude, AddFeature, AddSketch, EditSketch, SetExtrude, SetFeature};

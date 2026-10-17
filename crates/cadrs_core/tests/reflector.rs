@@ -3,7 +3,7 @@
 //! against a closed form (or, for the fillets on the curved pocket floors, bounds and the mesh),
 //! the centre of mass on the Z axis (the 4-fold pattern and the mirror make the plate symmetric)
 //! and the mass in kg. `course_ps27_reflector` makes the same steps through the UI.
-#![cfg(feature = "occt")]
+#![cfg(feature = "brep")]
 #![allow(clippy::field_reassign_with_default)]
 
 use std::f64::consts::PI;

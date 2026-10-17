@@ -1,7 +1,6 @@
-//! Thicken and Fill of the OCCT backend ([`Kernel::thicken_surfaces`], [`Kernel::fill`]).
-#![cfg(feature = "occt")]
+//! Thicken and Fill ([`Kernel::thicken_surfaces`], [`Kernel::fill`]).
 
-use cadrs_kernel::backend::occt::OcctKernel;
+use cadrs_kernel::DefaultKernel as OcctKernel;
 use cadrs_kernel::*;
 use nalgebra::{Point2, Point3, Unit, Vector3};
 

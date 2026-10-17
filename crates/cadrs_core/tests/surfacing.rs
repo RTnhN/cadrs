@@ -1,6 +1,6 @@
 //! Thicken, Helix and Fill through the document's commands (`cadrs_core::surfacing`), with
 //! volumes and areas from the kernel.
-#![cfg(feature = "occt")]
+#![cfg(feature = "brep")]
 
 use cadrs_core::advanced::{PathRef, SweepFeature};
 use cadrs_core::commands::{AddExtrude, AddFeature, AddSketch, EditSketch, SetExtrude};

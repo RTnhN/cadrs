@@ -8,7 +8,7 @@
 //! inertia … computed at the center of mass, aligned with the default coordinate system"); the
 //! diagonal holds the moments (`Lxx = ∫(y² + z²) dm`) and the products carry the tensor's minus
 //! sign (`Lxy = −∫xy dm`).
-#![cfg(feature = "occt")]
+#![cfg(feature = "brep")]
 
 use cadrs_core::appearance::{PALETTE, palette, part_appearance};
 use cadrs_core::commands::{AddExtrude, AddFeature, AddSketch, EditSketch, SetExtrude, SetPartMaterial};

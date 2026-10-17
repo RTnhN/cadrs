@@ -3,7 +3,7 @@
 //! reads 100 / 60 / 25, its top 6000 mm² and two neighbouring faces 90°; two boxes 15 apart read
 //! 15; a Ø40 cylinder reads radius 20; a face drafted 5° by the Draft feature falls in the
 //! draft analysis's 3°–6° band.
-#![cfg(feature = "occt")]
+#![cfg(feature = "brep")]
 
 use cadrs_core::analysis::{DraftBand, draft_angle};
 use cadrs_core::commands::{AddExtrude, AddFeature, AddSketch, EditSketch, SetExtrude};

@@ -9,7 +9,7 @@
 //! - the bar's M6 tapped hole's thread: major Ø6, minor Ø5 (the M6×1 tap drill), 8 long from
 //!   the top face, down;
 //! - every new view operation undoes.
-#![cfg(feature = "occt")]
+#![cfg(feature = "brep")]
 
 use cadrs_core::commands::{AddSketch, EditDrawing, EditSketch};
 use cadrs_core::document::{Document, Element};

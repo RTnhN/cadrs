@@ -3,7 +3,7 @@
 //! have one cap, a block added flush with another continues its faces, and references made
 //! through any of the merged faces' names (a sketch on a face, an edge to fillet) still work.
 //! The face counts are Onshape's for the same parts.
-#![cfg(feature = "occt")]
+#![cfg(feature = "brep")]
 
 use std::f64::consts::PI;
 

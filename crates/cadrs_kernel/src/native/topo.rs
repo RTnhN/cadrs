@@ -164,7 +164,24 @@ impl Body {
             e.curve = e.curve.transformed(m);
         }
         let mirror = m.det() < 0.0;
+        let k = m.scale();
         for f in &mut b.faces {
+            // Lengths in the surface's parameters scale with the body.
+            if (k - 1.0).abs() > 1e-15 {
+                let uv = match f.surf {
+                    Surface::Plane { .. } => Some(V3::new(k, k, 1.0)),
+                    Surface::Cylinder { .. } | Surface::Cone { .. } => Some(V3::new(1.0, k, 1.0)),
+                    _ => None,
+                };
+                if let Some(d) = uv {
+                    let a = Affine { m: nalgebra::Matrix3::from_diagonal(&d), t: V3::zeros() };
+                    for l in &mut f.loops {
+                        for c in l.iter_mut() {
+                            c.pc = c.pc.transformed(&a);
+                        }
+                    }
+                }
+            }
             f.surf = f.surf.transformed(m);
             if mirror {
                 f.sense = !f.sense;

@@ -48,9 +48,9 @@ use crate::parts::{Part, PartKind};
 
 /// Import and export jobs on the worker (P3F.2).
 pub mod exchange;
-#[cfg(feature = "occt")]
+#[cfg(feature = "brep")]
 pub mod persist;
-#[cfg(feature = "occt")]
+#[cfg(feature = "brep")]
 pub mod session;
 
 /// The result of rebuilding a feature list.
@@ -343,8 +343,8 @@ const MAX_ENTRIES: usize = 1024;
 /// A kernel session and the per-feature cache. The app uses the one on the worker thread
 /// (through [`build`] and [`request`]); tests and benchmarks can own one.
 pub struct Rebuilder {
-    #[cfg(feature = "occt")]
-    kernel: cadrs_kernel::backend::occt::OcctKernel,
+    #[cfg(feature = "brep")]
+    kernel: cadrs_kernel::DefaultKernel,
     entries: HashMap<u64, Entry>,
     generation: u64,
     /// The feature whose [`Stage`] is worth meshing (the last part feature).
@@ -373,7 +373,7 @@ pub struct Rebuilder {
     placed_components: HashMap<u64, PlacedComponent>,
     /// Footprint models as kernel solids, unplaced (by model), for exports and drawing views of
     /// derived boards (`model_bodies_cached`).
-    #[cfg(feature = "occt")]
+    #[cfg(feature = "brep")]
     model_bodies: Vec<(u64, Vec<BodyId>, f64)>,
 }
 
@@ -483,8 +483,8 @@ fn chain_key_str(before: u64, s: &str) -> u64 {
 impl Rebuilder {
     pub fn new() -> Self {
         Self {
-            #[cfg(feature = "occt")]
-            kernel: cadrs_kernel::backend::occt::OcctKernel::new(),
+            #[cfg(feature = "brep")]
+            kernel: cadrs_kernel::DefaultKernel::new(),
             entries: HashMap::new(),
             generation: 0,
             stage_for: None,
@@ -496,7 +496,7 @@ impl Rebuilder {
             skipped_meshes: Default::default(),
             board_bodies: Vec::new(),
             placed_components: HashMap::new(),
-            #[cfg(feature = "occt")]
+            #[cfg(feature = "brep")]
             model_bodies: Vec::new(),
         }
     }
@@ -515,7 +515,7 @@ impl Rebuilder {
         let times = self.sketch_times.clone();
         // A source built in another session (another document imported earlier, a document
         // opened before) comes back from its snapshot instead of being rebuilt.
-        #[cfg(feature = "occt")]
+        #[cfg(feature = "brep")]
         self.restore_snapshot(features);
         self.depth += 1;
         let build = self.rebuild(features);
@@ -812,18 +812,18 @@ impl Rebuilder {
         }
     }
 
-    #[cfg(feature = "occt")]
+    #[cfg(feature = "brep")]
     fn release(&mut self, body: BodyId) {
         use cadrs_kernel::Kernel;
         self.kernel.release(body);
     }
 
-    #[cfg(not(feature = "occt"))]
+    #[cfg(not(feature = "brep"))]
     fn release(&mut self, _body: BodyId) {}
 
     /// Rebuilds `features` and writes the requested parts (as they are after the last feature)
     /// to STEP: one file per part, or one file with them all (see [`crate::export`]).
-    #[cfg(feature = "occt")]
+    #[cfg(feature = "brep")]
     pub fn export_step(&mut self, features: &[Feature], req: &StepRequest) -> Result<Vec<StepFile>, String> {
         use cadrs_kernel::Kernel;
         if req.parts.is_empty() {
@@ -900,7 +900,7 @@ impl Rebuilder {
 
     /// Solids for a drawing view of the board components among `parts` (one body each, the
     /// caller releases them); a component whose model can't be made is left out.
-    #[cfg(feature = "occt")]
+    #[cfg(feature = "brep")]
     fn view_solids(&mut self, features: &[Feature], state: &State, parts: &[&Part]) -> HashMap<PartId, BodyId> {
         let mut made = HashMap::new();
         for p in parts.iter().filter(|p| state.part(p.id).is_some_and(|s| s.body.is_none())) {
@@ -913,7 +913,7 @@ impl Rebuilder {
 
     /// A board component's model as one body (its solids made one compound), the caller's to
     /// release ([`Self::component_solids`]).
-    #[cfg(feature = "occt")]
+    #[cfg(feature = "brep")]
     fn component_body(&mut self, features: &[Feature], state: &State, part: PartId) -> Result<BodyId, String> {
         use cadrs_kernel::Kernel;
         let bodies = self.component_solids(features, state, part)?;
@@ -928,7 +928,7 @@ impl Rebuilder {
         }
     }
 
-    #[cfg(not(feature = "occt"))]
+    #[cfg(not(feature = "brep"))]
     fn view_solids(&mut self, _features: &[Feature], _state: &State, _parts: &[&Part]) -> HashMap<PartId, BodyId> {
         HashMap::new()
     }
@@ -936,7 +936,7 @@ impl Rebuilder {
     /// A derived board's component part as its model's solids (`docs/PCB_IN_PART_STUDIO.md` P7:
     /// a STEP export carries real solids, not the mesh the Part Studio shows), where the board
     /// copy puts it now. The caller releases them.
-    #[cfg(feature = "occt")]
+    #[cfg(feature = "brep")]
     fn component_solids(&mut self, features: &[Feature], state: &State, part: PartId) -> Result<Vec<BodyId>, String> {
         use cadrs_kernel::Kernel;
         for (fid, out) in state.derived.iter() {
@@ -978,7 +978,7 @@ impl Rebuilder {
 
     /// A model's solids, unplaced, made once (by the model) and kept for later views and exports
     /// of its components: copy them, don't release them.
-    #[cfg(feature = "occt")]
+    #[cfg(feature = "brep")]
     fn model_bodies_cached(&mut self, m: &cadrs_eda::footprint::Model3d) -> Result<(Vec<BodyId>, f64), String> {
         use cadrs_kernel::Kernel;
         // (Whether its file is loaded too: until it is, the generated body stands in.)
@@ -997,7 +997,7 @@ impl Rebuilder {
     }
 
     /// A mesh part as a faceted solid (its own triangles sewn), when its model can't be had.
-    #[cfg(feature = "occt")]
+    #[cfg(feature = "brep")]
     fn mesh_body(&mut self, state: &State, part: PartId) -> Result<BodyId, String> {
         use cadrs_kernel::Kernel;
         let s = &state.part(part).ok_or("it no longer exists")?.part.solid;
@@ -1009,7 +1009,7 @@ impl Rebuilder {
         self.kernel.mesh_solid(&tris, 1e-4).map_err(|e| format!("its mesh doesn't make a solid: {e}"))
     }
 
-    #[cfg(not(feature = "occt"))]
+    #[cfg(not(feature = "brep"))]
     pub fn export_step(&mut self, _features: &[Feature], _req: &StepRequest) -> Result<Vec<StepFile>, String> {
         Err("STEP export needs the solid-modelling kernel".into())
     }
@@ -1095,7 +1095,7 @@ impl Rebuilder {
         let mut tris: Vec<crate::views::ShadedTriangle> = Vec::new();
         // Each triangle's body (its index in `bodies`), for `hide_occluded_pieces`.
         let mut owners: Vec<Option<usize>> = Vec::new();
-        #[cfg(feature = "occt")]
+        #[cfg(feature = "brep")]
         let mut bodies: Vec<(BodyId, Arc<cadrs_kernel::BodyNames>)> = Vec::new();
         for (el, studio) in &st.studios {
             let occs: Vec<&crate::drawing_assembly::OccState> =
@@ -1104,7 +1104,7 @@ impl Rebuilder {
                 continue;
             }
             let build = self.rebuild(&studio.features);
-            #[cfg(feature = "occt")]
+            #[cfg(feature = "brep")]
             let kstate = self.last.clone();
             for o in occs {
                 let Some(p) = build.part(o.part) else { continue };
@@ -1114,11 +1114,11 @@ impl Rebuilder {
                 // that check its edges' visibility (`hide_occluded_pieces`).
                 let shaded = crate::views::shade(&[&q], &req.frame, &studio.props, &studio.appearances);
                 // Owned by the body pushed below, if it is.
-                #[cfg(feature = "occt")]
+                #[cfg(feature = "brep")]
                 let first = tris.len();
                 owners.extend(std::iter::repeat_n(None, shaded.len()));
                 tris.extend(shaded);
-                #[cfg(feature = "occt")]
+                #[cfg(feature = "brep")]
                 {
                     use cadrs_kernel::Kernel;
                     let Some(s) = kstate.part(o.part) else { continue };
@@ -1158,7 +1158,7 @@ impl Rebuilder {
         let mut paired: Vec<(crate::views::ShadedTriangle, Option<usize>)> = tris.into_iter().zip(owners).collect();
         paired.sort_by(|a, b| mean(&b.0).total_cmp(&mean(&a.0)));
         let (tris, owners): (Vec<_>, Vec<_>) = paired.into_iter().unzip();
-        #[cfg(feature = "occt")]
+        #[cfg(feature = "brep")]
         {
             use cadrs_kernel::Kernel;
             let ids: Vec<BodyId> = bodies.iter().map(|(b, _)| *b).collect();
@@ -1191,7 +1191,7 @@ impl Rebuilder {
         Ok(out)
     }
 
-    #[cfg(feature = "occt")]
+    #[cfg(feature = "brep")]
     fn project_parts(
         &mut self,
         state: &State,
@@ -1236,7 +1236,7 @@ impl Rebuilder {
         Ok((proj, hatch))
     }
 
-    #[cfg(not(feature = "occt"))]
+    #[cfg(not(feature = "brep"))]
     fn project_parts(
         &mut self,
         _state: &State,
@@ -1271,7 +1271,7 @@ impl Rebuilder {
         };
         // P3I.5 (SM1.6, SM12): Extrude → Remove, Fillet, Chamfer and Face patterns on an active
         // sheet metal model edit its definition.
-        #[cfg(feature = "occt")]
+        #[cfg(feature = "brep")]
         if let Some(r) = self.sheet_metal_aware(before, f, state) {
             return r.unwrap_or_else(fail);
         }
@@ -1303,120 +1303,120 @@ impl Rebuilder {
             }
             // P3I.6 (SM14.3): an ordinary Extrude can't take a flat-pattern sketch.
             FeatureKind::Extrude(e) if crate::sheetmetal_flat::on_flat(before, &e.sketches()) => fail(crate::sheetmetal_flat::MODEL_SPACE.into()),
-            #[cfg(feature = "occt")]
+            #[cfg(feature = "brep")]
             FeatureKind::Extrude(e) => match self.extrude(before, f.id, e, state) {
                 Ok(o) => o,
                 Err(why) => fail(why),
             },
-            #[cfg(feature = "occt")]
+            #[cfg(feature = "brep")]
             FeatureKind::Boolean(b) => match self.boolean(f.id, b, state) {
                 Ok(o) => o,
                 Err(why) => fail(why),
             },
-            #[cfg(feature = "occt")]
+            #[cfg(feature = "brep")]
             FeatureKind::Revolve(r) => match self.revolve(before, f.id, r, state) {
                 Ok(o) => o,
                 Err(why) => fail(why),
             },
-            #[cfg(feature = "occt")]
+            #[cfg(feature = "brep")]
             FeatureKind::Fillet(x) => self.fillet(f.id, x, state).unwrap_or_else(fail),
-            #[cfg(feature = "occt")]
+            #[cfg(feature = "brep")]
             FeatureKind::Chamfer(x) => self.chamfer(f.id, x, state).unwrap_or_else(fail),
-            #[cfg(feature = "occt")]
+            #[cfg(feature = "brep")]
             FeatureKind::Shell(x) => self.shell(f.id, x, state).unwrap_or_else(fail),
-            #[cfg(feature = "occt")]
+            #[cfg(feature = "brep")]
             FeatureKind::DirectEdit(x) => self.direct_edit(f.id, x, state).unwrap_or_else(fail),
-            #[cfg(feature = "occt")]
+            #[cfg(feature = "brep")]
             FeatureKind::Hole(x) => self.hole(before, f.id, x, state).unwrap_or_else(fail),
-            #[cfg(feature = "occt")]
+            #[cfg(feature = "brep")]
             FeatureKind::Plane(x) => self.plane(before, f.id, x, state).unwrap_or_else(fail),
-            #[cfg(feature = "occt")]
+            #[cfg(feature = "brep")]
             FeatureKind::Sweep(x) => self.sweep(before, f.id, x, state).unwrap_or_else(fail),
-            #[cfg(feature = "occt")]
+            #[cfg(feature = "brep")]
             FeatureKind::Loft(x) => self.loft(before, f.id, x, state).unwrap_or_else(fail),
-            #[cfg(feature = "occt")]
+            #[cfg(feature = "brep")]
             FeatureKind::Split(x) => self.split_parts(before, f.id, x, state).unwrap_or_else(fail),
             FeatureKind::MateConnector(x) => self.mate_connector(before, f.id, x, state).unwrap_or_else(fail),
-            #[cfg(feature = "occt")]
+            #[cfg(feature = "brep")]
             FeatureKind::Pattern(x) => self.pattern(before, f.id, x, state).unwrap_or_else(fail),
-            #[cfg(feature = "occt")]
+            #[cfg(feature = "brep")]
             FeatureKind::Mirror(x) => self.mirror(before, f.id, x, state).unwrap_or_else(fail),
-            #[cfg(feature = "occt")]
+            #[cfg(feature = "brep")]
             FeatureKind::Draft(x) => self.draft(before, f.id, x, state).unwrap_or_else(fail),
-            #[cfg(feature = "occt")]
+            #[cfg(feature = "brep")]
             FeatureKind::Derived(x) => self.derived(before, f.id, x, state).unwrap_or_else(fail),
-            #[cfg(not(feature = "occt"))]
+            #[cfg(not(feature = "brep"))]
             FeatureKind::Derived(_) => fail("This feature needs the solid-modelling kernel".into()),
             FeatureKind::Transform(x) => self.transform(before, f.id, x, state).unwrap_or_else(fail),
-            #[cfg(feature = "occt")]
+            #[cfg(feature = "brep")]
             FeatureKind::Composite(x) => self.composite(f.id, x, state).unwrap_or_else(fail),
-            #[cfg(feature = "occt")]
+            #[cfg(feature = "brep")]
             FeatureKind::Import(x) => self.import(f.id, x, state).unwrap_or_else(fail),
-            #[cfg(feature = "occt")]
+            #[cfg(feature = "brep")]
             FeatureKind::Image(x) => self.picture(f.id, x, state).unwrap_or_else(fail),
-            #[cfg(feature = "occt")]
+            #[cfg(feature = "brep")]
             FeatureKind::Thicken(x) => self.thicken(before, f.id, x, state).unwrap_or_else(fail),
-            #[cfg(feature = "occt")]
+            #[cfg(feature = "brep")]
             FeatureKind::Helix(x) => self.helix(before, f.id, x, state).unwrap_or_else(fail),
-            #[cfg(feature = "occt")]
+            #[cfg(feature = "brep")]
             FeatureKind::Fill(x) => self.fill(before, f.id, x, state).unwrap_or_else(fail),
-            #[cfg(feature = "occt")]
+            #[cfg(feature = "brep")]
             FeatureKind::SheetMetalModel(x) => self.sheet_metal_model(before, f.id, &f.name, x, state).unwrap_or_else(fail),
-            #[cfg(not(feature = "occt"))]
+            #[cfg(not(feature = "brep"))]
             FeatureKind::SheetMetalModel(_) => fail("Sheet metal needs the solid-modelling kernel".into()),
-            #[cfg(feature = "occt")]
+            #[cfg(feature = "brep")]
             FeatureKind::ModifyJoint(x) => self.modify_joint(f.id, &f.name, x, state).unwrap_or_else(fail),
-            #[cfg(not(feature = "occt"))]
+            #[cfg(not(feature = "brep"))]
             FeatureKind::ModifyJoint(_) => fail("Sheet metal needs the solid-modelling kernel".into()),
             // P3I.9.
-            #[cfg(feature = "occt")]
+            #[cfg(feature = "brep")]
             FeatureKind::SheetMetalLoft(x) => self.sheet_metal_loft(before, f.id, &f.name, x, state).unwrap_or_else(fail),
-            #[cfg(feature = "occt")]
+            #[cfg(feature = "brep")]
             FeatureKind::Form(x) => self.sheet_metal_form(before, f.id, &f.name, x, state).unwrap_or_else(fail),
-            #[cfg(feature = "occt")]
+            #[cfg(feature = "brep")]
             FeatureKind::TagForm(x) => self.tag_form(f.id, x, state).unwrap_or_else(fail),
-            #[cfg(not(feature = "occt"))]
+            #[cfg(not(feature = "brep"))]
             FeatureKind::SheetMetalLoft(_) | FeatureKind::Form(_) | FeatureKind::TagForm(_) => fail("Sheet metal needs the solid-modelling kernel".into()),
             // P3I.4.
-            #[cfg(feature = "occt")]
+            #[cfg(feature = "brep")]
             FeatureKind::SheetMetal(x) => self.sheet_metal_feature(before, f.id, &f.name, x, state).unwrap_or_else(fail),
-            #[cfg(not(feature = "occt"))]
+            #[cfg(not(feature = "brep"))]
             FeatureKind::SheetMetal(_) => fail("Sheet metal needs the solid-modelling kernel".into()),
             // P3I.5.
-            #[cfg(feature = "occt")]
+            #[cfg(feature = "brep")]
             FeatureKind::SheetMetalTool(x) => self.sheet_metal_tool(before, f.id, &f.name, x, state).unwrap_or_else(fail),
-            #[cfg(not(feature = "occt"))]
+            #[cfg(not(feature = "brep"))]
             FeatureKind::SheetMetalTool(_) => fail("Sheet metal needs the solid-modelling kernel".into()),
             // P3I.6.
-            #[cfg(feature = "occt")]
+            #[cfg(feature = "brep")]
             FeatureKind::FlatExtrude(x) => self.flat_extrude(before, f.id, &f.name, x, state).unwrap_or_else(fail),
-            #[cfg(not(feature = "occt"))]
+            #[cfg(not(feature = "brep"))]
             FeatureKind::FlatExtrude(_) => fail("Sheet metal needs the solid-modelling kernel".into()),
-            #[cfg(not(feature = "occt"))]
+            #[cfg(not(feature = "brep"))]
             FeatureKind::Thicken(_) | FeatureKind::Helix(_) | FeatureKind::Fill(_) | FeatureKind::Image(_) => {
                 fail("This feature needs the solid-modelling kernel".into())
             }
-            #[cfg(not(feature = "occt"))]
+            #[cfg(not(feature = "brep"))]
             FeatureKind::Composite(_) => fail("This feature needs the solid-modelling kernel".into()),
-            #[cfg(not(feature = "occt"))]
+            #[cfg(not(feature = "brep"))]
             FeatureKind::Draft(_) | FeatureKind::Transform(_) => fail("This feature needs the solid-modelling kernel".into()),
-            #[cfg(not(feature = "occt"))]
+            #[cfg(not(feature = "brep"))]
             FeatureKind::Import(_) | FeatureKind::Derived(_) => fail("Imports need the solid-modelling kernel".into()),
-            #[cfg(not(feature = "occt"))]
+            #[cfg(not(feature = "brep"))]
             FeatureKind::Pattern(_) | FeatureKind::Mirror(_) => fail("This feature needs the solid-modelling kernel".into()),
-            #[cfg(not(feature = "occt"))]
+            #[cfg(not(feature = "brep"))]
             FeatureKind::Plane(_) | FeatureKind::Sweep(_) | FeatureKind::Loft(_) | FeatureKind::Split(_) => {
                 fail("This feature needs the solid-modelling kernel".into())
             }
-            #[cfg(not(feature = "occt"))]
+            #[cfg(not(feature = "brep"))]
             FeatureKind::Fillet(_) | FeatureKind::Chamfer(_) | FeatureKind::Shell(_) | FeatureKind::Hole(_) | FeatureKind::DirectEdit(_) => {
                 fail("This feature needs the solid-modelling kernel".into())
             }
-            #[cfg(not(feature = "occt"))]
+            #[cfg(not(feature = "brep"))]
             FeatureKind::Revolve(_) => fail("Revolves need the solid-modelling kernel".into()),
-            #[cfg(not(feature = "occt"))]
+            #[cfg(not(feature = "brep"))]
             FeatureKind::Extrude(e) => prism_fallback(before, f.id, e, state).unwrap_or_else(fail),
-            #[cfg(not(feature = "occt"))]
+            #[cfg(not(feature = "brep"))]
             FeatureKind::Boolean(_) => fail("Booleans need the solid-modelling kernel".into()),
         }
     }
@@ -1435,7 +1435,7 @@ impl Rebuilder {
         #[allow(unused_mut)]
         let mut base = x.base_frame(before, &parts)?;
         // P3.11: the Alignment entity's direction is the primary axis.
-        #[cfg(feature = "occt")]
+        #[cfg(feature = "brep")]
         if let Some(d) = &x.alignment {
             let z = self.direction(before, state, d)?;
             base = crate::mate::aligned(base, [z.x, z.y, z.z]);
@@ -1478,7 +1478,7 @@ fn parent_below(features: &[Feature], i: usize) -> Option<String> {
 }
 
 /// Without a kernel: a blind New extrude as the prism mesh.
-#[cfg(not(feature = "occt"))]
+#[cfg(not(feature = "brep"))]
 fn prism_fallback(before: &[Feature], id: FeatureId, e: &ExtrudeFeature, state: &Arc<State>) -> Result<Output, String> {
     if let Some(p) = e.problem() {
         return Err(p.into());
@@ -1581,22 +1581,22 @@ fn missing_inputs(before: &[Feature], f: &Feature, state: &State) -> Vec<usize> 
     out
 }
 
-#[cfg(feature = "occt")]
+#[cfg(feature = "brep")]
 fn face_resolves(state: &State, f: &crate::document::FaceRef) -> bool {
     kernel_ops::face_resolves(state, f)
 }
 
-#[cfg(not(feature = "occt"))]
+#[cfg(not(feature = "brep"))]
 fn face_resolves(state: &State, f: &crate::document::FaceRef) -> bool {
     state.parts.iter().any(|p| p.part.solid.faces.iter().any(|x| x.name == f.face))
 }
 
-#[cfg(feature = "occt")]
+#[cfg(feature = "brep")]
 fn entity_resolves(state: &State, e: &crate::applied::EdgeOrFace) -> bool {
     kernel_ops::entity_resolves(state, e)
 }
 
-#[cfg(not(feature = "occt"))]
+#[cfg(not(feature = "brep"))]
 fn entity_resolves(state: &State, e: &crate::applied::EdgeOrFace) -> bool {
     match e {
         crate::applied::EdgeOrFace::Edge(r) => {
@@ -1609,7 +1609,7 @@ fn entity_resolves(state: &State, e: &crate::applied::EdgeOrFace) -> bool {
 // ---------------------------------------------------------------------------------------------
 // Extrude and Boolean through the kernel
 
-#[cfg(feature = "occt")]
+#[cfg(feature = "brep")]
 mod kernel_ops {
     use super::*;
     use cadrs_kernel::naming::{self, BodyNames};
@@ -3170,10 +3170,10 @@ fn run(rx: mpsc::Receiver<Job>) {
     REPORTS_PROGRESS.with(|r| r.set(true));
     let mut rebuilder = Rebuilder::new();
     // The snapshot of the last app rebuild, written once the thread has been idle a while.
-    #[cfg(feature = "occt")]
+    #[cfg(feature = "brep")]
     let mut pending_save: Option<session::PendingSave> = None;
     loop {
-        #[cfg(feature = "occt")]
+        #[cfg(feature = "brep")]
         let job = match rx.recv_timeout(session::SAVE_AFTER) {
             Ok(job) => job,
             Err(mpsc::RecvTimeoutError::Timeout) => {
@@ -3184,18 +3184,18 @@ fn run(rx: mpsc::Receiver<Job>) {
             }
             Err(mpsc::RecvTimeoutError::Disconnected) => break,
         };
-        #[cfg(not(feature = "occt"))]
+        #[cfg(not(feature = "brep"))]
         let Ok(job) = rx.recv() else { break };
         match job {
             Job::Rebuild { features, reply, cancelled, persist } => {
                 if cancelled.load(Ordering::Relaxed) {
                     continue;
                 }
-                #[cfg(feature = "occt")]
+                #[cfg(feature = "brep")]
                 if persist {
                     let _ = catch_unwind(AssertUnwindSafe(|| rebuilder.restore_snapshot(&features)));
                 }
-                #[cfg(not(feature = "occt"))]
+                #[cfg(not(feature = "brep"))]
                 let _ = persist;
                 let result = catch_unwind(AssertUnwindSafe(|| rebuilder.rebuild(&features)));
                 let build = match result {
@@ -3206,7 +3206,7 @@ fn run(rx: mpsc::Receiver<Job>) {
                         Build::failed(&features, "Internal error while rebuilding")
                     }
                 };
-                #[cfg(feature = "occt")]
+                #[cfg(feature = "brep")]
                 if persist && build.computed > 0 {
                     pending_save = rebuilder.plan_save(&features);
                 }
@@ -3303,7 +3303,7 @@ pub fn clear_cache() {
 /// of once the rebuild thread goes idle: the Onshape importer runs each document in its own
 /// process, and a later document's Derived feature restores this one's Part Studio from it.
 /// Nothing is written without a snapshot store ([`session::set_store`]).
-#[cfg(feature = "occt")]
+#[cfg(feature = "brep")]
 pub fn save_snapshot_now(features: Vec<Feature>) {
     run_on_worker(move |r| {
         r.rebuild(&features);
@@ -3316,7 +3316,7 @@ pub fn save_snapshot_now(features: Vec<Feature>) {
 
 /// P3B.9: kernel bodies of placed parts, for work across Part Studios (an assembly's
 /// interference and export). The bodies it returns are the caller's to release.
-#[cfg(feature = "occt")]
+#[cfg(feature = "brep")]
 impl Rebuilder {
     /// A copy of the part `part` of the Part Studio `features` (rebuilt, mostly from the cache)
     /// moved by the rotation `rotation` (rows) and `translation` (mm).
@@ -3567,7 +3567,7 @@ pub type Triangle32 = [[f32; 3]; 3];
 /// triangles only: HLR already hides a part's edges behind its own faces, and its coarse display
 /// mesh lying a hair nearer than the true surface cut visible outlines into stubs (Final
 /// regression judge: `course_drw_ex3_update` 29–32, the cut-out ring and the screw outlines).
-#[cfg(feature = "occt")]
+#[cfg(feature = "brep")]
 fn hide_occluded_pieces(
     k: &dyn cadrs_kernel::Kernel,
     ids: &[BodyId],
@@ -3709,9 +3709,9 @@ fn hide_occluded_pieces(
 /// triangles hide them: the curves on the parts' surfaces where one part enters another (edges
 /// of the common inside a part are hidden by that part's faces). They are drawn as visible
 /// edges with no source (nothing attaches to them).
-#[cfg(feature = "occt")]
+#[cfg(feature = "brep")]
 fn part_intersections(
-    k: &mut cadrs_kernel::backend::occt::OcctKernel,
+    k: &mut cadrs_kernel::DefaultKernel,
     ids: &[BodyId],
     frame: &cadrs_kernel::ViewFrame,
     opts: &cadrs_kernel::ProjectOptions,
@@ -3748,7 +3748,7 @@ fn part_intersections(
 }
 
 /// The part of polyline `pts` from arc length `s0` to `s1`.
-#[cfg(feature = "occt")]
+#[cfg(feature = "brep")]
 fn sub_polyline(pts: &[nalgebra::Point2<f64>], s0: f64, s1: f64) -> Vec<nalgebra::Point2<f64>> {
     let mut out = Vec::new();
     let mut s = 0.0;
@@ -3772,7 +3772,7 @@ type ProjectedParts = (cadrs_kernel::Projection, Vec<Vec<[f64; 2]>>);
 
 /// The layout of a derived board among `features` (or in the features of Part Studios they
 /// derive, at any depth) that has the footprint `fp`.
-#[cfg(feature = "occt")]
+#[cfg(feature = "brep")]
 fn layout_with(features: &[Feature], fp: uuid::Uuid) -> Option<&cadrs_eda::board::Board> {
     features.iter().find_map(|f| match &f.kind {
         FeatureKind::Derived(d) => d.board.as_ref().map(|b| &b.layout).filter(|l| l.footprints.iter().any(|x| x.id == fp)).or_else(|| layout_with(&d.studio, fp)),

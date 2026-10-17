@@ -1,6 +1,6 @@
 //! P3.6: the applied features through the feature list (Fillet, Chamfer, Shell, Hole), reorder
 //! and folders. Every expected value is derived by hand in the test's comment.
-#![cfg(feature = "occt")]
+#![cfg(feature = "brep")]
 #![allow(clippy::field_reassign_with_default)]
 
 use std::f64::consts::PI;

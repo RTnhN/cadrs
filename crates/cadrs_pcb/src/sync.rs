@@ -304,7 +304,7 @@ pub fn run_now(plan: SyncPlan) -> Result<SyncOutcome, String> {
     run(plan).wait().unwrap_or_else(|| Err("The kernel thread stopped".into()))
 }
 
-#[cfg(feature = "occt")]
+#[cfg(feature = "brep")]
 fn run_on(r: &mut cadrs_core::rebuild::Rebuilder, plan: &SyncPlan) -> Result<SyncOutcome, String> {
     let mut parts = Vec::new();
     let mut result = Ok(());
@@ -350,7 +350,7 @@ fn run_on(r: &mut cadrs_core::rebuild::Rebuilder, plan: &SyncPlan) -> Result<Syn
     Ok(SyncOutcome { command, unrecognised, warnings: m.warnings })
 }
 
-#[cfg(not(feature = "occt"))]
+#[cfg(not(feature = "brep"))]
 fn run_on(_r: &mut cadrs_core::rebuild::Rebuilder, _plan: &SyncPlan) -> Result<SyncOutcome, String> {
     Err("Sync needs the solid-modelling kernel".into())
 }

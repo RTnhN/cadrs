@@ -1,6 +1,6 @@
 //! Onshape import: the Import feature (STEP and STL files stored with the document) and the
 //! Derived feature (parts of another Part Studio, of this document or another one).
-#![cfg(feature = "occt")]
+#![cfg(feature = "brep")]
 
 use std::sync::Arc;
 

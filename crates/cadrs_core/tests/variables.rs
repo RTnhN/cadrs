@@ -1,6 +1,6 @@
 //! P3F.4: variables and expressions (`intro-to-parametric-cad.md` P5.1–P5.3, P5.6, X2).
 //! Every expected value is derived by hand in the test's comment.
-#![cfg(feature = "occt")]
+#![cfg(feature = "brep")]
 
 use cadrs_core::commands::{AddFeature, EditSketch, MoveFeatures, SetExtrude, SetFeature};
 use cadrs_core::document::{Document, FeatureKind};

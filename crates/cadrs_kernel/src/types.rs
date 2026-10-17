@@ -53,6 +53,7 @@ pub enum Curve2 {
     /// An arc from `start_angle` sweeping `sweep` radians: counter-clockwise when `sweep` is
     /// positive, clockwise when it is negative.
     Arc { center: Point2<f64>, radius: f64, start_angle: f64, sweep: f64, source: Option<u64> },
+    /// A whole circle: counter-clockwise, or clockwise when `radius` is negative.
     Circle { center: Point2<f64>, radius: f64, source: Option<u64> },
     Ellipse {
         center: Point2<f64>,

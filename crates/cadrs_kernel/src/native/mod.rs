@@ -21,6 +21,7 @@ pub mod profile;
 pub mod split;
 pub mod ssi;
 pub mod surface;
+pub mod surfacing;
 pub mod sweep;
 pub mod sweep_general;
 pub mod sweep_path;

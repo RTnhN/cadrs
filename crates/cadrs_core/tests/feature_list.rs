@@ -1,7 +1,7 @@
 //! P3.9: feature-list management on the Gear Cover stand-in: the rollback bar and suppression
 //! (what is rebuilt, through the command and undo layer), deleting a folder with its features,
 //! dependencies, and regeneration times.
-#![cfg(feature = "occt")]
+#![cfg(feature = "brep")]
 
 use std::f64::consts::PI;
 

@@ -1,7 +1,7 @@
 //! The Image feature: a picture inserted into a Part Studio is a flat surface part named after
 //! its file, carrying the picture where it lies; Transform moves the picture with the part and
 //! copies it onto copies.
-#![cfg(feature = "occt")]
+#![cfg(feature = "brep")]
 
 use std::sync::Arc;
 

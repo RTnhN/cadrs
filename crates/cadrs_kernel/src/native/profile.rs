@@ -225,10 +225,11 @@ pub fn piece_of(c: &Curve2, src: Src) -> Result<Piece> {
             arc(Curve::Circle { c: p3(center), x: V3::x(), y: V3::y(), r: radius }, start_angle, sweep)
         }
         Curve2::Circle { center, radius, .. } => {
-            if radius < TOL {
+            // A negative radius runs clockwise.
+            if radius.abs() < TOL {
                 return Err(KernelError::InvalidProfile("a degenerate circle".into()));
             }
-            Piece { c: Curve::Circle { c: p3(center), x: V3::x(), y: V3::y(), r: radius }, t0: 0.0, t1: TAU, rev: false, src, more: vec![] }
+            Piece { c: Curve::Circle { c: p3(center), x: V3::x(), y: V3::y(), r: radius.abs() }, t0: 0.0, t1: TAU, rev: radius < 0.0, src, more: vec![] }
         }
         Curve2::Ellipse { center, major_radius, minor_radius, rotation, .. } => {
             if major_radius.abs() < TOL || minor_radius.abs() < TOL {

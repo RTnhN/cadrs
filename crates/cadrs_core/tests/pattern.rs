@@ -1,6 +1,6 @@
 //! P3.8: patterns, mirror and mate connectors through the feature list. Every expected value is
 //! derived by hand in the test's comment.
-#![cfg(feature = "occt")]
+#![cfg(feature = "brep")]
 #![allow(clippy::field_reassign_with_default)]
 
 use std::f64::consts::PI;

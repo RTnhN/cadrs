@@ -16,7 +16,7 @@
 //! (the grip's two extrude ends), 62.50 = 125 / 2, 8.50 = (25 − 8) / 2, and the callout's
 //! 6.60 / 11.25 / 6.00 from ISO 273 (medium series, M6: 6.6) and the ISO 4762 M6 socket head
 //! (dk 10 + 1.25, k 6).
-#![cfg(feature = "occt")]
+#![cfg(feature = "brep")]
 
 use std::sync::Arc;
 

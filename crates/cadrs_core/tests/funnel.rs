@@ -16,7 +16,7 @@
 //! **Mass.** Polypropylene is 0.033 lb/in³ exactly (913.437 kg/m³, `material`), so 2.975 in³
 //! weighs 0.0982 lb: 0.098 lb as the course's, and the inertia reads as `ex4-step18.png`'s
 //! (Lxx 0.205, Lyy 0.518, Lxz −0.059 in² lb).
-#![cfg(feature = "occt")]
+#![cfg(feature = "brep")]
 
 use cadrs_core::advanced::{LoftCondition, LoftFeature, LoftProfile, PathRef, SweepFeature};
 use cadrs_core::applied::{EdgeOrFace, FilletFeature, ShellFeature};
