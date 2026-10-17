@@ -1,0 +1,274 @@
+//! p-curves: a 3D curve lying on a surface as a curve in the surface's (u, v), parametrized by
+//! the 3D curve's own parameter. Exact for curves in planes and for rims and rulings of
+//! surfaces of revolution; otherwise an interpolating cubic through projected points, refined
+//! until it is within 1e-10 of the projection.
+
+use std::sync::Arc;
+
+use super::curve::Curve;
+use super::math::*;
+use super::nurbs::NurbsCurve;
+use super::surface::Surface;
+
+fn line2(o: P2, d: V2) -> Curve {
+    Curve::Line { o: P3::new(o.x, o.y, 0.0), d: V3::new(d.x, d.y, 0.0) }
+}
+
+/// The p-curve of `c` on [t0, t1] on `s`, its periodic coordinates shifted so its middle lies
+/// near `near` (in the face's chart) when given.
+pub fn pcurve(s: &Surface, c: &Curve, t0: f64, t1: f64, near: Option<P2>) -> Curve {
+    let pc = exact(s, c).unwrap_or_else(|| fitted(s, c, t0, t1));
+    shift_into(s, pc, (t0 + t1) * 0.5, near)
+}
+
+/// Shifts a p-curve by whole periods so its point at `tm` lies nearest `near`.
+pub fn shift_into(s: &Surface, pc: Curve, tm: f64, near: Option<P2>) -> Curve {
+    let Some(near) = near else { return pc };
+    let m = pc.point(tm);
+    let du = if s.u_periodic() { ((near.x - m.x) / TAU).round() * TAU } else { 0.0 };
+    let dv = if s.v_periodic() { ((near.y - m.y) / TAU).round() * TAU } else { 0.0 };
+    if du == 0.0 && dv == 0.0 {
+        return pc;
+    }
+    pc.transformed(&Affine::translation(V3::new(du, dv, 0.0)))
+}
+
+/// The angle of the direction `v` in the frame's xy plane.
+fn ang(f: &Frame, v: &V3) -> f64 {
+    v.dot(&f.y).atan2(v.dot(&f.x))
+}
+
+fn exact(s: &Surface, c: &Curve) -> Option<Curve> {
+    match s {
+        Surface::Plane { f } => {
+            // Model → plane coordinates is affine (rows x, y, z).
+            let m = nalgebra::Matrix3::from_rows(&[f.x.transpose(), f.y.transpose(), f.x.cross(&f.y).transpose()]);
+            let a = Affine { m, t: -(m * f.o.coords) };
+            let pc = match c {
+                Curve::Circle { c: cc, x, y, r } => {
+                    let (xl, yl) = (m * x, m * y);
+                    Curve::Circle { c: a.point(cc), x: V3::new(xl.x, xl.y, 0.0), y: V3::new(yl.x, yl.y, 0.0), r: *r }
+                }
+                Curve::Ellipse { c: cc, x, y, a: ra, b: rb } => {
+                    let (xl, yl) = (m * x, m * y);
+                    Curve::Ellipse { c: a.point(cc), x: V3::new(xl.x, xl.y, 0.0), y: V3::new(yl.x, yl.y, 0.0), a: *ra, b: *rb }
+                }
+                _ => c.transformed(&a),
+            };
+            Some(flatten(pc))
+        }
+        Surface::Cylinder { f, r } => match c {
+            Curve::Line { o, d } if d.cross(&f.z).norm() < 1e-12 * d.norm() => {
+                let l = f.local(o);
+                Some(line2(P2::new(l.y.atan2(l.x), l.z), V2::new(0.0, d.dot(&f.z))))
+            }
+            Curve::Circle { c: cc, x, y, r: rc } if coaxial_circle(f, cc, x, y) && (rc - r).abs() < 1e-7 => {
+                let sgn = x.cross(y).dot(&f.x.cross(&f.y)).signum();
+                Some(line2(P2::new(ang(f, x), f.local(cc).z), V2::new(sgn, 0.0)))
+            }
+            _ => None,
+        },
+        Surface::Cone { f, r, a } => match c {
+            Curve::Circle { c: cc, x, y, .. } if coaxial_circle(f, cc, x, y) => {
+                let sgn = x.cross(y).dot(&f.x.cross(&f.y)).signum();
+                let h = f.local(cc).z;
+                Some(line2(P2::new(ang(f, x), h / a.cos()), V2::new(sgn, 0.0)))
+            }
+            Curve::Line { o, d } => {
+                // A ruling: in a plane through the axis, along the cone's slope.
+                let l = f.local(o);
+                let rho = (l.x * l.x + l.y * l.y).sqrt();
+                let u = if rho > 1e-9 { l.y.atan2(l.x) } else {
+                    let ld = V3::new(d.dot(&f.x), d.dot(&f.y), 0.0);
+                    ld.y.atan2(ld.x)
+                };
+                let radial = f.x * u.cos() + f.y * u.sin();
+                let ruling = radial * a.sin() + f.z * a.cos();
+                if d.cross(&ruling).norm() > 1e-9 * d.norm() {
+                    return None;
+                }
+                let _ = r;
+                let v0 = (rho - r) * a.sin() + l.z * a.cos();
+                Some(line2(P2::new(u, v0), V2::new(0.0, d.dot(&ruling))))
+            }
+            _ => None,
+        },
+        Surface::Sphere { f, .. } => match c {
+            Curve::Circle { c: cc, x, y, .. } if coaxial_circle(f, cc, x, y) => {
+                let sgn = x.cross(y).dot(&f.x.cross(&f.y)).signum();
+                let l = f.local(&c.point(0.0));
+                let v = l.z.atan2((l.x * l.x + l.y * l.y).sqrt());
+                Some(line2(P2::new(ang(f, x), v), V2::new(sgn, 0.0)))
+            }
+            Curve::Circle { c: cc, x, y, .. } if (cc - f.o).norm() < 1e-9 && x.cross(y).dot(&f.z).abs() < 1e-12 => {
+                // A meridian: u const, v = ±t + v0.
+                meridian(f, &f.o, x, y)
+            }
+            _ => None,
+        },
+        Surface::Torus { f, rmaj, .. } => match c {
+            Curve::Circle { c: cc, x, y, .. } if coaxial_circle(f, cc, x, y) => {
+                let sgn = x.cross(y).dot(&f.x.cross(&f.y)).signum();
+                let l = f.local(&c.point(0.0));
+                let v = l.z.atan2((l.x * l.x + l.y * l.y).sqrt() - rmaj);
+                Some(line2(P2::new(ang(f, x), v), V2::new(sgn, 0.0)))
+            }
+            Curve::Circle { c: cc, x, y, .. } if x.cross(y).dot(&f.z).abs() < 1e-12 => {
+                let l = f.local(cc);
+                if l.z.abs() > 1e-9 || ((l.x * l.x + l.y * l.y).sqrt() - rmaj).abs() > 1e-9 {
+                    return None;
+                }
+                meridian(f, cc, x, y)
+            }
+            _ => None,
+        },
+        Surface::Revolution { f, .. } => match c {
+            Curve::Circle { c: cc, x, y, .. } if coaxial_circle(f, cc, x, y) => {
+                let sgn = x.cross(y).dot(&f.x.cross(&f.y)).signum();
+                let (_, v) = s.project(&c.point(0.0), None);
+                Some(line2(P2::new(ang(f, x), v), V2::new(sgn, 0.0)))
+            }
+            _ => None,
+        },
+        Surface::Extrusion { c: base, d } => match c {
+            Curve::Line { o, d: dl } if dl.cross(d).norm() < 1e-12 * dl.norm() => {
+                let (u, v) = s.project(o, None);
+                let _ = base;
+                Some(line2(P2::new(u, v), V2::new(0.0, dl.dot(d) / d.norm_squared())))
+            }
+            _ => None,
+        },
+        Surface::Nurbs(_) => None,
+    }
+}
+
+/// A meridian circle (in a plane through the axis, centred at `cc`): u const, v = σt + v0.
+fn meridian(f: &Frame, cc: &P3, x: &V3, y: &V3) -> Option<Curve> {
+    // The radial direction of the meridian's half plane: the in-plane direction square to z.
+    let n = x.cross(y);
+    let radial = f.z.cross(&n).normalize();
+    // In the (radial, z) plane, the circle point at t is cc + r(cos t x + sin t y); its angle
+    // from the centre is atan2(·z, ·radial).
+    let (xr, xz) = (x.dot(&radial), x.dot(&f.z));
+    let (yr, yz) = (y.dot(&radial), y.dot(&f.z));
+    let sig = (xr * yz - xz * yr).signum();
+    let v0 = xz.atan2(xr);
+    let u = ang(f, &radial);
+    let _ = cc;
+    // The half plane must be the one the circle's points use (radial positive side).
+    Some(line2(P2::new(u, v0), V2::new(0.0, sig)))
+}
+
+fn coaxial_circle(f: &Frame, cc: &P3, x: &V3, y: &V3) -> bool {
+    let n = x.cross(y);
+    if n.cross(&f.z).norm() > 1e-10 {
+        return false;
+    }
+    let w = cc - f.o;
+    (w - f.z * w.dot(&f.z)).norm() < 1e-9
+}
+
+/// Drops the z coordinate of a 2D curve (numerical noise from projecting into a plane).
+fn flatten(c: Curve) -> Curve {
+    match c {
+        Curve::Line { o, d } => Curve::Line { o: P3::new(o.x, o.y, 0.0), d: V3::new(d.x, d.y, 0.0) },
+        Curve::Nurbs(n) => {
+            let mut n = (*n).clone();
+            for h in &mut n.cps {
+                h.z = 0.0;
+            }
+            Curve::Nurbs(Arc::new(n))
+        }
+        other => other,
+    }
+}
+
+/// Interpolates projected points with the curve's own parameters.
+fn fitted(s: &Surface, c: &Curve, t0: f64, t1: f64) -> Curve {
+    let pieces = c.pieces(t0, t1);
+    let mut ts: Vec<f64> = Vec::new();
+    for w in pieces.windows(2) {
+        let n = 16;
+        for i in 0..n {
+            ts.push(w[0] + (w[1] - w[0]) * i as f64 / n as f64);
+        }
+    }
+    ts.push(t1);
+    let (mu, mv) = s.metric();
+    let mut uvs: Vec<P2> = Vec::new();
+    let project = |t: f64, hint: Option<(f64, f64)>| -> P2 {
+        let (u, v) = s.project(&c.point(t), hint);
+        P2::new(u, v)
+    };
+    for _round in 0..8 {
+        uvs.clear();
+        let mut hint: Option<(f64, f64)> = None;
+        for &t in &ts {
+            let q = project(t, hint);
+            hint = Some((q.x, q.y));
+            uvs.push(q);
+        }
+        let pts: Vec<P3> = uvs.iter().map(|q| P3::new(q.x, q.y, 0.0)).collect();
+        let fit = NurbsCurve::interpolate(&pts, &ts, 3.min(pts.len() - 1), None, None);
+        // Check the midpoints.
+        let mut ins = Vec::new();
+        for k in 0..ts.len() - 1 {
+            let tm = (ts[k] + ts[k + 1]) * 0.5;
+            let f = fit.point(tm);
+            let q = project(tm, Some((uvs[k].x, uvs[k].y)));
+            let err = ((f.x - q.x) * mu).hypot((f.y - q.y) * mv);
+            if err > 1e-10 {
+                ins.push(tm);
+            }
+        }
+        if ins.is_empty() || ts.len() > 50_000 {
+            return Curve::Nurbs(Arc::new(fit));
+        }
+        ts.extend(ins);
+        ts.sort_by(f64::total_cmp);
+    }
+    let pts: Vec<P3> = uvs.iter().map(|q| P3::new(q.x, q.y, 0.0)).collect();
+    Curve::Nurbs(Arc::new(NurbsCurve::interpolate(&pts, &ts[..pts.len()], 3, None, None)))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn check(s: &Surface, c: &Curve, t0: f64, t1: f64) {
+        let pc = pcurve(s, c, t0, t1, None);
+        for i in 0..=20 {
+            let t = t0 + (t1 - t0) * i as f64 / 20.0;
+            let q = pc.point(t);
+            let p = s.eval(q.x, q.y);
+            assert!((p - c.point(t)).norm() < 1e-8, "{s:?} {c:?} at {t}: {}", (p - c.point(t)).norm());
+        }
+    }
+
+    #[test]
+    fn pcurves_lie_on_their_curves() {
+        let f = Frame::from_xz(P3::new(1.0, 2.0, 3.0), V3::new(1.0, 0.2, 0.0), V3::new(0.1, 0.0, 1.0));
+        let cyl = Surface::Cylinder { f, r: 5.0 };
+        let rim = Curve::Circle { c: f.o + f.z * 2.0, x: f.y, y: -f.x, r: 5.0 };
+        check(&cyl, &rim, 0.3, 4.0);
+        let ruling = Curve::Line { o: f.o + f.x * 5.0, d: -f.z };
+        check(&cyl, &ruling, -3.0, 2.0);
+        // An oblique ellipse: fitted.
+        let pl = Surface::Plane { f: Frame::from_z(f.o, V3::new(0.3, 0.1, 1.0)) };
+        let e = super::super::ssi::surface_surface(&pl, ((0.0, 1.0), (0.0, 1.0)), &cyl, ((0.0, TAU), (-10.0, 10.0)), &Bbox { min: P3::new(-20.0, -20.0, -20.0), max: P3::new(20.0, 20.0, 20.0) });
+        assert_eq!(e.len(), 1);
+        check(&cyl, &e[0].c, 0.0, TAU);
+        check(&pl, &e[0].c, 0.0, TAU);
+        let sph = Surface::Sphere { f, r: 5.0 };
+        let lat = Curve::Circle { c: f.o + f.z * 3.0, x: f.x, y: f.y, r: 4.0 };
+        check(&sph, &lat, 0.0, TAU);
+        let mer = Curve::Circle { c: f.o, x: f.x, y: f.z, r: 5.0 };
+        check(&sph, &mer, -1.0, 1.0);
+        let tor = Surface::Torus { f, rmaj: 10.0, rmin: 2.0 };
+        let m2 = Curve::Circle { c: f.o + f.y * 10.0, x: f.y, y: f.z, r: 2.0 };
+        check(&tor, &m2, 0.0, TAU);
+        let cone = Surface::Cone { f, r: 3.0, a: 0.3 };
+        let ruling = Curve::Line { o: cone.eval(1.0, 0.0), d: cone.d1(1.0, 0.0).2 };
+        check(&cone, &ruling, -2.0, 2.0);
+    }
+}

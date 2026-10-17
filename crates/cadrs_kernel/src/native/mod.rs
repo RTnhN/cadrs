@@ -10,8 +10,12 @@ pub mod kernel;
 pub mod mass;
 pub mod math;
 pub mod nurbs;
+pub mod pcurve;
 pub mod profile;
+pub mod split;
+pub mod ssi;
 pub mod surface;
+pub mod sweep;
 pub mod tess;
 pub mod topo;
 
