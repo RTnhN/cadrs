@@ -334,11 +334,12 @@ mod tests {
                 faces += p.body.faces.len();
                 solids += p.body.solids.len();
                 // Edges off their faces within the file's own tolerance are not our doing.
+                let size = p.body.bbox().diagonal();
                 let errs: Vec<String> = p
                     .body
                     .check()
                     .into_iter()
-                    .filter(|e| !e.split("off the edge by ").nth(1).and_then(|d| d.parse::<f64>().ok()).is_some_and(|d| d < 1e-3))
+                    .filter(|e| !e.split("off the edge by ").nth(1).and_then(|d| d.parse::<f64>().ok()).is_some_and(|d| d < 1e-3f64.max(1e-6 * size)))
                     .collect();
                 if !errs.is_empty() {
                     problems.push(format!("{} check errors ({})", errs.len(), errs[0]));
@@ -377,7 +378,7 @@ mod tests {
             let warn = if m.warnings.is_empty() { String::new() } else { format!(" warnings {} ({})", m.warnings.len(), m.warnings[0]) };
             if problems.is_empty() {
                 ok += 1;
-                println!("ok   {path}: {} parts {faces} faces {solids} solids V={vol:.4} {dt:.2}s{warn}", m.parts.len());
+                println!("ok   {path}: {} parts {} occurrences (model {:?}) {faces} faces {solids} solids V={vol:.4} {dt:.2}s{warn}", m.parts.len(), m.occurrences.len(), m.name);
             } else {
                 bad += 1;
                 let bb = m.parts[0].body.bbox();
@@ -387,114 +388,70 @@ mod tests {
         println!("{ok} ok, {bad} bad");
     }
 
+    /// Writes the test bodies as STEP and IGES files (and a two-part assembly) into the directory
+    /// `CADRS_EXPORT_DIR`, with their volumes and areas in `expected.txt`, to check them with
+    /// other readers.
     #[test]
     #[ignore]
-    fn debug_dump() {
-        let Ok(path) = std::env::var("CADRS_DUMP") else { return };
-        let bytes = std::fs::read(&path).unwrap();
-        let m = super::super::step::read(&bytes).unwrap();
-        for w in &m.warnings {
-            println!("warning: {w}");
-        }
-        let b = &m.parts[0].body;
-        for e in b.check() {
-            println!("check: {e}");
-        }
-        // Faces whose exact and tessellated areas differ.
-        let defl = b.bbox().diagonal() * 2e-4;
-        let (fm, _) = super::super::tess::mesh_body(b, defl, 0.1);
-        for (fi, m) in fm.iter().enumerate() {
-            let exact = super::super::mass::face_area(b, fi).0;
-            let mut a = 0.0;
-            for t in &m.indices {
-                let [p, q, r] = t.map(|i| m.positions[i as usize]);
-                a += (q - p).cross(&(r - p)).norm() / 2.0;
-            }
-            if (a - exact).abs() > 1e-2 * exact.abs().max(1e-6) {
-                let mut tiny = f64::INFINITY;
-                for l in &b.faces[fi].loops {
-                    for c in l {
-                        let e = &b.edges[c.edge];
-                        for k in 0..=64 {
-                            let q = c.pc.point(e.t[0] + (e.t[1] - e.t[0]) * k as f64 / 64.0);
-                            for x in [q.x, q.y] {
-                                if x != 0.0 && x.abs() < tiny {
-                                    tiny = x.abs();
-                                    if tiny < 1e-40 {
-                                        println!("tiny {x:e} at t {} of edge {} {:?} t {:?} pc {:?}", e.t[0] + (e.t[1] - e.t[0]) * k as f64 / 64.0, c.edge, e.curve, e.t, c.pc);
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-                // Brute force over the loops' uv box (right for rectangular domains).
-                let polys = super::super::classify::face_polygons(b, &b.faces[fi]);
-                let (mut u0, mut u1, mut v0, mut v1) = (f64::INFINITY, f64::NEG_INFINITY, f64::INFINITY, f64::NEG_INFINITY);
-                for q in polys.iter().flatten() {
-                    (u0, u1, v0, v1) = (u0.min(q.x), u1.max(q.x), v0.min(q.y), v1.max(q.y));
-                }
-                let n = 400;
-                let mut brute = 0.0;
-                for i in 0..n {
-                    for j in 0..n {
-                        let (u, v) = (u0 + (u1 - u0) * (i as f64 + 0.5) / n as f64, v0 + (v1 - v0) * (j as f64 + 0.5) / n as f64);
-                        let (_, su, sv) = b.faces[fi].surf.d1(u, v);
-                        brute += su.cross(&sv).norm();
-                    }
-                }
-                brute *= (u1 - u0) * (v1 - v0) / (n * n) as f64;
-                println!("area: face {fi} ({:?}) exact {exact:.6} mesh {a:.6} box integral {brute:.6}; smallest uv {tiny:e}", b.faces[fi].surf.kind());
+    fn write_samples() {
+        let Ok(dir) = std::env::var("CADRS_EXPORT_DIR") else { return };
+        let dir = std::path::PathBuf::from(dir);
+        let mut k = NativeKernel::new();
+        let mut all = bodies(&mut k);
+        let nb = nurbs_top_box(&mut k);
+        all.push(("NURBS top face", nb, 6000.0));
+        let mut expected = String::new();
+        for (i, (name, b, _)) in all.iter().enumerate() {
+            let mp = k.mass_properties(*b).unwrap();
+            for (fmt, ext) in [(ExchangeFormat::Step, "step"), (ExchangeFormat::Iges, "igs")] {
+                let bytes = k.export_model(fmt, name, &[(*b, name.to_string())], &[]).unwrap();
+                let file = format!("body{i}.{ext}");
+                std::fs::write(dir.join(&file), bytes).unwrap();
+                expected.push_str(&format!("{file} {} {} {name}\n", mp.volume, mp.surface_area));
             }
         }
-        if let Some(e) = std::env::var("CADRS_EDGE").ok().and_then(|s| s.parse::<usize>().ok()) {
-            for (fi, f) in b.faces.iter().enumerate() {
-                for (li, l) in f.loops.iter().enumerate() {
-                    for c in l.iter().filter(|c| c.edge == e) {
-                        println!("edge {e}: face {fi} loop {li} fwd {} ({:?}, sense {}, {} loops)", c.fwd, f.surf.kind(), f.sense, f.loops.len());
-                    }
-                }
-            }
-        }
-        let only: Option<usize> = std::env::var("CADRS_FACE").ok().and_then(|s| s.parse().ok());
-        for (fi, f) in b.faces.iter().enumerate() {
-            if only.map_or(false, |o| o != fi) {
-                continue;
-            }
-            let kind = match &f.surf {
-                Surface::Nurbs(n) => format!("nurbs {}x{} deg {}x{} range {:?}", n.cps.len(), n.cps[0].len(), n.du, n.dv, n.range()),
-                s => format!("{:?} {s:?}", s.kind()),
-            };
-            println!("face {fi}: {kind} sense {}", f.sense);
-            for (li, l) in f.loops.iter().enumerate() {
-                for c in l {
-                    let e = &b.edges[c.edge];
-                    let (t0, t1) = crate::native::topo::co_range(e, c.fwd);
-                    let (a, z) = (c.pc.point(t0), c.pc.point(t1));
-                    let ck = match &e.curve {
-                        crate::native::curve::Curve::Line { .. } => "line",
-                        crate::native::curve::Curve::Circle { .. } => "circle",
-                        crate::native::curve::Curve::Ellipse { .. } => "ellipse",
-                        crate::native::curve::Curve::Nurbs(_) => "nurbs",
-                    };
-                    println!("  loop {li} edge {} {ck}{} fwd {} t {:.4}..{:.4} uv ({:.5},{:.5}) -> ({:.5},{:.5})", c.edge, if e.degenerate { " (degenerate)" } else { "" }, c.fwd, t0, t1, a.x, a.y, z.x, z.y);
-                    println!("    from {:?} to {:?} curve {:?} pc {:?}", b.verts[b.co_start(c)].p, b.verts[b.co_end(c)].p, e.curve, c.pc);
-                    if let crate::native::curve::Curve::Nurbs(n) = &e.curve {
-                        let (r0, r1) = n.range();
-                        println!(
-                            "    nurbs deg {} {} cps range {r0}..{r1} knots {:?}; ends off vertices by {:.3e} {:.3e}; range ends {:?} {:?}",
-                            n.degree,
-                            n.cps.len(),
-                            n.knots,
-                            (e.point(e.t[0]) - b.verts[e.v[0]].p).norm(),
-                            (e.point(e.t[1]) - b.verts[e.v[1]].p).norm(),
-                            n.point(r0),
-                            n.point(r1)
-                        );
-                        println!("    vertices {:?} {:?}", b.verts[e.v[0]].p, b.verts[e.v[1]].p);
-                    }
-                }
-            }
+        let turn = Motion { linear: nalgebra::Matrix3::new(0.0, -1.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0), translation: Vector3::new(200.0, 10.0, 5.0) };
+        let insts = vec![
+            ExportInstance { part: 0, placement: Motion::identity(), name: "Box <1>".into() },
+            ExportInstance { part: 0, placement: turn, name: "Box <2>".into() },
+            ExportInstance { part: 1, placement: Motion::translation(Vector3::new(0.0, 0.0, 25.0)), name: "Pin <1>".into() },
+        ];
+        let bytes = k.export_model(ExchangeFormat::Step, "Two parts", &[(all[0].1, "Box".into()), (all[1].1, "Pin".into())], &insts).unwrap();
+        std::fs::write(dir.join("assembly.step"), bytes).unwrap();
+        std::fs::write(dir.join("expected.txt"), expected).unwrap();
+    }
+
+    /// Writers differ in the order of a placement's two representations (child first, as OCCT
+    /// and we write, or parent first): both read to the same placement.
+    #[test]
+    fn assembly_placements_in_either_representation_order() {
+        let mut k = NativeKernel::new();
+        let a = extrude(&mut k, vec![region(poly(&[p(0., 0.), p(10., 0.), p(10., 10.), p(0., 10.)]), vec![])], 10.0);
+        let turn = Motion { linear: nalgebra::Matrix3::new(0.0, -1.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0), translation: Vector3::new(50.0, 7.0, -3.0) };
+        let insts = vec![ExportInstance { part: 0, placement: turn, name: "turned".into() }];
+        let bytes = k.export_model(ExchangeFormat::Step, "asm", &[(a, "cube".into())], &insts).unwrap();
+        let text = String::from_utf8(bytes).unwrap();
+        // Swap the representations and the transformation's items.
+        let swap = |line: &str, kw: &str| -> String {
+            let Some(i) = line.find(kw) else { return line.to_string() };
+            let start = i + kw.len();
+            let end = start + line[start..].find(')').unwrap();
+            let args: Vec<&str> = line[start..end].split(',').collect();
+            let (a, b) = (args[2], args[3]);
+            format!("{}'','',{b},{a}{}", &line[..start], &line[end..])
+        };
+        let swapped: String = text
+            .lines()
+            .map(|l| swap(&swap(l, "(REPRESENTATION_RELATIONSHIP("), "ITEM_DEFINED_TRANSFORMATION("))
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert_ne!(swapped, text);
+        for bytes in [text.as_bytes(), swapped.as_bytes()] {
+            let m = k.import_model(ExchangeFormat::Step, bytes).unwrap();
+            assert_eq!(m.occurrences.len(), 1);
+            assert_eq!(m.occurrences[0].name, "turned");
+            let pl = &m.occurrences[0].placement;
+            assert!((pl.linear - turn.linear).norm() < 1e-12 && (pl.translation - turn.translation).norm() < 1e-12, "{pl:?}");
         }
     }
 

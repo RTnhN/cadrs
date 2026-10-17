@@ -22,6 +22,13 @@
 //! normal, so the reader reverses the loops of a face whose flag is 0. The body is rebuilt by
 //! [`super::xbuild::XBuilder`]. A part's name goes in a Name property (406 form 15) attached to
 //! its 186, and in the 186's directory label.
+//!
+//! **Trimmed surfaces.** Most IGES in the wild has no topology: faces are trimmed (144) or
+//! bounded (143) surfaces whose boundaries (142 / 141) are model space curves, often composites
+//! (102). A file without B-rep solids or shells is read that way: the faces are sewn by their
+//! boundary curves (vertices welded within ten times the file's resolution, coincident segments
+//! made one edge), each connected group of faces is a shell, a closed one a solid, and the
+//! shells are oriented consistently and outward.
 
 use std::collections::HashMap;
 use std::fmt::Write as _;
@@ -472,6 +479,8 @@ struct File {
     ents: HashMap<usize, DirEnt>,
     /// Length unit → mm.
     scale: f64,
+    /// The global section's minimum resolution (mm).
+    resolution: f64,
 }
 
 type R<T> = Result<T, String>;
@@ -560,7 +569,8 @@ fn parse(bytes: &[u8]) -> R<File> {
         let params = if params.is_empty() { params } else { params[1..].to_vec() };
         ents.insert(de, DirEnt { kind, form, transform, label, params });
     }
-    Ok(File { ents, scale })
+    let resolution = gt.get(18).and_then(|t| t.f()).filter(|r| *r > 0.0).unwrap_or(1e-6) * scale;
+    Ok(File { ents, scale, resolution })
 }
 
 struct Reader<'a> {
@@ -889,7 +899,306 @@ fn name_of(f: &File, e: &DirEnt, nparams: usize) -> String {
     e.label.clone()
 }
 
-/// Reads an IGES file's MSBO solids (and free shells) as parts at the identity.
+/// A piece of a trimmed surface's boundary: a 3D curve from `a` to `b`.
+struct Seg {
+    c: Curve,
+    a: P3,
+    b: P3,
+}
+
+impl<'a> Reader<'a> {
+    /// The 3D segments of a model space boundary curve, composites (102) flattened, in order.
+    fn segments(&self, de: usize, out: &mut Vec<Seg>, depth: usize) -> R<()> {
+        let e = self.ent(de)?;
+        let pl = self.place(e)?;
+        let n = |i| Self::num(e, i);
+        match e.kind {
+            102 if depth < 8 => {
+                for k in 0..Self::ptr(e, 0)? {
+                    self.segments(Self::ptr(e, 1 + k)?, out, depth + 1)?;
+                }
+            }
+            110 => {
+                let (a, b) = (pl.point(&P3::new(n(0)?, n(1)?, n(2)?)), pl.point(&P3::new(n(3)?, n(4)?, n(5)?)));
+                if (b - a).norm() > 1e-12 {
+                    out.push(Seg { c: Curve::line(a, b).0, a, b });
+                }
+            }
+            100 => {
+                let zt = n(0)?;
+                let (a, b) = (pl.point(&P3::new(n(3)?, n(4)?, zt)), pl.point(&P3::new(n(5)?, n(6)?, zt)));
+                out.push(Seg { c: self.curve(de)?, a, b });
+            }
+            104 => {
+                let zt = n(6)?;
+                let (a, b) = (pl.point(&P3::new(n(7)?, n(8)?, zt)), pl.point(&P3::new(n(9)?, n(10)?, zt)));
+                out.push(Seg { c: self.curve(de)?, a, b });
+            }
+            126 => {
+                let k = n(0)? as usize;
+                let m = n(1)? as usize;
+                let vb = 6 + (k + m + 2) + (k + 1) + 3 * (k + 1);
+                let c = self.curve(de)?;
+                let (r0, r1) = c.nurbs_range().unwrap_or((0.0, 1.0));
+                let (v0, v1) = (n(vb).unwrap_or(r0).clamp(r0, r1), n(vb + 1).unwrap_or(r1).clamp(r0, r1));
+                let c = match &c {
+                    // A sub-range of the spline: trim it, so its ends are the segment's.
+                    Curve::Nurbs(nc) if v0 > r0 + 1e-12 || v1 < r1 - 1e-12 => Curve::Nurbs(Arc::new(Curve::Nurbs(nc.clone()).to_nurbs(v0.min(v1), v0.max(v1)))),
+                    _ => c,
+                };
+                let (a, b) = (c.point(v0), c.point(v1));
+                out.push(Seg { c, a, b });
+            }
+            k => return Err(format!("unsupported IGES boundary curve type {k}")),
+        }
+        Ok(())
+    }
+
+    /// A curve on a surface (142): its model space curve, or its parameter space curve mapped
+    /// through a spline surface.
+    fn boundary(&self, de: usize, surf: &Surface) -> R<Vec<Seg>> {
+        let e = self.ent(de)?;
+        let mut out = Vec::new();
+        match e.kind {
+            142 => {
+                let (bptr, cptr) = (Self::ptr(e, 2)?, Self::ptr(e, 3)?);
+                if cptr != 0 {
+                    self.segments(cptr, &mut out, 0)?;
+                } else if bptr != 0 {
+                    let Surface::Nurbs(_) = surf else { return Err("a parameter space boundary on a non-spline surface".into()) };
+                    let mut uv = Vec::new();
+                    // Parameter curves are in the surface's own space: no unit scale.
+                    self.segments(bptr, &mut uv, 0)?;
+                    for sg in uv {
+                        let s = self.f.scale;
+                        let unscale = |p: &P3| P3::new(p.x / s, p.y / s, 0.0);
+                        let (pa, pb) = (unscale(&sg.a), unscale(&sg.b));
+                        let c2 = sg.c.transformed(&Affine { m: nalgebra::Matrix3::identity() / s, t: V3::zeros() });
+                        let (t0, t1) = super::xbuild::edge_range(&c2, &pa, &pb, (pa - pb).norm() < 1e-12).unwrap_or((0.0, 1.0));
+                        let ts: Vec<f64> = (0..=32).map(|i| t0 + (t1 - t0) * i as f64 / 32.0).collect();
+                        let pts: Vec<P3> = ts.iter().map(|&t| {
+                            let q = c2.point(t);
+                            surf.eval(q.x, q.y)
+                        }).collect();
+                        let fit = NurbsCurve::interpolate(&pts, &ts, 3, None, None);
+                        out.push(Seg { a: pts[0], b: pts[32], c: Curve::Nurbs(Arc::new(fit)) });
+                    }
+                } else {
+                    return Err("a boundary with no curve".into());
+                }
+            }
+            141 => {
+                // TYPE, PREF, SPTR, N, then per curve: CRVPT, SENSE (1 along, 2 reversed), K, K pcurves.
+                let nc = Self::ptr(e, 3)?;
+                let mut i = 4;
+                for _ in 0..nc {
+                    let (cv, sense, k) = (Self::ptr(e, i)?, Self::ptr(e, i + 1)?, Self::ptr(e, i + 2)?);
+                    i += 3 + k;
+                    let mut segs = Vec::new();
+                    self.segments(cv, &mut segs, 0)?;
+                    if sense == 2 {
+                        segs.reverse();
+                        for sg in segs.iter_mut() {
+                            std::mem::swap(&mut sg.a, &mut sg.b);
+                        }
+                    }
+                    out.extend(segs);
+                }
+            }
+            k => return Err(format!("unsupported IGES boundary type {k}")),
+        }
+        Ok(out)
+    }
+}
+
+/// The boundary of a spline surface's whole parameter range, counter-clockwise in (u, v).
+fn natural_boundary(surf: &Surface) -> R<Vec<Seg>> {
+    let Surface::Nurbs(n) = surf else { return Err("an untrimmed surface that is not a spline".into()) };
+    let ((u0, u1), (v0, v1)) = n.range();
+    let (nu, nv) = (n.cps.len(), n.cps[0].len());
+    let row = |j: usize| NurbsCurve { degree: n.du, knots: n.ku.clone(), cps: (0..nu).map(|i| n.cps[i][j]).collect() };
+    let col = |i: usize| NurbsCurve { degree: n.dv, knots: n.kv.clone(), cps: n.cps[i].clone() };
+    let mut out = Vec::new();
+    for (c, (pa, pb)) in [
+        (row(0), ((u0, v0), (u1, v0))),
+        (col(nu - 1), ((u1, v0), (u1, v1))),
+        (row(nv - 1), ((u1, v1), (u0, v1))),
+        (col(0), ((u0, v1), (u0, v0))),
+    ] {
+        let (a, b) = (surf.eval(pa.0, pa.1), surf.eval(pb.0, pb.1));
+        out.push(Seg { c: Curve::Nurbs(Arc::new(c)), a, b });
+    }
+    Ok(out)
+}
+
+/// Sews trimmed (144) and bounded (143) surfaces — faces with no topology — by their boundary
+/// curves: vertices welded within the file's resolution, segments matched to shared edges,
+/// each connected group of faces a shell (a solid when closed). The faces' orientation is then
+/// made consistent and outward ([`super::xbuild::orient_shells`]).
+fn read_trimmed(f: &File, out: &mut ReadModel) {
+    let mut des: Vec<usize> = f.ents.iter().filter(|(_, e)| e.kind == 144 || e.kind == 143).map(|(d, _)| *d).collect();
+    if des.is_empty() {
+        return;
+    }
+    des.sort_unstable();
+    // The weld distance: ten times the file's resolution, within 1e-9 and 1e-4 of the model's
+    // size.
+    let size = des
+        .iter()
+        .filter_map(|d| {
+            let e = &f.ents[d];
+            let r = Reader { f, xb: XBuilder::new(), verts: HashMap::new(), edges: HashMap::new() };
+            let mut segs = Vec::new();
+            r.boundary(Reader::ptr(e, 3).ok()?, &Surface::Plane { f: Frame::world() }).ok().map(|s| segs = s)?;
+            Some(segs.iter().map(|s| s.a.coords.amax().max(-s.a.coords.min())).fold(0.0, f64::max))
+        })
+        .fold(0.0, f64::max)
+        .max(1e-3);
+    let tol = (f.resolution * 10.0).clamp(1e-9 * size, 1e-4 * size).max(1e-9);
+    let mut r = Reader { f, xb: XBuilder::new(), verts: HashMap::new(), edges: HashMap::new() };
+    let mut weld: Vec<P3> = Vec::new();
+    let mut cells: HashMap<[i64; 3], Vec<usize>> = HashMap::new();
+    let mut vertex = |xb: &mut XBuilder, p: P3| -> usize {
+        let k = [p.x, p.y, p.z].map(|c| (c / tol).floor() as i64);
+        for dx in -1..=1 {
+            for dy in -1..=1 {
+                for dz in -1..=1 {
+                    if let Some(v) = cells.get(&[k[0] + dx, k[1] + dy, k[2] + dz]) {
+                        for &i in v {
+                            if (weld[i] - p).norm() <= tol {
+                                return i;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        weld.push(p);
+        let i = xb.vertex(p);
+        cells.entry(k).or_default().push(i);
+        i
+    };
+    let mut by_pair: HashMap<(usize, usize), Vec<usize>> = HashMap::new();
+    let mut faces = Vec::new();
+    for de in des {
+        let e = &f.ents[&de];
+        let res = (|| -> R<(Surface, Vec<Vec<Seg>>)> {
+            let surf = r.surface(Reader::ptr(e, 0)?)?;
+            let mut loops = Vec::new();
+            if e.kind == 144 {
+                let (n1, n2, pto) = (Reader::ptr(e, 1)?, Reader::ptr(e, 2)?, Reader::ptr(e, 3)?);
+                loops.push(if n1 == 0 || pto == 0 { natural_boundary(&surf)? } else { r.boundary(pto, &surf)? });
+                for k in 0..n2 {
+                    loops.push(r.boundary(Reader::ptr(e, 4 + k)?, &surf)?);
+                }
+            } else {
+                // 143: TYPE, SPTR, N, boundaries (the first outer).
+                let n = Reader::ptr(e, 2)?;
+                for k in 0..n {
+                    loops.push(r.boundary(Reader::ptr(e, 3 + k)?, &surf)?);
+                }
+            }
+            Ok((surf, loops))
+        })();
+        let (surf, seg_loops) = match res {
+            Ok(x) => x,
+            Err(err) => {
+                out.warnings.push(format!("IGES face {de}: {err}"));
+                continue;
+            }
+        };
+        let mut loops = Vec::new();
+        for segs in seg_loops {
+            let mut l = Vec::new();
+            for sg in segs {
+                let (va, vb) = (vertex(&mut r.xb, sg.a), vertex(&mut r.xb, sg.b));
+                let Some(ne) = r.xb.edge(sg.c, va, vb) else { continue };
+                // The same edge as one of another face's?
+                let key = (va.min(vb), va.max(vb));
+                let found = by_pair.get(&key).and_then(|cands| {
+                    let new = &r.xb.body.edges[ne];
+                    let mid = new.point(new.mid_t());
+                    cands.iter().copied().find(|&c| {
+                        let old = &r.xb.body.edges[c];
+                        (old.point(old.curve.closest(&mid, old.t[0], old.t[1])) - mid).norm() < tol * 10.0
+                    })
+                });
+                match found {
+                    Some(c) => {
+                        let fwd = if va != vb {
+                            r.xb.body.edges[c].v[0] == va
+                        } else {
+                            let (new, old) = (&r.xb.body.edges[ne], &r.xb.body.edges[c]);
+                            new.curve.tangent(new.t[0]).dot(&old.curve.tangent(old.t[0])) > 0.0
+                        };
+                        r.xb.body.edges.pop();
+                        l.push((c, fwd));
+                    }
+                    None => {
+                        by_pair.entry(key).or_default().push(ne);
+                        l.push((ne, true));
+                    }
+                }
+            }
+            if !l.is_empty() {
+                loops.push(l);
+            }
+        }
+        if !loops.is_empty() {
+            faces.push(r.xb.face(XFace { surf, sense: true, loops }));
+        }
+    }
+    // Shells: faces connected through shared edges; closed when every edge is used twice.
+    let mut parent: Vec<usize> = (0..faces.len()).collect();
+    fn find(p: &mut [usize], x: usize) -> usize {
+        let mut r = x;
+        while p[r] != r {
+            r = p[r];
+        }
+        p[x] = r;
+        r
+    }
+    let mut users: HashMap<usize, Vec<usize>> = HashMap::new();
+    for (k, &fi) in faces.iter().enumerate() {
+        for &(e, _) in r.xb.faces[fi].loops.iter().flatten() {
+            users.entry(e).or_default().push(k);
+        }
+    }
+    for us in users.values() {
+        for w in us.windows(2) {
+            let (a, b) = (find(&mut parent, w[0]), find(&mut parent, w[1]));
+            parent[a.max(b)] = a.min(b);
+        }
+    }
+    let mut groups: Vec<(usize, Vec<usize>)> = Vec::new();
+    for k in 0..faces.len() {
+        let g = find(&mut parent, k);
+        match groups.iter_mut().find(|x| x.0 == g) {
+            Some(x) => x.1.push(k),
+            None => groups.push((g, vec![k])),
+        }
+    }
+    for (_, ks) in groups {
+        let closed = ks.iter().all(|&k| r.xb.faces[faces[k]].loops.iter().flatten().all(|&(e, _)| users[&e].len() == 2));
+        let sh = r.xb.shell(ks.iter().map(|&k| faces[k]).collect(), closed);
+        if closed {
+            r.xb.solid(vec![sh]);
+        }
+    }
+    r.xb.unoriented = true;
+    let (body, w) = r.xb.finish();
+    out.warnings.extend(w);
+    // Each solid a part; the loose sheets together.
+    for piece in super::exchange::split_into_solids(&body) {
+        if !piece.faces.is_empty() {
+            out.occurrences.push(ReadOccurrence { part: out.parts.len(), placement: Affine::identity(), name: String::new() });
+            out.parts.push(ReadPart { body: piece, name: String::new() });
+        }
+    }
+}
+
+/// Reads an IGES file's MSBO solids and free shells, or else its trimmed surfaces sewn, as
+/// parts at the identity.
 pub fn read(bytes: &[u8]) -> Result<ReadModel, String> {
     let f = parse(bytes)?;
     let mut des: Vec<usize> = f.ents.keys().copied().collect();
@@ -953,13 +1262,13 @@ pub fn read(bytes: &[u8]) -> Result<ReadModel, String> {
         }
     }
     if out.parts.is_empty() {
-        let trimmed = f.ents.values().any(|e| e.kind == 144 || e.kind == 143);
-        return Err(if trimmed {
-            "the file has trimmed surfaces (144) but no B-rep solids (186); only B-rep IGES is supported".into()
-        } else if let Some(w) = out.warnings.first() {
+        read_trimmed(&f, &mut out);
+    }
+    if out.parts.is_empty() {
+        return Err(if let Some(w) = out.warnings.first() {
             format!("the file holds no B-rep we can read ({w})")
         } else {
-            "the file holds no B-rep solids or shells".into()
+            "the file holds no B-rep solids, shells or trimmed surfaces".into()
         });
     }
     Ok(out)
@@ -968,6 +1277,43 @@ pub fn read(bytes: &[u8]) -> Result<ReadModel, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A 10 mm cube as six trimmed planes (108 + 144, boundaries 142 of 102 composites of lines),
+    /// half of them bounded the wrong way round: sewn into one outward solid.
+    #[test]
+    fn sews_trimmed_surfaces_into_a_solid() {
+        let c = |x: f64, y: f64, z: f64| P3::new(x * 10.0, y * 10.0, z * 10.0);
+        let quads = [
+            [c(0., 0., 0.), c(0., 1., 0.), c(1., 1., 0.), c(1., 0., 0.)],
+            [c(0., 0., 1.), c(1., 0., 1.), c(1., 1., 1.), c(0., 1., 1.)],
+            [c(0., 0., 0.), c(1., 0., 0.), c(1., 0., 1.), c(0., 0., 1.)],
+            [c(0., 1., 0.), c(0., 1., 1.), c(1., 1., 1.), c(1., 1., 0.)],
+            [c(0., 0., 0.), c(0., 0., 1.), c(0., 1., 1.), c(0., 1., 0.)],
+            [c(1., 0., 0.), c(1., 1., 0.), c(1., 1., 1.), c(1., 0., 1.)],
+        ];
+        let mut w = Writer::default();
+        for (k, q) in quads.iter().enumerate() {
+            let q: Vec<P3> = if k % 2 == 0 { q.to_vec() } else { q.iter().rev().copied().collect() };
+            let n = (q[1] - q[0]).cross(&(q[2] - q[0])).normalize();
+            let d = n.dot(&q[0].coords);
+            let plane = w.add(108, 0, [n.x, n.y, n.z, d].iter().map(|x| real(*x)).chain(["0".into(), "0.".into(), "0.".into(), "0.".into(), "0.".into()]).collect());
+            let mut comp = vec!["4".to_string()];
+            for i in 0..4 {
+                let (a, b) = (q[i], q[(i + 1) % 4]);
+                comp.push(w.add(110, 0, [a.x, a.y, a.z, b.x, b.y, b.z].iter().map(|x| real(*x)).collect()).to_string());
+            }
+            let comp = w.add(102, 0, comp);
+            let bnd = w.add(142, 0, vec!["0".into(), plane.to_string(), "0".into(), comp.to_string(), "2".into()]);
+            w.add(144, 0, vec![plane.to_string(), "1".into(), "0".into(), bnd.to_string()]);
+        }
+        let m = read(&w.finish(10.0)).unwrap();
+        assert_eq!(m.parts.len(), 1);
+        let b = &m.parts[0].body;
+        assert!(b.check().is_empty(), "{:?}", b.check());
+        assert_eq!((b.solids.len(), b.faces.len(), b.edges.len()), (1, 6, 12));
+        let mp = super::super::mass::body_mass(b);
+        assert!((mp.volume - 1000.0).abs() < 1e-9 && (mp.surface_area - 600.0).abs() < 1e-9, "{mp:?}");
+    }
 
     #[test]
     fn tokens_with_hollerith_and_d_exponents() {

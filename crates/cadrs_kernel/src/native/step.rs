@@ -252,7 +252,7 @@ impl<'a> Lexer<'a> {
                 self.i += 1;
                 Ok(Param::Str(t))
             }
-            Some(b'.') if self.s.get(self.i + 1).map_or(false, |c| c.is_ascii_alphabetic() || *c == b'_') => {
+            Some(b'.') if self.s.get(self.i + 1).is_some_and(|c| c.is_ascii_alphabetic() || *c == b'_') => {
                 self.i += 1;
                 let st = self.i;
                 while self.i < self.s.len() && self.s[self.i] != b'.' {
@@ -624,6 +624,64 @@ impl<'a> Geo<'a> {
         })
     }
 
+    /// A hyperbola or parabola (unbounded curves) as the exact quadratic arc between two of its
+    /// points (an edge's vertices); None for other curves.
+    fn conic_arc(&self, id: u64, p0: &P3, p1: &P3) -> R<Option<Curve>> {
+        let mut r = self.rec(id)?;
+        // Through SURFACE_CURVE and friends to the 3D curve.
+        while matches!(r.kind(), "SURFACE_CURVE" | "SEAM_CURVE" | "INTERSECTION_CURVE" | "BOUNDED_SURFACE_CURVE" | "TRIMMED_CURVE") {
+            r = self.rec(self.rf(r.params(), 1)?)?;
+        }
+        let ps = r.params();
+        type F = Box<dyn Fn(f64) -> V3>;
+        let (t0, t1, w, pt, d1): (f64, f64, f64, F, F) = match r.kind() {
+            "HYPERBOLA" => {
+                // c + a cosh t·x + b sinh t·y
+                let f = self.axis2(self.rf(ps, 1)?)?;
+                let (a, b) = (self.num(ps, 2)? * self.ls, self.num(ps, 3)? * self.ls);
+                let t = |p: &P3| ((p - f.o).dot(&f.y) / b).asinh();
+                let (t0, t1) = (t(p0), t(p1));
+                (
+                    t0.min(t1),
+                    t0.max(t1),
+                    ((t1 - t0) / 2.0).cosh(),
+                    Box::new(move |t: f64| f.o.coords + f.x * (a * t.cosh()) + f.y * (b * t.sinh())),
+                    Box::new(move |t: f64| f.x * (a * t.sinh()) + f.y * (b * t.cosh())),
+                )
+            }
+            "PARABOLA" => {
+                // c + a(t²·x + 2t·y)
+                let f = self.axis2(self.rf(ps, 1)?)?;
+                let a = self.num(ps, 2)? * self.ls;
+                let t = |p: &P3| (p - f.o).dot(&f.y) / (2.0 * a);
+                let (t0, t1) = (t(p0), t(p1));
+                (
+                    t0.min(t1),
+                    t0.max(t1),
+                    1.0,
+                    Box::new(move |t: f64| f.o.coords + (f.x * (t * t) + f.y * (2.0 * t)) * a),
+                    Box::new(move |t: f64| (f.x * (2.0 * t) + f.y * 2.0) * a),
+                )
+            }
+            _ => return Ok(None),
+        };
+        if t1 - t0 < 1e-12 {
+            return Ok(None);
+        }
+        // The middle control point: where the end tangents meet (the weight makes it exact).
+        let (a, b) = (P3::from(pt(t0)), P3::from(pt(t1)));
+        let (da, db) = (d1(t0), d1(t1));
+        let n = da.cross(&db);
+        let m = if n.norm() < 1e-14 {
+            P3::from((a.coords + b.coords) / 2.0)
+        } else {
+            let s = (b - a).cross(&db).dot(&n) / n.norm_squared();
+            a + da * s
+        };
+        let c = NurbsCurve { degree: 2, knots: vec![t0, t0, t0, t1, t1, t1], cps: vec![hom(&a, 1.0), hom(&m, w), hom(&b, 1.0)] };
+        Ok(Some(Curve::Nurbs(Arc::new(c))))
+    }
+
     /// Control points (with weights) from a list of point references.
     fn cps(&self, l: &Param, w: Option<&[Param]>) -> R<Vec<H>> {
         let l = l.as_list().ok_or("control points are not a list")?;
@@ -830,7 +888,11 @@ impl<'a> TopoReader<'a> {
         }
         let ps = r.params();
         let (a, b) = (self.vertex(self.g.rf(ps, 1)?)?, self.vertex(self.g.rf(ps, 2)?)?);
-        let c = self.g.curve(self.g.rf(ps, 3)?)?;
+        let cid = self.g.rf(ps, 3)?;
+        let c = match self.g.conic_arc(cid, &self.xb.body.verts[a].p, &self.xb.body.verts[b].p)? {
+            Some(c) => c,
+            None => self.g.curve(cid)?,
+        };
         let same = ps.get(4).and_then(|p| p.as_bool()).unwrap_or(true);
         let e = if same { self.xb.edge(c, a, b).map(|e| (e, true)) } else { self.xb.edge(c, b, a).map(|e| (e, false)) };
         self.edges.insert(id, e);
