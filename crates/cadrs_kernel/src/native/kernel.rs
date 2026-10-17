@@ -333,6 +333,10 @@ impl Kernel for NativeKernel {
         super::features::revolve_with(self, profile, spec)
     }
 
+    fn sweep_with(&mut self, profile: &Profile, spec: &SweepSpec) -> Result<OpResult> {
+        super::sweep_path::sweep_with(self, profile, spec)
+    }
+
     fn boolean(&mut self, op: BoolOp, target: BodyId, tools: &[BodyId]) -> Result<OpResult> {
         super::boolean::boolean(self, op, target, tools)
     }

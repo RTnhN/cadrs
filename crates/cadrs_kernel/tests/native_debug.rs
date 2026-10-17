@@ -321,3 +321,24 @@ fn debug_concave_conic() {
         eprintln!("{prof:?}: added {:.9} per mm (circle {:.9}) solids {} faces {}", (k.mass_properties(f).unwrap().volume - 1750.0) / 10.0, 1.0 - std::f64::consts::PI / 4.0 * 4.0 / 4.0, k.solid_count(f).unwrap(), k.faces(f).unwrap().len());
     }
 }
+
+#[test]
+fn debug_sweep() {
+    use std::f64::consts::PI;
+    let mut k = NativeKernel::new();
+    let prof = Profile::new(Plane { origin: Point3::origin(), x_dir: Vector3::y_axis(), normal: Vector3::x_axis() }, vec![Region { outer: Loop { curves: vec![Curve2::Circle { center: p(0., 0.), radius: 5.0, source: None }] }, holes: vec![], source: Some(7) }]);
+    let plane = Plane::top();
+    let l = |a, b| PathCurve::Sketch { plane, curve: Curve2::Line { a, b, source: None } };
+    let paths = vec![
+        ("line", vec![l(p(0., 0.), p(100., 0.))]),
+        ("arc", vec![PathCurve::Sketch { plane, curve: Curve2::Arc { center: p(0., 50.), radius: 50.0, start_angle: -PI / 2.0, sweep: PI / 2.0, source: None } }]),
+        ("L", vec![l(p(0., 0.), p(100., 0.)), PathCurve::Sketch { plane, curve: Curve2::Arc { center: p(100., 50.), radius: 50.0, start_angle: -PI / 2.0, sweep: PI / 2.0, source: None } }, l(p(150., 50.), p(150., 130.))]),
+    ];
+    for (name, path) in paths {
+        let spec = SweepSpec { body: BodyKind::Solid, path, control: SweepControl::None, faces: vec![] };
+        match k.sweep_with(&prof, &spec) {
+            Ok(r) => { let b = r.bodies[0]; eprintln!("{name}: vol {:.6} solids {} faces {} check {:?}", k.mass_properties(b).unwrap().volume, k.solid_count(b).unwrap(), k.faces(b).unwrap().len(), k.get(b).unwrap().check()); }
+            Err(e) => eprintln!("{name}: err {e}"),
+        }
+    }
+}

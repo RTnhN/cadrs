@@ -737,3 +737,8 @@ pub fn revolve_with(k: &mut NativeKernel, profile: &Profile, spec: &RevolveSpec)
     }
     Ok(kept.into_result(k))
 }
+
+/// The union of two tagged bodies, every face keeping its tags.
+pub fn tagged_union(a: &Tagged, b: &Tagged) -> Result<Tagged> {
+    tagged_bool(a, b, BoolOp::Union)
+}

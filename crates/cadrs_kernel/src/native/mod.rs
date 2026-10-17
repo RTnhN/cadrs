@@ -18,6 +18,8 @@ pub mod split;
 pub mod ssi;
 pub mod surface;
 pub mod sweep;
+pub mod sweep_general;
+pub mod sweep_path;
 pub mod tess;
 pub mod topo;
 pub mod unify;

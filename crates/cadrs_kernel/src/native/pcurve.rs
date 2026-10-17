@@ -144,7 +144,10 @@ fn exact(s: &Surface, c: &Curve, t0: f64, t1: f64) -> Option<Curve> {
                 if l.z.abs() > 1e-9 || ((l.x * l.x + l.y * l.y).sqrt() - rmaj).abs() > 1e-9 {
                     return None;
                 }
-                meridian(f, cc, x, y)
+                // The half plane of the circle's centre.
+                let w = cc - f.o;
+                let radial = (w - f.z * w.dot(&f.z)).normalize();
+                meridian_side(f, x, y, &radial)
             }
             _ => None,
         },

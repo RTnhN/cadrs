@@ -220,6 +220,35 @@ impl NurbsCurve {
     /// Global interpolation (A9.1) of degree `p` through `pts` at parameters `params`, with
     /// optional end derivatives. Non-rational.
     pub fn interpolate(pts: &[P3], params: &[f64], p: usize, d0: Option<V3>, d1: Option<V3>) -> Self {
+        // Parameters must increase strictly: drop points whose parameter repeats.
+        let mut keep: Vec<usize> = Vec::with_capacity(pts.len());
+        for i in 0..pts.len() {
+            if keep.last().map_or(true, |&j| params[i] > params[j] + 1e-14 * (1.0 + params[j].abs())) {
+                keep.push(i);
+            }
+        }
+        if keep.len() < pts.len() {
+            let pts2: Vec<P3> = keep.iter().map(|&i| pts[i]).collect();
+            let par2: Vec<f64> = keep.iter().map(|&i| params[i]).collect();
+            return Self::interpolate(&pts2, &par2, p, d0, d1);
+        }
+        if pts.len() == 1 {
+            return Self { degree: 1, knots: vec![params[0], params[0], params[0] + 1.0, params[0] + 1.0], cps: vec![hom(&pts[0], 1.0), hom(&pts[0], 1.0)] };
+        }
+        match Self::try_interpolate(pts, params, p, d0, d1) {
+            Some(c) => c,
+            None if p > 1 || d0.is_some() || d1.is_some() => Self::interpolate(pts, params, 1, None, None),
+            None => {
+                // Degree one through the points always works.
+                let mut knots = vec![params[0]];
+                knots.extend_from_slice(params);
+                knots.push(*params.last().unwrap());
+                Self { degree: 1, knots, cps: pts.iter().map(|q| hom(q, 1.0)).collect() }
+            }
+        }
+    }
+
+    fn try_interpolate(pts: &[P3], params: &[f64], p: usize, d0: Option<V3>, d1: Option<V3>) -> Option<Self> {
         let n_pts = pts.len();
         let extra = d0.is_some() as usize + d1.is_some() as usize;
         let n = n_pts + extra; // number of control points
@@ -277,9 +306,12 @@ impl NurbsCurve {
                 }
             }
         }
-        let sol = a.lu().solve(&rhs).expect("interpolation matrix is singular");
+        let sol = a.lu().solve(&rhs)?;
+        if sol.iter().any(|x| !x.is_finite()) {
+            return None;
+        }
         let cps = (0..n).map(|i| H::new(sol[(i, 0)], sol[(i, 1)], sol[(i, 2)], 1.0)).collect();
-        Self { degree: p, knots, cps }
+        Some(Self { degree: p, knots, cps })
     }
 
     /// Chord-length parameters in [0, 1].
