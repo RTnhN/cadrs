@@ -27,7 +27,7 @@ IGNORED = {
     "checkview", "erase", "donly", "display", "fit", "clear", "puts", "smallview", "axo", "top", "front", "left", "vinit", "vdisplay",
     "vfit", "vsetdispmode", "vclear", "vclose", "checkmaxtol", "checksection", "decho", "dlog", "pload", "cpulimit", "protect",
     "isos", "triangles", "dchrono", "chrono", "xwd", "vdump", "dmode", "disp", "view", "2dfit", "repaint", "settolerance",
-    "checktrinfo", "dtyp", "whatis", "tolerance", "checkfreebounds", "checkcontinuity", "bfillds", "bclearobjects", "bcleartools",
+    "checktrinfo", "dtyp", "whatis", "tolerance", "checkfreebounds", "checkcontinuity", "bfillds",
     "brunparallel", "bnondestructive", "bfuzzyvalue", "bglue", "bcheckinverted", "buseobb", "bdrawwarnshapes", "bsimplify",
     "setfillhistory", "savehistory", "tclean", "incmesh",
 }
@@ -70,6 +70,8 @@ class Case:
         self.exploded = {}  # draw prefix -> (rust vec ident, kind)
         self.consts = dict(consts)
         self.bop_args = None
+        self.objects = []
+        self.tools = []
         self.n_tmp = 0
 
     def num(self, tok):
@@ -171,10 +173,21 @@ class Case:
         elif c in ("pcylinder", "pcone", "psphere", "ptorus"):
             want = {"pcylinder": 2, "pcone": 3, "psphere": 1, "ptorus": 2}[c]
             rest = a[1:]
-            if len(rest) == want + 1 and rest[0] in self.vars:
-                self.bind(a[0], f"k.{c}_on({self.shape(rest[0])}, {', '.join(L(x) for x in rest[1:])})?")
-            elif len(rest) == want:
-                self.bind(a[0], f"k.{c}({', '.join(L(x) for x in rest)})?")
+            pl = None
+            if rest and rest[0] in self.vars:
+                pl, rest = rest[0], rest[1:]
+            nums = [L(x) for x in rest]
+            ax = f"Some({self.shape(pl)})" if pl else "None"
+            if len(rest) == want:
+                if pl:
+                    self.bind(a[0], f"k.{c}_on({self.shape(pl)}, {', '.join(nums)})?")
+                else:
+                    self.bind(a[0], f"k.{c}({', '.join(nums)})?")
+            elif len(rest) == want + 1 and c != "psphere" or (c == "psphere" and len(rest) == 2):
+                self.bind(a[0], f"k.{c}_a({ax}, {', '.join(nums)})?")
+            elif c == "psphere" and len(rest) in (3, 4):
+                ang = nums[3] if len(rest) == 4 else "360.0"
+                self.bind(a[0], f"k.psphere_zone({ax}, {nums[0]}, {nums[1]}, {nums[2]}, {ang})?")
             else:
                 raise Unsupported(f"{c} with these arguments")
         elif c == "prism" and len(a) == 5:
@@ -183,6 +196,31 @@ class Case:
             self.bind(a[0], f"k.revol({self.shape(a[1])}, {', '.join(L(x) for x in a[2:])})?")
         elif c in ("bfuse", "bcut", "bcommon") and len(a) == 3:
             self.bind(a[0], f"k.{c}({self.shape(a[1])}, {self.shape(a[2])})?")
+        elif c == "bclearobjects":
+            self.objects = []
+        elif c == "bcleartools":
+            self.tools = []
+        elif c == "baddobjects":
+            self.objects += [self.shape(x) for x in a]
+        elif c == "baddtools":
+            self.tools += [self.shape(x) for x in a]
+        elif c == "bbop" and len(a) == 2:
+            if not self.objects or not self.tools:
+                raise Unsupported("bbop without objects and tools")
+            def fused(lst, tag):
+                acc = lst[0]
+                for i, x in enumerate(lst[1:]):
+                    t = f"{tag}_{self.n_tmp}"
+                    self.n_tmp += 1
+                    self.lines.append(f"let {t} = k.bfuse({acc}, {x})?;")
+                    acc = "&" + t
+                return acc
+            x, y = fused(self.objects, "objs"), fused(self.tools, "tools")
+            op = a[1]
+            f = {"0": ("bcommon", x, y), "1": ("bfuse", x, y), "2": ("bcut", x, y), "3": ("bcut", y, x)}.get(op)
+            if not f:
+                raise Unsupported(f"bbop {op}")
+            self.bind(a[0], f"k.{f[0]}({f[1]}, {f[2]})?")
         elif c == "bop" and len(a) == 2:
             self.bop_args = (self.shape(a[0]), self.shape(a[1]))
         elif c in ("bopfuse", "bopcut", "bopcommon", "boptuc") and len(a) == 1:
@@ -203,10 +241,10 @@ class Case:
         elif c == "nurbsconvert" and len(a) == 2:
             # The same geometry (our surfaces stay exact): a copy.
             self.bind(a[0], f"{self.shape(a[1])[1:]}.clone()")
-        elif c == "explode" and len(a) == 2 and a[1].lower() in ("e", "f"):
+        elif c in ("explode", "nexplode") and len(a) == 2 and a[1].lower() in ("e", "f"):
             kind = a[1].lower()
             vec = ident(a[0]) + ("_edges" if kind == "e" else "_faces")
-            fn = "explode_edges" if kind == "e" else "explode_faces"
+            fn = ("n" if c == "nexplode" else "") + ("explode_edges" if kind == "e" else "explode_faces")
             self.lines.append(f"let {vec} = k.{fn}({self.shape(a[0])})?;")
             self.exploded[a[0]] = (vec, kind)
         elif c == "blend" and len(a) >= 4 and (len(a) - 2) % 2 == 0:
@@ -229,8 +267,9 @@ class Case:
                 o = a[i]
                 if o in ("-s", "-v", "-l") and i + 1 < len(a):
                     if a[i + 1] == "empty":
-                        raise Unsupported("checkprops empty")
-                    self.lines.append(f"k.checkprops_{o[1]}({s}, {L(a[i + 1])})?;")
+                        self.lines.append(f"k.checkprops_empty({s})?;")
+                    else:
+                        self.lines.append(f"k.checkprops_{o[1]}({s}, {L(a[i + 1])})?;")
                     done = True
                     i += 2
                 elif o in ("-eps", "-deps"):

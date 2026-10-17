@@ -52,6 +52,8 @@ pub enum Shape {
     BodyEdge(BodyId, EdgeId),
     /// A face of a body (from `explode`).
     BodyFace(BodyId, FaceId),
+    /// Nothing (an empty boolean result).
+    Empty,
 }
 
 /// A placement (DRAW's `plane`): origin, normal and x direction.
@@ -316,6 +318,78 @@ impl NativeKernel {
         Ok(Shape::Body(res.bodies[0]))
     }
 
+    /// `pcylinder name [plane] r h angle` (degrees): a sector of the cylinder.
+    pub fn pcylinder_a(&mut self, ax: Option<&Ax3>, r: f64, h: f64, angle: f64) -> Result<Shape> {
+        let ax = ax.copied().unwrap_or(Ax3 { origin: P3::origin(), z: V3::z(), x: V3::x() });
+        if angle >= 360.0 - 1e-9 {
+            return self.pcylinder_on(&ax, r, h);
+        }
+        let p = nalgebra::Point2::new;
+        self.revolve_section(&ax, &[p(0.0, 0.0), p(r, 0.0), p(r, h), p(0.0, h)], angle.to_radians())
+    }
+
+    /// `pcone name [plane] r1 r2 h angle` (degrees).
+    pub fn pcone_a(&mut self, ax: Option<&Ax3>, r1: f64, r2: f64, h: f64, angle: f64) -> Result<Shape> {
+        let ax = ax.copied().unwrap_or(Ax3 { origin: P3::origin(), z: V3::z(), x: V3::x() });
+        if angle >= 360.0 - 1e-9 {
+            return self.pcone_on(&ax, r1, r2, h);
+        }
+        let p = nalgebra::Point2::new;
+        let mut pts = vec![p(0.0, 0.0)];
+        if r1 > 0.0 {
+            pts.push(p(r1, 0.0));
+        }
+        if r2 > 0.0 {
+            pts.push(p(r2, h));
+        }
+        pts.push(p(0.0, h));
+        self.revolve_section(&ax, &pts, angle.to_radians())
+    }
+
+    /// `psphere name [plane] r angle` (degrees of longitude).
+    pub fn psphere_a(&mut self, ax: Option<&Ax3>, r: f64, angle: f64) -> Result<Shape> {
+        let ax = ax.copied().unwrap_or(Ax3 { origin: P3::origin(), z: V3::z(), x: V3::x() });
+        let half = Region {
+            outer: Loop {
+                curves: vec![
+                    Curve2::Arc { center: nalgebra::Point2::origin(), radius: r, start_angle: -PI / 2.0, sweep: PI, source: None },
+                    l2(nalgebra::Point2::new(0.0, r), nalgebra::Point2::new(0.0, -r)),
+                ],
+            },
+            holes: vec![],
+            source: None,
+        };
+        let res = self.revolve(&Profile::new(self.meridian(&ax), vec![half]), Axis { origin: ax.origin, dir: nalgebra::Unit::new_normalize(ax.z) }, angle.min(360.0).to_radians())?;
+        Ok(Shape::Body(res.bodies[0]))
+    }
+
+    /// `psphere name [plane] r lat1 lat2 [angle]` (degrees): the zone between two latitudes.
+    pub fn psphere_zone(&mut self, ax: Option<&Ax3>, r: f64, lat1: f64, lat2: f64, angle: f64) -> Result<Shape> {
+        let ax = ax.copied().unwrap_or(Ax3 { origin: P3::origin(), z: V3::z(), x: V3::x() });
+        let (a1, a2) = (lat1.to_radians(), lat2.to_radians());
+        let (p1, p2) = (nalgebra::Point2::new(r * a1.cos(), r * a1.sin()), nalgebra::Point2::new(r * a2.cos(), r * a2.sin()));
+        let mut curves = vec![Curve2::Arc { center: nalgebra::Point2::origin(), radius: r, start_angle: a1, sweep: a2 - a1, source: None }];
+        let (q2, q1) = (nalgebra::Point2::new(0.0, p2.y), nalgebra::Point2::new(0.0, p1.y));
+        if p2.x.abs() > 1e-12 {
+            curves.push(l2(p2, q2));
+        }
+        curves.push(l2(q2, q1));
+        if p1.x.abs() > 1e-12 {
+            curves.push(l2(q1, p1));
+        }
+        let region = Region { outer: Loop { curves }, holes: vec![], source: None };
+        let res = self.revolve(&Profile::new(self.meridian(&ax), vec![region]), Axis { origin: ax.origin, dir: nalgebra::Unit::new_normalize(ax.z) }, angle.min(360.0).to_radians())?;
+        Ok(Shape::Body(res.bodies[0]))
+    }
+
+    /// `ptorus name [plane] R r angle` (degrees of longitude).
+    pub fn ptorus_a(&mut self, ax: Option<&Ax3>, big: f64, r: f64, angle: f64) -> Result<Shape> {
+        let ax = ax.copied().unwrap_or(Ax3 { origin: P3::origin(), z: V3::z(), x: V3::x() });
+        let region = Region { outer: Loop { curves: vec![Curve2::Circle { center: nalgebra::Point2::new(big, 0.0), radius: r, source: None }] }, holes: vec![], source: None };
+        let res = self.revolve(&Profile::new(self.meridian(&ax), vec![region]), Axis { origin: ax.origin, dir: nalgebra::Unit::new_normalize(ax.z) }, angle.min(360.0).to_radians())?;
+        Ok(Shape::Body(res.bodies[0]))
+    }
+
     /// `pcone name r1 r2 h`.
     pub fn pcone(&mut self, r1: f64, r2: f64, h: f64) -> Result<Shape> {
         self.pcone_on(&Ax3 { origin: P3::origin(), z: V3::z(), x: V3::x() }, r1, r2, h)
@@ -421,10 +495,13 @@ impl NativeKernel {
 
     fn bop(&mut self, op: BoolOp, a: &Shape, b: &Shape) -> Result<Shape> {
         let (a, b) = (self.body_of(a)?, self.body_of(b)?);
-        let r = self.boolean(op, a, &[b])?;
+        let r = match self.boolean(op, a, &[b]) {
+            Err(KernelError::OperationFailed(m)) if m.contains("empty") => return Ok(Shape::Empty),
+            r => r?,
+        };
         match r.bodies.len() {
             1 => Ok(Shape::Body(r.bodies[0])),
-            0 => Err(err("the boolean's result is empty")),
+            0 => Ok(Shape::Empty),
             _ => {
                 // DRAW keeps a compound: fuse the pieces' properties by summing (one body).
                 let mut acc = r.bodies[0];
@@ -536,6 +613,36 @@ impl NativeKernel {
         Ok(ids.into_iter().map(|i| Shape::BodyEdge(b, EdgeId(i as u64))).collect())
     }
 
+    /// `nexplode shape e`: the edges sorted by their centres of mass (DRAW's key
+    /// x·999 + y·99 + z·0.9; a stable order, the same as OCCT's for the same shape).
+    pub fn nexplode_edges(&self, s: &Shape) -> Result<Vec<Shape>> {
+        let b = self.body_of(s)?;
+        let body = self.get(b)?;
+        let mut ids: Vec<(f64, usize)> = Vec::new();
+        for (i, e) in body.edges.iter().enumerate() {
+            if let Some(c) = linear_centre(&[e]) {
+                ids.push((nexplode_key(&c), i));
+            }
+        }
+        ids.sort_by(|x, y| x.0.total_cmp(&y.0));
+        Ok(ids.into_iter().map(|(_, i)| Shape::BodyEdge(b, EdgeId(i as u64))).collect())
+    }
+
+    /// `nexplode shape f`: the faces sorted by the centres of mass of their boundaries.
+    pub fn nexplode_faces(&self, s: &Shape) -> Result<Vec<Shape>> {
+        let b = self.body_of(s)?;
+        let body = self.get(b)?;
+        let infos = self.faces(b)?;
+        let mut ids: Vec<(f64, usize)> = Vec::new();
+        for (i, f) in body.faces.iter().enumerate() {
+            let edges: Vec<&super::topo::Edge> = f.loops.iter().flatten().map(|c| &body.edges[c.edge]).collect();
+            let c = linear_centre(&edges).unwrap_or(infos[i].center);
+            ids.push((nexplode_key(&c), i));
+        }
+        ids.sort_by(|x, y| x.0.total_cmp(&y.0));
+        Ok(ids.into_iter().map(|(_, i)| Shape::BodyFace(b, infos[i].id)).collect())
+    }
+
     /// `explode shape f`.
     pub fn explode_faces(&self, s: &Shape) -> Result<Vec<Shape>> {
         let b = self.body_of(s)?;
@@ -640,6 +747,7 @@ impl NativeKernel {
             Shape::Body(b) => self.edges(*b)?.iter().map(|e| e.length).sum(),
             Shape::BodyEdge(b, id) => self.edges(*b)?.iter().find(|e| e.id == *id).map_or(0.0, |e| e.length),
             Shape::BodyFace(..) => return Err(KernelError::Unsupported("lprops of a face of a body")),
+            Shape::Empty => 0.0,
         })
     }
 
@@ -666,6 +774,17 @@ impl NativeKernel {
             Shape::Body(b) => self.mass_properties(*b)?.volume,
             _ => 0.0,
         })
+    }
+
+    /// `checkprops shape -s empty` (and -v, -l): nothing there.
+    pub fn checkprops_empty(&mut self, s: &Shape) -> Result<()> {
+        match s {
+            Shape::Empty => Ok(()),
+            _ => {
+                let (a, v) = (self.sprops(s)?, self.vprops(s)?);
+                if a.abs() < 1e-9 && v.abs() < 1e-9 { Ok(()) } else { Err(err(&format!("the result isn't empty (area {a}, volume {v})"))) }
+            }
+        }
     }
 
     /// `checkprops shape -l length`.
@@ -710,6 +829,7 @@ impl NativeKernel {
             }
             Shape::BodyEdge(..) => NbShapes { vertex: 2, edge: 1, ..Default::default() },
             Shape::BodyFace(..) => NbShapes { face: 1, ..Default::default() },
+            Shape::Empty => NbShapes::default(),
         })
     }
 
@@ -736,6 +856,30 @@ pub fn check_nb(got: NbShapes, vertex: Option<usize>, edge: Option<usize>, wire:
         }
     }
     if bad.is_empty() { Ok(()) } else { Err(err(&format!("checknbshapes: {}", bad.join(", ")))) }
+}
+
+fn nexplode_key(c: &P3) -> f64 {
+    c.x * 999.0 + c.y * 99.0 + c.z * 0.9
+}
+
+/// The centre of mass of edges by length (`BRepGProp::LinearProperties`).
+fn linear_centre(edges: &[&super::topo::Edge]) -> Option<P3> {
+    let (mut acc, mut total) = (V3::zeros(), 0.0);
+    for e in edges {
+        if e.degenerate {
+            continue;
+        }
+        let n = 64;
+        let mut prev = e.point(e.t[0]);
+        for i in 1..=n {
+            let p = e.point(e.t[0] + (e.t[1] - e.t[0]) * i as f64 / n as f64);
+            let l = (p - prev).norm();
+            acc += (prev.coords + p.coords) * 0.5 * l;
+            total += l;
+            prev = p;
+        }
+    }
+    (total > 0.0).then(|| P3::from(acc / total))
 }
 
 fn l2(a: nalgebra::Point2<f64>, b: nalgebra::Point2<f64>) -> Curve2 {
