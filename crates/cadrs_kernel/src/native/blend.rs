@@ -829,3 +829,83 @@ pub fn chamfer(k: &mut NativeKernel, body: BodyId, edges: &[EdgeId], opts: &Cham
     }
     blend(k, body, &list, false)
 }
+
+/// Onshape's Full round: the middle face replaced by a half cylinder tangent to two parallel
+/// flat side faces (r = half their distance).
+pub fn full_round(k: &mut NativeKernel, body: BodyId, side1: FaceId, center: FaceId, side2: FaceId) -> Result<OpResult> {
+    let b = (**k.get(body)?).clone();
+    let plane_of = |f: FaceId| -> Result<(P3, V3)> {
+        let face = b.faces.get(f.0 as usize).ok_or_else(|| KernelError::InvalidParameter(format!("unknown {f:?}")))?;
+        match &face.surf {
+            Surface::Plane { f: fr } => Ok((fr.o, fr.x.cross(&fr.y) * if face.sense { 1.0 } else { -1.0 })),
+            _ => Err(KernelError::InvalidParameter("A full round needs flat side and middle faces".into())),
+        }
+    };
+    let (o1, n1) = plane_of(side1)?;
+    let (o2, n2) = plane_of(side2)?;
+    let (om, nm) = plane_of(center)?;
+    if n1.dot(&n2) > -1.0 + 1e-9 {
+        return Err(KernelError::InvalidParameter("A full round needs two parallel side faces facing away from each other".into()));
+    }
+    if n1.dot(&nm).abs() > 1e-9 {
+        return Err(KernelError::InvalidParameter("The middle face must be square to the parallel side faces".into()));
+    }
+    let width = (o2 - o1).dot(&n1).abs();
+    let r = width / 2.0;
+    // The round's axis: in the middle face's plane moved r into the material, midway between
+    // the sides, along the sides' and middle face's common direction.
+    let along = n1.cross(&nm).normalize();
+    let mid_side = o1 + (o2 - o1).dot(&n1) * n1 * 0.5 + n1 * 0.0;
+    let _ = mid_side;
+    // A point on the axis: on the middle plane, halfway between the side planes, then r down.
+    let base = om + n1 * ((o1 - om).dot(&n1) + (o2 - om).dot(&n1)) * 0.5 - nm * r;
+    // Section plane square to the axis.
+    let x = n1;
+    let y = nm;
+    let plane = Plane { origin: base, x_dir: nalgebra::Unit::new_normalize(x), normal: nalgebra::Unit::new_normalize(x.cross(&y)) };
+    let ydir = plane.y_dir().into_inner();
+    let up = if ydir.dot(&nm) > 0.0 { 1.0 } else { -1.0 };
+    // Rectangle above the axis less the half disc: corners (±r, 0), (±r, r + δ) in (x, y·up).
+    let delta = r * 0.5 + 1e-3;
+    let p2 = |a: f64, c: f64| nalgebra::Point2::new(a, c * up);
+    let l = |a, c| Curve2::Line { a, b: c, source: None };
+    let (start, sweep) = if up > 0.0 { (0.0, PI) } else { (0.0, -PI) };
+    let region = Region {
+        outer: Loop {
+            curves: vec![
+                Curve2::Arc { center: p2(0.0, 0.0), radius: r, start_angle: start, sweep, source: Some(1) },
+                l(p2(-r, 0.0), p2(-r, r + delta)),
+                l(p2(-r, r + delta), p2(r, r + delta)),
+                l(p2(r, r + delta), p2(r, 0.0)),
+            ],
+        },
+        holes: vec![],
+        source: None,
+    };
+    let prof = Profile::new(plane, vec![region]);
+    let regions = super::profile::regions(&prof)?;
+    let mf = super::profile::merge_regions(&regions)?;
+    // Long enough to cover the body along the axis.
+    let (lo, hi) = super::kernel::extent_along(&b, &base, &along);
+    let dir = plane.normal.into_inner();
+    let s = if dir.dot(&along) > 0.0 { 1.0 } else { -1.0 };
+    let (lo, hi) = if s > 0.0 { (lo, hi) } else { (-hi, -lo) };
+    let kind = Prism { plane, dir };
+    let built = sweep::sweep_full(&mf, &[], &kind, lo - 1.0, hi + 1.0, false, true)?;
+    let mut src = vec![Vec::new(); built.body.faces.len()];
+    for (f, o) in &built.origins {
+        if let Origin::ProfileCurve { curve: 1, .. } = o {
+            src[*f].push(FaceSrc::Input(center.0 as usize));
+        }
+    }
+    let cur = Tracked::of(b.clone());
+    let out = cur.apply(&built.body, &src, BoolOp::Subtract)?;
+    // The removed volume must be the two corner slivers: (2 − π/2) r² per unit length.
+    let v0 = super::mass::body_mass(&b).volume;
+    let v1 = super::mass::body_mass(&out.body).volume;
+    let len = hi - lo;
+    if v0 - v1 > (2.0 - PI / 2.0) * r * r * len * 1.5 + 1e-6 {
+        return Err(KernelError::InvalidParameter("The side faces are too shallow for the full round".into()));
+    }
+    Ok(out.into_result(k, body))
+}

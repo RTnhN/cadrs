@@ -345,6 +345,10 @@ impl Kernel for NativeKernel {
         super::blend::fillet(self, body, edges, spec)
     }
 
+    fn full_round(&mut self, body: BodyId, side1: FaceId, center: FaceId, side2: FaceId) -> Result<OpResult> {
+        super::blend::full_round(self, body, side1, center, side2)
+    }
+
     fn chamfer(&mut self, body: BodyId, edges: &[EdgeId], spec: ChamferSpec) -> Result<OpResult> {
         super::blend::chamfer(self, body, edges, &ChamferOpts::new(spec))
     }
