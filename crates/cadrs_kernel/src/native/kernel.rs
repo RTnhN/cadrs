@@ -549,6 +549,12 @@ impl Kernel for NativeKernel {
         Ok(Aabb { min: P3::new(x0, y0, z0), max: P3::new(x1, y1, z1) })
     }
 
+    fn project(&self, bodies: &[BodyId], frame: &ViewFrame, opts: &ProjectOptions) -> Result<Projection> {
+        let entries = bodies.iter().map(|&id| self.entry(id)).collect::<Result<Vec<_>>>()?;
+        let inputs: Vec<super::hlr::HlrBody> = entries.iter().map(|e| super::hlr::HlrBody { body: &e.body, polys: e.polys() }).collect();
+        Ok(super::hlr::project(&inputs, frame, opts))
+    }
+
     fn ray_hits(&self, body: BodyId, origin: Point3<f64>, dir: nalgebra::Vector3<f64>) -> Result<Vec<RayHit>> {
         let e = self.entry(body)?;
         let d = dir.normalize();
