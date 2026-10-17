@@ -27,6 +27,8 @@ const SCENARIO_NOW: i64 = 1_790_263_800;
 
 mod batch;
 mod check;
+#[cfg(target_os = "linux")]
+mod install;
 
 /// Every way to run cadrs (`-h`, `--help`).
 const HELP: &str = "\
@@ -42,6 +44,8 @@ Usage:
       Rebuilds a stored document without a window and reports its features in error or warning.
   cadrs --headless --jobs N (--scenarios a,b,... | --all)
       Renders many scenarios, N at a time, each in its own process.
+  cadrs --install
+      Installs this build for the current user, with a launcher entry (Linux; `cargo install-local`).
 
 Documents live in --data-dir, else $CADRS_DATA_DIR, else the platform data dir
 (~/.local/share/cadrs/documents on Linux).";
@@ -52,6 +56,20 @@ fn main() -> AppExit {
     if args.iter().any(|a| a == "-h" || a == "--help") {
         println!("{HELP}");
         return AppExit::Success;
+    }
+    // `--install`: copies this build into ~/.local, with a launcher entry.
+    #[cfg(target_os = "linux")]
+    if args.iter().any(|a| a == "--install") {
+        return match install::run() {
+            Ok(dir) => {
+                println!("Installed cadrs to {}", dir.display());
+                AppExit::Success
+            }
+            Err(e) => {
+                eprintln!("{e}");
+                AppExit::from_code(1)
+            }
+        };
     }
     // `--list-documents`: the store's documents with their ids, no window.
     if let Some(code) = check::list_documents(&args) {

@@ -16,3 +16,8 @@ rustflags = ["-C", "link-arg=-fuse-ld=mold", "-Zshare-generics=y", "-Zthreads=4"
 
 [build]
 jobs = 16
+
+[alias]
+# Builds in release and installs it for the current user, with a launcher entry (Linux; see
+# crates/cadrs/src/install.rs).
+install-local = "run -r -p cadrs -- --install"
