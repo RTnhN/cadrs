@@ -17,16 +17,30 @@ fn line2(o: P2, d: V2) -> Curve {
 /// The p-curve of `c` on [t0, t1] on `s`, its periodic coordinates shifted so its middle lies
 /// near `near` (in the face's chart) when given.
 pub fn pcurve(s: &Surface, c: &Curve, t0: f64, t1: f64, near: Option<P2>) -> Curve {
-    let pc = exact(s, c).unwrap_or_else(|| fitted(s, c, t0, t1));
+    let pc = exact(s, c, t0, t1).unwrap_or_else(|| fitted(s, c, t0, t1));
     shift_into(s, pc, (t0 + t1) * 0.5, near)
 }
 
 /// Shifts a p-curve by whole periods so its point at `tm` lies nearest `near`.
 pub fn shift_into(s: &Surface, pc: Curve, tm: f64, near: Option<P2>) -> Curve {
-    let Some(near) = near else { return pc };
     let m = pc.point(tm);
+    // A sphere's meridian p-curves repeat every turn in v: bring them into [−π/2, π/2].
+    if let (Surface::Sphere { .. }, None) = (s, near) {
+        let dv = -((m.y + PI / 2.0) / TAU).floor() * TAU;
+        if dv != 0.0 {
+            return pc.transformed(&Affine::translation(V3::new(0.0, dv, 0.0)));
+        }
+        return pc;
+    }
+    let Some(near) = near else { return pc };
     let du = if s.u_periodic() { ((near.x - m.x) / TAU).round() * TAU } else { 0.0 };
-    let dv = if s.v_periodic() { ((near.y - m.y) / TAU).round() * TAU } else { 0.0 };
+    let dv = if s.v_periodic() {
+        ((near.y - m.y) / TAU).round() * TAU
+    } else if matches!(s, Surface::Sphere { .. }) {
+        -((m.y + PI / 2.0) / TAU).floor() * TAU
+    } else {
+        0.0
+    };
     if du == 0.0 && dv == 0.0 {
         return pc;
     }
@@ -38,7 +52,7 @@ fn ang(f: &Frame, v: &V3) -> f64 {
     v.dot(&f.y).atan2(v.dot(&f.x))
 }
 
-fn exact(s: &Surface, c: &Curve) -> Option<Curve> {
+fn exact(s: &Surface, c: &Curve, t0: f64, t1: f64) -> Option<Curve> {
     match s {
         Surface::Plane { f } => {
             // Model → plane coordinates is affine (rows x, y, z).
@@ -101,8 +115,20 @@ fn exact(s: &Surface, c: &Curve) -> Option<Curve> {
                 Some(line2(P2::new(ang(f, x), v), V2::new(sgn, 0.0)))
             }
             Curve::Circle { c: cc, x, y, .. } if (cc - f.o).norm() < 1e-9 && x.cross(y).dot(&f.z).abs() < 1e-12 => {
-                // A meridian: u const, v = ±t + v0.
-                meridian(f, &f.o, x, y)
+                // A meridian: u const, v = ±t + v0, in the half plane holding the arc.
+                let m = c.point((t0 + t1) * 0.5) - f.o;
+                let side = m - f.z * m.dot(&f.z);
+                if side.norm() < 1e-9 {
+                    return None;
+                }
+                // The arc must stay in that half plane (not run over a pole).
+                for s in [0.0, 1.0] {
+                    let q = c.point(t0 + (t1 - t0) * s) - f.o;
+                    if (q - f.z * q.dot(&f.z)).dot(&side) < -1e-9 {
+                        return None;
+                    }
+                }
+                meridian_side(f, x, y, &side.normalize())
             }
             _ => None,
         },
@@ -140,6 +166,16 @@ fn exact(s: &Surface, c: &Curve) -> Option<Curve> {
         },
         Surface::Nurbs(_) => None,
     }
+}
+
+/// A sphere's meridian in the half plane of `radial`: u const, v = σt + v0.
+fn meridian_side(f: &Frame, x: &V3, y: &V3, radial: &V3) -> Option<Curve> {
+    let (xr, xz) = (x.dot(radial), x.dot(&f.z));
+    let (yr, yz) = (y.dot(radial), y.dot(&f.z));
+    let sig = (xr * yz - xz * yr).signum();
+    let v0 = xz.atan2(xr);
+    let u = ang(f, radial);
+    Some(line2(P2::new(u, v0), V2::new(0.0, sig)))
 }
 
 /// A meridian circle (in a plane through the axis, centred at `cc`): u const, v = σt + v0.
@@ -200,16 +236,20 @@ fn fitted(s: &Surface, c: &Curve, t0: f64, t1: f64) -> Curve {
         let (u, v) = s.project(&c.point(t), hint);
         P2::new(u, v)
     };
-    for _round in 0..8 {
-        uvs.clear();
+    let fit_at = |ts: &[f64]| -> (NurbsCurve, Vec<P2>) {
+        let mut uvs = Vec::with_capacity(ts.len());
         let mut hint: Option<(f64, f64)> = None;
-        for &t in &ts {
+        for &t in ts {
             let q = project(t, hint);
             hint = Some((q.x, q.y));
             uvs.push(q);
         }
         let pts: Vec<P3> = uvs.iter().map(|q| P3::new(q.x, q.y, 0.0)).collect();
-        let fit = NurbsCurve::interpolate(&pts, &ts, 3.min(pts.len() - 1), None, None);
+        (NurbsCurve::interpolate(&pts, ts, 3.min(pts.len() - 1), None, None), uvs)
+    };
+    let _ = &mut uvs;
+    for _round in 0..12 {
+        let (fit, uvs) = fit_at(&ts);
         // Check the midpoints.
         let mut ins = Vec::new();
         for k in 0..ts.len() - 1 {
@@ -217,7 +257,7 @@ fn fitted(s: &Surface, c: &Curve, t0: f64, t1: f64) -> Curve {
             let f = fit.point(tm);
             let q = project(tm, Some((uvs[k].x, uvs[k].y)));
             let err = ((f.x - q.x) * mu).hypot((f.y - q.y) * mv);
-            if err > 1e-10 {
+            if err > 1e-9 {
                 ins.push(tm);
             }
         }
@@ -227,8 +267,7 @@ fn fitted(s: &Surface, c: &Curve, t0: f64, t1: f64) -> Curve {
         ts.extend(ins);
         ts.sort_by(f64::total_cmp);
     }
-    let pts: Vec<P3> = uvs.iter().map(|q| P3::new(q.x, q.y, 0.0)).collect();
-    Curve::Nurbs(Arc::new(NurbsCurve::interpolate(&pts, &ts[..pts.len()], 3, None, None)))
+    Curve::Nurbs(Arc::new(fit_at(&ts).0))
 }
 
 #[cfg(test)]

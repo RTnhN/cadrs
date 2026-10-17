@@ -516,7 +516,7 @@ pub fn merge_edges(b: &mut Body) {
                 Curve::Line { o, d } => (pc_ - o).dot(d) / d.norm_squared(),
                 _ => {
                     // Angle on the circle unwrapped away from ta through tv.
-                    let raw = curve.closest(&pc_, -1e9, 1e9);
+                    let raw = curve.closest(&pc_, tv - PI, tv + PI);
                     let dir = (tv - ta).signum();
                     let mut t = unwrap_near(raw, tv, TAU);
                     if (t - tv) * dir <= 0.0 {

@@ -86,6 +86,15 @@ impl Pool {
         if let Some(i) = self.find(&p) {
             return i;
         }
+        if std::env::var("CADRS_VERTEX_DEBUG").is_ok() {
+            let near_round = |x: f64| {
+                let r = (x * 2.0).round() / 2.0;
+                (x - r).abs() > 1e-11 && (x - r).abs() < 1e-5
+            };
+            if near_round(p.x) || near_round(p.y) || near_round(p.z) {
+                eprintln!("inexact vertex {p:?}\n{}", std::backtrace::Backtrace::force_capture());
+            }
+        }
         self.verts.push(p);
         let i = self.verts.len() - 1;
         self.grid.entry(Self::cell(&p)).or_default().push(i);
@@ -209,6 +218,36 @@ fn on_curve(c: &Curve, t0: f64, t1: f64, p: &P3, tol: f64) -> Option<f64> {
 /// The parameter of a point on a closed curve, unwrapped into [t0, t1].
 fn param_on(c: &Curve, t0: f64, t1: f64, p: &P3) -> f64 {
     c.closest(p, t0, t1)
+}
+
+/// The parameter of the point of the curve nearest `p`, starting from `t` (exact for lines and
+/// circles; Newton otherwise).
+fn refine_param(c: &Curve, t0: f64, t1: f64, p: &P3, t: f64) -> f64 {
+    match c {
+        Curve::Line { .. } | Curve::Circle { .. } => {
+            let tc = c.closest(p, t0 - (t1 - t0), t1 + (t1 - t0));
+            if (tc - t).abs() < 1e-4 * (1.0 + t.abs()) { tc.clamp(t0, t1) } else { t }
+        }
+        _ => {
+            let mut x = t;
+            for _ in 0..20 {
+                let (q, d1, d2) = c.d2(x);
+                let r = q - p;
+                let f = r.dot(&d1);
+                let df = d1.norm_squared() + r.dot(&d2);
+                if df.abs() < 1e-300 {
+                    break;
+                }
+                let nx = (x - f / df).clamp(t0, t1);
+                if (nx - x).abs() < 1e-16 * (1.0 + x.abs()) {
+                    x = nx;
+                    break;
+                }
+                x = nx;
+            }
+            x
+        }
+    }
 }
 
 /// Whether an edge lies on a surface (its sample points are on it).
@@ -439,6 +478,10 @@ fn run(a: &Body, b: &Body, mode: Mode) -> Result<BoolOut> {
             for (ta, tb) in ssi::curve_curve(&ca.curve, ca.t[0], ca.t[1], &cb.curve, cb.t[0], cb.t[1], VTOL * 0.5) {
                 let p = ca.curve.point(ta);
                 let v = pool.vertex(p);
+                // The parameters of the (possibly merged) vertex itself.
+                let q = pool.verts[v];
+                let ta = refine_param(&ca.curve, ca.t[0], ca.t[1], &q, ta);
+                let tb = refine_param(&cb.curve, cb.t[0], cb.t[1], &q, tb);
                 pool.split(ea, ta, v);
                 pool.split(eb, tb, v);
             }
@@ -466,6 +509,7 @@ fn run(a: &Body, b: &Body, mode: Mode) -> Result<BoolOut> {
                     _ => {}
                 }
                 let v = pool.vertex(p);
+                let t = refine_param(&ed.curve, ed.t[0], ed.t[1], &pool.verts[v], t);
                 pool.split(e, t, v);
                 if !face_pts[fi].contains(&v) {
                     face_pts[fi].push(v);
@@ -583,7 +627,9 @@ fn run(a: &Body, b: &Body, mode: Mode) -> Result<BoolOut> {
                         if ed.degenerate || !ebox.get(e).map_or(true, |b| b.contains(&pm)) {
                             return false;
                         }
-                        let ends_ok = (ed.v == [va, vb] || ed.v == [vb, va]) && ed.splits.is_empty() || (ed.splits.iter().any(|s| s.1 == va) || ed.v.contains(&va)) && (ed.splits.iter().any(|s| s.1 == vb) || ed.v.contains(&vb));
+                        // Only an unsplit edge between exactly these vertices (pieces of split
+                        // edges that coincide with the new edge are unified later).
+                        let ends_ok = (ed.v == [va, vb] || ed.v == [vb, va]) && ed.splits.is_empty();
                         ends_ok && on_curve(&ed.curve, ed.t[0], ed.t[1], &pm, VTOL).is_some()
                     });
                     let e = match existing {
@@ -710,7 +756,7 @@ fn run(a: &Body, b: &Body, mode: Mode) -> Result<BoolOut> {
         };
         let fwd = if same { a.fwd } else { !a.fwd };
         let v = if fwd { [ce.v[0], ce.v[1]] } else { [ce.v[1], ce.v[0]] };
-        Arc { edge: c, fwd, pc, t: ce.t, v, cut: a.cut }
+        Arc { edge: c, fwd, pc, t: ce.t, v, cut: a.cut, deg: ce.degenerate }
     };
     let arcs_of = |pool: &Pool, f: &WFace, e: usize, fwd: bool, pc: &Curve| -> Vec<Arc> {
         let ps: Vec<usize> = if e < pieces.len() { pieces[e].clone() } else { vec![e] };
@@ -719,7 +765,7 @@ fn run(a: &Body, b: &Body, mode: Mode) -> Result<BoolOut> {
             .map(|&p| {
                 let ed = &pool.edges[p];
                 let v = if fwd { [ed.v[0], ed.v[1]] } else { [ed.v[1], ed.v[0]] };
-                canon_arc(pool, f, Arc { edge: p, fwd, pc: pc.clone(), t: ed.t, v, cut: false })
+                canon_arc(pool, f, Arc { edge: p, fwd, pc: pc.clone(), t: ed.t, v, cut: false, deg: ed.degenerate })
             })
             .collect();
         if !fwd {
@@ -745,7 +791,17 @@ fn run(a: &Body, b: &Body, mode: Mode) -> Result<BoolOut> {
                 }
                 let ed = &pool.edges[c];
                 let pc = pcurve::pcurve(&f.surf, &ed.curve, ed.t[0], ed.t[1], Some(f.uv_center));
-                cut_arcs.push(Arc { edge: c, fwd: true, pc, t: ed.t, v: ed.v, cut: true });
+                if std::env::var("CADRS_BOOL_DEBUG").is_ok() {
+                    for (k, t) in ed.t.iter().enumerate() {
+                        let q = pc.point(*t);
+                        let d = (f.surf.eval(q.x, q.y) - pool.verts[ed.v[k]]).norm();
+                        let dc = (ed.curve.point(*t) - pool.verts[ed.v[k]]).norm();
+                        if d > 1e-6 || dc > 1e-6 {
+                            eprintln!("cut {c} end {k}: p-curve off by {d:e}, curve off by {dc:e}; {:?} t {:?} surf {:?}", ed.curve, ed.t, f.surf);
+                        }
+                    }
+                }
+                cut_arcs.push(Arc { edge: c, fwd: true, pc, t: ed.t, v: ed.v, cut: true, deg: false });
             }
         }
         if cut_arcs.is_empty() {
@@ -830,6 +886,17 @@ fn run(a: &Body, b: &Body, mode: Mode) -> Result<BoolOut> {
         for l in loops {
             let mut nl = Vec::new();
             for a in l {
+                if a.deg {
+                    // A pole piece: its own degenerate edge over the arc's range.
+                    let ed = &pool.edges[a.edge];
+                    let v = *vmap.entry(ed.v[0]).or_insert_with(|| {
+                        out.verts.push(super::topo::Vertex { p: pool.verts[ed.v[0]] });
+                        out.verts.len() - 1
+                    });
+                    out.edges.push(Edge { curve: ed.curve.clone(), t: a.t, v: [v, v], degenerate: true });
+                    nl.push(Coedge { edge: out.edges.len() - 1, fwd: a.fwd, pc: a.pc.clone() });
+                    continue;
+                }
                 let ne = *emap.entry(a.edge).or_insert_with(|| {
                     let ed = &pool.edges[a.edge];
                     let mut vv = [0usize; 2];

@@ -21,6 +21,12 @@ pub struct IntCurve {
 /// The intersection of two surfaces near the box `bb` (the overlap of the two faces' boxes),
 /// given the uv boxes of the faces for the numeric fallback.
 pub fn surface_surface(a: &Surface, ua: ((f64, f64), (f64, f64)), b: &Surface, ub: ((f64, f64), (f64, f64)), bb: &Bbox) -> Vec<IntCurve> {
+    if let Some(r) = plane_extrusion(a, b, ub, bb) {
+        return r;
+    }
+    if let Some(r) = plane_extrusion(b, a, ua, bb) {
+        return r;
+    }
     if let Some(r) = analytic(a, b, bb) {
         return r;
     }
@@ -31,6 +37,52 @@ pub fn surface_surface(a: &Surface, ua: ((f64, f64), (f64, f64)), b: &Surface, u
     // other's distance.
     let _ = ub;
     numeric(a, ua, b, bb)
+}
+
+/// A plane and an extrusion: rulings where the plane contains the direction, otherwise the
+/// base curve projected along the direction onto the plane (an affine image: exact).
+fn plane_extrusion(p: &Surface, e: &Surface, ue: ((f64, f64), (f64, f64)), bb: &Bbox) -> Option<Vec<IntCurve>> {
+    let (Surface::Plane { f }, Surface::Extrusion { c, d }) = (p, e) else { return None };
+    let n = f.x.cross(&f.y);
+    let (u0, u1) = ue.0;
+    let pad = (u1 - u0).abs() * 1e-6;
+    let (u0, u1) = (u0 - pad, u1 + pad);
+    let dn = n.dot(d);
+    if dn.abs() < 1e-12 * d.norm() {
+        // Rulings through the points where the base curve meets the plane.
+        let pl = Surface::Plane { f: *f };
+        let bbig = bb.grow(bb.diagonal() * 0.01 + 1e-6);
+        let mut out = Vec::new();
+        let (lo, hi) = match c.nurbs_range() {
+            Some((a, b)) => (u0.max(a), u1.min(b)),
+            None => (u0, u1),
+        };
+        for t in curve_surface(c, lo, hi, &pl) {
+            out.extend(bound_line(c.point(t), d.normalize(), &bbig));
+        }
+        return Some(out);
+    }
+    // x ↦ x − d (n·(x − o)) / (n·d): the projection along d onto the plane.
+    let m = nalgebra::Matrix3::identity() - d * n.transpose() / dn;
+    let aff = Affine { m, t: d * (n.dot(&f.o.coords) / dn) };
+    let (lo, hi) = match c.nurbs_range() {
+        Some((a, b)) => (u0.max(a), u1.min(b)),
+        None => (u0, u1),
+    };
+    if hi <= lo {
+        return Some(vec![]);
+    }
+    let curve = match c {
+        Curve::Line { o, d: dl } => {
+            let o2 = aff.point(o);
+            let d2 = m * dl;
+            Curve::Line { o: o2, d: d2 }
+        }
+        Curve::Circle { .. } | Curve::Ellipse { .. } => Curve::Nurbs(Arc::new(c.to_nurbs(lo, hi).transformed(&aff))),
+        Curve::Nurbs(nc) => Curve::Nurbs(Arc::new(nc.transformed(&aff))),
+    };
+    let closed = c.is_periodic() && (hi - lo) >= TAU - 1e-9;
+    Some(vec![IntCurve { c: curve, t0: lo, t1: hi, closed }])
 }
 
 fn bound_line(o: P3, d: V3, bb: &Bbox) -> Option<IntCurve> {
@@ -227,8 +279,22 @@ fn analytic(a: &Surface, b: &Surface, bb: &Bbox) -> Option<Vec<IntCurve>> {
             Some(vec![circle(f1.o + d / l * x, d / l, (r1 * r1 - x * x).max(0.0).sqrt())])
         }
         _ => {
-            // Coaxial surfaces of revolution: circles where the meridians cross.
-            let (Some((oa, za)), Some((ob, zb))) = (a.axis(), b.axis()) else { return None };
+            // Coaxial surfaces of revolution: circles where the meridians cross. A sphere is
+            // symmetric about any axis through its centre.
+            let (Some((mut oa, mut za)), Some((ob, zb))) = (a.axis(), b.axis()) else { return None };
+            if let Surface::Sphere { f, .. } = a {
+                let w = f.o - ob;
+                if (w - zb * w.dot(&zb)).norm() < 1e-9 {
+                    oa = ob;
+                    za = zb;
+                }
+            }
+            let (ob, zb) = if let Surface::Sphere { f, .. } = b {
+                let w = f.o - oa;
+                if (w - za * w.dot(&za)).norm() < 1e-9 { (oa, za) } else { (ob, zb) }
+            } else {
+                (ob, zb)
+            };
             if !matches!(a, Surface::Cylinder { .. } | Surface::Cone { .. } | Surface::Sphere { .. } | Surface::Torus { .. }) {
                 return None;
             }
@@ -247,77 +313,101 @@ fn analytic(a: &Surface, b: &Surface, bb: &Bbox) -> Option<Vec<IntCurve>> {
     }
 }
 
-/// The meridian function of a surface of revolution about (o, z): its signed distance at the
-/// point (ρ, h) of a half plane through the axis.
-fn meridian_fn<'a>(s: &'a Surface, o: &P3, z: &V3) -> impl Fn(f64, f64) -> f64 + 'a {
-    let x = any_perpendicular(z);
-    let (o, z) = (*o, *z);
-    move |rho: f64, h: f64| s.signed_distance(&(o + x * rho + z * h)).unwrap_or(1.0)
+/// The meridian of an analytic surface of revolution about (o, z) in the (ρ, h) half plane:
+/// a line (cylinder, cone, plane square to the axis) or a circle (sphere, torus).
+#[derive(Debug, Clone, Copy)]
+enum Meridian {
+    /// Points p + s·d.
+    Line { p: (f64, f64), d: (f64, f64) },
+    Circle { c: (f64, f64), r: f64 },
 }
 
-fn coaxial(a: &Surface, b: &Surface, o: &P3, z: &V3, bb: &Bbox) -> Vec<IntCurve> {
-    // Sample the meridian of `a` in (ρ, h) and find where b's meridian function changes sign.
-    let fa = meridian_fn(a, o, z);
-    let fb = meridian_fn(b, o, z);
-    // Range of ρ and h from the box.
-    let mut hmin = f64::INFINITY;
-    let mut hmax = f64::NEG_INFINITY;
-    let mut rmax: f64 = 0.0;
-    for i in 0..8 {
-        let p = P3::new(
-            if i & 1 == 0 { bb.min.x } else { bb.max.x },
-            if i & 2 == 0 { bb.min.y } else { bb.max.y },
-            if i & 4 == 0 { bb.min.z } else { bb.max.z },
-        );
-        let w = p - o;
-        let h = w.dot(z);
-        hmin = hmin.min(h);
-        hmax = hmax.max(h);
-        rmax = rmax.max((w - z * h).norm());
-    }
-    let pad = (hmax - hmin).max(rmax) * 0.05 + 1e-6;
-    let (hmin, hmax, rmax) = (hmin - pad, hmax + pad, rmax + pad);
-    // Contour fa = 0 and fb = 0 on a grid; find common points by Newton from grid cells.
-    let n = 96;
-    let mut pts: Vec<(f64, f64)> = Vec::new();
-    for i in 0..n {
-        for j in 0..n {
-            let r0 = rmax * i as f64 / n as f64;
-            let r1 = rmax * (i + 1) as f64 / n as f64;
-            let h0 = hmin + (hmax - hmin) * j as f64 / n as f64;
-            let h1 = hmin + (hmax - hmin) * (j + 1) as f64 / n as f64;
-            let ca = [fa(r0, h0), fa(r1, h0), fa(r0, h1), fa(r1, h1)];
-            let cb = [fb(r0, h0), fb(r1, h0), fb(r0, h1), fb(r1, h1)];
-            let sa = ca.iter().any(|x| *x <= 0.0) && ca.iter().any(|x| *x >= 0.0);
-            let sb = cb.iter().any(|x| *x <= 0.0) && cb.iter().any(|x| *x >= 0.0);
-            if !(sa && sb) {
-                continue;
+fn meridian(s: &Surface, o: &P3, z: &V3) -> Option<Meridian> {
+    let h_of = |p: &P3| (p - o).dot(z);
+    Some(match s {
+        Surface::Cylinder { r, .. } => Meridian::Line { p: (*r, 0.0), d: (0.0, 1.0) },
+        Surface::Cone { f, r, a } => {
+            let s = f.z.dot(z).signum();
+            Meridian::Line { p: (*r, h_of(&f.o)), d: (a.sin(), a.cos() * s) }
+        }
+        Surface::Sphere { f, r } => Meridian::Circle { c: (0.0, h_of(&f.o)), r: *r },
+        Surface::Torus { f, rmaj, rmin } => Meridian::Circle { c: (*rmaj, h_of(&f.o)), r: *rmin },
+        Surface::Plane { f } => {
+            let n = f.x.cross(&f.y);
+            if n.cross(z).norm() > 1e-12 {
+                return None;
             }
-            // Newton on (fa, fb) = 0 from the cell centre.
-            let (mut r, mut h) = ((r0 + r1) / 2.0, (h0 + h1) / 2.0);
-            let e = 1e-7 * (1.0 + rmax);
-            let mut ok = false;
-            for _ in 0..40 {
-                let (a0, b0) = (fa(r, h), fb(r, h));
-                let (ar, br) = ((fa(r + e, h) - fa(r - e, h)) / (2.0 * e), (fb(r + e, h) - fb(r - e, h)) / (2.0 * e));
-                let (ah, bh) = ((fa(r, h + e) - fa(r, h - e)) / (2.0 * e), (fb(r, h + e) - fb(r, h - e)) / (2.0 * e));
-                let Some((dr, dh)) = solve2(ar, ah, br, bh, -a0, -b0) else { break };
-                r += dr;
-                h += dh;
-                if dr.abs() + dh.abs() < 1e-14 * (1.0 + rmax) {
-                    ok = true;
-                    break;
-                }
+            Meridian::Line { p: (0.0, h_of(&f.o)), d: (1.0, 0.0) }
+        }
+        _ => return None,
+    })
+}
+
+/// Intersections of two meridians (ρ, h), tangencies included (within `tol`).
+fn meridian_points(a: Meridian, b: Meridian, tol: f64) -> Vec<(f64, f64)> {
+    let mut out = Vec::new();
+    match (a, b) {
+        (Meridian::Line { p: p1, d: d1 }, Meridian::Line { p: p2, d: d2 }) => {
+            let den = d1.0 * d2.1 - d1.1 * d2.0;
+            if den.abs() < 1e-14 {
+                return out;
             }
-            if ok && fa(r, h).abs() < 1e-9 && fb(r, h).abs() < 1e-9 && r > 1e-9 {
-                if !pts.iter().any(|(pr, ph)| (pr - r).abs() < 1e-7 && (ph - h).abs() < 1e-7) {
-                    pts.push((r, h));
+            let (wx, wy) = (p2.0 - p1.0, p2.1 - p1.1);
+            let s = (wx * d2.1 - wy * d2.0) / den;
+            out.push((p1.0 + d1.0 * s, p1.1 + d1.1 * s));
+        }
+        (Meridian::Line { p, d }, Meridian::Circle { c, r }) | (Meridian::Circle { c, r }, Meridian::Line { p, d }) => {
+            let l = (d.0 * d.0 + d.1 * d.1).sqrt();
+            let (dx, dy) = (d.0 / l, d.1 / l);
+            let (wx, wy) = (p.0 - c.0, p.1 - c.1);
+            let b = wx * dx + wy * dy;
+            let cc = wx * wx + wy * wy - r * r;
+            let disc = b * b - cc;
+            if disc < -2.0 * r * tol {
+                return out;
+            }
+            if disc.abs() <= 2.0 * r * tol {
+                let s = -b;
+                out.push((p.0 + dx * s, p.1 + dy * s));
+            } else {
+                let q = disc.sqrt();
+                for s in [-b - q, -b + q] {
+                    out.push((p.0 + dx * s, p.1 + dy * s));
                 }
             }
         }
+        (Meridian::Circle { c: c1, r: r1 }, Meridian::Circle { c: c2, r: r2 }) => {
+            let (dx, dy) = (c2.0 - c1.0, c2.1 - c1.1);
+            let d = (dx * dx + dy * dy).sqrt();
+            if d < 1e-14 {
+                return out;
+            }
+            if d > r1 + r2 + tol || d < (r1 - r2).abs() - tol {
+                return out;
+            }
+            let x = (d * d + r1 * r1 - r2 * r2) / (2.0 * d);
+            let h2 = r1 * r1 - x * x;
+            let (ex, ey) = (dx / d, dy / d);
+            let base = (c1.0 + ex * x, c1.1 + ey * x);
+            if h2 <= (r1 * tol * 2.0).max(1e-18) {
+                out.push(base);
+            } else {
+                let h = h2.sqrt();
+                out.push((base.0 - ey * h, base.1 + ex * h));
+                out.push((base.0 + ey * h, base.1 - ex * h));
+            }
+        }
     }
+    out
+}
+
+fn coaxial(a: &Surface, b: &Surface, o: &P3, z: &V3, bb: &Bbox) -> Vec<IntCurve> {
+    let (Some(ma), Some(mb)) = (meridian(a, o, z), meridian(b, o, z)) else { return vec![] };
     let f = Frame::from_z(*o, *z);
-    pts.into_iter()
+    let _ = bb;
+    meridian_points(ma, mb, 1e-7)
+        .into_iter()
+        .filter(|(r, _)| *r > 1e-9)
         .map(|(r, h)| IntCurve { c: Curve::Circle { c: o + z * h, x: f.x, y: f.y, r }, t0: 0.0, t1: TAU, closed: true })
         .collect()
 }
@@ -561,6 +651,44 @@ fn chord(pts: &[P3]) -> Vec<f64> {
 /// Parameters in [t0, t1] where the curve meets the surface (sign changes of the distance,
 /// and touching points), refined.
 pub fn curve_surface(c: &Curve, t0: f64, t1: f64, s: &Surface) -> Vec<f64> {
+    // A circle or an ellipse against a plane: A cos t + B sin t + C = 0, tangency included.
+    if let (Curve::Circle { .. } | Curve::Ellipse { .. }, Surface::Plane { f }) = (c, s) {
+        let n = f.x.cross(&f.y);
+        let (cc, ax, ay) = match c {
+            Curve::Circle { c, x, y, r } => (*c, x * *r, y * *r),
+            Curve::Ellipse { c, x, y, a, b } => (*c, x * *a, y * *b),
+            _ => unreachable!(),
+        };
+        let (a, b, k) = (n.dot(&ax), n.dot(&ay), n.dot(&(cc - f.o)));
+        let r = (a * a + b * b).sqrt();
+        if r < 1e-14 {
+            return vec![]; // in a plane parallel to it
+        }
+        let phi = b.atan2(a);
+        let q = -k / r;
+        let mut ts = Vec::new();
+        if q.abs() > 1.0 + 1e-12 {
+            return ts;
+        }
+        if (q.abs() - 1.0).abs() <= 1e-12 * 4.0 || (1.0 - q * q) * r * r < 1e-20 {
+            ts.push(if q > 0.0 { phi } else { phi + PI });
+        } else {
+            let d = q.clamp(-1.0, 1.0).acos();
+            ts.push(phi + d);
+            ts.push(phi - d);
+        }
+        let mut out: Vec<f64> = Vec::new();
+        for t in ts {
+            for k in -2..=2 {
+                let tt = t + TAU * k as f64;
+                if tt >= t0 - 1e-12 && tt <= t1 + 1e-12 && !out.iter().any(|x| (x - tt).abs() < 1e-12) {
+                    out.push(tt.clamp(t0, t1));
+                }
+            }
+        }
+        out.sort_by(f64::total_cmp);
+        return out;
+    }
     // Exact cases.
     if let (Curve::Line { o, d }, true) = (c, s.signed_distance(&P3::origin()).is_some()) {
         let ts: Vec<f64> = super::classify::ray_surface(s, o, d, t0 - 1.0, t1 + 1.0).into_iter().map(|(t, _, _)| t).collect();
@@ -659,6 +787,56 @@ pub fn curve_curve(a: &Curve, a0: f64, a1: f64, b: &Curve, b0: f64, b1: f64, tol
             }
         }
         return out;
+    }
+    // A line and a circle in closed form (either order).
+    let line_circle = |l: &Curve, l0: f64, l1: f64, c: &Curve, c0: f64, c1: f64| -> Option<Vec<(f64, f64)>> {
+        let (Curve::Line { o, d }, Curve::Circle { c: cc, x, y, r }) = (l, c) else { return None };
+        let n = x.cross(y);
+        let dd = d.norm();
+        let du = d / dd;
+        let mut hits: Vec<P3> = Vec::new();
+        if du.dot(&n).abs() < 1e-12 {
+            // In a plane parallel to the circle's: only meets it in the circle's plane.
+            if (o - cc).dot(&n).abs() > tol {
+                return Some(vec![]);
+            }
+            let w = o - cc;
+            let b = w.dot(&du);
+            let disc = b * b - (w.norm_squared() - r * r);
+            if disc < -2.0 * r * tol {
+                return Some(vec![]);
+            }
+            if disc.abs() <= 2.0 * r * tol * 1e-3 || disc <= 0.0 {
+                hits.push(o + du * (-b));
+            } else {
+                let q = disc.sqrt();
+                hits.push(o + du * (-b - q));
+                hits.push(o + du * (-b + q));
+            }
+        } else {
+            let s = (cc - o).dot(&n) / du.dot(&n);
+            hits.push(o + du * s);
+        }
+        let mut out = Vec::new();
+        for p in hits {
+            let w = p - cc;
+            if (w.norm() - r).abs() > tol {
+                continue;
+            }
+            let tl = (p - o).dot(d) / (dd * dd);
+            let ang = w.dot(y).atan2(w.dot(x));
+            let tc = super::curve::clamp_periodic(ang, c0, c1);
+            if tl >= l0 - 1e-9 && tl <= l1 + 1e-9 && (c.point(tc) - p).norm() < tol {
+                out.push((tl.clamp(l0, l1), tc));
+            }
+        }
+        Some(out)
+    };
+    if let Some(r) = line_circle(a, a0, a1, b, b0, b1) {
+        return r;
+    }
+    if let Some(r) = line_circle(b, b0, b1, a, a0, a1) {
+        return r.into_iter().map(|(x, y)| (y, x)).collect();
     }
     // Sample a, find local minima of the distance to b, refine by Newton on both parameters.
     let n = match a {

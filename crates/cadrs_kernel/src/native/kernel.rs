@@ -337,6 +337,22 @@ impl Kernel for NativeKernel {
         super::boolean::boolean(self, op, target, tools)
     }
 
+    fn fillet(&mut self, body: BodyId, edges: &[EdgeId], radius: f64) -> Result<OpResult> {
+        super::blend::fillet(self, body, edges, &FilletSpec::radius(radius))
+    }
+
+    fn fillet_with(&mut self, body: BodyId, edges: &[EdgeId], spec: &FilletSpec) -> Result<OpResult> {
+        super::blend::fillet(self, body, edges, spec)
+    }
+
+    fn chamfer(&mut self, body: BodyId, edges: &[EdgeId], spec: ChamferSpec) -> Result<OpResult> {
+        super::blend::chamfer(self, body, edges, &ChamferOpts::new(spec))
+    }
+
+    fn chamfer_with(&mut self, body: BodyId, edges: &[EdgeId], opts: &ChamferOpts) -> Result<OpResult> {
+        super::blend::chamfer(self, body, edges, opts)
+    }
+
     fn split(&mut self, body: BodyId, tool: &SplitTool, source: u64) -> Result<OpResult> {
         super::ops::split(self, body, tool, source)
     }

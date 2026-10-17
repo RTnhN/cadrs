@@ -16,6 +16,8 @@ pub struct Arc {
     /// Start and end vertices in the direction of travel.
     pub v: [usize; 2],
     pub cut: bool,
+    /// A degenerate edge (a pole): one vertex, a p-curve along the pole line.
+    pub deg: bool,
 }
 
 impl Arc {
@@ -47,7 +49,43 @@ pub fn split_face(surf: &Surface, flip: bool, boundary: &[Vec<Arc>], cuts: &[Arc
     let sgn = if flip { -1.0 } else { 1.0 };
     // Oriented, scaled uv (material on the left for every loop).
     let o = |p: P2| P2::new(p.x * mu, p.y * mv * sgn);
-    let mut arcs: Vec<Arc> = boundary.iter().flatten().cloned().collect();
+    let mut arcs: Vec<Arc> = Vec::new();
+    // Degenerate boundary arcs are split where cuts arrive on them (a cut ending at a pole).
+    let cut_ends: Vec<(usize, P2)> = cuts.iter().flat_map(|c| [(c.v[0], c.uv_at(0.0)), (c.v[1], c.uv_at(1.0))]).collect();
+    for a in boundary.iter().flatten() {
+        if !a.deg {
+            arcs.push(a.clone());
+            continue;
+        }
+        let (u0, u1) = (a.uv_at(0.0), a.uv_at(1.0));
+        let span = (u1 - u0).norm();
+        let mut fr: Vec<f64> = cut_ends
+            .iter()
+            .filter(|(v, _)| *v == a.v[0])
+            .filter_map(|(_, q)| {
+                if span < 1e-300 {
+                    return None;
+                }
+                let s = (q - u0).dot(&(u1 - u0)) / (span * span);
+                let off = (u0 + (u1 - u0) * s - q).norm();
+                (s > 1e-9 && s < 1.0 - 1e-9 && off < 1e-6 * (1.0 + span)).then_some(s)
+            })
+            .collect();
+        fr.sort_by(f64::total_cmp);
+        fr.dedup_by(|x, y| (*x - *y).abs() < 1e-9);
+        if fr.is_empty() {
+            arcs.push(a.clone());
+            continue;
+        }
+        let (ts, te) = if a.fwd { (a.t[0], a.t[1]) } else { (a.t[1], a.t[0]) };
+        let mut bounds = vec![ts];
+        bounds.extend(fr.iter().map(|s| ts + (te - ts) * s));
+        bounds.push(te);
+        for w in bounds.windows(2) {
+            let (lo, hi) = if a.fwd { (w[0], w[1]) } else { (w[1], w[0]) };
+            arcs.push(Arc { t: [lo, hi], ..a.clone() });
+        }
+    }
     for c in cuts {
         arcs.push(Arc { cut: true, ..c.clone() });
         arcs.push(Arc { cut: true, ..c.twin() });
@@ -100,6 +138,11 @@ pub fn split_face(surf: &Surface, flip: bool, boundary: &[Vec<Arc>], cuts: &[Arc
         }
         if !changed {
             break;
+        }
+    }
+    if std::env::var("CADRS_SPLIT_DEBUG").is_ok() {
+        for (k, a) in arcs.iter().enumerate() {
+            eprintln!("arc {k}: edge {} fwd {} cut {} alive {} nodes {:?} uv {:?} -> {:?}", a.edge, a.fwd, a.cut, alive[k], ends[k], a.uv_at(0.0), a.uv_at(1.0));
         }
     }
     // Departure direction of each arc at its start, and arrival direction at its end.
