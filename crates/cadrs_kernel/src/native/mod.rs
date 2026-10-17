@@ -9,6 +9,7 @@ pub mod curve;
 pub mod features;
 pub mod kernel;
 pub mod local;
+pub mod loft_build;
 pub mod mass;
 pub mod math;
 pub mod nurbs;

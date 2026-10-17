@@ -250,6 +250,56 @@ fn refine_param(c: &Curve, t0: f64, t1: f64, p: &P3, t: f64) -> f64 {
     }
 }
 
+/// Two faces sharing an edge (the same vertices and curve) whose surfaces are tangent along
+/// it, and which aren't both analytic (analytic pairs are intersected exactly).
+fn tangent_along_shared_edge(pool: &Pool, fa: &WFace, fb: &WFace, ea: &[usize], eb: &[usize]) -> bool {
+    let analytic = |s: &Surface| !matches!(s, Surface::Nurbs(_) | Surface::Extrusion { .. } | Surface::Revolution { .. });
+    if analytic(&fa.surf) && analytic(&fb.surf) {
+        return false;
+    }
+    for &x in ea {
+        let e = &pool.edges[x];
+        if e.degenerate {
+            continue;
+        }
+        for &y in eb {
+            let o = &pool.edges[y];
+            if o.degenerate {
+                continue;
+            }
+            // The same curve, at least where they overlap (whole circles may have their seams in
+            // different places).
+            let same_ends = x == y || {
+                let on = |a: &WEdge, b: &WEdge| [0.25, 0.5, 0.75].iter().all(|f| {
+                    let m = b.curve.point(b.t[0] + (b.t[1] - b.t[0]) * f);
+                    on_curve(&a.curve, a.t[0], a.t[1], &m, VTOL * 10.0).is_some()
+                });
+                on(e, o) && on(o, e)
+            };
+            if std::env::var("CADRS_BOOL_DEBUG").is_ok() && same_ends {
+                let p = e.curve.point(e.t[0] + (e.t[1] - e.t[0]) * 0.5);
+                let (ua, va) = fa.surf.project(&p, Some((fa.uv_center.x, fa.uv_center.y)));
+                let (ub, vb) = fb.surf.project(&p, Some((fb.uv_center.x, fb.uv_center.y)));
+                eprintln!("shared edge {x}/{y}: normals dot {:.12}, proj err {:.3e} {:.3e}", fa.surf.normal(ua, va).dot(&fb.surf.normal(ub, vb)), (fa.surf.eval(ua, va) - p).norm(), (fb.surf.eval(ub, vb) - p).norm());
+            }
+            if !same_ends {
+                continue;
+            }
+            // Tangent along it: the normals agree (up to sign) at a few points.
+            let tangent = [0.2, 0.5, 0.8].iter().all(|f| {
+                let p = e.curve.point(e.t[0] + (e.t[1] - e.t[0]) * f);
+                let (ua, va) = fa.surf.project(&p, None);
+                let (ub, vb) = fb.surf.project(&p, None);
+                fa.surf.normal(ua, va).dot(&fb.surf.normal(ub, vb)).abs() > 1.0 - 1e-6
+            });
+            if tangent {
+                return true;
+            }
+        }
+    }
+    false
+}
+
 /// Whether an edge lies on a surface (its sample points are on it).
 fn edge_on_surface(e: &WEdge, s: &Surface) -> bool {
     if e.degenerate {
@@ -592,7 +642,17 @@ fn run(a: &Body, b: &Body, mode: Mode) -> Result<BoolOut> {
                 }
                 (ub, vb)
             };
+            // Faces that share an edge and are tangent along it (one continues the other): the
+            // shared edge is their contact; contouring tangent surfaces finds nothing more but
+            // noise.
+            if tangent_along_shared_edge(&pool, &faces[fa], &faces[fb], &face_edges[fa], &face_edges[fb]) {
+                continue;
+            }
+            let t_ssi = std::time::Instant::now();
             let curves = ssi::surface_surface(&faces[fa].surf, uvbox(&faces[fa]), &faces[fb].surf, uvbox(&faces[fb]), &ob);
+            if std::env::var("CADRS_BOOL_DEBUG").is_ok() {
+                eprintln!("ssi {fa}×{fb} {:?}×{:?}: {} curves in {:?}", faces[fa].surf.kind(), faces[fb].surf.kind(), curves.len(), t_ssi.elapsed());
+            }
             if curves.is_empty() {
                 continue;
             }

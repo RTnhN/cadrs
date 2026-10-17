@@ -314,6 +314,71 @@ impl NurbsCurve {
         Some(Self { degree: p, knots, cps })
     }
 
+    /// Interpolation (degree `p`) through points at parameters, with optional first and second
+    /// derivatives at both ends. Non-rational. Falls back to fewer conditions when singular.
+    pub fn interpolate_ext(pts: &[P3], params: &[f64], p: usize, d1: [Option<V3>; 2], d2: [Option<V3>; 2]) -> Self {
+        if d2[0].is_none() && d2[1].is_none() {
+            return Self::interpolate(pts, params, p, d1[0], d1[1]);
+        }
+        let n_pts = pts.len();
+        let s0 = d1[0].is_some() as usize + d2[0].is_some() as usize;
+        let s1 = d1[1].is_some() as usize + d2[1].is_some() as usize;
+        let n = n_pts + s0 + s1;
+        let p = p.min(n - 1).max(1);
+        let mut ext: Vec<f64> = vec![params[0]; s0];
+        ext.extend_from_slice(params);
+        ext.extend(vec![params[n_pts - 1]; s1]);
+        let mut knots = vec![params[0]; p + 1];
+        let inner = n - p - 1;
+        for j in 1..=inner {
+            let s: f64 = (j..j + p).map(|i| ext[i.min(ext.len() - 1)]).sum();
+            knots.push(s / p as f64);
+        }
+        knots.extend(vec![params[n_pts - 1]; p + 1]);
+        let mut a = DMatrix::<f64>::zeros(n, n);
+        let mut rhs = DMatrix::<f64>::zeros(n, 3);
+        let mut row = 0;
+        let mut put = |a: &mut DMatrix<f64>, rhs: &mut DMatrix<f64>, u: f64, d: usize, v: V3| {
+            let span = find_span(n - 1, p, u, &knots);
+            let nd = basis_ders(span, u, p, d, &knots);
+            if d < nd.len() {
+                for j in 0..=p {
+                    a[(row, span - p + j)] = nd[d][j];
+                }
+            }
+            rhs[(row, 0)] = v.x;
+            rhs[(row, 1)] = v.y;
+            rhs[(row, 2)] = v.z;
+            row += 1;
+        };
+        for (i, q) in pts.iter().enumerate() {
+            put(&mut a, &mut rhs, params[i], 0, q.coords);
+            if i == 0 {
+                if let Some(d) = d1[0] {
+                    put(&mut a, &mut rhs, params[0], 1, d);
+                }
+                if let Some(d) = d2[0] {
+                    put(&mut a, &mut rhs, params[0], 2, d);
+                }
+            }
+            if i == n_pts - 1 {
+                if let Some(d) = d1[1] {
+                    put(&mut a, &mut rhs, params[n_pts - 1], 1, d);
+                }
+                if let Some(d) = d2[1] {
+                    put(&mut a, &mut rhs, params[n_pts - 1], 2, d);
+                }
+            }
+        }
+        match a.lu().solve(&rhs) {
+            Some(sol) if sol.iter().all(|x| x.is_finite()) => {
+                let cps = (0..n).map(|i| H::new(sol[(i, 0)], sol[(i, 1)], sol[(i, 2)], 1.0)).collect();
+                Self { degree: p, knots, cps }
+            }
+            _ => Self::interpolate(pts, params, p, d1[0], d1[1]),
+        }
+    }
+
     /// Chord-length parameters in [0, 1].
     pub fn chord_params(pts: &[P3]) -> Vec<f64> {
         let mut t = vec![0.0];

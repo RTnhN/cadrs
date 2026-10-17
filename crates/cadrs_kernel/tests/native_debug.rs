@@ -342,3 +342,19 @@ fn debug_sweep() {
         }
     }
 }
+
+#[test]
+fn debug_loft_match() {
+    let mut k = NativeKernel::new();
+    let circle_at = |z: f64, r: f64| Profile::new(Plane { origin: Point3::new(0.0, 0.0, z), ..Plane::top() }, vec![Region { outer: Loop { curves: vec![Curve2::Circle { center: p(0., 0.), radius: r, source: None }] }, holes: vec![], source: Some(4) }]);
+    let none = LoftEnd::default();
+    let first = k.loft_with(&LoftSpec { body: BodyKind::Solid, sections: vec![LoftSection::Profile(circle_at(0.0, 10.0)), LoftSection::Profile(circle_at(20.0, 5.0))], start: none, end: none, source: 9 }).unwrap().bodies[0];
+    let cap = k.faces(first).unwrap().into_iter().find(|f| f.plane.is_some_and(|pl| pl.normal.z > 0.9)).unwrap().id;
+    let m = k.loft_with(&LoftSpec { body: BodyKind::Solid, sections: vec![LoftSection::Face(FaceInput { body: first, face: cap, source: 7 }), LoftSection::Profile(circle_at(40.0, 10.0))], start: LoftEnd { condition: LoftCondition::MatchTangent, magnitude: 1.0 }, end: none, source: 9 }).unwrap().bodies[0];
+    let (a, b) = ((**k.get(first).unwrap()).clone(), (**k.get(m).unwrap()).clone());
+    for (n, f) in a.faces.iter().enumerate() { eprintln!("A face {n} {:?}", f.surf.kind()); }
+    for (n, f) in b.faces.iter().enumerate() { eprintln!("B face {n} {:?}", f.surf.kind()); }
+    let t = std::time::Instant::now();
+    let r = native::boolean::boolean_bodies(&a, &b, BoolOp::Union);
+    eprintln!("union: {:?} in {:?}", r.as_ref().map(|r| (r.body.faces.len(), r.body.solids.len())).map_err(|e| e.to_string()), t.elapsed());
+}

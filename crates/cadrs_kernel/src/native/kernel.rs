@@ -333,6 +333,10 @@ impl Kernel for NativeKernel {
         super::features::revolve_with(self, profile, spec)
     }
 
+    fn loft_with(&mut self, spec: &LoftSpec) -> Result<OpResult> {
+        super::loft_build::loft_with(self, spec)
+    }
+
     fn sweep_with(&mut self, profile: &Profile, spec: &SweepSpec) -> Result<OpResult> {
         super::sweep_path::sweep_with(self, profile, spec)
     }

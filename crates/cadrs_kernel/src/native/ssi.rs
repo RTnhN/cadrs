@@ -33,9 +33,12 @@ pub fn surface_surface(a: &Surface, ua: ((f64, f64), (f64, f64)), b: &Surface, u
     if let Some(r) = analytic(b, a, bb) {
         return r;
     }
-    // Numeric: contour over the surface whose box is smaller in model space, against the
-    // other's distance.
-    let _ = ub;
+    // Numeric: contour over a surface without an implicit form against the other's exact
+    // signed distance when it has one.
+    let implicit = |s: &Surface| s.signed_distance(&P3::origin()).is_some();
+    if implicit(a) && !implicit(b) {
+        return numeric(b, ub, a, bb);
+    }
     numeric(a, ua, b, bb)
 }
 
@@ -412,6 +415,24 @@ fn coaxial(a: &Surface, b: &Surface, o: &P3, z: &V3, bb: &Bbox) -> Vec<IntCurve>
         .collect()
 }
 
+/// The signed distance to `s` by projection from a hint (`hint` is updated with the foot's uv).
+pub fn sdist_hint(s: &Surface, p: &P3, hint: &mut Option<(f64, f64)>) -> f64 {
+    if let Some(d) = s.signed_distance(p) {
+        return d;
+    }
+    let (u, v) = s.project(p, *hint);
+    let (q, su, sv) = s.d1(u, v);
+    // A hinted Newton may stall on the wrong side of a fold: check against a fresh projection
+    // when the foot is far.
+    let n = su.cross(&sv);
+    let l = n.norm();
+    *hint = Some((u, v));
+    if l < 1e-300 {
+        return (p - q).norm();
+    }
+    (p - q).dot(&(n / l))
+}
+
 /// The signed distance to `s` (by projection when it has no implicit form).
 pub fn sdist(s: &Surface, p: &P3) -> f64 {
     if let Some(d) = s.signed_distance(p) {
@@ -436,11 +457,16 @@ fn numeric(a: &Surface, ua: ((f64, f64), (f64, f64)), b: &Surface, bb: &Bbox) ->
     let h = size / 96.0;
     let nu = (((u1 - u0) * mu / h).ceil() as usize).clamp(8, 400);
     let nv = (((v1 - v0) * mv / h).ceil() as usize).clamp(8, 400);
-    let g = |u: f64, v: f64| sdist(b, &a.eval(u, v));
     let mut grid = vec![vec![0.0; nv + 1]; nu + 1];
+    let mut row_hint: Option<(f64, f64)> = None;
     for i in 0..=nu {
+        let mut hint = row_hint;
         for j in 0..=nv {
-            grid[i][j] = g(u0 + (u1 - u0) * i as f64 / nu as f64, v0 + (v1 - v0) * j as f64 / nv as f64);
+            let p = a.eval(u0 + (u1 - u0) * i as f64 / nu as f64, v0 + (v1 - v0) * j as f64 / nv as f64);
+            grid[i][j] = sdist_hint(b, &p, &mut hint);
+            if j == 0 {
+                row_hint = hint;
+            }
         }
     }
     let uvat = |i: f64, j: f64| P2::new(u0 + (u1 - u0) * i / nu as f64, v0 + (v1 - v0) * j / nv as f64);
@@ -528,16 +554,21 @@ fn numeric(a: &Surface, ua: ((f64, f64), (f64, f64)), b: &Surface, bb: &Bbox) ->
 pub fn refine_point(a: &Surface, b: &Surface, uv: P2) -> P3 {
     let (mut u, mut v) = (uv.x, uv.y);
     let e = 1e-7;
+    let mut hint: Option<(f64, f64)> = if b.signed_distance(&P3::origin()).is_some() { None } else { Some(b.project(&a.eval(u, v), None)) };
     for _ in 0..30 {
         let p = a.eval(u, v);
-        let g0 = sdist(b, &p);
+        let g0 = sdist_hint(b, &p, &mut hint);
         if g0.abs() < 1e-13 {
             break;
         }
         let (_, su, sv) = a.d1(u, v);
         // ∇g ≈ n_b·(Su, Sv) with n_b the distance gradient.
-        let gu = (sdist(b, &(p + su * e)) - sdist(b, &(p - su * e))) / (2.0 * e);
-        let gv = (sdist(b, &(p + sv * e)) - sdist(b, &(p - sv * e))) / (2.0 * e);
+        let mut h1 = hint;
+        let mut h2 = hint;
+        let mut h3 = hint;
+        let mut h4 = hint;
+        let gu = (sdist_hint(b, &(p + su * e), &mut h1) - sdist_hint(b, &(p - su * e), &mut h2)) / (2.0 * e);
+        let gv = (sdist_hint(b, &(p + sv * e), &mut h3) - sdist_hint(b, &(p - sv * e), &mut h4)) / (2.0 * e);
         let l = gu * gu + gv * gv;
         if l < 1e-300 {
             break;
