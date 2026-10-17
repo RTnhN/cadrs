@@ -180,6 +180,13 @@ pub fn mesh_face(body: &Body, f: &Face, es: &[(Vec<f64>, Vec<P3>)], defl: f64, a
         } else {
             nu
         };
+        // Rows (columns) no further apart than half the face's width across them, or Delaunay
+        // bridges a narrow curved strip from side to side.
+        let (wu, wv) = ((ubox.1 - ubox.0) * mu, (vbox.1 - vbox.0) * mv);
+        if nu > 1 {
+            nv = nv.max(((wv / (0.5 * wu)).ceil() as usize).clamp(1, 400));
+        }
+        let nu = if nv > 1 { nu.max(((wu / (0.5 * wv)).ceil() as usize).clamp(1, 400)) } else { nu };
         if nu > 1 || nv > 1 {
             let du = (ubox.1 - ubox.0) / nu as f64;
             let dv = (vbox.1 - vbox.0) / nv as f64;

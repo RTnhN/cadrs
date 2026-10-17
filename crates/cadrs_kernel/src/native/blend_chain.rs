@@ -231,21 +231,6 @@ pub fn chain_tool(b: &Body, input: BodyId, chain: &[(usize, bool)], kind: &dyn F
     let (ra, rb) = (range.0 * len, range.1 * len);
     let total_lo = ra - if extend.0 { ext_len } else { 0.0 };
     let total_hi = rb + if extend.1 { ext_len } else { 0.0 };
-    // Sections 1.5 apart on flat faces; on curved ones close enough that the lofted contact
-    // rails stay on the faces within the boolean's tolerance (cubic interpolation of an arc
-    // errs as h⁴: 2e-5 at 1.5 on R10, 1e-7 at 0.45), so the boolean takes them as contacts.
-    let curved = sides.iter().flatten().any(|&(f, _)| !matches!(b.faces[f].surf, super::surface::Surface::Plane { .. }))
-        || sides.iter().flatten().any(|&(f, _)| neighbours(f).iter().any(|&g| !matches!(b.faces[g].surf, super::surface::Surface::Plane { .. })));
-    let h = if curved { 0.45 } else { 1.5 };
-    let n_total = (((total_hi - total_lo) / h).ceil() as usize).clamp(8, 600);
-    let mut ss: Vec<f64> = (0..=n_total).map(|i| total_lo + (total_hi - total_lo) * i as f64 / n_total as f64).collect();
-    for &sj in starts.iter().skip(1) {
-        if sj > total_lo && sj < total_hi {
-            ss.push(sj);
-        }
-    }
-    ss.sort_by(f64::total_cmp);
-    ss.dedup_by(|a, c| (*a - *c).abs() < 1e-6);
     // A station: the contacts on the faces they lie on (the edge's own, or the neighbour the
     // contact moved onto; outside the chain's ends, the end edge's own faces).
     let within = |s: f64| (-1e-9..=len + 1e-9).contains(&s);
@@ -289,12 +274,77 @@ pub fn chain_tool(b: &Body, input: BodyId, chain: &[(usize, bool)], kind: &dyn F
         let (pieces, plane, _) = ch.section(s, faces)?;
         Ok(Station { s, pieces, plane, faces: [faces[0].0, faces[1].0] })
     };
-    let mut stations: Vec<Station> = Vec::with_capacity(ss.len());
-    let mut prev: Option<[usize; 2]> = None;
-    for &s in &ss {
-        let st = station(s, prev.filter(|_| within(s)))?;
-        prev = Some(st.faces);
-        stations.push(st);
+    // Stations marched with an adaptive step (as OCCT's blend walking): a step is taken when
+    // the edge's direction and each contact rail turn little enough over it that the lofted
+    // rails stay on their faces within the boolean's tolerance. A cubic through sections a
+    // chord c apart that turn by θ errs by about c·θ³/384: kept under 1e-7. Steps grow by 1.5
+    // where the turn is well inside that, up to 1.5.
+    const RAIL_TOL: f64 = 1e-7;
+    let (max_step, min_step): (f64, f64) = (1.5, 1e-3);
+    // The chain's vertices and its two ends (where the extensions start) are stations.
+    let mut breaks: Vec<f64> = starts.iter().skip(1).copied().chain([0.0, len]).filter(|&sj| sj > total_lo + 1e-6 && sj < total_hi - 1e-6).collect();
+    breaks.push(total_hi);
+    breaks.sort_by(f64::total_cmp);
+    let contacts = |st: &Station| -> [P3; 3] {
+        let w = |q: P3| st.plane.origin + st.plane.x_dir.into_inner() * q.x + st.plane.y_dir().into_inner() * q.y;
+        let end = |x: &Piece| x.c.point(if x.rev { x.t0 } else { x.t1 });
+        let start = |x: &Piece| x.c.point(if x.rev { x.t1 } else { x.t0 });
+        [w(end(&st.pieces[0])), w(start(&st.pieces[2])), st.plane.origin]
+    };
+    // The worst c·θ³ over the rails (and the edge's own points) between three stations.
+    let bend = |a: &[P3; 3], b: &[P3; 3], c: &[P3; 3]| -> f64 {
+        (0..3)
+            .map(|i| {
+                let (d0, d1) = (b[i] - a[i], c[i] - b[i]);
+                let (l0, l1) = (d0.norm(), d1.norm());
+                if l0 < 1e-12 || l1 < 1e-12 {
+                    return 0.0;
+                }
+                let th = (d0.dot(&d1) / (l0 * l1)).clamp(-1.0, 1.0).acos();
+                l1 * th.powi(3) / 384.0
+            })
+            .fold(0.0, f64::max)
+    };
+    let mut stations: Vec<Station> = vec![station(total_lo, None)?];
+    let mut step = max_step;
+    let mut bi = 0;
+    while stations.last().unwrap().s < total_hi - 1e-9 {
+        let s0 = stations.last().unwrap().s;
+        while breaks[bi] <= s0 + 1e-9 {
+            bi += 1;
+        }
+        let prev = Some(stations.last().unwrap().faces).filter(|_| within(s0));
+        // Even steps up to the next forced station (a short step next to long ones makes the
+        // loft through the sections overshoot).
+        let rem = breaks[bi] - s0;
+        let mut h = rem / (rem / step).ceil().max(1.0);
+        loop {
+            let s1 = s0 + h;
+            let st = station(s1, prev.filter(|_| within(s1)))?;
+            // Against the station before the last (the turn of the rails at the last one), or
+            // before there is one, the half step.
+            let err = if stations.len() >= 2 {
+                let n = stations.len();
+                bend(&contacts(&stations[n - 2]), &contacts(&stations[n - 1]), &contacts(&st))
+            } else {
+                let mid = station(s0 + 0.5 * h, prev)?;
+                bend(&contacts(&stations[0]), &contacts(&mid), &contacts(&st))
+            };
+            if err <= RAIL_TOL || h <= min_step {
+                if err < RAIL_TOL / 4.0 {
+                    step = (h * 1.5).min(max_step);
+                } else {
+                    step = h;
+                }
+                stations.push(st);
+                break;
+            }
+            h *= 0.5;
+        }
+    }
+    if std::env::var("CADRS_BLEND_DEBUG").is_ok() {
+        let ss: Vec<String> = stations.iter().map(|st| format!("{:.3}", st.s)).collect();
+        eprintln!("chain stations ({} on [{total_lo:.3}, {total_hi:.3}], chain length {len:.3}): {}", ss.len(), ss.join(" "));
     }
     // Where the contacts change faces: a station there in both pieces (bisected).
     let mut groups: Vec<Vec<Station>> = vec![Vec::new()];
