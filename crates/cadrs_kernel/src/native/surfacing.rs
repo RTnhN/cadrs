@@ -432,7 +432,7 @@ pub fn sew_faces(mut b: Body, tol: f64) -> Result<Body> {
 }
 
 /// Flips faces so each shared edge is used once each way (breadth first from face 0).
-fn orient(b: &mut Body) -> Result<()> {
+pub(crate) fn orient(b: &mut Body) -> Result<()> {
     let nf = b.faces.len();
     let ef = b.edge_faces();
     let mut done = vec![false; nf];

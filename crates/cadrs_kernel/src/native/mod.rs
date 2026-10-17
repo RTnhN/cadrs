@@ -2,6 +2,7 @@
 //! booleans, features, tessellation and exchange, with no C or C++ dependency.
 
 pub mod blend;
+pub mod blend_chain;
 pub mod bodyio;
 pub mod boolean;
 pub mod build;

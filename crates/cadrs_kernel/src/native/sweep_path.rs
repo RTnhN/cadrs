@@ -456,7 +456,7 @@ fn caps(t: &Tagged, end: bool) -> Vec<(usize, P3, f64)> {
 
 /// Glues `b` onto `a` where an end cap of `a` and a start cap of `b` coincide: both caps go,
 /// their edges become one.
-fn glue(a: &Tagged, b: &Tagged) -> Option<Tagged> {
+pub(crate) fn glue(a: &Tagged, b: &Tagged) -> Option<Tagged> {
     let ea = caps(a, true);
     let sb = caps(b, false);
     let mut pairs: Vec<(usize, usize)> = Vec::new();

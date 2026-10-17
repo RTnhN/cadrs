@@ -196,7 +196,7 @@ fn finish(section: Curve, t0: f64, t1: f64, c1: P2, c2: P2, c: &Corner2, src: Sr
 }
 
 /// The faces on either side of an edge, with the coedges.
-fn edge_sides(b: &Body, e: usize) -> Result<[(usize, bool); 2]> {
+pub(crate) fn edge_sides(b: &Body, e: usize) -> Result<[(usize, bool); 2]> {
     let mut out = Vec::new();
     for (fi, f) in b.faces.iter().enumerate() {
         for l in &f.loops {
@@ -622,6 +622,7 @@ pub fn blend(k: &mut NativeKernel, body: BodyId, edges: &[(EdgeId, Box<dyn Fn(f6
         for &(e, _) in chain {
             check_fits(&b, e, kind.as_ref())?;
         }
+        // Exact strips on planes and cylinders where it applies, else the lofted tool.
         let tool = chain_tool(&b, body, chain, kind.as_ref(), *swap, (0.0, 1.0), (true, true))?;
         let op = if tool.convex { BoolOp::Subtract } else { BoolOp::Union };
         cur = cur.apply(&tool.body, &tool.src, op)?;
@@ -1227,7 +1228,7 @@ fn is_arc_face(b: &Body, f: usize) -> bool {
 }
 
 /// The outward signed distance of a point from a face's surface.
-fn out_dist(f: &Face, p: &P3) -> (f64, V3, P3) {
+pub(crate) fn out_dist(f: &Face, p: &P3) -> (f64, V3, P3) {
     let (u, v) = f.surf.project(p, None);
     let q = f.surf.eval(u, v);
     let n = f.surf.normal(u, v) * if f.sense { 1.0 } else { -1.0 };
@@ -1236,7 +1237,7 @@ fn out_dist(f: &Face, p: &P3) -> (f64, V3, P3) {
 
 /// A point on the face's surface `dist` along the face from `p`, in the plane through `p`
 /// square to `t`, starting along `w` (marching along the section curve).
-fn along_face(f: &Face, p: &P3, t: &V3, w: &V3, dist: f64) -> P3 {
+pub(crate) fn along_face(f: &Face, p: &P3, t: &V3, w: &V3, dist: f64) -> P3 {
     let steps = 64;
     let h = dist / steps as f64;
     let mut q = *p;
@@ -1270,6 +1271,12 @@ pub fn edge_tool_general(b: &Body, input: BodyId, e: usize, kind: &dyn Fn(f64) -
 /// blend is one smooth tool with no joints. On each edge the first face is the one whose loop
 /// runs along the chain (swapped when `swap`); `range` and `extend` apply to the chain's ends.
 pub fn chain_tool(b: &Body, input: BodyId, chain: &[(usize, bool)], kind: &dyn Fn(f64) -> SectionKind, swap: bool, range: (f64, f64), extend: (bool, bool)) -> Result<Tool> {
+    super::blend_chain::chain_tool(b, input, chain, kind, swap, range, extend)
+}
+
+/// The previous lofted chain tool (the contacts on the chain edges' own faces).
+#[allow(dead_code)]
+fn chain_tool_lofted(b: &Body, input: BodyId, chain: &[(usize, bool)], kind: &dyn Fn(f64) -> SectionKind, swap: bool, range: (f64, f64), extend: (bool, bool)) -> Result<Tool> {
     // Faces of each edge: (first, second) with their coedge directions.
     let mut sides: Vec<[(usize, bool); 2]> = Vec::new();
     for &(e, fwd) in chain {

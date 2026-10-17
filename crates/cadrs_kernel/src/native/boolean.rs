@@ -783,6 +783,15 @@ fn run(a: &Body, b: &Body, mode: Mode) -> Result<BoolOut> {
             if tangent_along_shared_edge(&pool, &faces[fa], &faces[fb], &face_edges[fa], &face_edges[fb]) {
                 continue;
             }
+            if std::env::var("CADRS_TANGENT_DEBUG").is_ok() && (matches!(faces[fa].surf, Surface::Nurbs(_)) || matches!(faces[fb].surf, Surface::Nurbs(_))) {
+                let dev = |edges: &[usize], s: &Surface| -> f64 {
+                    edges.iter().map(|&x| {
+                        let e = &pool.edges[x];
+                        [0.0, 0.3, 0.5, 0.7, 1.0].iter().map(|f| s.distance(&e.curve.point(e.t[0] + (e.t[1] - e.t[0]) * f))).fold(0.0, f64::max)
+                    }).fold(f64::INFINITY, f64::min)
+                };
+                eprintln!("not tangent {fa}×{fb}: closest edge of b to a {:e}, of a to b {:e}", dev(&face_edges[fb], &faces[fa].surf), dev(&face_edges[fa], &faces[fb].surf));
+            }
             let t_ssi = std::time::Instant::now();
             let curves = ssi::surface_surface(&faces[fa].surf, uvbox(&faces[fa]), &faces[fb].surf, uvbox(&faces[fb]), &ob);
             if std::env::var("CADRS_BOOL_DEBUG").is_ok() {

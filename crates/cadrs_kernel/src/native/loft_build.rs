@@ -187,7 +187,7 @@ fn compatible(curves: &mut [NurbsCurve]) -> bool {
 
 /// The loft's lateral surfaces from per-section compatible curves (homogeneous poles
 /// interpolated across the sections at `v`).
-fn skin(curves: &[NurbsCurve], v: &[f64]) -> NurbsSurface {
+pub(crate) fn skin(curves: &[NurbsCurve], v: &[f64]) -> NurbsSurface {
     let ncp = curves[0].cps.len();
     if curves.len() == 2 {
         // Ruled.
@@ -425,7 +425,7 @@ fn skin_conditioned(curves: &[NurbsCurve], v: &[f64], d1: [Option<Vec<V3>>; 2], 
 
 /// The iso-curve u = const or v = const of a surface whose knots are clamped, as an exact
 /// B-spline (a row or a column of poles).
-fn iso(s: &NurbsSurface, along_u: bool, at_end: bool) -> NurbsCurve {
+pub(crate) fn iso(s: &NurbsSurface, along_u: bool, at_end: bool) -> NurbsCurve {
     if along_u {
         let j = if at_end { s.cps[0].len() - 1 } else { 0 };
         NurbsCurve { degree: s.du, knots: s.ku.clone(), cps: s.cps.iter().map(|row| row[j]).collect() }
