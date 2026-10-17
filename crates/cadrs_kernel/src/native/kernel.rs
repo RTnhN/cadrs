@@ -595,4 +595,33 @@ impl Kernel for NativeKernel {
             .map(|(t, f, p)| RayHit { face: FaceId(f as u64), t, point: p })
             .collect())
     }
+
+    // Exchange (native/exchange.rs).
+    fn export_step(&self, bodies: &[BodyId]) -> Result<Vec<u8>> {
+        super::exchange::export_step(self, bodies)
+    }
+
+    fn import_step(&mut self, bytes: &[u8]) -> Result<Vec<BodyId>> {
+        super::exchange::import_step(self, bytes)
+    }
+
+    fn import_model(&mut self, format: exchange::ExchangeFormat, bytes: &[u8]) -> Result<exchange::ImportedModel> {
+        super::exchange::import_model(self, format, bytes)
+    }
+
+    fn export_model(&self, format: exchange::ExchangeFormat, name: &str, parts: &[(BodyId, String)], instances: &[exchange::ExportInstance]) -> Result<Vec<u8>> {
+        super::exchange::export_model(self, format, name, parts, instances)
+    }
+
+    fn mesh_solid(&mut self, triangles: &[[Point3<f64>; 3]], tol: f64) -> Result<BodyId> {
+        super::exchange::mesh_solid(self, triangles, tol)
+    }
+
+    fn write_body(&self, body: BodyId) -> Result<Vec<u8>> {
+        super::exchange::write_body(self, body)
+    }
+
+    fn read_body(&mut self, bytes: &[u8]) -> Result<BodyId> {
+        super::exchange::read_body(self, bytes)
+    }
 }

@@ -147,7 +147,16 @@ fn face_integrals_v(body: &Body, f: &Face, shift: &V3) -> Q {
             let p0 = c.pc.point(lo);
             let p1 = c.pc.point(hi);
             let du = (p1.x - p0.x).abs();
-            let extra = if f.surf.u_periodic() { (du / (PI / 8.0)).ceil() as usize } else { 1 }.max(1);
+            // Periodic: pieces of at most π/8; a general extrusion's curve pieces in four (|N|
+            // varies along them).
+            let extra = if f.surf.u_periodic() {
+                (du / (PI / 8.0)).ceil() as usize
+            } else if matches!(f.surf, Surface::Extrusion { .. }) && !matches!(c.pc, Curve::Nurbs(_)) {
+                4
+            } else {
+                1
+            }
+            .max(1);
             if extra > 1 {
                 let mut r = Vec::new();
                 for w in ts.windows(2) {
@@ -235,21 +244,29 @@ fn rect_integrals(s: &Surface, ns: &super::nurbs::NurbsSurface, r: [f64; 4], shi
     let mut acc = [0.0; NQ];
     let (bu, bv) = ns.breaks();
     let cut = |ks: Vec<f64>, a: f64, b: f64| -> Vec<f64> {
+        let mut pts = vec![a];
+        pts.extend(ks.into_iter().filter(|k| *k > a + 1e-14 && *k < b - 1e-14));
+        pts.push(b);
+        // One or two spans: split each (|N| varies within a span); more are short already.
+        let m = if pts.len() <= 3 { 4 } else { 1 };
         let mut out = vec![a];
-        out.extend(ks.into_iter().filter(|k| *k > a + 1e-14 && *k < b - 1e-14));
-        out.push(b);
+        for w in pts.windows(2) {
+            for i in 1..=m {
+                out.push(w[0] + (w[1] - w[0]) * i as f64 / m as f64);
+            }
+        }
         out
     };
     let us = cut(bu, r[0], r[1]);
     let vs = cut(bv, r[2], r[3]);
-    let rational = ns.cps.iter().flatten().any(|h| (h.w - 1.0).abs() > 1e-15);
-    let gu = if rational { &GAUSS16 } else { &GAUSS8 };
+    // The area integrand |N| is only smooth: 16 points a span.
+    let gu = &GAUSS16;
     for wu in us.windows(2) {
         let (mu, ru) = ((wu[0] + wu[1]) * 0.5, (wu[1] - wu[0]) * 0.5);
         for wv in vs.windows(2) {
             let (mv, rv) = ((wv[0] + wv[1]) * 0.5, (wv[1] - wv[0]) * 0.5);
             for (x, gw) in gu.x.iter().zip(gu.w) {
-                for (y, hw) in GAUSS8.x.iter().zip(GAUSS8.w) {
+                for (y, hw) in GAUSS16.x.iter().zip(GAUSS16.w) {
                     integrand(s, mu + ru * x, mv + rv * y, shift, &mut acc, gw * hw * ru * rv);
                 }
             }

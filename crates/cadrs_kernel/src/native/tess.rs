@@ -190,7 +190,9 @@ pub fn mesh_face(body: &Body, f: &Face, es: &[(Vec<f64>, Vec<P3>)], defl: f64, a
     let mut cdt: ConstrainedDelaunayTriangulation<SPoint<f64>> = ConstrainedDelaunayTriangulation::new();
     let mut handles = Vec::with_capacity(nb + grid.len());
     for p in pts_uv.iter().chain(grid.iter()) {
-        match cdt.insert(SPoint::new(p.x * mu, p.y * mv)) {
+        // spade refuses coordinates of tiny magnitude (below ~1.8e-43): those are zero.
+        let tiny = |x: f64| if x.abs() < 1e-30 { 0.0 } else { x };
+        match cdt.insert(SPoint::new(tiny(p.x * mu), tiny(p.y * mv))) {
             Ok(h) => handles.push(h),
             Err(_) => return FaceMesh::default(),
         }
