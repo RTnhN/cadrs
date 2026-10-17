@@ -937,3 +937,26 @@ fn debug_repro_fillet() {
         eprintln!("new face {fid:?} {o:?}: area {:.4} at {:.2?}", fi.area, fi.center);
     }
 }
+
+/// OCCT blend/simple/J1: a cone's edges blended one at a time (which is OCCT's `s_1`?).
+#[test]
+fn debug_draw_cone_blend() -> cadrs_kernel::Result<()> {
+    let mut k = NativeKernel::new();
+    let s = k.pcone(10.0, 5.0, 20.0)?;
+    let s = k.tscale(&s, 0.0, 0.0, 0.0, 10.0)?;
+    if let cadrs_kernel::native::draw::Shape::Body(b) = &s {
+        let body = k.get(*b)?;
+        let ef = body.edge_faces();
+        for (i, e) in body.edges.iter().enumerate() {
+            eprintln!("edge {i}: degenerate {} faces {:?} {:?}", e.degenerate, ef[i], std::mem::discriminant(&e.curve));
+        }
+    }
+    let es = k.explode_edges(&s)?;
+    for (i, e) in es.iter().enumerate() {
+        match k.blend(&s, 10.0, &[e]) {
+            Ok(r) => eprintln!("s_{}: area {}", i + 1, k.sprops(&r)?),
+            Err(x) => eprintln!("s_{}: {x}", i + 1),
+        }
+    }
+    Ok(())
+}

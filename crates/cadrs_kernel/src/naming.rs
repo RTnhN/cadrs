@@ -398,14 +398,22 @@ pub fn name_faces_aliased(
             set(&mut names, f, FaceName { split, ..name });
         }
     }
-    // Several sources for one face (faces merged into one): the smallest name, so the choice
-    // is stable; the others become aliases of it.
+    // Several sources for one face (faces merged into one): the inputs' names first, in the
+    // history's order (the target's face before the tools'), then this operation's own (the
+    // smallest: their regions are stable). A face merged into an existing one keeps that one's
+    // name whatever the operations' ids are; the others become aliases of it.
     let mut unnamed = 0;
     let mut merged: Vec<(FaceName, FaceName)> = Vec::new();
     let out: Vec<FaceName> = names
         .into_iter()
-        .map(|mut n| {
-            n.sort();
+        .map(|n| {
+            let (mut own, inherited): (Vec<FaceName>, Vec<FaceName>) = n.into_iter().partition(|x| x.op == op);
+            own.sort();
+            let mut n = inherited;
+            n.extend(own);
+            if n.len() > 1 {
+                n[1..].sort();
+            }
             let Some(&first) = n.first() else {
                 unnamed += 1;
                 return FaceName::new(op, FaceOrigin::Unnamed { index: unnamed - 1 });

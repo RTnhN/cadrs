@@ -82,6 +82,38 @@ pub struct NbShapes {
     pub solid: usize,
 }
 
+/// OCCT's order of a primitive's sub-shapes (for `explode`): reference points (edge midpoints,
+/// face centres) in OCCT's order, carried along through transforms.
+#[derive(Debug, Clone, Default)]
+struct OcctOrder {
+    edges: Vec<P3>,
+    faces: Vec<P3>,
+}
+
+thread_local! {
+    static ORDERS: std::cell::RefCell<std::collections::HashMap<BodyId, OcctOrder>> = Default::default();
+}
+
+fn set_order(b: BodyId, o: OcctOrder) {
+    ORDERS.with(|m| m.borrow_mut().insert(b, o));
+}
+
+fn order_of(b: BodyId) -> Option<OcctOrder> {
+    ORDERS.with(|m| m.borrow().get(&b).cloned())
+}
+
+/// OCCT's order for a full cylinder or truncated cone (BRepPrim_OneAxis): faces lateral, top,
+/// bottom; edges top circle, seam, bottom circle (the seam at the placement's x).
+fn revolved_order(ax: &Ax3, r1: f64, r2: f64, h: f64) -> OcctOrder {
+    let w = |x: f64, y: f64, z: f64| ax.origin + ax.x * x + ax.y() * y + ax.z * z;
+    let (lo, hi) = (0.0f64.min(h), 0.0f64.max(h));
+    let (rlo, rhi) = if h >= 0.0 { (r1, r2) } else { (r2, r1) };
+    OcctOrder {
+        edges: vec![w(-rhi, 0.0, hi), w((r1 + r2) / 2.0, 0.0, (lo + hi) / 2.0), w(-rlo, 0.0, lo)],
+        faces: vec![w(0.0, (r1 + r2) / 2.0, (lo + hi) / 2.0), w(0.0, 0.0, hi), w(0.0, 0.0, lo)],
+    }
+}
+
 fn err(m: &str) -> KernelError {
     KernelError::OperationFailed(m.to_string())
 }
@@ -252,6 +284,18 @@ impl NativeKernel {
         };
         let region = Region { outer: rect((x0, y0), (x1, y0), (x1, y1), (x0, y1)), holes: vec![], source: None };
         let r = self.extrude(&Profile::new(pl, vec![region]), Extent::Blind(dz.abs()))?;
+        // OCCT's order (BRepPrim_GWedge): faces XMin XMax YMin YMax ZMin ZMax; edges as met
+        // along the faces' wires.
+        let (z0, z1) = (0.0f64.min(dz), 0.0f64.max(dz));
+        let (xm, ym, zm) = ((x0 + x1) / 2.0, (y0 + y1) / 2.0, (z0 + z1) / 2.0);
+        let w = |x: f64, y: f64, z: f64| ax.origin + ax.x * x + ax.y() * y + ax.z * z;
+        let edges = vec![
+            w(x0, y0, zm), w(x0, ym, z1), w(x0, y1, zm), w(x0, ym, z0),
+            w(x1, y0, zm), w(x1, ym, z1), w(x1, y1, zm), w(x1, ym, z0),
+            w(xm, y0, z0), w(xm, y0, z1), w(xm, y1, z0), w(xm, y1, z1),
+        ];
+        let faces = vec![w(x0, ym, zm), w(x1, ym, zm), w(xm, y0, zm), w(xm, y1, zm), w(xm, ym, z0), w(xm, ym, z1)];
+        set_order(r.bodies[0], OcctOrder { edges, faces });
         Ok(Shape::Body(r.bodies[0]))
     }
 
@@ -268,6 +312,7 @@ impl NativeKernel {
         }
         let region = Region { outer: Loop { curves: vec![Curve2::Circle { center: nalgebra::Point2::origin(), radius: r, source: None }] }, holes: vec![], source: None };
         let res = self.extrude(&Profile::new(pl, vec![region]), Extent::Blind(h.abs()))?;
+        set_order(res.bodies[0], revolved_order(ax, r, r, h));
         Ok(Shape::Body(res.bodies[0]))
     }
 
@@ -287,7 +332,11 @@ impl NativeKernel {
             pts.push(p(r2, h));
         }
         pts.push(p(0.0, h));
-        self.revolve_section(ax, &pts, TAU)
+        let s = self.revolve_section(ax, &pts, TAU)?;
+        if let (Shape::Body(b), true) = (&s, r1 > 0.0 && r2 > 0.0) {
+            set_order(*b, revolved_order(ax, r1, r2, h));
+        }
+        Ok(s)
     }
 
     /// `psphere name r`.
@@ -433,7 +482,11 @@ impl NativeKernel {
             }
             Shape::Body(b) => {
                 let body = self.get(*b)?.transformed(m);
-                Shape::Body(self.insert(body))
+                let nb = self.insert(body);
+                if let Some(o) = order_of(*b) {
+                    set_order(nb, OcctOrder { edges: o.edges.iter().map(|p| m.point(p)).collect(), faces: o.faces.iter().map(|p| m.point(p)).collect() });
+                }
+                Shape::Body(nb)
             }
             _ => return Err(KernelError::Unsupported("moving a sub-shape")),
         })
@@ -471,13 +524,42 @@ impl NativeKernel {
     /// `explode shape e`: the body's edges (in the kernel's order, not OCCT's).
     pub fn explode_edges(&self, s: &Shape) -> Result<Vec<Shape>> {
         let b = self.body_of(s)?;
-        Ok(self.edges(b)?.into_iter().map(|e| Shape::BodyEdge(b, e.id)).collect())
+        let body = self.get(b)?;
+        let mut ids: Vec<usize> = (0..body.edges.len()).filter(|&i| !body.edges[i].degenerate).collect();
+        // A primitive: OCCT's order, each reference point's nearest edge (by midpoint).
+        if let Some(o) = order_of(b) {
+            if o.edges.len() == ids.len() {
+                let mid = |i: usize| body.edges[i].point(body.edges[i].mid_t());
+                ids = o.edges.iter().map(|p| *ids.iter().min_by(|&&x, &&y| (mid(x) - p).norm().total_cmp(&(mid(y) - p).norm())).unwrap()).collect();
+            }
+        }
+        Ok(ids.into_iter().map(|i| Shape::BodyEdge(b, EdgeId(i as u64))).collect())
     }
 
     /// `explode shape f`.
     pub fn explode_faces(&self, s: &Shape) -> Result<Vec<Shape>> {
         let b = self.body_of(s)?;
-        Ok(self.faces(b)?.into_iter().map(|f| Shape::BodyFace(b, f.id)).collect())
+        let infos = self.faces(b)?;
+        if let Some(o) = order_of(b) {
+            if o.faces.len() == infos.len() {
+                // The face nearest each reference point (by distance to its surface and centroid).
+                let body = self.get(b)?;
+                return Ok(o
+                    .faces
+                    .iter()
+                    .map(|p| {
+                        let best = (0..body.faces.len())
+                            .min_by(|&x, &y| {
+                                let d = |i: usize| body.faces[i].surf.distance(p) + 1e-3 * (infos[i].center - p).norm();
+                                d(x).total_cmp(&d(y))
+                            })
+                            .unwrap();
+                        Shape::BodyFace(b, infos[best].id)
+                    })
+                    .collect());
+            }
+        }
+        Ok(infos.into_iter().map(|f| Shape::BodyFace(b, f.id)).collect())
     }
 
     /// `blend result shape r e1 e2 …` (one radius).

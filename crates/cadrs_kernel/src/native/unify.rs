@@ -115,6 +115,13 @@ pub fn unify_faces(b: &mut Body, from: Vec<Vec<(usize, usize)>>, can_merge: &dyn
     }
     let mut replace: Vec<Option<Face>> = vec![None; nf];
     let mut drop = vec![false; nf];
+    // Each face's group's first face (where a merged face goes).
+    let mut first = vec![usize::MAX; nf];
+    for g in groups.values() {
+        for &f in g {
+            first[f] = g[0];
+        }
+    }
     for (_, g) in groups {
         if g.len() < 2 {
             continue;
@@ -130,9 +137,12 @@ pub fn unify_faces(b: &mut Body, from: Vec<Vec<(usize, usize)>>, can_merge: &dyn
     let mut new_from: Vec<Vec<(usize, usize)>> = Vec::new();
     let mut faces = Vec::new();
     let mut gfrom: std::collections::HashMap<usize, Vec<(usize, usize)>> = Default::default();
-    for (r, f) in (0..nf).map(|f| (dsu.find(f), f)) {
-        if replace[r].is_some() || drop[r] {
-            gfrom.entry(r).or_default().extend(from[f].iter().copied());
+    // The sources of a merged face: all its group's (keyed by the group's first face, where the
+    // merged face is: the union-find root needn't be that face).
+    for f in 0..nf {
+        let g0 = first[f];
+        if replace[g0].is_some() {
+            gfrom.entry(g0).or_default().extend(from[f].iter().copied());
         }
     }
     for f in 0..nf {
@@ -153,6 +163,75 @@ pub fn unify_faces(b: &mut Body, from: Vec<Vec<(usize, usize)>>, can_merge: &dyn
     b.faces = faces;
     compact(b);
     new_from
+}
+
+/// Removes slits from faces on surfaces that aren't periodic (an edge a planar face uses twice,
+/// as a full revolve leaves on its discs and annuli): their loops are chained again without
+/// them (the largest first, as the outer loop), and unused edges are dropped.
+pub fn drop_slits(b: &mut Body) {
+    for fi in 0..b.faces.len() {
+        let f = &b.faces[fi];
+        if f.surf.u_periodic() || f.surf.v_periodic() {
+            continue;
+        }
+        let mut uses: std::collections::HashMap<usize, usize> = Default::default();
+        for c in f.loops.iter().flatten() {
+            *uses.entry(c.edge).or_default() += 1;
+        }
+        if !uses.iter().any(|(e, n)| *n == 2 && !b.edges[*e].degenerate) {
+            continue;
+        }
+        let rest: Vec<Coedge> = f.loops.iter().flatten().filter(|c| uses[&c.edge] != 2 && !b.edges[c.edge].degenerate).cloned().collect();
+        if rest.is_empty() {
+            continue;
+        }
+        // Chain by vertices.
+        let mut used = vec![false; rest.len()];
+        let mut loops: Vec<Vec<Coedge>> = Vec::new();
+        let mut ok = true;
+        for s0 in 0..rest.len() {
+            if used[s0] {
+                continue;
+            }
+            used[s0] = true;
+            let mut ch = vec![rest[s0].clone()];
+            let start = b.co_start(&rest[s0]);
+            while b.co_end(ch.last().unwrap()) != start {
+                let end = b.co_end(ch.last().unwrap());
+                match (0..rest.len()).find(|&k| !used[k] && b.co_start(&rest[k]) == end) {
+                    Some(nx) => {
+                        used[nx] = true;
+                        ch.push(rest[nx].clone());
+                    }
+                    None => {
+                        ok = false;
+                        break;
+                    }
+                }
+            }
+            if !ok {
+                break;
+            }
+            loops.push(ch);
+        }
+        if !ok {
+            continue;
+        }
+        // The outer loop first: the largest in extent.
+        let extent = |l: &Vec<Coedge>| {
+            let mut bb = Bbox::empty();
+            for c in l {
+                let e = &b.edges[c.edge];
+                for i in 0..=8 {
+                    bb.add(&e.point(e.t[0] + (e.t[1] - e.t[0]) * i as f64 / 8.0));
+                }
+            }
+            bb.diagonal()
+        };
+        loops.sort_by(|x, y| extent(y).total_cmp(&extent(x)));
+        b.faces[fi].loops = loops;
+    }
+    compact(b);
 }
 
 /// Drops unused edges and vertices.

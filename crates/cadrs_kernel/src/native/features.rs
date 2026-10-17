@@ -675,11 +675,16 @@ pub fn revolve_with(k: &mut NativeKernel, profile: &Profile, spec: &RevolveSpec)
         return Err(KernelError::InvalidParameter("The revolve turns more than a whole turn".into()));
     }
     let whole = whole || (s1 - s0) >= TAU - 1e-12;
-    let t = if solid {
+    let mut t = if solid {
         sweep_united(&faces, &kind, s0, if whole { s0 + TAU } else { s1 }, whole)?
     } else {
         Tagged::from_built(sweep::sweep_full(&faces, &ch, &kind, s0, if whole { s0 + TAU } else { s1 }, whole, false)?)
     };
+    // A whole turn of a segment square to the axis is a disc or an annulus: no slit seam (and no
+    // edges left over on the axis).
+    if whole {
+        super::unify::drop_slits(&mut t.body);
+    }
     let Some((bodies, offset)) = conform else {
         return Ok(t.into_result(k));
     };
