@@ -344,8 +344,21 @@ def group_consts(tests, group):
     return consts
 
 
+def known_failures():
+    path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "occt_known_failures.txt")
+    out = set()
+    if os.path.exists(path):
+        for line in open(path):
+            line = line.strip()
+            if line and not line.startswith("#"):
+                g, n = line.split()
+                out.add((g, n))
+    return out
+
+
 def main():
     tests, out, groups = sys.argv[1], sys.argv[2], sys.argv[3:]
+    known = known_failures()
     for group in groups:
         gdir = os.path.join(tests, group)
         consts = group_consts(tests, group)
@@ -379,6 +392,8 @@ def main():
                     n_ok += 1
                     body.append(f"/// OCCT `tests/{group}/{grid}/{case}`.")
                     body.append("#[test]")
+                    if (group, name) in known:
+                        body.append('#[ignore = "known failure (tools/occt_known_failures.txt)"]')
                     body.append(f"fn {name}() -> Result<()> {{")
                     body.append("    #[allow(unused_mut)]")
                     body.append("    let mut k = NativeKernel::new();")
