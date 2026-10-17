@@ -88,6 +88,150 @@ fn plane_extrusion(p: &Surface, e: &Surface, ue: ((f64, f64), (f64, f64)), bb: &
     Some(vec![IntCurve { c: curve, t0: lo, t1: hi, closed }])
 }
 
+/// A plane and a cone meet in a conic: in the cone's frame, with g(u) = n_x cos u + n_y sin u,
+/// the plane n·X = c gives v = (c − r g)/(s g + n_z k) (s, k the sine and cosine of the half
+/// angle), so X·D = (A cos u, A sin u, k(c − r g)) with D = s g + n_z k and A = r n_z k + s c:
+/// with the half-angle substitution a rational quadratic in t, exact as rational Bézier pieces.
+/// The pieces cover the parts of the curve inside `bb`. None when the plane passes through the
+/// apex (A = 0: lines, handled elsewhere or numerically).
+fn plane_cone(fp: &Frame, fc: &Frame, r: f64, ang: f64, bb: &Bbox) -> Option<Vec<IntCurve>> {
+    use super::nurbs::{NurbsCurve, H};
+    let n = plane_n(fp);
+    let nl = V3::new(n.dot(&fc.x), n.dot(&fc.y), n.dot(&fc.z));
+    let c = n.dot(&(fp.o - fc.o));
+    let (s, k) = ang.sin_cos();
+    let q = nl.z * k;
+    let a = r * q + s * c;
+    if a.abs() < 1e-9 * (1.0 + r.abs() + c.abs()) {
+        return None;
+    }
+    let local_point = |u: f64| -> Option<P3> {
+        let g = nl.x * u.cos() + nl.y * u.sin();
+        let d = s * g + q;
+        if d.abs() < 1e-14 {
+            return None;
+        }
+        let v = (c - r * g) / d;
+        let rho = r + s * v;
+        Some(fc.o + (fc.x * u.cos() + fc.y * u.sin()) * rho + fc.z * (k * v))
+    };
+    let inside = |u: f64| local_point(u).is_some_and(|p| bb.contains(&p));
+    // Runs of u inside the box.
+    let m = 360;
+    let us: Vec<f64> = (0..m).map(|i| TAU * i as f64 / m as f64).collect();
+    let ins: Vec<bool> = us.iter().map(|&u| inside(u)).collect();
+    if !ins.iter().any(|x| *x) {
+        return Some(vec![]);
+    }
+    let edge_of = |a: f64, b: f64| -> f64 {
+        // The boundary between an inside `a` and an outside `b`.
+        let (mut lo, mut hi) = (a, b);
+        for _ in 0..60 {
+            let mid = 0.5 * (lo + hi);
+            if inside(mid) { lo = mid } else { hi = mid }
+        }
+        lo
+    };
+    let mut runs: Vec<(f64, f64, bool)> = Vec::new();
+    if ins.iter().all(|x| *x) {
+        runs.push((0.0, TAU, true));
+    } else {
+        let start = (0..m).find(|&i| !ins[i]).unwrap();
+        let mut i = 0;
+        while i < m {
+            let j = (start + i) % m;
+            if ins[j] {
+                let mut e = i;
+                while e + 1 < m && ins[(start + e + 1) % m] {
+                    e += 1;
+                }
+                let u_in0 = us[j] + if (start + i) >= m { TAU } else { 0.0 };
+                let first = (start + i) as f64 * TAU / m as f64;
+                let last = (start + e) as f64 * TAU / m as f64;
+                let _ = u_in0;
+                let ua = edge_of(first, first - TAU / m as f64);
+                let ub = edge_of(last, last + TAU / m as f64);
+                runs.push((ua, ub, false));
+                i = e + 1;
+            } else {
+                i += 1;
+            }
+        }
+    }
+    let to_world = |h: &nalgebra::Vector4<f64>| -> H {
+        let p = fc.o.coords * h.w + fc.x * h.x + fc.y * h.y + fc.z * h.z;
+        H::new(p.x, p.y, p.z, h.w)
+    };
+    // One rational quadratic Bézier piece on [ua, ub] (|ub − ua| < π), homogeneous, local.
+    let piece = |ua: f64, ub: f64| -> [nalgebra::Vector4<f64>; 3] {
+        let um = 0.5 * (ua + ub);
+        let tt = (0.25 * (ub - ua)).tan();
+        let (cm, sm) = (um.cos(), um.sin());
+        let at = |tau: f64| -> nalgebra::Vector4<f64> {
+            let t = -tt + 2.0 * tt * tau;
+            let (c1, s1, one) = (1.0 - t * t, 2.0 * t, 1.0 + t * t);
+            let cu = cm * c1 - sm * s1;
+            let su = sm * c1 + cm * s1;
+            let g = nl.x * cu + nl.y * su;
+            nalgebra::Vector4::new(a * cu, a * su, k * (c * one - r * g), s * g + q * one)
+        };
+        let (p0, pm, p1) = (at(0.0), at(0.5), at(1.0));
+        [p0, pm * 2.0 - (p0 + p1) * 0.5, p1]
+    };
+    let mut out = Vec::new();
+    for (ua, ub, closed) in runs {
+        if ub - ua < 1e-9 {
+            continue;
+        }
+        // Pieces of at most π/4 whose weights share one sign.
+        let mut spans: Vec<(f64, f64)> = Vec::new();
+        let n0 = ((ub - ua) / (PI / 4.0)).ceil().max(1.0) as usize;
+        let mut stack: Vec<(f64, f64)> = (0..n0).rev().map(|i| (ua + (ub - ua) * i as f64 / n0 as f64, ua + (ub - ua) * (i + 1) as f64 / n0 as f64)).collect();
+        while let Some((x, y)) = stack.pop() {
+            let b = piece(x, y);
+            let pos = b.iter().all(|h| h.w > 1e-300);
+            let neg = b.iter().all(|h| h.w < -1e-300);
+            if pos || neg || y - x < 1e-6 {
+                spans.push((x, y));
+            } else {
+                let mid = 0.5 * (x + y);
+                stack.push((mid, y));
+                stack.push((x, mid));
+            }
+        }
+        let mut cps: Vec<H> = Vec::new();
+        let mut knots = vec![0.0; 3];
+        for (i, &(x, y)) in spans.iter().enumerate() {
+            let mut b = piece(x, y);
+            if b[0].w < 0.0 {
+                for h in b.iter_mut() {
+                    *h = -*h;
+                }
+            }
+            if let Some(last) = cps.last() {
+                let f = last.w / b[0].w;
+                for h in b.iter_mut() {
+                    *h *= f;
+                }
+                cps.push(to_world(&b[1]));
+                cps.push(to_world(&b[2]));
+            } else {
+                cps.extend(b.iter().map(|h| to_world(h)));
+            }
+            let kv = (i + 1) as f64;
+            if i + 1 < spans.len() {
+                knots.extend([kv, kv]);
+            } else {
+                knots.extend([kv; 3]);
+            }
+        }
+        let nc = NurbsCurve { degree: 2, knots, cps };
+        let (t0, t1) = nc.range();
+        out.push(IntCurve { c: Curve::Nurbs(std::sync::Arc::new(nc)), t0, t1, closed });
+    }
+    Some(out)
+}
+
 fn bound_line(o: P3, d: V3, bb: &Bbox) -> Option<IntCurve> {
     // Clip the line to the box (slabs).
     let (mut t0, mut t1) = (f64::NEG_INFINITY, f64::INFINITY);
@@ -217,7 +361,7 @@ fn analytic(a: &Surface, b: &Surface, bb: &Bbox) -> Option<Vec<IntCurve>> {
                 }
                 return Some(out);
             }
-            None
+            plane_cone(fp, fc, *r, *ang, &bbig)
         }
         (Surface::Plane { f: fp }, Surface::Torus { f: ft, rmaj, rmin }) => {
             let n = plane_n(fp);
@@ -984,4 +1128,40 @@ pub fn curve_curve(a: &Curve, a0: f64, a1: f64, b: &Curve, b0: f64, b1: f64, tol
         }
     }
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Plane sections of a cone (ellipse, parabola, hyperbola): every point of the exact conic
+    /// lies on both surfaces.
+    #[test]
+    fn plane_cone_conics_lie_on_both() {
+        let fc = Frame { o: P3::new(1.0, -2.0, 0.5), x: V3::x(), y: V3::y(), z: V3::z() };
+        let (r, a) = (3.0, -0.4);
+        let bb = Bbox { min: P3::new(-40.0, -40.0, -40.0), max: P3::new(40.0, 40.0, 40.0) };
+        for (n, o) in [
+            (V3::new(0.2, 0.1, 1.0), P3::new(0.0, 0.0, 1.0)),
+            (V3::new(0.0, 1.0, 0.0), P3::new(0.0, -1.5, 0.0)),
+            (V3::new((PI / 2.0 - 0.4).cos(), 0.0, (PI / 2.0 - 0.4).sin()), P3::new(2.0, 0.0, 0.0)),
+            (V3::new(1.0, 0.3, 0.6), P3::new(1.5, -2.0, 1.0)),
+        ] {
+            let fp = Frame::from_z(o, n.normalize());
+            let curves = plane_cone(&fp, &fc, r, a, &bb).unwrap();
+            assert!(!curves.is_empty(), "{n:?}");
+            for ic in &curves {
+                for i in 0..=200 {
+                    let t = ic.t0 + (ic.t1 - ic.t0) * i as f64 / 200.0;
+                    let p = ic.c.point(t);
+                    assert!((p - fp.o).dot(&n.normalize()).abs() < 1e-9, "off the plane {n:?}");
+                    // Either nappe: (±ρ − r)·cos a = z·sin a.
+                    let l = fc.local(&p);
+                    let rho = l.x.hypot(l.y);
+                    let off = [1.0, -1.0].map(|sg: f64| ((sg * rho - r) * a.cos() - l.z * a.sin()).abs()).into_iter().fold(f64::INFINITY, f64::min);
+                    assert!(off < 1e-9, "off the cone {n:?}: {off}");
+                }
+            }
+        }
+    }
 }

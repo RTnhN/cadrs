@@ -73,6 +73,28 @@ pub fn split(k: &mut NativeKernel, body: BodyId, tool: &SplitTool, source: u64) 
     let (Ok(inn), Ok(out)) = (inn, out) else {
         return Err(KernelError::InvalidParameter("The split tool doesn't cross the part".into()));
     };
+    // A face isn't extended: the cut must lie within it.
+    if let SplitTool::Face { body: tb, face } = tool {
+        let t = k.get(*tb)?;
+        let tf = &t.faces[face.0 as usize];
+        let polys = super::classify::face_polygons(&t, tf);
+        for r in [&inn, &out] {
+            for (i, srcs) in r.from.iter().enumerate() {
+                if !srcs.iter().any(|&(owner, _)| owner == 1) {
+                    continue;
+                }
+                for c in r.body.faces[i].loops.iter().flatten() {
+                    let e = &r.body.edges[c.edge];
+                    for q in [e.point(e.t[0]), e.point(e.mid_t())] {
+                        let (u, v) = tf.surf.project(&q, None);
+                        if super::classify::in_face(&polys, &tf.surf, P2::new(u, v), 1e-6) == super::classify::InFace::Outside {
+                            return Err(KernelError::InvalidParameter("The split face doesn't reach across the part".into()));
+                        }
+                    }
+                }
+            }
+        }
+    }
     let mut result = Body::default();
     let mut history = History::default();
     for r in [&inn, &out] {

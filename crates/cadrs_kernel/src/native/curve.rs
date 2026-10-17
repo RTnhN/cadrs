@@ -268,9 +268,11 @@ fn adaptive_len(c: &Curve, a: f64, b: f64, depth: usize) -> f64 {
 }
 
 /// The angle step for an arc of radius r to stay within `defl` and `ang`.
+/// The angle step along an arc of radius r: within `defl` of it, and the chords turning by at
+/// most half of `ang` (the mesh's area then stays within ~3e-4 of the exact one at 5°).
 pub fn arc_step(r: f64, defl: f64, ang: f64) -> f64 {
     let d = if defl < r { 2.0 * (1.0 - defl / r).acos() } else { PI / 2.0 };
-    d.min(ang).max(1e-3)
+    d.min(ang * 0.5).max(1e-3)
 }
 
 /// Puts an angle into the range [t0, t1] modulo 2π when it fits, else the nearer end.

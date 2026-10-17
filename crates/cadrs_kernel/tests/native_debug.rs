@@ -547,3 +547,25 @@ fn debug_ring_union() {
         Err(e) => panic!("{e}"),
     }
 }
+
+/// A slotted pan head screw (#4-40 × 1/2): a revolved profile with lines and cones, minus a slot
+/// across the head down to 0.6 of its height. One solid.
+#[test]
+fn debug_pan_head_slot() {
+    let mut k = NativeKernel::new();
+    let u = 25.4;
+    let (d, hh, a, length, j) = (0.112 * u, 0.068 * u, 0.219 * u / 2.0, 0.5 * u, 0.039 * u / 2.0);
+    let w = a * 1.2;
+    let pts = [(0.0, -length), (d / 2.0, -length), (d / 2.0, 0.0), (a, 0.0), (a, 0.45 * hh), (0.88 * a, 0.82 * hh), (0.68 * a, hh), (0.0, hh)];
+    let n = pts.len();
+    let lp = Loop { curves: (0..n).map(|i| Curve2::Line { a: p(pts[i].0, pts[i].1), b: p(pts[(i + 1) % n].0, pts[(i + 1) % n].1), source: None }).collect() };
+    let front = Plane { origin: Point3::origin(), x_dir: Vector3::x_axis(), normal: -Vector3::y_axis() };
+    let axis = Axis { origin: Point3::origin(), dir: Vector3::z_axis() };
+    let body = k.revolve(&Profile::new(front, vec![reg(lp)]), axis, std::f64::consts::TAU).unwrap().bodies[0];
+    let v0 = k.mass_properties(body).unwrap().volume;
+    let slot = k.extrude(&Profile::new(Plane { origin: Point3::new(0.0, 0.0, 0.6 * hh), ..Plane::top() }, vec![reg(rect(-w, -j, w, j))]), Extent::Blind(0.7 * hh)).unwrap().bodies[0];
+    let r = k.boolean(BoolOp::Subtract, body, &[slot]).unwrap();
+    let m = k.mass_properties(r.bodies[0]).unwrap();
+    eprintln!("solids {} volume {} (before {v0})", k.solid_count(r.bodies[0]).unwrap(), m.volume);
+    assert_eq!(k.solid_count(r.bodies[0]).unwrap(), 1);
+}

@@ -532,6 +532,7 @@ pub fn blend(k: &mut NativeKernel, body: BodyId, edges: &[(EdgeId, Box<dyn Fn(f6
             return Err(KernelError::InvalidParameter(format!("unknown edge {e}")));
         }
     }
+    check_overlaps(&b, edges)?;
     // Picked edges at each vertex.
     let mut at_vertex: std::collections::HashMap<usize, Vec<usize>> = Default::default();
     for &e in &picked {
@@ -812,6 +813,55 @@ fn check_fits(b: &Body, e: usize, kind: &dyn Fn(f64) -> SectionKind) -> Result<(
     }
     if !(fits[0] && fits[1]) {
         return Err(KernelError::OperationFailed("the blend is too large for the faces at the edge".into()));
+    }
+    Ok(())
+}
+
+/// Blends of two edges that share a flat face but no vertex must not overlap on it: the edges
+/// lie at least the sum of the blends' contact offsets apart.
+fn check_overlaps(b: &Body, edges: &[(EdgeId, Box<dyn Fn(f64) -> SectionKind>, bool)]) -> Result<()> {
+    // Per edge: (planar face, contact offset on it) for both sides.
+    let mut info: Vec<(usize, [(usize, f64); 2])> = Vec::new();
+    for (e, kind, _) in edges {
+        let e = e.0 as usize;
+        let Ok([s1, s2]) = edge_sides(b, e) else { continue };
+        let tm = b.edges[e].mid_t();
+        let (n1, w1) = face_dirs(b, s1.0, e, s1.1, tm);
+        let (n2, w2) = face_dirs(b, s2.0, e, s2.1, tm);
+        let phi = n1.dot(&n2).clamp(-1.0, 1.0).acos();
+        let theta = w1.dot(&w2).clamp(-1.0, 1.0).acos();
+        let (a1, a2) = match kind(phi) {
+            SectionKind::Circle { r } | SectionKind::Conic { r, .. } | SectionKind::Curvature { r, .. } => (r / (theta / 2.0).tan(), r / (theta / 2.0).tan()),
+            SectionKind::Chamfer { d1, d2 } => (d1, d2),
+            SectionKind::Asymmetric { r1, r2 } => (r1 / (theta / 2.0).tan(), r2 / (theta / 2.0).tan()),
+        };
+        info.push((e, [(s1.0, a1), (s2.0, a2)]));
+    }
+    for i in 0..info.len() {
+        for j in i + 1..info.len() {
+            let (ei, si) = info[i];
+            let (ej, sj) = info[j];
+            let (a, c) = (&b.edges[ei], &b.edges[ej]);
+            if a.v.iter().any(|v| c.v.contains(v)) {
+                continue;
+            }
+            for &(fi, ai) in &si {
+                for &(fj, aj) in &sj {
+                    if fi != fj || !matches!(b.faces[fi].surf, Surface::Plane { .. }) || !(ai + aj).is_finite() {
+                        continue;
+                    }
+                    let mut d = f64::INFINITY;
+                    for k in 0..=16 {
+                        let p = a.point(a.t[0] + (a.t[1] - a.t[0]) * k as f64 / 16.0);
+                        let t = c.curve.closest(&p, c.t[0], c.t[1]);
+                        d = d.min((c.point(t) - p).norm());
+                    }
+                    if d < ai + aj - 1e-7 {
+                        return Err(KernelError::OperationFailed("the blends of two edges overlap: the size is too large for the face between them".into()));
+                    }
+                }
+            }
+        }
     }
     Ok(())
 }
