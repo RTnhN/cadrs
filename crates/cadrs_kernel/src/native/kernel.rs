@@ -555,12 +555,20 @@ impl Kernel for NativeKernel {
     }
 
     fn mass_properties(&self, body: BodyId) -> Result<MassProperties> {
-        Ok(super::mass::body_mass(self.get(body)?))
+        let t = std::time::Instant::now();
+        let m = super::mass::body_mass(self.get(body)?);
+        slow("mass_properties", t, self.get(body)?);
+        if t.elapsed().as_millis() > 500 {
+            dump("slow-mass", self.get(body)?, &format!("{:?}", t.elapsed()));
+        }
+        Ok(m)
     }
 
     fn tessellate(&self, body: BodyId, quality: Tessellation) -> Result<TriMesh> {
         let b = self.get(body)?;
+        let t = std::time::Instant::now();
         let (faces, es) = tess::mesh_body(b, quality.deflection, quality.angle);
+        slow("tessellate", t, b);
         let mut m = TriMesh::default();
         for (fi, fm) in faces.into_iter().enumerate() {
             let base = m.positions.len() as u32;
@@ -651,6 +659,15 @@ impl NativeKernel {
             }
         }
         r.clone()
+    }
+}
+
+/// With `CADRS_PROFILE` set, reports calls slower than 50 ms.
+fn slow(what: &str, t: std::time::Instant, b: &Body) {
+    let e = t.elapsed();
+    if e.as_millis() >= 50 && std::env::var("CADRS_PROFILE").is_ok() {
+        let nurbs = b.faces.iter().filter(|f| matches!(f.surf, super::surface::Surface::Nurbs(_))).count();
+        eprintln!("[profile] {what}: {e:?} ({} faces, {nurbs} NURBS)", b.faces.len());
     }
 }
 

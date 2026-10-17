@@ -613,3 +613,53 @@ fn debug_repro_shell() {
         Err(e) => panic!("{e}"),
     }
 }
+
+/// A thread profile swept along a helix (cubic Bézier pieces, 16 a turn): per-face mass times.
+#[test]
+fn debug_thread_sweep_mass() {
+    use std::f64::consts::TAU;
+    let mut k = NativeKernel::new();
+    let (r, pitch, turns, per) = (18.375, 4.125, 2.0, 16usize);
+    let n = (turns * per as f64) as usize;
+    let th = TAU / per as f64;
+    let kk = 4.0 / 3.0 * (th / 4.0).tan();
+    let pt = |a: f64| Point3::new(r * a.cos(), r * a.sin(), pitch * a / TAU);
+    let tan = |a: f64| Vector3::new(-r * a.sin(), r * a.cos(), pitch / TAU);
+    let path: Vec<PathCurve> = (0..n)
+        .map(|i| {
+            let (a0, a1) = (th * i as f64, th * (i + 1) as f64);
+            let poles = vec![pt(a0), pt(a0) + tan(a0) * kk, pt(a1) - tan(a1) * kk, pt(a1)];
+            PathCurve::Bezier3 { poles, weights: vec![] }
+        })
+        .collect();
+    let front = Plane { origin: Point3::origin(), x_dir: Vector3::x_axis(), normal: -Vector3::y_axis() };
+    let poly = |pts: &[(f64, f64)]| Loop { curves: (0..pts.len()).map(|i| Curve2::Line { a: p(pts[i].0, pts[i].1), b: p(pts[(i + 1) % pts.len()].0, pts[(i + 1) % pts.len()].1), source: None }).collect() };
+    let prof = Profile::new(front, vec![reg(poly(&[(18.375, -1.2), (19.8, -0.7), (19.8, 0.7), (18.375, 1.2)]))]);
+    let t = std::time::Instant::now();
+    let r = k.sweep_with(&prof, &SweepSpec { body: BodyKind::Solid, path, control: SweepControl::None, faces: vec![] }).unwrap();
+    eprintln!("sweep {:?}", t.elapsed());
+    let b = k.get(r.bodies[0]).unwrap().clone();
+    for (fi, f) in b.faces.iter().enumerate() {
+        let t = std::time::Instant::now();
+        let q = native::mass::face_integrals(&b, f, &Vector3::zeros());
+        let pcs: Vec<String> = f.loops.iter().flatten().map(|c| match &c.pc { native::curve::Curve::Line { d, .. } => format!("L({:.1e},{:.1e})", d.x, d.y), native::curve::Curve::Nurbs(n) => format!("N{}", n.cps.len()), o => format!("{:?}", std::mem::discriminant(o)) }).collect();
+        eprintln!("face {fi} {:?}: {:?} area {:.4} pcs {pcs:?}", f.surf.kind(), t.elapsed(), q[0]);
+    }
+}
+
+/// Per-face mass times of a dumped body: CADRS_REPRO=<file.body>.
+#[test]
+fn debug_repro_mass() {
+    let Ok(path) = std::env::var("CADRS_REPRO") else { return };
+    let b = cadrs_kernel::native::bodyio::read(&std::fs::read(path).unwrap()).unwrap();
+    for (fi, f) in b.faces.iter().enumerate() {
+        let t = std::time::Instant::now();
+        let q = native::mass::face_integrals(&b, f, &Vector3::zeros());
+        let pcs: Vec<String> = f.loops.iter().flatten().map(|c| {
+            let e3 = match &b.edges[c.edge].curve { native::curve::Curve::Nurbs(n) => format!("/3D N{} deg{}", n.cps.len(), n.degree), _ => String::new() };
+            match &c.pc { native::curve::Curve::Line { d, .. } => format!("L({:.1e},{:.1e}){e3}", d.x, d.y), native::curve::Curve::Nurbs(n) => format!("N{}{e3}", n.cps.len()), o => format!("{:?}", std::mem::discriminant(o)) }
+        }).collect();
+        let surf = match &f.surf { native::surface::Surface::Nurbs(n) => format!("NURBS {}x{} deg {}x{}", n.cps.len(), n.cps[0].len(), n.du, n.dv), s => format!("{:?}", s.kind()) };
+        eprintln!("face {fi} {surf}: {:?} area {:.4} pcs {pcs:?}", t.elapsed(), q[0]);
+    }
+}

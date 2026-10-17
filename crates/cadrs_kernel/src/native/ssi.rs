@@ -6,6 +6,7 @@ use std::sync::Arc;
 
 use super::curve::Curve;
 use super::math::*;
+use rayon::prelude::*;
 use super::nurbs::NurbsCurve;
 use super::surface::Surface;
 
@@ -696,6 +697,11 @@ fn numeric(a: &Surface, ua: ((f64, f64), (f64, f64)), b: &Surface, bb: &Bbox) ->
 /// A point on both surfaces near a's (u, v): Newton on a's parameters for sd_b = 0, then a
 /// few alternating projections to tighten.
 pub fn refine_point(a: &Surface, b: &Surface, uv: P2) -> P3 {
+    refine_point_uv(a, b, uv).0
+}
+
+/// [`refine_point`] with the point's (u, v) on `a`.
+pub fn refine_point_uv(a: &Surface, b: &Surface, uv: P2) -> (P3, P2) {
     let (mut u, mut v) = (uv.x, uv.y);
     let e = 1e-7;
     let mut hint: Option<(f64, f64)> = if b.signed_distance(&P3::origin()).is_some() { None } else { Some(b.project(&a.eval(u, v), None)) };
@@ -720,7 +726,7 @@ pub fn refine_point(a: &Surface, b: &Surface, uv: P2) -> P3 {
         u -= g0 * gu / l;
         v -= g0 * gv / l;
     }
-    a.eval(u, v)
+    (a.eval(u, v), P2::new(u, v))
 }
 
 fn join_polylines(polys: &mut Vec<(Vec<P3>, bool)>, tol: f64) {
@@ -788,25 +794,35 @@ fn fit_curve(a: &Surface, b: &Surface, mut pts: Vec<P3>, closed: bool) -> IntCur
     }
     // Remove near-duplicates.
     pts.dedup_by(|x, y| (*x - *y).norm() < 1e-9);
+    // The points' (u, v) on a, each projection hinted by the previous one's.
+    let mut uvs: Vec<P2> = Vec::with_capacity(pts.len());
+    let mut hint: Option<(f64, f64)> = None;
+    for p in &pts {
+        let (u, v) = a.project(p, hint);
+        hint = Some((u, v));
+        uvs.push(P2::new(u, v));
+    }
     for _round in 0..6 {
         let t = chord(&pts);
         let c = NurbsCurve::interpolate(&pts, &t, 3.min(pts.len() - 1), None, None);
-        let mut ins: Vec<(usize, P3)> = Vec::new();
-        for k in 0..pts.len() - 1 {
-            let tm = (t[k] + t[k + 1]) / 2.0;
-            let q = c.point(tm);
-            let (u, v) = a.project(&q, None);
-            let exact = refine_point(a, b, P2::new(u, v));
-            if (exact - q).norm() > 1e-9 && (pts[k + 1] - pts[k]).norm() > 1e-6 {
-                ins.push((k + 1, exact));
-            }
-        }
+        let found: Vec<Option<(usize, P3, P2)>> = (0..pts.len() - 1)
+            .into_par_iter()
+            .map(|k| {
+                let tm = (t[k] + t[k + 1]) / 2.0;
+                let q = c.point(tm);
+                let (u, v) = a.project(&q, Some((uvs[k].x, uvs[k].y)));
+                let (exact, uv) = refine_point_uv(a, b, P2::new(u, v));
+                ((exact - q).norm() > 1e-9 && (pts[k + 1] - pts[k]).norm() > 1e-6).then_some((k + 1, exact, uv))
+            })
+            .collect();
+        let ins: Vec<(usize, P3, P2)> = found.into_iter().flatten().collect();
         if ins.is_empty() || pts.len() > 20000 {
             let n = c.range();
             return IntCurve { c: Curve::Nurbs(Arc::new(c)), t0: n.0, t1: n.1, closed };
         }
-        for (k, p) in ins.into_iter().rev() {
+        for (k, p, uv) in ins.into_iter().rev() {
             pts.insert(k, p);
+            uvs.insert(k, uv);
         }
     }
     let t = chord(&pts);

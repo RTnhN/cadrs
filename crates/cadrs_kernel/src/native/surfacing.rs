@@ -85,6 +85,12 @@ pub fn thicken(k: &mut NativeKernel, spec: &ThickenSpec) -> Result<OpResult> {
     if sheets.is_empty() {
         return Err(invalid("Select surfaces or faces to thicken"));
     }
+    // Faces that sew into one sheet with flat open ends: shelled as the solid they bound.
+    if sheets.len() > 1 {
+        if let Some(r) = thicken_sheet(k, &sheets, spec) {
+            return Ok(r);
+        }
+    }
     let mut acc: Option<Body> = None;
     for s in &sheets {
         for d in [spec.along, -spec.against] {
@@ -102,6 +108,87 @@ pub fn thicken(k: &mut NativeKernel, spec: &ThickenSpec) -> Result<OpResult> {
     let n = body.faces.len();
     let t = Tagged { body, tags: (0..n).map(|i| vec![Origin::ProfileCurve { region: spec.source, curve: i as u64 }]).collect() };
     Ok(t.into_result(k))
+}
+
+/// A face's normal at an interior point (oriented by its sense), with that point.
+fn face_normal(b: &Body, f: usize) -> Option<(P3, V3)> {
+    let (_, c) = super::mass::face_area(b, f);
+    let face = &b.faces[f];
+    let (u, v) = face.surf.project(&c, None);
+    let n = face.surf.normal(u, v) * if face.sense { 1.0 } else { -1.0 };
+    Some((face.surf.eval(u, v), n))
+}
+
+/// Thickens faces that sew into one connected sheet whose free edges close in flat loops: the
+/// sheet capped across those loops bounds a solid, which is shelled (inwards or outwards, as
+/// the faces' normals point) without its caps. None when that doesn't apply.
+fn thicken_sheet(k: &mut NativeKernel, sheets: &[Body], spec: &ThickenSpec) -> Option<OpResult> {
+    let mut all = Body::default();
+    let mut normals: Vec<(P3, V3)> = Vec::new();
+    for s in sheets {
+        all.append(s);
+        normals.push(face_normal(s, 0)?);
+    }
+    let sewn = sew_faces(all, 1e-6).ok()?;
+    if sewn.faces.len() != sheets.len() {
+        return None;
+    }
+    // One connected sheet.
+    let ef = sewn.edge_faces();
+    let mut comp = vec![usize::MAX; sewn.faces.len()];
+    let mut stack = vec![0usize];
+    comp[0] = 0;
+    while let Some(f) = stack.pop() {
+        for c in sewn.faces[f].loops.iter().flatten() {
+            for &g in &ef[c.edge] {
+                if comp[g] == usize::MAX {
+                    comp[g] = 0;
+                    stack.push(g);
+                }
+            }
+        }
+    }
+    if comp.iter().any(|c| *c == usize::MAX) {
+        return None;
+    }
+    // Orienting may have flipped faces: "along" follows the majority of the picked normals.
+    let agree: usize = (0..sewn.faces.len()).filter(|&f| face_normal(&sewn, f).is_some_and(|(_, n)| n.dot(&normals[f].1) > 0.0)).count();
+    let along_is_sewn = 2 * agree >= sewn.faces.len();
+    let n = sewn.faces.len();
+    let id = k.insert(sewn);
+    let tool = super::ops::face_tool(k, id, &(0..n as u64).map(FaceId).collect::<Vec<_>>(), spec.source).ok()?;
+    let tid = tool.bodies[0];
+    let caps: Vec<FaceId> = tool.history.generated.iter().filter(|(_, o)| matches!(o, Origin::StartCap { .. })).map(|(f, _)| *f).collect();
+    if caps.is_empty() {
+        return None;
+    }
+    // Whether the sewn sheet's normals point out of the capped solid.
+    let solid = k.get(tid).ok()?.clone();
+    let sewn_b = k.get(id).ok()?.clone();
+    let (p, nsheet) = face_normal(&sewn_b, 0)?;
+    let fi = (0..solid.faces.len()).find(|&f| !caps.contains(&FaceId(f as u64)) && face_normal(&solid, f).is_some_and(|(q, _)| (q - p).norm() < 1e-6)).unwrap_or(0);
+    let (_, nsolid) = face_normal(&solid, fi)?;
+    let sheet_out = nsheet.dot(&nsolid) > 0.0;
+    let along_out = sheet_out == along_is_sewn;
+    let mut parts: Vec<BodyId> = Vec::new();
+    for (d, out) in [(spec.along, along_out), (spec.against, !along_out)] {
+        if d < 1e-9 {
+            continue;
+        }
+        let r = super::offset_round::shell(k, tid, &ShellSpec { remove: caps.clone(), thickness: d, outward: out, hollow: false }).ok()?;
+        parts.push(r.bodies[0]);
+    }
+    let body = match parts.as_slice() {
+        [a] => k.get(*a).ok()?.as_ref().clone(),
+        [a, b] => super::boolean::boolean_bodies(k.get(*a).ok()?, k.get(*b).ok()?, BoolOp::Union).ok()?.body,
+        _ => return None,
+    };
+    if body.solids.len() != 1 {
+        return None;
+    }
+    let nf = body.faces.len();
+    let t = Tagged { body, tags: (0..nf).map(|i| vec![Origin::ProfileCurve { region: spec.source, curve: i as u64 }]).collect() };
+    Some(t.into_result(k))
 }
 
 /// The best plane through points, when they lie in one (within 1e-6 of the size).
@@ -246,6 +333,31 @@ pub fn sew(k: &mut NativeKernel, bodies: &[BodyId], tol: f64) -> Result<OpResult
     for id in bodies {
         b.append(k.get(*id)?);
     }
+    let mut b = sew_faces(b, tol)?;
+    b.shells.clear();
+    b.solids.clear();
+    super::boolean::assemble_shells(&mut b)?;
+    if b.solids.is_empty() {
+        return Err(invalid("The surfaces don't close"));
+    }
+    let mut v = super::mass::body_mass(&b).volume;
+    if v < 0.0 {
+        for f in &mut b.faces {
+            Body::reverse_face(f);
+        }
+        v = -v;
+    }
+    if v < 1e-9 {
+        return Err(invalid("The surfaces don't enclose a volume"));
+    }
+    let n = b.faces.len();
+    let t = Tagged { body: b, tags: (0..n).map(|i| vec![Origin::ProfileCurve { region: u64::MAX, curve: i as u64 }]).collect() };
+    Ok(t.into_result(k))
+}
+
+/// Faces sewn into one sheet: coincident vertices and edges merged, the faces oriented
+/// consistently (the sheet may stay open).
+pub fn sew_faces(mut b: Body, tol: f64) -> Result<Body> {
     let tol = tol.max(1e-7);
     // Merge coincident vertices.
     let nv = b.verts.len();
@@ -316,25 +428,7 @@ pub fn sew(k: &mut NativeKernel, bodies: &[BodyId], tol: f64) -> Result<OpResult
     super::unify::compact(&mut b);
     // Orient the faces consistently: across every shared edge the two uses run opposite ways.
     orient(&mut b)?;
-    b.shells.clear();
-    b.solids.clear();
-    super::boolean::assemble_shells(&mut b)?;
-    if b.solids.is_empty() {
-        return Err(invalid("The surfaces don't close"));
-    }
-    let mut v = super::mass::body_mass(&b).volume;
-    if v < 0.0 {
-        for f in &mut b.faces {
-            Body::reverse_face(f);
-        }
-        v = -v;
-    }
-    if v < 1e-9 {
-        return Err(invalid("The surfaces don't enclose a volume"));
-    }
-    let n = b.faces.len();
-    let t = Tagged { body: b, tags: (0..n).map(|i| vec![Origin::ProfileCurve { region: u64::MAX, curve: i as u64 }]).collect() };
-    Ok(t.into_result(k))
+    Ok(b)
 }
 
 /// Flips faces so each shared edge is used once each way (breadth first from face 0).

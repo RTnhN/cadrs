@@ -225,9 +225,44 @@ fn move_plane(p: &Plane, m: &Affine) -> Plane {
 fn sweep_spine(faces: &[MergedFace], chains: &[Vec<Piece>], plane: Plane, spine: &[Seg], control: SweepControl, solid: bool) -> Result<Vec<Tagged>> {
     let mut place = plane;
     let mut out = Vec::new();
+    // Segments swept with sampled frames, gathered while they meet tangentially (one surface
+    // per profile curve along the run).
+    let mut run: Vec<Seg> = Vec::new();
+    let flush = |run: &mut Vec<Seg>, place: &mut Plane, out: &mut Vec<Tagged>| -> Result<()> {
+        if run.is_empty() {
+            return Ok(());
+        }
+        let (b, end) = super::sweep_general::sweep_seg(faces, chains, *place, run, control, solid)?;
+        out.push(Tagged::from_built(b));
+        *place = end;
+        run.clear();
+        Ok(())
+    };
     for seg in spine {
-        match (&seg.c, control) {
-            (Curve::Line { d, .. }, SweepControl::None | SweepControl::KeepOrientation | SweepControl::LockDirection(_)) => {
+        let exact = match (&seg.c, control) {
+            (Curve::Line { .. }, SweepControl::None | SweepControl::KeepOrientation | SweepControl::LockDirection(_)) => true,
+            (Curve::Circle { c, x, y, .. }, SweepControl::None) => {
+                let axis = x.cross(y).normalize();
+                // The axis must lie in the profile's plane (where it will be when the run ends:
+                // only checked once the run is flushed, so be conservative).
+                run.is_empty() && axis.dot(&place.normal).abs() <= 1e-7 && (c - place.origin).dot(&place.normal).abs() <= 1e-6
+            }
+            _ => false,
+        };
+        if !exact {
+            if let Some(last) = run.last() {
+                // A break in tangent, or a quarter turn gathered: a new piece.
+                let turned: f64 = run.iter().map(|g| g.dir(0.0).angle(&g.dir(1.0))).sum::<f64>() + seg.dir(0.0).angle(&seg.dir(1.0));
+                if last.dir(1.0).dot(&seg.dir(0.0)) < 1.0 - 1e-9 || turned > PI / 2.0 + 1e-9 {
+                    flush(&mut run, &mut place, &mut out)?;
+                }
+            }
+            run.push(seg.clone());
+            continue;
+        }
+        flush(&mut run, &mut place, &mut out)?;
+        match &seg.c {
+            Curve::Line { d, .. } => {
                 let dir = d.normalize() * if seg.rev { -1.0 } else { 1.0 };
                 let len = seg.length();
                 let kind = Prism { plane: place, dir };
@@ -236,21 +271,13 @@ fn sweep_spine(faces: &[MergedFace], chains: &[Vec<Piece>], plane: Plane, spine:
                 out.push(Tagged::from_built(b));
                 place = move_plane(&place, &Affine::translation(dir * len));
             }
-            (Curve::Circle { c, x, y, .. }, SweepControl::None) => {
+            Curve::Circle { c, x, y, .. } => {
                 // Turn about the arc's axis, counter-clockwise about z.
                 let axis = x.cross(y).normalize() * if seg.rev { -1.0 } else { 1.0 };
                 let span = seg.t1 - seg.t0;
                 let start = seg.start();
                 let radial = (start - c).normalize();
                 let f = Frame { o: *c, x: radial, y: axis.cross(&radial), z: axis };
-                // The axis must lie in the profile's plane.
-                if axis.dot(&place.normal).abs() > 1e-7 || (c - place.origin).dot(&place.normal).abs() > 1e-6 {
-                    // Not square to the arc: sampled frames.
-                    let (b, end) = super::sweep_general::sweep_seg(faces, chains, place, seg, control, solid)?;
-                    out.push(Tagged::from_built(b));
-                    place = end;
-                    continue;
-                }
                 let kind = Revolve { plane: place, f };
                 let whole = span >= TAU - 1e-9;
                 let b = sweep::sweep_full(faces, chains, &kind, 0.0, if whole { TAU } else { span }, whole, solid)?;
@@ -258,13 +285,10 @@ fn sweep_spine(faces: &[MergedFace], chains: &[Vec<Piece>], plane: Plane, spine:
                 let r = nalgebra::Rotation3::from_axis_angle(&nalgebra::Unit::new_normalize(axis), span).into_inner();
                 place = move_plane(&place, &Affine { m: r, t: c.coords - r * c.coords });
             }
-            _ => {
-                let (b, end) = super::sweep_general::sweep_seg(faces, chains, place, seg, control, solid)?;
-                out.push(Tagged::from_built(b));
-                place = end;
-            }
+            _ => unreachable!(),
         }
     }
+    flush(&mut run, &mut place, &mut out)?;
     Ok(out)
 }
 
@@ -283,6 +307,7 @@ fn swap_caps(t: &mut Tagged) {
 pub fn sweep_with(k: &mut NativeKernel, profile: &Profile, spec: &SweepSpec) -> Result<OpResult> {
     let segs = path_segments(k, &spec.path)?;
     let (path, closed) = chain(segs)?;
+    let path_len = path.len();
     let (used, solid) = match spec.body {
         BodyKind::Thin { left, right } => (crate::thin::thin_profile(profile, left, right)?, true),
         BodyKind::Solid => (profile.clone(), true),
@@ -325,6 +350,8 @@ pub fn sweep_with(k: &mut NativeKernel, profile: &Profile, spec: &SweepSpec) -> 
         return Err(KernelError::InvalidProfile("the profile has nothing to sweep".into()));
     }
     let center = profile_center(&faces, &chains, &plane);
+    let prof = std::env::var("CADRS_PROFILE").is_ok();
+    let t0 = std::time::Instant::now();
     let mut pieces: Vec<Tagged> = Vec::new();
     for (spine, backward) in spines(path, closed, &plane, &center) {
         let mut these = sweep_spine(&faces, &chains, plane, &spine, spec.control, solid)?;
@@ -333,6 +360,10 @@ pub fn sweep_with(k: &mut NativeKernel, profile: &Profile, spec: &SweepSpec) -> 
         }
         pieces.extend(these);
     }
+    if prof {
+        eprintln!("sweep: {} pieces swept in {:?} (path {} segments)", pieces.len(), t0.elapsed(), path_len);
+    }
+    let t1 = std::time::Instant::now();
     // Join the pieces: the caps at the joints are glued away (pieces that meet anywhere else,
     // a two-way sweep's halves, are united).
     let mut acc = pieces.remove(0);
@@ -351,6 +382,9 @@ pub fn sweep_with(k: &mut NativeKernel, profile: &Profile, spec: &SweepSpec) -> 
         if let Some(g) = glue_self(&acc) {
             acc = g;
         }
+    }
+    if prof {
+        eprintln!("sweep: joined in {:?}", t1.elapsed());
     }
     Ok(acc.into_result(k))
 }

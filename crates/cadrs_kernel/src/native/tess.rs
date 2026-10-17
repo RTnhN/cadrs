@@ -137,11 +137,12 @@ pub fn mesh_face(body: &Body, f: &Face, es: &[(Vec<f64>, Vec<P3>)], defl: f64, a
     if hu.is_finite() || hv.is_finite() {
         let nu = if hu.is_finite() { (((ubox.1 - ubox.0) / hu).ceil() as usize).clamp(1, 400) } else { 1 };
         let mut nv = if hv.is_finite() { (((vbox.1 - vbox.0) / hv).ceil() as usize).clamp(1, 400) } else { 1 };
-        // Keep triangles from getting too thin along a straight direction.
+        // Straight along v (cylinders, cones, extrusions): long triangles from one end to the other
+        // are exact there and keep the rulings whole; only very long ones are cut.
         if !hv.is_finite() && hu.is_finite() {
             let du = (ubox.1 - ubox.0) / nu as f64 * mu;
             let ext = (vbox.1 - vbox.0) * mv;
-            nv = ((ext / (du * 8.0)).ceil() as usize).clamp(1, 400);
+            nv = ((ext / (du * 64.0)).ceil() as usize).clamp(1, 400);
         }
         let nu = if !hu.is_finite() && hv.is_finite() {
             let dv = (vbox.1 - vbox.0) / nv as f64 * mv;

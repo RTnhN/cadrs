@@ -17,7 +17,7 @@ fn line2(o: P2, d: V2) -> Curve {
 /// The p-curve of `c` on [t0, t1] on `s`, its periodic coordinates shifted so its middle lies
 /// near `near` (in the face's chart) when given.
 pub fn pcurve(s: &Surface, c: &Curve, t0: f64, t1: f64, near: Option<P2>) -> Curve {
-    let pc = exact(s, c, t0, t1).unwrap_or_else(|| fitted(s, c, t0, t1));
+    let pc = exact(s, c, t0, t1).or_else(|| iso_line(s, c, t0, t1)).unwrap_or_else(|| fitted(s, c, t0, t1));
     shift_into(s, pc, (t0 + t1) * 0.5, near)
 }
 
@@ -222,18 +222,63 @@ fn flatten(c: Curve) -> Curve {
     }
 }
 
+/// A curve that runs along an iso-line of a B-spline or general surface with its parameter an
+/// affine function of the iso-line's (a sweep's rails, a loft's rails): a straight p-curve.
+fn iso_line(s: &Surface, c: &Curve, t0: f64, t1: f64) -> Option<Curve> {
+    if !matches!(s, Surface::Nurbs(_) | Surface::Extrusion { .. } | Surface::Revolution { .. }) {
+        return None;
+    }
+    let n = 8;
+    let mut uv: Vec<P2> = Vec::with_capacity(n + 1);
+    let mut hint: Option<(f64, f64)> = None;
+    for i in 0..=n {
+        let t = t0 + (t1 - t0) * i as f64 / n as f64;
+        let p = c.point(t);
+        let (u, v) = s.project(&p, hint);
+        if (s.eval(u, v) - p).norm() > 1e-9 {
+            return None;
+        }
+        hint = Some((u, v));
+        uv.push(P2::new(u, v));
+    }
+    let (a, b) = (uv[0], uv[n]);
+    let d = (b - a) / (t1 - t0);
+    let line = Curve::Line { o: P3::new(a.x - d.x * t0, a.y - d.y * t0, 0.0), d: V3::new(d.x, d.y, 0.0) };
+    // Straight in uv and affine in t, and an iso-line (u or v constant).
+    if d.x.abs() > 1e-12 * d.y.abs().max(1e-300) && d.y.abs() > 1e-12 * d.x.abs().max(1e-300) {
+        return None;
+    }
+    let tol = 1e-10 * (1.0 + a.coords.norm() + b.coords.norm());
+    for (i, q) in uv.iter().enumerate() {
+        let t = t0 + (t1 - t0) * i as f64 / n as f64;
+        let l = line.point(t);
+        if (l.x - q.x).abs() > tol || (l.y - q.y).abs() > tol {
+            return None;
+        }
+    }
+    // And between the samples, on the surface.
+    for i in 0..n {
+        let t = t0 + (t1 - t0) * (i as f64 + 0.5) / n as f64;
+        let l = line.point(t);
+        if (s.eval(l.x, l.y) - c.point(t)).norm() > 1e-9 {
+            return None;
+        }
+    }
+    Some(line)
+}
+
 /// Interpolates projected points with the curve's own parameters.
 fn fitted(s: &Surface, c: &Curve, t0: f64, t1: f64) -> Curve {
     let pieces = c.pieces(t0, t1);
     let mut ts: Vec<f64> = Vec::new();
+    // A few samples a piece to start (refined below where the fit is off).
+    let n = (512 / pieces.len().max(1)).clamp(2, 16);
     for w in pieces.windows(2) {
-        let n = 16;
         for i in 0..n {
             ts.push(w[0] + (w[1] - w[0]) * i as f64 / n as f64);
         }
     }
     ts.push(t1);
-    let (mu, mv) = s.metric();
     let mut uvs: Vec<P2> = Vec::new();
     let project = |t: f64, hint: Option<(f64, f64)>| -> P2 {
         let (u, v) = s.project(&c.point(t), hint);
@@ -258,8 +303,11 @@ fn fitted(s: &Surface, c: &Curve, t0: f64, t1: f64) -> Curve {
         for k in 0..ts.len() - 1 {
             let tm = (ts[k] + ts[k + 1]) * 0.5;
             let f = fit.point(tm);
+            // Measured in model space between the fit's point and the projection's (uv noise of
+            // projections on B-spline surfaces would never settle; an intersection curve may lie
+            // a little off the surface, which no p-curve can make up).
             let q = project(tm, Some((uvs[k].x, uvs[k].y)));
-            let err = ((f.x - q.x) * mu).hypot((f.y - q.y) * mv);
+            let err = (s.eval(f.x, f.y) - s.eval(q.x, q.y)).norm();
             if err > 1e-9 {
                 ins.push(tm);
             }
