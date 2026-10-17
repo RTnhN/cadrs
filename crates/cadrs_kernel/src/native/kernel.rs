@@ -337,6 +337,22 @@ impl Kernel for NativeKernel {
         super::boolean::boolean(self, op, target, tools)
     }
 
+    fn split(&mut self, body: BodyId, tool: &SplitTool, source: u64) -> Result<OpResult> {
+        super::ops::split(self, body, tool, source)
+    }
+
+    fn split_faces(&mut self, body: BodyId, faces: &[FaceId], tool: &SplitTool) -> Result<OpResult> {
+        super::ops::split_faces(self, body, faces, tool)
+    }
+
+    fn face_tool(&mut self, body: BodyId, faces: &[FaceId], source: u64) -> Result<OpResult> {
+        super::ops::face_tool(self, body, faces, source)
+    }
+
+    fn face_normals_at(&self, body: BodyId, face: FaceId, points: &[Point3<f64>]) -> Result<Vec<nalgebra::Vector3<f64>>> {
+        super::ops::face_normals_at(self, body, face, points)
+    }
+
     fn transform(&mut self, body: BodyId, t: &Transform) -> Result<OpResult> {
         self.transform_motion(body, &Motion::from_isometry(t))
     }

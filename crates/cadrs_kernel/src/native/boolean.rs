@@ -260,16 +260,32 @@ fn interior_point(loops: &[Vec<Arc>]) -> Option<P2> {
 
 pub fn interior_of_polys(polys: &[Vec<P2>]) -> Option<P2> {
     let mut vb = (f64::INFINITY, f64::NEG_INFINITY);
+    let mut ub = (f64::INFINITY, f64::NEG_INFINITY);
     for p in polys {
         for q in p {
             vb = (vb.0.min(q.y), vb.1.max(q.y));
+            ub = (ub.0.min(q.x), ub.1.max(q.x));
         }
     }
     if !vb.0.is_finite() || vb.1 - vb.0 < 1e-14 {
         return None;
     }
+    // Distance from a point to the boundary, scaled to the box.
+    let (su, sv) = (1.0 / (ub.1 - ub.0).max(1e-300), 1.0 / (vb.1 - vb.0).max(1e-300));
+    let clearance = |q: &P2| -> f64 {
+        let qs = P2::new(q.x * su, q.y * sv);
+        let mut d = f64::INFINITY;
+        for p in polys {
+            let n = p.len();
+            for i in 0..n {
+                let (a, b) = (p[i], p[(i + 1) % n]);
+                d = d.min(seg_dist2(&qs, &P2::new(a.x * su, a.y * sv), &P2::new(b.x * su, b.y * sv)));
+            }
+        }
+        d
+    };
     let mut best: Option<(f64, P2)> = None;
-    for frac in [0.5, 0.3137, 0.6863, 0.1571, 0.8429, 0.0713, 0.9287] {
+    for frac in [0.5123, 0.3137, 0.6863, 0.1571, 0.8429, 0.0713, 0.9287, 0.4231, 0.5869, 0.2377, 0.7623] {
         let y = vb.0 + (vb.1 - vb.0) * frac;
         let mut xs: Vec<f64> = Vec::new();
         for p in polys {
@@ -284,9 +300,10 @@ pub fn interior_of_polys(polys: &[Vec<P2>]) -> Option<P2> {
         xs.sort_by(f64::total_cmp);
         let mut k = 0;
         while k + 1 < xs.len() {
-            let w = xs[k + 1] - xs[k];
-            if best.map_or(true, |(bw, _)| w > bw) {
-                best = Some((w, P2::new((xs[k] + xs[k + 1]) * 0.5, y)));
+            let q = P2::new((xs[k] + xs[k + 1]) * 0.5, y);
+            let c = clearance(&q);
+            if best.map_or(true, |(bc, _)| c > bc) {
+                best = Some((c, q));
             }
             k += 2;
         }
@@ -310,9 +327,40 @@ pub struct BoolOut {
 
 /// The boolean of two bodies.
 pub fn boolean_bodies(a: &Body, b: &Body, op: BoolOp) -> Result<BoolOut> {
+    run(a, b, Mode::Bool(op))
+}
+
+/// What to do with the split faces.
+#[derive(Debug, Clone)]
+pub enum Mode {
+    Bool(BoolOp),
+    /// Split the listed faces of the target (all when None) by the tool's faces and keep every
+    /// piece of the target: the target's faces imprinted by the tool.
+    Imprint(Option<Vec<usize>>),
+}
+
+pub fn imprint(a: &Body, b: &Body, faces: Option<Vec<usize>>) -> Result<BoolOut> {
+    run(a, b, Mode::Imprint(faces))
+}
+
+fn run(a: &Body, b: &Body, mode: Mode) -> Result<BoolOut> {
+    let op = match &mode {
+        Mode::Bool(op) => *op,
+        Mode::Imprint(_) => BoolOp::Subtract,
+    };
+    let selected = |f: usize| -> bool {
+        match &mode {
+            Mode::Imprint(Some(list)) => list.contains(&f),
+            _ => true,
+        }
+    };
+    let imprinting = matches!(mode, Mode::Imprint(_));
     // Disjoint boxes: nothing to intersect.
     let (ba, bb) = (a.bbox(), b.bbox());
     if !ba.grow(VTOL).overlaps(&bb.grow(VTOL)) {
+        if imprinting {
+            return Ok(BoolOut { body: a.clone(), from: (0..a.faces.len()).map(|i| vec![(0, i)]).collect() });
+        }
         return match op {
             BoolOp::Union => {
                 let mut out = a.clone();
@@ -443,6 +491,9 @@ pub fn boolean_bodies(a: &Body, b: &Body, op: BoolOp) -> Result<BoolOut> {
     let mut coincident: Vec<Vec<usize>> = vec![Vec::new(); faces.len()];
     let mut new_edges: Vec<usize> = Vec::new();
     for fa in 0..na_faces {
+        if !selected(faces[fa].orig) {
+            continue;
+        }
         for fb in na_faces..faces.len() {
             if !faces[fa].bbox.overlaps(&faces[fb].bbox) {
                 continue;
@@ -715,6 +766,12 @@ pub fn boolean_bodies(a: &Body, b: &Body, op: BoolOp) -> Result<BoolOut> {
     let mut keep: Vec<(usize, Vec<Vec<Arc>>, bool)> = Vec::new(); // (face, loops, flip)
     for (fi, loops) in subs {
         let f = &faces[fi];
+        if imprinting {
+            if f.owner == 0 {
+                keep.push((fi, loops, false));
+            }
+            continue;
+        }
         let Some(uv) = interior_point(&loops) else { continue };
         let p = f.surf.eval(uv.x, uv.y);
         let n_out = f.surf.normal(uv.x, uv.y) * if f.sense { 1.0 } else { -1.0 };
@@ -742,6 +799,9 @@ pub fn boolean_bodies(a: &Body, b: &Body, op: BoolOp) -> Result<BoolOut> {
             }
         });
         let a_side = f.owner == 0;
+        if std::env::var("CADRS_BOOL_DEBUG").is_ok() {
+            eprintln!("sub of face {fi} (owner {} orig {}): {} loops, class {class:?} at {p:?}", f.owner, f.orig, loops.len());
+        }
         let (k, flip) = match (op, a_side, class) {
             (BoolOp::Union, _, Class::Out) => (true, false),
             (BoolOp::Union, true, Class::OnSame) => (true, false),

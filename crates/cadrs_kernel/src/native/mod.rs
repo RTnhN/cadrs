@@ -10,6 +10,7 @@ pub mod kernel;
 pub mod mass;
 pub mod math;
 pub mod nurbs;
+pub mod ops;
 pub mod pcurve;
 pub mod profile;
 pub mod split;

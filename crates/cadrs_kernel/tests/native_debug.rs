@@ -91,3 +91,14 @@ fn debug_thin3() {
         Err(e) => println!("thin err {e}"),
     }
 }
+
+#[test]
+fn debug_split() {
+    let mut k = NativeKernel::new();
+    let b = k.extrude(&Profile::new(Plane::top(), vec![reg(rect(0., 0., 10., 20.))]), Extent::Blind(30.0)).unwrap().bodies[0];
+    let plane = Plane { origin: Point3::new(0.0, 0.0, 10.0), ..Plane::top() };
+    let r = k.split(b, &SplitTool::Plane(plane), 42).unwrap();
+    let s = r.bodies[0];
+    let body = k.get(s).unwrap();
+    println!("solids {} shells {:?} faces {}", body.solids.len(), body.shells.len(), body.faces.len());
+}
