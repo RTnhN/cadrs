@@ -2792,6 +2792,8 @@ fn clear_toasts(mut commands: Commands) {
 fn on_pick_row_activate(
     a: On<Activate>,
     q: Query<&PickRow>,
+    instance_lists: Query<(Entity, &Children), With<crate::assembly::list::InstanceRows>>,
+    mut instance_anchor: Local<crate::assembly::list::RangeAnchor>,
     button: Res<cadrs_ui::menu::LastPointerButton>,
     keys: Res<ButtonInput<KeyCode>>,
     doc: Option<Res<ActiveDocument>>,
@@ -2813,6 +2815,17 @@ fn on_pick_row_activate(
         // Right-clicking another feature makes it the selection (its menu acts on it alone).
         if secondary && matches!(row.0, Pick::Feature(_)) {
             selection.0.retain(|p| !matches!(p, Pick::Feature(_)));
+        }
+        if !secondary && let Some(doc) = doc.as_ref() && let Some(element) = doc.active {
+            // Instance rows are direct children in displayed order. Folder headers, mate
+            // connectors and other non-pickable rows are deliberately skipped.
+            if let Some((container, children)) = instance_lists.iter().find(|(_, children)| children.contains(&a.entity)) {
+                let order: Vec<Pick> = children.iter().filter_map(|e| q.get(e).ok().map(|r| r.0)).collect();
+                let shift = keys.any_pressed([KeyCode::ShiftLeft, KeyCode::ShiftRight]);
+                let additive = keys.any_pressed([KeyCode::ControlLeft, KeyCode::ControlRight, KeyCode::SuperLeft, KeyCode::SuperRight]);
+                let how = instance_anchor.select((doc.doc.id, element, container), &order, row.0, &selection, shift, additive);
+                row_click.pending = Some((row.0, how));
+            }
         }
         if let (Pick::Feature(id), false) = (row.0, secondary) {
             let shift = keys.any_pressed([KeyCode::ShiftLeft, KeyCode::ShiftRight]);
@@ -4123,5 +4136,42 @@ mod tab_name_tests {
     fn tab_names_are_unique() {
         let names = unique_tab_names(&[("bracket_pair", "part-studio"), ("Bracket pair", "assembly"), ("Part Studio 1", "part-studio"), ("Bracket pair", "assembly")]);
         assert_eq!(names, ["tab-bracket-pair", "tab-bracket-pair-assembly", "tab-part-studio-1", "tab-bracket-pair-assembly-2"]);
+    }
+}
+
+#[cfg(test)]
+mod assembly_range_tests {
+    use super::*;
+    use crate::viewport::{FeatureRowClick, RowSelect, Selection};
+
+    #[test]
+    fn assembly_range_uses_tree_order_skips_headers_and_ignores_right_click() {
+        let mut app = App::new();
+        let mut doc = ActiveDocument::new(cadrs_core::Document::new("Tree selection"));
+        doc.active = Some(doc.doc.elements[1].id);
+        app.insert_resource(doc)
+            .init_resource::<Selection>()
+            .init_resource::<FeatureRowClick>()
+            .init_resource::<ButtonInput<KeyCode>>()
+            .init_resource::<cadrs_ui::menu::LastPointerButton>()
+            .add_message::<PickRequest>()
+            .add_observer(on_pick_row_activate);
+        let picks: Vec<Pick> = (0..4).map(|_| Pick::Part(cadrs_core::assembly::InstanceId::new().part_id())).collect();
+        let entities: Vec<Entity> = picks.iter().map(|p| app.world_mut().spawn(PickRow(*p)).id()).collect();
+        let header = app.world_mut().spawn_empty().id();
+        let container = app.world_mut().spawn(crate::assembly::list::InstanceRows).id();
+        // Entity creation order deliberately differs from display order; the last row is
+        // outside this tree (for example, a part row in another panel).
+        app.world_mut().entity_mut(container).add_children(&[entities[2], header, entities[0], entities[1]]);
+        app.world_mut().trigger(Activate { entity: entities[2] });
+        assert_eq!(app.world_mut().resource_mut::<FeatureRowClick>().pending.take(), Some((picks[2], RowSelect::Only)));
+        app.world_mut().resource_mut::<Selection>().0 = vec![picks[2]];
+        app.world_mut().resource_mut::<ButtonInput<KeyCode>>().press(KeyCode::ShiftRight);
+        app.world_mut().trigger(Activate { entity: entities[1] });
+        assert_eq!(app.world_mut().resource_mut::<FeatureRowClick>().pending.take(), Some((picks[1], RowSelect::Range(vec![picks[2], picks[0], picks[1]]))));
+        app.world_mut().resource_mut::<cadrs_ui::menu::LastPointerButton>().0 = bevy::picking::pointer::PointerButton::Secondary;
+        app.world_mut().trigger(Activate { entity: entities[0] });
+        assert!(app.world().resource::<FeatureRowClick>().pending.is_none());
+        assert_eq!(app.world().resource::<Selection>().0, vec![picks[2]]);
     }
 }
