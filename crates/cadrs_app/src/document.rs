@@ -428,6 +428,7 @@ fn top_bar(root: &mut ChildSpawnerCommands, t: &Theme, doc_name: &str) {
             }),
             observe(|ev: On<MenuAction>, q: Query<Entity, With<DocumentName>>, mut commands: Commands| {
                 match ev.item.as_str() {
+                    "document-menu-export" => commands.queue(crate::native_document::open_export),
                     "document-menu-units" => commands.queue(crate::units_dialog::open_units_dialog),
                     "document-menu-full-rebuild" => commands.queue(full_rebuild),
                     // P3D.3: a version of the document as it is.
@@ -868,6 +869,7 @@ fn document_menu() -> Menu {
     Menu::new("document-menu-popup")
         .min_width(200.0)
         .item(MenuItem::new("document-menu-rename", "Rename document…").icon("edit"))
+        .item(MenuItem::new("document-menu-export", "Export document…").icon("file-export"))
         .item(MenuItem::new("document-menu-copy", "Copy workspace…").icon("copy").planned())
         .item(
             MenuItem::new("document-menu-properties", "Properties…")

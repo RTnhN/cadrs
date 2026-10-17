@@ -78,6 +78,7 @@ pub mod plane_display;
 pub mod region_select;
 pub mod render_ui;
 pub mod export_image;
+pub mod native_document;
 pub mod repair;
 pub mod replace_reference;
 pub mod selection_readout;
@@ -630,6 +631,7 @@ impl Plugin for CadrsAppPlugin {
             .add_plugins(sheetmetal_tools_ui::SheetMetalToolsPlugin)
             .add_plugins((tab_folders::TabFoldersPlugin, tab_manager::TabManagerPlugin, analysis::AnalysisPlugin, preferences_ui::PreferencesPlugin, manipulator::ManipulatorPlugin, mcp::McpPlugin))
             .add_plugins((variables_ui::VariablesPlugin, scale_ui::ScalePlugin, threads_ui::ThreadsPlugin, simulation_ui::SimulationPlugin, render_ui::RenderUiPlugin, export_image::ExportImagePlugin))
+            .add_plugins(native_document::NativeDocumentPlugin)
             .add_plugins((import_dialog::ImportDialogPlugin, import_file::ImportFilePlugin, picture::PicturePlugin, file_drop::FileDropPlugin, drop_import::DropImportPlugin, image_dialog::ImageDialogPlugin))
             .init_resource::<ExportDirOverride>()
             // A long menu that has to be capped keeps clear of the tab strip (Final part 3:
