@@ -55,6 +55,7 @@ impl Plugin for InsertPlugin {
             .add_observer(on_accept)
             .add_observer(on_cancel)
             .add_observer(on_activate)
+            .add_observer(on_studio_toggle)
             .add_observer(on_kind_tab)
             .add_observer(on_button);
     }
@@ -110,6 +111,8 @@ pub struct InsertSession {
     pub boards: bool,
     /// **Insert as rigid** (P3B.8, A2.4): a Part Studio row inserts one rigid instance.
     pub rigid: bool,
+    /// Part Studios collapsed in the source tree, retained while searching or switching tabs.
+    pub collapsed: std::collections::HashSet<ElementId>,
     /// The Standard content tab is chosen (P3B.5, A19.1).
     pub standard: bool,
     /// Standard content and linked inserts made (each one step over the whole document).
@@ -161,6 +164,10 @@ struct InsertTree;
 #[derive(Component, Debug, Clone)]
 struct InsertRow(Item);
 
+/// A Part Studio header whose disclosure toggles its child rows.
+#[derive(Component)]
+struct InsertStudio(ElementId);
+
 /// The "Inserted: n" text.
 #[derive(Component)]
 struct InsertCount;
@@ -189,6 +196,7 @@ pub fn open_insert_dialog(world: &mut World) {
         assemblies: false,
         boards: false,
         rigid: false,
+        collapsed: Default::default(),
         standard: false,
         std_steps: 0,
         mark,
@@ -306,18 +314,24 @@ fn dialog(t: &Theme, doc_name: String) -> impl Bundle {
                     r.spawn(Node { flex_grow: 1.0, ..default() });
                     r.spawn(ToolButton::new("insert-filter-sketches", "sketch").icon_size(16.0).disabled(true).tooltip("Sketches (not available yet)").build(t));
                 });
-                b.spawn((
-                    Name::new("insert-tree"),
-                    InsertTree,
-                    Node {
-                        flex_direction: FlexDirection::Column,
-                        min_height: Val::Px(150.0),
-                        max_height: Val::Px(330.0),
-                        overflow: Overflow::scroll_y(),
-                        padding: UiRect::vertical(Val::Px(4.0)),
-                        ..default()
-                    },
-                ));
+                b.spawn(Node { flex_direction: FlexDirection::Column, min_height: Val::Px(150.0), max_height: Val::Px(330.0), ..default() })
+                    .with_children(|frame| {
+                        let tree = frame.spawn((
+                            Name::new("insert-tree"),
+                            InsertTree,
+                            cadrs_ui::WheelScroll,
+                            cadrs_ui::scrollbar::ScrollGutter(12.0),
+                            Node {
+                                flex_direction: FlexDirection::Column,
+                                min_height: Val::Px(150.0),
+                                max_height: Val::Px(330.0),
+                                overflow: Overflow::scroll_y(),
+                                padding: UiRect::vertical(Val::Px(4.0)),
+                                ..default()
+                            },
+                        )).id();
+                        frame.spawn(cadrs_ui::vertical_scrollbar(t, "insert-tree-scrollbar", tree));
+                    });
                 b.spawn(Node {
                     justify_content: JustifyContent::FlexEnd,
                     padding: UiRect::new(Val::Px(8.0), Val::Px(10.0), Val::Px(4.0), Val::Px(6.0)),
@@ -501,7 +515,19 @@ pub(crate) fn thumbnail(
 }
 
 /// What the tree was built from.
-type TreeKey = Vec<(String, bool, Option<(ElementId, Option<PartId>)>, bool)>;
+type TreeKey = Vec<(String, Option<bool>, Option<(ElementId, Option<PartId>)>, bool)>;
+
+/// Filter child rows without changing what their Part Studio header inserts. Linked studios
+/// use their snapshot's namespaced element id, so they collapse independently too.
+fn visible_tree_items(items: Vec<TreeRow>, collapsed: &std::collections::HashSet<ElementId>) -> Vec<TreeRow> {
+    items.into_iter().filter(|(_, key, studio)| {
+        *studio || !key.is_some_and(|(element, part)| part.is_some() && collapsed.contains(&element))
+    }).collect()
+}
+
+fn studio_disclosure(studio: bool, key: Option<(ElementId, Option<PartId>)>, s: &InsertSession) -> Option<bool> {
+    studio.then(|| key.is_none_or(|(element, _)| !s.collapsed.contains(&element)))
+}
 
 #[allow(clippy::too_many_arguments)]
 fn rebuild_tree(
@@ -520,10 +546,10 @@ fn rebuild_tree(
         return;
     };
     let Some((tree, added)) = q_tree.iter().next().map(|(e, r)| (e, r.is_added())) else { return };
-    let items = tree_items(&doc, &mut parts_of, &s);
+    let items = visible_tree_items(tree_items(&doc, &mut parts_of, &s), &s.collapsed);
     let key: TreeKey = items
         .iter()
-        .map(|(it, k, studio)| (if it.rigid.is_empty() { it.label.clone() } else { format!("{} (rigid)", it.label) }, *studio, *k, s.armed.as_ref() == Some(it)))
+        .map(|(it, k, studio)| (if it.rigid.is_empty() { it.label.clone() } else { format!("{} (rigid)", it.label) }, studio_disclosure(*studio, *k, &s), *k, s.armed.as_ref() == Some(it)))
         .collect();
     if !added && last.as_ref() == Some(&key) {
         return;
@@ -554,13 +580,16 @@ fn rebuild_tree(
                 TreeItem::new(name, label)
                     .height(38.0)
                     .left(if studio { 4.0 } else { 30.0 })
-                    .disclosure(studio.then_some(true))
+                    .disclosure(studio_disclosure(studio, k, &s))
                     .selected(armed)
                     .build(&t),
                 InsertRow(item),
                 ChildOf(tree),
             ))
             .id();
+        if let Some((element, _)) = k.filter(|_| studio) {
+            commands.entity(row).insert(InsertStudio(element));
+        }
         if let Some(tip) = rigid_tip {
             commands.entity(row).insert(Tooltip::new(tip));
         }
@@ -826,6 +855,14 @@ pub(crate) fn pose_at_pointer(world: &mut World, item: &Item, screen: Vec2) -> P
     };
     let t = p - middle;
     Pose::translation([t.x as f64, t.y as f64, t.z as f64])
+}
+
+/// The chevron only changes the source list; it never arms or inserts the studio's parts.
+fn on_studio_toggle(ev: On<cadrs_ui::TreeToggle>, rows: Query<&InsertStudio>, session: Option<ResMut<InsertSession>>) {
+    let (Ok(row), Some(mut s)) = (rows.get(ev.entity), session) else { return };
+    if !s.collapsed.remove(&row.0) {
+        s.collapsed.insert(row.0);
+    }
 }
 
 /// Picks up a row's item (a click in the tree).
@@ -1116,5 +1153,100 @@ fn on_dialog_button(world: &mut World, name: &str) {
             }
         }
         _ => {}
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use bevy::picking::{backend::HitData, events::Scroll, pointer::Location};
+
+    fn dialog_app() -> App {
+        let mut doc = cadrs_core::Document::empty("Insert test");
+        doc.elements.push(cadrs_core::Element::assembly("Assembly"));
+        let mut app = App::new();
+        app.insert_resource(ActiveDocument::new(doc))
+            .init_resource::<Theme>()
+            .add_observer(on_studio_toggle);
+        app.world_mut().spawn(ViewportArea);
+        open_insert_dialog(app.world_mut());
+        app
+    }
+
+    fn rows(a: ElementId, b: ElementId) -> Vec<TreeRow> {
+        let part = |el, name: &str| {
+            let id = PartId::new(cadrs_core::FeatureId::new(), 0);
+            (Item { sources: vec![InstanceSource::Part { element: el, part: id }], label: name.into(), rigid: vec![], link: None }, Some((el, Some(id))), false)
+        };
+        let header = |el, children: &[TreeRow]| {
+            (Item { sources: children.iter().flat_map(|r| r.0.sources.clone()).collect(), label: "Studio".into(), rigid: vec![], link: None }, Some((el, None)), true)
+        };
+        let first = vec![part(a, "Part A"), part(a, "Part B")];
+        let second = vec![part(b, "Part C")];
+        let mut out = vec![header(a, &first)];
+        out.extend(first);
+        out.push(header(b, &second));
+        out.extend(second);
+        out
+    }
+
+    #[test]
+    fn studio_disclosures_hide_only_their_children_without_inserting() {
+        let mut app = dialog_app();
+        let (a, b) = (ElementId::new(), ElementId::new());
+        let items = rows(a, b);
+        let header = app.world_mut().spawn(InsertStudio(a)).id();
+        let armed = items[2].0.clone();
+        app.world_mut().resource_mut::<InsertSession>().armed = Some(armed.clone());
+        app.world_mut().trigger(cadrs_ui::TreeToggle { entity: header });
+        let s = app.world().resource::<InsertSession>();
+        assert_eq!(studio_disclosure(true, Some((a, None)), s), Some(false));
+        assert_eq!(studio_disclosure(true, Some((b, None)), s), Some(true));
+        assert_eq!(s.armed.as_ref(), Some(&armed));
+        assert!(s.inserted.is_empty());
+        assert!(!s.pending);
+        let visible = visible_tree_items(items.clone(), &s.collapsed);
+        assert_eq!(visible.len(), 3);
+        assert_eq!(visible[0].0.sources.len(), 2, "the collapsed header must still insert the whole studio");
+        assert_eq!(visible[2].0.label, "Part C");
+        // Filtering or switching kinds does not discard the user's disclosure state.
+        app.world_mut().resource_mut::<InsertSession>().query = "Part".into();
+        app.world_mut().resource_mut::<InsertSession>().assemblies = true;
+        app.world_mut().resource_mut::<InsertSession>().assemblies = false;
+        assert!(app.world().resource::<InsertSession>().collapsed.contains(&a));
+        app.world_mut().trigger(cadrs_ui::TreeToggle { entity: header });
+        let s = app.world().resource::<InsertSession>();
+        assert_eq!(visible_tree_items(items.clone(), &s.collapsed), items);
+        assert_eq!(studio_disclosure(true, Some((a, None)), s), Some(true));
+    }
+
+    #[test]
+    fn insert_tree_scrolls_when_wheel_events_bubble_from_a_row() {
+        let mut app = dialog_app();
+        app.add_plugins(cadrs_ui::scrollbar::ScrollbarPlugin);
+        app.world_mut().flush();
+        // Pointer traversal queries Window even while bubbling through UI parents.
+        // Register a window component without creating an operating-system window.
+        let window = app.world_mut().spawn(Window::default()).id();
+        let tree = app.world_mut().query_filtered::<Entity, With<InsertTree>>().single(app.world()).unwrap();
+        assert!(app.world().get::<cadrs_ui::WheelScroll>(tree).is_some());
+        let mut bars = app.world_mut().query::<&cadrs_ui::scrollbar::SlimScrollbar>();
+        assert!(bars.iter(app.world()).any(|bar| bar.target == tree));
+        app.world_mut().entity_mut(tree).insert(ComputedNode {
+            size: Vec2::new(262.0, 330.0), content_size: Vec2::new(262.0, 2000.0), ..default()
+        });
+        let row = app.world_mut().spawn((Node::default(), ChildOf(tree))).id();
+        let target = bevy::camera::RenderTarget::Window(bevy::window::WindowRef::Entity(window)).normalize(None).unwrap();
+        let wheel = |app: &mut App, unit, y| {
+            app.world_mut().trigger(Pointer::new(PointerId::Mouse, Location { target: target.clone(), position: Vec2::ZERO }, Scroll {
+                unit, x: 0.0, y, hit: HitData::new(tree, 0.0, None, None), phase: bevy::input::touch::TouchPhase::Moved,
+            }, row));
+        };
+        wheel(&mut app, bevy::input::mouse::MouseScrollUnit::Line, -1.0);
+        assert_eq!(app.world().get::<bevy::ui::ScrollPosition>(tree).unwrap().y, 24.0);
+        wheel(&mut app, bevy::input::mouse::MouseScrollUnit::Pixel, -2000.0);
+        assert_eq!(app.world().get::<bevy::ui::ScrollPosition>(tree).unwrap().y, 1670.0);
+        wheel(&mut app, bevy::input::mouse::MouseScrollUnit::Pixel, 2000.0);
+        assert_eq!(app.world().get::<bevy::ui::ScrollPosition>(tree).unwrap().y, 0.0);
     }
 }
