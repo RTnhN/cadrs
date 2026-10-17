@@ -103,6 +103,27 @@ pub fn ray_surface(s: &Surface, o: &P3, d: &V3, tmin: f64, tmax: f64) -> Vec<(f6
                 }
             }
         }
+        Surface::Extrusion { c, d: dir } => {
+            // The plane through the ray parallel to the extrusion cuts it in rulings where the
+            // base curve crosses that plane; each ruling meets the ray at one point.
+            let m = d.cross(dir);
+            if m.norm() < 1e-12 {
+                return Vec::new();
+            }
+            let fr = Frame::from_z(*o, m.normalize());
+            let pl = Surface::Plane { f: fr };
+            let (a, b) = c.nurbs_range().unwrap_or((0.0, TAU));
+            for u in super::ssi::curve_surface(c, a, b, &pl) {
+                let q = c.point(u);
+                // o + t d = q + v dir: solve in least squares.
+                let w = q - o;
+                let (dd, dr, rr) = (d.dot(d), d.dot(dir), dir.dot(dir));
+                let (wd, wr) = (w.dot(d), w.dot(dir));
+                if let Some((t, _v)) = solve2(dd, -dr, dr, -rr, wd, wr) {
+                    ts.push(t);
+                }
+            }
+        }
         _ => {
             // Implicit along the ray where available, else sampled distance with projection.
             let n = 400;

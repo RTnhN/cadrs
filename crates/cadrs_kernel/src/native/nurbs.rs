@@ -306,7 +306,7 @@ impl NurbsCurve {
                 }
             }
         }
-        let sol = a.lu().solve(&rhs)?;
+        let sol = if n > 24 { banded_solve(&a, &rhs, p + 2)? } else { a.lu().solve(&rhs)? };
         if sol.iter().any(|x| !x.is_finite()) {
             return None;
         }
@@ -558,6 +558,99 @@ impl NurbsSurface {
         let cps: Vec<Vec<H>> = (0..ncp).map(|i| cols[i].cps.clone()).collect();
         Self { du: curves[0].degree, dv: cols[0].degree, ku: curves[0].knots.clone(), kv: cols[0].knots.clone(), cps }
     }
+}
+
+/// Solves a banded system A·X = B (|i − j| ≤ `bw` outside the band is zero) by Gaussian
+/// elimination with partial pivoting inside the band: O(n·bw²) instead of O(n³). B-spline
+/// collocation matrices are banded (and totally positive).
+pub fn banded_solve(a: &DMatrix<f64>, b: &DMatrix<f64>, bw: usize) -> Option<DMatrix<f64>> {
+    let n = a.nrows();
+    let m = b.ncols();
+    // Band storage of rows: entries j in [i − bw, i + 2bw] (room for fill-in from pivoting).
+    let w = 3 * bw + 1;
+    let off = bw; // column j of row i lives at index j + off − i
+    let mut band = vec![0.0f64; n * w];
+    let at = |i: usize, j: usize| -> Option<usize> {
+        let k = j as isize + off as isize - i as isize;
+        (k >= 0 && (k as usize) < w).then(|| i * w + k as usize)
+    };
+    for i in 0..n {
+        for j in i.saturating_sub(bw)..(i + 2 * bw + 1).min(n) {
+            if let Some(k) = at(i, j) {
+                band[k] = a[(i, j)];
+            }
+        }
+        // Entries outside the stored band must be zero.
+        for j in 0..n {
+            if (j + bw < i || j > i + 2 * bw) && a[(i, j)] != 0.0 {
+                return a.clone().lu().solve(b);
+            }
+        }
+    }
+    let mut x = b.clone();
+    for c in 0..n {
+        // Pivot among rows c..c+bw.
+        let last = (c + bw + 1).min(n);
+        let mut piv = c;
+        let mut best = 0.0;
+        for r in c..last {
+            let v = at(r, c).map(|k| band[k].abs()).unwrap_or(0.0);
+            if v > best {
+                best = v;
+                piv = r;
+            }
+        }
+        if best < 1e-300 {
+            return None;
+        }
+        if piv != c {
+            for j in c.saturating_sub(bw)..(c + 2 * bw + 1).min(n) {
+                let (ka, kb) = (at(c, j), at(piv, j));
+                match (ka, kb) {
+                    (Some(ka), Some(kb)) => band.swap(ka, kb),
+                    (Some(ka), None) => band[ka] = 0.0,
+                    (None, Some(kb)) => {
+                        if band[kb] != 0.0 {
+                            return a.clone().lu().solve(b);
+                        }
+                    }
+                    (None, None) => {}
+                }
+            }
+            x.swap_rows(c, piv);
+        }
+        let d = band[at(c, c).unwrap()];
+        for r in c + 1..last {
+            let Some(krc) = at(r, c) else { continue };
+            let f = band[krc] / d;
+            if f == 0.0 {
+                continue;
+            }
+            for j in c..(c + 2 * bw + 1).min(n) {
+                if let (Some(kr), Some(kc)) = (at(r, j), at(c, j)) {
+                    band[kr] -= f * band[kc];
+                }
+            }
+            for col in 0..m {
+                let v = x[(c, col)];
+                x[(r, col)] -= f * v;
+            }
+        }
+    }
+    // Back substitution.
+    for c in (0..n).rev() {
+        let d = band[at(c, c).unwrap()];
+        for col in 0..m {
+            let mut s = x[(c, col)];
+            for j in c + 1..(c + 2 * bw + 1).min(n) {
+                if let Some(k) = at(c, j) {
+                    s -= band[k] * x[(j, col)];
+                }
+            }
+            x[(c, col)] = s / d;
+        }
+    }
+    Some(x)
 }
 
 /// Solves a dense square system (used by fits).

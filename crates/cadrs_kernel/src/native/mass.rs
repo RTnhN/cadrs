@@ -6,6 +6,7 @@
 use rayon::prelude::*;
 
 use super::math::*;
+use super::curve::Curve;
 use super::surface::Surface;
 use super::topo::{co_range, Body, Face};
 
@@ -107,8 +108,88 @@ fn inner(s: &Surface, u0: f64, u: f64, v: f64, shift: &V3, w: f64, acc: &mut Q, 
     }
 }
 
+/// Surfaces whose integrand is a low-degree polynomial along v (ruled along v): their inner
+/// integral runs along v, exactly with one 8-point rule.
+fn ruled_in_v(s: &Surface) -> bool {
+    matches!(s, Surface::Cylinder { .. } | Surface::Cone { .. } | Surface::Extrusion { .. } | Surface::Plane { .. })
+}
+
+/// G(u, v) = ∫_{v0}^{v} h(u, s) ds for all quantities, weighted by `w`.
+fn inner_v(s: &Surface, u: f64, v0: f64, v: f64, shift: &V3, w: f64, acc: &mut Q) {
+    if (v - v0).abs() < 1e-300 {
+        return;
+    }
+    let (m, r) = ((v0 + v) * 0.5, (v - v0) * 0.5);
+    for (x, gw) in GAUSS8.x.iter().zip(GAUSS8.w) {
+        integrand(s, u, m + r * x, shift, acc, w * gw * r);
+    }
+}
+
+/// Face integrals with the inner integral along v: ∫∫ h = −∮ G du.
+fn face_integrals_v(body: &Body, f: &Face, shift: &V3) -> Q {
+    let mut acc = [0.0; NQ];
+    let mut v_ref = f64::INFINITY;
+    for l in &f.loops {
+        for c in l {
+            let e = &body.edges[c.edge];
+            v_ref = v_ref.min(c.pc.point(e.t[0]).y).min(c.pc.point(e.t[1]).y);
+        }
+    }
+    if !v_ref.is_finite() {
+        return acc;
+    }
+    for l in &f.loops {
+        for c in l {
+            let e = &body.edges[c.edge];
+            let (t0, t1) = co_range(e, c.fwd);
+            let (lo, hi) = (t0.min(t1), t0.max(t1));
+            let mut ts = c.pc.pieces(lo, hi);
+            let p0 = c.pc.point(lo);
+            let p1 = c.pc.point(hi);
+            let du = (p1.x - p0.x).abs();
+            let extra = if f.surf.u_periodic() { (du / (PI / 8.0)).ceil() as usize } else { 1 }.max(1);
+            if extra > 1 {
+                let mut r = Vec::new();
+                for w in ts.windows(2) {
+                    for i in 0..extra {
+                        r.push(w[0] + (w[1] - w[0]) * i as f64 / extra as f64);
+                    }
+                }
+                r.push(hi);
+                ts = r;
+            }
+            if t0 > t1 {
+                ts.reverse();
+            }
+            let fine = matches!(c.pc, Curve::Nurbs(_)) && ts.len() > 64;
+            let g = if fine { &GAUSS8 } else { &GAUSS16 };
+            for w in ts.windows(2) {
+                let (a, b) = (w[0], w[1]);
+                let (m, r) = ((a + b) * 0.5, (b - a) * 0.5);
+                for (x, gw) in g.x.iter().zip(g.w) {
+                    let t = m + r * x;
+                    let (uv, duv, _) = c.pc.d2(t);
+                    if duv.x == 0.0 {
+                        continue;
+                    }
+                    inner_v(&f.surf, uv.x, v_ref, uv.y, shift, -gw * r * duv.x, &mut acc);
+                }
+            }
+        }
+    }
+    if !f.sense {
+        for q in acc.iter_mut().take(4) {
+            *q = -*q;
+        }
+    }
+    acc
+}
+
 /// The 14 face integrals of a face, relative to `shift`, oriented by its sense.
 pub fn face_integrals(body: &Body, f: &Face, shift: &V3) -> Q {
+    if ruled_in_v(&f.surf) && !matches!(f.surf, Surface::Plane { .. }) {
+        return face_integrals_v(body, f, shift);
+    }
     let mut acc = [0.0; NQ];
     let mut scratch = Vec::with_capacity(64);
     // The reference u: the smallest u on the boundary keeps H small.
@@ -154,10 +235,12 @@ pub fn face_integrals(body: &Body, f: &Face, shift: &V3) -> Q {
             if t0 > t1 {
                 ts.reverse();
             }
+            let fine = matches!(c.pc, Curve::Nurbs(_)) && ts.len() > 64;
+            let g = if fine { &GAUSS8 } else { &GAUSS16 };
             for w in ts.windows(2) {
                 let (a, b) = (w[0], w[1]);
                 let (m, r) = ((a + b) * 0.5, (b - a) * 0.5);
-                for (x, gw) in GAUSS16.x.iter().zip(GAUSS16.w) {
+                for (x, gw) in g.x.iter().zip(g.w) {
                     let t = m + r * x;
                     let (uv, duv, _) = c.pc.d2(t);
                     let dv = duv.y;

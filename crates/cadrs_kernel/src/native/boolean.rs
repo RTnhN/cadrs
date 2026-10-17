@@ -26,6 +26,33 @@ use super::surface::Surface;
 use super::topo::{Body, Coedge, Edge, Face, Shell, Solid};
 use crate::*;
 
+/// Accumulated time per boolean phase (CADRS_PROFILE=1 prints it after each boolean).
+struct Prof {
+    t: std::time::Instant,
+    on: bool,
+    phases: Vec<(&'static str, std::time::Duration)>,
+}
+
+impl Prof {
+    fn new() -> Self {
+        Self { t: std::time::Instant::now(), on: std::env::var("CADRS_PROFILE").is_ok(), phases: Vec::new() }
+    }
+    fn mark(&mut self, name: &'static str) {
+        if self.on {
+            let now = std::time::Instant::now();
+            self.phases.push((name, now - self.t));
+            self.t = now;
+        }
+    }
+    fn report(&self, what: &str) {
+        if self.on {
+            let total: std::time::Duration = self.phases.iter().map(|p| p.1).sum();
+            let parts: Vec<String> = self.phases.iter().map(|(n, d)| format!("{n} {:.1}ms", d.as_secs_f64() * 1e3)).collect();
+            eprintln!("[profile] {what}: {:.1}ms = {}", total.as_secs_f64() * 1e3, parts.join(", "));
+        }
+    }
+}
+
 /// Vertices closer than this are merged (mm).
 pub const VTOL: f64 = 1e-6;
 
@@ -463,6 +490,7 @@ fn run(a: &Body, b: &Body, mode: Mode) -> Result<BoolOut> {
             BoolOp::Intersect => Err(KernelError::OperationFailed("the result is empty".into())),
         };
     }
+    let mut prof = Prof::new();
     let mut pool = Pool::default();
     let mut faces: Vec<WFace> = Vec::new();
     import(&mut pool, &mut faces, a, 0, false);
@@ -483,6 +511,7 @@ fn run(a: &Body, b: &Body, mode: Mode) -> Result<BoolOut> {
             }
         }
     }
+    prof.mark("import");
     // 2a. Vertices on edges of the other body.
     for e in 0..ne {
         if pool.edges[e].degenerate {
@@ -568,6 +597,7 @@ fn run(a: &Body, b: &Body, mode: Mode) -> Result<BoolOut> {
             }
         }
     }
+    prof.mark("edge-edge");
     // 2c. Edge–face intersections.
     let mut face_pts: Vec<Vec<usize>> = vec![Vec::new(); faces.len()];
     for e in 0..ne {
@@ -611,6 +641,7 @@ fn run(a: &Body, b: &Body, mode: Mode) -> Result<BoolOut> {
         }
         vs
     };
+    prof.mark("edge-face");
     // 3. Face–face.
     let mut cuts: Vec<Vec<usize>> = vec![Vec::new(); faces.len()];
     let mut coincident: Vec<Vec<usize>> = vec![Vec::new(); faces.len()];
@@ -743,6 +774,7 @@ fn run(a: &Body, b: &Body, mode: Mode) -> Result<BoolOut> {
             }
         }
     }
+    prof.mark("face-face");
     // Pieces of the split edges.
     let mut pieces: Vec<Vec<usize>> = Vec::with_capacity(pool.edges.len());
     let n_all = pool.edges.len();
@@ -907,6 +939,7 @@ fn run(a: &Body, b: &Body, mode: Mode) -> Result<BoolOut> {
             subs.push((fi, lps));
         }
     }
+    prof.mark("split");
     // 5. Classify.
     let polys_a: Vec<Vec<Vec<P2>>> = a.faces.iter().map(|f| classify::face_polygons(a, f)).collect();
     let polys_b: Vec<Vec<Vec<P2>>> = b.faces.iter().map(|f| classify::face_polygons(b, f)).collect();
@@ -963,6 +996,7 @@ fn run(a: &Body, b: &Body, mode: Mode) -> Result<BoolOut> {
             keep.push((fi, loops, flip));
         }
     }
+    prof.mark("classify");
     if keep.is_empty() {
         return Err(KernelError::OperationFailed("the result is empty".into()));
     }
@@ -1022,8 +1056,12 @@ fn run(a: &Body, b: &Body, mode: Mode) -> Result<BoolOut> {
         let owners: Vec<usize> = from.iter().map(|f| f[0].0).collect();
         from = super::unify::unify_faces(&mut out, from, &|f, g| owners[f] != owners[g]);
     }
+    prof.mark("assemble");
     super::unify::merge_edges(&mut out);
+    prof.mark("unify");
     assemble_shells(&mut out)?;
+    prof.mark("shells");
+    prof.report(&format!("{op:?} {}×{} faces", a.faces.len(), b.faces.len()));
     Ok(BoolOut { body: out, from })
 }
 
@@ -1164,8 +1202,21 @@ pub fn assemble_shells(b: &mut Body) -> Result<()> {
         let si = b.shells.len();
         b.shells.push(Shell { faces: fs.clone(), closed });
         if closed {
-            let shift = b.bbox().center().coords;
-            let vol: f64 = fs.iter().map(|&f| super::mass::face_integrals(b, &b.faces[f], &shift)[4]).sum();
+            outer.push((si, f64::NAN));
+        }
+    }
+    // With several closed shells, tell outer shells from voids by their volume's sign.
+    if outer.len() > 1 {
+        let shift = b.bbox().center().coords;
+        let all: Vec<(usize, f64)> = outer
+            .iter()
+            .map(|(si, _)| {
+                let vol: f64 = b.shells[*si].faces.iter().map(|&f| super::mass::face_integrals(b, &b.faces[f], &shift)[4]).sum();
+                (*si, vol)
+            })
+            .collect();
+        outer.clear();
+        for (si, vol) in all {
             if vol >= 0.0 {
                 outer.push((si, vol));
             } else {
