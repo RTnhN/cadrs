@@ -16,10 +16,33 @@ pub struct Piece {
     pub t0: f64,
     pub t1: f64,
     pub rev: bool,
-    /// (region source, curve source) for naming the side face.
-    pub src: (u64, u64),
+    /// What the side face it sweeps is named after.
+    pub src: Src,
     /// Further origins when pieces of several regions were fused into this one.
-    pub more: Vec<(u64, u64)>,
+    pub more: Vec<Src>,
+}
+
+/// The origin of a profile piece: a sketch curve of a region, or an edge of a body (a face used
+/// as a profile).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Src {
+    Curve { region: u64, curve: u64 },
+    Edge { body: u64, edge: u64 },
+}
+
+impl Src {
+    pub fn origin(&self) -> crate::Origin {
+        match *self {
+            Src::Curve { region, curve } => crate::Origin::ProfileCurve { region, curve },
+            Src::Edge { body, edge } => crate::Origin::FromEdge { body: crate::BodyId(body), edge: crate::EdgeId(edge) },
+        }
+    }
+    pub fn region(&self) -> Option<u64> {
+        match *self {
+            Src::Curve { region, .. } => Some(region),
+            Src::Edge { .. } => None,
+        }
+    }
 }
 
 impl Piece {
@@ -170,7 +193,7 @@ pub fn loop_polygon(l: &[Piece], defl: f64) -> Vec<P2> {
 }
 
 /// A 2D curve from a sketch curve, with the piece's range and direction.
-pub fn piece_of(c: &Curve2, src: (u64, u64)) -> Result<Piece> {
+pub fn piece_of(c: &Curve2, src: Src) -> Result<Piece> {
     let e2 = |v: V2| V3::new(v.x, v.y, 0.0);
     let p3 = |p: P2| P3::new(p.x, p.y, 0.0);
     let arc = |c: Curve, start: f64, sweep: f64| {
@@ -276,7 +299,7 @@ pub fn regions(profile: &Profile) -> Result<Vec<Region2>> {
             let mut pieces = Vec::new();
             for (ci, c) in l.curves.iter().enumerate() {
                 let cs = c.source().unwrap_or(unsourced_curve(li, ci));
-                pieces.push(piece_of(c, (source, cs))?);
+                pieces.push(piece_of(c, Src::Curve { region: source, curve: cs })?);
             }
             let pieces = chain_loop(pieces)?;
             check_closed(&pieces)?;
@@ -378,6 +401,11 @@ pub fn merge_regions(regions: &[Region2]) -> Result<Vec<MergedFace>> {
         regions.iter().map(|r| MergedFace { outer: r.outer.clone(), holes: r.holes.clone(), regions: vec![r.source] }).collect()
     };
     if regions.len() < 2 {
+        return Ok(separate());
+    }
+    // Regions whose interiors overlap aren't a partition: leave them separate (the caller unites
+    // their solids).
+    if regions_overlap(regions) {
         return Ok(separate());
     }
     // All loops with their owner.
@@ -545,7 +573,7 @@ fn fuse_pieces(mut lp: Loop2, tol: f64) -> Loop2 {
         for i in 0..n {
             let j = (i + 1) % n;
             let (a, b) = (&lp[i], &lp[j]);
-            if a.src.0 == b.src.0 || !a.same_carrier(b, tol) || a.rev != b.rev {
+            if a.src.region() == b.src.region() || !a.same_carrier(b, tol) || a.rev != b.rev {
                 continue;
             }
             if a.dir(1.0).dot(&b.dir(0.0)) < 1.0 - 1e-9 {
@@ -581,4 +609,116 @@ fn fuse_pieces(mut lp: Loop2, tol: f64) -> Loop2 {
         }
     }
     lp
+}
+
+/// Orders an open chain's pieces head to tail (flipping pieces as needed).
+pub fn chain_loop_open(mut pieces: Vec<Piece>) -> Result<Loop2> {
+    if pieces.len() <= 1 {
+        return Ok(pieces);
+    }
+    // Start from a piece end that touches no other piece.
+    let touches = |p: &P2, pieces: &[Piece], skip: usize| pieces.iter().enumerate().any(|(i, q)| i != skip && ((q.start() - p).norm() < JOIN || (q.end() - p).norm() < JOIN));
+    let mut first = 0;
+    let mut flip = false;
+    for (i, p) in pieces.iter().enumerate() {
+        if !touches(&p.start(), &pieces, i) {
+            first = i;
+            break;
+        }
+        if !touches(&p.end(), &pieces, i) {
+            first = i;
+            flip = true;
+            break;
+        }
+    }
+    let p = pieces.remove(first);
+    let mut out = vec![if flip { p.reversed() } else { p }];
+    while !pieces.is_empty() {
+        let end = out.last().unwrap().end();
+        let Some(i) = pieces.iter().position(|q| (q.start() - end).norm() < JOIN || (q.end() - end).norm() < JOIN) else {
+            return Err(KernelError::InvalidProfile("the chain's curves are not connected".into()));
+        };
+        let q = pieces.remove(i);
+        out.push(if (q.start() - end).norm() < JOIN { q } else { q.reversed() });
+    }
+    Ok(out)
+}
+
+/// Crossings of the ray from q towards +x with a piece (exact for lines and circular arcs).
+fn ray_crossings(p: &Piece, q: &P2) -> i32 {
+    match &p.c {
+        Curve::Line { .. } => {
+            let (a, b) = (p.start(), p.end());
+            if (a.y > q.y) != (b.y > q.y) {
+                let x = a.x + (q.y - a.y) / (b.y - a.y) * (b.x - a.x);
+                if x > q.x {
+                    return 1;
+                }
+            }
+            0
+        }
+        Curve::Circle { c, x, y, r } => {
+            let dy = q.y - c.y;
+            if dy.abs() >= *r {
+                return 0;
+            }
+            let dx = (r * r - dy * dy).sqrt();
+            let mut n = 0;
+            for px in [c.x - dx, c.x + dx] {
+                if px <= q.x {
+                    continue;
+                }
+                let v = V3::new(px - c.x, q.y - c.y, 0.0);
+                let ang = v.dot(y).atan2(v.dot(x));
+                let a = unwrap_near(ang, (p.t0 + p.t1) * 0.5, TAU);
+                // Half-open on the parameter so joints count once.
+                let (lo, hi) = (p.t0, p.t1);
+                if a > lo && a <= hi || (a - lo).abs() < 1e-14 && false {
+                    n += 1;
+                }
+            }
+            n
+        }
+        _ => {
+            let pts = p.sample(1e-5);
+            let mut n = 0;
+            for w in pts.windows(2) {
+                let (a, b) = (w[0], w[1]);
+                if (a.y > q.y) != (b.y > q.y) {
+                    let x = a.x + (q.y - a.y) / (b.y - a.y) * (b.x - a.x);
+                    if x > q.x {
+                        n += 1;
+                    }
+                }
+            }
+            n
+        }
+    }
+}
+
+/// Point strictly inside a loop (even–odd on the exact pieces).
+pub fn in_loop(l: &[Piece], q: &P2) -> bool {
+    l.iter().map(|p| ray_crossings(p, q)).sum::<i32>() % 2 == 1
+}
+
+/// Whether the interiors of any two regions overlap (points just inside one region's boundary
+/// lie inside another).
+pub fn regions_overlap(regions: &[Region2]) -> bool {
+    let inside = |q: &P2, j: usize| in_loop(&regions[j].outer, q) && !regions[j].holes.iter().any(|h| in_loop(h, q));
+    for (i, r) in regions.iter().enumerate() {
+        for l in std::iter::once(&r.outer).chain(r.holes.iter()) {
+            for p in l {
+                for s in [0.25, 0.5, 0.75] {
+                    let d = p.dir(s);
+                    let q = p.at(s) + V2::new(-d.y, d.x) * 1e-5;
+                    for j in 0..regions.len() {
+                        if j != i && inside(&q, j) {
+                            return true;
+                        }
+                    }
+                }
+            }
+        }
+    }
+    false
 }

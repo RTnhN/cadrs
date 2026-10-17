@@ -8,7 +8,7 @@
 use super::build::{fix_senses, Built, MIN_DEPTH};
 use super::curve::Curve;
 use super::math::*;
-use super::profile::{MergedFace, Piece};
+use super::profile::{MergedFace, Piece, Src};
 use super::surface::Surface;
 use super::topo::*;
 use crate::{KernelError, Origin, Result};
@@ -206,6 +206,86 @@ impl SweepKind for Revolve {
 /// Sweeps the faces from s0 to s1 (s0 < s1). `whole`: a closed sweep (a whole turn) whose end
 /// is its start: no caps, the start edges are seams.
 pub fn sweep(_plane: &crate::Plane, faces: &[MergedFace], kind: &dyn SweepKind, s0: f64, s1: f64, whole: bool) -> Result<Built> {
+    sweep_full(faces, &[], kind, s0, s1, whole, true)
+}
+
+/// The side faces swept by one strand of pieces (a closed loop or an open chain): returns the
+/// face indices with their origins and the start and end profile coedges (cap boundaries).
+struct Strand {
+    sides: Vec<(usize, Vec<Src>)>,
+    bottom: Vec<Coedge>,
+    top: Vec<Coedge>,
+}
+
+fn sweep_strand(b: &mut Body, lp: &[Piece], closed: bool, kind: &dyn SweepKind, s0: f64, s1: f64, whole: bool, up: bool, m0: &Affine, m1: &Affine) -> Strand {
+    let k = lp.len();
+    let nj = if closed { k } else { k + 1 };
+    let joint = |j: usize| -> P2 { if j < k { lp[j].start() } else { lp[k - 1].end() } };
+    let rails: Vec<Option<Curve>> = (0..nj).map(|j| kind.rail(joint(j))).collect();
+    let vb: Vec<usize> = (0..nj)
+        .map(|j| {
+            let q = joint(j);
+            b.add_vertex(m0.point(&P3::new(q.x, q.y, 0.0)))
+        })
+        .collect();
+    let vt: Vec<usize> = (0..nj)
+        .map(|j| {
+            if whole || rails[j].is_none() {
+                vb[j]
+            } else {
+                let q = joint(j);
+                b.add_vertex(m1.point(&P3::new(q.x, q.y, 0.0)))
+            }
+        })
+        .collect();
+    let rail_e: Vec<(usize, bool)> = (0..nj)
+        .map(|j| match &rails[j] {
+            Some(c) => (b.add_edge(c.clone(), s0, s1, vb[j], vt[j]), false),
+            None => (b.add_degenerate(b.verts[vb[j]].p, s0, s1, vb[j]), true),
+        })
+        .collect();
+    let mut out = Strand { sides: Vec::new(), bottom: Vec::new(), top: Vec::new() };
+    for (i, p) in lp.iter().enumerate() {
+        let j = if closed { (i + 1) % k } else { i + 1 };
+        let c0 = p.c.transformed(m0);
+        let (v0b, v1b) = if p.rev { (vb[j], vb[i]) } else { (vb[i], vb[j]) };
+        let (v0t, v1t) = if p.rev { (vt[j], vt[i]) } else { (vt[i], vt[j]) };
+        let Some(side) = kind.side(p, &p.c.transformed(&kind.place(0.0))) else {
+            let e = b.add_edge(c0.clone(), p.t0, p.t1, v0b, v1b);
+            out.bottom.push(Coedge { edge: e, fwd: !p.rev, pc: p.c.clone() });
+            out.top.push(Coedge { edge: e, fwd: !p.rev, pc: p.c.clone() });
+            continue;
+        };
+        let eb = b.add_edge(c0.clone(), p.t0, p.t1, v0b, v1b);
+        let et = if whole { eb } else { b.add_edge(p.c.transformed(m1), p.t0, p.t1, v0t, v1t) };
+        out.bottom.push(Coedge { edge: eb, fwd: !p.rev, pc: p.c.clone() });
+        out.top.push(Coedge { edge: et, fwd: !p.rev, pc: p.c.clone() });
+        let (ts, te) = (p.ts(), p.te());
+        let plane_side = matches!(side.surf, Surface::Plane { .. });
+        let mut sl = Vec::new();
+        sl.push(Coedge { edge: eb, fwd: !p.rev, pc: (side.along)(s0) });
+        if !(rail_e[j].1 && plane_side) {
+            sl.push(Coedge { edge: rail_e[j].0, fwd: true, pc: (side.across)(te) });
+        }
+        sl.push(Coedge { edge: et, fwd: p.rev, pc: (side.along)(s1) });
+        if !(rail_e[i].1 && plane_side) {
+            sl.push(Coedge { edge: rail_e[i].0, fwd: false, pc: (side.across)(ts) });
+        }
+        if !up {
+            sl.reverse();
+            for c in &mut sl {
+                c.fwd = !c.fwd;
+            }
+        }
+        b.faces.push(Face { surf: side.surf, sense: true, loops: vec![sl] });
+        out.sides.push((b.faces.len() - 1, std::iter::once(p.src).chain(p.more.iter().copied()).collect()));
+    }
+    out
+}
+
+/// Sweeps closed faces (solids, or their boundaries as sheets when `solid` is false) and open
+/// chains (sheets) from s0 to s1.
+pub fn sweep_full(faces: &[MergedFace], chains: &[Vec<Piece>], kind: &dyn SweepKind, s0: f64, s1: f64, whole: bool, solid: bool) -> Result<Built> {
     if s1 - s0 < MIN_DEPTH {
         return Err(KernelError::InvalidParameter(format!(
             "The depth {:e} is below the modelling tolerance ({MIN_DEPTH:e} mm)",
@@ -217,86 +297,28 @@ pub fn sweep(_plane: &crate::Plane, faces: &[MergedFace], kind: &dyn SweepKind, 
     let m1 = kind.place(s1);
     let mut out = Built::default();
     let b = &mut out.body;
-    let mut solid_shells = Vec::new();
+    let rev_loop = |l: &mut Vec<Coedge>| {
+        l.reverse();
+        for c in l.iter_mut() {
+            c.fwd = !c.fwd;
+        }
+    };
     for mf in faces {
         let face_start = b.faces.len();
         let mut bottom_loops: Vec<Vec<Coedge>> = Vec::new();
         let mut top_loops: Vec<Vec<Coedge>> = Vec::new();
-        let mut sides: Vec<(usize, Vec<(u64, u64)>)> = Vec::new();
-        let loops: Vec<&Vec<Piece>> = std::iter::once(&mf.outer).chain(mf.holes.iter()).collect();
-        for lp in loops {
-            let k = lp.len();
-            let rails: Vec<Option<Curve>> = lp.iter().map(|p| kind.rail(p.start())).collect();
-            let vb: Vec<usize> = lp.iter().map(|p| {
-                let q = p.start();
-                b.add_vertex(m0.point(&P3::new(q.x, q.y, 0.0)))
-            }).collect();
-            let vt: Vec<usize> = (0..k)
-                .map(|j| {
-                    if whole || rails[j].is_none() {
-                        vb[j]
-                    } else {
-                        let q = lp[j].start();
-                        b.add_vertex(m1.point(&P3::new(q.x, q.y, 0.0)))
-                    }
-                })
-                .collect();
-            // Rails at the joints: an edge, or a degenerate edge on the axis.
-            let rail_e: Vec<(usize, bool)> = (0..k)
-                .map(|j| match &rails[j] {
-                    Some(c) => (b.add_edge(c.clone(), s0, s1, vb[j], vt[j]), false),
-                    None => (b.add_degenerate(b.verts[vb[j]].p, s0, s1, vb[j]), true),
-                })
-                .collect();
-            let mut bl = Vec::new();
-            let mut tl = Vec::new();
-            for (i, p) in lp.iter().enumerate() {
-                let j = (i + 1) % k;
-                let c0 = p.c.transformed(&m0);
-                let (v0b, v1b) = if p.rev { (vb[j], vb[i]) } else { (vb[i], vb[j]) };
-                let (v0t, v1t) = if p.rev { (vt[j], vt[i]) } else { (vt[i], vt[j]) };
-                let Some(side) = kind.side(p, &p.c.transformed(&kind.place(0.0))) else {
-                    // On the axis: the start and end profile edges coincide.
-                    let e = b.add_edge(c0.clone(), p.t0, p.t1, v0b, v1b);
-                    bl.push(Coedge { edge: e, fwd: !p.rev, pc: p.c.clone() });
-                    tl.push(Coedge { edge: e, fwd: !p.rev, pc: p.c.clone() });
-                    continue;
-                };
-                let eb = b.add_edge(c0.clone(), p.t0, p.t1, v0b, v1b);
-                let et = if whole { eb } else { b.add_edge(p.c.transformed(&m1), p.t0, p.t1, v0t, v1t) };
-                bl.push(Coedge { edge: eb, fwd: !p.rev, pc: p.c.clone() });
-                tl.push(Coedge { edge: et, fwd: !p.rev, pc: p.c.clone() });
-                let (ts, te) = (p.ts(), p.te());
-                let plane_side = matches!(side.surf, Surface::Plane { .. });
-                let mut sl = Vec::new();
-                sl.push(Coedge { edge: eb, fwd: !p.rev, pc: (side.along)(s0) });
-                if !(rail_e[j].1 && plane_side) {
-                    sl.push(Coedge { edge: rail_e[j].0, fwd: true, pc: (side.across)(te) });
-                }
-                sl.push(Coedge { edge: et, fwd: p.rev, pc: (side.along)(s1) });
-                if !(rail_e[i].1 && plane_side) {
-                    sl.push(Coedge { edge: rail_e[i].0, fwd: false, pc: (side.across)(ts) });
-                }
-                if !up {
-                    sl.reverse();
-                    for c in &mut sl {
-                        c.fwd = !c.fwd;
-                    }
-                }
-                b.faces.push(Face { surf: side.surf, sense: true, loops: vec![sl] });
-                sides.push((b.faces.len() - 1, std::iter::once(p.src).chain(p.more.iter().copied()).collect()));
+        let mut sides = Vec::new();
+        for lp in std::iter::once(&mf.outer).chain(mf.holes.iter()) {
+            let st = sweep_strand(b, lp, true, kind, s0, s1, whole, up, &m0, &m1);
+            sides.extend(st.sides);
+            bottom_loops.push(st.bottom);
+            top_loops.push(st.top);
+            if !solid {
+                // Each loop's sheet is its own shell.
             }
-            bottom_loops.push(bl);
-            top_loops.push(tl);
         }
         let n_sides = b.faces.len() - face_start;
-        let rev_loop = |l: &mut Vec<Coedge>| {
-            l.reverse();
-            for c in l.iter_mut() {
-                c.fwd = !c.fwd;
-            }
-        };
-        if !whole {
+        if solid && !whole {
             if up {
                 bottom_loops.iter_mut().for_each(rev_loop);
             } else {
@@ -313,17 +335,28 @@ pub fn sweep(_plane: &crate::Plane, faces: &[MergedFace], kind: &dyn SweepKind, 
             }
         }
         for (fi, srcs) in sides {
-            for (region, curve) in srcs {
-                out.origins.push((fi, Origin::ProfileCurve { region, curve }));
+            for s in srcs {
+                out.origins.push((fi, s.origin()));
             }
         }
         fix_senses(b, face_start..face_start + n_sides);
         let fs: Vec<usize> = (face_start..b.faces.len()).collect();
-        b.shells.push(Shell { faces: fs, closed: true });
-        solid_shells.push(b.shells.len() - 1);
+        b.shells.push(Shell { faces: fs, closed: solid });
+        if solid {
+            let s = b.shells.len() - 1;
+            b.solids.push(Solid { shells: vec![s] });
+        }
     }
-    for s in solid_shells {
-        b.solids.push(Solid { shells: vec![s] });
+    for ch in chains {
+        let face_start = b.faces.len();
+        let st = sweep_strand(b, ch, false, kind, s0, s1, whole, true, &m0, &m1);
+        for (fi, srcs) in st.sides {
+            for s in srcs {
+                out.origins.push((fi, s.origin()));
+            }
+        }
+        fix_senses(b, face_start..b.faces.len());
+        b.shells.push(Shell { faces: (face_start..b.faces.len()).collect(), closed: false });
     }
     out.origins.sort_by_key(|(f, _)| *f);
     Ok(out)

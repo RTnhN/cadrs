@@ -809,8 +809,89 @@ pub fn boolean_bodies(a: &Body, b: &Body, op: BoolOp) -> Result<BoolOut> {
     Ok(BoolOut { body: out, from })
 }
 
+/// Splits edges used by more than two faces (solids touching along an edge) into one edge per
+/// pair of faces bounding the same material wedge, pairing the faces in their order around
+/// the edge.
+pub fn split_nonmanifold(b: &mut Body) {
+    let ne = b.edges.len();
+    let mut uses: Vec<Vec<(usize, usize, usize)>> = vec![Vec::new(); ne]; // (face, loop, index)
+    for (fi, f) in b.faces.iter().enumerate() {
+        for (li, l) in f.loops.iter().enumerate() {
+            for (k, c) in l.iter().enumerate() {
+                uses[c.edge].push((fi, li, k));
+            }
+        }
+    }
+    for e in 0..ne {
+        let u = uses[e].clone();
+        if u.len() <= 2 || b.edges[e].degenerate {
+            continue;
+        }
+        let ed = b.edges[e].clone();
+        let tm = ed.mid_t();
+        let p = ed.point(tm);
+        let t = ed.curve.tangent(tm).normalize();
+        let a = any_perpendicular(&t);
+        let bb = t.cross(&a);
+        // Each use: its angle about t and whether the material lies counter-clockwise of it.
+        let mut items: Vec<(f64, bool, (usize, usize, usize))> = Vec::new();
+        for &(fi, li, k) in &u {
+            let f = &b.faces[fi];
+            let c = &f.loops[li][k];
+            let uv = c.pc.point(tm);
+            let n = f.surf.normal(uv.x, uv.y) * if f.sense { 1.0 } else { -1.0 };
+            let d = t * if c.fwd { 1.0 } else { -1.0 };
+            let w0 = n.cross(&d); // into the face (first order)
+            // A point a little way into the face, so faces tangent at the edge separate.
+            let (_, duv, _) = c.pc.d2(tm);
+            let perp = V2::new(-duv.y, duv.x);
+            let len = (ed.t[1] - ed.t[0]).abs() * ed.curve.tangent(tm).norm();
+            let step = (len * 1e-2).min(0.05).max(1e-4);
+            let (pu, su, sv) = f.surf.d1(uv.x, uv.y);
+            let g = su * perp.x + sv * perp.y;
+            let sgn = if g.dot(&w0) >= 0.0 { 1.0 } else { -1.0 };
+            let scale = step / g.norm().max(1e-300);
+            let q = f.surf.eval(uv.x + perp.x * scale * sgn, uv.y + perp.y * scale * sgn);
+            let w = {
+                let r = q - pu;
+                let r = r - t * r.dot(&t);
+                if r.norm() > 1e-12 { r.normalize() } else { w0 }
+            };
+            let ang = w.dot(&bb).atan2(w.dot(&a));
+            let ccw = t.cross(&w0);
+            let mat_ccw = (-n).dot(&ccw) > 0.0;
+            items.push((ang, mat_ccw, (fi, li, k)));
+        }
+        let _ = p;
+        items.sort_by(|x, y| x.0.total_cmp(&y.0));
+        let m = items.len();
+        // Pair each face whose material is counter-clockwise with the next one.
+        let mut pairs: Vec<((usize, usize, usize), (usize, usize, usize))> = Vec::new();
+        for i in 0..m {
+            if items[i].1 {
+                let j = (i + 1) % m;
+                pairs.push((items[i].2, items[j].2));
+            }
+        }
+        if pairs.len() < 2 {
+            continue;
+        }
+        for (pi, (x, y)) in pairs.into_iter().enumerate() {
+            if pi == 0 {
+                continue;
+            }
+            b.edges.push(ed.clone());
+            let nid = b.edges.len() - 1;
+            for (fi, li, k) in [x, y] {
+                b.faces[fi].loops[li][k].edge = nid;
+            }
+        }
+    }
+}
+
 /// Groups faces into shells by shared edges and shells into solids (outer shells and voids).
 pub fn assemble_shells(b: &mut Body) -> Result<()> {
+    split_nonmanifold(b);
     let ef = b.edge_faces();
     let nf = b.faces.len();
     let mut comp = vec![usize::MAX; nf];
