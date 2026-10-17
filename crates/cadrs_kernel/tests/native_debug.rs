@@ -358,3 +358,100 @@ fn debug_loft_match() {
     let r = native::boolean::boolean_bodies(&a, &b, BoolOp::Union);
     eprintln!("union: {:?} in {:?}", r.as_ref().map(|r| (r.body.faces.len(), r.body.solids.len())).map_err(|e| e.to_string()), t.elapsed());
 }
+
+#[test]
+fn debug_d_chamfer() {
+    use std::f64::consts::PI;
+    let mut k = NativeKernel::new();
+    let d_loop = Loop { curves: vec![Curve2::Arc { center: p(0., 0.), radius: 10.0, start_angle: 0.0, sweep: PI, source: None }, Curve2::Line { a: p(-10., 0.), b: p(10., 0.), source: None }] };
+    let d = k.extrude(&Profile::new(Plane::top(), vec![reg(d_loop)]), Extent::Blind(10.0)).unwrap().bodies[0];
+    let straight = k.edges(d).unwrap().into_iter().find(|e| e.curve == CurveKind::Line && (e.length - 10.0).abs() < 1e-9 && e.start.x > 0.0).unwrap().id;
+    let r = k.chamfer_with(d, &[straight], &ChamferOpts::new(ChamferSpec::EqualDistance(2.0)));
+    match r { Ok(r) => eprintln!("D chamfer vol {} (D {}) solids {}", k.mass_properties(r.bodies[0]).unwrap().volume, k.mass_properties(d).unwrap().volume, k.solid_count(r.bodies[0]).unwrap()), Err(e) => eprintln!("err {e}") }
+}
+
+#[test]
+fn debug_width_chain() {
+    use std::f64::consts::PI;
+    let mut k = NativeKernel::new();
+    let l = |a, b| Curve2::Line { a, b, source: None };
+    let ar = |c, r, s, w| Curve2::Arc { center: c, radius: r, start_angle: s, sweep: w, source: None };
+    let rounded = Loop { curves: vec![
+        l(p(10., 0.), p(50., 0.)), ar(p(50., 10.), 10.0, -PI / 2.0, PI / 2.0), l(p(60., 10.), p(60., 30.)), ar(p(50., 30.), 10.0, 0.0, PI / 2.0),
+        l(p(50., 40.), p(10., 40.)), ar(p(10., 30.), 10.0, PI / 2.0, PI / 2.0), l(p(0., 30.), p(0., 10.)), ar(p(10., 10.), 10.0, PI, PI / 2.0),
+    ] };
+    let plate = k.extrude(&Profile::new(Plane::top(), vec![reg(rounded)]), Extent::Blind(20.0)).unwrap().bodies[0];
+    let front = Plane { origin: Point3::origin(), x_dir: Vector3::x_axis(), normal: -Vector3::y_axis() };
+    let poly = |pts: &[Point2<f64>]| Loop { curves: (0..pts.len()).map(|i| l(pts[i], pts[(i + 1) % pts.len()])).collect() };
+    let wedge = k.extrude(&Profile::new(front, vec![reg(poly(&[p(-10., 7.5), p(70., 27.5), p(70., 40.), p(-10., 40.)]))]), Extent::Symmetric(200.0)).unwrap().bodies[0];
+    let cut = k.boolean(BoolOp::Subtract, plate, &[wedge]).unwrap().bodies[0];
+    let v_cut = k.mass_properties(cut).unwrap().volume;
+    {
+        let b = k.get(cut).unwrap();
+        eprintln!("cut: vol {v_cut} solids {} faces {} check {:?}", b.solids.len(), b.faces.len(), b.check());
+        let small = k.extrude(&Profile::new(Plane::top(), vec![reg(rect(20., 15., 30., 25.))]), Extent::Blind(30.0)).unwrap().bodies[0];
+        let r = k.boolean(BoolOp::Subtract, cut, &[small]);
+        eprintln!("cut − small box: {:?}", r.map(|r| k.mass_properties(r.bodies[0]).unwrap().volume));
+    }
+    let slope = k.faces(cut).unwrap().into_iter().find(|f| f.plane.is_some_and(|pl| pl.normal.x < -0.1 && pl.normal.z > 0.5)).unwrap().id;
+    let e0 = k.edges(cut).unwrap().into_iter().find(|e| e.faces.contains(&Some(slope))).unwrap().id;
+    let chain = k.tangent_chain(cut, e0).unwrap();
+    let infos = k.edges(cut).unwrap();
+    let spec = FilletSpec { size: FilletSize::Width(3.0), ..FilletSpec::radius(1.0) };
+    for e in &chain {
+        let i = &infos[e.0 as usize];
+        let body = k.get(cut).unwrap().clone();
+        let tool = native::blend::edge_tool(&body, cut, e.0 as usize, &|phi: f64| native::blend::SectionKind::Circle { r: 3.0 / (2.0 * (phi / 2.0).sin()) }, false);
+        let tv = tool.as_ref().map(|t| native::mass::body_mass(&t.body).volume).map_err(|e| e.to_string());
+        eprintln!("edge {:?} {:?} len {:.3}: tool vol {:?}", e, i.curve, i.length, tv);
+        if let Ok(t) = tool {
+            if std::env::var("ONLY_FIRST").is_ok() && e.0 != 3 { continue; }
+            if std::env::var("SKIP_SINGLE").is_ok() { continue; }
+            eprintln!("   tool check {:?} solids {}", t.body.check(), t.body.solids.len());
+            match native::boolean::boolean_bodies(&body, &t.body, BoolOp::Subtract) {
+                Ok(r) => eprintln!("   removed {:.4} solids {}", v_cut - native::mass::body_mass(&r.body).volume, r.body.solids.len()),
+                Err(er) => eprintln!("   err {er}"),
+            }
+        }
+    }
+    let _ = (v_cut, spec);
+    {
+        let body = k.get(cut).unwrap().clone();
+        // The chain as (edge, forward) in order: walk it.
+        let ch: Vec<(usize, bool)> = {
+            let mut v: Vec<(usize, bool)> = Vec::new();
+            let es: Vec<usize> = chain.iter().map(|e| e.0 as usize).collect();
+            // start: an edge whose start vertex touches no other chain edge
+            let touches = |vx: usize, skip: usize| es.iter().any(|&o| o != skip && body.edges[o].v.contains(&vx));
+            let mut cur = es.iter().copied().find(|&e| !touches(body.edges[e].v[0], e)).map(|e| (e, true)).or_else(|| es.iter().copied().find(|&e| !touches(body.edges[e].v[1], e)).map(|e| (e, false))).unwrap();
+            v.push(cur);
+            loop {
+                let end = if cur.1 { body.edges[cur.0].v[1] } else { body.edges[cur.0].v[0] };
+                let Some(n) = es.iter().copied().find(|&o| !v.iter().any(|x| x.0 == o) && body.edges[o].v.contains(&end)) else { break };
+                cur = (n, body.edges[n].v[0] == end);
+                v.push(cur);
+            }
+            v
+        };
+        let t = native::blend::chain_tool(&body, cut, &ch, &|phi: f64| native::blend::SectionKind::Circle { r: 3.0 / (2.0 * (phi / 2.0).sin()) }, false, (0.0, 1.0), (true, true)).unwrap();
+        eprintln!("chain tool: vol {} solids {} check {:?}", native::mass::body_mass(&t.body).volume, t.body.solids.len(), t.body.check().len());
+        for (ei, e) in t.body.edges.iter().enumerate() {
+            if e.degenerate { continue; }
+            let mut worst: f64 = f64::INFINITY;
+            let mut best_face = 0;
+            for (fi, f) in body.faces.iter().enumerate() {
+                let w = (0..=20).map(|i| f.surf.distance(&e.point(e.t[0] + (e.t[1] - e.t[0]) * i as f64 / 20.0))).fold(0.0f64, f64::max);
+                if w < worst { worst = w; best_face = fi; }
+            }
+            eprintln!("  tool edge {ei}: nearest body surface {best_face} max dev {worst:.3e}");
+        }
+    }
+    let mk = || -> Box<dyn Fn(f64) -> native::blend::SectionKind> { Box::new(|phi: f64| native::blend::SectionKind::Circle { r: 3.0 / (2.0 * (phi / 2.0).sin()) }) };
+    for n in 1..=chain.len() {
+        let list: Vec<(EdgeId, Box<dyn Fn(f64) -> native::blend::SectionKind>, bool)> = chain[..n].iter().map(|e| (*e, mk(), false)).collect();
+        match native::blend::blend(&mut k, cut, &list, false) {
+            Ok(r) => eprintln!("chain[..{n}]: removed {:.4}", v_cut - k.mass_properties(r.bodies[0]).unwrap().volume),
+            Err(er) => eprintln!("chain[..{n}]: err {er}"),
+        }
+    }
+}

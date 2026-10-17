@@ -16,9 +16,11 @@ use super::kernel::NativeKernel;
 use super::math::*;
 use super::nurbs::NurbsCurve;
 use super::profile::{MergedFace, Piece, Src};
+#[allow(unused_imports)]
+use super::profile;
 use super::surface::Surface;
 use super::sweep::{self, Prism, Revolve};
-use super::topo::{co_range, Body};
+use super::topo::{co_range, Body, Face};
 use crate::*;
 
 /// What each face of a body continues: an input face, or a new face with an origin.
@@ -234,6 +236,11 @@ pub struct Tool {
 /// Builds the tool of one edge. `kind_at` gives the section for the edge's faces' angle
 /// (normals φ apart) and which face is first.
 pub fn edge_tool(b: &Body, input: BodyId, e: usize, kind: &dyn Fn(f64) -> SectionKind, swap: bool) -> Result<Tool> {
+    edge_tool_range(b, input, e, kind, swap, (0.0, 1.0), (true, true))
+}
+
+/// The tool over the fraction `range` of the edge, extended past the ends where `extend` says.
+pub fn edge_tool_range(b: &Body, input: BodyId, e: usize, kind: &dyn Fn(f64) -> SectionKind, swap: bool, range: (f64, f64), extend: (bool, bool)) -> Result<Tool> {
     let ed = &b.edges[e];
     if ed.degenerate {
         return Err(KernelError::InvalidParameter("A degenerate edge can't be blended".into()));
@@ -266,7 +273,9 @@ pub fn edge_tool(b: &Body, input: BodyId, e: usize, kind: &dyn Fn(f64) -> Sectio
             let ext = size * 2.0 + 1.0;
             let mf = MergedFace { outer: lp, holes: vec![], regions: vec![u64::MAX] };
             let kind_ = Prism { plane, dir: t };
-            let built = sweep::sweep_full(&[mf], &[], &kind_, -ext, len + ext, false, true)?;
+            let s0 = range.0 * len - if extend.0 { ext } else { 0.0 };
+            let s1 = range.1 * len + if extend.1 { ext } else { 0.0 };
+            let built = sweep::sweep_full(&[mf], &[], &kind_, s0, s1, false, true)?;
             let src = tool_src(&built);
             let ends = corner_info(b, ed, &n1, &n2, &w1, &w2, section);
             Ok(Tool { body: built.body, src, convex, ends })
@@ -280,7 +289,7 @@ pub fn edge_tool(b: &Body, input: BodyId, e: usize, kind: &dyn Fn(f64) -> Sectio
                 _ => s.axis().is_some_and(|(o, z)| z.cross(&axis_dir).norm() < 1e-9 && (o - c).cross(&axis_dir).norm() < 1e-7),
             };
             if !coaxial(f1) || !coaxial(f2) {
-                return Err(KernelError::Unsupported("blends of this edge (only straight edges between planes and circular rims)"));
+                return edge_tool_general(b, input, e, kind, swap, range, extend);
             }
             let q = ed.point(ed.t[0]);
             let t = ed.curve.tangent(ed.t[0]).normalize();
@@ -300,18 +309,21 @@ pub fn edge_tool(b: &Body, input: BodyId, e: usize, kind: &dyn Fn(f64) -> Sectio
             let kind_ = Revolve { plane, f };
             let closed = ed.closed();
             let span = (ed.t[1] - ed.t[0]).abs();
-            let (s0, s1, whole) = if closed { (0.0, TAU, true) } else {
-                // The angle the edge turns about the axis, from q.
+            let whole_range = range.0 <= 0.0 && range.1 >= 1.0;
+            let (s0, s1, whole) = if closed && whole_range { (0.0, TAU, true) } else {
+                // The angles the edge turns about the axis, from q.
                 let sgn = if t.dot(&f.y) > 0.0 { 1.0 } else { -1.0 };
-                let ext = 0.2f64.min((TAU - span) / 2.0 - 1e-3).max(0.0);
-                if sgn > 0.0 { (-ext, span + ext, false) } else { (-span - ext, ext, false) }
+                let room = if closed { 0.0 } else { (TAU - span) / 2.0 - 1e-3 };
+                let ext = 0.2f64.min(room).max(0.0);
+                let (a, c) = (range.0 * span - if extend.0 { ext } else { 0.0 }, range.1 * span + if extend.1 { ext } else { 0.0 });
+                if sgn > 0.0 { (a, c, false) } else { (-c, -a, false) }
             };
             let built = sweep::sweep_full(&[mf], &[], &kind_, s0, s1, whole, true)?;
             let src = tool_src(&built);
             let z = (q, V3::zeros(), V3::zeros());
             Ok(Tool { body: built.body, src, convex, ends: [z, z] })
         }
-        _ => Err(KernelError::Unsupported("blends of this edge (only straight edges between planes and circular rims)")),
+        _ => edge_tool_general(b, input, e, kind, swap, range, extend),
     }
 }
 
@@ -531,57 +543,161 @@ pub fn blend(k: &mut NativeKernel, body: BodyId, edges: &[(EdgeId, Box<dyn Fn(f6
     let mut cur = Tracked::of(b.clone());
     let mut radius_at: std::collections::HashMap<usize, f64> = Default::default();
     let mut corner_vertices: Vec<usize> = Vec::new();
+    // Tangent chains of picked edges (two picked edges meeting tangentially at a vertex, and
+    // nothing else picked there): one tool each.
+    let tangent_out = |e: usize, v: usize| -> V3 {
+        let ed = &b.edges[e];
+        if ed.v[0] == v { -ed.curve.tangent(ed.t[0]).normalize() } else { ed.curve.tangent(ed.t[1]).normalize() }
+    };
+    let continues = |e: usize, v: usize| -> Option<usize> {
+        let at = at_vertex.get(&v)?;
+        let others: Vec<usize> = at.iter().copied().filter(|&o| o != e).collect();
+        if others.len() != 1 {
+            return None;
+        }
+        let o = others[0];
+        // Tangent: this edge's direction out of v equals the other's direction into it.
+        (tangent_out(e, v).dot(&-tangent_out(o, v)) > 1.0 - 1e-6).then_some(o)
+    };
+    let mut in_chain = vec![false; b.edges.len()];
+    let mut chain_tools: Vec<(Vec<(usize, bool)>, usize)> = Vec::new(); // (chain, index of the spec)
+    for (k, (e, _, _)) in edges.iter().enumerate() {
+        let e = e.0 as usize;
+        if in_chain[e] || b.edges[e].closed() {
+            continue;
+        }
+        // Walk back to the chain's start, then forwards.
+        let mut start = (e, true);
+        let mut seen = vec![e];
+        loop {
+            let (ce, fwd) = start;
+            let v = if fwd { b.edges[ce].v[0] } else { b.edges[ce].v[1] };
+            let Some(o) = continues(ce, v) else { break };
+            if seen.contains(&o) {
+                break;
+            }
+            seen.push(o);
+            let ofwd = b.edges[o].v[1] == v;
+            start = (o, ofwd);
+        }
+        let mut chain = vec![start];
+        loop {
+            let (ce, fwd) = *chain.last().unwrap();
+            let v = if fwd { b.edges[ce].v[1] } else { b.edges[ce].v[0] };
+            let Some(o) = continues(ce, v) else { break };
+            if chain.iter().any(|c| c.0 == o) {
+                break;
+            }
+            chain.push((o, b.edges[o].v[0] == v));
+        }
+        // Only chains with an edge the exact tools can't take (the exact tools are better
+        // wherever they apply).
+        let exact = |e: usize| -> bool {
+            let ed = &b.edges[e];
+            let Ok([s1, s2]) = edge_sides(&b, e) else { return false };
+            let (f1, f2) = (&b.faces[s1.0].surf, &b.faces[s2.0].surf);
+            match &ed.curve {
+                Curve::Line { .. } => matches!(f1, Surface::Plane { .. }) && matches!(f2, Surface::Plane { .. }),
+                Curve::Circle { c, x, y, .. } => {
+                    let axis = x.cross(y).normalize();
+                    let coax = |s: &Surface| match s {
+                        Surface::Plane { f } => f.x.cross(&f.y).cross(&axis).norm() < 1e-9,
+                        _ => s.axis().is_some_and(|(o, z)| z.cross(&axis).norm() < 1e-9 && (o - c).cross(&axis).norm() < 1e-7),
+                    };
+                    coax(f1) && coax(f2)
+                }
+                _ => false,
+            }
+        };
+        if chain.len() > 1 && chain.iter().any(|c| !exact(c.0)) {
+            for c in &chain {
+                in_chain[c.0] = true;
+            }
+            chain_tools.push((chain, k));
+        }
+    }
+    for (chain, k) in &chain_tools {
+        let (_, kind, swap) = &edges[*k];
+        for &(e, _) in chain {
+            check_fits(&b, e, kind.as_ref())?;
+        }
+        let tool = chain_tool(&b, body, chain, kind.as_ref(), *swap, (0.0, 1.0), (true, true))?;
+        let op = if tool.convex { BoolOp::Subtract } else { BoolOp::Union };
+        cur = cur.apply(&tool.body, &tool.src, op)?;
+    }
     for (e, kind, swap) in edges {
+        if in_chain[e.0 as usize] {
+            continue;
+        }
         let e = e.0 as usize;
         let ed = b.edges[e].clone();
-        let tool = edge_tool(&b, body, e, kind.as_ref(), *swap)?;
+        // How each end meets the other picked edges there.
+        let tangent_at = |end: usize| -> V3 {
+            let tv = ed.curve.tangent(ed.t[end]).normalize();
+            if end == 0 { -tv } else { tv } // away from the edge at this end
+        };
+        let other_dir = |o: usize, v: usize| -> V3 {
+            let oe = &b.edges[o];
+            if oe.v[0] == v {
+                oe.curve.tangent(oe.t[0]).normalize()
+            } else {
+                -oe.curve.tangent(oe.t[1]).normalize()
+            }
+        };
+        let mut extend = (true, true);
+        let mut plans: Vec<(usize, usize, Vec<usize>)> = Vec::new(); // (end, vertex, others)
+        for (end, v) in ed.v.iter().enumerate() {
+            if ed.closed() {
+                continue;
+            }
+            let others: Vec<usize> = at_vertex.get(v).map(|x| x.iter().copied().filter(|&o| o != e).collect()).unwrap_or_default();
+            // A tangent-continuing neighbour: no extension; the tools meet square to the edges.
+            if others.len() == 1 && tangent_at(end).dot(&other_dir(others[0], *v)) > 1.0 - 1e-6 {
+                if end == 0 {
+                    extend.0 = false;
+                } else {
+                    extend.1 = false;
+                }
+                continue;
+            }
+            plans.push((end, *v, others));
+        }
+        let tool = edge_tool_range(&b, body, e, kind.as_ref(), *swap, (0.0, 1.0), extend)?;
         // The section's contact points must lie on the faces (the blend fits).
         check_fits(&b, e, kind.as_ref())?;
         let (mut tb, mut ts) = (tool.body, tool.src);
-        if let Curve::Line { d, .. } = &ed.curve {
-            let t = d.normalize();
-            for (end, v) in ed.v.iter().enumerate() {
-                let others: Vec<usize> = at_vertex.get(v).map(|x| x.iter().copied().filter(|&o| o != e).collect()).unwrap_or_default();
-                let p = b.verts[*v].p;
-                let out = if end == 0 { -t } else { t }; // away from the edge at this end
-                match others.len() {
-                    0 => {}
-                    1 => {
-                        // Miter with the other edge: the bisector plane of the two directions.
-                        let o = &b.edges[others[0]];
-                        let od = match &o.curve {
-                            Curve::Line { d, .. } => {
-                                let d = d.normalize();
-                                if o.v[0] == *v { d } else { -d }
-                            }
-                            _ => continue,
-                        };
-                        // The plane through p bisecting the angle between −out (along this edge)
-                        // and od (along the other): normal (out + od) normalized... the half
-                        // space beyond keeps the other's side.
-                        // The plane through p bisecting the two edges; its normal points to the
-                        // other edge's side, which is cut away.
-                        let n = (out + od).normalize();
-                        let (nb, ns) = trim_tool(&tb, &ts, p, n)?;
+        for (end, v, others) in plans {
+            let p = b.verts[v].p;
+            let out = tangent_at(end);
+            match others.len() {
+                0 => {}
+                1 => {
+                    // Miter: the plane through p bisecting the two edges; its normal points to
+                    // the other edge's side, which is cut away.
+                    let od = other_dir(others[0], v);
+                    let n = out + od;
+                    if n.norm() < 1e-9 {
+                        continue;
+                    }
+                    let (nb, ns) = trim_tool(&tb, &ts, p, n.normalize())?;
+                    tb = nb;
+                    ts = ns;
+                }
+                2 if corners && matches!(ed.curve, Curve::Line { .. }) => {
+                    // Three fillets: stop square to the edge at the ball centre.
+                    if let SectionKind::Circle { r } = kind(PI / 2.0) {
+                        radius_at.insert(v, r);
+                        if !corner_vertices.contains(&v) {
+                            corner_vertices.push(v);
+                        }
+                        let c = ball_centre(&b, v, r).unwrap_or(p);
+                        let along = (c - p).dot(&out);
+                        let (nb, ns) = trim_tool(&tb, &ts, p + out * along, out)?;
                         tb = nb;
                         ts = ns;
                     }
-                    2 if corners => {
-                        // Three fillets: stop square to the edge at the ball centre.
-                        if let SectionKind::Circle { r } = kind(PI / 2.0) {
-                            radius_at.insert(*v, r);
-                            if !corner_vertices.contains(v) {
-                                corner_vertices.push(*v);
-                            }
-                            let c = ball_centre(&b, *v, r).unwrap_or(p);
-                            let along = (c - p).dot(&out);
-                            let (nb, ns) = trim_tool(&tb, &ts, p + out * along, out)?;
-                            tb = nb;
-                            ts = ns;
-                        }
-                    }
-                    _ => {}
                 }
+                _ => {}
             }
         }
         // A concave tool adds material: cut its extensions off at the end faces (or square to
@@ -908,4 +1024,369 @@ pub fn full_round(k: &mut NativeKernel, body: BodyId, side1: FaceId, center: Fac
         return Err(KernelError::InvalidParameter("The side faces are too shallow for the full round".into()));
     }
     Ok(out.into_result(k, body))
+}
+
+
+/// A partial fillet (PS14.6): the whole fillet's tool between the planes square to the edge at
+/// the fractions `from` and `to`; at an end of the edge with no tangent neighbour the tool runs
+/// past the vertex, as the whole fillet does.
+pub fn fillet_partial(k: &mut NativeKernel, body: BodyId, edge: EdgeId, spec: &FilletSpec, from: f64, to: f64) -> Result<OpResult> {
+    if !(0.0..=1.0).contains(&from) || !(0.0..=1.0).contains(&to) || to <= from + 1e-9 {
+        return Err(KernelError::InvalidParameter("A partial fillet needs 0 ≤ from < to ≤ 1".into()));
+    }
+    let b = (**k.get(body)?).clone();
+    let e = edge.0 as usize;
+    if e >= b.edges.len() {
+        return Err(KernelError::InvalidParameter(format!("unknown {edge:?}")));
+    }
+    let chain = k.tangent_chain(body, edge)?;
+    let ed = b.edges[e].clone();
+    // An end at a vertex with a tangent neighbour stops square to the edge there.
+    let tangent_at = |v: usize| chain.iter().any(|c| c.0 as usize != e && b.edges[c.0 as usize].v.contains(&v));
+    let extend = (from <= 0.0 && !tangent_at(ed.v[0]) && !ed.closed(), to >= 1.0 && !tangent_at(ed.v[1]) && !ed.closed());
+    let spec = *spec;
+    let kind = move |phi: f64| fillet_section(&spec, phi);
+    check_fits(&b, e, &kind)?;
+    let tool = edge_tool_range(&b, body, e, &kind, false, (from, to), extend)?;
+    // The tool's caps (square to the edge at the bounds) become the fillet's end faces.
+    let mut src = tool.src.clone();
+    let mut caps = Vec::new();
+    for (fi, f) in tool.body.faces.iter().enumerate() {
+        if src[fi].is_empty() {
+            if let Surface::Plane { f: fr } = &f.surf {
+                let n = fr.x.cross(&fr.y);
+                let t = ed.curve.tangent(ed.mid_t()).normalize();
+                if n.cross(&t).norm() < 1e-6 || matches!(ed.curve, Curve::Circle { .. }) {
+                    caps.push(fi);
+                }
+            }
+        }
+    }
+    // Which cap is at the start: nearer the edge's start point.
+    let p0 = ed.point(ed.t[0] + (ed.t[1] - ed.t[0]) * from);
+    let mut caps_d: Vec<(usize, f64)> = caps.iter().map(|&fi| (fi, (super::mass::face_area(&tool.body, fi).1 - p0).norm())).collect();
+    caps_d.sort_by(|a, c| a.1.total_cmp(&c.1));
+    if let Some(&(f, _)) = caps_d.first() {
+        if !extend.0 {
+            src[f].push(FaceSrc::New(Origin::StartCap { region: 0 }));
+        }
+    }
+    if caps_d.len() > 1 {
+        let f = caps_d.last().unwrap().0;
+        if !extend.1 {
+            src[f].push(FaceSrc::New(Origin::EndCap { region: 0 }));
+        }
+    }
+    let cur = Tracked::of(b);
+    let op = if tool.convex { BoolOp::Subtract } else { BoolOp::Union };
+    let out = cur.apply(&tool.body, &src, op)?;
+    Ok(out.into_result(k, body))
+}
+
+/// A variable fillet: circular sections whose radius follows a law along each edge, lofted
+/// through sections at the law's points (and past the edge's ends).
+pub fn fillet_variable(k: &mut NativeKernel, body: BodyId, laws: &[FilletLaw], _allow_overflow: bool) -> Result<OpResult> {
+    let b = (**k.get(body)?).clone();
+    let mut cur = Tracked::of(b.clone());
+    for law in laws {
+        let e = law.edge.0 as usize;
+        if e >= b.edges.len() || law.radii.is_empty() {
+            return Err(KernelError::InvalidParameter("unknown edge or empty law".into()));
+        }
+        if law.radii.iter().any(|(_, r)| !(*r > 0.0)) {
+            return Err(KernelError::InvalidParameter("A fillet radius must be positive".into()));
+        }
+        let ed = b.edges[e].clone();
+        let Curve::Line { d, .. } = &ed.curve else {
+            return Err(KernelError::Unsupported("variable fillets of curved edges"));
+        };
+        let [s1, s2] = edge_sides(&b, e)?;
+        if !matches!(b.faces[s1.0].surf, Surface::Plane { .. }) || !matches!(b.faces[s2.0].surf, Surface::Plane { .. }) {
+            return Err(KernelError::Unsupported("variable fillets between curved faces"));
+        }
+        let mut pts: Vec<(f64, f64)> = law.radii.clone();
+        pts.sort_by(|a, c| a.0.total_cmp(&c.0));
+        if pts.len() == 1 {
+            pts = vec![(0.0, pts[0].1), (1.0, pts[0].1)];
+        }
+        if pts[0].0 > 0.0 {
+            pts.insert(0, (0.0, pts[0].1));
+        }
+        if pts.last().unwrap().0 < 1.0 {
+            let r = pts.last().unwrap().1;
+            pts.push((1.0, r));
+        }
+        let t = d.normalize();
+        let len = (ed.t[1] - ed.t[0]) * d.norm();
+        let p_start = ed.point(ed.t[0]);
+        let (n1, w1) = face_dirs(&b, s1.0, e, s1.1, ed.mid_t());
+        let (n2, w2) = face_dirs(&b, s2.0, e, s2.1, ed.mid_t());
+        let convex = w2.dot(&n1) < 0.0;
+        let _ = n2;
+        let x = w1;
+        let y = t.cross(&x);
+        let to2 = |v: &V3| V2::new(v.dot(&x), v.dot(&y));
+        let corner = Corner2 { u1: to2(&w1).normalize(), u2: to2(&w2).normalize(), convex };
+        let rmax = pts.iter().map(|p| p.1).fold(0.0, f64::max);
+        let ext = rmax * 4.0 + 1.0;
+        // Sections: the law's points, and one past each end with the end radius.
+        let mut stations: Vec<(f64, f64)> = vec![(-ext, pts[0].1)];
+        stations.extend(pts.iter().map(|(f, r)| (f * len, *r)));
+        stations.push((len + ext, pts.last().unwrap().1));
+        let mut sections = Vec::new();
+        for (s, r) in &stations {
+            let o = p_start + t * *s;
+            let plane = Plane { origin: o, x_dir: nalgebra::Unit::new_normalize(x), normal: nalgebra::Unit::new_normalize(t) };
+            let (lp, _, _) = section_loop(&corner, SectionKind::Circle { r: *r }, Src::Edge { body: body.0, edge: e as u64 })?;
+            // Back to sketch curves: line, arc, line (all sections the same shape).
+            let curves: Vec<Curve2> = lp.iter().map(piece_to_curve2).collect::<Option<Vec<_>>>().ok_or_else(|| KernelError::Unsupported("this variable fillet section"))?;
+            sections.push(LoftSection::Profile(Profile::new(plane, vec![Region { outer: Loop { curves }, holes: vec![], source: Some(e as u64) }])));
+        }
+        let mut tk = NativeKernel::new();
+        let lr = super::loft_build::loft_with(&mut tk, &LoftSpec { body: BodyKind::Solid, sections, start: LoftEnd::default(), end: LoftEnd::default(), source: 0 })?;
+        let tool = (**tk.get(lr.bodies[0])?).clone();
+        // The face swept by the arcs is the fillet face.
+        let mut src = vec![Vec::new(); tool.faces.len()];
+        for (f, o) in &lr.history.generated {
+            if let Origin::ProfileCurve { curve, .. } = o {
+                // The arc is the second curve of each section loop.
+                if *curve == unsourced_curve(0, 1) || matches!(tool.faces[f.0 as usize].surf, Surface::Nurbs(_)) && is_arc_face(&tool, f.0 as usize) {
+                    src[f.0 as usize].push(FaceSrc::New(Origin::FromEdge { body, edge: EdgeId(e as u64) }));
+                }
+            }
+        }
+        cur = cur.apply(&tool, &src, if convex { BoolOp::Subtract } else { BoolOp::Union })?;
+    }
+    Ok(cur.into_result(k, body))
+}
+
+/// A loft face that isn't flat (the one the arcs swept).
+fn is_arc_face(b: &Body, f: usize) -> bool {
+    let face = &b.faces[f];
+    let (u0, v0) = (0.5, 0.5);
+    let d = face.surf.d2(u0, v0);
+    d[3].norm() > 1e-9
+}
+
+/// A 2D piece as a sketch curve (lines and arcs).
+fn piece_to_curve2(p: &Piece) -> Option<Curve2> {
+    let pt = |q: P3| nalgebra::Point2::new(q.x, q.y);
+    match &p.c {
+        Curve::Line { .. } => Some(Curve2::Line { a: p.start(), b: p.end(), source: None }),
+        Curve::Circle { c, x, y, r } => {
+            let a0 = {
+                let q = p.c.point(if p.rev { p.t1 } else { p.t0 }) - c;
+                q.y.atan2(q.x)
+            };
+            let orient = x.cross(y).z.signum();
+            let sweep = (p.t1 - p.t0) * if p.rev { -1.0 } else { 1.0 } * orient;
+            Some(Curve2::Arc { center: pt(*c), radius: *r, start_angle: a0, sweep, source: None })
+        }
+        _ => None,
+    }
+}
+
+
+/// The outward signed distance of a point from a face's surface.
+fn out_dist(f: &Face, p: &P3) -> (f64, V3, P3) {
+    let (u, v) = f.surf.project(p, None);
+    let q = f.surf.eval(u, v);
+    let n = f.surf.normal(u, v) * if f.sense { 1.0 } else { -1.0 };
+    ((p - q).dot(&n), n, q)
+}
+
+/// A point on the face's surface `dist` along the face from `p`, in the plane through `p`
+/// square to `t`, starting along `w` (marching along the section curve).
+fn along_face(f: &Face, p: &P3, t: &V3, w: &V3, dist: f64) -> P3 {
+    let steps = 64;
+    let h = dist / steps as f64;
+    let mut q = *p;
+    let mut dir = *w;
+    for _ in 0..steps {
+        let mut x = q + dir * h;
+        // Back onto the surface and into the plane.
+        for _ in 0..4 {
+            let (u, v) = f.surf.project(&x, None);
+            x = f.surf.eval(u, v);
+            x -= t * (x - p).dot(t);
+        }
+        let step = x - q;
+        if step.norm() > 1e-15 {
+            dir = step.normalize();
+        }
+        q = x;
+    }
+    q
+}
+
+/// A blend tool for any edge between two faces: at samples along the edge (and past its ends)
+/// the section is solved on the exact surfaces (the rolling ball's centre at r inside both faces
+/// in the plane square to the edge, or the chamfer's contact points `d` along each face), and
+/// the line–curve–line sections are lofted.
+pub fn edge_tool_general(b: &Body, input: BodyId, e: usize, kind: &dyn Fn(f64) -> SectionKind, swap: bool, range: (f64, f64), extend: (bool, bool)) -> Result<Tool> {
+    chain_tool(b, input, &[(e, true)], kind, swap, range, extend)
+}
+
+/// One blend tool along a chain of edges (each run forwards or backwards), so a tangent chain's
+/// blend is one smooth tool with no joints. On each edge the first face is the one whose loop
+/// runs along the chain (swapped when `swap`); `range` and `extend` apply to the chain's ends.
+pub fn chain_tool(b: &Body, input: BodyId, chain: &[(usize, bool)], kind: &dyn Fn(f64) -> SectionKind, swap: bool, range: (f64, f64), extend: (bool, bool)) -> Result<Tool> {
+    // Faces of each edge: (first, second) with their coedge directions.
+    let mut sides: Vec<[(usize, bool); 2]> = Vec::new();
+    for &(e, fwd) in chain {
+        let [a, c] = edge_sides(b, e)?;
+        let (mut s1, mut s2) = if a.1 == fwd { (a, c) } else { (c, a) };
+        if swap {
+            std::mem::swap(&mut s1, &mut s2);
+        }
+        sides.push([s1, s2]);
+    }
+    let e0 = chain[0].0;
+    let ed0 = &b.edges[e0];
+    let tm = ed0.mid_t();
+    let (n1m, _) = face_dirs(b, sides[0][0].0, e0, sides[0][0].1, tm);
+    let (_, w2m) = face_dirs(b, sides[0][1].0, e0, sides[0][1].1, tm);
+    let convex = w2m.dot(&n1m) < 0.0;
+    let lens: Vec<f64> = chain.iter().map(|&(e, _)| b.edges[e].curve.length(b.edges[e].t[0], b.edges[e].t[1])).collect();
+    let len: f64 = lens.iter().sum();
+    // Stations: (edge index in the chain, fraction along it in the chain's direction).
+    let size_guess0 = match kind(PI / 2.0) {
+        SectionKind::Circle { r } | SectionKind::Conic { r, .. } | SectionKind::Curvature { r, .. } => r,
+        SectionKind::Chamfer { d1, d2 } => d1.max(d2),
+        SectionKind::Asymmetric { r1, r2 } => r1.max(r2),
+    };
+    let ext_len = size_guess0 * 2.0 + 0.5;
+    let mut stations: Vec<(usize, f64)> = Vec::new();
+    let (ra, rb) = (range.0 * len, range.1 * len);
+    let total_lo = ra - if extend.0 { ext_len } else { 0.0 };
+    let total_hi = rb + if extend.1 { ext_len } else { 0.0 };
+    let n_total = (((total_hi - total_lo) / 1.5).ceil() as usize).clamp(8, 160);
+    let mut acc = 0.0;
+    let starts: Vec<f64> = lens.iter().map(|l| { let s0 = acc; acc += l; s0 }).collect();
+    for i in 0..=n_total {
+        let s = total_lo + (total_hi - total_lo) * i as f64 / n_total as f64;
+        // Which edge: clamp into the chain (extensions run on the end edges' curves).
+        let mut k = starts.iter().rposition(|&st| st <= s).unwrap_or(0);
+        if k >= chain.len() {
+            k = chain.len() - 1;
+        }
+        let f = (s - starts[k]) / lens[k].max(1e-300);
+        stations.push((k, f));
+    }
+    // Also a station exactly at each joint.
+    for k in 1..chain.len() {
+        let sj = starts[k];
+        if sj > total_lo && sj < total_hi {
+            stations.push((k, 0.0));
+        }
+    }
+    stations.sort_by(|a, c| (starts[a.0] + a.1 * lens[a.0]).total_cmp(&(starts[c.0] + c.1 * lens[c.0])));
+    stations.dedup_by(|a, c| ((starts[a.0] + a.1 * lens[a.0]) - (starts[c.0] + c.1 * lens[c.0])).abs() < 1e-6);
+    let mut sections = Vec::new();
+    for &(k, fr) in &stations {
+    let (e, fwd) = chain[k];
+    let ed = &b.edges[e];
+    let [s1, s2] = sides[k];
+    let (f1, f2) = (&b.faces[s1.0], &b.faces[s2.0]);
+    {
+        let fr = if fwd { fr } else { 1.0 - fr };
+        let t = ed.t[0] + (ed.t[1] - ed.t[0]) * fr;
+        let p = ed.curve.point(t);
+        let tan = ed.curve.tangent(t).normalize() * if fwd { 1.0 } else { -1.0 };
+        // The faces' outward normals and directions into them square to the edge at p (the
+        // surfaces continue past the faces' boundaries for the extensions).
+        let dirs = |f: &Face, co_fwd: bool| -> (V3, V3) {
+            let (u, v) = f.surf.project(&p, None);
+            let nrm = f.surf.normal(u, v) * if f.sense { 1.0 } else { -1.0 };
+            let d = tan * if co_fwd == fwd { 1.0 } else { -1.0 };
+            (nrm, nrm.cross(&d))
+        };
+        let (n1, w1) = dirs(f1, s1.1);
+        let (n2, w2) = dirs(f2, s2.1);
+        let phi = n1.dot(&n2).clamp(-1.0, 1.0).acos();
+        let theta = w1.dot(&w2).clamp(-1.0, 1.0).acos();
+        let section = kind(phi);
+        let (c1, c2, curve): (P3, P3, Curve2Section) = match section {
+            SectionKind::Circle { r } => {
+                // Ball centre: r inside both faces (outside for a concave edge), in the plane.
+                let s = if convex { -1.0 } else { 1.0 };
+                let bis = (w1 + w2).normalize();
+                let mut x = p + bis * (r / (theta / 2.0).sin());
+                for _ in 0..50 {
+                    let (d1, g1, _) = out_dist(f1, &x);
+                    let (d2, g2, _) = out_dist(f2, &x);
+                    // Solve d1 = s r, d2 = s r, (x − p)·tan = 0.
+                    let m = nalgebra::Matrix3::from_rows(&[g1.transpose(), g2.transpose(), tan.transpose()]);
+                    let rhs = V3::new(s * r - d1, s * r - d2, -(x - p).dot(&tan));
+                    let Some(inv) = m.try_inverse() else { break };
+                    let dx = inv * rhs;
+                    x += dx;
+                    if dx.norm() < 1e-13 {
+                        break;
+                    }
+                }
+                let (_, _, q1) = out_dist(f1, &x);
+                let (_, _, q2) = out_dist(f2, &x);
+                (q1, q2, Curve2Section::Arc(x, r))
+            }
+            SectionKind::Chamfer { d1, d2 } => (along_face(f1, &p, &tan, &w1, d1), along_face(f2, &p, &tan, &w2, d2), Curve2Section::Line),
+            _ => return Err(KernelError::InvalidParameter("Conic, curvature and asymmetric fillets work on straight edges between flat faces".into())),
+        };
+        // The section's plane: through the contacts and the corner.
+        let nrm = (c1 - p).cross(&(c2 - p));
+        if nrm.norm() < 1e-12 {
+            return Err(KernelError::OperationFailed("the blend's section degenerates along the edge".into()));
+        }
+        let nrm = nrm.normalize();
+        let xd = (c1 - p).normalize();
+        let plane = Plane { origin: p, x_dir: nalgebra::Unit::new_normalize(xd), normal: nalgebra::Unit::new_normalize(nrm) };
+        let yd = plane.y_dir().into_inner();
+        let to2 = |q: &P3| nalgebra::Point2::new((q - p).dot(&xd), (q - p).dot(&yd));
+        let (q1, q2) = (to2(&c1), to2(&c2));
+        let bis = (q1.coords.normalize() + q2.coords.normalize()).normalize();
+        let size = q1.coords.norm().max(q2.coords.norm());
+        let pc = nalgebra::Point2::origin() - bis * (size * 0.5 + 1e-3);
+        let (mid, q1, q2): (Curve2, nalgebra::Point2<f64>, nalgebra::Point2<f64>) = match curve {
+            Curve2Section::Line => (Curve2::Line { a: q1, b: q2, source: Some(1) }, q1, q2),
+            Curve2Section::Arc(center, _r) => {
+                let cc = to2(&center);
+                let r = ((q1 - cc).norm() + (q2 - cc).norm()) * 0.5;
+                let a1 = (q1.y - cc.y).atan2(q1.x - cc.x);
+                let a2 = (q2.y - cc.y).atan2(q2.x - cc.x);
+                // The short way round.
+                let mut sw = a2 - a1;
+                while sw > PI {
+                    sw -= TAU;
+                }
+                while sw < -PI {
+                    sw += TAU;
+                }
+                let arc = Curve2::Arc { center: cc, radius: r, start_angle: a1, sweep: sw, source: Some(1) };
+                // The lines run to the arc's own ends.
+                let (s, e) = (arc.start(), arc.end());
+                (arc, s, e)
+            }
+        };
+        let curves = vec![Curve2::Line { a: pc, b: q1, source: Some(0) }, mid, Curve2::Line { a: q2, b: pc, source: Some(2) }];
+        sections.push(LoftSection::Profile(Profile::new(plane, vec![Region { outer: Loop { curves }, holes: vec![], source: Some(0) }])));
+    }
+    }
+    let e = e0;
+    let mut tk = NativeKernel::new();
+    let lr = super::loft_build::loft_with(&mut tk, &LoftSpec { body: BodyKind::Solid, sections, start: LoftEnd::default(), end: LoftEnd::default(), source: 0 })?;
+    let body = (**tk.get(lr.bodies[0])?).clone();
+    let mut src = vec![Vec::new(); body.faces.len()];
+    for (f, o) in &lr.history.generated {
+        if let Origin::ProfileCurve { curve: 1, .. } = o {
+            src[f.0 as usize].push(FaceSrc::New(Origin::FromEdge { body: input, edge: EdgeId(e as u64) }));
+        }
+    }
+    let z = (P3::origin(), V3::zeros(), V3::zeros());
+    Ok(Tool { body, src, convex, ends: [z, z] })
+}
+
+#[derive(Debug, Clone, Copy)]
+enum Curve2Section {
+    Line,
+    Arc(P3, f64),
 }

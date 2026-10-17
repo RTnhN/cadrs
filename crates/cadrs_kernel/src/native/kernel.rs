@@ -369,6 +369,14 @@ impl Kernel for NativeKernel {
         super::offset_round::shell(self, body, spec)
     }
 
+    fn fillet_partial(&mut self, body: BodyId, edge: EdgeId, spec: &FilletSpec, from: f64, to: f64) -> Result<OpResult> {
+        super::blend::fillet_partial(self, body, edge, spec, from, to)
+    }
+
+    fn fillet_variable(&mut self, body: BodyId, laws: &[FilletLaw], allow_overflow: bool) -> Result<OpResult> {
+        super::blend::fillet_variable(self, body, laws, allow_overflow)
+    }
+
     fn full_round(&mut self, body: BodyId, side1: FaceId, center: FaceId, side2: FaceId) -> Result<OpResult> {
         super::blend::full_round(self, body, side1, center, side2)
     }

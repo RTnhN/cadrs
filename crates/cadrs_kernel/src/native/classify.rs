@@ -124,6 +124,9 @@ pub fn ray_surface(s: &Surface, o: &P3, d: &V3, tmin: f64, tmax: f64) -> Vec<(f6
                 }
             }
         }
+        Surface::Nurbs(_) | Surface::Revolution { .. } => {
+            return ray_parametric(s, o, d);
+        }
         _ => {
             // Implicit along the ray where available, else sampled distance with projection.
             let n = 400;
@@ -176,6 +179,80 @@ pub fn ray_surface(s: &Surface, o: &P3, d: &V3, tmin: f64, tmax: f64) -> Vec<(f6
         out.push((t, u, v));
     }
     // Torus: the quadric cases above miss it; handled by the sampled branch.
+    out
+}
+
+/// Line–surface hits on a parametric surface: the ray against a triangulated grid of the
+/// surface's parameter box, each hit refined by Newton on S(u, v) = o + t·d.
+fn ray_parametric(s: &Surface, o: &P3, d: &V3) -> Vec<(f64, f64, f64)> {
+    let ((u0, u1), (v0, v1)) = match s {
+        Surface::Revolution { m, .. } => ((0.0, TAU), m.nurbs_range().unwrap_or((-1e3, 1e3))),
+        _ => s.param_box(),
+    };
+    let n = 32;
+    let at = |i: usize, j: usize| (u0 + (u1 - u0) * i as f64 / n as f64, v0 + (v1 - v0) * j as f64 / n as f64);
+    let mut grid = vec![P3::origin(); (n + 1) * (n + 1)];
+    for i in 0..=n {
+        for j in 0..=n {
+            let (u, v) = at(i, j);
+            grid[i * (n + 1) + j] = s.eval(u, v);
+        }
+    }
+    let mut out: Vec<(f64, f64, f64)> = Vec::new();
+    let tri = |a: &P3, b: &P3, c: &P3| -> Option<(f64, f64, f64)> {
+        // Möller–Trumbore with a small margin; returns (t, β, γ).
+        let (e1, e2) = (b - a, c - a);
+        let h = d.cross(&e2);
+        let det = e1.dot(&h);
+        if det.abs() < 1e-300 {
+            return None;
+        }
+        let f = 1.0 / det;
+        let sv = o - a;
+        let bu = f * sv.dot(&h);
+        let q = sv.cross(&e1);
+        let bv = f * d.dot(&q);
+        let m = 0.05;
+        if bu < -m || bv < -m || bu + bv > 1.0 + m {
+            return None;
+        }
+        Some((f * e2.dot(&q), bu, bv))
+    };
+    for i in 0..n {
+        for j in 0..n {
+            let (p00, p10, p01, p11) = (grid[i * (n + 1) + j], grid[(i + 1) * (n + 1) + j], grid[i * (n + 1) + j + 1], grid[(i + 1) * (n + 1) + j + 1]);
+            let (ua, va) = at(i, j);
+            let (ub, vb) = at(i + 1, j + 1);
+            for (k, (a, b, c)) in [(p00, p10, p11), (p00, p11, p01)].into_iter().enumerate() {
+                let Some((t, bu, bv)) = tri(&a, &b, &c) else { continue };
+                // Seed (u, v) inside the cell.
+                let (mut u, mut v) = if k == 0 { (ua + (ub - ua) * (bu + bv), va + (vb - va) * bv) } else { (ua + (ub - ua) * bu, va + (vb - va) * (bu + bv)) };
+                let mut tt = t;
+                let mut ok = false;
+                for _ in 0..30 {
+                    let (q, su, sv) = s.d1(u, v);
+                    let r = q - (o + d * tt);
+                    if r.norm() < 1e-12 {
+                        ok = true;
+                        break;
+                    }
+                    let m = nalgebra::Matrix3::from_columns(&[su, sv, -d]);
+                    let Some(inv) = m.try_inverse() else { break };
+                    let dx = inv * (-r);
+                    u += dx.x;
+                    v += dx.y;
+                    tt += dx.z;
+                    if dx.norm() < 1e-14 {
+                        ok = (s.eval(u, v) - (o + d * tt)).norm() < 1e-9;
+                        break;
+                    }
+                }
+                if ok && !out.iter().any(|(x, ..)| (x - tt).abs() < 1e-9) {
+                    out.push((tt, u, v));
+                }
+            }
+        }
+    }
     out
 }
 

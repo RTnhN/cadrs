@@ -284,6 +284,23 @@ fn tangent_along_shared_edge(pool: &Pool, fa: &WFace, fb: &WFace, ea: &[usize], 
     if analytic(&fa.surf) && analytic(&fb.surf) {
         return false;
     }
+    // A boundary edge of one face lying on the other's surface with the two tangent along it
+    // (a blend's contact curve on the face it blends into).
+    // (Also a boundary edge lying on the other surface where the face leaves it: a blend
+    // tool's strip meeting the face it blends along its contact curve. The edge is imprinted
+    // exactly; contouring would only find it again, inexactly.)
+    let tangent_on = |edges: &[usize], _f: &WFace, g: &WFace| -> bool {
+        edges.iter().any(|&x| {
+            let e = &pool.edges[x];
+            !e.degenerate && (e.t[1] - e.t[0]).abs() > 0.0 && edge_on_surface(e, &g.surf) && {
+                let l = e.curve.length(e.t[0], e.t[1]);
+                l > 1e-3
+            }
+        })
+    };
+    if tangent_on(eb, fb, fa) || tangent_on(ea, fa, fb) {
+        return true;
+    }
     for &x in ea {
         let e = &pool.edges[x];
         if e.degenerate {
@@ -600,6 +617,8 @@ fn run(a: &Body, b: &Body, mode: Mode) -> Result<BoolOut> {
     prof.mark("edge-edge");
     // 2c. Edge–face intersections.
     let mut face_pts: Vec<Vec<usize>> = vec![Vec::new(); faces.len()];
+    // Edges of one body lying on a face of the other (imprinted as cuts once split).
+    let mut on_face: Vec<Vec<usize>> = vec![Vec::new(); faces.len()];
     for e in 0..ne {
         if pool.edges[e].degenerate {
             continue;
@@ -611,6 +630,9 @@ fn run(a: &Body, b: &Body, mode: Mode) -> Result<BoolOut> {
             }
             let ed = pool.edges[e].clone();
             if edge_on_surface(&ed, &faces[fi].surf) {
+                if !on_face[fi].contains(&e) {
+                    on_face[fi].push(e);
+                }
                 continue;
             }
             for t in ssi::curve_surface(&ed.curve, ed.t[0], ed.t[1], &faces[fi].surf) {
@@ -828,6 +850,21 @@ fn run(a: &Body, b: &Body, mode: Mode) -> Result<BoolOut> {
                     if ok {
                         canon[g[j]] = g[i];
                     }
+                }
+            }
+        }
+    }
+    // Edges lying on a face (not on its boundary) imprint it.
+    for fi in 0..faces.len() {
+        for &e in &on_face[fi].clone() {
+            for &pe in &pieces[e] {
+                let ed = &pool.edges[pe];
+                if ed.degenerate {
+                    continue;
+                }
+                let pm = ed.curve.point((ed.t[0] + ed.t[1]) * 0.5);
+                if point_in_face(&faces[fi], &pm, VTOL) == InFace::Inside && !cuts[fi].contains(&pe) {
+                    cuts[fi].push(pe);
                 }
             }
         }
