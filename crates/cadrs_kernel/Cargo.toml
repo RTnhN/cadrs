@@ -12,6 +12,8 @@ serde.workspace = true
 uuid.workspace = true
 opencascade = { workspace = true, optional = true }
 glam = { workspace = true, optional = true }
+rayon.workspace = true
+spade = "2.15"
 
 [features]
 default = []

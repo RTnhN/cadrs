@@ -2169,6 +2169,26 @@ dependencies = [
 ]
 
 [[package]]
+name = "cadrs_gpu"
+version = "0.1.5"
+dependencies = [
+ "bytemuck",
+ "cadrs_gpu_kernels",
+ "futures-lite",
+ "rayon",
+ "wgpu",
+]
+
+[[package]]
+name = "cadrs_gpu_kernels"
+version = "0.1.5"
+dependencies = [
+ "glam 0.33.9",
+ "libm",
+ "spirv-std",
+]
+
+[[package]]
 name = "cadrs_harness"
 version = "0.1.5"
 dependencies = [
@@ -2196,7 +2216,9 @@ dependencies = [
  "glam 0.24.2",
  "nalgebra",
  "opencascade",
+ "rayon",
  "serde",
+ "spade",
  "uuid",
 ]
 

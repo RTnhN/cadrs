@@ -1,0 +1,503 @@
+//! `NativeKernel`: the pure-Rust backend of [`crate::Kernel`].
+
+use std::collections::HashMap;
+use std::sync::{Arc, OnceLock};
+
+use nalgebra::Point3;
+
+use super::build::{self, Built};
+use super::classify;
+use super::curve::Curve;
+use super::math::*;
+use super::profile;
+use super::surface::Surface;
+use super::tess;
+use super::topo::Body;
+use crate::*;
+
+/// A body in the session, with lazily derived data.
+pub struct Entry {
+    pub body: Arc<Body>,
+    polys: OnceLock<Vec<Vec<Vec<P2>>>>,
+}
+
+impl Entry {
+    pub fn new(body: Body) -> Self {
+        Self { body: Arc::new(body), polys: OnceLock::new() }
+    }
+    pub fn polys(&self) -> &Vec<Vec<Vec<P2>>> {
+        self.polys.get_or_init(|| self.body.faces.iter().map(|f| classify::face_polygons(&self.body, f)).collect())
+    }
+}
+
+#[derive(Default)]
+pub struct NativeKernel {
+    bodies: HashMap<u64, Entry>,
+    next: u64,
+}
+
+impl NativeKernel {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn entry(&self, id: BodyId) -> Result<&Entry> {
+        self.bodies.get(&id.0).ok_or(KernelError::UnknownBody(id))
+    }
+
+    pub fn get(&self, id: BodyId) -> Result<&Arc<Body>> {
+        Ok(&self.entry(id)?.body)
+    }
+
+    pub fn insert(&mut self, body: Body) -> BodyId {
+        let id = self.next;
+        self.next += 1;
+        self.bodies.insert(id, Entry::new(body));
+        BodyId(id)
+    }
+
+    pub fn insert_result(&mut self, b: Built) -> OpResult {
+        let mut history = History::default();
+        for (f, o) in &b.origins {
+            history.generated.push((FaceId(*f as u64), *o));
+        }
+        let id = self.insert(b.body);
+        OpResult { bodies: vec![id], history }
+    }
+
+    /// Extent of a body along a unit direction from a point: (min, max) of (p − o)·d.
+    pub fn extent_along(&self, body: BodyId, o: &P3, d: &V3) -> Result<(f64, f64)> {
+        let b = self.get(body)?;
+        Ok(extent_along(b, o, d))
+    }
+}
+
+/// Exact extent of the body's edges along `d` (and of its curved faces' interior extremes).
+pub fn extent_along(b: &Body, o: &P3, d: &V3) -> (f64, f64) {
+    let mut lo = f64::INFINITY;
+    let mut hi = f64::NEG_INFINITY;
+    let mut add = |x: f64| {
+        lo = lo.min(x);
+        hi = hi.max(x);
+    };
+    for v in &b.verts {
+        add((v.p - o).dot(d));
+    }
+    for e in &b.edges {
+        if e.degenerate {
+            continue;
+        }
+        match &e.curve {
+            Curve::Line { .. } => {}
+            Curve::Circle { c, x, y, r } => {
+                // Stationary points of r(cos t x·d + sin t y·d).
+                let (a, bb) = (x.dot(d) * r, y.dot(d) * r);
+                let t = bb.atan2(a);
+                for tt in [t, t + PI] {
+                    let tt = super::curve::clamp_periodic(tt, e.t[0], e.t[1]);
+                    add((e.point(tt) - o).dot(d));
+                }
+                let _ = c;
+            }
+            Curve::Ellipse { x, y, a, b: bb, .. } => {
+                let (p, q) = (x.dot(d) * a, y.dot(d) * bb);
+                let t = q.atan2(p);
+                for tt in [t, t + PI] {
+                    let tt = super::curve::clamp_periodic(tt, e.t[0], e.t[1]);
+                    add((e.point(tt) - o).dot(d));
+                }
+            }
+            Curve::Nurbs(_) => {
+                let n = 64;
+                let mut best = (f64::INFINITY, f64::NEG_INFINITY, e.t[0], e.t[0]);
+                for i in 0..=n {
+                    let t = e.t[0] + (e.t[1] - e.t[0]) * i as f64 / n as f64;
+                    let x = (e.point(t) - o).dot(d);
+                    if x < best.0 {
+                        best.0 = x;
+                        best.2 = t;
+                    }
+                    if x > best.1 {
+                        best.1 = x;
+                        best.3 = t;
+                    }
+                }
+                for t0 in [best.2, best.3] {
+                    // Newton on C'(t)·d = 0.
+                    let mut t = t0;
+                    for _ in 0..20 {
+                        let (_, d1, d2) = e.curve.d2(t);
+                        let f = d1.dot(d);
+                        let df = d2.dot(d);
+                        if df.abs() < 1e-300 {
+                            break;
+                        }
+                        t = (t - f / df).clamp(e.t[0], e.t[1]);
+                    }
+                    add((e.point(t) - o).dot(d));
+                }
+            }
+        }
+    }
+    // Interior extremes of curved faces: where the normal is ±d.
+    for (fi, f) in b.faces.iter().enumerate() {
+        if matches!(f.surf, Surface::Plane { .. }) {
+            continue;
+        }
+        for cand in face_extremes(b, fi, d) {
+            add((cand - o).dot(d));
+        }
+    }
+    (lo, hi)
+}
+
+/// Points of a face's interior where its normal is parallel to `d` (candidates for extremes).
+fn face_extremes(b: &Body, fi: usize, d: &V3) -> Vec<P3> {
+    let f = &b.faces[fi];
+    let polys = classify::face_polygons(b, f);
+    let mut out = Vec::new();
+    let mut ub = (f64::INFINITY, f64::NEG_INFINITY);
+    let mut vb = (f64::INFINITY, f64::NEG_INFINITY);
+    for p in &polys {
+        for q in p {
+            ub = (ub.0.min(q.x), ub.1.max(q.x));
+            vb = (vb.0.min(q.y), vb.1.max(q.y));
+        }
+    }
+    if !ub.0.is_finite() {
+        return out;
+    }
+    let n = 8;
+    for i in 0..=n {
+        for j in 0..=n {
+            let (mut u, mut v) = (ub.0 + (ub.1 - ub.0) * i as f64 / n as f64, vb.0 + (vb.1 - vb.0) * j as f64 / n as f64);
+            // Newton on (S_u·d, S_v·d) = 0.
+            let mut ok = false;
+            for _ in 0..30 {
+                let s = f.surf.d2(u, v);
+                let (gu, gv) = (s[1].dot(d), s[2].dot(d));
+                let (a, bb, c) = (s[3].dot(d), s[4].dot(d), s[5].dot(d));
+                let Some((du, dv)) = solve2(a, bb, bb, c, -gu, -gv) else { break };
+                u += du;
+                v += dv;
+                if du.abs() + dv.abs() < 1e-13 {
+                    ok = true;
+                    break;
+                }
+            }
+            if ok && u >= ub.0 - 1e-9 && u <= ub.1 + 1e-9 && v >= vb.0 - 1e-9 && v <= vb.1 + 1e-9 {
+                if classify::in_face(&polys, &f.surf, P2::new(u, v), 1e-9) != classify::InFace::Outside {
+                    out.push(f.surf.eval(u, v));
+                }
+            }
+        }
+    }
+    out
+}
+
+fn curve_kind(e: &super::topo::Edge) -> CurveKind {
+    if e.degenerate {
+        return CurveKind::Degenerate;
+    }
+    match e.curve {
+        Curve::Line { .. } => CurveKind::Line,
+        Curve::Circle { .. } => CurveKind::Circle,
+        Curve::Ellipse { .. } => CurveKind::Ellipse,
+        Curve::Nurbs(_) => CurveKind::Other,
+    }
+}
+
+pub fn face_info(b: &Body, fi: usize) -> FaceInfo {
+    let f = &b.faces[fi];
+    let (area, center) = super::mass::face_area(b, fi);
+    let plane = match &f.surf {
+        Surface::Plane { f: fr } => {
+            let n = fr.x.cross(&fr.y) * if f.sense { 1.0 } else { -1.0 };
+            Some(Plane { origin: fr.o, x_dir: nalgebra::Unit::new_normalize(fr.x), normal: nalgebra::Unit::new_normalize(n) })
+        }
+        _ => None,
+    };
+    let axis = f.surf.axis().map(|(o, d)| Axis { origin: o, dir: nalgebra::Unit::new_normalize(d) });
+    let radius = match &f.surf {
+        Surface::Cylinder { r, .. } | Surface::Sphere { r, .. } | Surface::Cone { r, .. } => Some(*r),
+        Surface::Torus { rmaj, .. } => Some(*rmaj),
+        _ => None,
+    };
+    FaceInfo { id: FaceId(fi as u64), kind: f.surf.kind(), plane, area, center, axis, radius }
+}
+
+pub fn edge_infos(b: &Body) -> Vec<EdgeInfo> {
+    let ef = b.edge_faces();
+    b.edges
+        .iter()
+        .enumerate()
+        .map(|(ei, e)| {
+            let faces = match ef[ei].as_slice() {
+                [] => [None, None],
+                [a] => [Some(FaceId(*a as u64)), None],
+                [a, b, ..] => [Some(FaceId(*a as u64)), Some(FaceId(*b as u64))],
+            };
+            let (t0, t1) = (e.t[0], e.t[1]);
+            let tan = |t: f64| {
+                let d = e.curve.tangent(t);
+                let l = d.norm();
+                if l > 0.0 { d / l } else { d }
+            };
+            let circle = match &e.curve {
+                Curve::Circle { c, x, y, r } if !e.degenerate => Some(Circle3 { center: *c, normal: nalgebra::Unit::new_normalize(x.cross(y)), radius: *r }),
+                _ => None,
+            };
+            EdgeInfo {
+                id: EdgeId(ei as u64),
+                faces,
+                length: if e.degenerate { 0.0 } else { e.curve.length(t0, t1) },
+                curve: curve_kind(e),
+                start: b.verts[e.v[0]].p,
+                end: b.verts[e.v[1]].p,
+                mid: if e.degenerate { b.verts[e.v[0]].p } else { e.point(e.mid_t()) },
+                start_tangent: tan(t0),
+                end_tangent: tan(t1),
+                circle,
+            }
+        })
+        .collect()
+}
+
+/// Copies the listed faces (with the edges and vertices they use) into a new body; returns it
+/// and the new index of each listed face.
+pub fn subset(b: &Body, faces: &[usize], closed: bool) -> Body {
+    let mut out = Body::default();
+    let mut vmap: HashMap<usize, usize> = HashMap::new();
+    let mut emap: HashMap<usize, usize> = HashMap::new();
+    for &fi in faces {
+        let mut f = b.faces[fi].clone();
+        for l in &mut f.loops {
+            for c in l.iter_mut() {
+                let ne = *emap.entry(c.edge).or_insert_with(|| {
+                    let mut e = b.edges[c.edge].clone();
+                    for k in 0..2 {
+                        let ov = e.v[k];
+                        e.v[k] = *vmap.entry(ov).or_insert_with(|| {
+                            out.verts.push(b.verts[ov].clone());
+                            out.verts.len() - 1
+                        });
+                    }
+                    out.edges.push(e);
+                    out.edges.len() - 1
+                });
+                c.edge = ne;
+            }
+        }
+        out.faces.push(f);
+    }
+    out.shells.push(super::topo::Shell { faces: (0..faces.len()).collect(), closed });
+    if closed {
+        out.solids.push(super::topo::Solid { shells: vec![0] });
+    }
+    out
+}
+
+impl Kernel for NativeKernel {
+    fn name(&self) -> &'static str {
+        "native"
+    }
+
+    fn extrude(&mut self, profile: &Profile, extent: Extent) -> Result<OpResult> {
+        let n = profile.plane.normal.into_inner();
+        let (s0, s1) = match extent {
+            Extent::Blind(d) => (0.0, d),
+            Extent::Symmetric(d) => (-d.abs() / 2.0, d.abs() / 2.0),
+            Extent::TwoSided { forward, backward } => (-backward, forward),
+        };
+        let (dir, s0, s1) = if s1 >= s0 { (n, s0, s1) } else { (-n, -s0, -s1) };
+        let regions = profile::regions(profile)?;
+        if regions.is_empty() {
+            return Err(KernelError::InvalidProfile("no regions".into()));
+        }
+        let faces = profile::merge_regions(&regions)?;
+        let b = build::prism(&profile.plane, &faces, dir, s0, s1)?;
+        Ok(self.insert_result(b))
+    }
+
+    fn extrude_with(&mut self, profile: &Profile, spec: &ExtrudeSpec) -> Result<OpResult> {
+        super::features::extrude_with(self, profile, spec)
+    }
+
+    fn revolve(&mut self, profile: &Profile, axis: Axis, angle: f64) -> Result<OpResult> {
+        let spec = RevolveSpec { full: angle.abs() >= TAU - 1e-12, ..RevolveSpec::solid(axis, Some(angle)) };
+        self.revolve_with(profile, &spec)
+    }
+
+    fn revolve_with(&mut self, profile: &Profile, spec: &RevolveSpec) -> Result<OpResult> {
+        super::features::revolve_with(self, profile, spec)
+    }
+
+    fn boolean(&mut self, op: BoolOp, target: BodyId, tools: &[BodyId]) -> Result<OpResult> {
+        super::boolean::boolean(self, op, target, tools)
+    }
+
+    fn transform(&mut self, body: BodyId, t: &Transform) -> Result<OpResult> {
+        self.transform_motion(body, &Motion::from_isometry(t))
+    }
+
+    fn transform_motion(&mut self, body: BodyId, motion: &Motion) -> Result<OpResult> {
+        let m = motion.linear;
+        if (m.transpose() * m - nalgebra::Matrix3::identity()).norm() > 1e-9 {
+            return Err(KernelError::InvalidParameter("The motion must be a rotation or a reflection (no scaling or shear)".into()));
+        }
+        let b = self.get(body)?.transformed(&Affine { m, t: motion.translation });
+        let nf = b.faces.len();
+        let id = self.insert(b);
+        let history = History { modified: (0..nf).map(|i| (FaceId(i as u64), InputFace { body, face: FaceId(i as u64) })).collect(), ..Default::default() };
+        Ok(OpResult { bodies: vec![id], history })
+    }
+
+    fn scale(&mut self, body: BodyId, center: Point3<f64>, factor: f64) -> Result<OpResult> {
+        if factor <= 0.0 {
+            return Err(KernelError::InvalidParameter("The scale must be positive".into()));
+        }
+        let m = nalgebra::Matrix3::identity() * factor;
+        let b = self.get(body)?.transformed(&Affine { m, t: center.coords - m * center.coords });
+        let nf = b.faces.len();
+        let id = self.insert(b);
+        let history = History { modified: (0..nf).map(|i| (FaceId(i as u64), InputFace { body, face: FaceId(i as u64) })).collect(), ..Default::default() };
+        Ok(OpResult { bodies: vec![id], history })
+    }
+
+    fn compound(&mut self, bodies: &[BodyId]) -> Result<OpResult> {
+        if bodies.is_empty() {
+            return Err(KernelError::InvalidParameter("A composite needs at least one body".into()));
+        }
+        let mut out = Body::default();
+        let mut history = History::default();
+        for &b in bodies {
+            let src = self.get(b)?.clone();
+            let (_, _, fo) = out.append(&src);
+            for i in 0..src.faces.len() {
+                history.modified.push((FaceId((fo + i) as u64), InputFace { body: b, face: FaceId(i as u64) }));
+            }
+        }
+        let id = self.insert(out);
+        Ok(OpResult { bodies: vec![id], history })
+    }
+
+    fn split_solids(&mut self, body: BodyId) -> Result<Vec<OpResult>> {
+        let b = self.get(body)?.clone();
+        let mut out = Vec::new();
+        let groups: Vec<(Vec<usize>, bool)> = if b.solids.is_empty() {
+            b.shells.iter().map(|s| (s.faces.clone(), false)).collect()
+        } else {
+            (0..b.solids.len()).map(|s| (b.solid_faces(s), true)).collect()
+        };
+        for (faces, closed) in groups {
+            let mut nb = subset(&b, &faces, closed);
+            // Keep the void shells of the solid.
+            if closed && b.solids.len() == 1 && b.solids[0].shells.len() > 1 {
+                nb.shells.clear();
+                nb.solids.clear();
+                let mut k = 0;
+                let mut sh = Vec::new();
+                for &s in &b.solids[0].shells {
+                    let n = b.shells[s].faces.len();
+                    nb.shells.push(super::topo::Shell { faces: (k..k + n).collect(), closed: true });
+                    sh.push(nb.shells.len() - 1);
+                    k += n;
+                }
+                nb.solids.push(super::topo::Solid { shells: sh });
+            }
+            let history = History {
+                modified: faces.iter().enumerate().map(|(i, f)| (FaceId(i as u64), InputFace { body, face: FaceId(*f as u64) })).collect(),
+                ..Default::default()
+            };
+            let id = self.insert(nb);
+            out.push(OpResult { bodies: vec![id], history });
+        }
+        Ok(out)
+    }
+
+    fn classify(&self, body: BodyId, point: Point3<f64>, tol: f64) -> Result<PointClass> {
+        let e = self.entry(body)?;
+        Ok(classify::classify_point(&e.body, e.polys(), &point, tol))
+    }
+
+    fn release(&mut self, body: BodyId) {
+        self.bodies.remove(&body.0);
+    }
+
+    fn faces(&self, body: BodyId) -> Result<Vec<FaceInfo>> {
+        let b = self.get(body)?;
+        use rayon::prelude::*;
+        Ok((0..b.faces.len()).into_par_iter().map(|i| face_info(b, i)).collect())
+    }
+
+    fn edges(&self, body: BodyId) -> Result<Vec<EdgeInfo>> {
+        Ok(edge_infos(self.get(body)?))
+    }
+
+    fn vertices(&self, body: BodyId) -> Result<Vec<VertexInfo>> {
+        let b = self.get(body)?;
+        let mut edges: Vec<Vec<EdgeId>> = vec![Vec::new(); b.verts.len()];
+        for (ei, e) in b.edges.iter().enumerate() {
+            for v in e.v {
+                if !edges[v].contains(&EdgeId(ei as u64)) {
+                    edges[v].push(EdgeId(ei as u64));
+                }
+            }
+        }
+        Ok(b.verts
+            .iter()
+            .enumerate()
+            .filter(|(i, _)| !edges[*i].is_empty())
+            .enumerate()
+            .map(|(k, (i, v))| VertexInfo { id: VertexId(k as u64), point: v.p, edges: edges[i].clone() })
+            .collect())
+    }
+
+    fn mass_properties(&self, body: BodyId) -> Result<MassProperties> {
+        Ok(super::mass::body_mass(self.get(body)?))
+    }
+
+    fn tessellate(&self, body: BodyId, quality: Tessellation) -> Result<TriMesh> {
+        let b = self.get(body)?;
+        let (faces, es) = tess::mesh_body(b, quality.deflection, quality.angle);
+        let mut m = TriMesh::default();
+        for (fi, fm) in faces.into_iter().enumerate() {
+            let base = m.positions.len() as u32;
+            m.positions.extend(fm.positions);
+            m.normals.extend(fm.normals);
+            for t in fm.indices {
+                m.indices.push([t[0] + base, t[1] + base, t[2] + base]);
+                m.triangle_faces.push(FaceId(fi as u64));
+            }
+        }
+        for (ei, (_, pts)) in es.into_iter().enumerate() {
+            if b.edges[ei].degenerate {
+                continue;
+            }
+            m.edges.push((EdgeId(ei as u64), pts));
+        }
+        Ok(m)
+    }
+
+    fn solid_count(&self, body: BodyId) -> Result<usize> {
+        Ok(self.get(body)?.solids.len())
+    }
+
+    fn bounding_box(&self, body: BodyId) -> Result<Aabb> {
+        let b = self.get(body)?;
+        let o = P3::origin();
+        let (x0, x1) = extent_along(b, &o, &V3::x());
+        let (y0, y1) = extent_along(b, &o, &V3::y());
+        let (z0, z1) = extent_along(b, &o, &V3::z());
+        Ok(Aabb { min: P3::new(x0, y0, z0), max: P3::new(x1, y1, z1) })
+    }
+
+    fn ray_hits(&self, body: BodyId, origin: Point3<f64>, dir: nalgebra::Vector3<f64>) -> Result<Vec<RayHit>> {
+        let e = self.entry(body)?;
+        let d = dir.normalize();
+        Ok(classify::ray_hits(&e.body, e.polys(), &origin, &d)
+            .into_iter()
+            .map(|(t, f, p)| RayHit { face: FaceId(f as u64), t, point: p })
+            .collect())
+    }
+}

@@ -7,6 +7,7 @@
 pub mod backend;
 pub mod exchange;
 pub mod loft;
+pub mod native;
 pub mod naming;
 pub mod projection;
 pub mod thin;

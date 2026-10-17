@@ -3262,3 +3262,5 @@ macro_rules! conformance {
 
 #[cfg(feature = "occt")]
 conformance!(occt, cadrs_kernel::backend::occt::OcctKernel::new());
+
+conformance!(native, cadrs_kernel::backend::native::NativeKernel::new());
