@@ -463,6 +463,72 @@ pub fn boolean_bodies(a: &Body, b: &Body, op: BoolOp) -> Result<BoolOut> {
     run(a, b, Mode::Bool(op))
 }
 
+/// Gives B-spline faces of `a` that lie (within 2 × [`VTOL`]) on a plane or cylinder face of
+/// `b` that surface, with their p-curves and sense recomputed. True when any changed.
+fn snap_to(a: &mut Body, b: &Body) -> bool {
+    let mut changed = false;
+    let targets: Vec<(usize, Bbox)> = b
+        .faces
+        .iter()
+        .enumerate()
+        .filter(|(_, f)| matches!(f.surf, Surface::Plane { .. } | Surface::Cylinder { .. }))
+        .map(|(i, _)| (i, super::kernel::subset(b, &[i], false).bbox().grow(1e-3)))
+        .collect();
+    if targets.is_empty() {
+        return false;
+    }
+    for fi in 0..a.faces.len() {
+        let Surface::Nurbs(ns) = &a.faces[fi].surf else { continue };
+        let ((u0, u1), (v0, v1)) = ns.range();
+        let s = a.faces[fi].surf.clone();
+        let n = 16;
+        let pts: Vec<P3> = (0..=n).flat_map(|i| (0..=n).map(move |j| (i, j))).map(|(i, j)| s.eval(u0 + (u1 - u0) * i as f64 / n as f64, v0 + (v1 - v0) * j as f64 / n as f64)).collect();
+        let mut fb = Bbox::empty();
+        for p in &pts {
+            fb.add(p);
+        }
+        for &(ti, ref tb) in &targets {
+            if !tb.overlaps(&fb) {
+                continue;
+            }
+            let t = &b.faces[ti].surf;
+            if std::env::var("CADRS_SNAP_DEBUG").is_ok() {
+                let dev = pts.iter().filter_map(|p| t.signed_distance(p)).map(f64::abs).fold(0.0, f64::max);
+                eprintln!("snap? face {fi} onto {ti} ({:?}): deviation {dev:e}", t.kind());
+            }
+            if pts.iter().any(|p| t.signed_distance(p).is_none_or(|d| d.abs() > 2.0 * VTOL)) {
+                continue;
+            }
+            // Between the samples too.
+            let fine = 64;
+            let ok = (0..fine).all(|i| (0..fine).all(|j| {
+                let p = s.eval(u0 + (u1 - u0) * (i as f64 + 0.5) / fine as f64, v0 + (v1 - v0) * (j as f64 + 0.5) / fine as f64);
+                t.signed_distance(&p).is_some_and(|d| d.abs() <= 2.0 * VTOL)
+            }));
+            if !ok {
+                continue;
+            }
+            let mid = s.eval(0.5 * (u0 + u1), 0.5 * (v0 + v1));
+            let near = t.project(&mid, None);
+            let edges = a.edges.clone();
+            for l in &mut a.faces[fi].loops {
+                for co in l.iter_mut() {
+                    let e = &edges[co.edge];
+                    co.pc = super::pcurve::pcurve(t, &e.curve, e.t[0], e.t[1], Some(P2::new(near.0, near.1)));
+                }
+            }
+            a.faces[fi].surf = t.clone();
+            super::build::fix_senses(a, [fi]);
+            if std::env::var("CADRS_BOOL_DEBUG").is_ok() {
+                eprintln!("snapped face {fi} onto the other body's face {ti} ({:?})", t.kind());
+            }
+            changed = true;
+            break;
+        }
+    }
+    changed
+}
+
 /// What to do with the split faces.
 #[derive(Debug, Clone)]
 pub enum Mode {
@@ -477,6 +543,19 @@ pub fn imprint(a: &Body, b: &Body, faces: Option<Vec<usize>>) -> Result<BoolOut>
 }
 
 fn run(a: &Body, b: &Body, mode: Mode) -> Result<BoolOut> {
+    // B-spline faces lying on an analytic face of the other body (within the tolerance:
+    // approximated sweeps along helices, lofts of circles) take its exact surface, so the two
+    // are imprinted as coincident instead of intersected nearly tangentially.
+    let (sa, sb);
+    let (a, b) = {
+        let mut a2 = a.clone();
+        let mut b2 = b.clone();
+        let ca = snap_to(&mut a2, b);
+        let cb = snap_to(&mut b2, a);
+        sa = a2;
+        sb = b2;
+        (if ca { &sa } else { a }, if cb { &sb } else { b })
+    };
     let op = match &mode {
         Mode::Bool(op) => *op,
         Mode::Imprint(_) => BoolOp::Subtract,
@@ -1097,6 +1176,10 @@ fn run(a: &Body, b: &Body, mode: Mode) -> Result<BoolOut> {
     super::unify::merge_edges(&mut out);
     prof.mark("unify");
     assemble_shells(&mut out)?;
+    // Solids in, faces out but no solid: some piece went missing.
+    if !a.solids.is_empty() && !b.solids.is_empty() && !out.faces.is_empty() && out.solids.is_empty() {
+        return Err(KernelError::OperationFailed("the boolean left an open shell".into()));
+    }
     prof.mark("shells");
     prof.report(&format!("{op:?} {}×{} faces", a.faces.len(), b.faces.len()));
     Ok(BoolOut { body: out, from })

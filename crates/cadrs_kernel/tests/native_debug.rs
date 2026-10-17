@@ -678,3 +678,42 @@ fn debug_variable_nine() {
         Err(e) => panic!("{e}"),
     }
 }
+
+/// A thread profile swept along a helix (TURNS, default ¼, 16 Bézier pieces a turn), its inner
+/// side at RIN (default 18: inside the Ø36.75 cylinder), united with the cylinder.
+#[test]
+fn debug_thread_union() {
+    use std::f64::consts::TAU;
+    let env = |k: &str, d: f64| std::env::var(k).ok().and_then(|s| s.parse().ok()).unwrap_or(d);
+    let (r, pitch, turns, per) = (18.375, 4.125, env("TURNS", 0.25), 16usize);
+    let rin = env("RIN", 18.0);
+    let n = (turns * per as f64).round() as usize;
+    let th = TAU / per as f64;
+    let kk = 4.0 / 3.0 * (th / 4.0).tan();
+    let pt = |a: f64| Point3::new(r * a.cos(), r * a.sin(), pitch * a / TAU);
+    let tan = |a: f64| Vector3::new(-r * a.sin(), r * a.cos(), pitch / TAU);
+    let path: Vec<PathCurve> = (0..n)
+        .map(|i| {
+            let (a0, a1) = (th * i as f64, th * (i + 1) as f64);
+            PathCurve::Bezier3 { poles: vec![pt(a0), pt(a0) + tan(a0) * kk, pt(a1) - tan(a1) * kk, pt(a1)], weights: vec![] }
+        })
+        .collect();
+    let mut k = NativeKernel::new();
+    let front = Plane { origin: Point3::origin(), x_dir: Vector3::x_axis(), normal: -Vector3::y_axis() };
+    let pts = [(rin, -1.2), (19.8, -0.7), (19.8, 0.7), (rin, 1.2)];
+    let lp = Loop { curves: (0..4).map(|i| Curve2::Line { a: p(pts[i].0, pts[i].1), b: p(pts[(i + 1) % 4].0, pts[(i + 1) % 4].1), source: None }).collect() };
+    let thread = k.sweep_with(&Profile::new(front, vec![reg(lp)]), &SweepSpec { body: BodyKind::Solid, path, control: SweepControl::None, faces: vec![] }).unwrap().bodies[0];
+    let disc = Loop { curves: vec![Curve2::Circle { center: p(0.0, 0.0), radius: r, source: None }] };
+    let cyl = k.extrude(&Profile::new(Plane { origin: Point3::new(0.0, 0.0, -2.0), ..Plane::top() }, vec![reg(disc)]), Extent::Blind(14.0)).unwrap().bodies[0];
+    let (vt, vc) = (k.mass_properties(thread).unwrap().volume, k.mass_properties(cyl).unwrap().volume);
+    let kinds: Vec<SurfaceKind> = k.faces(thread).unwrap().iter().map(|f| f.kind).collect();
+    eprintln!("thread faces: {kinds:?}");
+    match k.boolean(BoolOp::Union, cyl, &[thread]) {
+        Ok(u) => {
+            let v = k.mass_properties(u.bodies[0]).unwrap().volume;
+            eprintln!("union {v} (thread {vt}, cylinder {vc}, outside part ≤ {})", vt);
+            assert!(v > vc && v <= vc + vt + 1e-6 * vc);
+        }
+        Err(e) => panic!("{e}"),
+    }
+}

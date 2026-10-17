@@ -60,8 +60,10 @@ fn u_breaks(s: &Surface, a: f64, b: f64, out: &mut Vec<f64>) {
         let mut pts = vec![a];
         pts.extend(ks);
         pts.push(b);
+        // One or two spans: split each (|N| varies within a long span); more are short already
+        // (the GPU kernel's `inner_job` does the same).
+        let m = if pts.len() <= 3 { 4 } else { 1 };
         for w in pts.windows(2) {
-            let m = 4;
             for i in 1..=m {
                 out.push(w[0] + (w[1] - w[0]) * i as f64 / m as f64);
             }
@@ -257,21 +259,21 @@ fn rect_integrals(s: &Surface, ns: &super::nurbs::NurbsSurface, r: [f64; 4], shi
         }
         out
     };
-    let us = cut(bu, r[0], r[1]);
     let vs = cut(bv, r[2], r[3]);
-    // The area integrand |N| is only smooth: 16 points a span.
-    let gu = &GAUSS16;
-    for wu in us.windows(2) {
-        let (mu, ru) = ((wu[0] + wu[1]) * 0.5, (wu[1] - wu[0]) * 0.5);
-        for wv in vs.windows(2) {
-            let (mv, rv) = ((wv[0] + wv[1]) * 0.5, (wv[1] - wv[0]) * 0.5);
-            for (x, gw) in gu.x.iter().zip(gu.w) {
-                for (y, hw) in GAUSS16.x.iter().zip(GAUSS16.w) {
-                    integrand(s, mu + ru * x, mv + rv * y, shift, &mut acc, gw * hw * ru * rv);
-                }
-            }
+    // The area integrand |N| is only smooth: 16 points a span; across many short spans 8.
+    let gv = if vs.len() > 17 { &GAUSS8 } else { &GAUSS16 };
+    // Along v the points and weights; along u the inner integral (as Green's theorem's jobs, so
+    // a GPU can take them).
+    let mut jobs: Vec<[f64; 4]> = Vec::with_capacity((vs.len() - 1) * gv.x.len());
+    for wv in vs.windows(2) {
+        let (mv, rv) = ((wv[0] + wv[1]) * 0.5, (wv[1] - wv[0]) * 0.5);
+        for (y, hw) in gv.x.iter().zip(gv.w) {
+            jobs.push([r[0], r[1], mv + rv * y, hw * rv]);
         }
     }
+    let _ = bu;
+    let mut scratch = Vec::with_capacity(64);
+    run_jobs(s, &jobs, shift, &mut acc, &mut scratch);
     acc
 }
 
@@ -310,6 +312,8 @@ pub fn face_integrals(body: &Body, f: &Face, shift: &V3) -> Q {
         return acc;
     }
     let v_periodic = f.surf.v_periodic() || matches!(f.surf, Surface::Sphere { .. });
+    // B-spline faces gather their inner integrals as jobs (run on the GPU when there are many).
+    let mut jobs: Option<Vec<[f64; 4]>> = matches!(f.surf, Surface::Nurbs(_)).then(Vec::new);
     for l in &f.loops {
         for c in l {
             let e = &body.edges[c.edge];
@@ -353,10 +357,17 @@ pub fn face_integrals(body: &Body, f: &Face, shift: &V3) -> Q {
                     if dv == 0.0 {
                         continue;
                     }
-                    inner(&f.surf, u_ref, uv.x, uv.y, shift, gw * r * dv, &mut acc, &mut scratch);
+                    if let Some(jobs) = jobs.as_mut() {
+                        jobs.push([u_ref, uv.x, uv.y, gw * r * dv]);
+                    } else {
+                        inner(&f.surf, u_ref, uv.x, uv.y, shift, gw * r * dv, &mut acc, &mut scratch);
+                    }
                 }
             }
         }
+    }
+    if let Some(jobs) = jobs {
+        run_jobs(&f.surf, &jobs, shift, &mut acc, &mut scratch);
     }
     if !f.sense {
         for q in acc.iter_mut().take(4) {
@@ -364,6 +375,57 @@ pub fn face_integrals(body: &Body, f: &Face, shift: &V3) -> Q {
         }
     }
     acc
+}
+
+/// Jobs below this many stay on the CPU (a dispatch costs about a millisecond).
+#[cfg(feature = "gpu")]
+const GPU_MIN_JOBS: usize = 512;
+
+static GPU_ON: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(true);
+
+/// Turns the GPU path off or back on (for comparisons; it is on when the kernel is built with
+/// the `gpu` feature and a GPU is there).
+pub fn set_gpu(on: bool) {
+    GPU_ON.store(on, std::sync::atomic::Ordering::Relaxed);
+}
+
+/// Whether mass properties may use the GPU now.
+pub fn gpu_active() -> bool {
+    #[cfg(feature = "gpu")]
+    {
+        GPU_ON.load(std::sync::atomic::Ordering::Relaxed) && cadrs_gpu::get().is_some()
+    }
+    #[cfg(not(feature = "gpu"))]
+    {
+        false
+    }
+}
+
+/// The inner integrals `[u0, u, v, w]` of a face, summed into `acc`: on the GPU when the kernel
+/// is built with it, one is there and there are enough jobs; else here.
+fn run_jobs(s: &Surface, jobs: &[[f64; 4]], shift: &V3, acc: &mut Q, scratch: &mut Vec<f64>) {
+    #[cfg(feature = "gpu")]
+    if jobs.len() >= GPU_MIN_JOBS && GPU_ON.load(std::sync::atomic::Ordering::Relaxed) {
+        if let (Surface::Nurbs(ns), Some(gpu)) = (s, cadrs_gpu::get()) {
+            if ns.du <= 3 && ns.dv <= 3 {
+                let (nu, nv) = (ns.cps.len(), ns.cps[0].len());
+                let ctrl: Vec<f64> = ns.cps.iter().flatten().flat_map(|h| [h.x, h.y, h.z, h.w]).collect();
+                let mut consts = vec![shift.x, shift.y, shift.z];
+                consts.extend_from_slice(&GAUSS16.x);
+                consts.extend_from_slice(&GAUSS16.w);
+                let q = cadrs_gpu::QuadParams { nu: nu as u32, nv: nv as u32, du: ns.du as u32, dv: ns.dv as u32, nku: ns.ku.len() as u32, nkv: ns.kv.len() as u32, jobs: 0, _pad: 0 };
+                for r in gpu.quad_inner(q, &ctrl, &ns.ku, &ns.kv, &consts, jobs) {
+                    for (a, x) in acc.iter_mut().zip(r) {
+                        *a += x;
+                    }
+                }
+                return;
+            }
+        }
+    }
+    for j in jobs {
+        inner(s, j[0], j[1], j[2], shift, j[3], acc, scratch);
+    }
 }
 
 /// Mass properties of a body (solids; a body without solids is a sheet: area only).

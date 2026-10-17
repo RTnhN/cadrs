@@ -12,4 +12,10 @@ serde.workspace = true
 uuid.workspace = true
 rayon.workspace = true
 spade = "2.15"
+cadrs_gpu = { path = "../cadrs_gpu", optional = true }
+
+[features]
+# GPU compute (Vulkan/Metal/DX12 through wgpu, rust-gpu kernels): large batches of the
+# mass-property quadrature on B-spline faces. Falls back to the CPU without a GPU.
+gpu = ["dep:cadrs_gpu"]
 

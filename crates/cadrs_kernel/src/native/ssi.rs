@@ -320,6 +320,12 @@ fn analytic(a: &Surface, b: &Surface, bb: &Bbox) -> Option<Vec<IntCurve>> {
             let minor = z.cross(&n).normalize(); // in the plane, square to the axis
             let major = n.cross(&minor).normalize(); // in the plane, along the tilt
             let a_len = r / cz.abs();
+            // A plane almost along the axis: the ellipse is far bigger than the region the faces
+            // span (parameters on it are ill-conditioned there); its part in the box as exact
+            // rational pieces instead (a cylinder is a cone of half angle 0).
+            if a_len > 4.0 * bbig.diagonal() {
+                return plane_cone(fp, fc, *r, 0.0, &bbig);
+            }
             Some(vec![IntCurve { c: Curve::Ellipse { c, x: major, y: minor, a: a_len, b: *r }, t0: 0.0, t1: TAU, closed: true }])
         }
         (Surface::Plane { f: fp }, Surface::Sphere { f: fs, r }) => {

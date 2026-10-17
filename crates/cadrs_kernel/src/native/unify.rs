@@ -649,3 +649,114 @@ pub fn planarize(b: &mut Body) -> bool {
     }
     changed
 }
+
+/// B-spline faces that lie on a cylinder (a profile line along a helix's axis swept round it,
+/// a skin of circles) become cylinders, with their p-curves and sense recomputed, so booleans
+/// see them coincide with the cylinders they lie on. Faces turning a whole way round are left.
+/// True when any changed.
+pub fn cylindrize(b: &mut Body) -> bool {
+    let mut changed = false;
+    for fi in 0..b.faces.len() {
+        let Surface::Nurbs(ns) = &b.faces[fi].surf else { continue };
+        let ((u0, u1), (v0, v1)) = ns.range();
+        let s = b.faces[fi].surf.clone();
+        let n = 12;
+        let mut pts: Vec<P3> = Vec::new();
+        let mut nrm: Vec<V3> = Vec::new();
+        for i in 0..=n {
+            for j in 0..=n {
+                let (u, v) = (u0 + (u1 - u0) * i as f64 / n as f64, v0 + (v1 - v0) * j as f64 / n as f64);
+                let (p, su, sv) = s.d1(u, v);
+                let nn = su.cross(&sv);
+                if nn.norm() < 1e-14 {
+                    continue;
+                }
+                pts.push(p);
+                nrm.push(nn.normalize());
+            }
+        }
+        if pts.len() < 20 {
+            continue;
+        }
+        // The axis: square to every normal.
+        let mut m = nalgebra::Matrix3::zeros();
+        for q in &nrm {
+            m += q * q.transpose();
+        }
+        let eig = m.symmetric_eigen();
+        let k = (0..3).min_by(|&a, &c| eig.eigenvalues[a].total_cmp(&eig.eigenvalues[c])).unwrap();
+        let z = eig.eigenvectors.column(k).into_owned().normalize();
+        if nrm.iter().any(|q| q.dot(&z).abs() > 1e-7) {
+            continue;
+        }
+        // Not a plane: the normals must turn.
+        let spread = nrm.iter().map(|q| q.dot(&nrm[0])).fold(1.0, f64::min);
+        if spread > 1.0 - 1e-6 {
+            continue;
+        }
+        // The circle in the plane square to z (algebraic fit), then the check.
+        let x0 = super::math::Frame::from_z(P3::origin(), z);
+        let loc: Vec<(f64, f64)> = pts.iter().map(|p| (p.coords.dot(&x0.x), p.coords.dot(&x0.y))).collect();
+        let mut a = nalgebra::Matrix3::zeros();
+        let mut rhs = V3::zeros();
+        for &(x, y) in &loc {
+            let row = V3::new(x, y, 1.0);
+            a += row * row.transpose();
+            rhs += row * (x * x + y * y);
+        }
+        let Some(sol) = a.lu().solve(&rhs) else { continue };
+        let (cx, cy) = (sol.x / 2.0, sol.y / 2.0);
+        let r = (sol.z + cx * cx + cy * cy).sqrt();
+        if !(r.is_finite() && r > 1e-9) {
+            continue;
+        }
+        let axis_o = P3::from(x0.x * cx + x0.y * cy);
+        let dist = |p: &P3| {
+            let w = p - axis_o;
+            (w - z * w.dot(&z)).norm()
+        };
+        let mut ok = true;
+        for i in 0..=40 {
+            for j in 0..=40 {
+                let p = s.eval(u0 + (u1 - u0) * i as f64 / 40.0, v0 + (v1 - v0) * j as f64 / 40.0);
+                if (dist(&p) - r).abs() > 1e-9 * (1.0 + r) {
+                    ok = false;
+                }
+            }
+        }
+        if !ok {
+            continue;
+        }
+        // The frame: the face's middle at u = π (its seam on the far side).
+        let mid = s.eval(0.5 * (u0 + u1), 0.5 * (v0 + v1));
+        let w = mid - axis_o;
+        let radial = (w - z * w.dot(&z)).normalize();
+        let fx = -radial;
+        let fy = z.cross(&fx);
+        let cyl = Surface::Cylinder { f: Frame { o: axis_o, x: fx, y: fy, z }, r };
+        // Angular extent of the face (from its edges): less than a turn.
+        let edges = b.edges.clone();
+        let mut ang = (f64::INFINITY, f64::NEG_INFINITY);
+        for co in b.faces[fi].loops.iter().flatten() {
+            let e = &edges[co.edge];
+            for i in 0..=8 {
+                let (u, _) = cyl.project(&e.point(e.t[0] + (e.t[1] - e.t[0]) * i as f64 / 8.0), Some((PI, 0.0)));
+                ang = (ang.0.min(u), ang.1.max(u));
+            }
+        }
+        if !(ang.1 - ang.0 < TAU - 1e-6) {
+            continue;
+        }
+        let mid_uv = cyl.project(&mid, Some((PI, 0.0)));
+        for l in &mut b.faces[fi].loops {
+            for co in l.iter_mut() {
+                let e = &edges[co.edge];
+                co.pc = pcurve::pcurve(&cyl, &e.curve, e.t[0], e.t[1], Some(P2::new(mid_uv.0, mid_uv.1)));
+            }
+        }
+        b.faces[fi].surf = cyl;
+        super::build::fix_senses(b, [fi]);
+        changed = true;
+    }
+    changed
+}

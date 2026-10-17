@@ -7,6 +7,9 @@
 //! - [`classify_point`]: inside/outside of a closed triangle mesh by ray parity along +X, with
 //!   the triangles bucketed in a uniform grid over `(y, z)` (CSR: `cell_start`, `cell_tris`).
 //!
+//! - [`inner_job`]: the kernel's mass-property quadrature on a B-spline face, the inner
+//!   integral of Green's theorem at one boundary point (degrees 1 to 3, rational).
+//!
 //! Everything is flat slices of scalars and `while` loops so the SPIR-V stays simple.
 
 #![no_std]
@@ -254,6 +257,241 @@ pub fn classify_point(g: &GridParams, tris: &[f32], cell_start: &[u32], cell_tri
     parity
 }
 
+
+// ---------------------------------------------------------------------------------------------
+// Mass-property quadrature on B-spline faces (the kernel's `mass` module, Green's theorem):
+// for each boundary quadrature point (u, v) of a face, the inner integral along u from the
+// face's reference u, ∫ h(s, v) ds, of the 14 integrated quantities.
+
+/// The surface and the job count, as the shader reads them (a uniform: `u32`s only).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[repr(C)]
+pub struct QuadParams {
+    /// Control points in u and v (`ctrl` is u-major: `(i * nv + j) * 4`, homogeneous).
+    pub nu: u32,
+    pub nv: u32,
+    /// Degrees (1 to 3) and knot counts.
+    pub du: u32,
+    pub dv: u32,
+    pub nku: u32,
+    pub nkv: u32,
+    pub jobs: u32,
+    pub _pad: u32,
+}
+
+/// Number of quantities per job (the kernel's `mass::NQ`).
+pub const NQ: usize = 14;
+
+/// The knot span of `t` for degree `p` with `n` control points.
+pub fn find_span_p<R: Real>(k: &[R], n: usize, p: usize, t: R) -> usize {
+    let mut s = p;
+    while s + 1 < n && t >= k[s + 1] {
+        s += 1;
+    }
+    s
+}
+
+/// The `p + 1` (p ≤ 3) non-zero basis functions of degree `p` at `t` in `span` and their first
+/// derivatives (Piegl & Tiller A2.2, the degree p − 1 row kept for the derivatives).
+pub fn basis_p<R: Real>(k: &[R], span: usize, t: R, p: usize) -> ([R; 4], [R; 4]) {
+    let z = R::zero();
+    let mut n = [R::one(), z, z, z];
+    let mut lower = [R::one(), z, z, z];
+    let mut left = [z; 4];
+    let mut right = [z; 4];
+    let mut j = 1;
+    while j <= p {
+        if j == p {
+            lower = n;
+        }
+        left[j] = t - k[span + 1 - j];
+        right[j] = k[span + j] - t;
+        let mut saved = z;
+        let mut r = 0;
+        while r < j {
+            let den = right[r + 1] + left[j - r];
+            let tmp = if den > z { n[r] / den } else { z };
+            n[r] = saved + right[r + 1] * tmp;
+            saved = left[j - r] * tmp;
+            r += 1;
+        }
+        n[j] = saved;
+        j += 1;
+    }
+    let pr = R::from_f32(p as f32);
+    let mut d = [z; 4];
+    let mut m = 0;
+    while m <= p {
+        let i = span + m - p;
+        let mut v = z;
+        if m >= 1 {
+            let den = k[i + p] - k[i];
+            if den > z {
+                v = v + lower[m - 1] / den;
+            }
+        }
+        if m < p {
+            let den = k[i + p + 1] - k[i + 1];
+            if den > z {
+                v = v - lower[m] / den;
+            }
+        }
+        d[m] = pr * v;
+        m += 1;
+    }
+    (n, d)
+}
+
+/// The surface's point and first partial derivatives at (u, v): `[S, S_u, S_v]`, 9 values.
+pub fn surface_d1<R: Real>(q: &QuadParams, ctrl: &[R], ku: &[R], kv: &[R], u: R, v: R) -> [R; 9] {
+    let (nu, nv, du, dv) = (q.nu as usize, q.nv as usize, q.du as usize, q.dv as usize);
+    let su = find_span_p(ku, nu, du, u);
+    let sv = find_span_p(kv, nv, dv, v);
+    let (bu, dbu) = basis_p(ku, su, u, du);
+    let (bv, dbv) = basis_p(kv, sv, v, dv);
+    let z = R::zero();
+    let mut a = [z; 4];
+    let mut au = [z; 4];
+    let mut av = [z; 4];
+    let mut i = 0;
+    while i <= du {
+        let col = su - du + i;
+        let mut j = 0;
+        while j <= dv {
+            let row = sv - dv + j;
+            let base = (col * nv + row) * 4;
+            let w0 = bu[i] * bv[j];
+            let wu = dbu[i] * bv[j];
+            let wv = bu[i] * dbv[j];
+            let mut c = 0;
+            while c < 4 {
+                let h = ctrl[base + c];
+                a[c] = a[c] + w0 * h;
+                au[c] = au[c] + wu * h;
+                av[c] = av[c] + wv * h;
+                c += 1;
+            }
+            j += 1;
+        }
+        i += 1;
+    }
+    let iw = R::one() / a[3];
+    let s = [a[0] * iw, a[1] * iw, a[2] * iw];
+    [
+        s[0],
+        s[1],
+        s[2],
+        (au[0] - au[3] * s[0]) * iw,
+        (au[1] - au[3] * s[1]) * iw,
+        (au[2] - au[3] * s[2]) * iw,
+        (av[0] - av[3] * s[0]) * iw,
+        (av[1] - av[3] * s[1]) * iw,
+        (av[2] - av[3] * s[2]) * iw,
+    ]
+}
+
+/// Adds the integrand at (u, v), weighted by `w`, to `out` (the kernel's `mass::integrand`).
+pub fn integrand<R: Real>(q: &QuadParams, ctrl: &[R], ku: &[R], kv: &[R], shift: [R; 3], u: R, v: R, w: R, out: &mut [R; NQ]) {
+    let d = surface_d1(q, ctrl, ku, kv, u, v);
+    let (su, sv) = ([d[3], d[4], d[5]], [d[6], d[7], d[8]]);
+    let n = [su[1] * sv[2] - su[2] * sv[1], su[2] * sv[0] - su[0] * sv[2], su[0] * sv[1] - su[1] * sv[0]];
+    let a = (n[0] * n[0] + n[1] * n[1] + n[2] * n[2]).sqrt() * w;
+    let (x, y, z) = (d[0] - shift[0], d[1] - shift[1], d[2] - shift[2]);
+    let (nx, ny, nz) = (n[0] * w, n[1] * w, n[2] * w);
+    let half = R::one() / R::from_f32(2.0);
+    let third = R::one() / R::from_f32(3.0);
+    out[0] = out[0] + a;
+    out[1] = out[1] + x * a;
+    out[2] = out[2] + y * a;
+    out[3] = out[3] + z * a;
+    out[4] = out[4] + (x * nx + y * ny + z * nz) * third;
+    out[5] = out[5] + x * x * half * nx;
+    out[6] = out[6] + y * y * half * ny;
+    out[7] = out[7] + z * z * half * nz;
+    out[8] = out[8] + x * x * x * third * nx;
+    out[9] = out[9] + y * y * y * third * ny;
+    out[10] = out[10] + z * z * z * third * nz;
+    out[11] = out[11] + x * x * y * half * nx;
+    out[12] = out[12] + y * y * z * half * ny;
+    out[13] = out[13] + z * z * x * half * nz;
+}
+
+/// One job: the inner integral along u from `u0` to `u1` at `v`, weighted by `w`, over the
+/// distinct knots between them (each span in four when there are one or two, 16-point
+/// Gauss–Legendre on each piece).
+/// `consts`: the shift (3), then the Gauss nodes (16) and weights (16).
+pub fn inner_job<R: Real>(q: &QuadParams, ctrl: &[R], ku: &[R], kv: &[R], consts: &[R], u0: R, u1: R, v: R, w: R) -> [R; NQ] {
+    let z = R::zero();
+    let mut acc = [z; NQ];
+    let d = u1 - u0;
+    let ad = if d < z { -d } else { d };
+    if !(ad > R::from_f32(1e-30)) {
+        return acc;
+    }
+    let shift = [consts[0], consts[1], consts[2]];
+    let asc = u1 > u0;
+    let (lo, hi) = if asc { (u0, u1) } else { (u1, u0) };
+    let eps = R::from_f32(1e-14);
+    let nk = q.nku as usize;
+    // Distinct knots inside: one or two spans are split in four (as the kernel's `u_breaks`).
+    let mut inside = 0;
+    let mut seen = lo;
+    let mut c = 0;
+    while c < nk {
+        let kk = ku[c];
+        c += 1;
+        if kk > lo + eps && kk < hi - eps {
+            let diff = kk - seen;
+            let ad = if diff < z { -diff } else { diff };
+            if !(ad < eps && seen != lo) {
+                inside += 1;
+                seen = kk;
+            }
+        }
+    }
+    let parts = if inside <= 1 { 4 } else { 1 };
+    let mut prev = u0;
+    let mut last_knot = lo;
+    let mut idx = 0;
+    // Visit the knots strictly inside (lo, hi) in the direction of travel, each value once.
+    while idx <= nk {
+        let (kk, at_end) = if idx == nk {
+            (u1, true)
+        } else {
+            let kk = if asc { ku[idx] } else { ku[nk - 1 - idx] };
+            (kk, false)
+        };
+        idx += 1;
+        if !at_end {
+            if !(kk > lo + eps && kk < hi - eps) {
+                continue;
+            }
+            let diff = kk - last_knot;
+            let ad = if diff < z { -diff } else { diff };
+            if ad < eps && last_knot != lo {
+                continue;
+            }
+            last_knot = kk;
+        }
+        // The piece from prev to kk (in four for one or two spans).
+        let mut m = 0;
+        while m < parts {
+            let a = prev + (kk - prev) * R::from_f32(m as f32) / R::from_f32(parts as f32);
+            let b = prev + (kk - prev) * R::from_f32((m + 1) as f32) / R::from_f32(parts as f32);
+            let mid = (a + b) / R::from_f32(2.0);
+            let r = (b - a) / R::from_f32(2.0);
+            let mut g = 0;
+            while g < 16 {
+                integrand(q, ctrl, ku, kv, shift, mid + r * consts[3 + g], v, w * consts[19 + g] * r, &mut acc);
+                g += 1;
+            }
+            m += 1;
+        }
+        prev = kk;
+    }
+    acc
+}
+
 #[cfg(target_arch = "spirv")]
 use spirv_std::{glam::UVec3, spirv};
 
@@ -331,10 +569,58 @@ pub fn classify(
     out[i as usize] = classify_point(g, tris, cell_start, cell_tris, pts[b], pts[b + 1], pts[b + 2]);
 }
 
+
+/// SPIR-V entry `quad_inner_f64`: one invocation per job (`jobs`: 4 doubles each, `u0 u1 v w`),
+/// 14 doubles out each (see [`inner_job`]).
+#[cfg(all(target_arch = "spirv", feature = "f64"))]
+#[spirv(compute(threads(64)))]
+pub fn quad_inner_f64(
+    #[spirv(global_invocation_id)] id: UVec3,
+    #[spirv(num_workgroups)] groups: UVec3,
+    #[spirv(uniform, descriptor_set = 0, binding = 0)] q: &QuadParams,
+    #[spirv(storage_buffer, descriptor_set = 0, binding = 1)] ctrl: &[f64],
+    #[spirv(storage_buffer, descriptor_set = 0, binding = 2)] ku: &[f64],
+    #[spirv(storage_buffer, descriptor_set = 0, binding = 3)] kv: &[f64],
+    #[spirv(storage_buffer, descriptor_set = 0, binding = 4)] consts: &[f64],
+    #[spirv(storage_buffer, descriptor_set = 0, binding = 5)] jobs: &[f64],
+    #[spirv(storage_buffer, descriptor_set = 0, binding = 6)] out: &mut [f64],
+) {
+    let i = id.x + id.y * groups.x * 64;
+    if i >= q.jobs {
+        return;
+    }
+    let b = (i * 4) as usize;
+    let r = inner_job(q, ctrl, ku, kv, consts, jobs[b], jobs[b + 1], jobs[b + 2], jobs[b + 3]);
+    let o = (i as usize) * NQ;
+    let mut c = 0;
+    while c < NQ {
+        out[o + c] = r[c];
+        c += 1;
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use std::prelude::rust_2024::*;
+
+    /// Every degree's basis functions sum to one and their derivatives to zero.
+    #[test]
+    fn partition_of_unity_any_degree() {
+        for p in 1..=3usize {
+            let mut k = std::vec![0.0f64; p + 1];
+            k.extend([0.2, 0.45, 0.7]);
+            k.extend(std::vec![1.0; p + 1]);
+            let n = k.len() - p - 1;
+            for i in 0..=100 {
+                let t = i as f64 / 100.0;
+                let s = find_span_p(&k, n, p, t);
+                let (b, d) = basis_p(&k, s, t, p);
+                assert!((b[..=p].iter().sum::<f64>() - 1.0).abs() < 1e-12, "p {p} t {t}");
+                assert!(d[..=p].iter().sum::<f64>().abs() < 1e-9, "p {p} t {t}");
+            }
+        }
+    }
 
     /// The basis functions sum to one and their derivatives to zero.
     #[test]

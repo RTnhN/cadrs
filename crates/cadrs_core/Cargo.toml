@@ -10,6 +10,9 @@ repository.workspace = true
 # back to the old prism mesh.
 default = ["brep"]
 brep = []
+# GPU compute in the kernel (mass properties of B-spline faces on Vulkan/Metal/DX12; the CPU
+# when there is no GPU).
+gpu = ["cadrs_kernel/gpu"]
 
 [dependencies]
 cadrs_sketch.workspace = true
