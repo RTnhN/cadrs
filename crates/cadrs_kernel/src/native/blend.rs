@@ -736,6 +736,10 @@ pub fn blend(k: &mut NativeKernel, body: BodyId, edges: &[(EdgeId, Box<dyn Fn(f6
             cur = cur.apply(&tool, &src, BoolOp::Subtract)?;
         }
     }
+    // A solid must stay a solid (an open result means a tool went wrong).
+    if !b.solids.is_empty() && cur.body.solids.is_empty() {
+        return Err(KernelError::OperationFailed("the blend left an open body".into()));
+    }
     Ok(cur.into_result(k, body))
 }
 

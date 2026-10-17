@@ -71,7 +71,8 @@ fn steps(s: &Surface, ub: (f64, f64), vb: (f64, f64), defl: f64, ang: f64) -> (f
             return f64::INFINITY;
         }
         let by_defl = (8.0 * defl / c).sqrt();
-        let by_ang = if k > 1e-12 { ang / k } else { f64::INFINITY };
+        // The same angular step as the edges (`curve::arc_step`): half of `ang`.
+        let by_ang = if k > 1e-12 { 0.5 * ang / k } else { f64::INFINITY };
         by_defl.min(by_ang)
     };
     (step(cu, ku), step(cv, kv))

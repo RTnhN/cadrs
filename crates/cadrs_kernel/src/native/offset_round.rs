@@ -315,7 +315,36 @@ fn face_band(b: &Body, fi: usize, t: f64) -> Result<Body> {
             let (lo, hi) = super::kernel::extent_along(&sub, &fr.o, &fr.z);
             let plane = Plane { origin: fr.o + fr.z * lo, x_dir: nalgebra::Unit::new_normalize(fr.x), normal: nalgebra::Unit::new_normalize(fr.z) };
             let circ = |rr: f64| Loop { curves: vec![Curve2::Circle { center: nalgebra::Point2::origin(), radius: rr, source: None }] };
-            let prof = Profile::new(plane, vec![Region { outer: circ(r1), holes: vec![circ(r0)], source: None }]);
+            // The face's angular range (its p-curves' u).
+            let (mut u0, mut u1) = (f64::INFINITY, f64::NEG_INFINITY);
+            for c in f.loops.iter().flatten() {
+                let e = &b.edges[c.edge];
+                for i in 0..=8 {
+                    let q = c.pc.point(e.t[0] + (e.t[1] - e.t[0]) * i as f64 / 8.0);
+                    u0 = u0.min(q.x);
+                    u1 = u1.max(q.x);
+                }
+            }
+            // A ring for a whole turn, else the annular sector behind the face.
+            let region = if !(u1 - u0 < TAU - 1e-9) {
+                Region { outer: circ(r1), holes: vec![circ(r0)], source: None }
+            } else {
+                let o = nalgebra::Point2::origin();
+                let at = |rr: f64, u: f64| nalgebra::Point2::new(rr * u.cos(), rr * u.sin());
+                Region {
+                    outer: Loop {
+                        curves: vec![
+                            Curve2::Arc { center: o, radius: r1, start_angle: u0, sweep: u1 - u0, source: None },
+                            Curve2::Line { a: at(r1, u1), b: at(r0, u1), source: None },
+                            Curve2::Arc { center: o, radius: r0, start_angle: u1, sweep: u0 - u1, source: None },
+                            Curve2::Line { a: at(r0, u0), b: at(r1, u0), source: None },
+                        ],
+                    },
+                    holes: vec![],
+                    source: None,
+                }
+            };
+            let prof = Profile::new(plane, vec![region]);
             let regions = super::profile::regions(&prof)?;
             let mf = super::profile::merge_regions(&regions)?;
             let kind = super::sweep::Prism { plane, dir: fr.z };

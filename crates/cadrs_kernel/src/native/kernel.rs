@@ -346,11 +346,15 @@ impl Kernel for NativeKernel {
     }
 
     fn fillet(&mut self, body: BodyId, edges: &[EdgeId], radius: f64) -> Result<OpResult> {
-        super::blend::fillet(self, body, edges, &FilletSpec::radius(radius))
+        dump("fillet", self.get(body)?, &format!("edges {edges:?} radius {radius}"));
+        let r = super::blend::fillet(self, body, edges, &FilletSpec::radius(radius));
+        self.dumped(&r)
     }
 
     fn fillet_with(&mut self, body: BodyId, edges: &[EdgeId], spec: &FilletSpec) -> Result<OpResult> {
-        super::blend::fillet(self, body, edges, spec)
+        dump("fillet", self.get(body)?, &format!("edges {edges:?} {spec:?}"));
+        let r = super::blend::fillet(self, body, edges, spec);
+        self.dumped(&r)
     }
 
     fn thicken_surfaces(&mut self, spec: &ThickenSpec) -> Result<OpResult> {
@@ -382,11 +386,15 @@ impl Kernel for NativeKernel {
     }
 
     fn shell(&mut self, body: BodyId, remove: &[FaceId], thickness: f64) -> Result<OpResult> {
-        super::offset_round::shell(self, body, &ShellSpec { remove: remove.to_vec(), thickness, outward: false, hollow: false })
+        dump("shell", self.get(body)?, &format!("remove {remove:?} thickness {thickness}"));
+        let r = super::offset_round::shell(self, body, &ShellSpec { remove: remove.to_vec(), thickness, outward: false, hollow: false });
+        self.dumped(&r)
     }
 
     fn shell_with(&mut self, body: BodyId, spec: &ShellSpec) -> Result<OpResult> {
-        super::offset_round::shell(self, body, spec)
+        dump("shell", self.get(body)?, &format!("{spec:?}"));
+        let r = super::offset_round::shell(self, body, spec);
+        self.dumped(&r)
     }
 
     fn fillet_partial(&mut self, body: BodyId, edge: EdgeId, spec: &FilletSpec, from: f64, to: f64) -> Result<OpResult> {
@@ -402,11 +410,15 @@ impl Kernel for NativeKernel {
     }
 
     fn chamfer(&mut self, body: BodyId, edges: &[EdgeId], spec: ChamferSpec) -> Result<OpResult> {
-        super::blend::chamfer(self, body, edges, &ChamferOpts::new(spec))
+        dump("chamfer", self.get(body)?, &format!("edges {edges:?} {spec:?}"));
+        let r = super::blend::chamfer(self, body, edges, &ChamferOpts::new(spec));
+        self.dumped(&r)
     }
 
     fn chamfer_with(&mut self, body: BodyId, edges: &[EdgeId], opts: &ChamferOpts) -> Result<OpResult> {
-        super::blend::chamfer(self, body, edges, opts)
+        dump("chamfer", self.get(body)?, &format!("edges {edges:?} {opts:?}"));
+        let r = super::blend::chamfer(self, body, edges, opts);
+        self.dumped(&r)
     }
 
     fn split(&mut self, body: BodyId, tool: &SplitTool, source: u64) -> Result<OpResult> {
@@ -624,4 +636,37 @@ impl Kernel for NativeKernel {
     fn read_body(&mut self, bytes: &[u8]) -> Result<BodyId> {
         super::exchange::read_body(self, bytes)
     }
+}
+
+impl NativeKernel {
+    /// With `CADRS_DUMP_DIR` set, reports an operation's outcome (solids, or the error).
+    fn dumped(&self, r: &Result<OpResult>) -> Result<OpResult> {
+        if std::env::var("CADRS_DUMP_DIR").is_ok() {
+            match r {
+                Ok(o) => {
+                    let solids: Vec<usize> = o.bodies.iter().filter_map(|b| self.get(*b).ok().map(|x| x.solids.len())).collect();
+                    eprintln!("dump: -> solids {solids:?} in {:?}", DUMP_T.with(|t| t.get().elapsed()));
+                }
+                Err(e) => eprintln!("dump: -> error {e} in {:?}", DUMP_T.with(|t| t.get().elapsed())),
+            }
+        }
+        r.clone()
+    }
+}
+
+thread_local! {
+    static DUMP_T: std::cell::Cell<std::time::Instant> = std::cell::Cell::new(std::time::Instant::now());
+}
+
+/// With `CADRS_DUMP_DIR` set, writes an operation's input body (exact bytes) and its parameters
+/// there, numbered, to reproduce failures in kernel tests.
+fn dump(op: &str, b: &Body, params: &str) {
+    let Ok(dir) = std::env::var("CADRS_DUMP_DIR") else { return };
+    DUMP_T.with(|t| t.set(std::time::Instant::now()));
+    static N: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+    let n = N.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let base = std::path::Path::new(&dir).join(format!("{op}-{n:03}"));
+    let _ = std::fs::write(base.with_extension("body"), super::bodyio::write(b));
+    let _ = std::fs::write(base.with_extension("txt"), params);
+    eprintln!("dump: {op}-{n:03} {params}");
 }

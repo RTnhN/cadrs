@@ -569,3 +569,47 @@ fn debug_pan_head_slot() {
     eprintln!("solids {} volume {} (before {v0})", k.solid_count(r.bodies[0]).unwrap(), m.volume);
     assert_eq!(k.solid_count(r.bodies[0]).unwrap(), 1);
 }
+
+/// A rounded rectangle (x −55..55, y −200..0, R20 corners) 40 high, shelled 4 mm from the
+/// bottom: V = A·40 − A'·36 with A' the outline offset 4 inwards (R16 corners).
+#[test]
+fn debug_rounded_box_shell() {
+    use std::f64::consts::PI;
+    let mut k = NativeKernel::new();
+    let rr = |x0: f64, y0: f64, x1: f64, y1: f64, r: f64| -> Loop {
+        let l = |a, b| Curve2::Line { a, b, source: None };
+        let arc = |cx: f64, cy: f64, a0: f64| Curve2::Arc { center: p(cx, cy), radius: r, start_angle: a0, sweep: PI / 2.0, source: None };
+        Loop { curves: vec![
+            l(p(x0 + r, y0), p(x1 - r, y0)), arc(x1 - r, y0 + r, -PI / 2.0),
+            l(p(x1, y0 + r), p(x1, y1 - r)), arc(x1 - r, y1 - r, 0.0),
+            l(p(x1 - r, y1), p(x0 + r, y1)), arc(x0 + r, y1 - r, PI / 2.0),
+            l(p(x0, y1 - r), p(x0, y0 + r)), arc(x0 + r, y0 + r, PI),
+        ] }
+    };
+    let b = k.extrude(&Profile::new(Plane::top(), vec![reg(rr(-55., -200., 55., 0., 20.))]), Extent::Blind(40.0)).unwrap().bodies[0];
+    let faces = k.faces(b).unwrap();
+    let bottom = faces.iter().find(|f| f.plane.is_some_and(|p| p.normal.z < -0.9)).unwrap().id;
+    let area = |w: f64, h: f64, r: f64| w * h - (4.0 - PI) * r * r;
+    let want = area(110.0, 200.0, 20.0) * 40.0 - area(102.0, 192.0, 16.0) * 36.0;
+    let r = k.shell(b, &[bottom], 4.0).unwrap();
+    let v = k.mass_properties(r.bodies[0]).unwrap().volume;
+    assert!((v - want).abs() < 1e-6 * want, "{v} vs {want}");
+}
+
+/// Replays a dumped shell (CADRS_DUMP_DIR): CADRS_REPRO=<file.body>, CADRS_REPRO_REMOVE=<face>,
+/// CADRS_REPRO_T=<thickness>.
+#[test]
+fn debug_repro_shell() {
+    let Ok(path) = std::env::var("CADRS_REPRO") else { return };
+    let mut k = NativeKernel::new();
+    let body = cadrs_kernel::native::bodyio::read(&std::fs::read(path).unwrap()).unwrap();
+    let b = k.insert(body);
+    let remove: Vec<FaceId> = std::env::var("CADRS_REPRO_REMOVE").unwrap().split(',').map(|s| FaceId(s.parse().unwrap())).collect();
+    let t: f64 = std::env::var("CADRS_REPRO_T").unwrap().parse().unwrap();
+    eprintln!("body volume {}", k.mass_properties(b).unwrap().volume);
+    let r = k.shell(b, &remove, t);
+    match r {
+        Ok(r) => eprintln!("shell volume {}", k.mass_properties(r.bodies[0]).unwrap().volume),
+        Err(e) => panic!("{e}"),
+    }
+}

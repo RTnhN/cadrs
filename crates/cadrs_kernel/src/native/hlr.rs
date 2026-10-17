@@ -676,6 +676,9 @@ impl<'a> Occluders<'a> {
     fn visible(&self, p: &P3, body: usize, own: &[usize]) -> bool {
         let q = self.frame.to_2d(p);
         let rd = -self.dir;
+        // Hits on face boundaries: two faces met at one point there means the ray runs through
+        // their common edge (out of the material, as along a tangent edge): hidden.
+        let mut rim: Vec<(f64, usize, usize)> = Vec::new();
         for &k in self.grid.at(q) {
             let (bi, fi, occ, lo, hi) = &self.items[k as usize];
             if !inside_box(&q, lo, hi) {
@@ -687,6 +690,12 @@ impl<'a> Occluders<'a> {
                     for (t, u, v) in ray_surface(dom.surf, p, &rd, -1e9, 1e9) {
                         if t > 1e-5 && dom.contains(u, v, true) {
                             return false;
+                        }
+                        if t > 1e-5 && dom.contains(u, v, false) {
+                            if rim.iter().any(|&(t2, b2, f2)| (t2 - t).abs() < 1e-6 && (b2, f2) != (*bi, *fi)) {
+                                return false;
+                            }
+                            rim.push((t, *bi, *fi));
                         }
                     }
                 }
@@ -1015,8 +1024,10 @@ pub fn project(bodies: &[HlrBody], frame: &ViewFrame, opts: &ProjectOptions) -> 
                     if (a + ab * f - q).norm() > cov {
                         return false;
                     }
+                    // A hidden silhouette stays even under a visible line (as the OCCT backend's
+                    // post-processing kept them); hidden edges there are dropped.
                     if o.visible && !pc.visible {
-                        return true;
+                        return s.class != ProjClass::Outline;
                     }
                     let od = dep[j] + (dep[j + 1] - dep[j]) * f;
                     if (od - d).abs() > 1e-6 {
