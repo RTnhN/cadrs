@@ -960,3 +960,38 @@ fn debug_draw_cone_blend() -> cadrs_kernel::Result<()> {
     }
     Ok(())
 }
+
+/// OCCT blend/simple/B7 and friends: each edge of a 270° cylinder sector blended alone.
+#[test]
+fn debug_draw_sector_blends() -> cadrs_kernel::Result<()> {
+    let mut k = NativeKernel::new();
+    let s = k.pcylinder_a(None, 50.0, 100.0, 270.0)?;
+    let es = k.explode_edges(&s)?;
+    for combo in [[0usize, 4, 99], [0, 5, 99], [0, 1, 99], [0, 1, 4], [0, 1, 5], [0, 2, 99], [0, 8, 99], [4, 8, 99]] {
+        let picked: Vec<&cadrs_kernel::native::draw::Shape> = combo.iter().filter(|&&i| i < es.len()).map(|&i| &es[i]).collect();
+        match k.blend(&s, 10.0, &picked) {
+            Ok(r) => eprintln!("combo {combo:?}: area {:.2}", k.sprops(&r)?),
+            Err(x) => eprintln!("combo {combo:?}: {x}"),
+        }
+    }
+    for (i, e) in es.iter().enumerate() {
+        let len = k.lprops(e)?;
+        match k.blend(&s, 10.0, &[e]) {
+            Ok(r) => eprintln!("edge {} (length {len:.2}): area {:.2}", i + 1, k.sprops(&r)?),
+            Err(x) => eprintln!("edge {} (length {len:.2}): {x}", i + 1),
+        }
+    }
+    Ok(())
+}
+
+/// A 270° cylinder sector: its top arc and a vertical side edge blended together (they meet at
+/// a corner).
+#[test]
+fn debug_sector_arc_and_side() -> cadrs_kernel::Result<()> {
+    let mut k = NativeKernel::new();
+    let s = k.pcylinder_a(None, 50.0, 100.0, 270.0)?;
+    let es = k.explode_edges(&s)?;
+    let r = k.blend(&s, 10.0, &[&es[0], &es[4]])?;
+    eprintln!("area {}", k.sprops(&r)?);
+    Ok(())
+}
