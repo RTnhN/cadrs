@@ -342,7 +342,16 @@ impl Kernel for NativeKernel {
     }
 
     fn boolean(&mut self, op: BoolOp, target: BodyId, tools: &[BodyId]) -> Result<OpResult> {
-        super::boolean::boolean(self, op, target, tools)
+        let r = super::boolean::boolean(self, op, target, tools);
+        // With CADRS_DUMP_DIR set, a failed boolean leaves its inputs there.
+        if r.is_err() && std::env::var("CADRS_DUMP_DIR").is_ok() {
+            dump("boolean-target", self.get(target)?, &format!("{op:?}"));
+            for t in tools {
+                dump("boolean-tool", self.get(*t)?, &format!("{op:?}"));
+            }
+            let _ = self.dumped(&r);
+        }
+        r
     }
 
     fn fillet(&mut self, body: BodyId, edges: &[EdgeId], radius: f64) -> Result<OpResult> {

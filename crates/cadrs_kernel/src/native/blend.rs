@@ -1407,16 +1407,23 @@ pub fn chain_tool(b: &Body, input: BodyId, chain: &[(usize, bool)], kind: &dyn F
             }
         };
         let curves = vec![Curve2::Line { a: pc, b: q1, source: Some(0) }, mid, Curve2::Line { a: q2, b: pc, source: Some(2) }];
-        sections.push(LoftSection::Profile(Profile::new(plane, vec![Region { outer: Loop { curves }, holes: vec![], source: Some(0) }])));
+        // The same three pieces in the same order at every station (lofted as they are).
+        let pieces: Vec<Piece> = curves
+            .iter()
+            .enumerate()
+            .map(|(i, c)| super::profile::piece_of(c, Src::Curve { region: 0, curve: i as u64 }))
+            .collect::<Result<_>>()?;
+        sections.push((pieces, plane));
     }
     }
     let e = e0;
     let mut tk = NativeKernel::new();
-    let lr = super::loft_build::loft_with(&mut tk, &LoftSpec { body: BodyKind::Solid, sections, start: LoftEnd::default(), end: LoftEnd::default(), source: 0 })?;
+    let built = super::loft_build::loft_pieces(&tk, &sections, 0)?;
+    let lr = super::features::Tagged::from_built(built).into_result(&mut tk);
     let body = (**tk.get(lr.bodies[0])?).clone();
     let mut src = vec![Vec::new(); body.faces.len()];
     for (f, o) in &lr.history.generated {
-        if let Origin::ProfileCurve { curve: 1, .. } = o {
+        if let Origin::ProfileCurve { curve, .. } = o && *curve == unsourced_curve(0, 1) {
             src[f.0 as usize].push(FaceSrc::New(Origin::FromEdge { body: input, edge: EdgeId(e as u64) }));
         }
     }

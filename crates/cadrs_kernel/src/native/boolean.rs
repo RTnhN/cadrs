@@ -466,6 +466,9 @@ pub fn boolean_bodies(a: &Body, b: &Body, op: BoolOp) -> Result<BoolOut> {
 /// Gives B-spline faces of `a` that lie (within 2 × [`VTOL`]) on a plane or cylinder face of
 /// `b` that surface, with their p-curves and sense recomputed. True when any changed.
 fn snap_to(a: &mut Body, b: &Body) -> bool {
+    if std::env::var("CADRS_NO_SNAP").is_ok() {
+        return false;
+    }
     let mut changed = false;
     let targets: Vec<(usize, Bbox)> = b
         .faces
@@ -784,6 +787,9 @@ fn run(a: &Body, b: &Body, mode: Mode) -> Result<BoolOut> {
             let curves = ssi::surface_surface(&faces[fa].surf, uvbox(&faces[fa]), &faces[fb].surf, uvbox(&faces[fb]), &ob);
             if std::env::var("CADRS_BOOL_DEBUG").is_ok() {
                 eprintln!("ssi {fa}×{fb} {:?}×{:?}: {} curves in {:?}", faces[fa].surf.kind(), faces[fb].surf.kind(), curves.len(), t_ssi.elapsed());
+                for ic in &curves {
+                    eprintln!("    curve closed {} from {:?} to {:?}", ic.closed, ic.c.point(ic.t0), ic.c.point(ic.t1));
+                }
             }
             if curves.is_empty() {
                 continue;
@@ -832,6 +838,26 @@ fn run(a: &Body, b: &Body, mode: Mode) -> Result<BoolOut> {
                             ivs.push((w[0].0, w[1].0, Some(w[0].1), Some(w[1].1)));
                         }
                     }
+                }
+                // A closed curve that isn't periodic (a fitted B-spline) can't run past its end:
+                // the interval that wraps becomes two pieces meeting at the curve's start.
+                if ic.closed && !ic.c.is_periodic() {
+                    let period = ic.t1 - ic.t0;
+                    let mut split: Vec<(f64, f64, Option<usize>, Option<usize>)> = Vec::new();
+                    for (ta, tb, va, vb) in ivs {
+                        if tb > ic.t1 + 1e-12 && ta < ic.t1 - 1e-12 {
+                            let vend = pool.vertex(ic.c.point(ic.t1));
+                            split.push((ta, ic.t1, va, Some(vend)));
+                            if tb - period > ic.t0 + 1e-12 {
+                                split.push((ic.t0, tb - period, Some(vend), vb));
+                            }
+                        } else if ta >= ic.t1 - 1e-12 {
+                            split.push((ta - period, tb - period, va, vb));
+                        } else {
+                            split.push((ta, tb, va, vb));
+                        }
+                    }
+                    ivs = split;
                 }
                 for (ta, tb, va, vb) in ivs {
                     // Wrap periodic parameters past the end.

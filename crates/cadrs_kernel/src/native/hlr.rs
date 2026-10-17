@@ -602,6 +602,7 @@ type OccItem = (usize, usize, Occ, P2, P2);
 /// Every face of every body, for rays towards the eye.
 struct Occluders<'a> {
     items: Vec<OccItem>,
+    bodies: &'a [HlrBody<'a>],
     grid: Grid,
     doms: &'a [Vec<Domain<'a>>],
     dir: V3,
@@ -613,7 +614,7 @@ struct Occluders<'a> {
 }
 
 impl<'a> Occluders<'a> {
-    fn new(bodies: &[HlrBody], doms: &'a [Vec<Domain<'a>>], frame: &ViewFrame, defl: f64, tol: f64) -> Self {
+    fn new(bodies: &'a [HlrBody<'a>], doms: &'a [Vec<Domain<'a>>], frame: &ViewFrame, defl: f64, tol: f64) -> Self {
         let dir = frame.dir;
         let per_body: Vec<Vec<OccItem>> = bodies
             .par_iter()
@@ -668,7 +669,7 @@ impl<'a> Occluders<'a> {
         for (k, it) in items.iter().enumerate() {
             grid.insert(k as u32, it.3, it.4);
         }
-        Self { items, grid, doms, dir, frame: *frame, skin_tri: 2.0 * defl + tol, skin_own: 20.0 * defl + tol }
+        Self { items, bodies, grid, doms, dir, frame: *frame, skin_tri: 2.0 * defl + tol, skin_own: 20.0 * defl + tol }
     }
 
     /// Whether a ray from `p` (on body `body`'s faces `own`) towards the eye leaves without
@@ -692,8 +693,14 @@ impl<'a> Occluders<'a> {
                             return false;
                         }
                         if t > 1e-5 && dom.contains(u, v, false) {
+                            // Through an edge of two faces, having crossed material on the way
+                            // (a hole's wall grazed lengthwise is not material).
                             if rim.iter().any(|&(t2, b2, f2)| (t2 - t).abs() < 1e-6 && (b2, f2) != (*bi, *fi)) {
-                                return false;
+                                let hb = &self.bodies[*bi];
+                                let mid = p + rd * (0.5 * t);
+                                if super::classify::classify_point(hb.body, hb.polys, &mid, 1e-7) == crate::PointClass::Inside {
+                                    return false;
+                                }
                             }
                             rim.push((t, *bi, *fi));
                         }

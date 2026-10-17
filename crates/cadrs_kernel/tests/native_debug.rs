@@ -761,3 +761,51 @@ fn debug_helix_tube() {
     eprintln!("tube {v} want {want} ({} faces: {faces:?})", faces.len());
     assert!((v - want).abs() < 1e-4 * want, "{v} vs {want}");
 }
+
+/// Replays a dumped boolean: CADRS_REPRO_A=<target.body>, CADRS_REPRO_B=<tool.body>,
+/// CADRS_REPRO_OP=Subtract|Union|Intersect.
+#[test]
+fn debug_repro_boolean() {
+    let (Ok(a), Ok(b)) = (std::env::var("CADRS_REPRO_A"), std::env::var("CADRS_REPRO_B")) else { return };
+    let op = match std::env::var("CADRS_REPRO_OP").as_deref() {
+        Ok("Union") => BoolOp::Union,
+        Ok("Intersect") => BoolOp::Intersect,
+        _ => BoolOp::Subtract,
+    };
+    let mut k = NativeKernel::new();
+    let a = k.insert(cadrs_kernel::native::bodyio::read(&std::fs::read(a).unwrap()).unwrap());
+    let b = k.insert(cadrs_kernel::native::bodyio::read(&std::fs::read(b).unwrap()).unwrap());
+    eprintln!("volumes {} and {}", k.mass_properties(a).unwrap().volume, k.mass_properties(b).unwrap().volume);
+    match k.boolean(op, a, &[b]) {
+        Ok(r) => eprintln!("result volume {}", k.mass_properties(r.bodies[0]).unwrap().volume),
+        Err(e) => panic!("{e}"),
+    }
+}
+
+/// A Ø25 bar along X minus a counterbored hole across it along Y (Ø5.5 through, ⌴Ø9.75 from
+/// below): the hand brake's grip without its slot.
+#[test]
+fn debug_cbore_across_bar() {
+    use std::f64::consts::{PI, TAU};
+    let mut k = NativeKernel::new();
+    let right = Plane { origin: Point3::new(-10.0, 0.0, 0.0), x_dir: Vector3::y_axis(), normal: Vector3::x_axis() };
+    let c = |cx: f64, cy: f64, r: f64| Loop { curves: vec![Curve2::Circle { center: p(cx, cy), radius: r, source: None }] };
+    let bar = k.extrude(&Profile::new(right, vec![reg(c(-4.0, -12.5, 12.5))]), Extent::Blind(170.0)).unwrap().bodies[0];
+    // The hole: Ø5.5 from y −17 to 9.5, the counterbore Ø9.75 from y −17 to −12.
+    let bottom = Plane { origin: Point3::new(0.0, -17.0, 0.0), x_dir: Vector3::x_axis(), normal: Vector3::y_axis() };
+    let hole = k.extrude(&Profile::new(bottom, vec![reg(c(25.0, 12.5, 2.75))]), Extent::Blind(26.5)).unwrap().bodies[0];
+    let cb = k.extrude(&Profile::new(bottom, vec![reg(c(25.0, 12.5, 4.875))]), Extent::Blind(5.0)).unwrap().bodies[0];
+    let tool = match std::env::var("TOOL").as_deref() {
+        Ok("hole") => hole,
+        Ok("cb") => cb,
+        _ => k.boolean(BoolOp::Union, hole, &[cb]).unwrap().bodies[0],
+    };
+    let v0 = k.mass_properties(bar).unwrap().volume;
+    let vt = k.mass_properties(tool).unwrap().volume;
+    eprintln!("bar {v0} (πr²L {}), tool {vt}", PI * 12.5 * 12.5 * 170.0);
+    let _ = TAU;
+    match k.boolean(BoolOp::Subtract, bar, &[tool]) {
+        Ok(r) => eprintln!("bar − hole {}", k.mass_properties(r.bodies[0]).unwrap().volume),
+        Err(e) => panic!("{e}"),
+    }
+}
