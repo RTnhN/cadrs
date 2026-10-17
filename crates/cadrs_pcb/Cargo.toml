@@ -10,7 +10,6 @@ repository.workspace = true
 [features]
 default = ["brep"]
 brep = ["cadrs_core/brep"]
-occt = ["cadrs_kernel/occt", "cadrs_core/occt"]
 
 [dependencies]
 cadrs_idf.workspace = true

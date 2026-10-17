@@ -181,23 +181,6 @@ fn meridian_side(f: &Frame, x: &V3, y: &V3, radial: &V3) -> Option<Curve> {
     Some(line2(P2::new(u, v0), V2::new(0.0, sig)))
 }
 
-/// A meridian circle (in a plane through the axis, centred at `cc`): u const, v = σt + v0.
-fn meridian(f: &Frame, cc: &P3, x: &V3, y: &V3) -> Option<Curve> {
-    // The radial direction of the meridian's half plane: the in-plane direction square to z.
-    let n = x.cross(y);
-    let radial = f.z.cross(&n).normalize();
-    // In the (radial, z) plane, the circle point at t is cc + r(cos t x + sin t y); its angle
-    // from the centre is atan2(·z, ·radial).
-    let (xr, xz) = (x.dot(&radial), x.dot(&f.z));
-    let (yr, yz) = (y.dot(&radial), y.dot(&f.z));
-    let sig = (xr * yz - xz * yr).signum();
-    let v0 = xz.atan2(xr);
-    let u = ang(f, &radial);
-    let _ = cc;
-    // The half plane must be the one the circle's points use (radial positive side).
-    Some(line2(P2::new(u, v0), V2::new(0.0, sig)))
-}
-
 fn coaxial_circle(f: &Frame, cc: &P3, x: &V3, y: &V3) -> bool {
     let n = x.cross(y);
     if n.cross(&f.z).norm() > 1e-10 {

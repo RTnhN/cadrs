@@ -5,7 +5,7 @@ use std::sync::{Arc, OnceLock};
 
 use nalgebra::Point3;
 
-use super::build::{self, Built};
+use super::build::Built;
 use super::classify;
 use super::curve::Curve;
 use super::math::*;

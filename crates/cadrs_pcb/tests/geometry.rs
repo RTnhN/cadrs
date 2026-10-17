@@ -1,4 +1,4 @@
-//! P3H.2: IDF → B-rep and MCAD → board on the fixtures (`fixtures/idf`), through OCCT.
+//! P3H.2: IDF → B-rep and MCAD → board on the fixtures (`fixtures/idf`), through the kernel.
 
 use std::f64::consts::PI;
 use std::path::PathBuf;

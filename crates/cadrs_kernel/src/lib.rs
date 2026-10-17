@@ -1,7 +1,8 @@
 //! The solid-modeling layer of cadrs.
 //!
-//! The rest of cadrs talks to B-rep kernels only through the [`Kernel`] trait and the types in
-//! [`types`], so backends (OpenCascade, monstertruck, our own code) can be swapped or combined.
+//! The rest of cadrs talks to the B-rep kernel only through the [`Kernel`] trait and the types in
+//! [`types`]. The kernel is [`native`]: exact curves and surfaces, booleans, features,
+//! tessellation, hidden-line removal and STEP/IGES exchange in pure Rust (no C or C++).
 //! See `crates/cadrs_kernel/README.md`.
 
 pub mod backend;

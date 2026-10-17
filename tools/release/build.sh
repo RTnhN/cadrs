@@ -5,8 +5,8 @@
 #
 # - Linux is built in the `cadrs-linux-build` container (Ubuntu 22.04, see the Dockerfile here),
 #   so the binary needs only glibc 2.35. Its build output stays in target/linux-release and it
-#   shares ~/.cargo/registry and ~/.cargo/git with the host, so only the first run builds OCCT
-#   and downloads the crates; later runs rebuild just what changed.
+#   shares ~/.cargo/registry and ~/.cargo/git with the host, so only the first run downloads the
+#   crates; later runs rebuild just what changed.
 # - Windows is built on the host with the MinGW toolchain (target/x86_64-pc-windows-gnu, cached
 #   like any cargo build).
 #

@@ -55,7 +55,6 @@ proptest = "1"
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
 nalgebra = { version = "0.35", default-features = false, features = ["std"] }
 ttf-parser = "0.25"
-glam = "0.24"
 # Sheet metal flat patterns (P3I.1): 2D polygon booleans for the flat outline, reliefs and the
 # collision check (MIT/Apache-2.0).
 geo = "0.32"
@@ -82,7 +81,6 @@ rmcp = { version = "3.5", default-features = false, features = ["server", "macro
 tokio = { version = "1", features = ["rt", "net", "sync", "time", "macros"] }
 tokio-util = "0.7"
 axum = { version = "0.8", default-features = false, features = ["http1", "tokio"] }
-opencascade = { git = "https://github.com/rvdende/opencascade-rs", branch = "main" }
 
 cadrs_core = { path = "crates/cadrs_core" }
 cadrs_sketch = { path = "crates/cadrs_sketch" }

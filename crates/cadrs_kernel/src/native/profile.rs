@@ -296,7 +296,7 @@ pub fn regions(profile: &Profile) -> Result<Vec<Region2>> {
     let mut out = Vec::new();
     for (ri, r) in profile.regions.iter().enumerate() {
         let source = r.source.unwrap_or(ri as u64);
-        let mut lp = |l: &crate::Loop, li: usize| -> Result<Loop2> {
+        let lp = |l: &crate::Loop, li: usize| -> Result<Loop2> {
             let mut pieces = Vec::new();
             for (ci, c) in l.curves.iter().enumerate() {
                 let cs = c.source().unwrap_or(unsourced_curve(li, ci));

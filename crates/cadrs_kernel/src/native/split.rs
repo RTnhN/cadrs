@@ -101,7 +101,7 @@ pub fn split_face(surf: &Surface, flip: bool, boundary: &[Vec<Arc>], cuts: &[Arc
     };
     let ntol = (size * 1e-7).max(1e-7);
     let mut nodes: Vec<(usize, P2)> = Vec::new();
-    let mut node_of = |v: usize, p: P2, nodes: &mut Vec<(usize, P2)>| -> usize {
+    let node_of = |v: usize, p: P2, nodes: &mut Vec<(usize, P2)>| -> usize {
         if let Some(i) = nodes.iter().position(|(nv, np)| *nv == v && (np - p).norm() < ntol * 100.0) {
             return i;
         }

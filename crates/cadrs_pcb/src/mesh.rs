@@ -103,7 +103,7 @@ pub fn package_mesh_in(kernel: &mut dyn Kernel, pkg: &cadrs_idf::Package) -> Res
     })
 }
 
-/// [`package_mesh_in`] with a kernel of its own (OpenCascade).
+/// [`package_mesh_in`] with a kernel of its own.
 #[cfg(feature = "brep")]
 pub fn package_mesh(pkg: &cadrs_idf::Package) -> Result<BodyMesh, String> {
     let mut k = cadrs_kernel::DefaultKernel::new();
@@ -164,7 +164,7 @@ pub fn board_mesh_in(kernel: &mut dyn Kernel, pcb: &PcbBoard) -> Result<BoardMes
     Ok(out)
 }
 
-/// [`board_mesh_in`] with a kernel of its own (OpenCascade).
+/// [`board_mesh_in`] with a kernel of its own.
 #[cfg(feature = "brep")]
 pub fn board_mesh(pcb: &PcbBoard) -> Result<BoardMesh, String> {
     let mut k = cadrs_kernel::DefaultKernel::new();

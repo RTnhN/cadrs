@@ -10,8 +10,8 @@
 //!   parts; an empty scope on the parts the new body touches (Add) or overlaps (Remove,
 //!   Intersect). [`Build::contacts`] tells the Extrude dialog what the new body touches, so it
 //!   can pick Add by itself (PS5.2).
-//! - Every body goes through the solid-modelling kernel ([`cadrs_kernel`], OpenCascade with the
-//!   default `occt` feature; without it, only blind New extrudes, as the prism mesh of
+//! - Every body goes through the solid-modelling kernel ([`cadrs_kernel`]'s native B-rep kernel,
+//!   with the default `brep` feature; without it, only blind New extrudes, as the prism mesh of
 //!   [`crate::solid`]).
 //! - **Per-feature cache.** Each feature's result (the parts after it, with their kernel bodies,
 //!   display meshes and mass properties, and its error) is cached under a key that chains the
@@ -399,7 +399,7 @@ thread_local! {
 }
 
 /// The geometry fingerprint this build was made with: a hash of the source that decides what a
-/// rebuild makes, the locked OpenCASCADE and the compiler (see `build.rs`). Built geometry kept
+/// rebuild makes (the kernel's included) and the compiler (see `build.rs`). Built geometry kept
 /// across sessions is keyed by it, so a fix never reuses what older code built.
 pub const GEOMETRY_FINGERPRINT: &str = env!("CADRS_GEOMETRY_FINGERPRINT");
 

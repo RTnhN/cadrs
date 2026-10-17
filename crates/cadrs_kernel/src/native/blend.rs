@@ -872,10 +872,9 @@ fn check_overlaps(b: &Body, edges: &[(EdgeId, Box<dyn Fn(f64) -> SectionKind>, b
 
 /// The kernel's fillet: every edge with its tangent chain.
 pub fn fillet(k: &mut NativeKernel, body: BodyId, edges: &[EdgeId], spec: &FilletSpec) -> Result<OpResult> {
-    if let FilletSize::Radius(r) | FilletSize::Width(r) = spec.size {
-        if !(r > 0.0) {
-            return Err(KernelError::InvalidParameter("The fillet's size must be positive".into()));
-        }
+    let (FilletSize::Radius(r) | FilletSize::Width(r)) = spec.size;
+    if !(r > 0.0) {
+        return Err(KernelError::InvalidParameter("The fillet's size must be positive".into()));
     }
     let mut all: Vec<EdgeId> = Vec::new();
     for &e in edges {
@@ -1226,25 +1225,6 @@ fn is_arc_face(b: &Body, f: usize) -> bool {
     let d = face.surf.d2(u0, v0);
     d[3].norm() > 1e-9
 }
-
-/// A 2D piece as a sketch curve (lines and arcs).
-fn piece_to_curve2(p: &Piece) -> Option<Curve2> {
-    let pt = |q: P3| nalgebra::Point2::new(q.x, q.y);
-    match &p.c {
-        Curve::Line { .. } => Some(Curve2::Line { a: p.start(), b: p.end(), source: None }),
-        Curve::Circle { c, x, y, r } => {
-            let a0 = {
-                let q = p.c.point(if p.rev { p.t1 } else { p.t0 }) - c;
-                q.y.atan2(q.x)
-            };
-            let orient = x.cross(y).z.signum();
-            let sweep = (p.t1 - p.t0) * if p.rev { -1.0 } else { 1.0 } * orient;
-            Some(Curve2::Arc { center: pt(*c), radius: *r, start_angle: a0, sweep, source: None })
-        }
-        _ => None,
-    }
-}
-
 
 /// The outward signed distance of a point from a face's surface.
 fn out_dist(f: &Face, p: &P3) -> (f64, V3, P3) {

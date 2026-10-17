@@ -5,8 +5,8 @@
 [![Rust](https://img.shields.io/badge/rust-stable%20%C2%B7%20edition%202024-orange.svg)](https://www.rust-lang.org)
 [![Bevy](https://img.shields.io/badge/bevy-0.19-232326.svg)](https://bevyengine.org)
 
-**A parametric, feature-based CAD app written in Rust**, with a Bevy UI and an OpenCASCADE
-modeling kernel. Its workflow follows Onshape's: sketch on a plane, constrain and dimension,
+**A parametric, feature-based CAD app written in Rust**, with a Bevy UI and its own pure-Rust
+B-rep modeling kernel. Its workflow follows Onshape's: sketch on a plane, constrain and dimension,
 build parts from features, put them together in assemblies, and make drawings from them.
 
 [![From sketch to solid, then a PCB in the same Part Studio: schematic, board layout and the routed board in 3D](.github/images/pcb-demo.gif)](https://youtu.be/qT1FKZqUAxA)
@@ -50,14 +50,14 @@ build parts from features, put them together in assemblies, and make drawings fr
 
 ## Building
 
-You need a stable Rust toolchain ([rustup](https://rustup.rs)), CMake and a C++ compiler.
-The first build compiles OpenCASCADE from source, which takes several minutes; later builds
-are incremental.
+You need a stable Rust toolchain ([rustup](https://rustup.rs)) and a C compiler (a few
+dependencies, such as `ring`, compile small C files). The B-rep kernel is pure Rust: there is
+no C++ or CMake build.
 
 On Debian or Ubuntu, Bevy also needs these:
 
 ```sh
-sudo apt install cmake g++ pkg-config libasound2-dev libudev-dev libwayland-dev libxkbcommon-dev
+sudo apt install build-essential pkg-config libasound2-dev libudev-dev libwayland-dev libxkbcommon-dev
 ```
 
 Then:
@@ -68,8 +68,8 @@ cd cadrs
 cargo run --release
 ```
 
-On macOS, CMake from Homebrew (`brew install cmake`) and the Xcode command line tools
-(`xcode-select --install`) are enough; it builds and runs natively on Apple Silicon (Metal).
+On macOS, the Xcode command line tools (`xcode-select --install`) are enough; it builds and
+runs natively on Apple Silicon (Metal).
 
 Documents are stored in your platform's data folder (on Linux, `~/.local/share/cadrs/`).
 
@@ -128,7 +128,7 @@ them, and `CADRS_BLESS=1` saves new ones.
 | `cadrs_ui` | A reusable Bevy widget library (theme, buttons, inputs, menus, dialogs, lists) |
 | `cadrs_core` | The document model, features, rebuild, commands and undo, persistence (no Bevy) |
 | `cadrs_sketch` | Sketch geometry, constraints, the solver, snapping and hit testing (no Bevy) |
-| `cadrs_kernel` | Our solid-modeling API over OpenCASCADE, with persistent face and edge names |
+| `cadrs_kernel` | The B-rep modeling kernel (pure Rust) and its API, with persistent face and edge names |
 | `cadrs_drawing` | Drawing views, projection and annotations |
 | `cadrs_fea` | Linear static finite-element analysis |
 | `cadrs_render` | A CPU path tracer for photorealistic renders |
@@ -138,7 +138,7 @@ them, and `CADRS_BLESS=1` saves new ones.
 | `cadrs_mcp` | The MCP server through which AI assistants drive the app |
 
 [crates/cadrs_kernel/README.md](crates/cadrs_kernel/README.md) describes the modeling layer:
-the kernel API, persistent face and edge naming, and the OpenCASCADE backend. The notes in
+the kernel API, persistent face and edge naming, and the native kernel's design. The notes in
 `reference/onshape/` record how Onshape behaves, which is what cadrs is measured against.
 
 ## License
@@ -156,8 +156,7 @@ in this work by you, as defined in the Apache-2.0 license, shall be dual license
 without any additional terms or conditions.
 
 Third-party parts keep their own licenses: the [Inter](https://rsms.me/inter/) font is under
-the SIL Open Font License ([assets/fonts/OFL.txt](assets/fonts/OFL.txt)), and
-[OpenCASCADE](https://dev.opencascade.org/) under the LGPL 2.1 with the OCCT exception.
+the SIL Open Font License ([assets/fonts/OFL.txt](assets/fonts/OFL.txt)).
 
 ## Disclaimer
 

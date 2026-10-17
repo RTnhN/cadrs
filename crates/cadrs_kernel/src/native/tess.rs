@@ -95,7 +95,7 @@ pub fn mesh_face(body: &Body, f: &Face, es: &[(Vec<f64>, Vec<P3>)], defl: f64, a
         for c in l {
             let e = &body.edges[c.edge];
             let (ts, ps) = &es[c.edge];
-            let mut add = |t: f64, p: P3, pts_uv: &mut Vec<P2>, pts_3d: &mut Vec<P3>| {
+            let add = |t: f64, p: P3, pts_uv: &mut Vec<P2>, pts_3d: &mut Vec<P3>| {
                 let q = c.pc.point(t);
                 pts_uv.push(P2::new(q.x, q.y));
                 pts_3d.push(p);

@@ -1,11 +1,8 @@
 //! Building bodies from profiles: planar faces, prisms (extrudes).
 
-use super::curve::Curve;
 use super::math::*;
-use super::profile::{MergedFace, Piece};
-use super::surface::Surface;
 use super::topo::*;
-use crate::{KernelError, Origin, Result};
+use crate::Origin;
 
 /// A body and the origins of its faces (a face may have several: a merged cap).
 #[derive(Debug, Clone, Default)]

@@ -491,9 +491,6 @@ pub fn extrude_with(k: &mut NativeKernel, profile: &Profile, spec: &ExtrudeSpec)
             let a = piece(k, &faces, &plane, o, d, first, true)?;
             match second {
                 Some(s) => {
-                    let mut back_plane = plane;
-                    back_plane.normal = -plane.normal;
-                    back_plane.x_dir = plane.x_dir;
                     // The second end sweeps the same profile the other way.
                     let b = piece(k, &faces, &plane, o, -d, s, false)?;
                     tagged_bool(&a, &b, BoolOp::Union)?
