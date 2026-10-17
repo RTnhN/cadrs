@@ -12,3 +12,6 @@ __pycache__/
 
 # Internal planning docs for the agent workflow (see CLAUDE.md): kept locally, not published.
 /docs/
+
+# Generated from OCCT's LGPL test scripts by tools/occt_to_rust.py (kept local).
+/crates/cadrs_kernel/tests/occt_*.rs
