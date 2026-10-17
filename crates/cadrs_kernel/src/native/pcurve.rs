@@ -264,7 +264,10 @@ fn fitted(s: &Surface, c: &Curve, t0: f64, t1: f64) -> Curve {
                 ins.push(tm);
             }
         }
-        if ins.is_empty() || ts.len() > 50_000 {
+        if ins.is_empty() || ts.len() > 4096 {
+            if !ins.is_empty() && std::env::var("CADRS_PCURVE_DEBUG").is_ok() {
+                eprintln!("pcurve: no fit after {} points ({} off) of {c:?} on {s:?}", ts.len(), ins.len());
+            }
             return Curve::Nurbs(Arc::new(fit));
         }
         ts.extend(ins);

@@ -486,3 +486,64 @@ fn debug_sweep_bezier() {
         }
     }
 }
+
+/// A Ø40 cylinder minus a full revolve of a 4 × 4 square straddling its wall (the revolve's
+/// seams lie in the cylinder's seam plane): V = π·20²·40 − π(22² − 18²)·4.
+#[test]
+fn debug_groove_ring() {
+    let mut k = NativeKernel::new();
+    let c = Loop { curves: vec![Curve2::Circle { center: p(0.0, 0.0), radius: 20.0, source: None }] };
+    let cyl = k.extrude(&Profile::new(Plane::top(), vec![reg(c)]), Extent::Blind(40.0)).unwrap().bodies[0];
+    let front = Plane { origin: Point3::origin(), x_dir: Vector3::x_axis(), normal: -Vector3::y_axis() };
+    let axis = Axis { origin: Point3::origin(), dir: Vector3::z_axis() };
+    let ring = k.revolve(&Profile::new(front, vec![reg(rect(18., 18., 22., 22.))]), axis, std::f64::consts::TAU).unwrap().bodies[0];
+    eprintln!("ring volume {}", k.mass_properties(ring).unwrap().volume);
+    let r = k.boolean(BoolOp::Subtract, cyl, &[ring]).unwrap();
+    let v = k.mass_properties(r.bodies[0]).unwrap().volume;
+    let want = std::f64::consts::PI * (16000.0 - 304.0);
+    assert!((v - want).abs() < 1e-6 * want, "{v} vs {want}");
+}
+
+/// A thin full revolve of a 4 × 4 square's loop, 1 mm inside: V = 12·2π·20.
+#[test]
+fn debug_thin_ring() {
+    let mut k = NativeKernel::new();
+    let front = Plane { origin: Point3::origin(), x_dir: Vector3::x_axis(), normal: -Vector3::y_axis() };
+    let axis = Axis { origin: Point3::origin(), dir: Vector3::z_axis() };
+    for prof in [
+        Profile::new(front, vec![reg(rect(18., 18., 22., 22.))]),
+        Profile { plane: front, regions: vec![], chains: vec![Chain { curves: rect(18., 18., 22., 22.).curves, source: None }] },
+    ] {
+        let spec = RevolveSpec { body: BodyKind::Thin { left: 1.0, right: 0.0 }, ..RevolveSpec::solid(axis, None) };
+        match k.revolve_with(&prof, &spec) {
+            Ok(r) => {
+                let v = k.mass_properties(r.bodies[0]).unwrap().volume;
+                let want = 12.0 * std::f64::consts::TAU * 20.0;
+                eprintln!("thin ring {v} vs {want}");
+            }
+            Err(e) => eprintln!("thin ring: {e}"),
+        }
+    }
+}
+
+/// Two full revolves of overlapping rectangles united (thin walls' bands).
+#[test]
+fn debug_ring_union() {
+    let mut k = NativeKernel::new();
+    let front = Plane { origin: Point3::origin(), x_dir: Vector3::x_axis(), normal: -Vector3::y_axis() };
+    let axis = Axis { origin: Point3::origin(), dir: Vector3::z_axis() };
+    let ring = |k: &mut NativeKernel, r: Loop| k.revolve(&Profile::new(front, vec![reg(r)]), axis, std::f64::consts::TAU).unwrap().bodies[0];
+    let a = ring(&mut k, rect(18., 18., 19., 22.));
+    let b = ring(&mut k, rect(18., 21., 22., 22.));
+    let r = k.boolean(BoolOp::Union, a, &[b]);
+    let tau = std::f64::consts::TAU;
+    // Areas 4 + 4 − 1 = 7 at centroids: A·r̄ = 4·18.5 + 4·20 − 1·18.5.
+    let want = tau * (4.0 * 18.5 + 4.0 * 20.0 - 18.5);
+    match r {
+        Ok(r) => {
+            let v = k.mass_properties(r.bodies[0]).unwrap().volume;
+            assert!((v - want).abs() < 1e-6 * want, "{v} vs {want}");
+        }
+        Err(e) => panic!("{e}"),
+    }
+}

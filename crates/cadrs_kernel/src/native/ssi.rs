@@ -869,6 +869,71 @@ pub fn curve_curve(a: &Curve, a0: f64, a1: f64, b: &Curve, b0: f64, b1: f64, tol
     if let Some(r) = line_circle(b, b0, b1, a, a0, a1) {
         return r.into_iter().map(|(x, y)| (y, x)).collect();
     }
+    // Two circles in closed form.
+    if let (&Curve::Circle { c: ca, x: xa, y: ya, r: ra }, &Curve::Circle { c: cb, x: xb, y: yb, r: rb }) = (a, b) {
+        let (na, nb) = (xa.cross(&ya), xb.cross(&yb));
+        let mut hits: Vec<P3> = Vec::new();
+        if na.cross(&nb).norm() < 1e-12 {
+            // Parallel planes: they meet only in one plane.
+            if (cb - ca).dot(&na).abs() > tol {
+                return out;
+            }
+            let d = cb - ca;
+            let d = d - na * d.dot(&na);
+            let dl = d.norm();
+            if dl < tol && (ra - rb).abs() < tol {
+                return out; // the same circle: overlaps are found from the end points
+            }
+            if dl < 1e-300 || dl > ra + rb + tol || dl < (ra - rb).abs() - tol {
+                return out;
+            }
+            // Radical line: distance along d from ca.
+            let u = d / dl;
+            let x = ((dl * dl + ra * ra - rb * rb) / (2.0 * dl)).clamp(-ra, ra);
+            let h2 = ra * ra - x * x;
+            let w = na.cross(&u);
+            if h2 <= (ra * tol * 1e-3).max(0.0) {
+                hits.push(ca + u * x);
+            } else {
+                let h = h2.sqrt();
+                hits.push(ca + u * x + w * h);
+                hits.push(ca + u * x - w * h);
+            }
+        } else {
+            // A's points on B's plane: the line where the planes meet, through circle A.
+            let dir = na.cross(&nb).normalize();
+            // A point on both planes.
+            let (da, db) = (na.dot(&ca.coords), nb.dot(&cb.coords));
+            let m = nalgebra::Matrix3::from_rows(&[na.transpose(), nb.transpose(), dir.transpose()]);
+            let Some(inv) = m.try_inverse() else { return out };
+            let o = P3::from(inv * V3::new(da, db, dir.dot(&ca.coords)));
+            let w = o - ca;
+            let bq = w.dot(&dir);
+            let disc = bq * bq - (w.norm_squared() - ra * ra);
+            if disc < -2.0 * ra * tol {
+                return out;
+            }
+            if disc <= 0.0 {
+                hits.push(o - dir * bq);
+            } else {
+                let q = disc.sqrt();
+                hits.push(o + dir * (-bq - q));
+                hits.push(o + dir * (-bq + q));
+            }
+        }
+        for p in hits {
+            let (wa, wb) = (p - ca, p - cb);
+            if (wa.norm() - ra).abs() > tol || (wb.norm() - rb).abs() > tol {
+                continue;
+            }
+            let ta = super::curve::clamp_periodic(wa.dot(&ya).atan2(wa.dot(&xa)), a0, a1);
+            let tb = super::curve::clamp_periodic(wb.dot(&yb).atan2(wb.dot(&xb)), b0, b1);
+            if (a.point(ta) - p).norm() < tol && (b.point(tb) - p).norm() < tol {
+                out.push((ta, tb));
+            }
+        }
+        return out;
+    }
     // Sample a, find local minima of the distance to b, refine by Newton on both parameters.
     let n = match a {
         Curve::Line { .. } => 32,
@@ -892,6 +957,10 @@ pub fn curve_curve(a: &Curve, a0: f64, a1: f64, b: &Curve, b0: f64, b1: f64, tol
         let (t, d, s) = samples[i];
         let left = if i > 0 { samples[i - 1].1 } else { f64::INFINITY };
         let right = if i + 1 < samples.len() { samples[i + 1].1 } else { f64::INFINITY };
+        // A run of coincident samples is an overlap, not crossings (found from the ends).
+        if d < tol && (left < tol || right < tol) {
+            continue;
+        }
         if d <= left && d <= right && d < spacing * 2.0 + tol {
             // Newton on min |a(t) − b(s)|².
             let (mut t, mut s) = (t, s);

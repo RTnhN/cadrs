@@ -222,7 +222,6 @@ fn merge_group(b: &mut Body, g: &[usize]) -> Option<Face> {
         let u = &uses[&e];
         u.len() == 2 && u[0] == u[1]
     };
-    let periodic = surf.u_periodic() || surf.v_periodic();
     let mut rest: Vec<Coedge> = Vec::new();
     for &f in g {
         for l in &b.faces[f].loops {
@@ -230,7 +229,9 @@ fn merge_group(b: &mut Body, g: &[usize]) -> Option<Face> {
                 if internal(c.edge) {
                     continue;
                 }
-                if periodic && seam(c.edge) {
+                // A seam: periodic surfaces are re-seamed below; on others it is a slit (a full
+                // revolve's planar annulus), which bounds nothing.
+                if seam(c.edge) {
                     continue;
                 }
                 rest.push(c.clone());

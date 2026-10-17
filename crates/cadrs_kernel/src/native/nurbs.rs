@@ -271,14 +271,23 @@ impl NurbsCurve {
             knots.push(s / p as f64);
         }
         knots.extend(vec![params[n_pts - 1]; p + 1]);
-        let mut a = DMatrix::<f64>::zeros(n, n);
+        // Large systems straight into band storage (a dense n × n matrix would not fit).
+        let banded = n > 24;
+        let bw = p + 2;
+        let mut a = DMatrix::<f64>::zeros(if banded { 0 } else { n }, if banded { 0 } else { n });
+        let mut band = Band::new(if banded { n } else { 0 }, bw);
+        let mut outside = false;
         let mut rhs = DMatrix::<f64>::zeros(n, 3);
         let mut row = 0;
-        let put = |a: &mut DMatrix<f64>, row: usize, u: f64, d: usize| {
+        let mut put = |a: &mut DMatrix<f64>, row: usize, u: f64, d: usize| {
             let span = find_span(n - 1, p, u, &knots);
             let nd = basis_ders(span, u, p, d, &knots);
             for j in 0..=p {
-                a[(row, span - p + j)] = nd[d][j];
+                if banded {
+                    outside |= !band.set(row, span - p + j, nd[d][j]);
+                } else {
+                    a[(row, span - p + j)] = nd[d][j];
+                }
             }
         };
         for (i, q) in pts.iter().enumerate() {
@@ -306,7 +315,15 @@ impl NurbsCurve {
                 }
             }
         }
-        let sol = if n > 24 { banded_solve(&a, &rhs, p + 2)? } else { a.lu().solve(&rhs)? };
+        drop(put);
+        let sol = if banded {
+            if outside {
+                return None;
+            }
+            band.solve(rhs)?
+        } else {
+            a.lu().solve(&rhs)?
+        };
         if sol.iter().any(|x| !x.is_finite()) {
             return None;
         }
@@ -335,7 +352,12 @@ impl NurbsCurve {
             knots.push(s / p as f64);
         }
         knots.extend(vec![params[n_pts - 1]; p + 1]);
-        let mut a = DMatrix::<f64>::zeros(n, n);
+        // Large systems straight into band storage (a dense n × n matrix would not fit).
+        let banded = n > 24;
+        let bw = p + 2;
+        let mut a = DMatrix::<f64>::zeros(if banded { 0 } else { n }, if banded { 0 } else { n });
+        let mut band = Band::new(if banded { n } else { 0 }, bw);
+        let mut outside = false;
         let mut rhs = DMatrix::<f64>::zeros(n, 3);
         let mut row = 0;
         let mut put = |a: &mut DMatrix<f64>, rhs: &mut DMatrix<f64>, u: f64, d: usize, v: V3| {
@@ -343,7 +365,11 @@ impl NurbsCurve {
             let nd = basis_ders(span, u, p, d, &knots);
             if d < nd.len() {
                 for j in 0..=p {
-                    a[(row, span - p + j)] = nd[d][j];
+                    if banded {
+                        outside |= !band.set(row, span - p + j, nd[d][j]);
+                    } else {
+                        a[(row, span - p + j)] = nd[d][j];
+                    }
                 }
             }
             rhs[(row, 0)] = v.x;
@@ -370,7 +396,13 @@ impl NurbsCurve {
                 }
             }
         }
-        match a.lu().solve(&rhs) {
+        drop(put);
+        let sol = if banded {
+            if outside { None } else { band.solve(rhs) }
+        } else {
+            a.lu().solve(&rhs)
+        };
+        match sol {
             Some(sol) if sol.iter().all(|x| x.is_finite()) => {
                 let cps = (0..n).map(|i| H::new(sol[(i, 0)], sol[(i, 1)], sol[(i, 2)], 1.0)).collect();
                 Self { degree: p, knots, cps }
@@ -565,28 +597,57 @@ impl NurbsSurface {
 /// collocation matrices are banded (and totally positive).
 pub fn banded_solve(a: &DMatrix<f64>, b: &DMatrix<f64>, bw: usize) -> Option<DMatrix<f64>> {
     let n = a.nrows();
-    let m = b.ncols();
-    // Band storage of rows: entries j in [i − bw, i + 2bw] (room for fill-in from pivoting).
-    let w = 3 * bw + 1;
-    let off = bw; // column j of row i lives at index j + off − i
-    let mut band = vec![0.0f64; n * w];
-    let at = |i: usize, j: usize| -> Option<usize> {
-        let k = j as isize + off as isize - i as isize;
-        (k >= 0 && (k as usize) < w).then(|| i * w + k as usize)
-    };
+    let mut band = Band::new(n, bw);
     for i in 0..n {
         for j in i.saturating_sub(bw)..(i + 2 * bw + 1).min(n) {
-            if let Some(k) = at(i, j) {
-                band[k] = a[(i, j)];
-            }
+            band.set(i, j, a[(i, j)]);
         }
-        // Entries outside the stored band must be zero.
-        for j in 0..n {
-            if (j + bw < i || j > i + 2 * bw) && a[(i, j)] != 0.0 {
+        // Entries just outside the stored band must be zero (B-spline collocation rows are
+        // local; checking every entry would make the solve O(n²)).
+        for j in [i.wrapping_sub(bw + 1), i + 2 * bw + 1] {
+            if j < n && a[(i, j)] != 0.0 {
                 return a.clone().lu().solve(b);
             }
         }
     }
+    band.solve(b.clone())
+}
+
+/// A square matrix in band storage: row i keeps columns [i − bw, i + 2bw] (room for the
+/// fill-in of partial pivoting).
+pub struct Band {
+    n: usize,
+    bw: usize,
+    band: Vec<f64>,
+}
+
+impl Band {
+    pub fn new(n: usize, bw: usize) -> Self {
+        Self { n, bw, band: vec![0.0; n * (3 * bw + 1)] }
+    }
+    fn at(&self, i: usize, j: usize) -> Option<usize> {
+        let w = 3 * self.bw + 1;
+        let k = j as isize + self.bw as isize - i as isize;
+        (k >= 0 && (k as usize) < w).then(|| i * w + k as usize)
+    }
+    /// Sets an entry; false when it lies outside the band.
+    pub fn set(&mut self, i: usize, j: usize, v: f64) -> bool {
+        match self.at(i, j) {
+            Some(k) => {
+                self.band[k] = v;
+                true
+            }
+            None => v == 0.0,
+        }
+    }
+    /// Solves A·X = B by Gaussian elimination with partial pivoting inside the band.
+    pub fn solve(self, b: DMatrix<f64>) -> Option<DMatrix<f64>> {
+        let (n, bw) = (self.n, self.bw);
+        let m = b.ncols();
+        let Band { band: mut band_v, .. } = self;
+        let me = Band { n, bw, band: Vec::new() };
+        let at = |i: usize, j: usize| me.at(i, j);
+        let band = &mut band_v;
     let mut x = b.clone();
     for c in 0..n {
         // Pivot among rows c..c+bw.
@@ -611,7 +672,7 @@ pub fn banded_solve(a: &DMatrix<f64>, b: &DMatrix<f64>, bw: usize) -> Option<DMa
                     (Some(ka), None) => band[ka] = 0.0,
                     (None, Some(kb)) => {
                         if band[kb] != 0.0 {
-                            return a.clone().lu().solve(b);
+                            return None;
                         }
                     }
                     (None, None) => {}
@@ -651,6 +712,7 @@ pub fn banded_solve(a: &DMatrix<f64>, b: &DMatrix<f64>, bw: usize) -> Option<DMa
         }
     }
     Some(x)
+    }
 }
 
 /// Solves a dense square system (used by fits).
