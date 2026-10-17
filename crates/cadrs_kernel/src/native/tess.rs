@@ -80,6 +80,8 @@ fn steps(s: &Surface, ub: (f64, f64), vb: (f64, f64), defl: f64, ang: f64) -> (f
 
 /// Triangulates one face. `es` holds each edge's samples.
 pub fn mesh_face(body: &Body, f: &Face, es: &[(Vec<f64>, Vec<P3>)], defl: f64, ang: f64) -> FaceMesh {
+    let t_start = std::time::Instant::now();
+    let prof = std::env::var("CADRS_TESS_PROFILE").is_ok();
     let (mu, mv) = f.surf.metric();
     // Boundary points: (uv, 3D point).
     let mut pts_uv: Vec<P2> = Vec::new();
@@ -166,21 +168,53 @@ pub fn mesh_face(body: &Body, f: &Face, es: &[(Vec<f64>, Vec<P3>)], defl: f64, a
                     })
                 })
                 .collect();
-            let polys: Vec<Vec<P2>> = loops.iter().map(|&(a, b)| pts_uv[a..b].to_vec()).collect();
-            for i in 1..nu {
-                for j in 1..nv {
-                    let q = P2::new(ubox.0 + du * i as f64, vbox.0 + dv * j as f64);
-                    let mut inside = false;
-                    for p in &polys {
-                        if point_in_polygon(&q, p) {
-                            inside = !inside;
+            // The boundary's segments bucketed by grid cell (scaled space), for the distance test.
+            let (cw, chh) = (du * mu, dv * mv);
+            let (ox, oy) = (ubox.0 * mu, vbox.0 * mv);
+            let cell = |x: f64, y: f64| -> (i64, i64) { (((x - ox) / cw).floor() as i64, ((y - oy) / chh).floor() as i64) };
+            let mut buckets: std::collections::HashMap<(i64, i64), Vec<usize>> = std::collections::HashMap::new();
+            for (k, (a, b)) in segs.iter().enumerate() {
+                let (c0, c1) = (cell(a.x.min(b.x) - min_d, a.y.min(b.y) - min_d), cell(a.x.max(b.x) + min_d, a.y.max(b.y) + min_d));
+                if (c1.0 - c0.0 + 1) * (c1.1 - c0.1 + 1) > 4096 {
+                    // A very long segment: in every cell of its rows would be too many; test it
+                    // against every point instead.
+                    buckets.entry((i64::MIN, i64::MIN)).or_default().push(k);
+                    continue;
+                }
+                for cx in c0.0..=c1.0 {
+                    for cy in c0.1..=c1.1 {
+                        buckets.entry((cx, cy)).or_default().push(k);
+                    }
+                }
+            }
+            let always: Vec<usize> = buckets.get(&(i64::MIN, i64::MIN)).cloned().unwrap_or_default();
+            // Per row of the grid, the inside intervals along u (one scanline pass over the
+            // boundary instead of a point-in-polygon test per point).
+            for j in 1..nv {
+                let v = vbox.0 + dv * j as f64;
+                let mut xs: Vec<f64> = Vec::new();
+                for &(a, b) in &loops {
+                    for i in a..b {
+                        let k = if i + 1 == b { a } else { i + 1 };
+                        let (p, q) = (pts_uv[i], pts_uv[k]);
+                        if (p.y > v) != (q.y > v) {
+                            xs.push(p.x + (v - p.y) * (q.x - p.x) / (q.y - p.y));
                         }
                     }
-                    if !inside {
+                }
+                xs.sort_by(f64::total_cmp);
+                for i in 1..nu {
+                    let u = ubox.0 + du * i as f64;
+                    let crossings = xs.partition_point(|x| *x < u);
+                    if crossings % 2 == 0 {
                         continue;
                     }
+                    let q = P2::new(u, v);
                     let qs = P2::new(q.x * mu, q.y * mv);
-                    if segs.iter().any(|(a, b)| seg_dist2(&qs, a, b) < min_d) {
+                    let c = cell(qs.x, qs.y);
+                    let near = buckets.get(&c).map_or(false, |ks| ks.iter().any(|&k| seg_dist2(&qs, &segs[k].0, &segs[k].1) < min_d))
+                        || always.iter().any(|&k| seg_dist2(&qs, &segs[k].0, &segs[k].1) < min_d);
+                    if near {
                         continue;
                     }
                     grid.push(q);
@@ -188,24 +222,48 @@ pub fn mesh_face(body: &Body, f: &Face, es: &[(Vec<f64>, Vec<P3>)], defl: f64, a
             }
         }
     }
-    // Constrained Delaunay in scaled uv.
-    let mut cdt: ConstrainedDelaunayTriangulation<SPoint<f64>> = ConstrainedDelaunayTriangulation::new();
-    let mut handles = Vec::with_capacity(nb + grid.len());
-    for p in pts_uv.iter().chain(grid.iter()) {
-        // spade refuses coordinates of tiny magnitude (below ~1.8e-43): those are zero.
-        let tiny = |x: f64| if x.abs() < 1e-30 { 0.0 } else { x };
-        match cdt.insert(SPoint::new(tiny(p.x * mu), tiny(p.y * mv))) {
-            Ok(h) => handles.push(h),
-            Err(_) => return FaceMesh::default(),
-        }
+    if prof {
+        eprintln!("tess face: boundary {nb}, grid {} in {:?}", grid.len(), t_start.elapsed());
     }
+    // Constrained Delaunay in scaled uv, bulk loaded (exact duplicates merged first, so the
+    // triangulation's vertices are our points in order).
+    let tiny = |x: f64| if x.abs() < 1e-30 { 0.0 } else { x };
+    let mut uniq: Vec<SPoint<f64>> = Vec::with_capacity(nb + grid.len());
+    let mut seen: std::collections::HashMap<(u64, u64), usize> = std::collections::HashMap::with_capacity(nb);
+    let mut handles: Vec<spade::handles::FixedVertexHandle> = Vec::with_capacity(nb + grid.len());
+    for (k, p) in pts_uv.iter().chain(grid.iter()).enumerate() {
+        let sp = SPoint::new(tiny(p.x * mu), tiny(p.y * mv));
+        if !(sp.x.is_finite() && sp.y.is_finite()) {
+            return FaceMesh::default();
+        }
+        // Only boundary points can repeat (the grid keeps clear of the boundary).
+        let idx = if k < nb {
+            *seen.entry((sp.x.to_bits(), sp.y.to_bits())).or_insert_with(|| {
+                uniq.push(sp);
+                uniq.len() - 1
+            })
+        } else {
+            uniq.push(sp);
+            uniq.len() - 1
+        };
+        handles.push(spade::handles::FixedVertexHandle::from_index(idx));
+    }
+    let mut cons: Vec<[usize; 2]> = Vec::new();
     for &(a, b) in &loops {
         for i in a..b {
             let j = if i + 1 == b { a } else { i + 1 };
-            if handles[i] != handles[j] {
-                cdt.try_add_constraint(handles[i], handles[j]);
+            let (x, y) = (handles[i].index(), handles[j].index());
+            if x != y {
+                cons.push([x, y]);
             }
         }
+    }
+    let cdt: ConstrainedDelaunayTriangulation<SPoint<f64>> = match ConstrainedDelaunayTriangulation::try_bulk_load_cdt(uniq, cons, |_| {}) {
+        Ok(c) => c,
+        Err(_) => return FaceMesh::default(),
+    };
+    if prof {
+        eprintln!("tess face: cdt at {:?}", t_start.elapsed());
     }
     // Inside faces by parity of constraint crossings from the hull.
     let nf = cdt.num_inner_faces();

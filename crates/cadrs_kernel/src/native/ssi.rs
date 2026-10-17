@@ -898,14 +898,28 @@ pub fn curve_surface(c: &Curve, t0: f64, t1: f64, s: &Surface) -> Vec<f64> {
         Curve::Circle { .. } | Curve::Ellipse { .. } => (((t1 - t0) / (PI / 32.0)).ceil() as usize).max(8),
         Curve::Nurbs(nc) => (nc.cps.len() * 8).clamp(16, 2000),
     };
-    let f = |t: f64| sdist(s, &c.point(t));
+    // The signed distance, its projection hinted (on B-spline and other non-implicit surfaces
+    // a fresh projection is a global search): along the samples from the previous one, inside
+    // a bracket from the bracket's own sample.
+    let implicit = s.signed_distance(&P3::origin()).is_some();
+    let fh = |t: f64, hint: &mut Option<(f64, f64)>| -> f64 { if implicit { sdist(s, &c.point(t)) } else { sdist_hint(s, &c.point(t), hint) } };
     let mut out: Vec<f64> = Vec::new();
-    let mut prev = (t0, f(t0));
-    let mut vals = vec![prev];
-    for i in 1..=n {
+    let mut hints: Vec<Option<(f64, f64)>> = Vec::with_capacity(n + 1);
+    let mut h: Option<(f64, f64)> = None;
+    let mut vals = Vec::with_capacity(n + 1);
+    for i in 0..=n {
         let t = t0 + (t1 - t0) * i as f64 / n as f64;
-        vals.push((t, f(t)));
+        let v = fh(t, &mut h);
+        vals.push((t, v));
+        hints.push(h);
     }
+    let mut prev: (f64, f64);
+    let f = |t: f64| -> f64 {
+        // Hinted from the nearest sample.
+        let i = (((t - t0) / (t1 - t0)) * n as f64).round().clamp(0.0, n as f64) as usize;
+        let mut hh = hints[i];
+        fh(t, &mut hh)
+    };
     for i in 0..vals.len() {
         let (t, ft) = vals[i];
         if ft.abs() < 1e-10 {
