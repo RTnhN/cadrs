@@ -32,5 +32,8 @@ slotmap.workspace = true
 # SVG drawings into sketches (vector_import).
 resvg.workspace = true
 
+zip = { version = "2", default-features = false, features = ["deflate"] }
+tempfile = "3"
+
 [dev-dependencies]
 tiny-skia.workspace = true
