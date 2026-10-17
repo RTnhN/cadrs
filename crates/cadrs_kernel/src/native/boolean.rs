@@ -465,6 +465,37 @@ fn run(a: &Body, b: &Body, mode: Mode) -> Result<BoolOut> {
             }
         }
     }
+    // 2a'. Closed edges (whole circles) are split at every vertex lying on them, of either body:
+    // coincident circles with their seams at different places then share their pieces.
+    let all_verts: Vec<usize> = {
+        let mut vs: Vec<usize> = Vec::new();
+        for e in 0..ne {
+            for v in pool.edges[e].v {
+                if !vs.contains(&v) {
+                    vs.push(v);
+                }
+            }
+        }
+        vs
+    };
+    for e in 0..ne {
+        let ed = pool.edges[e].clone();
+        if ed.degenerate || ed.v[0] != ed.v[1] {
+            continue;
+        }
+        for &v in &all_verts {
+            if v == ed.v[0] {
+                continue;
+            }
+            let p = pool.verts[v];
+            if !ebox[e].contains(&p) {
+                continue;
+            }
+            if let Some(t) = on_curve(&ed.curve, ed.t[0], ed.t[1], &p, VTOL) {
+                pool.split(e, t, v);
+            }
+        }
+    }
     // 2b. Edge–edge intersections (A × B).
     for ea in 0..na_edges {
         if pool.edges[ea].degenerate {

@@ -349,6 +349,22 @@ impl Kernel for NativeKernel {
         super::blend::fillet(self, body, edges, spec)
     }
 
+    fn offset(&mut self, body: BodyId, spec: &OffsetSpec) -> Result<OpResult> {
+        super::local::offset(self, body, spec)
+    }
+
+    fn draft(&mut self, body: BodyId, spec: &DraftSpec) -> Result<OpResult> {
+        super::local::draft(self, body, spec)
+    }
+
+    fn shell(&mut self, body: BodyId, remove: &[FaceId], thickness: f64) -> Result<OpResult> {
+        super::offset_round::shell(self, body, &ShellSpec { remove: remove.to_vec(), thickness, outward: false, hollow: false })
+    }
+
+    fn shell_with(&mut self, body: BodyId, spec: &ShellSpec) -> Result<OpResult> {
+        super::offset_round::shell(self, body, spec)
+    }
+
     fn full_round(&mut self, body: BodyId, side1: FaceId, center: FaceId, side2: FaceId) -> Result<OpResult> {
         super::blend::full_round(self, body, side1, center, side2)
     }
