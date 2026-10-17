@@ -306,7 +306,9 @@ fn analytic(a: &Surface, b: &Surface, bb: &Bbox) -> Option<Vec<IntCurve>> {
                 let w = z.cross(&n).normalize();
                 let h = (r * r - d * d).max(0.0).sqrt();
                 let mut out = Vec::new();
-                if h < 1e-9 {
+                // Tangent (to within a tenth of the boolean's tolerance in distance; the two lines
+                // of a plane 1e-16 inside are still 1.5e-8 apart): one line.
+                if h < 1e-9 || r - d.abs() < 1e-7 * r.max(1.0) {
                     out.extend(bound_line(foot, z, &bbig));
                 } else {
                     out.extend(bound_line(foot + w * h, z, &bbig));
@@ -717,7 +719,17 @@ fn numeric(a: &Surface, ua: ((f64, f64), (f64, f64)), b: &Surface, bb: &Bbox) ->
     };
     let mut polys: Vec<(Vec<P3>, bool)> = lines.into_iter().map(|(pl, c)| (pl.into_iter().map(refine).collect(), c)).collect();
     // Join polylines that meet in 3D (across a periodic seam).
+    let dbg = std::env::var("CADRS_SSI_DEBUG").is_ok();
+    if dbg {
+        eprintln!("numeric: {} polylines before joining: {:?}", polys.len(), polys.iter().map(|(p, c)| (p.len(), *c, p[0], *p.last().unwrap())).collect::<Vec<_>>());
+    }
     join_polylines(&mut polys, h * 1e-3);
+    // Crossings on both sides of a periodic seam are one point in space: a polyline made only of
+    // such (all its points at one place) is no curve.
+    polys.retain(|(p, _)| p.iter().any(|q| (q - p[0]).norm() > h * 1e-3));
+    if dbg {
+        eprintln!("numeric: {} after: {:?}", polys.len(), polys.iter().map(|(p, c)| (p.len(), *c)).collect::<Vec<_>>());
+    }
     polys.into_iter().filter(|(p, _)| p.len() >= 2).map(|(p, closed)| fit_curve(a, b, p, closed)).collect()
 }
 

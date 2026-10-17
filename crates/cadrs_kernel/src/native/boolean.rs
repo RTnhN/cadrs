@@ -374,6 +374,10 @@ fn point_in_face(f: &WFace, p: &P3, tol: f64) -> InFace {
 
 /// A point inside a face's domain (uv) given its loops as arcs.
 fn interior_point(loops: &[Vec<Arc>]) -> Option<P2> {
+    interior_points(loops).into_iter().next()
+}
+
+fn interior_points(loops: &[Vec<Arc>]) -> Vec<P2> {
     let mut polys: Vec<Vec<P2>> = Vec::new();
     for l in loops {
         let mut pts = Vec::new();
@@ -388,10 +392,12 @@ fn interior_point(loops: &[Vec<Arc>]) -> Option<P2> {
         }
         polys.push(pts);
     }
-    interior_of_polys(&polys)
+    interior_points_of_polys(&polys)
 }
 
-pub fn interior_of_polys(polys: &[Vec<P2>]) -> Option<P2> {
+/// Points inside the polygons (on a few scanlines, each midway across an inside interval),
+/// farthest from the boundary first.
+pub fn interior_points_of_polys(polys: &[Vec<P2>]) -> Vec<P2> {
     let mut vb = (f64::INFINITY, f64::NEG_INFINITY);
     let mut ub = (f64::INFINITY, f64::NEG_INFINITY);
     for p in polys {
@@ -401,7 +407,7 @@ pub fn interior_of_polys(polys: &[Vec<P2>]) -> Option<P2> {
         }
     }
     if !vb.0.is_finite() || vb.1 - vb.0 < 1e-14 {
-        return None;
+        return Vec::new();
     }
     // Distance from a point to the boundary, scaled to the box.
     let (su, sv) = (1.0 / (ub.1 - ub.0).max(1e-300), 1.0 / (vb.1 - vb.0).max(1e-300));
@@ -417,7 +423,7 @@ pub fn interior_of_polys(polys: &[Vec<P2>]) -> Option<P2> {
         }
         d
     };
-    let mut best: Option<(f64, P2)> = None;
+    let mut cands: Vec<(f64, P2)> = Vec::new();
     for frac in [0.5123, 0.3137, 0.6863, 0.1571, 0.8429, 0.0713, 0.9287, 0.4231, 0.5869, 0.2377, 0.7623] {
         let y = vb.0 + (vb.1 - vb.0) * frac;
         let mut xs: Vec<f64> = Vec::new();
@@ -434,14 +440,16 @@ pub fn interior_of_polys(polys: &[Vec<P2>]) -> Option<P2> {
         let mut k = 0;
         while k + 1 < xs.len() {
             let q = P2::new((xs[k] + xs[k + 1]) * 0.5, y);
-            let c = clearance(&q);
-            if best.map_or(true, |(bc, _)| c > bc) {
-                best = Some((c, q));
-            }
+            cands.push((clearance(&q), q));
             k += 2;
         }
     }
-    best.map(|(_, p)| p)
+    cands.sort_by(|a, b| b.0.total_cmp(&a.0));
+    cands.into_iter().map(|(_, p)| p).collect()
+}
+
+pub fn interior_of_polys(polys: &[Vec<P2>]) -> Option<P2> {
+    interior_points_of_polys(polys).into_iter().next()
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1118,7 +1126,19 @@ fn run(a: &Body, b: &Body, mode: Mode) -> Result<BoolOut> {
         }
         let class = class.unwrap_or_else(|| {
             let (other, polys) = if f.owner == 0 { (b, &polys_b) } else { (a, &polys_a) };
-            match classify::classify_point(other, polys, &p, VTOL) {
+            // A point on the other body's boundary (a sub-face whose sample landed on an edge of
+            // the other body lying in it) decides nothing: try the face's other inside points.
+            let mut pc = classify::classify_point(other, polys, &p, VTOL);
+            if pc == PointClass::OnBoundary {
+                for q in interior_points(&loops).into_iter().skip(1).take(12) {
+                    let c = classify::classify_point(other, polys, &f.surf.eval(q.x, q.y), VTOL);
+                    if c != PointClass::OnBoundary {
+                        pc = c;
+                        break;
+                    }
+                }
+            }
+            match pc {
                 PointClass::Inside => Class::In,
                 PointClass::Outside => Class::Out,
                 PointClass::OnBoundary => {
