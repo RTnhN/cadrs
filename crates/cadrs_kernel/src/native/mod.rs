@@ -7,6 +7,7 @@ pub mod build;
 pub mod classify;
 pub mod curve;
 pub mod features;
+pub mod hlr;
 pub mod kernel;
 pub mod local;
 pub mod loft_build;
