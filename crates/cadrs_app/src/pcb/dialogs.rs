@@ -97,7 +97,7 @@ fn wrapped(t: &Theme, name: &str, text: &str, italic: bool, color: Color) -> imp
 // ---------------------------------------------------------------------------------------------
 // Import ECAD files
 
-/// Opens Import ECAD files (the toolbar's upload button).
+/// Opens Import ECAD files (the toolbar's import button).
 pub fn open_import_dialog(world: &mut World) {
     let mut q = world.query_filtered::<(), With<ImportDialog>>();
     if q.iter(world).next().is_some() {
@@ -861,7 +861,7 @@ pub fn store_sample_part_document(world: &mut World) {
 
 const HELP: &[(&str, &str)] = &[
     ("Boards", "A PCB Studio holds any number of boards. + creates a new board (a 100 × 80 mm outline) and lets you type its name; double-click a board to rename it. Click a board under Boards to show it; the board shown is bold and blue. Right-click a board to delete it (Undo brings it back)."),
-    ("Import ECAD files", "Click the upload button, choose a board's .emn file and its .emp library (Ctrl+click picks both), then Import. Each import adds a board."),
+    ("Import ECAD files", "Click the Import ECAD files button, choose a board's .emn file and its .emp library (Ctrl+click picks both), then Import. Each import adds a board."),
     ("Viewport", "The board is green and components are coloured by package. Orbit with the right mouse button, pan with the middle button, zoom with the wheel; F fits the board. Click a component to select it."),
     ("Components", "+ creates a component and lets you type its name; double-click it to rename it. Click a board under Components to list its packages; click a package for its component view (the part alone on a grid). Click the board again to go back."),
     ("Component properties", "The right edge's first button shows the selected component's part name, part number and representation: None, From ECAD data (a box from the outline and height) or Custom part (a part from a Part Studio, moved with Translate, Center and Rotate, then Accept). The choice is kept in the component library, so every PCB Studio follows."),

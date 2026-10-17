@@ -1740,7 +1740,7 @@ fn create_menu(t: &Theme, name: &'static str) -> impl Bundle {
         )
         .separator()
         .item(
-            MenuItem::new("import-files", "Import files…").icon("upload"),
+            MenuItem::new("import-files", "Import files…").icon("file-import"),
         )
         .item(
             MenuItem::new("import-from", "Import from")

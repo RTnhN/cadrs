@@ -981,7 +981,7 @@ fn insert_menu(paste: Option<String>) -> Menu {
         )
         .item(
             // P3F.2: STEP and IGES files as new tabs.
-            MenuItem::new("import-files", "Import…").icon("upload"),
+            MenuItem::new("import-files", "Import…").icon("file-import"),
         );
     match paste {
         Some(name) => menu
