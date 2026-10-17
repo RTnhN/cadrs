@@ -137,6 +137,7 @@ struct Snap {
 
 #[derive(Debug, Clone)]
 struct TriadDrag {
+    selection: Selection,
     handle: TriadHandle,
     start: Vec2,
     /// The instance's pose and the triad's world frame when the drag started.
@@ -177,6 +178,7 @@ pub struct Triad {
 /// step (so the typed value replaces it: still one undo step).
 #[derive(Debug, Clone)]
 struct ValueEdit {
+    selection: Selection,
     instance: InstanceId,
     handle: TriadHandle,
     pose: Pose,
@@ -381,6 +383,29 @@ type PickSessions<'w> = (
     Option<Res<'w, crate::simulation_ui::LoadSession>>,
 );
 
+/// Whole-instance selections (tree clicks and box selection) use a shared widget at the
+/// selection's bounds. Prefer a movable representative so a fixed row cannot disable it.
+fn whole_selection_frame(doc: &ActiveDocument, selection: &Selection, cache: &PartCache) -> Option<TriadFrame> {
+    let model = doc.active_element()?.assembly_model()?;
+    let ids = super::selected_instances(selection);
+    let instance = ids.iter().rev().filter_map(|id| model.instance(*id)).find(|i| !i.fixed)
+        .or_else(|| ids.iter().rev().find_map(|id| model.instance(*id)))?;
+    let mut lo = Vec3::splat(f32::INFINITY);
+    let mut hi = Vec3::splat(f32::NEG_INFINITY);
+    for id in super::view_parts(cache, &ids) {
+        if let Some(part) = cache.part(id) {
+            for p in &part.solid.positions {
+                let p = v3(*p);
+                lo = lo.min(p);
+                hi = hi.max(p);
+            }
+        }
+    }
+    let center = if lo.is_finite() && hi.is_finite() { d3((lo + hi) * 0.5) } else { instance.pose.translation };
+    let inv = instance.pose.inverse();
+    Some(TriadFrame { instance: instance.id, origin: inv.apply(center), x: inv.rotate([1.0, 0.0, 0.0]), z: inv.rotate([0.0, 0.0, 1.0]), circle: None })
+}
+
 /// Places the triad where an instance's face, edge or vertex was just clicked; removes it when
 /// nothing of an instance is selected.
 #[allow(clippy::too_many_arguments)]
@@ -413,7 +438,7 @@ fn place_on_pick(
     if triad.placed_for == selection.0 || triad.drag.is_some() {
         // The instance may have gone (undo, delete).
         if let Some(f) = triad.frame
-            && super::view_parts(&cache, &[f.instance]).is_empty()
+            && doc.active_element().and_then(|e| e.assembly_model()?.instance(f.instance)).is_none()
         {
             triad.frame = None;
         }
@@ -427,11 +452,11 @@ fn place_on_pick(
         .copied();
     triad.placed_for = selection.0.clone();
     let any = selection.0.iter().any(|p| matches!(p, Pick::Face(..) | Pick::Edge(..) | Pick::Vertex(..)));
-    if !any {
-        triad.frame = None;
+    if !any || super::selected_instances(&selection).len() > 1 {
+        triad.frame = whole_selection_frame(&doc, &selection, &cache);
         return;
     }
-    let Some(pick) = newest else { return };
+    let Some(pick) = newest.or_else(|| selection.0.iter().rev().find(|p| matches!(p, Pick::Face(..) | Pick::Edge(..) | Pick::Vertex(..))).copied()) else { return };
     let Some(part_id) = pick.part() else { return };
     let Some(part) = cache.part(part_id) else { return };
     let instance = InstanceId::of_part(part_id);
@@ -527,6 +552,7 @@ fn triad_pointer(
     mut inputs: MessageReader<PointerInput>,
     doc: Option<Res<ActiveDocument>>,
     cache: Res<PartCache>,
+    selection: Res<Selection>,
     view: Res<ViewportView>,
     rect: Res<ViewportRect>,
     vdrag: Res<ViewportDrag>,
@@ -593,6 +619,7 @@ fn triad_pointer(
                     continue;
                 }
                 triad.drag = Some(TriadDrag {
+                    selection: selection.clone(),
                     handle: h,
                     start: pos,
                     pose,
@@ -719,9 +746,10 @@ fn triad_pointer(
                     let id = f.instance;
                     let anchor = d3(d.origin);
                     let (handle, start, axes, u) = (d.handle, d.pose, d.axes, units.0);
+                    let selection = d.selection.clone();
                     commands.queue(move |world: &mut World| {
                         // The readout shows what the mates let happen, not what was asked.
-                        if let Some(solved) = super::drag::preview_move(world, id, p, anchor)
+                        if let Some(solved) = super::drag::preview_move(world, id, p, anchor, &selection)
                             && let Some(text) = solved_value(handle, &start, &solved, anchor, &axes, &u)
                             && let Some(d) = world.resource_mut::<Triad>().drag.as_mut()
                         {
@@ -746,10 +774,12 @@ fn triad_pointer(
                     let element = doc.active.unwrap_or_default();
                     let id = f.instance;
                     let anchor = d3(d.origin);
-                    commands.queue(move |world: &mut World| super::drag::commit_move(world, element, id, p, anchor, label));
+                    let selection = d.selection.clone();
+                    commands.queue(move |world: &mut World| super::drag::commit_move_for(world, element, id, p, anchor, label, &selection));
                     // The value box stays: an exact value can be typed (A3.4).
                     let moved = v3(p.translation) - v3(d.pose.translation);
                     triad.edit = Some(ValueEdit {
+                        selection: d.selection.clone(),
                         instance: id,
                         handle: d.handle,
                         pose: d.pose,
@@ -1184,7 +1214,7 @@ fn apply_typed(world: &mut World, text: &str) {
         }
     }
     let label = if angle { "Rotate instance" } else { "Move instance" };
-    super::drag::commit_move(world, element, e.instance, new, d3(e.origin), label);
+    super::drag::commit_move_for(world, element, e.instance, new, d3(e.origin), label, &e.selection);
     world.resource_mut::<Triad>().edit = None;
     world.resource_mut::<bevy::input_focus::InputFocus>().clear();
 }
@@ -1328,5 +1358,45 @@ fn place_markers(
             ))
             .id();
         commands.entity(area).add_child(e);
+    }
+}
+
+#[cfg(test)]
+mod movement_tests {
+    use super::*;
+    use cadrs_core::{Document, FeatureId, PartId, parts::PartKind, solid::Solid};
+    use core_asm::{Instance, InstanceSource};
+
+    #[test]
+    fn whole_part_selection_places_widget_at_shared_bounds_and_prefers_movable_part() {
+        let mut doc = Document::new("Selection widget");
+        let studio = doc.elements[0].id;
+        let assembly = doc.elements[1].id;
+        let ids = [InstanceId::new(), InstanceId::new()];
+        let source = InstanceSource::Part { element: studio, part: PartId::new(FeatureId::new(), 0) };
+        doc.elements[1].assembly.instances = vec![
+            Instance::new(ids[0], source.clone(), Pose::IDENTITY),
+            Instance::new(ids[1], source, Pose::translation([20.0, 0.0, 0.0])),
+        ];
+        doc.elements[1].assembly.instances[1].fixed = true;
+        let mut doc = ActiveDocument::new(doc);
+        doc.active = Some(assembly);
+        let mut cache = PartCache::default();
+        for (n, id) in ids.iter().enumerate() {
+            let feature = cadrs_core::FeatureId(id.0);
+            let x = n as f64 * 20.0;
+            cache.parts.push(Part {
+                id: id.part_id(), feature, name: format!("Part {n}"), kind: PartKind::Solid,
+                palette: n as u32, mass: None, features: vec![feature], source: None, derived: None,
+                solid: std::sync::Arc::new(Solid { positions: vec![[x - 1.0, -1.0, -1.0], [x + 1.0, 1.0, 1.0]], ..default() }),
+            });
+        }
+        let selection = Selection(ids.iter().map(|i| Pick::Part(i.part_id())).collect());
+        let frame = whole_selection_frame(&doc, &selection, &cache).expect("tree and box selections need a widget without a face pick");
+        assert_eq!(frame.instance, ids[0], "a fixed last selection must not disable the widget");
+        assert_eq!(frame.origin, [10.0, 0.0, 0.0]);
+        assert!(whole_selection_frame(&doc, &Selection::default(), &cache).is_none());
+        doc.doc.elements[1].assembly.instances.clear();
+        assert!(whole_selection_frame(&doc, &selection, &cache).is_none(), "deleted rows must not retain a widget");
     }
 }
