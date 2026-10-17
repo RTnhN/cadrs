@@ -255,7 +255,16 @@ pub fn face_normals_at(k: &NativeKernel, body: BodyId, face: FaceId, points: &[P
     Ok(points
         .iter()
         .map(|p| {
-            let (u, v) = f.surf.project(p, Some((center.x, center.y)));
+            // From the face's interior, and (a polar patch can lead Newton astray) from the
+            // nearest point of a coarse grid when that lands closer.
+            let mut uv = f.surf.project(p, Some((center.x, center.y)));
+            if (f.surf.eval(uv.0, uv.1) - p).norm() > 1e-9 {
+                let w = f.surf.project(p, None);
+                if (f.surf.eval(w.0, w.1) - p).norm() < (f.surf.eval(uv.0, uv.1) - p).norm() {
+                    uv = w;
+                }
+            }
+            let (u, v) = uv;
             f.surf.normal(u, v) * if f.sense { 1.0 } else { -1.0 }
         })
         .collect())

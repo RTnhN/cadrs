@@ -32,6 +32,8 @@ struct Chain<'a> {
     starts: Vec<f64>,
     lens: Vec<f64>,
     kind: &'a dyn Fn(f64) -> SectionKind,
+    /// Each edge's own faces (the section's size follows their angle at the edge).
+    sides: Vec<[(usize, bool); 2]>,
     convex: bool,
     polys: std::cell::RefCell<std::collections::HashMap<usize, std::sync::Arc<Vec<Vec<P2>>>>>,
 }
@@ -79,8 +81,13 @@ impl Chain<'_> {
             let d = tan * if co_fwd == fwd { 1.0 } else { -1.0 };
             (nrm, nrm.cross(&d))
         };
-        let (n1, w1) = dirs(f1, faces[0].1);
-        let (n2, w2) = dirs(f2, faces[1].1);
+        let (_, w1) = dirs(f1, faces[0].1);
+        let (_, w2) = dirs(f2, faces[1].1);
+        // The angle between the edge's own faces at the edge (continuous along the chain, where
+        // the contacts' faces change as the contacts cross onto tangent neighbours).
+        let own = self.sides[k];
+        let (n1, _) = dirs(&b.faces[own[0].0], own[0].1);
+        let (n2, _) = dirs(&b.faces[own[1].0], own[1].1);
         let phi = n1.dot(&n2).clamp(-1.0, 1.0).acos();
         let theta = w1.dot(&w2).clamp(-1.0, 1.0).acos();
         enum Mid {
@@ -192,7 +199,7 @@ pub fn chain_tool(b: &Body, input: BodyId, chain: &[(usize, bool)], kind: &dyn F
         let (_, w2) = f(sides[0][1].0, sides[0][1].1);
         w2.dot(&n1) < 0.0
     };
-    let ch = Chain { b, chain, starts: starts.clone(), lens: lens.clone(), kind, convex, polys: Default::default() };
+    let ch = Chain { b, chain, starts: starts.clone(), lens: lens.clone(), kind, sides: sides.clone(), convex, polys: Default::default() };
     // Tangent-continuous neighbours of a face (across edges where their normals agree).
     let ef = b.edge_faces();
     let neighbours = |fi: usize| -> Vec<usize> {
@@ -224,7 +231,13 @@ pub fn chain_tool(b: &Body, input: BodyId, chain: &[(usize, bool)], kind: &dyn F
     let (ra, rb) = (range.0 * len, range.1 * len);
     let total_lo = ra - if extend.0 { ext_len } else { 0.0 };
     let total_hi = rb + if extend.1 { ext_len } else { 0.0 };
-    let n_total = (((total_hi - total_lo) / 1.5).ceil() as usize).clamp(8, 160);
+    // Sections 1.5 apart on flat faces; on curved ones close enough that the lofted contact
+    // rails stay on the faces within the boolean's tolerance (cubic interpolation of an arc
+    // errs as h⁴: 2e-5 at 1.5 on R10, 1e-7 at 0.45), so the boolean takes them as contacts.
+    let curved = sides.iter().flatten().any(|&(f, _)| !matches!(b.faces[f].surf, super::surface::Surface::Plane { .. }))
+        || sides.iter().flatten().any(|&(f, _)| neighbours(f).iter().any(|&g| !matches!(b.faces[g].surf, super::surface::Surface::Plane { .. })));
+    let h = if curved { 0.45 } else { 1.5 };
+    let n_total = (((total_hi - total_lo) / h).ceil() as usize).clamp(8, 600);
     let mut ss: Vec<f64> = (0..=n_total).map(|i| total_lo + (total_hi - total_lo) * i as f64 / n_total as f64).collect();
     for &sj in starts.iter().skip(1) {
         if sj > total_lo && sj < total_hi {
@@ -306,8 +319,20 @@ pub fn chain_tool(b: &Body, input: BodyId, chain: &[(usize, bool)], kind: &dyn F
                 let (g0, g1) = flags(lo);
                 let (pa, pla, _) = ch.section(lo, [(f[0], g0), (f[1], g1)])?;
                 let (pb, plb, _) = ch.section(lo, [(st.faces[0], g0), (st.faces[1], g1)])?;
-                groups.last_mut().unwrap().push(Station { s: lo, pieces: pa, plane: pla, faces: f });
-                groups.push(vec![Station { s: lo, pieces: pb, plane: plb, faces: st.faces }]);
+                if std::env::var("CADRS_BLEND_DEBUG").is_ok() {
+                    let ends = |ps: &[Piece], pl: &Plane| {
+                        ps.iter()
+                            .map(|x| {
+                                let q = x.c.point(if x.rev { x.t1 } else { x.t0 });
+                                pl.origin + pl.x_dir.into_inner() * q.x + pl.y_dir().into_inner() * q.y
+                            })
+                            .collect::<Vec<_>>()
+                    };
+                    let d: Vec<f64> = ends(&pa, &pla).iter().zip(ends(&pb, &plb)).map(|(a, b)| (a - b).norm()).collect();
+                    eprintln!("chain tool: face change at s {lo:.6} (from {a:.4} to {:.4}, edge starts {:?}) {f:?} -> {:?}, section ends apart {d:?}, pa {:?}", st.s, ch.starts, st.faces, ends(&pa, &pla));
+                }
+                groups.last_mut().unwrap().push(Station { s: lo, pieces: pa.clone(), plane: pla, faces: f });
+                groups.push(vec![Station { s: lo, pieces: pa.clone(), plane: pla, faces: st.faces }]);
                 groups.last_mut().unwrap().push(st);
             }
             _ => groups.last_mut().unwrap().push(st),

@@ -571,10 +571,19 @@ pub fn sdist_hint(s: &Surface, p: &P3, hint: &mut Option<(f64, f64)>) -> f64 {
     if let Some(d) = s.signed_distance(p) {
         return d;
     }
-    let (u, v) = s.project(p, *hint);
-    let (q, su, sv) = s.d1(u, v);
-    // A hinted Newton may stall on the wrong side of a fold: check against a fresh projection
-    // when the foot is far.
+    let (mut u, mut v) = s.project(p, *hint);
+    let (mut q, mut su, mut sv) = s.d1(u, v);
+    // A hinted Newton may stall on the wrong side of a fold or on the domain's edge: when the
+    // foot isn't square to the surface, check against a projection from a coarse grid.
+    let r = p - q;
+    let tang = (r.dot(&su) / su.norm().max(1e-300)).abs() + (r.dot(&sv) / sv.norm().max(1e-300)).abs();
+    if hint.is_some() && tang > 1e-7 * (1.0 + r.norm()) {
+        let (u2, v2) = s.project_coarse(p, 8);
+        let (q2, su2, sv2) = s.d1(u2, v2);
+        if (p - q2).norm() < r.norm() - 1e-12 {
+            (u, v, q, su, sv) = (u2, v2, q2, su2, sv2);
+        }
+    }
     let n = su.cross(&sv);
     let l = n.norm();
     *hint = Some((u, v));
@@ -693,11 +702,46 @@ fn numeric(a: &Surface, ua: ((f64, f64), (f64, f64)), b: &Surface, bb: &Bbox) ->
         lines.push((pl, closed));
     }
     // Refine onto both surfaces, in 3D.
-    let refine = |uv: P2| -> P3 { refine_point(a, b, uv) };
+    // Ends on the box's sides stay on them (Newton along the side), so the curve reaches the
+    // face's boundary there.
+    let (tu, tv) = ((u1 - u0) * 1e-9, (v1 - v0) * 1e-9);
+    let refine = |uv: P2| -> P3 {
+        let side_u = (uv.x - u0).abs() < tu || (uv.x - u1).abs() < tu;
+        let side_v = (uv.y - v0).abs() < tv || (uv.y - v1).abs() < tv;
+        if side_u != side_v {
+            if let Some(p) = refine_on_side(a, b, uv, side_u) {
+                return p;
+            }
+        }
+        refine_point(a, b, uv)
+    };
     let mut polys: Vec<(Vec<P3>, bool)> = lines.into_iter().map(|(pl, c)| (pl.into_iter().map(refine).collect(), c)).collect();
     // Join polylines that meet in 3D (across a periodic seam).
     join_polylines(&mut polys, h * 1e-3);
     polys.into_iter().filter(|(p, _)| p.len() >= 2).map(|(p, closed)| fit_curve(a, b, p, closed)).collect()
+}
+
+/// A point on both surfaces on a's iso line through `uv` (u fixed when `fix_u`): Newton on the
+/// other parameter for sd_b = 0. `None` when it doesn't converge.
+fn refine_on_side(a: &Surface, b: &Surface, uv: P2, fix_u: bool) -> Option<P3> {
+    let (u, mut v) = if fix_u { (uv.x, uv.y) } else { (uv.y, uv.x) };
+    let at = |w: f64| if fix_u { a.eval(u, w) } else { a.eval(w, u) };
+    let mut hint: Option<(f64, f64)> = if b.signed_distance(&P3::origin()).is_some() { None } else { Some(b.project(&at(v), None)) };
+    let e = 1e-7;
+    for _ in 0..30 {
+        let g0 = sdist_hint(b, &at(v), &mut hint);
+        if g0.abs() < 1e-13 {
+            return Some(at(v));
+        }
+        let (mut h1, mut h2) = (hint, hint);
+        let d = (sdist_hint(b, &at(v + e), &mut h1) - sdist_hint(b, &at(v - e), &mut h2)) / (2.0 * e);
+        if d.abs() < 1e-300 {
+            return None;
+        }
+        v -= g0 / d;
+    }
+    let p = at(v);
+    (sdist(b, &p).abs() < 1e-9).then_some(p)
 }
 
 /// A point on both surfaces near a's (u, v): Newton on a's parameters for sd_b = 0, then a

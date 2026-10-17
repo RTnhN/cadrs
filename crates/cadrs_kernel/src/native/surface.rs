@@ -251,13 +251,25 @@ impl Surface {
         }
     }
 
+    /// The closest point from a coarse `n` × `n` grid start (a cheap check of a hinted
+    /// projection; surfaces with a closed form project exactly).
+    pub fn project_coarse(&self, p: &P3, n: usize) -> (f64, f64) {
+        match self {
+            Surface::Extrusion { .. } | Surface::Nurbs(_) => self.project_grid(p, None, n),
+            _ => self.project(p, None),
+        }
+    }
+
     /// Generic closest point by sampling and Newton (extrusions and NURBS).
     fn project_newton(&self, p: &P3, hint: Option<(f64, f64)>) -> (f64, f64) {
+        self.project_grid(p, hint, 24)
+    }
+
+    fn project_grid(&self, p: &P3, hint: Option<(f64, f64)>, n: usize) -> (f64, f64) {
         let ((u0, u1), (v0, v1)) = self.param_box();
-        let (mut u, mut v) = match hint {
+        let (u, v) = match hint {
             Some(h) => h,
             None => {
-                let n = 24;
                 let mut best = (f64::INFINITY, (u0, v0));
                 for i in 0..=n {
                     for j in 0..=n {
@@ -271,21 +283,39 @@ impl Surface {
                 best.1
             }
         };
-        for _ in 0..50 {
-            let d = self.d2(u, v);
-            let r = d[0] - p.coords;
-            let fu = r.dot(&d[1]);
-            let fv = r.dot(&d[2]);
-            let a = d[1].norm_squared() + r.dot(&d[3]);
-            let b = d[1].dot(&d[2]) + r.dot(&d[4]);
-            let c = d[2].norm_squared() + r.dot(&d[5]);
-            let Some((du, dv)) = solve2(a, b, b, c, -fu, -fv) else { break };
-            let (nu, nv) = (self.clamp_u(u + du, u0, u1), (v + dv).clamp(v0.min(v1), v1.max(v0)));
-            let step = (nu - u).abs() + (nv - v).abs();
-            u = nu;
-            v = nv;
-            if step < 1e-15 {
-                break;
+        let newton = |mut u: f64, mut v: f64| {
+            for _ in 0..50 {
+                let d = self.d2(u, v);
+                let r = d[0] - p.coords;
+                let fu = r.dot(&d[1]);
+                let fv = r.dot(&d[2]);
+                let a = d[1].norm_squared() + r.dot(&d[3]);
+                let b = d[1].dot(&d[2]) + r.dot(&d[4]);
+                let c = d[2].norm_squared() + r.dot(&d[5]);
+                let Some((du, dv)) = solve2(a, b, b, c, -fu, -fv) else { break };
+                let (nu, nv) = (self.clamp_u(u + du, u0, u1), (v + dv).clamp(v0.min(v1), v1.max(v0)));
+                let step = (nu - u).abs() + (nv - v).abs();
+                u = nu;
+                v = nv;
+                if step < 1e-15 {
+                    break;
+                }
+            }
+            (u, v)
+        };
+        let (u, v) = newton(u, v);
+        // Stopped on a v end of a surface closed in v (a polar patch's seam): the point may lie
+        // just across the seam, so go on from the other end too.
+        if (v == v0 || v == v1) && (self.eval(u, v) - p).norm() > 1e-9 {
+            let closed = (0..3).all(|i| {
+                let a = u0 + (u1 - u0) * (0.2 + 0.3 * i as f64);
+                (self.eval(a, v0) - self.eval(a, v1)).norm() < 1e-9
+            });
+            if closed {
+                let (u2, v2) = newton(u, if v == v0 { v1 } else { v0 });
+                if (self.eval(u2, v2) - p).norm() < (self.eval(u, v) - p).norm() {
+                    return (u2, v2);
+                }
             }
         }
         (u, v)

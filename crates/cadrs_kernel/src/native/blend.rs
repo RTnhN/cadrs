@@ -45,7 +45,14 @@ impl Tracked {
 
     /// Combines with a tool whose faces carry `tool_src`.
     pub fn apply(&self, tool: &Body, tool_src: &[Vec<FaceSrc>], op: BoolOp) -> Result<Tracked> {
-        let r: BoolOut = boolean_bodies(&self.body, tool, op)?;
+        let r: BoolOut = match boolean_bodies(&self.body, tool, op) {
+            Ok(r) => r,
+            Err(e) => {
+                super::kernel::dump("tracked-target", &self.body, &format!("{op:?}"));
+                super::kernel::dump("tracked-tool", tool, &format!("{op:?}: {e}"));
+                return Err(e);
+            }
+        };
         let src = r
             .from
             .iter()

@@ -269,7 +269,7 @@ pub trait Kernel {
     /// within `ρ = √(setback² + r²)` of the vertex (the fillets' ends and the default corner
     /// patch; the contact lines on the faces end `setback` from the vertex) is replaced by one
     /// N-sided patch meeting every face around it tangentially (G1). The patch is generated
-    /// `FromVertex`. A corner OCCT can't fill is an `OperationFailed` error saying so.
+    /// `FromVertex`. A corner the kernel can't fill is an `OperationFailed` error saying so.
     fn fillet_smooth(&mut self, _body: BodyId, _edges: &[EdgeId], _spec: &FilletSpec, _setback: f64) -> Result<OpResult> {
         Err(KernelError::Unsupported("smooth fillet corners"))
     }

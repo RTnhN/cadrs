@@ -366,6 +366,12 @@ impl Kernel for NativeKernel {
         self.dumped(&r)
     }
 
+    fn fillet_smooth(&mut self, body: BodyId, edges: &[EdgeId], spec: &FilletSpec, setback: f64) -> Result<OpResult> {
+        dump("fillet", self.get(body)?, &format!("edges {edges:?} {spec:?} smooth {setback}"));
+        let r = super::blend_corner::fillet_smooth(self, body, edges, spec, setback);
+        self.dumped(&r)
+    }
+
     fn thicken_surfaces(&mut self, spec: &ThickenSpec) -> Result<OpResult> {
         super::surfacing::thicken(self, spec)
     }
@@ -688,7 +694,7 @@ thread_local! {
 
 /// With `CADRS_DUMP_DIR` set, writes an operation's input body (exact bytes) and its parameters
 /// there, numbered, to reproduce failures in kernel tests.
-fn dump(op: &str, b: &Body, params: &str) {
+pub(crate) fn dump(op: &str, b: &Body, params: &str) {
     let Ok(dir) = std::env::var("CADRS_DUMP_DIR") else { return };
     DUMP_T.with(|t| t.set(std::time::Instant::now()));
     static N: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);

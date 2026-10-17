@@ -2207,6 +2207,7 @@ dependencies = [
 name = "cadrs_kernel"
 version = "0.1.5"
 dependencies = [
+ "cadrs_gpu",
  "nalgebra",
  "rayon",
  "serde",
