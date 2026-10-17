@@ -38,6 +38,8 @@ pub struct PathSweep {
     reach: f64,
     /// The helix the path follows (within its approximation), swept by its exact screw motion.
     helix: Option<Helix>,
+    /// The helix's angle at the fine steps (unwrapped along the path).
+    angles: Vec<f64>,
 }
 
 /// A helix: axis through `o` along unit `a`, radius `r`, rising `c` per radian, `e1`/`e2`
@@ -66,6 +68,13 @@ impl Helix {
         let a = w.dot(&self.e2).atan2(w.dot(&self.e1));
         a + ((near - a) / TAU).round() * TAU
     }
+    /// The angle of a point on the helix, its turn told by its height (when the helix rises).
+    fn angle_of(&self, p: &P3, near: f64) -> f64 {
+        let w = p - self.o;
+        let a = w.dot(&self.e2).atan2(w.dot(&self.e1));
+        let guess = if self.c.abs() > 1e-12 { w.dot(&self.a) / self.c } else { near };
+        a + ((guess - a) / TAU).round() * TAU
+    }
     /// The screw motion that turns the helix by `phi` along itself.
     fn screw(&self, phi: f64) -> Affine {
         let m = nalgebra::Rotation3::from_axis_angle(&nalgebra::Unit::new_normalize(self.a), phi).into_inner();
@@ -88,7 +97,11 @@ pub fn fit_helix_segs(segs: &[Seg]) -> Option<Helix> {
     pts.push(last.end());
     tans.push(last.dir(1.0));
     let size = pts.iter().map(|p| (p - pts[0]).norm()).fold(0.0, f64::max);
-    fit_helix(&pts, &tans, 1e-4 * (1.0 + size))
+    let h = fit_helix(&pts, &tans, 1e-4 * (1.0 + size));
+    if std::env::var("CADRS_SWEEP_DEBUG").is_ok() {
+        eprintln!("helix fit over {} segments: {h:?}", segs.len());
+    }
+    h
 }
 
 /// The helix through points of a path (with their travel fractions), when they all lie on one
@@ -184,7 +197,7 @@ impl PathSweep {
         }
         *cum.last_mut().unwrap() = 1.0;
         let fine = FINE * segs.len();
-        let mut me = Self { plane, segs: segs.to_vec(), cum, pts: vec![], rots: vec![], v: vec![], deg: 3, reach, helix: None };
+        let mut me = Self { plane, segs: segs.to_vec(), cum, pts: vec![], rots: vec![], v: vec![], deg: 3, reach, helix: None, angles: vec![] };
         let pts: Vec<P3> = (0..=fine).map(|i| me.at(i as f64 / fine as f64)).collect();
         let tans: Vec<V3> = (0..=fine).map(|i| me.dir(i as f64 / fine as f64)).collect();
         if tans.iter().any(|t| !t.iter().all(|x| x.is_finite())) {
@@ -195,12 +208,28 @@ impl PathSweep {
         // caller fitted to the whole chain (so neighbouring pieces share it), else this run's.
         if control == SweepControl::None {
             me.helix = match helix {
-                Some(h) => Some(Helix { th0: h.angle(&pts[0], h.th0), ..h }),
+                Some(h) => {
+                    let th0 = h.angle_of(&pts[0], h.th0);
+                    if std::env::var("CADRS_SWEEP_DEBUG").is_ok() {
+                        let end = pts.last().unwrap();
+                        eprintln!("run of {} segments: th0 {th0} (end angle {}), start {:?}", segs.len(), h.angle_of(end, th0), pts[0]);
+                    }
+                    Some(Helix { th0, ..h })
+                }
                 None => {
                     let size = pts.iter().map(|p| (p - pts[0]).norm()).fold(0.0, f64::max);
                     fit_helix(&pts, &tans, 1e-4 * (1.0 + size))
                 }
             };
+        }
+        if let Some(h) = me.helix {
+            let mut th = h.th0;
+            me.angles = (0..=fine)
+                .map(|i| {
+                    th = h.angle(&me.path_at(i as f64 / fine as f64), th);
+                    th
+                })
+                .collect();
         }
         let (pts, tans) = match me.helix {
             Some(_) => {
@@ -342,14 +371,14 @@ impl PathSweep {
     }
     /// The helix's angle at s (from the path's point there).
     fn helix_angle(&self, h: &Helix, s: f64) -> f64 {
-        // Unwrap along the path from its start, in steps a quarter turn at most apart.
-        let n = 64 * self.segs.len();
-        let mut th = h.th0;
-        let steps = ((s.clamp(0.0, 1.0) * n as f64).ceil() as usize).max(1);
-        for i in 1..=steps {
-            th = h.angle(&self.path_at(s * i as f64 / steps as f64), th);
+        // Unwrapped next to the angle at the fine step before s.
+        let s = s.clamp(0.0, 1.0);
+        let fine = self.angles.len().saturating_sub(1);
+        if fine == 0 {
+            return h.angle(&self.path_at(s), h.th0);
         }
-        th
+        let i = ((s * fine as f64).floor() as usize).min(fine);
+        h.angle(&self.path_at(s), self.angles[i])
     }
     fn at(&self, s: f64) -> P3 {
         match &self.helix {
@@ -443,6 +472,7 @@ impl SweepKind for PathSweep {
         let c = piece.c.clone();
         let (t0, t1) = (piece.t0, piece.t1);
         let ends: Vec<Affine> = vec![self.place(0.0), self.place(1.0)];
+        let n0c = n0.clone();
         Some(SideGeo {
             surf,
             along: Box::new(move |s| {
@@ -451,8 +481,8 @@ impl SweepKind for PathSweep {
                     let k = (ub - ua) / (t1 - t0);
                     return super::sweep::line2(P2::new(ua - t0 * k, v), V2::new(k, 0.0));
                 }
-                let m = if s < 0.5 { &ends[0] } else { &ends[1] };
-                super::pcurve::pcurve(&s_a, &c.transformed(m), t0, t1, None)
+                let _ = (&s_a, &ends);
+                iso_pcurve(&n0c, &c, t0, t1, ua, ub, v)
             }),
             across: Box::new(move |t| {
                 let u = if (t - t0).abs() <= (t - t1).abs() { ua } else { ub };
@@ -465,6 +495,70 @@ impl SweepKind for PathSweep {
         let d = self.pts[1] - self.pts[0];
         d.dot(&self.plane.normal) > 0.0
     }
+}
+
+/// The p-curve of a profile piece's iso-line v of its skin: u(t) the parameter of the piece's
+/// own B-spline `n0` (the skin's u) at the piece's point c(t), u(t0) = ua and u(t1) = ub (a whole
+/// circle's ends are its seam), interpolated until it maps onto the piece within 1e-12.
+fn iso_pcurve(n0: &NurbsCurve, c: &Curve, t0: f64, t1: f64, ua: f64, ub: f64, v: f64) -> Curve {
+    let invert = |t: f64, guess: f64| -> f64 {
+        let p = c.point(t);
+        let (lo, hi) = (ua.min(ub), ua.max(ub));
+        let mut u = guess.clamp(lo, hi);
+        for _ in 0..40 {
+            let d = n0.ders(u, 2);
+            let (q, d1, d2) = (P3::from(d[0]), d[1], d[2]);
+            let r = q - p;
+            let f = r.dot(&d1);
+            let df = d1.norm_squared() + r.dot(&d2);
+            if df.abs() < 1e-300 {
+                break;
+            }
+            let step = f / df;
+            u = (u - step).clamp(lo, hi);
+            if step.abs() < 1e-15 * (1.0 + u.abs()) {
+                break;
+            }
+        }
+        u
+    };
+    let u_at = |ts: &[f64]| -> Vec<f64> {
+        let n = ts.len();
+        ts.iter()
+            .enumerate()
+            .map(|(i, &t)| {
+                if i == 0 {
+                    ua
+                } else if i + 1 == n {
+                    ub
+                } else {
+                    invert(t, ua + (ub - ua) * (t - t0) / (t1 - t0))
+                }
+            })
+            .collect()
+    };
+    let mut ts: Vec<f64> = (0..=32).map(|i| t0 + (t1 - t0) * i as f64 / 32.0).collect();
+    for _ in 0..10 {
+        let us = u_at(&ts);
+        let pts: Vec<P3> = us.iter().map(|&u| P3::new(u, v, 0.0)).collect();
+        let fit = NurbsCurve::interpolate(&pts, &ts, 3, None, None);
+        let mut ins = Vec::new();
+        for k in 0..ts.len() - 1 {
+            let tm = 0.5 * (ts[k] + ts[k + 1]);
+            let q = fit.point(tm);
+            if (n0.point(q.x) - c.point(tm)).norm() > 1e-12 * (1.0 + c.point(tm).coords.norm()) {
+                ins.push(tm);
+            }
+        }
+        if ins.is_empty() || ts.len() > 4096 {
+            return Curve::Nurbs(Arc::new(fit));
+        }
+        ts.extend(ins);
+        ts.sort_by(f64::total_cmp);
+    }
+    let us = u_at(&ts);
+    let pts: Vec<P3> = us.iter().map(|&u| P3::new(u, v, 0.0)).collect();
+    Curve::Nurbs(Arc::new(NurbsCurve::interpolate(&pts, &ts, 3, None, None)))
 }
 
 /// Sweeps the profile along a run of tangent-continuous segments; the profile's plane where it
@@ -480,14 +574,20 @@ pub fn sweep_seg(faces: &[MergedFace], chains: &[Vec<Piece>], plane: Plane, segs
             reach = reach.max((m.point(&P3::new(q.x, q.y, 0.0)) - start).norm());
         }
     }
+    let t0 = std::time::Instant::now();
     let kind = PathSweep::new(plane, segs, control, reach, helix)?;
+    let t1 = t0.elapsed();
     if (kind.pts[1] - kind.pts[0]).dot(&plane.normal).abs() < 1e-9 * (kind.pts[1] - kind.pts[0]).norm().max(1e-300) {
         return Err(KernelError::InvalidParameter("The sweep path runs in the profile's plane".into()));
     }
     let mut b = super::sweep::sweep_full(faces, chains, &kind, 0.0, 1.0, false, solid)?;
+    let t2 = t0.elapsed();
     // Sides that came out flat or on a cylinder (a profile edge along a helix's axis) as those
     // surfaces, so booleans see them coincide with faces of the same surface.
     super::unify::planarize(&mut b.body);
     super::unify::cylindrize(&mut b.body);
+    if std::env::var("CADRS_PROFILE").is_ok() {
+        eprintln!("[profile] sweep piece: frames {t1:?}, faces {:?}, recognise {:?} ({} sections)", t2 - t1, t0.elapsed() - t2, kind.v.len());
+    }
     Ok((b, kind.end_plane()))
 }

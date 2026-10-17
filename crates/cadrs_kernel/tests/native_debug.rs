@@ -717,3 +717,47 @@ fn debug_thread_union() {
         Err(e) => panic!("{e}"),
     }
 }
+
+/// A Ø1 circle swept along a helix (R10, pitch 5, three turns; Bézier pieces, 16 a turn), the
+/// circle in the plane through the axis at the start: V = π/4 · cos(slope) · length.
+#[test]
+fn debug_helix_tube() {
+    use std::f64::consts::{PI, TAU};
+    let (r, pitch, turns, per) = (10.0, 5.0, 3.0, 16usize);
+    let n = (turns * per as f64) as usize;
+    let th = TAU / per as f64;
+    let kk = 4.0 / 3.0 * (th / 4.0).tan();
+    let pt = |a: f64| Point3::new(r * a.cos(), r * a.sin(), pitch * a / TAU);
+    let tan = |a: f64| Vector3::new(-r * a.sin(), r * a.cos(), pitch / TAU);
+    let quad = std::env::var("QUAD").is_ok();
+    let path: Vec<PathCurve> = (0..n)
+        .map(|i| {
+            let (a0, a1) = (th * i as f64, th * (i + 1) as f64);
+            if quad {
+                // Rational quadratic arcs (as cadrs_core's helix): the middle pole where the end
+                // tangents meet, weight cos(θ/2), z through the middle.
+                let w = (th / 2.0).cos();
+                let m = (a0 + a1) / 2.0;
+                let mid = Point3::new(r * m.cos() / w, r * m.sin() / w, pitch * m / TAU);
+                PathCurve::Bezier3 { poles: vec![pt(a0), mid, pt(a1)], weights: vec![1.0, w, 1.0] }
+            } else {
+                PathCurve::Bezier3 { poles: vec![pt(a0), pt(a0) + tan(a0) * kk, pt(a1) - tan(a1) * kk, pt(a1)], weights: vec![] }
+            }
+        })
+        .collect();
+    let mut k = NativeKernel::new();
+    let front = Plane { origin: Point3::origin(), x_dir: Vector3::x_axis(), normal: -Vector3::y_axis() };
+    let c = if std::env::var("ARC").is_ok() {
+        Loop { curves: vec![Curve2::Arc { center: p(10.0, 0.0), radius: 0.5, start_angle: 0.0, sweep: TAU, source: None }] }
+    } else {
+        Loop { curves: vec![Curve2::Circle { center: p(10.0, 0.0), radius: 0.5, source: None }] }
+    };
+    let b = k.sweep_with(&Profile::new(front, vec![reg(c)]), &SweepSpec { body: BodyKind::Solid, path, control: SweepControl::None, faces: vec![] }).unwrap().bodies[0];
+    let v = k.mass_properties(b).unwrap().volume;
+    let len = turns * ((TAU * r).powi(2) + pitch * pitch).sqrt();
+    let slope = (pitch / (TAU * r)).atan();
+    let want = PI * 0.25 * slope.cos() * len;
+    let faces: Vec<SurfaceKind> = k.faces(b).unwrap().iter().map(|f| f.kind).collect();
+    eprintln!("tube {v} want {want} ({} faces: {faces:?})", faces.len());
+    assert!((v - want).abs() < 1e-4 * want, "{v} vs {want}");
+}

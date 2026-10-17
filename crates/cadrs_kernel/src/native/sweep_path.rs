@@ -328,6 +328,14 @@ fn swap_caps(t: &mut Tagged) {
 
 pub fn sweep_with(k: &mut NativeKernel, profile: &Profile, spec: &SweepSpec) -> Result<OpResult> {
     let segs = path_segments(k, &spec.path)?;
+    if std::env::var("CADRS_SWEEP_DEBUG").is_ok() {
+        for (i, g) in segs.iter().enumerate() {
+            eprintln!("path {i}: {:?} {:?} -> {:?} ({} long)", std::mem::discriminant(&g.c), g.start(), g.end(), g.length());
+        }
+        eprintln!("profile plane {:?}, {} regions, control {:?}", profile.plane, profile.regions.len(), spec.control);
+        eprintln!("first path curve {:?}", spec.path.first());
+        eprintln!("profile {:?}", profile.regions.first().map(|r| &r.outer));
+    }
     let (path, closed) = chain(segs)?;
     let path_len = path.len();
     let (used, solid) = match spec.body {
@@ -375,10 +383,26 @@ pub fn sweep_with(k: &mut NativeKernel, profile: &Profile, spec: &SweepSpec) -> 
     let prof = std::env::var("CADRS_PROFILE").is_ok();
     let t0 = std::time::Instant::now();
     let mut pieces: Vec<Tagged> = Vec::new();
-    for (spine, backward) in spines(path, closed, &plane, &center) {
+    let sp = spines(path, closed, &plane, &center);
+    if std::env::var("CADRS_SWEEP_DEBUG").is_ok() {
+        for (spine, backward) in &sp {
+            eprintln!("spine of {} segments, backward {backward}, from {:?}", spine.len(), spine[0].start());
+        }
+    }
+    for (spine, backward) in sp {
         let mut these = sweep_spine(&faces, &chains, plane, &spine, spec.control, solid)?;
         if backward {
             these.iter_mut().for_each(swap_caps);
+        }
+        if std::env::var("CADRS_SWEEP_DEBUG").is_ok() {
+            for t in &these {
+                eprintln!("piece: volume {} faces {} solids {} check {:?}", super::mass::body_mass(&t.body).volume, t.body.faces.len(), t.body.solids.len(), t.body.check());
+                for (fi, f) in t.body.faces.iter().enumerate() {
+                    let q = super::mass::face_integrals(&t.body, f, &V3::zeros());
+                    let pcs: Vec<String> = f.loops.iter().flatten().map(|c| match &c.pc { Curve::Line { d, .. } => format!("L({:.2e},{:.2e})", d.x, d.y), Curve::Nurbs(n) => format!("N{}", n.cps.len()), _ => "?".into() }).collect();
+                    eprintln!("   face {fi} {:?} area {} vol-term {} pcs {pcs:?}", f.surf.kind(), q[0], q[4]);
+                }
+            }
         }
         pieces.extend(these);
     }
@@ -393,11 +417,19 @@ pub fn sweep_with(k: &mut NativeKernel, profile: &Profile, spec: &SweepSpec) -> 
         acc = if solid {
             match glue(&acc, &p) {
                 Some(g) => g,
-                None => super::features::tagged_union(&acc, &p)?,
+                None => {
+                    if std::env::var("CADRS_SWEEP_DEBUG").is_ok() {
+                        eprintln!("join: glue failed, united");
+                    }
+                    super::features::tagged_union(&acc, &p)?
+                }
             }
         } else {
             compound(acc, p)
         };
+        if std::env::var("CADRS_SWEEP_DEBUG").is_ok() {
+            eprintln!("join: volume {} faces {}", super::mass::body_mass(&acc.body).volume, acc.body.faces.len());
+        }
     }
     // A closed path: the last piece's end cap meets the first piece's start cap.
     if solid {
@@ -484,7 +516,7 @@ fn glue(a: &Tagged, b: &Tagged) -> Option<Tagged> {
                     // Keep the p-curve's chart: align its start with the old coedge's start.
                     let (ot0, _) = super::topo::co_range(&old, c.fwd);
                     let sp = c.pc.point(ot0);
-                    let mut pc = super::pcurve::pcurve(&surf, &new.curve, new.t[0], new.t[1], None);
+                    let mut pc = transfer_pcurve(&old, &c.pc, &new).unwrap_or_else(|| super::pcurve::pcurve(&surf, &new.curve, new.t[0], new.t[1], None));
                     let (nt0, _) = super::topo::co_range(&new, fwd);
                     let q = pc.point(nt0);
                     let du = if surf.u_periodic() { ((sp.x - q.x) / TAU).round() * TAU } else { 0.0 };
@@ -576,7 +608,7 @@ fn glue_within(t: &Tagged, fa: usize, fb: usize) -> Option<Tagged> {
                     let fwd = if same { c.fwd } else { !c.fwd };
                     let (ot0, _) = super::topo::co_range(&old, c.fwd);
                     let sp = c.pc.point(ot0);
-                    let mut pc = super::pcurve::pcurve(&surf, &new.curve, new.t[0], new.t[1], None);
+                    let mut pc = transfer_pcurve(&old, &c.pc, &new).unwrap_or_else(|| super::pcurve::pcurve(&surf, &new.curve, new.t[0], new.t[1], None));
                     let (nt0, _) = super::topo::co_range(&new, fwd);
                     let q = pc.point(nt0);
                     let du = if surf.u_periodic() { ((sp.x - q.x) / TAU).round() * TAU } else { 0.0 };
@@ -605,6 +637,42 @@ fn glue_within(t: &Tagged, fa: usize, fb: usize) -> Option<Tagged> {
         return None;
     }
     Some(Tagged { body, tags })
+}
+
+/// The p-curve of `new` (an edge on the same curve as `old`, its parameter an affine function
+/// of old's) from old's p-curve: no re-fit (a re-fit on a closed B-spline face can land on the
+/// wrong side of its seam).
+fn transfer_pcurve(old: &super::topo::Edge, pc: &Curve, new: &super::topo::Edge) -> Option<Curve> {
+    let at = |f: f64| new.t[0] + (new.t[1] - new.t[0]) * f;
+    let (t1, t2) = (at(0.25), at(0.75));
+    let u1 = old.curve.closest(&new.point(t1), old.t[0], old.t[1]);
+    let u2 = old.curve.closest(&new.point(t2), old.t[0], old.t[1]);
+    let a = (u2 - u1) / (t2 - t1);
+    let b = u1 - a * t1;
+    if !(a.abs() > 1e-12) {
+        return None;
+    }
+    for f in [0.0, 0.125, 0.5, 0.875, 1.0] {
+        let t = at(f);
+        if (old.point(a * t + b) - new.point(t)).norm() > 1e-9 {
+            return None;
+        }
+    }
+    match pc {
+        Curve::Line { o, d } => Some(Curve::Line { o: o + d * b, d: d * a }),
+        Curve::Nurbs(n) => {
+            let (r0, r1) = n.range();
+            if a > 0.0 {
+                Some(Curve::Nurbs(std::sync::Arc::new(n.reparam((r0 - b) / a, (r1 - b) / a))))
+            } else {
+                // orig(a t + b) = rev(r0 + r1 − a t − b): rev at a' t + b', a' = −a > 0.
+                let (a2, b2) = (-a, r0 + r1 - b);
+                let rev = n.reversed();
+                Some(Curve::Nurbs(std::sync::Arc::new(rev.reparam((r0 - b2) / a2, (r1 - b2) / a2))))
+            }
+        }
+        _ => None,
+    }
 }
 
 fn compound(mut a: Tagged, b: Tagged) -> Tagged {
