@@ -381,6 +381,7 @@ type PickSessions<'w> = (
     Option<Res<'w, super::replicate_dialog::ReplicateSession>>,
     // P3F.5 judge: the simulation's load dialog picks faces, not instances.
     Option<Res<'w, crate::simulation_ui::LoadSession>>,
+    Res<'w, crate::section_view::SectionViews>,
 );
 
 /// Whole-instance selections (tree clicks and box selection) use a shared widget at the
@@ -423,6 +424,8 @@ fn place_on_pick(
     eda: Res<crate::eda::Eda2d>,
 ) {
     let Some(doc) = doc else { return };
+    // The pointer system cancels any in-flight widget drag while editing a section.
+    if sessions.6.dialog.is_some() { return; }
     // Hidden while measuring; gone while inserting, mating or grouping.
     let hidden = mass.is_some();
     if triad.hidden != hidden {
@@ -535,7 +538,8 @@ fn hit(sc: &Screen, p: Vec2) -> Option<TriadHandle> {
 /// The triad handle at a screen position (for the right-click menu), with its instance.
 pub fn handle_at(world: &World, at: Vec2) -> Option<(InstanceId, TriadHandle)> {
     let t = world.resource::<Triad>();
-    if t.hidden || world.contains_resource::<crate::measure::MeasurePanel>() {
+    if t.hidden || world.contains_resource::<crate::measure::MeasurePanel>()
+        || world.resource::<crate::section_view::SectionViews>().dialog.is_some() {
         return None;
     }
     let f = t.frame?;
@@ -563,8 +567,18 @@ fn triad_pointer(
     mut asm: ResMut<super::AssemblyParts>,
     mut grab: ResMut<super::ViewportGrab>,
     q_menus: Query<(), With<cadrs_ui::menu::ContextMenuAnchor>>,
+    section: Res<crate::section_view::SectionViews>,
     mut commands: Commands,
 ) {
+    if section.dialog.is_some() {
+        inputs.clear();
+        if triad.drag.is_some() {
+            asm.preview.clear();
+            grab.0 = false;
+        }
+        *triad = Triad::default();
+        return;
+    }
     if triad.menu_handle.is_some() && q_menus.is_empty() {
         triad.menu_handle = None;
     }

@@ -197,6 +197,7 @@ fn instance_drag(
         Res<super::explode::ExplodeUi>,
         // A board's layout edited in context takes the presses (`crate::board_in_studio`).
         Res<crate::eda::Eda2d>,
+        Res<crate::section_view::SectionViews>,
     ),
     mut state: ResMut<InstanceDrag>,
     mut commands: Commands,
@@ -218,6 +219,16 @@ fn instance_drag(
     let over = pointer_over_viewport(&hover, &q_area);
     // P3B.8: while an exploded view is edited, a press is the explode triad's.
     let blocked = busy.0.is_some() || busy.1.is_some() || busy.2.is_some() || busy.3.is_some() || busy.4.is_some() || busy.5.editing() || busy.6.plane().is_some();
+    // Section-plane picking and dragging must never start or finish a part move.
+    if busy.7.dialog.is_some() {
+        inputs.clear();
+        if state.press.is_some() || state.active.is_some() {
+            *state = InstanceDrag::default();
+            parts.preview.clear();
+            grab.0 = false;
+        }
+        return;
+    }
     let mut last_move: Option<Vec2> = None;
     let mut finish = None;
     for input in inputs.read() {
@@ -427,7 +438,7 @@ mod movement_tests {
     #[test]
     fn dragging_previews_every_selected_part_and_commits_one_undo_step_or_cancels() {
         use bevy::picking::pointer::Location;
-        for (cancel, batched) in [(false, false), (true, false), (false, true)] {
+        for (cancel, batched, section) in [(false, false, false), (true, false, false), (false, true, false), (false, false, true), (false, true, true)] {
             let (doc, ids) = scene();
             let before = doc.doc.clone();
             let selection = selected(&ids[..2]);
@@ -441,6 +452,7 @@ mod movement_tests {
                 .init_resource::<super::super::ViewportGrab>()
                 .init_resource::<super::super::explode::ExplodeUi>()
                 .init_resource::<crate::eda::Eda2d>()
+                .init_resource::<crate::section_view::SectionViews>()
                 .insert_resource(ViewportView { view: crate::camera::ViewState { scale: 1.0, ..crate::camera::ViewState::standard(crate::camera::StandardView::Top) }, ..default() })
                 .insert_resource(ViewportRect(Rect::new(0.0, 0.0, 200.0, 200.0)))
                 .insert_resource(InstanceDrag { press: Some(Press { instance: ids[0], targets, local: [0.0; 3], hit: Vec3::ZERO, at: Vec2::splat(100.0) }), active: None })
@@ -448,6 +460,9 @@ mod movement_tests {
             let window = app.world_mut().spawn_empty().id();
             let target = bevy::camera::RenderTarget::Window(bevy::window::WindowRef::Entity(window)).normalize(None).unwrap();
             let location = Location { target, position: Vec2::new(120.0, 110.0) };
+            if section && batched {
+                app.world_mut().resource_mut::<crate::section_view::SectionViews>().dialog = before.elements.get(1).map(|e| e.id);
+            }
             app.world_mut().write_message(PointerInput::new(PointerId::Mouse, location.clone(), PointerAction::Move { delta: Vec2::new(20.0, 10.0) }));
             if !batched {
                 app.update();
@@ -456,12 +471,15 @@ mod movement_tests {
                 for id in &ids[..2] { close(preview[id], before.elements[1].assembly.instance(*id).unwrap().pose.then(&Pose::translation([20.0, -10.0, 0.0]))); }
                 assert_eq!(app.world().resource::<ActiveDocument>().doc, before, "preview must not edit the document");
             }
+            if section {
+                app.world_mut().resource_mut::<crate::section_view::SectionViews>().dialog = before.elements.get(1).map(|e| e.id);
+            }
             let action = if cancel { PointerAction::Cancel } else { PointerAction::Release(PointerButton::Primary) };
             app.world_mut().write_message(PointerInput::new(PointerId::Mouse, location, action));
             app.update();
             assert!(app.world().resource::<super::super::AssemblyParts>().preview.is_empty());
             let mut active = app.world_mut().resource_mut::<ActiveDocument>();
-            if cancel { assert_eq!(active.doc, before); assert_eq!(active.history.undo_len(), 0); }
+            if cancel || section { assert_eq!(active.doc, before); assert_eq!(active.history.undo_len(), 0); }
             else {
                 assert_eq!(active.history.undo_len(), 1);
                 let after = active.doc.clone();
