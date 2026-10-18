@@ -18,6 +18,7 @@ pub mod document;
 pub mod drawing;
 pub mod eda;
 pub mod draft_ui;
+pub mod accept;
 pub mod boolean;
 pub mod board_fit;
 pub mod board_in_studio;
@@ -600,7 +601,7 @@ impl Plugin for CadrsAppPlugin {
                 shortcuts::ShortcutsPlugin,
                 script::ScriptPlugin,
             ))
-            .add_plugins(rebuild_indicator::RebuildIndicatorPlugin)
+            .add_plugins((rebuild_indicator::RebuildIndicatorPlugin, accept::AcceptPlugin))
             .add_plugins((
                 parts::PartsPlugin,
                 parts_list::PartsListPlugin,

@@ -20,7 +20,7 @@
 //! `FirstShape`/`LastShape`, through the fork's `*_h` operations), which
 //! [`crate::naming`] turns into names that survive rebuilds.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::f64::consts::{PI, TAU};
 
 use glam::{DVec3, dvec3};
@@ -81,8 +81,13 @@ pub struct OcctKernel {
     vertex_infos: std::sync::Mutex<HashMap<BodyId, std::sync::Arc<Vec<VertexInfo>>>>,
     masses: std::sync::Mutex<HashMap<BodyId, MassProperties>>,
     /// A mesh body's display mesh: its triangles as they came (OCCT's mesher took 5 s to
-    /// triangulate again the 265 000 triangles of an imported STL).
-    meshes: HashMap<BodyId, std::sync::Arc<TriMesh>>,
+    /// triangulate again the 265 000 triangles of an imported STL); also a huge polyhedral
+    /// body's, which is exact at any quality (see [`OcctKernel::big_faces`]).
+    meshes: std::sync::Mutex<HashMap<BodyId, std::sync::Arc<TriMesh>>>,
+    /// The intersection of two bodies (target, tool) that [`Kernel::overlaps`] made, for the
+    /// [`Kernel::boolean`] intersect of the same two that usually follows (a Remove's preview of
+    /// the material it takes out): one boolean less, 15 s with a 265 000-facet mesh (issue #11).
+    commons: std::sync::Mutex<HashMap<(BodyId, BodyId), (Shape, OcctHistory)>>,
     next_id: u64,
 }
 
@@ -463,7 +468,13 @@ impl OcctKernel {
                 ToolFaces::Continue(f) => Src::In(*f),
             };
             let theirs = vec![Some(src); face_count(tool)?];
-            let (next, h) = if *add { result.try_union_clean_h(tool) } else { result.try_subtract_h(tool) }.map_err(occt)?;
+            let huge = face_count(&result)? + face_count(tool)? > MERGE_MAX_FACES;
+            let (next, h) = match (*add, huge) {
+                (true, false) => union_clean_checked(&result, tool),
+                (true, true) => result.try_union_h(tool),
+                (false, _) => result.try_subtract_h(tool),
+            }
+            .map_err(occt)?;
             let mut next_sources: Vec<Option<Src>> = vec![None; face_count(&next)?];
             for (outs, src) in h.faces.iter().zip(sources.iter().chain(&theirs)) {
                 for &f in outs {
@@ -486,9 +497,13 @@ impl OcctKernel {
                 None => {}
             }
         }
+        let kept: HashSet<FaceId> = sources.iter().filter_map(|s| match s {
+            Some(Src::In(f)) => Some(*f),
+            _ => None,
+        }).collect();
         for i in 0..n {
             let face = FaceId(i as u64);
-            if !sources.contains(&Some(Src::In(face))) {
+            if !kept.contains(&face) {
                 history.deleted.push(InputFace { body, face });
             }
         }
@@ -636,12 +651,16 @@ impl OcctKernel {
 ///
 /// Surface bodies are left as they are. The merge is dropped (the shape kept as it was, seams and
 /// all) when it merges nothing, or when it would change the volume, make an invalid solid out of
-/// a valid one, leave a face with no edges, or lose track of a face.
+/// a valid one, leave a face with no edges, or lose track of a face. Huge bodies (an imported
+/// mesh's facets, more than [`MERGE_MAX_FACES`]) are left as they are too.
 fn merge_same_domain(shape: Shape, history: History) -> Result<(Shape, History)> {
     if shape.sub_count(SubKind::Solid).map_err(occt)? == 0 {
         return Ok((shape, history));
     }
     let before = shape.topology_counts().map_err(occt)?;
+    if before[0] > MERGE_MAX_FACES {
+        return Ok((shape, history));
+    }
     // UnifySameDomain edits the edges of its input in place, and a result shares its untouched
     // faces and edges with the operation's inputs (other bodies): it works on a copy.
     let Ok((merged, h)) = clone_shape(&shape).try_clean_h() else {
@@ -710,7 +729,31 @@ fn merge_same_domain(shape: Shape, history: History) -> Result<(Shape, History)>
     Ok((merged, out))
 }
 
+/// The union with the faces on one surface merged across the two bodies, made from copies of
+/// them: UnifySameDomain edits the edges it merges in place, and the fused result shares edges
+/// with its inputs, so a merge that goes wrong (one on a shelled body's offset faces dropped a
+/// region, leaving a valid solid without it) would damage the inputs too. Checked by volume (no
+/// less than either body, no more than both together); else the plain union of the inputs.
+fn union_clean_checked(a: &Shape, b: &Shape) -> std::result::Result<(Shape, OcctHistory), opencascade::Error> {
+    let (va, vb) = (a.mass_properties().volume, b.mass_properties().volume);
+    let (u, h) = clone_shape(a).try_union_clean_h(&clone_shape(b))?;
+    let vu = u.mass_properties().volume;
+    let slack = 1e-6 * (va.abs() + vb.abs()).max(1.0);
+    if vu.is_finite() && vu >= va.max(vb) - slack && vu <= va + vb + slack {
+        Ok((u, h))
+    } else {
+        a.try_union_h(b)
+    }
+}
+
 /// The number of distinct faces of a shape.
+/// The most faces a body's same-surface faces are merged for (`merge_same_domain`, and the
+/// merge across a union): UnifySameDomain's face orientation fix (ShapeFix_Shell's GetShells)
+/// grows with the square of the face count, and took 2½ minutes for the 42 000 faces left of a
+/// 265 000-facet mesh after a boolean (issue #11). A CAD body has far fewer; a body with more is
+/// a mesh's facets, which stay facets.
+const MERGE_MAX_FACES: usize = 10_000;
+
 fn face_count(shape: &Shape) -> Result<usize> {
     Ok(shape.topology_counts().map_err(occt)?[0])
 }
@@ -1212,7 +1255,10 @@ impl Kernel for OcctKernel {
             let (next, h) = match op {
                 // A face of the target and a face of the tool on one surface, meeting, become
                 // one face (no seam where the bodies met); `insert` then merges the rest.
-                BoolOp::Union => result.try_union_clean_h(shape).and_then(|(u, h)| {
+                // Huge bodies: the plain union (see `MERGE_MAX_FACES`; the validity checks
+                // below took as long again).
+                BoolOp::Union if face_count(&result)? + face_count(shape)? > MERGE_MAX_FACES => result.try_union_h(shape),
+                BoolOp::Union => union_clean_checked(&result, shape).and_then(|(u, h)| {
                     // Merging only across the two bodies can leave a face it couldn't merge
                     // whole (a cylinder meeting two pieces of one split by ribs) invalid, and
                     // the full merge in `insert` then goes wrong too: the plain union instead,
@@ -1224,6 +1270,10 @@ impl Kernel for OcctKernel {
                     }
                 }),
                 BoolOp::Subtract => result.try_subtract_h(shape),
+                BoolOp::Intersect if tools.len() == 1 => match self.commons.lock().ok().and_then(|mut c| c.remove(&(target, tool))) {
+                    Some(made) => Ok(made),
+                    None => result.try_intersect_h(shape),
+                },
                 BoolOp::Intersect => result.try_intersect_h(shape),
             }
             .map_err(occt)?;
@@ -1245,10 +1295,11 @@ impl Kernel for OcctKernel {
                 .enumerate()
                 .filter_map(|(i, s)| Some((FaceId(i as u64), (*s)?)))
                 .collect(),
-            deleted: inputs
-                .into_iter()
-                .filter(|i| !sources.contains(&Some(*i)))
-                .collect(),
+            // A set: scanning the result for each input took minutes for a 265 000-face mesh.
+            deleted: {
+                let kept: HashSet<InputFace> = sources.iter().flatten().copied().collect();
+                inputs.into_iter().filter(|i| !kept.contains(i)).collect()
+            },
             ..History::default()
         };
         self.insert(result, history)
@@ -1790,7 +1841,12 @@ impl Kernel for OcctKernel {
         if let Ok(mut c) = self.masses.lock() {
             c.remove(&body);
         }
-        self.meshes.remove(&body);
+        if let Ok(mut c) = self.meshes.lock() {
+            c.remove(&body);
+        }
+        if let Ok(mut c) = self.commons.lock() {
+            c.retain(|k, _| k.0 != body && k.1 != body);
+        }
     }
 
     fn write_body(&self, body: BodyId) -> Result<Vec<u8>> {
@@ -1806,7 +1862,8 @@ impl Kernel for OcctKernel {
         if let Some(f) = self.face_infos.lock().ok().and_then(|c| c.get(&body).cloned()) {
             return Ok(f.as_ref().clone());
         }
-        let infos = std::sync::Arc::new(face_infos(self.body(body)?));
+        let shape = self.body(body)?;
+        let infos = std::sync::Arc::new(if face_count(shape)? > MERGE_MAX_FACES { self.big_faces(body)? } else { face_infos(shape) });
         if let Ok(mut c) = self.face_infos.lock() {
             c.insert(body, infos.clone());
         }
@@ -1839,6 +1896,13 @@ impl Kernel for OcctKernel {
         if let Some(m) = self.masses.lock().ok().and_then(|c| c.get(&body).copied()) {
             return Ok(m);
         }
+        // A huge polyhedral body's comes from its faces' triangles (`big_faces`).
+        if face_count(self.body(body)?)? > MERGE_MAX_FACES {
+            self.faces(body)?;
+            if let Some(m) = self.masses.lock().ok().and_then(|c| c.get(&body).copied()) {
+                return Ok(m);
+            }
+        }
         let m = self.mass_uncached(body)?;
         if let Ok(mut c) = self.masses.lock() {
             c.insert(body, m);
@@ -1856,6 +1920,25 @@ impl Kernel for OcctKernel {
     fn joins(&mut self, a: BodyId, b: BodyId) -> Result<bool> {
         let fused = self.body(a)?.try_union(self.body(b)?).map_err(occt)?;
         Ok(fused.sub_count(SubKind::Solid).map_err(occt)? == 1)
+    }
+
+    fn overlaps(&mut self, a: BodyId, b: BodyId) -> Result<bool> {
+        // The intersection as `boolean` makes it, kept for the one that follows, without the
+        // face merge a stored result gets (minutes for a 265 000-face mesh).
+        let (common, h) = clone_shape(self.body(a)?).try_intersect_h(self.body(b)?).map_err(occt)?;
+        let overlap = if common.faces().next().is_none() {
+            false
+        } else if face_count(&common)? > MERGE_MAX_FACES {
+            // A huge one (a mesh's facets) has volume if it has a solid: its integral took
+            // seconds.
+            common.sub_count(SubKind::Solid).map_err(occt)? > 0
+        } else {
+            common.mass_properties().volume > 1e-9
+        };
+        if let Ok(mut c) = self.commons.lock() {
+            c.insert((a, b), (common, h));
+        }
+        Ok(overlap)
     }
 
     fn bounding_box(&self, body: BodyId) -> Result<Aabb> {
@@ -1887,46 +1970,19 @@ impl Kernel for OcctKernel {
     }
 
     fn tessellate(&self, body: BodyId, quality: Tessellation) -> Result<TriMesh> {
-        // A mesh body's own flat triangles are exact at any quality.
-        if let Some(m) = self.meshes.get(&body) {
+        // A mesh body's own flat triangles are exact at any quality, and so is a huge
+        // polyhedral body's mesh (`big_faces`).
+        let cached = || self.meshes.lock().ok().and_then(|c| c.get(&body).cloned());
+        if let Some(m) = cached() {
             return Ok(m.as_ref().clone());
         }
-        let shape = self.body(body)?;
-        let deflection = quality.deflection.max(1e-4);
-        let angle = quality.angle.clamp(1e-3, 1.0);
-        // Meshing the whole body gives the faces one discretisation of their shared edges; the
-        // faces and edges below read it back.
-        shape.try_mesh(deflection, angle).map_err(occt)?;
-
-        let mut out = TriMesh::default();
-        for (fi, face) in faces_of(shape).iter().enumerate() {
-            // A face neither mesher could triangulate (a degenerate sliver in an imported STEP)
-            // is left out of the display mesh rather than failing the whole body.
-            let Ok(mesh) = face.triangulation() else { continue };
-            let base = out.positions.len() as u32;
-            out.positions
-                .extend(mesh.positions.iter().map(|v| Point3::from(to_na(*v))));
-            out.normals.extend(mesh.normals.iter().map(|n| to_na(*n)));
-            // Keep the arrays parallel even if OCCT returned no normals for a face.
-            out.normals.resize(out.positions.len(), Vector3::zeros());
-            for tri in &mesh.indices {
-                out.indices.push(tri.map(|i| base + i));
-                out.triangle_faces.push(FaceId(fi as u64));
+        if face_count(self.body(body)?)? > MERGE_MAX_FACES {
+            self.faces(body)?;
+            if let Some(m) = cached() {
+                return Ok(m.as_ref().clone());
             }
         }
-        out.edges = Edges::of(shape)
-            .list
-            .iter()
-            .enumerate()
-            .map(|(i, edge)| {
-                let points = edge.polyline(shape, angle, deflection).map_err(occt)?;
-                Ok((
-                    EdgeId(i as u64),
-                    points.into_iter().map(|p| Point3::from(to_na(p))).collect(),
-                ))
-            })
-            .collect::<Result<Vec<_>>>()?;
-        Ok(out)
+        self.tessellate_uncached(body, quality)
     }
 
     fn project(&self, bodies: &[BodyId], frame: &ViewFrame, opts: &ProjectOptions) -> Result<Projection> {
@@ -2170,11 +2226,16 @@ impl Kernel for OcctKernel {
         // wound (sewing a 265 000-triangle STL with two such edges never finished: issue #11).
         let wound = directed.iter().all(|(&(a, b), n)| directed.get(&(b, a)) == Some(n));
         // Its mass from the triangles themselves, exact for a polyhedron and instant (OCCT's
-        // integration over 265 000 faces took 5 s).
+        // integration over 265 000 faces took 5 s). Its sign says which way the triangles are
+        // wound, so OCCT needn't classify the shell to orient it (4 s of the same import).
         let mut mass = None;
-        let solid = match wound.then(|| Shape::try_mesh_solid(&points, &tris, tol)) {
-            Some(Ok(s)) => {
-                mass = Some(polyhedron_mass(&points, &tris));
+        let built = wound.then(|| {
+            let m = polyhedron_mass(&points, &tris);
+            (m, Shape::try_mesh_solid_wound(&points, &tris, tol, m.1))
+        });
+        let solid = match built {
+            Some((m, Ok(s))) => {
+                mass = Some(m);
                 s
             }
             _ => {
@@ -2208,7 +2269,9 @@ impl Kernel for OcctKernel {
             // from them (OCCT's integrals over each face took 8 s for 265 000).
             if !unified {
                 let (mesh, faces, edges, vertices) = mesh_body_mesh(&points, &tris, inward);
-                self.meshes.insert(body, std::sync::Arc::new(mesh));
+                if let Ok(mut c) = self.meshes.lock() {
+                    c.insert(body, std::sync::Arc::new(mesh));
+                }
                 if let Ok(mut c) = self.face_infos.lock() {
                     c.insert(body, std::sync::Arc::new(faces));
                 }
@@ -2872,6 +2935,35 @@ fn face_infos(shape: &Shape) -> Vec<FaceInfo> {
         .collect()
 }
 
+/// A flat face's info from its triangles (wound about its outward normal), exact for a face
+/// with straight edges: as [`face_info`] gives it, without OCCT's integrals.
+fn flat_face_info(id: FaceId, tris: &[[Point3<f64>; 3]]) -> Option<FaceInfo> {
+    let (mut area, mut moment, mut normal) = (0.0, Vector3::zeros(), Vector3::zeros());
+    for [a, b, c] in tris {
+        let n = (b - a).cross(&(c - a));
+        let w = n.norm() / 2.0;
+        area += w;
+        moment += (a.coords + b.coords + c.coords) / 3.0 * w;
+        normal += n;
+    }
+    if area <= 0.0 || normal.norm() <= 0.0 {
+        return None;
+    }
+    let center = Point3::from(moment / area);
+    let n = normal.normalize();
+    let helper = if n.x.abs() < 0.9 { Vector3::x() } else { Vector3::y() };
+    let x_dir = Unit::new_normalize(helper - n * helper.dot(&n));
+    Some(FaceInfo {
+        id,
+        kind: SurfaceKind::Plane,
+        plane: Some(Plane { origin: center, x_dir, normal: Unit::new_normalize(n) }),
+        area,
+        center,
+        axis: None,
+        radius: None,
+    })
+}
+
 fn face_info(id: FaceId, face: &Face) -> FaceInfo {
     let area = face.surface_area();
     let center = Point3::from(to_na(face.center_of_mass()));
@@ -2918,6 +3010,105 @@ fn face_info(id: FaceId, face: &Face) -> FaceInfo {
     }
 }
 
+impl OcctKernel {
+    /// [`Kernel::tessellate`] by OCCT's mesher.
+    fn tessellate_uncached(&self, body: BodyId, quality: Tessellation) -> Result<TriMesh> {
+        let shape = self.body(body)?;
+        let deflection = quality.deflection.max(1e-4);
+        let angle = quality.angle.clamp(1e-3, 1.0);
+        // Meshing the whole body gives the faces one discretisation of their shared edges; the
+        // faces and edges below read it back.
+        shape.try_mesh(deflection, angle).map_err(occt)?;
+
+        let mut out = TriMesh::default();
+        for (fi, face) in faces_of(shape).iter().enumerate() {
+            // A face neither mesher could triangulate (a degenerate sliver in an imported STEP)
+            // is left out of the display mesh rather than failing the whole body.
+            let Ok(mesh) = face.triangulation() else { continue };
+            let base = out.positions.len() as u32;
+            out.positions
+                .extend(mesh.positions.iter().map(|v| Point3::from(to_na(*v))));
+            out.normals.extend(mesh.normals.iter().map(|n| to_na(*n)));
+            // Keep the arrays parallel even if OCCT returned no normals for a face.
+            out.normals.resize(out.positions.len(), Vector3::zeros());
+            for tri in &mesh.indices {
+                out.indices.push(tri.map(|i| base + i));
+                out.triangle_faces.push(FaceId(fi as u64));
+            }
+        }
+        out.edges = Edges::of(shape)
+            .list
+            .iter()
+            .enumerate()
+            .map(|(i, edge)| {
+                let points = edge.polyline(shape, angle, deflection).map_err(occt)?;
+                Ok((
+                    EdgeId(i as u64),
+                    points.into_iter().map(|p| Point3::from(to_na(p))).collect(),
+                ))
+            })
+            .collect::<Result<Vec<_>>>()?;
+        Ok(out)
+    }
+
+    /// The faces of a huge body (more than [`MERGE_MAX_FACES`]: a mesh's facets, cut or added
+    /// to). A flat face with straight edges is its display triangles exactly, so its area,
+    /// centroid and normal come from them rather than from OCCT's integrals and projections
+    /// (40 s for the 260 000 faces of an STL with a pocket cut in it, issue #11). When every face
+    /// is like that, the body is a polyhedron: its mesh, exact at any quality, is kept as its
+    /// display mesh and its mass worked out from it too.
+    fn big_faces(&self, body: BodyId) -> Result<Vec<FaceInfo>> {
+        let shape = self.body(body)?;
+        let mesh = self.tessellate_uncached(body, Tessellation { deflection: 0.05, angle: PI / 36.0 })?;
+        let faces = faces_of(shape);
+        let mut curved = vec![false; faces.len()];
+        for e in self.edges(body)? {
+            if e.curve != CurveKind::Line {
+                for f in e.faces.iter().flatten() {
+                    if let Some(c) = curved.get_mut(f.0 as usize) {
+                        *c = true;
+                    }
+                }
+            }
+        }
+        // Each face's triangles (the mesh lists them face by face).
+        let mut tris: Vec<Vec<[Point3<f64>; 3]>> = vec![Vec::new(); faces.len()];
+        for (t, f) in mesh.indices.iter().zip(&mesh.triangle_faces) {
+            if let Some(list) = tris.get_mut(f.0 as usize) {
+                list.push(t.map(|i| mesh.positions[i as usize]));
+            }
+        }
+        let mut polyhedral = true;
+        let infos: Vec<FaceInfo> = faces
+            .iter()
+            .enumerate()
+            .map(|(i, face)| {
+                let id = FaceId(i as u64);
+                let flat = !curved[i] && !tris[i].is_empty() && matches!(face.surface_type(), Ok(SurfaceType::Plane));
+                match flat.then(|| flat_face_info(id, &tris[i])).flatten() {
+                    Some(info) => info,
+                    None => {
+                        polyhedral = false;
+                        face_info(id, face)
+                    }
+                }
+            })
+            .collect();
+        if polyhedral && shape.sub_count(SubKind::Solid).map_err(occt)? > 0 {
+            let points: Vec<f64> = mesh.positions.iter().flat_map(|p| [p.x, p.y, p.z]).collect();
+            let indices: Vec<i32> = mesh.indices.iter().flatten().map(|&i| i as i32).collect();
+            let (m, inward) = polyhedron_mass(&points, &indices);
+            if !inward && let Ok(mut c) = self.masses.lock() {
+                c.insert(body, m);
+            }
+        }
+        if polyhedral && let Ok(mut c) = self.meshes.lock() {
+            c.insert(body, std::sync::Arc::new(mesh));
+        }
+        Ok(infos)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2946,16 +3137,8 @@ mod tests {
         }
     }
 
-    /// The mesh body's display mesh without meshing is OCCT's mesh of it: the same faces,
-    /// triangles (corners, winding and normals) and edges, wound outward and inward.
-    #[test]
-    fn mesh_body_mesh_matches_occt() {
-        let pyramid = (
-            vec![100.0, 50.0, -20.0, 130.0, 52.0, -20.0, 104.0, 75.0, -18.0, 112.0, 58.0, 9.0, 101.0, 70.0, -19.0],
-            vec![0, 2, 1, 0, 4, 2, 0, 1, 3, 1, 2, 3, 2, 4, 3, 4, 0, 3],
-        );
-        // A 10 mm cube, each side a 4 × 4 grid of squares split in two, wound outward.
-        let cube = {
+    /// A 10 mm cube, each side a 4 × 4 grid of squares split in two, wound outward.
+    fn grid_cube() -> (Vec<f64>, Vec<i32>) {
             let (mut points, mut tris, mut index) = (Vec::new(), Vec::new(), HashMap::new());
             let mut at = |q: [i64; 3]| -> i32 {
                 *index.entry(q).or_insert_with(|| {
@@ -2982,12 +3165,60 @@ mod tests {
                 }
             }
             (points, tris)
-        };
+        }
+
+    /// A huge body's faces and mass from its display triangles (`big_faces`) are OCCT's: the
+    /// grid cube with a box cut out of a corner, its faces triangles, squares and L shapes.
+    #[test]
+    fn big_faces_match_occt() {
+        let (points, tris) = grid_cube();
+        let mut k = OcctKernel::new();
+        let cube = k.insert_raw(Shape::try_mesh_solid(&points, &tris, 1e-7).unwrap(), History::default()).unwrap().bodies[0];
+        let tool = k.insert_raw(Shape::box_from_corners(dvec3(13.0, 12.0, 11.0), dvec3(20.0, 20.0, 20.0)), History::default()).unwrap().bodies[0];
+        let body = k.boolean(BoolOp::Subtract, cube, &[tool]).unwrap().bodies[0];
+        let occt = face_infos(k.body(body).unwrap());
+        let ours = k.big_faces(body).unwrap();
+        assert_eq!(ours.len(), occt.len());
+        assert!(occt.iter().any(|f| f.area > 7.0), "some faces are more than one triangle");
+        for (a, b) in ours.iter().zip(&occt) {
+            assert_eq!((a.id, a.kind, a.axis, a.radius), (b.id, b.kind, b.axis, b.radius));
+            assert!((a.area - b.area).abs() < 1e-9 * b.area && (a.center - b.center).norm() < 1e-9, "{a:?} vs {b:?}");
+            let (pa, pb) = (a.plane.unwrap(), b.plane.unwrap());
+            assert!((pa.origin - pb.origin).norm() < 1e-9 && (pa.normal.into_inner() - pb.normal.into_inner()).norm() < 1e-6 && (pa.x_dir.into_inner() - pb.x_dir.into_inner()).norm() < 1e-6, "{pa:?} vs {pb:?}");
+        }
+        // A polyhedron: its mass and display mesh are kept.
+        let (m, o) = (k.masses.lock().unwrap()[&body], k.mass_uncached(body).unwrap());
+        let near = |a: f64, b: f64| (a - b).abs() <= 1e-9 * b.abs().max(1.0);
+        assert!(near(m.volume, o.volume) && near(m.surface_area, o.surface_area) && (m.center_of_mass - o.center_of_mass).norm() < 1e-9, "{m:?} vs {o:?}");
+        for r in 0..3 {
+            for c in 0..3 {
+                assert!((m.inertia[(r, c)] - o.inertia[(r, c)]).abs() <= 1e-7 * o.inertia[(0, 0)].abs(), "{m:?} vs {o:?}");
+            }
+        }
+        let quality = Tessellation { deflection: 0.01, angle: 0.05 };
+        assert_eq!(*k.meshes.lock().unwrap()[&body], k.tessellate_uncached(body, quality).unwrap());
+    }
+
+    /// The mesh body's display mesh without meshing is OCCT's mesh of it: the same faces,
+    /// triangles (corners, winding and normals) and edges, wound outward and inward.
+    #[test]
+    fn mesh_body_mesh_matches_occt() {
+        let pyramid = (
+            vec![100.0, 50.0, -20.0, 130.0, 52.0, -20.0, 104.0, 75.0, -18.0, 112.0, 58.0, 9.0, 101.0, 70.0, -19.0],
+            vec![0, 2, 1, 0, 4, 2, 0, 1, 3, 1, 2, 3, 2, 4, 3, 4, 0, 3],
+        );
+        let cube = grid_cube();
         for (points, outward) in [pyramid, cube] {
             let inward: Vec<i32> = outward.as_chunks::<3>().0.iter().flat_map(|t| [t[0], t[2], t[1]]).collect();
             for (tris, flag) in [(&outward[..], false), (&inward[..], true)] {
+                // Built as the import builds it, oriented by the winding rather than by OCCT, and
+                // the same solid OCCT orients itself.
+                let oriented = Shape::try_mesh_solid(&points, tris, 1e-7).unwrap().mass_properties();
+                let solid = Shape::try_mesh_solid_wound(&points, tris, 1e-7, flag).unwrap();
+                let m = solid.mass_properties();
+                assert!(m.volume > 0.0 && (m.volume - oriented.volume).abs() < 1e-9 * oriented.volume, "{} vs {}", m.volume, oriented.volume);
                 let mut k = OcctKernel::new();
-                let body = k.insert_raw(Shape::try_mesh_solid(&points, tris, 1e-7).unwrap(), History::default()).unwrap().bodies[0];
+                let body = k.insert_raw(solid, History::default()).unwrap().bodies[0];
                 let occt = k.tessellate(body, Tessellation { deflection: 0.05, angle: 0.1 }).unwrap();
                 let (ours, faces, edges, vertices) = mesh_body_mesh(&points, tris, flag);
                 let (occt_edges, occt_vertices) = (k.edges_uncached(body).unwrap(), k.vertices_uncached(body).unwrap());

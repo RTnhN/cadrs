@@ -219,7 +219,8 @@ pub fn accept(world: &mut World) {
     let Some(doc) = world.get_resource::<ActiveDocument>() else { return };
     let Some(el) = doc.doc.element(s.element) else { return };
     let Some(f) = el.feature(s.feature).filter(|f| f.is_valid()).cloned() else { return };
-    if cadrs_core::rebuild::build(&el.active_features()).error(f.id).is_some() {
+    let features = el.active_features();
+    if crate::accept::builds(world, "import", features, f.id, accept) != Some(true) {
         return;
     }
     let label = if s.is_new { format!("Insert {}", f.name) } else { format!("Edit {}", f.name) };
@@ -368,6 +369,8 @@ fn sync_import_dialog(
                 DespawnOnExit(AppState::Document),
                 FeatureDialog::new("import-dialog")
                     .title(f.name.clone())
+                    // Room for a file name beside Choose file (it overran the default width).
+                    .width(340.0)
                     .valid(valid)
                     .body(move |b| {
                         b.spawn(Node { flex_direction: FlexDirection::Column, row_gap: Val::Px(4.0), ..default() }).with_children(|b| {
@@ -377,7 +380,8 @@ fn sync_import_dialog(
                                     r.spawn((
                                         Name::new("import-file-name"),
                                         t.text(format!("{} ({})", x.file_name, x.format.label()), t.font_base, FontWeight::MEDIUM, t.foreground),
-                                        Node { flex_grow: 1.0, ..default() },
+                                        // A longer name wraps rather than running past the dialog.
+                                        Node { flex_grow: 1.0, flex_shrink: 1.0, min_width: Val::Px(0.0), ..default() },
                                         Pickable::IGNORE,
                                     ));
                                     r.spawn((ChooseFile, cadrs_ui::Button::new("import-choose-file").label("Choose file").small().outline().tooltip("Import another file").build(&t)));

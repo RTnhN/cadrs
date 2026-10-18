@@ -362,6 +362,15 @@ pub trait Kernel {
         Ok(joined)
     }
 
+    /// Whether two solid bodies overlap with volume: their intersection has some. Only asks the
+    /// question (the parts a new body's Remove cuts), like [`Kernel::joins`].
+    fn overlaps(&mut self, a: BodyId, b: BodyId) -> Result<bool> {
+        let r = self.boolean(BoolOp::Intersect, a, &[b])?;
+        let v = self.mass_properties(r.bodies[0]).map(|m| m.volume).unwrap_or(0.0);
+        self.release(r.bodies[0]);
+        Ok(v > 1e-9)
+    }
+
     /// A tight axis-aligned bounding box of the body's exact geometry.
     fn bounding_box(&self, _body: BodyId) -> Result<Aabb> {
         Err(KernelError::Unsupported("bounding box"))
