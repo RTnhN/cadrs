@@ -1707,7 +1707,7 @@ pub fn sketch_toolbar(tb: &mut ChildSpawnerCommands, t: &Theme) {
                 B::Tool(T::Fillet),
             ),
             ("sketch-trim", "trim", true, "Trim (M)", B::Tool(T::Trim)),
-            ("sketch-offset", "offset", true, "Offset (O)", B::Tool(T::Offset)),
+            ("sketch-offset", "offset", true, "Offset (O): pick curves, then click empty space or press Enter", B::Tool(T::Offset)),
             ("sketch-mirror", "mirror", false, "Mirror", B::Tool(T::Mirror)),
             (
                 "sketch-pattern",
