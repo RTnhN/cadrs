@@ -16,7 +16,9 @@
 //!   axis (the angle shown beside it, "25 deg").
 //! - The material removed is clipped on the GPU (`part_shading.wgsl`), the edges on the CPU, and
 //!   picking ignores what was cut away (a pick through a cap stops at it). The caps are hatched.
-//! - The **caps** are the faces a half-space boolean leaves on the plane
+//! - During movement, the displayed mesh supplies immediate closing faces. After release,
+//!   one exact cap job at a time replaces these previews; obsolete drag positions are not queued.
+//!   Exact **caps** are the faces a half-space boolean leaves on the plane
 //!   ([`cadrs_core::section`], the drawings' section cut), worked out on the kernel thread for
 //!   each part shown and cached per plane (both sides of a plane share their caps), drawn in
 //!   each part's colour with their outlines.
@@ -29,6 +31,8 @@
 //! - The default planes and plane features stay whole; a sketch on the removed side is not
 //!   drawn.
 //! - A section is a view, per tab: nothing in the document changes and nothing is undone.
+
+mod preview;
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -371,6 +375,8 @@ pub struct SectionClip {
     key: Option<Vec<CapKey>>,
     pending: Vec<(CapKey, cadrs_core::rebuild::PendingJob<PlaneCaps>)>,
     cache: Vec<(CapKey, Arc<PlaneCaps>)>,
+    preview_cache: Vec<(CapKey, Arc<PlaneCaps>)>,
+    displayed: Option<(Vec<CapKey>, Cut, Vec<usize>)>,
 }
 
 /// One plane's caps as the kernel works them out, per part.
@@ -866,6 +872,7 @@ fn sync_dialog(
     cache: Res<PartCache>,
     units: Res<crate::WorkspaceUnits>,
     theme: Res<Theme>,
+    arrow: Res<SectionArrow>,
     q_dialog: Query<(Entity, &SectionDialog, &FeatureDialogState)>,
     q_area: Query<Entity, With<ViewportArea>>,
     mut commands: Commands,
@@ -877,6 +884,7 @@ fn sync_dialog(
         }
         return;
     };
+    if !q_dialog.is_empty() && (arrow.drag.is_some() || arrow.turn.is_some()) { return; }
     let s = views.per.get(&el).cloned().unwrap_or_default();
     let offset = units.0.with_unit(s.active_plane().map_or(0.0, |p| p.offset) as f64, cadrs_sketch::units::Quantity::Length);
     let names: Vec<String> = s.items.iter().map(|p| cache.part(*p).map(|q| q.name.clone()).unwrap_or_else(|| "Part".into())).collect();
@@ -897,29 +905,34 @@ fn sync_dialog(
 
 /// Works out each plane's caps on the kernel thread (cached per plane and parts cut), then
 /// keeps the part of each that the other planes remove too.
-fn compute_caps(views: Res<SectionViews>, doc: Option<Res<ActiveDocument>>, mut cache: ResMut<PartCache>, mut clip: ResMut<SectionClip>) {
+fn compute_caps(views: Res<SectionViews>, arrow: Res<SectionArrow>, doc: Option<Res<ActiveDocument>>, mut cache: ResMut<PartCache>, mut clip: ResMut<SectionClip>) {
+    // Always drain the one outstanding job, even when the section was closed or changed.
+    // Dropping its receiver would not cancel work already on the shared kernel thread.
+    let mut done = Vec::new();
+    clip.pending.retain(|(key, job)| match job.poll() {
+        Some(result) => { done.push((*key, Arc::new(result.unwrap_or_default()))); false }
+        None => true,
+    });
+    for (key, caps) in done {
+        clip.cache.retain(|(k, _)| k.0 != key.0 || k.1 == key.1);
+        clip.cache.push((key, caps));
+        while clip.cache.len() > CACHED_PLANES { clip.cache.remove(0); }
+    }
     let el = doc.as_ref().and_then(|d| d.active);
     let state = el.and_then(|el| views.per.get(&el));
     let cut = state.and_then(|s| s.cut());
-    if clip.plane != cut {
-        clip.plane = cut;
-    }
+    if clip.plane != cut { clip.plane = cut; }
     let excluded = match (state, cut) {
         (Some(s), Some(_)) => s.excluded(cache.shown().map(|p| p.id)),
         _ => Vec::new(),
     };
-    if clip.excluded != excluded {
-        clip.excluded = excluded.clone();
-    }
+    if clip.excluded != excluded { clip.excluded = excluded.clone(); }
     let Some(cut) = cut else {
-        if !clip.caps.is_empty() {
-            clip.caps = Arc::default();
-        }
+        if !clip.caps.is_empty() { clip.caps = Arc::default(); }
         clip.key = None;
-        clip.pending.clear();
-        if cache.section.is_some() {
-            cache.section = None;
-        }
+        clip.displayed = None;
+        clip.preview_cache.clear();
+        cache.section = None;
         return;
     };
     let (Some(doc), Some(el)) = (doc, el) else { return };
@@ -931,79 +944,55 @@ fn compute_caps(views: Res<SectionViews>, doc: Option<Res<ActiveDocument>>, mut 
         h.finish()
     };
     let keys: Vec<CapKey> = cut.planes().iter().map(|(o, n)| cap_key(el, cache.generation, *o, *n, parts_hash)).collect();
-    let pick = |caps: &Caps| crate::parts::SectionPick {
-        cut,
-        excluded: excluded.clone(),
-        caps: caps.iter().flat_map(|c| c.triangles.iter().copied()).collect(),
-    };
-    // The cut applies at once (a flip or an offset along a plane already worked out keeps its
-    // caps); the caps follow when the kernel has them.
-    if clip.key.as_ref() == Some(&keys) {
-        if cache.section.as_ref().is_none_or(|s| s.cut != cut || s.excluded != excluded) {
-            let caps = combine(&clip.caps_raw(&keys), &cut);
-            cache.section = Some(pick(&caps));
-            clip.caps = Arc::new(caps);
+    clip.preview_cache.retain(|(key, _)| keys.contains(key));
+    let mut raw = Vec::new();
+    let mut missing = Vec::new();
+    for (i, key) in keys.iter().enumerate() {
+        if let Some((_, caps)) = clip.cache.iter().find(|(k, _)| k == key) {
+            raw.push(caps.clone());
+            continue;
         }
-        return;
+        missing.push((i, *key));
+        let caps = if let Some((_, caps)) = clip.preview_cache.iter().find(|(k, _)| k == key) {
+            caps.clone()
+        } else {
+            let (origin, normal) = cut.planes()[i];
+            let caps = Arc::new(cache.shown().filter(|p| p.kind == cadrs_core::PartKind::Solid && cut_parts.contains(&p.id)).filter_map(|p| {
+                let cap = preview::cap(&p.solid, origin, normal);
+                (!cap.triangles.is_empty()).then_some((p.id, cap))
+            }).collect::<PlaneCaps>());
+            clip.preview_cache.push((*key, caps.clone()));
+            caps
+        };
+        raw.push(caps);
     }
-    if cache.section.as_ref().is_none_or(|s| s.cut != cut || s.excluded != excluded) {
-        cache.section = Some(pick(&clip.caps));
-    }
-    // Finished jobs into the cache.
-    let mut done = Vec::new();
-    clip.pending.retain(|(k, job)| match job.poll() {
-        Some(r) => {
-            done.push((*k, Arc::new(r.unwrap_or_default())));
-            false
-        }
-        None => true,
-    });
-    for (k, caps) in done {
-        clip.cache.retain(|(c, _)| c.0 != el || c.1 == k.1);
-        clip.cache.push((k, caps));
-        while clip.cache.len() > CACHED_PLANES {
-            clip.cache.remove(0);
-        }
-    }
-    let missing: Vec<(usize, CapKey)> = keys.iter().copied().enumerate().filter(|(_, k)| !clip.cache.iter().any(|(c, _)| c == k)).collect();
-    if missing.is_empty() {
-        let caps = combine(&clip.caps_raw(&keys), &cut);
-        cache.section = Some(pick(&caps));
+    let displayed = (keys.clone(), cut, raw.iter().map(|caps| Arc::as_ptr(caps) as usize).collect());
+    if clip.displayed.as_ref() != Some(&displayed) {
+        let caps = combine(&raw, &cut);
+        cache.section = Some(crate::parts::SectionPick {
+            cut, excluded: excluded.clone(), caps: caps.iter().flat_map(|c| c.triangles.iter().copied()).collect(),
+        });
         clip.caps = Arc::new(caps);
-        clip.key = Some(keys);
-        clip.pending.clear();
-        return;
+        clip.displayed = Some(displayed);
     }
-    if cache.rebuilding {
-        return;
-    }
+    clip.key = missing.is_empty().then_some(keys);
+    // Keep only the latest requested position: no queue of intermediate drag samples.
+    // An already running job may finish, but its result cannot replace a different cut.
+    if missing.is_empty() || cache.rebuilding || arrow.drag.is_some() || arrow.turn.is_some() || !clip.pending.is_empty() { return; }
     let items: Vec<SectionItem> = if cache.assembly.is_some() {
         let Some(asm) = doc.active_element().and_then(|e| e.assembly_model()) else { return };
-        cadrs_core::assembly::interference::items(&doc.doc, asm)
-            .into_iter()
+        cadrs_core::assembly::interference::items(&doc.doc, asm).into_iter()
             .filter(|it| cut_parts.contains(&it.view_part))
-            .map(|it| SectionItem { view_part: it.view_part, features: it.features, part: it.part, pose: it.pose })
-            .collect()
+            .map(|it| SectionItem { view_part: it.view_part, features: it.features, part: it.part, pose: it.pose }).collect()
     } else {
         let Some((_, features, _)) = cache.settled() else { return };
         let features = features.to_vec();
         cut_parts.iter().map(|p| SectionItem { view_part: *p, features: features.clone(), part: *p, pose: cadrs_core::assembly::Pose::IDENTITY }).collect()
     };
-    for (i, key) in missing {
-        if clip.pending.iter().any(|(k, _)| *k == key) {
-            continue;
-        }
-        let (o, n) = cut.planes()[i];
-        let plane = SectionPlane { origin: o.as_dvec3().to_array(), normal: n.as_dvec3().to_array() };
-        clip.pending.push((key, cadrs_core::section::caps(items.clone(), plane)));
-    }
-}
-
-impl SectionClip {
-    /// Each plane's caps from the cache, in the planes' order.
-    fn caps_raw(&self, keys: &[CapKey]) -> Vec<Arc<PlaneCaps>> {
-        keys.iter().map(|k| self.cache.iter().find(|(c, _)| c == k).map(|(_, v)| v.clone()).unwrap_or_default()).collect()
-    }
+    let (i, key) = missing[0];
+    let (o, n) = cut.planes()[i];
+    let plane = SectionPlane { origin: o.as_dvec3().to_array(), normal: n.as_dvec3().to_array() };
+    clip.pending.push((key, cadrs_core::section::caps(items, plane)));
 }
 
 /// The caps as drawn: each plane's, kept only where the other planes remove too (two planes
@@ -1127,12 +1116,25 @@ const HATCH_PX: f32 = 7.0;
 
 /// The caps' outlines, as part edges, and their hatching: thin diagonal lines across each
 /// cap a constant distance apart on screen, as Onshape's.
-fn draw_caps(clip: Res<SectionClip>, cache: Res<PartCache>, view: Res<ViewportView>, mut edges: Gizmos<PartEdgeGizmos>) {
+#[derive(Default)]
+struct HatchCache {
+    caps: Arc<Caps>,
+    view: Option<crate::camera::ViewState>,
+    lines: Vec<Vec<(Vec3, Vec3)>>,
+}
+
+fn draw_caps(clip: Res<SectionClip>, arrow: Res<SectionArrow>, cache: Res<PartCache>, view: Res<ViewportView>, mut cached: Local<HatchCache>, mut edges: Gizmos<PartEdgeGizmos>) {
     if clip.plane.is_none() {
         return;
     }
+    let moving = arrow.drag.is_some() || arrow.turn.is_some();
+    if !moving && (!Arc::ptr_eq(&cached.caps, &clip.caps) || cached.view != Some(view.view)) {
+        cached.lines = clip.caps.iter().map(|cap| hatch(cap, &view.view)).collect();
+        cached.caps = clip.caps.clone();
+        cached.view = Some(view.view);
+    }
     let outline = view.view.render.edges() || view.view.render.line_drawing();
-    for cap in clip.caps.iter() {
+    for (i, cap) in clip.caps.iter().enumerate() {
         if !cache.shown().any(|p| p.id == cap.part) {
             continue;
         }
@@ -1141,8 +1143,10 @@ fn draw_caps(clip: Res<SectionClip>, cache: Res<PartCache>, view: Res<ViewportVi
                 edges.linestrip(l.iter().copied(), Color::srgb_u8(0x14, 0x14, 0x14));
             }
         }
-        for (a, b) in hatch(cap, &view.view) {
-            edges.line(a, b, Color::srgba_u8(0x14, 0x14, 0x14, 0xa0));
+        if !moving {
+            for &(a, b) in &cached.lines[i] {
+                edges.line(a, b, Color::srgba_u8(0x14, 0x14, 0x14, 0xa0));
+            }
         }
     }
 }
@@ -1779,6 +1783,66 @@ pub fn clip_polyline(pts: impl IntoIterator<Item = Vec3>, cut: Cut) -> Vec<Vec<V
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn dragging_caps_follow_current_cut_and_preserve_holes_without_kernel_jobs() {
+        let mut doc = ActiveDocument::new(cadrs_core::Document::new("Section preview"));
+        let el = doc.doc.elements[0].id;
+        doc.active = Some(el);
+        let feature = FeatureId::new();
+        let part = PartId::new(feature, 0);
+        let mut cache = PartCache::default();
+        cache.parts.push(cadrs_core::Part {
+            id: part, feature, name: "Tube".into(), kind: cadrs_core::PartKind::Solid,
+            palette: 0, solid: Arc::new(preview::tests::tube()), mass: None,
+            features: vec![feature], source: None, derived: None,
+        });
+        let plane = SectionCutPlane::new(SectionRef::Plane(PlaneKind::Top), "Top".into(), Vec3::ZERO, Vec3::Z);
+        let mut views = SectionViews::default();
+        views.dialog = Some(el);
+        views.per.insert(el, SectionState::with(plane));
+        let mut arrow = SectionArrow::default();
+        arrow.drag = Some(SectionArrowDrag { start_offset: 0.0, axis: (Vec3::ZERO, Vec3::Z), start_t: 0.0, px_per_mm: 1.0 });
+        let mut app = App::new();
+        app.insert_resource(doc).insert_resource(cache).insert_resource(views).insert_resource(arrow)
+            .init_resource::<SectionClip>().add_systems(Update, compute_caps);
+        let mut obsolete = None;
+        for step in 0..30 {
+            app.world_mut().resource_mut::<SectionViews>().per.get_mut(&el).unwrap().planes[0].offset = step as f32 * 0.02;
+            app.update();
+            let clip = app.world().resource::<SectionClip>();
+            assert!(clip.pending.is_empty(), "dragging must not enqueue intermediate positions");
+            assert_eq!(clip.caps.len(), 1);
+            let area: f32 = clip.caps[0].triangles.iter().map(|t| (t[1] - t[0]).cross(t[2] - t[0]).length() * 0.5).sum();
+            assert!((area - 12.0).abs() < 1e-4, "preview filled the hole");
+            let (origin, normal) = clip.plane.unwrap().planes()[0];
+            assert!(clip.caps[0].triangles.iter().flatten().all(|p| (*p - origin).dot(normal).abs() < 1e-5));
+            if step == 0 { obsolete = Some(clip.preview_cache[0].0); }
+        }
+        let before = app.world().resource::<SectionClip>().caps.clone();
+        app.world_mut().resource_mut::<SectionClip>().cache.push((obsolete.unwrap(), Arc::new(Vec::new())));
+        app.update();
+        assert!(Arc::ptr_eq(&before, &app.world().resource::<SectionClip>().caps), "obsolete results cannot replace the latest preview");
+        // Repeated frames reuse caps; exact results for the current plane replace the preview.
+        let (key, exact) = app.world().resource::<SectionClip>().preview_cache[0].clone();
+        app.world_mut().resource_mut::<SectionClip>().cache.push((key, exact));
+        app.update();
+        assert!(app.world().resource::<SectionClip>().key.is_some());
+        app.world_mut().resource_mut::<SectionViews>().per.get_mut(&el).unwrap().items.push(part);
+        app.update();
+        assert!(app.world().resource::<SectionClip>().caps.is_empty(), "excluded parts must remain whole");
+        {
+            let mut views = app.world_mut().resource_mut::<SectionViews>();
+            let state = views.per.get_mut(&el).unwrap();
+            state.items.clear();
+            state.planes.push(SectionCutPlane::new(SectionRef::Plane(PlaneKind::Right), "Right".into(), Vec3::ZERO, Vec3::X));
+        }
+        app.update();
+        let clip = app.world().resource::<SectionClip>();
+        let top = clip.caps.iter().find(|c| c.normal.dot(Vec3::Z) > 0.99).unwrap();
+        let area: f32 = top.triangles.iter().map(|t| (t[1] - t[0]).cross(t[2] - t[0]).length() * 0.5).sum();
+        assert!((area - 6.0).abs() < 0.01, "the other plane must clip the preview too");
+    }
 
     #[test]
     fn polylines_are_clipped_at_the_plane() {
