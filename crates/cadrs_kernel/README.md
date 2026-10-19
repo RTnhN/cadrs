@@ -1072,3 +1072,35 @@ area 50 179.7110 mm² (expected 368 749.705 and 50 179.71).
   for later features, so an extrude takes their regions like any sketch's.
 - Conformance: `derived_frame_motion` (a box's top-face centre onto a frame at (0, 0, 100) turned
   a quarter: V 6000, centroid (0, 0, 85), every face `modified` from its original).
+
+## The kernel in its own process (`cadrs_core::rebuild::process`)
+OpenCASCADE can crash (a segfault no `catch_unwind` stops: the per-face offset of Move face did,
+before `check_face_moves`). The app therefore runs the kernel in a **process of its own**, its
+own executable started with `--kernel-process <port> <token>`; a crash there costs a rebuild,
+not the app. `CADRS_KERNEL=thread` keeps the kernel on a thread of the app (for debugging), and
+tests and tools (`rebuild::build` without `process::use_process`) always do.
+- **What runs there**: the worker loop of the kernel thread as it was (`rebuild::run`: the
+  `Rebuilder`, its cache, the session snapshots). Every `rebuild::Job` is one request and one
+  reply. Closures can't be sent, so kernel work other than rebuilds, exports and drawing views
+  is a named `rebuild::task::Task` (section caps, interference, import plans, model exports, the
+  stage preview, Full rebuild, PCB Sync, ...); tasks of other crates are registered at start
+  (`cadrs_app::register_kernel_tasks`), in the app and the kernel process alike.
+- **The connection**: a loopback TCP socket the app listens on (not stdout, which OpenCASCADE
+  writes to), checked with a random token. Messages are MessagePack with named fields
+  (`rmp-serde`; the documents' optional fields are skipped when empty, which bincode can't
+  read), each after its length. A rebuild sends each part's mesh once: one sent before goes as
+  its id, and the app hands out the `Arc` it already holds (so an edit costs what it did on the
+  thread, and the app's pointer checks still see unchanged parts as unchanged).
+- **Crashes**: the kernel process reports the cache key of the feature it is computing; if the
+  connection closes during a rebuild, that key is *poisoned*, a new kernel process is started
+  (it restores the session snapshot as the app's next start would) and the rebuild is asked
+  again. The feature fails with "The geometry kernel crashed while building this feature"; the
+  rest of the list builds. Changing the feature or anything above it gives it a new key.
+- **Shared state**: the app sends the files of its blob cache the kernel process lacks, and the
+  kernel process sends the ones it makes (a board's skin); the documents and snapshot folders
+  are sent when set (`process::set_documents`, `set_snapshots`). A Sheet metal model's
+  `picking` (never saved, so not serialized) travels beside the feature list.
+- Tests: `cadrs_core/tests/kernel_process.rs` (its own executable is the kernel process; a
+  feature made to crash fails alone, exports, tasks and blobs go through), and
+  `process::tests` (every fixture's feature lists and a rebuild's result survive the trip).
+  `CADRS_KERNEL_CRASH_ON=<feature name>` makes a kernel process crash on that feature.

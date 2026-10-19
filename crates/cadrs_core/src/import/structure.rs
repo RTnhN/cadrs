@@ -50,14 +50,14 @@ pub enum ImportMode {
 }
 
 /// A part of the file: its name and how many solids it has.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct PlanPart {
     pub name: String,
     pub solids: usize,
 }
 
 /// One use of a part: which, where (the file's coordinates, mm) and the instance's name.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct PlanOccurrence {
     pub color: Option<crate::appearance::Appearance>,
     pub part: usize,
@@ -66,7 +66,7 @@ pub struct PlanOccurrence {
 }
 
 /// What a file holds, read by the kernel ([`crate::rebuild::exchange::plan_import`]).
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct ImportPlan {
     pub format: ImportFormat,
     /// The top-level product's name.

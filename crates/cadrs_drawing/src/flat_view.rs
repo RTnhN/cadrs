@@ -196,7 +196,7 @@ pub struct FlatInput {
 }
 
 /// What a flat pattern view's geometry says beyond its edges.
-#[derive(Debug, Clone, PartialEq, Default)]
+#[derive(Debug, Clone, PartialEq, Default, serde::Serialize, serde::Deserialize)]
 pub struct FlatData {
     pub bends: Vec<FlatBendInfo>,
     pub thickness: f64,

@@ -76,7 +76,7 @@ pub fn sync_plane(c: SyncPlaneChoice) -> SyncPlane {
 }
 
 /// A part to translate: its studio's features, the part, and where the tab has it.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct SyncPart {
     pub name: String,
     pub features: Vec<Feature>,
@@ -85,7 +85,7 @@ pub struct SyncPart {
 }
 
 /// A component instance found by name.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct SyncComponent {
     pub refdes: String,
     pub package: String,
@@ -97,7 +97,7 @@ pub struct SyncComponent {
 }
 
 /// What a sync will do (made on the main thread from the document, run on the kernel thread).
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct SyncPlan {
     pub pcb: ElementId,
     pub target: Option<BoardId>,
@@ -111,7 +111,7 @@ pub struct SyncPlan {
 }
 
 /// The result: the command, and what to tell the user.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct SyncOutcome {
     pub command: SyncBoard,
     /// Not translated (PCB5.4), each name once.
@@ -296,7 +296,25 @@ pub fn plan(doc: &Document, pcb: ElementId, source: ElementId, plane: SyncPlaneC
 
 /// Runs a plan on the kernel thread.
 pub fn run(plan: SyncPlan) -> PendingJob<Result<SyncOutcome, String>> {
-    cadrs_core::rebuild::run_on_worker(move |r| run_on(r, &plan))
+    cadrs_core::rebuild::task::run(Run(plan))
+}
+
+/// [`run`] as a [`cadrs_core::rebuild::task::Task`] (registered with [`register_tasks`]).
+#[derive(serde::Serialize, serde::Deserialize)]
+struct Run(SyncPlan);
+
+impl cadrs_core::rebuild::task::Task for Run {
+    const NAME: &'static str = "pcb-sync";
+    type Output = Result<SyncOutcome, String>;
+    fn run(self, r: &mut cadrs_core::rebuild::Rebuilder) -> Self::Output {
+        run_on(r, &self.0)
+    }
+}
+
+/// Makes this crate's kernel work known to the kernel process
+/// ([`cadrs_core::rebuild::task::register`]).
+pub fn register_tasks() {
+    cadrs_core::rebuild::task::register::<Run>();
 }
 
 /// [`run`], waiting for the result.

@@ -1060,8 +1060,10 @@ pub fn hidden_sketches(el: &cadrs_core::Element, features: &[Feature], editing: 
 fn set_snapshot_store(store: Res<crate::DocumentStore>) {
     let Some(dir) = store.0.root().parent().map(|p| p.join("cache").join("session")) else {
         cadrs_core::rebuild::session::set_store(None);
+        cadrs_core::rebuild::process::set_snapshots(None);
         return;
     };
+    cadrs_core::rebuild::process::set_snapshots(Some(dir.clone()));
     let disk = cadrs_core::blob_store::DiskStore::new(dir);
     cadrs_core::rebuild::session::set_store(Some(std::sync::Arc::new(disk.clone())));
     std::thread::spawn(move || disk.prune(std::time::Duration::from_secs(30 * 24 * 3600), 2 << 30));

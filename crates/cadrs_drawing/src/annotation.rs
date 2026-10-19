@@ -74,7 +74,7 @@ impl Default for AnnotationId {
 // The model side
 
 /// A model edge's exact geometry (model mm), from the part's B-rep.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub enum ModelEdge {
     /// A straight edge between its two vertices.
     Line { a: [f64; 3], b: [f64; 3] },

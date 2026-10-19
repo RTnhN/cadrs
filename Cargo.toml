@@ -37,6 +37,9 @@ bevy = { version = "0.19.1", features = ["bevy_dev_tools"] }
 winit = { version = "0.30.13", default-features = false }
 serde = { version = "1", features = ["derive", "rc"] }
 ron = "0.12"
+# The kernel process's messages (`cadrs_core::rebuild::process`): self-describing, so the
+# documents' optional fields round-trip.
+rmp-serde = "1.3"
 uuid = { version = "1", features = ["v4", "serde"] }
 # The autorouter's GPU search (cadrs_router): the wgpu Bevy uses, taking SPIR-V from rust-gpu.
 wgpu = { version = "29", default-features = false, features = ["std", "parking_lot", "spirv", "vulkan", "metal", "dx12"] }
