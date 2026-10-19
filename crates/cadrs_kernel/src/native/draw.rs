@@ -512,6 +512,21 @@ impl NativeKernel {
         Ok(Shape::Body(b))
     }
 
+    /// `sewing result tol shapes…`: the shapes' faces sewn along edges that coincide within
+    /// `tol` (one shell where they connect, closed shells solids).
+    pub fn sewing(&mut self, tol: f64, shapes: &[&Shape]) -> Result<Shape> {
+        let mut body = super::topo::Body::default();
+        for s in shapes {
+            let id = self.body_of(s)?;
+            body.append(self.get(id)?);
+        }
+        let mut body = super::surfacing::sew_faces(body, tol).map_err(|e| err(&e.to_string()))?;
+        body.shells.clear();
+        body.solids.clear();
+        super::boolean::assemble_shells(&mut body)?;
+        Ok(Shape::Body(self.insert(body)))
+    }
+
     // --- Booleans and transforms ------------------------------------------------------------
 
     fn body_of(&self, s: &Shape) -> Result<BodyId> {
@@ -910,6 +925,20 @@ impl NativeKernel {
             Shape::BodyFace(..) => NbShapes { face: 1, ..Default::default() },
             Shape::Empty => NbShapes::default(),
         })
+    }
+
+    /// `checkfreebounds shape n`: the number of free edges (used by one face only: the open
+    /// boundaries of a sheet).
+    pub fn checkfreebounds(&self, s: &Shape, want: usize) -> Result<()> {
+        let n = match s {
+            Shape::Body(b) => {
+                let body = self.get(*b)?;
+                body.edge_faces().iter().enumerate().filter(|(e, fs)| fs.len() == 1 && !body.edges[*e].degenerate).count()
+            }
+            Shape::Empty => 0,
+            _ => return Err(KernelError::Unsupported("free bounds of a shape that isn't a body")),
+        };
+        if n == want { Ok(()) } else { Err(err(&format!("{n} free edges, expected {want}"))) }
     }
 
     /// `checkshape`: the body is valid.

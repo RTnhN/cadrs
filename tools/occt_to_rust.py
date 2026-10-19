@@ -27,9 +27,9 @@ IGNORED = {
     "checkview", "erase", "donly", "display", "fit", "clear", "puts", "smallview", "axo", "top", "front", "left", "vinit", "vdisplay",
     "vfit", "vsetdispmode", "vclear", "vclose", "checkmaxtol", "checksection", "decho", "dlog", "pload", "cpulimit", "protect",
     "isos", "triangles", "dchrono", "chrono", "xwd", "vdump", "dmode", "disp", "view", "2dfit", "repaint", "settolerance",
-    "checktrinfo", "dtyp", "whatis", "tolerance", "checkfreebounds", "checkcontinuity", "bfillds",
+    "checktrinfo", "dtyp", "whatis", "tolerance", "checkcontinuity", "bfillds",
     "brunparallel", "bnondestructive", "bfuzzyvalue", "bglue", "bcheckinverted", "buseobb", "bdrawwarnshapes", "bsimplify",
-    "setfillhistory", "savehistory", "tclean", "incmesh", "tolblend", "dversion", "dsetsignal", "testgrid", "datadir", "locate_data_file",
+    "setfillhistory", "savehistory", "tclean", "incmesh", "tolblend", "checkfaults", "dversion", "dsetsignal", "testgrid", "datadir", "locate_data_file",
 }
 
 
@@ -301,6 +301,24 @@ class Case:
             self.lines.append(f"draw::check_nb(k.nbshapes({s})?, {args})?;")
         elif c == "checkshape":
             self.lines.append(f"k.checkshape({self.shape(a[0])})?;")
+        elif c == "checkfreebounds" and len(a) >= 2:
+            if len(a) > 2:
+                raise Unsupported("checkfreebounds with options")
+            self.lines.append(f"k.checkfreebounds({self.shape(a[0])}, {int(self.num(a[1]))})?;")
+        elif c == "sewing" and len(a) >= 2:
+            # sewing result [tol] [options] shapes…
+            rest = a[1:]
+            tol = 1e-6
+            try:
+                tol = self.num(rest[0])
+                rest = rest[1:]
+            except Unsupported:
+                pass
+            shapes = [w for w in rest if not w.startswith("-") and not w.startswith("+")]
+            if not shapes:
+                raise Unsupported("sewing without shapes")
+            args = ", ".join(self.shape(w) for w in shapes)
+            self.bind(a[0], f"k.sewing({repr(float(tol))}, &[{args}])?")
         elif c == "restore" and len(a) >= 2:
             if not a[0].startswith("@data:"):
                 raise Unsupported("restore of a file that isn't in OCCT's data")

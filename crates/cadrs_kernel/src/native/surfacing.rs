@@ -19,7 +19,7 @@ use super::math::*;
 use super::nurbs::{NurbsCurve, NurbsSurface};
 use super::surface::Surface;
 use super::sweep_path::{chain, path_segments, Seg};
-use super::topo::{Body, Coedge, Face, Shell, Solid};
+use super::topo::{Body, Coedge, Edge, Face, Shell, Solid};
 use crate::*;
 
 fn invalid(why: &str) -> KernelError {
@@ -375,6 +375,34 @@ pub fn sew_faces(mut b: Body, tol: f64) -> Result<Body> {
     for e in &mut b.edges {
         e.v = [vmap[e.v[0]], vmap[e.v[1]]];
     }
+    // T-junctions: a free edge with another free edge's vertex lying on it (one face's long
+    // edge against two of its neighbour's) is split there, at that vertex.
+    for _ in 0..10_000 {
+        let ef = b.edge_faces();
+        let free: Vec<usize> = (0..b.edges.len()).filter(|&e| ef[e].len() == 1 && !b.edges[e].degenerate).collect();
+        let mut ends: Vec<usize> = free.iter().flat_map(|&e| b.edges[e].v).collect();
+        ends.sort_unstable();
+        ends.dedup();
+        let mut hit = None;
+        'find: for &e in &free {
+            let ed = &b.edges[e];
+            let (lo, hi) = (ed.t[0].min(ed.t[1]), ed.t[0].max(ed.t[1]));
+            for &w in &ends {
+                if ed.v.contains(&w) {
+                    continue;
+                }
+                let p = b.verts[w].p;
+                let t = ed.curve.closest(&p, lo, hi);
+                let q = ed.curve.point(t);
+                if (q - p).norm() < tol && (q - ed.point(ed.t[0])).norm() > tol && (q - ed.point(ed.t[1])).norm() > tol {
+                    hit = Some((e, t, w));
+                    break 'find;
+                }
+            }
+        }
+        let Some((e, t, w)) = hit else { break };
+        split_edge_at(&mut b, e, t, w);
+    }
     // Merge coincident edges (same ends and middle), re-parametrizing the p-curves.
     let ne = b.edges.len();
     let mut emap: Vec<(usize, bool)> = (0..ne).map(|i| (i, true)).collect();
@@ -539,4 +567,32 @@ pub fn delete_faces(k: &mut NativeKernel, body: BodyId, remove: &[FaceId]) -> Re
     }
     let id = k.insert(out);
     Ok(OpResult { bodies: vec![id], history })
+}
+
+/// Splits edge `e` at parameter `t` at the existing vertex `w`, in every face using it.
+fn split_edge_at(b: &mut Body, e: usize, t: f64, w: usize) {
+    let old = b.edges[e].clone();
+    b.edges[e] = Edge { t: [old.t[0], t], v: [old.v[0], w], ..old.clone() };
+    b.edges.push(Edge { t: [t, old.t[1]], v: [w, old.v[1]], ..old });
+    let e2 = b.edges.len() - 1;
+    for f in &mut b.faces {
+        for l in &mut f.loops {
+            let mut nl = Vec::with_capacity(l.len() + 1);
+            for c in l.drain(..) {
+                if c.edge == e {
+                    let second = Coedge { edge: e2, fwd: c.fwd, pc: c.pc.clone() };
+                    if c.fwd {
+                        nl.push(c);
+                        nl.push(second);
+                    } else {
+                        nl.push(second);
+                        nl.push(c);
+                    }
+                } else {
+                    nl.push(c);
+                }
+            }
+            *l = nl;
+        }
+    }
 }

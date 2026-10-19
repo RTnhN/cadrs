@@ -29,7 +29,6 @@ proc checktrinfo {args} {}
 proc checkview {args} {}
 proc checkmaxtol {args} {}
 proc checksection {args} {}
-proc checkfreebounds {args} {}
 proc checkcolor {args} {}
 proc dlog {args} { return "" }
 
