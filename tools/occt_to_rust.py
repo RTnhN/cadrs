@@ -29,7 +29,7 @@ IGNORED = {
     "isos", "triangles", "dchrono", "chrono", "xwd", "vdump", "dmode", "disp", "view", "2dfit", "repaint", "settolerance",
     "checktrinfo", "dtyp", "whatis", "tolerance", "checkfreebounds", "checkcontinuity", "bfillds",
     "brunparallel", "bnondestructive", "bfuzzyvalue", "bglue", "bcheckinverted", "buseobb", "bdrawwarnshapes", "bsimplify",
-    "setfillhistory", "savehistory", "tclean", "incmesh",
+    "setfillhistory", "savehistory", "tclean", "incmesh", "tolblend", "dversion", "dsetsignal", "testgrid", "datadir", "locate_data_file",
 }
 
 
@@ -324,23 +324,78 @@ def tokens(cmd):
     return cmd.split()
 
 
-def convert(path, consts):
+def tcl_list(text):
+    """The words of a Tcl list (braces group, backslashes escape, quotes group)."""
+    words, i, n = [], 0, len(text)
+    while i < n:
+        while i < n and text[i].isspace():
+            i += 1
+        if i >= n:
+            break
+        if text[i] == "{":
+            depth, j = 1, i + 1
+            while j < n and depth:
+                if text[j] == "\\":
+                    j += 2
+                    continue
+                depth += {"{": 1, "}": -1}.get(text[j], 0)
+                j += 1
+            words.append(text[i + 1:j - 1])
+            i = j
+        elif text[i] == '"':
+            j, w = i + 1, []
+            while j < n and text[j] != '"':
+                if text[j] == "\\" and j + 1 < n:
+                    w.append(text[j + 1])
+                    j += 2
+                    continue
+                w.append(text[j])
+                j += 1
+            words.append("".join(w))
+            i = j + 1
+        else:
+            w = []
+            while i < n and not text[i].isspace():
+                if text[i] == "\\" and i + 1 < n:
+                    w.append(text[i + 1])
+                    i += 2
+                    continue
+                w.append(text[i])
+                i += 1
+            words.append("".join(w))
+    return words
+
+
+FLATTEN = os.path.join(os.path.dirname(os.path.abspath(__file__)), "occt_flatten.tcl")
+
+
+def flatten(files):
+    """The DRAW commands the scripts run, loops and substitutions expanded (tclsh)."""
+    import subprocess
+    try:
+        r = subprocess.run(["tclsh", FLATTEN, *files], capture_output=True, text=True, timeout=10)
+    except subprocess.TimeoutExpired:
+        raise Unsupported("Tcl evaluation (it doesn't finish)")
+    if r.returncode != 0:
+        first = (r.stderr.strip().splitlines() or ["?"])[0][:80]
+        raise Unsupported(f"Tcl evaluation ({first})")
+    return [tcl_list(l[4:]) for l in r.stdout.splitlines() if l.startswith("CMD ")]
+
+
+def convert(path, consts, begins=()):
     text = open(path, encoding="utf-8", errors="replace").read()
     if re.search(r"stepread|igesread|testreadstep|ReadStep|readstl|brestore", text):
         return None, "needs reading STEP, IGES or STL", text
     if "locate_data_file" in text and not DATA:
         return None, "needs OCCT's data files (tools/occt_to_rust.py --data <dir>)", text
-    text = re.sub(r"\[\s*locate_data_file\s+([^\]\s]+)\s*\]", r"@data:\1", text)
     case = Case(consts)
     try:
-        if re.search(r"^\s*(if|foreach|for|while|proc|catch|switch)\b", text, re.M):
-            raise Unsupported("Tcl control flow")
-        for cmd in split_commands(text):
-            if cmd.split()[0] in IGNORED:
+        for words in flatten([*begins, path]):
+            if not words or words[0] in IGNORED:
                 continue
-            case.emit(tokens(cmd))
+            case.emit(words)
     except Unsupported as e:
-        return None, f"needs {e}", text
+        return None, f"needs {e}", text.replace("[locate_data_file ", "[locate_data_file ")
     except KeyError as e:
         return None, f"needs the name {e}", text
     if not any(l.startswith("k.check") or l.startswith("draw::check") for l in case.lines):
@@ -404,7 +459,8 @@ def main():
                 if name in seen:
                     name += "_2"
                 seen.add(name)
-                lines, why, text = convert(p, gconsts)
+                begins = [b for b in (os.path.join(gdir, "begin"), os.path.join(gdir, grid, "begin")) if os.path.isfile(b)]
+                lines, why, text = convert(p, gconsts, begins)
                 body.append("")
                 if lines is None:
                     n_ign += 1

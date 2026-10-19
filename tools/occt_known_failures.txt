@@ -8,6 +8,7 @@ blend complex_a5
 blend complex_a7
 blend complex_b2
 blend complex_b3
+blend complex_b5
 blend complex_c1
 blend complex_c6
 blend complex_d6
