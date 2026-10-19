@@ -819,3 +819,4 @@ offset faces_type_i_k3
 offset faces_type_i_k5
 offset faces_type_i_k6
 offset faces_type_i_k9
+boolean gdml_public_b2

@@ -93,8 +93,7 @@ struct WFace {
     polys: Vec<Vec<P2>>,
     bbox: Bbox,
     uv_center: P2,
-    /// The face's own tolerance: the largest of its edges' and vertices' (0 for exact
-    /// geometry, where the run's applies).
+    /// The face's own tolerance (0: exact, the run's applies).
     tol: f64,
 }
 
@@ -270,10 +269,10 @@ fn import(pool: &mut Pool, faces: &mut Vec<WFace>, b: &Body, owner: usize, merge
             bb = bb.grow(d * 0.02);
         }
         let center = uvb.center();
-        let ftol = f.loops.iter().flatten().flat_map(|c| {
-            let e = &b.edges[c.edge];
-            [own(e.tol), own(b.verts[e.v[0]].tol), own(b.verts[e.v[1]].tol)]
-        }).fold(0.0, f64::max);
+        // Faces don't carry a tolerance of their own yet (OCCT's are usually exact even where
+        // their edges' are not): the run's applies, and the edges' and vertices' where they are
+        // involved.
+        let ftol = 0.0;
         faces.push(WFace {
             surf: f.surf.clone(),
             sense: f.sense,
@@ -938,9 +937,9 @@ fn run(a: &Body, b: &Body, mode: Mode) -> Result<BoolOut> {
             if !faces[fa].bbox.overlaps(&faces[fb].bbox) {
                 continue;
             }
-            // Coincident within the faces' tolerances, or 1e-7 of their size (the float noise of
-            // geometry made apart: radii of 25 and 25.0000015).
-            let ctol = vtol().max(faces[fa].tol).max(faces[fb].tol).max(faces[fa].bbox.diagonal().max(faces[fb].bbox.diagonal()) * 1e-7);
+            // Coincident within the faces' tolerances (near-coincident faces have had theirs
+            // raised: `near_coincident_tolerances`).
+            let ctol = vtol().max(faces[fa].tol).max(faces[fb].tol);
             if faces[fa].surf.same_domain(&faces[fb].surf, ctol).is_some() {
                 coincident[fa].push(fb);
                 coincident[fb].push(fa);
@@ -1003,7 +1002,7 @@ fn run(a: &Body, b: &Body, mode: Mode) -> Result<BoolOut> {
                         continue;
                     }
                     let t = param_on(&ic.c, ic.t0, ic.t1, &p);
-                    if (ic.c.point(t) - p).norm() < (vtol() * 2.0).max(ft).max(pool.vtols[v]) {
+                    if (ic.c.point(t) - p).norm() < (vtol() * 2.0).max(ft) {
                         ps.push((t, v));
                         // A closed curve: the vertex at its start is also at its end.
                         if ic.closed && ((t - ic.t0).abs() < 1e-12 || (t - ic.t1).abs() < 1e-12) {

@@ -1222,6 +1222,21 @@ impl<'a> Model<'a> {
         }
     }
 
+    /// The representation's distance uncertainty (the file's modelling precision), in mm.
+    fn rep_uncertainty(&mut self, rep: u64) -> Option<f64> {
+        let ctx = self.rec(rep).and_then(|r| r.parts.iter().find_map(|p| p.1.get(2)?.as_ref()))?;
+        let ls = self.context_units(ctx).0;
+        let list: Vec<u64> = self.rec(ctx)?.part("GLOBAL_UNCERTAINTY_ASSIGNED_CONTEXT")?.first()?.as_list()?.iter().filter_map(|x| x.as_ref()).collect();
+        list.iter()
+            .filter_map(|&u| {
+                let r = self.rec(u)?;
+                r.has("UNCERTAINTY_MEASURE_WITH_UNIT").then(|| r.part("UNCERTAINTY_MEASURE_WITH_UNIT").and_then(|ps| ps.first()?.as_f64()))?
+            })
+            .map(|x| x * ls)
+            .filter(|x| x.is_finite() && *x > 0.0)
+            .reduce(f64::max)
+    }
+
     fn geo(&mut self, rep: u64) -> Geo<'a> {
         let (ls, angle) = self.rep_units(rep);
         Geo { f: self.f, ls, angle }
@@ -1376,8 +1391,17 @@ fn build_shapes(m: &mut Model, shapes: &[(u64, u64, Affine)], warnings: &mut Vec
         }
         let errors = std::mem::take(&mut tr.errors);
         warnings.extend(errors);
-        let (b, w) = tr.xb.finish();
+        let (mut b, w) = tr.xb.finish();
         warnings.extend(w);
+        // The file's precision is its entities' tolerance (OCCT's reader does the same).
+        if let Some(u) = m.rep_uncertainty(rep).filter(|u| *u > super::topo::TOL_MIN) {
+            for v in &mut b.verts {
+                v.tol = v.tol.max(u);
+            }
+            for e in &mut b.edges {
+                e.tol = e.tol.max(u);
+            }
+        }
         let b = if at == Affine::identity() { b } else { b.transformed(&at) };
         body.append(&b);
     }
@@ -1780,7 +1804,9 @@ pub fn write(name: &str, parts: &[(&Body, &str)], instances: &[WriteInstance]) -
     let mm = w.add("(LENGTH_UNIT() NAMED_UNIT(*) SI_UNIT(.MILLI.,.METRE.))");
     let rad = w.add("(NAMED_UNIT(*) PLANE_ANGLE_UNIT() SI_UNIT($,.RADIAN.))");
     let sr = w.add("(NAMED_UNIT(*) SI_UNIT($,.STERADIAN.) SOLID_ANGLE_UNIT())");
-    let unc = w.add(&format!("UNCERTAINTY_MEASURE_WITH_UNIT(LENGTH_MEASURE(1.E-07),#{mm},'distance_accuracy_value','confusion accuracy')"));
+    // The parts' largest entity tolerance (1e-7 for exact geometry).
+    let tol = parts.iter().flat_map(|(b, _)| b.verts.iter().map(|v| v.tol).chain(b.edges.iter().map(|e| e.tol))).fold(super::topo::TOL_MIN, f64::max);
+    let unc = w.add(&format!("UNCERTAINTY_MEASURE_WITH_UNIT(LENGTH_MEASURE({}),#{mm},'distance_accuracy_value','confusion accuracy')", real(tol)));
     let ctx = w.add(&format!(
         "(GEOMETRIC_REPRESENTATION_CONTEXT(3) GLOBAL_UNCERTAINTY_ASSIGNED_CONTEXT((#{unc})) GLOBAL_UNIT_ASSIGNED_CONTEXT((#{mm},#{rad},#{sr})) REPRESENTATION_CONTEXT('Context #1','3D Context with UNIT and UNCERTAINTY'))"
     ));
