@@ -241,6 +241,11 @@ class Case:
         elif c == "nurbsconvert" and len(a) == 2:
             # The same geometry (our surfaces stay exact): a copy.
             self.bind(a[0], f"{self.shape(a[1])[1:]}.clone()")
+        elif c == "explode" and (len(a) == 1 or (len(a) == 2 and a[1].lower() in ("v", "vertex", "w", "wire", "sh", "shell", "so", "solid", "edge", "face"))):
+            kind = a[1].lower() if len(a) == 2 else ""
+            vec = ident(a[0]) + "_x" + (kind or "sub")
+            self.lines.append(f"let {vec} = k.explode_kind({self.shape(a[0])}, {kind!r})?;".replace("'", '"'))
+            self.exploded[a[0]] = (vec, kind)
         elif c in ("explode", "nexplode") and len(a) == 2 and a[1].lower() in ("e", "f"):
             kind = a[1].lower()
             vec = ident(a[0]) + ("_edges" if kind == "e" else "_faces")

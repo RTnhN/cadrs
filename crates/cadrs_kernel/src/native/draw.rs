@@ -735,6 +735,75 @@ impl NativeKernel {
         Ok(ids.into_iter().map(|(_, i)| Shape::BodyFace(b, infos[i].id)).collect())
     }
 
+    /// `explode shape kind` for the other kinds: `v` (vertices), `w` (wires: the faces' loops),
+    /// `sh` (shells), `so` (solids), and none (the next level down: a compound's solids, a
+    /// solid's shells).
+    pub fn explode_kind(&mut self, s: &Shape, kind: &str) -> Result<Vec<Shape>> {
+        let k = kind.to_lowercase();
+        let dedge = |e: &super::topo::Edge| DEdge { curve: e.curve.clone(), t0: e.t[0], t1: e.t[1] };
+        match (s, k.as_str()) {
+            (Shape::Wire(w), "e" | "edge") => Ok(w.iter().cloned().map(Shape::Edge).collect()),
+            (Shape::Wire(w), "v" | "vertex") => {
+                let mut pts: Vec<P3> = Vec::new();
+                for e in w {
+                    for p in [e.start(), e.end()] {
+                        if !pts.iter().any(|q| (q - p).norm() < 1e-7) {
+                            pts.push(p);
+                        }
+                    }
+                }
+                Ok(pts.into_iter().map(Shape::Vertex).collect())
+            }
+            (Shape::Wire(_), "w" | "wire") => Ok(vec![s.clone()]),
+            (Shape::Edge(e), "v" | "vertex") => Ok(vec![Shape::Vertex(e.start()), Shape::Vertex(e.end())]),
+            (Shape::Body(_), "e" | "edge") => self.explode_edges(s),
+            (Shape::Body(_), "f" | "face") => self.explode_faces(s),
+            (Shape::Body(b), "v" | "vertex") => {
+                let body = self.get(*b)?;
+                let used: Vec<usize> = {
+                    let mut u = Vec::new();
+                    for e in body.edges.iter().filter(|e| !e.degenerate) {
+                        for v in e.v {
+                            if !u.contains(&v) {
+                                u.push(v);
+                            }
+                        }
+                    }
+                    u
+                };
+                Ok(used.into_iter().map(|v| Shape::Vertex(body.verts[v].p)).collect())
+            }
+            (Shape::Body(b), "w" | "wire") => {
+                let body = self.get(*b)?;
+                Ok(body.faces.iter().flat_map(|f| f.loops.iter()).map(|l| {
+                    Shape::Wire(l.iter().filter(|c| !body.edges[c.edge].degenerate).map(|c| {
+                        let e = dedge(&body.edges[c.edge]);
+                        if c.fwd { e } else { e.reversed() }
+                    }).collect())
+                }).collect())
+            }
+            (Shape::Body(b), "sh" | "shell") => {
+                let body = (**self.get(*b)?).clone();
+                let mut out = Vec::new();
+                for sh in &body.shells {
+                    let piece = super::kernel::subset(&body, &sh.faces, sh.closed);
+                    out.push(Shape::Body(self.insert(piece)));
+                }
+                Ok(out)
+            }
+            (Shape::Body(b), "so" | "solid" | "") => {
+                let body = (**self.get(*b)?).clone();
+                let pieces = super::exchange::split_into_solids(&body);
+                if k.is_empty() && pieces.len() <= 1 {
+                    // A solid: its shells.
+                    return self.explode_kind(s, "sh");
+                }
+                Ok(pieces.into_iter().filter(|p| !p.solids.is_empty() || k.is_empty()).map(|p| Shape::Body(self.insert(p))).collect())
+            }
+            _ => Err(KernelError::Unsupported("explode of this kind")),
+        }
+    }
+
     /// `explode shape f`.
     pub fn explode_faces(&self, s: &Shape) -> Result<Vec<Shape>> {
         let b = self.body_of(s)?;
