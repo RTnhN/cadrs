@@ -60,7 +60,7 @@ Scenario(
         Click(ui("move-face")),
         Click(ui("direct-edit-menu-delete-face")),
         WaitFor("delete-face-dialog"),
-        Click(xyz(25, 20, 13)),
+        ClickAt(1051, 367),
         MoveTo(1420, 900),
         Wait(3),
         Screenshot("05-hole-deleted"),
