@@ -448,7 +448,13 @@ pub fn chain_tool(b: &Body, input: BodyId, chain: &[(usize, bool)], kind: &dyn F
     // Loft each piece (its sections as they are) and glue them.
     let mut tk = super::kernel::NativeKernel::new();
     let mut acc: Option<Tagged> = None;
+    // Each piece's faces are named after the chain edge it runs along (a chamfer round a cut
+    // fillet keeps a face per edge, with edges between them, as other systems show).
+    let mut group_edges: Vec<usize> = Vec::new();
     for g in groups.iter() {
+        let mid = g.first().zip(g.last()).map_or(0.0, |(a, b)| 0.5 * (a.s + b.s));
+        group_edges.push(chain[ch.edge_at(mid)].0);
+        let region = group_edges.len() as u64;
         let mut secs: Vec<(Vec<Piece>, Plane)> = Vec::new();
         let mut last_s = f64::NEG_INFINITY;
         for st in g {
@@ -461,7 +467,7 @@ pub fn chain_tool(b: &Body, input: BodyId, chain: &[(usize, bool)], kind: &dyn F
         if secs.len() < 2 {
             continue;
         }
-        let built = super::loft_build::loft_pieces(&tk, &secs, 0)?;
+        let built = super::loft_build::loft_pieces(&tk, &secs, region)?;
         let t = Tagged::from_built(built);
         acc = Some(match acc {
             None => t,
@@ -485,10 +491,11 @@ pub fn chain_tool(b: &Body, input: BodyId, chain: &[(usize, bool)], kind: &dyn F
     let body = (**tk.get(lr.bodies[0])?).clone();
     let mut src = vec![Vec::new(); body.faces.len()];
     for (f, o) in &lr.history.generated {
-        if let Origin::ProfileCurve { curve, .. } = o
+        if let Origin::ProfileCurve { region, curve } = o
             && *curve == unsourced_curve(0, 1)
         {
-            src[f.0 as usize].push(FaceSrc::New(Origin::FromEdge { body: input, edge: EdgeId(e0 as u64) }));
+            let e = group_edges.get((*region as usize).wrapping_sub(1)).copied().unwrap_or(e0);
+            src[f.0 as usize].push(FaceSrc::New(Origin::FromEdge { body: input, edge: EdgeId(e as u64) }));
         }
     }
     let z = (P3::origin(), V3::zeros(), V3::zeros());
