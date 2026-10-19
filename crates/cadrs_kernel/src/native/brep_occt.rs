@@ -805,6 +805,10 @@ struct Builder<'a> {
     verts: HashMap<(usize, Vec<(usize, i64)>), usize>,
     edges: HashMap<(usize, Vec<(usize, i64)>), Option<usize>>,
     free_faces: Vec<usize>,
+    /// Edges outside any face (wires and edges of the shape), in order.
+    free_edges: Vec<usize>,
+    /// Whether any free edge is in a wire.
+    wires: bool,
     warnings: Vec<String>,
 }
 
@@ -947,23 +951,46 @@ impl Builder<'_> {
                     self.free_faces.push(fi);
                 }
             }
+            Kind::Wire => {
+                self.wires = true;
+                for &(o, c, l) in &sh.subs {
+                    self.visit(c, ori.compose(o), &loc.then(&self.f.locs[l]));
+                }
+            }
+            Kind::Edge(..) => {
+                if matches!(ori, Ori::Fwd | Ori::Rev) {
+                    if let Some(e) = self.edge(s, loc) {
+                        if !self.free_edges.contains(&e) {
+                            self.free_edges.push(e);
+                        }
+                    }
+                }
+            }
             _ => {}
         }
     }
 }
 
-/// Reads an OCCT BRep text file into a body (its solids, then sheets) and the problems met.
-pub fn read(bytes: &[u8]) -> R<(Body, Vec<String>)> {
-    read_ordered(bytes).map(|(b, w, _)| (b, w))
+/// What a BRep file holds.
+pub struct BrepRead {
+    /// The faces' body (solids, then sheets); None when the file has no faces.
+    pub body: Option<Body>,
+    /// The middle points of the body's edges in OCCT's exploration order (the order of first
+    /// use, depth first, as `TopExp_Explorer` meets them; degenerate edges left out). The faces
+    /// keep the file's order.
+    pub edge_order: Vec<P3>,
+    /// Edges outside faces (a wire's or a compound's): curve and parameter range.
+    pub free_edges: Vec<(Curve, f64, f64)>,
+    /// Whether the free edges are in wires (else loose edges).
+    pub wires: bool,
+    pub warnings: Vec<String>,
 }
 
-/// [`read`], with the middle points of the file's edges in OCCT's exploration order (the order
-/// of first use, depth first, as `TopExp_Explorer` meets them; degenerate edges left out). The
-/// faces keep the file's order.
-pub fn read_ordered(bytes: &[u8]) -> R<(Body, Vec<String>, Vec<P3>)> {
+/// [`read`], with free edges and OCCT's edge order.
+pub fn read_ordered(bytes: &[u8]) -> R<BrepRead> {
     let text = String::from_utf8_lossy(bytes);
     let f = parse(&text)?;
-    let mut b = Builder { f: &f, xb: XBuilder::new(), verts: HashMap::new(), edges: HashMap::new(), free_faces: Vec::new(), warnings: Vec::new() };
+    let mut b = Builder { f: &f, xb: XBuilder::new(), verts: HashMap::new(), edges: HashMap::new(), free_faces: Vec::new(), free_edges: Vec::new(), wires: false, warnings: Vec::new() };
     let (o, s, l) = f.root;
     b.visit(s, o, &f.locs[l]);
     let free = std::mem::take(&mut b.free_faces);
@@ -971,13 +998,30 @@ pub fn read_ordered(bytes: &[u8]) -> R<(Body, Vec<String>, Vec<P3>)> {
         b.xb.shell(free, false);
     }
     let mut warnings = std::mem::take(&mut b.warnings);
+    let free_edges: Vec<(Curve, f64, f64)> = b.free_edges.iter().map(|&e| {
+        let ed = &b.xb.body.edges[e];
+        (ed.curve.clone(), ed.t[0], ed.t[1])
+    }).collect();
     let mids: Vec<P3> = b.xb.body.edges.iter().map(|e| e.point(e.mid_t())).collect();
-    let (body, w) = b.xb.finish();
-    warnings.extend(w);
-    if body.faces.is_empty() {
-        return Err(format!("no faces read ({})", warnings.join("; ")));
+    let has_faces = !b.xb.faces.is_empty();
+    let body = if has_faces {
+        let (body, w) = b.xb.finish();
+        warnings.extend(w);
+        Some(body).filter(|x| !x.faces.is_empty())
+    } else {
+        None
+    };
+    if body.is_none() && free_edges.is_empty() {
+        return Err(format!("no faces or edges read ({})", warnings.join("; ")));
     }
-    Ok((body, warnings, mids))
+    Ok(BrepRead { body, edge_order: mids, free_edges, wires: b.wires, warnings })
+}
+
+/// Reads an OCCT BRep text file into a body (its solids, then sheets) and the problems met.
+pub fn read(bytes: &[u8]) -> R<(Body, Vec<String>)> {
+    let r = read_ordered(bytes)?;
+    let warnings = r.warnings;
+    r.body.map(|b| (b, warnings)).ok_or_else(|| "no faces read".to_string())
 }
 
 #[cfg(test)]

@@ -1072,3 +1072,60 @@ fn debug_repro_chamfer() {
         Err(e) => eprintln!("failed: {e}"),
     }
 }
+
+/// Prints an edge boolean's pieces: CADRS_EBOP_A=<file>, CADRS_EBOP_B=<file> (object a, tool b),
+/// CADRS_EBOP_OP=common|cut|fuse.
+#[test]
+#[ignore]
+fn debug_edge_bop() {
+    let (Ok(a), Ok(b)) = (std::env::var("CADRS_EBOP_A"), std::env::var("CADRS_EBOP_B")) else { return };
+    let mut k = NativeKernel::new();
+    let (sa, sb) = (k.restore(&a).unwrap(), k.restore(&b).unwrap());
+    let show = |s: &draw::Shape| match s {
+        draw::Shape::Wire(w) => {
+            for e in w {
+                eprintln!("  {:?} -> {:?} len {:.4}", e.start(), e.end(), e.length());
+            }
+        }
+        other => eprintln!("  {other:?}"),
+    };
+    eprintln!("a:");
+    show(&sa);
+    eprintln!("b:");
+    if let draw::Shape::Body(id) = sb {
+        let body = k.get(id).unwrap();
+        eprintln!("  body: {} faces {} edges {} solids, volume {}, check {:?}", body.faces.len(), body.edges.len(), body.solids.len(), k.vprops(&sb).unwrap(), body.check());
+        if std::env::var("CADRS_EBOP_EDGES").is_ok() {
+            for e in &body.edges {
+                eprintln!("    edge {:?} t {:?} {:?} -> {:?} deg {}", e.curve, e.t, e.point(e.t[0]), e.point(e.t[1]), e.degenerate);
+            }
+        }
+    } else {
+        show(&sb);
+    }
+    let r = match std::env::var("CADRS_EBOP_OP").as_deref() {
+        Ok("cut") => k.bcut(&sa, &sb),
+        Ok("fuse") => k.bfuse(&sa, &sb),
+        _ => k.bcommon(&sa, &sb),
+    }
+    .unwrap();
+    eprintln!("result: length {}, {:?}", k.lprops(&r).unwrap(), k.nbshapes(&r).unwrap());
+    show(&r);
+}
+
+/// The distance from edge set A's points to B's edges along A (CADRS_EBOP_A, CADRS_EBOP_B).
+#[test]
+#[ignore]
+fn debug_edge_gap() {
+    let (Ok(a), Ok(b)) = (std::env::var("CADRS_EBOP_A"), std::env::var("CADRS_EBOP_B")) else { return };
+    let mut k = NativeKernel::new();
+    let (draw::Shape::Wire(wa), draw::Shape::Wire(wb)) = (k.restore(&a).unwrap(), k.restore(&b).unwrap()) else { panic!() };
+    for e in &wa {
+        for i in 0..=100 {
+            let t = e.t0 + (e.t1 - e.t0) * i as f64 / 100.0;
+            let p = e.curve.point(t);
+            let d = wb.iter().map(|o| { let tt = o.curve.closest(&p, o.t0.min(o.t1), o.t0.max(o.t1)); (o.curve.point(tt) - p).norm() }).fold(f64::INFINITY, f64::min);
+            if d < 1e-3 { eprintln!("{i:3} {:?} {d:.3e}", p); }
+        }
+    }
+}

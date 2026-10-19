@@ -789,15 +789,24 @@ impl XBuilder {
         while !rest.is_empty() {
             let (e, f) = *m.last().unwrap();
             let end = self.co_start(e, !f);
-            let Some((i, flip)) = rest.iter().enumerate().find_map(|(i, &(e2, f2))| {
-                if self.same_vertex(end, self.co_start(e2, f2)) {
-                    Some((i, false))
-                } else if self.same_vertex(end, self.co_start(e2, !f2)) {
-                    Some((i, true))
-                } else {
-                    None
-                }
-            }) else {
+            // The edges that go on from here: as given before turned round, and another edge
+            // before going straight back along the same one (a seam's two uses are apart, with
+            // the closed edges at its ends between them).
+            let Some((_, i, flip)) = rest
+                .iter()
+                .enumerate()
+                .filter_map(|(i, &(e2, f2))| {
+                    let back = (e2 == e) as u8 * 2;
+                    if self.same_vertex(end, self.co_start(e2, f2)) {
+                        Some((back, i, false))
+                    } else if self.same_vertex(end, self.co_start(e2, !f2)) {
+                        Some((back + 1, i, true))
+                    } else {
+                        None
+                    }
+                })
+                .min_by_key(|&(score, i, _)| (score, i))
+            else {
                 return false;
             };
             let (e2, f2) = rest.remove(i);

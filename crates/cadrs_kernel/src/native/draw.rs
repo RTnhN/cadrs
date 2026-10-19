@@ -484,10 +484,16 @@ impl NativeKernel {
         Ok(Shape::Body(r.bodies[0]))
     }
 
-    /// `restore file name`: a shape from an OCCT BRep file (`explode` follows the file's order).
+    /// `restore file name`: a shape from an OCCT BRep file (`explode` follows the file's order);
+    /// a file of only wires and edges gives its edges.
     pub fn restore(&mut self, path: &str) -> Result<Shape> {
         let bytes = std::fs::read(path).map_err(|e| err(&format!("{path}: {e}")))?;
-        let (body, _, edges) = super::brep_occt::read_ordered(&bytes).map_err(|e| err(&format!("{path}: {e}")))?;
+        let r = super::brep_occt::read_ordered(&bytes).map_err(|e| err(&format!("{path}: {e}")))?;
+        let Some(body) = r.body else {
+            let mut es: Vec<DEdge> = r.free_edges.into_iter().map(|(curve, t0, t1)| DEdge { curve, t0, t1 }).collect();
+            return Ok(if es.len() == 1 && !r.wires { Shape::Edge(es.remove(0)) } else { Shape::Wire(es) });
+        };
+        let edges = r.edge_order;
         let nf = body.faces.len();
         let b = self.insert(body);
         let infos = self.faces(b)?;
@@ -515,7 +521,56 @@ impl NativeKernel {
         }
     }
 
+    /// A shape's edges, when it is edges (a wire, an edge).
+    fn edges_of(s: &Shape) -> Option<Vec<super::edge_bop::Piece>> {
+        let p = |e: &DEdge| super::edge_bop::Piece { curve: e.curve.clone(), t0: e.t0, t1: e.t1 };
+        match s {
+            Shape::Edge(e) => Some(vec![p(e)]),
+            Shape::Wire(w) => Some(w.iter().map(p).collect()),
+            _ => None,
+        }
+    }
+
+    /// A boolean with edges: the pieces of the lower-dimensional argument.
+    fn edge_bop(&mut self, op: BoolOp, a: &Shape, b: &Shape) -> Result<Shape> {
+        use super::edge_bop::{edge_boolean, Other};
+        let (ea, eb) = (Self::edges_of(a), Self::edges_of(b));
+        let (edges, other_shape, op) = match (&ea, &eb) {
+            (Some(e), _) => (e.clone(), b, op),
+            // A solid or sheet with edges: common is symmetric; a cut leaves the solid as it was.
+            (None, Some(e)) => match op {
+                BoolOp::Intersect => (e.clone(), a, op),
+                BoolOp::Subtract => return Ok(a.clone()),
+                BoolOp::Union => return Err(KernelError::Unsupported("a fuse of arguments of different dimensions")),
+            },
+            _ => unreachable!(),
+        };
+        let body;
+        let other = match Self::edges_of(other_shape) {
+            Some(es) => {
+                body = es;
+                Other::Edges(&body)
+            }
+            None => match other_shape {
+                Shape::Body(id) => Other::Body(self.get(*id)?),
+                Shape::Empty => Other::Edges(&[]),
+                _ => return Err(KernelError::Unsupported("booleans of edges with this shape")),
+            },
+        };
+        // A fuse keeps a wire's pieces where the other argument runs along them too; a loose
+        // edge's only where it doesn't (OCCT's compound holds the wire as rebuilt).
+        let wire_b = matches!(b, Shape::Wire(_));
+        let r = edge_boolean(op, &edges, &other, wire_b).ok_or(KernelError::Unsupported("a fuse of arguments of different dimensions"))?;
+        if r.is_empty() {
+            return Ok(Shape::Empty);
+        }
+        Ok(Shape::Wire(r.into_iter().map(|p| DEdge { curve: p.curve, t0: p.t0, t1: p.t1 }).collect()))
+    }
+
     fn bop(&mut self, op: BoolOp, a: &Shape, b: &Shape) -> Result<Shape> {
+        if Self::edges_of(a).is_some() || Self::edges_of(b).is_some() {
+            return self.edge_bop(op, a, b);
+        }
         let (a, b) = (self.body_of(a)?, self.body_of(b)?);
         let r = match self.boolean(op, a, &[b]) {
             Err(KernelError::OperationFailed(m)) if m.contains("empty") => return Ok(Shape::Empty),
@@ -830,7 +885,9 @@ impl NativeKernel {
         Ok(match s {
             Shape::Vertex(_) => NbShapes { vertex: 1, ..Default::default() },
             Shape::Edge(e) => NbShapes { vertex: if (e.start() - e.end()).norm() < 1e-9 { 1 } else { 2 }, edge: 1, ..Default::default() },
-            Shape::Wire(w) => NbShapes { vertex: wire_vertices(w), edge: w.len(), wire: 1, ..Default::default() },
+            Shape::Wire(w) => {
+                NbShapes { vertex: wire_vertices(w), edge: distinct_edges(w), wire: 1, ..Default::default() }
+            }
             Shape::Face { loops, .. } => NbShapes {
                 vertex: loops.iter().map(|l| wire_vertices(l)).sum(),
                 edge: loops.iter().map(|l| l.len()).sum(),
@@ -908,12 +965,31 @@ fn l2(a: nalgebra::Point2<f64>, b: nalgebra::Point2<f64>) -> Curve2 {
     Curve2::Line { a, b, source: None }
 }
 
-fn wire_vertices(w: &[DEdge]) -> usize {
-    if w.is_empty() {
-        return 0;
+/// The number of distinct edges: coincident ones (the same ends, each one's middle on the other)
+/// once.
+fn distinct_edges(w: &[DEdge]) -> usize {
+    let tol = 1e-6;
+    let mut seen: Vec<&DEdge> = Vec::new();
+    for e in w {
+        let (a, b) = (e.start(), e.end());
+        let same = |x: &&DEdge| {
+            let ends = ((x.start() - a).norm() <= tol && (x.end() - b).norm() <= tol) || ((x.start() - b).norm() <= tol && (x.end() - a).norm() <= tol);
+            ends && {
+                let m = e.curve.point((e.t0 + e.t1) / 2.0);
+                let t = x.curve.closest(&m, x.t0.min(x.t1), x.t0.max(x.t1));
+                (x.curve.point(t) - m).norm() <= tol * 10.0
+            }
+        };
+        if !seen.iter().any(same) {
+            seen.push(e);
+        }
     }
-    let closed = (w[0].start() - w.last().unwrap().end()).norm() < 1e-7;
-    if closed { w.len() } else { w.len() + 1 }
+    seen.len()
+}
+
+fn wire_vertices(w: &[DEdge]) -> usize {
+    let ends: Vec<(P3, P3)> = w.iter().map(|e| (e.start(), e.end())).collect();
+    super::edge_bop::vertex_count(&ends, 1e-6)
 }
 
 /// Turns edges round so each starts where the one before ends.

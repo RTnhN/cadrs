@@ -11,6 +11,7 @@ pub mod build;
 pub mod classify;
 pub mod curve;
 pub mod draw;
+pub mod edge_bop;
 pub mod exchange;
 pub mod features;
 pub mod hlr;
