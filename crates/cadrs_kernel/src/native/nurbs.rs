@@ -219,6 +219,59 @@ impl NurbsCurve {
 
     /// Global interpolation (A9.1) of degree `p` through `pts` at parameters `params`, with
     /// optional end derivatives. Non-rational.
+    /// The closed curve of degree `p` through `pts` (the first not repeated at the end) at
+    /// `params`, with `params[m]` (one more than the points) the parameter where it closes: a
+    /// periodic B-spline (C^(p-1) at the closure too), returned clamped on
+    /// [params[0], params[m]]. None when the system is singular.
+    pub fn interpolate_periodic(pts: &[P3], params: &[f64], p: usize) -> Option<Self> {
+        let m = pts.len();
+        if m < 2 || params.len() != m + 1 || p == 0 {
+            return None;
+        }
+        let period = params[m] - params[0];
+        // The parameters repeated a period either way, as many as the degree needs.
+        let t = |k: isize| -> f64 {
+            let q = k.div_euclid(m as isize);
+            let r = k.rem_euclid(m as isize) as usize;
+            params[r] + q as f64 * period
+        };
+        let ncp = m + 2 * p;
+        let knots: Vec<f64> = (0..ncp + p + 1).map(|i| t(i as isize - p as isize)).collect();
+        let mut a = DMatrix::<f64>::zeros(m, m);
+        for k in 0..m {
+            let span = find_span(ncp - 1, p, params[k], &knots);
+            let nb = basis_ders(span, params[k], p, 0, &knots);
+            for j in 0..=p {
+                a[(k, (span - p + j) % m)] += nb[0][j];
+            }
+        }
+        let lu = a.lu();
+        let mut sol = [DVector::<f64>::zeros(m), DVector::<f64>::zeros(m), DVector::<f64>::zeros(m)];
+        for (c, out) in sol.iter_mut().enumerate() {
+            let b = DVector::from_iterator(m, pts.iter().map(|q| q[c]));
+            *out = lu.solve(&b)?;
+        }
+        let cps: Vec<H> = (0..ncp).map(|i| H::new(sol[0][i % m], sol[1][i % m], sol[2][i % m], 1.0)).collect();
+        let mut c = Self { degree: p, knots, cps };
+        // Clamp: knots of multiplicity p at both ends of the period, then cut.
+        let (lo, hi) = (params[0], params[m]);
+        let eps = 1e-12 * (1.0 + period.abs());
+        let mult = |c: &Self, u: f64| c.knots.iter().filter(|k| (*k - u).abs() <= eps).count();
+        while mult(&c, lo) < p {
+            c = c.insert_knot(lo);
+        }
+        while mult(&c, hi) < p {
+            c = c.insert_knot(hi);
+        }
+        let a = c.knots.iter().position(|k| (k - lo).abs() <= eps)?;
+        let b = c.knots.iter().rposition(|k| (k - hi).abs() <= eps)?;
+        let mut knots = vec![lo];
+        knots.extend(c.knots[a..=b].iter().map(|k| k.clamp(lo, hi)));
+        knots.push(hi);
+        let cps = c.cps[a - 1..=b - p].to_vec();
+        Some(Self { degree: p, knots, cps })
+    }
+
     pub fn interpolate(pts: &[P3], params: &[f64], p: usize, d0: Option<V3>, d1: Option<V3>) -> Self {
         // Parameters must increase strictly: drop points whose parameter repeats.
         let mut keep: Vec<usize> = Vec::with_capacity(pts.len());
@@ -723,6 +776,20 @@ pub fn solve(a: DMatrix<f64>, b: DVector<f64>) -> Option<DVector<f64>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn periodic_interpolation_closes_smoothly() {
+        let pts = [P3::new(1.0, 0.0, 0.0), P3::new(0.0, 2.0, 0.5), P3::new(-1.5, 0.0, 0.0), P3::new(0.0, -1.0, -0.5)];
+        let params = [0.0, 0.2, 0.55, 0.8, 1.0];
+        let c = NurbsCurve::interpolate_periodic(&pts, &params, 3).unwrap();
+        assert_eq!(c.range(), (0.0, 1.0));
+        for (q, u) in pts.iter().zip(params) {
+            assert!((c.point(u) - q).norm() < 1e-9, "{u}");
+        }
+        assert!((c.point(1.0) - pts[0]).norm() < 1e-9);
+        let (d0, d1) = (c.ders(0.0, 2), c.ders(1.0, 2));
+        assert!((d0[1] - d1[1]).norm() < 1e-8 && (d0[2] - d1[2]).norm() < 1e-7, "{d0:?} {d1:?}");
+    }
 
     #[test]
     fn quarter_circle_is_exact() {

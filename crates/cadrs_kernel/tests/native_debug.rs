@@ -1193,3 +1193,36 @@ fn debug_chamfer_faces() {
         eprintln!("  {:?} area {:10.4} normal {:?} centre {:?}", f.kind, f.area, f.plane.map(|p| [p.normal.x, p.normal.y, p.normal.z]), [f.center.x, f.center.y, f.center.z]);
     }
 }
+
+/// The area of lofts with known answers (a cone from a circle to an apex, a frustum).
+#[test]
+#[ignore]
+fn debug_loft_area() {
+    use cadrs_kernel::native::NativeKernel;
+    let mut k = NativeKernel::new();
+    let c = k.circle(0.0, 0.0, 0.0, 10.0);
+    let e = k.mkedge_full(&c);
+    let w = k.wire(&[&e]).unwrap();
+    let v = k.vertex(0.0, 0.0, 40.0);
+    let cone = k.thrusections(false, false, &[&v, &w]).unwrap();
+    let a = k.sprops(&cone).unwrap();
+    println!("cone {a} exact {}", std::f64::consts::PI * 10.0 * 1700f64.sqrt());
+    let c2 = k.circle(0.0, 0.0, 40.0, 5.0);
+    let e2 = k.mkedge_full(&c2);
+    let w2 = k.wire(&[&e2]).unwrap();
+    let fr = k.thrusections(false, false, &[&w, &w2]).unwrap();
+    let a = k.sprops(&fr).unwrap();
+    println!("frustum {a} exact {}", std::f64::consts::PI * 15.0 * 1625f64.sqrt());
+}
+
+#[test]
+#[ignore]
+fn debug_restore_shapes() {
+    use cadrs_kernel::native::NativeKernel;
+    let mut k = NativeKernel::new();
+    let d = "/home/casper/work/cadrsperf/occt-dataset/opencascade-dataset-7.8.0/brep/";
+    for f in std::env::var("CADRS_FILES").unwrap_or("C13 C1".into()).split_whitespace() {
+        let s = k.restore(&format!("{d}{f}")).unwrap();
+        println!("{f}: {s:?}");
+    }
+}

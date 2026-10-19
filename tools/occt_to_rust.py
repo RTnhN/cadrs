@@ -73,6 +73,7 @@ class Case:
         self.objects = []
         self.tools = []
         self.n_tmp = 0
+        self.todo = set()  # checks OCCT itself fails (its TODO markers): left out
 
     def num(self, tok):
         try:
@@ -179,6 +180,12 @@ class Case:
                     code.append(repr(self.num(w)))
                 i += 1
             self.bind(a[0], f'k.profile({face}, "{" ".join(code)}")?')
+        elif c == "thrusections" and len(a) >= 5:
+            args = [x for x in a if x not in ("-safe", "-N")]
+            if any(x.startswith("-") and not re.fullmatch(r"-?[0-9.eE+]+", x) for x in args):
+                raise Unsupported("thrusections with options")
+            secs = ", ".join(self.shape(x) for x in args[3:])
+            self.bind(args[0], f"k.thrusections({'true' if self.num(args[1]) else 'false'}, {'true' if self.num(args[2]) else 'false'}, &[{secs}])?")
         elif c == "box" and len(a) in (4, 7):
             if len(a) == 4:
                 self.bind(a[0], f"k.box_({', '.join(L(x) for x in a[1:])})?")
@@ -284,7 +291,10 @@ class Case:
             done = False
             while i < len(a):
                 o = a[i]
-                if o in ("-s", "-v", "-l") and i + 1 < len(a):
+                if o in ("-s", "-v", "-l") and i + 1 < len(a) and o in self.todo:
+                    i += 2
+                    done = True
+                elif o in ("-s", "-v", "-l") and i + 1 < len(a):
                     if a[i + 1] == "empty":
                         self.lines.append(f"k.checkprops_empty({s})?;")
                     else:
@@ -317,12 +327,18 @@ class Case:
                 else:
                     raise Unsupported(f"checknbshapes {o}")
             args = ", ".join(f"Some({want[x]})" if x in want else "None" for x in ("vertex", "edge", "wire", "face", "shell", "solid"))
+            if "nb" in self.todo:
+                return
             self.lines.append(f"draw::check_nb(k.nbshapes({s})?, {args})?;")
         elif c == "checkshape":
+            if "shape" in self.todo:
+                return
             self.lines.append(f"k.checkshape({self.shape(a[0])})?;")
         elif c == "checkfreebounds" and len(a) >= 2:
             if len(a) > 2:
                 raise Unsupported("checkfreebounds with options")
+            if "free" in self.todo:
+                return
             self.lines.append(f"k.checkfreebounds({self.shape(a[0])}, {int(self.num(a[1]))})?;")
         elif c == "sewing" and len(a) >= 2:
             # sewing result [tol] [options] shapes…
@@ -426,6 +442,21 @@ def convert(path, consts, begins=()):
     if "locate_data_file" in text and not DATA:
         return None, "needs OCCT's data files (tools/occt_to_rust.py --data <dir>)", text
     case = Case(consts)
+    # OCCT's TODO markers on all platforms (or Linux): the checks OCCT doesn't meet itself.
+    for m in re.finditer(r'^\s*puts\s+"TODO\s+(?:[^\s:]+\s+)?(?:ALL|All|all|Linux)\s*:(.*)', text, re.M):
+        what = m.group(1).lower()
+        if "area" in what:
+            case.todo.add("-s")
+        if "volume" in what:
+            case.todo.add("-v")
+        if "length" in what:
+            case.todo.add("-l")
+        if "number of" in what and "wrong" in what:
+            case.todo.add("nb")
+        if "faults" in what or "faulty shapes" in what:
+            case.todo.add("shape")
+        if "free edges" in what:
+            case.todo.add("free")
     try:
         for words in flatten([*begins, path]):
             if not words or words[0] in IGNORED:

@@ -511,3 +511,4 @@ sewing tol_1_v8
 sewing tol_1_x7
 sewing tol_1_y5
 boolean bcut_simple_g6
+thrusection not_solids_w7

@@ -38,6 +38,9 @@ impl Part {
     fn start(&self) -> P3 {
         self.c.point(if self.rev { self.t1 } else { self.t0 })
     }
+    fn end(&self) -> P3 {
+        self.c.point(if self.rev { self.t0 } else { self.t1 })
+    }
     /// An exact B-spline of the part in its direction of travel, on [0, 1].
     fn nurbs(&self) -> NurbsCurve {
         let n = self.c.to_nurbs(self.t0, self.t1);
@@ -194,8 +197,9 @@ pub(crate) fn skin(curves: &[NurbsCurve], v: &[f64]) -> NurbsSurface {
         let cps: Vec<Vec<H>> = (0..ncp).map(|i| vec![curves[0].cps[i], curves[1].cps[i]]).collect();
         return NurbsSurface { du: curves[0].degree, dv: 1, ku: curves[0].knots.clone(), kv: vec![0.0, 0.0, 1.0, 1.0], cps };
     }
-    // Interpolate each column of homogeneous poles (as points in 4D: x, y, z and w separately).
-    let q = 3.min(curves.len() - 1);
+    // Interpolate each column of homogeneous poles (as points in 4D: x, y, z and w separately):
+    // one span through up to nine sections (OCCT's approximation comes out so), else cubic.
+    let q = if curves.len() <= 9 { curves.len() - 1 } else { 3 };
     let mut cols: Vec<Vec<H>> = Vec::new();
     let mut kv = Vec::new();
     for i in 0..ncp {
@@ -443,55 +447,126 @@ fn line2(o: P2, d: V2) -> Curve {
 /// v = 0 the first section). `caps`: the first and last sections' cap surfaces (None for a
 /// point or a sheet). `point_ends`: sections that are points.
 fn assemble(surfs: Vec<NurbsSurface>, closed_u: bool, srcs: &[u64], caps: [Option<(Surface, Option<FaceInput>)>; 2], points: [bool; 2], solid: bool, source: u64) -> Result<Built> {
-    let n = surfs.len();
+    assemble_rows(vec![surfs], closed_u, false, srcs, caps, points, solid, source)
+}
+
+/// The loft's body from rows of surfaces (bottom to top; each row one surface per section
+/// part, all rows sharing their u knots), the caps and the point ends.
+#[allow(clippy::too_many_arguments)]
+fn assemble_rows(rows: Vec<Vec<NurbsSurface>>, closed_u: bool, closed_v: bool, srcs: &[u64], caps: [Option<(Surface, Option<FaceInput>)>; 2], points: [bool; 2], solid: bool, source: u64) -> Result<Built> {
+    let n = rows[0].len();
+    let nr = rows.len();
     let mut b = Body::default();
-    // Corner vertices: bottom and top at each joint (u = 0 of part i).
+    // Corner vertices at each level (0 bottom … nr top) and joint (u = 0 of part i).
     let nj = if closed_u { n } else { n + 1 };
-    let corner = |j: usize, top: bool| -> P3 {
-        let (s, at_end) = if j < n { (&surfs[j], false) } else { (&surfs[n - 1], true) };
+    let corner = |r: usize, j: usize| -> P3 {
+        let (row, top) = if r < nr { (&rows[r], false) } else { (&rows[nr - 1], true) };
+        let (s, at_end) = if j < n { (&row[j], false) } else { (&row[n - 1], true) };
         let c = iso(s, false, at_end);
         let (a, bb) = c.range();
         c.point(if top { bb } else { a })
     };
-    let mut vb: Vec<usize> = Vec::new();
-    let mut vt: Vec<usize> = Vec::new();
-    for j in 0..nj {
-        let p = corner(j, false);
-        vb.push(if points[0] && j > 0 { vb[0] } else { b.add_vertex(p) });
-        let q = corner(j, true);
-        vt.push(if points[1] && j > 0 { vt[0] } else { b.add_vertex(q) });
+    let mut vs: Vec<Vec<usize>> = Vec::new();
+    for r in 0..=nr {
+        // A loft back to its first section ends on the first level.
+        if r == nr && closed_v {
+            vs.push(vs[0].clone());
+            continue;
+        }
+        let point = (r == 0 && points[0]) || (r == nr && points[1]);
+        let mut level: Vec<usize> = Vec::new();
+        for j in 0..nj {
+            let p = corner(r, j);
+            level.push(if point && j > 0 { level[0] } else { b.add_vertex(p) });
+        }
+        vs.push(level);
     }
-    // Rails (v-curves) at the joints.
-    let rails: Vec<usize> = (0..nj)
-        .map(|j| {
-            let (s, at_end) = if j < n { (&surfs[j], false) } else { (&surfs[n - 1], true) };
-            let c = iso(s, false, at_end);
-            let (a, bb) = c.range();
-            b.add_edge(Curve::Nurbs(Arc::new(c)), a, bb, vb[j], vt[j])
+    // Rails (v-curves) at the joints, per row.
+    let rails: Vec<Vec<usize>> = (0..nr)
+        .map(|r| {
+            (0..nj)
+                .map(|j| {
+                    let (s, at_end) = if j < n { (&rows[r][j], false) } else { (&rows[r][n - 1], true) };
+                    let c = iso(s, false, at_end);
+                    let (a, bb) = c.range();
+                    b.add_edge(Curve::Nurbs(Arc::new(c)), a, bb, vs[r][j], vs[r + 1][j])
+                })
+                .collect()
         })
         .collect();
-    let mut bottom = Vec::new();
-    let mut top = Vec::new();
-    let mut faces_out: Vec<(usize, u64)> = Vec::new();
-    for (i, s) in surfs.iter().enumerate() {
-        let j = if closed_u { (i + 1) % n } else { i + 1 };
-        let cb = iso(s, true, false);
-        let ct = iso(s, true, true);
-        let (ua, ub) = cb.range();
-        let eb = if points[0] { b.add_degenerate(b.verts[vb[0]].p, ua, ub, vb[0]) } else { b.add_edge(Curve::Nurbs(Arc::new(cb)), ua, ub, vb[i], vb[j]) };
-        let et = if points[1] { b.add_degenerate(b.verts[vt[0]].p, ua, ub, vt[0]) } else { b.add_edge(Curve::Nurbs(Arc::new(ct)), ua, ub, vt[i], vt[j]) };
-        let ((u0, u1), (v0, v1)) = s.range();
-        let lp = vec![
-            Coedge { edge: eb, fwd: true, pc: line2(P2::new(0.0, v0), V2::new(1.0, 0.0)) },
-            Coedge { edge: rails[j], fwd: true, pc: line2(P2::new(u1, 0.0), V2::new(0.0, 1.0)) },
-            Coedge { edge: et, fwd: false, pc: line2(P2::new(0.0, v1), V2::new(1.0, 0.0)) },
-            Coedge { edge: rails[i], fwd: false, pc: line2(P2::new(u0, 0.0), V2::new(0.0, 1.0)) },
-        ];
-        b.faces.push(Face { surf: Surface::Nurbs(Arc::new(s.clone())), sense: true, loops: vec![lp] });
-        faces_out.push((b.faces.len() - 1, srcs.get(i).copied().unwrap_or(unsourced_curve(0, i))));
-        bottom.push(eb);
-        top.push(et);
+    // A flat patch running into a point (a ruled triangle): a plane face of three edges, no
+    // degenerate edge (as OCCT's ruled loft).
+    let triangle = |r: usize, i: usize| -> Option<Surface> {
+        let at_point = (r == 0 && points[0]) || (r + 1 == nr && points[1]);
+        if !at_point {
+            return None;
+        }
+        let pts: Vec<P3> = rows[r][i].cps.iter().flatten().map(dehom).collect();
+        let o = pts[0];
+        let far = pts.iter().max_by(|a, b| (*a - o).norm().total_cmp(&(*b - o).norm()))?;
+        let x = (far - o).try_normalize(1e-12)?;
+        let nrm = pts.iter().map(|p| x.cross(&(p - o))).max_by(|a, b| a.norm().total_cmp(&b.norm()))?.try_normalize(1e-12)?;
+        let size = (far - o).norm();
+        if pts.iter().any(|p| (p - o).dot(&nrm).abs() > 1e-9 * size.max(1.0)) {
+            return None;
+        }
+        Some(Surface::Plane { f: Frame { o, x, y: nrm.cross(&x), z: nrm } })
+    };
+    // Section edges at each level (none at a point under triangles).
+    let mut levels: Vec<Vec<usize>> = Vec::new();
+    for r in 0..=nr {
+        if r == nr && closed_v {
+            levels.push(levels[0].clone());
+            continue;
+        }
+        let point = (r == 0 && points[0]) || (r == nr && points[1]);
+        let mut es = Vec::new();
+        for i in 0..n {
+            let j = if closed_u { (i + 1) % n } else { i + 1 };
+            let c = if r < nr { iso(&rows[r][i], true, false) } else { iso(&rows[nr - 1][i], true, true) };
+            let (ua, ub) = c.range();
+            let flat = point && triangle(if r == 0 { 0 } else { nr - 1 }, i).is_some();
+            es.push(if flat {
+                usize::MAX
+            } else if point {
+                b.add_degenerate(b.verts[vs[r][0]].p, ua, ub, vs[r][0])
+            } else {
+                b.add_edge(Curve::Nurbs(Arc::new(c)), ua, ub, vs[r][i], vs[r][j])
+            });
+        }
+        levels.push(es);
     }
+    let mut faces_out: Vec<(usize, u64)> = Vec::new();
+    for (r, row) in rows.iter().enumerate() {
+        for (i, s) in row.iter().enumerate() {
+            let j = if closed_u { (i + 1) % n } else { i + 1 };
+            if let Some(surf) = triangle(r, i) {
+                let mut lp = Vec::new();
+                for (e, fwd) in [(levels[r][i], true), (rails[r][j], true), (levels[r + 1][i], false), (rails[r][i], false)] {
+                    if e == usize::MAX {
+                        continue;
+                    }
+                    let ed = &b.edges[e];
+                    lp.push(Coedge { edge: e, fwd, pc: super::pcurve::pcurve(&surf, &ed.curve, ed.t[0], ed.t[1], None) });
+                }
+                b.faces.push(Face { surf, sense: true, loops: vec![lp] });
+                faces_out.push((b.faces.len() - 1, srcs.get(i).copied().unwrap_or(unsourced_curve(0, i))));
+                continue;
+            }
+            let ((u0, u1), (v0, v1)) = s.range();
+            let lp = vec![
+                Coedge { edge: levels[r][i], fwd: true, pc: line2(P2::new(0.0, v0), V2::new(1.0, 0.0)) },
+                Coedge { edge: rails[r][j], fwd: true, pc: line2(P2::new(u1, 0.0), V2::new(0.0, 1.0)) },
+                Coedge { edge: levels[r + 1][i], fwd: false, pc: line2(P2::new(0.0, v1), V2::new(1.0, 0.0)) },
+                Coedge { edge: rails[r][i], fwd: false, pc: line2(P2::new(u0, 0.0), V2::new(0.0, 1.0)) },
+            ];
+            b.faces.push(Face { surf: Surface::Nurbs(Arc::new(s.clone())), sense: true, loops: vec![lp] });
+            faces_out.push((b.faces.len() - 1, srcs.get(i).copied().unwrap_or(unsourced_curve(0, i))));
+        }
+    }
+    let bottom = levels[0].clone();
+    let top = levels[nr].clone();
+    let n = b.faces.len();
     fix_senses(&mut b, 0..n);
     let mut origins: Vec<(usize, Origin)> = faces_out.iter().map(|&(f, c)| (f, Origin::ProfileCurve { region: source, curve: c })).collect();
     if solid {
@@ -562,7 +637,7 @@ fn cap_surface(k: &NativeKernel, s: &Sec) -> Option<(Surface, Option<FaceInput>)
 
 /// Exact skinning; None when the sections don't match.
 fn loft_exact(k: &NativeKernel, spec: &LoftSpec, secs: &mut Vec<Sec>, solid: bool) -> Result<Option<Built>> {
-    loft_exact_with(k, spec, secs, solid, true)
+    loft_exact_with(k, spec, secs, solid, true, false)
 }
 
 /// A solid loft through sections given as loops of profile pieces in their planes, whose
@@ -580,10 +655,234 @@ pub fn loft_pieces(k: &NativeKernel, sections: &[(Vec<super::profile::Piece>, Pl
         secs.push(Sec::Loop { parts, plane: Some(*plane), face: None });
     }
     let spec = LoftSpec { body: BodyKind::Solid, sections: vec![], start: LoftEnd::default(), end: LoftEnd::default(), source };
-    loft_exact_with(k, &spec, &mut secs, true, false)?.ok_or_else(|| invalid("The sections don't match"))
+    loft_exact_with(k, &spec, &mut secs, true, false, false)?.ok_or_else(|| invalid("The sections don't match"))
 }
 
-fn loft_exact_with(k: &NativeKernel, spec: &LoftSpec, secs: &mut Vec<Sec>, solid: bool, align: bool) -> Result<Option<Built>> {
+/// A section of [`loft_wires`]: a wire (edges as curves between parameters, chained in order) or
+/// a point.
+#[derive(Debug, Clone)]
+pub enum WireSection {
+    Wire(Vec<(Curve, f64, f64)>),
+    Point(P3),
+}
+
+/// OCCT's `thrusections`: a loft through wires, closed (a solid when `solid` and the sections
+/// are planar, else a shell) or open (a sheet). `ruled` joins neighbouring sections by ruled
+/// surfaces instead of one smooth surface through all of them.
+pub fn loft_wires(k: &NativeKernel, sections: &[WireSection], solid: bool, ruled: bool) -> Result<Built> {
+    let mut secs: Vec<Sec> = Vec::new();
+    for s in sections {
+        match s {
+            WireSection::Point(p) => secs.push(Sec::Point(*p)),
+            WireSection::Wire(w) => {
+                let parts: Vec<Part> = w
+                    .iter()
+                    .enumerate()
+                    .map(|(i, (c, t0, t1))| Part { c: c.clone(), t0: t0.min(*t1), t1: t0.max(*t1), rev: t1 < t0, src: unsourced_curve(0, i) })
+                    .collect();
+                let plane = wire_plane(&parts);
+                secs.push(Sec::Loop { parts, plane, face: None });
+            }
+        }
+    }
+    let spec = LoftSpec { body: BodyKind::Solid, sections: vec![], start: LoftEnd::default(), end: LoftEnd::default(), source: 0 };
+    let closed = secs.iter().all(|s| match s {
+        Sec::Loop { parts, .. } => (parts[0].start() - parts.last().unwrap().end()).norm() < 1e-6,
+        Sec::Point(_) => true,
+    });
+    let solid = solid && closed && secs.iter().all(|s| matches!(s, Sec::Point(_) | Sec::Loop { plane: Some(_), .. }));
+    let counts: Vec<usize> = secs.iter().filter_map(|s| if let Sec::Loop { parts, .. } = s { Some(parts.len()) } else { None }).collect();
+    // OCCT re-matches the sections by rays when their edge counts differ or every one is
+    // tangent-continuous all round (C1: the same derivative either side of each vertex).
+    let smooth = |parts: &[Part]| {
+        (0..parts.len()).all(|i| {
+            let (a, b) = (&parts[i], &parts[(i + 1) % parts.len()]);
+            let da = a.c.tangent(if a.rev { a.t0 } else { a.t1 }) * if a.rev { -1.0 } else { 1.0 };
+            let db = b.c.tangent(if b.rev { b.t1 } else { b.t0 }) * if b.rev { -1.0 } else { 1.0 };
+            (a.end() - b.start()).norm() < 2e-7 && (da - db).norm() <= 2e-7 * (1.0 + da.norm())
+        })
+    };
+    let all_smooth = secs.iter().all(|s| match s {
+        Sec::Loop { parts, .. } => smooth(parts),
+        Sec::Point(_) => true,
+    });
+    let differ = counts.iter().any(|n| *n != counts[0]);
+    if closed && (differ || all_smooth) {
+        // (Smooth sections that aren't planar keep their own edges.)
+        match polar_match(&mut secs) {
+            Ok(()) => return loft_exact_with(k, &spec, &mut secs, solid, false, ruled)?.ok_or_else(|| invalid("The sections don't match")),
+            Err(e) if differ => return Err(e),
+            Err(_) => {}
+        }
+    }
+    loft_exact_with(k, &spec, &mut secs, solid, true, ruled)?.ok_or_else(|| KernelError::Unsupported("thrusections of wires with different numbers of edges"))
+}
+
+/// Gives closed planar sections the same number of edges, as OCCT's polar method: each
+/// section's vertices are carried to its neighbours (moved with the centres, turned with the
+/// planes) and split them where the ray from the neighbour's centre meets it (or reuse a vertex
+/// within 1% of an edge's end); back from the last section, then forward from the first. Each
+/// loop then starts at the vertex the first loop's start leads to, all the same way round.
+fn polar_match(secs: &mut [Sec]) -> Result<()> {
+    let idx: Vec<usize> = (0..secs.len()).filter(|&i| matches!(secs[i], Sec::Loop { .. })).collect();
+    let loops = |secs: &[Sec], i: usize| -> Vec<Part> { if let Sec::Loop { parts, .. } = &secs[i] { parts.clone() } else { Vec::new() } };
+    // Centres (the length-weighted centroid, a lone circle's centre) and axes.
+    let mut pos = Vec::new();
+    let mut axes = Vec::new();
+    for &i in &idx {
+        let parts = loops(secs, i);
+        let Sec::Loop { plane: Some(pl), .. } = &secs[i] else { return Err(KernelError::Unsupported("thrusections of sections with different numbers of edges that aren't planar")) };
+        let c = match &parts[..] {
+            [Part { c: Curve::Circle { c, .. } | Curve::Ellipse { c, .. }, .. }] => *c,
+            _ => {
+                let (mut acc, mut len) = (V3::zeros(), 0.0);
+                for p in &parts {
+                    for k in 0..32 {
+                        let (a, b) = (p.t0 + (p.t1 - p.t0) * k as f64 / 32.0, p.t0 + (p.t1 - p.t0) * (k + 1) as f64 / 32.0);
+                        let l = p.c.length(a, b);
+                        acc += p.c.point(0.5 * (a + b)).coords * l;
+                        len += l;
+                    }
+                }
+                P3::from(acc / len)
+            }
+        };
+        pos.push(c);
+        axes.push(pl.normal.into_inner());
+    }
+    let n = idx.len();
+    // The loft's direction orients the axes and the loops.
+    let along = pos[n - 1] - pos[0];
+    let along = if along.norm() > 1e-9 { along } else { axes[0] };
+    for a in axes.iter_mut() {
+        if a.dot(&along) < 0.0 {
+            *a = -*a;
+        }
+    }
+    for (k, &i) in idx.iter().enumerate() {
+        if let Sec::Loop { parts, .. } = &mut secs[i] {
+            if turning(parts, &axes[k]) < 0.0 {
+                *parts = reverse_parts(parts);
+            }
+        }
+    }
+    let carry = |p: &P3, from: usize, to: usize| -> P3 {
+        let q = p + (pos[to] - pos[from]);
+        let r = nalgebra::Rotation3::rotation_between(&axes[from], &axes[to]).unwrap_or_else(nalgebra::Rotation3::identity);
+        pos[to] + r * (q - pos[to])
+    };
+    // Where the ray from section k's centre towards `target` meets its loop: (part, parameter).
+    let hit = |parts: &[Part], k: usize, target: &P3| -> Option<(usize, f64)> {
+        let d = target - pos[k];
+        let ax = axes[k];
+        let side = |p: &P3| (p - pos[k]).cross(&d).dot(&ax);
+        let mut best: Option<(f64, usize, f64)> = None;
+        for (pi, p) in parts.iter().enumerate() {
+            const N: usize = 64;
+            let t_at = |j: usize| p.t0 + (p.t1 - p.t0) * j as f64 / N as f64;
+            for j in 0..N {
+                let (mut a, mut b) = (t_at(j), t_at(j + 1));
+                let (mut fa, fb) = (side(&p.c.point(a)), side(&p.c.point(b)));
+                if fa * fb > 0.0 {
+                    continue;
+                }
+                for _ in 0..60 {
+                    let m = 0.5 * (a + b);
+                    let fm = side(&p.c.point(m));
+                    if fa * fm <= 0.0 {
+                        b = m;
+                    } else {
+                        a = m;
+                        fa = fm;
+                    }
+                }
+                let t = 0.5 * (a + b);
+                let q = p.c.point(t);
+                if (q - pos[k]).dot(&d) <= 0.0 {
+                    continue;
+                }
+                let dist = (q - target).norm();
+                if best.map_or(true, |(bd, ..)| dist < bd) {
+                    best = Some((dist, pi, t));
+                }
+            }
+        }
+        best.map(|(_, pi, t)| (pi, t))
+    };
+    // Splits loop k at the ray towards `target` (unless a vertex is within 1%).
+    let split = |secs: &mut [Sec], k: usize, target: &P3| {
+        let Sec::Loop { parts, .. } = &mut secs[idx[k]] else { return };
+        let Some((pi, t)) = hit(parts, k, target) else { return };
+        let p = parts[pi].clone();
+        let tol = 0.01 * (p.t1 - p.t0).abs();
+        if (t - p.t0).abs() < tol || (p.t1 - t).abs() < tol {
+            return;
+        }
+        let (a, b) = (Part { t1: t, ..p.clone() }, Part { t0: t, ..p.clone() });
+        let pieces = if p.rev { [b, a] } else { [a, b] };
+        parts.splice(pi..pi + 1, pieces);
+    };
+    for k in (1..n).rev() {
+        for v in loops(secs, idx[k]).iter().map(|p| p.start()) {
+            let target = carry(&v, k, k - 1);
+            split(secs, k - 1, &target);
+        }
+    }
+    for k in 0..n - 1 {
+        for v in loops(secs, idx[k]).iter().map(|p| p.start()) {
+            let target = carry(&v, k, k + 1);
+            split(secs, k + 1, &target);
+        }
+    }
+    // Start each loop where the first one's start leads.
+    let mut start = loops(secs, idx[0])[0].start();
+    for k in 1..n {
+        start = carry(&start, k - 1, k);
+        let parts = loops(secs, idx[k]);
+        let best = (0..parts.len()).min_by(|&a, &b| {
+            let ang = |r: usize| {
+                let u = (parts[r].start() - pos[k]).normalize();
+                -u.dot(&(start - pos[k]).normalize())
+            };
+            ang(a).total_cmp(&ang(b))
+        });
+        if let (Some(best), Sec::Loop { parts, .. }) = (best, &mut secs[idx[k]]) {
+            parts.rotate_left(best);
+            start = parts[0].start();
+        }
+    }
+    let counts: Vec<usize> = idx.iter().map(|&i| loops(secs, i).len()).collect();
+    if counts.iter().any(|c| *c != counts[0]) {
+        return Err(invalid("The sections can't be matched edge for edge"));
+    }
+    Ok(())
+}
+
+/// The plane of a planar loop of parts (Newell's normal), if it is planar.
+fn wire_plane(parts: &[Part]) -> Option<Plane> {
+    let mut pts = Vec::new();
+    for p in parts {
+        for k in 0..32 {
+            pts.push(p.c.point(p.t0 + (p.t1 - p.t0) * k as f64 / 32.0));
+        }
+    }
+    let n = pts.len();
+    let mut nrm = V3::zeros();
+    for i in 0..n {
+        let (a, b) = (pts[i], pts[(i + 1) % n]);
+        nrm += a.coords.cross(&b.coords);
+    }
+    let nrm = nrm.try_normalize(1e-12)?;
+    let o = pts[0];
+    let size = pts.iter().map(|p| (p - o).norm()).fold(0.0, f64::max);
+    if pts.iter().any(|p| (p - o).dot(&nrm).abs() > 1e-7 * size.max(1.0)) {
+        return None;
+    }
+    let x = (pts[n / 3] - o) - nrm * (pts[n / 3] - o).dot(&nrm);
+    Some(Plane { origin: o, x_dir: nalgebra::Unit::try_new(x, 1e-12)?, normal: nalgebra::Unit::new_normalize(nrm) })
+}
+
+fn loft_exact_with(k: &NativeKernel, spec: &LoftSpec, secs: &mut Vec<Sec>, solid: bool, align: bool, ruled: bool) -> Result<Option<Built>> {
     let loops: Vec<usize> = secs.iter().filter_map(|s| if let Sec::Loop { parts, .. } = s { Some(parts.len()) } else { None }).collect();
     if loops.is_empty() || loops.iter().any(|n| *n != loops[0]) {
         return Ok(None);
@@ -591,12 +890,35 @@ fn loft_exact_with(k: &NativeKernel, spec: &LoftSpec, secs: &mut Vec<Sec>, solid
     let count = loops[0];
     let first = centroid(&secs[0]);
     let last = centroid(secs.last().unwrap());
-    let axis = last - first;
+    let mut axis = last - first;
+    // A loft that comes back to its first section: along the way to the second.
+    if axis.norm() < 1e-9 && secs.len() > 2 {
+        axis = centroid(&secs[1]) - first;
+    }
     if axis.norm() < 1e-9 {
         return Err(invalid("The loft's profiles lie on top of each other"));
     }
+    // Open sections (sheets): each the way round that starts nearest the previous one's start.
+    let closed_u = secs.iter().all(|s| match s {
+        Sec::Loop { parts, .. } => (parts[0].start() - parts.last().unwrap().end()).norm() < 1e-6,
+        Sec::Point(_) => true,
+    });
+    if !closed_u {
+        if secs.iter().any(|s| matches!(s, Sec::Point(_))) {
+            return Ok(None);
+        }
+        for i in 1..secs.len() {
+            let Sec::Loop { parts: prev, .. } = &secs[i - 1] else { continue };
+            let (a, b) = (prev[0].start(), prev.last().unwrap().end());
+            let Sec::Loop { parts, .. } = &mut secs[i] else { continue };
+            let (c, d) = (parts[0].start(), parts.last().unwrap().end());
+            if (c - b).norm() + (d - a).norm() < (c - a).norm() + (d - b).norm() {
+                *parts = reverse_parts(parts);
+            }
+        }
+    }
     // The same way round the axis, each started where it lines up with the previous one.
-    for s in secs.iter_mut().filter(|_| align) {
+    for s in secs.iter_mut().filter(|_| align && closed_u) {
         if let Sec::Loop { parts, .. } = s {
             if turning(parts, &axis) < 0.0 {
                 *parts = reverse_parts(parts);
@@ -604,7 +926,7 @@ fn loft_exact_with(k: &NativeKernel, spec: &LoftSpec, secs: &mut Vec<Sec>, solid
         }
     }
     let mut prev_dir: Option<V3> = None;
-    for i in (0..secs.len()).filter(|_| align) {
+    for i in (0..secs.len()).filter(|_| align && closed_u) {
         let c = centroid(&secs[i]);
         if let Sec::Loop { parts, .. } = &mut secs[i] {
             let perp = |d: V3| d - axis.normalize() * d.dot(&axis.normalize());
@@ -632,8 +954,16 @@ fn loft_exact_with(k: &NativeKernel, spec: &LoftSpec, secs: &mut Vec<Sec>, solid
     }
     // Compatible curves per part across the sections.
     let n_secs = secs.len();
+    // Back to the first section at the end: closed across the sections (no caps).
+    let closed_v = n_secs > 2
+        && match (&secs[0], &secs[n_secs - 1]) {
+            (Sec::Loop { parts: a, .. }, Sec::Loop { parts: b, .. }) => a.len() == b.len() && a.iter().zip(b).all(|(p, q)| (p.start() - q.start()).norm() < 1e-7 && (p.end() - q.end()).norm() < 1e-7),
+            _ => false,
+        };
+    let solid = solid && !closed_v;
     let mut srcs = Vec::new();
     let mut surfs = Vec::new();
+    let mut ruled_cols: Vec<Vec<NurbsSurface>> = Vec::new();
     // v parameters by the distance between centres.
     let cents: Vec<P3> = secs.iter().map(centroid).collect();
     let mut v = vec![0.0];
@@ -685,14 +1015,20 @@ fn loft_exact_with(k: &NativeKernel, spec: &LoftSpec, secs: &mut Vec<Sec>, solid
             let (a0, a1) = (fit(&d0, &curves[0], false), fit(&d1, &curves[n_secs - 1], false));
             let (b0, b1) = (fit(&d0, &curves[0], true), fit(&d1, &curves[n_secs - 1], true));
             surfs.push(skin_conditioned(&curves, &v, [a0, a1], [b0, b1]));
+        } else if ruled {
+            // One ruled surface per neighbouring pair (a face each, as OCCT).
+            ruled_cols.push(curves.windows(2).map(|w| skin(w, &[0.0, 1.0])).collect::<Vec<_>>());
         } else {
             surfs.push(skin(&curves, &v));
         }
     }
-    let closed_u = true;
     let caps = [cap_surface(k, &secs[0]), cap_surface(k, &secs[n_secs - 1])];
     let points = [matches!(secs[0], Sec::Point(_)), matches!(secs[n_secs - 1], Sec::Point(_))];
-    Ok(Some(assemble(surfs, closed_u, &srcs, caps, points, solid, spec.source)?))
+    if ruled {
+        let rows: Vec<Vec<NurbsSurface>> = (0..n_secs - 1).map(|r| ruled_cols.iter().map(|c| c[r].clone()).collect()).collect();
+        return Ok(Some(assemble_rows(rows, closed_u, closed_v, &srcs, caps, points, solid, spec.source)?));
+    }
+    Ok(Some(assemble_rows(vec![surfs], closed_u, closed_v, &srcs, caps, points, solid, spec.source)?))
 }
 
 /// The loft's end derivative at a section (OCCT backend conventions: magnitude × the length

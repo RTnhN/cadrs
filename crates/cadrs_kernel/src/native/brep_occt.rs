@@ -1356,6 +1356,8 @@ pub struct BrepRead {
     pub free_edges: Vec<(Curve, f64, f64)>,
     /// Whether the free edges are in wires (else loose edges).
     pub wires: bool,
+    /// The vertices of a file with no faces or edges.
+    pub points: Vec<P3>,
     pub warnings: Vec<String>,
 }
 
@@ -1408,10 +1410,26 @@ pub fn read_ordered(bytes: &[u8]) -> R<BrepRead> {
     } else {
         None
     };
+    // A file of only vertices (or of edges without curves, a wire collapsed to a point).
+    let mut points: Vec<P3> = Vec::new();
     if body.is_none() && free_edges.is_empty() {
-        return Err(format!("no faces or edges read ({})", warnings.join("; ")));
+        fn walk(f: &File, s: usize, loc: &Loc, out: &mut Vec<P3>) {
+            if let Kind::Vertex(p) = f.shapes[s].kind {
+                let q = loc.m.point(&p);
+                if !out.iter().any(|x| (x - q).norm() < 1e-7) {
+                    out.push(q);
+                }
+            }
+            for &(_, c, l) in &f.shapes[s].subs {
+                walk(f, c, &loc.then(&f.locs[l]), out);
+            }
+        }
+        walk(&f, s, &f.locs[l], &mut points);
+        if points.is_empty() {
+            return Err(format!("no faces or edges read ({})", warnings.join("; ")));
+        }
     }
-    Ok(BrepRead { body, edge_order: mids, free_edges, wires: b.wires, warnings })
+    Ok(BrepRead { body, edge_order: mids, free_edges, wires: b.wires, points, warnings })
 }
 
 /// Reads an OCCT BRep text file into a body (its solids, then sheets) and the problems met.

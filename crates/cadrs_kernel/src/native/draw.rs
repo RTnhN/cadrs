@@ -708,12 +708,38 @@ impl NativeKernel {
         Ok(Shape::Body(r.bodies[0]))
     }
 
+    /// `thrusections name issolid isruled section…`: a loft through wires (or edges), with a
+    /// vertex allowed first and last.
+    pub fn thrusections(&mut self, solid: bool, ruled: bool, sections: &[&Shape]) -> Result<Shape> {
+        use super::loft_build::WireSection;
+        let secs = sections
+            .iter()
+            .map(|s| {
+                Ok(match s {
+                    Shape::Vertex(p) => WireSection::Point(*p),
+                    Shape::Edge(e) => WireSection::Wire(vec![(e.curve.clone(), e.t0, e.t1)]),
+                    Shape::Wire(w) => WireSection::Wire(w.iter().map(|e| (e.curve.clone(), e.t0, e.t1)).collect()),
+                    Shape::Face { loops, .. } if loops.len() == 1 => WireSection::Wire(loops[0].iter().map(|e| (e.curve.clone(), e.t0, e.t1)).collect()),
+                    _ => return Err(err("thrusections takes wires, edges and vertices")),
+                })
+            })
+            .collect::<Result<Vec<_>>>()?;
+        if secs.len() < 2 {
+            return Err(err("thrusections needs two sections"));
+        }
+        let built = super::loft_build::loft_wires(self, &secs, solid, ruled)?;
+        Ok(Shape::Body(self.insert(built.body)))
+    }
+
     /// `restore file name`: a shape from an OCCT BRep file (`explode` follows the file's order);
     /// a file of only wires and edges gives its edges.
     pub fn restore(&mut self, path: &str) -> Result<Shape> {
         let bytes = std::fs::read(path).map_err(|e| err(&format!("{path}: {e}")))?;
         let r = super::brep_occt::read_ordered(&bytes).map_err(|e| err(&format!("{path}: {e}")))?;
         let Some(body) = r.body else {
+            if let [p] = r.points[..] {
+                return Ok(Shape::Vertex(p));
+            }
             let mut es: Vec<DEdge> = r.free_edges.into_iter().map(|(curve, t0, t1)| DEdge { curve, t0, t1 }).collect();
             return Ok(if es.len() == 1 && !r.wires { Shape::Edge(es.remove(0)) } else { Shape::Wire(es) });
         };
@@ -979,6 +1005,8 @@ impl NativeKernel {
                 Ok(pts.into_iter().map(Shape::Vertex).collect())
             }
             (Shape::Wire(_), "w" | "wire") => Ok(vec![s.clone()]),
+            (Shape::Face { loops, .. }, "w" | "wire") => Ok(loops.iter().cloned().map(Shape::Wire).collect()),
+            (Shape::Face { loops, .. }, "e" | "edge") => Ok(loops.iter().flatten().cloned().map(Shape::Edge).collect()),
             (Shape::Edge(e), "v" | "vertex") => Ok(vec![Shape::Vertex(e.start()), Shape::Vertex(e.end())]),
             (Shape::Body(_), "e" | "edge") => self.explode_edges(s),
             (Shape::Body(_), "f" | "face") => self.explode_faces(s),
