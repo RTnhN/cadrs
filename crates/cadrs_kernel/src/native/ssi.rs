@@ -717,7 +717,49 @@ fn numeric(a: &Surface, ua: ((f64, f64), (f64, f64)), b: &Surface, bb: &Bbox) ->
         }
         refine_point(a, b, uv)
     };
-    let mut polys: Vec<(Vec<P3>, bool)> = lines.into_iter().map(|(pl, c)| (pl.into_iter().map(refine).collect(), c)).collect();
+    // Each traced line is a seed: the curve through it is marched on both surfaces (exact
+    // points, through saddle cells and across the grid's cells), unless a curve marched from
+    // an earlier seed already passes there. A seed the march can't follow keeps its traced
+    // points.
+    let marching = std::env::var_os("CADRS_NO_MARCH").is_none();
+    let bx = super::march::UvBox { u: (u0, u1), v: (v0, v1) };
+    let mut polys: Vec<(Vec<P3>, bool)> = Vec::new();
+    let mut marched: Vec<Vec<P3>> = Vec::new();
+    for (pl, c) in lines {
+        if marching {
+            let seed = pl[pl.len() / 2];
+            let sp = refine(seed);
+            let covered = marched.iter().any(|m| m.windows(2).any(|w| seg_dist3(&sp, &w[0], &w[1]) < h * 0.5));
+            if covered {
+                continue;
+            }
+            if let Some(m) = super::march::march(a, bx, b, seed, size) {
+                marched.push(m.pts.clone());
+                polys.push((m.pts, m.closed));
+                continue;
+            }
+        }
+        polys.push((pl.into_iter().map(refine).collect(), c));
+    }
+    // A curve marched twice (from seeds on two of its traced pieces): the copy goes.
+    let on = |q: &P3, line: &[P3], closed: bool| {
+        let n = line.len();
+        (0..if closed { n } else { n - 1 }).any(|k| seg_dist3(q, &line[k], &line[(k + 1) % n]) < h * 0.25)
+    };
+    let mut keep = vec![true; polys.len()];
+    for j in 0..polys.len() {
+        for i in 0..j {
+            if keep[i] && polys[i].0.len() >= 2 && polys[j].0.iter().all(|q| on(q, &polys[i].0, polys[i].1)) {
+                keep[j] = false;
+                break;
+            }
+        }
+    }
+    let mut k = 0;
+    polys.retain(|_| {
+        k += 1;
+        keep[k - 1]
+    });
     // Join polylines that meet in 3D (across a periodic seam).
     let dbg = std::env::var("CADRS_SSI_DEBUG").is_ok();
     if dbg {
@@ -789,6 +831,14 @@ pub fn refine_point_uv(a: &Surface, b: &Surface, uv: P2) -> (P3, P2) {
         v -= g0 * gv / l;
     }
     (a.eval(u, v), P2::new(u, v))
+}
+
+/// Distance from p to the segment ab.
+fn seg_dist3(p: &P3, a: &P3, b: &P3) -> f64 {
+    let d = b - a;
+    let l = d.norm_squared();
+    let t = if l < 1e-300 { 0.0 } else { ((p - a).dot(&d) / l).clamp(0.0, 1.0) };
+    (a + d * t - p).norm()
 }
 
 fn join_polylines(polys: &mut Vec<(Vec<P3>, bool)>, tol: f64) {

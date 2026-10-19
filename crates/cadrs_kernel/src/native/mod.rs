@@ -27,6 +27,7 @@ pub mod offset2d;
 pub mod slab;
 pub mod smb;
 pub mod recognize;
+pub mod march;
 pub mod offset_round;
 pub mod ops;
 pub mod pcurve;
