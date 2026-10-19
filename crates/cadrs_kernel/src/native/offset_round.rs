@@ -21,7 +21,7 @@ use crate::*;
 fn face_slab(b: &Body, fi: usize, d: f64) -> Result<Body> {
     let f = &b.faces[fi];
     let Surface::Plane { f: fr } = &f.surf else {
-        return Err(KernelError::Unsupported("offsets of curved faces"));
+        return super::slab::face_slab(b, fi, d);
     };
     let n = fr.x.cross(&fr.y) * if f.sense { 1.0 } else { -1.0 };
     let plane = Plane { origin: fr.o, x_dir: nalgebra::Unit::new_normalize(fr.x), normal: nalgebra::Unit::new_normalize(n) };
@@ -350,6 +350,6 @@ fn face_band(b: &Body, fi: usize, t: f64) -> Result<Body> {
             let kind = super::sweep::Prism { plane, dir: fr.z };
             Ok(super::sweep::sweep_full(&mf, &[], &kind, 0.0, hi - lo, false, true)?.body)
         }
-        _ => Err(KernelError::Unsupported("shells of this kind of face")),
+        _ => super::slab::face_slab(b, fi, -t),
     }
 }

@@ -317,6 +317,19 @@ impl NativeKernel {
         Ok(Shape::Face { plane, loops: vec![edges] })
     }
 
+    /// `add what to`: into a compound, or a wire as a hole in a planar face.
+    pub fn add(&self, what: &Shape, to: &Shape) -> Result<Shape> {
+        match to {
+            Shape::Compound(v) => {
+                let mut v = v.clone();
+                v.push(what.clone());
+                Ok(Shape::Compound(v))
+            }
+            Shape::Empty => Ok(Shape::Compound(vec![what.clone()])),
+            _ => self.add_hole(what, to),
+        }
+    }
+
     /// `add wire face`: a hole in a planar face.
     pub fn add_hole(&self, w: &Shape, f: &Shape) -> Result<Shape> {
         let (Shape::Wire(w), Shape::Face { plane, loops }) = (w, f) else { return Err(err("add takes a wire and a face")) };
@@ -816,6 +829,27 @@ impl NativeKernel {
         })
     }
 
+    /// `offsetparameter tol mode join; offsetload s d [faces…]; offsetperform result`: the
+    /// solid offset by `d` (faces meeting where they intersect, or rounded with arc joins), or
+    /// with faces listed a thick solid: those faces removed and walls `d` thick (outwards for
+    /// d > 0).
+    pub fn offsetperform(&mut self, s: &Shape, d: f64, faces: &[&Shape], arc: bool) -> Result<Shape> {
+        let b = self.body_of(s)?;
+        if faces.is_empty() {
+            let r = crate::Kernel::offset(self, b, &OffsetSpec { distance: d, faces: vec![], sharp: !arc })?;
+            return Ok(Shape::Body(r.bodies[0]));
+        }
+        let remove = faces
+            .iter()
+            .map(|f| match f {
+                Shape::BodyFace(fb, id) if *fb == b => Ok(*id),
+                _ => Err(err("offsetload: the faces must be faces of the shape")),
+            })
+            .collect::<Result<Vec<_>>>()?;
+        let r = crate::Kernel::shell_with(self, b, &ShellSpec { remove, thickness: d.abs(), outward: d > 0.0, hollow: false })?;
+        Ok(Shape::Body(r.bodies[0]))
+    }
+
     /// `compound s… name`.
     pub fn compound_shapes(&self, shapes: &[&Shape]) -> Shape {
         Shape::Compound(shapes.iter().map(|s| (*s).clone()).collect())
@@ -949,7 +983,7 @@ impl NativeKernel {
         if Self::edges_of(a).is_some() || Self::edges_of(b).is_some() {
             return self.edge_bop(op, a, b);
         }
-        let (a, b) = (self.body_of(a)?, self.body_of(b)?);
+        let (a, b) = (self.solid_of(a)?, self.solid_of(b)?);
         let r = match self.boolean(op, a, &[b]) {
             Err(KernelError::OperationFailed(m)) if m.contains("empty") => return Ok(Shape::Empty),
             r => r?,
@@ -965,6 +999,21 @@ impl NativeKernel {
                 }
                 Ok(Shape::Body(acc))
             }
+        }
+    }
+
+    /// A solid argument: a body, or a compound of them as one body.
+    fn solid_of(&mut self, s: &Shape) -> Result<BodyId> {
+        match s {
+            Shape::Compound(v) if !v.is_empty() => {
+                let mut acc = self.solid_of(&v[0])?;
+                for x in &v[1..] {
+                    let b = self.solid_of(x)?;
+                    acc = self.compound(acc, b)?;
+                }
+                Ok(acc)
+            }
+            _ => self.body_of(s),
         }
     }
 
@@ -1020,6 +1069,8 @@ impl NativeKernel {
                 }
                 Shape::Body(nb)
             }
+            Shape::Compound(v) => Shape::Compound(v.iter().map(|x| self.motion(x, m)).collect::<Result<_>>()?),
+            Shape::Empty => Shape::Empty,
             _ => return Err(KernelError::Unsupported("moving a sub-shape")),
         })
     }
@@ -1291,6 +1342,13 @@ impl NativeKernel {
             }
             Shape::Body(b) => self.mass_properties(*b)?.surface_area,
             Shape::BodyFace(b, id) => self.faces(*b)?.iter().find(|f| f.id == *id).map_or(0.0, |f| f.area),
+            Shape::Compound(v) => {
+                let mut a = 0.0;
+                for x in v {
+                    a += self.sprops(x)?;
+                }
+                a
+            }
             _ => 0.0,
         })
     }
@@ -1299,6 +1357,7 @@ impl NativeKernel {
     pub fn vprops(&self, s: &Shape) -> Result<f64> {
         Ok(match s {
             Shape::Body(b) => self.mass_properties(*b)?.volume,
+            Shape::Compound(v) => v.iter().map(|x| self.vprops(x)).sum::<Result<f64>>()?,
             _ => 0.0,
         })
     }

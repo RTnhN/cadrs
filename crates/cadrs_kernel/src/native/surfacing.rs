@@ -45,7 +45,7 @@ fn slab(face: &Body, d: f64) -> Result<Body> {
             let kind = super::sweep::Prism { plane, dir };
             Ok(super::sweep::sweep_full(&[mf], &[], &kind, 0.0, d.abs(), false, true)?.body)
         }
-        _ => Err(KernelError::Unsupported("thickening a curved face")),
+        _ => super::slab::face_slab(face, 0, d),
     }
 }
 

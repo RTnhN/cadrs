@@ -146,6 +146,11 @@ fn reverse_parts(parts: &[Part]) -> Vec<Part> {
 }
 
 /// Makes curves compatible: the same degree (all quadratic or all cubic) and knots.
+/// Curves of one degree given the same knots (by knot insertion); false when the degrees differ.
+pub(crate) fn make_compatible(curves: &mut [NurbsCurve]) -> bool {
+    compatible(curves)
+}
+
 fn compatible(curves: &mut [NurbsCurve]) -> bool {
     let deg = curves.iter().map(|c| c.degree).max().unwrap_or(1);
     if curves.iter().any(|c| c.degree != deg) {
