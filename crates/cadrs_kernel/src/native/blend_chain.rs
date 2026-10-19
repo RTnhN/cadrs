@@ -59,6 +59,52 @@ impl Chain<'_> {
         super::classify::periodic_candidates(&f.surf, u, v, &ps).into_iter().any(|uv| super::classify::in_face(&ps, &f.surf, uv, 1e-7) != super::classify::InFace::Outside)
     }
 
+    /// The point `dist` from `p` across face `own` in the plane square to `t` (from direction
+    /// `w`), continuing on face `next`'s surface past `own`'s boundary.
+    fn walk(&self, own: usize, next: usize, p: &P3, t: &V3, w: &V3, dist: f64) -> P3 {
+        if own == next {
+            return along_face(&self.b.faces[own], p, t, w, dist);
+        }
+        let steps = 64;
+        let h = dist / steps as f64;
+        let (mut q, mut dir) = (*p, *w);
+        let mut left = dist;
+        let mut cur = own;
+        let onto = |fi: usize, x: P3| -> P3 {
+            let f = &self.b.faces[fi];
+            let mut x = x;
+            for _ in 0..4 {
+                let (u, v) = f.surf.project(&x, None);
+                x = f.surf.eval(u, v);
+                x -= t * (x - p).dot(t);
+            }
+            x
+        };
+        while left > 1e-12 {
+            let step = h.min(left);
+            let x = onto(cur, q + dir * step);
+            let (x, used) = if cur == own && !self.on(own, &x) {
+                // Where the step leaves the face (bisection); on from there on the next face.
+                let (mut lo, mut hi) = (0.0, 1.0);
+                for _ in 0..40 {
+                    let m = (lo + hi) / 2.0;
+                    if self.on(own, &onto(own, q + dir * (step * m))) { lo = m } else { hi = m }
+                }
+                cur = next;
+                (onto(own, q + dir * (step * lo)), step * lo)
+            } else {
+                (x, step)
+            };
+            let d = x - q;
+            if d.norm() > 1e-15 {
+                dir = d.normalize();
+            }
+            q = x;
+            left -= used;
+        }
+        q
+    }
+
     /// The line–arc–line (or line–line–line) section at chain position `s` with the contacts
     /// on `faces` (each with the side flag of the edge's own face it continues), and whether
     /// each contact lies on its face.
@@ -115,7 +161,13 @@ impl Chain<'_> {
                 let (_, _, q2) = out_dist(f2, &x);
                 (q1, q2, Mid::Arc(x))
             }
-            SectionKind::Chamfer { d1, d2 } => (along_face(f1, &p, &tan, &w1, d1), along_face(f2, &p, &tan, &w2, d2), Mid::Line),
+            SectionKind::Chamfer { d1, d2 } => {
+                // Along the edge's own face, onto the contact's face where the walk leaves it
+                // (so neighbouring sections agree where the contact changes face).
+                let (_, o1) = dirs(&b.faces[own[0].0], own[0].1);
+                let (_, o2) = dirs(&b.faces[own[1].0], own[1].1);
+                (self.walk(own[0].0, faces[0].0, &p, &tan, &o1, d1), self.walk(own[1].0, faces[1].0, &p, &tan, &o2, d2), Mid::Line)
+            }
             _ => return Err(KernelError::InvalidParameter("Conic, curvature and asymmetric fillets work on straight edges between flat faces".into())),
         };
         let inside = [self.on(faces[0].0, &c1), self.on(faces[1].0, &c2)];
