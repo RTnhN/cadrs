@@ -18,6 +18,13 @@ fn debug_rebuild_document() {
         }
         let b = cadrs_core::rebuild::build(features);
         println!("{}: {} parts in {:?}", el.name, b.parts.len(), b.elapsed);
+        if std::env::var("CADRS_DOC_FACES").is_ok() {
+            for part in &b.parts {
+                for (i, f) in part.solid.faces.iter().enumerate() {
+                    println!("  face {i} {:?} at {:?}", f.name, part.solid.face_point(i));
+                }
+            }
+        }
         for (f, e) in &b.errors {
             let name = features.iter().find(|x| x.id == *f).map_or("?", |x| x.name.as_str());
             println!("  ERROR {name}: {e}");

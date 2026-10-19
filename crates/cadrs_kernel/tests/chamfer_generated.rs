@@ -539,8 +539,8 @@ fn vertical_edges_chamfered_and_filleted() {
 
 /// Every edge of random prisms chamfered at once: top and bottom outlines cut, vertical edges
 /// cut or filled, corners of three. No exact volume here; the result must be valid and have
-/// the prism's faces and one per edge (no slivers, spikes or end caps), and lose less than the
-/// edges' sections alone would (corners share material).
+/// the prism's faces, one per edge and Onshape's corner triangles (no slivers, spikes or end
+/// caps).
 #[test]
 fn prisms_chamfered_all_round() {
     let mut rng = Rng(0xa11_70d);
@@ -558,7 +558,10 @@ fn prisms_chamfered_all_round() {
         };
         let infos = k.edges(b).unwrap();
         let edges: Vec<EdgeId> = infos.iter().map(|e| e.id).collect();
-        let n0 = k.faces(b).unwrap().len();
+        // Onshape closes each end of a filled inside corner, where the two chamfers either side
+        // meet it, with a triangular corner face: two per inside corner.
+        let inside: usize = loops.iter().flat_map(|(_, a)| a.iter()).filter(|&&t| t > std::f64::consts::PI).count();
+        let n0 = k.faces(b).unwrap().len() + 2 * inside;
         match k.chamfer_with(b, &edges, &ChamferOpts::new(ChamferSpec::EqualDistance(d))) {
             Err(e) => case.check("chamfer", false, e.to_string()),
             Ok(res) => {

@@ -487,6 +487,47 @@ pub fn hexahedron(c: &[P3; 8]) -> Result<Body> {
 
 /// Keeps the part of a tool on the side of the plane (through `o`, normal `n`) that `n`
 /// points away from.
+/// The face a planar face of `b` lies on, as (point, outward normal).
+fn face_plane(b: &Body, fi: usize) -> Option<(P3, V3)> {
+    let f = &b.faces[fi];
+    let Surface::Plane { f: fr } = &f.surf else { return None };
+    Some((fr.o, fr.x.cross(&fr.y) * if f.sense { 1.0 } else { -1.0 }))
+}
+
+/// The point on three planes (None when two are nearly parallel).
+fn meet3(a: (P3, V3), b: (P3, V3), c: (P3, V3)) -> Option<P3> {
+    let m = nalgebra::Matrix3::from_rows(&[a.1.transpose(), b.1.transpose(), c.1.transpose()]);
+    let r = V3::new(a.1.dot(&a.0.coords), b.1.dot(&b.0.coords), c.1.dot(&c.0.coords));
+    let x = m.try_inverse()? * r;
+    Some(P3::from(x))
+}
+
+/// The triangular corner face where the fill of concave edge `e` meets the cuts of `ca` and
+/// `cb` at `v`: through the fill's face meeting each chamfer on that chamfer's other face (the
+/// wall the fill leans on), and the chamfers' edges crossing on the face they share. As
+/// (point, normal towards `v`: the side it cuts away).
+fn corner_triangle(b: &Body, e: usize, ca: usize, cb: usize, v: usize, d1: f64, d2: f64) -> Option<(P3, V3)> {
+    let shared = |x: usize, y: usize| -> Option<usize> {
+        let (sx, sy) = (edge_sides(b, x).ok()?, edge_sides(b, y).ok()?);
+        sx.iter().map(|s| s.0).find(|f| sy.iter().any(|t| t.0 == *f))
+    };
+    let fill = chamfer_plane(b, e, v, d1, d2)?;
+    let (pa, pb) = (chamfer_plane(b, ca, v, d1, d2)?, chamfer_plane(b, cb, v, d1, d2)?);
+    let (wa, wb, top) = (face_plane(b, shared(e, ca)?)?, face_plane(b, shared(e, cb)?)?, face_plane(b, shared(ca, cb)?)?);
+    let p_a = meet3(pa, fill, wa)?;
+    let p_b = meet3(pb, fill, wb)?;
+    let q = meet3(pa, pb, top)?;
+    let mut n = (p_b - p_a).cross(&(q - p_a));
+    if n.norm() < 1e-12 {
+        return None;
+    }
+    n = n.normalize();
+    if n.dot(&(b.verts[v].p - p_a)) < 0.0 {
+        n = -n;
+    }
+    Some((p_a, n))
+}
+
 /// The plane of a straight chamfer of edge `c` at its vertex `v`: through the points `d1` and
 /// `d2` in from the edge on its two (flat) faces, with its normal pointing out of the material.
 fn chamfer_plane(b: &Body, c: usize, v: usize, d1: f64, d2: f64) -> Option<(P3, V3)> {
@@ -641,6 +682,9 @@ pub fn blend(k: &mut NativeKernel, body: BodyId, edges: &[(EdgeId, Box<dyn Fn(f6
     }
     let mut cur = Tracked::of(b.clone());
     let mut radius_at: std::collections::HashMap<usize, f64> = Default::default();
+    // Corner faces where a fill meets two cuts (by vertex): the plane, its normal towards the
+    // material it cuts away. The cuts there stay above it.
+    let mut corner_planes: std::collections::HashMap<usize, (P3, V3)> = Default::default();
     let mut corner_vertices: Vec<usize> = Vec::new();
     // Tangent chains of picked edges (two picked edges meeting tangentially at a vertex, and
     // nothing else picked there): one tool each.
@@ -863,62 +907,44 @@ pub fn blend(k: &mut NativeKernel, body: BodyId, edges: &[(EdgeId, Box<dyn Fn(f6
                 _ => {}
             }
         }
-        // A fill ending where chamfers cut: their planes run on over the fill's ends (the
-        // chamfer faces carry straight on across the corner). Where two cuts meet in a valley
-        // over an end, the fill is split by the plane through the edge bisecting their corner
-        // and each half trimmed by the plane on its side (the valley's higher one).
+        // A fill ending where chamfers cut. One cut: its plane runs on over the fill's end (the
+        // chamfer face carries straight on across the corner). Two cuts (the top edges either
+        // side of a filled inside corner): as Onshape, a triangular corner face closes the
+        // corner, through the points where the fill's face meets each chamfer on its wall and
+        // where the two chamfers' edges cross on the face they share. The fill stops under it,
+        // and the cuts don't go below it there (see `corner_planes`).
         if !tool.convex {
             if let SectionKind::Chamfer { d1, d2 } = kind(PI / 2.0) {
-                let mut side_m: Option<V3> = None;
-                // Per end: the cuts' planes and their directions away from the vertex.
-                let mut ends: Vec<Vec<(V3, P3, V3)>> = Vec::new();
                 for v in ed.v.iter() {
                     let cuts: Vec<usize> = at_vertex.get(v).map(|x| x.iter().copied().filter(|&o| o != e && edge_convex(&b, o) == Some(true)).collect()).unwrap_or_default();
-                    let mut here = Vec::new();
-                    for c in cuts {
-                        if let Some((o, n)) = chamfer_plane(&b, c, *v, d1, d2) {
-                            here.push((other_dir(c, *v), o, n));
+                    match cuts.len() {
+                        1 => {
+                            if let Some((o, n)) = chamfer_plane(&b, cuts[0], *v, d1, d2) {
+                                let (nb, ns) = trim_tool(&tb, &ts, o, n)?;
+                                tb = nb;
+                                ts = ns;
+                            }
                         }
-                    }
-                    if here.len() == 2 && side_m.is_none() {
-                        let m = here[0].0 - here[1].0;
-                        if m.norm() > 1e-9 {
-                            side_m = Some(m.normalize());
+                        2 => {
+                            if let Some((o, n)) = corner_triangle(&b, e, cuts[0], cuts[1], *v, d1, d2) {
+                                let (nb, ns) = trim_tool(&tb, &ts, o, n)?;
+                                tb = nb;
+                                ts = ns;
+                                corner_planes.insert(*v, (o, n));
+                            }
                         }
-                    }
-                    ends.push(here);
-                }
-                let p0 = b.verts[ed.v[0]].p;
-                // The halves (or the whole fill), each with its side (+1, −1; 0: whole).
-                let mut pieces: Vec<(Body, Vec<Vec<FaceSrc>>, f64)> = match side_m {
-                    Some(m) => {
-                        let (a, sa) = trim_tool(&tb, &ts, p0, -m)?;
-                        let (c, sc) = trim_tool(&tb, &ts, p0, m)?;
-                        vec![(a, sa, 1.0), (c, sc, -1.0)]
-                    }
-                    None => vec![(tb.clone(), ts.clone(), 0.0)],
-                };
-                for here in &ends {
-                    for piece in pieces.iter_mut() {
-                        // The cut on this piece's side (the only one when there's one).
-                        let pick = match (here.len(), side_m) {
-                            (1, _) => Some(&here[0]),
-                            (2, Some(m)) => here.iter().find(|(d, _, _)| d.dot(&m) * piece.2 > 0.0),
-                            _ => None,
-                        };
-                        if let Some((_, o, n)) = pick {
-                            let (nb, ns) = trim_tool(&piece.0, &piece.1, *o, *n)?;
-                            piece.0 = nb;
-                            piece.1 = ns;
-                        }
+                        _ => {}
                     }
                 }
-                let (last_b, last_s, _) = pieces.pop().unwrap();
-                for (pb, ps, _) in pieces {
-                    cur = cur.apply(&pb, &ps, BoolOp::Union)?;
+            }
+        }
+        if tool.convex {
+            for v in ed.v.iter() {
+                if let Some(&(o, n)) = corner_planes.get(v) {
+                    let (nb, ns) = trim_tool(&tb, &ts, o, -n)?;
+                    tb = nb;
+                    ts = ns;
                 }
-                tb = last_b;
-                ts = last_s;
             }
         }
         // Its extensions end at the end faces: flush where a tool removing material would dig
