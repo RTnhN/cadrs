@@ -487,6 +487,33 @@ pub fn hexahedron(c: &[P3; 8]) -> Result<Body> {
 
 /// Keeps the part of a tool on the side of the plane (through `o`, normal `n`) that `n`
 /// points away from.
+/// The plane of a straight chamfer of edge `c` at its vertex `v`: through the points `d1` and
+/// `d2` in from the edge on its two (flat) faces, with its normal pointing out of the material.
+fn chamfer_plane(b: &Body, c: usize, v: usize, d1: f64, d2: f64) -> Option<(P3, V3)> {
+    let ed = &b.edges[c];
+    if !matches!(ed.curve, Curve::Line { .. }) {
+        return None;
+    }
+    let [s1, s2] = edge_sides(b, c).ok()?;
+    let p = b.verts[v].p;
+    let t = ed.curve.tangent(ed.mid_t()).normalize();
+    let side = |fi: usize, fwd: bool| -> Option<(V3, V3)> {
+        let f = &b.faces[fi];
+        let Surface::Plane { f: fr } = &f.surf else { return None };
+        let n = fr.x.cross(&fr.y) * if f.sense { 1.0 } else { -1.0 };
+        // Into the face, square to the edge (material lies left of the coedge).
+        let dir = t * if fwd { 1.0 } else { -1.0 };
+        Some((n, n.cross(&dir).normalize()))
+    };
+    let ((n1, w1), (n2, w2)) = (side(s1.0, s1.1)?, side(s2.0, s2.1)?);
+    let (q1, q2) = (p + w1 * d1, p + w2 * d2);
+    let mut m = t.cross(&(q2 - q1)).normalize();
+    if m.dot(&(n1 + n2)) < 0.0 {
+        m = -m;
+    }
+    Some((q1, m))
+}
+
 /// Whether edge `e` is convex (the material's corner between its faces is under 180°), at
 /// its middle.
 fn edge_convex(b: &Body, e: usize) -> Option<bool> {
@@ -856,6 +883,20 @@ pub fn blend(k: &mut NativeKernel, body: BodyId, edges: &[(EdgeId, Box<dyn Fn(f6
                         let (nb, ns) = trim_tool(&tb, &ts, b.verts[*v].p, nf)?;
                         tb = nb;
                         ts = ns;
+                    }
+                }
+            }
+            // A fill ending where a chamfer cuts: the chamfer's plane runs on over the fill's
+            // end, trimming it (the chamfer face carries straight on across the corner).
+            if !tool.convex {
+                if let SectionKind::Chamfer { d1, d2 } = kind(PI / 2.0) {
+                    let cuts: Vec<usize> = at_vertex.get(v).map(|x| x.iter().copied().filter(|&o| o != e && edge_convex(&b, o) == Some(true)).collect()).unwrap_or_default();
+                    for c in cuts {
+                        if let Some((o, n)) = chamfer_plane(&b, c, *v, d1, d2) {
+                            let (nb, ns) = trim_tool(&tb, &ts, o, n)?;
+                            tb = nb;
+                            ts = ns;
+                        }
                     }
                 }
             }

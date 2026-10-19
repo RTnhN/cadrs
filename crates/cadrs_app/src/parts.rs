@@ -1787,27 +1787,40 @@ pub struct GhostMesh;
 const GHOST_PART_ALPHA: f32 = 0.18;
 
 /// Keeps one faint mesh per ghost part (the parts before the edited feature).
+#[allow(clippy::too_many_arguments)]
 fn sync_ghost_meshes(
     cache: Res<PartCache>,
+    faces: Res<FaceSelection>,
+    highlight: Res<PlaneHighlight>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<PartShading>>,
     mut mat: Local<Option<Handle<PartShading>>>,
     q: Query<Entity, With<GhostMesh>>,
-    mut last: Local<Option<u64>>,
+    mut last: Local<Option<(u64, Vec<Pick>, Option<Pick>)>>,
     mut commands: Commands,
 ) {
-    if *last == Some(cache.ghost_generation) {
+    // The selected faces filled in a subtle yellow, the hovered one lighter: picks land on the
+    // ghost, so it shows them.
+    let hovered = highlight.viewport.filter(|p| matches!(p, Pick::Face(..)));
+    let key = (cache.ghost_generation, faces.0.clone(), hovered);
+    if last.as_ref() == Some(&key) {
         return;
     }
-    *last = Some(cache.ghost_generation);
+    *last = Some(key);
     for e in &q {
         commands.entity(e).try_despawn();
     }
     let mat = mat.get_or_insert_with(|| materials.add(PartShading::new(true, true))).clone();
     for part in &cache.ghost {
         let mut bases = cache.bases(part);
-        for b in &mut bases {
+        for (fi, b) in bases.iter_mut().enumerate() {
             b.alpha = b.alpha.min(GHOST_PART_ALPHA);
+            let pick = part.solid.faces.get(fi).map(|f| Pick::Face(part.id, f.name));
+            if pick.is_some_and(|p| faces.0.contains(&p)) {
+                *b = FaceBase { rgb: SELECTED_BASE, alpha: if pick == hovered { 0.6 } else { 0.42 } };
+            } else if pick.is_some() && pick == hovered {
+                *b = FaceBase { rgb: [255.0, 214.0, 140.0], alpha: 0.32 };
+            }
         }
         let mesh = meshes.add(part_base_mesh(part, true, &bases));
         commands.spawn((
@@ -2102,7 +2115,10 @@ fn draw_part_edges(
         // Edges: hovered or selected.
         for e in &hp.solid.edges {
             let pick = Pick::Edge(part.id, e.name);
-            let color = if hovered_pick(pick) {
+            let color = if hovered_pick(pick) && selected(pick) {
+                // Hovering a selected edge: a click deselects it.
+                EDGE_HOVER_SELECTED
+            } else if hovered_pick(pick) {
                 EDGE_HOVER
             } else if selected(pick) {
                 SELECTED
@@ -2155,6 +2171,9 @@ pub const HOVER: Color = Color::srgb(1.0, 198.0 / 255.0, 133.0 / 255.0);
 /// A hovered edge: the same orange, more saturated so the thin line reads as clearly as the
 /// face outline of `screens/24a` (P3.2 judge).
 pub const EDGE_HOVER: Color = Color::srgb(1.0, 170.0 / 255.0, 60.0 / 255.0);
+
+/// A selected edge under the pointer: a bright yellow, apart from the selection's orange.
+pub const EDGE_HOVER_SELECTED: Color = Color::srgb(1.0, 0.95, 0.35);
 
 /// The amber of selected part faces, edges, vertices and parts, sampled from the course's
 /// screenshots (`ex3-step3.png`, `ex3-step9.png`, `lesson-fillet-and-chamfer.png`: about

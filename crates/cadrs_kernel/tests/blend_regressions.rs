@@ -61,3 +61,23 @@ fn chamfer_inside_corners() {
     assert!((removed - 855.168388).abs() < 1e-4, "{removed}");
     assert_eq!(k.faces(out).unwrap().len(), 14 + 12);
 }
+
+/// The same block chamfered on its notch wall all round (its top and bottom edges cut, the
+/// vertical inside corner filled), a top edge and two hole edges. Where the fill meets a cut,
+/// the cut's plane runs on over the fill's end; a chamfer ending against an unchamfered wall
+/// ends flush, its end part of that wall. No faces but the block's 14 and the 7 chamfers.
+#[test]
+fn chamfer_mixed_corners() {
+    let mut k = NativeKernel::new();
+    let b = k.insert(bodyio::read(include_bytes!("data/chamfer_mixed_corners.body")).unwrap());
+    let edges = [26, 35, 8, 10, 11, 12, 9].map(EdgeId);
+    let r = k.chamfer_with(b, &edges, &ChamferOpts::new(ChamferSpec::EqualDistance(2.0))).unwrap();
+    let out = r.bodies[0];
+    assert!(k.get(out).unwrap().check().is_empty());
+    assert_eq!(k.faces(out).unwrap().len(), 14 + 7);
+    for (one, faces) in [(&[11][..], 15), (&[12, 11][..], 16), (&[10, 11, 12][..], 17), (&[26][..], 15)] {
+        let ids: Vec<EdgeId> = one.iter().map(|&i| EdgeId(i)).collect();
+        let r = k.chamfer_with(b, &ids, &ChamferOpts::new(ChamferSpec::EqualDistance(2.0))).unwrap();
+        assert_eq!(k.faces(r.bodies[0]).unwrap().len(), faces, "{one:?}");
+    }
+}

@@ -1186,6 +1186,9 @@ fn debug_chamfer_faces() {
     let out = r.bodies[0];
     let faces = k.faces(out).unwrap();
     eprintln!("{} faces (input {})", faces.len(), k.faces(b).unwrap().len());
+    let body = k.get(out).unwrap();
+    let bb = body.bbox();
+    eprintln!("bbox {:?} .. {:?} (input {:?} .. {:?}) check {:?} volume {} (input {})", bb.min, bb.max, k.get(b).unwrap().bbox().min, k.get(b).unwrap().bbox().max, body.check(), k.mass_properties(out).unwrap().volume, k.mass_properties(b).unwrap().volume);
     for f in &faces {
         eprintln!("  {:?} area {:10.4} normal {:?} centre {:?}", f.kind, f.area, f.plane.map(|p| [p.normal.x, p.normal.y, p.normal.z]), [f.center.x, f.center.y, f.center.z]);
     }
