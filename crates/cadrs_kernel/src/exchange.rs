@@ -57,6 +57,8 @@ pub struct ImportedPart {
 /// instance's name (empty when the file gives none).
 #[derive(Debug, Clone, PartialEq)]
 pub struct ImportedOccurrence {
+    /// Instance-level surface color overriding the source part.
+    pub color: Option<[u8; 4]>,
     pub part: usize,
     pub placement: Motion,
     pub name: String,

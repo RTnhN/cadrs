@@ -368,3 +368,74 @@ fn experimental_brep_exports_combined_and_individual_placed_parts() {
     assert_eq!(files[1].part.as_deref(), Some("Moved copy"));
     assert_ne!(files[0].bytes, files[1].bytes, "instance placements must reach the BREP writer");
 }
+
+#[test]
+fn step_colors_survive_flattening_document_round_trip_and_snapshot_restore() {
+    use cadrs_core::appearance::{Appearance, face_appearance};
+    let bytes = include_bytes!("fixtures/colored_assembly.step");
+    let mut r = Rebuilder::new();
+    let plan = r.plan_import(ImportFormat::Step, bytes).unwrap();
+    let doc = imported_document(&plan, "Colors.step", bytes.to_vec(), ImportAs::PartStudio, ImportIds::fresh());
+    let saved = ron::to_string(&doc).unwrap();
+    let doc: Document = ron::from_str(&saved).unwrap();
+    let features = doc.elements[0].features();
+    let build = r.rebuild(features);
+    assert!(build.errors.is_empty(), "{:?}", build.errors);
+    assert_eq!(build.parts.len(), 2);
+    let counts = |part: &cadrs_core::parts::Part, color| part.solid.faces.iter()
+        .filter(|face| face_appearance(part, &face.name, &[], &[]).0 == color).count();
+    assert_eq!(counts(&build.parts[0], Appearance::rgb(255,0,0)), 5);
+    assert_eq!(counts(&build.parts[0], Appearance::rgb(0,255,0)), 1);
+    assert_eq!(counts(&build.parts[1], Appearance::rgb(0,0,255)), 6);
+    let snapshot = r.snapshot(&r.snapshot_keys(features)).unwrap();
+    let mut reopened = Rebuilder::new();
+    assert!(reopened.restore(&snapshot).unwrap() > 0);
+    let restored = reopened.rebuild(features);
+    assert_eq!(restored.parts[0].solid.looks, build.parts[0].solid.looks);
+    assert_eq!(restored.parts[1].solid.looks, build.parts[1].solid.looks);
+    assert_eq!(reopened.snapshot(&reopened.snapshot_keys(features)).unwrap().len(), snapshot.len(), "snapshot restores kernel colors as well as meshes");
+    // Restored kernel metadata must survive a subsequent transform, too.
+    let item = ExportItem { features: Arc::new(features.to_vec()), part: restored.parts[0].id,
+        name: "Box".into(), pose: Some(Pose { translation: [12.0,0.0,0.0], ..Pose::IDENTITY }),
+        source: (doc.elements[0].id, restored.parts[0].id), source_name: "Box".into() };
+    assert!(!reopened.export_files(&ExportRequest::new(ModelFormat::Brep, "Box", vec![item])).unwrap()[0].bytes.is_empty());
+}
+
+#[test]
+fn step_instance_color_overrides_survive_assembly_document_round_trip() {
+    use cadrs_core::appearance::{Appearance, face_appearance};
+    let bytes = include_bytes!("fixtures/colored_assembly.step");
+    let mut r = Rebuilder::new();
+    let plan = r.plan_import(ImportFormat::Step, bytes).unwrap();
+    let doc = imported_document(&plan, "Colors.step", bytes.to_vec(), ImportAs::Assembly, ImportIds::fresh());
+    let doc: Document = ron::from_str(&ron::to_string(&doc).unwrap()).unwrap();
+    let build = Arc::new(r.rebuild(doc.elements[0].features()));
+    assert!(build.errors.is_empty(), "{:?}", build.errors);
+    let asm = doc.elements[1].assembly_model().unwrap();
+    let (parts, props) = cadrs_core::assembly::instance_parts(&doc, asm, |_| Some(build.clone()));
+    assert_eq!(parts.len(), 2);
+    let first: Vec<_> = parts[0].solid.faces.iter().map(|f| face_appearance(&parts[0], &f.name, &props, &[]).0).collect();
+    assert_eq!(first.iter().filter(|&&a| a == Appearance::rgb(255,0,0)).count(), 5);
+    assert_eq!(first.iter().filter(|&&a| a == Appearance::rgb(0,255,0)).count(), 1);
+    assert!(parts[1].solid.faces.iter().all(|f| face_appearance(&parts[1], &f.name, &props, &[]).0 == Appearance::rgb(0,0,255)));
+}
+
+#[test]
+fn ordinary_step_import_preserves_colors_and_user_appearance_overrides() {
+    use cadrs_core::appearance::{Appearance, face_appearance};
+    let import = cadrs_core::import::ImportFeature::from_file("Colors.step", include_bytes!("fixtures/colored_assembly.step").to_vec()).unwrap();
+    let feature = Feature { id: FeatureId::new(), name: "Import".into(), kind: FeatureKind::Import(import), suppress_by: None };
+    let build = Rebuilder::new().rebuild(&[feature]);
+    assert!(build.errors.is_empty(), "{:?}", build.errors);
+    assert_eq!(build.parts.len(), 2);
+    assert_eq!(build.parts[0].solid.looks.len(), 6);
+    let part = &build.parts[0];
+    let mut prop = cadrs_core::document::PartProps::new(part.id);
+    prop.appearance = Some(Appearance::rgb(80,90,100));
+    assert!(part.solid.faces.iter().all(|f| face_appearance(part, &f.name, &[prop.clone()], &[]).0 == prop.appearance.unwrap()));
+    let mut partial = part.clone();
+    Arc::make_mut(&mut partial.solid).looks.retain(|(_, a)| *a == Appearance::rgb(0,255,0));
+    let unstyled = partial.solid.faces.iter().find(|f| !partial.solid.looks.iter().any(|(name,_)| *name == f.name)).unwrap();
+    assert_eq!(face_appearance(&partial, &unstyled.name, &[], &[]).0, cadrs_core::appearance::palette(part.palette));
+    assert!(cadrs_core::appearance::has_face_overrides(&partial, &[], &[]));
+}

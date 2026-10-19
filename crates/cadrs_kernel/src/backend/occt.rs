@@ -70,6 +70,7 @@ fn occt(e: opencascade::Error) -> KernelError {
 #[derive(Default)]
 pub struct OcctKernel {
     bodies: HashMap<BodyId, Shape>,
+    colors: HashMap<BodyId, Vec<Option<[u8; 4]>>>,
     /// Each body's faces as [`Kernel::faces`] gives them, worked out once: a body never changes
     /// once stored, and a face's area and centroid are exact integrals over its surface (seconds
     /// for a model of B-spline faces), asked for again by every feature that looks at the body.
@@ -496,6 +497,15 @@ impl OcctKernel {
         }
         let id = BodyId(self.next_id);
         self.next_id += 1;
+        if history.modified.iter().any(|(_, input)| self.colors.contains_key(&input.body)) {
+            let mut colors = vec![None; face_count(&shape)?];
+            for (face, input) in &history.modified {
+                if let Some(color) = self.colors.get(&input.body).and_then(|v| v.get(input.face.0 as usize)).copied().flatten() {
+                    if let Some(entry) = colors.get_mut(face.0 as usize) { *entry = Some(color); }
+                }
+            }
+            if colors.iter().any(Option::is_some) { self.colors.insert(id, colors); }
+        }
         self.bodies.insert(id, shape);
         Ok(OpResult {
             bodies: vec![id],
@@ -1019,9 +1029,19 @@ impl Kernel for OcctKernel {
         if loose.is_empty() {
             return self.split_solids(body);
         }
-        let mut pieces: Vec<Shape> = solids.iter().map(clone_shape).collect();
+        let parent = faces_of(shape);
+        let mut by_hash: HashMap<u64, Vec<usize>> = HashMap::new();
+        for (i, face) in parent.iter().enumerate() { by_hash.entry(face.identity_hash()).or_default().push(i); }
+        let mut pieces = solids;
         pieces.extend(loose);
-        pieces.into_iter().map(|s| self.insert_raw(s, History::default())).collect()
+        let pieces: Vec<_> = pieces.into_iter().map(|shape| {
+            let modified = faces_of(&shape).iter().enumerate().filter_map(|(i, face)| {
+                let j = by_hash.get(&face.identity_hash())?.iter().copied().find(|&j| parent[j].is_same(face))?;
+                Some((FaceId(i as u64), InputFace { body, face: FaceId(j as u64) }))
+            }).collect();
+            (shape, History { modified, ..History::default() })
+        }).collect();
+        pieces.into_iter().map(|(shape, history)| self.insert_raw(shape, history)).collect()
     }
 
     fn revolve(&mut self, profile: &Profile, axis: Axis, angle: f64) -> Result<OpResult> {
@@ -1657,10 +1677,17 @@ impl Kernel for OcctKernel {
     }
 
     fn release(&mut self, body: BodyId) {
+        self.colors.remove(&body);
         self.bodies.remove(&body);
         if let Ok(mut c) = self.face_infos.lock() {
             c.remove(&body);
         }
+    }
+
+    fn face_colors(&self, body: BodyId) -> Vec<Option<[u8; 4]>> { self.colors.get(&body).cloned().unwrap_or_default() }
+    fn set_face_colors(&mut self, body: BodyId, colors: Vec<Option<[u8; 4]>>) {
+        if colors.iter().any(Option::is_some) { self.colors.insert(body, colors); }
+        else { self.colors.remove(&body); }
     }
 
     fn write_body(&self, body: BodyId) -> Result<Vec<u8>> {
@@ -2210,7 +2237,8 @@ fn loose_shells(shape: &Shape, solids: &[Shape]) -> Result<Vec<Shape>> {
         .filter(|sh| !faces_of(sh).iter().any(owned))
         .map(|sh| match Shape::try_sew_solid(&[&sh], 1e-6) {
             Ok(s) if s.sub_count(SubKind::Solid).unwrap_or(0) == 1 && s.is_valid().unwrap_or(false) => s,
-            _ => clone_shape(&sh),
+            // Keep surface face identities so split_imported can carry their styles.
+            _ => sh,
         })
         .collect())
 }

@@ -59,6 +59,7 @@ pub struct PlanPart {
 /// One use of a part: which, where (the file's coordinates, mm) and the instance's name.
 #[derive(Debug, Clone, PartialEq)]
 pub struct PlanOccurrence {
+    pub color: Option<crate::appearance::Appearance>,
     pub part: usize,
     pub pose: Pose,
     pub name: String,
@@ -238,6 +239,7 @@ pub fn import_elements(doc: &Document, plan: &ImportPlan, file_name: &str, data:
                 let source = InstanceSource::Part { element: ids.studio, part };
                 let mut inst = Instance::new(InstanceId::from_u128(ids.instance_base + n), source, pose);
                 n += 1;
+                inst.appearance = o.color;
                 inst.index = model.next_index(&source);
                 // As an insert: the first instance is fixed where the file puts it.
                 inst.fixed = model.instances.is_empty();
@@ -323,9 +325,9 @@ mod tests {
             name: "Bracket set".into(),
             parts: vec![PlanPart { name: "Bracket".into(), solids: 1 }, PlanPart { name: "".into(), solids: 2 }],
             occurrences: vec![
-                PlanOccurrence { part: 0, pose: Pose::IDENTITY, name: "Bracket <1>".into() },
-                PlanOccurrence { part: 0, pose: moved, name: "Bracket <2>".into() },
-                PlanOccurrence { part: 1, pose: Pose::IDENTITY, name: "".into() },
+                PlanOccurrence { color: None, part: 0, pose: Pose::IDENTITY, name: "Bracket <1>".into() },
+                PlanOccurrence { color: None, part: 0, pose: moved, name: "Bracket <2>".into() },
+                PlanOccurrence { color: None, part: 1, pose: Pose::IDENTITY, name: "".into() },
             ],
         }
     }

@@ -158,7 +158,15 @@ one STEP file with their product names), used by `assembly::interference::{check
   orientation before writing, and can write separate files. This export will be removed if
   cadrs switches to another geometry kernel; prefer STEP for portable geometry.
 
-The OCCT backend (`backend/occt_exchange.rs`) goes through the fork's XDE bindings: `opencascade::xde`
+STEP reading uses the local color-aware XDE bridge (`backend/step_colors.rs` and
+`step_colors.cc`) because the dependency's reader disables colors. It returns exact binary
+BREP shapes and sRGB/alpha surface styles, including solid/shell defaults, face colors, and
+component overrides. Styles follow transforms and split bodies through face history. The
+application retains them in display solids and session snapshots; assembly overrides are
+saved with instances. Explicit user appearances take precedence. The original STEP blob
+remains with the document, so rebuilding also restores its colors.
+
+IGES reading and neutral-file writing use the fork's XDE bindings: `opencascade::xde`
 and `opencascade_sys::cadrs_xde`, fork commits `277175f` and `a475208`.
 - **Reading:** `STEPCAFControl_Reader` / `IGESCAFControl_Reader` into an XCAF document in mm. The
   free shapes are walked: assemblies' components are followed with their locations composed, and

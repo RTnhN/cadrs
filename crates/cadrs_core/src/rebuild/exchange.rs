@@ -139,7 +139,7 @@ impl Rebuilder {
             .iter()
             .map(|p| PlanPart { name: p.name.clone(), solids: self.kernel.solid_count(p.body).unwrap_or(1) })
             .collect();
-        let occurrences = model.occurrences.iter().map(|o| PlanOccurrence { part: o.part, pose: pose_of(&o.placement), name: o.name.clone() }).collect();
+        let occurrences = model.occurrences.iter().map(|o| PlanOccurrence { color: o.color.map(|[r,g,b,a]| crate::appearance::Appearance::rgb(r,g,b).with_alpha(a)), part: o.part, pose: pose_of(&o.placement), name: o.name.clone() }).collect();
         ImportPlan { format, name: model.name.clone(), parts, occurrences }
     }
 

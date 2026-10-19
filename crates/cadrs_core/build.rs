@@ -44,7 +44,7 @@ fn collect(dir: &Path, out: &mut Vec<PathBuf>) {
         let p = e.path();
         if p.is_dir() {
             collect(&p, out);
-        } else if p.extension().is_some_and(|x| x == "rs") {
+        } else if p.extension().is_some_and(|x| x == "rs" || x == "cc" || x == "hxx") {
             out.push(p);
         }
     }

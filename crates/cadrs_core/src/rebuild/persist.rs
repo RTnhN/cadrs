@@ -35,7 +35,7 @@ use crate::parts::{Part, PartKind};
 use crate::solid::Solid;
 
 /// The blob format: bump when [`Snapshot`] or a `Saved` form changes.
-pub const FORMAT: u32 = 6;
+pub const FORMAT: u32 = 7;
 
 const MAGIC: &[u8; 8] = b"CADRSNAP";
 
@@ -137,7 +137,8 @@ impl Persist for BodyId {
             w.error.get_or_insert_with(|| format!("a body could not be written: {e}"));
             Vec::new()
         });
-        w.bodies.push(bytes);
+        let colors = w.kernel.face_colors(*self);
+        w.bodies.push(bincode::serialize(&(bytes, colors)).expect("body bytes and colors serialize"));
         w.body_index.insert(*self, i);
         i
     }
@@ -147,7 +148,9 @@ impl Persist for BodyId {
             return Ok(*b);
         }
         let bytes = r.bodies.get(i).ok_or("a body is missing")?;
-        let b = r.kernel.read_body(bytes).map_err(|e| format!("a body could not be read: {e}"))?;
+        let (bytes, colors): (Vec<u8>, Vec<Option<[u8; 4]>>) = bincode::deserialize(bytes).map_err(|e| format!("body metadata: {e}"))?;
+        let b = r.kernel.read_body(&bytes).map_err(|e| format!("a body could not be read: {e}"))?;
+        r.kernel.set_face_colors(b, colors);
         r.loaded[i] = Some(b);
         r.added.push(b);
         Ok(b)

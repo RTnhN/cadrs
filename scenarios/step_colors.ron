@@ -1,0 +1,27 @@
+// Import a real AP214 assembly: red body, green face, and blue second occurrence.
+Scenario(
+    start: Some("landing"),
+    steps: [
+        Click(ui("create")),
+        WaitFor("import-files"),
+        Click(ui("import-files")),
+        WaitFor("import-picker"),
+        Click(ui("import-picker-folder")),
+        Key("Ctrl+A"),
+        Type("crates/cadrs_core/tests/fixtures"),
+        Key("Enter"),
+        WaitFor("import-picker-row-colored_assembly.step"),
+        Click(ui("import-picker-row-colored_assembly.step")),
+        Click(ui("import-picker-open")),
+        WaitFor("import-dialog"),
+        Click(ui("import-ok")),
+        WaitFor("document-shell"),
+        Key("F"),
+        Wait(5),
+        Screenshot("01-colored-assembly-instances"),
+        Click(ui("tab-colored-assembly")),
+        Key("F"),
+        Wait(5),
+        Screenshot("02-part-and-face-colors"),
+    ],
+)

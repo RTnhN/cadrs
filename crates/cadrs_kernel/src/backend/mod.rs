@@ -2,3 +2,6 @@
 
 #[cfg(feature = "occt")]
 pub mod occt;
+
+#[cfg(feature = "occt")]
+mod step_colors;
