@@ -544,6 +544,10 @@ def convert(path, consts, begins=()):
         return None, f"needs the name {e}", text
     if not any(l.startswith("k.check") or l.startswith("draw::check") for l in case.lines):
         return None, "checks nothing we measure", text
+    # Every result is also checked for validity (OCCT's scripts mostly measure only), unless
+    # OCCT's own TODO says its result is faulty.
+    if "result" in case.vars and "shape" not in case.todo and not any(l.startswith("k.checkshape(&result)") for l in case.lines):
+        case.lines.append("k.checkshape(&result)?;")
     return case.lines, None, text
 
 

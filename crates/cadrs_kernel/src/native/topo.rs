@@ -265,7 +265,7 @@ impl Body {
                     }
                     // p-curve on the edge in 3D.
                     if !ea.degenerate {
-                        for s in [0.25, 0.5, 0.75] {
+                        for s in [0.1, 0.25, 0.4, 0.5, 0.6, 0.75, 0.9] {
                             let t = ea.t[0] + (ea.t[1] - ea.t[0]) * s;
                             let uv = a.pc.point(t);
                             let q = f.surf.eval(uv.x, uv.y);
@@ -277,6 +277,39 @@ impl Body {
                             }
                         }
                     }
+                }
+            }
+        }
+        // Each edge ends at its vertices (within their tolerances).
+        for (ei, e) in self.edges.iter().enumerate() {
+            if e.degenerate {
+                continue;
+            }
+            for k in 0..2 {
+                let Some(v) = self.verts.get(e.v[k]) else {
+                    errs.push(format!("edge {ei}: vertex {} doesn't exist", e.v[k]));
+                    continue;
+                };
+                let d = (e.point(e.t[k]) - v.p).norm();
+                if d > v.tol.max(e.tol).max(1e-6) {
+                    errs.push(format!("edge {ei}: end {k} is {d:.3e} from its vertex"));
+                }
+            }
+        }
+        // Loops don't cross themselves in (u, v).
+        for (fi, f) in self.faces.iter().enumerate() {
+            for (li, l) in f.loops.iter().enumerate() {
+                let mut poly: Vec<P2> = Vec::new();
+                for c in l {
+                    let e = &self.edges[c.edge];
+                    let (t0, t1) = co_range(e, c.fwd);
+                    for i in 0..8 {
+                        let q = c.pc.point(t0 + (t1 - t0) * i as f64 / 8.0);
+                        poly.push(P2::new(q.x, q.y));
+                    }
+                }
+                if let Some((i, j)) = self_crossing(&poly) {
+                    errs.push(format!("face {fi} loop {li} crosses itself in (u, v) (segments {i} and {j})"));
                 }
             }
         }
@@ -311,6 +344,90 @@ impl Body {
                 }
             }
         }
+        // Solids enclose a positive volume (their faces point out).
+        if errs.is_empty() {
+            for si in 0..self.solids.len() {
+                let faces = self.solid_faces(si);
+                let sub = super::kernel::subset(self, &faces, true);
+                let v = super::mass::body_mass(&sub).volume;
+                if !(v > 0.0) {
+                    errs.push(format!("solid {si} encloses a volume of {v:.3e} (its faces point in)"));
+                }
+            }
+        }
         errs
     }
+}
+
+impl Body {
+    /// Raises vertex and edge tolerances to the gaps actually there (an edge's ends from its
+    /// vertices, its p-curves from its curve), up to `cap`: an operation that merged within a
+    /// tolerance records it, as OCCT does. Gaps beyond `cap` are left for [`Body::check`].
+    pub fn fit_tolerances(&mut self, cap: f64) {
+        for ei in 0..self.edges.len() {
+            let e = &self.edges[ei];
+            if e.degenerate {
+                continue;
+            }
+            for k in 0..2 {
+                let d = (e.point(e.t[k]) - self.verts[e.v[k]].p).norm();
+                if d <= cap && d * 1.01 > self.verts[e.v[k]].tol {
+                    self.verts[e.v[k]].tol = (d * 1.01).max(TOL_MIN);
+                }
+            }
+        }
+        let mut etol = vec![0.0f64; self.edges.len()];
+        for f in &self.faces {
+            for c in f.loops.iter().flatten() {
+                let e = &self.edges[c.edge];
+                if e.degenerate {
+                    continue;
+                }
+                for s in [0.1, 0.25, 0.4, 0.5, 0.6, 0.75, 0.9] {
+                    let t = e.t[0] + (e.t[1] - e.t[0]) * s;
+                    let uv = c.pc.point(t);
+                    etol[c.edge] = etol[c.edge].max((f.surf.eval(uv.x, uv.y) - e.point(t)).norm());
+                }
+            }
+        }
+        for (e, d) in self.edges.iter_mut().zip(etol) {
+            if d <= cap && d * 1.01 > e.tol {
+                e.tol = (d * 1.01).max(TOL_MIN);
+            }
+        }
+    }
+}
+
+/// Two non-neighbouring segments of a closed polygon that cross (proper crossings only:
+/// touching at a point is allowed, as a loop through a pole or along a seam does).
+fn self_crossing(p: &[P2]) -> Option<(usize, usize)> {
+    let n = p.len();
+    if n < 4 {
+        return None;
+    }
+    let mut size: f64 = 0.0;
+    for q in p {
+        size = size.max(q.x.abs()).max(q.y.abs());
+    }
+    let eps = 1e-9 * (1.0 + size);
+    let cross = |a: &P2, b: &P2, c: &P2| (b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x);
+    for i in 0..n {
+        let (a, b) = (p[i], p[(i + 1) % n]);
+        for j in i + 2..n {
+            if (j + 1) % n == i {
+                continue;
+            }
+            let (c, d) = (p[j], p[(j + 1) % n]);
+            if a.x.max(b.x) < c.x.min(d.x) - eps || c.x.max(d.x) < a.x.min(b.x) - eps || a.y.max(b.y) < c.y.min(d.y) - eps || c.y.max(d.y) < a.y.min(b.y) - eps {
+                continue;
+            }
+            let (d1, d2, d3, d4) = (cross(&a, &b, &c), cross(&a, &b, &d), cross(&c, &d, &a), cross(&c, &d, &b));
+            let l1 = (b - a).norm() * eps.max(1e-300);
+            let l2 = (d - c).norm() * eps.max(1e-300);
+            if ((d1 > l1 && d2 < -l1) || (d1 < -l1 && d2 > l1)) && ((d3 > l2 && d4 < -l2) || (d3 < -l2 && d4 > l2)) {
+                return Some((i, j));
+            }
+        }
+    }
+    None
 }

@@ -1543,6 +1543,8 @@ fn run(a: &Body, b: &Body, mode: Mode) -> Result<BoolOut> {
     }
     prof.mark("assemble");
     super::unify::merge_edges(&mut out);
+    // The run merged within its tolerance: the result's entities say so.
+    out.fit_tolerances(vtol() * 10.0);
     prof.mark("unify");
     assemble_shells(&mut out)?;
     // Solids in, faces out but no solid: some piece went missing.

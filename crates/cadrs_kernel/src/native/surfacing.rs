@@ -491,6 +491,8 @@ pub fn sew_faces(mut b: Body, tol: f64) -> Result<Body> {
     super::unify::compact(&mut b);
     // Orient the faces consistently: across every shared edge the two uses run opposite ways.
     orient(&mut b)?;
+    // Sewn within `tol`: the merged vertices and edges carry the gaps they close.
+    b.fit_tolerances(tol);
     Ok(b)
 }
 

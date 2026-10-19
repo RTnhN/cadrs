@@ -1492,11 +1492,19 @@ impl NativeKernel {
 
     /// `checkshape`: the body is valid.
     pub fn checkshape(&self, s: &Shape) -> Result<()> {
-        if let Shape::Body(b) = s {
-            let issues = self.get(*b)?.check();
-            if !issues.is_empty() {
-                return Err(err(&format!("checkshape: {issues:?}")));
+        match s {
+            Shape::Body(b) => {
+                let issues = self.get(*b)?.check();
+                if !issues.is_empty() {
+                    return Err(err(&format!("checkshape: {issues:?}")));
+                }
             }
+            Shape::Compound(v) => {
+                for x in v {
+                    self.checkshape(x)?;
+                }
+            }
+            _ => {}
         }
         Ok(())
     }
