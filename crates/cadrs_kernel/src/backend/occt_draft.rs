@@ -138,6 +138,12 @@ impl OcctKernel {
             }
             return self.insert_raw(copy, out);
         }
+        // Move face (some faces moved, the rest kept): OCCT's offset crashes when a moved face
+        // reaches a face it doesn't border, or shrinks to nothing, so those are refused first.
+        if spec.distance.abs() < 1e-9 {
+            self.check_face_moves(body, &spec.faces)?;
+        }
+        let shape = self.body(body)?;
         let faces: Vec<usize> = spec.faces.iter().map(|(f, _)| f.0 as usize).collect();
         let offsets: Vec<f64> = spec.faces.iter().map(|(_, d)| *d).collect();
         let (result, h) = shape.try_offset_h(&faces, &offsets, spec.distance, spec.sharp).map_err(occt)?;
@@ -155,6 +161,79 @@ impl OcctKernel {
             return Err(KernelError::OperationFailed("the offset went the wrong way".into()));
         }
         Ok(out)
+    }
+
+    /// Refuses a Move face that would change the body's topology, which OCCT's offset can't
+    /// build (and may crash on): a moved face that would shrink to nothing (a hole's wall moved
+    /// past its axis), or that would reach a face it doesn't border (a hole grown through the
+    /// side of the block). Checked on a tessellation: each moved face's points swept along their
+    /// normals by its distance against the other faces' triangles, and the other faces' points
+    /// swept back against the moved triangles. Coming within `CLEARANCE` counts as reaching.
+    fn check_face_moves(&self, body: BodyId, moves: &[(crate::FaceId, f64)]) -> Result<()> {
+        const CLEARANCE: f64 = 0.02;
+        let mesh = self.tessellate(body, crate::Tessellation { deflection: 0.05, angle: 5f64.to_radians() })?;
+        let infos = self.faces(body)?;
+        let moved = |f: crate::FaceId| moves.iter().find(|(m, _)| *m == f).map(|(_, d)| *d);
+        // The faces each moved face borders: they extend or trim to follow it.
+        let mut borders: Vec<(crate::FaceId, crate::FaceId)> = Vec::new();
+        for e in self.edges(body)? {
+            if let [Some(a), Some(b)] = e.faces {
+                borders.push((a, b));
+                borders.push((b, a));
+            }
+        }
+        let obstacle = |m: crate::FaceId, other: crate::FaceId| other != m && !borders.contains(&(m, other));
+        let p = |i: u32| DVec3::new(mesh.positions[i as usize].x, mesh.positions[i as usize].y, mesh.positions[i as usize].z);
+        let n = |i: u32| DVec3::new(mesh.normals[i as usize].x, mesh.normals[i as usize].y, mesh.normals[i as usize].z).normalize_or_zero();
+        // Each triangle with its face, corners and outward normal (the vertex normals' side).
+        let tris: Vec<(crate::FaceId, [DVec3; 3], DVec3)> = mesh
+            .indices
+            .iter()
+            .zip(&mesh.triangle_faces)
+            .filter_map(|(t, f)| {
+                let c = [p(t[0]), p(t[1]), p(t[2])];
+                let g = (c[1] - c[0]).cross(c[2] - c[0]).normalize_or_zero();
+                let side = n(t[0]) + n(t[1]) + n(t[2]);
+                (g != DVec3::ZERO).then_some((*f, c, if g.dot(side) < 0.0 { -g } else { g }))
+            })
+            .collect();
+        // Every corner of each face's triangles, with its outward normal.
+        let points: Vec<(crate::FaceId, DVec3, DVec3)> =
+            mesh.indices.iter().zip(&mesh.triangle_faces).flat_map(|(t, f)| t.map(|i| (*f, p(i), n(i)))).collect();
+        let fail = |what: &str| Err(KernelError::OperationFailed(format!("the faces can't move that far: {what}")));
+        // Shrinking to nothing: a point of a face with an axis carried across the axis.
+        for &(f, d) in moves {
+            let Some(axis) = infos.iter().find(|i| i.id == f).and_then(|i| i.axis.as_ref().map(|a| (i.kind, a))) else { continue };
+            let (kind, axis) = axis;
+            let (o, dir) = (to_glam(axis.origin.coords), to_glam(axis.dir.into_inner()));
+            let off = |q: DVec3| if kind == crate::SurfaceKind::Sphere { q - o } else { (q - o) - dir * (q - o).dot(dir) };
+            for (_, q, nq) in points.iter().filter(|(g, ..)| *g == f) {
+                let (before, after) = (off(*q), off(*q + *nq * d));
+                if before.length() > 1e-9 && after.dot(before) <= CLEARANCE * before.length() {
+                    return fail("the face would shrink to nothing");
+                }
+            }
+        }
+        // Reaching another face. Another moved face may come to meet it: their distances add.
+        let reach = |d: f64, other: crate::FaceId| d.abs() + moved(other).map_or(0.0, f64::abs) + CLEARANCE;
+        for &(m, d) in moves {
+            let s = d.signum();
+            for (_, q, nq) in points.iter().filter(|(g, ..)| *g == m) {
+                for (g, c, _) in tris.iter().filter(|(g, ..)| obstacle(m, *g)) {
+                    if ray_hits(*q, *nq * s, c).is_some_and(|t| t <= reach(d, *g)) {
+                        return fail("a face would run into another face");
+                    }
+                }
+            }
+            for (_, c, nt) in tris.iter().filter(|(g, ..)| *g == m) {
+                for (h, q, _) in points.iter().filter(|(h, ..)| obstacle(m, *h)) {
+                    if ray_hits(*q, -*nt * s, c).is_some_and(|t| t <= reach(d, *h)) {
+                        return fail("a face would run into another face");
+                    }
+                }
+            }
+        }
+        Ok(())
     }
 
     pub(super) fn fillet_variable_full(&mut self, body: BodyId, laws: &[FilletLaw], allow_overflow: bool) -> Result<OpResult> {
@@ -217,3 +296,20 @@ impl OcctKernel {
 }
 
 use crate::History;
+
+/// Where the ray from `o` along the unit `dir` meets the triangle `c` (Möller–Trumbore): its
+/// distance, if past the start (a point on the triangle's own edge doesn't count).
+fn ray_hits(o: DVec3, dir: DVec3, c: &[DVec3; 3]) -> Option<f64> {
+    let (e1, e2) = (c[1] - c[0], c[2] - c[0]);
+    let p = dir.cross(e2);
+    let det = e1.dot(p);
+    if det.abs() < 1e-12 {
+        return None;
+    }
+    let s = o - c[0];
+    let u = s.dot(p) / det;
+    let q = s.cross(e1);
+    let v = dir.dot(q) / det;
+    let t = e2.dot(q) / det;
+    (u >= -1e-9 && v >= -1e-9 && u + v <= 1.0 + 1e-9 && t > 1e-6).then_some(t)
+}

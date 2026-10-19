@@ -213,3 +213,79 @@ fn simplify_merges_coplanar_faces() {
     close(p.mass.unwrap().volume, 2000.0, 1e-6);
     assert_eq!(p.solid.faces.len(), 6);
 }
+
+/// The faces of the first part that `pick` chooses, moved by each distance in turn: every move
+/// either builds a valid body or fails with a reason, never a crash (OCCT's offset crashes when a
+/// moved face reaches a face it doesn't border or shrinks away, so those are refused first).
+/// Returns how many moves failed.
+fn sweep_moves(make: impl Fn() -> Doc, pick: impl Fn(&cadrs_core::solid::SolidFace) -> bool, distances: impl Iterator<Item = f64>) -> usize {
+    let mut failed = 0;
+    for distance in distances {
+        let mut d = make();
+        let faces = faces_where(&d.parts()[0], &pick);
+        assert!(!faces.is_empty());
+        let f = d.add("Move face", FeatureKind::DirectEdit(DirectEditFeature { kind: DirectEditKind::MoveFace, faces, distance, distance_expr: format!("{distance} mm") }));
+        let b = d.build();
+        match b.errors.iter().find(|(id, _)| *id == f) {
+            Some(_) => failed += 1,
+            None => assert!(b.parts.iter().all(|p| p.mass.is_some_and(|m| m.volume > 0.0)), "{distance}: an empty body"),
+        }
+    }
+    failed
+}
+
+fn steps(from: f64, to: f64, step: f64) -> impl Iterator<Item = f64> {
+    (0..=((to - from) / step).round() as i32).map(move |k| from + k as f64 * step)
+}
+
+#[test]
+#[ignore = "slow: a few hundred rebuilds"]
+fn moving_faces_too_far_fails_without_crashing() {
+    let top = |z: f64| move |f: &cadrs_core::solid::SolidFace| f.plane.is_some_and(|p| p.normal()[2] > 0.5 && (p.origin[2] - z).abs() < 1e-9);
+    // The hole's wall: shrunk away (5) or grown through the long sides (−5).
+    let n = sweep_moves(|| block_with_hole().0, is_cylinder, steps(-12.0, 6.0, 0.25));
+    assert!(n > 0, "the far moves fail");
+    // The top: down through the bottom (−10).
+    sweep_moves(|| block_with_hole().0, top(10.0), steps(-25.0, 10.0, 0.5));
+    // Two Ø10 holes 6 apart: one grown into the other (−3), then through the sides.
+    let two_holes = || {
+        let mut d = Doc::new();
+        d.block(0.0, 0.0, 40.0, 20.0, 10.0);
+        let s = d.sketch(PlaneRef::Top, vec![circle(12.0, 10.0, 5.0), circle(28.0, 10.0, 5.0)]);
+        d.extrude(s, &[Vec2::new(12.0, 10.0), Vec2::new(28.0, 10.0)], |e| {
+            e.op = BooleanOp::Remove;
+            e.depth = 10.0;
+        });
+        d
+    };
+    let left_hole = |f: &cadrs_core::solid::SolidFace| is_cylinder(f) && f.axis.is_some_and(|(o, _)| (o[0] - 12.0).abs() < 1e-6);
+    sweep_moves(two_holes, left_hole, steps(-6.0, 1.0, 0.25));
+    // A pocket 4 deep from the bottom: its floor down through the opening (4) or up through
+    // the top (−6).
+    let pocket = || {
+        let mut d = Doc::new();
+        d.block(0.0, 0.0, 40.0, 20.0, 10.0);
+        let s = d.sketch(PlaneRef::Top, vec![rect(10.0, 5.0, 30.0, 15.0)]);
+        d.extrude(s, &[Vec2::new(20.0, 10.0)], |e| {
+            e.op = BooleanOp::Remove;
+            e.depth = 4.0;
+        });
+        d
+    };
+    let floor = |f: &cadrs_core::solid::SolidFace| f.plane.is_some_and(|p| p.normal()[2] < -0.5 && (p.origin[2] - 4.0).abs() < 1e-9);
+    sweep_moves(pocket, floor, steps(-8.0, 6.0, 0.25));
+    // A Ø10 boss 15 high on the block: its top down into the block (−5), its wall grown past
+    // the block's sides.
+    let boss = || {
+        let mut d = Doc::new();
+        d.block(0.0, 0.0, 40.0, 20.0, 10.0);
+        let s = d.sketch(PlaneRef::Top, vec![circle(20.0, 10.0, 5.0)]);
+        d.extrude(s, &[Vec2::new(20.0, 10.0)], |e| {
+            e.op = BooleanOp::Add;
+            e.depth = 15.0;
+        });
+        d
+    };
+    sweep_moves(boss, top(15.0), steps(-12.0, 5.0, 0.5));
+    sweep_moves(boss, is_cylinder, steps(-6.0, 8.0, 0.5));
+}
