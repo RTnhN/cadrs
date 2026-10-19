@@ -152,6 +152,12 @@ one STEP file with their product names), used by `assembly::interference::{check
   `NEXT_ASSEMBLY_USAGE_OCCURRENCE`s). IGES writes solids as MSBO solids
   (`write.iges.brep.mode = 1`), so they read back as solids.
 
+- `export_brep(bodies) -> bytes`: experimental OpenCASCADE text `.brep` export. Bodies are
+  collected into a compound, preserving exact geometry but no names, feature history, or
+  assembly structure. The application's export worker applies instance placements and Y-up
+  orientation before writing, and can write separate files. This export will be removed if
+  cadrs switches to another geometry kernel; prefer STEP for portable geometry.
+
 The OCCT backend (`backend/occt_exchange.rs`) goes through the fork's XDE bindings: `opencascade::xde`
 and `opencascade_sys::cadrs_xde`, fork commits `277175f` and `a475208`.
 - **Reading:** `STEPCAFControl_Reader` / `IGESCAFControl_Reader` into an XCAF document in mm. The

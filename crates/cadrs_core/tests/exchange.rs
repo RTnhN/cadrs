@@ -345,3 +345,26 @@ fn the_bracket_pair_fixture() {
         }
     }
 }
+
+#[test]
+fn experimental_brep_exports_combined_and_individual_placed_parts() {
+    let f = Arc::new(rect_studio(10.0, 20.0, 30.0));
+    let mut r = Rebuilder::new();
+    let mut its = items(&f, &mut r, 1);
+    let mut second = its[0].clone();
+    second.name = "Moved copy".into();
+    second.pose = Some(Pose { translation: [100.0, 0.0, 0.0], ..Pose::IDENTITY });
+    its.push(second);
+    let mut req = ExportRequest::new(ModelFormat::Brep, "Boxes", its);
+    req.y_up = true;
+    let files = r.export_files(&req).unwrap();
+    assert_eq!(files.len(), 1);
+    assert_eq!(files[0].extension, "brep");
+    assert_eq!(files[0].part, None);
+    assert!(String::from_utf8_lossy(&files[0].bytes).contains("CASCADE Topology"));
+    req.individual = true;
+    let files = r.export_files(&req).unwrap();
+    assert_eq!(files.len(), 2);
+    assert_eq!(files[1].part.as_deref(), Some("Moved copy"));
+    assert_ne!(files[0].bytes, files[1].bytes, "instance placements must reach the BREP writer");
+}

@@ -373,6 +373,11 @@ pub trait Kernel {
     fn ray_hits(&self, _body: BodyId, _origin: Point3<f64>, _dir: Vector3<f64>) -> Result<Vec<RayHit>> {
         Err(KernelError::Unsupported("ray queries"))
     }
+    /// Experimental OpenCASCADE text BREP; backend-specific and geometry only.
+    fn export_brep(&self, _bodies: &[BodyId]) -> Result<Vec<u8>> {
+        Err(KernelError::Unsupported("OpenCASCADE BREP export"))
+    }
+
     fn export_step(&self, _bodies: &[BodyId]) -> Result<Vec<u8>> {
         Err(KernelError::Unsupported("STEP export"))
     }

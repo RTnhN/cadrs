@@ -2128,6 +2128,21 @@ impl Kernel for OcctKernel {
         Ok(self.insert_raw(solid, History::default())?.bodies[0])
     }
 
+    fn export_brep(&self, bodies: &[BodyId]) -> Result<Vec<u8>> {
+        use opencascade::primitives::Compound;
+        if bodies.is_empty() { return Err(KernelError::OperationFailed("BREP export: no bodies".into())); }
+        let shapes = bodies.iter().map(|&id| self.body(id)).collect::<Result<Vec<_>>>()?;
+        let shape: Shape = Compound::from_shapes(shapes).into();
+        let path = std::env::temp_dir().join(format!("cadrs-occt-{}-{:?}.brep", std::process::id(), std::thread::current().id()));
+        let failed = |why: String| KernelError::OperationFailed(format!("BREP export: {why}"));
+        let result = (|| {
+            shape.write_brep_text(&path).map_err(|e| failed(e.to_string()))?;
+            std::fs::read(&path).map_err(|e| failed(e.to_string()))
+        })();
+        let _ = std::fs::remove_file(&path);
+        result
+    }
+
     fn export_step(&self, bodies: &[BodyId]) -> Result<Vec<u8>> {
         let shapes = bodies
             .iter()
@@ -2703,5 +2718,26 @@ fn face_info(id: FaceId, face: &Face) -> FaceInfo {
         center,
         axis: None,
         radius: None,
+    }
+}
+
+#[cfg(test)]
+mod brep_export_tests {
+    use super::*;
+
+    #[test]
+    fn text_brep_round_trip_preserves_multiple_solids() {
+        let mut kernel = OcctKernel::new();
+        let a = kernel.insert_raw(Shape::box_with_dimensions(10.0, 20.0, 30.0), History::default()).unwrap().bodies[0];
+        let b = kernel.insert_raw(Shape::box_with_dimensions(2.0, 3.0, 4.0), History::default()).unwrap().bodies[0];
+        let bytes = kernel.export_brep(&[a, b]).unwrap();
+        assert!(String::from_utf8_lossy(&bytes).contains("CASCADE Topology"));
+        let path = std::env::temp_dir().join(format!("cadrs-brep-round-trip-{}.brep", std::process::id()));
+        std::fs::write(&path, bytes).unwrap();
+        let shape = Shape::read_brep_text(&path).unwrap();
+        std::fs::remove_file(path).unwrap();
+        assert_eq!(shape.sub_count(SubKind::Solid).unwrap(), 2);
+        assert!((shape.mass_properties().volume - 6024.0).abs() < 1e-6);
+        assert!(kernel.export_brep(&[]).is_err());
     }
 }

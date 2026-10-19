@@ -18,6 +18,8 @@ use crate::import::{ImportFormat, ImportPlan, PlanOccurrence, PlanPart};
 pub enum ModelFormat {
     Step,
     Iges,
+    /// Experimental OpenCASCADE text BREP, with flattened placements.
+    Brep,
     Stl { binary: bool },
     Obj,
 }
@@ -27,6 +29,7 @@ impl ModelFormat {
         match self {
             ModelFormat::Step => "step",
             ModelFormat::Iges => "igs",
+            ModelFormat::Brep => "brep",
             ModelFormat::Stl { .. } => "stl",
             ModelFormat::Obj => "obj",
         }
@@ -205,6 +208,18 @@ impl Rebuilder {
                             Ok(ExportFile { part: (g.len() == 1 && req.individual).then(|| g[0].1.clone()), extension: ext, bytes })
                         })
                         .collect()
+                }
+                ModelFormat::Brep => {
+                    let mut bodies = Vec::new();
+                    for it in &req.items {
+                        bodies.push((body_of(self, &it.features, it.part, &place(it.pose))?, it.name.clone()));
+                    }
+                    let groups: Vec<&[(BodyId, String)]> = if req.individual { bodies.chunks(1).collect() } else { vec![&bodies[..]] };
+                    groups.into_iter().map(|group| {
+                        let ids: Vec<_> = group.iter().map(|(id, _)| *id).collect();
+                        let bytes = self.kernel.export_brep(&ids).map_err(|e| e.to_string())?;
+                        Ok(ExportFile { part: req.individual.then(|| group[0].1.clone()), extension: "brep", bytes })
+                    }).collect()
                 }
                 ModelFormat::Stl { .. } | ModelFormat::Obj => {
                     let quality = cadrs_kernel::Tessellation { deflection: req.deflection.max(1e-4), angle: req.angle.clamp(1e-3, 1.0) };
