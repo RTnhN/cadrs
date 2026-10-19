@@ -583,3 +583,88 @@ fn prisms_chamfered_all_round() {
     }
     assert!(failures.is_empty(), "{} of {cases} cases failed:\n{}", failures.len(), failures.join("\n"));
 }
+
+/// Convex prisms (boxes and regular prisms) with every edge filleted at one radius: the
+/// result is the prism shrunk by r grown again by a ball of r, so Steiner's formula gives its
+/// volume exactly: V' + A'r + (Σ L(π − θ)/2) r² + (4/3)πr³ over the shrunk prism (θ each edge's
+/// dihedral angle). Faces: the prism's, one per edge, one sphere patch per corner.
+#[test]
+fn convex_prisms_filleted_all_round() {
+    let mut rng = Rng(0xba11_0f5);
+    let mut failures = Vec::new();
+    let cases = 30;
+    for i in 0..cases {
+        let sides = if i % 3 == 0 { 4 } else { rng.int(3, 8) };
+        let rad = rng.range(15.0, 25.0);
+        let rot = rng.range(0.0, 1.0);
+        let base: Vec<P2> = if i % 3 == 0 {
+            let (w, l) = (rng.range(20.0, 40.0), rng.range(20.0, 40.0));
+            vec![P2::new(0.0, 0.0), P2::new(w, 0.0), P2::new(w, l), P2::new(0.0, l)]
+        } else {
+            (0..sides).map(|j| {
+                let a = rot + j as f64 / sides as f64 * std::f64::consts::TAU;
+                P2::new(rad * a.cos(), rad * a.sin())
+            }).collect()
+        };
+        let h = rng.range(15.0, 30.0);
+        let n = base.len();
+        // The base shrunk by r (mitred, convex): each corner moves r/sin(θ/2) along its bisector.
+        let ang = interior_angles(&base);
+        let shortest = (0..n).map(|j| (base[(j + 1) % n] - base[j]).norm()).fold(f64::INFINITY, f64::min);
+        let r = rng.range(0.05, 0.25) * shortest.min(h) * 0.5;
+        let inner: Vec<P2> = (0..n).map(|j| {
+            let (a, b, c) = (base[(j + n - 1) % n], base[j], base[(j + 1) % n]);
+            let bis = ((a - b).normalize() + (c - b).normalize()).normalize();
+            b + bis * (r / (ang[j] / 2.0).sin())
+        }).collect();
+        let hi = h - 2.0 * r;
+        let area = signed_area(&inner);
+        let per: f64 = (0..n).map(|j| (inner[(j + 1) % n] - inner[j]).norm()).sum();
+        let v_in = area * hi;
+        let a_in = 2.0 * area + per * hi;
+        // Edges: the base and top outlines (dihedral 90°), the vertical edges (the corner's θ).
+        let m_in = per * 2.0 * (std::f64::consts::PI / 2.0) / 2.0 + (0..n).map(|j| hi * (std::f64::consts::PI - ang[j]) / 2.0).sum::<f64>();
+        let expected = v_in + a_in * r + m_in * r * r + 4.0 / 3.0 * std::f64::consts::PI * r * r * r;
+        let mut case = Case { name: format!("rounded prism {i} ({n} sides, r {r:.3})"), failures: Vec::new() };
+        let mut k = NativeKernel::new();
+        let Ok(b) = prism(&mut k, &base, &[], h) else {
+            failures.push(format!("{}: extrude failed", case.name));
+            continue;
+        };
+        let edges: Vec<EdgeId> = k.edges(b).unwrap().iter().map(|e| e.id).collect();
+        let n0 = k.faces(b).unwrap().len();
+        let nv = k.vertices(b).unwrap().len();
+        match k.fillet(b, &edges, r) {
+            Err(e) => case.check("fillet", false, e.to_string()),
+            Ok(res) => {
+                let out = res.bodies[0];
+                let issues = k.get(out).unwrap().check();
+                case.check("valid", issues.is_empty(), format!("{issues:?}"));
+                let v = k.mass_properties(out).unwrap().volume;
+                case.check("volume", (v - expected).abs() < 1e-6 * expected, format!("{v:.9}, expected {expected:.9}"));
+                let nf = k.faces(out).unwrap().len();
+                case.check("faces", nf == n0 + edges.len() + nv, format!("{nf} faces, expected {}", n0 + edges.len() + nv));
+            }
+        }
+        failures.extend(case.failures);
+    }
+    assert!(failures.is_empty(), "{} of {cases} cases failed:\n{}", failures.len(), failures.join("\n"));
+}
+
+#[test]
+#[ignore]
+fn debug_octagon_round() {
+    for (rot, r) in [(0.0, 1.0), (0.2, 1.0), (0.0, 0.5), (0.39, 1.5)] {
+        for sides in [8] {
+            let base: Vec<P2> = (0..sides).map(|j| {
+                let a = rot + j as f64 / sides as f64 * std::f64::consts::TAU;
+                P2::new(20.0 * a.cos(), 20.0 * a.sin())
+            }).collect();
+            let mut k = NativeKernel::new();
+            let b = prism(&mut k, &base, &[], 20.0).unwrap();
+            let edges: Vec<EdgeId> = k.edges(b).unwrap().iter().map(|e| e.id).collect();
+            let res = k.fillet(b, &edges, r);
+            eprintln!("sides {sides} rot {rot} r {r}: {:?}", res.map(|x| k.faces(x.bodies[0]).unwrap().len()));
+        }
+    }
+}

@@ -374,16 +374,40 @@ pub fn corner_tool(b: &Body, v: usize, r: f64, vertex_origin: Origin) -> Result<
     let m = nalgebra::Matrix3::from_rows(&[normals[0].transpose(), normals[1].transpose(), normals[2].transpose()]);
     let Some(inv) = m.try_inverse() else { return Ok(None) };
     let c = p + inv * V3::new(-r, -r, -r);
-    // The block: between the offset planes through c and planes pushed out past p.
+    // The block: between the planes through c square to the three edges (where their fillets
+    // stop, tangent to the ball) and planes pushed out past p. (At a right-angled corner these
+    // are the faces' planes moved in by r.)
+    let mut dirs: Vec<V3> = Vec::new();
+    for ed in b.edges.iter().filter(|x| !x.degenerate && x.v.contains(&v)) {
+        if !matches!(ed.curve, Curve::Line { .. }) {
+            return Ok(None);
+        }
+        // Along the edge towards the vertex (from its ends: a line may run either way).
+        let other = if ed.v[0] == v { ed.v[1] } else { ed.v[0] };
+        let towards = (p - b.verts[other].p).normalize();
+        if !dirs.iter().any(|m| m.dot(&towards) > 1.0 - 1e-9) {
+            dirs.push(towards);
+        }
+    }
+    if dirs.len() != 3 {
+        return Ok(None);
+    }
+    // Only a convex corner is bounded by where its fillets stop; elsewhere the faces' planes
+    // moved in by r (the same at a right-angled corner).
+    if !vertex_convex(b, v) {
+        dirs = normals.clone();
+    }
+    let dm = nalgebra::Matrix3::from_rows(&[dirs[0].transpose(), dirs[1].transpose(), dirs[2].transpose()]);
+    let Some(dinv) = dm.try_inverse() else { return Ok(None) };
     let push = r * 0.5 + 1e-3;
     let corner = |s: [bool; 3]| -> P3 {
-        // s[i]: on the outer plane (n·(x − p) = push) or the inner one (n·(x − c) = 0).
+        // s[i]: on the outer plane (d·(x − p) = push) or the inner one (d·(x − c) = 0).
         let rhs = V3::new(
-            if s[0] { normals[0].dot(&p.coords) + push } else { normals[0].dot(&c.coords) },
-            if s[1] { normals[1].dot(&p.coords) + push } else { normals[1].dot(&c.coords) },
-            if s[2] { normals[2].dot(&p.coords) + push } else { normals[2].dot(&c.coords) },
+            if s[0] { dirs[0].dot(&p.coords) + push } else { dirs[0].dot(&c.coords) },
+            if s[1] { dirs[1].dot(&p.coords) + push } else { dirs[1].dot(&c.coords) },
+            if s[2] { dirs[2].dot(&p.coords) + push } else { dirs[2].dot(&c.coords) },
         );
-        P3::from(inv * rhs)
+        P3::from(dinv * rhs)
     };
     let block = hexahedron(&[
         corner([false, false, false]),
@@ -400,8 +424,14 @@ pub fn corner_tool(b: &Body, v: usize, r: f64, vertex_origin: Origin) -> Result<
     let d = p - c;
     let z = normals[0];
     let side = d - z * d.dot(&z);
-    let ball = if side.norm() > 1e-9 { ball_frame(c, r, z, -side.normalize())? } else { ball_towards(c, r, d)? };
-    let r = boolean_bodies(&block, &ball, BoolOp::Subtract)?;
+    // A corner that isn't square: the poles and seam turned away from it instead.
+    let square = dirs.iter().all(|a| dirs.iter().all(|b2| (a - b2).norm() < 1e-9 || a.dot(b2).abs() < 1e-9));
+    let ball = if square && side.norm() > 1e-9 { ball_frame(c, r, z, -side.normalize())? } else { ball_towards(c, r, d)? };
+    let r = boolean_bodies(&block, &ball, BoolOp::Subtract).inspect_err(|x| {
+        if std::env::var("CADRS_BLEND_DEBUG").is_ok() {
+            eprintln!("corner tool at {p:?}: {x}; centre {c:?} r {r} dirs {dirs:?} square {square}");
+        }
+    })?;
     let src = r
         .from
         .iter()
