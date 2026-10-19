@@ -793,7 +793,7 @@ pub fn blend(k: &mut NativeKernel, body: BodyId, edges: &[(EdgeId, Box<dyn Fn(f6
             let mine = edge_convex(&b, e);
             let others: Vec<usize> = at_vertex.get(v).map(|x| x.iter().copied().filter(|&o| o != e && edge_convex(&b, o) == mine).collect()).unwrap_or_default();
             // A tangent-continuing neighbour: no extension; the tools meet square to the edges.
-            if others.len() == 1 && tangent_at(end).dot(&other_dir(others[0], *v)) > 1.0 - 1e-6 {
+            if others.len() == 1 && tangent_at(end).dot(&other_dir(others[0], *v)) > 1.0 - 1e-12 {
                 if end == 0 {
                     extend.0 = false;
                 } else {
@@ -806,7 +806,10 @@ pub fn blend(k: &mut NativeKernel, body: BodyId, edges: &[(EdgeId, Box<dyn Fn(f6
         // An end where the edge runs on smoothly into an edge left as it is: the blend stops
         // square there.
         for (end, v) in ed.v.iter().enumerate() {
-            if !ed.closed() && continues_smoothly(&b, *v, tangent_at(end), &[e]) {
+            // (Blended neighbours are mitred instead.)
+            let mut except = at_vertex.get(v).cloned().unwrap_or_default();
+            except.push(e);
+            if !ed.closed() && continues_smoothly(&b, *v, tangent_at(end), &except) {
                 if end == 0 {
                     extend.0 = false;
                 } else {

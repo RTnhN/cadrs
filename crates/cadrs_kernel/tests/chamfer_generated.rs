@@ -396,3 +396,143 @@ fn debug_box_pairs() {
         }
     }
 }
+
+// ---------------------------------------------------------------------------------------------
+// More generated cases: fillets on the top outline, chamfers and fillets on the vertical edges
+// (convex corners cut, inside corners filled).
+
+/// A random outline (star, notched, or one with a hole) as (outer, holes, loops with the
+/// material's angles).
+fn outline(rng: &mut Rng, i: usize) -> (Vec<P2>, Vec<Vec<P2>>, Vec<(Vec<P2>, Vec<f64>)>) {
+    let kind = i % 3;
+    let mut outer = if kind == 1 { notched(rng) } else { star(rng) };
+    if signed_area(&outer) < 0.0 {
+        outer.reverse();
+    }
+    let mut loops = vec![(outer.clone(), interior_angles(&outer))];
+    let mut holes = Vec::new();
+    if kind == 2 {
+        let m = rng.int(3, 6);
+        let r = rng.range(3.0, 6.0);
+        let rot = rng.range(0.0, 1.0);
+        let mut hole: Vec<P2> = (0..m).map(|j| {
+            let a = rot + j as f64 / m as f64 * std::f64::consts::TAU;
+            P2::new(r * a.cos(), r * a.sin())
+        }).collect();
+        if signed_area(&hole) < 0.0 {
+            hole.reverse();
+        }
+        let ang = interior_angles(&hole).into_iter().map(|t| std::f64::consts::TAU - t).collect();
+        loops.push((hole.clone(), ang));
+        holes.push(hole);
+    }
+    (outer, holes, loops)
+}
+
+fn prism(k: &mut NativeKernel, outer: &[P2], holes: &[Vec<P2>], h: f64) -> Result<BodyId> {
+    let profile = Profile::new(Plane::top(), vec![Region { outer: polygon(outer), holes: holes.iter().map(|h| polygon(h)).collect(), source: None }]);
+    Ok(k.extrude(&profile, Extent::Blind(h))?.bodies[0])
+}
+
+#[test]
+fn filleted_prisms() {
+    let mut rng = Rng(0xf111_e7ed);
+    let mut failures = Vec::new();
+    let cases = 45;
+    for i in 0..cases {
+        let (outer, holes, loops) = outline(&mut rng, i);
+        let r = safe_distance(&loops).min(2.0);
+        let h = rng.range(8.0, 20.0);
+        let perimeter: f64 = loops.iter().map(|(p, _)| (0..p.len()).map(|j| (p[(j + 1) % p.len()] - p[j]).norm()).sum::<f64>()).sum();
+        let k_sum: f64 = loops.iter().flat_map(|(_, a)| a.iter()).map(|t| 1.0 / (t / 2.0).tan()).sum();
+        // ∫₀ʳ g(t) (P − 2Kt) dt, g the round's depth at t from the edge (Gauss–Legendre).
+        let g = |t: f64| r - (r * r - (r - t) * (r - t)).max(0.0).sqrt();
+        let n = 400;
+        let expected: f64 = (0..n).map(|j| {
+            let t = (j as f64 + 0.5) / n as f64 * r;
+            g(t) * (perimeter - 2.0 * k_sum * t) * r / n as f64
+        }).sum();
+        let mut case = Case { name: format!("filleted prism {i} ({} corners, {} holes, r {r:.3})", outer.len(), holes.len()), failures: Vec::new() };
+        let mut k = NativeKernel::new();
+        let Ok(b) = prism(&mut k, &outer, &holes, h) else {
+            failures.push(format!("{}: extrude failed", case.name));
+            continue;
+        };
+        let edges: Vec<EdgeId> = k.edges(b).unwrap().iter().filter(|e| (e.start.z - h).abs() < 1e-9 && (e.end.z - h).abs() < 1e-9).map(|e| e.id).collect();
+        let n0 = k.faces(b).unwrap().len();
+        let v0 = k.mass_properties(b).unwrap().volume;
+        match k.fillet(b, &edges, r) {
+            Err(e) => case.check("fillet", false, e.to_string()),
+            Ok(res) => {
+                let out = res.bodies[0];
+                if std::env::var("CADRS_GEN_CASE").ok().and_then(|x| x.parse::<usize>().ok()) == Some(i) {
+                    eprintln!("outline {outer:?}\nangles {:?}", interior_angles(&outer).iter().map(|a| a.to_degrees()).collect::<Vec<_>>());
+                    for f in k.faces(out).unwrap() {
+                        eprintln!("  {:?} area {:.4} centre {:?}", f.kind, f.area, [f.center.x, f.center.y, f.center.z]);
+                    }
+                }
+                let issues = k.get(out).unwrap().check();
+                case.check("valid", issues.is_empty(), format!("{issues:?}"));
+                let removed = v0 - k.mass_properties(out).unwrap().volume;
+                // The midpoint rule is good to ~1e-6 of the removed volume here.
+                case.check("volume", (removed - expected).abs() < 2e-4 * expected, format!("removed {removed:.6}, expected {expected:.6}"));
+                let nf = k.faces(out).unwrap().len();
+                case.check("faces", nf == n0 + edges.len(), format!("{nf} faces, expected {}", n0 + edges.len()));
+            }
+        }
+        failures.extend(case.failures);
+    }
+    assert!(failures.is_empty(), "{} of {cases} cases failed:\n{}", failures.len(), failures.join("\n"));
+}
+
+#[test]
+fn vertical_edges_chamfered_and_filleted() {
+    let mut rng = Rng(0x7e47_1ca1);
+    let mut failures = Vec::new();
+    let cases = 60;
+    for i in 0..cases {
+        let (outer, holes, loops) = outline(&mut rng, i);
+        let size = safe_distance(&loops).min(2.0);
+        let h = rng.range(8.0, 20.0);
+        let fillet = i % 2 == 1;
+        // The area each vertical corner loses (negative: an inside corner gains).
+        let corner = |theta: f64| -> f64 {
+            if fillet {
+                let r = size;
+                if theta < std::f64::consts::PI {
+                    r * r / (theta / 2.0).tan() - (std::f64::consts::PI - theta) * r * r / 2.0
+                } else {
+                    let phi = std::f64::consts::TAU - theta;
+                    -(r * r / (phi / 2.0).tan() - (std::f64::consts::PI - phi) * r * r / 2.0)
+                }
+            } else {
+                size * size / 2.0 * theta.sin()
+            }
+        };
+        let expected: f64 = loops.iter().flat_map(|(_, a)| a.iter()).map(|&t| corner(t) * h).sum();
+        let mut case = Case { name: format!("vertical {} {i} ({} corners, {} holes, size {size:.3})", if fillet { "fillets" } else { "chamfers" }, outer.len(), holes.len()), failures: Vec::new() };
+        let mut k = NativeKernel::new();
+        let Ok(b) = prism(&mut k, &outer, &holes, h) else {
+            failures.push(format!("{}: extrude failed", case.name));
+            continue;
+        };
+        let edges: Vec<EdgeId> = k.edges(b).unwrap().iter().filter(|e| (e.start.z - e.end.z).abs() > 1e-9).map(|e| e.id).collect();
+        let n0 = k.faces(b).unwrap().len();
+        let v0 = k.mass_properties(b).unwrap().volume;
+        let r = if fillet { k.fillet(b, &edges, size) } else { k.chamfer_with(b, &edges, &ChamferOpts::new(ChamferSpec::EqualDistance(size))) };
+        match r {
+            Err(e) => case.check("blend", false, e.to_string()),
+            Ok(res) => {
+                let out = res.bodies[0];
+                let issues = k.get(out).unwrap().check();
+                case.check("valid", issues.is_empty(), format!("{issues:?}"));
+                let removed = v0 - k.mass_properties(out).unwrap().volume;
+                case.check("volume", (removed - expected).abs() < 1e-6 * (1.0 + expected.abs()), format!("removed {removed:.9}, expected {expected:.9}"));
+                let nf = k.faces(out).unwrap().len();
+                case.check("faces", nf == n0 + edges.len(), format!("{nf} faces, expected {}", n0 + edges.len()));
+            }
+        }
+        failures.extend(case.failures);
+    }
+    assert!(failures.is_empty(), "{} of {cases} cases failed:\n{}", failures.len(), failures.join("\n"));
+}
