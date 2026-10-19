@@ -799,11 +799,19 @@ fn parse(text: &str) -> R<File> {
 // ---------------------------------------------------------------------------------------------
 // Building
 
+/// A location's map rounded (to 1e-9), so two uses of a shape placed alike are one shape
+/// whichever products of locations placed them.
+fn loc_key(l: &Loc) -> [i64; 12] {
+    let m = &l.m;
+    let v = [m.m[(0, 0)], m.m[(0, 1)], m.m[(0, 2)], m.m[(1, 0)], m.m[(1, 1)], m.m[(1, 2)], m.m[(2, 0)], m.m[(2, 1)], m.m[(2, 2)], m.t.x, m.t.y, m.t.z];
+    v.map(|x| (x * 1e9).round() as i64)
+}
+
 struct Builder<'a> {
     f: &'a File,
     xb: XBuilder,
-    verts: HashMap<(usize, Vec<(usize, i64)>), usize>,
-    edges: HashMap<(usize, Vec<(usize, i64)>), Option<usize>>,
+    verts: HashMap<(usize, [i64; 12]), usize>,
+    edges: HashMap<(usize, [i64; 12]), Option<usize>>,
     free_faces: Vec<usize>,
     /// Edges outside any face (wires and edges of the shape), in order.
     free_edges: Vec<usize>,
@@ -814,7 +822,7 @@ struct Builder<'a> {
 
 impl Builder<'_> {
     fn vertex(&mut self, s: usize, loc: &Loc) -> Option<usize> {
-        let key = (s, loc.chain.clone());
+        let key = (s, loc_key(loc));
         if let Some(&v) = self.verts.get(&key) {
             return Some(v);
         }
@@ -825,7 +833,7 @@ impl Builder<'_> {
     }
 
     fn edge(&mut self, s: usize, loc: &Loc) -> Option<usize> {
-        let key = (s, loc.chain.clone());
+        let key = (s, loc_key(loc));
         if let Some(e) = self.edges.get(&key) {
             return *e;
         }
@@ -990,7 +998,9 @@ pub struct BrepRead {
 pub fn read_ordered(bytes: &[u8]) -> R<BrepRead> {
     let text = String::from_utf8_lossy(bytes);
     let f = parse(&text)?;
-    let mut b = Builder { f: &f, xb: XBuilder::new(), verts: HashMap::new(), edges: HashMap::new(), free_faces: Vec::new(), free_edges: Vec::new(), wires: false, warnings: Vec::new() };
+    let mut xb = XBuilder::new();
+    xb.trust_orientation = true;
+    let mut b = Builder { f: &f, xb, verts: HashMap::new(), edges: HashMap::new(), free_faces: Vec::new(), free_edges: Vec::new(), wires: false, warnings: Vec::new() };
     let (o, s, l) = f.root;
     b.visit(s, o, &f.locs[l]);
     let free = std::mem::take(&mut b.free_faces);

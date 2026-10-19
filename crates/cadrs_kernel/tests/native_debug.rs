@@ -1005,7 +1005,7 @@ fn debug_sector_arc_and_side() -> cadrs_kernel::Result<()> {
 fn debug_read_occt_dataset() {
     let Ok(dir) = std::env::var("CADRS_OCCT_DATA") else { return };
     let one = std::path::Path::new(&dir);
-    let mut paths: Vec<_> = (if one.is_file() { vec![one.to_path_buf()] } else { walk(one) }).into_iter().filter(|p| p.extension().is_some_and(|e| e == "brep" || e == "rle")).collect();
+    let mut paths: Vec<_> = if one.is_file() { vec![one.to_path_buf()] } else { walk(one).into_iter().filter(|p| p.extension().is_some_and(|e| e == "brep" || e == "rle")).collect() };
     paths.sort();
     let (mut ok, mut fail) = (0, 0);
     let mut reasons: std::collections::BTreeMap<String, usize> = Default::default();
@@ -1020,6 +1020,11 @@ fn debug_read_occt_dataset() {
                 let issues = b.check();
                 let v = cadrs_kernel::native::mass::body_mass(&b).volume;
                 println!("OK {} faces {} solids {} warn {} issues {} volume {v:.6e} {dt:.2}s", p.display(), b.faces.len(), b.solids.len(), w.len(), issues.len());
+                if paths.len() == 1 {
+                    for x in w.iter().chain(issues.iter()) {
+                        println!("  {x}");
+                    }
+                }
             }
             Ok(Err(e)) => {
                 fail += 1;
@@ -1127,5 +1132,42 @@ fn debug_edge_gap() {
             let d = wb.iter().map(|o| { let tt = o.curve.closest(&p, o.t0.min(o.t1), o.t0.max(o.t1)); (o.curve.point(tt) - p).norm() }).fold(f64::INFINITY, f64::min);
             if d < 1e-3 { eprintln!("{i:3} {:?} {d:.3e}", p); }
         }
+    }
+}
+
+/// A boolean of two OCCT data files: CADRS_RB_A, CADRS_RB_B, CADRS_RB_OP=common|cut|fuse.
+#[test]
+#[ignore]
+fn debug_restore_bop() {
+    let (Ok(a), Ok(b)) = (std::env::var("CADRS_RB_A"), std::env::var("CADRS_RB_B")) else { return };
+    let mut k = NativeKernel::new();
+    let (sa, sb) = (k.restore(&a).unwrap(), k.restore(&b).unwrap());
+    for (n, s) in [("a", &sa), ("b", &sb)] {
+        if let draw::Shape::Body(id) = s {
+            let (v, a) = (k.vprops(s).unwrap(), k.sprops(s).unwrap());
+            let body = k.get(*id).unwrap();
+            eprintln!("{n}: {} faces {} solids volume {v:.6} area {a:.6} check {:?}", body.faces.len(), body.solids.len(), body.check());
+            for f in &body.faces {
+                eprint!("{:?} ", f.surf.kind());
+            }
+            eprintln!();
+            if std::env::var("CADRS_RB_FACES").is_ok() {
+                for (i, f) in body.faces.iter().enumerate() {
+                    let n = f.surf.normal(0.0, 0.0) * if f.sense { 1.0 } else { -1.0 };
+                    let loops: Vec<Vec<(usize, bool, [f64; 3])>> = f.loops.iter().map(|l| l.iter().map(|c| { let p = body.verts[body.co_start(c)].p; (c.edge, c.fwd, [p.x, p.y, p.z]) }).collect()).collect();
+                    eprintln!("  face {i} normal {:?} loops {loops:?}", [n.x, n.y, n.z]);
+                }
+            }
+        }
+    }
+    let t = std::time::Instant::now();
+    let r = match std::env::var("CADRS_RB_OP").as_deref() {
+        Ok("cut") => k.bcut(&sa, &sb),
+        Ok("fuse") => k.bfuse(&sa, &sb),
+        _ => k.bcommon(&sa, &sb),
+    };
+    match r {
+        Ok(r) => eprintln!("result in {:?}: area {:?} volume {:?}", t.elapsed(), k.sprops(&r), k.vprops(&r)),
+        Err(e) => eprintln!("failed in {:?}: {e}", t.elapsed()),
     }
 }

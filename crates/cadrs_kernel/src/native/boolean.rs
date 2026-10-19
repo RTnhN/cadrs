@@ -1120,7 +1120,9 @@ fn run(a: &Body, b: &Body, mode: Mode) -> Result<BoolOut> {
             if point_in_face(gf, &p, VTOL * 10.0) != InFace::Outside {
                 let (gu, gv) = gf.surf.project(&p, Some((gf.uv_center.x, gf.uv_center.y)));
                 let gn = gf.surf.normal(gu, gv) * if gf.sense { 1.0 } else { -1.0 };
-                class = Some(if gn.dot(&n_out) > 0.0 { Class::OnSame } else { Class::OnOpp });
+                // Against a sheet an overlap is an overlap, whichever way the faces face.
+                let other_sheet = if f.owner == 0 { b.solids.is_empty() } else { a.solids.is_empty() };
+                class = Some(if gn.dot(&n_out) > 0.0 || other_sheet { Class::OnSame } else { Class::OnOpp });
                 break;
             }
         }

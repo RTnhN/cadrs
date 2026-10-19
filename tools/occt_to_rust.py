@@ -369,6 +369,9 @@ def known_failures():
     return out
 
 
+# Groups whose known failures are slow to run: they run only with --ignored.
+SLOW_GROUPS = {"blend"}
+
 # OCCT's test data by file name (`--data <dir>`: the unpacked opencascade-dataset).
 DATA = {}
 
@@ -417,7 +420,22 @@ def main():
                     body.append(f"/// OCCT `tests/{group}/{grid}/{case}`.")
                     body.append("#[test]")
                     if (group, name) in known:
-                        body.append('#[ignore = "known failure (tools/occt_known_failures.txt)"]')
+                        # Two-sided: a known failure must still fail (and says so when it
+                        # passes). Slow groups run them only with --ignored.
+                        if group in SLOW_GROUPS:
+                            body.append('#[ignore = "known failure, slow (tools/occt_known_failures.txt)"]')
+                        body.append(f"fn {name}() {{")
+                        body.append("    let run = || -> Result<()> {")
+                        body.append("        #[allow(unused_mut)]")
+                        body.append("        let mut k = NativeKernel::new();")
+                        for l in lines:
+                            body.append("        " + l)
+                        body.append("        Ok(())")
+                        body.append("    };")
+                        body.append("    let passed = matches!(std::panic::catch_unwind(std::panic::AssertUnwindSafe(run)), Ok(Ok(())));")
+                        body.append(f'    assert!(!passed, "a known failure now passes: remove `{group} {name}` from tools/occt_known_failures.txt");')
+                        body.append("}")
+                        continue
                     body.append(f"fn {name}() -> Result<()> {{")
                     body.append("    #[allow(unused_mut)]")
                     body.append("    let mut k = NativeKernel::new();")

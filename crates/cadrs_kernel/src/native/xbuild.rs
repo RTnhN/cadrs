@@ -62,6 +62,9 @@ pub struct XBuilder {
     /// Whether the file says nothing of the faces' orientation (IGES trimmed surfaces): solids
     /// are then always turned to enclose a positive volume.
     pub unoriented: bool,
+    /// Whether the loops' edge orientations are right (OCCT files): loops are then only
+    /// reordered, never turned round edge by edge.
+    pub trust_orientation: bool,
     /// p-curves by (face, edge), before any shift by periods (faces are traced more than once).
     pc_cache: std::cell::RefCell<std::collections::HashMap<(usize, usize), Curve>>,
 }
@@ -769,7 +772,9 @@ impl XBuilder {
         if l.len() < 2 || self.chains(l) {
             return true;
         }
-        for first in [l[0].1, !l[0].1] {
+        let flips: &[bool] = if self.trust_orientation { &[] } else { &[false, true] };
+        for &turn in flips {
+            let first = l[0].1 ^ turn;
             let mut m = l.clone();
             m[0].1 = first;
             for k in 1..m.len() {
@@ -799,7 +804,7 @@ impl XBuilder {
                     let back = (e2 == e) as u8 * 2;
                     if self.same_vertex(end, self.co_start(e2, f2)) {
                         Some((back, i, false))
-                    } else if self.same_vertex(end, self.co_start(e2, !f2)) {
+                    } else if !self.trust_orientation && self.same_vertex(end, self.co_start(e2, !f2)) {
                         Some((back + 1, i, true))
                     } else {
                         None
