@@ -998,3 +998,77 @@ fn debug_sector_arc_and_side() -> cadrs_kernel::Result<()> {
     }
     Ok(())
 }
+
+/// Reads every `.brep` under `CADRS_OCCT_DATA` and reports which fail (and why, by kind).
+#[test]
+#[ignore]
+fn debug_read_occt_dataset() {
+    let Ok(dir) = std::env::var("CADRS_OCCT_DATA") else { return };
+    let one = std::path::Path::new(&dir);
+    let mut paths: Vec<_> = (if one.is_file() { vec![one.to_path_buf()] } else { walk(one) }).into_iter().filter(|p| p.extension().is_some_and(|e| e == "brep" || e == "rle")).collect();
+    paths.sort();
+    let (mut ok, mut fail) = (0, 0);
+    let mut reasons: std::collections::BTreeMap<String, usize> = Default::default();
+    for p in &paths {
+        let bytes = std::fs::read(p).unwrap();
+        let t = std::time::Instant::now();
+        let r = std::panic::catch_unwind(|| cadrs_kernel::native::brep_occt::read(&bytes));
+        let dt = t.elapsed().as_secs_f64();
+        match r {
+            Ok(Ok((b, w))) => {
+                ok += 1;
+                let issues = b.check();
+                let v = cadrs_kernel::native::mass::body_mass(&b).volume;
+                println!("OK {} faces {} solids {} warn {} issues {} volume {v:.6e} {dt:.2}s", p.display(), b.faces.len(), b.solids.len(), w.len(), issues.len());
+            }
+            Ok(Err(e)) => {
+                fail += 1;
+                let k: String = e.chars().take(40).collect();
+                *reasons.entry(k).or_default() += 1;
+                println!("ERR {}: {}", p.display(), e.chars().take(200).collect::<String>());
+            }
+            Err(_) => {
+                fail += 1;
+                *reasons.entry("panic".into()).or_default() += 1;
+                println!("PANIC {}", p.display());
+            }
+        }
+    }
+    println!("read {ok}, failed {fail}");
+    for (k, n) in reasons {
+        println!("{n:5} {k}");
+    }
+}
+
+fn walk(d: &std::path::Path) -> Vec<std::path::PathBuf> {
+    let mut out = Vec::new();
+    for e in std::fs::read_dir(d).unwrap().flatten() {
+        let p = e.path();
+        if p.is_dir() { out.extend(walk(&p)) } else { out.push(p) }
+    }
+    out
+}
+
+/// Replays a dumped chamfer: CADRS_REPRO_CHAMFER=<file.body>, CADRS_REPRO_EDGES=<e,e,…>,
+/// CADRS_REPRO_D=<distance> (equal distance).
+#[test]
+#[ignore]
+fn debug_repro_chamfer() {
+    let Ok(path) = std::env::var("CADRS_REPRO_CHAMFER") else { return };
+    let mut k = NativeKernel::new();
+    let b = k.insert(cadrs_kernel::native::bodyio::read(&std::fs::read(path).unwrap()).unwrap());
+    let edges: Vec<EdgeId> = std::env::var("CADRS_REPRO_EDGES").unwrap().split(',').map(|s| EdgeId(s.parse().unwrap())).collect();
+    let d: f64 = std::env::var("CADRS_REPRO_D").unwrap().parse().unwrap();
+    let body = k.get(b).unwrap().clone();
+    for e in &edges {
+        let ed = &body.edges[e.0 as usize];
+        let faces: Vec<_> = body.edge_faces()[e.0 as usize].iter().map(|&f| format!("{f}:{:?}", body.faces[f].surf.kind())).collect();
+        eprintln!("edge {} {:?} {:?}..{:?} faces {faces:?}", e.0, std::mem::discriminant(&ed.curve), ed.point(ed.t[0]), ed.point(ed.t[1]));
+    }
+    let v0 = k.mass_properties(b).unwrap().volume;
+    let r = k.chamfer_with(b, &edges, &ChamferOpts::new(ChamferSpec::EqualDistance(d)));
+    match r {
+        Ok(r) => eprintln!("ok: removed {}", v0 - k.mass_properties(r.bodies[0]).unwrap().volume),
+        Err(e) => eprintln!("failed: {e}"),
+    }
+}

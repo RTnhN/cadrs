@@ -301,6 +301,16 @@ class Case:
             self.lines.append(f"draw::check_nb(k.nbshapes({s})?, {args})?;")
         elif c == "checkshape":
             self.lines.append(f"k.checkshape({self.shape(a[0])})?;")
+        elif c == "restore" and len(a) >= 2:
+            if not a[0].startswith("@data:"):
+                raise Unsupported("restore of a file that isn't in OCCT's data")
+            name = a[0][len("@data:"):]
+            path = DATA.get(name)
+            if path is None:
+                raise Unsupported(f"the data file {name}")
+            if b"CASCADE Topology V" not in open(path, "rb").read(400):
+                raise Unsupported(f"reading {name}")
+            self.bind(a[1], f'k.restore("{path}")?')
         else:
             raise Unsupported(c)
 
@@ -316,8 +326,11 @@ def tokens(cmd):
 
 def convert(path, consts):
     text = open(path, encoding="utf-8", errors="replace").read()
-    if re.search(r"locate_data_file|\brestore\b|stepread|igesread|testreadstep|ReadStep|readstl|brestore", text):
-        return None, "needs OCCT's data files", text
+    if re.search(r"stepread|igesread|testreadstep|ReadStep|readstl|brestore", text):
+        return None, "needs reading STEP, IGES or STL", text
+    if "locate_data_file" in text and not DATA:
+        return None, "needs OCCT's data files (tools/occt_to_rust.py --data <dir>)", text
+    text = re.sub(r"\[\s*locate_data_file\s+([^\]\s]+)\s*\]", r"@data:\1", text)
     case = Case(consts)
     try:
         if re.search(r"^\s*(if|foreach|for|while|proc|catch|switch)\b", text, re.M):
@@ -356,8 +369,19 @@ def known_failures():
     return out
 
 
+# OCCT's test data by file name (`--data <dir>`: the unpacked opencascade-dataset).
+DATA = {}
+
+
 def main():
-    tests, out, groups = sys.argv[1], sys.argv[2], sys.argv[3:]
+    args = sys.argv[1:]
+    if "--data" in args:
+        i = args.index("--data")
+        for root, _, files in os.walk(os.path.abspath(args[i + 1])):
+            for f in files:
+                DATA.setdefault(f, os.path.join(root, f))
+        del args[i:i + 2]
+    tests, out, groups = args[0], args[1], args[2:]
     known = known_failures()
     for group in groups:
         gdir = os.path.join(tests, group)

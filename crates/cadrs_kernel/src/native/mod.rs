@@ -5,6 +5,7 @@ pub mod blend;
 pub mod blend_chain;
 pub mod blend_corner;
 pub mod bodyio;
+pub mod brep_occt;
 pub mod boolean;
 pub mod build;
 pub mod classify;

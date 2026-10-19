@@ -484,6 +484,28 @@ impl NativeKernel {
         Ok(Shape::Body(r.bodies[0]))
     }
 
+    /// `restore file name`: a shape from an OCCT BRep file (`explode` follows the file's order).
+    pub fn restore(&mut self, path: &str) -> Result<Shape> {
+        let bytes = std::fs::read(path).map_err(|e| err(&format!("{path}: {e}")))?;
+        let (body, _, edges) = super::brep_occt::read_ordered(&bytes).map_err(|e| err(&format!("{path}: {e}")))?;
+        let nf = body.faces.len();
+        let b = self.insert(body);
+        let infos = self.faces(b)?;
+        let body = self.get(b)?;
+        if infos.len() == nf {
+            // A point on each face, near its middle.
+            let faces = (0..nf)
+                .map(|i| {
+                    let s = &body.faces[i].surf;
+                    let (u, v) = s.project(&infos[i].center, None);
+                    s.eval(u, v)
+                })
+                .collect();
+            set_order(b, OcctOrder { edges, faces });
+        }
+        Ok(Shape::Body(b))
+    }
+
     // --- Booleans and transforms ------------------------------------------------------------
 
     fn body_of(&self, s: &Shape) -> Result<BodyId> {
