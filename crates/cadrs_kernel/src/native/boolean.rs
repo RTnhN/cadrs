@@ -1271,7 +1271,68 @@ fn run(a: &Body, b: &Body, mode: Mode) -> Result<BoolOut> {
     let polys_a: Vec<Vec<Vec<P2>>> = a.faces.iter().map(|f| classify::face_polygons(a, f)).collect();
     let polys_b: Vec<Vec<Vec<P2>>> = b.faces.iter().map(|f| classify::face_polygons(b, f)).collect();
     let mut keep: Vec<(usize, Vec<Vec<Arc>>, bool)> = Vec::new(); // (face, loops, flip)
-    for (fi, loops) in subs {
+    // Sub-faces of one body joined across an edge piece no cut runs along lie on one side of
+    // the other body: grouped (union-find over shared uncut pieces), each group is classified
+    // once and its answer shared (faces on a coincident face keep their own test).
+    let mut parent: Vec<usize> = (0..subs.len()).collect();
+    fn root(p: &mut Vec<usize>, mut i: usize) -> usize {
+        while p[i] != i {
+            p[i] = p[p[i]];
+            i = p[i];
+        }
+        i
+    }
+    {
+        // Pieces touching the other body (cuts of any face, edges lying on its faces, edges
+        // merged with its edges) can separate sides: they don't join.
+        let mut touching: std::collections::HashSet<usize> = std::collections::HashSet::new();
+        for list in cuts.iter().chain(on_face.iter()) {
+            for &e in list {
+                touching.insert(e);
+                touching.insert(canon[e.min(canon.len() - 1)]);
+                if e < pieces.len() {
+                    for &p in &pieces[e] {
+                        touching.insert(p);
+                        touching.insert(canon[p]);
+                    }
+                }
+            }
+        }
+        for (e, &c) in canon.iter().enumerate() {
+            if c != e {
+                touching.insert(c);
+                touching.insert(e);
+            }
+        }
+        // Nor pieces ending where a cut ends (the other body meets this one there; within a
+        // tolerance a crossing seen on one face can be missed on its neighbour).
+        let cut_ends: std::collections::HashSet<usize> = subs.iter().flat_map(|(_, l)| l.iter().flatten()).filter(|a| a.cut).flat_map(|a| a.v).collect();
+        let mut by_piece: HashMap<(usize, i64, i64, usize), usize> = HashMap::new();
+        for (k, (fi, loops)) in subs.iter().enumerate() {
+            for a in loops.iter().flatten().filter(|a| !a.cut && !a.deg && !touching.contains(&a.edge) && !a.v.iter().any(|v| cut_ends.contains(v))) {
+                let (lo, hi) = (a.t[0].min(a.t[1]), a.t[0].max(a.t[1]));
+                let key = (a.edge, (lo * 1e9).round() as i64, (hi * 1e9).round() as i64, faces[*fi].owner);
+                match by_piece.get(&key) {
+                    Some(&other) => {
+                        let (x, y) = (root(&mut parent, k), root(&mut parent, other));
+                        if x != y {
+                            parent[x] = y;
+                        }
+                    }
+                    None => {
+                        by_piece.insert(key, k);
+                    }
+                }
+            }
+        }
+    }
+    let groups: Vec<usize> = (0..subs.len()).map(|k| root(&mut parent, k)).collect();
+    // A group's class: (class, confirmed by a second member). A disagreement makes the group
+    // classify every member itself.
+    let mut group_class: HashMap<usize, (Class, bool)> = HashMap::new();
+    let mut unreliable: std::collections::HashSet<usize> = std::collections::HashSet::new();
+    let propagate = std::env::var_os("CADRS_NO_PROPAGATE").is_none();
+    for (sk, (fi, loops)) in subs.into_iter().enumerate() {
         let f = &faces[fi];
         if imprinting {
             if f.owner == 0 {
@@ -1294,7 +1355,13 @@ fn run(a: &Body, b: &Body, mode: Mode) -> Result<BoolOut> {
                 break;
             }
         }
-        let class = class.unwrap_or_else(|| {
+        let g = groups[sk];
+        let shared = match group_class.get(&g) {
+            Some(&(c, true)) if class.is_none() && propagate && !unreliable.contains(&g) => Some(c),
+            _ => None,
+        };
+        let fresh = class.is_none() && shared.is_none();
+        let class = class.or(shared).unwrap_or_else(|| {
             let (other, polys) = if f.owner == 0 { (b, &polys_b) } else { (a, &polys_a) };
             // A point on the other body's boundary (a sub-face whose sample landed on an edge of
             // the other body lying in it) decides nothing: try the face's other inside points.
@@ -1319,9 +1386,28 @@ fn run(a: &Body, b: &Body, mode: Mode) -> Result<BoolOut> {
                 }
             }
         });
+        if fresh && matches!(class, Class::In | Class::Out) {
+            match group_class.get(&g).copied() {
+                None => {
+                    group_class.insert(g, (class, false));
+                }
+                Some((c, false)) => {
+                    if c == class {
+                        group_class.insert(g, (c, true));
+                    } else {
+                        unreliable.insert(g);
+                    }
+                }
+                Some((c, true)) => {
+                    if c != class {
+                        unreliable.insert(g);
+                    }
+                }
+            }
+        }
         let a_side = f.owner == 0;
         if std::env::var("CADRS_BOOL_DEBUG").is_ok() {
-            eprintln!("sub of face {fi} (owner {} orig {}): {} loops, class {class:?} at {p:?}", f.owner, f.orig, loops.len());
+            eprintln!("sub of face {fi} (owner {} orig {}): {} loops, class {class:?} at {p:?}{}", f.owner, f.orig, loops.len(), if shared.is_some() { " (shared)" } else { "" });
         }
         let (k, flip) = match (op, a_side, class) {
             (BoolOp::Union, _, Class::Out) => (true, false),

@@ -277,7 +277,6 @@ boolean bopcut_complex_h9
 boolean bopcut_complex_i7
 boolean bopcut_complex_j2
 boolean bopcut_complex_k9
-boolean bopcut_complex_l4
 boolean bopcut_complex_m6
 boolean bopcut_complex_n5
 boolean bopcut_complex_n6
