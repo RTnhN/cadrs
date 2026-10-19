@@ -53,8 +53,6 @@ blend simple_k3
 blend simple_k4
 blend simple_k6
 blend simple_l2
-blend simple_l5
-blend simple_l7
 blend simple_l8
 blend simple_l9
 blend simple_m3
@@ -65,7 +63,6 @@ blend simple_m8
 blend simple_m9
 blend simple_n1
 blend simple_n4
-blend simple_n5
 blend simple_n6
 blend simple_n7
 blend simple_n8
@@ -74,7 +71,6 @@ blend simple_o2
 blend simple_o3
 blend simple_o4
 blend simple_o5
-blend simple_o7
 blend simple_o8
 blend simple_o9
 blend simple_p3

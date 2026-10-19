@@ -487,6 +487,24 @@ pub fn hexahedron(c: &[P3; 8]) -> Result<Body> {
 
 /// Keeps the part of a tool on the side of the plane (through `o`, normal `n`) that `n`
 /// points away from.
+/// Whether edges `e` and `o` meet at `p` in an inside corner of the face they share: `o`,
+/// heading `od` away from `p`, turns away from the side of `e` the face's material is on.
+fn inside_corner(b: &Body, e: usize, o: usize, p: &P3, od: &V3) -> bool {
+    for f in &b.faces {
+        let uses = |x: usize| f.loops.iter().flatten().find(|c| c.edge == x);
+        let (Some(ce), Some(_)) = (uses(e), uses(o)) else { continue };
+        let ed = &b.edges[e];
+        let t = ed.curve.closest(p, ed.t[0].min(ed.t[1]), ed.t[0].max(ed.t[1]));
+        let dir = ed.curve.tangent(t).normalize() * if ce.fwd { 1.0 } else { -1.0 };
+        let (u, v) = f.surf.project(p, None);
+        let n = f.surf.normal(u, v) * if f.sense { 1.0 } else { -1.0 };
+        // Material lies left of a coedge about the outward normal.
+        let inward = n.cross(&dir);
+        return od.dot(&inward) < 0.0;
+    }
+    false
+}
+
 /// Whether the edge running `out` away from vertex `v` carries on smoothly there into another
 /// edge (not `except`): a blend stopping at `v` then ends square, with no extension along it.
 fn continues_smoothly(b: &Body, v: usize, out: V3, except: &[usize]) -> bool {
@@ -770,9 +788,39 @@ pub fn blend(k: &mut NativeKernel, body: BodyId, edges: &[(EdgeId, Box<dyn Fn(f6
                     if n.norm() < 1e-9 {
                         continue;
                     }
-                    let (nb, ns) = trim_tool(&tb, &ts, p, n.normalize())?;
+                    // A convex corner: each tool keeps its side of the bisecting plane. An inside
+                    // corner (the other edge heading away from this edge's material on the face
+                    // they share): both tools run on through the corner, where the union of the
+                    // two cuts is the chamfer, and stop square where they leave the other
+                    // blend's strip on that face (its width over the sine of the corner angle).
+                    let inside = inside_corner(&b, e, others[0], &p, &od);
+                    let (o, n) = if inside {
+                        let width = match kind(PI / 2.0) {
+                            SectionKind::Chamfer { d1, d2 } => d1.max(d2),
+                            SectionKind::Circle { r } => r,
+                            _ => 0.0,
+                        };
+                        let sin = out.cross(&od).norm().max(1e-6);
+                        (p + out * (width / sin), out)
+                    } else {
+                        (p, n.normalize())
+                    };
+                    let (nb, ns) = trim_tool(&tb, &ts, o, n)?;
                     tb = nb;
                     ts = ns;
+                    // Past an inside corner the tool runs under the other blend: cut it at the
+                    // planes of its own faces too (its corner is pushed out past them, for a
+                    // clean boolean, and would dig under the other cut).
+                    if inside {
+                        for (fi, _) in edge_sides(&b, e)? {
+                            if let Surface::Plane { f: fr } = &b.faces[fi].surf {
+                                let nf = fr.x.cross(&fr.y) * if b.faces[fi].sense { 1.0 } else { -1.0 };
+                                let (nb, ns) = trim_tool(&tb, &ts, p, nf)?;
+                                tb = nb;
+                                ts = ns;
+                            }
+                        }
+                    }
                 }
                 2 if corners && matches!(ed.curve, Curve::Line { .. }) => {
                     // Three fillets: stop square to the edge at the ball centre.
@@ -796,6 +844,11 @@ pub fn blend(k: &mut NativeKernel, body: BodyId, edges: &[(EdgeId, Box<dyn Fn(f6
         let [s1, s2] = edge_sides(&b, e)?;
         for (end, v) in ed.v.iter().enumerate() {
             if ed.closed() || (tool.convex && ((end == 0 && !extend.0) || (end == 1 && !extend.1))) {
+                continue;
+            }
+            // Ends meeting other blended edges were mitred above; only free ends here.
+            let others = at_vertex.get(v).map_or(0, |x| x.iter().filter(|&&o| o != e).count());
+            if tool.convex && others > 0 {
                 continue;
             }
             let tv = ed.curve.tangent(ed.t[end]).normalize();
