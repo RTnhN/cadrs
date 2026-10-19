@@ -362,11 +362,19 @@ pub fn sew_faces(mut b: Body, tol: f64) -> Result<Body> {
     // Merge coincident vertices.
     let nv = b.verts.len();
     let mut vmap: Vec<usize> = (0..nv).collect();
+    let point_box = |p: &P3, r: f64| {
+        let mut bb = Bbox::empty();
+        bb.add(p);
+        bb.grow(r)
+    };
+    let vtree = super::bvh::Bvh::new(b.verts.iter().map(|v| point_box(&v.p, 0.0)).collect());
     for i in 0..nv {
         if vmap[i] != i {
             continue;
         }
-        for j in i + 1..nv {
+        let mut near = vtree.query(&point_box(&b.verts[i].p, tol));
+        near.sort_unstable();
+        for j in near.into_iter().filter(|&j| j > i) {
             if vmap[j] == j && (b.verts[i].p - b.verts[j].p).norm() < tol {
                 vmap[j] = i;
             }
@@ -384,10 +392,13 @@ pub fn sew_faces(mut b: Body, tol: f64) -> Result<Body> {
         ends.sort_unstable();
         ends.dedup();
         let mut hit = None;
+        let etree = super::bvh::Bvh::new(ends.iter().map(|&w| point_box(&b.verts[w].p, 0.0)).collect());
         'find: for &e in &free {
             let ed = &b.edges[e];
             let (lo, hi) = (ed.t[0].min(ed.t[1]), ed.t[0].max(ed.t[1]));
-            for &w in &ends {
+            let mut near = etree.query(&super::boolean::curve_bbox(&ed.curve, lo, hi).grow(tol));
+            near.sort_unstable();
+            for w in near.into_iter().map(|k| ends[k]) {
                 if ed.v.contains(&w) {
                     continue;
                 }
