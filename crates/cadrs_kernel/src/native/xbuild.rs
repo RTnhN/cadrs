@@ -128,6 +128,8 @@ pub fn edge_range(c: &Curve, p0: &P3, p1: &P3, closed: bool) -> Option<(f64, f64
 pub fn analytic(s: &Surface) -> Option<Surface> {
     const EPS: f64 = 1e-9;
     match s {
+        // A B-spline that is exactly a plane, cylinder, cone or sphere.
+        Surface::Nurbs(n) if std::env::var_os("CADRS_NO_RECOG_S").is_none() => super::recognize::surface(n),
         Surface::Revolution { f, m } => {
             let z = f.z.normalize();
             let foot = |p: &P3| f.o + z * (p - f.o).dot(&z);
@@ -539,6 +541,11 @@ impl XBuilder {
     /// An edge from `v0` to `v1` along `curve` (turned round when it runs from `v1` to `v0`).
     /// None for an empty edge.
     pub fn edge(&mut self, curve: Curve, v0: usize, v1: usize) -> Option<usize> {
+        // A B-spline that is exactly a line or circle.
+        let curve = match &curve {
+            Curve::Nurbs(n) if std::env::var_os("CADRS_NO_RECOG_C").is_none() => super::recognize::curve(n).unwrap_or(curve),
+            _ => curve,
+        };
         let (p0, p1) = (self.body.verts[v0].p, self.body.verts[v1].p);
         let closed = v0 == v1;
         let (curve, (t0, t1)) = match edge_range(&curve, &p0, &p1, closed) {

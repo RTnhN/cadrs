@@ -404,14 +404,21 @@ pub fn sew_faces(mut b: Body, tol: f64) -> Result<Body> {
         split_edge_at(&mut b, e, t, w);
     }
     // Merge coincident edges (same ends and middle), re-parametrizing the p-curves.
+    // Pairs only (an edge bounds two faces at most), closest first: an edge between two
+    // vertices that several edges join takes the one that runs along it.
     let ne = b.edges.len();
     let mut emap: Vec<(usize, bool)> = (0..ne).map(|i| (i, true)).collect();
+    let mut uses = vec![0usize; ne];
+    for c in b.faces.iter().flat_map(|f| f.loops.iter().flatten()) {
+        uses[c.edge] += 1;
+    }
+    let mut cands: Vec<(f64, usize, usize, bool)> = Vec::new();
     for i in 0..ne {
-        if emap[i].0 != i || b.edges[i].degenerate {
+        if b.edges[i].degenerate || uses[i] >= 2 {
             continue;
         }
         for j in i + 1..ne {
-            if emap[j].0 != j || b.edges[j].degenerate {
+            if b.edges[j].degenerate || uses[i] + uses[j] > 2 {
                 continue;
             }
             let (a, c) = (&b.edges[i], &b.edges[j]);
@@ -419,13 +426,30 @@ pub fn sew_faces(mut b: Body, tol: f64) -> Result<Body> {
             if !same {
                 continue;
             }
-            let m = c.point(c.mid_t());
-            let t = a.curve.closest(&m, a.t[0], a.t[1]);
-            if (a.curve.point(t) - m).norm() < tol * 10.0 {
+            // The farthest of a few points of one from the other.
+            let mut dmax: f64 = 0.0;
+            for f in [0.25, 0.5, 0.75] {
+                let m = c.point(c.t[0] + (c.t[1] - c.t[0]) * f);
+                let t = a.curve.closest(&m, a.t[0], a.t[1]);
+                dmax = dmax.max((a.curve.point(t) - m).norm());
+            }
+            if dmax < tol {
+                let m = c.point(c.mid_t());
+                let t = a.curve.closest(&m, a.t[0], a.t[1]);
                 let fwd = if a.v[0] != a.v[1] { a.v == c.v } else { a.curve.tangent(t).dot(&c.curve.tangent(c.mid_t())) > 0.0 };
-                emap[j] = (i, fwd);
+                cands.push((dmax, i, j, fwd));
             }
         }
+    }
+    cands.sort_by(|x, y| x.0.total_cmp(&y.0));
+    let mut taken = vec![false; ne];
+    for (_, i, j, fwd) in cands {
+        if taken[i] || taken[j] {
+            continue;
+        }
+        taken[i] = true;
+        taken[j] = true;
+        emap[j] = (i, fwd);
     }
     for fi in 0..b.faces.len() {
         let surf = b.faces[fi].surf.clone();

@@ -1250,3 +1250,66 @@ fn debug_read_brep_dir() {
         }
     }
 }
+
+/// Reads every .smb under CADRS_SMB_DIR (recursively) and prints what it gives.
+#[test]
+#[ignore]
+fn debug_read_smb_dir() {
+    use cadrs_kernel::native::{mass, smb};
+    let Ok(dir) = std::env::var("CADRS_SMB_DIR") else { return };
+    let mut files = Vec::new();
+    let root = std::path::PathBuf::from(&dir);
+    if root.is_file() {
+        files.push(root.clone());
+    }
+    let mut stack = if root.is_dir() { vec![root.clone()] } else { vec![] };
+    while let Some(d) = stack.pop() {
+        for e in std::fs::read_dir(&d).unwrap().flatten() {
+            let p = e.path();
+            if p.is_dir() {
+                stack.push(p);
+            } else if p.extension().is_some_and(|x| x == "smb") {
+                files.push(p);
+            }
+        }
+    }
+    files.sort();
+    let (mut ok, mut valid) = (0, 0);
+    for p in &files {
+        let name = p.strip_prefix(&dir).ok().filter(|x| !x.as_os_str().is_empty()).unwrap_or(p).display().to_string();
+        let t = std::time::Instant::now();
+        match smb::read(&std::fs::read(p).unwrap()) {
+            Ok((b, w)) => {
+                ok += 1;
+                let issues = b.check();
+                if issues.is_empty() && !b.solids.is_empty() {
+                    valid += 1;
+                }
+                let m = mass::body_mass(&b);
+                println!("{name}: faces {} solids {} check {:?} volume {:.4} warnings {} ({:?})", b.faces.len(), b.solids.len(), issues.first(), m.volume, w.len(), t.elapsed());
+            }
+            Err(e) => println!("{name}: ERROR {e}"),
+        }
+    }
+    println!("{} files, {ok} read, {valid} valid solids", files.len());
+}
+
+/// Free edges and sizes of a restored file before and after sewing (CADRS_FILE, CADRS_TOL).
+#[test]
+#[ignore]
+fn debug_sew_file() {
+    use cadrs_kernel::native::NativeKernel;
+    let Ok(f) = std::env::var("CADRS_FILE") else { return };
+    let tol: f64 = std::env::var("CADRS_TOL").ok().and_then(|x| x.parse().ok()).unwrap_or(1e-6);
+    let mut k = NativeKernel::new();
+    let a = k.restore(&f).unwrap();
+    let n = k.nbshapes(&a).unwrap();
+    println!("input {n:?}");
+    let r = k.sewing(tol, &[&a]).unwrap();
+    println!("sewn {:?}", k.nbshapes(&r).unwrap());
+    for want in 0..60 {
+        if k.checkfreebounds(&r, want).is_ok() {
+            println!("free edges {want}");
+        }
+    }
+}

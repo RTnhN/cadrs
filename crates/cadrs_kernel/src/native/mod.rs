@@ -25,6 +25,8 @@ pub mod meshsolid;
 pub mod nurbs;
 pub mod offset2d;
 pub mod slab;
+pub mod smb;
+pub mod recognize;
 pub mod offset_round;
 pub mod ops;
 pub mod pcurve;

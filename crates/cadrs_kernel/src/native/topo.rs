@@ -258,7 +258,9 @@ impl Body {
                     let du = (pa.x - pb.x).abs();
                     let dv = (pa.y - pb.y).abs();
                     let (mu, mv) = f.surf.metric();
-                    if du * mu > 1e-5 || dv * mv > 1e-5 {
+                    // Within the shared vertex's tolerance (1e-5 for exact geometry).
+                    let gap_tol = self.verts.get(self.co_end(a)).map_or(0.0, |v| v.tol).max(1e-5);
+                    if du * mu > gap_tol || dv * mv > gap_tol {
                         errs.push(format!("face {fi} loop {li}: p-curve gap after coedge {k}: ({:.3e}, {:.3e})", pa.x - pb.x, pa.y - pb.y));
                     }
                     // p-curve on the edge in 3D.
@@ -268,7 +270,8 @@ impl Body {
                             let uv = a.pc.point(t);
                             let q = f.surf.eval(uv.x, uv.y);
                             let p = ea.point(t);
-                            if (q - p).norm() > 1e-6 {
+                            // Within the edge's tolerance (a read model's p-curves stray by it).
+                            if (q - p).norm() > self.edges[a.edge].tol.max(1e-6) {
                                 errs.push(format!("face {fi} loop {li} coedge {k} (edge {}): p-curve off the edge by {:.3e}", a.edge, (q - p).norm()));
                                 break;
                             }

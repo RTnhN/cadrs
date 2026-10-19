@@ -123,9 +123,6 @@ impl Pool {
         let s = 1.0 / self.cell;
         ((p.x * s).floor() as i64, (p.y * s).floor() as i64, (p.z * s).floor() as i64)
     }
-    fn find(&self, p: &P3) -> Option<usize> {
-        self.find_tol(p, 0.0)
-    }
     /// The vertex `p` (of tolerance `tol`) falls on.
     fn find_tol(&self, p: &P3, tol: f64) -> Option<usize> {
         let (cx, cy, cz) = self.cell_of(p);
@@ -145,9 +142,6 @@ impl Pool {
             }
         }
         best.map(|(_, i)| i)
-    }
-    fn vertex(&mut self, p: P3) -> usize {
-        self.vertex_tol(p, 0.0)
     }
     /// The vertex at `p` with tolerance `tol`: an existing one within reach (its tolerance grown
     /// to hold this one's ball), else a new one.
@@ -171,9 +165,6 @@ impl Pool {
             }
         }
         self.new_vertex_tol(p, tol)
-    }
-    fn new_vertex(&mut self, p: P3) -> usize {
-        self.new_vertex_tol(p, 0.0)
     }
     fn new_vertex_tol(&mut self, p: P3, tol: f64) -> usize {
         self.verts.push(p);
