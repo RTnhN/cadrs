@@ -6,10 +6,9 @@
 //!   (pointing into the part: a hole's edge on the underside points up the hole), along a
 //!   straight edge; X along the model X laid onto that plane (else the model Y). The triad
 //!   belongs to the instance: moving the instance carries it along.
-//! - **Look**: Onshape's line-art triad, white strokes with a dark outline so it reads on light
-//!   and dark faces: the origin's ring, three arrows with open cone heads, the rotation rings at
-//!   their ends and the small plane squares between them. The handle under the pointer turns
-//!   orange, the one being dragged blue.
+//! - **Look**: axis-coloured translation arrows and rotation arcs with a dark outline. Each
+//!   rotation arc lies perpendicular to its axis and turns by the right-hand rule. During a
+//!   drag, a swept arc and start/end radii show the solved rotation about the shared origin.
 //! - **Relocate** (A3.2): dragging the origin moves the triad, not the part. It snaps to the
 //!   instance's connector points near the pointer (circle and hole centres, face centroids,
 //!   vertices, edge midpoints), shown as dots on the entity under the pointer; holding **Shift**
@@ -17,8 +16,9 @@
 //!   aligns with the circle, and the bottom-right readout shows "Diameter: 0.563 in"
 //!   (`ex1-step5.png`).
 //! - **Move** (A3.4): dragging an arrow moves the instance along it, a plane square in its
-//!   plane, a ring turns it about the axis; a value box at the pointer shows the distance or
+//!   plane, an arc turns it about the perpendicular axis; a value box shows the distance or
 //!   the angle. Releasing records one undo step. Fixed instances don't move (A3.7).
+//!   Rotation stops use the increment and tolerance in Preferences; Shift bypasses snapping.
 //! - **Menus** (A3.3, A3.4): right-click the origin → Move to origin; an arrow → Align with Z,
 //!   Anti-align with Z; a ring → Rotate 90°, Rotate 180°; each followed by the instance menu
 //!   ([`super::menu`]).
@@ -155,7 +155,12 @@ struct TriadDrag {
     /// The last face under the pointer (origin drags): its points stay shown while the pointer
     /// is on one of its edges or corners (Final part 3: `course_asm_triad` 02 showed one dot).
     face: Option<Pick>,
+    rotation: Option<RingDrag>,
 }
+
+/// The radial direction grabbed in the plane perpendicular to the chosen rotation axis.
+#[derive(Debug, Clone, Copy)]
+struct RingDrag { zero: Vec3, edge_on: bool }
 
 /// The triad: where it is, the handle under the pointer, and a drag in progress.
 #[derive(Resource, Debug, Default)]
@@ -216,6 +221,13 @@ const ORIGIN_R: f32 = 7.0;
 /// How close (px) the pointer must be to grab a handle, and to snap to a point.
 const GRAB: f32 = 7.0;
 const SNAP: f32 = 14.0;
+
+/// Magnetic stops at the preferred increment; Shift bypasses both stops and degree rounding.
+fn rotation_degrees(degrees: f64, increment: f64, tolerance: f64, shift: bool) -> f64 {
+    if shift || increment == 0.0 { return degrees; }
+    let stop = (degrees / increment).round() * increment;
+    if (degrees - stop).abs() <= tolerance + 1e-5 { stop } else { degrees.round() }
+}
 
 fn v3(p: [f64; 3]) -> Vec3 {
     Vec3::new(p[0] as f32, p[1] as f32, p[2] as f32)
@@ -478,6 +490,7 @@ struct Screen {
     tips: [Vec2; 3],
     bases: [Vec2; 3],
     rings: [Vec2; 3],
+    arcs: [Vec<Vec2>; 3],
     squares: [[Vec2; 4]; 3],
 }
 
@@ -486,13 +499,60 @@ fn screen(view: &ViewState, rect: &ViewportRect, o: Vec3, axes: &[Vec3; 3]) -> S
     let to = |p: Vec3| rect.to_screen(view.project(p));
     let tips = [0, 1, 2].map(|i| to(o + axes[i] * ARROW * s));
     let bases = [0, 1, 2].map(|i| to(o + axes[i] * ORIGIN_R * 1.4 * s));
-    let rings = [0, 1, 2].map(|i| to(o + axes[i] * (ARROW + RING_GAP + RING_R) * s));
+    let arcs = [0, 1, 2].map(|i| rotation_arc(o, axes, i, s).into_iter().map(to).collect::<Vec<_>>());
+    let rings = [0, 1, 2].map(|i| arcs[i][arcs[i].len() / 2]);
     let squares = [0, 1, 2].map(|k| {
         let (i, j) = ((k + 1) % 3, (k + 2) % 3);
         let (a, b) = (SQ_A * ARROW * s, SQ_B * ARROW * s);
         [(a, a), (b, a), (b, b), (a, b)].map(|(u, w)| to(o + axes[i] * u + axes[j] * w))
     });
-    Screen { origin: to(o), tips, bases, rings, squares }
+    Screen { origin: to(o), tips, bases, rings, arcs, squares }
+}
+
+const ROTATION_RADIUS: f32 = ARROW + RING_GAP;
+
+/// Positive sweep about axes[i] follows the right-hand rule: v = axis × u.
+fn rotation_arc(origin: Vec3, axes: &[Vec3; 3], i: usize, scale: f32) -> Vec<Vec3> {
+    let u = axes[(i + 1) % 3];
+    let v = axes[i].cross(u).normalize_or_zero();
+    (0..=24).map(|k| {
+        let a = (18.0 + 54.0 * k as f32 / 24.0).to_radians();
+        origin + (u * a.cos() + v * a.sin()) * ROTATION_RADIUS * scale
+    }).collect()
+}
+
+fn radial_at(view: &ViewState, rect: &ViewportRect, origin: Vec3, axis: Vec3, pos: Vec2) -> Option<Vec3> {
+    let (o, direction) = view.ray(rect.offset(pos));
+    let denominator = direction.dot(axis);
+    if denominator.abs() < 1e-5 { return None; }
+    let radial = o + direction * ((origin - o).dot(axis) / denominator) - origin;
+    (radial.length() > 1e-5).then(|| radial.normalize())
+}
+
+fn begin_ring(view: &ViewState, rect: &ViewportRect, origin: Vec3, axes: &[Vec3; 3], index: usize, pos: Vec2) -> RingDrag {
+    let edge_on = view.back().dot(axes[index]).abs() < 0.1;
+    let zero = (!edge_on).then(|| radial_at(view, rect, origin, axes[index], pos)).flatten().unwrap_or_else(|| {
+        let point = rotation_arc(origin, axes, index, view.scale).into_iter()
+            .min_by(|a, b| view.project(*a).distance_squared(rect.offset(pos)).total_cmp(&view.project(*b).distance_squared(rect.offset(pos)))).unwrap();
+        (point - origin).normalize()
+    });
+    RingDrag { zero, edge_on }
+}
+
+fn ring_degrees(drag: RingDrag, view: &ViewState, rect: &ViewportRect, origin: Vec3, axis: Vec3, start: Vec2, pos: Vec2) -> Option<f64> {
+    if drag.edge_on {
+        let tangent = view.project_vector(axis.cross(drag.zero) * ROTATION_RADIUS * view.scale);
+        return (tangent.length_squared() > 1e-6).then(|| ((pos - start).dot(tangent) / tangent.length_squared()).to_degrees() as f64);
+    }
+    let radial = radial_at(view, rect, origin, axis, pos)?;
+    Some(axis.dot(drag.zero.cross(radial)).atan2(drag.zero.dot(radial)).to_degrees() as f64)
+}
+
+fn rotation_about(start: &Pose, solved: &Pose, axis: Vec3) -> f64 {
+    let r = solved.rotation_matrix() * start.rotation_matrix().transpose();
+    let w = [r[(2, 1)] - r[(1, 2)], r[(0, 2)] - r[(2, 0)], r[(1, 0)] - r[(0, 1)]];
+    let sine = (w[0] * axis.x as f64 + w[1] * axis.y as f64 + w[2] * axis.z as f64) / 2.0;
+    sine.atan2((r.trace() - 1.0) / 2.0).to_degrees()
 }
 
 fn segment_distance(p: Vec2, a: Vec2, b: Vec2) -> f32 {
@@ -522,10 +582,11 @@ fn hit(sc: &Screen, p: Vec2) -> Option<TriadHandle> {
     if sc.origin.distance(p) <= ORIGIN_R + 3.0 {
         return Some(TriadHandle::Origin);
     }
-    for i in 0..3 {
-        if sc.rings[i].distance(p) <= RING_R + GRAB * 0.6 {
-            return Some(TriadHandle::Ring(i));
-        }
+    if let Some((distance, i)) = (0..3).map(|i| {
+        let distance = sc.arcs[i].windows(2).map(|w| segment_distance(p, w[0], w[1])).fold(f32::INFINITY, f32::min);
+        (distance, i)
+    }).min_by(|a, b| a.0.total_cmp(&b.0)) {
+        if distance <= GRAB { return Some(TriadHandle::Ring(i)); }
     }
     for i in 0..3 {
         if segment_distance(p, sc.bases[i], sc.tips[i]) <= GRAB {
@@ -561,7 +622,7 @@ fn triad_pointer(
     rect: Res<ViewportRect>,
     vdrag: Res<ViewportDrag>,
     keys: Res<ButtonInput<KeyCode>>,
-    units: Res<crate::WorkspaceUnits>,
+    (units, prefs): (Res<crate::WorkspaceUnits>, Res<crate::preferences_ui::LocalPreferences>),
     highlight: Res<crate::viewport::PlaneHighlight>,
     mut triad: ResMut<Triad>,
     mut asm: ResMut<super::AssemblyParts>,
@@ -645,6 +706,7 @@ fn triad_pointer(
                     value: String::new(),
                     snaps: Vec::new(),
                     face: None,
+                    rotation: match h { TriadHandle::Ring(i) => Some(begin_ring(&view.view, &rect, o, &axes, i, pos)), _ => None },
                 });
             }
             PointerAction::Move { .. } => {
@@ -739,19 +801,11 @@ fn triad_pointer(
                         }
                     }
                     TriadHandle::Ring(i) => {
-                        let c = rect.to_screen(view.view.project(d.origin));
-                        let (v0, v1) = (d.start - c, pos - c);
-                        if v0.length() < 2.0 || v1.length() < 2.0 {
-                            continue;
-                        }
-                        // Screen y points down: a counter-clockwise turn on screen has a
-                        // negative cross product; it is positive about an axis toward the viewer.
-                        let a = d.axes[i];
-                        let screen_ccw = -v0.perp_dot(v1).atan2(v0.dot(v1));
-                        let sign = if a.dot(view.view.back()) >= 0.0 { 1.0 } else { -1.0 };
-                        let deg = (screen_ccw * sign).to_degrees().round() as f64;
-                        d.current = Some(core_asm::rotated(&d.pose, d3(d.origin), d3(a), deg.to_radians()));
-                        d.value = format!("{} deg", deg);
+                        let Some(rotation) = d.rotation else { continue };
+                        let Some(raw) = ring_degrees(rotation, &view.view, &rect, d.origin, d.axes[i], d.start, pos) else { continue };
+                        let deg = rotation_degrees(raw, prefs.0.rotation_snap_degrees(), prefs.0.rotation_snap_tolerance_degrees(), shift);
+                        d.current = Some(core_asm::rotated(&d.pose, d3(d.origin), d3(d.axes[i]), deg.to_radians()));
+                        d.value = format!("{} deg", (deg * 10.0).round() / 10.0 + 0.0);
                     }
                     TriadHandle::None | TriadHandle::View => {}
                 }
@@ -825,15 +879,7 @@ fn solved_value(handle: TriadHandle, start: &Pose, solved: &Pose, anchor: [f64; 
     match handle {
         TriadHandle::Arrow(i) => Some(units.with_unit(moved.dot(axes[i]) as f64, cadrs_sketch::units::Quantity::Length)),
         TriadHandle::Plane(_) => Some(units.with_unit(moved.length() as f64, cadrs_sketch::units::Quantity::Length)),
-        TriadHandle::Ring(i) => {
-            // R = R_solved R_startᵀ; its turn about the axis.
-            let r = solved.rotation_matrix() * start.rotation_matrix().transpose();
-            let a = axes[i];
-            let w = [r[(2, 1)] - r[(1, 2)], r[(0, 2)] - r[(2, 0)], r[(1, 0)] - r[(0, 1)]];
-            let s = (w[0] * a.x as f64 + w[1] * a.y as f64 + w[2] * a.z as f64) / 2.0;
-            let c = (r.trace() - 1.0) / 2.0;
-            Some(format!("{} deg", s.atan2(c).to_degrees().round() + 0.0))
-        }
+        TriadHandle::Ring(i) => Some(format!("{} deg", (rotation_about(start, solved, axes[i]) * 10.0).round() / 10.0 + 0.0)),
         _ => None,
     }
 }
@@ -903,7 +949,10 @@ fn draw_triad(
         } else if triad.hover == Some(h) && active.is_none() {
             HOVER
         } else {
-            WHITE
+            match h {
+                TriadHandle::Arrow(i) | TriadHandle::Ring(i) => [Color::srgb_u8(0xd8, 0x45, 0x45), Color::srgb_u8(0x32, 0xa0, 0x57), Color::srgb_u8(0x3d, 0x6f, 0xd8)][i],
+                _ => WHITE,
+            }
         }
     };
     // The handle whose menu is open stays highlighted (P3B.1 judge).
@@ -912,7 +961,7 @@ fn draw_triad(
         halo.line(a, b, HALO);
         line.line(a, b, c);
     };
-    // The arrows: a line, an open cone head, the ring past the tip.
+    // Translation arrows, separate from the perpendicular rotation arcs.
     for (i, axis) in axes.iter().enumerate() {
         let c = color(TriadHandle::Arrow(i));
         let tip = o + *axis * ARROW * s;
@@ -923,20 +972,34 @@ fn draw_triad(
         seg(base - side, tip, c);
         seg(base + side, tip, c);
         seg(base - side, base + side, c);
-        // The ring: a circle about the axis (seen as an ellipse), and its hub line.
+    }
+    // Rotation arcs lie in the plane perpendicular to the axis they turn about.
+    for i in 0..3 {
         let rc = color(TriadHandle::Ring(i));
-        let center = o + *axis * (ARROW + RING_GAP + RING_R) * s;
-        let (u, w) = (axis.any_orthonormal_pair().0, axis.any_orthonormal_pair().1);
-        let pts: Vec<Vec3> = (0..=24)
-            .map(|k| {
-                let t = k as f32 / 24.0 * std::f32::consts::TAU;
-                center + (u * t.cos() + w * t.sin()) * RING_R * s
-            })
-            .collect();
-        for p in pts.windows(2) {
-            seg(p[0], p[1], rc);
-        }
-        seg(tip, center - *axis * RING_R * 0.2 * s, rc);
+        let points = rotation_arc(o, &axes, i, s);
+        for pair in points.windows(2) { seg(pair[0], pair[1], rc); }
+        let center = points[points.len() / 2];
+        let (u, w) = (v.right(), v.up());
+        let points: Vec<_> = (0..=16).map(|k| {
+            let a = k as f32 / 16.0 * std::f32::consts::TAU;
+            center + (u * a.cos() + w * a.sin()) * RING_R * 0.6 * s
+        }).collect();
+        for pair in points.windows(2) { seg(pair[0], pair[1], rc); }
+    }
+    // Show the actual solved rotation as an arc and its start/end radii.
+    if let Some(drag) = &triad.drag
+        && let TriadHandle::Ring(i) = drag.handle
+        && let Some(rotation) = drag.rotation
+    {
+        let degrees = rotation_about(&drag.pose, &pose, drag.axes[i]);
+        let radius = (ROTATION_RADIUS + 5.0) * s;
+        let steps = ((degrees.abs() / 3.0).ceil() as usize).max(1);
+        let points: Vec<_> = (0..=steps).map(|k| {
+            drag.origin + Quat::from_axis_angle(drag.axes[i], (degrees * k as f64 / steps as f64).to_radians() as f32) * rotation.zero * radius
+        }).collect();
+        for pair in points.windows(2) { seg(pair[0], pair[1], ACTIVE); }
+        seg(drag.origin, points[0], ACTIVE);
+        seg(drag.origin, *points.last().unwrap(), ACTIVE);
     }
     // The plane squares.
     for k in 0..3 {
@@ -1378,6 +1441,82 @@ fn place_markers(
 #[cfg(test)]
 mod movement_tests {
     use super::*;
+
+    #[test]
+    fn arcs_select_their_perpendicular_axis_and_rotate_by_the_right_hand_rule() {
+        let axes = [Vec3::X, Vec3::Y, Vec3::Z];
+        let origin = Vec3::new(10.0, -4.0, 3.0);
+        let rect = ViewportRect(Rect::new(0.0, 0.0, 1200.0, 900.0));
+        let view = ViewState { scale: 0.5, ..ViewState::standard(crate::camera::StandardView::Isometric) };
+        let sc = screen(&view, &rect, origin, &axes);
+        for i in 0..3 {
+            let arc = rotation_arc(origin, &axes, i, view.scale);
+            assert!(arc.iter().all(|p| (*p - origin).dot(axes[i]).abs() < 1e-5));
+            assert_eq!(hit(&sc, sc.rings[i]), Some(TriadHandle::Ring(i)));
+            let radial = (arc[arc.len() / 2] - origin).normalize();
+            let press = rect.to_screen(view.project(origin + radial * ROTATION_RADIUS * view.scale));
+            let drag = begin_ring(&view, &rect, origin, &axes, i, press);
+            assert!(!drag.edge_on);
+            for degrees in [-90.0f32, -30.0, 30.0, 90.0] {
+                let end = Quat::from_axis_angle(axes[i], degrees.to_radians()) * radial;
+                let pos = rect.to_screen(view.project(origin + end * ROTATION_RADIUS * view.scale));
+                let angle = ring_degrees(drag, &view, &rect, origin, axes[i], press, pos).unwrap();
+                assert!((angle - degrees as f64).abs() < 0.01, "axis {i}: {angle} instead of {degrees}");
+                let pose = core_asm::rotated(&Pose::IDENTITY, d3(origin), d3(axes[i]), angle.to_radians());
+                assert!((rotation_about(&Pose::IDENTITY, &pose, axes[i]) - angle).abs() < 1e-4);
+            }
+            // The cross product points toward the positive sweep on each arc.
+            assert!(axes[i].dot((arc[0] - origin).cross(arc[1] - origin)) > 0.0);
+        }
+    }
+
+    #[test]
+    fn edge_on_rotation_handles_keep_a_finite_directional_drag() {
+        let axes = [Vec3::X, Vec3::Y, Vec3::Z];
+        let view = ViewState::standard(crate::camera::StandardView::Top);
+        let rect = ViewportRect(Rect::new(0.0, 0.0, 1000.0, 800.0));
+        for i in [0, 1] {
+            let arc = rotation_arc(Vec3::ZERO, &axes, i, view.scale);
+            let press = rect.to_screen(view.project(arc[arc.len() / 2]));
+            let drag = begin_ring(&view, &rect, Vec3::ZERO, &axes, i, press);
+            assert!(drag.edge_on);
+            let tangent = view.project_vector(axes[i].cross(drag.zero) * ROTATION_RADIUS * view.scale);
+            for sign in [-1.0, 1.0] {
+                let angle = ring_degrees(drag, &view, &rect, Vec3::ZERO, axes[i], press, press + tangent * 0.1 * sign).unwrap();
+                assert!(angle.is_finite() && angle.signum() == sign as f64);
+            }
+        }
+    }
+
+    #[test]
+    fn rotation_stops_cover_both_directions_and_shift_allows_free_angles() {
+        for stop in [-180.0, -135.0, -90.0, -45.0, 0.0, 45.0, 90.0, 135.0, 180.0] {
+            for delta in [-5.0, -4.5, 0.0, 4.5, 5.0] {
+                assert_eq!(rotation_degrees(stop + delta, 45.0, 5.0, false), stop);
+                assert_eq!(rotation_degrees(stop + delta, 45.0, 5.0, true), stop + delta);
+            }
+            for delta in [-5.01, 5.01] {
+                assert_eq!(rotation_degrees(stop + delta, 45.0, 5.0, false), (stop + delta).round());
+                assert_ne!(rotation_degrees(stop + delta, 45.0, 5.0, false), stop);
+            }
+        }
+        assert_eq!(rotation_degrees(12.25, 45.0, 5.0, true), 12.25);
+        assert_eq!(rotation_degrees(12.25, 45.0, 5.0, false), 12.0);
+        // The same pointer angle can freely enter and leave a magnetic stop.
+        assert_eq!(rotation_degrees(43.25, 45.0, 5.0, false), 45.0);
+        assert_eq!(rotation_degrees(35.0, 45.0, 10.0, false), 45.0);
+        assert_eq!(rotation_degrees(30.0, 45.0, 15.0, false), 45.0);
+        assert_eq!(rotation_degrees(29.9, 45.0, 15.0, false), 30.0);
+        assert_eq!(rotation_degrees(30.0, 45.0, 15.0, true), 30.0);
+        for increment in [15.0, 22.5, 30.0, 60.0, 90.0] {
+            assert_eq!(rotation_degrees(increment - 4.5, increment, 5.0, false), increment);
+            assert_eq!(rotation_degrees(-increment + 4.5, increment, 5.0, false), -increment);
+            assert_eq!(rotation_degrees(increment - 4.5, increment, 5.0, true), increment - 4.5);
+        }
+        assert_eq!(rotation_degrees(43.25, 0.0, 5.0, false), 43.25);
+        assert_eq!(rotation_degrees(43.25, 45.0, 5.0, true), 43.25);
+        assert_eq!(rotation_degrees(43.25, 45.0, 5.0, false), 45.0);
+    }
     use cadrs_core::{Document, FeatureId, PartId, parts::PartKind, solid::Solid};
     use core_asm::{Instance, InstanceSource};
 
