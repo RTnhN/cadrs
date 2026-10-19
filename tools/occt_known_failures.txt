@@ -16,6 +16,7 @@ blend complex_e5
 blend complex_e7
 blend complex_f1
 blend complex_f2
+blend complex_f4
 blend complex_f7
 blend complex_g1
 blend complex_g2
@@ -160,7 +161,6 @@ boolean bcut_complex_c4
 boolean bcut_complex_e4
 boolean bcut_complex_f1
 boolean bcut_complex_f9
-boolean bcut_complex_g5
 boolean bcut_complex_h4
 boolean bcut_complex_h9
 boolean bcut_complex_i2
@@ -195,9 +195,9 @@ boolean bfuse_complex_e7
 boolean bfuse_complex_i3
 boolean bfuse_complex_k1
 boolean bfuse_complex_k6
+boolean bfuse_complex_l3
 boolean bfuse_complex_l9
 boolean bfuse_complex_m4
-boolean bfuse_complex_m5
 boolean bfuse_complex_n4
 boolean bfuse_complex_o1
 boolean bfuse_complex_o2

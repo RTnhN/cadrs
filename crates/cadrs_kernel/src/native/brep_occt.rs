@@ -383,24 +383,35 @@ fn spline_curve(s: &Spline, t0: f64, t1: f64) -> R<NurbsCurve> {
 }
 
 /// The curve on [a, b] (inside its domain) with clamped ends.
-fn clamp(mut c: NurbsCurve, a: f64, b: f64) -> NurbsCurve {
-    let p = c.degree;
+fn clamp(c: NurbsCurve, a: f64, b: f64) -> NurbsCurve {
     let eps = 1e-13 * (1.0 + a.abs().max(b.abs()));
+    if !(b > a + eps) {
+        // An empty range (a degenerate edge's): nothing to cut.
+        return c;
+    }
+    clamp_on(c.clone(), a, b, eps).unwrap_or(c)
+}
+
+fn clamp_on(mut c: NurbsCurve, a: f64, b: f64, eps: f64) -> Option<NurbsCurve> {
+    let p = c.degree;
     for u in [a, b] {
         let m = c.knots.iter().filter(|k| (**k - u).abs() <= eps).count();
         for _ in m..p {
             c = c.insert_knot(u);
         }
     }
-    let ia = c.knots.iter().position(|k| (*k - a).abs() <= eps).unwrap();
+    let ia = c.knots.iter().position(|k| (*k - a).abs() <= eps)?;
     let ma = c.knots[ia..].iter().take_while(|k| (**k - a).abs() <= eps).count();
-    let ib = c.knots.iter().position(|k| (*k - b).abs() <= eps).unwrap();
+    let ib = c.knots.iter().position(|k| (*k - b).abs() <= eps)?;
+    if ib < ia + ma || ia + ma < p + 1 {
+        return None;
+    }
     let mut knots = vec![a; p + 1];
     knots.extend_from_slice(&c.knots[ia + ma..ib]);
     knots.extend(vec![b; p + 1]);
     let first = ia + ma - 1 - p;
     let ncp = knots.len() - p - 1;
-    NurbsCurve { degree: p, knots, cps: c.cps[first..first + ncp].to_vec() }
+    Some(NurbsCurve { degree: p, knots, cps: c.cps.get(first..first + ncp)?.to_vec() })
 }
 
 fn spline_surface(du: usize, dv: usize, poles: &[Vec<H>], u: &(Vec<f64>, Vec<usize>, bool), v: &(Vec<f64>, Vec<usize>, bool)) -> R<NurbsSurface> {
@@ -1082,6 +1093,8 @@ struct Direct<'a> {
     f: &'a File,
     body: Body,
     verts: HashMap<(usize, [i64; 12]), usize>,
+    /// Vertices by position (1e-6 cells), to merge coincident vertex records.
+    grid: HashMap<[i64; 3], Vec<usize>>,
     edges: HashMap<(usize, [i64; 12]), usize>,
     shells: Vec<(Vec<usize>, bool)>,
     solids: Vec<Vec<usize>>,
@@ -1095,7 +1108,31 @@ impl Direct<'_> {
             return Ok(v);
         }
         let Kind::Vertex(p) = self.f.shapes[s].kind else { return Err("not a vertex".into()) };
-        let v = self.body.add_vertex(loc.m.point(&p));
+        let p = loc.m.point(&p);
+        // Two vertex records at one point (files from other systems): one vertex.
+        let cell = |q: &P3| [(q.x * 1e6).round() as i64, (q.y * 1e6).round() as i64, (q.z * 1e6).round() as i64];
+        let c = cell(&p);
+        let mut found = None;
+        'look: for dx in -1..=1 {
+            for dy in -1..=1 {
+                for dz in -1..=1 {
+                    if let Some(vs) = self.grid.get(&[c[0] + dx, c[1] + dy, c[2] + dz]) {
+                        if let Some(&v) = vs.iter().find(|&&v| (self.body.verts[v].p - p).norm() < 1e-7) {
+                            found = Some(v);
+                            break 'look;
+                        }
+                    }
+                }
+            }
+        }
+        let v = match found {
+            Some(v) => v,
+            None => {
+                let v = self.body.add_vertex(p);
+                self.grid.entry(c).or_default().push(v);
+                v
+            }
+        };
         self.verts.insert(key, v);
         Ok(v)
     }
@@ -1154,16 +1191,20 @@ impl Direct<'_> {
                 let eloc = wloc.then(&self.f.locs[el]);
                 let e = self.edge(es, &eloc)?;
                 let Kind::Edge(_, _, ref pcs) = self.f.shapes[es].kind else { unreachable!() };
-                let rep = pcs
-                    .iter()
-                    .find(|r| r.surf == si && loc_key(&eloc.then(&self.f.locs[r.loc])) == skey)
-                    .ok_or_else(|| format!("edge {es} has no p-curve on face {s}"))?;
-                let idx = match rep.pc2 {
-                    Some(p2) if rel == Ori::Rev => p2,
-                    _ => rep.pc,
-                };
+                let rep = pcs.iter().find(|r| r.surf == si && loc_key(&eloc.then(&self.f.locs[r.loc])) == skey);
                 let ed = &self.body.edges[e];
-                let pc = to_curve(&self.f.curves2d[idx], ed.t[0], ed.t[1])?;
+                let pc = match rep {
+                    Some(rep) => {
+                        let idx = match rep.pc2 {
+                            Some(p2) if rel == Ori::Rev => p2,
+                            _ => rep.pc,
+                        };
+                        to_curve(&self.f.curves2d[idx], ed.t[0], ed.t[1])?
+                    }
+                    // OCCT keeps no p-curves on planes (it projects the edge when asked).
+                    None if matches!(surf, Surface::Plane { .. }) && !ed.degenerate => super::pcurve::pcurve(&surf, &ed.curve, ed.t[0], ed.t[1], None),
+                    None => return Err(format!("edge {es} has no p-curve on face {s}")),
+                };
                 lp.push(Coedge { edge: e, fwd: ori.compose(rel) == Ori::Fwd, pc });
             }
             if !lp.is_empty() {
@@ -1283,7 +1324,7 @@ fn uv_area(l: &[Coedge], b: &Body) -> f64 {
 }
 
 fn build_direct(f: &File) -> R<Body> {
-    let mut d = Direct { f, body: Body::default(), verts: HashMap::new(), edges: HashMap::new(), shells: Vec::new(), solids: Vec::new(), free_faces: Vec::new() };
+    let mut d = Direct { f, body: Body::default(), verts: HashMap::new(), grid: HashMap::new(), edges: HashMap::new(), shells: Vec::new(), solids: Vec::new(), free_faces: Vec::new() };
     let (o, s, l) = f.root;
     d.visit(s, o, &f.locs[l])?;
     if !d.free_faces.is_empty() {
@@ -1339,7 +1380,7 @@ pub fn read_ordered(bytes: &[u8]) -> R<BrepRead> {
     let mids: Vec<P3> = b.xb.body.edges.iter().map(|e| e.point(e.mid_t())).collect();
     let has_faces = !b.xb.faces.is_empty();
     // Straight from the file when that gives a valid body; else rebuilt.
-    let direct = if has_faces {
+    let direct = if has_faces && std::env::var_os("CADRS_OCCT_REBUILD").is_none() {
         match build_direct(&f) {
             Ok(x) => {
                 let issues = x.check();
