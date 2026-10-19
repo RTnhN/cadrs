@@ -484,14 +484,10 @@ impl NurbsCurve {
             c = c.insert_knot(u);
         }
         let idx = c.knots.iter().position(|k| (*k - u).abs() < 1e-14).unwrap();
-        // knots[idx..idx+p+1] == u
-        let left_knots: Vec<f64> = c.knots[..idx + p + 1].to_vec();
-        let mut lk = left_knots;
-        lk.push(u);
-        let left = Self { degree: p, knots: lk, cps: c.cps[..idx].to_vec() };
-        let mut rk = vec![u];
-        rk.extend_from_slice(&c.knots[idx..]);
-        let right = Self { degree: p, knots: rk, cps: c.cps[idx - 1..].to_vec() };
+        // knots[idx..idx+p+1] == u: the left curve's poles end at idx − 1, the right's start at
+        // idx (both the point at u).
+        let left = Self { degree: p, knots: c.knots[..idx + p + 1].to_vec(), cps: c.cps[..idx].to_vec() };
+        let right = Self { degree: p, knots: c.knots[idx..].to_vec(), cps: c.cps[idx..].to_vec() };
         (left, right)
     }
 
@@ -515,6 +511,51 @@ impl NurbsCurve {
             }
         }
         Self { degree: p, knots, cps }
+    }
+
+    /// The same curve one degree higher (exact): each span raised as a Bézier segment, the
+    /// spans joined again at knots of full multiplicity.
+    pub fn elevated(&self) -> Self {
+        let p = self.degree;
+        let (a, b) = self.range();
+        let eps = 1e-12 * (1.0 + a.abs().max(b.abs()));
+        let mut c = self.clone();
+        let inner: Vec<f64> = {
+            let mut v: Vec<f64> = Vec::new();
+            for &k in &self.knots[p + 1..self.knots.len() - p - 1] {
+                if v.last().map_or(true, |l| (k - l).abs() > eps) {
+                    v.push(k);
+                }
+            }
+            v
+        };
+        for &u in &inner {
+            while c.knots.iter().filter(|k| (**k - u).abs() <= eps).count() < p {
+                c = c.insert_knot(u);
+            }
+        }
+        // Each span's poles end at its first knot's last occurrence.
+        let starts: Vec<f64> = std::iter::once(a).chain(inner.iter().copied()).collect();
+        let mut cps: Vec<H> = Vec::new();
+        for (sgi, &u) in starts.iter().enumerate() {
+            let r = c.knots.iter().rposition(|k| (*k - u).abs() <= eps).unwrap_or(p).min(c.cps.len() - 1).max(p);
+            let seg = &c.cps[r - p..=r];
+            let up: Vec<H> = (0..=p + 1)
+                .map(|i| {
+                    let t = i as f64 / (p + 1) as f64;
+                    let prev = if i > 0 { seg[i - 1] * t } else { H::zeros() };
+                    let cur = if i <= p { seg[i] * (1.0 - t) } else { H::zeros() };
+                    prev + cur
+                })
+                .collect();
+            cps.extend(if sgi == 0 { &up[..] } else { &up[1..] });
+        }
+        let mut knots = vec![a; p + 2];
+        for &u in &inner {
+            knots.extend(std::iter::repeat_n(u, p + 1));
+        }
+        knots.extend(std::iter::repeat_n(b, p + 2));
+        Self { degree: p + 1, knots, cps }
     }
 
     /// Degree elevation by repeated knot refinement is not needed yet; this raises the degree of
@@ -776,6 +817,40 @@ pub fn solve(a: DMatrix<f64>, b: DVector<f64>) -> Option<DVector<f64>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn split_halves_are_valid_curves() {
+        let c = NurbsCurve::interpolate(&[P3::new(0.0, 0.0, 0.0), P3::new(1.0, 2.0, 0.0), P3::new(3.0, 1.0, 1.0), P3::new(4.0, 3.0, 0.0), P3::new(6.0, 0.0, 2.0)], &[0.0, 0.2, 0.5, 0.7, 1.0], 3, None, None);
+        for u in [0.3, 0.5] {
+            let (l, r) = c.split(u);
+            for h in [&l, &r] {
+                assert_eq!(h.knots.len(), h.cps.len() + h.degree + 1);
+            }
+            assert_eq!((l.range(), r.range()), ((0.0, u), (u, 1.0)));
+            for i in 0..=20 {
+                let t = u * i as f64 / 20.0;
+                assert!((l.point(t) - c.point(t)).norm() < 1e-12);
+                let t = u + (1.0 - u) * i as f64 / 20.0;
+                assert!((r.point(t) - c.point(t)).norm() < 1e-12);
+            }
+        }
+    }
+
+    #[test]
+    fn elevation_keeps_the_curve() {
+        let c = NurbsCurve::interpolate(&[P3::new(0.0, 0.0, 0.0), P3::new(1.0, 2.0, 0.0), P3::new(3.0, 1.0, 1.0), P3::new(4.0, 3.0, 0.0), P3::new(6.0, 0.0, 2.0)], &[0.0, 0.2, 0.5, 0.7, 1.0], 2, None, None);
+        let w = std::f64::consts::FRAC_1_SQRT_2;
+        let arc = NurbsCurve::bezier(&[P3::new(1.0, 0.0, 0.0), P3::new(1.0, 1.0, 0.0), P3::new(0.0, 1.0, 0.0)], &[1.0, w, 1.0]);
+        for c in [c, arc] {
+            let e = c.elevated();
+            assert_eq!(e.degree, c.degree + 1);
+            assert_eq!(e.knots.len(), e.cps.len() + e.degree + 1);
+            for i in 0..=40 {
+                let u = i as f64 / 40.0;
+                assert!((e.point(u) - c.point(u)).norm() < 1e-12, "{u}");
+            }
+        }
+    }
 
     #[test]
     fn periodic_interpolation_closes_smoothly() {

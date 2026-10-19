@@ -505,6 +505,17 @@ pub fn extrude_with(k: &mut NativeKernel, profile: &Profile, spec: &ExtrudeSpec)
 }
 
 /// Sweeps faces into a solid; faces whose boxes overlap (thin walls' bands) are united.
+/// A straight sweep of a profile's regions along any vector (an oblique prism).
+pub fn prism_along(k: &mut NativeKernel, profile: &Profile, v: V3) -> Result<OpResult> {
+    let len = v.norm();
+    if len < 1e-12 || v.dot(&profile.plane.normal).abs() < 1e-9 * len {
+        return Err(KernelError::InvalidParameter("A prism needs a direction off the profile's plane".into()));
+    }
+    let faces = inputs(k, profile, &[])?;
+    let kind = sweep::Prism { plane: profile.plane, dir: v / len };
+    Ok(sweep_united(&faces, &kind, 0.0, len, false)?.into_result(k))
+}
+
 fn sweep_united(faces: &[MergedFace], kind: &dyn SweepKind, s0: f64, s1: f64, whole: bool) -> Result<Tagged> {
     let t = Tagged::from_built(sweep::sweep_full(faces, &[], kind, s0, s1, whole, true)?);
     if faces.len() < 2 {

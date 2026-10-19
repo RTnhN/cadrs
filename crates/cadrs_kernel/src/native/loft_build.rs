@@ -984,6 +984,19 @@ fn loft_exact_with(k: &NativeKernel, spec: &LoftSpec, secs: &mut Vec<Sec>, solid
                 curves.push(NurbsCurve { degree: 0, knots: vec![], cps: vec![] });
             }
         }
+        // The same degree all through (lines and conics are quadratics already).
+        let top = curves.iter().map(|c| c.degree).max().unwrap_or(1);
+        for c in curves.iter_mut().filter(|c| !c.cps.is_empty()) {
+            while c.degree < top {
+                *c = c.elevated();
+            }
+        }
+        let template = template.map(|mut t| {
+            while t.degree < top {
+                t = t.elevated();
+            }
+            t
+        });
         // Points: the template's shape collapsed onto the point.
         let tpl = template.unwrap();
         for (si, s) in secs.iter().enumerate() {

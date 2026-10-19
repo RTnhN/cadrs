@@ -114,12 +114,12 @@ impl Ax {
 
 /// A B-spline as OCCT holds it: poles, weights, distinct knots with multiplicities.
 #[derive(Debug, Clone)]
-struct Spline {
-    degree: usize,
-    poles: Vec<H>,
-    knots: Vec<f64>,
-    mults: Vec<usize>,
-    periodic: bool,
+pub(crate) struct Spline {
+    pub degree: usize,
+    pub poles: Vec<H>,
+    pub knots: Vec<f64>,
+    pub mults: Vec<usize>,
+    pub periodic: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -347,7 +347,7 @@ fn read_surface(t: &mut Tok) -> R<GSurf> {
 
 /// The knot vector and poles of a spline whose domain covers [t0, t1] (a periodic one unrolled
 /// over enough periods), cut to [t0, t1] when that lies inside.
-fn spline_curve(s: &Spline, t0: f64, t1: f64) -> R<NurbsCurve> {
+pub(crate) fn spline_curve(s: &Spline, t0: f64, t1: f64) -> R<NurbsCurve> {
     let p = s.degree;
     if p == 0 || s.knots.len() < 2 || s.knots.len() != s.mults.len() {
         return Err("a bad B-spline".into());

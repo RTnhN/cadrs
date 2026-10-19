@@ -360,7 +360,12 @@ pub fn chain_tool(b: &Body, input: BodyId, chain: &[(usize, bool)], kind: &dyn F
     let mut stations: Vec<Station> = vec![station(total_lo, None)?];
     let mut step = max_step;
     let mut bi = 0;
+    // A bound on the march (a path that never settles fails instead of hanging).
+    const MAX_STATIONS: usize = 5000;
     while stations.last().unwrap().s < total_hi - 1e-9 {
+        if stations.len() > MAX_STATIONS {
+            return Err(KernelError::OperationFailed(format!("the blend's path needs more than {MAX_STATIONS} sections (at {:.4} of [{total_lo:.3}, {total_hi:.3}], step {step:.2e})", stations.last().unwrap().s)));
+        }
         let s0 = stations.last().unwrap().s;
         while breaks[bi] <= s0 + 1e-9 {
             bi += 1;

@@ -120,6 +120,20 @@ fn err(m: &str) -> KernelError {
     KernelError::OperationFailed(m.to_string())
 }
 
+/// A DRAW placement (`gp_Ax2`): origin, main direction (+z by default) and x direction
+/// (projected square to the main one; OCCT's choice when not given). Returns origin, x and y.
+fn ax2_of(o: [f64; 3], n: Option<[f64; 3]>, x: Option<[f64; 3]>) -> (P3, V3, V3) {
+    let n = V3::from(n.unwrap_or([0.0, 0.0, 1.0])).normalize();
+    let xd = match x {
+        Some(x) => {
+            let x = V3::from(x);
+            (x - n * x.dot(&n)).normalize()
+        }
+        None => ax2_x(&n),
+    };
+    (P3::from(o), xd, n.cross(&xd))
+}
+
 /// OCCT's x direction for a placement with only its main direction (`gp_Ax2(P, V)`).
 pub fn ax2_x(v: &V3) -> V3 {
     let (a, b, c) = (v.x, v.y, v.z);
@@ -202,9 +216,59 @@ impl NativeKernel {
         Shape::Edge(DEdge { curve: c.clone(), t0, t1 })
     }
 
-    /// `mkedge name curve` of a whole circle.
+    /// `mkedge name curve`: the whole curve (a circle's or ellipse's turn, a B-spline's range).
     pub fn mkedge_full(&self, c: &Curve) -> Shape {
-        self.mkedge(c, 0.0, TAU)
+        let (t0, t1) = match c {
+            Curve::Nurbs(n) => n.range(),
+            _ => (0.0, TAU),
+        };
+        self.mkedge(c, t0, t1)
+    }
+
+    /// `ellipse name x y z [nx ny nz [xx xy xz]] major minor` (normal +z, OCCT's x direction
+    /// for the normal unless given).
+    pub fn ellipse(&self, o: [f64; 3], n: Option<[f64; 3]>, x: Option<[f64; 3]>, major: f64, minor: f64) -> Curve {
+        let (c, xd, yd) = ax2_of(o, n, x);
+        Curve::Ellipse { c, x: xd, y: yd, a: major, b: minor }
+    }
+
+    /// `parabola name x y z [nx ny nz [xx xy xz]] focal`: O + t²/(4f)·X + t·Y, as an exact
+    /// quadratic on t ∈ [−10⁴, 10⁴] (OCCT's parameters).
+    pub fn parabola(&self, o: [f64; 3], n: Option<[f64; 3]>, x: Option<[f64; 3]>, focal: f64) -> Result<Curve> {
+        if !(focal > 0.0) {
+            return Err(err("parabola: the focal length must be positive"));
+        }
+        let (c, xd, yd) = ax2_of(o, n, x);
+        const L: f64 = 1e4;
+        // The quadratic's Bézier poles on [−L, L]: its ends and the crossing of their tangents.
+        let p = |t: f64| c + xd * (t * t / (4.0 * focal)) + yd * t;
+        let mid = c - xd * (L * L / (4.0 * focal));
+        let b = super::nurbs::NurbsCurve::bezier(&[p(-L), mid, p(L)], &[1.0, 1.0, 1.0]).reparam(-L, L);
+        Ok(Curve::Nurbs(std::sync::Arc::new(b)))
+    }
+
+    /// `beziercurve name n x y z [w] …` (on [0, 1]).
+    pub fn beziercurve(&self, poles: &[[f64; 3]], weights: Option<&[f64]>) -> Result<Curve> {
+        if poles.len() < 2 {
+            return Err(err("beziercurve needs two poles"));
+        }
+        let pts: Vec<P3> = poles.iter().map(|p| P3::from(*p)).collect();
+        let ones = vec![1.0; pts.len()];
+        Ok(Curve::Nurbs(std::sync::Arc::new(super::nurbs::NurbsCurve::bezier(&pts, weights.unwrap_or(&ones)))))
+    }
+
+    /// `bsplinecurve name degree nknots k m … x y z w …` and `pbsplinecurve` (periodic: the
+    /// poles of one period).
+    pub fn bsplinecurve(&self, degree: usize, knots: &[f64], mults: &[usize], poles: &[[f64; 4]], periodic: bool) -> Result<Curve> {
+        let s = super::brep_occt::Spline {
+            degree,
+            poles: poles.iter().map(|p| super::nurbs::hom(&P3::new(p[0], p[1], p[2]), p[3])).collect(),
+            knots: knots.to_vec(),
+            mults: mults.to_vec(),
+            periodic,
+        };
+        let c = super::brep_occt::spline_curve(&s, 0.0, 0.0).map_err(|e| err(&format!("bsplinecurve: {e}")))?;
+        Ok(Curve::Nurbs(std::sync::Arc::new(c)))
     }
 
     /// `wire name e1 e2 …`: the edges chained end to start (each turned round when needed).
@@ -691,7 +755,8 @@ impl NativeKernel {
         let n = profile.plane.normal.into_inner();
         let along = v.dot(&n);
         if (v - n * along).norm() > 1e-9 * v.norm().max(1.0) {
-            return Err(KernelError::Unsupported("prisms off the face's normal"));
+            let r = super::features::prism_along(self, &profile, v)?;
+            return Ok(Shape::Body(r.bodies[0]));
         }
         let mut p = profile;
         if along < 0.0 {
@@ -1459,7 +1524,40 @@ fn face_profile(f: &Shape) -> Result<Profile> {
                     let sweep = (e.t1 - e.t0) * if flip { -1.0 } else { 1.0 };
                     curves.push(Curve2::Arc { center: cc, radius: *r, start_angle: start, sweep, source: None });
                 }
-                _ => return Err(KernelError::Unsupported("faces bounded by curves other than lines and circles")),
+                Curve::Ellipse { c, x, y, a, b } => {
+                    let cc = to2(c);
+                    let (xd, yd) = (plane.x_dir.into_inner(), plane.y_dir().into_inner());
+                    let x2 = nalgebra::Vector2::new(x.dot(&xd), x.dot(&yd));
+                    let flip = x.cross(y).dot(&n) < 0.0;
+                    curves.push(Curve2::EllipseArc {
+                        center: cc,
+                        major_radius: *a,
+                        minor_radius: if flip { -*b } else { *b },
+                        rotation: x2.y.atan2(x2.x),
+                        start: e.t0,
+                        sweep: e.t1 - e.t0,
+                        source: None,
+                    });
+                }
+                Curve::Nurbs(_) => {
+                    // Non-rational, up to cubic: exact cubic Bézier spans.
+                    let (lo, hi) = (e.t0.min(e.t1), e.t0.max(e.t1));
+                    let mut nc = e.curve.to_nurbs(lo, hi);
+                    if e.t1 < e.t0 {
+                        nc = nc.reversed();
+                    }
+                    if nc.is_rational() || nc.degree > 3 {
+                        return Err(KernelError::Unsupported("faces bounded by rational or high-degree B-splines"));
+                    }
+                    while nc.degree < 3 {
+                        nc = nc.elevated();
+                    }
+                    for span in bezier_spans(&nc) {
+                        let q: Vec<_> = span.iter().map(|h| to2(&super::nurbs::dehom(h))).collect();
+                        curves.push(Curve2::Bezier { poles: [q[0], q[1], q[2], q[3]], source: None });
+                    }
+                }
+                _ => return Err(KernelError::Unsupported("faces bounded by curves other than lines, conics and B-splines")),
             }
         }
         Ok(Loop { curves })
@@ -1467,6 +1565,32 @@ fn face_profile(f: &Shape) -> Result<Profile> {
     let outer = conv(&loops[0])?;
     let holes = loops[1..].iter().map(conv).collect::<Result<Vec<_>>>()?;
     Ok(Profile::new(*plane, vec![Region { outer, holes, source: None }]))
+}
+
+/// The Bézier spans of a B-spline (its poles per span, interior knots raised to the degree).
+fn bezier_spans(c: &super::nurbs::NurbsCurve) -> Vec<Vec<super::nurbs::H>> {
+    let p = c.degree;
+    let (a, b) = c.range();
+    let eps = 1e-12 * (1.0 + a.abs().max(b.abs()));
+    let mut inner: Vec<f64> = Vec::new();
+    for &k in &c.knots[p + 1..c.knots.len() - p - 1] {
+        if k > a + eps && k < b - eps && inner.last().map_or(true, |l| (k - l).abs() > eps) {
+            inner.push(k);
+        }
+    }
+    let mut d = c.clone();
+    for &u in &inner {
+        while d.knots.iter().filter(|k| (**k - u).abs() <= eps).count() < p {
+            d = d.insert_knot(u);
+        }
+    }
+    std::iter::once(a)
+        .chain(inner.iter().copied())
+        .map(|u| {
+            let r = d.knots.iter().rposition(|k| (*k - u).abs() <= eps).unwrap_or(p).min(d.cps.len() - 1).max(p);
+            d.cps[r - p..=r].to_vec()
+        })
+        .collect()
 }
 
 /// A planar primitive for the fillet: a line or a circle in the corner's plane.

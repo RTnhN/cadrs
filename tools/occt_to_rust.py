@@ -27,7 +27,7 @@ IGNORED = {
     "checkview", "erase", "donly", "display", "fit", "clear", "puts", "smallview", "axo", "top", "front", "left", "vinit", "vdisplay",
     "vfit", "vsetdispmode", "vclear", "vclose", "checkmaxtol", "checksection", "decho", "dlog", "pload", "cpulimit", "protect",
     "isos", "triangles", "dchrono", "chrono", "xwd", "vdump", "dmode", "disp", "view", "2dfit", "repaint", "settolerance",
-    "checktrinfo", "dtyp", "whatis", "tolerance", "checkcontinuity", "bfillds",
+    "checktrinfo", "dtyp", "whatis", "tolerance", "checkcontinuity", "bfillds", "setflags",
     "brunparallel", "bnondestructive", "bfuzzyvalue", "bglue", "bcheckinverted", "buseobb", "bdrawwarnshapes", "bsimplify",
     "setfillhistory", "savehistory", "tclean", "incmesh", "tolblend", "checkfaults", "dversion", "dsetsignal", "testgrid", "datadir", "locate_data_file",
 }
@@ -149,6 +149,38 @@ class Case:
             else:
                 self.bind(a[0], f"k.plane_x({', '.join(nums)})")
             self.vars[a[0]] = ident(a[0])
+        elif c in ("ellipse", "parabola") and len(a) in ((6, 9, 12) if c == "ellipse" else (5, 8, 11)):
+            nv = 2 if c == "ellipse" else 1
+            geo, vals = a[1:len(a) - nv], a[len(a) - nv:]
+            o = f"[{L(geo[0])}, {L(geo[1])}, {L(geo[2])}]"
+            n = f"Some([{L(geo[3])}, {L(geo[4])}, {L(geo[5])}])" if len(geo) >= 6 else "None"
+            x = f"Some([{L(geo[6])}, {L(geo[7])}, {L(geo[8])}])" if len(geo) >= 9 else "None"
+            if c == "ellipse":
+                self.bind(a[0], f"k.ellipse({o}, {n}, {x}, {L(vals[0])}, {L(vals[1])})")
+            else:
+                self.bind(a[0], f"k.parabola({o}, {n}, {x}, {L(vals[0])})?")
+        elif c == "beziercurve" and len(a) >= 2:
+            np_ = int(self.num(a[1]))
+            rest = a[2:]
+            if np_ <= 0 or len(rest) % np_ or len(rest) // np_ not in (3, 4):
+                raise Unsupported("beziercurve with these arguments")
+            st = len(rest) // np_
+            poles = [f"[{L(rest[i * st])}, {L(rest[i * st + 1])}, {L(rest[i * st + 2])}]" for i in range(np_)]
+            w = f"Some(&[{', '.join(L(rest[i * st + 3]) for i in range(np_))}])" if st == 4 else "None"
+            self.bind(a[0], f"k.beziercurve(&[{', '.join(poles)}], {w})?")
+        elif c in ("bsplinecurve", "pbsplinecurve") and len(a) >= 3:
+            deg, nk = int(self.num(a[1])), int(self.num(a[2]))
+            ks = a[3:3 + 2 * nk]
+            if len(ks) != 2 * nk:
+                raise Unsupported(f"{c} with these arguments")
+            knots = [L(ks[2 * i]) for i in range(nk)]
+            mults = [int(self.num(ks[2 * i + 1])) for i in range(nk)]
+            rest = a[3 + 2 * nk:]
+            if len(rest) % 4:
+                raise Unsupported(f"{c} with these arguments")
+            poles = [f"[{', '.join(L(x) for x in rest[i:i + 4])}]" for i in range(0, len(rest), 4)]
+            per = "true" if c == "pbsplinecurve" else "false"
+            self.bind(a[0], f"k.bsplinecurve({deg}, &[{', '.join(knots)}], &[{', '.join(map(str, mults))}], &[{', '.join(poles)}], {per})?")
         elif c == "mkedge" and len(a) == 4:
             self.bind(a[0], f"k.mkedge(&{self.vars[a[1]] if a[1] in self.vars else self.raise_(a[1])}, {L(a[2])}, {L(a[3])})")
         elif c == "mkedge" and len(a) == 2:
