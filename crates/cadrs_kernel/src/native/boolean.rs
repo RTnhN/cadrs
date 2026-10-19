@@ -202,18 +202,55 @@ fn edge_bbox(e: &WEdge, verts: &[P3]) -> Bbox {
     bb.add(&verts[e.v[0]]);
     bb.add(&verts[e.v[1]]);
     if !e.degenerate {
-        let n = match e.curve {
-            Curve::Line { .. } => 1,
-            _ => 32,
-        };
-        for i in 0..=n {
-            bb.add(&e.curve.point(e.t[0] + (e.t[1] - e.t[0]) * i as f64 / n as f64));
+        bb.union(&curve_bbox(&e.curve, e.t[0], e.t[1]));
+    }
+    bb.grow(vtol() * 10.0 + e.tol)
+}
+
+/// A box that holds the curve between t0 and t1: exact for lines, circles and ellipses (their
+/// extremes in each axis), the poles' box for B-splines (a rational B-spline with positive
+/// weights lies in its poles' convex hull).
+pub fn curve_bbox(c: &Curve, t0: f64, t1: f64) -> Bbox {
+    let (lo, hi) = (t0.min(t1), t0.max(t1));
+    let mut bb = Bbox::empty();
+    bb.add(&c.point(lo));
+    bb.add(&c.point(hi));
+    match c {
+        Curve::Line { .. } => {}
+        Curve::Circle { c: o, x, y, r } | Curve::Ellipse { c: o, x, y, a: r, .. } => {
+            let (rx, ry) = match c {
+                Curve::Ellipse { a, b, .. } => (*a, *b),
+                _ => (*r, *r),
+            };
+            let _ = o;
+            // Coordinate k is o_k + rx·x_k·cos t + ry·y_k·sin t: extreme where tan t = ry·y_k / (rx·x_k).
+            for k in 0..3 {
+                let t = (ry * y[k]).atan2(rx * x[k]);
+                for base in [t, t + std::f64::consts::PI] {
+                    // Every copy of the extreme inside [lo, hi].
+                    let mut tt = base + ((lo - base) / std::f64::consts::TAU).ceil() * std::f64::consts::TAU;
+                    while tt <= hi {
+                        bb.add(&c.point(tt));
+                        tt += std::f64::consts::TAU;
+                    }
+                }
+            }
         }
-        if let Curve::Circle { r, .. } | Curve::Ellipse { a: r, .. } = e.curve {
-            bb = bb.grow(r * 0.02);
+        Curve::Nurbs(_) => {
+            let n = c.to_nurbs(lo, hi);
+            if n.cps.iter().all(|h| h.w > 0.0) {
+                for h in &n.cps {
+                    bb.add(&super::nurbs::dehom(h));
+                }
+            } else {
+                for i in 0..=64 {
+                    bb.add(&c.point(lo + (hi - lo) * i as f64 / 64.0));
+                }
+                bb = bb.grow(bb.diagonal() * 0.02);
+            }
         }
     }
-    bb.grow(vtol() * 10.0)
+    bb
 }
 
 /// Imports a body's vertices, edges and faces into the pool.
@@ -800,12 +837,23 @@ fn run(a: &Body, b: &Body, mode: Mode) -> Result<BoolOut> {
         vs
     };
     let body_verts = [verts_of(0..na_edges, &pool), verts_of(na_edges..ne, &pool)];
+    // Spatial indexes (candidates come back in the order the full scans used).
+    let point_box = |p: &P3| {
+        let mut b = Bbox::empty();
+        b.add(p);
+        b
+    };
+    let vtrees = [0, 1].map(|k| super::bvh::Bvh::new(body_verts[k].iter().map(|&v| point_box(&pool.verts[v])).collect()));
+    let reach = pool.vtols.iter().copied().fold(vtol(), f64::max).max(pool.edges.iter().map(|e| e.tol).fold(0.0, f64::max));
     for e in 0..ne {
         if pool.edges[e].degenerate {
             continue;
         }
-        let other = &body_verts[1 - owner_of_edge(e)];
-        for &v in other {
+        let ob = 1 - owner_of_edge(e);
+        let mut near = vtrees[ob].query(&ebox[e].grow(reach));
+        near.sort_unstable();
+        let other: Vec<usize> = near.into_iter().map(|i| body_verts[ob][i]).collect();
+        for &v in &other {
             let p = pool.verts[v];
             let ed = &pool.edges[e];
             let tol = vtol().max(pool.vtols[v]).max(ed.tol);
@@ -843,11 +891,14 @@ fn run(a: &Body, b: &Body, mode: Mode) -> Result<BoolOut> {
         }
     }
     // 2b. Edge–edge intersections (A × B).
+    let btree = super::bvh::Bvh::new(ebox[na_edges..ne].to_vec());
     for ea in 0..na_edges {
         if pool.edges[ea].degenerate {
             continue;
         }
-        for eb in na_edges..ne {
+        let mut near = btree.query(&ebox[ea]);
+        near.sort_unstable();
+        for eb in near.into_iter().map(|j| j + na_edges) {
             if pool.edges[eb].degenerate || !ebox[ea].overlaps(&ebox[eb]) {
                 continue;
             }
@@ -870,12 +921,15 @@ fn run(a: &Body, b: &Body, mode: Mode) -> Result<BoolOut> {
     let mut face_pts: Vec<Vec<usize>> = vec![Vec::new(); faces.len()];
     // Edges of one body lying on a face of the other (imprinted as cuts once split).
     let mut on_face: Vec<Vec<usize>> = vec![Vec::new(); faces.len()];
+    let ftree = super::bvh::Bvh::new(faces.iter().map(|f| f.bbox.clone()).collect());
     for e in 0..ne {
         if pool.edges[e].degenerate {
             continue;
         }
         let oe = owner_of_edge(e);
-        for fi in 0..faces.len() {
+        let mut near = ftree.query(&ebox[e]);
+        near.sort_unstable();
+        for fi in near {
             if faces[fi].owner == oe || !ebox[e].overlaps(&faces[fi].bbox) {
                 continue;
             }
@@ -924,7 +978,9 @@ fn run(a: &Body, b: &Body, mode: Mode) -> Result<BoolOut> {
         if !selected(faces[fa].orig) {
             continue;
         }
-        for fb in na_faces..faces.len() {
+        let mut near = ftree.query(&faces[fa].bbox);
+        near.sort_unstable();
+        for fb in near.into_iter().filter(|&f| f >= na_faces) {
             if !faces[fa].bbox.overlaps(&faces[fb].bbox) {
                 continue;
             }

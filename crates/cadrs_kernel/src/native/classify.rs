@@ -347,13 +347,24 @@ pub fn classify_point(body: &Body, polys: &[Vec<Vec<P2>>], p: &P3, tol: f64) -> 
 
 /// Ray parity with retries in other directions when a ray grazes an edge or a face.
 pub fn parity_inside(body: &Body, polys: &[Vec<Vec<P2>>], p: &P3) -> bool {
-    let dirs = [
+    // Five fixed directions, then 32 more spread over the sphere (a golden-angle spiral) while
+    // every ray so far grazed a face or ran through an edge.
+    let golden = std::f64::consts::PI * (3.0 - 5f64.sqrt());
+    let dirs: Vec<V3> = [
         V3::new(0.5773, 0.5774, 0.5772),
         V3::new(-0.3014, 0.8123, 0.4993),
         V3::new(0.7071, -0.1213, -0.6966),
         V3::new(0.1234, 0.2345, -0.9641),
         V3::new(-0.8, -0.35, 0.487),
-    ];
+    ]
+    .into_iter()
+    .chain((0..32).map(|i| {
+        let z = 1.0 - (i as f64 + 0.5) / 16.0;
+        let r = (1.0 - z * z).max(0.0).sqrt();
+        let a = golden * i as f64 + 0.1;
+        V3::new(r * a.cos(), r * a.sin(), z)
+    }))
+    .collect();
     let bb = body.bbox().grow(1.0);
     let span = bb.diagonal() + (bb.center() - p).norm();
     let mut votes = (0, 0);
@@ -399,5 +410,24 @@ pub fn parity_inside(body: &Body, polys: &[Vec<Vec<P2>>], p: &P3) -> bool {
             break;
         }
     }
+    if votes.0 + votes.1 == 0 {
+        // Every ray grazed: by the side of the nearest face.
+        return nearest_face_inside(body, p);
+    }
     votes.0 > votes.1
+}
+
+/// Whether `p` lies behind the nearest face of `body` (against its outward normal there).
+fn nearest_face_inside(body: &Body, p: &P3) -> bool {
+    let mut best: Option<(f64, V3, P3)> = None;
+    for f in &body.faces {
+        let (u, v) = f.surf.project(p, None);
+        let q = f.surf.eval(u, v);
+        let d = (q - p).norm();
+        if best.is_none_or(|b| d < b.0) {
+            let n = f.surf.normal(u, v) * if f.sense { 1.0 } else { -1.0 };
+            best = Some((d, n, q));
+        }
+    }
+    best.is_some_and(|(_, n, q)| (p - q).dot(&n) < 0.0)
 }
