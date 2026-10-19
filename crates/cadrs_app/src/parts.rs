@@ -81,7 +81,7 @@ impl Plugin for PartsPlugin {
             .add_systems(Update, set_snapshot_store.run_if(resource_changed::<crate::DocumentStore>))
             .add_systems(
                 Update,
-                (update_part_cache, crate::assembly::in_context::sync_context_parts, sync_part_meshes, shade_parts, draw_part_edges, draw_sketch_curve_picks, tint_selection, tint_sketch_plane)
+                (update_part_cache, crate::assembly::in_context::sync_context_parts, sync_part_meshes, sync_ghost_meshes, draw_ghost_edges, shade_parts, draw_part_edges, draw_sketch_curve_picks, tint_selection, tint_sketch_plane)
                     .chain()
                     .in_set(PartsSet)
                     .after(crate::viewport::apply_view_to_camera)
@@ -432,6 +432,12 @@ pub struct PartCache {
     pub missing: HashMap<FeatureId, Vec<usize>>,
     /// True while a rebuild is running (the parts on screen are the previous ones).
     pub rebuilding: bool,
+    /// The parts as they were before the feature whose dialog is open (Onshape's ghost): drawn
+    /// faint over the result and pickable, so edges the feature consumed (a chamfered edge) can
+    /// still be picked. Empty when no dialog is open.
+    pub ghost: Vec<Part>,
+    /// Bumped when [`Self::ghost`] changes (its meshes are rebuilt).
+    pub ghost_generation: u64,
     /// Sketches consumed by an extrude (other than the one being edited): hidden in the view and
     /// greyed out in the feature list.
     pub hidden_sketches: HashSet<FeatureId>,
@@ -665,7 +671,19 @@ impl PartCache {
     /// The shown parts that can be picked (MC2.3: not an assembly context's while Select
     /// transparent geometry is off).
     pub fn pickable(&self) -> impl Iterator<Item = &Part> {
-        self.shown().filter(|p| !self.unpickable.contains(&p.id))
+        self.shown().filter(|p| !self.unpickable.contains(&p.id)).chain(self.ghost.iter())
+    }
+
+    /// The part `id` that has `edge`: the shown one, else its ghost (an edge the edited
+    /// feature consumed).
+    pub fn part_with_edge(&self, id: PartId, edge: &EdgeName) -> Option<&Part> {
+        self.part(id).filter(|p| p.solid.edge(edge).is_some()).or_else(|| self.ghost.iter().find(|p| p.id == id && p.solid.edge(edge).is_some()))
+    }
+
+    /// The part `id` that has `face`: the shown one, else its ghost.
+    pub fn part_or_ghost_with_face(&self, id: PartId, face: &FaceName) -> Option<&Part> {
+        let has = |p: &&Part| p.solid.faces.iter().any(|f| &f.name == face);
+        self.part(id).filter(has).or_else(|| self.ghost.iter().find(|p| p.id == id && has(p)))
     }
 
     /// A shown part, or the Add preview's body, by id (what the part meshes draw).
@@ -1746,6 +1764,62 @@ fn sync_part_meshes(
         // so is the material a Remove takes out.
         if crate::assembly::standard::is_ghost(part.id) || cache.xray(part).is_some() {
             e.insert(RenderLayers::layer(crate::viewport::OVERLAY_LAYER));
+        }
+    }
+}
+
+/// A mesh of [`PartCache::ghost`].
+#[derive(Component)]
+pub struct GhostMesh;
+
+/// The ghost's opacity: faint enough to read the result through it.
+const GHOST_PART_ALPHA: f32 = 0.18;
+
+/// Keeps one faint mesh per ghost part (the parts before the edited feature).
+fn sync_ghost_meshes(
+    cache: Res<PartCache>,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<PartShading>>,
+    mut mat: Local<Option<Handle<PartShading>>>,
+    q: Query<Entity, With<GhostMesh>>,
+    mut last: Local<Option<u64>>,
+    mut commands: Commands,
+) {
+    if *last == Some(cache.ghost_generation) {
+        return;
+    }
+    *last = Some(cache.ghost_generation);
+    for e in &q {
+        commands.entity(e).try_despawn();
+    }
+    let mat = mat.get_or_insert_with(|| materials.add(PartShading::new(true, true))).clone();
+    for part in &cache.ghost {
+        let mut bases = cache.bases(part);
+        for b in &mut bases {
+            b.alpha = b.alpha.min(GHOST_PART_ALPHA);
+        }
+        let mesh = meshes.add(part_base_mesh(part, true, &bases));
+        commands.spawn((
+            Name::new(format!("ghost-{}", part.name.to_lowercase().replace(' ', "-"))),
+            GhostMesh,
+            Mesh3d(mesh),
+            MeshMaterial3d(mat.clone()),
+            Transform::IDENTITY,
+            DespawnOnExit(AppState::Document),
+        ));
+    }
+}
+
+/// The ghost's edges that the edited feature consumed (gone from the result: a chamfered or
+/// filleted edge), faint, as Onshape draws them to pick on.
+fn draw_ghost_edges(cache: Res<PartCache>, section: Res<crate::section_view::SectionClip>, mut g: Gizmos<PreviewEdgeGizmos>) {
+    for part in &cache.ghost {
+        let shown = cache.part(part.id);
+        for e in part.solid.edges.iter().filter(|e| !e.smooth) {
+            if shown.is_some_and(|s| s.solid.edge(&e.name).is_some()) {
+                continue;
+            }
+            strip(&mut g, section.clip_for(part.id), e.points.iter().map(|p| v3(*p)), Color::srgba(0.08, 0.08, 0.08, 0.55));
         }
     }
 }

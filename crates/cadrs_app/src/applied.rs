@@ -701,12 +701,12 @@ pub fn finish(world: &mut World) {
 pub fn entity_of(cache: &PartCache, p: Pick) -> Option<EdgeOrFace> {
     match p {
         Pick::Edge(part, edge) => {
-            let solid = &cache.part(part)?.solid;
+            let solid = &cache.part_with_edge(part, &edge)?.solid;
             let seed = solid.edge(&edge)?.midpoint();
             Some(EdgeOrFace::Edge(EdgeRef { part, edge, seed }))
         }
         Pick::Face(part, face) => {
-            let solid = &cache.part(part)?.solid;
+            let solid = &cache.part_or_ghost_with_face(part, &face)?.solid;
             let i = solid.faces.iter().position(|f| f.name == face)?;
             let seed = solid.face_point(i)?;
             Some(EdgeOrFace::Face(FaceRef { part, face, seed }))
@@ -1031,10 +1031,14 @@ fn roll_back_to_edited(
 }
 
 /// The parts before the feature being edited (cached on the rebuild thread).
-fn update_before_parts(session: Option<Res<AppliedSession>>, doc: Option<Res<ActiveDocument>>, mut before: ResMut<BeforeParts>) {
+fn update_before_parts(session: Option<Res<AppliedSession>>, doc: Option<Res<ActiveDocument>>, mut before: ResMut<BeforeParts>, mut cache: ResMut<PartCache>) {
     let (Some(s), Some(doc)) = (session, doc) else {
         if before.key.is_some() {
             *before = BeforeParts::default();
+        }
+        if !cache.ghost.is_empty() {
+            cache.ghost.clear();
+            cache.ghost_generation += 1;
         }
         return;
     };
@@ -1053,6 +1057,9 @@ fn update_before_parts(session: Option<Res<AppliedSession>>, doc: Option<Res<Act
     }
     before.parts = cadrs_core::rebuild::build(upstream).parts.clone();
     before.key = Some((s.feature, key));
+    // Onshape's ghost: the parts before the feature, faint and pickable over the result.
+    cache.ghost = before.parts.clone();
+    cache.ghost_generation += 1;
 }
 
 /// A new hole's Merge scope defaults to the part its points drill (P3.8 judge; Onshape fills
