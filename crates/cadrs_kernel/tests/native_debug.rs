@@ -1226,3 +1226,27 @@ fn debug_restore_shapes() {
         println!("{f}: {s:?}");
     }
 }
+
+/// Reads every .brep under CADRS_BREP_DIR and prints what it gives (validity, volume, area).
+#[test]
+#[ignore]
+fn debug_read_brep_dir() {
+    use cadrs_kernel::native::brep_occt;
+    let Ok(dir) = std::env::var("CADRS_BREP_DIR") else { return };
+    let mut names: Vec<_> = std::fs::read_dir(&dir).unwrap().filter_map(|e| e.ok()).map(|e| e.path()).filter(|p| p.extension().is_some_and(|x| x == "brep")).collect();
+    names.sort();
+    for p in names {
+        let bytes = std::fs::read(&p).unwrap();
+        let name = p.file_name().unwrap().to_string_lossy().to_string();
+        match brep_occt::read_ordered(&bytes) {
+            Ok(r) => match r.body {
+                Some(b) => {
+                    let m = cadrs_kernel::native::mass::body_mass(&b);
+                    println!("{name}: faces {} solids {} check {:?} volume {:.6} area {:.6}", b.faces.len(), b.solids.len(), b.check().first(), m.volume, m.surface_area);
+                }
+                None => println!("{name}: no body ({} free edges, {} points)", r.free_edges.len(), r.points.len()),
+            },
+            Err(e) => println!("{name}: ERROR {e}"),
+        }
+    }
+}

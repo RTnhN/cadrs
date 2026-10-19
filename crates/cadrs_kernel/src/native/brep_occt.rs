@@ -1398,7 +1398,14 @@ pub fn read_ordered(bytes: &[u8]) -> R<BrepRead> {
         match build_direct(&f) {
             Ok(x) => {
                 let issues = x.check();
-                if issues.is_empty() {
+                // A face of no area (bounds left out: a whole sphere) or of negative area (a loop
+                // on a periodic surface read the wrong way round) means the file's loops don't
+                // say what the rebuild works out.
+                let bad_face = (0..x.faces.len()).find(|&f| !(super::mass::face_area(&x, f).0 > 0.0));
+                if let Some(f) = bad_face.filter(|_| issues.is_empty()) {
+                    warnings.push(format!("rebuilt (face {f} of the file's body has no area of its own)"));
+                    None
+                } else if issues.is_empty() {
                     Some(x)
                 } else {
                     warnings.push(format!("rebuilt (the file's body: {})", issues[0]));
@@ -1419,6 +1426,22 @@ pub fn read_ordered(bytes: &[u8]) -> R<BrepRead> {
         let (body, w) = b.xb.finish();
         warnings.extend(w);
         Some(body).filter(|x| !x.faces.is_empty())
+    } else {
+        None
+    };
+    // A solid enclosing a negative volume (a whole torus, whose one loop of seams runs either
+    // way): turned round.
+    let body = if let Some(mut x) = body {
+        for si in 0..x.solids.len() {
+            let faces = x.solid_faces(si);
+            let sub = super::kernel::subset(&x, &faces, true);
+            if super::mass::body_mass(&sub).volume < 0.0 {
+                for f in faces {
+                    Body::reverse_face(&mut x.faces[f]);
+                }
+            }
+        }
+        Some(x)
     } else {
         None
     };
