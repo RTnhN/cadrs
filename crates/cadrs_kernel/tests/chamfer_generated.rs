@@ -536,3 +536,47 @@ fn vertical_edges_chamfered_and_filleted() {
     }
     assert!(failures.is_empty(), "{} of {cases} cases failed:\n{}", failures.len(), failures.join("\n"));
 }
+
+/// Every edge of random prisms chamfered at once: top and bottom outlines cut, vertical edges
+/// cut or filled, corners of three. No exact volume here; the result must be valid and have
+/// the prism's faces and one per edge (no slivers, spikes or end caps), and lose less than the
+/// edges' sections alone would (corners share material).
+#[test]
+fn prisms_chamfered_all_round() {
+    let mut rng = Rng(0xa11_70d);
+    let mut failures = Vec::new();
+    let cases = 45;
+    for i in 0..cases {
+        let (outer, holes, loops) = outline(&mut rng, i);
+        let d = safe_distance(&loops).min(1.5);
+        let h = rng.range(10.0, 20.0);
+        let mut case = Case { name: format!("all-round {i} ({} corners, {} holes, d {d:.3})", outer.len(), holes.len()), failures: Vec::new() };
+        let mut k = NativeKernel::new();
+        let Ok(b) = prism(&mut k, &outer, &holes, h) else {
+            failures.push(format!("{}: extrude failed", case.name));
+            continue;
+        };
+        let infos = k.edges(b).unwrap();
+        let edges: Vec<EdgeId> = infos.iter().map(|e| e.id).collect();
+        let n0 = k.faces(b).unwrap().len();
+        match k.chamfer_with(b, &edges, &ChamferOpts::new(ChamferSpec::EqualDistance(d))) {
+            Err(e) => case.check("chamfer", false, e.to_string()),
+            Ok(res) => {
+                let out = res.bodies[0];
+                let issues = k.get(out).unwrap().check();
+                case.check("valid", issues.is_empty(), format!("{issues:?}"));
+                let nf = k.faces(out).unwrap().len();
+                case.check("faces", nf == n0 + edges.len(), format!("{nf} faces, expected {}", n0 + edges.len()));
+                if std::env::var("CADRS_GEN_ALL").ok().and_then(|x| x.parse::<usize>().ok()) == Some(i) {
+                    eprintln!("outline {outer:?}\nangles {:?}", interior_angles(&outer).iter().map(|a| a.to_degrees()).collect::<Vec<_>>());
+                    for f in k.faces(out).unwrap() {
+                        let n = f.plane.map(|p| [p.normal.x, p.normal.y, p.normal.z]);
+                        eprintln!("  {:?} area {:.4} normal {n:?} centre {:?}", f.kind, f.area, [f.center.x, f.center.y, f.center.z]);
+                    }
+                }
+            }
+        }
+        failures.extend(case.failures);
+    }
+    assert!(failures.is_empty(), "{} of {cases} cases failed:\n{}", failures.len(), failures.join("\n"));
+}

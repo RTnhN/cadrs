@@ -863,6 +863,64 @@ pub fn blend(k: &mut NativeKernel, body: BodyId, edges: &[(EdgeId, Box<dyn Fn(f6
                 _ => {}
             }
         }
+        // A fill ending where chamfers cut: their planes run on over the fill's ends (the
+        // chamfer faces carry straight on across the corner). Where two cuts meet in a valley
+        // over an end, the fill is split by the plane through the edge bisecting their corner
+        // and each half trimmed by the plane on its side (the valley's higher one).
+        if !tool.convex {
+            if let SectionKind::Chamfer { d1, d2 } = kind(PI / 2.0) {
+                let mut side_m: Option<V3> = None;
+                // Per end: the cuts' planes and their directions away from the vertex.
+                let mut ends: Vec<Vec<(V3, P3, V3)>> = Vec::new();
+                for v in ed.v.iter() {
+                    let cuts: Vec<usize> = at_vertex.get(v).map(|x| x.iter().copied().filter(|&o| o != e && edge_convex(&b, o) == Some(true)).collect()).unwrap_or_default();
+                    let mut here = Vec::new();
+                    for c in cuts {
+                        if let Some((o, n)) = chamfer_plane(&b, c, *v, d1, d2) {
+                            here.push((other_dir(c, *v), o, n));
+                        }
+                    }
+                    if here.len() == 2 && side_m.is_none() {
+                        let m = here[0].0 - here[1].0;
+                        if m.norm() > 1e-9 {
+                            side_m = Some(m.normalize());
+                        }
+                    }
+                    ends.push(here);
+                }
+                let p0 = b.verts[ed.v[0]].p;
+                // The halves (or the whole fill), each with its side (+1, −1; 0: whole).
+                let mut pieces: Vec<(Body, Vec<Vec<FaceSrc>>, f64)> = match side_m {
+                    Some(m) => {
+                        let (a, sa) = trim_tool(&tb, &ts, p0, -m)?;
+                        let (c, sc) = trim_tool(&tb, &ts, p0, m)?;
+                        vec![(a, sa, 1.0), (c, sc, -1.0)]
+                    }
+                    None => vec![(tb.clone(), ts.clone(), 0.0)],
+                };
+                for here in &ends {
+                    for piece in pieces.iter_mut() {
+                        // The cut on this piece's side (the only one when there's one).
+                        let pick = match (here.len(), side_m) {
+                            (1, _) => Some(&here[0]),
+                            (2, Some(m)) => here.iter().find(|(d, _, _)| d.dot(&m) * piece.2 > 0.0),
+                            _ => None,
+                        };
+                        if let Some((_, o, n)) = pick {
+                            let (nb, ns) = trim_tool(&piece.0, &piece.1, *o, *n)?;
+                            piece.0 = nb;
+                            piece.1 = ns;
+                        }
+                    }
+                }
+                let (last_b, last_s, _) = pieces.pop().unwrap();
+                for (pb, ps, _) in pieces {
+                    cur = cur.apply(&pb, &ps, BoolOp::Union)?;
+                }
+                tb = last_b;
+                ts = last_s;
+            }
+        }
         // Its extensions end at the end faces: flush where a tool removing material would dig
         // into one, and where a tool adding material would stick out of one.
         let [s1, s2] = edge_sides(&b, e)?;
@@ -886,20 +944,6 @@ pub fn blend(k: &mut NativeKernel, body: BodyId, edges: &[(EdgeId, Box<dyn Fn(f6
                         let (nb, ns) = trim_tool(&tb, &ts, b.verts[*v].p, nf)?;
                         tb = nb;
                         ts = ns;
-                    }
-                }
-            }
-            // A fill ending where a chamfer cuts: the chamfer's plane runs on over the fill's
-            // end, trimming it (the chamfer face carries straight on across the corner).
-            if !tool.convex {
-                if let SectionKind::Chamfer { d1, d2 } = kind(PI / 2.0) {
-                    let cuts: Vec<usize> = at_vertex.get(v).map(|x| x.iter().copied().filter(|&o| o != e && edge_convex(&b, o) == Some(true)).collect()).unwrap_or_default();
-                    for c in cuts {
-                        if let Some((o, n)) = chamfer_plane(&b, c, *v, d1, d2) {
-                            let (nb, ns) = trim_tool(&tb, &ts, o, n)?;
-                            tb = nb;
-                            ts = ns;
-                        }
                     }
                 }
             }
