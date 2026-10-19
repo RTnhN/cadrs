@@ -1322,7 +1322,7 @@ fn debug_smb_edges() {
     use cadrs_kernel::native::smb;
     let Ok(f) = std::env::var("CADRS_SMB") else { return };
     let (body, mids, _) = smb::read_with_edges(&std::fs::read(&f).unwrap()).unwrap();
-    println!("{} faces, {} edges; surfaces {:?}", body.faces.len(), body.edges.len(), body.faces.iter().map(|f| f.surf.kind()).collect::<Vec<_>>());
+    println!("{} faces, {} edges; surfaces {:?}", body.faces.len(), body.edges.len(), body.faces.iter().map(|f| format!("{:?}", f.surf).chars().take(12).collect::<String>()).collect::<Vec<_>>());
     let ef = body.edge_faces();
     for w in std::env::var("CADRS_EDGES").unwrap_or_default().split_whitespace() {
         let i: usize = w.parse().unwrap();
@@ -1333,7 +1333,7 @@ fn debug_smb_edges() {
             (e, (ed.point(t) - m).norm())
         }).min_by(|a, b| a.1.total_cmp(&b.1)).unwrap();
         let ed = &body.edges[e];
-        println!("file edge {i} at {m:?} -> edge {e} (off {d:.2e}) {:?} faces {:?}", std::mem::discriminant(&ed.curve), ef[e].iter().map(|&f| body.faces[f].surf.kind()).collect::<Vec<_>>());
+        println!("file edge {i} at {m:?} -> edge {e} (off {d:.2e}) {:?} faces {:?} v {:?} tangents {:?} {:?}", std::mem::discriminant(&ed.curve), ef[e].iter().map(|&f| body.faces[f].surf.kind()).collect::<Vec<_>>(), ed.v, ed.curve.tangent(ed.t[0]).normalize(), ed.curve.tangent(ed.t[1]).normalize());
     }
 }
 
@@ -1364,6 +1364,12 @@ fn debug_smb_fillet() {
     println!("merge_edges again: {} edges", again.edges.len());
     for (i, f) in out.faces.iter().enumerate() {
         println!("  face {i} {:?} loops {:?}", f.surf.kind(), f.loops.iter().map(|l| l.len()).collect::<Vec<_>>());
+        if f.loops.len() == 1 && f.loops[0].len() == 3 {
+            for c in &f.loops[0] {
+                let e = &out.edges[c.edge];
+                println!("      {:?} -> {:?} {:?}", out.verts[e.v[0]].p, out.verts[e.v[1]].p, std::mem::discriminant(&e.curve));
+            }
+        }
     }
     let mut ve = vec![Vec::new(); out.verts.len()];
     for (i, e) in out.edges.iter().enumerate() {

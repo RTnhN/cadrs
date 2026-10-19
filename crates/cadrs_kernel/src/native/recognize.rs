@@ -61,10 +61,43 @@ fn circle3(a: &P3, b: &P3, c: &P3) -> Option<(P3, V3, f64)> {
     Some((cc, w.normalize(), (a - cc).norm()))
 }
 
+/// A B-spline straight in one direction with every cross-section the first one moved by the
+/// same vector: the extrusion of that curve (c(u) + d·v).
+fn extrusion(n: &NurbsSurface) -> Option<Surface> {
+    let rows = |a: &[Vec<super::nurbs::H>]| -> Option<V3> {
+        // a[i] = [first, second] per pole: one translation for all, weights equal.
+        let mut d: Option<V3> = None;
+        for r in a {
+            if r.len() != 2 || (r[0].w - r[1].w).abs() > 1e-12 * r[0].w.abs().max(1.0) {
+                return None;
+            }
+            let t = dehom(&r[1]) - dehom(&r[0]);
+            match d {
+                None => d = Some(t),
+                Some(d0) if (t - d0).norm() <= 1e-9 * (1.0 + d0.norm()) => {}
+                _ => return None,
+            }
+        }
+        d.filter(|d| d.norm() > 1e-12)
+    };
+    if n.dv == 1 && n.cps[0].len() == 2 {
+        let d = rows(&n.cps)?;
+        let c = NurbsCurve { degree: n.du, knots: n.ku.clone(), cps: n.cps.iter().map(|r| r[0]).collect() };
+        return Some(Surface::Extrusion { c: Curve::Nurbs(std::sync::Arc::new(c)), d });
+    }
+    if n.du == 1 && n.cps.len() == 2 {
+        let cols: Vec<Vec<super::nurbs::H>> = (0..n.cps[0].len()).map(|j| vec![n.cps[0][j], n.cps[1][j]]).collect();
+        let d = rows(&cols)?;
+        let c = NurbsCurve { degree: n.dv, knots: n.kv.clone(), cps: n.cps[0].clone() };
+        return Some(Surface::Extrusion { c: Curve::Nurbs(std::sync::Arc::new(c)), d });
+    }
+    None
+}
+
 /// The plane, cylinder, cone or sphere a B-spline surface is, if it is one (checked: every
 /// sample lies on the surface returned, by its own distance).
 pub fn surface(n: &NurbsSurface) -> Option<Surface> {
-    let cand = candidate(n)?;
+    let cand = candidate(n).or_else(|| extrusion(n))?;
     let ((u0, u1), (v0, v1)) = n.range();
     let mut bb = Bbox::empty();
     let m = 10;

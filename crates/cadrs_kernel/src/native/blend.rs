@@ -810,10 +810,11 @@ pub fn blend(k: &mut NativeKernel, body: BodyId, edges: &[(EdgeId, Box<dyn Fn(f6
         };
         let in_this: Vec<usize> = chain.iter().map(|c| c.0).collect();
         let open = start_v != end_v;
-        // Ends running on smoothly into edges left as they are stop square, unextended.
+        // Ends running on smoothly into edges left as they are stop square, unextended; a
+        // closed chain (smooth all round) has no ends: its tool closes on itself.
         let extend = (
-            !(open && continues_smoothly(&b, start_v, away(first, true), &in_this)),
-            !(open && continues_smoothly(&b, end_v, away(last, false), &in_this)),
+            open && !continues_smoothly(&b, start_v, away(first, true), &in_this),
+            open && !continues_smoothly(&b, end_v, away(last, false), &in_this),
         );
         let tool = chain_tool(&b, body, chain, kind.as_ref(), *swap, (0.0, 1.0), extend)?;
         let (mut tb, mut ts) = (tool.body, tool.src);
@@ -860,6 +861,14 @@ pub fn blend(k: &mut NativeKernel, body: BodyId, edges: &[(EdgeId, Box<dyn Fn(f6
             }
         };
         let mut extend = (true, true);
+        // A closed edge smooth at its vertex (a closed spline rim) has no ends: its tool closes
+        // on itself.
+        if ed.closed() {
+            let (t0, t1) = (ed.curve.tangent(ed.t[0]), ed.curve.tangent(ed.t[1]));
+            if t0.normalize().dot(&t1.normalize()) > 1.0 - 1e-9 {
+                extend = (false, false);
+            }
+        }
         let mut plans: Vec<(usize, usize, Vec<usize>)> = Vec::new(); // (end, vertex, others)
         for (end, v) in ed.v.iter().enumerate() {
             if ed.closed() {
