@@ -160,7 +160,6 @@ boolean bcut_complex_f9
 boolean bcut_complex_h4
 boolean bcut_complex_h9
 boolean bcut_complex_i2
-boolean bcut_complex_k1
 boolean bcut_complex_k4
 boolean bcut_complex_k6
 boolean bcut_complex_k7
@@ -191,7 +190,6 @@ boolean bfuse_complex_e7
 boolean bfuse_complex_i3
 boolean bfuse_complex_k1
 boolean bfuse_complex_k6
-boolean bfuse_complex_l3
 boolean bfuse_complex_l9
 boolean bfuse_complex_m4
 boolean bfuse_complex_n4
@@ -215,9 +213,7 @@ boolean bopcommon_2d_p3
 boolean bopcommon_2d_p5
 boolean bopcommon_2d_p7
 boolean bopcommon_2d_p8
-boolean bopcommon_complex_g8
 boolean bopcommon_complex_g9
-boolean bopcommon_complex_h1
 boolean bopcommon_complex_h7
 boolean bopcommon_complex_i2
 boolean bopcommon_complex_i5
@@ -238,10 +234,8 @@ boolean bopcut_2d_c8
 boolean bopcut_2d_d1
 boolean bopcut_2d_d3
 boolean bopcut_2d_d4
-boolean bopcut_complex_h5
 boolean bopcut_complex_h8
 boolean bopcut_complex_h9
-boolean bopcut_complex_i1
 boolean bopcut_complex_i7
 boolean bopcut_complex_j2
 boolean bopcut_complex_k9
@@ -266,13 +260,11 @@ boolean bopfuse_2d_c9
 boolean bopfuse_2d_d1
 boolean bopfuse_complex_f1
 boolean bopfuse_complex_g2
-boolean bopfuse_complex_g3
 boolean bopfuse_complex_g9
 boolean bopfuse_complex_h4
 boolean bopfuse_complex_h7
 boolean bopfuse_complex_i4
 boolean bopfuse_complex_j6
-boolean bopfuse_complex_k4
 boolean bopfuse_complex_k9
 boolean bopfuse_complex_l5
 boolean bopfuse_complex_l6
@@ -299,7 +291,6 @@ boolean boptuc_2d_o9
 boolean boptuc_2d_p2
 boolean boptuc_2d_p4
 boolean boptuc_2d_p5
-boolean boptuc_complex_c5
 boolean boptuc_complex_c6
 boolean boptuc_complex_c7
 boolean boptuc_complex_d4

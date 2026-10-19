@@ -54,7 +54,22 @@ impl Prof {
 }
 
 /// Vertices closer than this are merged (mm).
+/// The default distance under which two points of a boolean are one ([`vtol`] for a run).
 pub const VTOL: f64 = 1e-6;
+
+thread_local! {
+    static RUN_TOL: std::cell::Cell<f64> = const { std::cell::Cell::new(VTOL) };
+}
+
+/// The boolean's point tolerance for the run in progress.
+pub fn vtol() -> f64 {
+    RUN_TOL.with(|t| t.get())
+}
+
+/// Sets [`vtol`] for the runs that follow on this thread.
+pub fn set_vtol(t: f64) {
+    RUN_TOL.with(|c| c.set(t));
+}
 
 #[derive(Debug, Clone)]
 struct WEdge {
@@ -87,7 +102,7 @@ struct Pool {
 
 impl Pool {
     fn cell(p: &P3) -> (i64, i64, i64) {
-        let s = 1.0 / (VTOL * 16.0);
+        let s = 1.0 / (vtol() * 16.0);
         ((p.x * s).floor() as i64, (p.y * s).floor() as i64, (p.z * s).floor() as i64)
     }
     fn find(&self, p: &P3) -> Option<usize> {
@@ -99,7 +114,7 @@ impl Pool {
                     if let Some(v) = self.grid.get(&(cx + dx, cy + dy, cz + dz)) {
                         for &i in v {
                             let d = (self.verts[i] - p).norm();
-                            if d < VTOL && best.map_or(true, |(bd, _)| d < bd) {
+                            if d < vtol() && best.map_or(true, |(bd, _)| d < bd) {
                                 best = Some((d, i));
                             }
                         }
@@ -172,7 +187,7 @@ fn edge_bbox(e: &WEdge, verts: &[P3]) -> Bbox {
             bb = bb.grow(r * 0.02);
         }
     }
-    bb.grow(VTOL * 10.0)
+    bb.grow(vtol() * 10.0)
 }
 
 /// Imports a body's vertices, edges and faces into the pool.
@@ -224,7 +239,7 @@ fn import(pool: &mut Pool, faces: &mut Vec<WFace>, b: &Body, owner: usize, merge
             owner,
             orig: fi,
             polys,
-            bbox: bb.grow(VTOL * 10.0),
+            bbox: bb.grow(vtol() * 10.0),
             uv_center: P2::new(center.x, center.y),
         });
     }
@@ -316,7 +331,7 @@ fn tangent_along_shared_edge(pool: &Pool, fa: &WFace, fb: &WFace, ea: &[usize], 
             let same_ends = x == y || {
                 let on = |a: &WEdge, b: &WEdge| [0.25, 0.5, 0.75].iter().all(|f| {
                     let m = b.curve.point(b.t[0] + (b.t[1] - b.t[0]) * f);
-                    on_curve(&a.curve, a.t[0], a.t[1], &m, VTOL * 10.0).is_some()
+                    on_curve(&a.curve, a.t[0], a.t[1], &m, vtol() * 10.0).is_some()
                 });
                 on(e, o) && on(o, e)
             };
@@ -351,7 +366,7 @@ fn edge_on_surface(e: &WEdge, s: &Surface) -> bool {
     }
     [0.0, 0.3, 0.5, 0.7, 1.0].iter().all(|f| {
         let p = e.curve.point(e.t[0] + (e.t[1] - e.t[0]) * f);
-        s.distance(&p) < VTOL
+        s.distance(&p) < vtol()
     })
 }
 
@@ -468,7 +483,29 @@ pub struct BoolOut {
 
 /// The boolean of two bodies.
 pub fn boolean_bodies(a: &Body, b: &Body, op: BoolOp) -> Result<BoolOut> {
-    run(a, b, Mode::Bool(op))
+    // At the default tolerance first; when that leaves the result broken (near-coincident
+    // geometry the tolerance splits into slivers or gaps: a surface through a corner within
+    // 1e-5), again at growing tolerances, as OCCT grows its entities' tolerances.
+    let first = with_tol(VTOL, || run(a, b, Mode::Bool(op)));
+    if !matches!(&first, Err(KernelError::OperationFailed(m)) if m.contains("open shell") || m.contains("left")) {
+        return first;
+    }
+    for t in [1e-5, 1e-4] {
+        if let Ok(r) = with_tol(t, || run(a, b, Mode::Bool(op))) {
+            return Ok(r);
+        }
+    }
+    first
+}
+
+/// Runs `f` with [`vtol`] at `t` (unless `CADRS_BOOL_TOL` fixes it), restoring it after.
+fn with_tol<T>(t: f64, f: impl FnOnce() -> T) -> T {
+    let before = vtol();
+    let t = std::env::var("CADRS_BOOL_TOL").ok().and_then(|x| x.parse::<f64>().ok()).unwrap_or(t);
+    set_vtol(t);
+    let r = f();
+    set_vtol(before);
+    r
 }
 
 /// Gives B-spline faces of `a` that lie (within 2 × [`VTOL`]) on a plane or cylinder face of
@@ -507,14 +544,14 @@ fn snap_to(a: &mut Body, b: &Body) -> bool {
                 let dev = pts.iter().filter_map(|p| t.signed_distance(p)).map(f64::abs).fold(0.0, f64::max);
                 eprintln!("snap? face {fi} onto {ti} ({:?}): deviation {dev:e}", t.kind());
             }
-            if pts.iter().any(|p| t.signed_distance(p).is_none_or(|d| d.abs() > 2.0 * VTOL)) {
+            if pts.iter().any(|p| t.signed_distance(p).is_none_or(|d| d.abs() > 2.0 * vtol())) {
                 continue;
             }
             // Between the samples too.
             let fine = 64;
             let ok = (0..fine).all(|i| (0..fine).all(|j| {
                 let p = s.eval(u0 + (u1 - u0) * (i as f64 + 0.5) / fine as f64, v0 + (v1 - v0) * (j as f64 + 0.5) / fine as f64);
-                t.signed_distance(&p).is_some_and(|d| d.abs() <= 2.0 * VTOL)
+                t.signed_distance(&p).is_some_and(|d| d.abs() <= 2.0 * vtol())
             }));
             if !ok {
                 continue;
@@ -580,7 +617,7 @@ fn run(a: &Body, b: &Body, mode: Mode) -> Result<BoolOut> {
     let imprinting = matches!(mode, Mode::Imprint(_));
     // Disjoint boxes: nothing to intersect.
     let (ba, bb) = (a.bbox(), b.bbox());
-    if !ba.grow(VTOL).overlaps(&bb.grow(VTOL)) {
+    if !ba.grow(vtol()).overlaps(&bb.grow(vtol())) {
         if imprinting {
             return Ok(BoolOut { body: a.clone(), from: (0..a.faces.len()).map(|i| vec![(0, i)]).collect() });
         }
@@ -646,7 +683,7 @@ fn run(a: &Body, b: &Body, mode: Mode) -> Result<BoolOut> {
             if v == ed.v[0] || v == ed.v[1] {
                 continue;
             }
-            if let Some(t) = on_curve(&ed.curve, ed.t[0], ed.t[1], &p, VTOL) {
+            if let Some(t) = on_curve(&ed.curve, ed.t[0], ed.t[1], &p, vtol()) {
                 pool.split(e, t, v);
             }
         }
@@ -677,7 +714,7 @@ fn run(a: &Body, b: &Body, mode: Mode) -> Result<BoolOut> {
             if !ebox[e].contains(&p) {
                 continue;
             }
-            if let Some(t) = on_curve(&ed.curve, ed.t[0], ed.t[1], &p, VTOL) {
+            if let Some(t) = on_curve(&ed.curve, ed.t[0], ed.t[1], &p, vtol()) {
                 pool.split(e, t, v);
             }
         }
@@ -692,7 +729,7 @@ fn run(a: &Body, b: &Body, mode: Mode) -> Result<BoolOut> {
                 continue;
             }
             let (ca, cb) = (pool.edges[ea].clone(), pool.edges[eb].clone());
-            for (ta, tb) in ssi::curve_curve(&ca.curve, ca.t[0], ca.t[1], &cb.curve, cb.t[0], cb.t[1], VTOL * 0.5) {
+            for (ta, tb) in ssi::curve_curve(&ca.curve, ca.t[0], ca.t[1], &cb.curve, cb.t[0], cb.t[1], vtol() * 0.5) {
                 let p = ca.curve.point(ta);
                 let v = pool.vertex(p);
                 // The parameters of the (possibly merged) vertex itself.
@@ -727,7 +764,7 @@ fn run(a: &Body, b: &Body, mode: Mode) -> Result<BoolOut> {
             }
             for t in ssi::curve_surface(&ed.curve, ed.t[0], ed.t[1], &faces[fi].surf) {
                 let p = ed.curve.point(t);
-                match point_in_face(&faces[fi], &p, VTOL) {
+                match point_in_face(&faces[fi], &p, vtol()) {
                     InFace::Outside => continue,
                     _ => {}
                 }
@@ -766,7 +803,7 @@ fn run(a: &Body, b: &Body, mode: Mode) -> Result<BoolOut> {
             if !faces[fa].bbox.overlaps(&faces[fb].bbox) {
                 continue;
             }
-            if faces[fa].surf.same_domain(&faces[fb].surf, VTOL).is_some() {
+            if faces[fa].surf.same_domain(&faces[fb].surf, vtol()).is_some() {
                 coincident[fa].push(fb);
                 coincident[fb].push(fa);
                 continue;
@@ -821,11 +858,11 @@ fn run(a: &Body, b: &Body, mode: Mode) -> Result<BoolOut> {
                 let mut ps: Vec<(f64, usize)> = Vec::new();
                 for &v in &cand {
                     let p = pool.verts[v];
-                    if !ob.grow(VTOL * 10.0).contains(&p) {
+                    if !ob.grow(vtol() * 10.0).contains(&p) {
                         continue;
                     }
                     let t = param_on(&ic.c, ic.t0, ic.t1, &p);
-                    if (ic.c.point(t) - p).norm() < VTOL * 2.0 {
+                    if (ic.c.point(t) - p).norm() < vtol() * 2.0 {
                         ps.push((t, v));
                         // A closed curve: the vertex at its start is also at its end.
                         if ic.closed && ((t - ic.t0).abs() < 1e-12 || (t - ic.t1).abs() < 1e-12) {
@@ -880,8 +917,8 @@ fn run(a: &Body, b: &Body, mode: Mode) -> Result<BoolOut> {
                     // Wrap periodic parameters past the end.
                     let tm = (ta + tb) * 0.5;
                     let pm = ic.c.point(tm);
-                    let ia = point_in_face(&faces[fa], &pm, VTOL);
-                    let ib = point_in_face(&faces[fb], &pm, VTOL);
+                    let ia = point_in_face(&faces[fa], &pm, vtol());
+                    let ib = point_in_face(&faces[fb], &pm, vtol());
                     if ia == InFace::Outside || ib == InFace::Outside {
                         continue;
                     }
@@ -896,7 +933,7 @@ fn run(a: &Body, b: &Body, mode: Mode) -> Result<BoolOut> {
                         // Only an unsplit edge between exactly these vertices (pieces of split
                         // edges that coincide with the new edge are unified later).
                         let ends_ok = (ed.v == [va, vb] || ed.v == [vb, va]) && ed.splits.is_empty();
-                        ends_ok && on_curve(&ed.curve, ed.t[0], ed.t[1], &pm, VTOL).is_some()
+                        ends_ok && on_curve(&ed.curve, ed.t[0], ed.t[1], &pm, vtol()).is_some()
                     });
                     let e = match existing {
                         Some(e) => e,
@@ -967,7 +1004,7 @@ fn run(a: &Body, b: &Body, mode: Mode) -> Result<BoolOut> {
                     let (p, q) = (&pool.edges[g[i]], &pool.edges[g[j]]);
                     let ok = [0.25, 0.5, 0.75].iter().all(|f| {
                         let m = q.curve.point(q.t[0] + (q.t[1] - q.t[0]) * f);
-                        on_curve(&p.curve, p.t[0], p.t[1], &m, VTOL * 10.0).is_some()
+                        on_curve(&p.curve, p.t[0], p.t[1], &m, vtol() * 10.0).is_some()
                     });
                     if ok {
                         canon[g[j]] = g[i];
@@ -985,7 +1022,7 @@ fn run(a: &Body, b: &Body, mode: Mode) -> Result<BoolOut> {
                     continue;
                 }
                 let pm = ed.curve.point((ed.t[0] + ed.t[1]) * 0.5);
-                if point_in_face(&faces[fi], &pm, VTOL) == InFace::Inside && !cuts[fi].contains(&pe) {
+                if point_in_face(&faces[fi], &pm, vtol()) == InFace::Inside && !cuts[fi].contains(&pe) {
                     cuts[fi].push(pe);
                 }
             }
@@ -1008,7 +1045,7 @@ fn run(a: &Body, b: &Body, mode: Mode) -> Result<BoolOut> {
                         continue;
                     }
                     let pm = ed.curve.point((ed.t[0] + ed.t[1]) * 0.5);
-                    if point_in_face(&faces[fa], &pm, VTOL) == InFace::Inside && !cuts[fa].contains(&pe) {
+                    if point_in_face(&faces[fa], &pm, vtol()) == InFace::Inside && !cuts[fa].contains(&pe) {
                         cuts[fa].push(pe);
                     }
                 }
@@ -1117,7 +1154,7 @@ fn run(a: &Body, b: &Body, mode: Mode) -> Result<BoolOut> {
         let mut class = None;
         for &g in &coincident[fi] {
             let gf = &faces[g];
-            if point_in_face(gf, &p, VTOL * 10.0) != InFace::Outside {
+            if point_in_face(gf, &p, vtol() * 10.0) != InFace::Outside {
                 let (gu, gv) = gf.surf.project(&p, Some((gf.uv_center.x, gf.uv_center.y)));
                 let gn = gf.surf.normal(gu, gv) * if gf.sense { 1.0 } else { -1.0 };
                 // Against a sheet an overlap is an overlap, whichever way the faces face.
@@ -1130,10 +1167,10 @@ fn run(a: &Body, b: &Body, mode: Mode) -> Result<BoolOut> {
             let (other, polys) = if f.owner == 0 { (b, &polys_b) } else { (a, &polys_a) };
             // A point on the other body's boundary (a sub-face whose sample landed on an edge of
             // the other body lying in it) decides nothing: try the face's other inside points.
-            let mut pc = classify::classify_point(other, polys, &p, VTOL);
+            let mut pc = classify::classify_point(other, polys, &p, vtol());
             if pc == PointClass::OnBoundary {
                 for q in interior_points(&loops).into_iter().skip(1).take(12) {
-                    let c = classify::classify_point(other, polys, &f.surf.eval(q.x, q.y), VTOL);
+                    let c = classify::classify_point(other, polys, &f.surf.eval(q.x, q.y), vtol());
                     if c != PointClass::OnBoundary {
                         pc = c;
                         break;

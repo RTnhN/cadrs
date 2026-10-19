@@ -44,10 +44,10 @@ fn chamfer_stops_where_the_chain_runs_on() {
 }
 
 /// A 2 mm chamfer round a block's top: an outline with a notch (two inside corners) and a
-/// rectangular hole (four more). At an inside corner both chamfers run on through the corner,
-/// so the cut there is their union, meeting in a valley; the dent left at those corners is gone.
-/// The volume is exact: the section (2 mm²) along the outline offset d/3 into the material
-/// (a convex corner shortens it by 2d/3; an inside corner shortens nothing and adds 2d³/3).
+/// rectangular hole (four more). Each pair of chamfers meets on the plane bisecting its corner:
+/// a mitre at the convex corners, a valley at the inside ones. Exact volume: the section
+/// (2 mm²) along the outline offset d/3 into the material (2d/3 shorter at a convex corner,
+/// longer at an inside one); and no faces but the 14 the block had and the 12 chamfers.
 #[test]
 fn chamfer_inside_corners() {
     let mut k = NativeKernel::new();
@@ -58,5 +58,6 @@ fn chamfer_inside_corners() {
     let out = r.bodies[0];
     assert!(k.get(out).unwrap().check().is_empty());
     let removed = v0 - k.mass_properties(out).unwrap().volume;
-    assert!((removed - 871.168388).abs() < 1e-4, "{removed}");
+    assert!((removed - 855.168388).abs() < 1e-4, "{removed}");
+    assert_eq!(k.faces(out).unwrap().len(), 14 + 12);
 }

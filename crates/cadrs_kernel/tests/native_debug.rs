@@ -1171,3 +1171,22 @@ fn debug_restore_bop() {
         Err(e) => eprintln!("failed in {:?}: {e}", t.elapsed()),
     }
 }
+
+/// Lists a chamfer result's faces (kind, area, normal, centre): CADRS_REPRO_CHAMFER,
+/// CADRS_REPRO_EDGES, CADRS_REPRO_D.
+#[test]
+#[ignore]
+fn debug_chamfer_faces() {
+    let Ok(path) = std::env::var("CADRS_REPRO_CHAMFER") else { return };
+    let mut k = NativeKernel::new();
+    let b = k.insert(cadrs_kernel::native::bodyio::read(&std::fs::read(path).unwrap()).unwrap());
+    let edges: Vec<EdgeId> = std::env::var("CADRS_REPRO_EDGES").unwrap().split(',').map(|s| EdgeId(s.parse().unwrap())).collect();
+    let d: f64 = std::env::var("CADRS_REPRO_D").unwrap().parse().unwrap();
+    let r = k.chamfer_with(b, &edges, &ChamferOpts::new(ChamferSpec::EqualDistance(d))).unwrap();
+    let out = r.bodies[0];
+    let faces = k.faces(out).unwrap();
+    eprintln!("{} faces (input {})", faces.len(), k.faces(b).unwrap().len());
+    for f in &faces {
+        eprintln!("  {:?} area {:10.4} normal {:?} centre {:?}", f.kind, f.area, f.plane.map(|p| [p.normal.x, p.normal.y, p.normal.z]), [f.center.x, f.center.y, f.center.z]);
+    }
+}

@@ -670,8 +670,19 @@ impl PartCache {
 
     /// The shown parts that can be picked (MC2.3: not an assembly context's while Select
     /// transparent geometry is off).
-    pub fn pickable(&self) -> impl Iterator<Item = &Part> {
-        self.shown().filter(|p| !self.unpickable.contains(&p.id)).chain(self.ghost.iter())
+    /// The parts picks land on: the ghost while a feature's dialog shows one (picks go to the
+    /// parts before the feature, as in Onshape), else the shown parts.
+    pub fn pickable(&self) -> Box<dyn Iterator<Item = &Part> + '_> {
+        if self.ghost.is_empty() {
+            Box::new(self.shown().filter(|p| !self.unpickable.contains(&p.id)))
+        } else {
+            Box::new(self.ghost.iter())
+        }
+    }
+
+    /// The geometry hover and selection are drawn on for `part`: its ghost while there is one.
+    pub fn picked_geometry<'a>(&'a self, part: &'a Part) -> &'a Part {
+        self.ghost.iter().find(|g| g.id == part.id).unwrap_or(part)
     }
 
     /// The part `id` that has `edge`: the shown one, else its ghost (an edge the edited
@@ -2031,7 +2042,9 @@ fn draw_part_edges(
         } else {
             Vec::new()
         };
-        for (fi, face) in part.solid.faces.iter().enumerate() {
+        // Hover and selection on the ghost while a dialog shows one (picks land there).
+        let hp = cache.picked_geometry(part);
+        for (fi, face) in hp.solid.faces.iter().enumerate() {
             let pick = Pick::Face(part.id, face.name);
             let hovered = hovered_pick(pick) || list_feature.is_some_and(|f| face.name.op == f.0);
             if !hovered && !selected(pick) {
@@ -2087,7 +2100,7 @@ fn draw_part_edges(
             }
         }
         // Edges: hovered or selected.
-        for e in &part.solid.edges {
+        for e in &hp.solid.edges {
             let pick = Pick::Edge(part.id, e.name);
             let color = if hovered_pick(pick) {
                 EDGE_HOVER
@@ -2103,7 +2116,7 @@ fn draw_part_edges(
         }
         // Vertices: a dot about 9 px across, facing the viewer.
         let rot = Quat::from_rotation_arc(Vec3::Z, v.back());
-        for vx in &part.solid.vertices {
+        for vx in &hp.solid.vertices {
             if clip.is_some_and(|c| c.removes(v3(vx.point))) {
                 continue;
             }
