@@ -23,6 +23,7 @@ pub mod mass;
 pub mod math;
 pub mod meshsolid;
 pub mod nurbs;
+pub mod offset2d;
 pub mod offset_round;
 pub mod ops;
 pub mod pcurve;

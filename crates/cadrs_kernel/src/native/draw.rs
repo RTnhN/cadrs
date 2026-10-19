@@ -52,6 +52,8 @@ pub enum Shape {
     BodyEdge(BodyId, EdgeId),
     /// A face of a body (from `explode`).
     BodyFace(BodyId, FaceId),
+    /// Several shapes (DRAW's `compound`, a result of several wires).
+    Compound(Vec<Shape>),
     /// Nothing (an empty boolean result).
     Empty,
 }
@@ -773,6 +775,52 @@ impl NativeKernel {
         Ok(Shape::Body(r.bodies[0]))
     }
 
+    /// `mkoffset name wire 1 d` (also a planar face's outer wire): the wire's offset by `d` in its
+    /// plane, outwards for d > 0 (an open wire all round, with round ends); a wire, several
+    /// (a compound), or nothing.
+    pub fn mkoffset(&self, s: &Shape, d: f64) -> Result<Shape> {
+        let edges: Vec<DEdge> = match s {
+            Shape::Edge(e) => vec![e.clone()],
+            Shape::Wire(w) => w.clone(),
+            Shape::Face { loops, .. } => loops[0].clone(),
+            _ => return Err(err("mkoffset takes a wire")),
+        };
+        if edges.is_empty() {
+            return Ok(Shape::Empty);
+        }
+        let plane = match fit_plane(&edges) {
+            Some(p) => p,
+            None => {
+                // A straight wire: in the plane z = const through it.
+                let z = edges[0].start().z;
+                let size = edges.iter().map(|e| (e.end() - edges[0].start()).norm()).fold(1.0, f64::max);
+                if edges.iter().any(|e| (e.start().z - z).abs() > 1e-6 * size || (e.end().z - z).abs() > 1e-6 * size) {
+                    return Err(err("mkoffset: the wire isn't planar"));
+                }
+                Plane { origin: P3::new(0.0, 0.0, z), x_dir: V3::x_axis(), normal: V3::z_axis() }
+            }
+        };
+        let to_w = super::build::plane_map(&plane, &V3::zeros(), 0.0);
+        let mt = to_w.m.transpose();
+        let to_l = Affine { m: mt, t: -(mt * to_w.t) };
+        let local: Vec<(Curve, f64, f64)> = edges.iter().map(|e| (e.curve.transformed(&to_l), e.t0, e.t1)).collect();
+        let loops = super::offset2d::offset_wire(&local, d)?;
+        let wires: Vec<Shape> = loops
+            .into_iter()
+            .map(|l| Shape::Wire(l.into_iter().map(|p| DEdge { curve: p.c.transformed(&to_w), t0: p.t0, t1: p.t1 }).collect()))
+            .collect();
+        Ok(match wires.len() {
+            0 => Shape::Empty,
+            1 => wires.into_iter().next().unwrap(),
+            _ => Shape::Compound(wires),
+        })
+    }
+
+    /// `compound s… name`.
+    pub fn compound_shapes(&self, shapes: &[&Shape]) -> Shape {
+        Shape::Compound(shapes.iter().map(|s| (*s).clone()).collect())
+    }
+
     /// `thrusections name issolid isruled section…`: a loft through wires (or edges), with a
     /// vertex allowed first and last.
     pub fn thrusections(&mut self, solid: bool, ruled: bool, sections: &[&Shape]) -> Result<Shape> {
@@ -1225,6 +1273,7 @@ impl NativeKernel {
             Shape::Body(b) => self.edges(*b)?.iter().map(|e| e.length).sum(),
             Shape::BodyEdge(b, id) => self.edges(*b)?.iter().find(|e| e.id == *id).map_or(0.0, |e| e.length),
             Shape::BodyFace(..) => return Err(KernelError::Unsupported("lprops of a face of a body")),
+            Shape::Compound(v) => v.iter().map(|x| self.lprops(x)).sum::<Result<f64>>()?,
             Shape::Empty => 0.0,
         })
     }
@@ -1309,8 +1358,36 @@ impl NativeKernel {
             }
             Shape::BodyEdge(..) => NbShapes { vertex: 2, edge: 1, ..Default::default() },
             Shape::BodyFace(..) => NbShapes { face: 1, ..Default::default() },
+            Shape::Compound(v) => {
+                let mut n = NbShapes::default();
+                for x in v {
+                    let m = self.nbshapes(x)?;
+                    n.vertex += m.vertex;
+                    n.edge += m.edge;
+                    n.wire += m.wire;
+                    n.face += m.face;
+                    n.shell += m.shell;
+                    n.solid += m.solid;
+                }
+                n
+            }
             Shape::Empty => NbShapes::default(),
         })
+    }
+
+    /// The offset group's end-script counts of an mkoffset result: vertices, edges and wires
+    /// (a result without wires counts as one, as `explode result w` gives the result itself).
+    pub fn check_offset_counts(&self, s: &Shape, v: Option<usize>, e: Option<usize>, w: Option<usize>) -> Result<()> {
+        let n = self.nbshapes(s)?;
+        let got = [n.vertex, n.edge, n.wire.max(1)];
+        for ((what, want), got) in ["vertices", "edges", "wires"].iter().zip([v, e, w]).zip(got) {
+            if let Some(want) = want {
+                if got != want {
+                    return Err(err(&format!("{got} {what}, expected {want}")));
+                }
+            }
+        }
+        Ok(())
     }
 
     /// `checkfreebounds shape n`: the number of free edges (used by one face only: the open
@@ -1404,7 +1481,13 @@ fn distinct_edges(w: &[DEdge]) -> usize {
 
 fn wire_vertices(w: &[DEdge]) -> usize {
     let ends: Vec<(P3, P3)> = w.iter().map(|e| (e.start(), e.end())).collect();
-    super::edge_bop::vertex_count(&ends, 1e-6)
+    // Ends meet within the wire's size times 1e-5 (vertex tolerances of read or offset wires).
+    let mut bb = Bbox::empty();
+    for (a, b) in &ends {
+        bb.add(a);
+        bb.add(b);
+    }
+    super::edge_bop::vertex_count(&ends, (bb.diagonal() * 1e-5).max(1e-6))
 }
 
 /// Turns edges round so each starts where the one before ends.
@@ -1491,7 +1574,8 @@ fn fit_plane(edges: &[DEdge]) -> Option<Plane> {
     }
     let nrm = nrm.try_normalize(1e-12)?;
     let o = pts[0];
-    if pts.iter().any(|p| (p - o).dot(&nrm).abs() > 1e-6) {
+    let size = pts.iter().map(|p| (p - o).norm()).fold(0.0, f64::max);
+    if pts.iter().any(|p| (p - o).dot(&nrm).abs() > (size * 1e-6).max(1e-6)) {
         return None;
     }
     let xd = ax2_x(&nrm);
@@ -1557,7 +1641,6 @@ fn face_profile(f: &Shape) -> Result<Profile> {
                         curves.push(Curve2::Bezier { poles: [q[0], q[1], q[2], q[3]], source: None });
                     }
                 }
-                _ => return Err(KernelError::Unsupported("faces bounded by curves other than lines, conics and B-splines")),
             }
         }
         Ok(Loop { curves })

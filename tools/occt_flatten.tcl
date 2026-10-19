@@ -43,3 +43,8 @@ set dirname .
 foreach f $argv {
     source $f
 }
+
+# The variables a group's end script checks against.
+foreach v {command off_param length nbsh_v nbsh_e nbsh_w} {
+    if {[info exists $v]} { _puts stdout "VAR $v [set $v]" }
+}
