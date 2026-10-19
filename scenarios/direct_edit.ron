@@ -1,0 +1,72 @@
+// Direct edits from the toolbar's Move face ▾ menu (Move face, Delete face, Simplify), on a
+// 60 × 40 × 20 block with a Ø10 hole (volumes asserted in `cadrs_core/tests/direct_edit.rs`).
+// 01 the menu.
+// 02 Move face: the top face picked, Distance 5 mm: the block is 25 tall.
+// 02a the arrow on the top face dragged up: the distance follows (snapped), the block grows.
+// 02b dragged down past the face: a negative distance, the block is lower than 20; the arrow
+//     turns to point down, the way the face moves.
+// 02c dragged further along the arrow (now pointing down): the face goes on down, past the
+//     bottom (-22 mm): refused with a reason (red), not a crash.
+// 03 the opposite direction arrow: the distance's sign flips back.
+// 04 accepted: Move face 1 in the list.
+// 05 Delete face: the hole's wall picked: the hole is healed over.
+// 06 accepted: Delete face 1 in the list.
+Scenario(
+    start: Some("document"),
+    steps: [
+        WaitFor("document-shell"),
+        Custom("sketch top rect 0 0 60 40 circle 30 20 5"),
+        Key("Shift+7"),
+        Key("Shift+E"),
+        WaitFor("extrude-dialog"),
+        Click(xyz(5, 5, 0)),
+        Click(ui("extrude-depth-field")),
+        Key("Ctrl+A"),
+        Type("20"),
+        Key("Enter"),
+        Key("F"),
+        Click(ui("move-face")),
+        Screenshot("01-direct-edit-menu"),
+        Click(ui("direct-edit-menu-move-face")),
+        WaitFor("move-face-dialog"),
+        Click(xyz(5, 5, 20)),
+        Click(ui("move-face-distance-field")),
+        Key("Ctrl+A"),
+        Type("5"),
+        Key("Tab"),
+        MoveTo(1420, 900),
+        Wait(3),
+        Screenshot("02-top-moved-up-5mm"),
+        Drag(ui("move-face-arrow"), xyz(30, 20, 40)),
+        MoveTo(1420, 900),
+        Wait(3),
+        Screenshot("02a-arrow-dragged-up"),
+        Drag(ui("move-face-arrow"), xyz(30, 20, 5)),
+        MoveTo(1420, 900),
+        Wait(3),
+        Screenshot("02b-arrow-dragged-down"),
+        Drag(ui("move-face-arrow"), at(1110, 600)),
+        MoveTo(1420, 900),
+        Wait(3),
+        Screenshot("02c-dragged-further-down"),
+        Click(ui("move-face-distance-flip")),
+        MoveTo(1420, 900),
+        Wait(3),
+        Screenshot("03-opposite-direction"),
+        Click(ui("move-face-dialog-accept")),
+        MoveTo(1420, 900),
+        Wait(3),
+        Screenshot("04-move-face-accepted"),
+        Click(ui("move-face")),
+        Click(ui("direct-edit-menu-delete-face")),
+        WaitFor("delete-face-dialog"),
+        Click(xyz(25, 20, 13)),
+        MoveTo(1420, 900),
+        Wait(3),
+        Screenshot("05-hole-deleted"),
+        Click(ui("delete-face-dialog-accept")),
+        MoveTo(1420, 900),
+        Wait(3),
+        Screenshot("06-delete-face-accepted"),
+    ],
+)

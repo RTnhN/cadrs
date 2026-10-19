@@ -132,13 +132,13 @@ pub fn pick(world: &mut World, kind: &mut FeatureKind, field: AppliedField, pick
 // The dialog (called at the end of the applied dialogs' chain, from `crate::surfacing_ui`)
 
 pub(crate) fn name(kind: &FeatureKind) -> Option<&'static str> {
-    matches!(kind, FeatureKind::FlatExtrude(_)).then_some("flat-extrude")
+    matches!(kind, FeatureKind::FlatExtrude(_)).then_some("flat-extrude").or_else(|| crate::direct_edit_ui::name(kind))
 }
 
 pub(crate) fn layout(kind: &FeatureKind) -> Option<String> {
     match kind {
         FeatureKind::FlatExtrude(x) => Some(format!("flat-extrude {}", x.remove)),
-        _ => None,
+        k => crate::direct_edit_ui::layout(k),
     }
 }
 
@@ -150,17 +150,17 @@ pub(crate) fn items(features: &[Feature], kind: &FeatureKind, role: Role) -> Opt
             v.extend(x.sketches.iter().map(|s| crate::extrude_dialog::whole_sketch_label(features, *s, BodyType::Solid)));
             Some(v)
         }
-        _ => None,
+        (k, r) => crate::direct_edit_ui::items(features, k, r),
     }
 }
 
 pub(crate) fn list_field(role: Role) -> Option<AppliedField> {
-    (role == Role::FlatRegions).then_some(AppliedField::FlatRegions)
+    (role == Role::FlatRegions).then_some(AppliedField::FlatRegions).or_else(|| crate::direct_edit_ui::list_field(role))
 }
 
 /// Add | Remove, then the regions.
 pub(crate) fn body(b: &mut ChildSpawner, t: &Theme, kind: &FeatureKind, field: AppliedField, items_of: &dyn Fn(Role) -> Vec<String>) {
-    let FeatureKind::FlatExtrude(x) = kind else { return };
+    let FeatureKind::FlatExtrude(x) = kind else { return crate::direct_edit_ui::body(b, t, kind, field, items_of) };
     b.spawn((Role::OpTab, TabStrip::new("flat-extrude-operation").compact().tab("Add").tab("Remove").selected(usize::from(x.remove)).build(t)));
     body_column(b, |b| {
         list(b, t, "flat-extrude-regions-field", "Faces and sketch regions to extrude", Role::FlatRegions, items_of(Role::FlatRegions), field == AppliedField::FlatRegions);
@@ -174,6 +174,9 @@ pub(crate) fn tab(k: &mut FeatureKind, role: Role, i: usize) {
 }
 
 pub(crate) fn remove(k: &mut FeatureKind, role: Role, i: usize) {
+    if !matches!(k, FeatureKind::FlatExtrude(_)) {
+        return crate::direct_edit_ui::remove(k, role, i);
+    }
     let (FeatureKind::FlatExtrude(x), Role::FlatRegions) = (k, role) else { return };
     if i < x.regions.len() {
         x.regions.remove(i);

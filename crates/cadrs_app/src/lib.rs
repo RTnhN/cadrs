@@ -68,6 +68,7 @@ pub mod sheetmetal_table;
 pub mod sheetmetal_p3i9_ui;
 pub mod sheetmetal_tools_ui;
 pub mod flat_ui;
+pub mod direct_edit_ui;
 pub mod flat_export_dialog;
 pub mod sketch_dxf;
 pub mod surfacing_ui;

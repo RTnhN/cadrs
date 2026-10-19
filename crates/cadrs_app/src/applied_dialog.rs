@@ -284,6 +284,9 @@ pub(crate) enum Role {
     HelixHandedness,
     FillEdges,
     FillContinuity,
+    // The direct edits (`crate::direct_edit_ui`).
+    DirectEditFaces,
+    DirectEditDistance,
     // P3I.2: the Sheet metal model (`crate::sheetmetal_ui`). Tabs:
     SmOpTab,
     // Lists
@@ -607,6 +610,7 @@ fn dialog(
         Role::SmUpTo,
         Role::SmSecondUpTo,
         Role::FlatRegions,
+        Role::DirectEditFaces,
     ]
         .into_iter()
         .chain(crate::sheetmetal_features_ui::LIST_ROLES)

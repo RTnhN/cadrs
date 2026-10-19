@@ -1501,6 +1501,7 @@ fn part_studio_toolbar(tb: &mut ChildSpawnerCommands, t: &Theme) {
             ("shell", "shell", false, "Shell"),
             ("hole", "hole", false, "Hole"),
             ("thread", "thread", false, "Thread"),
+            ("move-face", "offset", true, "Move face, Delete face, Simplify"),
         ],
         &[
             ("pattern", "linear-pattern", true, "Linear pattern"),
@@ -1641,6 +1642,33 @@ fn part_studio_toolbar(tb: &mut ChildSpawnerCommands, t: &Theme) {
                 ));
                 continue;
             }
+            if *name == "move-face" {
+                // The direct edits: Move face, and from its menu Delete face and Simplify.
+                tb.spawn((
+                    ToolButton::new(*name, *icon_name).dropdown(true).tooltip(*tip).build(t),
+                    observe(
+                        |a: On<Activate>, q: Query<(&ComputedNode, &UiGlobalTransform)>, theme: Res<Theme>, mut commands: Commands| {
+                            let at = q.get(a.entity).map_or(Vec2::ZERO, |(n, t)| {
+                                let s = n.inverse_scale_factor();
+                                let size = n.size() * s;
+                                t.translation * s + Vec2::new(-size.x / 2.0, size.y / 2.0 + 2.0)
+                            });
+                            let anchor = cadrs_ui::menu::open_context_menu(&mut commands, at, direct_edit_menu().build(&theme));
+                            commands.entity(anchor).observe(|ev: On<MenuAction>, mut commands: Commands| {
+                                use cadrs_core::direct_edit::DirectEditKind;
+                                let kind = match ev.item.as_str() {
+                                    "direct-edit-menu-move-face" => DirectEditKind::MoveFace,
+                                    "direct-edit-menu-delete-face" => DirectEditKind::DeleteFace,
+                                    "direct-edit-menu-simplify" => DirectEditKind::Simplify,
+                                    _ => return,
+                                };
+                                commands.queue(move |world: &mut World| crate::applied::begin(world, crate::applied::AppliedKind::DirectEdit(kind)));
+                            });
+                        },
+                    ),
+                ));
+                continue;
+            }
             if let Some(kind) = crate::applied_dialog::toolbar_kind(name) {
                 // P3.6: Fillet, Chamfer, Shell and Hole.
                 tb.spawn((
@@ -1715,6 +1743,16 @@ fn surfacing_menu() -> Menu {
         .item(MenuItem::new("surfacing-menu-thicken", "Thicken").icon("thicken"))
         .item(MenuItem::new("surfacing-menu-fill", "Fill").icon("surface"))
         .item(MenuItem::new("surfacing-menu-helix", "Helix").icon("thread"))
+}
+
+/// The Move face button's menu: the direct edits (icon-rs has no move face, delete face or
+/// simplify icon yet: offset, delete and surface stand in).
+fn direct_edit_menu() -> Menu {
+    Menu::new("direct-edit-menu")
+        .min_width(160.0)
+        .item(MenuItem::new("direct-edit-menu-move-face", "Move face").icon("offset"))
+        .item(MenuItem::new("direct-edit-menu-delete-face", "Delete face").icon("delete"))
+        .item(MenuItem::new("direct-edit-menu-simplify", "Simplify").icon("surface"))
 }
 
 /// The Sheet metal model button's ▾ (P3I.2, X1): the other sheet metal tools in Onshape's order,
@@ -2906,6 +2944,8 @@ enum RowKind {
     Thicken,
     Helix,
     Fill,
+    /// Move face, Delete face, Simplify (their icon).
+    DirectEdit(&'static str),
     /// P3F.4: a Variable.
     Variable,
     /// P3I.2: a Sheet metal model.
@@ -2957,6 +2997,7 @@ impl RowKind {
             RowKind::Sm9(icon) => icon,
             RowKind::SheetMetal(icon) => icon,
             RowKind::SheetMetalTool(icon) => icon,
+            RowKind::DirectEdit(icon) => icon,
             _ => "sketch",
         }
     }
@@ -3055,6 +3096,11 @@ fn rebuild_feature_rows(
                 cadrs_core::FeatureKind::SheetMetalTool(x) => RowKind::SheetMetalTool(x.icon()),
                 // P3I.6: a flat pattern extrude is an Extrude in the list.
                 cadrs_core::FeatureKind::FlatExtrude(_) => RowKind::Extrude,
+                cadrs_core::FeatureKind::DirectEdit(x) => RowKind::DirectEdit(match x.kind {
+                    cadrs_core::direct_edit::DirectEditKind::MoveFace => "offset",
+                    cadrs_core::direct_edit::DirectEditKind::DeleteFace => "delete",
+                    cadrs_core::direct_edit::DirectEditKind::Simplify => "surface",
+                }),
                 _ if cache.hidden_sketches.contains(&f.id) => RowKind::ConsumedSketch,
                 _ if cache.preview_sketches.contains(&f.id) => RowKind::ReferencedSketch,
                 _ => RowKind::Sketch,

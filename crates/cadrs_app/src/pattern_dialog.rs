@@ -350,7 +350,7 @@ pub(crate) fn body(b: &mut ChildSpawner, t: &Theme, kind: &FeatureKind, field: A
         crate::transform_ui::body(b, t, kind, field, items_of);
         return;
     }
-    if matches!(kind, FeatureKind::Thicken(_) | FeatureKind::Helix(_) | FeatureKind::Fill(_) | FeatureKind::FlatExtrude(_)) {
+    if matches!(kind, FeatureKind::Thicken(_) | FeatureKind::Helix(_) | FeatureKind::Fill(_) | FeatureKind::FlatExtrude(_) | FeatureKind::DirectEdit(_)) {
         crate::surfacing_ui::body(b, t, kind, field, items_of);
         return;
     }
