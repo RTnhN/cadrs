@@ -30,7 +30,7 @@ use super::curve::Curve;
 use super::math::*;
 use super::nurbs::{hom, NurbsCurve, NurbsSurface, H};
 use super::surface::Surface;
-use super::topo::{co_range, Body, Coedge, Face, Shell, Solid};
+use super::topo::{co_range, Body, Coedge, Face, Shell, Solid, TOL_MIN};
 use super::xbuild::{XBuilder, XFace};
 
 type R<T> = Result<T, String>;
@@ -677,6 +677,8 @@ struct PcRep {
 #[derive(Debug, Clone)]
 struct TShape {
     kind: Kind,
+    /// A vertex's or edge's tolerance from the file (0 for other shapes).
+    tol: f64,
     closed: bool,
     subs: Vec<(Ori, usize, usize)>,
 }
@@ -788,9 +790,10 @@ fn parse(text: &str) -> R<File> {
     let mut shapes: Vec<TShape> = Vec::with_capacity(n);
     for si in 0..n {
         let ty = t.next()?;
+        let mut tol = 0.0;
         let kind = (|| -> R<Kind> { Ok(match ty {
             "Ve" => {
-                let _tol = t.f()?;
+                tol = t.f()?;
                 let p = t.p3()?;
                 // Point representations, to a "0 0".
                 loop {
@@ -807,7 +810,7 @@ fn parse(text: &str) -> R<File> {
                 Kind::Vertex(p)
             }
             "Ed" => {
-                let _tol = t.f()?;
+                tol = t.f()?;
                 let (_sp, _sr) = (t.i()?, t.i()?);
                 let degenerate = t.i()? == 1;
                 let mut c3 = None;
@@ -888,7 +891,7 @@ fn parse(text: &str) -> R<File> {
             }
             subs.push(r);
         }
-        shapes.push(TShape { kind, closed, subs });
+        shapes.push(TShape { kind, tol, closed, subs });
     }
     let root = match shape_ref(&mut t, n) {
         Ok(Some(r)) if r.1 < shapes.len() && r.2 < locs.len() => r,
@@ -929,6 +932,7 @@ impl Builder<'_> {
         }
         let Kind::Vertex(p) = self.f.shapes[s].kind else { return None };
         let v = self.xb.vertex(loc.m.point(&p));
+        self.xb.body.verts[v].tol = self.f.shapes[s].tol.max(TOL_MIN);
         self.verts.insert(key, v);
         Some(v)
     }
@@ -971,6 +975,9 @@ impl Builder<'_> {
             }
         };
         let e = self.xb.edge(curve, v0, v1);
+        if let Some(e) = e {
+            self.xb.body.edges[e].tol = self.f.shapes[s].tol.max(TOL_MIN);
+        }
         if e.is_none() {
             self.warnings.push(format!("edge {s}: empty"));
         }
@@ -1133,6 +1140,10 @@ impl Direct<'_> {
                 v
             }
         };
+        let tol = self.f.shapes[s].tol;
+        if tol > self.body.verts[v].tol {
+            self.body.verts[v].tol = tol;
+        }
         self.verts.insert(key, v);
         Ok(v)
     }
@@ -1167,6 +1178,7 @@ impl Direct<'_> {
             let c = to_curve(&self.f.curves[ci], a, b)?.transformed(&at);
             self.body.add_edge(c, a, b, v0, v1)
         };
+        self.body.edges[e].tol = self.f.shapes[s].tol.max(TOL_MIN);
         self.edges.insert(key, e);
         Ok(e)
     }

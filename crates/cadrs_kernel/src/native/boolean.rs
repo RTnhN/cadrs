@@ -77,6 +77,8 @@ struct WEdge {
     t: [f64; 2],
     v: [usize; 2],
     degenerate: bool,
+    /// The edge's tolerance (the input's, or the run's for new edges).
+    tol: f64,
     /// Split points (t, vertex).
     splits: Vec<(f64, usize)>,
 }
@@ -91,22 +93,43 @@ struct WFace {
     polys: Vec<Vec<P2>>,
     bbox: Bbox,
     uv_center: P2,
+    /// The face's own tolerance: the largest of its edges' and vertices' (0 for exact
+    /// geometry, where the run's applies).
+    tol: f64,
 }
 
-#[derive(Default)]
 struct Pool {
     verts: Vec<P3>,
+    /// Each vertex's tolerance: points within the larger of two tolerances (and the run's) are
+    /// one vertex.
+    vtols: Vec<f64>,
+    /// The grid's cell: big enough that a merge never reaches past the neighbouring cells.
+    cell: f64,
     grid: HashMap<(i64, i64, i64), Vec<usize>>,
     edges: Vec<WEdge>,
 }
 
+impl Default for Pool {
+    fn default() -> Self {
+        Pool::with_tolerance(0.0)
+    }
+}
+
 impl Pool {
-    fn cell(p: &P3) -> (i64, i64, i64) {
-        let s = 1.0 / (vtol() * 16.0);
+    /// A pool for entities of tolerances up to `max_tol`.
+    fn with_tolerance(max_tol: f64) -> Self {
+        Pool { verts: Vec::new(), vtols: Vec::new(), cell: (vtol() * 16.0).max(max_tol * 2.0), grid: HashMap::new(), edges: Vec::new() }
+    }
+    fn cell_of(&self, p: &P3) -> (i64, i64, i64) {
+        let s = 1.0 / self.cell;
         ((p.x * s).floor() as i64, (p.y * s).floor() as i64, (p.z * s).floor() as i64)
     }
     fn find(&self, p: &P3) -> Option<usize> {
-        let (cx, cy, cz) = Self::cell(p);
+        self.find_tol(p, 0.0)
+    }
+    /// The vertex `p` (of tolerance `tol`) falls on.
+    fn find_tol(&self, p: &P3, tol: f64) -> Option<usize> {
+        let (cx, cy, cz) = self.cell_of(p);
         let mut best: Option<(f64, usize)> = None;
         for dx in -1..=1 {
             for dy in -1..=1 {
@@ -114,7 +137,7 @@ impl Pool {
                     if let Some(v) = self.grid.get(&(cx + dx, cy + dy, cz + dz)) {
                         for &i in v {
                             let d = (self.verts[i] - p).norm();
-                            if d < vtol() && best.map_or(true, |(bd, _)| d < bd) {
+                            if d < vtol().max(tol).max(self.vtols[i]) && best.map_or(true, |(bd, _)| d < bd) {
                                 best = Some((d, i));
                             }
                         }
@@ -125,7 +148,18 @@ impl Pool {
         best.map(|(_, i)| i)
     }
     fn vertex(&mut self, p: P3) -> usize {
-        if let Some(i) = self.find(&p) {
+        self.vertex_tol(p, 0.0)
+    }
+    /// The vertex at `p` with tolerance `tol`: an existing one within reach (its tolerance grown
+    /// to hold this one's ball), else a new one.
+    fn vertex_tol(&mut self, p: P3, tol: f64) -> usize {
+        if let Some(i) = self.find_tol(&p, tol) {
+            if tol > 0.0 {
+                let reach = (self.verts[i] - p).norm() + tol;
+                if reach > self.vtols[i] {
+                    self.vtols[i] = reach;
+                }
+            }
             return i;
         }
         if std::env::var("CADRS_VERTEX_DEBUG").is_ok() {
@@ -137,15 +171,17 @@ impl Pool {
                 eprintln!("inexact vertex {p:?}\n{}", std::backtrace::Backtrace::force_capture());
             }
         }
-        self.verts.push(p);
-        let i = self.verts.len() - 1;
-        self.grid.entry(Self::cell(&p)).or_default().push(i);
-        i
+        self.new_vertex_tol(p, tol)
     }
     fn new_vertex(&mut self, p: P3) -> usize {
+        self.new_vertex_tol(p, 0.0)
+    }
+    fn new_vertex_tol(&mut self, p: P3, tol: f64) -> usize {
         self.verts.push(p);
+        self.vtols.push(tol);
         let i = self.verts.len() - 1;
-        self.grid.entry(Self::cell(&p)).or_default().push(i);
+        let c = self.cell_of(&p);
+        self.grid.entry(c).or_default().push(i);
         i
     }
     fn split(&mut self, e: usize, t: f64, v: usize) {
@@ -192,10 +228,12 @@ fn edge_bbox(e: &WEdge, verts: &[P3]) -> Bbox {
 
 /// Imports a body's vertices, edges and faces into the pool.
 fn import(pool: &mut Pool, faces: &mut Vec<WFace>, b: &Body, owner: usize, merge: bool) {
-    let vmap: Vec<usize> = b.verts.iter().map(|v| if merge { pool.vertex(v.p) } else { pool.new_vertex(v.p) }).collect();
+    // Exact inputs carry no tolerance of their own (the run's applies).
+    let own = |t: f64| if t > super::topo::TOL_MIN { t } else { 0.0 };
+    let vmap: Vec<usize> = b.verts.iter().map(|v| if merge { pool.vertex_tol(v.p, own(v.tol)) } else { pool.new_vertex_tol(v.p, own(v.tol)) }).collect();
     let e0 = pool.edges.len();
     for e in &b.edges {
-        pool.edges.push(WEdge { curve: e.curve.clone(), t: e.t, v: [vmap[e.v[0]], vmap[e.v[1]]], degenerate: e.degenerate, splits: Vec::new() });
+        pool.edges.push(WEdge { curve: e.curve.clone(), t: e.t, v: [vmap[e.v[0]], vmap[e.v[1]]], degenerate: e.degenerate, tol: own(e.tol), splits: Vec::new() });
     }
     for (fi, f) in b.faces.iter().enumerate() {
         let loops: Vec<Vec<(usize, bool, Curve)>> = f.loops.iter().map(|l| l.iter().map(|c| (c.edge + e0, c.fwd, c.pc.clone())).collect()).collect();
@@ -232,6 +270,10 @@ fn import(pool: &mut Pool, faces: &mut Vec<WFace>, b: &Body, owner: usize, merge
             bb = bb.grow(d * 0.02);
         }
         let center = uvb.center();
+        let ftol = f.loops.iter().flatten().flat_map(|c| {
+            let e = &b.edges[c.edge];
+            [own(e.tol), own(b.verts[e.v[0]].tol), own(b.verts[e.v[1]].tol)]
+        }).fold(0.0, f64::max);
         faces.push(WFace {
             surf: f.surf.clone(),
             sense: f.sense,
@@ -239,8 +281,9 @@ fn import(pool: &mut Pool, faces: &mut Vec<WFace>, b: &Body, owner: usize, merge
             owner,
             orig: fi,
             polys,
-            bbox: bb.grow(vtol() * 10.0),
+            bbox: bb.grow(vtol() * 10.0 + ftol),
             uv_center: P2::new(center.x, center.y),
+            tol: ftol,
         });
     }
 }
@@ -361,12 +404,18 @@ fn tangent_along_shared_edge(pool: &Pool, fa: &WFace, fb: &WFace, ea: &[usize], 
 
 /// Whether an edge lies on a surface (its sample points are on it).
 fn edge_on_surface(e: &WEdge, s: &Surface) -> bool {
+    edge_on_surface_tol(e, s, 0.0)
+}
+
+/// [`edge_on_surface`] within also `tol` (the face's) and the edge's own tolerance.
+fn edge_on_surface_tol(e: &WEdge, s: &Surface, tol: f64) -> bool {
     if e.degenerate {
         return true;
     }
+    let tol = vtol().max(e.tol).max(tol);
     [0.0, 0.3, 0.5, 0.7, 1.0].iter().all(|f| {
         let p = e.curve.point(e.t[0] + (e.t[1] - e.t[0]) * f);
-        s.distance(&p) < vtol()
+        s.distance(&p) < tol
     })
 }
 
@@ -486,16 +535,92 @@ pub fn boolean_bodies(a: &Body, b: &Body, op: BoolOp) -> Result<BoolOut> {
     // At the default tolerance first; when that leaves the result broken (near-coincident
     // geometry the tolerance splits into slivers or gaps: a surface through a corner within
     // 1e-5), again at growing tolerances, as OCCT grows its entities' tolerances.
+    // Faces of the two bodies on one surface but for float noise (made apart: radii 25 and
+    // 25.0000015) get the gap as their edges' and vertices' tolerance, so they meet.
+    let raised = near_coincident_tolerances(a, b);
+    let (a, b) = match &raised {
+        Some((x, y)) => (x, y),
+        None => (a, b),
+    };
     let first = with_tol(VTOL, || run(a, b, Mode::Bool(op)));
     if !matches!(&first, Err(KernelError::OperationFailed(m)) if m.contains("open shell") || m.contains("left")) {
         return first;
     }
-    for t in [1e-5, 1e-4] {
+    for t in [1e-5, 1e-4].into_iter().filter(|_| std::env::var_os("CADRS_NO_RETRY").is_none()) {
         if let Ok(r) = with_tol(t, || run(a, b, Mode::Bool(op))) {
             return Ok(r);
         }
     }
     first
+}
+
+/// The faces of `a` and `b` that lie on one surface only within 1e-7 of their size (beyond the
+/// run's tolerance): the two bodies with those faces' edges and vertices given the gap (with
+/// margin) as tolerance; None when there are none.
+fn near_coincident_tolerances(a: &Body, b: &Body) -> Option<(Body, Body)> {
+    let face_pts = |body: &Body, f: usize| -> Vec<P3> {
+        let mut pts = Vec::new();
+        for c in body.faces[f].loops.iter().flatten() {
+            let e = &body.edges[c.edge];
+            for i in 0..=8 {
+                pts.push(e.point(e.t[0] + (e.t[1] - e.t[0]) * i as f64 / 8.0));
+            }
+        }
+        pts
+    };
+    let boxes = |body: &Body| -> Vec<(Vec<P3>, Bbox)> {
+        (0..body.faces.len())
+            .map(|f| {
+                let pts = face_pts(body, f);
+                let mut bb = Bbox::empty();
+                for p in &pts {
+                    bb.add(p);
+                }
+                (pts, bb)
+            })
+            .collect()
+    };
+    let (ba, bb) = (boxes(a), boxes(b));
+    let mut raise: Vec<(usize, usize, f64)> = Vec::new();
+    for (fa, (pa, xa)) in ba.iter().enumerate() {
+        for (fb, (pb, xb)) in bb.iter().enumerate() {
+            let size = xa.diagonal().max(xb.diagonal());
+            let ctol = size * 1e-7;
+            if ctol <= vtol() || !xa.grow(ctol).overlaps(&xb.grow(ctol)) {
+                continue;
+            }
+            let (sa, sb) = (&a.faces[fa].surf, &b.faces[fb].surf);
+            if sa.same_domain(sb, vtol()).is_some() || sa.same_domain(sb, ctol).is_none() {
+                continue;
+            }
+            // The gap: the farthest boundary point of either face from the other's surface.
+            let gap = pb.iter().map(|p| sa.distance(p)).chain(pa.iter().map(|p| sb.distance(p))).fold(0.0, f64::max);
+            if gap > vtol() && gap <= ctol * 2.0 {
+                raise.push((fa, fb, gap * 1.5));
+            }
+        }
+    }
+    if std::env::var_os("CADRS_BOOL_DEBUG").is_some() {
+        eprintln!("near-coincident faces (a, b, tolerance): {raise:?}");
+    }
+    if raise.is_empty() {
+        return None;
+    }
+    let (mut a2, mut b2) = (a.clone(), b.clone());
+    let bump = |body: &mut Body, f: usize, t: f64| {
+        let es: Vec<usize> = body.faces[f].loops.iter().flatten().map(|c| c.edge).collect();
+        for e in es {
+            body.edges[e].tol = body.edges[e].tol.max(t);
+            for v in body.edges[e].v {
+                body.verts[v].tol = body.verts[v].tol.max(t);
+            }
+        }
+    };
+    for (fa, fb, t) in raise {
+        bump(&mut a2, fa, t);
+        bump(&mut b2, fb, t);
+    }
+    Some((a2, b2))
 }
 
 thread_local! {
@@ -648,7 +773,8 @@ fn run(a: &Body, b: &Body, mode: Mode) -> Result<BoolOut> {
         };
     }
     let mut prof = Prof::new();
-    let mut pool = Pool::default();
+    let max_tol = a.verts.iter().chain(&b.verts).map(|v| v.tol).chain(a.edges.iter().chain(&b.edges).map(|e| e.tol)).fold(0.0, f64::max);
+    let mut pool = Pool::with_tolerance(max_tol);
     let mut faces: Vec<WFace> = Vec::new();
     import(&mut pool, &mut faces, a, 0, false);
     let na_edges = pool.edges.len();
@@ -669,51 +795,44 @@ fn run(a: &Body, b: &Body, mode: Mode) -> Result<BoolOut> {
         }
     }
     prof.mark("import");
-    // 2a. Vertices on edges of the other body.
-    for e in 0..ne {
-        if pool.edges[e].degenerate {
-            continue;
-        }
-        let other_verts: Vec<usize> = {
-            // Vertices of the other body's edges.
-            let mut vs = Vec::new();
-            let range = if owner_of_edge(e) == 0 { na_edges..ne } else { 0..na_edges };
-            for o in range {
-                for v in pool.edges[o].v {
-                    if !vs.contains(&v) {
-                        vs.push(v);
-                    }
-                }
-            }
-            vs
-        };
-        for v in other_verts {
-            let p = pool.verts[v];
-            if !ebox[e].contains(&p) {
-                continue;
-            }
-            let ed = &pool.edges[e];
-            if v == ed.v[0] || v == ed.v[1] {
-                continue;
-            }
-            if let Some(t) = on_curve(&ed.curve, ed.t[0], ed.t[1], &p, vtol()) {
-                pool.split(e, t, v);
-            }
-        }
-    }
-    // 2a'. Closed edges (whole circles) are split at every vertex lying on them, of either body:
-    // coincident circles with their seams at different places then share their pieces.
-    let all_verts: Vec<usize> = {
-        let mut vs: Vec<usize> = Vec::new();
-        for e in 0..ne {
-            for v in pool.edges[e].v {
-                if !vs.contains(&v) {
+    // 2a. Vertices on edges of the other body (within the larger of the vertex's, the edge's
+    // and the run's tolerances).
+    let verts_of = |range: std::ops::Range<usize>, pool: &Pool| -> Vec<usize> {
+        let mut seen = std::collections::HashSet::new();
+        let mut vs = Vec::new();
+        for o in range {
+            for v in pool.edges[o].v {
+                if seen.insert(v) {
                     vs.push(v);
                 }
             }
         }
         vs
     };
+    let body_verts = [verts_of(0..na_edges, &pool), verts_of(na_edges..ne, &pool)];
+    for e in 0..ne {
+        if pool.edges[e].degenerate {
+            continue;
+        }
+        let other = &body_verts[1 - owner_of_edge(e)];
+        for &v in other {
+            let p = pool.verts[v];
+            let ed = &pool.edges[e];
+            let tol = vtol().max(pool.vtols[v]).max(ed.tol);
+            if !ebox[e].grow(tol).contains(&p) {
+                continue;
+            }
+            if v == ed.v[0] || v == ed.v[1] {
+                continue;
+            }
+            if let Some(t) = on_curve(&ed.curve, ed.t[0], ed.t[1], &p, tol) {
+                pool.split(e, t, v);
+            }
+        }
+    }
+    // 2a'. Closed edges (whole circles) are split at every vertex lying on them, of either body:
+    // coincident circles with their seams at different places then share their pieces.
+    let all_verts: Vec<usize> = verts_of(0..ne, &pool);
     for e in 0..ne {
         let ed = pool.edges[e].clone();
         if ed.degenerate || ed.v[0] != ed.v[1] {
@@ -724,10 +843,11 @@ fn run(a: &Body, b: &Body, mode: Mode) -> Result<BoolOut> {
                 continue;
             }
             let p = pool.verts[v];
-            if !ebox[e].contains(&p) {
+            let tol = vtol().max(pool.vtols[v]).max(ed.tol);
+            if !ebox[e].grow(tol).contains(&p) {
                 continue;
             }
-            if let Some(t) = on_curve(&ed.curve, ed.t[0], ed.t[1], &p, vtol()) {
+            if let Some(t) = on_curve(&ed.curve, ed.t[0], ed.t[1], &p, tol) {
                 pool.split(e, t, v);
             }
         }
@@ -742,9 +862,10 @@ fn run(a: &Body, b: &Body, mode: Mode) -> Result<BoolOut> {
                 continue;
             }
             let (ca, cb) = (pool.edges[ea].clone(), pool.edges[eb].clone());
-            for (ta, tb) in ssi::curve_curve(&ca.curve, ca.t[0], ca.t[1], &cb.curve, cb.t[0], cb.t[1], vtol() * 0.5) {
+            let et = ca.tol.max(cb.tol);
+            for (ta, tb) in ssi::curve_curve(&ca.curve, ca.t[0], ca.t[1], &cb.curve, cb.t[0], cb.t[1], vtol().max(et) * 0.5) {
                 let p = ca.curve.point(ta);
-                let v = pool.vertex(p);
+                let v = pool.vertex_tol(p, et);
                 // The parameters of the (possibly merged) vertex itself.
                 let q = pool.verts[v];
                 let ta = refine_param(&ca.curve, ca.t[0], ca.t[1], &q, ta);
@@ -769,7 +890,7 @@ fn run(a: &Body, b: &Body, mode: Mode) -> Result<BoolOut> {
                 continue;
             }
             let ed = pool.edges[e].clone();
-            if edge_on_surface(&ed, &faces[fi].surf) {
+            if edge_on_surface_tol(&ed, &faces[fi].surf, faces[fi].tol) {
                 if !on_face[fi].contains(&e) {
                     on_face[fi].push(e);
                 }
@@ -777,11 +898,12 @@ fn run(a: &Body, b: &Body, mode: Mode) -> Result<BoolOut> {
             }
             for t in ssi::curve_surface(&ed.curve, ed.t[0], ed.t[1], &faces[fi].surf) {
                 let p = ed.curve.point(t);
-                match point_in_face(&faces[fi], &p, vtol()) {
+                let et = ed.tol.max(faces[fi].tol);
+                match point_in_face(&faces[fi], &p, vtol().max(et)) {
                     InFace::Outside => continue,
                     _ => {}
                 }
-                let v = pool.vertex(p);
+                let v = pool.vertex_tol(p, et);
                 let t = refine_param(&ed.curve, ed.t[0], ed.t[1], &pool.verts[v], t);
                 pool.split(e, t, v);
                 if !face_pts[fi].contains(&v) {
@@ -816,7 +938,10 @@ fn run(a: &Body, b: &Body, mode: Mode) -> Result<BoolOut> {
             if !faces[fa].bbox.overlaps(&faces[fb].bbox) {
                 continue;
             }
-            if faces[fa].surf.same_domain(&faces[fb].surf, vtol()).is_some() {
+            // Coincident within the faces' tolerances, or 1e-7 of their size (the float noise of
+            // geometry made apart: radii of 25 and 25.0000015).
+            let ctol = vtol().max(faces[fa].tol).max(faces[fb].tol).max(faces[fa].bbox.diagonal().max(faces[fb].bbox.diagonal()) * 1e-7);
+            if faces[fa].surf.same_domain(&faces[fb].surf, ctol).is_some() {
                 coincident[fa].push(fb);
                 coincident[fb].push(fa);
                 continue;
@@ -867,15 +992,18 @@ fn run(a: &Body, b: &Body, mode: Mode) -> Result<BoolOut> {
                     cand.push(v);
                 }
             }
+            // The pair's tolerance: the larger of the faces' (new vertices and edges carry it).
+            let ft = faces[fa].tol.max(faces[fb].tol);
+            let tf = vtol().max(ft);
             for ic in curves {
                 let mut ps: Vec<(f64, usize)> = Vec::new();
                 for &v in &cand {
                     let p = pool.verts[v];
-                    if !ob.grow(vtol() * 10.0).contains(&p) {
+                    if !ob.grow(tf * 10.0).contains(&p) {
                         continue;
                     }
                     let t = param_on(&ic.c, ic.t0, ic.t1, &p);
-                    if (ic.c.point(t) - p).norm() < vtol() * 2.0 {
+                    if (ic.c.point(t) - p).norm() < (vtol() * 2.0).max(ft).max(pool.vtols[v]) {
                         ps.push((t, v));
                         // A closed curve: the vertex at its start is also at its end.
                         if ic.closed && ((t - ic.t0).abs() < 1e-12 || (t - ic.t1).abs() < 1e-12) {
@@ -913,7 +1041,7 @@ fn run(a: &Body, b: &Body, mode: Mode) -> Result<BoolOut> {
                     let mut split: Vec<(f64, f64, Option<usize>, Option<usize>)> = Vec::new();
                     for (ta, tb, va, vb) in ivs {
                         if tb > ic.t1 + 1e-12 && ta < ic.t1 - 1e-12 {
-                            let vend = pool.vertex(ic.c.point(ic.t1));
+                            let vend = pool.vertex_tol(ic.c.point(ic.t1), ft);
                             split.push((ta, ic.t1, va, Some(vend)));
                             if tb - period > ic.t0 + 1e-12 {
                                 split.push((ic.t0, tb - period, Some(vend), vb));
@@ -930,12 +1058,12 @@ fn run(a: &Body, b: &Body, mode: Mode) -> Result<BoolOut> {
                     // Wrap periodic parameters past the end.
                     let tm = (ta + tb) * 0.5;
                     let pm = ic.c.point(tm);
-                    let ia = point_in_face(&faces[fa], &pm, vtol());
-                    let ib = point_in_face(&faces[fb], &pm, vtol());
+                    let ia = point_in_face(&faces[fa], &pm, tf);
+                    let ib = point_in_face(&faces[fb], &pm, tf);
                     if ia == InFace::Outside || ib == InFace::Outside {
                         continue;
                     }
-                    let va = va.unwrap_or_else(|| pool.vertex(ic.c.point(ta)));
+                    let va = va.unwrap_or_else(|| pool.vertex_tol(ic.c.point(ta), ft));
                     let vb = vb.unwrap_or(va);
                     // Reuse an existing edge running there.
                     let existing = (0..pool.edges.len()).find(|&e| {
@@ -946,7 +1074,7 @@ fn run(a: &Body, b: &Body, mode: Mode) -> Result<BoolOut> {
                         // Only an unsplit edge between exactly these vertices (pieces of split
                         // edges that coincide with the new edge are unified later).
                         let ends_ok = (ed.v == [va, vb] || ed.v == [vb, va]) && ed.splits.is_empty();
-                        ends_ok && on_curve(&ed.curve, ed.t[0], ed.t[1], &pm, vtol()).is_some()
+                        ends_ok && on_curve(&ed.curve, ed.t[0], ed.t[1], &pm, tf.max(ed.tol)).is_some()
                     });
                     let e = match existing {
                         Some(e) => e,
@@ -954,7 +1082,7 @@ fn run(a: &Body, b: &Body, mode: Mode) -> Result<BoolOut> {
                             // Unwrap the parameter range for the curve (closed curves may run past
                             // t1).
                             let (ta, tb) = (ta, tb);
-                            pool.edges.push(WEdge { curve: ic.c.clone(), t: [ta, tb], v: [va, vb], degenerate: false, splits: Vec::new() });
+                            pool.edges.push(WEdge { curve: ic.c.clone(), t: [ta, tb], v: [va, vb], degenerate: false, tol: ft, splits: Vec::new() });
                             new_edges.push(pool.edges.len() - 1);
                             pool.edges.len() - 1
                         }
@@ -985,7 +1113,7 @@ fn run(a: &Body, b: &Body, mode: Mode) -> Result<BoolOut> {
         bounds.push((ed.t[1], ed.v[1]));
         let mut ps = Vec::new();
         for w in bounds.windows(2) {
-            pool.edges.push(WEdge { curve: ed.curve.clone(), t: [w[0].0, w[1].0], v: [w[0].1, w[1].1], degenerate: false, splits: Vec::new() });
+            pool.edges.push(WEdge { curve: ed.curve.clone(), t: [w[0].0, w[1].0], v: [w[0].1, w[1].1], degenerate: false, tol: ed.tol, splits: Vec::new() });
             ps.push(pool.edges.len() - 1);
         }
         pieces.push(ps);
@@ -1238,10 +1366,10 @@ fn run(a: &Body, b: &Body, mode: Mode) -> Result<BoolOut> {
                     // A pole piece: its own degenerate edge over the arc's range.
                     let ed = &pool.edges[a.edge];
                     let v = *vmap.entry(ed.v[0]).or_insert_with(|| {
-                        out.verts.push(super::topo::Vertex { p: pool.verts[ed.v[0]] });
+                        out.verts.push(super::topo::Vertex { p: pool.verts[ed.v[0]], tol: pool.vtols[ed.v[0]].max(super::topo::TOL_MIN) });
                         out.verts.len() - 1
                     });
-                    out.edges.push(Edge { curve: ed.curve.clone(), t: a.t, v: [v, v], degenerate: true });
+                    out.edges.push(Edge { curve: ed.curve.clone(), t: a.t, v: [v, v], degenerate: true, tol: ed.tol.max(super::topo::TOL_MIN) });
                     nl.push(Coedge { edge: out.edges.len() - 1, fwd: a.fwd, pc: a.pc.clone() });
                     continue;
                 }
@@ -1250,11 +1378,11 @@ fn run(a: &Body, b: &Body, mode: Mode) -> Result<BoolOut> {
                     let mut vv = [0usize; 2];
                     for k in 0..2 {
                         vv[k] = *vmap.entry(ed.v[k]).or_insert_with(|| {
-                            out.verts.push(super::topo::Vertex { p: pool.verts[ed.v[k]] });
+                            out.verts.push(super::topo::Vertex { p: pool.verts[ed.v[k]], tol: pool.vtols[ed.v[k]].max(super::topo::TOL_MIN) });
                             out.verts.len() - 1
                         });
                     }
-                    out.edges.push(Edge { curve: ed.curve.clone(), t: ed.t, v: vv, degenerate: ed.degenerate });
+                    out.edges.push(Edge { curve: ed.curve.clone(), t: ed.t, v: vv, degenerate: ed.degenerate, tol: ed.tol.max(super::topo::TOL_MIN) });
                     out.edges.len() - 1
                 });
                 nl.push(Coedge { edge: ne, fwd: a.fwd, pc: a.pc.clone() });

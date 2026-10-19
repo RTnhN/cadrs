@@ -508,7 +508,7 @@ fn merge_group(b: &mut Body, g: &[usize]) -> Option<Face> {
             let _ = end2;
         }
         let (lo, hi, vlo, vhi) = if v1 < v2 { (s1, s2v, v1, v2) } else { (s2v, s1, v2, v1) };
-        b.edges.push(Edge { curve: iso, t: [vlo, vhi], v: [lo, hi], degenerate: false });
+        b.edges.push(Edge { curve: iso, t: [vlo, vhi], v: [lo, hi], degenerate: false, tol: super::topo::TOL_MIN });
         let se = b.edges.len() - 1;
         let line_at = |u: f64| Curve::Line { o: P3::new(u, 0.0, 0.0), d: V3::new(0.0, 1.0, 0.0) };
         // From s1 (at u_s + 2πw) to s2, then chain 2, then from s2 (at u_s) back to s1.
@@ -611,7 +611,7 @@ pub fn merge_edges(b: &mut Body) {
             if (t1 - t0) > TAU + 1e-9 {
                 continue;
             }
-            let ne = Edge { curve: curve.clone(), t: [t0, t1], v: [v0, v1], degenerate: false };
+            let ne = Edge { curve: curve.clone(), t: [t0, t1], v: [v0, v1], degenerate: false, tol: super::topo::TOL_MIN };
             let _ = closed;
             b.edges[e1] = ne.clone();
             // Replace coedges: in each face, the coedges of e1 and e2 become one of e1.

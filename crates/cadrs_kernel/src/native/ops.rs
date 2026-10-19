@@ -272,5 +272,5 @@ pub fn face_normals_at(k: &NativeKernel, body: BodyId, face: FaceId, points: &[P
 
 #[allow(dead_code)]
 fn unused(_: &Coedge) -> (f64, f64) {
-    co_range(&super::topo::Edge { curve: Curve::Line { o: P3::origin(), d: V3::x() }, t: [0.0, 1.0], v: [0, 0], degenerate: false }, true)
+    co_range(&super::topo::Edge { curve: Curve::Line { o: P3::origin(), d: V3::x() }, t: [0.0, 1.0], v: [0, 0], degenerate: false, tol: super::topo::TOL_MIN }, true)
 }

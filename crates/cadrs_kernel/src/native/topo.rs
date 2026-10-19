@@ -15,9 +15,15 @@ use super::curve::Curve;
 use super::math::*;
 use super::surface::Surface;
 
+/// The smallest tolerance an entity has (OCCT's `Precision::Confusion`): exact geometry.
+pub const TOL_MIN: f64 = 1e-7;
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct Vertex {
     pub p: P3,
+    /// The ball about `p` the vertex stands for: ends of its edges and its position on faces
+    /// lie within it ([`TOL_MIN`] for exact geometry; larger for read or healed shapes).
+    pub tol: f64,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -27,6 +33,9 @@ pub struct Edge {
     pub v: [usize; 2],
     /// A point edge (a cone's apex, a sphere's pole): only its p-curves mean anything.
     pub degenerate: bool,
+    /// How far the edge's 3D curve, its p-curves on its faces and the faces may stray from one
+    /// another along it ([`TOL_MIN`] for exact geometry).
+    pub tol: f64,
 }
 
 impl Edge {
@@ -84,17 +93,17 @@ pub fn co_range(e: &Edge, fwd: bool) -> (f64, f64) {
 
 impl Body {
     pub fn add_vertex(&mut self, p: P3) -> usize {
-        self.verts.push(Vertex { p });
+        self.verts.push(Vertex { p, tol: TOL_MIN });
         self.verts.len() - 1
     }
 
     pub fn add_edge(&mut self, curve: Curve, t0: f64, t1: f64, v0: usize, v1: usize) -> usize {
-        self.edges.push(Edge { curve, t: [t0, t1], v: [v0, v1], degenerate: false });
+        self.edges.push(Edge { curve, t: [t0, t1], v: [v0, v1], degenerate: false, tol: TOL_MIN });
         self.edges.len() - 1
     }
 
     pub fn add_degenerate(&mut self, at: P3, t0: f64, t1: f64, v: usize) -> usize {
-        self.edges.push(Edge { curve: Curve::Line { o: at, d: V3::zeros() }, t: [t0, t1], v: [v, v], degenerate: true });
+        self.edges.push(Edge { curve: Curve::Line { o: at, d: V3::zeros() }, t: [t0, t1], v: [v, v], degenerate: true, tol: TOL_MIN });
         self.edges.len() - 1
     }
 

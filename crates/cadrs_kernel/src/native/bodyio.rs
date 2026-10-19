@@ -24,6 +24,9 @@ use super::surface::Surface;
 use super::topo::*;
 
 const MAGIC: &[u8; 8] = b"CADRSNB1";
+/// The same with a tolerance after each vertex and edge (written only when some entity has more
+/// than [`TOL_MIN`], so exact bodies keep the first layout).
+const MAGIC2: &[u8; 8] = b"CADRSNB2";
 
 struct W(Vec<u8>);
 
@@ -155,12 +158,16 @@ impl W {
 
 /// The body as bytes.
 pub fn write(b: &Body) -> Vec<u8> {
-    let mut w = W(MAGIC.to_vec());
+    let tols = b.verts.iter().any(|v| v.tol > TOL_MIN) || b.edges.iter().any(|e| e.tol > TOL_MIN);
+    let mut w = W(if tols { MAGIC2 } else { MAGIC }.to_vec());
     for n in [b.verts.len(), b.edges.len(), b.faces.len(), b.shells.len(), b.solids.len()] {
         w.u32(n);
     }
     for v in &b.verts {
         w.p(&v.p);
+        if tols {
+            w.f(v.tol);
+        }
     }
     for e in &b.edges {
         w.curve(&e.curve);
@@ -169,6 +176,9 @@ pub fn write(b: &Body) -> Vec<u8> {
         w.u32(e.v[0]);
         w.u32(e.v[1]);
         w.u8(e.degenerate as u8);
+        if tols {
+            w.f(e.tol);
+        }
     }
     for f in &b.faces {
         w.surface(&f.surf);
@@ -298,14 +308,17 @@ impl<'a> Rd<'a> {
 
 /// A body from bytes written by [`write`].
 pub fn read(bytes: &[u8]) -> Result<Body, String> {
-    if bytes.len() < 28 || &bytes[..8] != MAGIC {
+    if bytes.len() < 28 || (&bytes[..8] != MAGIC && &bytes[..8] != MAGIC2) {
         return Err("not a native kernel body".into());
     }
     let mut r = Rd { b: bytes, i: 8 };
     let (nv, ne, nf, ns, nso) = (r.count(24)?, r.count(30)?, r.count(6)?, r.count(5)?, r.count(4)?);
     let mut b = Body::default();
+    let tols = &bytes[..8] == MAGIC2;
     for _ in 0..nv {
-        b.verts.push(Vertex { p: r.p()? });
+        let p = r.p()?;
+        let tol = if tols { r.f()? } else { TOL_MIN };
+        b.verts.push(Vertex { p, tol });
     }
     for _ in 0..ne {
         let curve = r.curve()?;
@@ -314,7 +327,9 @@ pub fn read(bytes: &[u8]) -> Result<Body, String> {
         if v[0] >= nv || v[1] >= nv {
             return Err("an edge's vertex is out of range".into());
         }
-        b.edges.push(Edge { curve, t, v, degenerate: r.bool()? });
+        let degenerate = r.bool()?;
+        let tol = if tols { r.f()? } else { TOL_MIN };
+        b.edges.push(Edge { curve, t, v, degenerate, tol });
     }
     for _ in 0..nf {
         let surf = r.surface()?;

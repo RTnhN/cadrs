@@ -303,7 +303,6 @@ boolean bopfuse_2d_c7
 boolean bopfuse_2d_c8
 boolean bopfuse_2d_c9
 boolean bopfuse_2d_d1
-boolean bopfuse_complex_f1
 boolean bopfuse_complex_g2
 boolean bopfuse_complex_g9
 boolean bopfuse_complex_h4
@@ -344,7 +343,6 @@ boolean boptuc_2d_o9
 boolean boptuc_2d_p2
 boolean boptuc_2d_p4
 boolean boptuc_2d_p5
-boolean boptuc_complex_b5
 boolean boptuc_complex_c6
 boolean boptuc_complex_c7
 boolean boptuc_complex_d4
@@ -805,7 +803,6 @@ offset shape_type_i_g2
 offset shape_type_i_g3
 offset shape_type_i_g4
 boolean bcut_complex_q9
-boolean gdml_public_b2
 blend simple_e6
 blend simple_e7
 blend simple_e8
