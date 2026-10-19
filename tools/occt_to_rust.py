@@ -165,6 +165,20 @@ class Case:
             self.bind(a[0], f"k.mkplane({self.shape(a[1])})?")
         elif c == "add" and len(a) == 2:
             self.bind(a[1], f"k.add_hole({self.shape(a[0])}, {self.shape(a[1])})?")
+        elif c == "profile" and len(a) >= 1:
+            face, code, i = "None", [], 1
+            while i < len(a):
+                w = a[i]
+                if w.upper() == "S" and i + 1 < len(a):
+                    face = f"Some({self.shape(a[i + 1])})"
+                    i += 2
+                    continue
+                if w.upper() in ("O", "P", "F", "X", "Y", "L", "XX", "YY", "T", "TT", "R", "RR", "D", "IX", "IY", "C", "W", "WW") and w not in self.consts:
+                    code.append(w.upper())
+                else:
+                    code.append(repr(self.num(w)))
+                i += 1
+            self.bind(a[0], f'k.profile({face}, "{" ".join(code)}")?')
         elif c == "box" and len(a) in (4, 7):
             if len(a) == 4:
                 self.bind(a[0], f"k.box_({', '.join(L(x) for x in a[1:])})?")

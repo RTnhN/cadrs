@@ -259,6 +259,230 @@ impl NativeKernel {
         Ok(Shape::Face { plane: *plane, loops })
     }
 
+    /// `profile name [S face] codes…`: DRAW's language for a planar profile, a point moving in
+    /// a plane (XY by default) with a direction (1 0 to start). `code` holds the instructions
+    /// with numbers already evaluated: `O x y z` and `P nx ny nz xx xy xz` place the plane,
+    /// `F x y` sets the start, `X`/`Y`/`L`/`T` move by, `XX`/`YY`/`TT` move to, `IX`/`IY` move
+    /// to a vertical/horizontal line, `R`/`RR` turn by/to an angle, `D` sets the direction,
+    /// `C radius angle` makes a tangent arc. The profile closes to the start and makes a face,
+    /// unless it ends with `W` (a closed wire) or `WW` (an open wire). `face` is the plane of
+    /// `S face` (a planar face).
+    pub fn profile(&self, face: Option<&Shape>, code: &str) -> Result<Shape> {
+        const CONF: f64 = 1e-7;
+        let (mut o, mut zn, mut xn) = (P3::origin(), V3::z(), V3::x());
+        if let Some(f) = face {
+            let plane = match f {
+                Shape::Face { plane, .. } => *plane,
+                Shape::BodyFace(b, id) => match &self.get(*b)?.faces[id.0 as usize].surf {
+                    super::surface::Surface::Plane { f } => Plane { origin: f.o, x_dir: nalgebra::Unit::new_normalize(f.x), normal: nalgebra::Unit::new_normalize(f.x.cross(&f.y)) },
+                    _ => return Err(KernelError::Unsupported("profile on a face that isn't planar")),
+                },
+                _ => return Err(err("profile S takes a face")),
+            };
+            (o, zn, xn) = (plane.origin, plane.normal.into_inner(), plane.x_dir.into_inner());
+        }
+        let w: Vec<&str> = code.split_whitespace().collect();
+        let (mut x0, mut y0, mut x, mut y, mut dx, mut dy) = (0.0, 0.0, 0.0, 0.0, 1.0, 0.0);
+        let (mut make_face, mut close, mut first, mut stay_first) = (true, true, true, false);
+        // The moves in plane coordinates: a line (start, direction, length) or an arc (centre,
+        // start angle, signed sweep, radius).
+        enum Move {
+            Line([f64; 2], [f64; 2], f64),
+            Arc([f64; 2], f64, f64, f64),
+        }
+        let mut moves: Vec<Move> = Vec::new();
+        let mut i = 0;
+        let num = |i: usize| -> Result<f64> { w.get(i).ok_or_else(|| err("profile: bad number of arguments"))?.parse::<f64>().map_err(|_| err("profile: a bad number")) };
+        while i < w.len() {
+            let c = w[i].to_ascii_uppercase();
+            let second = c.chars().nth(1);
+            let mut line = None;
+            let mut arc = None;
+            match c.chars().next().unwrap_or(' ') {
+                'F' => {
+                    if !first {
+                        return Err(err("profile: F must precede all moves"));
+                    }
+                    (x, y) = (num(i + 1)?, num(i + 2)?);
+                    (x0, y0) = (x, y);
+                    stay_first = true;
+                    i += 2;
+                }
+                'O' => {
+                    o = P3::new(num(i + 1)?, num(i + 2)?, num(i + 3)?);
+                    stay_first = true;
+                    i += 3;
+                }
+                'P' => {
+                    let vn = V3::new(num(i + 1)?, num(i + 2)?, num(i + 3)?);
+                    let vx = V3::new(num(i + 4)?, num(i + 5)?, num(i + 6)?);
+                    if vn.norm() <= CONF || vx.norm() <= CONF {
+                        return Err(err("profile: a null direction"));
+                    }
+                    zn = vn.normalize();
+                    xn = zn.cross(&vx).cross(&zn).try_normalize(1e-12).ok_or_else(|| err("profile: parallel directions"))?;
+                    stay_first = true;
+                    i += 6;
+                }
+                'X' => {
+                    let mut l = num(i + 1)?;
+                    if second == Some('X') {
+                        l -= x;
+                    }
+                    (dx, dy) = (1.0, 0.0);
+                    line = Some(l);
+                    i += 1;
+                }
+                'Y' => {
+                    let mut l = num(i + 1)?;
+                    if second == Some('Y') {
+                        l -= y;
+                    }
+                    (dx, dy) = (0.0, 1.0);
+                    line = Some(l);
+                    i += 1;
+                }
+                'L' => {
+                    line = Some(num(i + 1)?);
+                    i += 1;
+                }
+                'T' => {
+                    let (mut vx, mut vy) = (num(i + 1)?, num(i + 2)?);
+                    if second == Some('T') {
+                        vx -= x;
+                        vy -= y;
+                    }
+                    let l = vx.hypot(vy);
+                    if l > CONF {
+                        (dx, dy) = (vx / l, vy / l);
+                        line = Some(l);
+                    }
+                    i += 2;
+                }
+                'R' => {
+                    let a = num(i + 1)?.to_radians();
+                    if second == Some('R') {
+                        (dx, dy) = (a.cos(), a.sin());
+                    } else {
+                        (dx, dy) = (a.cos() * dx - a.sin() * dy, a.sin() * dx + a.cos() * dy);
+                    }
+                    i += 1;
+                }
+                'D' => {
+                    let (vx, vy) = (num(i + 1)?, num(i + 2)?);
+                    let l = vx.hypot(vy);
+                    if l > CONF {
+                        (dx, dy) = (vx / l, vy / l);
+                    }
+                    i += 2;
+                }
+                'C' => {
+                    let r = num(i + 1)?;
+                    if r.abs() > CONF {
+                        arc = Some((r, num(i + 2)?.to_radians()));
+                    }
+                    i += 2;
+                }
+                'I' => {
+                    let v = num(i + 1)?;
+                    match second {
+                        Some('X') => {
+                            if dx.abs() < CONF {
+                                return Err(err("profile: can't intersect"));
+                            }
+                            line = Some((v - x) / dx);
+                        }
+                        Some('Y') => {
+                            if dy.abs() < CONF {
+                                return Err(err("profile: can't intersect"));
+                            }
+                            line = Some((v - y) / dy);
+                        }
+                        _ => {}
+                    }
+                    i += 1;
+                }
+                'W' => {
+                    make_face = false;
+                    close = second != Some('W');
+                    i = w.len() - 1;
+                }
+                _ => return Err(err(&format!("profile: unknown code {}", w[i]))),
+            }
+            loop {
+                if let Some(mut l) = line.take() {
+                    if l < 0.0 {
+                        l = -l;
+                        (dx, dy) = (-dx, -dy);
+                    }
+                    moves.push(Move::Line([x, y], [dx, dy], l));
+                    x += l * dx;
+                    y += l * dy;
+                } else if let Some((r, a)) = arc.take() {
+                    // The centre is on the left of the direction for a positive radius; the
+                    // arc turns left for a positive radius and angle.
+                    let (cx, cy) = (x - r * dy, y + r * dx);
+                    let ccw = (r > 0.0) == (a > 0.0);
+                    let sweep = a.abs() * if ccw { 1.0 } else { -1.0 };
+                    let start = (y - cy).atan2(x - cx);
+                    let rr = r.abs();
+                    moves.push(Move::Arc([cx, cy], start, sweep, rr));
+                    let e = start + sweep;
+                    (x, y) = (cx + rr * e.cos(), cy + rr * e.sin());
+                    (dx, dy) = if ccw { (-e.sin(), e.cos()) } else { (e.sin(), -e.cos()) };
+                }
+                first = stay_first;
+                stay_first = false;
+                i += 1;
+                if i == w.len() && close {
+                    let (vx, vy) = (x0 - x, y0 - y);
+                    let l = vx.hypot(vy);
+                    if l > CONF {
+                        (dx, dy) = (vx / l, vy / l);
+                        line = Some(l);
+                        i -= 1;
+                        continue;
+                    }
+                }
+                break;
+            }
+        }
+        let yn = zn.cross(&xn);
+        let at = |p: [f64; 2]| o + xn * p[0] + yn * p[1];
+        let mut edges = Vec::new();
+        let mut area = 0.0;
+        for m in &moves {
+            match *m {
+                Move::Line(p, d, l) => {
+                    if l <= CONF {
+                        continue;
+                    }
+                    let q = [p[0] + d[0] * l, p[1] + d[1] * l];
+                    area += p[0] * q[1] - q[0] * p[1];
+                    let (curve, len) = Curve::line(at(p), at(q));
+                    edges.push(DEdge { curve, t0: 0.0, t1: len });
+                }
+                Move::Arc(c, start, sweep, r) => {
+                    // The polygon term of the chord plus the circular segment.
+                    let (p, q) = ([c[0] + r * start.cos(), c[1] + r * start.sin()], [c[0] + r * (start + sweep).cos(), c[1] + r * (start + sweep).sin()]);
+                    area += p[0] * q[1] - q[0] * p[1] + r * r * (sweep - sweep.sin());
+                    let xd = xn * start.cos() + yn * start.sin();
+                    let yd = zn.cross(&xd) * sweep.signum();
+                    edges.push(DEdge { curve: Curve::Circle { c: at(c), x: xd, y: yd, r }, t0: 0.0, t1: sweep.abs() });
+                }
+            }
+        }
+        if edges.is_empty() {
+            return Err(err("profile: no edges"));
+        }
+        if !make_face {
+            return Ok(Shape::Wire(edges));
+        }
+        // OCCT turns the face round when the wire runs clockwise in the plane.
+        let normal = if area >= 0.0 { zn } else { -zn };
+        Ok(Shape::Face { plane: Plane { origin: o, x_dir: nalgebra::Unit::new_normalize(xn), normal: nalgebra::Unit::new_normalize(normal) }, loops: vec![edges] })
+    }
+
     // --- Primitives -------------------------------------------------------------------------
 
     /// `box name dx dy dz`.
