@@ -2932,6 +2932,7 @@ pub fn fillet_asymmetric(k: &mut dyn Kernel) {
         size: FilletSize::Radius(2.0),
         allow_overflow: true,
         profile: FilletProfile::Asymmetric { second: 4.0, flip },
+        propagate: true,
     };
     let a = one(k.fillet_with(b, &[edge], &spec(false)).unwrap());
     close(v0 - volume(k, a), (1.0 - PI / 4.0) * 8.0 * 30.0, 1e-4);

@@ -136,8 +136,7 @@ pub struct FilletFeature {
     pub size: f64,
     pub size_expr: String,
     /// Tangent propagation (on by default): the picked edges' tangent chains are filleted too.
-    /// OpenCascade always continues a fillet along tangent edges, so with it off a pick whose
-    /// chain has unpicked edges fails with that reason.
+    /// Off, only the picked edges are, stopping square where they run on into unpicked ones.
     #[serde(default = "yes")]
     pub tangent_propagation: bool,
     /// Allow edge overflow (on by default): off refuses a fillet that runs onto a face other

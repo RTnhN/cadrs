@@ -487,6 +487,43 @@ pub fn hexahedron(c: &[P3; 8]) -> Result<Body> {
 
 /// Keeps the part of a tool on the side of the plane (through `o`, normal `n`) that `n`
 /// points away from.
+/// Whether the edge running `out` away from vertex `v` carries on smoothly there into another
+/// edge (not `except`): a blend stopping at `v` then ends square, with no extension along it.
+fn continues_smoothly(b: &Body, v: usize, out: V3, except: &[usize]) -> bool {
+    b.edges.iter().enumerate().any(|(i, o)| {
+        if except.contains(&i) || o.degenerate || !o.v.contains(&v) {
+            return false;
+        }
+        let d = if o.v[0] == v { o.curve.tangent(o.t[0]) } else { -o.curve.tangent(o.t[1]) };
+        d.norm() > 0.0 && d.normalize().dot(&out) > 1.0 - 1e-6
+    })
+}
+
+/// Where to cut a blend tool's extension past the end of its edge (or chain) at vertex `v`,
+/// heading `out` away from the edge, as (point, normal of the side cut away), given the faces
+/// the blend runs between. A tool removing material (`convex`) is cut flush with a flat end face
+/// it would otherwise dig into (one facing back along the edge: the floor a chamfered wall
+/// stands on); a tool adding material is cut at an end face it would stick out of, else square
+/// to the edge.
+fn end_cut(b: &Body, v: usize, out: V3, sides: &[usize], convex: bool) -> Option<(P3, V3)> {
+    let p = b.verts[v].p;
+    let mut plane: Option<(P3, V3)> = None;
+    for (fi, f) in b.faces.iter().enumerate() {
+        if sides.contains(&fi) || !f.loops.iter().flatten().any(|c| b.edges[c.edge].v.contains(&v)) {
+            continue;
+        }
+        if let Surface::Plane { f: fr } = &f.surf {
+            let n = fr.x.cross(&fr.y) * if f.sense { 1.0 } else { -1.0 };
+            if convex && n.dot(&out) < -1e-6 {
+                plane = Some((p, -n));
+            } else if !convex && n.dot(&out) > 1e-6 {
+                plane = Some((p, n));
+            }
+        }
+    }
+    if convex { plane } else { Some(plane.unwrap_or((p, out))) }
+}
+
 fn trim_tool(tool: &Body, src: &[Vec<FaceSrc>], o: P3, n: V3) -> Result<(Body, Vec<Vec<FaceSrc>>)> {
     let bb = tool.bbox();
     let size = bb.diagonal() * 2.0 + (bb.center() - o).norm() * 2.0 + 10.0;
@@ -630,9 +667,42 @@ pub fn blend(k: &mut NativeKernel, body: BodyId, edges: &[(EdgeId, Box<dyn Fn(f6
             check_fits(&b, e, kind.as_ref())?;
         }
         // Exact strips on planes and cylinders where it applies, else the lofted tool.
-        let tool = chain_tool(&b, body, chain, kind.as_ref(), *swap, (0.0, 1.0), (true, true))?;
+        // The chain's open ends, each with the direction away from the chain.
+        let (first, last) = (chain[0], chain[chain.len() - 1]);
+        let start_v = if first.1 { b.edges[first.0].v[0] } else { b.edges[first.0].v[1] };
+        let end_v = if last.1 { b.edges[last.0].v[1] } else { b.edges[last.0].v[0] };
+        let away = |ce: (usize, bool), at_start: bool| -> V3 {
+            let ed = &b.edges[ce.0];
+            let t = if ce.1 == at_start { ed.t[0] } else { ed.t[1] };
+            let along = ed.curve.tangent(t).normalize() * if ce.1 { 1.0 } else { -1.0 };
+            if at_start { -along } else { along }
+        };
+        let in_this: Vec<usize> = chain.iter().map(|c| c.0).collect();
+        let open = start_v != end_v;
+        // Ends running on smoothly into edges left as they are stop square, unextended.
+        let extend = (
+            !(open && continues_smoothly(&b, start_v, away(first, true), &in_this)),
+            !(open && continues_smoothly(&b, end_v, away(last, false), &in_this)),
+        );
+        let tool = chain_tool(&b, body, chain, kind.as_ref(), *swap, (0.0, 1.0), extend)?;
+        let (mut tb, mut ts) = (tool.body, tool.src);
+        // Cut the extensions at the end faces as for one edge.
+        if open {
+            for (ce, v, at_start, ext) in [(first, start_v, true, extend.0), (last, end_v, false, extend.1)] {
+                if !ext {
+                    continue;
+                }
+                let out = away(ce, at_start);
+                let sides: Vec<usize> = chain.iter().flat_map(|c| edge_sides(&b, c.0).map(|s| [s[0].0, s[1].0]).unwrap_or([usize::MAX; 2])).collect();
+                if let Some((o, n)) = end_cut(&b, v, out, &sides, tool.convex) {
+                    let (nb, ns) = trim_tool(&tb, &ts, o, n)?;
+                    tb = nb;
+                    ts = ns;
+                }
+            }
+        }
         let op = if tool.convex { BoolOp::Subtract } else { BoolOp::Union };
-        cur = cur.apply(&tool.body, &tool.src, op)?;
+        cur = cur.apply(&tb, &ts, op)?;
     }
     for (e, kind, swap) in edges {
         if in_chain[e.0 as usize] {
@@ -670,6 +740,18 @@ pub fn blend(k: &mut NativeKernel, body: BodyId, edges: &[(EdgeId, Box<dyn Fn(f6
                 continue;
             }
             plans.push((end, *v, others));
+        }
+        // An end where the edge runs on smoothly into an edge left as it is: the blend stops
+        // square there.
+        for (end, v) in ed.v.iter().enumerate() {
+            if !ed.closed() && continues_smoothly(&b, *v, tangent_at(end), &[e]) {
+                if end == 0 {
+                    extend.0 = false;
+                } else {
+                    extend.1 = false;
+                }
+                plans.retain(|x| x.0 != end);
+            }
         }
         let tool = edge_tool_range(&b, body, e, kind.as_ref(), *swap, (0.0, 1.0), extend)?;
         // The section's contact points must lie on the faces (the blend fits).
@@ -709,27 +791,16 @@ pub fn blend(k: &mut NativeKernel, body: BodyId, edges: &[(EdgeId, Box<dyn Fn(f6
                 _ => {}
             }
         }
-        // A concave tool adds material: cut its extensions off at the end faces (or square to
-        // the edge at its ends).
-        if !tool.convex {
-            for (end, v) in ed.v.iter().enumerate() {
-                let p = b.verts[*v].p;
-                let tv = ed.curve.tangent(ed.t[end]).normalize();
-                let out = if end == 0 { -tv } else { tv };
-                let [s1, s2] = edge_sides(&b, e)?;
-                let mut plane: Option<(P3, V3)> = None;
-                for (fi, f) in b.faces.iter().enumerate() {
-                    if fi == s1.0 || fi == s2.0 || !f.loops.iter().flatten().any(|c| b.edges[c.edge].v.contains(v)) {
-                        continue;
-                    }
-                    if let Surface::Plane { f: fr } = &f.surf {
-                        let n = fr.x.cross(&fr.y) * if f.sense { 1.0 } else { -1.0 };
-                        if n.dot(&out) > 1e-6 {
-                            plane = Some((p, n));
-                        }
-                    }
-                }
-                let (o, n) = plane.unwrap_or((p, out));
+        // Its extensions end at the end faces: flush where a tool removing material would dig
+        // into one, and where a tool adding material would stick out of one.
+        let [s1, s2] = edge_sides(&b, e)?;
+        for (end, v) in ed.v.iter().enumerate() {
+            if ed.closed() || (tool.convex && ((end == 0 && !extend.0) || (end == 1 && !extend.1))) {
+                continue;
+            }
+            let tv = ed.curve.tangent(ed.t[end]).normalize();
+            let out = if end == 0 { -tv } else { tv };
+            if let Some((o, n)) = end_cut(&b, *v, out, &[s1.0, s2.0], tool.convex) {
                 let (nb, ns) = trim_tool(&tb, &ts, o, n)?;
                 tb = nb;
                 ts = ns;
@@ -878,7 +949,8 @@ fn check_overlaps(b: &Body, edges: &[(EdgeId, Box<dyn Fn(f64) -> SectionKind>, b
     Ok(())
 }
 
-/// The kernel's fillet: every edge with its tangent chain.
+/// The kernel's fillet: every edge with its tangent chain (only the edges without
+/// propagation).
 pub fn fillet(k: &mut NativeKernel, body: BodyId, edges: &[EdgeId], spec: &FilletSpec) -> Result<OpResult> {
     let (FilletSize::Radius(r) | FilletSize::Width(r)) = spec.size;
     if !(r > 0.0) {
@@ -886,7 +958,8 @@ pub fn fillet(k: &mut NativeKernel, body: BodyId, edges: &[EdgeId], spec: &Fille
     }
     let mut all: Vec<EdgeId> = Vec::new();
     for &e in edges {
-        for c in k.tangent_chain(body, e)? {
+        let chain = if spec.propagate { k.tangent_chain(body, e)? } else { vec![e] };
+        for c in chain {
             if !all.contains(&c) {
                 all.push(c);
             }

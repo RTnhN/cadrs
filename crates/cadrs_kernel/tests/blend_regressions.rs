@@ -18,4 +18,27 @@ fn chamfer_over_fillets() {
     // About the chain's length (176 mm) times the section (2 mm²), less where it bends.
     let removed = v0 - k.mass_properties(out).unwrap().volume;
     assert!((320.0..352.0).contains(&removed), "{removed}");
+    // The chamfer ends flush with the round cut's floor (z = 15.5) instead of digging into it:
+    // the floor only gains the chamfer's two end sections (under 2 mm² each).
+    let floor = |id: BodyId| -> f64 {
+        k.faces(id).unwrap().iter().filter(|f| f.kind == SurfaceKind::Plane && (f.center.z - 15.5).abs() < 1e-6).map(|f| f.area).sum()
+    };
+    let gained = floor(out) - floor(b);
+    assert!(gained > 0.0 && gained < 4.0, "floor area {} -> {}", floor(b), floor(out));
+}
+
+/// The same model's top arc alone (Tangent propagation off): the chamfer stops square at the
+/// arc's ends, where the rim runs on smoothly over the fillets, instead of running on past them.
+#[test]
+fn chamfer_stops_where_the_chain_runs_on() {
+    let mut k = NativeKernel::new();
+    let b = k.insert(bodyio::read(include_bytes!("data/chamfer_over_fillets.body")).unwrap());
+    let v0 = k.mass_properties(b).unwrap().volume;
+    let r = k.chamfer_with(b, &[EdgeId(22)], &ChamferOpts::new(ChamferSpec::EqualDistance(2.0))).unwrap();
+    let out = r.bodies[0];
+    assert!(k.get(out).unwrap().check().is_empty());
+    // The arc (103.5 mm) times the section (2 mm², about 3% more for the section's offset from
+    // the round cut's axis).
+    let removed = v0 - k.mass_properties(out).unwrap().volume;
+    assert!((207.0..216.0).contains(&removed), "{removed}");
 }

@@ -610,6 +610,14 @@ pub struct FilletSpec {
     pub allow_overflow: bool,
     #[serde(default)]
     pub profile: FilletProfile,
+    /// Tangent propagation: the edges' tangent chains are filleted too (on by default). Off,
+    /// only the edges are, stopping square where they run on smoothly into others.
+    #[serde(default = "yes")]
+    pub propagate: bool,
+}
+
+fn yes() -> bool {
+    true
 }
 
 impl FilletSpec {
@@ -618,6 +626,7 @@ impl FilletSpec {
             size: FilletSize::Radius(r),
             allow_overflow: true,
             profile: FilletProfile::Circular,
+            propagate: true,
         }
     }
 }

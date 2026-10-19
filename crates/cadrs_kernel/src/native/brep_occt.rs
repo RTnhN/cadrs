@@ -30,7 +30,7 @@ use super::curve::Curve;
 use super::math::*;
 use super::nurbs::{hom, NurbsCurve, NurbsSurface, H};
 use super::surface::Surface;
-use super::topo::Body;
+use super::topo::{co_range, Body, Coedge, Face, Shell, Solid};
 use super::xbuild::{XBuilder, XFace};
 
 type R<T> = Result<T, String>;
@@ -100,6 +100,10 @@ impl Ax {
     }
     fn frame(&self) -> Frame {
         Frame::from_xz(self.o, self.x, self.z)
+    }
+    /// The file's own axes (left-handed ones too), so (u, v) are OCCT's.
+    fn frame_exact(&self) -> Frame {
+        Frame { o: self.o, x: self.x.normalize(), y: self.y.normalize(), z: self.z.normalize() }
     }
     /// +1 for a right-handed system, −1 for a left-handed one (whose surfaces' natural normals
     /// point the other way from ours).
@@ -199,7 +203,66 @@ fn read_curve(t: &mut Tok) -> R<GCurve> {
     })
 }
 
-/// Reads past a 2D curve (the file's p-curves aren't used).
+fn p2(t: &mut Tok) -> R<P3> {
+    Ok(P3::new(t.f()?, t.f()?, 0.0))
+}
+
+fn d2(t: &mut Tok) -> R<V3> {
+    Ok(V3::new(t.f()?, t.f()?, 0.0))
+}
+
+fn ax2(t: &mut Tok) -> R<Ax> {
+    let (o, x, y) = (p2(t)?, d2(t)?, d2(t)?);
+    Ok(Ax { o, z: x.cross(&y), x, y })
+}
+
+fn poles2(t: &mut Tok, n: usize, rational: bool) -> R<Vec<H>> {
+    (0..n)
+        .map(|_| {
+            let p = p2(t)?;
+            let w = if rational { t.f()? } else { 1.0 };
+            Ok(hom(&p, w))
+        })
+        .collect()
+}
+
+/// A 2D curve (a p-curve), as a curve in the z = 0 plane.
+fn read_curve2d(t: &mut Tok) -> R<GCurve> {
+    Ok(match t.i()? {
+        1 => GCurve::Line(p2(t)?, d2(t)?),
+        2 => GCurve::Circle(ax2(t)?, t.f()?),
+        3 => GCurve::Ellipse(ax2(t)?, t.f()?, t.f()?),
+        4 => GCurve::Parabola(ax2(t)?, t.f()?),
+        5 => GCurve::Hyperbola(ax2(t)?, t.f()?, t.f()?),
+        6 => {
+            let rational = t.i()? != 0;
+            let degree = t.u()?;
+            let poles = poles2(t, degree + 1, rational)?;
+            GCurve::Spline(Spline { degree, poles, knots: vec![0.0, 1.0], mults: vec![degree + 1; 2], periodic: false })
+        }
+        7 => {
+            let rational = t.i()? != 0;
+            let periodic = t.i()? != 0;
+            let (degree, np, nk) = (t.u()?, t.u()?, t.u()?);
+            let poles = poles2(t, np, rational)?;
+            let (knots, mults) = read_knots(t, nk)?;
+            GCurve::Spline(Spline { degree, poles, knots, mults, periodic })
+        }
+        8 => {
+            skip(t, 2)?;
+            GCurve::Trimmed(Box::new(read_curve2d(t)?))
+        }
+        9 => {
+            // Offset to the right of the direction of travel: T × z.
+            let d = t.f()?;
+            GCurve::Offset(d, V3::z(), Box::new(read_curve2d(t)?))
+        }
+        k => return Err(format!("unknown 2D curve type {k}")),
+    })
+}
+
+/// Reads past a 2D curve.
+#[allow(dead_code)]
 fn skip_curve2d(t: &mut Tok) -> R<()> {
     match t.i()? {
         1 => skip(t, 4),
@@ -431,13 +494,15 @@ fn curve_range(g: &GCurve) -> Option<(f64, f64)> {
 }
 
 /// Our surface and whether its natural normal is OCCT's.
-fn to_surface(g: &GSurf) -> R<(Surface, bool)> {
+fn to_surface(g: &GSurf, exact: bool) -> R<(Surface, bool)> {
+    let fr = |ax: &Ax| if exact { ax.frame_exact() } else { ax.frame() };
+    let hand = |ax: &Ax| exact || ax.hand() > 0.0;
     Ok(match g {
-        GSurf::Plane(ax) => (Surface::Plane { f: ax.frame() }, ax.hand() > 0.0),
-        GSurf::Cylinder(ax, r) => (Surface::Cylinder { f: ax.frame(), r: *r }, ax.hand() > 0.0),
-        GSurf::Cone(ax, r, a) => (Surface::Cone { f: ax.frame(), r: *r, a: *a }, ax.hand() > 0.0),
-        GSurf::Sphere(ax, r) => (Surface::Sphere { f: ax.frame(), r: *r }, ax.hand() > 0.0),
-        GSurf::Torus(ax, rmaj, rmin) => (Surface::Torus { f: ax.frame(), rmaj: *rmaj, rmin: *rmin }, ax.hand() > 0.0),
+        GSurf::Plane(ax) => (Surface::Plane { f: fr(ax) }, hand(ax)),
+        GSurf::Cylinder(ax, r) => (Surface::Cylinder { f: fr(ax), r: *r }, hand(ax)),
+        GSurf::Cone(ax, r, a) => (Surface::Cone { f: fr(ax), r: *r, a: *a }, hand(ax)),
+        GSurf::Sphere(ax, r) => (Surface::Sphere { f: fr(ax), r: *r }, hand(ax)),
+        GSurf::Torus(ax, rmaj, rmin) => (Surface::Torus { f: fr(ax), rmaj: *rmaj, rmin: *rmin }, hand(ax)),
         GSurf::Extrusion(d, c) => {
             let (a, b) = curve_range(c).ok_or("an extrusion of an unbounded curve")?;
             let c = to_curve(c, a, b)?;
@@ -455,13 +520,13 @@ fn to_surface(g: &GSurf) -> R<(Surface, bool)> {
             (Surface::Revolution { f: Frame::from_xz(*o, xh, z), m }, true)
         }
         GSurf::Spline { du, dv, poles, u, v } => (Surface::Nurbs(Arc::new(spline_surface(*du, *dv, poles, u, v)?)), true),
-        GSurf::Trimmed(s) => to_surface(s)?,
-        GSurf::Offset(d, s) => offset_surface(*d, s)?,
+        GSurf::Trimmed(s) => to_surface(s, exact)?,
+        GSurf::Offset(d, s) => offset_surface(*d, s, exact)?,
     })
 }
 
-fn offset_surface(d: f64, g: &GSurf) -> R<(Surface, bool)> {
-    let (base, same) = to_surface(g)?;
+fn offset_surface(d: f64, g: &GSurf, exact: bool) -> R<(Surface, bool)> {
+    let (base, same) = to_surface(g, exact)?;
     // Along OCCT's normal: ours, or ours turned round.
     let d = if same { d } else { -d };
     let pos = |r: f64| if r > 1e-12 { Ok(r) } else { Err("an offset surface of no radius".to_string()) };
@@ -577,14 +642,25 @@ impl Ori {
 #[derive(Debug, Clone)]
 enum Kind {
     Vertex(P3),
-    /// The 3D curve (index, location, range), when there is one, and whether it is degenerate.
-    Edge(Option<(usize, usize, f64, f64)>, bool),
+    /// The 3D curve (index, location, range), when there is one, whether it is degenerate, and
+    /// its p-curves.
+    Edge(Option<(usize, usize, f64, f64)>, bool, Vec<PcRep>),
     Wire,
     /// The surface (index, location).
     Face(Option<(usize, usize)>),
     Shell,
     Solid,
     Compound,
+}
+
+/// An edge's p-curve on a surface (two on a closed surface: the edge's forward use first).
+#[derive(Debug, Clone)]
+struct PcRep {
+    pc: usize,
+    pc2: Option<usize>,
+    surf: usize,
+    loc: usize,
+    range: (f64, f64),
 }
 
 #[derive(Debug, Clone)]
@@ -597,6 +673,7 @@ struct TShape {
 /// A parsed file.
 struct File {
     locs: Vec<Loc>,
+    curves2d: Vec<GCurve>,
     curves: Vec<GCurve>,
     surfaces: Vec<GSurf>,
     shapes: Vec<TShape>,
@@ -664,9 +741,7 @@ fn parse(text: &str) -> R<File> {
     }
 
     let n2 = t.table("Curve2ds")?;
-    for _ in 0..n2 {
-        skip_curve2d(&mut t)?;
-    }
+    let curves2d = (0..n2).map(|_| read_curve2d(&mut t)).collect::<R<Vec<_>>>()?;
     let nc = t.table("Curves")?;
     let curves = (0..nc).map(|_| read_curve(&mut t)).collect::<R<Vec<_>>>()?;
     let np = t.table("Polygon3D")?;
@@ -725,6 +800,7 @@ fn parse(text: &str) -> R<File> {
                 let (_sp, _sr) = (t.i()?, t.i()?);
                 let degenerate = t.i()? == 1;
                 let mut c3 = None;
+                let mut pcs: Vec<PcRep> = Vec::new();
                 loop {
                     match t.i()? {
                         0 => break,
@@ -735,14 +811,28 @@ fn parse(text: &str) -> R<File> {
                                 c3 = Some((c - 1, l, a, b));
                             }
                         }
-                        2 => skip(&mut t, 5 + if version == 2 { 4 } else { 0 })?,
-                        3 => {
-                            // pc, pc2 and the regularity, written "24C0" or "24 C0".
-                            skip(&mut t, 1)?;
-                            if t.next()?.bytes().all(|b| b.is_ascii_digit()) {
-                                skip(&mut t, 1)?;
+                        k @ (2 | 3) => {
+                            let pc = t.u()?;
+                            let pc2 = if k == 3 {
+                                // pc2 and the regularity, written "24C0" or "24 C0".
+                                let w = t.next()?;
+                                let digits: String = w.chars().take_while(|c| c.is_ascii_digit()).collect();
+                                if digits.len() == w.len() {
+                                    skip(&mut t, 1)?;
+                                }
+                                Some(digits.parse::<usize>().map_err(|_| format!("bad p-curve index {w}"))?)
+                            } else {
+                                None
+                            };
+                            let (sf, l) = (t.u()?, t.u()?);
+                            let (a, b) = (t.f()?, t.f()?);
+                            if version == 2 {
+                                skip(&mut t, 4)?;
                             }
-                            skip(&mut t, 4 + if version == 2 { 4 } else { 0 })?
+                            let ok = |i: usize| i >= 1 && i <= curves2d.len();
+                            if ok(pc) && pc2.is_none_or(ok) && sf >= 1 {
+                                pcs.push(PcRep { pc: pc - 1, pc2: pc2.map(|x| x - 1), surf: sf - 1, loc: l, range: (a, b) });
+                            }
                         }
                         4 => skip(&mut t, 5)?,
                         5 => skip(&mut t, 2)?,
@@ -751,7 +841,7 @@ fn parse(text: &str) -> R<File> {
                         k => return Err(format!("unknown edge representation {k}")),
                     }
                 }
-                Kind::Edge(c3, degenerate)
+                Kind::Edge(c3, degenerate, pcs)
             }
             "Wi" => Kind::Wire,
             "Fa" => {
@@ -793,7 +883,7 @@ fn parse(text: &str) -> R<File> {
         Ok(Some(r)) if r.1 < shapes.len() && r.2 < locs.len() => r,
         _ => (Ori::Fwd, shapes.len().checked_sub(1).ok_or("no shapes")?, 0),
     };
-    Ok(File { locs, curves, surfaces, shapes, root })
+    Ok(File { locs, curves2d, curves, surfaces, shapes, root })
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -844,7 +934,7 @@ impl Builder<'_> {
 
     fn make_edge(&mut self, s: usize, loc: &Loc) -> Option<usize> {
         let sh = &self.f.shapes[s];
-        let Kind::Edge(c3, degenerate) = sh.kind else { return None };
+        let Kind::Edge(c3, degenerate, _) = sh.kind else { return None };
         if degenerate {
             return None;
         }
@@ -882,7 +972,7 @@ impl Builder<'_> {
             self.warnings.push(format!("face {s}: no surface"));
             return None;
         };
-        let (surf, same) = match to_surface(&self.f.surfaces[si]) {
+        let (surf, same) = match to_surface(&self.f.surfaces[si], false) {
             Ok(x) => x,
             Err(e) => {
                 self.warnings.push(format!("face {s}: {e}"));
@@ -979,6 +1069,240 @@ impl Builder<'_> {
     }
 }
 
+
+// ---------------------------------------------------------------------------------------------
+// Building straight from the file
+
+/// Builds the body from the file as it is: its vertices, its edges' 3D curves and ranges, its
+/// faces on surfaces with OCCT's (u, v) (the file's own axes) and their loops with the file's
+/// p-curves (a seam's two). Shared shapes stay shared. Anything the file leaves out (an edge
+/// without a p-curve on a face, a missing curve) makes it give up (the caller rebuilds through
+/// [`XBuilder`] instead).
+struct Direct<'a> {
+    f: &'a File,
+    body: Body,
+    verts: HashMap<(usize, [i64; 12]), usize>,
+    edges: HashMap<(usize, [i64; 12]), usize>,
+    shells: Vec<(Vec<usize>, bool)>,
+    solids: Vec<Vec<usize>>,
+    free_faces: Vec<usize>,
+}
+
+impl Direct<'_> {
+    fn vertex(&mut self, s: usize, loc: &Loc) -> R<usize> {
+        let key = (s, loc_key(loc));
+        if let Some(&v) = self.verts.get(&key) {
+            return Ok(v);
+        }
+        let Kind::Vertex(p) = self.f.shapes[s].kind else { return Err("not a vertex".into()) };
+        let v = self.body.add_vertex(loc.m.point(&p));
+        self.verts.insert(key, v);
+        Ok(v)
+    }
+
+    fn edge(&mut self, s: usize, loc: &Loc) -> R<usize> {
+        let key = (s, loc_key(loc));
+        if let Some(&e) = self.edges.get(&key) {
+            return Ok(e);
+        }
+        let sh = &self.f.shapes[s];
+        let Kind::Edge(c3, degenerate, ref pcs) = sh.kind else { return Err("not an edge".into()) };
+        let (mut v0, mut v1) = (None, None);
+        for &(o, vs, l) in &sh.subs.clone() {
+            let vl = loc.then(&self.f.locs[l]);
+            match o {
+                Ori::Fwd => v0 = Some(self.vertex(vs, &vl)?),
+                Ori::Rev => v1 = Some(self.vertex(vs, &vl)?),
+                _ => {}
+            }
+        }
+        let (v0, v1) = match (v0, v1) {
+            (Some(a), Some(b)) => (a, b),
+            (Some(a), None) | (None, Some(a)) => (a, a),
+            _ => return Err(format!("edge {s} has no vertices")),
+        };
+        let e = if degenerate {
+            let (a, b) = pcs.first().map_or((0.0, 1.0), |r| r.range);
+            self.body.add_degenerate(self.body.verts[v0].p, a, b, v0)
+        } else {
+            let (ci, cl, a, b) = c3.ok_or_else(|| format!("edge {s} has no 3D curve"))?;
+            let at = compose(&loc.m, &self.f.locs[cl].m);
+            let c = to_curve(&self.f.curves[ci], a, b)?.transformed(&at);
+            self.body.add_edge(c, a, b, v0, v1)
+        };
+        self.edges.insert(key, e);
+        Ok(e)
+    }
+
+    fn face(&mut self, s: usize, ori: Ori, loc: &Loc) -> R<usize> {
+        let sh = self.f.shapes[s].clone();
+        let Kind::Face(Some((si, sl))) = sh.kind else { return Err(format!("face {s} has no surface")) };
+        let (surf, _) = to_surface(&self.f.surfaces[si], true)?;
+        let sloc = loc.then(&self.f.locs[sl]);
+        let surf = surf.transformed(&sloc.m);
+        let skey = loc_key(&sloc);
+        let mut loops: Vec<Vec<Coedge>> = Vec::new();
+        for &(wo, ws, wl) in &sh.subs {
+            let wloc = loc.then(&self.f.locs[wl]);
+            let mut lp = Vec::new();
+            for &(eo, es, el) in &self.f.shapes[ws].subs.clone() {
+                // Relative to the face (its own orientation aside), then as the face uses it.
+                let rel = wo.compose(eo);
+                if !matches!(rel, Ori::Fwd | Ori::Rev) {
+                    continue;
+                }
+                let eloc = wloc.then(&self.f.locs[el]);
+                let e = self.edge(es, &eloc)?;
+                let Kind::Edge(_, _, ref pcs) = self.f.shapes[es].kind else { unreachable!() };
+                let rep = pcs
+                    .iter()
+                    .find(|r| r.surf == si && loc_key(&eloc.then(&self.f.locs[r.loc])) == skey)
+                    .ok_or_else(|| format!("edge {es} has no p-curve on face {s}"))?;
+                let idx = match rep.pc2 {
+                    Some(p2) if rel == Ori::Rev => p2,
+                    _ => rep.pc,
+                };
+                let ed = &self.body.edges[e];
+                let pc = to_curve(&self.f.curves2d[idx], ed.t[0], ed.t[1])?;
+                lp.push(Coedge { edge: e, fwd: ori.compose(rel) == Ori::Fwd, pc });
+            }
+            if !lp.is_empty() {
+                loops.push(lp);
+            }
+        }
+        let sense = ori == Ori::Fwd;
+        for l in &mut loops {
+            *l = chain(std::mem::take(l), &self.body).ok_or_else(|| format!("a loop of face {s} doesn't chain"))?;
+            align_periods(&surf, l, &self.body);
+        }
+        // The outer loop first: the one enclosing the most (counter-clockwise about the outward
+        // normal: positive in (u, v) for a forward face).
+        let area = |l: &Vec<Coedge>| uv_area(l, &self.body) * if sense { 1.0 } else { -1.0 };
+        if let Some(k) = (0..loops.len()).max_by(|&a, &b| area(&loops[a]).total_cmp(&area(&loops[b]))) {
+            loops.swap(0, k);
+        }
+        self.body.faces.push(Face { surf, sense, loops });
+        Ok(self.body.faces.len() - 1)
+    }
+
+    fn shell(&mut self, s: usize, ori: Ori, loc: &Loc) -> R<Vec<usize>> {
+        let mut faces = Vec::new();
+        for &(o, fs, l) in &self.f.shapes[s].subs.clone() {
+            if matches!(self.f.shapes[fs].kind, Kind::Face(_)) {
+                faces.push(self.face(fs, ori.compose(o), &loc.then(&self.f.locs[l]))?);
+            }
+        }
+        Ok(faces)
+    }
+
+    fn visit(&mut self, s: usize, ori: Ori, loc: &Loc) -> R<()> {
+        let sh = self.f.shapes[s].clone();
+        match sh.kind {
+            Kind::Compound => {
+                for &(o, c, l) in &sh.subs {
+                    self.visit(c, ori.compose(o), &loc.then(&self.f.locs[l]))?;
+                }
+            }
+            Kind::Solid => {
+                let mut shells = Vec::new();
+                for &(o, c, l) in &sh.subs {
+                    if matches!(self.f.shapes[c].kind, Kind::Shell) {
+                        let faces = self.shell(c, ori.compose(o), &loc.then(&self.f.locs[l]))?;
+                        self.shells.push((faces, true));
+                        shells.push(self.shells.len() - 1);
+                    }
+                }
+                self.solids.push(shells);
+            }
+            Kind::Shell => {
+                let faces = self.shell(s, ori, loc)?;
+                self.shells.push((faces, sh.closed));
+            }
+            Kind::Face(_) => {
+                let f = self.face(s, ori, loc)?;
+                self.free_faces.push(f);
+            }
+            _ => {}
+        }
+        Ok(())
+    }
+}
+
+/// A loop's coedges in order, each starting where the one before ends (files list a wire's
+/// edges in any order); at a fork, another edge before going straight back along the same one
+/// (a seam's two uses). None when they don't close up.
+fn chain(mut rest: Vec<Coedge>, b: &Body) -> Option<Vec<Coedge>> {
+    let mut out = vec![rest.remove(0)];
+    while !rest.is_empty() {
+        let last = out.last().unwrap();
+        let end = b.co_end(last);
+        let i = rest
+            .iter()
+            .enumerate()
+            .filter(|(_, c)| b.co_start(c) == end)
+            .min_by_key(|(i, c)| ((c.edge == last.edge) as usize, *i))
+            .map(|(i, _)| i)?;
+        out.push(rest.remove(i));
+    }
+    (b.co_end(out.last().unwrap()) == b.co_start(&out[0])).then_some(out)
+}
+
+/// Shifts each p-curve of a loop by whole periods to start where the one before ended (loops
+/// are continuous in (u, v); the file's p-curves may sit in any period).
+fn align_periods(s: &Surface, l: &mut [Coedge], b: &Body) {
+    let (pu, pv) = (if s.u_periodic() { Some(TAU) } else { None }, if s.v_periodic() { Some(TAU) } else { None });
+    if pu.is_none() && pv.is_none() {
+        return;
+    }
+    let ends = |c: &Coedge| {
+        let (a, z) = co_range(&b.edges[c.edge], c.fwd);
+        (c.pc.point(a), c.pc.point(z))
+    };
+    for k in 1..l.len() {
+        let prev_end = ends(&l[k - 1]).1;
+        let start = ends(&l[k]).0;
+        let shift = |d: f64, per: Option<f64>| per.map_or(0.0, |p| (d / p).round() * p);
+        let (du, dv) = (shift(prev_end.x - start.x, pu), shift(prev_end.y - start.y, pv));
+        if du != 0.0 || dv != 0.0 {
+            l[k].pc = l[k].pc.transformed(&Affine::translation(V3::new(du, dv, 0.0)));
+        }
+    }
+}
+
+/// The signed area a loop encloses in (u, v) (sampled).
+fn uv_area(l: &[Coedge], b: &Body) -> f64 {
+    let mut pts: Vec<P3> = Vec::new();
+    for c in l {
+        let (a, z) = co_range(&b.edges[c.edge], c.fwd);
+        for i in 0..16 {
+            pts.push(c.pc.point(a + (z - a) * i as f64 / 16.0));
+        }
+    }
+    let n = pts.len();
+    (0..n).map(|i| { let (p, q) = (pts[i], pts[(i + 1) % n]); p.x * q.y - q.x * p.y }).sum::<f64>() / 2.0
+}
+
+fn build_direct(f: &File) -> R<Body> {
+    let mut d = Direct { f, body: Body::default(), verts: HashMap::new(), edges: HashMap::new(), shells: Vec::new(), solids: Vec::new(), free_faces: Vec::new() };
+    let (o, s, l) = f.root;
+    d.visit(s, o, &f.locs[l])?;
+    if !d.free_faces.is_empty() {
+        let ff = std::mem::take(&mut d.free_faces);
+        d.shells.push((ff, false));
+    }
+    if d.body.faces.is_empty() {
+        return Err("no faces".into());
+    }
+    let mut body = d.body;
+    for (faces, closed) in d.shells {
+        body.shells.push(Shell { faces, closed });
+    }
+    for shells in d.solids {
+        body.solids.push(Solid { shells });
+    }
+    Ok(body)
+}
+
 /// What a BRep file holds.
 pub struct BrepRead {
     /// The faces' body (solids, then sheets); None when the file has no faces.
@@ -1014,7 +1338,29 @@ pub fn read_ordered(bytes: &[u8]) -> R<BrepRead> {
     }).collect();
     let mids: Vec<P3> = b.xb.body.edges.iter().map(|e| e.point(e.mid_t())).collect();
     let has_faces = !b.xb.faces.is_empty();
-    let body = if has_faces {
+    // Straight from the file when that gives a valid body; else rebuilt.
+    let direct = if has_faces {
+        match build_direct(&f) {
+            Ok(x) => {
+                let issues = x.check();
+                if issues.is_empty() {
+                    Some(x)
+                } else {
+                    warnings.push(format!("rebuilt (the file's body: {})", issues[0]));
+                    None
+                }
+            }
+            Err(e) => {
+                warnings.push(format!("rebuilt ({e})"));
+                None
+            }
+        }
+    } else {
+        None
+    };
+    let body = if let Some(x) = direct {
+        Some(x)
+    } else if has_faces {
         let (body, w) = b.xb.finish();
         warnings.extend(w);
         Some(body).filter(|x| !x.faces.is_empty())
