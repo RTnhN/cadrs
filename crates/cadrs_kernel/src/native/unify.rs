@@ -608,7 +608,8 @@ pub fn merge_edges(b: &mut Body) {
             let _ = (pa, pv);
             let closed = far_a == far_c;
             let (t0, t1, v0, v1) = if ta < tc { (ta, tc, far_a, far_c) } else { (tc, ta, far_c, far_a) };
-            if (t1 - t0) > TAU + 1e-9 {
+            // (A circle can't run past a whole turn; a line's parameter is a length.)
+            if matches!(curve, Curve::Circle { .. }) && (t1 - t0) > TAU + 1e-9 {
                 continue;
             }
             let ne = Edge { curve: curve.clone(), t: [t0, t1], v: [v0, v1], degenerate: false, tol: super::topo::TOL_MIN };

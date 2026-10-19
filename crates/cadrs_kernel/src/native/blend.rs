@@ -72,7 +72,10 @@ impl Tracked {
         Ok(Tracked { body: r.body, src })
     }
 
-    pub fn into_result(self, k: &mut NativeKernel, input: BodyId) -> OpResult {
+    pub fn into_result(mut self, k: &mut NativeKernel, input: BodyId) -> OpResult {
+        // Edges split where tools met and left joining in a line or circle between the same
+        // faces become one again (faces keep their indices).
+        super::unify::merge_edges(&mut self.body);
         let mut history = History::default();
         let n = k.get(input).map(|b| b.faces.len()).unwrap_or(0);
         let mut seen = vec![false; n];

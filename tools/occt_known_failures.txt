@@ -688,3 +688,6 @@ offset faces_type_i_k5
 offset faces_type_i_k6
 offset faces_type_i_k9
 boolean gdml_public_b2
+offset faces_type_i_k2
+offset faces_type_i_k4
+offset faces_type_i_k8

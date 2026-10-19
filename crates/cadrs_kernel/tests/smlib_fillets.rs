@@ -39,14 +39,12 @@ mod smlib {
 
 /// SMLib fillet test 1: `cyl_cyl_219.smb`, radius 1.0, edges [(6, 6), (10, 10)].
 #[test]
-#[ignore = "known failure, slow (tools/smlib_known_failures.txt)"]
 fn case_001_cyl_cyl_219() {
     assert!(smlib::case("cyl_cyl_219.smb", 1.0, &[(6, 6), (10, 10)], true, false, 27).is_err(), "a known failure now passes: remove `case_001_cyl_cyl_219` from tools/smlib_known_failures.txt");
 }
 
 /// SMLib fillet test 2: `cyl_cyl_2191.smb`, radius 0.4, edges [(5, 6), (8, 9)].
 #[test]
-#[ignore = "known failure, slow (tools/smlib_known_failures.txt)"]
 fn case_002_cyl_cyl_2191() {
     assert!(smlib::case("cyl_cyl_2191.smb", 0.4, &[(5, 6), (8, 9)], true, false, 39).is_err(), "a known failure now passes: remove `case_002_cyl_cyl_2191` from tools/smlib_known_failures.txt");
 }
@@ -60,7 +58,7 @@ fn case_003_box_on_box() {
 /// SMLib fillet test 4: `brick.smb`, radius 12.7, edges [(12, 12), (17, 17)].
 #[test]
 fn case_004_brick() {
-    assert!(smlib::case("brick.smb", 12.7, &[(12, 12), (17, 17)], true, false, 32).is_err(), "a known failure now passes: remove `case_004_brick` from tools/smlib_known_failures.txt");
+    smlib::case("brick.smb", 12.7, &[(12, 12), (17, 17)], true, false, 32).unwrap();
 }
 
 /// SMLib fillet test 5: `l_shaped_box.smb`, radius 1.0, edges [(13, 13)].
@@ -78,7 +76,7 @@ fn case_006_l_shaped_box() {
 /// SMLib fillet test 7: `cyl_on_box.smb`, radius 0.5, edges [(4, 4), (13, 13)].
 #[test]
 fn case_007_cyl_on_box() {
-    assert!(smlib::case("cyl_on_box.smb", 0.5, &[(4, 4), (13, 13)], true, false, 19).is_err(), "a known failure now passes: remove `case_007_cyl_on_box` from tools/smlib_known_failures.txt");
+    smlib::case("cyl_on_box.smb", 0.5, &[(4, 4), (13, 13)], true, false, 19).unwrap();
 }
 
 /// SMLib fillet test 8: `case_int.smb`, radius 1.0, edges [(0, 0)].
@@ -211,7 +209,6 @@ fn case_123_corner_box() {
 
 /// SMLib fillet test 126: `torii_fillet.smb`, radius 0.5, edges [(4, 4), (5, 5), (10, 10), (21, 22), (24, 24), (27, 27), (29, 29), (30, 31)].
 #[test]
-#[ignore = "known failure, slow (tools/smlib_known_failures.txt)"]
 fn case_126_torii_fillet() {
     assert!(smlib::case("torii_fillet.smb", 0.5, &[(4, 4), (5, 5), (10, 10), (21, 22), (24, 24), (27, 27), (29, 29), (30, 31)], true, false, 53).is_err(), "a known failure now passes: remove `case_126_torii_fillet` from tools/smlib_known_failures.txt");
 }
@@ -376,7 +373,6 @@ fn case_223_vase3() {
 
 /// SMLib fillet test 224: `0311.smb`, radius 203.2, edges [(6, 7)].
 #[test]
-#[ignore = "known failure, slow (tools/smlib_known_failures.txt)"]
 fn case_224_0311() {
     assert!(smlib::case("0311.smb", 203.2, &[(6, 7)], true, false, 15).is_err(), "a known failure now passes: remove `case_224_0311` from tools/smlib_known_failures.txt");
 }
@@ -458,7 +454,6 @@ fn case_237_knife() {
 
 /// SMLib fillet test 403: `fillet1019.smb`, radius 5.08, edges [(4, 4)].
 #[test]
-#[ignore = "known failure, slow (tools/smlib_known_failures.txt)"]
 fn case_403_fillet1019() {
     assert!(smlib::case("fillet1019.smb", 5.08, &[(4, 4)], true, false, 24).is_err(), "a known failure now passes: remove `case_403_fillet1019` from tools/smlib_known_failures.txt");
 }
@@ -478,26 +473,23 @@ fn case_405_cyl_on_box1() {
 /// SMLib fillet test 406: `2cyls_on_box.smb`, radius 25.0, edges [(15, 15)].
 #[test]
 fn case_406_2cyls_on_box() {
-    assert!(smlib::case("2cyls_on_box.smb", 25.0, &[(15, 15)], true, false, 23).is_err(), "a known failure now passes: remove `case_406_2cyls_on_box` from tools/smlib_known_failures.txt");
+    smlib::case("2cyls_on_box.smb", 25.0, &[(15, 15)], true, false, 23).unwrap();
 }
 
 /// SMLib fillet test 407: `cyl_on_box_w_fillet.smb`, radius 1.0, edges [(2, 2)].
 #[test]
-#[ignore = "known failure, slow (tools/smlib_known_failures.txt)"]
 fn case_407_cyl_on_box_w_fillet() {
     assert!(smlib::case("cyl_on_box_w_fillet.smb", 1.0, &[(2, 2)], true, false, 26).is_err(), "a known failure now passes: remove `case_407_cyl_on_box_w_fillet` from tools/smlib_known_failures.txt");
 }
 
 /// SMLib fillet test 408: `cyl_on_box_w_fillet1.smb`, radius 1.0, edges [(2, 2)].
 #[test]
-#[ignore = "known failure, slow (tools/smlib_known_failures.txt)"]
 fn case_408_cyl_on_box_w_fillet1() {
     assert!(smlib::case("cyl_on_box_w_fillet1.smb", 1.0, &[(2, 2)], true, false, 27).is_err(), "a known failure now passes: remove `case_408_cyl_on_box_w_fillet1` from tools/smlib_known_failures.txt");
 }
 
 /// SMLib fillet test 409: `cyl_on_box_w_fillet2.smb`, radius 2.0, edges [(6, 7)].
 #[test]
-#[ignore = "known failure, slow (tools/smlib_known_failures.txt)"]
 fn case_409_cyl_on_box_w_fillet2() {
     assert!(smlib::case("cyl_on_box_w_fillet2.smb", 2.0, &[(6, 7)], true, false, 40).is_err(), "a known failure now passes: remove `case_409_cyl_on_box_w_fillet2` from tools/smlib_known_failures.txt");
 }
@@ -532,7 +524,7 @@ fn case_413_cliff_3() {
 /// SMLib fillet test 414: `cliff_4.smb`, radius 30.0, edges [(12, 12)].
 #[test]
 fn case_414_cliff_4() {
-    assert!(smlib::case("cliff_4.smb", 30.0, &[(12, 12)], true, false, 17).is_err(), "a known failure now passes: remove `case_414_cliff_4` from tools/smlib_known_failures.txt");
+    smlib::case("cliff_4.smb", 30.0, &[(12, 12)], true, false, 17).unwrap();
 }
 
 /// SMLib fillet test 415: `cyl_on_box_w_hole.smb`, radius 20.0, edges [(15, 15)].
@@ -543,7 +535,6 @@ fn case_415_cyl_on_box_w_hole() {
 
 /// SMLib fillet test 416: `rollover_corner.smb`, radius 13.0, edges [(10, 10)].
 #[test]
-#[ignore = "known failure, slow (tools/smlib_known_failures.txt)"]
 fn case_416_rollover_corner() {
     assert!(smlib::case("rollover_corner.smb", 13.0, &[(10, 10)], true, false, 23).is_err(), "a known failure now passes: remove `case_416_rollover_corner` from tools/smlib_known_failures.txt");
 }
@@ -551,13 +542,13 @@ fn case_416_rollover_corner() {
 /// SMLib fillet test 417: `cyl_on_box_w_tan_hole.smb`, radius 10.0, edges [(17, 17)].
 #[test]
 fn case_417_cyl_on_box_w_tan_hole() {
-    assert!(smlib::case("cyl_on_box_w_tan_hole.smb", 10.0, &[(17, 17)], true, false, 34).is_err(), "a known failure now passes: remove `case_417_cyl_on_box_w_tan_hole` from tools/smlib_known_failures.txt");
+    smlib::case("cyl_on_box_w_tan_hole.smb", 10.0, &[(17, 17)], true, false, 34).unwrap();
 }
 
 /// SMLib fillet test 418: `box_diff_cyl_big_rad.smb`, radius 28.0, edges [(12, 12)].
 #[test]
 fn case_418_box_diff_cyl_big_rad() {
-    assert!(smlib::case("box_diff_cyl_big_rad.smb", 28.0, &[(12, 12)], true, false, 20).is_err(), "a known failure now passes: remove `case_418_box_diff_cyl_big_rad` from tools/smlib_known_failures.txt");
+    smlib::case("box_diff_cyl_big_rad.smb", 28.0, &[(12, 12)], true, false, 20).unwrap();
 }
 
 /// SMLib fillet test 419: `box_diff_3cyls.smb`, radius 22.0, edges [(20, 20)].

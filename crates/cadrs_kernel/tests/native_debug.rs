@@ -1313,3 +1313,70 @@ fn debug_sew_file() {
         }
     }
 }
+
+/// One SMLib fillet case's edges (CADRS_SMB file, CADRS_EDGES "a b c" file indices): what they
+/// map to and what they are.
+#[test]
+#[ignore]
+fn debug_smb_edges() {
+    use cadrs_kernel::native::smb;
+    let Ok(f) = std::env::var("CADRS_SMB") else { return };
+    let (body, mids, _) = smb::read_with_edges(&std::fs::read(&f).unwrap()).unwrap();
+    println!("{} faces, {} edges; surfaces {:?}", body.faces.len(), body.edges.len(), body.faces.iter().map(|f| f.surf.kind()).collect::<Vec<_>>());
+    let ef = body.edge_faces();
+    for w in std::env::var("CADRS_EDGES").unwrap_or_default().split_whitespace() {
+        let i: usize = w.parse().unwrap();
+        let m = mids[i];
+        let (e, d) = (0..body.edges.len()).filter(|&e| !body.edges[e].degenerate).map(|e| {
+            let ed = &body.edges[e];
+            let t = ed.curve.closest(&m, ed.t[0], ed.t[1]);
+            (e, (ed.point(t) - m).norm())
+        }).min_by(|a, b| a.1.total_cmp(&b.1)).unwrap();
+        let ed = &body.edges[e];
+        println!("file edge {i} at {m:?} -> edge {e} (off {d:.2e}) {:?} faces {:?}", std::mem::discriminant(&ed.curve), ef[e].iter().map(|&f| body.faces[f].surf.kind()).collect::<Vec<_>>());
+    }
+}
+
+/// One SMLib case's result (CADRS_SMB file, CADRS_EDGES file indices, CADRS_R radius): faces
+/// with their kinds and loop sizes.
+#[test]
+#[ignore]
+fn debug_smb_fillet() {
+    use cadrs_kernel::native::{smb, NativeKernel};
+    use cadrs_kernel::{EdgeId, Kernel};
+    let Ok(f) = std::env::var("CADRS_SMB") else { return };
+    let r: f64 = std::env::var("CADRS_R").unwrap().parse().unwrap();
+    let (body, mids, _) = smb::read_with_edges(&std::fs::read(&f).unwrap()).unwrap();
+    let ids: Vec<EdgeId> = std::env::var("CADRS_EDGES").unwrap().split_whitespace().map(|w| {
+        let m = mids[w.parse::<usize>().unwrap()];
+        EdgeId((0..body.edges.len()).filter(|&e| !body.edges[e].degenerate).min_by(|&a, &b| {
+            let d = |e: usize| { let ed = &body.edges[e]; let t = ed.curve.closest(&m, ed.t[0], ed.t[1]); (ed.point(t) - m).norm() };
+            d(a).total_cmp(&d(b))
+        }).unwrap() as u64)
+    }).collect();
+    let mut k = NativeKernel::new();
+    let b = k.insert(body);
+    let res = k.fillet(b, &ids, r).unwrap();
+    let out = k.get(res.bodies[0]).unwrap();
+    println!("{} faces {} edges", out.faces.len(), out.edges.len());
+    let mut again = (**out).clone();
+    cadrs_kernel::native::unify::merge_edges(&mut again);
+    println!("merge_edges again: {} edges", again.edges.len());
+    for (i, f) in out.faces.iter().enumerate() {
+        println!("  face {i} {:?} loops {:?}", f.surf.kind(), f.loops.iter().map(|l| l.len()).collect::<Vec<_>>());
+    }
+    let mut ve = vec![Vec::new(); out.verts.len()];
+    for (i, e) in out.edges.iter().enumerate() {
+        ve[e.v[0]].push(i);
+        if e.v[1] != e.v[0] {
+            ve[e.v[1]].push(i);
+        }
+    }
+    let ef = out.edge_faces();
+    for (v, es) in ve.iter().enumerate().filter(|(_, es)| es.len() == 2) {
+        println!("  vertex {v} at {:?}: edges {es:?} {:?} faces {:?} {:?}", out.verts[v].p, es.iter().map(|&e| std::mem::discriminant(&out.edges[e].curve)).collect::<Vec<_>>(), ef[es[0]], ef[es[1]]);
+        for &e in es {
+            println!("      edge {e}: {:?} t {:?} v {:?}", out.edges[e].curve, out.edges[e].t, out.edges[e].v);
+        }
+    }
+}

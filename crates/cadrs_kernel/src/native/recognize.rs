@@ -57,12 +57,30 @@ fn circle3(a: &P3, b: &P3, c: &P3) -> Option<(P3, V3, f64)> {
     if ww < 1e-24 * (u.norm_squared() * v.norm_squared()).max(1e-300) {
         return None;
     }
-    let cc = a + (v * u.norm_squared() - u * v.norm_squared()).cross(&w) * (-0.5 / ww);
+    let cc = a + (v * u.norm_squared() - u * v.norm_squared()).cross(&w) * (0.5 / ww);
     Some((cc, w.normalize(), (a - cc).norm()))
 }
 
-/// The plane, cylinder, cone or sphere a B-spline surface is, if it is one.
+/// The plane, cylinder, cone or sphere a B-spline surface is, if it is one (checked: every
+/// sample lies on the surface returned, by its own distance).
 pub fn surface(n: &NurbsSurface) -> Option<Surface> {
+    let cand = candidate(n)?;
+    let ((u0, u1), (v0, v1)) = n.range();
+    let mut bb = Bbox::empty();
+    let m = 10;
+    let mut pts = Vec::new();
+    for i in 0..=m {
+        for j in 0..=m {
+            let p = n.point(u0 + (u1 - u0) * i as f64 / m as f64, v0 + (v1 - v0) * j as f64 / m as f64);
+            bb.add(&p);
+            pts.push(p);
+        }
+    }
+    let tol = bb.diagonal() * REL * 10.0;
+    pts.iter().all(|p| cand.distance(p) < tol).then_some(cand)
+}
+
+fn candidate(n: &NurbsSurface) -> Option<Surface> {
     let ((u0, u1), (v0, v1)) = n.range();
     let m = 12;
     let mut pts = Vec::new();
@@ -146,7 +164,8 @@ pub fn surface(n: &NurbsSurface) -> Option<Surface> {
             let (x, y, _) = to2(p);
             P3::new(x, y, 0.0)
         };
-        let (c, _, r) = circle3(&q(&ps[0]), &q(&ps[ps.len() / 2]), &q(&ps[ps.len() - 1]))?;
+        // (Not the last point: on a whole turn it is the first.)
+        let (c, _, r) = circle3(&q(&ps[0]), &q(&ps[ps.len() / 3]), &q(&ps[2 * ps.len() / 3]))?;
         let h = to2(&ps[0]).2;
         Some((c, r, h))
     };
@@ -197,4 +216,35 @@ pub fn surface(n: &NurbsSurface) -> Option<Surface> {
     // Surface::Cone { f, r, a }: radius r at the frame's origin, half-angle a (radius growing
     // along +z for a > 0).
     Some(Surface::Cone { f: seam_frame, r: s0.1, a: slope.atan() })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::native::nurbs::H;
+
+    /// A whole circle in five unequal rational pieces (as SMLib writes them) is a circle.
+    #[test]
+    fn uneven_rational_circle_is_a_circle() {
+        let w = [1.0, 0.7071067811865476, 1.0, 0.8535533905932737, 0.8535533905932737, 1.0, 0.7071067811865475, 1.0, 0.7071067811865475, 1.0];
+        let p = [
+            [3.6180339887498949, 2.5, 5.0],
+            [2.5583363680084634, 0.9771975379242740, 3.5355339059327378],
+            [2.5, 1.3819660112501051, 5.0],
+            [1.7385987689621367, 1.1795817745871895, 4.2677669529663689],
+            [1.1795817745871895, 1.7385987689621367, 4.2677669529663689],
+            [1.3819660112501051, 2.5, 5.0],
+            [0.9771975379242739, 2.5583363680084634, 3.5355339059327373],
+            [2.5, 3.6180339887498949, 5.0],
+            [2.5583363680084630, 2.5583363680084634, 3.5355339059327373],
+            [3.6180339887498949, 2.5, 5.0],
+        ];
+        let cps = p.iter().zip(w).map(|(q, w)| H::new(q[0], q[1], q[2], w)).collect();
+        let knots = vec![0.0, 0.0, 0.0, 1.711412337262567, 1.711412337262567, 2.567118505893851, 3.422824674525135, 3.422824674525135, 5.134237011787703, 5.134237011787703, 6.84564934905027, 6.84564934905027, 6.84564934905027];
+        let n = NurbsCurve { degree: 2, knots, cps };
+        match curve(&n) {
+            Some(Curve::Circle { c, r, .. }) => assert!((c - P3::new(2.5, 2.5, 5.0)).norm() < 1e-9 && (r - 1.118033988749895).abs() < 1e-9),
+            other => panic!("{other:?}"),
+        }
+    }
 }

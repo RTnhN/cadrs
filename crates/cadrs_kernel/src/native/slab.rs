@@ -74,7 +74,7 @@ fn circle3(a: &P3, b: &P3, c: &P3) -> Option<(P3, V3, f64)> {
     if ww < 1e-24 {
         return None;
     }
-    let cc = a + (v * u.norm_squared() - u * v.norm_squared()).cross(&w) * (-0.5 / ww);
+    let cc = a + (v * u.norm_squared() - u * v.norm_squared()).cross(&w) * (0.5 / ww);
     Some((cc, w.normalize(), (a - cc).norm()))
 }
 
