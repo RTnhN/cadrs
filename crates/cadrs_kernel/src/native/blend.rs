@@ -10,7 +10,7 @@
 //! the corner is the ball rolling on all three faces: a corner tool (the block between the
 //! faces and the ball's centre, less the ball) leaves the exact sphere octant.
 
-use super::boolean::{boolean_bodies, BoolOut};
+use super::boolean::{boolean_bodies, boolean_bodies_flush, BoolOut};
 use super::curve::Curve;
 use super::kernel::NativeKernel;
 use super::math::*;
@@ -45,7 +45,7 @@ impl Tracked {
 
     /// Combines with a tool whose faces carry `tool_src`.
     pub fn apply(&self, tool: &Body, tool_src: &[Vec<FaceSrc>], op: BoolOp) -> Result<Tracked> {
-        let r: BoolOut = match boolean_bodies(&self.body, tool, op) {
+        let r: BoolOut = match boolean_bodies_flush(&self.body, tool, op) {
             Ok(r) => r,
             Err(e) => {
                 super::kernel::dump("tracked-target", &self.body, &format!("{op:?}"));
@@ -487,6 +487,33 @@ pub fn hexahedron(c: &[P3; 8]) -> Result<Body> {
 
 /// Keeps the part of a tool on the side of the plane (through `o`, normal `n`) that `n`
 /// points away from.
+/// Whether edge `e` is convex (the material's corner between its faces is under 180°), at
+/// its middle.
+fn edge_convex(b: &Body, e: usize) -> Option<bool> {
+    let ed = &b.edges[e];
+    if ed.degenerate {
+        return None;
+    }
+    let [s1, s2] = edge_sides(b, e).ok()?;
+    let p = ed.point(ed.mid_t());
+    let normal = |fi: usize| {
+        let f = &b.faces[fi];
+        let (u, v) = f.surf.project(&p, None);
+        f.surf.normal(u, v) * if f.sense { 1.0 } else { -1.0 }
+    };
+    let (n1, n2) = (normal(s1.0), normal(s2.0));
+    let dir = ed.curve.tangent(ed.mid_t()).normalize() * if s1.1 { 1.0 } else { -1.0 };
+    // Into face 1, square to the edge (material lies left of a coedge about the normal).
+    let w1 = n1.cross(&dir);
+    let c = w1.dot(&n2);
+    if c.abs() < 1e-9 { None } else { Some(c < 0.0) }
+}
+
+/// Whether the solid is convex round vertex `v`: every edge there convex.
+fn vertex_convex(b: &Body, v: usize) -> bool {
+    b.edges.iter().enumerate().filter(|(_, x)| !x.degenerate && x.v.contains(&v)).all(|(i, _)| edge_convex(b, i) == Some(true))
+}
+
 /// Whether the edge running `out` away from vertex `v` carries on smoothly there into another
 /// edge (not `except`): a blend stopping at `v` then ends square, with no extension along it.
 fn continues_smoothly(b: &Body, v: usize, out: V3, except: &[usize]) -> bool {
@@ -704,7 +731,12 @@ pub fn blend(k: &mut NativeKernel, body: BodyId, edges: &[(EdgeId, Box<dyn Fn(f6
         let op = if tool.convex { BoolOp::Subtract } else { BoolOp::Union };
         cur = cur.apply(&tb, &ts, op)?;
     }
-    for (e, kind, swap) in edges {
+    // Fills (concave edges' blends, adding material) before cuts: the result is the solid with
+    // the fills added, less the cuts (a chamfer along a top edge cuts the top of a fill in the
+    // inside corner below it).
+    let mut order: Vec<&(EdgeId, Box<dyn Fn(f64) -> SectionKind>, bool)> = edges.iter().collect();
+    order.sort_by_key(|(e, _, _)| edge_convex(&b, e.0 as usize) == Some(true));
+    for (e, kind, swap) in order {
         if in_chain[e.0 as usize] {
             continue;
         }
@@ -729,7 +761,10 @@ pub fn blend(k: &mut NativeKernel, body: BodyId, edges: &[(EdgeId, Box<dyn Fn(f6
             if ed.closed() {
                 continue;
             }
-            let others: Vec<usize> = at_vertex.get(v).map(|x| x.iter().copied().filter(|&o| o != e).collect()).unwrap_or_default();
+            // The other blended edges here of the same kind (a cut meets cuts, a fill fills): a
+            // cut and a fill don't mitre, each ends as at a free end.
+            let mine = edge_convex(&b, e);
+            let others: Vec<usize> = at_vertex.get(v).map(|x| x.iter().copied().filter(|&o| o != e && edge_convex(&b, o) == mine).collect()).unwrap_or_default();
             // A tangent-continuing neighbour: no extension; the tools meet square to the edges.
             if others.len() == 1 && tangent_at(end).dot(&other_dir(others[0], *v)) > 1.0 - 1e-6 {
                 if end == 0 {
@@ -770,8 +805,13 @@ pub fn blend(k: &mut NativeKernel, body: BodyId, edges: &[(EdgeId, Box<dyn Fn(f6
                     if n.norm() < 1e-9 {
                         continue;
                     }
-                    // Each tool keeps its side of the plane bisecting the corner (convex or
-                    // inside: at an inside corner the two cuts meet in a valley there).
+                    // Chamfers where the solid is convex round the vertex: each tool, run on
+                    // past it, already cuts exactly what its chamfer plane does there (the solid lies
+                    // inside its faces' planes): no trim. Elsewhere each keeps its side of the
+                    // plane bisecting the corner (an inside corner: the cuts meet in a valley).
+                    if matches!(kind(PI / 2.0), SectionKind::Chamfer { .. }) && vertex_convex(&b, v) {
+                        continue;
+                    }
                     let (nb, ns) = trim_tool(&tb, &ts, p, n.normalize())?;
                     tb = nb;
                     ts = ns;
@@ -801,9 +841,23 @@ pub fn blend(k: &mut NativeKernel, body: BodyId, edges: &[(EdgeId, Box<dyn Fn(f6
                 continue;
             }
             // Ends meeting other blended edges were mitred above; only free ends here.
-            let others = at_vertex.get(v).map_or(0, |x| x.iter().filter(|&&o| o != e).count());
+            let mine = edge_convex(&b, e);
+            let others = at_vertex.get(v).map_or(0, |x| x.iter().filter(|&&o| o != e && edge_convex(&b, o) == mine).count());
             if tool.convex && others > 0 {
                 continue;
+            }
+            // A cut ending where a fill runs (a chamfered top edge over a filled inside corner):
+            // its corner, pushed out past its faces for a clean boolean, would bite the fill.
+            let fill_here = at_vertex.get(v).is_some_and(|x| x.iter().any(|&o| o != e && edge_convex(&b, o) == Some(!tool.convex)));
+            if tool.convex && fill_here {
+                for (fi, _) in [s1, s2] {
+                    if let Surface::Plane { f: fr } = &b.faces[fi].surf {
+                        let nf = fr.x.cross(&fr.y) * if b.faces[fi].sense { 1.0 } else { -1.0 };
+                        let (nb, ns) = trim_tool(&tb, &ts, b.verts[*v].p, nf)?;
+                        tb = nb;
+                        ts = ns;
+                    }
+                }
             }
             let tv = ed.curve.tangent(ed.t[end]).normalize();
             let out = if end == 0 { -tv } else { tv };

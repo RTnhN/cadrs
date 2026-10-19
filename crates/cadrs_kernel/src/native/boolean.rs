@@ -498,6 +498,19 @@ pub fn boolean_bodies(a: &Body, b: &Body, op: BoolOp) -> Result<BoolOut> {
     first
 }
 
+thread_local! {
+    static MERGE_FLUSH: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+/// [`boolean_bodies`], with faces of the two inputs on one surface merged whatever the
+/// operation (a blend's tool face flush with a face it ends against becomes part of it).
+pub fn boolean_bodies_flush(a: &Body, b: &Body, op: BoolOp) -> Result<BoolOut> {
+    MERGE_FLUSH.with(|m| m.set(true));
+    let r = boolean_bodies(a, b, op);
+    MERGE_FLUSH.with(|m| m.set(false));
+    r
+}
+
 /// Runs `f` with [`vtol`] at `t` (unless `CADRS_BOOL_TOL` fixes it), restoring it after.
 fn with_tol<T>(t: f64, f: impl FnOnce() -> T) -> T {
     let before = vtol();
@@ -1262,9 +1275,11 @@ fn run(a: &Body, b: &Body, mode: Mode) -> Result<BoolOut> {
         eprintln!("check: {:?}", out.check());
     }
     let mut from: Vec<Vec<(usize, usize)>> = from.into_iter().map(|x| vec![x]).collect();
-    if op == BoolOp::Union {
+    let flush = MERGE_FLUSH.with(|m| m.get());
+    if op == BoolOp::Union || flush {
         let owners: Vec<usize> = from.iter().map(|f| f[0].0).collect();
-        from = super::unify::unify_faces(&mut out, from, &|f, g| owners[f] != owners[g]);
+        // For a blend, also pieces of one face the cut split (a wall a chamfer ends against).
+        from = super::unify::unify_faces(&mut out, from, &|f, g| flush || owners[f] != owners[g]);
     }
     prof.mark("assemble");
     super::unify::merge_edges(&mut out);
