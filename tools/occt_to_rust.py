@@ -254,6 +254,9 @@ class Case:
                     self.bind(a[0], f"k.{c}({', '.join(nums)})?")
             elif len(rest) == want + 1 and c != "psphere" or (c == "psphere" and len(rest) == 2):
                 self.bind(a[0], f"k.{c}_a({ax}, {', '.join(nums)})?")
+            elif c == "ptorus" and len(rest) in (4, 5):
+                ang = nums[4] if len(rest) == 5 else "360.0"
+                self.bind(a[0], f"k.ptorus_zone({ax}, {nums[0]}, {nums[1]}, {nums[2]}, {nums[3]}, {ang})?")
             elif c == "psphere" and len(rest) in (3, 4):
                 ang = nums[3] if len(rest) == 4 else "360.0"
                 self.bind(a[0], f"k.psphere_zone({ax}, {nums[0]}, {nums[1]}, {nums[2]}, {ang})?")

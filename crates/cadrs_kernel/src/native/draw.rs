@@ -685,6 +685,33 @@ impl NativeKernel {
         Ok(Shape::Body(res.bodies[0]))
     }
 
+    /// `ptorus name [plane] R r a1 a2 [angle]`: a torus zone, the pipe's circle from a1 to a2
+    /// (degrees about its centre, from the outside) closed by planes square to the axis down to
+    /// it (as OCCT's revolved primitives), turned by `angle`.
+    pub fn ptorus_zone(&mut self, ax: Option<&Ax3>, big: f64, r: f64, a1: f64, a2: f64, angle: f64) -> Result<Shape> {
+        let ax = ax.copied().unwrap_or(Ax3 { origin: P3::origin(), z: V3::z(), x: V3::x() });
+        let (a1, a2) = (a1.to_radians(), a2.to_radians());
+        let c = nalgebra::Point2::new(big, 0.0);
+        let (p1, p2) = (nalgebra::Point2::new(big + r * a1.cos(), r * a1.sin()), nalgebra::Point2::new(big + r * a2.cos(), r * a2.sin()));
+        if (a2 - a1).abs() >= TAU - 1e-9 {
+            return self.ptorus_a(Some(&ax), big, r, angle);
+        }
+        let mut curves = vec![Curve2::Arc { center: c, radius: r, start_angle: a1, sweep: a2 - a1, source: None }];
+        let (q2, q1) = (nalgebra::Point2::new(0.0, p2.y), nalgebra::Point2::new(0.0, p1.y));
+        if p2.x.abs() > 1e-12 {
+            curves.push(l2(p2, q2));
+        }
+        if (q2 - q1).norm() > 1e-12 {
+            curves.push(l2(q2, q1));
+        }
+        if p1.x.abs() > 1e-12 {
+            curves.push(l2(q1, p1));
+        }
+        let region = Region { outer: Loop { curves }, holes: vec![], source: None };
+        let res = self.revolve(&Profile::new(self.meridian(&ax), vec![region]), Axis { origin: ax.origin, dir: nalgebra::Unit::new_normalize(ax.z) }, angle.min(360.0).to_radians())?;
+        Ok(Shape::Body(res.bodies[0]))
+    }
+
     /// `ptorus name [plane] R r angle` (degrees of longitude).
     pub fn ptorus_a(&mut self, ax: Option<&Ax3>, big: f64, r: f64, angle: f64) -> Result<Shape> {
         let ax = ax.copied().unwrap_or(Ax3 { origin: P3::origin(), z: V3::z(), x: V3::x() });
