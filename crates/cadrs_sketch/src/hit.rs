@@ -24,6 +24,22 @@ pub enum Entity {
     /// which a constraint tool takes as the point it projects to (used first if it isn't; see
     /// [`crate::constraint::fit_op`]).
     Link(crate::Link),
+    /// The sketch X axis: on a Top, Front or Right sketch, where another default plane cuts
+    /// the sketch plane (seen edge-on), usable as a line reference (#31).
+    XAxis,
+    /// The sketch Y axis (see [`Entity::XAxis`]).
+    YAxis,
+}
+
+impl Entity {
+    /// The plane axis this is, as a curve reference.
+    pub fn axis(self) -> Option<crate::CurveRef> {
+        match self {
+            Entity::XAxis => Some(crate::CurveRef::XAxis),
+            Entity::YAxis => Some(crate::CurveRef::YAxis),
+            _ => None,
+        }
+    }
 }
 
 /// A hit-test result.
@@ -74,6 +90,22 @@ pub fn curve_polyline(s: &Sketch, id: CurveId) -> Vec<Vec2> {
             .map(|g| g.tessellate(PICK_STEP, 32))
             .unwrap_or_default(),
     }
+}
+
+/// The sketch axis under `cursor` (screen px), drawn from `-half` to `half` mm along it (the
+/// edge-on default planes' extent), nearest first.
+pub fn axis_hit(cursor: Vec2, half: f64, to_screen: impl Fn(Vec2) -> Vec2) -> Option<Hit> {
+    [
+        (Entity::XAxis, Vec2::new(-half, 0.0), Vec2::new(half, 0.0)),
+        (Entity::YAxis, Vec2::new(0.0, -half), Vec2::new(0.0, half)),
+    ]
+    .into_iter()
+    .map(|(entity, a, b)| Hit {
+        entity,
+        distance: dist_point_segment(cursor, to_screen(a), to_screen(b)),
+    })
+    .filter(|h| h.distance <= CURVE_TOLERANCE_PX)
+    .min_by(|a, b| a.distance.total_cmp(&b.distance))
 }
 
 /// Distance in pixels from `cursor` (screen px) to a curve.
@@ -240,6 +272,17 @@ mod tests {
         .apply(&mut s)
         .unwrap();
         s
+    }
+
+    #[test]
+    fn axes_within_their_extent() {
+        let h = |x: f64, y: f64| axis_hit(Vec2::new(x, y), 75.0, screen).map(|h| h.entity);
+        // 3 px below the X axis, 40 mm along it; 4 px beside the Y axis.
+        assert_eq!(h(900.0, 503.0), Some(Entity::XAxis));
+        assert_eq!(h(504.0, 200.0), Some(Entity::YAxis));
+        // Too far off it, or past the planes' edge.
+        assert_eq!(h(900.0, 507.0), None);
+        assert_eq!(h(500.0 + 760.0, 500.0), None);
     }
 
     fn curve_of(s: &Sketch, f: impl Fn(&CurveKind) -> bool) -> CurveId {

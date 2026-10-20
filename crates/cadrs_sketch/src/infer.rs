@@ -13,7 +13,7 @@
 //! 5. and 6. guides: horizontal or vertical from the tool's anchor (the start of the line
 //!    being drawn); parallel or perpendicular to a recently hovered ("woken") line,
 //!    perpendicular to a line ending at the anchor (the previous segment of a chain), tangent
-//!    to an arc ending there; and alignment with woken points. Two guides that cross near the
+//!    to an arc ending there; and alignment with woken points and midpoints. Two guides that cross near the
 //!    cursor combine.
 //!
 //! All tolerances are in screen pixels (distances in mm times `px_per_mm`), so the same
@@ -274,6 +274,9 @@ pub struct ToolContext {
     /// Recently hovered lines: parallel and perpendicular guides come from these (and from
     /// lines ending at the anchor).
     pub woken_curves: Vec<CurveId>,
+    /// Lines and arcs whose midpoint was recently hovered: alignment guides come from these
+    /// midpoints too.
+    pub woken_mids: Vec<CurveId>,
     /// Shift is held: no inference.
     pub suppress: bool,
     /// Points that are not targets (a dragged point, S11.4).
@@ -289,6 +292,8 @@ pub enum Guide {
     Anchor,
     /// Alignment with a woken point.
     Point(PointRef),
+    /// Alignment with a woken line's or arc's midpoint (a point is added there on commit).
+    Midpoint(CurveId),
 }
 
 /// A constraint the placed point gets when the click is committed.
@@ -431,11 +436,7 @@ pub fn infer(cursor: Vec2, px_per_mm: f64, s: &Sketch, ctx: &ToolContext) -> Vec
         .curves
         .iter()
         .filter(|(k, _)| !ctx.exclude_curves.contains(k))
-        .filter_map(|(k, c)| match c.kind {
-            CurveKind::Line { a, b } => Some((k, s.pos(a).midpoint(s.pos(b)))),
-            CurveKind::Arc { .. } => Some((k, s.arc_geom(k)?.mid())),
-            _ => None,
-        })
+        .filter_map(|(k, _)| Some((k, s.curve_mid(k)?)))
         .filter(|(_, m)| away_from_anchor(*m))
         .filter_map(|(k, m)| {
             let d = px(m.distance(cursor));
@@ -579,6 +580,17 @@ pub fn infer(cursor: Vec2, px_per_mm: f64, s: &Sketch, ctx: &ToolContext) -> Vec
             add_guide(p, y, Placed::Vertical(Guide::Point(*w)));
         }
     }
+    for k in &ctx.woken_mids {
+        if ctx.exclude_curves.contains(k) {
+            continue;
+        }
+        if let Some(m) = s.curve_mid(*k)
+            && ctx.anchor.is_none_or(|a| px(a.distance(m)) > 1e-6)
+        {
+            add_guide(m, x, Placed::Horizontal(Guide::Midpoint(*k)));
+            add_guide(m, y, Placed::Vertical(Guide::Midpoint(*k)));
+        }
+    }
     // Nearest first (anchor guides first on ties: they were added first).
     guides.sort_by(|a, b| a.distance_px.total_cmp(&b.distance_px));
 
@@ -690,6 +702,7 @@ pub fn placed_specs(
                 })
             }
             Guide::Point(r) => Some(Orient::Points(here, point(r))),
+            Guide::Midpoint(c) => Some(Orient::Points(here, PointSpec::Midpoint(c))),
         }
     };
     let new_line = || {
@@ -1091,6 +1104,61 @@ mod tests {
                 Placed::Vertical(Guide::Point(PointRef::Point(p)))
             ]
         );
+    }
+
+    #[test]
+    fn alignment_with_a_woken_midpoint() {
+        // #34: a hovered midpoint gives alignment guides like a hovered point, and committing
+        // one adds a point at the midpoint for the constraint to use.
+        let mut s = Sketch::new();
+        let l = line(&mut s, Vec2::new(10.0, 10.0), Vec2::new(30.0, 10.0));
+        let cursor = Vec2::new(20.0 + 2.0 / PPM, 40.0);
+        assert!(best(cursor, &s, &default_ctx()).is_none());
+        let mut ctx = default_ctx();
+        wake(&mut ctx.woken_mids, l, 3);
+        let c = best(cursor, &s, &ctx).unwrap();
+        assert_eq!(c.kind, Kind::Guide);
+        assert_eq!(c.pos, Vec2::new(20.0, 40.0));
+        assert_eq!(c.constraints, vec![Placed::Vertical(Guide::Midpoint(l))]);
+        // A line from (0, 40) ending there: vertical with the midpoint, which gets a point.
+        let start = Vec2::new(0.0, 40.0);
+        let specs = placed_specs(&s, c.pos, &c.constraints, Some(start), true);
+        assert_eq!(
+            specs,
+            vec![ConstraintOf::Vertical(Orient::Points(
+                PointSpec::At(c.pos),
+                PointSpec::Midpoint(l)
+            ))]
+        );
+        SketchOp::Batch(vec![
+            SketchOp::AddPolyline {
+                points: vec![start, c.pos],
+                closed: false,
+                construction: false,
+                label: "Add line",
+            },
+            SketchOp::AddConstraints(specs),
+        ])
+        .apply(&mut s)
+        .unwrap();
+        let mid = s.point_at(Vec2::new(20.0, 10.0), 1e-9).unwrap();
+        let end = s.point_at(c.pos, 1e-9).unwrap();
+        let has = |want: crate::Constraint| s.constraints.values().any(|x| x.same_as(&want));
+        assert!(has(ConstraintOf::Midpoint(PointRef::Point(mid), CurveRef::Curve(l))));
+        assert!(has(ConstraintOf::Vertical(Orient::Points(
+            PointRef::Point(end),
+            PointRef::Point(mid)
+        ))));
+        // The alignment holds: moving the line's end moves the new line's end with the midpoint.
+        let b = s.point_at(Vec2::new(30.0, 10.0), 1e-9).unwrap();
+        SketchOp::MovePoints {
+            moves: vec![(b, Vec2::new(50.0, 10.0))],
+        }
+        .apply(&mut s)
+        .unwrap();
+        let (m, e) = (s.pos(mid), s.pos(end));
+        assert!((m.x - (s.pos(s.curve_ends(l).unwrap().0).x + s.pos(b).x) / 2.0).abs() < 1e-6);
+        assert!((m.x - e.x).abs() < 1e-6);
     }
 
     #[test]

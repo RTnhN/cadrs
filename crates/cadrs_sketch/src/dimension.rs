@@ -92,6 +92,7 @@ pub fn measure(s: &Sketch, kind: DimensionKind) -> Option<f64> {
         DimensionKind::Horizontal { a, b } => (pos(b)? - pos(a)?).x.abs(),
         DimensionKind::Vertical { a, b } => (pos(b)? - pos(a)?).y.abs(),
         DimensionKind::Aligned { a, b } => pos(a)?.distance(pos(b)?),
+        DimensionKind::OriginAligned { p } => pos(p)?.length(),
         DimensionKind::Diameter { curve } => match s.curves.get(curve)?.kind {
             CurveKind::Circle { radius, .. } => radius * 2.0,
             _ => s.arc_geom(curve)?.radius * 2.0,
@@ -318,6 +319,8 @@ fn classify(s: &Sketch, e: SketchEntity) -> Option<Pick> {
         },
         // A used part vertex: its point.
         SketchEntity::Link(l) => Pick::Point(PointRef::Point(s.linked_point(l)?)),
+        SketchEntity::XAxis => Pick::Line(CurveRef::XAxis),
+        SketchEntity::YAxis => Pick::Line(CurveRef::YAxis),
         SketchEntity::Dimension(_) | SketchEntity::Constraint(_) | SketchEntity::Text(_) => return None,
     })
 }
@@ -418,22 +421,15 @@ pub fn propose_at(
                 }
             }
             // A point and the origin: horizontal and vertical distances are distances to the
-            // axes.
+            // axes; elsewhere, the straight distance (#31).
             (Pick::Point(p), Pick::Point(q)) => {
                 let k = if p == PointRef::Origin { q } else { p };
                 let pos = point_pos(s, k)?;
-                let horizontal = match linear_orientation(Vec2::ZERO, pos, cursor) {
-                    Orientation::Horizontal => true,
-                    Orientation::Vertical => false,
-                    Orientation::Aligned => pos.x.abs() >= pos.y.abs(),
-                };
-                DimensionKind::PointLine {
-                    p: k,
-                    line: if horizontal {
-                        CurveRef::YAxis
-                    } else {
-                        CurveRef::XAxis
-                    },
+                match (linear_orientation(Vec2::ZERO, pos, cursor), k) {
+                    (Orientation::Horizontal, _) => DimensionKind::PointLine { p: k, line: CurveRef::YAxis },
+                    (Orientation::Vertical, _) => DimensionKind::PointLine { p: k, line: CurveRef::XAxis },
+                    (Orientation::Aligned, PointRef::Point(p)) => DimensionKind::OriginAligned { p },
+                    (Orientation::Aligned, PointRef::Origin) => return None,
                 }
             }
             (Pick::Point(p), Pick::Line(line)) | (Pick::Line(line), Pick::Point(p)) => {
@@ -504,7 +500,14 @@ pub fn propose_at(
                     }
                     // Parallel lines: the distance between them (doubled across a centreline).
                     None => {
-                        let (other, centre) = if is_centreline(s, b) && !is_centreline(s, a) { (a, b) } else { (b, a) };
+                        // Measured from a sketch line's end to the other line: never from a
+                        // plane axis (it has no ends, #31).
+                        let axis = |l: CurveRef| !matches!(l, CurveRef::Curve(_));
+                        let (other, centre) = if axis(b) || (is_centreline(s, b) && !is_centreline(s, a)) {
+                            (a, b)
+                        } else {
+                            (b, a)
+                        };
                         let CurveRef::Curve(k) = other else { return None };
                         let (p, _) = s.curve_ends(k)?;
                         point_to_line(s, PointRef::Point(p), centre, cursor)?
@@ -583,6 +586,11 @@ fn linear_frame(s: &Sketch, kind: DimensionKind, angle: f64) -> Option<(Vec2, Ve
             let (pa, pb) = (pos(a)?, pos(b)?);
             let u = (pb - pa).normalize();
             (pa, pb, u, -u.perp())
+        }
+        DimensionKind::OriginAligned { p } => {
+            let pb = pos(p)?;
+            let u = pb.normalize();
+            (Vec2::ZERO, pb, u, -u.perp())
         }
         DimensionKind::PointLine { p, line } => {
             let p = point_pos(s, p)?;
@@ -1184,6 +1192,61 @@ mod tests {
     /// side, the diameter (twice it, from the point to its mirror image) once the label crosses
     /// the centreline (P3.4, `ex2-step4.png`: Ø2.625 and Ø3.75 to the centreline); solving
     /// with a new value moves the point to half of it from the line.
+    #[test]
+    fn point_to_a_plane_axis() {
+        // #31: an edge-on default plane (the sketch X axis) as a dimension's line.
+        let mut s = Sketch::new();
+        let (_, a, _) = line(&mut s, v(15.0, 33.0), v(130.0, 45.0));
+        let d = propose(&s, &[SketchEntity::Point(a), SketchEntity::XAxis], v(-10.0, 20.0)).unwrap();
+        assert_eq!(
+            d.kind,
+            DimensionKind::PointLine {
+                p: PointRef::Point(a),
+                line: CurveRef::XAxis
+            }
+        );
+        assert!((d.value - 33.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn origin_to_a_point_straight() {
+        // #31: the origin and a point, the label off both spans: the straight distance; held
+        // when its value changes (the point moves along the ray from the origin).
+        let mut s = Sketch::new();
+        let (_, a, _) = line(&mut s, v(30.0, 40.0), v(80.0, 40.0));
+        let picks = [SketchEntity::Origin, SketchEntity::Point(a)];
+        let d = propose(&s, &picks, v(50.0, 60.0)).unwrap();
+        assert_eq!(d.kind, DimensionKind::OriginAligned { p: a });
+        assert!((d.value - 50.0).abs() < 1e-9);
+        // Over the point's x span: still the vertical distance to the X axis.
+        let h = propose(&s, &picks, v(15.0, 60.0)).unwrap();
+        assert!(matches!(h.kind, DimensionKind::PointLine { line: CurveRef::YAxis, .. }));
+        SketchOp::SetDimension {
+            dimension: Dimension { value: 100.0, ..d },
+            moves: vec![],
+            radii: vec![],
+        }
+        .apply(&mut s)
+        .unwrap();
+        assert!((s.pos(a).length() - 100.0).abs() < 1e-6);
+        assert!((measure(&s, d.kind).unwrap() - 100.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn line_to_a_parallel_plane_axis() {
+        // #31: a line and the axis parallel to it, picked in either order: their distance.
+        let mut s = Sketch::new();
+        let (l, ..) = line(&mut s, v(40.0, -30.0), v(40.0, 30.0));
+        for picks in [
+            [SketchEntity::Curve(l), SketchEntity::YAxis],
+            [SketchEntity::YAxis, SketchEntity::Curve(l)],
+        ] {
+            let d = propose(&s, &picks, v(20.0, 40.0)).unwrap();
+            assert!(matches!(d.kind, DimensionKind::PointLine { line: CurveRef::YAxis, .. }));
+            assert!((d.value - 40.0).abs() < 1e-9);
+        }
+    }
+
     #[test]
     fn diametral_to_a_centreline() {
         let mut s = Sketch::new();

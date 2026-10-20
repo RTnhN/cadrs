@@ -1211,6 +1211,11 @@ impl System {
                 inputs.extend(self.point(s, PointRef::Point(b)));
                 self.push(Kind::Distance(v), inputs, src);
             }
+            DimensionKind::OriginAligned { p } => {
+                let mut inputs = self.point(s, PointRef::Origin).to_vec();
+                inputs.extend(self.point(s, PointRef::Point(p)));
+                self.push(Kind::Distance(v), inputs, src);
+            }
             DimensionKind::Diameter { curve } | DimensionKind::Radius { curve } => {
                 let factor = if matches!(kind, DimensionKind::Diameter { .. }) {
                     2.0

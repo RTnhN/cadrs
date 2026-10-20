@@ -50,7 +50,7 @@ impl Plugin for ManagedContextPlugin {
 pub fn display_states_menu() -> Menu {
     Menu::new("display-states-menu")
         .min_width(210.0)
-        .item(MenuItem::new("display-states-menu-states", "Display states").icon("display-states").disabled(true).tooltip("Named display states aren't in cadrs yet"))
+        .item(MenuItem::new("display-states-menu-states", "Display states").icon("display-states").planned().tooltip("Named display states aren't in cadrs yet"))
         .item(MenuItem::new("display-states-menu-in-context", "Create Part Studio in context").icon("part-studio"))
 }
 

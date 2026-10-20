@@ -28,7 +28,7 @@ use bevy::prelude::*;
 use cadrs_sketch::edit::{OffsetShape, chain_of, offset_geometry};
 use cadrs_sketch::geom::dist_point_segment;
 use cadrs_sketch::hit::hit_test;
-use cadrs_sketch::{CurveId, CurveKind, DimensionKind, PlaneFrame, Sketch, SketchEntity, SketchOp};
+use cadrs_sketch::{CurveId, CurveKind, CurveRef, DimensionKind, PlaneFrame, Sketch, SketchEntity, SketchOp};
 use cadrs_ui::input::TextInputField;
 
 use crate::sketch::{ActiveSketchTool, PartStudioMode, SketchSession, SketchTool};
@@ -175,10 +175,7 @@ fn edit_tools_pointer(
         }
         match tool.tool {
             SketchTool::Mirror => {
-                let first_line = selection.0.first().and_then(|e| match *e {
-                    SketchEntity::Curve(c) if is_line(sketch, c) => Some(c),
-                    _ => None,
-                });
+                let first_line = selection.0.first().and_then(|e| mirror_line(sketch, *e));
                 match first_line {
                     Some(axis) if selection.0.len() > 1 => {
                         let curves: Vec<CurveId> = selection.0[1..]
@@ -210,6 +207,8 @@ fn edit_tools_pointer(
             map.to_screen64(p)
         })
         .map(|h| h.entity)
+        // The Mirror tool mirrors in an edge-on default plane too (#31).
+        .or_else(|| (tool.tool == SketchTool::Mirror).then(|| map.axis_at(pos)).flatten())
     };
     for input in inputs.read() {
         if input.pointer_id != PointerId::Mouse || !active {
@@ -309,6 +308,14 @@ fn is_line(s: &Sketch, c: CurveId) -> bool {
     matches!(s.curves.get(c).map(|c| c.kind), Some(CurveKind::Line { .. }))
 }
 
+/// The mirror line `e` gives: a line, or a sketch axis (an edge-on default plane).
+fn mirror_line(s: &Sketch, e: SketchEntity) -> Option<CurveRef> {
+    match e {
+        SketchEntity::Curve(c) if is_line(s, c) => Some(CurveRef::Curve(c)),
+        _ => e.axis(),
+    }
+}
+
 /// A Mirror click: the first pick must be a line (the mirror line, kept selected); each
 /// entity picked after it is mirrored at once.
 fn mirror_pick(
@@ -318,15 +325,12 @@ fn mirror_pick(
     commands: &mut Commands,
     target: (cadrs_core::ElementId, cadrs_core::FeatureId),
 ) {
-    let axis = selection.0.first().and_then(|e| match *e {
-        SketchEntity::Curve(c) if is_line(sketch, c) => Some(c),
-        _ => None,
-    });
+    let axis = selection.0.first().and_then(|e| mirror_line(sketch, *e));
     match (axis, hit) {
-        (None, Some(SketchEntity::Curve(c))) if is_line(sketch, c) => {
-            selection.0 = vec![SketchEntity::Curve(c)];
+        (None, Some(e)) if mirror_line(sketch, e).is_some() => {
+            selection.0 = vec![e];
         }
-        (Some(axis), Some(SketchEntity::Curve(c))) if c != axis => {
+        (Some(axis), Some(SketchEntity::Curve(c))) if CurveRef::Curve(c) != axis => {
             execute(
                 commands,
                 target,
