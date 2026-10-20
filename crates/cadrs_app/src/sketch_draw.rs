@@ -943,10 +943,14 @@ fn draw_sketches(
                 new_overlay.square = Some(map.to_screen(p));
             }
             for (horizontal, g) in c.guides() {
-                let Guide::Point(r) = g else { continue };
-                let from = match r {
-                    PointRef::Point(p) => sketch.pos(p),
-                    PointRef::Origin => SVec2::ZERO,
+                let from = match g {
+                    Guide::Point(PointRef::Point(p)) => sketch.pos(p),
+                    Guide::Point(PointRef::Origin) => SVec2::ZERO,
+                    Guide::Midpoint(k) => match sketch.curve_mid(k) {
+                        Some(m) => m,
+                        None => continue,
+                    },
+                    Guide::Anchor => continue,
                 };
                 let to = if horizontal {
                     SVec2::new(c.pos.x, from.y)

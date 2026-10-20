@@ -1346,6 +1346,15 @@ impl Sketch {
         }
     }
 
+    /// A line's or arc's midpoint.
+    pub fn curve_mid(&self, id: CurveId) -> Option<Vec2> {
+        match self.curves.get(id)?.kind {
+            CurveKind::Line { a, b } => Some(self.pos(a).midpoint(self.pos(b))),
+            CurveKind::Arc { .. } => Some(self.arc_geom(id)?.mid()),
+            _ => None,
+        }
+    }
+
     /// A curve's end points (lines and arcs), in order.
     pub fn curve_ends(&self, id: CurveId) -> Option<(PointId, PointId)> {
         match self.curves.get(id)?.kind {

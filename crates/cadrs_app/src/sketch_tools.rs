@@ -462,6 +462,9 @@ pub struct SketchDraw {
     pub woken: Vec<PointRef>,
     /// Recently hovered lines (parallel/perpendicular guides come from these).
     pub woken_curves: Vec<CurveId>,
+    /// Lines and arcs whose midpoint was recently hovered (alignment guides come from these
+    /// midpoints too, #34).
+    pub woken_mids: Vec<CurveId>,
     /// The points placed so far for the shape in progress, with their inferred constraints.
     pending: Vec<(SVec2, Vec<Placed>)>,
     /// Constraints already worked out for the shape in progress (an aligned rectangle's first
@@ -633,6 +636,7 @@ fn reset_tools(
     draw.inference = None;
     draw.woken.clear();
         draw.woken_curves.clear();
+    draw.woken_mids.clear();
     draw.pending.clear();
     draw.cursor = None;
     draw.label_drag = None;
@@ -665,6 +669,7 @@ fn reset_on_tool_change(
         draw.pending.clear();
         draw.woken.clear();
         draw.woken_curves.clear();
+        draw.woken_mids.clear();
         close_quick_dims(&mut flow, &mut commands);
     }
 }
@@ -790,6 +795,7 @@ pub fn tool_context(state: DrawState, draw: &SketchDraw, suppress: bool) -> Tool
         hv_from_anchor: hv,
         woken: draw.woken.clone(),
         woken_curves: draw.woken_curves.clone(),
+        woken_mids: draw.woken_mids.clone(),
         suppress: suppress || sizing,
         ..ToolContext::default()
     }
@@ -1307,8 +1313,19 @@ pub(crate) fn sketch_pointer(
                         infer::wake(&mut draw.woken, PointRef::Point(k), WOKEN_MAX)
                     }
                     Some(Kind::Origin) => infer::wake(&mut draw.woken, PointRef::Origin, WOKEN_MAX),
+                    // Passing over a midpoint wakes it for alignment guides, and its line for
+                    // parallel/perpendicular ones.
+                    Some(Kind::Midpoint(k)) => {
+                        infer::wake(&mut draw.woken_mids, k, WOKEN_MAX);
+                        if matches!(
+                            snap_sketch.curves.get(k).map(|c| c.kind),
+                            Some(CurveKind::Line { .. })
+                        ) {
+                            infer::wake(&mut draw.woken_curves, k, WOKEN_MAX)
+                        }
+                    }
                     // Passing over a line wakes it for parallel/perpendicular guides.
-                    Some(Kind::OnCurve(cadrs_sketch::CurveRef::Curve(k)) | Kind::Midpoint(k))
+                    Some(Kind::OnCurve(cadrs_sketch::CurveRef::Curve(k)))
                         if matches!(
                             snap_sketch.curves.get(k).map(|c| c.kind),
                             Some(CurveKind::Line { .. })
@@ -1334,6 +1351,7 @@ pub(crate) fn sketch_pointer(
         PointRef::Origin => true,
     });
     draw.woken_curves.retain(|c| snap_sketch.curves.contains_key(*c));
+    draw.woken_mids.retain(|c| snap_sketch.curves.contains_key(*c));
     track_sweep(&mut draw);
     track_sides(&mut draw);
     let dragged = draw.drag.as_ref().map(|d| d.entity);
