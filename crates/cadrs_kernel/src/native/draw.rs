@@ -879,7 +879,7 @@ impl NativeKernel {
 
     /// `depouille result shape dx dy dz face angle px py pz nx ny nz [face angle …]`: faces
     /// drafted by angles (degrees) along the pull direction about neutral planes (through p,
-    /// normal n, which must lie along the pull).
+    /// normal n).
     pub fn depouille(&mut self, s: &Shape, dir: [f64; 3], groups: &[(&Shape, f64, [f64; 3], [f64; 3])]) -> Result<Shape> {
         let mut b = self.body_of(s)?;
         let pull = V3::from(dir).normalize();
@@ -888,10 +888,9 @@ impl NativeKernel {
             if *fb != self.body_of(s)? {
                 return Err(err("depouille drafts faces of the shape"));
             }
-            if V3::from(*n).normalize().cross(&pull).norm() > 1e-9 {
-                return Err(KernelError::Unsupported("a neutral plane not square to the pull direction"));
-            }
-            let spec = DraftSpec { faces: vec![*fid], angle: angle.to_radians(), pull: nalgebra::Unit::new_normalize(pull), neutral: P3::from(*p), tangent_propagation: true };
+            let nn = V3::from(*n).normalize();
+            let neutral_normal = (nn.cross(&pull).norm() > 1e-9).then(|| nalgebra::Unit::new_normalize(nn));
+            let spec = DraftSpec { faces: vec![*fid], angle: angle.to_radians(), pull: nalgebra::Unit::new_normalize(pull), neutral: P3::from(*p), neutral_normal, tangent_propagation: true };
             b = crate::Kernel::draft(self, b, &spec)?.bodies[0];
         }
         Ok(Shape::Body(b))

@@ -55,7 +55,7 @@ impl Rebuilder {
         let bodies = groups.iter().map(|g| (g.0, g.1)).collect();
         let (angle, tangent) = (x.angle.to_radians(), x.tangent_propagation);
         let mut out = self.per_part(id, "Draft", state, bodies, |this, i, body| {
-            let spec = DraftSpec { faces: faces[i].clone(), angle, pull, neutral, tangent_propagation: tangent };
+            let spec = DraftSpec { faces: faces[i].clone(), angle, pull, neutral, neutral_normal: None, tangent_propagation: tangent };
             this.kernel.draft(body, &spec)
         })?;
         // PS11.1: some faces gone but the rest drafted is a warning, not a failure.
@@ -122,7 +122,7 @@ impl Rebuilder {
                 .collect();
             let drafted = self.kernel.draft(
                 body,
-                &DraftSpec { faces: sides, angle, pull: half.direction, neutral: start, tangent_propagation: true },
+                &DraftSpec { faces: sides, angle, pull: half.direction, neutral: start, neutral_normal: None, tangent_propagation: true },
             );
             self.kernel.release(body);
             let d = match drafted {

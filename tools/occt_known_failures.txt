@@ -742,9 +742,6 @@ boolean bsection_p4
 boolean bsection_q9
 boolean bsection_r3
 boolean bsection_r9
-draft angle_a6
-draft angle_a9
-draft angle_b1
 draft angle_b3
 draft angle_c3
 draft angle_c5

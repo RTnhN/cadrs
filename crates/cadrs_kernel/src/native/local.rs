@@ -690,16 +690,31 @@ pub fn draft(k: &mut NativeKernel, body: BodyId, spec: &DraftSpec) -> Result<OpR
                 // turned about it to make the angle with the pull (OCCT's: absolute, so a face
                 // already inclined takes the angle given), its outward normal tipping towards
                 // the pull (the face leans in as it rises).
-                let t = pull.cross(&n).normalize();
+                let nn = spec.neutral_normal.map_or(pull, |x| x.into_inner());
+                let t = nn.cross(&n).try_normalize(1e-9).ok_or_else(|| KernelError::InvalidParameter("A face parallel to the neutral plane can't be drafted".into()))?;
                 let m = t.cross(&n);
-                let alpha = -(fr.o - spec.neutral).dot(&pull) / m.dot(&pull);
+                let alpha = -(fr.o - spec.neutral).dot(&nn) / m.dot(&nn);
                 let on = fr.o + m * alpha;
-                let h = (n - pull * n.dot(&pull)).normalize();
-                let n2 = h * spec.angle.cos() + pull * spec.angle.sin();
+                // The new normal turns about the hinge (n cos θ + m sin θ) until its component
+                // along the pull is sin a; of the two turns, the smaller.
+                let (ca, cb) = (n.dot(&pull), m.dot(&pull));
+                let r = (ca * ca + cb * cb).sqrt();
+                if r < spec.angle.sin().abs() - 1e-12 {
+                    return Err(KernelError::InvalidParameter("the face can't reach that angle turning about its hinge".into()));
+                }
+                let phi = cb.atan2(ca);
+                let delta = (spec.angle.sin() / r).clamp(-1.0, 1.0).acos();
+                let wrap = |x: f64| (x + PI).rem_euclid(TAU) - PI;
+                let (th1, th2) = (wrap(phi + delta), wrap(phi - delta));
+                let th = if th1.abs() <= th2.abs() { th1 } else { th2 };
+                let n2 = n * th.cos() + m * th.sin();
                 let natural = if f.sense { n2 } else { -n2 };
                 Surface::Plane { f: Frame { o: on, x: t, y: natural.cross(&t), z: natural } }
             }
             Surface::Cylinder { f: fr, .. } | Surface::Cone { f: fr, .. } => {
+                if spec.neutral_normal.is_some() {
+                    return Err(KernelError::Unsupported("drafting a cylinder or cone about a neutral plane at an angle to the pull"));
+                }
                 if fr.z.cross(&pull).norm() > 1e-9 {
                     return Err(KernelError::Unsupported("drafting a cylinder or cone not along the pull"));
                 }

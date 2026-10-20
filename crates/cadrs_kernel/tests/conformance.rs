@@ -2847,6 +2847,7 @@ pub fn draft_cube_sides(k: &mut dyn Kernel) {
         angle: angle.to_radians(),
         pull: up(),
         neutral: Point3::new(0.0, 0.0, z),
+        neutral_normal: None,
         tangent_propagation: true,
     };
     let inward = one(k.draft(cube, &spec(5.0, 0.0)).unwrap());
@@ -2863,7 +2864,7 @@ pub fn draft_cube_sides(k: &mut dyn Kernel) {
     let side: Vec<FaceId> = k.faces(cyl).unwrap().into_iter().filter(|f| f.kind == SurfaceKind::Cylinder).map(|f| f.id).collect();
     assert_eq!(side.len(), 1);
     let cone = one(
-        k.draft(cyl, &DraftSpec { faces: side, angle: 5f64.to_radians(), pull: up(), neutral: Point3::origin(), tangent_propagation: true })
+        k.draft(cyl, &DraftSpec { faces: side, angle: 5f64.to_radians(), pull: up(), neutral: Point3::origin(), neutral_normal: None, tangent_propagation: true })
             .unwrap(),
     );
     let r = 10.0 - 20.0 * t;

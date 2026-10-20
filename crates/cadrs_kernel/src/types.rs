@@ -962,8 +962,12 @@ pub struct DraftSpec {
     pub angle: f64,
     /// The pull direction (the neutral plane's normal, or its opposite when flipped).
     pub pull: Unit<Vector3<f64>>,
-    /// A point on the neutral plane (its normal is `pull`).
+    /// A point on the neutral plane.
     pub neutral: Point3<f64>,
+    /// The neutral plane's normal when it isn't `pull` (a plane faces are turned about at an
+    /// angle to the pull: each face hinges on its line on that plane).
+    #[serde(default)]
+    pub neutral_normal: Option<Unit<Vector3<f64>>>,
     /// Draft the faces tangent to the picked ones too.
     pub tangent_propagation: bool,
 }
