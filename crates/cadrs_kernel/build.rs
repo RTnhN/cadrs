@@ -11,9 +11,18 @@ fn main() {
             .include(occt_sys::occt_path().join("include"))
             .flag_if_supported("-std=c++17")
             .compile("cadrs-step-colors");
+        cxx_build::bridge("src/backend/shell_sectors.rs")
+            .file("src/backend/shell_sectors.cc")
+            .include("src/backend")
+            .include(occt_sys::occt_path().join("include"))
+            .flag_if_supported("-std=c++17")
+            .compile("cadrs-shell-sectors");
         println!("cargo:rerun-if-changed=src/backend/step_colors.rs");
         println!("cargo:rerun-if-changed=src/backend/step_colors.cc");
         println!("cargo:rerun-if-changed=src/backend/step_colors.hxx");
+        println!("cargo:rerun-if-changed=src/backend/shell_sectors.rs");
+        println!("cargo:rerun-if-changed=src/backend/shell_sectors.cc");
+        println!("cargo:rerun-if-changed=src/backend/shell_sectors.hxx");
     }
     if occt && windows {
         println!("cargo:rustc-link-lib=dylib=advapi32");

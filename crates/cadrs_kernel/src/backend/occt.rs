@@ -203,6 +203,16 @@ impl OcctKernel {
             let fs = face_shapes
                 .get(f.id.0 as usize)
                 .ok_or_else(|| KernelError::OperationFailed("face list".into()))?;
+            // A convex round no thicker than the wall collapses onto its axis: its slab is the
+            // sector out to the axis instead.
+            let sector = super::shell_sectors::ffi::convex_sector(&fs.try_to_bin_brep().map_err(occt)?, t)
+                .map_err(|e| KernelError::OperationFailed(format!("shell sector: {e}")))?;
+            if !sector.is_empty() {
+                for piece in &sector {
+                    tools.push(Shape::try_from_bin_brep(&piece.brep).map_err(occt)?);
+                }
+                continue;
+            }
             let (slab, _) = fs.try_thicken_h(sign * t).map_err(occt)?;
             tools.push(slab);
         }
