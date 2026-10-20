@@ -41,6 +41,7 @@ pub mod fonts;
 pub mod glyphs;
 pub mod gallery;
 pub mod icon;
+mod icon_raster;
 pub mod inline_edit;
 pub mod input;
 pub mod list;
