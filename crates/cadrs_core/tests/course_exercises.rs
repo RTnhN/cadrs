@@ -474,7 +474,7 @@ fn exercise_2_is_fully_defined_and_its_area_matches_the_drawing() {
         b.curve(v(-48.3, 100.0)),
     );
     b.op(SketchOp::Mirror {
-        axis,
+        axis: cadrs_sketch::CurveRef::Curve(axis),
         curves: vec![base, side, waist],
     });
     // Step 5: the tangent arc between the arcs' top ends (tangent at both).
@@ -576,7 +576,7 @@ fn exercise_2_is_fully_defined_and_its_area_matches_the_drawing() {
     let side_arc = b.s().curves_at(line_top).find(|c| *c != line).unwrap();
     // Step 11: mirror both.
     b.op(SketchOp::Mirror {
-        axis,
+        axis: cadrs_sketch::CurveRef::Curve(axis),
         curves: vec![line, side_arc],
     });
     // Step 12: the bottom arc.

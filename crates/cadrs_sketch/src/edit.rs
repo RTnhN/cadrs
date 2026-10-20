@@ -27,12 +27,12 @@ use crate::{
 /// mirrored point this close to an existing point shares it.
 const ON_AXIS: f64 = 1e-6;
 
-/// Mirrors `curves` in the line `axis`. Returns the copies (source, copy) in order.
-pub fn mirror(s: &mut Sketch, axis: CurveId, curves: &[CurveId]) -> Result<Vec<(CurveId, CurveId)>, String> {
-    let Some(CurveKind::Line { a, b }) = s.curves.get(axis).map(|c| c.kind) else {
+/// Mirrors `curves` in the line (or sketch axis) `axis`. Returns the copies (source, copy) in
+/// order.
+pub fn mirror(s: &mut Sketch, axis: CurveRef, curves: &[CurveId]) -> Result<Vec<(CurveId, CurveId)>, String> {
+    let Some((p0, p1)) = crate::dimension::line_ends(s, axis) else {
         return Err("the mirror line is not a line".into());
     };
-    let (p0, p1) = (s.pos(a), s.pos(b));
     if p0.distance(p1) < 1e-9 {
         return Err("the mirror line has no length".into());
     }
@@ -62,7 +62,7 @@ pub fn mirror(s: &mut Sketch, axis: CurveId, curves: &[CurveId]) -> Result<Vec<(
     };
     let mut out = Vec::new();
     for &c in curves {
-        if c == axis {
+        if CurveRef::Curve(c) == axis {
             continue;
         }
         let Some(curve) = s.curves.get(c).copied() else {
@@ -136,7 +136,7 @@ pub fn mirror(s: &mut Sketch, axis: CurveId, curves: &[CurveId]) -> Result<Vec<(
         s.add_constraint(ConstraintOf::SymmetricCurves(
             CurveRef::Curve(c),
             CurveRef::Curve(copy),
-            CurveRef::Curve(axis),
+            axis,
         ));
         out.push((c, copy));
     }
@@ -148,11 +148,11 @@ pub fn mirror(s: &mut Sketch, axis: CurveId, curves: &[CurveId]) -> Result<Vec<(
 
 /// A free end (used by one curve only) of a line or arc, not being mirrored, whose carrier
 /// passes through `m` and which is near it (within a quarter of the curve's size).
-fn free_end_near(s: &Sketch, m: Vec2, skip: &[CurveId], axis: CurveId) -> Option<PointId> {
+fn free_end_near(s: &Sketch, m: Vec2, skip: &[CurveId], axis: CurveRef) -> Option<PointId> {
     let tol = 1e-6 * (1.0 + m.length());
     let mut best: Option<(PointId, f64)> = None;
     for (k, c) in &s.curves {
-        if skip.contains(&k) || k == axis {
+        if skip.contains(&k) || CurveRef::Curve(k) == axis {
             continue;
         }
         let (on_carrier, size) = match c.kind {
@@ -684,7 +684,7 @@ mod tests {
         .unwrap();
         let arc = s.curves.keys().find(|k| s.arc_geom(*k).is_some()).unwrap();
         SketchOp::Mirror {
-            axis,
+            axis: CurveRef::Curve(axis),
             curves: vec![l, arc],
         }
         .apply(&mut s)
@@ -729,6 +729,55 @@ mod tests {
     }
 
     #[test]
+    fn mirror_in_a_plane_axis() {
+        // #31: an edge-on default plane (the sketch Y axis) as the mirror line.
+        let mut s = Sketch::new();
+        let l = line(&mut s, v(10.0, 0.0), v(30.0, 20.0), false);
+        SketchOp::Mirror {
+            axis: CurveRef::YAxis,
+            curves: vec![l],
+        }
+        .apply(&mut s)
+        .unwrap();
+        let copy = s.curves.keys().find(|k| *k != l).unwrap();
+        let (a, b) = s.curve_ends(copy).unwrap();
+        let mut ends = [s.pos(a), s.pos(b)];
+        ends.sort_by(|p, q| p.y.total_cmp(&q.y));
+        assert!(ends[0].distance(v(-10.0, 0.0)) < 1e-9 && ends[1].distance(v(-30.0, 20.0)) < 1e-9);
+        assert!(s.constraints.values().any(|c| *c
+            == ConstraintOf::SymmetricCurves(CurveRef::Curve(l), CurveRef::Curve(copy), CurveRef::YAxis)));
+        // The copy follows its source.
+        let end = s.point_at(v(30.0, 20.0), 1e-9).unwrap();
+        SketchOp::MovePoints {
+            moves: vec![(end, v(40.0, 25.0))],
+        }
+        .apply(&mut s)
+        .unwrap();
+        let p = s.pos(end);
+        assert!([a, b].iter().any(|q| s.pos(*q).distance(v(-p.x, p.y)) < 1e-6));
+    }
+
+    #[test]
+    fn plane_axes_are_line_picks_for_constraints() {
+        use crate::constraint::{ConstraintKind, Fit, fit};
+        use crate::SketchEntity as E;
+        let mut s = Sketch::new();
+        let l1 = line(&mut s, v(2.0, 1.0), v(5.0, 5.0), false);
+        let l2 = line(&mut s, v(-2.0, 1.0), v(-6.0, 5.0), false);
+        let Fit::Complete(cs) = fit(ConstraintKind::Symmetric, &s, &[E::YAxis, E::Curve(l1), E::Curve(l2)]) else {
+            panic!("symmetric about the Y axis")
+        };
+        assert_eq!(
+            cs,
+            vec![ConstraintOf::SymmetricCurves(CurveRef::Curve(l1), CurveRef::Curve(l2), CurveRef::YAxis)]
+        );
+        assert!(matches!(
+            fit(ConstraintKind::Parallel, &s, &[E::Curve(l1), E::XAxis]),
+            Fit::Complete(_)
+        ));
+    }
+
+    #[test]
     fn mirror_shares_points_on_the_axis_and_existing_points() {
         let mut s = Sketch::new();
         let axis = line(&mut s, v(0.0, 0.0), v(0.0, 100.0), true);
@@ -739,7 +788,7 @@ mod tests {
         let lone = line(&mut s, v(60.0, 50.0), v(80.0, 90.0), false);
         let before = s.points.len();
         SketchOp::Mirror {
-            axis,
+            axis: CurveRef::Curve(axis),
             curves: vec![base, side],
         }
         .apply(&mut s)

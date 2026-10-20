@@ -712,6 +712,8 @@ pub enum DimensionKind {
     Vertical { a: PointId, b: PointId },
     /// The straight distance between two points.
     Aligned { a: PointId, b: PointId },
+    /// The straight distance from the sketch origin to a point (#31).
+    OriginAligned { p: PointId },
     /// A circle's diameter.
     Diameter { curve: CurveId },
     /// An arc's radius.
@@ -830,6 +832,7 @@ impl DimensionKind {
             K::Horizontal { a, b } => pt(a).zip(pt(b)).map(|(a, b)| K::Horizontal { a, b }),
             K::Vertical { a, b } => pt(a).zip(pt(b)).map(|(a, b)| K::Vertical { a, b }),
             K::Aligned { a, b } => pt(a).zip(pt(b)).map(|(a, b)| K::Aligned { a, b }),
+            K::OriginAligned { p } => pt(p).map(|p| K::OriginAligned { p }),
             K::Diameter { curve } => cv(curve).map(|curve| K::Diameter { curve }),
             K::Radius { curve } => cv(curve).map(|curve| K::Radius { curve }),
             K::PointLine { p, line } => pref(p).zip(cref(line)).map(|(p, line)| K::PointLine { p, line }),
@@ -850,6 +853,7 @@ impl DimensionKind {
             DimensionKind::Horizontal { a, b }
             | DimensionKind::Vertical { a, b }
             | DimensionKind::Aligned { a, b } => a == p || b == p,
+            DimensionKind::OriginAligned { p: q } => q == p,
             DimensionKind::PointLine { p: q, .. }
             | DimensionKind::Diametral { p: q, .. }
             | DimensionKind::PointCircle { p: q, .. } => {
@@ -926,6 +930,7 @@ impl DimensionKind {
             DimensionKind::Horizontal { a, b }
             | DimensionKind::Vertical { a, b }
             | DimensionKind::Aligned { a, b } => vec![a, b],
+            DimensionKind::OriginAligned { p } => vec![p],
             DimensionKind::PointLine {
                 p: PointRef::Point(p),
                 ..
@@ -1513,6 +1518,7 @@ impl Sketch {
                 DimensionKind::Horizontal { a, b } => DimensionKind::Horizontal { a: swap(a), b: swap(b) },
                 DimensionKind::Vertical { a, b } => DimensionKind::Vertical { a: swap(a), b: swap(b) },
                 DimensionKind::Aligned { a, b } => DimensionKind::Aligned { a: swap(a), b: swap(b) },
+                DimensionKind::OriginAligned { p } => DimensionKind::OriginAligned { p: swap(p) },
                 DimensionKind::PointLine { p: PointRef::Point(p), line } => DimensionKind::PointLine {
                     p: PointRef::Point(swap(p)),
                     line,

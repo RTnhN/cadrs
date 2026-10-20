@@ -154,6 +154,18 @@ impl ScreenMap {
         SVec2::new(s.x as f64, s.y as f64)
     }
 
+    /// The sketch axis under a screen position, on a Top, Front or Right sketch: there the
+    /// other two default planes cut the sketch plane along its axes (seen edge-on), and are
+    /// picked as line references (mirror lines, dimensions, constraints; #31).
+    pub fn axis_at(&self, pos: Vec2) -> Option<SketchEntity> {
+        if !matches!(self.plane, PlaneRef::Top | PlaneRef::Front | PlaneRef::Right) {
+            return None;
+        }
+        let half = crate::viewport::PLANE_HALF as f64;
+        cadrs_sketch::hit::axis_hit(SVec2::new(pos.x as f64, pos.y as f64), half, |p| self.to_screen64(p))
+            .map(|h| h.entity)
+    }
+
     /// The sketch point under a screen position, or `None` when the plane is seen edge-on (or,
     /// in perspective, the position is above its horizon).
     pub fn to_sketch(&self, s: Vec2) -> Option<SVec2> {
@@ -678,7 +690,7 @@ fn prune_selection(
         SketchEntity::Constraint(c) => sketch.constraints.contains_key(c),
         SketchEntity::Text(t) => sketch.texts.contains_key(t),
         // A part vertex: drawn while it exists (`sketch_links`).
-        SketchEntity::Origin | SketchEntity::Link(_) => true,
+        SketchEntity::Origin | SketchEntity::Link(_) | SketchEntity::XAxis | SketchEntity::YAxis => true,
     };
     if !selection.0.iter().all(exists) {
         selection.0.retain(exists);
@@ -885,6 +897,7 @@ pub(crate) fn sketch_pointer(
                     _ => vertex_at(pos).or(hit),
                 }
             })
+            .or_else(|| map.axis_at(pos))
     };
     let mut drag_moved = false;
     for input in inputs.read() {
@@ -957,8 +970,11 @@ pub(crate) fn sketch_pointer(
                     && tool.tool == SketchTool::Select
                     && let Some(p) = draw.press
                     && !p.began
-                    // A part vertex under the press doesn't stop a box selection.
-                    && matches!(p.hit, None | Some(SketchEntity::Link(_)))
+                    // A part vertex or an axis under the press doesn't stop a box selection.
+                    && matches!(
+                        p.hit,
+                        None | Some(SketchEntity::Link(_) | SketchEntity::XAxis | SketchEntity::YAxis)
+                    )
                     && p.screen.distance(pos) > DRAG_THRESHOLD
                 {
                     draw.state = DrawState::BoxSelect { start: p.screen };
@@ -2400,8 +2416,11 @@ fn sketch_edit_keys(
                                 curves.push(tx.lines[0]);
                             }
                         }
-                        // The origin and part vertices cannot be deleted.
-                        SketchEntity::Origin | SketchEntity::Link(_) => {}
+                        // The origin, part vertices and the axes cannot be deleted.
+                        SketchEntity::Origin
+                        | SketchEntity::Link(_)
+                        | SketchEntity::XAxis
+                        | SketchEntity::YAxis => {}
                     }
                 }
                 // A point selected together with its curve goes with the curve; on its own,
