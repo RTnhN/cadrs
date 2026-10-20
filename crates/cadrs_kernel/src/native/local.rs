@@ -7,6 +7,7 @@
 use super::curve::Curve;
 use super::kernel::NativeKernel;
 use super::math::*;
+use super::nurbs::NurbsCurve;
 use super::surface::Surface;
 use super::topo::{Body, Coedge};
 use crate::*;
@@ -280,8 +281,78 @@ pub fn offset_surface(s: &Surface, sense: bool, d: f64) -> Option<Surface> {
             let k = d * if f.right_handed() { 1.0 } else { -1.0 };
             Surface::Cone { f: Frame { o: f.o - f.z * (k * a.sin()), ..*f }, r: r + k * a.cos(), a: *a }
         }
+        // An extrusion: its curve moved square to the direction (the normal is), extruded the
+        // same way.
+        Surface::Extrusion { c, d: dir } => {
+            let off = offset_curve_along(c, &|t| s.normal(t, 0.0), d)?;
+            Surface::Extrusion { c: off, d: *dir }
+        }
+        // A revolution: its meridian (at u = 0) moved along the normal there, revolved.
+        Surface::Revolution { f, m } => {
+            let off = offset_curve_along(m, &|t| s.normal(0.0, t), d)?;
+            Surface::Revolution { f: *f, m: off }
+        }
+        // A B-spline: a surface through a grid of offset points (exact offsets aren't
+        // B-splines).
+        Surface::Nurbs(n) => {
+            let ((u0, u1), (v0, v1)) = n.range();
+            let k = 32;
+            let us: Vec<f64> = (0..=k).map(|i| u0 + (u1 - u0) * i as f64 / k as f64).collect();
+            let vs: Vec<f64> = (0..=k).map(|j| v0 + (v1 - v0) * j as f64 / k as f64).collect();
+            let rows: Vec<NurbsCurve> = us
+                .iter()
+                .map(|&u| {
+                    let pts: Vec<P3> = vs.iter().map(|&v| s.eval(u, v) + s.normal(u, v) * d).collect();
+                    NurbsCurve::interpolate(&pts, &vs, 3, None, None)
+                })
+                .collect();
+            let surf = super::nurbs::NurbsSurface::through_curves(&rows, &us, 3, None, None);
+            // through_curves runs its rows along v and interpolates them along u: transpose to
+            // keep the parameters' roles.
+            let cps: Vec<Vec<super::nurbs::H>> = (0..surf.cps[0].len()).map(|j| surf.cps.iter().map(|r| r[j]).collect()).collect();
+            Surface::Nurbs(std::sync::Arc::new(super::nurbs::NurbsSurface { du: surf.dv, dv: surf.du, ku: surf.kv.clone(), kv: surf.ku.clone(), cps }))
+        }
         _ => return None,
     })
+}
+
+/// A curve moved by `d` along the unit field `n(t)`: exact for a line moved by a constant
+/// vector and a circle moved square to itself in its plane (concentric), else a cubic through
+/// 65 offset points on its parameters. None when a circle would shrink to nothing.
+fn offset_curve_along(c: &Curve, n: &dyn Fn(f64) -> V3, d: f64) -> Option<Curve> {
+    let (t0, t1) = c.nurbs_range().unwrap_or(match c {
+        Curve::Circle { .. } | Curve::Ellipse { .. } => (0.0, TAU),
+        _ => (-1.0, 1.0),
+    });
+    match c {
+        Curve::Line { o, d: dir } => {
+            let (a, b) = (n(t0), n(t1));
+            if (a - b).norm() < 1e-9 {
+                return Some(Curve::Line { o: o + a * d, d: *dir });
+            }
+        }
+        Curve::Circle { c: cc, x, y, r } => {
+            // Normal along the radius (in the plane): a concentric circle.
+            let p = c.point(0.0);
+            let radial = (p - cc) / *r;
+            let nn = n(0.0);
+            let along = nn.dot(&radial);
+            if (along.abs() - 1.0).abs() < 1e-9 {
+                let r2 = r + d * along;
+                return (r2 > 1e-9).then_some(Curve::Circle { c: *cc, x: *x, y: *y, r: r2 });
+            }
+            // Normal across the plane: the circle moved along it.
+            let z = x.cross(y);
+            if (nn.dot(&z).abs() - 1.0).abs() < 1e-9 {
+                return Some(Curve::Circle { c: cc + nn * d, x: *x, y: *y, r: *r });
+            }
+        }
+        _ => {}
+    }
+    let k = 64;
+    let ts: Vec<f64> = (0..=k).map(|i| t0 + (t1 - t0) * i as f64 / k as f64).collect();
+    let pts: Vec<P3> = ts.iter().map(|&t| c.point(t) + n(t) * d).collect();
+    Some(Curve::Nurbs(std::sync::Arc::new(NurbsCurve::interpolate(&pts, &ts, 3, None, None))))
 }
 
 /// Sharp offset: every face moved by its distance, the edges where the moved faces meet.
