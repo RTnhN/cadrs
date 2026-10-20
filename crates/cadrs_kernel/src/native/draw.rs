@@ -183,7 +183,7 @@ fn one_axis_order(ax: &Ax3, bot: (f64, f64), top: (f64, f64), mid: (f64, f64), c
 /// `closed` (a whole turn) the start and end are the same, with no end faces.
 fn sweep_order(loops: &[Vec<DEdge>], at: &dyn Fn(&P3, f64) -> P3, swept: &dyn Fn(&P3) -> bool, closed: bool) -> OcctOrder {
     let mut edges: Vec<P3> = Vec::new();
-    let mut add = |edges: &mut Vec<P3>, p: P3| {
+    let add = |edges: &mut Vec<P3>, p: P3| {
         if !edges.iter().any(|q| (q - p).norm() < 1e-9 * (1.0 + p.coords.norm())) {
             edges.push(p);
         }
