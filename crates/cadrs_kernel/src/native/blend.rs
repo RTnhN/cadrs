@@ -759,6 +759,14 @@ pub fn blend(k: &mut NativeKernel, body: BodyId, edges: &[(EdgeId, Box<dyn Fn(f6
             return Err(KernelError::InvalidParameter(format!("unknown edge {e}")));
         }
     }
+    if std::env::var_os("CADRS_BLEND_DEBUG").is_some() {
+        let ef = b.edge_faces();
+        for &e in &picked {
+            let ed = &b.edges[e];
+            let kinds: Vec<String> = ef[e].iter().map(|&f| format!("{f}:{:?}", b.faces[f].surf.kind())).collect();
+            eprintln!("blend edge {e}: {} convex {:?} faces {kinds:?}", format!("{:?}", ed.curve).chars().take(40).collect::<String>(), edge_convex(&b, e));
+        }
+    }
     check_overlaps(&b, edges)?;
     // Picked edges at each vertex.
     let mut at_vertex: std::collections::HashMap<usize, Vec<usize>> = Default::default();

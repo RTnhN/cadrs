@@ -15,7 +15,7 @@ use std::sync::Arc;
 
 use super::curve::Curve;
 use super::math::*;
-use super::nurbs::NurbsSurface;
+use super::nurbs::{NurbsCurve, NurbsSurface, H};
 use crate::SurfaceKind;
 
 #[derive(Debug, Clone, PartialEq)]
@@ -391,13 +391,81 @@ impl Surface {
         bb.grow(e * (1.0 + 1e-9) + 1e-12)
     }
 
+    /// The surface over the parameter rectangle u × v as an exact NURBS surface on the same
+    /// parameters (a B-spline surface as it is): a plane bilinear; a cylinder, cone, sphere,
+    /// torus or revolution its meridian turned by a rational quadratic arc (the meridian's
+    /// control points rotated by the arc's, weights multiplied); an extrusion its curve swept.
+    pub fn to_nurbs(&self, u: (f64, f64), v: (f64, f64)) -> NurbsSurface {
+        let h = |p: P3, w: f64| H::new(p.x * w, p.y * w, p.z * w, w);
+        let line = |a: P3, b: P3| NurbsCurve::bezier(&[a, b], &[1.0, 1.0]).reparam(v.0, v.1);
+        // A local meridian (x radial, z along the axis) turned about f.z.
+        let revolve = |f: &Frame, m: &NurbsCurve| {
+            let arc = super::curve::conic_nurbs(P3::origin(), V3::x(), V3::y(), u.0, u.1);
+            let cps = arc
+                .cps
+                .iter()
+                .map(|a| {
+                    let (ax, ay, wa) = (a.x / a.w, a.y / a.w, a.w);
+                    m.cps
+                        .iter()
+                        .map(|q| {
+                            let (mx, my, mz, wm) = (q.x / q.w, q.y / q.w, q.z / q.w, q.w);
+                            let p = f.o + f.x * (mx * ax - my * ay) + f.y * (mx * ay + my * ax) + f.z * mz;
+                            h(p, wa * wm)
+                        })
+                        .collect()
+                })
+                .collect();
+            NurbsSurface { du: arc.degree, dv: m.degree, ku: arc.knots.clone(), kv: m.knots.clone(), cps }
+        };
+        let o = P3::origin();
+        match self {
+            Surface::Plane { .. } => {
+                let c = |a: f64, b: f64| h(self.eval(a, b), 1.0);
+                NurbsSurface { du: 1, dv: 1, ku: vec![u.0, u.0, u.1, u.1], kv: vec![v.0, v.0, v.1, v.1], cps: vec![vec![c(u.0, v.0), c(u.0, v.1)], vec![c(u.1, v.0), c(u.1, v.1)]] }
+            }
+            Surface::Cylinder { f, r } => revolve(f, &line(P3::new(*r, 0.0, v.0), P3::new(*r, 0.0, v.1))),
+            Surface::Cone { f, r, a } => {
+                let m = |t: f64| P3::new(r + t * a.sin(), 0.0, t * a.cos());
+                revolve(f, &line(m(v.0), m(v.1)))
+            }
+            Surface::Sphere { f, r } => revolve(f, &super::curve::conic_nurbs(o, V3::x() * *r, V3::z() * *r, v.0, v.1)),
+            Surface::Torus { f, rmaj, rmin } => revolve(f, &super::curve::conic_nurbs(P3::new(*rmaj, 0.0, 0.0), V3::x() * *rmin, V3::z() * *rmin, v.0, v.1)),
+            Surface::Revolution { f, m } => {
+                let mut mc = m.to_nurbs(v.0, v.1);
+                for q in mc.cps.iter_mut() {
+                    let l = f.local(&P3::new(q.x / q.w, q.y / q.w, q.z / q.w));
+                    *q = h(P3::from(l), q.w);
+                }
+                revolve(f, &mc)
+            }
+            Surface::Extrusion { c, d } => {
+                let cn = c.to_nurbs(u.0, u.1);
+                let cps = cn
+                    .cps
+                    .iter()
+                    .map(|q| {
+                        let p = P3::new(q.x / q.w, q.y / q.w, q.z / q.w);
+                        vec![h(p + d * v.0, q.w), h(p + d * v.1, q.w)]
+                    })
+                    .collect();
+                NurbsSurface { du: cn.degree, dv: 1, ku: cn.knots.clone(), kv: vec![v.0, v.0, v.1, v.1], cps }
+            }
+            Surface::Nurbs(n) => (**n).clone(),
+        }
+    }
+
+    /// The parameter ranges (an unbounded direction as ±1e4; a periodic one as one period).
     pub fn param_box(&self) -> ((f64, f64), (f64, f64)) {
+        let open = (-1e4, 1e4);
         match self {
             Surface::Nurbs(n) => n.range(),
-            Surface::Extrusion { c, .. } => (c.nurbs_range().unwrap_or((0.0, TAU)), (-1e4, 1e4)),
+            Surface::Plane { .. } => (open, open),
+            Surface::Extrusion { c, .. } => (c.nurbs_range().unwrap_or(if c.is_periodic() { (0.0, TAU) } else { open }), open),
             Surface::Sphere { .. } => ((0.0, TAU), (-PI / 2.0, PI / 2.0)),
             Surface::Torus { .. } => ((0.0, TAU), (-PI, PI)),
-            _ => ((0.0, TAU), (-1e4, 1e4)),
+            Surface::Revolution { m, .. } => ((0.0, TAU), m.nurbs_range().unwrap_or(if m.is_periodic() { (0.0, TAU) } else { open })),
+            Surface::Cylinder { .. } | Surface::Cone { .. } => ((0.0, TAU), open),
         }
     }
 
@@ -610,6 +678,45 @@ mod tests {
             check_derivs(&s, 0.7, 0.4);
             if let Some(d) = s.signed_distance(&(s.eval(0.7, 0.4) + s.normal(0.7, 0.4) * 0.5)) {
                 assert!((d - 0.5).abs() < 1e-12, "{s:?} distance {d}");
+            }
+        }
+    }
+
+    #[test]
+    fn nurbs_forms_match_the_surfaces() {
+        let f = Frame { o: P3::new(1.0, -2.0, 0.5), x: V3::new(0.6, 0.8, 0.0), y: V3::new(-0.8, 0.6, 0.0), z: V3::z() };
+        // (A revolution's meridian lies in its frame's x–z half plane.)
+        let m = |r: f64, z: f64| f.o + f.x * r + f.z * z;
+        let meridian = Curve::nurbs(NurbsCurve::bezier(&[m(3.0, 0.0), m(5.0, 1.5), m(3.4, 3.5)], &[1.0, 1.0, 1.0]));
+        let surfs = [
+            Surface::Plane { f },
+            Surface::Cylinder { f, r: 2.0 },
+            Surface::Cone { f, r: 2.0, a: 0.3 },
+            Surface::Sphere { f, r: 3.0 },
+            Surface::Torus { f, rmaj: 5.0, rmin: 1.5 },
+            Surface::Revolution { f, m: meridian },
+            Surface::Extrusion { c: Curve::Ellipse { c: P3::new(0.0, 0.0, 0.0), x: V3::x(), y: V3::y(), a: 3.0, b: 2.0 }, d: V3::new(0.1, 0.0, 1.0) },
+        ];
+        for s in &surfs {
+            let (u, v) = match s {
+                Surface::Sphere { .. } => ((0.3, 4.0), (-1.2, 1.4)),
+                Surface::Revolution { .. } => ((0.3, 4.0), (0.0, 1.0)),
+                _ => ((0.3, 4.0), (-1.0, 2.5)),
+            };
+            let n = s.to_nurbs(u, v);
+            for i in 0..=8 {
+                for j in 0..=8 {
+                    let (a, b) = (u.0 + (u.1 - u.0) * i as f64 / 8.0, v.0 + (v.1 - v.0) * j as f64 / 8.0);
+                    let want = s.eval(a, b);
+                    // The NURBS form's parameters differ inside an arc (rational): compare points
+                    // by distance to the surface and the corners exactly.
+                    let got = n.ders2(a, b)[0];
+                    let p = P3::from(got);
+                    assert!(s.distance(&p) < 1e-9, "{} off the surface by {} at {i} {j}: {p:?} vs {want:?}", format!("{s:?}").chars().take(12).collect::<String>(), s.distance(&p));
+                    if (i == 0 || i == 8) && (j == 0 || j == 8) {
+                        assert!((p - want).norm() < 1e-9, "{:?} corner {p:?} vs {want:?}", s.kind());
+                    }
+                }
             }
         }
     }

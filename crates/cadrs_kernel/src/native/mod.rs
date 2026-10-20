@@ -24,6 +24,7 @@ pub mod math;
 pub mod meshsolid;
 pub mod nurbs;
 pub mod offset2d;
+pub mod oracle;
 pub mod slab;
 pub mod smb;
 pub mod recognize;

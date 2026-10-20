@@ -289,7 +289,7 @@ pub fn clamp_periodic(a: f64, t0: f64, t1: f64) -> f64 {
 
 /// A rational quadratic B-spline for `c + cos t·x + sin t·y` on [t0, t1], parametrized on
 /// [t0, t1] by angle at the arc joints.
-fn conic_nurbs(c: P3, x: V3, y: V3, t0: f64, t1: f64) -> NurbsCurve {
+pub(crate) fn conic_nurbs(c: P3, x: V3, y: V3, t0: f64, t1: f64) -> NurbsCurve {
     let sweep = t1 - t0;
     let n = ((sweep.abs() / (PI / 2.0)).ceil() as usize).max(1);
     let dt = sweep / n as f64;
