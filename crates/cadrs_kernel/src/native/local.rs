@@ -312,7 +312,6 @@ pub fn offset_surface(s: &Surface, sense: bool, d: f64) -> Option<Surface> {
             let cps: Vec<Vec<super::nurbs::H>> = (0..surf.cps[0].len()).map(|j| surf.cps.iter().map(|r| r[j]).collect()).collect();
             Surface::Nurbs(std::sync::Arc::new(super::nurbs::NurbsSurface { du: surf.dv, dv: surf.du, ku: surf.kv.clone(), kv: surf.ku.clone(), cps }))
         }
-        _ => return None,
     })
 }
 
@@ -411,24 +410,18 @@ pub fn draft(k: &mut NativeKernel, body: BodyId, spec: &DraftSpec) -> Result<OpR
                 if n.cross(&pull).norm() < 1e-9 {
                     return Err(KernelError::InvalidParameter("A face square to the pull direction can't be drafted".into()));
                 }
-                if n.dot(&pull).abs() > 1e-9 {
-                    return Err(KernelError::Unsupported("drafting a face that is already inclined"));
-                }
-                // The line where the face meets the neutral plane, and the face turned about it
-                // so its outward normal tips towards the pull (the face leans in as it rises).
-                let axis = pull.cross(&n).normalize();
-                let on = fr.o - pull * (fr.o - spec.neutral).dot(&pull);
-                let r = nalgebra::Rotation3::from_axis_angle(&nalgebra::Unit::new_normalize(axis), spec.angle).into_inner();
-                let rot = Affine { m: r, t: on.coords - r * on.coords };
-                // Which way: the new normal must gain a component along the pull.
-                let n2 = r * n;
-                let rot = if n2.dot(&pull) * spec.angle.signum() >= 0.0 {
-                    rot
-                } else {
-                    let r = nalgebra::Rotation3::from_axis_angle(&nalgebra::Unit::new_normalize(axis), -spec.angle).into_inner();
-                    Affine { m: r, t: on.coords - r * on.coords }
-                };
-                Surface::Plane { f: fr.transformed(&rot) }
+                // The line where the face meets the neutral plane (the hinge), and the face
+                // turned about it to make the angle with the pull (OCCT's: absolute, so a face
+                // already inclined takes the angle given), its outward normal tipping towards
+                // the pull (the face leans in as it rises).
+                let t = pull.cross(&n).normalize();
+                let m = t.cross(&n);
+                let alpha = -(fr.o - spec.neutral).dot(&pull) / m.dot(&pull);
+                let on = fr.o + m * alpha;
+                let h = (n - pull * n.dot(&pull)).normalize();
+                let n2 = h * spec.angle.cos() + pull * spec.angle.sin();
+                let natural = if f.sense { n2 } else { -n2 };
+                Surface::Plane { f: Frame { o: on, x: t, y: natural.cross(&t), z: natural } }
             }
             Surface::Cylinder { f: fr, r } => {
                 if fr.z.cross(&pull).norm() > 1e-9 {

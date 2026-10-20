@@ -234,6 +234,12 @@ class Case:
             s_, d_, fs = self.offset_load
             arc = "true" if self.offset_join == "a" else "false"
             self.bind(a[0], f"k.offsetperform({self.shape(s_)}, {L(d_)}, &[{', '.join(self.shape(f) for f in fs)}], {arc})?")
+        elif c == "depouille" and len(a) >= 13 and (len(a) - 5) % 8 == 0:
+            groups = []
+            for i in range(5, len(a), 8):
+                g = a[i:i + 8]
+                groups.append(f"({self.shape(g[0])}, {L(g[1])}, [{L(g[2])}, {L(g[3])}, {L(g[4])}], [{L(g[5])}, {L(g[6])}, {L(g[7])}])")
+            self.bind(a[0], f"k.depouille({self.shape(a[1])}, [{L(a[2])}, {L(a[3])}, {L(a[4])}], &[{', '.join(groups)}])?")
         elif c == "box" and len(a) in (4, 7):
             if len(a) == 4:
                 self.bind(a[0], f"k.box_({', '.join(L(x) for x in a[1:])})?")

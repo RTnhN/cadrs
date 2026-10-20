@@ -877,6 +877,26 @@ impl NativeKernel {
         Ok(Shape::Body(r.bodies[0]))
     }
 
+    /// `depouille result shape dx dy dz face angle px py pz nx ny nz [face angle …]`: faces
+    /// drafted by angles (degrees) along the pull direction about neutral planes (through p,
+    /// normal n, which must lie along the pull).
+    pub fn depouille(&mut self, s: &Shape, dir: [f64; 3], groups: &[(&Shape, f64, [f64; 3], [f64; 3])]) -> Result<Shape> {
+        let mut b = self.body_of(s)?;
+        let pull = V3::from(dir).normalize();
+        for (face, angle, p, n) in groups {
+            let Shape::BodyFace(fb, fid) = face else { return Err(err("depouille drafts faces of the shape")) };
+            if *fb != self.body_of(s)? {
+                return Err(err("depouille drafts faces of the shape"));
+            }
+            if V3::from(*n).normalize().cross(&pull).norm() > 1e-9 {
+                return Err(KernelError::Unsupported("a neutral plane not square to the pull direction"));
+            }
+            let spec = DraftSpec { faces: vec![*fid], angle: angle.to_radians(), pull: nalgebra::Unit::new_normalize(pull), neutral: P3::from(*p), tangent_propagation: false };
+            b = crate::Kernel::draft(self, b, &spec)?.bodies[0];
+        }
+        Ok(Shape::Body(b))
+    }
+
     /// `compound s… name`.
     pub fn compound_shapes(&self, shapes: &[&Shape]) -> Shape {
         Shape::Compound(shapes.iter().map(|s| (*s).clone()).collect())
