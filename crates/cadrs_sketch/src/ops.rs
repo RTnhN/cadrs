@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 use crate::constraint::{Constraint, ConstraintOf, CurveRef, PointRef};
 use crate::solve::{self, Source};
 use crate::{
-    ConstraintId, ConstraintSpec, Curve, CurveId, CurveKind, Dimension, DimensionId, PointId,
+    ConstraintId, ConstraintSpec, Curve, CurveId, CurveKind, Dimension, DimensionId, PointId, PointSpec,
     Sketch, Vec2,
 };
 
@@ -762,6 +762,25 @@ impl SketchOp {
             }
             SketchOp::AddConstraints(specs) => {
                 for spec in specs {
+                    // A midpoint a spec refers to gets a point if it has none.
+                    let mut mids = Vec::new();
+                    spec.map(
+                        |p| {
+                            if let PointSpec::Midpoint(c) = p {
+                                mids.push(c);
+                            }
+                            Some(p)
+                        },
+                        Some,
+                    );
+                    for c in mids {
+                        if let Some(m) = s.curve_mid(c)
+                            && s.point_at(m, crate::MERGE_EPS).is_none()
+                        {
+                            let p = s.add_point(m);
+                            s.add_constraint(ConstraintOf::Midpoint(PointRef::Point(p), CurveRef::Curve(c)));
+                        }
+                    }
                     if let Some(c) = spec.resolve(s) {
                         s.add_constraint(c);
                     }
