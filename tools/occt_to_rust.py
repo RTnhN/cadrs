@@ -295,6 +295,13 @@ class Case:
             self.bind(a[0], f"k.{f[0]}({f[1]}, {f[2]})?")
         elif c == "bop" and len(a) == 2:
             self.bop_args = (self.shape(a[0]), self.shape(a[1]))
+        elif c == "bsection" and len(a) == 3:
+            self.bind(a[0], f"k.bsection({self.shape(a[1])}, {self.shape(a[2])})?")
+        elif c == "bopsection" and len(a) == 1:
+            if not self.bop_args:
+                raise Unsupported("bopsection without bop")
+            x, y = self.bop_args
+            self.bind(a[0], f"k.bsection({x}, {y})?")
         elif c in ("bopfuse", "bopcut", "bopcommon", "boptuc") and len(a) == 1:
             if not self.bop_args:
                 raise Unsupported(f"{c} without bop")

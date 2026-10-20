@@ -749,6 +749,14 @@ pub enum Mode {
     /// Split the listed faces of the target (all when None) by the tool's faces and keep every
     /// piece of the target: the target's faces imprinted by the tool.
     Imprint(Option<Vec<usize>>),
+    /// Only where the faces of the two meet: the intersection edges (and edges of one lying
+    /// on faces of the other), as a body of edges.
+    Section,
+}
+
+/// The section of two bodies: the edges where their faces meet (a body of edges, no faces).
+pub fn section(a: &Body, b: &Body) -> Result<Body> {
+    run(a, b, Mode::Section).map(|o| o.body)
 }
 
 pub fn imprint(a: &Body, b: &Body, faces: Option<Vec<usize>>) -> Result<BoolOut> {
@@ -771,7 +779,7 @@ fn run(a: &Body, b: &Body, mode: Mode) -> Result<BoolOut> {
     };
     let op = match &mode {
         Mode::Bool(op) => *op,
-        Mode::Imprint(_) => BoolOp::Subtract,
+        Mode::Imprint(_) | Mode::Section => BoolOp::Subtract,
     };
     let selected = |f: usize| -> bool {
         match &mode {
@@ -1057,6 +1065,50 @@ fn run(a: &Body, b: &Body, mode: Mode) -> Result<BoolOut> {
                         }
                     }
                 }
+                // Sections only (booleans rely on the edge–face stage's crossings): where the curve
+                // leaves either face (a crossing that stage missed, as on a B-spline face),
+                // found by sampling the in-face status along it and bisecting each change, and
+                // the open curve's own ends, cut it too.
+                let sectioning = matches!(mode, Mode::Section);
+                if sectioning {
+                    let inside = |t: f64| {
+                        let p = ic.c.point(t);
+                        point_in_face(&faces[fa], &p, tf) != InFace::Outside && point_in_face(&faces[fb], &p, tf) != InFace::Outside
+                    };
+                    let n = 64;
+                    let span = ic.t1 - ic.t0;
+                    let mut prev = inside(ic.t0);
+                    for k in 1..=n {
+                        let t = ic.t0 + span * k as f64 / n as f64;
+                        let cur = inside(t);
+                        if cur != prev {
+                            let (mut lo, mut hi) = (t - span / n as f64, t);
+                            for _ in 0..50 {
+                                let m = 0.5 * (lo + hi);
+                                if inside(m) == prev {
+                                    lo = m;
+                                } else {
+                                    hi = m;
+                                }
+                            }
+                            let tc = 0.5 * (lo + hi);
+                            let pc = ic.c.point(tc);
+                            if !ps.iter().any(|(pt, v)| (pt - tc).abs() < 1e-9 * (1.0 + span.abs()) || (pool.verts[*v] - pc).norm() < tf * 10.0) {
+                                let v = pool.vertex_tol(pc, ft);
+                                ps.push((tc, v));
+                            }
+                        }
+                        prev = cur;
+                    }
+                }
+                if sectioning && !ic.closed {
+                    for t in [ic.t0, ic.t1] {
+                        if !ps.iter().any(|(pt, _)| (pt - t).abs() < 1e-12 * (1.0 + t.abs())) {
+                            let v = pool.vertex_tol(ic.c.point(t), ft);
+                            ps.push((t, v));
+                        }
+                    }
+                }
                 ps.sort_by(|a, b| a.0.total_cmp(&b.0));
                 ps.dedup_by(|a, b| (a.0 - b.0).abs() < 1e-12 && a.1 == b.1);
                 // Intervals.
@@ -1106,6 +1158,9 @@ fn run(a: &Body, b: &Body, mode: Mode) -> Result<BoolOut> {
                     let pm = ic.c.point(tm);
                     let ia = point_in_face(&faces[fa], &pm, tf);
                     let ib = point_in_face(&faces[fb], &pm, tf);
+                    if std::env::var("CADRS_BOOL_DEBUG").is_ok() {
+                        eprintln!("  interval {ta}..{tb} at {pm:?}: in a {ia:?}, in b {ib:?}");
+                    }
                     if ia == InFace::Outside || ib == InFace::Outside {
                         continue;
                     }
@@ -1143,6 +1198,38 @@ fn run(a: &Body, b: &Body, mode: Mode) -> Result<BoolOut> {
         }
     }
     prof.mark("face-face");
+    if matches!(mode, Mode::Section) {
+        // The new intersection edges, and edges of one body lying on a face of the other
+        // (their parts inside that face).
+        let mut out = Body::default();
+        let mut vmap: HashMap<usize, usize> = HashMap::new();
+        let mut add = |out: &mut Body, curve: &Curve, t: [f64; 2], v: [usize; 2]| {
+            let vs = v.map(|x| *vmap.entry(x).or_insert_with(|| out.add_vertex(pool.verts[x])));
+            out.add_edge(curve.clone(), t[0], t[1], vs[0], vs[1]);
+        };
+        for &e in &new_edges {
+            let ed = &pool.edges[e];
+            add(&mut out, &ed.curve, ed.t, ed.v);
+        }
+        for (fi, list) in on_face.iter().enumerate() {
+            for &e in list {
+                let ed = pool.edges[e].clone();
+                // The edge's pieces between its split points, kept where inside the face.
+                let mut ts: Vec<(f64, usize)> = vec![(ed.t[0], ed.v[0])];
+                let mut sp = ed.splits.clone();
+                sp.sort_by(|a, b| a.0.total_cmp(&b.0));
+                ts.extend(sp);
+                ts.push((ed.t[1], ed.v[1]));
+                for w in ts.windows(2) {
+                    let pm = ed.curve.point(0.5 * (w[0].0 + w[1].0));
+                    if point_in_face(&faces[fi], &pm, vtol()) != InFace::Outside {
+                        add(&mut out, &ed.curve, [w[0].0, w[1].0], [w[0].1, w[1].1]);
+                    }
+                }
+            }
+        }
+        return Ok(BoolOut { body: out, from: Vec::new() });
+    }
     // Pieces of the split edges.
     let mut pieces: Vec<Vec<usize>> = Vec::with_capacity(pool.edges.len());
     let n_all = pool.edges.len();

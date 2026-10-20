@@ -296,10 +296,47 @@ fn analytic(a: &Surface, b: &Surface, bb: &Bbox) -> Option<Vec<IntCurve>> {
                 let c = fc.o + z * t;
                 return Some(vec![IntCurve { c: Curve::Circle { c, x: fc.x, y: fc.y, r: *r }, t0: 0.0, t1: TAU, closed: true }]);
             }
+            // Nearly parallel (single-precision data tilt a plane by 1e-8): the ellipse is huge
+            // and its parts in the region are straight to second order in the tilt; each is the
+            // chord between where the plane cuts the cross-section circles at the region's
+            // lowest and highest points along the axis.
+            if cz.abs() >= 1e-12 && cz.abs() * bbig.diagonal() < 1e-3 {
+                let corners: Vec<P3> = (0..8).map(|k| P3::new(if k & 1 == 0 { bbig.min.x } else { bbig.max.x }, if k & 2 == 0 { bbig.min.y } else { bbig.max.y }, if k & 4 == 0 { bbig.min.z } else { bbig.max.z })).collect();
+                let hs: Vec<f64> = corners.iter().map(|c| (c - fc.o).dot(&z)).collect();
+                let (h0, h1) = (hs.iter().copied().fold(f64::INFINITY, f64::min), hs.iter().copied().fold(f64::NEG_INFINITY, f64::max));
+                // At height h: the cross-section's centre, the plane's line in it (direction
+                // w = z × n, offset d from the centre), and its two crossings.
+                let cuts = |h: f64| -> Option<[P3; 2]> {
+                    let c = fc.o + z * h;
+                    let d = (c - fp.o).dot(&n);
+                    // The plane's trace in the section plane: n projected square to z.
+                    let np = (n - z * n.dot(&z)).try_normalize(1e-12)?;
+                    let dd = d / n.dot(&np);
+                    if dd.abs() > *r + 1e-7 * r.max(1.0) {
+                        return None;
+                    }
+                    let w = z.cross(&np).normalize();
+                    let k = (r * r - dd * dd).max(0.0).sqrt();
+                    let foot = c - np * dd;
+                    Some([foot + w * k, foot - w * k])
+                };
+                if let (Some(a), Some(b)) = (cuts(h0), cuts(h1)) {
+                    let mut out = Vec::new();
+                    let tangent = (a[0] - a[1]).norm() < 1e-7 * r.max(1.0);
+                    for i in 0..if tangent { 1 } else { 2 } {
+                        if let Some(d) = (b[i] - a[i]).try_normalize(1e-12) {
+                            out.extend(bound_line(a[i], d, &bbig));
+                        }
+                    }
+                    return Some(out);
+                }
+            }
+            // Parallel to the axis: lines where the plane cuts the circle.
             if cz.abs() < 1e-12 {
-                // Parallel to the axis: lines where the plane cuts the circle.
                 let d = (fc.o - fp.o).dot(&n); // signed distance of the axis from the plane
-                if d.abs() > r + 1e-12 {
+                // (A plane touching within the tangency tolerance, outside as well as inside,
+                // meets the cylinder along one line.)
+                if d.abs() > r + 1e-7 * r.max(1.0) {
                     return Some(vec![]);
                 }
                 let foot = fc.o - n * d;

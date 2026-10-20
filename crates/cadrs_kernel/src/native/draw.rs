@@ -1064,6 +1064,27 @@ impl NativeKernel {
         self.bop(BoolOp::Union, a, b)
     }
 
+    /// `bsection result a b` (and `bop a b; bopsection result`): the edges where the two
+    /// shapes' faces meet.
+    pub fn bsection(&mut self, a: &Shape, b: &Shape) -> Result<Shape> {
+        let (a, b) = (self.solid_of(a)?, self.solid_of(b)?);
+        let (ba, bb) = ((**self.get(a)?).clone(), (**self.get(b)?).clone());
+        let sec = super::boolean::section(&ba, &bb)?;
+        // One edge per stretch (an edge found twice, from both sides, counts once).
+        let mut out: Vec<DEdge> = Vec::new();
+        for e in &sec.edges {
+            let m = e.point(e.mid_t());
+            if out.iter().any(|o| {
+                let t = o.curve.closest(&m, o.t0.min(o.t1), o.t0.max(o.t1));
+                (o.curve.point(t) - m).norm() < 1e-7 && (o.length() - e.curve.length(e.t[0].min(e.t[1]), e.t[0].max(e.t[1]))).abs() < 1e-6
+            }) {
+                continue;
+            }
+            out.push(DEdge { curve: e.curve.clone(), t0: e.t[0], t1: e.t[1] });
+        }
+        Ok(if out.is_empty() { Shape::Empty } else { Shape::Wire(out) })
+    }
+
     /// `bcut result a b`.
     pub fn bcut(&mut self, a: &Shape, b: &Shape) -> Result<Shape> {
         self.bop(BoolOp::Subtract, a, b)
