@@ -118,6 +118,62 @@ fn revolved_order(ax: &Ax3, r1: f64, r2: f64, h: f64) -> OcctOrder {
     }
 }
 
+/// OCCT's order for any primitive turned about an axis (BRepPrim_OneAxis), from its meridian
+/// in (radius, height): the ends `bot` (VMin) and `top` (VMax), a point `mid` half way along it,
+/// whether it is closed (a torus's circle), and the angle turned. The shell's faces are the
+/// lateral one, the top and bottom (planes square to the axis, where the meridian ends off it)
+/// and the start and end (half planes, when the angle is short of a turn); the edges as the
+/// faces' wires meet them: the lateral wire top, end, bottom, start; the top wire top, start-top,
+/// end-top; the bottom wire bottom, end-bottom, start-bottom; the start wire start-bottom, axis,
+/// start-top, start. Degenerate edges (a meridian ending on the axis) count, as in OCCT.
+fn one_axis_order(ax: &Ax3, bot: (f64, f64), top: (f64, f64), mid: (f64, f64), closed: bool, angle: f64) -> OcctOrder {
+    let w = |r: f64, th: f64, z: f64| ax.origin + (ax.x * th.cos() + ax.y() * th.sin()) * r + ax.z * z;
+    let sides = TAU - angle > 1e-9;
+    let on_axis = |r: f64| r.abs() < 1e-9;
+    let has_top = !closed && !on_axis(top.0);
+    let has_bottom = !closed && !on_axis(bot.0);
+    let half = if sides { angle / 2.0 } else { PI };
+    let mut edges: Vec<P3> = Vec::new();
+    let mut add = |p: P3| {
+        if !edges.iter().any(|q| (q - p).norm() < 1e-9 * (1.0 + p.coords.norm())) {
+            edges.push(p);
+        }
+    };
+    let e_top = w(top.0, half, top.1);
+    let e_bot = w(bot.0, half, bot.1);
+    let e_start = w(mid.0, 0.0, mid.1);
+    let e_end = if sides { w(mid.0, angle, mid.1) } else { e_start };
+    // Lateral.
+    add(e_top);
+    add(e_end);
+    add(if closed { e_top } else { e_bot });
+    add(e_start);
+    if has_top && sides {
+        add(w(top.0 / 2.0, 0.0, top.1));
+        add(w(top.0 / 2.0, angle, top.1));
+    }
+    if has_bottom && sides {
+        add(w(bot.0 / 2.0, angle, bot.1));
+        add(w(bot.0 / 2.0, 0.0, bot.1));
+    }
+    if sides && !closed {
+        add(w(0.0, 0.0, (bot.1 + top.1) / 2.0));
+    }
+    let mut faces = vec![w(mid.0, half, mid.1)];
+    if has_top {
+        faces.push(w(top.0 / 2.0, half, top.1));
+    }
+    if has_bottom {
+        faces.push(w(bot.0 / 2.0, half, bot.1));
+    }
+    if sides {
+        let (r, z) = ((mid.0 + if closed { mid.0 } else { 0.0 }) / 2.0, (bot.1 + top.1 + 2.0 * mid.1) / 4.0);
+        faces.push(w(r, 0.0, z));
+        faces.push(w(r, angle, z));
+    }
+    OcctOrder { edges, faces }
+}
+
 fn err(m: &str) -> KernelError {
     KernelError::OperationFailed(m.to_string())
 }
@@ -628,7 +684,12 @@ impl NativeKernel {
             return self.pcylinder_on(&ax, r, h);
         }
         let p = nalgebra::Point2::new;
-        self.revolve_section(&ax, &[p(0.0, 0.0), p(r, 0.0), p(r, h), p(0.0, h)], angle.to_radians())
+        let a = angle.to_radians();
+        let s = self.revolve_section(&ax, &[p(0.0, 0.0), p(r, 0.0), p(r, h), p(0.0, h)], a)?;
+        if let Shape::Body(b) = &s {
+            set_order(*b, one_axis_order(&ax, (r, 0.0f64.min(h)), (r, 0.0f64.max(h)), (r, h / 2.0), false, a));
+        }
+        Ok(s)
     }
 
     /// `pcone name [plane] r1 r2 h angle` (degrees).
@@ -646,7 +707,12 @@ impl NativeKernel {
             pts.push(p(r2, h));
         }
         pts.push(p(0.0, h));
-        self.revolve_section(&ax, &pts, angle.to_radians())
+        let a = angle.to_radians();
+        let s = self.revolve_section(&ax, &pts, a)?;
+        if let Shape::Body(b) = &s {
+            set_order(*b, one_axis_order(&ax, (r1, 0.0), (r2, h), ((r1 + r2) / 2.0, h / 2.0), false, a));
+        }
+        Ok(s)
     }
 
     /// `psphere name [plane] r angle` (degrees of longitude).
@@ -663,6 +729,8 @@ impl NativeKernel {
             source: None,
         };
         let res = self.revolve(&Profile::new(self.meridian(&ax), vec![half]), Axis { origin: ax.origin, dir: nalgebra::Unit::new_normalize(ax.z) }, angle.min(360.0).to_radians())?;
+        let a = angle.min(360.0).to_radians();
+        set_order(res.bodies[0], one_axis_order(&ax, (0.0, -r), (0.0, r), (r, 0.0), false, a));
         Ok(Shape::Body(res.bodies[0]))
     }
 
@@ -682,6 +750,8 @@ impl NativeKernel {
         }
         let region = Region { outer: Loop { curves }, holes: vec![], source: None };
         let res = self.revolve(&Profile::new(self.meridian(&ax), vec![region]), Axis { origin: ax.origin, dir: nalgebra::Unit::new_normalize(ax.z) }, angle.min(360.0).to_radians())?;
+        let am = (a1 + a2) / 2.0;
+        set_order(res.bodies[0], one_axis_order(&ax, (p1.x, p1.y), (p2.x, p2.y), (r * am.cos(), r * am.sin()), false, angle.min(360.0).to_radians()));
         Ok(Shape::Body(res.bodies[0]))
     }
 
@@ -709,6 +779,8 @@ impl NativeKernel {
         }
         let region = Region { outer: Loop { curves }, holes: vec![], source: None };
         let res = self.revolve(&Profile::new(self.meridian(&ax), vec![region]), Axis { origin: ax.origin, dir: nalgebra::Unit::new_normalize(ax.z) }, angle.min(360.0).to_radians())?;
+        let am = (a1 + a2) / 2.0;
+        set_order(res.bodies[0], one_axis_order(&ax, (p1.x, p1.y), (p2.x, p2.y), (big + r * am.cos(), r * am.sin()), false, angle.min(360.0).to_radians()));
         Ok(Shape::Body(res.bodies[0]))
     }
 
@@ -717,6 +789,7 @@ impl NativeKernel {
         let ax = ax.copied().unwrap_or(Ax3 { origin: P3::origin(), z: V3::z(), x: V3::x() });
         let region = Region { outer: Loop { curves: vec![Curve2::Circle { center: nalgebra::Point2::new(big, 0.0), radius: r, source: None }] }, holes: vec![], source: None };
         let res = self.revolve(&Profile::new(self.meridian(&ax), vec![region]), Axis { origin: ax.origin, dir: nalgebra::Unit::new_normalize(ax.z) }, angle.min(360.0).to_radians())?;
+        set_order(res.bodies[0], one_axis_order(&ax, (big + r, 0.0), (big + r, 0.0), (big - r, 0.0), true, angle.min(360.0).to_radians()));
         Ok(Shape::Body(res.bodies[0]))
     }
 
@@ -737,8 +810,8 @@ impl NativeKernel {
         }
         pts.push(p(0.0, h));
         let s = self.revolve_section(ax, &pts, TAU)?;
-        if let (Shape::Body(b), true) = (&s, r1 > 0.0 && r2 > 0.0) {
-            set_order(*b, revolved_order(ax, r1, r2, h));
+        if let Shape::Body(b) = &s {
+            set_order(*b, if r1 > 0.0 && r2 > 0.0 { revolved_order(ax, r1, r2, h) } else { one_axis_order(ax, (r1, 0.0), (r2, h), ((r1 + r2) / 2.0, h / 2.0), false, TAU) });
         }
         Ok(s)
     }
@@ -760,6 +833,7 @@ impl NativeKernel {
             source: None,
         };
         let res = self.revolve(&Profile::new(self.meridian(ax), vec![half]), Axis { origin: ax.origin, dir: nalgebra::Unit::new_normalize(ax.z) }, TAU)?;
+        set_order(res.bodies[0], one_axis_order(ax, (0.0, -r), (0.0, r), (r, 0.0), false, TAU));
         Ok(Shape::Body(res.bodies[0]))
     }
 
@@ -771,6 +845,7 @@ impl NativeKernel {
     pub fn ptorus_on(&mut self, ax: &Ax3, big: f64, r: f64) -> Result<Shape> {
         let region = Region { outer: Loop { curves: vec![Curve2::Circle { center: nalgebra::Point2::new(big, 0.0), radius: r, source: None }] }, holes: vec![], source: None };
         let res = self.revolve(&Profile::new(self.meridian(ax), vec![region]), Axis { origin: ax.origin, dir: nalgebra::Unit::new_normalize(ax.z) }, TAU)?;
+        set_order(res.bodies[0], one_axis_order(ax, (big + r, 0.0), (big + r, 0.0), (big - r, 0.0), true, TAU));
         Ok(Shape::Body(res.bodies[0]))
     }
 
@@ -1176,8 +1251,12 @@ impl NativeKernel {
         let b = self.body_of(s)?;
         let body = self.get(b)?;
         let mut ids: Vec<usize> = (0..body.edges.len()).filter(|&i| !body.edges[i].degenerate).collect();
-        // A primitive: OCCT's order, each reference point's nearest edge (by midpoint).
+        // A primitive: OCCT's order, each reference point's nearest edge (by midpoint); its
+        // degenerate edges count, as OCCT's do.
         if let Some(o) = order_of(b) {
+            if o.edges.len() != ids.len() && o.edges.len() == body.edges.len() {
+                ids = (0..body.edges.len()).collect();
+            }
             if o.edges.len() == ids.len() {
                 let mid = |i: usize| body.edges[i].point(body.edges[i].mid_t());
                 ids = o.edges.iter().map(|p| *ids.iter().min_by(|&&x, &&y| (mid(x) - p).norm().total_cmp(&(mid(y) - p).norm())).unwrap()).collect();

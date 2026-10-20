@@ -414,11 +414,16 @@ fn analytic(a: &Surface, b: &Surface, bb: &Bbox) -> Option<Vec<IntCurve>> {
             let cz = n.dot(&ft.z);
             if (1.0 - cz.abs()) < 1e-12 {
                 let h = (fp.o - ft.o).dot(&ft.z);
-                if h.abs() >= *rmin - 1e-12 {
+                let tol = 1e-9 * (1.0 + rmaj + rmin);
+                if h.abs() > *rmin + tol {
                     return Some(vec![]);
                 }
-                let w = (rmin * rmin - h * h).sqrt();
                 let c = ft.o + ft.z * h;
+                if h.abs() >= *rmin - tol {
+                    // Tangent (a blend's plane): the circle the tube touches it along.
+                    return Some(vec![IntCurve { c: Curve::Circle { c, x: ft.x, y: ft.y, r: *rmaj }, t0: 0.0, t1: TAU, closed: true }]);
+                }
+                let w = (rmin * rmin - h * h).sqrt();
                 return Some(vec![
                     IntCurve { c: Curve::Circle { c, x: ft.x, y: ft.y, r: rmaj + w }, t0: 0.0, t1: TAU, closed: true },
                     IntCurve { c: Curve::Circle { c, x: ft.x, y: ft.y, r: rmaj - w }, t0: 0.0, t1: TAU, closed: true },
@@ -445,7 +450,8 @@ fn analytic(a: &Surface, b: &Surface, bb: &Bbox) -> Option<Vec<IntCurve>> {
             if l < 1e-12 {
                 return Some(vec![]); // coaxial: no curve (or the same surface)
             }
-            if l > r1 + r2 + 1e-12 || l < (r1 - r2).abs() - 1e-12 {
+            let tol = 1e-9 * (1.0 + r1 + r2);
+            if l > r1 + r2 + tol || l < (r1 - r2).abs() - tol {
                 return Some(vec![]);
             }
             let x = (l * l + r1 * r1 - r2 * r2) / (2.0 * l);
@@ -454,7 +460,8 @@ fn analytic(a: &Surface, b: &Surface, bb: &Bbox) -> Option<Vec<IntCurve>> {
             let ey = f1.z.cross(&ex);
             let base = f1.o + ex * x;
             let mut out = Vec::new();
-            if h < 1e-9 {
+            let tangent = (l - (r1 + r2)).abs() <= tol || (l - (r1 - r2).abs()).abs() <= tol;
+            if tangent || h < 1e-9 {
                 out.extend(bound_line(base, f1.z, &bbig));
             } else {
                 out.extend(bound_line(base + ey * h, f1.z, &bbig));

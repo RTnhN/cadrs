@@ -185,6 +185,50 @@ pub fn section_loop(c: &Corner2, kind: SectionKind, src: Src) -> Result<(Vec<Pie
     finish(section, 0.0, 1.0, c1, c2, c, src)
 }
 
+/// The section loop of a circular blend whose centre and contact points are known (solved on
+/// curved faces): the short arc from `c1` to `c2` about `centre`.
+fn arc_section_loop(c: &Corner2, centre: P2, c1: P2, c2: P2, r: f64, src: Src) -> Result<Vec<Piece>> {
+    let x = (c1 - centre).normalize();
+    let to2 = (c2 - centre).normalize();
+    let y0 = V2::new(-x.y, x.x);
+    let y = if y0.dot(&to2) >= 0.0 { y0 } else { -y0 };
+    let sweep = to2.dot(&y).atan2(to2.dot(&x));
+    let circle = Curve::Circle { c: P3::new(centre.x, centre.y, 0.0), x: V3::new(x.x, x.y, 0.0), y: V3::new(y.x, y.y, 0.0), r };
+    Ok(finish(circle, 0.0, sweep, c1, c2, c, src)?.0)
+}
+
+/// The centre of the ball of radius `r` rolling on both faces in the plane through `p` square
+/// to `tan` (inside both for a convex edge, outside for a concave one), and its contact points:
+/// Newton on the signed distances from the exact surfaces, started from the faces' tangent
+/// lines' answer.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn ball_in_plane(f1: &Face, f2: &Face, p: &P3, tan: &V3, w1: &V3, w2: &V3, r: f64, convex: bool) -> Option<(P3, P3, P3)> {
+    let s = if convex { -1.0 } else { 1.0 };
+    let theta = w1.dot(w2).clamp(-1.0, 1.0).acos();
+    if theta < 1e-6 {
+        return None;
+    }
+    let bis = (w1 + w2).normalize();
+    let mut x = p + bis * (r / (theta / 2.0).sin());
+    for _ in 0..60 {
+        let (d1, g1, _) = out_dist(f1, &x);
+        let (d2, g2, _) = out_dist(f2, &x);
+        let m = nalgebra::Matrix3::from_rows(&[g1.transpose(), g2.transpose(), tan.transpose()]);
+        let rhs = V3::new(s * r - d1, s * r - d2, -(x - p).dot(tan));
+        let dx = m.try_inverse()? * rhs;
+        x += dx;
+        if dx.norm() < 1e-13 * (1.0 + x.coords.norm()) {
+            break;
+        }
+    }
+    let (d1, _, q1) = out_dist(f1, &x);
+    let (d2, _, q2) = out_dist(f2, &x);
+    let ok = (d1 - s * r).abs() < 1e-9 * (1.0 + r) && (d2 - s * r).abs() < 1e-9 * (1.0 + r) && (x - p).dot(tan).abs() < 1e-9 * (1.0 + r);
+    // The contacts on the faces' sides of the edge (not a far branch of a curved surface).
+    let near = (q1 - p).dot(w1) > 0.0 && (q2 - p).dot(w2) > 0.0;
+    (ok && near).then_some((x, q1, q2))
+}
+
 fn finish(section: Curve, t0: f64, t1: f64, c1: P2, c2: P2, c: &Corner2, src: Src) -> Result<(Vec<Piece>, P2, P2)> {
     let (t0, t1, rev) = if t1 >= t0 { (t0, t1, false) } else { (t1, t0, true) };
     let pt = |q: P2| P3::new(q.x, q.y, 0.0);
@@ -312,7 +356,18 @@ pub fn edge_tool_range(b: &Body, input: BodyId, e: usize, kind: &dyn Fn(f64) -> 
             let y = t.cross(&radial);
             let to2 = |v: &V3| V2::new(v.dot(&radial), v.dot(&y));
             let corner = Corner2 { u1: to2(&w1).normalize(), u2: to2(&w2).normalize(), convex };
-            let (lp, _, _) = section_loop(&corner, section, src)?;
+            // A face curved in the meridian plane (a sphere, a torus): the rolling ball's centre
+            // solved on the exact surfaces, not on the faces' tangent lines at the edge.
+            let curved = |s: &Surface| matches!(s, Surface::Sphere { .. } | Surface::Torus { .. });
+            let lp = match section {
+                SectionKind::Circle { r } if curved(f1) || curved(f2) => {
+                    let (fa, fb) = (&b.faces[s1.0], &b.faces[s2.0]);
+                    let (centre, k1, k2) = ball_in_plane(fa, fb, &q, &t, &w1, &w2, r, convex).ok_or_else(|| KernelError::OperationFailed("the blend is too large for the faces at the edge".into()))?;
+                    let p2 = |x: &P3| P2::new((x - q).dot(&radial), (x - q).dot(&y));
+                    arc_section_loop(&corner, p2(&centre), p2(&k1), p2(&k2), r, src)?
+                }
+                _ => section_loop(&corner, section, src)?.0,
+            };
             let mf = MergedFace { outer: lp, holes: vec![], regions: vec![u64::MAX] };
             // Revolve frame: z the axis, x towards the section.
             let f = Frame { o: *c, x: radial, y: axis_dir.cross(&radial), z: axis_dir };

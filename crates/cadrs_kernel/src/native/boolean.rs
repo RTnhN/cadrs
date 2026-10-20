@@ -1207,10 +1207,6 @@ fn run(a: &Body, b: &Body, mode: Mode) -> Result<BoolOut> {
             let vs = v.map(|x| *vmap.entry(x).or_insert_with(|| out.add_vertex(pool.verts[x])));
             out.add_edge(curve.clone(), t[0], t[1], vs[0], vs[1]);
         };
-        for &e in &new_edges {
-            let ed = &pool.edges[e];
-            add(&mut out, &ed.curve, ed.t, ed.v);
-        }
         for (fi, list) in on_face.iter().enumerate() {
             for &e in list {
                 let ed = pool.edges[e].clone();
@@ -1226,6 +1222,28 @@ fn run(a: &Body, b: &Body, mode: Mode) -> Result<BoolOut> {
                         add(&mut out, &ed.curve, [w[0].0, w[1].0], [w[0].1, w[1].1]);
                     }
                 }
+            }
+        }
+        // An intersection curve running along one of those edges (a plane touching a torus
+        // along the circle bounding it) is that edge, found again with ends that the tangency
+        // leaves ill-defined: kept once, as the edge.
+        let kept = out.edges.len();
+        for &e in &new_edges {
+            let ed = &pool.edges[e];
+            let along = (0..kept).any(|o| {
+                let oe = &out.edges[o];
+                [0.25, 0.5, 0.75].iter().all(|&f| {
+                    let p = ed.curve.point(ed.t[0] + (ed.t[1] - ed.t[0]) * f);
+                    (oe.point(oe.curve.closest(&p, oe.t[0], oe.t[1])) - p).norm() < vtol() * 10.0
+                })
+            });
+            if !along {
+                add(&mut out, &ed.curve, ed.t, ed.v);
+            }
+        }
+        if std::env::var("CADRS_BOOL_DEBUG").is_ok() {
+            for (i, e) in out.edges.iter().enumerate() {
+                eprintln!("section edge {i}: v {:?} t {:?} {:?} -> {:?} mid {:?}", e.v, e.t, e.point(e.t[0]), e.point(e.t[1]), e.point(0.5 * (e.t[0] + e.t[1])));
             }
         }
         return Ok(BoolOut { body: out, from: Vec::new() });
