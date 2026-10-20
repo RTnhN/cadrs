@@ -174,6 +174,54 @@ fn one_axis_order(ax: &Ax3, bot: (f64, f64), top: (f64, f64), mid: (f64, f64), c
     OcctOrder { edges, faces }
 }
 
+/// OCCT's order for a face swept along a path (BRepSweep): the shell holds each wire edge's
+/// lateral face in wire order, then the face at the path's start and at its end; a lateral
+/// face's wire is the edge swept from the edge's first vertex, from its last (in the edge's
+/// own direction), then the edge at the start and at the end. `at(p, s)` moves a point a
+/// fraction s along the sweep; `swept(p)` is false where a vertex doesn't move (on a
+/// revolution's axis), so it sweeps no edge, and an edge of such points no face. With
+/// `closed` (a whole turn) the start and end are the same, with no end faces.
+fn sweep_order(loops: &[Vec<DEdge>], at: &dyn Fn(&P3, f64) -> P3, swept: &dyn Fn(&P3) -> bool, closed: bool) -> OcctOrder {
+    let mut edges: Vec<P3> = Vec::new();
+    let mut add = |edges: &mut Vec<P3>, p: P3| {
+        if !edges.iter().any(|q| (q - p).norm() < 1e-9 * (1.0 + p.coords.norm())) {
+            edges.push(p);
+        }
+    };
+    let mut faces: Vec<P3> = Vec::new();
+    let mid = |e: &DEdge| e.curve.point(0.5 * (e.t0 + e.t1));
+    for l in loops {
+        for e in l {
+            let (a, b) = if e.t0 <= e.t1 { (e.start(), e.end()) } else { (e.end(), e.start()) };
+            let m = mid(e);
+            if !swept(&a) && !swept(&b) && !swept(&m) {
+                continue;
+            }
+            faces.push(at(&m, 0.5));
+            for v in [a, b] {
+                if swept(&v) {
+                    add(&mut edges, at(&v, 0.5));
+                }
+            }
+            add(&mut edges, m);
+            add(&mut edges, at(&m, 1.0));
+        }
+    }
+    if !closed {
+        let pts: Vec<P3> = loops[0].iter().map(mid).collect();
+        let c = P3::from(pts.iter().fold(V3::zeros(), |acc, p| acc + p.coords) / pts.len().max(1) as f64);
+        for s in [0.0, 1.0] {
+            for l in loops {
+                for e in l {
+                    add(&mut edges, at(&mid(e), s));
+                }
+            }
+            faces.push(at(&c, s));
+        }
+    }
+    OcctOrder { edges, faces }
+}
+
 fn err(m: &str) -> KernelError {
     KernelError::OperationFailed(m.to_string())
 }
@@ -871,8 +919,15 @@ impl NativeKernel {
         let v = V3::new(dx, dy, dz);
         let n = profile.plane.normal.into_inner();
         let along = v.dot(&n);
+        let order = || match f {
+            Shape::Face { loops, .. } => Some(sweep_order(loops, &|p, s| p + v * s, &|_| true, false)),
+            _ => None,
+        };
         if (v - n * along).norm() > 1e-9 * v.norm().max(1.0) {
             let r = super::features::prism_along(self, &profile, v)?;
+            if let Some(o) = order() {
+                set_order(r.bodies[0], o);
+            }
             return Ok(Shape::Body(r.bodies[0]));
         }
         let mut p = profile;
@@ -880,13 +935,33 @@ impl NativeKernel {
             p.plane.origin += n * along;
         }
         let r = self.extrude(&p, Extent::Blind(along.abs()))?;
+        if let Some(o) = order() {
+            set_order(r.bodies[0], o);
+        }
         Ok(Shape::Body(r.bodies[0]))
     }
 
     /// `revol name face x y z dx dy dz angle` (degrees).
     pub fn revol(&mut self, f: &Shape, x: f64, y: f64, z: f64, dx: f64, dy: f64, dz: f64, angle: f64) -> Result<Shape> {
         let profile = face_profile(f)?;
-        let r = self.revolve(&profile, Axis { origin: P3::new(x, y, z), dir: nalgebra::Unit::new_normalize(V3::new(dx, dy, dz)) }, angle.to_radians())?;
+        let (o, d) = (P3::new(x, y, z), V3::new(dx, dy, dz).normalize());
+        let a = angle.to_radians();
+        let r = self.revolve(&profile, Axis { origin: o, dir: nalgebra::Unit::new_normalize(d) }, a)?;
+        if let Shape::Face { loops, .. } = f {
+            let closed = a.abs() >= TAU - 1e-9;
+            let at = |p: &P3, s: f64| {
+                let th = a * s;
+                let w = p - o;
+                let along = d * w.dot(&d);
+                let r = w - along;
+                o + along + r * th.cos() + d.cross(&r) * th.sin()
+            };
+            let swept = |p: &P3| {
+                let w = p - o;
+                (w - d * w.dot(&d)).norm() > 1e-9 * (1.0 + w.norm())
+            };
+            set_order(r.bodies[0], sweep_order(loops, &at, &swept, closed));
+        }
         Ok(Shape::Body(r.bodies[0]))
     }
 
@@ -1256,6 +1331,9 @@ impl NativeKernel {
         if let Some(o) = order_of(b) {
             if o.edges.len() != ids.len() && o.edges.len() == body.edges.len() {
                 ids = (0..body.edges.len()).collect();
+            }
+            if std::env::var_os("CADRS_ORDER_DEBUG").is_some() {
+                eprintln!("explode e: OCCT order has {} edges, the body {} ({} not degenerate)", o.edges.len(), body.edges.len(), ids.len());
             }
             if o.edges.len() == ids.len() {
                 let mid = |i: usize| body.edges[i].point(body.edges[i].mid_t());

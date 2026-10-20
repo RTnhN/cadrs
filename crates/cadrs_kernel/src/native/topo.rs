@@ -205,20 +205,41 @@ impl Body {
         b
     }
 
-    /// The bounding box of the vertices and sampled edges and faces (loose but covering).
+    /// A box sure to hold the body: its vertices, its edges' exact boxes and its faces' boxes
+    /// (curved faces bulge past their edges).
     pub fn bbox(&self) -> Bbox {
         let mut bb = Bbox::empty();
         for v in &self.verts {
             bb.add(&v.p);
         }
         for e in &self.edges {
-            if e.degenerate {
-                continue;
+            if !e.degenerate {
+                bb.union(&super::boolean::curve_bbox(&e.curve, e.t[0], e.t[1]));
             }
-            let n = 16;
-            for i in 0..=n {
-                bb.add(&e.point(e.t[0] + (e.t[1] - e.t[0]) * i as f64 / n as f64));
+        }
+        for fi in 0..self.faces.len() {
+            if !matches!(self.faces[fi].surf, Surface::Plane { .. }) {
+                bb.union(&self.face_bbox(fi));
             }
+        }
+        bb
+    }
+
+    /// A box sure to hold face `fi`: its edges' exact boxes and its surface's box over the
+    /// rectangle holding its p-curves.
+    pub fn face_bbox(&self, fi: usize) -> Bbox {
+        let f = &self.faces[fi];
+        let mut bb = Bbox::empty();
+        let mut uv = Bbox::empty();
+        for c in f.loops.iter().flatten() {
+            let e = &self.edges[c.edge];
+            if !e.degenerate {
+                bb.union(&super::boolean::curve_bbox(&e.curve, e.t[0], e.t[1]));
+            }
+            uv.union(&super::boolean::curve_bbox(&c.pc, e.t[0], e.t[1]));
+        }
+        if !matches!(f.surf, Surface::Plane { .. }) && !uv.is_empty() {
+            bb.union(&f.surf.patch_bbox((uv.min.x, uv.max.x), (uv.min.y, uv.max.y)));
         }
         bb
     }

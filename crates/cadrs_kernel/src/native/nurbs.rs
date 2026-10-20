@@ -613,7 +613,32 @@ pub struct NurbsSurface {
     pub cps: Vec<Vec<H>>,
 }
 
+impl NurbsCurve {
+    /// The part of the curve over [a, b] (clamped to its range).
+    pub fn restricted(&self, a: f64, b: f64) -> Self {
+        let (lo, hi) = self.range();
+        let (a, b) = (a.max(lo), b.min(hi));
+        let mut c = self.clone();
+        if a > lo && a < hi {
+            c = c.split(a).1;
+        }
+        if b < hi && b > a {
+            c = c.split(b).0;
+        }
+        c
+    }
+}
+
 impl NurbsSurface {
+    /// The control net of the patch over u × v (each row's and then each column's curve cut
+    /// there): its points' hull holds that part of the surface.
+    pub fn sub_net(&self, u: (f64, f64), v: (f64, f64)) -> Vec<Vec<H>> {
+        let rows: Vec<Vec<H>> = self.cps.iter().map(|r| NurbsCurve { degree: self.dv, knots: self.kv.clone(), cps: r.clone() }.restricted(v.0, v.1).cps).collect();
+        let nv = rows[0].len();
+        let cols: Vec<Vec<H>> = (0..nv).map(|j| NurbsCurve { degree: self.du, knots: self.ku.clone(), cps: rows.iter().map(|r| r[j]).collect() }.restricted(u.0, u.1).cps).collect();
+        cols
+    }
+
     pub fn range(&self) -> ((f64, f64), (f64, f64)) {
         let nu = self.cps.len();
         let nv = self.cps[0].len();
@@ -916,6 +941,31 @@ mod tests {
             assert!((c.point(*u) - p).norm() < 1e-12);
         }
         assert!((c.ders(0.0, 1)[1] - V3::x()).norm() < 1e-10);
+    }
+
+    #[test]
+    fn a_sub_net_holds_its_patch() {
+        let pts: Vec<Vec<P3>> = (0..5).map(|i| (0..4).map(|j| P3::new(i as f64, j as f64, ((i * 7 + j * 3) % 5) as f64)).collect()).collect();
+        let cps: Vec<Vec<H>> = pts.iter().map(|r| r.iter().map(|p| H::new(p.x, p.y, p.z, 1.0)).collect()).collect();
+        let s = NurbsSurface { du: 3, dv: 2, ku: vec![0.0, 0.0, 0.0, 0.0, 0.5, 1.0, 1.0, 1.0, 1.0], kv: vec![0.0, 0.0, 0.0, 0.4, 1.0, 1.0, 1.0], cps };
+        let (u, v) = ((0.2, 0.7), (0.1, 0.55));
+        let net = s.sub_net(u, v);
+        let mut lo = V3::repeat(f64::MAX);
+        let mut hi = V3::repeat(f64::MIN);
+        for h in net.iter().flatten() {
+            let p = V3::new(h.x / h.w, h.y / h.w, h.z / h.w);
+            lo = lo.inf(&p);
+            hi = hi.sup(&p);
+        }
+        let whole: f64 = (0..5).map(|i| pts[i].iter().map(|p| p.z).fold(f64::MIN, f64::max)).fold(f64::MIN, f64::max);
+        for i in 0..=20 {
+            for j in 0..=20 {
+                let q = s.ders2(u.0 + (u.1 - u.0) * i as f64 / 20.0, v.0 + (v.1 - v.0) * j as f64 / 20.0)[0];
+                assert!(q.x >= lo.x - 1e-12 && q.x <= hi.x + 1e-12 && q.y >= lo.y - 1e-12 && q.y <= hi.y + 1e-12 && q.z >= lo.z - 1e-12 && q.z <= hi.z + 1e-12);
+            }
+        }
+        // Tighter than the whole net.
+        assert!((hi.x - lo.x) < 4.0 && (hi.y - lo.y) < 3.0 && hi.z <= whole);
     }
 
     #[test]

@@ -283,18 +283,9 @@ fn import(pool: &mut Pool, faces: &mut Vec<WFace>, b: &Body, owner: usize, merge
                 }
             }
         }
-        // Curved faces may bulge past their edges: add interior extremes.
+        // Curved faces may bulge past their edges: a box sure to hold the face.
         if !matches!(f.surf, Surface::Plane { .. }) {
-            let (u0, u1, v0, v1) = (uvb.min.x, uvb.max.x, uvb.min.y, uvb.max.y);
-            let n = 8;
-            for i in 0..=n {
-                for j in 0..=n {
-                    let (u, v) = (u0 + (u1 - u0) * i as f64 / n as f64, v0 + (v1 - v0) * j as f64 / n as f64);
-                    bb.add(&f.surf.eval(u, v));
-                }
-            }
-            let d = bb.diagonal();
-            bb = bb.grow(d * 0.02);
+            bb.union(&b.face_bbox(fi));
         }
         let center = uvb.center();
         // Faces don't carry a tolerance of their own yet (OCCT's are usually exact even where

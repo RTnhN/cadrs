@@ -472,7 +472,10 @@ fn analytic(a: &Surface, b: &Surface, bb: &Bbox) -> Option<Vec<IntCurve>> {
         (Surface::Sphere { f: f1, r: r1 }, Surface::Sphere { f: f2, r: r2 }) => {
             let d = f2.o - f1.o;
             let l = d.norm();
-            if l < 1e-12 || l > r1 + r2 || l < (r1 - r2).abs() {
+            // Touching within the run's tolerance or a relative 1e-7 (a gap or overlap that
+            // small): a point of tangency, not a circle (one of radius √(2rδ) would cut a sliver cap).
+            let tol = super::boolean::vtol().max(1e-7 * (r1 + r2));
+            if l < 1e-12 || l > r1 + r2 - tol || l < (r1 - r2).abs() + tol {
                 return Some(vec![]);
             }
             let x = (l * l + r1 * r1 - r2 * r2) / (2.0 * l);

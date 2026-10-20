@@ -427,7 +427,8 @@ class Case:
                 raise Unsupported(f"the data file {name}")
             if b"CASCADE Topology V" not in open(path, "rb").read(400):
                 raise Unsupported(f"reading {name}")
-            self.bind(a[1], f'k.restore("{path}")?')
+            rel = os.path.relpath(path, DATA_ROOT[0]).replace(os.sep, "/")
+            self.bind(a[1], f'k.restore(&data("{rel}"))?')
         else:
             raise Unsupported(c)
 
@@ -590,12 +591,14 @@ SLOW_GROUPS = {"blend", "offset"}
 
 # OCCT's test data by file name (`--data <dir>`: the unpacked opencascade-dataset).
 DATA = {}
+DATA_ROOT = [""]
 
 
 def main():
     args = sys.argv[1:]
     if "--data" in args:
         i = args.index("--data")
+        DATA_ROOT[0] = os.path.abspath(args[i + 1])
         for root, _, files in os.walk(os.path.abspath(args[i + 1])):
             for f in files:
                 DATA.setdefault(f, os.path.join(root, f))
@@ -674,6 +677,21 @@ def main():
             "use cadrs_kernel::native::{draw, NativeKernel};",
             "use cadrs_kernel::Result;",
         ]
+        if DATA_ROOT[0]:
+            crate = os.path.dirname(os.path.abspath(out))
+            default = os.path.relpath(DATA_ROOT[0], crate).replace(os.sep, "/")
+            head += [
+                "",
+                "/// A file of OCCT's dataset (github.com/Open-Cascade-SAS/OCCT-data): under",
+                f"/// `$CADRS_OCCT_DATA`, else `{default}` from this crate.",
+                "#[allow(dead_code)]",
+                "fn data(rel: &str) -> String {",
+                "    let root = std::env::var(\"CADRS_OCCT_DATA\").unwrap_or_else(|_| format!(\"{}/" + default + "\", env!(\"CARGO_MANIFEST_DIR\")));",
+                "    let p = format!(\"{root}/{rel}\");",
+                "    assert!(std::path::Path::new(&p).exists(), \"OCCT's dataset file {p} is missing: set CADRS_OCCT_DATA to the dataset's folder\");",
+                "    p",
+                "}",
+            ]
         with open(os.path.join(out, f"occt_{group}.rs"), "w") as f:
             f.write("\n".join(head + body) + "\n")
         print(f"{group}: {n_ok} converted, {n_ign} waiting")

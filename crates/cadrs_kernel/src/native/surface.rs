@@ -326,6 +326,71 @@ impl Surface {
     }
 
     /// The parameter box used for sampling (NURBS: its range; extrusions: curve range × ±1e4).
+    /// A box sure to hold the surface over the parameter rectangle u × v. Samples on a grid
+    /// grown by the bilinear interpolation's error bound, h²/8 · max |S''| along each
+    /// direction (analytic for the quadrics and the torus); a B-spline's control-point hull;
+    /// an extrusion's base curve box swept; a revolution's meridian box turned all round.
+    pub fn patch_bbox(&self, u: (f64, f64), v: (f64, f64)) -> Bbox {
+        let mut bb = Bbox::empty();
+        match self {
+            Surface::Nurbs(n) => {
+                // A rectangle running past the range (a closed surface's p-curves continue
+                // across its seam) covers the whole range that way.
+                let ((ru0, ru1), (rv0, rv1)) = n.range();
+                let (eu, ev) = ((ru1 - ru0) * 1e-9, (rv1 - rv0) * 1e-9);
+                let u = if u.0 < ru0 - eu || u.1 > ru1 + eu { (ru0, ru1) } else { u };
+                let v = if v.0 < rv0 - ev || v.1 > rv1 + ev { (rv0, rv1) } else { v };
+                for h in n.sub_net(u, v).iter().flatten() {
+                    bb.add(&P3::new(h.x / h.w, h.y / h.w, h.z / h.w));
+                }
+                return bb;
+            }
+            Surface::Extrusion { c, d } => {
+                let cb = super::boolean::curve_bbox(c, u.0, u.1);
+                for t in [v.0, v.1] {
+                    bb.add(&(cb.min + d * t));
+                    bb.add(&(cb.max + d * t));
+                }
+                return bb;
+            }
+            Surface::Revolution { f, m } => {
+                let mb = super::boolean::curve_bbox(m, v.0, v.1);
+                let (mut rho, mut h) = (0.0f64, (f64::MAX, f64::MIN));
+                for i in 0..8 {
+                    let c = P3::new(if i & 1 == 0 { mb.min.x } else { mb.max.x }, if i & 2 == 0 { mb.min.y } else { mb.max.y }, if i & 4 == 0 { mb.min.z } else { mb.max.z });
+                    let l = f.local(&c);
+                    rho = rho.max((l.x * l.x + l.y * l.y).sqrt());
+                    h = (h.0.min(l.z), h.1.max(l.z));
+                }
+                for (a, b) in [(-1.0, -1.0), (-1.0, 1.0), (1.0, -1.0), (1.0, 1.0)] {
+                    for z in [h.0, h.1] {
+                        bb.add(&(f.o + f.x * (a * rho) + f.y * (b * rho) + f.z * z));
+                    }
+                }
+                return bb;
+            }
+            _ => {}
+        }
+        // Bounds on |S_uu| and |S_vv| over the rectangle.
+        let (auu, avv) = match self {
+            Surface::Plane { .. } => (0.0, 0.0),
+            Surface::Cylinder { r, .. } => (r.abs(), 0.0),
+            Surface::Cone { r, a, .. } => ((r + v.0 * a.sin()).abs().max((r + v.1 * a.sin()).abs()), 0.0),
+            Surface::Sphere { r, .. } => (r.abs(), r.abs()),
+            Surface::Torus { rmaj, rmin, .. } => (rmaj.abs() + rmin.abs(), rmin.abs()),
+            _ => unreachable!(),
+        };
+        let n = 8;
+        let (hu, hv) = ((u.1 - u.0) / n as f64, (v.1 - v.0) / n as f64);
+        for i in 0..=n {
+            for j in 0..=n {
+                bb.add(&self.eval(u.0 + hu * i as f64, v.0 + hv * j as f64));
+            }
+        }
+        let e = auu * hu * hu / 8.0 + avv * hv * hv / 8.0;
+        bb.grow(e * (1.0 + 1e-9) + 1e-12)
+    }
+
     pub fn param_box(&self) -> ((f64, f64), (f64, f64)) {
         match self {
             Surface::Nurbs(n) => n.range(),
