@@ -501,6 +501,8 @@ fn classify(s: &Sketch, e: crate::SketchEntity) -> Option<Pick> {
         },
         // A used part vertex: its point.
         E::Link(l) => Pick::Point(PointRef::Point(s.linked_point(l)?)),
+        E::XAxis => Pick::Line(CurveRef::XAxis),
+        E::YAxis => Pick::Line(CurveRef::YAxis),
         E::Dimension(_) | E::Constraint(_) | E::Text(_) => return None,
     })
 }

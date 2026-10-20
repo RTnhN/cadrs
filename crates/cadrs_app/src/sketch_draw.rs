@@ -676,18 +676,29 @@ fn draw_sketches(
                 sel_points.extend(points);
             }
         }
-        // Snapped axes get the hover band over the axis line (the edge-on planes' extent).
+        // Snapped and hovered axes get the hover band over the axis line (the edge-on planes'
+        // extent); selected ones (picked as a line reference, #31) the selection colour.
+        if let Some(r) = hover.0.and_then(SketchEntity::axis)
+            && !hot.contains(&r)
+        {
+            hot.push(r);
+        }
         let h = crate::viewport::PLANE_HALF as f64;
+        let axis_ends = |r: CurveRef| match r {
+            CurveRef::XAxis => Some((SVec2::new(-h, 0.0), SVec2::new(h, 0.0))),
+            CurveRef::YAxis => Some((SVec2::new(0.0, -h), SVec2::new(0.0, h))),
+            CurveRef::Curve(_) => None,
+        };
         for r in &hot {
-            let (a, b) = match r {
-                CurveRef::XAxis => (SVec2::new(-h, 0.0), SVec2::new(h, 0.0)),
-                CurveRef::YAxis => (SVec2::new(0.0, -h), SVec2::new(0.0, h)),
-                CurveRef::Curve(_) => continue,
-            };
+            let Some((a, b)) = axis_ends(*r) else { continue };
             unnudged(|| {
                 hover_g.line(world(&frame, a), world(&frame, b), hover_band());
                 lines.line(world(&frame, a), world(&frame, b), hover_core());
             });
+        }
+        for r in selection.0.iter().filter_map(|e| e.axis()) {
+            let Some((a, b)) = axis_ends(r).filter(|_| !hot.contains(&r)) else { continue };
+            unnudged(|| lines.line(world(&frame, a), world(&frame, b), selected()));
         }
         // Snapped part edges in the sketch plane (they aren't sketch curves), and the ones the
         // Dimension tool hovers or picked, and their ends.
