@@ -649,7 +649,11 @@ def main():
                             body.append("        " + l)
                         body.append("        Ok(())")
                         body.append("    };")
-                        body.append("    let passed = matches!(std::panic::catch_unwind(std::panic::AssertUnwindSafe(run)), Ok(Ok(())));")
+                        body.append("    let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(run));")
+                        body.append("    if let Ok(Err(e)) = &r {")
+                        body.append('        eprintln!("known failure: {e:?}");')
+                        body.append("    }")
+                        body.append("    let passed = matches!(r, Ok(Ok(())));")
                         body.append(f'    assert!(!passed, "a known failure now passes: remove `{group} {name}` from tools/occt_known_failures.txt");')
                         body.append("}")
                         continue

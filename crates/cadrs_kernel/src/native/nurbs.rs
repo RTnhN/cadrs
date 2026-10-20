@@ -491,6 +491,31 @@ impl NurbsCurve {
         (left, right)
     }
 
+    /// This curve followed by `next` (which starts where this one ends, same degree): a C0
+    /// joint, `next` reparametrised to carry on from this curve's end and its weights scaled
+    /// to match at the joint.
+    pub fn joined(&self, next: &Self) -> Self {
+        let p = self.degree;
+        let (_, end) = self.range();
+        let (start, _) = next.range();
+        let s = self.cps[self.cps.len() - 1].w / next.cps[0].w;
+        let mut knots = self.knots[..self.knots.len() - 1].to_vec();
+        knots.extend(next.knots[p + 1..].iter().map(|k| k - start + end));
+        let mut cps = self.cps.clone();
+        cps.extend(next.cps[1..].iter().map(|c| c * s));
+        Self { degree: p, knots, cps }
+    }
+
+    /// A closed curve restarted at `u`: from `u` to its end, then from its start back to `u`.
+    pub fn restarted(&self, u: f64) -> Self {
+        let (a, b) = self.range();
+        if u <= a || u >= b {
+            return self.clone();
+        }
+        let (l, r) = self.split(u);
+        r.joined(&l)
+    }
+
     /// Inserts the knot `u` once (A5.1).
     pub fn insert_knot(&self, u: f64) -> Self {
         let p = self.degree;
@@ -891,6 +916,25 @@ mod tests {
             assert!((c.point(*u) - p).norm() < 1e-12);
         }
         assert!((c.ders(0.0, 1)[1] - V3::x()).norm() < 1e-10);
+    }
+
+    #[test]
+    fn restarting_a_closed_curve_keeps_its_points() {
+        // A closed rational quadratic: the unit circle as four quarter arcs.
+        let r = std::f64::consts::FRAC_1_SQRT_2;
+        let pts = [(1.0, 0.0, 1.0), (1.0, 1.0, r), (0.0, 1.0, 1.0), (-1.0, 1.0, r), (-1.0, 0.0, 1.0), (-1.0, -1.0, r), (0.0, -1.0, 1.0), (1.0, -1.0, r), (1.0, 0.0, 1.0)];
+        let c = NurbsCurve { degree: 2, knots: vec![0.0, 0.0, 0.0, 1.0, 1.0, 2.0, 2.0, 3.0, 3.0, 4.0, 4.0, 4.0], cps: pts.iter().map(|&(x, y, w)| H::new(x * w, y * w, 0.0, w)).collect() };
+        let d = c.restarted(1.3);
+        assert_eq!(d.knots.len(), d.cps.len() + d.degree + 1);
+        assert_eq!(d.range(), (1.3, 5.3));
+        assert!((d.point(1.3) - c.point(1.3)).norm() < 1e-12);
+        for i in 0..=40 {
+            let t = 1.3 + 4.0 * i as f64 / 40.0;
+            let q = d.point(t);
+            assert!((q.coords.norm() - 1.0).abs() < 1e-12);
+            let want = if t <= 4.0 { c.point(t) } else { c.point(t - 4.0) };
+            assert!((q - want).norm() < 1e-12, "{t}");
+        }
     }
 
     #[test]

@@ -891,7 +891,7 @@ impl NativeKernel {
             if V3::from(*n).normalize().cross(&pull).norm() > 1e-9 {
                 return Err(KernelError::Unsupported("a neutral plane not square to the pull direction"));
             }
-            let spec = DraftSpec { faces: vec![*fid], angle: angle.to_radians(), pull: nalgebra::Unit::new_normalize(pull), neutral: P3::from(*p), tangent_propagation: false };
+            let spec = DraftSpec { faces: vec![*fid], angle: angle.to_radians(), pull: nalgebra::Unit::new_normalize(pull), neutral: P3::from(*p), tangent_propagation: true };
             b = crate::Kernel::draft(self, b, &spec)?.bodies[0];
         }
         Ok(Shape::Body(b))
