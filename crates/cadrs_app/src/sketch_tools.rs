@@ -972,8 +972,12 @@ pub(crate) fn sketch_pointer(
                     drag_moved = draw.drag.is_some();
                     continue;
                 }
+                // The Mirror tool boxes the curves to mirror once its line is picked (#37).
+                let boxes = select
+                    || (tool.tool == SketchTool::Mirror
+                        && crate::sketch_edit_tools::mirror_axis(sketch, &selection).is_some());
                 if let DrawState::Idle = draw.state
-                    && tool.tool == SketchTool::Select
+                    && boxes
                     && let Some(p) = draw.press
                     && !p.began
                     // A part vertex or an axis under the press doesn't stop a box selection.
@@ -1100,17 +1104,29 @@ pub(crate) fn sketch_pointer(
                     }
                     continue;
                 }
+                // A selection box: left to right takes what is inside it, right to left what
+                // it crosses too (`box_select.md`).
+                let in_box = |start: Vec2| {
+                    box_select(
+                        sketch,
+                        SVec2::new(start.x as f64, start.y as f64),
+                        SVec2::new(pos.x as f64, pos.y as f64),
+                        pos.x < start.x,
+                        |p| map.to_screen64(p),
+                    )
+                };
+                if tool.tool == SketchTool::Mirror
+                    && let DrawState::BoxSelect { start } = draw.state
+                {
+                    // #37: every curve in the box is mirrored at once.
+                    let found = in_box(start);
+                    crate::sketch_edit_tools::mirror_box(sketch, &selection, &found, &mut commands, target);
+                    draw.state = DrawState::Idle;
+                    continue;
+                }
                 if tool.tool == SketchTool::Select {
                     if let DrawState::BoxSelect { start } = draw.state {
-                        let crossing = pos.x < start.x;
-                        let found = box_select(
-                            sketch,
-                            SVec2::new(start.x as f64, start.y as f64),
-                            SVec2::new(pos.x as f64, pos.y as f64),
-                            crossing,
-                            |p| map.to_screen64(p),
-                        );
-                        for e in found {
+                        for e in in_box(start) {
                             if !selection.contains(e) {
                                 selection.0.push(e);
                             }

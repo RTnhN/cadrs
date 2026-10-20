@@ -3,7 +3,10 @@
 //! - **Mirror** (toolbar; Onshape gives it no key): pick the mirror line first (it turns
 //!   yellow), then each entity picked is mirrored at once, as one undo step, linked to its
 //!   source by a Symmetric constraint ([`SketchOp::Mirror`]). With a line and entities already
-//!   selected, choosing Mirror mirrors them in the first-selected line.
+//!   selected, choosing Mirror mirrors them in the first-selected line. Once the line is
+//!   picked, pressing on empty space and dragging draws a selection box (`box_select.md`: left
+//!   to right takes the curves inside it, right to left those it crosses too), and releasing
+//!   mirrors every curve it found as one undo step (#37).
 //! - **Offset (O):** click an entity to offset it, or press on it and drag to take its whole
 //!   chain (the lines and arcs joined end to end with it). The offset follows the cursor's
 //!   distance on the side it was picked from; the arrow at the preview points to that side and
@@ -175,8 +178,7 @@ fn edit_tools_pointer(
         }
         match tool.tool {
             SketchTool::Mirror => {
-                let first_line = selection.0.first().and_then(|e| mirror_line(sketch, *e));
-                match first_line {
+                match mirror_axis(sketch, &selection) {
                     Some(axis) if selection.0.len() > 1 => {
                         let curves: Vec<CurveId> = selection.0[1..]
                             .iter()
@@ -325,8 +327,7 @@ fn mirror_pick(
     commands: &mut Commands,
     target: (cadrs_core::ElementId, cadrs_core::FeatureId),
 ) {
-    let axis = selection.0.first().and_then(|e| mirror_line(sketch, *e));
-    match (axis, hit) {
+    match (mirror_axis(sketch, selection), hit) {
         (None, Some(e)) if mirror_line(sketch, e).is_some() => {
             selection.0 = vec![e];
         }
@@ -341,6 +342,41 @@ fn mirror_pick(
             );
         }
         _ => {}
+    }
+}
+
+/// The Mirror tool's line: the first selected entity, once a line (or an axis) is picked.
+pub fn mirror_axis(sketch: &Sketch, selection: &SketchSelection) -> Option<CurveRef> {
+    selection.0.first().and_then(|e| mirror_line(sketch, *e))
+}
+
+/// The curves the Mirror tool mirrors from what a selection box found: every curve but the
+/// mirror line itself (points, texts and the origin have no mirror image here).
+pub fn mirror_targets(axis: CurveRef, found: &[SketchEntity]) -> Vec<CurveId> {
+    found
+        .iter()
+        .filter_map(|e| match *e {
+            SketchEntity::Curve(c) if CurveRef::Curve(c) != axis => Some(c),
+            _ => None,
+        })
+        .collect()
+}
+
+/// A Mirror selection box released (#37): every curve it found is mirrored in the picked line
+/// at once, as one undo step. Nothing happens without a line, or an empty box.
+pub fn mirror_box(
+    sketch: &Sketch,
+    selection: &SketchSelection,
+    found: &[SketchEntity],
+    commands: &mut Commands,
+    target: (cadrs_core::ElementId, cadrs_core::FeatureId),
+) {
+    let Some(axis) = mirror_axis(sketch, selection) else {
+        return;
+    };
+    let curves = mirror_targets(axis, found);
+    if !curves.is_empty() {
+        execute(commands, target, SketchOp::Mirror { axis, curves });
     }
 }
 
@@ -729,6 +765,54 @@ mod tests {
         assert!((inner - 3.0).abs() < 1e-6, "{inner}");
         assert!(!offset_value_fails(&s, id, &SketchOp::SetDimensionValue { id, value: 2.0 }));
         assert!(offset_value_fails(&s, id, &SketchOp::SetDimensionValue { id, value: 10.0 }));
+    }
+
+    /// #37: a box dragged over a mirror line and two circles mirrors the circles in one
+    /// step; the line itself is left alone.
+    #[test]
+    fn a_box_mirrors_every_curve_it_finds_but_the_line() {
+        let mut s = Sketch::new();
+        SketchOp::AddPolyline {
+            points: vec![SVec2::new(0.0, -20.0), SVec2::new(0.0, 20.0)],
+            closed: false,
+            construction: false,
+            label: "Add line",
+        }
+        .apply(&mut s)
+        .unwrap();
+        let line = s.curves.keys().next().unwrap();
+        SketchOp::AddCircle { center: SVec2::new(-10.0, 5.0), radius: 2.0, construction: false }.apply(&mut s).unwrap();
+        SketchOp::AddCircle { center: SVec2::new(-10.0, -5.0), radius: 2.0, construction: false }.apply(&mut s).unwrap();
+        let selection = SketchSelection(vec![SketchEntity::Curve(line)]);
+        let axis = mirror_axis(&s, &selection).unwrap();
+        assert_eq!(axis, CurveRef::Curve(line));
+        // A window (left to right) around everything, 1 px per mm, y up.
+        let found = cadrs_sketch::hit::box_select(
+            &s,
+            SVec2::new(-15.0, -25.0),
+            SVec2::new(5.0, 25.0),
+            false,
+            |p| SVec2::new(p.x, -p.y),
+        );
+        assert!(found.contains(&SketchEntity::Curve(line)));
+        let curves = mirror_targets(axis, &found);
+        assert_eq!(curves.len(), 2);
+        assert!(!curves.contains(&line));
+        SketchOp::Mirror { axis, curves }.apply(&mut s).unwrap();
+        let circles: Vec<SVec2> = s
+            .curves
+            .values()
+            .filter_map(|c| match c.kind {
+                CurveKind::Circle { center, .. } => Some(s.pos(center)),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(circles.len(), 4);
+        for c in [SVec2::new(10.0, 5.0), SVec2::new(10.0, -5.0)] {
+            assert!(circles.iter().any(|p| p.distance(c) < 1e-6), "{circles:?}");
+        }
+        // Without a line picked, a box mirrors nothing.
+        assert!(mirror_axis(&s, &SketchSelection(vec![])).is_none());
     }
 
     #[test]
