@@ -377,13 +377,18 @@ fn sync_import_dialog(
                             b.spawn((Name::new("import-file-row"), Node { align_items: AlignItems::Center, column_gap: Val::Px(8.0), min_height: Val::Px(28.0), ..default() }))
                                 .with_children(|r| {
                                     r.spawn((cadrs_ui::icon("file-import", 16.0, t.muted_foreground), Pickable::IGNORE));
-                                    r.spawn((
-                                        Name::new("import-file-name"),
-                                        t.text(format!("{} ({})", x.file_name, x.format.label()), t.font_base, FontWeight::MEDIUM, t.foreground),
-                                        // A longer name wraps rather than running past the dialog.
-                                        Node { flex_grow: 1.0, flex_shrink: 1.0, min_width: Val::Px(0.0), ..default() },
-                                        Pickable::IGNORE,
-                                    ));
+                                    // A longer name is cut in the middle (its end and format stay),
+                                    // with the whole name in a tooltip on its cell (#26).
+                                    r.spawn((Name::new("import-file-cell"), Node { flex_grow: 1.0, ..cadrs_ui::ellipsis::Ellipsis::node() })).with_children(|c| {
+                                        c.spawn((
+                                            Name::new("import-file-name"),
+                                            t.text(format!("{} ({})", x.file_name, x.format.label()), t.font_base, FontWeight::MEDIUM, t.foreground),
+                                            cadrs_ui::ellipsis::Ellipsis::middle().with_tooltip(),
+                                            cadrs_ui::ellipsis::Ellipsis::node(),
+                                            Pickable::IGNORE,
+                                        ))
+                                        .insert(TextLayout::no_wrap());
+                                    });
                                     r.spawn((ChooseFile, cadrs_ui::Button::new("import-choose-file").label("Choose file").small().outline().tooltip("Import another file").build(&t)));
                                 });
                             b.spawn(OptionRow::new("import-y-up", "Y axis is up").checked(x.y_axis_up).build(&t));
