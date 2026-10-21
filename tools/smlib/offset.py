@@ -11,7 +11,8 @@ Two kinds of block convert:
 - `ShellBrep(file, d, bExtendCorners, ..., faces)` (smOffsetTest.cpp:190): the faces (0-based)
   opened, walls |d| thick, inside the body when d < 0 and outside when d > 0 (SMLib offsets or
   insets with those faces kept, then takes the difference with the input): `shell_with` with a
-  `ShellSpec`, the faces picked by their centroids.
+  `ShellSpec`, the faces picked by their centroids, its corners sharp (`ShellSpec::sharp`) when
+  SMLib extends them (`bExtendCorners`).
 """
 import os
 import re
@@ -28,6 +29,8 @@ NOT_CONVERTED = [
 ]
 
 PRELUDE = r'''
+use cadrs_kernel::native::mass;
+use cadrs_kernel::native::surface::Surface;
 use cadrs_kernel::native::topo::Body;
 use cadrs_kernel::native::NativeKernel;
 use cadrs_kernel::{BoolOp, Kernel, OffsetSpec, OpResult, ShellSpec};
@@ -65,15 +68,33 @@ fn offset(file: &str, d: f64, keep: Option<usize>, cutter: Option<&str>, e: &Exp
 }
 
 /// SMLib's `ShellBrep`: the faces `open` (SMLib's indices) removed and walls `|d|` thick,
-/// inside the body when `d < 0`, outside when `d > 0`.
-fn shell(file: &str, d: f64, open: &[usize], e: &Expect) -> Result<(), String> {
+/// inside the body when `d < 0`, outside when `d > 0`, the corners extended sharp when `sharp`.
+///
+/// SMLib approximates the offsets of spline faces to the model's tolerance `tol` (`ShellBrep`
+/// builds `SmOffsetGeometryCreation(|d|, brep tolerance)`), so its volume is good only to the
+/// area of those walls times `tol`: the volume is compared to that when it is coarser than
+/// `REL_TOL` (problemShell6's walls, tolerance 0.03, are 5e-4 thinner in SMLib than the 2.54 we
+/// keep to 1e-7).
+fn shell(file: &str, d: f64, open: &[usize], sharp: bool, tol: f64, e: &Expect) -> Result<(), String> {
     let m = model(SUITE, file)?;
-    let spec = ShellSpec { remove: faces(&m, open)?, thickness: d.abs(), outward: d > 0.0, hollow: false };
+    let spec = ShellSpec { remove: faces(&m, open)?, thickness: d.abs(), outward: d > 0.0, hollow: false, sharp };
     let input = m.body.clone();
     let mut k = NativeKernel::new();
     let b = k.insert(m.body);
     let r = k.shell_with(b, &spec).map_err(|e| format!("shell: {e:?}"))?;
-    check_result(&input, one(&k, r)?, e)
+    let out = one(&k, r)?;
+    let spline = (0..out.faces.len()).filter(|&f| matches!(out.faces[f].surf, Surface::Nurbs(_))).map(|f| mass::face_area(out, f).0).sum::<f64>();
+    match e.volume {
+        Some(v) if spline * tol > REL_TOL * v => {
+            check_result(&input, out, &Expect { volume: None, ..*e })?;
+            let ours = mass::body_mass(out).volume;
+            if (ours - v).abs() > spline * tol {
+                return Err(format!("volume {ours:.6}, SMLib gives {v:.6} (more than its approximation, {:.3e})", spline * tol));
+            }
+            Ok(())
+        }
+        _ => check_result(&input, out, e),
+    }
 }
 '''
 
@@ -169,6 +190,16 @@ def expect_of(fe):
     return out
 
 
+def brep_tol(ctx, fx):
+    """The model's tolerance (its file's `Brep Tolerance`, or `Brep ZoneTol3d` in later
+    versions): SMLib's shell approximates to it."""
+    with open(ctx.path(fx.rel)) as f:
+        for line in f:
+            if "Brep Tolerance" in line or "Brep ZoneTol3d" in line:
+                return float(line.split()[0])
+    raise ValueError("%s: no tolerance" % fx.name)
+
+
 def stem(path):
     return os.path.splitext(os.path.basename(path))[0].lower()
 
@@ -230,7 +261,7 @@ def offset_cases(ctx, src, prefix, body):
                 ", ".join(map(str, faces_)), "" if extend else " (SMLib: corners rounded, `bExtendCorners` FALSE)")
             exp = expect_of(ce[0]) if ce else {}
             oargs = [fx, d] + faces_ + ([] if extend else ["--no-extend"])
-            call = 'shell("%s", %s, &[%s], {expect})' % (fx.name, rust_f64(d), ", ".join(map(str, faces_)))
+            call = 'shell("%s", %s, &[%s], %s, %s, {expect})' % (fx.name, rust_f64(d), ", ".join(map(str, faces_)), "true" if extend else "false", rust_f64(brep_tol(ctx, fx)))
             cases.append(Case(name, doc, call, [fx], exp, ("shell", oargs)))
         else:
             print("offset: %s block %d not converted" % (prefix, n), file=sys.stderr)

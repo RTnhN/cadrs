@@ -152,8 +152,61 @@ fn line_meet(c: &Curve, surfs: &[&Surface], p: P3) -> Option<P3> {
     surfs.iter().all(|s| s.distance(&q) < 1e-7).then_some(q)
 }
 
+/// The points where a surface collapses: a cone's apex, a sphere's poles.
+fn singular_points(s: &Surface) -> Vec<P3> {
+    match s {
+        Surface::Cone { f, r, a } if a.sin().abs() > 1e-12 => vec![f.o + f.z * (-r / a.tan())],
+        Surface::Sphere { f, r } => vec![f.o + f.z * *r, f.o - f.z * *r],
+        _ => vec![],
+    }
+}
+
+/// A part of a surface's parameters: `((u0, u1), (v0, v1))`.
+pub type UvBox = ((f64, f64), (f64, f64));
+
 /// Rebuilds the body's geometry with new surfaces for its faces (same topology).
 pub fn replace_surfaces(b: &Body, surfs: &[Surface]) -> Result<Body> {
+    replace_surfaces_in(b, surfs, &[])
+}
+
+/// A straight edge between two surfaces swept along its direction (extrusions, cylinders and
+/// planes along it) stays a line along it: the one through the new end (exact; marching along
+/// two parallel sweeps finds nothing to follow when their profiles cross at a point).
+fn swept_line(surfs: &[Surface], fs: &[usize], old: &Curve, p0: &P3, p1: &P3) -> Option<Curve> {
+    let Curve::Line { d, .. } = old else { return None };
+    let d = d.try_normalize(1e-12)?;
+    let along = |s: &Surface| match s {
+        Surface::Extrusion { d: e, .. } => e.normalize().cross(&d).norm() < 1e-12,
+        Surface::Cylinder { f, .. } => f.z.cross(&d).norm() < 1e-12,
+        Surface::Plane { f } => f.x.cross(&f.y).dot(&d).abs() < 1e-12,
+        _ => false,
+    };
+    if fs.len() != 2 || fs[0] == fs[1] || !fs.iter().all(|&f| along(&surfs[f])) || fs.iter().all(|&f| matches!(surfs[f], Surface::Plane { .. })) {
+        return None;
+    }
+    let line = Curve::Line { o: *p0, d };
+    let w = p1 - p0;
+    let size = 1.0 + w.norm() + p0.coords.norm();
+    let on = (w - d * w.dot(&d)).norm() < 1e-9 * size && fs.iter().all(|&f| [p0, p1].iter().all(|p| surfs[f].distance(p) < 1e-7 * size));
+    on.then_some(line)
+}
+
+/// Whether `p` projects inside the part `dom` of the surface (an angle modulo a turn).
+fn in_domain(s: &Surface, dom: &UvBox, p: &P3) -> bool {
+    let (u, v) = s.project(p, None);
+    let inside = |x: f64, (a, b): (f64, f64), periodic: bool| {
+        let tol = 1e-9 * (1.0 + (b - a).abs() + a.abs());
+        let x = if periodic { a + (x - a).rem_euclid(TAU) } else { x };
+        x >= a - tol && x <= b + tol || (periodic && x - TAU >= a - tol && x - TAU <= b + tol)
+    };
+    inside(u, dom.0, s.u_periodic()) && inside(v, dom.1, s.v_periodic())
+}
+
+/// [`replace_surfaces`], with the part of each face's new surface the face lies on (by face;
+/// missing or None: anywhere). Where a new surface meets a neighbour more than once, each edge
+/// is the crossing inside it.
+pub fn replace_surfaces_in(b: &Body, surfs: &[Surface], domains: &[Option<UvBox>]) -> Result<Body> {
+    let dom = |f: usize| domains.get(f).copied().flatten();
     let mut out = b.clone();
     let vf = vertex_faces(b);
     let ef = b.edge_faces();
@@ -194,7 +247,14 @@ pub fn replace_surfaces(b: &Body, surfs: &[Surface]) -> Result<Body> {
             let p = line_meet(&b.edges[e].curve, &others, b.verts[v].p)?;
             fs.iter().all(|s| s.distance(&p) < 1e-7).then_some(p)
         };
-        let p = on_line.or_else(on_seam).or_else(on_kept).or_else(|| meet(&fs, b.verts[v].p)).ok_or_else(|| KernelError::OperationFailed("the moved faces no longer meet at a corner".into()))?;
+        // At a pole or apex (the end of a point edge): the new surface's own, nearest.
+        let on_pole = || {
+            let f = (0..b.edges.len()).filter(|&e| b.edges[e].degenerate && b.edges[e].v.contains(&v)).flat_map(|e| ef[e].iter().copied()).next()?;
+            let old = b.verts[v].p;
+            let p = singular_points(&surfs[f]).into_iter().min_by(|x, y| (x - old).norm().total_cmp(&(y - old).norm()))?;
+            fs.iter().all(|s| s.distance(&p) < 1e-7).then_some(p)
+        };
+        let p = on_pole().or(on_line).or_else(on_seam).or_else(on_kept).or_else(|| meet(&fs, b.verts[v].p)).ok_or_else(|| KernelError::OperationFailed("the moved faces no longer meet at a corner".into()))?;
         out.verts[v].p = p;
     }
     // Edges.
@@ -224,6 +284,8 @@ pub fn replace_surfaces(b: &Body, surfs: &[Surface]) -> Result<Body> {
         let old_mid = ed.point(ed.mid_t());
         let curve = if let Some((_, c)) = tangent.iter().find(|(x, _)| *x == e) {
             c.clone()
+        } else if let Some(c) = swept_line(surfs, fs, &ed.curve, &p0, &p1) {
+            c
         } else if fs.len() == 2 && fs[0] == fs[1] {
             // A seam: the new surface's iso-u line through the vertex.
             let s = &surfs[fs[0]];
@@ -294,6 +356,19 @@ pub fn replace_surfaces(b: &Body, surfs: &[Surface]) -> Result<Body> {
                 (curve, r)
             }
         };
+        // The arc must lie in its faces' domains: else the other way round (a circle crossing
+        // a plane twice runs both ways between the crossings).
+        let inside = |c: &Curve, t0: f64, t1: f64| {
+            fs.iter().all(|&f| dom(f).is_none_or(|d| [0.25, 0.5, 0.75].iter().all(|s| in_domain(&surfs[f], &d, &c.point(t0 + (t1 - t0) * s)))))
+        };
+        let (t0, t1) = match &curve {
+            Curve::Circle { .. } | Curve::Ellipse { .. } if ed.v[0] != ed.v[1] && !inside(&curve, t0, t1) => {
+                let other = if t1 > t0 { (t0, t1 - TAU) } else { (t0, t1 + TAU) };
+                if inside(&curve, other.0, other.1) { other } else { (t0, t1) }
+            }
+            Curve::Nurbs(_) if !inside(&curve, t0, t1) => nurbs_arc(&curve, &p0, &p1, &-dir0).filter(|(a, z)| inside(&curve, *a, *z)).unwrap_or((t0, t1)),
+            _ => (t0, t1),
+        };
         let (curve, t0, t1) = if t1 < t0 { let (c, a, b2) = curve.reversed(t0, t1); (c, b2.min(a), a.max(b2)) } else { (curve, t0, t1) };
         let (t0, t1) = if t1 < t0 { (t1, t0) } else { (t0, t1) };
         out.edges[e].curve = curve;
@@ -360,10 +435,44 @@ pub fn replace_surfaces(b: &Body, surfs: &[Surface]) -> Result<Body> {
         }
     }
     super::build::fix_senses(&mut out, 0..b.faces.len());
-    // The senses must not flip (an inside-out face means the move turned it over).
-    for (fi, f) in out.faces.iter().enumerate() {
-        let _ = fi;
-        let _ = f;
+    // Tolerances: an edge between moved faces is a new intersection curve, its p-curves fits
+    // on the new surfaces: its tolerance is how far they stray from one another (not the old
+    // edge's, which a read model sets for its own geometry); likewise a moved vertex's.
+    let changed: Vec<bool> = (0..b.faces.len()).map(|f| surfs[f] != b.faces[f].surf).collect();
+    let mut stray = vec![0.0f64; out.edges.len()];
+    for f in out.faces.iter() {
+        for c in f.loops.iter().flatten() {
+            let e = &out.edges[c.edge];
+            if e.degenerate {
+                continue;
+            }
+            for i in 0..=8 {
+                let t = e.t[0] + (e.t[1] - e.t[0]) * i as f64 / 8.0;
+                let uv = c.pc.point(t);
+                let p = e.point(t);
+                stray[c.edge] = stray[c.edge].max((f.surf.eval(uv.x, uv.y) - p).norm()).max(f.surf.distance(&p));
+            }
+        }
+    }
+    for (e, x) in stray.iter().enumerate() {
+        if ef[e].iter().any(|&f| changed[f]) && !out.edges[e].degenerate {
+            out.edges[e].tol = (1.5 * x).max(super::topo::TOL_MIN);
+        }
+    }
+    for v in 0..out.verts.len() {
+        if !vf[v].iter().any(|&f| changed[f]) {
+            continue;
+        }
+        let p = out.verts[v].p;
+        let mut d = vf[v].iter().map(|&f| out.faces[f].surf.distance(&p)).fold(0.0, f64::max);
+        for e in out.edges.iter().filter(|e| !e.degenerate) {
+            for k in 0..2 {
+                if e.v[k] == v {
+                    d = d.max((e.point(e.t[k]) - p).norm());
+                }
+            }
+        }
+        out.verts[v].tol = (1.5 * d).max(super::topo::TOL_MIN);
     }
     let errs = out.check();
     if !errs.is_empty() {
@@ -383,6 +492,49 @@ pub fn replace_surfaces(b: &Body, surfs: &[Surface]) -> Result<Body> {
         return Err(KernelError::OperationFailed(format!("the moved faces don't close: {}", errs[0])));
     }
     Ok(out)
+}
+
+/// `Kernel::replace_faces`: faces given new surfaces, each keeping the side its material is
+/// on (SMLib's `SmBrep::LocalOperation` keeps the face's use).
+pub fn replace_faces(k: &mut NativeKernel, body: BodyId, faces: &[FaceReplacement]) -> Result<OpResult> {
+    let b = (**k.get(body)?).clone();
+    let mut surfs: Vec<Surface> = b.faces.iter().map(|f| f.surf.clone()).collect();
+    let mut domains: Vec<Option<UvBox>> = vec![None; b.faces.len()];
+    for r in faces {
+        let fi = r.face.0 as usize;
+        if fi >= b.faces.len() {
+            return Err(KernelError::InvalidParameter(format!("unknown {:?}", r.face)));
+        }
+        surfs[fi] = r.surface.clone();
+        domains[fi] = r.domain;
+    }
+    let mut out = replace_surfaces_in(&b, &surfs, &domains)?;
+    // The outward normal at the middle of each new face agrees with the old face's at its own.
+    let outward = |body: &Body, fi: usize, p: &P3| {
+        let f = &body.faces[fi];
+        let (u, v) = f.surf.project(p, None);
+        f.surf.normal(u, v) * if f.sense { 1.0 } else { -1.0 }
+    };
+    for r in faces {
+        let fi = r.face.0 as usize;
+        let middle = |body: &Body| super::smb::face_centroids(&super::kernel::subset(body, &[fi], false)).first().copied();
+        let (Some(was), Some(now)) = (middle(&b), middle(&out)) else { continue };
+        let before = outward(&b, fi, &was);
+        if outward(&out, fi, &now).dot(&before) < 0.0 {
+            out.faces[fi].sense = !out.faces[fi].sense;
+        }
+    }
+    let errs = out.check();
+    if let Some(e) = errs.first() {
+        return Err(KernelError::OperationFailed(format!("the replaced faces don't close: {e}")));
+    }
+    if super::mass::body_mass(&out).volume <= 0.0 {
+        return Err(KernelError::OperationFailed("the replaced faces turn the body inside out".into()));
+    }
+    let nf = out.faces.len();
+    let id = k.insert(out);
+    let history = History { modified: (0..nf).map(|i| (FaceId(i as u64), InputFace { body, face: FaceId(i as u64) })).collect(), ..Default::default() };
+    Ok(OpResult { bodies: vec![id], history })
 }
 
 /// On a closed B-spline (an intersection loop), the arc from `p0` to `p1` leaving `p0` along
@@ -480,6 +632,17 @@ fn nurbs_arc(c: &Curve, p0: &P3, p1: &P3, dir0: &V3) -> Option<(f64, f64)> {
 
 /// A surface moved `d` along its outward normal (sense applied).
 pub fn offset_surface(s: &Surface, sense: bool, d: f64) -> Option<Surface> {
+    // A B-spline that is a plane, cylinder, cone or sphere: its exact offset (a fit of a
+    // cone's offset would have to pass its apex).
+    if let Surface::Nurbs(n) = s
+        && let Some(a) = super::recognize::surface(n)
+    {
+        let ((u0, u1), (v0, v1)) = n.range();
+        let (u, v) = ((u0 + u1) / 2.0, (v0 + v1) / 2.0);
+        let (ua, va) = a.project(&s.eval(u, v), None);
+        let same = s.normal(u, v).dot(&a.normal(ua, va)) > 0.0;
+        return offset_surface(&a, sense == same, d);
+    }
     let d = if sense { d } else { -d };
     Some(match s {
         Surface::Plane { f } => {
@@ -526,22 +689,79 @@ pub fn offset_surface(s: &Surface, sense: bool, d: f64) -> Option<Surface> {
         // A B-spline: a surface through a grid of offset points (exact offsets aren't
         // B-splines).
         Surface::Nurbs(n) => {
-            let ((u0, u1), (v0, v1)) = n.range();
-            let k = 32;
-            let us: Vec<f64> = (0..=k).map(|i| u0 + (u1 - u0) * i as f64 / k as f64).collect();
-            let vs: Vec<f64> = (0..=k).map(|j| v0 + (v1 - v0) * j as f64 / k as f64).collect();
-            let rows: Vec<NurbsCurve> = us
-                .iter()
-                .map(|&u| {
-                    let pts: Vec<P3> = vs.iter().map(|&v| s.eval(u, v) + s.normal(u, v) * d).collect();
-                    NurbsCurve::interpolate(&pts, &vs, 3, None, None)
-                })
-                .collect();
-            let surf = super::nurbs::NurbsSurface::through_curves(&rows, &us, 3, None, None);
-            // through_curves runs its rows along v and interpolates them along u: transpose to
-            // keep the parameters' roles.
-            let cps: Vec<Vec<super::nurbs::H>> = (0..surf.cps[0].len()).map(|j| surf.cps.iter().map(|r| r[j]).collect()).collect();
-            Surface::Nurbs(std::sync::Arc::new(super::nurbs::NurbsSurface { du: surf.dv, dv: surf.du, ku: surf.kv.clone(), kv: surf.ku.clone(), cps }))
+            // The grid doubled until the surface holds the offset at the cells' middles too.
+            // It spans a fifth more of the surface past each side where the surface is open
+            // there (its polynomial continuation): a face moved in must reach its neighbours'
+            // offsets past its old edges (SMLib extends the surfaces too,
+            // `GetCreateExtendedSurface`). Not past a side the surface closes up across, nor
+            // past a pole (a side collapsed to a point).
+            let ((a0, a1), (b0, b1)) = n.range();
+            let size = 1.0 + n.cps.iter().flatten().map(|h| (h.xyz() / h.w).norm()).fold(0.0, f64::max);
+            // Points along each side: u = a0, u = a1, v = b0, v = b1.
+            let side = |k: usize| -> Vec<P3> {
+                (0..=4)
+                    .map(|j| {
+                        let (fu, fv) = (a0 + (a1 - a0) * j as f64 / 4.0, b0 + (b1 - b0) * j as f64 / 4.0);
+                        match k {
+                            0 => s.eval(a0, fv),
+                            1 => s.eval(a1, fv),
+                            2 => s.eval(fu, b0),
+                            _ => s.eval(fu, b1),
+                        }
+                    })
+                    .collect()
+            };
+            let sides: Vec<Vec<P3>> = (0..4).map(side).collect();
+            let same = |p: &P3, q: &P3| (p - q).norm() < 1e-9 * size;
+            let closed = |k: usize| sides[k].iter().zip(&sides[k + 1]).all(|(p, q)| same(p, q));
+            let pole = |k: usize| sides[k].iter().all(|p| same(p, &sides[k][0]));
+            // (Nor a rational one: past its domain its weights can reach zero.)
+            let w0 = n.cps[0][0].w;
+            let rational = n.cps.iter().flatten().any(|h| (h.w - w0).abs() > 1e-12 * w0.abs());
+            let grow = |(a, b): (f64, f64), k: usize| {
+                if rational {
+                    return (a, b);
+                }
+                let w = 0.2 * (b - a);
+                (if closed(k) || pole(k) { a } else { a - w }, if closed(k) || pole(k + 1) { b } else { b + w })
+            };
+            let ((u0, u1), (v0, v1)) = (grow((a0, a1), 0), grow((b0, b1), 2));
+            // At a pole the normal is the limit from inside the domain.
+            let (uc, vc) = ((a0 + a1) / 2.0, (b0 + b1) / 2.0);
+            let normal = |u: f64, v: f64| {
+                let dd = s.d2(u, v);
+                if dd[1].cross(&dd[2]).norm() > 1e-12 * (dd[1].norm_squared() + dd[2].norm_squared()) {
+                    return s.normal(u, v);
+                }
+                s.normal(u + (uc - u) * 1e-6, v + (vc - v) * 1e-6)
+            };
+            let at = |u: f64, v: f64| s.eval(u, v) + normal(u, v) * d;
+            let mut k = 32;
+            loop {
+                let us: Vec<f64> = (0..=k).map(|i| u0 + (u1 - u0) * i as f64 / k as f64).collect();
+                let vs: Vec<f64> = (0..=k).map(|j| v0 + (v1 - v0) * j as f64 / k as f64).collect();
+                let rows: Vec<NurbsCurve> = us
+                    .iter()
+                    .map(|&u| {
+                        let pts: Vec<P3> = vs.iter().map(|&v| at(u, v)).collect();
+                        NurbsCurve::interpolate(&pts, &vs, 3, None, None)
+                    })
+                    .collect();
+                let surf = super::nurbs::NurbsSurface::through_curves(&rows, &us, 3, None, None);
+                // through_curves runs its rows along v and interpolates them along u: transpose
+                // to keep the parameters' roles.
+                let cps: Vec<Vec<super::nurbs::H>> = (0..surf.cps[0].len()).map(|j| surf.cps.iter().map(|r| r[j]).collect()).collect();
+                let off = Surface::Nurbs(std::sync::Arc::new(super::nurbs::NurbsSurface { du: surf.dv, dv: surf.du, ku: surf.kv.clone(), kv: surf.ku.clone(), cps }));
+                let err = us
+                    .windows(2)
+                    .flat_map(|a| vs.windows(2).map(move |b| (0.5 * (a[0] + a[1]), 0.5 * (b[0] + b[1]))))
+                    .map(|(u, v)| (off.eval(u, v) - at(u, v)).norm())
+                    .fold(0.0, f64::max);
+                if err < OFFSET_FIT * (1.0 + d.abs()) * 1e3 || k >= 32 {
+                    break off;
+                }
+                k *= 2;
+            }
         }
     })
 }
@@ -579,11 +799,25 @@ fn offset_curve_along(c: &Curve, n: &dyn Fn(f64) -> V3, d: f64) -> Option<Curve>
         }
         _ => {}
     }
-    let k = 64;
-    let ts: Vec<f64> = (0..=k).map(|i| t0 + (t1 - t0) * i as f64 / k as f64).collect();
-    let pts: Vec<P3> = ts.iter().map(|&t| c.point(t) + n(t) * d).collect();
-    Some(Curve::Nurbs(std::sync::Arc::new(NurbsCurve::interpolate(&pts, &ts, 3, None, None))))
+    // A cubic through offset points, their number doubled until it holds the offset between
+    // them too (the curve's knots kink the offset).
+    let at = |t: f64| c.point(t) + n(t) * d;
+    let mut k = 64;
+    loop {
+        let ts: Vec<f64> = (0..=k).map(|i| t0 + (t1 - t0) * i as f64 / k as f64).collect();
+        let pts: Vec<P3> = ts.iter().map(|&t| at(t)).collect();
+        let fit = Curve::Nurbs(std::sync::Arc::new(NurbsCurve::interpolate(&pts, &ts, 3, None, None)));
+        let err = ts.windows(2).map(|w| (fit.point(0.5 * (w[0] + w[1])) - at(0.5 * (w[0] + w[1]))).norm()).fold(0.0, f64::max);
+        if err < OFFSET_FIT * (1.0 + d.abs()) || k >= 1024 {
+            return Some(fit);
+        }
+        k *= 2;
+    }
 }
+
+/// How closely an approximated offset (curve or surface) follows the true one (mm, relative to
+/// the distance).
+const OFFSET_FIT: f64 = 1e-9;
 
 /// Sharp offset: every face moved by its distance, the edges where the moved faces meet.
 pub fn offset_sharp(b: &Body, dist: &[f64]) -> Result<Body> {
@@ -605,8 +839,10 @@ pub fn offset(k: &mut NativeKernel, body: BodyId, spec: &OffsetSpec) -> Result<O
             *x = *d;
         }
     }
-    let out = if spec.sharp || dist.iter().all(|d| *d <= 0.0) {
+    let out = if spec.sharp || dist.iter().all(|d| *d == 0.0) {
         offset_sharp(&b, &dist)?
+    } else if dist.iter().all(|d| *d <= 0.0) {
+        super::offset_round::inset_rounded(&b, &dist)?
     } else {
         super::offset_round::offset_rounded(&b, &dist)?
     };

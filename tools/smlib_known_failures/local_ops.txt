@@ -1,6 +1,2 @@
 # SMLib local-operation cases (tests/smlib_local_ops.rs, from tools/smlib/local_ops.py) that fail:
 # `name`, or `name slow` when it takes over a minute (run only with --ignored).
-#
-# A cylinder crossing an old edge's plane twice: replace_surfaces takes the arc nearer the old
-# edge (below the axis, volume 807.3), not the half the test's domain names (1592.7).
-local_op_3_box

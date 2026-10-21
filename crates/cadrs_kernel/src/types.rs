@@ -677,6 +677,12 @@ pub struct ShellSpec {
     pub outward: bool,
     /// A closed hollow body: no face is removed, the inside becomes a void.
     pub hollow: bool,
+    /// The walls' corners extend sharp (faces meet where their offsets intersect: SMLib's
+    /// `bExtendCorners`, OCCT's intersection join) instead of rounded (OCCT's default arc join:
+    /// outward, a cylinder round each convex edge and a ball at each corner; inward, the cavity
+    /// rounded at the body's concave edges).
+    #[serde(default)]
+    pub sharp: bool,
 }
 
 /// Volume, area, centroid and inertia, computed from exact geometry where the backend can.
@@ -990,6 +996,18 @@ pub struct OffsetSpec {
     /// Keep edges sharp (the offset faces meet where they intersect: a box stays a box), else
     /// round them (the body grown by a ball).
     pub sharp: bool,
+}
+
+/// A face's new surface for [`Kernel::replace_faces`](crate::Kernel::replace_faces).
+#[derive(Debug, Clone, PartialEq)]
+pub struct FaceReplacement {
+    pub face: FaceId,
+    pub surface: crate::native::surface::Surface,
+    /// The part of the surface the face lies on, in the surface's own parameters
+    /// `((u0, u1), (v0, v1))` (radians for angles): where the surface meets a neighbour more
+    /// than once (a cylinder crossing a side's plane twice), each edge is the crossing inside
+    /// it. None: the crossings nearest the old edges.
+    pub domain: Option<((f64, f64), (f64, f64))>,
 }
 
 /// A variable radius along one edge (P3.10, PS14.6 Variable fillet): `(t, r)` pairs, `t` in

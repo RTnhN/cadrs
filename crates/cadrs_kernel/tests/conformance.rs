@@ -2140,7 +2140,7 @@ pub fn shell_options(k: &mut dyn Kernel) {
     // 100 × 60 × 40, bottom open, 4 mm inward: V = 100·60·40 − 92·52·36 = 67 776.
     let b = plate(k, 0.0, 0.0, 100.0, 60.0, 0.0, 40.0);
     let bottom = face_at(k, b, -Vector3::z(), 0.0);
-    let spec = ShellSpec { remove: vec![bottom], thickness: 4.0, outward: false, hollow: false };
+    let spec = ShellSpec { remove: vec![bottom], thickness: 4.0, outward: false, hollow: false, sharp: false };
     let s = one(k.shell_with(b, &spec).unwrap());
     close(volume(k, s), 100.0 * 60.0 * 40.0 - 92.0 * 52.0 * 36.0, 1e-6);
     // Outward: the walls lie outside at exactly 4 mm; OCCT rounds the outer edges and corners
@@ -2179,7 +2179,7 @@ pub fn shell_around_a_counterbore(k: &mut dyn Kernel) {
     let tool = one(k.revolve_with(&Profile::new(plane, vec![region(polygon(&section))]), &RevolveSpec::solid(Axis { origin: at, dir }, None)).unwrap());
     let d = one(k.boolean(BoolOp::Subtract, b, &[tool]).unwrap());
     let bottom = face_at(k, d, -Vector3::z(), 0.0);
-    let s = one(k.shell_with(d, &ShellSpec { remove: vec![bottom], thickness: 4.0, outward: false, hollow: false }).unwrap());
+    let s = one(k.shell_with(d, &ShellSpec { remove: vec![bottom], thickness: 4.0, outward: false, hollow: false, sharp: false }).unwrap());
     let (t, rh, rc): (f64, f64, f64) = (4.0, 2.65, 4.875);
     let g = |s: f64| (s * (t * t - s * s).max(0.0).sqrt() + t * t * (s / t).asin()) / 2.0;
     let f = |s: f64| -(t * t - s * s).max(0.0).powf(1.5) / 3.0 + rc * g(s);

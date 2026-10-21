@@ -452,6 +452,7 @@ impl Rebuilder {
                 thickness: t,
                 outward,
                 hollow,
+                sharp: false,
             };
             this.kernel.shell_with(body, &spec)
         })

@@ -499,9 +499,13 @@ impl Kernel for NativeKernel {
         super::local::draft(self, body, spec)
     }
 
+    fn replace_faces(&mut self, body: BodyId, faces: &[FaceReplacement]) -> Result<OpResult> {
+        super::local::replace_faces(self, body, faces)
+    }
+
     fn shell(&mut self, body: BodyId, remove: &[FaceId], thickness: f64) -> Result<OpResult> {
         dump("shell", self.get(body)?, &format!("remove {remove:?} thickness {thickness}"));
-        let r = super::offset_round::shell(self, body, &ShellSpec { remove: remove.to_vec(), thickness, outward: false, hollow: false });
+        let r = super::offset_round::shell(self, body, &ShellSpec { remove: remove.to_vec(), thickness, outward: false, hollow: false, sharp: false });
         self.dumped(&r)
     }
 

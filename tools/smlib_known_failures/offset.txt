@@ -1,30 +1,31 @@
 # SMLib offset and shell cases (tests/smlib_offset.rs, from tools/smlib/offset.py) that fail:
 # `name`, or `name slow` when it takes over a minute (run only with --ignored).
 #
-# Rounded offset: a face's slab is rejected ("p-curve off the edge" by 7e-6 to 5e-4).
-offset_04_off_extrusion
+# Rounded offset: the slabs, tubes and balls are valid, but a union of them leaves an open shell
+# (a pipe round a spline edge, balls at extrusion corners; the boolean, not the pieces).
+offset_04_off_extrusion slow
+offset_07_off_extrusion slow
+offset_12_offset_bracket2 slow
+offset_13_offset_bracket2 slow
+offset_14_offset_bracket2 slow
+# Rounded offset 2.2 of off_extrusion: an extrusion face's offset crosses itself (its concave
+# part is tighter than the distance), so its slab isn't valid.
 offset_05_off_extrusion
-offset_07_off_extrusion
+# Rounded offset 0.3 of boolean_trees_result: a face's slab isn't a solid.
 offset_08_boolean_trees_result
+# Rounded offset 0.5 of offset_bracket2: a union with a ball leaves a body with a p-curve gap of
+# 13.9 in u (the boolean lets an invalid result through).
 offset_09_offset_bracket2
-offset_10_offset_bracket2
-offset_11_offset_bracket2
-offset_15a_offset_bracket2
-offset_15b_offset_bracket2
-offset_16_insetcone
-# Rounded offset: "slabs of this kind of face" unsupported (offset_bracket2 at 3.5 and more).
-offset_12_offset_bracket2
-offset_13_offset_bracket2
-offset_14_offset_bracket2
-# Inset with one face kept: "moved faces no longer meet along an edge".
+# Rounded inset with a face kept: the body less the inward slab of a concave cylinder (or an
+# extrusion face) leaves an open shell (the slab's face lies on the body's).
 offset_06_off_extrusion
-# Shell: "the boolean left an open shell".
+# Rounded inward shell: the sphere face's slab has a p-curve gap at the pole.
 offset_03_offsetboxsphoncorner
-shell_01_problemshell
-shell_02_problemshell1
-shell_03_problemshell2
-shell_04_problemshell21
-# Outward shell: 2.0e-2 less volume than SMLib's (SMLib extends convex corners sharp; shell_with grows outward walls with offset_rounded).
-shell_06_problemshell4
-# Shell volume 2.0e-4 off SMLib's on a model of tolerance 0.058 (REL_TOL is 1e-4).
-shell_08_problemshell6
+# Inward shell of the hourglass models (spline walls): the body less the cavity leaves an open
+# shell, and the sharp cavity's walls don't reach the opening at the corners.
+shell_01_problemshell slow
+shell_03_problemshell2 slow
+shell_04_problemshell21 slow
+# Inward shell of InsetCone: the body less the cavity (flush with the open cone face) is empty;
+# the sharp cavity with the cone moved out has a non-manifold seam.
+offset_16_insetcone

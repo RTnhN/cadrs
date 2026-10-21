@@ -1,8 +1,9 @@
 """SMLib's local-operation tests (tests/prog_test/src/smFilletTest.cpp, `my_local_op`,
 smFilletTest.cpp:3518): `SmBrep::LocalOperation` gives one face a new surface and rebuilds the
-edges and vertices around it. Here that is `native::local::replace_surfaces` (the `Kernel` trait
-has no replace-face operation): the face is picked by its centroid, the new surface built as the
-test builds it, and the face keeps the side it faced (SMLib keeps the face's use).
+edges and vertices around it. Here that is `Kernel::replace_faces`: the face is picked by its
+centroid, the new surface built as the test builds it, with the part of it the test names
+(`AdjustSTEPUVDomain`: degrees for a cylinder's angle, radians here), and the face keeps the side
+it faced (SMLib keeps the face's use).
 
 SMLib's test asserts nothing but success, and marks lCount 3 and 5 "needs fixing". Those two
 check closed-form volume and area (SMLib's own lCount 3 isn't a solid; its lCount 5 agrees with
@@ -25,10 +26,11 @@ NOT_CONVERTED = [
 ]
 
 PRELUDE = r'''
-use cadrs_kernel::native::local::replace_surfaces;
 use cadrs_kernel::native::math::{Frame, P3, V3};
 use cadrs_kernel::native::smb;
 use cadrs_kernel::native::surface::Surface;
+use cadrs_kernel::native::NativeKernel;
+use cadrs_kernel::{FaceReplacement, Kernel};
 
 const SUITE: &str = "local_ops";
 
@@ -46,33 +48,24 @@ fn frame(o: [f64; 3], x: [f64; 3], y: [f64; 3]) -> Frame {
     Frame::from_xz(P3::new(o[0], o[1], o[2]), x, x.cross(&y))
 }
 
-/// The outward normal of `body`'s face `f` near `p`.
-fn outward(body: &cadrs_kernel::native::topo::Body, f: usize, p: &P3) -> V3 {
-    let face = &body.faces[f];
-    let (u, v) = face.surf.project(p, None);
-    face.surf.normal(u, v) * if face.sense { 1.0 } else { -1.0 }
-}
-
 /// SMLib's `SmBrep::LocalOperation`: face `face` (SMLib's index) of `file` given the surface
-/// `new`, then checked.
-fn local_op(file: &str, face: usize, new: New, e: &Expect) -> Result<(), String> {
+/// `new` over `domain` (`[u0, v0, u1, v1]` when the test names one), then checked.
+fn local_op(file: &str, face: usize, new: New, domain: Option<[f64; 4]>, e: &Expect) -> Result<(), String> {
     let m = model(SUITE, file)?;
     let [id] = faces(&m, &[face])?[..] else { return Err("no face".into()) };
-    let fi = id.0 as usize;
-    let surf = match new {
+    let surface = match new {
         New::Plane(o, x, y) => Surface::Plane { f: frame(o, x, y) },
         New::Cylinder(o, x, y, r) => Surface::Cylinder { f: frame(o, x, y), r },
         New::Sms(s) => smb::read_surface(&std::fs::read(data(SUITE, s)).map_err(|e| format!("{s}: {e}"))?)?,
     };
-    let mut surfs: Vec<Surface> = m.body.faces.iter().map(|f| f.surf.clone()).collect();
-    surfs[fi] = surf;
-    let mut out = replace_surfaces(&m.body, &surfs).map_err(|e| format!("{e:?}"))?;
-    // The face faces the side it faced before (SMLib keeps its face use).
-    let before = outward(&m.body, fi, &m.face_centroids[face].ok_or("no centroid")?);
-    let at = smb::face_centroids(&out)[fi];
-    out.faces[fi].sense = true;
-    out.faces[fi].sense = outward(&out, fi, &at).dot(&before) > 0.0;
-    check_result(&m.body, &out, e)
+    let input = m.body.clone();
+    let mut k = NativeKernel::new();
+    let b = k.insert(m.body);
+    let domain = domain.map(|d| ((d[0], d[2]), (d[1], d[3])));
+    let r = k.replace_faces(b, &[FaceReplacement { face: id, surface, domain }]).map_err(|e| format!("{e:?}"))?;
+    let [out] = r.bodies[..] else { return Err(format!("{} bodies", r.bodies.len())) };
+    let out = k.get(out).map_err(|e| format!("{e:?}"))?;
+    check_result(&input, out, e)
 }
 '''
 
@@ -157,6 +150,7 @@ def block_case(ctx, src, n, b):
     if lo and hi:
         dom = nums(lo.group(1)) + nums(hi.group(1))
         dom = [dom[0], dom[1], dom[2], dom[3]]
+    domain = "None"
     if "SmPlane::CreateCanonical" in b or "SmCylinder::CreateCanonical" in b:
         o = nums(pos.group(1))
         x, y = vec(pos.group(2), local), vec(pos.group(3), local)
@@ -170,6 +164,10 @@ def block_case(ctx, src, n, b):
             new = "New::Cylinder(%s, %s, %s, %s)" % (rarr(o), rarr(x), rarr(y), rust_f64(r))
             what = "the cylinder of radius %s about %s through %s" % (r, tuple(z), tuple(o))
             oracle_args = [fx, face, "cyl"] + o + list(z) + [r]
+        if dom:
+            # STEP's units: a cylinder's angle in degrees.
+            u = (lambda x: math.radians(x)) if "SmCylinder::CreateCanonical" in b else (lambda x: x)
+            domain = "Some(%s)" % rarr([u(dom[0]), dom[1], u(dom[2]), dom[3]])
         oracle_args += ["--xdir=%s" % fmt(x)] + (["--dom=%s" % fmt(dom)] if dom else [])
     elif "SmBSplineSurface::ReadFromFile" in b:
         sms = re.search(r'SmBSplineSurface::ReadFromFile\(\s*crContext\s*,\s*_T\(\s*"\.\./\.\./([^"]+\.sms)"\s*\)', b).group(1)
@@ -183,7 +181,7 @@ def block_case(ctx, src, n, b):
         return None
     doc = "SMLib local operation %d (smFilletTest.cpp:%d): face %d of `%s` becomes %s." % (n, line, face, fx.name, what)
     name = "local_op_%d_%s" % (n, os.path.splitext(fx.name)[0].lower())
-    call = 'local_op("%s", %d, %s, {expect})' % (fx.name, face, new)
+    call = 'local_op("%s", %d, %s, %s, {expect})' % (fx.name, face, new, domain)
     if n in CLOSED:
         why, v, a = CLOSED[n]
         c = Case(name, doc + " Closed form: %s." % why, call, fixtures, {"volume": v, "area": a})

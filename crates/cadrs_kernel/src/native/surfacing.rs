@@ -174,7 +174,7 @@ fn thicken_sheet(k: &mut NativeKernel, sheets: &[Body], spec: &ThickenSpec) -> O
         if d < 1e-9 {
             continue;
         }
-        let r = super::offset_round::shell(k, tid, &ShellSpec { remove: caps.clone(), thickness: d, outward: out, hollow: false }).ok()?;
+        let r = super::offset_round::shell(k, tid, &ShellSpec { remove: caps.clone(), thickness: d, outward: out, hollow: false, sharp: false }).ok()?;
         parts.push(r.bodies[0]);
     }
     let body = match parts.as_slice() {

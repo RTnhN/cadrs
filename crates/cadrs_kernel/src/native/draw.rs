@@ -1141,7 +1141,7 @@ impl NativeKernel {
                 _ => Err(err("offsetload: the faces must be faces of the shape")),
             })
             .collect::<Result<Vec<_>>>()?;
-        let r = crate::Kernel::shell_with(self, b, &ShellSpec { remove, thickness: d.abs(), outward: d > 0.0, hollow: false })?;
+        let r = crate::Kernel::shell_with(self, b, &ShellSpec { remove, thickness: d.abs(), outward: d > 0.0, hollow: false, sharp: !arc })?;
         Ok(Shape::Body(r.bodies[0]))
     }
 

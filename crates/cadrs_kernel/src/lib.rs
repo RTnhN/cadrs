@@ -280,6 +280,14 @@ pub trait Kernel {
         Err(KernelError::Unsupported("offset"))
     }
 
+    /// The solid with faces given new surfaces (SMLib's `SmBrep::LocalOperation`, a direct
+    /// edit): the edges and vertices round them recomputed where the new surfaces meet their
+    /// neighbours, the topology kept, each face keeping the side its material is on. Faces are
+    /// `modified`.
+    fn replace_faces(&mut self, _body: BodyId, _faces: &[FaceReplacement]) -> Result<OpResult> {
+        Err(KernelError::Unsupported("replace_faces"))
+    }
+
     /// A fillet whose radius varies along each edge (P3.10, PS14.6 Variable fillet). Every edge
     /// tangent to a listed edge must be listed too (OCCT continues a fillet along them). With
     /// `allow_overflow` off it is refused where it runs onto another face, as `fillet_with`.

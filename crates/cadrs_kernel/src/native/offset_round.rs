@@ -21,6 +21,15 @@ use crate::*;
 fn face_slab(b: &Body, fi: usize, d: f64) -> Result<Body> {
     let f = &b.faces[fi];
     let Surface::Plane { f: fr } = &f.surf else {
+        // A concave cylinder whose axis the offset reaches: the wedge out to its axis.
+        if let Surface::Cylinder { f: fr, r } = &f.surf
+            && d > 0.0
+            && f.sense != fr.right_handed()
+            && d >= r * (1.0 - 1e-9)
+            && let Some(w) = cylinder_wedge(b, fi)?
+        {
+            return Ok(w);
+        }
         return super::slab::face_slab(b, fi, d);
     };
     let n = fr.x.cross(&fr.y) * if f.sense { 1.0 } else { -1.0 };
@@ -53,15 +62,35 @@ fn edge_tube(b: &Body, e: usize, r: f64) -> Result<Body> {
             Ok(super::sweep::sweep_full(&mf, &[], &kind, 0.0, len, false, true)?.body)
         }
         Curve::Circle { c, x, y, r: rc } => {
-            if r >= *rc {
-                return Err(KernelError::Unsupported("a tube wider than its arc's radius"));
-            }
             let q = ed.point(ed.t[0]);
             let axis = x.cross(y).normalize();
             let radial = (q - c).normalize();
             let tangent = axis.cross(&radial);
+            // The profile plane's x runs out from the axis, its y down it (−axis); the axis is
+            // the line x = −rc.
             let plane = Plane { origin: q, x_dir: nalgebra::Unit::new_normalize(radial), normal: nalgebra::Unit::new_normalize(tangent) };
-            let prof = Profile::new(plane, vec![Region { outer: Loop { curves: vec![Curve2::Circle { center: nalgebra::Point2::origin(), radius: r, source: None }] }, holes: vec![], source: None }]);
+            let outer = if r < rc * (1.0 - 1e-9) {
+                Loop { curves: vec![Curve2::Circle { center: nalgebra::Point2::origin(), radius: r, source: None }] }
+            } else {
+                // A tube wider than its arc's radius (a spindle torus): the balls along the
+                // arc reach across the axis, but a point on the arc's side of the axis is
+                // nearest the arc there, so the tube is the disc's part on that side revolved
+                // (past the arc's ends the vertices' balls cover the rest).
+                // (As wide as the arc's radius, the disc only touches the axis: its chord there
+                // is kept 1e-4 of the radius long, a sliver 5e-9 of it off the axis.)
+                let hmin = 1e-4 * r;
+                let h = (r * r - rc * rc).max(0.0).sqrt();
+                let (x, h) = if h < hmin { (-(r * r - hmin * hmin).sqrt(), hmin) } else { (-rc, h) };
+                let (a, b) = (nalgebra::Point2::new(x, h), nalgebra::Point2::new(x, -h));
+                let (ta, tb) = (h.atan2(x), (-h).atan2(x));
+                Loop {
+                    curves: vec![
+                        Curve2::Arc { center: nalgebra::Point2::origin(), radius: r, start_angle: tb, sweep: ta - tb, source: None },
+                        Curve2::Line { a, b, source: None },
+                    ],
+                }
+            };
+            let prof = Profile::new(plane, vec![Region { outer, holes: vec![], source: None }]);
             let regions = super::profile::regions(&prof)?;
             let mf = super::profile::merge_regions(&regions)?;
             let f = Frame { o: *c, x: radial, y: axis.cross(&radial), z: axis };
@@ -70,7 +99,20 @@ fn edge_tube(b: &Body, e: usize, r: f64) -> Result<Body> {
             let kind = super::sweep::Revolve { plane, f };
             Ok(super::sweep::sweep_full(&mf, &[], &kind, 0.0, if whole { TAU } else { span }, whole, true)?.body)
         }
-        _ => Err(KernelError::Unsupported("tubes round this kind of edge")),
+        // Any other curve: a disc square to the edge at its start swept along it (a pipe).
+        _ => {
+            let p0 = ed.point(ed.t[0]);
+            let t = ed.curve.tangent(ed.t[0]).try_normalize(1e-12).ok_or(KernelError::Unsupported("a tube round an edge with no direction"))?;
+            let fr = Frame::from_z(p0, t);
+            let plane = Plane { origin: p0, x_dir: nalgebra::Unit::new_normalize(fr.x), normal: nalgebra::Unit::new_normalize(t) };
+            let prof = Profile::new(plane, vec![Region { outer: Loop { curves: vec![Curve2::Circle { center: nalgebra::Point2::origin(), radius: r, source: None }] }, holes: vec![], source: None }]);
+            let mut k = NativeKernel::new();
+            let body = k.insert(b.clone());
+            let spec = SweepSpec { body: BodyKind::Solid, path: vec![PathCurve::Edge { body, edge: EdgeId(e as u64) }], control: SweepControl::None, faces: vec![] };
+            let out = k.sweep_with(&prof, &spec)?;
+            let [id] = out.bodies[..] else { return Err(KernelError::OperationFailed("a tube round an edge isn't one body".into())) };
+            Ok((**k.get(id)?).clone())
+        }
     }
 }
 
@@ -100,23 +142,47 @@ fn convex(b: &Body, e: usize) -> Option<bool> {
     Some(w2.dot(&n1) < 0.0)
 }
 
+/// `acc` (op) `piece`; a failure says which piece (`what`) with `CADRS_OFFSET_DEBUG`, and
+/// leaves both bodies in `CADRS_DUMP_DIR`.
+fn combine(acc: &Body, piece: &Body, op: BoolOp, what: &dyn Fn() -> String) -> Result<Body> {
+    let debug = std::env::var_os("CADRS_OFFSET_DEBUG").is_some();
+    let dump = || {
+        if std::env::var_os("CADRS_DUMP_DIR").is_some() {
+            super::kernel::dump("offset-target", acc, &format!("{op:?} {}", what()));
+            super::kernel::dump("offset-tool", piece, &format!("{op:?} {}", what()));
+        }
+    };
+    let r = boolean_bodies(acc, piece, op)
+        .inspect_err(|e| {
+            if debug {
+                eprintln!("offset: {op:?} with {}: {e:?}", what());
+            }
+            dump();
+        })?
+        .body;
+    // Debugging: a result the boolean let through invalid.
+    if debug && let Some(e) = r.check().first() {
+        eprintln!("offset: {op:?} with {} is invalid: {e}", what());
+        dump();
+    }
+    Ok(r)
+}
+
 /// The body grown by a ball of radius d (all faces moved out by d, edges and corners rounded).
 pub fn offset_rounded(b: &Body, dist: &[f64]) -> Result<Body> {
     let d = dist[0];
     if dist.iter().any(|x| (x - d).abs() > 1e-12) || d <= 0.0 {
         return Err(KernelError::Unsupported("rounded offsets with different distances per face"));
     }
-    let mut acc = b.clone();
+    let mut pieces: Vec<(Body, String)> = Vec::new();
     for fi in 0..b.faces.len() {
-        let slab = face_slab(b, fi, d)?;
-        acc = boolean_bodies(&acc, &slab, BoolOp::Union)?.body;
+        pieces.push((face_slab(b, fi, d)?, format!("the slab of face {fi} ({:?})", b.faces[fi].surf.kind())));
     }
     for e in 0..b.edges.len() {
         if b.edges[e].degenerate || convex(b, e) != Some(true) {
             continue;
         }
-        let tube = edge_tube(b, e, d)?;
-        acc = boolean_bodies(&acc, &tube, BoolOp::Union)?.body;
+        pieces.push((edge_tube(b, e, d)?, format!("the tube round edge {e}")));
     }
     let mut done: Vec<P3> = Vec::new();
     for e in &b.edges {
@@ -126,11 +192,43 @@ pub fn offset_rounded(b: &Body, dist: &[f64]) -> Result<Body> {
                 continue;
             }
             done.push(p);
-            let ball = ball_body(p, d)?;
-            acc = boolean_bodies(&acc, &ball, BoolOp::Union)?.body;
+            pieces.push((ball_body(p, d)?, format!("the ball at {p:?}")));
         }
     }
-    Ok(acc)
+    combine_all(b.clone(), pieces, BoolOp::Union)
+}
+
+/// `acc` combined (`op`) with each piece in turn. A piece whose boolean fails is tried again
+/// after the others: a union or difference of pieces doesn't depend on their order, but the
+/// touching configurations a boolean has to settle do (a slab's side against a neighbour's
+/// slab, not yet merged into a face). Fails when a round makes no progress, or after three
+/// rounds (each failed boolean costs its retries).
+fn combine_all(mut acc: Body, mut todo: Vec<(Body, String)>, op: BoolOp) -> Result<Body> {
+    for round in 0..3 {
+        let n = todo.len();
+        let mut left = Vec::new();
+        let mut first: Option<KernelError> = None;
+        for (piece, what) in todo {
+            match combine(&acc, &piece, op, &|| what.clone()) {
+                Ok(r) => {
+                    acc = r;
+                    if std::env::var("CADRS_SHELL_DEBUG").is_ok() {
+                        eprintln!("after {what}: {:.6} solids {}", super::mass::body_mass(&acc).volume, acc.solids.len());
+                    }
+                }
+                Err(e) => {
+                    first.get_or_insert(e);
+                    left.push((piece, what));
+                }
+            }
+        }
+        match first {
+            None => return Ok(acc),
+            Some(e) if left.len() == n || round == 2 => return Err(e),
+            Some(_) => todo = left,
+        }
+    }
+    Err(KernelError::OperationFailed("the offset's pieces don't combine".into()))
 }
 
 pub fn shell(k: &mut NativeKernel, body: BodyId, spec: &ShellSpec) -> Result<OpResult> {
@@ -151,51 +249,106 @@ pub fn shell(k: &mut NativeKernel, body: BodyId, spec: &ShellSpec) -> Result<OpR
         return Err(KernelError::InvalidParameter("The shell's walls would intersect themselves; reduce the thickness".into()));
     }
     let cur = Tracked::of(b.clone());
+    let v0 = super::mass::body_mass(&b).volume;
     let result = if !spec.outward {
-        // The cavity: kept faces moved in by t, removed faces moved out past the body.
+        // The cavity: kept faces moved in by t, removed faces moved out past the body, or,
+        // failing that (a spline wall's offset doesn't reach that far), where they are (the
+        // cavity opens flush with them).
         let dist: Vec<f64> = (0..b.faces.len()).map(|f| if remove.contains(&f) { size * 0.1 + 1.0 } else { -t }).collect();
+        let flush: Vec<f64> = dist.iter().enumerate().map(|(f, d)| if remove.contains(&f) { 0.0 } else { *d }).collect();
         // Concave edges between kept faces round the cavity (the walls are t thick
-        // everywhere): build it from its definition then.
+        // everywhere): build it from its definition then. Each way of making the cavity is
+        // tried in turn until the body less it comes out (a cavity flush with a removed face
+        // shares that face with the body, which the boolean may not settle).
         let concave = (0..b.edges.len()).any(|e| !b.edges[e].degenerate && convex(&b, e) == Some(false));
-        let cavity = if concave {
-            cavity_by_regions(&b, &remove, t)?
+        let sharp = |x: &Vec<f64>| super::local::offset_sharp(&b, x).and_then(|c| {
+            if super::mass::body_mass(&c).volume > 0.0 { Ok(c) } else { Err(KernelError::OperationFailed("the inset is empty".into())) }
+        });
+        let regions = || cavity_by_regions(&b, &remove, t);
+        let ways: Vec<Box<dyn Fn() -> Result<Body>>> = if concave && !spec.sharp {
+            vec![Box::new(regions)]
         } else {
-            match super::local::offset_sharp(&b, &dist) {
-                Ok(c) if super::mass::body_mass(&c).volume > 0.0 => c,
-                _ => cavity_by_regions(&b, &remove, t)?,
-            }
+            vec![Box::new(|| sharp(&dist)), Box::new(|| sharp(&flush)), Box::new(regions)]
         };
-        if spec.hollow {
-            // A closed void: the body with the cavity as an inner shell.
-            let mut out = cur.apply(&cavity, &vec![Vec::new(); cavity.faces.len()], BoolOp::Subtract)?;
-            if out.body.solids.len() != 1 {
-                return Err(KernelError::OperationFailed("the hollow shell isn't one solid".into()));
+        let mut first: Option<KernelError> = None;
+        let mut done = None;
+        for way in &ways {
+            let out = way().and_then(|cavity| {
+                let mut out = cur.apply(&cavity, &vec![Vec::new(); cavity.faces.len()], BoolOp::Subtract)?;
+                if spec.hollow {
+                    // A closed void: the body with the cavity as an inner shell.
+                    if out.body.solids.len() != 1 {
+                        return Err(KernelError::OperationFailed("the hollow shell isn't one solid".into()));
+                    }
+                    out.body.solids[0].shells.sort();
+                }
+                let v1 = super::mass::body_mass(&out.body).volume;
+                if v1 <= 1e-9 || v1 > v0 + 1e-9 {
+                    return Err(KernelError::OperationFailed("the shell came out wrong".into()));
+                }
+                Ok(out)
+            });
+            match out {
+                Ok(o) => {
+                    done = Some(o);
+                    break;
+                }
+                Err(e) => {
+                    first.get_or_insert(e);
+                }
             }
-            out.body.solids[0].shells.sort();
-            out
-        } else {
-            cur.apply(&cavity, &vec![Vec::new(); cavity.faces.len()], BoolOp::Subtract)?
+        }
+        match (done, first) {
+            (Some(o), _) => o,
+            (None, Some(e)) => return Err(e),
+            (None, None) => return Err(KernelError::OperationFailed("no cavity".into())),
         }
     } else {
         // Outward: the body grown by a ball, less the body, cut back at the removed faces.
-        let grown = offset_rounded(&b, &vec![t; b.faces.len()])?;
-        let mut walls = Tracked { src: vec![Vec::new(); grown.faces.len()], body: grown };
-        for &f in &remove {
-            let face = &b.faces[f];
-            let Surface::Plane { f: fr } = &face.surf else {
-                return Err(KernelError::Unsupported("removing a curved face from an outward shell"));
-            };
-            let n = fr.x.cross(&fr.y) * if face.sense { 1.0 } else { -1.0 };
-            let hs = half_space(fr.o, n, size * 4.0 + t * 4.0 + 10.0)?;
-            walls = walls.apply(&hs, &vec![Vec::new(); hs.faces.len()], BoolOp::Subtract)?;
+        let rounded = || -> Result<Tracked> {
+            let grown = offset_rounded(&b, &vec![t; b.faces.len()])?;
+            let mut walls = Tracked { src: vec![Vec::new(); grown.faces.len()], body: grown };
+            for &f in &remove {
+                let face = &b.faces[f];
+                let Surface::Plane { f: fr } = &face.surf else {
+                    return Err(KernelError::Unsupported("removing a curved face from an outward shell"));
+                };
+                let n = fr.x.cross(&fr.y) * if face.sense { 1.0 } else { -1.0 };
+                let hs = half_space(fr.o, n, size * 4.0 + t * 4.0 + 10.0)?;
+                walls = walls.apply(&hs, &vec![Vec::new(); hs.faces.len()], BoolOp::Subtract)?;
+            }
+            // walls − body: the body's faces bound the inside.
+            let r = boolean_bodies(&walls.body, &b, BoolOp::Subtract)?;
+            let src = r.from.iter().map(|s| s.iter().filter(|(o, _)| *o == 1).map(|(_, f)| super::blend::FaceSrc::Input(*f)).collect()).collect();
+            Ok(Tracked { body: r.body, src })
+        };
+        // With sharp corners: the kept faces moved out by t (the removed ones staying where
+        // they are, so the walls end flush with them), less the body. They differ from rounded
+        // ones only at a convex edge between kept faces; where the sharp walls can't be made
+        // (an offset face that doesn't reach its neighbour, a boolean that fails), rounded.
+        let ef = b.edge_faces();
+        let corners = (0..b.edges.len()).any(|e| !b.edges[e].degenerate && convex(&b, e) == Some(true) && ef[e].iter().all(|f| !remove.contains(f)));
+        let sharp = || -> Result<Tracked> {
+            let dist: Vec<f64> = (0..b.faces.len()).map(|f| if remove.contains(&f) { 0.0 } else { t }).collect();
+            let grown = super::local::offset_sharp(&b, &dist)?;
+            let r = boolean_bodies(&grown, &b, BoolOp::Subtract)?;
+            let src = r.from.iter().map(|s| s.iter().filter(|(o, _)| *o == 1).map(|(_, f)| super::blend::FaceSrc::Input(*f)).collect()).collect();
+            Ok(Tracked { body: r.body, src })
+        };
+        if spec.sharp && corners {
+            match sharp() {
+                Ok(r) => r,
+                Err(e) => {
+                    if std::env::var("CADRS_SHELL_DEBUG").is_ok() {
+                        eprintln!("shell: sharp outward walls failed ({e}); rounded");
+                    }
+                    rounded()?
+                }
+            }
+        } else {
+            rounded()?
         }
-        let inner = Tracked::of(b.clone());
-        // walls − body: the body's faces bound the inside.
-        let r = boolean_bodies(&walls.body, &inner.body, BoolOp::Subtract)?;
-        let src = r.from.iter().map(|s| s.iter().filter(|(o, _)| *o == 1).map(|(_, f)| super::blend::FaceSrc::Input(*f)).collect()).collect();
-        Tracked { body: r.body, src }
     };
-    let v0 = super::mass::body_mass(&b).volume;
     let v1 = super::mass::body_mass(&result.body).volume;
     if std::env::var("CADRS_SHELL_DEBUG").is_ok() {
         eprintln!("shell: body {v0} result {v1} solids {} faces {}", result.body.solids.len(), result.body.faces.len());
@@ -255,10 +408,67 @@ fn walls_cross(b: &Body, remove: &[usize], t: f64) -> bool {
     false
 }
 
+/// The body shrunk by a ball of radius `d` (every face moved in by d, the concave edges and
+/// corners rounded: the points farther than d inside the body), the faces at distance 0 left
+/// where they are (SMLib's inset with its convex edges, the body's concave ones, rounded:
+/// `SmOffsetExecutive` with `SetExtendConvexEdges(FALSE)`). A body with no concave edge
+/// shrinks to its sharp inset.
+pub fn inset_rounded(b: &Body, dist: &[f64]) -> Result<Body> {
+    let t = -dist.iter().copied().fold(0.0, f64::min);
+    if dist.iter().any(|x| *x != 0.0 && (x + t).abs() > 1e-12) || !(t > 0.0) {
+        return Err(KernelError::Unsupported("rounded insets with different distances per face"));
+    }
+    let concave = (0..b.edges.len()).any(|e| !b.edges[e].degenerate && convex(b, e) == Some(false));
+    if !concave
+        && let Ok(c) = super::local::offset_sharp(b, dist)
+    {
+        return Ok(c);
+    }
+    let still: Vec<usize> = (0..b.faces.len()).filter(|&f| dist[f] == 0.0).collect();
+    inner_core(b, &still, t, false)
+}
+
+/// A tube round each concave edge and a ball at each of their vertices (not round the `still`
+/// faces' edges and vertices unless `round_still`).
+fn rounds(b: &Body, still: &[usize], t: f64, round_still: bool) -> Result<Vec<(Body, String)>> {
+    let ef = b.edge_faces();
+    let at_still = |e: usize| !round_still && ef[e].iter().any(|f| still.contains(f));
+    let still_verts: Vec<usize> = (0..b.edges.len()).filter(|&e| at_still(e)).flat_map(|e| b.edges[e].v).collect();
+    let mut pieces: Vec<(Body, String)> = Vec::new();
+    let mut balls: Vec<P3> = Vec::new();
+    for e in 0..b.edges.len() {
+        if b.edges[e].degenerate || convex(b, e) != Some(false) || at_still(e) {
+            continue;
+        }
+        pieces.push((edge_tube(b, e, t)?, format!("the tube round edge {e}")));
+        // A closed edge (a whole circle) has no corner: its seam vertex needs no ball.
+        if b.edges[e].v[0] == b.edges[e].v[1] {
+            continue;
+        }
+        for v in b.edges[e].v {
+            let p = b.verts[v].p;
+            if !still_verts.contains(&v) && !balls.iter().any(|q| (q - p).norm() < 1e-9) {
+                balls.push(p);
+            }
+        }
+    }
+    for p in balls {
+        pieces.push((ball_body(p, t)?, format!("the ball at {p:?}")));
+    }
+    Ok(pieces)
+}
+
 /// The cavity built from its definition: the body less each kept face swept inward by t, a
 /// tube round each concave edge between kept faces and a ball at each vertex of a concave edge.
 pub fn cavity_by_regions(b: &Body, remove: &[usize], t: f64) -> Result<Body> {
-    let mut acc = b.clone();
+    inner_core(b, remove, t, true)
+}
+
+/// The body less each face but `still` swept inward by t, a tube round each concave edge and a
+/// ball at each vertex of one; with `round_still` false, not round the edges and vertices of
+/// the `still` faces (which stay where they are).
+fn inner_core(b: &Body, remove: &[usize], t: f64, round_still: bool) -> Result<Body> {
+    let mut pieces: Vec<(Body, String)> = Vec::new();
     for fi in 0..b.faces.len() {
         if remove.contains(&fi) {
             continue;
@@ -267,89 +477,110 @@ pub fn cavity_by_regions(b: &Body, remove: &[usize], t: f64) -> Result<Body> {
             Surface::Plane { .. } => face_slab(b, fi, -t)?,
             _ => face_band(b, fi, t)?,
         };
-        acc = boolean_bodies(&acc, &slab, BoolOp::Subtract)?.body;
-        if std::env::var("CADRS_SHELL_DEBUG").is_ok() {
-            eprintln!("after slab of face {fi} ({:?}): cavity {:.6} solids {}", b.faces[fi].surf.kind(), super::mass::body_mass(&acc).volume, acc.solids.len());
-        }
+        pieces.push((slab, format!("the inward slab of face {fi} ({:?})", b.faces[fi].surf.kind())));
     }
-    let mut balls: Vec<P3> = Vec::new();
-    for e in 0..b.edges.len() {
-        if b.edges[e].degenerate || convex(b, e) != Some(false) {
-            continue;
-        }
-        let tube = edge_tube(b, e, t)?;
-        acc = boolean_bodies(&acc, &tube, BoolOp::Subtract)?.body;
-        if std::env::var("CADRS_SHELL_DEBUG").is_ok() {
-            eprintln!("after tube of edge {e}: cavity {:.6} solids {}", super::mass::body_mass(&acc).volume, acc.solids.len());
-        }
-        // A closed edge (a whole circle) has no corner: its seam vertex needs no ball.
-        if b.edges[e].v[0] == b.edges[e].v[1] {
-            continue;
-        }
-        for v in b.edges[e].v {
-            let p = b.verts[v].p;
-            if !balls.iter().any(|q| (q - p).norm() < 1e-9) {
-                balls.push(p);
-            }
-        }
-    }
-    for p in balls {
-        let ball = ball_body(p, t)?;
-        acc = boolean_bodies(&acc, &ball, BoolOp::Subtract)?.body;
-    }
-    Ok(acc)
+    pieces.extend(rounds(b, remove, t, round_still)?);
+    combine_all(b.clone(), pieces, BoolOp::Subtract)
 }
 
 /// The region within t inside a curved face (a cylinder's band).
 fn face_band(b: &Body, fi: usize, t: f64) -> Result<Body> {
     let f = &b.faces[fi];
-    match &f.surf {
-        Surface::Cylinder { f: fr, r } => {
-            // The ring between r and r ∓ t over the face's height range (whole turn).
-            let outward = f.sense == fr.right_handed();
-            let (r0, r1) = if outward { (r - t, *r) } else { (*r, r + t) };
-            if r0 <= 0.0 {
-                return Err(KernelError::Unsupported("a shell thicker than a cylinder's radius"));
-            }
-            let sub = super::kernel::subset(b, &[fi], false);
-            let (lo, hi) = super::kernel::extent_along(&sub, &fr.o, &fr.z);
-            let plane = Plane { origin: fr.o + fr.z * lo, x_dir: nalgebra::Unit::new_normalize(fr.x), normal: nalgebra::Unit::new_normalize(fr.z) };
-            let circ = |rr: f64| Loop { curves: vec![Curve2::Circle { center: nalgebra::Point2::origin(), radius: rr, source: None }] };
-            // The face's angular range (its p-curves' u).
-            let (mut u0, mut u1) = (f64::INFINITY, f64::NEG_INFINITY);
-            for c in f.loops.iter().flatten() {
-                let e = &b.edges[c.edge];
-                for i in 0..=8 {
-                    let q = c.pc.point(e.t[0] + (e.t[1] - e.t[0]) * i as f64 / 8.0);
-                    u0 = u0.min(q.x);
-                    u1 = u1.max(q.x);
-                }
-            }
-            // A ring for a whole turn, else the annular sector behind the face.
-            let region = if !(u1 - u0 < TAU - 1e-9) {
-                Region { outer: circ(r1), holes: vec![circ(r0)], source: None }
-            } else {
-                let o = nalgebra::Point2::origin();
-                let at = |rr: f64, u: f64| nalgebra::Point2::new(rr * u.cos(), rr * u.sin());
-                Region {
-                    outer: Loop {
-                        curves: vec![
-                            Curve2::Arc { center: o, radius: r1, start_angle: u0, sweep: u1 - u0, source: None },
-                            Curve2::Line { a: at(r1, u1), b: at(r0, u1), source: None },
-                            Curve2::Arc { center: o, radius: r0, start_angle: u1, sweep: u0 - u1, source: None },
-                            Curve2::Line { a: at(r0, u0), b: at(r1, u0), source: None },
-                        ],
-                    },
-                    holes: vec![],
-                    source: None,
-                }
-            };
-            let prof = Profile::new(plane, vec![region]);
-            let regions = super::profile::regions(&prof)?;
-            let mf = super::profile::merge_regions(&regions)?;
-            let kind = super::sweep::Prism { plane, dir: fr.z };
-            Ok(super::sweep::sweep_full(&mf, &[], &kind, 0.0, hi - lo, false, true)?.body)
+    if let Surface::Cylinder { f: fr, r } = &f.surf {
+        // The ring between r and r ∓ t behind the face.
+        let outward = f.sense == fr.right_handed();
+        let (r0, r1) = if outward { (r - t, *r) } else { (*r, r + t) };
+        if r0 <= 0.0 {
+            return Err(KernelError::Unsupported("a shell thicker than a cylinder's radius"));
         }
-        _ => super::slab::face_slab(b, fi, -t),
+        if let Some(band) = cylinder_band(b, fi, r0, r1)? {
+            return Ok(band);
+        }
     }
+    super::slab::face_slab(b, fi, -t)
+}
+
+/// The points of a concave cylindrical face's slab nearer the face than its axis: the wedge
+/// between the face and the axis. A concave face's normals meet at its axis, so no point past
+/// the axis is nearer the face than the rest of the body: when the offset reaches the axis
+/// this is the face's part of the grown body (its offset surface would have no radius).
+fn cylinder_wedge(b: &Body, fi: usize) -> Result<Option<Body>> {
+    let Surface::Cylinder { r, .. } = &b.faces[fi].surf else { return Ok(None) };
+    cylinder_band(b, fi, 0.0, *r)
+}
+
+/// The solid between radii r0 and r1 (r0 = 0: out from the axis) over a cylindrical face's
+/// angles and heights: an annular sector (a ring for a whole turn; a pie slice or a disc from
+/// the axis) swept along the axis. None unless the face spans whole axial lines between two
+/// circles square to the axis (its domain a rectangle in angle and height).
+fn cylinder_band(b: &Body, fi: usize, r0: f64, r1: f64) -> Result<Option<Body>> {
+    let f = &b.faces[fi];
+    let Surface::Cylinder { f: fr, r } = &f.surf else { return Ok(None) };
+    let size = 1.0 + r + fr.o.coords.norm();
+    let rect = f.loops.iter().flatten().all(|c| {
+        let e = &b.edges[c.edge];
+        e.degenerate
+            || match &e.curve {
+                Curve::Line { d, .. } => d.normalize().cross(&fr.z).norm() < 1e-9,
+                Curve::Circle { c: cc, x, y, r: rc } => {
+                    let w = cc - fr.o;
+                    x.cross(y).normalize().cross(&fr.z).norm() < 1e-9 && (w - fr.z * w.dot(&fr.z)).norm() < 1e-7 * size && (rc - r).abs() < 1e-7 * size
+                }
+                _ => false,
+            }
+    });
+    if !rect {
+        return Ok(None);
+    }
+    let sub = super::kernel::subset(b, &[fi], false);
+    let (lo, hi) = super::kernel::extent_along(&sub, &fr.o, &fr.z);
+    let plane = Plane { origin: fr.o + fr.z * lo, x_dir: nalgebra::Unit::new_normalize(fr.x), normal: nalgebra::Unit::new_normalize(fr.z) };
+    let circ = |rr: f64| Loop { curves: vec![Curve2::Circle { center: nalgebra::Point2::origin(), radius: rr, source: None }] };
+    // The face's angular range (its p-curves' u), as angles in the plane (whose y is z × x:
+    // the frame's y for a right-handed frame, else the other way).
+    let (mut u0, mut u1) = (f64::INFINITY, f64::NEG_INFINITY);
+    for c in f.loops.iter().flatten() {
+        let e = &b.edges[c.edge];
+        for i in 0..=8 {
+            let q = c.pc.point(e.t[0] + (e.t[1] - e.t[0]) * i as f64 / 8.0);
+            u0 = u0.min(q.x);
+            u1 = u1.max(q.x);
+        }
+    }
+    let whole = !(u1 - u0 < TAU - 1e-9);
+    let (u0, u1) = if fr.right_handed() { (u0, u1) } else { (-u1, -u0) };
+    let o = nalgebra::Point2::origin();
+    let at = |rr: f64, u: f64| nalgebra::Point2::new(rr * u.cos(), rr * u.sin());
+    let region = match (whole, r0 > 0.0) {
+        (true, true) => Region { outer: circ(r1), holes: vec![circ(r0)], source: None },
+        (true, false) => Region { outer: circ(r1), holes: vec![], source: None },
+        (false, true) => Region {
+            outer: Loop {
+                curves: vec![
+                    Curve2::Arc { center: o, radius: r1, start_angle: u0, sweep: u1 - u0, source: None },
+                    Curve2::Line { a: at(r1, u1), b: at(r0, u1), source: None },
+                    Curve2::Arc { center: o, radius: r0, start_angle: u1, sweep: u0 - u1, source: None },
+                    Curve2::Line { a: at(r0, u0), b: at(r1, u0), source: None },
+                ],
+            },
+            holes: vec![],
+            source: None,
+        },
+        (false, false) => Region {
+            outer: Loop {
+                curves: vec![
+                    Curve2::Arc { center: o, radius: r1, start_angle: u0, sweep: u1 - u0, source: None },
+                    Curve2::Line { a: at(r1, u1), b: o, source: None },
+                    Curve2::Line { a: o, b: at(r1, u0), source: None },
+                ],
+            },
+            holes: vec![],
+            source: None,
+        },
+    };
+    let prof = Profile::new(plane, vec![region]);
+    let regions = super::profile::regions(&prof)?;
+    let mf = super::profile::merge_regions(&regions)?;
+    let kind = super::sweep::Prism { plane, dir: fr.z };
+    Ok(Some(super::sweep::sweep_full(&mf, &[], &kind, 0.0, hi - lo, false, true)?.body))
 }

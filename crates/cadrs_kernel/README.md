@@ -140,7 +140,7 @@ orientation (`build::fix_senses`). Periodic faces have seams (an edge used twice
 | `ssi` | Surface intersections: analytic cases (planes, quadrics, tori, coaxial surfaces of revolution, plane × extrusion, plane × cone as exact conics), and numeric contouring of one surface's signed distance over the other's uv box, refined onto both and fitted (projections hinted by the neighbouring point). Curve–curve and curve–surface hits. |
 | `boolean`, `boolean_kinds`, `split`, `classify`, `unify` | Booleans: a pool of the inputs' vertices and edges, split at vertex-on-edge, edge–edge, edge–face and face–face intersections; coincident faces imprinted and coincident pieces made one edge; faces split in uv; pieces classified by exact ray parity; the kept faces assembled into shells; coplanar and same-surface faces merged (`unify`). Sheets, wires and points (`boolean_kinds`): sheets split by `imprint` and their pieces kept by a point inside each, solid − sheet a split into solids, wires through `edge_bop`; the result kind per operation is tabled in the module. |
 | `blend` | Fillets and chamfers as tool bodies (an exact prism or revolution of the rolling-ball or chamfer section where the edge allows, a lofted chain tool otherwise) subtracted or added; corner tools where three blended edges meet; variable, partial, asymmetric, conic and curvature sections; overlap and fit checks. |
-| `local`, `offset_round` | Offsets (sharp and rounded), drafts, shells (inward and outward, hollow; the cavity built from its definition: the body less each kept face's slab, tubes and balls). |
+| `local`, `offset_round`, `slab` | Offsets (sharp: the faces' new surfaces re-intersected; rounded: the body ∪ each face's slab ∪ a tube round each convex edge ∪ a ball at each vertex, a concave cylinder's slab its wedge out to the axis when the distance passes its radius; rounded insets: the body less each face's inward slab, a tube round each concave edge and a ball at each of its vertices), drafts, face replacement (`Kernel::replace_faces`, SMLib's local operation, the new surface's domain picking the crossings), shells (inward and outward, hollow, corners rounded or sharp; the cavity built from its definition: the body less each kept face's slab, tubes and balls). Slabs keep the body's edge and vertex tolerances. |
 | `surfacing` | Thicken (a sewn sheet with flat open ends shelled as the solid it bounds), fill (planar, Coons), sew, simplify, delete faces. |
 | `mass` | Exact mass properties: the divergence theorem on each face, integrated by Green's theorem over the uv domain (nested Gauss–Legendre), along v for ruled faces, and by a tensor rule on knot spans for untrimmed B-spline patches. |
 | `tess` | Tessellation: every edge sampled once (chord deflection and half the angle step), each face triangulated by a constrained Delaunay triangulation (spade) in metric-scaled uv, in parallel (rayon). |
@@ -180,8 +180,10 @@ the kind's prefix.
 **Debugging and profiling** (environment variables; output on stderr):
 - `CADRS_PROFILE=1`: each boolean's phases, slow mass properties and tessellations, sweeps.
 - `CADRS_BOOL_DEBUG=1`, `CADRS_SPLIT_DEBUG=1`, `CADRS_SHELL_DEBUG=1`, `CADRS_VERTEX_DEBUG=1`,
-  `CADRS_PCURVE_DEBUG=1`: the boolean's intersections, face splits and output faces; face
-  splitting in uv; a shell's cavity steps; vertex merging; p-curve fits that don't converge.
+  `CADRS_PCURVE_DEBUG=1`, `CADRS_OFFSET_DEBUG=1`, `CADRS_SLAB_DEBUG=1`: the boolean's
+  intersections, face splits and output faces; face splitting in uv; a shell's cavity steps;
+  vertex merging; p-curve fits that don't converge; the offset's piece whose boolean fails
+  (with `CADRS_DUMP_DIR`, both inputs are written); a face slab's build warnings.
 - `CADRS_DUMP_DIR=<dir>`: shells, fillets and chamfers write their input body (exact bytes) and
   parameters there, with the outcome; slow mass properties too. `tests/native_debug.rs` replays
   them (`CADRS_REPRO=<file.body> cargo test -r -p cadrs_kernel --test native_debug debug_repro_shell`).
