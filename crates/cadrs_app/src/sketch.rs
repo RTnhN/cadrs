@@ -1805,7 +1805,7 @@ fn tool_visuals(t: &Theme) -> Visuals {
 /// Enables the sketch tools once the sketch has a plane and marks the active tool. Like
 /// Onshape, the Construction button is lit for a selection that is all construction geometry,
 /// else for the mode new geometry is drawn in.
-#[allow(clippy::type_complexity)]
+#[allow(clippy::type_complexity, clippy::too_many_arguments)]
 pub(crate) fn sync_sketch_toolbar(
     session: Option<Res<SketchSession>>,
     doc: Option<Res<ActiveDocument>>,
