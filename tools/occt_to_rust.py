@@ -306,12 +306,35 @@ class Case:
             self.offset_join = a[2]
         elif c == "offsetload" and len(a) >= 2:
             self.offset_load = (a[0], a[1], a[2:])
+            self.offset_on = []
+        elif c == "offsetonface" and len(a) >= 2 and len(a) % 2 == 0:
+            if self.offset_load is None:
+                raise Unsupported("offsetonface without offsetload")
+            self.offset_on += [(a[i], a[i + 1]) for i in range(0, len(a), 2)]
         elif c == "offsetperform" and len(a) == 1:
             if self.offset_load is None:
                 raise Unsupported("offsetperform without offsetload")
             s_, d_, fs = self.offset_load
             arc = "true" if self.offset_join == "a" else "false"
-            self.bind(a[0], f"k.offsetperform({self.shape(s_)}, {L(d_)}, &[{', '.join(self.shape(f) for f in fs)}], {arc})?")
+            on = getattr(self, "offset_on", [])
+            if on:
+                if fs:
+                    raise Unsupported("offsetonface with faces removed")
+                own = ", ".join(f"({self.shape(f)}, {L(x)})" for f, x in on)
+                self.bind(a[0], f"k.offsetperform_on({self.shape(s_)}, {L(d_)}, &[{own}], {arc})?")
+            else:
+                self.bind(a[0], f"k.offsetperform({self.shape(s_)}, {L(d_)}, &[{', '.join(self.shape(f) for f in fs)}], {arc})?")
+        elif c == "offsetcompshape" and len(a) >= 3:
+            opts = [x for x in a[3:] if x.startswith("-")]
+            if any(x not in ("-i", "-t") for x in opts):
+                raise Unsupported("offsetcompshape options")
+            fs = [x for x in a[3:] if not x.startswith("-")]
+            inter = "true" if "-i" in opts else "false"
+            self.bind(a[0], f"k.offsetcompshape({self.shape(a[1])}, {L(a[2])}, &[{', '.join(self.shape(f) for f in fs)}], {inter})?")
+        elif c == "thickshell" and 3 <= len(a) <= 5:
+            if len(a) >= 4 and a[3] not in ("i", "a"):
+                raise Unsupported("thickshell join type")
+            self.bind(a[0], f"k.thickshell({self.shape(a[1])}, {L(a[2])})?")
         elif c == "depouille" and len(a) >= 13 and (len(a) - 5) % 8 == 0:
             groups = []
             for i in range(5, len(a), 8):

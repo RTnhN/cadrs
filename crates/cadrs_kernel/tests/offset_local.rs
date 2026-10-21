@@ -128,3 +128,22 @@ fn replace_face_takes_the_arc_in_the_domain() {
     let lower = one(k.replace_faces(b, &[FaceReplacement { domain: None, ..upper }]).unwrap());
     close(volume(&k, lower), 1200.0 - 125.0 * PI, 1e-9);
 }
+
+/// A cylinder whose side is given its exact B-spline form (closed round, not periodic: its seam
+/// on the spline's boundary), then offset sharp: the seam moves as the spline's own iso line
+/// (an exact iso curve of the surface, not an iso line of an analytic one).
+#[test]
+fn seam_on_a_closed_spline_moves() {
+    let mut k = NativeKernel::new();
+    let b = prism(&mut k, circle((0.0, 0.0), 5.0), vec![], 10.0);
+    let side = k.faces(b).unwrap().into_iter().find(|f| f.kind == SurfaceKind::Cylinder).expect("no side").id;
+    let surf = {
+        let body = k.get(b).unwrap();
+        let f = &body.faces[side.0 as usize];
+        Surface::Nurbs(std::sync::Arc::new(f.surf.to_nurbs((0.0, 2.0 * PI), (-1.0, 11.0))))
+    };
+    let spline = one(k.replace_faces(b, &[FaceReplacement { face: side, surface: surf, domain: None }]).unwrap());
+    close(volume(&k, spline), PI * 25.0 * 10.0, 1e-6);
+    let out = one(k.offset(spline, &OffsetSpec { distance: 1.0, faces: vec![], sharp: true }).unwrap());
+    close(volume(&k, out), PI * 36.0 * 12.0, 1e-5);
+}

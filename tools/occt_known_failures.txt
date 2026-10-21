@@ -835,3 +835,20 @@ feat featrevol_i9
 feat featrf_b2
 # feat: unsupported: revolved features up to a face and an angle.
 feat featrevol_a8
+# offsetcompshape / offsetonface / thickshell cases made runnable by those commands: thick solids whose
+# walls cross (compshape a1, a6, a7), booleans (a2), sharp offsets where faces vanish or meet new
+# neighbours (shape_type_i_c p3, v4, y3–y8; compshape a4), a thickened closed sphere face (bug26233).
+offset bugs_bug26233
+offset compshape_a1
+offset compshape_a2
+offset compshape_a4
+offset compshape_a6
+offset compshape_a7
+offset shape_type_i_c_p3
+offset shape_type_i_c_v4
+offset shape_type_i_c_y3
+offset shape_type_i_c_y4
+offset shape_type_i_c_y5
+offset shape_type_i_c_y6
+offset shape_type_i_c_y7
+offset shape_type_i_c_y8

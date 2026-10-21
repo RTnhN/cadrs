@@ -1157,6 +1157,40 @@ impl NativeKernel {
         Ok(Shape::Body(r.bodies[0]))
     }
 
+    /// `offsetload s d; offsetonface f1 d1 [f2 d2 …]; offsetperform result`: the solid offset
+    /// by `d`, the faces listed by their own distances (sharp or, with arc joins, rounded; a
+    /// face at distance 0 stays where it is).
+    pub fn offsetperform_on(&mut self, s: &Shape, d: f64, own: &[(&Shape, f64)], arc: bool) -> Result<Shape> {
+        let b = self.body_of(s)?;
+        let faces = own
+            .iter()
+            .map(|(f, x)| match f {
+                Shape::BodyFace(fb, id) if *fb == b => Ok((*id, *x)),
+                _ => Err(err("offsetonface: the faces must be faces of the shape")),
+            })
+            .collect::<Result<Vec<_>>>()?;
+        let r = crate::Kernel::offset(self, b, &OffsetSpec { distance: d, faces, sharp: !arc })?;
+        Ok(Shape::Body(r.bodies[0]))
+    }
+
+    /// `offsetcompshape result s d [face …] [-i]`: a thick solid (OCCT's `MakeThickSolid`): the
+    /// faces listed removed and walls `|d|` thick (outwards for d > 0), corners rounded unless
+    /// `-i` (intersection); with no face, the solid offset by `d`.
+    pub fn offsetcompshape(&mut self, s: &Shape, d: f64, faces: &[&Shape], intersect: bool) -> Result<Shape> {
+        self.offsetperform(s, d, faces, !intersect)
+    }
+
+    /// `thickshell result shape d [i|a [tol]]`: a sheet (a face or a shell) thickened into a
+    /// solid by `d` along its normals (against them for d < 0).
+    pub fn thickshell(&mut self, s: &Shape, d: f64) -> Result<Shape> {
+        let spec = match s {
+            Shape::BodyFace(b, f) => ThickenSpec { bodies: vec![], faces: vec![FaceInput { body: *b, face: *f, source: 0 }], profiles: vec![], along: d.max(0.0), against: (-d).max(0.0), source: 0 },
+            _ => ThickenSpec { bodies: vec![self.body_of(s)?], faces: vec![], profiles: vec![], along: d.max(0.0), against: (-d).max(0.0), source: 0 },
+        };
+        let r = crate::Kernel::thicken_surfaces(self, &spec)?;
+        Ok(Shape::Body(r.bodies[0]))
+    }
+
     /// `depouille result shape dx dy dz face angle px py pz nx ny nz [face angle …]`: faces
     /// drafted by angles (degrees) along the pull direction about neutral planes (through p,
     /// normal n).

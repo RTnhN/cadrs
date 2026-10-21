@@ -152,6 +152,46 @@ fn line_meet(c: &Curve, surfs: &[&Surface], p: P3) -> Option<P3> {
     surfs.iter().all(|s| s.distance(&q) < 1e-7).then_some(q)
 }
 
+/// On a B-spline surface closed in u or v (not periodic: its p-curves stay in its range), the
+/// p-curve `pc` over [t0, t1] moved across the range when its start is a whole range from `at`
+/// (the previous coedge's end) and stays in the range moved: a seam's other use.
+fn closed_spline_shift(s: &Surface, pc: &Curve, t0: f64, t1: f64, at: [f64; 2]) -> Option<Curve> {
+    let Surface::Nurbs(n) = s else { return None };
+    let ((u0, u1), (v0, v1)) = n.range();
+    let (q, r) = (pc.point(t0), pc.point(t1));
+    let (q, r) = ([q.x, q.y], [r.x, r.y]);
+    let mut shift = [0.0; 2];
+    for (k, (a, b), closed) in [(0, (u0, u1), (0..=4).all(|j| (s.eval(u0, v0 + (v1 - v0) * j as f64 / 4.0) - s.eval(u1, v0 + (v1 - v0) * j as f64 / 4.0)).norm() < 1e-9)), (1, (v0, v1), (0..=4).all(|i| (s.eval(u0 + (u1 - u0) * i as f64 / 4.0, v0) - s.eval(u0 + (u1 - u0) * i as f64 / 4.0, v1)).norm() < 1e-9))] {
+        let w = b - a;
+        if !closed || w <= 0.0 {
+            continue;
+        }
+        let m = ((at[k] - q[k]) / w).round();
+        let tol = 1e-9 * w;
+        let inside = |x: f64| x >= a - tol && x <= b + tol;
+        if m != 0.0 && inside(q[k] + m * w) && inside(r[k] + m * w) {
+            shift[k] = m * w;
+        }
+    }
+    (shift != [0.0; 2]).then(|| pc.transformed(&Affine::translation(V3::new(shift[0], shift[1], 0.0))))
+}
+
+/// The exact iso curve of a B-spline surface: u = `t` (running along v) when `along_v`, else
+/// v = `t` (along u). Its poles are the surface's rows blended by the other direction's basis
+/// at `t`, in homogeneous coordinates.
+fn nurbs_iso(n: &super::nurbs::NurbsSurface, t: f64, along_v: bool) -> NurbsCurve {
+    let (deg, knots, count) = if along_v { (n.du, &n.ku, n.cps.len()) } else { (n.dv, &n.kv, n.cps[0].len()) };
+    let span = super::nurbs::find_span(count - 1, deg, t, knots);
+    let basis = &super::nurbs::basis_ders(span, t, deg, 0, knots)[0];
+    if along_v {
+        let cps = (0..n.cps[0].len()).map(|j| (0..=deg).map(|k| n.cps[span - deg + k][j] * basis[k]).sum()).collect();
+        NurbsCurve { degree: n.dv, knots: n.kv.clone(), cps }
+    } else {
+        let cps = (0..n.cps.len()).map(|i| (0..=deg).map(|k| n.cps[i][span - deg + k] * basis[k]).sum()).collect();
+        NurbsCurve { degree: n.du, knots: n.ku.clone(), cps }
+    }
+}
+
 /// The points where a surface collapses: a cone's apex, a sphere's poles.
 fn singular_points(s: &Surface) -> Vec<P3> {
     match s {
@@ -287,10 +327,26 @@ pub fn replace_surfaces_in(b: &Body, surfs: &[Surface], domains: &[Option<UvBox>
         } else if let Some(c) = swept_line(surfs, fs, &ed.curve, &p0, &p1) {
             c
         } else if fs.len() == 2 && fs[0] == fs[1] {
-            // A seam: the new surface's iso-u line through the vertex.
+            // A seam: the new surface's iso-u line through the vertex (on a closed B-spline,
+            // the iso line along the old seam's constant parameter, at the side it lies on).
             let s = &surfs[fs[0]];
-            let (u, _) = s.project(&p0, None);
-            s.iso_u(u).ok_or(KernelError::Unsupported("moving a seam of this surface"))?
+            match s {
+                Surface::Nurbs(n) => {
+                    let old = &b.faces[fs[0]].surf;
+                    let (ua, va) = old.project(&ed.point(ed.t[0]), None);
+                    let (ub, vb) = old.project(&ed.point(ed.mid_t()), None);
+                    let along_v = (ua - ub).abs() <= (va - vb).abs();
+                    let (u, v) = s.project(&p0, None);
+                    let ((u0, u1), (v0, v1)) = n.range();
+                    let snap = |x: f64, a: f64, b: f64| if (x - a).abs() < 1e-6 * (b - a) { a } else if (x - b).abs() < 1e-6 * (b - a) { b } else { x };
+                    let iso = if along_v { nurbs_iso(n, snap(u, u0, u1), true) } else { nurbs_iso(n, snap(v, v0, v1), false) };
+                    Curve::Nurbs(std::sync::Arc::new(iso))
+                }
+                _ => {
+                    let (u, _) = s.project(&p0, None);
+                    s.iso_u(u).ok_or(KernelError::Unsupported("moving a seam of this surface"))?
+                }
+            }
         } else if fs.len() == 2 {
             let (sa, sb) = (&surfs[fs[0]], &surfs[fs[1]]);
             let mut bb = Bbox::empty();
@@ -392,13 +448,16 @@ pub fn replace_surfaces_in(b: &Body, surfs: &[Surface], domains: &[Option<UvBox>
                 // surface's u, which no projection recovers).
                 let same = surf == b.faces[fi].surf && (old.degenerate || (e.t == old.t && e.curve == old.curve));
                 let mut pc = if same { c.pc.clone() } else { super::pcurve::pcurve(&surf, &e.curve, e.t[0], e.t[1], None) };
-                let (t0, _) = super::topo::co_range(e, c.fwd);
+                let (t0, t1) = super::topo::co_range(e, c.fwd);
                 if let Some(a) = at {
                     let q = pc.point(t0);
                     let du = if surf.u_periodic() { ((a.x - q.x) / TAU).round() * TAU } else { 0.0 };
                     let dv = if surf.v_periodic() { ((a.y - q.y) / TAU).round() * TAU } else { 0.0 };
                     if du != 0.0 || dv != 0.0 {
                         pc = pc.transformed(&Affine::translation(V3::new(du, dv, 0.0)));
+                    }
+                    if let Some(shifted) = closed_spline_shift(&surf, &pc, t0, t1, [a.x, a.y]) {
+                        pc = shifted;
                     }
                 }
                 let (_, t1) = super::topo::co_range(e, c.fwd);
@@ -410,10 +469,22 @@ pub fn replace_surfaces_in(b: &Body, surfs: &[Surface], domains: &[Option<UvBox>
         }
     }
     // Seams: both coedges of a seam got the same p-curve; shift the one that should be a
-    // period away so the loop closes.
+    // period away so the loop closes (on a closed spline, to the other side of its range).
     for fi in 0..out.faces.len() {
         let surf = out.faces[fi].surf.clone();
         if !surf.u_periodic() {
+            for li in 0..out.faces[fi].loops.len() {
+                let n = out.faces[fi].loops[li].len();
+                for k in 0..n {
+                    let prev = out.faces[fi].loops[li][(k + n - 1) % n].clone();
+                    let cur = out.faces[fi].loops[li][k].clone();
+                    let (_, pt1) = super::topo::co_range(&out.edges[prev.edge], prev.fwd);
+                    let (ct0, ct1) = super::topo::co_range(&out.edges[cur.edge], cur.fwd);
+                    if let Some(shifted) = closed_spline_shift(&surf, &cur.pc, ct0, ct1, { let a = prev.pc.point(pt1); [a.x, a.y] }) {
+                        out.faces[fi].loops[li][k].pc = shifted;
+                    }
+                }
+            }
             continue;
         }
         for li in 0..out.faces[fi].loops.len() {
