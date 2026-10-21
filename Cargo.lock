@@ -2067,7 +2067,6 @@ dependencies = [
  "cadrs_core",
  "cadrs_harness",
  "cadrs_ui",
- "directories",
  "image",
 ]
 

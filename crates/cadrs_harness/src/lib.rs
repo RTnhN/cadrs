@@ -243,6 +243,7 @@ pub fn default_plugins(opts: &HarnessOptions) -> PluginGroupBuilder {
         plugins.set(WindowPlugin {
             primary_window: Some(Window {
                 title: "cadrs".into(),
+                // The Wayland app id / X11 class: desktops match it to cadrs.desktop for the icon.
                 name: Some("cadrs".into()),
                 resolution,
                 ..default()

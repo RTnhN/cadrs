@@ -28,9 +28,9 @@ use cadrs_ui::CadrsUiPlugin;
 /// "Now" in scenarios: 2026-09-24 15:30 UTC.
 const SCENARIO_NOW: i64 = 1_790_263_800;
 
-mod desktop_entry;
 mod batch;
 mod check;
+mod install;
 
 /// Every way to run cadrs (`-h`, `--help`).
 const HELP: &str = "\
@@ -46,9 +46,9 @@ Usage:
       Rebuilds a stored document without a window and reports its features in error or warning.
   cadrs --headless --jobs N (--scenarios a,b,... | --all)
       Renders many scenarios, N at a time, each in its own process.
-
-  cadrs --install-desktop
-      Installs the Linux app launcher and cube icon for this executable.
+  cadrs --install
+      Installs this build for the current user, with a launcher entry (Linux, macOS, Windows;
+      `cargo install-local`).
 
 Documents live in --data-dir, else $CADRS_DATA_DIR, else the platform data dir
 (~/.local/share/cadrs/documents on Linux).";
@@ -72,10 +72,18 @@ fn main() -> AppExit {
         println!("{HELP}");
         return AppExit::Success;
     }
-    if args.iter().any(|a| a == "--install-desktop") {
-        return match desktop_entry::install_desktop() {
-            Ok(()) => AppExit::Success,
-            Err(e) => { eprintln!("cannot install desktop launcher: {e}"); AppExit::from_code(1) }
+    // `--install`: installs this build for the user, with a launcher entry (`install.rs`;
+    // `--install-desktop` is its older name).
+    if args.iter().any(|a| a == "--install" || a == "--install-desktop") {
+        return match install::run() {
+            Ok(dir) => {
+                println!("Installed cadrs to {}", dir.display());
+                AppExit::Success
+            }
+            Err(e) => {
+                eprintln!("{e}");
+                AppExit::from_code(1)
+            }
         };
     }
     // `--list-documents`: the store's documents with their ids, no window.
