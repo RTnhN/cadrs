@@ -638,7 +638,10 @@ pub fn sweep_body(b: &Body, mv: &BodyMove, s1: f64, whole: bool, source: u64) ->
         return Err(KernelError::InvalidParameter("The sweep makes no faces (every edge lies along it)".into()));
     }
     if !sheet {
-        o.shells.push(Shell { faces, closed: false });
+        // One open shell per piece of edge-connected faces (disjoint wires sweep apart).
+        for piece in o.face_components(&faces) {
+            o.shells.push(Shell { faces: piece, closed: false });
+        }
         out.origins.sort_by_key(|(f, _)| *f);
         return Ok(out);
     }
@@ -659,17 +662,49 @@ pub fn sweep_body(b: &Body, mv: &BodyMove, s1: f64, whole: bool, source: u64) ->
             out.origins.push((o.faces.len() - 1, Origin::EndCap { region: 0 }));
         }
     }
-    o.shells.push(Shell { faces, closed: true });
-    o.solids.push(Solid { shells: vec![0] });
     // Built facing the way the sheet faces at the start: turn it out.
-    let v = super::mass::body_mass(o).volume;
-    if v < 0.0 {
+    let whole_body = super::kernel::subset(o, &faces, true);
+    if super::mass::body_mass(&whole_body).volume < 0.0 {
         for f in &mut o.faces {
             Body::reverse_face(f);
         }
     }
+    assemble_solids(o, &faces)?;
     out.origins.sort_by_key(|(f, _)| *f);
     Ok(out)
+}
+
+/// Makes the closed shells and solids of `faces` (outward-facing): one closed shell per piece of
+/// edge-connected faces; a piece enclosing a positive volume bounds a solid, one enclosing a
+/// negative volume is a void of the smallest such solid around it (a profile's hole turned a
+/// whole turn about an axis outside it sweeps a tunnel, not a hole).
+fn assemble_solids(o: &mut Body, faces: &[usize]) -> Result<()> {
+    let pieces = o.face_components(faces);
+    let vols: Vec<f64> = pieces.iter().map(|p| super::mass::body_mass(&super::kernel::subset(o, p, true)).volume).collect();
+    let mut outers: Vec<usize> = (0..pieces.len()).filter(|&k| vols[k] > 0.0).collect();
+    outers.sort_by(|&a, &b| vols[a].total_cmp(&vols[b]));
+    let mut solids: Vec<Vec<usize>> = outers.iter().map(|&k| vec![k]).collect();
+    for k in (0..pieces.len()).filter(|&k| !(vols[k] > 0.0)) {
+        let Some(p) = pieces[k].iter().flat_map(|&f| o.faces[f].loops.iter().flatten()).next().map(|c| o.verts[o.co_start(c)].p) else { continue };
+        // The smallest solid holding it.
+        let home = outers.iter().position(|&s| {
+            let sub = super::kernel::subset(o, &pieces[s], true);
+            let polys: Vec<_> = sub.faces.iter().map(|f| super::classify::face_polygons(&sub, f)).collect();
+            super::classify::parity_inside(&sub, &polys, &p)
+        });
+        let Some(h) = home else {
+            return Err(KernelError::OperationFailed("The sweep makes a cavity outside its solid".into()));
+        };
+        solids[h].push(k);
+    }
+    for sol in solids {
+        let first = o.shells.len();
+        for &k in &sol {
+            o.shells.push(Shell { faces: pieces[k].clone(), closed: true });
+        }
+        o.solids.push(Solid { shells: (first..first + sol.len()).collect() });
+    }
+    Ok(())
 }
 
 /// Refuses a sheet that doesn't cross the sweep the same way everywhere (sampled on its

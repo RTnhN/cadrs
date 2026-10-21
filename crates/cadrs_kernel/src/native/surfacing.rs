@@ -355,7 +355,7 @@ pub fn sew(k: &mut NativeKernel, bodies: &[BodyId], tol: f64) -> Result<OpResult
 }
 
 /// Faces sewn into one sheet: coincident vertices and edges merged, the faces oriented
-/// consistently (the sheet may stay open).
+/// consistently (the sheet may stay open), one shell per edge-connected piece and no solids.
 pub fn sew_faces(mut b: Body, tol: f64) -> Result<Body> {
     let tol = tol.max(1e-7);
     // Merge coincident vertices.
@@ -490,6 +490,28 @@ pub fn sew_faces(mut b: Body, tol: f64) -> Result<Body> {
     super::unify::compact(&mut b);
     // Orient the faces consistently: across every shared edge the two uses run opposite ways.
     orient(&mut b)?;
+    // One shell per piece of faces joined through shared edges (the input's shells no longer
+    // say what is joined, and a read model may list a face twice), closed when it uses each
+    // edge once each way. No solids: a caller that wants them assembles them.
+    let all: Vec<usize> = (0..b.faces.len()).collect();
+    let pieces = b.face_components(&all);
+    b.shells = pieces
+        .into_iter()
+        .map(|faces| {
+            let mut uses: std::collections::HashMap<usize, (u32, u32)> = std::collections::HashMap::new();
+            for c in faces.iter().flat_map(|&f| b.faces[f].loops.iter().flatten()) {
+                let u = uses.entry(c.edge).or_default();
+                if c.fwd {
+                    u.0 += 1;
+                } else {
+                    u.1 += 1;
+                }
+            }
+            let closed = uses.iter().all(|(&e, &u)| u == (1, 1) || b.edges[e].degenerate);
+            Shell { faces, closed }
+        })
+        .collect();
+    b.solids.clear();
     // Sewn within `tol`: the merged vertices and edges carry the gaps they close.
     b.fit_tolerances(tol);
     Ok(b)

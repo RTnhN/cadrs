@@ -332,6 +332,38 @@ impl Body {
         bb
     }
 
+    /// `faces` split into the groups joined through shared edges (each group in the order
+    /// `faces` lists them; groups ordered by their first face).
+    pub fn face_components(&self, faces: &[usize]) -> Vec<Vec<usize>> {
+        let mut parent: Vec<usize> = (0..faces.len()).collect();
+        fn root(p: &mut [usize], mut i: usize) -> usize {
+            while p[i] != i {
+                p[i] = p[p[i]];
+                i = p[i];
+            }
+            i
+        }
+        let mut by_edge: std::collections::HashMap<usize, usize> = std::collections::HashMap::new();
+        for (k, &fi) in faces.iter().enumerate() {
+            for c in self.faces[fi].loops.iter().flatten() {
+                let first = *by_edge.entry(c.edge).or_insert(k);
+                let (a, b) = (root(&mut parent, first), root(&mut parent, k));
+                parent[a.max(b)] = a.min(b);
+            }
+        }
+        let mut groups: Vec<Vec<usize>> = Vec::new();
+        let mut slot: Vec<Option<usize>> = vec![None; faces.len()];
+        for (k, &f) in faces.iter().enumerate() {
+            let r = root(&mut parent, k);
+            let g = *slot[r].get_or_insert_with(|| {
+                groups.push(Vec::new());
+                groups.len() - 1
+            });
+            groups[g].push(f);
+        }
+        groups
+    }
+
     /// Whether the body has a solid.
     pub fn is_solid(&self) -> bool {
         !self.solids.is_empty()
@@ -899,31 +931,16 @@ impl Body {
                     None => owner[f] = Some(si),
                 }
             }
-            // Faces joined through shared edges (union–find over the shell's faces).
-            let mut parent: Vec<usize> = (0..s.faces.len()).collect();
-            fn root(p: &mut [usize], mut i: usize) -> usize {
-                while p[i] != i {
-                    p[i] = p[p[i]];
-                    i = p[i];
-                }
-                i
-            }
-            let mut by_edge: std::collections::HashMap<usize, usize> = std::collections::HashMap::new();
             let mut shell_uses: std::collections::BTreeMap<usize, (i32, i32)> = std::collections::BTreeMap::new();
-            for (k, &fi) in s.faces.iter().enumerate() {
-                for c in self.faces[fi].loops.iter().flatten() {
-                    let u = shell_uses.entry(c.edge).or_default();
-                    if c.fwd {
-                        u.0 += 1;
-                    } else {
-                        u.1 += 1;
-                    }
-                    let first = *by_edge.entry(c.edge).or_insert(k);
-                    let (a, b) = (root(&mut parent, first), root(&mut parent, k));
-                    parent[a] = b;
+            for c in s.faces.iter().flat_map(|&fi| self.faces[fi].loops.iter().flatten()) {
+                let u = shell_uses.entry(c.edge).or_default();
+                if c.fwd {
+                    u.0 += 1;
+                } else {
+                    u.1 += 1;
                 }
             }
-            let pieces = (0..parent.len()).filter(|&k| root(&mut parent, k) == k).count();
+            let pieces = self.face_components(&s.faces).len();
             if pieces > 1 {
                 errs.push(format!("shell {si} isn't connected: its faces make {pieces} pieces that share no edge"));
             }

@@ -215,3 +215,61 @@ fn finds_a_pcurve_off_its_edge_between_samples() {
     assert!(b.check().is_empty(), "the fast check samples past the bump: {:?}", b.check());
     finds(&b, "p-curve off the edge");
 }
+
+/// Faces `faces` of body `id` alone, as a sheet body in `k`.
+fn sheet_of(k: &mut NativeKernel, id: BodyId, faces: &[usize]) -> BodyId {
+    let sheet = cadrs_kernel::native::kernel::subset(&body(k, id), faces, false);
+    k.insert(sheet)
+}
+
+#[test]
+fn a_hole_turned_a_whole_turn_is_a_void() {
+    // The plate's top face (a 10 × 10 square with a hole of radius 2) turned about the line
+    // x = −5 along y: a ring whose hole sweeps a closed tunnel, a void shell of its own.
+    let mut k = NativeKernel::new();
+    let pl = plate(&mut k);
+    let fi = holed_face(&body(&k, pl));
+    let sheet = sheet_of(&mut k, pl, &[fi]);
+    let axis = Axis { origin: Point3::new(-5.0, 0.0, 0.0), dir: Vector3::y_axis() };
+    let ring = k.sweep_body(sheet, &BodySweep::Rotate { axis, angle: TAU }).unwrap().bodies[0];
+    let b = body(&k, ring);
+    valid(&b);
+    assert_eq!(b.solids.len(), 1);
+    assert_eq!(b.solids[0].shells.len(), 2, "the tunnel is a void");
+    let want = TAU * 10.0 * (100.0 - 4.0 * PI);
+    let v = k.mass_properties(ring).unwrap().volume;
+    assert!((v - want).abs() < 1e-6 * want, "{v} vs {want}");
+}
+
+#[test]
+fn disjoint_wires_sweep_into_separate_shells() {
+    let mut k = NativeKernel::new();
+    let seg = |k: &mut NativeKernel, y: f64| {
+        let c = PathCurve::Sketch { plane: Plane::top(), curve: Curve2::Line { a: p(0.0, y), b: p(5.0, y), source: None } };
+        k.create_wire(&[c]).unwrap().bodies[0]
+    };
+    let (a, b) = (seg(&mut k, 0.0), seg(&mut k, 3.0));
+    let both = k.compound(&[a, b]).unwrap().bodies[0];
+    let walls = k.sweep_body(both, &BodySweep::Translate(Vector3::new(0.0, 0.0, 2.0))).unwrap().bodies[0];
+    let w = body(&k, walls);
+    valid(&w);
+    assert_eq!(w.shells.len(), 2);
+}
+
+#[test]
+fn sewing_rebuilds_the_shells() {
+    // Two faces of a box that share an edge, read with each face listed twice in a shell of
+    // its own (as the SMLib reader gives lamina faces): sewn, they are one open shell.
+    let mut k = NativeKernel::new();
+    let bx = extrude(&mut k, region(rect(0.0, 0.0, 1.0, 1.0), vec![]), 1.0);
+    let b = body(&k, bx);
+    let e = b.faces[0].loops[0][0].edge;
+    let other = (1..b.faces.len()).find(|&f| b.faces[f].loops.iter().flatten().any(|c| c.edge == e)).unwrap();
+    let mut two = cadrs_kernel::native::kernel::subset(&b, &[0, other], false);
+    two.shells = vec![cadrs_kernel::native::topo::Shell { faces: vec![0, 0], closed: false }, cadrs_kernel::native::topo::Shell { faces: vec![1, 1], closed: false }];
+    finds(&two, "listed twice");
+    let sewn = cadrs_kernel::native::surfacing::sew_faces(two, 1e-6).unwrap();
+    valid(&sewn);
+    assert_eq!(sewn.shells.len(), 1);
+    assert_eq!(sewn.shells[0].faces.len(), 2);
+}
