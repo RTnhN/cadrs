@@ -20,7 +20,8 @@
 //
 // An input is a .smb file, `file.smp#i` (the i-th brep of a part file, default 0), or for
 // `sweep` a built-in primitive: `sphere:r:cx:cy:cz` (SmPrimitiveCreation::CreateSphere, as
-// smSweepTest.cpp case 25/33) or `spherenp:r:cx:cy:cz` (CreateSphereNoPole, cases 27-29).
+// smSweepTest.cpp case 25/33) or `spherenp:r:cx:cy:cz` (CreateSphereNoPole, cases 27-29), and
+// for any subcommand `box:l:w:h:x:y:z`, `cone:h:r0:r1:x:y:z`, `torus:R:r:x:y:z` (my_test_merge).
 // `props` and `fillet` read through SM_API with the UV trim curves rebuilt (as before); the other
 // subcommands read like SMLib's own tests (SmBrep::ReadFromFile, no rebuild; --rebuild-uv to
 // rebuild). The native kernel writes its bodies as .smb with `native::oracle::smb_text`.
@@ -178,6 +179,25 @@ static SmBrep* load(const std::string& spec, bool rebuild_uv) {
             SmPrimitiveCreation pc(b->GetInfiniteRegion());
             if (pc.CreateSphere(a[0], 0, 360, place) != SM_SUCCESS) fail("CreateSphere failed");
         }
+        return b;
+    }
+    // my_test_merge's primitive pairs (smMergeTest.cpp): box:l:w:h:x:y:z (CreateBox, min corner
+    // at x y z), cone:h:r0:r1:x:y:z (CreateCone, base centre at x y z, axis +z) and
+    // torus:R:r:x:y:z (CreateTorus about +z), full turns, tolerance SM_ZONE_TOL_3D as the test sets.
+    for (const char* kind : {"box:", "cone:", "torus:"}) {
+        size_t n = std::strlen(kind);
+        if (spec.compare(0, n, kind) != 0) continue;
+        std::vector<double> a = nums_after(spec, n);
+        size_t want = kind[0] == 't' ? 5 : 6;
+        if (a.size() != want) fail("bad primitive " + spec);
+        SmBrep* b = new (ctx()) SmBrep();
+        b->SetTolerance(SM_ZONE_TOL_3D);
+        SmAxis2Placement place(SmPoint3d(a[want - 3], a[want - 2], a[want - 1]), SmVector3d(1, 0, 0), SmVector3d(0, 1, 0));
+        SmPrimitiveCreation pc(b->GetInfiniteRegion());
+        SmStatus st = kind[0] == 'b'   ? pc.CreateBox(a[0], a[1], a[2], place)
+                      : kind[0] == 'c' ? pc.CreateCone(a[0], a[1], a[2], 0, 360, place)
+                                       : pc.CreateTorus(a[0], a[1], 0, 360, place);
+        if (st != SM_SUCCESS) fail("can't build " + spec);
         return b;
     }
     std::string path = spec;

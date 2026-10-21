@@ -317,26 +317,26 @@ fn pcurve_unsnapped(s: &Surface, c: &Curve, t0: f64, t1: f64) -> Curve {
     let tol = Tol { fit: TOL.max(1e-11 * size), off: 5e-4f64.max(1e-5 * size) };
     // A spline on a curved surface, or anything on a spline surface, has no exact p-curve: fit
     // it directly.
-    if (matches!(c, Curve::Nurbs(_)) && !matches!(s, Surface::Plane { .. })) || matches!(s, Surface::Nurbs(_)) {
-        if let Some(pc) = fit_pieces(s, &per, c, &pieces, &tol) {
-            return pc;
-        }
+    if ((matches!(c, Curve::Nurbs(_)) && !matches!(s, Surface::Plane { .. })) || matches!(s, Surface::Nurbs(_)))
+        && let Some(pc) = fit_pieces(s, &per, c, &pieces, &tol)
+    {
+        return pc;
     }
     let mut pc = pcurve::pcurve(s, c, t0, t1, None);
     // A meridian arc past a sphere's pole is the same arc at u + π with v mirrored in the pole.
-    if let (Surface::Sphere { .. }, Curve::Line { o, d }) = (s, &pc) {
-        if d.x == 0.0 {
-            // v is periodic along a whole meridian: bring the arc's middle into (−π, π] first.
-            let vm = pc.point((t0 + t1) / 2.0).y;
-            let k = ((vm - wrap(vm, -PI, TAU)) / TAU).round() * TAU;
-            let (o, vm) = (P3::new(o.x, o.y - k, 0.0), vm - k);
-            pc = if vm.abs() > PI / 2.0 + 1e-9 {
-                let pole = if vm > 0.0 { PI } else { -PI };
-                Curve::Line { o: P3::new(o.x + PI, pole - o.y, 0.0), d: V3::new(0.0, -d.y, 0.0) }
-            } else {
-                Curve::Line { o, d: *d }
-            };
-        }
+    if let (Surface::Sphere { .. }, Curve::Line { o, d }) = (s, &pc)
+        && d.x == 0.0
+    {
+        // v is periodic along a whole meridian: bring the arc's middle into (−π, π] first.
+        let vm = pc.point((t0 + t1) / 2.0).y;
+        let k = ((vm - wrap(vm, -PI, TAU)) / TAU).round() * TAU;
+        let (o, vm) = (P3::new(o.x, o.y - k, 0.0), vm - k);
+        pc = if vm.abs() > PI / 2.0 + 1e-9 {
+            let pole = if vm > 0.0 { PI } else { -PI };
+            Curve::Line { o: P3::new(o.x + PI, pole - o.y, 0.0), d: V3::new(0.0, -d.y, 0.0) }
+        } else {
+            Curve::Line { o, d: *d }
+        };
     }
     if matches!(s, Surface::Plane { .. }) {
         return pc;
@@ -351,10 +351,10 @@ fn pcurve_unsnapped(s: &Surface, c: &Curve, t0: f64, t1: f64) -> Curve {
         if on(&pc) {
             return pc;
         }
-        if let Some(m) = torus_meridian(s, c) {
-            if on(&m) {
-                return m;
-            }
+        if let Some(m) = torus_meridian(s, c)
+            && on(&m)
+        {
+            return m;
         }
     }
     if samples(&pc).iter().all(|&t| pc_error(s, &per, c, &pc, t, tol.off) < tol.fit) {
@@ -710,10 +710,10 @@ impl XBuilder {
             let mut acc = 0;
             (0..n)
                 .map(|k| {
-                    if k > 0 {
-                        if let Some(i) = free.iter().position(|&j| j == k) {
-                            acc += m[i];
-                        }
+                    if k > 0
+                        && let Some(i) = free.iter().position(|&j| j == k)
+                    {
+                        acc += m[i];
                     }
                     acc
                 })
@@ -1020,7 +1020,14 @@ impl XBuilder {
     }
 
     /// Builds the body: seams where missing, p-curves, pole edges, outer loops and senses.
-    pub fn finish(mut self) -> (Body, Vec<String>) {
+    pub fn finish(self) -> (Body, Vec<String>) {
+        let (body, w, _) = self.finish_mapped();
+        (body, w)
+    }
+
+    /// [`finish`](Self::finish), with the body face each builder face became (None when it was
+    /// dropped), by builder face id.
+    pub fn finish_mapped(mut self) -> (Body, Vec<String>, Vec<Option<usize>>) {
         let nf = self.faces.len();
         let mut dropped = vec![false; nf];
         for fi in 0..nf {
@@ -1190,7 +1197,8 @@ impl XBuilder {
             self.warnings.push(format!("{flipped} faces turned round to orient their shells consistently"));
         }
         drop_unused(&mut self.body);
-        (self.body, self.warnings)
+        let map = new_index.iter().map(|&i| (i != usize::MAX).then_some(i)).collect();
+        (self.body, self.warnings, map)
     }
 }
 

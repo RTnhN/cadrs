@@ -186,10 +186,7 @@ proptest! {
         }
     }
 
-    // smb.rs is being extended in another workstream; it still panics on face references out
-    // of range (`build`, `face_ids[fi]`) and on counts it allocates for (capacity overflow).
     #[test]
-    #[ignore = "smb reader: panics on out-of-range face references and huge counts (smb.rs build)"]
     fn smb_reader_never_panics(e in edits(), raw in proptest::collection::vec(any::<u8>(), 0..256)) {
         let bytes = apply(smb_seed(), &e);
         if let Ok((b, _)) = smb::read(&bytes) {

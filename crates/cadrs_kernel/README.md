@@ -235,6 +235,37 @@ The expected values come from the Onshape course exercises (see `reference/onsha
 
 The kernel must pass the suite; a case it can't do yet fails visibly (see "Status" above).
 
+### SMLib suites
+NVIDIA's SMLib (usd-brep, Apache-2.0) has a test program, `tests/prog_test/src/*.cpp`, of
+numbered cases on models in `TestFiles/`. `tools/smlib_to_rust.py <usd-brep> [suite...]` turns
+them into `tests/smlib_<suite>.rs`:
+- `tools/smlib/<suite>.py`, one per suite, finds the cases in its source file. It turns each
+  into a call of the suite's runner, the Rust in its `PRELUDE`, and lists the blocks it leaves
+  out with the reason. Suites are separate files so they can be added side by side.
+- The driver splits the source into blocks (`if (lCount == N)`, `case N:`) for the suite
+  modules. It copies the models into `tests/data/smlib/<suite>/` with a licence README. Cases
+  listed in `tools/smlib_known_failures/<suite>.txt` (`name`, or `name slow`) must still
+  fail, so one that starts to pass has to come off the list. Slow cases are `#[ignore]`d.
+- With `CADRS_SMLIB_ORACLE` set to `tools/smlib_oracle`'s binary, the driver runs SMLib once per
+  case. It bakes SMLib's volume, area, face and edge counts and solidity into the test. Volume
+  and area must agree to a relative 1e-4. A result that SMLib itself doesn't call a manifold
+  solid is not used (most of these enclose no volume). Without the oracle, a case checks
+  SMLib's asserted counts and the invariants: `check()` is clean, the shells are closed, the
+  Euler characteristic is possible, and the volume is positive. Face and edge counts are
+  compared only when the input model is all planes.
+- `tests/smlib_common/mod.rs` is shared by every suite. It reads models (`file.smb`, or
+  `file.smp#k`), checks results, and finds SMLib's edges and faces in our bodies by their
+  middle points and centroids. A pick that is ambiguous, or that finds nothing, panics.
+  `examples/smlib_points.rs` gives the driver the same points to hand to the oracle.
+
+`native::smb` reads every SMLib ASCII format the suites use:
+- B-reps (`.smb`), with the legacy B-spline layout and the versioned (38, 42) layout of
+  `Object Type` records: lines, circles, planes, cones and cylinders, surfaces of revolution
+  and of extrusion.
+- Parts (`.smp`: curves, surfaces, B-reps) and bare curves and surfaces (`.smc`, `.sms`).
+
+Free curves and surfaces keep SMLib's parametrisation. Faces get the exact analytic surface.
+
 **P3B.9 (assemblies: Check interference, assembly export).** No new `Kernel` operation: an
 assembly's interference is the existing `transform` of each part's body to its placement,
 then `boolean(Intersect, a, [b])` and `mass_properties(..).volume`. The case

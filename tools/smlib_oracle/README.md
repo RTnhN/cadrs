@@ -22,7 +22,9 @@ area, face and edge counts, and whether it is a manifold solid (`report()`):
 
 Each one drives SMLib the way a test in `usd-brep/tests/prog_test/src` does, with that test's
 tolerances and flags. An input is a `.smb` file or `file.smp#i` (the i-th brep of a part file,
-default 0). `props` and `fillet` read through SM_API with the UV trim curves rebuilt; the others
+default 0), or one of `my_test_merge`'s primitives (smMergeTest.cpp, `SmPrimitiveCreation`, full
+turns about +z, tolerance 1e-5): `box:l:w:h:x:y:z` (min corner at x y z), `cone:h:r0:r1:x:y:z`
+(base centre at x y z) or `torus:R:r:x:y:z`. `props` and `fillet` read through SM_API with the UV trim curves rebuilt; the others
 read as the tests do (`SmBrep::ReadFromFile`, no rebuild; `--rebuild-uv` to rebuild). Options
 are `--key` or `--key=value` anywhere on the line. `ORACLE_VERBOSE=1` puts diagnostics on
 stderr (SMLib's error callback, per-face areas, and per-command details).
