@@ -799,6 +799,22 @@ impl Kernel for NativeKernel {
         Ok(super::hlr::project(&inputs, frame, opts))
     }
 
+    fn silhouettes(&self, body: BodyId, view: &SilhouetteView, tolerance: f64) -> Result<Vec<SilhouetteCurve>> {
+        super::silhouette::kernel_silhouettes(self, body, view, tolerance)
+    }
+
+    fn min_distance(&self, a: &DistanceTarget, b: &DistanceTarget) -> Result<DistanceResult> {
+        super::distance::kernel_distance(self, a, b, super::distance::Sense::Min)
+    }
+
+    fn max_distance(&self, a: &DistanceTarget, b: &DistanceTarget) -> Result<DistanceResult> {
+        super::distance::kernel_distance(self, a, b, super::distance::Sense::Max)
+    }
+
+    fn face_from_surface(&mut self, body: BodyId, face: FaceId, domain: Option<UvRect>) -> Result<OpResult> {
+        super::face_build::kernel_face_from_surface(self, body, face, domain)
+    }
+
     fn ray_hits(&self, body: BodyId, origin: Point3<f64>, dir: nalgebra::Vector3<f64>) -> Result<Vec<RayHit>> {
         let e = self.entry(body)?;
         let d = dir.normalize();

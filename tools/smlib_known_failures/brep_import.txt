@@ -1,4 +1,1 @@
-# SMLib B-rep import cases (tests/smlib_brep_import.rs, from tools/smlib/brep_import.py) that fail.
-
-# Missing API: no face from a bare surface over its natural domain (CreateFaceFromSurface).
-make_face_approximate_sphere
+# SMLib B-rep import cases (tests/smlib_brep_import.rs, from tools/smlib/brep_import.py) that fail: none.

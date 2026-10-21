@@ -12,129 +12,71 @@ use smlib_common::*;
 mod intersect;
 use intersect::*;
 
-use cadrs_kernel::native::math::{any_perpendicular, Affine, P3, V3};
-use cadrs_kernel::native::surface::Surface;
+use cadrs_kernel::native::math::{Affine, P3, V3};
 use cadrs_kernel::native::NativeKernel;
-use cadrs_kernel::projection::{ProjClass, ProjectOptions, ViewFrame};
-use cadrs_kernel::Kernel;
+use cadrs_kernel::{Kernel, SilhouetteView};
 
 const SUITE: &str = "silhouette";
 
-/// The outlines' 2D tolerance.
-const PROJ_TOL: f64 = 1e-4;
-/// A lifted point's line of sight touches its face within this.
-const LIFT_TOL: f64 = 1e-3;
-/// And the face's normal there is this square to it (|n·v|).
-const SQUARE: f64 = 0.05;
-
-/// MISSING API: silhouette curves seen from an eye point (n·(p − eye) = 0). `native::hlr`
-/// projects along a direction only.
-fn missing_perspective_silhouette() -> Result<Found, String> {
-    Err("missing API: no silhouette curves for a perspective view (native::hlr projects along a direction only)".into())
-}
-
-/// Where the line `o + t·d`, t in [t0, t1], touches `s`: the t minimizing the distance plus a
-/// measure of how far the surface's normal at the foot is from square to the line (the line
-/// also meets the surface where it crosses it, at distance 0 too), `scale` (mm) weighing the
-/// two alike near a tangency (distance ≈ δ²/2ρ, n·d ≈ δ/ρ). Returns (t, distance, |n·d|).
-fn touch(s: &Surface, o: &P3, d: &V3, t0: f64, t1: f64, scale: f64) -> (f64, f64, f64) {
-    let eval = |t: f64| {
-        let p = o + d * t;
-        let (u, v) = s.project(&p, Some(s.project_coarse(&p, 16)));
-        let gap = dist(s, &p);
-        let nd = s.normal(u, v).normalize().dot(d).abs();
-        (gap + 0.5 * scale * nd * nd, gap, nd)
-    };
-    let n = 192;
-    let h = (t1 - t0) / n as f64;
-    let (mut best, mut fb) = (t0, f64::INFINITY);
-    for i in 0..=n {
-        let t = t0 + h * i as f64;
-        let v = eval(t).0;
-        if v < fb {
-            (best, fb) = (t, v);
-        }
-    }
-    // Golden section around the best sample.
-    let (mut a, mut b) = (best - h, best + h);
-    let g = 0.5 * (5f64.sqrt() - 1.0);
-    for _ in 0..60 {
-        let (c, e) = (b - g * (b - a), a + g * (b - a));
-        if eval(c).0 < eval(e).0 {
-            b = e;
-        } else {
-            a = c;
-        }
-    }
-    let t = if eval(0.5 * (a + b)).0 < fb { 0.5 * (a + b) } else { best };
-    let (_, gap, nd) = eval(t);
-    (t, gap, nd)
-}
+/// The curves' chord tolerance (mm).
+const TOL: f64 = 1e-4;
+/// A point of a curve lies on its face's surface within this.
+const ON: f64 = 1e-6;
+/// And the surface's normal there is this square to the line of sight (|n·w|).
+const SQUARE: f64 = 1e-3;
 
 /// SMLib's `my_test_tsurf_silhouette`: `file` moved by `mv`, seen along `view` (or from the eye
 /// point `view` when `persp`).
 fn silhouette(file: &str, mv: [f64; 3], view: [f64; 3], persp: bool, want: &Want) -> Result<(), String> {
     let m = model(SUITE, file)?;
     let body = m.body.transformed(&Affine::translation(V3::new(mv[0], mv[1], mv[2])));
-    let found = if persp {
-        missing_perspective_silhouette()?
-    } else {
-        let bb = body.bbox();
-        let d = V3::new(view[0], view[1], view[2]).normalize();
-        let frame = ViewFrame::new(d, any_perpendicular(&d));
-        let mut k = NativeKernel::new();
-        let id = k.insert(body.clone());
-        let proj = k.project(&[id], &frame, &ProjectOptions { tolerance: PROJ_TOL, hidden: true }).map_err(|e| format!("{e:?}"))?;
-        let up = frame.up();
-        let corners: Vec<P3> = (0..8).map(|i| P3::new([bb.min.x, bb.max.x][i & 1], [bb.min.y, bb.max.y][(i >> 1) & 1], [bb.min.z, bb.max.z][i >> 2])).collect();
-        let mut found = Found::default();
-        for (j, e) in proj.edges.iter().filter(|e| e.class == ProjClass::Outline).enumerate() {
-            let Some(f) = e.source.and_then(|s| s.face) else { return Err(format!("outline {j} has no face")) };
-            let s = &body.faces[f.0 as usize].surf;
-            let mut piece = Vec::new();
-            for q in &e.points {
-                let o = frame.origin + frame.x * q.x + up * q.y;
-                let ts = corners.iter().map(|c| (c - o).dot(&d));
-                let (t0, t1) = ts.fold((f64::INFINITY, f64::NEG_INFINITY), |(a, b), t| (a.min(t), b.max(t)));
-                let (t, gap, nd) = touch(s, &o, &d, t0 - 1.0, t1 + 1.0, 0.1 * bb.diagonal());
-                let p = o + d * t;
-                let (u, v) = s.project(&p, Some(s.project_coarse(&p, 16)));
-                let foot = s.eval(u, v);
-                if gap > LIFT_TOL || nd > SQUARE {
-                    return Err(format!("outline {j} (face {}): the line of sight through {q:?} misses the face by {gap:.1e} (n·v {nd:.2e})", f.0));
-                }
-                piece.push(foot);
-            }
-            found.length += piece.windows(2).map(|w| (w[1] - w[0]).norm()).sum::<f64>();
-            found.pieces.push(piece);
+    let (eye, dir) = (P3::new(view[0], view[1], view[2]), V3::new(view[0], view[1], view[2]).normalize());
+    let v = if persp { SilhouetteView::Perspective(eye) } else { SilhouetteView::Parallel(dir) };
+    let mut k = NativeKernel::new();
+    let id = k.insert(body.clone());
+    let curves = k.silhouettes(id, &v, TOL).map_err(|e| format!("{e:?}"))?;
+    let mut found = Found::default();
+    for (j, c) in curves.iter().enumerate() {
+        let s = &body.faces[c.face.0 as usize].surf;
+        if c.uv.len() != c.points.len() {
+            return Err(format!("curve {j}: {} points, {} (u, v)", c.points.len(), c.uv.len()));
         }
-        found
-    };
+        for (p, q) in c.points.iter().zip(&c.uv) {
+            let gap = (s.eval(q.x, q.y) - p).norm();
+            let sight = if persp { (p - eye).normalize() } else { dir };
+            let nd = s.normal(q.x, q.y).dot(&sight).abs();
+            if gap > ON || nd > SQUARE {
+                return Err(format!("curve {j} (face {}): {p:?} is {gap:.1e} off its surface, n·w {nd:.2e}", c.face.0));
+            }
+        }
+        found.length += c.length();
+        found.pieces.push(c.points.clone());
+    }
     check_found(&found, want)
 }
 
 /// SMLib advanced silhouette 1: `sphere.smb` moved by (-60, -150, 0), seen along (1, 0, 0); SMLib's test asserts 2, SMLib's length 31.4161.
 #[test]
 fn silhouette_01_sphere_par() {
-    known_failure(silhouette("sphere.smb", [-60.0, -150.0, 0.0], [1.0, 0.0, 0.0], false, &Want { any: true, length: Some(31.4160712675), samples: &[] }), "silhouette", "silhouette_01_sphere_par");
+    silhouette("sphere.smb", [-60.0, -150.0, 0.0], [1.0, 0.0, 0.0], false, &Want { any: true, length: Some(31.4160712675), samples: &[] }).unwrap();
 }
 
 /// SMLib advanced silhouette 2: `sphere.smb` moved by (0, -150, 0), seen along (0, 1, 0); SMLib's test asserts 2, SMLib's length 31.4161.
 #[test]
 fn silhouette_02_sphere_par() {
-    known_failure(silhouette("sphere.smb", [0.0, -150.0, 0.0], [0.0, 1.0, 0.0], false, &Want { any: true, length: Some(31.416071636), samples: &[] }), "silhouette", "silhouette_02_sphere_par");
+    silhouette("sphere.smb", [0.0, -150.0, 0.0], [0.0, 1.0, 0.0], false, &Want { any: true, length: Some(31.416071636), samples: &[] }).unwrap();
 }
 
 /// SMLib advanced silhouette 3: `sphere.smb` moved by (60, -150, 0), seen along (0, 0, 1); SMLib's test asserts 1, SMLib's length 31.4159.
 #[test]
 fn silhouette_03_sphere_par() {
-    known_failure(silhouette("sphere.smb", [60.0, -150.0, 0.0], [0.0, 0.0, 1.0], false, &Want { any: true, length: Some(31.4159315025), samples: &[] }), "silhouette", "silhouette_03_sphere_par");
+    silhouette("sphere.smb", [60.0, -150.0, 0.0], [0.0, 0.0, 1.0], false, &Want { any: true, length: Some(31.4159315025), samples: &[] }).unwrap();
 }
 
 /// SMLib advanced silhouette 4: `sphere.smb` moved by (90, -150, 0), seen along (1, 1, 1); SMLib's test asserts 1, SMLib's length 31.4159.
 #[test]
 fn silhouette_04_sphere_par() {
-    known_failure(silhouette("sphere.smb", [90.0, -150.0, 0.0], [1.0, 1.0, 1.0], false, &Want { any: true, length: Some(31.4158724213), samples: &[] }), "silhouette", "silhouette_04_sphere_par");
+    silhouette("sphere.smb", [90.0, -150.0, 0.0], [1.0, 1.0, 1.0], false, &Want { any: true, length: Some(31.4158724213), samples: &[] }).unwrap();
 }
 
 /// SMLib advanced silhouette 5: `cone.smb` moved by (-60, -120, 0), seen along (1, 0, 0); SMLib's test asserts 0, SMLib's length 0.
@@ -188,13 +130,13 @@ fn silhouette_12_plane_circ_par() {
 /// SMLib advanced silhouette 13: `plane_square.smb` moved by (-60, -210, 0), seen along (1, 0, 0); SMLib's test asserts 6, SMLib's length 40.
 #[test]
 fn silhouette_13_plane_square_par() {
-    known_failure(silhouette("plane_square.smb", [-60.0, -210.0, 0.0], [1.0, 0.0, 0.0], false, &Want { any: true, length: Some(40.0), samples: &[] }), "silhouette", "silhouette_13_plane_square_par");
+    silhouette("plane_square.smb", [-60.0, -210.0, 0.0], [1.0, 0.0, 0.0], false, &Want { any: true, length: Some(40.0), samples: &[] }).unwrap();
 }
 
 /// SMLib advanced silhouette 14: `plane_square.smb` moved by (0, -210, 0), seen along (0, 1, 0); SMLib's test asserts 6, SMLib's length 40.
 #[test]
 fn silhouette_14_plane_square_par() {
-    known_failure(silhouette("plane_square.smb", [0.0, -210.0, 0.0], [0.0, 1.0, 0.0], false, &Want { any: true, length: Some(40.0), samples: &[] }), "silhouette", "silhouette_14_plane_square_par");
+    silhouette("plane_square.smb", [0.0, -210.0, 0.0], [0.0, 1.0, 0.0], false, &Want { any: true, length: Some(40.0), samples: &[] }).unwrap();
 }
 
 /// SMLib advanced silhouette 15: `plane_square.smb` moved by (60, -210, 0), seen along (0, 0, 1); SMLib's test asserts 0, SMLib's length 0.
@@ -213,12 +155,11 @@ fn silhouette_16_plane_square_par() {
 /// SMLib's test asserts 19, the oracle finds 20 curves.
 #[test]
 fn silhouette_17_toruswvy_par() {
-    known_failure(silhouette("toruswvy.smb", [-60.0, -90.0, 0.0], [1.0, 1.0, 1.0], false, &Want { any: true, length: Some(268.300287257), samples: &[] }), "silhouette", "silhouette_17_toruswvy_par");
+    silhouette("toruswvy.smb", [-60.0, -90.0, 0.0], [1.0, 1.0, 1.0], false, &Want { any: true, length: Some(268.300287257), samples: &[] }).unwrap();
 }
 
 /// SMLib advanced silhouette 18: `toruswvy.smb` moved by (0, -90, 0), seen along (0, 0, 1); SMLib's test asserts 4, SMLib's length 203.935.
 #[test]
-#[ignore = "slow"]
 fn silhouette_18_toruswvy_par() {
     silhouette("toruswvy.smb", [0.0, -90.0, 0.0], [0.0, 0.0, 1.0], false, &Want { any: true, length: Some(203.935163302), samples: &[] }).unwrap();
 }
@@ -227,102 +168,99 @@ fn silhouette_18_toruswvy_par() {
 /// SMLib's test asserts 48, the oracle finds 20 curves.
 #[test]
 fn silhouette_19_toruswvy_par() {
-    known_failure(silhouette("toruswvy.smb", [60.0, -90.0, 0.0], [1.0, 0.0, 0.0], false, &Want { any: true, length: Some(387.520122035), samples: &[] }), "silhouette", "silhouette_19_toruswvy_par");
+    silhouette("toruswvy.smb", [60.0, -90.0, 0.0], [1.0, 0.0, 0.0], false, &Want { any: true, length: Some(387.520122035), samples: &[] }).unwrap();
 }
 
 /// SMLib advanced silhouette 20: `torus.smb` moved by (-60, -40, 0), seen along (0, 1, 0); SMLib's test asserts 28, SMLib's length 188.495.
 /// SMLib's test asserts 28, the oracle finds 6 curves.
 #[test]
-#[ignore = "known failure, slow (tools/smlib_known_failures/silhouette.txt)"]
 fn silhouette_20_torus_par() {
-    known_failure(silhouette("torus.smb", [-60.0, -40.0, 0.0], [0.0, 1.0, 0.0], false, &Want { any: true, length: Some(188.495206632), samples: &[] }), "silhouette", "silhouette_20_torus_par");
+    silhouette("torus.smb", [-60.0, -40.0, 0.0], [0.0, 1.0, 0.0], false, &Want { any: true, length: Some(188.495206632), samples: &[] }).unwrap();
 }
 
 /// SMLib advanced silhouette 21: `torus.smb` moved by (0, -40, 0), seen along (1, 0, 0); SMLib's test asserts 16, SMLib's length 188.495.
 /// SMLib's test asserts 16, the oracle finds 8 curves.
 #[test]
-#[ignore = "known failure, slow (tools/smlib_known_failures/silhouette.txt)"]
 fn silhouette_21_torus_par() {
-    known_failure(silhouette("torus.smb", [0.0, -40.0, 0.0], [1.0, 0.0, 0.0], false, &Want { any: true, length: Some(188.494899985), samples: &[] }), "silhouette", "silhouette_21_torus_par");
+    silhouette("torus.smb", [0.0, -40.0, 0.0], [1.0, 0.0, 0.0], false, &Want { any: true, length: Some(188.494899985), samples: &[] }).unwrap();
 }
 
 /// SMLib advanced silhouette 22: `torus.smb` moved by (60, -40, 0), seen along (1, 0, 1e-07); SMLib's test asserts 14, SMLib's length 188.495.
 /// SMLib's test asserts 14, the oracle finds 8 curves.
 #[test]
-#[ignore = "known failure, slow (tools/smlib_known_failures/silhouette.txt)"]
 fn silhouette_22_torus_par() {
-    known_failure(silhouette("torus.smb", [60.0, -40.0, 0.0], [1.0, 0.0, 1e-07], false, &Want { any: true, length: Some(188.494900057), samples: &[] }), "silhouette", "silhouette_22_torus_par");
+    silhouette("torus.smb", [60.0, -40.0, 0.0], [1.0, 0.0, 1e-07], false, &Want { any: true, length: Some(188.494900057), samples: &[] }).unwrap();
 }
 
 /// SMLib advanced silhouette 23: `vase_rev.smb` moved by (-60, 0, 0), seen along (1, 1, 1); SMLib's test asserts 13, SMLib's length 154.146.
 /// SMLib's test asserts 13, the oracle finds 14 curves.
 #[test]
 fn silhouette_23_vase_rev_par() {
-    known_failure(silhouette("vase_rev.smb", [-60.0, 0.0, 0.0], [1.0, 1.0, 1.0], false, &Want { any: true, length: Some(154.145970886), samples: &[] }), "silhouette", "silhouette_23_vase_rev_par");
+    silhouette("vase_rev.smb", [-60.0, 0.0, 0.0], [1.0, 1.0, 1.0], false, &Want { any: true, length: Some(154.145970886), samples: &[] }).unwrap();
 }
 
 /// SMLib advanced silhouette 24: `vase_rev.smb` moved by (0, 0, 0), seen along (1, 0.3, 0.1); SMLib's test asserts 5, SMLib's length 139.156.
 #[test]
 fn silhouette_24_vase_rev_par() {
-    known_failure(silhouette("vase_rev.smb", [0.0, 0.0, 0.0], [1.0, 0.3, 0.1], false, &Want { any: true, length: Some(139.156281254), samples: &[] }), "silhouette", "silhouette_24_vase_rev_par");
+    silhouette("vase_rev.smb", [0.0, 0.0, 0.0], [1.0, 0.3, 0.1], false, &Want { any: true, length: Some(139.156281254), samples: &[] }).unwrap();
 }
 
 /// SMLib advanced silhouette 25: `vase_rev.smb` moved by (60, 0, 0), seen along (1, 0, 0); SMLib's test asserts 5, SMLib's length 138.569.
 #[test]
 fn silhouette_25_vase_rev_par() {
-    known_failure(silhouette("vase_rev.smb", [60.0, 0.0, 0.0], [1.0, 0.0, 0.0], false, &Want { any: true, length: Some(138.568667926), samples: &[] }), "silhouette", "silhouette_25_vase_rev_par");
+    silhouette("vase_rev.smb", [60.0, 0.0, 0.0], [1.0, 0.0, 0.0], false, &Want { any: true, length: Some(138.568667926), samples: &[] }).unwrap();
 }
 
 /// SMLib advanced silhouette 26: `toruswvy.smb` moved by (-60, 40, 0), eye at (100, 100, 100); SMLib's test asserts 6, SMLib's length 246.515.
 #[test]
 fn silhouette_26_toruswvy_persp() {
-    known_failure(silhouette("toruswvy.smb", [-60.0, 40.0, 0.0], [100.0, 100.0, 100.0], true, &Want { any: true, length: Some(246.514949003), samples: &[] }), "silhouette", "silhouette_26_toruswvy_persp");
+    silhouette("toruswvy.smb", [-60.0, 40.0, 0.0], [100.0, 100.0, 100.0], true, &Want { any: true, length: Some(246.514949003), samples: &[] }).unwrap();
 }
 
 /// SMLib advanced silhouette 27: `toruswvy.smb` moved by (0, 40, 0), eye at (0, 60, 100); SMLib's test asserts 4, SMLib's length 193.875.
 #[test]
 fn silhouette_27_toruswvy_persp() {
-    known_failure(silhouette("toruswvy.smb", [0.0, 40.0, 0.0], [0.0, 60.0, 100.0], true, &Want { any: true, length: Some(193.874762669), samples: &[] }), "silhouette", "silhouette_27_toruswvy_persp");
+    silhouette("toruswvy.smb", [0.0, 40.0, 0.0], [0.0, 60.0, 100.0], true, &Want { any: true, length: Some(193.874762669), samples: &[] }).unwrap();
 }
 
 /// SMLib advanced silhouette 28: `toruswvy.smb` moved by (60, 40, 0), eye at (160, 60, 0); SMLib's test asserts 10, SMLib's length 359.54.
 #[test]
 fn silhouette_28_toruswvy_persp() {
-    known_failure(silhouette("toruswvy.smb", [60.0, 40.0, 0.0], [160.0, 60.0, 0.0], true, &Want { any: true, length: Some(359.539611937), samples: &[] }), "silhouette", "silhouette_28_toruswvy_persp");
+    silhouette("toruswvy.smb", [60.0, 40.0, 0.0], [160.0, 60.0, 0.0], true, &Want { any: true, length: Some(359.539611937), samples: &[] }).unwrap();
 }
 
 /// SMLib advanced silhouette 29: `torus.smb` moved by (-60, 90, 0), eye at (-60, 190, 0); SMLib's test asserts 4, SMLib's length 166.583.
 #[test]
 fn silhouette_29_torus_persp() {
-    known_failure(silhouette("torus.smb", [-60.0, 90.0, 0.0], [-60.0, 190.0, 0.0], true, &Want { any: true, length: Some(166.582968693), samples: &[] }), "silhouette", "silhouette_29_torus_persp");
+    silhouette("torus.smb", [-60.0, 90.0, 0.0], [-60.0, 190.0, 0.0], true, &Want { any: true, length: Some(166.582968693), samples: &[] }).unwrap();
 }
 
 /// SMLib advanced silhouette 30: `torus.smb` moved by (0, 90, 0), eye at (100, 90, 0); SMLib's test asserts 5, SMLib's length 166.584.
 #[test]
 fn silhouette_30_torus_persp() {
-    known_failure(silhouette("torus.smb", [0.0, 90.0, 0.0], [100.0, 90.0, 0.0], true, &Want { any: true, length: Some(166.583625533), samples: &[] }), "silhouette", "silhouette_30_torus_persp");
+    silhouette("torus.smb", [0.0, 90.0, 0.0], [100.0, 90.0, 0.0], true, &Want { any: true, length: Some(166.583625533), samples: &[] }).unwrap();
 }
 
 /// SMLib advanced silhouette 31: `torus.smb` moved by (60, 90, 0), eye at (60, -90, 1e-05); SMLib's test asserts 4, SMLib's length 172.342.
 #[test]
 fn silhouette_31_torus_persp() {
-    known_failure(silhouette("torus.smb", [60.0, 90.0, 0.0], [60.0, -90.0, 1e-05], true, &Want { any: true, length: Some(172.341710348), samples: &[] }), "silhouette", "silhouette_31_torus_persp");
+    silhouette("torus.smb", [60.0, 90.0, 0.0], [60.0, -90.0, 1e-05], true, &Want { any: true, length: Some(172.341710348), samples: &[] }).unwrap();
 }
 
 /// SMLib advanced silhouette 32: `vase_rev.smb` moved by (-60, 120, 0), eye at (40, 220, 100); SMLib's test asserts 8, SMLib's length 145.281.
 #[test]
 fn silhouette_32_vase_rev_persp() {
-    known_failure(silhouette("vase_rev.smb", [-60.0, 120.0, 0.0], [40.0, 220.0, 100.0], true, &Want { any: true, length: Some(145.280597909), samples: &[] }), "silhouette", "silhouette_32_vase_rev_persp");
+    silhouette("vase_rev.smb", [-60.0, 120.0, 0.0], [40.0, 220.0, 100.0], true, &Want { any: true, length: Some(145.280597909), samples: &[] }).unwrap();
 }
 
 /// SMLib advanced silhouette 33: `vase_rev.smb` moved by (0, 120, 0), eye at (160, 30, 10); SMLib's test asserts 5, SMLib's length 140.84.
 #[test]
 fn silhouette_33_vase_rev_persp() {
-    known_failure(silhouette("vase_rev.smb", [0.0, 120.0, 0.0], [160.0, 30.0, 10.0], true, &Want { any: true, length: Some(140.839726425), samples: &[] }), "silhouette", "silhouette_33_vase_rev_persp");
+    silhouette("vase_rev.smb", [0.0, 120.0, 0.0], [160.0, 30.0, 10.0], true, &Want { any: true, length: Some(140.839726425), samples: &[] }).unwrap();
 }
 
 /// SMLib advanced silhouette 34: `vase_rev.smb` moved by (60, 120, 0), eye at (160, 120, 0); SMLib's test asserts 5, SMLib's length 138.454.
 #[test]
 fn silhouette_34_vase_rev_persp() {
-    known_failure(silhouette("vase_rev.smb", [60.0, 120.0, 0.0], [160.0, 120.0, 0.0], true, &Want { any: true, length: Some(138.454485626), samples: &[] }), "silhouette", "silhouette_34_vase_rev_persp");
+    silhouette("vase_rev.smb", [60.0, 120.0, 0.0], [160.0, 120.0, 0.0], true, &Want { any: true, length: Some(138.454485626), samples: &[] }).unwrap();
 }

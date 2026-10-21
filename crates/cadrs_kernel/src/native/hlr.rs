@@ -5,12 +5,12 @@
 //!   and degenerate edges. An edge between two faces whose outward normals agree along it
 //!   (tangent faces, a fillet's boundary) is Smooth, any other edge Sharp;
 //! - the outlines (silhouettes) of curved faces, where the surface normal is square to the
-//!   direction of sight, clipped to the face's trimmed domain: on cylinders and cones the
-//!   generators at the (one or two) angles u where n·dir = 0 (along u, n·dir is
-//!   `A cos u + B sin u + C`, fitted from three normals); on spheres the great circle square to
-//!   the direction of sight; on anything else (tori, surfaces of revolution and extrusion,
-//!   NURBS) the zero set of n·dir traced on a uv grid (marching squares, each grid crossing
-//!   bisected onto the exact zero) as a polyline.
+//!   direction of sight, clipped to the face's trimmed domain ([`super::silhouette`]): exact
+//!   generators on cylinders and cones, exact circles on spheres (and tori seen along their
+//!   axis), elsewhere the zero set of n·dir traced on a uv grid and refined onto the exact
+//!   zero within the tolerance, once round a closed surface (a contour on a seam included) and
+//!   through the points where two branches cross. A face seen edge-on adds no outline: its
+//!   edges are the lines.
 //!
 //! Each line is projected to 2D as a polyline within the tolerance and keeps its exact 2D shape:
 //! a line stays a line, a circle seen face-on becomes an arc, a circle or ellipse seen edge-on a
@@ -32,16 +32,16 @@
 //! whole circle too (so an unbroken circle is one full arc). Sources: the body's edge index for
 //! edges, its face index for outlines.
 
-use std::collections::HashMap;
-
 use rayon::prelude::*;
 
-use super::classify::{in_face, ray_surface, InFace};
+use super::classify::ray_surface;
 use super::curve::Curve;
 use super::math::*;
+use super::silhouette::{domain_silhouettes, Found, SilGeom, SilOptions, View};
 use super::surface::Surface;
 use super::tess;
 use super::topo::Body;
+use super::uvdomain::FaceDomain as Domain;
 use crate::projection::{ProjClass, ProjCurve, ProjEdge, ProjSource, ProjVisibility, Projection, ProjectOptions, ViewFrame};
 use crate::{EdgeId, FaceId};
 
@@ -60,52 +60,6 @@ const SMOOTH_COS: f64 = 0.999_96;
 const EPS2: f64 = 1e-7;
 /// Lines whose directions differ by less than this sine lie along each other.
 const PARALLEL: f64 = 0.15;
-
-/// A face's trimmed domain: its uv polygons and their box.
-struct Domain<'a> {
-    surf: &'a Surface,
-    polys: &'a [Vec<P2>],
-    ub: (f64, f64),
-    vb: (f64, f64),
-}
-
-impl<'a> Domain<'a> {
-    fn new(surf: &'a Surface, polys: &'a [Vec<P2>]) -> Self {
-        let mut ub = (f64::INFINITY, f64::NEG_INFINITY);
-        let mut vb = (f64::INFINITY, f64::NEG_INFINITY);
-        for q in polys.iter().flatten() {
-            ub = (ub.0.min(q.x), ub.1.max(q.x));
-            vb = (vb.0.min(q.y), vb.1.max(q.y));
-        }
-        Self { surf, polys, ub, vb }
-    }
-
-    fn is_empty(&self) -> bool {
-        !(self.ub.0 < self.ub.1 && self.vb.0 <= self.vb.1)
-    }
-
-    /// Whether (u, v), shifted by whole periods, lies in the face (on its boundary too unless
-    /// `strict`).
-    fn contains(&self, u: f64, v: f64, strict: bool) -> bool {
-        if self.is_empty() {
-            return false;
-        }
-        let shifts = |x: f64, (lo, hi): (f64, f64), periodic: bool| -> Vec<f64> {
-            let ks: &[f64] = if periodic { &[0.0, -1.0, 1.0, -2.0, 2.0] } else { &[0.0] };
-            ks.iter().map(|k| x + TAU * k).filter(|y| *y >= lo - 1e-9 && *y <= hi + 1e-9).collect()
-        };
-        for u in shifts(u, self.ub, self.surf.u_periodic()) {
-            for v in shifts(v, self.vb, self.surf.v_periodic()) {
-                match in_face(self.polys, self.surf, P2::new(u, v), 1e-6) {
-                    InFace::Inside => return true,
-                    InFace::Boundary if !strict => return true,
-                    _ => {}
-                }
-            }
-        }
-        false
-    }
-}
 
 /// A line's 3D geometry: an exact curve, or a polyline parametrized by vertex index.
 enum Geo {
@@ -310,229 +264,24 @@ fn edge_srcs(frame: &ViewFrame, b: &Body, bi: usize, tol: f64) -> Vec<Src> {
         .collect()
 }
 
-/// The runs of [a, b] where `inside` holds, found on `n` samples and refined by bisection.
-fn clip(a: f64, b: f64, n: usize, inside: impl Fn(f64) -> bool) -> Vec<(f64, f64)> {
-    let ts: Vec<f64> = (0..=n).map(|i| a + (b - a) * i as f64 / n as f64).collect();
-    let st: Vec<bool> = ts.iter().map(|&t| inside(t)).collect();
-    let cut = |mut lo: f64, mut hi: f64, s: bool| {
-        for _ in 0..50 {
-            let m = 0.5 * (lo + hi);
-            if inside(m) == s {
-                lo = m;
-            } else {
-                hi = m;
-            }
-        }
-        0.5 * (lo + hi)
-    };
-    let mut runs = Vec::new();
-    let mut start = if st[0] { Some(a) } else { None };
-    for i in 1..=n {
-        if st[i] != st[i - 1] {
-            let c = cut(ts[i - 1], ts[i], st[i - 1]);
-            match start.take() {
-                Some(s) => runs.push((s, c)),
-                None => start = Some(c),
-            }
-        }
-    }
-    if let Some(s) = start {
-        runs.push((s, b));
-    }
-    runs.retain(|r| r.1 - r.0 > 1e-12);
-    runs
-}
-
-/// The zero set of n·dir on the face, traced on a uv grid and clipped to the face, as 3D
-/// polylines. In a periodic direction the grid is shifted off the box by a fraction of a cell
-/// and runs a cell past it, so a contour lying on the seam (a torus's meridian seen side-on)
-/// falls inside cells rather than on grid lines (the clipping and the overlap test drop the
-/// copy a period away).
-fn trace_outline(dom: &Domain, dir: &V3) -> Vec<Vec<P3>> {
-    let n = 64usize;
-    let s = dom.surf;
-    let (ub, vb) = (dom.ub, dom.vb);
-    let (du, dv) = ((ub.1 - ub.0) / n as f64, (vb.1 - vb.0) / n as f64);
-    if du <= 0.0 || dv <= 0.0 {
-        return vec![];
-    }
-    let axis = |lo: f64, d: f64, periodic: bool| if periodic { (lo - 0.381_966 * d, n + 1) } else { (lo, n) };
-    let ((u0, nu), (v0, nv)) = (axis(ub.0, du, s.u_periodic()), axis(vb.0, dv, s.v_periodic()));
-    let g = |q: P2| s.normal(q.x, q.y).dot(dir);
-    let uv = |i: usize, j: usize| P2::new(u0 + du * i as f64, v0 + dv * j as f64);
-    let vals: Vec<f64> = (0..(nu + 1) * (nv + 1)).map(|k| g(uv(k % (nu + 1), k / (nu + 1)))).collect();
-    if vals.iter().all(|x| x.abs() < 1e-9) {
-        return vec![];
-    }
-    let val = |i: usize, j: usize| vals[j * (nu + 1) + i];
-    let pos = |x: f64| x >= 0.0;
-    // Grid edge keys: 2·node for the edge to (i + 1, j), 2·node + 1 for the edge to (i, j + 1).
-    let node = |i: usize, j: usize| j * (nu + 1) + i;
-    let mut segs: Vec<(usize, usize)> = Vec::new();
-    for j in 0..nv {
-        for i in 0..nu {
-            let c = [val(i, j), val(i + 1, j), val(i + 1, j + 1), val(i, j + 1)];
-            let sg = c.map(pos);
-            let keys = [2 * node(i, j), 2 * node(i + 1, j) + 1, 2 * node(i, j + 1), 2 * node(i, j) + 1];
-            let cross = [sg[0] != sg[1], sg[1] != sg[2], sg[3] != sg[2], sg[0] != sg[3]];
-            let list: Vec<usize> = (0..4).filter(|&k| cross[k]).collect();
-            match list.len() {
-                2 => segs.push((keys[list[0]], keys[list[1]])),
-                4 => {
-                    let centre = g(P2::new(u0 + du * (i as f64 + 0.5), v0 + dv * (j as f64 + 0.5)));
-                    if pos(centre) == sg[0] {
-                        segs.push((keys[0], keys[1]));
-                        segs.push((keys[2], keys[3]));
-                    } else {
-                        segs.push((keys[3], keys[0]));
-                        segs.push((keys[1], keys[2]));
-                    }
-                }
-                _ => {}
-            }
-        }
-    }
-    if segs.is_empty() {
-        return vec![];
-    }
-    // The exact zero on a grid edge.
-    let point = |key: usize| -> P2 {
-        let nd = key / 2;
-        let (i, j) = (nd % (nu + 1), nd / (nu + 1));
-        let (a, b) = if key.is_multiple_of(2) { (uv(i, j), uv(i + 1, j)) } else { (uv(i, j), uv(i, j + 1)) };
-        let (mut lo, mut hi) = (a, b);
-        let slo = pos(g(lo));
-        for _ in 0..40 {
-            let m = nalgebra::center(&lo, &hi);
-            if pos(g(m)) == slo {
-                lo = m;
-            } else {
-                hi = m;
-            }
-        }
-        nalgebra::center(&lo, &hi)
-    };
-    // Chain the segments, open chains from their ends first.
-    let mut at: HashMap<usize, Vec<usize>> = HashMap::new();
-    for (k, &(a, b)) in segs.iter().enumerate() {
-        at.entry(a).or_default().push(k);
-        at.entry(b).or_default().push(k);
-    }
-    let mut keys: Vec<usize> = at.keys().copied().collect();
-    keys.sort_by_key(|k| (at[k].len() != 1, *k));
-    let mut used = vec![false; segs.len()];
-    let mut chains: Vec<Vec<usize>> = Vec::new();
-    for start in keys {
-        while let Some(&first) = at[&start].iter().find(|&&k| !used[k]) {
-            let mut chain = vec![start];
-            let mut cur = start;
-            let mut next = Some(first);
-            while let Some(k) = next {
-                used[k] = true;
-                let (a, b) = segs[k];
-                cur = if a == cur { b } else { a };
-                chain.push(cur);
-                next = at[&cur].iter().copied().find(|&k| !used[k]);
-            }
-            chains.push(chain);
-        }
-    }
-    // Clip each chain to the face.
-    let mut out = Vec::new();
-    for chain in chains {
-        let pts: Vec<P2> = chain.iter().map(|&k| point(k)).collect();
-        let inside: Vec<bool> = pts.iter().map(|q| dom.contains(q.x, q.y, false)).collect();
-        let cut = |a: P2, b: P2| -> P2 {
-            let (mut lo, mut hi) = (a, b);
-            let s = dom.contains(a.x, a.y, false);
-            for _ in 0..30 {
-                let m = nalgebra::center(&lo, &hi);
-                if dom.contains(m.x, m.y, false) == s {
-                    lo = m;
-                } else {
-                    hi = m;
-                }
-            }
-            nalgebra::center(&lo, &hi)
-        };
-        let mut run: Vec<P2> = Vec::new();
-        for k in 0..pts.len() {
-            if inside[k] {
-                if run.is_empty() && k > 0 {
-                    run.push(cut(pts[k], pts[k - 1]));
-                }
-                run.push(pts[k]);
-            } else if !run.is_empty() {
-                run.push(cut(pts[k - 1], pts[k]));
-                out.push(std::mem::take(&mut run));
-            }
-        }
-        if !run.is_empty() {
-            out.push(run);
-        }
-    }
-    out.into_iter().filter(|r| r.len() >= 2).map(|r| r.iter().map(|q| s.eval(q.x, q.y)).collect()).collect()
-}
-
 /// The outlines of one face as lines of the view.
 fn face_outlines(frame: &ViewFrame, bi: usize, fi: usize, dom: &Domain, tol: f64) -> Vec<Src> {
-    let dir = frame.dir;
-    let s = dom.surf;
-    if dom.is_empty() {
-        return vec![];
-    }
-    let mk = |geo: Geo, t: (f64, f64), closed: bool| make_src(frame, bi, ProjClass::Outline, None, Some(fi), vec![fi], geo, t, closed, tol);
-    match s {
-        Surface::Plane { .. } => vec![],
-        Surface::Cylinder { .. } | Surface::Cone { .. } => {
-            // n·dir = A cos u + B sin u + C along u (the normal is constant along a generator).
-            let vm = 0.5 * (dom.vb.0 + dom.vb.1);
-            let g = |u: f64| s.normal(u, vm).dot(&dir);
-            let (g0, g1, g2) = (g(0.0), g(PI / 2.0), g(PI));
-            let c = 0.5 * (g0 + g2);
-            let (a, b) = (0.5 * (g0 - g2), g1 - c);
-            let r = a.hypot(b);
-            if r < 1e-9 || c.abs() > r {
-                return vec![];
-            }
-            let phi = b.atan2(a);
-            let alpha = (-c / r).clamp(-1.0, 1.0).acos();
-            let mut us = vec![phi + alpha];
-            if alpha > 1e-9 {
-                us.push(phi - alpha);
-            }
-            let mut out = Vec::new();
-            for u0 in us {
-                let Some(line) = s.iso_u(u0) else { continue };
-                for run in clip(dom.vb.0, dom.vb.1, 32, |v| dom.contains(u0, v, false)) {
-                    out.extend(mk(Geo::Exact(line.clone()), run, false));
+    let opts = SilOptions { tol, grid: 96 };
+    let Found::Curves(curves) = domain_silhouettes(dom, &View::Parallel(frame.dir), &opts) else { return vec![] };
+    curves
+        .into_iter()
+        .filter_map(|(geo, closed)| {
+            let mk = |geo: Geo, t: (f64, f64), closed: bool| make_src(frame, bi, ProjClass::Outline, None, Some(fi), vec![fi], geo, t, closed, tol);
+            match geo {
+                SilGeom::Exact { curve, t } => mk(Geo::Exact(curve), t, closed),
+                SilGeom::Poly { pts, .. } if pts.len() >= 2 => {
+                    let n = (pts.len() - 1) as f64;
+                    mk(Geo::Poly(pts), (0.0, n), false)
                 }
+                SilGeom::Poly { .. } => None,
             }
-            out
-        }
-        Surface::Sphere { f, r } => {
-            let a = any_perpendicular(&dir);
-            let circle = Curve::Circle { c: f.o, x: a, y: dir.cross(&a).normalize(), r: *r };
-            let inside = |t: f64| {
-                let (u, v) = s.project(&circle.point(t), None);
-                dom.contains(u, v, false)
-            };
-            let mut runs = clip(0.0, TAU, 64, inside);
-            if runs.len() >= 2 && runs[0].0 == 0.0 && runs[runs.len() - 1].1 == TAU {
-                let last = runs.pop().unwrap();
-                runs[0] = (last.0, runs[0].1 + TAU);
-            }
-            let full = runs.len() == 1 && runs[0] == (0.0, TAU);
-            runs.into_iter().filter_map(|run| mk(Geo::Exact(circle.clone()), run, full)).collect()
-        }
-        _ => trace_outline(dom, &dir)
-            .into_iter()
-            .filter_map(|p| {
-                let n = (p.len() - 1) as f64;
-                mk(Geo::Poly(p), (0.0, n), false)
-            })
-            .collect(),
-    }
+        })
+        .collect()
 }
 
 /// A uniform 2D grid of items by their boxes.
@@ -1239,6 +988,39 @@ mod tests {
         let (lo, hi) = p.bounds().unwrap();
         assert!((hi.x - 13.0).abs() < 0.02 && (lo.y + 13.0).abs() < 0.02, "{lo} {hi}");
         assert!(!p.edges.iter().any(|e| e.visibility == ProjVisibility::Hidden), "{p:#?}");
+    }
+
+    /// Regressions from SMLib's silhouette models: a sphere whose loop is only slits (a seam
+    /// and a cut: the whole sphere) kept its outline only where the slits' zero-area polygon
+    /// happened to contain it (none, or half); a B-spline torus seen side-on, a meridian on its
+    /// seam, drew more outline than it has (73.2 visible and 32.5 hidden against 71.4 and 31.4:
+    /// pieces traced past the seam, chords cutting the crossings).
+    #[test]
+    fn smlib_sphere_and_torus_outlines() {
+        let read = |bytes: &[u8]| native::smb::read_brep(bytes).unwrap().body;
+        let sphere = read(include_bytes!("../../tests/data/smlib/silhouette/sphere.smb"));
+        let mut k = native::NativeKernel::new();
+        let s = k.insert(sphere);
+        for d in [Vector3::x(), Vector3::y(), Vector3::z(), Vector3::new(1.0, 1.0, 1.0)] {
+            let p = k.project(&[s], &ViewFrame::new(d, native::math::any_perpendicular(&d)), &ProjectOptions::default()).unwrap();
+            // The visible lines on the outline circle (r 5 about the centre): all of it.
+            let on_circle: f64 = p
+                .edges
+                .iter()
+                .filter(|e| e.visibility == ProjVisibility::Visible && e.points.iter().all(|q| (q.coords.norm() - 5.0).abs() < 0.02))
+                .map(|e| e.length())
+                .sum();
+            assert!((on_circle - TAU * 5.0).abs() < 0.05, "{d:?}: {on_circle} {p:#?}");
+            assert!(p.of(ProjVisibility::Visible, ProjClass::Outline).count() > 0, "{d:?}");
+        }
+        // The B-spline torus R 10 r 5 from the front: the outer half meridians and the top and
+        // bottom lines (2·5π + 2·20) visible, the inner half meridians hidden.
+        let torus = read(include_bytes!("../../tests/data/smlib/silhouette/torus.smb"));
+        let t = k.insert(torus);
+        let p = k.project(&[t], &front(), &ProjectOptions::default()).unwrap();
+        let len = |v: ProjVisibility| p.of(v, ProjClass::Outline).map(|e| e.length()).sum::<f64>();
+        assert!((len(ProjVisibility::Visible) - (10.0 * PI + 40.0)).abs() < 0.05, "{} {p:#?}", len(ProjVisibility::Visible));
+        assert!((len(ProjVisibility::Hidden) - 10.0 * PI).abs() < 0.05, "{}", len(ProjVisibility::Hidden));
     }
 
     /// A 10 × 10 grid of holes in a plate, seen from the front and from a corner.

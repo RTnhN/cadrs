@@ -1,39 +1,6 @@
 # SMLib advanced silhouette cases (tests/smlib_silhouette.rs, from tools/smlib/silhouette.py)
 # that fail: `name`, or `name slow` (over a minute).
 
-# Missing API: no silhouette curves for a perspective view (native::hlr is parallel only).
-silhouette_26_toruswvy_persp
-silhouette_27_toruswvy_persp
-silhouette_28_toruswvy_persp
-silhouette_29_torus_persp
-silhouette_30_torus_persp
-silhouette_31_torus_persp
-silhouette_32_vase_rev_persp
-silhouette_33_vase_rev_persp
-silhouette_34_vase_rev_persp
-
-# HLR drops outlines lying on edges and merges outlines lying on each other in 2D: the sphere's
-# outline (on its seam or edge-on) missing or halved; the plane seen edge-on gives none.
-silhouette_01_sphere_par
-silhouette_02_sphere_par
-silhouette_03_sphere_par
-silhouette_04_sphere_par
-silhouette_13_plane_square_par
-silhouette_14_plane_square_par
-
-# Torus outlines: lifted length 1.4–2.9 times SMLib's (outline pieces traced more than once).
-silhouette_20_torus_par slow
-silhouette_21_torus_par slow
-silhouette_22_torus_par slow
-
-# Outline points whose line of sight doesn't touch the face (0.001 to 0.2 off): the traced
-# outline, or the lift's choice among several tangencies (unresolved).
-silhouette_17_toruswvy_par
-silhouette_19_toruswvy_par
-silhouette_23_vase_rev_par
-silhouette_24_vase_rev_par
-silhouette_25_vase_rev_par
-
 # The SMLib reader: cone.smb, "a loop doesn't close".
 silhouette_05_cone_par
 silhouette_06_cone_par

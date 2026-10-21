@@ -11,12 +11,14 @@ pub mod boolean_kinds;
 pub mod build;
 pub mod classify;
 pub mod curve;
+pub mod distance;
 /// The DRAW test harness the generated OCCT suites run on (a test kit, not kernel API): built
 /// for tests and with the `testkit` feature.
 #[cfg(any(test, feature = "testkit"))]
 pub mod draw;
 pub mod edge_bop;
 pub mod exchange;
+pub mod face_build;
 pub mod features;
 pub mod fillet;
 pub mod fillet_geom;
@@ -33,6 +35,7 @@ pub mod offset2d;
 /// Bodies for the SMLib test oracle (test kit, as `draw`).
 #[cfg(any(test, feature = "testkit"))]
 pub mod oracle;
+pub mod silhouette;
 pub mod slab;
 pub mod smb;
 pub mod recognize;
@@ -54,6 +57,7 @@ pub mod tess;
 pub mod tol;
 pub mod topo;
 pub mod unify;
+pub mod uvdomain;
 pub mod xbuild;
 
 pub use kernel::NativeKernel;

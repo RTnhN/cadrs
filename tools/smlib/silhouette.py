@@ -4,18 +4,16 @@ vase), each moved, whose faces' silhouette curves (`CreateSilhouetteCurves` on t
 domain, then `CreateCurvesByTrimming`; `my_test_tsurf_silhouette`, smTopoTest.cpp) are counted,
 for a direction of sight (25 cases) or an eye point (9 cases, `bPerspective`).
 
-The kernel has no silhouette curves of its own, only the outlines of a drawing view
-(`Kernel::project`, native::hlr: projected to 2D, parallel views only). A parallel case projects
-the model with hidden lines and lifts every outline point back to 3D: the point where the line of
-sight through it touches the outline's face (where the line comes nearest the face with the
-face's normal square to it: it also meets the face where it crosses it). It checks:
-- every outline point lifts (the line of sight touches the face within 1e-3, and the normal there
-  is square to the direction of sight, |n·v| ≤ 0.05);
-- the lifted length against SMLib's (the oracle's `silhouette`), to 1e-3;
+Here `Kernel::silhouettes` (native::silhouette) gives every face's silhouette curves, seen or
+hidden, for the same parallel or perspective view. It checks:
+- every point of the curves is its face's surface at the (u, v) given with it (1e-6), where the
+  normal is square to the line of sight (|n·w| ≤ 1e-3, w the direction of sight, or from the
+  eye point to the point);
+- the curves' total length against SMLib's (the oracle's `silhouette`), to 1e-3;
 - none where SMLib finds none (the count is compared only as none against some: SMLib counts
   trimmed pieces, and the sphere's count is unconfirmed, 2 against the asserted 5).
-A perspective case (n·(p − eye) = 0) calls `missing_perspective_silhouette`: the kernel has no
-API for it, so those cases are known failures until it does.
+A face seen edge-on (the planes seen along their edges) lies wholly on its silhouette: both give
+the sides of its uv box that lie in it (the square's four sides, nothing of the disc).
 """
 import re
 
@@ -24,8 +22,8 @@ from smlib._oracle import oracle_run, want_literal
 
 SOURCE = "smAdvancedTest.cpp"
 
-# Passing cases that take over a minute (the wavy torus's outline lifted point by point).
-SLOW = {"silhouette_18_toruswvy_par"}
+# Passing cases that take over a minute.
+SLOW = set()
 TITLE = "advanced silhouette"
 
 PRELUDE = r'''
@@ -33,104 +31,46 @@ PRELUDE = r'''
 mod intersect;
 use intersect::*;
 
-use cadrs_kernel::native::math::{any_perpendicular, Affine, P3, V3};
-use cadrs_kernel::native::surface::Surface;
+use cadrs_kernel::native::math::{Affine, P3, V3};
 use cadrs_kernel::native::NativeKernel;
-use cadrs_kernel::projection::{ProjClass, ProjectOptions, ViewFrame};
-use cadrs_kernel::Kernel;
+use cadrs_kernel::{Kernel, SilhouetteView};
 
 const SUITE: &str = "silhouette";
 
-/// The outlines' 2D tolerance.
-const PROJ_TOL: f64 = 1e-4;
-/// A lifted point's line of sight touches its face within this.
-const LIFT_TOL: f64 = 1e-3;
-/// And the face's normal there is this square to it (|n·v|).
-const SQUARE: f64 = 0.05;
-
-/// MISSING API: silhouette curves seen from an eye point (n·(p − eye) = 0). `native::hlr`
-/// projects along a direction only.
-fn missing_perspective_silhouette() -> Result<Found, String> {
-    Err("missing API: no silhouette curves for a perspective view (native::hlr projects along a direction only)".into())
-}
-
-/// Where the line `o + t·d`, t in [t0, t1], touches `s`: the t minimizing the distance plus a
-/// measure of how far the surface's normal at the foot is from square to the line (the line
-/// also meets the surface where it crosses it, at distance 0 too), `scale` (mm) weighing the
-/// two alike near a tangency (distance ≈ δ²/2ρ, n·d ≈ δ/ρ). Returns (t, distance, |n·d|).
-fn touch(s: &Surface, o: &P3, d: &V3, t0: f64, t1: f64, scale: f64) -> (f64, f64, f64) {
-    let eval = |t: f64| {
-        let p = o + d * t;
-        let (u, v) = s.project(&p, Some(s.project_coarse(&p, 16)));
-        let gap = dist(s, &p);
-        let nd = s.normal(u, v).normalize().dot(d).abs();
-        (gap + 0.5 * scale * nd * nd, gap, nd)
-    };
-    let n = 192;
-    let h = (t1 - t0) / n as f64;
-    let (mut best, mut fb) = (t0, f64::INFINITY);
-    for i in 0..=n {
-        let t = t0 + h * i as f64;
-        let v = eval(t).0;
-        if v < fb {
-            (best, fb) = (t, v);
-        }
-    }
-    // Golden section around the best sample.
-    let (mut a, mut b) = (best - h, best + h);
-    let g = 0.5 * (5f64.sqrt() - 1.0);
-    for _ in 0..60 {
-        let (c, e) = (b - g * (b - a), a + g * (b - a));
-        if eval(c).0 < eval(e).0 {
-            b = e;
-        } else {
-            a = c;
-        }
-    }
-    let t = if eval(0.5 * (a + b)).0 < fb { 0.5 * (a + b) } else { best };
-    let (_, gap, nd) = eval(t);
-    (t, gap, nd)
-}
+/// The curves' chord tolerance (mm).
+const TOL: f64 = 1e-4;
+/// A point of a curve lies on its face's surface within this.
+const ON: f64 = 1e-6;
+/// And the surface's normal there is this square to the line of sight (|n·w|).
+const SQUARE: f64 = 1e-3;
 
 /// SMLib's `my_test_tsurf_silhouette`: `file` moved by `mv`, seen along `view` (or from the eye
 /// point `view` when `persp`).
 fn silhouette(file: &str, mv: [f64; 3], view: [f64; 3], persp: bool, want: &Want) -> Result<(), String> {
     let m = model(SUITE, file)?;
     let body = m.body.transformed(&Affine::translation(V3::new(mv[0], mv[1], mv[2])));
-    let found = if persp {
-        missing_perspective_silhouette()?
-    } else {
-        let bb = body.bbox();
-        let d = V3::new(view[0], view[1], view[2]).normalize();
-        let frame = ViewFrame::new(d, any_perpendicular(&d));
-        let mut k = NativeKernel::new();
-        let id = k.insert(body.clone());
-        let proj = k.project(&[id], &frame, &ProjectOptions { tolerance: PROJ_TOL, hidden: true }).map_err(|e| format!("{e:?}"))?;
-        let up = frame.up();
-        let corners: Vec<P3> = (0..8).map(|i| P3::new([bb.min.x, bb.max.x][i & 1], [bb.min.y, bb.max.y][(i >> 1) & 1], [bb.min.z, bb.max.z][i >> 2])).collect();
-        let mut found = Found::default();
-        for (j, e) in proj.edges.iter().filter(|e| e.class == ProjClass::Outline).enumerate() {
-            let Some(f) = e.source.and_then(|s| s.face) else { return Err(format!("outline {j} has no face")) };
-            let s = &body.faces[f.0 as usize].surf;
-            let mut piece = Vec::new();
-            for q in &e.points {
-                let o = frame.origin + frame.x * q.x + up * q.y;
-                let ts = corners.iter().map(|c| (c - o).dot(&d));
-                let (t0, t1) = ts.fold((f64::INFINITY, f64::NEG_INFINITY), |(a, b), t| (a.min(t), b.max(t)));
-                let (t, gap, nd) = touch(s, &o, &d, t0 - 1.0, t1 + 1.0, 0.1 * bb.diagonal());
-                let p = o + d * t;
-                let (u, v) = s.project(&p, Some(s.project_coarse(&p, 16)));
-                let foot = s.eval(u, v);
-                if gap > LIFT_TOL || nd > SQUARE {
-                    return Err(format!("outline {j} (face {}): the line of sight through {q:?} misses the face by {gap:.1e} (n·v {nd:.2e})", f.0));
-                }
-                piece.push(foot);
-            }
-            found.length += piece.windows(2).map(|w| (w[1] - w[0]).norm()).sum::<f64>();
-            found.pieces.push(piece);
+    let (eye, dir) = (P3::new(view[0], view[1], view[2]), V3::new(view[0], view[1], view[2]).normalize());
+    let v = if persp { SilhouetteView::Perspective(eye) } else { SilhouetteView::Parallel(dir) };
+    let mut k = NativeKernel::new();
+    let id = k.insert(body.clone());
+    let curves = k.silhouettes(id, &v, TOL).map_err(|e| format!("{e:?}"))?;
+    let mut found = Found::default();
+    for (j, c) in curves.iter().enumerate() {
+        let s = &body.faces[c.face.0 as usize].surf;
+        if c.uv.len() != c.points.len() {
+            return Err(format!("curve {j}: {} points, {} (u, v)", c.points.len(), c.uv.len()));
         }
-        found
-    };
+        for (p, q) in c.points.iter().zip(&c.uv) {
+            let gap = (s.eval(q.x, q.y) - p).norm();
+            let sight = if persp { (p - eye).normalize() } else { dir };
+            let nd = s.normal(q.x, q.y).dot(&sight).abs();
+            if gap > ON || nd > SQUARE {
+                return Err(format!("curve {j} (face {}): {p:?} is {gap:.1e} off its surface, n·w {nd:.2e}", c.face.0));
+            }
+        }
+        found.length += c.length();
+        found.pieces.push(c.points.clone());
+    }
     check_found(&found, want)
 }
 '''

@@ -8,27 +8,49 @@ mod smlib_common;
 #[allow(unused_imports)]
 use smlib_common::*;
 
+use cadrs_kernel::native::mass;
 use cadrs_kernel::native::smb;
 use cadrs_kernel::native::surface::Surface;
-use cadrs_kernel::native::topo::Body;
+use cadrs_kernel::native::NativeKernel;
 
 const SUITE: &str = "brep_import";
 
-/// MISSING API: a face of a bare surface over its natural domain (SMLib's
-/// `SmBrep::CreateFaceFromSurface`, iso-curve edges, poles as vertices).
-fn missing_face_from_surface(_s: &Surface) -> Result<Body, String> {
-    Err("missing API: no face from a bare surface over its natural domain (SmBrep::CreateFaceFromSurface)".into())
+/// The area of `s` over its parameter box, |Su × Sv| integrated by 5-point Gauss–Legendre on a
+/// 32 × 32 grid.
+fn surface_area(s: &Surface) -> f64 {
+    const X: [f64; 5] = [-0.906_179_845_938_664, -0.538_469_310_105_683, 0.0, 0.538_469_310_105_683, 0.906_179_845_938_664];
+    const W: [f64; 5] = [0.236_926_885_056_189, 0.478_628_670_499_366, 0.568_888_888_888_889, 0.478_628_670_499_366, 0.236_926_885_056_189];
+    let ((u0, u1), (v0, v1)) = s.param_box();
+    let n = 32;
+    let (hu, hv) = ((u1 - u0) / n as f64, (v1 - v0) / n as f64);
+    let mut a = 0.0;
+    for i in 0..n {
+        for j in 0..n {
+            for (xu, wu) in X.iter().zip(W) {
+                for (xv, wv) in X.iter().zip(W) {
+                    let u = u0 + hu * (i as f64 + 0.5 + 0.5 * xu);
+                    let v = v0 + hv * (j as f64 + 0.5 + 0.5 * xv);
+                    let (_, su, sv) = s.d1(u, v);
+                    a += wu * wv * su.cross(&sv).norm() * 0.25 * hu * hv;
+                }
+            }
+        }
+    }
+    a
 }
 
 /// `my_test_MakeFace`: `file` holds `surfaces` surfaces, `curves` curves and no B-reps; its
-/// surface made a face has `faces` faces, `edges` edges and `verts` vertices.
+/// surface made a face has `faces` faces, `edges` edges and `verts` vertices, and the surface's
+/// area.
 fn make_face(file: &str, surfaces: usize, curves: usize, faces: usize, edges: usize, verts: usize) -> Result<(), String> {
     let bytes = std::fs::read(data(SUITE, file)).map_err(|e| format!("{file}: {e}"))?;
     let p = smb::read_part(&bytes)?;
     if (p.surfaces.len(), p.curves.len(), p.breps.len()) != (surfaces, curves, 0) {
         return Err(format!("{} surfaces, {} curves, {} B-reps", p.surfaces.len(), p.curves.len(), p.breps.len()));
     }
-    let b = missing_face_from_surface(&p.surfaces[0])?;
+    let mut k = NativeKernel::new();
+    let id = k.face_from_bare_surface(&p.surfaces[0], None).map_err(|e| format!("{e:?}"))?;
+    let b = k.get(id).map_err(|e| format!("{e:?}"))?;
     if let Some(i) = b.check().first() {
         return Err(format!("invalid: {i}"));
     }
@@ -36,11 +58,15 @@ fn make_face(file: &str, surfaces: usize, curves: usize, faces: usize, edges: us
     if (b.faces.len(), ne, b.verts.len()) != (faces, edges, verts) {
         return Err(format!("{} faces, {ne} edges, {} vertices", b.faces.len(), b.verts.len()));
     }
+    let (got, want) = (mass::face_area(b, 0).0, surface_area(&p.surfaces[0]));
+    if (got - want).abs() > 1e-6 * want {
+        return Err(format!("area {got:.9}, the surface's {want:.9}"));
+    }
     Ok(())
 }
 
 /// SMLib B-rep import: `ApproximateSphere.smp` (1 surface, 4 curves, no B-reps), its surface made a face: 1 face, 1 edge (the seam), 2 vertices (the poles).
 #[test]
 fn make_face_approximate_sphere() {
-    known_failure(make_face("ApproximateSphere.smp", 1, 4, 1, 1, 2), "brep_import", "make_face_approximate_sphere");
+    make_face("ApproximateSphere.smp", 1, 4, 1, 1, 2).unwrap();
 }

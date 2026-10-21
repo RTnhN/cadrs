@@ -11,6 +11,7 @@ pub mod loft;
 pub mod native;
 pub mod naming;
 pub mod projection;
+pub mod query;
 pub mod thin;
 pub mod types;
 
@@ -18,6 +19,7 @@ pub use naming::{BodyNames, EdgeName, FaceName, FaceOrigin, OpId, VertexName};
 pub use projection::{
     ProjClass, ProjCurve, ProjEdge, ProjSource, ProjVisibility, ProjectOptions, Projection, ViewFrame,
 };
+pub use query::{DistanceLocation, DistanceResult, DistanceTarget, SilhouetteCurve, SilhouetteView, UvRect};
 pub use types::*;
 
 /// The kernel cadrs builds with: the native (pure Rust) B-rep kernel.
@@ -474,6 +476,36 @@ pub trait Kernel {
     /// edge or face it came from (see [`projection`]). The bodies hide each other.
     fn project(&self, _bodies: &[BodyId], _frame: &ViewFrame, _opts: &ProjectOptions) -> Result<Projection> {
         Err(KernelError::Unsupported("view projection"))
+    }
+
+    /// The silhouette curves of every face of `body` seen along a direction or from an eye
+    /// point: where the face's normal is square to the line of sight (SMLib's
+    /// `CreateSilhouetteCurves` clipped to the face), hidden or not, as model-space polylines
+    /// within `tolerance` (mm), with their (u, v). A face seen edge-on (wholly on its
+    /// silhouette) gives the sides of its uv box that lie in it, as SMLib does.
+    fn silhouettes(&self, _body: BodyId, _view: &SilhouetteView, _tolerance: f64) -> Result<Vec<SilhouetteCurve>> {
+        Err(KernelError::Unsupported("silhouette curves"))
+    }
+
+    /// The minimum distance between two points, edges, faces or bodies (their boundaries), and
+    /// the closest points. `EmptyResult` when either side has no geometry.
+    fn min_distance(&self, _a: &DistanceTarget, _b: &DistanceTarget) -> Result<DistanceResult> {
+        Err(KernelError::Unsupported("distance queries"))
+    }
+
+    /// The maximum distance between two points, edges, faces or bodies, and the farthest
+    /// points.
+    fn max_distance(&self, _a: &DistanceTarget, _b: &DistanceTarget) -> Result<DistanceResult> {
+        Err(KernelError::Unsupported("distance queries"))
+    }
+
+    /// A sheet body of one face: the surface of `face` over its natural uv domain (a
+    /// B-spline's range, a period of a periodic direction) or over `domain`, bounded by
+    /// iso-curves, with poles as degenerate edges and seams where the domain closes round
+    /// (SMLib's `CreateFaceFromSurface`). The result has no history. `InvalidParameter` for an
+    /// unbounded surface without a domain, or a domain outside the surface.
+    fn face_from_surface(&mut self, _body: BodyId, _face: FaceId, _domain: Option<UvRect>) -> Result<OpResult> {
+        Err(KernelError::Unsupported("faces from surfaces"))
     }
 
     /// The body's vertices. The default finds them as the distinct ends of [`Kernel::edges`]
