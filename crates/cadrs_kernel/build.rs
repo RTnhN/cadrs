@@ -9,12 +9,14 @@ fn main() {
             .file("src/backend/step_colors.cc")
             .include("src/backend")
             .include(occt_sys::occt_path().join("include"))
+            .define("_USE_MATH_DEFINES", None)
             .flag_if_supported("-std=c++17")
             .compile("cadrs-step-colors");
         cxx_build::bridge("src/backend/shell_sectors.rs")
             .file("src/backend/shell_sectors.cc")
             .include("src/backend")
             .include(occt_sys::occt_path().join("include"))
+            .define("_USE_MATH_DEFINES", None)
             .flag_if_supported("-std=c++17")
             .compile("cadrs-shell-sectors");
         println!("cargo:rerun-if-changed=src/backend/step_colors.rs");

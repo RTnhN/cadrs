@@ -5,8 +5,9 @@
 //! freedom). The **eye** at the right end shows on hover (always, crossed out, on a hidden
 //! instance, whose row is greyed) and hides or shows it. A row selects its instance (the
 //! selection the view shares); right-click opens the instance menu ([`super::menu`]). The
-//! header counts the instances. Shift-click selects the displayed range from the last plain
-//! or Ctrl/Cmd-click; Ctrl/Cmd+Shift adds that range. Collapsed and filtered-out rows are skipped.
+//! header counts the instances. A click adds a row to the selection or takes it out (with or
+//! without Ctrl/Cmd, as in Onshape); Shift-click selects the displayed range from the last click,
+//! and Ctrl/Cmd+Shift adds that range. Collapsed and filtered-out rows are skipped.
 //!
 //! P3B.4:
 //! - A **subassembly** row has the assembly icon (bracketed when rigid) and a ▸ that opens it:
@@ -92,15 +93,15 @@ impl RangeAnchor {
             }
         }
         self.anchor = Some((scope, clicked));
-        // A missing anchor starts a fresh selection, never toggles off the Shift endpoint.
-        if additive && !shift { RowSelect::Toggle }
-        else if shift && additive {
+        // A click without Shift toggles the row, as in Onshape. A missing anchor starts a fresh
+        // selection, never toggles off the Shift endpoint.
+        if !shift { RowSelect::Toggle }
+        else if additive {
             let mut range = selection.0.clone();
             if !range.contains(&clicked) { range.push(clicked); }
             RowSelect::Range(range)
         }
-        else if shift { RowSelect::Range(vec![clicked]) }
-        else { RowSelect::Only }
+        else { RowSelect::Range(vec![clicked]) }
     }
 }
 
@@ -1036,6 +1037,11 @@ mod range_tests {
             apply(&mut selection, p, how);
             selection.0.clone()
         };
+        assert_eq!(click(20, false, false), order[20..21]);
+        // A plain click adds a row and a second one takes it out again (Onshape).
+        assert_eq!(click(7, false, false), vec![order[20], order[7]]);
+        assert_eq!(click(7, false, false), order[20..21]);
+        assert_eq!(click(20, false, false), vec![]);
         assert_eq!(click(20, false, false), order[20..21]);
         assert_eq!(click(53, true, false), order[20..54]);
         assert_eq!(click(25, true, false), order[20..26]);
