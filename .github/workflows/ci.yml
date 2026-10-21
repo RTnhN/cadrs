@@ -53,3 +53,24 @@ jobs:
       # `cargo test --workspace`.
       - name: Test
         run: cargo test --workspace --exclude cadrs --lib
+
+  macos:
+    name: Build and test (macOS)
+    runs-on: macos-14
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: System packages
+        run: brew install cmake
+
+      - name: Rust toolchain
+        run: rustup toolchain install && rustc -V
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Build
+        run: cargo build --workspace
+
+      - name: Test
+        run: cargo test --workspace --exclude cadrs --lib

@@ -693,6 +693,12 @@ fn golden_course_s19_mirror() {
 
 #[test]
 #[ignore = "headless screenshots; run with: cargo test -r -p cadrs -F app-tests --test golden -- --ignored"]
+fn golden_mirror_box_select() {
+    run_scenario("mirror_box_select");
+}
+
+#[test]
+#[ignore = "headless screenshots; run with: cargo test -r -p cadrs -F app-tests --test golden -- --ignored"]
 fn golden_course_s19_offset() {
     run_scenario("course_s19_offset");
 }
@@ -2407,4 +2413,10 @@ fn golden_part_studio_double_click_edit() {
 #[ignore = "headless screenshots; run with: cargo test -r -p cadrs -F app-tests --test golden -- --ignored"]
 fn golden_vector_drop() {
     run_scenario("vector_drop");
+}
+
+#[test]
+#[ignore = "headless screenshots; run with: cargo test -r -p cadrs -F app-tests --test golden -- --ignored"]
+fn golden_image_placement() {
+    run_scenario("image_placement");
 }

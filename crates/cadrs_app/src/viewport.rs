@@ -746,6 +746,9 @@ fn spawn_scene(
         alpha_mode: AlphaMode::Blend,
         double_sided: true,
         cull_mode: None,
+        // Behind whatever lies on a plane (a face at 0, a picture dropped on Top), which
+        // otherwise fought it for depth: twice a picture's lift the other way (about 40 µm).
+        depth_bias: -2.0 * crate::picture::SURFACE_BIAS,
         ..default()
     };
     let normal = materials.add(fill(plane_fill()));

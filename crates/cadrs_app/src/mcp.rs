@@ -1340,6 +1340,8 @@ mod tests {
             json!({ "type": "set_geometry", "points": [[id, p]], "radii": [[id, 5.0]] }),
             json!({ "type": "scale", "center": p, "factor": 2.0 }),
             json!({ "type": "mirror", "axis": id, "curves": [id] }),
+            json!({ "type": "mirror", "axis": "YAxis", "curves": [id] }),
+            json!({ "type": "mirror", "axis": { "Curve": id }, "curves": [id] }),
             json!({ "type": "offset", "chain": [[id, false]], "distance": 2.0, "left": true, "label": [0.0, 0.0] }),
             json!({ "type": "add_constraint", "constraints": [{ "Coincident": [{ "Point": id }, { "Point": id }] }], "label": "Add coincident" }),
             json!({ "type": "add_constraint", "constraints": [{ "Horizontal": { "Line": { "Curve": id } } }] }),
