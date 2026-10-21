@@ -11,7 +11,8 @@ use crate::native::features::{face_as_profile, Tagged};
 use crate::native::kernel::NativeKernel;
 use crate::native::math::*;
 use crate::native::profile::{self, MergedFace, Piece};
-use super::{sweep_full, Frames, Prism, Revolve};
+use super::corner::Corner;
+use super::{sweep_full, Frames, Join, Prism, Revolve};
 use crate::*;
 
 /// A path segment in the direction the path runs: its curve on [t0, t1], run backwards when
@@ -222,10 +223,16 @@ fn move_plane(p: &Plane, m: &Affine) -> Plane {
 }
 
 /// Sweeps the profile (faces and chains in `plane` coordinates) along one spine.
-fn sweep_spine(faces: &[MergedFace], chains: &[Vec<Piece>], plane: Plane, spine: &[Seg], frames: Frames, solid: bool) -> Result<Vec<Tagged>> {
+/// The pieces, each with the corner it starts at (none for the first, or where the path is
+/// tangent: [`Join::None`] keeps the profile's placement round corners and records none).
+fn sweep_spine(faces: &[MergedFace], chains: &[Vec<Piece>], plane: Plane, spine: &[Seg], frames: Frames, join: Join, solid: bool) -> Result<(Vec<Tagged>, Vec<Option<Corner>>)> {
     let control = frames.control();
     let mut place = plane;
     let mut out = Vec::new();
+    let mut corners: Vec<Option<Corner>> = Vec::new();
+    let mut pending: Option<Corner> = None;
+    // Corners are joined for solids whose profile turns with the path.
+    let joins = join != Join::None && solid && control == SweepControl::None;
     // Segments swept with sampled frames, gathered while they meet tangentially (one surface
     // per profile curve along the run).
     let mut run: Vec<Seg> = Vec::new();
@@ -248,17 +255,30 @@ fn sweep_spine(faces: &[MergedFace], chains: &[Vec<Piece>], plane: Plane, spine:
         }
     }
     let mut run_helix: Option<super::frames::Helix> = None;
-    let flush = |run: &mut Vec<Seg>, place: &mut Plane, out: &mut Vec<Tagged>, helix: Option<super::frames::Helix>| -> Result<()> {
+    let flush = |run: &mut Vec<Seg>, place: &mut Plane, out: &mut Vec<Tagged>, corners: &mut Vec<Option<Corner>>, pending: &mut Option<Corner>, helix: Option<super::frames::Helix>| -> Result<()> {
         if run.is_empty() {
             return Ok(());
         }
         let (b, end) = super::frames::sweep_seg(faces, chains, *place, run, frames, solid, helix)?;
         out.push(Tagged::from_built(b));
+        corners.push(pending.take());
         *place = end;
         run.clear();
         Ok(())
     };
     for (si, seg) in spine.iter().enumerate() {
+        // A corner: the profile turns with the path about the corner (the least rotation from
+        // one direction to the next) and the pieces either side are joined there.
+        if joins && si > 0 {
+            let (d1, d2) = (spine[si - 1].dir(1.0), seg.dir(0.0));
+            if d1.dot(&d2) < 1.0 - 1e-9 {
+                flush(&mut run, &mut place, &mut out, &mut corners, &mut pending, run_helix)?;
+                let v = seg.start();
+                let end = place;
+                place = move_plane(&place, &least_turn(&d1, &d2, &v));
+                pending = Some(Corner { v, d1, d2, end, start: place });
+            }
+        }
         let exact = match (&seg.c, control) {
             (Curve::Line { .. }, SweepControl::None | SweepControl::KeepOrientation | SweepControl::LockDirection(_)) => true,
             (Curve::Circle { c, x, y, .. }, SweepControl::None) => {
@@ -274,7 +294,7 @@ fn sweep_spine(faces: &[MergedFace], chains: &[Vec<Piece>], plane: Plane, spine:
                 // A break in tangent, or a quarter turn gathered: a new piece.
                 let turned: f64 = run.iter().map(|g| g.dir(0.0).angle(&g.dir(1.0))).sum::<f64>() + seg.dir(0.0).angle(&seg.dir(1.0));
                 if last.dir(1.0).dot(&seg.dir(0.0)) < 1.0 - 1e-9 || turned > PI / 2.0 + 1e-9 {
-                    flush(&mut run, &mut place, &mut out, run_helix)?;
+                    flush(&mut run, &mut place, &mut out, &mut corners, &mut pending, run_helix)?;
                 }
             }
             if run.is_empty() {
@@ -283,7 +303,7 @@ fn sweep_spine(faces: &[MergedFace], chains: &[Vec<Piece>], plane: Plane, spine:
             run.push(seg.clone());
             continue;
         }
-        flush(&mut run, &mut place, &mut out, run_helix)?;
+        flush(&mut run, &mut place, &mut out, &mut corners, &mut pending, run_helix)?;
         match &seg.c {
             Curve::Line { d, .. } => {
                 let dir = d.normalize() * if seg.rev { -1.0 } else { 1.0 };
@@ -292,6 +312,7 @@ fn sweep_spine(faces: &[MergedFace], chains: &[Vec<Piece>], plane: Plane, spine:
                 // The profile plane may sit anywhere along the line: sweep from it.
                 let b = sweep_full(faces, chains, &kind, 0.0, len, false, solid)?;
                 out.push(Tagged::from_built(b));
+                corners.push(pending.take());
                 place = move_plane(&place, &Affine::translation(dir * len));
             }
             Curve::Circle { c, x, y, .. } => {
@@ -305,17 +326,27 @@ fn sweep_spine(faces: &[MergedFace], chains: &[Vec<Piece>], plane: Plane, spine:
                 let whole = span >= TAU - 1e-9;
                 let b = sweep_full(faces, chains, &kind, 0.0, if whole { TAU } else { span }, whole, solid)?;
                 out.push(Tagged::from_built(b));
+                corners.push(pending.take());
                 let r = nalgebra::Rotation3::from_axis_angle(&nalgebra::Unit::new_normalize(axis), span).into_inner();
                 place = move_plane(&place, &Affine { m: r, t: c.coords - r * c.coords });
             }
             _ => unreachable!(),
         }
     }
-    flush(&mut run, &mut place, &mut out, run_helix)?;
-    Ok(out)
+    flush(&mut run, &mut place, &mut out, &mut corners, &mut pending, run_helix)?;
+    Ok((out, corners))
 }
 
-fn swap_caps(t: &mut Tagged) {
+/// The least rotation about `o` taking direction `a` to `b`.
+fn least_turn(a: &V3, b: &V3, o: &P3) -> Affine {
+    let r = match a.cross(b).try_normalize(1e-12) {
+        Some(axis) => nalgebra::Rotation3::from_axis_angle(&nalgebra::Unit::new_unchecked(axis), a.angle(b)).into_inner(),
+        None => nalgebra::Matrix3::identity(),
+    };
+    Affine { m: r, t: o.coords - r * o.coords }
+}
+
+pub(super) fn swap_caps(t: &mut Tagged) {
     for ts in &mut t.tags {
         for x in ts.iter_mut() {
             *x = match *x {
@@ -381,14 +412,14 @@ pub fn sweep_with(k: &mut NativeKernel, profile: &Profile, spec: &SweepSpec) -> 
     }
     let center = profile_center(&faces, &chains, &plane);
     let sp = spines(path, closed, &plane, &center);
-    Ok(sweep_spines(&faces, &chains, plane, sp, spec.control, solid)?.into_result(k))
+    Ok(sweep_spines(&faces, &chains, plane, sp, spec.control, Join::Mitre, solid)?.into_result(k))
 }
 
 /// Sweeps the profile (`faces` and `chains` in `plane` coordinates) along each spine (with
 /// whether it runs backwards, from [`spines`]) and joins the pieces: the caps at the joints are
 /// glued away (pieces that meet anywhere else, a two-way sweep's halves, are united); sheets are
 /// kept side by side.
-pub(crate) fn sweep_spines(faces: &[MergedFace], chains: &[Vec<Piece>], plane: Plane, sp: Vec<(Vec<Seg>, bool)>, frames: impl Into<Frames>, solid: bool) -> Result<Tagged> {
+pub(crate) fn sweep_spines(faces: &[MergedFace], chains: &[Vec<Piece>], plane: Plane, sp: Vec<(Vec<Seg>, bool)>, frames: impl Into<Frames>, join: Join, solid: bool) -> Result<Tagged> {
     let frames = frames.into();
     let prof = std::env::var("CADRS_PROFILE").is_ok();
     let t0 = std::time::Instant::now();
@@ -402,8 +433,10 @@ pub(crate) fn sweep_spines(faces: &[MergedFace], chains: &[Vec<Piece>], plane: P
     // A backward spine's pieces go first, last piece first: each then ends (its caps swapped)
     // where the next starts, so the joints glue.
     let mut backs: Vec<Tagged> = Vec::new();
+    let mut back_corners: Vec<Option<Corner>> = Vec::new();
+    let mut corners: Vec<Option<Corner>> = Vec::new();
     for (spine, backward) in sp {
-        let mut these = sweep_spine(faces, chains, plane, &spine, frames, solid)?;
+        let (mut these, mut at) = sweep_spine(faces, chains, plane, &spine, frames, join, solid)?;
         if std::env::var("CADRS_SWEEP_DEBUG").is_ok() {
             for t in &these {
                 eprintln!("piece: volume {} faces {} solids {} check {:?}", crate::native::mass::body_mass(&t.body).volume, t.body.faces.len(), t.body.solids.len(), t.body.check());
@@ -419,12 +452,24 @@ pub(crate) fn sweep_spines(faces: &[MergedFace], chains: &[Vec<Piece>], plane: P
             these.reverse();
             these.append(&mut backs);
             backs = these;
+            // In forward order the corner before piece j is the one after it as swept.
+            let n = at.len();
+            let mut fwd: Vec<Option<Corner>> = (0..n).map(|j| if j == 0 { None } else { at[n - j].map(|c| c.reversed()) }).collect();
+            fwd.append(&mut back_corners);
+            back_corners = fwd;
             continue;
         }
         pieces.extend(these);
+        corners.append(&mut at);
     }
     backs.append(&mut pieces);
     let mut pieces = backs;
+    if let Some(first) = corners.first_mut() {
+        // The forward pieces start where the backward ones end: at the profile.
+        *first = None;
+    }
+    back_corners.append(&mut corners);
+    let mut corners = back_corners;
     if prof {
         eprintln!("sweep: {} pieces swept in {:?} (path {} segments)", pieces.len(), t0.elapsed(), path_len);
     }
@@ -435,8 +480,11 @@ pub(crate) fn sweep_spines(faces: &[MergedFace], chains: &[Vec<Piece>], plane: P
         return Err(KernelError::InvalidParameter("Select a sweep path".into()));
     }
     let mut acc = pieces.remove(0);
-    for p in pieces {
-        acc = if solid {
+    corners.remove(0);
+    for (p, corner) in pieces.into_iter().zip(corners) {
+        acc = if let (true, Some(c)) = (solid, corner) {
+            super::corner::join(faces, chains, &acc, &p, &c, join)?
+        } else if solid {
             match glue(&acc, &p) {
                 Some(g) => g,
                 None => {

@@ -49,7 +49,7 @@ impl Tagged {
 }
 
 /// The boolean of two tagged bodies (the tool's faces untagged).
-fn tagged_bool(a: &Tagged, b: &Tagged, op: BoolOp) -> Result<Tagged> {
+pub(crate) fn tagged_bool(a: &Tagged, b: &Tagged, op: BoolOp) -> Result<Tagged> {
     let r = boolean_bodies(&a.body, &b.body, op)?;
     let tags = r
         .from

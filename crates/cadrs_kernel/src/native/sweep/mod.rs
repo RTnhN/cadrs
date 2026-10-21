@@ -25,9 +25,8 @@
 //! restarted there). Each segment gets the exact motion it allows, tangent runs of general
 //! segments one [`frames::PathSweep`], and the pieces are joined where they meet: the caps at
 //! each joint are glued away ([`path::glue`]). At a corner (a joint where the path's tangent
-//! breaks) the profile keeps its placement from the segment before; corner joins (mitred or
-//! round) are not built yet, so a profile carried round a sharp corner usually fails to unite
-//! (an `OpenResult` error, never a wrong body).
+//! breaks) the profile turns with the path by the least rotation and the pieces are joined
+//! ([`Join`]): mitred (the default of [`crate::Kernel::sweep_with`]) or round.
 //!
 //! The sampled motion runs along the path by length (no jump in speed where segments meet),
 //! and a run gets as many sections as keep the skinned surfaces within
@@ -45,6 +44,7 @@ use super::topo::*;
 use crate::{KernelError, Origin, Result};
 
 mod body;
+mod corner;
 pub mod frames;
 mod kinds;
 pub mod path;
@@ -61,6 +61,21 @@ pub enum Frames {
     /// Frenet frames (the principal normal) wherever the path bends everywhere, however its
     /// curvature varies (OCCT's `FR` mode); rotation-minimizing where it doesn't.
     Frenet,
+}
+
+/// How a solid sweep joins its pieces at a corner of its path (where the path's tangent
+/// breaks), the profile turned with the path there.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Join {
+    /// No join: the profile keeps its placement round the corner and the pieces are united as
+    /// they are (OCCT's `Transformed` mode), which usually fails at a sharp corner.
+    None,
+    /// Each piece extended to the plane bisecting the corner and cut there (OCCT's
+    /// `RightCorner`): exact for a profile square to the path.
+    Mitre,
+    /// The pieces meet square to the path at the corner and its outside is filled by the
+    /// profile turned about the corner (OCCT's `RoundCorner`).
+    Round,
 }
 
 impl Frames {

@@ -1345,9 +1345,9 @@ impl NativeKernel {
 
     /// Sweeps a section along spines (from [`super::sweep::path::spines`]): a solid, or a sheet sewn
     /// along the joints of its pieces.
-    fn sweep_section(&mut self, sec: &Section, spines: Vec<(Vec<Seg>, bool)>, control: super::sweep::Frames, solid: bool) -> Result<Shape> {
+    fn sweep_section(&mut self, sec: &Section, spines: Vec<(Vec<Seg>, bool)>, control: super::sweep::Frames, join: super::sweep::Join, solid: bool) -> Result<Shape> {
         let (faces, chains) = sec.pieces(solid)?;
-        let t = super::sweep::path::sweep_spines(&faces, &chains, sec.plane, spines, control, solid)?;
+        let t = super::sweep::path::sweep_spines(&faces, &chains, sec.plane, spines, control, join, solid)?;
         if solid {
             return Ok(Shape::Body(self.insert(t.body)));
         }
@@ -1451,7 +1451,12 @@ impl NativeKernel {
             return self.corner_pipe(&sec, &path, closed, si, f, transition == 'R', solid);
         }
         let spines = split_spines(path, closed, si, f);
-        self.sweep_section(&sec, spines, control, solid)
+        let join = match transition {
+            'C' => super::sweep::Join::Mitre,
+            'R' => super::sweep::Join::Round,
+            _ => super::sweep::Join::None,
+        };
+        self.sweep_section(&sec, spines, control, join, solid)
     }
 
     /// The right-corner pipe (see [`NativeKernel::corner_pipe`]) of sections `secs` at the

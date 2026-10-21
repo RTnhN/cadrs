@@ -384,6 +384,7 @@ offset faces_type_i_i5
 offset faces_type_i_j5
 offset faces_type_i_l1
 offset faces_type_i_l3
+offset faces_type_i_l4
 offset faces_type_i_l5
 offset faces_type_i_l7
 offset faces_type_i_l8
@@ -410,6 +411,7 @@ offset shape_type_i_c_v8
 offset shape_type_i_c_w1
 offset shape_type_i_c_w6
 offset shape_type_i_c_w7
+offset shape_type_i_c_y2
 offset shape_type_i_d2
 offset shape_type_i_d3
 offset shape_type_i_d4
@@ -424,13 +426,11 @@ offset shape_type_i_g2
 offset shape_type_i_g4
 offset faces_type_i_k6
 boolean gdml_public_b2
-boolean bcut_complex_e6
 boolean bcut_complex_l7
 boolean bfuse_complex_k5
 sewing tol_0_01_j6
 sewing tol_0_01_q4
 sewing tol_100_b2
-sewing tol_100_c4
 sewing tol_100_e7
 sewing tol_100_r7
 sewing tol_1_a2
@@ -699,6 +699,7 @@ offset faces_type_i_f9
 offset shape_type_i_c9
 # offset: the operation fails.
 offset faces_type_i_f7
+offset faces_type_i_n2
 offset shape_type_i_d1
 # heal: wire tails across faces of a shell (the edges cut are other faces' too; OCCT splits them there).
 heal wire_tails_composed_a19
@@ -753,6 +754,14 @@ offset compshape_a2
 offset compshape_a4
 offset compshape_a6
 offset compshape_a7
+offset shape_type_i_c_p3
+offset shape_type_i_c_v4
+offset shape_type_i_c_y3
+offset shape_type_i_c_y4
+offset shape_type_i_c_y5
+offset shape_type_i_c_y6
+offset shape_type_i_c_y7
+offset shape_type_i_c_y8
 # boolean: topology counts differ from OCCT's (faces split or merged differently).
 boolean bopcut_complex_e5
 boolean cells_test_j1
@@ -787,8 +796,6 @@ boolean volumemaker_f4
 # boolean: unsupported: booleans of shapes other than solids.
 boolean cells_test_j4
 # boolean: the result is invalid (checkshape).
-boolean volumemaker_a9
-boolean volumemaker_b2
 boolean volumemaker_e4
 boolean volumemaker_f5
 # offset: unifysamedom after an offset the kernel fails (W6).

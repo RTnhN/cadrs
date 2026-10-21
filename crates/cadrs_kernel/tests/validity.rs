@@ -273,3 +273,24 @@ fn sewing_rebuilds_the_shells() {
     assert_eq!(sewn.shells.len(), 1);
     assert_eq!(sewn.shells[0].faces.len(), 2);
 }
+
+#[test]
+fn a_sweep_round_a_sharp_corner_is_mitred() {
+    // A 2 × 2 square square to an L-shaped path (10 along x, then 10 along y): the mitred bar,
+    // volume A·L = 80 and area 168, valid at the full level.
+    let mut k = NativeKernel::new();
+    let plane = Plane { origin: Point3::origin(), x_dir: Vector3::y_axis(), normal: Vector3::x_axis() };
+    let profile = Profile::new(plane, vec![region(rect(-1.0, -1.0, 1.0, 1.0), vec![])]);
+    let path = vec![
+        PathCurve::Sketch { plane: Plane::top(), curve: Curve2::Line { a: p(0.0, 0.0), b: p(10.0, 0.0), source: None } },
+        PathCurve::Sketch { plane: Plane::top(), curve: Curve2::Line { a: p(10.0, 0.0), b: p(10.0, 10.0), source: None } },
+    ];
+    let r = k.sweep_with(&profile, &SweepSpec { body: BodyKind::Solid, path, control: SweepControl::None, faces: vec![] }).unwrap();
+    let id = r.bodies[0];
+    valid(&body(&k, id));
+    let m = k.mass_properties(id).unwrap();
+    assert!((m.volume - 80.0).abs() < 1e-6 && (m.surface_area - 168.0).abs() < 1e-6, "{m:?}");
+    // Every face keeps a name: a side of a profile curve, or a cap.
+    let named: std::collections::HashSet<u64> = r.history.generated.iter().map(|(f, _)| f.0).collect();
+    assert_eq!(named.len(), k.faces(id).unwrap().len());
+}

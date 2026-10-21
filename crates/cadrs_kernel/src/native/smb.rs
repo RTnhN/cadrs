@@ -40,6 +40,11 @@ use super::surface::Surface;
 use super::topo::{Body, TOL_MIN};
 use super::xbuild::{XBuilder, XFace};
 
+/// The largest gap (mm) between a read model's curves and the p-curves read or fitted for them
+/// that its tolerances are raised to cover (OCCT's readers record the gaps they find the same
+/// way); a larger one is a fault of the file the check reports.
+const READ_GAP: f64 = 1e-3;
+
 type R<T> = Result<T, String>;
 
 /// A B-rep read from a file, with where SMLib's tests point at its pieces.
@@ -819,6 +824,8 @@ fn build(t: Topo, curves: Vec<NurbsCurve>, surfs: Vec<SurfRec>) -> R<Brep> {
     }
     let (mut body, w, map) = xb.finish_mapped();
     warnings.extend(w);
+    // The tolerances the gaps need (the file's are its own curves'; the p-curves are ours).
+    body.fit_tolerances_searched(READ_GAP);
     // Wire edges (edge uses of kind 2): a wire body's edges, or free edges beside the faces,
     // their ends merged with the faces' vertices where they meet.
     let mut wire_edges: Vec<usize> = eus.iter().filter(|u| u.0 == 2).map(|u| u.1).filter(|&e| e < edges.len()).collect();
@@ -1094,6 +1101,22 @@ mod tests {
         }
     }
 
+    /// Files the checks used to refuse: two solids sharing an edge (each closed shell uses it
+    /// once each way), and loops whose coarse polylines cross where their p-curves don't (a
+    /// tightly curved p-curve), all valid at the full level too; and the tolerances a file's
+    /// gaps between its curves and our p-curves need, raised to cover them.
+    #[test]
+    fn shared_edges_curved_loops_and_gaps() {
+        for f in ["reader/boxes_share_one_edge.smb", "reader/Mouse.smb", "fillets/vase2.smb", "offset/OffsetBoxSphOnCorner.smb"] {
+            let b = read_brep(&fixture(f)).unwrap_or_else(|e| panic!("{f}: {e}"));
+            solid(&b, f);
+            let full = b.body.check_with(super::super::topo::CheckLevel::Full);
+            assert!(full.is_empty(), "{f}: {full:?}");
+        }
+        let b = read_brep(&fixture("reader/boxes_share_one_edge.smb")).unwrap();
+        assert_eq!(b.body.solids.len(), 2);
+    }
+
     /// Version 38 with surfaces of extrusion and revolution (checking its spline faces takes
     /// about a minute).
     #[test]
@@ -1191,14 +1214,12 @@ mod tests {
         }
     }
 
-    /// Every SSI part of an NVIDIA usd-brep checkout (`$CADRS_USD_BREP`) reads into valid bodies.
+    /// Every SSI part of an NVIDIA usd-brep checkout (`$CADRS_USD_BREP`, else the one beside
+    /// this checkout) reads into valid bodies.
     #[test]
-    #[ignore = "needs a usd-brep checkout (CADRS_USD_BREP)"]
+    #[ignore = "needs a usd-brep checkout"]
     fn every_ssi_part_reads() {
-        let Ok(root) = std::env::var("CADRS_USD_BREP") else {
-            eprintln!("every_ssi_part_reads: skipped, set CADRS_USD_BREP to a usd-brep checkout");
-            return;
-        };
+        let root = std::env::var("CADRS_USD_BREP").unwrap_or_else(|_| format!("{}/../../../../nvbrep/usd-brep", env!("CARGO_MANIFEST_DIR")));
         let dir = std::path::Path::new(&root).join("TestFiles/pt_TestFiles");
         let mut names: Vec<_> = std::fs::read_dir(&dir).unwrap().flatten().map(|e| e.file_name().to_string_lossy().to_string()).filter(|n| (n.starts_with("ssi_") || n.starts_with("ss_")) && n.ends_with(".smp")).collect();
         names.sort();

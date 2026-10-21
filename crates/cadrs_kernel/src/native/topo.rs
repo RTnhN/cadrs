@@ -33,8 +33,9 @@ pub enum CheckLevel {
     /// What operations check their results with ([`Body::check`]), fast enough to run after
     /// every step: references, coedges meeting end to start in 3D and in (u, v), p-curves on
     /// their edges at 7 points, edge ends on their vertices, loops not crossing themselves (8
-    /// samples per coedge), each edge of a closed shell used once each way, the rules of each
-    /// body kind, and solids enclosing a positive volume.
+    /// samples per coedge, confirmed by the full check's test), each edge of a closed shell
+    /// used once each way by that shell's faces, the rules of each body kind, and solids
+    /// enclosing a positive volume.
     #[default]
     Fast,
     /// Everything `Fast` checks, and (for tests, imports and debugging):
@@ -47,8 +48,7 @@ pub enum CheckLevel {
     ///   tolerance (exact orientation predicates decide the crossings);
     /// - the first loop of a face its outer loop, counter-clockwise about the outward normal,
     ///   the others holes inside it running the other way, no hole inside another;
-    /// - each shell edge-connected, each face in at most one shell, and each edge of a closed
-    ///   shell used once each way by that shell's faces;
+    /// - each shell edge-connected, and each face in at most one shell;
     /// - each solid's outer shell enclosing a positive volume and each void shell a negative
     ///   one, with no vertex outside the outer shell (touching it is allowed).
     Full,
@@ -537,7 +537,12 @@ impl Body {
                         poly.push(P2::new(q.x, q.y));
                     }
                 }
-                if let Some((i, j)) = self_crossing(&poly) {
+                // Eight samples a coedge can cut across a tightly curved p-curve: a crossing
+                // they show stands only if the loop's polyline within LOOP_GAP of its p-curves
+                // crosses itself too (the full check's test).
+                if let Some((i, j)) = self_crossing(&poly)
+                    && self.check_face_domain(fi).iter().any(|e| e.starts_with(&format!("face {fi} loop {li} crosses itself")))
+                {
                     errs.push(format!("face {fi} loop {li} crosses itself in (u, v) (segments {i} and {j})"));
                 }
             }
@@ -555,20 +560,23 @@ impl Body {
                 }
             }
         }
+        // Counted per shell: closed shells of one body may share an edge (two solids touching
+        // along it, as a non-manifold model has them), each using it once each way.
         for s in &self.shells {
             if !s.closed {
                 continue;
             }
-            let mut used = vec![false; self.edges.len()];
-            for &fi in &s.faces {
-                for l in &self.faces[fi].loops {
-                    for c in l {
-                        used[c.edge] = true;
-                    }
+            let mut shell_uses: std::collections::BTreeMap<usize, (i32, i32)> = std::collections::BTreeMap::new();
+            for c in s.faces.iter().flat_map(|&fi| self.faces[fi].loops.iter().flatten()) {
+                let u = shell_uses.entry(c.edge).or_default();
+                if c.fwd {
+                    u.0 += 1;
+                } else {
+                    u.1 += 1;
                 }
             }
-            for (ei, u) in uses.iter().enumerate() {
-                if used[ei] && *u != (1, 1) && !self.edges[ei].degenerate {
+            for (&ei, &u) in &shell_uses {
+                if u != (1, 1) && !self.edges[ei].degenerate {
                     errs.push(format!("edge {ei} used {u:?} times in a closed shell"));
                 }
             }
@@ -576,7 +584,7 @@ impl Body {
         errs.extend(self.check_kinds(&uses));
         if full {
             errs.extend(self.check_ends_on_faces());
-            errs.extend(self.check_shells(&uses));
+            errs.extend(self.check_shells());
             for fi in 0..self.faces.len() {
                 errs.extend(self.check_face_domain(fi));
             }
@@ -812,6 +820,44 @@ impl Body {
     }
 }
 
+impl Body {
+    /// [`Body::fit_tolerances`] measured as [`CheckLevel::Full`] measures: each p-curve's largest
+    /// gap from its edge searched for (not taken at 7 points), and each p-curve's ends on the
+    /// face against their vertices. For readers, whose models' tolerances must cover the gaps
+    /// their curves actually leave (the p-curves they fit, the files' own); gaps beyond `cap`
+    /// are left for the check to report.
+    pub fn fit_tolerances_searched(&mut self, cap: f64) {
+        self.fit_tolerances(cap);
+        let mut etol = vec![0.0f64; self.edges.len()];
+        let mut vtol = vec![0.0f64; self.verts.len()];
+        for f in &self.faces {
+            for c in f.loops.iter().flatten() {
+                let e = &self.edges[c.edge];
+                if !e.degenerate {
+                    etol[c.edge] = etol[c.edge].max(pcurve_gap(e, &c.pc, &f.surf));
+                }
+                for k in 0..2 {
+                    let uv = c.pc.point(e.t[k]);
+                    let d = (f.surf.eval(uv.x, uv.y) - self.verts[e.v[k]].p).norm();
+                    if d.is_finite() {
+                        vtol[e.v[k]] = vtol[e.v[k]].max(d);
+                    }
+                }
+            }
+        }
+        for (e, d) in self.edges.iter_mut().zip(etol) {
+            if d <= cap && d * 1.01 > e.tol {
+                e.tol = (d * 1.01).max(TOL_MIN);
+            }
+        }
+        for (v, d) in self.verts.iter_mut().zip(vtol) {
+            if d <= cap && d * 1.01 > v.tol {
+                v.tol = (d * 1.01).max(TOL_MIN);
+            }
+        }
+    }
+}
+
 /// Why a curve can't be evaluated (non-finite numbers, a malformed B-spline), if it can't.
 fn curve_issue(c: &Curve) -> Option<String> {
     let finite = |v: &[f64]| v.iter().all(|x| x.is_finite());
@@ -913,10 +959,9 @@ impl Body {
         errs
     }
 
-    /// Shells: each face in one shell at most, each shell edge-connected, and each edge of a
-    /// closed shell used once each way by that shell's own faces (`uses` counts the uses by all
-    /// faces; an edge [`Body::check`] already reported there isn't reported again).
-    fn check_shells(&self, uses: &[(i32, i32)]) -> Vec<String> {
+    /// Shells: each face in one shell at most, and each shell edge-connected (that each edge of
+    /// a closed shell is used once each way by its faces, the fast check checks).
+    fn check_shells(&self) -> Vec<String> {
         let mut errs = Vec::new();
         let mut owner: Vec<Option<usize>> = vec![None; self.faces.len()];
         for (si, s) in self.shells.iter().enumerate() {
@@ -931,25 +976,9 @@ impl Body {
                     None => owner[f] = Some(si),
                 }
             }
-            let mut shell_uses: std::collections::BTreeMap<usize, (i32, i32)> = std::collections::BTreeMap::new();
-            for c in s.faces.iter().flat_map(|&fi| self.faces[fi].loops.iter().flatten()) {
-                let u = shell_uses.entry(c.edge).or_default();
-                if c.fwd {
-                    u.0 += 1;
-                } else {
-                    u.1 += 1;
-                }
-            }
             let pieces = self.face_components(&s.faces).len();
             if pieces > 1 {
                 errs.push(format!("shell {si} isn't connected: its faces make {pieces} pieces that share no edge"));
-            }
-            if s.closed {
-                for (&e, &u) in &shell_uses {
-                    if u != (1, 1) && uses[e] == (1, 1) && !self.edges[e].degenerate {
-                        errs.push(format!("edge {e} is used {u:?} times by closed shell {si} (its other use is in another shell)"));
-                    }
-                }
             }
         }
         errs
