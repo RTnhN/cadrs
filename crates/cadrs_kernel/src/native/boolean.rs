@@ -53,22 +53,34 @@ impl Prof {
     }
 }
 
-/// Vertices closer than this are merged (mm).
-/// The default distance under which two points of a boolean are one ([`vtol`] for a run).
-pub const VTOL: f64 = 1e-6;
+/// The default distance under which two points of a boolean are one (mm; [`tol::POINT`],
+/// [`vtol`] for a run).
+pub const VTOL: f64 = super::tol::POINT;
 
 thread_local! {
+    /// The merge distance of the run in progress: set only by [`with_tol`] from the run's
+    /// [`BoolOptions`] for the run's duration (restored after it, a panic included), so the
+    /// run's helpers and the intersections it calls read the run's tolerance without passing it
+    /// down. Outside a run it is [`VTOL`].
     static RUN_TOL: std::cell::Cell<f64> = const { std::cell::Cell::new(VTOL) };
 }
 
-/// The boolean's point tolerance for the run in progress.
+/// The boolean's point tolerance for the run in progress ([`VTOL`] outside one).
 pub fn vtol() -> f64 {
     RUN_TOL.with(|t| t.get())
 }
 
-/// Sets [`vtol`] for the runs that follow on this thread.
-pub fn set_vtol(t: f64) {
+fn set_vtol(t: f64) {
     RUN_TOL.with(|c| c.set(t));
+}
+
+/// How a boolean runs: its tolerances, and whether faces of the two inputs on one surface are
+/// merged whatever the operation (`flush`: a blend's tool face flush with a face it ends
+/// against becomes part of it; otherwise only a union merges them).
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+pub struct BoolOptions {
+    pub tol: super::tol::Tolerances,
+    pub flush: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -133,7 +145,7 @@ impl Pool {
                     if let Some(v) = self.grid.get(&(cx + dx, cy + dy, cz + dz)) {
                         for &i in v {
                             let d = (self.verts[i] - p).norm();
-                            if d < vtol().max(tol).max(self.vtols[i]) && best.map_or(true, |(bd, _)| d < bd) {
+                            if d < vtol().max(tol).max(self.vtols[i]) && best.is_none_or(|(bd, _)| d < bd) {
                                 best = Some((d, i));
                             }
                         }
@@ -548,24 +560,29 @@ pub struct BoolOut {
     pub from: Vec<Vec<(usize, usize)>>,
 }
 
-/// The boolean of two bodies.
+/// The boolean of two bodies, with the default [`BoolOptions`].
 pub fn boolean_bodies(a: &Body, b: &Body, op: BoolOp) -> Result<BoolOut> {
+    boolean_bodies_with(a, b, op, BoolOptions::default())
+}
+
+/// The boolean of two bodies with explicit options.
+pub fn boolean_bodies_with(a: &Body, b: &Body, op: BoolOp, opts: BoolOptions) -> Result<BoolOut> {
     // At the default tolerance first; when that leaves the result broken (near-coincident
     // geometry the tolerance splits into slivers or gaps: a surface through a corner within
     // 1e-5), again at growing tolerances, as OCCT grows its entities' tolerances.
     // Faces of the two bodies on one surface but for float noise (made apart: radii 25 and
     // 25.0000015) get the gap as their edges' and vertices' tolerance, so they meet.
-    let raised = near_coincident_tolerances(a, b);
+    let raised = with_tol(opts.tol.point, || near_coincident_tolerances(a, b));
     let (a, b) = match &raised {
         Some((x, y)) => (x, y),
         None => (a, b),
     };
-    let first = with_tol(VTOL, || run(a, b, Mode::Bool(op)));
-    if !matches!(&first, Err(KernelError::OperationFailed(m)) if m.contains("open shell") || m.contains("left")) {
+    let first = with_tol(opts.tol.point, || run(a, b, Mode::Bool(op), opts.flush));
+    if !matches!(&first, Err(KernelError::OpenResult(_))) && !matches!(&first, Err(KernelError::OperationFailed(m)) if m.contains("open shell") || m.contains("left")) {
         return first;
     }
-    for t in [1e-5, 1e-4].into_iter().filter(|_| std::env::var_os("CADRS_NO_RETRY").is_none()) {
-        if let Ok(r) = with_tol(t, || run(a, b, Mode::Bool(op))) {
+    for t in opts.tol.retries.into_iter().filter(|_| std::env::var_os("CADRS_NO_RETRY").is_none()) {
+        if let Ok(r) = with_tol(t, || run(a, b, Mode::Bool(op), opts.flush)) {
             return Ok(r);
         }
     }
@@ -641,27 +658,23 @@ fn near_coincident_tolerances(a: &Body, b: &Body) -> Option<(Body, Body)> {
     Some((a2, b2))
 }
 
-thread_local! {
-    static MERGE_FLUSH: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
-}
-
 /// [`boolean_bodies`], with faces of the two inputs on one surface merged whatever the
 /// operation (a blend's tool face flush with a face it ends against becomes part of it).
 pub fn boolean_bodies_flush(a: &Body, b: &Body, op: BoolOp) -> Result<BoolOut> {
-    MERGE_FLUSH.with(|m| m.set(true));
-    let r = boolean_bodies(a, b, op);
-    MERGE_FLUSH.with(|m| m.set(false));
-    r
+    boolean_bodies_with(a, b, op, BoolOptions { flush: true, ..BoolOptions::default() })
 }
 
-/// Runs `f` with [`vtol`] at `t` (unless `CADRS_BOOL_TOL` fixes it), restoring it after.
+/// Runs `f` with [`vtol`] at `t`, restoring it after (on a panic too).
 fn with_tol<T>(t: f64, f: impl FnOnce() -> T) -> T {
-    let before = vtol();
-    let t = std::env::var("CADRS_BOOL_TOL").ok().and_then(|x| x.parse::<f64>().ok()).unwrap_or(t);
+    struct Restore(f64);
+    impl Drop for Restore {
+        fn drop(&mut self) {
+            set_vtol(self.0);
+        }
+    }
+    let _restore = Restore(vtol());
     set_vtol(t);
-    let r = f();
-    set_vtol(before);
-    r
+    f()
 }
 
 /// Gives B-spline faces of `a` that lie (within 2 × [`VTOL`]) on a plane or cylinder face of
@@ -747,14 +760,15 @@ pub enum Mode {
 
 /// The section of two bodies: the edges where their faces meet (a body of edges, no faces).
 pub fn section(a: &Body, b: &Body) -> Result<Body> {
-    run(a, b, Mode::Section).map(|o| o.body)
+    run(a, b, Mode::Section, false).map(|o| o.body)
 }
 
 pub fn imprint(a: &Body, b: &Body, faces: Option<Vec<usize>>) -> Result<BoolOut> {
-    run(a, b, Mode::Imprint(faces))
+    run(a, b, Mode::Imprint(faces), false)
 }
 
-fn run(a: &Body, b: &Body, mode: Mode) -> Result<BoolOut> {
+/// One run of the boolean at the tolerance [`with_tol`] set; `flush` as in [`BoolOptions`].
+fn run(a: &Body, b: &Body, mode: Mode, flush: bool) -> Result<BoolOut> {
     // B-spline faces lying on an analytic face of the other body (within the tolerance:
     // approximated sweeps along helices, lofts of circles) take its exact surface, so the two
     // are imprinted as coincident instead of intersected nearly tangentially.
@@ -795,7 +809,7 @@ fn run(a: &Body, b: &Body, mode: Mode) -> Result<BoolOut> {
                 Ok(BoolOut { body: out, from })
             }
             BoolOp::Subtract => Ok(BoolOut { body: a.clone(), from: (0..a.faces.len()).map(|i| vec![(0, i)]).collect() }),
-            BoolOp::Intersect => Err(KernelError::OperationFailed("the result is empty".into())),
+            BoolOp::Intersect => Err(KernelError::EmptyResult("the result is empty".into())),
         };
     }
     let mut prof = Prof::new();
@@ -920,7 +934,7 @@ fn run(a: &Body, b: &Body, mode: Mode) -> Result<BoolOut> {
     let mut face_pts: Vec<Vec<usize>> = vec![Vec::new(); faces.len()];
     // Edges of one body lying on a face of the other (imprinted as cuts once split).
     let mut on_face: Vec<Vec<usize>> = vec![Vec::new(); faces.len()];
-    let ftree = super::bvh::Bvh::new(faces.iter().map(|f| f.bbox.clone()).collect());
+    let ftree = super::bvh::Bvh::new(faces.iter().map(|f| f.bbox).collect());
     for e in 0..ne {
         if pool.edges[e].degenerate {
             continue;
@@ -942,9 +956,8 @@ fn run(a: &Body, b: &Body, mode: Mode) -> Result<BoolOut> {
             for t in ssi::curve_surface(&ed.curve, ed.t[0], ed.t[1], &faces[fi].surf) {
                 let p = ed.curve.point(t);
                 let et = ed.tol.max(faces[fi].tol);
-                match point_in_face(&faces[fi], &p, vtol().max(et)) {
-                    InFace::Outside => continue,
-                    _ => {}
+                if point_in_face(&faces[fi], &p, vtol().max(et)) == InFace::Outside {
+                    continue;
                 }
                 let v = pool.vertex_tol(p, et);
                 let t = refine_param(&ed.curve, ed.t[0], ed.t[1], &pool.verts[v], t);
@@ -1160,7 +1173,7 @@ fn run(a: &Body, b: &Body, mode: Mode) -> Result<BoolOut> {
                     // Reuse an existing edge running there.
                     let existing = (0..pool.edges.len()).find(|&e| {
                         let ed = &pool.edges[e];
-                        if ed.degenerate || !ebox.get(e).map_or(true, |b| b.contains(&pm)) {
+                        if ed.degenerate || !ebox.get(e).is_none_or(|b| b.contains(&pm)) {
                             return false;
                         }
                         // Only an unsplit edge between exactly these vertices (pieces of split
@@ -1427,7 +1440,7 @@ fn run(a: &Body, b: &Body, mode: Mode) -> Result<BoolOut> {
     // the other body: grouped (union-find over shared uncut pieces), each group is classified
     // once and its answer shared (faces on a coincident face keep their own test).
     let mut parent: Vec<usize> = (0..subs.len()).collect();
-    fn root(p: &mut Vec<usize>, mut i: usize) -> usize {
+    fn root(p: &mut [usize], mut i: usize) -> usize {
         while p[i] != i {
             p[i] = p[p[i]];
             i = p[i];
@@ -1577,7 +1590,7 @@ fn run(a: &Body, b: &Body, mode: Mode) -> Result<BoolOut> {
     }
     prof.mark("classify");
     if keep.is_empty() {
-        return Err(KernelError::OperationFailed("the result is empty".into()));
+        return Err(KernelError::EmptyResult("the result is empty".into()));
     }
     // 6. Assemble.
     let mut out = Body::default();
@@ -1631,7 +1644,6 @@ fn run(a: &Body, b: &Body, mode: Mode) -> Result<BoolOut> {
         eprintln!("check: {:?}", out.check());
     }
     let mut from: Vec<Vec<(usize, usize)>> = from.into_iter().map(|x| vec![x]).collect();
-    let flush = MERGE_FLUSH.with(|m| m.get());
     if op == BoolOp::Union || flush {
         let owners: Vec<usize> = from.iter().map(|f| f[0].0).collect();
         // For a blend, also pieces of one face the cut split (a wall a chamfer ends against).
@@ -1645,7 +1657,7 @@ fn run(a: &Body, b: &Body, mode: Mode) -> Result<BoolOut> {
     assemble_shells(&mut out)?;
     // Solids in, faces out but no solid: some piece went missing.
     if !a.solids.is_empty() && !b.solids.is_empty() && !out.faces.is_empty() && out.solids.is_empty() {
-        return Err(KernelError::OperationFailed("the boolean left an open shell".into()));
+        return Err(KernelError::OpenResult("the boolean left an open shell".into()));
     }
     prof.mark("shells");
     prof.report(&format!("{op:?} {}×{} faces", a.faces.len(), b.faces.len()));
@@ -1689,6 +1701,8 @@ pub fn split_nonmanifold(b: &mut Body) {
             let (_, duv, _) = c.pc.d2(tm);
             let perp = V2::new(-duv.y, duv.x);
             let len = (ed.t[1] - ed.t[0]).abs() * ed.curve.tangent(tm).norm();
+            // (Not `clamp`: a NaN length takes 0.05 here.)
+            #[allow(clippy::manual_clamp)]
             let step = (len * 1e-2).min(0.05).max(1e-4);
             let (pu, su, sv) = f.surf.d1(uv.x, uv.y);
             let g = su * perp.x + sv * perp.y;
@@ -1709,7 +1723,8 @@ pub fn split_nonmanifold(b: &mut Body) {
         items.sort_by(|x, y| x.0.total_cmp(&y.0));
         let m = items.len();
         // Pair each face whose material is counter-clockwise with the next one.
-        let mut pairs: Vec<((usize, usize, usize), (usize, usize, usize))> = Vec::new();
+        type Use = (usize, usize, usize);
+        let mut pairs: Vec<(Use, Use)> = Vec::new();
         for i in 0..m {
             if items[i].1 {
                 let j = (i + 1) % m;
@@ -1813,7 +1828,7 @@ pub fn assemble_shells(b: &mut Body) -> Result<()> {
     }
     let open = b.shells.iter().any(|s| !s.closed);
     if open && !outer.is_empty() {
-        return Err(KernelError::OperationFailed("the boolean left an open shell".into()));
+        return Err(KernelError::OpenResult("the boolean left an open shell".into()));
     }
     let mut solids: Vec<Vec<usize>> = outer.iter().map(|(s, _)| vec![*s]).collect();
     for (v, _) in voids {
@@ -1829,7 +1844,7 @@ pub fn assemble_shells(b: &mut Body) -> Result<()> {
         for (k, (s, vol)) in outer.iter().enumerate() {
             let sub = super::kernel::subset(b, &b.shells[*s].faces, true);
             let polys: Vec<Vec<Vec<P2>>> = sub.faces.iter().map(|f| classify::face_polygons(&sub, f)).collect();
-            if classify::parity_inside(&sub, &polys, &p) && best.map_or(true, |(bv, _)| *vol < bv) {
+            if classify::parity_inside(&sub, &polys, &p) && best.is_none_or(|(bv, _)| *vol < bv) {
                 best = Some((*vol, k));
             }
         }
@@ -1850,7 +1865,7 @@ pub fn boolean(k: &mut NativeKernel, op: BoolOp, target: BodyId, tools: &[BodyId
     let mut origin: Vec<Vec<(BodyId, usize)>> = (0..cur.faces.len()).map(|i| vec![(target, i)]).collect();
     for &t in tools {
         let tb = (**k.get(t)?).clone();
-        let r = boolean_bodies(&cur, &tb, op)?;
+        let r = boolean_bodies_with(&cur, &tb, op, BoolOptions { tol: k.tolerances(), flush: false })?;
         origin = r
             .from
             .iter()
@@ -1876,4 +1891,21 @@ pub fn boolean(k: &mut NativeKernel, op: BoolOp, target: BodyId, tools: &[BodyId
     }
     let id = k.insert(cur);
     Ok(OpResult { bodies: vec![id], history })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The run's tolerance is back to the default after a run, a panicking one included
+    /// (regression: it was restored only on return, and an environment variable could change it).
+    #[test]
+    fn run_tolerance_is_scoped() {
+        assert_eq!(vtol(), VTOL);
+        let r = std::panic::catch_unwind(|| with_tol(1e-3, || -> () { panic!("inside a run") }));
+        assert!(r.is_err());
+        assert_eq!(vtol(), VTOL);
+        assert_eq!(with_tol(1e-4, || with_tol(1e-5, vtol) + vtol()), 1e-5 + 1e-4);
+        assert_eq!(vtol(), VTOL);
+    }
 }

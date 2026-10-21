@@ -19,8 +19,9 @@ use super::math::Affine;
 use super::step::{motion_affine, ReadModel, WriteInstance};
 use super::topo::{Body, Shell, Solid};
 
+/// A file or body that can't be read: the data's fault, not the operation's.
 fn failed(what: &str, why: String) -> KernelError {
-    KernelError::OperationFailed(format!("{what}: {why}"))
+    KernelError::InvalidInput(format!("{what}: {why}"))
 }
 
 fn read(format: ExchangeFormat, bytes: &[u8]) -> Result<ReadModel> {
@@ -28,7 +29,14 @@ fn read(format: ExchangeFormat, bytes: &[u8]) -> Result<ReadModel> {
         ExchangeFormat::Step => super::step::read(bytes),
         ExchangeFormat::Iges => super::iges::read(bytes),
     };
-    let m = r.map_err(|e| failed(&format!("{} import", format.label()), e))?;
+    let what = format!("{} import", format.label());
+    let m = r.map_err(|e| failed(&what, e))?;
+    // Numbers no geometry can have, or a model too large for the kernel's tolerances.
+    for p in &m.parts {
+        if let Some(why) = p.body.check_refs().into_iter().next().or_else(|| p.body.size_issue(super::tol::SIZE)) {
+            return Err(failed(&what, format!("part '{}': {why}", p.name)));
+        }
+    }
     if std::env::var("CADRS_EXCHANGE_DEBUG").is_ok() {
         for w in &m.warnings {
             eprintln!("{} import: {w}", format.label());
@@ -37,10 +45,23 @@ fn read(format: ExchangeFormat, bytes: &[u8]) -> Result<ReadModel> {
     Ok(m)
 }
 
+/// Refuses bodies a writer can't put in a file (non-finite numbers, dangling indices).
+fn writable(bodies: &[&Body]) -> Result<()> {
+    match bodies.iter().find_map(|b| b.check_refs().into_iter().next()) {
+        Some(why) => Err(KernelError::InvalidInput(format!("the body can't be written: {why}"))),
+        None => Ok(()),
+    }
+}
+
 pub fn export_model(k: &NativeKernel, format: ExchangeFormat, name: &str, parts: &[(BodyId, String)], instances: &[ExportInstance]) -> Result<Vec<u8>> {
     let bodies: Vec<&Body> = parts.iter().map(|(b, _)| k.get(*b).map(|a| a.as_ref())).collect::<Result<_>>()?;
+    writable(&bodies)?;
     if let Some(i) = instances.iter().find(|i| i.part >= parts.len()) {
         return Err(KernelError::InvalidParameter(format!("instance '{}' refers to part {} of {}", i.name, i.part, parts.len())));
+    }
+    let finite = |m: &Motion| m.linear.iter().chain(m.translation.iter()).all(|x| x.is_finite());
+    if let Some(i) = instances.iter().find(|i| !finite(&i.placement)) {
+        return Err(KernelError::InvalidInput(format!("instance '{}' has a placement that isn't finite", i.name)));
     }
     let named: Vec<(&Body, &str)> = bodies.iter().zip(parts).map(|(b, (_, n))| (*b, n.as_str())).collect();
     Ok(match format {
@@ -73,6 +94,7 @@ pub fn import_model(k: &mut NativeKernel, format: ExchangeFormat, bytes: &[u8]) 
 
 pub fn export_step(k: &NativeKernel, bodies: &[BodyId]) -> Result<Vec<u8>> {
     let bs: Vec<&Body> = bodies.iter().map(|b| k.get(*b).map(|a| a.as_ref())).collect::<Result<_>>()?;
+    writable(&bs)?;
     let names: Vec<String> = (1..=bs.len()).map(|i| format!("Body {i}")).collect();
     let named: Vec<(&Body, &str)> = bs.iter().zip(&names).map(|(b, n)| (*b, n.as_str())).collect();
     Ok(super::step::write("cadrs", &named, &[]))
@@ -482,5 +504,27 @@ mod tests {
         assert_eq!(m.parts[1].name, "b");
         let c = k.mass_properties(m.parts[1].body).unwrap().center_of_mass;
         assert!((c - Point3::new(45.0, 5.0, 5.0)).norm() < 1e-9, "{c}");
+    }
+
+    /// Non-finite numbers never reach a file, and never panic the writer (regression:
+    /// `step::real` unwrapped the exponent of `{:e}`, and NaN coordinates were written as 0).
+    #[test]
+    fn non_finite_bodies_are_not_written() {
+        for x in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY, 1e300, -1e-300, f64::MIN_POSITIVE, 5e-324] {
+            let s = crate::native::step::real(x);
+            assert!(s.contains('.'), "{x}: {s}");
+        }
+        let mut k = NativeKernel::new();
+        let good = extrude(&mut k, vec![region(poly(&[p(0.0, 0.0), p(10.0, 0.0), p(10.0, 10.0)]), vec![])], 5.0);
+        let mut b = Body::clone(k.get(good).unwrap());
+        b.verts[0].p.x = f64::NAN;
+        let bad = k.insert(b);
+        for format in [ExchangeFormat::Step, ExchangeFormat::Iges] {
+            assert!(export_model(&k, format, "x", &[(good, "good".into())], &[]).is_ok());
+            assert!(matches!(export_model(&k, format, "x", &[(bad, "bad".into())], &[]), Err(KernelError::InvalidInput(_))));
+        }
+        assert!(matches!(export_step(&k, &[bad]), Err(KernelError::InvalidInput(_))));
+        let nan = ExportInstance { part: 0, placement: Motion { linear: nalgebra::Matrix3::identity(), translation: Vector3::new(f64::NAN, 0.0, 0.0) }, name: "i".into() };
+        assert!(matches!(export_model(&k, ExchangeFormat::Step, "x", &[(good, "good".into())], &[nan]), Err(KernelError::InvalidInput(_))));
     }
 }

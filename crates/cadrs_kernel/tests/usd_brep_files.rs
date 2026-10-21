@@ -35,7 +35,7 @@ fn usd_brep_occt_files_read_right() {
     ("sphere_hole", 1, 0, 0.000000, 45.238934),
     ("sphere_natural", 1, 0, 0.000000, 50.265482), // (the whole sphere, r 2: 16π)
     ("sphere_partial_full_uv_extent", 1, 0, 0.000000, 12.566371), // (a quarter of the r 2 sphere: 4π)
-    ("sphere_u_seam", 1, 0, 0.000000, 6.283185),
+    ("sphere_u_seam", 1, 0, 0.000000, std::f64::consts::TAU), // (2π)
     ("torus", 1, 1, 113.697843, 189.496405), // (R 4, r 1.2: V 2π²Rr², A 4π²Rr)
     ("torus_natural", 1, 0, 0.000000, 189.496405), // (the whole torus: 4π²Rr)
     ("torus_u_seam", 1, 0, 0.000000, 11.440401),

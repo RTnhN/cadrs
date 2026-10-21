@@ -13,6 +13,10 @@ use super::topo::{co_range, Body, Face};
 /// Number of integrated quantities (see `integrand`).
 pub const NQ: usize = 14;
 
+/// The most pieces of at most π/8 a p-curve is cut into on a periodic face (256 turns): more
+/// is no geometry, only a parameter range a file got wrong, which must not loop for ever.
+const MAX_PIECES: f64 = 4096.0;
+
 pub type Q = [f64; NQ];
 
 /// The integrand at (u, v) relative to `shift`: area terms (scaled by |N|) and volume terms
@@ -96,6 +100,7 @@ fn s_u_scale(_s: &Surface) -> f64 {
 }
 
 /// H(u, v) for all quantities, weighted by `w` (the outer quadrature weight × v'(t)).
+#[allow(clippy::too_many_arguments)]
 fn inner(s: &Surface, u0: f64, u: f64, v: f64, shift: &V3, w: f64, acc: &mut Q, scratch: &mut Vec<f64>) {
     if (u - u0).abs() < 1e-300 {
         return;
@@ -152,7 +157,7 @@ fn face_integrals_v(body: &Body, f: &Face, shift: &V3) -> Q {
             // Periodic: pieces of at most π/8; a general extrusion's curve pieces in four (|N|
             // varies along them).
             let extra = if f.surf.u_periodic() {
-                (du / (PI / 8.0)).ceil() as usize
+                (du / (PI / 8.0)).ceil().min(MAX_PIECES) as usize
             } else if matches!(f.surf, Surface::Extrusion { .. }) && !matches!(c.pc, Curve::Nurbs(_)) {
                 4
             } else {
@@ -287,9 +292,9 @@ pub fn face_integrals(body: &Body, f: &Face, shift: &V3) -> Q {
     if ruled_in_v(&f.surf) && !matches!(f.surf, Surface::Plane { .. }) {
         return face_integrals_v(body, f, shift);
     }
-    if let Surface::Nurbs(ns) = &f.surf {
-        if ns.du <= 3 && ns.dv <= 3 {
-            if let Some((r, orient)) = iso_rectangle(body, f) {
+    if let Surface::Nurbs(ns) = &f.surf
+        && ns.du <= 3 && ns.dv <= 3
+            && let Some((r, orient)) = iso_rectangle(body, f) {
                 let mut acc = rect_integrals(&f.surf, ns, r, shift);
                 for q in acc.iter_mut() {
                     *q *= orient;
@@ -301,8 +306,6 @@ pub fn face_integrals(body: &Body, f: &Face, shift: &V3) -> Q {
                 }
                 return acc;
             }
-        }
-    }
     let mut acc = [0.0; NQ];
     let mut scratch = Vec::with_capacity(64);
     // The reference u: the smallest u on the boundary keeps H small.
@@ -332,7 +335,7 @@ pub fn face_integrals(body: &Body, f: &Face, shift: &V3) -> Q {
             let du = (p1.x - p0.x).abs();
             let dv = (p1.y - p0.y).abs();
             let extra = if f.surf.u_periodic() || v_periodic {
-                ((du.max(if v_periodic { dv } else { 0.0 })) / (PI / 8.0)).ceil() as usize
+                ((du.max(if v_periodic { dv } else { 0.0 })) / (PI / 8.0)).ceil().min(MAX_PIECES) as usize
             } else {
                 1
             }

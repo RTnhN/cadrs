@@ -154,7 +154,7 @@ impl<'a> Lexer<'a> {
             while self.i < self.s.len() && self.s[self.i].is_ascii_whitespace() {
                 self.i += 1;
             }
-            if self.s[self.i..].starts_with(b"/*") {
+            if self.s.get(self.i..).is_some_and(|r| r.starts_with(b"/*")) {
                 match self.s[self.i + 2..].windows(2).position(|w| w == b"*/") {
                     Some(k) => self.i += k + 4,
                     None => self.i = self.s.len(),
@@ -248,6 +248,9 @@ impl<'a> Lexer<'a> {
                 while self.i < self.s.len() && self.s[self.i] != b'"' {
                     self.i += 1;
                 }
+                if self.i == self.s.len() {
+                    return self.err("unterminated binary");
+                }
                 let t = String::from_utf8_lossy(&self.s[st..self.i]).into_owned();
                 self.i += 1;
                 Ok(Param::Str(t))
@@ -257,6 +260,9 @@ impl<'a> Lexer<'a> {
                 let st = self.i;
                 while self.i < self.s.len() && self.s[self.i] != b'.' {
                     self.i += 1;
+                }
+                if self.i == self.s.len() {
+                    return self.err("unterminated enumeration");
                 }
                 let t = String::from_utf8_lossy(&self.s[st..self.i]).trim().to_ascii_uppercase();
                 self.i += 1;
@@ -769,7 +775,7 @@ impl<'a> Geo<'a> {
             return Err("a B-spline curve with too few control points".into());
         }
         let knots = self.knots(form, deg, cps.len(), mults, vals)?;
-        Ok(NurbsCurve { degree: deg, knots, cps })
+        NurbsCurve::new(deg, knots, cps).map_err(|e| e.message())
     }
 
     fn bspline_surface(&self, r: &Record) -> R<NurbsSurface> {
@@ -803,7 +809,7 @@ impl<'a> Geo<'a> {
             Some(k) if form == "WITH_KNOTS" => (self.knots(form, du, nu, k.first(), k.get(2))?, self.knots(form, dv, nv, k.get(1), k.get(3))?),
             _ => (self.knots(form, du, nu, None, None)?, self.knots(form, dv, nv, None, None)?),
         };
-        Ok(NurbsSurface { du, dv, ku, kv, cps })
+        NurbsSurface::new(du, dv, ku, kv, cps).map_err(|e| e.message())
     }
 
     fn surface(&self, id: u64) -> R<Surface> {
@@ -1203,11 +1209,10 @@ impl<'a> Model<'a> {
                     if let Some(k) = self.unit_factor(u, 0) {
                         out.0 = k;
                     }
-                } else if r.has("PLANE_ANGLE_UNIT") {
-                    if let Some(k) = self.unit_factor(u, 0) {
+                } else if r.has("PLANE_ANGLE_UNIT")
+                    && let Some(k) = self.unit_factor(u, 0) {
                         out.1 = k;
                     }
-                }
             }
         }
         self.units.insert(ctx, out);
@@ -1295,11 +1300,10 @@ impl<'a> Model<'a> {
             }
             for &sdr in self.ids("SHAPE_DEFINITION_REPRESENTATION") {
                 let Some(r) = self.rec(sdr) else { continue };
-                if r.params().first().and_then(|p| p.as_ref()) == Some(pds) {
-                    if let Some(rep) = r.params().get(1).and_then(|p| p.as_ref()) {
+                if r.params().first().and_then(|p| p.as_ref()) == Some(pds)
+                    && let Some(rep) = r.params().get(1).and_then(|p| p.as_ref()) {
                         out.push(rep);
                     }
-                }
             }
         }
         out
@@ -1500,7 +1504,8 @@ pub fn read(bytes: &[u8]) -> Result<ReadModel, String> {
 // ---------------------------------------------------------------------------------------------
 // Writing
 
-/// A real in the file's notation: always with a decimal point, shortest round-trip digits.
+/// A real in the file's notation: always with a decimal point, shortest round-trip digits. A
+/// non-finite value (which no file can hold; the exporters refuse such bodies) is written as 0.
 pub fn real(x: f64) -> String {
     if !x.is_finite() {
         return "0.".into();
@@ -1513,8 +1518,9 @@ pub fn real(x: f64) -> String {
         let s = format!("{x}");
         if s.contains('.') { s } else { s + "." }
     } else {
+        // `{:e}` of a finite number always has its exponent after an `e`.
         let s = format!("{x:e}");
-        let (m, e) = s.split_once('e').unwrap();
+        let (m, e) = s.split_once('e').unwrap_or((s.as_str(), "0"));
         let m = if m.contains('.') { m.to_string() } else { format!("{m}.") };
         format!("{m}E{e}")
     }

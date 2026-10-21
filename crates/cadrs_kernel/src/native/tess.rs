@@ -19,7 +19,10 @@ pub struct FaceMesh {
 }
 
 /// Each edge's sample parameters and points.
-pub fn edge_samples(body: &Body, defl: f64, ang: f64) -> Vec<(Vec<f64>, Vec<P3>)> {
+pub type EdgeSamples = Vec<(Vec<f64>, Vec<P3>)>;
+
+/// Each edge's sample parameters and points.
+pub fn edge_samples(body: &Body, defl: f64, ang: f64) -> EdgeSamples {
     body.edges
         .par_iter()
         .map(|e| {
@@ -246,7 +249,7 @@ pub fn mesh_face(body: &Body, f: &Face, es: &[(Vec<f64>, Vec<P3>)], defl: f64, a
                     let q = P2::new(u, v);
                     let qs = P2::new(q.x * mu, q.y * mv);
                     let c = cell(qs.x, qs.y);
-                    let near = buckets.get(&c).map_or(false, |ks| ks.iter().any(|&k| seg_dist2(&qs, &segs[k].0, &segs[k].1) < min_d))
+                    let near = buckets.get(&c).is_some_and(|ks| ks.iter().any(|&k| seg_dist2(&qs, &segs[k].0, &segs[k].1) < min_d))
                         || always.iter().any(|&k| seg_dist2(&qs, &segs[k].0, &segs[k].1) < min_d);
                     if near {
                         continue;
@@ -375,7 +378,7 @@ pub fn mesh_face(body: &Body, f: &Face, es: &[(Vec<f64>, Vec<P3>)], defl: f64, a
 }
 
 /// The whole body's mesh, face by face.
-pub fn mesh_body(body: &Body, defl: f64, ang: f64) -> (Vec<FaceMesh>, Vec<(Vec<f64>, Vec<P3>)>) {
+pub fn mesh_body(body: &Body, defl: f64, ang: f64) -> (Vec<FaceMesh>, EdgeSamples) {
     let es = edge_samples(body, defl, ang);
     let faces: Vec<FaceMesh> = body.faces.par_iter().map(|f| mesh_face(body, f, &es, defl, ang)).collect();
     (faces, es)

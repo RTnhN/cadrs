@@ -229,7 +229,8 @@ impl<'a> Rd<'a> {
         Ok(self.u8()? != 0)
     }
     fn u32(&mut self) -> Res<usize> {
-        Ok(u32::from_le_bytes(self.take(4)?.try_into().unwrap()) as usize)
+        let b = self.take(4)?;
+        Ok(u32::from_le_bytes([b[0], b[1], b[2], b[3]]) as usize)
     }
     /// A count, checked against the bytes left (each item at least `min` bytes).
     fn count(&mut self, min: usize) -> Res<usize> {
@@ -240,7 +241,8 @@ impl<'a> Rd<'a> {
         Ok(n)
     }
     fn f(&mut self) -> Res<f64> {
-        Ok(f64::from_le_bytes(self.take(8)?.try_into().unwrap()))
+        let b = self.take(8)?;
+        Ok(f64::from_le_bytes([b[0], b[1], b[2], b[3], b[4], b[5], b[6], b[7]]))
     }
     fn p(&mut self) -> Res<P3> {
         Ok(P3::new(self.f()?, self.f()?, self.f()?))
@@ -268,10 +270,7 @@ impl<'a> Rd<'a> {
                 let knots = self.knots()?;
                 let n = self.count(32)?;
                 let cps = (0..n).map(|_| self.h()).collect::<Res<Vec<_>>>()?;
-                if n < degree + 1 || knots.len() != n + degree + 1 {
-                    return Err("a NURBS curve with bad knots".into());
-                }
-                Curve::Nurbs(Arc::new(NurbsCurve { degree, knots, cps }))
+                Curve::Nurbs(Arc::new(NurbsCurve::new(degree, knots, cps).map_err(|e| format!("a NURBS curve: {}", e.message()))?))
             }
             t => return Err(format!("unknown curve tag {t}")),
         })
@@ -296,10 +295,7 @@ impl<'a> Rd<'a> {
                 for _ in 0..nu {
                     cps.push((0..nv).map(|_| self.h()).collect::<Res<Vec<_>>>()?);
                 }
-                if nu < du + 1 || nv < dv + 1 || ku.len() != nu + du + 1 || kv.len() != nv + dv + 1 {
-                    return Err("a NURBS surface with bad knots".into());
-                }
-                Surface::Nurbs(Arc::new(NurbsSurface { du, dv, ku, kv, cps }))
+                Surface::Nurbs(Arc::new(NurbsSurface::new(du, dv, ku, kv, cps).map_err(|e| format!("a NURBS surface: {}", e.message()))?))
             }
             t => return Err(format!("unknown surface tag {t}")),
         })
@@ -368,6 +364,9 @@ pub fn read(bytes: &[u8]) -> Result<Body, String> {
     }
     if r.i != bytes.len() {
         return Err("trailing bytes after the body".into());
+    }
+    if let Some(why) = b.check_refs().into_iter().next() {
+        return Err(why);
     }
     Ok(b)
 }

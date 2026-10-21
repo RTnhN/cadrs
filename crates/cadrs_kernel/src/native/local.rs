@@ -228,7 +228,7 @@ pub fn replace_surfaces(b: &Body, surfs: &[Surface]) -> Result<Body> {
             // A seam: the new surface's iso-u line through the vertex.
             let s = &surfs[fs[0]];
             let (u, _) = s.project(&p0, None);
-            s.iso_u(u).ok_or_else(|| KernelError::Unsupported("moving a seam of this surface"))?
+            s.iso_u(u).ok_or(KernelError::Unsupported("moving a seam of this surface"))?
         } else if fs.len() == 2 {
             let (sa, sb) = (&surfs[fs[0]], &surfs[fs[1]]);
             let mut bb = Bbox::empty();
@@ -263,7 +263,7 @@ pub fn replace_surfaces(b: &Body, surfs: &[Surface]) -> Result<Body> {
                 let t0 = ic.c.closest(&p0, ic.t0, ic.t1);
                 let t1 = ic.c.closest(&p1, ic.t0, ic.t1);
                 let d = (ic.c.point(t0) - p0).norm() + (ic.c.point(t1) - p1).norm();
-                if best.as_ref().map_or(true, |(bd, _)| d < *bd) {
+                if best.as_ref().is_none_or(|(bd, _)| d < *bd) {
                     best = Some((d, ic.c));
                 }
             }
@@ -593,7 +593,7 @@ pub fn offset_sharp(b: &Body, dist: &[f64]) -> Result<Body> {
         .zip(dist)
         .map(|(f, d)| if *d == 0.0 { Some(f.surf.clone()) } else { offset_surface(&f.surf, f.sense, *d) })
         .collect::<Option<Vec<_>>>()
-        .ok_or_else(|| KernelError::Unsupported("offsetting this kind of face"))?;
+        .ok_or(KernelError::Unsupported("offsetting this kind of face"))?;
     replace_surfaces(b, &surfs)
 }
 

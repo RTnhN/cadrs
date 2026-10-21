@@ -20,6 +20,8 @@ crates/cadrs_kernel/
   src/native/          # the B-rep kernel (see "The native kernel" below)
   src/backend/mod.rs   # `backend::native::NativeKernel` (also `cadrs_kernel::DefaultKernel`)
   tests/conformance.rs # the conformance suite, 83 cases
+  tests/occt_*.rs, smlib_*.rs # suites generated from OCCT's and SMLib's tests (see "Tests")
+  tests/fuzz_readers.rs # property tests: no input panics a reader or a B-spline constructor
   tests/native_debug.rs # reproductions and timings (several replay CADRS_DUMP_DIR dumps)
 ```
 There's no Bevy dependency. `cadrs_core` depends on `cadrs_kernel`, and features rebuild through it
@@ -117,7 +119,11 @@ the conformance suite and the `cadrs_core` tests; OCCT had passed all 83 cases i
 **Geometry.** Curves (`curve.rs`): lines, circles, ellipses and rational B-splines (`nurbs.rs`,
 homogeneous control points; banded B-spline interpolation, so large fits are O(n)). Surfaces
 (`surface.rs`): plane, cylinder, cone, sphere, torus, surfaces of revolution and extrusion of any
-curve, and rational B-spline surfaces. Lengths are mm; the vertex tolerance is 1e-6 mm.
+curve, and rational B-spline surfaces. Lengths are mm; tolerances are in "Tolerances" below.
+B-splines from outside the kernel (files, scripts) go through the checked constructors
+`NurbsCurve::new`, `NurbsSurface::new` and `NurbsCurve::try_bezier` (knot count, monotone finite
+knots, degree, finite poles, positive weights), so a malformed one is an error, not an index
+panic in an evaluator.
 
 **Topology** (`topo.rs`). A `Body` has vertices, edges (a curve on [t0, t1]; a closed edge, a whole
 circle, has one vertex; degenerate edges sit at surface poles), faces (a surface, a sense and
@@ -141,6 +147,35 @@ orientation (`build::fix_senses`). Periodic faces have seams (an edge used twice
 | `hlr` | Hidden-line removal for drawing views: exact silhouettes and edges, crossings refined by Newton, visibility by rays against the faces. |
 | `step`, `iges`, `xbuild`, `exchange`, `bodyio`, `meshsolid` | STEP (AP214) and IGES read and write with assemblies; other systems' files rebuilt into valid bodies; an exact binary body format (`write_body`/`read_body`, the rebuild cache's); triangle meshes to solids. |
 
+**Tolerances** (`native::tol`). One model, three levels ten times apart (mm):
+- `CONFUSION` 1e-7: exact geometry; points closer are one point, and no entity's own tolerance is
+  smaller (`topo::TOL_MIN`, OCCT's `Precision::Confusion`).
+- `POINT` 1e-6: what an operation merges. A boolean pools vertices closer than this
+  (`boolean::VTOL`); `Body::check` allows an edge end or a p-curve this far off when the entity's
+  own tolerance is smaller.
+- `LOOP_GAP` 1e-5: the largest gap between consecutive p-curves of a loop that `check` accepts at
+  a vertex of smaller tolerance.
+- `SIZE` 1e8: the size box. Beyond it a double no longer resolves `CONFUSION`; the readers refuse
+  geometry outside it.
+
+Above these, vertices and edges carry their own tolerance (a read or healed body's gaps,
+`Body::fit_tolerances`, as OCCT), and operations take the larger of their own and the entities'.
+The values an operation runs with are a `tol::Tolerances` carried by the session
+(`NativeKernel::tolerances`, `set_tolerances`; the default is the model above) and passed
+explicitly: `boolean::boolean_bodies_with(a, b, op, BoolOptions { tol, flush })`. A boolean whose
+first run leaves an open shell runs again at `Tolerances::retries` (1e-5, then 1e-4). Inside a
+run, the run's merge distance is read by its helpers through `boolean::vtol()`, which only the run
+sets, for its duration, and restores on return or panic; no environment variable changes it.
+
+**Errors.** Every operation returns `Result<_, KernelError>`, with a message in words for the
+user. The variant says what a caller can do: `EmptyResult` (an Intersect of bodies that don't
+meet: cadrs reads it as "no interference" or "nothing left of the part"), `OpenResult` (faces
+that don't close into a solid; a boolean retries at larger tolerances on it), `InvalidInput`
+(a file or body that doesn't read, malformed B-splines, non-finite numbers, geometry outside the
+size box), `InvalidParameter` and `InvalidProfile` (the caller's values), `Unsupported`,
+`UnknownBody`, and `OperationFailed` for the rest. `KernelError::message` gives the words without
+the kind's prefix.
+
 **Debugging and profiling** (environment variables; output on stderr):
 - `CADRS_PROFILE=1`: each boolean's phases, slow mass properties and tessellations, sweeps.
 - `CADRS_BOOL_DEBUG=1`, `CADRS_SPLIT_DEBUG=1`, `CADRS_SHELL_DEBUG=1`, `CADRS_VERTEX_DEBUG=1`,
@@ -149,14 +184,33 @@ orientation (`build::fix_senses`). Periodic faces have seams (an edge used twice
 - `CADRS_DUMP_DIR=<dir>`: shells, fillets and chamfers write their input body (exact bytes) and
   parameters there, with the outcome; slow mass properties too. `tests/native_debug.rs` replays
   them (`CADRS_REPRO=<file.body> cargo test -r -p cadrs_kernel --test native_debug debug_repro_shell`).
+- `CADRS_NO_RETRY=1` turns off a boolean's retries at larger tolerances (to see the first run's
+  failure); it is the one debugging variable that changes results.
 
-**Status.** 81 of the 83 conformance cases pass (`cargo test -r -p cadrs_kernel --test
-conformance`, about 2.5 s). Not done yet:
-- Width fillets along a tangent chain whose faces change along it (a slope cut through rounded
-  corners: lines and ellipse arcs; `fillet_width`, the gear cover's last fillet). The lofted
-  chain tool's rails don't lie on the faces exactly, and the booleans leave an open body; it is
-  reported as an error.
-- Smooth fillet corners (`fillet_smooth`, a G1 patch where three fillets meet).
+**Status.** All 83 conformance cases pass (`cargo test -r -p cadrs_kernel --test conformance`,
+about 3 s). The generated OCCT and SMLib suites are tracked by the scoreboard,
+`python3 -I tools/kernel_scoreboard.py` (per file: cases, passing, known failures, and why the
+rest don't run yet).
+
+**Tests.**
+- Unit tests in the modules (`cargo test -r -p cadrs_kernel --lib`), the conformance suite, and
+  the suites generated from OCCT's DRAW scripts (`tests/occt_*.rs`, `tools/occt_to_rust.py`) and
+  SMLib's tests (`tests/smlib_*.rs`). A generated case listed in `tools/occt_known_failures.txt`
+  or `tools/smlib_known_failures*` asserts that it still fails; when it passes, remove the line
+  and regenerate the file.
+- The generated suites run on a DRAW-style harness (`native::draw`) and the SMLib oracle's body
+  writer (`native::oracle`): test code, built only for tests and with the `testkit` feature
+  (the crate's own tests turn it on through a dev-dependency on itself), not kernel API.
+- `tests/fuzz_readers.rs`: property tests (proptest) that feed the STEP, IGES, OCCT BRep and
+  body readers edited files (numbers swapped for extreme ones, bytes flipped, cut short) and
+  random bytes, and the B-spline constructors random knots, degrees, weights and points; nothing
+  may panic. `PROPTEST_CASES=<n>` runs more cases, `FUZZ_TRACE=1` prints each, and the ignored
+  `replay` test reads the file `FUZZ_REPRO` names with every reader. (The SMLib reader's case is
+  ignored until that reader stops panicking on bad face references.)
+- Clippy is a gate: `tools/kernel_clippy.sh` (all targets, warnings denied; CI runs it). The lint
+  levels are in the crate's `Cargo.toml` (`unsafe_code` denied).
+- The full `cargo test -r -p cadrs_kernel` takes about 12 minutes; run the suites a change
+  touches and the conformance suite.
 
 **GPU** (spike, `crates/cadrs_gpu_kernels`, `crates/cadrs_gpu`; see `bench/gpu_spike.md` in the
 working notes): kernels written in Rust compile to SPIR-V with rust-gpu (f64 included) and run

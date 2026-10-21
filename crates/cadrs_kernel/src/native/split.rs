@@ -184,7 +184,7 @@ pub fn split_face(surf: &Surface, flip: bool, boundary: &[Vec<Arc>], cuts: &[Arc
             let d2 = dep2[c];
             let ang2 = cross2(&din, &d2).atan2(din.dot(&d2));
             let key = (ang, ang2);
-            if best.map_or(true, |(a, b, _)| key.0 > a + 1e-9 || ((key.0 - a).abs() <= 1e-9 && key.1 > b)) {
+            if best.is_none_or(|(a, b, _)| key.0 > a + 1e-9 || ((key.0 - a).abs() <= 1e-9 && key.1 > b)) {
                 best = Some((key.0, key.1, c));
             }
         }
@@ -265,7 +265,7 @@ pub fn split_face(surf: &Surface, flip: bool, boundary: &[Vec<Arc>], cuts: &[Arc
         let _ = &pts;
         let mut best: Option<(f64, usize)> = None;
         for (i, (_, op, a)) in outers.iter().enumerate() {
-            if point_in_polygon(&q, op) && best.map_or(true, |(ba, _)| *a < ba) {
+            if point_in_polygon(&q, op) && best.is_none_or(|(ba, _)| *a < ba) {
                 best = Some((*a, i));
             }
         }

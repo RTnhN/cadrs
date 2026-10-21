@@ -401,9 +401,12 @@ fn debug_box_pairs() {
 // More generated cases: fillets on the top outline, chamfers and fillets on the vertical edges
 // (convex corners cut, inside corners filled).
 
+/// An outline's loops, each with the material's angle at its corners.
+type AngledLoops = Vec<(Vec<P2>, Vec<f64>)>;
+
 /// A random outline (star, notched, or one with a hole) as (outer, holes, loops with the
 /// material's angles).
-fn outline(rng: &mut Rng, i: usize) -> (Vec<P2>, Vec<Vec<P2>>, Vec<(Vec<P2>, Vec<f64>)>) {
+fn outline(rng: &mut Rng, i: usize) -> (Vec<P2>, Vec<Vec<P2>>, AngledLoops) {
     let kind = i % 3;
     let mut outer = if kind == 1 { notched(rng) } else { star(rng) };
     if signed_area(&outer) < 0.0 {
@@ -590,7 +593,7 @@ fn prisms_chamfered_all_round() {
 /// dihedral angle). Faces: the prism's, one per edge, one sphere patch per corner.
 #[test]
 fn convex_prisms_filleted_all_round() {
-    let mut rng = Rng(0xba11_0f5);
+    let mut rng = Rng(0x0ba1_10f5);
     let mut failures = Vec::new();
     let cases = 30;
     for i in 0..cases {
@@ -655,7 +658,8 @@ fn convex_prisms_filleted_all_round() {
 #[ignore]
 fn debug_octagon_round() {
     for (rot, r) in [(0.0, 1.0), (0.2, 1.0), (0.0, 0.5), (0.39, 1.5)] {
-        for sides in [8] {
+        {
+            let sides = 8;
             let base: Vec<P2> = (0..sides).map(|j| {
                 let a = rot + j as f64 / sides as f64 * std::f64::consts::TAU;
                 P2::new(20.0 * a.cos(), 20.0 * a.sin())

@@ -197,10 +197,11 @@ pub fn mesh_volume(tris: impl IntoIterator<Item = [Point3<f64>; 3]>) -> f64 {
 /// The triangles of a binary STL file.
 pub fn read_stl_binary(bytes: &[u8]) -> Option<Vec<[Point3<f64>; 3]>> {
     let n = u32::from_le_bytes(bytes.get(80..84)?.try_into().ok()?) as usize;
-    let mut out = Vec::with_capacity(n);
+    // (Capacity only for the records the file can hold: the count is the file's word.)
+    let mut out = Vec::with_capacity(n.min(bytes.len().saturating_sub(84) / 50));
     for k in 0..n {
-        let rec = bytes.get(84 + k * 50..84 + (k + 1) * 50)?;
-        let f = |i: usize| f32::from_le_bytes(rec[i * 4..i * 4 + 4].try_into().unwrap()) as f64;
+        let rec: &[u8; 50] = bytes.get(84 + k * 50..84 + (k + 1) * 50)?.try_into().ok()?;
+        let f = |i: usize| f32::from_le_bytes([rec[i * 4], rec[i * 4 + 1], rec[i * 4 + 2], rec[i * 4 + 3]]) as f64;
         let p = |j: usize| Point3::new(f(3 + j * 3), f(4 + j * 3), f(5 + j * 3));
         out.push([p(0), p(1), p(2)]);
     }

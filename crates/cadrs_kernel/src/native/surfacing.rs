@@ -86,11 +86,10 @@ pub fn thicken(k: &mut NativeKernel, spec: &ThickenSpec) -> Result<OpResult> {
         return Err(invalid("Select surfaces or faces to thicken"));
     }
     // Faces that sew into one sheet with flat open ends: shelled as the solid they bound.
-    if sheets.len() > 1 {
-        if let Some(r) = thicken_sheet(k, &sheets, spec) {
+    if sheets.len() > 1
+        && let Some(r) = thicken_sheet(k, &sheets, spec) {
             return Ok(r);
         }
-    }
     let mut acc: Option<Body> = None;
     for s in &sheets {
         for d in [spec.along, -spec.against] {
@@ -104,7 +103,7 @@ pub fn thicken(k: &mut NativeKernel, spec: &ThickenSpec) -> Result<OpResult> {
             });
         }
     }
-    let body = acc.unwrap();
+    let body = acc.ok_or_else(|| invalid("The thickness must be greater than zero"))?;
     let n = body.faces.len();
     let t = Tagged { body, tags: (0..n).map(|i| vec![Origin::ProfileCurve { region: spec.source, curve: i as u64 }]).collect() };
     Ok(t.into_result(k))
@@ -148,7 +147,7 @@ fn thicken_sheet(k: &mut NativeKernel, sheets: &[Body], spec: &ThickenSpec) -> O
             }
         }
     }
-    if comp.iter().any(|c| *c == usize::MAX) {
+    if comp.contains(&usize::MAX) {
         return None;
     }
     // Orienting may have flipped faces: "along" follows the majority of the picked normals.

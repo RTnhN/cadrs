@@ -736,7 +736,7 @@ impl Rebuilder {
                             let names = naming::name_body(&this.kernel, body, op, &r.history, &inputs).map_err(|e| e.to_string())?;
                             Ok(Some((body, names)))
                         }
-                        Err(cadrs_kernel::KernelError::OperationFailed(m)) if m.contains("empty") => Ok(None),
+                        Err(cadrs_kernel::KernelError::EmptyResult(_)) => Ok(None),
                         Err(e) => Err(format!("Copying the features failed: {e}")),
                     }
                 };

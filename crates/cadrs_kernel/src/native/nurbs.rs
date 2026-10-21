@@ -99,9 +99,9 @@ pub fn basis_ders(span: usize, u: f64, p: usize, d: usize, knots: &[f64]) -> Vec
         }
     }
     let mut rr = p as f64;
-    for k in 1..=d {
-        for j in 0..=p {
-            ders[k][j] *= rr;
+    for (k, row) in ders.iter_mut().enumerate().skip(1) {
+        for x in row.iter_mut() {
+            *x *= rr;
         }
         rr *= (p - k) as f64;
     }
@@ -124,9 +124,77 @@ fn binom(n: usize, k: usize) -> f64 {
     r
 }
 
+/// Why a knot vector, degree and control points don't make a B-spline: `None` when they do.
+/// `n` control points of degree `p` need `n + p + 1` finite non-decreasing knots, `n > p`, a
+/// non-empty range `knots[p] < knots[n]`, and finite control points with positive weights.
+/// (Knots repeated more than `p + 1` times are allowed: some files have them, and the
+/// evaluators take them.)
+fn knots_issue(p: usize, knots: &[f64], cps: &[H]) -> Option<String> {
+    let n = cps.len();
+    if p == 0 {
+        return Some("a B-spline needs degree 1 or more".into());
+    }
+    if n <= p {
+        return Some(format!("a degree {p} B-spline needs at least {} control points, not {n}", p + 1));
+    }
+    if knots.len() != n + p + 1 {
+        return Some(format!("{n} control points of degree {p} need {} knots, not {}", n + p + 1, knots.len()));
+    }
+    if knots.iter().any(|k| !k.is_finite()) {
+        return Some("a knot isn't a finite number".into());
+    }
+    if knots.windows(2).any(|w| w[1] < w[0]) {
+        return Some("the knots decrease".into());
+    }
+    if knots[n] <= knots[p] {
+        return Some("the knots leave an empty parameter range".into());
+    }
+    if cps.iter().any(|c| !c.iter().all(|x| x.is_finite())) {
+        return Some("a control point isn't finite".into());
+    }
+    if let Some(c) = cps.iter().find(|c| c.w <= 0.0) {
+        return Some(format!("a weight {} isn't positive", c.w));
+    }
+    None
+}
+
 impl NurbsCurve {
-    /// A (rational) Bézier curve from its poles and weights, on [0, 1].
+    /// A B-spline curve checked to be well formed (see [`NurbsCurve::validate`]): the constructor
+    /// for data from outside the kernel (files, scripts), where the fields could disagree.
+    pub fn new(degree: usize, knots: Vec<f64>, cps: Vec<H>) -> crate::Result<Self> {
+        let c = Self { degree, knots, cps };
+        c.validate()?;
+        Ok(c)
+    }
+
+    /// Checks that the knots, degree and control points make a B-spline (the evaluators index
+    /// by them unchecked): `n + p + 1` finite non-decreasing knots for `n > p` control points, a
+    /// non-empty range, finite control points and positive weights.
+    pub fn validate(&self) -> crate::Result<()> {
+        match knots_issue(self.degree, &self.knots, &self.cps) {
+            Some(why) => Err(crate::KernelError::InvalidInput(why)),
+            None => Ok(()),
+        }
+    }
+
+    /// A (rational) Bézier curve from its poles and weights, on [0, 1], checked: at least two
+    /// poles, as many weights, all finite and the weights positive.
+    pub fn try_bezier(poles: &[P3], weights: &[f64]) -> crate::Result<Self> {
+        if poles.len() < 2 || weights.len() != poles.len() {
+            return Err(crate::KernelError::InvalidInput(format!("a Bézier curve needs two or more poles and a weight for each ({} poles, {} weights)", poles.len(), weights.len())));
+        }
+        let c = Self::bezier(poles, weights);
+        c.validate()?;
+        Ok(c)
+    }
+
+    /// A (rational) Bézier curve from its poles and weights, on [0, 1]: for poles the kernel
+    /// made itself; [`NurbsCurve::try_bezier`] checks poles from outside.
+    ///
+    /// # Panics
+    /// With no poles, or fewer weights than poles.
     pub fn bezier(poles: &[P3], weights: &[f64]) -> Self {
+        assert!(!poles.is_empty() && weights.len() >= poles.len(), "a Bézier curve needs poles and a weight for each");
         let p = poles.len() - 1;
         let mut knots = vec![0.0; p + 1];
         knots.extend(vec![1.0; p + 1]);
@@ -276,7 +344,7 @@ impl NurbsCurve {
         // Parameters must increase strictly: drop points whose parameter repeats.
         let mut keep: Vec<usize> = Vec::with_capacity(pts.len());
         for i in 0..pts.len() {
-            if keep.last().map_or(true, |&j| params[i] > params[j] + 1e-14 * (1.0 + params[j].abs())) {
+            if keep.last().is_none_or(|&j| params[i] > params[j] + 1e-14 * (1.0 + params[j].abs())) {
                 keep.push(i);
             }
         }
@@ -349,24 +417,22 @@ impl NurbsCurve {
             rhs[(row, 1)] = q.y;
             rhs[(row, 2)] = q.z;
             row += 1;
-            if i == 0 {
-                if let Some(d) = d0 {
+            if i == 0
+                && let Some(d) = d0 {
                     put(&mut a, row, params[0], 1);
                     rhs[(row, 0)] = d.x;
                     rhs[(row, 1)] = d.y;
                     rhs[(row, 2)] = d.z;
                     row += 1;
                 }
-            }
-            if i == n_pts - 1 {
-                if let Some(d) = d1 {
+            if i == n_pts - 1
+                && let Some(d) = d1 {
                     put(&mut a, row, params[n_pts - 1], 1);
                     rhs[(row, 0)] = d.x;
                     rhs[(row, 1)] = d.y;
                     rhs[(row, 2)] = d.z;
                     row += 1;
                 }
-            }
         }
         drop(put);
         let sol = if banded {
@@ -548,7 +614,7 @@ impl NurbsCurve {
         let inner: Vec<f64> = {
             let mut v: Vec<f64> = Vec::new();
             for &k in &self.knots[p + 1..self.knots.len() - p - 1] {
-                if v.last().map_or(true, |l| (k - l).abs() > eps) {
+                if v.last().is_none_or(|l| (k - l).abs() > eps) {
                     v.push(k);
                 }
             }
@@ -630,6 +696,33 @@ impl NurbsCurve {
 }
 
 impl NurbsSurface {
+    /// A B-spline surface checked to be well formed (see [`NurbsSurface::validate`]).
+    pub fn new(du: usize, dv: usize, ku: Vec<f64>, kv: Vec<f64>, cps: Vec<Vec<H>>) -> crate::Result<Self> {
+        let s = Self { du, dv, ku, kv, cps };
+        s.validate()?;
+        Ok(s)
+    }
+
+    /// Checks that the net is rectangular and each direction's knots, degree and control points
+    /// make a B-spline (as [`NurbsCurve::validate`]).
+    pub fn validate(&self) -> crate::Result<()> {
+        let bad = |why: String| Err(crate::KernelError::InvalidInput(why));
+        let Some(first) = self.cps.first().filter(|r| !r.is_empty()) else { return bad("a B-spline surface needs control points".into()) };
+        if self.cps.iter().any(|r| r.len() != first.len()) {
+            return bad("the B-spline surface's rows of control points differ in length".into());
+        }
+        let col: Vec<H> = self.cps.iter().map(|r| r[0]).collect();
+        if let Some(why) = knots_issue(self.du, &self.ku, &col) {
+            return bad(format!("along u: {why}"));
+        }
+        for r in &self.cps {
+            if let Some(why) = knots_issue(self.dv, &self.kv, r) {
+                return bad(format!("along v: {why}"));
+            }
+        }
+        Ok(())
+    }
+
     /// The control net of the patch over u × v (each row's and then each column's curve cut
     /// there): its points' hull holds that part of the surface.
     pub fn sub_net(&self, u: (f64, f64), v: (f64, f64)) -> Vec<Vec<H>> {
@@ -1011,5 +1104,37 @@ mod tests {
         assert!((d[0] - V3::new(0.5, 0.5, 0.25)).norm() < 1e-14);
         assert!((d[1] - V3::new(1.0, 0.0, 0.5)).norm() < 1e-14);
         assert!((d[4] - V3::new(0.0, 0.0, 1.0)).norm() < 1e-14);
+    }
+
+    /// Malformed knots, degrees, weights and coordinates are errors from the checked
+    /// constructors (regression: `range` indexed `knots[cps.len()]` unchecked, and `bezier`
+    /// underflowed on no poles).
+    #[test]
+    fn checked_constructors_refuse_malformed_splines() {
+        let cps = |n: usize| (0..n).map(|i| H::new(i as f64, 0.0, 0.0, 1.0)).collect::<Vec<_>>();
+        assert!(NurbsCurve::new(2, vec![0.0, 0.0, 0.0, 1.0, 1.0, 1.0], cps(3)).is_ok());
+        // OCCT blend complex_e7: as many knots as poles.
+        assert!(NurbsCurve::new(2, vec![0.0, 0.0, 1.0, 1.0], cps(4)).is_err());
+        assert!(NurbsCurve::new(0, vec![0.0, 1.0], cps(1)).is_err());
+        assert!(NurbsCurve::new(3, vec![0.0; 7], cps(3)).is_err());
+        assert!(NurbsCurve::new(1, vec![0.0, 0.0, 1.0, 0.5, 1.0], cps(3)).is_err());
+        assert!(NurbsCurve::new(1, vec![0.0, 0.0, 0.0, 0.0], cps(2)).is_err());
+        assert!(NurbsCurve::new(1, vec![0.0, f64::NAN, 1.0, 1.0], cps(2)).is_err());
+        let mut w = cps(2);
+        w[1].w = 0.0;
+        assert!(NurbsCurve::new(1, vec![0.0, 0.0, 1.0, 1.0], w.clone()).is_err());
+        w[1] = H::new(f64::INFINITY, 0.0, 0.0, 1.0);
+        assert!(NurbsCurve::new(1, vec![0.0, 0.0, 1.0, 1.0], w).is_err());
+        assert!(NurbsCurve::try_bezier(&[], &[]).is_err());
+        assert!(NurbsCurve::try_bezier(&[P3::origin()], &[1.0]).is_err());
+        assert!(NurbsCurve::try_bezier(&[P3::origin(), P3::new(1.0, 0.0, 0.0)], &[1.0]).is_err());
+        assert!(NurbsCurve::try_bezier(&[P3::origin(), P3::new(1.0, 0.0, 0.0)], &[1.0, -1.0]).is_err());
+        assert_eq!(NurbsCurve::try_bezier(&[P3::origin(), P3::new(1.0, 0.0, 0.0)], &[1.0, 1.0]).map(|c| c.range()), Ok((0.0, 1.0)));
+        let k = vec![0.0, 0.0, 1.0, 1.0];
+        assert!(NurbsSurface::new(1, 1, k.clone(), k.clone(), vec![cps(2), cps(2)]).is_ok());
+        assert!(NurbsSurface::new(1, 1, k.clone(), k.clone(), vec![cps(2), cps(3)]).is_err());
+        assert!(NurbsSurface::new(1, 1, k.clone(), k.clone(), vec![]).is_err());
+        assert!(NurbsSurface::new(0, 0, vec![], vec![], vec![vec![]]).is_err());
+        assert!(NurbsSurface::new(1, 2, k.clone(), k, vec![cps(2), cps(2)]).is_err());
     }
 }

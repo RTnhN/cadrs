@@ -6,6 +6,7 @@
 //! Arguments follow DRAW's order (points and directions as separate numbers, angles in degrees
 //! where DRAW takes degrees). Shapes are [`Shape`] values: vertices, edges, wires and planar
 //! faces are held here; solids and sheets are bodies of the kernel.
+#![allow(clippy::too_many_arguments, reason = "the methods take the DRAW commands' arguments as they are")]
 
 use std::f64::consts::{PI, TAU};
 
@@ -360,7 +361,7 @@ impl NativeKernel {
         }
         let pts: Vec<P3> = poles.iter().map(|p| P3::from(*p)).collect();
         let ones = vec![1.0; pts.len()];
-        Ok(Curve::Nurbs(std::sync::Arc::new(super::nurbs::NurbsCurve::bezier(&pts, weights.unwrap_or(&ones)))))
+        Ok(Curve::Nurbs(std::sync::Arc::new(super::nurbs::NurbsCurve::try_bezier(&pts, weights.unwrap_or(&ones))?)))
     }
 
     /// `bsplinecurve name degree nknots k m … x y z w …` and `pbsplinecurve` (periodic: the
@@ -1181,7 +1182,7 @@ impl NativeKernel {
         }
         let (a, b) = (self.solid_of(a)?, self.solid_of(b)?);
         let r = match self.boolean(op, a, &[b]) {
-            Err(KernelError::OperationFailed(m)) if m.contains("empty") => return Ok(Shape::Empty),
+            Err(KernelError::EmptyResult(_)) => return Ok(Shape::Empty),
             r => r?,
         };
         match r.bodies.len() {
@@ -1448,8 +1449,8 @@ impl NativeKernel {
     pub fn explode_faces(&self, s: &Shape) -> Result<Vec<Shape>> {
         let b = self.body_of(s)?;
         let infos = self.faces(b)?;
-        if let Some(o) = order_of(b) {
-            if o.faces.len() == infos.len() {
+        if let Some(o) = order_of(b)
+            && o.faces.len() == infos.len() {
                 // The face nearest each reference point (by distance to its surface and centroid).
                 let body = self.get(b)?;
                 return Ok(o
@@ -1466,7 +1467,6 @@ impl NativeKernel {
                     })
                     .collect());
             }
-        }
         Ok(infos.into_iter().map(|f| Shape::BodyFace(b, f.id)).collect())
     }
 
@@ -1664,11 +1664,10 @@ impl NativeKernel {
         let n = self.nbshapes(s)?;
         let got = [n.vertex, n.edge, n.wire.max(1)];
         for ((what, want), got) in ["vertices", "edges", "wires"].iter().zip([v, e, w]).zip(got) {
-            if let Some(want) = want {
-                if got != want {
+            if let Some(want) = want
+                && got != want {
                     return Err(err(&format!("{got} {what}, expected {want}")));
                 }
-            }
         }
         Ok(())
     }
@@ -1711,11 +1710,10 @@ impl NativeKernel {
 pub fn check_nb(got: NbShapes, vertex: Option<usize>, edge: Option<usize>, wire: Option<usize>, face: Option<usize>, shell: Option<usize>, solid: Option<usize>) -> Result<()> {
     let mut bad = Vec::new();
     for (name, g, w) in [("vertex", got.vertex, vertex), ("edge", got.edge, edge), ("wire", got.wire, wire), ("face", got.face, face), ("shell", got.shell, shell), ("solid", got.solid, solid)] {
-        if let Some(w) = w {
-            if g != w {
+        if let Some(w) = w
+            && g != w {
                 bad.push(format!("{name} {g} (expected {w})"));
             }
-        }
     }
     if bad.is_empty() { Ok(()) } else { Err(err(&format!("checknbshapes: {}", bad.join(", ")))) }
 }
@@ -1858,11 +1856,10 @@ fn fit_plane(edges: &[DEdge]) -> Option<Plane> {
         nrm += V3::new((a.y - b.y) * (a.z + b.z), (a.z - b.z) * (a.x + b.x), (a.x - b.x) * (a.y + b.y));
     }
     // A single circle edge: its own normal.
-    if edges.len() == 1 {
-        if let Curve::Circle { x, y, .. } = &edges[0].curve {
+    if edges.len() == 1
+        && let Curve::Circle { x, y, .. } = &edges[0].curve {
             nrm = x.cross(y) * if edges[0].t1 >= edges[0].t0 { 1.0 } else { -1.0 };
         }
-    }
     let nrm = nrm.try_normalize(1e-12)?;
     let o = pts[0];
     let size = pts.iter().map(|p| (p - o).norm()).fold(0.0, f64::max);
@@ -1948,7 +1945,7 @@ fn bezier_spans(c: &super::nurbs::NurbsCurve) -> Vec<Vec<super::nurbs::H>> {
     let eps = 1e-12 * (1.0 + a.abs().max(b.abs()));
     let mut inner: Vec<f64> = Vec::new();
     for &k in &c.knots[p + 1..c.knots.len() - p - 1] {
-        if k > a + eps && k < b - eps && inner.last().map_or(true, |l| (k - l).abs() > eps) {
+        if k > a + eps && k < b - eps && inner.last().is_none_or(|l| (k - l).abs() > eps) {
             inner.push(k);
         }
     }

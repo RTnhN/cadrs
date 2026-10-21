@@ -30,11 +30,10 @@ pub fn curve(n: &NurbsCurve) -> Option<Curve> {
     let tol = size * REL;
     // A line: every sample on the chord's line.
     let (p0, p1) = (pts[0], pts[m]);
-    if let Some(d) = (p1 - p0).try_normalize(1e-12) {
-        if pts.iter().all(|p| ((p - p0) - d * (p - p0).dot(&d)).norm() < tol) && n.cps.iter().all(|h| ((dehom(h) - p0) - d * (dehom(h) - p0).dot(&d)).norm() < tol * 10.0) {
+    if let Some(d) = (p1 - p0).try_normalize(1e-12)
+        && pts.iter().all(|p| ((p - p0) - d * (p - p0).dot(&d)).norm() < tol) && n.cps.iter().all(|h| ((dehom(h) - p0) - d * (dehom(h) - p0).dot(&d)).norm() < tol * 10.0) {
             return Some(Curve::Line { o: p0, d });
         }
-    }
     // A circle: the circle through three samples holds all of them.
     if n.degree < 2 {
         return None;
@@ -237,12 +236,13 @@ fn candidate(n: &NurbsSurface) -> Option<Surface> {
         }
         return None;
     }
-    // A cone: the radius changing linearly along the axis.
-    let (h0, h1) = ((c0 - c0).dot(&a), (c1 - c0).dot(&a));
-    if (h1 - h0).abs() < tol {
+    // A cone: the radius changing linearly along the axis, heights measured from the first
+    // section's centre (the seam frame's origin, where the radius is s0's).
+    let h1 = (c1 - c0).dot(&a);
+    if h1.abs() < tol {
         return None;
     }
-    let slope = (s1.1 - s0.1) / (h1 - h0);
+    let slope = (s1.1 - s0.1) / h1;
     if pts.iter().any(|p| (dist_axis(p) - (s0.1 + slope * (p - c0).dot(&a))).abs() > tol) {
         return None;
     }
@@ -258,19 +258,20 @@ mod tests {
 
     /// A whole circle in five unequal rational pieces (as SMLib writes them) is a circle.
     #[test]
+    #[allow(clippy::approx_constant, reason = "SMLib's weights, as written in its file")]
     fn uneven_rational_circle_is_a_circle() {
         let w = [1.0, 0.7071067811865476, 1.0, 0.8535533905932737, 0.8535533905932737, 1.0, 0.7071067811865475, 1.0, 0.7071067811865475, 1.0];
         let p = [
-            [3.6180339887498949, 2.5, 5.0],
-            [2.5583363680084634, 0.9771975379242740, 3.5355339059327378],
-            [2.5, 1.3819660112501051, 5.0],
-            [1.7385987689621367, 1.1795817745871895, 4.2677669529663689],
-            [1.1795817745871895, 1.7385987689621367, 4.2677669529663689],
-            [1.3819660112501051, 2.5, 5.0],
+            [3.618_033_988_749_895, 2.5, 5.0],
+            [2.5583363680084634, 0.977_197_537_924_274, 3.5355339059327378],
+            [2.5, 1.381_966_011_250_105, 5.0],
+            [1.7385987689621367, 1.1795817745871895, 4.267_766_952_966_369],
+            [1.1795817745871895, 1.7385987689621367, 4.267_766_952_966_369],
+            [1.381_966_011_250_105, 2.5, 5.0],
             [0.9771975379242739, 2.5583363680084634, 3.5355339059327373],
-            [2.5, 3.6180339887498949, 5.0],
-            [2.5583363680084630, 2.5583363680084634, 3.5355339059327373],
-            [3.6180339887498949, 2.5, 5.0],
+            [2.5, 3.618_033_988_749_895, 5.0],
+            [2.558_336_368_008_463, 2.5583363680084634, 3.5355339059327373],
+            [3.618_033_988_749_895, 2.5, 5.0],
         ];
         let cps = p.iter().zip(w).map(|(q, w)| H::new(q[0], q[1], q[2], w)).collect();
         let knots = vec![0.0, 0.0, 0.0, 1.711412337262567, 1.711412337262567, 2.567118505893851, 3.422824674525135, 3.422824674525135, 5.134237011787703, 5.134237011787703, 6.84564934905027, 6.84564934905027, 6.84564934905027];
@@ -278,6 +279,32 @@ mod tests {
         match curve(&n) {
             Some(Curve::Circle { c, r, .. }) => assert!((c - P3::new(2.5, 2.5, 5.0)).norm() < 1e-9 && (r - 1.118033988749895).abs() < 1e-9),
             other => panic!("{other:?}"),
+        }
+    }
+
+    /// A cone's NURBS form is recognised as that cone (radius at the seam frame's origin,
+    /// half-angle with its sign), whichever way the radius grows and wherever the cone sits
+    /// along its axis (regression: the first section's height was written `(c0 - c0)·a`).
+    #[test]
+    fn nurbs_cone_is_the_cone() {
+        for (o, z, r, half) in [
+            (P3::new(0.0, 0.0, 0.0), V3::z(), 5.0, 0.3),
+            (P3::new(1.0, -2.0, 7.0), V3::new(1.0, 2.0, 2.0).normalize(), 8.0, -0.4),
+            (P3::new(0.0, 0.0, 40.0), -V3::y(), 2.0, 0.6),
+        ] {
+            let cone = Surface::Cone { f: Frame::from_z(o, z), r, a: half };
+            let n = cone.to_nurbs((0.0, 2.0), (3.0, 9.0));
+            let Some(Surface::Cone { f, r: r2, a: a2 }) = surface(&n) else { panic!("not a cone: {:?}", surface(&n)) };
+            // The recognised cone has the same points (a's sign follows its frame's z).
+            for (u, v) in [(0.0, 3.0), (1.0, 6.0), (2.0, 9.0), (0.5, 4.5)] {
+                let p = n.point(u, v);
+                assert!(cone.distance(&p) < 1e-9 && Surface::Cone { f, r: r2, a: a2 }.distance(&p) < 1e-9);
+            }
+            assert!((f.z.dot(&z).abs() - 1.0).abs() < 1e-9 && (a2.abs() - half.abs()).abs() < 1e-9, "{a2} {half}");
+            // The frame's origin lies on the axis, the radius r2 there.
+            let (h, d) = ((f.o - o).dot(&z), f.o - o);
+            assert!((d - z * h).norm() < 1e-9);
+            assert!((r2 - (r + h * half.tan())).abs() < 1e-9, "{r2} at {h}");
         }
     }
 }

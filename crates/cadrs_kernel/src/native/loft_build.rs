@@ -219,7 +219,12 @@ pub(crate) fn skin(curves: &[NurbsCurve], v: &[f64]) -> NurbsSurface {
 }
 
 /// A derivative field along a section end (first, and second derivatives with curvature).
-type Field = (Box<dyn Fn(&P3) -> V3>, Option<Box<dyn Fn(&P3) -> V3>>);
+/// A vector at each point of a section (a derivative the loft must match there).
+type VecField = Box<dyn Fn(&P3) -> V3>;
+/// A loft end's first derivative field and, for curvature, its second.
+type Field = (VecField, Option<VecField>);
+/// Sampled end derivatives (rows of the sample grid): first, and second for curvature.
+type EndDerivs = (Vec<Vec<V3>>, Option<Vec<Vec<V3>>>);
 
 /// Per-section geometry for the end conditions.
 struct SecGeo {
@@ -272,7 +277,7 @@ fn field(k: &NativeKernel, end: &LoftEnd, sec: &LoftSection, g: &SecGeo, i: usiz
     let len = end.magnitude * total;
     let c = g.centers[i];
     let sign = if g.radii[toward] < g.radii[i] { -1.0 } else { 1.0 } * if first { 1.0 } else { -1.0 };
-    let radial = move |normal: V3, length: f64| -> Box<dyn Fn(&P3) -> V3> {
+    let radial = move |normal: V3, length: f64| -> VecField {
         let nn = normal.normalize();
         Box::new(move |p: &P3| {
             let d = p - c;
@@ -328,7 +333,7 @@ fn field(k: &NativeKernel, end: &LoftEnd, sec: &LoftSection, g: &SecGeo, i: usiz
                         let ed = &b.edges[e];
                         let t = ed.curve.closest(p, ed.t[0], ed.t[1]);
                         let dd = (ed.point(t) - p).norm();
-                        if best.map_or(true, |(bd, ..)| dd < bd) {
+                        if best.is_none_or(|(bd, ..)| dd < bd) {
                             best = Some((dd, e, gf));
                         }
                     }
@@ -348,8 +353,8 @@ fn field(k: &NativeKernel, end: &LoftEnd, sec: &LoftSection, g: &SecGeo, i: usiz
             };
             let at = std::sync::Arc::new(at);
             let a1 = at.clone();
-            let d1: Box<dyn Fn(&P3) -> V3> = Box::new(move |p: &P3| a1(p).0 * len);
-            let d2: Option<Box<dyn Fn(&P3) -> V3>> = if end.condition == LoftCondition::MatchCurvature {
+            let d1: VecField = Box::new(move |p: &P3| a1(p).0 * len);
+            let d2: Option<VecField> = if end.condition == LoftCondition::MatchCurvature {
                 let a2 = at.clone();
                 let b2 = b.clone();
                 Some(Box::new(move |p: &P3| {
@@ -388,12 +393,12 @@ fn fit_poles(c: &NurbsCurve, f: &dyn Fn(&P3) -> V3) -> Vec<V3> {
         let span = super::nurbs::find_span(n - 1, c.degree, u, &c.knots);
         let nd = super::nurbs::basis_ders(span, u, c.degree, 0, &c.knots);
         let mut wsum = 0.0;
-        for k in 0..=c.degree {
-            wsum += nd[0][k] * c.cps[span - c.degree + k].w;
+        for (n, cp) in nd[0].iter().zip(&c.cps[span - c.degree..=span]) {
+            wsum += n * cp.w;
         }
-        for k in 0..=c.degree {
+        for (k, n) in nd[0].iter().enumerate() {
             let i = span - c.degree + k;
-            rows[(j, i)] = nd[0][k] * c.cps[i].w / wsum;
+            rows[(j, i)] = n * c.cps[i].w / wsum;
         }
         let v = f(&c.point(u));
         rhs[(j, 0)] = v.x;
@@ -459,6 +464,14 @@ fn assemble(surfs: Vec<NurbsSurface>, closed_u: bool, srcs: &[u64], caps: [Optio
 /// part, all rows sharing their u knots), the caps and the point ends.
 #[allow(clippy::too_many_arguments)]
 fn assemble_rows(rows: Vec<Vec<NurbsSurface>>, closed_u: bool, closed_v: bool, srcs: &[u64], caps: [Option<(Surface, Option<FaceInput>)>; 2], points: [bool; 2], solid: bool, source: u64) -> Result<Built> {
+    // Degenerate sections (from a caller's NaN or coincident data) make surfaces that can't be
+    // evaluated: an error, not a panic further on.
+    if rows.is_empty() || rows[0].is_empty() {
+        return Err(KernelError::OperationFailed("the loft has no surfaces".into()));
+    }
+    for s in rows.iter().flatten() {
+        s.validate().map_err(|e| KernelError::OperationFailed(format!("the loft's surface isn't valid ({})", e.message())))?;
+    }
     let n = rows[0].len();
     let nr = rows.len();
     let mut b = Body::default();
@@ -641,7 +654,7 @@ fn cap_surface(k: &NativeKernel, s: &Sec) -> Option<(Surface, Option<FaceInput>)
 }
 
 /// Exact skinning; None when the sections don't match.
-fn loft_exact(k: &NativeKernel, spec: &LoftSpec, secs: &mut Vec<Sec>, solid: bool) -> Result<Option<Built>> {
+fn loft_exact(k: &NativeKernel, spec: &LoftSpec, secs: &mut [Sec], solid: bool) -> Result<Option<Built>> {
     loft_exact_with(k, spec, secs, solid, true, false)
 }
 
@@ -720,7 +733,7 @@ pub fn loft_wires(k: &NativeKernel, sections: &[WireSection], solid: bool, ruled
             Err(_) => {}
         }
     }
-    loft_exact_with(k, &spec, &mut secs, solid, true, ruled)?.ok_or_else(|| KernelError::Unsupported("thrusections of wires with different numbers of edges"))
+    loft_exact_with(k, &spec, &mut secs, solid, true, ruled)?.ok_or(KernelError::Unsupported("thrusections of wires with different numbers of edges"))
 }
 
 /// Gives closed planar sections the same number of edges, as OCCT's polar method: each
@@ -765,11 +778,10 @@ fn polar_match(secs: &mut [Sec]) -> Result<()> {
         }
     }
     for (k, &i) in idx.iter().enumerate() {
-        if let Sec::Loop { parts, .. } = &mut secs[i] {
-            if turning(parts, &axes[k]) < 0.0 {
+        if let Sec::Loop { parts, .. } = &mut secs[i]
+            && turning(parts, &axes[k]) < 0.0 {
                 *parts = reverse_parts(parts);
             }
-        }
     }
     let carry = |p: &P3, from: usize, to: usize| -> P3 {
         let q = p + (pos[to] - pos[from]);
@@ -807,7 +819,7 @@ fn polar_match(secs: &mut [Sec]) -> Result<()> {
                     continue;
                 }
                 let dist = (q - target).norm();
-                if best.map_or(true, |(bd, ..)| dist < bd) {
+                if best.is_none_or(|(bd, ..)| dist < bd) {
                     best = Some((dist, pi, t));
                 }
             }
@@ -833,8 +845,8 @@ fn polar_match(secs: &mut [Sec]) -> Result<()> {
             split(secs, k - 1, &target);
         }
     }
-    for k in 0..n - 1 {
-        for v in loops(secs, idx[k]).iter().map(|p| p.start()) {
+    for (k, &ik) in idx.iter().enumerate().take(n.saturating_sub(1)) {
+        for v in loops(secs, ik).iter().map(|p| p.start()) {
             let target = carry(&v, k, k + 1);
             split(secs, k + 1, &target);
         }
@@ -887,7 +899,7 @@ fn wire_plane(parts: &[Part]) -> Option<Plane> {
     Some(Plane { origin: o, x_dir: nalgebra::Unit::try_new(x, 1e-12)?, normal: nalgebra::Unit::new_normalize(nrm) })
 }
 
-fn loft_exact_with(k: &NativeKernel, spec: &LoftSpec, secs: &mut Vec<Sec>, solid: bool, align: bool, ruled: bool) -> Result<Option<Built>> {
+fn loft_exact_with(k: &NativeKernel, spec: &LoftSpec, secs: &mut [Sec], solid: bool, align: bool, ruled: bool) -> Result<Option<Built>> {
     let loops: Vec<usize> = secs.iter().filter_map(|s| if let Sec::Loop { parts, .. } = s { Some(parts.len()) } else { None }).collect();
     if loops.is_empty() || loops.iter().any(|n| *n != loops[0]) {
         return Ok(None);
@@ -924,11 +936,10 @@ fn loft_exact_with(k: &NativeKernel, spec: &LoftSpec, secs: &mut Vec<Sec>, solid
     }
     // The same way round the axis, each started where it lines up with the previous one.
     for s in secs.iter_mut().filter(|_| align && closed_u) {
-        if let Sec::Loop { parts, .. } = s {
-            if turning(parts, &axis) < 0.0 {
+        if let Sec::Loop { parts, .. } = s
+            && turning(parts, &axis) < 0.0 {
                 *parts = reverse_parts(parts);
             }
-        }
     }
     let mut prev_dir: Option<V3> = None;
     for i in (0..secs.len()).filter(|_| align && closed_u) {
@@ -975,7 +986,10 @@ fn loft_exact_with(k: &NativeKernel, spec: &LoftSpec, secs: &mut Vec<Sec>, solid
     for i in 1..n_secs {
         v.push(v[i - 1] + (cents[i] - cents[i - 1]).norm());
     }
-    let total = *v.last().unwrap();
+    let total = v.last().copied().unwrap_or(0.0);
+    if !(total.is_finite() && total > 0.0) {
+        return Err(KernelError::OperationFailed("the loft's sections lie on top of each other".into()));
+    }
     let v: Vec<f64> = v.iter().map(|x| x / total).collect();
     for pi in 0..count {
         let mut curves: Vec<NurbsCurve> = Vec::new();
@@ -1052,7 +1066,7 @@ fn loft_exact_with(k: &NativeKernel, spec: &LoftSpec, secs: &mut Vec<Sec>, solid
 /// The loft's end derivative at a section (OCCT backend conventions: magnitude × the length
 /// through the section centres).
 #[allow(clippy::too_many_arguments)]
-fn end_derivative(k: &NativeKernel, end: &LoftEnd, sec: &LoftSection, samples: &crate::loft::Samples, i: usize, toward: usize, total: f64, first: bool) -> Result<Option<(Vec<Vec<V3>>, Option<Vec<Vec<V3>>>)>> {
+fn end_derivative(k: &NativeKernel, end: &LoftEnd, sec: &LoftSection, samples: &crate::loft::Samples, i: usize, toward: usize, total: f64, first: bool) -> Result<Option<EndDerivs>> {
     let n = samples.normals[i];
     let len = end.magnitude * total;
     let c = samples.centers[i];
@@ -1109,7 +1123,7 @@ fn end_derivative(k: &NativeKernel, end: &LoftEnd, sec: &LoftSection, samples: &
 /// in the neighbour's tangent plane square to the boundary, leaving the first section away
 /// from its body (arriving into the last); with curvature, the neighbour's normal curvature in
 /// that direction as the second derivative.
-fn match_derivatives(k: &NativeKernel, fi: &FaceInput, samples: &crate::loft::Samples, i: usize, first: bool, len: f64, curvature: bool) -> Result<(Vec<Vec<V3>>, Option<Vec<Vec<V3>>>)> {
+fn match_derivatives(k: &NativeKernel, fi: &FaceInput, samples: &crate::loft::Samples, i: usize, first: bool, len: f64, curvature: bool) -> Result<EndDerivs> {
     let b = k.get(fi.body)?;
     let face = fi.face.0 as usize;
     let ef = b.edge_faces();
@@ -1134,7 +1148,7 @@ fn match_derivatives(k: &NativeKernel, fi: &FaceInput, samples: &crate::loft::Sa
                 let ed = &b.edges[e];
                 let t = ed.curve.closest(p, ed.t[0], ed.t[1]);
                 let d = (ed.point(t) - p).norm();
-                if best.map_or(true, |(bd, ..)| d < bd) {
+                if best.is_none_or(|(bd, ..)| d < bd) {
                     best = Some((d, e, g));
                 }
             }
@@ -1212,7 +1226,7 @@ fn loft_sampled(k: &NativeKernel, spec: &LoftSpec, solid: bool) -> Result<Built>
         };
         let curves: Vec<NurbsCurve> = patch.iter().map(|row| NurbsCurve::interpolate(&pts_of(row), &up, 3, None, None)).collect();
         // Derivatives of the poles: interpolate the sample derivatives with the same basis.
-        let deriv_poles = |ds: &Option<(Vec<Vec<V3>>, Option<Vec<Vec<V3>>>)>, second: bool| -> Option<Vec<V3>> {
+        let deriv_poles = |ds: &Option<EndDerivs>, second: bool| -> Option<Vec<V3>> {
             let (a, b) = ds.as_ref()?;
             let rows = if second { b.as_ref()? } else { a };
             let mut row: Vec<P3> = rows[pi].iter().map(|d| P3::from(*d)).collect();
@@ -1333,7 +1347,7 @@ fn loft_thin(k: &mut NativeKernel, spec: &LoftSpec, left: f64, right: f64) -> Re
         }
         let to_profile = |l: &[super::profile::Piece]| -> Result<Profile> {
             // Back to sketch curves for the section (exact circles and lines).
-            let curves: Vec<Curve2> = l.iter().map(piece_curve2).collect::<Option<Vec<_>>>().ok_or_else(|| KernelError::Unsupported("thin lofts of these curves"))?;
+            let curves: Vec<Curve2> = l.iter().map(piece_curve2).collect::<Option<Vec<_>>>().ok_or(KernelError::Unsupported("thin lofts of these curves"))?;
             Ok(Profile::new(p.plane, vec![Region { outer: Loop { curves }, holes: vec![], source: None }]))
         };
         outer.push(LoftSection::Profile(to_profile(&mf[0].outer)?));
@@ -1367,5 +1381,35 @@ fn piece_curve2(p: &super::profile::Piece) -> Option<Curve2> {
             Some(Curve2::Arc { center: pt(*c), radius: *r, start_angle: start, sweep, source: None })
         }
         _ => None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::native::profile::{Piece, Src};
+
+    fn square(plane: Plane, nan: bool) -> (Vec<Piece>, Plane) {
+        let c = |x: f64, y: f64| P3::new(if nan { f64::NAN } else { x }, y, 0.0);
+        let corners = [c(0.0, 0.0), c(10.0, 0.0), c(10.0, 10.0), c(0.0, 10.0)];
+        let pieces = (0..4)
+            .map(|i| {
+                let (a, b) = (corners[i], corners[(i + 1) % 4]);
+                Piece { c: Curve::Line { o: a, d: b - a }, t0: 0.0, t1: 1.0, rev: false, src: Src::Curve { region: 0, curve: i as u64 }, more: vec![] }
+            })
+            .collect();
+        (pieces, plane)
+    }
+
+    /// Sections on top of each other, or with NaN coordinates (as a blend's degenerate chain
+    /// made in OCCT `blend complex_e7`), are an error, not an index panic in a NURBS evaluator.
+    #[test]
+    fn degenerate_sections_are_errors() {
+        let k = NativeKernel::new();
+        let top = Plane::top();
+        let up = Plane { origin: nalgebra::Point3::new(0.0, 0.0, 20.0), ..top };
+        assert!(loft_pieces(&k, &[square(top, false), square(up, false)], 0).is_ok());
+        assert!(loft_pieces(&k, &[square(top, false), square(top, false)], 0).is_err());
+        assert!(loft_pieces(&k, &[square(top, true), square(up, true)], 0).is_err());
     }
 }

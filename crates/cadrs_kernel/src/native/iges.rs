@@ -154,14 +154,14 @@ impl Writer {
         let mut p = vec![k1.to_string(), k2.to_string(), n.du.to_string(), n.dv.to_string(), "0".into(), "0".into(), (!rational as u8).to_string(), "0".into(), "0".into()];
         p.extend(n.ku.iter().map(|x| real(*x)));
         p.extend(n.kv.iter().map(|x| real(*x)));
+        // The first index varies fastest: column by column.
+        let column = |j: usize| n.cps.iter().map(move |row| row[j]);
         for j in 0..=k2 {
-            for i in 0..=k1 {
-                p.push(real(n.cps[i][j].w));
-            }
+            p.extend(column(j).map(|h| real(h.w)));
         }
         for j in 0..=k2 {
-            for i in 0..=k1 {
-                let q = dehom(&n.cps[i][j]);
+            for h in column(j) {
+                let q = dehom(&h);
                 p.extend([real(q.x), real(q.y), real(q.z)]);
             }
         }
@@ -587,6 +587,16 @@ impl<'a> Reader<'a> {
     fn num(e: &DirEnt, i: usize) -> R<f64> {
         e.params.get(i).and_then(|t| t.f()).ok_or_else(|| format!("entity {} has too few parameters", e.kind))
     }
+    /// A count or degree: a whole number no larger than the entity's parameter list (a larger
+    /// one can't describe data the entity holds, and would overflow the index arithmetic).
+    fn count(e: &DirEnt, i: usize) -> R<usize> {
+        let x = Self::num(e, i)?;
+        if x >= 0.0 && x.fract() == 0.0 && x <= e.params.len() as f64 {
+            Ok(x as usize)
+        } else {
+            Err(format!("entity {} has a bad count {x}", e.kind))
+        }
+    }
     fn ptr(e: &DirEnt, i: usize) -> R<usize> {
         Ok(Self::num(e, i)?.abs() as usize)
     }
@@ -636,8 +646,8 @@ impl<'a> Reader<'a> {
     }
 
     fn nurbs_curve(e: &DirEnt) -> R<NurbsCurve> {
-        let k = Self::num(e, 0)? as usize;
-        let m = Self::num(e, 1)? as usize;
+        let k = Self::count(e, 0)?;
+        let m = Self::count(e, 1)?;
         let nk = k + m + 2;
         let base = 6;
         let knots: Vec<f64> = (0..nk).map(|i| Self::num(e, base + i)).collect::<R<_>>()?;
@@ -652,7 +662,7 @@ impl<'a> Reader<'a> {
         if m == 0 || k + 1 < m + 1 {
             return Err("a B-spline curve of degree 0".into());
         }
-        Ok(NurbsCurve { degree: m, knots, cps })
+        NurbsCurve::new(m, knots, cps).map_err(|e| e.message())
     }
 
     fn curve(&self, de: usize) -> R<Curve> {
@@ -762,7 +772,8 @@ impl<'a> Reader<'a> {
                 Surface::Extrusion { c, d }
             }
             128 => {
-                let (k1, k2, m1, m2) = (n(0)? as usize, n(1)? as usize, n(2)? as usize, n(3)? as usize);
+                let c = |i| Self::count(e, i);
+                let (k1, k2, m1, m2) = (c(0)?, c(1)?, c(2)?, c(3)?);
                 if m1 == 0 || m2 == 0 {
                     return Err("a B-spline surface of degree 0".into());
                 }
@@ -774,15 +785,15 @@ impl<'a> Reader<'a> {
                 let cb = wb + (k1 + 1) * (k2 + 1);
                 let mut cps = vec![vec![H::zeros(); k2 + 1]; k1 + 1];
                 for j in 0..=k2 {
-                    for i in 0..=k1 {
+                    for (i, row) in cps.iter_mut().enumerate() {
                         // The first index varies fastest.
                         let idx = j * (k1 + 1) + i;
                         let w = n(wb + idx)?;
                         let q = pl.point(&P3::new(n(cb + 3 * idx)?, n(cb + 3 * idx + 1)?, n(cb + 3 * idx + 2)?));
-                        cps[i][j] = hom(&q, if w > 0.0 { w } else { 1.0 });
+                        row[j] = hom(&q, if w > 0.0 { w } else { 1.0 });
                     }
                 }
-                Surface::Nurbs(Arc::new(NurbsSurface { du: m1, dv: m2, ku, kv, cps }))
+                Surface::Nurbs(Arc::new(NurbsSurface::new(m1, m2, ku, kv, cps).map_err(|e| e.message())?))
             }
             k => return Err(format!("unsupported IGES surface type {k}")),
         })
@@ -797,7 +808,8 @@ impl<'a> Reader<'a> {
             return Err(format!("entity {list} is not a vertex list"));
         }
         let pl = self.place(e)?;
-        let k = 1 + 3 * (idx - 1);
+        // (1-based; an index no list holds is an error, not an overflow.)
+        let k = idx.checked_sub(1).and_then(|i| i.checked_mul(3)).map(|i| i + 1).filter(|&k| k < e.params.len()).ok_or_else(|| format!("vertex {idx} of list {list} doesn't exist"))?;
         let p = pl.point(&P3::new(Self::num(e, k)?, Self::num(e, k + 1)?, Self::num(e, k + 2)?));
         let v = self.xb.vertex(p);
         self.verts.insert((list, idx), v);
@@ -882,20 +894,18 @@ impl<'a> Reader<'a> {
 /// The Name property (406 form 15) among an entity's trailing pointers, else its label.
 fn name_of(f: &File, e: &DirEnt, nparams: usize) -> String {
     let p = &e.params;
-    let get = |i: usize| p.get(i).and_then(|t| t.f()).map(|x| x as usize);
-    if let Some(na) = get(nparams) {
-        if let Some(np) = get(nparams + 1 + na) {
+    // (Counts beyond the list can't be right: they stop the search, never overflow it.)
+    let get = |i: usize| p.get(i).and_then(|t| t.f()).map(|x| x as usize).filter(|&x| x <= p.len());
+    if let Some(na) = get(nparams)
+        && let Some(np) = get(nparams + 1 + na) {
             for k in 0..np {
-                if let Some(pe) = get(nparams + 2 + na + k).and_then(|d| f.ents.get(&d)) {
-                    if pe.kind == 406 && pe.form == 15 {
-                        if let Some(Tok::Str(s)) = pe.params.get(1) {
+                if let Some(pe) = get(nparams + 2 + na + k).and_then(|d| f.ents.get(&d))
+                    && pe.kind == 406 && pe.form == 15
+                        && let Some(Tok::Str(s)) = pe.params.get(1) {
                             return s.clone();
                         }
-                    }
-                }
             }
         }
-    }
     e.label.clone()
 }
 
@@ -935,8 +945,8 @@ impl<'a> Reader<'a> {
                 out.push(Seg { c: self.curve(de)?, a, b });
             }
             126 => {
-                let k = n(0)? as usize;
-                let m = n(1)? as usize;
+                let k = Self::count(e, 0)?;
+                let m = Self::count(e, 1)?;
                 let vb = 6 + (k + m + 2) + (k + 1) + 3 * (k + 1);
                 let c = self.curve(de)?;
                 let (r0, r1) = c.nurbs_range().unwrap_or((0.0, 1.0));

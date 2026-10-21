@@ -27,26 +27,57 @@ use std::fmt;
 
 use nalgebra::{Point3, Vector3};
 
+/// Why an operation failed. Each variant carries a message in words for the user; the variant
+/// says what a caller can do about it (e.g. read `EmptyResult` of an Intersect as "no
+/// interference", retry an `OpenResult` with other options, report `InvalidInput` as a bad
+/// file).
 #[derive(Debug, Clone, PartialEq)]
 pub enum KernelError {
     /// The profile is empty, open or self-intersecting.
     InvalidProfile(String),
     /// The backend could not perform the operation (e.g. a fillet radius too large).
     OperationFailed(String),
+    /// The operation would leave nothing: an Intersect of bodies that don't meet, a cut that
+    /// removes the whole body.
+    EmptyResult(String),
+    /// The operation built faces that don't close into a solid (a boolean or blend that left an
+    /// open shell). Never returned as a body: the caller gets this error instead.
+    OpenResult(String),
     /// A parameter the kernel can't build with (e.g. a depth below its modelling tolerance);
     /// the message says why in words for the user.
     InvalidParameter(String),
+    /// Input data that isn't well formed: a file that doesn't parse, a B-spline whose knots,
+    /// degree or weights don't fit its control points, a body whose topology refers to
+    /// entities it doesn't have, non-finite coordinates.
+    InvalidInput(String),
     /// This backend does not implement the operation.
     Unsupported(&'static str),
     UnknownBody(BodyId),
+}
+
+impl KernelError {
+    /// The message in words, without the kind's prefix.
+    pub fn message(&self) -> String {
+        match self {
+            Self::InvalidProfile(why)
+            | Self::OperationFailed(why)
+            | Self::EmptyResult(why)
+            | Self::OpenResult(why)
+            | Self::InvalidParameter(why)
+            | Self::InvalidInput(why) => why.clone(),
+            Self::Unsupported(op) => format!("{op} is not supported by this kernel"),
+            Self::UnknownBody(id) => format!("unknown body {id:?}"),
+        }
+    }
 }
 
 impl fmt::Display for KernelError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::InvalidProfile(why) => write!(f, "invalid profile: {why}"),
-            Self::OperationFailed(why) => write!(f, "operation failed: {why}"),
+            Self::OperationFailed(why) | Self::EmptyResult(why) | Self::OpenResult(why) => write!(f, "operation failed: {why}"),
             Self::InvalidParameter(why) => write!(f, "{why}"),
+            Self::InvalidInput(why) => write!(f, "invalid input: {why}"),
             Self::Unsupported(op) => write!(f, "{op} is not supported by this kernel"),
             Self::UnknownBody(id) => write!(f, "unknown body {id:?}"),
         }

@@ -149,6 +149,18 @@ enum GSurf {
     Offset(f64, Box<GSurf>),
 }
 
+/// The largest B-spline degree a file may give (OCCT's `Geom_BSplineCurve::MaxDegree`).
+const MAX_DEGREE: usize = 25;
+
+/// A degree read from the file, checked.
+fn degree(t: &mut Tok) -> R<usize> {
+    let d = t.u()?;
+    if d > MAX_DEGREE {
+        return Err(format!("a B-spline of degree {d}"));
+    }
+    Ok(d)
+}
+
 fn read_poles(t: &mut Tok, n: usize, rational: bool) -> R<Vec<H>> {
     (0..n)
         .map(|_| {
@@ -160,8 +172,7 @@ fn read_poles(t: &mut Tok, n: usize, rational: bool) -> R<Vec<H>> {
 }
 
 fn read_knots(t: &mut Tok, n: usize) -> R<(Vec<f64>, Vec<usize>)> {
-    let mut k = Vec::with_capacity(n);
-    let mut m = Vec::with_capacity(n);
+    let (mut k, mut m) = (Vec::new(), Vec::new());
     for _ in 0..n {
         k.push(t.f()?);
         m.push(t.u()?);
@@ -178,14 +189,14 @@ fn read_curve(t: &mut Tok) -> R<GCurve> {
         5 => GCurve::Hyperbola(Ax::read(t)?, t.f()?, t.f()?),
         6 => {
             let rational = t.i()? != 0;
-            let degree = t.u()?;
+            let degree = degree(t)?;
             let poles = read_poles(t, degree + 1, rational)?;
             GCurve::Spline(Spline { degree, poles, knots: vec![0.0, 1.0], mults: vec![degree + 1; 2], periodic: false })
         }
         7 => {
             let rational = t.i()? != 0;
             let periodic = t.i()? != 0;
-            let (degree, np, nk) = (t.u()?, t.u()?, t.u()?);
+            let (degree, np, nk) = (degree(t)?, t.u()?, t.u()?);
             let poles = read_poles(t, np, rational)?;
             let (knots, mults) = read_knots(t, nk)?;
             GCurve::Spline(Spline { degree, poles, knots, mults, periodic })
@@ -236,14 +247,14 @@ fn read_curve2d(t: &mut Tok) -> R<GCurve> {
         5 => GCurve::Hyperbola(ax2(t)?, t.f()?, t.f()?),
         6 => {
             let rational = t.i()? != 0;
-            let degree = t.u()?;
+            let degree = degree(t)?;
             let poles = poles2(t, degree + 1, rational)?;
             GCurve::Spline(Spline { degree, poles, knots: vec![0.0, 1.0], mults: vec![degree + 1; 2], periodic: false })
         }
         7 => {
             let rational = t.i()? != 0;
             let periodic = t.i()? != 0;
-            let (degree, np, nk) = (t.u()?, t.u()?, t.u()?);
+            let (degree, np, nk) = (degree(t)?, t.u()?, t.u()?);
             let poles = poles2(t, np, rational)?;
             let (knots, mults) = read_knots(t, nk)?;
             GCurve::Spline(Spline { degree, poles, knots, mults, periodic })
@@ -270,7 +281,7 @@ fn skip_curve2d(t: &mut Tok) -> R<()> {
         3 | 5 => skip(t, 8),
         6 => {
             let rational = t.i()? != 0;
-            let degree = t.u()?;
+            let degree = degree(t)?;
             skip(t, (degree + 1) * (2 + rational as usize))
         }
         7 => {
@@ -315,14 +326,14 @@ fn read_surface(t: &mut Tok) -> R<GSurf> {
         }
         8 => {
             let (ur, vr) = (t.i()? != 0, t.i()? != 0);
-            let (du, dv) = (t.u()?, t.u()?);
+            let (du, dv) = (degree(t)?, degree(t)?);
             let poles = (0..=du).map(|_| read_poles(t, dv + 1, ur || vr)).collect::<R<Vec<_>>>()?;
             GSurf::Spline { du, dv, poles, u: (vec![0.0, 1.0], vec![du + 1; 2], false), v: (vec![0.0, 1.0], vec![dv + 1; 2], false) }
         }
         9 => {
             let (ur, vr) = (t.i()? != 0, t.i()? != 0);
             let (up, vp) = (t.i()? != 0, t.i()? != 0);
-            let (du, dv) = (t.u()?, t.u()?);
+            let (du, dv) = (degree(t)?, degree(t)?);
             let (nu, nv) = (t.u()?, t.u()?);
             let (nku, nkv) = (t.u()?, t.u()?);
             let poles = (0..nu).map(|_| read_poles(t, nv, ur || vr)).collect::<R<Vec<_>>>()?;
@@ -349,16 +360,21 @@ fn read_surface(t: &mut Tok) -> R<GSurf> {
 /// over enough periods), cut to [t0, t1] when that lies inside.
 pub(crate) fn spline_curve(s: &Spline, t0: f64, t1: f64) -> R<NurbsCurve> {
     let p = s.degree;
-    if p == 0 || s.knots.len() < 2 || s.knots.len() != s.mults.len() {
+    if p == 0 || p > MAX_DEGREE || s.knots.len() < 2 || s.knots.len() != s.mults.len() {
         return Err("a bad B-spline".into());
     }
-    let (a, b) = (s.knots[0], *s.knots.last().unwrap());
+    // The flat knots' count before making them (a count from the file could be anything).
+    let flat = s.mults.iter().try_fold(0usize, |a, &m| a.checked_add(m)).filter(|&n| n <= s.poles.len() + 2 * p + 2);
+    if flat.is_none() || s.knots.iter().any(|k| !k.is_finite()) {
+        return Err("a B-spline's knot multiplicities don't fit its poles".into());
+    }
+    let (a, b) = (s.knots[0], s.knots[s.knots.len() - 1]);
     if !s.periodic {
         let knots: Vec<f64> = s.knots.iter().zip(&s.mults).flat_map(|(k, m)| std::iter::repeat_n(*k, *m)).collect();
         if knots.len() != s.poles.len() + p + 1 {
             return Err(format!("{} knots for {} poles of degree {p}", knots.len(), s.poles.len()));
         }
-        let c = NurbsCurve { degree: p, knots, cps: s.poles.clone() };
+        let c = NurbsCurve::new(p, knots, s.poles.clone()).map_err(|e| e.message())?;
         let (lo, hi) = (t0.max(a), t1.min(b));
         return Ok(if hi > lo && (lo > a || hi < b) { clamp(c, lo, hi) } else { c });
     }
@@ -369,17 +385,23 @@ pub(crate) fn spline_curve(s: &Spline, t0: f64, t1: f64) -> R<NurbsCurve> {
         return Err(format!("a periodic B-spline with {} poles for {n} knots", s.poles.len()));
     }
     let period = b - a;
+    if period <= 0.0 || !period.is_finite() || !t0.is_finite() || !t1.is_finite() || (t1 - t0).abs() / period > 1e4 {
+        return Err("a periodic B-spline's range doesn't fit its period".into());
+    }
     let knot = |j: i64| -> f64 { per[j.rem_euclid(n as i64) as usize] + period * j.div_euclid(n as i64) as f64 };
     // OCCT's flat knots start p + 1 − m₁ knots before the first one, with the first basis
     // function on the first pole.
     let m1 = (p + 1).saturating_sub(s.mults[0]) as i64;
     let (lo, hi) = if t1 > t0 { (t0, t1) } else { (a, b) };
+    if ((lo - a) / period).abs() > 1e4 || ((hi - a) / period).abs() > 1e4 {
+        return Err("a periodic B-spline's range lies too many periods away".into());
+    }
     let plo = ((lo - a) / period).floor() as i64 - 1;
     let phi = ((hi - a) / period).ceil() as i64 + 1;
     let (i0, i1) = (plo * n as i64, phi * n as i64);
     let knots: Vec<f64> = (i0..=i1 + p as i64 + 1).map(|i| knot(i - m1)).collect();
     let cps: Vec<H> = (i0..=i1).map(|i| s.poles[i.rem_euclid(n as i64) as usize]).collect();
-    Ok(clamp(NurbsCurve { degree: p, knots, cps }, lo, hi))
+    Ok(clamp(NurbsCurve::new(p, knots, cps).map_err(|e| e.message())?, lo, hi))
 }
 
 /// The curve on [a, b] (inside its domain) with clamped ends.
@@ -415,10 +437,10 @@ fn clamp_on(mut c: NurbsCurve, a: f64, b: f64, eps: f64) -> Option<NurbsCurve> {
 }
 
 fn spline_surface(du: usize, dv: usize, poles: &[Vec<H>], u: &(Vec<f64>, Vec<usize>, bool), v: &(Vec<f64>, Vec<usize>, bool)) -> R<NurbsSurface> {
-    if poles.is_empty() || poles.iter().any(|r| r.len() != poles[0].len()) {
+    if poles.is_empty() || poles.iter().any(|r| r.len() != poles[0].len()) || u.0.len() < 2 || v.0.len() < 2 {
         return Err("a bad B-spline surface".into());
     }
-    let full = |k: &(Vec<f64>, Vec<usize>, bool)| (k.0[0], *k.0.last().unwrap());
+    let full = |k: &(Vec<f64>, Vec<usize>, bool)| (k.0[0], k.0[k.0.len() - 1]);
     // Along u, column by column.
     let nv = poles[0].len();
     let mut cols: Vec<NurbsCurve> = Vec::with_capacity(nv);
@@ -761,7 +783,7 @@ fn parse(text: &str) -> R<File> {
     for _ in 0..np {
         let nn = t.u()?;
         let has = t.i()? != 0;
-        skip(&mut t, 1 + 3 * nn + if has { nn } else { 0 })?;
+        skip(&mut t, nn.saturating_mul(if has { 4 } else { 3 }).saturating_add(1))?;
     }
     let npt = t.table("PolygonOnTriangulations")?;
     for _ in 0..npt {
@@ -782,12 +804,14 @@ fn parse(text: &str) -> R<File> {
         let (nn, ntri) = (t.u()?, t.u()?);
         let uv = t.i()? != 0;
         let normals = if version >= 3 { t.i()? != 0 } else { false };
-        skip(&mut t, 1 + 3 * nn + if uv { 2 * nn } else { 0 } + 3 * ntri + if normals { 3 * nn } else { 0 })?;
+        let per_node = 3 + if uv { 2 } else { 0 } + if normals { 3 } else { 0 };
+        skip(&mut t, nn.saturating_mul(per_node).saturating_add(ntri.saturating_mul(3)).saturating_add(1))?;
     }
 
     t.expect("TShapes")?;
     let n = t.u()?;
-    let mut shapes: Vec<TShape> = Vec::with_capacity(n);
+    // (Capacity from the count only as far as the file could hold that many.)
+    let mut shapes: Vec<TShape> = Vec::with_capacity(n.min(text.len()));
     for si in 0..n {
         let ty = t.next()?;
         let mut tol = 0.0;
@@ -821,7 +845,7 @@ fn parse(text: &str) -> R<File> {
                         1 => {
                             let (c, l) = (t.u()?, t.u()?);
                             let (a, b) = (t.f()?, t.f()?);
-                            if c >= 1 && c <= curves.len() {
+                            if c >= 1 && c <= curves.len() && l < locs.len() {
                                 c3 = Some((c - 1, l, a, b));
                             }
                         }
@@ -844,7 +868,7 @@ fn parse(text: &str) -> R<File> {
                                 skip(&mut t, 4)?;
                             }
                             let ok = |i: usize| i >= 1 && i <= curves2d.len();
-                            if ok(pc) && pc2.is_none_or(ok) && sf >= 1 {
+                            if ok(pc) && pc2.is_none_or(ok) && sf >= 1 && sf <= surfaces.len() && l < locs.len() {
                                 pcs.push(PcRep { pc: pc - 1, pc2: pc2.map(|x| x - 1), surf: sf - 1, loc: l, range: (a, b) });
                             }
                         }
@@ -864,7 +888,7 @@ fn parse(text: &str) -> R<File> {
                 if val == 0 || val == 1 {
                     let _tol = t.f()?;
                     let (s, l) = (t.u()?, t.u()?);
-                    if s >= 1 && s <= surfaces.len() {
+                    if s >= 1 && s <= surfaces.len() && l < locs.len() {
                         surf = Some((s - 1, l));
                     }
                     if t.peek() == Some("2") {
@@ -1074,13 +1098,11 @@ impl Builder<'_> {
                 }
             }
             Kind::Edge(..) => {
-                if matches!(ori, Ori::Fwd | Ori::Rev) {
-                    if let Some(e) = self.edge(s, loc) {
-                        if !self.free_edges.contains(&e) {
+                if matches!(ori, Ori::Fwd | Ori::Rev)
+                    && let Some(e) = self.edge(s, loc)
+                        && !self.free_edges.contains(&e) {
                             self.free_edges.push(e);
                         }
-                    }
-                }
             }
             _ => {}
         }
@@ -1123,12 +1145,11 @@ impl Direct<'_> {
         'look: for dx in -1..=1 {
             for dy in -1..=1 {
                 for dz in -1..=1 {
-                    if let Some(vs) = self.grid.get(&[c[0] + dx, c[1] + dy, c[2] + dz]) {
-                        if let Some(&v) = vs.iter().find(|&&v| (self.body.verts[v].p - p).norm() < 1e-7) {
+                    if let Some(vs) = self.grid.get(&[c[0].saturating_add(dx), c[1].saturating_add(dy), c[2].saturating_add(dz)])
+                        && let Some(&v) = vs.iter().find(|&&v| (self.body.verts[v].p - p).norm() < 1e-7) {
                             found = Some(v);
                             break 'look;
                         }
-                    }
                 }
             }
         }
@@ -1401,8 +1422,8 @@ pub fn read_ordered(bytes: &[u8]) -> R<BrepRead> {
                 // A face of no area (bounds left out: a whole sphere) or of negative area (a loop
                 // on a periodic surface read the wrong way round) means the file's loops don't
                 // say what the rebuild works out.
-                let bad_face = (0..x.faces.len()).find(|&f| !(super::mass::face_area(&x, f).0 > 0.0));
-                if let Some(f) = bad_face.filter(|_| issues.is_empty()) {
+                let bad_face = if issues.is_empty() { (0..x.faces.len()).find(|&f| !(super::mass::face_area(&x, f).0 > 0.0)) } else { None };
+                if let Some(f) = bad_face {
                     warnings.push(format!("rebuilt (face {f} of the file's body has no area of its own)"));
                     None
                 } else if issues.is_empty() {
@@ -1429,6 +1450,11 @@ pub fn read_ordered(bytes: &[u8]) -> R<BrepRead> {
     } else {
         None
     };
+    // A body with numbers no geometry can have (NaN, infinite) or dangling references: an
+    // error, before anything integrates over it.
+    if let Some(why) = body.as_ref().and_then(|x| x.check_refs().into_iter().next().or_else(|| x.size_issue(super::tol::SIZE))) {
+        return Err(why);
+    }
     // A solid enclosing a negative volume (a whole torus, whose one loop of seams runs either
     // way): turned round.
     let body = if let Some(mut x) = body {

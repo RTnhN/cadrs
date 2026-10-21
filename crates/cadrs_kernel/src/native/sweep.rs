@@ -217,6 +217,7 @@ struct Strand {
     top: Vec<Coedge>,
 }
 
+#[allow(clippy::too_many_arguments)]
 fn sweep_strand(b: &mut Body, lp: &[Piece], closed: bool, kind: &dyn SweepKind, s0: f64, s1: f64, whole: bool, up: bool, m0: &Affine, m1: &Affine) -> Strand {
     let k = lp.len();
     let nj = if closed { k } else { k + 1 };

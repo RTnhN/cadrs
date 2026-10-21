@@ -10,6 +10,9 @@ pub mod boolean;
 pub mod build;
 pub mod classify;
 pub mod curve;
+/// The DRAW test harness the generated OCCT suites run on (a test kit, not kernel API): built
+/// for tests and with the `testkit` feature.
+#[cfg(any(test, feature = "testkit"))]
 pub mod draw;
 pub mod edge_bop;
 pub mod exchange;
@@ -24,6 +27,8 @@ pub mod math;
 pub mod meshsolid;
 pub mod nurbs;
 pub mod offset2d;
+/// Bodies for the SMLib test oracle (test kit, as `draw`).
+#[cfg(any(test, feature = "testkit"))]
 pub mod oracle;
 pub mod slab;
 pub mod smb;
@@ -43,6 +48,7 @@ pub mod sweep;
 pub mod sweep_general;
 pub mod sweep_path;
 pub mod tess;
+pub mod tol;
 pub mod topo;
 pub mod unify;
 pub mod xbuild;

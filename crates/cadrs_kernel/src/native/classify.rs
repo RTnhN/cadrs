@@ -346,6 +346,7 @@ pub fn classify_point(body: &Body, polys: &[Vec<Vec<P2>>], p: &P3, tol: f64) -> 
 }
 
 /// Ray parity with retries in other directions when a ray grazes an edge or a face.
+#[allow(clippy::approx_constant, reason = "ray directions picked off the axes and diagonals, not constants")]
 pub fn parity_inside(body: &Body, polys: &[Vec<Vec<P2>>], p: &P3) -> bool {
     // Five fixed directions, then 32 more spread over the sphere (a golden-angle spiral) while
     // every ray so far grazed a face or ran through an edge.

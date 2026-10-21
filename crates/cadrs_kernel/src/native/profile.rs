@@ -497,7 +497,7 @@ pub fn merge_regions(regions: &[Region2]) -> Result<Vec<MergedFace>> {
                 }
                 let dout = q.dir(0.0);
                 let ang = cross2(&din, &dout).atan2(din.dot(&dout));
-                if best.map_or(true, |(b, _)| ang > b) {
+                if best.is_none_or(|(b, _)| ang > b) {
                     best = Some((ang, k));
                 }
             }

@@ -30,15 +30,29 @@ impl Entry {
     }
 }
 
+/// A kernel session: its bodies and the tolerances its operations run with.
 #[derive(Default)]
 pub struct NativeKernel {
     bodies: HashMap<u64, Entry>,
     next: u64,
+    tol: super::tol::Tolerances,
 }
 
 impl NativeKernel {
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// The tolerances the session's operations run with ([`super::tol`]).
+    pub fn tolerances(&self) -> super::tol::Tolerances {
+        self.tol
+    }
+
+    /// Sets the tolerances the session's operations run with from now on.
+    pub fn set_tolerances(&mut self, tol: super::tol::Tolerances) -> Result<()> {
+        tol.validate()?;
+        self.tol = tol;
+        Ok(())
     }
 
     pub fn entry(&self, id: BodyId) -> Result<&Entry> {
@@ -185,11 +199,10 @@ fn face_extremes(b: &Body, fi: usize, d: &V3) -> Vec<P3> {
                     break;
                 }
             }
-            if ok && u >= ub.0 - 1e-9 && u <= ub.1 + 1e-9 && v >= vb.0 - 1e-9 && v <= vb.1 + 1e-9 {
-                if classify::in_face(&polys, &f.surf, P2::new(u, v), 1e-9) != classify::InFace::Outside {
+            if ok && u >= ub.0 - 1e-9 && u <= ub.1 + 1e-9 && v >= vb.0 - 1e-9 && v <= vb.1 + 1e-9
+                && classify::in_face(&polys, &f.surf, P2::new(u, v), 1e-9) != classify::InFace::Outside {
                     out.push(f.surf.eval(u, v));
                 }
-            }
         }
     }
     out
@@ -275,9 +288,9 @@ pub fn subset(b: &Body, faces: &[usize], closed: bool) -> Body {
             for c in l.iter_mut() {
                 let ne = *emap.entry(c.edge).or_insert_with(|| {
                     let mut e = b.edges[c.edge].clone();
-                    for k in 0..2 {
-                        let ov = e.v[k];
-                        e.v[k] = *vmap.entry(ov).or_insert_with(|| {
+                    for v in e.v.iter_mut() {
+                        let ov = *v;
+                        *v = *vmap.entry(ov).or_insert_with(|| {
                             out.verts.push(b.verts[ov].clone());
                             out.verts.len() - 1
                         });

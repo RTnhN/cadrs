@@ -813,7 +813,7 @@ impl Rebuilder {
                     return Ok(vec![x]);
                 }
                 // A relief cut that takes the whole bend end away leaves nothing of it.
-                Err(cadrs_kernel::KernelError::OperationFailed(m)) if m.contains("empty") => {
+                Err(cadrs_kernel::KernelError::EmptyResult(_)) => {
                     self.kernel.release(body);
                     return Ok(Vec::new());
                 }

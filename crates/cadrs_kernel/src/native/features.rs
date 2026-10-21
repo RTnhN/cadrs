@@ -380,7 +380,7 @@ fn piece(k: &NativeKernel, faces: &[MergedFace], plane: &Plane, o: P3, dir: V3, 
                     Some(t0) => boolean_bodies(&t0, &moved, BoolOp::Union)?.body,
                 });
             }
-            let tool = tool.unwrap();
+            let tool = tool.ok_or_else(|| KernelError::InvalidParameter("Up to part: no part to extrude up to".into()))?;
             let tool = Tagged { tags: vec![Vec::new(); tool.faces.len()], body: tool };
             let is_start = |x: &Tagged, fs: &[usize]| fs.iter().any(|&f| x.has(f, |o| matches!(o, Origin::StartCap { .. })));
             let out = tagged_bool(&t, &tool, BoolOp::Subtract).ok();
@@ -715,7 +715,7 @@ pub fn revolve_with(k: &mut NativeKernel, profile: &Profile, spec: &RevolveSpec)
             Some(t0) => boolean_bodies(&t0, &moved, BoolOp::Union)?.body,
         });
     }
-    let tool = tool.unwrap();
+    let tool = tool.ok_or_else(|| KernelError::InvalidParameter("Up to part: no part to extrude up to".into()))?;
     let tool = Tagged { tags: vec![Vec::new(); tool.faces.len()], body: tool };
     let is_start = |x: &Tagged, fs: &[usize]| fs.iter().any(|&f| x.has(f, |o| matches!(o, Origin::StartCap { .. })));
     let out = tagged_bool(&t, &tool, BoolOp::Subtract).ok();

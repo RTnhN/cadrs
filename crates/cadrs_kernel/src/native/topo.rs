@@ -15,8 +15,9 @@ use super::curve::Curve;
 use super::math::*;
 use super::surface::Surface;
 
-/// The smallest tolerance an entity has (OCCT's `Precision::Confusion`): exact geometry.
-pub const TOL_MIN: f64 = 1e-7;
+/// The smallest tolerance an entity has (OCCT's `Precision::Confusion`): exact geometry
+/// ([`super::tol::CONFUSION`]).
+pub const TOL_MIN: f64 = super::tol::CONFUSION;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Vertex {
@@ -259,8 +260,68 @@ impl Body {
         }
     }
 
-    /// Checks the structural invariants; returns a list of problems (empty when valid).
+    /// Checks that every index the body holds refers to an entity it has (coedges to edges,
+    /// edges to vertices, shells to faces, solids to shells) and that its geometry is well
+    /// formed (finite points, valid B-splines): what every other method relies on without
+    /// checking. Bodies from outside (files, the body format) are checked with it before use.
+    /// Returns the problems (empty when sound).
+    pub fn check_refs(&self) -> Vec<String> {
+        let mut errs = Vec::new();
+        let finite = |p: &P3| p.iter().all(|x| x.is_finite());
+        for (vi, v) in self.verts.iter().enumerate() {
+            if !finite(&v.p) || !v.tol.is_finite() {
+                errs.push(format!("vertex {vi} isn't finite"));
+            }
+        }
+        for (ei, e) in self.edges.iter().enumerate() {
+            if let Some(&v) = e.v.iter().find(|&&v| v >= self.verts.len()) {
+                errs.push(format!("edge {ei}: vertex {v} doesn't exist"));
+            }
+            if !e.t.iter().all(|t| t.is_finite()) || !e.tol.is_finite() {
+                errs.push(format!("edge {ei}: its range isn't finite"));
+            }
+            if let Some(why) = curve_issue(&e.curve) {
+                errs.push(format!("edge {ei}: {why}"));
+            }
+        }
+        for (fi, f) in self.faces.iter().enumerate() {
+            if let Some(why) = surface_issue(&f.surf) {
+                errs.push(format!("face {fi}: {why}"));
+            }
+            for (li, l) in f.loops.iter().enumerate() {
+                if l.is_empty() {
+                    errs.push(format!("face {fi} loop {li} is empty"));
+                }
+                for c in l {
+                    if c.edge >= self.edges.len() {
+                        errs.push(format!("face {fi} loop {li}: edge {} doesn't exist", c.edge));
+                    }
+                    if let Some(why) = curve_issue(&c.pc) {
+                        errs.push(format!("face {fi} loop {li}: p-curve: {why}"));
+                    }
+                }
+            }
+        }
+        for (si, s) in self.shells.iter().enumerate() {
+            if let Some(f) = s.faces.iter().find(|&&f| f >= self.faces.len()) {
+                errs.push(format!("shell {si}: face {f} doesn't exist"));
+            }
+        }
+        for (si, s) in self.solids.iter().enumerate() {
+            if let Some(sh) = s.shells.iter().find(|&&sh| sh >= self.shells.len()) {
+                errs.push(format!("solid {si}: shell {sh} doesn't exist"));
+            }
+        }
+        errs
+    }
+
+    /// Checks the structural invariants; returns a list of problems (empty when valid). A body
+    /// whose indices or geometry are unsound ([`Body::check_refs`]) gets only those problems.
     pub fn check(&self) -> Vec<String> {
+        let refs = self.check_refs();
+        if !refs.is_empty() {
+            return refs;
+        }
         let mut errs = Vec::new();
         for (fi, f) in self.faces.iter().enumerate() {
             for (li, l) in f.loops.iter().enumerate() {
@@ -279,8 +340,8 @@ impl Body {
                     let du = (pa.x - pb.x).abs();
                     let dv = (pa.y - pb.y).abs();
                     let (mu, mv) = f.surf.metric();
-                    // Within the shared vertex's tolerance (1e-5 for exact geometry).
-                    let gap_tol = self.verts.get(self.co_end(a)).map_or(0.0, |v| v.tol).max(1e-5);
+                    // Within the shared vertex's tolerance (LOOP_GAP for exact geometry).
+                    let gap_tol = self.verts.get(self.co_end(a)).map_or(0.0, |v| v.tol).max(super::tol::LOOP_GAP);
                     if du * mu > gap_tol || dv * mv > gap_tol {
                         errs.push(format!("face {fi} loop {li}: p-curve gap after coedge {k}: ({:.3e}, {:.3e})", pa.x - pb.x, pa.y - pb.y));
                     }
@@ -292,7 +353,7 @@ impl Body {
                             let q = f.surf.eval(uv.x, uv.y);
                             let p = ea.point(t);
                             // Within the edge's tolerance (a read model's p-curves stray by it).
-                            if (q - p).norm() > self.edges[a.edge].tol.max(1e-6) {
+                            if (q - p).norm() > self.edges[a.edge].tol.max(super::tol::POINT) {
                                 errs.push(format!("face {fi} loop {li} coedge {k} (edge {}): p-curve off the edge by {:.3e}", a.edge, (q - p).norm()));
                                 break;
                             }
@@ -312,7 +373,7 @@ impl Body {
                     continue;
                 };
                 let d = (e.point(e.t[k]) - v.p).norm();
-                if d > v.tol.max(e.tol).max(1e-6) {
+                if d > v.tol.max(e.tol).max(super::tol::POINT) {
                     errs.push(format!("edge {ei}: end {k} is {d:.3e} from its vertex"));
                 }
             }
@@ -378,6 +439,67 @@ impl Body {
         }
         errs
     }
+}
+
+impl Body {
+    /// The first of the body's points, curves and surfaces that reaches outside the size box
+    /// ±`max` (vertices; centres, origins and radii of curves and surfaces; B-spline control
+    /// points; p-curves, in parameters, are left alone): a file's model the kernel can't hold
+    /// to its tolerances ([`super::tol::SIZE`]).
+    pub fn size_issue(&self, max: f64) -> Option<String> {
+        let out = |x: f64| !(x.abs() <= max);
+        let pt = |p: &P3| p.iter().any(|x| out(*x));
+        let curve = |c: &Curve| match c {
+            Curve::Line { o, .. } => pt(o),
+            Curve::Circle { c, r, .. } => pt(c) || out(*r),
+            Curve::Ellipse { c, a, b, .. } => pt(c) || out(*a) || out(*b),
+            Curve::Nurbs(n) => n.cps.iter().any(|h| pt(&super::nurbs::dehom(h))),
+        };
+        if let Some(i) = self.verts.iter().position(|v| pt(&v.p)) {
+            return Some(format!("vertex {i} lies outside the size box (±{max:e} mm)"));
+        }
+        if let Some(i) = self.edges.iter().position(|e| curve(&e.curve)) {
+            return Some(format!("edge {i}'s curve reaches outside the size box (±{max:e} mm)"));
+        }
+        let surf = |s: &Surface| match s {
+            Surface::Plane { f } => pt(&f.o),
+            Surface::Cylinder { f, r } | Surface::Sphere { f, r } | Surface::Cone { f, r, .. } => pt(&f.o) || out(*r),
+            Surface::Torus { f, rmaj, rmin } => pt(&f.o) || out(*rmaj) || out(*rmin),
+            Surface::Revolution { f, m } => pt(&f.o) || curve(m),
+            Surface::Extrusion { c, .. } => curve(c),
+            Surface::Nurbs(n) => n.cps.iter().flatten().any(|h| pt(&super::nurbs::dehom(h))),
+        };
+        let i = self.faces.iter().position(|f| surf(&f.surf))?;
+        Some(format!("face {i}'s surface reaches outside the size box (±{max:e} mm)"))
+    }
+}
+
+/// Why a curve can't be evaluated (non-finite numbers, a malformed B-spline), if it can't.
+fn curve_issue(c: &Curve) -> Option<String> {
+    let finite = |v: &[f64]| v.iter().all(|x| x.is_finite());
+    let ok = match c {
+        Curve::Line { o, d } => finite(o.coords.as_slice()) && finite(d.as_slice()),
+        Curve::Circle { c, x, y, r } => finite(c.coords.as_slice()) && finite(x.as_slice()) && finite(y.as_slice()) && r.is_finite(),
+        Curve::Ellipse { c, x, y, a, b } => finite(c.coords.as_slice()) && finite(x.as_slice()) && finite(y.as_slice()) && a.is_finite() && b.is_finite(),
+        Curve::Nurbs(n) => return n.validate().err().map(|e| e.message()),
+    };
+    (!ok).then(|| "a curve isn't finite".to_string())
+}
+
+/// Why a surface can't be evaluated, if it can't.
+fn surface_issue(s: &Surface) -> Option<String> {
+    let finite = |v: &[f64]| v.iter().all(|x| x.is_finite());
+    let frame = |f: &Frame| finite(f.o.coords.as_slice()) && finite(f.x.as_slice()) && finite(f.y.as_slice()) && finite(f.z.as_slice());
+    let ok = match s {
+        Surface::Plane { f } => frame(f),
+        Surface::Cylinder { f, r } | Surface::Sphere { f, r } => frame(f) && r.is_finite(),
+        Surface::Cone { f, r, a } => frame(f) && r.is_finite() && a.is_finite(),
+        Surface::Torus { f, rmaj, rmin } => frame(f) && rmaj.is_finite() && rmin.is_finite(),
+        Surface::Revolution { f, m } => return if frame(f) { curve_issue(m) } else { Some("a surface isn't finite".into()) },
+        Surface::Extrusion { c, d } => return if finite(d.as_slice()) { curve_issue(c) } else { Some("a surface isn't finite".into()) },
+        Surface::Nurbs(n) => return n.validate().err().map(|e| e.message()),
+    };
+    (!ok).then(|| "a surface isn't finite".to_string())
 }
 
 impl Body {

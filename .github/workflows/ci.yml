@@ -48,6 +48,10 @@ jobs:
       - name: Build
         run: cargo build --workspace
 
+      # The kernel is kept clippy-clean (warnings denied; lint levels in its Cargo.toml).
+      - name: Clippy (kernel)
+        run: tools/kernel_clippy.sh
+
       # Unit tests only: each integration test (`crates/*/tests`) links Bevy and OpenCASCADE into
       # its own large binary, too much for a hosted runner's disk. Run them locally with
       # `cargo test --workspace`.

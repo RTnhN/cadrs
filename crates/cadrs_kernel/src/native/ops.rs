@@ -77,7 +77,7 @@ pub fn split(k: &mut NativeKernel, body: BodyId, tool: &SplitTool, source: u64) 
     if let SplitTool::Face { body: tb, face } = tool {
         let t = k.get(*tb)?;
         let tf = &t.faces[face.0 as usize];
-        let polys = super::classify::face_polygons(&t, tf);
+        let polys = super::classify::face_polygons(t, tf);
         for r in [&inn, &out] {
             for (i, srcs) in r.from.iter().enumerate() {
                 if !srcs.iter().any(|&(owner, _)| owner == 1) {

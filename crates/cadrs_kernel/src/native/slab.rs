@@ -86,14 +86,13 @@ fn side_surface(c: &Curve, t0: f64, t1: f64, o: &Curve) -> Surface {
     }).collect();
     let p0 = pts[0];
     let far = pts.iter().max_by(|a, b| (*a - p0).norm().total_cmp(&(*b - p0).norm())).copied().unwrap_or(p0);
-    if let Some(x) = (far - p0).try_normalize(1e-12) {
-        if let Some(n) = pts.iter().map(|p| x.cross(&(p - p0))).max_by(|a, b| a.norm().total_cmp(&b.norm())).and_then(|n| n.try_normalize(1e-12)) {
+    if let Some(x) = (far - p0).try_normalize(1e-12)
+        && let Some(n) = pts.iter().map(|p| x.cross(&(p - p0))).max_by(|a, b| a.norm().total_cmp(&b.norm())).and_then(|n| n.try_normalize(1e-12)) {
             let size = (far - p0).norm();
             if pts.iter().all(|p| (p - p0).dot(&n).abs() < 1e-9 * (1.0 + size)) {
                 return Surface::Plane { f: Frame { o: p0, x, y: n.cross(&x), z: n } };
             }
         }
-    }
     let (mut a, mut b) = (c.to_nurbs(t0, t1), o.to_nurbs(t0, t1));
     while a.degree < b.degree {
         a = a.elevated();
@@ -135,10 +134,10 @@ pub fn face_slab(b: &Body, fi: usize, d: f64) -> Result<Body> {
             continue;
         }
         for v in e.v {
-            if !vb.contains_key(&v) {
+            if let std::collections::hash_map::Entry::Vacant(e) = vb.entry(v) {
                 let p = b.verts[v].p;
                 let q = p + normal_at(&f.surf, f.sense, &p) * d;
-                vb.insert(v, xb.vertex(p));
+                e.insert(xb.vertex(p));
                 vt.insert(v, xb.vertex(q));
             }
         }

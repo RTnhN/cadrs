@@ -2173,7 +2173,7 @@ mod kernel_ops {
             let r = match self.kernel.boolean(kind, body, &tool_bodies) {
                 Ok(r) => r,
                 // Nothing left of the part (an empty result).
-                Err(cadrs_kernel::KernelError::OperationFailed(m)) if m.contains("empty") => {
+                Err(cadrs_kernel::KernelError::EmptyResult(_)) => {
                     next.parts.retain(|q| q.part.id != part);
                     return Ok(Vec::new());
                 }

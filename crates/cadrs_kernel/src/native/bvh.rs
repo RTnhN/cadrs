@@ -204,9 +204,9 @@ mod tests {
         let mut got = t.pairs(&u);
         got.sort();
         let mut want = Vec::new();
-        for i in 0..boxes.len() {
-            for j in 0..other.len() {
-                if boxes[i].overlaps(&other[j]) {
+        for (i, a) in boxes.iter().enumerate() {
+            for (j, b) in other.iter().enumerate() {
+                if a.overlaps(b) {
                     want.push((i, j));
                 }
             }

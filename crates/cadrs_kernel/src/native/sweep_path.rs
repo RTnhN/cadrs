@@ -151,7 +151,7 @@ fn spines(path: Vec<Seg>, closed: bool, plane: &Plane, center: &P3) -> Vec<(Vec<
             let p = s.c.point(t);
             let _ = o;
             let d = (p - center).norm();
-            if best.map_or(true, |(bd, ..)| d < bd) {
+            if best.is_none_or(|(bd, ..)| d < bd) {
                 let f = (t - s.t0) / (s.t1 - s.t0);
                 best = Some((d, i, if s.rev { 1.0 - f } else { f }));
             }
@@ -432,11 +432,10 @@ pub fn sweep_with(k: &mut NativeKernel, profile: &Profile, spec: &SweepSpec) -> 
         }
     }
     // A closed path: the last piece's end cap meets the first piece's start cap.
-    if solid {
-        if let Some(g) = glue_self(&acc) {
+    if solid
+        && let Some(g) = glue_self(&acc) {
             acc = g;
         }
-    }
     if prof {
         eprintln!("sweep: joined in {:?}", t1.elapsed());
     }
@@ -531,9 +530,9 @@ pub(crate) fn glue(a: &Tagged, b: &Tagged) -> Option<Tagged> {
     }
     // Merge the vertices of b's other edges.
     for e in body.edges.iter_mut() {
-        for k in 0..2 {
-            if let Some(&v) = vmap.get(&e.v[k]) {
-                e.v[k] = v;
+        for ev in e.v.iter_mut() {
+            if let Some(&v) = vmap.get(ev) {
+                *ev = v;
             }
         }
     }
@@ -622,9 +621,9 @@ fn glue_within(t: &Tagged, fa: usize, fb: usize) -> Option<Tagged> {
         }
     }
     for e in body.edges.iter_mut() {
-        for k in 0..2 {
-            if let Some(&v) = vmap.get(&e.v[k]) {
-                e.v[k] = v;
+        for ev in e.v.iter_mut() {
+            if let Some(&v) = vmap.get(ev) {
+                *ev = v;
             }
         }
     }

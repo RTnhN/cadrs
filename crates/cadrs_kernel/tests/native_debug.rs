@@ -448,7 +448,8 @@ fn debug_width_chain() {
     }
     let mk = || -> Box<dyn Fn(f64) -> native::blend::SectionKind> { Box::new(|phi: f64| native::blend::SectionKind::Circle { r: 3.0 / (2.0 * (phi / 2.0).sin()) }) };
     for n in 1..=chain.len() {
-        let list: Vec<(EdgeId, Box<dyn Fn(f64) -> native::blend::SectionKind>, bool)> = chain[..n].iter().map(|e| (*e, mk(), false)).collect();
+        type Section = Box<dyn Fn(f64) -> native::blend::SectionKind>;
+        let list: Vec<(EdgeId, Section, bool)> = chain[..n].iter().map(|e| (*e, mk(), false)).collect();
         match native::blend::blend(&mut k, cut, &list, false) {
             Ok(r) => eprintln!("chain[..{n}]: removed {:.4}", v_cut - k.mass_properties(r.bodies[0]).unwrap().volume),
             Err(er) => eprintln!("chain[..{n}]: err {er}"),
@@ -867,8 +868,11 @@ fn debug_repro_fillet() {
     if let Ok(fi) = std::env::var("CADRS_REPRO_MESH_FACE") {
         let fi: usize = fi.parse().unwrap();
         let es = cadrs_kernel::native::tess::edge_samples(&body, 0.01, 0.1);
+        // A single-threaded debug repro: nothing else reads the environment meanwhile.
+        #[allow(unsafe_code)]
         unsafe { std::env::set_var("CADRS_TESS_PROFILE", "1") };
         let fm = cadrs_kernel::native::tess::mesh_face(&body, &body.faces[fi], &es, 0.01, 0.1);
+        #[allow(unsafe_code)]
         unsafe { std::env::remove_var("CADRS_TESS_PROFILE") };
         eprintln!("face {fi}: {} triangles", fm.indices.len());
     }

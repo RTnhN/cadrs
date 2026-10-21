@@ -93,7 +93,7 @@ pub fn unify_faces(b: &mut Body, from: Vec<Vec<(usize, usize)>>, can_merge: &dyn
     let nf = b.faces.len();
     let ef = b.edge_faces();
     let mut dsu = Dsu((0..nf).collect());
-    for (_e, fs) in ef.iter().enumerate() {
+    for fs in ef.iter() {
         if fs.len() != 2 || fs[0] == fs[1] {
             continue;
         }
@@ -102,11 +102,10 @@ pub fn unify_faces(b: &mut Body, from: Vec<Vec<(usize, usize)>>, can_merge: &dyn
             continue;
         }
         let (a, c) = (&b.faces[f], &b.faces[g]);
-        if let Some(same) = a.surf.same_domain(&c.surf, 1e-6) {
-            if same == (a.sense == c.sense) {
+        if let Some(same) = a.surf.same_domain(&c.surf, 1e-6)
+            && same == (a.sense == c.sense) {
                 dsu.join(f, g);
             }
-        }
     }
     let mut groups: std::collections::BTreeMap<usize, Vec<usize>> = Default::default();
     for f in 0..nf {
