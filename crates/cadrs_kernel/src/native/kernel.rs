@@ -774,30 +774,9 @@ impl Kernel for NativeKernel {
     }
 
     fn tessellate(&self, body: BodyId, quality: Tessellation) -> Result<TriMesh> {
-        let b = self.get(body)?;
         let t = std::time::Instant::now();
-        let (faces, es) = tess::mesh_body(b, quality.deflection, quality.angle);
-        slow("tessellate", t, b);
-        let mut m = TriMesh::default();
-        for (fi, fm) in faces.into_iter().enumerate() {
-            let base = m.positions.len() as u32;
-            m.positions.extend(fm.positions);
-            m.normals.extend(fm.normals);
-            for t in fm.indices {
-                m.indices.push([t[0] + base, t[1] + base, t[2] + base]);
-                m.triangle_faces.push(FaceId(fi as u64));
-            }
-        }
-        for (ei, (_, pts)) in es.into_iter().enumerate() {
-            if b.edges[ei].degenerate {
-                continue;
-            }
-            m.edges.push((EdgeId(ei as u64), pts));
-        }
-        if !b.points.is_empty() {
-            let ids = vertex_ids(b);
-            m.points = b.points.iter().map(|&v| (VertexId(ids[v].unwrap_or(0) as u64), b.verts[v].p)).collect();
-        }
+        let m = self.tessellate_with(body, &tess::TessParams::try_from(quality)?)?;
+        slow("tessellate", t, self.get(body)?);
         Ok(m)
     }
 

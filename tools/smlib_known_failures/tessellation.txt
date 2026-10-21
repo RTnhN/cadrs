@@ -1,7 +1,1 @@
 # SMLib tessellation cases (tests/smlib_tessellation.rs, from tools/smlib/tessellation.py) that fail.
-
-# nurb_fillet.smb's mesh isn't watertight (138 of 24198 edges unmatched at every setting).
-tess_1_nurb_fillet
-tess_2_nurb_fillet
-tess_3_nurb_fillet
-tess_4_nurb_fillet

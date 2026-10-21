@@ -42,7 +42,7 @@ for path in sorted(glob.glob(os.path.join(tests, "*.rs"))):
             else:
                 c["missing"] += 1
                 feats[b] += 1
-        elif "a known failure now passes" in body:
+        elif "a known failure now passes" in body or "known_failure(" in body:
             c["known"] += 1
         else:
             c["pass"] += 1
