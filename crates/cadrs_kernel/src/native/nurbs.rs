@@ -109,6 +109,197 @@ pub fn basis_ders(span: usize, u: f64, p: usize, d: usize, knots: &[f64]) -> Vec
     ders
 }
 
+/// The largest degree the evaluators take without allocating (higher ones take
+/// [`basis_ders`]'s vectors).
+const MAXP: usize = 7;
+/// The highest derivative they take without allocating.
+const MAXD: usize = 2;
+
+/// Basis values and derivatives in a fixed array: `[k][j]`, the k-th derivative of the j-th
+/// non-zero function.
+type Fixed = [[f64; MAXP + 1]; MAXD + 1];
+
+/// [`basis_ders`] in fixed arrays, for `p <= MAXP` and `d <= MAXD`: the same arithmetic in the
+/// same order, so the same values to the bit, without its dozen allocations (the evaluators run
+/// millions of times in mass properties and meshing). Monomorphized per degree (`N` = p + 1)
+/// so its tables are just as large as they need to be.
+fn basis_ders_fixed(span: usize, u: f64, p: usize, d: usize, knots: &[f64]) -> Fixed {
+    match p {
+        0 => basis_ders_n::<1>(span, u, d, knots),
+        1 => basis_ders_n::<2>(span, u, d, knots),
+        2 => basis_ders_n::<3>(span, u, d, knots),
+        3 => basis_ders_n::<4>(span, u, d, knots),
+        4 => basis_ders_n::<5>(span, u, d, knots),
+        5 => basis_ders_n::<6>(span, u, d, knots),
+        6 => basis_ders_n::<7>(span, u, d, knots),
+        _ => basis_ders_n::<8>(span, u, d, knots),
+    }
+}
+
+fn basis_ders_n<const N: usize>(span: usize, u: f64, d: usize, knots: &[f64]) -> Fixed {
+    let p = N - 1;
+    let mut ndu = [[0.0; N]; N];
+    let mut left = [0.0; N];
+    let mut right = [0.0; N];
+    ndu[0][0] = 1.0;
+    for j in 1..=p {
+        left[j] = u - knots[span + 1 - j];
+        right[j] = knots[span + j] - u;
+        let mut saved = 0.0;
+        for r in 0..j {
+            ndu[j][r] = right[r + 1] + left[j - r];
+            let temp = if ndu[j][r] == 0.0 { 0.0 } else { ndu[r][j - 1] / ndu[j][r] };
+            ndu[r][j] = saved + right[r + 1] * temp;
+            saved = left[j - r] * temp;
+        }
+        ndu[j][j] = saved;
+    }
+    let d = d.min(p);
+    let mut ders = [[0.0; MAXP + 1]; MAXD + 1];
+    for j in 0..=p {
+        ders[0][j] = ndu[j][p];
+    }
+    let mut a = [[0.0; N]; 2];
+    for r in 0..=p {
+        let (mut s1, mut s2) = (0usize, 1usize);
+        a[0][0] = 1.0;
+        for k in 1..=d {
+            let mut dd = 0.0;
+            let rk = r as isize - k as isize;
+            let pk = p as isize - k as isize;
+            if r >= k {
+                a[s2][0] = a[s1][0] / ndu[(pk + 1) as usize][rk as usize];
+                dd = a[s2][0] * ndu[rk as usize][pk as usize];
+            }
+            let j1 = if rk >= -1 { 1 } else { (-rk) as usize };
+            let j2 = if (r as isize - 1) <= pk { k - 1 } else { p - r };
+            for j in j1..=j2 {
+                let idx = (rk + j as isize) as usize;
+                a[s2][j] = (a[s1][j] - a[s1][j - 1]) / ndu[(pk + 1) as usize][idx];
+                dd += a[s2][j] * ndu[idx][pk as usize];
+            }
+            if r as isize <= pk {
+                a[s2][k] = -a[s1][k - 1] / ndu[(pk + 1) as usize][r];
+                dd += a[s2][k] * ndu[r][pk as usize];
+            }
+            ders[k][r] = dd;
+            std::mem::swap(&mut s1, &mut s2);
+        }
+    }
+    let mut rr = p as f64;
+    for (k, row) in ders.iter_mut().enumerate().take(d + 1).skip(1) {
+        for x in row.iter_mut().take(p + 1) {
+            *x *= rr;
+        }
+        rr *= (p - k) as f64;
+    }
+    ders
+}
+
+/// Values and first derivatives of the non-zero basis functions, for `p <= MAXP`: the hot
+/// evaluators' case (points and first derivatives) in two short arrays.
+#[derive(Clone, Copy)]
+struct B1 {
+    v: [f64; MAXP + 1],
+    d: [f64; MAXP + 1],
+}
+
+/// [`basis_ders`] with `d` = 0 or 1 (`deriv`) as a [`B1`]: A2.3's arithmetic for those rows,
+/// so the same values to the bit.
+fn basis1(span: usize, u: f64, p: usize, deriv: bool, knots: &[f64]) -> B1 {
+    match p {
+        0 => basis1_n::<1>(span, u, deriv, knots),
+        1 => basis1_n::<2>(span, u, deriv, knots),
+        2 => basis1_n::<3>(span, u, deriv, knots),
+        3 => basis1_n::<4>(span, u, deriv, knots),
+        4 => basis1_n::<5>(span, u, deriv, knots),
+        5 => basis1_n::<6>(span, u, deriv, knots),
+        6 => basis1_n::<7>(span, u, deriv, knots),
+        _ => basis1_n::<8>(span, u, deriv, knots),
+    }
+}
+
+#[inline]
+fn basis1_n<const N: usize>(span: usize, u: f64, deriv: bool, knots: &[f64]) -> B1 {
+    let p = N - 1;
+    let mut ndu = [[0.0; N]; N];
+    let mut left = [0.0; N];
+    let mut right = [0.0; N];
+    ndu[0][0] = 1.0;
+    for j in 1..=p {
+        left[j] = u - knots[span + 1 - j];
+        right[j] = knots[span + j] - u;
+        let mut saved = 0.0;
+        for r in 0..j {
+            ndu[j][r] = right[r + 1] + left[j - r];
+            let temp = if ndu[j][r] == 0.0 { 0.0 } else { ndu[r][j - 1] / ndu[j][r] };
+            ndu[r][j] = saved + right[r + 1] * temp;
+            saved = left[j - r] * temp;
+        }
+        ndu[j][j] = saved;
+    }
+    let mut out = B1 { v: [0.0; MAXP + 1], d: [0.0; MAXP + 1] };
+    for j in 0..=p {
+        out.v[j] = ndu[j][p];
+    }
+    if deriv && p >= 1 {
+        // A2.3's k = 1 row: (1 / ndu[p][r−1])·ndu[r−1][p−1] + (−1 / ndu[p][r])·ndu[r][p−1], times p.
+        for r in 0..=p {
+            let mut dd = 0.0;
+            if r >= 1 {
+                let a = 1.0 / ndu[p][r - 1];
+                dd = a * ndu[r - 1][p - 1];
+            }
+            if r < p {
+                let a = -1.0 / ndu[p][r];
+                dd += a * ndu[r][p - 1];
+            }
+            out.d[r] = dd * p as f64;
+        }
+    }
+    out
+}
+
+/// Basis values by derivative order and index, from either evaluator.
+trait BasisAt {
+    fn at(&self, k: usize, j: usize) -> f64;
+}
+
+impl BasisAt for B1 {
+    #[inline]
+    fn at(&self, k: usize, j: usize) -> f64 {
+        if k == 0 { self.v[j] } else { self.d[j] }
+    }
+}
+
+/// Basis function values and derivatives, in fixed arrays when the degree allows.
+enum Basis {
+    Fixed(Fixed),
+    Heap(Vec<Vec<f64>>),
+}
+
+impl BasisAt for Basis {
+    #[inline]
+    fn at(&self, k: usize, j: usize) -> f64 {
+        Basis::at(self, k, j)
+    }
+}
+
+impl Basis {
+    fn new(span: usize, u: f64, p: usize, d: usize, knots: &[f64]) -> Self {
+        if p <= MAXP && d <= MAXD { Basis::Fixed(basis_ders_fixed(span, u, p, d, knots)) } else { Basis::Heap(basis_ders(span, u, p, d, knots)) }
+    }
+
+    /// The k-th derivative of the j-th non-zero function.
+    #[inline]
+    fn at(&self, k: usize, j: usize) -> f64 {
+        match self {
+            Basis::Fixed(b) => b[k][j],
+            Basis::Heap(b) => b[k][j],
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct NurbsCurve {
     pub degree: usize,
@@ -212,6 +403,9 @@ impl NurbsCurve {
 
     /// Homogeneous derivatives up to `d` (A3.2).
     fn hders(&self, u: f64, d: usize) -> Vec<H> {
+        if d <= MAXD {
+            return self.hders_fixed(u, d)[..=d].to_vec();
+        }
         let n = self.cps.len() - 1;
         let p = self.degree;
         let span = find_span(n, p, u, &self.knots);
@@ -220,6 +414,28 @@ impl NurbsCurve {
         for k in 0..=d.min(p) {
             for j in 0..=p {
                 out[k] += self.cps[span - p + j] * nd[k][j];
+            }
+        }
+        out
+    }
+
+    /// [`Self::hders`] for `d <= MAXD`, in an array (entries above `d` zero).
+    fn hders_fixed(&self, u: f64, d: usize) -> [H; MAXD + 1] {
+        let n = self.cps.len() - 1;
+        let p = self.degree;
+        let span = find_span(n, p, u, &self.knots);
+        if d <= 1 && p <= MAXP {
+            return self.hders_with(span, d, &basis1(span, u, p, d == 1, &self.knots));
+        }
+        self.hders_with(span, d, &Basis::new(span, u, p, d, &self.knots))
+    }
+
+    fn hders_with(&self, span: usize, d: usize, nd: &impl BasisAt) -> [H; MAXD + 1] {
+        let p = self.degree;
+        let mut out = [H::zeros(); MAXD + 1];
+        for (k, o) in out.iter_mut().enumerate().take(d.min(p) + 1) {
+            for j in 0..=p {
+                *o += self.cps[span - p + j] * nd.at(k, j);
             }
         }
         out
@@ -240,8 +456,18 @@ impl NurbsCurve {
     }
 
     pub fn point(&self, u: f64) -> P3 {
-        let h = self.hders(u, 0);
-        dehom(&h[0])
+        dehom(&self.hders_fixed(u, 0)[0])
+    }
+
+    /// Point, first and second derivative (as [`Self::ders`] with `d` = 2, without allocating).
+    pub fn ders2(&self, u: f64) -> (P3, V3, V3) {
+        let h = self.hders_fixed(u, 2);
+        let c0 = h[0].xyz() / h[0].w;
+        let c1 = (h[1].xyz() - c0 * (binom(1, 1) * h[1].w)) / h[0].w;
+        let mut v = h[2].xyz();
+        v -= c1 * (binom(2, 1) * h[1].w);
+        v -= c0 * (binom(2, 2) * h[2].w);
+        (P3::from(c0), c1, v / h[0].w)
     }
 
     pub fn transformed(&self, m: &Affine) -> Self {
@@ -745,31 +971,65 @@ impl NurbsSurface {
 
     /// Point and first and second derivatives: [S, Su, Sv, Suu, Suv, Svv] (A4.4).
     pub fn ders2(&self, u: f64, v: f64) -> [V3; 6] {
+        let s = self.ders_upto::<2>(u, v);
+        [s[0][0], s[1][0], s[0][1], s[2][0], s[1][1], s[0][2]]
+    }
+
+    /// Point and first derivatives (S, Su, Sv): [`Self::ders2`]'s, to the bit, for less.
+    pub fn ders1(&self, u: f64, v: f64) -> (P3, V3, V3) {
+        let s = self.ders_upto::<1>(u, v);
+        (P3::from(s[0][0]), s[1][0], s[0][1])
+    }
+
+    /// The derivatives S_kl for k + l <= N <= 2 (A4.4), the others zero.
+    fn ders_upto<const N: usize>(&self, u: f64, v: f64) -> [[V3; 3]; 3] {
         let nu = self.cps.len() - 1;
         let nv = self.cps[0].len() - 1;
         let su = find_span(nu, self.du, u, &self.ku);
         let sv = find_span(nv, self.dv, v, &self.kv);
-        let bu = basis_ders(su, u, self.du, 2, &self.ku);
-        let bv = basis_ders(sv, v, self.dv, 2, &self.kv);
+        if N <= 1 && self.du <= MAXP && self.dv <= MAXP {
+            let bu = basis1(su, u, self.du, N == 1, &self.ku);
+            let bv = basis1(sv, v, self.dv, N == 1, &self.kv);
+            return self.rational::<N>(&self.homogeneous::<N>(su, sv, &bu, &bv));
+        }
+        let bu = Basis::new(su, u, self.du, N, &self.ku);
+        let bv = Basis::new(sv, v, self.dv, N, &self.kv);
+        self.rational::<N>(&self.homogeneous::<N>(su, sv, &bu, &bv))
+    }
+
+    /// The homogeneous derivatives A_kl for k + l <= N (A4.4's first half).
+    fn homogeneous<const N: usize>(&self, su: usize, sv: usize, bu: &impl BasisAt, bv: &impl BasisAt) -> [[H; 3]; 3] {
         // Homogeneous derivatives A[k][l].
         let mut a = [[H::zeros(); 3]; 3];
-        for k in 0..=2usize.min(self.du) {
-            let mut temp = vec![H::zeros(); self.dv + 1];
-            for s in 0..=self.dv {
+        let mut fixed = [H::zeros(); MAXP + 1];
+        let mut heap = Vec::new();
+        let temp: &mut [H] = if self.dv <= MAXP {
+            &mut fixed[..=self.dv]
+        } else {
+            heap.resize(self.dv + 1, H::zeros());
+            &mut heap
+        };
+        for (k, ak) in a.iter_mut().enumerate().take(N.min(self.du) + 1) {
+            temp.fill(H::zeros());
+            for (s, t) in temp.iter_mut().enumerate() {
                 for r in 0..=self.du {
-                    temp[s] += self.cps[su - self.du + r][sv - self.dv + s] * bu[k][r];
+                    *t += self.cps[su - self.du + r][sv - self.dv + s] * bu.at(k, r);
                 }
             }
-            for l in 0..=(2 - k).min(self.dv) {
-                for s in 0..=self.dv {
-                    a[k][l] += temp[s] * bv[l][s];
+            for (l, akl) in ak.iter_mut().enumerate().take((N - k).min(self.dv) + 1) {
+                for (s, t) in temp.iter().enumerate() {
+                    *akl += t * bv.at(l, s);
                 }
             }
         }
-        // Rational: S_kl.
+        a
+    }
+
+    /// The rational derivatives S_kl from the homogeneous ones (A4.4's second half).
+    fn rational<const N: usize>(&self, a: &[[H; 3]; 3]) -> [[V3; 3]; 3] {
         let mut s = [[V3::zeros(); 3]; 3];
-        for k in 0..=2 {
-            for l in 0..=(2 - k) {
+        for k in 0..=N {
+            for l in 0..=(N - k) {
                 let mut v = a[k][l].xyz();
                 for j in 1..=l {
                     v -= s[k][l - j] * (binom(l, j) * a[0][j].w);
@@ -785,11 +1045,35 @@ impl NurbsSurface {
                 s[k][l] = v / a[0][0].w;
             }
         }
-        [s[0][0], s[1][0], s[0][1], s[2][0], s[1][1], s[0][2]]
+        s
     }
 
     pub fn point(&self, u: f64, v: f64) -> P3 {
-        P3::from(self.ders2(u, v)[0])
+        P3::from(self.ders_upto::<0>(u, v)[0][0])
+    }
+
+    /// The iso-curve at `v` for evaluating many points along u in [u0, u1] (mass properties'
+    /// inner integrals): the control points of S(·, v) and ∂S/∂v(·, v), contracted along v once.
+    pub fn iso_v(&self, v: f64, u0: f64, u1: f64) -> IsoV<'_> {
+        let nu = self.cps.len() - 1;
+        let nv = self.cps[0].len() - 1;
+        let sv = find_span(nv, self.dv, v, &self.kv);
+        let bv = Basis::new(sv, v, self.dv, 1, &self.kv);
+        let (a, b) = (u0.min(u1), u0.max(u1));
+        let lo = find_span(nu, self.du, a, &self.ku) - self.du;
+        let hi = find_span(nu, self.du, b, &self.ku);
+        let mut q = Vec::with_capacity(hi + 1 - lo);
+        let mut qv = Vec::with_capacity(hi + 1 - lo);
+        for row in &self.cps[lo..=hi] {
+            let (mut h, mut hv) = (H::zeros(), H::zeros());
+            for (s, c) in row[sv - self.dv..=sv].iter().enumerate() {
+                h += c * bv.at(0, s);
+                hv += c * bv.at(1, s);
+            }
+            q.push(h);
+            qv.push(hv);
+        }
+        IsoV { s: self, v, lo, q, qv }
     }
 
     pub fn transformed(&self, m: &Affine) -> Self {
@@ -962,9 +1246,145 @@ pub fn solve(a: DMatrix<f64>, b: DVector<f64>) -> Option<DVector<f64>> {
     a.lu().solve(&b)
 }
 
+/// A B-spline surface along u at one v ([`NurbsSurface::iso_v`]).
+pub struct IsoV<'a> {
+    s: &'a NurbsSurface,
+    v: f64,
+    /// The first control row held.
+    lo: usize,
+    q: Vec<H>,
+    qv: Vec<H>,
+}
+
+impl IsoV<'_> {
+    /// Point and first derivatives (S, Su, Sv) at (u, v): [`NurbsSurface::ders1`]'s to
+    /// rounding (the sums taken in the other order); outside the u range it was made for, that.
+    pub fn d1(&self, u: f64) -> (P3, V3, V3) {
+        let s = self.s;
+        let su = find_span(s.cps.len() - 1, s.du, u, &s.ku);
+        if su - s.du < self.lo || su >= self.lo + self.q.len() {
+            return s.ders1(u, self.v);
+        }
+        if s.du <= MAXP {
+            self.d1_with(su, &basis1(su, u, s.du, true, &s.ku))
+        } else {
+            self.d1_with(su, &Basis::new(su, u, s.du, 1, &s.ku))
+        }
+    }
+
+    fn d1_with(&self, su: usize, bu: &impl BasisAt) -> (P3, V3, V3) {
+        let s = self.s;
+        let (mut a, mut au, mut av) = (H::zeros(), H::zeros(), H::zeros());
+        for r in 0..=s.du {
+            let i = su - s.du + r - self.lo;
+            a += self.q[i] * bu.at(0, r);
+            au += self.q[i] * bu.at(1, r);
+            av += self.qv[i] * bu.at(0, r);
+        }
+        let p = a.xyz() / a.w;
+        let du = (au.xyz() - p * au.w) / a.w;
+        let dv = (av.xyz() - p * av.w) / a.w;
+        (P3::from(p), du, dv)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The allocation-free evaluators (`Basis`, `ders_upto`, `hders_fixed`) give the values of
+    /// A2.3/A4.4 computed with [`basis_ders`]'s vectors, to the bit, for a rational surface and
+    /// curve of low degree and one above `MAXP` (the vector path).
+    #[test]
+    fn fixed_evaluators_match_the_allocating_ones() {
+        fn reference(s: &NurbsSurface, u: f64, v: f64) -> [V3; 6] {
+            let su = find_span(s.cps.len() - 1, s.du, u, &s.ku);
+            let sv = find_span(s.cps[0].len() - 1, s.dv, v, &s.kv);
+            let bu = basis_ders(su, u, s.du, 2, &s.ku);
+            let bv = basis_ders(sv, v, s.dv, 2, &s.kv);
+            let mut a = [[H::zeros(); 3]; 3];
+            for k in 0..=2usize.min(s.du) {
+                let mut temp = vec![H::zeros(); s.dv + 1];
+                for (j, t) in temp.iter_mut().enumerate() {
+                    for r in 0..=s.du {
+                        *t += s.cps[su - s.du + r][sv - s.dv + j] * bu[k][r];
+                    }
+                }
+                for l in 0..=(2 - k).min(s.dv) {
+                    for (j, t) in temp.iter().enumerate() {
+                        a[k][l] += t * bv[l][j];
+                    }
+                }
+            }
+            let mut d = [[V3::zeros(); 3]; 3];
+            for k in 0..=2 {
+                for l in 0..=(2 - k) {
+                    let mut x = a[k][l].xyz();
+                    for j in 1..=l {
+                        x -= d[k][l - j] * (binom(l, j) * a[0][j].w);
+                    }
+                    for i in 1..=k {
+                        x -= d[k - i][l] * (binom(k, i) * a[i][0].w);
+                        let mut x2 = V3::zeros();
+                        for j in 1..=l {
+                            x2 += d[k - i][l - j] * (binom(l, j) * a[i][j].w);
+                        }
+                        x -= x2 * binom(k, i);
+                    }
+                    d[k][l] = x / a[0][0].w;
+                }
+            }
+            [d[0][0], d[1][0], d[0][1], d[2][0], d[1][1], d[0][2]]
+        }
+        let clamped = |p: usize, inner: &[f64]| {
+            let mut k = vec![0.0; p + 1];
+            k.extend_from_slice(inner);
+            k.extend(vec![1.0; p + 1]);
+            k
+        };
+        for (du, dv) in [(2, 3), (3, 1), (13, 2)] {
+            let (nu, nv) = (du + 4, dv + 3);
+            let cps: Vec<Vec<H>> = (0..nu)
+                .map(|i| (0..nv).map(|j| {
+                    let w = 1.0 + 0.3 * ((i * 7 + j * 3) % 5) as f64;
+                    hom(&P3::new(i as f64, j as f64, ((i * j) as f64).sin()), w)
+                }).collect())
+                .collect();
+            let s = NurbsSurface { du, dv, ku: clamped(du, &[0.2, 0.55, 0.7]), kv: clamped(dv, &[0.4, 0.6]), cps };
+            for (u, v) in [(0.0, 0.0), (0.13, 0.77), (0.55, 0.4), (0.91, 0.05), (1.0, 1.0)] {
+                let r = reference(&s, u, v);
+                assert_eq!(s.ders2(u, v), r);
+                assert_eq!(s.ders1(u, v), (P3::from(r[0]), r[1], r[2]));
+                assert_eq!(s.point(u, v), P3::from(r[0]));
+                // Along an iso-curve: the same to rounding, also past the range it was made for.
+                let iso = s.iso_v(v, 0.1, 0.6);
+                for uu in [0.1, 0.35, 0.6, 0.95] {
+                    let (p, du, dv) = iso.d1(uu);
+                    let (q, qu, qv) = s.ders1(uu, v);
+                    let tol = |a: &V3, b: &V3| (a - b).norm() <= 1e-12 * (1.0 + b.norm());
+                    assert!(tol(&p.coords, &q.coords) && tol(&du, &qu) && tol(&dv, &qv), "{du} vs {qu}");
+                }
+            }
+            let c = NurbsCurve { degree: du, knots: clamped(du, &[0.2, 0.55, 0.7]), cps: s.cps.iter().map(|row| row[1]).collect() };
+            for t in [0.0, 0.3, 0.55, 0.99, 1.0] {
+                // A3.2 with the vectors, then A4.2.
+                let span = find_span(c.cps.len() - 1, c.degree, t, &c.knots);
+                let nd = basis_ders(span, t, c.degree, 2, &c.knots);
+                let mut h = [H::zeros(); 3];
+                for (k, hk) in h.iter_mut().enumerate().take(2.min(c.degree) + 1) {
+                    for j in 0..=c.degree {
+                        *hk += c.cps[span - c.degree + j] * nd[k][j];
+                    }
+                }
+                let c0 = h[0].xyz() / h[0].w;
+                let c1 = (h[1].xyz() - c0 * (binom(1, 1) * h[1].w)) / h[0].w;
+                let c2 = (h[2].xyz() - c1 * (binom(2, 1) * h[1].w) - c0 * (binom(2, 2) * h[2].w)) / h[0].w;
+                assert_eq!(c.ders2(t), (P3::from(c0), c1, c2));
+                assert_eq!(c.ders(t, 2), vec![c0, c1, c2]);
+                assert_eq!(c.point(t), dehom(&h[0]));
+            }
+        }
+    }
 
     #[test]
     fn split_halves_are_valid_curves() {

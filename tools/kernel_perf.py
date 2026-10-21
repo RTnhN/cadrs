@@ -1,0 +1,533 @@
+#!/usr/bin/env python3
+"""Times the native kernel against OCCT 7.8 on the same operations and inputs.
+
+    tools/kernel_perf.py [--out DIR] [--reps N] [--timeout SECS] [--only CAT,...] [--report-only]
+
+1. Builds `crates/cadrs_kernel/examples/kernel_bench.rs` and the conformance test binary
+   (release, `$CARGO_TARGET_DIR`), and `tools/occt_bench` against the static OCCT
+   (`$OCCT`, see tools/occt_bench/build.sh).
+2. Writes the cases (`<out>/cases.txt`):
+   - OCCT's DRAW cases (boolean, blend, offset, pipe, draft) that pass on the native kernel,
+     read back from the generated suites (`tests/occt_<group>.rs`, whose statements map one to
+     one onto the bench's commands), sampled (`--stride-<group>`, default every case for the
+     small groups) plus the slow outliers the reviews name;
+   - SMLib's fillet, boolean and offset cases that pass (`tests/smlib_<suite>.rs`);
+   - tessellation and mass properties of the largest SMLib models;
+   - STEP import and export of a range of files of OCCT's dataset.
+   `kernel_bench prep` then writes the case files of each side: OCCT reads the SMLib models as
+   STEP that the native kernel wrote.
+3. Runs each case in its own process (a hung case times out alone), `--reps` runs, medians:
+   the native kernel on one thread (`RAYON_NUM_THREADS=1`) and on rayon's default pool, OCCT
+   on one thread (as DRAW runs by default). The conformance suite is timed from its test binary
+   (`--report-time`) against `bench/occt_conformance_times.txt` (the same cases on the former
+   OCCT backend; times of whole tests).
+4. Writes `<out>/results.json` and the report `docs/PERF.md`: per case the CPU time (user +
+   system, all threads) of each side on one thread and the ratio, per category the geometric
+   mean of the ratios over the cases both sides complete; the load average while measuring.
+
+CPU time is what's compared: the machine is shared, and under load wall times stretch with
+the queue while CPU times don't.
+"""
+
+import argparse
+import json
+import math
+import os
+import re
+import resource
+import statistics
+import subprocess
+import sys
+import time
+
+REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+KERNEL = os.path.join(REPO, "crates", "cadrs_kernel")
+TESTS = os.path.join(KERNEL, "tests")
+SMLIB = os.path.join(TESTS, "data", "smlib")
+DATA = os.environ.get("CADRS_OCCT_DATA", os.path.join(REPO, "..", "occt-dataset", "opencascade-dataset-7.8.0"))
+OCCT_CONF = os.path.join(REPO, "..", "bench", "occt_conformance_times.txt")
+
+# The operations a DRAW case times; everything else sets it up.
+TIMED = {"bcut", "bfuse", "bcommon", "bsection", "blend", "mkoffset", "offsetperform", "pipe", "buildsweep", "depouille"}
+# Generated-suite method -> bench command.
+CMDS = {
+    "restore": "restore", "box_": "box", "box_at": "boxat", "pcylinder": "pcylinder", "pcone": "pcone", "psphere": "psphere",
+    "ptorus": "ptorus", "ttranslate": "ttranslate", "trotate": "trotate", "tscale": "tscale", "explode_edges": "explode_e",
+    "nexplode_edges": "nexplode_e", "explode_faces": "explode_f", "nexplode_faces": "nexplode_f", "bcut": "bcut", "bfuse": "bfuse",
+    "bcommon": "bcommon", "bsection": "bsection", "blend": "blend", "lprops": "lprops", "mkoffset": "mkoffset", "mkplane": "mkplane",
+    "offsetperform": "offsetperform", "pipe": "pipe", "buildsweep": "buildsweep", "depouille": "depouille", "wire": "wire",
+    "polyline": "polyline", "prism": "prism", "revol": "revol",
+}
+GROUPS = ["boolean", "blend", "offset", "pipe", "draft"]
+# Cases the reviews single out as slow: always in the sample when they pass.
+OUTLIERS = {"bcut_complex_o5", "bcut_complex_q1", "bcommon_complex_c7", "bsection_j3"}
+# STEP files of OCCT's dataset, 50 kB to 3.5 MB.
+STEP_FILES = [
+    "trj6_pm4-ec-203.stp", "r0901_ec.stp", "nist_ftc_08_asme1_ap242-2.stp", "ec_soapbox-A.stp", "ec_turbine-A.stp",
+    "as1_motor.step", "trj4_s1-pe-214.stp", "trj3_as1-ec-214.stp", "bug27453_165-174_piattello.stp", "r103ec.stp",
+    "bug24595_281390.stp", "trj3_s1-ct-214.stp",
+]
+TESS_MODELS = 10
+
+
+def num_tok(s):
+    s = s.replace(" ", "")
+    if re.fullmatch(r"-?[0-9.]+(e-?[0-9]+)?", s) or re.fullmatch(r"\w+\*-?[0-9.]+(e-?[0-9]+)?", s):
+        return s
+    return None
+
+
+def split_args(s):
+    out, depth, cur, q = [], 0, "", None
+    for ch in s:
+        if q:
+            cur += ch
+            if ch == q:
+                q = None
+            continue
+        if ch in "\"'":
+            q = ch
+        elif ch in "([":
+            depth += 1
+        elif ch in ")]":
+            depth -= 1
+        elif ch == "," and depth == 0:
+            out.append(cur.strip())
+            cur = ""
+            continue
+        cur += ch
+    if cur.strip():
+        out.append(cur.strip())
+    return out
+
+
+def flatten(arg):
+    """An argument of a generated call as bench tokens, or None."""
+    arg = arg.strip()
+    m = re.fullmatch(r'&data\("([^"]+)"\)', arg)
+    if m:
+        return [os.path.join(DATA, m.group(1))]
+    if arg.startswith("&"):
+        arg = arg[1:].strip()
+    if arg[:1] in "[(":
+        toks = []
+        for a in split_args(arg[1:-1]):
+            f = flatten(a)
+            if f is None:
+                return None
+            toks += f
+        return toks
+    if arg in ("true", "false"):
+        return ["1" if arg == "true" else "0"]
+    m = re.fullmatch(r'"(\w+)"|\'(\w)\'', arg)
+    if m:
+        return [m.group(1) or m.group(2)]
+    m = re.fullmatch(r"(\w+)\[(\d+)\]", arg)
+    if m:
+        return [f"{m.group(1)}.{m.group(2)}"]
+    if re.fullmatch(r"[A-Za-z_]\w*", arg):
+        return [arg]
+    n = num_tok(arg)
+    return [n] if n else None
+
+
+def convert_body(body):
+    """A generated test's statements as bench lines, or None when one has no bench command."""
+    lines = []
+    for st in re.findall(r"^\s*(.+?;)\s*$", body, re.M):
+        if st.startswith(("k.check", "draw::check", "#[allow", "let mut k", "Ok(", "eprintln")):
+            continue
+        m = re.fullmatch(r"let (?:mut )?(\w+) = k\.(\w+)\((.*)\)\??;", st)
+        if not m or m.group(2) not in CMDS:
+            return None
+        var, meth, args = m.groups()
+        toks = []
+        for a in split_args(args):
+            f = flatten(a)
+            if f is None:
+                return None
+            toks += f
+        if meth == "buildsweep":
+            # spine, sections…, mode, dx dy dz, transition, solid -> spine mode dx dy dz transition solid sections…
+            toks = [toks[0]] + toks[-6:] + toks[1:-6]
+        elif meth == "offsetperform":
+            toks = toks[:2] + [toks[-1]] + toks[2:-1]
+        star = "*" if meth in TIMED else ""
+        lines.append(f"{star}{var} = {CMDS[meth]} {' '.join(toks)}")
+    return lines if any(l.startswith("*") for l in lines) else None
+
+
+def known_failures():
+    kf = set()
+    with open(os.path.join(REPO, "tools", "occt_known_failures.txt")) as f:
+        for l in f:
+            l = l.strip()
+            if l and not l.startswith("#"):
+                kf.add(" ".join(l.split()[:2]))
+    return kf
+
+
+def occt_cases(strides):
+    kf = known_failures()
+    out = []
+    for g in GROUPS:
+        src = open(os.path.join(TESTS, f"occt_{g}.rs")).read()
+        conv = []
+        for t in re.split(r"\n/// OCCT ", src)[1:]:
+            head, _, rest = t.partition("fn ")
+            if "#[ignore" in head:
+                continue
+            name = re.match(r"(\w+)\(", rest).group(1)
+            if f"{g} {name}" in kf or "known failure" in rest:
+                continue
+            body = rest.split("let mut k = NativeKernel::new();", 1)[-1]
+            lines = convert_body(body)
+            if lines:
+                conv.append((name, lines))
+        stride = strides.get(g, 1)
+        picked = [c for i, c in enumerate(conv) if i % stride == 0 or c[0] in OUTLIERS]
+        print(f"occt {g}: {len(conv)} passing cases convert, {len(picked)} sampled", file=sys.stderr)
+        out += [(f"{g}/{n}", f"occt_{g}", l) for n, l in picked]
+    return out
+
+
+def smlib_cases():
+    out = []
+
+    def passing(suite, pat):
+        src = open(os.path.join(TESTS, f"smlib_{suite}.rs")).read()
+        for t in re.split(r"\n#\[test\]\n", src)[1:]:
+            if t.lstrip().startswith("#[ignore"):
+                continue
+            name = re.search(r"fn (\w+)\(", t).group(1)
+            m = re.search(r"\n    " + pat, t)
+            if m:
+                yield name, m
+
+    for name, m in passing("fillets", r'blend\("([^"]+)", &\[([^\]]*)\], (true|false), Op::Fillet\(([-0-9.e]+)\)'):
+        ranges = [f"{a}-{b}" for a, b in re.findall(r"\((\d+), (\d+)\)", m.group(2))]
+        inc = "1" if m.group(3) == "true" else "0"
+        out.append((f"fillets/{name}", "smlib_fillet", [f"m = smb {SMLIB}/fillets/{m.group(1)}", f"*r = smbfillet m {m.group(4)} {inc} {' '.join(ranges)}"]))
+    ops = {"U": "bfuse", "I": "bcommon", "D": "bcut"}
+    for name, m in passing("booleans", r'chain\(&\[([^\]]*)\], ([UID]),'):
+        files = re.findall(r'"([^"]+)"', m.group(1))
+        lines = [f"b{i} = smb {SMLIB}/booleans/{f}" for i, f in enumerate(files)]
+        acc = "b0"
+        for i in range(1, len(files)):
+            lines.append(f"*r{i} = {ops[m.group(2)]} {acc} b{i}")
+            acc = f"r{i}"
+        out.append((f"booleans/{name}", "smlib_boolean", lines))
+    for name, m in passing("offset", r'offset\("([^"]+)", ([-0-9.e]+), None, None,'):
+        out.append((f"offset/{name}", "smlib_offset", [f"m = smb {SMLIB}/offset/{m.group(1)}", f"*r = offset m {m.group(2)}"]))
+    print(f"smlib: {len(out)} passing fillet, boolean and offset cases", file=sys.stderr)
+    return out
+
+
+def model_cases():
+    files = []
+    for d in os.listdir(SMLIB):
+        for f in os.listdir(os.path.join(SMLIB, d)):
+            if f.endswith(".smb"):
+                p = os.path.join(SMLIB, d, f)
+                files.append((os.path.getsize(p), p))
+    files.sort(reverse=True)
+    out = []
+    for _, p in files[:TESS_MODELS]:
+        stem = os.path.basename(p)[:-4]
+        out.append((f"tess/{stem}", "tess", [f"m = smb {p}", "*tess m 0.001 0.5"]))
+        out.append((f"mass/{stem}", "mass", [f"m = smb {p}", "*mass m"]))
+        # OCCT's default rules are coarse (1e-3 off on the blade hubs); adaptive to 1e-9 is the
+        # native kernel's precision class.
+        out.append((f"mass_eps9/{stem}", "mass_eps9", [f"m = smb {p}", "*mass m 1e-9"]))
+    return out
+
+
+def step_cases(out_dir):
+    out = []
+    for f in STEP_FILES:
+        p = os.path.join(DATA, "step", f)
+        if not os.path.exists(p):
+            continue
+        stem = re.sub(r"\W", "_", f.rsplit(".", 1)[0])
+        out.append((f"step_read/{stem}", "step_read", [f"*m = stepread {p}"]))
+        out.append((f"step_write/{stem}", "step_write", [f"m = stepread {p}", f"*stepwrite m {out_dir}/written_{stem}.step"]))
+    return out
+
+
+def write_cases(path, cases):
+    with open(path, "w") as f:
+        for name, cat, lines in cases:
+            f.write(f"case {name} {cat}\n")
+            for l in lines:
+                f.write(l + "\n")
+            f.write("end\n")
+
+
+def case_names(path):
+    return [(l.split()[1], l.split()[2]) for l in open(path) if l.startswith("case ")]
+
+
+def loadavg():
+    with open("/proc/loadavg") as f:
+        return float(f.read().split()[0])
+
+
+def run_side(label, cmd, cases_file, names, env, timeout, reps):
+    """Runs each case in its own process; returns {name: {...}} and the load seen."""
+    res, loads = {}, [loadavg()]
+    t0 = time.time()
+    for i, (name, cat) in enumerate(names):
+        try:
+            p = subprocess.run(cmd + [cases_file, "--case", name, "--reps", str(reps)], env=env, capture_output=True, text=True, timeout=timeout)
+            line = next((l for l in p.stdout.splitlines() if l.startswith("RESULT\t")), None)
+            if line is None:
+                r = {"ok": False, "msg": f"crashed (exit {p.returncode})"}
+            else:
+                f = line.split("\t")
+                r = {"ok": f[3] == "ok", "wall": float(f[4]), "cpu": float(f[5]), "runs": int(f[6]), "msg": f[7] if len(f) > 7 else ""}
+        except subprocess.TimeoutExpired:
+            r = {"ok": False, "msg": f"timeout {timeout} s"}
+        r["category"] = cat
+        res[name] = r
+        if i % 20 == 0:
+            loads.append(loadavg())
+            print(f"[{label}] {i + 1}/{len(names)} {time.time() - t0:.0f} s, load {loads[-1]:.1f}", file=sys.stderr)
+    loads.append(loadavg())
+    return res, loads
+
+
+def conformance(binary, reps, threads):
+    """Median per-test time (ms) of the conformance suite: with `threads` = 1 the CPU time
+    (user + system) of a process running just that test, less an empty run's; else the wall
+    time `--report-time` gives on rayon's default pool. (One rayon thread's wall time is no use
+    under load: every hand-off to the pool waits for the scheduler.)"""
+    env = dict(os.environ, RUSTC_BOOTSTRAP="1")
+    times = {}
+    if threads == 1:
+        env["RAYON_NUM_THREADS"] = "1"
+        names = [l.split(": test")[0] for l in subprocess.run([binary, "--list"], env=env, capture_output=True, text=True).stdout.splitlines() if l.endswith(": test")]
+
+        def cpu(args):
+            r0 = resource.getrusage(resource.RUSAGE_CHILDREN)
+            subprocess.run([binary, "--test-threads=1", "-q"] + args, env=env, capture_output=True)
+            r1 = resource.getrusage(resource.RUSAGE_CHILDREN)
+            return (r1.ru_utime - r0.ru_utime + r1.ru_stime - r0.ru_stime) * 1e3
+
+        empty = statistics.median(cpu(["--exact", "no_such_test"]) for _ in range(max(reps, 5)))
+        for n in names:
+            times[n] = statistics.median(max(cpu(["--exact", n]) - empty, 0.0) for _ in range(reps))
+        return times
+    for _ in range(reps):
+        p = subprocess.run([binary, "--test-threads=1", "-Zunstable-options", "--report-time", "--format", "json"], env=env, capture_output=True, text=True)
+        for l in p.stdout.splitlines():
+            try:
+                e = json.loads(l)
+            except ValueError:
+                continue
+            if e.get("type") == "test" and e.get("event") == "ok" and "exec_time" in e:
+                times.setdefault(e["name"], []).append(e["exec_time"] * 1e3)
+    return {n: statistics.median(v) for n, v in times.items()}
+
+
+def occt_conformance():
+    out = {}
+    if os.path.exists(OCCT_CONF):
+        for l in open(OCCT_CONF):
+            f = l.split()
+            if len(f) == 2 and f[0].startswith("occt::"):
+                out[f[0][6:]] = float(f[1]) * 1e3
+    return out
+
+
+def gmean(xs):
+    return math.exp(sum(math.log(x) for x in xs) / len(xs)) if xs else float("nan")
+
+
+# Below this CPU time a case is mostly fixed overhead on both sides; the ratio is floored there.
+FLOOR_MS = 0.05
+
+
+# What each category times, and what to keep in mind reading it.
+NOTES = [
+    "**The categories.**",
+    "- `occt_<group>`: OCCT's own DRAW cases (`tests/<group>`) that pass on the native kernel, as the",
+    "  generated suites run them; the operation timed (`bcut`, `blend`, `mkoffset`, `offsetperform`,",
+    "  `pipe`/`buildsweep`, `depouille`). Booleans and 2D offsets are sampled (every 12th, every 4th).",
+    "- `smlib_<suite>`: SMLib's fillet, boolean and offset cases that pass. OCCT reads the models as STEP",
+    "  the native kernel wrote, the fillet's edges picked by their middle points; OCCT's own failures",
+    "  are listed below.",
+    "- `tess`, `mass`: the largest SMLib models; the chord is 0.001 of the bounding box's diagonal, the",
+    "  angle 0.5 rad. OCCT's default mass properties (fixed Gauss rules) are fast but coarse (1e-3 off in",
+    "  volume on the blade hubs, 7e-5 on the vases); `mass_eps9` times OCCT adaptive to 1e-9, the",
+    "  native kernel's precision class.",
+    "- `step_read`, `step_write`: files of OCCT's dataset, read into bodies, and written back.",
+    "",
+]
+
+
+def report(R, path):
+    rows, cats = [], {}
+    for name, ours in R["cadrs_1t"].items():
+        occ = R["occt_1t"].get(name, {})
+        mt = R["cadrs_mt"].get(name, {})
+        cat = ours["category"]
+        ratio = None
+        if ours.get("ok") and occ.get("ok"):
+            ratio = max(ours["cpu"], FLOOR_MS) / max(occ["cpu"], FLOOR_MS)
+            cats.setdefault(cat, []).append(ratio)
+        rows.append((cat, name, ours, mt, occ, ratio))
+    # Conformance.
+    conf_rows = []
+    oc = R.get("occt_conformance", {})
+    for name, t in sorted(R.get("conformance_1t", {}).items()):
+        short = name.split("::")[-1]
+        o = oc.get(short.replace("s", ""))
+        tm = R.get("conformance_mt", {}).get(name)
+        ratio = max(t, FLOOR_MS) / max(o, FLOOR_MS) if o is not None else None
+        if ratio:
+            cats.setdefault("conformance", []).append(ratio)
+        conf_rows.append(("conformance", short, t, tm, o, ratio))
+
+    L = []
+    L.append("# Kernel performance against OCCT")
+    L.append("")
+    L.append("Generated by `tools/kernel_perf.py`; don't edit by hand. Re-run it after kernel changes that")
+    L.append("matter for speed.")
+    L.append("")
+    m = R["meta"]
+    L.append(f"Measured {m['date']} on {m['cpu']} ({m['cores']} threads), native kernel at `{m['git']}`")
+    L.append(f"plus the working tree, OCCT 7.8.0 (static, `-O2`). Load average while measuring: native kernel")
+    L.append(f"{m['load_cadrs_1t']}, OCCT {m['load_occt_1t']} (other jobs share the machine; hence CPU time).")
+    L.append("")
+    L.append("**How.** A case is a DRAW-like script both sides read: `kernel_bench` (an example of the")
+    L.append("crate) for the native kernel, `tools/occt_bench` for OCCT, each command mapped onto the")
+    L.append("same DRAW/OCCT calls on the same input files. Only its marked lines (the operation, not")
+    L.append("loading its input) are timed. Each case runs in its own process, at least "
+             f"{m['reps']} times and")
+    L.append("until its runs have taken a second (fewer when one run is slow). **Time is CPU time**")
+    L.append("(user + system, all threads; the mean over the runs) on one thread: `RAYON_NUM_THREADS=1`")
+    L.append("for the native kernel, OCCT's default (no parallel mode, as DRAW). The `mt` column is the")
+    L.append(f"native kernel's median wall time on rayon's default pool ({m['cores']} threads, under the")
+    L.append(f"load above). Ratio = native / OCCT; times under {FLOOR_MS} ms count as {FLOOR_MS} ms in it.")
+    L.append("Only cases both kernels complete enter the means; the others are listed with their error.")
+    L.append("")
+    L.append("## Summary")
+    L.append("")
+    L.append("| Category | Cases timed | Geometric mean ratio | Median ratio | Native faster in |")
+    L.append("|---|---:|---:|---:|---:|")
+    allr = []
+    for cat in sorted(cats):
+        v = cats[cat]
+        allr += v
+        L.append(f"| {cat} | {len(v)} | {gmean(v):.2f} | {statistics.median(v):.2f} | {sum(1 for x in v if x < 1)} |")
+    L.append(f"| **all** | {len(allr)} | **{gmean(allr):.2f}** | {statistics.median(allr):.2f} | {sum(1 for x in allr if x < 1)} |")
+    L.append("")
+    L.extend(NOTES)
+    L.append("Conformance compares whole tests: the native kernel's CPU time for a process running the one")
+    L.append("test (one rayon thread, less an empty run's) with the same tests' times on the former OCCT")
+    L.append("backend (`bench/occt_conformance_times.txt`, wall times to 1 ms). They include the tests'")
+    L.append("own checks (mass properties and meshes at 0.01 mm), not only the modelling operations.")
+    L.append("")
+    worst = sorted([r for r in rows + conf_rows if r[5] is not None], key=lambda r: -r[5])[:20]
+    L.append("## The 20 worst ratios")
+    L.append("")
+    L.append("| Case | Category | Native ms | OCCT ms | Ratio |")
+    L.append("|---|---|---:|---:|---:|")
+    for cat, name, ours, mt, occ, ratio in worst:
+        ot = ours["cpu"] if isinstance(ours, dict) else ours
+        oo = occ["cpu"] if isinstance(occ, dict) else occ
+        L.append(f"| `{name}` | {cat} | {ot:.2f} | {oo:.2f} | {ratio:.1f} |")
+    L.append("")
+    L.append("## Failures")
+    L.append("")
+    L.append("Cases one side doesn't complete (they pass in the native kernel's test suites, so a native")
+    L.append("failure here is a difference between the suite and the bench, e.g. a time-out).")
+    L.append("")
+    L.append("| Case | Native | OCCT |")
+    L.append("|---|---|---|")
+    for cat, name, ours, mt, occ, ratio in rows:
+        if ratio is None:
+            a = f"{ours['cpu']:.2f} ms" if ours.get("ok") else ours.get("msg", "")[:80]
+            b = f"{occ['cpu']:.2f} ms" if occ.get("ok") else occ.get("msg", "missing")[:80]
+            L.append(f"| `{name}` | {a} | {b} |")
+    L.append("")
+    L.append("## All cases")
+    L.append("")
+    L.append("CPU ms on one thread; `mt` wall ms on the default pool.")
+    L.append("")
+    L.append("| Case | Category | Native | Native mt | OCCT | Ratio |")
+    L.append("|---|---|---:|---:|---:|---:|")
+    for cat, name, ours, mt, occ, ratio in sorted(rows, key=lambda r: (r[0], r[1])):
+        f = lambda d, k: f"{d[k]:.2f}" if d.get("ok") else "fail"
+        L.append(f"| `{name}` | {cat} | {f(ours, 'cpu')} | {f(mt, 'wall')} | {f(occ, 'cpu')} | {'' if ratio is None else f'{ratio:.2f}'} |")
+    for cat, name, t, tm, o, ratio in conf_rows:
+        L.append(f"| `{name}` | {cat} | {t:.2f} | {'' if tm is None else f'{tm:.2f}'} | {'' if o is None else f'{o:.2f}'} | {'' if ratio is None else f'{ratio:.2f}'} |")
+    with open(path, "w") as f:
+        f.write("\n".join(L) + "\n")
+    return cats, worst
+
+
+def cargo_build(target):
+    env = dict(os.environ, CARGO_TARGET_DIR=target)
+    env.setdefault("CARGO_BUILD_JOBS", "3")
+    subprocess.run(["cargo", "build", "-r", "-p", "cadrs_kernel", "--example", "kernel_bench"], cwd=REPO, env=env, check=True)
+    p = subprocess.run(["cargo", "test", "-r", "-p", "cadrs_kernel", "--test", "conformance", "--no-run", "--message-format=json"], cwd=REPO, env=env, check=True, capture_output=True, text=True)
+    conf = None
+    for l in p.stdout.splitlines():
+        e = json.loads(l)
+        if e.get("reason") == "compiler-artifact" and e.get("target", {}).get("name") == "conformance" and e.get("executable"):
+            conf = e["executable"]
+    return os.path.join(target, "release", "examples", "kernel_bench"), conf
+
+
+def main():
+    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("--out", default=os.path.join(REPO, "target", "kernel_perf"))
+    ap.add_argument("--reps", type=int, default=5)
+    ap.add_argument("--timeout", type=int, default=180)
+    ap.add_argument("--only", help="categories to (re)run, comma-separated; others keep their results")
+    ap.add_argument("--stride-boolean", type=int, default=12)
+    ap.add_argument("--stride-blend", type=int, default=2)
+    ap.add_argument("--stride-offset", type=int, default=4)
+    ap.add_argument("--report-only", action="store_true")
+    ap.add_argument("--doc", default=os.path.join(REPO, "docs", "PERF.md"))
+    a = ap.parse_args()
+    os.makedirs(a.out, exist_ok=True)
+    rpath = os.path.join(a.out, "results.json")
+    R = json.load(open(rpath)) if os.path.exists(rpath) else {}
+    if not a.report_only:
+        target = os.environ.get("CARGO_TARGET_DIR", os.path.join(REPO, "target"))
+        bench, conf_bin = cargo_build(target)
+        occt_bin = os.path.join(a.out, "occt_bench")
+        subprocess.run([os.path.join(REPO, "tools", "occt_bench", "build.sh"), occt_bin], check=True)
+        strides = {"boolean": a.stride_boolean, "blend": a.stride_blend, "offset": a.stride_offset}
+        cases = occt_cases(strides) + smlib_cases() + model_cases() + step_cases(a.out)
+        only = set(a.only.split(",")) if a.only else None
+        if only:
+            cases = [c for c in cases if c[1] in only]
+        raw = os.path.join(a.out, "cases.txt")
+        write_cases(raw, cases)
+        ours_f, occt_f = os.path.join(a.out, "cadrs.cases"), os.path.join(a.out, "occt.cases")
+        subprocess.run([bench, "prep", raw, ours_f, occt_f, os.path.join(a.out, "step")], check=True)
+        names = case_names(ours_f)
+        one = dict(os.environ, RAYON_NUM_THREADS="1")
+        for key, cmd, f, env in [("cadrs_1t", [bench, "run"], ours_f, one), ("occt_1t", [occt_bin], occt_f, one), ("cadrs_mt", [bench, "run"], ours_f, dict(os.environ))]:
+            res, loads = run_side(key, cmd, f, names, env, a.timeout, a.reps)
+            old = {n: r for n, r in R.get(key, {}).items() if only and r["category"] not in only}
+            R[key] = {**old, **res}
+            R.setdefault("meta", {})[f"load_{key}"] = f"{min(loads):.0f}–{max(loads):.0f}"
+        if not only or "conformance" in only:
+            R["conformance_1t"] = conformance(conf_bin, a.reps, 1)
+            R["conformance_mt"] = conformance(conf_bin, a.reps, None)
+            R["occt_conformance"] = occt_conformance()
+        git = subprocess.run(["git", "rev-parse", "--short", "HEAD"], cwd=REPO, capture_output=True, text=True).stdout.strip()
+        cpu = next((l.split(":", 1)[1].strip() for l in open("/proc/cpuinfo") if l.startswith("model name")), "?")
+        R["meta"].update({"date": time.strftime("%Y-%m-%d"), "git": git, "cpu": cpu, "cores": os.cpu_count(), "reps": a.reps})
+        json.dump(R, open(rpath, "w"), indent=1)
+    cats, worst = report(R, a.doc)
+    for c in sorted(cats):
+        print(f"{c:16} {len(cats[c]):4} cases  geomean {gmean(cats[c]):.2f}")
+
+
+if __name__ == "__main__":
+    main()

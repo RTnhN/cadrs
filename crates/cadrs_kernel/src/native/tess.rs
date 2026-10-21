@@ -756,7 +756,11 @@ fn vx(dom: &Domain, uv: P2, p: Option<P3>, (mu, mv): (f64, f64)) -> Vx {
     let (q, su, sv) = dom.d1(uv);
     let n = su.cross(&sv);
     let l = n.norm();
-    let smooth = l > 1e-10 * su.norm() * sv.norm() && l > 1e-300;
+    // At a pole or an apex a derivative vanishes, but only to rounding: a cone's Su there is
+    // 1e-15 long and may point either way, its normal the other nappe's (turned by π against its
+    // neighbours', which the angle refinement then splits for ever). Against the face's mean
+    // speeds, such a point has no normal of its own.
+    let smooth = l > 1e-10 * su.norm() * sv.norm() && l > 1e-300 && su.norm() > 1e-9 * mu && sv.norm() > 1e-9 * mv;
     let n = if smooth { n / l } else { dom.normal(uv) };
     Vx { at: SPoint::new(tiny(uv.x * mu), tiny(uv.y * mv)), uv, p: p.unwrap_or(q), n, smooth, fresh: false }
 }
@@ -1369,6 +1373,27 @@ pub fn check_triangles(tris: impl IntoIterator<Item = [P3; 3]>) -> MeshCheck {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Regression (W12): the closed B-spline cones of SMLib's `box_cone_grid.smp`, read as cones,
+    /// put their apex row a rounding error past the apex, where Su × Sv points the other nappe's
+    /// way. Taken as smooth, those normals turned π against their neighbours' and the angle
+    /// refinement split the triangles by the apex for ever: 20 000 triangles at any chord and
+    /// 0.3 to 0.7 s a face. A point whose derivative vanishes has no normal of its own.
+    #[test]
+    fn cone_apex_rows_dont_refine_for_ever() {
+        let p = format!("{}/tests/data/smlib/booleans/box_cone_grid.smp", env!("CARGO_MANIFEST_DIR"));
+        let part = super::super::smb::read_part(&std::fs::read(p).unwrap()).unwrap();
+        let mut cones = 0;
+        for b in &part.breps {
+            let es = edge_samples(&b.body, 0.1, 0.5);
+            for f in b.body.faces.iter().filter(|f| matches!(f.surf, Surface::Cone { .. })) {
+                cones += 1;
+                let m = mesh_face(&b.body, f, &es, 0.1, 0.5);
+                assert!(!m.indices.is_empty() && m.indices.len() < 500, "{} triangles on a cone of radius 10 at most", m.indices.len());
+            }
+        }
+        assert!(cones > 0);
+    }
 
     #[test]
     fn params_are_checked() {

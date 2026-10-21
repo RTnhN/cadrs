@@ -49,10 +49,7 @@ impl Curve {
                 let (s, co) = t.sin_cos();
                 (c + x * (a * co) + y * (b * s), y * (b * co) - x * (a * s), -(x * (a * co) + y * (b * s)))
             }
-            Curve::Nurbs(n) => {
-                let d = n.ders(t, 2);
-                (P3::from(d[0]), d[1], d[2])
-            }
+            Curve::Nurbs(n) => n.ders2(t),
         }
     }
 

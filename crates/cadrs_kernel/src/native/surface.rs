@@ -74,11 +74,15 @@ impl Surface {
             Surface::Cone { f, r, a } => f.o + (f.x * u.cos() + f.y * u.sin()) * (r + v * a.sin()) + f.z * (v * a.cos()),
             Surface::Sphere { f, r } => f.o + (f.x * u.cos() + f.y * u.sin()) * (r * v.cos()) + f.z * (r * v.sin()),
             Surface::Torus { f, rmaj, rmin } => f.o + (f.x * u.cos() + f.y * u.sin()) * (rmaj + rmin * v.cos()) + f.z * (rmin * v.sin()),
+            Surface::Nurbs(n) => n.point(u, v),
             _ => P3::from(self.d2(u, v)[0]),
         }
     }
 
     pub fn d1(&self, u: f64, v: f64) -> (P3, V3, V3) {
+        if let Surface::Nurbs(n) = self {
+            return n.ders1(u, v);
+        }
         let d = self.d2(u, v);
         (P3::from(d[0]), d[1], d[2])
     }

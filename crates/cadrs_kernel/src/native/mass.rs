@@ -24,7 +24,13 @@ pub type Q = [f64; NQ];
 #[inline]
 fn integrand(s: &Surface, u: f64, v: f64, shift: &V3, out: &mut Q, w: f64) {
     let (p, su, sv) = s.d1(u, v);
-    let n = su.cross(&sv);
+    accumulate(&p, &su, &sv, shift, out, w);
+}
+
+/// [`integrand`] from the point and first derivatives.
+#[inline]
+fn accumulate(p: &P3, su: &V3, sv: &V3, shift: &V3, out: &mut Q, w: f64) {
+    let n = su.cross(sv);
     let a = n.norm() * w;
     let (x, y, z) = (p.x - shift.x, p.y - shift.y, p.z - shift.z);
     let (nx, ny, nz) = (n.x * w, n.y * w, n.z * w);
@@ -115,11 +121,20 @@ fn inner(s: &Surface, u0: f64, u: f64, v: f64, shift: &V3, w: f64, acc: &mut Q, 
     // Along u an analytic surface's integrand is a low trigonometric polynomial over pieces of
     // at most π/8: eight points are exact to rounding there.
     let g = if matches!(s, Surface::Nurbs(_) | Surface::Extrusion { .. }) { &GAUSS16 } else { &GAUSS8 };
+    // A B-spline surface along u at this v: its control net contracted along v once, then a
+    // curve's evaluation per point.
+    let iso = if let Surface::Nurbs(ns) = s { Some(ns.iso_v(v, u0, u)) } else { None };
     for k in 0..scratch.len() - 1 {
         let (lo, hi) = (scratch[k], scratch[k + 1]);
         let (m, r) = ((lo + hi) * 0.5, (hi - lo) * 0.5);
         for (x, gw) in g.x.iter().zip(g.w) {
-            integrand(s, m + r * x, v, shift, acc, w * gw * r);
+            match &iso {
+                Some(iso) => {
+                    let (p, su, sv) = iso.d1(m + r * x);
+                    accumulate(&p, &su, &sv, shift, acc, w * gw * r);
+                }
+                None => integrand(s, m + r * x, v, shift, acc, w * gw * r),
+            }
         }
     }
 }

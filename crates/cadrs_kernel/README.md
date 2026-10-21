@@ -324,6 +324,25 @@ CPU. Build the shaders with `cargo gpu build --shader-crate crates/cadrs_gpu_ker
 --output-dir crates/cadrs_gpu/shaders` (cargo-gpu: `cargo +nightly-2026-07-03 install
 cargo-gpu --version 0.11.0 --locked`).
 
+## Performance
+
+`tools/kernel_perf.py` times the kernel against OCCT 7.8 on the same operations and inputs and
+writes `docs/PERF.md` (per case, per category, the 20 worst ratios). Both sides read one
+DRAW-like case file: `examples/kernel_bench.rs` runs it on the native kernel, `tools/occt_bench`
+(C++, a static OCCT) on OCCT. The cases are OCCT's own boolean, blend, offset, pipe and draft
+cases that pass here, SMLib's fillet, boolean and offset cases, meshes and mass properties of the
+largest SMLib models, and STEP files of OCCT's dataset; plus the conformance suite against its
+former OCCT backend's times. Time is CPU time on one thread (the machine is shared). Geometric
+mean of native / OCCT per category, 2026-10-21:
+
+| Faster than OCCT | About even | Slower |
+|---|---|---|
+| booleans 0.48 (OCCT cases), 0.17 (SMLib); 2D offsets and offset shapes 0.17; STEP export 0.16; mass properties 0.52 against OCCT's adaptive integration to 1e-9; conformance 0.36 | meshing 0.97 | fillets 9.2 (OCCT blend), 10.3 (SMLib); sweeps 2.4; drafts 1.9; STEP import 1.9; mass properties 11 against OCCT's fixed Gauss rules (1e-3 off on the blade hubs) |
+
+All 648 cases: 0.65; `docs/PERF.md` lists the slowest. B-spline evaluation (`native::nurbs`) is
+allocation-free up to degree 7, and mass properties contract a B-spline face along v once per
+inner integral (`NurbsSurface::iso_v`).
+
 ## Conformance suite
 The expected values come from the Onshape course exercises (see `reference/onshape/training/`):
 - Control Arm: volume 368 749.705 mm³.
