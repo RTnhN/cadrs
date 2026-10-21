@@ -246,11 +246,17 @@ pub fn face_slab(b: &Body, fi: usize, d: f64) -> Result<Body> {
     }
     let sh = xb.shell(faces, true);
     xb.solid(vec![sh]);
-    let (body, warnings) = xb.finish();
+    let (mut body, warnings) = xb.finish();
     if std::env::var_os("CADRS_SLAB_DEBUG").is_some() {
         eprintln!("slab of face {fi} ({:?}) by {d}: {warnings:?}", f.surf.kind());
     }
-    let issues = body.check();
+    let mut issues = body.check();
+    // A slab whose faces all point in (its closed shell oriented the wrong way round): turned
+    // inside out.
+    if !issues.is_empty() && issues.iter().all(|s| s.contains("encloses a volume")) {
+        body.faces.iter_mut().for_each(Body::reverse_face);
+        issues = body.check();
+    }
     if !issues.is_empty() || body.solids.is_empty() {
         return Err(KernelError::OperationFailed(format!("the face's slab isn't valid: {}", issues.first().map_or("no solid", |s| s.as_str()))));
     }

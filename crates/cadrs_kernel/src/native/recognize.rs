@@ -1,6 +1,6 @@
 //! B-splines that are exactly simple geometry, recognised so the exact algorithms (analytic
 //! intersections, blend sections, offsets) apply to them: curves that are lines or circular
-//! arcs, surfaces that are planes, cylinders, cones or spheres. Files from systems that write
+//! arcs, surfaces that are planes, cylinders, cones, spheres or tori. Files from systems that write
 //! everything as NURBS (SMLib's, many STEP exporters') then model like native geometry.
 //!
 //! Each test samples the B-spline on a grid and accepts the candidate only when every sample
@@ -93,10 +93,10 @@ fn extrusion(n: &NurbsSurface) -> Option<Surface> {
     None
 }
 
-/// The plane, cylinder, cone or sphere a B-spline surface is, if it is one (checked: every
-/// sample lies on the surface returned, by its own distance).
+/// The plane, cylinder, cone, sphere or torus a B-spline surface is, if it is one (checked:
+/// every sample lies on the surface returned, by its own distance).
 pub fn surface(n: &NurbsSurface) -> Option<Surface> {
-    let cand = candidate(n).or_else(|| extrusion(n))?;
+    let cand = candidate(n).or_else(|| torus(n)).or_else(|| extrusion(n))?;
     let ((u0, u1), (v0, v1)) = n.range();
     let mut bb = Bbox::empty();
     let m = 10;
@@ -110,6 +110,57 @@ pub fn surface(n: &NurbsSurface) -> Option<Surface> {
     }
     let tol = bb.diagonal() * REL * 10.0;
     pts.iter().all(|p| cand.distance(p) < tol).then_some(cand)
+}
+
+/// A torus: the iso lines one way are circles about one axis (their normals along it, their
+/// centres on it), and an iso line the other way is a circle in a plane through the axis (the
+/// meridian), its centre off the axis.
+fn torus(n: &NurbsSurface) -> Option<Surface> {
+    let ((u0, u1), (v0, v1)) = n.range();
+    let m = 12;
+    let at = |i: usize, j: usize| n.point(u0 + (u1 - u0) * i as f64 / m as f64, v0 + (v1 - v0) * j as f64 / m as f64);
+    let mut bb = Bbox::empty();
+    for i in 0..=m {
+        for j in 0..=m {
+            bb.add(&at(i, j));
+        }
+    }
+    let tol = bb.diagonal() * REL * 10.0;
+    // The circle through a line of samples, when they all lie on it.
+    let circle = |ps: &[P3]| -> Option<(P3, V3, f64)> {
+        let k = ps.len();
+        let (c, nn, r) = circle3(&ps[0], &ps[k / 3], &ps[2 * k / 3])?;
+        ps.iter().all(|p| ((p - c).norm() - r).abs() < tol && (p - c).dot(&nn).abs() < tol).then_some((c, nn, r))
+    };
+    // Rows along v at fixed u (`by_u`), or along u at fixed v.
+    let row = |by_u: bool, k: usize| -> Vec<P3> { (0..=m).map(|t| if by_u { at(k, t) } else { at(t, k) }).collect() };
+    for by_u in [true, false] {
+        let rings: Option<Vec<(P3, V3, f64)>> = [0, m / 2, m].iter().map(|&k| circle(&row(by_u, k))).collect();
+        let Some(rings) = rings else { continue };
+        let (c0, a, _) = rings[0];
+        let on_axis = |c: &P3| ((c - c0) - a * (c - c0).dot(&a)).norm() < tol;
+        if !rings.iter().all(|(c, nn, _)| nn.cross(&a).norm() < 1e-7 && on_axis(c)) {
+            continue;
+        }
+        // The meridian: a row the other way.
+        let Some((mc, mn, rmin)) = circle(&row(!by_u, 0)) else { continue };
+        // In a plane through the axis: its normal square to the axis, its centre's plane
+        // holding the axis.
+        if mn.dot(&a).abs() > 1e-7 || (c0 - mc).dot(&mn).abs() > tol {
+            continue;
+        }
+        let o = c0 + a * (mc - c0).dot(&a);
+        let radial = mc - o;
+        let rmaj = radial.norm();
+        if rmaj < tol {
+            continue;
+        }
+        // The seam (u = 0) towards the patch's first corner.
+        let corner = at(0, 0);
+        let x = ((corner - o) - a * (corner - o).dot(&a)).try_normalize(1e-12).unwrap_or_else(|| radial / rmaj);
+        return Some(Surface::Torus { f: Frame { o, x, y: a.cross(&x), z: a }, rmaj, rmin });
+    }
+    None
 }
 
 fn candidate(n: &NurbsSurface) -> Option<Surface> {

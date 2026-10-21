@@ -38,7 +38,34 @@ fn face_slab(b: &Body, fi: usize, d: f64) -> Result<Body> {
     let mut k = NativeKernel::new();
     let id = k.insert(tmp);
     let prof = Profile::new(plane, vec![]);
-    let mf = super::features::face_as_profile(&k, &prof, &FaceInput { body: id, face: FaceId(0), source: 0 })?;
+    let mut mf = super::features::face_as_profile(&k, &prof, &FaceInput { body: id, face: FaceId(0), source: 0 })?;
+    // A closed spline edge would sweep a band round a closed, non-periodic surface (one seam
+    // edge used twice), which the boolean doesn't take: in two halves, two plain sides.
+    let halve = |l: &mut super::profile::Loop2| {
+        *l = l
+            .drain(..)
+            .flat_map(|p| {
+                let closed = matches!(p.c, Curve::Nurbs(_)) && (p.c.point(p.t0) - p.c.point(p.t1)).norm() < 1e-9 * (1.0 + p.c.point(p.t0).coords.norm());
+                if closed {
+                    let m = 0.5 * (p.t0 + p.t1);
+                    let (mut a, mut b) = (p.clone(), p);
+                    // The halves in the loop's order (a reversed piece runs from t1 to t0).
+                    if a.rev {
+                        a.t0 = m;
+                        b.t1 = m;
+                    } else {
+                        a.t1 = m;
+                        b.t0 = m;
+                    }
+                    vec![a, b]
+                } else {
+                    vec![p]
+                }
+            })
+            .collect();
+    };
+    halve(&mut mf.outer);
+    mf.holes.iter_mut().for_each(halve);
     let dir = if d >= 0.0 { n } else { -n };
     let kind = super::sweep::Prism { plane, dir };
     Ok(super::sweep::sweep_full(&[mf], &[], &kind, 0.0, d.abs(), false, true)?.body)
@@ -152,10 +179,7 @@ fn combine(acc: &Body, piece: &Body, op: BoolOp, what: &dyn Fn() -> String) -> R
             super::kernel::dump("offset-tool", piece, &format!("{op:?} {}", what()));
         }
     };
-    // TODO(W6): the bracket2 offsets (smlib_offset 10, 11, 15a, 15b) go on from a union whose
-    // faces' p-curves don't close; drop the opt-out once they don't depend on it.
-    let opts = super::boolean::BoolOptions { allow_uv_gaps: true, ..Default::default() };
-    let r = super::boolean::boolean_bodies_with(acc, piece, op, opts)
+    let r = boolean_bodies(acc, piece, op)
         .inspect_err(|e| {
             if debug {
                 eprintln!("offset: {op:?} with {}: {e:?}", what());
@@ -163,12 +187,29 @@ fn combine(acc: &Body, piece: &Body, op: BoolOp, what: &dyn Fn() -> String) -> R
             dump();
         })?
         .body;
-    // Debugging: a result the boolean let through invalid.
-    if debug && let Some(e) = r.check().first() {
-        eprintln!("offset: {op:?} with {} is invalid: {e}", what());
+    // A result the boolean let through invalid is a failure: the piece is tried again later
+    // (never built on).
+    if let Some(e) = r.check().first() {
+        if debug {
+            eprintln!("offset: {op:?} with {} is invalid: {e}", what());
+        }
         dump();
+        return Err(KernelError::OperationFailed(format!("the boolean with {} isn't valid: {e}", what())));
     }
     Ok(r)
+}
+
+/// The body with its adjacent faces on one surface merged (a face imprinted with a region of
+/// its own plane): the offset doesn't depend on how a surface is split, but the pieces' slabs
+/// would meet along bands on one surface, which the boolean can't settle. Unchanged when the
+/// merge doesn't give a valid solid.
+fn merged(b: &Body) -> Body {
+    let mut k = NativeKernel::new();
+    let id = k.insert(b.clone());
+    match crate::Kernel::simplify(&mut k, id).ok().and_then(|r| r.bodies.first().and_then(|x| k.get(*x).ok()).map(|x| (**x).clone())) {
+        Some(m) if m.check().is_empty() && m.faces.len() < b.faces.len() => m,
+        _ => b.clone(),
+    }
 }
 
 /// The body grown by a ball of radius d (all faces moved out by d, edges and corners rounded).
@@ -177,6 +218,8 @@ pub fn offset_rounded(b: &Body, dist: &[f64]) -> Result<Body> {
     if dist.iter().any(|x| (x - d).abs() > 1e-12) || d <= 0.0 {
         return Err(KernelError::Unsupported("rounded offsets with different distances per face"));
     }
+    let merged = merged(b);
+    let b = &merged;
     let mut pieces: Vec<(Body, String)> = Vec::new();
     for fi in 0..b.faces.len() {
         pieces.push((face_slab(b, fi, d)?, format!("the slab of face {fi} ({:?})", b.faces[fi].surf.kind())));

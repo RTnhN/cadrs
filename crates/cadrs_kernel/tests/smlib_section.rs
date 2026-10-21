@@ -138,7 +138,7 @@ fn section(file: &str, mv: [f64; 3], n: [f64; 3], planes: &[Plane]) -> Result<()
 /// SMLib advanced section 1: `torus.smb` moved by (0, 0, 0), 7 planes square to (0, 1, 0); SMLib's test asserts `lNumFound == 14 || lNumFound == 16`, SMLib (the oracle) finds 9 curves, lengths 0, 54.56, 74.16, 0, 111.2, 54.56, 0.
 #[test]
 fn section_1_torus_y() {
-    known_failure(section("torus.smb", [0.0, 0.0, 0.0], [0.0, 1.0, 0.0], &[
+    section("torus.smb", [0.0, 0.0, 0.0], [0.0, 1.0, 0.0], &[
         Plane { at: [-15.00002, -15.00002, -5.00002], length: 0.0, loops: (0, 1) },
         Plane { at: [-10.0000133333, -10.0000133333, -3.33334666667], length: 54.55523374559993, loops: (1, 1) },
         Plane { at: [-5.00000666667, -5.00000666667, -1.66667333333], length: 74.14342473561146, loops: (1, 2) },
@@ -146,13 +146,13 @@ fn section_1_torus_y() {
         Plane { at: [5.00000666667, 5.00000666667, 1.66667333333], length: 74.14342473561146, loops: (1, 2) },
         Plane { at: [10.0000133333, 10.0000133333, 3.33334666667], length: 54.55523374559993, loops: (1, 1) },
         Plane { at: [15.00002, 15.00002, 5.00002], length: 0.0, loops: (0, 1) },
-    ]), "section", "section_1_torus_y");
+    ]).unwrap();
 }
 
 /// SMLib advanced section 2: `torus.smb` moved by (0, -40, 0), 7 planes square to (0, 0, 1); SMLib's test asserts `lNumFound == 13`, SMLib (the oracle) finds 0 curves, lengths 0, 0, 0, 0, 0, 0, 0.
 #[test]
 fn section_2_torus_z() {
-    known_failure(section("torus.smb", [0.0, -40.0, 0.0], [0.0, 0.0, 1.0], &[
+    section("torus.smb", [0.0, -40.0, 0.0], [0.0, 0.0, 1.0], &[
         Plane { at: [-15.00002, -55.00002, -5.00002], length: 0.0, loops: (0, 1) },
         Plane { at: [-10.0000133333, -50.0000133333, -3.33334666667], length: 125.66370614359172, loops: (2, 2) },
         Plane { at: [-5.00000666667, -45.0000066667, -1.66667333333], length: 125.66370614359172, loops: (2, 2) },
@@ -160,13 +160,13 @@ fn section_2_torus_z() {
         Plane { at: [5.00000666667, -34.9999933333, 1.66667333333], length: 125.66370614359172, loops: (2, 2) },
         Plane { at: [10.0000133333, -29.9999866667, 3.33334666667], length: 125.66370614359172, loops: (2, 2) },
         Plane { at: [15.00002, -24.99998, 5.00002], length: 0.0, loops: (0, 1) },
-    ]), "section", "section_2_torus_z");
+    ]).unwrap();
 }
 
 /// SMLib advanced section 3: `torus.smb` moved by (-40, -40, 0), 7 planes square to (1, 0, 0); SMLib's test asserts `lNumFound == 16 || lNumFound == 17`, SMLib (the oracle) finds 12 curves, lengths 0, 54.56, 74.15, 0, 74.22, 54.56, 0.
 #[test]
 fn section_3_torus_x() {
-    known_failure(section("torus.smb", [-40.0, -40.0, 0.0], [1.0, 0.0, 0.0], &[
+    section("torus.smb", [-40.0, -40.0, 0.0], [1.0, 0.0, 0.0], &[
         Plane { at: [-55.00002, -55.00002, -5.00002], length: 0.0, loops: (0, 1) },
         Plane { at: [-50.0000133333, -50.0000133333, -3.33334666667], length: 54.55523374559994, loops: (1, 1) },
         Plane { at: [-45.0000066667, -45.0000066667, -1.66667333333], length: 74.14342469159959, loops: (1, 2) },
@@ -174,5 +174,5 @@ fn section_3_torus_x() {
         Plane { at: [-34.9999933333, -34.9999933333, 1.66667333333], length: 74.14342469159959, loops: (1, 2) },
         Plane { at: [-29.9999866667, -29.9999866667, 3.33334666667], length: 54.55523374559993, loops: (1, 1) },
         Plane { at: [-24.99998, -24.99998, 5.00002], length: 0.0, loops: (0, 1) },
-    ]), "section", "section_3_torus_x");
+    ]).unwrap();
 }

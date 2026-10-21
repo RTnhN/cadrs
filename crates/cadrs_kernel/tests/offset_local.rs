@@ -147,3 +147,70 @@ fn seam_on_a_closed_spline_moves() {
     let out = one(k.offset(spline, &OffsetSpec { distance: 1.0, faces: vec![], sharp: true }).unwrap());
     close(volume(&k, out), PI * 36.0 * 12.0, 1e-5);
 }
+
+/// OCCT's offset of an L-shaped prism (a 2 × 2 square less its 1 × 1 corner, 1 deep) by 1
+/// with the inner riser moved 3: the riser passes the outer side, so the step between them
+/// vanishes and so does the outer side (the riser moved past it): the 5 × 4 rectangle, 3 deep.
+#[test]
+fn sharp_offset_where_faces_vanish() {
+    let mut k = NativeKernel::new();
+    let b = prism(&mut k, polygon(&[(0.0, 0.0), (2.0, 0.0), (2.0, 1.0), (1.0, 1.0), (1.0, 2.0), (0.0, 2.0)]), vec![], 1.0);
+    let riser = k.faces(b).unwrap().into_iter().find(|f| f.plane.is_some_and(|p| p.normal.x > 0.5) && (f.center.x - 1.0).abs() < 1e-9).expect("no riser").id;
+    let out = one(k.offset(b, &OffsetSpec { distance: 1.0, faces: vec![(riser, 3.0)], sharp: true }).unwrap());
+    close(volume(&k, out), 5.0 * 4.0 * 3.0, 1e-9);
+}
+
+/// Every hole of every face lies inside its face's outer loop in (u, v).
+fn holes_inside(b: &cadrs_kernel::native::topo::Body) -> std::result::Result<(), String> {
+    use cadrs_kernel::native::topo::co_range;
+    for (fi, f) in b.faces.iter().enumerate() {
+        let polys: Vec<Vec<(f64, f64)>> = f
+            .loops
+            .iter()
+            .map(|l| {
+                l.iter()
+                    .flat_map(|c| {
+                        let e = &b.edges[c.edge];
+                        let (t0, t1) = co_range(e, c.fwd);
+                        (0..16).map(move |i| {
+                            let q = c.pc.point(t0 + (t1 - t0) * i as f64 / 16.0);
+                            (q.x, q.y)
+                        })
+                    })
+                    .collect()
+            })
+            .collect();
+        let inside = |p: (f64, f64), poly: &[(f64, f64)]| {
+            let mut w = false;
+            for i in 0..poly.len() {
+                let (a, c) = (poly[i], poly[(i + 1) % poly.len()]);
+                if (a.1 > p.1) != (c.1 > p.1) && p.0 < a.0 + (p.1 - a.1) * (c.0 - a.0) / (c.1 - a.1) {
+                    w = !w;
+                }
+            }
+            w
+        };
+        for (li, h) in polys.iter().enumerate().skip(1) {
+            if h.iter().any(|p| !inside(*p, &polys[0])) {
+                return Err(format!("face {fi}: hole {li} isn't inside the outer loop"));
+            }
+        }
+    }
+    Ok(())
+}
+
+/// OCCT's draft angle J4: a box fused onto a cylinder's side, its face drafted; the hole the
+/// box leaves in the cylinder grows across the cylinder's seam, which has to move round out
+/// of it (the hole may not straddle the seam).
+#[test]
+fn draft_moves_a_seam_out_of_a_hole() {
+    use cadrs_kernel::native::draw;
+    let mut k = NativeKernel::new();
+    let p = k.plane(0.0, 0.0, 0.0, 1.0, 0.0, 0.0);
+    let p = k.pcylinder_on(&p, 10.0, 20.0).unwrap();
+    let bx = k.box_at(5.0, 0.5, 0.0, 10.0, 5.0, 20.0).unwrap();
+    let f = k.bfuse(&p, &bx).unwrap();
+    let faces = k.nexplode_faces(&f).unwrap();
+    let draw::Shape::Body(r) = k.depouille(&f, [0.0, 0.0, 1.0], &[(&faces[3], 5.0, [0.0, 0.0, 20.0], [0.0, 0.0, 1.0])]).unwrap() else { panic!("not a body") };
+    holes_inside(k.get(r).unwrap()).unwrap();
+}

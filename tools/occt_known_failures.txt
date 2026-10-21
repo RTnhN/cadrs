@@ -410,7 +410,6 @@ offset shape_type_i_c_v8
 offset shape_type_i_c_w1
 offset shape_type_i_c_w6
 offset shape_type_i_c_w7
-offset shape_type_i_c_y2
 offset shape_type_i_d2
 offset shape_type_i_d3
 offset shape_type_i_d4
@@ -754,14 +753,6 @@ offset compshape_a2
 offset compshape_a4
 offset compshape_a6
 offset compshape_a7
-offset shape_type_i_c_p3
-offset shape_type_i_c_v4
-offset shape_type_i_c_y3
-offset shape_type_i_c_y4
-offset shape_type_i_c_y5
-offset shape_type_i_c_y6
-offset shape_type_i_c_y7
-offset shape_type_i_c_y8
 # boolean: topology counts differ from OCCT's (faces split or merged differently).
 boolean bopcut_complex_e5
 boolean cells_test_j1
