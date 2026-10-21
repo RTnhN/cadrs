@@ -111,6 +111,28 @@ fn outward_shell_with_sharp_corners() {
     close(volume(&k, out), 108.0 * 68.0 * 44.0 - 100.0 * 60.0 * 40.0, 1e-9);
 }
 
+/// A rounded inward shell of a 20 × 10 block with a fin 2 thick (x 9–11, out to y = 15), all
+/// 10 high, bottom open, 1.5 thick: the fin's walls cross (it is thinner than two walls), so it
+/// stays solid (OCCT's thick solids keep such ribs; this was refused as walls that intersect
+/// themselves). The cavity is the block's 17 × 7 × 8.5 and, under the fin's root, the part of
+/// its 2 × 1.5 strip farther than 1.5 from both concave corners (less two quarter discs, which
+/// overlap by half a lens), 8.5 high.
+#[test]
+fn rounded_shell_keeps_a_thin_fin_solid() {
+    let mut k = NativeKernel::new();
+    let b = prism(&mut k, polygon(&[(0.0, 0.0), (20.0, 0.0), (20.0, 10.0), (11.0, 10.0), (11.0, 15.0), (9.0, 15.0), (9.0, 10.0), (0.0, 10.0)]), vec![], 10.0);
+    let bottom = face_at(&k, b, -Vector3::z(), 0.0);
+    let spec = ShellSpec { remove: vec![bottom], thickness: 1.5, outward: false, hollow: false, sharp: false };
+    let out = one(k.shell_with(b, &spec).unwrap());
+    let r: f64 = 1.5;
+    let half_lens = r * r * (1.0 / r).acos() - (r * r - 1.0).sqrt();
+    let strip = 2.0 * r - (2.0 * PI * r * r / 4.0 - half_lens);
+    close(volume(&k, out), 20.0 * 10.0 * 10.0 + 2.0 * 5.0 * 10.0 - (17.0 * 7.0 + strip) * 8.5, 1e-9);
+    // Sharp, the walls can't be made: an error.
+    let err = k.shell_with(b, &ShellSpec { sharp: true, ..spec }).unwrap_err();
+    assert!(err.to_string().contains("reduce the thickness"), "{err}");
+}
+
 /// A cube's top replaced by a cylinder across it whose axis lies above the top: the side
 /// planes cut the cylinder twice, and the domain (the upper half) picks the arcs. The result
 /// is the 10 × 10 × 12 block under a half round of radius 5 (SMLib's local operation 3).

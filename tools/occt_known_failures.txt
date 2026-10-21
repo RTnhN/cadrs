@@ -389,7 +389,6 @@ offset faces_type_i_l9
 offset faces_type_i_m1
 offset faces_type_i_m2
 offset faces_type_i_m3
-offset shape_type_a_a1
 offset shape_type_a_a8
 offset shape_type_i_a5
 offset shape_type_i_a9
@@ -735,15 +734,14 @@ feat featrevol_i9
 feat featrf_b2
 # feat: unsupported: revolved features up to a face and an angle.
 feat featrevol_a8
-# offsetcompshape / offsetonface / thickshell cases made runnable by those commands: thick solids whose
-# walls cross (compshape a1, a6, a7), booleans (a2), sharp offsets where faces vanish or meet new
-# neighbours (shape_type_i_c p3, v4, y3–y8; compshape a4), a thickened closed sphere face (bug26233).
+# offsetcompshape / offsetonface / thickshell cases made runnable by those commands: thick solids
+# whose expected volume is the input's ("real volume of result shape is unknown yet": compshape a1,
+# ours 434000; a4, where OCCT's command fails inside a catch, ours 67007), booleans (a2), a thickened
+# closed sphere face (bug26233).
 offset bugs_bug26233
 offset compshape_a1
 offset compshape_a2
 offset compshape_a4
-offset compshape_a6
-offset compshape_a7
 # boolean: topology counts differ from OCCT's (faces split or merged differently).
 boolean bopcut_complex_e5
 boolean cells_test_j1

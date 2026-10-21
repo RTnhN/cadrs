@@ -380,8 +380,9 @@ pub trait Kernel {
     /// ([`Kernel::shell_with`] inward, rounded joins).
     ///
     /// `InvalidParameter` for a thickness that isn't above zero, no face to remove, an unknown
-    /// face, or walls that would intersect themselves (too thick); `OperationFailed` when the
-    /// offset can't be built. History: the faces kept and the inner walls offset from them are
+    /// face, or walls so thick they leave no cavity (walls that cross only where the body is
+    /// thinner than two of them leave it solid there); `OperationFailed` when the offset can't
+    /// be built. History: the faces kept and the inner walls offset from them are
     /// `modified` from their input face; the removed faces are `deleted`.
     ///
     /// # Examples
@@ -447,8 +448,9 @@ pub trait Kernel {
     }
 
     /// The shell of Onshape's dialog (P3.6, PS16): faces removed, inward or outward, or a
-    /// closed hollow body. A shell whose walls would intersect themselves is an
-    /// `OperationFailed` error, never a wrong body. The default handles an inward shell.
+    /// closed hollow body. A shell whose walls would leave no cavity (or, with sharp corners,
+    /// would cross anywhere) is an `InvalidParameter` error, never a wrong body. The default
+    /// handles an inward shell.
     fn shell_with(&mut self, body: BodyId, spec: &ShellSpec) -> Result<OpResult> {
         if spec.outward || spec.hollow {
             return Err(KernelError::Unsupported("this shell"));

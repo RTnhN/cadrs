@@ -128,6 +128,16 @@ fn edge_tube(b: &Body, e: usize, r: f64) -> Result<Body> {
         }
         // Any other curve: a disc square to the edge at its start swept along it (a pipe).
         _ => {
+            // Where the edge curves tighter than the radius the pipe folds over itself: not a
+            // valid solid (and its booleans fail only after every retry).
+            let n = 256;
+            let tight = (0..=n).any(|i| {
+                let (_, d1, d2) = ed.curve.d2(ed.t[0] + (ed.t[1] - ed.t[0]) * i as f64 / n as f64);
+                d1.cross(&d2).norm() * r >= d1.norm().powi(3)
+            });
+            if tight {
+                return Err(KernelError::Unsupported("a tube round an edge curved tighter than its radius"));
+            }
             let p0 = ed.point(ed.t[0]);
             let t = ed.curve.tangent(ed.t[0]).try_normalize(1e-12).ok_or(KernelError::Unsupported("a tube round an edge with no direction"))?;
             let fr = Frame::from_z(p0, t);
@@ -179,24 +189,16 @@ fn combine(acc: &Body, piece: &Body, op: BoolOp, what: &dyn Fn() -> String) -> R
             super::kernel::dump("offset-tool", piece, &format!("{op:?} {}", what()));
         }
     };
-    let r = boolean_bodies(acc, piece, op)
+    // (The boolean returns only valid bodies, so a piece is never built on a broken result:
+    // one that fails is tried again later.)
+    Ok(boolean_bodies(acc, piece, op)
         .inspect_err(|e| {
             if debug {
                 eprintln!("offset: {op:?} with {}: {e:?}", what());
             }
             dump();
         })?
-        .body;
-    // A result the boolean let through invalid is a failure: the piece is tried again later
-    // (never built on).
-    if let Some(e) = r.check().first() {
-        if debug {
-            eprintln!("offset: {op:?} with {} is invalid: {e}", what());
-        }
-        dump();
-        return Err(KernelError::OperationFailed(format!("the boolean with {} isn't valid: {e}", what())));
-    }
-    Ok(r)
+        .body)
 }
 
 /// The body with its adjacent faces on one surface merged (a face imprinted with a region of
@@ -218,17 +220,68 @@ pub fn offset_rounded(b: &Body, dist: &[f64]) -> Result<Body> {
     if dist.iter().any(|x| (x - d).abs() > 1e-12) || d <= 0.0 {
         return Err(KernelError::Unsupported("rounded offsets with different distances per face"));
     }
+    grown_except(b, d, &[])
+}
+
+/// A face's outward normal at a point on it.
+fn outward_normal(b: &Body, fi: usize, p: &P3) -> V3 {
+    let f = &b.faces[fi];
+    let (u, v) = f.surf.project(p, None);
+    f.surf.normal(u, v) * if f.sense { 1.0 } else { -1.0 }
+}
+
+/// The body grown by a ball of radius d, but for the parts beyond the planes `cut` (a point
+/// and an outward normal: an outward shell's removed faces, beyond which the caller cuts the
+/// grown body away): the slab of a face on a cut plane, the tube round an edge of one whose
+/// other face doesn't point below the plane, and the ball at a vertex of one whose faces don't
+/// (the points within d of those lie beyond the plane or within d of a face's middle, in its
+/// slab). Rounds there are the costliest pieces to unite (a tube round a spline touches its
+/// faces' slabs along their offsets) and are cut away whole.
+fn grown_except(b: &Body, d: f64, cut: &[(P3, V3)]) -> Result<Body> {
     let merged = merged(b);
     let b = &merged;
+    let size = 1.0 + b.bbox().diagonal();
+    let ef = b.edge_faces();
+    // The cut plane each face lies on.
+    let on_cut: Vec<Option<V3>> = (0..b.faces.len())
+        .map(|fi| {
+            let Surface::Plane { f: fr } = &b.faces[fi].surf else { return None };
+            let n = fr.x.cross(&fr.y).normalize() * if b.faces[fi].sense { 1.0 } else { -1.0 };
+            cut.iter().find(|(o, m)| n.dot(m) > 1.0 - 1e-9 && (fr.o - o).dot(m).abs() < 1e-9 * size).map(|(_, m)| *m)
+        })
+        .collect();
+    // A face that doesn't point below the cut plane `m` at `p`.
+    let above = |fi: usize, m: &V3, p: &P3| outward_normal(b, fi, p).dot(m) >= -1e-9;
     let mut pieces: Vec<(Body, String)> = Vec::new();
     for fi in 0..b.faces.len() {
-        pieces.push((face_slab(b, fi, d)?, format!("the slab of face {fi} ({:?})", b.faces[fi].surf.kind())));
+        if on_cut[fi].is_none() {
+            pieces.push((face_slab(b, fi, d)?, format!("the slab of face {fi} ({:?})", b.faces[fi].surf.kind())));
+        }
     }
     for e in 0..b.edges.len() {
-        if b.edges[e].degenerate || convex(b, e) != Some(true) {
+        let ed = &b.edges[e];
+        if ed.degenerate || convex(b, e) != Some(true) {
             continue;
         }
-        pieces.push((edge_tube(b, e, d)?, format!("the tube round edge {e}")));
+        let beyond = ef[e].iter().any(|&f| {
+            on_cut[f].is_some_and(|m| {
+                ef[e].iter().all(|&g| (0..=8).all(|i| above(g, &m, &ed.point(ed.t[0] + (ed.t[1] - ed.t[0]) * i as f64 / 8.0))))
+            })
+        });
+        if !beyond {
+            pieces.push((edge_tube(b, e, d)?, format!("the tube round edge {e}")));
+        }
+    }
+    // Each vertex's faces.
+    let mut vf: Vec<Vec<usize>> = vec![Vec::new(); b.verts.len()];
+    for (e, fs) in ef.iter().enumerate() {
+        for &v in &b.edges[e].v {
+            for &f in fs {
+                if !vf[v].contains(&f) {
+                    vf[v].push(f);
+                }
+            }
+        }
     }
     let mut done: Vec<P3> = Vec::new();
     for e in &b.edges {
@@ -238,7 +291,10 @@ pub fn offset_rounded(b: &Body, dist: &[f64]) -> Result<Body> {
                 continue;
             }
             done.push(p);
-            pieces.push((ball_body(p, d)?, format!("the ball at {p:?}")));
+            let beyond = vf[v].iter().any(|&f| on_cut[f].is_some_and(|m| vf[v].iter().all(|&g| above(g, &m, &p))));
+            if !beyond {
+                pieces.push((ball_body(p, d)?, format!("the ball at {p:?}")));
+            }
         }
     }
     combine_all(b.clone(), pieces, BoolOp::Union)
@@ -291,8 +347,13 @@ pub fn shell(k: &mut NativeKernel, body: BodyId, spec: &ShellSpec) -> Result<OpR
         return Err(KernelError::InvalidParameter("unknown face".into()));
     }
     let size = b.bbox().diagonal();
-    if !spec.outward && walls_cross(&b, &remove, t) {
-        return Err(KernelError::InvalidParameter("The shell's walls would intersect themselves; reduce the thickness".into()));
+    // Walls closer than twice the thickness: the faces moved in cross over each other, so no
+    // sharp inset exists. Rounded, the cavity from its definition leaves the body solid where
+    // they meet (OCCT's thick solids do the same); with no cavity left, or sharp, an error.
+    let crossing = !spec.outward && walls_cross(&b, &remove, t);
+    let too_thick = || KernelError::InvalidParameter("The shell's walls would intersect themselves; reduce the thickness".into());
+    if crossing && spec.sharp {
+        return Err(too_thick());
     }
     let cur = Tracked::of(b.clone());
     let v0 = super::mass::body_mass(&b).volume;
@@ -311,7 +372,7 @@ pub fn shell(k: &mut NativeKernel, body: BodyId, spec: &ShellSpec) -> Result<OpR
             if super::mass::body_mass(&c).volume > 0.0 { Ok(c) } else { Err(KernelError::OperationFailed("the inset is empty".into())) }
         });
         let regions = || cavity_by_regions(&b, &remove, t);
-        let ways: Vec<Box<dyn Fn() -> Result<Body>>> = if concave && !spec.sharp {
+        let ways: Vec<Box<dyn Fn() -> Result<Body>>> = if (concave || crossing) && !spec.sharp {
             vec![Box::new(regions)]
         } else {
             vec![Box::new(|| sharp(&dist)), Box::new(|| sharp(&flush)), Box::new(regions)]
@@ -332,6 +393,10 @@ pub fn shell(k: &mut NativeKernel, body: BodyId, spec: &ShellSpec) -> Result<OpR
                 if v1 <= 1e-9 || v1 > v0 + 1e-9 {
                     return Err(KernelError::OperationFailed("the shell came out wrong".into()));
                 }
+                // Walls that meet everywhere leave no cavity.
+                if crossing && v1 >= v0 * (1.0 - 1e-9) {
+                    return Err(too_thick());
+                }
                 Ok(out)
             });
             match out {
@@ -346,13 +411,22 @@ pub fn shell(k: &mut NativeKernel, body: BodyId, spec: &ShellSpec) -> Result<OpR
         }
         match (done, first) {
             (Some(o), _) => o,
+            (None, Some(_)) if crossing => return Err(too_thick()),
             (None, Some(e)) => return Err(e),
             (None, None) => return Err(KernelError::OperationFailed("no cavity".into())),
         }
     } else {
         // Outward: the body grown by a ball, less the body, cut back at the removed faces.
         let rounded = || -> Result<Tracked> {
-            let grown = offset_rounded(&b, &vec![t; b.faces.len()])?;
+            // (Not the rounds beyond the removed faces, which are cut away.)
+            let cut: Vec<(P3, V3)> = remove
+                .iter()
+                .filter_map(|&f| match &b.faces[f].surf {
+                    Surface::Plane { f: fr } => Some((fr.o, fr.x.cross(&fr.y).normalize() * if b.faces[f].sense { 1.0 } else { -1.0 })),
+                    _ => None,
+                })
+                .collect();
+            let grown = grown_except(&b, t, &cut)?;
             let mut walls = Tracked { src: vec![Vec::new(); grown.faces.len()], body: grown };
             for &f in &remove {
                 let face = &b.faces[f];
