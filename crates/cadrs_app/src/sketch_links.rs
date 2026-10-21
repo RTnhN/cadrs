@@ -367,6 +367,16 @@ fn pierce_hover(
     ))
 }
 
+/// The Use op: like Onshape, the shapes are construction geometry while Construction (Q) is
+/// on (issue #45).
+fn use_op(items: Vec<(Projected, cadrs_sketch::Link)>, construction: bool) -> SketchOp {
+    if construction {
+        SketchOp::UseConstruction { items }
+    } else {
+        SketchOp::Use { items }
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
 fn link_pointer(
     mut inputs: MessageReader<PointerInput>,
@@ -466,7 +476,7 @@ fn link_pointer(
     if let Some(c) = clicked {
         if using {
             if let Some(h) = pick.hover.clone() {
-                execute(&mut commands, target, SketchOp::Use { items: h.items });
+                execute(&mut commands, target, use_op(h.items, tool.construction));
             }
         } else if own_point(c).is_none()
             && let Some((link, _)) =

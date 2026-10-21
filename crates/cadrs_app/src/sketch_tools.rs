@@ -2343,25 +2343,89 @@ fn execute_with(
 
 pub(crate) fn execute(
     commands: &mut Commands,
+    target: (cadrs_core::ElementId, cadrs_core::FeatureId),
+    op: SketchOp,
+) {
+    commands.queue(move |world: &mut World| execute_now(world, target, op));
+}
+
+/// [`execute`], on the world.
+pub(crate) fn execute_now(
+    world: &mut World,
     (element, feature): (cadrs_core::ElementId, cadrs_core::FeatureId),
     op: SketchOp,
 ) {
-    commands.queue(move |world: &mut World| {
-        // Geometry snapped to part edges uses them (`cadrs_sketch::external`).
-        let op = match world.get_resource::<ExternalSnap>().and_then(|x| x.get(feature)) {
-            Some((base, ext)) => ext.commit(base, op),
-            None => op,
-        };
-        if let Some(mut doc) = world.get_resource_mut::<ActiveDocument>()
-            && let Err(e) = doc.execute(&EditSketch {
-                element,
-                feature,
-                op,
-            })
-        {
-            warn!("sketch edit failed: {e}");
+    // Geometry snapped to part edges uses them (`cadrs_sketch::external`).
+    let op = match world.get_resource::<ExternalSnap>().and_then(|x| x.get(feature)) {
+        Some((base, ext)) => ext.commit(base, op),
+        None => op,
+    };
+    if let Some(mut doc) = world.get_resource_mut::<ActiveDocument>()
+        && let Err(e) = doc.execute(&EditSketch {
+            element,
+            feature,
+            op,
+        })
+    {
+        warn!("sketch edit failed: {e}");
+    }
+}
+
+/// The Construction button and Q, like Onshape's (issue #45): with curves selected, makes
+/// them all construction geometry (or all regular, when they are construction already) as one
+/// command; with nothing selected, or while drawing, flips construction for new geometry.
+pub(crate) fn toggle_construction(world: &mut World) {
+    let Some(s) = world
+        .get_resource::<SketchSession>()
+        .filter(|s| !s.waiting_for_plane)
+    else {
+        return;
+    };
+    let target = (s.element, s.feature);
+    let curves = world
+        .get_resource::<SketchSelection>()
+        .map_or_else(Vec::new, |s| curve_ids(&s.0));
+    let drawing = world
+        .get_resource::<SketchDraw>()
+        .is_some_and(|d| d.state.is_drawing());
+    if curves.is_empty() || drawing {
+        if let Some(mut tool) = world.get_resource_mut::<ActiveSketchTool>() {
+            tool.construction = !tool.construction;
         }
-    });
+        return;
+    }
+    let Some(all) = all_construction(world_sketch(world), &curves) else {
+        return;
+    };
+    execute_now(
+        world,
+        target,
+        SketchOp::SetConstruction {
+            curves,
+            construction: !all,
+        },
+    );
+}
+
+/// The curves among `entities`.
+pub(crate) fn curve_ids(entities: &[SketchEntity]) -> Vec<CurveId> {
+    entities
+        .iter()
+        .filter_map(|e| match e {
+            SketchEntity::Curve(c) => Some(*c),
+            _ => None,
+        })
+        .collect()
+}
+
+/// Whether `curves` are all construction geometry; `None` without a sketch or curves.
+pub(crate) fn all_construction(sketch: Option<&Sketch>, curves: &[CurveId]) -> Option<bool> {
+    let sk = sketch?;
+    (!curves.is_empty()).then(|| {
+        curves
+            .iter()
+            .all(|c| sk.curves.get(*c).is_some_and(|c| c.construction))
+    })
 }
 
 pub(crate) fn world_sketch(world: &World) -> Option<&Sketch> {
@@ -2406,7 +2470,6 @@ fn sketch_edit_keys(
     q_dialogs: Query<(), With<cadrs_ui::DialogRoot>>,
     session: Option<Res<SketchSession>>,
     doc: Option<Res<ActiveDocument>>,
-    mut tool: ResMut<ActiveSketchTool>,
     mut draw: ResMut<SketchDraw>,
     mut selection: ResMut<SketchSelection>,
     flow: Res<QuickDimFlow>,
@@ -2501,31 +2564,7 @@ fn sketch_edit_keys(
                     },
                 );
             }
-            KeyCode::KeyQ if !shift => {
-                let curves: Vec<CurveId> = selection
-                    .0
-                    .iter()
-                    .filter_map(|e| match e {
-                        SketchEntity::Curve(c) => Some(*c),
-                        _ => None,
-                    })
-                    .collect();
-                if curves.is_empty() || draw.state.is_drawing() {
-                    tool.construction = !tool.construction;
-                } else if let Some(sk) = sketch {
-                    let all = curves
-                        .iter()
-                        .all(|c| sk.curves.get(*c).is_some_and(|c| c.construction));
-                    execute(
-                        &mut commands,
-                        target,
-                        SketchOp::SetConstruction {
-                            curves,
-                            construction: !all,
-                        },
-                    );
-                }
-            }
+            KeyCode::KeyQ if !shift => commands.queue(toggle_construction),
             KeyCode::KeyA if shift => {
                 if let DrawState::Line {
                     prev: prev @ Some(_),
