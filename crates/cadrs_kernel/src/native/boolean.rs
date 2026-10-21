@@ -694,6 +694,49 @@ pub fn boolean_bodies_flush(a: &Body, b: &Body, op: BoolOp) -> Result<BoolOut> {
     boolean_bodies_with(a, b, op, BoolOptions { flush: true, ..BoolOptions::default() })
 }
 
+thread_local! {
+    static UV_CHECK: std::cell::Cell<bool> = const { std::cell::Cell::new(true) };
+}
+
+/// Runs `f` with booleans that return a body whose faces' p-curves don't close (instead of
+/// failing), restoring the check after (on a panic too). For callers that repair or discard
+/// such faces themselves; not for results handed out.
+pub fn allowing_uv_gaps<T>(f: impl FnOnce() -> T) -> T {
+    struct Restore(bool);
+    impl Drop for Restore {
+        fn drop(&mut self) {
+            UV_CHECK.with(|c| c.set(self.0));
+        }
+    }
+    let _restore = Restore(UV_CHECK.with(|c| c.get()));
+    UV_CHECK.with(|c| c.set(false));
+    f()
+}
+
+/// The first loop of `b` whose p-curves don't meet in (u, v) at a vertex (beyond the vertex's
+/// tolerance, as [`Body::check`] has it; whole turns apart across a periodic seam is meeting).
+fn uv_gap(b: &Body) -> Option<String> {
+    for (fi, f) in b.faces.iter().enumerate() {
+        let (mu, mv) = f.surf.metric();
+        let off = |d: f64, periodic: bool| if periodic { (d - (d / TAU).round() * TAU).abs() } else { d.abs() };
+        for (li, l) in f.loops.iter().enumerate() {
+            for k in 0..l.len() {
+                let (x, y) = (&l[k], &l[(k + 1) % l.len()]);
+                let (ex, ey) = (b.edges.get(x.edge)?, b.edges.get(y.edge)?);
+                let (_, t1) = super::topo::co_range(ex, x.fwd);
+                let (t0, _) = super::topo::co_range(ey, y.fwd);
+                let (pa, pb) = (x.pc.point(t1), y.pc.point(t0));
+                let v = if x.fwd { ex.v[1] } else { ex.v[0] };
+                let tol = b.verts.get(v).map_or(0.0, |v| v.tol).max(super::tol::LOOP_GAP);
+                if off(pa.x - pb.x, f.surf.u_periodic()) * mu > tol || off(pa.y - pb.y, f.surf.v_periodic()) * mv > tol {
+                    return Some(format!("face {fi} loop {li}: p-curve gap after coedge {k} ({:.3e}, {:.3e})", pa.x - pb.x, pa.y - pb.y));
+                }
+            }
+        }
+    }
+    None
+}
+
 /// Runs `f` with [`vtol`] at `t`, restoring it after (on a panic too).
 fn with_tol<T>(t: f64, f: impl FnOnce() -> T) -> T {
     struct Restore(f64);
@@ -1254,6 +1297,20 @@ fn run(a: &Body, b: &Body, mode: Mode, flush: bool) -> Result<BoolOut> {
                 if ia == InFace::Outside || ib == InFace::Outside {
                     continue;
                 }
+                // Where the faces touch along an edge of one (a blend's spring edge on a wall it
+                // is tangent to), the curve is that edge found again: the edge is already there,
+                // and the curve would cut the faces at every vertex along it.
+                let along_edge = |f: usize| {
+                    [0.25, 0.75].iter().all(|k| point_in_face(&faces[f], &ic.c.point(ta + (tb - ta) * k), tf) == InFace::Boundary)
+                };
+                let tangent_at = |p: &P3| {
+                    let (sa, sb) = (&faces[fa].surf, &faces[fb].surf);
+                    let ((ua, va_), (ub, vb_)) = (sa.project(p, None), sb.project(p, None));
+                    sa.normal(ua, va_).cross(&sb.normal(ub, vb_)).norm() < 1e-3
+                };
+                if ((ia == InFace::Boundary && along_edge(fa)) || (ib == InFace::Boundary && along_edge(fb))) && tangent_at(&pm) {
+                    continue;
+                }
                 let va = va.unwrap_or_else(|| pool.vertex_tol(ic.c.point(ta), ft));
                 let vb = vb.unwrap_or(va);
                 // Reuse an existing edge running there.
@@ -1739,6 +1796,13 @@ fn run(a: &Body, b: &Body, mode: Mode, flush: bool) -> Result<BoolOut> {
     prof.mark("unify");
     assemble_shells(&mut out)?;
     super::unify::split_shared_vertices(&mut out);
+    // A face whose loop's p-curves don't meet in (u, v) can't be closed: an error, never an
+    // invalid body (unless the caller opted out: `allowing_uv_gaps`).
+    if UV_CHECK.with(|c| c.get()) {
+        if let Some(why) = uv_gap(&out) {
+            return Err(KernelError::OperationFailed(format!("the boolean built a face that doesn't close: {why}")));
+        }
+    }
     // Solids in, faces out but no solid: some piece went missing.
     if !a.solids.is_empty() && !b.solids.is_empty() && !out.faces.is_empty() && out.solids.is_empty() {
         return Err(KernelError::OpenResult("the boolean left an open shell".into()));

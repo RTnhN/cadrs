@@ -3,10 +3,11 @@
 reads a part's two B-reps, moves them and intersects every face of the first with every face of
 the second (`GlobalSurfaceIntersect` on the faces' uv boxes, `my_test_ssi`, smTopoTest.cpp).
 
-Here each face pair goes through `ssi::surface_surface_points` (tests/smlib_common/intersect.rs)
+Here each face pair goes through `ssi::surface_surface` (tests/smlib_common/intersect.rs)
 and the case checks:
 - every point of every curve lies on both surfaces;
-- the total length of the curves inside both faces against SMLib's (the oracle's `ssi`), to 1e-3;
+- the total length of the curves inside both faces (untrimmed, over their uv domains as SMLib
+  intersects them) against SMLib's (the oracle's `ssi`), to 1e-3;
 - every sample point of SMLib's curves (8 per curve) lies near one of ours;
 - the count only as none against some: SMLib splits curves at seams and returns degenerate
   curves and coincident regions' boundaries its own way. The count is the test's without
@@ -37,14 +38,14 @@ use cadrs_kernel::native::smb;
 const SUITE: &str = "ssi_advanced";
 
 /// SMLib's `my_test_one_ssi`: the part's two B-reps moved by `t`, every face of the first
-/// intersected with every face of the second.
+/// intersected with every face of the second, over their uv domains as SMLib does (untrimmed).
 fn ssi(file: &str, t: [f64; 3], want: &Want) -> Result<(), String> {
     let bytes = std::fs::read(data(SUITE, file)).map_err(|e| format!("{file}: {e}"))?;
     let part = smb::read_part(&bytes)?;
     let [a, b, ..] = part.breps.as_slice() else { return Err(format!("{file}: {} B-reps", part.breps.len())) };
     let m = Affine::translation(V3::new(t[0], t[1], t[2]));
     let (a, b) = (a.body.transformed(&m), b.body.transformed(&m));
-    let found = intersect_patches(&Patch::faces(&a), &Patch::faces(&b))?;
+    let found = intersect_patches(&Patch::domains(&a), &Patch::domains(&b))?;
     check_found(&found, want)
 }
 '''

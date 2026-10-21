@@ -152,7 +152,9 @@ fn combine(acc: &Body, piece: &Body, op: BoolOp, what: &dyn Fn() -> String) -> R
             super::kernel::dump("offset-tool", piece, &format!("{op:?} {}", what()));
         }
     };
-    let r = boolean_bodies(acc, piece, op)
+    // TODO(W6): the bracket2 offsets (smlib_offset 10, 11, 15a, 15b) go on from a union whose
+    // faces' p-curves don't close; drop the opt-out once they don't depend on it.
+    let r = super::boolean::allowing_uv_gaps(|| boolean_bodies(acc, piece, op))
         .inspect_err(|e| {
             if debug {
                 eprintln!("offset: {op:?} with {}: {e:?}", what());

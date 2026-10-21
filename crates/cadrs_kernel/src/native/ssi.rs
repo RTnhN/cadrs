@@ -1314,55 +1314,6 @@ fn curve_curve_closed(a: &Curve, a0: f64, a1: f64, b: &Curve, b0: f64, b1: f64, 
         }
         return out;
     }
-    // Sample a, find local minima of the distance to b, refine by Newton on both parameters.
-    let n = match a {
-        Curve::Line { .. } => 32,
-        Curve::Circle { .. } | Curve::Ellipse { .. } => (((a1 - a0) / (PI / 32.0)).ceil() as usize).max(16),
-        Curve::Nurbs(nc) => (nc.cps.len() * 8).clamp(32, 2000),
-    };
-    let dist = |t: f64| -> (f64, f64) {
-        let p = a.point(t);
-        let s = b.closest(&p, b0, b1);
-        ((b.point(s) - p).norm(), s)
-    };
-    let samples: Vec<(f64, f64, f64)> = (0..=n)
-        .map(|i| {
-            let t = a0 + (a1 - a0) * i as f64 / n as f64;
-            let (d, s) = dist(t);
-            (t, d, s)
-        })
-        .collect();
-    let spacing = a.length(a0, a1) / n as f64;
-    for i in 0..samples.len() {
-        let (t, d, s) = samples[i];
-        let left = if i > 0 { samples[i - 1].1 } else { f64::INFINITY };
-        let right = if i + 1 < samples.len() { samples[i + 1].1 } else { f64::INFINITY };
-        // A run of coincident samples is an overlap, not crossings (found from the ends).
-        if d < tol && (left < tol || right < tol) {
-            continue;
-        }
-        if d <= left && d <= right && d < spacing * 2.0 + tol {
-            // Newton on min |a(t) − b(s)|².
-            let (mut t, mut s) = (t, s);
-            for _ in 0..50 {
-                let (p, pa, paa) = a.d2(t);
-                let (q, qb, qbb) = b.d2(s);
-                let r = p - q;
-                let ft = r.dot(&pa);
-                let fs = -r.dot(&qb);
-                let (j11, j12, j22) = (pa.dot(&pa) + r.dot(&paa), -pa.dot(&qb), qb.dot(&qb) - r.dot(&qbb));
-                let Some((dt, ds)) = solve2(j11, j12, j12, j22, -ft, -fs) else { break };
-                t = (t + dt).clamp(a0, a1);
-                s = (s + ds).clamp(b0, b1);
-                if dt.abs() + ds.abs() < 1e-15 {
-                    break;
-                }
-            }
-            if (a.point(t) - b.point(s)).norm() < tol && !out.iter().any(|(x, _): &(f64, f64)| (x - t).abs() < 1e-9) {
-                out.push((t, s));
-            }
-        }
-    }
     out
 }
 

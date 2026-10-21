@@ -7,7 +7,9 @@
 //! degenerate curves, coincident regions), so counts are compared only as none against some.
 //! What is checked:
 //! - every point of the curves inside both faces lies on both surfaces ([`ON_TOL`]);
-//! - the length of the curves inside both faces against SMLib's (the oracle's), to 1e-3;
+//! - the length of the curves inside both faces against SMLib's (the oracle's), to 1e-3: faces
+//!   as SMLib takes them ([`Patch::domain`]: untrimmed, over their uv domains) where the suite
+//!   intersects B-rep faces;
 //! - every sample point SMLib's curves pass through lies near one of ours ([`SAMPLE_TOL`]).
 #![allow(dead_code)]
 
@@ -35,11 +37,62 @@ pub fn dist(s: &Surface, p: &P3) -> f64 {
     if let Some(d) = s.signed_distance(p) {
         return d.abs();
     }
-    let (u, v) = s.project(p, None);
-    let d0 = (s.eval(u, v) - p).norm();
-    let hint = s.project_coarse(p, 16);
-    let (u, v) = s.project(p, Some(hint));
-    d0.min((s.eval(u, v) - p).norm())
+    feet(s, p, None).into_iter().map(|(u, v)| (s.eval(u, v) - p).norm()).fold(f64::INFINITY, f64::min)
+}
+
+/// Distance from `p` to `s`, Newton from the foot of the point before (`hint`, updated), or a
+/// global search ([`feet`]) when that comes out farther than [`ON_TOL`].
+pub fn dist_along(s: &Surface, p: &P3, hint: &std::cell::Cell<Option<(f64, f64)>>) -> f64 {
+    if let Some(d) = s.signed_distance(p) {
+        return d.abs();
+    }
+    if let Some(h) = hint.get() {
+        let (u, v) = s.project(p, Some(h));
+        let d = (s.eval(u, v) - p).norm();
+        if d <= ON_TOL {
+            hint.set(Some((u, v)));
+            return d;
+        }
+    }
+    let best = feet(s, p, None).into_iter().map(|(u, v)| ((s.eval(u, v) - p).norm(), (u, v))).fold((f64::INFINITY, (0.0, 0.0)), |x, y| if y.0 < x.0 { y } else { x });
+    hint.set(Some(best.1));
+    best.0
+}
+
+/// Candidate feet of `p` on `s`: Newton from the default start, from the nearest points of a
+/// coarse and a fine grid over the surface's range (or `uv` where that is unbounded), and from
+/// both sides of a closed surface's seam (where Newton stops).
+pub fn feet(s: &Surface, p: &P3, uv: Option<UvBox>) -> Vec<(f64, f64)> {
+    let mut out = vec![s.project(p, None)];
+    if matches!(s, Surface::Plane { .. }) {
+        return out;
+    }
+    let ((pu0, pu1), (pv0, pv1)) = s.param_box();
+    let bounded = |a: f64, b: f64| a > -1e4 && b < 1e4;
+    let ((u0, u1), (v0, v1)) = match uv {
+        Some(((fu0, fu1), (fv0, fv1))) => (if bounded(pu0, pu1) { (pu0, pu1) } else { (fu0, fu1) }, if bounded(pv0, pv1) { (pv0, pv1) } else { (fv0, fv1) }),
+        None => ((pu0, pu1), (pv0, pv1)),
+    };
+    if bounded(u0, u1) && bounded(v0, v1) {
+        for n in [16usize, 64] {
+            let mut best = (f64::INFINITY, (u0, v0));
+            for i in 0..=n {
+                for j in 0..=n {
+                    let (a, b) = (u0 + (u1 - u0) * i as f64 / n as f64, v0 + (v1 - v0) * j as f64 / n as f64);
+                    let d = (s.eval(a, b) - p).norm_squared();
+                    if d < best.0 {
+                        best = (d, (a, b));
+                    }
+                }
+            }
+            out.push(s.project(p, Some(best.1)));
+        }
+    }
+    let first = out[out.len() - 1];
+    for h in [(u0, first.1), (u1, first.1), (first.0, v0), (first.0, v1)] {
+        out.push(s.project(p, Some(h)));
+    }
+    out
 }
 
 /// A surface and the part of it a face covers: its uv polygons and their box.
@@ -74,6 +127,27 @@ impl Patch {
         (0..body.faces.len()).map(|f| Patch::face(body, f)).collect()
     }
 
+    /// Face `f` of `body` as SMLib's `GlobalSurfaceIntersect` takes it: its surface over the face's
+    /// uv domain, untrimmed (`SmFace::GetUVDomain`): the surface's whole range in a direction
+    /// where that is bounded (a B-spline's, a meridian's or an extruded curve's range, an
+    /// angle's turn; a cylinder's angle excepted), the face's extent where it isn't (a plane, a
+    /// cylinder's length).
+    pub fn domain(body: &Body, f: usize) -> Patch {
+        let face = Patch::face(body, f);
+        let ((u0, u1), (v0, v1)) = face.surf.param_box();
+        let bounded = |a: f64, b: f64| a > -1e4 && b < 1e4;
+        // (A cylinder's own face keeps its angle range: SMLib's cylinder domain is its sweep.)
+        let whole = !matches!(face.surf, Surface::Cylinder { .. });
+        let u = if whole && bounded(u0, u1) { (u0, u1) } else { face.uv.0 };
+        let v = if whole && bounded(v0, v1) { (v0, v1) } else { face.uv.1 };
+        Patch::rect(face.surf, (u, v))
+    }
+
+    /// Every face of `body` as SMLib intersects it ([`Patch::domain`]).
+    pub fn domains(body: &Body) -> Vec<Patch> {
+        (0..body.faces.len()).map(|f| Patch::domain(body, f)).collect()
+    }
+
     /// The surface over the uv rectangle `uv` (an untrimmed face, `CreateFaceFromSurface`).
     pub fn rect(surf: Surface, uv: UvBox) -> Patch {
         let ((u0, u1), (v0, v1)) = uv;
@@ -87,10 +161,19 @@ impl Patch {
 
     /// Whether `p` (near the surface) lies in the patch, its boundary included.
     pub fn contains(&self, p: &P3) -> bool {
-        let mut starts = vec![self.surf.project(p, None)];
-        if !matches!(self.surf, Surface::Plane { .. }) {
-            let c = self.surf.project_coarse(p, 16);
-            starts.push(self.surf.project(p, Some(c)));
+        self.contains_along(p, &std::cell::Cell::new(None))
+    }
+
+    /// [`Patch::contains`] for a point along a curve: the foot first from the foot of the point
+    /// before (`hint`, updated), the global search only where that comes out far.
+    pub fn contains_along(&self, p: &P3, hint: &std::cell::Cell<Option<(f64, f64)>>) -> bool {
+        let hinted = hint.get().map(|h| self.surf.project(p, Some(h))).filter(|&(u, v)| (self.surf.eval(u, v) - p).norm() <= ON_TOL);
+        let starts = match hinted {
+            Some(uv) => vec![uv],
+            None => feet(&self.surf, p, Some(self.uv)),
+        };
+        if let Some(&best) = starts.iter().min_by(|x, y| (self.surf.eval(x.0, x.1) - p).norm().total_cmp(&(self.surf.eval(y.0, y.1) - p).norm())) {
+            hint.set(Some(best));
         }
         starts.into_iter().any(|(u, v)| {
             let d = (self.surf.eval(u, v) - p).norm();
@@ -211,8 +294,12 @@ pub fn intersect_patches(pa: &[Patch], pb: &[Patch]) -> Result<Found, String> {
                 let (t0, t1) = (c.t0.min(c.t1), c.t0.max(c.t1));
                 // What lies in both faces (near both surfaces: a bounded surface's points
                 // past its edge are in neither) must lie on both surfaces.
+                // (Each surface's foot followed along the curve from the last, as a continuation
+                // finds it; a global search where that comes out far.)
+                let (ha, hb) = (std::cell::Cell::new(None), std::cell::Cell::new(None));
+                let (ca, cb) = (std::cell::Cell::new(None), std::cell::Cell::new(None));
                 let on_both = |p: &P3| -> Result<(), String> {
-                    let (da, db) = (dist(&a.surf, p), dist(&b.surf, p));
+                    let (da, db) = (dist_along(&a.surf, p, &ha), dist_along(&b.surf, p, &hb));
                     if da > ON_TOL || db > ON_TOL {
                         return Err(format!("faces {i}×{j}, curve {k}: the point {p:?} is {da:.1e} off the first surface and {db:.1e} off the second"));
                     }
@@ -220,7 +307,7 @@ pub fn intersect_patches(pa: &[Patch], pb: &[Patch]) -> Result<Found, String> {
                 };
                 let both = |t: f64| {
                     let p = c.c.point(t);
-                    a.contains(&p) && b.contains(&p)
+                    a.contains_along(&p, &ca) && b.contains_along(&p, &cb)
                 };
                 if c.c.length(t0, t1) <= 1e-9 {
                     // A degenerate curve: a point.

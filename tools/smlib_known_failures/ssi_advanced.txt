@@ -9,33 +9,16 @@ ssi_42_coincident_torii
 
 # Touching at points or along curves: no point contacts or tangent curves found.
 ssi_15_rev_rev_180_pts
-ssi_22_tor_sph_tan
-ssi_43_tor_sph_touch
 
 # Curves missing or partial (length short of SMLib's, or none).
-ssi_11_rev_rev_360
-ssi_12_rev_rev_opposite
-ssi_13_rev_rev_90
-ssi_14_rev_rev_rot180
-ssi_18_rev_sph_full
-ssi_24_tor_in_tor_tang_hyper
-ssi_25_tor_in_tor_tan_ellip
-ssi_28_pln_rev1
-ssi_30_pln_rev3
-ssi_33_rev_rev1
-ssi_45_sph_plane1
-ssi_46_sph_plane2
-ssi_50_cone_2pln
-ssi_52_tor_overlap
-ssi_53_spiral
 
 # Curves inside both faces lying off a surface by more than 1e-3.
 ssi_16_rev_rev_coin
 ssi_17_rev_rev_coin_touch slow
-ssi_34_bumppy_plane2
 ssi_35_rev_rev_sing
 
-# Too long (curves found twice): 48.9 against SMLib's 24.0.
+# An oracle error: the plane holds both side meridians of the surface of revolution (u = 0 and
+# its end), and SMLib reports only one (24.0); ours, 48.9, is both, each checked on both surfaces.
 ssi_29_pln_rev2
 
 # A branch missed near the singular points (an SMLib sample 3e-3 from our curves).
