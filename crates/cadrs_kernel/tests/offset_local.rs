@@ -301,3 +301,20 @@ fn wire_offset_trims_a_swallowtail() {
     let areas: Vec<f64> = ds.iter().map(|&d| area(d)).collect();
     assert!(areas.windows(2).all(|w| w[0] < w[1]), "{areas:?}");
 }
+
+/// OCCT bug 26233: a whole sphere's face thickened by 10 outward: the solid between radii 100
+/// and 110, its outer sphere one shell and the inner one a void (the face has no boundary to
+/// join them across).
+#[test]
+fn thickened_sphere_face_has_a_void() {
+    use cadrs_kernel::native::draw;
+    use cadrs_kernel::native::topo::CheckLevel;
+    let mut k = NativeKernel::new();
+    let s = k.psphere(100.0).unwrap();
+    let faces = k.explode_faces(&s).unwrap();
+    let draw::Shape::Body(r) = k.thickshell(&faces[0], 10.0).unwrap() else { panic!("not a body") };
+    let b = k.get(r).unwrap();
+    assert_eq!((b.solids.len(), b.shells.len(), b.faces.len()), (1, 2, 2));
+    assert_eq!(b.check_with(CheckLevel::Full), Vec::<String>::new());
+    close(volume(&k, r), 4.0 / 3.0 * PI * (110f64.powi(3) - 100f64.powi(3)), 1e-6);
+}

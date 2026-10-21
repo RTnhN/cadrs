@@ -736,9 +736,7 @@ feat featrf_b2
 feat featrevol_a8
 # offsetcompshape / offsetonface / thickshell cases made runnable by those commands: thick solids
 # whose expected volume is the input's ("real volume of result shape is unknown yet": compshape a1,
-# ours 434000; a4, where OCCT's command fails inside a catch, ours 67007), booleans (a2), a thickened
-# closed sphere face (bug26233).
-offset bugs_bug26233
+# ours 434000; a4, where OCCT's command fails inside a catch, ours 67007), booleans (a2).
 offset compshape_a1
 offset compshape_a2
 offset compshape_a4

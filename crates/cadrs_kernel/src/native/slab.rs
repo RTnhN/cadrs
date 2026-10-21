@@ -238,14 +238,58 @@ pub fn face_slab(b: &Body, fi: usize, d: f64) -> Result<Body> {
         f.loops.iter().map(|l| l.iter().filter(|c| !b.edges[c.edge].degenerate).map(|c| (m[&c.edge], c.fwd)).collect()).filter(|l: &Vec<(usize, bool)>| !l.is_empty()).collect()
     };
     let mut faces = vec![
-        xb.face(XFace { surf: surf.clone(), sense: if d > 0.0 { !sense } else { sense }, loops: map_loops(&eb) }),
-        xb.face(XFace { surf: top_surf, sense: if d > 0.0 { sense } else { !sense }, loops: map_loops(&et) }),
+        XFace { surf: surf.clone(), sense: if d > 0.0 { !sense } else { sense }, loops: map_loops(&eb) },
+        XFace { surf: top_surf, sense: if d > 0.0 { sense } else { !sense }, loops: map_loops(&et) },
     ];
-    for s in sides {
-        faces.push(xb.face(s));
+    faces.extend(sides);
+    // The faces in groups joined by their edges: one closed shell, or for a face with no side
+    // (a whole sphere, closed by its seam and poles) the face and its offset apart, the outer
+    // one bounding the slab and the other its void.
+    let mut group: Vec<usize> = (0..faces.len()).collect();
+    let root = |g: &[usize], mut i: usize| {
+        while g[i] != i {
+            i = g[i];
+        }
+        i
+    };
+    let mut by_edge: HashMap<usize, usize> = HashMap::new();
+    for (i, f) in faces.iter().enumerate() {
+        for &(e, _) in f.loops.iter().flatten() {
+            let j = *by_edge.entry(e).or_insert(i);
+            let (ri, rj) = (root(&group, i), root(&group, j));
+            group[ri.max(rj)] = ri.min(rj);
+        }
     }
-    let sh = xb.shell(faces, true);
-    xb.solid(vec![sh]);
+    let mut shells: Vec<(f64, Vec<usize>)> = Vec::new();
+    let mut roots: Vec<usize> = Vec::new();
+    for i in 0..faces.len() {
+        let r = root(&group, i);
+        let k = roots.iter().position(|&x| x == r).unwrap_or_else(|| {
+            roots.push(r);
+            shells.push((0.0, Vec::new()));
+            roots.len() - 1
+        });
+        shells[k].1.push(i);
+    }
+    // The outer shell (the largest box) first.
+    for (size, members) in shells.iter_mut() {
+        let mut bb = Bbox::empty();
+        for &(e, _) in members.iter().flat_map(|&i| faces[i].loops.iter().flatten()) {
+            let ed = &xb.body.edges[e];
+            (0..=4).for_each(|k| bb.add(&ed.point(ed.t[0] + (ed.t[1] - ed.t[0]) * k as f64 / 4.0)));
+        }
+        *size = bb.diagonal();
+    }
+    shells.sort_by(|a, b| b.0.total_cmp(&a.0));
+    let mut ids: Vec<Option<XFace>> = faces.into_iter().map(Some).collect();
+    let shells: Vec<usize> = shells
+        .into_iter()
+        .map(|(_, members)| {
+            let fs = members.into_iter().filter_map(|i| ids[i].take()).map(|f| xb.face(f)).collect();
+            xb.shell(fs, true)
+        })
+        .collect();
+    xb.solid(shells);
     let (mut body, warnings) = xb.finish();
     if std::env::var_os("CADRS_SLAB_DEBUG").is_some() {
         eprintln!("slab of face {fi} ({:?}) by {d}: {warnings:?}", f.surf.kind());

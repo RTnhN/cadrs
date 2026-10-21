@@ -11,13 +11,20 @@ offset_14_offset_bracket2 slow
 # Rounded offset 2.2 of off_extrusion: the edges curved tighter than 2.2 (the B-splines, down to
 # radius 1.13 and 2.0) would get tubes that fold over themselves: refused.
 offset_05_off_extrusion
-# Rounded offset 0.3 of boolean_trees_result: a face's slab isn't a solid.
+# Rounded offset 0.3 of boolean_trees_result: face 11's slab isn't a solid. The B-spline closes
+# to a cone-like apex at (12, −8, 0) (its normals there turn round a cone 19° about −y), so its
+# offset there is a curve, not a point, and the slab (which leaves a pole's edge out) can't close
+# the offset face's loop.
 offset_08_boolean_trees_result
-# Rounded inset with a face kept: a valid solid with SMLib's face and edge counts (15, 39), but
-# 2.6e-3 under SMLib's volume (406.26 against 407.32; area 643.92 against 644.66): the inset's
-# geometry, not the boolean.
+# Rounded inset with a face kept: a valid solid with SMLib's face and edge counts (15, 39) whose
+# geometry is the exact erosion: its section is 41.95986 at both ends (the 2D offsets of the
+# profile's loops), so its volume is 41.95986 × 9.7 = 407.0106. SMLib's is 407.3193 (its two end
+# faces differ, 42.244 and 41.931, and it measures the input 6.4e-4 over its exact 591.836); ours
+# integrates to 406.264, the inset spline face's area 150.50 where its mesh has 150.98 (mass.rs).
 offset_06_off_extrusion
-# Rounded inward shell: the sphere face's slab has a p-curve gap at the pole.
+# Rounded inward shell: the shell is built (valid, 21 faces), but from a different input: our
+# reader gives face 10 (the corner's spline) an area of 5306 where SMLib has 12187 (its loop runs
+# edge 29 out and back along v = 0), so the body is 980189 against SMLib's 1197774 (smb.rs).
 offset_03_offsetboxsphoncorner
 # Inward shell of InsetCone: the body less the cavity (flush with the open cone face) is empty;
 # the sharp cavity with the cone moved out has a non-manifold seam.
