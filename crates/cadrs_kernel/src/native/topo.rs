@@ -10,6 +10,12 @@
 //! - `sense`: the outward normal is the surface's natural normal Su × Sv when true.
 //! - A seam (on a periodic surface) is one edge used twice by the same face, once each way, with
 //!   two p-curves a period apart.
+//!
+//! Body kinds (Onshape's set, [`BodyClass`]): a body holds solids (closed shells), sheets (open
+//! shells), wires (chains of free edges: edges no face uses, listed in [`Body::wires`]) and
+//! acorn points (free vertices, listed in [`Body::points`]). Wires and points sit beside the
+//! face lists, so code that walks `faces` and `edges` by index is unchanged: a wire body is a
+//! body with edges and no faces, a point body one with vertices only.
 
 use super::curve::Curve;
 use super::math::*;
@@ -78,6 +84,14 @@ pub struct Solid {
     pub shells: Vec<usize>,
 }
 
+/// A chain of free edges (used by no face), each with the direction the chain runs along it:
+/// edge k ends where edge k + 1 starts. It is closed when the last edge ends where the first
+/// starts.
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct Wire {
+    pub edges: Vec<(usize, bool)>,
+}
+
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct Body {
     pub verts: Vec<Vertex>,
@@ -85,7 +99,13 @@ pub struct Body {
     pub faces: Vec<Face>,
     pub shells: Vec<Shell>,
     pub solids: Vec<Solid>,
+    /// Wire bodies' edge chains (Phase 1b). Edges of faces are never in a wire.
+    pub wires: Vec<Wire>,
+    /// Acorn points: vertices no edge uses (a point body's points).
+    pub points: Vec<usize>,
 }
+
+pub use crate::BodyClass;
 
 /// A coedge's start and end parameters in its direction of travel.
 pub fn co_range(e: &Edge, fwd: bool) -> (f64, f64) {
@@ -161,6 +181,10 @@ impl Body {
         for s in &o.solids {
             self.solids.push(Solid { shells: s.shells.iter().map(|x| x + so).collect() });
         }
+        for w in &o.wires {
+            self.wires.push(Wire { edges: w.edges.iter().map(|&(e, f)| (e + eo, f)).collect() });
+        }
+        self.points.extend(o.points.iter().map(|v| v + vo));
         (vo, eo, fo)
     }
 
@@ -312,6 +336,17 @@ impl Body {
                 errs.push(format!("solid {si}: shell {sh} doesn't exist"));
             }
         }
+        for (wi, w) in self.wires.iter().enumerate() {
+            if w.edges.is_empty() {
+                errs.push(format!("wire {wi} is empty"));
+            }
+            if let Some((e, _)) = w.edges.iter().find(|&&(e, _)| e >= self.edges.len()) {
+                errs.push(format!("wire {wi}: edge {e} doesn't exist"));
+            }
+        }
+        if let Some(v) = self.points.iter().find(|&&v| v >= self.verts.len()) {
+            errs.push(format!("point vertex {v} doesn't exist"));
+        }
         errs
     }
 
@@ -426,6 +461,7 @@ impl Body {
                 }
             }
         }
+        errs.extend(self.check_kinds(&uses));
         // Solids enclose a positive volume (their faces point out).
         if errs.is_empty() {
             for si in 0..self.solids.len() {
@@ -442,6 +478,186 @@ impl Body {
 }
 
 impl Body {
+    /// What the body is: one kind of piece (solids, sheets, wires or points), several
+    /// (`Mixed`, a compound), or nothing. Free edges left in no wire don't count (they are
+    /// construction leftovers, as before Phase 1b).
+    pub fn class(&self) -> BodyClass {
+        let in_solid: std::collections::HashSet<usize> = self.solids.iter().flat_map(|s| s.shells.iter().copied()).collect();
+        let in_shell: std::collections::HashSet<usize> = self.shells.iter().flat_map(|s| s.faces.iter().copied()).collect();
+        let solid = !self.solids.is_empty();
+        // Faces of a shell of no solid, or of no shell at all.
+        let sheet = (0..self.shells.len()).any(|s| !in_solid.contains(&s) && !self.shells[s].faces.is_empty())
+            || (0..self.faces.len()).any(|f| !in_shell.contains(&f));
+        let wire = !self.wires.is_empty();
+        let point = !self.points.is_empty();
+        match (solid, sheet, wire, point) {
+            (false, false, false, false) => BodyClass::Empty,
+            (true, false, false, false) => BodyClass::Solid,
+            (false, true, false, false) => BodyClass::Sheet,
+            (false, false, true, false) => BodyClass::Wire,
+            (false, false, false, true) => BodyClass::Point,
+            _ => BodyClass::Mixed,
+        }
+    }
+
+    /// Whether wire `w` ends where it starts.
+    pub fn wire_closed(&self, w: &Wire) -> bool {
+        let (Some(&(e0, f0)), Some(&(e1, f1))) = (w.edges.first(), w.edges.last()) else { return false };
+        let start = self.edges[e0].v[if f0 { 0 } else { 1 }];
+        let end = self.edges[e1].v[if f1 { 1 } else { 0 }];
+        start == end
+    }
+
+    /// Adds an acorn point.
+    pub fn add_point(&mut self, p: P3) -> usize {
+        let v = self.add_vertex(p);
+        self.points.push(v);
+        v
+    }
+
+    /// The edges no face uses and no degenerate one (wire edges and construction leftovers).
+    pub fn free_edges(&self) -> Vec<usize> {
+        let mut used = vec![false; self.edges.len()];
+        for c in self.faces.iter().flat_map(|f| f.loops.iter().flatten()) {
+            used[c.edge] = true;
+        }
+        (0..self.edges.len()).filter(|&e| !used[e] && !self.edges[e].degenerate).collect()
+    }
+
+    /// Gathers the free edges in no wire into wires: each chain of edges meeting at vertices
+    /// that only two of them share (a vertex where three or more meet ends the chains there).
+    /// Chains start at an end (a vertex of one edge) where there is one, so open chains come
+    /// out whole; what is left is closed loops.
+    pub fn chain_wires(&mut self) {
+        let mut taken = vec![false; self.edges.len()];
+        for w in &self.wires {
+            for &(e, _) in &w.edges {
+                taken[e] = true;
+            }
+        }
+        let free: Vec<usize> = self.free_edges().into_iter().filter(|&e| !taken[e]).collect();
+        let mut at: std::collections::HashMap<usize, Vec<usize>> = std::collections::HashMap::new();
+        for &e in &free {
+            at.entry(self.edges[e].v[0]).or_default().push(e);
+            if !self.edges[e].closed() {
+                at.entry(self.edges[e].v[1]).or_default().push(e);
+            }
+        }
+        let degree = |v: usize| at.get(&v).map_or(0, |l| l.len());
+        // Ends of chains first, then anything left (closed loops).
+        let mut starts: Vec<(usize, bool)> = Vec::new();
+        for &e in &free {
+            let ed = &self.edges[e];
+            if degree(ed.v[0]) != 2 {
+                starts.push((e, true));
+            }
+            if !ed.closed() && degree(ed.v[1]) != 2 {
+                starts.push((e, false));
+            }
+        }
+        starts.extend(free.iter().map(|&e| (e, true)));
+        for (e0, fwd0) in starts {
+            if taken[e0] {
+                continue;
+            }
+            taken[e0] = true;
+            let mut w = Wire { edges: vec![(e0, fwd0)] };
+            let first = self.edges[e0].v[if fwd0 { 0 } else { 1 }];
+            loop {
+                let &(e, f) = w.edges.last().unwrap_or(&(e0, fwd0));
+                let end = self.edges[e].v[if f { 1 } else { 0 }];
+                if end == first || degree(end) != 2 {
+                    break;
+                }
+                let Some(&next) = at[&end].iter().find(|&&n| !taken[n]) else { break };
+                taken[next] = true;
+                w.edges.push((next, self.edges[next].v[0] == end));
+            }
+            self.wires.push(w);
+        }
+    }
+
+    /// The rules of each kind of piece ([`Body::check`]): `uses` counts each edge's forward and
+    /// reversed uses by faces.
+    /// - solids: their shells are closed (and, as checked before, each edge of a closed shell is
+    ///   used once each way and the faces point out);
+    /// - sheets: manifold: an edge of open shells only has at most two uses (boundary edges
+    ///   have one). Not required oriented: read and 2D-boolean sheets may use an edge twice the
+    ///   same way;
+    /// - wires: chains of free, non-degenerate edges, each edge starting where the one before
+    ///   ends, each in one wire once; a body with wires has every free edge in one;
+    /// - points: vertices no edge uses, each listed once.
+    fn check_kinds(&self, uses: &[(i32, i32)]) -> Vec<String> {
+        let mut errs = Vec::new();
+        for (si, s) in self.solids.iter().enumerate() {
+            for &sh in &s.shells {
+                if !self.shells[sh].closed {
+                    errs.push(format!("solid {si}: shell {sh} is open"));
+                }
+            }
+        }
+        let mut in_closed = vec![false; self.edges.len()];
+        for s in self.shells.iter().filter(|s| s.closed) {
+            for &fi in &s.faces {
+                for c in self.faces[fi].loops.iter().flatten() {
+                    in_closed[c.edge] = true;
+                }
+            }
+        }
+        for (ei, &(f, r)) in uses.iter().enumerate() {
+            if in_closed[ei] || self.edges[ei].degenerate {
+                continue;
+            }
+            if f + r > 2 {
+                errs.push(format!("edge {ei} is used by {} faces (a sheet must be manifold)", f + r));
+            }
+        }
+        let mut in_wire = vec![0usize; self.edges.len()];
+        for (wi, w) in self.wires.iter().enumerate() {
+            for (k, &(e, fwd)) in w.edges.iter().enumerate() {
+                in_wire[e] += 1;
+                if self.edges[e].degenerate {
+                    errs.push(format!("wire {wi}: edge {e} is degenerate"));
+                }
+                if uses[e] != (0, 0) {
+                    errs.push(format!("wire {wi}: edge {e} is an edge of a face"));
+                }
+                if let Some(&(n, nf)) = w.edges.get(k + 1) {
+                    let end = self.edges[e].v[if fwd { 1 } else { 0 }];
+                    let start = self.edges[n].v[if nf { 0 } else { 1 }];
+                    if end != start {
+                        errs.push(format!("wire {wi}: edge {k} doesn't meet the next"));
+                    }
+                }
+            }
+        }
+        for (e, &n) in in_wire.iter().enumerate() {
+            if n > 1 {
+                errs.push(format!("edge {e} is in wires {n} times"));
+            }
+        }
+        if !self.wires.is_empty()
+            && let Some(e) = self.free_edges().into_iter().find(|&e| in_wire[e] == 0)
+        {
+            errs.push(format!("edge {e} is free but in no wire"));
+        }
+        let mut on_edge = vec![false; self.verts.len()];
+        for e in &self.edges {
+            on_edge[e.v[0]] = true;
+            on_edge[e.v[1]] = true;
+        }
+        let mut seen = std::collections::HashSet::new();
+        for &v in &self.points {
+            if on_edge[v] {
+                errs.push(format!("point vertex {v} is the end of an edge"));
+            }
+            if !seen.insert(v) {
+                errs.push(format!("point vertex {v} is listed twice"));
+            }
+        }
+        errs
+    }
+
     /// The first of the body's points, curves and surfaces that reaches outside the size box
     /// ±`max` (vertices; centres, origins and radii of curves and surfaces; B-spline control
     /// points; p-curves, in parameters, are left alone): a file's model the kernel can't hold
@@ -573,4 +789,284 @@ fn self_crossing(p: &[P2]) -> Option<(usize, usize)> {
         }
     }
     None
+}
+
+/// Body kinds (Phase 1b): each kind's `check`, mass properties, tessellation, the body format
+/// and STEP/IGES round trips, sweeps one kind higher, the cylindrical box and the revolve about
+/// an axis off the sketch plane.
+#[cfg(test)]
+mod kind_tests {
+    use std::f64::consts::{PI, TAU};
+
+    use nalgebra::{Point2, Point3, Unit, Vector3};
+
+    use super::Body;
+    use crate::exchange::ExchangeFormat;
+    use crate::native::kernel::NativeKernel;
+    use crate::*;
+
+    fn near(a: f64, b: f64, rel: f64) -> bool {
+        (a - b).abs() <= rel * b.abs().max(1.0)
+    }
+
+    fn line(a: [f64; 2], b: [f64; 2]) -> PathCurve {
+        PathCurve::Sketch { plane: Plane::top(), curve: Curve2::Line { a: Point2::new(a[0], a[1]), b: Point2::new(b[0], b[1]), source: None } }
+    }
+
+    /// A closed 10 × 10 square wire in the top plane.
+    fn square(k: &mut NativeKernel) -> BodyId {
+        let c = [[0.0, 0.0], [10.0, 0.0], [10.0, 10.0], [0.0, 10.0]];
+        let curves: Vec<PathCurve> = (0..4).map(|i| line(c[i], c[(i + 1) % 4])).collect();
+        k.create_wire(&curves).unwrap().bodies[0]
+    }
+
+    fn body(k: &NativeKernel, id: BodyId) -> &Body {
+        k.get(id).unwrap()
+    }
+
+    fn valid(k: &NativeKernel, id: BodyId) {
+        let issues = body(k, id).check();
+        assert!(issues.is_empty(), "{issues:?}");
+    }
+
+    /// Round trips through STEP, IGES and the body format; returns the bodies read.
+    fn round_trips(k: &mut NativeKernel, id: BodyId) -> Vec<BodyId> {
+        let bytes = k.write_body(id).unwrap();
+        let back = k.read_body(&bytes).unwrap();
+        assert_eq!(body(k, back), body(k, id), "the body format changed the body");
+        let mut out = vec![back];
+        for format in [ExchangeFormat::Step, ExchangeFormat::Iges] {
+            let file = k.export_model(format, "kinds", &[(id, "part".into())], &[]).unwrap();
+            let m = k.import_model(format, &file).unwrap_or_else(|e| panic!("{format:?}: {e}"));
+            assert_eq!(m.parts.len(), 1, "{format:?}");
+            out.push(m.parts[0].body);
+        }
+        out
+    }
+
+    #[test]
+    fn point_bodies() {
+        let mut k = NativeKernel::new();
+        let id = k.create_points(&[Point3::new(1.0, 2.0, 3.0), Point3::new(3.0, 4.0, 5.0)]).unwrap().bodies[0];
+        assert_eq!(k.body_class(id).unwrap(), BodyClass::Point);
+        valid(&k, id);
+        let m = k.mass_properties(id).unwrap();
+        assert_eq!((m.volume, m.surface_area, m.length), (0.0, 0.0, 0.0));
+        assert!((m.center_of_mass - Point3::new(2.0, 3.0, 4.0)).norm() < 1e-12);
+        let t = k.tessellate(id, Tessellation::default()).unwrap();
+        assert_eq!(t.points.len(), 2);
+        assert!(t.indices.is_empty() && t.edges.is_empty());
+        assert_eq!(k.vertices(id).unwrap().len(), 2);
+        assert!(k.faces(id).unwrap().is_empty() && k.edges(id).unwrap().is_empty());
+        for b in round_trips(&mut k, id) {
+            assert_eq!(k.body_class(b).unwrap(), BodyClass::Point);
+            valid(&k, b);
+            let pts: Vec<Point3<f64>> = body(&k, b).points.iter().map(|&v| body(&k, b).verts[v].p).collect();
+            assert_eq!(pts.len(), 2);
+            assert!((pts[1] - Point3::new(3.0, 4.0, 5.0)).norm() < 1e-9);
+        }
+        assert!(matches!(k.create_points(&[]), Err(KernelError::InvalidParameter(_))));
+        assert!(matches!(k.create_points(&[Point3::new(f64::NAN, 0.0, 0.0)]), Err(KernelError::InvalidInput(_))));
+    }
+
+    #[test]
+    fn wire_bodies() {
+        let mut k = NativeKernel::new();
+        let id = square(&mut k);
+        assert_eq!(k.body_class(id).unwrap(), BodyClass::Wire);
+        valid(&k, id);
+        let b = body(&k, id);
+        assert_eq!(b.wires.len(), 1);
+        assert!(b.wire_closed(&b.wires[0]));
+        let m = k.mass_properties(id).unwrap();
+        assert!(near(m.length, 40.0, 1e-12));
+        assert!((m.center_of_mass - Point3::new(5.0, 5.0, 0.0)).norm() < 1e-9);
+        let t = k.tessellate(id, Tessellation::default()).unwrap();
+        assert_eq!(t.edges.len(), 4);
+        assert!(t.indices.is_empty());
+        let es = k.edges(id).unwrap();
+        assert_eq!(es.len(), 4);
+        assert!(es.iter().all(|e| e.faces == [None, None]));
+        assert_eq!(k.vertices(id).unwrap().len(), 4);
+        // An open wire with an arc: a quarter circle of radius 5, then a line of 3.
+        let arc = PathCurve::Sketch { plane: Plane::top(), curve: Curve2::Arc { center: Point2::origin(), radius: 5.0, start_angle: 0.0, sweep: PI / 2.0, source: None } };
+        let open = k.create_wire(&[line([0.0, 5.0], [-3.0, 5.0]), arc]).unwrap().bodies[0];
+        valid(&k, open);
+        let ob = body(&k, open);
+        assert!(!ob.wire_closed(&ob.wires[0]));
+        let want = 5.0 * PI / 2.0 + 3.0;
+        assert!(near(k.mass_properties(open).unwrap().length, want, 1e-9));
+        for b in round_trips(&mut k, id) {
+            assert_eq!(k.body_class(b).unwrap(), BodyClass::Wire, "{b:?}");
+            valid(&k, b);
+            let bb = body(&k, b);
+            assert!(bb.wires.len() == 1 && bb.wire_closed(&bb.wires[0]));
+            assert!(near(k.mass_properties(b).unwrap().length, 40.0, 1e-9));
+        }
+        for b in round_trips(&mut k, open) {
+            valid(&k, b);
+            assert!(near(k.mass_properties(b).unwrap().length, want, 1e-9), "{}", k.mass_properties(b).unwrap().length);
+        }
+        // Curves that don't join are refused.
+        assert!(k.create_wire(&[line([0.0, 0.0], [1.0, 0.0]), line([5.0, 5.0], [6.0, 5.0])]).is_err());
+    }
+
+    #[test]
+    fn check_finds_broken_kinds() {
+        let mut k = NativeKernel::new();
+        let id = square(&mut k);
+        let good = body(&k, id).clone();
+        // A wire whose edges don't meet.
+        let mut b = good.clone();
+        b.wires[0].edges.swap(1, 2);
+        assert!(b.check().iter().any(|i| i.contains("doesn't meet")), "{:?}", b.check());
+        // A free edge left out of the wires.
+        let mut b = good.clone();
+        b.wires[0].edges.pop();
+        assert!(b.check().iter().any(|i| i.contains("in no wire")), "{:?}", b.check());
+        // An edge in two wires; a wire edge out of range.
+        let mut b = good.clone();
+        b.wires.push(super::Wire { edges: vec![b.wires[0].edges[0]] });
+        assert!(b.check().iter().any(|i| i.contains("in wires 2 times")));
+        let mut b = good.clone();
+        b.wires[0].edges.push((99, true));
+        assert!(b.check_refs().iter().any(|i| i.contains("edge 99")));
+        // A point on an edge, and listed twice.
+        let mut b = good.clone();
+        b.points = vec![0, 0];
+        let issues = b.check();
+        assert!(issues.iter().any(|i| i.contains("end of an edge")) && issues.iter().any(|i| i.contains("twice")), "{issues:?}");
+        // A sheet whose edge three faces use (non-manifold).
+        let sheet = k.sweep_body(id, &BodySweep::Translate(Vector3::new(0.0, 0.0, 5.0))).unwrap().bodies[0];
+        let mut b = body(&k, sheet).clone();
+        valid(&k, sheet);
+        b.faces.push(b.faces[0].clone());
+        b.shells[0].faces.push(b.faces.len() - 1);
+        assert!(b.check().iter().any(|i| i.contains("manifold")), "{:?}", b.check());
+        // A solid whose shell isn't closed.
+        let mut c = k.extrude(&Profile::new(Plane::top(), vec![Region { outer: Loop { curves: vec![Curve2::Circle { center: Point2::origin(), radius: 1.0, source: None }] }, holes: vec![], source: None }]), Extent::Blind(1.0)).map(|r| body(&k, r.bodies[0]).clone()).unwrap();
+        c.shells[0].closed = false;
+        assert!(c.check().iter().any(|i| i.contains("is open")));
+    }
+
+    #[test]
+    fn sweeps_one_kind_higher() {
+        let mut k = NativeKernel::new();
+        // Points into a wire, straight and turned (part and whole).
+        let p = k.create_points(&[Point3::new(5.0, 0.0, 0.0)]).unwrap().bodies[0];
+        let w = k.sweep_body(p, &BodySweep::Translate(Vector3::new(0.0, 3.0, 4.0))).unwrap().bodies[0];
+        assert_eq!(k.body_class(w).unwrap(), BodyClass::Wire);
+        assert!(near(k.mass_properties(w).unwrap().length, 5.0, 1e-12));
+        let z = Axis { origin: Point3::origin(), dir: Vector3::z_axis() };
+        let arc = k.sweep_body(p, &BodySweep::Rotate { axis: z, angle: PI / 2.0 }).unwrap().bodies[0];
+        valid(&k, arc);
+        assert!(near(k.mass_properties(arc).unwrap().length, 2.5 * PI, 1e-12));
+        let ring = k.sweep_body(p, &BodySweep::Rotate { axis: z, angle: -TAU }).unwrap().bodies[0];
+        valid(&k, ring);
+        assert!(body(&k, ring).edges[0].closed());
+        assert!(near(k.mass_properties(ring).unwrap().length, 10.0 * PI, 1e-12));
+        // A point on the axis sweeps nothing.
+        let o = k.create_points(&[Point3::new(0.0, 0.0, 2.0)]).unwrap().bodies[0];
+        assert!(k.sweep_body(o, &BodySweep::Rotate { axis: z, angle: 1.0 }).is_err());
+        // A wire into a sheet: the square's walls.
+        let sq = square(&mut k);
+        let walls = k.sweep_body(sq, &BodySweep::Translate(Vector3::new(0.0, 0.0, 5.0))).unwrap();
+        let wb = walls.bodies[0];
+        valid(&k, wb);
+        assert_eq!(k.body_class(wb).unwrap(), BodyClass::Sheet);
+        assert!(near(k.mass_properties(wb).unwrap().surface_area, 200.0, 1e-12));
+        assert_eq!(walls.history.generated.len(), 4);
+        assert!(walls.history.generated.iter().all(|(_, o)| matches!(o, Origin::FromEdge { body, .. } if *body == sq)));
+        // A segment into a flat sheet, then that into a box.
+        let seg = k.create_wire(&[line([0.0, 0.0], [10.0, 0.0])]).unwrap().bodies[0];
+        let flat = k.sweep_body(seg, &BodySweep::Translate(Vector3::new(0.0, 10.0, 0.0))).unwrap().bodies[0];
+        valid(&k, flat);
+        assert!(near(k.mass_properties(flat).unwrap().surface_area, 100.0, 1e-12));
+        let boxed = k.sweep_body(flat, &BodySweep::Translate(Vector3::new(0.0, 0.0, -5.0))).unwrap().bodies[0];
+        valid(&k, boxed);
+        assert_eq!(k.body_class(boxed).unwrap(), BodyClass::Solid);
+        let m = k.mass_properties(boxed).unwrap();
+        assert!(near(m.volume, 500.0, 1e-12) && near(m.surface_area, 400.0, 1e-12), "{m:?}");
+        // A sheet swept along itself makes no solid.
+        assert!(matches!(k.sweep_body(flat, &BodySweep::Translate(Vector3::new(1.0, 0.0, 0.0))), Err(KernelError::InvalidParameter(_))));
+        // Turned: a segment parallel to the axis into a cylinder, its rectangle into a tube.
+        let up = k.create_wire(&[PathCurve::Bezier3 { poles: vec![Point3::new(5.0, 0.0, 0.0), Point3::new(5.0, 0.0, 4.0)], weights: vec![] }]).unwrap().bodies[0];
+        let cyl = k.sweep_body(up, &BodySweep::Rotate { axis: z, angle: TAU }).unwrap().bodies[0];
+        valid(&k, cyl);
+        assert!(near(k.mass_properties(cyl).unwrap().surface_area, 40.0 * PI, 1e-9));
+        let rect = k.sweep_body(up, &BodySweep::Translate(Vector3::new(2.0, 0.0, 0.0))).unwrap().bodies[0];
+        let tube = k.sweep_body(rect, &BodySweep::Rotate { axis: z, angle: TAU }).unwrap().bodies[0];
+        valid(&k, tube);
+        assert!(near(k.mass_properties(tube).unwrap().volume, PI * 24.0 * 4.0, 1e-9));
+        let quarter = k.sweep_body(rect, &BodySweep::Rotate { axis: z, angle: PI / 2.0 }).unwrap().bodies[0];
+        valid(&k, quarter);
+        assert!(near(k.mass_properties(quarter).unwrap().volume, PI * 24.0, 1e-9));
+        // A segment skew to the axis turned: a hyperboloid; area 2π ∫ ρ √(ρ'² + h'²) dt.
+        let skew = k.create_wire(&[PathCurve::Bezier3 { poles: vec![Point3::new(5.0, -1.0, 0.0), Point3::new(5.0, 1.0, 3.0)], weights: vec![] }]).unwrap().bodies[0];
+        let hyp = k.sweep_body(skew, &BodySweep::Rotate { axis: z, angle: TAU }).unwrap().bodies[0];
+        valid(&k, hyp);
+        let n = 20000;
+        let want: f64 = (0..n)
+            .map(|i| {
+                let t = (i as f64 + 0.5) / n as f64;
+                let (y, dy) = (-1.0 + 2.0 * t, 2.0);
+                let rho = (25.0 + y * y).sqrt();
+                TAU * rho * ((y * dy / rho).powi(2) + 9.0).sqrt() / n as f64
+            })
+            .sum();
+        assert!(near(k.mass_properties(hyp).unwrap().surface_area, want, 1e-6), "{} vs {want}", k.mass_properties(hyp).unwrap().surface_area);
+        for b in round_trips(&mut k, hyp) {
+            assert!(near(k.mass_properties(b).unwrap().surface_area, want, 1e-6));
+        }
+    }
+
+    #[test]
+    fn cylindrical_box() {
+        let mut k = NativeKernel::new();
+        let spec = |len: f64, ri: f64, ro: f64, a0: f64, a1: f64| CylindricalBox { frame: Plane::top(), length: len, inner_radius: ri, outer_radius: ro, start_angle: a0.to_radians(), end_angle: a1.to_radians() };
+        let id = k.cylindrical_box(&spec(10.0, 2.0, 5.0, 30.0, 120.0)).unwrap().bodies[0];
+        valid(&k, id);
+        let m = k.mass_properties(id).unwrap();
+        let th = PI / 2.0;
+        assert!(near(m.volume, th / 2.0 * 21.0 * 10.0, 1e-9));
+        assert!(near(m.surface_area, th * 21.0 + th * 7.0 * 10.0 + 2.0 * 3.0 * 10.0, 1e-9));
+        // It starts at 30°: its centroid lies at 75°.
+        let c = m.center_of_mass;
+        assert!((c.y.atan2(c.x) - 75f64.to_radians()).abs() < 1e-9);
+        let tube = k.cylindrical_box(&spec(1.0, 1.0, 2.0, 0.0, 360.0)).unwrap().bodies[0];
+        valid(&k, tube);
+        assert!(near(k.mass_properties(tube).unwrap().volume, 3.0 * PI, 1e-9));
+        for bad in [spec(0.0, 2.0, 5.0, 0.0, 90.0), spec(-1.0, 2.0, 5.0, 0.0, 90.0), spec(10.0, 0.0, 5.0, 0.0, 90.0), spec(10.0, 5.0, 2.0, 0.0, 90.0), spec(10.0, 5.0, 5.0, 0.0, 90.0), spec(10.0, 2.0, 5.0, 400.0, 450.0), spec(10.0, 2.0, 5.0, -10.0, 50.0), spec(10.0, 2.0, 5.0, 90.0, 10.0), spec(10.0, 2.0, 5.0, 0.0, 400.0), spec(f64::NAN, 2.0, 5.0, 0.0, 90.0), spec(10.0, 2.0, f64::INFINITY, 0.0, 90.0)] {
+            assert!(matches!(k.cylindrical_box(&bad), Err(KernelError::InvalidParameter(_))), "{bad:?}");
+        }
+    }
+
+    #[test]
+    fn revolve_about_an_axis_off_the_plane() {
+        let mut k = NativeKernel::new();
+        // The square [1, 2] × [0, 1] of the top plane about the y-parallel axis one below it:
+        // swept volume θ ∫ x dA = 1.5 θ (each point leaves the plane at speed x).
+        let sq = Region { outer: Loop { curves: [[1.0, 0.0], [2.0, 0.0], [2.0, 1.0], [1.0, 1.0]].iter().zip([[2.0, 0.0], [2.0, 1.0], [1.0, 1.0], [1.0, 0.0]]).map(|(a, b)| Curve2::Line { a: Point2::new(a[0], a[1]), b: Point2::new(b[0], b[1]), source: None }).collect() }, holes: vec![], source: None };
+        let p = Profile::new(Plane::top(), vec![sq]);
+        let axis = Axis { origin: Point3::new(0.0, 0.0, -1.0), dir: Vector3::y_axis() };
+        for (angle, vol) in [(PI / 2.0, 0.75 * PI), (TAU, 3.0 * PI)] {
+            let id = k.revolve(&p, axis, angle).unwrap().bodies[0];
+            valid(&k, id);
+            assert!(near(k.mass_properties(id).unwrap().volume, vol, 1e-9), "{angle}: {}", k.mass_properties(id).unwrap().volume);
+        }
+        // A skew axis (SMLib sweep 31's kind): valid, and volume θ ∫ (z × r)·n dA.
+        let skew = Axis { origin: Point3::new(4.0, 2.0, -3.0), dir: Unit::new_normalize(Vector3::new(-2.0, 5.0, 1.0)) };
+        let id = k.revolve(&p, skew, 1.0).unwrap().bodies[0];
+        valid(&k, id);
+        let (z, o) = (skew.dir.into_inner(), skew.origin);
+        let speed = |x: f64, y: f64| z.cross(&(Point3::new(x, y, 0.0) - o)).z.abs();
+        let n = 200;
+        let want: f64 = (0..n * n).map(|i| speed(1.0 + ((i % n) as f64 + 0.5) / n as f64, ((i / n) as f64 + 0.5) / n as f64) / (n * n) as f64).sum();
+        assert!(near(k.mass_properties(id).unwrap().volume, want, 1e-6), "{} vs {want}", k.mass_properties(id).unwrap().volume);
+        // An axis square to the plane, or one the profile straddles, is refused.
+        let normal = Axis { origin: Point3::new(0.0, 0.0, -1.0), dir: Vector3::z_axis() };
+        assert!(k.revolve(&p, normal, 1.0).is_err());
+        let across = Axis { origin: Point3::new(1.5, 0.0, -1.0), dir: Vector3::y_axis() };
+        assert!(k.revolve(&p, across, 1.0).is_err());
+    }
 }

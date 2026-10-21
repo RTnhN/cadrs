@@ -185,9 +185,9 @@ fn sheet_boolean(union: bool, a: fn(&NativeKernel) -> Result<Shape, String>, b: 
 
 /// SMLib's `CreateCylindricalBox` (SmPrimitiveCreation.cpp:424): the piece of a thick-walled
 /// cylinder about the frame's z between two radii, a length and two angles, refusing bad
-/// dimensions. cadrs has no such primitive: `None` until one is wired in here.
-fn cylindrical_box(_k: &mut NativeKernel, _len: f64, _r_in: f64, _r_out: f64, _a0: f64, _a1: f64) -> Option<Result<BodyId, KernelError>> {
-    None
+/// dimensions: cadrs's `Kernel::cylindrical_box` ([`kinds::cylindrical_box_deg`]).
+fn cylindrical_box(k: &mut NativeKernel, len: f64, r_in: f64, r_out: f64, a0: f64, a1: f64) -> Option<Result<BodyId, KernelError>> {
+    Some(cylindrical_box_deg(k, len, r_in, r_out, a0, a1))
 }
 
 /// A `CreateCylindricalBox` check: built and as `w` when `ok`, refused otherwise.
@@ -531,7 +531,7 @@ def extract(ctx):
         ok = st == "SM_SUCCESS"
         th = math.radians(a1 - a0)
         w = want("SOLID", volume=th / 2 * (ro * ro - ri * ri) * ln, area=th * (ro * ro - ri * ri) + th * (ro + ri) * ln + 2 * (ro - ri) * ln) if ok else "&SOLID"
-        doc = "SMLib primitive: `CreateCylindricalBox(%g, %g, %g, %g, %g)` (smSweepTest.cpp:%d, case %d) %s. cadrs has no cylindrical-box primitive (missing)." % (
+        doc = "SMLib primitive: `CreateCylindricalBox(%g, %g, %g, %g, %g)` (smSweepTest.cpp:%d, case %d) %s. cadrs: `Kernel::cylindrical_box`." % (
             ln, ri, ro, a0, a1, line, i, "is made" if ok else "is refused (%s)" % why.strip())
         cases.append(Case("cylindrical_box_%d" % i, doc, "cyl_box(%s, %s, %s, %s, %s, %s, %s)" % (f(ln), f(ri), f(ro), f(a0), f(a1), "true" if ok else "false", w)))
     return cases

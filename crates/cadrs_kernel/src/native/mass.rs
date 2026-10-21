@@ -496,6 +496,7 @@ pub fn body_mass(body: &Body) -> crate::MassProperties {
         }
     }
     let area = q[0];
+    let (length, moment) = wire_length(body);
     let solid = body.is_solid();
     let vol = if solid { q[4] } else { 0.0 };
     let (center, inertia) = if solid && vol.abs() > 1e-300 {
@@ -508,10 +509,37 @@ pub fn body_mass(body: &Body) -> crate::MassProperties {
         (P3::from(c + shift), ic)
     } else if area.abs() > 1e-300 {
         (P3::from(V3::new(q[1], q[2], q[3]) / area + shift), nalgebra::Matrix3::zeros())
+    } else if length > 1e-300 {
+        (P3::from(moment / length), nalgebra::Matrix3::zeros())
+    } else if !body.points.is_empty() {
+        let sum = body.points.iter().fold(V3::zeros(), |s, &v| s + body.verts[v].p.coords);
+        (P3::from(sum / body.points.len() as f64), nalgebra::Matrix3::zeros())
     } else {
         (P3::from(shift), nalgebra::Matrix3::zeros())
     };
-    crate::MassProperties { volume: vol, surface_area: area, center_of_mass: center, inertia }
+    crate::MassProperties { volume: vol, surface_area: area, center_of_mass: center, inertia, length }
+}
+
+/// The total length of a body's wires and its first moment ∫ p ds (Gauss–Legendre on each
+/// edge's smooth pieces; exact for lines).
+pub fn wire_length(body: &Body) -> (f64, V3) {
+    let mut length = 0.0;
+    let mut moment = V3::zeros();
+    for &(ei, _) in body.wires.iter().flat_map(|w| w.edges.iter()) {
+        let e = &body.edges[ei];
+        if e.degenerate {
+            continue;
+        }
+        let (t0, t1) = (e.t[0].min(e.t[1]), e.t[0].max(e.t[1]));
+        let n = if matches!(e.curve, Curve::Line { .. }) { 1 } else { 8 };
+        for w in e.curve.pieces(t0, t1).windows(2) {
+            length += integrate(w[0], w[1], n, &GAUSS16, |t| e.curve.tangent(t).norm());
+            for k in 0..3 {
+                moment[k] += integrate(w[0], w[1], n, &GAUSS16, |t| e.curve.point(t)[k] * e.curve.tangent(t).norm());
+            }
+        }
+    }
+    (length, moment)
 }
 
 /// A face's area and area centroid.

@@ -210,10 +210,42 @@ impl Writer {
         (de, c)
     }
 
+    /// A body's wires and points: independent curves (one per edge) and points (116), grouped
+    /// in a 402 form 7 named after the part.
+    fn wireframe(&mut self, b: &Body, name: &str) -> Option<usize> {
+        let mut members = Vec::new();
+        for &(ei, _) in b.wires.iter().flat_map(|w| w.edges.iter()) {
+            let e = &b.edges[ei];
+            let de = self.curve(&e.curve, e.t[0], e.t[1]);
+            self.ent(de).status = "00000000";
+            members.push(de);
+        }
+        for &v in &b.points {
+            let de = self.point(&b.verts[v].p);
+            self.ent(de).status = "00000000";
+            members.push(de);
+        }
+        if members.is_empty() {
+            return None;
+        }
+        let mut p = vec![members.len().to_string()];
+        p.extend(members.iter().map(|m| m.to_string()));
+        let de = self.add(402, 7, p);
+        let e = self.ent(de);
+        e.status = "00000000";
+        e.label = name.chars().filter(|c| c.is_ascii_graphic()).take(8).collect();
+        Some(de)
+    }
+
     fn body(&mut self, b: &Body, name: &str) -> Vec<usize> {
+        let wire = self.wireframe(b, name);
+        if b.faces.is_empty() {
+            return wire.into_iter().collect();
+        }
+        let in_wire: std::collections::HashSet<usize> = b.wires.iter().flat_map(|w| w.edges.iter().map(|e| e.0)).collect();
         let used: Vec<usize> = {
             let mut u = vec![false; b.verts.len()];
-            for e in b.edges.iter().filter(|e| !e.degenerate) {
+            for (_, e) in b.edges.iter().enumerate().filter(|(i, e)| !e.degenerate && !in_wire.contains(i)) {
                 u[e.v[0]] = true;
                 u[e.v[1]] = true;
             }
@@ -227,7 +259,7 @@ impl Writer {
             vp.extend([real(p.x), real(p.y), real(p.z)]);
         }
         let vl = self.add(502, 1, vp);
-        let edges: Vec<usize> = (0..b.edges.len()).filter(|&e| !b.edges[e].degenerate).collect();
+        let edges: Vec<usize> = (0..b.edges.len()).filter(|&e| !b.edges[e].degenerate && !in_wire.contains(&e)).collect();
         let mut eidx = vec![0usize; b.edges.len()];
         let mut ep = vec![edges.len().to_string()];
         for (k, &ei) in edges.iter().enumerate() {
@@ -291,6 +323,7 @@ impl Writer {
                 tops.push(sh);
             }
         }
+        tops.extend(wire);
         tops
     }
 
@@ -473,6 +506,9 @@ struct DirEnt {
     transform: usize,
     label: String,
     params: Vec<Tok>,
+    /// The status's subordinate switch is 00: the entity stands on its own (not only a part of
+    /// another).
+    independent: bool,
 }
 
 struct File {
@@ -564,10 +600,11 @@ fn parse(bytes: &[u8]) -> R<File> {
         let transform: usize = field(a, 6).parse().unwrap_or(0);
         let form: u32 = field(b, 4).parse().unwrap_or(0);
         let label = field(b, 7).to_string();
+        let independent = field(a, 8).get(2..4).is_none_or(|sw| sw == "00");
         let params = pdata.get(&de).map(|s| tokens(s, pd, rd)).unwrap_or_default();
         // The first parameter repeats the entity type.
         let params = if params.is_empty() { params } else { params[1..].to_vec() };
-        ents.insert(de, DirEnt { kind, form, transform, label, params });
+        ents.insert(de, DirEnt { kind, form, transform, label, params, independent });
     }
     let resolution = gt.get(18).and_then(|t| t.f()).filter(|r| *r > 0.0).unwrap_or(1e-6) * scale;
     Ok(File { ents, scale, resolution })
@@ -1209,6 +1246,60 @@ fn read_trimmed(f: &File, out: &mut ReadModel) {
 
 /// Reads an IGES file's MSBO solids and free shells, or else its trimmed surfaces sewn, as
 /// parts at the identity.
+/// A file of curves and points (no B-rep, no trimmed surfaces): each 402 group of them a wire
+/// body named after the group, the independent ones in no group one more. Curves are welded
+/// end to end within ten times the file's resolution and chained into wires.
+fn read_wires(f: &File, out: &mut ReadModel) {
+    let is_curve = |k: u32| matches!(k, 100 | 102 | 104 | 110 | 126);
+    let mut des: Vec<usize> = f.ents.keys().copied().collect();
+    des.sort_unstable();
+    let mut groups: Vec<(String, Vec<usize>)> = Vec::new();
+    let mut grouped = std::collections::HashSet::new();
+    for &de in &des {
+        let e = &f.ents[&de];
+        if e.kind != 402 {
+            continue;
+        }
+        let n = Reader::count(e, 0).unwrap_or(0);
+        let members: Vec<usize> = (0..n).filter_map(|k| Reader::ptr(e, 1 + k).ok()).filter(|m| f.ents.get(m).is_some_and(|x| is_curve(x.kind) || x.kind == 116)).collect();
+        if !members.is_empty() {
+            grouped.extend(members.iter().copied());
+            groups.push((name_of(f, e, 1 + n), members));
+        }
+    }
+    let loose: Vec<usize> = des.iter().copied().filter(|d| !grouped.contains(d) && f.ents[d].independent && (is_curve(f.ents[d].kind) || f.ents[d].kind == 116)).collect();
+    if !loose.is_empty() {
+        groups.push((String::new(), loose));
+    }
+    let tol = (f.resolution * 10.0).max(1e-9);
+    for (name, members) in groups {
+        let r = Reader { f, xb: XBuilder::new(), verts: HashMap::new(), edges: HashMap::new() };
+        let (mut segs, mut pts) = (Vec::new(), Vec::new());
+        for de in members {
+            if f.ents[&de].kind == 116 {
+                match r.point(de) {
+                    Ok(p) => pts.push(p),
+                    Err(e) => out.warnings.push(e),
+                }
+                continue;
+            }
+            let mut ss = Vec::new();
+            if let Err(e) = r.segments(de, &mut ss, 0) {
+                out.warnings.push(e);
+            }
+            for s in ss {
+                let closed = (s.a - s.b).norm() <= tol && s.c.is_periodic();
+                segs.push(super::step::WireSeg { c: s.c, a: s.a, b: s.b, closed });
+            }
+        }
+        let body = super::step::wire_body(&segs, &pts, tol);
+        if !body.wires.is_empty() || !body.points.is_empty() {
+            out.occurrences.push(ReadOccurrence { part: out.parts.len(), placement: Affine::identity(), name: name.clone() });
+            out.parts.push(ReadPart { body, name });
+        }
+    }
+}
+
 pub fn read(bytes: &[u8]) -> Result<ReadModel, String> {
     let f = parse(bytes)?;
     let mut des: Vec<usize> = f.ents.keys().copied().collect();
@@ -1273,6 +1364,9 @@ pub fn read(bytes: &[u8]) -> Result<ReadModel, String> {
     }
     if out.parts.is_empty() {
         read_trimmed(&f, &mut out);
+    }
+    if out.parts.is_empty() {
+        read_wires(&f, &mut out);
     }
     if out.parts.is_empty() {
         return Err(if let Some(w) = out.warnings.first() {

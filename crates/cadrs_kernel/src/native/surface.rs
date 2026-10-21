@@ -5,7 +5,10 @@
 //! - Cone: `o + (r + v sin a)(cos u·x + sin u·y) + v cos a·z` (a: the semi-angle).
 //! - Sphere: `o + r cos v(cos u·x + sin u·y) + r sin v·z`, v in [−π/2, π/2].
 //! - Torus: `o + (R + r cos v)(cos u·x + sin u·y) + r sin v·z`.
-//! - Revolution: the meridian curve (in the frame's xz half plane) turned by u about z.
+//! - Revolution: the meridian curve (in the frame's xz half plane) turned by u about z. A
+//!   meridian off that plane (a curve skew to the axis turned about it: a revolve about an axis
+//!   off the profile's plane) is the same `S(u, v) = Rot_z(u)·m(v)`; [`Surface::project`]
+//!   handles it by its meridian's (ρ, h) profile ([`meridian_off_plane`]).
 //! - Extrusion: `C(u) + v·d`.
 //!
 //! The natural normal is Su × Sv; for the analytic surfaces it points away from the axis
@@ -231,6 +234,7 @@ impl Surface {
                 };
                 (ang(f), v)
             }
+            Surface::Revolution { f, m } if meridian_off_plane(f, m) => project_off_plane(f, m, p, hint),
             Surface::Revolution { f, m } => {
                 let u = ang(f);
                 let l = f.local(p);
@@ -636,9 +640,134 @@ impl Surface {
                 }
                 Some(a.right_handed() == b.right_handed())
             }
+            (Surface::Revolution { f: a, m: ma }, Surface::Revolution { f: b, m: mb }) => {
+                // About the same axis, each meridian on the other surface (two lines that are
+                // the same hyperboloid's rulings, a revolve's side swept twice).
+                par(&a.z, &b.z)?;
+                if !on_axis(a, b) {
+                    return None;
+                }
+                let samples = |m: &Curve| -> Vec<f64> {
+                    match (m.nurbs_range(), m) {
+                        (Some((t0, t1)), _) => (0..=8).map(|i| t0 + (t1 - t0) * i as f64 / 8.0).collect(),
+                        (None, Curve::Line { d, .. }) => [-10.0, -3.0, -1.0, 0.0, 1.0, 3.0, 10.0].iter().map(|x| x / d.norm().max(1e-300)).collect(),
+                        _ => (0..8).map(|i| TAU * i as f64 / 8.0).collect(),
+                    }
+                };
+                for (s, m) in [(self, mb), (o, ma)] {
+                    for t in samples(m) {
+                        let p = m.point(t);
+                        let (u, v) = s.project(&p, None);
+                        if (s.eval(u, v) - p).norm() > tol {
+                            return None;
+                        }
+                    }
+                }
+                let p = mb.point(samples(mb)[3]);
+                let ((ua, va), (ub, vb)) = (self.project(&p, None), o.project(&p, None));
+                Some(self.normal(ua, va).dot(&o.normal(ub, vb)) > 0.0)
+            }
             _ => None,
         }
     }
+}
+
+/// Whether a surface of revolution's meridian leaves its frame's xz plane (a curve skew to the
+/// axis). The usual meridian lies in it, and the rest of the kernel takes v from the point
+/// turned into that plane.
+pub fn meridian_off_plane(f: &Frame, m: &Curve) -> bool {
+    let off = |p: &P3| {
+        let l = f.local(p);
+        l.y.abs() > 1e-9 * (1.0 + l.norm())
+    };
+    let off_v = |d: &V3| f.y.dot(d).abs() > 1e-12 * d.norm();
+    match m {
+        Curve::Line { o, d } => off(o) || off_v(d),
+        Curve::Circle { c, x, y, .. } | Curve::Ellipse { c, x, y, .. } => off(c) || off_v(x) || off_v(y),
+        Curve::Nurbs(n) => n.cps.iter().any(|h| off(&super::nurbs::dehom(h))),
+    }
+}
+
+/// The azimuth (about the frame's z, from its x) of a surface of revolution's meridian point at
+/// `v`: 0 for a meridian in the xz half plane.
+pub fn meridian_azimuth(f: &Frame, m: &Curve, v: f64) -> f64 {
+    let l = f.local(&m.point(v));
+    if l.x.hypot(l.y) < 1e-300 { 0.0 } else { l.y.atan2(l.x) }
+}
+
+/// [`Surface::project`] on a surface of revolution whose meridian is off its frame's xz plane:
+/// v makes the meridian's (ρ, h) nearest the point's (the distance from a point to a circle
+/// about the axis is that of their (ρ, h)), u turns the meridian point to the point's azimuth.
+fn project_off_plane(f: &Frame, m: &Curve, p: &P3, hint: Option<(f64, f64)>) -> (f64, f64) {
+    let l = f.local(p);
+    let (rho, h) = (l.x.hypot(l.y), l.z);
+    let (a, b) = match m.nurbs_range() {
+        Some(r) => r,
+        None if m.is_periodic() => {
+            let c = hint.map(|h| h.1).unwrap_or(0.0);
+            (c - PI, c + PI)
+        }
+        None => (-1e12, 1e12),
+    };
+    // (ρ, h) of the meridian at v and the half gradient of the squared distance, with its
+    // derivative.
+    let at = |v: f64| {
+        let (q, d1, d2) = m.d2(v);
+        let (q, d1, d2) = (f.local(&q), V3::new(d1.dot(&f.x), d1.dot(&f.y), d1.dot(&f.z)), V3::new(d2.dot(&f.x), d2.dot(&f.y), d2.dot(&f.z)));
+        let r = q.x.hypot(q.y).max(1e-300);
+        let r1 = (q.x * d1.x + q.y * d1.y) / r;
+        let r2 = (d1.x * d1.x + d1.y * d1.y + q.x * d2.x + q.y * d2.y) / r - r1 * r1 / r;
+        let (dr, dh) = (r - rho, q.z - h);
+        (dr * dr + dh * dh, dr * r1 + dh * d1.z, r1 * r1 + dr * r2 + d1.z * d1.z + dh * d2.z)
+    };
+    let mut starts: Vec<f64> = Vec::new();
+    if let Some((_, hv)) = hint {
+        starts.push(hv);
+    }
+    starts.push(m.closest(p, a, b));
+    match m {
+        Curve::Line { o, d } => {
+            // Where the line's height is the point's, and where its distance from the axis is.
+            let (lo, ld) = (f.local(o), V3::new(d.dot(&f.x), d.dot(&f.y), d.dot(&f.z)));
+            if ld.z.abs() > 1e-300 {
+                starts.push((h - lo.z) / ld.z);
+            }
+            let (qa, qb, qc) = (ld.x * ld.x + ld.y * ld.y, 2.0 * (lo.x * ld.x + lo.y * ld.y), lo.x * lo.x + lo.y * lo.y - rho * rho);
+            if qa > 1e-300 {
+                let disc = qb * qb - 4.0 * qa * qc;
+                let sq = disc.max(0.0).sqrt();
+                starts.extend([(-qb - sq) / (2.0 * qa), (-qb + sq) / (2.0 * qa)]);
+            }
+        }
+        _ => starts.extend((0..=32).map(|i| a + (b - a) * i as f64 / 32.0)),
+    }
+    let mut best = (f64::INFINITY, starts[0].clamp(a, b));
+    for s in starts {
+        let mut v = s.clamp(a, b);
+        for _ in 0..40 {
+            let (_, g, gp) = at(v);
+            if !(gp.abs() > 1e-300) {
+                break;
+            }
+            let nv = (v - g / gp).clamp(a, b);
+            let step = (nv - v).abs();
+            v = nv;
+            if step < 1e-15 * (1.0 + v.abs()) {
+                break;
+            }
+        }
+        let d = at(v).0;
+        if d < best.0 {
+            best = (d, v);
+        }
+    }
+    let v = best.1;
+    let az = l.y.atan2(l.x) - meridian_azimuth(f, m, v);
+    let u = match hint {
+        Some((hu, _)) => unwrap_near(az, hu, TAU),
+        None => wrap(az, 0.0, TAU),
+    };
+    (u, v)
 }
 
 #[cfg(test)]

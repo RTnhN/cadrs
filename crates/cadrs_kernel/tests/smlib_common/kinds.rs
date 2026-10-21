@@ -7,8 +7,8 @@
 //! non-manifold cell complex holding faces, wire edges and vertex shells together. The cases
 //! build the cadrs equivalent of each piece with the kernel's own operations (extrude, revolve,
 //! sweep, loft, booleans, and the draw harness's `prism`/`revol` for vertices and edges) and
-//! check each piece by its kind. Wires and points are Phase 1b (body kinds): until the kernel
-//! has them, sweeping a vertex fails and those cases are known failures.
+//! check each piece by its kind. Wires and points are Phase 1b (body kinds): a vertex swept is
+//! a wire body (`Kernel::sweep_body`), an edge or wire swept a sheet.
 #![allow(dead_code)]
 
 use cadrs_kernel::native::draw::Shape;
@@ -97,6 +97,9 @@ pub fn check_body(k: &NativeKernel, id: BodyId, w: &Want) -> Result<(), String> 
             near("area", cadrs_kernel::native::mass::body_mass(b).surface_area, w.area)?;
         }
         Kind::Wire => {
+            if let Some(i) = b.check().first() {
+                return Err(format!("invalid: {i}"));
+            }
             if !b.faces.is_empty() {
                 return Err(format!("not a wire: {} faces", b.faces.len()));
             }
@@ -236,6 +239,13 @@ pub fn point_sweeps(k: &mut NativeKernel, pts: &[[f64; 3]], m: Move, reps: usize
         }
     }
     Ok(Shape::Compound(out))
+}
+
+/// SMLib's `CreateCylindricalBox(len, r_in, r_out, a0, a1)` (angles in degrees, about the world
+/// z from x): cadrs's `Kernel::cylindrical_box`.
+pub fn cylindrical_box_deg(k: &mut NativeKernel, len: f64, r_in: f64, r_out: f64, a0: f64, a1: f64) -> Result<BodyId, KernelError> {
+    let spec = cadrs_kernel::CylindricalBox { frame: Plane::top(), length: len, inner_radius: r_in, outer_radius: r_out, start_angle: a0.to_radians(), end_angle: a1.to_radians() };
+    Ok(k.cylindrical_box(&spec)?.bodies[0])
 }
 
 /// A line in plane coordinates.

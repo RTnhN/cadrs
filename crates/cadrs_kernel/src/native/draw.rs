@@ -916,6 +916,9 @@ impl NativeKernel {
 
     /// `prism name face dx dy dz` (along the face's normal).
     pub fn prism(&mut self, f: &Shape, dx: f64, dy: f64, dz: f64) -> Result<Shape> {
+        if let Some(s) = self.sweep_lower(f, &BodySweep::Translate(V3::new(dx, dy, dz)))? {
+            return Ok(s);
+        }
         let profile = face_profile(f)?;
         let v = V3::new(dx, dy, dz);
         let n = profile.plane.normal.into_inner();
@@ -942,8 +945,26 @@ impl NativeKernel {
         Ok(Shape::Body(r.bodies[0]))
     }
 
+    /// A vertex, edge or wire swept one kind higher (into a wire or a sheet body) by
+    /// [`Kernel::sweep_body`]; None for other shapes.
+    fn sweep_lower(&mut self, s: &Shape, sweep: &BodySweep) -> Result<Option<Shape>> {
+        let body = match s {
+            Shape::Vertex(p) => crate::Kernel::create_points(self, &[*p])?.bodies[0],
+            Shape::Edge(e) => self.insert(super::kernel::wire_of_curves(&[(e.curve.clone(), e.t0, e.t1)])?),
+            Shape::Wire(w) => self.insert(super::kernel::wire_of_curves(&w.iter().map(|e| (e.curve.clone(), e.t0, e.t1)).collect::<Vec<_>>())?),
+            _ => return Ok(None),
+        };
+        let r = crate::Kernel::sweep_body(self, body, sweep)?;
+        self.release(body);
+        Ok(Some(Shape::Body(r.bodies[0])))
+    }
+
     /// `revol name face x y z dx dy dz angle` (degrees).
     pub fn revol(&mut self, f: &Shape, x: f64, y: f64, z: f64, dx: f64, dy: f64, dz: f64, angle: f64) -> Result<Shape> {
+        let axis = Axis { origin: P3::new(x, y, z), dir: nalgebra::Unit::new_normalize(V3::new(dx, dy, dz)) };
+        if let Some(s) = self.sweep_lower(f, &BodySweep::Rotate { axis, angle: angle.to_radians() })? {
+            return Ok(s);
+        }
         let profile = face_profile(f)?;
         let (o, d) = (P3::new(x, y, z), V3::new(dx, dy, dz).normalize());
         let a = angle.to_radians();

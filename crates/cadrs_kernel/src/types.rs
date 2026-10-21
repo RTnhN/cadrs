@@ -694,6 +694,10 @@ pub struct MassProperties {
     /// Multiply by a density (kg/mm³) for kg·mm². Zero for a surface body. P3.5.
     #[serde(default)]
     pub inertia: Matrix3<f64>,
+    /// mm: the total length of the body's wires (Phase 1b; 0 without wires). The centroid of a
+    /// body with neither volume nor area is its wires' (by length), else its points' mean.
+    #[serde(default)]
+    pub length: f64,
 }
 
 impl MassProperties {
@@ -811,8 +815,12 @@ pub struct TriMesh {
     pub indices: Vec<[u32; 3]>,
     /// One entry per triangle.
     pub triangle_faces: Vec<FaceId>,
-    /// Edge polylines for drawing black edges and edge picking.
+    /// Edge polylines for drawing black edges and edge picking (a wire body's are its
+    /// polylines).
     pub edges: Vec<(EdgeId, Vec<Point3<f64>>)>,
+    /// A point body's points (its acorn vertices).
+    #[serde(default)]
+    pub points: Vec<(VertexId, Point3<f64>)>,
 }
 
 /// What an operation did; feeds persistent naming (see [`crate::naming`]). Face ids are the
@@ -1025,4 +1033,53 @@ pub struct FillSpec {
     pub curves: Vec<FillCurve>,
     /// The caller's id for the new face.
     pub source: u64,
+}
+
+/// What a body is (Onshape's body kinds, Phase 1b): its pieces are all solids, all sheets
+/// (open shells of faces), all wires (chains of free edges) or all points; `Mixed` holds
+/// several kinds (a compound); `Empty` nothing.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum BodyClass {
+    Empty,
+    Point,
+    Wire,
+    Sheet,
+    Solid,
+    Mixed,
+}
+
+impl BodyClass {
+    /// The kind a sweep of this kind makes (a point sweeps an edge, an edge a face, a face a
+    /// solid), if it makes one.
+    pub fn swept(self) -> Option<BodyClass> {
+        match self {
+            Self::Point => Some(Self::Wire),
+            Self::Wire => Some(Self::Sheet),
+            Self::Sheet => Some(Self::Solid),
+            _ => None,
+        }
+    }
+}
+
+/// How [`crate::Kernel::sweep_body`] moves a body: straight along a vector, or turned about an
+/// axis by an angle (radians, counter-clockwise seen from the tip of the axis; a whole turn
+/// when its size is 2π or more).
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub enum BodySweep {
+    Translate(Vector3<f64>),
+    Rotate { axis: Axis, angle: f64 },
+}
+
+/// A cylindrical box (SMLib's `CreateCylindricalBox`): the piece of a thick-walled tube about
+/// `frame`'s normal from `frame`'s origin, `length` long, between `inner_radius` and
+/// `outer_radius`, from `start_angle` to `end_angle` (radians, counter-clockwise about the
+/// normal from `frame`'s x direction): an annular sector extruded.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct CylindricalBox {
+    pub frame: Plane,
+    pub length: f64,
+    pub inner_radius: f64,
+    pub outer_radius: f64,
+    pub start_angle: f64,
+    pub end_angle: f64,
 }

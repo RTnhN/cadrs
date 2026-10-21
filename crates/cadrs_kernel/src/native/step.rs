@@ -861,6 +861,131 @@ impl<'a> Geo<'a> {
     }
 }
 
+/// A piece of a wire read from a file: a curve from `a` to `b` (along it), or all of a closed
+/// curve.
+pub struct WireSeg {
+    pub c: Curve,
+    pub a: P3,
+    pub b: P3,
+    pub closed: bool,
+}
+
+impl Geo<'_> {
+    /// The point at a parameter of a basis curve record in the file's terms (a LINE's runs
+    /// along its VECTOR's magnitude, a CIRCLE's and ELLIPSE's is an angle).
+    fn at_param(&self, basis: u64, c: &Curve, u: f64) -> R<P3> {
+        let r = self.rec(basis)?;
+        Ok(match (r.kind(), c) {
+            ("LINE", Curve::Line { o, d }) => {
+                let v = self.rec(self.rf(r.params(), 2)?)?;
+                o + d * (u * self.num(v.params(), 2)? * self.ls)
+            }
+            ("CIRCLE" | "ELLIPSE", _) => c.point(u * self.angle),
+            _ => c.point(u),
+        })
+    }
+
+    /// The curves and points of a wireframe item (`GEOMETRIC_CURVE_SET`, `GEOMETRIC_SET`, and
+    /// inside them trimmed curves, composite curves, bounded curves, circles, ellipses and
+    /// points). Unbounded lines are skipped.
+    fn wire_items(&self, id: u64, segs: &mut Vec<WireSeg>, pts: &mut Vec<P3>, depth: usize) -> R<()> {
+        if depth > 8 {
+            return Ok(());
+        }
+        let r = self.rec(id)?;
+        let ps = r.params();
+        let ends = |c: &Curve, a: P3, b: P3| {
+            let closed = (a - b).norm() <= 1e-9 * (1.0 + a.coords.norm()) && c.is_periodic();
+            WireSeg { c: c.clone(), a, b, closed }
+        };
+        if r.is_complex() {
+            if r.has("B_SPLINE_CURVE") {
+                let c = self.curve(id)?;
+                let (t0, t1) = c.nurbs_range().unwrap_or((0.0, 1.0));
+                let (a, b) = (c.point(t0), c.point(t1));
+                segs.push(WireSeg { closed: (a - b).norm() <= 1e-9 * (1.0 + a.coords.norm()), c, a, b });
+            }
+            return Ok(());
+        }
+        match r.kind() {
+            "GEOMETRIC_CURVE_SET" | "GEOMETRIC_SET" => {
+                for e in at(ps, 1)?.as_list().ok_or("a set's elements are not a list")? {
+                    self.wire_items(e.as_ref().ok_or("a set's element is not a reference")?, segs, pts, depth + 1)?;
+                }
+            }
+            "CARTESIAN_POINT" => pts.push(self.point(id)?),
+            "TRIMMED_CURVE" => {
+                let basis = self.rf(ps, 1)?;
+                let c = self.curve(basis)?;
+                let trim = |i: usize| -> R<P3> {
+                    let l = at(ps, i)?.as_list().ok_or("a trim is not a list")?;
+                    if let Some(p) = l.iter().find_map(|x| x.as_ref()) {
+                        return self.point(p);
+                    }
+                    let u = l.iter().find_map(|x| x.as_f64()).ok_or("a trim has neither a point nor a parameter")?;
+                    self.at_param(basis, &c, u)
+                };
+                let (a, b) = (trim(2)?, trim(3)?);
+                let along = ps.get(4).and_then(|p| p.as_bool()).unwrap_or(true);
+                let (a, b) = if along { (a, b) } else { (b, a) };
+                let curve = match self.conic_arc(basis, &a, &b)? {
+                    Some(arc) => arc,
+                    None => c,
+                };
+                segs.push(ends(&curve, a, b));
+            }
+            "COMPOSITE_CURVE" => {
+                for sg in at(ps, 1)?.as_list().ok_or("segments are not a list")? {
+                    let sr = self.rec(sg.as_ref().ok_or("a segment is not a reference")?)?;
+                    self.wire_items(self.rf(sr.params(), 2)?, segs, pts, depth + 1)?;
+                }
+            }
+            "CIRCLE" | "ELLIPSE" => {
+                let c = self.curve(id)?;
+                let a = c.point(0.0);
+                segs.push(WireSeg { c, a, b: a, closed: true });
+            }
+            "LINE" => {}
+            _ => {
+                let c = self.curve(id)?;
+                let (t0, t1) = c.nurbs_range().ok_or_else(|| format!("#{id}: an unbounded curve in a curve set"))?;
+                let (a, b) = (c.point(t0), c.point(t1));
+                segs.push(WireSeg { closed: (a - b).norm() <= 1e-9 * (1.0 + a.coords.norm()), c, a, b });
+            }
+        }
+        Ok(())
+    }
+}
+
+/// A wire body from a file's curves and points: the curves' ends welded within `tol` into
+/// vertices, the edges chained into wires ([`Body::chain_wires`]), the points as acorns.
+pub fn wire_body(segs: &[WireSeg], pts: &[P3], tol: f64) -> Body {
+    let mut b = Body::default();
+    let vertex = |b: &mut Body, p: P3| match b.verts.iter().position(|v| (v.p - p).norm() <= tol) {
+        Some(i) => i,
+        None => b.add_vertex(p),
+    };
+    for s in segs {
+        let va = vertex(&mut b, s.a);
+        let vb = if s.closed { va } else { vertex(&mut b, s.b) };
+        let p0 = b.verts[va].p;
+        let p1 = b.verts[vb].p;
+        if let Some((t0, t1)) = super::xbuild::edge_range(&s.c, &p0, &p1, s.closed) {
+            b.add_edge(s.c.clone(), t0, t1, va, vb);
+        }
+    }
+    b.chain_wires();
+    for p in pts {
+        b.add_point(*p);
+    }
+    b.fit_tolerances(tol.max(1e-6));
+    b
+}
+
+fn is_wire_item(kind: &str) -> bool {
+    matches!(kind, "GEOMETRIC_CURVE_SET" | "GEOMETRIC_SET")
+}
+
 /// Builds topology items into one body.
 struct TopoReader<'a> {
     g: Geo<'a>,
@@ -1087,7 +1212,7 @@ impl<'a> TopoReader<'a> {
 }
 
 fn is_shape_item(kind: &str) -> bool {
-    matches!(kind, "MANIFOLD_SOLID_BREP" | "BREP_WITH_VOIDS" | "FACETED_BREP" | "SHELL_BASED_SURFACE_MODEL" | "CLOSED_SHELL" | "OPEN_SHELL" | "ADVANCED_FACE" | "FACE_SURFACE")
+    matches!(kind, "MANIFOLD_SOLID_BREP" | "BREP_WITH_VOIDS" | "FACETED_BREP" | "SHELL_BASED_SURFACE_MODEL" | "CLOSED_SHELL" | "OPEN_SHELL" | "ADVANCED_FACE" | "FACE_SURFACE") || is_wire_item(kind)
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -1382,9 +1507,23 @@ fn build_shapes(m: &mut Model, shapes: &[(u64, u64, Affine)], warnings: &mut Vec
         return None;
     }
     let mut body = Body::default();
+    // Curves and points (wireframes), read only for a part with nothing else.
+    let mut wires = Body::default();
+    let is_wire: Vec<bool> = shapes.iter().map(|(it, ..)| m.rec(*it).is_some_and(|r| is_wire_item(r.kind()))).collect();
+    for (it, rep, at) in shapes.iter().zip(&is_wire).filter(|(_, w)| **w).map(|(s, _)| s) {
+        let g = m.geo(*rep);
+        let (mut segs, mut pts) = (Vec::new(), Vec::new());
+        if let Err(e) = g.wire_items(*it, &mut segs, &mut pts, 0) {
+            warnings.push(e);
+        }
+        let size = segs.iter().flat_map(|s| [s.a, s.b]).chain(pts.iter().copied()).map(|p| p.coords.amax().max(-p.coords.min())).fold(1.0, f64::max);
+        let tol = m.rep_uncertainty(*rep).unwrap_or(1e-7 * size).max(1e-9 * size);
+        let w = wire_body(&segs, &pts, tol);
+        wires.append(&if *at == Affine::identity() { w } else { w.transformed(at) });
+    }
     // Each item gets its own vertices and edges (solids that share edge records in the file,
     // touching along them, stay separate solids).
-    let groups: Vec<(u64, Affine, Vec<u64>)> = shapes.iter().map(|(it, rep, at)| (*rep, *at, vec![*it])).collect();
+    let groups: Vec<(u64, Affine, Vec<u64>)> = shapes.iter().zip(&is_wire).filter(|(_, w)| !**w).map(|((it, rep, at), _)| (*rep, *at, vec![*it])).collect();
     for (rep, at, items) in groups {
         let g = m.geo(rep);
         let mut tr = TopoReader { g, xb: XBuilder::new(), verts: HashMap::new(), edges: HashMap::new(), segs: HashMap::new(), errors: Vec::new() };
@@ -1409,7 +1548,10 @@ fn build_shapes(m: &mut Model, shapes: &[(u64, u64, Affine)], warnings: &mut Vec
         let b = if at == Affine::identity() { b } else { b.transformed(&at) };
         body.append(&b);
     }
-    if body.faces.is_empty() { None } else { Some(body) }
+    if body.faces.is_empty() {
+        body.append(&wires);
+    }
+    if body.faces.is_empty() && body.wires.is_empty() && body.points.is_empty() { None } else { Some(body) }
 }
 
 /// Reads a STEP file's parts and assembly structure.
@@ -1475,7 +1617,7 @@ pub fn read(bytes: &[u8]) -> Result<ReadModel, String> {
     }
     if out.parts.is_empty() {
         // No product structure: every shape item in the file, as one part.
-        let reps: Vec<u64> = ["ADVANCED_BREP_SHAPE_REPRESENTATION", "MANIFOLD_SURFACE_SHAPE_REPRESENTATION", "SHAPE_REPRESENTATION", "FACETED_BREP_SHAPE_REPRESENTATION"].iter().flat_map(|k| m.ids(k).iter().copied()).collect();
+        let reps: Vec<u64> = ["ADVANCED_BREP_SHAPE_REPRESENTATION", "MANIFOLD_SURFACE_SHAPE_REPRESENTATION", "SHAPE_REPRESENTATION", "FACETED_BREP_SHAPE_REPRESENTATION", "GEOMETRICALLY_BOUNDED_WIREFRAME_SHAPE_REPRESENTATION"].iter().flat_map(|k| m.ids(k).iter().copied()).collect();
         let mut shapes = Vec::new();
         let mut seen = HashSet::new();
         for rep in reps {
@@ -1697,11 +1839,42 @@ impl Writer {
         }
     }
 
+    /// Writes a body's wires and points as one `GEOMETRIC_CURVE_SET` of trimmed curves (each
+    /// trimmed by its end points and its parameters in the file's terms) and points.
+    fn wireframe(&mut self, b: &Body) -> Vec<u64> {
+        let mut items = Vec::new();
+        for &(ei, _) in b.wires.iter().flat_map(|w| w.edges.iter()) {
+            let e = &b.edges[ei];
+            let basis = self.curve(&e.curve, e.t[0]);
+            // The file's parameter of our t (see `curve`: a line starts at t0, an ellipse with
+            // its axes swapped a quarter turn on).
+            let u = |t: f64| match &e.curve {
+                Curve::Line { .. } => t - e.t[0],
+                Curve::Ellipse { a, b, .. } if a < b => t - std::f64::consts::FRAC_PI_2,
+                _ => t,
+            };
+            let (p0, p1) = (self.point(&b.verts[e.v[0]].p), self.point(&b.verts[e.v[1]].p));
+            items.push(self.add(&format!(
+                "TRIMMED_CURVE('',#{basis},(#{p0},PARAMETER_VALUE({})),(#{p1},PARAMETER_VALUE({})),.T.,.PARAMETER.)",
+                real(u(e.t[0])),
+                real(u(e.t[1]))
+            )));
+        }
+        for &v in &b.points {
+            items.push(self.point(&b.verts[v].p));
+        }
+        if items.is_empty() {
+            return Vec::new();
+        }
+        vec![self.add(&format!("GEOMETRIC_CURVE_SET('',({}))", Self::refs(&items)))]
+    }
+
     /// Writes a body's shape items: solids, and free shells as one surface model.
     fn body(&mut self, b: &Body) -> (Vec<u64>, Vec<u64>) {
         let mut vid = vec![0u64; b.verts.len()];
         let mut used = vec![false; b.verts.len()];
-        for e in b.edges.iter().filter(|e| !e.degenerate) {
+        let wire_edge: HashSet<usize> = b.wires.iter().flat_map(|w| w.edges.iter().map(|e| e.0)).collect();
+        for (_, e) in b.edges.iter().enumerate().filter(|(i, e)| !e.degenerate && !wire_edge.contains(i)) {
             used[e.v[0]] = true;
             used[e.v[1]] = true;
         }
@@ -1712,8 +1885,9 @@ impl Writer {
             }
         }
         let mut eid = vec![0u64; b.edges.len()];
+        let in_wire: HashSet<usize> = b.wires.iter().flat_map(|w| w.edges.iter().map(|e| e.0)).collect();
         for (i, e) in b.edges.iter().enumerate() {
-            if e.degenerate {
+            if e.degenerate || in_wire.contains(&i) {
                 continue;
             }
             let c = self.curve(&e.curve, e.t[0]);
@@ -1852,17 +2026,23 @@ pub fn write(name: &str, parts: &[(&Body, &str)], instances: &[WriteInstance]) -
     let mut written: Vec<(u64, u64, u64)> = Vec::new();
     for (b, pname) in &all_parts {
         let (solids, sheets) = w.body(b);
+        let wires = w.wireframe(b);
         let ax = origin(&mut w);
-        let (pd, rep) = match (solids.is_empty(), sheets.is_empty()) {
-            (false, true) => product(&mut w, pname, &solids, "ADVANCED_BREP_SHAPE_REPRESENTATION", ax),
-            (true, false) => product(&mut w, pname, &sheets, "MANIFOLD_SURFACE_SHAPE_REPRESENTATION", ax),
-            (true, true) => product(&mut w, pname, &[], "SHAPE_REPRESENTATION", ax),
-            (false, false) => {
-                let (pd, rep) = product(&mut w, pname, &solids, "ADVANCED_BREP_SHAPE_REPRESENTATION", ax);
-                let ax2 = origin(&mut w);
-                let n = encode_string(pname);
-                let srep = w.add(&format!("MANIFOLD_SURFACE_SHAPE_REPRESENTATION({n},(#{ax2},{}),#{ctx})", Writer::refs(&sheets)));
-                w.add(&format!("SHAPE_REPRESENTATION_RELATIONSHIP('','',#{rep},#{srep})"));
+        // The first kind present is the part's representation; the others are related to it.
+        let kinds: Vec<(&str, &Vec<u64>)> = [("ADVANCED_BREP_SHAPE_REPRESENTATION", &solids), ("MANIFOLD_SURFACE_SHAPE_REPRESENTATION", &sheets), ("GEOMETRICALLY_BOUNDED_WIREFRAME_SHAPE_REPRESENTATION", &wires)]
+            .into_iter()
+            .filter(|(_, items)| !items.is_empty())
+            .collect();
+        let (pd, rep) = match kinds.split_first() {
+            None => product(&mut w, pname, &[], "SHAPE_REPRESENTATION", ax),
+            Some(((kind, items), rest)) => {
+                let (pd, rep) = product(&mut w, pname, items, kind, ax);
+                for (kind, items) in rest {
+                    let ax2 = origin(&mut w);
+                    let n = encode_string(pname);
+                    let srep = w.add(&format!("{kind}({n},(#{ax2},{}),#{ctx})", Writer::refs(items)));
+                    w.add(&format!("SHAPE_REPRESENTATION_RELATIONSHIP('','',#{rep},#{srep})"));
+                }
                 (pd, rep)
             }
         };

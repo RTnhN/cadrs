@@ -102,6 +102,7 @@ pub fn combined_mass<'a>(parts: impl IntoIterator<Item = &'a Part>) -> Option<ca
         surface_area: area,
         center_of_mass: center,
         inertia,
+        length: masses.iter().map(|m| m.length).sum(),
     })
 }
 

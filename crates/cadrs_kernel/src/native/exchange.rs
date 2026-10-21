@@ -100,8 +100,8 @@ pub fn export_step(k: &NativeKernel, bodies: &[BodyId]) -> Result<Vec<u8>> {
     Ok(super::step::write("cadrs", &named, &[]))
 }
 
-/// One body per solid of `b` (with its void shells), and the shells of no solid together as one
-/// surface body.
+/// One body per solid of `b` (with its void shells), the shells of no solid together as one
+/// surface body, and its wires and points as one more.
 pub fn split_into_solids(b: &Body) -> Vec<Body> {
     let mut out = Vec::new();
     for s in &b.solids {
@@ -134,6 +134,7 @@ pub fn split_into_solids(b: &Body) -> Vec<Body> {
         }
         out.push(nb);
     }
+    out.extend(super::kernel::loose_part(b));
     out
 }
 
@@ -145,7 +146,7 @@ pub fn import_step(k: &mut NativeKernel, bytes: &[u8]) -> Result<Vec<BodyId>> {
         let b = &m.parts[o.part].body;
         let placed = if o.placement == Affine::identity() { b.clone() } else { b.transformed(&o.placement) };
         for piece in split_into_solids(&placed) {
-            if piece.solids.is_empty() {
+            if piece.solids.is_empty() && !piece.faces.is_empty() {
                 sheets.append(&piece);
             } else {
                 solids.push(piece);

@@ -377,6 +377,44 @@ pub trait Kernel {
         Err(KernelError::Unsupported("read body"))
     }
 
+    // Body kinds (Phase 1b: Onshape's solid, sheet, wire and point bodies).
+
+    /// What a body is: solids, sheets, wires, points, a mix of them (a compound), or nothing.
+    fn body_class(&self, _body: BodyId) -> Result<BodyClass> {
+        Err(KernelError::Unsupported("body kinds"))
+    }
+
+    /// A wire body: the curves (edges of bodies, sketch curves, Bézier curves in space) joined
+    /// end to end into one chain, open or closed. Its edges have no faces in
+    /// [`Kernel::edges`]; its mass properties give its `length`.
+    fn create_wire(&mut self, _curves: &[PathCurve]) -> Result<OpResult> {
+        Err(KernelError::Unsupported("wire bodies"))
+    }
+
+    /// A point body: acorn points (vertices without edges), in order.
+    fn create_points(&mut self, _points: &[Point3<f64>]) -> Result<OpResult> {
+        Err(KernelError::Unsupported("point bodies"))
+    }
+
+    /// A body swept one kind higher along a vector or about an axis (Onshape's extrude and
+    /// revolve of points, curves and surfaces): points into a wire, a wire into a sheet, a sheet
+    /// into a solid. The input's vertices and edges keep their ids in the result; side faces are
+    /// generated `FromEdge` of the edge of `body` that swept them, a sheet's start and end
+    /// copies `StartCap`/`EndCap { region: 0 }`. A sheet that doesn't cross the sweep the same
+    /// way everywhere (its solid would fold through itself) is an `InvalidParameter` error.
+    fn sweep_body(&mut self, _body: BodyId, _sweep: &BodySweep) -> Result<OpResult> {
+        Err(KernelError::Unsupported("sweeping bodies"))
+    }
+
+    /// A cylindrical box (SMLib's `CreateCylindricalBox`): an annular sector extruded along the
+    /// frame's normal. Its faces are generated as a revolve's (region 0). Refuses
+    /// (`InvalidParameter`) a length or inner radius that isn't above zero, an outer radius not
+    /// above the inner, a start angle outside [0, 2π), and an end angle not after the start or
+    /// more than a turn past it.
+    fn cylindrical_box(&mut self, _spec: &CylindricalBox) -> Result<OpResult> {
+        Err(KernelError::Unsupported("cylindrical boxes"))
+    }
+
     // Queries.
     fn faces(&self, body: BodyId) -> Result<Vec<FaceInfo>>;
     fn edges(&self, body: BodyId) -> Result<Vec<EdgeInfo>>;

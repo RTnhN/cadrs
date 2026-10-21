@@ -151,11 +151,13 @@ fn exact(s: &Surface, c: &Curve, t0: f64, t1: f64) -> Option<Curve> {
             }
             _ => None,
         },
-        Surface::Revolution { f, .. } => match c {
+        Surface::Revolution { f, m } => match c {
             Curve::Circle { c: cc, x, y, .. } if coaxial_circle(f, cc, x, y) => {
                 let sgn = x.cross(y).dot(&f.x.cross(&f.y)).signum();
                 let (_, v) = s.project(&c.point(0.0), None);
-                Some(line2(P2::new(ang(f, x), v), V2::new(sgn, 0.0)))
+                // A meridian off the frame's xz plane sits at its own azimuth.
+                let az = if super::surface::meridian_off_plane(f, m) { super::surface::meridian_azimuth(f, m, v) } else { 0.0 };
+                Some(line2(P2::new(ang(f, x) - az, v), V2::new(sgn, 0.0)))
             }
             _ => None,
         },

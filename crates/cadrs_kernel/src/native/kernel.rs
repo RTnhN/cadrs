@@ -310,6 +310,92 @@ pub fn subset(b: &Body, faces: &[usize], closed: bool) -> Body {
     out
 }
 
+/// The index among [`Kernel::vertices`] of each vertex of the body (those edges end at, and the
+/// acorn points), None for the others.
+pub fn vertex_ids(b: &Body) -> Vec<Option<usize>> {
+    let mut used = vec![false; b.verts.len()];
+    for e in &b.edges {
+        used[e.v[0]] = true;
+        used[e.v[1]] = true;
+    }
+    for &v in &b.points {
+        used[v] = true;
+    }
+    let mut k = 0;
+    used.iter()
+        .map(|&u| {
+            u.then(|| {
+                k += 1;
+                k - 1
+            })
+        })
+        .collect()
+}
+
+/// A body's wires and points alone (their vertices and edges copied), if it has any.
+pub fn loose_part(b: &Body) -> Option<Body> {
+    if b.wires.is_empty() && b.points.is_empty() {
+        return None;
+    }
+    let mut out = Body::default();
+    let mut vmap: HashMap<usize, usize> = HashMap::new();
+    let mut vert = |out: &mut Body, v: usize| {
+        *vmap.entry(v).or_insert_with(|| {
+            out.verts.push(b.verts[v].clone());
+            out.verts.len() - 1
+        })
+    };
+    for w in &b.wires {
+        let mut nw = super::topo::Wire::default();
+        for &(e, fwd) in &w.edges {
+            let mut ed = b.edges[e].clone();
+            ed.v = [vert(&mut out, ed.v[0]), vert(&mut out, ed.v[1])];
+            out.edges.push(ed);
+            nw.edges.push((out.edges.len() - 1, fwd));
+        }
+        out.wires.push(nw);
+    }
+    for &v in &b.points {
+        let nv = vert(&mut out, v);
+        out.points.push(nv);
+    }
+    Some(out)
+}
+
+/// The wire body of [`Kernel::create_wire`]: the curves chained end to end, the vertices at
+/// their joints (with the tolerance of the joints' gaps).
+fn wire_body(k: &NativeKernel, curves: &[PathCurve]) -> Result<Body> {
+    wire_of_segments(super::sweep_path::path_segments(k, curves)?)
+}
+
+/// A wire body of 3D curves, each over [t0, t1] (run backwards when t0 > t1), joined end to end.
+pub fn wire_of_curves(curves: &[(Curve, f64, f64)]) -> Result<Body> {
+    wire_of_segments(curves.iter().map(|(c, t0, t1)| super::sweep_path::Seg { c: c.clone(), t0: t0.min(*t1), t1: t0.max(*t1), rev: t0 > t1 }).collect())
+}
+
+fn wire_of_segments(segs: Vec<super::sweep_path::Seg>) -> Result<Body> {
+    if segs.is_empty() {
+        return Err(KernelError::InvalidParameter("A wire needs a curve".into()));
+    }
+    let (segs, closed) = super::sweep_path::chain(segs).map_err(|_| KernelError::InvalidParameter("The wire's curves must join end to end in one chain".into()))?;
+    let mut b = Body::default();
+    let first = b.add_vertex(segs[0].start());
+    let mut at = first;
+    let mut w = super::topo::Wire::default();
+    for (i, s) in segs.iter().enumerate() {
+        let next = if closed && i + 1 == segs.len() { first } else { b.add_vertex(s.end()) };
+        let e = if s.rev { b.add_edge(s.c.clone(), s.t0, s.t1, next, at) } else { b.add_edge(s.c.clone(), s.t0, s.t1, at, next) };
+        w.edges.push((e, !s.rev));
+        at = next;
+    }
+    b.wires.push(w);
+    b.fit_tolerances(1e-4);
+    if let Some(why) = b.check().into_iter().next().or_else(|| b.size_issue(super::tol::SIZE)) {
+        return Err(KernelError::InvalidParameter(format!("the wire isn't valid: {why}")));
+    }
+    Ok(b)
+}
+
 impl Kernel for NativeKernel {
     fn name(&self) -> &'static str {
         "native"
@@ -543,6 +629,11 @@ impl Kernel for NativeKernel {
             let id = self.insert(nb);
             out.push(OpResult { bodies: vec![id], history });
         }
+        // The wires and points, as one more body.
+        if let Some(loose) = loose_part(&b) {
+            let id = self.insert(loose);
+            out.push(OpResult { bodies: vec![id], history: History::default() });
+        }
         Ok(out)
     }
 
@@ -553,6 +644,94 @@ impl Kernel for NativeKernel {
 
     fn release(&mut self, body: BodyId) {
         self.bodies.remove(&body.0);
+    }
+
+    fn body_class(&self, body: BodyId) -> Result<BodyClass> {
+        Ok(self.get(body)?.class())
+    }
+
+    fn create_wire(&mut self, curves: &[PathCurve]) -> Result<OpResult> {
+        let b = wire_body(self, curves)?;
+        Ok(self.insert_result(Built { body: b, origins: Vec::new() }))
+    }
+
+    fn create_points(&mut self, points: &[Point3<f64>]) -> Result<OpResult> {
+        if points.is_empty() {
+            return Err(KernelError::InvalidParameter("A point body needs a point".into()));
+        }
+        let mut b = Body::default();
+        for p in points {
+            if !p.iter().all(|x| x.is_finite()) {
+                return Err(KernelError::InvalidInput("a point isn't finite".into()));
+            }
+            b.add_point(*p);
+        }
+        if let Some(why) = b.size_issue(super::tol::SIZE) {
+            return Err(KernelError::InvalidParameter(why));
+        }
+        Ok(self.insert_result(Built { body: b, origins: Vec::new() }))
+    }
+
+    fn sweep_body(&mut self, body: BodyId, sweep: &BodySweep) -> Result<OpResult> {
+        let b = self.get(body)?.clone();
+        let built = match *sweep {
+            BodySweep::Translate(v) => {
+                let len = v.norm();
+                if !len.is_finite() || len < super::build::MIN_DEPTH {
+                    return Err(KernelError::InvalidParameter(format!("The sweep's length {len:e} is below the modelling tolerance")));
+                }
+                super::sweep::sweep_body(&b, &super::sweep::BodyMove::Straight(v / len), len, false, body.0)?
+            }
+            BodySweep::Rotate { axis, angle } => {
+                if !angle.is_finite() || angle.abs() < 1e-9 {
+                    return Err(KernelError::InvalidParameter("The sweep's angle must be above zero".into()));
+                }
+                if angle.abs() > TAU + 1e-9 {
+                    return Err(KernelError::InvalidParameter("The sweep turns more than a whole turn".into()));
+                }
+                // Counter-clockwise about the axis: a negative angle turns about the reversed axis.
+                let z = axis.dir.into_inner() * angle.signum();
+                let x = if z.x.abs() < 0.9 { V3::x() } else { V3::y() };
+                let x = (x - z * x.dot(&z)).normalize();
+                let turn = super::sweep::Turn { plane: Plane::top(), f: Frame { o: axis.origin, x, y: z.cross(&x), z }, up: true };
+                let whole = angle.abs() >= TAU - 1e-12;
+                super::sweep::sweep_body(&b, &super::sweep::BodyMove::Turn(&turn), if whole { TAU } else { angle.abs() }, whole, body.0)?
+            }
+        };
+        if let Some(why) = built.body.check().into_iter().next() {
+            return Err(KernelError::OperationFailed(format!("the sweep made an invalid body: {why}")));
+        }
+        Ok(self.insert_result(built))
+    }
+
+    fn cylindrical_box(&mut self, spec: &CylindricalBox) -> Result<OpResult> {
+        let CylindricalBox { frame, length, inner_radius: ri, outer_radius: ro, start_angle: a0, end_angle: a1 } = *spec;
+        let bad = |why: &str| Err(KernelError::InvalidParameter(why.into()));
+        if !(length > 0.0) || !length.is_finite() {
+            return bad("A cylindrical box needs a length above zero");
+        }
+        if !(ri > 0.0) || !ro.is_finite() {
+            return bad("A cylindrical box needs an inside radius above zero");
+        }
+        if !(ro > ri) {
+            return bad("A cylindrical box's outside radius must be above its inside radius");
+        }
+        if !(0.0..TAU).contains(&a0) {
+            return bad("A cylindrical box's start angle must lie in [0°, 360°)");
+        }
+        if !(a1 > a0) || a1 - a0 > TAU + 1e-12 {
+            return bad("A cylindrical box's end angle must come after its start angle, at most a turn past it");
+        }
+        let z = frame.normal.into_inner();
+        let (x, y) = (frame.x_dir.into_inner(), frame.y_dir().into_inner());
+        let radial = x * a0.cos() + y * a0.sin();
+        // The section through the axis at the start angle: x radial, y along the axis.
+        let plane = Plane { origin: frame.origin, x_dir: nalgebra::Unit::new_normalize(radial), normal: nalgebra::Unit::new_normalize(radial.cross(&z)) };
+        let p = |u: f64, v: f64| nalgebra::Point2::new(u, v);
+        let pts = [p(ri, 0.0), p(ro, 0.0), p(ro, length), p(ri, length)];
+        let curves = (0..4).map(|i| Curve2::Line { a: pts[i], b: pts[(i + 1) % 4], source: None }).collect();
+        let profile = Profile::new(plane, vec![Region { outer: Loop { curves }, holes: vec![], source: Some(0) }]);
+        self.revolve(&profile, Axis { origin: frame.origin, dir: frame.normal }, (a1 - a0).min(TAU))
     }
 
     fn faces(&self, body: BodyId) -> Result<Vec<FaceInfo>> {
@@ -578,7 +757,7 @@ impl Kernel for NativeKernel {
         Ok(b.verts
             .iter()
             .enumerate()
-            .filter(|(i, _)| !edges[*i].is_empty())
+            .filter(|(i, _)| !edges[*i].is_empty() || b.points.contains(i))
             .enumerate()
             .map(|(k, (i, v))| VertexInfo { id: VertexId(k as u64), point: v.p, edges: edges[i].clone() })
             .collect())
@@ -614,6 +793,10 @@ impl Kernel for NativeKernel {
                 continue;
             }
             m.edges.push((EdgeId(ei as u64), pts));
+        }
+        if !b.points.is_empty() {
+            let ids = vertex_ids(b);
+            m.points = b.points.iter().map(|&v| (VertexId(ids[v].unwrap_or(0) as u64), b.verts[v].p)).collect();
         }
         Ok(m)
     }

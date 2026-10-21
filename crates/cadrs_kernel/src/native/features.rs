@@ -615,6 +615,9 @@ pub fn revolve_with(k: &mut NativeKernel, profile: &Profile, spec: &RevolveSpec)
     if faces.is_empty() && ch.is_empty() {
         return Err(KernelError::InvalidProfile("no regions".into()));
     }
+    if axis_off_plane(profile, &spec.axis) {
+        return revolve_off_plane(k, profile, spec, &faces, &ch);
+    }
     let f = revolve_frame(profile, &faces, &ch, &spec.axis)?;
     let kind = sweep::Revolve { plane: profile.plane, f };
     let solid = spec.body != BodyKind::Surface;
@@ -749,6 +752,87 @@ pub fn revolve_with(k: &mut NativeKernel, profile: &Profile, spec: &RevolveSpec)
         }
     }
     Ok(kept.into_result(k))
+}
+
+/// Whether a revolve axis leaves the sketch plane (or is parallel to it off it).
+fn axis_off_plane(profile: &Profile, axis: &Axis) -> bool {
+    let n = profile.plane.normal.into_inner();
+    axis.dir.dot(&n).abs() > 1e-9 || (axis.origin - profile.plane.origin).dot(&n).abs() > 1e-6
+}
+
+/// A revolve about an axis off the sketch plane (SMLib's rotational sweep of a face about any
+/// axis, [`sweep::Turn`]): angle ends only (an angle, symmetric, a second angle, or a whole
+/// turn). Every point of the profile must leave the plane the same way: the profile lies on one
+/// side of the plane through the axis along the plane's normal.
+fn revolve_off_plane(k: &mut NativeKernel, profile: &Profile, spec: &RevolveSpec, faces: &[MergedFace], ch: &[Vec<Piece>]) -> Result<OpResult> {
+    let n = profile.plane.normal.into_inner();
+    let z = spec.axis.dir.into_inner();
+    let o = spec.axis.origin;
+    if z.cross(&n).norm() < 1e-9 {
+        return Err(KernelError::InvalidParameter("The revolve axis must not be square to the sketch plane".into()));
+    }
+    let m = super::build::plane_map(&profile.plane, &V3::zeros(), 0.0);
+    let mut pts: Vec<P3> = Vec::new();
+    for l in faces.iter().flat_map(|f| std::iter::once(&f.outer).chain(f.holes.iter())).chain(ch.iter()) {
+        for p in l {
+            pts.extend(p.sample(1e-3).into_iter().map(|q| m.point(&P3::new(q.x, q.y, 0.0))));
+        }
+    }
+    let size = pts.iter().map(|p| (p - o).norm()).fold(1.0, f64::max);
+    // How fast each point leaves the plane: (z × (p − o))·n.
+    let (mut lo, mut hi) = (f64::INFINITY, f64::NEG_INFINITY);
+    for p in &pts {
+        let d = z.cross(&(p - o)).dot(&n);
+        lo = lo.min(d);
+        hi = hi.max(d);
+    }
+    let eps = 1e-9 * size;
+    if hi > eps && lo < -eps {
+        return Err(KernelError::InvalidParameter("The profile lies on both sides of the revolve axis".into()));
+    }
+    if !(hi > eps || lo < -eps) {
+        return Err(KernelError::InvalidParameter("The profile turns within its plane about this axis".into()));
+    }
+    // x towards the profile's middle (any square to the axis when that is on it).
+    let mid = pts.iter().fold(V3::zeros(), |s, p| s + (p - o)) / pts.len().max(1) as f64;
+    let mut x = mid - z * mid.dot(&z);
+    if x.norm() < 1e-9 * size {
+        x = n - z * n.dot(&z);
+    }
+    let x = x.normalize();
+    let kind = sweep::Turn { plane: profile.plane, f: Frame { o, x, y: z.cross(&x), z }, up: hi > eps };
+    let (s0, s1) = if spec.full {
+        (0.0, TAU)
+    } else {
+        let angle = |e: &RevolveEnd| match *e {
+            RevolveEnd::Angle(a) => Ok(a),
+            _ => Err(KernelError::Unsupported("up-to ends for a revolve about an axis off the sketch plane")),
+        };
+        let a1 = angle(&spec.end)?;
+        if spec.symmetric {
+            (-a1.abs() / 2.0, a1.abs() / 2.0)
+        } else {
+            let a0 = match &spec.second {
+                Some(e) => -angle(e)?,
+                None => 0.0,
+            };
+            (a0.min(a1), a0.max(a1))
+        }
+    };
+    if s1 - s0 > TAU + 1e-9 {
+        return Err(KernelError::InvalidParameter("The revolve turns more than a whole turn".into()));
+    }
+    let whole = (s1 - s0) >= TAU - 1e-12;
+    let s1 = if whole { s0 + TAU } else { s1 };
+    let mut t = if spec.body != BodyKind::Surface {
+        sweep_united(faces, &kind, s0, s1, whole)?
+    } else {
+        Tagged::from_built(sweep::sweep_full(faces, ch, &kind, s0, s1, whole, false)?)
+    };
+    if whole {
+        super::unify::drop_slits(&mut t.body);
+    }
+    Ok(t.into_result(k))
 }
 
 /// The union of two tagged bodies, every face keeping its tags.

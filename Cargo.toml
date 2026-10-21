@@ -115,3 +115,11 @@ opt-level = 3
 # The path tracer too (P3F.6).
 [profile.dev.package.cadrs_render]
 opt-level = 3
+
+# Kernel iteration (`cargo test --profile kernel -p cadrs_kernel`): release-level optimisation for
+# the geometry tests, but incremental and with more codegen units, so an edit to one module
+# recompiles in seconds instead of rebuilding the crate.
+[profile.kernel]
+inherits = "release"
+incremental = true
+codegen-units = 64

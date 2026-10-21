@@ -8,7 +8,10 @@
 //! - edge: curve, t0, t1, v0, v1 (u32), degenerate (u8);
 //! - face: surface, sense (u8), loop count, per loop its coedge count and per coedge edge (u32),
 //!   fwd (u8) and p-curve;
-//! - shell: face count, faces (u32), closed (u8); solid: shell count, shells (u32).
+//! - shell: face count, faces (u32), closed (u8); solid: shell count, shells (u32);
+//! - only when the body has wires or points (Phase 1b; bodies without them keep the layout
+//!   before): the wire count, per wire its edge count and per edge the edge (u32) and its
+//!   direction (u8); then the point count and the points' vertices (u32).
 //!
 //! A curve is a tag (0 line, 1 circle, 2 ellipse, 3 NURBS) and its fields; a surface a tag
 //! (0 plane, 1 cylinder, 2 cone, 3 sphere, 4 torus, 5 revolution, 6 extrusion, 7 NURBS), a frame
@@ -206,6 +209,20 @@ pub fn write(b: &Body) -> Vec<u8> {
             w.u32(x);
         }
     }
+    if !b.wires.is_empty() || !b.points.is_empty() {
+        w.u32(b.wires.len());
+        for wire in &b.wires {
+            w.u32(wire.edges.len());
+            for &(e, fwd) in &wire.edges {
+                w.u32(e);
+                w.u8(fwd as u8);
+            }
+        }
+        w.u32(b.points.len());
+        for &v in &b.points {
+            w.u32(v);
+        }
+    }
     w.0
 }
 
@@ -361,6 +378,28 @@ pub fn read(bytes: &[u8]) -> Result<Body, String> {
             return Err("a solid's shell is out of range".into());
         }
         b.solids.push(Solid { shells });
+    }
+    if r.i < bytes.len() {
+        // Wires and points.
+        for _ in 0..r.count(4)? {
+            let n = r.count(5)?;
+            let mut wire = Wire::default();
+            for _ in 0..n {
+                let e = r.u32()?;
+                if e >= ne {
+                    return Err("a wire's edge is out of range".into());
+                }
+                wire.edges.push((e, r.bool()?));
+            }
+            b.wires.push(wire);
+        }
+        for _ in 0..r.count(4)? {
+            let v = r.u32()?;
+            if v >= nv {
+                return Err("a point's vertex is out of range".into());
+            }
+            b.points.push(v);
+        }
     }
     if r.i != bytes.len() {
         return Err("trailing bytes after the body".into());
