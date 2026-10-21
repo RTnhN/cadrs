@@ -45,7 +45,6 @@ blend simple_t8
 blend simple_u2
 blend simple_u5
 blend simple_u7
-blend simple_v4
 blend simple_v7
 blend simple_w3
 blend simple_w7
@@ -383,7 +382,6 @@ offset faces_type_i_i5
 offset faces_type_i_j5
 offset faces_type_i_l1
 offset faces_type_i_l3
-offset faces_type_i_l4
 offset faces_type_i_l5
 offset faces_type_i_l7
 offset faces_type_i_l8
@@ -402,15 +400,11 @@ offset shape_type_i_c4
 offset shape_type_i_c6
 offset shape_type_i_c_i4
 offset shape_type_i_c_i5
-offset shape_type_i_c_o8
-offset shape_type_i_c_p1
 offset shape_type_i_c_v1
 offset shape_type_i_c_v2
 offset shape_type_i_c_v8
 offset shape_type_i_c_w1
 offset shape_type_i_c_w6
-offset shape_type_i_c_w7
-offset shape_type_i_c_y2
 offset shape_type_i_d2
 offset shape_type_i_d3
 offset shape_type_i_d4
@@ -601,7 +595,6 @@ blend simple_i8
 blend simple_r1
 blend simple_r2
 blend simple_r6
-blend simple_v6
 blend simple_y9
 blend tolblend_simple_a2
 blend tolblend_simple_a8
@@ -700,7 +693,6 @@ offset faces_type_i_f9
 offset shape_type_i_c9
 # offset: the operation fails.
 offset faces_type_i_f7
-offset faces_type_i_n2
 offset shape_type_i_d1
 # heal: wire tails across faces of a shell (the edges cut are other faces' too; OCCT splits them there).
 heal wire_tails_composed_a19
@@ -753,14 +745,6 @@ offset compshape_a2
 offset compshape_a4
 offset compshape_a6
 offset compshape_a7
-offset shape_type_i_c_p3
-offset shape_type_i_c_v4
-offset shape_type_i_c_y3
-offset shape_type_i_c_y4
-offset shape_type_i_c_y5
-offset shape_type_i_c_y6
-offset shape_type_i_c_y7
-offset shape_type_i_c_y8
 # boolean: topology counts differ from OCCT's (faces split or merged differently).
 boolean bopcut_complex_e5
 boolean cells_test_j1
@@ -802,7 +786,6 @@ offset shape_type_i_c_v9
 # feat: with OCCT's unmerged booleans the fused base's faces split, and the profile's face isn't the one OCCT's numbering gives.
 feat featrevol_h2
 # offset: unifysamedom after offsetonface, whose offset the kernel fails (W6).
-offset shape_type_i_c_xt2
 # tolblend_simple_c9: the blend tool's subtraction leaves the box face under the tool in two
 # pieces whose seam edges three or four faces share (a non-manifold result, refused); pair 7x15
 # finds three near-identical curves along the tool's spring edge (W2).

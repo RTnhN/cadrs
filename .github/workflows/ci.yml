@@ -4,6 +4,8 @@ on:
   push:
     branches: [main, 'kernel-*']
   pull_request:
+  # A merge queue runs the required checks on the merged result.
+  merge_group:
   workflow_dispatch:
   # The kernel gate (tools/kernel_gate.sh): every kernel test, known failures included; too slow
   # for each push.
@@ -23,9 +25,13 @@ env:
   CARGO_PROFILE_TEST_DEBUG: line-tables-only
 
 jobs:
-  # Per push: the kernel's clippy gate and its fast tests (unit tests and conformance).
+  # Per push and pull request: the kernel's builds without the test feature, its clippy gate and
+  # its fast tests (unit tests and conformance); any failed step fails the job. It is the merge
+  # requirement for main and kernel-10: mark "Kernel (checks, clippy, fast tests)" as a required
+  # status check in both branches' protection rules (Settings > Branches), with "Build and test
+  # (Linux)" for main.
   kernel:
-    name: Kernel (clippy, fast tests)
+    name: Kernel (checks, clippy, fast tests)
     if: github.event_name != 'schedule'
     runs-on: ubuntu-24.04
     timeout-minutes: 90
@@ -56,20 +62,30 @@ jobs:
       - name: Test (kernel unit tests, conformance)
         run: cargo test -r -p cadrs_kernel --lib --test conformance
 
-  # Nightly: tools/kernel_gate.sh on a clean export of the commit, with OCCT's DRAW suites
-  # regenerated from OCCT 7.8.1's test scripts and its 7.8.0 dataset. Fails on a regression, a
-  # stale known failure, a hang or a crash; results.json and summary.txt are kept as artifacts.
+  # Nightly, for main and kernel-10: tools/kernel_gate.sh on a clean export of the branch, with
+  # OCCT's DRAW suites regenerated from OCCT 7.8.1's test scripts and its 7.8.0 dataset, and every
+  # kind of ignored test run that can be. Fails on a failed check, a regression, a stale known
+  # failure or ignore, a hang, a crash, or a case much slower than the branch's last passing run
+  # (its durations are the baseline, kept in the Actions cache). results.json is the
+  # scoreboard's input: `gh run download -n kernel-gate-<branch>`, then
+  # `tools/kernel_scoreboard.py --results results.json`; the job summary shows it too.
   kernel-gate:
-    name: Kernel gate (nightly)
+    name: Kernel gate (nightly, ${{ matrix.ref }})
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-24.04
     timeout-minutes: 360
+    strategy:
+      fail-fast: false
+      matrix:
+        ref: ${{ github.event_name == 'schedule' && fromJSON('["main", "kernel-10"]') || fromJSON(format('["{0}"]', github.ref_name)) }}
     env:
       OCCT_TESTS: ${{ github.workspace }}/../occt/tests
       CADRS_OCCT_DATA: ${{ github.workspace }}/../occt-dataset/opencascade-dataset-7.8.0
       RUST_TEST_THREADS: 4
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ matrix.ref }}
 
       - name: System packages
         run: |
@@ -103,17 +119,40 @@ jobs:
           fi
           ls "$CADRS_OCCT_DATA" | head
 
+      # The durations of the branch's last passing gate run.
+      - name: Baseline (restore)
+        uses: actions/cache/restore@v4
+        with:
+          path: kernel_gate_baseline
+          key: kernel-gate-baseline-${{ matrix.ref }}-${{ github.run_id }}
+          restore-keys: kernel-gate-baseline-${{ matrix.ref }}-
+
       - name: Kernel gate
-        run: tools/kernel_gate.sh --out "$GITHUB_WORKSPACE/kernel_gate"
+        run: |
+          mkdir -p kernel_gate_baseline
+          tools/kernel_gate.sh --out "$GITHUB_WORKSPACE/kernel_gate" \
+            --baseline kernel_gate_baseline/baseline.json --write-baseline kernel_gate_baseline/baseline.json
+
+      - name: Baseline (save)
+        if: success()
+        uses: actions/cache/save@v4
+        with:
+          path: kernel_gate_baseline
+          key: kernel-gate-baseline-${{ matrix.ref }}-${{ github.run_id }}
 
       - name: Scoreboard
         if: always()
-        run: python3 -I tools/kernel_scoreboard.py --results "$GITHUB_WORKSPACE/kernel_gate/results.json" || true
+        run: |
+          {
+            echo '```'
+            python3 -I tools/kernel_scoreboard.py --results "$GITHUB_WORKSPACE/kernel_gate/results.json" || true
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
 
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: kernel-gate
+          name: kernel-gate-${{ matrix.ref }}
           path: |
             kernel_gate/results.json
             kernel_gate/summary.txt

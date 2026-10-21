@@ -3,13 +3,20 @@
 the gate. Normally started by tools/kernel_gate.sh, which exports a clean tree first.
 
 usage: tools/kernel_gate.py --tree DIR --out DIR [--commit SHA] [--only a,b] [--skip a,b]
-                            [--hang S] [--binary-timeout S] [--slow S] [--no-build]
+                            [--hang S] [--binary-timeout S] [--slow S] [--no-build] [--known-only]
+                            [--baseline FILE] [--write-baseline FILE]
+       tools/kernel_gate.py --make-baseline RESULTS FILE
 
 Builds the tree's tests (`cargo test --profile kernel -p cadrs_kernel --no-run`; the target dir
 is $CARGO_TARGET_DIR), lists each binary's tests (libtest JSON, `-Z unstable-options`), and runs
-the ones that aren't ignored plus the ignored known failures (`#[ignore = "known failure…"]`, the
-slow ones), $RUST_TEST_THREADS at a time (3 by default). Other ignored tests (cases waiting for a
-command, debugging tools) are listed, not run.
+them $RUST_TEST_THREADS at a time (3 by default): the ones that aren't ignored, and the ignored
+ones of every kind but three, which are listed, not run:
+  - the OCCT suites' cases waiting for a command (`needs …`, Tcl, nothing measured): their body
+    is the DRAW script as comments, so they would pass without testing anything;
+  - debugging tools (a bare `#[ignore]`) and tests that need an input from the environment
+    (`replays …`, `needs a usd-brep checkout`, `needs the data file …`, and smlib_oracle's
+    without $CADRS_SMLIB_ORACLE): they return early without it.
+--known-only runs only the ignored known failures (`#[ignore = "known failure…"]`).
 
 A test that runs longer than --hang seconds is killed as a hang, and the binary goes on with the
 tests it hadn't finished; a binary that dies (a stack overflow, an abort) has the tests it was
@@ -18,13 +25,24 @@ running retried one at a time to find the one that crashes. Each case is classif
   known       a known failure (tools/occt_known_failures.txt, tools/smlib_known_failures/) that
               still fails
   STALE       a known failure that now passes: take it off the list and regenerate the suite
-  REGRESSION  a failure that isn't listed
+  STALE-IGNORE  a test ignored with a reason (not a listed known failure, not "slow") that now
+              passes: un-ignore it
+  REGRESSION  a failure that isn't listed (or an ignored "slow" test that fails)
   HANG        killed after --hang seconds (or the binary's --binary-timeout ran out first)
   CRASH       killed its test binary
   ignored     not run (the ignore reason is kept)
-and flagged slow above --slow seconds (60). Writes <out>/results.json (one record per case) and
-<out>/summary.txt (a table per suite, the STALE, REGRESSION, HANG and CRASH lists, the slowest 20
-cases), and exits 1 when anything is STALE, REGRESSION, HANG or CRASH (2 on a setup error).
+and flagged slow above --slow seconds (60). With a baseline (--baseline FILE, else
+<out>/baseline.json when it exists: the durations of an earlier run), a case is also a
+SLOW-REGRESSION when it takes more than 3 times and more than 5 s longer than its baseline time
+scaled by the run's load: the median ratio of this run's durations to the baseline's over the
+cases of at least 1 s, when that is above 1. (libtest reports wall time only, per test; the tests share one process,
+so a test's CPU time isn't measurable, and the median ratio stands in for the load.)
+--write-baseline FILE writes this run's durations as the next baseline when the gate passes;
+--make-baseline RESULTS FILE writes one from an earlier results.json.
+
+Writes <out>/results.json (one record per case) and <out>/summary.txt (a table per suite, the
+STALE, STALE-IGNORE, REGRESSION, HANG, CRASH and SLOW-REGRESSION lists, the slowest 20 cases),
+and exits 1 when any of those lists isn't empty (2 on a setup error).
 
 First it runs the CHECKS (`cargo check -p cadrs_kernel` with no features, so the library builds
 without the tests' `testkit` feature; `cargo check -p cadrs_core`, its real consumer); a failed
@@ -41,7 +59,14 @@ import sys
 import threading
 import time
 
-BAD = ("STALE", "REGRESSION", "HANG", "CRASH")
+BAD = ("STALE", "STALE-IGNORE", "REGRESSION", "HANG", "CRASH")
+# Ignore reasons of tests that need an input from the environment and return early without it.
+INPUT_IGNORES = ("replays ", "needs a usd-brep checkout", "needs the data file")
+# Binaries whose tests return early without a program an environment variable names: their
+# ignored tests run only when it names one.
+NEEDS_ENV = {"smlib_oracle": "CADRS_SMLIB_ORACLE"}
+# SLOW-REGRESSION: more than RATIO times and more than MARGIN seconds over the scaled baseline.
+SLOW_RATIO, SLOW_MARGIN = 3.0, 5.0
 CURRENT = []  # the running test binary, killed with the gate
 
 
@@ -250,7 +275,22 @@ class Runner:
         return "died", sorted(running)
 
 
-def classify(rec, known):
+def ignored_kind(binary, why, known_only):
+    """How an ignored test runs: "known" (an ignored known failure), "slow" (a case too slow for
+    the default run), "waiting" (ignored with another reason: it fails today), or None (not run;
+    see the module docs)."""
+    if why.startswith("known failure"):
+        return "known"
+    if known_only or binary.startswith("occt_") or not why or why.startswith(INPUT_IGNORES):
+        return None
+    if binary in NEEDS_ENV and not os.path.isfile(os.environ.get(NEEDS_ENV[binary], "")):
+        return None
+    return "slow" if why == "slow" else "waiting"
+
+
+def classify(rec, listed, kind):
+    """The class of a test's result: `listed` for a generated known failure (it asserts that it
+    still fails), `kind` the ignored_kind of an ignored test (None when it isn't ignored)."""
     o = rec["outcome"]
     if o == "ignored":
         return "ignored"
@@ -258,11 +298,49 @@ def classify(rec, known):
         return "HANG"
     if o == "crash":
         return "CRASH"
-    if o == "ok":
-        return "known" if known else "pass"
-    if STALE_MARK in rec.get("stdout", ""):
-        return "STALE"
-    return "known" if known else "REGRESSION"
+    if listed:
+        if o == "ok":
+            return "known"
+        return "STALE" if STALE_MARK in rec.get("stdout", "") else "known"
+    if kind in ("known", "waiting"):
+        # An ignored test asserts success: passing, it shouldn't be ignored any more.
+        return "STALE-IGNORE" if o == "ok" else "known"
+    return "pass" if o == "ok" else "REGRESSION"
+
+
+def key(t):
+    return "%s %s" % (t["binary"], t["name"])
+
+
+def make_baseline(res):
+    """{"binary name": seconds} of the cases a results file ran (hangs and crashes left out)."""
+    return {
+        "commit": res.get("commit", ""),
+        "finished": res.get("finished", ""),
+        "durations": {key(t): t["duration"] for t in res["tests"] if t["class"] not in ("ignored", "HANG", "CRASH")},
+    }
+
+
+def slow_regressions(tests, base):
+    """Marks the cases much slower than their baseline (t["slow_regression"]); returns the
+    run's load ratio: the median of duration / baseline over the cases of at least 1 s, and at
+    least 1 (a run faster overall, from a lighter load or faster code, is compared with the
+    baseline's own times, so a case that only kept its time isn't flagged)."""
+    ratios = sorted(t["duration"] / base[key(t)] for t in tests if t["class"] not in ("ignored", "HANG", "CRASH") and base.get(key(t), 0.0) >= 1.0)
+    load = max(1.0, ratios[len(ratios) // 2]) if len(ratios) >= 20 else 1.0
+    for t in tests:
+        b = base.get(key(t))
+        if b is None or t["class"] == "ignored":
+            continue
+        expected = b * load
+        if t["duration"] > SLOW_RATIO * expected and t["duration"] - expected > SLOW_MARGIN:
+            t["slow_regression"] = {"baseline": b, "expected": round(expected, 1)}
+    return load
+
+
+def rate_of(c):
+    good = c["pass"] + c["STALE"] + c["STALE-IGNORE"]
+    return "%.1f" % (100.0 * good / c["run"]) if c["run"] else "-"
 
 
 def summary(res):
@@ -271,9 +349,10 @@ def summary(res):
     out = []
     out.append("kernel gate: %s, tree %s, %s; hang limit %d s, %d test threads" % (res["commit"] or "?", res["tree"], res["finished"], res["hang_limit"], res["threads"]))
     out.append("")
-    cols = ("suite", "cases", "run", "pass", "known", "STALE", "REGR", "HANG", "CRASH", "ignored", "slow", "pass %", "wall s")
-    out.append("%-26s %6s %6s %6s %6s %6s %6s %6s %6s %8s %5s %7s %8s" % cols)
-    tot = dict.fromkeys(("cases", "run", "pass", "known", "STALE", "REGRESSION", "HANG", "CRASH", "ignored", "slow"), 0)
+    cols = ("suite", "cases", "run", "pass", "known", "STALE", "ST-IGN", "REGR", "HANG", "CRASH", "SLOWR", "ignored", "slow", "pass %", "wall s")
+    row = "%-26s %6s %6s %6s %6s %6s %6s %6s %6s %6s %6s %8s %5s %7s %8s"
+    out.append(row % cols)
+    tot = dict.fromkeys(("cases", "run", "pass", "known", "STALE", "STALE-IGNORE", "REGRESSION", "HANG", "CRASH", "SLOWR", "ignored", "slow"), 0)
     tot_wall = 0.0
     for b in sorted(res["binaries"]):
         ts = [t for t in tests if t["binary"] == b]
@@ -285,21 +364,30 @@ def summary(res):
                 c["run"] += 1
             if t["duration"] > slow:
                 c["slow"] += 1
+            if t.get("slow_regression"):
+                c["SLOWR"] += 1
         for k in tot:
             tot[k] += c[k]
         wall = res["binaries"][b].get("wall", 0.0)
         tot_wall += wall
-        rate = "%.1f" % (100.0 * (c["pass"] + c["STALE"]) / c["run"]) if c["run"] else "-"
-        out.append("%-26s %6d %6d %6d %6d %6d %6d %6d %6d %8d %5d %7s %8.0f" % (b, c["cases"], c["run"], c["pass"], c["known"], c["STALE"], c["REGRESSION"], c["HANG"], c["CRASH"], c["ignored"], c["slow"], rate, wall))
-    rate = "%.1f" % (100.0 * (tot["pass"] + tot["STALE"]) / tot["run"]) if tot["run"] else "-"
-    out.append("%-26s %6d %6d %6d %6d %6d %6d %6d %6d %8d %5d %7s %8.0f" % ("TOTAL", tot["cases"], tot["run"], tot["pass"], tot["known"], tot["STALE"], tot["REGRESSION"], tot["HANG"], tot["CRASH"], tot["ignored"], tot["slow"], rate, tot_wall))
-    out.append("(pass % = (pass + STALE) / run: known failures, regressions, hangs and crashes count as failures)")
+        out.append(row % (b, *[c[k] for k in tot], rate_of(c), "%.0f" % wall))
+    out.append(row % ("TOTAL", *[tot[k] for k in tot], rate_of(tot), "%.0f" % tot_wall))
+    out.append("(pass % = (pass + STALE + STALE-IGNORE) / run: known failures, regressions, hangs and crashes count as failures)")
     for cls in BAD:
         bad = [t for t in tests if t["class"] == cls]
         out.append("")
         out.append("%s (%d)%s" % (cls, len(bad), ":" if bad else ""))
         for t in bad:
             out.append("  %s %s (%.1f s)%s" % (t["binary"], t["name"], t["duration"], ": " + t["message"] if t.get("message") and cls != "STALE" else ""))
+    regs = [t for t in tests if t.get("slow_regression")]
+    out.append("")
+    if res.get("baseline"):
+        out.append("SLOW-REGRESSION (%d)%s  [baseline %s, this run's load ratio %.2f]" % (len(regs), ":" if regs else "", res["baseline"], res.get("load_ratio", 1.0)))
+    else:
+        out.append("SLOW-REGRESSION: no baseline")
+    for t in sorted(regs, key=lambda t: -t["duration"]):
+        sr = t["slow_regression"]
+        out.append("  %s %s: %.1f s, baseline %.1f s (%.1f s at this run's load)" % (t["binary"], t["name"], t["duration"], sr["baseline"], sr["expected"]))
     for c in res.get("checks", []):
         out.append("")
         out.append("CHECK %s: %s" % ("ok" if c["ok"] else "FAILED", c["name"]))
@@ -318,8 +406,8 @@ def summary(res):
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
-    ap.add_argument("--tree", required=True)
-    ap.add_argument("--out", required=True)
+    ap.add_argument("--tree")
+    ap.add_argument("--out")
     ap.add_argument("--commit", default="")
     ap.add_argument("--profile", default="kernel")
     ap.add_argument("--only", default="", help="comma-separated binaries to run (default: all)")
@@ -330,7 +418,16 @@ def main():
     ap.add_argument("--no-build", action="store_true", help="use the binaries of --binaries")
     ap.add_argument("--no-checks", action="store_true", help="skip the `cargo check` builds")
     ap.add_argument("--binaries", default="", help="JSON {name: executable} (with --no-build)")
+    ap.add_argument("--known-only", action="store_true", help="of the ignored tests, run only the known failures")
+    ap.add_argument("--baseline", default="", help="durations of an earlier run (default <out>/baseline.json)")
+    ap.add_argument("--write-baseline", default="", help="write this run's durations here when the gate passes")
+    ap.add_argument("--make-baseline", nargs=2, metavar=("RESULTS", "FILE"), help="write a baseline from a results.json and exit")
     a = ap.parse_args()
+    if a.make_baseline:
+        json.dump(make_baseline(json.load(open(a.make_baseline[0]))), open(a.make_baseline[1], "w"), indent=0, sort_keys=True)
+        return
+    if not a.tree or not a.out:
+        ap.error("--tree and --out are required")
     signal.signal(signal.SIGTERM, stop)
     signal.signal(signal.SIGINT, stop)
 
@@ -377,7 +474,8 @@ def main():
             log("  %s" % e)
             continue
         kn = known.get(b, set())
-        run = [n for n, ign, why in listed if not ign or why.startswith("known failure")]
+        kinds = {n: ignored_kind(b, why, a.known_only) for n, ign, why in listed if ign}
+        run = [n for n, ign, why in listed if not ign or kinds[n]]
         errlog.write("==== %s\n" % b)
         errlog.flush()
         got = Runner(exes[b], crate, env, threads, a.hang, a.binary_timeout, errlog).run(run) if run else {}
@@ -387,9 +485,10 @@ def main():
                 r = {"outcome": "ignored", "duration": 0.0, "stdout": ""}
                 if n in run:
                     r = {"outcome": "crash", "duration": 0.0, "stdout": "no result from the test binary"}
-            is_known = n.split("::")[-1] in kn or why.startswith("known failure")
-            rec = {"binary": b, "name": n, "outcome": r["outcome"], "duration": round(r["duration"], 3), "known": is_known, "ignore": why if ign else None}
-            rec["class"] = classify(dict(r), is_known)
+            # A generated known failure: on a list (its wrapper asserts that it still fails).
+            listed_known = n.split("::")[-1] in kn or why.startswith("known failure, slow (tools/")
+            rec = {"binary": b, "name": n, "outcome": r["outcome"], "duration": round(r["duration"], 3), "known": listed_known, "ignore": why if ign else None}
+            rec["class"] = classify(dict(r), listed_known, kinds.get(n))
             if rec["class"] in ("REGRESSION", "HANG", "CRASH", "known") and r["outcome"] != "ok":
                 rec["message"] = short_message(r.get("stdout", ""))
             res["tests"].append(rec)
@@ -399,12 +498,23 @@ def main():
         log("  %d listed, %d run, %d bad, %.0f s" % (len(listed), len(run), len(bad), wall))
         json.dump(res, open(path, "w"), indent=0)
     res["finished"] = datetime.datetime.now().isoformat(timespec="seconds")
+    base_path = a.baseline or os.path.join(a.out, "baseline.json")
+    if os.path.exists(base_path):
+        base = json.load(open(base_path))
+        res["baseline"] = "%s (%s)" % (base_path, base.get("commit") or "?")
+        res["load_ratio"] = round(slow_regressions(res["tests"], base["durations"]), 3)
+    elif a.baseline:
+        log("no baseline at %s: no SLOW-REGRESSION check" % a.baseline)
     json.dump(res, open(path, "w"), indent=0)
     text = summary(res)
     open(os.path.join(a.out, "summary.txt"), "w").write(text)
     print(text)
     errors = any(i.get("error") for i in res["binaries"].values()) or not all(c["ok"] for c in checked)
-    sys.exit(1 if errors or any(t["class"] in BAD for t in res["tests"]) else 0)
+    failed = errors or any(t["class"] in BAD or t.get("slow_regression") for t in res["tests"])
+    if a.write_baseline and not failed:
+        json.dump(make_baseline(res), open(a.write_baseline, "w"), indent=0, sort_keys=True)
+        log("baseline written to %s" % a.write_baseline)
+    sys.exit(1 if failed else 0)
 
 
 if __name__ == "__main__":

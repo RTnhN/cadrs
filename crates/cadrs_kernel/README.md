@@ -308,13 +308,21 @@ results, or with `--static`, it falls back to reading the suites' source, which 
   checks that the library builds without features (`cargo check -p cadrs_kernel`: every test
   turns `testkit` on) and that `cargo check -p cadrs_core`, the kernel's consumer, passes. Then
   it builds with `--profile kernel` and runs every test binary, `RUST_TEST_THREADS` (3) at a
-  time, the slow `#[ignore]`d known failures included. Each case is a pass, a known failure still
-  failing, STALE (a known failure that passes: take it off the list), a REGRESSION (an unlisted
-  failure), a HANG (over `--hang`, 900 s; the binary goes on without it) or a CRASH; slow over
-  60 s is flagged. It writes `results.json` and `summary.txt` (a table per suite, the lists, the
-  slowest 20 cases) to `$CARGO_TARGET_DIR/kernel_gate/` and exits 1 on a failed check, STALE,
-  REGRESSION, HANG or CRASH. `--only occt_blend,smlib_fillets` runs some binaries. CI runs it
-  nightly; the two checks, clippy and the fast kernel tests run on every push.
+  time, with every kind of ignored test that can run: the known failures, `slow`, and the ones
+  ignored with a reason (not the OCCT suites' cases waiting for a command, whose bodies are
+  comments, nor debugging tools and tests that need a file, a checkout or the SMLib oracle they
+  aren't given). Each case is a pass, a known failure still failing, STALE (a listed known
+  failure that passes: take it off the list), STALE-IGNORE (an ignored test that passes:
+  un-ignore it), a REGRESSION (an unlisted failure), a HANG (over `--hang`, 900 s; the binary
+  goes on without it) or a CRASH; slow over 60 s is flagged. With a baseline (`--baseline`, the
+  durations of an earlier run; `--write-baseline` writes one when the gate passes), a case more
+  than 3× and 5 s slower than its baseline, scaled by the run's load (the median ratio of the
+  durations), is a SLOW-REGRESSION. It writes `results.json` and `summary.txt` (a table per
+  suite, the lists, the slowest 20 cases) to `$CARGO_TARGET_DIR/kernel_gate/` and exits 1 when
+  any list or check fails. `--only occt_blend,smlib_fillets` runs some binaries. CI runs the
+  checks, clippy and the fast kernel tests on every push and pull request (the merge
+  requirement), and the gate nightly on main and kernel-10 against the branch's last passing
+  run (delete its `kernel-gate-baseline-<branch>-*` Actions cache to accept a slowdown).
 
 **GPU** (spike, `crates/cadrs_gpu_kernels`, `crates/cadrs_gpu`; see `bench/gpu_spike.md` in the
 working notes): kernels written in Rust compile to SPIR-V with rust-gpu (f64 included) and run

@@ -1231,12 +1231,14 @@ mod tests {
         }
     }
 
-    /// Every SSI part of an NVIDIA usd-brep checkout (`$CADRS_USD_BREP`, else the one beside
-    /// this checkout) reads into valid bodies.
+    /// Every SSI part of an NVIDIA usd-brep checkout (`$CADRS_USD_BREP`) reads into valid bodies.
     #[test]
-    #[ignore = "needs a usd-brep checkout"]
+    #[ignore = "needs a usd-brep checkout (CADRS_USD_BREP)"]
     fn every_ssi_part_reads() {
-        let root = std::env::var("CADRS_USD_BREP").unwrap_or_else(|_| format!("{}/../../../../nvbrep/usd-brep", env!("CARGO_MANIFEST_DIR")));
+        let Ok(root) = std::env::var("CADRS_USD_BREP") else {
+            eprintln!("every_ssi_part_reads: skipped, set CADRS_USD_BREP to a usd-brep checkout");
+            return;
+        };
         let dir = std::path::Path::new(&root).join("TestFiles/pt_TestFiles");
         let mut names: Vec<_> = std::fs::read_dir(&dir).unwrap().flatten().map(|e| e.file_name().to_string_lossy().to_string()).filter(|n| (n.starts_with("ssi_") || n.starts_with("ss_")) && n.ends_with(".smp")).collect();
         names.sort();

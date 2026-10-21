@@ -20,7 +20,8 @@
 # Environment: OCCT_TESTS (OCCT's tests/ folder, default ../opencascade-rs/crates/occt-sys/OCCT/tests
 # beside this checkout; OCCT 7.8.1), CADRS_OCCT_DATA (the unpacked opencascade-dataset-7.8.0,
 # default ../occt-dataset/opencascade-dataset-7.8.0), OCCT_GROUPS (the OCCT groups to generate),
-# RUST_TEST_THREADS (3), CARGO_TARGET_DIR, CARGO_BUILD_JOBS.
+# CADRS_SMLIB_ORACLE (default target/smlib_oracle/smlib_oracle when built), RUST_TEST_THREADS (3),
+# CARGO_TARGET_DIR, CARGO_BUILD_JOBS.
 set -eu
 repo=$(cd "$(dirname "$0")/.." && pwd)
 rev=HEAD
@@ -42,6 +43,10 @@ mkdir -p "$out"
 out=$(cd "$out" && pwd)
 export CADRS_OCCT_DATA=${CADRS_OCCT_DATA:-$repo/../occt-dataset/opencascade-dataset-7.8.0}
 export RUST_TEST_THREADS=${RUST_TEST_THREADS:-3}
+# The SMLib oracle (tools/smlib_oracle/README.md), when it's built: smlib_oracle's tests use it.
+if [ -z "${CADRS_SMLIB_ORACLE:-}" ] && [ -x "$repo/target/smlib_oracle/smlib_oracle" ]; then
+    export CADRS_SMLIB_ORACLE="$repo/target/smlib_oracle/smlib_oracle"
+fi
 occt_tests=${OCCT_TESTS:-$repo/../opencascade-rs/crates/occt-sys/OCCT/tests}
 occt_groups=${OCCT_GROUPS:-blend boolean draft evolved feat fillet2d heal mkface offset pipe prism sewing thrusection}
 
