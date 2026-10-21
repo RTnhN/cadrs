@@ -170,15 +170,11 @@ pub fn check_result(input: &Body, out: &Body, e: &Expect) -> Result<(), String> 
     } else if !out.solids.is_empty() {
         return Err("a solid, SMLib gives none".into());
     }
-    if let Some(n) = e.faces {
-        if planar(input) && out.faces.len() != n {
-            return Err(format!("{} faces, SMLib gives {n}", out.faces.len()));
-        }
+    if let Some(n) = e.faces && planar(input) && out.faces.len() != n {
+        return Err(format!("{} faces, SMLib gives {n}", out.faces.len()));
     }
-    if let Some(n) = e.edges {
-        if planar(input) && edge_count(out) != n {
-            return Err(format!("{} edges, SMLib gives {n}", edge_count(out)));
-        }
+    if let Some(n) = e.edges && planar(input) && edge_count(out) != n {
+        return Err(format!("{} edges, SMLib gives {n}", edge_count(out)));
     }
     if e.volume.is_some() || e.area.is_some() {
         let m = cadrs_kernel::native::mass::body_mass(out);

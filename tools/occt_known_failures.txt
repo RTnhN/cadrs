@@ -356,7 +356,6 @@ offset wire_unclosed_outside_0_075_b5
 offset wire_unclosed_outside_0_075_b6
 offset wire_unclosed_outside_0_075_c4
 offset faces_type_a_a3
-offset faces_type_a_a9
 offset faces_type_a_b1
 offset faces_type_i_a9
 offset faces_type_i_b4

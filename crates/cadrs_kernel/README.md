@@ -224,23 +224,62 @@ size box), `InvalidParameter` and `InvalidProfile` (the caller's values), `Unsup
 `UnknownBody`, and `OperationFailed` for the rest. `KernelError::message` gives the words without
 the kind's prefix.
 
-**Debugging and profiling** (environment variables; output on stderr):
+**Environment variables.** None is needed in normal use. Every one the kernel reads is listed
+here; `tools/kernel_gate.sh` and CI run with none of the switches set.
+
+Debug output (on stderr; results don't change):
 - `CADRS_PROFILE=1`: each boolean's phases, slow mass properties and tessellations, sweeps.
+  `CADRS_TESS_PROFILE=1`: a face tessellation's phases.
 - `CADRS_BOOL_DEBUG=1`, `CADRS_SPLIT_DEBUG=1`, `CADRS_SHELL_DEBUG=1`, `CADRS_VERTEX_DEBUG=1`,
   `CADRS_PCURVE_DEBUG=1`, `CADRS_OFFSET_DEBUG=1`, `CADRS_SLAB_DEBUG=1`: the boolean's
   intersections, face splits and output faces; face splitting in uv; a shell's cavity steps;
   vertex merging; p-curve fits that don't converge; the offset's piece whose boolean fails
   (with `CADRS_DUMP_DIR`, both inputs are written); a face slab's build warnings.
+- `CADRS_SNAP_DEBUG=1`, `CADRS_TANGENT_DEBUG=1`, `CADRS_EBOP_DEBUG=1`: a boolean's snapping of
+  B-spline faces onto planes and cylinders, its tangent B-spline contacts, an edge boolean's
+  splits.
+- `CADRS_SSI_DEBUG=1` (with `CADRS_SSI_SEEDS=1` and `CADRS_SSI_DUMP=1` for the seeds and the
+  traced points): surface-surface intersection.
+- `CADRS_FILLET_DEBUG=1`, `CADRS_BLEND_DEBUG=1`, `CADRS_DRAFT_DEBUG=1`, `CADRS_SWEEP_DEBUG=1`:
+  the local fillet's progress, with times; the blend tool's chains, stations and corners (and why
+  a local fillet fell back to it); a draft's edges and unsupported faces; a sweep's path and
+  helix fits.
+- `CADRS_EXCHANGE_DEBUG=1`: the warnings of a STEP, IGES or BRep import. `CADRS_ORDER_DEBUG=1`:
+  the DRAW harness's edge order (`explode e`, test code).
 - `CADRS_DUMP_DIR=<dir>`: shells, fillets and chamfers write their input body (exact bytes) and
   parameters there, with the outcome; slow mass properties too. `tests/native_debug.rs` replays
   them (`CADRS_REPRO=<file.body> cargo test -r -p cadrs_kernel --test native_debug debug_repro_shell`).
-- `CADRS_NO_RETRY=1` turns off a boolean's retries at larger tolerances (to see the first run's
-  failure); it is the one debugging variable that changes results.
+
+Debug switches that **change results** (to isolate a stage when a case fails; never set them
+otherwise):
+- `CADRS_NO_RETRY=1` (`boolean.rs`): no retries of a boolean at larger tolerances, to see the
+  first run's failure.
+- `CADRS_NO_SNAP=1` (`boolean.rs`): no snapping of B-spline faces onto the other body's planes
+  and cylinders before a boolean.
+- `CADRS_NO_PROPAGATE=1` (`boolean.rs`): each split face is classified on its own, without the
+  in/out propagation through its connected group.
+- `CADRS_NO_LOCAL_FILLET=1` (`blend.rs`): circular constant-radius fillets skip the local
+  (boolean-free) fillet and go straight to the blend tool. `CADRS_LOCAL_FILLET_ONLY=1`: the
+  opposite, a local fillet's failure is the result instead of falling back to the blend tool.
+- `CADRS_NO_RECOG_S=1`, `CADRS_NO_RECOG_C=1` (`xbuild.rs`): imported B-spline surfaces and
+  curves are kept as B-splines instead of being recognised as planes, cylinders, cones, spheres,
+  lines and circles.
+- `CADRS_OCCT_REBUILD=1` (`brep_occt.rs`): an OCCT BRep file's faces are always rebuilt from
+  their edges instead of being read directly.
+
+Test harness (tests only): `CADRS_OCCT_DATA` (OCCT's dataset for the generated OCCT suites,
+default `../occt-dataset/opencascade-dataset-7.8.0` beside the checkout), `CADRS_SMLIB_ORACLE`
+(the SMLib oracle binary), `CADRS_USD_BREP` (a usd-brep checkout, for the ignored
+`smb::every_ssi_part_reads`; default `../nvbrep/usd-brep` beside the checkout's parent),
+`CADRS_EXCHANGE_FILES` and `CADRS_EXPORT_DIR` (the ignored corpus tests in `exchange.rs`),
+`PROPTEST_CASES`, `FUZZ_TRACE`, `FUZZ_REPRO` (`tests/fuzz_readers.rs`) and the `CADRS_REPRO*`
+inputs of `tests/native_debug.rs`'s replays.
 
 **Status.** All 83 conformance cases pass (`cargo test -r -p cadrs_kernel --test conformance`,
-about 3 s). The generated OCCT and SMLib suites are tracked by the scoreboard,
-`python3 -I tools/kernel_scoreboard.py` (per file: cases, passing, known failures, and why the
-rest don't run yet).
+about 3 s). The measured state of every suite is the gate's: `tools/kernel_gate.sh` (below).
+`python3 -I tools/kernel_scoreboard.py` shows its last results per test binary (cases run,
+passing, known failures, stale ones, regressions, hangs, and why the rest don't run yet); with no
+results, or with `--static`, it falls back to reading the suites' source, which runs nothing.
 
 **Tests.**
 - Unit tests in the modules (`cargo test -r -p cadrs_kernel --lib`), the conformance suite, and
@@ -261,6 +300,19 @@ rest don't run yet).
   levels are in the crate's `Cargo.toml` (`unsafe_code` denied).
 - The full `cargo test -r -p cadrs_kernel` takes about 12 minutes; run the suites a change
   touches and the conformance suite.
+- The gate, `tools/kernel_gate.sh`, makes "HEAD is green" a measured fact. It exports a clean
+  tree (`git archive HEAD`, or `--rev`; `--tree DIR` tests a tree as it is) and regenerates the
+  gitignored OCCT suites there (`OCCT_TESTS`: OCCT 7.8.1's `tests/`; `CADRS_OCCT_DATA`). It
+  checks that the library builds without features (`cargo check -p cadrs_kernel`: every test
+  turns `testkit` on) and that `cargo check -p cadrs_core`, the kernel's consumer, passes. Then
+  it builds with `--profile kernel` and runs every test binary, `RUST_TEST_THREADS` (3) at a
+  time, the slow `#[ignore]`d known failures included. Each case is a pass, a known failure still
+  failing, STALE (a known failure that passes: take it off the list), a REGRESSION (an unlisted
+  failure), a HANG (over `--hang`, 900 s; the binary goes on without it) or a CRASH; slow over
+  60 s is flagged. It writes `results.json` and `summary.txt` (a table per suite, the lists, the
+  slowest 20 cases) to `$CARGO_TARGET_DIR/kernel_gate/` and exits 1 on a failed check, STALE,
+  REGRESSION, HANG or CRASH. `--only occt_blend,smlib_fillets` runs some binaries. CI runs it
+  nightly; the two checks, clippy and the fast kernel tests run on every push.
 
 **GPU** (spike, `crates/cadrs_gpu_kernels`, `crates/cadrs_gpu`; see `bench/gpu_spike.md` in the
 working notes): kernels written in Rust compile to SPIR-V with rust-gpu (f64 included) and run

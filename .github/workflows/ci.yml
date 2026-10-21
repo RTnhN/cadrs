@@ -2,12 +2,17 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    branches: [main, 'kernel-*']
   pull_request:
   workflow_dispatch:
+  # The kernel gate (tools/kernel_gate.sh): every kernel test, known failures included; too slow
+  # for each push.
+  schedule:
+    - cron: '17 2 * * *'
 
 concurrency:
-  group: ci-${{ github.ref }}
+  # A push doesn't cancel the nightly gate.
+  group: ci-${{ github.ref }}-${{ github.event_name }}
   cancel-in-progress: true
 
 env:
@@ -18,8 +23,105 @@ env:
   CARGO_PROFILE_TEST_DEBUG: line-tables-only
 
 jobs:
+  # Per push: the kernel's clippy gate and its fast tests (unit tests and conformance).
+  kernel:
+    name: Kernel (clippy, fast tests)
+    if: github.event_name != 'schedule'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: System packages
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends clang mold
+
+      - name: Rust toolchain
+        run: rustup toolchain install && rustc -V
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: kernel
+
+      # The library without the tests' `testkit` feature (every test enables it), and the
+      # kernel's real consumer.
+      - name: Check (kernel without features, cadrs_core)
+        run: cargo check -p cadrs_kernel && cargo check -p cadrs_core
+
+      # The kernel is kept clippy-clean (warnings denied; lint levels in its Cargo.toml).
+      - name: Clippy (kernel)
+        run: tools/kernel_clippy.sh
+
+      - name: Test (kernel unit tests, conformance)
+        run: cargo test -r -p cadrs_kernel --lib --test conformance
+
+  # Nightly: tools/kernel_gate.sh on a clean export of the commit, with OCCT's DRAW suites
+  # regenerated from OCCT 7.8.1's test scripts and its 7.8.0 dataset. Fails on a regression, a
+  # stale known failure, a hang or a crash; results.json and summary.txt are kept as artifacts.
+  kernel-gate:
+    name: Kernel gate (nightly)
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 360
+    env:
+      OCCT_TESTS: ${{ github.workspace }}/../occt/tests
+      CADRS_OCCT_DATA: ${{ github.workspace }}/../occt-dataset/opencascade-dataset-7.8.0
+      RUST_TEST_THREADS: 4
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: System packages
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends clang mold
+
+      - name: Rust toolchain
+        run: rustup toolchain install && rustc -V
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: kernel-gate
+
+      - name: OCCT test scripts (7.8.1)
+        run: |
+          git clone --depth 1 --branch V7_8_1 --filter=blob:none --sparse \
+            https://github.com/Open-Cascade-SAS/OCCT "$GITHUB_WORKSPACE/../occt"
+          git -C "$GITHUB_WORKSPACE/../occt" sparse-checkout set tests
+
+      - uses: actions/cache@v4
+        with:
+          path: ${{ github.workspace }}/../occt-dataset
+          key: occt-dataset-7.8.0
+
+      - name: OCCT dataset (7.8.0)
+        run: |
+          if [ ! -d "$CADRS_OCCT_DATA" ]; then
+            mkdir -p "$GITHUB_WORKSPACE/../occt-dataset"
+            curl -fsSL https://github.com/Open-Cascade-SAS/OCCT/releases/download/V7_8_0/opencascade-dataset-7.8.0.tar.xz \
+              | tar -xJ -C "$GITHUB_WORKSPACE/../occt-dataset"
+          fi
+          ls "$CADRS_OCCT_DATA" | head
+
+      - name: Kernel gate
+        run: tools/kernel_gate.sh --out "$GITHUB_WORKSPACE/kernel_gate"
+
+      - name: Scoreboard
+        if: always()
+        run: python3 -I tools/kernel_scoreboard.py --results "$GITHUB_WORKSPACE/kernel_gate/results.json" || true
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: kernel-gate
+          path: |
+            kernel_gate/results.json
+            kernel_gate/summary.txt
+            kernel_gate/stderr.log
+
   test:
     name: Build and test (Linux)
+    if: github.event_name != 'schedule'
     runs-on: ubuntu-24.04
     timeout-minutes: 120
     steps:
@@ -48,10 +150,6 @@ jobs:
       - name: Build
         run: cargo build --workspace
 
-      # The kernel is kept clippy-clean (warnings denied; lint levels in its Cargo.toml).
-      - name: Clippy (kernel)
-        run: tools/kernel_clippy.sh
-
       # Unit tests only: each integration test (`crates/*/tests`) links Bevy and OpenCASCADE into
       # its own large binary, too much for a hosted runner's disk. Run them locally with
       # `cargo test --workspace`.
@@ -60,6 +158,7 @@ jobs:
 
   macos:
     name: Build and test (macOS)
+    if: github.event_name != 'schedule'
     runs-on: macos-14
     timeout-minutes: 120
     steps:
