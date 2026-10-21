@@ -211,7 +211,7 @@ fn dimension_pointer(
     let alive = |e: &SketchEntity| match *e {
         SketchEntity::Point(p) => sketch.points.contains_key(p),
         SketchEntity::Curve(c) => sketch.curves.contains_key(c),
-        SketchEntity::Origin => true,
+        SketchEntity::Origin | SketchEntity::XAxis | SketchEntity::YAxis => true,
         _ => false,
     };
     if !dim.picks.iter().all(alive) || dim.clicks.len() != dim.picks.len() {
@@ -286,7 +286,8 @@ fn dimension_pointer(
                 let hit = hit_test(sketch, SVec2::new(pos.x as f64, pos.y as f64), |p| {
                     map.to_screen64(p)
                 })
-                .map(|h| h.entity);
+                .map(|h| h.entity)
+                .or_else(|| map.axis_at(pos));
                 let click = map
                     .to_sketch(pos)
                     .unwrap_or(SVec2::new(f64::NAN, f64::NAN));

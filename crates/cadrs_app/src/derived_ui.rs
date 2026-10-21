@@ -317,7 +317,7 @@ pub fn accept(world: &mut World) {
         return;
     }
     let features = world.resource::<ActiveDocument>().doc.element(s.element).map(|e| e.active_features()).unwrap_or_default();
-    if cadrs_core::rebuild::build(&features).error(f.id).is_some() {
+    if crate::accept::builds(world, "derived", features, f.id, accept) != Some(true) {
         return;
     }
     let label = if s.is_new { format!("Insert {}", f.name) } else { format!("Edit {}", f.name) };

@@ -7,6 +7,9 @@ repository.workspace = true
 
 [dependencies]
 bevy.workspace = true
+# Icons at sizes not built in (a UI scale, a high-DPI screen), rendered like `build.rs` does.
+resvg.workspace = true
+icon-rs.workspace = true
 
 [build-dependencies]
 resvg.workspace = true

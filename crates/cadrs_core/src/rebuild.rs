@@ -144,6 +144,10 @@ pub struct Stage {
     pub remove: bool,
 }
 
+/// More faces than a CAD body has: an imported mesh's facets (as the kernel's own limit for
+/// merging faces). Checks only for the dialogs' sake skip such a part.
+const HUGE_FACES: usize = 10_000;
+
 /// The parts an extrude's new body meets (before its boolean).
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct Contacts {
@@ -1859,11 +1863,11 @@ mod kernel_ops {
         ) -> Result<Output, String> {
             let op = id.0;
             let surface = e.surface;
-            let contacts = if surface {
-                Contacts::default()
-            } else {
-                self.contacts(tool.0, state)
-            };
+            // A New only needs them while its dialog may be open (it picks Add once its body
+            // touches a part), and they cost a boolean with each part near it (10 s by a
+            // 265 000-facet mesh, issue #11).
+            let wanted = !surface && (e.op != BooleanOp::New || self.stage_for == Some(id));
+            let contacts = if wanted { self.contacts(tool.0, state, e.op == BooleanOp::New) } else { Contacts::default() };
             // The dialog's preview of a Remove: the material it takes out of the parts.
             let removed = (self.stage_for == Some(id) && e.op == BooleanOp::Remove && !surface)
                 .then(|| self.removed_volume(id, &tool, &Self::scope(e, state, &contacts), state, &geoms));
@@ -1890,7 +1894,7 @@ mod kernel_ops {
                     })
                 });
                 o.stage = stage.or(cut);
-                o.contacts = Some(contacts);
+                o.contacts = (wanted || surface).then_some(contacts);
                 o
             })
         }
@@ -2289,8 +2293,9 @@ mod kernel_ops {
             self.split_named(body, op, names, &HashMap::new())
         }
 
-        /// Which parts the new body touches (Add) and overlaps (Remove, Intersect).
-        fn contacts(&mut self, tool: BodyId, state: &State) -> Contacts {
+        /// Which parts the new body touches (Add) and overlaps (Remove, Intersect). `only_ui`:
+        /// only for the dialog (a New picking Add by itself), so huge parts are left out.
+        fn contacts(&mut self, tool: BodyId, state: &State, only_ui: bool) -> Contacts {
             let mut out = Contacts::default();
             let Ok(tb) = self.kernel.bounding_box(tool) else {
                 return out;
@@ -2305,16 +2310,17 @@ mod kernel_ops {
                 if apart {
                     continue;
                 }
-                // Touching or overlapping: their union is one solid.
-                if self.kernel.joins(b, tool).unwrap_or(false) {
-                    out.touches.push(p.part.id);
+                // A huge part (a mesh's facets) took 15 s, on every change of a New extrude's
+                // depth beside an imported STL (issue #11): a New doesn't join it by itself.
+                if only_ui && self.kernel.faces(b).is_ok_and(|f| f.len() > HUGE_FACES) {
+                    continue;
                 }
-                if let Ok(r) = self.kernel.boolean(BoolOp::Intersect, b, &[tool]) {
-                    let v = self.kernel.mass_properties(r.bodies[0]).map(|m| m.volume).unwrap_or(0.0);
-                    self.kernel.release(r.bodies[0]);
-                    if v > 1e-9 {
-                        out.overlaps.push(p.part.id);
-                    }
+                // Overlapping, else touching: their union is one solid.
+                if self.kernel.overlaps(b, tool).unwrap_or(false) {
+                    out.overlaps.push(p.part.id);
+                    out.touches.push(p.part.id);
+                } else if self.kernel.joins(b, tool).unwrap_or(false) {
+                    out.touches.push(p.part.id);
                 }
             }
             out

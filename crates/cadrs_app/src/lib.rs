@@ -18,6 +18,7 @@ pub mod document;
 pub mod drawing;
 pub mod eda;
 pub mod draft_ui;
+pub mod accept;
 pub mod boolean;
 pub mod board_fit;
 pub mod board_in_studio;
@@ -33,6 +34,8 @@ pub mod revolve_dialog;
 pub mod gallery;
 pub mod history_panel;
 pub mod drop_import;
+pub mod app_icon;
+pub mod window_title;
 pub mod file_drop;
 pub mod image_dialog;
 pub mod import_dialog;
@@ -608,7 +611,7 @@ impl Plugin for CadrsAppPlugin {
                 shortcuts::ShortcutsPlugin,
                 script::ScriptPlugin,
             ))
-            .add_plugins(rebuild_indicator::RebuildIndicatorPlugin)
+            .add_plugins((rebuild_indicator::RebuildIndicatorPlugin, accept::AcceptPlugin))
             .add_plugins((
                 parts::PartsPlugin,
                 parts_list::PartsListPlugin,
@@ -639,7 +642,7 @@ impl Plugin for CadrsAppPlugin {
             .add_plugins((tab_folders::TabFoldersPlugin, tab_manager::TabManagerPlugin, analysis::AnalysisPlugin, preferences_ui::PreferencesPlugin, manipulator::ManipulatorPlugin, mcp::McpPlugin))
             .add_plugins((variables_ui::VariablesPlugin, scale_ui::ScalePlugin, threads_ui::ThreadsPlugin, simulation_ui::SimulationPlugin, render_ui::RenderUiPlugin, export_image::ExportImagePlugin))
             .add_plugins(native_document::NativeDocumentPlugin)
-            .add_plugins((import_dialog::ImportDialogPlugin, import_file::ImportFilePlugin, picture::PicturePlugin, file_drop::FileDropPlugin, drop_import::DropImportPlugin, image_dialog::ImageDialogPlugin))
+            .add_plugins((import_dialog::ImportDialogPlugin, import_file::ImportFilePlugin, picture::PicturePlugin, file_drop::FileDropPlugin, drop_import::DropImportPlugin, image_dialog::ImageDialogPlugin, app_icon::AppIconPlugin, window_title::WindowTitlePlugin))
             .init_resource::<ExportDirOverride>()
             // A long menu that has to be capped keeps clear of the tab strip (Final part 3:
             // `course_asm_triad` 08, `course_asm_std_bulk_edit` 02).

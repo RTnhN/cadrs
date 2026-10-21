@@ -219,7 +219,8 @@ pub fn accept(world: &mut World) {
     let Some(doc) = world.get_resource::<ActiveDocument>() else { return };
     let Some(el) = doc.doc.element(s.element) else { return };
     let Some(f) = el.feature(s.feature).filter(|f| f.is_valid()).cloned() else { return };
-    if cadrs_core::rebuild::build(&el.active_features()).error(f.id).is_some() {
+    let features = el.active_features();
+    if crate::accept::builds(world, "import", features, f.id, accept) != Some(true) {
         return;
     }
     let label = if s.is_new { format!("Insert {}", f.name) } else { format!("Edit {}", f.name) };
@@ -368,18 +369,26 @@ fn sync_import_dialog(
                 DespawnOnExit(AppState::Document),
                 FeatureDialog::new("import-dialog")
                     .title(f.name.clone())
+                    // Room for a file name beside Choose file (it overran the default width).
+                    .width(340.0)
                     .valid(valid)
                     .body(move |b| {
                         b.spawn(Node { flex_direction: FlexDirection::Column, row_gap: Val::Px(4.0), ..default() }).with_children(|b| {
                             b.spawn((Name::new("import-file-row"), Node { align_items: AlignItems::Center, column_gap: Val::Px(8.0), min_height: Val::Px(28.0), ..default() }))
                                 .with_children(|r| {
                                     r.spawn((cadrs_ui::icon("file-import", 16.0, t.muted_foreground), Pickable::IGNORE));
-                                    r.spawn((
-                                        Name::new("import-file-name"),
-                                        t.text(format!("{} ({})", x.file_name, x.format.label()), t.font_base, FontWeight::MEDIUM, t.foreground),
-                                        Node { flex_grow: 1.0, ..default() },
-                                        Pickable::IGNORE,
-                                    ));
+                                    // A longer name is cut in the middle (its end and format stay),
+                                    // with the whole name in a tooltip on its cell (#26).
+                                    r.spawn((Name::new("import-file-cell"), Node { flex_grow: 1.0, ..cadrs_ui::ellipsis::Ellipsis::node() })).with_children(|c| {
+                                        c.spawn((
+                                            Name::new("import-file-name"),
+                                            t.text(format!("{} ({})", x.file_name, x.format.label()), t.font_base, FontWeight::MEDIUM, t.foreground),
+                                            cadrs_ui::ellipsis::Ellipsis::middle().with_tooltip(),
+                                            cadrs_ui::ellipsis::Ellipsis::node(),
+                                            Pickable::IGNORE,
+                                        ))
+                                        .insert(TextLayout::no_wrap());
+                                    });
                                     r.spawn((ChooseFile, cadrs_ui::Button::new("import-choose-file").label("Choose file").small().outline().tooltip("Import another file").build(&t)));
                                 });
                             b.spawn(OptionRow::new("import-y-up", "Y axis is up").checked(x.y_axis_up).build(&t));

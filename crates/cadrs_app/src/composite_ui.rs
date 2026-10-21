@@ -183,7 +183,7 @@ pub fn accept(world: &mut World) {
     let Some(s) = world.get_resource::<CompositeSession>().cloned() else { return };
     let Some(f) = current(world, &s).filter(|f| f.is_valid()) else { return };
     let features = world.get_resource::<ActiveDocument>().and_then(|d| Some(d.doc.element(s.element)?.active_features())).unwrap_or_default();
-    if cadrs_core::rebuild::build(&features).error(f.id).is_some() {
+    if crate::accept::builds(world, "composite", features, f.id, accept) != Some(true) {
         return;
     }
     let label = if s.is_new { format!("Insert {}", f.name) } else { format!("Edit {}", f.name) };

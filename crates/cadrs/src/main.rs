@@ -28,7 +28,7 @@ use cadrs_ui::CadrsUiPlugin;
 /// "Now" in scenarios: 2026-09-24 15:30 UTC.
 const SCENARIO_NOW: i64 = 1_790_263_800;
 
-mod app_icon;
+mod desktop_entry;
 mod batch;
 mod check;
 
@@ -73,7 +73,7 @@ fn main() -> AppExit {
         return AppExit::Success;
     }
     if args.iter().any(|a| a == "--install-desktop") {
-        return match app_icon::install_desktop() {
+        return match desktop_entry::install_desktop() {
             Ok(()) => AppExit::Success,
             Err(e) => { eprintln!("cannot install desktop launcher: {e}"); AppExit::from_code(1) }
         };
@@ -118,8 +118,7 @@ fn main() -> AppExit {
     };
 
     let mut app = App::new();
-    app.add_plugins(cadrs_harness::default_plugins(&opts))
-        .add_systems(Update, app_icon::set_window_icon);
+    app.add_plugins(cadrs_harness::default_plugins(&opts));
     if let Some(start) = scenario.as_ref().and_then(|s| s.start.clone()) {
         app.insert_resource(StartState(start));
     }

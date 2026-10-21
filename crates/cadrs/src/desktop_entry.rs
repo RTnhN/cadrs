@@ -1,30 +1,5 @@
-//! Native app identity, reusing the Documents logo's icon-rs cube.
-
-use bevy::{ecs::system::NonSendMarker, prelude::*, winit::WINIT_WINDOWS};
-use cadrs_ui::icon::{APP_ICON_PNG, APP_ICON_RGBA, APP_ICON_SIZE};
-
-#[derive(Component)]
-pub(crate) struct IconSet;
-
-/// Retry until the native window exists; the marker keeps headless runs harmless and ensures
-/// each new window receives its icon. winit requires this to run on the main thread.
-pub(crate) fn set_window_icon(
-    windows: Query<Entity, (With<Window>, Without<IconSet>)>,
-    mut commands: Commands,
-    _main_thread: NonSendMarker,
-) {
-    if windows.is_empty() { return; }
-    WINIT_WINDOWS.with_borrow(|native| {
-        for entity in &windows {
-            if let Some(window) = native.get_window(entity) {
-                let icon = winit::window::Icon::from_rgba(APP_ICON_RGBA.to_vec(), APP_ICON_SIZE, APP_ICON_SIZE)
-                    .expect("build-time app icon has valid RGBA dimensions");
-                window.set_window_icon(Some(icon));
-                commands.entity(entity).insert(IconSet);
-            }
-        }
-    });
-}
+//! `cadrs --install-desktop`: a Linux launcher for this executable, with the app icon
+//! (`assets/icons/cadrs.png`, the one `cadrs_app::app_icon` sets on the window).
 
 /// Wayland docks obtain icons from desktop entries rather than set_window_icon. Register the
 /// same app ID as Window::name, pointing at this executable (no shell or cargo dependency).
@@ -45,7 +20,7 @@ pub(crate) fn install_desktop() -> std::io::Result<()> {
     fs::create_dir_all(&applications)?;
     fs::create_dir_all(&icons)?;
     let icon = icons.join("cadrs-logo.png");
-    fs::write(&icon, APP_ICON_PNG)?;
+    fs::write(&icon, include_bytes!("../../../assets/icons/cadrs.png"))?;
     // GNOME can retain a cached missing themed icon after a first-time install. A file icon
     // resolves immediately, including when the user's hicolor directory has no theme index.
     let icon = icon.to_str().ok_or_else(|| io::Error::other("icon path is not UTF-8"))?

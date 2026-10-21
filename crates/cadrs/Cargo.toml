@@ -4,10 +4,10 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
+build = "build.rs"
 
 [dependencies]
 bevy.workspace = true
-winit.workspace = true
 directories.workspace = true
 cadrs_app.workspace = true
 cadrs_core.workspace = true

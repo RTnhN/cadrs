@@ -1211,6 +1211,11 @@ impl System {
                 inputs.extend(self.point(s, PointRef::Point(b)));
                 self.push(Kind::Distance(v), inputs, src);
             }
+            DimensionKind::OriginAligned { p } => {
+                let mut inputs = self.point(s, PointRef::Origin).to_vec();
+                inputs.extend(self.point(s, PointRef::Point(p)));
+                self.push(Kind::Distance(v), inputs, src);
+            }
             DimensionKind::Diameter { curve } | DimensionKind::Radius { curve } => {
                 let factor = if matches!(kind, DimensionKind::Diameter { .. }) {
                     2.0
@@ -2353,45 +2358,23 @@ pub fn drag(s: &mut Sketch, drag: &Drag, skip: &HashSet<Source>) -> bool {
 /// One frame of an interactive drag: moves `live` toward `drag`, solving from `base` (the
 /// sketch when the drag began) rather than from the previous frame, so the result depends only
 /// on where the cursor is now, not on the path it took (dragging out and back returns to the
-/// start). A solution that turns a corner inside out (a rectangle flipping over) is rejected;
-/// then the previous frame's geometry is tried as the starting point, and if that flips too the
-/// sketch stays as it was. Returns true if `live` changed.
+/// start). If no solution is reached from `base`, the previous frame's geometry is tried as the
+/// starting point, and if that fails too the sketch stays as it was. Returns true if `live`
+/// changed.
+///
+/// A drag may turn a shape inside out: pulling a rectangle's corner past the opposite side
+/// flips the rectangle over, as a segment's length passes through zero (#38). Nothing stops at
+/// the crossing; only a frame whose target collapses a line or a circle exactly is skipped.
 pub fn drag_from(base: &Sketch, live: &mut Sketch, drag_to: &Drag, skip: &HashSet<Source>) -> bool {
     let mut from_base = base.clone();
-    if drag(&mut from_base, drag_to, skip) && !flips_corner(base, &from_base) {
+    if drag(&mut from_base, drag_to, skip) {
         *live = from_base;
         return true;
     }
     let mut from_live = live.clone();
-    if drag(&mut from_live, drag_to, skip) && !flips_corner(base, &from_live) {
+    if drag(&mut from_live, drag_to, skip) {
         *live = from_live;
         return true;
-    }
-    false
-}
-
-/// True if a corner (two lines meeting at a point) turns the other way in `after` than in
-/// `before`: the shape was turned inside out. Nearly straight corners are ignored.
-pub fn flips_corner(before: &Sketch, after: &Sketch) -> bool {
-    for (p, _) in &before.points {
-        let lines: Vec<CurveId> = before
-            .curves_at(p)
-            .filter(|c| matches!(before.curves[*c].kind, CurveKind::Line { .. }))
-            .take(2)
-            .collect();
-        let [l1, l2] = lines[..] else { continue };
-        let turn = |s: &Sketch| -> Option<f64> {
-            let a = s.direction_from(l1, p)?;
-            let b = s.direction_from(l2, p)?;
-            let cross = a.x * b.y - a.y * b.x;
-            Some(cross)
-        };
-        let (Some(t0), Some(t1)) = (turn(before), turn(after)) else {
-            continue;
-        };
-        if t0.abs() > 0.05 && t1.abs() > 0.05 && t0.signum() != t1.signum() {
-            return true;
-        }
     }
     false
 }
