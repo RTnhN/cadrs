@@ -29,7 +29,7 @@ use super::math::*;
 use super::nurbs::NurbsCurve;
 use super::split::{split_face, Arc};
 use super::surface::Surface;
-use super::topo::{Body, Coedge, Face, Shell};
+use super::topo::{Body, CheckLevel, Coedge, Face, Shell};
 use crate::*;
 use std::collections::HashMap;
 
@@ -42,34 +42,30 @@ fn debug(what: impl FnOnce() -> String) {
     }
 }
 
-thread_local! {
-    /// When the fillet being built must give up (every ball solve checks it): a fillet that
-    /// can't be built quickly is reported, never left running.
-    static DEADLINE: std::cell::Cell<Option<std::time::Instant>> = const { std::cell::Cell::new(None) };
-}
+/// The work a local fillet may do, in ball solves (each sections the strip once: a few
+/// Newton steps on the two faces), shared by its strips: a fillet that can't be built with that
+/// much is reported, never left running. Counted, not timed, so the same input always gets the
+/// same answer whatever the machine's load.
+#[derive(Clone, Debug)]
+struct Budget(std::rc::Rc<std::cell::Cell<u64>>);
 
-/// The time a local fillet may take.
-const BUDGET: std::time::Duration = std::time::Duration::from_secs(20);
-
-/// Sets the deadline for the fillet being built, cleared when dropped.
-struct Budget;
+/// Ball solves a fillet may take: seven times the most a fillet that's built takes (1.4·10⁵,
+/// OCCT blend complex_g1; SMLib's fillets under 9·10⁴).
+const BALL_SOLVES: u64 = 1_000_000;
 
 impl Budget {
-    fn start() -> Budget {
-        DEADLINE.with(|d| d.set(Some(std::time::Instant::now() + BUDGET)));
-        Budget
+    fn new(solves: u64) -> Budget {
+        Budget(std::rc::Rc::new(std::cell::Cell::new(solves)))
     }
-}
-
-impl Drop for Budget {
-    fn drop(&mut self) {
-        DEADLINE.with(|d| d.set(None));
+    /// Takes one solve; false when none are left.
+    fn spend(&self) -> bool {
+        let left = self.0.get();
+        self.0.set(left.saturating_sub(1));
+        left > 0
     }
-}
-
-/// Whether the fillet being built is out of time.
-fn out_of_time() -> bool {
-    DEADLINE.with(|d| d.get().is_some_and(|t| std::time::Instant::now() > t))
+    fn spent(&self) -> bool {
+        self.0.get() == 0
+    }
 }
 
 fn unsupported(why: &'static str) -> KernelError {
@@ -126,6 +122,8 @@ struct EdgeFillet {
     /// otherwise the ball rolls on from one face onto a smoothly joined one there and the next
     /// strip of the edge carries on.
     at_vertex: [bool; 2],
+    /// The fillet's work budget (shared by all its strips).
+    budget: Budget,
     /// How far a contact may lie from the spine (farther is a far branch of a curved face):
     /// a few radii, more where the faces meet at a sharp angle and the ball sits deep in it.
     reach: f64,
@@ -163,7 +161,7 @@ impl EdgeFillet {
 
     /// The ball at spine parameter t from contacts near `guess` (default: from the edge).
     fn ball(&self, b: &Body, t: f64, guess: Option<[P2; 2]>) -> Option<Ball> {
-        if out_of_time() {
+        if !self.budget.spend() {
             return None;
         }
         let f = [&b.faces[self.faces[0]], &b.faces[self.faces[1]]];
@@ -291,7 +289,7 @@ fn edge_convexity(b: &Body, e: usize) -> Option<bool> {
 }
 
 /// Sets up the fillet of radius r along edge e.
-fn edge_fillet(b: &Body, e: usize, law: &[(f64, f64)], flat: bool) -> Result<EdgeFillet> {
+fn edge_fillet(b: &Body, e: usize, law: &[(f64, f64)], flat: bool, budget: &Budget) -> Result<EdgeFillet> {
     let ed = &b.edges[e];
     if ed.degenerate {
         return Err(KernelError::InvalidParameter("A degenerate edge can't be filleted".into()));
@@ -336,7 +334,7 @@ fn edge_fillet(b: &Body, e: usize, law: &[(f64, f64)], flat: bool) -> Result<Edg
     let law = varies.then_some(pts);
     let exact = if varies { None } else { geom::exact_kind([&b.faces[faces[0]], &b.faces[faces[1]]], &spine) };
     let tm = ed.mid_t();
-    let mut ef = EdgeFillet { e, faces, k, law, flat, spine, exact, mid: dummy_ball(), tm, closed: ed.closed(), at_vertex: [true, true], reach: 4.0 * r + 1e-9 };
+    let mut ef = EdgeFillet { e, faces, k, law, flat, spine, exact, mid: dummy_ball(), tm, closed: ed.closed(), at_vertex: [true, true], budget: budget.clone(), reach: 4.0 * r + 1e-9 };
     // The contacts lie r / tan(θ/2) from the edge in a wedge of angle θ.
     let theta = (0..=8).filter_map(|i| wedge(b, &ef, ed.t[0] + (ed.t[1] - ed.t[0]) * i as f64 / 8.0).map(|w| w.2)).fold(std::f64::consts::PI, f64::min);
     ef.reach = ef.reach.max(2.0 * r / (theta / 2.0).tan().max(1e-3) + r);
@@ -1196,8 +1194,8 @@ fn first_roll(b: &Body, ef: &EdgeFillet, from: &Ball, t0: f64, t1: f64) -> Resul
 
 /// The strips of edge e: one per pair of faces the ball touches along it, in increasing spine
 /// parameter (the ball rolls over smooth edges of the edge's faces onto the faces beyond).
-fn pieces_of(b: &Body, e: usize, law: &[(f64, f64)], flat: bool, rolls: &mut Vec<Ball>) -> Result<Vec<(EdgeFillet, [Option<usize>; 2])>> {
-    let base = edge_fillet(b, e, law, flat)?;
+fn pieces_of(b: &Body, e: usize, law: &[(f64, f64)], flat: bool, budget: &Budget, rolls: &mut Vec<Ball>) -> Result<Vec<(EdgeFillet, [Option<usize>; 2])>> {
+    let base = edge_fillet(b, e, law, flat, budget)?;
     if base.closed {
         return Ok(vec![(base, [None, None])]);
     }
@@ -1257,17 +1255,17 @@ fn pieces_of(b: &Body, e: usize, law: &[(f64, f64)], flat: bool, rolls: &mut Vec
 }
 
 fn clone_fillet(f: &EdgeFillet) -> EdgeFillet {
-    EdgeFillet { e: f.e, faces: f.faces, k: f.k, law: f.law.clone(), flat: f.flat, spine: f.spine.clone(), exact: f.exact, mid: f.mid, tm: f.tm, closed: f.closed, at_vertex: f.at_vertex, reach: f.reach }
+    EdgeFillet { e: f.e, faces: f.faces, k: f.k, law: f.law.clone(), flat: f.flat, spine: f.spine.clone(), exact: f.exact, mid: f.mid, tm: f.tm, closed: f.closed, at_vertex: f.at_vertex, budget: f.budget.clone(), reach: f.reach }
 }
 
-fn plan(b: &Body, edges: &[RadiusLaw], flat: bool) -> Result<Plan> {
+fn plan(b: &Body, edges: &[RadiusLaw], flat: bool, budget: &Budget) -> Result<Plan> {
     let mut efs: Vec<EdgeFillet> = Vec::new();
     let mut rolls: Vec<Ball> = Vec::new();
     let mut roll_ends: Vec<(usize, usize, usize)> = Vec::new(); // (strip, end, roll)
     for (e, law) in edges {
         let e = *e;
         debug(|| format!("edge {e}: strips"));
-        for (f, rs) in pieces_of(b, e, law, flat, &mut rolls)? {
+        for (f, rs) in pieces_of(b, e, law, flat, budget, &mut rolls)? {
             for (j, x) in rs.iter().enumerate() {
                 if let Some(id) = x {
                     roll_ends.push((efs.len(), j, *id));
@@ -1687,6 +1685,46 @@ fn rail_pcurve(st: &Strip, k: usize, from: f64, to: f64) -> Option<Curve> {
     Some(Curve::Line { o: P3::new(k0 + k1, v, 0.0), d: V3::new(-1.0, 0.0, 0.0) })
 }
 
+/// The p-curve of `c` on [t0, t1] on `s` ([`super::pcurve::pcurve`]), checked along its
+/// length: where the fit strays from the curve (a B-spline surface whose projection the fit's
+/// samples missed), the curve's points projected densely in turn, interpolated at their
+/// parameters.
+fn face_pcurve(s: &Surface, c: &Curve, t0: f64, t1: f64, near: Option<P2>) -> Curve {
+    let pc = super::pcurve::pcurve(s, c, t0, t1, near);
+    const N: usize = 48;
+    let gap = |pc: &Curve| -> f64 {
+        (0..=N)
+            .map(|i| {
+                let t = t0 + (t1 - t0) * i as f64 / N as f64;
+                let uv = pc.point(t);
+                let d = (s.eval(uv.x, uv.y) - c.point(t)).norm();
+                if d.is_nan() { f64::INFINITY } else { d }
+            })
+            .fold(0.0, f64::max)
+    };
+    let size = c.point(t0).coords.abs().max().max(c.point(t1).coords.abs().max());
+    let g0 = gap(&pc);
+    if g0 <= 1e-6 * (1.0 + size) {
+        return pc;
+    }
+    let m = 256;
+    let periods = super::pcurve::closed_periods(s);
+    let mut hint = { let q = pc.point(t0); Some((q.x, q.y)) };
+    let mut ts = Vec::with_capacity(m + 1);
+    let mut pts = Vec::with_capacity(m + 1);
+    for i in 0..=m {
+        let t = t0 + (t1 - t0) * i as f64 / m as f64;
+        let q = super::pcurve::project_along(s, &c.point(t), hint, periods);
+        hint = Some((q.x, q.y));
+        ts.push(t);
+        pts.push(P3::new(q.x, q.y, 0.0));
+    }
+    let dense = super::pcurve::shift_into(s, Curve::nurbs(NurbsCurve::interpolate(&pts, &ts, 3, None, None)), 0.5 * (t0 + t1), near);
+    let g1 = gap(&dense);
+    debug(|| format!("  a p-curve {g0:.3e} off its curve, {g1:.3e} projected densely"));
+    if g1 < g0 { dense } else { pc }
+}
+
 /// The arcs of a face's loops (for [`split_face`]).
 fn face_arcs(b: &Body, f: &Face) -> Vec<Vec<Arc>> {
     f.loops
@@ -1711,7 +1749,7 @@ fn split(b: &Body, f: &Face, cuts: &[usize]) -> Vec<Face> {
         .map(|&e| {
             let ed = &b.edges[e];
             let near = near_chart(b, f, &ed.point(ed.mid_t()));
-            let pc = super::pcurve::pcurve(&f.surf, &ed.curve, ed.t[0], ed.t[1], near);
+            let pc = face_pcurve(&f.surf, &ed.curve, ed.t[0], ed.t[1], near);
             Arc { edge: e, fwd: true, pc, t: ed.t, v: ed.v, cut: true, deg: false }
         })
         .collect();
@@ -1937,7 +1975,8 @@ fn trace_until(b: &Body, ef: &EdgeFillet, g: &Face, a: &Mark, z: &Mark, stop: Op
     let st = ef.spine.curve.d2(a.t).1.norm().max(1e-12);
     let sw = (a.ball.q[0].p - a.ball.c).angle(&(a.ball.q[1].p - a.ball.c)) * r;
     let total = (z.p - a.p).norm();
-    let hmax = (total / 16.0).min(r / 2.0).max(1e-9);
+    // Steps short enough for a cubic through the points to keep to the curve.
+    let hmax = (total / 48.0).min(r / 6.0).max(1e-9);
     let (mut t, mut w, mut bl) = (a.t, a.w, a.ball);
     let mut pts = vec![a.p];
     let mut dir: Option<(f64, f64)> = None;
@@ -2256,24 +2295,71 @@ fn common_edge(b: &Body, a: usize, c: usize) -> Option<usize> {
 /// normals: the cut meets the face's boundary edge tangentially at a rail's end, and only an
 /// exact tangent keeps its p-curve on the face's side of that edge.
 fn fit_cut(xs: &[P3], g: Option<&Face>, centres: [Option<P3>; 2]) -> (Curve, f64, f64) {
-    let ps = NurbsCurve::chord_params(xs);
-    let last = ps.len() - 1;
-    let tangent = |i: usize, towards: usize, c: Option<P3>| -> Option<V3> {
-        let (g, c) = (g?, c?);
-        let p = xs[i];
-        let ng = geom::contact(g, geom::foot(g, &p, None)).n;
-        let d = (p - c).normalize().cross(&ng);
-        if d.norm() < 1e-9 {
-            return None;
-        }
-        let chord = xs[towards] - p;
-        let d = d.normalize() * d.normalize().dot(&chord).signum();
-        // As fast as the chord parameters run there.
-        Some(d * (chord.norm() / (ps[towards] - ps[i]).abs().max(1e-300)))
+    let fit = |ps: &[f64]| -> NurbsCurve {
+        let last = ps.len() - 1;
+        let tangent = |i: usize, towards: usize, c: Option<P3>| -> Option<V3> {
+            let (g, c) = (g?, c?);
+            let p = xs[i];
+            let ng = geom::contact(g, geom::foot(g, &p, None)).n;
+            let d = (p - c).normalize().cross(&ng);
+            if d.norm() < 1e-9 {
+                return None;
+            }
+            let chord = xs[towards] - p;
+            let d = d.normalize() * d.normalize().dot(&chord).signum();
+            // As fast as the parameters run there.
+            Some(d * (chord.norm() / (ps[towards] - ps[i]).abs().max(1e-300)))
+        };
+        let d0 = tangent(0, 1, centres[0]);
+        let d1 = tangent(last, last - 1, centres[1]).map(|d| -d);
+        NurbsCurve::interpolate(xs, ps, 3, d0, d1)
     };
-    let d0 = tangent(0, 1, centres[0]);
-    let d1 = tangent(last, last - 1, centres[1]).map(|d| -d);
-    (Curve::nurbs(NurbsCurve::interpolate(xs, &ps, 3, d0, d1)), ps[0], ps[last])
+    let chord = NurbsCurve::chord_params(xs);
+    let last = chord.len() - 1;
+    let c = fit(&chord);
+    // Points traced in uneven steps can make the interpolant swing off the curve between
+    // them; measured against the face the cut lies on, centripetal parameters (which follow
+    // uneven spacing more calmly) are taken where they keep closer.
+    if let Some(g) = g {
+        let off = |c: &NurbsCurve, ps: &[f64]| -> f64 {
+            let mut worst: f64 = 0.0;
+            let mut hint = None;
+            for w in ps.windows(2) {
+                for f in [0.25, 0.5, 0.75] {
+                    let p = c.point(w[0] + (w[1] - w[0]) * f);
+                    let uv = geom::foot(g, &p, hint);
+                    hint = Some(uv);
+                    worst = worst.max((geom::contact(g, uv).p - p).norm());
+                }
+            }
+            worst
+        };
+        let size = xs.iter().fold(0.0f64, |m, p| m.max(p.coords.abs().max()));
+        let e0 = off(&c, &chord);
+        if e0 > 1e-7 * (1.0 + size) {
+            // Chord lengths, then a blend of them with even steps.
+            let mut best = (e0, c, chord.clone());
+            let mut len = vec![0.0; xs.len()];
+            for i in 1..xs.len() {
+                len[i] = len[i - 1] + (xs[i] - xs[i - 1]).norm().max(1e-300);
+            }
+            let total = len[last];
+            let even: Vec<f64> = (0..xs.len()).map(|i| i as f64 / last as f64).collect();
+            let lens: Vec<f64> = len.iter().map(|x| x / total).collect();
+            let mixed: Vec<f64> = lens.iter().zip(&even).map(|(a, b)| 0.5 * (a + b)).collect();
+            for ps in [lens, mixed] {
+                let c2 = fit(&ps);
+                let e2 = off(&c2, &ps);
+                if e2 < best.0 {
+                    best = (e2, c2, ps);
+                }
+            }
+            debug(|| format!("  cut fit off its face by {e0:.3e}, at best {:.3e}", best.0));
+            let (_, c, ps) = best;
+            return (Curve::nurbs(c), ps[0], ps[last]);
+        }
+    }
+    (Curve::nurbs(c), chord[0], chord[last])
 }
 
 /// Whether point `p` (on face `fi`'s surface) lies inside the face.
@@ -2553,24 +2639,38 @@ pub fn fillet_edges_laws(b: &Body, input: BodyId, edges: &[RadiusLaw], flat: boo
     if edges.iter().any(|(e, law)| *e >= b.edges.len() || law.is_empty()) {
         return Err(KernelError::InvalidParameter("unknown edge or empty radius law".into()));
     }
-    let _budget = Budget::start();
+    let budget = Budget::new(BALL_SOLVES);
     let r = edges.iter().flat_map(|(_, l)| l.iter().map(|x| x.1)).fold(0.0, f64::max);
     let size = b.bbox().diagonal().max(r);
     // B-spline strips within 1e-5 of the size (their sections exact at the stations): well inside
     // the volume and area agreement wanted, with spans few enough to integrate quickly.
     let fit_tol = 1e-5 * (1.0 + size);
     let vtol = 1e-6 * (1.0 + r);
-    let p = plan(b, edges, flat).map_err(|e| if out_of_time() { failed("the local fillet ran out of time") } else { e })?;
+    let out_of_work = || failed("the local fillet takes more work than its budget");
+    let p = plan(b, edges, flat, &budget).map_err(|e| if budget.spent() { out_of_work() } else { e })?;
     debug(|| format!("planned {} strips, {} corners", p.efs.len(), p.corners.len()));
     // Rails running off their faces mid-strip are cut by the faces beyond; where that fails,
     // the strips as they are (the rail may only graze an edge).
-    trim(b, input, &p, size, fit_tol, vtol, true).or_else(|e| {
-        if out_of_time() {
-            return Err(failed("the local fillet ran out of time"));
+    let r = trim(b, input, &p, size, fit_tol, vtol, true).or_else(|e| {
+        if budget.spent() {
+            return Err(out_of_work());
         }
         debug(|| format!("with cliffs: {e}; again without"));
-        trim(b, input, &p, size, fit_tol, vtol, false)
-    })
+        // Only where the rails really stay on their faces: a rail across one of the face's
+        // loops (a hole crossing the strip) leaves loops crossing, which only the full check
+        // sees.
+        let (out, src) = trim(b, input, &p, size, fit_tol, vtol, false).map_err(|e| if budget.spent() { out_of_work() } else { e })?;
+        let level = if b.check_with(CheckLevel::Full).is_empty() { CheckLevel::Full } else { CheckLevel::Fast };
+        match out.check_with(level).first() {
+            Some(x) => {
+                debug(|| format!("without cliffs: {x}"));
+                Err(e)
+            }
+            None => Ok((out, src)),
+        }
+    });
+    debug(|| format!("ball solves: {}", BALL_SOLVES - budget.0.get()));
+    r
 }
 
 /// The strips, ends and corners of plan `p` put into `b`'s faces (`cliffs`: rails running off
@@ -3167,7 +3267,7 @@ fn patch(b: &mut Body, p: &Patch) -> Result<()> {
     for (e, fwd) in path {
         let ed = &b.edges[e];
         let near = near_chart(b, &b.faces[fi], &ed.point(ed.mid_t()));
-        let pc = super::pcurve::pcurve(&b.faces[fi].surf, &ed.curve, ed.t[0], ed.t[1], near);
+        let pc = face_pcurve(&b.faces[fi].surf, &ed.curve, ed.t[0], ed.t[1], near);
         out.push(Coedge { edge: e, fwd, pc });
     }
     b.faces[fi].loops[li] = out;
@@ -3212,7 +3312,7 @@ fn assemble(mut nb: Body, out: &Pieces, picked: &[usize], size: f64) -> Result<(
                             for &c in cs {
                                 let ed = &nb.edges[c];
                                 let near = near_chart(&nb, f, &ed.point(ed.mid_t()));
-                                let pc = super::pcurve::pcurve(&f.surf, &ed.curve, ed.t[0], ed.t[1], near);
+                                let pc = face_pcurve(&f.surf, &ed.curve, ed.t[0], ed.t[1], near);
                                 o += &format!("cut {c}: pc {:?} → {:?}; ", pc.point(ed.t[0]), pc.point(ed.t[1]));
                                 for i in 0..=20 {
                                     let t = ed.t[0] + (ed.t[1] - ed.t[0]) * i as f64 / 20.0;
@@ -3314,7 +3414,7 @@ fn assemble(mut nb: Body, out: &Pieces, picked: &[usize], size: f64) -> Result<(
                 let ee = &nb.edges[ei];
                 let pc = match nf.pcurves.iter().find(|x| x.0 == ei) {
                     Some((_, c)) => c.clone(),
-                    None => super::pcurve::pcurve(&nf.surf, &ee.curve, ee.t[0], ee.t[1], None),
+                    None => face_pcurve(&nf.surf, &ee.curve, ee.t[0], ee.t[1], None),
                 };
                 Coedge { edge: ei, fwd, pc }
             })
@@ -3343,7 +3443,10 @@ fn assemble(mut nb: Body, out: &Pieces, picked: &[usize], size: f64) -> Result<(
     nb.shells = shells;
     super::build::fix_senses(&mut nb, first_new..nf);
     super::xbuild::drop_unused(&mut nb);
-    nb.fit_tolerances(1e-4 * (1.0 + size));
+    // Edges the trimming split for nothing join again here (as every blend's result's do),
+    // before the tolerances are fitted to what's left.
+    super::unify::merge_edges(&mut nb);
+    nb.fit_tolerances_searched(1e-4 * (1.0 + size));
     debug(|| {
         let mut o = String::new();
         for (fi, f) in nb.faces.iter().enumerate() {
@@ -3403,6 +3506,30 @@ mod tests {
         let want = 6000.0 - (4.0 - PI) * 30.0;
         assert!((v - want).abs() < 1e-9 * want, "{v} vs {want}");
         assert_eq!(k.get(id2).unwrap().faces.len(), 7);
+    }
+
+    /// A hole through the top runs into the fillet: the strip is cut by the hole's wall (a
+    /// cliff), and the cut keeps to both surfaces (traced in uneven steps, its interpolant
+    /// once swung millimetres off them, and a retry that ignored the hole left its loop
+    /// crossing the trimmed face's) — the full check finds nothing.
+    #[test]
+    fn a_hole_through_the_fillet_cuts_it() {
+        use crate::native::draw::Shape;
+        let mut k = NativeKernel::new();
+        let bx = k.box_(30.0, 30.0, 30.0).unwrap();
+        let cy = k.pcylinder(6.0, 30.0).unwrap();
+        let cy = k.ttranslate(&cy, 15.0, 9.0, 0.0).unwrap();
+        let Shape::Body(id) = k.bcut(&bx, &cy).unwrap() else { unreachable!() };
+        let b = (**k.get(id).unwrap()).clone();
+        let v0 = k.mass_properties(id).unwrap().volume;
+        let e = edge_near(&b, P3::new(15.0, 0.0, 30.0));
+        let (out, _) = fillet_edges(&b, id, &[e], 5.0).map_err(|e| format!("{e}")).unwrap();
+        assert_eq!(out.check_with(CheckLevel::Full), Vec::<String>::new());
+        let id2 = k.insert(out);
+        // Less than the whole edge's (1 − π/4)r² × 30, the hole having taken some of it.
+        let lost = v0 - k.mass_properties(id2).unwrap().volume;
+        let whole = (1.0 - PI / 4.0) * 25.0 * 30.0;
+        assert!(lost > 0.6 * whole && lost < whole, "{lost} of {whole}");
     }
 
     #[test]

@@ -367,13 +367,15 @@ pub fn chain_tool(b: &Body, input: BodyId, chain: &[(usize, bool)], kind: &dyn F
     let mut stations: Vec<Station> = vec![station(total_lo, None)?];
     let mut step = max_step;
     let mut bi = 0;
-    // A bound on the march (a path that never settles fails instead of hanging), in sections
-    // and in time.
+    // A bound on the march (a path that never settles fails instead of hanging): in stations
+    // kept, and in sections solved (tried steps included). Counted, not timed, so the same
+    // input always gets the same answer.
     const MAX_STATIONS: usize = 5000;
-    let started = std::time::Instant::now();
+    const MAX_SECTIONS: usize = 4_000;
+    let mut solved = 0usize;
     while stations.last().unwrap().s < total_hi - 1e-9 {
-        if started.elapsed() > std::time::Duration::from_secs(90) {
-            return Err(KernelError::OperationFailed("the blend's path takes too long to trace".into()));
+        if solved > MAX_SECTIONS {
+            return Err(KernelError::OperationFailed(format!("the blend's path needs more than {MAX_SECTIONS} sections solved")));
         }
         if stations.len() > MAX_STATIONS {
             return Err(KernelError::OperationFailed(format!("the blend's path needs more than {MAX_STATIONS} sections (at {:.4} of [{total_lo:.3}, {total_hi:.3}], step {step:.2e})", stations.last().unwrap().s)));
@@ -389,6 +391,7 @@ pub fn chain_tool(b: &Body, input: BodyId, chain: &[(usize, bool)], kind: &dyn F
         let mut h = rem / (rem / step).ceil().max(1.0);
         loop {
             let s1 = s0 + h;
+            solved += 1;
             let st = station(s1, prev.filter(|_| within(s1)))?;
             // Against the station before the last (the turn of the rails at the last one), or
             // before there is one, the half step.
@@ -413,7 +416,7 @@ pub fn chain_tool(b: &Body, input: BodyId, chain: &[(usize, bool)], kind: &dyn F
     }
     if std::env::var("CADRS_BLEND_DEBUG").is_ok() {
         let ss: Vec<String> = stations.iter().map(|st| format!("{:.3}", st.s)).collect();
-        eprintln!("chain stations ({} on [{total_lo:.3}, {total_hi:.3}], chain length {len:.3}): {}", ss.len(), ss.join(" "));
+        eprintln!("chain stations ({} on [{total_lo:.3}, {total_hi:.3}], chain length {len:.3}, {solved} sections solved): {}", ss.len(), ss.join(" "));
     }
     // Where the contacts change faces: a station there in both pieces (bisected).
     let mut groups: Vec<Vec<Station>> = vec![Vec::new()];
@@ -483,7 +486,7 @@ pub fn chain_tool(b: &Body, input: BodyId, chain: &[(usize, bool)], kind: &dyn F
         let t = Tagged::from_built(built);
         acc = Some(match acc {
             None => t,
-            Some(a) => match super::sweep_path::glue(&a, &t) {
+            Some(a) => match super::sweep::path::glue(&a, &t) {
                 Some(gl) => gl,
                 None => super::features::tagged_union(&a, &t)?,
             },

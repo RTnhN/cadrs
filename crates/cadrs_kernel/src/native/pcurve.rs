@@ -50,13 +50,23 @@ pub fn project_along(s: &Surface, p: &P3, hint: Option<(f64, f64)>, periods: [Op
     let (u, v) = s.project(p, hint);
     let mut q = P2::new(u, v);
     let near_enough = 1e-7 * (1.0 + p.coords.norm());
-    if hint.is_some() && (s.eval(q.x, q.y) - p).norm() > near_enough {
+    // A curve within a tolerance of the surface (a fitted intersection) is off it by more
+    // than `near_enough` everywhere: the hinted foot stands where it is the true foot (the
+    // miss square to the surface there) and near, not only where it reaches the point.
+    let foot = |q: P2| -> bool {
+        let (x, su, sv) = s.d1(q.x, q.y);
+        let d = p - x;
+        let n = d.norm();
+        n <= 1e-4 * (1.0 + p.coords.norm()) && d.dot(&su).abs() <= 1e-6 * n * su.norm() && d.dot(&sv).abs() <= 1e-6 * n * sv.norm()
+    };
+    if hint.is_some() && (s.eval(q.x, q.y) - p).norm() > near_enough && !foot(q) {
         let (u2, v2) = s.project(p, None);
         if (s.eval(u2, v2) - p).norm() < (s.eval(q.x, q.y) - p).norm() * 0.5 {
             q = P2::new(u2, v2);
         }
     }
     if (s.eval(q.x, q.y) - p).norm() > near_enough
+        && !foot(q)
         && let Some(r) = beyond_range(s, p, q)
     {
         q = r;

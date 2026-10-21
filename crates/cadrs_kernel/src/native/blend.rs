@@ -75,7 +75,7 @@ impl Tracked {
     pub fn into_result(mut self, k: &mut NativeKernel, input: BodyId) -> OpResult {
         // Edges split where tools met and left joining in a line or circle between the same
         // faces become one again (faces keep their indices).
-        super::unify::merge_edges(&mut self.body);
+        merge_edges(&mut self.body);
         let mut history = History::default();
         let n = k.get(input).map(|b| b.faces.len()).unwrap_or(0);
         let mut seen = vec![false; n];
@@ -566,8 +566,10 @@ pub fn hexahedron(c: &[P3; 8]) -> Result<Body> {
     b.faces = faces;
     b.shells.push(super::topo::Shell { faces: (0..6).collect(), closed: true });
     b.solids.push(super::topo::Solid { shells: vec![0] });
-    // Outward: flip everything if the volume came out negative.
-    if super::mass::body_mass(&b).volume < 0.0 {
+    // Outward: flip everything if the volume came out negative (the quads' signed volume,
+    // each split in two triangles: they're planar).
+    let volume: f64 = quads.iter().map(|q| c[q[0]].coords.dot(&c[q[1]].coords.cross(&c[q[2]].coords)) + c[q[0]].coords.dot(&c[q[2]].coords.cross(&c[q[3]].coords))).sum::<f64>() / 6.0;
+    if volume < 0.0 {
         for f in &mut b.faces {
             Body::reverse_face(f);
         }
@@ -1233,6 +1235,23 @@ fn check_overlaps(b: &Body, edges: &[EdgeBlend]) -> Result<()> {
 
 /// The kernel's fillet: every edge with its tangent chain (only the edges without
 /// propagation).
+/// Joins edges split for nothing ([`super::unify::merge_edges`]) and sizes the joined edges'
+/// tolerances to their p-curves' true gaps (a joined edge's p-curves are the pieces' joined,
+/// off it by as much as the pieces were off theirs).
+fn merge_edges(b: &mut Body) {
+    super::unify::merge_edges(b);
+    b.fit_tolerances_searched(1e-4 * (1.0 + b.bbox().diagonal()));
+}
+
+/// The first defect of a local blend's result `out` of `input`: by the full check
+/// ([`CheckLevel::Full`](super::topo::CheckLevel::Full)), or by the fast one where the input
+/// itself doesn't pass the full one (its own defects carry over into the result).
+fn local_problem(input: &Body, out: &Body) -> Option<String> {
+    use super::topo::CheckLevel;
+    let level = if input.check_with(CheckLevel::Full).is_empty() { CheckLevel::Full } else { CheckLevel::Fast };
+    out.check_with(level).into_iter().next()
+}
+
 pub fn fillet(k: &mut NativeKernel, body: BodyId, edges: &[EdgeId], spec: &FilletSpec) -> Result<OpResult> {
     let (FilletSize::Radius(r) | FilletSize::Width(r)) = spec.size;
     if !(r > 0.0) {
@@ -1267,9 +1286,9 @@ pub fn fillet(k: &mut NativeKernel, body: BodyId, edges: &[EdgeId], spec: &Fille
         // do): it must stay valid.
         let local = super::fillet::fillet_edges(&b, body, &picked, r).and_then(|(out, src)| {
             let mut merged = out.clone();
-            super::unify::merge_edges(&mut merged);
-            match merged.check().first() {
-                Some(e) => Err(KernelError::OperationFailed(format!("the local fillet's merged edges don't close: {e}"))),
+            merge_edges(&mut merged);
+            match local_problem(&b, &merged) {
+                Some(e) => Err(KernelError::OperationFailed(format!("the local fillet isn't valid: {e}"))),
                 None => Ok((out, src)),
             }
         });
@@ -1363,9 +1382,9 @@ pub fn chamfer(k: &mut NativeKernel, body: BodyId, edges: &[EdgeId], opts: &Cham
         if let Some(laws) = laws {
             let local = super::fillet::fillet_edges_laws(&b, body, &laws, true).and_then(|(out, src)| {
                 let mut merged = out.clone();
-                super::unify::merge_edges(&mut merged);
-                match merged.check().first() {
-                    Some(e) => Err(KernelError::OperationFailed(format!("the local chamfer's merged edges don't close: {e}"))),
+                merge_edges(&mut merged);
+                match local_problem(&b, &merged) {
+                    Some(e) => Err(KernelError::OperationFailed(format!("the local chamfer isn't valid: {e}"))),
                     None => Ok((out, src)),
                 }
             });
@@ -1578,9 +1597,9 @@ pub fn fillet_variable(k: &mut NativeKernel, body: BodyId, laws: &[FilletLaw], _
             .collect();
         let local = super::fillet::fillet_edges_laws(&b, body, &edges, false).and_then(|(out, src)| {
             let mut merged = out.clone();
-            super::unify::merge_edges(&mut merged);
-            match merged.check().first() {
-                Some(e) => Err(KernelError::OperationFailed(format!("the local fillet's merged edges don't close: {e}"))),
+            merge_edges(&mut merged);
+            match local_problem(&b, &merged) {
+                Some(e) => Err(KernelError::OperationFailed(format!("the local fillet isn't valid: {e}"))),
                 None => Ok((out, src)),
             }
         });

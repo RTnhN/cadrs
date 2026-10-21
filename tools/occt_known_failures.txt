@@ -672,7 +672,6 @@ blend simple_j8
 blend simple_j9
 blend tolblend_simple_e9
 # blend: the result is invalid (checkshape).
-blend simple_r3
 # blend: radius laws reaching 0 (OCCT ends evolutive blends at a point).
 blend tolblend_buildvol_a3
 blend tolblend_buildvol_a4
@@ -790,3 +789,13 @@ feat featrevol_h2
 # pieces whose seam edges three or four faces share (a non-manifold result, refused); pair 7x15
 # finds three near-identical curves along the tool's spring edge (W2).
 blend tolblend_simple_c9
+# A hole or face cuts across the whole fillet strip (local trimming doesn't support it yet;
+# the blend tool's result is wrong): these passed only while the fillet's crossing loops went
+# unchecked (the full check finds them) (W1).
+blend buildevol_i2
+blend buildevol_i5
+blend buildevol_j8
+blend simple_s4
+blend simple_t9
+blend simple_u3
+blend simple_u4

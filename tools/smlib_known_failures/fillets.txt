@@ -39,7 +39,6 @@ case_216_caps_coons slow
 case_217_caps_nside slow
 case_218_fillet1010
 case_219_fillet0227 slow
-case_220_vase
 case_221_vase1
 case_223_vase3 slow
 case_224_0311

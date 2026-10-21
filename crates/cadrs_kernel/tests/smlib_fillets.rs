@@ -250,6 +250,7 @@ fn case_121_6_sided_corner() {
 }
 
 /// SMLib fillet test 122: `cyl_sphere.smb`, radius 0.5, edges all but [].
+/// SMLib (the oracle) fails: fillet failed (1007).
 #[test]
 fn case_122_cyl_sphere() {
     known_failure(blend("cyl_sphere.smb", &[], false, Op::Fillet(0.5), &Expect { edges: Some(8), ..Expect::default() }), "fillets", "case_122_cyl_sphere");
@@ -431,7 +432,7 @@ fn case_219_fillet0227() {
 /// SMLib fillet test 220: `vase.smb`, radius 6.35, edges [(0, 0), (2, 2), (4, 4), (7, 7), (17, 19), (21, 21)].
 #[test]
 fn case_220_vase() {
-    known_failure(blend("vase.smb", &[(0, 0), (2, 2), (4, 4), (7, 7), (17, 19), (21, 21)], true, Op::Fillet(6.35), &Expect { volume: Some(612268.533963), area: Some(98864.0376106), faces: Some(19), edges: Some(48), solid: Some(true), ..Expect::default() }), "fillets", "case_220_vase");
+    blend("vase.smb", &[(0, 0), (2, 2), (4, 4), (7, 7), (17, 19), (21, 21)], true, Op::Fillet(6.35), &Expect { volume: Some(612268.533963), area: Some(98864.0376106), faces: Some(19), edges: Some(48), solid: Some(true), ..Expect::default() }).unwrap();
 }
 
 /// SMLib fillet test 221: `vase1.smb`, radius 5.08, edges [(2, 2), (5, 5), (6, 6), (10, 10), (12, 12), (16, 16), (18, 18), (22, 22)].
