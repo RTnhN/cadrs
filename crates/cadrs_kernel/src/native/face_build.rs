@@ -49,24 +49,8 @@ pub fn face_from_surface(s: &Surface, domain: Option<UvBox>) -> Result<Body> {
     // A Bézier patch (one span in a direction, ends apart) goes on as its polynomial past its
     // range, as OCCT evaluates it: the face is made on the same polynomial re-expressed over
     // the domain.
-    let extended;
-    let s = match s {
-        Surface::Nurbs(n) => match bezier_extended(n, (u0, u1), (v0, v1)) {
-            Some(e) => {
-                extended = Surface::Nurbs(std::sync::Arc::new(e));
-                &extended
-            }
-            None => s,
-        },
-        Surface::Extrusion { c: Curve::Nurbs(c), d } => match bezier_curve_extended(c, (u0, u1)) {
-            Some(e) => {
-                extended = Surface::Extrusion { c: Curve::nurbs(e), d: *d };
-                &extended
-            }
-            None => s,
-        },
-        _ => s,
-    };
+    let extended = extended_past(s, ((u0, u1), (v0, v1)));
+    let s = extended.as_ref().unwrap_or(s);
     let ((pu0, pu1), (pv0, pv1)) = s.param_box();
     // Angular directions: a periodic one, or the v of a revolution of a circle or ellipse.
     let (per_u, per_v) = (s.u_periodic(), s.v_periodic() || matches!(s, Surface::Revolution { m, .. } if m.is_periodic()));
@@ -240,6 +224,17 @@ fn bezier_extended(n: &NurbsSurface, u: (f64, f64), v: (f64, f64)) -> Option<Nur
         kv = [vec![v.0; n.dv + 1], vec![v.1; n.dv + 1]].concat();
     }
     NurbsSurface::new(n.du, n.dv, ku, kv, cps).ok()
+}
+
+/// `s` re-expressed over `domain` where it is a Bézier patch, or the extrusion of a Bézier curve,
+/// that the domain reaches past (OCCT evaluates the polynomial beyond its range); None when
+/// it isn't, or the domain is inside its range.
+pub(crate) fn extended_past(s: &Surface, (u, v): UvBox) -> Option<Surface> {
+    match s {
+        Surface::Nurbs(n) => bezier_extended(n, u, v).map(|e| Surface::Nurbs(std::sync::Arc::new(e))),
+        Surface::Extrusion { c: Curve::Nurbs(c), d } => bezier_curve_extended(c, u).map(|e| Surface::Extrusion { c: Curve::nurbs(e), d: *d }),
+        _ => None,
+    }
 }
 
 /// A Bézier curve (one span, ends apart) re-expressed over [a, b] reaching past its range;

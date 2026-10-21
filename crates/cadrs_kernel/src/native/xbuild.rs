@@ -246,7 +246,13 @@ fn project(s: &Surface, per: &Periods, p: &P3, hint: Option<(f64, f64)>, off: f6
             // retry when clearly off.
             let d = (s.eval(u, v) - p).norm();
             if d >= off {
-                let (u2, v2) = s.project(p, None);
+                // From the nearest point of the surface's cached grid (a B-spline's), else from
+                // the surface's own fresh search.
+                let seeded = per.seed(s, p).map(|g| s.project(p, Some(g)));
+                let (u2, v2) = match seeded {
+                    Some(uv) if (s.eval(uv.0, uv.1) - p).norm() < off => uv,
+                    _ => s.project(p, None),
+                };
                 if (s.eval(u2, v2) - p).norm() < d - 1e-9 {
                     (u, v) = (u2, v2);
                 }
@@ -269,7 +275,13 @@ fn project(s: &Surface, per: &Periods, p: &P3, hint: Option<(f64, f64)>, off: f6
 /// degree-7 splines with C1 joints that its single fit doesn't follow); when it is off by more
 /// than the modelling tolerance, a fit of our own, piece by piece of the curve.
 pub fn pcurve_checked(s: &Surface, c: &Curve, t0: f64, t1: f64) -> Curve {
-    snap_tiny(pcurve_unsnapped(s, c, t0, t1))
+    pcurve_checked_tol(s, c, t0, t1, 0.0)
+}
+
+/// [`pcurve_checked`] for an edge of tolerance `etol`: a point of the curve as far off the face
+/// as that is no reason to search the surface afresh.
+pub fn pcurve_checked_tol(s: &Surface, c: &Curve, t0: f64, t1: f64, etol: f64) -> Curve {
+    snap_tiny(pcurve_unsnapped(s, c, t0, t1, etol))
 }
 
 /// Zeroes coefficients below 1e-13 of the curve's size (rounding residue of files' 1e-16
@@ -302,7 +314,7 @@ fn snap_tiny(c: Curve) -> Curve {
     }
 }
 
-fn pcurve_unsnapped(s: &Surface, c: &Curve, t0: f64, t1: f64) -> Curve {
+fn pcurve_unsnapped(s: &Surface, c: &Curve, t0: f64, t1: f64, etol: f64) -> Curve {
     let pieces = c.pieces(t0, t1);
     let per = periods(s);
     // Tolerances relative to the model's size (files come in metres-long models too).
@@ -314,7 +326,7 @@ fn pcurve_unsnapped(s: &Surface, c: &Curve, t0: f64, t1: f64) -> Curve {
         bb.add(&c.point((t0 + t1) / 2.0));
         bb.diagonal().max(bb.max.coords.amax()).max(-bb.min.coords.min())
     };
-    let tol = Tol { fit: TOL.max(1e-11 * size), off: 5e-4f64.max(1e-5 * size) };
+    let tol = Tol { fit: TOL.max(1e-11 * size), off: 5e-4f64.max(1e-5 * size).max(2.0 * etol) };
     // A spline on a curved surface, or anything on a spline surface, has no exact p-curve: fit
     // it directly.
     if ((matches!(c, Curve::Nurbs(_)) && !matches!(s, Surface::Plane { .. })) || matches!(s, Surface::Nurbs(_)))
@@ -458,9 +470,24 @@ struct Periods {
     pu: Option<f64>,
     pv: Option<f64>,
     domain: Option<((f64, f64), (f64, f64))>,
+    /// A B-spline surface's points on a 25 × 25 grid of its range, made the first time a
+    /// projection needs a fresh start (one edge's fit projects many points).
+    grid: std::cell::OnceCell<Vec<(f64, f64, P3)>>,
 }
 
 impl Periods {
+    /// The (u, v) of the grid point nearest `p` on a B-spline surface (its grid made once).
+    fn seed(&self, s: &Surface, p: &P3) -> Option<(f64, f64)> {
+        let Surface::Nurbs(n) = s else { return None };
+        let grid = self.grid.get_or_init(|| {
+            let ((u0, u1), (v0, v1)) = n.range();
+            const G: usize = 24;
+            let at = |k: usize, lo: f64, hi: f64| lo + (hi - lo) * k as f64 / G as f64;
+            (0..=G).flat_map(|i| (0..=G).map(move |j| (i, j))).map(|(i, j)| (at(i, u0, u1), at(j, v0, v1), n.point(at(i, u0, u1), at(j, v0, v1)))).collect()
+        });
+        grid.iter().min_by(|a, b| (a.2 - p).norm_squared().total_cmp(&(b.2 - p).norm_squared())).map(|g| (g.0, g.1))
+    }
+
     /// (u, v) moved by periods into a closed spline surface's parameter range (where it
     /// evaluates), unchanged elsewhere.
     fn in_domain(&self, u: f64, v: f64) -> (f64, f64) {
@@ -487,14 +514,14 @@ fn periods(s: &Surface) -> Periods {
                 let u = u0 + (u1 - u0) * k as f64 / 4.0;
                 (n.point(u, v0) - n.point(u, v1)).norm() < JOIN
             });
-            Periods { pu: closed_u.then_some(u1 - u0), pv: closed_v.then_some(v1 - v0), domain: Some(((u0, u1), (v0, v1))) }
+            Periods { pu: closed_u.then_some(u1 - u0), pv: closed_v.then_some(v1 - v0), domain: Some(((u0, u1), (v0, v1))), grid: Default::default() }
         }
         Surface::Extrusion { c: Curve::Nurbs(n), .. } => {
             let (a, b) = n.range();
             let closed = (n.point(a) - n.point(b)).norm() < JOIN;
-            Periods { pu: closed.then_some(b - a), pv: None, domain: Some(((a, b), (f64::NEG_INFINITY, f64::INFINITY))) }
+            Periods { pu: closed.then_some(b - a), pv: None, domain: Some(((a, b), (f64::NEG_INFINITY, f64::INFINITY))), grid: Default::default() }
         }
-        _ => Periods { pu: s.u_periodic().then_some(P), pv: s.v_periodic().then_some(P), domain: None },
+        _ => Periods { pu: s.u_periodic().then_some(P), pv: s.v_periodic().then_some(P), domain: None, grid: Default::default() },
     }
 }
 
@@ -639,7 +666,7 @@ impl XBuilder {
     /// The p-curve of edge `e` on `s`.
     fn pc_raw(&self, s: &Surface, e: usize) -> Curve {
         let ed = &self.body.edges[e];
-        pcurve_checked(s, &ed.curve, ed.t[0], ed.t[1])
+        pcurve_checked_tol(s, &ed.curve, ed.t[0], ed.t[1], ed.tol)
     }
 
     /// Whether moving along u at `uv` leaves the surface point in place (a pole or an apex):

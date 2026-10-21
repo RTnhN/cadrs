@@ -25,5 +25,3 @@ ssi_29_pln_rev2
 
 # Curves through a cone's apex (read since the reader closes the apex's loops): they stop
 # short of the apex (0.3-0.7% of the length).
-ssi_47_cone_plane1
-ssi_49_cone_cyl2

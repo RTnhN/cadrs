@@ -1117,6 +1117,23 @@ mod tests {
         assert_eq!(b.body.solids.len(), 2);
     }
 
+    /// Unhinted projection onto a B-spline tube closed in u (not periodic) finds points on its
+    /// seam: test8's face 0, along its seam edge (Newton held at a u end used to step v away,
+    /// and the grid's basin across the seam was missed).
+    #[test]
+    fn projection_finds_points_on_a_closed_splines_seam() {
+        let (b, _) = read(&fixture("fillets/test8.smb")).unwrap();
+        let f = &b.faces[0];
+        let e = &b.edges[1];
+        for k in 0..=64 {
+            let p = e.point(e.t[0] + (e.t[1] - e.t[0]) * k as f64 / 64.0);
+            let (u, v) = f.surf.project(&p, None);
+            let d = (f.surf.eval(u, v) - p).norm();
+            assert!(d < 1e-6, "sample {k}: {d}");
+            assert!(f.surf.distance(&p) < 1e-6);
+        }
+    }
+
     /// Version 38 with surfaces of extrusion and revolution (checking its spline faces takes
     /// about a minute).
     #[test]

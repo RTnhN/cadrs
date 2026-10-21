@@ -95,6 +95,9 @@ pub struct Hyperbola {
 pub struct DSurface {
     s: Surface,
     domain: Option<((f64, f64), (f64, f64))>,
+    /// For an `offset` surface: the surface it offsets and by how much (`mkface` past a
+    /// Bézier's range offsets the polynomial extended there, as OCCT evaluates it).
+    base: Option<(Surface, f64)>,
 }
 
 /// Counts of sub-shapes (DRAW's `nbshapes`).
@@ -1757,7 +1760,7 @@ impl NativeKernel {
     /// along the direction).
     pub fn extsurf(&self, c: &Curve, dx: f64, dy: f64, dz: f64) -> Result<DSurface> {
         let d = V3::new(dx, dy, dz).try_normalize(1e-12).ok_or_else(|| err("extsurf: a null direction"))?;
-        Ok(DSurface { s: Surface::Extrusion { c: c.clone(), d }, domain: None })
+        Ok(DSurface { s: Surface::Extrusion { c: c.clone(), d }, domain: None, base: None })
     }
 
     /// `revsurf name curve x y z dx dy dz`: the curve turned about the axis (u the angle from the
@@ -1765,12 +1768,12 @@ impl NativeKernel {
     pub fn revsurf(&self, c: &Curve, x: f64, y: f64, z: f64, dx: f64, dy: f64, dz: f64) -> Result<DSurface> {
         let zd = V3::new(dx, dy, dz).try_normalize(1e-12).ok_or_else(|| err("revsurf: a null axis"))?;
         let xd = ax2_x(&zd);
-        Ok(DSurface { s: Surface::Revolution { f: Frame { o: P3::new(x, y, z), x: xd, y: zd.cross(&xd), z: zd }, m: c.clone() }, domain: None })
+        Ok(DSurface { s: Surface::Revolution { f: Frame { o: P3::new(x, y, z), x: xd, y: zd.cross(&xd), z: zd }, m: c.clone() }, domain: None, base: None })
     }
 
     /// A placement (`plane`) as its plane surface (u along its x, v along its y).
     pub fn plane_surface(&self, ax: &Ax3) -> DSurface {
-        DSurface { s: Surface::Plane { f: Frame { o: ax.origin, x: ax.x, y: ax.y(), z: ax.z } }, domain: None }
+        DSurface { s: Surface::Plane { f: Frame { o: ax.origin, x: ax.x, y: ax.y(), z: ax.z } }, domain: None, base: None }
     }
 
     /// `cylinder|cone|sphere|torus name [x y z [nx ny nz [xx xy xz]]] values`: the elementary
@@ -1786,7 +1789,7 @@ impl NativeKernel {
             ("torus", [big, r]) => Surface::Torus { f, rmaj: *big, rmin: *r },
             _ => return Err(err("an elementary surface with these values")),
         };
-        Ok(DSurface { s, domain: None })
+        Ok(DSurface { s, domain: None, base: None })
     }
 
     /// `beziersurf name nu nv x y z [w] …` (the poles row by row along u, v outer).
@@ -1813,18 +1816,22 @@ impl NativeKernel {
         // poles[i][j]: i along u; DRAW lists them u fastest.
         let grid: Vec<Vec<super::nurbs::H>> = (0..nu).map(|i| (0..nv).map(|j| poles[j * nu + i]).map(|p| super::nurbs::hom(&P3::new(p[0], p[1], p[2]), p[3])).collect()).collect();
         let s = super::brep_occt::spline_surface(du, dv, &grid, u, v).map_err(|e| err(&format!("a spline surface: {e}")))?;
-        Ok(DSurface { s: Surface::Nurbs(std::sync::Arc::new(s)), domain: None })
+        Ok(DSurface { s: Surface::Nurbs(std::sync::Arc::new(s)), domain: None, base: None })
     }
 
     /// `offset name surface d`: the surface moved `d` along its normal (Su × Sv).
     pub fn offset_surf(&self, s: &DSurface, d: f64) -> Result<DSurface> {
         let o = super::local::offset_surface(&s.s, true, d).ok_or(KernelError::Unsupported("this offset surface"))?;
-        Ok(DSurface { s: o, domain: s.domain })
+        let base = match &s.base {
+            Some((b, d0)) => (b.clone(), d0 + d),
+            None => (s.s.clone(), d),
+        };
+        Ok(DSurface { s: o, domain: s.domain, base: Some(base) })
     }
 
     /// `trim name surface u0 u1 v0 v1`: the surface restricted to a uv rectangle.
     pub fn trim_surf(&self, s: &DSurface, u0: f64, u1: f64, v0: f64, v1: f64) -> DSurface {
-        DSurface { s: s.s.clone(), domain: Some(((u0.min(u1), u0.max(u1)), (v0.min(v1), v0.max(v1)))) }
+        DSurface { s: s.s.clone(), domain: Some(((u0.min(u1), u0.max(u1)), (v0.min(v1), v0.max(v1)))), base: s.base.clone() }
     }
 
     /// `mkface name surface [u0 u1 v0 v1]`: a face of the surface over the rectangle (or its
@@ -1843,7 +1850,12 @@ impl NativeKernel {
             }
         };
         let domain = domain.map(|(u, v)| (clamp(u, pu0, pu1, s.s.u_periodic()), clamp(v, pv0, pv1, s.s.v_periodic())));
-        let sheet = super::face_build::face_from_surface(&s.s, domain)?;
+        // An offset past its base's Bézier range: the base extended there, offset.
+        let reoffset = match (&s.base, domain) {
+            (Some((b, d)), Some(dom)) => super::face_build::extended_past(b, dom).and_then(|e| super::local::offset_surface(&e, true, *d)),
+            _ => None,
+        };
+        let sheet = super::face_build::face_from_surface(reoffset.as_ref().unwrap_or(&s.s), domain)?;
         Ok(Shape::Body(self.insert(sheet)))
     }
 

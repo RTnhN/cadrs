@@ -300,6 +300,8 @@ impl Surface {
         // another basin of the distance: a surface curving back on itself between grid
         // points), from the next nearest local minima of the grid too.
         let mut others: Vec<(f64, (f64, f64))> = Vec::new();
+        // The nearest grid point (squared distance): no answer may be farther.
+        let mut grid_best: Option<(f64, (f64, f64))> = None;
         let (u, v) = match hint {
             Some(h) => h,
             None => {
@@ -323,6 +325,7 @@ impl Surface {
                     }
                 }
                 others.sort_by(|a, b| a.0.total_cmp(&b.0));
+                grid_best = others.first().copied();
                 if others.is_empty() {
                     (u0, v0)
                 } else {
@@ -340,7 +343,36 @@ impl Surface {
                 let b = d[1].dot(&d[2]) + r.dot(&d[4]);
                 let c = d[2].norm_squared() + r.dot(&d[5]);
                 let Some((du, dv)) = solve2(a, b, b, c, -fu, -fv) else { break };
-                let (nu, nv) = (self.clamp_u(u + du, u0, u1), (v + dv).clamp(v0.min(v1), v1.max(v0)));
+                let (mut nu, mut nv) = (self.clamp_u(u + du, u0, u1), (v + dv).clamp(v0.min(v1), v1.max(v0)));
+                // Held at a u end (or a v end): the joint step's other half aimed past it, so
+                // step the free direction alone (the closest point along the boundary).
+                if nu != u + du && c > 1e-300 {
+                    nv = (v - fv / c).clamp(v0.min(v1), v1.max(v0));
+                } else if nv != v + dv && a > 1e-300 {
+                    nu = self.clamp_u(u - fu / a, u0, u1);
+                }
+                // Only steps that bring the point closer (far from it the distance's Hessian
+                // needn't be positive and Newton can climb): halved until they do, else a step
+                // down the gradient (scaled per direction), halved the same way.
+                let here = r.norm_squared();
+                let closer = |nu: f64, nv: f64| (self.eval(nu, nv) - p).norm_squared() < here;
+                let mut tries = 0;
+                while !closer(nu, nv) && tries < 30 {
+                    (nu, nv) = (u + (nu - u) * 0.5, v + (nv - v) * 0.5);
+                    tries += 1;
+                }
+                if tries == 30 {
+                    let (su, sv) = (d[1].norm_squared().max(1e-300), d[2].norm_squared().max(1e-300));
+                    (nu, nv) = (self.clamp_u(u - fu / su, u0, u1), (v - fv / sv).clamp(v0.min(v1), v1.max(v0)));
+                    tries = 0;
+                    while !closer(nu, nv) && tries < 30 {
+                        (nu, nv) = (u + (nu - u) * 0.5, v + (nv - v) * 0.5);
+                        tries += 1;
+                    }
+                    if tries == 30 {
+                        break;
+                    }
+                }
                 let step = (nu - u).abs() + (nv - v).abs();
                 u = nu;
                 v = nv;
@@ -372,8 +404,45 @@ impl Surface {
             if closed {
                 let (u2, v2) = newton(u, if v == v0 { v1 } else { v0 });
                 if (self.eval(u2, v2) - p).norm() < (self.eval(u, v) - p).norm() {
-                    return (u2, v2);
+                    (u, v) = (u2, v2);
                 }
+            }
+        }
+        // The same across a u seam (a B-spline tube closed in u but not periodic: Newton
+        // clamped at one end of u where the point lies just past the other).
+        if (u == u0 || u == u1) && !self.u_periodic() && (self.eval(u, v) - p).norm() > 1e-9 {
+            let closed = (0..3).all(|i| {
+                let b = v0 + (v1 - v0) * (0.2 + 0.3 * i as f64);
+                (self.eval(u0, b) - self.eval(u1, b)).norm() < 1e-9
+            });
+            if closed {
+                let (u2, v2) = newton(if u == u0 { u1 } else { u0 }, v);
+                if (self.eval(u2, v2) - p).norm() < (self.eval(u, v) - p).norm() {
+                    (u, v) = (u2, v2);
+                }
+            }
+        }
+        // Unhinted and farther than the nearest grid point (Newton left its basin), or held off
+        // the surface at a seam of a spline closed across it (the grid's basins there lie on
+        // both sides): a grid four times as fine, else that grid point.
+        let off_at_seam = || {
+            let closed_at = |a: P3, b: P3| (a - b).norm() < 1e-9;
+            let probe = [0.2, 0.5, 0.8];
+            let at_u = (u == u0 || u == u1) && probe.iter().all(|f| closed_at(self.eval(u0, v0 + (v1 - v0) * f), self.eval(u1, v0 + (v1 - v0) * f)));
+            let at_v = (v == v0 || v == v1) && probe.iter().all(|f| closed_at(self.eval(u0 + (u1 - u0) * f, v0), self.eval(u0 + (u1 - u0) * f, v1)));
+            (at_u || at_v) && (self.eval(u, v) - p).norm() > near_enough
+        };
+        if let Some((gd, guv)) = grid_best
+            && ((self.eval(u, v) - p).norm_squared() > gd || off_at_seam())
+        {
+            if n < 96 {
+                let (u2, v2) = self.project_grid(p, None, 4 * n);
+                if (self.eval(u2, v2) - p).norm_squared() < (self.eval(u, v) - p).norm_squared() {
+                    (u, v) = (u2, v2);
+                }
+            }
+            if (self.eval(u, v) - p).norm_squared() > gd {
+                (u, v) = guv;
             }
         }
         (u, v)

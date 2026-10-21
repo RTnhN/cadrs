@@ -577,6 +577,10 @@ feat featrevol_j5
 feat featrevol_j6
 # feat: unsupported: revolved features between faces that aren't planes through the axis.
 feat featrevol_h1
+# mkface: offsets of extrusions of rational Bézier curves past the curve's [0, 1]: the curve's weight
+# vanishes inside the face's u range (at u ≈ 1.37 for weights 1, 2, 1), where it runs to infinity.
+mkface after_extsurf_and_offset_c8
+mkface after_extsurf_and_offset_c9
 # draft: the operation fails.
 draft angle_c4
 draft angle_h3

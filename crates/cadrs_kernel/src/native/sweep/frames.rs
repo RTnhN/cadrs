@@ -41,7 +41,7 @@ pub struct PathSweep {
     cum: Vec<f64>,
     /// Each segment's length from its start at travel fractions i / [`ARC_STEPS`]: s runs along
     /// the path by length, so the sections' motion has no jump in speed where segments meet.
-    arc: Vec<Vec<f64>>,
+    arc: Vec<ArcTable>,
     /// The path point and frame rotation (relative to the start frame) at the fine steps.
     pts: Vec<P3>,
     rots: Vec<nalgebra::UnitQuaternion<f64>>,
@@ -205,8 +205,8 @@ impl PathSweep {
     pub fn new(plane: Plane, segs: &[Seg], frames: Frames, reach: f64, helix: Option<Helix>) -> Result<Self> {
         let control = frames.control();
         let any_spread = frames == Frames::Frenet;
-        let arc: Vec<Vec<f64>> = segs.iter().map(arc_table).collect();
-        let lens: Vec<f64> = arc.iter().map(|a| a[ARC_STEPS]).collect();
+        let arc: Vec<ArcTable> = segs.iter().map(ArcTable::new).collect();
+        let lens: Vec<f64> = arc.iter().map(ArcTable::total).collect();
         let total: f64 = lens.iter().sum();
         let mut cum = vec![0.0];
         for l in &lens {
@@ -338,10 +338,17 @@ impl PathSweep {
         // The estimate assumes rails parametrized by length; a path whose speed varies along its
         // parameter (a B-spline's) bends them in s more. Check the rails of the profile's reach
         // between the sections and double the sections until they hold (each doubling cuts the
-        // cubic's error about 16 times).
+        // cubic's error about 16 times; one that cuts it less than 4 times is following frames
+        // that aren't smooth, where more sections only cost, so the doubling stops there).
         let tol = SECTION_TOL * (1.0 + me.reach);
-        while n < MAX_SECTIONS && me.rail_error(n) > tol {
-            n = (2 * n).min(MAX_SECTIONS);
+        let mut err = me.rail_error(n);
+        while n < MAX_SECTIONS && err > tol {
+            let more = (2 * n).min(MAX_SECTIONS);
+            let e = me.rail_error(more);
+            if e > err / 4.0 {
+                break;
+            }
+            (n, err) = (more, e);
         }
         me.v = (0..=n).map(|k| k as f64 / n as f64).collect();
         Ok(me)
@@ -418,7 +425,7 @@ impl PathSweep {
         let k = self.cum.partition_point(|c| *c <= s).saturating_sub(1).min(self.segs.len() - 1);
         let (a, b) = (self.cum[k], self.cum[k + 1]);
         let frac = if b > a { ((s - a) / (b - a)).clamp(0.0, 1.0) } else { 0.0 };
-        (k, frac_at_length(&self.segs[k], &self.arc[k], frac * self.arc[k][ARC_STEPS]))
+        (k, self.arc[k].frac_at(frac * self.arc[k].total()))
     }
     fn path_at(&self, s: f64) -> P3 {
         let (k, f) = self.seg_at(s);
@@ -515,35 +522,47 @@ fn length_between(seg: &Seg, f0: f64, f1: f64) -> f64 {
     GAUSS8.x.iter().zip(GAUSS8.w).map(|(x, w)| w * speed(seg, m + r * x)).sum::<f64>() * r
 }
 
-/// A segment's length from its start at travel fractions i / [`ARC_STEPS`].
-fn arc_table(seg: &Seg) -> Vec<f64> {
-    let mut out = vec![0.0];
-    for i in 0..ARC_STEPS {
-        let (f0, f1) = (i as f64 / ARC_STEPS as f64, (i + 1) as f64 / ARC_STEPS as f64);
-        out.push(out[i] + length_between(seg, f0, f1));
-    }
-    out
+/// A segment's length table: its length from its start and its speed at travel fractions
+/// i / [`ARC_STEPS`] (lengths by 8-point Gauss over each step), computed once per segment.
+#[derive(Debug, Clone)]
+struct ArcTable {
+    len: Vec<f64>,
+    speed: Vec<f64>,
 }
 
-/// The travel fraction where a segment has run `len` (its table `arc`): Newton's method from
-/// the table step holding it.
-fn frac_at_length(seg: &Seg, arc: &[f64], len: f64) -> f64 {
-    let i = arc.partition_point(|l| *l <= len).saturating_sub(1).min(ARC_STEPS - 1);
-    let (lo, hi) = (i as f64 / ARC_STEPS as f64, (i + 1) as f64 / ARC_STEPS as f64);
-    let (la, lb) = (arc[i], arc[i + 1]);
-    let mut f = if lb > la { lo + (hi - lo) * ((len - la) / (lb - la)).clamp(0.0, 1.0) } else { lo };
-    for _ in 0..4 {
-        let v = speed(seg, f);
-        if !(v > 1e-300) {
-            break;
+impl ArcTable {
+    fn new(seg: &Seg) -> Self {
+        let mut len = vec![0.0];
+        for i in 0..ARC_STEPS {
+            let (f0, f1) = (i as f64 / ARC_STEPS as f64, (i + 1) as f64 / ARC_STEPS as f64);
+            len.push(len[i] + length_between(seg, f0, f1));
         }
-        let step = (la + length_between(seg, lo, f) - len) / v;
-        f = (f - step).clamp(lo, hi);
-        if step.abs() < 1e-15 {
-            break;
-        }
+        let speed = (0..=ARC_STEPS).map(|i| speed(seg, i as f64 / ARC_STEPS as f64)).collect();
+        Self { len, speed }
     }
-    f
+
+    fn total(&self) -> f64 {
+        self.len[ARC_STEPS]
+    }
+
+    /// The travel fraction where the segment has run `len`: the cubic Hermite interpolation of
+    /// the fraction against length through the table (the fraction's slope is 1 / speed), so
+    /// the motion stays smooth, O(h⁴) from the exact inverse and with no curve evaluations.
+    fn frac_at(&self, len: f64) -> f64 {
+        let i = self.len.partition_point(|l| *l <= len).saturating_sub(1).min(ARC_STEPS - 1);
+        let (la, lb) = (self.len[i], self.len[i + 1]);
+        let h = lb - la;
+        let (fa, fb) = (i as f64 / ARC_STEPS as f64, (i + 1) as f64 / ARC_STEPS as f64);
+        if !(h > 1e-300) {
+            return fa;
+        }
+        let x = ((len - la) / h).clamp(0.0, 1.0);
+        let slope = |v: f64| if v > 1e-300 { h / v } else { fb - fa };
+        let (ma, mb) = (slope(self.speed[i]), slope(self.speed[i + 1]));
+        let (x2, x3) = (x * x, x * x * x);
+        let f = (2.0 * x3 - 3.0 * x2 + 1.0) * fa + (x3 - 2.0 * x2 + x) * ma + (-2.0 * x3 + 3.0 * x2) * fb + (x3 - x2) * mb;
+        f.clamp(fa, fb)
+    }
 }
 
 /// The curve parameter at travel fraction s of a segment.

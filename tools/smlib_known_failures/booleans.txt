@@ -3,7 +3,6 @@
 
 # The boolean fails: "the boolean left an open shell" (see W5's report for the stage and cause).
 box_cone_grid_00
-box_cone_grid_01
 box_cone_grid_18
 box_cone_grid_19
 box_cone_grid_21
