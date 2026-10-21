@@ -614,6 +614,16 @@ fn draw_sketches(
     ) {
         let frame = map.plane.frame();
         let ppm = map.zoom() as f64;
+        // A box selection being dragged shows what it would select as selected.
+        let mut previewed = selection.clone();
+        if matches!(draw.state, DrawState::BoxSelect { .. }) {
+            for e in &draw.box_preview {
+                if !previewed.contains(*e) {
+                    previewed.0.push(*e);
+                }
+            }
+        }
+        let selection = &previewed;
         // What the cursor snapped to (only while a tool places points).
         // ... or where a dragged point snapped (S11.4).
         let inference = draw
@@ -1188,7 +1198,7 @@ fn draw_sketches(
         {
             let frame = map.plane.frame();
             let ppm = map.zoom();
-            for (h, end) in crate::sketch_tools::spline_handles(sketch, &selection) {
+            for (h, end) in crate::sketch_tools::spline_handles(sketch, selection) {
                 let h = match draw.spline_handle {
                     Some(d) if d.curve == h.curve && d.at_start == h.at_start => d,
                     _ => h,
