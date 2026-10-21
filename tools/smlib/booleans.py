@@ -7,6 +7,8 @@ What converts:
 - the primitive pairs (`SmPrimitiveCreation`: box/box, cone/cone, sphere/sphere, torus/torus).
   SMLib's test unions them; intersection and difference are added, from the oracle only;
 - `my_test_stress`'s BoxUCylTan union;
+- `my_test_non_manifold`'s box ∩ plane.smb and plane.smb − box: a solid with a sheet, whose
+  results are sheets (SMLib's own result; volume not compared);
 - `boolean_trees.smp`: the chain union of `my_many_prim_test` (45 edges);
 - `box_box_grid`, `box_cyl_grid`, `box_cone_grid.smp`: one case per pair of
   `my_two_prim_test` whose SMLib union is a manifold solid (pairs that touch are left out) and
@@ -33,8 +35,6 @@ NOT_CONVERTED = [
      "a box with wires (5) or vertex shells (5), two wires (2): non-manifold cell complexes, out of scope"),
     ("my_test_non_manifold: box ∪ / − plane.smb, merge with plane.smb",
      "SMLib's results keep the sheet inside the box (7 faces, not a manifold solid): non-manifold, out of scope"),
-    ("my_test_non_manifold: box ∩ plane.smb, plane.smb − box",
-     "SMLib gives a sheet (one face, area 49 and 51): sheet results, for Phase 1b"),
     ("Piecewise merge (smMergeTest.cpp:1851, 2 cases) and `my_test_bbu 20` (box merged with itself)",
      "SmMerge::PiecewiseMerge / SM_BO_MERGE: cell complexes, not a boolean the kernel has"),
     ("my_stitching_demo (smMergeTest.cpp:343)",
@@ -132,6 +132,11 @@ fn chain(files: &[&str], op: BoolOp, e: &Expect) -> Result<(), String> {
         acc = bop(&mut k, op, acc, id)?;
     }
     check(&k, &bodies, acc, e)
+}
+
+/// `files[0] op files[1]` whose result is a sheet (no volume to compare).
+fn sheet_chain(files: &[&str], op: BoolOp, e: &Expect) -> Result<(), String> {
+    chain(files, op, &Expect { volume: None, solid: Some(false), ..*e })
 }
 
 /// `my_two_prim_test` on a grid part: B-rep 2i ∪ B-rep 2i+1 for each i of `pairs`, each a
@@ -310,6 +315,35 @@ def stress_cases(src):
     return cases
 
 
+def sheet_cases(src):
+    """`my_test_non_manifold`'s box ∩ plane and plane − box (the two whose SMLib result is a
+    sheet; the union and box − plane keep the sheet inside the box: non-manifold)."""
+    body = function(src, "my_test_non_manifold")
+    box, plane = Fixture(MODEL + "Solids/box.smb"), Fixture(MODEL + "Solids/plane.smb")
+    cases = []
+    for b in top_blocks(body):
+        if "plane.smb" not in b:
+            continue
+        m = re.search(r"my_test_bbu\(\s*(pBrep|pOther)\s*,\s*(pBrep|pOther)\s*,\s*(\d)", b)
+        if not m:
+            continue
+        first, op = m.group(1), m.group(3)
+        if (first, op) == ("pBrep", "1"):
+            a, bb, code, what, sign = box, plane, "I", "intersection", "∩"
+        elif (first, op) == ("pOther", "2"):
+            a, bb, code, what, sign = plane, box, "D", "difference", "−"
+        else:
+            continue
+        # (The same call comes earlier in the function, on the box with wires.)
+        at = src.find(m.group(0), src.find("Solids/plane.smb"))
+        line = src[:at].count("\n") + 1
+        doc = "SMLib boolean: `%s` %s `%s`, a sheet (`my_test_non_manifold`, smMergeTest.cpp:%d)." % (a.name, sign, bb.name, line)
+        cases.append(Case("%s_%s_%s" % (os.path.splitext(a.name)[0], what, os.path.splitext(bb.name)[0]), doc,
+                          'sheet_chain(&["%s", "%s"], %s, {expect})' % (a.name, bb.name, code), [a, bb], {"solid": False},
+                          ("boolean", [a, bb, code])))
+    return cases
+
+
 def oracle_chain(ctx, fixtures, op):
     """SMLib's `a op b op ...` left to right, step by step: its report of the last step, or
     {ok: False}."""
@@ -433,7 +467,7 @@ def empty(ctx, f):
 def extract(ctx):
     src = ctx.source(SOURCE)
     merge = function(src, "my_test_merge")
-    cases = primitive_cases(src, merge) + stress_cases(src)
+    cases = primitive_cases(src, merge) + stress_cases(src) + sheet_cases(src)
     try:
         cases += part_cases(ctx, src, merge)
     except ValueError as e:

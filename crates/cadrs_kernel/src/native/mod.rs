@@ -7,6 +7,7 @@ pub mod blend_corner;
 pub mod bodyio;
 pub mod brep_occt;
 pub mod boolean;
+pub mod boolean_kinds;
 pub mod build;
 pub mod classify;
 pub mod curve;

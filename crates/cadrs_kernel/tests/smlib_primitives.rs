@@ -215,13 +215,13 @@ fn prim_02_box_turned() {
 /// SMLib primitive 2: `Boolean2D` difference of `CreateRectangle(5, 3)` at (-20, -20, 0) and `CreateCircle(4)` at (-15, -15, 0) (smSweepTest.cpp:634): a sheet of one face, 5 edges. cadrs: a sheet boolean of two planar faces (Phase 1b).
 #[test]
 fn prim_02_rectangle_less_circle() {
-    known_failure(sheet_boolean(false, |k| rect_face(k, [-20.0, -20.0, 0.0], 5.0, 3.0), |k| disk_face(k, [-15.0, -15.0, 0.0], 4.0), &Want { faces: Some(1), edges: Some(5), area: Some(10.086521205564972), ..SHEET }), "primitives", "prim_02_rectangle_less_circle");
+    sheet_boolean(false, |k| rect_face(k, [-20.0, -20.0, 0.0], 5.0, 3.0), |k| disk_face(k, [-15.0, -15.0, 0.0], 4.0), &Want { faces: Some(1), edges: Some(5), area: Some(10.086521205564972), ..SHEET }).unwrap();
 }
 
 /// SMLib primitive 2: `Boolean2D` union of `my_test_tsurf_creation`'s face and a copy moved by (3, 2.5, 0) (smSweepTest.cpp:634); SMLib asserts 1 faces, 25 edges, 25 vertices (0 wire, 25 lamina, 0 manifold edges), one face. cadrs: a sheet boolean of two planar faces (Phase 1b).
 #[test]
 fn prim_02_tsurf_union() {
-    known_failure(sheet_boolean(true, |k| tsurf_face(k, 0.0, 0.0), |k| tsurf_face(k, 3.0, 2.5), &Want { faces: Some(1), edges: Some(25), area: Some(108.91923164065169), ..SHEET }), "primitives", "prim_02_tsurf_union");
+    sheet_boolean(true, |k| tsurf_face(k, 0.0, 0.0), |k| tsurf_face(k, 3.0, 2.5), &Want { faces: Some(1), edges: Some(25), area: Some(108.91923164065169), ..SHEET }).unwrap();
 }
 
 /// SMLib primitive 3: `CreateLinearSweep` (capped) of a 5 square less a triangle and two circles along (1, 1, 1) · 3 (smSweepTest.cpp:724); SMLib asserts 11 faces, 27 edges, 18 vertices (0 wire, 0 lamina, 27 manifold edges). cadrs: a prism (counts not compared: the circles' sides are closed faces).

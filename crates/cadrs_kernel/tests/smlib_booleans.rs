@@ -6,7 +6,6 @@
 //! Not converted:
 //! - my_test_non_manifold (smMergeTest.cpp:989), 17 cases: a box with wires (5) or vertex shells (5), two wires (2): non-manifold cell complexes, out of scope
 //! - my_test_non_manifold: box ∪ / − plane.smb, merge with plane.smb: SMLib's results keep the sheet inside the box (7 faces, not a manifold solid): non-manifold, out of scope
-//! - my_test_non_manifold: box ∩ plane.smb, plane.smb − box: SMLib gives a sheet (one face, area 49 and 51): sheet results, for Phase 1b
 //! - Piecewise merge (smMergeTest.cpp:1851, 2 cases) and `my_test_bbu 20` (box merged with itself): SmMerge::PiecewiseMerge / SM_BO_MERGE: cell complexes, not a boolean the kernel has
 //! - my_stitching_demo (smMergeTest.cpp:343): fillet_ts.smb is stitched (StitchFaces 0.001, 0.005) before the difference; unstitched, SMLib's difference isn't a solid: the stitch suite's
 //! - my_mouse_demo (mouse_1..5.smb): a SM_BO_MERGE chain of five one-face sheets then MakeManifold: a sheet complex (23 faces, 71 edges in SMLib), not a solid
@@ -106,6 +105,11 @@ fn chain(files: &[&str], op: BoolOp, e: &Expect) -> Result<(), String> {
     check(&k, &bodies, acc, e)
 }
 
+/// `files[0] op files[1]` whose result is a sheet (no volume to compare).
+fn sheet_chain(files: &[&str], op: BoolOp, e: &Expect) -> Result<(), String> {
+    chain(files, op, &Expect { volume: None, solid: Some(false), ..*e })
+}
+
 /// `my_two_prim_test` on a grid part: B-rep 2i ∪ B-rep 2i+1 for each i of `pairs`, each a
 /// valid solid; their edges total `total` when every input is planar.
 fn grid(file: &str, pairs: &[usize], total: Option<usize>) -> Result<(), String> {
@@ -132,7 +136,7 @@ fn grid(file: &str, pairs: &[usize], total: Option<usize>) -> Result<(), String>
 /// SMLib boolean: union `box:10:10:10:0:0:0` ∪ `box:10:7:5:2:2:0` (SMLib's test (smMergeTest.cpp:1733)).
 #[test]
 fn prim_box_union() {
-    known_failure(primitives((Prim::Box(10.0, 10.0, 10.0), [0.0, 0.0, 0.0]), (Prim::Box(10.0, 7.0, 5.0), [2.0, 2.0, 0.0]), U, &Expect { volume: Some(1070.0), area: Some(648.0), faces: Some(10), edges: Some(24), solid: Some(true), ..Expect::default() }), "booleans", "prim_box_union");
+    primitives((Prim::Box(10.0, 10.0, 10.0), [0.0, 0.0, 0.0]), (Prim::Box(10.0, 7.0, 5.0), [2.0, 2.0, 0.0]), U, &Expect { volume: Some(1070.0), area: Some(648.0), faces: Some(10), edges: Some(24), solid: Some(true), ..Expect::default() }).unwrap();
 }
 
 /// SMLib boolean: intersection `box:10:10:10:0:0:0` ∩ `box:10:7:5:2:2:0` (added: SMLib's test unions this pair (smMergeTest.cpp:1733)).
@@ -214,6 +218,18 @@ fn stress_boxucyltan_union() {
     chain(&["BoxUCylTan1.txt", "BoxUCylTan2.txt"], U, &Expect { volume: Some(215680.376756), area: Some(31600.4524292), faces: Some(10), edges: Some(24), solid: Some(true), ..Expect::default() }).unwrap();
 }
 
+/// SMLib boolean: `box.smb` ∩ `plane.smb`, a sheet (`my_test_non_manifold`, smMergeTest.cpp:1374).
+#[test]
+fn box_intersection_plane() {
+    sheet_chain(&["box.smb", "plane.smb"], I, &Expect { volume: Some(0.0), area: Some(49.0), faces: Some(1), edges: Some(4), solid: Some(false), ..Expect::default() }).unwrap();
+}
+
+/// SMLib boolean: `plane.smb` − `box.smb`, a sheet (`my_test_non_manifold`, smMergeTest.cpp:1430).
+#[test]
+fn plane_difference_box() {
+    sheet_chain(&["plane.smb", "box.smb"], D, &Expect { volume: Some(0.0), area: Some(51.0), faces: Some(1), edges: Some(6), solid: Some(false), ..Expect::default() }).unwrap();
+}
+
 /// SMLib boolean: union of `boolean_trees.smp`'s B-reps, last to first (`my_many_prim_test`, smMergeTest.cpp:1996; SMLib asserts 45 edges).
 #[test]
 fn boolean_trees_union() {
@@ -247,7 +263,7 @@ fn box_box_grid_04() {
 /// SMLib boolean: `box_box_grid.smp#10` ∪ `box_box_grid.smp#11` (`my_two_prim_test`, smMergeTest.cpp:2039).
 #[test]
 fn box_box_grid_05() {
-    known_failure(chain(&["box_box_grid.smp#10", "box_box_grid.smp#11"], U, &Expect { volume: Some(1000.0), area: Some(600.0), faces: Some(6), edges: Some(12), solid: Some(true), ..Expect::default() }), "booleans", "box_box_grid_05");
+    chain(&["box_box_grid.smp#10", "box_box_grid.smp#11"], U, &Expect { volume: Some(1000.0), area: Some(600.0), faces: Some(6), edges: Some(12), solid: Some(true), ..Expect::default() }).unwrap();
 }
 
 /// SMLib boolean: `box_box_grid.smp#12` ∪ `box_box_grid.smp#13` (`my_two_prim_test`, smMergeTest.cpp:2039).
@@ -277,13 +293,13 @@ fn box_box_grid_09() {
 /// SMLib boolean: `box_box_grid.smp#20` ∪ `box_box_grid.smp#21` (`my_two_prim_test`, smMergeTest.cpp:2039).
 #[test]
 fn box_box_grid_10() {
-    known_failure(chain(&["box_box_grid.smp#20", "box_box_grid.smp#21"], U, &Expect { volume: Some(1750.0), area: Some(950.0), faces: Some(10), edges: Some(24), solid: Some(true), ..Expect::default() }), "booleans", "box_box_grid_10");
+    chain(&["box_box_grid.smp#20", "box_box_grid.smp#21"], U, &Expect { volume: Some(1750.0), area: Some(950.0), faces: Some(10), edges: Some(24), solid: Some(true), ..Expect::default() }).unwrap();
 }
 
 /// SMLib boolean: `box_box_grid.smp#22` ∪ `box_box_grid.smp#23` (`my_two_prim_test`, smMergeTest.cpp:2039).
 #[test]
 fn box_box_grid_11() {
-    known_failure(chain(&["box_box_grid.smp#22", "box_box_grid.smp#23"], U, &Expect { volume: Some(1190.0), area: Some(678.0), faces: Some(10), edges: Some(24), solid: Some(true), ..Expect::default() }), "booleans", "box_box_grid_11");
+    chain(&["box_box_grid.smp#22", "box_box_grid.smp#23"], U, &Expect { volume: Some(1190.0), area: Some(678.0), faces: Some(10), edges: Some(24), solid: Some(true), ..Expect::default() }).unwrap();
 }
 
 /// SMLib boolean: `box_box_grid.smp#24` ∪ `box_box_grid.smp#25` (`my_two_prim_test`, smMergeTest.cpp:2039).
@@ -295,7 +311,7 @@ fn box_box_grid_12() {
 /// SMLib boolean: `box_box_grid.smp#26` ∪ `box_box_grid.smp#27` (`my_two_prim_test`, smMergeTest.cpp:2039).
 #[test]
 fn box_box_grid_13() {
-    known_failure(chain(&["box_box_grid.smp#26", "box_box_grid.smp#27"], U, &Expect { volume: Some(1322.96703857), area: Some(729.186815429), faces: Some(8), edges: Some(18), solid: Some(true), ..Expect::default() }), "booleans", "box_box_grid_13");
+    chain(&["box_box_grid.smp#26", "box_box_grid.smp#27"], U, &Expect { volume: Some(1322.96703857), area: Some(729.186815429), faces: Some(8), edges: Some(18), solid: Some(true), ..Expect::default() }).unwrap();
 }
 
 /// SMLib boolean: `box_box_grid.smp#28` ∪ `box_box_grid.smp#29` (`my_two_prim_test`, smMergeTest.cpp:2039).
@@ -307,7 +323,7 @@ fn box_box_grid_14() {
 /// SMLib boolean: `box_box_grid.smp#30` ∪ `box_box_grid.smp#31` (`my_two_prim_test`, smMergeTest.cpp:2039).
 #[test]
 fn box_box_grid_15() {
-    known_failure(chain(&["box_box_grid.smp#30", "box_box_grid.smp#31"], U, &Expect { volume: Some(1170.73461334), area: Some(702.440768004), faces: Some(18), edges: Some(48), solid: Some(true), ..Expect::default() }), "booleans", "box_box_grid_15");
+    chain(&["box_box_grid.smp#30", "box_box_grid.smp#31"], U, &Expect { volume: Some(1170.73461334), area: Some(702.440768004), faces: Some(18), edges: Some(48), solid: Some(true), ..Expect::default() }).unwrap();
 }
 
 /// SMLib boolean: `box_box_grid.smp#32` ∪ `box_box_grid.smp#33` (`my_two_prim_test`, smMergeTest.cpp:2039).
@@ -319,7 +335,7 @@ fn box_box_grid_16() {
 /// SMLib boolean: `box_box_grid.smp#34` ∪ `box_box_grid.smp#35` (`my_two_prim_test`, smMergeTest.cpp:2039).
 #[test]
 fn box_box_grid_17() {
-    known_failure(chain(&["box_box_grid.smp#34", "box_box_grid.smp#35"], U, &Expect { volume: Some(1096.0), area: Some(712.0), faces: Some(14), edges: Some(36), solid: Some(true), ..Expect::default() }), "booleans", "box_box_grid_17");
+    chain(&["box_box_grid.smp#34", "box_box_grid.smp#35"], U, &Expect { volume: Some(1096.0), area: Some(712.0), faces: Some(14), edges: Some(36), solid: Some(true), ..Expect::default() }).unwrap();
 }
 
 /// SMLib boolean: `box_box_grid.smp#36` ∪ `box_box_grid.smp#37` (`my_two_prim_test`, smMergeTest.cpp:2039).
@@ -331,7 +347,7 @@ fn box_box_grid_18() {
 /// SMLib boolean: `box_box_grid.smp#38` ∪ `box_box_grid.smp#39` (`my_two_prim_test`, smMergeTest.cpp:2039).
 #[test]
 fn box_box_grid_19() {
-    known_failure(chain(&["box_box_grid.smp#38", "box_box_grid.smp#39"], U, &Expect { volume: Some(1066.29437252), area: Some(678.068975771), faces: Some(14), edges: Some(36), solid: Some(true), ..Expect::default() }), "booleans", "box_box_grid_19");
+    chain(&["box_box_grid.smp#38", "box_box_grid.smp#39"], U, &Expect { volume: Some(1066.29437252), area: Some(678.068975771), faces: Some(14), edges: Some(36), solid: Some(true), ..Expect::default() }).unwrap();
 }
 
 /// SMLib boolean: `box_box_grid.smp#40` ∪ `box_box_grid.smp#41` (`my_two_prim_test`, smMergeTest.cpp:2039).
@@ -343,7 +359,7 @@ fn box_box_grid_20() {
 /// SMLib boolean: `box_box_grid.smp#42` ∪ `box_box_grid.smp#43` (`my_two_prim_test`, smMergeTest.cpp:2039).
 #[test]
 fn box_box_grid_21() {
-    known_failure(chain(&["box_box_grid.smp#42", "box_box_grid.smp#43"], U, &Expect { volume: Some(1011.69550412), area: Some(604.67820165), faces: Some(8), edges: Some(18), solid: Some(true), ..Expect::default() }), "booleans", "box_box_grid_21");
+    chain(&["box_box_grid.smp#42", "box_box_grid.smp#43"], U, &Expect { volume: Some(1011.69550412), area: Some(604.67820165), faces: Some(8), edges: Some(18), solid: Some(true), ..Expect::default() }).unwrap();
 }
 
 /// SMLib boolean: `box_box_grid.smp#44` ∪ `box_box_grid.smp#45` (`my_two_prim_test`, smMergeTest.cpp:2039).
@@ -361,13 +377,13 @@ fn box_box_grid_23() {
 /// SMLib boolean: `box_box_grid.smp#48` ∪ `box_box_grid.smp#49` (`my_two_prim_test`, smMergeTest.cpp:2039).
 #[test]
 fn box_box_grid_24() {
-    known_failure(chain(&["box_box_grid.smp#48", "box_box_grid.smp#49"], U, &Expect { volume: Some(2000.0), area: Some(1200.0), faces: Some(12), edges: Some(24), solid: Some(true), ..Expect::default() }), "booleans", "box_box_grid_24");
+    chain(&["box_box_grid.smp#48", "box_box_grid.smp#49"], U, &Expect { volume: Some(2000.0), area: Some(1200.0), faces: Some(12), edges: Some(24), solid: Some(true), ..Expect::default() }).unwrap();
 }
 
 /// SMLib boolean: the unions of `box_box_grid.smp` (`my_two_prim_test`, smMergeTest.cpp:2039): SMLib asserts 659 edges for all 25; without the non-manifold pairs 3, 636 (compared for planar inputs).
 #[test]
 fn box_box_grid_all() {
-    known_failure(grid("box_box_grid.smp", &[0, 1, 2, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24], Some(636)), "booleans", "box_box_grid_all");
+    grid("box_box_grid.smp", &[0, 1, 2, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24], Some(636)).unwrap();
 }
 
 /// SMLib boolean: `box_cyl_grid.smp#0` ∪ `box_cyl_grid.smp#1` (`my_two_prim_test`, smMergeTest.cpp:2055).
@@ -391,7 +407,7 @@ fn box_cyl_grid_02() {
 /// SMLib boolean: `box_cyl_grid.smp#6` ∪ `box_cyl_grid.smp#7` (`my_two_prim_test`, smMergeTest.cpp:2055).
 #[test]
 fn box_cyl_grid_03() {
-    known_failure(chain(&["box_cyl_grid.smp#6", "box_cyl_grid.smp#7"], U, &Expect { volume: Some(1785.39840382), area: Some(1071.22809242), faces: Some(9), edges: Some(16), solid: Some(true), ..Expect::default() }), "booleans", "box_cyl_grid_03");
+    chain(&["box_cyl_grid.smp#6", "box_cyl_grid.smp#7"], U, &Expect { volume: Some(1785.39840382), area: Some(1071.22809242), faces: Some(9), edges: Some(16), solid: Some(true), ..Expect::default() }).unwrap();
 }
 
 /// SMLib boolean: `box_cyl_grid.smp#8` ∪ `box_cyl_grid.smp#9` (`my_two_prim_test`, smMergeTest.cpp:2055).
@@ -517,7 +533,7 @@ fn box_cyl_grid_24() {
 /// SMLib boolean: the unions of `box_cyl_grid.smp` (`my_two_prim_test`, smMergeTest.cpp:2055): SMLib asserts 499 edges for all 25; without the non-manifold pairs 6, 482 (compared for planar inputs).
 #[test]
 fn box_cyl_grid_all() {
-    known_failure(grid("box_cyl_grid.smp", &[0, 1, 2, 3, 4, 5, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24], Some(482)), "booleans", "box_cyl_grid_all");
+    grid("box_cyl_grid.smp", &[0, 1, 2, 3, 4, 5, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24], Some(482)).unwrap();
 }
 
 /// SMLib boolean: `box_cone_grid.smp#0` ∪ `box_cone_grid.smp#1` (`my_two_prim_test`, smMergeTest.cpp:2080).

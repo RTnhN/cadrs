@@ -1701,10 +1701,8 @@ fn run(a: &Body, b: &Body, mode: Mode, flush: bool) -> Result<BoolOut> {
         eprintln!("check: {:?}", out.check());
     }
     let mut from: Vec<Vec<(usize, usize)>> = from.into_iter().map(|x| vec![x]).collect();
-    if op == BoolOp::Union || flush {
-        let owners: Vec<usize> = from.iter().map(|f| f[0].0).collect();
-        // For a blend, also pieces of one face the cut split (a wall a chamfer ends against).
-        from = super::unify::unify_faces(&mut out, from, &|f, g| flush || owners[f] != owners[g]);
+    if !imprinting {
+        from = super::unify::unify_boolean(&mut out, from, flush);
     }
     prof.mark("assemble");
     super::unify::merge_edges(&mut out);
@@ -1712,6 +1710,7 @@ fn run(a: &Body, b: &Body, mode: Mode, flush: bool) -> Result<BoolOut> {
     out.fit_tolerances(vtol() * 10.0);
     prof.mark("unify");
     assemble_shells(&mut out)?;
+    super::unify::split_shared_vertices(&mut out);
     // Solids in, faces out but no solid: some piece went missing.
     if !a.solids.is_empty() && !b.solids.is_empty() && !out.faces.is_empty() && out.solids.is_empty() {
         return Err(KernelError::OpenResult("the boolean left an open shell".into()));
@@ -1917,6 +1916,10 @@ pub fn assemble_shells(b: &mut Body) -> Result<()> {
 
 /// The kernel operation: the target combined with each tool in turn.
 pub fn boolean(k: &mut NativeKernel, op: BoolOp, target: BodyId, tools: &[BodyId]) -> Result<OpResult> {
+    // Sheets, wires and points: their own rules (`boolean_kinds`).
+    if let Some(r) = super::boolean_kinds::boolean(k, op, target, tools) {
+        return r;
+    }
     let mut cur = (**k.get(target)?).clone();
     // For each face of `cur`: where it came from (body, face).
     let mut origin: Vec<Vec<(BodyId, usize)>> = (0..cur.faces.len()).map(|i| vec![(target, i)]).collect();

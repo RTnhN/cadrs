@@ -1,8 +1,6 @@
 # SMLib sweep cases (tests/smlib_sweeps.rs, from tools/smlib/sweeps.py) that fail: `name`, or
 # `name slow` when it takes over a minute (run only with --ignored).
 
-# Coplanar faces left split by the union (20 faces, not 14; volume and area right).
-null_region_hollow
 # The union of the whole turn's pieces leaves an open shell without W2's uncommitted
 # boolean/SSI work (passes with it): remove when that lands.
 case_32_rotate_whole_brep_block_with_internal_edges_full

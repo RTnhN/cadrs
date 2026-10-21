@@ -30,6 +30,24 @@ fn pc_from(s: &Surface, e: &Edge, fwd: bool, at: Option<P2>) -> Curve {
     }
 }
 
+/// The p-curve of coedge `c` on `s` continuing a chain at `at` (None: as it lies). A
+/// degenerate edge (a pole) keeps its own p-curve, moved to start at `at`: its 3D curve is a
+/// point, which says nothing about the parameter line it runs along.
+fn chain_pc(s: &Surface, b: &Body, c: &Coedge, at: Option<P2>) -> Curve {
+    let e = &b.edges[c.edge];
+    if !e.degenerate {
+        return pc_from(s, e, c.fwd, at);
+    }
+    let Some(at) = at else { return c.pc.clone() };
+    let start = co_uv(b, c, false);
+    let d = at - start;
+    if d.norm() == 0.0 {
+        c.pc.clone()
+    } else {
+        c.pc.transformed(&Affine::translation(V3::new(d.x, d.y, 0.0)))
+    }
+}
+
 struct Dsu(Vec<usize>);
 impl Dsu {
     fn find(&mut self, x: usize) -> usize {
@@ -161,7 +179,60 @@ pub fn unify_faces(b: &mut Body, from: Vec<Vec<(usize, usize)>>, can_merge: &dyn
     }
     b.faces = faces;
     compact(b);
+    // Pieces of one input face merged again name it once.
+    for srcs in &mut new_from {
+        let mut seen = std::collections::HashSet::new();
+        srcs.retain(|s| seen.insert(*s));
+    }
     new_from
+}
+
+/// Merges the faces of a boolean's result that lie on one surface across an edge (OCCT's
+/// UnifySameDomain after a boolean): pieces of the two inputs (a union's coplanar faces, a
+/// cut's wall continuing a face of the target), and pieces of one input face that a
+/// coincident face of the other body imprinted and the operation kept on both sides. Two
+/// faces of one input stay apart (the input had them so); with `flush` (a blend), any merge.
+/// `from` is each face's sources (owner, input face) as [`unify_faces`] takes it.
+pub fn unify_boolean(b: &mut Body, from: Vec<Vec<(usize, usize)>>, flush: bool) -> Vec<Vec<(usize, usize)>> {
+    let src: Vec<(usize, usize)> = from.iter().map(|f| f[0]).collect();
+    unify_faces(b, from, &|f, g| flush || src[f].0 != src[g].0 || src[f] == src[g])
+}
+
+/// Gives each shell its own copy of a vertex several shells share (solids touching at a
+/// corner: the boolean pools their vertices), so every vertex lies on one shell and the
+/// shells' Euler characteristics stand alone. The first shell keeps the vertex.
+pub fn split_shared_vertices(b: &mut Body) {
+    let mut shell_of_edge = vec![usize::MAX; b.edges.len()];
+    for (si, s) in b.shells.iter().enumerate() {
+        for &f in &s.faces {
+            for c in b.faces[f].loops.iter().flatten() {
+                shell_of_edge[c.edge] = si;
+            }
+        }
+    }
+    // For each vertex, its copy per shell after the first that uses it.
+    let mut copies: std::collections::HashMap<(usize, usize), usize> = Default::default();
+    let mut owner: Vec<Option<usize>> = vec![None; b.verts.len()];
+    for e in 0..b.edges.len() {
+        let s = shell_of_edge[e];
+        if s == usize::MAX {
+            continue;
+        }
+        for k in 0..2 {
+            let v = b.edges[e].v[k];
+            match owner[v] {
+                None => owner[v] = Some(s),
+                Some(o) if o == s => {}
+                Some(_) => {
+                    let nv = *copies.entry((v, s)).or_insert_with(|| {
+                        b.verts.push(b.verts[v].clone());
+                        b.verts.len() - 1
+                    });
+                    b.edges[e].v[k] = nv;
+                }
+            }
+        }
+    }
 }
 
 /// Removes slits from faces on surfaces that aren't periodic (an edge a planar face uses twice,
@@ -312,6 +383,17 @@ fn merge_group(b: &mut Body, g: &[usize]) -> Option<Face> {
                 if seam(c.edge) {
                     continue;
                 }
+                // A pole edge of a face on another parametrization of the surface (a sphere
+                // turned another way) where the base surface is regular there: a point.
+                let e = &b.edges[c.edge];
+                if e.degenerate {
+                    let p = e.point(e.t[0]);
+                    let (u, v) = surf.project(&p, None);
+                    let (_, su, sv) = surf.d1(u, v);
+                    if su.cross(&sv).norm() > 1e-9 * (1.0 + su.norm() * sv.norm()) {
+                        continue;
+                    }
+                }
                 rest.push(c.clone());
             }
         }
@@ -319,10 +401,22 @@ fn merge_group(b: &mut Body, g: &[usize]) -> Option<Face> {
     if rest.is_empty() {
         return None;
     }
+    // Two pole edges at one vertex (each face had its own) would need joining into one over
+    // both their parameter ranges: left apart.
+    let mut poles = std::collections::HashSet::new();
+    for c in rest.iter().filter(|c| b.edges[c.edge].degenerate) {
+        if !poles.insert(b.edges[c.edge].v[0]) {
+            return None;
+        }
+    }
     // Chain into closed loops by vertices.
     let mut used = vec![false; rest.len()];
     let mut chains: Vec<Vec<Coedge>> = Vec::new();
-    for s in 0..rest.len() {
+    // Chains start on real edges (a pole's degenerate edge starts and ends at one vertex: a
+    // chain begun there would close at once).
+    let deg = |k: usize| b.edges[rest[k].edge].degenerate;
+    let order: Vec<usize> = (0..rest.len()).filter(|&k| !deg(k)).chain((0..rest.len()).filter(|&k| deg(k))).collect();
+    for s in order {
         if used[s] {
             continue;
         }
@@ -332,10 +426,15 @@ fn merge_group(b: &mut Body, g: &[usize]) -> Option<Face> {
         let mut guard = 0;
         loop {
             let end = b.co_end(ch.last().unwrap());
-            if end == start {
-                break;
-            }
-            let nx = (0..rest.len()).find(|&k| !used[k] && b.co_start(&rest[k]) == end)?;
+            // A pole's degenerate edge first: the loop runs along it as soon as it reaches
+            // the pole (else it would be left as a loop of its own).
+            let at_end = |k: &usize| !used[*k] && b.co_start(&rest[*k]) == end;
+            let pole = (0..rest.len()).filter(at_end).find(|&k| deg(k));
+            let nx = match pole {
+                Some(k) => k,
+                None if end == start => break,
+                None => (0..rest.len()).find(at_end)?,
+            };
             used[nx] = true;
             ch.push(rest[nx].clone());
             guard += 1;
@@ -360,17 +459,36 @@ fn merge_group(b: &mut Body, g: &[usize]) -> Option<Face> {
     let mut windings = Vec::new();
     for ch in &mut chains {
         let mut at: Option<P2> = None;
-        // Start the chain in the base face's chart.
+        // Start the chain in the base face's chart, at an edge that isn't a pole.
+        if let Some(k) = ch.iter().position(|c| !b.edges[c.edge].degenerate) {
+            ch.rotate_left(k);
+        }
         let first = &ch[0];
         let pc0 = pcurve::pcurve(&surf, &b.edges[first.edge].curve, b.edges[first.edge].t[0], b.edges[first.edge].t[1], Some(center));
         let (t0, _) = co_range(&b.edges[first.edge], first.fwd);
         let p0 = pc0.point(t0);
         let start = P2::new(p0.x, p0.y);
         for c in ch.iter_mut() {
-            let e = &b.edges[c.edge];
-            let pc = if at.is_none() { pc0.clone() } else { pc_from(&surf, e, c.fwd, at) };
+            let pc = if at.is_none() && !b.edges[c.edge].degenerate { pc0.clone() } else { chain_pc(&surf, b, c, at) };
             c.pc = pc;
             at = Some(co_uv(b, c, true));
+        }
+        // A pole's p-curve runs along the pole from where the edge before it ends to where the
+        // one after it starts (a pole the merged face only touches: dropped).
+        let n = ch.len();
+        if n > 2 {
+            for k in 0..n {
+                if !b.edges[ch[k].edge].degenerate {
+                    continue;
+                }
+                let (from, to) = (co_uv(b, &ch[(k + n - 1) % n], true), co_uv(b, &ch[(k + 1) % n], false));
+                let (t0, t1) = co_range(&b.edges[ch[k].edge], ch[k].fwd);
+                let d = (to - from) / (t1 - t0);
+                let o = from - d * t0;
+                ch[k].pc = Curve::Line { o: P3::new(o.x, o.y, 0.0), d: V3::new(d.x, d.y, 0.0) };
+            }
+            ch.retain(|c| !b.edges[c.edge].degenerate || (co_uv(b, c, true) - co_uv(b, c, false)).norm() > 1e-12);
+            at = ch.last().map(|c| co_uv(b, c, true));
         }
         let end = at.unwrap();
         windings.push(((end.x - start.x) / TAU).round() as i64);
@@ -481,8 +599,7 @@ fn merge_group(b: &mut Body, g: &[usize]) -> Option<Face> {
         let realign = |b: &Body, ch: &mut Vec<Coedge>, start: P2| {
             let mut at = Some(start);
             for c in ch.iter_mut() {
-                let e = &b.edges[c.edge];
-                c.pc = pc_from(&surf, e, c.fwd, at);
+                c.pc = chain_pc(&surf, b, c, at);
                 at = Some(co_uv(b, c, true));
             }
         };

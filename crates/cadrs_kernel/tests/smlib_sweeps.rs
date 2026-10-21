@@ -309,5 +309,5 @@ fn null_region_vertex() {
 /// SMLib sweep `my_test_dosweep_null_region` (smSweepTest.cpp:3187): the hollow box (`my_make_hollow_box`) swept whole along (1,1,0)/√2 · 7 (SMLib asserts no counts: its merge is off). cadrs: a hexagonal prism (8 faces, 18 edges) with the part of the cavity the walls never cross left as a void (6 faces, 12 edges): the cavity's points whose path back stays in it.
 #[test]
 fn null_region_hollow() {
-    known_failure(boxes(([0.0, 0.0, 0.0], [10.0, 8.0, 6.0]), Some(([1.0, 1.0, 0.5], [8.0, 6.0, 5.0])), Move::Trans([4.949747468305833, 4.949747468305833, 0.0]), &Want { faces: Some(14), edges: Some(30), volume: Some(998.5550493584376), area: Some(685.60303038033), ..SOLID }), "sweeps", "null_region_hollow");
+    boxes(([0.0, 0.0, 0.0], [10.0, 8.0, 6.0]), Some(([1.0, 1.0, 0.5], [8.0, 6.0, 5.0])), Move::Trans([4.949747468305833, 4.949747468305833, 0.0]), &Want { faces: Some(14), edges: Some(30), volume: Some(998.5550493584376), area: Some(685.60303038033), ..SOLID }).unwrap();
 }

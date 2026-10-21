@@ -1188,6 +1188,10 @@ impl NativeKernel {
             }
             None => match other_shape {
                 Shape::Body(id) => Other::Body(self.get(*id)?),
+                Shape::Face { .. } | Shape::BodyFace(..) | Shape::Compound(_) => {
+                    let id = self.solid_of(other_shape)?;
+                    Other::Body(self.get(id)?)
+                }
                 Shape::Empty => Other::Edges(&[]),
                 _ => return Err(KernelError::Unsupported("booleans of edges with this shape")),
             },
@@ -1236,8 +1240,39 @@ impl NativeKernel {
                 }
                 Ok(acc)
             }
+            Shape::Face { .. } => self.sheet_of_face(s),
+            // A face of a body: that face alone, as a sheet.
+            Shape::BodyFace(b, f) => {
+                let sheet = super::kernel::subset(self.get(*b)?, &[f.0 as usize], false);
+                Ok(self.insert(sheet))
+            }
             _ => self.body_of(s),
         }
+    }
+
+    /// A planar face as a one-face sheet body facing along its plane's normal (the bottom of a
+    /// unit-thick prism of it, turned over).
+    fn sheet_of_face(&mut self, f: &Shape) -> Result<BodyId> {
+        let Shape::Face { plane, .. } = f else { return Err(err("not a planar face")) };
+        let profile = face_profile(f)?;
+        let prism = self.extrude(&profile, Extent::Blind(1.0))?.bodies[0];
+        let body = (**self.get(prism)?).clone();
+        self.release(prism);
+        let n = plane.normal.into_inner();
+        let bottom = body
+            .faces
+            .iter()
+            .position(|face| match &face.surf {
+                super::surface::Surface::Plane { f: fr } => {
+                    let fz = fr.z * if face.sense { 1.0 } else { -1.0 };
+                    fz.dot(&n) < -0.5 && (fr.o - plane.origin).dot(&n).abs() < 1e-9
+                }
+                _ => false,
+            })
+            .ok_or_else(|| err("the face's prism has no bottom face"))?;
+        let mut sheet = super::kernel::subset(&body, &[bottom], false);
+        super::topo::Body::reverse_face(&mut sheet.faces[0]);
+        Ok(self.insert(sheet))
     }
 
     /// Two bodies as one (their solids side by side, as DRAW's compounds).

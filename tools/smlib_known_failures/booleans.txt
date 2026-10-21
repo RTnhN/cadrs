@@ -1,45 +1,31 @@
 # SMLib boolean cases (tests/smlib_booleans.rs, from tools/smlib/booleans.py) that fail: `name`, or
 # `name slow` when it takes over a minute (run only with --ignored).
 
-# Coplanar faces left split: more faces than SMLib on all-planar inputs.
-prim_box_union
-box_box_grid_05
-box_box_grid_10
-box_box_grid_11
-box_box_grid_13
-box_box_grid_15
-box_box_grid_17
-box_box_grid_19
-box_box_grid_21
-box_cone_grid_23
-# One edge fewer than SMLib (13 against 14) on all-planar inputs.
-box_cone_grid_05
-# The boolean fails: "the boolean left an open shell".
+# The boolean fails: "the boolean left an open shell" (see W5's report for the stage and cause).
 boolean_trees_union
+box_cone_grid_00
 box_cone_grid_01
-box_cone_grid_04
+box_cone_grid_05
 box_cone_grid_06
 box_cone_grid_10
 box_cone_grid_11
 box_cone_grid_12
-box_cone_grid_14
-box_cone_grid_21
-# The result has an open shell.
-box_cone_grid_16
-box_cone_grid_17
+box_cone_grid_15
 box_cone_grid_18
 box_cone_grid_19
 box_cone_grid_20
+box_cone_grid_21
 box_cone_grid_22
-# The result has no solid.
-box_cone_grid_00
-box_cone_grid_02
-box_cone_grid_15
 box_cone_grid_24
-# Invalid topology: Euler characteristic 3 with 2 shells.
-box_box_grid_24
-box_cyl_grid_03
+# Invalid topology: a face's p-curves leave a gap (15.6 in u) after its first coedge.
+box_cone_grid_14
+# The cone is read as a one-face sheet (its base cap missing: the SMLib reader at this commit),
+# so the union is one of a solid and a sheet ("Unsupported"). They pass with W8's reader work:
+# remove when that lands.
+box_cone_grid_02
+box_cone_grid_04
+box_cone_grid_16
+box_cone_grid_17
+box_cone_grid_23
 # Aggregates: a pair above fails.
-box_box_grid_all
-box_cyl_grid_all
 box_cone_grid_all
