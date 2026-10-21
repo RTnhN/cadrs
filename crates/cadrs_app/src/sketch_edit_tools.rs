@@ -6,7 +6,8 @@
 //!   selected, choosing Mirror mirrors them in the first-selected line. Once the line is
 //!   picked, pressing on empty space and dragging draws a selection box (`box_select.md`: left
 //!   to right takes the curves inside it, right to left those it crosses too), and releasing
-//!   mirrors every curve it found as one undo step (#37).
+//!   mirrors every curve it found as one undo step (#37). A prompt says which step is next
+//!   ([`mirror_prompt`]); Enter or Esc ends the tool.
 //! - **Offset (O):** click an entity to offset it, or press on it and drag to take its whole
 //!   chain (the lines and arcs joined end to end with it). The offset follows the cursor's
 //!   distance on the side it was picked from; the arrow at the preview points to that side and
@@ -60,6 +61,14 @@ impl Plugin for SketchEditToolsPlugin {
             )
             .add_systems(
                 Update,
+                mirror_prompt
+                    .after(SketchToolsSet)
+                    .run_if(in_state(PartStudioMode::Sketching))
+                    .run_if(in_state(AppState::Document)),
+            )
+            .add_systems(OnExit(PartStudioMode::Sketching), close_mirror_prompt)
+            .add_systems(
+                Update,
                 draw_offset_preview
                     .after(crate::sketch_draw::SketchDrawSet)
                     .run_if(in_state(AppState::Document)),
@@ -105,6 +114,53 @@ impl OffsetTool {
         self.chain.clear();
         self.arrow = None;
         self.press = None;
+    }
+}
+
+/// The Mirror tool's prompt toast.
+#[derive(Component)]
+struct MirrorPrompt;
+
+/// While the Mirror tool is on, a prompt says what to pick next: the mirror line, then the
+/// entities to mirror (with how to finish).
+#[allow(clippy::too_many_arguments)]
+fn mirror_prompt(
+    tool: Res<ActiveSketchTool>,
+    session: Option<Res<SketchSession>>,
+    doc: Option<Res<ActiveDocument>>,
+    selection: Res<SketchSelection>,
+    theme: Res<cadrs_ui::Theme>,
+    q_prompt: Query<Entity, With<MirrorPrompt>>,
+    mut shown: Local<Option<&'static str>>,
+    mut commands: Commands,
+) {
+    let want = match session_sketch(session.as_deref(), doc.as_deref()) {
+        Some(sketch) if tool.tool == SketchTool::Mirror => Some(match mirror_axis(sketch, &selection) {
+            None => "Select a mirror line.",
+            Some(_) => "Select entities to be mirrored. Enter or Esc to finish.",
+        }),
+        _ => None,
+    };
+    if want == *shown {
+        return;
+    }
+    *shown = want;
+    for e in &q_prompt {
+        commands.entity(e).try_despawn();
+    }
+    if let Some(text) = want {
+        let toast = cadrs_ui::show_notification(
+            &mut commands,
+            &theme,
+            cadrs_ui::Notification::info(text).name("mirror-prompt").autohide(false),
+        );
+        commands.entity(toast).insert(MirrorPrompt);
+    }
+}
+
+fn close_mirror_prompt(q_prompt: Query<Entity, With<MirrorPrompt>>, mut commands: Commands) {
+    for e in &q_prompt {
+        commands.entity(e).try_despawn();
     }
 }
 
@@ -351,12 +407,13 @@ pub fn mirror_axis(sketch: &Sketch, selection: &SketchSelection) -> Option<Curve
 }
 
 /// The curves the Mirror tool mirrors from what a selection box found: every curve but the
-/// mirror line itself (points, texts and the origin have no mirror image here).
-pub fn mirror_targets(axis: CurveRef, found: &[SketchEntity]) -> Vec<CurveId> {
+/// mirror line itself and those already mirrored in it (points, texts and the origin have no
+/// mirror image here).
+pub fn mirror_targets(sketch: &Sketch, axis: CurveRef, found: &[SketchEntity]) -> Vec<CurveId> {
     found
         .iter()
         .filter_map(|e| match *e {
-            SketchEntity::Curve(c) if CurveRef::Curve(c) != axis => Some(c),
+            SketchEntity::Curve(c) if CurveRef::Curve(c) != axis && !cadrs_sketch::edit::mirrored_in(sketch, axis, c) => Some(c),
             _ => None,
         })
         .collect()
@@ -374,7 +431,7 @@ pub fn mirror_box(
     let Some(axis) = mirror_axis(sketch, selection) else {
         return;
     };
-    let curves = mirror_targets(axis, found);
+    let curves = mirror_targets(sketch, axis, found);
     if !curves.is_empty() {
         execute(commands, target, SketchOp::Mirror { axis, curves });
     }
@@ -795,7 +852,7 @@ mod tests {
             |p| SVec2::new(p.x, -p.y),
         );
         assert!(found.contains(&SketchEntity::Curve(line)));
-        let curves = mirror_targets(axis, &found);
+        let curves = mirror_targets(&s, axis, &found);
         assert_eq!(curves.len(), 2);
         assert!(!curves.contains(&line));
         SketchOp::Mirror { axis, curves }.apply(&mut s).unwrap();
@@ -811,6 +868,15 @@ mod tests {
         for c in [SVec2::new(10.0, 5.0), SVec2::new(10.0, -5.0)] {
             assert!(circles.iter().any(|p| p.distance(c) < 1e-6), "{circles:?}");
         }
+        // A second box over the circles and their copies mirrors nothing again.
+        let again = cadrs_sketch::hit::box_select(
+            &s,
+            SVec2::new(-15.0, -25.0),
+            SVec2::new(15.0, 25.0),
+            false,
+            |p| SVec2::new(p.x, -p.y),
+        );
+        assert!(mirror_targets(&s, axis, &again).is_empty());
         // Without a line picked, a box mirrors nothing.
         assert!(mirror_axis(&s, &SketchSelection(vec![])).is_none());
     }

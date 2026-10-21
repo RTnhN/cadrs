@@ -1260,7 +1260,7 @@ pub(crate) fn sketch_pointer(
             );
             match crate::sketch_edit_tools::mirror_axis(sketch, &selection) {
                 Some(axis) if tool.tool == SketchTool::Mirror => {
-                    crate::sketch_edit_tools::mirror_targets(axis, &found).into_iter().map(SketchEntity::Curve).collect()
+                    crate::sketch_edit_tools::mirror_targets(sketch, axis, &found).into_iter().map(SketchEntity::Curve).collect()
                 }
                 _ => found,
             }
