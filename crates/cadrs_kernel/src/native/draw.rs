@@ -1007,9 +1007,14 @@ impl NativeKernel {
                 let z = edges[0].start().z;
                 let size = edges.iter().map(|e| (e.end() - edges[0].start()).norm()).fold(1.0, f64::max);
                 if edges.iter().any(|e| (e.start().z - z).abs() > 1e-6 * size || (e.end().z - z).abs() > 1e-6 * size) {
-                    return Err(err("mkoffset: the wire isn't planar"));
+                    // Nearly planar (within its tolerance, as OCCT's FindSurface): offset in the
+                    // plane fitting it best, the wire projected onto it.
+                    let pts: Vec<P3> = edges.iter().flat_map(|e| (0..=16).map(move |i| e.curve.point(e.t0 + (e.t1 - e.t0) * i as f64 / 16.0))).collect();
+                    let (o, n) = super::offset2d::best_plane(&pts, 1e-2).ok_or_else(|| err("mkoffset: the wire isn't planar"))?;
+                    Plane { origin: o, x_dir: nalgebra::Unit::new_normalize(ax2_x(&n)), normal: nalgebra::Unit::new_normalize(n) }
+                } else {
+                    Plane { origin: P3::new(0.0, 0.0, z), x_dir: V3::x_axis(), normal: V3::z_axis() }
                 }
-                Plane { origin: P3::new(0.0, 0.0, z), x_dir: V3::x_axis(), normal: V3::z_axis() }
             }
         };
         let to_w = super::build::plane_map(&plane, &V3::zeros(), 0.0);
@@ -1797,7 +1802,16 @@ fn wire_vertices(w: &[DEdge]) -> usize {
         bb.add(a);
         bb.add(b);
     }
-    super::edge_bop::vertex_count(&ends, (bb.diagonal() * 1e-5).max(1e-6))
+    let tol = (bb.diagonal() * 1e-5).max(1e-6);
+    // Edges in a chain share a vertex where each ends and the next starts, however short they
+    // are (an offset's tiny edges at near-tangent corners are edges of their own).
+    if ends.len() > 1 && ends.windows(2).all(|w| (w[0].1 - w[1].0).norm() <= tol) {
+        let closed = (ends[ends.len() - 1].1 - ends[0].0).norm() <= tol;
+        // (An edge closing on itself, as a circle, has one vertex at both its ends.)
+        let rings = w.iter().zip(&ends).filter(|(e, (a, b))| (b - a).norm() <= tol && e.length() > 2.0 * tol).count();
+        return (if closed { ends.len() } else { ends.len() + 1 }).saturating_sub(rings).max(1);
+    }
+    super::edge_bop::vertex_count(&ends, tol)
 }
 
 /// Turns edges round so each starts where the one before ends.

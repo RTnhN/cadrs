@@ -259,7 +259,10 @@ fn adaptive_len(c: &Curve, a: f64, b: f64, depth: usize) -> f64 {
     let f = |t: f64| c.tangent(t).norm();
     let g8 = integrate(a, b, 1, &GAUSS8, f);
     let g16 = integrate(a, b, 1, &GAUSS16, f);
-    if (g8 - g16).abs() < 1e-13 * g16.abs().max(1e-9) || depth > 12 {
+    // (Below the rounding noise of the curve's coordinates the two rules can't agree better: a
+    // short B-spline far from the origin would otherwise subdivide to the depth limit.)
+    let noise = 1e3 * f64::EPSILON * c.point(0.5 * (a + b)).coords.norm();
+    if (g8 - g16).abs() < (1e-13 * g16.abs().max(1e-9)).max(noise) || depth > 12 {
         g16
     } else {
         let m = (a + b) * 0.5;
