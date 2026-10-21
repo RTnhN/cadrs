@@ -3,6 +3,7 @@
 //! and X11. (The Windows executable carries the same icon as a resource: `crates/cadrs/build.rs`.
 //! Wayland shows a desktop entry's icon instead.)
 
+use bevy::ecs::system::NonSendMarker;
 use bevy::prelude::*;
 use bevy::winit::WINIT_WINDOWS;
 
@@ -16,7 +17,13 @@ impl Plugin for AppIconPlugin {
 
 const ICON_PNG: &[u8] = include_bytes!("../../../assets/icons/cadrs.png");
 
-fn set_window_icon(windows: Query<Entity, With<bevy::window::PrimaryWindow>>, mut done: Local<bool>) {
+/// `WINIT_WINDOWS` is thread-local and only filled on the main thread: the marker keeps this
+/// system there (on another thread it never finds the window).
+fn set_window_icon(
+    windows: Query<Entity, With<bevy::window::PrimaryWindow>>,
+    mut done: Local<bool>,
+    _main_thread: NonSendMarker,
+) {
     if *done {
         return;
     }
