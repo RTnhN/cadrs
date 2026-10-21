@@ -3,14 +3,6 @@
 
 # Coincident surfaces (cylinders on each other, coplanar squares meeting along an edge): SMLib
 # returns the shared region's boundary and the lines where they meet; ssi gives nothing.
-analytic_02
-analytic_03
-analytic_06
-analytic_07
-analytic_10
-analytic_11
-analytic_12
-analytic_14
 
 # No intersection found where SMLib finds some (the half spheres).
 analytic_16

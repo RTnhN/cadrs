@@ -248,7 +248,28 @@ impl Surface {
                     }
                     None => (-1e12, 1e12),
                 };
-                let v = m.closest(&q, a, b);
+                // Hinted: Newton on the meridian from the hint (a projection that follows a
+                // curve along; the global search samples the whole meridian every time).
+                let local = hint.and_then(|(_, hv)| {
+                    let mut t = hv.clamp(a, b);
+                    for _ in 0..20 {
+                        let (c, d1, d2) = m.d2(t);
+                        let r = c - q;
+                        let df = d1.norm_squared() + r.dot(&d2);
+                        if df <= 1e-300 {
+                            return None;
+                        }
+                        let step = r.dot(&d1) / df;
+                        let next = (t - step).clamp(a, b);
+                        // Converged, or held at an end of the meridian.
+                        if (next - t).abs() <= 1e-12 * (1.0 + t.abs()) {
+                            return Some(next);
+                        }
+                        t = next;
+                    }
+                    None
+                });
+                let v = local.unwrap_or_else(|| m.closest(&q, a, b));
                 (u, v)
             }
             Surface::Extrusion { .. } | Surface::Nurbs(_) => self.project_newton(p, hint),
@@ -720,6 +741,38 @@ fn project_off_plane(f: &Frame, m: &Curve, p: &P3, hint: Option<(f64, f64)>) -> 
         let (dr, dh) = (r - rho, q.z - h);
         (dr * dr + dh * dh, dr * r1 + dh * d1.z, r1 * r1 + dr * r2 + d1.z * d1.z + dh * d2.z)
     };
+    let newton = |s: f64| {
+        let mut v = s.clamp(a, b);
+        for _ in 0..40 {
+            let (_, g, gp) = at(v);
+            if !(gp.abs() > 1e-300) {
+                return (v, false);
+            }
+            let nv = (v - g / gp).clamp(a, b);
+            let step = (nv - v).abs();
+            v = nv;
+            if step < 1e-15 * (1.0 + v.abs()) {
+                return (v, true);
+            }
+        }
+        (v, false)
+    };
+    let finish = |v: f64| {
+        let az = l.y.atan2(l.x) - meridian_azimuth(f, m, v);
+        let u = match hint {
+            Some((hu, _)) => unwrap_near(az, hu, TAU),
+            None => wrap(az, 0.0, TAU),
+        };
+        (u, v)
+    };
+    // Hinted (a projection that follows a curve along): Newton from the hint, when it settles
+    // on a minimum; the many starts below are for a point with nothing to go by.
+    if let Some((_, hv)) = hint {
+        let (v, settled) = newton(hv);
+        if settled && at(v).2 > 0.0 {
+            return finish(v);
+        }
+    }
     let mut starts: Vec<f64> = Vec::new();
     if let Some((_, hv)) = hint {
         starts.push(hv);
@@ -743,31 +796,13 @@ fn project_off_plane(f: &Frame, m: &Curve, p: &P3, hint: Option<(f64, f64)>) -> 
     }
     let mut best = (f64::INFINITY, starts[0].clamp(a, b));
     for s in starts {
-        let mut v = s.clamp(a, b);
-        for _ in 0..40 {
-            let (_, g, gp) = at(v);
-            if !(gp.abs() > 1e-300) {
-                break;
-            }
-            let nv = (v - g / gp).clamp(a, b);
-            let step = (nv - v).abs();
-            v = nv;
-            if step < 1e-15 * (1.0 + v.abs()) {
-                break;
-            }
-        }
+        let (v, _) = newton(s);
         let d = at(v).0;
         if d < best.0 {
             best = (d, v);
         }
     }
-    let v = best.1;
-    let az = l.y.atan2(l.x) - meridian_azimuth(f, m, v);
-    let u = match hint {
-        Some((hu, _)) => unwrap_near(az, hu, TAU),
-        None => wrap(az, 0.0, TAU),
-    };
-    (u, v)
+    finish(best.1)
 }
 
 #[cfg(test)]

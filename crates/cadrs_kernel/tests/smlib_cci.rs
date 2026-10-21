@@ -367,31 +367,31 @@ fn cci_analy_06() {
 /// SMLib `my_test_cci_analy` 7: a line crossing the unit circle's plane at a shallow angle near (−1, 0) at gap x, swept through the tolerance.
 #[test]
 fn cci_analy_07() {
-    known_failure(analy(7), "cci", "cci_analy_07");
+    analy(7).unwrap();
 }
 
 /// SMLib `my_test_cci_analy` 8: a line crossing the unit circle's plane at a steeper angle near (−1, 0) at gap x, swept through the tolerance.
 #[test]
 fn cci_analy_08() {
-    known_failure(analy(8), "cci", "cci_analy_08");
+    analy(8).unwrap();
 }
 
 /// SMLib `my_test_cci_analy` 9: a line crossing the unit circle's plane at 45° near (−1, 0) at gap x, swept through the tolerance.
 #[test]
 fn cci_analy_09() {
-    known_failure(analy(9), "cci", "cci_analy_09");
+    analy(9).unwrap();
 }
 
 /// SMLib `my_test_cci_analy` 10: a line out of the plane ending near (−1, 0) at gap x, swept through the tolerance.
 #[test]
 fn cci_analy_10() {
-    known_failure(analy(10), "cci", "cci_analy_10");
+    analy(10).unwrap();
 }
 
 /// SMLib `my_test_cci_analy` 11: a line in the plane ending near (−1, 0) at gap x, swept through the tolerance.
 #[test]
 fn cci_analy_11() {
-    known_failure(analy(11), "cci", "cci_analy_11");
+    analy(11).unwrap();
 }
 
 /// SMLib `my_test_cci_analy` 12: a line square to the circle's plane passing (−1, 0) at gap x, swept through the tolerance.
@@ -403,7 +403,7 @@ fn cci_analy_12() {
 /// SMLib `my_test_cci_analy` 13: a line tangent to the unit circle at (−1, 0), moved x across, swept through the tolerance.
 #[test]
 fn cci_analy_13() {
-    known_failure(analy(13), "cci", "cci_analy_13");
+    analy(13).unwrap();
 }
 
 /// SMLib `my_test_cci_analy` 14: a line from the unit circle's centre at height y near its seam, and a circle at the line's end, swept through the tolerance.
@@ -451,49 +451,49 @@ fn cci_coincident_nurbs() {
 /// SMLib CCI unit test: two overlapping lines (1 range).
 #[test]
 fn cci_coincident_lines() {
-    known_failure(unit("coincident_lines"), "cci", "cci_coincident_lines");
+    unit("coincident_lines").unwrap();
 }
 
 /// SMLib CCI unit test: circles of radius 0.500005 and 0.499999 (1 range).
 #[test]
 fn cci_coincident_circles_radii() {
-    known_failure(unit("coincident_circles_radii"), "cci", "cci_coincident_circles_radii");
+    unit("coincident_circles_radii").unwrap();
 }
 
 /// SMLib CCI unit test: the same circle twice (1 range).
 #[test]
 fn cci_coincident_circles() {
-    known_failure(unit("coincident_circles"), "cci", "cci_coincident_circles");
+    unit("coincident_circles").unwrap();
 }
 
 /// SMLib CCI unit test: a circle and a copy starting a quarter turn on (2).
 #[test]
 fn cci_coincident_circles_turned() {
-    known_failure(unit("coincident_circles_turned"), "cci", "cci_coincident_circles_turned");
+    unit("coincident_circles_turned").unwrap();
 }
 
 /// SMLib CCI unit test: a circle and a copy running the other way (1).
 #[test]
 fn cci_coincident_circles_opposite() {
-    known_failure(unit("coincident_circles_opposite"), "cci", "cci_coincident_circles_opposite");
+    unit("coincident_circles_opposite").unwrap();
 }
 
 /// SMLib CCI unit test: a circle and a copy running the other way from a quarter turn on (2).
 #[test]
 fn cci_coincident_circles_opposite_turned() {
-    known_failure(unit("coincident_circles_opposite_turned"), "cci", "cci_coincident_circles_opposite_turned");
+    unit("coincident_circles_opposite_turned").unwrap();
 }
 
 /// SMLib CCI unit test: two 17-point cubic zigzags crossing at 16 points.
 #[test]
 fn cci_nurb_zigzag_16() {
-    known_failure(unit("nurb_zigzag_16"), "cci", "cci_nurb_zigzag_16");
+    unit("nurb_zigzag_16").unwrap();
 }
 
 /// SMLib CCI unit test: the zigzags shifted 1 apart in x: 8 crossings.
 #[test]
 fn cci_nurb_zigzag_shifted_8() {
-    known_failure(unit("nurb_zigzag_shifted_8"), "cci", "cci_nurb_zigzag_shifted_8");
+    unit("nurb_zigzag_shifted_8").unwrap();
 }
 
 /// SMLib CCI unit test: the zigzags shifted 1 apart in y: partly coincident (8; SMLib's "broken case").

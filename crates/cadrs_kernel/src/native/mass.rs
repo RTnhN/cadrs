@@ -99,6 +99,12 @@ fn s_u_scale(_s: &Surface) -> f64 {
     0.25
 }
 
+/// Four-point Gauss–Legendre on [−1, 1].
+const GAUSS4: Gauss = Gauss {
+    x: &[-0.861_136_311_594_052_6, -0.339_981_043_584_856_3, 0.339_981_043_584_856_3, 0.861_136_311_594_052_6],
+    w: &[0.347_854_845_137_453_9, 0.652_145_154_862_546_1, 0.652_145_154_862_546_1, 0.347_854_845_137_453_9],
+};
+
 /// H(u, v) for all quantities, weighted by `w` (the outer quadrature weight × v'(t)).
 #[allow(clippy::too_many_arguments)]
 fn inner(s: &Surface, u0: f64, u: f64, v: f64, shift: &V3, w: f64, acc: &mut Q, scratch: &mut Vec<f64>) {
@@ -106,10 +112,13 @@ fn inner(s: &Surface, u0: f64, u: f64, v: f64, shift: &V3, w: f64, acc: &mut Q, 
         return;
     }
     u_breaks(s, u0, u, scratch);
+    // Along u an analytic surface's integrand is a low trigonometric polynomial over pieces of
+    // at most π/8: eight points are exact to rounding there.
+    let g = if matches!(s, Surface::Nurbs(_) | Surface::Extrusion { .. }) { &GAUSS16 } else { &GAUSS8 };
     for k in 0..scratch.len() - 1 {
         let (lo, hi) = (scratch[k], scratch[k + 1]);
         let (m, r) = ((lo + hi) * 0.5, (hi - lo) * 0.5);
-        for (x, gw) in GAUSS16.x.iter().zip(GAUSS16.w) {
+        for (x, gw) in g.x.iter().zip(g.w) {
             integrand(s, m + r * x, v, shift, acc, w * gw * r);
         }
     }
@@ -183,7 +192,9 @@ fn face_integrals_v(body: &Body, f: &Face, shift: &V3) -> Q {
                 ts.reverse();
             }
             let fine = matches!(c.pc, Curve::Nurbs(_)) && ts.len() > 64;
-            let g = if fine { &GAUSS8 } else { &GAUSS16 };
+            // (A p-curve of hundreds of short pieces, an intersection curve's: four points a
+            // piece are plenty.)
+            let g = if fine && ts.len() > 512 { &GAUSS4 } else if fine { &GAUSS8 } else { &GAUSS16 };
             for w in ts.windows(2) {
                 let (a, b) = (w[0], w[1]);
                 let (m, r) = ((a + b) * 0.5, (b - a) * 0.5);
@@ -359,7 +370,9 @@ pub fn face_integrals(body: &Body, f: &Face, shift: &V3) -> Q {
                 ts.reverse();
             }
             let fine = matches!(c.pc, Curve::Nurbs(_)) && ts.len() > 64;
-            let g = if fine { &GAUSS8 } else { &GAUSS16 };
+            // (A p-curve of hundreds of short pieces, an intersection curve's: four points a
+            // piece are plenty.)
+            let g = if fine && ts.len() > 512 { &GAUSS4 } else if fine { &GAUSS8 } else { &GAUSS16 };
             for w in ts.windows(2) {
                 let (a, b) = (w[0], w[1]);
                 let (m, r) = ((a + b) * 0.5, (b - a) * 0.5);

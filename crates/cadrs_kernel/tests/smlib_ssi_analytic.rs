@@ -175,13 +175,13 @@ fn analytic(case: u32, want: &Want) -> Result<(), String> {
 /// SMLib analytic SSI 2: two 240° cylinder patches, the second moved 4 along the axis and turned 180°: two shared regions [0°, 60°] and [180°, 240°] × height 1; SMLib asserts 8 curves, closed-form length 12.3776.
 #[test]
 fn analytic_02() {
-    known_failure(analytic(2, &Want { any: true, length: Some(12.377580409572781), samples: &[] }), "ssi_analytic", "analytic_02");
+    analytic(2, &Want { any: true, length: Some(12.377580409572781), samples: &[] }).unwrap();
 }
 
 /// SMLib analytic SSI 3: two 200° cylinders of extrusion, the second moved 3 and turned 200°: the shared region [0°, 40°] × height 2 and the line where they meet at 200°; SMLib asserts 5 curves, closed-form length 8.79253.
 #[test]
 fn analytic_03() {
-    known_failure(analytic(3, &Want { any: true, length: Some(8.792526803190928), samples: &[] }), "ssi_analytic", "analytic_03");
+    analytic(3, &Want { any: true, length: Some(8.792526803190928), samples: &[] }).unwrap();
 }
 
 /// SMLib analytic SSI 5: `surf_extrude.smb` and a copy shifted (5, 0, 1) along its extrusion frame; SMLib asserts 3 curves.
@@ -193,13 +193,13 @@ fn analytic_05() {
 /// SMLib analytic SSI 6: two 200° cylinders of extrusion, the second moved 3 and turned 90°: the shared region [90°, 200°] × height 2; SMLib asserts 4 curves, closed-form length 11.6794.
 #[test]
 fn analytic_06() {
-    known_failure(analytic(6, &Want { any: true, length: Some(11.67944870877505), samples: &[] }), "ssi_analytic", "analytic_06");
+    analytic(6, &Want { any: true, length: Some(11.67944870877505), samples: &[] }).unwrap();
 }
 
 /// SMLib analytic SSI 7: two 180° cylinder patches, the second moved 5 along the axis: they meet along a half circle; SMLib asserts 1 curves, closed-form length 6.28319.
 #[test]
 fn analytic_07() {
-    known_failure(analytic(7, &Want { any: true, length: Some(6.283185307179586), samples: &[] }), "ssi_analytic", "analytic_07");
+    analytic(7, &Want { any: true, length: Some(6.283185307179586), samples: &[] }).unwrap();
 }
 
 /// SMLib analytic SSI 9: parts of `surf_rev.smb` and `surf_sphere150.smb` on the reference frame; SMLib asserts 0 curves.
@@ -211,19 +211,19 @@ fn analytic_09() {
 /// SMLib analytic SSI 10: two 180° cylinder patches, the second moved 4 along the axis: the shared region, height 1; SMLib asserts 4 curves, closed-form length 14.5664.
 #[test]
 fn analytic_10() {
-    known_failure(analytic(10, &Want { any: true, length: Some(14.566370614359172), samples: &[] }), "ssi_analytic", "analytic_10");
+    analytic(10, &Want { any: true, length: Some(14.566370614359172), samples: &[] }).unwrap();
 }
 
 /// SMLib analytic SSI 11: two 180° cylinder patches, the second moved 4 and turned 90°: the shared region [90°, 180°] × height 1; SMLib asserts 4 curves, closed-form length 8.28319.
 #[test]
 fn analytic_11() {
-    known_failure(analytic(11, &Want { any: true, length: Some(8.283185307179586), samples: &[] }), "ssi_analytic", "analytic_11");
+    analytic(11, &Want { any: true, length: Some(8.283185307179586), samples: &[] }).unwrap();
 }
 
 /// SMLib analytic SSI 12: two 180° cylinder patches, the second moved 4 and turned 180°: they meet along two lines of length 1; SMLib asserts 2 curves, closed-form length 2.
 #[test]
 fn analytic_12() {
-    known_failure(analytic(12, &Want { any: true, length: Some(2.0), samples: &[] }), "ssi_analytic", "analytic_12");
+    analytic(12, &Want { any: true, length: Some(2.0), samples: &[] }).unwrap();
 }
 
 /// SMLib analytic SSI 13: `surf_extrude.smb` and a copy shifted along its extrusion by its height and 1 across; SMLib asserts 3 curves.
@@ -235,7 +235,7 @@ fn analytic_13() {
 /// SMLib analytic SSI 14: two coplanar 10 × 10 squares meeting along an edge of length 5; SMLib asserts 1 curves, closed-form length 5.
 #[test]
 fn analytic_14() {
-    known_failure(analytic(14, &Want { any: true, length: Some(5.0), samples: &[] }), "ssi_analytic", "analytic_14");
+    analytic(14, &Want { any: true, length: Some(5.0), samples: &[] }).unwrap();
 }
 
 /// SMLib analytic SSI 15: `surf_extrude.smb` and a copy moved (1, 0, 7), on the reference frame; SMLib asserts 3 curves.

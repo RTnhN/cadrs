@@ -28,6 +28,21 @@
 
 use rayon::prelude::*;
 
+/// The sine of the angle between the normals below which the surfaces are tangent at a point:
+/// n_a × n_b gives no direction to march along.
+const TANGENT_SIN: f64 = 1e-7;
+/// The sine of the angle above which a point found by a closest-point solve is a crossing
+/// (marched from) rather than a touching point (such a solve stops within the tolerance, so a
+/// point of a tangent curve has its normals a little apart).
+const TRANSVERSAL_SIN: f64 = 1e-3;
+/// The angle (radians) by which two normal cones must clear each other to count as separated.
+const CONE_MARGIN: f64 = 1e-3;
+/// The size of a cell (a fraction of the region's) below which a pair isn't cut further.
+const TINY: f64 = 2e-3;
+/// How far apart the surfaces may be at a point of the intersection, relative to the region
+/// (at least that times 1 mm).
+const REL_TOL: f64 = 1e-9;
+
 use super::math::*;
 use super::surface::Surface;
 
@@ -311,7 +326,7 @@ fn separated(a: &Cell, b: &Cell) -> bool {
         return false;
     }
     let between = a.axis.cross(&b.axis).norm().atan2(a.axis.dot(&b.axis).abs());
-    between > a.half + b.half + 1e-3
+    between > a.half + b.half + CONE_MARGIN
 }
 
 /// The parameter cuts of one direction: the box's ends, B-spline knots inside it, and every
@@ -602,7 +617,7 @@ fn touch(ctx: &Ctx, ca: &Cell, cb: &Cell, out: &mut Found) {
 
 /// Whether the cell of a lies on b (all its samples within a hair of it): an area of contact.
 fn coincident(ctx: &Ctx, ca: &Cell, cb: &Cell) -> bool {
-    let lim = ctx.tol.max(1e-9 * ctx.size);
+    let lim = super::tol::CONFUSION.max(1e-9 * ctx.size);
     let mut hint = cb.uv.mid();
     for i in 0..3 {
         for j in 0..3 {
@@ -672,7 +687,7 @@ fn search(ctx: &Ctx, ca: Cell, cb: Cell) -> Found {
 fn transversal(ctx: &Ctx, p: &Pt) -> bool {
     let na = ctx.a.s.normal(p.a.0, p.a.1);
     let nb = ctx.b.s.normal(p.b.0, p.b.1);
-    na.cross(&nb).norm() > 1e-3
+    na.cross(&nb).norm() > TRANSVERSAL_SIN
 }
 
 /// The unit tangent of the intersection at a point (n_a × n_b), None where the surfaces are
@@ -680,7 +695,7 @@ fn transversal(ctx: &Ctx, p: &Pt) -> bool {
 fn tangent(ctx: &Ctx, p: &Pt) -> Option<V3> {
     let na = ctx.a.s.normal(p.a.0, p.a.1);
     let nb = ctx.b.s.normal(p.b.0, p.b.1);
-    na.cross(&nb).try_normalize(1e-7)
+    na.cross(&nb).try_normalize(TANGENT_SIN)
 }
 
 /// A further condition on a point of both surfaces: its value at the point (and a's point
@@ -1081,6 +1096,12 @@ fn chain_touches(pts: Vec<Pt>, link: f64, merge: f64) -> (Vec<Traced>, Vec<Pt>) 
             order.push(left.swap_remove(bi));
         }
         let pts: Vec<Pt> = order.iter().map(|&k| uniq[k]).collect();
+        // A curve's chain runs on: one that folds back often is points scattered over a patch
+        // where the surfaces nearly touch, not a tangent curve.
+        let folds = pts.windows(3).filter(|w| (w[1].p - w[0].p).dot(&(w[2].p - w[1].p)) < 0.0).count();
+        if folds * 10 > pts.len() {
+            continue;
+        }
         let closed = pts.len() > 4 && (pts[0].p - pts[pts.len() - 1].p).norm() < link;
         curves.push(Traced { pts, closed, ends: [End::Singular; 2], tangent: true });
     }
@@ -1096,6 +1117,9 @@ pub fn intersect(a: &Surface, ua: UvBox, b: &Surface, ub: UvBox, region: &Bbox) 
 pub fn intersect_stats(a: &Surface, ua: UvBox, b: &Surface, ub: UvBox, region: &Bbox) -> (Intersection, Stats) {
     let mut stats = Stats::default();
     if !ua.is_valid() || !ub.is_valid() || region.is_empty() {
+        if std::env::var_os("CADRS_SSI_DEBUG").is_some() {
+            eprintln!("ssi_numeric: nothing to search ({ua:?}, {ub:?}, region {region:?})");
+        }
         return (Intersection::default(), stats);
     }
     let cells_a: Vec<Cell> = initial_cells(a, ua).into_iter().map(|r| cell(a, r)).collect();
@@ -1108,14 +1132,17 @@ pub fn intersect_stats(a: &Surface, ua: UvBox, b: &Surface, ub: UvBox, region: &
     r.min = r.min.sup(&ba.min).sup(&bbx.min);
     r.max = r.max.inf(&ba.max).inf(&bbx.max);
     if r.is_empty() || r.min.y > r.max.y || r.min.z > r.max.z {
+        if std::env::var_os("CADRS_SSI_DEBUG").is_some() {
+            eprintln!("ssi_numeric: the boxes don't meet in the region ({r:?})");
+        }
         return (Intersection::default(), stats);
     }
     let size = r.diagonal().max(1e-9);
-    let tol = 1e-9 * size.max(1.0);
+    let tol = REL_TOL * size.max(1.0);
     let r = r.grow(1e-6 * size + tol);
     let ((pu0, pu1), (pv0, pv1)) = b.param_box();
     let bt = Dom::new(b, UvBox::new((pu0.max(-1e4), pu1.min(1e4)), (pv0.max(-1e4), pv1.min(1e4))));
-    let ctx = Ctx { a: Dom::new(a, ua), b: Dom::new(b, ub), bt, region: r, size, tiny: 2e-3 * size, tol };
+    let ctx = Ctx { a: Dom::new(a, ua), b: Dom::new(b, ub), bt, region: r, size, tiny: TINY * size, tol };
     let pairs: Vec<(Cell, Cell)> = cells_a.iter().flat_map(|ca| cells_b.iter().filter(|cb| ca.bb.grow(tol).overlaps(&cb.bb)).map(move |cb| (*ca, *cb))).collect();
     let clock = std::time::Instant::now();
     let found: Vec<Found> = pairs.into_par_iter().map(|(ca, cb)| search(&ctx, ca, cb)).collect();

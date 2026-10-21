@@ -49,6 +49,8 @@ pub mod profile;
 pub mod split;
 pub mod split_area;
 pub mod ssi;
+pub mod ssi_cci;
+pub mod ssi_coincident;
 pub mod ssi_numeric;
 pub mod step;
 pub mod surface;

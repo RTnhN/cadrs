@@ -20,11 +20,20 @@ pub struct IntCurve {
 }
 
 /// The intersection of two surfaces near the box `bb` (the overlap of the two faces' boxes),
-/// given the uv boxes of the faces for the numeric fallback: the crossing curves, then the
-/// curves along which the surfaces touch.
+/// given the uv boxes of the faces for the numeric fallback: the crossing curves, the curves
+/// along which the surfaces touch, the boundary of a region where they coincide, and isolated
+/// points of contact as curves of no length (t0 = t1).
 pub fn surface_surface(a: &Surface, ua: ((f64, f64), (f64, f64)), b: &Surface, ub: ((f64, f64), (f64, f64)), bb: &Bbox) -> Vec<IntCurve> {
     let r = surface_surface_full(a, ua, b, ub, bb);
-    r.curves.into_iter().chain(r.tangent).collect()
+    if std::env::var_os("CADRS_SSI_DEBUG").is_some() {
+        eprintln!("surface_surface: {} crossing (length {:.4}), {} tangent, {} coincident, points {:?}", r.curves.len(), r.curves.iter().map(|c| c.c.length(c.t0, c.t1)).sum::<f64>(), r.tangent.len(), r.coincident.len(), r.points);
+        for c in &r.tangent {
+            eprintln!("  tangent {:?} .. {:?} length {}", c.c.point(c.t0), c.c.point(c.t1), c.c.length(c.t0, c.t1));
+        }
+    }
+    // (A point of contact as a curve of no length.)
+    let points = r.points.into_iter().map(|p| IntCurve { c: Curve::Line { o: p, d: V3::x() }, t0: 0.0, t1: 0.0, closed: false });
+    r.curves.into_iter().chain(r.tangent).chain(r.coincident).chain(points).collect()
 }
 
 /// A surface–surface intersection in parts.
@@ -38,11 +47,27 @@ pub struct Ssi {
     /// Points on the crossing curves where the surfaces are tangent (branch points and touching
     /// points, where curves meet): each curve passing one runs through it.
     pub singular: Vec<P3>,
+    /// The boundary of the region where the surfaces coincide (over their boxes): the sides of
+    /// either box lying on the other surface inside its box. (Booleans treat coincident faces
+    /// apart.)
+    pub coincident: Vec<IntCurve>,
+    /// Isolated points where the surfaces touch.
+    pub points: Vec<P3>,
+}
+
+/// How near two surfaces must be to coincide (within a part in 10⁹ of the problem's size,
+/// and at least [`super::tol::CONFUSION`]).
+fn coincidence_tol(bb: &Bbox) -> f64 {
+    super::tol::CONFUSION.max(1e-9 * bb.diagonal())
 }
 
 /// [`surface_surface`] in parts.
 pub fn surface_surface_full(a: &Surface, ua: ((f64, f64), (f64, f64)), b: &Surface, ub: ((f64, f64), (f64, f64)), bb: &Bbox) -> Ssi {
     let closed = |curves| Ssi { curves, ..Ssi::default() };
+    let tc = coincidence_tol(bb);
+    if a.same_domain(b, tc).is_some() {
+        return Ssi { coincident: super::ssi_coincident::region_boundary(a, ua, b, ub, tc), ..Ssi::default() };
+    }
     if let Some(r) = plane_extrusion(a, b, ub, bb) {
         return closed(r);
     }
@@ -686,8 +711,20 @@ fn numeric(a: &Surface, ua: ((f64, f64), (f64, f64)), b: &Surface, ub: ((f64, f6
     let uvbox = |s: &Surface, x: ((f64, f64), (f64, f64))| {
         let ok = [x.0 .0, x.0 .1, x.1 .0, x.1 .1].iter().all(|v| v.is_finite()) && x.0 .1 > x.0 .0 && x.1 .1 > x.1 .0;
         let ((u0, u1), (v0, v1)) = if ok { x } else { s.param_box() };
-        UvBox::new((u0.max(-1e4), u1.min(1e4)), (v0.max(-1e4), v1.min(1e4)))
+        // Within the surface's own range where it has one (a B-spline evaluated past its ends
+        // is a continuation the face isn't on).
+        let ((pu0, pu1), (pv0, pv1)) = s.param_box();
+        let clamp = |(a, b): (f64, f64), (lo, hi): (f64, f64), periodic: bool| if periodic { (a.max(-1e4), b.min(1e4)) } else { (a.max(lo).max(-1e4), b.min(hi).min(1e4)) };
+        let (u0, u1) = clamp((u0, u1), (pu0, pu1), s.u_periodic());
+        let (v0, v1) = clamp((v0, v1), (pv0, pv1), s.v_periodic());
+        UvBox::new((u0, u1), (v0, v1))
     };
+    // One surface lying all on the other (a copy with another domain, or another form of it):
+    // no crossing to search for, only the shared region's boundary.
+    let tc = coincidence_tol(bb);
+    if super::ssi_coincident::lies_on(a, ua, b, tc) || super::ssi_coincident::lies_on(b, ub, a, tc) {
+        return Ssi { coincident: super::ssi_coincident::region_boundary(a, ua, b, ub, tc), ..Ssi::default() };
+    }
     let res = intersect(a, uvbox(a, ua), b, uvbox(b, ub), bb);
     let res_singular: Vec<P3> = res.singular.iter().map(|q| q.p).collect();
     let h = bb.diagonal().max(1e-9) / 96.0;
@@ -732,7 +769,12 @@ fn numeric(a: &Surface, ua: ((f64, f64), (f64, f64)), b: &Surface, ub: ((f64, f6
     }
     let curves: Vec<IntCurve> = polys.into_iter().filter(|(p, _)| p.len() >= 2).map(|(p, closed)| fit_curve(a, b, p, closed)).collect();
     let tangent: Vec<IntCurve> = tangents.into_iter().filter_map(|(p, closed)| fit_points(p, closed)).collect();
-    Ssi { curves, tangent, singular: res_singular }
+    let coincident = if res.coincident { super::ssi_coincident::region_boundary(a, ua, b, ub, coincidence_tol(bb)) } else { Vec::new() };
+    // (Where the surfaces coincide, touching points chain along the region's edge: its
+    // boundary stands for them.)
+    let tangent = if res.coincident { Vec::new() } else { tangent };
+    let points = res.points.iter().map(|q| q.p).collect();
+    Ssi { curves, tangent, singular: res_singular, coincident, points }
 }
 
 /// A cubic B-spline through points as they are (a tangent curve's touching points, which
@@ -804,20 +846,33 @@ fn join_polylines<T: Clone>(polys: &mut Vec<(Vec<T>, bool)>, tol: f64, at: impl 
                     continue;
                 }
                 let (Some(ai), Some(bi), Some(aj), Some(bj)) = (polys[i].0.first().map(&at), polys[i].0.last().map(&at), polys[j].0.first().map(&at), polys[j].0.last().map(&at)) else { continue };
+                // The direction a polyline leaves by at its end (or start): two pieces join only
+                // where they run on smoothly (not at a kink: two generators of a cone through
+                // its apex are two curves).
+                let out_dir = |p: &[T], end: bool| -> V3 {
+                    let n = p.len();
+                    if n < 2 {
+                        return V3::zeros();
+                    }
+                    let (x, y) = if end { (at(&p[n - 2]), at(&p[n - 1])) } else { (at(&p[1]), at(&p[0])) };
+                    (y - x).try_normalize(1e-300).unwrap_or_else(V3::zeros)
+                };
+                let smooth = |ei: bool, ej: bool| out_dir(&polys[i].0, ei).dot(&out_dir(&polys[j].0, ej)) < -0.85;
                 let mut pj = polys[j].0.clone();
                 let mut pi = polys[i].0.clone();
-                let joined = if (bi - aj).norm() < tol {
+                let (bi_aj, bi_bj, ai_bj, ai_aj) = ((bi - aj).norm() < tol && smooth(true, false), (bi - bj).norm() < tol && smooth(true, true), (ai - bj).norm() < tol && smooth(false, true), (ai - aj).norm() < tol && smooth(false, false));
+                let joined = if bi_aj {
                     pi.extend(pj.drain(1..));
                     true
-                } else if (bi - bj).norm() < tol {
+                } else if bi_bj {
                     pj.reverse();
                     pi.extend(pj.drain(1..));
                     true
-                } else if (ai - bj).norm() < tol {
+                } else if ai_bj {
                     pj.extend(pi.drain(1..));
                     pi = pj.clone();
                     true
-                } else if (ai - aj).norm() < tol {
+                } else if ai_aj {
                     pj.reverse();
                     pj.extend(pi.drain(1..));
                     pi = pj.clone();
@@ -1049,6 +1104,28 @@ pub fn curve_surface(c: &Curve, t0: f64, t1: f64, s: &Surface) -> Vec<f64> {
             }
         }
     }
+    // Stretches where the curve lies on the surface (three samples or more in a row within a
+    // hair of it: an edge along a face it is tangent to): the distance's noise there gives no
+    // crossings, only the stretch's ends do.
+    let scale = 1.0 + vals.iter().map(|(t, _)| c.point(*t).coords.norm()).fold(0.0, f64::max);
+    let on: Vec<bool> = vals.iter().map(|(_, v)| v.abs() <= 1e-8 * scale).collect();
+    let mut i = 0;
+    while i < on.len() {
+        if !on[i] {
+            i += 1;
+            continue;
+        }
+        let mut e = i;
+        while e + 1 < on.len() && on[e + 1] {
+            e += 1;
+        }
+        if e >= i + 2 {
+            let (lo, hi) = (vals[i].0, vals[e].0);
+            out.retain(|t| *t <= lo || *t >= hi);
+            out.extend([lo, hi]);
+        }
+        i = e + 1;
+    }
     out.sort_by(f64::total_cmp);
     out.dedup_by(|a, b| (*a - *b).abs() < 1e-9);
     out
@@ -1086,8 +1163,22 @@ fn touching_root(c: &Curve, s: &Surface, t: f64) -> f64 {
     if x.is_finite() && (x - t).abs() * speed < 1e-6 && fx <= ft + 1e-12 { x } else { t }
 }
 
-/// Points where two bounded curves meet (within `tol`): (t on a, t on b).
+/// Points where two bounded curves meet (within `tol`): (t on a, t on b). Lines and circles in
+/// closed form; when those find nothing (a near miss off the plane or past an end, or an
+/// overlap: its ends), and for other curves, by subdivision ([`super::ssi_cci`]).
 pub fn curve_curve(a: &Curve, a0: f64, a1: f64, b: &Curve, b0: f64, b1: f64, tol: f64) -> Vec<(f64, f64)> {
+    let closed_form = |c: &Curve| matches!(c, Curve::Line { .. } | Curve::Circle { .. });
+    if closed_form(a) && closed_form(b) {
+        let r = curve_curve_closed(a, a0, a1, b, b0, b1, tol);
+        if !r.is_empty() {
+            return r;
+        }
+    }
+    super::ssi_cci::curve_curve(a, a0, a1, b, b0, b1, tol)
+}
+
+/// [`curve_curve`] for lines and circles in closed form.
+fn curve_curve_closed(a: &Curve, a0: f64, a1: f64, b: &Curve, b0: f64, b1: f64, tol: f64) -> Vec<(f64, f64)> {
     let mut out = Vec::new();
     // Line–line in closed form.
     if let (Curve::Line { o: oa, d: da }, Curve::Line { o: ob, d: db }) = (a, b) {

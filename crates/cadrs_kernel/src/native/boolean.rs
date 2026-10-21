@@ -1863,22 +1863,39 @@ pub fn assemble_shells(b: &mut Body) -> Result<()> {
             outer.push((si, f64::NAN));
         }
     }
-    // With several closed shells, tell outer shells from voids by their volume's sign.
+    // With several closed shells, tell outer shells from voids: whether a shell's faces point
+    // out of what it encloses (rays leaving it along a face normal cross it an even number of
+    // times). Each is sized by its box, for picking the smallest one around a void. (Their
+    // volumes tell the same, but integrating faces cut by long intersection curves is slow.)
     if outer.len() > 1 {
-        let shift = b.bbox().center().coords;
-        let all: Vec<(usize, f64)> = outer
+        let polys: Vec<Vec<Vec<P2>>> = b.faces.iter().map(|f| classify::face_polygons(b, f)).collect();
+        let all: Vec<(usize, f64, bool)> = outer
             .iter()
             .map(|(si, _)| {
-                let vol: f64 = b.shells[*si].faces.iter().map(|&f| super::mass::face_integrals(b, &b.faces[f], &shift)[4]).sum();
-                (*si, vol)
+                let fs = &b.shells[*si].faces;
+                let mut bb = Bbox::empty();
+                for &f in fs {
+                    for l in &b.faces[f].loops {
+                        for c in l {
+                            let e = &b.edges[c.edge];
+                            bb.add(&e.point(e.t[0]));
+                            bb.add(&e.point(0.5 * (e.t[0] + e.t[1])));
+                        }
+                    }
+                }
+                let out = shell_points_out(b, fs, &polys).unwrap_or_else(|| {
+                    let shift = b.bbox().center().coords;
+                    fs.iter().map(|&f| super::mass::face_integrals(b, &b.faces[f], &shift)[4]).sum::<f64>() >= 0.0
+                });
+                (*si, bb.diagonal(), out)
             })
             .collect();
         outer.clear();
-        for (si, vol) in all {
-            if vol >= 0.0 {
-                outer.push((si, vol));
+        for (si, size, out) in all {
+            if out {
+                outer.push((si, size));
             } else {
-                voids.push((si, vol));
+                voids.push((si, size));
             }
         }
     }
@@ -1912,6 +1929,35 @@ pub fn assemble_shells(b: &mut Body) -> Result<()> {
         b.solids.push(Solid { shells: s });
     }
     Ok(())
+}
+
+/// Whether the faces of a closed shell point out of the region it encloses, by ray parity:
+/// from points inside a few of its faces, rays along the outward normal (and two tilts of it)
+/// cross the shell an even number of times when they do. None when the votes don't settle it.
+fn shell_points_out(b: &Body, faces: &[usize], polys: &[Vec<Vec<P2>>]) -> Option<bool> {
+    let size = b.bbox().diagonal().max(1e-9);
+    let (mut out, mut inward) = (0, 0);
+    for &f in faces.iter().take(3) {
+        let fc = &b.faces[f];
+        let Some(uv) = interior_of_polys(&polys[f]) else { continue };
+        let p = fc.surf.eval(uv.x, uv.y);
+        let n = fc.surf.normal(uv.x, uv.y) * if fc.sense { 1.0 } else { -1.0 };
+        let (t1, t2) = (any_perpendicular(&n), n.cross(&any_perpendicular(&n)));
+        for d in [n, (n + t1 * 0.3).normalize(), (n + t2 * 0.3).normalize()] {
+            let hits = classify::ray_hits(b, polys, &p, &d);
+            let k = hits.iter().filter(|(t, hf, _)| *t > 1e-7 * size && faces.contains(hf)).count();
+            if k % 2 == 0 {
+                out += 1;
+            } else {
+                inward += 1;
+            }
+        }
+    }
+    match out.cmp(&inward) {
+        std::cmp::Ordering::Greater => Some(true),
+        std::cmp::Ordering::Less => Some(false),
+        std::cmp::Ordering::Equal => None,
+    }
 }
 
 /// The kernel operation: the target combined with each tool in turn.

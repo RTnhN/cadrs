@@ -4,9 +4,6 @@
 
 # Coincident surfaces: SMLib returns the boundary of the shared region; ssi gives nothing (or less).
 ssi_01_ext_ext_coin
-ssi_38_coincident_planes
-ssi_39_coincident_cyls
-ssi_40_coincident_spheres
 ssi_41_coincident_spheres2
 ssi_42_coincident_torii
 
@@ -42,7 +39,6 @@ ssi_35_rev_rev_sing
 ssi_29_pln_rev2
 
 # A branch missed near the singular points (an SMLib sample 3e-3 from our curves).
-ssi_21_tor_purpen_tor_sing
 
 # The SMLib reader: "a loop doesn't close" (cone and torus faces with a pole).
 ssi_23_tor_sph_tan2
