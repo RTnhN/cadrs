@@ -17,6 +17,8 @@
 //! face lists, so code that walks `faces` and `edges` by index is unchanged: a wire body is a
 //! body with edges and no faces, a point body one with vertices only.
 
+#![warn(missing_docs)]
+
 use super::curve::Curve;
 use super::math::*;
 use super::surface::Surface;
@@ -25,18 +27,51 @@ use super::surface::Surface;
 /// ([`super::tol::CONFUSION`]).
 pub const TOL_MIN: f64 = super::tol::CONFUSION;
 
+/// How thorough [`Body::check_with`] is.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum CheckLevel {
+    /// What operations check their results with ([`Body::check`]), fast enough to run after
+    /// every step: references, coedges meeting end to start in 3D and in (u, v), p-curves on
+    /// their edges at 7 points, edge ends on their vertices, loops not crossing themselves (8
+    /// samples per coedge), each edge of a closed shell used once each way, the rules of each
+    /// body kind, and solids enclosing a positive volume.
+    #[default]
+    Fast,
+    /// Everything `Fast` checks, and (for tests, imports and debugging):
+    /// - each p-curve's largest distance from its edge searched for (dense samples, then a
+    ///   golden-section search about the worst), within the edge's tolerance;
+    /// - each p-curve's ends on the face at its vertices, and a degenerate edge's p-curve on
+    ///   its point, within the vertex's tolerance;
+    /// - a face's loops, as polylines within a fraction of [`super::tol::LOOP_GAP`] of their
+    ///   p-curves, not crossing themselves or each other in (u, v) by more than the edges'
+    ///   tolerance (exact orientation predicates decide the crossings);
+    /// - the first loop of a face its outer loop, counter-clockwise about the outward normal,
+    ///   the others holes inside it running the other way, no hole inside another;
+    /// - each shell edge-connected, each face in at most one shell, and each edge of a closed
+    ///   shell used once each way by that shell's faces;
+    /// - each solid's outer shell enclosing a positive volume and each void shell a negative
+    ///   one, with no vertex outside the outer shell (touching it is allowed).
+    Full,
+}
+
+/// A point where edges meet.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Vertex {
+    /// Where it is (mm).
     pub p: P3,
     /// The ball about `p` the vertex stands for: ends of its edges and its position on faces
     /// lie within it ([`TOL_MIN`] for exact geometry; larger for read or healed shapes).
     pub tol: f64,
 }
 
+/// A bounded piece of a curve between two vertices.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Edge {
+    /// The 3D curve it lies on.
     pub curve: Curve,
+    /// Its parameter range on `curve`, start then end (`t[0] < t[1]`).
     pub t: [f64; 2],
+    /// Its start and end vertices (indices into [`Body::verts`]; equal for a closed edge).
     pub v: [usize; 2],
     /// A point edge (a cone's apex, a sphere's pole): only its p-curves mean anything.
     pub degenerate: bool,
@@ -46,38 +81,52 @@ pub struct Edge {
 }
 
 impl Edge {
+    /// The point of its curve at `t`.
     pub fn point(&self, t: f64) -> P3 {
         self.curve.point(t)
     }
+    /// The middle of its parameter range.
     pub fn mid_t(&self) -> f64 {
         (self.t[0] + self.t[1]) * 0.5
     }
+    /// A non-degenerate edge that ends where it starts (a whole circle).
     pub fn closed(&self) -> bool {
         self.v[0] == self.v[1] && !self.degenerate
     }
 }
 
+/// A face's use of an edge in one of its loops.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Coedge {
+    /// The edge (an index into [`Body::edges`]).
     pub edge: usize,
+    /// Whether the loop runs along the edge (from `v[0]` to `v[1]`) or against it.
     pub fwd: bool,
     /// The p-curve (z = 0) in the face's (u, v), parametrized by the edge's t.
     pub pc: Curve,
 }
 
+/// A bounded piece of a surface.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Face {
+    /// The surface it lies on.
     pub surf: Surface,
+    /// Whether its outward normal is the surface's natural normal Su × Sv (else the opposite).
     pub sense: bool,
+    /// Its boundary: the outer loop first, then the holes, each a cycle of coedges.
     pub loops: Vec<Vec<Coedge>>,
 }
 
+/// Faces joined along their edges.
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct Shell {
+    /// Its faces (indices into [`Body::faces`]).
     pub faces: Vec<usize>,
+    /// Whether it encloses a volume (each of its edges used once each way).
     pub closed: bool,
 }
 
+/// A volume bounded by closed shells.
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct Solid {
     /// Outer shell first, then voids.
@@ -89,15 +138,23 @@ pub struct Solid {
 /// starts.
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct Wire {
+    /// Its edges in order, each with whether the chain runs along it.
     pub edges: Vec<(usize, bool)>,
 }
 
+/// A boundary representation: its entities in flat lists, referring to each other by index
+/// ([`Body::check_refs`] checks the indices, [`Body::check_with`] the rest).
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct Body {
+    /// The vertices.
     pub verts: Vec<Vertex>,
+    /// The edges (of faces, of wires, and degenerate ones at poles and apexes).
     pub edges: Vec<Edge>,
+    /// The faces.
     pub faces: Vec<Face>,
+    /// The shells: closed ones bound solids, open ones are sheets.
     pub shells: Vec<Shell>,
+    /// The solids.
     pub solids: Vec<Solid>,
     /// Wire bodies' edge chains (Phase 1b). Edges of faces are never in a wire.
     pub wires: Vec<Wire>,
@@ -113,16 +170,21 @@ pub fn co_range(e: &Edge, fwd: bool) -> (f64, f64) {
 }
 
 impl Body {
+    /// Adds a vertex of tolerance [`TOL_MIN`]; returns its index.
     pub fn add_vertex(&mut self, p: P3) -> usize {
         self.verts.push(Vertex { p, tol: TOL_MIN });
         self.verts.len() - 1
     }
 
+    /// Adds the edge of `curve` from `t0` at vertex `v0` to `t1` at `v1`, of tolerance
+    /// [`TOL_MIN`]; returns its index.
     pub fn add_edge(&mut self, curve: Curve, t0: f64, t1: f64, v0: usize, v1: usize) -> usize {
         self.edges.push(Edge { curve, t: [t0, t1], v: [v0, v1], degenerate: false, tol: TOL_MIN });
         self.edges.len() - 1
     }
 
+    /// Adds a degenerate edge at `at` (a pole or apex) at vertex `v` for the p-curve range
+    /// `t0..t1`; returns its index.
     pub fn add_degenerate(&mut self, at: P3, t0: f64, t1: f64, v: usize) -> usize {
         self.edges.push(Edge { curve: Curve::Line { o: at, d: V3::zeros() }, t: [t0, t1], v: [v, v], degenerate: true, tol: TOL_MIN });
         self.edges.len() - 1
@@ -134,6 +196,7 @@ impl Body {
         if c.fwd { e.v[0] } else { e.v[1] }
     }
 
+    /// The end vertex of a coedge.
     pub fn co_end(&self, c: &Coedge) -> usize {
         let e = &self.edges[c.edge];
         if c.fwd { e.v[1] } else { e.v[0] }
@@ -269,6 +332,7 @@ impl Body {
         bb
     }
 
+    /// Whether the body has a solid.
     pub fn is_solid(&self) -> bool {
         !self.solids.is_empty()
     }
@@ -350,9 +414,18 @@ impl Body {
         errs
     }
 
-    /// Checks the structural invariants; returns a list of problems (empty when valid). A body
-    /// whose indices or geometry are unsound ([`Body::check_refs`]) gets only those problems.
+    /// Checks the structural invariants at [`CheckLevel::Fast`], the level operations run on
+    /// their results; returns a list of problems (empty when valid). A body whose indices or
+    /// geometry are unsound ([`Body::check_refs`]) gets only those problems.
     pub fn check(&self) -> Vec<String> {
+        self.check_with(CheckLevel::Fast)
+    }
+
+    /// Checks the body at `level` ([`CheckLevel`] says what each level covers); returns the
+    /// problems found (empty when valid). [`CheckLevel::Full`] reports everything
+    /// [`CheckLevel::Fast`] does and more, never less.
+    pub fn check_with(&self, level: CheckLevel) -> Vec<String> {
+        let full = level == CheckLevel::Full;
         let refs = self.check_refs();
         if !refs.is_empty() {
             return refs;
@@ -380,18 +453,25 @@ impl Body {
                     if du * mu > gap_tol || dv * mv > gap_tol {
                         errs.push(format!("face {fi} loop {li}: p-curve gap after coedge {k}: ({:.3e}, {:.3e})", pa.x - pb.x, pa.y - pb.y));
                     }
-                    // p-curve on the edge in 3D.
+                    // p-curve on the edge in 3D, within the edge's tolerance (a read model's
+                    // p-curves stray by it): 7 points, or the largest gap searched for (Full).
                     if !ea.degenerate {
-                        for s in [0.1, 0.25, 0.4, 0.5, 0.6, 0.75, 0.9] {
-                            let t = ea.t[0] + (ea.t[1] - ea.t[0]) * s;
-                            let uv = a.pc.point(t);
-                            let q = f.surf.eval(uv.x, uv.y);
-                            let p = ea.point(t);
-                            // Within the edge's tolerance (a read model's p-curves stray by it).
-                            if (q - p).norm() > self.edges[a.edge].tol.max(super::tol::POINT) {
-                                errs.push(format!("face {fi} loop {li} coedge {k} (edge {}): p-curve off the edge by {:.3e}", a.edge, (q - p).norm()));
-                                break;
-                            }
+                        let allowed = ea.tol.max(super::tol::POINT);
+                        let gap = if full {
+                            pcurve_gap(ea, &a.pc, &f.surf)
+                        } else {
+                            [0.1, 0.25, 0.4, 0.5, 0.6, 0.75, 0.9]
+                                .into_iter()
+                                .map(|s| {
+                                    let t = ea.t[0] + (ea.t[1] - ea.t[0]) * s;
+                                    let uv = a.pc.point(t);
+                                    (f.surf.eval(uv.x, uv.y) - ea.point(t)).norm()
+                                })
+                                .find(|&d| d > allowed)
+                                .unwrap_or(0.0)
+                        };
+                        if gap > allowed {
+                            errs.push(format!("face {fi} loop {li} coedge {k} (edge {}): p-curve off the edge by {gap:.3e}", a.edge));
                         }
                     }
                 }
@@ -462,6 +542,13 @@ impl Body {
             }
         }
         errs.extend(self.check_kinds(&uses));
+        if full {
+            errs.extend(self.check_ends_on_faces());
+            errs.extend(self.check_shells(&uses));
+            for fi in 0..self.faces.len() {
+                errs.extend(self.check_face_domain(fi));
+            }
+        }
         // Solids enclose a positive volume (their faces point out).
         if errs.is_empty() {
             for si in 0..self.solids.len() {
@@ -471,6 +558,9 @@ impl Body {
                 if !(v > 0.0) {
                     errs.push(format!("solid {si} encloses a volume of {v:.3e} (its faces point in)"));
                 }
+            }
+            if full && errs.is_empty() {
+                errs.extend(self.check_voids());
             }
         }
         errs
@@ -757,6 +847,506 @@ impl Body {
     }
 }
 
+/// The checks [`CheckLevel::Full`] adds to [`CheckLevel::Fast`]. Each runs on a body whose
+/// references are sound ([`Body::check_refs`]).
+impl Body {
+    /// Each p-curve's ends on the face at the edge's vertices, and a degenerate edge's whole
+    /// p-curve on its point, within the vertex's tolerance (or the edge's, if larger).
+    fn check_ends_on_faces(&self) -> Vec<String> {
+        let mut errs = Vec::new();
+        for (fi, f) in self.faces.iter().enumerate() {
+            for (li, l) in f.loops.iter().enumerate() {
+                for (k, c) in l.iter().enumerate() {
+                    let e = &self.edges[c.edge];
+                    let on = |t: f64, v: usize| {
+                        let uv = c.pc.point(t);
+                        (f.surf.eval(uv.x, uv.y) - self.verts[v].p).norm()
+                    };
+                    let allowed = |v: usize| self.verts[v].tol.max(e.tol).max(super::tol::POINT);
+                    for end in 0..2 {
+                        let d = on(e.t[end], e.v[end]);
+                        if !(d <= allowed(e.v[end])) {
+                            errs.push(format!("face {fi} loop {li} coedge {k} (edge {}): p-curve end {end} lies {d:.3e} from vertex {}", c.edge, e.v[end]));
+                        }
+                    }
+                    if e.degenerate {
+                        let worst = (1..8).map(|i| on(e.t[0] + (e.t[1] - e.t[0]) * i as f64 / 8.0, e.v[0])).fold(0.0, f64::max);
+                        if !(worst <= allowed(e.v[0])) {
+                            errs.push(format!("face {fi} loop {li} coedge {k} (degenerate edge {}): p-curve strays {worst:.3e} from its point", c.edge));
+                        }
+                    }
+                }
+            }
+        }
+        errs
+    }
+
+    /// Shells: each face in one shell at most, each shell edge-connected, and each edge of a
+    /// closed shell used once each way by that shell's own faces (`uses` counts the uses by all
+    /// faces; an edge [`Body::check`] already reported there isn't reported again).
+    fn check_shells(&self, uses: &[(i32, i32)]) -> Vec<String> {
+        let mut errs = Vec::new();
+        let mut owner: Vec<Option<usize>> = vec![None; self.faces.len()];
+        for (si, s) in self.shells.iter().enumerate() {
+            if s.faces.is_empty() {
+                errs.push(format!("shell {si} has no faces"));
+                continue;
+            }
+            for &f in &s.faces {
+                match owner[f] {
+                    Some(o) if o == si => errs.push(format!("face {f} is listed twice in shell {si}")),
+                    Some(o) => errs.push(format!("face {f} is in shells {o} and {si}")),
+                    None => owner[f] = Some(si),
+                }
+            }
+            // Faces joined through shared edges (union–find over the shell's faces).
+            let mut parent: Vec<usize> = (0..s.faces.len()).collect();
+            fn root(p: &mut [usize], mut i: usize) -> usize {
+                while p[i] != i {
+                    p[i] = p[p[i]];
+                    i = p[i];
+                }
+                i
+            }
+            let mut by_edge: std::collections::HashMap<usize, usize> = std::collections::HashMap::new();
+            let mut shell_uses: std::collections::BTreeMap<usize, (i32, i32)> = std::collections::BTreeMap::new();
+            for (k, &fi) in s.faces.iter().enumerate() {
+                for c in self.faces[fi].loops.iter().flatten() {
+                    let u = shell_uses.entry(c.edge).or_default();
+                    if c.fwd {
+                        u.0 += 1;
+                    } else {
+                        u.1 += 1;
+                    }
+                    let first = *by_edge.entry(c.edge).or_insert(k);
+                    let (a, b) = (root(&mut parent, first), root(&mut parent, k));
+                    parent[a] = b;
+                }
+            }
+            let pieces = (0..parent.len()).filter(|&k| root(&mut parent, k) == k).count();
+            if pieces > 1 {
+                errs.push(format!("shell {si} isn't connected: its faces make {pieces} pieces that share no edge"));
+            }
+            if s.closed {
+                for (&e, &u) in &shell_uses {
+                    if u != (1, 1) && uses[e] == (1, 1) && !self.edges[e].degenerate {
+                        errs.push(format!("edge {e} is used {u:?} times by closed shell {si} (its other use is in another shell)"));
+                    }
+                }
+            }
+        }
+        errs
+    }
+
+    /// Face `fi`'s loops in (u, v): none crosses itself or another, the first is the outer one
+    /// (counter-clockwise about the outward normal), the others holes inside it running the
+    /// other way, and no hole lies inside another.
+    fn check_face_domain(&self, fi: usize) -> Vec<String> {
+        let f = &self.faces[fi];
+        let mut errs = Vec::new();
+        // The loops as polylines in (u, v) scaled to lengths on the surface, each point with its
+        // edge's tolerance plus how far its segment strays from the p-curve.
+        let mut ubox = (f64::INFINITY, f64::NEG_INFINITY);
+        let mut vbox = (f64::INFINITY, f64::NEG_INFINITY);
+        for c in f.loops.iter().flatten() {
+            let e = &self.edges[c.edge];
+            for s in [0.0, 0.5, 1.0] {
+                let q = c.pc.point(e.t[0] + (e.t[1] - e.t[0]) * s);
+                ubox = (ubox.0.min(q.x), ubox.1.max(q.x));
+                vbox = (vbox.0.min(q.y), vbox.1.max(q.y));
+            }
+        }
+        if !(ubox.0 <= ubox.1 && vbox.0 <= vbox.1) {
+            return errs;
+        }
+        let (su, sv) = uv_scale(&f.surf, ubox, vbox);
+        let flat = 0.5 * super::tol::LOOP_GAP;
+        let rings: Vec<Ring> = f
+            .loops
+            .iter()
+            .map(|l| {
+                let mut r = Ring::default();
+                for c in l {
+                    let e = &self.edges[c.edge];
+                    let (t0, t1) = co_range(e, c.fwd);
+                    let tol = e.tol.max(super::tol::LOOP_GAP);
+                    flatten(&c.pc, t0, t1, (su, sv), flat, tol, &mut r);
+                }
+                r
+            })
+            .collect();
+        let crossings = loop_crossings(&rings);
+        for &(a, b, p) in &crossings {
+            let (u, v) = (p.x / su, p.y / sv);
+            if a == b {
+                errs.push(format!("face {fi} loop {a} crosses itself in (u, v) near ({u:.6}, {v:.6})"));
+            } else {
+                errs.push(format!("face {fi}: loops {a} and {b} cross in (u, v) near ({u:.6}, {v:.6})"));
+            }
+        }
+        if !crossings.is_empty() {
+            return errs;
+        }
+        // Orientation and nesting (only meaningful for loops that don't cross).
+        let sign = if f.sense { 1.0 } else { -1.0 };
+        let areas: Vec<f64> = rings.iter().map(|r| r.area()).collect();
+        let significant = |i: usize| areas[i].abs() > rings[i].perimeter() * rings[i].tol_max();
+        if significant(0) && areas[0] * sign < 0.0 {
+            errs.push(format!("face {fi}: its outer loop runs clockwise about the outward normal (area {:.3e} in (u, v))", areas[0]));
+        }
+        // Whole periods a hole may be shifted by to lie in the outer loop's range.
+        let shifts = period_shifts(&f.surf, (su, sv));
+        for i in 1..rings.len() {
+            if significant(i) && areas[i] * sign > 0.0 {
+                errs.push(format!("face {fi} loop {i}: a hole running the same way as the outer loop"));
+            }
+            if rings[i].pts.len() >= 2 && rings[0].pts.len() >= 3 && !shifts.iter().any(|d| rings[0].holds(&rings[i], *d) != Some(false)) {
+                errs.push(format!("face {fi} loop {i}: a hole outside the outer loop"));
+            }
+            for j in 1..rings.len() {
+                if i != j && rings[j].pts.len() >= 3 && rings[j].bbox_holds(&rings[i]) && rings[j].holds(&rings[i], V2::zeros()) == Some(true) {
+                    errs.push(format!("face {fi}: hole {i} lies inside hole {j}"));
+                }
+            }
+        }
+        errs
+    }
+
+    /// Each solid of several shells: the outer shell encloses a positive volume, each void a
+    /// negative one (its faces point into the void), and no vertex of a void lies outside the
+    /// outer shell (on it is allowed).
+    fn check_voids(&self) -> Vec<String> {
+        let mut errs = Vec::new();
+        for (si, s) in self.solids.iter().enumerate() {
+            let [outer, voids @ ..] = s.shells.as_slice() else { continue };
+            if voids.is_empty() {
+                continue;
+            }
+            let shell = |sh: usize| super::kernel::subset(self, &self.shells[sh].faces, true);
+            let out = shell(*outer);
+            let v = super::mass::body_mass(&out).volume;
+            if !(v > 0.0) {
+                errs.push(format!("solid {si}: its outer shell {outer} encloses a volume of {v:.3e}"));
+                continue;
+            }
+            let polys: Vec<Vec<Vec<P2>>> = out.faces.iter().map(|f| super::classify::face_polygons(&out, f)).collect();
+            for &sh in voids {
+                let void = shell(sh);
+                let v = super::mass::body_mass(&void).volume;
+                if !(v < 0.0) {
+                    errs.push(format!("solid {si}: void shell {sh} encloses a volume of {v:.3e} (its faces must point into the void)"));
+                }
+                // A void may touch its outer shell (its vertices on it); none may lie outside.
+                let outside = void.verts.iter().any(|v| super::classify::classify_point(&out, &polys, &v.p, v.tol.max(super::tol::POINT)) == crate::PointClass::Outside);
+                if outside {
+                    errs.push(format!("solid {si}: void shell {sh} lies outside the outer shell {outer}"));
+                }
+            }
+        }
+        errs
+    }
+}
+
+/// The largest distance between edge `e`'s curve and its p-curve `pc` on `surf` (infinite if
+/// either can't be evaluated): 33 samples, then a golden-section search about the worst.
+fn pcurve_gap(e: &Edge, pc: &Curve, surf: &Surface) -> f64 {
+    const N: usize = 32;
+    let gap = |t: f64| {
+        let uv = pc.point(t);
+        let d = (surf.eval(uv.x, uv.y) - e.point(t)).norm();
+        if d.is_nan() { f64::INFINITY } else { d }
+    };
+    let at = |i: usize| e.t[0] + (e.t[1] - e.t[0]) * i as f64 / N as f64;
+    let (mut worst, mut wi) = (0.0, 0);
+    for i in 0..=N {
+        let d = gap(at(i));
+        if d > worst {
+            (worst, wi) = (d, i);
+        }
+    }
+    if worst.is_infinite() {
+        return worst;
+    }
+    // The gap is smooth along the edge: its largest value lies within a sample of the worst.
+    let (mut a, mut b) = (at(wi.saturating_sub(1)), at((wi + 1).min(N)));
+    let r = 0.5 * (5f64.sqrt() - 1.0);
+    let (mut x1, mut x2) = (b - r * (b - a), a + r * (b - a));
+    let (mut g1, mut g2) = (gap(x1), gap(x2));
+    for _ in 0..40 {
+        if g1 > g2 {
+            (b, x2, g2) = (x2, x1, g1);
+            x1 = b - r * (b - a);
+            g1 = gap(x1);
+        } else {
+            (a, x1, g1) = (x1, x2, g2);
+            x2 = a + r * (b - a);
+            g2 = gap(x2);
+        }
+    }
+    worst.max(g1).max(g2)
+}
+
+/// The lengths on `surf` of a unit step in u and in v over the box `u` × `v`: the surface's own
+/// metric for planes and quadrics, else the median of central differences on a 5 × 5 grid.
+fn uv_scale(surf: &Surface, u: (f64, f64), v: (f64, f64)) -> (f64, f64) {
+    if matches!(surf, Surface::Plane { .. } | Surface::Cylinder { .. } | Surface::Cone { .. } | Surface::Sphere { .. } | Surface::Torus { .. }) {
+        return surf.metric();
+    }
+    let (hu, hv) = (((u.1 - u.0) * 1e-4).max(1e-9), ((v.1 - v.0) * 1e-4).max(1e-9));
+    let (mut du, mut dv) = (Vec::with_capacity(25), Vec::with_capacity(25));
+    for i in 0..5 {
+        for j in 0..5 {
+            let x = u.0 + (u.1 - u.0) * (i as f64 + 0.5) / 5.0;
+            let y = v.0 + (v.1 - v.0) * (j as f64 + 0.5) / 5.0;
+            du.push((surf.eval(x + hu, y) - surf.eval(x - hu, y)).norm() / (2.0 * hu));
+            dv.push((surf.eval(x, y + hv) - surf.eval(x, y - hv)).norm() / (2.0 * hv));
+        }
+    }
+    let median = |mut d: Vec<f64>| {
+        d.sort_by(f64::total_cmp);
+        let m = d[d.len() / 2];
+        if m.is_finite() && m > 0.0 { m } else { 1.0 }
+    };
+    (median(du), median(dv))
+}
+
+/// The shifts by whole periods (scaled as the rings are) worth trying to bring a hole into the
+/// outer loop's range of a periodic surface: none first.
+fn period_shifts(surf: &Surface, (su, sv): (f64, f64)) -> Vec<V2> {
+    let periodic = |p: bool| if p && !matches!(surf, Surface::Extrusion { .. }) { vec![0.0, -TAU, TAU] } else { vec![0.0] };
+    let (us, vs) = (periodic(surf.u_periodic()), periodic(surf.v_periodic()));
+    us.iter().flat_map(|&a| vs.iter().map(move |&b| V2::new(a * su, b * sv))).collect()
+}
+
+/// A loop as a closed polyline in scaled (u, v): `pts[i]` starts segment i (to `pts[i + 1]`,
+/// the last back to the first), which may stray `dev[i]` from the p-curves and whose edge has
+/// tolerance `tol[i]`.
+#[derive(Default)]
+struct Ring {
+    pts: Vec<P2>,
+    tol: Vec<f64>,
+}
+
+impl Ring {
+    fn seg(&self, i: usize) -> (P2, P2) {
+        (self.pts[i], self.pts[(i + 1) % self.pts.len()])
+    }
+
+    /// Twice-halved shoelace: the signed area (counter-clockwise positive).
+    fn area(&self) -> f64 {
+        (0..self.pts.len()).map(|i| {
+            let (a, b) = self.seg(i);
+            a.x * b.y - b.x * a.y
+        })
+        .sum::<f64>()
+            * 0.5
+    }
+
+    fn perimeter(&self) -> f64 {
+        (0..self.pts.len()).map(|i| {
+            let (a, b) = self.seg(i);
+            (b - a).norm()
+        })
+        .sum()
+    }
+
+    fn tol_max(&self) -> f64 {
+        self.tol.iter().copied().fold(0.0, f64::max)
+    }
+
+    fn bbox(&self) -> (P2, P2) {
+        let mut lo = P2::new(f64::INFINITY, f64::INFINITY);
+        let mut hi = P2::new(f64::NEG_INFINITY, f64::NEG_INFINITY);
+        for p in &self.pts {
+            lo = P2::new(lo.x.min(p.x), lo.y.min(p.y));
+            hi = P2::new(hi.x.max(p.x), hi.y.max(p.y));
+        }
+        (lo, hi)
+    }
+
+    /// Whether `o`'s box lies within this ring's box.
+    fn bbox_holds(&self, o: &Ring) -> bool {
+        let ((a0, a1), (b0, b1)) = (self.bbox(), o.bbox());
+        a0.x <= b0.x && a0.y <= b0.y && b1.x <= a1.x && b1.y <= a1.y
+    }
+
+    /// Whether ring `o`, moved by `d`, lies inside this one, judged on up to 16 of its points
+    /// clear of this ring's boundary: `None` when every point tried lies on the boundary.
+    fn holds(&self, o: &Ring, d: V2) -> Option<bool> {
+        let step = o.pts.len().div_ceil(16).max(1);
+        let tol = self.tol_max().max(o.tol_max());
+        let mut verdict = None;
+        for p in o.pts.iter().step_by(step).map(|p| p + d) {
+            let near = (0..self.pts.len()).any(|i| {
+                let (a, b) = self.seg(i);
+                seg_dist2(&p, &a, &b) <= tol
+            });
+            if near {
+                continue;
+            }
+            if !point_in_polygon(&p, &self.pts) {
+                return Some(false);
+            }
+            verdict = Some(true);
+        }
+        verdict
+    }
+}
+
+/// Appends coedge p-curve `pc` from `t0` towards `t1` to `r` (its end is the next coedge's
+/// start): scaled by `scale`, split until each segment lies within `flat` of the curve (lines
+/// whole; at most 4 · 2¹⁰ segments, a segment left coarser carrying how far it strays).
+fn flatten(pc: &Curve, t0: f64, t1: f64, scale: (f64, f64), flat: f64, tol: f64, r: &mut Ring) {
+    let at = |t: f64| {
+        let q = pc.point(t);
+        P2::new(q.x * scale.0, q.y * scale.1)
+    };
+    if matches!(pc, Curve::Line { .. }) {
+        r.pts.push(at(t0));
+        r.tol.push(tol);
+        return;
+    }
+    #[allow(clippy::too_many_arguments, reason = "a recursion's state")]
+    fn split(at: &dyn Fn(f64) -> P2, ta: f64, tb: f64, pa: P2, pb: P2, depth: u32, flat: f64, tol: f64, r: &mut Ring) {
+        let stray = [0.25, 0.5, 0.75].into_iter().map(|s| seg_dist2(&at(ta + (tb - ta) * s), &pa, &pb)).fold(0.0, f64::max);
+        if stray > flat && depth < 10 {
+            let tm = 0.5 * (ta + tb);
+            let pm = at(tm);
+            split(at, ta, tm, pa, pm, depth + 1, flat, tol, r);
+            split(at, tm, tb, pm, pb, depth + 1, flat, tol, r);
+        } else {
+            r.pts.push(pa);
+            r.tol.push(tol + stray.max(flat));
+        }
+    }
+    const N0: usize = 4;
+    for i in 0..N0 {
+        let (ta, tb) = (t0 + (t1 - t0) * i as f64 / N0 as f64, t0 + (t1 - t0) * (i + 1) as f64 / N0 as f64);
+        split(&at, ta, tb, at(ta), at(tb), 0, flat, tol, r);
+    }
+}
+
+/// The pairs of loops (a loop with itself for a self-crossing) whose polylines cross properly
+/// by more than their tolerance, each pair once with a point near the crossing. Neighbouring
+/// segments of a loop are never compared. Segments are binned in a grid of about √n × √n cells
+/// over their box, and only segments sharing a cell are compared (a dense p-curve's segments
+/// would make a sweep along one axis quadratic).
+fn loop_crossings(rings: &[Ring]) -> Vec<(usize, usize, P2)> {
+    struct Seg {
+        a: P2,
+        b: P2,
+        lp: usize,
+        i: usize,
+        tol: f64,
+        lo: P2,
+        hi: P2,
+    }
+    let mut segs: Vec<Seg> = Vec::new();
+    for (lp, r) in rings.iter().enumerate() {
+        if r.pts.len() < 2 {
+            continue;
+        }
+        for i in 0..r.pts.len() {
+            let (a, b) = r.seg(i);
+            segs.push(Seg { a, b, lp, i, tol: r.tol[i], lo: P2::new(a.x.min(b.x), a.y.min(b.y)), hi: P2::new(a.x.max(b.x), a.y.max(b.y)) });
+        }
+    }
+    let mut found: Vec<(usize, usize, P2)> = Vec::new();
+    if segs.len() < 2 {
+        return found;
+    }
+    let (mut lo, mut hi) = (segs[0].lo, segs[0].hi);
+    for s in &segs {
+        lo = P2::new(lo.x.min(s.lo.x), lo.y.min(s.lo.y));
+        hi = P2::new(hi.x.max(s.hi.x), hi.y.max(s.hi.y));
+    }
+    let g = ((segs.len() as f64).sqrt().ceil() as usize).clamp(1, 512);
+    let (w, h) = ((hi.x - lo.x).max(1e-300), (hi.y - lo.y).max(1e-300));
+    let cell = |x: f64, y: f64| (((x - lo.x) / w * g as f64) as usize).min(g - 1) + g * (((y - lo.y) / h * g as f64) as usize).min(g - 1);
+    let mut bins: Vec<Vec<usize>> = vec![Vec::new(); g * g];
+    for (k, s) in segs.iter().enumerate() {
+        let (c0, c1) = (cell(s.lo.x, s.lo.y), cell(s.hi.x, s.hi.y));
+        for cy in c0 / g..=c1 / g {
+            for cx in c0 % g..=c1 % g {
+                bins[cx + g * cy].push(k);
+            }
+        }
+    }
+    for bin in &bins {
+        for (n, &j) in bin.iter().enumerate() {
+            let sj = &segs[j];
+            for &k in &bin[..n] {
+                let sk = &segs[k];
+                let (pair_a, pair_b) = (sk.lp.min(sj.lp), sk.lp.max(sj.lp));
+                if sk.hi.x < sj.lo.x || sj.hi.x < sk.lo.x || sk.hi.y < sj.lo.y || sj.hi.y < sk.lo.y || found.iter().any(|&(a, b, _)| (a, b) == (pair_a, pair_b)) {
+                    continue;
+                }
+                if sk.lp == sj.lp {
+                    let len = rings[sk.lp].pts.len();
+                    if sk.i.abs_diff(sj.i) <= 1 || sk.i.abs_diff(sj.i) == len - 1 {
+                        continue;
+                    }
+                }
+                if crosses(&sk.a, &sk.b, &sj.a, &sj.b, sk.tol.max(sj.tol)) {
+                    found.push((pair_a, pair_b, sj.a));
+                }
+            }
+        }
+    }
+    found
+}
+
+/// Whether segments a–b and c–d cross properly, each pair of ends lying more than `tol` to
+/// either side of the other segment's line. The sides come from [`orient2d`]'s exact sign.
+fn crosses(a: &P2, b: &P2, c: &P2, d: &P2, tol: f64) -> bool {
+    let (o1, o2, o3, o4) = (orient2d(a, b, c), orient2d(a, b, d), orient2d(c, d, a), orient2d(c, d, b));
+    if o1 * o2 >= 0 || o3 * o4 >= 0 {
+        return false;
+    }
+    let side = |p: &P2, q: &P2, r: &P2| ((q.x - p.x) * (r.y - p.y) - (q.y - p.y) * (r.x - p.x)).abs() / (q - p).norm().max(1e-300);
+    side(a, b, c) > tol && side(a, b, d) > tol && side(c, d, a) > tol && side(c, d, b) > tol
+}
+
+/// The exact sign of the orientation of `a`, `b`, `c` (+1 counter-clockwise, −1 clockwise, 0
+/// collinear): Shewchuk's filtered `orient2d`, falling back to the determinant summed exactly
+/// as an expansion of error-free products and sums when the filter can't decide.
+fn orient2d(a: &P2, b: &P2, c: &P2) -> i32 {
+    let l = (a.x - c.x) * (b.y - c.y);
+    let r = (a.y - c.y) * (b.x - c.x);
+    let det = l - r;
+    // Shewchuk's ccwerrboundA = (3 + 16ε)ε with ε = 2⁻⁵³.
+    let bound = (3.0 + 16.0 * f64::EPSILON / 2.0) * (f64::EPSILON / 2.0) * (l.abs() + r.abs());
+    if det.abs() > bound {
+        return if det > 0.0 { 1 } else { -1 };
+    }
+    // (ax − cx)(by − cy) − (ay − cy)(bx − cx) expanded into six products, each split exactly
+    // into a product and its rounding error, summed into a non-overlapping expansion whose
+    // largest (last non-zero) component carries the sign.
+    let terms = [(a.x, b.y), (-a.x, c.y), (-c.x, b.y), (-a.y, b.x), (a.y, c.x), (b.x, c.y)];
+    let mut e: Vec<f64> = Vec::with_capacity(24);
+    for (x, y) in terms {
+        let p = x * y;
+        let err = x.mul_add(y, -p);
+        for v in [err, p] {
+            // Grow the expansion by v (Shewchuk's GROW-EXPANSION).
+            let mut q = v;
+            for h in e.iter_mut() {
+                let s = q + *h;
+                let bv = s - q;
+                let low = (q - (s - bv)) + (*h - bv);
+                *h = low;
+                q = s;
+            }
+            e.push(q);
+        }
+    }
+    match e.iter().rev().find(|&&x| x != 0.0) {
+        Some(&x) if x > 0.0 => 1,
+        Some(_) => -1,
+        None => 0,
+    }
+}
+
 /// Two non-neighbouring segments of a closed polygon that cross (proper crossings only:
 /// touching at a point is allowed, as a loop through a pole or along a seam does).
 fn self_crossing(p: &[P2]) -> Option<(usize, usize)> {
@@ -789,6 +1379,59 @@ fn self_crossing(p: &[P2]) -> Option<(usize, usize)> {
         }
     }
     None
+}
+
+/// The exact orientation predicate of the full check.
+#[cfg(test)]
+mod predicate_tests {
+    use super::{crosses, orient2d, P2};
+
+    /// The exact sign of the orientation determinant of integer points (as i128).
+    fn exact(a: (i64, i64), b: (i64, i64), c: (i64, i64)) -> i32 {
+        let d = (a.0 as i128 - c.0 as i128) * (b.1 as i128 - c.1 as i128) - (a.1 as i128 - c.1 as i128) * (b.0 as i128 - c.0 as i128);
+        d.signum() as i32
+    }
+
+    #[test]
+    fn orient2d_is_exact_near_collinear() {
+        // Points of up to 2⁵² (exact doubles, whose products aren't) far apart and nearly on
+        // one line, a few units off it: the plain determinant rounds; the predicate must not.
+        let mut s: u64 = 0x9e37_79b9_7f4a_7c15;
+        let mut next = || {
+            s ^= s << 13;
+            s ^= s >> 7;
+            s ^= s << 17;
+            s
+        };
+        let mut wrong_naive = 0;
+        for _ in 0..20000 {
+            let big = 1u64 << 50;
+            let a = ((next() % big) as i64, (next() % big) as i64);
+            let (dx, dy) = ((next() % 1000) as i64 + 1, (next() % 1000) as i64 + 1);
+            let k = (next() % (1 << 39)) as i64 + 1;
+            let b = (a.0 + dx * k, a.1 + dy * k);
+            let c = (a.0 + dx * 2 * k + (next() % 7) as i64 - 3, a.1 + dy * 2 * k + (next() % 7) as i64 - 3);
+            let f = |q: (i64, i64)| P2::new(q.0 as f64, q.1 as f64);
+            let want = exact(a, b, c);
+            assert_eq!(orient2d(&f(a), &f(b), &f(c)), want, "{a:?} {b:?} {c:?}");
+            let naive = (f(a).x - f(c).x) * (f(b).y - f(c).y) - (f(a).y - f(c).y) * (f(b).x - f(c).x);
+            if (naive > 0.0) as i32 - ((naive < 0.0) as i32) != want {
+                wrong_naive += 1;
+            }
+        }
+        assert!(wrong_naive > 0, "the cases never needed the exact fallback");
+        assert_eq!(orient2d(&P2::new(0.0, 0.0), &P2::new(1.0, 1.0), &P2::new(2.0, 2.0)), 0);
+    }
+
+    #[test]
+    fn crossings_at_tolerance() {
+        let p = P2::new;
+        // An X crosses; a touch at an end, or a crossing shallower than the tolerance, doesn't.
+        assert!(crosses(&p(0.0, 0.0), &p(2.0, 2.0), &p(0.0, 2.0), &p(2.0, 0.0), 1e-6));
+        assert!(!crosses(&p(0.0, 0.0), &p(2.0, 0.0), &p(1.0, 0.0), &p(1.0, 1.0), 1e-6));
+        assert!(!crosses(&p(0.0, 0.0), &p(2.0, 0.0), &p(1.0, -1e-7), &p(1.0, 1.0), 1e-6));
+        assert!(crosses(&p(0.0, 0.0), &p(2.0, 0.0), &p(1.0, -1e-5), &p(1.0, 1.0), 1e-6));
+    }
 }
 
 /// Body kinds (Phase 1b): each kind's `check`, mass properties, tessellation, the body format
