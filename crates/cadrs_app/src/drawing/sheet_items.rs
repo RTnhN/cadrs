@@ -13,6 +13,7 @@
 //!   ends, spline points, image corners) reshape it; an image's corners keep its aspect ratio.
 //!   Delete removes the selection. Every change is one undoable drawing edit.
 
+use cadrs_ui::ShortcutKey;
 use std::collections::HashMap;
 use std::path::PathBuf;
 
@@ -560,7 +561,7 @@ fn items_keys(
         if k.state != bevy::input::ButtonState::Pressed || typing || !q_dialogs.is_empty() || !q_menus.is_empty() || ctrl {
             continue;
         }
-        match k.key_code {
+        match k.shortcut_code() {
             KeyCode::Escape | KeyCode::Enter | KeyCode::NumpadEnter if !ui.spline.is_empty() => {
                 commands.queue(finish_spline);
             }

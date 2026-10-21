@@ -27,6 +27,7 @@
 //!
 //! Stand-in icon (see `docs/icon-migration.md`): Derived is `file-import`.
 
+use cadrs_ui::ShortcutKey;
 use std::collections::HashSet;
 
 use bevy::input::ButtonState;
@@ -405,7 +406,7 @@ fn derived_keys(mut keys: MessageReader<KeyboardInput>, session: Option<Res<Deri
         if k.state != ButtonState::Pressed || !q_dialogs.is_empty() || q_focus.get().is_some() {
             continue;
         }
-        match k.key_code {
+        match k.shortcut_code() {
             KeyCode::Enter | KeyCode::NumpadEnter => commands.queue(accept),
             KeyCode::Escape => commands.queue(cancel),
             _ => {}

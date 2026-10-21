@@ -24,6 +24,8 @@
 use std::collections::HashMap;
 
 use bevy::asset::RenderAssetUsages;
+use bevy::input::ButtonState;
+use bevy::input::keyboard::KeyboardInput;
 use bevy::input_focus::InputFocus;
 use bevy::prelude::*;
 use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
@@ -40,7 +42,7 @@ use cadrs_ui::input::{TextInputField, TextInputPlaceholder};
 use cadrs_ui::menu::ContextMenuAnchor;
 use cadrs_ui::prelude::*;
 use cadrs_ui::icon::icon_in;
-use cadrs_ui::{Button, CollapsibleToggled, Icon};
+use cadrs_ui::{Button, CollapsibleToggled, Icon, ShortcutKey};
 
 use crate::{ActiveDocument, AppClock, AppState, DocumentStore, UserProfile};
 
@@ -1629,6 +1631,7 @@ fn sync_disclosures(
 
 #[allow(clippy::too_many_arguments)]
 fn landing_shortcuts(
+    mut keys_in: MessageReader<KeyboardInput>,
     keys: Res<ButtonInput<KeyCode>>,
     focus: Res<InputFocus>,
     q_fields: Query<(), With<TextInputField>>,
@@ -1643,6 +1646,7 @@ fn landing_shortcuts(
     if focus.get().is_some_and(|f| q_fields.contains(f)) || !q_dialogs.is_empty() || !q_menus.is_empty() {
         // An Enter that a dialog, field or menu took in this frame doesn't open the selection.
         *busy = 2;
+        keys_in.clear();
         return;
     }
     let was_busy = *busy > 0;
@@ -1653,17 +1657,20 @@ fn landing_shortcuts(
         && let Some(pick) = details_state.pick
     {
         commands.queue(move |world: &mut World| details::open_pick(world, pick));
+        keys_in.clear();
         return;
     }
     let ctrl = keys.any_pressed([KeyCode::ControlLeft, KeyCode::ControlRight]);
     let shift = keys.any_pressed([KeyCode::ShiftLeft, KeyCode::ShiftRight]);
-    let changed = if ctrl && keys.just_pressed(KeyCode::KeyZ) {
+    let pressed: Vec<KeyCode> =
+        keys_in.read().filter(|k| k.state == ButtonState::Pressed).map(|k| k.shortcut_code()).collect();
+    let changed = if ctrl && pressed.contains(&KeyCode::KeyZ) {
         if shift {
             lib.redo(&store.0)
         } else {
             lib.undo(&store.0)
         }
-    } else if ctrl && keys.just_pressed(KeyCode::KeyY) {
+    } else if ctrl && pressed.contains(&KeyCode::KeyY) {
         lib.redo(&store.0)
     } else {
         false

@@ -21,6 +21,7 @@
 //!
 //! Both change the sketch only through [`cadrs_core::commands::EditSketch`] commands.
 
+use cadrs_ui::ShortcutKey;
 use std::collections::VecDeque;
 
 use bevy::input::ButtonState;
@@ -334,7 +335,7 @@ fn edit_tools_keys(
     for k in keys_in.read() {
         if k.state != ButtonState::Pressed || k.repeat || typing || flow.consumed(&frame) { continue; }
         if tool.tool != SketchTool::Offset || off.chain.is_empty() { continue; }
-        match k.key_code {
+        match k.shortcut_code() {
             KeyCode::Escape => { off.clear(); selection.0.clear(); flow.consumed_frame = Some(frame.0); }
             KeyCode::Enter | KeyCode::NumpadEnter => {
                 if let (Some(sketch), Some(map), Some(session)) = (session_sketch(session.as_deref(), doc.as_deref()), screen.active, session.as_deref()) {

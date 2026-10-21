@@ -19,6 +19,7 @@
 //!   it; aligned views slide along their parent's fold line and children follow their parent.
 //!   Delete removes the selected views.
 
+use cadrs_ui::ShortcutKey;
 use std::collections::HashSet;
 
 use bevy::input::keyboard::KeyboardInput;
@@ -1325,7 +1326,7 @@ fn view_keys(
         if k.state != bevy::input::ButtonState::Pressed || typing || !q_dialogs.is_empty() || !q_menus.is_empty() {
             continue;
         }
-        match k.key_code {
+        match k.shortcut_code() {
             KeyCode::Enter | KeyCode::NumpadEnter if matches!(ui.tool, ViewTool::Boundary { view: Some(_), .. }) => {
                 commands.queue(|w: &mut World| {
                     super::view_kind_tools::enter(w);

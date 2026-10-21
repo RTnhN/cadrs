@@ -15,6 +15,7 @@
 //! - Measuring is a view: nothing in the document changes, and nothing is undone.
 //! - Not while a sketch or a feature dialog is open (the selection belongs to it then).
 
+use cadrs_ui::ShortcutKey;
 use bevy::input::ButtonState;
 use bevy::input::keyboard::KeyboardInput;
 use bevy::input_focus::InputFocus;
@@ -349,7 +350,7 @@ fn measure_keys(
         if k.state != ButtonState::Pressed || typing || !q_dialogs.is_empty() || !q_menus.is_empty() || !viewing {
             continue;
         }
-        match k.key_code {
+        match k.shortcut_code() {
             KeyCode::BracketLeft if !modifier => commands.queue(toggle_panel),
             KeyCode::Escape if panel.is_some() => commands.remove_resource::<MeasurePanel>(),
             _ => {}

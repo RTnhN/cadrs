@@ -52,6 +52,7 @@ pub mod segmented;
 pub mod selection_box;
 pub mod selection_field;
 pub mod selection_list;
+pub mod shortcut_key;
 pub mod menu;
 pub mod name_popup;
 pub mod path_field;
@@ -78,6 +79,7 @@ use bevy::prelude::*;
 
 pub use action_row::{ActionRow, ActionRowAction};
 pub use anim::{FadeIn, FinishAnimations};
+pub use shortcut_key::ShortcutKey;
 pub use float_bar::FloatBar;
 pub use segmented::{Segmented, SegmentedSelect, SegmentedState};
 pub use floating_panel::{FloatingPanel, FloatingPanelBody, FloatingPanelClose, panel_caption};

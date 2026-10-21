@@ -14,6 +14,7 @@
 //! harness alike). The viewport only reacts while the pointer is over the `viewport-area` UI
 //! node, so panels and menus on top of it keep their clicks.
 
+use cadrs_ui::ShortcutKey;
 use std::collections::HashMap;
 
 use bevy::camera::ScalingMode;
@@ -1421,7 +1422,7 @@ fn view_shortcuts(
             continue;
         }
         // Arrows: rotate (15°, Shift 90°, Ctrl 5°) or, with Ctrl+Shift, pan.
-        let arrow = match k.key_code {
+        let arrow = match k.shortcut_code() {
             KeyCode::ArrowLeft => Some(Vec2::new(-1.0, 0.0)),
             KeyCode::ArrowRight => Some(Vec2::new(1.0, 0.0)),
             KeyCode::ArrowUp => Some(Vec2::new(0.0, -1.0)),
@@ -1444,7 +1445,7 @@ fn view_shortcuts(
             continue;
         }
         let standard = if shift {
-            match k.key_code {
+            match k.shortcut_code() {
                 KeyCode::Digit1 => Some(StandardView::Front),
                 KeyCode::Digit2 => Some(StandardView::Back),
                 KeyCode::Digit3 => Some(StandardView::Left),
@@ -1466,7 +1467,7 @@ fn view_shortcuts(
             view.animate_to(to);
             continue;
         }
-        match k.key_code {
+        match k.shortcut_code() {
             // A board's layout edited in the view: normal to the board, from the top (N) or the
             // bottom (Shift+N).
             KeyCode::KeyN if *kind == ActiveKind::PartStudio && let Some(h) = eda2d.plane() => {

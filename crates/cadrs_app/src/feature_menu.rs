@@ -13,6 +13,7 @@
 //!   neither yet, so its entries are shown disabled.
 //! - **Edit healthy moment of …**: shown disabled until Repair (P3D.4).
 
+use cadrs_ui::ShortcutKey;
 use std::collections::HashSet;
 
 use bevy::input::ButtonState;
@@ -75,7 +76,7 @@ fn paste_shortcut(
     let ctrl = keys.any_pressed([KeyCode::ControlLeft, KeyCode::ControlRight]);
     let typing = focus.get().is_some_and(|e| q_fields.contains(e));
     for k in keys_in.read() {
-        if k.state != ButtonState::Pressed || !ctrl || typing || k.key_code != KeyCode::KeyV {
+        if k.state != ButtonState::Pressed || !ctrl || typing || k.shortcut_code() != KeyCode::KeyV {
             continue;
         }
         let (Some(s), Some((_, sketch))) = (session.as_ref(), clipboard.0.as_ref()) else { continue };

@@ -14,6 +14,7 @@
 //! - [`Slider`]: a thin track with a round knob (Onshape's detail slider). Dragging it, or
 //!   pressing on the track, moves the knob and triggers [`SliderChange`].
 
+use crate::shortcut_key::ShortcutKey;
 use std::borrow::Cow;
 
 use bevy::ecs::spawn::SpawnWith;
@@ -579,7 +580,7 @@ fn on_number_key(
     if ev.input.state != ButtonState::Pressed || text.is_composing() {
         return;
     }
-    match ev.input.key_code {
+    match ev.input.shortcut_code() {
         KeyCode::Enter | KeyCode::NumpadEnter => {
             ev.propagate(false);
             commands.trigger(NumberFieldCommit {

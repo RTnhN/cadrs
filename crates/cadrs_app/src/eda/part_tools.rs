@@ -14,6 +14,7 @@
 //! The component's symbol and footprint are its studio's project library: a symbol without a
 //! default footprint gets the component's own.
 
+use cadrs_ui::ShortcutKey;
 use bevy::input::ButtonState;
 use bevy::input::keyboard::KeyboardInput;
 use bevy::prelude::*;
@@ -389,7 +390,7 @@ fn handle_keys(world: &mut World, keys: Vec<KeyboardInput>) {
         if k.state != ButtonState::Pressed {
             continue;
         }
-        match k.key_code {
+        match k.shortcut_code() {
             KeyCode::Escape => {
                 let idle = world.resource::<PartState>().tool == Tool::Select;
                 set_tool(world, Tool::Select);

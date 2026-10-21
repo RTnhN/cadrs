@@ -46,6 +46,7 @@ pub mod view_linked;
 pub mod symbol_cards;
 pub mod views;
 
+use cadrs_ui::ShortcutKey;
 use std::collections::HashMap;
 
 use bevy::camera::ScalingMode;
@@ -628,7 +629,7 @@ pub(crate) fn drawing_keys(
         if k.state != bevy::input::ButtonState::Pressed || typing || !q_dialogs.is_empty() || alt {
             continue;
         }
-        match k.key_code {
+        match k.shortcut_code() {
             KeyCode::KeyF if !ctrl && !shift => {
                 if let Some(doc) = doc.as_deref()
                     && let Some((id, d)) = active_drawing(doc)

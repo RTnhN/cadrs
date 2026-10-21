@@ -20,6 +20,7 @@
 //! `smj-model-radius(-checkbox)`, `smj-radius`, `smj-model-k(-checkbox)`, `smj-calc`,
 //! `smj-value`.
 
+use cadrs_ui::ShortcutKey;
 use bevy::input::ButtonState;
 use bevy::input::keyboard::KeyboardInput;
 use bevy::prelude::*;
@@ -228,7 +229,7 @@ fn joint_keys(
         if k.state != ButtonState::Pressed || !q_dialogs.is_empty() || focus.get().is_some() {
             continue;
         }
-        match k.key_code {
+        match k.shortcut_code() {
             KeyCode::Enter | KeyCode::NumpadEnter => commands.queue(accept),
             KeyCode::Escape => commands.queue(cancel),
             _ => {}

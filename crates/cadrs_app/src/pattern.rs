@@ -22,6 +22,7 @@
 //! line, a connector's Z, the origin); a path (edges, sketch curves, a whole sketch); a mirror
 //! plane (a default or Plane feature, a flat face, a connector's XY plane).
 
+use cadrs_ui::ShortcutKey;
 use bevy::input::ButtonState;
 use bevy::input::keyboard::KeyboardInput;
 use bevy::prelude::*;
@@ -506,7 +507,7 @@ fn connector_key(
     mut commands: Commands,
 ) {
     for k in keys.read() {
-        if k.state != ButtonState::Pressed || !matches!(k.key_code, KeyCode::KeyK | KeyCode::KeyM) {
+        if k.state != ButtonState::Pressed || !matches!(k.shortcut_code(), KeyCode::KeyK | KeyCode::KeyM) {
             continue;
         }
         let shift_alt = buttons.any_pressed([KeyCode::ShiftLeft, KeyCode::ShiftRight, KeyCode::AltLeft, KeyCode::AltRight]);
@@ -516,7 +517,7 @@ fn connector_key(
         }
         let studio = *kind == crate::viewport::ActiveKind::PartStudio;
         let assembly = *kind == crate::viewport::ActiveKind::Assembly;
-        match (k.key_code, ctrl) {
+        match (k.shortcut_code(), ctrl) {
             (KeyCode::KeyK, false) if studio || assembly => shown.0 = !shown.0,
             (KeyCode::KeyM, true) if studio => {
                 commands.queue(|world: &mut World| crate::applied::begin(world, AppliedKind::MateConnector));
