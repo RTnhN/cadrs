@@ -272,7 +272,7 @@ otherwise):
 Test harness (tests only): `CADRS_OCCT_DATA` (OCCT's dataset for the generated OCCT suites,
 default `../occt-dataset/opencascade-dataset-7.8.0` beside the checkout), `CADRS_SMLIB_ORACLE`
 (the SMLib oracle binary), `CADRS_USD_BREP` (a usd-brep checkout, for the ignored
-`smb::every_ssi_part_reads`; default `../nvbrep/usd-brep` beside the checkout's parent),
+`smb::every_ssi_part_reads`, which skips without it),
 `CADRS_EXCHANGE_FILES` and `CADRS_EXPORT_DIR` (the ignored corpus tests in `exchange.rs`),
 `PROPTEST_CASES`, `FUZZ_TRACE`, `FUZZ_REPRO` (`tests/fuzz_readers.rs`) and the `CADRS_REPRO*`
 inputs of `tests/native_debug.rs`'s replays.

@@ -1224,9 +1224,12 @@ fn debug_loft_area() {
 fn debug_restore_shapes() {
     use cadrs_kernel::native::NativeKernel;
     let mut k = NativeKernel::new();
-    let d = "/home/casper/work/cadrsperf/occt-dataset/opencascade-dataset-7.8.0/brep/";
+    let Ok(d) = std::env::var("CADRS_OCCT_DATA") else {
+        eprintln!("debug_restore_shapes: set CADRS_OCCT_DATA to OCCT's dataset folder");
+        return;
+    };
     for f in std::env::var("CADRS_FILES").unwrap_or("C13 C1".into()).split_whitespace() {
-        let s = k.restore(&format!("{d}{f}")).unwrap();
+        let s = k.restore(&format!("{d}/brep/{f}")).unwrap();
         println!("{f}: {s:?}");
     }
 }
