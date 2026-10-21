@@ -4210,7 +4210,8 @@ mod assembly_range_tests {
         // outside this tree (for example, a part row in another panel).
         app.world_mut().entity_mut(container).add_children(&[entities[2], header, entities[0], entities[1]]);
         app.world_mut().trigger(Activate { entity: entities[2] });
-        assert_eq!(app.world_mut().resource_mut::<FeatureRowClick>().pending.take(), Some((picks[2], RowSelect::Only)));
+        // A plain click toggles the row (Onshape).
+        assert_eq!(app.world_mut().resource_mut::<FeatureRowClick>().pending.take(), Some((picks[2], RowSelect::Toggle)));
         app.world_mut().resource_mut::<Selection>().0 = vec![picks[2]];
         app.world_mut().resource_mut::<ButtonInput<KeyCode>>().press(KeyCode::ShiftRight);
         app.world_mut().trigger(Activate { entity: entities[1] });

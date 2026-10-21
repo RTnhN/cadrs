@@ -45,6 +45,36 @@ jobs:
       # OpenCASCADE is built from source on the first run (several minutes); the cache keeps it.
       - uses: Swatinem/rust-cache@v2
 
+      # occt-sys installs OpenCASCADE in target/debug/OCCT, which rust-cache deletes when it saves
+      # (it keeps only build, deps and .fingerprint), while the cached opencascade-sys build script
+      # stays fresh and never rebuilds it: a cache hit then has no OCCT headers or libraries. This
+      # step caches that folder on its own. It must come after rust-cache: post steps run in
+      # reverse order, so it saves before rust-cache's cleanup deletes the folder.
+      - name: OpenCASCADE revision
+        id: occt
+        shell: bash
+        run: |
+          rev=$(grep -A2 '^name = "occt-sys"' Cargo.lock | sed -n 's/^source = ".*#\([0-9a-f]*\)"$/\1/p')
+          test -n "$rev"
+          echo "rev=$rev" >> "$GITHUB_OUTPUT"
+      - name: OpenCASCADE cache
+        id: occt-cache
+        uses: actions/cache@v4
+        with:
+          path: target/debug/OCCT
+          key: occt-${{ runner.os }}-${{ runner.arch }}-${{ steps.occt.outputs.rev }}
+      # No OpenCASCADE cache for this revision (a target folder saved before this step existed,
+      # or an evicted cache): drop whatever OCCT the target folder holds, whole or partial, and
+      # opencascade-sys's artifacts and fingerprint (`cargo clean -p`, whatever the layout of the
+      # target folder), so cargo runs its build script again and builds OCCT.
+      - name: Rebuild OpenCASCADE if a cache lost it
+        if: steps.occt-cache.outputs.cache-hit != 'true'
+        shell: bash
+        run: |
+          rm -rf target/debug/OCCT
+          cargo clean -p opencascade-sys
+          echo "OpenCASCADE will be built"
+
       - name: Build
         run: cargo build --workspace
 
@@ -68,6 +98,32 @@ jobs:
         run: rustup toolchain install && rustc -V
 
       - uses: Swatinem/rust-cache@v2
+
+      # See the Linux job.
+      - name: OpenCASCADE revision
+        id: occt
+        shell: bash
+        run: |
+          rev=$(grep -A2 '^name = "occt-sys"' Cargo.lock | sed -n 's/^source = ".*#\([0-9a-f]*\)"$/\1/p')
+          test -n "$rev"
+          echo "rev=$rev" >> "$GITHUB_OUTPUT"
+      - name: OpenCASCADE cache
+        id: occt-cache
+        uses: actions/cache@v4
+        with:
+          path: target/debug/OCCT
+          key: occt-${{ runner.os }}-${{ runner.arch }}-${{ steps.occt.outputs.rev }}
+      # No OpenCASCADE cache for this revision (a target folder saved before this step existed,
+      # or an evicted cache): drop whatever OCCT the target folder holds, whole or partial, and
+      # opencascade-sys's artifacts and fingerprint (`cargo clean -p`, whatever the layout of the
+      # target folder), so cargo runs its build script again and builds OCCT.
+      - name: Rebuild OpenCASCADE if a cache lost it
+        if: steps.occt-cache.outputs.cache-hit != 'true'
+        shell: bash
+        run: |
+          rm -rf target/debug/OCCT
+          cargo clean -p opencascade-sys
+          echo "OpenCASCADE will be built"
 
       - name: Build
         run: cargo build --workspace
