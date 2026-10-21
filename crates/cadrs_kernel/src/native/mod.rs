@@ -58,8 +58,6 @@ pub mod step;
 pub mod surface;
 pub mod surfacing;
 pub mod sweep;
-pub mod sweep_general;
-pub mod sweep_path;
 pub mod tails;
 pub mod tess;
 pub mod tol;
@@ -69,3 +67,6 @@ pub mod uvdomain;
 pub mod xbuild;
 
 pub use kernel::NativeKernel;
+/// The path sweeps and sampled-frame sweeps by their former module names (kept for callers
+/// not yet moved to `sweep::path` and `sweep::frames`).
+pub use sweep::{frames as sweep_general, path as sweep_path};

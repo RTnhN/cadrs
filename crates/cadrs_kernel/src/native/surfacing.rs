@@ -18,7 +18,7 @@ use super::kernel::NativeKernel;
 use super::math::*;
 use super::nurbs::{NurbsCurve, NurbsSurface};
 use super::surface::Surface;
-use super::sweep_path::{chain, path_segments, Seg};
+use super::sweep::path::{chain, path_segments, Seg};
 use super::topo::{Body, Coedge, Edge, Face, Shell, Solid};
 use crate::*;
 

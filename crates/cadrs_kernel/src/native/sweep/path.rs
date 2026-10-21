@@ -4,14 +4,14 @@
 //! is a prism of the profile as it is placed there, an arc a revolve about the arc's axis; the
 //! profile's placement is carried along rigidly, and the pieces are united (the caps at the
 //! joints cancel). Other curves (and arcs the profile isn't square to) are swept with
-//! sampled frames (see `sweep_general`).
+//! sampled frames (see [`super::frames`]).
 
-use super::curve::Curve;
-use super::features::{face_as_profile, Tagged};
-use super::kernel::NativeKernel;
-use super::math::*;
-use super::profile::{self, MergedFace, Piece};
-use super::sweep::{self, Prism, Revolve};
+use crate::native::curve::Curve;
+use crate::native::features::{face_as_profile, Tagged};
+use crate::native::kernel::NativeKernel;
+use crate::native::math::*;
+use crate::native::profile::{self, MergedFace, Piece};
+use super::{sweep_full, Frames, Prism, Revolve};
 use crate::*;
 
 /// A path segment in the direction the path runs: its curve on [t0, t1], run backwards when
@@ -74,12 +74,12 @@ pub fn path_segments(k: &NativeKernel, path: &[PathCurve]) -> Result<Vec<Seg>> {
             }
             PathCurve::Sketch { plane, curve } => {
                 let p = profile::piece_of(curve, profile::Src::Curve { region: 0, curve: 0 })?;
-                let m = super::build::plane_map(plane, &V3::zeros(), 0.0);
+                let m = crate::native::build::plane_map(plane, &V3::zeros(), 0.0);
                 out.push(Seg { c: p.c.transformed(&m), t0: p.t0, t1: p.t1, rev: p.rev });
             }
             PathCurve::Bezier3 { poles, weights } => {
                 let w = if weights.len() == poles.len() { weights.clone() } else { vec![1.0; poles.len()] };
-                let n = super::nurbs::NurbsCurve::bezier(poles, &w);
+                let n = crate::native::nurbs::NurbsCurve::bezier(poles, &w);
                 out.push(Seg { c: Curve::Nurbs(std::sync::Arc::new(n)), t0: 0.0, t1: 1.0, rev: false });
             }
         }
@@ -143,11 +143,11 @@ pub fn chain(mut segs: Vec<Seg>) -> Result<(Vec<Seg>, bool)> {
 pub(crate) fn spines(path: Vec<Seg>, closed: bool, plane: &Plane, center: &P3) -> Vec<(Vec<Seg>, bool)> {
     let o = plane.origin;
     let n = plane.normal.into_inner();
-    let pl = super::surface::Surface::Plane { f: super::build::plane_frame(plane, V3::zeros()) };
+    let pl = crate::native::surface::Surface::Plane { f: crate::native::build::plane_frame(plane, V3::zeros()) };
     // Where the plane crosses the path, nearest the profile's centre.
     let mut best: Option<(f64, usize, f64)> = None;
     for (i, s) in path.iter().enumerate() {
-        for t in super::ssi::curve_surface(&s.c, s.t0, s.t1, &pl) {
+        for t in crate::native::ssi::curve_surface(&s.c, s.t0, s.t1, &pl) {
             let p = s.c.point(t);
             let _ = o;
             let d = (p - center).norm();
@@ -199,7 +199,7 @@ pub(crate) fn spines(path: Vec<Seg>, closed: bool, plane: &Plane, center: &P3) -
 
 /// The profile's centre (where the path should meet it).
 pub(crate) fn profile_center(faces: &[MergedFace], chains: &[Vec<Piece>], plane: &Plane) -> P3 {
-    let m = super::build::plane_map(plane, &V3::zeros(), 0.0);
+    let m = crate::native::build::plane_map(plane, &V3::zeros(), 0.0);
     let mut acc = V3::zeros();
     let mut n = 0.0;
     for p in faces.iter().flat_map(|f| std::iter::once(&f.outer).chain(f.holes.iter())).flatten().chain(chains.iter().flatten()) {
@@ -222,14 +222,15 @@ fn move_plane(p: &Plane, m: &Affine) -> Plane {
 }
 
 /// Sweeps the profile (faces and chains in `plane` coordinates) along one spine.
-fn sweep_spine(faces: &[MergedFace], chains: &[Vec<Piece>], plane: Plane, spine: &[Seg], control: SweepControl, solid: bool) -> Result<Vec<Tagged>> {
+fn sweep_spine(faces: &[MergedFace], chains: &[Vec<Piece>], plane: Plane, spine: &[Seg], frames: Frames, solid: bool) -> Result<Vec<Tagged>> {
+    let control = frames.control();
     let mut place = plane;
     let mut out = Vec::new();
     // Segments swept with sampled frames, gathered while they meet tangentially (one surface
     // per profile curve along the run).
     let mut run: Vec<Seg> = Vec::new();
     // The helix each tangent chain of general segments follows (one fit for the whole chain).
-    let mut chain_helix: Vec<Option<super::sweep_general::Helix>> = vec![None; spine.len()];
+    let mut chain_helix: Vec<Option<super::frames::Helix>> = vec![None; spine.len()];
     {
         let mut i = 0;
         while i < spine.len() {
@@ -238,7 +239,7 @@ fn sweep_spine(faces: &[MergedFace], chains: &[Vec<Piece>], plane: Plane, spine:
                 j += 1;
             }
             if j - i >= 2 {
-                let h = super::sweep_general::fit_helix_segs(&spine[i..j]);
+                let h = super::frames::fit_helix_segs(&spine[i..j]);
                 for x in &mut chain_helix[i..j] {
                     *x = h;
                 }
@@ -246,12 +247,12 @@ fn sweep_spine(faces: &[MergedFace], chains: &[Vec<Piece>], plane: Plane, spine:
             i = j;
         }
     }
-    let mut run_helix: Option<super::sweep_general::Helix> = None;
-    let flush = |run: &mut Vec<Seg>, place: &mut Plane, out: &mut Vec<Tagged>, helix: Option<super::sweep_general::Helix>| -> Result<()> {
+    let mut run_helix: Option<super::frames::Helix> = None;
+    let flush = |run: &mut Vec<Seg>, place: &mut Plane, out: &mut Vec<Tagged>, helix: Option<super::frames::Helix>| -> Result<()> {
         if run.is_empty() {
             return Ok(());
         }
-        let (b, end) = super::sweep_general::sweep_seg(faces, chains, *place, run, control, solid, helix)?;
+        let (b, end) = super::frames::sweep_seg(faces, chains, *place, run, frames, solid, helix)?;
         out.push(Tagged::from_built(b));
         *place = end;
         run.clear();
@@ -289,7 +290,7 @@ fn sweep_spine(faces: &[MergedFace], chains: &[Vec<Piece>], plane: Plane, spine:
                 let len = seg.length();
                 let kind = Prism { plane: place, dir };
                 // The profile plane may sit anywhere along the line: sweep from it.
-                let b = sweep::sweep_full(faces, chains, &kind, 0.0, len, false, solid)?;
+                let b = sweep_full(faces, chains, &kind, 0.0, len, false, solid)?;
                 out.push(Tagged::from_built(b));
                 place = move_plane(&place, &Affine::translation(dir * len));
             }
@@ -302,7 +303,7 @@ fn sweep_spine(faces: &[MergedFace], chains: &[Vec<Piece>], plane: Plane, spine:
                 let f = Frame { o: *c, x: radial, y: axis.cross(&radial), z: axis };
                 let kind = Revolve { plane: place, f };
                 let whole = span >= TAU - 1e-9;
-                let b = sweep::sweep_full(faces, chains, &kind, 0.0, if whole { TAU } else { span }, whole, solid)?;
+                let b = sweep_full(faces, chains, &kind, 0.0, if whole { TAU } else { span }, whole, solid)?;
                 out.push(Tagged::from_built(b));
                 let r = nalgebra::Rotation3::from_axis_angle(&nalgebra::Unit::new_normalize(axis), span).into_inner();
                 place = move_plane(&place, &Affine { m: r, t: c.coords - r * c.coords });
@@ -387,7 +388,8 @@ pub fn sweep_with(k: &mut NativeKernel, profile: &Profile, spec: &SweepSpec) -> 
 /// whether it runs backwards, from [`spines`]) and joins the pieces: the caps at the joints are
 /// glued away (pieces that meet anywhere else, a two-way sweep's halves, are united); sheets are
 /// kept side by side.
-pub(crate) fn sweep_spines(faces: &[MergedFace], chains: &[Vec<Piece>], plane: Plane, sp: Vec<(Vec<Seg>, bool)>, control: SweepControl, solid: bool) -> Result<Tagged> {
+pub(crate) fn sweep_spines(faces: &[MergedFace], chains: &[Vec<Piece>], plane: Plane, sp: Vec<(Vec<Seg>, bool)>, frames: impl Into<Frames>, solid: bool) -> Result<Tagged> {
+    let frames = frames.into();
     let prof = std::env::var("CADRS_PROFILE").is_ok();
     let t0 = std::time::Instant::now();
     let path_len: usize = sp.iter().map(|s| s.0.len()).sum();
@@ -401,12 +403,12 @@ pub(crate) fn sweep_spines(faces: &[MergedFace], chains: &[Vec<Piece>], plane: P
     // where the next starts, so the joints glue.
     let mut backs: Vec<Tagged> = Vec::new();
     for (spine, backward) in sp {
-        let mut these = sweep_spine(faces, chains, plane, &spine, control, solid)?;
+        let mut these = sweep_spine(faces, chains, plane, &spine, frames, solid)?;
         if std::env::var("CADRS_SWEEP_DEBUG").is_ok() {
             for t in &these {
-                eprintln!("piece: volume {} faces {} solids {} check {:?}", super::mass::body_mass(&t.body).volume, t.body.faces.len(), t.body.solids.len(), t.body.check());
+                eprintln!("piece: volume {} faces {} solids {} check {:?}", crate::native::mass::body_mass(&t.body).volume, t.body.faces.len(), t.body.solids.len(), t.body.check());
                 for (fi, f) in t.body.faces.iter().enumerate() {
-                    let q = super::mass::face_integrals(&t.body, f, &V3::zeros());
+                    let q = crate::native::mass::face_integrals(&t.body, f, &V3::zeros());
                     let pcs: Vec<String> = f.loops.iter().flatten().map(|c| match &c.pc { Curve::Line { d, .. } => format!("L({:.2e},{:.2e})", d.x, d.y), Curve::Nurbs(n) => format!("N{}", n.cps.len()), _ => "?".into() }).collect();
                     eprintln!("   face {fi} {:?} area {} vol-term {} pcs {pcs:?}", f.surf.kind(), q[0], q[4]);
                 }
@@ -441,14 +443,14 @@ pub(crate) fn sweep_spines(faces: &[MergedFace], chains: &[Vec<Piece>], plane: P
                     if std::env::var("CADRS_SWEEP_DEBUG").is_ok() {
                         eprintln!("join: glue failed, united");
                     }
-                    super::features::tagged_union(&acc, &p)?
+                    crate::native::features::tagged_union(&acc, &p)?
                 }
             }
         } else {
             compound(acc, p)
         };
         if std::env::var("CADRS_SWEEP_DEBUG").is_ok() {
-            eprintln!("join: volume {} faces {}", super::mass::body_mass(&acc.body).volume, acc.body.faces.len());
+            eprintln!("join: volume {} faces {}", crate::native::mass::body_mass(&acc.body).volume, acc.body.faces.len());
         }
     }
     // A closed path: the last piece's end cap meets the first piece's start cap.
@@ -467,7 +469,7 @@ fn caps(t: &Tagged, end: bool) -> Vec<(usize, P3, f64)> {
     (0..t.body.faces.len())
         .filter(|&f| t.tags[f].iter().any(|o| if end { matches!(o, Origin::EndCap { .. }) } else { matches!(o, Origin::StartCap { .. }) }))
         .map(|f| {
-            let (a, c) = super::mass::face_area(&t.body, f);
+            let (a, c) = crate::native::mass::face_area(&t.body, f);
             (f, c, a)
         })
         .collect()
@@ -533,17 +535,17 @@ pub(crate) fn glue(a: &Tagged, b: &Tagged) -> Option<Tagged> {
                     let new = body.edges[x].clone();
                     let fwd = if same { c.fwd } else { !c.fwd };
                     // Keep the p-curve's chart: align its start with the old coedge's start.
-                    let (ot0, _) = super::topo::co_range(&old, c.fwd);
+                    let (ot0, _) = crate::native::topo::co_range(&old, c.fwd);
                     let sp = c.pc.point(ot0);
-                    let mut pc = transfer_pcurve(&old, &c.pc, &new).unwrap_or_else(|| super::pcurve::pcurve(&surf, &new.curve, new.t[0], new.t[1], None));
-                    let (nt0, _) = super::topo::co_range(&new, fwd);
+                    let mut pc = transfer_pcurve(&old, &c.pc, &new).unwrap_or_else(|| crate::native::pcurve::pcurve(&surf, &new.curve, new.t[0], new.t[1], None));
+                    let (nt0, _) = crate::native::topo::co_range(&new, fwd);
                     let q = pc.point(nt0);
                     let du = if surf.u_periodic() { ((sp.x - q.x) / TAU).round() * TAU } else { 0.0 };
                     let dv = if surf.v_periodic() { ((sp.y - q.y) / TAU).round() * TAU } else { 0.0 };
                     if du != 0.0 || dv != 0.0 {
                         pc = pc.transformed(&Affine::translation(V3::new(du, dv, 0.0)));
                     }
-                    body.faces[fi].loops[li][ci] = super::topo::Coedge { edge: x, fwd, pc };
+                    body.faces[fi].loops[li][ci] = crate::native::topo::Coedge { edge: x, fwd, pc };
                 }
             }
         }
@@ -561,8 +563,8 @@ pub(crate) fn glue(a: &Tagged, b: &Tagged) -> Option<Tagged> {
     let keep: Vec<usize> = (0..nf).filter(|f| !drop.contains(f)).collect();
     body.faces = keep.iter().map(|&f| body.faces[f].clone()).collect();
     let tags = keep.iter().map(|&f| tags[f].clone()).collect();
-    super::unify::compact(&mut body);
-    super::boolean::assemble_shells(&mut body).ok()?;
+    crate::native::unify::compact(&mut body);
+    crate::native::boolean::assemble_shells(&mut body).ok()?;
     if body.solids.len() != 1 {
         return None;
     }
@@ -579,7 +581,7 @@ pub(crate) fn glue_self(t: &Tagged) -> Option<Tagged> {
                 // Split into a body without the two caps and glue through a copy.
                 let _ = (fe, fs);
                 let mut a = t.clone();
-                let mut b = Tagged { body: super::topo::Body::default(), tags: vec![] };
+                let mut b = Tagged { body: crate::native::topo::Body::default(), tags: vec![] };
                 std::mem::swap(&mut a, &mut b);
                 let _ = a;
                 return glue_within(&b, *fe, *fs);
@@ -625,17 +627,17 @@ fn glue_within(t: &Tagged, fa: usize, fb: usize) -> Option<Tagged> {
                     let old = body.edges[c.edge].clone();
                     let new = body.edges[x].clone();
                     let fwd = if same { c.fwd } else { !c.fwd };
-                    let (ot0, _) = super::topo::co_range(&old, c.fwd);
+                    let (ot0, _) = crate::native::topo::co_range(&old, c.fwd);
                     let sp = c.pc.point(ot0);
-                    let mut pc = transfer_pcurve(&old, &c.pc, &new).unwrap_or_else(|| super::pcurve::pcurve(&surf, &new.curve, new.t[0], new.t[1], None));
-                    let (nt0, _) = super::topo::co_range(&new, fwd);
+                    let mut pc = transfer_pcurve(&old, &c.pc, &new).unwrap_or_else(|| crate::native::pcurve::pcurve(&surf, &new.curve, new.t[0], new.t[1], None));
+                    let (nt0, _) = crate::native::topo::co_range(&new, fwd);
                     let q = pc.point(nt0);
                     let du = if surf.u_periodic() { ((sp.x - q.x) / TAU).round() * TAU } else { 0.0 };
                     let dv = if surf.v_periodic() { ((sp.y - q.y) / TAU).round() * TAU } else { 0.0 };
                     if du != 0.0 || dv != 0.0 {
                         pc = pc.transformed(&Affine::translation(V3::new(du, dv, 0.0)));
                     }
-                    body.faces[fi].loops[li][ci] = super::topo::Coedge { edge: x, fwd, pc };
+                    body.faces[fi].loops[li][ci] = crate::native::topo::Coedge { edge: x, fwd, pc };
                 }
             }
         }
@@ -650,8 +652,8 @@ fn glue_within(t: &Tagged, fa: usize, fb: usize) -> Option<Tagged> {
     let keep: Vec<usize> = (0..nf).filter(|&f| f != fa && f != fb).collect();
     body.faces = keep.iter().map(|&f| body.faces[f].clone()).collect();
     let tags = keep.iter().map(|&f| t.tags[f].clone()).collect();
-    super::unify::compact(&mut body);
-    super::boolean::assemble_shells(&mut body).ok()?;
+    crate::native::unify::compact(&mut body);
+    crate::native::boolean::assemble_shells(&mut body).ok()?;
     if body.solids.len() != 1 {
         return None;
     }
@@ -661,7 +663,7 @@ fn glue_within(t: &Tagged, fa: usize, fb: usize) -> Option<Tagged> {
 /// The p-curve of `new` (an edge on the same curve as `old`, its parameter an affine function
 /// of old's) from old's p-curve: no re-fit (a re-fit on a closed B-spline face can land on the
 /// wrong side of its seam).
-fn transfer_pcurve(old: &super::topo::Edge, pc: &Curve, new: &super::topo::Edge) -> Option<Curve> {
+fn transfer_pcurve(old: &crate::native::topo::Edge, pc: &Curve, new: &crate::native::topo::Edge) -> Option<Curve> {
     let at = |f: f64| new.t[0] + (new.t[1] - new.t[0]) * f;
     let (t1, t2) = (at(0.25), at(0.75));
     let u1 = old.curve.closest(&new.point(t1), old.t[0], old.t[1]);

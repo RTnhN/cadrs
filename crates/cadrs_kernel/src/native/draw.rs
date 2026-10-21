@@ -15,7 +15,7 @@ use super::kernel::NativeKernel;
 use super::math::*;
 use super::profile::{MergedFace, Piece, Src};
 use super::surface::Surface;
-use super::sweep_path::Seg;
+use super::sweep::path::Seg;
 use crate::*;
 
 /// An edge: a curve between two parameters.
@@ -1292,7 +1292,7 @@ impl NativeKernel {
             }
             _ => return Err(err("the spine must be a wire")),
         };
-        super::sweep_path::chain(segs)
+        super::sweep::path::chain(segs)
     }
 
     /// A profile of a pipe: a planar face, or a wire or edge (closed or open). `hint`
@@ -1343,11 +1343,11 @@ impl NativeKernel {
         }
     }
 
-    /// Sweeps a section along spines (from [`sweep_path::spines`]): a solid, or a sheet sewn
+    /// Sweeps a section along spines (from [`super::sweep::path::spines`]): a solid, or a sheet sewn
     /// along the joints of its pieces.
-    fn sweep_section(&mut self, sec: &Section, spines: Vec<(Vec<Seg>, bool)>, control: SweepControl, solid: bool) -> Result<Shape> {
+    fn sweep_section(&mut self, sec: &Section, spines: Vec<(Vec<Seg>, bool)>, control: super::sweep::Frames, solid: bool) -> Result<Shape> {
         let (faces, chains) = sec.pieces(solid)?;
-        let t = super::sweep_path::sweep_spines(&faces, &chains, sec.plane, spines, control, solid)?;
+        let t = super::sweep::path::sweep_spines(&faces, &chains, sec.plane, spines, control, solid)?;
         if solid {
             return Ok(Shape::Body(self.insert(t.body)));
         }
@@ -1398,9 +1398,10 @@ impl NativeKernel {
         let [(section, contact, correct)] = sections else { return Err(err("buildsweep needs a section")) };
         let mut sec = self.section_of(section, &path[0].dir(0.0))?;
         let control = match mode {
-            "CF" | "FR" | "DT" => SweepControl::None,
-            "FX" => SweepControl::KeepOrientation,
-            "CN" => SweepControl::LockDirection(nalgebra::Unit::try_new(V3::from(dir), 1e-12).ok_or_else(|| err("setsweep -CN: a null direction"))?),
+            "CF" | "DT" => SweepControl::None.into(),
+            "FR" => super::sweep::Frames::Frenet,
+            "FX" => SweepControl::KeepOrientation.into(),
+            "CN" => SweepControl::LockDirection(nalgebra::Unit::try_new(V3::from(dir), 1e-12).ok_or_else(|| err("setsweep -CN: a null direction"))?).into(),
             _ => return Err(KernelError::Unsupported("this setsweep mode")),
         };
         // Where the section sits on the spine (GeomFill_SectionPlacement).
@@ -1526,7 +1527,7 @@ impl NativeKernel {
             }
             acc = match acc.take() {
                 None => Some(piece),
-                Some(a) => match super::sweep_path::glue(&a, &piece) {
+                Some(a) => match super::sweep::path::glue(&a, &piece) {
                     Some(g) => Some(g),
                     None => {
                         let (x, y) = (self.insert(a.body), self.insert(piece.body));
@@ -1542,7 +1543,7 @@ impl NativeKernel {
                 (**self.get(b)?).clone()
             }
             (Some(a), None) => {
-                let a = if closed { super::sweep_path::glue_self(&a).unwrap_or(a) } else { a };
+                let a = if closed { super::sweep::path::glue_self(&a).unwrap_or(a) } else { a };
                 if solid {
                     return Ok(Shape::Body(self.insert(a.body)));
                 }
@@ -3470,7 +3471,7 @@ fn strip_caps(body: super::topo::Body, first: &Section, last: &Section, closed: 
     sheet
 }
 
-/// The spines of a sweep from fraction `f` of segment `si` of a path (as `sweep_path::spines`):
+/// The spines of a sweep from fraction `f` of segment `si` of a path (as `sweep::path::spines`):
 /// one onward from there (a closed path all the way round), and one back to the start.
 fn split_spines(path: Vec<Seg>, closed: bool, si: usize, f: f64) -> Vec<(Vec<Seg>, bool)> {
     let tol = 1e-9;

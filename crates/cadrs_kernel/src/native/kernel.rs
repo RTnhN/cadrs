@@ -365,19 +365,19 @@ pub fn loose_part(b: &Body) -> Option<Body> {
 /// The wire body of [`Kernel::create_wire`]: the curves chained end to end, the vertices at
 /// their joints (with the tolerance of the joints' gaps).
 fn wire_body(k: &NativeKernel, curves: &[PathCurve]) -> Result<Body> {
-    wire_of_segments(super::sweep_path::path_segments(k, curves)?)
+    wire_of_segments(super::sweep::path::path_segments(k, curves)?)
 }
 
 /// A wire body of 3D curves, each over [t0, t1] (run backwards when t0 > t1), joined end to end.
 pub fn wire_of_curves(curves: &[(Curve, f64, f64)]) -> Result<Body> {
-    wire_of_segments(curves.iter().map(|(c, t0, t1)| super::sweep_path::Seg { c: c.clone(), t0: t0.min(*t1), t1: t0.max(*t1), rev: t0 > t1 }).collect())
+    wire_of_segments(curves.iter().map(|(c, t0, t1)| super::sweep::path::Seg { c: c.clone(), t0: t0.min(*t1), t1: t0.max(*t1), rev: t0 > t1 }).collect())
 }
 
-fn wire_of_segments(segs: Vec<super::sweep_path::Seg>) -> Result<Body> {
+fn wire_of_segments(segs: Vec<super::sweep::path::Seg>) -> Result<Body> {
     if segs.is_empty() {
         return Err(KernelError::InvalidParameter("A wire needs a curve".into()));
     }
-    let (segs, closed) = super::sweep_path::chain(segs).map_err(|_| KernelError::InvalidParameter("The wire's curves must join end to end in one chain".into()))?;
+    let (segs, closed) = super::sweep::path::chain(segs).map_err(|_| KernelError::InvalidParameter("The wire's curves must join end to end in one chain".into()))?;
     let mut b = Body::default();
     let first = b.add_vertex(segs[0].start());
     let mut at = first;
@@ -437,7 +437,7 @@ impl Kernel for NativeKernel {
     }
 
     fn sweep_with(&mut self, profile: &Profile, spec: &SweepSpec) -> Result<OpResult> {
-        super::sweep_path::sweep_with(self, profile, spec)
+        super::sweep::path::sweep_with(self, profile, spec)
     }
 
     fn boolean(&mut self, op: BoolOp, target: BodyId, tools: &[BodyId]) -> Result<OpResult> {

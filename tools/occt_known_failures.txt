@@ -485,19 +485,7 @@ pipe specific_zb3
 pipe specific_zb5
 pipe specific_zc6
 pipe specific_zc8
-# pipe: the area differs: OCCT's reference values are its adaptive sprops (eps 1e-4), which over-estimate oblique extrusions (standard_b5: exact 4069, OCCT's Gauss 4068, its adaptive 4272), and its CorrectedFrenet frame differs from our rotation-minimizing one on non-planar spines (specific_q3, s1).
-pipe specific_j9
-pipe specific_q3
-pipe specific_q4
-pipe specific_q5
-pipe specific_q6
-pipe specific_q9
-pipe specific_r1
-pipe specific_s1
-pipe specific_s2
-pipe specific_s3
-pipe specific_s4
-pipe specific_s7
+# pipe: the area differs: OCCT's reference values are its adaptive sprops (eps 1e-4), which over-estimate oblique extrusions (standard_b5: exact 4069, OCCT's Gauss 4068, its adaptive 4272).
 pipe standard_b1
 pipe standard_b5
 pipe standard_c8
