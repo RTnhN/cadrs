@@ -1,6 +1,7 @@
 //! The native (pure Rust) B-rep kernel: exact curves and surfaces, boundary representation,
 //! booleans, features, tessellation and exchange, with no C or C++ dependency.
 
+pub mod axes;
 pub mod blend;
 pub mod blend_chain;
 pub mod blend_corner;

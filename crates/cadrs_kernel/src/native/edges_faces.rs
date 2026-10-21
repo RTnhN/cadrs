@@ -107,7 +107,7 @@ pub fn edges_to_faces(edges: &[Edge3]) -> Result<Vec<PlaneFace>> {
     }
     let mut out = Vec::new();
     for (o, n) in planes {
-        let xd = super::draw::ax2_x(&n);
+        let xd = super::axes::ax2_x(&n);
         let yd = n.cross(&xd);
         let to2 = |p: &P3| P2::new((p - o).dot(&xd), (p - o).dot(&yd));
         let to3 = |q: &P2| o + xd * q.x + yd * q.y;

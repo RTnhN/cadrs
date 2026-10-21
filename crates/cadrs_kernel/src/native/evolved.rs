@@ -55,7 +55,7 @@ pub fn evolved(k: &mut NativeKernel, spine: &[(Curve, f64, f64)], profile: &[Reg
     }
     if up.norm() < 1e-12 {
         // An open straight spine: any normal square to it.
-        up = super::draw::ax2_x(&edges[0].dir(0.0));
+        up = super::axes::ax2_x(&edges[0].dir(0.0));
     }
     let up = up.normalize();
     let size = pts.iter().map(|p| (p - pts[0]).norm()).fold(0.0, f64::max).max(1e-9);
