@@ -236,3 +236,68 @@ fn draft_moves_a_seam_out_of_a_hole() {
     let draw::Shape::Body(r) = k.depouille(&f, [0.0, 0.0, 1.0], &[(&faces[3], 5.0, [0.0, 0.0, 20.0], [0.0, 0.0, 1.0])]).unwrap() else { panic!("not a body") };
     holes_inside(k.get(r).unwrap()).unwrap();
 }
+
+/// The loop of face `fi` of SMLib's off_extrusion (its end faces: two B-splines, an arc and a
+/// line) as a wire offset takes it: each edge in the loop's direction, a reversed one as a
+/// decreasing parameter range, in the face's plane (or as it is in space).
+fn extrusion_loop(fi: usize, in_plane: bool) -> Vec<(cadrs_kernel::native::curve::Curve, f64, f64)> {
+    use cadrs_kernel::native::math::Affine;
+    let bytes = std::fs::read(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/data/smlib/offset/off_extrusion.smb")).unwrap();
+    let b = cadrs_kernel::native::smb::read_brep(&bytes).unwrap().body;
+    let f = &b.faces[fi];
+    let Surface::Plane { f: fr } = &f.surf else { panic!("face {fi} isn't planar") };
+    let fr = Frame::from_z(fr.o, fr.x.cross(&fr.y));
+    let m = nalgebra::Matrix3::from_rows(&[fr.x.transpose(), fr.y.transpose(), fr.z.transpose()]);
+    let to_plane = Affine { m, t: -(m * fr.o.coords) };
+    f.loops[0]
+        .iter()
+        .map(|c| {
+            let e = &b.edges[c.edge];
+            let curve = if in_plane { e.curve.transformed(&to_plane) } else { e.curve.clone() };
+            if c.fwd { (curve, e.t[0], e.t[1]) } else { (curve, e.t[1], e.t[0]) }
+        })
+        .collect()
+}
+
+/// The planar wire offset of off_extrusion's end loop with its reversed edges given as
+/// decreasing parameter ranges: offset outward and inward (it panicked in a closest-point
+/// search over a backwards range). A side face's loop, square to the plane z = 0 the offset
+/// works in, flattens to edges of no length: an error, not a panic.
+#[test]
+fn wire_offset_takes_reversed_edges() {
+    use cadrs_kernel::native::curve::Curve;
+    use cadrs_kernel::native::offset2d::offset_wire;
+    let wire = extrusion_loop(0, true);
+    assert!(wire.iter().any(|e| matches!(e.0, Curve::Nurbs(_))) && wire.iter().any(|e| e.1 > e.2), "a spline and a reversed edge");
+    for d in [0.3, -0.3, 1.0] {
+        let loops = offset_wire(&wire, d).unwrap_or_else(|e| panic!("offset by {d}: {e:?}"));
+        assert_eq!(loops.len(), 1, "offset by {d}");
+    }
+    // Faces 3 and up are the extrusion's flat sides.
+    assert!(offset_wire(&extrusion_loop(3, false), 0.3).is_err());
+}
+
+/// Offsets of off_extrusion's end loop past the radius of its concave B-spline (about 1.1):
+/// that edge's offset folds into a swallowtail, whose two cuts meet at one point. They stayed
+/// two cuts (they were merged as one, and the loop came out empty from 1.8 to 2.3 outward): one
+/// loop at every distance, its area growing with the distance.
+#[test]
+fn wire_offset_trims_a_swallowtail() {
+    use cadrs_kernel::native::offset2d::offset_wire;
+    let wire = extrusion_loop(0, true);
+    let area = |d: f64| -> f64 {
+        let loops = offset_wire(&wire, d).unwrap_or_else(|e| panic!("offset by {d}: {e:?}"));
+        assert_eq!(loops.len(), 1, "offset by {d}");
+        let mut a = 0.0;
+        for p in &loops[0] {
+            for k in 0..200 {
+                let (x, y) = (p.c.point(p.t0 + (p.t1 - p.t0) * k as f64 / 200.0), p.c.point(p.t0 + (p.t1 - p.t0) * (k + 1) as f64 / 200.0));
+                a += 0.5 * (x.x * y.y - y.x * x.y);
+            }
+        }
+        a.abs()
+    };
+    let ds = [-3.0, -2.5, -2.0, -1.5, 1.5, 1.8, 2.0, 2.2, 2.3, 2.5];
+    let areas: Vec<f64> = ds.iter().map(|&d| area(d)).collect();
+    assert!(areas.windows(2).all(|w| w[0] < w[1]), "{areas:?}");
+}

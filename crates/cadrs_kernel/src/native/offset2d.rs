@@ -61,7 +61,8 @@ fn forward(c: &Curve, t0: f64, t1: f64) -> Piece2 {
     if t1 >= t0 {
         Piece2 { c: c.clone(), t0, t1 }
     } else {
-        let (c, a, b) = c.reversed(t0, t1);
+        // `reversed` maps an increasing range: the edge's [t1, t0] run the other way.
+        let (c, a, b) = c.reversed(t1, t0);
         Piece2 { c, t0: a, t1: b }
     }
 }
@@ -347,10 +348,19 @@ pub fn offset_wire(edges: &[(Curve, f64, f64)], d: f64) -> Result<Vec<Vec<Piece2
     let clock = std::time::Instant::now();
     let wire = chained(edges.iter().map(|(c, a, b)| flattened(c, *a, *b)).map(|(c, a, b)| forward(&c, a, b)).collect());
     let mut bb = Bbox::empty();
+    // Each edge's length in the plane (its chords): an edge square to the plane (a wire not in
+    // z = 0) flattens to a point, which has no direction to offset along.
+    let mut lens = Vec::with_capacity(wire.len());
     for e in &wire {
-        for k in 0..=8 {
-            bb.add(&e.c.point(e.t0 + (e.t1 - e.t0) * k as f64 / 8.0));
+        let pts: Vec<P3> = (0..=8).map(|k| e.c.point(e.t0 + (e.t1 - e.t0) * k as f64 / 8.0)).collect();
+        if !(e.t0.is_finite() && e.t1.is_finite()) || pts.iter().any(|p| !(p.x.is_finite() && p.y.is_finite())) {
+            return Err(KernelError::InvalidParameter("an offset of a wire with an edge of no length in its plane".into()));
         }
+        lens.push(pts.windows(2).map(|w| (w[1] - w[0]).norm()).sum::<f64>());
+        pts.iter().for_each(|p| bb.add(p));
+    }
+    if lens.iter().any(|l| *l <= bb.diagonal() * 1e-12) {
+        return Err(KernelError::InvalidParameter("an offset of a wire with an edge of no length in its plane".into()));
     }
     let size = bb.diagonal().max(d.abs());
     let tol = size * 1e-7;
@@ -519,12 +529,14 @@ pub fn offset_wire(edges: &[(Curve, f64, f64)], d: f64) -> Result<Vec<Vec<Piece2
         ts.push(r.p.t1);
         ts.sort_by(f64::total_cmp);
         ts.dedup_by(|a, b| (*a - *b).abs() < 1e-12 * (1.0 + b.abs()));
-        // Cuts closer together than the tolerance are one (the ends stay).
+        // Cuts closer together than the tolerance are one (the ends stay). Not the two cuts of
+        // a self-crossing, which meet at one point with a loop between (a swallowtail).
         let mut merged: Vec<f64> = Vec::new();
+        let near = |a: f64, b: f64| (r.p.c.point(a) - r.p.c.point(b)).norm() < tol * 10.0;
         for (i, &t) in ts.iter().enumerate() {
             let last = i + 1 == ts.len();
             match merged.last() {
-                Some(&m) if (r.p.c.point(t) - r.p.c.point(m)).norm() < tol * 10.0 => {
+                Some(&m) if near(t, m) && [0.25, 0.5, 0.75].iter().all(|f| near(m + (t - m) * f, m)) => {
                     if last {
                         *merged.last_mut().unwrap() = t;
                     }
