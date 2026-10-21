@@ -8,7 +8,6 @@ build = "build.rs"
 
 [dependencies]
 bevy.workspace = true
-directories.workspace = true
 cadrs_app.workspace = true
 cadrs_core.workspace = true
 cadrs_harness.workspace = true

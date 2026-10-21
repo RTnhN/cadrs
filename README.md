@@ -84,14 +84,16 @@ cd cadrs
 cargo run --release
 ```
 
-On Linux, register the app launcher and cube icon after building:
+To install the checkout for your user, with a launcher entry and the app icon:
 
 ```sh
-cargo run --release -- --install-desktop
+cargo install-local
 ```
 
-This installs a user-local desktop entry for the current executable. Restart cadrs afterward
-so Wayland docks can match it to the launcher. Re-run the command if you move the executable.
+This builds in release and copies the app and its libraries to `~/.local/opt/cadrs` with
+`~/.local/bin/cadrs` and a `cadrs.desktop` entry (Linux), to `~/Applications/cadrs.app` (macOS),
+or to `%LOCALAPPDATA%\Programs\cadrs` with a Start Menu shortcut (Windows). Run it again to
+update the installed copy.
 
 On macOS, CMake from Homebrew (`brew install cmake`) and the Xcode command line tools
 (`xcode-select --install`) are enough; it builds and runs natively on Apple Silicon (Metal).

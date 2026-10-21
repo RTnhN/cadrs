@@ -1,66 +1,214 @@
-//! `cadrs --install`: installs this executable for the current user (Linux), so a checkout can be
-//! the source of truth for the cadrs on a machine. `cargo install-local` (an alias in
+//! `cadrs --install`: installs this executable for the current user, so a checkout can be the
+//! source of truth for the cadrs on a machine. `cargo install-local` (an alias in
 //! `.cargo/config.toml`) builds in release and runs it.
 //!
-//! - `~/.local/opt/cadrs/`: a stripped copy of the executable and the built-in `libraries/`,
-//!   which the app reads beside itself. A copy, so rebuilding the checkout never pulls the
-//!   executable from under a running install.
-//! - `~/.local/bin/cadrs`: a symlink to it.
-//! - `~/.local/share/applications/cadrs.desktop` and its icon. The window's Wayland app id is
-//!   `cadrs` (see `cadrs_harness::default_plugins`), which ties the window to this entry.
+//! The executable is copied with the built-in `libraries/` beside it (the app reads them there),
+//! so rebuilding the checkout never pulls the executable from under a running install. The new
+//! install is assembled beside the old one and then swapped in.
+//!
+//! - **Linux**: `~/.local/opt/cadrs/` (the executable stripped: the debug symbols are a third of
+//!   it), `~/.local/bin/cadrs` linked to it, and `~/.local/share/applications/cadrs.desktop` with
+//!   the icon. The window's Wayland app id is `cadrs` (see `cadrs_harness::default_plugins`),
+//!   which ties the window to this entry.
+//! - **macOS**: an app bundle, `~/Applications/cadrs.app` (`Contents/MacOS/` the executable and
+//!   `libraries/`, `Contents/Resources/cadrs.icns`, `Contents/Info.plist`), so Launchpad and
+//!   Spotlight find it. Not stripped: that would break the linker's ad-hoc code signature, which
+//!   Apple Silicon needs to run it.
+//! - **Windows**: `%LOCALAPPDATA%\Programs\cadrs\` and a Start Menu shortcut (made through
+//!   PowerShell's `WScript.Shell`); the shortcut takes its icon from the executable's own icon
+//!   resource (`crates/cadrs/build.rs`).
 
 use std::path::{Path, PathBuf};
 
+/// The app icon, as the window and the Windows executable have it (`cadrs_app::app_icon`).
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+const ICON: &[u8] = include_bytes!("../../../assets/icons/cadrs.png");
+#[cfg(target_os = "linux")]
 const DESKTOP: &str = include_str!("../../../tools/linux/cadrs.desktop");
-const ICON: &str = include_str!("../../../tools/linux/cadrs.svg");
 
+fn err(what: &str, p: &Path, e: std::io::Error) -> String {
+    format!("cannot {what} {}: {e}", p.display())
+}
+
+fn env_dir(name: &str) -> Result<PathBuf, String> {
+    std::env::var_os(name).filter(|v| !v.is_empty()).map(PathBuf::from).ok_or_else(|| format!("{name} is not set"))
+}
+
+/// Installs this build. Returns where it went.
 pub fn run() -> Result<PathBuf, String> {
-    let home = std::env::var_os("HOME").map(PathBuf::from).ok_or("HOME is not set")?;
     let exe = std::env::current_exe().map_err(|e| format!("cannot find this executable: {e}"))?;
     let libraries = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../libraries");
-    let prefix = home.join(".local/opt/cadrs");
-    let err = |what: &str, p: &Path, e: std::io::Error| format!("cannot {what} {}: {e}", p.display());
+    let root = install_root()?;
 
-    // Assemble the new install beside the old one, then swap them.
-    let staging = prefix.with_extension("new");
-    let old = prefix.with_extension("old");
+    let staging = root.with_extension("new");
+    let old = root.with_extension("old");
     for d in [&staging, &old] {
         if d.exists() {
             std::fs::remove_dir_all(d).map_err(|e| err("remove", d, e))?;
         }
     }
-    std::fs::create_dir_all(&staging).map_err(|e| err("create", &staging, e))?;
-    let installed = staging.join("cadrs");
+    let bin = staging.join(bin_dir());
+    std::fs::create_dir_all(&bin).map_err(|e| err("create", &bin, e))?;
+    let installed = bin.join(format!("cadrs{}", std::env::consts::EXE_SUFFIX));
     std::fs::copy(&exe, &installed).map_err(|e| err("copy", &exe, e))?;
-    // The debug symbols are a third of the executable; without `strip` the copy keeps them.
+    #[cfg(target_os = "linux")]
     let _ = std::process::Command::new("strip").arg(&installed).status();
-    copy_dir(&libraries, &staging.join("libraries")).map_err(|e| err("copy", &libraries, e))?;
-    if prefix.exists() {
-        std::fs::rename(&prefix, &old).map_err(|e| err("move", &prefix, e))?;
+    copy_dir(&libraries, &bin.join("libraries")).map_err(|e| err("copy", &libraries, e))?;
+    #[cfg(target_os = "macos")]
+    write_bundle(&staging)?;
+    if root.exists() {
+        std::fs::rename(&root, &old).map_err(|e| err("move", &root, e))?;
     }
-    std::fs::rename(&staging, &prefix).map_err(|e| err("move", &staging, e))?;
+    std::fs::rename(&staging, &root).map_err(|e| err("move", &staging, e))?;
     if old.exists() {
         std::fs::remove_dir_all(&old).map_err(|e| err("remove", &old, e))?;
     }
+    launcher(&root.join(bin_dir()).join(format!("cadrs{}", std::env::consts::EXE_SUFFIX)))?;
+    Ok(root)
+}
 
+/// The folder the install replaces as a whole.
+fn install_root() -> Result<PathBuf, String> {
+    #[cfg(target_os = "linux")]
+    return Ok(env_dir("HOME")?.join(".local/opt/cadrs"));
+    #[cfg(target_os = "macos")]
+    return Ok(env_dir("HOME")?.join("Applications/cadrs.app"));
+    #[cfg(target_os = "windows")]
+    return Ok(env_dir("LOCALAPPDATA")?.join("Programs").join("cadrs"));
+    #[cfg(not(any(target_os = "linux", target_os = "macos", target_os = "windows")))]
+    return Err("--install supports Linux, macOS and Windows".into());
+}
+
+/// Where the executable and `libraries/` go inside the install.
+fn bin_dir() -> &'static str {
+    if cfg!(target_os = "macos") { "Contents/MacOS" } else { "" }
+}
+
+#[cfg(target_os = "linux")]
+fn launcher(installed: &Path) -> Result<(), String> {
+    let home = env_dir("HOME")?;
     let bin = home.join(".local/bin");
     let apps = home.join(".local/share/applications");
-    let icons = home.join(".local/share/icons/hicolor/scalable/apps");
+    let icons = home.join(".local/share/icons/hicolor/256x256/apps");
     for d in [&bin, &apps, &icons] {
         std::fs::create_dir_all(d).map_err(|e| err("create", d, e))?;
     }
     let link = bin.join("cadrs");
     let _ = std::fs::remove_file(&link);
-    std::os::unix::fs::symlink(prefix.join("cadrs"), &link).map_err(|e| err("link", &link, e))?;
-    let icon = icons.join("cadrs.svg");
+    std::os::unix::fs::symlink(installed, &link).map_err(|e| err("link", &link, e))?;
+    let icon = icons.join("cadrs.png");
     std::fs::write(&icon, ICON).map_err(|e| err("write", &icon, e))?;
     // The icon by its path: a user hicolor theme without an index.theme keeps a stale icon cache
     // that hides a new icon named by theme name.
-    let desktop = DESKTOP.replace("@EXEC@", &prefix.join("cadrs").to_string_lossy()).replace("@ICON@", &icon.to_string_lossy());
+    let desktop = DESKTOP.replace("@EXEC@", &installed.to_string_lossy()).replace("@ICON@", &icon.to_string_lossy());
     let entry = apps.join("cadrs.desktop");
     std::fs::write(&entry, desktop).map_err(|e| err("write", &entry, e))?;
     let _ = std::process::Command::new("update-desktop-database").arg(&apps).stderr(std::process::Stdio::null()).status();
-    Ok(prefix)
+    Ok(())
+}
+
+/// The bundle's `Info.plist` and icon.
+#[cfg(target_os = "macos")]
+fn write_bundle(bundle: &Path) -> Result<(), String> {
+    let contents = bundle.join("Contents");
+    let resources = contents.join("Resources");
+    std::fs::create_dir_all(&resources).map_err(|e| err("create", &resources, e))?;
+    let icns = resources.join("cadrs.icns");
+    std::fs::write(&icns, icns_of_png(ICON)).map_err(|e| err("write", &icns, e))?;
+    let plist = contents.join("Info.plist");
+    std::fs::write(&plist, info_plist(env!("CARGO_PKG_VERSION"))).map_err(|e| err("write", &plist, e))
+}
+
+/// The bundle is the launcher; Launch Services is told about it so it shows at once.
+#[cfg(target_os = "macos")]
+fn launcher(installed: &Path) -> Result<(), String> {
+    const LSREGISTER: &str = "/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister";
+    if let Some(bundle) = installed.ancestors().nth(3) {
+        let _ = std::process::Command::new(LSREGISTER).arg("-f").arg(bundle).status();
+    }
+    Ok(())
+}
+
+#[cfg(target_os = "windows")]
+fn launcher(installed: &Path) -> Result<(), String> {
+    let programs = env_dir("APPDATA")?.join(r"Microsoft\Windows\Start Menu\Programs");
+    std::fs::create_dir_all(&programs).map_err(|e| err("create", &programs, e))?;
+    let script = shortcut_script(&programs.join("cadrs.lnk"), installed);
+    let status = std::process::Command::new("powershell")
+        .args(["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", &script])
+        .status()
+        .map_err(|e| format!("cannot run PowerShell for the Start Menu shortcut: {e}"))?;
+    if !status.success() {
+        return Err("PowerShell could not make the Start Menu shortcut".into());
+    }
+    Ok(())
+}
+
+#[cfg(not(any(target_os = "linux", target_os = "macos", target_os = "windows")))]
+fn launcher(_: &Path) -> Result<(), String> {
+    Ok(())
+}
+
+/// A PowerShell command that makes the shortcut `lnk` to `exe`, with the executable's icon.
+#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+fn shortcut_script(lnk: &Path, exe: &Path) -> String {
+    // A single-quoted PowerShell string takes everything literally but `'`, written twice.
+    let q = |p: &Path| format!("'{}'", p.to_string_lossy().replace('\'', "''"));
+    let dir = exe.parent().unwrap_or(exe);
+    format!(
+        "$s = (New-Object -ComObject WScript.Shell).CreateShortcut({}); $s.TargetPath = {}; $s.WorkingDirectory = {}; $s.IconLocation = {} + ',0'; $s.Description = 'cadrs'; $s.Save()",
+        q(lnk),
+        q(exe),
+        q(dir),
+        q(exe)
+    )
+}
+
+/// A `.icns` file holding `png` (256 × 256) as its `ic08` image: macOS reads PNG data in an icns
+/// directly.
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+fn icns_of_png(png: &[u8]) -> Vec<u8> {
+    let entry = 8 + png.len() as u32;
+    let mut out = Vec::with_capacity(8 + entry as usize);
+    out.extend_from_slice(b"icns");
+    out.extend_from_slice(&(8 + entry).to_be_bytes());
+    out.extend_from_slice(b"ic08");
+    out.extend_from_slice(&entry.to_be_bytes());
+    out.extend_from_slice(png);
+    out
+}
+
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+fn info_plist(version: &str) -> String {
+    format!(
+        r#"<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>CFBundleName</key>
+	<string>cadrs</string>
+	<key>CFBundleDisplayName</key>
+	<string>cadrs</string>
+	<key>CFBundleIdentifier</key>
+	<string>com.github.rvdende.cadrs</string>
+	<key>CFBundleExecutable</key>
+	<string>cadrs</string>
+	<key>CFBundleIconFile</key>
+	<string>cadrs</string>
+	<key>CFBundlePackageType</key>
+	<string>APPL</string>
+	<key>CFBundleShortVersionString</key>
+	<string>{version}</string>
+	<key>CFBundleVersion</key>
+	<string>{version}</string>
+	<key>LSApplicationCategoryType</key>
+	<string>public.app-category.graphics-design</string>
+	<key>NSHighResolutionCapable</key>
+	<true/>
+</dict>
+</plist>
+"#
+    )
 }
 
 fn copy_dir(from: &Path, to: &Path) -> std::io::Result<()> {
@@ -75,4 +223,38 @@ fn copy_dir(from: &Path, to: &Path) -> std::io::Result<()> {
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn an_icns_wraps_the_png_with_its_lengths() {
+        let png = [1u8, 2, 3];
+        let icns = icns_of_png(&png);
+        assert_eq!(&icns[0..4], b"icns");
+        assert_eq!(u32::from_be_bytes(icns[4..8].try_into().unwrap()) as usize, icns.len());
+        assert_eq!(&icns[8..12], b"ic08");
+        assert_eq!(u32::from_be_bytes(icns[12..16].try_into().unwrap()), 8 + 3);
+        assert_eq!(&icns[16..], &png);
+        // The real icon is a PNG, which `ic08` takes as is.
+        assert_eq!(&include_bytes!("../../../assets/icons/cadrs.png")[1..4], b"PNG");
+    }
+
+    #[test]
+    fn the_plist_names_the_executable_and_icon() {
+        let p = info_plist("1.2.3");
+        assert!(p.contains("<key>CFBundleExecutable</key>\n\t<string>cadrs</string>"));
+        assert!(p.contains("<key>CFBundleIconFile</key>\n\t<string>cadrs</string>"));
+        assert!(p.contains("<string>1.2.3</string>"));
+    }
+
+    #[test]
+    fn the_shortcut_script_quotes_its_paths() {
+        let s = shortcut_script(Path::new(r"C:\Users\o'neil\cadrs.lnk"), Path::new(r"C:\Programs\cadrs\cadrs.exe"));
+        assert!(s.contains(r"CreateShortcut('C:\Users\o''neil\cadrs.lnk')"));
+        assert!(s.contains(r"$s.TargetPath = 'C:\Programs\cadrs\cadrs.exe'"));
+        assert!(s.contains(r"$s.IconLocation = 'C:\Programs\cadrs\cadrs.exe' + ',0'"));
+    }
 }
