@@ -49,28 +49,27 @@ use super::pcurve;
 use super::topo::{co_range, Body, Coedge};
 use crate::*;
 
-/// The distance under which two points of the kinds' booleans are one: the boolean's run
-/// tolerance with the margin its merged entities carry.
+/// The distance under which two points of the kinds' booleans are one: the boolean's default
+/// tolerance ([`boolean::VTOL`]) with the margin its merged entities carry.
 fn tol() -> f64 {
-    boolean::vtol() * 10.0
+    boolean::VTOL * 10.0
 }
 
 /// The kernel operation when an input isn't a solid: the target combined with each tool in
 /// turn (as [`boolean::boolean`]), None when every input is a solid.
-pub fn boolean(k: &mut NativeKernel, op: BoolOp, target: BodyId, tools: &[BodyId]) -> Option<Result<OpResult>> {
+pub fn boolean(k: &mut NativeKernel, op: BoolOp, target: BodyId, tools: &[BodyId], opts: boolean::BoolOptions) -> Option<Result<OpResult>> {
     let mut inputs = vec![target];
     inputs.extend_from_slice(tools);
     let all_solid = inputs.iter().all(|&b| k.get(b).map(|x| kind(x) == BodyClass::Solid).unwrap_or(true));
     if all_solid {
         return None;
     }
-    Some(run(k, op, target, tools))
+    Some(run(k, op, target, tools, opts))
 }
 
-fn run(k: &mut NativeKernel, op: BoolOp, target: BodyId, tools: &[BodyId]) -> Result<OpResult> {
+fn run(k: &mut NativeKernel, op: BoolOp, target: BodyId, tools: &[BodyId], opts: boolean::BoolOptions) -> Result<OpResult> {
     let mut cur = (**k.get(target)?).clone();
     let mut origin: Vec<Vec<(BodyId, usize)>> = (0..cur.faces.len()).map(|i| vec![(target, i)]).collect();
-    let opts = boolean::BoolOptions { tol: k.tolerances(), flush: false };
     for &t in tools {
         let tb = (**k.get(t)?).clone();
         let r = combine(&cur, &tb, op, opts)?;

@@ -63,6 +63,12 @@ fn coincidence_tol(bb: &Bbox) -> f64 {
 
 /// [`surface_surface`] in parts.
 pub fn surface_surface_full(a: &Surface, ua: ((f64, f64), (f64, f64)), b: &Surface, ub: ((f64, f64), (f64, f64)), bb: &Bbox) -> Ssi {
+    surface_surface_tol(a, ua, b, ub, bb, super::boolean::VTOL)
+}
+
+/// [`surface_surface_full`] for a boolean merging points within `tol`: surfaces touching
+/// within it touch (two spheres meet in a point, not a circle that small).
+pub fn surface_surface_tol(a: &Surface, ua: ((f64, f64), (f64, f64)), b: &Surface, ub: ((f64, f64), (f64, f64)), bb: &Bbox, tol: f64) -> Ssi {
     let closed = |curves| Ssi { curves, ..Ssi::default() };
     let tc = coincidence_tol(bb);
     if a.same_domain(b, tc).is_some() {
@@ -74,10 +80,10 @@ pub fn surface_surface_full(a: &Surface, ua: ((f64, f64), (f64, f64)), b: &Surfa
     if let Some(r) = plane_extrusion(b, a, ua, bb) {
         return closed(r);
     }
-    if let Some(r) = analytic(a, b, bb) {
+    if let Some(r) = analytic(a, b, bb, tol) {
         return closed(r);
     }
-    if let Some(r) = analytic(b, a, bb) {
+    if let Some(r) = analytic(b, a, bb, tol) {
         return closed(r);
     }
     // Numeric, over the surface without an implicit form first (its points' parameters are
@@ -311,7 +317,7 @@ fn plane_n(f: &Frame) -> V3 {
 }
 
 /// Closed forms. `None` when the pair isn't handled here (try the other order, then numeric).
-fn analytic(a: &Surface, b: &Surface, bb: &Bbox) -> Option<Vec<IntCurve>> {
+fn analytic(a: &Surface, b: &Surface, bb: &Bbox, run_tol: f64) -> Option<Vec<IntCurve>> {
     let bbig = bb.grow(bb.diagonal() * 0.01 + 1e-6);
     match (a, b) {
         (Surface::Plane { f: fa }, Surface::Plane { f: fb }) => {
@@ -520,7 +526,7 @@ fn analytic(a: &Surface, b: &Surface, bb: &Bbox) -> Option<Vec<IntCurve>> {
             let l = d.norm();
             // Touching within the run's tolerance or a relative 1e-7 (a gap or overlap that
             // small): a point of tangency, not a circle (one of radius √(2rδ) would cut a sliver cap).
-            let tol = super::boolean::vtol().max(1e-7 * (r1 + r2));
+            let tol = run_tol.max(1e-7 * (r1 + r2));
             if l < 1e-12 || l > r1 + r2 - tol || l < (r1 - r2).abs() + tol {
                 return Some(vec![]);
             }

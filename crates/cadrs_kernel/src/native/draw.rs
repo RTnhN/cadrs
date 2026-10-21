@@ -2336,7 +2336,7 @@ impl NativeKernel {
         }
         let (a, b) = (self.solid_of(a)?, self.solid_of(b)?);
         // As OCCT's: faces of the two shapes on one surface stay apart.
-        let r = match super::boolean::without_merging(|| self.boolean(op, a, &[b])) {
+        let r = match super::boolean::boolean_with(self, op, a, &[b], false) {
             Err(KernelError::EmptyResult(_)) => return Ok(Shape::Empty),
             r => r?,
         };

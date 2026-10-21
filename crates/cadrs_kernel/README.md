@@ -210,10 +210,12 @@ Above these, vertices and edges carry their own tolerance (a read or healed body
 `Body::fit_tolerances`, as OCCT), and operations take the larger of their own and the entities'.
 The values an operation runs with are a `tol::Tolerances` carried by the session
 (`NativeKernel::tolerances`, `set_tolerances`; the default is the model above) and passed
-explicitly: `boolean::boolean_bodies_with(a, b, op, BoolOptions { tol, flush })`. A boolean whose
-first run leaves an open shell runs again at `Tolerances::retries` (1e-5, then 1e-4). Inside a
-run, the run's merge distance is read by its helpers through `boolean::vtol()`, which only the run
-sets, for its duration, and restores on return or panic; no environment variable changes it.
+explicitly: `boolean::boolean_bodies_with(a, b, op, BoolOptions { tol, .. })`. A boolean whose
+first run leaves an open shell runs again at `Tolerances::retries` (1e-5, then 1e-4). A run
+passes its merge distance down to its helpers and the intersections it calls as an argument
+(no thread-local or global state); `BoolOptions` also says whether faces on one surface are
+merged afterwards (`merge_coplanar`, off for the DRAW harness, as OCCT) and whether a face whose
+p-curves don't close may be returned (`allow_uv_gaps`, for callers that repair such faces).
 
 **Errors.** Every operation returns `Result<_, KernelError>`, with a message in words for the
 user. The variant says what a caller can do: `EmptyResult` (an Intersect of bodies that don't
@@ -252,12 +254,12 @@ Debug output (on stderr; results don't change):
 
 Debug switches that **change results** (to isolate a stage when a case fails; never set them
 otherwise):
-- `CADRS_NO_RETRY=1` (`boolean.rs`): no retries of a boolean at larger tolerances, to see the
-  first run's failure.
-- `CADRS_NO_SNAP=1` (`boolean.rs`): no snapping of B-spline faces onto the other body's planes
-  and cylinders before a boolean.
-- `CADRS_NO_PROPAGATE=1` (`boolean.rs`): each split face is classified on its own, without the
-  in/out propagation through its connected group.
+- `CADRS_DEBUG_NO_RETRY=1` (`boolean.rs`): no retries of a boolean at larger tolerances, to
+  see the first run's failure.
+- `CADRS_DEBUG_NO_SNAP=1` (`boolean.rs`): no snapping of B-spline faces onto the other body's
+  planes and cylinders before a boolean.
+- `CADRS_DEBUG_NO_PROPAGATE=1` (`boolean.rs`): each split face is classified on its own, without
+  the in/out propagation through its connected group.
 - `CADRS_NO_LOCAL_FILLET=1` (`blend.rs`): circular constant-radius fillets skip the local
   (boolean-free) fillet and go straight to the blend tool. `CADRS_LOCAL_FILLET_ONLY=1`: the
   opposite, a local fillet's failure is the result instead of falling back to the blend tool.
