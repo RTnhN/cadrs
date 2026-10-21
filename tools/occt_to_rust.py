@@ -30,7 +30,7 @@ IGNORED = {
     "checktrinfo", "dtyp", "whatis", "tolerance", "checkcontinuity", "bfillds", "setflags",
     "brunparallel", "bnondestructive", "bfuzzyvalue", "bglue", "bcheckinverted", "buseobb", "bdrawwarnshapes", "bsimplify",
     "setfillhistory", "savehistory", "tclean", "incmesh", "tolblend", "checkfaults", "dversion", "dsetsignal", "testgrid", "datadir", "locate_data_file",
-    "fsameparameter", "encoderegularity",
+    "fsameparameter", "encoderegularity", "bopcheck",
 }
 
 
@@ -84,6 +84,7 @@ class Case:
         self.sweep = None  # mksweep's spine, setsweep's mode and the sections added
         self.evol = None  # mkevol's result name, shape and the edges' radius laws
         self.feat = None  # the form feature featprism/featrevol/featdprism defined
+        self.eval_compounds = {}  # `eval compound [explode s e] … name`: name -> the shapes
         self.surfaces = {}  # mksurface's surfaces of faces: name -> the face
 
     def num(self, tok):
@@ -237,6 +238,26 @@ class Case:
         elif c == "polyline" and len(a) >= 7 and (len(a) - 1) % 3 == 0:
             pts = [f"[{L(a[i])}, {L(a[i + 1])}, {L(a[i + 2])}]" for i in range(1, len(a), 3)]
             self.bind(a[0], f"k.polyline(&[{', '.join(pts)}])?")
+        elif c == "DT_SplitByNumber" and len(a) in (3, 4):
+            if len(a) == 3:
+                self.bind(a[0], f"k.split_by_number({self.shape(a[1])}, {int(self.num(a[2]))}, None)?")
+            else:
+                self.bind(a[0], f"k.split_by_number({self.shape(a[1])}, 0, Some(({int(self.num(a[2]))}, {int(self.num(a[3]))})))?")
+        elif c == "polyvertex" and len(a) >= 3:
+            self.bind(a[0], f"k.polyvertex(&[{', '.join(self.shape(x) for x in a[1:])}])?")
+        elif c == "fixshape" and len(a) >= 2:
+            ang, wid, i = 0.0, -1.0, 2
+            while i < len(a):
+                if a[i] == "-maxtaila" and i + 1 < len(a):
+                    ang = self.num(a[i + 1])
+                elif a[i] == "-maxtailw" and i + 1 < len(a):
+                    wid = self.num(a[i + 1])
+                else:
+                    raise Unsupported(f"fixshape {a[i]}")
+                i += 2
+            if wid < 0:
+                raise Unsupported("fixshape without its tail fix")
+            self.bind(a[0], f"k.fixshape_tails({self.shape(a[1])}, {ang!r}, {wid!r})?")
         elif c == "mkplane" and len(a) == 2:
             self.bind(a[0], f"k.mkplane({self.shape(a[1])})?")
         elif c == "add" and len(a) == 2:
@@ -261,6 +282,17 @@ class Case:
                 raise Unsupported("thrusections with options")
             secs = ", ".join(self.shape(x) for x in args[3:])
             self.bind(args[0], f"k.thrusections({'true' if self.num(args[1]) else 'false'}, {'true' if self.num(args[2]) else 'false'}, &[{secs}])?")
+        elif c == "compound" and len(a) == 1 and a[0] in self.eval_compounds:
+            # `eval compound [explode s e] … name`: the sub-shapes of each explode.
+            vecs = []
+            for x in self.eval_compounds[a[0]]:
+                if x not in self.exploded:
+                    raise Unsupported(f"the shape {x}")
+                vecs.append(self.exploded[x][0])
+            parts = " ".join(f".chain({v}.iter())" for v in vecs[1:])
+            self.bind(a[0], f"draw::Shape::Compound({vecs[0]}.iter(){parts}.cloned().collect())")
+        elif c == "edgestofaces" and len(a) == 2:
+            self.bind(a[0], f"k.edgestofaces({self.shape(a[1])})?")
         elif c == "compound" and len(a) >= 1:
             self.bind(a[-1], f"k.compound_shapes(&[{', '.join(self.shape(x) for x in a[:-1])}])")
         elif c == "offsetparameter" and len(a) >= 3:
@@ -747,6 +779,8 @@ def convert(path, consts, begins=()):
             case.todo.add("free")
     if re.search(r'^\s*puts\s+"TODO\s+\S+\s+(?:ALL|All|all|Linux)\s*:.*(cannot be built|is not done)', text, re.M):
         return None, "OCCT can't build it either (its TODO)", text
+    for m in re.finditer(r"eval\s+compound((?:\s*\[explode\s+\w+\s+\w+\])+)\s+(\w+)", text):
+        case.eval_compounds[m.group(2)] = re.findall(r"\[explode\s+(\w+)\s+\w+\]", m.group(1))
     try:
         cmds, tvars = flatten([*begins, path])
         for words in cmds:

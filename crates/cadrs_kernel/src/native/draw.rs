@@ -483,6 +483,18 @@ impl NativeKernel {
         Ok(Shape::Wire(out))
     }
 
+    /// `polyvertex name v1 v2 …`: the polygon through the vertices.
+    pub fn polyvertex(&self, vs: &[&Shape]) -> Result<Shape> {
+        let pts = vs
+            .iter()
+            .map(|v| match v {
+                Shape::Vertex(p) => Ok([p.x, p.y, p.z]),
+                _ => Err(err("polyvertex takes vertices")),
+            })
+            .collect::<Result<Vec<_>>>()?;
+        self.polyline(&pts)
+    }
+
     /// `mkplane name wire`: the planar face inside a closed wire.
     pub fn mkplane(&self, w: &Shape) -> Result<Shape> {
         let edges = match w {
@@ -1228,7 +1240,7 @@ impl NativeKernel {
     pub fn sewing(&mut self, tol: f64, shapes: &[&Shape]) -> Result<Shape> {
         let mut body = super::topo::Body::default();
         for s in shapes {
-            let id = self.body_of(s)?;
+            let id = self.solid_of(s)?;
             body.append(self.get(id)?);
         }
         let mut body = super::surfacing::sew_faces(body, tol).map_err(|e| err(&e.to_string()))?;
@@ -1861,6 +1873,15 @@ impl NativeKernel {
         }
     }
 
+    /// As [`NativeKernel::feat_apply`] for a feature between limit faces: alone (`fuse` 2), it
+    /// is the tool's part outside the base (OCCT's local operation keeps that).
+    fn feat_apply_limited(&mut self, base: &Shape, tool: BodyId, fuse: i64) -> Result<Shape> {
+        match fuse {
+            0 | 1 => self.feat_apply(base, tool, fuse),
+            _ => self.bcut(&Shape::Body(tool), base),
+        }
+    }
+
     /// An extrude of the feature's profile along `dir` with `end` (and `start` along it first).
     fn feat_extrude(&mut self, pbase: &Shape, dir: V3, start: f64, end: ExtrudeEnd, symmetric: bool, scene: Vec<BodyId>) -> Result<BodyId> {
         let (profile, faces) = self.feat_profile(pbase)?;
@@ -1956,7 +1977,7 @@ impl NativeKernel {
                     spec.full = false;
                     spec.end = RevolveEnd::Angle(th);
                     let tool = crate::Kernel::revolve_with(self, &profile, &spec)?.bodies[0];
-                    return self.feat_apply(base, tool, fuse);
+                    return self.feat_apply_limited(base, tool, fuse);
                 }
                 if let (Some(f), Some(u)) = (from, until)
                     && let Some(t0) = angle_to(self, f, 0.0)
@@ -1969,7 +1990,7 @@ impl NativeKernel {
                     let (profile, faces) = self.feat_profile(&turned)?;
                     let spec = RevolveSpec { faces, ..RevolveSpec::solid(axis, Some(t1)) };
                     let tool = crate::Kernel::revolve_with(self, &profile, &spec)?.bodies[0];
-                    return self.feat_apply(base, tool, fuse);
+                    return self.feat_apply_limited(base, tool, fuse);
                 }
                 match (from, until) {
                     (None, None) => crate::Kernel::revolve_with(self, &profile, &spec)?.bodies[0],
@@ -1990,7 +2011,7 @@ impl NativeKernel {
             }
             _ => return Err(KernelError::Unsupported("this kind of form feature")),
         };
-        self.feat_apply(base, tool, fuse)
+        if from.is_some() || until.is_some() { self.feat_apply_limited(base, tool, fuse) } else { self.feat_apply(base, tool, fuse) }
     }
 
     /// `featperformval kind result value`: the feature with a length (a prism, `value` along
@@ -2650,6 +2671,123 @@ impl NativeKernel {
             Shape::Compound(v) => v.iter().map(|x| self.vprops(x)).sum::<Result<f64>>()?,
             _ => 0.0,
         })
+    }
+
+    /// `fixshape result shape -maxtaila degrees -maxtailw width` (ShapeFix with its wire-tail
+    /// fix, `native::tails`): the faces' tails removed. A lone face stays a face (no shell).
+    pub fn fixshape_tails(&mut self, s: &Shape, max_angle: f64, max_width: f64) -> Result<Shape> {
+        let (mut body, lone) = match s {
+            Shape::Face { .. } => {
+                let b = self.sheet_of_face(s)?;
+                ((**self.get(b)?).clone(), true)
+            }
+            Shape::BodyFace(b, f) => (super::kernel::subset(self.get(*b)?, &[f.0 as usize], false), true),
+            Shape::Body(b) => {
+                let body = (**self.get(*b)?).clone();
+                let lone = body.faces.len() == 1 && body.solids.is_empty();
+                (body, lone)
+            }
+            _ => return Err(KernelError::Unsupported("fixshape of this kind of shape")),
+        };
+        super::tails::fix_tails(&mut body, max_angle.to_radians(), max_width)?;
+        if lone {
+            body.shells.clear();
+        }
+        Ok(Shape::Body(self.insert(body)))
+    }
+
+    /// `DT_SplitByNumber result face parts` and `DT_SplitByNumber result face nu nv`
+    /// (`native::split_area`): the face divided into patches.
+    pub fn split_by_number(&mut self, f: &Shape, parts: usize, fixed: Option<(usize, usize)>) -> Result<Shape> {
+        let (b, fi) = match f {
+            Shape::BodyFace(b, id) => (*b, id.0 as usize),
+            Shape::Body(b) if self.get(*b)?.faces.len() == 1 => (*b, 0),
+            Shape::Face { .. } => (self.sheet_of_face(f)?, 0),
+            _ => return Err(KernelError::Unsupported("DT_SplitByNumber of this kind of shape")),
+        };
+        if let Some(out) = super::split_area::split_face(self.get(b)?, fi, parts, fixed)? {
+            return Ok(Shape::Body(self.insert(out)));
+        }
+        // A trimmed face: each cell's region in space (a plane's rectangle, or a sector and a
+        // slab of a sphere's or a cylinder's) cut out of it.
+        let (cells, _) = super::split_area::cells(self.get(b)?, fi, parts, fixed)?;
+        let face = super::kernel::subset(self.get(b)?, &[fi], false);
+        let surf = face.faces[0].surf.clone();
+        let sheet = Shape::Body(self.insert(face));
+        let big = crate::Kernel::bounding_box(self, self.body_of(&sheet)?).map(|bb| (bb.max - bb.min).norm()).unwrap_or(1.0).max(1.0) * 4.0;
+        let mut pieces: Vec<Shape> = Vec::new();
+        for ((u0, u1), (v0, v1)) in cells {
+            let region = match &surf {
+                Surface::Plane { f } => {
+                    let z = f.x.cross(&f.y);
+                    let ax = Ax3 { origin: f.o + f.x * u0 + f.y * v0 - z * big, z, x: f.x };
+                    self.box_on(&ax, u1 - u0, v1 - v0, 2.0 * big)?
+                }
+                Surface::Sphere { f, r } => self.sector(f, u0, u1, r * v0.sin(), r * v1.sin(), big)?,
+                Surface::Cylinder { f, .. } => self.sector(f, u0, u1, v0, v1, big)?,
+                _ => return Err(KernelError::Unsupported("dividing trimmed faces of this surface")),
+            };
+            match self.bcommon(&sheet, &region)? {
+                Shape::Empty => {}
+                p => pieces.push(p),
+            }
+        }
+        let mut body = super::topo::Body::default();
+        for p in &pieces {
+            let pb = self.body_of(p)?;
+            let _ = body.append(self.get(pb)?);
+        }
+        Ok(Shape::Body(self.insert(body)))
+    }
+
+    /// The solid between the half planes at angles `a0` and `a1` about a frame's z axis (less
+    /// than a half turn apart) and the heights `z0` and `z1` along it, `big` across.
+    fn sector(&mut self, f: &Frame, a0: f64, a1: f64, z0: f64, z1: f64, big: f64) -> Result<Shape> {
+        let at = |a: f64, r: f64, z: f64| f.o + (f.x * a.cos() + f.y * a.sin()) * r + f.z * z;
+        let am = 0.5 * (a0 + a1);
+        let rm = big / ((a1 - a0) / 4.0).cos();
+        let ring = |z: f64| [at(0.0, 0.0, z), at(a0, big, z), at(am, rm, z), at(a1, big, z)];
+        let (lo, hi) = (ring(z0.min(z1)), ring(z0.max(z1)));
+        let mut tris: Vec<[P3; 3]> = vec![[lo[0], lo[2], lo[1]], [lo[0], lo[3], lo[2]], [hi[0], hi[1], hi[2]], [hi[0], hi[2], hi[3]]];
+        for k in 0..4 {
+            let j = (k + 1) % 4;
+            tris.push([lo[k], lo[j], hi[j]]);
+            tris.push([lo[k], hi[j], hi[k]]);
+        }
+        let b = crate::Kernel::mesh_solid(self, &tris, 1e-9 * big)?;
+        Ok(Shape::Body(b))
+    }
+
+    /// `edgestofaces result edges` (`native::edges_faces`): the planar faces the edges
+    /// enclose, as a compound.
+    pub fn edgestofaces(&self, s: &Shape) -> Result<Shape> {
+        fn gather(k: &NativeKernel, s: &Shape, out: &mut Vec<(Curve, f64, f64)>) -> Result<()> {
+            match s {
+                Shape::Edge(e) => out.push((e.curve.clone(), e.t0, e.t1)),
+                Shape::Wire(w) => out.extend(w.iter().map(|e| (e.curve.clone(), e.t0, e.t1))),
+                Shape::BodyEdge(b, id) => {
+                    let e = k.get(*b)?.edges.get(id.0 as usize).ok_or_else(|| err("an unknown edge"))?;
+                    out.push((e.curve.clone(), e.t[0], e.t[1]));
+                }
+                Shape::Compound(v) => {
+                    for x in v {
+                        gather(k, x, out)?;
+                    }
+                }
+                Shape::Empty => {}
+                _ => return Err(KernelError::Unsupported("edgestofaces of shapes other than edges")),
+            }
+            Ok(())
+        }
+        let mut edges = Vec::new();
+        gather(self, s, &mut edges)?;
+        let faces = super::edges_faces::edges_to_faces(&edges)?;
+        Ok(Shape::Compound(
+            faces
+                .into_iter()
+                .map(|(plane, loops)| Shape::Face { plane, loops: loops.into_iter().map(|l| l.into_iter().map(|(curve, t0, t1)| DEdge { curve, t0, t1 }).collect()).collect() })
+                .collect(),
+        ))
     }
 
     /// `checkprops shape -s empty` (and -v, -l): nothing there.

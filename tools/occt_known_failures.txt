@@ -96,8 +96,6 @@ boolean bcommon_2d_p3
 boolean bcommon_2d_p5
 boolean bcommon_2d_p7
 boolean bcommon_2d_p8
-boolean bcommon_simple_h4
-boolean bcommon_simple_h5
 boolean bcut_2d_a8
 boolean bcut_2d_n5
 boolean bcut_2d_p8
@@ -122,14 +120,10 @@ boolean bcut_complex_f9
 boolean bcut_complex_h4
 boolean bcut_complex_i2
 boolean bcut_complex_k4
-boolean bcut_complex_k7
 boolean bcut_complex_l4
-boolean bcut_complex_l5
-boolean bcut_complex_m3
 boolean bcut_complex_n6
 boolean bcut_complex_o5
 boolean bcut_complex_p7
-boolean bcut_complex_q3
 boolean bfuse_2d_a7
 boolean bfuse_2d_a9
 boolean bfuse_2d_b2
@@ -146,9 +140,6 @@ boolean bfuse_2d_d1
 boolean bfuse_complex_e1
 boolean bfuse_complex_i3
 boolean bfuse_complex_k6
-boolean bfuse_complex_l9
-boolean bfuse_complex_m4
-boolean bfuse_complex_n4
 boolean bfuse_complex_q7
 boolean bopcommon_2d_n5
 boolean bopcommon_2d_n7
@@ -170,13 +161,6 @@ boolean bopcommon_complex_i2
 boolean bopcommon_complex_k2
 boolean bopcommon_complex_k3
 boolean bopcommon_complex_k5
-boolean bopcommon_complex_k6
-boolean bopcommon_complex_k7
-boolean bopcommon_complex_k8
-boolean bopcommon_complex_k9
-boolean bopcommon_complex_l1
-boolean bopcommon_complex_l2
-boolean bopcommon_simple_zp7
 boolean bopcut_2d_b9
 boolean bopcut_2d_c2
 boolean bopcut_2d_c4
@@ -192,13 +176,6 @@ boolean bopcut_complex_i7
 boolean bopcut_complex_j2
 boolean bopcut_complex_k9
 boolean bopcut_complex_m6
-boolean bopcut_complex_n5
-boolean bopcut_complex_n6
-boolean bopcut_complex_n7
-boolean bopcut_complex_n8
-boolean bopcut_complex_n9
-boolean bopcut_complex_o1
-boolean bopcut_simple_zp8
 boolean bopfuse_2d_a7
 boolean bopfuse_2d_a9
 boolean bopfuse_2d_b2
@@ -219,18 +196,11 @@ boolean bopfuse_complex_j6
 boolean bopfuse_complex_k8
 boolean bopfuse_complex_l1
 boolean bopfuse_complex_m1
-boolean bopfuse_complex_m5
-boolean bopfuse_complex_m6
-boolean bopfuse_complex_m7
-boolean bopfuse_complex_m8
-boolean bopfuse_complex_m9
-boolean bopfuse_complex_n1
 boolean bopfuse_complex_n2
 boolean bopfuse_complex_n5
 boolean bopfuse_complex_n6
 boolean bopfuse_complex_o1
 boolean bopfuse_complex_o4
-boolean bopfuse_simple_zp4
 boolean bopfuse_simple_zp6
 boolean boptuc_2d_a8
 boolean boptuc_2d_m8
@@ -246,13 +216,6 @@ boolean boptuc_complex_c6
 boolean boptuc_complex_c7
 boolean boptuc_complex_d4
 boolean boptuc_complex_d8
-boolean boptuc_complex_g2
-boolean boptuc_complex_g3
-boolean boptuc_complex_g4
-boolean boptuc_complex_g5
-boolean boptuc_complex_g6
-boolean boptuc_complex_g7
-boolean boptuc_simple_zp3
 sewing tol_0_01_e5
 sewing tol_0_01_e7
 sewing tol_0_01_f5
@@ -511,12 +474,9 @@ boolean bsection_p1
 boolean bsection_p4
 boolean bsection_r9
 draft angle_b3
-draft angle_c3
-draft angle_c5
 draft angle_d6
 draft angle_e3
 draft angle_e9
-draft angle_f1
 draft angle_f6
 draft angle_f7
 draft angle_g8
@@ -609,10 +569,6 @@ feat featdprism_c6
 feat featdprism_c9
 feat featprism_a3
 feat featprism_h9
-feat featprism_i1
-feat featprism_i2
-feat featprism_i3
-feat featprism_i4
 feat featprism_i5
 feat featprism_m1
 feat featprism_o5
@@ -835,3 +791,7 @@ offset shape_type_i_c9
 offset faces_type_i_f7
 offset faces_type_i_n2
 offset shape_type_i_d1
+# heal: wire tails across faces of a shell (the edges cut are other faces' too; OCCT splits them there).
+heal wire_tails_composed_a19
+# heal: a trimmed cylinder face divided: the cells left by its holes differ from OCCT's (8 for 6).
+heal split_number_d1
