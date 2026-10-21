@@ -775,9 +775,13 @@ pub fn solid_of(
 
     // Assemble the solid, face by face.
     let mut out = Solid::default();
+    let colors = k.face_colors(body);
     let mut kernel_planes: Vec<Option<kernel::Plane>> = Vec::new();
     let mut remap: Vec<u32> = vec![u32::MAX; pos.len()];
     for (name, fis) in shown.iter().zip(&members) {
+        if let Some([r, g, b, alpha]) = fis.iter().find_map(|&fi| colors.get(fi).copied().flatten()) {
+            out.looks.push((*name, crate::appearance::Appearance::rgb(r, g, b).with_alpha(alpha)));
+        }
         let first_triangle = out.triangle_count();
         for &fi in fis {
             for &t in &face_tris[fi] {

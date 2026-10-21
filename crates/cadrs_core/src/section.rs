@@ -176,7 +176,7 @@ fn cap_loops(k: &dyn Kernel, body: BodyId, frame: &ViewFrame, depth: f64) -> Res
 
 /// A section view's cutting plane: the material on the side `normal` points to is removed (the
 /// eye looks at the cut from that side).
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct SectionPlane {
     pub origin: [f64; 3],
     /// Unit length.
@@ -185,7 +185,7 @@ pub struct SectionPlane {
 
 /// The faces a section leaves on its plane for one part: its triangles and boundary loops (3D,
 /// in the part's placed coordinates) and its exact area (mm², the kernel's).
-#[derive(Debug, Clone, Default, PartialEq)]
+#[derive(Debug, Clone, Default, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct Cap {
     pub triangles: Vec<[[f32; 3]; 3]>,
     pub loops: Vec<Vec<[f32; 3]>>,
@@ -263,7 +263,7 @@ pub fn section_cap(k: &mut dyn Kernel, body: BodyId, plane: &SectionPlane) -> Re
 
 /// One part to section: its Part Studio's features, the part, and where it is placed (an
 /// assembly's occurrence; the identity in a Part Studio). `view_part` is its id on screen.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct SectionItem {
     pub view_part: crate::ids::PartId,
     pub features: Vec<crate::document::Feature>,
@@ -274,7 +274,22 @@ pub struct SectionItem {
 /// The caps of `items` cut by `plane`, worked out on the kernel thread (each part's exact body,
 /// placed, cut by the half-space). Parts that fail or that the plane misses are left out.
 pub fn caps(items: Vec<SectionItem>, plane: SectionPlane) -> crate::rebuild::PendingJob<Vec<(crate::ids::PartId, Cap)>> {
-    crate::rebuild::run_on_worker(move |r| caps_on(r, &items, &plane))
+    crate::rebuild::task::run(Caps { items, plane })
+}
+
+/// [`caps`] as a [`crate::rebuild::task::Task`].
+#[derive(serde::Serialize, serde::Deserialize)]
+pub(crate) struct Caps {
+    items: Vec<SectionItem>,
+    plane: SectionPlane,
+}
+
+impl crate::rebuild::task::Task for Caps {
+    const NAME: &'static str = "section-caps";
+    type Output = Vec<(crate::ids::PartId, Cap)>;
+    fn run(self, r: &mut crate::rebuild::Rebuilder) -> Self::Output {
+        caps_on(r, &self.items, &self.plane)
+    }
 }
 
 #[cfg(feature = "occt")]

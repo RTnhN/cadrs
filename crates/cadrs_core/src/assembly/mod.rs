@@ -247,6 +247,9 @@ impl InstanceSource {
 /// An instance of a part in an assembly.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Instance {
+    /// An imported instance's appearance override, over its source part's colors.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub appearance: Option<crate::appearance::Appearance>,
     pub id: InstanceId,
     pub source: InstanceSource,
     /// Its number among the instances of the same source: the `<n>` of `Motor Mount <1>`.
@@ -295,6 +298,7 @@ impl Instance {
             id,
             source,
             index: 0,
+            appearance: None,
             pose,
             hidden: false,
             fixed: false,
@@ -618,6 +622,7 @@ pub fn instance_parts(
             p.material = sp.material;
             p.properties = sp.properties;
         }
+        if let Some(a) = o.appearance { p.appearance = Some(a); p.faces.clear(); }
         parts.push(Part {
             id,
             feature: src.feature,

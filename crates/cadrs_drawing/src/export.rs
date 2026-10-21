@@ -221,7 +221,7 @@ pub struct Text {
 }
 
 /// A picture on the page.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct Picture {
     /// The image's bottom-left corner, and its bottom (`u`) and left (`v`) edges (mm): a
     /// rectangle for an inserted image, turned or mirrored for a view's (a board's layout).

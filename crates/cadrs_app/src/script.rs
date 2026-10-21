@@ -161,12 +161,12 @@ fn run_script_commands(mut msgs: MessageReader<ScriptCommand>, mut commands: Com
         }
         // P3I.8 (SM17): the legacy C-channel's STEP file (`samples::sheetmetal_legacy`).
         if let Some(path) = m.0.strip_prefix("sm-legacy-step ") {
-            write_step(path.trim(), cadrs_core::samples::sheetmetal_legacy::step);
+            write_step(path.trim(), cadrs_core::samples::StepFixture::SheetMetalLegacy);
             continue;
         }
         // P3I.8 (SM17): the legacy Case (an open box, round corner reliefs as the lesson's).
         if let Some(path) = m.0.strip_prefix("sm-legacy-case-step ") {
-            write_step(path.trim(), cadrs_core::samples::sheetmetal_legacy::case_round_step);
+            write_step(path.trim(), cadrs_core::samples::StepFixture::SheetMetalLegacyCase);
             continue;
         }
         // P3I.8 (SM18): the Heating Mantle master's depth, edited in its own studio.
@@ -1248,13 +1248,13 @@ fn open_fixture(world: &mut World, name: &str) {
 
 /// `step-fixture <path>`: the bracket pair STEP file, written now (the kernel thread builds it).
 fn step_fixture(path: &str) {
-    write_step(path, cadrs_core::samples::bracket_pair::step);
+    write_step(path, cadrs_core::samples::StepFixture::BracketPair);
 }
 
-/// Writes the STEP file `make` builds (on the kernel thread) to `path`.
-fn write_step(path: &str, make: fn(&mut cadrs_core::rebuild::Rebuilder) -> Result<Vec<u8>, String>) {
+/// Writes the STEP file of `sample` (built on the kernel) to `path`.
+fn write_step(path: &str, sample: cadrs_core::samples::StepFixture) {
     let path = std::path::PathBuf::from(path);
-    let bytes = cadrs_core::rebuild::run_on_worker(make).wait();
+    let bytes = cadrs_core::rebuild::task::run(sample).wait();
     match bytes {
         Some(Ok(b)) => {
             if let Some(dir) = path.parent() {

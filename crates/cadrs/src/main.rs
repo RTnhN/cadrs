@@ -11,6 +11,9 @@
 //! [--sketch <name>]` rebuilds a stored
 //! document and reports the features in error or warning, in detail (see [`check`]).
 //!
+//! `cadrs --kernel-process <port> <token>` is the geometry kernel the app starts for itself
+//! (`cadrs_core::rebuild::process`); `CADRS_KERNEL=thread` keeps the kernel in the app instead.
+//!
 //! Documents live in `--data-dir`, else `CADRS_DATA_DIR`, else the platform data dir
 //! (`~/.local/share/cadrs/documents`, `%APPDATA%\cadrs\documents`). Scenarios use a fresh
 //! `<out dir>/data` instead, a fixed clock and a fixed user, so their screenshots are
@@ -25,6 +28,7 @@ use cadrs_ui::CadrsUiPlugin;
 /// "Now" in scenarios: 2026-09-24 15:30 UTC.
 const SCENARIO_NOW: i64 = 1_790_263_800;
 
+mod desktop_entry;
 mod batch;
 mod check;
 
@@ -43,15 +47,36 @@ Usage:
   cadrs --headless --jobs N (--scenarios a,b,... | --all)
       Renders many scenarios, N at a time, each in its own process.
 
+  cadrs --install-desktop
+      Installs the Linux app launcher and cube icon for this executable.
+
 Documents live in --data-dir, else $CADRS_DATA_DIR, else the platform data dir
 (~/.local/share/cadrs/documents on Linux).";
 
 fn main() -> AppExit {
     // `--jobs N` / `--scenarios a,b` / `--all`: many scenarios in parallel child processes.
     let args: Vec<String> = std::env::args().skip(1).collect();
+    // The kernel process this executable starts for itself (`cadrs_core::rebuild::process`).
+    cadrs_app::register_kernel_tasks();
+    if args.first().map(String::as_str) == Some(cadrs_core::rebuild::process::ARG) {
+        return AppExit::from_code(cadrs_core::rebuild::process::main(&args[1..]) as u8);
+    }
+    // The kernel runs in a process of its own, so a crash in it costs a rebuild, not the app
+    // (`CADRS_KERNEL=thread` keeps it on a thread of this process, for debugging).
+    if std::env::var("CADRS_KERNEL").as_deref() != Ok("thread")
+        && let Ok(exe) = std::env::current_exe()
+    {
+        cadrs_core::rebuild::process::use_process(exe, Vec::new());
+    }
     if args.iter().any(|a| a == "-h" || a == "--help") {
         println!("{HELP}");
         return AppExit::Success;
+    }
+    if args.iter().any(|a| a == "--install-desktop") {
+        return match desktop_entry::install_desktop() {
+            Ok(()) => AppExit::Success,
+            Err(e) => { eprintln!("cannot install desktop launcher: {e}"); AppExit::from_code(1) }
+        };
     }
     // `--list-documents`: the store's documents with their ids, no window.
     if let Some(code) = check::list_documents(&args) {

@@ -1,8 +1,8 @@
 //! The PCB Studio tab (stage 3H, P3H.3–P3H.4; PCB1–PCB4, PCB11, X1, X6, X10), laid out like the
 //! course's `v3-interface-poster.png` and `v8-component-properties-poster.png`:
 //!
-//! - **Toolbar** (top left, icon buttons with tooltips): Import ECAD files (`upload`), Export this
-//!   board to IDF (`download`) │ Sync a Part Studio or assembly with PCB Studio
+//! - **Toolbar** (top left, icon buttons with tooltips): Import ECAD files (`file-import`), Export this
+//!   board to IDF (`file-export`) │ Sync a Part Studio or assembly with PCB Studio
 //!   (`sync-document`), Create an assembly from this ECAD data (`create-assembly`) │ the
 //!   **Search** field with its magnifier and ✕ (PCB3.3: Enter or the magnifier searches
 //!   designators, packages, part numbers and board names; the matches light up in the view and
@@ -308,13 +308,13 @@ struct SearchStep;
 pub fn toolbar(tb: &mut ChildSpawnerCommands, t: &Theme) {
     let tool = |name: &'static str, icon: &'static str, tip: &'static str| ToolButton::new(name, icon).icon_size(20.0).tooltip(tip).build(t);
     tb.spawn((
-        tool("pcb-import", "upload", "Import ECAD files"),
+        tool("pcb-import", "file-import", "Import ECAD files"),
         observe(|_: On<Activate>, mut commands: Commands| {
             commands.queue(dialogs::open_import_dialog);
         }),
     ));
     tb.spawn((
-        tool("pcb-export", "download", "Export this board to IDF"),
+        tool("pcb-export", "file-export", "Export this board to IDF"),
         NeedsBoard,
         observe(|_: On<Activate>, mut commands: Commands| {
             commands.queue(transfer::open_export_dialog);

@@ -397,7 +397,12 @@ pub fn offset_geometry(
     let joints = if closed { n } else { n.saturating_sub(1) };
     for i in 0..joints {
         let j = (i + 1) % n;
-        let (end_i, start_j) = (end_of_shape(&out[i], s), start_of_shape(&out[j], s));
+        // Lines already follow chain traversal, but arcs retain their stored CCW
+        // direction. A reversed arc enters at its end and leaves at its start.
+        let reversed_i = chain[i].1 && matches!(out[i], OffsetShape::Arc { .. });
+        let reversed_j = chain[j].1 && matches!(out[j], OffsetShape::Arc { .. });
+        let end_i = if reversed_i { start_of_shape(&out[i], s) } else { end_of_shape(&out[i], s) };
+        let start_j = if reversed_j { end_of_shape(&out[j], s) } else { start_of_shape(&out[j], s) };
         let (Some(e), Some(st)) = (end_i, start_j) else {
             continue;
         };
@@ -406,8 +411,8 @@ pub fn offset_geometry(
         } else {
             meeting_point(s, &out[i], &out[j], e.midpoint(st)).unwrap_or(e.midpoint(st))
         };
-        set_end(&mut out[i], s, meet);
-        set_start(&mut out[j], s, meet);
+        if reversed_i { set_start(&mut out[i], s, meet); } else { set_end(&mut out[i], s, meet); }
+        if reversed_j { set_end(&mut out[j], s, meet); } else { set_start(&mut out[j], s, meet); }
     }
     Ok(out)
 }
@@ -1119,6 +1124,44 @@ mod tests {
             _ => panic!("{shapes:?}"),
         }
         let _ = ArcGeom::ccw(v(0.0, 0.0), v(1.0, 0.0), v(0.0, 1.0));
+    }
+
+    #[test]
+    fn offset_tangent_line_arc_line_preserves_quarter_arc_in_both_directions() {
+        for reverse_lines in [false, true] {
+            let mut s = Sketch::new();
+            let a = v(0.0, 0.0);
+            let b = v(20.0, 0.0);
+            let c = v(30.0, 10.0);
+            let d = v(30.0, 30.0);
+            let first = if reverse_lines { line(&mut s, b, a, false) } else { line(&mut s, a, b, false) };
+            SketchOp::AddArc {
+                center: v(20.0, 10.0), start: b, end: c, construction: false,
+            }.apply(&mut s).unwrap();
+            let last = if reverse_lines { line(&mut s, d, c, false) } else { line(&mut s, c, d, false) };
+            // Picking either end may traverse the stored CCW arc backwards.
+            for seed in [first, last] {
+                let (chain, closed) = chain_of(&s, seed);
+                assert!(!closed);
+                assert_eq!(chain.len(), 3);
+                for left in [false, true] {
+                    let shapes = offset_geometry(&s, &chain, 2.0, left).unwrap();
+                    let OffsetShape::Arc { geom, .. } = shapes[1] else { panic!("missing arc") };
+                    assert!((geom.sweep - std::f64::consts::FRAC_PI_2).abs() < 1e-8, "{chain:?}: {geom:?}");
+                    let endpoints = [geom.start(), geom.end()];
+                    for shape in [shapes[0], shapes[2]] {
+                        let OffsetShape::Line(p, q) = shape else { panic!("missing line") };
+                        assert!(endpoints.iter().any(|e| e.distance(p).min(e.distance(q)) < 1e-8));
+                        let tangent = (q - p).normalize();
+                        let joint = endpoints.iter().find(|e| e.distance(p).min(e.distance(q)) < 1e-8).unwrap();
+                        assert!(tangent.dot(*joint - geom.center).abs() < 1e-8);
+                    }
+                    let mut placed = s.clone();
+                    let made = offset(&mut placed, &chain, 2.0, left, (2.0, 0.0)).unwrap();
+                    assert!((placed.arc_geom(made[1]).unwrap().sweep - std::f64::consts::FRAC_PI_2).abs() < 1e-8);
+                }
+            }
+        }
     }
 
     #[test]

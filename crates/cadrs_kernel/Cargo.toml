@@ -12,8 +12,15 @@ serde.workspace = true
 uuid.workspace = true
 opencascade = { workspace = true, optional = true }
 glam = { workspace = true, optional = true }
+cxx = { version = "1", optional = true }
+
+[build-dependencies]
+# Order the bridge build after the dependency has installed OCCT's headers (also on clean builds).
+opencascade-sys = { git = "https://github.com/rvdende/opencascade-rs", branch = "main", features = ["builtin"], optional = true }
+cxx-build = { version = "1", optional = true }
+occt-sys = { git = "https://github.com/rvdende/opencascade-rs", branch = "main", optional = true }
 
 [features]
 default = []
 # OpenCascade backend (builds OCCT 7.8.1 from source, about 6 min cold).
-occt = ["dep:opencascade", "dep:glam"]
+occt = ["dep:opencascade", "dep:glam", "dep:cxx", "dep:cxx-build", "dep:occt-sys", "dep:opencascade-sys"]

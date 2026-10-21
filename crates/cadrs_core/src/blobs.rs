@@ -45,11 +45,43 @@ pub fn hash_of(bytes: &[u8]) -> String {
 /// Keeps `bytes` in the cache and returns their hash.
 pub fn insert(bytes: Vec<u8>) -> String {
     let hash = hash_of(&bytes);
+    let mut added = None;
     if let Ok(mut c) = cache().write() {
-        c.entry(hash.clone()).or_insert_with(|| Arc::new(bytes));
+        c.entry(hash.clone()).or_insert_with(|| {
+            let b = Arc::new(bytes);
+            added = Some(b.clone());
+            b
+        });
+    }
+    if let (Some(b), Some(hook)) = (added, INSERT_HOOK.get()) {
+        hook(&hash, &b);
     }
     hash
 }
+
+/// Keeps `bytes`, whose hash is `hash`, without telling the [`set_insert_hook`] (the files the
+/// app and the kernel process pass each other, [`crate::rebuild::process`]).
+pub fn insert_known(hash: &str, bytes: Vec<u8>) {
+    if let Ok(mut c) = cache().write() {
+        c.entry(hash.to_string()).or_insert_with(|| Arc::new(bytes));
+    }
+}
+
+/// The hashes of the loaded blobs.
+pub fn hashes() -> Vec<String> {
+    cache().read().map(|c| c.keys().cloned().collect()).unwrap_or_default()
+}
+
+/// Called with each file [`insert`] adds to the cache (the kernel process sends them to the
+/// app). Set once.
+pub fn set_insert_hook(hook: InsertHook) {
+    let _ = INSERT_HOOK.set(hook);
+}
+
+/// See [`set_insert_hook`]: called with a new file's hash and bytes.
+pub type InsertHook = Box<dyn Fn(&str, &[u8]) + Send + Sync>;
+
+static INSERT_HOOK: OnceLock<InsertHook> = OnceLock::new();
 
 /// The bytes with this hash, if they are loaded.
 pub fn get(hash: &str) -> Option<Arc<Vec<u8>>> {

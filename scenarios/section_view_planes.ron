@@ -7,7 +7,7 @@
 // 03 the Right plane picked too: only the wedge past both planes goes (a corner of the bracket
 //    cut out), each cap stopping at the other plane; the Right plane is the active one (its
 //    offset arrow and rotation arc).
-// 04 Angle 25: the Right plane turned about its axis, the arc's readout "25 deg".
+// 04 Tilt 1 at 25°; 04b Tilt 2 at 15°: independent tilts with matching coloured handles.
 // 05 Offset 20 on it; 06 the Front plane's row clicked: the gizmo moves to it.
 // 07 the Include tab: Items to include (none: everything is still cut).
 // 08 the Front plane's ✕: one plane left, the Right plane turned 25°; 09 ✓: the section stays.
@@ -40,6 +40,15 @@ Scenario(
         Wait(3),
         ExpectText("section-angle-label", "25 deg"),
         Screenshot("04-right-plane-turned-25"),
+        Click(ui("section-angle-2-field")),
+        Key("Ctrl+A"),
+        Type("15"),
+        Key("Enter"),
+        MoveTo(1420, 900),
+        Wait(3),
+        ExpectText("section-angle-label", "15 deg"),
+        ExpectText("section-angle-label", "25 deg"),
+        Screenshot("04b-two-independent-tilts"),
         Click(ui("section-offset-field")),
         Key("Ctrl+A"),
         Type("20"),

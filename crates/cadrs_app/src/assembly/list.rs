@@ -5,7 +5,8 @@
 //! freedom). The **eye** at the right end shows on hover (always, crossed out, on a hidden
 //! instance, whose row is greyed) and hides or shows it. A row selects its instance (the
 //! selection the view shares); right-click opens the instance menu ([`super::menu`]). The
-//! header counts the instances.
+//! header counts the instances. Shift-click selects the displayed range from the last plain
+//! or Ctrl/Cmd-click; Ctrl/Cmd+Shift adds that range. Collapsed and filtered-out rows are skipped.
 //!
 //! P3B.4:
 //! - A **subassembly** row has the assembly icon (bracketed when rigid) and a ▸ that opens it:
@@ -58,6 +59,48 @@ impl Plugin for InstanceListPlugin {
         .add_observer(on_eye_click)
         .add_observer(on_lock_click)
         .add_observer(on_sub_toggle);
+    }
+}
+
+/// Persistent row identity survives list rebuilds; the container and document/tab scope keep
+/// an anchor from leaking into another tree. Only currently displayed pickable rows range.
+#[derive(Default)]
+pub(crate) struct RangeAnchor {
+    anchor: Option<((cadrs_core::DocumentId, cadrs_core::ElementId, Entity), Pick)>,
+}
+
+impl RangeAnchor {
+    pub(crate) fn select(
+        &mut self,
+        scope: (cadrs_core::DocumentId, cadrs_core::ElementId, Entity),
+        order: &[Pick],
+        clicked: Pick,
+        selection: &crate::viewport::Selection,
+        shift: bool,
+        additive: bool,
+    ) -> crate::viewport::RowSelect {
+        use crate::viewport::RowSelect;
+        if shift {
+            let from = self.anchor.filter(|(s, p)| *s == scope && selection.contains(*p))
+                .and_then(|(_, p)| order.iter().position(|r| *r == p));
+            if let (Some(a), Some(b)) = (from, order.iter().position(|r| *r == clicked)) {
+                let mut range = if additive { selection.0.clone() } else { Vec::new() };
+                for p in &order[a.min(b)..=a.max(b)] {
+                    if !range.contains(p) { range.push(*p); }
+                }
+                return RowSelect::Range(range);
+            }
+        }
+        self.anchor = Some((scope, clicked));
+        // A missing anchor starts a fresh selection, never toggles off the Shift endpoint.
+        if additive && !shift { RowSelect::Toggle }
+        else if shift && additive {
+            let mut range = selection.0.clone();
+            if !range.contains(&clicked) { range.push(clicked); }
+            RowSelect::Range(range)
+        }
+        else if shift { RowSelect::Range(vec![clicked]) }
+        else { RowSelect::Only }
     }
 }
 
@@ -962,4 +1005,84 @@ fn on_row_menu(ev: On<ContextMenuRequested>, q: Query<&InstanceRow>, mut command
         }
         super::menu::open_instance_menu(world, at, instance, super::triad::TriadHandle::None);
     });
+}
+
+#[cfg(test)]
+mod range_tests {
+    use super::*;
+    use crate::viewport::{RowSelect, Selection};
+
+    fn picks(n: usize) -> Vec<Pick> {
+        (0..n).map(|_| Pick::Part(InstanceId::new().part_id())).collect()
+    }
+
+    fn apply(selection: &mut Selection, clicked: Pick, how: RowSelect) {
+        match how {
+            RowSelect::Only => selection.0 = if selection.0 == [clicked] { vec![] } else { vec![clicked] },
+            RowSelect::Toggle => selection.toggle(clicked),
+            RowSelect::Range(rows) => selection.0 = rows,
+        }
+    }
+
+    #[test]
+    fn forward_reverse_shrinking_and_additive_ranges_keep_the_anchor() {
+        let order = picks(54);
+        let scope = (cadrs_core::DocumentId::new(), cadrs_core::ElementId::new(), Entity::PLACEHOLDER);
+        let mut anchor = RangeAnchor::default();
+        let mut selection = Selection::default();
+        let mut click = |index, shift, additive| {
+            let p = order[index];
+            let how = anchor.select(scope, &order, p, &selection, shift, additive);
+            apply(&mut selection, p, how);
+            selection.0.clone()
+        };
+        assert_eq!(click(20, false, false), order[20..21]);
+        assert_eq!(click(53, true, false), order[20..54]);
+        assert_eq!(click(25, true, false), order[20..26]);
+        assert_eq!(click(0, true, false), order[0..21]);
+        assert_eq!(click(20, true, false), order[20..21]);
+        assert_eq!(click(53, false, true), vec![order[20], order[53]]);
+        let additive = click(50, true, true);
+        assert_eq!(additive.len(), 5);
+        for p in [order[20], order[50], order[51], order[52], order[53]] { assert!(additive.contains(&p)); }
+        assert_eq!(click(52, true, false), order[52..54]);
+    }
+
+    #[test]
+    fn missing_hidden_deleted_or_deselected_anchor_starts_at_endpoint() {
+        let order = picks(5);
+        let scope = (cadrs_core::DocumentId::new(), cadrs_core::ElementId::new(), Entity::PLACEHOLDER);
+        for case in 0..6 {
+            let mut anchor = RangeAnchor::default();
+            let mut selection = Selection(vec![order[0]]);
+            if case != 0 { anchor.select(scope, &order, order[0], &selection, false, false); }
+            let mut shown = order.clone();
+            let mut new_scope = scope;
+            match case {
+                1 => { shown.remove(0); } // Filtered, deleted or in a collapsed branch.
+                2 => selection.0.clear(),
+                3 => new_scope.0 = cadrs_core::DocumentId::new(),
+                4 => new_scope.1 = cadrs_core::ElementId::new(),
+                5 => { let mut world = World::new(); new_scope.2 = world.spawn_empty().id(); }
+                _ => {},
+            }
+            assert_eq!(anchor.select(new_scope, &shown, order[4], &selection, true, false), RowSelect::Range(vec![order[4]]), "case {case}");
+            selection.0 = vec![order[4]];
+            assert_eq!(anchor.select(new_scope, &shown, order[3], &selection, true, false), RowSelect::Range(vec![order[3], order[4]]));
+        }
+    }
+
+    #[test]
+    fn visible_order_and_occurrences_are_respected_without_duplicate_picks() {
+        let order = picks(5);
+        let scope = (cadrs_core::DocumentId::new(), cadrs_core::ElementId::new(), Entity::PLACEHOLDER);
+        let mut anchor = RangeAnchor::default();
+        let selection = Selection(vec![order[3], order[0]]);
+        anchor.select(scope, &order, order[3], &selection, false, false);
+        // Reordered/filter results (including expanded child rows) define the range.
+        let shown = vec![order[4], order[3], order[1], order[1], order[0]];
+        assert_eq!(anchor.select(scope, &shown, order[0], &selection, true, false), RowSelect::Range(vec![order[3], order[1], order[0]]));
+        assert_eq!(anchor.select(scope, &[], order[2], &selection, true, true), RowSelect::Range(vec![order[3], order[0], order[2]]));
+        assert_eq!(anchor.select(scope, &order, order[0], &selection, false, true), RowSelect::Toggle);
+    }
 }

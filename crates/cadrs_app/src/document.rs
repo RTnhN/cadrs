@@ -428,6 +428,7 @@ fn top_bar(root: &mut ChildSpawnerCommands, t: &Theme, doc_name: &str) {
             }),
             observe(|ev: On<MenuAction>, q: Query<Entity, With<DocumentName>>, mut commands: Commands| {
                 match ev.item.as_str() {
+                    "document-menu-export" => commands.queue(crate::native_document::open_export),
                     "document-menu-units" => commands.queue(crate::units_dialog::open_units_dialog),
                     "document-menu-full-rebuild" => commands.queue(full_rebuild),
                     // P3D.3: a version of the document as it is.
@@ -868,6 +869,7 @@ fn document_menu() -> Menu {
     Menu::new("document-menu-popup")
         .min_width(200.0)
         .item(MenuItem::new("document-menu-rename", "Rename document…").icon("edit"))
+        .item(MenuItem::new("document-menu-export", "Export document…").icon("file-export"))
         .item(MenuItem::new("document-menu-copy", "Copy workspace…").icon("copy").planned())
         .item(
             MenuItem::new("document-menu-properties", "Properties…")
@@ -979,7 +981,7 @@ fn insert_menu(paste: Option<String>) -> Menu {
         )
         .item(
             // P3F.2: STEP and IGES files as new tabs.
-            MenuItem::new("import-files", "Import…").icon("upload"),
+            MenuItem::new("import-files", "Import…").icon("file-import"),
         );
     match paste {
         Some(name) => menu
@@ -1499,6 +1501,7 @@ fn part_studio_toolbar(tb: &mut ChildSpawnerCommands, t: &Theme) {
             ("shell", "shell", false, "Shell"),
             ("hole", "hole", false, "Hole"),
             ("thread", "thread", false, "Thread"),
+            ("move-face", "offset", true, "Move face, Delete face, Simplify"),
         ],
         &[
             ("pattern", "linear-pattern", true, "Linear pattern"),
@@ -1639,6 +1642,33 @@ fn part_studio_toolbar(tb: &mut ChildSpawnerCommands, t: &Theme) {
                 ));
                 continue;
             }
+            if *name == "move-face" {
+                // The direct edits: Move face, and from its menu Delete face and Simplify.
+                tb.spawn((
+                    ToolButton::new(*name, *icon_name).dropdown(true).tooltip(*tip).build(t),
+                    observe(
+                        |a: On<Activate>, q: Query<(&ComputedNode, &UiGlobalTransform)>, theme: Res<Theme>, mut commands: Commands| {
+                            let at = q.get(a.entity).map_or(Vec2::ZERO, |(n, t)| {
+                                let s = n.inverse_scale_factor();
+                                let size = n.size() * s;
+                                t.translation * s + Vec2::new(-size.x / 2.0, size.y / 2.0 + 2.0)
+                            });
+                            let anchor = cadrs_ui::menu::open_context_menu(&mut commands, at, direct_edit_menu().build(&theme));
+                            commands.entity(anchor).observe(|ev: On<MenuAction>, mut commands: Commands| {
+                                use cadrs_core::direct_edit::DirectEditKind;
+                                let kind = match ev.item.as_str() {
+                                    "direct-edit-menu-move-face" => DirectEditKind::MoveFace,
+                                    "direct-edit-menu-delete-face" => DirectEditKind::DeleteFace,
+                                    "direct-edit-menu-simplify" => DirectEditKind::Simplify,
+                                    _ => return,
+                                };
+                                commands.queue(move |world: &mut World| crate::applied::begin(world, crate::applied::AppliedKind::DirectEdit(kind)));
+                            });
+                        },
+                    ),
+                ));
+                continue;
+            }
             if let Some(kind) = crate::applied_dialog::toolbar_kind(name) {
                 // P3.6: Fillet, Chamfer, Shell and Hole.
                 tb.spawn((
@@ -1713,6 +1743,16 @@ fn surfacing_menu() -> Menu {
         .item(MenuItem::new("surfacing-menu-thicken", "Thicken").icon("thicken"))
         .item(MenuItem::new("surfacing-menu-fill", "Fill").icon("surface"))
         .item(MenuItem::new("surfacing-menu-helix", "Helix").icon("thread"))
+}
+
+/// The Move face button's menu: the direct edits (icon-rs has no move face, delete face or
+/// simplify icon yet: offset, delete and surface stand in).
+fn direct_edit_menu() -> Menu {
+    Menu::new("direct-edit-menu")
+        .min_width(160.0)
+        .item(MenuItem::new("direct-edit-menu-move-face", "Move face").icon("offset"))
+        .item(MenuItem::new("direct-edit-menu-delete-face", "Delete face").icon("delete"))
+        .item(MenuItem::new("direct-edit-menu-simplify", "Simplify").icon("surface"))
 }
 
 /// The Sheet metal model button's ▾ (P3I.2, X1): the other sheet metal tools in Onshape's order,
@@ -2790,6 +2830,8 @@ fn clear_toasts(mut commands: Commands) {
 fn on_pick_row_activate(
     a: On<Activate>,
     q: Query<&PickRow>,
+    instance_lists: Query<(Entity, &Children), With<crate::assembly::list::InstanceRows>>,
+    mut instance_anchor: Local<crate::assembly::list::RangeAnchor>,
     button: Res<cadrs_ui::menu::LastPointerButton>,
     keys: Res<ButtonInput<KeyCode>>,
     doc: Option<Res<ActiveDocument>>,
@@ -2811,6 +2853,17 @@ fn on_pick_row_activate(
         // Right-clicking another feature makes it the selection (its menu acts on it alone).
         if secondary && matches!(row.0, Pick::Feature(_)) {
             selection.0.retain(|p| !matches!(p, Pick::Feature(_)));
+        }
+        if !secondary && let Some(doc) = doc.as_ref() && let Some(element) = doc.active {
+            // Instance rows are direct children in displayed order. Folder headers, mate
+            // connectors and other non-pickable rows are deliberately skipped.
+            if let Some((container, children)) = instance_lists.iter().find(|(_, children)| children.contains(&a.entity)) {
+                let order: Vec<Pick> = children.iter().filter_map(|e| q.get(e).ok().map(|r| r.0)).collect();
+                let shift = keys.any_pressed([KeyCode::ShiftLeft, KeyCode::ShiftRight]);
+                let additive = keys.any_pressed([KeyCode::ControlLeft, KeyCode::ControlRight, KeyCode::SuperLeft, KeyCode::SuperRight]);
+                let how = instance_anchor.select((doc.doc.id, element, container), &order, row.0, &selection, shift, additive);
+                row_click.pending = Some((row.0, how));
+            }
         }
         if let (Pick::Feature(id), false) = (row.0, secondary) {
             let shift = keys.any_pressed([KeyCode::ShiftLeft, KeyCode::ShiftRight]);
@@ -2891,6 +2944,8 @@ enum RowKind {
     Thicken,
     Helix,
     Fill,
+    /// Move face, Delete face, Simplify (their icon).
+    DirectEdit(&'static str),
     /// P3F.4: a Variable.
     Variable,
     /// P3I.2: a Sheet metal model.
@@ -2942,6 +2997,7 @@ impl RowKind {
             RowKind::Sm9(icon) => icon,
             RowKind::SheetMetal(icon) => icon,
             RowKind::SheetMetalTool(icon) => icon,
+            RowKind::DirectEdit(icon) => icon,
             _ => "sketch",
         }
     }
@@ -3040,6 +3096,11 @@ fn rebuild_feature_rows(
                 cadrs_core::FeatureKind::SheetMetalTool(x) => RowKind::SheetMetalTool(x.icon()),
                 // P3I.6: a flat pattern extrude is an Extrude in the list.
                 cadrs_core::FeatureKind::FlatExtrude(_) => RowKind::Extrude,
+                cadrs_core::FeatureKind::DirectEdit(x) => RowKind::DirectEdit(match x.kind {
+                    cadrs_core::direct_edit::DirectEditKind::MoveFace => "offset",
+                    cadrs_core::direct_edit::DirectEditKind::DeleteFace => "delete",
+                    cadrs_core::direct_edit::DirectEditKind::Simplify => "surface",
+                }),
                 _ if cache.hidden_sketches.contains(&f.id) => RowKind::ConsumedSketch,
                 _ if cache.preview_sketches.contains(&f.id) => RowKind::ReferencedSketch,
                 _ => RowKind::Sketch,
@@ -4121,5 +4182,42 @@ mod tab_name_tests {
     fn tab_names_are_unique() {
         let names = unique_tab_names(&[("bracket_pair", "part-studio"), ("Bracket pair", "assembly"), ("Part Studio 1", "part-studio"), ("Bracket pair", "assembly")]);
         assert_eq!(names, ["tab-bracket-pair", "tab-bracket-pair-assembly", "tab-part-studio-1", "tab-bracket-pair-assembly-2"]);
+    }
+}
+
+#[cfg(test)]
+mod assembly_range_tests {
+    use super::*;
+    use crate::viewport::{FeatureRowClick, RowSelect, Selection};
+
+    #[test]
+    fn assembly_range_uses_tree_order_skips_headers_and_ignores_right_click() {
+        let mut app = App::new();
+        let mut doc = ActiveDocument::new(cadrs_core::Document::new("Tree selection"));
+        doc.active = Some(doc.doc.elements[1].id);
+        app.insert_resource(doc)
+            .init_resource::<Selection>()
+            .init_resource::<FeatureRowClick>()
+            .init_resource::<ButtonInput<KeyCode>>()
+            .init_resource::<cadrs_ui::menu::LastPointerButton>()
+            .add_message::<PickRequest>()
+            .add_observer(on_pick_row_activate);
+        let picks: Vec<Pick> = (0..4).map(|_| Pick::Part(cadrs_core::assembly::InstanceId::new().part_id())).collect();
+        let entities: Vec<Entity> = picks.iter().map(|p| app.world_mut().spawn(PickRow(*p)).id()).collect();
+        let header = app.world_mut().spawn_empty().id();
+        let container = app.world_mut().spawn(crate::assembly::list::InstanceRows).id();
+        // Entity creation order deliberately differs from display order; the last row is
+        // outside this tree (for example, a part row in another panel).
+        app.world_mut().entity_mut(container).add_children(&[entities[2], header, entities[0], entities[1]]);
+        app.world_mut().trigger(Activate { entity: entities[2] });
+        assert_eq!(app.world_mut().resource_mut::<FeatureRowClick>().pending.take(), Some((picks[2], RowSelect::Only)));
+        app.world_mut().resource_mut::<Selection>().0 = vec![picks[2]];
+        app.world_mut().resource_mut::<ButtonInput<KeyCode>>().press(KeyCode::ShiftRight);
+        app.world_mut().trigger(Activate { entity: entities[1] });
+        assert_eq!(app.world_mut().resource_mut::<FeatureRowClick>().pending.take(), Some((picks[1], RowSelect::Range(vec![picks[2], picks[0], picks[1]]))));
+        app.world_mut().resource_mut::<cadrs_ui::menu::LastPointerButton>().0 = bevy::picking::pointer::PointerButton::Secondary;
+        app.world_mut().trigger(Activate { entity: entities[0] });
+        assert!(app.world().resource::<FeatureRowClick>().pending.is_none());
+        assert_eq!(app.world().resource::<Selection>().0, vec![picks[2]]);
     }
 }

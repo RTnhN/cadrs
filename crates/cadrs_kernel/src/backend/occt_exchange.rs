@@ -37,6 +37,11 @@ pub(super) fn import_model(k: &mut OcctKernel, format: ExchangeFormat, bytes: &[
     let failed = |why: String| KernelError::OperationFailed(format!("{} import: {why}", format.label()));
     let path = temp_path(ext(format));
     std::fs::write(&path, bytes).map_err(|e| failed(e.to_string()))?;
+    if format == ExchangeFormat::Step {
+        let result = import_colored_step(k, &path);
+        let _ = std::fs::remove_file(&path);
+        return result;
+    }
     let model = {
         let _guard = EXCHANGE.lock().unwrap_or_else(|e| e.into_inner());
         match format {
@@ -74,7 +79,7 @@ pub(super) fn import_model(k: &mut OcctKernel, format: ExchangeFormat, bytes: &[
     let occurrences = model
         .occurrences
         .into_iter()
-        .filter_map(|o| Some(ImportedOccurrence { part: (*index.get(o.part)?)?, placement: motion(&o.matrix), name: o.name }))
+        .filter_map(|o| Some(ImportedOccurrence { color: None, part: (*index.get(o.part)?)?, placement: motion(&o.matrix), name: o.name }))
         .collect();
     Ok(ImportedModel { name: model.name, parts, occurrences })
 }
@@ -114,4 +119,57 @@ pub(super) fn export_model(
     let bytes = result.map_err(|e| failed(e.to_string())).and_then(|_| std::fs::read(&path).map_err(|e| failed(e.to_string())));
     let _ = std::fs::remove_file(&path);
     bytes
+}
+
+fn import_colored_step(k: &mut OcctKernel, path: &std::path::Path) -> Result<ImportedModel> {
+    use crate::Kernel;
+    let _guard = EXCHANGE.lock().unwrap_or_else(|e| e.into_inner());
+    let model = super::super::step_colors::ffi::read_step_colors(&path.to_string_lossy())
+        .map_err(|e| KernelError::OperationFailed(format!("STEP import: {e}")))?;
+    let mut parts: Vec<ImportedPart> = Vec::new();
+    let mut index = Vec::new();
+    for part in model.parts {
+        let shape = Shape::try_from_bin_brep(&part.brep).map_err(super::occt)?;
+        if face_count(&shape)? == 0 { index.push(None); continue; }
+        // Keep imported face boundaries and traversal order, including differently colored
+        // coplanar faces; unifying them would discard their styles.
+        let result = match k.insert_raw(shape, History::default()) {
+            Ok(r) => r,
+            Err(e) => { for p in parts { k.release(p.body); } return Err(e); }
+        };
+        let body = result.bodies[0];
+        k.set_face_colors(body, part.faces.into_iter().map(|c| c.present.then_some(c.rgba)).collect());
+        index.push(Some(parts.len()));
+        parts.push(ImportedPart { body, name: part.name });
+    }
+    if parts.is_empty() { return Err(KernelError::OperationFailed("STEP file holds no shapes".into())); }
+    let occurrences = model.occurrences.into_iter().filter_map(|o| Some(ImportedOccurrence {
+        part: (*index.get(o.part)?)?, placement: motion(&o.matrix), name: o.name, color: o.color.present.then_some(o.color.rgba),
+    })).collect();
+    Ok(ImportedModel { name: model.name, parts, occurrences })
+}
+
+#[cfg(test)]
+mod color_tests {
+    use super::*;
+    use crate::Kernel;
+
+    #[test]
+    fn step_preserves_part_face_and_instance_colors() {
+        let bytes = super::super::super::step_colors::ffi::step_color_fixture().unwrap();
+        let mut kernel = OcctKernel::new();
+        let model = kernel.import_model(ExchangeFormat::Step, &bytes).unwrap();
+        assert_eq!(model.parts.len(), 1);
+        assert_eq!(model.occurrences.len(), 2);
+        let colors = kernel.face_colors(model.parts[0].body);
+        assert_eq!(colors.iter().filter(|c| **c == Some([255,0,0,255])).count(), 5);
+        assert_eq!(colors.iter().filter(|c| **c == Some([0,255,0,255])).count(), 1);
+        assert_eq!(model.occurrences[0].color, None);
+        assert_eq!(model.occurrences[1].color, Some([0,0,255,255]));
+        let moved = kernel.transform(model.parts[0].body, &crate::Transform::identity()).unwrap().bodies[0];
+        assert_eq!(kernel.face_colors(moved), colors);
+        for piece in kernel.split_imported(moved).unwrap() {
+            assert_eq!(kernel.face_colors(piece.bodies[0]), colors);
+        }
+    }
 }

@@ -243,6 +243,7 @@ pub fn default_plugins(opts: &HarnessOptions) -> PluginGroupBuilder {
         plugins.set(WindowPlugin {
             primary_window: Some(Window {
                 title: "cadrs".into(),
+                name: Some("cadrs".into()),
                 resolution,
                 ..default()
             }),

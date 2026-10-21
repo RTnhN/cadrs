@@ -16,8 +16,8 @@
 //    it keeps its Part Studio position, over the uBGA;
 // 08 (step 9) Top view, the uBGA clicked (its top face: "Area: 52.540 mm²", 7.4 × 7.1), the
 //    triad's Y arrow dragged and "1 in" typed; 09 applied: the uBGA 25.4 mm further along Y;
-// 10 (step 10) Group, a box dragged over the board (window): the 20 components it will select
-//    pre-highlighted; 10b released: they fill the Group's Instances; 11 grouped, the board fixed
+// 10 (step 10) Group, a box dragged over the board (window), without live component highlights;
+//    10b released: the 20 components fill the Group's Instances; 11 grouped, the board fixed
 //    ("Group 1" under Mate Features in normal text);
 // 12 (step 11) in PCB Studio, Sync: the dialog on the "secondary board (Assembly)", Top Plane;
 // 13 (step 12) the board updated in place: the uBGA moved, the keep-out (dark) at the corner;

@@ -70,6 +70,7 @@ fn occt(e: opencascade::Error) -> KernelError {
 #[derive(Default)]
 pub struct OcctKernel {
     bodies: HashMap<BodyId, Shape>,
+    colors: HashMap<BodyId, Vec<Option<[u8; 4]>>>,
     /// Each body's faces as [`Kernel::faces`] gives them, worked out once: a body never changes
     /// once stored, and a face's area and centroid are exact integrals over its surface (seconds
     /// for a model of B-spline faces), asked for again by every feature that looks at the body.
@@ -327,6 +328,16 @@ impl OcctKernel {
             let fs = face_shapes
                 .get(f.id.0 as usize)
                 .ok_or_else(|| KernelError::OperationFailed("face list".into()))?;
+            // A convex round no thicker than the wall collapses onto its axis: its slab is the
+            // sector out to the axis instead.
+            let sector = super::shell_sectors::ffi::convex_sector(&fs.try_to_bin_brep().map_err(occt)?, t)
+                .map_err(|e| KernelError::OperationFailed(format!("shell sector: {e}")))?;
+            if !sector.is_empty() {
+                for piece in &sector {
+                    tools.push(Shape::try_from_bin_brep(&piece.brep).map_err(occt)?);
+                }
+                continue;
+            }
             let (slab, _) = fs.try_thicken_h(sign * t).map_err(occt)?;
             tools.push(slab);
         }
@@ -631,6 +642,15 @@ impl OcctKernel {
         }
         let id = BodyId(self.next_id);
         self.next_id += 1;
+        if history.modified.iter().any(|(_, input)| self.colors.contains_key(&input.body)) {
+            let mut colors = vec![None; face_count(&shape)?];
+            for (face, input) in &history.modified {
+                if let Some(color) = self.colors.get(&input.body).and_then(|v| v.get(input.face.0 as usize)).copied().flatten() {
+                    if let Some(entry) = colors.get_mut(face.0 as usize) { *entry = Some(color); }
+                }
+            }
+            if colors.iter().any(Option::is_some) { self.colors.insert(id, colors); }
+        }
         self.bodies.insert(id, shape);
         Ok(OpResult {
             bodies: vec![id],
@@ -1182,9 +1202,19 @@ impl Kernel for OcctKernel {
         if loose.is_empty() {
             return self.split_solids(body);
         }
-        let mut pieces: Vec<Shape> = solids.iter().map(clone_shape).collect();
+        let parent = faces_of(shape);
+        let mut by_hash: HashMap<u64, Vec<usize>> = HashMap::new();
+        for (i, face) in parent.iter().enumerate() { by_hash.entry(face.identity_hash()).or_default().push(i); }
+        let mut pieces = solids;
         pieces.extend(loose);
-        pieces.into_iter().map(|s| self.insert_raw(s, History::default())).collect()
+        let pieces: Vec<_> = pieces.into_iter().map(|shape| {
+            let modified = faces_of(&shape).iter().enumerate().filter_map(|(i, face)| {
+                let j = by_hash.get(&face.identity_hash())?.iter().copied().find(|&j| parent[j].is_same(face))?;
+                Some((FaceId(i as u64), InputFace { body, face: FaceId(j as u64) }))
+            }).collect();
+            (shape, History { modified, ..History::default() })
+        }).collect();
+        pieces.into_iter().map(|(shape, history)| self.insert_raw(shape, history)).collect()
     }
 
     fn revolve(&mut self, profile: &Profile, axis: Axis, angle: f64) -> Result<OpResult> {
@@ -1828,6 +1858,7 @@ impl Kernel for OcctKernel {
     }
 
     fn release(&mut self, body: BodyId) {
+        self.colors.remove(&body);
         self.bodies.remove(&body);
         if let Ok(mut c) = self.face_infos.lock() {
             c.remove(&body);
@@ -1847,6 +1878,12 @@ impl Kernel for OcctKernel {
         if let Ok(mut c) = self.commons.lock() {
             c.retain(|k, _| k.0 != body && k.1 != body);
         }
+    }
+
+    fn face_colors(&self, body: BodyId) -> Vec<Option<[u8; 4]>> { self.colors.get(&body).cloned().unwrap_or_default() }
+    fn set_face_colors(&mut self, body: BodyId, colors: Vec<Option<[u8; 4]>>) {
+        if colors.iter().any(Option::is_some) { self.colors.insert(body, colors); }
+        else { self.colors.remove(&body); }
     }
 
     fn write_body(&self, body: BodyId) -> Result<Vec<u8>> {
@@ -2286,6 +2323,21 @@ impl Kernel for OcctKernel {
         Ok(body)
     }
 
+    fn export_brep(&self, bodies: &[BodyId]) -> Result<Vec<u8>> {
+        use opencascade::primitives::Compound;
+        if bodies.is_empty() { return Err(KernelError::OperationFailed("BREP export: no bodies".into())); }
+        let shapes = bodies.iter().map(|&id| self.body(id)).collect::<Result<Vec<_>>>()?;
+        let shape: Shape = Compound::from_shapes(shapes).into();
+        let path = std::env::temp_dir().join(format!("cadrs-occt-{}-{:?}.brep", std::process::id(), std::thread::current().id()));
+        let failed = |why: String| KernelError::OperationFailed(format!("BREP export: {why}"));
+        let result = (|| {
+            shape.write_brep_text(&path).map_err(|e| failed(e.to_string()))?;
+            std::fs::read(&path).map_err(|e| failed(e.to_string()))
+        })();
+        let _ = std::fs::remove_file(&path);
+        result
+    }
+
     fn export_step(&self, bodies: &[BodyId]) -> Result<Vec<u8>> {
         let shapes = bodies
             .iter()
@@ -2353,7 +2405,8 @@ fn loose_shells(shape: &Shape, solids: &[Shape]) -> Result<Vec<Shape>> {
         .filter(|sh| !faces_of(sh).iter().any(owned))
         .map(|sh| match Shape::try_sew_solid(&[&sh], 1e-6) {
             Ok(s) if s.sub_count(SubKind::Solid).unwrap_or(0) == 1 && s.is_valid().unwrap_or(false) => s,
-            _ => clone_shape(&sh),
+            // Keep surface face identities so split_imported can carry their styles.
+            _ => sh,
         })
         .collect())
 }
@@ -3263,5 +3316,26 @@ mod tests {
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod brep_export_tests {
+    use super::*;
+
+    #[test]
+    fn text_brep_round_trip_preserves_multiple_solids() {
+        let mut kernel = OcctKernel::new();
+        let a = kernel.insert_raw(Shape::box_with_dimensions(10.0, 20.0, 30.0), History::default()).unwrap().bodies[0];
+        let b = kernel.insert_raw(Shape::box_with_dimensions(2.0, 3.0, 4.0), History::default()).unwrap().bodies[0];
+        let bytes = kernel.export_brep(&[a, b]).unwrap();
+        assert!(String::from_utf8_lossy(&bytes).contains("CASCADE Topology"));
+        let path = std::env::temp_dir().join(format!("cadrs-brep-round-trip-{}.brep", std::process::id()));
+        std::fs::write(&path, bytes).unwrap();
+        let shape = Shape::read_brep_text(&path).unwrap();
+        std::fs::remove_file(path).unwrap();
+        assert_eq!(shape.sub_count(SubKind::Solid).unwrap(), 2);
+        assert!((shape.mass_properties().volume - 6024.0).abs() < 1e-6);
+        assert!(kernel.export_brep(&[]).is_err());
     }
 }

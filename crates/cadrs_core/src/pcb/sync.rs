@@ -75,7 +75,7 @@ impl super::PcbStudio {
 }
 
 /// What a sync computed (`cadrs_pcb::sync`), to be put into a PCB Studio.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct SyncBoard {
     pub element: ElementId,
     /// The board to update (a re-sync); `None` adds a new board named `name`.

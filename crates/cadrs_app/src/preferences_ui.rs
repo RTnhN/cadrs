@@ -13,11 +13,11 @@
 
 use bevy::picking::pointer::PointerButton;
 use bevy::prelude::*;
-use bevy::text::FontWeight;
+use bevy::text::{EditableText, FontWeight};
 use bevy::ui_widgets::{Activate, observe};
 use cadrs_core::preferences::{Modifiers, MouseButton, MousePreset, Preferences, UI_SCALES, ViewAction};
 use cadrs_ui::prelude::*;
-use cadrs_ui::{Button, DialogClose, MenuAction, MenuItem, Select, SelectChange, SelectState, Switch, SwitchState, form_row, open_menu};
+use cadrs_ui::{Button, DialogClose, MenuAction, MenuItem, NumberField, NumberFieldCommit, NumberFieldEdit, NumberFieldState, Select, SelectChange, SelectState, Switch, SwitchState, form_row, open_menu};
 
 use crate::{AppState, DocumentStore};
 
@@ -30,7 +30,8 @@ impl Plugin for PreferencesPlugin {
             .add_systems(Update, apply_ui_scale)
             .add_observer(on_account)
             .add_observer(on_account_action)
-            .add_observer(on_preset_change);
+            .add_observer(on_preset_change)
+            .add_observer(on_rotation_snap_commit);
     }
 }
 
@@ -170,6 +171,8 @@ fn gesture_text(preset: MousePreset, action: ViewAction) -> String {
 pub fn open_preferences(world: &mut World) {
     let preset = world.resource::<LocalPreferences>().mouse();
     let mcp = world.resource::<LocalPreferences>().0.mcp;
+    let snap = world.resource::<LocalPreferences>().0.rotation_snap_degrees();
+    let tolerance = world.resource::<LocalPreferences>().0.rotation_snap_tolerance_degrees();
     let ui_scale = world.resource::<LocalPreferences>().0.ui_scale;
     let endpoint = cadrs_mcp::url(std::net::SocketAddr::from((std::net::Ipv4Addr::LOCALHOST, mcp.port)));
     let state = *world.resource::<State<AppState>>().get();
@@ -210,6 +213,18 @@ pub fn open_preferences(world: &mut World) {
                 }
                 let at = UI_SCALES.iter().position(|p| *p == ui_scale).unwrap_or(2);
                 b.spawn(form_row(t, "pref-ui-scale-row", "UI scale", 150.0)).with_child(sizes.selected(at).build(t));
+                b.spawn((
+                    Name::new("pref-assembly-heading"),
+                    t.text("Assembly manipulation", t.font_base, FontWeight::BOLD, t.foreground),
+                    Node { margin: UiRect::new(Val::ZERO, Val::ZERO, Val::Px(14.0), Val::Px(4.0)), ..default() },
+                ));
+                b.spawn(NumberField::new("pref-rotation-snap", "Rotation snap increment").text(format!("{snap} deg")).label_width(200.0).build(t));
+                b.spawn(NumberField::new("pref-rotation-snap-tolerance", "Snap tolerance").text(format!("{tolerance} deg")).label_width(200.0).build(t));
+                b.spawn((
+                    Name::new("pref-rotation-snap-hint"),
+                    t.text("Snap when within the tolerance of an increment. Hold Shift to disable snapping. Increment: 0–180° (0 disables). Tolerance: 0–90°.", t.font_sm, FontWeight::NORMAL, t.muted_foreground),
+                    Node { width: Val::Px(400.0), margin: UiRect::top(Val::Px(6.0)), ..default() },
+                )).insert(TextLayout::default());
                 b.spawn((
                     Name::new("pref-mcp-heading"),
                     t.text("AI assistants (MCP)", t.font_base, FontWeight::BOLD, t.foreground),
@@ -271,10 +286,30 @@ fn on_preset_change(ev: On<SelectChange>, q: Query<&Name>, mut q_text: Query<(&G
 fn save_preferences(world: &mut World) {
     let mut q = world.query_filtered::<Entity, With<PreferencesDialog>>();
     let Some(dialog) = q.iter(world).next() else { return };
+    // Read the live edit so clicking OK works even before a blur-commit is processed.
+    let mut fields = world.query::<(&NumberFieldEdit, &EditableText)>();
+    let values: Vec<_> = fields.iter(world).filter_map(|(edit, text)| {
+        let name = world.get::<Name>(edit.0)?.as_str();
+        matches!(name, "pref-rotation-snap" | "pref-rotation-snap-tolerance").then(|| (edit.0, name.to_string(), text.value().to_string()))
+    }).collect();
+    let mut validated = Vec::new();
+    for (entity, name, text) in values {
+        let value = parse_rotation_snap(&text).filter(|v| name != "pref-rotation-snap-tolerance" || *v <= 90.0);
+        let Some(value) = value else {
+            if let Some(mut state) = world.get_mut::<NumberFieldState>(entity) { state.text = text; state.error = true; }
+            return;
+        };
+        validated.push((name, value));
+    }
+    for (name, value) in validated {
+        let mut prefs = world.resource_mut::<LocalPreferences>();
+        if name == "pref-rotation-snap-tolerance" { prefs.0.rotation_snap_tolerance_degrees = value; }
+        else { prefs.0.rotation_snap_degrees = value; }
+    }
     let mut qs = world.query::<(&Name, &SelectState)>();
     let preset = qs.iter(world).find(|(n, _)| n.as_str() == "pref-mouse-preset").and_then(|(_, s)| MousePreset::ALL.get(s.selected).copied());
     if let Some(p) = preset {
-        set_mouse_preset(world, p);
+        world.resource_mut::<LocalPreferences>().0.mouse = p;
     }
     let size = qs.iter(world).find(|(n, _)| n.as_str() == "pref-ui-scale").and_then(|(_, s)| UI_SCALES.get(s.selected).copied());
     if let Some(p) = size {
@@ -283,14 +318,72 @@ fn save_preferences(world: &mut World) {
     let mut qm = world.query::<(&Name, &SwitchState)>();
     let mcp = qm.iter(world).find(|(n, _)| n.as_str() == "pref-mcp-enabled").map(|(_, s)| s.on);
     if let Some(on) = mcp {
-        set_mcp_enabled(world, on);
+        world.resource_mut::<LocalPreferences>().0.mcp.enabled = on;
     }
+    save(world);
     world.trigger(DialogClose { entity: dialog });
+}
+
+fn parse_rotation_snap(text: &str) -> Option<f64> {
+    let value: f64 = text.trim().trim_end_matches("deg").trim_end_matches('°').trim().parse().ok()?;
+    (value.is_finite() && (0.0..=180.0).contains(&value)).then_some(value)
+}
+
+fn on_rotation_snap_commit(ev: On<NumberFieldCommit>, mut fields: Query<(&Name, &mut NumberFieldState)>) {
+    let Ok((name, mut state)) = fields.get_mut(ev.entity) else { return };
+    if !matches!(name.as_str(), "pref-rotation-snap" | "pref-rotation-snap-tolerance") { return; }
+    state.text = ev.text.clone();
+    state.error = parse_rotation_snap(&ev.text).filter(|v| name.as_str() != "pref-rotation-snap-tolerance" || *v <= 90.0).is_none();
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn preferences_dialog_exposes_the_rotation_increment_and_shift_hint() {
+        let mut world = World::new();
+        world.init_resource::<LocalPreferences>();
+        world.init_resource::<Theme>();
+        world.insert_resource(State::new(AppState::Document));
+        open_preferences(&mut world);
+        let mut fields = world.query::<(&Name, &NumberFieldState)>();
+        let (_, snap) = fields.iter(&world).find(|(name, _)| name.as_str() == "pref-rotation-snap").unwrap();
+        assert_eq!(snap.text, "45 deg");
+        let (_, tolerance) = fields.iter(&world).find(|(name, _)| name.as_str() == "pref-rotation-snap-tolerance").unwrap();
+        assert_eq!(tolerance.text, "10 deg");
+        let mut texts = world.query::<(&Name, &Text)>();
+        let (_, hint) = texts.iter(&world).find(|(name, _)| name.as_str() == "pref-rotation-snap-hint").unwrap();
+        assert!(hint.0.contains("Shift"));
+    }
+
+    #[test]
+    fn rotation_snap_accepts_fractional_degrees_and_validates_before_saving() {
+        assert_eq!(parse_rotation_snap("22.5 deg"), Some(22.5));
+        assert_eq!(parse_rotation_snap("0°"), Some(0.0));
+        assert_eq!(parse_rotation_snap("180"), Some(180.0));
+        for text in ["-1", "181", "NaN", "inf", "", "abc"] { assert_eq!(parse_rotation_snap(text), None); }
+        let mut world = World::new();
+        world.init_resource::<LocalPreferences>();
+        world.spawn(PreferencesDialog);
+        let field = world.spawn((Name::new("pref-rotation-snap"), NumberFieldState { text: "45 deg".into(), error: false })).id();
+        let edit = world.spawn((NumberFieldEdit(field), EditableText::new("22.5"))).id();
+        let tolerance = world.spawn((Name::new("pref-rotation-snap-tolerance"), NumberFieldState::default())).id();
+        let tolerance_edit = world.spawn((NumberFieldEdit(tolerance), EditableText::new("15"))).id();
+        save_preferences(&mut world);
+        assert_eq!(world.resource::<LocalPreferences>().0.rotation_snap_degrees(), 22.5, "OK must read the live edit without requiring Enter");
+        assert_eq!(world.resource::<LocalPreferences>().0.rotation_snap_tolerance_degrees(), 15.0);
+        world.entity_mut(edit).insert(EditableText::new("-10"));
+        save_preferences(&mut world);
+        assert_eq!(world.resource::<LocalPreferences>().0.rotation_snap_degrees(), 22.5, "invalid edits must not change saved preferences");
+        assert!(world.get::<NumberFieldState>(field).unwrap().error);
+        world.entity_mut(edit).insert(EditableText::new("60"));
+        world.entity_mut(tolerance_edit).insert(EditableText::new("91"));
+        save_preferences(&mut world);
+        assert_eq!(world.resource::<LocalPreferences>().0.rotation_snap_degrees(), 22.5, "invalid tolerance must not partially apply a new increment");
+        assert_eq!(world.resource::<LocalPreferences>().0.rotation_snap_tolerance_degrees(), 15.0);
+        assert!(world.get::<NumberFieldState>(tolerance).unwrap().error);
+    }
 
     #[test]
     fn gesture_rows_read_like_the_table() {

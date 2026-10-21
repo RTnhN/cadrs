@@ -21,7 +21,7 @@
 
 use bevy::prelude::*;
 use cadrs_core::assembly::InstanceId;
-use cadrs_core::assembly::commands::{DeleteInstances, SetInstancesFixed, SetInstancesHidden};
+use cadrs_core::assembly::commands::{SetInstancesFixed, SetInstancesHidden};
 use cadrs_core::assembly::structure::{DissolveSubassembly, MoveToNewSubassembly, SetInstancesSuppressed, SetSubassemblyFlexible};
 use cadrs_core::{ElementId, FeatureId};
 use cadrs_ui::menu::{ContextMenuAnchor, Menu, MenuAction, MenuEntry, MenuItem};
@@ -674,9 +674,7 @@ fn act(world: &mut World, menu: &AsmMenu, handle: TriadHandle, item: &str) {
             }
         }
         "asm-export" => crate::export_dialog::open_export_dialog(world, parts.clone()),
-        "asm-delete" if super::run(world, &DeleteInstances { element, instances: targets.clone() }) => {
-            world.resource_mut::<Selection>().0.retain(|p| super::instance_of(p).is_none_or(|i| !targets.contains(&i)));
-        }
+        "asm-delete" => super::delete_instances(world, element, targets.clone()),
         // A19.9: Edit standard content instance, on the targets (bulk edit).
         "asm-std-edit" => super::standard::open_edit_dialog(world, targets.clone()),
         "asm-select-same-config" | "asm-select-same-part" => {

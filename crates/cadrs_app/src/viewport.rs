@@ -1725,7 +1725,17 @@ fn update_hover(
     ),
     (zoom_window, section_arrow, eda2d, fit): (Option<Res<crate::view_options::ZoomWindow>>, Res<crate::section_view::SectionArrow>, Res<crate::eda::Eda2d>, Res<crate::board_fit::FitState>),
     mut last: Local<Option<(Vec2, crate::parts::PickFilter, Option<Pick>)>>,
+    box_select: Option<Res<crate::assembly::box_select::AssemblyBox>>,
 ) {
+    // A box drag only updates its rectangle. Avoid picking and rebuilding hover tints for
+    // every part the pointer crosses; normal hover resumes once the drag ends.
+    if box_select.is_some_and(|b| b.active()) {
+        *last = None;
+        if highlight.viewport.is_some() || highlight.list.is_some() {
+            *highlight = PlaneHighlight::default();
+        }
+        return;
+    }
     // While a sketch has its plane, planes no longer react to the pointer (the sketch tools
     // own it); while it waits for one, planes highlight as pick candidates.
     let filter = pick_override.0.or(pick_filter(planes.0, session.as_deref(), extrude.as_deref(), applied.as_deref(), create.as_deref()));

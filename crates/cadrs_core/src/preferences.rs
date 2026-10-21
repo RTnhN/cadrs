@@ -246,20 +246,35 @@ impl Default for McpPreferences {
 }
 
 /// The local preferences.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct Preferences {
     #[serde(default)]
     pub mouse: MousePreset,
     #[serde(default)]
     pub mcp: McpPreferences,
+    /// Assembly rotation stops in degrees; zero disables snapping.
+    #[serde(default = "default_rotation_snap_degrees")]
+    pub rotation_snap_degrees: f64,
+    /// Maximum angular distance from a rotation stop, in degrees.
+    #[serde(default = "default_rotation_snap_tolerance_degrees")]
+    pub rotation_snap_tolerance_degrees: f64,
     /// How large the interface is drawn, in percent of the display's own scale (issue #12).
     #[serde(default = "default_ui_scale")]
     pub ui_scale: u16,
 }
 
+fn default_rotation_snap_degrees() -> f64 { 45.0 }
+fn default_rotation_snap_tolerance_degrees() -> f64 { 10.0 }
+
 impl Default for Preferences {
     fn default() -> Self {
-        Self { mouse: MousePreset::default(), mcp: McpPreferences::default(), ui_scale: 100 }
+        Self {
+            mouse: MousePreset::default(),
+            mcp: McpPreferences::default(),
+            rotation_snap_degrees: default_rotation_snap_degrees(),
+            rotation_snap_tolerance_degrees: default_rotation_snap_tolerance_degrees(),
+            ui_scale: 100,
+        }
     }
 }
 
@@ -278,6 +293,16 @@ impl Preferences {
 }
 
 impl Preferences {
+    pub fn rotation_snap_tolerance_degrees(&self) -> f64 {
+        if self.rotation_snap_tolerance_degrees.is_finite() && (0.0..=90.0).contains(&self.rotation_snap_tolerance_degrees) {
+            self.rotation_snap_tolerance_degrees
+        } else { default_rotation_snap_tolerance_degrees() }
+    }
+    pub fn rotation_snap_degrees(&self) -> f64 {
+        if self.rotation_snap_degrees.is_finite() && (0.0..=180.0).contains(&self.rotation_snap_degrees) {
+            self.rotation_snap_degrees
+        } else { default_rotation_snap_degrees() }
+    }
     /// The preferences file in a store root.
     pub fn path(root: &Path) -> PathBuf {
         root.join(PREFERENCES_FILE)
@@ -358,16 +383,29 @@ mod tests {
     }
 
     #[test]
+    fn invalid_snap_preferences_use_the_default_without_affecting_other_choices() {
+        for value in [-1.0, 181.0, f64::NAN, f64::INFINITY] {
+            let p = Preferences { rotation_snap_degrees: value, ..Preferences::default() };
+            assert_eq!(p.rotation_snap_degrees(), 45.0);
+        }
+        assert_eq!(Preferences { rotation_snap_degrees: 0.0, ..Preferences::default() }.rotation_snap_degrees(), 0.0);
+        for value in [-1.0, 91.0, f64::NAN, f64::INFINITY] {
+            let p = Preferences { rotation_snap_tolerance_degrees: value, ..Preferences::default() };
+            assert_eq!(p.rotation_snap_tolerance_degrees(), 10.0);
+        }
+    }
+
+    #[test]
     fn preferences_round_trip_through_the_store_root() {
         let dir = std::env::temp_dir().join(format!("cadrs-prefs-test-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         assert_eq!(Preferences::load(&dir), Preferences::default());
-        let p = Preferences { mouse: MousePreset::SolidWorks, mcp: McpPreferences { enabled: true, port: 7700 }, ui_scale: 125 };
+        let p = Preferences { mouse: MousePreset::SolidWorks, mcp: McpPreferences { enabled: true, port: 7700 }, rotation_snap_degrees: 22.5, rotation_snap_tolerance_degrees: 15.0, ui_scale: 125 };
         p.save(&dir).unwrap();
         assert_eq!(Preferences::load(&dir), p);
         // A file from before the MCP server reads with it off.
         std::fs::write(Preferences::path(&dir), "(mouse: Creo)").unwrap();
-        assert_eq!(Preferences::load(&dir), Preferences { mouse: MousePreset::Creo, mcp: McpPreferences::default(), ui_scale: 100 });
+        assert_eq!(Preferences::load(&dir), Preferences { mouse: MousePreset::Creo, ..Preferences::default() });
         // An unreadable file reads as the defaults.
         std::fs::write(Preferences::path(&dir), "not ron").unwrap();
         assert_eq!(Preferences::load(&dir), Preferences::default());

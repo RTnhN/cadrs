@@ -382,6 +382,15 @@ pub trait Kernel {
     fn ray_hits(&self, _body: BodyId, _origin: Point3<f64>, _dir: Vector3<f64>) -> Result<Vec<RayHit>> {
         Err(KernelError::Unsupported("ray queries"))
     }
+    /// Experimental OpenCASCADE text BREP; backend-specific and geometry only.
+    fn export_brep(&self, _bodies: &[BodyId]) -> Result<Vec<u8>> {
+        Err(KernelError::Unsupported("OpenCASCADE BREP export"))
+    }
+
+    /// Imported surface colors, in face order; absent entries keep the application's palette.
+    fn face_colors(&self, _body: BodyId) -> Vec<Option<[u8; 4]>> { Vec::new() }
+    fn set_face_colors(&mut self, _body: BodyId, _colors: Vec<Option<[u8; 4]>>) {}
+
     fn export_step(&self, _bodies: &[BodyId]) -> Result<Vec<u8>> {
         Err(KernelError::Unsupported("STEP export"))
     }

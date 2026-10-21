@@ -2961,7 +2961,7 @@ fn on_quick_dim_commit(
             // Not a length: keep the box open.
             return;
         };
-        apply_quick_dim(world, open.target, v);
+        if !apply_quick_dim(world, open.target, v) { return; }
         let frame = world.resource::<bevy::diagnostic::FrameCount>().0;
         let mut flow = world.resource_mut::<QuickDimFlow>();
         flow.open = None;
@@ -3001,26 +3001,26 @@ fn on_quick_dim_cancel(
 
 /// Sets a quick dimension: moves the geometry (there is no solver yet) and records the
 /// driving dimension, as one undoable command.
-fn apply_quick_dim(world: &mut World, target: QuickDimTarget, v: f64) {
+fn apply_quick_dim(world: &mut World, target: QuickDimTarget, v: f64) -> bool {
     let Some(s) = world.get_resource::<SketchSession>() else {
-        return;
+        return false;
     };
     let (element, feature) = (s.element, s.feature);
     let Some(map) = world.resource::<SketchScreen>().active else {
-        return;
+        return false;
     };
     let Some(sketch) = world_sketch(world) else {
-        return;
+        return false;
     };
     let Some(op) = quick_dim_op(sketch, target, v, map.px_per_mm() as f64) else {
-        return;
+        return false;
     };
     // P3D.1 (IR5.3): an offset distance that can't be made is refused with a warning.
     if let QuickDimTarget::Dim(id) = target
         && crate::sketch_edit_tools::offset_value_fails(sketch, id, &op)
     {
         crate::sketch_edit_tools::offset_failed_toast(world);
-        return;
+        return false;
     }
     // The free end of a line or tangent arc just drawn (a chain continues from it).
     let moved_end = target.fixed_curve().and_then(|(c, fixed)| {
@@ -3036,7 +3036,7 @@ fn apply_quick_dim(world: &mut World, target: QuickDimTarget, v: f64) {
         })
     {
         warn!("cannot set the dimension: {e}");
-        return;
+        return false;
     }
     // The line tool's chain goes on from where that end is now.
     if let Some((p, old)) = moved_end
@@ -3049,6 +3049,7 @@ fn apply_quick_dim(world: &mut World, target: QuickDimTarget, v: f64) {
             *start = new;
         }
     }
+    true
 }
 
 /// The edit that gives `target` the value `v` (mm). `px_per_mm` places the dimension line a

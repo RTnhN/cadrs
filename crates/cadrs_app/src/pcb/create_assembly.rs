@@ -168,7 +168,7 @@ fn accept(world: &mut World) {
 /// Starts building the tabs for `board` of the PCB Studio `element` (the dialog's OK). With a
 /// document store (always, in the app) the components are **component documents** (P3H.7): one
 /// stored document per new package in the settings' component folder, versioned, referenced by
-/// version; the store work runs on the kernel thread too.
+/// version; the store work runs in the background too.
 pub fn start(world: &mut World, element: ElementId, board: BoardId, opts: CreateOptions) {
     let Some(doc) = world.get_resource::<ActiveDocument>().map(|d| d.doc.clone()) else { return };
     let Some(name) = doc.element(element).and_then(|e| e.pcb()).and_then(|s| s.board(board)).map(|b| b.name().to_string()) else { return };
@@ -177,7 +177,7 @@ pub fn start(world: &mut World, element: ElementId, board: BoardId, opts: Create
     let now = world.resource::<crate::AppClock>().now();
     let user = world.resource::<crate::UserProfile>().id.clone();
     let board_name = name.clone();
-    let pending = cadrs_core::rebuild::run_on_worker(move |r| {
+    let pending = cadrs_core::rebuild::run_in_background(move || {
         let (cmd, docs) = match &store {
             Some(store) => {
                 let mut docs = ComponentDocuments::new(store, folder.as_ref(), doc.id, &board_name, &user, now)?;
@@ -190,14 +190,14 @@ pub fn start(world: &mut World, element: ElementId, board: BoardId, opts: Create
         // when the tabs are shown.
         for e in cmd.elements.iter().chain(cmd.links.iter().map(|l| &l.element)) {
             if matches!(e.kind, cadrs_core::document::ElementKind::PartStudio { .. }) {
-                r.rebuild(&e.active_features());
+                cadrs_core::rebuild::build(&e.active_features());
             }
         }
         // The new component documents' thumbnails for the documents page (their part).
         if let (Some(store), Some(docs)) = (&store, &docs) {
             for u in docs.used.iter().filter(|u| u.created) {
                 let Some(l) = cmd.links.iter().find(|l| l.source.document == Some(u.document) && matches!(l.element.kind, cadrs_core::document::ElementKind::PartStudio { .. })) else { continue };
-                let build = r.rebuild(&l.element.active_features());
+                let build = cadrs_core::rebuild::build(&l.element.active_features());
                 let list: Vec<(&cadrs_core::Solid, [u8; 3])> = build.parts.iter().map(|p| (&*p.solid, cadrs_core::appearance::part_appearance(p, l.element.part_props()).rgb)).collect();
                 if !list.is_empty() {
                     let _ = store.write_thumbnail(u.document, &cadrs_core::assembly::thumb::render(&list, 96));

@@ -66,10 +66,10 @@ pub fn gallery_menu(theme: &Theme) -> impl Bundle {
         .item(MenuItem::new("menu-document", "Document…").icon("file"))
         .item(MenuItem::new("menu-folder", "Folder…").icon("folder"))
         .separator()
-        .item(MenuItem::new("menu-import", "Import files…").icon("upload"))
+        .item(MenuItem::new("menu-import", "Import files…").icon("file-import"))
         .item(
             MenuItem::new("menu-import-from", "Import from")
-                .icon("upload")
+                .icon("cloud-upload")
                 .submenu(vec![
                     MenuItem::new("menu-import-drive", "Cloud drive…").into(),
                     MenuItem::new("menu-import-url", "URL…").into(),

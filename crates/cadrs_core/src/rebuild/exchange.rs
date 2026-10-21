@@ -14,10 +14,12 @@ use crate::assembly::Pose;
 use crate::import::{ImportFormat, ImportPlan, PlanOccurrence, PlanPart};
 
 /// An export format for 3D models.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum ModelFormat {
     Step,
     Iges,
+    /// Experimental OpenCASCADE text BREP, with flattened placements.
+    Brep,
     Stl { binary: bool },
     Obj,
 }
@@ -27,6 +29,7 @@ impl ModelFormat {
         match self {
             ModelFormat::Step => "step",
             ModelFormat::Iges => "igs",
+            ModelFormat::Brep => "brep",
             ModelFormat::Stl { .. } => "stl",
             ModelFormat::Obj => "obj",
         }
@@ -40,7 +43,7 @@ impl ModelFormat {
 /// One thing to export: a part of a Part Studio (its features), where it goes (`None`: where
 /// it is in its studio), its name, and what it is an instance of (instances of the same
 /// source are one part of an assembly file).
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ExportItem {
     pub features: Arc<Vec<Feature>>,
     pub part: PartId,
@@ -52,7 +55,7 @@ pub struct ExportItem {
 }
 
 /// What to export.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ExportRequest {
     pub format: ModelFormat,
     /// The file (or assembly) name.
@@ -79,21 +82,67 @@ impl ExportRequest {
 }
 
 /// An exported file: the item's name when it holds one item, its extension and its bytes.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize)]
 pub struct ExportFile {
     pub part: Option<String>,
     pub extension: &'static str,
     pub bytes: Vec<u8>,
 }
 
+/// An [`ExportFile`] from the kernel process, its extension one of [`ModelFormat::extension`]'s.
+#[derive(serde::Deserialize)]
+struct ExportFileWire {
+    part: Option<String>,
+    extension: String,
+    bytes: Vec<u8>,
+}
+
+impl<'de> serde::Deserialize<'de> for ExportFile {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        let w = ExportFileWire::deserialize(d)?;
+        let extension = ["step", "igs", "brep", "stl", "obj"]
+            .into_iter()
+            .find(|k| *k == w.extension)
+            .ok_or_else(|| serde::de::Error::custom(format!("unknown export extension {}", w.extension)))?;
+        Ok(ExportFile { part: w.part, extension, bytes: w.bytes })
+    }
+}
+
 /// Reads `bytes` (a `format` file) on the worker and says what it holds.
 pub fn plan_import(format: ImportFormat, bytes: Vec<u8>) -> PendingJob<Result<ImportPlan, String>> {
-    run_on_worker(move |r| r.plan_import(format, &bytes))
+    super::task::run(PlanImport { format, bytes })
+}
+
+/// [`plan_import`] as a [`super::task::Task`].
+#[derive(serde::Serialize, serde::Deserialize)]
+pub(crate) struct PlanImport {
+    format: ImportFormat,
+    bytes: Vec<u8>,
+}
+
+impl super::task::Task for PlanImport {
+    const NAME: &'static str = "plan-import";
+    type Output = Result<ImportPlan, String>;
+    fn run(self, r: &mut super::Rebuilder) -> Self::Output {
+        r.plan_import(self.format, &self.bytes)
+    }
 }
 
 /// Writes the files of `req` on the worker.
 pub fn export_files(req: ExportRequest) -> PendingJob<Result<Vec<ExportFile>, String>> {
-    run_on_worker(move |r| r.export_files(&req))
+    super::task::run(ExportFiles(req))
+}
+
+/// [`export_files`] as a [`super::task::Task`].
+#[derive(serde::Serialize, serde::Deserialize)]
+pub(crate) struct ExportFiles(ExportRequest);
+
+impl super::task::Task for ExportFiles {
+    const NAME: &'static str = "export-files";
+    type Output = Result<Vec<ExportFile>, String>;
+    fn run(self, r: &mut super::Rebuilder) -> Self::Output {
+        r.export_files(&self.0)
+    }
 }
 
 fn pose_of(m: &cadrs_kernel::Motion) -> Pose {
@@ -136,7 +185,7 @@ impl Rebuilder {
             .iter()
             .map(|p| PlanPart { name: p.name.clone(), solids: self.kernel.solid_count(p.body).unwrap_or(1) })
             .collect();
-        let occurrences = model.occurrences.iter().map(|o| PlanOccurrence { part: o.part, pose: pose_of(&o.placement), name: o.name.clone() }).collect();
+        let occurrences = model.occurrences.iter().map(|o| PlanOccurrence { color: o.color.map(|[r,g,b,a]| crate::appearance::Appearance::rgb(r,g,b).with_alpha(a)), part: o.part, pose: pose_of(&o.placement), name: o.name.clone() }).collect();
         ImportPlan { format, name: model.name.clone(), parts, occurrences }
     }
 
@@ -205,6 +254,18 @@ impl Rebuilder {
                             Ok(ExportFile { part: (g.len() == 1 && req.individual).then(|| g[0].1.clone()), extension: ext, bytes })
                         })
                         .collect()
+                }
+                ModelFormat::Brep => {
+                    let mut bodies = Vec::new();
+                    for it in &req.items {
+                        bodies.push((body_of(self, &it.features, it.part, &place(it.pose))?, it.name.clone()));
+                    }
+                    let groups: Vec<&[(BodyId, String)]> = if req.individual { bodies.chunks(1).collect() } else { vec![&bodies[..]] };
+                    groups.into_iter().map(|group| {
+                        let ids: Vec<_> = group.iter().map(|(id, _)| *id).collect();
+                        let bytes = self.kernel.export_brep(&ids).map_err(|e| e.to_string())?;
+                        Ok(ExportFile { part: req.individual.then(|| group[0].1.clone()), extension: "brep", bytes })
+                    }).collect()
                 }
                 ModelFormat::Stl { .. } | ModelFormat::Obj => {
                     let quality = cadrs_kernel::Tessellation { deflection: req.deflection.max(1e-4), angle: req.angle.clamp(1e-3, 1.0) };
