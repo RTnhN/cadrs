@@ -15,3 +15,4 @@ __pycache__/
 
 # Generated from OCCT's LGPL test scripts by tools/occt_to_rust.py (kept local).
 /crates/cadrs_kernel/tests/occt_*.rs
+/target-*/
