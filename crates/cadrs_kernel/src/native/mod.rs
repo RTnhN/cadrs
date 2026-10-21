@@ -10,6 +10,7 @@ pub mod brep_occt;
 pub mod boolean;
 pub mod boolean_kinds;
 pub mod build;
+pub mod cells;
 pub mod classify;
 pub mod curve;
 pub mod distance;

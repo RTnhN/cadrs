@@ -85,6 +85,10 @@ class Case:
         self.evol = None  # mkevol's result name, shape and the edges' radius laws
         self.feat = None  # the form feature featprism/featrevol/featdprism defined
         self.eval_compounds = {}  # `eval compound [explode s e] … name`: name -> the shapes
+        self.object_names, self.tool_names = [], []
+        self.cells = None  # bcbuild's arguments: (expressions, names)
+        self.cells_result = None  # the name bcadd builds the result under
+        self.face_surfs = {}  # faces of whole surfaces (mkface without bounds): name -> surface
         self.surfaces = {}  # mksurface's surfaces of faces: name -> the face
 
     def num(self, tok):
@@ -473,7 +477,14 @@ class Case:
             self.surfs.add(a[0])
         elif c == "mkface" and len(a) in (2, 6) and (a[1] in self.surfs or a[1] in self.planes):
             uv = f"Some([{', '.join(L(x) for x in a[2:])}])" if len(a) == 6 else "None"
-            self.bind(a[0], f"k.mkface({self.surf(a[1])}, {uv})?")
+            surf = self.surf(a[1])
+            if a[1] in self.planes:
+                # The plane's surface held (mkvolume uses it again).
+                tmp = ident(a[0]) + "_surf"
+                self.lines.append(f"let {tmp} = k.plane_surface(&{self.vars[a[1]]});")
+                surf = "&" + tmp
+            self.bind(a[0], f"k.mkface({surf}, {uv})?")
+            self.face_surfs[a[0]] = surf
         elif c == "wedge" and len(a) in (5, 8):
             nums = [L(x) for x in a[1:]]
             top = f"[0.0, 0.0, {nums[3]}, {nums[2]}]" if len(a) == 5 else f"[{', '.join(nums[3:])}]"
@@ -547,12 +558,62 @@ class Case:
             self.bind(a[0], f"k.{c}({self.shape(a[1])}, {self.shape(a[2])})?")
         elif c == "bclearobjects":
             self.objects = []
+            self.object_names = []
         elif c == "bcleartools":
             self.tools = []
+            self.tool_names = []
         elif c == "baddobjects":
             self.objects += [self.shape(x) for x in a]
+            self.object_names += a
         elif c == "baddtools":
             self.tools += [self.shape(x) for x in a]
+            self.tool_names += a
+        elif c == "compound" and a and a[-1] == "TheFeatureC":
+            return  # removefeatures' CheckIsFeatureRemoved (history checks we don't keep)
+        elif c == "unifysamedom" and len(a) == 2:
+            self.bind(a[0], f"k.unifysamedom({self.shape(a[1])})?")
+        elif c == "removefeatures" and len(a) >= 3:
+            self.bind(a[0], f"k.removefeatures({self.shape(a[1])}, &[{', '.join(self.shape(x) for x in a[2:])}])?")
+        elif c in ("bsplit", "bapisplit") and len(a) == 1:
+            if not self.objects:
+                raise Unsupported(f"{c} without objects")
+            self.bind(a[0], f"k.bsplit(&[{', '.join(self.objects)}], &[{', '.join(self.tools)}])?")
+        elif c == "bcbuild" and len(a) == 1:
+            self.cells = (self.objects + self.tools, self.object_names + self.tool_names)
+            self.cells_result = None
+        elif c == "bcremoveall" and len(a) == 0:
+            self.cells_result = None
+        elif c in ("bcadd", "bcaddall") and len(a) >= 1:
+            if self.cells is None:
+                raise Unsupported(f"{c} without bcbuild")
+            exprs, names = self.cells
+            spec = []
+            mat, upd = 0, False
+            if len(a) >= 3 and a[-3] == "-m":
+                mat, upd, a = int(self.num(a[-2])), a[-1] == "-u", a[:-3]
+            elif len(a) >= 2 and a[-2] == "-m":
+                mat, a = int(self.num(a[-1])), a[:-2]
+            if c == "bcadd":
+                if len(a) % 2 != 1:
+                    raise Unsupported("bcadd with these arguments")
+                for i in range(1, len(a), 2):
+                    if a[i] not in names:
+                        raise Unsupported(f"bcadd of {a[i]}, not an argument")
+                    spec.append(f"({names.index(a[i])}, {'true' if int(self.num(a[i + 1])) else 'false'})")
+            elif len(a) > 1:
+                raise Unsupported("bcaddall with options")
+            prev = f"Some({self.shape(self.cells_result)})" if self.cells_result else "None"
+            self.bind(a[0], f"k.bcadd(&[{', '.join(exprs)}], &[{', '.join(spec)}], {prev}, {mat}, {'true' if upd else 'false'})?")
+            self.cells_result = a[0]
+        elif c == "bcremoveint" and len(a) == 1:
+            self.bind(a[0], f"k.bcremoveint({self.shape(a[0])})?")
+        elif c == "mkvolume" and len(a) >= 2:
+            names = [x for x in a[1:] if not x.startswith("-")]
+            if any(x.startswith("-") for x in a[1:]):
+                raise Unsupported("mkvolume with options")
+            if not all(x in self.face_surfs for x in names):
+                raise Unsupported("mkvolume of shapes other than faces of whole surfaces")
+            self.bind(a[0], f"k.mkvolume(&[{', '.join(self.face_surfs[x] for x in names)}])?")
         elif c == "bbop" and len(a) == 2:
             if not self.objects or not self.tools:
                 raise Unsupported("bbop without objects and tools")

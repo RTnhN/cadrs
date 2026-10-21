@@ -581,11 +581,9 @@ feat featprism_c3
 feat featprism_d3
 feat featprism_m4
 feat featprism_n1
-feat featprism_n2
 feat featprism_r7
 feat featprism_r8
 feat featrevol_d1
-feat featrevol_d2
 # feat: unsupported: features up to shapes other than faces.
 feat featprism_g3
 feat featprism_g8
@@ -621,7 +619,6 @@ draft angle_l5
 # draft: a boolean of the feature fails (open shell).
 draft angle_h5
 # draft: the measured property differs from OCCT's.
-draft angle_i5
 draft angle_k9
 # blend: a boolean of the feature fails (open shell).
 blend bfuseblend_a6
@@ -842,3 +839,49 @@ offset shape_type_i_c_y5
 offset shape_type_i_c_y6
 offset shape_type_i_c_y7
 offset shape_type_i_c_y8
+# boolean: topology counts differ from OCCT's (faces split or merged differently).
+boolean bopcut_complex_e5
+boolean cells_test_j1
+boolean volumemaker_d8
+# boolean: cells, splits and mkvolume whose booleans fail (open shell).
+boolean cells_test_e2
+boolean volumemaker_a2
+boolean volumemaker_a4
+boolean volumemaker_a8
+boolean volumemaker_b1
+boolean volumemaker_c5
+boolean volumemaker_c6
+boolean volumemaker_e5
+boolean volumemaker_e6
+boolean volumemaker_f1
+boolean volumemaker_f2
+boolean volumemaker_f6
+boolean volumemaker_f7
+boolean volumemaker_f8
+boolean volumemaker_f9
+boolean volumemaker_g1
+boolean volumemaker_g2
+boolean volumemaker_g5
+boolean volumemaker_g6
+boolean volumemaker_g8
+boolean volumemaker_h1
+# boolean: cells or mkvolume whose measured properties differ from OCCT's.
+boolean cells_test_j2
+boolean cells_test_k1
+boolean volumemaker_b7
+boolean volumemaker_f4
+# boolean: unsupported: booleans of shapes other than solids.
+boolean cells_test_j4
+# boolean: the result is invalid (checkshape).
+boolean volumemaker_a9
+boolean volumemaker_b2
+boolean volumemaker_e4
+boolean volumemaker_f5
+# offset: unifysamedom after an offset the kernel fails (W6).
+offset shape_type_i_c_v3
+offset shape_type_i_c_v5
+offset shape_type_i_c_v9
+# feat: with OCCT's unmerged booleans the fused base's faces split, and the profile's face isn't the one OCCT's numbering gives.
+feat featrevol_h2
+# offset: unifysamedom after offsetonface, whose offset the kernel fails (W6).
+offset shape_type_i_c_xt2

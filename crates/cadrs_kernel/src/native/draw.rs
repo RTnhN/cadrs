@@ -120,6 +120,11 @@ thread_local! {
     static ORDERS: std::cell::RefCell<std::collections::HashMap<BodyId, OcctOrder>> = Default::default();
 }
 
+thread_local! {
+    /// The cells builder's materials of result cells (`bcadd -m`).
+    static MATERIALS: std::cell::RefCell<std::collections::HashMap<BodyId, i64>> = Default::default();
+}
+
 fn set_order(b: BodyId, o: OcctOrder) {
     ORDERS.with(|m| m.borrow_mut().insert(b, o));
 }
@@ -1820,6 +1825,18 @@ impl NativeKernel {
     /// trimmed or natural bounds), as a sheet body.
     pub fn mkface(&mut self, s: &DSurface, uv: Option<[f64; 4]>) -> Result<Shape> {
         let domain = uv.map(|[u0, u1, v0, v1]| ((u0, u1), (v0, v1))).or(s.domain);
+        // Bounds past an open direction's reach (OCCT's ±1e6 "infinite" faces) are cut back to
+        // the kernel's extent of the surface.
+        let ((pu0, pu1), (pv0, pv1)) = s.s.param_box();
+        const INFINITE: f64 = 1e5;
+        let clamp = |(a, b): (f64, f64), lo: f64, hi: f64, periodic: bool| {
+            if periodic {
+                (a, b)
+            } else {
+                (if a <= -INFINITE { a.max(lo) } else { a }, if b >= INFINITE { b.min(hi) } else { b })
+            }
+        };
+        let domain = domain.map(|(u, v)| (clamp(u, pu0, pu1, s.s.u_periodic()), clamp(v, pv0, pv1, s.s.v_periodic())));
         let sheet = super::face_build::face_from_surface(&s.s, domain)?;
         Ok(Shape::Body(self.insert(sheet)))
     }
@@ -2318,7 +2335,8 @@ impl NativeKernel {
             return self.edge_bop(op, a, b);
         }
         let (a, b) = (self.solid_of(a)?, self.solid_of(b)?);
-        let r = match self.boolean(op, a, &[b]) {
+        // As OCCT's: faces of the two shapes on one surface stay apart.
+        let r = match super::boolean::without_merging(|| self.boolean(op, a, &[b])) {
             Err(KernelError::EmptyResult(_)) => return Ok(Shape::Empty),
             r => r?,
         };
@@ -3023,6 +3041,192 @@ impl NativeKernel {
         let xd = plane.x_dir.into_inner();
         let ax = Ax3 { origin: plane.origin - xd * big - n.cross(&xd) * big, z: n, x: xd };
         self.box_on(&ax, 2.0 * big, 2.0 * big, big)
+    }
+
+    /// `bcbuild r; bcadd result a 1 b 0 … [-m material [-u]]` (BOPAlgo_CellsBuilder,
+    /// `native::cells`): the cells of the arguments inside those marked 1 and outside those
+    /// marked 0 (the others either way), added to `prev` (the result so far) as solids side by
+    /// side, each once; tagged with `material` when not 0, and with `update` the cells of each
+    /// material fused (their shared boundaries gone). An empty `spec` adds every cell.
+    pub fn bcadd(&mut self, args: &[&Shape], spec: &[(usize, bool)], prev: Option<&Shape>, material: i64, update: bool) -> Result<Shape> {
+        let ids = args.iter().map(|a| self.solid_of(a)).collect::<Result<Vec<_>>>()?;
+        let cells = super::cells::select_cells(self, &ids, spec)?;
+        let mut out: Vec<Shape> = match prev {
+            Some(Shape::Compound(v)) => v.clone(),
+            Some(Shape::Empty) | None => Vec::new(),
+            Some(s) => vec![s.clone()],
+        };
+        // A cell already in the result (the same volume, area and box) isn't added again.
+        let sig = |k: &Self, b: BodyId| -> Result<[f64; 8]> {
+            let m = crate::Kernel::mass_properties(k, b)?;
+            let bb = crate::Kernel::bounding_box(k, b)?;
+            Ok([m.volume, m.surface_area, bb.min.x, bb.min.y, bb.min.z, bb.max.x, bb.max.y, bb.max.z])
+        };
+        let mut have: Vec<[f64; 8]> = Vec::new();
+        for p in &out {
+            if let Shape::Body(b) = p {
+                have.push(sig(self, *b)?);
+            }
+        }
+        for c in cells {
+            let sc = sig(self, c)?;
+            let scale = sc.iter().fold(1.0f64, |a, x| a.max(x.abs()));
+            if have.iter().any(|h| h.iter().zip(&sc).all(|(x, y)| (x - y).abs() <= 1e-6 * scale)) {
+                continue;
+            }
+            have.push(sc);
+            if material != 0 {
+                MATERIALS.with(|m| m.borrow_mut().insert(c, material));
+            }
+            out.push(Shape::Body(c));
+        }
+        let r = if out.is_empty() { Shape::Empty } else { Shape::Compound(out) };
+        if update { self.bcremoveint(&r) } else { Ok(r) }
+    }
+
+    /// `bcremoveint result`: the result's cells of each material fused (their shared
+    /// boundaries gone); cells of no material stay apart.
+    pub fn bcremoveint(&mut self, s: &Shape) -> Result<Shape> {
+        let Shape::Compound(v) = s else { return Ok(s.clone()) };
+        let mut groups: Vec<(i64, Vec<Shape>)> = Vec::new();
+        let mut out = Vec::new();
+        for x in v {
+            let m = match x {
+                Shape::Body(b) => MATERIALS.with(|m| m.borrow().get(b).copied()),
+                _ => None,
+            };
+            match m {
+                Some(m) => match groups.iter_mut().find(|g| g.0 == m) {
+                    Some(g) => g.1.push(x.clone()),
+                    None => groups.push((m, vec![x.clone()])),
+                },
+                None => out.push(x.clone()),
+            }
+        }
+        for (m, parts) in groups {
+            let mut acc = parts[0].clone();
+            for x in &parts[1..] {
+                acc = self.bfuse(&acc, x)?;
+            }
+            if let Shape::Body(b) = &acc {
+                MATERIALS.with(|mm| mm.borrow_mut().insert(*b, m));
+            }
+            out.push(acc);
+        }
+        Ok(Shape::Compound(out))
+    }
+
+    /// `bsplit result` and `bapisplit result` (BOPAlgo_Splitter, `native::cells::split_by`):
+    /// the objects split by the tools, the pieces side by side.
+    pub fn bsplit(&mut self, objects: &[&Shape], tools: &[&Shape]) -> Result<Shape> {
+        let o = objects.iter().map(|a| self.solid_of(a)).collect::<Result<Vec<_>>>()?;
+        let t = tools.iter().map(|a| self.solid_of(a)).collect::<Result<Vec<_>>>()?;
+        let parts = super::cells::split_by(self, &o, &t)?;
+        Ok(Shape::Compound(parts.into_iter().map(Shape::Body).collect()))
+    }
+
+    /// `removefeatures result shape f1 f2 …` (BRepAlgoAPI_Defeaturing): the faces removed and
+    /// the gap healed by their neighbours (the kernel's delete-faces).
+    pub fn removefeatures(&mut self, s: &Shape, faces: &[&Shape]) -> Result<Shape> {
+        let b = self.body_of(s)?;
+        fn gather(b: BodyId, s: &Shape, out: &mut Vec<FaceId>) -> Result<()> {
+            match s {
+                Shape::BodyFace(fb, f) if *fb == b => out.push(*f),
+                Shape::Compound(v) => {
+                    for x in v {
+                        gather(b, x, out)?;
+                    }
+                }
+                _ => return Err(err("removefeatures takes faces of the shape")),
+            }
+            Ok(())
+        }
+        let mut ids = Vec::new();
+        for f in faces {
+            gather(b, f, &mut ids)?;
+        }
+        ids.sort_by_key(|f| f.0);
+        ids.dedup();
+        let r = crate::Kernel::delete_faces(self, b, &ids)?;
+        Ok(Shape::Body(r.bodies[0]))
+    }
+
+    /// `unifysamedom result shape` (ShapeUpgrade_UnifySameDomain): faces on one surface that
+    /// meet merged, then edges on one curve (the kernel's unify).
+    pub fn unifysamedom(&mut self, s: &Shape) -> Result<Shape> {
+        let b = self.solid_of(s)?;
+        let mut body = (**self.get(b)?).clone();
+        let from: Vec<Vec<(usize, usize)>> = (0..body.faces.len()).map(|i| vec![(0, i)]).collect();
+        super::unify::unify_faces(&mut body, from, &|_, _| true);
+        super::unify::merge_edges(&mut body);
+        let had_solids = !body.solids.is_empty();
+        body.shells.clear();
+        body.solids.clear();
+        super::boolean::assemble_shells(&mut body)?;
+        if !had_solids {
+            body.solids.clear();
+        }
+        Ok(Shape::Body(self.insert(body)))
+    }
+
+    /// `mkvolume result f1 f2 …` (BOPAlgo_MakerVolume) for faces covering whole surfaces
+    /// (planes, cylinders, a cone's nappe from its apex, spheres): the bounded cells the
+    /// surfaces divide space into, as solids side by side.
+    pub fn mkvolume(&mut self, surfs: &[&DSurface]) -> Result<Shape> {
+        // How far the bounded cells can reach: about the surfaces' placements.
+        let mut pts: Vec<P3> = Vec::new();
+        let mut rmax: f64 = 0.0;
+        for s in surfs {
+            match &s.s {
+                Surface::Plane { f } => pts.push(f.o),
+                Surface::Cylinder { f, r } | Surface::Sphere { f, r } | Surface::Cone { f, r, .. } => {
+                    pts.push(f.o);
+                    rmax = rmax.max(r.abs());
+                }
+                _ => return Err(KernelError::Unsupported("mkvolume of faces of this kind of surface")),
+            }
+        }
+        let c = P3::from(pts.iter().fold(V3::zeros(), |a, p| a + p.coords) / pts.len().max(1) as f64);
+        let spread = pts.iter().map(|p| (p - c).norm()).fold(0.0, f64::max) + rmax;
+        let l0 = 4.0 * spread.max(1e-3);
+        let outer = Ax3 { origin: c - V3::new(l0, l0, l0), z: V3::z(), x: V3::x() };
+        let outer = self.box_on(&outer, 2.0 * l0, 2.0 * l0, 2.0 * l0)?;
+        let big = 4.0 * l0;
+        let mut regions = Vec::new();
+        for s in surfs {
+            let region = match &s.s {
+                Surface::Plane { f } => {
+                    let n = f.x.cross(&f.y).normalize();
+                    let o = c - n * (c - f.o).dot(&n);
+                    let x = f.x.normalize();
+                    self.box_on(&Ax3 { origin: o - x * big - n.cross(&x) * big, z: n, x }, 2.0 * big, 2.0 * big, big)?
+                }
+                Surface::Cylinder { f, r } => {
+                    let z = f.z.normalize();
+                    let o = f.o + z * ((c - f.o).dot(&z) - big);
+                    self.pcylinder_on(&Ax3 { origin: o, z, x: f.x.normalize() }, *r, 2.0 * big)?
+                }
+                Surface::Sphere { f, r } => self.psphere_on(&Ax3 { origin: f.o, z: f.z.normalize(), x: f.x.normalize() }, *r)?,
+                Surface::Cone { f, r, a } => {
+                    if r.abs() > 1e-9 {
+                        return Err(KernelError::Unsupported("mkvolume of truncated cones"));
+                    }
+                    let z = f.z.normalize() * a.cos().signum();
+                    let h = big * 4.0;
+                    self.pcone_on(&Ax3 { origin: f.o, z, x: f.x.normalize() }, 0.0, h * a.tan().abs(), h)?
+                }
+                _ => unreachable!(),
+            };
+            regions.push(self.body_of(&region)?);
+        }
+        let ob = self.body_of(&outer)?;
+        let cells = super::cells::split_cells(self, ob, &regions)?;
+        let bb = crate::Kernel::bounding_box(self, ob)?;
+        let kept = super::cells::bounded(self, &cells, &bb, 1e-6 * l0)?;
+        Ok(match kept.len() {
+            0 => Shape::Empty,
+            _ => Shape::Compound(kept.into_iter().map(Shape::Body).collect()),
+        })
     }
 
     /// `checkprops shape -s empty` (and -v, -l): nothing there.

@@ -76,6 +76,26 @@ fn set_vtol(t: f64) {
     RUN_TOL.with(|c| c.set(t));
 }
 
+thread_local! {
+    /// Set by [`without_merging`]: booleans keep faces on one surface apart (no unify).
+    static NO_MERGE: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+/// Runs `f` with booleans that keep the faces of the two inputs on one surface apart, as OCCT's
+/// do (the DRAW harness's boolean commands): no coplanar merge after the run.
+pub fn without_merging<T>(f: impl FnOnce() -> T) -> T {
+    let before = NO_MERGE.with(|c| c.replace(true));
+    struct Restore(bool);
+    impl Drop for Restore {
+        fn drop(&mut self) {
+            NO_MERGE.with(|c| c.set(self.0));
+        }
+    }
+    let _restore = Restore(before);
+    f()
+}
+
+
 /// How a boolean runs: its tolerances, and whether faces of the two inputs on one surface are
 /// merged whatever the operation (`flush`: a blend's tool face flush with a face it ends
 /// against becomes part of it; otherwise only a union merges them).
@@ -1709,7 +1729,7 @@ fn run(a: &Body, b: &Body, mode: Mode, flush: bool) -> Result<BoolOut> {
         eprintln!("check: {:?}", out.check());
     }
     let mut from: Vec<Vec<(usize, usize)>> = from.into_iter().map(|x| vec![x]).collect();
-    if !imprinting {
+    if !imprinting && !NO_MERGE.with(|c| c.get()) {
         from = super::unify::unify_boolean(&mut out, from, flush);
     }
     prof.mark("assemble");
