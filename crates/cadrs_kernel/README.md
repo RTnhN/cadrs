@@ -214,8 +214,8 @@ explicitly: `boolean::boolean_bodies_with(a, b, op, BoolOptions { tol, .. })`. A
 first run leaves an open shell runs again at `Tolerances::retries` (1e-5, then 1e-4). A run
 passes its merge distance down to its helpers and the intersections it calls as an argument
 (no thread-local or global state); `BoolOptions` also says whether faces on one surface are
-merged afterwards (`merge_coplanar`, off for the DRAW harness, as OCCT) and whether a face whose
-p-curves don't close may be returned (`allow_uv_gaps`, for callers that repair such faces).
+merged afterwards (`merge_coplanar`, off for the DRAW harness, as OCCT). A boolean never returns
+an invalid body: a result that fails `Body::check` is an error, retried at the larger tolerances.
 
 **Errors.** Every operation returns `Result<_, KernelError>`, with a message in words for the
 user. The variant says what a caller can do: `EmptyResult` (an Intersect of bodies that don't

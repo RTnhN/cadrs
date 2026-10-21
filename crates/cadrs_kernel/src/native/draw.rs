@@ -2209,8 +2209,10 @@ impl NativeKernel {
             lp.extend(edges.iter().cloned());
             lp.extend([line(p1, e1), line(e1, f0), line(f0, f1), line(f1, e0)]);
             let swept = tool(self, &Shape::Face { plane, loops: vec![lp] })?;
-            let pieces = if fuse != 0 { self.bcut(&swept, base)? } else { self.bcommon(&swept, base)? };
-            let Ok(pb) = self.body_of(&pieces) else { continue };
+            // (A side whose region crosses itself, the wire's ends carried on across it, gives
+            // a tool the boolean refuses: the other side is tried.)
+            let pieces = if fuse != 0 { self.bcut(&swept, base) } else { self.bcommon(&swept, base) };
+            let Ok(pb) = pieces.and_then(|p| self.body_of(&p)) else { continue };
             let mid = {
                 let e = &edges[edges.len() / 2];
                 e.curve.point(0.5 * (e.t0 + e.t1)) + side * (1e-3 * size) + mid_off

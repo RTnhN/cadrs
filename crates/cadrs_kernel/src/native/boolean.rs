@@ -59,8 +59,7 @@ impl Prof {
 /// run's is [`BoolOptions::tol`]'s).
 pub const VTOL: f64 = super::tol::POINT;
 
-/// How a boolean runs: its tolerances, which faces on one surface are merged afterwards, and
-/// what result it refuses.
+/// How a boolean runs: its tolerances, and which faces on one surface are merged afterwards.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct BoolOptions {
     /// The merge distance of the first run and of the retries after one that fails.
@@ -72,15 +71,11 @@ pub struct BoolOptions {
     /// Faces on one surface are merged after the run (true by default); OCCT's booleans (the
     /// DRAW harness's) keep them apart.
     pub merge_coplanar: bool,
-    /// A result with a face whose loop's p-curves don't close in (u, v) is returned instead of
-    /// refused (false by default). For callers that repair or discard such faces themselves;
-    /// not for results handed out.
-    pub allow_uv_gaps: bool,
 }
 
 impl Default for BoolOptions {
     fn default() -> Self {
-        BoolOptions { tol: super::tol::Tolerances::default(), flush: false, merge_coplanar: true, allow_uv_gaps: false }
+        BoolOptions { tol: super::tol::Tolerances::default(), flush: false, merge_coplanar: true }
     }
 }
 
@@ -91,12 +86,11 @@ struct RunOpts {
     tol: f64,
     flush: bool,
     merge_coplanar: bool,
-    allow_uv_gaps: bool,
 }
 
 impl RunOpts {
     /// Section and imprint runs: a boolean's defaults.
-    const PLAIN: RunOpts = RunOpts { tol: VTOL, flush: false, merge_coplanar: true, allow_uv_gaps: false };
+    const PLAIN: RunOpts = RunOpts { tol: VTOL, flush: false, merge_coplanar: true };
 }
 
 #[derive(Debug, Clone)]
@@ -598,9 +592,11 @@ pub fn boolean_bodies_with(a: &Body, b: &Body, op: BoolOp, opts: BoolOptions) ->
         Some((x, y)) => (x, y),
         None => (a, b),
     };
-    let at = |tol: f64| RunOpts { tol, flush: opts.flush, merge_coplanar: opts.merge_coplanar, allow_uv_gaps: opts.allow_uv_gaps };
+    let at = |tol: f64| RunOpts { tol, flush: opts.flush, merge_coplanar: opts.merge_coplanar };
     let first = run(a, b, Mode::Bool(op), at(opts.tol.point));
-    if !matches!(&first, Err(KernelError::OpenResult(_))) && !matches!(&first, Err(KernelError::OperationFailed(m)) if m.contains("open shell") || m.contains("left")) {
+    // (Retried: an open shell, a face that doesn't close, an invalid result.)
+    let broken = |m: &str| ["open shell", "left", "doesn't close", "is invalid"].iter().any(|w| m.contains(w));
+    if !matches!(&first, Err(KernelError::OpenResult(_))) && !matches!(&first, Err(KernelError::OperationFailed(m)) if broken(m)) {
         return first;
     }
     for t in opts.tol.retries.into_iter().filter(|_| std::env::var_os("CADRS_DEBUG_NO_RETRY").is_none()) {
@@ -802,7 +798,7 @@ pub fn imprint(a: &Body, b: &Body, faces: Option<Vec<usize>>) -> Result<BoolOut>
 
 /// One run of the boolean.
 fn run(a: &Body, b: &Body, mode: Mode, opts: RunOpts) -> Result<BoolOut> {
-    let RunOpts { tol: run_tol, flush, merge_coplanar, allow_uv_gaps } = opts;
+    let RunOpts { tol: run_tol, flush, merge_coplanar } = opts;
     // B-spline faces lying on an analytic face of the other body (within the tolerance:
     // approximated sweeps along helices, lofts of circles) take its exact surface, so the two
     // are imprinted as coincident instead of intersected nearly tangentially.
@@ -1752,11 +1748,20 @@ fn run(a: &Body, b: &Body, mode: Mode, opts: RunOpts) -> Result<BoolOut> {
     out.fit_tolerances(run_tol * 10.0);
     prof.mark("unify");
     assemble_shells(&mut out)?;
+    if drop_empty_solids(&mut out, &mut from) && out.faces.is_empty() {
+        return Err(KernelError::EmptyResult("the result is empty".into()));
+    }
     super::unify::split_shared_vertices(&mut out);
     // A face whose loop's p-curves don't meet in (u, v) can't be closed: an error, never an
-    // invalid body (unless the caller opted out: `allow_uv_gaps`).
-    if !allow_uv_gaps && let Some(why) = uv_gap(&out) {
+    // invalid body.
+    if let Some(why) = uv_gap(&out) {
         return Err(KernelError::OperationFailed(format!("the boolean built a face that doesn't close: {why}")));
+    }
+    // Nor any other invalid body ([`Body::check`]).
+    if matches!(mode, Mode::Bool(_))
+        && let Some(why) = out.check().into_iter().next()
+    {
+        return Err(KernelError::OperationFailed(format!("the boolean's result is invalid: {why}")));
     }
     // Solids in, faces out but no solid: some piece went missing.
     if !a.solids.is_empty() && !b.solids.is_empty() && !out.faces.is_empty() && out.solids.is_empty() {
@@ -1770,6 +1775,64 @@ fn run(a: &Body, b: &Body, mode: Mode, opts: RunOpts) -> Result<BoolOut> {
 /// Splits edges used by more than two faces (solids touching along an edge) into one edge per
 /// pair of faces bounding the same material wedge, pairing the faces in their order around
 /// the edge.
+/// Drops the solids of `b` that enclose no volume (to 1e-9 of the body's box, cubed): a closed
+/// shell of faces of the two inputs that met face to face, both kept, is a sheet-thin sliver,
+/// not a solid. Their faces go too (and their entries in `from`). True when any went.
+fn drop_empty_solids(b: &mut Body, from: &mut Vec<Vec<(usize, usize)>>) -> bool {
+    let size = b.bbox().diagonal();
+    let empty: Vec<usize> = (0..b.solids.len())
+        .filter(|&si| {
+            let sub = super::kernel::subset(b, &b.solid_faces(si), true);
+            super::mass::body_mass(&sub).volume.abs() <= 1e-9 * size * size * size
+        })
+        .collect();
+    if empty.is_empty() {
+        return false;
+    }
+    let mut dead = vec![false; b.faces.len()];
+    for &si in &empty {
+        for f in b.solid_faces(si) {
+            dead[f] = true;
+        }
+    }
+    let mut fmap = vec![usize::MAX; b.faces.len()];
+    let mut faces = Vec::new();
+    let mut kept_from = Vec::new();
+    for (fi, f) in std::mem::take(&mut b.faces).into_iter().enumerate() {
+        if !dead[fi] {
+            fmap[fi] = faces.len();
+            faces.push(f);
+            kept_from.push(from.get(fi).cloned().unwrap_or_default());
+        }
+    }
+    b.faces = faces;
+    *from = kept_from;
+    let dead_shells: std::collections::HashSet<usize> = empty.iter().flat_map(|&si| b.solids[si].shells.clone()).collect();
+    let mut smap = vec![usize::MAX; b.shells.len()];
+    let mut shells = Vec::new();
+    for (si, mut sh) in std::mem::take(&mut b.shells).into_iter().enumerate() {
+        if dead_shells.contains(&si) {
+            continue;
+        }
+        sh.faces = sh.faces.iter().filter(|&&f| !dead[f]).map(|&f| fmap[f]).collect();
+        smap[si] = shells.len();
+        shells.push(sh);
+    }
+    b.shells = shells;
+    let solids = std::mem::take(&mut b.solids);
+    b.solids = solids
+        .into_iter()
+        .enumerate()
+        .filter(|(si, _)| !empty.contains(si))
+        .map(|(_, mut so)| {
+            so.shells = so.shells.iter().map(|&s| smap[s]).collect();
+            so
+        })
+        .collect();
+    super::unify::compact(b);
+    true
+}
+
 pub fn split_nonmanifold(b: &mut Body) {
     let ne = b.edges.len();
     let mut uses: Vec<Vec<(usize, usize, usize)>> = vec![Vec::new(); ne]; // (face, loop, index)

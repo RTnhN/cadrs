@@ -345,7 +345,8 @@ pub fn classify_point(body: &Body, polys: &[Vec<Vec<P2>>], p: &P3, tol: f64) -> 
     if parity_inside(body, polys, p) { crate::PointClass::Inside } else { crate::PointClass::Outside }
 }
 
-/// Ray parity with retries in other directions when a ray grazes an edge or a face.
+/// Ray parity, by the majority of a few rays (two that agree, else the first side to three),
+/// with retries in other directions when a ray grazes an edge or a face.
 #[allow(clippy::approx_constant, reason = "ray directions picked off the axes and diagonals, not constants")]
 pub fn parity_inside(body: &Body, polys: &[Vec<Vec<P2>>], p: &P3) -> bool {
     // Five fixed directions, then 32 more spread over the sphere (a golden-angle spiral) while
@@ -407,7 +408,10 @@ pub fn parity_inside(body: &Body, polys: &[Vec<Vec<P2>>], p: &P3) -> bool {
         } else {
             votes.1 += 1;
         }
-        if votes.0 + votes.1 >= 1 {
+        // Two rays that agree, else the first side to three: a ray can miss a crossing (near
+        // the boundary of a face's polygon, nearly along a B-spline face) and so count the
+        // wrong parity.
+        if (votes.0.min(votes.1) == 0 && votes.0.max(votes.1) >= 2) || votes.0.max(votes.1) >= 3 {
             break;
         }
     }
