@@ -8,6 +8,7 @@
 //! highlight, Enter or a click launches the tool (as its toolbar button would), Esc or a click
 //! elsewhere closes the list.
 
+use cadrs_ui::ShortcutKey;
 use bevy::input::ButtonState;
 use bevy::input::keyboard::KeyboardInput;
 use bevy::input_focus::{FocusedInput, InputFocus};
@@ -267,7 +268,7 @@ fn open_on_key(
     let typing = focus.get().is_some_and(|e| q_fields.contains(e));
     let alt = keys.any_pressed([KeyCode::AltLeft, KeyCode::AltRight]);
     for k in keys_in.read() {
-        if k.state == ButtonState::Pressed && k.key_code == KeyCode::KeyC && alt && !typing && q_dialogs.is_empty() {
+        if k.state == ButtonState::Pressed && k.shortcut_code() == KeyCode::KeyC && alt && !typing && q_dialogs.is_empty() {
             commands.queue(open);
         }
     }
@@ -360,7 +361,7 @@ fn on_arrow_keys(ev: On<FocusedInput<KeyboardInput>>, q: Query<&Name>, mut state
     if n == 0 {
         return;
     }
-    match ev.input.key_code {
+    match ev.input.shortcut_code() {
         KeyCode::ArrowDown => state.highlight = (state.highlight + 1) % n,
         KeyCode::ArrowUp => state.highlight = (state.highlight + n - 1) % n,
         _ => {}

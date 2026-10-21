@@ -12,6 +12,7 @@
 //! which opens a menu at that position; its invisible anchor entity receives the bubbling
 //! [`MenuAction`], so put whatever the handler needs (such as the clicked row's id) on it.
 
+use crate::shortcut_key::ShortcutKey;
 use std::borrow::Cow;
 
 use bevy::ecs::spawn::SpawnWith;
@@ -884,7 +885,7 @@ fn close_on_escape(
     mut commands: Commands,
 ) {
     for k in keys.read() {
-        if k.state == ButtonState::Pressed && k.key_code == KeyCode::Escape && !q_layer.is_empty() {
+        if k.state == ButtonState::Pressed && k.shortcut_code() == KeyCode::Escape && !q_layer.is_empty() {
             commands.queue(close_all_menus);
         }
     }

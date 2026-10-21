@@ -22,6 +22,7 @@
 //!
 //! Names: `board-layout-<board>` (a layout mesh).
 
+use cadrs_ui::ShortcutKey;
 use std::collections::{HashMap, HashSet};
 use std::hash::{Hash, Hasher};
 
@@ -828,7 +829,7 @@ fn edit_keys(world: &mut World, mut idle: Local<bool>) {
         *idle = false;
         return;
     }
-    let esc = keys.iter().any(|k| k.state == bevy::input::ButtonState::Pressed && k.key_code == KeyCode::Escape);
+    let esc = keys.iter().any(|k| k.state == bevy::input::ButtonState::Pressed && k.shortcut_code() == KeyCode::Escape);
     if esc && *idle && crate::eda::ui::keys_for(world, crate::eda::Mode::Layout) {
         end_edit(world);
     }

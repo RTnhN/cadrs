@@ -19,6 +19,7 @@
 //! automatically a moment after they happen, and when the document closes a thumbnail is
 //! rendered (see [`crate::thumbnail`]).
 
+use cadrs_ui::ShortcutKey;
 use bevy::input::ButtonState;
 use bevy::input::keyboard::KeyboardInput;
 use bevy::input_focus::InputFocus;
@@ -4121,7 +4122,7 @@ fn document_shortcuts(
         if k.state != ButtonState::Pressed || typing || !ctrl || !q_dialogs.is_empty() {
             continue;
         }
-        let changed = match k.key_code {
+        let changed = match k.shortcut_code() {
             KeyCode::KeyZ if shift => doc.redo().is_some(),
             KeyCode::KeyZ if doc.history.undo_len() > floor => doc.undo().is_some(),
             KeyCode::KeyY => doc.redo().is_some(),
@@ -4219,5 +4220,39 @@ mod assembly_range_tests {
         app.world_mut().trigger(Activate { entity: entities[0] });
         assert!(app.world().resource::<FeatureRowClick>().pending.is_none());
         assert_eq!(app.world().resource::<Selection>().0, vec![picks[2]]);
+    }
+}
+
+#[cfg(test)]
+mod layout_tests {
+    use super::*;
+    use bevy::input::keyboard::Key;
+
+    /// Issue #32: on AZERTY the key labelled Z is QWERTY's W, and Ctrl+Z still undoes.
+    #[test]
+    fn ctrl_z_undoes_on_azerty() {
+        let mut active = ActiveDocument::new(cadrs_core::Document::new("Layouts"));
+        active.execute(&RenameDocument { name: "Renamed".into() }).unwrap();
+        let mut keys = ButtonInput::<KeyCode>::default();
+        keys.press(KeyCode::ControlLeft);
+        let mut app = App::new();
+        app.add_message::<KeyboardInput>()
+            .insert_resource(active)
+            .insert_resource(keys)
+            .init_resource::<InputFocus>()
+            .add_systems(Update, document_shortcuts);
+        let press = |app: &mut App, code: KeyCode, ch: &str| {
+            app.world_mut().write_message(KeyboardInput {
+                key_code: code, logical_key: Key::Character(ch.into()),
+                state: ButtonState::Pressed, text: None, repeat: false, window: Entity::PLACEHOLDER,
+            });
+            app.update();
+        };
+        // AZERTY's W sits on QWERTY's Z: Ctrl+W must not undo.
+        press(&mut app, KeyCode::KeyZ, "w");
+        assert_eq!(app.world().resource::<ActiveDocument>().history.undo_len(), 1);
+        press(&mut app, KeyCode::KeyW, "z");
+        assert_eq!(app.world().resource::<ActiveDocument>().history.undo_len(), 0);
+        assert_eq!(app.world().resource::<ActiveDocument>().history.redo_len(), 1);
     }
 }

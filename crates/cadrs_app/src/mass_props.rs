@@ -26,6 +26,7 @@
 //! - While it shows a mass, the **centre of mass** is marked in the view with the quartered
 //!   circle (P3.6, `ex4-step18.png`, `ex3-step10.png`).
 
+use cadrs_ui::ShortcutKey;
 use bevy::input::ButtonState;
 use bevy::input::keyboard::KeyboardInput;
 use bevy::prelude::*;
@@ -488,7 +489,7 @@ fn mass_keys(mut keys: MessageReader<KeyboardInput>, panel: Option<Res<MassPanel
         return;
     }
     for k in keys.read() {
-        if k.state == ButtonState::Pressed && k.key_code == KeyCode::Escape {
+        if k.state == ButtonState::Pressed && k.shortcut_code() == KeyCode::Escape {
             commands.remove_resource::<MassPanel>();
         }
     }

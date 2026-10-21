@@ -6,6 +6,7 @@
 //! [`DialogClose`] on the dialog root and then despawns the dialog. Clicking the backdrop does
 //! nothing (the dialog is modal).
 
+use crate::shortcut_key::ShortcutKey;
 use std::borrow::Cow;
 
 use bevy::ecs::spawn::SpawnWith;
@@ -258,7 +259,7 @@ fn close_on_escape(
     mut commands: Commands,
 ) {
     for k in keys.read() {
-        if k.state != ButtonState::Pressed || k.key_code != KeyCode::Escape || !q_menus.is_empty() {
+        if k.state != ButtonState::Pressed || k.shortcut_code() != KeyCode::Escape || !q_menus.is_empty() {
             continue;
         }
         // Close the topmost dialog.

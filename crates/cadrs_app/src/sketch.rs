@@ -19,6 +19,7 @@
 //! Every change goes through the command layer ([`ActiveDocument::execute`]). Tools (M4 on)
 //! plug into [`ActiveSketchTool`]; Esc first leaves the active tool, then clears the selection.
 
+use cadrs_ui::ShortcutKey;
 use bevy::input::ButtonState;
 use bevy::input::keyboard::KeyboardInput;
 use bevy::input_focus::InputFocus;
@@ -737,7 +738,7 @@ fn modeling_keys(
             continue;
         }
         let part_studio = *kind == crate::viewport::ActiveKind::PartStudio;
-        match k.key_code {
+        match k.shortcut_code() {
             KeyCode::KeyS if shift && part_studio => commands.queue(begin_sketch),
             KeyCode::Escape if !selection.0.is_empty() => selection.0.clear(),
             KeyCode::Delete | KeyCode::Backspace if part_studio => {
@@ -837,7 +838,7 @@ pub(crate) fn sketch_keys(
             continue;
         }
         if text.open.is_some() {
-            match k.key_code {
+            match k.shortcut_code() {
                 KeyCode::Enter | KeyCode::NumpadEnter => {
                     commands.queue(crate::sketch_text::accept_open)
                 }
@@ -846,7 +847,7 @@ pub(crate) fn sketch_keys(
             }
             continue;
         }
-        match k.key_code {
+        match k.shortcut_code() {
             // Shift+Enter accepts and starts the next sketch ("accept and repeat").
             KeyCode::Enter | KeyCode::NumpadEnter if shift => {
                 commands.queue(|world: &mut World| {

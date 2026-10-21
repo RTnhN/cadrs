@@ -15,6 +15,7 @@
 //!   row each with its swatch; double-click a row, or right-click → Edit appearance, to change
 //!   it.
 
+use cadrs_ui::ShortcutKey;
 use bevy::input::ButtonState;
 use bevy::input::keyboard::KeyboardInput;
 use bevy::prelude::*;
@@ -344,7 +345,7 @@ fn appearance_keys(
         return;
     }
     for k in keys.read() {
-        if k.state == ButtonState::Pressed && k.key_code == KeyCode::Escape {
+        if k.state == ButtonState::Pressed && k.shortcut_code() == KeyCode::Escape {
             commands.queue(close_dialogs);
         }
     }

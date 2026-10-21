@@ -19,6 +19,7 @@
 //! Every change goes through the command layer; the arrow drag previews through
 //! [`PartOverride`] and records one step when released.
 
+use cadrs_ui::ShortcutKey;
 use bevy::input::ButtonState;
 use bevy::input::keyboard::KeyboardInput;
 use bevy::input_focus::InputFocus;
@@ -903,7 +904,7 @@ fn extrude_keys(
         {
             continue;
         }
-        match k.key_code {
+        match k.shortcut_code() {
             KeyCode::KeyE
                 if shift
                     && session.is_none()

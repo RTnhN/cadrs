@@ -18,6 +18,7 @@
 //!   insert is one undo step; Undo (the footer, or Ctrl+Z) removes them one by one; ✕ removes
 //!   all of this dialog's inserts.
 
+use cadrs_ui::ShortcutKey;
 use bevy::asset::RenderAssetUsages;
 use bevy::input::ButtonState;
 use bevy::input::keyboard::KeyboardInput;
@@ -1014,7 +1015,7 @@ fn insert_keys(
         if k.state != ButtonState::Pressed {
             continue;
         }
-        match k.key_code {
+        match k.shortcut_code() {
             KeyCode::Enter if !typing => commands.queue(accept),
             KeyCode::Escape if placing => commands.queue(|world: &mut World| {
                 if let Some(mut f) = world.get_resource_mut::<super::standard::StdForm>() {

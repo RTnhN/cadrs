@@ -10,6 +10,7 @@
 //! - ✓ or Enter accepts (one undo step, "Insert Import 1"), ✕ or Esc removes a new Import or
 //!   reverts an edit. Every change is a command.
 
+use cadrs_ui::ShortcutKey;
 use bevy::input::ButtonState;
 use bevy::input::keyboard::KeyboardInput;
 use bevy::prelude::*;
@@ -272,7 +273,7 @@ fn import_keys(
         if k.state != ButtonState::Pressed || !q_dialogs.is_empty() {
             continue;
         }
-        match k.key_code {
+        match k.shortcut_code() {
             KeyCode::Enter | KeyCode::NumpadEnter => commands.queue(accept),
             KeyCode::Escape => commands.queue(cancel),
             _ => {}

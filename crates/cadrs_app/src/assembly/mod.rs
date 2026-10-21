@@ -70,6 +70,7 @@ pub mod studio_edit;
 pub mod triad;
 pub mod where_used;
 
+use cadrs_ui::ShortcutKey;
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -635,7 +636,7 @@ fn assembly_keys(
         }
         // Ctrl+C / Ctrl+V: the instance clipboard (A15.13).
         if ctrl && !shift {
-            match k.key_code {
+            match k.shortcut_code() {
                 KeyCode::KeyC => {
                     commands.queue(|world: &mut World| {
                         let selected = selected_instances(world.resource::<Selection>());
@@ -660,8 +661,8 @@ fn assembly_keys(
             continue;
         }
         // The mate, Group and Animate dialogs: Enter accepts, Esc cancels.
-        if k.key_code == KeyCode::Escape || k.key_code == KeyCode::Enter {
-            let esc = k.key_code == KeyCode::Escape;
+        if k.shortcut_code() == KeyCode::Escape || k.shortcut_code() == KeyCode::Enter {
+            let esc = k.shortcut_code() == KeyCode::Escape;
             commands.queue(move |world: &mut World| {
                 if world.contains_resource::<animate::AnimateSession>() {
                     world.remove_resource::<animate::AnimateSession>();
@@ -688,7 +689,7 @@ fn assembly_keys(
             });
             continue;
         }
-        match k.key_code {
+        match k.shortcut_code() {
             KeyCode::Delete | KeyCode::Backspace if !k.repeat && insert.is_none() && q_features.is_empty() => {
                 commands.queue(move |world: &mut World| {
                     let instances = selected_instances(world.resource::<Selection>());

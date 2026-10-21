@@ -33,6 +33,7 @@
 //!
 //! Every change is one undo step (`ui::commit`).
 
+use cadrs_ui::ShortcutKey;
 use bevy::input::ButtonState;
 use bevy::input::keyboard::KeyboardInput;
 use bevy::prelude::*;
@@ -514,7 +515,7 @@ fn handle_keys(world: &mut World, keys: Vec<KeyboardInput>) {
         let pointer = world.resource::<EdaPointer>().at;
         let sel = world.resource::<SchState>().selection.clone();
         if ctrl {
-            match k.key_code {
+            match k.shortcut_code() {
                 // Copy (the selection, else what is under the pointer), held by its middle:
                 // paste or duplicate follow the pointer centred on it.
                 KeyCode::KeyC | KeyCode::KeyD => {
@@ -525,7 +526,7 @@ fn handle_keys(world: &mut World, keys: Vec<KeyboardInput>) {
                         continue;
                     }
                     ui::carry_parts(world, &mut clip);
-                    if k.key_code == KeyCode::KeyD {
+                    if k.shortcut_code() == KeyCode::KeyD {
                         set_tool(world, Tool::Paste(Box::new(clip)));
                     } else {
                         world.resource_mut::<SchState>().clipboard = Some(clip);
@@ -544,17 +545,17 @@ fn handle_keys(world: &mut World, keys: Vec<KeyboardInput>) {
         }
         // While placing a symbol or a label: R turns it, X and Y mirror it.
         let placing = matches!(world.resource::<SchState>().tool, Tool::Place(_) | Tool::Label(_) | Tool::GlobalLabel(_));
-        if placing && matches!(k.key_code, KeyCode::KeyR | KeyCode::KeyX | KeyCode::KeyY) {
+        if placing && matches!(k.shortcut_code(), KeyCode::KeyR | KeyCode::KeyX | KeyCode::KeyY) {
             let mut s = world.resource_mut::<SchState>();
             let o = &mut s.orient;
-            match k.key_code {
+            match k.shortcut_code() {
                 KeyCode::KeyR => o.turns = (o.turns + 1) % 4,
                 KeyCode::KeyX => o.mirror_x = !o.mirror_x,
                 _ => o.mirror_y = !o.mirror_y,
             }
             continue;
         }
-        match k.key_code {
+        match k.shortcut_code() {
             KeyCode::Escape => {
                 let had = !matches!(world.resource::<SchState>().tool, Tool::Select) || world.resource::<SchState>().moving.is_some();
                 set_tool(world, Tool::Select);
@@ -572,7 +573,7 @@ fn handle_keys(world: &mut World, keys: Vec<KeyboardInput>) {
             KeyCode::KeyX | KeyCode::KeyY => {
                 let items = if sel.is_empty() { hit_items(world, pointer) } else { sel };
                 if !items.is_empty() {
-                    let up_down = k.key_code == KeyCode::KeyY;
+                    let up_down = k.shortcut_code() == KeyCode::KeyY;
                     ui::commit(world, "Mirror", |d| {
                         let c = snap(se::selection_center(&d.schematic, 0, &items));
                         se::mirror_items(&mut d.schematic, 0, &items, c, up_down);
@@ -593,7 +594,7 @@ fn handle_keys(world: &mut World, keys: Vec<KeyboardInput>) {
                 let items = if sel.is_empty() { hit_items(world, pointer) } else { sel };
                 if !items.is_empty() {
                     world.resource_mut::<SchState>().selection = items.clone();
-                    world.resource_mut::<SchState>().moving = Some(Moving { items, from: snap(pointer), drag: k.key_code == KeyCode::KeyG, on_release: false, end: None });
+                    world.resource_mut::<SchState>().moving = Some(Moving { items, from: snap(pointer), drag: k.shortcut_code() == KeyCode::KeyG, on_release: false, end: None });
                 }
             }
             KeyCode::KeyR => {

@@ -7,6 +7,7 @@
 //!
 //! The outer frame gets the builder's name; the inner editable entity is named `<name>-field`.
 
+use crate::shortcut_key::ShortcutKey;
 use std::borrow::Cow;
 
 use bevy::ecs::lifecycle::HookContext;
@@ -419,7 +420,7 @@ fn on_field_key(
     if disabled || ev.input.state != ButtonState::Pressed || text.is_composing() {
         return;
     }
-    match ev.input.key_code {
+    match ev.input.shortcut_code() {
         KeyCode::Enter | KeyCode::NumpadEnter => {
             commands.trigger(TextSubmit {
                 entity: ev.focused_entity,

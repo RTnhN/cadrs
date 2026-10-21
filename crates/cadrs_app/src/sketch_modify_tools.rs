@@ -17,6 +17,7 @@
 //!
 //! Every edit is an [`EditSketch`](cadrs_core::commands::EditSketch) command.
 
+use cadrs_ui::ShortcutKey;
 use bevy::input::ButtonState;
 use bevy::input::keyboard::KeyboardInput;
 use bevy::input_focus::InputFocus;
@@ -153,7 +154,7 @@ fn modify_keys(
 ) {
     let typing = focus.get().is_some_and(|e| q_fields.contains(e));
     for k in keys_in.read() {
-        if k.state != ButtonState::Pressed || typing || k.key_code != KeyCode::Escape {
+        if k.state != ButtonState::Pressed || typing || k.shortcut_code() != KeyCode::Escape {
             continue;
         }
         if is_modify(tool.tool) && (t.extend.is_some() || t.split_first.is_some()) {

@@ -35,6 +35,7 @@
 //! the cursor passes over are "woken" and offer alignment guides afterwards. Quick dimensions
 //! record driving dimensions, which the solver keeps (M6).
 
+use cadrs_ui::ShortcutKey;
 use std::collections::VecDeque;
 
 use bevy::input::ButtonState;
@@ -2448,7 +2449,7 @@ fn sketch_edit_keys(
         }
         if ctrl {
             // Ctrl+A selects all the sketch's geometry.
-            if k.key_code == KeyCode::KeyA
+            if k.shortcut_code() == KeyCode::KeyA
                 && !shift
                 && let Some(sk) = sketch
             {
@@ -2456,7 +2457,7 @@ fn sketch_edit_keys(
             }
             continue;
         }
-        match k.key_code {
+        match k.shortcut_code() {
             KeyCode::Delete | KeyCode::Backspace if !selection.0.is_empty() => {
                 let mut curves = Vec::new();
                 let mut points = Vec::new();
@@ -2575,7 +2576,7 @@ pub(crate) fn clear_regions_on_space(
 ) {
     let typing = focus.get().is_some_and(|e| q_fields.contains(e));
     for k in keys_in.read() {
-        if k.state == ButtonState::Pressed && !typing && k.key_code == KeyCode::Space {
+        if k.state == ButtonState::Pressed && !typing && k.shortcut_code() == KeyCode::Space {
             regions.0.clear();
         }
     }

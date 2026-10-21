@@ -11,6 +11,7 @@
 //!
 //! Names: `composite-dialog`, `composite-parts-field`, `composite-closed(-checkbox)`.
 
+use cadrs_ui::ShortcutKey;
 use bevy::input::ButtonState;
 use bevy::input::keyboard::KeyboardInput;
 use bevy::prelude::*;
@@ -276,7 +277,7 @@ fn composite_keys(
         if k.state != ButtonState::Pressed || !q_dialogs.is_empty() || focus.get().is_some() {
             continue;
         }
-        match k.key_code {
+        match k.shortcut_code() {
             KeyCode::Enter | KeyCode::NumpadEnter => commands.queue(accept),
             KeyCode::Escape => commands.queue(cancel),
             _ => {}
