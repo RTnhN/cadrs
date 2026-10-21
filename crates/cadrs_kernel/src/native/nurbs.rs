@@ -575,10 +575,15 @@ impl NurbsCurve {
     /// A closed curve restarted at `u`: from `u` to its end, then from its start back to `u`.
     pub fn restarted(&self, u: f64) -> Self {
         let (a, b) = self.range();
-        if u <= a || u >= b {
+        // (A start a rounding error from an end is that end: splitting there leaves an empty
+        // piece.)
+        if u <= a + 1e-12 * (b - a) || u >= b - 1e-12 * (b - a) {
             return self.clone();
         }
         let (l, r) = self.split(u);
+        if l.cps.is_empty() || r.cps.is_empty() {
+            return self.clone();
+        }
         r.joined(&l)
     }
 

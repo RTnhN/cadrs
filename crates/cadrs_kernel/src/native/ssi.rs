@@ -1,6 +1,6 @@
-//! Intersections: surface–surface (analytic cases exactly, the rest by contouring the signed
-//! distance over one surface's parameter box and refining onto both surfaces), curve–surface
-//! and curve–curve.
+//! Intersections: surface–surface (analytic cases exactly, the rest by the numeric engine of
+//! [`super::ssi_numeric`]: subdivision with a loop test for every branch, then marching on both
+//! surfaces), curve–surface and curve–curve.
 
 use std::sync::Arc;
 
@@ -20,27 +20,48 @@ pub struct IntCurve {
 }
 
 /// The intersection of two surfaces near the box `bb` (the overlap of the two faces' boxes),
-/// given the uv boxes of the faces for the numeric fallback.
+/// given the uv boxes of the faces for the numeric fallback: the crossing curves, then the
+/// curves along which the surfaces touch.
 pub fn surface_surface(a: &Surface, ua: ((f64, f64), (f64, f64)), b: &Surface, ub: ((f64, f64), (f64, f64)), bb: &Bbox) -> Vec<IntCurve> {
+    let r = surface_surface_full(a, ua, b, ub, bb);
+    r.curves.into_iter().chain(r.tangent).collect()
+}
+
+/// A surface–surface intersection in parts.
+#[derive(Debug, Clone, Default)]
+pub struct Ssi {
+    /// Curves where the surfaces cross.
+    pub curves: Vec<IntCurve>,
+    /// Curves along which they touch without crossing (numeric cases; the closed forms give
+    /// theirs in `curves`).
+    pub tangent: Vec<IntCurve>,
+    /// Points on the crossing curves where the surfaces are tangent (branch points and touching
+    /// points, where curves meet): each curve passing one runs through it.
+    pub singular: Vec<P3>,
+}
+
+/// [`surface_surface`] in parts.
+pub fn surface_surface_full(a: &Surface, ua: ((f64, f64), (f64, f64)), b: &Surface, ub: ((f64, f64), (f64, f64)), bb: &Bbox) -> Ssi {
+    let closed = |curves| Ssi { curves, ..Ssi::default() };
     if let Some(r) = plane_extrusion(a, b, ub, bb) {
-        return r;
+        return closed(r);
     }
     if let Some(r) = plane_extrusion(b, a, ua, bb) {
-        return r;
+        return closed(r);
     }
     if let Some(r) = analytic(a, b, bb) {
-        return r;
+        return closed(r);
     }
     if let Some(r) = analytic(b, a, bb) {
-        return r;
+        return closed(r);
     }
-    // Numeric: contour over a surface without an implicit form against the other's exact
-    // signed distance when it has one.
+    // Numeric, over the surface without an implicit form first (its points' parameters are
+    // the ones the fit refines on).
     let implicit = |s: &Surface| s.signed_distance(&P3::origin()).is_some();
     if implicit(a) && !implicit(b) {
-        return numeric(b, ub, a, bb);
+        return numeric(b, ub, a, ua, bb);
     }
-    numeric(a, ua, b, bb)
+    numeric(a, ua, b, ub, bb)
 }
 
 /// A plane and an extrusion: rulings where the plane contains the direction, otherwise the
@@ -217,7 +238,7 @@ fn plane_cone(fp: &Frame, fc: &Frame, r: f64, ang: f64, bb: &Bbox) -> Option<Vec
                 cps.push(to_world(&b[1]));
                 cps.push(to_world(&b[2]));
             } else {
-                cps.extend(b.iter().map(|h| to_world(h)));
+                cps.extend(b.iter().map(to_world));
             }
             let kv = (i + 1) as f64;
             if i + 1 < spans.len() {
@@ -657,141 +678,32 @@ pub fn sdist(s: &Surface, p: &P3) -> f64 {
     (p - q).dot(&(n / l))
 }
 
-/// Contours sd_b(S_a(u, v)) = 0 over a's uv box, refines and fits B-splines.
-fn numeric(a: &Surface, ua: ((f64, f64), (f64, f64)), b: &Surface, bb: &Bbox) -> Vec<IntCurve> {
-    let ((u0, u1), (v0, v1)) = ua;
-    let (mu, mv) = a.metric();
-    let ext = ((u1 - u0) * mu).max((v1 - v0) * mv).max(1e-9);
-    let size = bb.diagonal().max(ext);
-    let h = size / 96.0;
-    let nu = (((u1 - u0) * mu / h).ceil() as usize).clamp(8, 400);
-    let nv = (((v1 - v0) * mv / h).ceil() as usize).clamp(8, 400);
-    let mut grid = vec![vec![0.0; nv + 1]; nu + 1];
-    let mut row_hint: Option<(f64, f64)> = None;
-    for i in 0..=nu {
-        let mut hint = row_hint;
-        for j in 0..=nv {
-            let p = a.eval(u0 + (u1 - u0) * i as f64 / nu as f64, v0 + (v1 - v0) * j as f64 / nv as f64);
-            grid[i][j] = sdist_hint(b, &p, &mut hint);
-            if j == 0 {
-                row_hint = hint;
-            }
-        }
-    }
-    let uvat = |i: f64, j: f64| P2::new(u0 + (u1 - u0) * i / nu as f64, v0 + (v1 - v0) * j / nv as f64);
-    // Marching squares: segments between edge crossings.
-    let mut segs: Vec<(P2, P2)> = Vec::new();
-    let cross = |ga: f64, gb: f64| -> f64 { ga / (ga - gb) };
-    for i in 0..nu {
-        for j in 0..nv {
-            let c = [grid[i][j], grid[i + 1][j], grid[i + 1][j + 1], grid[i][j + 1]];
-            let corners = [(0.0, 0.0), (1.0, 0.0), (1.0, 1.0), (0.0, 1.0)];
-            let mut pts: Vec<P2> = Vec::new();
-            for k in 0..4 {
-                let (ga, gb) = (c[k], c[(k + 1) % 4]);
-                if (ga < 0.0) != (gb < 0.0) {
-                    let t = cross(ga, gb);
-                    let (a0, a1) = (corners[k], corners[(k + 1) % 4]);
-                    pts.push(uvat(i as f64 + a0.0 + (a1.0 - a0.0) * t, j as f64 + a0.1 + (a1.1 - a0.1) * t));
-                }
-            }
-            if pts.len() == 2 {
-                segs.push((pts[0], pts[1]));
-            } else if pts.len() == 4 {
-                // Saddle: pair by the centre's sign.
-                let cen = (c[0] + c[1] + c[2] + c[3]) / 4.0;
-                if (cen < 0.0) == (c[0] < 0.0) {
-                    segs.push((pts[0], pts[3]));
-                    segs.push((pts[1], pts[2]));
-                } else {
-                    segs.push((pts[0], pts[1]));
-                    segs.push((pts[2], pts[3]));
-                }
-            }
-        }
-    }
-    if segs.is_empty() {
-        return vec![];
-    }
-    // Link segments into polylines.
-    let key = |p: &P2| ((p.x * 1e9).round() as i64, (p.y * 1e9).round() as i64);
-    let mut by_end: std::collections::HashMap<(i64, i64), Vec<usize>> = std::collections::HashMap::new();
-    for (k, (p, q)) in segs.iter().enumerate() {
-        by_end.entry(key(p)).or_default().push(k);
-        by_end.entry(key(q)).or_default().push(k);
-    }
-    let mut used = vec![false; segs.len()];
-    let mut lines: Vec<(Vec<P2>, bool)> = Vec::new();
-    for s in 0..segs.len() {
-        if used[s] {
-            continue;
-        }
-        used[s] = true;
-        let mut pl = vec![segs[s].0, segs[s].1];
-        // Extend forward then backward.
-        for dir in 0..2 {
-            loop {
-                let end = if dir == 0 { *pl.last().unwrap() } else { pl[0] };
-                let next = by_end.get(&key(&end)).and_then(|v| v.iter().find(|k| !used[**k]).copied());
-                let Some(k) = next else { break };
-                used[k] = true;
-                let (p, q) = segs[k];
-                let other = if key(&p) == key(&end) { q } else { p };
-                if dir == 0 {
-                    pl.push(other);
-                } else {
-                    pl.insert(0, other);
-                }
-            }
-        }
-        let closed = pl.len() > 3 && key(&pl[0]) == key(pl.last().unwrap());
-        if closed {
-            pl.pop();
-        }
-        lines.push((pl, closed));
-    }
-    // Refine onto both surfaces, in 3D.
-    // Ends on the box's sides stay on them (Newton along the side), so the curve reaches the
-    // face's boundary there.
-    let (tu, tv) = ((u1 - u0) * 1e-9, (v1 - v0) * 1e-9);
-    let refine = |uv: P2| -> P3 {
-        let side_u = (uv.x - u0).abs() < tu || (uv.x - u1).abs() < tu;
-        let side_v = (uv.y - v0).abs() < tv || (uv.y - v1).abs() < tv;
-        if side_u != side_v {
-            if let Some(p) = refine_on_side(a, b, uv, side_u) {
-                return p;
-            }
-        }
-        refine_point(a, b, uv)
+/// The intersection by the numeric engine ([`super::ssi_numeric`]): its traced curves fitted
+/// with B-splines through exact points (tangent curves through the touching points found).
+fn numeric(a: &Surface, ua: ((f64, f64), (f64, f64)), b: &Surface, ub: ((f64, f64), (f64, f64)), bb: &Bbox) -> Ssi {
+    use super::ssi_numeric::{intersect, UvBox};
+    // A box that isn't finite (a face without p-curves) falls back on the surface's own.
+    let uvbox = |s: &Surface, x: ((f64, f64), (f64, f64))| {
+        let ok = [x.0 .0, x.0 .1, x.1 .0, x.1 .1].iter().all(|v| v.is_finite()) && x.0 .1 > x.0 .0 && x.1 .1 > x.1 .0;
+        let ((u0, u1), (v0, v1)) = if ok { x } else { s.param_box() };
+        UvBox::new((u0.max(-1e4), u1.min(1e4)), (v0.max(-1e4), v1.min(1e4)))
     };
-    // Each traced line is a seed: the curve through it is marched on both surfaces (exact
-    // points, through saddle cells and across the grid's cells), unless a curve marched from
-    // an earlier seed already passes there. A seed the march can't follow keeps its traced
-    // points.
-    let marching = std::env::var_os("CADRS_NO_MARCH").is_none();
-    let bx = super::march::UvBox { u: (u0, u1), v: (v0, v1) };
-    let mut polys: Vec<(Vec<P3>, bool)> = Vec::new();
-    let mut marched: Vec<Vec<P3>> = Vec::new();
-    for (pl, c) in lines {
-        if marching {
-            let seed = pl[pl.len() / 2];
-            let sp = refine(seed);
-            let covered = marched.iter().any(|m| m.windows(2).any(|w| seg_dist3(&sp, &w[0], &w[1]) < h * 0.5));
-            if covered {
-                continue;
-            }
-            if let Some(m) = super::march::march(a, bx, b, seed, size) {
-                marched.push(m.pts.clone());
-                polys.push((m.pts, m.closed));
-                continue;
-            }
+    let res = intersect(a, uvbox(a, ua), b, uvbox(b, ub), bb);
+    let res_singular: Vec<P3> = res.singular.iter().map(|q| q.p).collect();
+    let h = bb.diagonal().max(1e-9) / 96.0;
+    let mut polys: Vec<(Vec<super::ssi_numeric::Pt>, bool)> = Vec::new();
+    let mut tangents: Vec<(Vec<P3>, bool)> = Vec::new();
+    for c in res.curves {
+        if c.tangent {
+            tangents.push((c.pts.iter().map(|p| p.p).collect(), c.closed));
+        } else {
+            polys.push((c.pts, c.closed));
         }
-        polys.push((pl.into_iter().map(refine).collect(), c));
     }
-    // A curve marched twice (from seeds on two of its traced pieces): the copy goes.
-    let on = |q: &P3, line: &[P3], closed: bool| {
+    // A curve traced twice (from seeds the first march didn't pass): the copy goes.
+    let on = |q: &super::ssi_numeric::Pt, line: &[super::ssi_numeric::Pt], closed: bool| {
         let n = line.len();
-        (0..if closed { n } else { n - 1 }).any(|k| seg_dist3(q, &line[k], &line[(k + 1) % n]) < h * 0.25)
+        (0..if closed { n } else { n - 1 }).any(|k| seg_dist3(&q.p, &line[k].p, &line[(k + 1) % n].p) < h * 0.25)
     };
     let mut keep = vec![true; polys.len()];
     for j in 0..polys.len() {
@@ -807,51 +719,40 @@ fn numeric(a: &Surface, ua: ((f64, f64), (f64, f64)), b: &Surface, bb: &Bbox) ->
         k += 1;
         keep[k - 1]
     });
-    // Join polylines that meet in 3D (across a periodic seam).
     let dbg = std::env::var("CADRS_SSI_DEBUG").is_ok();
     if dbg {
-        eprintln!("numeric: {} polylines before joining: {:?}", polys.len(), polys.iter().map(|(p, c)| (p.len(), *c, p[0], *p.last().unwrap())).collect::<Vec<_>>());
+        eprintln!("numeric: {} polylines before joining: {:?}", polys.len(), polys.iter().map(|(p, c)| (p.len(), *c, p[0].p, p[p.len() - 1].p)).collect::<Vec<_>>());
     }
-    join_polylines(&mut polys, h * 1e-3);
+    join_polylines(&mut polys, h * 1e-3, |q| q.p);
     // Crossings on both sides of a periodic seam are one point in space: a polyline made only of
     // such (all its points at one place) is no curve.
-    polys.retain(|(p, _)| p.iter().any(|q| (q - p[0]).norm() > h * 1e-3));
+    polys.retain(|(p, _)| p.iter().any(|q| (q.p - p[0].p).norm() > h * 1e-3));
     if dbg {
         eprintln!("numeric: {} after: {:?}", polys.len(), polys.iter().map(|(p, c)| (p.len(), *c)).collect::<Vec<_>>());
     }
-    polys.into_iter().filter(|(p, _)| p.len() >= 2).map(|(p, closed)| fit_curve(a, b, p, closed)).collect()
+    let curves: Vec<IntCurve> = polys.into_iter().filter(|(p, _)| p.len() >= 2).map(|(p, closed)| fit_curve(a, b, p, closed)).collect();
+    let tangent: Vec<IntCurve> = tangents.into_iter().filter_map(|(p, closed)| fit_points(p, closed)).collect();
+    Ssi { curves, tangent, singular: res_singular }
 }
 
-/// A point on both surfaces on a's iso line through `uv` (u fixed when `fix_u`): Newton on the
-/// other parameter for sd_b = 0. `None` when it doesn't converge.
-fn refine_on_side(a: &Surface, b: &Surface, uv: P2, fix_u: bool) -> Option<P3> {
-    let (u, mut v) = if fix_u { (uv.x, uv.y) } else { (uv.y, uv.x) };
-    let at = |w: f64| if fix_u { a.eval(u, w) } else { a.eval(w, u) };
-    let mut hint: Option<(f64, f64)> = if b.signed_distance(&P3::origin()).is_some() { None } else { Some(b.project(&at(v), None)) };
-    let e = 1e-7;
-    for _ in 0..30 {
-        let g0 = sdist_hint(b, &at(v), &mut hint);
-        if g0.abs() < 1e-13 {
-            return Some(at(v));
-        }
-        let (mut h1, mut h2) = (hint, hint);
-        let d = (sdist_hint(b, &at(v + e), &mut h1) - sdist_hint(b, &at(v - e), &mut h2)) / (2.0 * e);
-        if d.abs() < 1e-300 {
-            return None;
-        }
-        v -= g0 / d;
+/// A cubic B-spline through points as they are (a tangent curve's touching points, which
+/// refinement can't sharpen: the surfaces' distance has no sign change there).
+fn fit_points(mut pts: Vec<P3>, closed: bool) -> Option<IntCurve> {
+    if closed {
+        pts.push(pts[0]);
     }
-    let p = at(v);
-    (sdist(b, &p).abs() < 1e-9).then_some(p)
+    pts.dedup_by(|x, y| (*x - *y).norm() < 1e-9);
+    if pts.len() < 2 {
+        return None;
+    }
+    let t = chord(&pts);
+    let c = NurbsCurve::interpolate(&pts, &t, 3.min(pts.len() - 1), None, None);
+    let n = c.range();
+    Some(IntCurve { c: Curve::Nurbs(Arc::new(c)), t0: n.0, t1: n.1, closed })
 }
 
-/// A point on both surfaces near a's (u, v): Newton on a's parameters for sd_b = 0, then a
-/// few alternating projections to tighten.
-pub fn refine_point(a: &Surface, b: &Surface, uv: P2) -> P3 {
-    refine_point_uv(a, b, uv).0
-}
-
-/// [`refine_point`] with the point's (u, v) on `a`.
+/// A point on both surfaces near a's (u, v): Newton on a's parameters for sd_b = 0, with the
+/// point's (u, v) on `a`.
 pub fn refine_point_uv(a: &Surface, b: &Surface, uv: P2) -> (P3, P2) {
     let (mut u, mut v) = (uv.x, uv.y);
     let e = 1e-7;
@@ -888,7 +789,9 @@ fn seg_dist3(p: &P3, a: &P3, b: &P3) -> f64 {
     (a + d * t - p).norm()
 }
 
-fn join_polylines(polys: &mut Vec<(Vec<P3>, bool)>, tol: f64) {
+/// Joins polylines whose ends meet (within `tol`; `at` gives a point's position), and closes
+/// those whose own ends meet.
+fn join_polylines<T: Clone>(polys: &mut Vec<(Vec<T>, bool)>, tol: f64, at: impl Fn(&T) -> P3) {
     let mut changed = true;
     while changed {
         changed = false;
@@ -900,8 +803,7 @@ fn join_polylines(polys: &mut Vec<(Vec<P3>, bool)>, tol: f64) {
                 if i == j || polys[j].1 {
                     continue;
                 }
-                let (ai, bi) = (polys[i].0[0], *polys[i].0.last().unwrap());
-                let (aj, bj) = (polys[j].0[0], *polys[j].0.last().unwrap());
+                let (Some(ai), Some(bi), Some(aj), Some(bj)) = (polys[i].0.first().map(&at), polys[i].0.last().map(&at), polys[j].0.first().map(&at), polys[j].0.last().map(&at)) else { continue };
                 let mut pj = polys[j].0.clone();
                 let mut pi = polys[i].0.clone();
                 let joined = if (bi - aj).norm() < tol {
@@ -924,7 +826,7 @@ fn join_polylines(polys: &mut Vec<(Vec<P3>, bool)>, tol: f64) {
                     false
                 };
                 if joined {
-                    let closed = (pi[0] - *pi.last().unwrap()).norm() < tol;
+                    let closed = pi.len() > 2 && (at(&pi[0]) - at(&pi[pi.len() - 1])).norm() < tol;
                     if closed {
                         pi.pop();
                     }
@@ -937,7 +839,7 @@ fn join_polylines(polys: &mut Vec<(Vec<P3>, bool)>, tol: f64) {
         }
         // Close single polylines whose ends meet.
         for p in polys.iter_mut() {
-            if !p.1 && p.0.len() > 2 && (p.0[0] - *p.0.last().unwrap()).norm() < tol {
+            if !p.1 && p.0.len() > 2 && (at(&p.0[0]) - at(&p.0[p.0.len() - 1])).norm() < tol {
                 p.0.pop();
                 p.1 = true;
             }
@@ -945,47 +847,69 @@ fn join_polylines(polys: &mut Vec<(Vec<P3>, bool)>, tol: f64) {
     }
 }
 
-/// Fits a cubic B-spline through exact intersection points, adding refined points where the
-/// fit strays (> 1e-9) from the true intersection.
-fn fit_curve(a: &Surface, b: &Surface, mut pts: Vec<P3>, closed: bool) -> IntCurve {
+/// Fits a cubic B-spline through exact points of a traced curve, adding points of both
+/// surfaces (refined on the plane square to the chord) where the fit strays from the
+/// intersection by more than 1e-9 (relative on a big curve).
+fn fit_curve(a: &Surface, b: &Surface, mut pts: Vec<super::ssi_numeric::Pt>, closed: bool) -> IntCurve {
     if closed {
         pts.push(pts[0]);
     }
-    // Remove near-duplicates.
-    pts.dedup_by(|x, y| (*x - *y).norm() < 1e-9);
-    // The points' (u, v) on a, each projection hinted by the previous one's.
-    let mut uvs: Vec<P2> = Vec::with_capacity(pts.len());
-    let mut hint: Option<(f64, f64)> = None;
-    for p in &pts {
-        let (u, v) = a.project(p, hint);
-        hint = Some((u, v));
-        uvs.push(P2::new(u, v));
+    pts.dedup_by(|x, y| (x.p - y.p).norm() < 1e-9);
+    // Angles continuous along the curve (joined pieces may differ by turns), so that the
+    // parameters of neighbours average to a start between them.
+    for k in 1..pts.len() {
+        let prev = pts[k - 1];
+        let q = &mut pts[k];
+        if a.u_periodic() {
+            q.a.0 = unwrap_near(q.a.0, prev.a.0, TAU);
+        }
+        if a.v_periodic() {
+            q.a.1 = unwrap_near(q.a.1, prev.a.1, TAU);
+        }
+        if b.u_periodic() {
+            q.b.0 = unwrap_near(q.b.0, prev.b.0, TAU);
+        }
+        if b.v_periodic() {
+            q.b.1 = unwrap_near(q.b.1, prev.b.1, TAU);
+        }
     }
+    let fit = |pts: &[super::ssi_numeric::Pt]| {
+        let xs: Vec<P3> = pts.iter().map(|q| q.p).collect();
+        let t = chord(&xs);
+        (NurbsCurve::interpolate(&xs, &t, 3.min(xs.len() - 1), None, None), t)
+    };
+    // How near the fit keeps to the intersection: 1e-9, or 2e-10 of the curve's size on a big
+    // model (a fit to 1e-9 over a metre takes thousands of points, all carried downstream).
+    let tol = {
+        let mut bb = Bbox::empty();
+        pts.iter().for_each(|q| bb.add(&q.p));
+        1e-9f64.max(2e-10 * bb.diagonal())
+    };
     for _round in 0..6 {
-        let t = chord(&pts);
-        let c = NurbsCurve::interpolate(&pts, &t, 3.min(pts.len() - 1), None, None);
-        let found: Vec<Option<(usize, P3, P2)>> = (0..pts.len() - 1)
+        let (c, t) = fit(&pts);
+        let found: Vec<Option<(usize, super::ssi_numeric::Pt)>> = (0..pts.len() - 1)
             .into_par_iter()
             .map(|k| {
-                let tm = (t[k] + t[k + 1]) / 2.0;
-                let q = c.point(tm);
-                let (u, v) = a.project(&q, Some((uvs[k].x, uvs[k].y)));
-                let (exact, uv) = refine_point_uv(a, b, P2::new(u, v));
-                ((exact - q).norm() > 1e-9 && (pts[k + 1] - pts[k]).norm() > 1e-6).then_some((k + 1, exact, uv))
+                let q = c.point((t[k] + t[k + 1]) / 2.0);
+                let chord = (pts[k + 1].p - pts[k].p).norm();
+                let exact = super::ssi_numeric::refine_between(a, b, &pts[k], &pts[k + 1], &q)?;
+                let off = (exact.p - q).norm();
+                (off > tol && chord > 1e-6 && off < 0.5 * chord).then_some((k + 1, exact))
             })
             .collect();
-        let ins: Vec<(usize, P3, P2)> = found.into_iter().flatten().collect();
+        let ins: Vec<(usize, super::ssi_numeric::Pt)> = found.into_iter().flatten().collect();
+        if std::env::var_os("CADRS_SSI_DEBUG").is_some() {
+            eprintln!("fit round {_round}: {} points, {} to insert", pts.len(), ins.len());
+        }
         if ins.is_empty() || pts.len() > 20000 {
             let n = c.range();
             return IntCurve { c: Curve::Nurbs(Arc::new(c)), t0: n.0, t1: n.1, closed };
         }
-        for (k, p, uv) in ins.into_iter().rev() {
+        for (k, p) in ins.into_iter().rev() {
             pts.insert(k, p);
-            uvs.insert(k, uv);
         }
     }
-    let t = chord(&pts);
-    let c = NurbsCurve::interpolate(&pts, &t, 3.min(pts.len() - 1), None, None);
+    let (c, _) = fit(&pts);
     let n = c.range();
     IntCurve { c: Curve::Nurbs(Arc::new(c)), t0: n.0, t1: n.1, closed }
 }
@@ -1043,7 +967,7 @@ pub fn curve_surface(c: &Curve, t0: f64, t1: f64, s: &Surface) -> Vec<f64> {
     if let (Curve::Line { o, d }, true) = (c, s.signed_distance(&P3::origin()).is_some()) {
         let ts: Vec<f64> = super::classify::ray_surface(s, o, d, t0 - 1.0, t1 + 1.0).into_iter().map(|(t, _, _)| t).collect();
         if !matches!(s, Surface::Torus { .. } | Surface::Revolution { .. } | Surface::Extrusion { .. } | Surface::Nurbs(_)) {
-            return ts.into_iter().filter(|t| *t >= t0 - 1e-9 && *t <= t1 + 1e-9).map(|t| t.clamp(t0, t1)).collect();
+            return ts.into_iter().map(|t| touching_root(c, s, t)).filter(|t| *t >= t0 - 1e-9 && *t <= t1 + 1e-9).map(|t| t.clamp(t0, t1)).collect();
         }
     }
     let n = match c {
@@ -1128,6 +1052,38 @@ pub fn curve_surface(c: &Curve, t0: f64, t1: f64, s: &Surface) -> Vec<f64> {
     out.sort_by(f64::total_cmp);
     out.dedup_by(|a, b| (*a - *b).abs() < 1e-9);
     out
+}
+
+/// A root `t` of a line meeting a surface, polished where the line touches it: a double root of
+/// the closed form is only good to the square root of the rounding error (a line tangent to a
+/// cylinder: 3e-8 along it), while the touching point is where the signed distance is
+/// stationary, found by Newton on its derivative.
+fn touching_root(c: &Curve, s: &Surface, t: f64) -> f64 {
+    let f = |x: f64| s.signed_distance(&c.point(x));
+    if f(t).is_none() {
+        return t;
+    }
+    let speed = c.d2(t).1.norm().max(1e-300);
+    let h = 1e-5 / speed;
+    let slope = |x: f64| (f(x + h).unwrap_or(0.0) - f(x - h).unwrap_or(0.0)) / (2.0 * h);
+    if slope(t).abs() > 1e-3 * speed {
+        return t;
+    }
+    let mut x = t;
+    for _ in 0..20 {
+        let g = slope(x);
+        let g2 = (f(x + h).unwrap_or(0.0) - 2.0 * f(x).unwrap_or(0.0) + f(x - h).unwrap_or(0.0)) / (h * h);
+        if g2.abs() < 1e-300 {
+            break;
+        }
+        let dx = -g / g2;
+        x += dx;
+        if dx.abs() < 1e-15 * (1.0 + x.abs()) {
+            break;
+        }
+    }
+    let (ft, fx) = (f(t).unwrap_or(f64::INFINITY).abs(), f(x).unwrap_or(f64::INFINITY).abs());
+    if x.is_finite() && (x - t).abs() * speed < 1e-6 && fx <= ft + 1e-12 { x } else { t }
 }
 
 /// Points where two bounded curves meet (within `tol`): (t on a, t on b).

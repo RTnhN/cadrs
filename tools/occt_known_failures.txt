@@ -143,7 +143,6 @@ boolean bcommon_2d_p7
 boolean bcommon_2d_p8
 boolean bcommon_complex_a6
 boolean bcommon_complex_b1
-boolean bcommon_complex_c7
 boolean bcommon_simple_h4
 boolean bcommon_simple_h5
 boolean bcut_2d_a8
@@ -201,7 +200,6 @@ boolean bfuse_complex_b4
 boolean bfuse_complex_e1
 boolean bfuse_complex_e7
 boolean bfuse_complex_i3
-boolean bfuse_complex_k1
 boolean bfuse_complex_k6
 boolean bfuse_complex_l9
 boolean bfuse_complex_m4
@@ -325,7 +323,6 @@ boolean boptuc_complex_c6
 boolean boptuc_complex_c7
 boolean boptuc_complex_d4
 boolean boptuc_complex_d8
-boolean boptuc_complex_f9
 boolean boptuc_complex_g1
 boolean boptuc_complex_g2
 boolean boptuc_complex_g3
@@ -336,10 +333,6 @@ boolean boptuc_complex_g7
 boolean boptuc_complex_g9
 boolean boptuc_complex_h1
 boolean boptuc_complex_i2
-boolean boptuc_simple_ze7
-boolean boptuc_simple_ze8
-boolean boptuc_simple_ze9
-boolean boptuc_simple_zf1
 boolean boptuc_simple_zp3
 sewing tol_0_01_e5
 sewing tol_0_01_e7
@@ -672,42 +665,29 @@ sewing tol_1_a2
 sewing tol_1_f4
 sewing tol_1_f5
 sewing tol_1_q5
-boolean bopsection_c2
 boolean bopsection_c7
 boolean bopsection_e1
 boolean bsection_a5
-boolean bsection_b1
 boolean bsection_c2
 boolean bsection_c7
 boolean bsection_d1
 boolean bsection_e1
-boolean bsection_e7
-boolean bsection_f1
 boolean bsection_f2
 boolean bsection_f6
-boolean bsection_f8
 boolean bsection_f9
-boolean bsection_g7
 boolean bsection_i2
 boolean bsection_i3
-boolean bsection_j5
 boolean bsection_j6
 boolean bsection_j7
 boolean bsection_j8
 boolean bsection_j9
 boolean bsection_k5
-boolean bsection_k7
-boolean bsection_k8
 boolean bsection_l7
 boolean bsection_m2
-boolean bsection_m4
-boolean bsection_m5
 boolean bsection_n8
 boolean bsection_o1
-boolean bsection_o2
 boolean bsection_p1
 boolean bsection_p4
-boolean bsection_r3
 boolean bsection_r9
 draft angle_b3
 draft angle_c3
@@ -720,7 +700,6 @@ draft angle_e9
 draft angle_f1
 draft angle_f6
 draft angle_f7
-draft angle_f8
 draft angle_g8
 draft angle_j8
 draft angle_k3
@@ -730,4 +709,3 @@ draft angle_m4
 draft angle_g1
 # bsection_k3: with exact (sub-net) B-spline face boxes the finer SSI grid finds a small loop near
 # the open branch and the open curve detours through it (63.5 long between ends 23.3 apart).
-boolean bsection_k3

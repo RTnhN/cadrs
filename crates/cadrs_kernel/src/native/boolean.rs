@@ -15,6 +15,8 @@
 
 use std::collections::HashMap;
 
+use rayon::prelude::*;
+
 use super::classify::{self, InFace};
 use super::curve::Curve;
 use super::kernel::NativeKernel;
@@ -986,6 +988,25 @@ fn run(a: &Body, b: &Body, mode: Mode, flush: bool) -> Result<BoolOut> {
     let mut cuts: Vec<Vec<usize>> = vec![Vec::new(); faces.len()];
     let mut coincident: Vec<Vec<usize>> = vec![Vec::new(); faces.len()];
     let mut new_edges: Vec<usize> = Vec::new();
+    let uvbox = |f: &WFace| {
+        let mut ub = (f64::INFINITY, f64::NEG_INFINITY);
+        let mut vb = (f64::INFINITY, f64::NEG_INFINITY);
+        for p in &f.polys {
+            for q in p {
+                ub = (ub.0.min(q.x), ub.1.max(q.x));
+                vb = (vb.0.min(q.y), vb.1.max(q.y));
+            }
+        }
+        (ub, vb)
+    };
+    let overlap = |fa: usize, fb: usize| {
+        let mut ob = faces[fa].bbox;
+        ob.min = ob.min.sup(&faces[fb].bbox.min);
+        ob.max = ob.max.inf(&faces[fb].bbox.max);
+        ob
+    };
+    // The pairs of faces to intersect, in a fixed order.
+    let mut pairs: Vec<(usize, usize)> = Vec::new();
     for fa in 0..na_faces {
         if !selected(faces[fa].orig) {
             continue;
@@ -1004,20 +1025,6 @@ fn run(a: &Body, b: &Body, mode: Mode, flush: bool) -> Result<BoolOut> {
                 coincident[fb].push(fa);
                 continue;
             }
-            let mut ob = faces[fa].bbox;
-            ob.min = ob.min.sup(&faces[fb].bbox.min);
-            ob.max = ob.max.inf(&faces[fb].bbox.max);
-            let uvbox = |f: &WFace| {
-                let mut ub = (f64::INFINITY, f64::NEG_INFINITY);
-                let mut vb = (f64::INFINITY, f64::NEG_INFINITY);
-                for p in &f.polys {
-                    for q in p {
-                        ub = (ub.0.min(q.x), ub.1.max(q.x));
-                        vb = (vb.0.min(q.y), vb.1.max(q.y));
-                    }
-                }
-                (ub, vb)
-            };
             // Faces that share an edge and are tangent along it (one continues the other): the
             // shared edge is their contact; contouring tangent surfaces finds nothing more but
             // noise.
@@ -1033,169 +1040,219 @@ fn run(a: &Body, b: &Body, mode: Mode, flush: bool) -> Result<BoolOut> {
                 };
                 eprintln!("not tangent {fa}×{fb}: closest edge of b to a {:e}, of a to b {:e}", dev(&face_edges[fb], &faces[fa].surf), dev(&face_edges[fa], &faces[fb].surf));
             }
-            let t_ssi = std::time::Instant::now();
-            let curves = ssi::surface_surface(&faces[fa].surf, uvbox(&faces[fa]), &faces[fb].surf, uvbox(&faces[fb]), &ob);
-            if std::env::var("CADRS_BOOL_DEBUG").is_ok() {
-                eprintln!("ssi {fa}×{fb} {:?}×{:?}: {} curves in {:?}", faces[fa].surf.kind(), faces[fb].surf.kind(), curves.len(), t_ssi.elapsed());
-                for ic in &curves {
-                    eprintln!("    curve closed {} from {:?} to {:?}", ic.closed, ic.c.point(ic.t0), ic.c.point(ic.t1));
-                }
+            pairs.push((fa, fb));
+        }
+    }
+    // Their intersections, each a function of the two faces alone: computed in parallel and
+    // used below in the pairs' order, so the result doesn't depend on the scheduling. (The
+    // run's tolerance is thread-local: each worker takes it on for the call.)
+    let run_tol = vtol();
+    let ssis: Vec<(Vec<ssi::IntCurve>, Vec<P3>, std::time::Duration)> = pairs
+        .par_iter()
+        .map(|&(fa, fb)| {
+            with_tol(run_tol, || {
+                let t = std::time::Instant::now();
+                // (The curves the surfaces only touch along are left out: the faces' tangent
+                // contact is found from their boundaries, as for faces tangent along an edge.)
+                let r = ssi::surface_surface_full(&faces[fa].surf, uvbox(&faces[fa]), &faces[fb].surf, uvbox(&faces[fb]), &overlap(fa, fb));
+                (r.curves, r.singular, t.elapsed())
+            })
+        })
+        .collect();
+    for (&(fa, fb), (curves, singular, el)) in pairs.iter().zip(ssis) {
+        let ob = overlap(fa, fb);
+        if std::env::var("CADRS_BOOL_DEBUG").is_ok() {
+            eprintln!("ssi {fa}×{fb} {:?}×{:?}: {} curves in {el:?}", faces[fa].surf.kind(), faces[fb].surf.kind(), curves.len());
+            for ic in &curves {
+                eprintln!("    curve closed {} from {:?} to {:?}", ic.closed, ic.c.point(ic.t0), ic.c.point(ic.t1));
             }
-            if curves.is_empty() {
-                continue;
+        }
+        if curves.is_empty() {
+            continue;
+        }
+        let mut cand: Vec<usize> = boundary_verts(&pool, fa);
+        for v in boundary_verts(&pool, fb).into_iter().chain(face_pts[fa].iter().copied()).chain(face_pts[fb].iter().copied()) {
+            if !cand.contains(&v) {
+                cand.push(v);
             }
-            let mut cand: Vec<usize> = boundary_verts(&pool, fa);
-            for v in boundary_verts(&pool, fb).into_iter().chain(face_pts[fa].iter().copied()).chain(face_pts[fb].iter().copied()) {
+        }
+        // The pair's tolerance: the larger of the faces' (new vertices and edges carry it).
+        let ft = faces[fa].tol.max(faces[fb].tol);
+        let tf = vtol().max(ft);
+        // Where two curves of the pair cross or touch (a branch point: the surfaces are
+        // tangent there) the faces' new edges meet, so both need a vertex: the SSI's own
+        // such points (exact, each curve passing one runs through it), and crossings found
+        // between the curves.
+        for p in &singular {
+            if ob.grow(tf * 10.0).contains(p) {
+                let v = pool.vertex_tol(*p, ft);
                 if !cand.contains(&v) {
                     cand.push(v);
                 }
             }
-            // The pair's tolerance: the larger of the faces' (new vertices and edges carry it).
-            let ft = faces[fa].tol.max(faces[fb].tol);
-            let tf = vtol().max(ft);
-            for ic in curves {
-                let mut ps: Vec<(f64, usize)> = Vec::new();
-                for &v in &cand {
-                    let p = pool.verts[v];
-                    if !ob.grow(tf * 10.0).contains(&p) {
-                        continue;
+        }
+        for i in 0..curves.len() {
+            for j in i + 1..curves.len() {
+                let (ci, cj) = (&curves[i], &curves[j]);
+                for (t, _) in ssi::curve_curve(&ci.c, ci.t0, ci.t1, &cj.c, cj.t0, cj.t1, tf) {
+                    let p = ci.c.point(t);
+                    if ob.grow(tf * 10.0).contains(&p) {
+                        let v = pool.vertex_tol(p, ft);
+                        if !cand.contains(&v) {
+                            cand.push(v);
+                        }
                     }
-                    let t = param_on(&ic.c, ic.t0, ic.t1, &p);
-                    if (ic.c.point(t) - p).norm() < (vtol() * 2.0).max(ft) {
+                }
+            }
+        }
+        for ic in curves {
+            let mut ps: Vec<(f64, usize)> = Vec::new();
+            for &v in &cand {
+                let p = pool.verts[v];
+                if !ob.grow(tf * 10.0).contains(&p) {
+                    continue;
+                }
+                let mut t = param_on(&ic.c, ic.t0, ic.t1, &p);
+                let on = (vtol() * 2.0).max(ft);
+                if (ic.c.point(t) - p).norm() < on {
+                    // A closed curve: the vertex at its start (within the tolerance, though
+                    // its parameter may land a hair off where the curve runs along it) is
+                    // also at its end.
+                    if ic.closed && (ic.c.point(ic.t0) - p).norm() < on {
+                        t = if (t - ic.t0).abs() <= (t - ic.t1).abs() { ic.t0 } else { ic.t1 };
+                    }
+                    ps.push((t, v));
+                    if ic.closed && ((t - ic.t0).abs() < 1e-12 || (t - ic.t1).abs() < 1e-12) {
+                        ps.push((if (t - ic.t0).abs() < 1e-12 { ic.t1 } else { ic.t0 }, v));
+                    }
+                }
+            }
+            // Sections only (booleans rely on the edge–face stage's crossings): where the curve
+            // leaves either face (a crossing that stage missed, as on a B-spline face),
+            // found by sampling the in-face status along it and bisecting each change, and
+            // the open curve's own ends, cut it too.
+            let sectioning = matches!(mode, Mode::Section);
+            if sectioning {
+                let inside = |t: f64| {
+                    let p = ic.c.point(t);
+                    point_in_face(&faces[fa], &p, tf) != InFace::Outside && point_in_face(&faces[fb], &p, tf) != InFace::Outside
+                };
+                let n = 64;
+                let span = ic.t1 - ic.t0;
+                let mut prev = inside(ic.t0);
+                for k in 1..=n {
+                    let t = ic.t0 + span * k as f64 / n as f64;
+                    let cur = inside(t);
+                    if cur != prev {
+                        let (mut lo, mut hi) = (t - span / n as f64, t);
+                        for _ in 0..50 {
+                            let m = 0.5 * (lo + hi);
+                            if inside(m) == prev {
+                                lo = m;
+                            } else {
+                                hi = m;
+                            }
+                        }
+                        let tc = 0.5 * (lo + hi);
+                        let pc = ic.c.point(tc);
+                        if !ps.iter().any(|(pt, v)| (pt - tc).abs() < 1e-9 * (1.0 + span.abs()) || (pool.verts[*v] - pc).norm() < tf * 10.0) {
+                            let v = pool.vertex_tol(pc, ft);
+                            ps.push((tc, v));
+                        }
+                    }
+                    prev = cur;
+                }
+            }
+            if sectioning && !ic.closed {
+                for t in [ic.t0, ic.t1] {
+                    if !ps.iter().any(|(pt, _)| (pt - t).abs() < 1e-12 * (1.0 + t.abs())) {
+                        let v = pool.vertex_tol(ic.c.point(t), ft);
                         ps.push((t, v));
-                        // A closed curve: the vertex at its start is also at its end.
-                        if ic.closed && ((t - ic.t0).abs() < 1e-12 || (t - ic.t1).abs() < 1e-12) {
-                            ps.push((if (t - ic.t0).abs() < 1e-12 { ic.t1 } else { ic.t0 }, v));
-                        }
                     }
                 }
-                // Sections only (booleans rely on the edge–face stage's crossings): where the curve
-                // leaves either face (a crossing that stage missed, as on a B-spline face),
-                // found by sampling the in-face status along it and bisecting each change, and
-                // the open curve's own ends, cut it too.
-                let sectioning = matches!(mode, Mode::Section);
-                if sectioning {
-                    let inside = |t: f64| {
-                        let p = ic.c.point(t);
-                        point_in_face(&faces[fa], &p, tf) != InFace::Outside && point_in_face(&faces[fb], &p, tf) != InFace::Outside
-                    };
-                    let n = 64;
-                    let span = ic.t1 - ic.t0;
-                    let mut prev = inside(ic.t0);
-                    for k in 1..=n {
-                        let t = ic.t0 + span * k as f64 / n as f64;
-                        let cur = inside(t);
-                        if cur != prev {
-                            let (mut lo, mut hi) = (t - span / n as f64, t);
-                            for _ in 0..50 {
-                                let m = 0.5 * (lo + hi);
-                                if inside(m) == prev {
-                                    lo = m;
-                                } else {
-                                    hi = m;
-                                }
-                            }
-                            let tc = 0.5 * (lo + hi);
-                            let pc = ic.c.point(tc);
-                            if !ps.iter().any(|(pt, v)| (pt - tc).abs() < 1e-9 * (1.0 + span.abs()) || (pool.verts[*v] - pc).norm() < tf * 10.0) {
-                                let v = pool.vertex_tol(pc, ft);
-                                ps.push((tc, v));
-                            }
-                        }
-                        prev = cur;
-                    }
-                }
-                if sectioning && !ic.closed {
-                    for t in [ic.t0, ic.t1] {
-                        if !ps.iter().any(|(pt, _)| (pt - t).abs() < 1e-12 * (1.0 + t.abs())) {
-                            let v = pool.vertex_tol(ic.c.point(t), ft);
-                            ps.push((t, v));
-                        }
-                    }
-                }
-                ps.sort_by(|a, b| a.0.total_cmp(&b.0));
-                ps.dedup_by(|a, b| (a.0 - b.0).abs() < 1e-12 && a.1 == b.1);
-                // Intervals.
-                let mut ivs: Vec<(f64, f64, Option<usize>, Option<usize>)> = Vec::new();
-                if ic.closed {
-                    if ps.is_empty() {
-                        ivs.push((ic.t0, ic.t1, None, None));
-                    } else {
-                        for k in 0..ps.len() {
-                            let (ta, va) = ps[k];
-                            let (tb, vb) = if k + 1 < ps.len() { ps[k + 1] } else { (ps[0].0 + (ic.t1 - ic.t0), ps[0].1) };
-                            if tb - ta > 1e-10 {
-                                ivs.push((ta, tb, Some(va), Some(vb)));
-                            }
-                        }
-                    }
+            }
+            ps.sort_by(|a, b| a.0.total_cmp(&b.0));
+            ps.dedup_by(|a, b| (a.0 - b.0).abs() < 1e-12 && a.1 == b.1);
+            // Intervals.
+            let mut ivs: Vec<(f64, f64, Option<usize>, Option<usize>)> = Vec::new();
+            if ic.closed {
+                if ps.is_empty() {
+                    ivs.push((ic.t0, ic.t1, None, None));
                 } else {
-                    for w in ps.windows(2) {
-                        if w[1].0 - w[0].0 > 1e-10 {
-                            ivs.push((w[0].0, w[1].0, Some(w[0].1), Some(w[1].1)));
+                    for k in 0..ps.len() {
+                        let (ta, va) = ps[k];
+                        let (tb, vb) = if k + 1 < ps.len() { ps[k + 1] } else { (ps[0].0 + (ic.t1 - ic.t0), ps[0].1) };
+                        if tb - ta > 1e-10 {
+                            ivs.push((ta, tb, Some(va), Some(vb)));
                         }
                     }
                 }
-                // A closed curve that isn't periodic (a fitted B-spline) can't run past its end:
-                // the interval that wraps becomes two pieces meeting at the curve's start.
-                if ic.closed && !ic.c.is_periodic() {
-                    let period = ic.t1 - ic.t0;
-                    let mut split: Vec<(f64, f64, Option<usize>, Option<usize>)> = Vec::new();
-                    for (ta, tb, va, vb) in ivs {
-                        if tb > ic.t1 + 1e-12 && ta < ic.t1 - 1e-12 {
-                            let vend = pool.vertex_tol(ic.c.point(ic.t1), ft);
-                            split.push((ta, ic.t1, va, Some(vend)));
-                            if tb - period > ic.t0 + 1e-12 {
-                                split.push((ic.t0, tb - period, Some(vend), vb));
-                            }
-                        } else if ta >= ic.t1 - 1e-12 {
-                            split.push((ta - period, tb - period, va, vb));
-                        } else {
-                            split.push((ta, tb, va, vb));
-                        }
+            } else {
+                for w in ps.windows(2) {
+                    if w[1].0 - w[0].0 > 1e-10 {
+                        ivs.push((w[0].0, w[1].0, Some(w[0].1), Some(w[1].1)));
                     }
-                    ivs = split;
                 }
+            }
+            // A closed curve that isn't periodic (a fitted B-spline) can't run past its end:
+            // the interval that wraps becomes two pieces meeting at the curve's start.
+            if ic.closed && !ic.c.is_periodic() {
+                let period = ic.t1 - ic.t0;
+                let mut split: Vec<(f64, f64, Option<usize>, Option<usize>)> = Vec::new();
                 for (ta, tb, va, vb) in ivs {
-                    // Wrap periodic parameters past the end.
-                    let tm = (ta + tb) * 0.5;
-                    let pm = ic.c.point(tm);
-                    let ia = point_in_face(&faces[fa], &pm, tf);
-                    let ib = point_in_face(&faces[fb], &pm, tf);
-                    if std::env::var("CADRS_BOOL_DEBUG").is_ok() {
-                        eprintln!("  interval {ta}..{tb} at {pm:?}: in a {ia:?}, in b {ib:?}");
+                    if tb > ic.t1 + 1e-12 && ta < ic.t1 - 1e-12 {
+                        let vend = pool.vertex_tol(ic.c.point(ic.t1), ft);
+                        split.push((ta, ic.t1, va, Some(vend)));
+                        if tb - period > ic.t0 + 1e-12 {
+                            split.push((ic.t0, tb - period, Some(vend), vb));
+                        }
+                    } else if ta >= ic.t1 - 1e-12 {
+                        split.push((ta - period, tb - period, va, vb));
+                    } else {
+                        split.push((ta, tb, va, vb));
                     }
-                    if ia == InFace::Outside || ib == InFace::Outside {
-                        continue;
+                }
+                ivs = split;
+            }
+            for (ta, tb, va, vb) in ivs {
+                // Wrap periodic parameters past the end.
+                let tm = (ta + tb) * 0.5;
+                let pm = ic.c.point(tm);
+                let ia = point_in_face(&faces[fa], &pm, tf);
+                let ib = point_in_face(&faces[fb], &pm, tf);
+                if std::env::var("CADRS_BOOL_DEBUG").is_ok() {
+                    eprintln!("  interval {ta}..{tb} at {pm:?}: in a {ia:?}, in b {ib:?}");
+                }
+                if ia == InFace::Outside || ib == InFace::Outside {
+                    continue;
+                }
+                let va = va.unwrap_or_else(|| pool.vertex_tol(ic.c.point(ta), ft));
+                let vb = vb.unwrap_or(va);
+                // Reuse an existing edge running there.
+                let existing = (0..pool.edges.len()).find(|&e| {
+                    let ed = &pool.edges[e];
+                    if ed.degenerate || !ebox.get(e).is_none_or(|b| b.contains(&pm)) {
+                        return false;
                     }
-                    let va = va.unwrap_or_else(|| pool.vertex_tol(ic.c.point(ta), ft));
-                    let vb = vb.unwrap_or(va);
-                    // Reuse an existing edge running there.
-                    let existing = (0..pool.edges.len()).find(|&e| {
-                        let ed = &pool.edges[e];
-                        if ed.degenerate || !ebox.get(e).is_none_or(|b| b.contains(&pm)) {
-                            return false;
-                        }
-                        // Only an unsplit edge between exactly these vertices (pieces of split
-                        // edges that coincide with the new edge are unified later).
-                        let ends_ok = (ed.v == [va, vb] || ed.v == [vb, va]) && ed.splits.is_empty();
-                        ends_ok && on_curve(&ed.curve, ed.t[0], ed.t[1], &pm, tf.max(ed.tol)).is_some()
-                    });
-                    let e = match existing {
-                        Some(e) => e,
-                        None => {
-                            // Unwrap the parameter range for the curve (closed curves may run past
-                            // t1).
-                            let (ta, tb) = (ta, tb);
-                            pool.edges.push(WEdge { curve: ic.c.clone(), t: [ta, tb], v: [va, vb], degenerate: false, tol: ft, splits: Vec::new() });
-                            new_edges.push(pool.edges.len() - 1);
-                            pool.edges.len() - 1
-                        }
-                    };
-                    for f in [fa, fb] {
-                        if !face_edges[f].contains(&e) && !cuts[f].contains(&e) {
-                            cuts[f].push(e);
-                        }
+                    // Only an unsplit edge between exactly these vertices (pieces of split
+                    // edges that coincide with the new edge are unified later).
+                    let ends_ok = (ed.v == [va, vb] || ed.v == [vb, va]) && ed.splits.is_empty();
+                    ends_ok && on_curve(&ed.curve, ed.t[0], ed.t[1], &pm, tf.max(ed.tol)).is_some()
+                });
+                let e = match existing {
+                    Some(e) => e,
+                    None => {
+                        // Unwrap the parameter range for the curve (closed curves may run past
+                        // t1).
+                        let (ta, tb) = (ta, tb);
+                        pool.edges.push(WEdge { curve: ic.c.clone(), t: [ta, tb], v: [va, vb], degenerate: false, tol: ft, splits: Vec::new() });
+                        new_edges.push(pool.edges.len() - 1);
+                        pool.edges.len() - 1
+                    }
+                };
+                for f in [fa, fb] {
+                    if !face_edges[f].contains(&e) && !cuts[f].contains(&e) {
+                        cuts[f].push(e);
                     }
                 }
             }
