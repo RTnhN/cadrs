@@ -9,13 +9,28 @@ use serde::{Deserialize, Serialize};
 use crate::constraint::{Constraint, ConstraintOf, CurveRef, PointRef};
 use crate::solve::{self, Source};
 use crate::{
-    ConstraintId, ConstraintSpec, Curve, CurveId, CurveKind, Dimension, DimensionId, PointId,
+    ConstraintId, ConstraintSpec, Curve, CurveId, CurveKind, Dimension, DimensionId, PointId, PointSpec,
     Sketch, Vec2,
 };
 
 /// The undo-menu label of an edit that came in as data (JSON), which has none.
 fn default_label() -> &'static str {
     "Sketch edit"
+}
+
+/// A curve reference given as one (`{"Curve": id}`, `"XAxis"`) or, as before plane axes could
+/// be mirror lines (#31), as a bare curve id.
+fn curve_or_ref<'de, D: serde::Deserializer<'de>>(d: D) -> Result<CurveRef, D::Error> {
+    #[derive(Deserialize)]
+    #[serde(untagged)]
+    enum Either {
+        Id(CurveId),
+        Ref(CurveRef),
+    }
+    Ok(match Either::deserialize(d)? {
+        Either::Id(k) => CurveRef::Curve(k),
+        Either::Ref(r) => r,
+    })
 }
 
 /// One edit of a sketch's geometry. Serialized as data (`{"type": "add_circle", …}`), so an
@@ -106,9 +121,13 @@ pub enum SketchOp {
     /// Adds constraints described by positions (see [`ConstraintSpec`]). Specs that do not
     /// resolve (the geometry is not there) and duplicates are skipped.
     AddConstraints(Vec<ConstraintSpec>),
-    /// Mirrors curves in a line (the Mirror tool), linking each copy to its source with a
-    /// Symmetric constraint (see [`crate::edit::mirror`]).
-    Mirror { axis: CurveId, curves: Vec<CurveId> },
+    /// Mirrors curves in a line or a sketch axis (the Mirror tool), linking each copy to its
+    /// source with a Symmetric constraint (see [`crate::edit::mirror`]).
+    Mirror {
+        #[serde(deserialize_with = "curve_or_ref")]
+        axis: CurveRef,
+        curves: Vec<CurveId>,
+    },
     /// Offsets a chain of curves (from [`crate::edit::chain_of`]) by `distance`, to the left of
     /// its direction of travel or the right, with a driving offset dimension whose label sits
     /// at `label` (its `offset`, `along`). See [`crate::edit::offset`].
@@ -743,6 +762,25 @@ impl SketchOp {
             }
             SketchOp::AddConstraints(specs) => {
                 for spec in specs {
+                    // A midpoint a spec refers to gets a point if it has none.
+                    let mut mids = Vec::new();
+                    spec.map(
+                        |p| {
+                            if let PointSpec::Midpoint(c) = p {
+                                mids.push(c);
+                            }
+                            Some(p)
+                        },
+                        Some,
+                    );
+                    for c in mids {
+                        if let Some(m) = s.curve_mid(c)
+                            && s.point_at(m, crate::MERGE_EPS).is_none()
+                        {
+                            let p = s.add_point(m);
+                            s.add_constraint(ConstraintOf::Midpoint(PointRef::Point(p), CurveRef::Curve(c)));
+                        }
+                    }
                     if let Some(c) = spec.resolve(s) {
                         s.add_constraint(c);
                     }

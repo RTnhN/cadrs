@@ -474,16 +474,22 @@ pub struct DragInfo {
     pub grab: SVec2,
     /// Conflicting constraints (left unsolved while dragging).
     pub skip: HashSet<Source>,
+    /// The points of a selection dragged as one (the grabbed entity was selected with others):
+    /// they all move with the pointer. Empty for a single entity.
+    pub group: Vec<PointId>,
 }
 
 impl DragInfo {
-    /// Starts a drag on a point or curve (not the origin, a dimension or a glyph).
+    /// Starts a drag on a point or curve (not the origin, a dimension or a glyph). Grabbing one
+    /// of several selected points and curves drags them all.
     pub fn new(
         entity: SketchEntity,
         sketch: &Sketch,
         grab: SVec2,
         skip: HashSet<Source>,
+        selection: &[SketchEntity],
     ) -> Option<Self> {
+        let group = if selection.contains(&entity) { group_points(sketch, selection) } else { Vec::new() };
         // A text is dragged by its box's lower edge; the rest of the box follows.
         let entity = match entity {
             SketchEntity::Text(t) => SketchEntity::Curve(sketch.texts.get(t)?.lines[0]),
@@ -499,6 +505,7 @@ impl DragInfo {
             base: sketch.clone(),
             grab,
             skip,
+            group,
         })
     }
 
@@ -506,6 +513,9 @@ impl DragInfo {
     pub fn target(&self, cursor: SVec2) -> Option<Drag> {
         let delta = cursor - self.grab;
         let s = &self.base;
+        if !self.group.is_empty() {
+            return Some(Drag::Points(self.group.iter().map(|p| (*p, s.pos(*p) + delta)).collect()));
+        }
         Some(match self.entity {
             SketchEntity::Point(p) => Drag::Points(vec![(p, s.pos(p) + delta)]),
             SketchEntity::Curve(c) => match s.curves.get(c)?.kind {
@@ -528,6 +538,31 @@ impl DragInfo {
     }
 }
 
+/// The points a selection drags as one: the selected points and the points of the selected
+/// curves and texts. Empty unless it holds more than one of those.
+fn group_points(sketch: &Sketch, selection: &[SketchEntity]) -> Vec<PointId> {
+    let mut movable = 0;
+    let mut points: Vec<PointId> = Vec::new();
+    for e in selection {
+        let found = match *e {
+            SketchEntity::Point(p) if sketch.points.contains_key(p) => vec![p],
+            SketchEntity::Curve(c) if sketch.curves.contains_key(c) => sketch.curve_points(c),
+            SketchEntity::Text(t) => match sketch.texts.get(t) {
+                Some(t) => t.lines.iter().flat_map(|c| sketch.curve_points(*c)).collect(),
+                None => continue,
+            },
+            _ => continue,
+        };
+        movable += 1;
+        for p in found {
+            if !points.contains(&p) {
+                points.push(p);
+            }
+        }
+    }
+    if movable > 1 { points } else { Vec::new() }
+}
+
 pub(crate) fn sketch_mut(world: &mut World) -> Option<&mut Sketch> {
     let s = world.get_resource::<SketchSession>()?.clone();
     let doc = world.get_resource_mut::<ActiveDocument>()?.into_inner();
@@ -542,7 +577,7 @@ pub(crate) fn sketch_mut(world: &mut World) -> Option<&mut Sketch> {
 
 /// Moves the live sketch toward a drag target (no undo step: the drag is recorded on release).
 /// Each frame solves from `base` (the sketch when the drag began), so dragging out and back
-/// returns to the start, and inside-out solutions are refused (see [`solve::drag_from`]).
+/// returns to the start; a shape may turn inside out on the way (see [`solve::drag_from`]).
 pub fn drag_live(world: &mut World, base: &Sketch, target: Drag, skip: HashSet<Source>) {
     if let Some(sketch) = sketch_mut(world) {
         solve::drag_from(base, sketch, &target, &skip);
@@ -837,5 +872,25 @@ mod tests {
             drag_op(&base, vec![(center, SVec2::new(5.0, 5.0))], vec![], vec![]),
             SketchOp::SetGeometry { .. }
         ));
+    }
+
+    #[test]
+    fn grabbing_one_of_a_selection_drags_it_all() {
+        let mut s = Sketch::new();
+        let line = s.add_line(SVec2::new(0.0, 0.0), SVec2::new(10.0, 0.0));
+        SketchOp::AddCircle { center: SVec2::new(20.0, 5.0), radius: 3.0, construction: false }.apply(&mut s).unwrap();
+        let circle = s.curves.keys().find(|c| *c != line).unwrap();
+        let selection = [SketchEntity::Curve(line), SketchEntity::Curve(circle)];
+        let grab = SVec2::new(5.0, 0.0);
+        let d = DragInfo::new(SketchEntity::Curve(line), &s, grab, HashSet::new(), &selection).unwrap();
+        let Some(Drag::Points(pins)) = d.target(grab + SVec2::new(1.0, 2.0)) else { panic!() };
+        // Both line ends and the circle's center, all moved by the same amount.
+        assert_eq!(pins.len(), 3);
+        for (p, t) in pins {
+            assert!(t.distance(s.pos(p) + SVec2::new(1.0, 2.0)) < 1e-9);
+        }
+        // Grabbing something outside the selection drags just that.
+        let d = DragInfo::new(SketchEntity::Curve(circle), &s, grab, HashSet::new(), &selection[..1]).unwrap();
+        assert!(matches!(d.target(grab), Some(Drag::Rim(..))));
     }
 }

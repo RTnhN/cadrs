@@ -861,6 +861,8 @@ pub(crate) fn sketch_keys(
             KeyCode::Enter | KeyCode::NumpadEnter | KeyCode::Escape if matches!(draw.state, DrawState::Spline { .. }) => {
                 commands.queue(crate::sketch_tools::finish_spline_world)
             }
+            // Enter ends the Mirror tool rather than the sketch.
+            KeyCode::Enter | KeyCode::NumpadEnter if tool.tool == SketchTool::Mirror => tool.tool = SketchTool::Select,
             KeyCode::Enter | KeyCode::NumpadEnter => commands.queue(accept_sketch),
             KeyCode::Escape => {
                 // Esc ends what the tool is drawing (a line chain), then leaves the tool, then

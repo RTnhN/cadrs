@@ -9,7 +9,9 @@
 modeling kernel. Its workflow follows Onshape's: sketch on a plane, constrain and dimension,
 build parts from features, put them together in assemblies, and make drawings from them.
 
-![cadrs: a pneumatic cylinder assembly with its instances, subassemblies and fasteners](.github/images/assembly.png)
+[![From sketch to solid, then a PCB in the same Part Studio: schematic, board layout and the routed board in 3D](.github/images/pcb-demo.gif)](https://youtu.be/qT1FKZqUAxA)
+
+*From sketch to part to PCB, in one document. [Watch the 90-second demo](https://youtu.be/qT1FKZqUAxA).*
 
 > **Status: early and moving fast.** cadrs works through the Onshape Learning Center's CAD
 > Basics courses exercise by exercise, but it is not yet a finished tool. Expect rough edges,
@@ -44,9 +46,7 @@ build parts from features, put them together in assemblies, and make drawings fr
   <img src=".github/images/render.png" width="49%" alt="A path-traced render of a two-part control arm">
 </p>
 
-[![From sketch to solid, then a PCB in the same Part Studio: schematic, board layout and the routed board in 3D](.github/images/pcb-demo.gif)](https://youtu.be/qT1FKZqUAxA)
-
-*From sketch to part to PCB, in one document. [Watch the 90-second demo](https://youtu.be/qT1FKZqUAxA).*
+![cadrs: a pneumatic cylinder assembly with its instances, subassemblies and fasteners](.github/images/assembly.png)
 
 ## Building
 

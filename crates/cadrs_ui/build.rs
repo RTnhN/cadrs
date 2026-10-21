@@ -3,42 +3,31 @@
 //! Each icon is rendered at several pixel sizes (so small icons stay crisp instead of being
 //! downscaled at runtime) and stored as raw straight-alpha RGBA8 in `OUT_DIR`. The generated
 //! `icons.rs` embeds them with `include_bytes!`, so icons need no runtime file IO or decoding and
-//! are available on the very first frame.
-//!
-//! How an icon is rasterized depends on its kind:
-//! - Glyph and line icons ([`icon_rs::Kind::is_tintable`]) are ink plus a small accent detail.
-//!   The ink is rendered in white so the runtime can tint it through `ImageNode::color`; the
-//!   accent detail is a second, separate white layer that the runtime tints with the accent.
-//! - Solid and sketch icons keep their full colours; the runtime only fades them.
+//! are available on the very first frame. Other sizes (a UI scale, a high-DPI screen) are
+//! rendered at runtime with the same code (`src/icon_raster.rs`).
 
 use std::fmt::Write as _;
 use std::path::PathBuf;
 
 use icon_rs::{Icon, Palette};
-use resvg::{tiny_skia, usvg};
+
+// `source` is for the runtime only.
+#[allow(dead_code)]
+#[path = "src/icon_raster.rs"]
+mod icon_raster;
 
 /// Pixel sizes each icon is rasterized at.
 const SIZES: [u32; 6] = [10, 12, 14, 16, 20, 24];
 
-/// Heavier copies of tintable icons, as (name, icon, stroke scale): the dialog's ✓ and ✕, the
-/// landing page's create button, and the feature tree's chevrons (about 2 px at 18 px,
-/// `screens/05`).
-const WEIGHTS: &[(&str, &str, f32)] = &[
-    ("check-bold", "check", 2.0),
-    ("x-bold", "close", 2.0),
-    ("plus-bold", "plus", 2.0),
-    ("chevron-down-medium", "chevron-down", 1.3),
-    ("chevron-right-medium", "chevron-right", 1.3),
-];
-
 fn main() {
     println!("cargo::rerun-if-changed=build.rs");
+    println!("cargo::rerun-if-changed=src/icon_raster.rs");
     let out_dir = PathBuf::from(std::env::var("OUT_DIR").unwrap());
     let icon_out = out_dir.join("icons");
     std::fs::create_dir_all(&icon_out).unwrap();
 
     let mut entries: Vec<(&str, Icon, f32)> = icon_rs::ALL.iter().map(|i| (i.name, *i, 1.0)).collect();
-    for &(name, base, scale) in WEIGHTS {
+    for &(name, base, scale) in icon_raster::WEIGHTS {
         let icon = icon_rs::get(base).unwrap_or_else(|| panic!("icon-rs has no {base:?} for {name:?}"));
         entries.push((name, icon, scale));
     }
@@ -50,13 +39,7 @@ fn main() {
         // The viewport manipulators are drawn larger.
         let big: &[u32] = if name.starts_with("manipulator-") { &[48] } else { &[] };
         for &size in SIZES.iter().chain(big) {
-            let (base, accent) = if icon.kind.is_tintable() {
-                let svg = with_stroke(icon.svg, stroke_scale(*scale, size));
-                let accent = icon.has_accent().then(|| accent_layer(&svg));
-                (ink_layer(&svg), accent)
-            } else {
-                (icon.svg.to_owned(), None)
-            };
+            let (base, accent) = icon_raster::layers(icon, *scale, size);
             images += &embed(&icon_out, name, size, "", &base);
             if let Some(accent) = accent {
                 accents += &embed(&icon_out, name, size, "accent", &accent);
@@ -85,56 +68,7 @@ fn main() {
 /// Writes one raster and returns its `ICON_DATA` / `ACCENT_DATA` row.
 fn embed(dir: &std::path::Path, name: &str, size: u32, layer: &str, svg: &str) -> String {
     let file = format!("{name}_{size}{}{layer}.rgba", if layer.is_empty() { "" } else { "_" });
-    std::fs::write(dir.join(&file), rasterize(svg, size, name)).unwrap();
+    let pixels = icon_raster::rasterize(svg, size).unwrap_or_else(|e| panic!("rasterizing icon {name}: {e}"));
+    std::fs::write(dir.join(&file), pixels).unwrap();
     format!("    ({name:?}, {size}, include_bytes!(concat!(env!(\"OUT_DIR\"), \"/icons/{file}\"))),\n")
-}
-
-/// How much heavier to draw a tintable icon: its weight variant, and a little heavier at 20 px
-/// to match the stroke weight of the reference toolbar icons (about 2 px).
-fn stroke_scale(weight: f32, size: u32) -> f32 {
-    weight * if size == 20 { 1.1 } else { 1.0 }
-}
-
-/// Scales the root `stroke-width` (icon-rs draws tintable icons with the root width only).
-fn with_stroke(svg: &str, scale: f32) -> String {
-    if scale == 1.0 {
-        return svg.to_owned();
-    }
-    let key = "stroke-width=\"";
-    let start = svg.find(key).expect("root stroke-width") + key.len();
-    let end = start + svg[start..].find('"').unwrap();
-    let width: f32 = svg[start..end].parse().unwrap();
-    format!("{}{}{}", &svg[..start], width * scale, &svg[end..])
-}
-
-/// The ink in white, with the accent detail removed.
-fn ink_layer(svg: &str) -> String {
-    let (ink, accent) = (Palette::LIGHT.ink.to_hex(), Palette::LIGHT.accent.to_hex());
-    svg.replace(&format!("=\"{ink}\""), "=\"#ffffff\"").replace(&format!("=\"{accent}\""), "=\"none\"")
-}
-
-/// Only the accent detail, in white.
-fn accent_layer(svg: &str) -> String {
-    let (ink, accent) = (Palette::LIGHT.ink.to_hex(), Palette::LIGHT.accent.to_hex());
-    svg.replace(&format!("=\"{ink}\""), "=\"none\"").replace(&format!("=\"{accent}\""), "=\"#ffffff\"")
-}
-
-fn rasterize(svg: &str, size: u32, name: &str) -> Vec<u8> {
-    let tree = usvg::Tree::from_str(svg, &usvg::Options::default())
-        .unwrap_or_else(|e| panic!("parsing icon {name}: {e}"));
-    let mut pixmap = tiny_skia::Pixmap::new(size, size).unwrap();
-    let scale = size as f32 / tree.size().width().max(tree.size().height());
-    resvg::render(
-        &tree,
-        tiny_skia::Transform::from_scale(scale, scale),
-        &mut pixmap.as_mut(),
-    );
-    pixmap
-        .pixels()
-        .iter()
-        .flat_map(|p| {
-            let c = p.demultiply();
-            [c.red(), c.green(), c.blue(), c.alpha()]
-        })
-        .collect()
 }
