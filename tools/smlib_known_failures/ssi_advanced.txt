@@ -1,0 +1,51 @@
+# SMLib advanced SSI cases (tests/smlib_ssi_advanced.rs, from tools/smlib/ssi_advanced.py) that
+# fail: `name`, or `name slow` when it takes over a minute (run only with --ignored). Grouped by
+# cause (W2's SSI rewrite is the target).
+
+# Coincident surfaces: SMLib returns the boundary of the shared region; ssi gives nothing (or less).
+ssi_01_ext_ext_coin
+ssi_38_coincident_planes
+ssi_39_coincident_cyls
+ssi_40_coincident_spheres
+ssi_41_coincident_spheres2
+ssi_42_coincident_torii
+
+# Touching at points or along curves: no point contacts or tangent curves found.
+ssi_15_rev_rev_180_pts
+ssi_22_tor_sph_tan
+ssi_43_tor_sph_touch
+
+# Curves missing or partial (length short of SMLib's, or none).
+ssi_11_rev_rev_360
+ssi_12_rev_rev_opposite
+ssi_13_rev_rev_90
+ssi_14_rev_rev_rot180
+ssi_18_rev_sph_full
+ssi_24_tor_in_tor_tang_hyper
+ssi_25_tor_in_tor_tan_ellip
+ssi_28_pln_rev1
+ssi_30_pln_rev3
+ssi_33_rev_rev1
+ssi_45_sph_plane1
+ssi_46_sph_plane2
+ssi_50_cone_2pln
+ssi_52_tor_overlap
+ssi_53_spiral
+
+# Curves inside both faces lying off a surface by more than 1e-3.
+ssi_16_rev_rev_coin
+ssi_17_rev_rev_coin_touch slow
+ssi_34_bumppy_plane2
+ssi_35_rev_rev_sing
+
+# Too long (curves found twice): 48.9 against SMLib's 24.0.
+ssi_29_pln_rev2
+
+# A branch missed near the singular points (an SMLib sample 3e-3 from our curves).
+ssi_21_tor_purpen_tor_sing
+
+# The SMLib reader: "a loop doesn't close" (cone and torus faces with a pole).
+ssi_23_tor_sph_tan2
+ssi_47_cone_plane1
+ssi_48_cone_cyl1
+ssi_49_cone_cyl2

@@ -1,0 +1,4 @@
+# SMLib stitching cases (tests/smlib_stitch.rs, from tools/smlib/stitch.py) that fail.
+
+# The stitched part less the cylinder: "the boolean left an open shell".
+stitch_4_cut
