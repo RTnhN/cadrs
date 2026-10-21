@@ -614,10 +614,8 @@ blend tolblend_buildvol_a6
 blend tolblend_buildvol_a7
 blend tolblend_simple_a1
 # blend: the kernel's variable fillet (fillet_variable) takes only straight edges between planes.
-blend buildevol_c4
 blend buildevol_c8
 blend buildevol_d9
-blend buildevol_e1
 blend buildevol_e2
 blend buildevol_e9
 blend buildevol_f1
@@ -637,7 +635,6 @@ blend buildevol_j6
 blend buildevol_j9
 blend buildevol_k3
 blend buildevol_k6
-blend buildevol_k7
 blend buildevol_k8
 # blend: the operation fails.
 blend bfuseblend_b6
@@ -788,9 +785,7 @@ blend tolblend_simple_c9
 # A hole or face cuts across the whole fillet strip (local trimming doesn't support it yet;
 # the blend tool's result is wrong): these passed only while the fillet's crossing loops went
 # unchecked (the full check finds them) (W1).
-blend buildevol_i2
 blend buildevol_i5
-blend buildevol_j8
 blend simple_s4
 blend simple_t9
 blend simple_u3

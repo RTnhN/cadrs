@@ -885,6 +885,11 @@ pub fn blend(k: &mut NativeKernel, body: BodyId, edges: &[EdgeBlend], corners: b
             open && !continues_smoothly(&b, end_v, away(last, false), &in_this),
         );
         let tool = chain_tool(&b, body, chain, kind.as_ref(), *swap, (0.0, 1.0), extend)?;
+        // A tool that didn't close into a solid has no inside to take away (its boolean only
+        // spends minutes finding so).
+        if !tool.body.is_solid() {
+            return Err(KernelError::OperationFailed("the blend's tool isn't a solid".into()));
+        }
         let (mut tb, mut ts) = (tool.body, tool.src);
         // Cut the extensions at the end faces as for one edge.
         if open {
