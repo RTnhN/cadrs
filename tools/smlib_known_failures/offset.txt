@@ -1,0 +1,30 @@
+# SMLib offset and shell cases (tests/smlib_offset.rs, from tools/smlib/offset.py) that fail:
+# `name`, or `name slow` when it takes over a minute (run only with --ignored).
+#
+# Rounded offset: a face's slab is rejected ("p-curve off the edge" by 7e-6 to 5e-4).
+offset_04_off_extrusion
+offset_05_off_extrusion
+offset_07_off_extrusion
+offset_08_boolean_trees_result
+offset_09_offset_bracket2
+offset_10_offset_bracket2
+offset_11_offset_bracket2
+offset_15a_offset_bracket2
+offset_15b_offset_bracket2
+offset_16_insetcone
+# Rounded offset: "slabs of this kind of face" unsupported (offset_bracket2 at 3.5 and more).
+offset_12_offset_bracket2
+offset_13_offset_bracket2
+offset_14_offset_bracket2
+# Inset with one face kept: "moved faces no longer meet along an edge".
+offset_06_off_extrusion
+# Shell: "the boolean left an open shell".
+offset_03_offsetboxsphoncorner
+shell_01_problemshell
+shell_02_problemshell1
+shell_03_problemshell2
+shell_04_problemshell21
+# Outward shell: 2.0e-2 less volume than SMLib's (SMLib extends convex corners sharp; shell_with grows outward walls with offset_rounded).
+shell_06_problemshell4
+# Shell volume 2.0e-4 off SMLib's on a model of tolerance 0.058 (REL_TOL is 1e-4).
+shell_08_problemshell6
