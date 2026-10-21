@@ -436,7 +436,7 @@ fn clamp_on(mut c: NurbsCurve, a: f64, b: f64, eps: f64) -> Option<NurbsCurve> {
     Some(NurbsCurve { degree: p, knots, cps: c.cps.get(first..first + ncp)?.to_vec() })
 }
 
-fn spline_surface(du: usize, dv: usize, poles: &[Vec<H>], u: &(Vec<f64>, Vec<usize>, bool), v: &(Vec<f64>, Vec<usize>, bool)) -> R<NurbsSurface> {
+pub(crate) fn spline_surface(du: usize, dv: usize, poles: &[Vec<H>], u: &(Vec<f64>, Vec<usize>, bool), v: &(Vec<f64>, Vec<usize>, bool)) -> R<NurbsSurface> {
     if poles.is_empty() || poles.iter().any(|r| r.len() != poles[0].len()) || u.0.len() < 2 || v.0.len() < 2 {
         return Err("a bad B-spline surface".into());
     }

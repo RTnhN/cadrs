@@ -14,6 +14,7 @@ use super::curve::Curve;
 use super::kernel::NativeKernel;
 use super::math::*;
 use super::profile::{MergedFace, Piece, Src};
+use super::surface::Surface;
 use super::sweep_path::Seg;
 use crate::*;
 
@@ -86,6 +87,14 @@ pub struct Hyperbola {
     pub y: V3,
     pub a: f64,
     pub b: f64,
+}
+
+/// A DRAW surface (`extsurf`, `revsurf`, `beziersurf`, …): the surface and the uv rectangle
+/// `trim` restricted it to.
+#[derive(Debug, Clone)]
+pub struct DSurface {
+    s: Surface,
+    domain: Option<((f64, f64), (f64, f64))>,
 }
 
 /// Counts of sub-shapes (DRAW's `nbshapes`).
@@ -1690,6 +1699,89 @@ impl NativeKernel {
         Ok(Shape::Body(self.insert(strip_caps(body, &secs[0], &last, closed))))
     }
 
+    // --- Surfaces -----------------------------------------------------------------------------
+
+    /// `extsurf name curve dx dy dz`: the curve extruded (u the curve's parameter, v the length
+    /// along the direction).
+    pub fn extsurf(&self, c: &Curve, dx: f64, dy: f64, dz: f64) -> Result<DSurface> {
+        let d = V3::new(dx, dy, dz).try_normalize(1e-12).ok_or_else(|| err("extsurf: a null direction"))?;
+        Ok(DSurface { s: Surface::Extrusion { c: c.clone(), d }, domain: None })
+    }
+
+    /// `revsurf name curve x y z dx dy dz`: the curve turned about the axis (u the angle from the
+    /// curve, v the curve's parameter).
+    pub fn revsurf(&self, c: &Curve, x: f64, y: f64, z: f64, dx: f64, dy: f64, dz: f64) -> Result<DSurface> {
+        let zd = V3::new(dx, dy, dz).try_normalize(1e-12).ok_or_else(|| err("revsurf: a null axis"))?;
+        let xd = ax2_x(&zd);
+        Ok(DSurface { s: Surface::Revolution { f: Frame { o: P3::new(x, y, z), x: xd, y: zd.cross(&xd), z: zd }, m: c.clone() }, domain: None })
+    }
+
+    /// A placement (`plane`) as its plane surface (u along its x, v along its y).
+    pub fn plane_surface(&self, ax: &Ax3) -> DSurface {
+        DSurface { s: Surface::Plane { f: Frame { o: ax.origin, x: ax.x, y: ax.y(), z: ax.z } }, domain: None }
+    }
+
+    /// `cylinder|cone|sphere|torus name [x y z [nx ny nz [xx xy xz]]] values`: the elementary
+    /// surfaces in a placement, parametrized as OCCT's (`cone`'s values: the half angle in
+    /// degrees and the radius at the placement).
+    pub fn elementary(&self, kind: &str, o: [f64; 3], n: Option<[f64; 3]>, x: Option<[f64; 3]>, vals: &[f64]) -> Result<DSurface> {
+        let (o, xd, yd) = ax2_of(o, n, x);
+        let f = Frame { o, x: xd, y: yd, z: xd.cross(&yd) };
+        let s = match (kind, vals) {
+            ("cylinder", [r]) => Surface::Cylinder { f, r: *r },
+            ("cone", [a, r]) => Surface::Cone { f, r: *r, a: a.to_radians() },
+            ("sphere", [r]) => Surface::Sphere { f, r: *r },
+            ("torus", [big, r]) => Surface::Torus { f, rmaj: *big, rmin: *r },
+            _ => return Err(err("an elementary surface with these values")),
+        };
+        Ok(DSurface { s, domain: None })
+    }
+
+    /// `beziersurf name nu nv x y z [w] …` (the poles row by row along u, v outer).
+    pub fn beziersurf(&self, nu: usize, nv: usize, poles: &[[f64; 4]]) -> Result<DSurface> {
+        let knots = |n: usize| (vec![0.0, 1.0], vec![n, n], false);
+        self.spline_surf(nu - 1, nv - 1, nu, nv, poles, &knots(nu), &knots(nv))
+    }
+
+    /// `bsplinesurf name udeg nuk u m … vdeg nvk v m … x y z w …` (`upbsplinesurf` etc.:
+    /// periodic directions, the poles of one period).
+    pub fn bsplinesurf(&self, du: usize, uk: &[f64], um: &[usize], uper: bool, dv: usize, vk: &[f64], vm: &[usize], vper: bool, poles: &[[f64; 4]]) -> Result<DSurface> {
+        let count = |m: &[usize], d: usize, per: bool| -> usize {
+            let s: usize = m.iter().sum();
+            if per { s - m.last().copied().unwrap_or(0) } else { s.saturating_sub(d + 1) }
+        };
+        let (nu, nv) = (count(um, du, uper), count(vm, dv, vper));
+        self.spline_surf(du, dv, nu, nv, poles, &(uk.to_vec(), um.to_vec(), uper), &(vk.to_vec(), vm.to_vec(), vper))
+    }
+
+    fn spline_surf(&self, du: usize, dv: usize, nu: usize, nv: usize, poles: &[[f64; 4]], u: &(Vec<f64>, Vec<usize>, bool), v: &(Vec<f64>, Vec<usize>, bool)) -> Result<DSurface> {
+        if nu == 0 || nv == 0 || poles.len() != nu * nv {
+            return Err(err("a spline surface's poles don't fit its knots"));
+        }
+        // poles[i][j]: i along u; DRAW lists them u fastest.
+        let grid: Vec<Vec<super::nurbs::H>> = (0..nu).map(|i| (0..nv).map(|j| poles[j * nu + i]).map(|p| super::nurbs::hom(&P3::new(p[0], p[1], p[2]), p[3])).collect()).collect();
+        let s = super::brep_occt::spline_surface(du, dv, &grid, u, v).map_err(|e| err(&format!("a spline surface: {e}")))?;
+        Ok(DSurface { s: Surface::Nurbs(std::sync::Arc::new(s)), domain: None })
+    }
+
+    /// `offset name surface d`: the surface moved `d` along its normal (Su × Sv).
+    pub fn offset_surf(&self, s: &DSurface, d: f64) -> Result<DSurface> {
+        let o = super::local::offset_surface(&s.s, true, d).ok_or(KernelError::Unsupported("this offset surface"))?;
+        Ok(DSurface { s: o, domain: s.domain })
+    }
+
+    /// `trim name surface u0 u1 v0 v1`: the surface restricted to a uv rectangle.
+    pub fn trim_surf(&self, s: &DSurface, u0: f64, u1: f64, v0: f64, v1: f64) -> DSurface {
+        DSurface { s: s.s.clone(), domain: Some(((u0.min(u1), u0.max(u1)), (v0.min(v1), v0.max(v1)))) }
+    }
+
+    /// `mkface name surface [u0 u1 v0 v1]`: a face of the surface over the rectangle (or its
+    /// trimmed or natural bounds), as a sheet body.
+    pub fn mkface(&mut self, s: &DSurface, uv: Option<[f64; 4]>) -> Result<Shape> {
+        let domain = uv.map(|[u0, u1, v0, v1]| ((u0, u1), (v0, v1))).or(s.domain);
+        let sheet = super::face_build::face_from_surface(&s.s, domain)?;
+        Ok(Shape::Body(self.insert(sheet)))
+    }
 
     /// `wedge name dx dy dz ltx` and `wedge name dx dy dz xmin zmin xmax zmax`
     /// (BRepPrim_Wedge): the box [0, dx] × [0, dy] × [0, dz] whose top (y = dy) is narrowed to

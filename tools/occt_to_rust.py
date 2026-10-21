@@ -363,6 +363,57 @@ class Case:
                 raise Unsupported("buildevol without mkevol and updatevol")
             name, s_, laws = self.evol
             self.bind(name, f"k.buildevol({s_}, &[{', '.join(laws)}])?")
+        elif c == "extsurf" and len(a) == 5 and a[1] in self.curves:
+            self.bind(a[0], f"k.extsurf(&{self.vars[a[1]]}, {', '.join(L(x) for x in a[2:])})?")
+            self.surfs.add(a[0])
+        elif c == "revsurf" and len(a) == 8 and a[1] in self.curves:
+            self.bind(a[0], f"k.revsurf(&{self.vars[a[1]]}, {', '.join(L(x) for x in a[2:])})?")
+            self.surfs.add(a[0])
+        elif c in ("cylinder", "cone", "sphere", "torus") and len(a) >= 2:
+            nv = {"cylinder": 1, "cone": 2, "sphere": 1, "torus": 2}[c]
+            geo, vals = a[1:len(a) - nv], a[len(a) - nv:]
+            if len(geo) not in (0, 3, 6, 9):
+                raise Unsupported(f"{c} with these arguments")
+            o = f"[{L(geo[0])}, {L(geo[1])}, {L(geo[2])}]" if geo else "[0.0, 0.0, 0.0]"
+            n = f"Some([{L(geo[3])}, {L(geo[4])}, {L(geo[5])}])" if len(geo) >= 6 else "None"
+            x = f"Some([{L(geo[6])}, {L(geo[7])}, {L(geo[8])}])" if len(geo) >= 9 else "None"
+            self.bind(a[0], f'k.elementary("{c}", {o}, {n}, {x}, &[{", ".join(L(v) for v in vals)}])?')
+            self.surfs.add(a[0])
+        elif c == "beziersurf" and len(a) >= 3:
+            nu, nv = int(self.num(a[1])), int(self.num(a[2]))
+            rest = a[3:]
+            if nu * nv == 0 or len(rest) % (nu * nv) or len(rest) // (nu * nv) not in (3, 4):
+                raise Unsupported("beziersurf with these arguments")
+            st = len(rest) // (nu * nv)
+            poles = [f"[{L(rest[i * st])}, {L(rest[i * st + 1])}, {L(rest[i * st + 2])}, {L(rest[i * st + 3]) if st == 4 else '1.0'}]" for i in range(nu * nv)]
+            self.bind(a[0], f"k.beziersurf({nu}, {nv}, &[{', '.join(poles)}])?")
+            self.surfs.add(a[0])
+        elif c in ("bsplinesurf", "upbsplinesurf", "vpbsplinesurf", "uvpbsplinesurf") and len(a) >= 3:
+            uper, vper = c.startswith("u"), c.startswith("v") or c.startswith("uv")
+            i = 1
+            def knots(i):
+                deg, nk = int(self.num(a[i])), int(self.num(a[i + 1]))
+                ks = a[i + 2:i + 2 + 2 * nk]
+                if len(ks) != 2 * nk:
+                    raise Unsupported(f"{c} with these arguments")
+                return deg, [L(ks[2 * j]) for j in range(nk)], [str(int(self.num(ks[2 * j + 1]))) for j in range(nk)], i + 2 + 2 * nk
+            du, uk, um, i = knots(i)
+            dv, vk, vm, i = knots(i)
+            rest = a[i:]
+            if len(rest) % 4:
+                raise Unsupported(f"{c} with these arguments")
+            poles = [f"[{', '.join(L(x) for x in rest[j:j + 4])}]" for j in range(0, len(rest), 4)]
+            self.bind(a[0], f"k.bsplinesurf({du}, &[{', '.join(uk)}], &[{', '.join(um)}], {str(uper).lower()}, {dv}, &[{', '.join(vk)}], &[{', '.join(vm)}], {str(vper).lower()}, &[{', '.join(poles)}])?")
+            self.surfs.add(a[0])
+        elif c == "offset" and len(a) == 3 and (a[1] in self.surfs or a[1] in self.planes):
+            self.bind(a[0], f"k.offset_surf({self.surf(a[1])}, {L(a[2])})?")
+            self.surfs.add(a[0])
+        elif c == "trim" and len(a) == 6 and (a[1] in self.surfs or a[1] in self.planes):
+            self.bind(a[0], f"k.trim_surf({self.surf(a[1])}, {', '.join(L(x) for x in a[2:])})")
+            self.surfs.add(a[0])
+        elif c == "mkface" and len(a) in (2, 6) and (a[1] in self.surfs or a[1] in self.planes):
+            uv = f"Some([{', '.join(L(x) for x in a[2:])}])" if len(a) == 6 else "None"
+            self.bind(a[0], f"k.mkface({self.surf(a[1])}, {uv})?")
         elif c == "wedge" and len(a) in (5, 8):
             nums = [L(x) for x in a[1:]]
             top = f"[0.0, 0.0, {nums[3]}, {nums[2]}]" if len(a) == 5 else f"[{', '.join(nums[3:])}]"
