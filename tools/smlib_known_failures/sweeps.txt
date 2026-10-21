@@ -1,0 +1,16 @@
+# SMLib sweep cases (tests/smlib_sweeps.rs, from tools/smlib/sweeps.py) that fail: `name`, or
+# `name slow` when it takes over a minute (run only with --ignored).
+
+# Phase 1b (body kinds): no wire bodies; a vertex can't be swept into an edge ("not a planar face").
+case_01_translate_vertices_higher_edges_same
+case_03_translate_vertices_higher
+case_08_translate_whole_brep_non_manifold_faces_wire_vertex
+case_10_rotate_vertices_higher_3x
+case_11_rotate_vertices_higher_full_circle
+case_14_rotate_vertices_higher_3x
+null_region_vertex
+# Missing: a face turned about an axis off its plane (a revolve wants the axis in the sketch plane).
+case_31_rotate_whole_brep_block_with_internal_edges
+case_32_rotate_whole_brep_block_with_internal_edges_full
+# Coplanar faces left split by the union (20 faces, not 14; volume and area right).
+null_region_hollow

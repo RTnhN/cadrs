@@ -1,0 +1,16 @@
+# SMLib primitive cases (tests/smlib_primitives.rs, from tools/smlib/primitives.py) that fail:
+# `name`, or `name slow` when it takes over a minute (run only with --ignored).
+
+# Phase 1b (body kinds): no booleans of sheets ("booleans of shapes other than solids").
+prim_02_rectangle_less_circle
+prim_02_tsurf_union
+# Missing: no cylindrical-box (annular sector) primitive.
+cylindrical_box_0
+cylindrical_box_1
+cylindrical_box_2
+cylindrical_box_3
+cylindrical_box_4
+cylindrical_box_5
+cylindrical_box_6
+# The sweep along a B-spline path is 2.1e-4 off A·L in volume (sampled sections; tolerance 1e-4).
+prim_08_curve_sweep
