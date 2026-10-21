@@ -1,4 +1,6 @@
-//! Kernel-independent geometry and result types.
+//! Kernel-independent geometry and result types: what goes into [`crate::Kernel`] operations
+//! (profiles, feature specs) and what comes out (ids, face and edge info, meshes, mass
+//! properties, history). Lengths are mm and angles radians throughout.
 
 use nalgebra::{Isometry3, Matrix3, Point2, Point3, Unit, Vector3};
 use serde::{Deserialize, Serialize};
@@ -18,8 +20,11 @@ pub struct EdgeId(pub u64);
 /// A sketch plane: an origin and orthonormal in-plane axes, in model coordinates (mm).
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct Plane {
+    /// The plane's origin (sketch coordinates (0, 0)).
     pub origin: Point3<f64>,
+    /// The sketch x axis, in the plane.
     pub x_dir: Unit<Vector3<f64>>,
+    /// The plane's normal; the sketch y axis is `normal × x_dir`.
     pub normal: Unit<Vector3<f64>>,
 }
 
@@ -33,6 +38,7 @@ impl Plane {
         }
     }
 
+    /// The sketch y axis: `normal × x_dir`.
     pub fn y_dir(&self) -> Unit<Vector3<f64>> {
         Unit::new_normalize(self.normal.cross(&self.x_dir))
     }
@@ -49,30 +55,68 @@ impl Plane {
 /// can be named after it.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum Curve2 {
-    Line { a: Point2<f64>, b: Point2<f64>, source: Option<u64> },
+    /// The segment from `a` to `b`.
+    Line {
+        /// Start point.
+        a: Point2<f64>,
+        /// End point.
+        b: Point2<f64>,
+        /// The sketch curve it came from.
+        source: Option<u64>,
+    },
     /// An arc from `start_angle` sweeping `sweep` radians: counter-clockwise when `sweep` is
     /// positive, clockwise when it is negative.
-    Arc { center: Point2<f64>, radius: f64, start_angle: f64, sweep: f64, source: Option<u64> },
-    /// A whole circle: counter-clockwise, or clockwise when `radius` is negative.
-    Circle { center: Point2<f64>, radius: f64, source: Option<u64> },
-    Ellipse {
+    Arc {
+        /// Centre.
         center: Point2<f64>,
+        /// Radius (above zero).
+        radius: f64,
+        /// Angle of the start point from the plane's x axis.
+        start_angle: f64,
+        /// Signed angle swept from the start.
+        sweep: f64,
+        /// The sketch curve it came from.
+        source: Option<u64>,
+    },
+    /// A whole circle: counter-clockwise, or clockwise when `radius` is negative.
+    Circle {
+        /// Centre.
+        center: Point2<f64>,
+        /// Radius; its sign gives the direction.
+        radius: f64,
+        /// The sketch curve it came from.
+        source: Option<u64>,
+    },
+    /// A whole ellipse, counter-clockwise from the end of its major axis.
+    Ellipse {
+        /// Centre.
+        center: Point2<f64>,
+        /// Semi-axis along `rotation`.
         major_radius: f64,
+        /// The other semi-axis.
         minor_radius: f64,
         /// Angle of the major axis from the plane's x axis.
         rotation: f64,
+        /// The sketch curve it came from.
         source: Option<u64>,
     },
     /// Part of an ellipse: the points `center + R(rotation)·(major·cos t, minor·sin t)` for `t`
     /// from `start` through `sweep` (counter-clockwise when positive and `minor_radius` is
     /// positive). `minor_radius` may be larger than `major_radius`, or negative.
     EllipseArc {
+        /// Centre.
         center: Point2<f64>,
+        /// Semi-axis along `rotation`.
         major_radius: f64,
+        /// The other semi-axis (its sign flips the direction).
         minor_radius: f64,
+        /// Angle of the major axis from the plane's x axis.
         rotation: f64,
+        /// Parameter `t` of the start point.
         start: f64,
+        /// Signed parameter range swept from `start`.
         sweep: f64,
+        /// The sketch curve it came from.
         source: Option<u64>,
     },
     /// Part of the curve `offset` from an ellipse (P3.7, X13: an offset of an ellipse isn't an
@@ -81,18 +125,31 @@ pub enum Curve2 {
     /// `t` from `start` through `sweep` (a whole turn for the closed curve). Positive offsets
     /// lie outside the ellipse.
     OffsetEllipseArc {
+        /// Centre of the base ellipse.
         center: Point2<f64>,
+        /// The base ellipse's semi-axis along `rotation`.
         major_radius: f64,
+        /// The base ellipse's other semi-axis.
         minor_radius: f64,
+        /// Angle of the major axis from the plane's x axis.
         rotation: f64,
+        /// Parameter `t` of the start point.
         start: f64,
+        /// Signed parameter range swept from `start`.
         sweep: f64,
+        /// Distance from the ellipse (positive outside).
         offset: f64,
+        /// The sketch curve it came from.
         source: Option<u64>,
     },
     /// A cubic Bézier curve (Final, S12.14: a sketch's Bézier curve): from `poles[0]` to
     /// `poles[3]`, with control points `poles[1]` and `poles[2]`.
-    Bezier { poles: [Point2<f64>; 4], source: Option<u64> },
+    Bezier {
+        /// The four control points.
+        poles: [Point2<f64>; 4],
+        /// The sketch curve it came from.
+        source: Option<u64>,
+    },
 }
 
 /// The point at `t` of the cubic Bézier curve with these poles.
@@ -193,13 +250,17 @@ pub fn offset_ellipse_point(center: Point2<f64>, major: f64, minor: f64, rotatio
 /// A closed loop of curves, joined end to start.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Loop {
+    /// The curves in order, each starting where the one before ends (the last ends where the
+    /// first starts). Any direction: the kernel orients loops itself.
     pub curves: Vec<Curve2>,
 }
 
 /// One planar face to feed a feature: an outer loop and hole loops on a plane.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Region {
+    /// The outer boundary.
     pub outer: Loop,
+    /// Holes, inside `outer` and apart from each other.
     pub holes: Vec<Loop>,
     /// The caller's id for the region (like a curve's `source`), so the faces made from it can
     /// be named after it; its index in the profile if `None`.
@@ -211,6 +272,7 @@ pub struct Region {
 /// don't close, PS4.10).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Chain {
+    /// The curves in order, each starting where the one before ends.
     pub curves: Vec<Curve2>,
     /// The caller's id for the chain (its faces are named as a region's sides).
     #[serde(default)]
@@ -220,7 +282,9 @@ pub struct Chain {
 /// The sketch regions selected for a feature, all on one plane.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Profile {
+    /// The sketch plane every curve lies on.
     pub plane: Plane,
+    /// Closed regions (the faces a solid feature sweeps).
     pub regions: Vec<Region>,
     /// Open chains (only surface and thin extrudes use them).
     #[serde(default)]
@@ -246,15 +310,35 @@ pub enum ExtrudeEnd {
     /// A depth (mm).
     Blind(f64),
     /// To the first faces of [`ExtrudeSpec::scene`] the sweep meets; the end takes their shape.
-    UpToNext { offset: f64 },
+    UpToNext {
+        /// Offset distance (see the type).
+        offset: f64,
+    },
     /// To a face of a body. A planar face parallel to the sketch plane gives a flat end at its
     /// height; another planar face trims the end along its plane; a curved face ends the sweep
     /// where it meets the face's body.
-    UpToFace { body: BodyId, face: FaceId, offset: f64 },
+    UpToFace {
+        /// The face's body.
+        body: BodyId,
+        /// The face.
+        face: FaceId,
+        /// Offset distance (see the type).
+        offset: f64,
+    },
     /// To a body: the end takes the shape of the body's faces the sweep meets.
-    UpToPart { body: BodyId, offset: f64 },
+    UpToPart {
+        /// The body.
+        body: BodyId,
+        /// Offset distance (see the type).
+        offset: f64,
+    },
     /// To the height of a point.
-    UpToVertex { point: Point3<f64>, offset: f64 },
+    UpToVertex {
+        /// The point.
+        point: Point3<f64>,
+        /// Offset distance (see the type).
+        offset: f64,
+    },
     /// Through every body of [`ExtrudeSpec::scene`] (to their far extent).
     ThroughAll,
 }
@@ -262,19 +346,27 @@ pub enum ExtrudeEnd {
 /// What an extrude makes (PS4.1).
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub enum BodyKind {
+    /// A solid: the regions swept, capped at both ends.
     Solid,
     /// Sheets swept by the profile's curves (its regions' boundaries and its open chains); no
     /// caps.
     Surface,
     /// A wall along the profile's curves: `left` mm to the left of each curve (inside a region,
     /// seen from the plane normal) and `right` mm to the right (PS4.11).
-    Thin { left: f64, right: f64 },
+    Thin {
+        /// Wall thickness to the left of each curve (mm).
+        left: f64,
+        /// Wall thickness to the right of each curve (mm).
+        right: f64,
+    },
 }
 
 /// A planar face of a body to extrude, like a sketch region (PS4.2).
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct FaceInput {
+    /// The face's body.
     pub body: BodyId,
+    /// The planar face.
     pub face: FaceId,
     /// The caller's id for it (its caps are named after it, like a region's `source`).
     pub source: u64,
@@ -284,6 +376,7 @@ pub struct FaceInput {
 /// Extrude dialog.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ExtrudeSpec {
+    /// Solid, Surface or Thin.
     pub body: BodyKind,
     /// The unit direction of the first end (the plane normal, or against it when flipped, or a
     /// picked direction, PS4.6). It must not lie in the plane.
@@ -326,20 +419,41 @@ pub enum RevolveEnd {
     /// A given angle.
     Angle(f64),
     /// To the first faces of [`RevolveSpec::scene`] the sweep meets.
-    UpToNext { offset: f64 },
+    UpToNext {
+        /// Offset angle (see the type).
+        offset: f64,
+    },
     /// To a face of a body: a plane through the axis gives an angle; any other face ends the
     /// sweep where it meets the face's body.
-    UpToFace { body: BodyId, face: FaceId, offset: f64 },
+    UpToFace {
+        /// The face's body.
+        body: BodyId,
+        /// The face.
+        face: FaceId,
+        /// Offset angle (see the type).
+        offset: f64,
+    },
     /// To a body: the end takes the shape of the body's faces the sweep meets.
-    UpToPart { body: BodyId, offset: f64 },
+    UpToPart {
+        /// The body.
+        body: BodyId,
+        /// Offset angle (see the type).
+        offset: f64,
+    },
     /// To the angle of a point about the axis.
-    UpToVertex { point: Point3<f64>, offset: f64 },
+    UpToVertex {
+        /// The point.
+        point: Point3<f64>,
+        /// Offset angle (see the type).
+        offset: f64,
+    },
 }
 
 /// A full revolve (P3.4): the body type, the axis, the ends and the options of Onshape's
 /// Revolve dialog (PS7).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct RevolveSpec {
+    /// Solid, Surface or Thin.
     pub body: BodyKind,
     /// The first end turns counter-clockwise about `axis.dir` (right-handed); the second end
     /// the other way.
@@ -347,6 +461,7 @@ pub struct RevolveSpec {
     /// A whole turn (Onshape's "Full", the default); `end`, `symmetric` and `second` are then
     /// ignored.
     pub full: bool,
+    /// The first end.
     pub end: RevolveEnd,
     /// Symmetric: `end` (an angle) is the total, split evenly both ways.
     pub symmetric: bool,
@@ -378,10 +493,27 @@ impl RevolveSpec {
 /// One curve of a sweep path (P3.7, PS19.2): an edge of a body or a sketch curve.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum PathCurve {
-    Edge { body: BodyId, edge: EdgeId },
-    Sketch { plane: Plane, curve: Curve2 },
+    /// An edge of a body.
+    Edge {
+        /// The edge's body.
+        body: BodyId,
+        /// The edge.
+        edge: EdgeId,
+    },
+    /// A sketch curve on its plane.
+    Sketch {
+        /// The sketch plane.
+        plane: Plane,
+        /// The curve in the plane's coordinates.
+        curve: Curve2,
+    },
     /// A (rational) Bézier curve in space by its poles and weights (a piece of a helix, say).
-    Bezier3 { poles: Vec<Point3<f64>>, weights: Vec<f64> },
+    Bezier3 {
+        /// Control points, at least two.
+        poles: Vec<Point3<f64>>,
+        /// One weight per pole, or empty for a polynomial curve.
+        weights: Vec<f64>,
+    },
 }
 
 /// How a sweep's profile turns as it follows the path (Onshape's profile control, PS19.6).
@@ -401,9 +533,11 @@ pub enum SweepControl {
 /// from its ends, the sweep runs both ways from there (PS19.5); a closed path starts there.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct SweepSpec {
+    /// Solid, Surface or Thin.
     pub body: BodyKind,
     /// Connected curves, in any order.
     pub path: Vec<PathCurve>,
+    /// How the profile turns along the path.
     pub control: SweepControl,
     /// Planar faces swept with the profile's regions.
     #[serde(default)]
@@ -451,7 +585,9 @@ pub enum LoftCondition {
 /// length through the section centres; 1 is the natural speed).
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct LoftEnd {
+    /// The condition.
     pub condition: LoftCondition,
+    /// Its magnitude (1 is the natural speed).
     pub magnitude: f64,
 }
 
@@ -470,8 +606,11 @@ pub struct LoftSpec {
     /// Solid, Surface (no caps) or Thin (the surface thickened: `left` inside, `right`
     /// outside).
     pub body: BodyKind,
+    /// The sections in order, at least two.
     pub sections: Vec<LoftSection>,
+    /// The condition at the first section.
     pub start: LoftEnd,
+    /// The condition at the last section.
     pub end: LoftEnd,
     /// The caller's id for the loft's faces (like a profile region's `source`).
     pub source: u64,
@@ -483,7 +622,12 @@ pub enum SplitTool {
     /// An unbounded plane.
     Plane(Plane),
     /// A face of a body (not extended).
-    Face { body: BodyId, face: FaceId },
+    Face {
+        /// The face's body.
+        body: BodyId,
+        /// The face.
+        face: FaceId,
+    },
     /// A surface body (a sheet).
     Body(BodyId),
 }
@@ -491,24 +635,31 @@ pub enum SplitTool {
 /// A circle in space: its center, the unit normal of its plane and its radius.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct Circle3 {
+    /// Centre.
     pub center: Point3<f64>,
+    /// Unit normal of its plane.
     pub normal: Unit<Vector3<f64>>,
+    /// Radius (mm).
     pub radius: f64,
 }
 
 /// Where a line crosses a face of a body ([`crate::Kernel::ray_hits`]).
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct RayHit {
+    /// The face crossed.
     pub face: FaceId,
     /// The distance from the ray's origin along its (unit) direction; negative behind it.
     pub t: f64,
+    /// Where it crosses.
     pub point: Point3<f64>,
 }
 
 /// An axis-aligned box (mm).
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct Aabb {
+    /// The least x, y and z.
     pub min: Point3<f64>,
+    /// The greatest x, y and z.
     pub max: Point3<f64>,
 }
 
@@ -536,14 +687,21 @@ impl Aabb {
 /// How far an extrude goes. Distances are in mm along the plane normal (negative = opposite).
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub enum Extent {
+    /// A depth along the normal (negative: against it).
     Blind(f64),
     /// Total depth, split evenly on both sides of the plane (Onshape "Symmetric").
     Symmetric(f64),
     /// Two independent directions (Onshape "second end position"): from `-backward` to
     /// `forward` along the normal.
-    TwoSided { forward: f64, backward: f64 },
+    TwoSided {
+        /// Depth along the normal.
+        forward: f64,
+        /// Depth against the normal.
+        backward: f64,
+    },
 }
 
+/// A boolean operation ([`crate::Kernel::boolean`]).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum BoolOp {
     /// Onshape "Add".
@@ -554,17 +712,29 @@ pub enum BoolOp {
     Intersect,
 }
 
+/// An infinite line: a point on it and its unit direction.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct Axis {
+    /// A point on the axis.
     pub origin: Point3<f64>,
+    /// Its direction (turns are counter-clockwise seen from its tip).
     pub dir: Unit<Vector3<f64>>,
 }
 
+/// A chamfer's size (P3.6, PS14.7).
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub enum ChamferSpec {
+    /// The same distance (mm) on both faces.
     EqualDistance(f64),
+    /// The first distance on the edge's first face, the second on the other (mm).
     TwoDistances(f64, f64),
-    DistanceAngle { distance: f64, angle: f64 },
+    /// A distance on the first face and the chamfer's angle to it (radians).
+    DistanceAngle {
+        /// Distance on the first face (mm).
+        distance: f64,
+        /// Angle between the chamfer and the first face (radians).
+        angle: f64,
+    },
 }
 
 /// How a fillet's size is given (P3.6, PS14.3).
@@ -589,25 +759,38 @@ pub enum FilletProfile {
     /// `rho` of the way from the contact chord's middle to the corner (0 < rho < 1: an ellipse
     /// below 0.5, a parabola at 0.5, a hyperbola above; the circle's rho is
     /// `sin(θ/2)/(1 + sin(θ/2))` for faces at an angle θ).
-    Conic { rho: f64 },
+    Conic {
+        /// The conic's shoulder, in (0, 1).
+        rho: f64,
+    },
     /// A curvature-continuous (G2) section: a quintic Bezier whose curvature is zero where it
     /// meets the faces. `magnitude` (0 < m ≤ 1) is how far towards the corner its inner poles
     /// reach.
-    Curvature { magnitude: f64 },
+    Curvature {
+        /// How far the inner poles reach towards the corner, in (0, 1].
+        magnitude: f64,
+    },
     /// (P3.10, PS14.6 Asymmetric) A section tangent to both faces whose contact lines are the
     /// circular fillet's for the size on the edge's first face and for `second` on its other
     /// face (`flip` swaps them): the conic with the circle's weight `sin(θ/2)`, which for faces
     /// at 90° is the quarter ellipse with those semi-axes. Straight edges between flat faces.
-    Asymmetric { second: f64, flip: bool },
+    Asymmetric {
+        /// The size on the edge's other face (mm).
+        second: f64,
+        /// Swap the two sizes.
+        flip: bool,
+    },
 }
 
 /// A fillet (P3.6, PS14.1–14.5).
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct FilletSpec {
+    /// Radius or width.
     pub size: FilletSize,
     /// Onshape's "Allow edge overflow": when off, a fillet that would run onto a face other
     /// than the faces meeting at its edge's ends is refused.
     pub allow_overflow: bool,
+    /// The cross section (circular by default).
     #[serde(default)]
     pub profile: FilletProfile,
     /// Tangent propagation: the edges' tangent chains are filleted too (on by default). Off,
@@ -621,6 +804,7 @@ fn yes() -> bool {
 }
 
 impl FilletSpec {
+    /// A circular fillet of radius `r`, overflow allowed, tangent edges propagated.
     pub fn radius(r: f64) -> Self {
         Self {
             size: FilletSize::Radius(r),
@@ -647,7 +831,9 @@ pub enum ChamferMeasure {
 /// A chamfer with its options (P3.6, PS14.7–14.9).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ChamferOpts {
+    /// The size.
     pub spec: ChamferSpec,
+    /// How the distances are measured.
     pub measurement: ChamferMeasure,
     /// The first distance (and the angle) go on the edge's other face.
     pub flip: bool,
@@ -656,6 +842,7 @@ pub struct ChamferOpts {
 }
 
 impl ChamferOpts {
+    /// `spec` measured along the faces, nothing flipped.
     pub fn new(spec: ChamferSpec) -> Self {
         Self {
             spec,
@@ -715,22 +902,33 @@ impl MassProperties {
     }
 }
 
+/// The kind of surface a face lies on.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum SurfaceKind {
+    /// A plane.
     Plane,
+    /// A circular cylinder.
     Cylinder,
+    /// A circular cone.
     Cone,
+    /// A sphere.
     Sphere,
+    /// A torus.
     Torus,
+    /// Anything else (B-spline, revolution, extrusion).
     Other,
 }
 
+/// What [`crate::Kernel::faces`] reports about a face.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct FaceInfo {
+    /// Its id (its index in the body's face list).
     pub id: FaceId,
+    /// Its surface's kind.
     pub kind: SurfaceKind,
     /// Set for planar faces, so they can be picked as sketch planes.
     pub plane: Option<Plane>,
+    /// Exact area (mm²).
     pub area: f64,
     /// The area centroid (on the face for planar faces; it may lie off a curved face).
     pub center: Point3<f64>,
@@ -747,28 +945,38 @@ pub struct FaceInfo {
 /// The kind of curve an edge lies on.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum CurveKind {
+    /// A straight line.
     Line,
+    /// A circle or circular arc.
     Circle,
+    /// An ellipse or elliptic arc.
     Ellipse,
+    /// Anything else (B-spline).
     Other,
     /// A degenerate edge (a cone's apex): a point.
     Degenerate,
 }
 
+/// What [`crate::Kernel::edges`] reports about an edge.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct EdgeInfo {
+    /// Its id (its index in the body's edge list).
     pub id: EdgeId,
     /// The faces on either side (the same face twice for a seam, `None` for a free edge).
     pub faces: [Option<FaceId>; 2],
     /// Exact length (mm).
     pub length: f64,
+    /// Its curve's kind.
     pub curve: CurveKind,
-    /// Where it starts and ends (the same point for a closed edge), and its middle point.
+    /// Where it starts.
     pub start: Point3<f64>,
+    /// Where it ends (where it starts for a closed edge).
     pub end: Point3<f64>,
+    /// Its middle point (at the middle of its parameter range).
     pub mid: Point3<f64>,
-    /// Unit tangents at the start and at the end, in the direction the edge runs.
+    /// The unit tangent at the start, in the direction the edge runs.
     pub start_tangent: Vector3<f64>,
+    /// The unit tangent at the end, in the direction the edge runs.
     pub end_tangent: Vector3<f64>,
     /// The exact circle of a circular edge or arc (P3.4: a revolve axis can be a circular edge,
     /// and Use projects the exact curve).
@@ -787,9 +995,12 @@ impl EdgeInfo {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct VertexId(pub u64);
 
+/// What [`crate::Kernel::vertices`] reports about a vertex.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct VertexInfo {
+    /// Its id.
     pub id: VertexId,
+    /// Where it is.
     pub point: Point3<f64>,
     /// The edges that end at it.
     pub edges: Vec<EdgeId>,
@@ -799,7 +1010,9 @@ pub struct VertexInfo {
 /// surface (mm), and the largest angle between neighbouring normals (radians).
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct Tessellation {
+    /// Largest distance from the mesh to the exact surface (mm), above zero.
     pub deflection: f64,
+    /// Largest angle between neighbouring normals (radians), above zero.
     pub angle: f64,
 }
 
@@ -816,8 +1029,11 @@ impl Default for Tessellation {
 /// A triangle mesh for display, tagged with the face each triangle belongs to.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct TriMesh {
+    /// Vertex positions (mm).
     pub positions: Vec<Point3<f64>>,
+    /// Unit outward surface normals, one per position.
     pub normals: Vec<Vector3<f64>>,
+    /// Triangles as indices into `positions`, counter-clockwise seen from outside.
     pub indices: Vec<[u32; 3]>,
     /// One entry per triangle.
     pub triangle_faces: Vec<FaceId>,
@@ -845,7 +1061,9 @@ pub struct History {
 /// A face of one of an operation's input bodies.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct InputFace {
+    /// The input body.
     pub body: BodyId,
+    /// Its face (an id of that body).
     pub face: FaceId,
 }
 
@@ -855,16 +1073,37 @@ pub enum Origin {
     /// Swept by a curve of a profile region. `region` is the region's `source` (its index in
     /// [`Profile::regions`] if it has none); `curve` is the curve's `source`, or
     /// [`unsourced_curve`] of its place in the region.
-    ProfileCurve { region: u64, curve: u64 },
+    ProfileCurve {
+        /// The region's id.
+        region: u64,
+        /// The curve's id.
+        curve: u64,
+    },
     /// The cap of profile region `region` (as above) where the sweep starts (on the profile
     /// plane for a blind extrude).
-    StartCap { region: u64 },
+    StartCap {
+        /// The region's id.
+        region: u64,
+    },
     /// The cap of profile region `region` where the sweep ends.
-    EndCap { region: u64 },
+    EndCap {
+        /// The region's id.
+        region: u64,
+    },
     /// Made from an edge of an input body (a fillet or chamfer face).
-    FromEdge { body: BodyId, edge: EdgeId },
+    FromEdge {
+        /// The input body.
+        body: BodyId,
+        /// Its edge.
+        edge: EdgeId,
+    },
     /// Made from a vertex of an input body (a fillet's corner patch).
-    FromVertex { body: BodyId, vertex: VertexId },
+    FromVertex {
+        /// The input body.
+        body: BodyId,
+        /// Its vertex.
+        vertex: VertexId,
+    },
 }
 
 /// The curve id [`Origin::ProfileCurve`] uses for a profile curve without a `source`: the
@@ -873,6 +1112,7 @@ pub fn unsourced_curve(lp: usize, index: usize) -> u64 {
     u64::MAX - ((lp as u64) << 32 | index as u64)
 }
 
+/// A rigid motion (rotation then translation).
 pub type Transform = Isometry3<f64>;
 
 /// A rigid motion or a reflection (P3.8: patterns and mirrors): `x ↦ linear·x + translation`,
@@ -880,7 +1120,9 @@ pub type Transform = Isometry3<f64>;
 /// reflection, so the mirror needs this.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct Motion {
+    /// The orthonormal linear part.
     pub linear: Matrix3<f64>,
+    /// The translation, applied after `linear`.
     pub translation: Vector3<f64>,
 }
 
@@ -891,10 +1133,12 @@ impl Default for Motion {
 }
 
 impl Motion {
+    /// The motion that moves nothing.
     pub fn identity() -> Self {
         Self { linear: Matrix3::identity(), translation: Vector3::zeros() }
     }
 
+    /// A move by `v`.
     pub fn translation(v: Vector3<f64>) -> Self {
         Self { linear: Matrix3::identity(), translation: v }
     }
@@ -915,6 +1159,7 @@ impl Motion {
         Self { linear, translation: 2.0 * n * n.dot(&point.coords) }
     }
 
+    /// The rigid motion `t`.
     pub fn from_isometry(t: &Transform) -> Self {
         Self { linear: t.rotation.to_rotation_matrix().into_inner(), translation: t.translation.vector }
     }
@@ -924,15 +1169,18 @@ impl Motion {
         Motion { linear: next.linear * self.linear, translation: next.linear * self.translation + next.translation }
     }
 
+    /// The motion that undoes this one.
     pub fn inverse(&self) -> Motion {
         let inv = self.linear.transpose();
         Motion { linear: inv, translation: -(inv * self.translation) }
     }
 
+    /// `p` moved.
     pub fn point(&self, p: &Point3<f64>) -> Point3<f64> {
         Point3::from(self.linear * p.coords + self.translation)
     }
 
+    /// `v` turned (or reflected); translations don't move vectors.
     pub fn vector(&self, v: &Vector3<f64>) -> Vector3<f64> {
         self.linear * v
     }
@@ -961,8 +1209,11 @@ impl Motion {
 /// Where a point is relative to a solid ([`crate::Kernel::classify`], P3.8).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum PointClass {
+    /// Strictly inside the material.
     Inside,
+    /// Outside the material.
     Outside,
+    /// On a face, within the tolerance.
     OnBoundary,
 }
 
@@ -1001,7 +1252,9 @@ pub struct OffsetSpec {
 /// A face's new surface for [`Kernel::replace_faces`](crate::Kernel::replace_faces).
 #[derive(Debug, Clone, PartialEq)]
 pub struct FaceReplacement {
+    /// The face to change.
     pub face: FaceId,
+    /// Its new surface (the native kernel's exact surface type).
     pub surface: crate::native::surface::Surface,
     /// The part of the surface the face lies on, in the surface's own parameters
     /// `((u0, u1), (v0, v1))` (radians for angles): where the surface meets a neighbour more
@@ -1014,7 +1267,9 @@ pub struct FaceReplacement {
 /// [0, 1] from the edge's `start` to its `end`, at least one.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct FilletLaw {
+    /// The edge.
     pub edge: EdgeId,
+    /// `(t, r)` pairs: radius `r` (mm) at fraction `t` of the edge, interpolated between.
     pub radii: Vec<(f64, f64)>,
 }
 
@@ -1029,7 +1284,9 @@ pub struct ThickenSpec {
     pub faces: Vec<FaceInput>,
     /// Planar sketch regions to thicken (their faces, normals along the plane's).
     pub profiles: Vec<Profile>,
+    /// Thickness along the faces' normals (mm).
     pub along: f64,
+    /// Thickness against the faces' normals (mm).
     pub against: f64,
     /// The caller's id for the new faces.
     pub source: u64,
@@ -1038,8 +1295,20 @@ pub struct ThickenSpec {
 /// One boundary curve of a Fill.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum FillCurve {
-    Edge { body: BodyId, edge: EdgeId },
-    Sketch { plane: Plane, curve: Curve2 },
+    /// An edge of a body.
+    Edge {
+        /// The edge's body.
+        body: BodyId,
+        /// The edge.
+        edge: EdgeId,
+    },
+    /// A sketch curve on its plane.
+    Sketch {
+        /// The sketch plane.
+        plane: Plane,
+        /// The curve in the plane's coordinates.
+        curve: Curve2,
+    },
 }
 
 /// A Fill (Onshape's Fill): a surface bounded by a closed chain of curves. A planar chain is
@@ -1058,11 +1327,17 @@ pub struct FillSpec {
 /// several kinds (a compound); `Empty` nothing.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum BodyClass {
+    /// Nothing.
     Empty,
+    /// Acorn points only.
     Point,
+    /// Wires (chains of free edges) only.
     Wire,
+    /// Open shells of faces only.
     Sheet,
+    /// Solids only.
     Solid,
+    /// More than one kind (a compound).
     Mixed,
 }
 
@@ -1084,8 +1359,15 @@ impl BodyClass {
 /// when its size is 2π or more).
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub enum BodySweep {
+    /// Straight along the vector (mm).
     Translate(Vector3<f64>),
-    Rotate { axis: Axis, angle: f64 },
+    /// About an axis.
+    Rotate {
+        /// The axis.
+        axis: Axis,
+        /// The angle (radians).
+        angle: f64,
+    },
 }
 
 /// A cylindrical box (SMLib's `CreateCylindricalBox`): the piece of a thick-walled tube about
@@ -1094,10 +1376,16 @@ pub enum BodySweep {
 /// normal from `frame`'s x direction): an annular sector extruded.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct CylindricalBox {
+    /// Origin on the axis, `normal` along it, `x_dir` where angles start.
     pub frame: Plane,
+    /// Length along the normal (mm), above zero.
     pub length: f64,
+    /// Inner radius (mm), above zero.
     pub inner_radius: f64,
+    /// Outer radius (mm), above `inner_radius`.
     pub outer_radius: f64,
+    /// Start angle (radians), in [0, 2π).
     pub start_angle: f64,
+    /// End angle (radians), after the start and at most a turn past it.
     pub end_angle: f64,
 }

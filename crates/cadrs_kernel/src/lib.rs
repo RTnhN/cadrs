@@ -3,14 +3,57 @@
 //! The rest of cadrs talks to the B-rep kernel only through the [`Kernel`] trait and the types in
 //! [`types`]. The kernel is [`native`]: exact curves and surfaces, booleans, features,
 //! tessellation, hidden-line removal and STEP/IGES exchange in pure Rust (no C or C++).
-//! See `crates/cadrs_kernel/README.md`.
+//! See `crates/cadrs_kernel/README.md` ("Using the kernel").
+//!
+//! # Using the kernel
+//!
+//! A session ([`DefaultKernel`]) owns bodies and hands out [`BodyId`]s. Operations never change
+//! their inputs: each returns new bodies in an [`OpResult`] with a [`History`] of what became of
+//! the input faces (for persistent naming, [`naming`]). Faces and edges are picked by the ids
+//! [`Kernel::faces`] and [`Kernel::edges`] report. Lengths are mm, angles radians.
+//!
+//! ```
+//! use cadrs_kernel::{BoolOp, Curve2, DefaultKernel, Extent, Kernel, Loop, Plane, Profile, Region};
+//! use nalgebra::Point2;
+//!
+//! /// The rectangle [x0, x1] × [y0, y1] on the top plane.
+//! fn rect(x0: f64, y0: f64, x1: f64, y1: f64) -> Profile {
+//!     let c = [Point2::new(x0, y0), Point2::new(x1, y0), Point2::new(x1, y1), Point2::new(x0, y1)];
+//!     let curves = (0..4).map(|i| Curve2::Line { a: c[i], b: c[(i + 1) % 4], source: None }).collect();
+//!     Profile::new(Plane::top(), vec![Region { outer: Loop { curves }, holes: vec![], source: None }])
+//! }
+//!
+//! let mut k = DefaultKernel::new();
+//! let block = k.extrude(&rect(0.0, 0.0, 20.0, 10.0), Extent::Blind(5.0))?.bodies[0];
+//! let pocket = k.extrude(&rect(5.0, 2.0, 10.0, 8.0), Extent::Blind(5.0))?.bodies[0];
+//! let cut = k.boolean(BoolOp::Subtract, block, &[pocket])?;
+//! assert!((k.mass_properties(cut.bodies[0])?.volume - (1000.0 - 150.0)).abs() < 1e-9);
+//! // The block is still there: operations make new bodies.
+//! assert!((k.mass_properties(block)?.volume - 1000.0).abs() < 1e-9);
+//! # Ok::<(), cadrs_kernel::KernelError>(())
+//! ```
 
+#![warn(missing_docs)]
+
+/// Kernel backends by name (`backend::native::NativeKernel`, the only one).
+#[allow(missing_docs, reason = "its one inner module re-exports `NativeKernel`, documented there")]
 pub mod backend;
+// TODO(missing_docs): document the public items (fields, variants) of exchange, loft, naming,
+// projection and query, then drop these allows.
+#[allow(missing_docs)]
 pub mod exchange;
+#[allow(missing_docs)]
 pub mod loft;
+// TODO(missing_docs): `native` is the kernel's internals, public for its tests and tools; every
+// module has its `//!` docs but not every item. The README's "Curated API" note describes the
+// facade that is to replace this blanket `pub`.
+#[allow(missing_docs)]
 pub mod native;
+#[allow(missing_docs)]
 pub mod naming;
+#[allow(missing_docs)]
 pub mod projection;
+#[allow(missing_docs)]
 pub mod query;
 pub mod thin;
 pub mod types;
@@ -54,6 +97,7 @@ pub enum KernelError {
     InvalidInput(String),
     /// This backend does not implement the operation.
     Unsupported(&'static str),
+    /// The id names no body of this session (never made here, or released).
     UnknownBody(BodyId),
 }
 
@@ -88,12 +132,15 @@ impl fmt::Display for KernelError {
 
 impl std::error::Error for KernelError {}
 
+/// The result of a kernel call.
 pub type Result<T> = std::result::Result<T, KernelError>;
 
 /// The bodies an operation produced, plus what it did to its inputs.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct OpResult {
+    /// The new bodies (usually one), owned by the session until [`Kernel::release`]d.
     pub bodies: Vec<BodyId>,
+    /// What became of the inputs' faces and where the new ones came from.
     pub history: History,
 }
 
@@ -101,11 +148,54 @@ pub struct OpResult {
 ///
 /// Operations never mutate their inputs; they return new bodies, so a feature list can be
 /// rebuilt from any point.
+///
+/// The contract every operation shares, unless its own docs say otherwise:
+/// - **Inputs**: bodies by [`BodyId`] of this session ([`KernelError::UnknownBody`] otherwise),
+///   faces and edges by the ids [`Kernel::faces`] and [`Kernel::edges`] give for that body.
+///   Lengths are mm, angles radians.
+/// - **Errors**: [`KernelError::InvalidParameter`] for a size, angle or selection that can't
+///   build (non-positive radius, unknown face), [`KernelError::InvalidProfile`] for a profile
+///   that doesn't close, [`KernelError::OperationFailed`] when the algorithm gives up and
+///   [`KernelError::OpenResult`] when faces didn't close into a solid. An operation never
+///   returns a body it found invalid: results pass the native kernel's `Body::check`.
+/// - **Tolerance**: exact geometry is within `native::tol::POINT` (1e-6 mm); vertices and edges
+///   carry their own tolerance when an operation had to merge within more (read files, healed
+///   shapes). Models must fit in the size box `native::tol::SIZE` (±1e8 mm).
+/// - **History**: [`OpResult::history`] lists each result face as `generated` (with an
+///   [`Origin`]: a profile curve, a cap, an input edge or vertex) or `modified` (continuing an
+///   input face, maybe trimmed or split), and the input faces that are gone as `deleted`.
 pub trait Kernel {
     /// Short backend name, for diagnostics.
     fn name(&self) -> &'static str;
 
     // Creating bodies.
+
+    /// A solid prism: the profile's regions swept along the plane normal by `extent`.
+    ///
+    /// Regions that overlap or touch are merged; holes stay holes. `InvalidProfile` for a
+    /// profile without regions or with a loop that doesn't close. History: every face is
+    /// generated, sides as [`Origin::ProfileCurve`], caps as [`Origin::StartCap`] (on the
+    /// sketch plane, or where the sweep starts) and [`Origin::EndCap`].
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # use cadrs_kernel::{DefaultKernel, Extent, Kernel, Origin};
+    /// # use cadrs_kernel::{Curve2, Loop, Plane, Profile, Region};
+    /// # fn rect(x0: f64, y0: f64, x1: f64, y1: f64) -> Profile {
+    /// #     let c = [nalgebra::Point2::new(x0, y0), nalgebra::Point2::new(x1, y0), nalgebra::Point2::new(x1, y1), nalgebra::Point2::new(x0, y1)];
+    /// #     let curves = (0..4).map(|i| Curve2::Line { a: c[i], b: c[(i + 1) % 4], source: None }).collect();
+    /// #     Profile::new(Plane::top(), vec![Region { outer: Loop { curves }, holes: vec![], source: None }])
+    /// # }
+    /// let mut k = DefaultKernel::new();
+    /// let r = k.extrude(&rect(0.0, 0.0, 20.0, 10.0), Extent::Symmetric(5.0))?;
+    /// let block = r.bodies[0];
+    /// assert_eq!(k.faces(block)?.len(), 6);
+    /// assert_eq!(r.history.generated.iter().filter(|(_, o)| matches!(o, Origin::ProfileCurve { .. })).count(), 4);
+    /// let m = k.mass_properties(block)?;
+    /// assert!((m.volume - 1000.0).abs() < 1e-9 && m.center_of_mass.z.abs() < 1e-9);
+    /// # Ok::<(), cadrs_kernel::KernelError>(())
+    /// ```
     fn extrude(&mut self, profile: &Profile, extent: Extent) -> Result<OpResult>;
 
     /// The full extrude of Onshape's dialog (P3.3): Solid, Surface or Thin; Blind, Up to
@@ -130,6 +220,10 @@ pub trait Kernel {
             _ => Err(KernelError::Unsupported("this extrude")),
         }
     }
+    /// A solid of revolution: the profile's regions turned about `axis` (in or off the
+    /// profile's plane, not crossing the regions) by `angle` radians, counter-clockwise about
+    /// `axis.dir`; a whole turn at 2π or more. An axis square to the plane or through a region
+    /// is an error. History as [`Kernel::extrude`]'s.
     fn revolve(&mut self, profile: &Profile, axis: Axis, angle: f64) -> Result<OpResult>;
 
     /// The full revolve of Onshape's dialog (P3.4, PS7): Solid, Surface or Thin; Full, an angle,
@@ -174,7 +268,44 @@ pub trait Kernel {
     }
 
     // Combining and editing bodies.
+
+    /// Unites, subtracts or intersects `tools` with `target` (Onshape's Add, Remove and
+    /// Intersect), giving one body (it may hold several solids: [`Kernel::split_solids`]).
+    ///
+    /// Faces of the inputs that meet within the run tolerance are merged (coplanar and
+    /// coincident faces included). Errors: `EmptyResult` when nothing is left (an Intersect of
+    /// bodies that don't meet, a Subtract that removes everything), `OpenResult` or
+    /// `OperationFailed` when the pieces don't close into a valid solid. History: every result
+    /// face is `modified` from the input face it is a piece of (target or tool); input faces
+    /// with no piece left are `deleted`; nothing is generated.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # use cadrs_kernel::{BoolOp, DefaultKernel, Extent, Kernel, KernelError};
+    /// # use cadrs_kernel::{Curve2, Loop, Plane, Profile, Region};
+    /// # fn rect(x0: f64, y0: f64, x1: f64, y1: f64) -> Profile {
+    /// #     let c = [nalgebra::Point2::new(x0, y0), nalgebra::Point2::new(x1, y0), nalgebra::Point2::new(x1, y1), nalgebra::Point2::new(x0, y1)];
+    /// #     let curves = (0..4).map(|i| Curve2::Line { a: c[i], b: c[(i + 1) % 4], source: None }).collect();
+    /// #     Profile::new(Plane::top(), vec![Region { outer: Loop { curves }, holes: vec![], source: None }])
+    /// # }
+    /// let mut k = DefaultKernel::new();
+    /// let a = k.extrude(&rect(0.0, 0.0, 10.0, 10.0), Extent::Blind(10.0))?.bodies[0];
+    /// let b = k.extrude(&rect(5.0, 5.0, 15.0, 15.0), Extent::Blind(10.0))?.bodies[0];
+    /// let union = k.boolean(BoolOp::Union, a, &[b])?;
+    /// assert!((k.mass_properties(union.bodies[0])?.volume - 1750.0).abs() < 1e-9);
+    /// let common = k.boolean(BoolOp::Intersect, a, &[b])?;
+    /// assert!((k.mass_properties(common.bodies[0])?.volume - 250.0).abs() < 1e-9);
+    /// assert!(!common.history.modified.is_empty() && common.history.generated.is_empty());
+    /// // Bodies that don't meet have no common part.
+    /// let far = k.extrude(&rect(50.0, 50.0, 60.0, 60.0), Extent::Blind(1.0))?.bodies[0];
+    /// assert!(matches!(k.boolean(BoolOp::Intersect, a, &[far]), Err(KernelError::EmptyResult(_))));
+    /// # Ok::<(), cadrs_kernel::KernelError>(())
+    /// ```
     fn boolean(&mut self, op: BoolOp, target: BodyId, tools: &[BodyId]) -> Result<OpResult>;
+
+    /// A copy of the body moved by a rigid motion. Every face of the copy is `modified` from
+    /// the face of `body` with the same id; topology and ids are kept.
     fn transform(&mut self, body: BodyId, transform: &Transform) -> Result<OpResult>;
 
     /// A copy of the body moved by a rigid motion or reflected (P3.8: patterns and mirrors).
@@ -207,12 +338,70 @@ pub trait Kernel {
     fn classify(&self, _body: BodyId, _point: Point3<f64>, _tol: f64) -> Result<PointClass> {
         Err(KernelError::Unsupported("point classification"))
     }
+    /// Rounds `edges` (and the edges tangent to them) with a constant `radius`: the rolling-ball
+    /// fillet, [`Kernel::fillet_with`] with [`FilletSpec::radius`].
+    ///
+    /// `InvalidParameter` for a radius that isn't above zero; `OperationFailed` for a radius the
+    /// faces can't hold (too large for the edge's neighbourhood) or a blend the kernel can't
+    /// close. History: each fillet face is generated [`Origin::FromEdge`] of its edge, corner
+    /// patches [`Origin::FromVertex`]; the trimmed faces are `modified`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # use cadrs_kernel::{DefaultKernel, Extent, Kernel, Origin};
+    /// # use cadrs_kernel::{Curve2, Loop, Plane, Profile, Region};
+    /// # fn rect(x0: f64, y0: f64, x1: f64, y1: f64) -> Profile {
+    /// #     let c = [nalgebra::Point2::new(x0, y0), nalgebra::Point2::new(x1, y0), nalgebra::Point2::new(x1, y1), nalgebra::Point2::new(x0, y1)];
+    /// #     let curves = (0..4).map(|i| Curve2::Line { a: c[i], b: c[(i + 1) % 4], source: None }).collect();
+    /// #     Profile::new(Plane::top(), vec![Region { outer: Loop { curves }, holes: vec![], source: None }])
+    /// # }
+    /// let mut k = DefaultKernel::new();
+    /// let block = k.extrude(&rect(0.0, 0.0, 20.0, 10.0), Extent::Blind(5.0))?.bodies[0];
+    /// // One of the four edges 20 mm long.
+    /// let edge = k.edges(block)?.into_iter().find(|e| (e.length - 20.0).abs() < 1e-9).unwrap().id;
+    /// let r = k.fillet(block, &[edge], 1.0)?;
+    /// // The fillet takes (1 − π/4) r² of the cross section along the edge.
+    /// let want = 1000.0 - (1.0 - std::f64::consts::FRAC_PI_4) * 20.0;
+    /// assert!((k.mass_properties(r.bodies[0])?.volume - want).abs() < 1e-6);
+    /// assert!(r.history.generated.iter().any(|(_, o)| matches!(o, Origin::FromEdge { edge: e, .. } if *e == edge)));
+    /// # Ok::<(), cadrs_kernel::KernelError>(())
+    /// ```
     fn fillet(&mut self, _body: BodyId, _edges: &[EdgeId], _radius: f64) -> Result<OpResult> {
         Err(KernelError::Unsupported("fillet"))
     }
+    /// Bevels `edges` (and the edges tangent to them) by `spec`'s distances measured along each
+    /// face ([`Kernel::chamfer_with`] with the default options). Errors and history as
+    /// [`Kernel::fillet`]'s: chamfer faces are generated [`Origin::FromEdge`].
     fn chamfer(&mut self, _body: BodyId, _edges: &[EdgeId], _spec: ChamferSpec) -> Result<OpResult> {
         Err(KernelError::Unsupported("chamfer"))
     }
+    /// Hollows a solid inward to walls `thickness` thick, open where the faces `remove` were
+    /// ([`Kernel::shell_with`] inward, rounded joins).
+    ///
+    /// `InvalidParameter` for a thickness that isn't above zero, no face to remove, an unknown
+    /// face, or walls that would intersect themselves (too thick); `OperationFailed` when the
+    /// offset can't be built. History: the faces kept and the inner walls offset from them are
+    /// `modified` from their input face; the removed faces are `deleted`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # use cadrs_kernel::{DefaultKernel, Extent, Kernel};
+    /// # use cadrs_kernel::{Curve2, Loop, Plane, Profile, Region};
+    /// # fn rect(x0: f64, y0: f64, x1: f64, y1: f64) -> Profile {
+    /// #     let c = [nalgebra::Point2::new(x0, y0), nalgebra::Point2::new(x1, y0), nalgebra::Point2::new(x1, y1), nalgebra::Point2::new(x0, y1)];
+    /// #     let curves = (0..4).map(|i| Curve2::Line { a: c[i], b: c[(i + 1) % 4], source: None }).collect();
+    /// #     Profile::new(Plane::top(), vec![Region { outer: Loop { curves }, holes: vec![], source: None }])
+    /// # }
+    /// let mut k = DefaultKernel::new();
+    /// let block = k.extrude(&rect(0.0, 0.0, 20.0, 10.0), Extent::Blind(5.0))?.bodies[0];
+    /// let top = k.faces(block)?.into_iter().find(|f| (f.center.z - 5.0).abs() < 1e-9).unwrap().id;
+    /// let cup = k.shell(block, &[top], 1.0)?.bodies[0];
+    /// // The cavity is 18 × 8 × 4.
+    /// assert!((k.mass_properties(cup)?.volume - (1000.0 - 18.0 * 8.0 * 4.0)).abs() < 1e-6);
+    /// # Ok::<(), cadrs_kernel::KernelError>(())
+    /// ```
     fn shell(&mut self, _body: BodyId, _remove: &[FaceId], _thickness: f64) -> Result<OpResult> {
         Err(KernelError::Unsupported("shell"))
     }
@@ -356,8 +545,6 @@ pub trait Kernel {
         Err(KernelError::Unsupported("mesh to solid"))
     }
 
-    /// Forgets a body (for example when a rebuild cache evicts a feature's output). Unknown ids
-    /// are ignored.
     /// Thickens surfaces and faces into a solid (Onshape's Thicken).
     fn thicken_surfaces(&mut self, _spec: &ThickenSpec) -> Result<OpResult> {
         Err(KernelError::Unsupported("thicken"))
@@ -373,6 +560,8 @@ pub trait Kernel {
         Err(KernelError::Unsupported("sew"))
     }
 
+    /// Forgets a body (for example when a rebuild cache evicts a feature's output). Unknown ids
+    /// are ignored. Ids are never reused, so a released id stays unknown.
     fn release(&mut self, _body: BodyId) {}
 
     /// A body as bytes (the backend's own exact format), which [`Self::read_body`] gives back
@@ -426,9 +615,69 @@ pub trait Kernel {
     }
 
     // Queries.
+
+    /// The body's faces in id order: [`FaceId`] `i` is the `i`-th face, with its surface kind,
+    /// plane (planar faces), area, centroid, and axis and radius (surfaces of revolution).
     fn faces(&self, body: BodyId) -> Result<Vec<FaceInfo>>;
+
+    /// The body's edges in id order, with the faces on either side, exact length, ends,
+    /// tangents and (circular edges) the exact circle. A wire body's edges have no faces.
     fn edges(&self, body: BodyId) -> Result<Vec<EdgeInfo>>;
+
+    /// Volume, area, centroid and inertia (unit density) from the exact geometry: analytic
+    /// faces integrated in closed form or by Gauss quadrature to near machine precision, not
+    /// from a mesh. A sheet has zero volume; a wire body gives its `length`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # use cadrs_kernel::{DefaultKernel, Extent, Kernel};
+    /// # use cadrs_kernel::{Curve2, Loop, Plane, Profile, Region};
+    /// # fn rect(x0: f64, y0: f64, x1: f64, y1: f64) -> Profile {
+    /// #     let c = [nalgebra::Point2::new(x0, y0), nalgebra::Point2::new(x1, y0), nalgebra::Point2::new(x1, y1), nalgebra::Point2::new(x0, y1)];
+    /// #     let curves = (0..4).map(|i| Curve2::Line { a: c[i], b: c[(i + 1) % 4], source: None }).collect();
+    /// #     Profile::new(Plane::top(), vec![Region { outer: Loop { curves }, holes: vec![], source: None }])
+    /// # }
+    /// let mut k = DefaultKernel::new();
+    /// let block = k.extrude(&rect(0.0, 0.0, 20.0, 10.0), Extent::Blind(5.0))?.bodies[0];
+    /// let m = k.mass_properties(block)?;
+    /// assert!((m.volume - 1000.0).abs() < 1e-9);
+    /// assert!((m.surface_area - 700.0).abs() < 1e-9);
+    /// assert!((m.center_of_mass - nalgebra::Point3::new(10.0, 5.0, 2.5)).norm() < 1e-9);
+    /// // Ixx = V (b² + c²) / 12 about the centroid.
+    /// assert!((m.inertia[(0, 0)] - 1000.0 * (100.0 + 25.0) / 12.0).abs() < 1e-6);
+    /// # Ok::<(), cadrs_kernel::KernelError>(())
+    /// ```
     fn mass_properties(&self, body: BodyId) -> Result<MassProperties>;
+
+    /// A triangle mesh of the body for display and export: within `quality.deflection` mm of
+    /// the exact surfaces and `quality.angle` between neighbouring normals, each triangle
+    /// tagged with its face, plus edge polylines and a point body's points. `InvalidInput` for
+    /// a deflection or angle that isn't finite and above zero. Deterministic: the same body
+    /// gives the same mesh whatever the thread count.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # use cadrs_kernel::{DefaultKernel, Extent, Kernel, Tessellation};
+    /// # use cadrs_kernel::{Curve2, Loop, Plane, Profile, Region};
+    /// # fn rect(x0: f64, y0: f64, x1: f64, y1: f64) -> Profile {
+    /// #     let c = [nalgebra::Point2::new(x0, y0), nalgebra::Point2::new(x1, y0), nalgebra::Point2::new(x1, y1), nalgebra::Point2::new(x0, y1)];
+    /// #     let curves = (0..4).map(|i| Curve2::Line { a: c[i], b: c[(i + 1) % 4], source: None }).collect();
+    /// #     Profile::new(Plane::top(), vec![Region { outer: Loop { curves }, holes: vec![], source: None }])
+    /// # }
+    /// let mut k = DefaultKernel::new();
+    /// let block = k.extrude(&rect(0.0, 0.0, 20.0, 10.0), Extent::Blind(5.0))?.bodies[0];
+    /// let mesh = k.tessellate(block, Tessellation::default())?;
+    /// assert_eq!(mesh.indices.len(), mesh.triangle_faces.len());
+    /// assert_eq!(mesh.edges.len(), 12);
+    /// let area: f64 = mesh.indices.iter().map(|t| {
+    ///     let [a, b, c] = t.map(|i| mesh.positions[i as usize]);
+    ///     (b - a).cross(&(c - a)).norm() / 2.0
+    /// }).sum();
+    /// assert!((area - 700.0).abs() < 1e-9); // flat faces mesh exactly
+    /// # Ok::<(), cadrs_kernel::KernelError>(())
+    /// ```
     fn tessellate(&self, body: BodyId, quality: Tessellation) -> Result<TriMesh>;
 
     /// The number of solids in a body (0 for a surface body).
@@ -457,6 +706,31 @@ pub trait Kernel {
     fn ray_hits(&self, _body: BodyId, _origin: Point3<f64>, _dir: Vector3<f64>) -> Result<Vec<RayHit>> {
         Err(KernelError::Unsupported("ray queries"))
     }
+    /// Writes bodies to a STEP AP214 file (exact B-rep: analytic and B-spline geometry, one
+    /// `MANIFOLD_SOLID_BREP` per solid), named "Body 1", "Body 2", ... in order.
+    /// [`Kernel::import_step`] reads it back with the same geometry within the file's
+    /// tolerance. Use [`Kernel::export_model`] for names, IGES or assemblies.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # use cadrs_kernel::{DefaultKernel, Extent, Kernel};
+    /// # use cadrs_kernel::{Curve2, Loop, Plane, Profile, Region};
+    /// # fn rect(x0: f64, y0: f64, x1: f64, y1: f64) -> Profile {
+    /// #     let c = [nalgebra::Point2::new(x0, y0), nalgebra::Point2::new(x1, y0), nalgebra::Point2::new(x1, y1), nalgebra::Point2::new(x0, y1)];
+    /// #     let curves = (0..4).map(|i| Curve2::Line { a: c[i], b: c[(i + 1) % 4], source: None }).collect();
+    /// #     Profile::new(Plane::top(), vec![Region { outer: Loop { curves }, holes: vec![], source: None }])
+    /// # }
+    /// let mut k = DefaultKernel::new();
+    /// let block = k.extrude(&rect(0.0, 0.0, 20.0, 10.0), Extent::Blind(5.0))?.bodies[0];
+    /// let step = k.export_step(&[block])?;
+    /// assert!(step.starts_with(b"ISO-10303-21;"));
+    /// let back = k.import_step(&step)?;
+    /// assert_eq!(back.len(), 1);
+    /// assert_eq!(k.faces(back[0])?.len(), 6);
+    /// assert!((k.mass_properties(back[0])?.volume - 1000.0).abs() < 1e-9);
+    /// # Ok::<(), cadrs_kernel::KernelError>(())
+    /// ```
     fn export_step(&self, _bodies: &[BodyId]) -> Result<Vec<u8>> {
         Err(KernelError::Unsupported("STEP export"))
     }

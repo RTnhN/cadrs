@@ -27,41 +27,88 @@ crates/cadrs_kernel/
 There's no Bevy dependency. `cadrs_core` depends on `cadrs_kernel`, and features rebuild through it
 (see "Rebuilding the feature list" below).
 
-## API sketch
+## Using the kernel
+The rest of cadrs uses the kernel through the `Kernel` trait (`src/lib.rs`) and the types in
+`src/types.rs`; `DefaultKernel` is the native kernel. Every public item there is documented
+(`#![warn(missing_docs)]`), each operation with its contract, and the main operations have
+doctests (`cargo test --profile kernel -p cadrs_kernel --doc`).
+
 ```rust
-pub struct BodyId;   // a solid/body owned by the kernel session
-pub struct FaceId;   // an index into one body; FaceName is the persistent name (see naming)
-pub struct EdgeId;
+use cadrs_kernel::{BoolOp, DefaultKernel, Extent, Kernel, Tessellation};
 
-pub trait Kernel {
-    // creation
-    fn extrude(&mut self, profile: &Profile, extent: Extent) -> Result<OpResult>;
-    fn revolve(&mut self, profile: &Profile, axis: Axis, angle: Angle) -> Result<OpResult>;
-    fn sweep(&mut self, profile: &Profile, path: &Path3) -> Result<OpResult>;
-    fn loft(&mut self, sections: &[Profile], opts: LoftOpts) -> Result<OpResult>;
-    // combination and editing
-    fn boolean(&mut self, op: BoolOp, target: BodyId, tools: &[BodyId]) -> Result<OpResult>;
-    fn fillet(&mut self, body: BodyId, edges: &[EdgeId], radius: f64) -> Result<OpResult>;
-    fn chamfer(&mut self, body: BodyId, edges: &[EdgeId], spec: ChamferSpec) -> Result<OpResult>;
-    fn shell(&mut self, body: BodyId, remove: &[FaceId], thickness: f64) -> Result<OpResult>;
-    fn transform(&mut self, body: BodyId, t: Isometry3) -> Result<OpResult>; // patterns, mirror
-    // queries
-    fn faces(&self, body: BodyId) -> Vec<FaceInfo>;   // id, surface kind, plane if planar
-    fn edges(&self, body: BodyId) -> Vec<EdgeInfo>;
-    fn mass_properties(&self, body: BodyId) -> MassProperties; // exact where possible
-    fn tessellate(&self, body: BodyId, tol: Tolerance) -> TriMesh; // with face and edge ids
-    fn export_step(&self, bodies: &[BodyId]) -> Result<Vec<u8>>;
-}
-
-pub struct OpResult {
-    pub bodies: Vec<BodyId>,
-    pub history: History, // generated/modified/deleted sub-shapes → feeds naming
-}
+let mut k = DefaultKernel::new();                       // a session: it owns the bodies
+let block = k.extrude(&rect, Extent::Blind(5.0))?.bodies[0];
+let cut = k.boolean(BoolOp::Subtract, block, &[tool])?; // OpResult { bodies, history }
+let edge = k.edges(cut.bodies[0])?[0].id;               // ids come from the queries
+let round = k.fillet(cut.bodies[0], &[edge], 1.0)?;
+let m = k.mass_properties(round.bodies[0])?;            // exact volume, area, inertia
+let mesh = k.tessellate(round.bodies[0], Tessellation::default())?;
+let step = k.export_step(&round.bodies)?;               // and import_step / import_model
 ```
+- **Session and ids.** A session owns its bodies; a `BodyId` is valid until `release`, and ids
+  are never reused. `FaceId`/`EdgeId`/`VertexId` are indices into one body, as `faces`, `edges`
+  and `vertices` list them; names that survive rebuilds are `naming`'s (see "Persistent
+  naming"), built from each operation's `History`.
+- **Operations** never change their inputs. Each returns an `OpResult`: the new bodies and a
+  `History` listing every result face as `generated` (with an `Origin`: profile curve, cap,
+  input edge or vertex) or `modified` (from an input face), and the input faces `deleted`.
+- **Errors** (`KernelError`) say what a caller can do: `InvalidParameter` (a size or selection
+  that can't build: tell the user), `InvalidProfile`, `EmptyResult` (an Intersect that finds
+  nothing), `OpenResult`/`OperationFailed` (the algorithm gave up: try other options),
+  `InvalidInput` (a bad file or body), `Unsupported`, `UnknownBody`. A wrong body is never
+  returned instead of an error.
+- **Units and tolerances.** mm and radians. Exact geometry is within `tol::POINT` (1e-6 mm);
+  read and healed bodies carry their own vertex and edge tolerances. See "Tolerances" below.
+- **Validity.** Every result passes `Body::check()` (`native::topo`): the fast structural check
+  operations run on their own results (references, loops closing in 3D and in (u, v), p-curves
+  on their edges, edge uses, body kinds, positive volume). `Body::check_with(CheckLevel::Full)`
+  adds what is too slow for every operation: loops crossing in (u, v) by exact segment tests,
+  loop nesting and orientation, shell connectivity and orientation, adaptive edge and vertex
+  consistency, and void shells inside their solid; it is meant for tests.
+- **Exchange.** `export_step`/`import_step` for plain STEP, `export_model`/`import_model` for
+  STEP or IGES with names and assemblies, `mesh_solid` for STL triangles; `write_body` and
+  `read_body` are the exact native body format (`native::bodyio`), which keeps every face,
+  edge and vertex in order, so names stay valid across a cache or the network.
+- **Determinism.** The same inputs are to give the same bytes (bodies, meshes, STEP text)
+  whatever the number of rayon threads; `tests/determinism.rs` checks it.
 - `Profile` is built from `cadrs_sketch` regions using **exact** boundary curves (lines, arcs,
-  circles, ellipses, later splines) on a sketch `Plane`, never the polyline used for display.
-- Hole, pattern, mirror and draft are built on top of these operations in `cadrs_core`, unless a
-  backend provides a better native version.
+  circles, ellipses, Béziers) on a sketch `Plane`, never the polyline used for display.
+- About 45 trait methods default to `Unsupported` so a backend can start small; the native
+  kernel implements them all.
+
+### Curated API (design note)
+Today all 61 modules of `native` are `pub`, so every internal function is public API. Only the
+crate's own tests reach into it: no other cadrs crate names `cadrs_kernel::native::...` (they
+use `Kernel`, `DefaultKernel` and the types). The tests use about 20 modules:
+`math` (P3, Frame, Affine), `surface::Surface`, `curve::Curve`, `nurbs`, `topo` (Body, Shell),
+`mass` (body_mass, face_area, face_integrals), `bodyio::read`, `tess` (edge_samples,
+mesh_face), `ssi`, `classify`, `smb`, `brep_occt::read`, `step`, `iges`, `exchange::write_body`,
+`features::prism_along`, `unify::merge_edges`, `evolved`, `surfacing`, and the test kit
+`draw` and `oracle`.
+
+The plan, in steps that each keep every test building:
+1. **A facade.** `native/mod.rs` declares its modules `pub(crate)` and re-exports a small
+   stable set: `NativeKernel`; the B-rep data model (`topo::{Body, Vertex, Edge, Coedge, Face,
+   Shell, Solid, Wire, CheckLevel}`, `curve::Curve`, `surface::Surface`, `nurbs::{NurbsCurve,
+   NurbsSurface}`, `math::{P3, V3, Frame, Affine}`); `tol` (the tolerance model); `bodyio`
+   (the body format). This is what a user writing a direct-edit or analysis tool needs.
+2. **A `testkit` module** (`cadrs_kernel::testkit`, under the existing `testkit` feature, which
+   the crate's tests already turn on) re-exporting the internals the tests reach: `draw`,
+   `oracle`, `smb`, `brep_occt`, `step`, `iges`, `ssi`, `classify`, `mass`, `tess`, `unify`,
+   `features`, `evolved`, `surfacing`. Under `cfg(feature = "testkit")` the old
+   `native::<module>` paths stay `pub` too, so the tests move to `testkit::` one file at a time
+   and nothing breaks in between; the generators (`tools/occt_to_rust.py`, the SMLib ones)
+   switch their `use` lines in the same change.
+3. **Seal it.** When no test names `native::<internal>` any more, drop the `cfg` re-export:
+   without `testkit` the public surface is `Kernel`, the types, and the facade of step 1.
+   `cargo check -p cadrs_kernel` (no features) and `cargo check -p cadrs_core` are the gate.
+
+Done so far: `#![warn(missing_docs)]` on the crate, with every public item of `lib.rs` and
+`types.rs` documented; `native` and the not-yet-documented `exchange`, `loft`, `naming`,
+`projection` and `query` carry an `allow(missing_docs)` with a TODO in `lib.rs`, so the lint
+holds for everything new outside them. `native::topo` (the data model) turns the lint back on
+for itself and is fully documented; the other `native` modules can do the same one at a time. Steps 1–3 change `native/mod.rs` and the tests, which
+belong to other workstreams.
 
 ## Persistent naming
 Every operation returns a `History` (what was generated or modified from which input face, edge
