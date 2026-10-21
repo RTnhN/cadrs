@@ -217,9 +217,7 @@ boolean bopfuse_complex_g9
 boolean bopfuse_complex_h4
 boolean bopfuse_complex_j6
 boolean bopfuse_complex_k8
-boolean bopfuse_complex_k9
 boolean bopfuse_complex_l1
-boolean bopfuse_complex_l9
 boolean bopfuse_complex_m1
 boolean bopfuse_complex_m5
 boolean bopfuse_complex_m6

@@ -18,7 +18,168 @@ fn line2(o: P2, d: V2) -> Curve {
 /// near `near` (in the face's chart) when given.
 pub fn pcurve(s: &Surface, c: &Curve, t0: f64, t1: f64, near: Option<P2>) -> Curve {
     let pc = exact(s, c, t0, t1).or_else(|| iso_line(s, c, t0, t1)).unwrap_or_else(|| fitted(s, c, t0, t1));
+    let pc = into_closed_range(s, pc, t0, t1, near);
     shift_into(s, pc, (t0 + t1) * 0.5, near)
+}
+
+/// The periods of a surface's closed directions (u, v): `TAU` where it is periodic, the
+/// parameter range where a B-spline surface closes on itself without being periodic (a
+/// revolved or skinned surface whose ends meet: its seam is the range's two ends).
+pub fn closed_periods(s: &Surface) -> [Option<f64>; 2] {
+    let Surface::Nurbs(n) = s else {
+        return [s.u_periodic().then_some(TAU), s.v_periodic().then_some(TAU)];
+    };
+    let ((u0, u1), (v0, v1)) = n.range();
+    let meets = |a: &dyn Fn(f64) -> (P3, P3)| {
+        (0..5).all(|i| {
+            let (p, q) = a(0.1 + 0.2 * i as f64);
+            (p - q).norm() <= 1e-9 * (1.0 + p.coords.norm())
+        })
+    };
+    let uc = meets(&|f| (s.eval(u0, v0 + (v1 - v0) * f), s.eval(u1, v0 + (v1 - v0) * f)));
+    let vc = meets(&|f| (s.eval(u0 + (u1 - u0) * f, v0), s.eval(u0 + (u1 - u0) * f, v1)));
+    [uc.then_some(u1 - u0), vc.then_some(v1 - v0)]
+}
+
+/// The (u, v) on `s` of the point `p` of a curve being followed, from the previous point's
+/// (`hint`): continuous with it across the seams of the closed directions (`periods`, as
+/// [`closed_periods`] gives them). A hinted projection that doesn't reach the point (held
+/// at the end of a closed B-spline's range while the curve goes on across its seam, or in
+/// another local minimum) is redone from the whole surface.
+pub fn project_along(s: &Surface, p: &P3, hint: Option<(f64, f64)>, periods: [Option<f64>; 2]) -> P2 {
+    let (u, v) = s.project(p, hint);
+    let mut q = P2::new(u, v);
+    let near_enough = 1e-7 * (1.0 + p.coords.norm());
+    if hint.is_some() && (s.eval(q.x, q.y) - p).norm() > near_enough {
+        let (u2, v2) = s.project(p, None);
+        if (s.eval(u2, v2) - p).norm() < (s.eval(q.x, q.y) - p).norm() * 0.5 {
+            q = P2::new(u2, v2);
+        }
+    }
+    if (s.eval(q.x, q.y) - p).norm() > near_enough
+        && let Some(r) = beyond_range(s, p, q)
+    {
+        q = r;
+    }
+    if let Some(h) = hint {
+        // At a pole (a cone's apex, the end of a B-spline surface's collapsed row) one
+        // coordinate is free: it continues the curve's.
+        let (fu, fv) = free_at(s, q);
+        if fu {
+            q.x = h.0;
+        }
+        if fv {
+            q.y = h.1;
+        }
+        if let Some(pu) = periods[0] {
+            q.x = unwrap_near(q.x, h.0, pu);
+        }
+        if let Some(pv) = periods[1] {
+            q.y = unwrap_near(q.y, h.1, pv);
+        }
+    }
+    q
+}
+
+/// A B-spline surface's projection held at the end of its range while the point lies on the
+/// surface's continuation past it (an intersection curve traced on the surface extended, as a
+/// blend's tool surface is): Newton from there without the range's bounds, if it reaches the
+/// point within a fifth of the range beyond.
+fn beyond_range(s: &Surface, p: &P3, q: P2) -> Option<P2> {
+    let Surface::Nurbs(n) = s else { return None };
+    let ((u0, u1), (v0, v1)) = n.range();
+    let at_end = |x: f64, a: f64, b: f64| (x - a).abs() <= (b - a) * 1e-9 || (x - b).abs() <= (b - a) * 1e-9;
+    if !at_end(q.x, u0, u1) && !at_end(q.y, v0, v1) {
+        return None;
+    }
+    let (mut u, mut v) = (q.x, q.y);
+    for _ in 0..50 {
+        let d = s.d2(u, v);
+        let r = d[0] - p.coords;
+        let (fu, fv) = (r.dot(&d[1]), r.dot(&d[2]));
+        let a = d[1].norm_squared() + r.dot(&d[3]);
+        let b = d[1].dot(&d[2]) + r.dot(&d[4]);
+        let c = d[2].norm_squared() + r.dot(&d[5]);
+        let det = a * c - b * b;
+        if det.abs() <= 1e-300 {
+            return None;
+        }
+        let (du, dv) = ((-fu * c + fv * b) / det, (-fv * a + fu * b) / det);
+        u += du;
+        v += dv;
+        if du.abs() + dv.abs() < 1e-15 * (1.0 + u.abs() + v.abs()) {
+            break;
+        }
+    }
+    let (eu, ev) = ((u1 - u0) * 0.2, (v1 - v0) * 0.2);
+    let ok = u.is_finite() && v.is_finite() && u > u0 - eu && u < u1 + eu && v > v0 - ev && v < v1 + ev;
+    // It must reach the point (the extension merely passing nearer isn't the surface).
+    (ok && (s.eval(u, v) - p).norm() <= 1e-6 * (1.0 + p.coords.norm())).then_some(P2::new(u, v))
+}
+
+/// Whether u (first) and v (second) are free at `q`: the surface doesn't move along them
+/// there (a pole).
+fn free_at(s: &Surface, q: P2) -> (bool, bool) {
+    let (_, su, sv) = s.d1(q.x, q.y);
+    let scale = 1e-9 * (su.norm() + sv.norm()).max(1e-300);
+    (su.norm() <= scale, sv.norm() <= scale)
+}
+
+/// Samples of a p-curve along a curve: the first ones, projected with nothing to continue,
+/// at a pole take the free coordinate from the first sample that isn't at one.
+fn settle_poles(s: &Surface, uvs: &mut [P2]) {
+    let free: Vec<(bool, bool)> = uvs.iter().map(|q| free_at(s, *q)).collect();
+    if let Some(k) = free.iter().position(|f| !f.0 && !f.1) {
+        for i in (0..k).rev() {
+            if free[i].0 {
+                uvs[i].x = uvs[i + 1].x;
+            }
+            if free[i].1 {
+                uvs[i].y = uvs[i + 1].y;
+            }
+        }
+    }
+}
+
+/// A p-curve on a B-spline surface closed in a direction but not periodic, moved by whole
+/// ranges so it lies in the surface's range (its evaluation doesn't wrap: a p-curve followed
+/// continuously across the seam must be brought back). One lying along the seam fits both
+/// ways: the copy nearest `near`. Other surfaces as they are.
+fn into_closed_range(s: &Surface, pc: Curve, t0: f64, t1: f64, near: Option<P2>) -> Curve {
+    let Surface::Nurbs(n) = s else { return pc };
+    let periods = closed_periods(s);
+    if periods == [None, None] {
+        return pc;
+    }
+    let ((u0, u1), (v0, v1)) = n.range();
+    let pts: Vec<P2> = (0..=16).map(|i| pc.point(t0 + (t1 - t0) * i as f64 / 16.0)).map(|q| P2::new(q.x, q.y)).collect();
+    // The shift (in whole periods) putting [lo, hi] most inside [a, b].
+    let best = |lo: f64, hi: f64, a: f64, b: f64, per: f64, at: Option<f64>| -> f64 {
+        let eps = (b - a) * 1e-9;
+        let mut cands: Vec<(f64, f64, f64)> = Vec::new();
+        for k in -2i32..=2 {
+            let d = k as f64 * per;
+            let out = (a - (lo + d)).max(0.0) + ((hi + d) - b).max(0.0);
+            let off = at.map_or(k.abs() as f64, |m| (m - ((lo + hi) * 0.5 + d)).abs());
+            cands.push((if out <= eps { 0.0 } else { out }, off, d));
+        }
+        cands.sort_by(|x, y| x.0.total_cmp(&y.0).then(x.1.total_cmp(&y.1)));
+        cands[0].2
+    };
+    let mut du = 0.0;
+    let mut dv = 0.0;
+    if let Some(pu) = periods[0] {
+        let (lo, hi) = pts.iter().fold((f64::INFINITY, f64::NEG_INFINITY), |(a, b), q| (a.min(q.x), b.max(q.x)));
+        du = best(lo, hi, u0, u1, pu, near.map(|q| q.x));
+    }
+    if let Some(pv) = periods[1] {
+        let (lo, hi) = pts.iter().fold((f64::INFINITY, f64::NEG_INFINITY), |(a, b), q| (a.min(q.y), b.max(q.y)));
+        dv = best(lo, hi, v0, v1, pv, near.map(|q| q.y));
+    }
+    if du == 0.0 && dv == 0.0 {
+        return pc;
+    }
+    pc.transformed(&Affine::translation(V3::new(du, dv, 0.0)))
 }
 
 /// Shifts a p-curve by whole periods so its point at `tm` lies nearest `near`.
@@ -216,16 +377,19 @@ fn iso_line(s: &Surface, c: &Curve, t0: f64, t1: f64) -> Option<Curve> {
     let n = 8;
     let mut uv: Vec<P2> = Vec::with_capacity(n + 1);
     let mut hint: Option<(f64, f64)> = None;
+    let periods = closed_periods(s);
     for i in 0..=n {
         let t = t0 + (t1 - t0) * i as f64 / n as f64;
         let p = c.point(t);
-        let (u, v) = s.project(&p, hint);
+        let q = project_along(s, &p, hint, periods);
+        let (u, v) = (q.x, q.y);
         if (s.eval(u, v) - p).norm() > 1e-9 {
             return None;
         }
         hint = Some((u, v));
         uv.push(P2::new(u, v));
     }
+    settle_poles(s, &mut uv);
     let (a, b) = (uv[0], uv[n]);
     let d = (b - a) / (t1 - t0);
     let line = Curve::Line { o: P3::new(a.x - d.x * t0, a.y - d.y * t0, 0.0), d: V3::new(d.x, d.y, 0.0) };
@@ -265,10 +429,10 @@ fn fitted(s: &Surface, c: &Curve, t0: f64, t1: f64) -> Curve {
     }
     ts.push(t1);
     let mut uvs: Vec<P2> = Vec::new();
-    let project = |t: f64, hint: Option<(f64, f64)>| -> P2 {
-        let (u, v) = s.project(&c.point(t), hint);
-        P2::new(u, v)
-    };
+    // Followed continuously across the surface's seams (brought back into a closed
+    // B-spline's range after: `into_closed_range`).
+    let periods = closed_periods(s);
+    let project = |t: f64, hint: Option<(f64, f64)>| -> P2 { project_along(s, &c.point(t), hint, periods) };
     let fit_at = |ts: &[f64]| -> (NurbsCurve, Vec<P2>) {
         let mut uvs = Vec::with_capacity(ts.len());
         let mut hint: Option<(f64, f64)> = None;
@@ -277,6 +441,7 @@ fn fitted(s: &Surface, c: &Curve, t0: f64, t1: f64) -> Curve {
             hint = Some((q.x, q.y));
             uvs.push(q);
         }
+        settle_poles(s, &mut uvs);
         let pts: Vec<P3> = uvs.iter().map(|q| P3::new(q.x, q.y, 0.0)).collect();
         (NurbsCurve::interpolate(&pts, ts, 3.min(pts.len() - 1), None, None), uvs)
     };
@@ -320,6 +485,58 @@ mod tests {
             let q = pc.point(t);
             let p = s.eval(q.x, q.y);
             assert!((p - c.point(t)).norm() < 1e-8, "{s:?} {c:?} at {t}: {}", (p - c.point(t)).norm());
+        }
+    }
+
+    /// On a B-spline cylinder closed in u (not periodic): an arc ending on the seam ends at the
+    /// range's end it comes to, one starting there starts at the other, both in the range
+    /// (regression: the seam end's projection took either end, the fit jumping a whole range).
+    #[test]
+    fn closed_bspline_seam_ends() {
+        let f = Frame::from_z(P3::new(1.0, 2.0, 3.0), V3::new(0.0, 0.0, 1.0));
+        let s = Surface::Nurbs(Arc::new(Surface::Cylinder { f, r: 5.0 }.to_nurbs((0.0, TAU), (0.0, 10.0))));
+        let periods = closed_periods(&s);
+        assert!(periods[0].is_some_and(|p| (p - TAU).abs() < 1e-9) && periods[1].is_none(), "{periods:?}");
+        let ((u0, u1), _) = s.param_box();
+        let arc = Curve::Circle { c: f.o + f.z * 3.0, x: f.x, y: f.y, r: 5.0 };
+        for (t0, t1, start, end) in [(PI, TAU, None, Some(u1)), (0.0, PI, Some(u0), None), (0.5, TAU, None, Some(u1))] {
+            check(&s, &arc, t0, t1);
+            let pc = pcurve(&s, &arc, t0, t1, None);
+            for i in 0..=20 {
+                let q = pc.point(t0 + (t1 - t0) * i as f64 / 20.0);
+                assert!(q.x >= u0 - 1e-9 && q.x <= u1 + 1e-9, "{t0}..{t1}: u {} out of the range", q.x);
+            }
+            if let Some(u) = start {
+                assert!((pc.point(t0).x - u).abs() < 1e-7, "{t0}..{t1}: starts at {}", pc.point(t0).x);
+            }
+            if let Some(u) = end {
+                assert!((pc.point(t1).x - u).abs() < 1e-7, "{t0}..{t1}: ends at {}", pc.point(t1).x);
+            }
+        }
+        // Clockwise from the seam: it starts at the range's end and runs back into it.
+        let cw = Curve::Circle { c: f.o + f.z * 3.0, x: f.x, y: -f.y, r: 5.0 };
+        check(&s, &cw, 0.0, PI);
+        let pc = pcurve(&s, &cw, 0.0, PI, None);
+        assert!((pc.point(0.0).x - u1).abs() < 1e-7 && (pc.point(PI).x - PI).abs() < 1e-6, "{:?} .. {:?}", pc.point(0.0), pc.point(PI));
+    }
+
+    /// A ruling of a B-spline cone up to its apex keeps one u to the end (regression: the apex,
+    /// where u is free, took an arbitrary one and bent the p-curve).
+    #[test]
+    fn ruling_to_a_pole() {
+        let f = Frame::from_z(P3::origin(), V3::new(0.0, 0.0, 1.0));
+        let a = -(0.5f64).atan();
+        let cone = Surface::Cone { f, r: 5.0, a };
+        let apex_v = -5.0 / a.sin();
+        let s = Surface::Nurbs(Arc::new(cone.to_nurbs((0.0, TAU), (0.0, apex_v))));
+        let (base, apex) = (cone.eval(1.0, 0.0), cone.eval(1.0, apex_v));
+        let (line, len) = Curve::line(base, apex);
+        let pc = pcurve(&s, &line, 0.0, len, None);
+        let u = pc.point(0.0).x;
+        for i in 0..=20 {
+            let q = pc.point(len * i as f64 / 20.0);
+            assert!((q.x - u).abs() < 1e-6, "u {} at {i}/20, {} at the base", q.x, u);
+            assert!((s.eval(q.x, q.y) - line.point(len * i as f64 / 20.0)).norm() < 1e-8);
         }
     }
 
