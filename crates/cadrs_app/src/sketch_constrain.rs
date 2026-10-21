@@ -542,7 +542,7 @@ pub(crate) fn sketch_mut(world: &mut World) -> Option<&mut Sketch> {
 
 /// Moves the live sketch toward a drag target (no undo step: the drag is recorded on release).
 /// Each frame solves from `base` (the sketch when the drag began), so dragging out and back
-/// returns to the start, and inside-out solutions are refused (see [`solve::drag_from`]).
+/// returns to the start; a shape may turn inside out on the way (see [`solve::drag_from`]).
 pub fn drag_live(world: &mut World, base: &Sketch, target: Drag, skip: HashSet<Source>) {
     if let Some(sketch) = sketch_mut(world) {
         solve::drag_from(base, sketch, &target, &skip);

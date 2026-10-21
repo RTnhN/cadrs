@@ -436,7 +436,7 @@ fn dragging_a_corner_moves_as_little_as_possible() {
 
 /// M8 regression (perf_500/02): dragging a rectangle's corner out past the opposite side and
 /// back must not leave the rectangle flipped or stretched. Each frame solves from the sketch as
-/// it was when the drag began, and solutions that turn a corner inside out are refused.
+/// it was when the drag began, so the result depends only on where the cursor is.
 #[test]
 fn dragging_out_and_back_restores_the_rectangle() {
     let mut s = Sketch::new();
@@ -457,7 +457,6 @@ fn dragging_out_and_back_restores_the_rectangle() {
         .collect();
     for target in &path {
         drag_from(&base, &mut live, &Drag::Points(vec![(p[2], *target)]), &skip);
-        assert!(!flips_corner(&base, &live), "flipped at {target:?}");
     }
     for (i, q) in p.iter().enumerate() {
         assert!(
@@ -472,6 +471,48 @@ fn dragging_out_and_back_restores_the_rectangle() {
     assert!(drag_from(&base, &mut live, &Drag::Points(vec![(p[2], v(150.0, 120.0))]), &skip));
     assert!(live.pos(p[2]).distance(v(150.0, 120.0)) < 1e-8);
     assert!(live.pos(p[0]).distance(v(120.0, 100.0)) < 1e-8);
+}
+
+/// #38: a drag is not stopped where a segment's length would pass through zero. Pulling a
+/// rectangle's corner past the opposite corner turns the rectangle inside out (its width and
+/// height change sign), still a rectangle, with the corner at the cursor.
+#[test]
+fn dragging_a_corner_past_the_opposite_corner_flips_the_rectangle() {
+    let mut s = Sketch::new();
+    let ([bottom, right, top, left], p) = rect(&mut s, v(120.0, 100.0), v(134.0, 110.0));
+    let base = s.clone();
+    let skip = HashSet::new();
+    // Frame by frame, as the pointer moves: through the opposite side and on past the corner.
+    let mut live = base.clone();
+    for i in 0..=30 {
+        let t = i as f64 / 30.0;
+        let target = v(134.0 - 26.0 * t, 110.0 - 20.0 * t);
+        drag_from(&base, &mut live, &Drag::Points(vec![(p[2], target)]), &skip);
+    }
+    let target = v(108.0, 90.0);
+    assert!(live.pos(p[2]).distance(target) < 1e-6, "{:?}", live.pos(p[2]));
+    assert!(live.pos(p[0]).distance(v(120.0, 100.0)) < 1e-6, "{:?}", live.pos(p[0]));
+    assert!(live.pos(p[1]).distance(v(108.0, 100.0)) < 1e-6, "{:?}", live.pos(p[1]));
+    assert!(live.pos(p[3]).distance(v(120.0, 90.0)) < 1e-6, "{:?}", live.pos(p[3]));
+    for l in [bottom, top] {
+        let (a, b) = live.curve_ends(l).unwrap();
+        assert!((live.pos(a).y - live.pos(b).y).abs() < 1e-9);
+    }
+    for l in [left, right] {
+        let (a, b) = live.curve_ends(l).unwrap();
+        assert!((live.pos(a).x - live.pos(b).x).abs() < 1e-9);
+    }
+    // The same target in one jump, straight from the start.
+    let mut live = base.clone();
+    assert!(drag_from(&base, &mut live, &Drag::Points(vec![(p[2], target)]), &skip));
+    assert!(live.pos(p[2]).distance(target) < 1e-6, "{:?}", live.pos(p[2]));
+    assert!(live.pos(p[1]).distance(v(108.0, 100.0)) < 1e-6, "{:?}", live.pos(p[1]));
+    assert!(live.pos(p[3]).distance(v(120.0, 90.0)) < 1e-6, "{:?}", live.pos(p[3]));
+    // Across one side only: the width changes sign, the height stays.
+    let mut live = base.clone();
+    assert!(drag_from(&base, &mut live, &Drag::Points(vec![(p[2], v(110.0, 112.0))]), &skip));
+    assert!(live.pos(p[1]).distance(v(110.0, 100.0)) < 1e-6, "{:?}", live.pos(p[1]));
+    assert!(live.pos(p[3]).distance(v(120.0, 112.0)) < 1e-6, "{:?}", live.pos(p[3]));
 }
 
 #[test]
