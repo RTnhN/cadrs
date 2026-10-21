@@ -122,6 +122,11 @@ pub fn unify_faces(b: &mut Body, from: Vec<Vec<(usize, usize)>>, can_merge: &dyn
             continue;
         }
         let (a, c) = (&b.faces[f], &b.faces[g]);
+        // B-splines and extrusions aren't merged (their coincidence is a sampled test, over
+        // part of their extents; the merged face would take the first's parametrization).
+        if [&a.surf, &c.surf].iter().any(|s| matches!(s, Surface::Nurbs(_) | Surface::Extrusion { .. })) {
+            continue;
+        }
         if let Some(same) = a.surf.same_domain(&c.surf, 1e-6)
             && same == (a.sense == c.sense) {
                 dsu.join(f, g);

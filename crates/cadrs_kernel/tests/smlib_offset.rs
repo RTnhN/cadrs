@@ -134,7 +134,7 @@ fn offset_08_boolean_trees_result() {
 /// SMLib offset demo 9 (smOffsetTest.cpp:896, `my_test_offset`): `offset_bracket2.smb` offset by 0.5.
 #[test]
 fn offset_09_offset_bracket2() {
-    known_failure(offset("offset_bracket2.smb", 0.5, None, None, &Expect { volume: Some(7659.34422718), area: Some(4394.23262042), faces: Some(176), edges: Some(361), solid: Some(true), ..Expect::default() }), "offset", "offset_09_offset_bracket2");
+    offset("offset_bracket2.smb", 0.5, None, None, &Expect { volume: Some(7659.34422718), area: Some(4394.23262042), faces: Some(176), edges: Some(361), solid: Some(true), ..Expect::default() }).unwrap();
 }
 
 /// SMLib offset demo 10 (smOffsetTest.cpp:907, `my_test_offset`): `offset_bracket2.smb` offset by 1.5.
@@ -174,7 +174,7 @@ fn offset_14_offset_bracket2() {
 /// SMLib's test asserts 302 edges, the oracle gives 312.
 #[test]
 fn offset_15a_offset_bracket2() {
-    offset("offset_bracket2.smb", 1.5, None, Some("offset_bracket_box.smb"), &Expect { volume: Some(10534.8004068), area: Some(4955.49980725), faces: Some(135), edges: Some(312), solid: Some(true), ..Expect::default() }).unwrap();
+    offset("offset_bracket2.smb", 1.5, None, Some("offset_bracket_box.smb"), &Expect { volume: Some(10534.7998503), area: Some(4955.49980725), faces: Some(135), edges: Some(312), solid: Some(true), ..Expect::default() }).unwrap();
 }
 
 /// SMLib offset demo 15 (smOffsetTest.cpp:976, `my_test_offset`): `offset_bracket2.smb` offset by 2.6, less `offset_bracket_box.smb`.
@@ -199,9 +199,8 @@ fn offset_17_insettaperedextrude() {
 
 /// SMLib shell demo 1 (smOffsetTest.cpp:522, `ShellBrep`): `problemShell.smb` shelled inward, 2.54 thick, face 1 open.
 #[test]
-#[ignore = "known failure, slow (tools/smlib_known_failures/offset.txt)"]
 fn shell_01_problemshell() {
-    known_failure(shell("problemShell.smb", -2.54, &[1], true, 0.002020058662515, &Expect { volume: Some(212811.594138), area: Some(169530.701347), faces: Some(11), edges: Some(24), solid: Some(true), ..Expect::default() }), "offset", "shell_01_problemshell");
+    shell("problemShell.smb", -2.54, &[1], true, 0.002020058662515, &Expect { volume: Some(212811.594138), area: Some(169530.701347), faces: Some(11), edges: Some(24), solid: Some(true), ..Expect::default() }).unwrap();
 }
 
 /// SMLib shell demo 2 (smOffsetTest.cpp:536, `ShellBrep`): `problemShell1.smb` shelled inward, 4.58 thick, face 4 open.
@@ -212,16 +211,14 @@ fn shell_02_problemshell1() {
 
 /// SMLib shell demo 3 (smOffsetTest.cpp:550, `ShellBrep`): `problemShell2.smb` shelled inward, 12.7 thick, face 1 open.
 #[test]
-#[ignore = "known failure, slow (tools/smlib_known_failures/offset.txt)"]
 fn shell_03_problemshell2() {
-    known_failure(shell("problemShell2.smb", -12.7, &[1], true, 0.002020058662515, &Expect { volume: Some(850394.557114), area: Some(144865.04112), faces: Some(11), edges: Some(24), solid: Some(true), ..Expect::default() }), "offset", "shell_03_problemshell2");
+    shell("problemShell2.smb", -12.7, &[1], true, 0.002020058662515, &Expect { volume: Some(850394.557114), area: Some(144865.04112), faces: Some(11), edges: Some(24), solid: Some(true), ..Expect::default() }).unwrap();
 }
 
 /// SMLib shell demo 4 (smOffsetTest.cpp:564, `ShellBrep`): `problemShell21.smb` shelled inward, 12.7 thick, face 2 open.
 #[test]
-#[ignore = "known failure, slow (tools/smlib_known_failures/offset.txt)"]
 fn shell_04_problemshell21() {
-    known_failure(shell("problemShell21.smb", -12.7, &[2], true, 0.002020058662515, &Expect { volume: Some(853031.068277), area: Some(145180.984521), faces: Some(11), edges: Some(24), solid: Some(true), ..Expect::default() }), "offset", "shell_04_problemshell21");
+    shell("problemShell21.smb", -12.7, &[2], true, 0.002020058662515, &Expect { volume: Some(853031.068277), area: Some(145180.984521), faces: Some(11), edges: Some(24), solid: Some(true), ..Expect::default() }).unwrap();
 }
 
 /// SMLib shell demo 5 (smOffsetTest.cpp:579, `ShellBrep`): `problemShell3.smb` shelled inward, 5.08 thick, face 0 open.

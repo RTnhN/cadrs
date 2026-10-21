@@ -121,7 +121,6 @@ boolean bcut_complex_h4
 boolean bcut_complex_i2
 boolean bcut_complex_k4
 boolean bcut_complex_l4
-boolean bcut_complex_n6
 boolean bcut_complex_o5
 boolean bcut_complex_p7
 boolean bfuse_2d_a7
@@ -435,7 +434,6 @@ offset shape_type_i_e3
 offset shape_type_i_e4
 offset shape_type_i_g2
 offset shape_type_i_g4
-boolean bcut_complex_q9
 offset faces_type_i_k6
 boolean gdml_public_b2
 boolean bcut_complex_e6
@@ -461,17 +459,9 @@ boolean bsection_f6
 boolean bsection_f9
 boolean bsection_i2
 boolean bsection_i3
-boolean bsection_j6
-boolean bsection_j7
-boolean bsection_j8
-boolean bsection_j9
-boolean bsection_k5
-boolean bsection_l7
 boolean bsection_m2
 boolean bsection_n8
-boolean bsection_o1
 boolean bsection_p1
-boolean bsection_p4
 boolean bsection_r9
 draft angle_b3
 draft angle_d6

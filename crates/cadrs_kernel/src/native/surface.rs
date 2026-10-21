@@ -688,9 +688,142 @@ impl Surface {
                 let ((ua, va), (ub, vb)) = (self.project(&p, None), o.project(&p, None));
                 Some(self.normal(ua, va).dot(&o.normal(ub, vb)) > 0.0)
             }
-            _ => None,
+            _ => sampled_same_domain(self, o, tol),
         }
     }
+}
+
+/// Whether a surface is compared by samples (B-splines and extrusions: no closed form says
+/// when two are one point set).
+fn sampled_kind(s: &Surface) -> bool {
+    matches!(s, Surface::Nurbs(_) | Surface::Extrusion { .. })
+}
+
+/// Parameters of a curve to sample a sweep of it at: its range, a whole turn, or a stretch of
+/// a line.
+fn curve_samples(c: &Curve, n: usize) -> Vec<f64> {
+    let (t0, t1) = match (c.nurbs_range(), c) {
+        (Some(r), _) => r,
+        (None, Curve::Line { d, .. }) => (-10.0 / d.norm().max(1e-300), 10.0 / d.norm().max(1e-300)),
+        _ => (0.0, TAU),
+    };
+    (0..=n).map(|i| t0 + (t1 - t0) * i as f64 / n as f64).collect()
+}
+
+/// Points of a B-spline or an extrusion to test against another surface, by rows (each row a
+/// curve of the surface, so a projection can follow it): a B-spline over its range; an
+/// extrusion along its base curve at three heights.
+fn coincidence_rows(s: &Surface) -> Vec<Vec<(f64, f64)>> {
+    match s {
+        Surface::Nurbs(n) => {
+            let ((u0, u1), (v0, v1)) = n.range();
+            let k = 8;
+            (0..=k)
+                .map(|i| {
+                    let v = v0 + (v1 - v0) * i as f64 / k as f64;
+                    (0..=k).map(|j| (u0 + (u1 - u0) * j as f64 / k as f64, v)).collect()
+                })
+                .collect()
+        }
+        Surface::Extrusion { c, d } => {
+            let ts = curve_samples(c, 12);
+            let size = {
+                let mut bb = Bbox::empty();
+                for &t in &ts {
+                    bb.add(&c.point(t));
+                }
+                bb.diagonal().max(1.0)
+            };
+            let h = size / d.norm().max(1e-300);
+            [-h, 0.0, h].iter().map(|&v| ts.iter().map(|&u| (u, v)).collect()).collect()
+        }
+        _ => Vec::new(),
+    }
+}
+
+/// How the points of `a` (its [`coincidence_rows`]) lie on `b`: how many are on it (within
+/// `tol`), and whether one is off it where `b` is (not merely beyond the edge of `b`'s
+/// parameter range, where `b` stops: surfaces that coincide over part of each). Each
+/// projection starts from the row's previous one; points beyond `b`'s box are passed over.
+/// None as soon as a point is off; otherwise the count and a point that is on (for the
+/// orientation).
+fn points_on(a: &Surface, b: &Surface, tol: f64) -> Option<(usize, Option<P3>)> {
+    let range = match b {
+        Surface::Nurbs(n) => Some(n.range()),
+        Surface::Extrusion { c, .. } => c.nurbs_range().map(|r| (r, (f64::NEG_INFINITY, f64::INFINITY))),
+        _ => None,
+    };
+    let bbox = range.map(|((u0, u1), (v0, v1))| {
+        let v = if v0.is_finite() { (v0, v1) } else { (-1e4, 1e4) };
+        b.patch_bbox((u0, u1), v).grow(tol)
+    });
+    let at_edge = |x: f64, lo: f64, hi: f64| lo.is_finite() && ((x - lo).abs() <= (hi - lo).abs() * 1e-9 || (x - hi).abs() <= (hi - lo).abs() * 1e-9);
+    let mut on = 0;
+    let mut first: Option<P3> = None;
+    for row in coincidence_rows(a) {
+        let mut hint: Option<(f64, f64)> = None;
+        for (u, v) in row {
+            let p = a.eval(u, v);
+            if bbox.as_ref().is_some_and(|bb| !bb.contains(&p)) {
+                hint = None;
+                continue;
+            }
+            let q = b.project(&p, hint);
+            let q = if (b.eval(q.0, q.1) - p).norm() > tol && hint.is_some() { b.project(&p, None) } else { q };
+            hint = Some(q);
+            if (b.eval(q.0, q.1) - p).norm() <= tol {
+                on += 1;
+                first.get_or_insert(p);
+                continue;
+            }
+            let beyond = range.is_some_and(|((u0, u1), (v0, v1))| at_edge(q.0, u0, u1) || at_edge(q.1, v0, v1));
+            if !beyond {
+                return None;
+            }
+        }
+    }
+    Some((on, first))
+}
+
+/// [`Surface::same_domain`] for B-splines and extrusions, with each other or with the closed-form
+/// surfaces: the same point set where both are, tested on samples (robust to the surfaces'
+/// parametrizations and to their covering different extents: a slab's wall over part of the
+/// body's). Every sample of either lying where the other is must be on it, within `tol`, and
+/// enough must be (a few, from one side at least). Extrusions must also run the same way. A
+/// closed-form surface goes on indefinitely (or closes), so only the other's samples are tested
+/// on it. The orientation is the normals' at a common point.
+fn sampled_same_domain(a: &Surface, b: &Surface, tol: f64) -> Option<bool> {
+    if !sampled_kind(a) && !sampled_kind(b) {
+        return None;
+    }
+    if let (Surface::Extrusion { d: da, .. }, Surface::Extrusion { d: db, .. }) = (a, b)
+        && da.normalize().cross(&db.normalize()).norm() > 1e-9
+    {
+        return None;
+    }
+    let mut common: Option<P3> = None;
+    let mut count = 0;
+    for (x, y) in [(a, b), (b, a)] {
+        if !sampled_kind(x) {
+            continue;
+        }
+        let (n, p) = points_on(x, y, tol)?;
+        count = count.max(n);
+        if common.is_none() {
+            common = p;
+        }
+    }
+    if count < 3 {
+        return None;
+    }
+    let p = common?;
+    let ((ua, va), (ub, vb)) = (a.project(&p, None), b.project(&p, None));
+    let (na, nb) = (a.normal(ua, va), b.normal(ub, vb));
+    let d = na.dot(&nb);
+    if d.abs() < 0.5 {
+        return None;
+    }
+    Some(d > 0.0)
 }
 
 /// Whether a surface of revolution's meridian leaves its frame's xz plane (a curve skew to the
@@ -808,6 +941,36 @@ fn project_off_plane(f: &Frame, m: &Curve, p: &P3, hint: Option<(f64, f64)>) -> 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Coincidence of B-spline and extrusion surfaces, sampled: an extrusion of a spline and the
+    /// same spline extruded twice as far; a B-spline cylinder patch and the cylinder; two patches
+    /// of one cylinder over different, overlapping ranges (and parametrizations). Surfaces only
+    /// near each other, or crossing, aren't.
+    #[test]
+    fn sampled_same_domain() {
+        let pts: Vec<P3> = [(0.0, 0.0), (1.0, 2.0), (3.0, 2.5), (5.0, 1.0)].iter().map(|&(x, y)| P3::new(x, y, 0.0)).collect();
+        let c = Curve::Nurbs(Arc::new(NurbsCurve::interpolate(&pts, &[0.0, 1.0, 2.0, 3.0], 3, None, None)));
+        let e1 = Surface::Extrusion { c: c.clone(), d: V3::new(0.0, 0.0, 1.0) };
+        let e2 = Surface::Extrusion { c: c.clone(), d: V3::new(0.0, 0.0, 2.0) };
+        assert_eq!(e1.same_domain(&e2, 1e-7), Some(true));
+        let off = Surface::Extrusion { c: c.transformed(&Affine::translation(V3::new(0.0, 0.01, 0.0))), d: V3::new(0.0, 0.0, 1.0) };
+        assert_eq!(e1.same_domain(&off, 1e-7), None);
+        let tilted = Surface::Extrusion { c, d: V3::new(0.0, 0.3, 1.0) };
+        assert_eq!(e1.same_domain(&tilted, 1e-7), None);
+        let f = Frame::from_z(P3::new(1.0, 2.0, 3.0), V3::new(0.0, 0.0, 1.0));
+        let cyl = Surface::Cylinder { f, r: 4.0 };
+        let patch = Surface::Nurbs(Arc::new(cyl.to_nurbs((0.0, PI), (0.0, 5.0))));
+        assert_eq!(patch.same_domain(&cyl, 1e-7), Some(true));
+        assert_eq!(cyl.same_domain(&patch, 1e-7), Some(true));
+        assert_eq!(patch.same_domain(&Surface::Cylinder { f, r: 4.01 }, 1e-7), None);
+        let other = Surface::Nurbs(Arc::new(cyl.to_nurbs((PI / 2.0, 1.5 * PI), (2.0, 8.0))));
+        assert_eq!(patch.same_domain(&other, 1e-7), Some(true));
+        let crossing = Surface::Nurbs(Arc::new(Surface::Cylinder { f: Frame::from_z(P3::new(4.0, 2.0, 3.0), V3::new(0.0, 0.0, 1.0)), r: 4.0 }.to_nurbs((0.0, TAU), (0.0, 5.0))));
+        assert_eq!(patch.same_domain(&crossing, 1e-7), None);
+        let plane = Surface::Plane { f };
+        let flat = Surface::Nurbs(Arc::new(plane.to_nurbs((-1.0, 1.0), (-1.0, 1.0))));
+        assert_eq!(flat.same_domain(&plane, 1e-7), Some(true));
+    }
 
     fn check_derivs(s: &Surface, u: f64, v: f64) {
         let h = 1e-6;

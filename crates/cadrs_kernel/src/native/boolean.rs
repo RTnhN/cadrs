@@ -453,7 +453,15 @@ fn edge_on_surface_tol(e: &WEdge, s: &Surface, tol: f64) -> bool {
 
 /// In-face test of a model point (projected onto the face's surface).
 fn point_in_face(f: &WFace, p: &P3, tol: f64) -> InFace {
-    let (u, v) = f.surf.project(p, Some((f.uv_center.x, f.uv_center.y)));
+    let (mut u, mut v) = f.surf.project(p, Some((f.uv_center.x, f.uv_center.y)));
+    // A projection from the face's middle can stop short on a B-spline or an extrusion (a
+    // local minimum, the end of the range): from the whole surface then.
+    if (f.surf.eval(u, v) - p).norm() > tol * 10.0 + 1e-9 && matches!(f.surf, Surface::Nurbs(_) | Surface::Extrusion { .. }) {
+        let (u2, v2) = f.surf.project(p, None);
+        if (f.surf.eval(u2, v2) - p).norm() < (f.surf.eval(u, v) - p).norm() {
+            (u, v) = (u2, v2);
+        }
+    }
     if (f.surf.eval(u, v) - p).norm() > tol * 10.0 + 1e-9 {
         return InFace::Outside;
     }
