@@ -106,6 +106,19 @@ pub fn split_edge(b: &mut Body, e: usize, t: f64) -> usize {
     v
 }
 
+/// Whether face `f`'s edges lie on surface `s` (a few points of each, within 1e-6 of their
+/// size), where `s` is: inside a B-spline's range, not on its extension.
+fn boundary_on(b: &Body, f: usize, s: &Surface) -> bool {
+    b.faces[f].loops.iter().flatten().all(|c| {
+        let e = &b.edges[c.edge];
+        (0..=4).all(|i| {
+            let p = e.point(e.t[0] + (e.t[1] - e.t[0]) * i as f64 / 4.0);
+            let (u, v) = s.project(&p, None);
+            (s.eval(u, v) - p).norm() <= 1e-6 * (1.0 + p.coords.norm())
+        })
+    })
+}
+
 /// Merges groups of faces; `can_merge(f, g)` says whether two faces may be merged (faces of
 /// different inputs). `from` (per face) is concatenated for merged faces, the group's first face
 /// first. Returns the new `from`.
@@ -122,15 +135,17 @@ pub fn unify_faces(b: &mut Body, from: Vec<Vec<(usize, usize)>>, can_merge: &dyn
             continue;
         }
         let (a, c) = (&b.faces[f], &b.faces[g]);
-        // B-splines and extrusions aren't merged (their coincidence is a sampled test, over
-        // part of their extents; the merged face would take the first's parametrization).
-        if [&a.surf, &c.surf].iter().any(|s| matches!(s, Surface::Nurbs(_) | Surface::Extrusion { .. })) {
-            continue;
+        // B-splines and extrusions: the merged face takes the first's surface and
+        // parametrization, so two different ones (coinciding by a sampled test, perhaps over
+        // part of their extents) merge only when each one's boundary lies on the other.
+        let sampled = |s: &Surface| matches!(s, Surface::Nurbs(_) | Surface::Extrusion { .. });
+        let same = if a.surf == c.surf { Some(true) } else { a.surf.same_domain(&c.surf, 1e-6) };
+        if let Some(same) = same
+            && same == (a.sense == c.sense)
+            && (!(sampled(&a.surf) || sampled(&c.surf)) || a.surf == c.surf || (boundary_on(b, f, &c.surf) && boundary_on(b, g, &a.surf)))
+        {
+            dsu.join(f, g);
         }
-        if let Some(same) = a.surf.same_domain(&c.surf, 1e-6)
-            && same == (a.sense == c.sense) {
-                dsu.join(f, g);
-            }
     }
     let mut groups: std::collections::BTreeMap<usize, Vec<usize>> = Default::default();
     for f in 0..nf {
@@ -962,4 +977,32 @@ pub fn cylindrize(b: &mut Body) -> bool {
         changed = true;
     }
     changed
+}
+
+#[cfg(test)]
+mod tests {
+    use super::super::kernel::NativeKernel;
+    use crate::*;
+    use nalgebra::Point2;
+
+    /// Two prisms of a profile with a Bézier side stacked one on the other and united: one
+    /// prism's faces (regression: the Bézier side stayed two faces, extrusions of one curve
+    /// shifted along their direction not being merged).
+    #[test]
+    fn stacked_spline_prisms_merge() {
+        let mut k = NativeKernel::new();
+        let p = |x: f64, y: f64| Point2::new(x, y);
+        let bez = Curve2::Bezier { poles: [p(0.0, 0.0), p(0.0, 10.0), p(20.0, 10.0), p(20.0, 0.0)], source: None };
+        let lp = Loop { curves: vec![Curve2::Line { a: p(20.0, 0.0), b: p(0.0, 0.0), source: None }, bez] };
+        let region = Region { outer: lp, holes: vec![], source: None };
+        let mut upper = Plane::top();
+        upper.origin.z = 5.0;
+        let a = k.extrude(&Profile::new(Plane::top(), vec![region.clone()]), Extent::Blind(5.0)).unwrap().bodies[0];
+        let b = k.extrude(&Profile::new(upper, vec![region]), Extent::Blind(5.0)).unwrap().bodies[0];
+        let u = k.boolean(BoolOp::Union, a, &[b]).unwrap().bodies[0];
+        let body = k.get(u).unwrap();
+        assert_eq!(body.check(), Vec::<String>::new());
+        assert_eq!(body.faces.len(), 4, "{:?}", body.faces.iter().map(|f| f.surf.kind()).collect::<Vec<_>>());
+        assert!((k.mass_properties(u).unwrap().volume - 1200.0).abs() < 1e-6);
+    }
 }

@@ -13,9 +13,9 @@ offset_14_offset_bracket2 slow
 offset_05_off_extrusion
 # Rounded offset 0.3 of boolean_trees_result: a face's slab isn't a solid.
 offset_08_boolean_trees_result
-# Rounded inset with a face kept: the body less the inward slab leaves an open shell. The
-# slab's extrusion walls are now found to lie on the body's, but the last subtract leaves a
-# body extrusion face unimprinted where the slab's coincident face covers part of it.
+# Rounded inset with a face kept: a valid solid with SMLib's face and edge counts (15, 39), but
+# 2.6e-3 under SMLib's volume (406.26 against 407.32; area 643.92 against 644.66): the inset's
+# geometry, not the boolean.
 offset_06_off_extrusion
 # Rounded inward shell: the sphere face's slab has a p-curve gap at the pole.
 offset_03_offsetboxsphoncorner

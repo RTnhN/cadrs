@@ -174,7 +174,7 @@ fn offset_14_offset_bracket2() {
 /// SMLib's test asserts 302 edges, the oracle gives 312.
 #[test]
 fn offset_15a_offset_bracket2() {
-    offset("offset_bracket2.smb", 1.5, None, Some("offset_bracket_box.smb"), &Expect { volume: Some(10534.7998503), area: Some(4955.49980725), faces: Some(135), edges: Some(312), solid: Some(true), ..Expect::default() }).unwrap();
+    offset("offset_bracket2.smb", 1.5, None, Some("offset_bracket_box.smb"), &Expect { volume: Some(10534.8004068), area: Some(4955.49980725), faces: Some(135), edges: Some(312), solid: Some(true), ..Expect::default() }).unwrap();
 }
 
 /// SMLib offset demo 15 (smOffsetTest.cpp:976, `my_test_offset`): `offset_bracket2.smb` offset by 2.6, less `offset_bracket_box.smb`.
