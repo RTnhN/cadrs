@@ -1350,6 +1350,38 @@ fn check_overflow(k: &NativeKernel, body: BodyId, edges: &[EdgeId], r: &OpResult
 pub fn chamfer(k: &mut NativeKernel, body: BodyId, edges: &[EdgeId], opts: &ChamferOpts) -> Result<OpResult> {
     let spec = opts.spec;
     let b = (**k.get(body)?).clone();
+    // Equal distances where the faces meet at a constant angle: by local trimming, as the
+    // ball whose contacts are that far along the faces, cut straight across.
+    if let (ChamferSpec::EqualDistance(d), ChamferMeasure::Offset) = (spec, opts.measurement)
+        && d > 0.0
+        && std::env::var_os("CADRS_NO_LOCAL_FILLET").is_none()
+    {
+        let laws: Option<Vec<super::fillet::RadiusLaw>> = edges
+            .iter()
+            .map(|e| super::fillet::chamfer_radius(&b, e.0 as usize, d).map(|r| (e.0 as usize, vec![(0.0, r), (1.0, r)])))
+            .collect();
+        if let Some(laws) = laws {
+            let local = super::fillet::fillet_edges_laws(&b, body, &laws, true).and_then(|(out, src)| {
+                let mut merged = out.clone();
+                super::unify::merge_edges(&mut merged);
+                match merged.check().first() {
+                    Some(e) => Err(KernelError::OperationFailed(format!("the local chamfer's merged edges don't close: {e}"))),
+                    None => Ok((out, src)),
+                }
+            });
+            match local {
+                Ok((out, src)) => return Ok(Tracked { body: out, src }.into_result(k, body)),
+                Err(e) => {
+                    if std::env::var_os("CADRS_LOCAL_FILLET_ONLY").is_some() {
+                        return Err(e);
+                    }
+                    if std::env::var_os("CADRS_BLEND_DEBUG").is_some() {
+                        eprintln!("local chamfer: {e}; falling back to the blend tool");
+                    }
+                }
+            }
+        }
+    }
     let mut list: Vec<EdgeBlend> = Vec::new();
     for &e in edges {
         let flip = opts.flip != opts.flipped.contains(&e);
@@ -1533,6 +1565,37 @@ pub fn fillet_partial(k: &mut NativeKernel, body: BodyId, edge: EdgeId, spec: &F
 /// through sections at the law's points (and past the edge's ends).
 pub fn fillet_variable(k: &mut NativeKernel, body: BodyId, laws: &[FilletLaw], _allow_overflow: bool) -> Result<OpResult> {
     let b = (**k.get(body)?).clone();
+    // By local trimming first (any edge and faces), then the tool for straight edges between
+    // flat faces.
+    if laws.iter().all(|l| (l.edge.0 as usize) < b.edges.len() && !l.radii.is_empty()) && std::env::var_os("CADRS_NO_LOCAL_FILLET").is_none() {
+        let edges: Vec<super::fillet::RadiusLaw> = laws
+            .iter()
+            .map(|l| {
+                let mut pts = l.radii.clone();
+                pts.sort_by(|a, c| a.0.total_cmp(&c.0));
+                (l.edge.0 as usize, pts)
+            })
+            .collect();
+        let local = super::fillet::fillet_edges_laws(&b, body, &edges, false).and_then(|(out, src)| {
+            let mut merged = out.clone();
+            super::unify::merge_edges(&mut merged);
+            match merged.check().first() {
+                Some(e) => Err(KernelError::OperationFailed(format!("the local fillet's merged edges don't close: {e}"))),
+                None => Ok((out, src)),
+            }
+        });
+        match local {
+            Ok((out, src)) => return Ok(Tracked { body: out, src }.into_result(k, body)),
+            Err(e) => {
+                if std::env::var_os("CADRS_LOCAL_FILLET_ONLY").is_some() {
+                    return Err(e);
+                }
+                if std::env::var_os("CADRS_BLEND_DEBUG").is_some() {
+                    eprintln!("local variable fillet: {e}; falling back to the blend tool");
+                }
+            }
+        }
+    }
     let mut cur = Tracked::of(b.clone());
     for law in laws {
         let e = law.edge.0 as usize;

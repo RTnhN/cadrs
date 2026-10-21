@@ -50,27 +50,20 @@ case_228_crown
 case_229_loft_brick
 case_230_box_extrusion1
 case_231_box_extrusion2 slow
-case_232_box_w_slot slow
 case_233_coons_01_03_29
 case_234_nurb_cone
 case_235_cube_sphere2
 case_237_knife slow
-case_301_l_shaped_box
 case_304_box
 case_306_extrusion0210
-case_307_l_shaped_box
-case_308_nurb_box1
 case_401_extrusion_old
 case_403_fillet1019
 case_404_cyl_on_box1
 case_405_cyl_on_box1
 case_407_cyl_on_box_w_fillet
 case_408_cyl_on_box_w_fillet1
-case_409_cyl_on_box_w_fillet2
 case_410_blade_hub_1 slow
 case_411_blade_hub_2 slow
 case_412_blade_hub_3 slow
-case_413_cliff_3
-case_415_cyl_on_box_w_hole
 case_416_rollover_corner
 case_421_blade_fillet_fails slow

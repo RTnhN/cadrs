@@ -4,7 +4,6 @@
 blend complex_a2
 blend complex_a3
 blend complex_a4
-blend complex_a5
 blend complex_a7
 blend complex_b2
 blend complex_b3
@@ -31,7 +30,6 @@ blend simple_k2
 blend simple_k3
 blend simple_k4
 blend simple_o2
-blend simple_o5
 blend simple_p4
 blend simple_p5
 blend simple_p7
@@ -43,18 +41,13 @@ blend simple_q8
 blend simple_r8
 blend simple_s2
 blend simple_t2
-blend simple_t5
 blend simple_t8
 blend simple_u2
 blend simple_u5
-blend simple_u6
 blend simple_u7
-blend simple_u9
-blend simple_v2
 blend simple_v4
 blend simple_v7
 blend simple_w3
-blend simple_w5
 blend simple_w7
 blend simple_x1
 blend simple_x2
@@ -63,8 +56,6 @@ blend simple_y6
 blend simple_y7
 blend simple_z1
 blend tolblend_simple_a3
-blend tolblend_simple_a5
-blend tolblend_simple_a7
 blend tolblend_simple_b4
 blend tolblend_simple_b5
 blend tolblend_simple_b6
@@ -622,12 +613,6 @@ draft angle_h5
 draft angle_k9
 # blend: a boolean of the feature fails (open shell).
 blend bfuseblend_a6
-blend buildevol_g5
-blend buildevol_j7
-blend buildevol_j8
-blend buildevol_k1
-blend buildevol_k2
-blend buildevol_k4
 blend complex_d2
 blend complex_e2
 blend encoderegularity_a2
@@ -637,7 +622,6 @@ blend simple_i8
 blend simple_r1
 blend simple_r2
 blend simple_r6
-blend simple_u1
 blend simple_v6
 blend simple_y9
 blend tolblend_simple_a2
@@ -648,12 +632,7 @@ blend tolblend_simple_f8
 # blend: the measured property differs from OCCT's.
 blend bfuseblend_b7
 blend buildevol_a3
-blend buildevol_a6
-blend buildevol_b1
 blend buildevol_b4
-blend buildevol_b7
-blend buildevol_i2
-blend buildevol_i5
 blend simple_a7
 blend simple_a8
 blend simple_i1
@@ -664,52 +643,20 @@ blend tolblend_buildvol_a6
 blend tolblend_buildvol_a7
 blend tolblend_simple_a1
 # blend: the kernel's variable fillet (fillet_variable) takes only straight edges between planes.
-blend buildevol_a5
-blend buildevol_a7
-blend buildevol_a9
-blend buildevol_b2
-blend buildevol_b6
-blend buildevol_b8
-blend buildevol_c1
-blend buildevol_c2
 blend buildevol_c4
-blend buildevol_c6
 blend buildevol_c8
-blend buildevol_c9
-blend buildevol_d3
-blend buildevol_d4
-blend buildevol_d5
-blend buildevol_d7
-blend buildevol_d8
 blend buildevol_d9
 blend buildevol_e1
 blend buildevol_e2
-blend buildevol_e3
-blend buildevol_e4
-blend buildevol_e5
-blend buildevol_e6
-blend buildevol_e7
-blend buildevol_e8
 blend buildevol_e9
 blend buildevol_f1
 blend buildevol_f2
 blend buildevol_f5
-blend buildevol_f6
 blend buildevol_f7
 blend buildevol_f8
 blend buildevol_f9
 blend buildevol_g1
-blend buildevol_g7
-blend buildevol_g8
-blend buildevol_g9
-blend buildevol_h1
-blend buildevol_h2
-blend buildevol_h3
-blend buildevol_h4
-blend buildevol_h5
-blend buildevol_h6
 blend buildevol_h7
-blend buildevol_h8
 blend buildevol_h9
 blend buildevol_i3
 blend buildevol_i6
@@ -755,8 +702,6 @@ blend tolblend_simple_e9
 # blend: the result is invalid (checkshape).
 blend simple_r3
 # blend: radius laws reaching 0 (OCCT ends evolutive blends at a point).
-blend tolblend_buildvol_a1
-blend tolblend_buildvol_a2
 blend tolblend_buildvol_a3
 blend tolblend_buildvol_a4
 blend tolblend_buildvol_a9

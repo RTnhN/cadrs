@@ -367,9 +367,14 @@ pub fn chain_tool(b: &Body, input: BodyId, chain: &[(usize, bool)], kind: &dyn F
     let mut stations: Vec<Station> = vec![station(total_lo, None)?];
     let mut step = max_step;
     let mut bi = 0;
-    // A bound on the march (a path that never settles fails instead of hanging).
+    // A bound on the march (a path that never settles fails instead of hanging), in sections
+    // and in time.
     const MAX_STATIONS: usize = 5000;
+    let started = std::time::Instant::now();
     while stations.last().unwrap().s < total_hi - 1e-9 {
+        if started.elapsed() > std::time::Duration::from_secs(90) {
+            return Err(KernelError::OperationFailed("the blend's path takes too long to trace".into()));
+        }
         if stations.len() > MAX_STATIONS {
             return Err(KernelError::OperationFailed(format!("the blend's path needs more than {MAX_STATIONS} sections (at {:.4} of [{total_lo:.3}, {total_hi:.3}], step {step:.2e})", stations.last().unwrap().s)));
         }

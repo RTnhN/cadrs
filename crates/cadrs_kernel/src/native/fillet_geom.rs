@@ -36,16 +36,22 @@ pub struct Contact {
 }
 
 /// A ball touching two faces: its centre and the contacts (on the first face, on the second).
+/// A flat ball's section is the straight line between its contacts (a chamfer: SMLib's
+/// constant-radius solver with a linear cross section, `SmLinearCrossSectionFSG`).
 #[derive(Debug, Clone, Copy)]
 pub struct Ball {
     pub c: P3,
     pub q: [Contact; 2],
+    pub flat: bool,
 }
 
 impl Ball {
-    /// The point of the ball's section arc a fraction `w` of the way from the first contact to
-    /// the second (the short way round).
+    /// The point of the ball's section a fraction `w` of the way from the first contact to
+    /// the second (round the arc, the short way, or along the line).
     pub fn arc_point(&self, w: f64) -> P3 {
+        if self.flat {
+            return self.q[0].p + (self.q[1].p - self.q[0].p) * w;
+        }
         let a = self.q[0].p - self.c;
         let b = self.q[1].p - self.c;
         let r = a.norm();
@@ -61,6 +67,10 @@ impl Ball {
     /// The section arc from the first contact to the second as a circle, with its parameter
     /// range (0 at the first contact).
     pub fn arc(&self) -> Option<(Curve, f64, f64)> {
+        if self.flat {
+            let (c, l) = Curve::line(self.q[0].p, self.q[1].p);
+            return (l > 1e-12).then_some((c, 0.0, l));
+        }
         let a = self.q[0].p - self.c;
         let b = self.q[1].p - self.c;
         let r = a.norm();
@@ -72,6 +82,30 @@ impl Ball {
         let y = yv.normalize();
         let th = b.dot(&y).atan2(b.dot(&x));
         Some((Curve::Circle { c: self.c, x, y, r }, 0.0, th))
+    }
+
+    /// How far `x` (in the section's plane) lies outside the section: past the arc from the
+    /// centre, or past the line, away from the centre.
+    pub fn sdist(&self, x: &P3) -> f64 {
+        if self.flat {
+            let chord = self.q[1].p - self.q[0].p;
+            let out = (self.q[0].p - self.c) + (self.q[1].p - self.c);
+            let n = (out - chord * (out.dot(&chord) / chord.norm_squared().max(1e-300))).normalize();
+            return (x - self.q[0].p).dot(&n);
+        }
+        (x - self.c).norm() - (self.q[0].p - self.c).norm()
+    }
+
+    /// The fraction of the way across the section from contact `k` that `x` lies.
+    pub fn frac(&self, k: usize, x: &P3) -> f64 {
+        let (a, o) = (self.q[k].p, self.q[1 - k].p);
+        if self.flat {
+            let d = o - a;
+            return (x - a).dot(&d) / d.norm_squared().max(1e-300);
+        }
+        let (a, o) = (a - self.c, o - self.c);
+        let whole = a.angle(&o);
+        if whole < 1e-12 { 0.0 } else { a.angle(&(x - self.c)) / whole }
     }
 }
 
@@ -153,14 +187,19 @@ fn damp(len: f64, lim: f64) -> f64 {
 pub fn ball_in_plane(f: [&Face; 2], k: [f64; 2], p0: &P3, t: &V3, guess: [P2; 2]) -> Option<Ball> {
     let mut x = guess;
     let sc = scale(p0, k[0].abs());
-    for _ in 0..60 {
+    // Steps no longer than the ball's size, or (a ball shrinking to nothing) the guess's gap.
+    let mut lim = 2.0 * k[0].abs();
+    for it in 0..60 {
         let a = offset(f[0], k[0], x[0])?;
         let b = offset(f[1], k[1], x[1])?;
+        if it == 0 {
+            lim = lim.max(2.0 * (a.contact.p - b.contact.p).norm()).max(1e-9 * sc);
+        }
         let r3 = a.o - b.o;
         let rp = (a.o - p0).dot(t);
         let res = SVector::<f64, 4>::new(r3.x, r3.y, r3.z, rp);
         if res.norm() < 1e-11 * sc {
-            return Some(Ball { c: P3::from((a.o.coords + b.o.coords) * 0.5), q: [a.contact, b.contact] });
+            return Some(Ball { c: P3::from((a.o.coords + b.o.coords) * 0.5), q: [a.contact, b.contact], flat: false });
         }
         let m = Matrix4::new(
             a.du.x, a.dv.x, -b.du.x, -b.dv.x, //
@@ -170,9 +209,9 @@ pub fn ball_in_plane(f: [&Face; 2], k: [f64; 2], p0: &P3, t: &V3, guess: [P2; 2]
         );
         let dx = m.lu().solve(&(-res))?;
         let (da, db) = (Vector2::new(dx[0], dx[1]), Vector2::new(dx[2], dx[3]));
-        // Steps no longer than the ball's size in 3D (Newton overshoots on curved faces).
+        // Newton overshoots on curved faces.
         let len = (a.du * da.x + a.dv * da.y).norm().max((b.du * db.x + b.dv * db.y).norm());
-        let g = damp(len, 2.0 * k[0].abs().max(1e-9));
+        let g = damp(len, lim);
         x = [step(f[0], &a, x[0], da, g), step(f[1], &b, x[1], db, g)];
     }
     None
@@ -210,7 +249,7 @@ pub fn ball3(f: [&Face; 3], k: [f64; 3], guess: [P2; 3]) -> Option<(P3, [Contact
         let dx = m.lu().solve(&(-res))?;
         let d: [Vector2<f64>; 3] = [Vector2::new(dx[0], dx[1]), Vector2::new(dx[2], dx[3]), Vector2::new(dx[4], dx[5])];
         let len = [(&a, d[0]), (&b, d[1]), (&c, d[2])].iter().map(|(o, s)| (o.du * s.x + o.dv * s.y).norm()).fold(0.0, f64::max);
-        let g = damp(len, 2.0 * k[0].abs().max(1e-9));
+        let g = damp(len, (2.0 * k[0].abs()).max(1e-9 * sc));
         x = [step(f[0], &a, x[0], d[0], g), step(f[1], &b, x[1], d[1], g), step(f[2], &c, x[2], d[2], g)];
     }
     None
@@ -290,7 +329,7 @@ pub fn rail_crossings(f: [&Face; 2], k: [f64; 2], side: usize, bd: &Boundary, ne
             let r = c - o.o;
             if r.norm() < 1e-11 * sc {
                 let q = if side == 0 { [cs, o.contact] } else { [o.contact, cs] };
-                ok = Some((t, Ball { c: P3::from((c.coords + o.o.coords) * 0.5), q }));
+                ok = Some((t, Ball { c: P3::from((c.coords + o.o.coords) * 0.5), q, flat: false }));
                 break;
             }
             let m = Matrix3::from_columns(&[dc, -o.du, -o.dv]);
@@ -344,7 +383,27 @@ impl Spine {
 
     /// The parameter whose section plane holds `c`, starting from `t`.
     pub fn param_of(&self, c: &P3, t: f64) -> f64 {
+        // Closed forms: a line's projection, a circle's angle about its axis (near t).
+        match &self.curve {
+            Curve::Line { o, d } => return (c - o).dot(d) / d.norm_squared(),
+            Curve::Circle { c: ctr, x, y, .. } => {
+                let v = c - ctr;
+                return unwrap_near(v.dot(y).atan2(v.dot(x)), t, TAU);
+            }
+            _ => {}
+        }
+        // Start from the guess or, if a sample of the curve lies nearer the point, from that
+        // (a curve folding back near the point has other sections through it).
+        let (lo, hi) = (self.t[0].min(self.t[1]), self.t[0].max(self.t[1]));
         let mut t = t;
+        let mut best = (c - self.at(t).0).norm();
+        for i in 0..=64 {
+            let s = lo + (hi - lo) * i as f64 / 64.0;
+            let d = (c - self.at(s).0).norm();
+            if d < 0.5 * best {
+                (t, best) = (s, d);
+            }
+        }
         for _ in 0..50 {
             let (p, d) = self.at(t);
             let (_, d1, d2) = self.curve.d2(self.on_curve(t));
@@ -434,6 +493,9 @@ impl Strip {
 /// The exact strip through ball `b` (all its balls are this one moved along the spine).
 pub fn exact_strip(kind: Exact, b: &Ball, spine: &Spine) -> Option<Strip> {
     let r = (b.q[0].p - b.c).norm();
+    if b.flat {
+        return exact_flat(kind, b, spine);
+    }
     match (kind, &spine.curve) {
         (Exact::Cylinder, Curve::Line { d, .. }) => {
             let d = d.normalize();
@@ -465,11 +527,57 @@ pub fn exact_strip(kind: Exact, b: &Ball, spine: &Spine) -> Option<Strip> {
     }
 }
 
+/// The exact chamfer strips: a plane along a straight edge between surfaces unchanged along
+/// it; along a circle between surfaces of revolution about its axis, the cone (or cylinder, or
+/// plane) through the two rail circles.
+fn exact_flat(kind: Exact, b: &Ball, spine: &Spine) -> Option<Strip> {
+    let (q0, q1) = (b.q[0].p, b.q[1].p);
+    match (kind, &spine.curve) {
+        (Exact::Cylinder, Curve::Line { d, .. }) => {
+            let d = d.normalize();
+            let x = (q1 - q0).normalize();
+            let surf = Surface::Plane { f: Frame { o: q0, x, y: d, z: x.cross(&d) } };
+            let rails = [Curve::Line { o: q0, d }, Curve::Line { o: q1, d }];
+            Some(Strip { surf, rails, kind: StripKind::Exact(kind) })
+        }
+        (Exact::Torus, Curve::Circle { c, x, y, .. }) => {
+            let z = x.cross(y).normalize();
+            let yy = z.cross(x);
+            let ring = |q: &P3| -> (f64, f64) {
+                let h = (q - c).dot(&z);
+                (h, (q - (c + z * h)).norm())
+            };
+            let ((h0, r0), (h1, r1)) = (ring(&q0), ring(&q1));
+            let rail = |h: f64, rr: f64| Curve::Circle { c: c + z * h, x: *x, y: yy, r: rr };
+            let rails = [rail(h0, r0), rail(h1, r1)];
+            let tol = 1e-12 * (1.0 + r0.max(r1));
+            let surf = if (h1 - h0).abs() < tol {
+                Surface::Plane { f: Frame { o: c + z * h0, x: *x, y: yy, z } }
+            } else if (r1 - r0).abs() < tol {
+                Surface::Cylinder { f: Frame { o: c + z * h0, x: *x, y: yy, z }, r: r0 }
+            } else {
+                let a = (r1 - r0).atan2(h1 - h0);
+                Surface::Cone { f: Frame { o: c + z * h0, x: *x, y: yy, z }, r: r0, a }
+            };
+            Some(Strip { surf, rails, kind: StripKind::Exact(kind) })
+        }
+        _ => None,
+    }
+}
+
 /// The rational quadratic arc of a ball's section, as three homogeneous control points.
 fn section_cps(b: &Ball) -> Option<[H; 3]> {
+    if b.flat {
+        let mid = P3::from((b.q[0].p.coords + b.q[1].p.coords) * 0.5);
+        return Some([hom(&b.q[0].p, 1.0), hom(&mid, 1.0), hom(&b.q[1].p, 1.0)]);
+    }
     let a = b.q[0].p - b.c;
     let e = b.q[1].p - b.c;
     let r = 0.5 * (a.norm() + e.norm());
+    // A ball of no size (a radius law reaching 0): the section is a point.
+    if r < 1e-12 * (1.0 + b.c.coords.abs().max()) {
+        return Some([hom(&b.c, 1.0); 3]);
+    }
     let half = 0.5 * a.normalize().dot(&e.normalize()).clamp(-1.0, 1.0).acos();
     // Arcs near a half turn have their middle control point far out: no single segment.
     if half > 85f64.to_radians() {

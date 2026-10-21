@@ -250,7 +250,6 @@ fn case_121_6_sided_corner() {
 }
 
 /// SMLib fillet test 122: `cyl_sphere.smb`, radius 0.5, edges all but [].
-/// SMLib (the oracle) fails: fillet failed (1007).
 #[test]
 fn case_122_cyl_sphere() {
     known_failure(blend("cyl_sphere.smb", &[], false, Op::Fillet(0.5), &Expect { edges: Some(8), ..Expect::default() }), "fillets", "case_122_cyl_sphere");
@@ -511,9 +510,8 @@ fn case_231_box_extrusion2() {
 /// SMLib fillet test 232: `box_w_slot.smb`, radius 0.01, edges [(4, 4)].
 /// SMLib (the oracle) fails: fillet failed (1001).
 #[test]
-#[ignore = "known failure, slow (tools/smlib_known_failures/fillets.txt)"]
 fn case_232_box_w_slot() {
-    known_failure(blend("box_w_slot.smb", &[(4, 4)], true, Op::Fillet(0.01), &Expect { edges: Some(53), ..Expect::default() }), "fillets", "case_232_box_w_slot");
+    blend("box_w_slot.smb", &[(4, 4)], true, Op::Fillet(0.01), &Expect { edges: Some(53), ..Expect::default() }).unwrap();
 }
 
 /// SMLib fillet test 233: `coons_01_03_29.smb`, radius 2.0, edges [(1, 1), (4, 4), (7, 7)].
@@ -553,7 +551,7 @@ fn case_237_knife() {
 /// SMLib fillet test 301: `l_shaped_box.smb`, radii by edge {0: 2.0 to 0.0, 13: 2.0 to 0.0}.
 #[test]
 fn case_301_l_shaped_box() {
-    known_failure(blend_laws("l_shaped_box.smb", &[(0, 2.0, 0.0), (13, 2.0, 0.0)], &Expect { edges: Some(22), ..Expect::default() }), "fillets", "case_301_l_shaped_box");
+    blend_laws("l_shaped_box.smb", &[(0, 2.0, 0.0), (13, 2.0, 0.0)], &Expect { edges: Some(22), ..Expect::default() }).unwrap();
 }
 
 /// SMLib fillet test 302: `box.smb`, radii by edge {0: 0.5, 1: 1.5}.
@@ -590,13 +588,13 @@ fn case_306_extrusion0210() {
 /// SMLib fillet test 307: `l_shaped_box.smb`, radii by edge {0: 2.0 to 0.0, 13: 2.0 to 0.0}.
 #[test]
 fn case_307_l_shaped_box() {
-    known_failure(blend_laws("l_shaped_box.smb", &[(0, 2.0, 0.0), (13, 2.0, 0.0)], &Expect { edges: Some(22), ..Expect::default() }), "fillets", "case_307_l_shaped_box");
+    blend_laws("l_shaped_box.smb", &[(0, 2.0, 0.0), (13, 2.0, 0.0)], &Expect { edges: Some(22), ..Expect::default() }).unwrap();
 }
 
 /// SMLib fillet test 308: `nurb_box1.smb`, radii by edge {3: 1.0, 7: 2.0, 8: 2.0, 0: 3.0, 2: 3.0}.
 #[test]
 fn case_308_nurb_box1() {
-    known_failure(blend_laws("nurb_box1.smb", &[(3, 1.0, 1.0), (7, 2.0, 2.0), (8, 2.0, 2.0), (0, 3.0, 3.0), (2, 3.0, 3.0)], &Expect { edges: Some(26), ..Expect::default() }), "fillets", "case_308_nurb_box1");
+    blend_laws("nurb_box1.smb", &[(3, 1.0, 1.0), (7, 2.0, 2.0), (8, 2.0, 2.0), (0, 3.0, 3.0), (2, 3.0, 3.0)], &Expect { edges: Some(26), ..Expect::default() }).unwrap();
 }
 
 /// SMLib fillet test 401: `ext_large_radius1.fdf` (`extrusion_old.smb`), edge 0 radius 3.8.
@@ -654,7 +652,7 @@ fn case_408_cyl_on_box_w_fillet1() {
 /// SMLib fillet test 409: `cyl_on_box_w_fillet2.smb`, radius 2.0, edges [(6, 7)].
 #[test]
 fn case_409_cyl_on_box_w_fillet2() {
-    known_failure(blend("cyl_on_box_w_fillet2.smb", &[(6, 7)], true, Op::Fillet(2.0), &Expect { volume: Some(1103.31466629), area: Some(652.51582546), faces: Some(17), edges: Some(40), solid: Some(true), ..Expect::default() }), "fillets", "case_409_cyl_on_box_w_fillet2");
+    blend("cyl_on_box_w_fillet2.smb", &[(6, 7)], true, Op::Fillet(2.0), &Expect { volume: Some(1103.31466629), area: Some(652.51582546), faces: Some(17), edges: Some(40), solid: Some(true), ..Expect::default() }).unwrap();
 }
 
 /// SMLib fillet test 410: `blade_hub_1.smb`, radius 3.5, edges [(2, 2), (4, 4), (6, 7)].
@@ -683,7 +681,7 @@ fn case_412_blade_hub_3() {
 /// SMLib fillet test 413: `cliff_3.smb`, radius 25.0, edges [(12, 12)].
 #[test]
 fn case_413_cliff_3() {
-    known_failure(blend("cliff_3.smb", &[(12, 12)], true, Op::Fillet(25.0), &Expect { volume: Some(273769.685226), area: Some(28373.1334785), faces: Some(9), edges: Some(20), solid: Some(true), ..Expect::default() }), "fillets", "case_413_cliff_3");
+    blend("cliff_3.smb", &[(12, 12)], true, Op::Fillet(25.0), &Expect { volume: Some(273769.685226), area: Some(28373.1334785), faces: Some(9), edges: Some(20), solid: Some(true), ..Expect::default() }).unwrap();
 }
 
 /// SMLib fillet test 414: `cliff_4.smb`, radius 30.0, edges [(12, 12)].
@@ -695,7 +693,7 @@ fn case_414_cliff_4() {
 /// SMLib fillet test 415: `cyl_on_box_w_hole.smb`, radius 20.0, edges [(15, 15)].
 #[test]
 fn case_415_cyl_on_box_w_hole() {
-    known_failure(blend("cyl_on_box_w_hole.smb", &[(15, 15)], true, Op::Fillet(20.0), &Expect { volume: Some(4857783.69209), area: Some(214055.119901), faces: Some(10), edges: Some(26), solid: Some(true), ..Expect::default() }), "fillets", "case_415_cyl_on_box_w_hole");
+    blend("cyl_on_box_w_hole.smb", &[(15, 15)], true, Op::Fillet(20.0), &Expect { volume: Some(4857783.69209), area: Some(214055.119901), faces: Some(10), edges: Some(26), solid: Some(true), ..Expect::default() }).unwrap();
 }
 
 /// SMLib fillet test 416: `rollover_corner.smb`, radius 13.0, edges [(10, 10)].
