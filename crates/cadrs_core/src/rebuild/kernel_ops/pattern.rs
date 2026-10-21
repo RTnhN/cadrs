@@ -604,7 +604,7 @@ impl Rebuilder {
         let own: Vec<PartId>;
         let narrowed;
         let merge = if merge.op == BooleanOp::Add && !merge.merge_all && merge.scope.is_empty() {
-            let touches = self.contacts(joined.0, state).touches;
+            let touches = self.contacts(joined.0, state, false).touches;
             own = seeds.iter().copied().filter(|s| touches.contains(s)).collect();
             narrowed = Merge { op: if own.is_empty() { BooleanOp::New } else { BooleanOp::Add }, merge_all: false, scope: &own, surface: merge.surface };
             &narrowed
