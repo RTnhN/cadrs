@@ -102,6 +102,9 @@ impl Tracked {
     }
 }
 
+/// An edge to blend: its section for the faces' angle, and whether its faces are swapped.
+pub type EdgeBlend = (EdgeId, Box<dyn Fn(f64) -> SectionKind>, bool);
+
 /// The section curve of a blend between the contact points.
 #[derive(Debug, Clone, Copy)]
 pub enum SectionKind {
@@ -751,7 +754,7 @@ fn fillet_section(spec: &FilletSpec, phi: f64) -> SectionKind {
 
 /// Blends the edges (each with its section) and the corners where three circular fillets of
 /// one radius meet between planes.
-pub fn blend(k: &mut NativeKernel, body: BodyId, edges: &[(EdgeId, Box<dyn Fn(f64) -> SectionKind>, bool)], corners: bool) -> Result<OpResult> {
+pub fn blend(k: &mut NativeKernel, body: BodyId, edges: &[EdgeBlend], corners: bool) -> Result<OpResult> {
     let b = (**k.get(body)?).clone();
     let picked: Vec<usize> = edges.iter().map(|(e, _, _)| e.0 as usize).collect();
     for &e in &picked {
@@ -902,7 +905,7 @@ pub fn blend(k: &mut NativeKernel, body: BodyId, edges: &[(EdgeId, Box<dyn Fn(f6
     // Fills (concave edges' blends, adding material) before cuts: the result is the solid with
     // the fills added, less the cuts (a chamfer along a top edge cuts the top of a fill in the
     // inside corner below it).
-    let mut order: Vec<&(EdgeId, Box<dyn Fn(f64) -> SectionKind>, bool)> = edges.iter().collect();
+    let mut order: Vec<&EdgeBlend> = edges.iter().collect();
     order.sort_by_key(|(e, _, _)| edge_convex(&b, e.0 as usize) == Some(true));
     for (e, kind, swap) in order {
         if in_chain[e.0 as usize] {
@@ -1018,8 +1021,8 @@ pub fn blend(k: &mut NativeKernel, body: BodyId, edges: &[(EdgeId, Box<dyn Fn(f6
         // corner, through the points where the fill's face meets each chamfer on its wall and
         // where the two chamfers' edges cross on the face they share. The fill stops under it,
         // and the cuts don't go below it there (see `corner_planes`).
-        if !tool.convex {
-            if let SectionKind::Chamfer { d1, d2 } = kind(PI / 2.0) {
+        if !tool.convex
+            && let SectionKind::Chamfer { d1, d2 } = kind(PI / 2.0) {
                 for v in ed.v.iter() {
                     let cuts: Vec<usize> = at_vertex.get(v).map(|x| x.iter().copied().filter(|&o| o != e && edge_convex(&b, o) == Some(true)).collect()).unwrap_or_default();
                     match cuts.len() {
@@ -1042,7 +1045,6 @@ pub fn blend(k: &mut NativeKernel, body: BodyId, edges: &[(EdgeId, Box<dyn Fn(f6
                     }
                 }
             }
-        }
         if tool.convex {
             for v in ed.v.iter() {
                 if let Some(&(o, n)) = corner_planes.get(v) {
@@ -1103,7 +1105,7 @@ pub fn blend(k: &mut NativeKernel, body: BodyId, edges: &[(EdgeId, Box<dyn Fn(f6
 }
 
 /// The index of a vertex among the vertices the kernel reports (those with edges).
-fn vertex_index(b: &Body, v: usize) -> usize {
+pub(crate) fn vertex_index(b: &Body, v: usize) -> usize {
     let mut used = vec![false; b.verts.len()];
     for e in &b.edges {
         used[e.v[0]] = true;
@@ -1182,7 +1184,7 @@ fn check_fits(b: &Body, e: usize, kind: &dyn Fn(f64) -> SectionKind) -> Result<(
 
 /// Blends of two edges that share a flat face but no vertex must not overlap on it: the edges
 /// lie at least the sum of the blends' contact offsets apart.
-fn check_overlaps(b: &Body, edges: &[(EdgeId, Box<dyn Fn(f64) -> SectionKind>, bool)]) -> Result<()> {
+fn check_overlaps(b: &Body, edges: &[EdgeBlend]) -> Result<()> {
     // Per edge: (planar face, contact offset on it) for both sides.
     let mut info: Vec<(usize, [(usize, f64); 2])> = Vec::new();
     for (e, kind, _) in edges {
@@ -1257,8 +1259,40 @@ pub fn fillet(k: &mut NativeKernel, body: BodyId, edges: &[EdgeId], spec: &Fille
             }
         }
     }
+    // A circular section of constant radius: by local trimming (no boolean) where that applies.
+    if matches!(spec.profile, FilletProfile::Circular) && matches!(spec.size, FilletSize::Radius(_)) && std::env::var_os("CADRS_NO_LOCAL_FILLET").is_none() {
+        let b = (**k.get(body)?).clone();
+        let picked: Vec<usize> = all.iter().map(|e| e.0 as usize).collect();
+        // The result's edges merge where the trimming split them for nothing (as every blend's
+        // do): it must stay valid.
+        let local = super::fillet::fillet_edges(&b, body, &picked, r).and_then(|(out, src)| {
+            let mut merged = out.clone();
+            super::unify::merge_edges(&mut merged);
+            match merged.check().first() {
+                Some(e) => Err(KernelError::OperationFailed(format!("the local fillet's merged edges don't close: {e}"))),
+                None => Ok((out, src)),
+            }
+        });
+        match local {
+            Ok((out, src)) => {
+                let res = Tracked { body: out, src }.into_result(k, body);
+                if !spec.allow_overflow {
+                    check_overflow(k, body, &all, &res)?;
+                }
+                return Ok(res);
+            }
+            Err(e) => {
+                if std::env::var_os("CADRS_LOCAL_FILLET_ONLY").is_some() {
+                    return Err(e);
+                }
+                if std::env::var_os("CADRS_BLEND_DEBUG").is_some() {
+                    eprintln!("local fillet: {e}; falling back to the blend tool");
+                }
+            }
+        }
+    }
     let spec = *spec;
-    let list: Vec<(EdgeId, Box<dyn Fn(f64) -> SectionKind>, bool)> = all
+    let list: Vec<EdgeBlend> = all
         .iter()
         .map(|&e| {
             let f: Box<dyn Fn(f64) -> SectionKind> = Box::new(move |phi| fillet_section(&spec, phi));
@@ -1316,7 +1350,7 @@ fn check_overflow(k: &NativeKernel, body: BodyId, edges: &[EdgeId], r: &OpResult
 pub fn chamfer(k: &mut NativeKernel, body: BodyId, edges: &[EdgeId], opts: &ChamferOpts) -> Result<OpResult> {
     let spec = opts.spec;
     let b = (**k.get(body)?).clone();
-    let mut list: Vec<(EdgeId, Box<dyn Fn(f64) -> SectionKind>, bool)> = Vec::new();
+    let mut list: Vec<EdgeBlend> = Vec::new();
     for &e in edges {
         let flip = opts.flip != opts.flipped.contains(&e);
         let ei = e.0 as usize;
@@ -1466,25 +1500,23 @@ pub fn fillet_partial(k: &mut NativeKernel, body: BodyId, edge: EdgeId, spec: &F
     let mut src = tool.src.clone();
     let mut caps = Vec::new();
     for (fi, f) in tool.body.faces.iter().enumerate() {
-        if src[fi].is_empty() {
-            if let Surface::Plane { f: fr } = &f.surf {
+        if src[fi].is_empty()
+            && let Surface::Plane { f: fr } = &f.surf {
                 let n = fr.x.cross(&fr.y);
                 let t = ed.curve.tangent(ed.mid_t()).normalize();
                 if n.cross(&t).norm() < 1e-6 || matches!(ed.curve, Curve::Circle { .. }) {
                     caps.push(fi);
                 }
             }
-        }
     }
     // Which cap is at the start: nearer the edge's start point.
     let p0 = ed.point(ed.t[0] + (ed.t[1] - ed.t[0]) * from);
     let mut caps_d: Vec<(usize, f64)> = caps.iter().map(|&fi| (fi, (super::mass::face_area(&tool.body, fi).1 - p0).norm())).collect();
     caps_d.sort_by(|a, c| a.1.total_cmp(&c.1));
-    if let Some(&(f, _)) = caps_d.first() {
-        if !extend.0 {
+    if let Some(&(f, _)) = caps_d.first()
+        && !extend.0 {
             src[f].push(FaceSrc::New(Origin::StartCap { region: 0 }));
         }
-    }
     if caps_d.len() > 1 {
         let f = caps_d.last().unwrap().0;
         if !extend.1 {
@@ -1680,8 +1712,7 @@ fn chain_tool_lofted(b: &Body, input: BodyId, chain: &[(usize, bool)], kind: &dy
         stations.push((k, f));
     }
     // Also a station exactly at each joint.
-    for k in 1..chain.len() {
-        let sj = starts[k];
+    for (k, &sj) in starts.iter().enumerate().take(chain.len()).skip(1) {
         if sj > total_lo && sj < total_hi {
             stations.push((k, 0.0));
         }
@@ -1773,7 +1804,7 @@ fn chain_tool_lofted(b: &Body, input: BodyId, chain: &[(usize, bool)], kind: &dy
                 (arc, s, e)
             }
         };
-        let curves = vec![Curve2::Line { a: pc, b: q1, source: Some(0) }, mid, Curve2::Line { a: q2, b: pc, source: Some(2) }];
+        let curves = [Curve2::Line { a: pc, b: q1, source: Some(0) }, mid, Curve2::Line { a: q2, b: pc, source: Some(2) }];
         // The same three pieces in the same order at every station (lofted as they are).
         let pieces: Vec<Piece> = curves
             .iter()

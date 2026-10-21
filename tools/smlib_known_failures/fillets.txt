@@ -1,11 +1,9 @@
 # SMLib fillet cases (tests/smlib_fillets.rs, from tools/smlib/fillets.py) that fail: `name`, or
 # `name slow` when it takes over a minute (run only with --ignored).
-case_001_cyl_cyl_219
 case_002_cyl_cyl_2191
 case_008_case_int slow
 case_009_case_ext
-case_010_tilt_cyl_on_box
-case_012_extrusion1002
+case_012_extrusion1002 slow
 case_102_ext_w_hole
 case_103_bolt
 case_105_extrusion_old slow
@@ -13,16 +11,13 @@ case_110_nurb_box slow
 case_111_box_on_box
 case_112_letter_g
 case_113_box_on_box
-case_114_cone_34
 case_115_filleted_box
 case_116_filleted_box
-case_117_ext_w_hole
 case_118_l_shaped_box
 case_119_l_shaped_box
 case_120_shell_fillet
 case_121_6_sided_corner
 case_122_cyl_sphere
-case_123_corner_box
 case_125_pyramid
 case_127_extrusion0206
 case_128_shell_fillet2
@@ -34,20 +29,18 @@ case_205_test5
 case_206_test6
 case_207_test7
 case_208_test8 slow
-case_209_test9
 case_210_sphere_dif_box
-case_211_cyl_cyl_shell
+case_211_cyl_cyl_shell slow
 case_212_sphere_plane
 case_213_bague slow
 case_214_cap1
-case_215_cap1
-case_216_caps_coons
+case_215_cap1 slow
+case_216_caps_coons slow
 case_217_caps_nside slow
 case_218_fillet1010
 case_219_fillet0227 slow
 case_220_vase
 case_221_vase1
-case_222_vase2
 case_223_vase3 slow
 case_224_0311
 case_225_box_diff_cyl
@@ -56,17 +49,14 @@ case_227_fillet1018 slow
 case_228_crown
 case_229_loft_brick
 case_230_box_extrusion1
-case_231_box_extrusion2
+case_231_box_extrusion2 slow
 case_232_box_w_slot slow
 case_233_coons_01_03_29
 case_234_nurb_cone
 case_235_cube_sphere2
-case_236_heart
 case_237_knife slow
 case_301_l_shaped_box
-case_302_box
 case_304_box
-case_305_box
 case_306_extrusion0210
 case_307_l_shaped_box
 case_308_nurb_box1
@@ -83,5 +73,4 @@ case_412_blade_hub_3 slow
 case_413_cliff_3
 case_415_cyl_on_box_w_hole
 case_416_rollover_corner
-case_419_box_diff_3cyls
 case_421_blade_fillet_fails slow

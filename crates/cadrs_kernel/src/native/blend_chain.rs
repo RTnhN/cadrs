@@ -157,6 +157,9 @@ impl Chain<'_> {
                         break;
                     }
                 }
+                if !x.coords.iter().all(|c| c.is_finite()) {
+                    return Err(KernelError::OperationFailed("the blend's section degenerates along the edge".into()));
+                }
                 let (_, _, q1) = out_dist(f1, &x);
                 let (_, _, q2) = out_dist(f2, &x);
                 (q1, q2, Mid::Arc(x))
@@ -170,6 +173,11 @@ impl Chain<'_> {
             }
             _ => return Err(KernelError::InvalidParameter("Conic, curvature and asymmetric fillets work on straight edges between flat faces".into())),
         };
+        // Faces tangent at the edge (or a failed solve) give no section, not a NaN one.
+        let finite = |q: &P3| q.coords.iter().all(|x| x.is_finite());
+        if !finite(&c1) || !finite(&c2) || (c1 - p).norm() < 1e-12 || (c2 - p).norm() < 1e-12 {
+            return Err(KernelError::OperationFailed("the blend's section degenerates along the edge".into()));
+        }
         let inside = [self.on(faces[0].0, &c1), self.on(faces[1].0, &c2)];
         // The section's plane: through the contacts and the corner.
         let nrm = (c1 - p).cross(&(c2 - p));
@@ -310,13 +318,12 @@ pub fn chain_tool(b: &Body, input: BodyId, chain: &[(usize, bool)], kind: &dyn F
                     }
                     let mut f2 = faces;
                     f2[side].0 = g;
-                    if let Ok((_, _, ins)) = ch.section(s, f2) {
-                        if ins[side] {
+                    if let Ok((_, _, ins)) = ch.section(s, f2)
+                        && ins[side] {
                             faces = f2;
                             moved = true;
                             break;
                         }
-                    }
                 }
             }
             if !moved {
@@ -370,7 +377,7 @@ pub fn chain_tool(b: &Body, input: BodyId, chain: &[(usize, bool)], kind: &dyn F
         while breaks[bi] <= s0 + 1e-9 {
             bi += 1;
         }
-        let prev = Some(stations.last().unwrap().faces).filter(|_| within(s0));
+        let prev = within(s0).then(|| stations.last().map(|x| x.faces)).flatten();
         // Even steps up to the next forced station (a short step next to long ones makes the
         // loft through the sections overshoot).
         let rem = breaks[bi] - s0;

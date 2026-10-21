@@ -17,6 +17,8 @@ pub mod draw;
 pub mod edge_bop;
 pub mod exchange;
 pub mod features;
+pub mod fillet;
+pub mod fillet_geom;
 pub mod hlr;
 pub mod iges;
 pub mod kernel;
