@@ -117,6 +117,11 @@ impl Ctx<'_> {
     }
 }
 
+/// A box holding the edge.
+fn piece_box(e: &Piece) -> Bbox {
+    super::boolean::curve_bbox(&e.curve, e.t0, e.t1)
+}
+
 /// The distance from `p` to an edge.
 fn dist_to(e: &Piece, p: &P3) -> f64 {
     let (a, b) = (e.t0.min(e.t1), e.t0.max(e.t1));
@@ -301,6 +306,11 @@ fn face_meets(cx: &Ctx, b: &Body, fi: usize, e: &Piece, ts: &[f64], out: &mut Ve
 fn splits(cx: &Ctx, e: &Piece, size: f64) -> Vec<f64> {
     let ts = samples(e, size);
     let mut out: Vec<f64> = Vec::new();
+    // Only edges whose boxes come within the tolerance of this one's can meet it.
+    let near = {
+        let bb = piece_box(e).grow(cx.tol);
+        move |o: &Piece| piece_box(o).overlaps(&bb)
+    };
     match cx.other {
         Other::Body(b) => {
             for fi in 0..b.faces.len() {
@@ -312,10 +322,11 @@ fn splits(cx: &Ctx, e: &Piece, size: f64) -> Vec<f64> {
             }
             // Where it starts or stops running along one of the body's edges (pieces of one
             // curve taken together: our seams and closed edges have vertices OCCT's don't).
-            out.extend(handovers(e, &ts, &cx.body_edges, cx.tol, size));
+            let close: Vec<Piece> = cx.body_edges.iter().filter(|o| near(o)).cloned().collect();
+            out.extend(handovers(e, &ts, &close, cx.tol, size));
         }
         Other::Edges(es) => {
-            for o in es.iter() {
+            for o in es.iter().filter(|o| near(o)) {
                 edge_meets(e, &ts, o, cx.tol, size, true, &mut out);
             }
         }

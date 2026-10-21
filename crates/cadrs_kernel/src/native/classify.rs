@@ -328,111 +328,199 @@ pub fn periodic_candidates(s: &Surface, u: f64, v: f64, polys: &[Vec<P2>]) -> Ve
     out
 }
 
-/// Inside / outside / on the boundary of the body's solids.
+/// Inside / outside / on the boundary of the body's solids. (Many points against one body:
+/// [`Classifier`].)
 pub fn classify_point(body: &Body, polys: &[Vec<Vec<P2>>], p: &P3, tol: f64) -> crate::PointClass {
-    // On a face?
-    for (fi, f) in body.faces.iter().enumerate() {
-        let (u, v) = f.surf.project(p, None);
-        let q = f.surf.eval(u, v);
-        if (q - p).norm() <= tol.max(1e-9) {
-            for uv in periodic_candidates(&f.surf, u, v, &polys[fi]) {
-                if in_face(&polys[fi], &f.surf, uv, tol.max(1e-9)) != InFace::Outside {
-                    return crate::PointClass::OnBoundary;
-                }
-            }
-        }
-    }
-    if parity_inside(body, polys, p) { crate::PointClass::Inside } else { crate::PointClass::Outside }
+    Classifier::new(body, polys).classify(p, tol)
 }
 
 /// Ray parity, by the majority of a few rays (two that agree, else the first side to three),
-/// with retries in other directions when a ray grazes an edge or a face.
-#[allow(clippy::approx_constant, reason = "ray directions picked off the axes and diagonals, not constants")]
+/// with retries in other directions when a ray grazes an edge or a face. (Many points against
+/// one body: [`Classifier`].)
 pub fn parity_inside(body: &Body, polys: &[Vec<Vec<P2>>], p: &P3) -> bool {
-    // Five fixed directions, then 32 more spread over the sphere (a golden-angle spiral) while
-    // every ray so far grazed a face or ran through an edge.
-    let golden = std::f64::consts::PI * (3.0 - 5f64.sqrt());
-    let dirs: Vec<V3> = [
-        V3::new(0.5773, 0.5774, 0.5772),
-        V3::new(-0.3014, 0.8123, 0.4993),
-        V3::new(0.7071, -0.1213, -0.6966),
-        V3::new(0.1234, 0.2345, -0.9641),
-        V3::new(-0.8, -0.35, 0.487),
-    ]
-    .into_iter()
-    .chain((0..32).map(|i| {
-        let z = 1.0 - (i as f64 + 0.5) / 16.0;
-        let r = (1.0 - z * z).max(0.0).sqrt();
-        let a = golden * i as f64 + 0.1;
-        V3::new(r * a.cos(), r * a.sin(), z)
-    }))
-    .collect();
-    let bb = body.bbox().grow(1.0);
-    let span = bb.diagonal() + (bb.center() - p).norm();
-    let mut votes = (0, 0);
-    for d in dirs {
-        let d = d.normalize();
-        let mut count = 0;
-        let mut bad = false;
-        'faces: for (fi, f) in body.faces.iter().enumerate() {
-            for (t, u, v) in ray_surface(&f.surf, p, &d, -span, span) {
-                if t <= 1e-12 {
-                    continue;
-                }
-                // Grazing: the ray nearly tangent to the surface.
-                let n = f.surf.normal(u, v);
-                if n.dot(&d).abs() < 1e-6 {
-                    bad = true;
-                    break 'faces;
-                }
-                for uv in periodic_candidates(&f.surf, u, v, &polys[fi]) {
-                    match in_face(&polys[fi], &f.surf, uv, 1e-7) {
-                        InFace::Inside => {
-                            count += 1;
-                            break;
-                        }
-                        InFace::Boundary => {
-                            bad = true;
-                            break 'faces;
-                        }
-                        InFace::Outside => {}
+    Classifier::new(body, polys).parity_inside(p)
+}
+
+/// A body prepared for classifying many points: its faces' boxes (rays and points only meet
+/// the faces whose boxes they reach), its own box, and a start inside each face's domain for
+/// the projections.
+pub struct Classifier<'a> {
+    body: &'a Body,
+    polys: &'a [Vec<Vec<P2>>],
+    boxes: Vec<Bbox>,
+    bbox: Bbox,
+    starts: Vec<Option<(f64, f64)>>,
+}
+
+impl<'a> Classifier<'a> {
+    /// The body with its faces' sampled loops ([`face_polygons`], one per face).
+    pub fn new(body: &'a Body, polys: &'a [Vec<Vec<P2>>]) -> Self {
+        let boxes: Vec<Bbox> = (0..body.faces.len()).map(|fi| body.face_bbox(fi)).collect();
+        let mut bbox = Bbox::empty();
+        for b in &boxes {
+            bbox.union(b);
+        }
+        for v in &body.verts {
+            bbox.add(&v.p);
+        }
+        let starts = polys
+            .iter()
+            .map(|ps| {
+                let mut uv = Bbox::empty();
+                ps.iter().flatten().for_each(|q| uv.add(&P3::new(q.x, q.y, 0.0)));
+                (!uv.is_empty()).then(|| (uv.center().x, uv.center().y))
+            })
+            .collect();
+        Classifier { body, polys, boxes, bbox, starts }
+    }
+
+    /// The (u, v) on face `fi`'s surface nearest `p`: from the face's start, and from the
+    /// surface's own search when that stops more than `tol` away.
+    fn project(&self, fi: usize, p: &P3, tol: f64) -> (f64, f64) {
+        let s = &self.body.faces[fi].surf;
+        if let Some(h) = self.starts[fi] {
+            let (u, v) = s.project(p, Some(h));
+            if (s.eval(u, v) - p).norm() <= tol {
+                return (u, v);
+            }
+        }
+        s.project(p, None)
+    }
+
+    /// Inside / outside / on the boundary of the body's solids (on a face within `tol`).
+    pub fn classify(&self, p: &P3, tol: f64) -> crate::PointClass {
+        let tol = tol.max(1e-9);
+        for (fi, f) in self.body.faces.iter().enumerate() {
+            if !self.boxes[fi].grow(tol).contains(p) {
+                continue;
+            }
+            let (u, v) = self.project(fi, p, tol);
+            if (f.surf.eval(u, v) - p).norm() <= tol {
+                for uv in periodic_candidates(&f.surf, u, v, &self.polys[fi]) {
+                    if in_face(&self.polys[fi], &f.surf, uv, tol) != InFace::Outside {
+                        return crate::PointClass::OnBoundary;
                     }
                 }
             }
         }
-        if bad {
-            continue;
-        }
-        if count % 2 == 1 {
-            votes.0 += 1;
-        } else {
-            votes.1 += 1;
-        }
-        // Two rays that agree, else the first side to three: a ray can miss a crossing (near
-        // the boundary of a face's polygon, nearly along a B-spline face) and so count the
-        // wrong parity.
-        if (votes.0.min(votes.1) == 0 && votes.0.max(votes.1) >= 2) || votes.0.max(votes.1) >= 3 {
-            break;
-        }
+        if self.parity_inside(p) { crate::PointClass::Inside } else { crate::PointClass::Outside }
     }
-    if votes.0 + votes.1 == 0 {
-        // Every ray grazed: by the side of the nearest face.
-        return nearest_face_inside(body, p);
+
+    /// Ray parity, by the majority of a few rays (two that agree, else the first side to
+    /// three), with retries in other directions when a ray grazes an edge or a face.
+    #[allow(clippy::approx_constant, reason = "ray directions picked off the axes and diagonals, not constants")]
+    pub fn parity_inside(&self, p: &P3) -> bool {
+        // Five fixed directions, then 32 more spread over the sphere (a golden-angle spiral)
+        // while every ray so far grazed a face or ran through an edge.
+        let golden = std::f64::consts::PI * (3.0 - 5f64.sqrt());
+        let dirs: Vec<V3> = [
+            V3::new(0.5773, 0.5774, 0.5772),
+            V3::new(-0.3014, 0.8123, 0.4993),
+            V3::new(0.7071, -0.1213, -0.6966),
+            V3::new(0.1234, 0.2345, -0.9641),
+            V3::new(-0.8, -0.35, 0.487),
+        ]
+        .into_iter()
+        .chain((0..32).map(|i| {
+            let z = 1.0 - (i as f64 + 0.5) / 16.0;
+            let r = (1.0 - z * z).max(0.0).sqrt();
+            let a = golden * i as f64 + 0.1;
+            V3::new(r * a.cos(), r * a.sin(), z)
+        }))
+        .collect();
+        let bb = self.bbox.grow(1.0);
+        let span = bb.diagonal() + (bb.center() - p).norm();
+        let mut votes = (0, 0);
+        for d in dirs {
+            let d = d.normalize();
+            let mut count = 0;
+            let mut bad = false;
+            'faces: for (fi, f) in self.body.faces.iter().enumerate() {
+                if !ray_meets_box(p, &d, &self.boxes[fi].grow(1e-9 * (1.0 + span))) {
+                    continue;
+                }
+                for (t, u, v) in ray_surface(&f.surf, p, &d, -span, span) {
+                    if t <= 1e-12 {
+                        continue;
+                    }
+                    // Grazing: the ray nearly tangent to the surface.
+                    let n = f.surf.normal(u, v);
+                    if n.dot(&d).abs() < 1e-6 {
+                        bad = true;
+                        break 'faces;
+                    }
+                    for uv in periodic_candidates(&f.surf, u, v, &self.polys[fi]) {
+                        match in_face(&self.polys[fi], &f.surf, uv, 1e-7) {
+                            InFace::Inside => {
+                                count += 1;
+                                break;
+                            }
+                            InFace::Boundary => {
+                                bad = true;
+                                break 'faces;
+                            }
+                            InFace::Outside => {}
+                        }
+                    }
+                }
+            }
+            if bad {
+                continue;
+            }
+            if count % 2 == 1 {
+                votes.0 += 1;
+            } else {
+                votes.1 += 1;
+            }
+            // Two rays that agree, else the first side to three: a ray can miss a crossing
+            // (near the boundary of a face's polygon, nearly along a B-spline face) and so count
+            // the wrong parity.
+            if (votes.0.min(votes.1) == 0 && votes.0.max(votes.1) >= 2) || votes.0.max(votes.1) >= 3 {
+                break;
+            }
+        }
+        if votes.0 + votes.1 == 0 {
+            // Every ray grazed: by the side of the nearest face.
+            return self.nearest_face_inside(p);
+        }
+        votes.0 > votes.1
     }
-    votes.0 > votes.1
+
+    /// Whether `p` lies behind the nearest face (against its outward normal there).
+    fn nearest_face_inside(&self, p: &P3) -> bool {
+        let mut best: Option<(f64, V3, P3)> = None;
+        for (fi, f) in self.body.faces.iter().enumerate() {
+            let (u, v) = self.project(fi, p, 0.0);
+            let q = f.surf.eval(u, v);
+            let d = (q - p).norm();
+            if best.is_none_or(|b| d < b.0) {
+                let n = f.surf.normal(u, v) * if f.sense { 1.0 } else { -1.0 };
+                best = Some((d, n, q));
+            }
+        }
+        best.is_some_and(|(_, n, q)| (p - q).dot(&n) < 0.0)
+    }
 }
 
-/// Whether `p` lies behind the nearest face of `body` (against its outward normal there).
-fn nearest_face_inside(body: &Body, p: &P3) -> bool {
-    let mut best: Option<(f64, V3, P3)> = None;
-    for f in &body.faces {
-        let (u, v) = f.surf.project(p, None);
-        let q = f.surf.eval(u, v);
-        let d = (q - p).norm();
-        if best.is_none_or(|b| d < b.0) {
-            let n = f.surf.normal(u, v) * if f.sense { 1.0 } else { -1.0 };
-            best = Some((d, n, q));
+/// Whether the ray from `o` along `d` (t > 0) meets the box.
+fn ray_meets_box(o: &P3, d: &V3, b: &Bbox) -> bool {
+    if b.is_empty() {
+        return false;
+    }
+    let (mut lo, mut hi) = (0.0f64, f64::INFINITY);
+    for k in 0..3 {
+        if d[k].abs() < 1e-300 {
+            if o[k] < b.min[k] || o[k] > b.max[k] {
+                return false;
+            }
+            continue;
+        }
+        let (t0, t1) = ((b.min[k] - o[k]) / d[k], (b.max[k] - o[k]) / d[k]);
+        lo = lo.max(t0.min(t1));
+        hi = hi.min(t0.max(t1));
+        if lo > hi {
+            return false;
         }
     }
-    best.is_some_and(|(_, n, q)| (p - q).dot(&n) < 0.0)
+    true
 }

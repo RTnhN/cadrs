@@ -457,6 +457,16 @@ impl Body {
     /// problems found (empty when valid). [`CheckLevel::Full`] reports everything
     /// [`CheckLevel::Fast`] does and more, never less.
     pub fn check_with(&self, level: CheckLevel) -> Vec<String> {
+        self.check_parts(level, true)
+    }
+
+    /// [`Body::check`] without its last test, the solids' volumes: for a caller that has them
+    /// already (a boolean, which computes them to drop empty solids).
+    pub fn check_structure(&self) -> Vec<String> {
+        self.check_parts(CheckLevel::Fast, false)
+    }
+
+    fn check_parts(&self, level: CheckLevel, volumes: bool) -> Vec<String> {
         let full = level == CheckLevel::Full;
         let refs = self.check_refs();
         if !refs.is_empty() {
@@ -590,7 +600,7 @@ impl Body {
             }
         }
         // Solids enclose a positive volume (their faces point out).
-        if errs.is_empty() {
+        if volumes && errs.is_empty() {
             for si in 0..self.solids.len() {
                 let faces = self.solid_faces(si);
                 let sub = super::kernel::subset(self, &faces, true);

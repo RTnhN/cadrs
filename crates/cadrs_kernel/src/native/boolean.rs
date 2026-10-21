@@ -1530,6 +1530,8 @@ fn run(a: &Body, b: &Body, mode: Mode, opts: RunOpts) -> Result<BoolOut> {
     // 5. Classify.
     let polys_a: Vec<Vec<Vec<P2>>> = a.faces.iter().map(|f| classify::face_polygons(a, f)).collect();
     let polys_b: Vec<Vec<Vec<P2>>> = b.faces.iter().map(|f| classify::face_polygons(b, f)).collect();
+    // (Each body prepared once for the many points classified against it.)
+    let (cls_a, cls_b) = (classify::Classifier::new(a, &polys_a), classify::Classifier::new(b, &polys_b));
     let mut keep: Vec<(usize, Vec<Vec<Arc>>, bool)> = Vec::new(); // (face, loops, flip)
     // Sub-faces of one body joined across an edge piece no cut runs along lie on one side of
     // the other body: grouped (union-find over shared uncut pieces), each group is classified
@@ -1622,13 +1624,13 @@ fn run(a: &Body, b: &Body, mode: Mode, opts: RunOpts) -> Result<BoolOut> {
         };
         let fresh = class.is_none() && shared.is_none();
         let class = class.or(shared).unwrap_or_else(|| {
-            let (other, polys) = if f.owner == 0 { (b, &polys_b) } else { (a, &polys_a) };
+            let other = if f.owner == 0 { &cls_b } else { &cls_a };
             // A point on the other body's boundary (a sub-face whose sample landed on an edge of
             // the other body lying in it) decides nothing: try the face's other inside points.
-            let mut pc = classify::classify_point(other, polys, &p, run_tol);
+            let mut pc = other.classify(&p, run_tol);
             if pc == PointClass::OnBoundary {
                 for q in interior_points(&loops).into_iter().skip(1).take(12) {
-                    let c = classify::classify_point(other, polys, &f.surf.eval(q.x, q.y), run_tol);
+                    let c = other.classify(&f.surf.eval(q.x, q.y), run_tol);
                     if c != PointClass::OnBoundary {
                         pc = c;
                         break;
@@ -1642,7 +1644,7 @@ fn run(a: &Body, b: &Body, mode: Mode, opts: RunOpts) -> Result<BoolOut> {
                     // On the other body's boundary but not on a coincident face: decide by a
                     // point nudged inwards along the face.
                     let q = p - n_out * 1e-5;
-                    if classify::parity_inside(other, polys, &q) { Class::In } else { Class::Out }
+                    if other.parity_inside(&q) { Class::In } else { Class::Out }
                 }
             }
         });
@@ -1748,7 +1750,8 @@ fn run(a: &Body, b: &Body, mode: Mode, opts: RunOpts) -> Result<BoolOut> {
     out.fit_tolerances(run_tol * 10.0);
     prof.mark("unify");
     assemble_shells(&mut out)?;
-    if drop_empty_solids(&mut out, &mut from) && out.faces.is_empty() {
+    let (dropped, volumes) = drop_empty_solids(&mut out, &mut from);
+    if dropped && out.faces.is_empty() {
         return Err(KernelError::EmptyResult("the result is empty".into()));
     }
     super::unify::split_shared_vertices(&mut out);
@@ -1757,11 +1760,15 @@ fn run(a: &Body, b: &Body, mode: Mode, opts: RunOpts) -> Result<BoolOut> {
     if let Some(why) = uv_gap(&out) {
         return Err(KernelError::OperationFailed(format!("the boolean built a face that doesn't close: {why}")));
     }
-    // Nor any other invalid body ([`Body::check`]).
-    if matches!(mode, Mode::Bool(_))
-        && let Some(why) = out.check().into_iter().next()
-    {
-        return Err(KernelError::OperationFailed(format!("the boolean's result is invalid: {why}")));
+    // Nor any other invalid body ([`Body::check`]; the solids' volumes known from above).
+    if matches!(mode, Mode::Bool(_)) {
+        let why = out.check_structure().into_iter().next().or_else(|| {
+            let si = volumes.iter().position(|v| !(*v > 0.0))?;
+            Some(format!("solid {si} encloses a volume of {:.3e} (its faces point in)", volumes[si]))
+        });
+        if let Some(why) = why {
+            return Err(KernelError::OperationFailed(format!("the boolean's result is invalid: {why}")));
+        }
     }
     // Solids in, faces out but no solid: some piece went missing.
     if !a.solids.is_empty() && !b.solids.is_empty() && !out.faces.is_empty() && out.solids.is_empty() {
@@ -1777,18 +1784,18 @@ fn run(a: &Body, b: &Body, mode: Mode, opts: RunOpts) -> Result<BoolOut> {
 /// the edge.
 /// Drops the solids of `b` that enclose no volume (to 1e-9 of the body's box, cubed): a closed
 /// shell of faces of the two inputs that met face to face, both kept, is a sheet-thin sliver,
-/// not a solid. Their faces go too (and their entries in `from`). True when any went.
-fn drop_empty_solids(b: &mut Body, from: &mut Vec<Vec<(usize, usize)>>) -> bool {
+/// not a solid. Their faces go too (and their entries in `from`). Returns whether any went,
+/// and the volumes of the solids left.
+fn drop_empty_solids(b: &mut Body, from: &mut Vec<Vec<(usize, usize)>>) -> (bool, Vec<f64>) {
     let size = b.bbox().diagonal();
-    let empty: Vec<usize> = (0..b.solids.len())
-        .filter(|&si| {
-            let sub = super::kernel::subset(b, &b.solid_faces(si), true);
-            super::mass::body_mass(&sub).volume.abs() <= 1e-9 * size * size * size
-        })
+    let volumes: Vec<f64> = (0..b.solids.len())
+        .map(|si| super::mass::body_mass(&super::kernel::subset(b, &b.solid_faces(si), true)).volume)
         .collect();
+    let empty: Vec<usize> = (0..b.solids.len()).filter(|&si| volumes[si].abs() <= 1e-9 * size * size * size).collect();
     if empty.is_empty() {
-        return false;
+        return (false, volumes);
     }
+    let left: Vec<f64> = (0..b.solids.len()).filter(|si| !empty.contains(si)).map(|si| volumes[si]).collect();
     let mut dead = vec![false; b.faces.len()];
     for &si in &empty {
         for f in b.solid_faces(si) {
@@ -1830,7 +1837,7 @@ fn drop_empty_solids(b: &mut Body, from: &mut Vec<Vec<(usize, usize)>>) -> bool 
         })
         .collect();
     super::unify::compact(b);
-    true
+    (true, left)
 }
 
 pub fn split_nonmanifold(b: &mut Body) {
