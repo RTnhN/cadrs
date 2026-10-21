@@ -27,8 +27,18 @@ use crate::{
 /// mirrored point this close to an existing point shares it.
 const ON_AXIS: f64 = 1e-6;
 
+/// True if curve `c` already has a mirror image in `axis`: it was mirrored there, or is
+/// itself a copy mirrored there.
+pub fn mirrored_in(s: &Sketch, axis: CurveRef, c: CurveId) -> bool {
+    let c = CurveRef::Curve(c);
+    s.constraints
+        .values()
+        .any(|x| matches!(*x, ConstraintOf::SymmetricCurves(a, b, l) if l == axis && (a == c || b == c)))
+}
+
 /// Mirrors `curves` in the line (or sketch axis) `axis`. Returns the copies (source, copy) in
-/// order.
+/// order. Curves already mirrored in it (and their copies) are left alone, so mirroring them
+/// again doesn't stack copies.
 pub fn mirror(s: &mut Sketch, axis: CurveRef, curves: &[CurveId]) -> Result<Vec<(CurveId, CurveId)>, String> {
     let Some((p0, p1)) = crate::dimension::line_ends(s, axis) else {
         return Err("the mirror line is not a line".into());
@@ -37,7 +47,8 @@ pub fn mirror(s: &mut Sketch, axis: CurveRef, curves: &[CurveId]) -> Result<Vec<
         return Err("the mirror line has no length".into());
     }
     let mut map: HashMap<PointId, PointId> = HashMap::new();
-    let sources: Vec<CurveId> = curves.to_vec();
+    let curves: Vec<CurveId> = curves.iter().copied().filter(|c| !mirrored_in(s, axis, *c)).collect();
+    let sources: Vec<CurveId> = curves.clone();
     let mut image = |s: &mut Sketch, p: PointId| -> PointId {
         if let Some(q) = map.get(&p) {
             return *q;
@@ -61,7 +72,7 @@ pub fn mirror(s: &mut Sketch, axis: CurveRef, curves: &[CurveId]) -> Result<Vec<
         q
     };
     let mut out = Vec::new();
-    for &c in curves {
+    for &c in &curves {
         if CurveRef::Curve(c) == axis {
             continue;
         }
@@ -726,6 +737,26 @@ mod tests {
         // arc copy's radius follows too.
         let g2 = s.arc_geom(copy_arc).unwrap();
         assert!((g2.radius - s.arc_geom(arc).unwrap().radius).abs() < 1e-6);
+    }
+
+    #[test]
+    fn mirroring_again_stacks_no_copies() {
+        let mut s = Sketch::new();
+        let axis = line(&mut s, v(0.0, -50.0), v(0.0, 50.0), true);
+        let l = line(&mut s, v(10.0, 0.0), v(30.0, 20.0), false);
+        let m = SketchOp::Mirror { axis: CurveRef::Curve(axis), curves: vec![l] };
+        m.apply(&mut s).unwrap();
+        let copy = s.curves.keys().find(|k| *k != axis && *k != l).unwrap();
+        let (curves, constraints) = (s.curves.len(), s.constraints.len());
+        // The source, its copy, or both: nothing to mirror.
+        for again in [vec![l], vec![copy], vec![l, copy]] {
+            assert!(SketchOp::Mirror { axis: CurveRef::Curve(axis), curves: again }.apply(&mut s.clone()).is_err());
+        }
+        // A new curve among them is still mirrored, on its own.
+        let n = line(&mut s, v(5.0, 30.0), v(15.0, 40.0), false);
+        SketchOp::Mirror { axis: CurveRef::Curve(axis), curves: vec![l, copy, n] }.apply(&mut s).unwrap();
+        assert_eq!(s.curves.len(), curves + 2);
+        assert_eq!(s.constraints.len(), constraints + 1);
     }
 
     #[test]

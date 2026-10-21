@@ -490,6 +490,9 @@ pub struct SketchDraw {
     pub drag_snap: Option<DragSnap>,
     /// A spline end handle being dragged: the spline, which end, and where the handle is.
     pub spline_handle: Option<SplineHandle>,
+    /// What a box selection in progress would select, drawn as selected while it is dragged
+    /// (the Mirror tool's: the curves it would mirror).
+    pub box_preview: Vec<SketchEntity>,
 }
 
 /// A spline's end handle (its tangent there, [`cadrs_sketch::spline`]).
@@ -968,12 +971,17 @@ pub(crate) fn sketch_pointer(
                         sketch,
                         grab,
                         analysis.conflicting_sources(),
+                        &selection.0,
                     );
                     drag_moved = draw.drag.is_some();
                     continue;
                 }
+                // The Mirror tool boxes the curves to mirror once its line is picked (#37).
+                let boxes = select
+                    || (tool.tool == SketchTool::Mirror
+                        && crate::sketch_edit_tools::mirror_axis(sketch, &selection).is_some());
                 if let DrawState::Idle = draw.state
-                    && tool.tool == SketchTool::Select
+                    && boxes
                     && let Some(p) = draw.press
                     && !p.began
                     // A part vertex or an axis under the press doesn't stop a box selection.
@@ -1100,17 +1108,29 @@ pub(crate) fn sketch_pointer(
                     }
                     continue;
                 }
+                // A selection box: left to right takes what is inside it, right to left what
+                // it crosses too (`box_select.md`).
+                let in_box = |start: Vec2| {
+                    box_select(
+                        sketch,
+                        SVec2::new(start.x as f64, start.y as f64),
+                        SVec2::new(pos.x as f64, pos.y as f64),
+                        pos.x < start.x,
+                        |p| map.to_screen64(p),
+                    )
+                };
+                if tool.tool == SketchTool::Mirror
+                    && let DrawState::BoxSelect { start } = draw.state
+                {
+                    // #37: every curve in the box is mirrored at once.
+                    let found = in_box(start);
+                    crate::sketch_edit_tools::mirror_box(sketch, &selection, &found, &mut commands, target);
+                    draw.state = DrawState::Idle;
+                    continue;
+                }
                 if tool.tool == SketchTool::Select {
                     if let DrawState::BoxSelect { start } = draw.state {
-                        let crossing = pos.x < start.x;
-                        let found = box_select(
-                            sketch,
-                            SVec2::new(start.x as f64, start.y as f64),
-                            SVec2::new(pos.x as f64, pos.y as f64),
-                            crossing,
-                            |p| map.to_screen64(p),
-                        );
-                        for e in found {
+                        for e in in_box(start) {
                             if !selection.contains(e) {
                                 selection.0.push(e);
                             }
@@ -1229,6 +1249,24 @@ pub(crate) fn sketch_pointer(
         }
     }
     draw.over_viewport = over;
+    draw.box_preview = match (draw.state, draw.cursor_screen) {
+        (DrawState::BoxSelect { start }, Some(pos)) => {
+            let found = box_select(
+                sketch,
+                SVec2::new(start.x as f64, start.y as f64),
+                SVec2::new(pos.x as f64, pos.y as f64),
+                pos.x < start.x,
+                |p| map.to_screen64(p),
+            );
+            match crate::sketch_edit_tools::mirror_axis(sketch, &selection) {
+                Some(axis) if tool.tool == SketchTool::Mirror => {
+                    crate::sketch_edit_tools::mirror_targets(sketch, axis, &found).into_iter().map(SketchEntity::Curve).collect()
+                }
+                _ => found,
+            }
+        }
+        _ => Vec::new(),
+    };
     // A drag follows the pointer (once per frame, from where the last frame left it). A
     // dragged point infers like a placed one (S11.4): it snaps to points, curves and
     // alignments with the origin and recently hovered points (not with itself).
@@ -1238,7 +1276,9 @@ pub(crate) fn sketch_pointer(
         && let Some(mut t) = d.target(c)
     {
         let mut snap = None;
+        // A selection dragged as one doesn't snap.
         if let SketchEntity::Point(p) = d.entity
+            && d.group.is_empty()
             && !suppress
             && d.base.points.contains_key(p)
         {
