@@ -428,28 +428,37 @@ fn fitted(s: &Surface, c: &Curve, t0: f64, t1: f64) -> Curve {
         }
     }
     ts.push(t1);
-    let mut uvs: Vec<P2> = Vec::new();
     // Followed continuously across the surface's seams (brought back into a closed
     // B-spline's range after: `into_closed_range`).
     let periods = closed_periods(s);
     let project = |t: f64, hint: Option<(f64, f64)>| -> P2 { project_along(s, &c.point(t), hint, periods) };
-    let fit_at = |ts: &[f64]| -> (NurbsCurve, Vec<P2>) {
-        let mut uvs = Vec::with_capacity(ts.len());
-        let mut hint: Option<(f64, f64)> = None;
-        for &t in ts {
-            let q = project(t, hint);
-            hint = Some((q.x, q.y));
-            uvs.push(q);
-        }
-        settle_poles(s, &mut uvs);
+    // The samples' projections, each hinted by its neighbour's and kept across the rounds
+    // (only the samples a round adds are projected).
+    let mut uvs: Vec<P2> = Vec::with_capacity(ts.len());
+    let mut hint: Option<(f64, f64)> = None;
+    for &t in &ts {
+        let q = project(t, hint);
+        hint = Some((q.x, q.y));
+        uvs.push(q);
+    }
+    settle_poles(s, &mut uvs);
+    let fit_of = |ts: &[f64], uvs: &[P2]| {
         let pts: Vec<P3> = uvs.iter().map(|q| P3::new(q.x, q.y, 0.0)).collect();
-        (NurbsCurve::interpolate(&pts, ts, 3.min(pts.len() - 1), None, None), uvs)
+        NurbsCurve::interpolate(&pts, ts, 3.min(pts.len() - 1), None, None)
     };
-    let _ = &mut uvs;
+    // How near the fit keeps to the curve's projection: 1e-9, or 2e-10 of the curve's size
+    // on a big model (the bound an intersection curve itself is fitted to).
+    let tol = {
+        let mut bb = Bbox::empty();
+        for k in 0..=8 {
+            bb.add(&c.point(t0 + (t1 - t0) * k as f64 / 8.0));
+        }
+        1e-9f64.max(2e-10 * bb.diagonal())
+    };
     for _round in 0..12 {
-        let (fit, uvs) = fit_at(&ts);
+        let fit = fit_of(&ts, &uvs);
         // Check the midpoints.
-        let mut ins = Vec::new();
+        let mut ins: Vec<(usize, f64, P2)> = Vec::new();
         for k in 0..ts.len() - 1 {
             let tm = (ts[k] + ts[k + 1]) * 0.5;
             let f = fit.point(tm);
@@ -458,8 +467,8 @@ fn fitted(s: &Surface, c: &Curve, t0: f64, t1: f64) -> Curve {
             // a little off the surface, which no p-curve can make up).
             let q = project(tm, Some((uvs[k].x, uvs[k].y)));
             let err = (s.eval(f.x, f.y) - s.eval(q.x, q.y)).norm();
-            if err > 1e-9 {
-                ins.push(tm);
+            if err > tol {
+                ins.push((k + 1, tm, q));
             }
         }
         if ins.is_empty() || ts.len() > 4096 {
@@ -468,10 +477,12 @@ fn fitted(s: &Surface, c: &Curve, t0: f64, t1: f64) -> Curve {
             }
             return Curve::Nurbs(Arc::new(fit));
         }
-        ts.extend(ins);
-        ts.sort_by(f64::total_cmp);
+        for (k, t, q) in ins.into_iter().rev() {
+            ts.insert(k, t);
+            uvs.insert(k, q);
+        }
     }
-    Curve::Nurbs(Arc::new(fit_at(&ts).0))
+    Curve::Nurbs(Arc::new(fit_of(&ts, &uvs)))
 }
 
 #[cfg(test)]

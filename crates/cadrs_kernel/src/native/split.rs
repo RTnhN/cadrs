@@ -37,6 +37,86 @@ impl Arc {
     }
 }
 
+/// The arc moved by (du, dv) in the face's (u, v) (a whole number of periods).
+fn shifted(a: &Arc, du: f64, dv: f64) -> Arc {
+    if du == 0.0 && dv == 0.0 {
+        return a.clone();
+    }
+    Arc { pc: a.pc.transformed(&Affine::translation(V3::new(du, dv, 0.0))), ..a.clone() }
+}
+
+/// The box of arcs' p-curves in (u, v), from a few points of each.
+fn uv_box(arcs: &[Arc]) -> (P2, P2) {
+    let (mut lo, mut hi) = (P2::new(f64::INFINITY, f64::INFINITY), P2::new(f64::NEG_INFINITY, f64::NEG_INFINITY));
+    for a in arcs {
+        for i in 0..=8 {
+            let q = a.uv_at(i as f64 / 8.0);
+            lo = P2::new(lo.x.min(q.x), lo.y.min(q.y));
+            hi = P2::new(hi.x.max(q.x), hi.y.max(q.y));
+        }
+    }
+    (lo, hi)
+}
+
+/// The face's loops and cuts in one chart of a periodic surface: a loop's p-curves may lie a
+/// period away from the outer loop's (each loop is continuous on its own, the face valid), and
+/// a cut's wherever its projection put it; the arrangement needs them where they meet. Inner
+/// loops lying outside the outer loop's range in a periodic direction are moved into it; a cut
+/// goes where its ends meet the boundary's vertices at the same (u, v), else into the range.
+fn one_chart(surf: &Surface, boundary: &[Vec<Arc>], cuts: &[Arc]) -> (Vec<Vec<Arc>>, Vec<Arc>) {
+    let periods = [surf.u_periodic().then_some(TAU), surf.v_periodic().then_some(TAU)];
+    if periods == [None, None] || boundary.is_empty() {
+        return (boundary.to_vec(), cuts.to_vec());
+    }
+    let (lo, hi) = uv_box(&boundary[0]);
+    let mid = |l: P2, h: P2| P2::new((l.x + h.x) * 0.5, (l.y + h.y) * 0.5);
+    // The whole periods taking a point at `c` into the outer loop's range (none when it is in).
+    let into_range = |c: P2| -> (f64, f64) {
+        let m = mid(lo, hi);
+        let step = |x: f64, a: f64, b: f64, mm: f64, per: Option<f64>| match per {
+            Some(p) if x < a - 1e-9 || x > b + 1e-9 => ((mm - x) / p).round() * p,
+            _ => 0.0,
+        };
+        (step(c.x, lo.x, hi.x, m.x, periods[0]), step(c.y, lo.y, hi.y, m.y, periods[1]))
+    };
+    let mut loops: Vec<Vec<Arc>> = vec![boundary[0].clone()];
+    for l in &boundary[1..] {
+        let (a, b) = uv_box(l);
+        let (du, dv) = into_range(mid(a, b));
+        loops.push(l.iter().map(|x| shifted(x, du, dv)).collect());
+    }
+    // Where the boundary's vertices are.
+    let ends: Vec<(usize, P2)> = loops.iter().flatten().flat_map(|a| [(a.v[0], a.uv_at(0.0)), (a.v[1], a.uv_at(1.0))]).collect();
+    let tol = 1e-6 * (1.0 + (hi - lo).norm());
+    let meets = |v: usize, q: P2| ends.iter().any(|(w, p)| *w == v && (p - q).norm() <= tol);
+    let out_cuts = cuts
+        .iter()
+        .map(|c| {
+            let (s, e) = (c.uv_at(0.0), c.uv_at(1.0));
+            let mut best: Option<(usize, f64, f64)> = None;
+            let ku: &[f64] = if periods[0].is_some() { &[0.0, -1.0, 1.0, -2.0, 2.0] } else { &[0.0] };
+            let kv: &[f64] = if periods[1].is_some() { &[0.0, -1.0, 1.0, -2.0, 2.0] } else { &[0.0] };
+            for &i in ku {
+                for &j in kv {
+                    let d = V2::new(i * TAU, j * TAU);
+                    let n = usize::from(meets(c.v[0], s + d)) + usize::from(meets(c.v[1], e + d));
+                    if best.is_none_or(|(bn, _, _)| n > bn) {
+                        best = Some((n, d.x, d.y));
+                    }
+                }
+            }
+            match best {
+                Some((n, du, dv)) if n > 0 => shifted(c, du, dv),
+                _ => {
+                    let (du, dv) = into_range(c.uv_at(0.5));
+                    shifted(c, du, dv)
+                }
+            }
+        })
+        .collect();
+    (loops, out_cuts)
+}
+
 pub struct SplitResult {
     /// Each face: loops of arcs, outer first.
     pub faces: Vec<Vec<Vec<Arc>>>,
@@ -45,6 +125,8 @@ pub struct SplitResult {
 /// Splits the region bounded by `boundary` (loops of arcs, as the face has them) by `cuts`
 /// (each used both ways). `flip`: the face's sense is reversed (its loops run clockwise in uv).
 pub fn split_face(surf: &Surface, flip: bool, boundary: &[Vec<Arc>], cuts: &[Arc]) -> SplitResult {
+    let (boundary, cuts) = one_chart(surf, boundary, cuts);
+    let (boundary, cuts) = (&boundary[..], &cuts[..]);
     let (mu, mv) = surf.metric();
     let sgn = if flip { -1.0 } else { 1.0 };
     // Oriented, scaled uv (material on the left for every loop).
@@ -273,5 +355,40 @@ pub fn split_face(surf: &Surface, flip: bool, boundary: &[Vec<Arc>], cuts: &[Arc
             faces[i].push(lp.iter().map(|&k| arcs[k].clone()).collect());
         }
     }
+    if std::env::var("CADRS_SPLIT_DEBUG").is_ok() {
+        for (i, f) in faces.iter().enumerate() {
+            eprintln!("split face {i}: {:?}", f.iter().map(|l| l.iter().map(|a| (a.edge, a.fwd, a.cut)).collect::<Vec<_>>()).collect::<Vec<_>>());
+        }
+    }
     SplitResult { faces }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn line(o: (f64, f64), d: (f64, f64)) -> Curve {
+        Curve::Line { o: P3::new(o.0, o.1, 0.0), d: V3::new(d.0, d.1, 0.0) }
+    }
+
+    /// A cylinder band whose loop runs in u ∈ [−2π, 0], cut by a small closed curve whose
+    /// p-curve lies a period over (u ≈ 1): a band with a hole and a disk (regression: the cut
+    /// stayed outside the loop's chart, the band lost its hole).
+    #[test]
+    fn cut_in_another_chart() {
+        let surf = Surface::Cylinder { f: Frame::from_z(P3::origin(), V3::z()), r: 1.0 };
+        let arc = |edge, fwd, pc, t: [f64; 2], v: [usize; 2]| Arc { edge, fwd, pc, t, v, cut: false, deg: false };
+        let boundary = vec![vec![
+            arc(0, true, line((-TAU, 0.0), (1.0, 0.0)), [0.0, TAU], [0, 0]),
+            arc(1, true, line((0.0, 0.0), (0.0, 1.0)), [0.0, 1.0], [0, 2]),
+            arc(2, false, line((-TAU, 1.0), (1.0, 0.0)), [0.0, TAU], [2, 2]),
+            arc(1, false, line((-TAU, 0.0), (0.0, 1.0)), [0.0, 1.0], [2, 0]),
+        ]];
+        let circle = Curve::Circle { c: P3::new(1.0, 0.5, 0.0), x: V3::x(), y: V3::y(), r: 0.2 };
+        let cut = Arc { edge: 3, fwd: true, pc: circle, t: [0.0, TAU], v: [3, 3], cut: true, deg: false };
+        let r = split_face(&surf, false, &boundary, &[cut]);
+        let mut loops: Vec<usize> = r.faces.iter().map(|f| f.len()).collect();
+        loops.sort();
+        assert_eq!(loops, vec![1, 2]);
+    }
 }
