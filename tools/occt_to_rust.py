@@ -30,7 +30,7 @@ IGNORED = {
     "checktrinfo", "dtyp", "whatis", "tolerance", "checkcontinuity", "bfillds", "setflags",
     "brunparallel", "bnondestructive", "bfuzzyvalue", "bglue", "bcheckinverted", "buseobb", "bdrawwarnshapes", "bsimplify",
     "setfillhistory", "savehistory", "tclean", "incmesh", "tolblend", "checkfaults", "dversion", "dsetsignal", "testgrid", "datadir", "locate_data_file",
-    "fsameparameter", "encoderegularity", "bopcheck",
+    "fsameparameter", "encoderegularity", "bopcheck", "don",
 }
 
 
@@ -258,6 +258,11 @@ class Case:
             if wid < 0:
                 raise Unsupported("fixshape without its tail fix")
             self.bind(a[0], f"k.fixshape_tails({self.shape(a[1])}, {ang!r}, {wid!r})?")
+        elif c == "halfspace" and len(a) == 5:
+            self.bind(a[0], f"k.halfspace({self.shape(a[1])}, {', '.join(L(x) for x in a[2:])})?")
+        elif c == "mkplane" and len(a) == 3:
+            # (OnlyPlane: our faces of wires are planar ones anyway.)
+            self.bind(a[0], f"k.mkplane({self.shape(a[1])})?")
         elif c == "mkplane" and len(a) == 2:
             self.bind(a[0], f"k.mkplane({self.shape(a[1])})?")
         elif c == "add" and len(a) == 2:
@@ -463,13 +468,34 @@ class Case:
                 raise Unsupported(f"{c} with these arguments")
             nums = [L(x) for x in a[3:-2]] + ["0.0"] * 6
             self.feat = (kind, self.shape(a[0]), self.shape(a[1]), f"[{', '.join(nums[:6])}]", int(self.num(a[-2])))
+        elif c == "featlf" and len(a) == 11:
+            if a[2] not in self.planes:
+                raise Unsupported(f"the plane {a[2]}")
+            self.feat = ("lf", self.shape(a[0]), self.shape(a[1]), f"&{self.vars[a[2]]}, [{', '.join(L(x) for x in a[3:6])}], [{', '.join(L(x) for x in a[6:9])}]", int(self.num(a[9])))
+        elif c == "addslide" and len(a) >= 3 and len(a) % 2 == 1:
+            # The faces the feature slides along (gluing hints for OCCT's local operation): the
+            # same shape results without them.
+            if self.feat is None or a[0].lower() != self.feat[0]:
+                raise Unsupported("addslide without its feature")
+            for x in a[1:]:
+                self.shape(x)
+        elif c == "featrf" and len(a) == 13:
+            if a[2] not in self.planes:
+                raise Unsupported(f"the plane {a[2]}")
+            self.feat = ("rf", self.shape(a[0]), self.shape(a[1]), f"&{self.vars[a[2]]}, [{', '.join(L(x) for x in a[3:9])}], {L(a[9])}, {L(a[10])}", int(self.num(a[11])))
+        elif c == "featperform" and len(a) == 2 and self.feat is not None and self.feat[0] in ("lf", "rf") and a[0].lower() == self.feat[0]:
+            kind, base, wire, args, fuse = self.feat
+            self.bind(a[1], f"k.feat{kind}({base}, {wire}, {args}, {fuse})?")
         elif c in ("featperform", "featperformval") and len(a) >= 2:
             if self.feat is None or a[0].lower() != self.feat[0]:
                 raise Unsupported(f"{c} {a[0]} without its definition")
             kind, base, pbase, params, fuse = self.feat
             if c == "featperformval":
+                if len(a) == 4:
+                    self.bind(a[1], f'k.featperformval_until({base}, {pbase}, "{kind}", {params}, {fuse}, {L(a[2])}, {self.shape(a[3])})?')
+                    return
                 if len(a) != 3:
-                    raise Unsupported("featperformval up to a face")
+                    raise Unsupported("featperformval with these arguments")
                 self.bind(a[1], f'k.featperformval({base}, {pbase}, "{kind}", {params}, {fuse}, {L(a[2])})?')
             else:
                 lim = [f"Some({self.shape(x)})" for x in a[2:]]

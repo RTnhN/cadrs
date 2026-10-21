@@ -18,6 +18,7 @@ pub mod distance;
 pub mod draw;
 pub mod edge_bop;
 pub mod edges_faces;
+pub mod evolved;
 pub mod exchange;
 pub mod face_build;
 pub mod features;

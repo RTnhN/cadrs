@@ -1309,6 +1309,8 @@ impl NativeKernel {
             }
             Shape::Wire(w) => wire(w.clone()),
             Shape::Edge(e) => wire(vec![e.clone()]),
+            // A face read from a file: a sheet of one face.
+            Shape::Body(b) if self.get(*b)?.faces.len() == 1 => self.section_of(&Shape::BodyFace(*b, FaceId(0)), hint),
             _ => Err(KernelError::Unsupported("pipes of this kind of profile")),
         }
     }
@@ -1343,7 +1345,11 @@ impl NativeKernel {
     /// an edge. Where the spine turns a corner the profile keeps its attitude (OCCT's G0 law);
     /// its three trihedron modes are one here (the rotation-minimizing frame).
     pub fn pipe(&mut self, spine: &Shape, profile: &Shape) -> Result<Shape> {
-        let solid = matches!(profile, Shape::Face { .. } | Shape::BodyFace(..));
+        let solid = match profile {
+            Shape::Face { .. } | Shape::BodyFace(..) => true,
+            Shape::Body(b) => !self.get(*b)?.faces.is_empty(),
+            _ => false,
+        };
         self.buildsweep(spine, &[(profile, false, false)], "CF", [0.0, 0.0, 1.0], 'M', solid)
     }
 
@@ -2014,25 +2020,199 @@ impl NativeKernel {
         if from.is_some() || until.is_some() { self.feat_apply_limited(base, tool, fuse) } else { self.feat_apply(base, tool, fuse) }
     }
 
+    /// `featlf base wire plane dx dy dz dx1 dy1 dz1 fuse modify; featperform lf result`
+    /// (BRepFeat_MakeLinearForm: a rib, or with `fuse` 0 a slot): the region of `plane` between
+    /// the open `wire` (its ends carried on along their tangents) and the base, made `d` thick
+    /// on one side of the plane and `d1` on the other (both the plane's own thickness when `d1`
+    /// is null: the rib centred on `d`'s half), added to the base; a slot's region lies on the
+    /// wire's side away from the base and is cut from it.
+    pub fn featlf(&mut self, base: &Shape, wire: &Shape, pl: &Ax3, d: [f64; 3], d1: [f64; 3], fuse: i64) -> Result<Shape> {
+        let (mut d, mut d1) = (V3::from(d), V3::from(d1));
+        let mut shift = V3::zeros();
+        if d1.norm() < 1e-12 {
+            // A rib centred: the wire moved half way along d, d split both ways.
+            shift = d * 0.5;
+            d *= 0.5;
+            d1 = -d;
+        }
+        let tool = move |k: &mut Self, region: &Shape| -> Result<Shape> {
+            let r = k.motion(region, &Affine::translation(d1))?;
+            k.prism(&r, (d - d1).x, (d - d1).y, (d - d1).z)
+        };
+        self.rib(base, wire, pl, shift, (d + d1) * 0.5, (d - d1).norm(), fuse, &tool)
+    }
+
+    /// `featrf base wire plane x y z dx dy dz h1 h2 fuse modify; featperform rf result`
+    /// (BRepFeat_MakeRevolutionForm): as [`NativeKernel::featlf`], the region turned about the
+    /// axis (so its sides follow the base's surfaces of revolution) and trimmed to `h1` on the
+    /// plane normal's side and `h2` on the other.
+    pub fn featrf(&mut self, base: &Shape, wire: &Shape, pl: &Ax3, axis: [f64; 6], h1: f64, h2: f64, fuse: i64) -> Result<Shape> {
+        let n = pl.z.normalize();
+        let ax = Axis { origin: P3::new(axis[0], axis[1], axis[2]), dir: nalgebra::Unit::try_new(V3::new(axis[3], axis[4], axis[5]), 1e-12).ok_or_else(|| err("featrf: a null axis"))? };
+        // The side of the axis the wire lies on.
+        let radial = {
+            let e = match wire {
+                Shape::Wire(w) if !w.is_empty() => w[w.len() / 2].clone(),
+                Shape::Edge(e) => e.clone(),
+                _ => return Err(err("featrf takes a wire")),
+            };
+            let w = e.curve.point(0.5 * (e.t0 + e.t1)) - ax.origin;
+            (w - ax.dir.into_inner() * w.dot(&ax.dir)).try_normalize(1e-12).ok_or_else(|| err("featrf: the wire lies on the axis"))?
+        };
+        let tool = move |k: &mut Self, region: &Shape| -> Result<Shape> {
+            // The region on the wire's side of the axis only.
+            let size = 1e3 * (1.0 + (pl.origin - ax.origin).norm() + h1 + h2);
+            let x = ax.dir.into_inner();
+            let side = Ax3 { origin: ax.origin - x * size - radial.cross(&x) * size, z: radial, x };
+            let side = k.box_on(&side, 2.0 * size, 2.0 * size, size)?;
+            let region = k.bcommon(region, &side)?;
+            let rb = k.body_of(&region)?;
+            // The region's nearest point to the axis sets how far it must turn to fill the slab.
+            let rmin = k
+                .get(rb)?
+                .verts
+                .iter()
+                .map(|v| {
+                    let w = v.p - ax.origin;
+                    (w - ax.dir.into_inner() * w.dot(&ax.dir)).norm()
+                })
+                .fold(f64::INFINITY, f64::min);
+            let h = h1.max(h2);
+            let ang = if rmin > h { (h / rmin).asin() * 1.5 } else { PI / 2.0 };
+            let r = nalgebra::Rotation3::from_axis_angle(&ax.dir, -ang).into_inner();
+            // Back to a planar face (revolved as a profile).
+            let face = match k.section_of(&region, &radial)? {
+                Section { plane, loops, closed: true } => Shape::Face { plane, loops },
+                _ => return Err(err("featrf: no region")),
+            };
+            let turned = k.motion(&face, &Affine { m: r, t: ax.origin.coords - r * ax.origin.coords })?;
+            let o = ax.origin;
+            let swept = k.revol(&turned, o.x, o.y, o.z, ax.dir.x, ax.dir.y, ax.dir.z, (2.0 * ang).to_degrees())?;
+            // Trimmed to the slab between the planes h1 and h2 off the profile's plane.
+            let size = k.body_of(&swept).and_then(|b| crate::Kernel::bounding_box(k, b)).map(|bb| (bb.max - bb.min).norm()).unwrap_or(1.0) * 2.0 + 1.0;
+            let x = ax2_x(&n);
+            let slab = Ax3 { origin: pl.origin - n * h2 - x * size - n.cross(&x) * size, z: n, x };
+            let slab = k.box_on(&slab, 2.0 * size, 2.0 * size, h1 + h2)?;
+            k.bcommon(&swept, &slab)
+        };
+        self.rib(base, wire, pl, V3::zeros(), n * (h1 - h2) * 0.5, h1 + h2, fuse, &tool)
+    }
+
+    /// The rib or slot of [`NativeKernel::featlf`]: the region of the plane between the wire
+    /// (moved by `shift`, its ends carried on) and the base, swept into a tool by `tool`; the
+    /// pieces of it the base leaves (outside it for a rib, inside for a slot) that lie along the
+    /// wire, `mid` off the plane, added to the base or cut from it. `thick` is how far the tool
+    /// reaches off the plane.
+    fn rib(&mut self, base: &Shape, wire: &Shape, pl: &Ax3, shift: V3, mid_off: V3, thick: f64, fuse: i64, tool: &dyn Fn(&mut Self, &Shape) -> Result<Shape>) -> Result<Shape> {
+        let b = self.body_of(base)?;
+        let edges: Vec<DEdge> = match wire {
+            Shape::Wire(w) => w.clone(),
+            Shape::Edge(e) => vec![e.clone()],
+            _ => return Err(err("a rib takes a wire")),
+        };
+        let edges: Vec<DEdge> = edges.iter().map(|e| DEdge { curve: e.curve.transformed(&Affine::translation(shift)), t0: e.t0, t1: e.t1 }).collect();
+        let n = pl.z.normalize();
+        let origin = pl.origin + shift;
+        let bb = crate::Kernel::bounding_box(self, b)?;
+        let size = (bb.max - bb.min).norm().max(1.0);
+        let big = 4.0 * size;
+        // The wire's ends carried on along their tangents.
+        let (first, last) = (&edges[0], &edges[edges.len() - 1]);
+        let (t0, _) = tangent_at(first);
+        let (_, t1) = tangent_at(last);
+        let (p0, p1) = (first.start(), last.end());
+        let (e0, e1) = (p0 - t0.normalize() * big, p1 + t1.normalize() * big);
+        // The side of the wire the region lies on: likelier towards the base (a rib) or away
+        // (a slot); the other side when that bounds nothing.
+        let centre = P3::from((bb.min.coords + bb.max.coords) / 2.0);
+        let mut side = n.cross(&(e1 - e0)).normalize();
+        if ((centre - e0).dot(&side) > 0.0) != (fuse != 0) {
+            side = -side;
+        }
+        let line = |a: P3, b: P3| {
+            let (c, l) = Curve::line(a, b);
+            DEdge { curve: c, t0: 0.0, t1: l }
+        };
+        let plane = Plane { origin, x_dir: nalgebra::Unit::new_normalize(ax2_x(&n)), normal: nalgebra::Unit::new_normalize(n) };
+        // A piece reaching past the base and the wire is open to the far side: not the region.
+        let mut hull = bb;
+        for e in &edges {
+            for i in 0..=8 {
+                let p = e.curve.point(e.t0 + (e.t1 - e.t0) * i as f64 / 8.0);
+                hull.min = hull.min.inf(&p);
+                hull.max = hull.max.sup(&p);
+            }
+        }
+        let reach = thick + 1e-6 * size;
+        let mut feature: Option<BodyId> = None;
+        for side in [side, -side] {
+            let (f0, f1) = (e1 + side * big, e0 + side * big);
+            let mut lp = vec![line(e0, p0)];
+            lp.extend(edges.iter().cloned());
+            lp.extend([line(p1, e1), line(e1, f0), line(f0, f1), line(f1, e0)]);
+            let swept = tool(self, &Shape::Face { plane, loops: vec![lp] })?;
+            let pieces = if fuse != 0 { self.bcut(&swept, base)? } else { self.bcommon(&swept, base)? };
+            let Ok(pb) = self.body_of(&pieces) else { continue };
+            let mid = {
+                let e = &edges[edges.len() / 2];
+                e.curve.point(0.5 * (e.t0 + e.t1)) + side * (1e-3 * size) + mid_off
+            };
+            for piece in super::exchange::split_into_solids(self.get(pb)?) {
+                let id = self.insert(piece);
+                let pbb = crate::Kernel::bounding_box(self, id)?;
+                let inside = (0..3).all(|i| pbb.min[i] >= hull.min[i] - reach && pbb.max[i] <= hull.max[i] + reach);
+                if inside && crate::Kernel::classify(self, id, mid, 1e-9 * size)? == PointClass::Inside {
+                    feature = Some(match feature {
+                        None => id,
+                        Some(f) => crate::Kernel::boolean(self, BoolOp::Union, f, &[id])?.bodies[0],
+                    });
+                }
+            }
+            if feature.is_some() {
+                break;
+            }
+        }
+        let feature = feature.ok_or_else(|| err("the rib's wire bounds no region against the base"))?;
+        if fuse != 0 { self.bfuse(base, &Shape::Body(feature)) } else { self.bcut(base, &Shape::Body(feature)) }
+    }
+
     /// `featperformval kind result value`: the feature with a length (a prism, `value` along
     /// its direction; a drafted prism, `value` high along the profile's normal with its walls
     /// leaning out by the draft angle) or an angle (a revolution, degrees).
     pub fn featperformval(&mut self, base: &Shape, pbase: &Shape, kind: &str, params: [f64; 6], fuse: i64, value: f64) -> Result<Shape> {
+        self.featperformval_from(base, pbase, kind, params, fuse, value, None)
+    }
+
+    /// `featperformval kind result value until` (PerformUntilHeight): a prism or drafted prism
+    /// `value` long from the planar face `until` on.
+    pub fn featperformval_until(&mut self, base: &Shape, pbase: &Shape, kind: &str, params: [f64; 6], fuse: i64, value: f64, until: &Shape) -> Result<Shape> {
+        let dir = match kind {
+            "prism" => V3::new(params[0], params[1], params[2]).normalize(),
+            "dprism" => self.feat_profile(pbase)?.0.plane.normal.into_inner(),
+            _ => return Err(KernelError::Unsupported("revolved features up to a face and an angle")),
+        };
+        let (ub, uf) = self.feat_face(until)?;
+        let start = self.feat_reach(pbase, &dir, ub, uf)?;
+        self.featperformval_from(base, pbase, kind, params, fuse, value, Some(start))
+    }
+
+    fn featperformval_from(&mut self, base: &Shape, pbase: &Shape, kind: &str, params: [f64; 6], fuse: i64, value: f64, start: Option<f64>) -> Result<Shape> {
+        let s0 = start.unwrap_or(0.0);
         let tool = match kind {
             "prism" => {
                 let dir = V3::new(params[0], params[1], params[2]).normalize();
-                self.feat_extrude(pbase, dir, 0.0, ExtrudeEnd::Blind(value), false, vec![])?
+                self.feat_extrude(pbase, dir, s0, ExtrudeEnd::Blind(value), false, vec![])?
             }
             "dprism" => {
                 let n = self.feat_profile(pbase)?.0.plane.normal.into_inner();
-                let prism = self.feat_extrude(pbase, n, 0.0, ExtrudeEnd::Blind(value), false, vec![])?;
+                let prism = self.feat_extrude(pbase, n, s0, ExtrudeEnd::Blind(value), false, vec![])?;
                 let angle = params[0] * PI / 360.0;
                 if angle.abs() < 1e-12 {
                     prism
                 } else {
                     // The walls: the faces that aren't square to the profile's normal.
                     let walls: Vec<FaceId> = self.faces(prism)?.into_iter().filter(|f| f.plane.is_none_or(|p| p.normal.dot(&n).abs() < 1.0 - 1e-9)).map(|f| f.id).collect();
-                    let o = self.feat_profile(pbase)?.0.plane.origin;
+                    let o = self.feat_profile(pbase)?.0.plane.origin + n * s0;
                     let pull = nalgebra::Unit::new_normalize(n * value.signum());
                     let spec = DraftSpec { faces: walls, angle: -angle, pull, neutral: o, neutral_normal: None, tangent_propagation: false };
                     crate::Kernel::draft(self, prism, &spec)?.bodies[0]
@@ -2788,6 +2968,38 @@ impl NativeKernel {
                 .map(|(plane, loops)| Shape::Face { plane, loops: loops.into_iter().map(|l| l.into_iter().map(|(curve, t0, t1)| DEdge { curve, t0, t1 }).collect()).collect() })
                 .collect(),
         ))
+    }
+
+    /// `halfspace name face x y z` (BRepPrimAPI_MakeHalfSpace): the side of a planar face's
+    /// plane the point is on, as a box reaching far past the face and the point (twenty times
+    /// their size) — an infinite solid's stand-in for booleans with finite shapes.
+    pub fn halfspace(&mut self, f: &Shape, x: f64, y: f64, z: f64) -> Result<Shape> {
+        let (plane, size) = match f {
+            Shape::Face { plane, loops } => {
+                let mut bb = Bbox::empty();
+                for e in loops.iter().flatten() {
+                    bb.add(&e.start());
+                }
+                (*plane, bb.diagonal())
+            }
+            Shape::BodyFace(b, id) => {
+                let plane = self.plane_of(*b, *id).ok_or(KernelError::Unsupported("half spaces of faces that aren't planar"))?;
+                let bb = crate::Kernel::bounding_box(self, *b)?;
+                (plane, (bb.max - bb.min).norm())
+            }
+            _ => return Err(KernelError::Unsupported("half spaces of this kind of shape")),
+        };
+        let p = P3::new(x, y, z);
+        let n0 = plane.normal.into_inner();
+        let side = (p - plane.origin).dot(&n0);
+        if side.abs() < 1e-12 {
+            return Err(err("halfspace: the point lies on the face's plane"));
+        }
+        let n = n0 * side.signum();
+        let big = 20.0 * (size + (p - plane.origin).norm()).max(1.0);
+        let xd = plane.x_dir.into_inner();
+        let ax = Ax3 { origin: plane.origin - xd * big - n.cross(&xd) * big, z: n, x: xd };
+        self.box_on(&ax, 2.0 * big, 2.0 * big, big)
     }
 
     /// `checkprops shape -s empty` (and -v, -l): nothing there.

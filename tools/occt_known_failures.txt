@@ -795,3 +795,43 @@ offset shape_type_i_d1
 heal wire_tails_composed_a19
 # heal: a trimmed cylinder face divided: the cells left by its holes differ from OCCT's (8 for 6).
 heal split_number_d1
+# feat: unsupported: features between faces that aren't planar.
+feat featdprism_a3
+feat featdprism_a6
+feat featdprism_b3
+feat featdprism_b6
+feat featprism_a9
+feat featprism_b8
+feat featprism_c2
+feat featprism_d9
+# feat: ribs whose thickness lies in their plane, and fillets after them that fail.
+feat featlf_a4
+feat featlf_e2
+feat featlf_e3
+# feat: a boolean of the feature fails (open shell).
+feat featlf_a8
+feat featlf_b7
+feat featlf_c2
+feat featlf_c3
+feat featlf_c4
+feat featrf_a4
+feat featrf_b3
+# feat: ribs and slots (featlf, featrf) whose area differs: OCCT closes the wire against the base along its faces where we take the base's whole cut-off piece.
+feat featlf_b3
+feat featlf_b4
+feat featlf_d7
+feat featlf_d8
+feat featlf_e4
+# feat: unsupported: booleans of shapes other than solids.
+feat featprism_c6
+feat featprism_g6
+feat featprism_g7
+feat featrevol_h6
+feat featrevol_h7
+feat featrevol_h8
+feat featrevol_i6
+feat featrevol_i7
+feat featrevol_i9
+feat featrf_b2
+# feat: unsupported: revolved features up to a face and an angle.
+feat featrevol_a8
