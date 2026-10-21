@@ -8,3 +8,8 @@ CMAKE_POLICY_VERSION_MINIMUM = "3.5"
 [target.x86_64-unknown-linux-gnu]
 linker = "clang"
 rustflags = ["-C", "link-arg=-fuse-ld=mold", "-Zshare-generics=y", "-Zthreads=8"]
+
+[alias]
+# Builds in release and installs it for the current user, with a launcher entry (Linux; see
+# crates/cadrs/src/install.rs).
+install-local = "run -r -p cadrs -- --install"

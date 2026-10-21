@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=cadrs
+GenericName=CAD
+Comment=Parametric, feature-based CAD
+Exec=@EXEC@
+Icon=@ICON@
+Terminal=false
+Categories=Graphics;Engineering;3DGraphics;
+Keywords=CAD;3D;sketch;PCB;STEP;
+StartupWMClass=cadrs
