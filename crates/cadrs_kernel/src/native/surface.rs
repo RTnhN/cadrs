@@ -292,20 +292,38 @@ impl Surface {
 
     fn project_grid(&self, p: &P3, hint: Option<(f64, f64)>, n: usize) -> (f64, f64) {
         let ((u0, u1), (v0, v1)) = self.param_box();
+        // Unhinted: Newton from the nearest grid point, and when that stops short of `p` (in
+        // another basin of the distance: a surface curving back on itself between grid
+        // points), from the next nearest local minima of the grid too.
+        let mut others: Vec<(f64, (f64, f64))> = Vec::new();
         let (u, v) = match hint {
             Some(h) => h,
             None => {
-                let mut best = (f64::INFINITY, (u0, v0));
+                let at = |i: usize, j: usize| (u0 + (u1 - u0) * i as f64 / n as f64, v0 + (v1 - v0) * j as f64 / n as f64);
+                let d: Vec<Vec<f64>> = (0..=n)
+                    .map(|i| {
+                        (0..=n)
+                            .map(|j| {
+                                let (a, b) = at(i, j);
+                                (self.eval(a, b) - p).norm_squared()
+                            })
+                            .collect()
+                    })
+                    .collect();
                 for i in 0..=n {
                     for j in 0..=n {
-                        let (a, b) = (u0 + (u1 - u0) * i as f64 / n as f64, v0 + (v1 - v0) * j as f64 / n as f64);
-                        let d = (self.eval(a, b) - p).norm_squared();
-                        if d < best.0 {
-                            best = (d, (a, b));
+                        let lowest = (i.saturating_sub(1)..=(i + 1).min(n)).all(|a| (j.saturating_sub(1)..=(j + 1).min(n)).all(|b| d[a][b] >= d[i][j]));
+                        if lowest {
+                            others.push((d[i][j], at(i, j)));
                         }
                     }
                 }
-                best.1
+                others.sort_by(|a, b| a.0.total_cmp(&b.0));
+                if others.is_empty() {
+                    (u0, v0)
+                } else {
+                    others.remove(0).1
+                }
             }
         };
         let newton = |mut u: f64, mut v: f64| {
@@ -328,7 +346,18 @@ impl Surface {
             }
             (u, v)
         };
-        let (u, v) = newton(u, v);
+        let (mut u, mut v) = newton(u, v);
+        let near_enough = 1e-7 * (1.0 + p.coords.norm());
+        for (_, (a, b)) in others.into_iter().take(4) {
+            let off = (self.eval(u, v) - p).norm();
+            if off <= near_enough {
+                break;
+            }
+            let (a, b) = newton(a, b);
+            if (self.eval(a, b) - p).norm() < off {
+                (u, v) = (a, b);
+            }
+        }
         // Stopped on a v end of a surface closed in v (a polar patch's seam): the point may lie
         // just across the seam, so go on from the other end too.
         if (v == v0 || v == v1) && (self.eval(u, v) - p).norm() > 1e-9 {
@@ -941,6 +970,30 @@ fn project_off_plane(f: &Frame, m: &Curve, p: &P3, hint: Option<(f64, f64)>) -> 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Projection onto a B-spline surface that folds back on itself between the points of the
+    /// start grid (a meander extruded): every point of the surface projects onto itself
+    /// (regression: Newton from the nearest grid point stopped on the neighbouring fold).
+    #[test]
+    fn projection_onto_a_folded_surface() {
+        let mut pts = Vec::new();
+        for k in 0..4 {
+            let y = k as f64 * 1.0;
+            let xs = if k % 2 == 0 { [0.0, 10.0] } else { [10.0, 0.0] };
+            pts.push(P3::new(xs[0], y, 0.0));
+            pts.push(P3::new(xs[1], y, 0.0));
+        }
+        let t: Vec<f64> = (0..pts.len()).map(|i| i as f64).collect();
+        let c = NurbsCurve::interpolate(&pts, &t, 3, None, None);
+        let cps: Vec<Vec<H>> = c.cps.iter().map(|h| vec![*h, h + H::new(0.0, 0.0, h.w, 0.0)]).collect();
+        let s = Surface::Nurbs(Arc::new(NurbsSurface::new(c.degree, 1, c.knots.clone(), vec![0.0, 0.0, 1.0, 1.0], cps).unwrap()));
+        let ((u0, u1), _) = s.param_box();
+        for i in 0..=200 {
+            let p = s.eval(u0 + (u1 - u0) * i as f64 / 200.0, 0.37);
+            let (u, v) = s.project(&p, None);
+            assert!((s.eval(u, v) - p).norm() < 1e-9, "{p:?} projects {:.3e} away", (s.eval(u, v) - p).norm());
+        }
+    }
 
     /// Coincidence of B-spline and extrusion surfaces, sampled: an extrusion of a spline and the
     /// same spline extruded twice as far; a B-spline cylinder patch and the cylinder; two patches

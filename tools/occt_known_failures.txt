@@ -441,10 +441,8 @@ sewing tol_1_f5
 sewing tol_1_q5
 boolean bsection_a5
 boolean bsection_c2
-boolean bsection_c7
 boolean bsection_d1
 boolean bsection_e1
-boolean bsection_f2
 boolean bsection_f6
 boolean bsection_f9
 boolean bsection_i2
