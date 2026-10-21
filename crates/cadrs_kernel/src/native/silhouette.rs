@@ -417,7 +417,18 @@ impl<'a> Tracer<'a> {
         let d = s.d2(u, v);
         let n = d[1].cross(&d[2]);
         let l = n.norm();
-        let n = if l > 1e-12 * d[1].norm() * d[2].norm() && l > 1e-300 { n / l } else { s.normal(u, v) };
+        let scale = (d[1].norm() * d[2].norm()).max(d[1].norm_squared()).max(d[2].norm_squared());
+        let n = if l > 1e-9 * scale && l > 1e-300 {
+            n / l
+        } else {
+            // A pole or apex (a collapsed row of a B-spline too): the normal just inside the face,
+            // a step towards the middle of its box.
+            let (cu, cv) = (0.5 * (self.dom.ub.0 + self.dom.ub.1), 0.5 * (self.dom.vb.0 + self.dom.vb.1));
+            let (qu, qv) = (u + (cu - u) * 1e-6, v + (cv - v) * 1e-6);
+            let e = s.d2(qu, qv);
+            let m = e[1].cross(&e[2]);
+            if m.norm() > 1e-300 { m.normalize() } else { s.normal(u, v) }
+        };
         n.dot(&self.view.sight(&P3::from(d[0])))
     }
 

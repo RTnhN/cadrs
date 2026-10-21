@@ -202,20 +202,12 @@ fn deterministic_across_thread_counts() {
 /// Closed bodies whose meshes may not be watertight, and why (a listed body that passes is
 /// reported, not failed: the reader's fixes land separately).
 const KNOWN: &[(&str, &str)] = &[
-    // A sphere face holed by tubes whose sense makes it face the other way from its neighbours
-    // (its loops say one way round, the sense the other): the reader's, not the mesher's.
-    ("booleans/boolean_trees.smp#5", "sphere face's sense opposite its neighbours"),
-    ("reader/boolean_trees.smp#5", "sphere face's sense opposite its neighbours"),
-    ("fillets/test4.smb#0", "sphere face's sense opposite its neighbours"),
     // Not diagnosed yet: 10 sides of 38 600 open where two planes meet a cylinder strip at the
     // hub (HEAD: 27 open, 76 folded).
     ("fillets/blade_hub_3.smb#0", "open sides at the hub"),
     // Not diagnosed yet: one triangle's worth (3 sides of 897) open by a degenerate edge's
     // corner on a B-spline face (HEAD: 41 open, 21 folded).
     ("offset/OffsetBoxSphOnCorner.smb#0", "a triangle missing at a degenerate corner"),
-    // The reader's sense for this B-spline cone faces it into its base disk (the reader's
-    // fixes in progress read it the right way round).
-    ("offset/InsetCone.smb#0", "cone face's sense opposite its base's"),
 ];
 
 /// The SMLib models in `tests/data/smlib`, meshed at a thousandth of their size and 0.5 rad:

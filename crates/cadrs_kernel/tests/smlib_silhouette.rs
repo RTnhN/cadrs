@@ -44,7 +44,10 @@ fn silhouette(file: &str, mv: [f64; 3], view: [f64; 3], persp: bool, want: &Want
         for (p, q) in c.points.iter().zip(&c.uv) {
             let gap = (s.eval(q.x, q.y) - p).norm();
             let sight = if persp { (p - eye).normalize() } else { dir };
-            let nd = s.normal(q.x, q.y).dot(&sight).abs();
+            // No normal at an apex or a pole (where a generator of a cone ends).
+            let (_, su, sv) = s.d1(q.x, q.y);
+            let apex = su.cross(&sv).norm() <= 1e-9 * su.norm_squared().max(sv.norm_squared());
+            let nd = if apex { 0.0 } else { s.normal(q.x, q.y).dot(&sight).abs() };
             if gap > ON || nd > SQUARE {
                 return Err(format!("curve {j} (face {}): {p:?} is {gap:.1e} off its surface, n·w {nd:.2e}", c.face.0));
             }
@@ -82,25 +85,25 @@ fn silhouette_04_sphere_par() {
 /// SMLib advanced silhouette 5: `cone.smb` moved by (-60, -120, 0), seen along (1, 0, 0); SMLib's test asserts 0, SMLib's length 0.
 #[test]
 fn silhouette_05_cone_par() {
-    known_failure(silhouette("cone.smb", [-60.0, -120.0, 0.0], [1.0, 0.0, 0.0], false, &Want { any: false, length: Some(0.0), samples: &[] }), "silhouette", "silhouette_05_cone_par");
+    silhouette("cone.smb", [-60.0, -120.0, 0.0], [1.0, 0.0, 0.0], false, &Want { any: false, length: Some(0.0), samples: &[] }).unwrap();
 }
 
 /// SMLib advanced silhouette 6: `cone.smb` moved by (0, -120, 0), seen along (0, 1, 0); SMLib's test asserts 2, SMLib's length 22.3607.
 #[test]
 fn silhouette_06_cone_par() {
-    known_failure(silhouette("cone.smb", [0.0, -120.0, 0.0], [0.0, 1.0, 0.0], false, &Want { any: true, length: Some(22.360679775), samples: &[] }), "silhouette", "silhouette_06_cone_par");
+    silhouette("cone.smb", [0.0, -120.0, 0.0], [0.0, 1.0, 0.0], false, &Want { any: true, length: Some(22.360679775), samples: &[] }).unwrap();
 }
 
 /// SMLib advanced silhouette 7: `cone.smb` moved by (60, -120, 0), seen along (0, 0, 1); SMLib's test asserts 2, SMLib's length 22.3607.
 #[test]
 fn silhouette_07_cone_par() {
-    known_failure(silhouette("cone.smb", [60.0, -120.0, 0.0], [0.0, 0.0, 1.0], false, &Want { any: true, length: Some(22.360679775), samples: &[] }), "silhouette", "silhouette_07_cone_par");
+    silhouette("cone.smb", [60.0, -120.0, 0.0], [0.0, 0.0, 1.0], false, &Want { any: true, length: Some(22.360679775), samples: &[] }).unwrap();
 }
 
 /// SMLib advanced silhouette 8: `cone.smb` moved by (90, -120, 0), seen along (1, 1, 1); SMLib's test asserts 2, SMLib's length 22.3607.
 #[test]
 fn silhouette_08_cone_par() {
-    known_failure(silhouette("cone.smb", [90.0, -120.0, 0.0], [1.0, 1.0, 1.0], false, &Want { any: true, length: Some(22.360679775), samples: &[] }), "silhouette", "silhouette_08_cone_par");
+    silhouette("cone.smb", [90.0, -120.0, 0.0], [1.0, 1.0, 1.0], false, &Want { any: true, length: Some(22.360679775), samples: &[] }).unwrap();
 }
 
 /// SMLib advanced silhouette 9: `plane_circ.smb` moved by (-60, -180, 0), seen along (1, 0, 0); SMLib's test asserts 0, SMLib's length 0.

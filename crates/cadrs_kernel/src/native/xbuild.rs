@@ -524,9 +524,21 @@ struct Trace {
     /// the surface collapses there along u (a pole or apex), and the joint's vertex.
     gaps: Vec<V2>,
     free: Vec<bool>,
+    /// The same for v: the surface collapses along v there (a cone's apex as a row of a
+    /// B-spline closed in v).
+    free_v: Vec<bool>,
     /// Net turns about u and v (with every free gap at its smallest).
     wu: i64,
     wv: i64,
+    /// The period in u the shifts and free jumps are counted in (2π, or a closed B-spline's
+    /// range).
+    pu: f64,
+    pv: f64,
+    /// Per coedge, the whole periods (in u) it is shifted by before any free jump: the jumps of
+    /// a closed spline's p-curves kept in its range.
+    base: Vec<i64>,
+    /// The same in v.
+    base_v: Vec<i64>,
 }
 
 impl XBuilder {
@@ -630,10 +642,25 @@ impl XBuilder {
         pcurve_checked(s, &ed.curve, ed.t[0], ed.t[1])
     }
 
-    /// Whether moving along u at `uv` leaves the surface point in place (a pole or an apex).
-    fn collapsed_u(s: &Surface, uv: P2) -> bool {
+    /// Whether moving along u at `uv` leaves the surface point in place (a pole or an apex):
+    /// round a periodic surface, or across a closed B-spline's whole range.
+    fn collapsed_u(s: &Surface, per: &Periods, uv: P2) -> bool {
+        let us: Vec<f64> = match per.domain {
+            Some(((u0, u1), _)) => [0.0, 0.25, 0.5, 0.75, 1.0].iter().map(|f| u0 + (u1 - u0) * f).collect(),
+            None => [PI / 2.0, PI, -PI / 2.0].iter().map(|du| uv.x + du).collect(),
+        };
         let p = s.eval(uv.x, uv.y);
-        [PI / 2.0, PI, -PI / 2.0].iter().all(|du| (s.eval(uv.x + du, uv.y) - p).norm() < JOIN)
+        us.iter().all(|&u| (s.eval(u, uv.y) - p).norm() < JOIN)
+    }
+
+    /// Whether moving along v at `uv` leaves the surface point in place.
+    fn collapsed_v(s: &Surface, per: &Periods, uv: P2) -> bool {
+        let vs: Vec<f64> = match per.domain {
+            Some((_, (v0, v1))) => [0.0, 0.25, 0.5, 0.75, 1.0].iter().map(|f| v0 + (v1 - v0) * f).collect(),
+            None => [PI / 2.0, PI, -PI / 2.0].iter().map(|dv| uv.y + dv).collect(),
+        };
+        let p = s.eval(uv.x, uv.y);
+        vs.iter().all(|&v| (s.eval(uv.x, v) - p).norm() < JOIN)
     }
 
     fn trace(&self, fi: usize, s: &Surface, l: &[(usize, bool)]) -> Trace {
@@ -652,12 +679,42 @@ impl XBuilder {
         let n = l.len();
         let mut gaps = Vec::with_capacity(n);
         let mut free = Vec::with_capacity(n);
+        let mut free_v = Vec::with_capacity(n);
         let (mut wu, mut wv) = (0i64, 0i64);
+        let per = periods(s);
+        // On a closed spline surface the p-curves stay in its range (`pc_from`), so a loop
+        // crossing the seam inside a coedge's run (a whole circle starting at the far side) jumps
+        // by a whole period from one coedge to the next: the coedges after it are a period over
+        // (`base`), and the jump is no gap.
+        let mut base = vec![0i64; n];
+        let pu_dom = per.pu.filter(|_| per.domain.is_some());
+        if let Some(pu) = pu_dom {
+            for j in 1..n {
+                base[j] = base[j - 1];
+                let g = ends[j].0.x - ends[j - 1].1.x + (base[j] - base[j - 1]) as f64 * pu;
+                let k = (g / pu).round();
+                if k != 0.0 && (g - k * pu).abs() <= 1e-7 * pu {
+                    base[j] -= k as i64;
+                }
+            }
+        }
+        let mut base_v = vec![0i64; n];
+        if let Some(pv) = per.pv.filter(|_| per.domain.is_some()) {
+            for j in 1..n {
+                base_v[j] = base_v[j - 1];
+                let g = ends[j].0.y - ends[j - 1].1.y;
+                let k = (g / pv).round();
+                if k != 0.0 && (g - k * pv).abs() <= 1e-7 * pv {
+                    base_v[j] -= k as i64;
+                }
+            }
+        }
+        let off = |k: usize| V2::new(base[k] as f64 * per.pu.unwrap_or(0.0), base_v[k] as f64 * per.pv.unwrap_or(0.0));
         for j in 0..n {
-            let prev = ends[(j + n - 1) % n].1;
-            let mut g = ends[j].0 - prev;
+            let pk = (j + n - 1) % n;
+            let prev = ends[pk].1 + off(pk);
+            let mut g = ends[j].0 + off(j) - prev;
             if j == 0 {
-                let per = periods(s);
                 if let Some(pu) = per.pu {
                     let k = (g.x / pu).round();
                     g.x -= k * pu;
@@ -670,14 +727,15 @@ impl XBuilder {
                 }
             }
             gaps.push(g);
-            free.push(s.u_periodic() && Self::collapsed_u(s, prev));
+            free.push(per.pu.is_some() && Self::collapsed_u(s, &per, prev));
+            free_v.push(per.pv.is_some() && Self::collapsed_v(s, &per, prev));
         }
-        Trace { pcs, ends, gaps, free, wu, wv }
+        Trace { pcs, ends, gaps, free, free_v, wu, wv, pu: per.pu.unwrap_or(P), pv: per.pv.unwrap_or(P), base, base_v }
     }
 
     /// Signed uv area (scaled by the surface metric) of a traced loop with per-coedge period
     /// shifts `n` (in u).
-    fn trace_area(s: &Surface, body: &Body, l: &[(usize, bool)], t: &Trace, n: &[i64]) -> f64 {
+    fn trace_area(s: &Surface, body: &Body, l: &[(usize, bool)], t: &Trace, n: &[i64], nv: &[i64]) -> f64 {
         let (mu, mv) = s.metric();
         let mut pts = Vec::new();
         for (k, &(e, fwd)) in l.iter().enumerate() {
@@ -687,10 +745,12 @@ impl XBuilder {
                 Curve::Line { .. } => 1,
                 _ => 32,
             };
-            let du = n[k] as f64 * P;
-            for i in 0..m {
+            let du = (n[k] + t.base[k]) as f64 * t.pu;
+            let dv = (nv[k] + t.base_v[k]) as f64 * t.pv;
+            // Both ends: a jump at a pole joins one coedge's end to the next one's start.
+            for i in 0..=m {
                 let q = t.pcs[k].point(a + (b - a) * i as f64 / m as f64);
-                pts.push(P2::new((q.x + du) * mu, q.y * mv));
+                pts.push(P2::new((q.x + du) * mu, (q.y + dv) * mv));
             }
         }
         polygon_area(&pts)
@@ -699,12 +759,26 @@ impl XBuilder {
     /// Settles the free (pole) jumps of a traced loop: per coedge its shift in whole periods of
     /// u. None when the loop wraps around the surface with nothing to absorb it (a seam is
     /// missing).
-    fn resolve(&self, s: &Surface, l: &[(usize, bool)], t: &Trace, hint: bool) -> Option<Vec<i64>> {
-        if t.wv != 0 {
-            return None;
-        }
+    fn resolve(&self, s: &Surface, l: &[(usize, bool)], t: &Trace, hint: bool) -> Option<(Vec<i64>, Vec<i64>)> {
         let n = l.len();
-        let free: Vec<usize> = (0..n).filter(|&j| t.free[j]).collect();
+        let zero = vec![0; n];
+        if t.wv == 0 {
+            let gaps: Vec<f64> = t.gaps.iter().map(|g| g.x).collect();
+            return Self::resolve_along(hint, &t.free, &gaps, t.wu, t.pu, |sh| Self::trace_area(s, &self.body, l, t, sh, &zero)).map(|u| (u, zero.clone()));
+        }
+        // Turning in v with poles across v (a B-spline cone closed in v, its apex a row).
+        if t.wu == 0 && t.free_v.iter().any(|&f| f) {
+            let gaps: Vec<f64> = t.gaps.iter().map(|g| g.y).collect();
+            return Self::resolve_along(hint, &t.free_v, &gaps, t.wv, t.pv, |sh| Self::trace_area(s, &self.body, l, t, &zero, sh)).map(|v| (zero.clone(), v));
+        }
+        None
+    }
+
+    /// [`Self::resolve`] along one direction: `free` joints, their `gaps` along it, the turns
+    /// `w` and the period `p`; `area` of the loop with per-coedge shifts.
+    fn resolve_along(hint: bool, free: &[bool], gaps: &[f64], w: i64, p: f64, area: impl Fn(&[i64]) -> f64) -> Option<Vec<i64>> {
+        let n = free.len();
+        let free: Vec<usize> = (0..n).filter(|&j| free[j]).collect();
         // Shifts from per-joint extra jumps m_j: coedge k is shifted by the sum of m_j, j in 1..=k.
         let shifts = |m: &[i64]| -> Vec<i64> {
             let mut acc = 0;
@@ -720,9 +794,9 @@ impl XBuilder {
                 .collect()
         };
         if free.is_empty() {
-            return if t.wu == 0 { Some(vec![0; n]) } else { None };
+            return if w == 0 { Some(vec![0; n]) } else { None };
         }
-        // The jumps must add up to −wu (so the loop closes) and each stay within a period.
+        // The jumps must add up to −w (so the loop closes) and each stay within a period.
         let mut best: Option<(bool, f64, Vec<i64>)> = None;
         let nf = free.len().min(3);
         let range: Vec<i64> = vec![-2, -1, 0, 1, 2];
@@ -732,15 +806,15 @@ impl XBuilder {
         }
         for mut m in combos {
             m.resize(free.len(), 0);
-            if m.iter().sum::<i64>() != -t.wu {
+            if m.iter().sum::<i64>() != -w {
                 continue;
             }
-            let ok = free.iter().zip(&m).all(|(&j, &mj)| (t.gaps[j].x + mj as f64 * P).abs() <= P * (1.0 + 1e-9));
+            let ok = free.iter().zip(&m).all(|(&j, &mj)| (gaps[j] + mj as f64 * p).abs() <= p * (1.0 + 1e-9));
             if !ok {
                 continue;
             }
             let sh = shifts(&m);
-            let a = Self::trace_area(s, &self.body, l, t, &sh);
+            let a = area(&sh);
             if a.abs() < 1e-12 {
                 continue;
             }
@@ -994,6 +1068,97 @@ impl XBuilder {
         }
     }
 
+    /// Makes a seam of two edges of one loop that are the same curve run both ways (some files
+    /// bound a torus or a cylinder band by four closed edges, the two copies of each seam as
+    /// edges of their own): the second becomes a use of the first, and its vertices the
+    /// first's. Only edges no other face uses.
+    fn merge_twin_edges(&mut self, fi: usize) {
+        let mut uses = vec![0usize; self.body.edges.len()];
+        for f in &self.faces {
+            for &(e, _) in f.loops.iter().flatten() {
+                uses[e] += 1;
+            }
+        }
+        for li in 0..self.faces[fi].loops.len() {
+            let n = self.faces[fi].loops[li].len();
+            for i in 0..n {
+                for j in i + 1..n {
+                    let ((ei, fwi), (ej, fwj)) = (self.faces[fi].loops[li][i], self.faces[fi].loops[li][j]);
+                    if ei == ej || uses[ei] != 1 || uses[ej] != 1 {
+                        continue;
+                    }
+                    let (a, b) = (&self.body.edges[ei], &self.body.edges[ej]);
+                    if a.degenerate || b.degenerate {
+                        continue;
+                    }
+                    let tol = 10.0 * JOIN.max(a.tol).max(b.tol);
+                    // Ends at the same places (cheap, first).
+                    let at = |v: usize| self.body.verts[v].p;
+                    let ends_meet = |x: [usize; 2], y: [usize; 2]| {
+                        let d = |u: usize, w: usize| (at(u) - at(w)).norm() <= tol;
+                        (d(x[0], y[0]) && d(x[1], y[1])) || (d(x[0], y[1]) && d(x[1], y[0]))
+                    };
+                    if !ends_meet(a.v, b.v) {
+                        continue;
+                    }
+                    // Every point of one on the other, and run the other way round the loop.
+                    let mut opposite = None;
+                    let mut same = true;
+                    for k in 1..8 {
+                        let t = a.t[0] + (a.t[1] - a.t[0]) * k as f64 / 8.0;
+                        let p = a.point(t);
+                        let tb = b.curve.closest(&p, b.t[0].min(b.t[1]), b.t[0].max(b.t[1]));
+                        if (b.point(tb) - p).norm() > tol {
+                            same = false;
+                            break;
+                        }
+                        let da = a.curve.tangent(t) * if fwi { 1.0 } else { -1.0 };
+                        let db = b.curve.tangent(tb) * if fwj { 1.0 } else { -1.0 };
+                        opposite.get_or_insert(da.dot(&db) < 0.0);
+                    }
+                    let same = same && {
+                        let q = b.point(b.mid_t());
+                        let ta = a.curve.closest(&q, a.t[0].min(a.t[1]), a.t[0].max(a.t[1]));
+                        (a.point(ta) - q).norm() <= tol
+                    };
+                    // Closed edges at one vertex chain either way: their flags in such files
+                    // don't always run them opposite, which a seam's two sides must.
+                    let closed = a.v[0] == a.v[1] && b.v[0] == b.v[1];
+                    if !same || (opposite != Some(true) && !closed) {
+                        continue;
+                    }
+                    // ej's vertices become ei's at the same places.
+                    let (av, bv) = (a.v, b.v);
+                    let mut map: Vec<(usize, usize)> = Vec::new();
+                    for x in bv {
+                        let p = self.body.verts[x].p;
+                        if let Some(&y) = av.iter().min_by(|&&u, &&w| (self.body.verts[u].p - p).norm().total_cmp(&(self.body.verts[w].p - p).norm())) {
+                            if (self.body.verts[y].p - p).norm() > tol {
+                                map.clear();
+                                break;
+                            }
+                            map.push((x, y));
+                        }
+                    }
+                    if map.len() != 2 {
+                        continue;
+                    }
+                    for e in &mut self.body.edges {
+                        for v in &mut e.v {
+                            if let Some(&(_, y)) = map.iter().find(|m| m.0 == *v) {
+                                *v = y;
+                            }
+                        }
+                    }
+                    self.faces[fi].loops[li][j] = (ei, !fwi);
+                    uses[ei] += 1;
+                    uses[ej] = 0;
+                    self.pc_cache.borrow_mut().clear();
+                }
+            }
+        }
+    }
+
     /// Bounds a whole sphere or torus given with no loops by its seams.
     fn close_whole(&mut self, fi: usize) -> bool {
         let s = self.faces[fi].surf.clone();
@@ -1061,9 +1226,70 @@ impl XBuilder {
                 }
                 self.faces[fi].surf = new;
             }
+            if self.faces[fi].surf.u_periodic() || self.faces[fi].surf.v_periodic() || matches!(self.faces[fi].surf, Surface::Nurbs(_)) {
+                self.merge_twin_edges(fi);
+            }
             if self.faces[fi].loops.is_empty() && !self.close_whole(fi) {
                 self.warnings.push(format!("face {fi}: no bounds"));
                 dropped[fi] = true;
+            }
+        }
+        // The file's senses against the loops of faces whose loops alone say which way round
+        // they go (no jumps at poles, no turns round the surface): when most disagree, the file
+        // writes its senses the other way about, and the faces whose loops can close either way
+        // round (round a sphere's poles) take the file's sense turned round too.
+        let (mut agree, mut disagree) = (0usize, 0usize);
+        for fi in 0..nf {
+            if dropped[fi] || self.faces[fi].loops.is_empty() {
+                continue;
+            }
+            let s = self.faces[fi].surf.clone();
+            let mut areas = Vec::new();
+            let mut plain = true;
+            for l in &self.faces[fi].loops {
+                let t = self.trace(fi, &s, l);
+                if t.wu != 0 || t.wv != 0 || t.free.iter().chain(&t.free_v).any(|&f| f) {
+                    plain = false;
+                    break;
+                }
+                let z = vec![0; l.len()];
+                areas.push(Self::trace_area(&s, &self.body, l, &t, &z, &z));
+            }
+            let Some(outer) = areas.iter().copied().max_by(|a, b| a.abs().total_cmp(&b.abs())).filter(|_| plain) else { continue };
+            if outer.abs() > 0.0 {
+                if (outer > 0.0) == self.faces[fi].sense { agree += 1 } else { disagree += 1 }
+            }
+        }
+        if disagree > agree {
+            for f in &mut self.faces {
+                f.sense = !f.sense;
+            }
+        }
+        // A whole sphere or torus bounded only by slits (a seam and a cut, each edge used both
+        // ways: loops enclosing no area, as SMLib writes some spheres) is bounded by its seams
+        // instead, as SMLib reads it; the slits' edges are dropped.
+        for fi in 0..nf {
+            if dropped[fi] || self.faces[fi].loops.is_empty() || !matches!(self.faces[fi].surf, Surface::Sphere { .. } | Surface::Torus { .. }) {
+                continue;
+            }
+            let s = self.faces[fi].surf.clone();
+            let slits = self.faces[fi].loops.iter().all(|l| {
+                let mut uses: std::collections::HashMap<usize, (usize, usize)> = std::collections::HashMap::new();
+                for &(e, f) in l {
+                    let u = uses.entry(e).or_default();
+                    if f { u.0 += 1 } else { u.1 += 1 }
+                }
+                let t = self.trace(fi, &s, l);
+                // As the loop closes (round the poles); one that doesn't close yet gets a seam
+                // the usual way.
+                let Some((su, sv)) = self.resolve(&s, l, &t, self.faces[fi].sense) else { return false };
+                let area = Self::trace_area(&s, &self.body, l, &t, &su, &sv);
+                let (mu, mv) = s.metric();
+                area.abs() < 1e-9 * mu * mv && uses.iter().all(|(&e, &(f, r))| self.body.edges[e].degenerate || f == r)
+            });
+            if slits {
+                self.faces[fi].loops.clear();
+                self.close_whole(fi);
             }
         }
         // Seams (they may split edges of other faces, so trace again after each).
@@ -1110,19 +1336,29 @@ impl XBuilder {
             let mut loops: Vec<(f64, Vec<Coedge>)> = Vec::new();
             for l in &xf.loops {
                 let t = self.trace(fi, s, l);
-                let Some(shift) = self.resolve(s, l, &t, xf.sense) else {
+                let Some((shift, vshift)) = self.resolve(s, l, &t, xf.sense) else {
                     self.warnings.push(format!("face {fi}: a loop doesn't close"));
                     continue;
                 };
                 let n = l.len();
+                // A spline surface's loop brought into its range in u.
+                let mut shift: Vec<i64> = shift.iter().zip(&t.base).map(|(a, b)| a + b).collect();
+                let vshift: Vec<i64> = vshift.iter().zip(&t.base_v).map(|(a, b)| a + b).collect();
+                if let Some(((u0, u1), _)) = periods(s).domain.filter(|_| periods(s).pu.is_some()) {
+                    let lo = (0..n).map(|k| t.ends[k].0.x.min(t.ends[k].1.x) + shift[k] as f64 * t.pu).fold(f64::INFINITY, f64::min);
+                    let c = ((u0 - lo) / t.pu - 1e-7).ceil();
+                    if c != 0.0 && lo + c * t.pu <= u1 {
+                        shift.iter_mut().for_each(|x| *x += c as i64);
+                    }
+                }
                 let mut out: Vec<Coedge> = Vec::with_capacity(n + 2);
                 for k in 0..n {
-                    let du = shift[k] as f64 * P;
-                    let pc = if du == 0.0 { t.pcs[k].clone() } else { t.pcs[k].transformed(&Affine::translation(V3::new(du, 0.0, 0.0))) };
+                    let (du, dv) = (shift[k] as f64 * t.pu, vshift[k] as f64 * t.pv);
+                    let pc = if du == 0.0 && dv == 0.0 { t.pcs[k].clone() } else { t.pcs[k].transformed(&Affine::translation(V3::new(du, dv, 0.0))) };
                     // A degenerate edge across a jump at a pole or apex.
                     let pk = (k + n - 1) % n;
-                    let prev = t.ends[pk].1 + V2::new(shift[pk] as f64 * P, 0.0);
-                    let start = t.ends[k].0 + V2::new(du, 0.0);
+                    let prev = t.ends[pk].1 + V2::new(shift[pk] as f64 * t.pu, vshift[pk] as f64 * t.pv);
+                    let start = t.ends[k].0 + V2::new(du, dv);
                     let d = start - prev;
                     let len = d.norm();
                     let collapsed = || {
@@ -1130,7 +1366,7 @@ impl XBuilder {
                         let mid = prev + d * 0.5;
                         (s.eval(start.x, start.y) - p0).norm() < JOIN && (s.eval(mid.x, mid.y) - p0).norm() < JOIN
                     };
-                    if len > 1e-9 && (t.free[k] || collapsed()) {
+                    if len > 1e-9 && (t.free[k] || t.free_v[k] || collapsed()) {
                         let vtx = self.co_start(l[k].0, l[k].1);
                         let p = self.body.verts[vtx].p;
                         let de = self.body.add_degenerate(p, 0.0, len, vtx);
@@ -1323,18 +1559,15 @@ pub fn orient_shells(b: &mut Body, always: bool) -> usize {
         flipped_total += flipped;
         // When faces were turned, outward (or, for voids, inward) by the enclosed volume.
         if (flipped > 0 || always) && b.shells[si].closed && in_solid.contains(&si) {
+            // The faces' boxes (a torus's vertices alone can be one point).
             let mut bb = Bbox::empty();
             for &fi in &faces {
-                for c in b.faces[fi].loops.iter().flatten() {
-                    for v in b.edges[c.edge].v {
-                        bb.add(&b.verts[v].p);
-                    }
-                }
+                bb.union(&b.face_bbox(fi));
             }
             // The sign of the enclosed volume from a coarse tessellation (exact integration of
             // spline faces would cost far more).
             let shift = bb.center().coords;
-            let defl = (bb.diagonal() * 2e-3).max(1e-6);
+            let defl = (bb.diagonal() * 1e-2).max(1e-6);
             let es = super::tess::edge_samples(b, defl, 0.5);
             let vol: f64 = faces
                 .iter()
@@ -1402,6 +1635,33 @@ pub fn drop_unused(b: &mut Body) {
         }
     }
     b.edges = edges;
+    b.verts = verts;
+}
+
+/// Removes vertices no edge uses and that are no acorn point (renumbering the rest).
+pub fn drop_unused_verts(b: &mut Body) {
+    let mut used = vec![false; b.verts.len()];
+    for e in &b.edges {
+        used[e.v[0]] = true;
+        used[e.v[1]] = true;
+    }
+    for &p in &b.points {
+        used[p] = true;
+    }
+    let mut map = vec![usize::MAX; b.verts.len()];
+    let mut verts = Vec::new();
+    for (i, v) in b.verts.iter().enumerate() {
+        if used[i] {
+            map[i] = verts.len();
+            verts.push(v.clone());
+        }
+    }
+    for e in &mut b.edges {
+        e.v = [map[e.v[0]], map[e.v[1]]];
+    }
+    for p in &mut b.points {
+        *p = map[*p];
+    }
     b.verts = verts;
 }
 

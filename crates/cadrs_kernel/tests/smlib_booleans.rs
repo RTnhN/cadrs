@@ -233,7 +233,7 @@ fn plane_difference_box() {
 /// SMLib boolean: union of `boolean_trees.smp`'s B-reps, last to first (`my_many_prim_test`, smMergeTest.cpp:1996; SMLib asserts 45 edges).
 #[test]
 fn boolean_trees_union() {
-    known_failure(chain(&["boolean_trees.smp#5", "boolean_trees.smp#4", "boolean_trees.smp#3", "boolean_trees.smp#2", "boolean_trees.smp#1", "boolean_trees.smp#0"], U, &Expect { volume: Some(1452.57386499), area: Some(1162.36172397), faces: Some(18), edges: Some(45), solid: Some(true), ..Expect::default() }), "booleans", "boolean_trees_union");
+    chain(&["boolean_trees.smp#5", "boolean_trees.smp#4", "boolean_trees.smp#3", "boolean_trees.smp#2", "boolean_trees.smp#1", "boolean_trees.smp#0"], U, &Expect { volume: Some(1452.57386499), area: Some(1162.36172397), faces: Some(18), edges: Some(45), solid: Some(true), ..Expect::default() }).unwrap();
 }
 
 /// SMLib boolean: `box_box_grid.smp#0` ∪ `box_box_grid.smp#1` (`my_two_prim_test`, smMergeTest.cpp:2039).
@@ -551,7 +551,7 @@ fn box_cone_grid_01() {
 /// SMLib boolean: `box_cone_grid.smp#4` ∪ `box_cone_grid.smp#5` (`my_two_prim_test`, smMergeTest.cpp:2080).
 #[test]
 fn box_cone_grid_02() {
-    known_failure(chain(&["box_cone_grid.smp#4", "box_cone_grid.smp#5"], U, &Expect { volume: Some(1261.79941984), area: Some(814.896396591), faces: Some(8), edges: Some(17), solid: Some(true), ..Expect::default() }), "booleans", "box_cone_grid_02");
+    chain(&["box_cone_grid.smp#4", "box_cone_grid.smp#5"], U, &Expect { volume: Some(1261.79941984), area: Some(814.896396591), faces: Some(8), edges: Some(17), solid: Some(true), ..Expect::default() }).unwrap();
 }
 
 /// SMLib boolean: `box_cone_grid.smp#6` ∪ `box_cone_grid.smp#7` (`my_two_prim_test`, smMergeTest.cpp:2080).
@@ -563,19 +563,19 @@ fn box_cone_grid_03() {
 /// SMLib boolean: `box_cone_grid.smp#8` ∪ `box_cone_grid.smp#9` (`my_two_prim_test`, smMergeTest.cpp:2080).
 #[test]
 fn box_cone_grid_04() {
-    known_failure(chain(&["box_cone_grid.smp#8", "box_cone_grid.smp#9"], U, &Expect { volume: Some(1122.25893281), area: Some(736.951280893), faces: Some(8), edges: Some(15), solid: Some(true), ..Expect::default() }), "booleans", "box_cone_grid_04");
+    chain(&["box_cone_grid.smp#8", "box_cone_grid.smp#9"], U, &Expect { volume: Some(1122.25893281), area: Some(736.951280893), faces: Some(8), edges: Some(15), solid: Some(true), ..Expect::default() }).unwrap();
 }
 
 /// SMLib boolean: `box_cone_grid.smp#10` ∪ `box_cone_grid.smp#11` (`my_two_prim_test`, smMergeTest.cpp:2080).
 #[test]
 fn box_cone_grid_05() {
-    known_failure(chain(&["box_cone_grid.smp#10", "box_cone_grid.smp#11"], U, &Expect { volume: Some(1001.65483566), area: Some(610.566461599), faces: Some(7), edges: Some(14), solid: Some(true), ..Expect::default() }), "booleans", "box_cone_grid_05");
+    chain(&["box_cone_grid.smp#10", "box_cone_grid.smp#11"], U, &Expect { volume: Some(1001.65483566), area: Some(610.566461599), faces: Some(7), edges: Some(14), solid: Some(true), ..Expect::default() }).unwrap();
 }
 
 /// SMLib boolean: `box_cone_grid.smp#12` ∪ `box_cone_grid.smp#13` (`my_two_prim_test`, smMergeTest.cpp:2080).
 #[test]
 fn box_cone_grid_06() {
-    known_failure(chain(&["box_cone_grid.smp#12", "box_cone_grid.smp#13"], U, &Expect { volume: Some(1009.1354727), area: Some(611.375635408), faces: Some(9), edges: Some(17), solid: Some(true), ..Expect::default() }), "booleans", "box_cone_grid_06");
+    chain(&["box_cone_grid.smp#12", "box_cone_grid.smp#13"], U, &Expect { volume: Some(1009.1354727), area: Some(611.375635408), faces: Some(9), edges: Some(17), solid: Some(true), ..Expect::default() }).unwrap();
 }
 
 /// SMLib boolean: `box_cone_grid.smp#14` ∪ `box_cone_grid.smp#15` (`my_two_prim_test`, smMergeTest.cpp:2080).
@@ -587,19 +587,19 @@ fn box_cone_grid_07() {
 /// SMLib boolean: `box_cone_grid.smp#20` ∪ `box_cone_grid.smp#21` (`my_two_prim_test`, smMergeTest.cpp:2080).
 #[test]
 fn box_cone_grid_10() {
-    known_failure(chain(&["box_cone_grid.smp#20", "box_cone_grid.smp#21"], U, &Expect { volume: Some(1134.43167822), area: Some(683.619834535), faces: Some(8), edges: Some(17), solid: Some(true), ..Expect::default() }), "booleans", "box_cone_grid_10");
+    chain(&["box_cone_grid.smp#20", "box_cone_grid.smp#21"], U, &Expect { volume: Some(1134.43167822), area: Some(683.619834535), faces: Some(8), edges: Some(17), solid: Some(true), ..Expect::default() }).unwrap();
 }
 
 /// SMLib boolean: `box_cone_grid.smp#22` ∪ `box_cone_grid.smp#23` (`my_two_prim_test`, smMergeTest.cpp:2080).
 #[test]
 fn box_cone_grid_11() {
-    known_failure(chain(&["box_cone_grid.smp#22", "box_cone_grid.smp#23"], U, &Expect { volume: Some(1007.0632119), area: Some(610.269048797), faces: Some(8), edges: Some(17), solid: Some(true), ..Expect::default() }), "booleans", "box_cone_grid_11");
+    chain(&["box_cone_grid.smp#22", "box_cone_grid.smp#23"], U, &Expect { volume: Some(1007.0632119), area: Some(610.269048797), faces: Some(8), edges: Some(17), solid: Some(true), ..Expect::default() }).unwrap();
 }
 
 /// SMLib boolean: `box_cone_grid.smp#24` ∪ `box_cone_grid.smp#25` (`my_two_prim_test`, smMergeTest.cpp:2080).
 #[test]
 fn box_cone_grid_12() {
-    known_failure(chain(&["box_cone_grid.smp#24", "box_cone_grid.smp#25"], U, &Expect { volume: Some(1070.79502267), area: Some(648.94521313), faces: Some(8), edges: Some(17), solid: Some(true), ..Expect::default() }), "booleans", "box_cone_grid_12");
+    chain(&["box_cone_grid.smp#24", "box_cone_grid.smp#25"], U, &Expect { volume: Some(1070.79502267), area: Some(648.94521313), faces: Some(8), edges: Some(17), solid: Some(true), ..Expect::default() }).unwrap();
 }
 
 /// SMLib boolean: `box_cone_grid.smp#26` ∪ `box_cone_grid.smp#27` (`my_two_prim_test`, smMergeTest.cpp:2080).
@@ -611,25 +611,25 @@ fn box_cone_grid_13() {
 /// SMLib boolean: `box_cone_grid.smp#28` ∪ `box_cone_grid.smp#29` (`my_two_prim_test`, smMergeTest.cpp:2080).
 #[test]
 fn box_cone_grid_14() {
-    known_failure(chain(&["box_cone_grid.smp#28", "box_cone_grid.smp#29"], U, &Expect { volume: Some(1232.09850792), area: Some(758.197924506), faces: Some(9), edges: Some(20), solid: Some(true), ..Expect::default() }), "booleans", "box_cone_grid_14");
+    chain(&["box_cone_grid.smp#28", "box_cone_grid.smp#29"], U, &Expect { volume: Some(1232.09850792), area: Some(758.197924506), faces: Some(9), edges: Some(20), solid: Some(true), ..Expect::default() }).unwrap();
 }
 
 /// SMLib boolean: `box_cone_grid.smp#30` ∪ `box_cone_grid.smp#31` (`my_two_prim_test`, smMergeTest.cpp:2080).
 #[test]
 fn box_cone_grid_15() {
-    known_failure(chain(&["box_cone_grid.smp#30", "box_cone_grid.smp#31"], U, &Expect { volume: Some(1019.24177923), area: Some(630.717403158), faces: Some(12), edges: Some(29), solid: Some(true), ..Expect::default() }), "booleans", "box_cone_grid_15");
+    chain(&["box_cone_grid.smp#30", "box_cone_grid.smp#31"], U, &Expect { volume: Some(1019.24177923), area: Some(630.717403158), faces: Some(12), edges: Some(29), solid: Some(true), ..Expect::default() }).unwrap();
 }
 
 /// SMLib boolean: `box_cone_grid.smp#32` ∪ `box_cone_grid.smp#33` (`my_two_prim_test`, smMergeTest.cpp:2080).
 #[test]
 fn box_cone_grid_16() {
-    known_failure(chain(&["box_cone_grid.smp#32", "box_cone_grid.smp#33"], U, &Expect { volume: Some(1047.12385561), area: Some(683.227853235), faces: Some(8), edges: Some(14), solid: Some(true), ..Expect::default() }), "booleans", "box_cone_grid_16");
+    chain(&["box_cone_grid.smp#32", "box_cone_grid.smp#33"], U, &Expect { volume: Some(1047.12385561), area: Some(683.227853235), faces: Some(8), edges: Some(14), solid: Some(true), ..Expect::default() }).unwrap();
 }
 
 /// SMLib boolean: `box_cone_grid.smp#34` ∪ `box_cone_grid.smp#35` (`my_two_prim_test`, smMergeTest.cpp:2080).
 #[test]
 fn box_cone_grid_17() {
-    known_failure(chain(&["box_cone_grid.smp#34", "box_cone_grid.smp#35"], U, &Expect { volume: Some(1034.56617216), area: Some(649.288469294), faces: Some(9), edges: Some(17), solid: Some(true), ..Expect::default() }), "booleans", "box_cone_grid_17");
+    chain(&["box_cone_grid.smp#34", "box_cone_grid.smp#35"], U, &Expect { volume: Some(1034.56617216), area: Some(649.288469294), faces: Some(9), edges: Some(17), solid: Some(true), ..Expect::default() }).unwrap();
 }
 
 /// SMLib boolean: `box_cone_grid.smp#36` ∪ `box_cone_grid.smp#37` (`my_two_prim_test`, smMergeTest.cpp:2080).
@@ -647,7 +647,7 @@ fn box_cone_grid_19() {
 /// SMLib boolean: `box_cone_grid.smp#40` ∪ `box_cone_grid.smp#41` (`my_two_prim_test`, smMergeTest.cpp:2080).
 #[test]
 fn box_cone_grid_20() {
-    known_failure(chain(&["box_cone_grid.smp#40", "box_cone_grid.smp#41"], U, &Expect { volume: Some(1047.73641964), area: Some(667.596586886), faces: Some(9), edges: Some(23), solid: Some(true), ..Expect::default() }), "booleans", "box_cone_grid_20");
+    chain(&["box_cone_grid.smp#40", "box_cone_grid.smp#41"], U, &Expect { volume: Some(1047.73641964), area: Some(667.596586886), faces: Some(9), edges: Some(23), solid: Some(true), ..Expect::default() }).unwrap();
 }
 
 /// SMLib boolean: `box_cone_grid.smp#42` ∪ `box_cone_grid.smp#43` (`my_two_prim_test`, smMergeTest.cpp:2080).
@@ -665,7 +665,7 @@ fn box_cone_grid_22() {
 /// SMLib boolean: `box_cone_grid.smp#46` ∪ `box_cone_grid.smp#47` (`my_two_prim_test`, smMergeTest.cpp:2080).
 #[test]
 fn box_cone_grid_23() {
-    known_failure(chain(&["box_cone_grid.smp#46", "box_cone_grid.smp#47"], U, &Expect { volume: Some(1000.0), area: Some(600.0), faces: Some(6), edges: Some(12), solid: Some(true), ..Expect::default() }), "booleans", "box_cone_grid_23");
+    chain(&["box_cone_grid.smp#46", "box_cone_grid.smp#47"], U, &Expect { volume: Some(1000.0), area: Some(600.0), faces: Some(6), edges: Some(12), solid: Some(true), ..Expect::default() }).unwrap();
 }
 
 /// SMLib boolean: `box_cone_grid.smp#48` ∪ `box_cone_grid.smp#49` (`my_two_prim_test`, smMergeTest.cpp:2080).

@@ -23,8 +23,7 @@ ssi_29_pln_rev2
 
 # A branch missed near the singular points (an SMLib sample 3e-3 from our curves).
 
-# The SMLib reader: "a loop doesn't close" (cone and torus faces with a pole).
-ssi_23_tor_sph_tan2
+# Curves through a cone's apex (read since the reader closes the apex's loops): they stop
+# short of the apex (0.3-0.7% of the length).
 ssi_47_cone_plane1
-ssi_48_cone_cyl1
 ssi_49_cone_cyl2

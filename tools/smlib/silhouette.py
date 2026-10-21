@@ -8,7 +8,7 @@ Here `Kernel::silhouettes` (native::silhouette) gives every face's silhouette cu
 hidden, for the same parallel or perspective view. It checks:
 - every point of the curves is its face's surface at the (u, v) given with it (1e-6), where the
   normal is square to the line of sight (|n·w| ≤ 1e-3, w the direction of sight, or from the
-  eye point to the point);
+  eye point to the point; at a cone's apex there is no normal);
 - the curves' total length against SMLib's (the oracle's `silhouette`), to 1e-3;
 - none where SMLib finds none (the count is compared only as none against some: SMLib counts
   trimmed pieces, and the sphere's count is unconfirmed, 2 against the asserted 5).
@@ -63,7 +63,10 @@ fn silhouette(file: &str, mv: [f64; 3], view: [f64; 3], persp: bool, want: &Want
         for (p, q) in c.points.iter().zip(&c.uv) {
             let gap = (s.eval(q.x, q.y) - p).norm();
             let sight = if persp { (p - eye).normalize() } else { dir };
-            let nd = s.normal(q.x, q.y).dot(&sight).abs();
+            // No normal at an apex or a pole (where a generator of a cone ends).
+            let (_, su, sv) = s.d1(q.x, q.y);
+            let apex = su.cross(&sv).norm() <= 1e-9 * su.norm_squared().max(sv.norm_squared());
+            let nd = if apex { 0.0 } else { s.normal(q.x, q.y).dot(&sight).abs() };
             if gap > ON || nd > SQUARE {
                 return Err(format!("curve {j} (face {}): {p:?} is {gap:.1e} off its surface, n·w {nd:.2e}", c.face.0));
             }

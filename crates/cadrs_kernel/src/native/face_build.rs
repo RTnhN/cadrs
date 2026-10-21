@@ -58,6 +58,13 @@ pub fn face_from_surface(s: &Surface, domain: Option<UvBox>) -> Result<Body> {
             }
             None => s,
         },
+        Surface::Extrusion { c: Curve::Nurbs(c), d } => match bezier_curve_extended(c, (u0, u1)) {
+            Some(e) => {
+                extended = Surface::Extrusion { c: Curve::nurbs(e), d: *d };
+                &extended
+            }
+            None => s,
+        },
         _ => s,
     };
     let ((pu0, pu1), (pv0, pv1)) = s.param_box();
@@ -235,6 +242,18 @@ fn bezier_extended(n: &NurbsSurface, u: (f64, f64), v: (f64, f64)) -> Option<Nur
     NurbsSurface::new(n.du, n.dv, ku, kv, cps).ok()
 }
 
+/// A Bézier curve (one span, ends apart) re-expressed over [a, b] reaching past its range;
+/// None when [a, b] is inside it or the curve isn't such a span.
+fn bezier_curve_extended(c: &NurbsCurve, (a, b): (f64, f64)) -> Option<NurbsCurve> {
+    let (r0, r1) = c.range();
+    let past = a < r0 - 1e-9 * (1.0 + r0.abs()) || b > r1 + 1e-9 * (1.0 + r1.abs());
+    let size = c.cps.iter().map(|h| super::nurbs::dehom(h).coords.norm()).fold(1.0, f64::max);
+    if !past || c.cps.len() != c.degree + 1 || (c.point(r0) - c.point(r1)).norm() <= 1e-9 * size {
+        return None;
+    }
+    NurbsCurve::new(c.degree, [vec![a; c.degree + 1], vec![b; c.degree + 1]].concat(), bezier_over(&c.cps, (r0, r1), (a, b))).ok()
+}
+
 /// The control points (homogeneous) over [a, b] of the Bézier polynomial with control points
 /// `cps` over `range`: its blossom at (a, …, a, b, …, b) (de Casteljau, which extrapolates).
 fn bezier_over(cps: &[H], range: (f64, f64), (a, b): (f64, f64)) -> Vec<H> {
@@ -385,6 +404,18 @@ mod tests {
         let sph = Surface::Sphere { f: Frame::world(), r: 2.0 }.to_nurbs((0.0, TAU), (-PI / 2.0, PI / 2.0));
         let ((a, b2), (c, d)) = sph.range();
         assert!(face_from_surface(&Surface::Nurbs(Arc::new(sph)), Some(((a - 1.0, b2), (c, d)))).is_err());
+    }
+
+    /// OCCT's mkface on an extrusion of a Bézier curve past the curve's [0, 1] (mkface c6–c9).
+    #[test]
+    fn extruded_bezier_past_its_range() {
+        // y = x² over [0, 1], extruded along z.
+        let c = NurbsCurve::new(2, vec![0.0, 0.0, 0.0, 1.0, 1.0, 1.0], vec![H::new(0.0, 0.0, 0.0, 1.0), H::new(0.5, 0.0, 0.0, 1.0), H::new(1.0, 1.0, 0.0, 1.0)]).unwrap();
+        let s = Surface::Extrusion { c: Curve::nurbs(c), d: V3::z() };
+        let b = face_from_surface(&s, Some(((0.0, 3.0), (0.0, 2.0)))).unwrap();
+        assert!(b.check().is_empty(), "{:?}", b.check());
+        assert_eq!(counts(&b), (1, 4, 0, 4));
+        assert!(b.verts.iter().any(|v| (v.p - P3::new(3.0, 9.0, 2.0)).norm() < 1e-9), "{:?}", b.verts);
     }
 
     /// A sphere as a B-spline (its rational quadratic net, poles as rows of equal points) and as

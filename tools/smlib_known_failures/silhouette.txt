@@ -1,8 +1,3 @@
 # SMLib advanced silhouette cases (tests/smlib_silhouette.rs, from tools/smlib/silhouette.py)
 # that fail: `name`, or `name slow` (over a minute).
 
-# The SMLib reader: cone.smb, "a loop doesn't close".
-silhouette_05_cone_par
-silhouette_06_cone_par
-silhouette_07_cone_par
-silhouette_08_cone_par

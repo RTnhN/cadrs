@@ -292,9 +292,56 @@ fn curve_of(st: &mut Stream, fmt: Fmt, ty: i64) -> R<NurbsCurve> {
             st.nl();
             polar_conversion(st, fmt)?;
         }
+        // Curve on a surface: domain of interest, breaks flag, the uv curve, the surface, then
+        // (when the flag is off) the breaks (`SmCrvOnSurf::ReadFromDB`). No B-spline form of
+        // its own: its 3D B-spline is the uv curve on the surface.
+        14048 => {
+            st.nums(4)?;
+            st.nl();
+            let need_breaks = st.int()? != 0;
+            st.nl();
+            st.nl();
+            let (uty, _) = st.read_type(true)?;
+            let uv = curve_of(st, fmt, uty)?;
+            st.nl();
+            let (sty, _) = st.read_type(false)?;
+            let srf = surface_of(st, fmt, sty)?;
+            if !need_breaks {
+                let n = st.count()?;
+                st.nl();
+                if n > 0 {
+                    st.nums(n)?;
+                    st.nl();
+                }
+            }
+            return Ok(curve_on_surface(&uv, &srf.nurbs));
+        }
         _ => return Err(format!("a curve of type {ty}")),
     }
     bspline_curve(st, fmt)
+}
+
+/// The 3D B-spline of a uv curve on a B-spline surface (SMLib's parametrisation): exact on an
+/// affine (bilinear, parallelogram, non-rational) patch, whose map takes control points to
+/// control points; elsewhere a cubic interpolation of 65 points of it at the uv curve's
+/// parameters.
+fn curve_on_surface(uv: &NurbsCurve, s: &NurbsSurface) -> NurbsCurve {
+    let affine = s.du == 1 && s.dv == 1 && s.cps.len() == 2 && s.cps[0].len() == 2 && s.cps.iter().flatten().all(|h| (h.w - 1.0).abs() < 1e-14) && {
+        let c = |i: usize, j: usize| s.cps[i][j].xyz();
+        (c(1, 1) - c(1, 0) - c(0, 1) + c(0, 0)).norm() < 1e-12 * (1.0 + c(0, 0).norm())
+    };
+    let ((su0, su1), (sv0, sv1)) = s.range();
+    let on = |q: P3| s.point(q.x.clamp(su0, su1), q.y.clamp(sv0, sv1));
+    if affine {
+        let (o, a, b) = (s.point(su0, sv0), s.point(su1, sv0), s.point(su0, sv1));
+        let map = |q: P3| o + (a - o) * ((q.x - su0) / (su1 - su0)) + (b - o) * ((q.y - sv0) / (sv1 - sv0));
+        let cps = uv.cps.iter().map(|h| super::nurbs::hom(&map(super::nurbs::dehom(h)), h.w)).collect();
+        return NurbsCurve { degree: uv.degree, knots: uv.knots.clone(), cps };
+    }
+    let (t0, t1) = uv.range();
+    let ts: Vec<f64> = (0..=64).map(|i| t0 + (t1 - t0) * i as f64 / 64.0).collect();
+    let pts: Vec<P3> = ts.iter().map(|&t| on(uv.point(t))).collect();
+    NurbsCurve::interpolate(&pts, &ts, 3, None, None)
 }
 
 /// `SmBrepData::ReadCurveFromDB` (without the attributes).
@@ -662,11 +709,38 @@ fn build(t: Topo, curves: Vec<NurbsCurve>, surfs: Vec<SurfRec>) -> R<Brep> {
     let mut xb = XBuilder::new();
     // SMLib turns its solids outward on reading (some files' face uses point in).
     xb.unoriented = true;
-    let vids: Vec<usize> = verts.iter().map(|(_, p)| xb.vertex(*p)).collect();
-    for (k, (t, _)) in verts.iter().enumerate() {
-        xb.body.verts[vids[k]].tol = t.max(TOL_MIN);
+    // Vertices at one point (within their tolerances) are one vertex: some files give a closed
+    // edge's two ends, or the corners of a torus's seams, vertices of their own.
+    let mut vids: Vec<usize> = Vec::with_capacity(verts.len());
+    // Earlier vertices by grid cell (cells as large as the largest tolerance).
+    let cell = verts.iter().map(|v| v.0).fold(TOL_MIN, f64::max) * 2.0;
+    let key = |p: &P3| [p.x, p.y, p.z].map(|x| (x / cell).floor() as i64);
+    let mut grid: std::collections::HashMap<[i64; 3], Vec<usize>> = std::collections::HashMap::new();
+    for (k, &(t, p)) in verts.iter().enumerate() {
+        let c = key(&p);
+        let mut same = None;
+        'near: for dx in -1..=1 {
+            for dy in -1..=1 {
+                for dz in -1..=1 {
+                    for &j in grid.get(&[c[0] + dx, c[1] + dy, c[2] + dz]).into_iter().flatten() {
+                        if (verts[j].1 - p).norm() <= verts[j].0.max(t).max(TOL_MIN) {
+                            same = Some(j);
+                            break 'near;
+                        }
+                    }
+                }
+            }
+        }
+        grid.entry(c).or_default().push(k);
+        let v = match same {
+            Some(j) => vids[j],
+            None => xb.vertex(p),
+        };
+        xb.body.verts[v].tol = xb.body.verts[v].tol.max(t.max(TOL_MIN));
+        vids.push(v);
     }
     let mut eids: Vec<Option<usize>> = Vec::new();
+    let mut stretches: Vec<Curve> = Vec::new();
     for (k, &(t, c, a, b, (p0, p1))) in edges.iter().enumerate() {
         let cur = curves.get(c).ok_or_else(|| format!("edge {k}: no curve {c}"))?;
         let (&va, &vb) = (vids.get(a).ok_or_else(|| format!("edge {k}: no vertex {a}"))?, vids.get(b).ok_or_else(|| format!("edge {k}: no vertex {b}"))?);
@@ -680,6 +754,7 @@ fn build(t: Topo, curves: Vec<NurbsCurve>, surfs: Vec<SurfRec>) -> R<Brep> {
         } else {
             cur.clone()
         };
+        stretches.push(super::xbuild::nurbs_curve(cur.clone()));
         let e = xb.edge(super::xbuild::nurbs_curve(cur), va, vb);
         if let Some(e) = e {
             xb.body.edges[e].tol = t.max(TOL_MIN);
@@ -725,12 +800,15 @@ fn build(t: Topo, curves: Vec<NurbsCurve>, surfs: Vec<SurfRec>) -> R<Brep> {
         let mut shell_ids = Vec::new();
         for si in first..first.saturating_add(cnt).min(shells.len()) {
             let Some(Some((n, start))) = shells.get(si).copied() else { continue };
-            let fs: Vec<usize> = (start..start.saturating_add(n).min(faceuses.len()))
-                .filter_map(|u| {
-                    let (f, o) = *faceuses.get(u)?;
-                    make_face(&mut xb, f, o)
-                })
-                .collect();
+            // A lamina face has a face use each way in the one shell: listed once.
+            let mut fs: Vec<usize> = Vec::new();
+            for &(f, o) in faceuses.iter().take(start.saturating_add(n)).skip(start) {
+                if let Some(id) = make_face(&mut xb, f, o)
+                    && !fs.contains(&id)
+                {
+                    fs.push(id);
+                }
+            }
             if !fs.is_empty() {
                 shell_ids.push(xb.shell(fs, !sheets));
             }
@@ -739,8 +817,48 @@ fn build(t: Topo, curves: Vec<NurbsCurve>, surfs: Vec<SurfRec>) -> R<Brep> {
             xb.solid(shell_ids);
         }
     }
-    let (body, w, map) = xb.finish_mapped();
+    let (mut body, w, map) = xb.finish_mapped();
     warnings.extend(w);
+    // Wire edges (edge uses of kind 2): a wire body's edges, or free edges beside the faces,
+    // their ends merged with the faces' vertices where they meet.
+    let mut wire_edges: Vec<usize> = eus.iter().filter(|u| u.0 == 2).map(|u| u.1).filter(|&e| e < edges.len()).collect();
+    wire_edges.sort_unstable();
+    wire_edges.dedup();
+    if !wire_edges.is_empty() {
+        let mut wb = XBuilder::new();
+        let mut wv: Vec<Option<usize>> = vec![None; verts.len()];
+        for &e in &wire_edges {
+            let (t, _, a, b, _) = edges[e];
+            let mut vid = |i: usize, wb: &mut XBuilder| -> usize {
+                *wv[i].get_or_insert_with(|| {
+                    let v = wb.vertex(verts[i].1);
+                    wb.body.verts[v].tol = verts[i].0.max(TOL_MIN);
+                    v
+                })
+            };
+            let (va, vb) = (vid(a, &mut wb), vid(b, &mut wb));
+            match wb.edge(stretches[e].clone(), va, vb) {
+                Some(x) => wb.body.edges[x].tol = t.max(TOL_MIN),
+                None => warnings.push(format!("wire edge {e} is empty")),
+            }
+        }
+        let (vo, eo, _) = body.append(&wb.body);
+        // Ends on a face vertex become that vertex.
+        for vi in vo..body.verts.len() {
+            let p = body.verts[vi].p;
+            if let Some(same) = (0..vo).find(|&u| (body.verts[u].p - p).norm() <= body.verts[u].tol.max(body.verts[vi].tol)) {
+                for e in &mut body.edges[eo..] {
+                    for v in &mut e.v {
+                        if *v == vi {
+                            *v = same;
+                        }
+                    }
+                }
+            }
+        }
+        super::xbuild::drop_unused_verts(&mut body);
+        body.chain_wires();
+    }
     if body.faces.is_empty() && !faces.is_empty() {
         return Err(format!("no faces read: {}", warnings.iter().take(3).cloned().collect::<Vec<_>>().join("; ")));
     }
@@ -762,7 +880,11 @@ fn build(t: Topo, curves: Vec<NurbsCurve>, surfs: Vec<SurfRec>) -> R<Brep> {
 /// body's size; exact integration of spline faces costs seconds each). What SMLib's tests'
 /// face indices are matched by: [`Brep::face_centroids`] are these of the read body.
 pub fn face_centroids(body: &Body) -> Vec<P3> {
-    let bb = body.bbox();
+    // The faces' boxes (surface-aware: a torus's vertices alone can be one point).
+    let mut bb = body.bbox();
+    for fi in 0..body.faces.len() {
+        bb.union(&body.face_bbox(fi));
+    }
     let defl = if bb.is_empty() { 1e-3 } else { (bb.diagonal() * 1e-3).max(1e-6) };
     let es = super::tess::edge_samples(body, defl, 0.3);
     body.faces
@@ -1063,13 +1185,8 @@ mod tests {
             assert_eq!((p.curves.len(), p.surfaces.len(), p.breps.len()), (nc, ns, nb), "{f}");
             for (k, b) in p.breps.iter().enumerate() {
                 let issues = b.body.check();
-                // The builder's limit, not the reader's: brep 4 loses a face whose loop doesn't
-                // close (so it is no solid).
-                if f == "reader/boolean_trees.smp" && k == 4 {
-                    assert!(b.body.solids.is_empty(), "{f} brep {k} now reads whole: drop it from the exceptions");
-                    continue;
-                }
                 assert!(issues.is_empty(), "{f} brep {k}: {issues:?}");
+                assert!(!b.warnings.iter().any(|w| w.contains("doesn't close")), "{f} brep {k}: {:?}", b.warnings);
             }
         }
     }
@@ -1096,13 +1213,64 @@ mod tests {
                 Err(e) => bad.push(format!("{n}: {e}")),
             }
         }
-        // The builder's limits (the files read): faces at a cone's apex or a sphere's pole whose
-        // loops don't close, single-face solids that come out inside out.
-        let known = ["ssi_coincident_spheres2.smp", "ssi_cone_cyl1.smp", "ssi_cone_cyl2.smp", "ssi_cone_plane1.smp", "ssi_spiral.smp", "ssi_tor_sph_tan.smp", "ssi_tor_sph_tan2.smp"];
-        let (old, new): (Vec<_>, Vec<_>) = bad.iter().partition(|b| known.iter().any(|k| b.starts_with(k)));
-        assert!(new.is_empty(), "{} of {}: {new:#?}", new.len(), names.len());
-        let fixed: Vec<_> = known.iter().filter(|k| !old.iter().any(|b| b.starts_with(*k))).collect();
-        assert!(fixed.is_empty(), "now read well: {fixed:?}");
+        assert!(bad.is_empty(), "{} of {}: {bad:#?}", bad.len(), names.len());
+    }
+
+    /// Faces the builder once dropped: a B-spline cone whose apex is a row of its net (the
+    /// loop's jump there a pole), spline cylinders and spheres whose closed edges start across
+    /// their seam (a whole period between coedges), a torus bounded by four closed edges (the
+    /// two copies of each seam as edges of their own, vertices all at one point), a sphere
+    /// bounded by slits only (a whole sphere); and wire edges whose curves lie on a surface
+    /// (type 14048); and faces whose sense the loops and the file's other faces decide.
+    #[test]
+    fn poles_seams_and_wires() {
+        // (file, brep, faces, solids, area)
+        for (f, k, nf, ns, area) in [
+            ("reader/cone.smb", 0, 1, 0, PI * 5.0 * 125f64.sqrt()),
+            ("reader/cyl_cyl_shell.smb", 0, 2, 0, -1.0),
+            ("reader/cyl_sphere.smb", 0, 2, 1, -1.0),
+            ("reader/ssi_cone_plane1.smp", 0, 1, 0, -1.0),
+            ("reader/ssi_tor_sph_tan2.smp", 0, 1, 1, -1.0),
+            ("reader/ssi_tor_sph_tan2.smp", 1, 1, 1, -1.0),
+            ("reader/torus_0.smb", 0, 1, 0, 4.0 * PI * PI * 10.0 * 5.0),
+            // Senses: a B-spline cone closed in v with its apex a row (jumps there across v),
+            // a sphere less two holes in a file whose senses are all the other way about, a
+            // sphere holed by two tubes.
+            ("offset/InsetCone.smb", 0, 2, 1, -1.0),
+            ("fillets/test4.smb", 0, 6, 1, -1.0),
+            ("reader/boolean_trees.smp", 5, 3, 1, -1.0),
+        ] {
+            let bytes = fixture(f);
+            let b = if f.ends_with(".smp") { read_part(&bytes).unwrap().breps.swap_remove(k) } else { read_brep(&bytes).unwrap_or_else(|e| panic!("{f}: {e}")) };
+            assert!(b.body.check().is_empty(), "{f} {k}: {:?}", b.body.check());
+            assert_eq!((b.body.faces.len(), b.body.solids.len()), (nf, ns), "{f} {k}: {:?}", b.warnings);
+            let m = super::super::mass::body_mass(&b.body);
+            if area > 0.0 {
+                assert!((m.surface_area - area).abs() < 1e-6 * area, "{f}: area {} want {area}", m.surface_area);
+            }
+            if ns > 0 {
+                assert!(m.volume > 0.0, "{f} {k}: volume {}", m.volume);
+            }
+        }
+        // A lamina face (a face use each way in one shell) is in its shell once.
+        let b = read_brep(&fixture("stitch/fillet_ts.smb")).unwrap().body;
+        for (si, sh) in b.shells.iter().enumerate() {
+            let mut f = sh.faces.clone();
+            f.sort_unstable();
+            f.dedup();
+            assert_eq!(f.len(), sh.faces.len(), "shell {si}: {:?}", sh.faces);
+        }
+        // Wire edges: the edge x = 25, y 15 → 20 as a line on a plane, alone and beside a box.
+        let b = read_brep(&fixture("reader/wire_edge.smb")).unwrap().body;
+        assert_eq!((b.faces.len(), b.edges.len(), b.wires.len()), (0, 1, 1));
+        assert_eq!(b.class(), crate::BodyClass::Wire);
+        let e = &b.edges[0];
+        let (p, q) = (e.point(e.t[0]), e.point(e.t[1]));
+        assert!(((p - P3::new(25.0, 15.0, 0.0)).norm() < 1e-9 && (q - P3::new(25.0, 20.0, 0.0)).norm() < 1e-9) || ((q - P3::new(25.0, 15.0, 0.0)).norm() < 1e-9 && (p - P3::new(25.0, 20.0, 0.0)).norm() < 1e-9), "{p:?} {q:?}");
+        let b = read_brep(&fixture("reader/box_with_attached_wire_edge_and_detached_wire_edge.smb")).unwrap().body;
+        assert!(b.check().is_empty(), "{:?}", b.check());
+        assert_eq!((b.faces.len(), b.wires.len()), (6, 2));
+        assert_eq!(b.class(), crate::BodyClass::Mixed);
     }
 
     #[test]
