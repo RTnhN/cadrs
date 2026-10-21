@@ -13,6 +13,8 @@ use std::f64::consts::{PI, TAU};
 use super::curve::Curve;
 use super::kernel::NativeKernel;
 use super::math::*;
+use super::profile::{MergedFace, Piece, Src};
+use super::sweep_path::Seg;
 use crate::*;
 
 /// An edge: a curve between two parameters.
@@ -74,6 +76,16 @@ impl Ax3 {
     pub fn y(&self) -> V3 {
         self.z.cross(&self.x)
     }
+}
+
+/// A hyperbola (DRAW's `hyperbola`): C + a·cosh t·X + b·sinh t·Y.
+#[derive(Debug, Clone, Copy)]
+pub struct Hyperbola {
+    pub c: P3,
+    pub x: V3,
+    pub y: V3,
+    pub a: f64,
+    pub b: f64,
 }
 
 /// Counts of sub-shapes (DRAW's `nbshapes`).
@@ -302,6 +314,57 @@ impl NativeKernel {
         let n = V3::new(nx, ny, nz).normalize();
         let xd = V3::new(xx, xy, xz);
         Ax3 { origin: P3::new(x, y, z), z: n, x: (xd - n * xd.dot(&n)).normalize() }
+    }
+
+    /// `hyperbola name x y z [nx ny nz [xx xy xz]] major minor` (OCCT's: C + major·cosh t·X +
+    /// minor·sinh t·Y; an edge of it needs its parameters, see [`NativeKernel::mkedge_hyperbola`]).
+    pub fn hyperbola(&self, o: [f64; 3], n: Option<[f64; 3]>, x: Option<[f64; 3]>, major: f64, minor: f64) -> Hyperbola {
+        let (c, x, y) = ax2_of(o, n, x);
+        Hyperbola { c, x, y, a: major, b: minor }
+    }
+
+    /// `mkedge name hyperbola t0 t1`: the arc from t0 to t1, as an exact rational quadratic (the
+    /// same points, though not at the same parameters: the edge runs over [t0, t1] by the conic's
+    /// own rational parametrization).
+    pub fn mkedge_hyperbola(&self, h: &Hyperbola, t0: f64, t1: f64) -> Result<Shape> {
+        if !(t1 > t0) || !(h.a > 0.0) || !(h.b > 0.0) {
+            return Err(err("mkedge: a hyperbola's arc needs t0 < t1 and positive radii"));
+        }
+        let at = |t: f64| h.c + h.x * (h.a * t.cosh()) + h.y * (h.b * t.sinh());
+        // The middle pole is where the end tangents cross; its weight cosh of the half span.
+        let (m, w) = (0.5 * (t0 + t1), 0.5 * (t1 - t0));
+        let mid = h.c + h.x * (h.a * m.cosh() / w.cosh()) + h.y * (h.b * m.sinh() / w.cosh());
+        let b = super::nurbs::NurbsCurve::bezier(&[at(t0), mid, at(t1)], &[1.0, w.cosh(), 1.0]).reparam(t0, t1);
+        Ok(Shape::Edge(DEdge { curve: Curve::Nurbs(std::sync::Arc::new(b)), t0, t1 }))
+    }
+
+    /// `orientation name F|R` (and `treverse`): the shape as it is, or turned round (a wire's or
+    /// an edge's direction, the sides of a face or of a body's faces).
+    pub fn orientation(&mut self, s: &Shape, o: &str) -> Result<Shape> {
+        match o.to_ascii_uppercase().as_str() {
+            "F" => return Ok(s.clone()),
+            "R" => {}
+            _ => return Err(KernelError::Unsupported("internal and external orientations")),
+        }
+        let rev = |l: &[DEdge]| l.iter().rev().map(DEdge::reversed).collect::<Vec<_>>();
+        Ok(match s {
+            Shape::Vertex(_) | Shape::Empty => s.clone(),
+            Shape::Edge(e) => Shape::Edge(e.reversed()),
+            Shape::Wire(w) => Shape::Wire(rev(w)),
+            Shape::Face { plane, loops } => Shape::Face {
+                plane: Plane { origin: plane.origin, x_dir: plane.x_dir, normal: -plane.normal },
+                loops: loops.iter().map(|l| rev(l)).collect(),
+            },
+            Shape::Body(b) => {
+                let mut body = (**self.get(*b)?).clone();
+                for f in &mut body.faces {
+                    super::topo::Body::reverse_face(f);
+                }
+                Shape::Body(self.insert(body))
+            }
+            Shape::Compound(v) => Shape::Compound(v.iter().map(|x| self.orientation(x, o)).collect::<Result<_>>()?),
+            _ => return Err(KernelError::Unsupported("turning a sub-shape round")),
+        })
     }
 
     // --- Topology ---------------------------------------------------------------------------
@@ -919,6 +982,9 @@ impl NativeKernel {
         if let Some(s) = self.sweep_lower(f, &BodySweep::Translate(V3::new(dx, dy, dz)))? {
             return Ok(s);
         }
+        if let Some(sheet) = self.sheet_shape(f)? {
+            return Ok(Shape::Body(crate::Kernel::sweep_body(self, sheet, &BodySweep::Translate(V3::new(dx, dy, dz)))?.bodies[0]));
+        }
         let profile = face_profile(f)?;
         let v = V3::new(dx, dy, dz);
         let n = profile.plane.normal.into_inner();
@@ -945,6 +1011,19 @@ impl NativeKernel {
         Ok(Shape::Body(r.bodies[0]))
     }
 
+    /// A sheet to sweep into a solid: a sheet body (a face of a surface) or a face of a body as
+    /// a sheet of its own; None for DRAW's planar faces (swept as profiles) and other shapes.
+    fn sheet_shape(&mut self, s: &Shape) -> Result<Option<BodyId>> {
+        Ok(match s {
+            Shape::Body(b) if self.get(*b)?.solids.is_empty() && !self.get(*b)?.faces.is_empty() => Some(*b),
+            Shape::BodyFace(b, f) if (f.0 as usize) < self.get(*b)?.faces.len() => {
+                let sheet = super::kernel::subset(self.get(*b)?, &[f.0 as usize], false);
+                Some(self.insert(sheet))
+            }
+            _ => None,
+        })
+    }
+
     /// A vertex, edge or wire swept one kind higher (into a wire or a sheet body) by
     /// [`Kernel::sweep_body`]; None for other shapes.
     fn sweep_lower(&mut self, s: &Shape, sweep: &BodySweep) -> Result<Option<Shape>> {
@@ -964,6 +1043,9 @@ impl NativeKernel {
         let axis = Axis { origin: P3::new(x, y, z), dir: nalgebra::Unit::new_normalize(V3::new(dx, dy, dz)) };
         if let Some(s) = self.sweep_lower(f, &BodySweep::Rotate { axis, angle: angle.to_radians() })? {
             return Ok(s);
+        }
+        if let Some(sheet) = self.sheet_shape(f)? {
+            return Ok(Shape::Body(crate::Kernel::sweep_body(self, sheet, &BodySweep::Rotate { axis, angle: angle.to_radians() })?.bodies[0]));
         }
         let profile = face_profile(f)?;
         let (o, d) = (P3::new(x, y, z), V3::new(dx, dy, dz).normalize());
@@ -1145,6 +1227,715 @@ impl NativeKernel {
         body.solids.clear();
         super::boolean::assemble_shells(&mut body)?;
         Ok(Shape::Body(self.insert(body)))
+    }
+
+    // --- Pipes ------------------------------------------------------------------------------
+
+    /// A spine (a wire or an edge) as a sweep path: its segments chained, and whether it closes.
+    fn path_of(&self, s: &Shape) -> Result<(Vec<Seg>, bool)> {
+        let seg = |c: &Curve, t0: f64, t1: f64| if t0 <= t1 { Seg { c: c.clone(), t0, t1, rev: false } } else { Seg { c: c.clone(), t0: t1, t1: t0, rev: true } };
+        let segs: Vec<Seg> = match s {
+            Shape::Edge(e) => vec![seg(&e.curve, e.t0, e.t1)],
+            Shape::Wire(w) => w.iter().map(|e| seg(&e.curve, e.t0, e.t1)).collect(),
+            Shape::BodyEdge(b, id) => {
+                let e = self.get(*b)?.edges.get(id.0 as usize).ok_or_else(|| err("an unknown edge"))?;
+                vec![seg(&e.curve, e.t[0], e.t[1])]
+            }
+            _ => return Err(err("the spine must be a wire")),
+        };
+        super::sweep_path::chain(segs)
+    }
+
+    /// A profile of a pipe: a planar face, or a wire or edge (closed or open). `hint`
+    /// is the direction a straight profile's plane is made square to.
+    fn section_of(&self, s: &Shape, hint: &V3) -> Result<Section> {
+        let wire = |edges: Vec<DEdge>| -> Result<Section> {
+            let closed = !edges.is_empty() && (edges[0].start() - edges[edges.len() - 1].end()).norm() < 1e-6 * (1.0 + edges[0].length());
+            let plane = match fit_plane(&edges) {
+                Some(p) => p,
+                None => {
+                    // A straight profile: the plane through it nearest square to `hint`.
+                    let d = (edges[edges.len() - 1].end() - edges[0].start()).try_normalize(1e-12).ok_or_else(|| err("a profile of no length"))?;
+                    let n = (hint - d * hint.dot(&d)).try_normalize(1e-9).unwrap_or_else(|| ax2_x(&d));
+                    Plane { origin: edges[0].start(), x_dir: nalgebra::Unit::new_normalize(d), normal: nalgebra::Unit::new_normalize(n) }
+                }
+            };
+            Ok(Section { plane, loops: vec![edges], closed })
+        };
+        match s {
+            Shape::Face { plane, loops } => Ok(Section { plane: *plane, loops: loops.clone(), closed: true }),
+            Shape::BodyFace(b, f) => {
+                let body = self.get(*b)?;
+                let face = body.faces.get(f.0 as usize).ok_or_else(|| err("an unknown face"))?;
+                let super::surface::Surface::Plane { f: fr } = &face.surf else { return Err(KernelError::Unsupported("pipes of faces that aren't planar")) };
+                let z = fr.x.cross(&fr.y) * if face.sense { 1.0 } else { -1.0 };
+                let plane = Plane { origin: fr.o, x_dir: nalgebra::Unit::new_normalize(fr.x), normal: nalgebra::Unit::new_normalize(z) };
+                let loops = face
+                    .loops
+                    .iter()
+                    .map(|l| {
+                        l.iter()
+                            .filter(|c| !body.edges[c.edge].degenerate)
+                            .map(|c| {
+                                let e = &body.edges[c.edge];
+                                let d = DEdge { curve: e.curve.clone(), t0: e.t[0], t1: e.t[1] };
+                                if c.fwd { d } else { d.reversed() }
+                            })
+                            .collect()
+                    })
+                    .collect();
+                Ok(Section { plane, loops, closed: true })
+            }
+            Shape::Wire(w) => wire(w.clone()),
+            Shape::Edge(e) => wire(vec![e.clone()]),
+            _ => Err(KernelError::Unsupported("pipes of this kind of profile")),
+        }
+    }
+
+    /// Sweeps a section along spines (from [`sweep_path::spines`]): a solid, or a sheet sewn
+    /// along the joints of its pieces.
+    fn sweep_section(&mut self, sec: &Section, spines: Vec<(Vec<Seg>, bool)>, control: SweepControl, solid: bool) -> Result<Shape> {
+        let (faces, chains) = sec.pieces(solid)?;
+        let t = super::sweep_path::sweep_spines(&faces, &chains, sec.plane, spines, control, solid)?;
+        if solid {
+            return Ok(Shape::Body(self.insert(t.body)));
+        }
+        // A sheet's pieces sewn along their joints (kept apart where sewing spoils them).
+        let size = t.body.verts.iter().fold(Bbox::empty(), |mut b, v| {
+            b.add(&v.p);
+            b
+        });
+        let sewn = super::surfacing::sew_faces(t.body.clone(), (size.diagonal() * 1e-9).max(1e-7)).ok().and_then(|mut body| {
+            body.shells.clear();
+            body.solids.clear();
+            super::boolean::assemble_shells(&mut body).ok()?;
+            // A closed shell stays a shell (OCCT makes a solid only when asked).
+            body.solids.clear();
+            body.check().is_empty().then_some(body)
+        });
+        Ok(Shape::Body(self.insert(sewn.unwrap_or(t.body))))
+    }
+
+    /// `pipe result spine profile [mode]` (OCCT's `BRepOffsetAPI_MakePipe`): the profile swept
+    /// along the whole spine from where it sits on it (as [`NativeKernel::buildsweep`] places
+    /// it), carried rigidly with the spine's frame; a solid from a face, a sheet from a wire or
+    /// an edge. Where the spine turns a corner the profile keeps its attitude (OCCT's G0 law);
+    /// its three trihedron modes are one here (the rotation-minimizing frame).
+    pub fn pipe(&mut self, spine: &Shape, profile: &Shape) -> Result<Shape> {
+        let solid = matches!(profile, Shape::Face { .. } | Shape::BodyFace(..));
+        self.buildsweep(spine, &[(profile, false, false)], "CF", [0.0, 0.0, 1.0], 'M', solid)
+    }
+
+    /// `mksweep spine; setsweep mode; addsweep section [-T] [-R]; buildsweep result [-M|-C|-R]
+    /// [-S]` (OCCT's `BRepOffsetAPI_MakePipeShell`) with one section (a wire or an edge): placed
+    /// on the spine where its plane crosses it nearest its centre (else at the nearer end), turned
+    /// square to the spine there with `correct` (-R), moved onto it with `contact` (-T) — its
+    /// point nearest the spine onto the spine — and swept both ways from there. `mode` is
+    /// setsweep's: `CF`, `FR` and `DT` follow the spine (the rotation-minimizing frame), `FX`
+    /// keeps the section's attitude, `CN` keeps its plane through the binormal `dir`.
+    /// `transition` is buildsweep's corner treatment (`M`, `C` or `R`); `solid` (-S) closes a
+    /// closed section's sheet with its ends (a planar face sweeps a solid).
+    pub fn buildsweep(&mut self, spine: &Shape, sections: &[(&Shape, bool, bool)], mode: &str, dir: [f64; 3], transition: char, solid: bool) -> Result<Shape> {
+        let (path, closed) = self.path_of(spine)?;
+        if sections.len() > 1 {
+            return self.sweep_sections(&path, closed, sections, solid);
+        }
+        let [(section, contact, correct)] = sections else { return Err(err("buildsweep needs a section")) };
+        let mut sec = self.section_of(section, &path[0].dir(0.0))?;
+        let control = match mode {
+            "CF" | "FR" | "DT" => SweepControl::None,
+            "FX" => SweepControl::KeepOrientation,
+            "CN" => SweepControl::LockDirection(nalgebra::Unit::try_new(V3::from(dir), 1e-12).ok_or_else(|| err("setsweep -CN: a null direction"))?),
+            _ => return Err(KernelError::Unsupported("this setsweep mode")),
+        };
+        // Where the section sits on the spine (GeomFill_SectionPlacement).
+        let center = sec.center();
+        let n = sec.plane.normal.into_inner();
+        let pl = super::surface::Surface::Plane { f: super::build::plane_frame(&sec.plane, V3::zeros()) };
+        let mut best: Option<(f64, usize, f64)> = None;
+        for (i, s) in path.iter().enumerate() {
+            for t in super::ssi::curve_surface(&s.c, s.t0, s.t1, &pl) {
+                let d = (s.c.point(t) - center).norm();
+                if best.is_none_or(|(bd, ..)| d < bd) {
+                    best = Some((d, i, s.frac_of(&s.c.point(t))));
+                }
+            }
+        }
+        let (si, f) = match best {
+            Some((_, i, f)) => (i, f),
+            None => {
+                let last = path.len() - 1;
+                let (d0, d1) = ((path[0].start() - center).dot(&n).abs(), (path[last].end() - center).dot(&n).abs());
+                if d0 <= d1 { (0, 0.0) } else { (last, 1.0) }
+            }
+        };
+        let p = path[si].part(f, f).start();
+        let tangent = path[si].dir(f);
+        if *correct {
+            // Turned about its centre so its plane is square to the spine.
+            if let Some(axis) = n.cross(&tangent).try_normalize(1e-12) {
+                let r = nalgebra::Rotation3::from_axis_angle(&nalgebra::Unit::new_unchecked(axis), n.angle(&tangent)).into_inner();
+                sec = sec.moved(&Affine { m: r, t: center.coords - r * center.coords });
+            }
+        }
+        if *contact {
+            // Moved so its point nearest the spine's point lies on it.
+            let q = sec.nearest(&p);
+            sec = sec.moved(&Affine::translation(p - q));
+        }
+        let solid = solid && sec.closed;
+        // The section faces the way the spine runs (else the solid would be inside out).
+        if sec.plane.normal.dot(&tangent) < 0.0 {
+            sec.plane.normal = -sec.plane.normal;
+        }
+        // Corners treated as OCCT's right or round corners (on spines of straight segments).
+        let corners = path.windows(2).any(|w| w[0].dir(1.0).dot(&w[1].dir(0.0)) < 1.0 - 1e-9)
+            || (closed && path[path.len() - 1].dir(1.0).dot(&path[0].dir(0.0)) < 1.0 - 1e-9);
+        if corners && transition != 'M' && path.iter().all(|s| matches!(s.c, Curve::Line { .. })) {
+            return self.corner_pipe(&sec, &path, closed, si, f, transition == 'R', solid);
+        }
+        let spines = split_spines(path, closed, si, f);
+        self.sweep_section(&sec, spines, control, solid)
+    }
+
+    /// The right-corner pipe (see [`NativeKernel::corner_pipe`]) of sections `secs` at the
+    /// starts of straight segments: each segment's prism between the planes bisecting its
+    /// corners, as a ruled loft between the section carried along the segment onto them, the
+    /// pieces glued at those planes (united where the sections, oblique to the segments, don't
+    /// meet exactly). A sheet is the solid without its end caps.
+    fn miter_pipe(&mut self, secs: &[Section], verts: &[P3], dirs: &[V3], lens: &[f64], closed: bool, solid: bool) -> Result<Shape> {
+        use super::features::Tagged;
+        use super::loft_build::WireSection;
+        let n = secs.len();
+        // The plane bisecting the corner at vertex i (none at an open spine's ends).
+        let miter = |i: usize| -> Option<(P3, V3)> {
+            if !closed && (i == 0 || i == n) {
+                return None;
+            }
+            let (a, b) = (dirs[(i + n - 1) % n], dirs[i % n]);
+            Some((verts[i % n], (a + b).normalize()))
+        };
+        // The section carried along direction d onto a plane: its edges projected along d.
+        let onto = |sec: &Section, d: &V3, plane: Option<(P3, V3)>| -> Vec<(Curve, f64, f64)> {
+            let m = match plane {
+                Some((o, m)) => {
+                    let den = d.dot(&m);
+                    let mat = nalgebra::Matrix3::identity() - d * m.transpose() / den;
+                    Affine { m: mat, t: d * (o.coords.dot(&m) / den) }
+                }
+                None => Affine::identity(),
+            };
+            sec.loops[0]
+                .iter()
+                .map(|e| match &e.curve {
+                    Curve::Line { .. } => {
+                        let (c, l) = Curve::line(m.point(&e.start()), m.point(&e.end()));
+                        (c, 0.0, l)
+                    }
+                    Curve::Nurbs(_) => (e.curve.transformed(&m), e.t0, e.t1),
+                    _ => {
+                        let nc = e.curve.to_nurbs(e.t0.min(e.t1), e.t0.max(e.t1)).transformed(&m);
+                        let (lo, hi) = nc.range();
+                        let c = Curve::Nurbs(std::sync::Arc::new(nc));
+                        if e.t0 <= e.t1 { (c, lo, hi) } else { (c, hi, lo) }
+                    }
+                })
+                .collect()
+        };
+        let mut acc: Option<Tagged> = None;
+        let mut fused: Option<Shape> = None;
+        for k in 0..n {
+            let start = onto(&secs[k], &dirs[k], miter(k));
+            let end_sec = secs[k].moved(&Affine::translation(dirs[k] * lens[k]));
+            let end = onto(&end_sec, &dirs[k], miter(k + 1));
+            let built = super::loft_build::loft_wires(self, &[WireSection::Wire(start.clone()), WireSection::Wire(end.clone())], true, true)?;
+            // Its caps: the planar faces through the first points of the two sections.
+            let (p0, p1) = (start[0].0.point(start[0].1), end[0].0.point(end[0].1));
+            let mut tags = vec![Vec::new(); built.body.faces.len()];
+            for (fi, f) in built.body.faces.iter().enumerate() {
+                if let super::surface::Surface::Plane { f: fr } = &f.surf {
+                    let z = fr.x.cross(&fr.y);
+                    let on = |p: &P3| (p - fr.o).dot(&z).abs() < 1e-7 * (1.0 + lens[k]);
+                    if on(&p0) && !on(&p1) {
+                        tags[fi].push(Origin::StartCap { region: 0 });
+                    } else if on(&p1) && !on(&p0) {
+                        tags[fi].push(Origin::EndCap { region: 0 });
+                    }
+                }
+            }
+            let piece = Tagged { body: built.body, tags };
+            if let Some(f) = fused.take() {
+                let b = self.insert(piece.body);
+                fused = Some(self.bfuse(&f, &Shape::Body(b))?);
+                continue;
+            }
+            acc = match acc.take() {
+                None => Some(piece),
+                Some(a) => match super::sweep_path::glue(&a, &piece) {
+                    Some(g) => Some(g),
+                    None => {
+                        let (x, y) = (self.insert(a.body), self.insert(piece.body));
+                        fused = Some(self.bfuse(&Shape::Body(x), &Shape::Body(y))?);
+                        None
+                    }
+                },
+            };
+        }
+        let body = match (acc, fused) {
+            (_, Some(f)) => {
+                let b = self.body_of(&f)?;
+                (**self.get(b)?).clone()
+            }
+            (Some(a), None) => {
+                let a = if closed { super::sweep_path::glue_self(&a).unwrap_or(a) } else { a };
+                if solid {
+                    return Ok(Shape::Body(self.insert(a.body)));
+                }
+                // A sheet: without the end caps.
+                let keep: Vec<usize> = (0..a.body.faces.len()).filter(|&f| a.tags[f].is_empty()).collect();
+                let mut sheet = super::kernel::subset(&a.body, &keep, false);
+                sheet.solids.clear();
+                return Ok(Shape::Body(self.insert(sheet)));
+            }
+            (None, None) => return Err(err("no pipe")),
+        };
+        if solid {
+            return Ok(Shape::Body(self.insert(body)));
+        }
+        let (s0, s1) = (secs[0].clone(), secs[n - 1].moved(&Affine::translation(dirs[n - 1] * lens[n - 1])));
+        Ok(Shape::Body(self.insert(strip_caps(body, &s0, &s1, closed))))
+    }
+
+    /// `buildsweep` through several sections (OCCT's `BRepFill_NSections`) along a straight
+    /// spine: each section sits at its distance along the spine (a vertex where it projects onto
+    /// it, a wire where its plane crosses it), and the surface interpolates them by the
+    /// polynomial through them in that distance (linear for two), extrapolated to the spine's
+    /// ends. With `contact` (-T) a vertex moves onto the spine and a wire's point nearest it
+    /// does; `correct` (-R) turns a wire square to the spine. One wire among vertices (the
+    /// sections are then scaled copies of it), or polygons of as many edges.
+    fn sweep_sections(&mut self, path: &[Seg], closed: bool, sections: &[(&Shape, bool, bool)], solid: bool) -> Result<Shape> {
+        use super::loft_build::WireSection;
+        let (a, b) = (path[0].start(), path[path.len() - 1].end());
+        let len = (b - a).norm();
+        let d = (b - a) / len.max(1e-300);
+        if closed || len < 1e-9 || path.iter().any(|s| !matches!(s.c, Curve::Line { .. }) || s.dir(0.0).dot(&d) < 1.0 - 1e-9) {
+            return Err(KernelError::Unsupported("sweeps through several sections along a spine that isn't straight"));
+        }
+        enum Sec {
+            Point(P3),
+            Wire(Vec<DEdge>),
+        }
+        let mut secs: Vec<(f64, Sec)> = Vec::new();
+        for (shape, contact, correct) in sections {
+            if let Shape::Vertex(p) = shape {
+                let at = (p - a).dot(&d);
+                secs.push((at, Sec::Point(if *contact { a + d * at } else { *p })));
+                continue;
+            }
+            let mut sec = self.section_of(shape, &d)?;
+            let center = sec.center();
+            let n = sec.plane.normal.into_inner();
+            let at = if n.dot(&d).abs() > 1e-9 { (sec.plane.origin - a).dot(&n) / n.dot(&d) } else { (center - a).dot(&d) };
+            if *correct
+                && let Some(axis) = n.cross(&d).try_normalize(1e-12)
+            {
+                let r = nalgebra::Rotation3::from_axis_angle(&nalgebra::Unit::new_unchecked(axis), n.angle(&d)).into_inner();
+                sec = sec.moved(&Affine { m: r, t: center.coords - r * center.coords });
+            }
+            if *contact {
+                let p = a + d * at;
+                let q = sec.nearest(&p);
+                sec = sec.moved(&Affine::translation(p - q));
+            }
+            secs.push((at, Sec::Wire(sec.loops.swap_remove(0))));
+        }
+        secs.sort_by(|x, y| x.0.total_cmp(&y.0));
+        if secs.windows(2).any(|w| w[1].0 - w[0].0 < 1e-9 * (1.0 + len)) {
+            return Err(err("buildsweep: two sections at one place on the spine"));
+        }
+        let wires: Vec<usize> = (0..secs.len()).filter(|&i| matches!(secs[i].1, Sec::Wire(_))).collect();
+        let polygons = wires.iter().all(|&i| match &secs[i].1 {
+            Sec::Wire(w) => w.iter().all(|e| matches!(e.curve, Curve::Line { .. })),
+            Sec::Point(_) => true,
+        });
+        let counts: Vec<usize> = wires.iter().map(|&i| if let Sec::Wire(w) = &secs[i].1 { w.len() } else { 0 }).collect();
+        if wires.is_empty() || (wires.len() > 1 && (!polygons || counts.iter().any(|c| *c != counts[0]))) {
+            return Err(KernelError::Unsupported("sweeps through sections that aren't one wire among vertices or alike polygons"));
+        }
+        // The section at distance v: the sections weighted by the Lagrange basis at v.
+        let section_at = |v: f64| -> WireSection {
+            let w: Vec<f64> = (0..secs.len())
+                .map(|i| (0..secs.len()).filter(|&j| j != i).map(|j| (v - secs[j].0) / (secs[i].0 - secs[j].0)).product())
+                .collect();
+            let mut c = V3::zeros();
+            for (i, (_, s)) in secs.iter().enumerate() {
+                if let Sec::Point(p) = s {
+                    c += p.coords * w[i];
+                }
+            }
+            if let [iw] = wires[..] {
+                let Sec::Wire(edges) = &secs[iw].1 else { unreachable!() };
+                if w[iw].abs() < 1e-9 {
+                    return WireSection::Point(P3::from(c));
+                }
+                let m = Affine { m: nalgebra::Matrix3::identity() * w[iw], t: c };
+                return WireSection::Wire(edges.iter().map(|e| (e.curve.transformed(&m), e.t0, e.t1)).collect());
+            }
+            let corner = |k: usize, end: bool| -> P3 {
+                let mut p = c;
+                for &i in &wires {
+                    if let Sec::Wire(edges) = &secs[i].1 {
+                        p += (if end { edges[k].end() } else { edges[k].start() }).coords * w[i];
+                    }
+                }
+                P3::from(p)
+            };
+            WireSection::Wire(
+                (0..counts[0])
+                    .map(|k| {
+                        let (cv, l) = Curve::line(corner(k, false), corner(k, true));
+                        (cv, 0.0, l)
+                    })
+                    .collect(),
+            )
+        };
+        let steps = if secs.len() == 2 { 1 } else { 16 };
+        let loft: Vec<WireSection> = (0..=steps).map(|j| section_at(len * j as f64 / steps as f64)).collect();
+        let built = super::loft_build::loft_wires(self, &loft, solid, steps == 1)?;
+        Ok(Shape::Body(self.insert(built.body)))
+    }
+
+    /// A pipe along a spine of straight segments with OCCT's corner transitions
+    /// (`BRepFill_RightCorner`, `BRepFill_RoundCorner`): the section turns with the spine at each
+    /// corner (OCCT's "compatible" law: by the least rotation taking one segment's direction to
+    /// the next), each segment sweeps a prism of it, and at a corner the prisms are extended and
+    /// cut where they meet (`round` false: at the plane bisecting the corner, exact for sections
+    /// square to the spine) or meet as they are with the corner's outside filled by the section
+    /// turned about the corner (`round`). A sheet is the solid without its end caps.
+    fn corner_pipe(&mut self, sec: &Section, path: &[Seg], closed: bool, si: usize, f: f64, round: bool, solid: bool) -> Result<Shape> {
+        if !sec.closed {
+            return Err(KernelError::Unsupported("corner transitions of open profiles"));
+        }
+        let n = path.len();
+        let verts: Vec<P3> = (0..=n).map(|i| if i < n { path[i].start() } else { path[n - 1].end() }).collect();
+        let dirs: Vec<V3> = path.iter().map(|s| s.dir(0.0)).collect();
+        let lens: Vec<f64> = path.iter().map(Seg::length).collect();
+        // The least rotation about `o` taking direction a to b.
+        let turn = |a: &V3, b: &V3, o: &P3| -> Affine {
+            let r = match a.cross(b).try_normalize(1e-12) {
+                Some(axis) => nalgebra::Rotation3::from_axis_angle(&nalgebra::Unit::new_unchecked(axis), a.angle(b)).into_inner(),
+                None => nalgebra::Matrix3::identity(),
+            };
+            Affine { m: r, t: o.coords - r * o.coords }
+        };
+        // The section at the start of each segment.
+        let mut secs: Vec<Section> = vec![sec.clone(); n];
+        secs[si] = sec.moved(&Affine::translation(-dirs[si] * (f * lens[si])));
+        for k in (0..si).rev() {
+            secs[k] = secs[k + 1].moved(&turn(&dirs[k + 1], &dirs[k], &verts[k + 1])).moved(&Affine::translation(-dirs[k] * lens[k]));
+        }
+        for k in si..n - 1 {
+            secs[k + 1] = secs[k].moved(&Affine::translation(dirs[k] * lens[k])).moved(&turn(&dirs[k], &dirs[k + 1], &verts[k + 1]));
+        }
+        let mut bb = Bbox::empty();
+        for p in verts.iter().chain(sec.loops.iter().flatten().map(|e| e.start()).collect::<Vec<_>>().iter()) {
+            bb.add(p);
+        }
+        let big = bb.diagonal().max(1.0) * 4.0;
+        // The half space {(p − o)·m ≤ 0}, as a big box.
+        let half = |k: &mut Self, o: &P3, m: &V3| -> Result<Shape> {
+            let m = m.normalize();
+            let x = ax2_x(&m);
+            let ax = Ax3 { origin: o - x * big - m.cross(&x) * big - m * (2.0 * big), z: m, x };
+            k.box_on(&ax, 2.0 * big, 2.0 * big, 2.0 * big)
+        };
+        let corner_at = |i: usize| closed || (i > 0 && i < n);
+        if !round {
+            return self.miter_pipe(&secs, &verts, &dirs, &lens, closed, solid);
+        }
+        let mut acc: Option<Shape> = None;
+        for k in 0..n {
+            let sheet = self.sheet_of_face(&Shape::Face { plane: secs[k].plane, loops: secs[k].loops.clone() })?;
+            let prism = crate::Kernel::sweep_body(self, sheet, &BodySweep::Translate(dirs[k] * lens[k]))?.bodies[0];
+            self.release(sheet);
+            let piece = Shape::Body(prism);
+            acc = Some(match acc {
+                None => piece,
+                Some(a) => self.bfuse(&a, &piece)?,
+            });
+            if corner_at(k + 1) {
+                // The corner's outside: the end section's part away from the turn, turned.
+                let next = dirs[(k + 1) % n];
+                let v = verts[k + 1];
+                let Some(axis) = dirs[k].cross(&next).try_normalize(1e-12) else { continue };
+                let inward = next - dirs[k] * next.dot(&dirs[k]);
+                let end = secs[k].moved(&Affine::translation(dirs[k] * lens[k]));
+                let sheet = self.sheet_of_face(&Shape::Face { plane: end.plane, loops: end.loops.clone() })?;
+                let h = half(self, &v, &inward)?;
+                let outer = self.bcommon(&Shape::Body(sheet), &h)?;
+                let Shape::Body(ob) = outer else { continue };
+                let knuckle = crate::Kernel::sweep_body(self, ob, &BodySweep::Rotate { axis: Axis { origin: v, dir: nalgebra::Unit::new_unchecked(axis) }, angle: dirs[k].angle(&next) })?.bodies[0];
+                let a = acc.take().ok_or_else(|| err("no pipe"))?;
+                acc = Some(self.bfuse(&a, &Shape::Body(knuckle))?);
+            }
+        }
+        let shape = acc.ok_or_else(|| err("no pipe"))?;
+        if solid {
+            return Ok(shape);
+        }
+        // A sheet: the solid's faces but its end caps.
+        let b = self.body_of(&shape)?;
+        let body = (**self.get(b)?).clone();
+        let last = secs[n - 1].moved(&Affine::translation(dirs[n - 1] * lens[n - 1]));
+        Ok(Shape::Body(self.insert(strip_caps(body, &secs[0], &last, closed))))
+    }
+
+
+    /// `wedge name dx dy dz ltx` and `wedge name dx dy dz xmin zmin xmax zmax`
+    /// (BRepPrim_Wedge): the box [0, dx] × [0, dy] × [0, dz] whose top (y = dy) is narrowed to
+    /// [xmin, xmax] × [zmin, zmax] (`ltx`: [0, ltx] × [0, dz]); its faces and edges in OCCT's
+    /// order, as a box's.
+    pub fn wedge(&mut self, dx: f64, dy: f64, dz: f64, top: [f64; 4]) -> Result<Shape> {
+        let [xmin, zmin, xmax, zmax] = top;
+        // The corners by (x, y, z) in {0, 1}: the box's, the top ones moved.
+        let c = |i: usize, j: usize, k: usize| -> P3 {
+            if j == 0 { P3::new(dx * i as f64, 0.0, dz * k as f64) } else { P3::new(if i == 0 { xmin } else { xmax }, dy, if k == 0 { zmin } else { zmax }) }
+        };
+        // Faces as quads (outward): XMin XMax YMin YMax ZMin ZMax.
+        let quads = [
+            [c(0, 0, 0), c(0, 0, 1), c(0, 1, 1), c(0, 1, 0)],
+            [c(1, 0, 0), c(1, 1, 0), c(1, 1, 1), c(1, 0, 1)],
+            [c(0, 0, 0), c(1, 0, 0), c(1, 0, 1), c(0, 0, 1)],
+            [c(0, 1, 0), c(0, 1, 1), c(1, 1, 1), c(1, 1, 0)],
+            [c(0, 0, 0), c(0, 1, 0), c(1, 1, 0), c(1, 0, 0)],
+            [c(0, 0, 1), c(1, 0, 1), c(1, 1, 1), c(0, 1, 1)],
+        ];
+        let tris: Vec<[P3; 3]> = quads.iter().flat_map(|q| [[q[0], q[1], q[2]], [q[0], q[2], q[3]]]).collect();
+        let size = (dx.abs() + dy.abs() + dz.abs()).max(1e-9);
+        let b = crate::Kernel::mesh_solid(self, &tris, 1e-9 * size)?;
+        let mid = |a: P3, b: P3| P3::from((a.coords + b.coords) / 2.0);
+        let edges = vec![
+            mid(c(0, 0, 0), c(0, 0, 1)), mid(c(0, 0, 1), c(0, 1, 1)), mid(c(0, 1, 0), c(0, 1, 1)), mid(c(0, 0, 0), c(0, 1, 0)),
+            mid(c(1, 0, 0), c(1, 0, 1)), mid(c(1, 0, 1), c(1, 1, 1)), mid(c(1, 1, 0), c(1, 1, 1)), mid(c(1, 0, 0), c(1, 1, 0)),
+            mid(c(0, 0, 0), c(1, 0, 0)), mid(c(0, 0, 1), c(1, 0, 1)), mid(c(0, 1, 0), c(1, 1, 0)), mid(c(0, 1, 1), c(1, 1, 1)),
+        ];
+        let faces = quads.iter().map(|q| P3::from(q.iter().fold(V3::zeros(), |a, p| a + p.coords) / 4.0)).collect();
+        set_order(b, OcctOrder { edges, faces });
+        Ok(Shape::Body(b))
+    }
+
+    // --- Form features (BRepFeat) -------------------------------------------------------------
+
+    /// A feature's profile (`featprism`'s Pbase): a planar face, as a kernel profile or a face
+    /// of a body.
+    fn feat_profile(&self, pbase: &Shape) -> Result<(Profile, Vec<FaceInput>)> {
+        match pbase {
+            Shape::Face { .. } => Ok((face_profile(pbase)?, vec![])),
+            Shape::BodyFace(b, f) => {
+                let plane = self.plane_of(*b, *f).ok_or(KernelError::Unsupported("features of faces that aren't planar"))?;
+                Ok((Profile::new(plane, vec![]), vec![FaceInput { body: *b, face: *f, source: 0 }]))
+            }
+            // A face read from a file: a sheet of one face.
+            Shape::Body(b) if self.get(*b)?.faces.len() == 1 => self.feat_profile(&Shape::BodyFace(*b, FaceId(0))),
+            _ => Err(err("the feature's profile must be a planar face")),
+        }
+    }
+
+    /// A face a feature runs up to (`featperform`'s From and Until): a face of a body, a planar
+    /// face, or a sheet (its first face).
+    fn feat_face(&mut self, s: &Shape) -> Result<(BodyId, FaceId)> {
+        match s {
+            Shape::BodyFace(b, f) => Ok((*b, *f)),
+            Shape::Face { .. } => Ok((self.sheet_of_face(s)?, FaceId(0))),
+            Shape::Body(b) if self.get(*b)?.faces.len() == 1 => Ok((*b, FaceId(0))),
+            _ => Err(KernelError::Unsupported("features up to shapes other than faces")),
+        }
+    }
+
+    /// The plane of a planar face of a body.
+    fn plane_of(&self, b: BodyId, f: FaceId) -> Option<Plane> {
+        self.faces(b).ok()?.into_iter().find(|i| i.id == f).and_then(|i| i.plane)
+    }
+
+    /// The feature's tool and how it combines with the base: `kind` is `prism` (`params` the
+    /// direction), `revol` (`params` the axis's point and direction) or `dprism` (`params[0]`
+    /// the draft angle as DRAW takes it: degrees, halved); `fuse` 1 adds it (a boss), 0 removes
+    /// it (a pocket), other values give the tool alone.
+    fn feat_apply(&mut self, base: &Shape, tool: BodyId, fuse: i64) -> Result<Shape> {
+        match fuse {
+            1 => self.bfuse(base, &Shape::Body(tool)),
+            0 => self.bcut(base, &Shape::Body(tool)),
+            _ => Ok(Shape::Body(tool)),
+        }
+    }
+
+    /// An extrude of the feature's profile along `dir` with `end` (and `start` along it first).
+    fn feat_extrude(&mut self, pbase: &Shape, dir: V3, start: f64, end: ExtrudeEnd, symmetric: bool, scene: Vec<BodyId>) -> Result<BodyId> {
+        let (profile, faces) = self.feat_profile(pbase)?;
+        let (dir, end, start) = match end {
+            ExtrudeEnd::Blind(l) if l < 0.0 => (-dir, ExtrudeEnd::Blind(-l), -start),
+            e => (dir, e, start),
+        };
+        let spec = ExtrudeSpec { body: BodyKind::Solid, direction: nalgebra::Unit::try_new(dir, 1e-12).ok_or_else(|| err("a null direction"))?, start_offset: start, end, symmetric, second: None, scene, faces };
+        Ok(crate::Kernel::extrude_with(self, &profile, &spec)?.bodies[0])
+    }
+
+    /// The signed distance along `dir` from the profile's plane to a planar face's plane.
+    fn feat_reach(&self, pbase: &Shape, dir: &V3, b: BodyId, f: FaceId) -> Result<f64> {
+        let (profile, _) = self.feat_profile(pbase)?;
+        let pl = self.plane_of(b, f).ok_or(KernelError::Unsupported("features between faces that aren't planar"))?;
+        let n = pl.normal.into_inner();
+        let den = dir.dot(&n);
+        if den.abs() < 1e-12 {
+            return Err(err("the feature runs parallel to its limit face"));
+        }
+        Ok((pl.origin - profile.plane.origin).dot(&n) / den)
+    }
+
+    /// `featprism|featrevol|featdprism base pbase skface …; featperform kind result [from] [until]`
+    /// (BRepFeat_MakePrism, MakeRevol, MakeDPrism): the profile face `pbase` (on the base's face
+    /// `skface`) swept through everything (no limits: a prism both ways, a revolution all
+    /// round), up to `until`, or from `from` to `until`; added to the base or cut from it.
+    pub fn featperform(&mut self, base: &Shape, pbase: &Shape, kind: &str, params: [f64; 6], fuse: i64, from: Option<&Shape>, until: Option<&Shape>) -> Result<Shape> {
+        let b = self.body_of(base)?;
+        let tool = match kind {
+            "prism" | "dprism" => {
+                let dir = if kind == "prism" { V3::new(params[0], params[1], params[2]).normalize() } else { self.feat_profile(pbase)?.0.plane.normal.into_inner() };
+                if kind == "dprism" {
+                    // Up to a planar face: its height there.
+                    let height = match (from, until) {
+                        (None, Some(u)) => {
+                            let (ub, uf) = self.feat_face(u)?;
+                            self.feat_reach(pbase, &dir, ub, uf)?
+                        }
+                        _ => return Err(KernelError::Unsupported("drafted prisms through all or between faces")),
+                    };
+                    return self.featperformval(base, pbase, kind, params, fuse, height);
+                }
+                match (from, until) {
+                    (None, None) => {
+                        // Through all: both ways, three times the base's size (as OCCT).
+                        let size = crate::Kernel::bounding_box(self, b).map(|bb| (bb.max - bb.min).norm()).unwrap_or(1.0).max(1.0);
+                        self.feat_extrude(pbase, dir, 0.0, ExtrudeEnd::Blind(3.0 * size), true, vec![])?
+                    }
+                    (None, Some(u)) => {
+                        let (ub, uf) = self.feat_face(u)?;
+                        match self.feat_reach(pbase, &dir, ub, uf) {
+                            Ok(d) => self.feat_extrude(pbase, dir, 0.0, ExtrudeEnd::Blind(d), false, vec![])?,
+                            Err(KernelError::Unsupported(_)) => match self.feat_extrude(pbase, dir, 0.0, ExtrudeEnd::UpToFace { body: ub, face: uf, offset: 0.0 }, false, vec![]) {
+                                Ok(t) => t,
+                                Err(_) => self.feat_extrude(pbase, -dir, 0.0, ExtrudeEnd::UpToFace { body: ub, face: uf, offset: 0.0 }, false, vec![])?,
+                            },
+                            Err(e) => return Err(e),
+                        }
+                    }
+                    (Some(f), Some(u)) => {
+                        let ((fb, ff), (ub, uf)) = (self.feat_face(f)?, self.feat_face(u)?);
+                        let (d0, d1) = (self.feat_reach(pbase, &dir, fb, ff)?, self.feat_reach(pbase, &dir, ub, uf)?);
+                        self.feat_extrude(pbase, dir, d0, ExtrudeEnd::Blind(d1 - d0), false, vec![])?
+                    }
+                    (Some(_), None) => return Err(err("featperform: a From face needs an Until face")),
+                }
+            }
+            "revol" => {
+                let axis = Axis { origin: P3::new(params[0], params[1], params[2]), dir: nalgebra::Unit::try_new(V3::new(params[3], params[4], params[5]), 1e-12).ok_or_else(|| err("a null axis"))? };
+                let (profile, faces) = self.feat_profile(pbase)?;
+                let mut spec = RevolveSpec { faces, ..RevolveSpec::solid(axis, None) };
+                // The turn from the profile's plane to a planar face's through the axis (the next
+                // time the turning plane meets it).
+                let angle_to = |k: &Self, s: &Shape, from_angle: f64| -> Option<f64> {
+                    let (fb, ff) = match s {
+                        Shape::BodyFace(b, f) => (*b, *f),
+                        _ => return None,
+                    };
+                    let pl = k.plane_of(fb, ff)?;
+                    let (z, nu) = (axis.dir.into_inner(), pl.normal.into_inner());
+                    if z.dot(&nu).abs() > 1e-9 || (axis.origin - pl.origin).dot(&nu).abs() > 1e-6 {
+                        return None;
+                    }
+                    let np = profile.plane.normal.into_inner();
+                    let th = np.cross(&nu).dot(&z).atan2(np.dot(&nu)).rem_euclid(PI);
+                    let th = (th - from_angle).rem_euclid(PI);
+                    Some(if th < 1e-9 { PI } else { th })
+                };
+                if let (None, Some(u)) = (from, until)
+                    && let Some(th) = angle_to(self, u, 0.0)
+                {
+                    spec.full = false;
+                    spec.end = RevolveEnd::Angle(th);
+                    let tool = crate::Kernel::revolve_with(self, &profile, &spec)?.bodies[0];
+                    return self.feat_apply(base, tool, fuse);
+                }
+                if let (Some(f), Some(u)) = (from, until)
+                    && let Some(t0) = angle_to(self, f, 0.0)
+                {
+                    let t0 = if (t0 - PI).abs() < 1e-9 { 0.0 } else { t0 };
+                    let t1 = angle_to(self, u, t0).ok_or(KernelError::Unsupported("revolved features between faces that aren't planes through the axis"))?;
+                    // The profile turned to the From face, then on to the Until face.
+                    let r = nalgebra::Rotation3::from_axis_angle(&axis.dir, t0).into_inner();
+                    let turned = self.motion(pbase, &Affine { m: r, t: axis.origin.coords - r * axis.origin.coords })?;
+                    let (profile, faces) = self.feat_profile(&turned)?;
+                    let spec = RevolveSpec { faces, ..RevolveSpec::solid(axis, Some(t1)) };
+                    let tool = crate::Kernel::revolve_with(self, &profile, &spec)?.bodies[0];
+                    return self.feat_apply(base, tool, fuse);
+                }
+                match (from, until) {
+                    (None, None) => crate::Kernel::revolve_with(self, &profile, &spec)?.bodies[0],
+                    (None, Some(u)) => {
+                        let (ub, uf) = self.feat_face(u)?;
+                        spec.full = false;
+                        spec.end = RevolveEnd::UpToFace { body: ub, face: uf, offset: 0.0 };
+                        match crate::Kernel::revolve_with(self, &profile, &spec) {
+                            Ok(r) => r.bodies[0],
+                            Err(_) => {
+                                spec.axis.dir = -spec.axis.dir;
+                                crate::Kernel::revolve_with(self, &profile, &spec)?.bodies[0]
+                            }
+                        }
+                    }
+                    _ => return Err(KernelError::Unsupported("revolved features between two faces")),
+                }
+            }
+            _ => return Err(KernelError::Unsupported("this kind of form feature")),
+        };
+        self.feat_apply(base, tool, fuse)
+    }
+
+    /// `featperformval kind result value`: the feature with a length (a prism, `value` along
+    /// its direction; a drafted prism, `value` high along the profile's normal with its walls
+    /// leaning out by the draft angle) or an angle (a revolution, degrees).
+    pub fn featperformval(&mut self, base: &Shape, pbase: &Shape, kind: &str, params: [f64; 6], fuse: i64, value: f64) -> Result<Shape> {
+        let tool = match kind {
+            "prism" => {
+                let dir = V3::new(params[0], params[1], params[2]).normalize();
+                self.feat_extrude(pbase, dir, 0.0, ExtrudeEnd::Blind(value), false, vec![])?
+            }
+            "dprism" => {
+                let n = self.feat_profile(pbase)?.0.plane.normal.into_inner();
+                let prism = self.feat_extrude(pbase, n, 0.0, ExtrudeEnd::Blind(value), false, vec![])?;
+                let angle = params[0] * PI / 360.0;
+                if angle.abs() < 1e-12 {
+                    prism
+                } else {
+                    // The walls: the faces that aren't square to the profile's normal.
+                    let walls: Vec<FaceId> = self.faces(prism)?.into_iter().filter(|f| f.plane.is_none_or(|p| p.normal.dot(&n).abs() < 1.0 - 1e-9)).map(|f| f.id).collect();
+                    let o = self.feat_profile(pbase)?.0.plane.origin;
+                    let pull = nalgebra::Unit::new_normalize(n * value.signum());
+                    let spec = DraftSpec { faces: walls, angle: -angle, pull, neutral: o, neutral_normal: None, tangent_propagation: false };
+                    crate::Kernel::draft(self, prism, &spec)?.bodies[0]
+                }
+            }
+            "revol" => {
+                let axis = Axis { origin: P3::new(params[0], params[1], params[2]), dir: nalgebra::Unit::try_new(V3::new(params[3], params[4], params[5]), 1e-12).ok_or_else(|| err("a null axis"))? };
+                let (profile, faces) = self.feat_profile(pbase)?;
+                let a = value.to_radians();
+                let axis = if a < 0.0 { Axis { origin: axis.origin, dir: -axis.dir } } else { axis };
+                let spec = RevolveSpec { faces, ..RevolveSpec::solid(axis, Some(a.abs().min(TAU))) };
+                crate::Kernel::revolve_with(self, &profile, &spec)?.bodies[0]
+            }
+            _ => return Err(KernelError::Unsupported("this kind of form feature")),
+        };
+        self.feat_apply(base, tool, fuse)
     }
 
     // --- Booleans and transforms ------------------------------------------------------------
@@ -1350,7 +2141,15 @@ impl NativeKernel {
             }
             Shape::Compound(v) => Shape::Compound(v.iter().map(|x| self.motion(x, m)).collect::<Result<_>>()?),
             Shape::Empty => Shape::Empty,
-            _ => return Err(KernelError::Unsupported("moving a sub-shape")),
+            // A face of a body moves as a sheet of its own; an edge as an edge.
+            Shape::BodyFace(b, f) => {
+                let sheet = super::kernel::subset(self.get(*b)?, &[f.0 as usize], false);
+                Shape::Body(self.insert(sheet.transformed(m)))
+            }
+            Shape::BodyEdge(b, e) => {
+                let ed = self.get(*b)?.edges.get(e.0 as usize).ok_or_else(|| err("an unknown edge"))?;
+                Shape::Edge(DEdge { curve: ed.curve.transformed(m), t0: ed.t[0], t1: ed.t[1] })
+            }
         })
     }
 
@@ -1433,6 +2232,23 @@ impl NativeKernel {
         }
         ids.sort_by(|x, y| x.0.total_cmp(&y.0));
         Ok(ids.into_iter().map(|(_, i)| Shape::BodyFace(b, infos[i].id)).collect())
+    }
+
+    /// `nexplode shape v`: the vertices sorted by DRAW's key of their points.
+    pub fn nexplode_vertices(&self, s: &Shape) -> Result<Vec<Shape>> {
+        let b = self.body_of(s)?;
+        let body = self.get(b)?;
+        let mut used: Vec<usize> = Vec::new();
+        for e in body.edges.iter().filter(|e| !e.degenerate) {
+            for v in e.v {
+                if !used.contains(&v) {
+                    used.push(v);
+                }
+            }
+        }
+        let mut pts: Vec<P3> = used.into_iter().map(|v| body.verts[v].p).collect();
+        pts.sort_by(|x, y| nexplode_key(x).total_cmp(&nexplode_key(y)));
+        Ok(pts.into_iter().map(Shape::Vertex).collect())
     }
 
     /// `explode shape kind` for the other kinds: `v` (vertices), `w` (wires: the faces' loops),
@@ -1537,6 +2353,103 @@ impl NativeKernel {
         let ids = edges.iter().map(|e| match e { Shape::BodyEdge(eb, id) if *eb == b => Ok(*id), _ => Err(err("blend takes edges of the shape")) }).collect::<Result<Vec<_>>>()?;
         let res = self.fillet(b, &ids, r)?;
         Ok(Shape::Body(res.bodies[0]))
+    }
+
+    /// `mkevol result shape; updatevol edge u1 r1 u2 r2 …; buildevol` (OCCT's evolutive blend,
+    /// `BRepFilletAPI_MakeFillet` with radius laws): each edge filleted with a radius
+    /// interpolating the (u, r) pairs, u taken as a fraction of the way from the first pair's to
+    /// the last's (as OCCT normalizes them) along the edge.
+    pub fn buildevol(&mut self, s: &Shape, laws: &[(&Shape, &[(f64, f64)])]) -> Result<Shape> {
+        let b = self.body_of(s)?;
+        let mut out = Vec::new();
+        for (e, pairs) in laws {
+            let Shape::BodyEdge(eb, id) = e else { return Err(err("updatevol takes edges of the shape")) };
+            if *eb != b || pairs.is_empty() {
+                return Err(err("updatevol takes edges of the shape and (u, r) pairs"));
+            }
+            let (u0, u1) = (pairs[0].0, pairs[pairs.len() - 1].0);
+            let radii = if pairs.len() == 1 || (u1 - u0).abs() < 1e-12 {
+                vec![(0.0, pairs[0].1), (1.0, pairs[0].1)]
+            } else {
+                pairs.iter().map(|(u, r)| ((u - u0) / (u1 - u0), *r)).collect()
+            };
+            out.push(FilletLaw { edge: *id, radii });
+        }
+        let r = crate::Kernel::fillet_variable(self, b, &out, true)?;
+        Ok(Shape::Body(r.bodies[0]))
+    }
+
+    /// `blend result shape r1 e1 r2 e2 …` with several radii: the edges filleted a radius at a
+    /// time (in the order the radii first appear), each later group's edges found again in the
+    /// body the earlier fillets left (by points along the original edges). OCCT fillets them
+    /// all at once: where edges of different radii meet, the corners differ.
+    pub fn blend_radii(&mut self, s: &Shape, edges: &[(f64, &Shape)]) -> Result<Shape> {
+        let b0 = self.body_of(s)?;
+        let original = (**self.get(b0)?).clone();
+        let mut radii: Vec<f64> = Vec::new();
+        for (r, _) in edges {
+            if !radii.contains(r) {
+                radii.push(*r);
+            }
+        }
+        let mut cur = b0;
+        for r in radii {
+            let mut ids: Vec<EdgeId> = Vec::new();
+            for (_, e) in edges.iter().filter(|(x, _)| *x == r) {
+                let Shape::BodyEdge(eb, id) = e else { return Err(err("blend takes edges of the shape")) };
+                if *eb != b0 {
+                    return Err(err("blend takes edges of the shape"));
+                }
+                if cur == b0 {
+                    ids.push(*id);
+                    continue;
+                }
+                let oe = original.edges.get(id.0 as usize).ok_or_else(|| err("an unknown edge"))?;
+                let body = self.get(cur)?;
+                let tol = 1e-6 * (1.0 + oe.curve.length(oe.t[0].min(oe.t[1]), oe.t[0].max(oe.t[1])));
+                let found = [0.5, 0.3, 0.7, 0.1, 0.9].iter().find_map(|f| {
+                    let p = oe.point(oe.t[0] + (oe.t[1] - oe.t[0]) * f);
+                    body.edges.iter().position(|e| {
+                        !e.degenerate && {
+                            let (lo, hi) = (e.t[0].min(e.t[1]), e.t[0].max(e.t[1]));
+                            (e.curve.point(e.curve.closest(&p, lo, hi)) - p).norm() < tol
+                        }
+                    })
+                });
+                let Some(ne) = found else { return Err(err("blend: an edge was consumed by an earlier radius's fillet")) };
+                if !ids.contains(&EdgeId(ne as u64)) {
+                    ids.push(EdgeId(ne as u64));
+                }
+            }
+            cur = self.fillet(cur, &ids, r)?.bodies[0];
+        }
+        Ok(Shape::Body(cur))
+    }
+
+    /// `bfuseblend result a b r` (and `bcutblend`): the fuse (or cut) of the shapes, its edges
+    /// along their section filleted with radius `r`.
+    pub fn bfuseblend(&mut self, a: &Shape, b: &Shape, r: f64, fuse: bool) -> Result<Shape> {
+        let sec = self.bsection(a, b)?;
+        let res = if fuse { self.bfuse(a, b)? } else { self.bcut(a, b)? };
+        let Shape::Wire(sec) = sec else { return Ok(res) };
+        let rb = self.body_of(&res)?;
+        let body = self.get(rb)?;
+        let ids: Vec<EdgeId> = (0..body.edges.len())
+            .filter(|&i| {
+                let e = &body.edges[i];
+                let m = e.point(e.mid_t());
+                !e.degenerate
+                    && sec.iter().any(|s| {
+                        let (lo, hi) = (s.t0.min(s.t1), s.t0.max(s.t1));
+                        (s.curve.point(s.curve.closest(&m, lo, hi)) - m).norm() < 1e-6 * (1.0 + s.length())
+                    })
+            })
+            .map(|i| EdgeId(i as u64))
+            .collect();
+        if ids.is_empty() {
+            return Ok(res);
+        }
+        Ok(Shape::Body(self.fillet(rb, &ids, r)?.bodies[0]))
     }
 
     /// `chamfer result shape e d`.
@@ -1777,6 +2690,152 @@ pub fn check_nb(got: NbShapes, vertex: Option<usize>, edge: Option<usize>, wire:
             }
     }
     if bad.is_empty() { Ok(()) } else { Err(err(&format!("checknbshapes: {}", bad.join(", ")))) }
+}
+
+/// A pipe's profile: its plane and loops (a face's outer loop first), and whether they close.
+#[derive(Debug, Clone)]
+struct Section {
+    plane: Plane,
+    loops: Vec<Vec<DEdge>>,
+    closed: bool,
+}
+
+impl Section {
+    /// Where OCCT places the section's axis (GeomFill_SectionPlacement): a circle's or an
+    /// ellipse's centre, else the mean of points spread evenly in each edge's parameter.
+    fn center(&self) -> P3 {
+        let l = &self.loops[0];
+        if let [e] = &l[..]
+            && let Curve::Circle { c, .. } | Curve::Ellipse { c, .. } = &e.curve
+        {
+            return *c;
+        }
+        let mut acc = V3::zeros();
+        let mut n = 0.0;
+        for e in l {
+            for i in 0..10 {
+                acc += e.curve.point(e.t0 + (e.t1 - e.t0) * i as f64 / 10.0).coords;
+                n += 1.0;
+            }
+        }
+        if !self.closed {
+            acc += l[l.len() - 1].end().coords;
+            n += 1.0;
+        }
+        P3::from(acc / n)
+    }
+
+    /// The point of the section nearest `p`.
+    fn nearest(&self, p: &P3) -> P3 {
+        let mut best = (f64::INFINITY, *p);
+        for e in self.loops.iter().flatten() {
+            let q = e.curve.point(e.curve.closest(p, e.t0.min(e.t1), e.t0.max(e.t1)));
+            let d = (q - p).norm();
+            if d < best.0 {
+                best = (d, q);
+            }
+        }
+        best.1
+    }
+
+    /// The section moved rigidly.
+    fn moved(&self, m: &Affine) -> Section {
+        let plane = Plane {
+            origin: m.point(&self.plane.origin),
+            x_dir: nalgebra::Unit::new_normalize(m.vector(&self.plane.x_dir)),
+            normal: nalgebra::Unit::new_normalize(m.vector(&self.plane.normal)),
+        };
+        let loops = self.loops.iter().map(|l| l.iter().map(|e| DEdge { curve: e.curve.transformed(m), t0: e.t0, t1: e.t1 }).collect()).collect();
+        Section { plane, loops, ..self.clone() }
+    }
+
+    /// The section in its plane's coordinates: faces (a closed section; capped only when the
+    /// sweep is solid) or one open chain.
+    fn pieces(&self, solid: bool) -> Result<(Vec<MergedFace>, Vec<Vec<Piece>>)> {
+        use super::profile;
+        let to_w = super::build::plane_map(&self.plane, &V3::zeros(), 0.0);
+        let mt = to_w.m.transpose();
+        let to_l = Affine { m: mt, t: -(mt * to_w.t) };
+        let pieces = |l: &[DEdge], li: usize| -> Vec<Piece> {
+            l.iter()
+                .enumerate()
+                .map(|(ci, e)| {
+                    let (t0, t1, rev) = if e.t0 <= e.t1 { (e.t0, e.t1, false) } else { (e.t1, e.t0, true) };
+                    Piece { c: e.curve.transformed(&to_l), t0, t1, rev, src: Src::Curve { region: 0, curve: crate::unsourced_curve(li, ci) }, more: vec![] }
+                })
+                .collect()
+        };
+        if !self.closed {
+            if solid {
+                return Err(err("a solid pipe needs a closed profile"));
+            }
+            return Ok((vec![], vec![profile::chain_loop_open(pieces(&self.loops[0], 0))?]));
+        }
+        let mut lps = Vec::new();
+        for (li, l) in self.loops.iter().enumerate() {
+            let lp = profile::chain_loop(pieces(l, li))?;
+            profile::check_closed(&lp)?;
+            // Outer loops counter-clockwise, holes clockwise.
+            let a = profile::loop_area(&lp);
+            lps.push(if (a < 0.0) == (li == 0) { profile::reverse_loop(&lp) } else { lp });
+        }
+        let outer = lps.remove(0);
+        let faces = profile::merge_regions(&[profile::Region2 { outer, holes: lps, source: 0 }])?;
+        Ok((faces, vec![]))
+    }
+}
+
+/// A pipe's solid as a sheet: without its planar end caps (the faces in the first and the last
+/// section's planes; a closed pipe has none).
+fn strip_caps(body: super::topo::Body, first: &Section, last: &Section, closed: bool) -> super::topo::Body {
+    let on = |s: &Section, f: &super::topo::Face| match &f.surf {
+        super::surface::Surface::Plane { f: fr } => {
+            let n = s.plane.normal.into_inner();
+            fr.x.cross(&fr.y).cross(&n).norm() < 1e-9 && (fr.o - s.plane.origin).dot(&n).abs() < 1e-6 * (1.0 + (fr.o - s.plane.origin).norm())
+        }
+        _ => false,
+    };
+    let keep: Vec<usize> = (0..body.faces.len()).filter(|&i| closed || !(on(first, &body.faces[i]) || on(last, &body.faces[i]))).collect();
+    let mut sheet = super::kernel::subset(&body, &keep, false);
+    sheet.solids.clear();
+    sheet
+}
+
+/// The spines of a sweep from fraction `f` of segment `si` of a path (as `sweep_path::spines`):
+/// one onward from there (a closed path all the way round), and one back to the start.
+fn split_spines(path: Vec<Seg>, closed: bool, si: usize, f: f64) -> Vec<(Vec<Seg>, bool)> {
+    let tol = 1e-9;
+    let last = path.len() - 1;
+    if si == 0 && f < tol {
+        return vec![(path, false)];
+    }
+    if !closed && si == last && f > 1.0 - tol {
+        return vec![(path.iter().rev().map(Seg::reversed).collect(), false)];
+    }
+    let mut before: Vec<Seg> = path[..si].to_vec();
+    let mut after: Vec<Seg> = Vec::new();
+    if f < tol {
+        after.extend(path[si..].iter().cloned());
+    } else if f > 1.0 - tol {
+        before.push(path[si].clone());
+        after.extend(path[si + 1..].iter().cloned());
+    } else {
+        before.push(path[si].part(0.0, f));
+        after.push(path[si].part(f, 1.0));
+        after.extend(path[si + 1..].iter().cloned());
+    }
+    if closed {
+        after.extend(before);
+        return vec![(after, false)];
+    }
+    let mut out = Vec::new();
+    if !after.is_empty() {
+        out.push((after, false));
+    }
+    if !before.is_empty() {
+        out.push((before.iter().rev().map(Seg::reversed).collect(), true));
+    }
+    out
 }
 
 fn nexplode_key(c: &P3) -> f64 {

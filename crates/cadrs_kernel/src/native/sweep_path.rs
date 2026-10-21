@@ -140,7 +140,7 @@ pub fn chain(mut segs: Vec<Seg>) -> Result<(Vec<Seg>, bool)> {
 
 /// The spines: one (the path from the profile) or two (forwards, and backwards from the
 /// profile), each with whether it runs backwards.
-fn spines(path: Vec<Seg>, closed: bool, plane: &Plane, center: &P3) -> Vec<(Vec<Seg>, bool)> {
+pub(crate) fn spines(path: Vec<Seg>, closed: bool, plane: &Plane, center: &P3) -> Vec<(Vec<Seg>, bool)> {
     let o = plane.origin;
     let n = plane.normal.into_inner();
     let pl = super::surface::Surface::Plane { f: super::build::plane_frame(plane, V3::zeros()) };
@@ -198,7 +198,7 @@ fn spines(path: Vec<Seg>, closed: bool, plane: &Plane, center: &P3) -> Vec<(Vec<
 }
 
 /// The profile's centre (where the path should meet it).
-fn profile_center(faces: &[MergedFace], chains: &[Vec<Piece>], plane: &Plane) -> P3 {
+pub(crate) fn profile_center(faces: &[MergedFace], chains: &[Vec<Piece>], plane: &Plane) -> P3 {
     let m = super::build::plane_map(plane, &V3::zeros(), 0.0);
     let mut acc = V3::zeros();
     let mut n = 0.0;
@@ -337,7 +337,6 @@ pub fn sweep_with(k: &mut NativeKernel, profile: &Profile, spec: &SweepSpec) -> 
         eprintln!("profile {:?}", profile.regions.first().map(|r| &r.outer));
     }
     let (path, closed) = chain(segs)?;
-    let path_len = path.len();
     let (used, solid) = match spec.body {
         BodyKind::Thin { left, right } => (crate::thin::thin_profile(profile, left, right)?, true),
         BodyKind::Solid => (profile.clone(), true),
@@ -380,20 +379,29 @@ pub fn sweep_with(k: &mut NativeKernel, profile: &Profile, spec: &SweepSpec) -> 
         return Err(KernelError::InvalidProfile("the profile has nothing to sweep".into()));
     }
     let center = profile_center(&faces, &chains, &plane);
+    let sp = spines(path, closed, &plane, &center);
+    Ok(sweep_spines(&faces, &chains, plane, sp, spec.control, solid)?.into_result(k))
+}
+
+/// Sweeps the profile (`faces` and `chains` in `plane` coordinates) along each spine (with
+/// whether it runs backwards, from [`spines`]) and joins the pieces: the caps at the joints are
+/// glued away (pieces that meet anywhere else, a two-way sweep's halves, are united); sheets are
+/// kept side by side.
+pub(crate) fn sweep_spines(faces: &[MergedFace], chains: &[Vec<Piece>], plane: Plane, sp: Vec<(Vec<Seg>, bool)>, control: SweepControl, solid: bool) -> Result<Tagged> {
     let prof = std::env::var("CADRS_PROFILE").is_ok();
     let t0 = std::time::Instant::now();
+    let path_len: usize = sp.iter().map(|s| s.0.len()).sum();
     let mut pieces: Vec<Tagged> = Vec::new();
-    let sp = spines(path, closed, &plane, &center);
     if std::env::var("CADRS_SWEEP_DEBUG").is_ok() {
         for (spine, backward) in &sp {
             eprintln!("spine of {} segments, backward {backward}, from {:?}", spine.len(), spine[0].start());
         }
     }
+    // A backward spine's pieces go first, last piece first: each then ends (its caps swapped)
+    // where the next starts, so the joints glue.
+    let mut backs: Vec<Tagged> = Vec::new();
     for (spine, backward) in sp {
-        let mut these = sweep_spine(&faces, &chains, plane, &spine, spec.control, solid)?;
-        if backward {
-            these.iter_mut().for_each(swap_caps);
-        }
+        let mut these = sweep_spine(faces, chains, plane, &spine, control, solid)?;
         if std::env::var("CADRS_SWEEP_DEBUG").is_ok() {
             for t in &these {
                 eprintln!("piece: volume {} faces {} solids {} check {:?}", super::mass::body_mass(&t.body).volume, t.body.faces.len(), t.body.solids.len(), t.body.check());
@@ -404,14 +412,26 @@ pub fn sweep_with(k: &mut NativeKernel, profile: &Profile, spec: &SweepSpec) -> 
                 }
             }
         }
+        if backward {
+            these.iter_mut().for_each(swap_caps);
+            these.reverse();
+            these.append(&mut backs);
+            backs = these;
+            continue;
+        }
         pieces.extend(these);
     }
+    backs.append(&mut pieces);
+    let mut pieces = backs;
     if prof {
         eprintln!("sweep: {} pieces swept in {:?} (path {} segments)", pieces.len(), t0.elapsed(), path_len);
     }
     let t1 = std::time::Instant::now();
     // Join the pieces: the caps at the joints are glued away (pieces that meet anywhere else,
     // a two-way sweep's halves, are united).
+    if pieces.is_empty() {
+        return Err(KernelError::InvalidParameter("Select a sweep path".into()));
+    }
     let mut acc = pieces.remove(0);
     for p in pieces {
         acc = if solid {
@@ -439,7 +459,7 @@ pub fn sweep_with(k: &mut NativeKernel, profile: &Profile, spec: &SweepSpec) -> 
     if prof {
         eprintln!("sweep: joined in {:?}", t1.elapsed());
     }
-    Ok(acc.into_result(k))
+    Ok(acc)
 }
 
 /// Faces of `t` that are caps (`end`: end caps, else start caps), with their area centroids.
@@ -550,7 +570,7 @@ pub(crate) fn glue(a: &Tagged, b: &Tagged) -> Option<Tagged> {
 }
 
 /// A closed sweep: glues its own end cap to its start cap.
-fn glue_self(t: &Tagged) -> Option<Tagged> {
+pub(crate) fn glue_self(t: &Tagged) -> Option<Tagged> {
     let e = caps(t, true);
     let s = caps(t, false);
     for (fe, ce, ae) in &e {

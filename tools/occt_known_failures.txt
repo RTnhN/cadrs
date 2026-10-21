@@ -561,3 +561,310 @@ draft angle_m4
 draft angle_g1
 # bsection_k3: with exact (sub-net) B-spline face boxes the finer SSI grid finds a small loop near
 # the open branch and the open curve detours through it (63.5 long between ends 23.3 apart).
+# W10: cases the DRAW commands added for pipes, sweeps, form features, evolutive and
+# multi-radius blends, surfaces and wedges made runnable, failing today (by cause).
+# pipe: a boolean of the feature fails (open shell).
+pipe bugs_bug32807
+pipe bugs_bug32809
+# pipe: round corners (-R): the turned outer half of the section (sweep_body of a clipped sheet) is invalid on oblique sections, or a closed spine's corner.
+pipe specific_h4
+pipe specific_h6
+pipe specific_i5
+pipe specific_i7
+pipe specific_j6
+pipe specific_j8
+pipe specific_k1
+pipe specific_z9
+pipe specific_za2
+pipe specific_zb3
+pipe specific_zb5
+pipe specific_zc6
+pipe specific_zc8
+# pipe: the area differs: OCCT's reference values are its adaptive sprops (eps 1e-4), which over-estimate oblique extrusions (standard_b5: exact 4069, OCCT's Gauss 4068, its adaptive 4272), and its CorrectedFrenet frame differs from our rotation-minimizing one on non-planar spines (specific_q3, s1).
+pipe specific_j9
+pipe specific_q3
+pipe specific_q4
+pipe specific_q5
+pipe specific_q6
+pipe specific_q9
+pipe specific_r1
+pipe specific_s1
+pipe specific_s2
+pipe specific_s3
+pipe specific_s4
+pipe specific_s7
+pipe standard_b1
+pipe standard_b5
+pipe standard_c8
+pipe standard_e6
+pipe standard_f3
+pipe standard_f4
+# pipe: round corners (-R) on a closed spine: the fused knuckles merge faces OCCT keeps apart.
+pipe specific_z5
+pipe specific_z7
+pipe specific_za8
+pipe specific_zb1
+pipe specific_zc2
+pipe specific_zc4
+# thrusection: -T (contact) on a wire section: OCCT's section point nearest the spine differs from ours.
+thrusection specific_h7
+# thrusection: MakePipeShell through sections of different edge counts or along a curved spine (no kernel multi-section sweep).
+thrusection specific_m6
+thrusection specific_m7
+thrusection specific_m8
+thrusection specific_m9
+thrusection specific_n1
+thrusection specific_n2
+thrusection specific_n3
+thrusection specific_n4
+# feat: unsupported: drafted prisms through all or between faces.
+feat featdprism_a1
+feat featdprism_b2
+feat featdprism_b4
+feat featdprism_c3
+feat featdprism_c4
+feat featdprism_d3
+feat featdprism_d4
+feat featdprism_d7
+feat featdprism_e1
+# feat: unsupported: features between faces that aren't planar.
+feat featdprism_a4
+feat featdprism_a9
+feat featprism_c4
+feat featprism_c8
+feat featprism_r5
+# feat: the area differs: OCCT's BRepFeat keeps only the feature's part its local operation selects (from/until faces trimming, gluing), we sweep and boolean whole.
+feat featdprism_a5
+feat featdprism_b1
+feat featdprism_b5
+feat featdprism_c2
+feat featdprism_c6
+feat featdprism_c9
+feat featprism_a3
+feat featprism_h9
+feat featprism_i1
+feat featprism_i2
+feat featprism_i3
+feat featprism_i4
+feat featprism_i5
+feat featprism_m1
+feat featprism_o5
+feat featrevol_a9
+feat featrevol_e1
+feat featrevol_e2
+feat featrevol_f1
+feat featrevol_f2
+feat featrevol_g1
+feat featrevol_g2
+feat featrevol_g6
+feat featrevol_j7
+feat featrevol_j8
+feat featrevol_j9
+# feat: unsupported: booleans of shapes other than solids.
+feat featdprism_c8
+feat featdprism_d9
+# feat: the operation fails.
+feat featprism_c3
+feat featprism_d3
+feat featprism_m4
+feat featprism_n1
+feat featprism_n2
+feat featprism_r7
+feat featprism_r8
+feat featrevol_d1
+feat featrevol_d2
+# feat: unsupported: features up to shapes other than faces.
+feat featprism_g3
+feat featprism_g8
+feat featprism_j4
+# feat: the result is invalid (checkshape).
+feat featprism_l9
+# feat: a boolean of the feature fails (open shell).
+feat featrevol_a6
+feat featrevol_b6
+feat featrevol_d5
+feat featrevol_e5
+feat featrevol_f5
+feat featrevol_g5
+feat featrevol_h5
+feat featrevol_i5
+feat featrevol_j5
+feat featrevol_j6
+# feat: unsupported: revolved features between faces that aren't planes through the axis.
+feat featrevol_h1
+# mkface: faces of extrusions of Bézier curves past the curve's [0, 1] (OCCT evaluates the polynomial beyond it).
+mkface after_extsurf_and_offset_c6
+mkface after_extsurf_and_offset_c7
+mkface after_extsurf_and_offset_c8
+mkface after_extsurf_and_offset_c9
+# draft: the operation fails.
+draft angle_c4
+draft angle_h3
+draft angle_h4
+draft angle_j9
+draft angle_k5
+draft angle_l4
+draft angle_l5
+# draft: a boolean of the feature fails (open shell).
+draft angle_h5
+# draft: the measured property differs from OCCT's.
+draft angle_i5
+draft angle_k9
+# blend: a boolean of the feature fails (open shell).
+blend bfuseblend_a6
+blend buildevol_g5
+blend buildevol_j7
+blend buildevol_j8
+blend buildevol_k1
+blend buildevol_k2
+blend buildevol_k4
+blend complex_d2
+blend complex_e2
+blend encoderegularity_a2
+blend encoderegularity_a4
+blend encoderegularity_a7
+blend simple_i8
+blend simple_r1
+blend simple_r2
+blend simple_r6
+blend simple_u1
+blend simple_v6
+blend simple_y9
+blend tolblend_simple_a2
+blend tolblend_simple_a8
+blend tolblend_simple_a9
+blend tolblend_simple_f3
+blend tolblend_simple_f8
+# blend: the measured property differs from OCCT's.
+blend bfuseblend_b7
+blend buildevol_a3
+blend buildevol_a6
+blend buildevol_b1
+blend buildevol_b4
+blend buildevol_b7
+blend buildevol_i2
+blend buildevol_i5
+blend simple_a7
+blend simple_a8
+blend simple_i1
+blend simple_i2
+blend simple_i4
+blend simple_i6
+blend tolblend_buildvol_a6
+blend tolblend_buildvol_a7
+blend tolblend_simple_a1
+# blend: the kernel's variable fillet (fillet_variable) takes only straight edges between planes.
+blend buildevol_a5
+blend buildevol_a7
+blend buildevol_a9
+blend buildevol_b2
+blend buildevol_b6
+blend buildevol_b8
+blend buildevol_c1
+blend buildevol_c2
+blend buildevol_c4
+blend buildevol_c6
+blend buildevol_c8
+blend buildevol_c9
+blend buildevol_d3
+blend buildevol_d4
+blend buildevol_d5
+blend buildevol_d7
+blend buildevol_d8
+blend buildevol_d9
+blend buildevol_e1
+blend buildevol_e2
+blend buildevol_e3
+blend buildevol_e4
+blend buildevol_e5
+blend buildevol_e6
+blend buildevol_e7
+blend buildevol_e8
+blend buildevol_e9
+blend buildevol_f1
+blend buildevol_f2
+blend buildevol_f5
+blend buildevol_f6
+blend buildevol_f7
+blend buildevol_f8
+blend buildevol_f9
+blend buildevol_g1
+blend buildevol_g7
+blend buildevol_g8
+blend buildevol_g9
+blend buildevol_h1
+blend buildevol_h2
+blend buildevol_h3
+blend buildevol_h4
+blend buildevol_h5
+blend buildevol_h6
+blend buildevol_h7
+blend buildevol_h8
+blend buildevol_h9
+blend buildevol_i3
+blend buildevol_i6
+blend buildevol_i9
+blend buildevol_j3
+blend buildevol_j6
+blend buildevol_j9
+blend buildevol_k3
+blend buildevol_k6
+blend buildevol_k7
+blend buildevol_k8
+# blend: the operation fails.
+blend bfuseblend_b6
+blend buildevol_b3
+blend buildevol_b9
+blend buildevol_d6
+blend complex_c2
+blend complex_e3
+blend complex_h4
+blend encoderegularity_a1
+blend encoderegularity_a5
+blend simple_r4
+blend simple_r5
+blend tolblend_simple_a4
+blend tolblend_simple_a6
+blend tolblend_simple_b2
+blend tolblend_simple_e2
+blend tolblend_simple_f1
+blend tolblend_simple_f4
+blend tolblend_simple_f5
+# blend: unsupported: faces bounded by rational or high-degree B-splines.
+blend buildevol_d1
+blend buildevol_d2
+# blend: blends of edges the kernel sees on one face (seams).
+blend buildevol_f3
+blend buildevol_f4
+blend complex_b4
+blend encoderegularity_a6
+blend simple_j7
+blend simple_j8
+blend simple_j9
+blend tolblend_simple_e9
+# blend: the result is invalid (checkshape).
+blend simple_r3
+# blend: radius laws reaching 0 (OCCT ends evolutive blends at a point).
+blend tolblend_buildvol_a1
+blend tolblend_buildvol_a2
+blend tolblend_buildvol_a3
+blend tolblend_buildvol_a4
+blend tolblend_buildvol_a9
+# offset: the measured property differs from OCCT's.
+offset faces_type_i_m4
+offset faces_type_i_m5
+offset faces_type_i_m6
+offset faces_type_i_m8
+# offset: a boolean of the feature fails (open shell).
+offset faces_type_i_f6
+offset faces_type_i_f8
+offset faces_type_i_m7
+offset faces_type_i_m9
+offset faces_type_i_n1
+# offset: unsupported: moving a seam of this surface.
+offset faces_type_i_f9
+offset shape_type_i_c9
+# offset: the operation fails.
+offset faces_type_i_f7
+offset faces_type_i_n2
+offset shape_type_i_d1

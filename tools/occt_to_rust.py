@@ -30,6 +30,7 @@ IGNORED = {
     "checktrinfo", "dtyp", "whatis", "tolerance", "checkcontinuity", "bfillds", "setflags",
     "brunparallel", "bnondestructive", "bfuzzyvalue", "bglue", "bcheckinverted", "buseobb", "bdrawwarnshapes", "bsimplify",
     "setfillhistory", "savehistory", "tclean", "incmesh", "tolblend", "checkfaults", "dversion", "dsetsignal", "testgrid", "datadir", "locate_data_file",
+    "fsameparameter", "encoderegularity",
 }
 
 
@@ -76,6 +77,14 @@ class Case:
         self.todo = set()  # checks OCCT itself fails (its TODO markers): left out
         self.offset_join = "i"
         self.offset_load = None
+        self.hyperbolas = set()  # names of hyperbolas (an edge of one takes its parameters)
+        self.curves = set()  # names of curves
+        self.surfs = set()  # names of surfaces
+        self.planes = set()  # names of placements (`plane`)
+        self.sweep = None  # mksweep's spine, setsweep's mode and the sections added
+        self.evol = None  # mkevol's result name, shape and the edges' radius laws
+        self.feat = None  # the form feature featprism/featrevol/featdprism defined
+        self.surfaces = {}  # mksurface's surfaces of faces: name -> the face
 
     def num(self, tok):
         try:
@@ -118,7 +127,19 @@ class Case:
     def bind(self, name, expr):
         r = ident(name)
         self.vars[name] = r
+        self.curves.discard(name)
+        self.surfs.discard(name)
+        self.hyperbolas.discard(name)
+        self.planes.discard(name)
         self.lines.append(f"let {r} = {expr};")
+
+    def surf(self, name):
+        """A Rust expression for a DRAW surface (a surface, or a plane's placement)."""
+        if name in self.surfs:
+            return "&" + self.vars[name]
+        if name in self.planes:
+            return f"&k.plane_surface(&{self.vars[name]})"
+        raise Unsupported(f"the surface {name}")
 
     def emit(self, words):
         c, a = words[0], words[1:]
@@ -136,12 +157,16 @@ class Case:
             return
         if c == "line" and len(a) == 7:
             self.bind(a[0], f"k.line({', '.join(L(x) for x in a[1:])})")
+            self.curves.add(a[0])
         elif c == "circle" and len(a) == 5:
             self.bind(a[0], f"k.circle({', '.join(L(x) for x in a[1:])})")
+            self.curves.add(a[0])
         elif c == "circle" and len(a) == 8:
             self.bind(a[0], f"k.circle_n({', '.join(L(x) for x in a[1:])})")
+            self.curves.add(a[0])
         elif c == "circle" and len(a) == 11:
             self.bind(a[0], f"k.circle_nx({', '.join(L(x) for x in a[1:])})")
+            self.curves.add(a[0])
         elif c == "plane" and len(a) in (4, 7, 10):
             nums = [L(x) for x in a[1:]]
             if len(a) == 4:
@@ -151,6 +176,7 @@ class Case:
             else:
                 self.bind(a[0], f"k.plane_x({', '.join(nums)})")
             self.vars[a[0]] = ident(a[0])
+            self.planes.add(a[0])
         elif c in ("ellipse", "parabola") and len(a) in ((6, 9, 12) if c == "ellipse" else (5, 8, 11)):
             nv = 2 if c == "ellipse" else 1
             geo, vals = a[1:len(a) - nv], a[len(a) - nv:]
@@ -161,6 +187,7 @@ class Case:
                 self.bind(a[0], f"k.ellipse({o}, {n}, {x}, {L(vals[0])}, {L(vals[1])})")
             else:
                 self.bind(a[0], f"k.parabola({o}, {n}, {x}, {L(vals[0])})?")
+            self.curves.add(a[0])
         elif c == "beziercurve" and len(a) >= 2:
             np_ = int(self.num(a[1]))
             rest = a[2:]
@@ -170,6 +197,7 @@ class Case:
             poles = [f"[{L(rest[i * st])}, {L(rest[i * st + 1])}, {L(rest[i * st + 2])}]" for i in range(np_)]
             w = f"Some(&[{', '.join(L(rest[i * st + 3]) for i in range(np_))}])" if st == 4 else "None"
             self.bind(a[0], f"k.beziercurve(&[{', '.join(poles)}], {w})?")
+            self.curves.add(a[0])
         elif c in ("bsplinecurve", "pbsplinecurve") and len(a) >= 3:
             deg, nk = int(self.num(a[1])), int(self.num(a[2]))
             ks = a[3:3 + 2 * nk]
@@ -183,6 +211,19 @@ class Case:
             poles = [f"[{', '.join(L(x) for x in rest[i:i + 4])}]" for i in range(0, len(rest), 4)]
             per = "true" if c == "pbsplinecurve" else "false"
             self.bind(a[0], f"k.bsplinecurve({deg}, &[{', '.join(knots)}], &[{', '.join(map(str, mults))}], &[{', '.join(poles)}], {per})?")
+            self.curves.add(a[0])
+        elif c == "hyperbola" and len(a) in (6, 9, 12):
+            geo, vals = a[1:len(a) - 2], a[len(a) - 2:]
+            o = f"[{L(geo[0])}, {L(geo[1])}, {L(geo[2])}]"
+            n = f"Some([{L(geo[3])}, {L(geo[4])}, {L(geo[5])}])" if len(geo) >= 6 else "None"
+            x = f"Some([{L(geo[6])}, {L(geo[7])}, {L(geo[8])}])" if len(geo) >= 9 else "None"
+            self.bind(a[0], f"k.hyperbola({o}, {n}, {x}, {L(vals[0])}, {L(vals[1])})")
+            self.hyperbolas.add(a[0])
+        elif c == "mkedge" and len(a) == 4 and a[1] in self.hyperbolas:
+            self.bind(a[0], f"k.mkedge_hyperbola(&{self.vars[a[1]]}, {L(a[2])}, {L(a[3])})?")
+            self.hyperbolas.discard(a[0])
+        elif c == "mkedge" and len(a) == 2 and a[1] in self.hyperbolas:
+            raise Unsupported("a whole hyperbola")
         elif c == "mkedge" and len(a) == 4:
             self.bind(a[0], f"k.mkedge(&{self.vars[a[1]] if a[1] in self.vars else self.raise_(a[1])}, {L(a[2])}, {L(a[3])})")
         elif c == "mkedge" and len(a) == 2:
@@ -270,6 +311,104 @@ class Case:
                 raise Unsupported(f"{c} with these arguments")
         elif c == "prism" and len(a) == 5:
             self.bind(a[0], f"k.prism({self.shape(a[1])}, {L(a[2])}, {L(a[3])}, {L(a[4])})?")
+        elif c == "pipe" and len(a) in (3, 4, 5):
+            self.bind(a[0], f"k.pipe({self.shape(a[1])}, {self.shape(a[2])})?")
+        elif c == "mksweep" and len(a) == 1:
+            self.sweep = {"spine": self.shape(a[0]), "mode": "CF", "dir": "[0.0, 0.0, 1.0]", "sections": []}
+        elif c == "setsweep" and len(a) >= 1:
+            if self.sweep is None:
+                raise Unsupported("setsweep without mksweep")
+            o = a[0]
+            if o in ("-FR", "-CF", "-DT") and len(a) == 1:
+                self.sweep["mode"] = o[1:]
+            elif o == "-CN" and len(a) == 4:
+                self.sweep["mode"] = "CN"
+                self.sweep["dir"] = f"[{L(a[1])}, {L(a[2])}, {L(a[3])}]"
+            elif o == "-FX" and len(a) in (4, 7):
+                self.sweep["mode"] = "FX"
+            elif o in ("-SM", "-DM") and len(a) == 2:
+                pass  # the approximation's degree and segments: our sweeps are exact
+            else:
+                raise Unsupported(f"setsweep {o}")
+        elif c == "addsweep" and len(a) >= 1:
+            if self.sweep is None:
+                raise Unsupported("addsweep without mksweep")
+            rest = a[1:]
+            if rest and not rest[0].startswith("-"):
+                raise Unsupported("addsweep at a vertex or with a law")
+            t, r = "-T" in rest, "-R" in rest
+            if any(x not in ("-T", "-R") for x in rest):
+                raise Unsupported("addsweep with a law")
+            self.sweep["sections"].append(f"({self.shape(a[0])}, {'true' if t else 'false'}, {'true' if r else 'false'})")
+        elif c == "buildsweep" and len(a) >= 1:
+            if self.sweep is None or not self.sweep["sections"]:
+                raise Unsupported("buildsweep without mksweep and addsweep")
+            opts = a[1:]
+            tr = "M"
+            if opts and opts[0] in ("-M", "-C", "-R"):
+                tr = opts[0][1]
+                opts = opts[1:]
+            solid = bool(opts) and opts[0] == "-S"
+            sw = self.sweep
+            self.bind(a[0], f"k.buildsweep({sw['spine']}, &[{', '.join(sw['sections'])}], \"{sw['mode']}\", {sw['dir']}, '{tr}', {'true' if solid else 'false'})?")
+        elif c == "mkevol" and len(a) in (2, 3):
+            self.evol = (a[0], self.shape(a[1]), [])
+        elif c == "updatevol" and len(a) >= 3 and len(a) % 2 == 1:
+            if self.evol is None:
+                raise Unsupported("updatevol without mkevol")
+            pairs = [f"({L(a[i])}, {L(a[i + 1])})" for i in range(1, len(a), 2)]
+            self.evol[2].append(f"({self.shape(a[0])}, &[{', '.join(pairs)}][..])")
+        elif c == "buildevol" and len(a) == 0:
+            if self.evol is None or not self.evol[2]:
+                raise Unsupported("buildevol without mkevol and updatevol")
+            name, s_, laws = self.evol
+            self.bind(name, f"k.buildevol({s_}, &[{', '.join(laws)}])?")
+        elif c == "wedge" and len(a) in (5, 8):
+            nums = [L(x) for x in a[1:]]
+            top = f"[0.0, 0.0, {nums[3]}, {nums[2]}]" if len(a) == 5 else f"[{', '.join(nums[3:])}]"
+            self.bind(a[0], f"k.wedge({nums[0]}, {nums[1]}, {nums[2]}, {top})?")
+        elif c == "mksurface" and len(a) == 2:
+            self.surfaces[a[0]] = self.shape(a[1])
+        elif c == "mkface" and len(a) == 2 and a[1] in self.surfaces:
+            # The face's whole surface: the face itself stands for it (as a limit of a feature,
+            # only its surface counts).
+            self.bind(a[0], f"{self.surfaces[a[1]][1:]}.clone()")
+        elif c in ("featprism", "featrevol", "featdprism") and len(a) in (6, 8, 11):
+            kind = c[4:]
+            want = {"prism": 8, "revol": 11, "dprism": 6}[kind]
+            if len(a) != want:
+                raise Unsupported(f"{c} with these arguments")
+            nums = [L(x) for x in a[3:-2]] + ["0.0"] * 6
+            self.feat = (kind, self.shape(a[0]), self.shape(a[1]), f"[{', '.join(nums[:6])}]", int(self.num(a[-2])))
+        elif c in ("featperform", "featperformval") and len(a) >= 2:
+            if self.feat is None or a[0].lower() != self.feat[0]:
+                raise Unsupported(f"{c} {a[0]} without its definition")
+            kind, base, pbase, params, fuse = self.feat
+            if c == "featperformval":
+                if len(a) != 3:
+                    raise Unsupported("featperformval up to a face")
+                self.bind(a[1], f'k.featperformval({base}, {pbase}, "{kind}", {params}, {fuse}, {L(a[2])})?')
+            else:
+                lim = [f"Some({self.shape(x)})" for x in a[2:]]
+                if len(lim) > 2:
+                    raise Unsupported("featperform with these arguments")
+                fr, un = ("None", "None") if not lim else (("None", lim[0]) if len(lim) == 1 else (lim[0], lim[1]))
+                self.bind(a[1], f'k.featperform({base}, {pbase}, "{kind}", {params}, {fuse}, {fr}, {un})?')
+        elif c == "orientation" and len(a) == 2:
+            self.bind(a[0], f"k.orientation({self.shape(a[0])}, \"{a[1].upper()}\")?")
+        elif c == "treverse" and len(a) >= 1:
+            for x in a:
+                self.bind(x, f"k.orientation({self.shape(x)}, \"R\")?")
+        elif c == "renamevar" and len(a) == 2:
+            if a[0] in self.exploded:
+                self.exploded[a[1]] = self.exploded[a[0]]
+            elif a[0] in self.vars:
+                kinds = [k for k in (self.curves, self.surfs, self.hyperbolas, self.planes) if a[0] in k]
+                self.vars[a[1]] = self.vars[a[0]]
+                for k in kinds:
+                    k.add(a[1])
+            else:
+                self.bind(a[1], f"{self.shape(a[0])[1:]}.clone()")
         elif c == "revol" and len(a) == 9:
             self.bind(a[0], f"k.revol({self.shape(a[1])}, {', '.join(L(x) for x in a[2:])})?")
         elif c in ("bfuse", "bcut", "bcommon") and len(a) == 3:
@@ -331,6 +470,12 @@ class Case:
             vec = ident(a[0]) + "_x" + (kind or "sub")
             self.lines.append(f"let {vec} = k.explode_kind({self.shape(a[0])}, {kind!r})?;".replace("'", '"'))
             self.exploded[a[0]] = (vec, kind)
+        elif c == "nexplode" and len(a) >= 2 and a[1][:1].lower() in ("e", "f", "v"):
+            kind = a[1][0].lower()
+            vec = ident(a[0]) + {"e": "_edges", "f": "_faces", "v": "_verts"}[kind]
+            fn = {"e": "nexplode_edges", "f": "nexplode_faces", "v": "nexplode_vertices"}[kind]
+            self.lines.append(f"let {vec} = k.{fn}({self.shape(a[0])})?;")
+            self.exploded[a[0]] = (vec, kind)
         elif c in ("explode", "nexplode") and len(a) == 2 and a[1].lower() in ("e", "f"):
             kind = a[1].lower()
             vec = ident(a[0]) + ("_edges" if kind == "e" else "_faces")
@@ -340,9 +485,15 @@ class Case:
         elif c == "blend" and len(a) >= 4 and (len(a) - 2) % 2 == 0:
             radii = {a[i] for i in range(2, len(a), 2)}
             if len(radii) != 1:
-                raise Unsupported("blend with several radii")
+                pairs = [f"({L(a[i])}, {self.shape(a[i + 1])})" for i in range(2, len(a), 2)]
+                self.bind(a[0], f"k.blend_radii({self.shape(a[1])}, &[{', '.join(pairs)}])?")
+                return
             edges = [self.shape(a[i]) for i in range(3, len(a), 2)]
             self.bind(a[0], f"k.blend({self.shape(a[1])}, {L(a[2])}, &[{', '.join(edges)}])?")
+        elif c in ("bfuseblend", "bcutblend") and len(a) in (4, 5):
+            if len(a) == 5 and a[4] != "-d":
+                raise Unsupported(f"{c} with these arguments")
+            self.bind(a[0], f"k.bfuseblend({self.shape(a[1])}, {self.shape(a[2])}, {L(a[3])}, {'true' if c == 'bfuseblend' else 'false'})?")
         elif c == "fillet2d" and len(a) == 4:
             self.bind(a[0], f"k.fillet2d({self.shape(a[1])}, {self.shape(a[2])}, {L(a[3])})?")
         elif c == "fillet2d" and len(a) == 3:
@@ -557,7 +708,10 @@ def convert(path, consts, begins=()):
     except KeyError as e:
         return None, f"needs the name {e}", text
     if not any(l.startswith("k.check") or l.startswith("draw::check") for l in case.lines):
-        return None, "checks nothing we measure", text
+        # A group whose end script checks the result's validity (and only what we can't
+        # measure besides, as OCCT's tolerances): that check is the case's.
+        if not (group_of(path) in END_CHECKSHAPE_GROUPS and "result" in case.vars and "shape" not in case.todo):
+            return None, "checks nothing we measure", text
     # Every result is also checked for validity (OCCT's scripts mostly measure only), unless
     # OCCT's own TODO says its result is faulty.
     if "result" in case.vars and "shape" not in case.todo and not any(l.startswith("k.checkshape(&result)") for l in case.lines):
@@ -584,6 +738,16 @@ def known_failures():
                 g, n = line.split()
                 out.add((g, n))
     return out
+
+
+# Groups whose end script's `checkshape result` is a case's check when it measures nothing else
+# (mkface: the faces made are only checked for validity and OCCT's tolerances).
+END_CHECKSHAPE_GROUPS = {"mkface"}
+
+
+def group_of(path):
+    """The group of a case's path (…/tests/<group>/<grid>/<case>)."""
+    return os.path.basename(os.path.dirname(os.path.dirname(os.path.abspath(path))))
 
 
 # Groups whose known failures are slow to run: they run only with --ignored.
