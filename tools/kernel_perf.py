@@ -21,7 +21,7 @@
    on one thread (as DRAW runs by default). The conformance suite is timed from its test binary
    (`--report-time`) against `bench/occt_conformance_times.txt` (the same cases on the former
    OCCT backend; times of whole tests).
-4. Writes `<out>/results.json` and the report `docs/PERF.md`: per case the CPU time (user +
+4. Writes `<out>/results.json` and the report `PERF.md`: per case the CPU time (user +
    system, all threads) of each side on one thread and the ratio, per category the geometric
    mean of the ratios over the cases both sides complete; the load average while measuring.
 
