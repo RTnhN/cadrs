@@ -65,20 +65,14 @@ jobs:
           key: occt-${{ runner.os }}-${{ runner.arch }}-${{ steps.occt.outputs.rev }}
       # No OpenCASCADE cache for this revision (a target folder saved before this step existed,
       # or an evicted cache): drop whatever OCCT the target folder holds, whole or partial, and
-      # the opencascade-sys fingerprint, so cargo runs its build script again and builds OCCT.
+      # opencascade-sys's artifacts and fingerprint (`cargo clean -p`, whatever the layout of the
+      # target folder), so cargo runs its build script again and builds OCCT.
       - name: Rebuild OpenCASCADE if a cache lost it
         if: steps.occt-cache.outputs.cache-hit != 'true'
         shell: bash
         run: |
-          if [ -d target/debug/OCCT ]; then
-            echo "target/debug/OCCT was restored without an OpenCASCADE cache:" \
-              "$(ls target/debug/OCCT/include 2>/dev/null | wc -l) headers," \
-              "$(ls target/debug/OCCT/lib 2>/dev/null | wc -l) libraries"
-            for f in Standard.hxx BinTools.hxx; do
-              [ -e "target/debug/OCCT/include/$f" ] && echo "  $f present" || echo "  $f missing"
-            done
-          fi
-          rm -rf target/debug/OCCT target/debug/.fingerprint/opencascade-sys-*
+          rm -rf target/debug/OCCT
+          cargo clean -p opencascade-sys
           echo "OpenCASCADE will be built"
 
       - name: Build
@@ -121,20 +115,14 @@ jobs:
           key: occt-${{ runner.os }}-${{ runner.arch }}-${{ steps.occt.outputs.rev }}
       # No OpenCASCADE cache for this revision (a target folder saved before this step existed,
       # or an evicted cache): drop whatever OCCT the target folder holds, whole or partial, and
-      # the opencascade-sys fingerprint, so cargo runs its build script again and builds OCCT.
+      # opencascade-sys's artifacts and fingerprint (`cargo clean -p`, whatever the layout of the
+      # target folder), so cargo runs its build script again and builds OCCT.
       - name: Rebuild OpenCASCADE if a cache lost it
         if: steps.occt-cache.outputs.cache-hit != 'true'
         shell: bash
         run: |
-          if [ -d target/debug/OCCT ]; then
-            echo "target/debug/OCCT was restored without an OpenCASCADE cache:" \
-              "$(ls target/debug/OCCT/include 2>/dev/null | wc -l) headers," \
-              "$(ls target/debug/OCCT/lib 2>/dev/null | wc -l) libraries"
-            for f in Standard.hxx BinTools.hxx; do
-              [ -e "target/debug/OCCT/include/$f" ] && echo "  $f present" || echo "  $f missing"
-            done
-          fi
-          rm -rf target/debug/OCCT target/debug/.fingerprint/opencascade-sys-*
+          rm -rf target/debug/OCCT
+          cargo clean -p opencascade-sys
           echo "OpenCASCADE will be built"
 
       - name: Build
