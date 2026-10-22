@@ -199,9 +199,12 @@ fn face_integrals_v(body: &Body, f: &Face, shift: &V3) -> Q {
                 ts = r;
             }
             // And where the p-curve crosses the surface's knots (the integrand is only piecewise
-            // polynomial there: a straight p-curve across a loft's many spans).
-            if let Surface::Nurbs(ns) = &f.surf {
-                ts = split_at_knots(&c.pc, &ts, &ns.ku, &ns.kv);
+            // polynomial there: a straight p-curve across a loft's many spans), or an extruded
+            // B-spline's (along u: |N| has a kink at each).
+            match &f.surf {
+                Surface::Nurbs(ns) => ts = split_at_knots(&c.pc, &ts, &ns.ku, &ns.kv),
+                Surface::Extrusion { c: ec, .. } => ts = split_at_knots(&c.pc, &ts, &curve_knots(ec), NO_KNOTS),
+                _ => {}
             }
             if t0 > t1 {
                 ts.reverse();
@@ -377,9 +380,12 @@ pub fn face_integrals(body: &Body, f: &Face, shift: &V3) -> Q {
                 ts = r;
             }
             // And where the p-curve crosses the surface's knots (the integrand is only piecewise
-            // polynomial there: a straight p-curve across a loft's many spans).
-            if let Surface::Nurbs(ns) = &f.surf {
-                ts = split_at_knots(&c.pc, &ts, &ns.ku, &ns.kv);
+            // polynomial there: a straight p-curve across a loft's many spans), or a revolved
+            // B-spline's (along v).
+            match &f.surf {
+                Surface::Nurbs(ns) => ts = split_at_knots(&c.pc, &ts, &ns.ku, &ns.kv),
+                Surface::Revolution { m, .. } => ts = split_at_knots(&c.pc, &ts, NO_KNOTS, &curve_knots(m)),
+                _ => {}
             }
             if t0 > t1 {
                 ts.reverse();
@@ -416,6 +422,17 @@ pub fn face_integrals(body: &Body, f: &Face, shift: &V3) -> Q {
         }
     }
     acc
+}
+
+/// No knots (a direction a surface is smooth along), for [`split_at_knots`].
+const NO_KNOTS: &[f64] = &[0.0, 0.0];
+
+/// A curve's knot vector, or [`NO_KNOTS`] for an analytic one.
+fn curve_knots(c: &Curve) -> Vec<f64> {
+    match c {
+        Curve::Nurbs(n) => n.knots.clone(),
+        _ => NO_KNOTS.to_vec(),
+    }
 }
 
 /// `ts` (increasing) with the parameters where the p-curve crosses an interior knot of `ku`

@@ -17,9 +17,9 @@ offset_05_off_extrusion
 offset_08_boolean_trees_result
 # Rounded inset with a face kept: a valid solid with SMLib's face and edge counts (15, 39) whose
 # geometry is the exact erosion: its section is 41.95986 at both ends (the 2D offsets of the
-# profile's loops), so its volume is 41.95986 × 9.7 = 407.0106. SMLib's is 407.3193 (its two end
-# faces differ, 42.244 and 41.931, and it measures the input 6.4e-4 over its exact 591.836); ours
-# integrates to 406.264, the inset spline face's area 150.50 where its mesh has 150.98 (mass.rs).
+# profile's loops), so its volume is 41.95986 × 9.7 = 407.0106; ours is 407.0099 (the inset
+# spline is a fit). SMLib's 407.3193 is its own approximation: its two end faces differ (42.244,
+# 41.931) and it measures the input 6.4e-4 over its exact 591.836.
 offset_06_off_extrusion
 # Rounded inward shell: the shell is built (valid, 21 faces), but from a different input: our
 # reader gives face 10 (the corner's spline) an area of 5306 where SMLib has 12187 (its loop runs
