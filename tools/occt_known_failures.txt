@@ -500,7 +500,6 @@ blend bfuseblend_a6
 blend complex_d2
 blend encoderegularity_a2
 blend encoderegularity_a4
-blend encoderegularity_a7
 blend simple_r1
 blend simple_r2
 blend simple_r6

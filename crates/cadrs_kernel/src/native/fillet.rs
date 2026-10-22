@@ -1679,7 +1679,13 @@ fn first_roll(b: &Body, ef: &EdgeFillet, from: &Ball, t0: f64, t1: f64) -> Resul
             let bd = Boundary { curve: &x.curve, pc: &c.pc, t: x.t };
             for (_, ball) in crossings(ef, f, ef.k_at(t0), k, &bd, &from.c, reach) {
                 let t = ef.spine.param_of(&ball.c, t0);
-                if t <= lo + tol::REL * span || t >= hi - tol::REL * span {
+                if !(t > lo + tol::REL * span && t < hi - tol::REL * span) {
+                    continue;
+                }
+                // Not a far branch: its contacts near the spine there (a ball on the far side of
+                // a cylinder the edge's face is part of crosses that face's far edges too).
+                let p = ef.spine.at(t).0;
+                if ball.q.iter().any(|q| (q.p - p).norm() > ef.reach) {
                     continue;
                 }
                 // Smooth there: the face beyond has the same normal.
@@ -1702,9 +1708,33 @@ fn first_roll(b: &Body, ef: &EdgeFillet, from: &Ball, t0: f64, t1: f64) -> Resul
 /// parameter (the ball rolls over smooth edges of the edge's faces onto the faces beyond).
 #[allow(clippy::too_many_arguments)]
 fn pieces_of(b: &Body, e: usize, law: &[(f64, f64)], flat: bool, ratio: f64, budget: &Budget, rolls: &mut Vec<Ball>) -> Result<Vec<(EdgeFillet, [Option<usize>; 2])>> {
-    let base = edge_fillet(b, e, law, flat, ratio, budget)?;
+    let mut base = edge_fillet(b, e, law, flat, ratio, budget)?;
     if base.closed {
         return Ok(vec![(base, [None, None])]);
+    }
+    // A contact already past a smooth edge of its face in the middle (a face split in two on
+    // one surface, the edge's face the narrow part): the strip starts on the face beyond, and
+    // rolls from there.
+    for k in 0..2 {
+        let fi = base.faces[k];
+        let p = base.mid.q[k].p;
+        if point_in_face(b, fi, &p) {
+            continue;
+        }
+        let other = base.faces[1 - k];
+        let beside = b.faces[fi]
+            .loops
+            .iter()
+            .flatten()
+            .filter(|c| c.edge != e && !b.edges[c.edge].degenerate && !is_seam(b, fi, c.edge))
+            .filter_map(|c| beyond(b, c.edge, fi))
+            .find(|&g| g != fi && g != other && same_surface(&b.faces[fi].surf, &b.faces[g].surf) && point_in_face(b, g, &p));
+        if let Some(g) = beside {
+            debug(|| format!("edge {e}: the ball's contact on face {fi} is on face {g}, beside it on its surface"));
+            base.faces[k] = g;
+            base.mid.q[k] = geom::contact(&b.faces[g], geom::foot(&b.faces[g], &p, None));
+            base.exact = if base.law.is_some() { None } else { geom::exact_kind([&b.faces[base.faces[0]], &b.faces[base.faces[1]]], &base.spine) };
+        }
     }
     let ed = &b.edges[e];
     // From the middle towards each end: each roll starts a strip with one face changed.
@@ -1714,6 +1744,7 @@ fn pieces_of(b: &Body, e: usize, law: &[(f64, f64)], flat: bool, ratio: f64, bud
         loop {
             let te = ed.t[j];
             let Some((k, into, ball, t)) = first_roll(b, &cur, &cur.mid, cur.tm, te)? else { break };
+            debug(|| format!("edge {e} side {j}: the ball rolls from face {} onto face {into} at t {t} (from {})", cur.faces[k], cur.tm));
             if side.len() > 16 {
                 return Err(failed("rolling ball", "the fillet's ball rolls over too many faces"));
             }
@@ -3878,6 +3909,20 @@ pub(crate) fn width_law(b: &Body, e: usize, w: f64) -> Option<Vec<(f64, f64)>> {
             let th = angle_at(b, e, s.clamp(tol::REL_POINT, 1.0 - tol::REL_POINT))?;
             let phi = PI - th;
             (phi > tol::ANGULAR_POINT && phi < PI - tol::ANGULAR_POINT).then(|| (s, w / (2.0 * (phi / 2.0).sin())))
+        })
+        .collect()
+}
+
+/// The radius law of an equal-distance chamfer `d` along edge e, whose faces' angle θ varies
+/// along it: the ball whose contacts lie d from the edge, r = d tan(θ/2), at samples along the
+/// edge (linear between).
+pub(crate) fn chamfer_law(b: &Body, e: usize, d: f64) -> Option<Vec<(f64, f64)>> {
+    let n = 16;
+    (0..=n)
+        .map(|i| {
+            let s = i as f64 / n as f64;
+            let th = angle_at(b, e, s.clamp(tol::REL_POINT, 1.0 - tol::REL_POINT))?;
+            (th > tol::ANGULAR_POINT && th < PI - tol::ANGULAR_POINT).then(|| (s, d * (th / 2.0).tan()))
         })
         .collect()
 }

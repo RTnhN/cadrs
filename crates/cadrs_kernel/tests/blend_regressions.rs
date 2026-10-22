@@ -81,3 +81,59 @@ fn chamfer_mixed_corners() {
         assert_eq!(k.faces(r.bodies[0]).unwrap().len(), faces, "{one:?}");
     }
 }
+
+/// A wheel's five spoke windows chamfered 2 mm on both sides (a user's document): each side
+/// face is split in two on its plane by a circle the windows' chamfers cross, and the edge list
+/// holds an edge between two tangent cylinders. The tangent edge is passed over (as OCCT does),
+/// the rails run on across the split onto the plane's other face, and where a window's outer
+/// arc lies wholly past the split its strip starts on that face (the crossings of the split
+/// circle are found however long it is).
+#[test]
+fn wheel_window_chamfer() {
+    let mut k = NativeKernel::new();
+    let b = k.insert(bodyio::read(include_bytes!("data/docs/wheel_window_chamfer.body")).unwrap());
+    let v0 = k.mass_properties(b).unwrap().volume;
+    let edges = [1, 2, 28, 29, 30, 31, 32, 33, 67, 68, 69, 70, 71, 72, 101, 102, 34, 35, 36, 37, 38, 39, 73, 74, 75, 76, 77, 78, 107, 108, 10, 11, 12, 13, 14, 15, 49, 50, 51, 52, 53, 54, 84, 85, 16, 17, 18, 19, 20, 21, 55, 56, 57, 58, 59, 60, 92, 93, 22, 23, 24, 25, 26, 27, 61, 62, 63, 64, 65, 66, 98, 99].map(EdgeId);
+    let r = k.chamfer_with(b, &edges, &ChamferOpts::new(ChamferSpec::EqualDistance(2.0))).unwrap();
+    let out = r.bodies[0];
+    assert!(k.get(out).unwrap().check().is_empty());
+    // Ten windows of about 71 mm round, a 2 mm² section.
+    let removed = v0 - k.mass_properties(out).unwrap().volume;
+    assert!((1350.0..1500.0).contains(&removed), "{removed}");
+}
+
+/// A pipe snap's edges chamfered 0.5 mm (a user's document), one of them where a cross hole
+/// meets the bore: the faces' angle varies along it, so its chamfer is a law of radii (the
+/// boolean tool's result wasn't valid).
+#[test]
+fn pipe_snap_chamfer() {
+    let mut k = NativeKernel::new();
+    let b = k.insert(bodyio::read(include_bytes!("data/docs/pipe_snap_chamfer.body")).unwrap());
+    let v0 = k.mass_properties(b).unwrap().volume;
+    let edges = [4, 45, 46, 26, 2, 7, 10, 13, 16, 19, 32, 35, 38, 41, 43, 22, 25, 29, 0, 5, 8, 11, 14, 17, 30, 33, 36, 39, 42, 20, 23, 27, 24, 28, 31, 15, 18, 21].map(EdgeId);
+    let r = k.chamfer_with(b, &edges, &ChamferOpts::new(ChamferSpec::EqualDistance(0.5))).unwrap();
+    let out = r.bodies[0];
+    assert!(k.get(out).unwrap().check().is_empty());
+    // OCCT takes 62.45 mm³ off.
+    let removed = v0 - k.mass_properties(out).unwrap().volume;
+    assert!((60.0..65.0).contains(&removed), "{removed}");
+}
+
+/// The rims of a cross hole through a D-shaped block filleted 5 mm (a user's document): the
+/// hole's axis lies where the block's half cylinder meets its flat sides, so the ball rolls
+/// from the cylinder onto the planes. A crossing on the cylinder's far side (its surface goes
+/// on round past the face) isn't a roll, nor one whose spine parameter isn't a number (the
+/// ball rolled back and forth for ever).
+#[test]
+fn cross_hole_fillet() {
+    let mut k = NativeKernel::new();
+    let b = k.insert(bodyio::read(include_bytes!("data/docs/cross_hole_fillet.body")).unwrap());
+    let v0 = k.mass_properties(b).unwrap().volume;
+    let spec = FilletSpec { allow_overflow: true, propagate: true, ..FilletSpec::radius(5.0) };
+    let r = k.fillet_with(b, &[11, 12, 2, 6].map(EdgeId), &spec).unwrap();
+    let out = r.bodies[0];
+    assert!(k.get(out).unwrap().check().is_empty());
+    // OCCT takes 1986 mm³ off.
+    let removed = v0 - k.mass_properties(out).unwrap().volume;
+    assert!((1880.0..2040.0).contains(&removed), "{removed}");
+}

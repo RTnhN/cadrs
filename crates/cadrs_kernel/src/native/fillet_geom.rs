@@ -284,13 +284,22 @@ pub fn rail_crossings(f: [&Face; 2], k: [f64; 2], side: usize, bd: &Boundary, ne
         let q = contact(fo, uv);
         ((c - q.p).dot(&q.n) - k[other], uv)
     };
-    let n = 48;
     let (t0, t1) = (bd.t[0], bd.t[1]);
+    // Samples a tenth of the reach apart at most (on a long boundary, a large circle, the ball
+    // may cross in and out between coarser ones), at least 48; only those near the balls solved.
+    let at = |i: usize, n: usize| bd.curve.point(t0 + (t1 - t0) * i as f64 / n as f64);
+    let len: f64 = (1..=48).map(|i| (at(i, 48) - at(i - 1, 48)).norm()).sum();
+    let n = ((len / (0.1 * reach).max(tol::TINY)).ceil() as usize).clamp(48, 4800);
+    let near_bd = reach + 2.0 * k[side].abs();
     let mut hint: Option<P2> = None;
     let mut prev: Option<(f64, f64)> = None;
     let mut brackets: Vec<(f64, f64)> = Vec::new();
     for i in 0..=n {
         let t = t0 + (t1 - t0) * i as f64 / n as f64;
+        if n > 48 && (bd.curve.point(t) - near).norm() > near_bd {
+            prev = None;
+            continue;
+        }
         let Some((c, _, _)) = centre(t) else {
             prev = None;
             continue;

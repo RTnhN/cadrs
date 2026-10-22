@@ -671,6 +671,37 @@ fn edge_convex(b: &Body, e: usize) -> Option<bool> {
     if c.abs() < tol::ANGULAR { None } else { Some(c < 0.0) }
 }
 
+/// Whether the faces at edge `e` join smoothly all along it (their normals the same at every
+/// sample): the edge marks no corner, and a blend there has nothing to take off or fill.
+fn smooth_edge(b: &Body, e: usize) -> bool {
+    let ed = &b.edges[e];
+    let Ok([s1, s2]) = edge_sides(b, e) else { return false };
+    if ed.degenerate {
+        return false;
+    }
+    (0..=8).all(|i| {
+        let t = ed.t[0] + (ed.t[1] - ed.t[0]) * i as f64 / 8.0;
+        let p = ed.point(t);
+        let normal = |fi: usize| {
+            let f = &b.faces[fi];
+            let (u, v) = f.surf.project(&p, None);
+            f.surf.normal(u, v) * if f.sense { 1.0 } else { -1.0 }
+        };
+        let (n1, n2) = (normal(s1.0), normal(s2.0));
+        n1.dot(&n2) > 0.0 && n1.cross(&n2).norm() < tol::ANGULAR_POINT
+    })
+}
+
+/// The picked edges less those whose faces join smoothly (OCCT's blends pass over them too);
+/// when every one does, there is nothing to blend.
+fn sharp_edges(b: &Body, edges: &[EdgeId]) -> Result<Vec<EdgeId>> {
+    let kept: Vec<EdgeId> = edges.iter().copied().filter(|e| (e.0 as usize) >= b.edges.len() || !smooth_edge(b, e.0 as usize)).collect();
+    if kept.is_empty() && !edges.is_empty() {
+        return Err(KernelError::InvalidGeometry { op: "blend", why: "the faces at the edge are tangent: nothing to blend".into() });
+    }
+    Ok(kept)
+}
+
 /// Whether the solid is convex round vertex `v`: every edge there convex.
 fn vertex_convex(b: &Body, v: usize) -> bool {
     b.edges.iter().enumerate().filter(|(_, x)| !x.degenerate && x.v.contains(&v)).all(|(i, _)| edge_convex(b, i) == Some(true))
@@ -1296,7 +1327,9 @@ pub fn fillet(k: &mut NativeKernel, body: BodyId, edges: &[EdgeId], spec: &Fille
     // A width: the radius whose contacts lie that far apart, on each edge whose faces meet at
     // one angle (normals φ apart: r = w / (2 sin(φ/2))).
     let b = (**k.get(body)?).clone();
-    let laws: Option<Vec<super::fillet::RadiusLaw>> = all
+    // (Local trimming passes over edges whose faces join smoothly.)
+    let sharp = sharp_edges(&b, &all)?;
+    let laws: Option<Vec<super::fillet::RadiusLaw>> = sharp
         .iter()
         .map(|e| {
             let e = e.0 as usize;
@@ -1400,15 +1433,24 @@ fn check_overflow(k: &NativeKernel, body: BodyId, edges: &[EdgeId], r: &OpResult
 pub fn chamfer(k: &mut NativeKernel, body: BodyId, edges: &[EdgeId], opts: &ChamferOpts) -> Result<OpResult> {
     let spec = opts.spec;
     let b = (**k.get(body)?).clone();
+    // (Local trimming passes over edges whose faces join smoothly.)
+    let sharp = sharp_edges(&b, edges)?;
     // Equal distances where the faces meet at a constant angle: by local trimming, as the
     // ball whose contacts are that far along the faces, cut straight across.
     if let (ChamferSpec::EqualDistance(d), ChamferMeasure::Offset) = (spec, opts.measurement)
         && d > 0.0
         && std::env::var_os("CADRS_NO_LOCAL_FILLET").is_none()
     {
-        let laws: Option<Vec<super::fillet::RadiusLaw>> = edges
+        let laws: Option<Vec<super::fillet::RadiusLaw>> = sharp
             .iter()
-            .map(|e| super::fillet::chamfer_radius(&b, e.0 as usize, d).map(|r| (e.0 as usize, vec![(0.0, r), (1.0, r)])))
+            .map(|e| {
+                let e = e.0 as usize;
+                // (Where the faces' angle varies along the edge, a law of radii.)
+                match super::fillet::chamfer_radius(&b, e, d) {
+                    Some(r) => Some((e, vec![(0.0, r), (1.0, r)])),
+                    None => Some((e, super::fillet::chamfer_law(&b, e, d)?)),
+                }
+            })
             .collect();
         if let Some(laws) = laws {
             let local = super::fillet::fillet_edges_laws(&b, body, &laws, true).and_then(|(out, src)| {
@@ -1437,7 +1479,7 @@ pub fn chamfer(k: &mut NativeKernel, body: BodyId, edges: &[EdgeId], opts: &Cham
     // distances that differ only along straight edges between flat faces; equal ones wherever
     // the faces meet at one angle (as the equal-distance chamfer above).
     if !matches!((spec, opts.measurement), (ChamferSpec::EqualDistance(_), ChamferMeasure::Offset)) && std::env::var_os("CADRS_NO_LOCAL_FILLET").is_none() {
-        let dists: Option<Vec<(usize, [f64; 2])>> = edges
+        let dists: Option<Vec<(usize, [f64; 2])>> = sharp
             .iter()
             .map(|&e| {
                 let ei = e.0 as usize;
