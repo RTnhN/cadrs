@@ -168,3 +168,38 @@ fn a_line_drawn_against_the_loop_runs_with_it() {
     assert_eq!(bottom.len(), 1);
     assert!(bottom[0].end.x > bottom[0].start.x, "{:?} → {:?}", bottom[0].start, bottom[0].end);
 }
+
+/// plant_pot_dish_square: two sketch lines in line make one side, as OCCT's merging of faces on
+/// one surface made them, and that side's edge on the far cap runs back along the loop (the
+/// way the side's boundary runs, as OCCT rebuilt it), so an extrude directed by that edge goes
+/// the way the document expects; the near cap's edge runs with the loop.
+#[test]
+fn lines_in_line_make_one_side_whose_far_edge_runs_back() {
+    // Counter-clockwise, its bottom drawn as two lines.
+    let curves = vec![
+        line(p(0.0, 0.0), p(4.0, 0.0)),
+        line(p(4.0, 0.0), p(10.0, 0.0)),
+        line(p(10.0, 0.0), p(10.0, 10.0)),
+        line(p(10.0, 10.0), p(0.0, 10.0)),
+        line(p(0.0, 10.0), p(0.0, 0.0)),
+    ];
+    let mut k = NativeKernel::new();
+    let region = Region { outer: Loop { curves }, holes: vec![], source: None };
+    // A feature's extrude (a DRAW-level prism keeps the two sides, as OCCT's does).
+    let spec = ExtrudeSpec::blind(nalgebra::Vector3::z_axis(), 2.0);
+    let id = k.extrude_with(&Profile::new(Plane::top(), vec![region]), &spec).unwrap().bodies[0];
+    let issues = k.get(id).unwrap().check_with(CheckLevel::Full);
+    assert!(issues.is_empty(), "{issues:?}");
+    assert_eq!(k.faces(id).unwrap().len(), 6, "a box");
+    let along_y0 = |z: f64| -> Vec<EdgeInfo> {
+        k.edges(id)
+            .unwrap()
+            .into_iter()
+            .filter(|e| [e.start.y, e.end.y, e.start.z - z, e.end.z - z].iter().all(|c| c.abs() < tol::ROUNDOFF))
+            .collect()
+    };
+    let (near, far) = (along_y0(0.0), along_y0(2.0));
+    assert_eq!((near.len(), far.len()), (1, 1));
+    assert!(near[0].end.x > near[0].start.x, "near: {:?} → {:?}", near[0].start, near[0].end);
+    assert!(far[0].end.x < far[0].start.x, "far: {:?} → {:?}", far[0].start, far[0].end);
+}

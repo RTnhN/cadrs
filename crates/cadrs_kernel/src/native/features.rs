@@ -443,11 +443,11 @@ pub fn extrude_with(k: &mut NativeKernel, profile: &Profile, spec: &ExtrudeSpec)
     let (profile_used, faces) = match spec.body {
         BodyKind::Thin { left, right } => {
             let bands = crate::thin::thin_profile(profile, left, right)?;
-            let f = inputs(k, &bands, &spec.faces)?;
+            let f = profile::fuse_sides(inputs(k, &bands, &spec.faces)?);
             (bands, f)
         }
         _ => {
-            let f = inputs(k, profile, &spec.faces)?;
+            let f = profile::fuse_sides(inputs(k, profile, &spec.faces)?);
             (profile.clone(), f)
         }
     };

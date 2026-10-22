@@ -179,6 +179,7 @@ fn sweep_strand(b: &mut Body, lp: &[Piece], closed: bool, kind: &dyn SweepKind, 
         })
         .collect();
     let mut out = Strand { sides: Vec::new(), bottom: Vec::new(), top: Vec::new() };
+    let mut turned: Vec<usize> = Vec::new();
     for (i, p) in lp.iter().enumerate() {
         let j = if closed { (i + 1) % k } else { i + 1 };
         let c0 = p.c.transformed(m0);
@@ -203,8 +204,46 @@ fn sweep_strand(b: &mut Body, lp: &[Piece], closed: bool, kind: &dyn SweepKind, 
         }
         b.faces.push(Face { surf: side.surf, sense: true, loops: vec![sl] });
         out.sides.push((b.faces.len() - 1, std::iter::once(p.src).chain(p.more.iter().copied()).collect()));
+        if !p.more.is_empty() && et != eb {
+            turned.push(et);
+        }
+    }
+    // The far edge of a side fused from several curves runs back along the loop: OCCT's merging
+    // of faces on one surface rebuilt such edges the way the side's boundary runs (a straight
+    // edge picked as a direction then points the same way).
+    for e in turned {
+        turn_line_edge(b, e, &mut out.top);
     }
     out
+}
+
+/// Turns a line edge round (its curve, vertices and every coedge on it, `extra` too), its
+/// p-curves lines; left as it is when one isn't.
+fn turn_line_edge(b: &mut Body, e: usize, extra: &mut [Coedge]) {
+    let flip = |c: &Curve, t: [f64; 2]| match c {
+        Curve::Line { o, d } => Some(Curve::Line { o: o + d * (t[0] + t[1]), d: -d }),
+        _ => None,
+    };
+    let t = b.edges[e].t;
+    let on_e = |c: &Coedge| c.edge == e;
+    let all_lines = b.faces.iter().flat_map(|f| f.loops.iter().flatten()).chain(extra.iter()).filter(|c| on_e(c)).all(|c| matches!(c.pc, Curve::Line { .. }));
+    let Some(curve) = flip(&b.edges[e].curve, t) else { return };
+    if !all_lines {
+        return;
+    }
+    let edge = &mut b.edges[e];
+    edge.curve = curve;
+    edge.v.swap(0, 1);
+    let turn = |c: &mut Coedge| {
+        if c.edge == e
+            && let Some(pc) = flip(&c.pc, t)
+        {
+            c.pc = pc;
+            c.fwd = !c.fwd;
+        }
+    };
+    b.faces.iter_mut().flat_map(|f| f.loops.iter_mut().flatten()).for_each(turn);
+    extra.iter_mut().for_each(turn);
 }
 
 /// Sweeps closed faces (solids, or their boundaries as sheets when `solid` is false) and open

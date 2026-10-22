@@ -738,7 +738,7 @@ pub fn merge_regions(regions: &[Region2]) -> Result<Vec<MergedFace>> {
                 return Err(KernelError::InvalidProfile("the regions' boundaries don't close after merging".into()));
             }
         }
-        traced.push(fuse_pieces(lp, tol));
+        traced.push(fuse_pieces(lp, tol, false));
     }
     // Outer loops and holes.
     let mut outers: Vec<(Loop2, Vec<P2>, f64)> = Vec::new();
@@ -788,9 +788,25 @@ pub fn merge_regions(regions: &[Region2]) -> Result<Vec<MergedFace>> {
     Ok(faces)
 }
 
-/// Fuses consecutive pieces of different regions that continue each other on one line or
-/// circle (Parasolid merges the side faces of touching regions).
-fn fuse_pieces(mut lp: Loop2, tol: f64) -> Loop2 {
+/// The faces with each loop's pieces that continue each other on one line fused into one (a
+/// feature's profile: the app's OCCT kernel merged the faces they swept, on one surface,
+/// after every operation; a DRAW-level prism keeps them apart, as OCCT's does).
+pub fn fuse_sides(faces: Vec<MergedFace>) -> Vec<MergedFace> {
+    faces
+        .into_iter()
+        .map(|f| MergedFace {
+            outer: fuse_pieces(f.outer, JOIN, true),
+            holes: f.holes.into_iter().map(|h| fuse_pieces(h, JOIN, true)).collect(),
+            regions: f.regions,
+        })
+        .collect()
+}
+
+/// Fuses consecutive pieces (of one curve, of one region's curves or of touching regions') that
+/// continue each other on one line, or on one circle unless `lines_only`: OCCT merged the faces they sweep into one after
+/// every operation (and Parasolid merges the side faces of touching regions). The fused piece
+/// keeps the first piece's origin and lists the others in `more`.
+fn fuse_pieces(mut lp: Loop2, tol: f64, lines_only: bool) -> Loop2 {
     let mut changed = true;
     while changed && lp.len() > 1 {
         changed = false;
@@ -798,15 +814,20 @@ fn fuse_pieces(mut lp: Loop2, tol: f64) -> Loop2 {
         for i in 0..n {
             let j = (i + 1) % n;
             let (a, b) = (&lp[i], &lp[j]);
-            if a.src.region() == b.src.region() || !a.same_carrier(b, tol) || a.rev != b.rev {
+            // A feature's lines of one region (`lines_only`), else pieces of touching regions.
+            let apart = if lines_only { a.src == b.src || !matches!(a.c, Curve::Line { .. }) } else { a.src.region() == b.src.region() };
+            if apart || !a.same_carrier(b, tol) || a.rev != b.rev {
                 continue;
             }
             if a.dir(1.0).dot(&b.dir(0.0)) < 1.0 - tol::ANGULAR {
                 continue;
             }
             let mut more = a.more.clone();
-            more.push(b.src);
-            more.extend(b.more.iter().copied());
+            for o in std::iter::once(b.src).chain(b.more.iter().copied()) {
+                if o != a.src && !more.contains(&o) {
+                    more.push(o);
+                }
+            }
             let fused = match &a.c {
                 Curve::Line { .. } => {
                     let (s, e) = (a.start(), b.end());
