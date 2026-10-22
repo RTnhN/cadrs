@@ -1865,14 +1865,31 @@ fn run(a: &Body, b: &Body, mode: Mode, opts: RunOpts) -> Result<BoolOut> {
     }
     prof.mark("assemble");
     super::unify::merge_edges(&mut out);
-    // The run merged within its tolerance: the result's entities say so.
-    out.fit_tolerances(run_tol * 10.0);
+    // The run merged within its tolerance: the result's entities say so, the p-curves' gaps
+    // searched for as the Full check measures them. An edge lying off a face by more (an
+    // input's edge off its own face, which the cut faces keep) has that recorded, up to a part
+    // in 10⁵ of the result's size.
+    out.fit_tolerances_searched(run_tol * 10.0);
+    let wide = 1e-5 * out.bbox().diagonal();
+    for fi in 0..out.faces.len() {
+        for c in out.faces[fi].loops.iter().flatten() {
+            let e = &out.edges[c.edge];
+            if e.degenerate {
+                continue;
+            }
+            let g = super::topo::pcurve_gap(e, &c.pc, &out.faces[fi].surf);
+            if g <= wide && g * 1.01 > e.tol {
+                out.edges[c.edge].tol = g * 1.01;
+            }
+        }
+    }
     prof.mark("unify");
     work.spend((out.faces.len() as u64).pow(2), "shell assembly")?;
     if std::env::var_os("CADRS_BOOL_WORK").is_some() {
         eprintln!("boolean work: {}", work.done);
     }
     assemble_shells(&mut out)?;
+    touch_voids(&mut out, run_tol * 10.0);
     // Faces of the two inputs on one surface (by input face): only a solid holding both of a
     // pair can enclose nothing.
     let pairs: std::collections::HashSet<(usize, usize)> = (0..na_faces).flat_map(|fa| coincident[fa].iter().map(move |&fb| (fa, fb))).map(|(fa, fb)| (faces[fa].orig, faces[fb].orig)).collect();
@@ -1904,6 +1921,39 @@ fn run(a: &Body, b: &Body, mode: Mode, opts: RunOpts) -> Result<BoolOut> {
     prof.mark("shells");
     prof.report(&format!("{op:?} {}×{} faces", a.faces.len(), b.faces.len()));
     Ok(BoolOut { body: out, from })
+}
+
+/// A void's vertices lying outside its solid's outer shell by no more than `tol` (a void
+/// touching the outer shell, as a cube's corners a sphere round it, within the run's
+/// tolerance) record the gap in their tolerance: they lie on the shell.
+fn touch_voids(b: &mut Body, tol: f64) {
+    let mut raise: Vec<(usize, f64)> = Vec::new();
+    for s in &b.solids {
+        let [outer, voids @ ..] = s.shells.as_slice() else { continue };
+        if voids.is_empty() {
+            continue;
+        }
+        let out = super::kernel::subset(b, &b.shells[*outer].faces, true);
+        let polys: Vec<Vec<Vec<P2>>> = out.faces.iter().map(|f| classify::face_polygons(&out, f)).collect();
+        for &sh in voids {
+            let mut vs: Vec<usize> = b.shells[sh].faces.iter().flat_map(|&f| b.faces[f].loops.iter().flatten().flat_map(|c| b.edges[c.edge].v)).collect();
+            vs.sort_unstable();
+            vs.dedup();
+            for v in vs {
+                let vx = &b.verts[v];
+                if classify::classify_point(&out, &polys, &vx.p, vx.tol.max(super::tol::POINT)) != PointClass::Outside {
+                    continue;
+                }
+                let d = out.faces.iter().map(|f| f.surf.distance(&vx.p)).fold(f64::INFINITY, f64::min);
+                if d <= tol {
+                    raise.push((v, d * 1.01));
+                }
+            }
+        }
+    }
+    for (v, t) in raise {
+        b.verts[v].tol = b.verts[v].tol.max(t);
+    }
 }
 
 /// The points where two curves meet (`hits`: (t on `a`, t on `b`), as [`ssi::curve_curve`]

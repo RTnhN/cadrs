@@ -1198,7 +1198,7 @@ impl Body {
 
 /// The largest distance between edge `e`'s curve and its p-curve `pc` on `surf` (infinite if
 /// either can't be evaluated): 33 samples, then a golden-section search about the worst.
-fn pcurve_gap(e: &Edge, pc: &Curve, surf: &Surface) -> f64 {
+pub(super) fn pcurve_gap(e: &Edge, pc: &Curve, surf: &Surface) -> f64 {
     const N: usize = 32;
     let gap = |t: f64| {
         let uv = pc.point(t);

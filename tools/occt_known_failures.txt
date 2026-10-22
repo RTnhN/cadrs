@@ -804,17 +804,6 @@ heal fix_gaps_b1
 boolean bopfuse_complex_h1
 # W15: cases that pass the fast check and fail the full one (CheckLevel::Full in every suite),
 # by cause and owner.
-# Full check: p-curves off their edge by more than its tolerance (fast check samples 7 points) (boolean results, W2b).
-boolean bcommon_complex_c7
-boolean bcut_complex_l7
-boolean bcut_complex_q1
-boolean bfuse_complex_c4
-boolean bfuse_complex_c5
-boolean bfuse_complex_c8
-boolean boptuc_complex_b7
-feat featprism_n2
-# Full check: a void shell outside its solid's outer shell, W2b.
-boolean boptuc_complex_c5
 # Full check: a face's loops cross in (u, v), W1b.
 blend complex_a5
 # Full check: faces of the shell cross (the notch's offset wall pierces the top), W6b.
