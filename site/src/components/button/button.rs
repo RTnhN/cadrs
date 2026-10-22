@@ -5,8 +5,8 @@
 use super::recipe::{
     ButtonColor, ButtonRadius, ButtonRecipeProps, ButtonSize, ButtonVariant, BUTTON_RECIPE,
 };
-use crate::components::_proa::free_web::binding_to_js_attr;
 use crate::components::spinner::{Spinner, SpinnerSize};
+use crate::components::_proa::free_web::binding_to_js_attr;
 use proa_actions::ActionDataStatic;
 
 use proa_core::{WebContext, WebRenderSync, WriteBuf};
@@ -14,8 +14,7 @@ use proa_ir::ReactiveAttr;
 use proa_macros::html_sync;
 
 /// Stable DOM contract for Button across Rust and generated render targets.
-pub const BUTTON_ANATOMY: crate::components::_proa::Anatomy =
-    crate::components::_proa::Anatomy::new("button", &["root"]);
+pub const BUTTON_ANATOMY: crate::components::_proa::Anatomy = crate::components::_proa::Anatomy::new("button", &["root"]);
 
 /// Button type for form behavior
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

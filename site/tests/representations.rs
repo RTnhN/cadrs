@@ -9,13 +9,16 @@ use tower::ServiceExt;
 #[path = "../src/app.rs"]
 mod app;
 #[path = "../src/components/mod.rs"]
-// Vendored Proa UI source: the site uses part of it.
+// Vendored Proa UI source, kept byte for byte as `proa ui add` installed it (see fmt.sh);
+// the site uses part of it.
 #[allow(unused)]
 mod components;
 #[path = "../src/endpoints/mod.rs"]
 mod endpoints;
 #[path = "../src/error.rs"]
 mod error;
+#[path = "../src/icons.rs"]
+mod icons;
 #[path = "../src/layouts/mod.rs"]
 mod layouts;
 #[path = "../src/pages/mod.rs"]

@@ -136,8 +136,6 @@ impl crate::components::_proa::variant_spec::ComponentSpec for SeparatorRecipe {
     }
 
     fn variant_metadata(&self) -> Vec<crate::components::_proa::variant_spec::VariantMetadata> {
-        vec![crate::components::_proa::variant_spec::variant_metadata::<
-            SeparatorOrientation,
-        >()]
+        vec![crate::components::_proa::variant_spec::variant_metadata::<SeparatorOrientation>()]
     }
 }

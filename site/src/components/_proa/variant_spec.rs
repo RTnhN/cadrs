@@ -54,13 +54,14 @@ pub trait VariantSpec: Copy + Default + 'static {
 
 pub struct VariantMetadata {
     pub name: &'static str,
-
+    
     pub ts_type: &'static str,
-
+    
     pub default_label: &'static str,
     pub default_value: &'static str,
     pub options: Vec<VariantOptionMetadata>,
     /// Whether this variant is optional (recipe default is None)
+    
     pub optional: bool,
 }
 
@@ -68,6 +69,7 @@ pub struct VariantMetadata {
 #[derive(Debug, Clone)]
 
 pub struct VariantOptionMetadata {
+    
     pub label: &'static str,
     pub value: &'static str,
     pub classes: &'static str,
@@ -209,20 +211,27 @@ pub struct ComponentMetadata {
     pub base_classes: &'static str,
     pub variants: Vec<VariantMetadata>,
     /// Stable scope/part contract for generated render targets.
+    
     pub anatomy: Option<AnatomyMetadata>,
     /// Class rules selected by combinations of two or more variant axes.
+    
     pub compound_variants: Vec<CompoundVariantMetadata>,
-
+    
     pub component_type: ComponentType,
     /// Component props (non-variant fields like disabled, id, etc.)
+    
     pub props: Vec<PropMetadata>,
     /// HTML element to render (e.g., "button", "div", "input")
+    
     pub element: Option<&'static str>,
     /// SVG inner content for icon components (the path/circle elements)
+    
     pub svg_content: Option<&'static str>,
     /// Whether this component renders its children
+    
     pub has_children: bool,
     /// Other components this component renders internally
+    
     pub dependencies: Vec<ComponentDependency>,
 }
 
@@ -235,8 +244,10 @@ pub struct ComponentDependency {
     /// Condition prop that controls rendering (e.g., "loading")
     pub condition: &'static str,
     /// Props to pass to the component as key-value pairs
+    
     pub props: Vec<(&'static str, &'static str)>,
     /// Where to render relative to children
+    
     pub position: RenderPosition,
 }
 
@@ -258,16 +269,22 @@ pub struct PropMetadata {
     /// TypeScript type (e.g., "boolean", "string", "ButtonType")
     pub ts_type: &'static str,
     /// Whether the prop is optional
+    
     pub optional: bool,
     /// Default value as TypeScript expression (e.g., "false", "'button'")
+    
     pub default: Option<&'static str>,
     /// HTML attribute name if different from prop name (e.g., "class" -> "className" in React)
+    
     pub html_attr: Option<&'static str>,
     /// Whether this is the children prop
+    
     pub is_children: bool,
     /// Whether this prop maps directly to an HTML attribute on the element
+    
     pub is_html_attr: bool,
     /// Expression to compute this attribute (e.g., "disabled || loading" for computed disabled)
+    
     pub computed: Option<&'static str>,
 }
 

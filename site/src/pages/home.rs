@@ -1,14 +1,16 @@
 use std::sync::OnceLock;
 
-use proa_core::{perf_ok, DataLoader, StaticRaw, WebContext, WebRenderSync, WriteError};
+use proa_core::{perf_ok, DataLoader, WebContext, WebRenderSync, WriteError};
 use proa_core::{MdRenderSync, WriteBuf};
 use proa_macros::html_sync;
 use proa_macros::md_sync;
 
 use crate::components::{
     button_recipe, Badge, BadgeVariant, ButtonRecipeProps, ButtonSize, ButtonStyle, ButtonVariant,
-    Card, CardContent, CardDescription, CardHeader, CardTitle, Separator, SeparatorOrientation,
+    Card, CardContent, CardDescription, CardHeader, CardTitle, Icon, IconSize, Separator,
+    SeparatorOrientation,
 };
+use crate::icons::IconRs;
 
 const RELEASES: &str = "https://github.com/rvdende/cadrs/releases";
 const LATEST_RELEASE: &str = "https://github.com/rvdende/cadrs/releases/latest";
@@ -178,23 +180,6 @@ fn link_button(size: ButtonSize, variant: ButtonVariant) -> ButtonStyle {
     })
 }
 
-/// The icon-rs platform icons, with their ink set to `currentColor` so each takes its button's
-/// text colour.
-struct PlatformIcons {
-    windows: String,
-    linux: String,
-    macos: String,
-}
-
-fn platform_icons() -> &'static PlatformIcons {
-    static ICONS: OnceLock<PlatformIcons> = OnceLock::new();
-    ICONS.get_or_init(|| PlatformIcons {
-        windows: icon_rs::PLATFORM_WINDOWS.current_color(),
-        linux: icon_rs::PLATFORM_LINUX.current_color(),
-        macos: icon_rs::PLATFORM_MACOS.current_color(),
-    })
-}
-
 /// One button per desktop platform: the latest release for Windows and Linux, and the build
 /// notes for macOS, which has no release build.
 struct PlatformButtons;
@@ -202,20 +187,31 @@ struct PlatformButtons;
 impl<L: DataLoader> WebRenderSync<L> for PlatformButtons {
     fn render(self, cx: &mut WebContext<L>) -> Result<(), WriteError> {
         let release = release();
-        let icons = platform_icons();
         let (windows, linux) = (release.windows.as_str(), release.linux.as_str());
         html_sync! {
             <div class="flex flex-wrap gap-3">
                 <a href={windows} class={link_button(ButtonSize::Lg, ButtonVariant::Solid)}>
-                    {StaticRaw(icons.windows.as_str())}
+                    {Icon {
+                        icon: IconRs(icon_rs::PLATFORM_WINDOWS),
+                        size: Some(IconSize::Sm),
+                        class: None,
+                    }}
                     "Windows"
                 </a>
                 <a href={linux} class={link_button(ButtonSize::Lg, ButtonVariant::Solid)}>
-                    {StaticRaw(icons.linux.as_str())}
+                    {Icon {
+                        icon: IconRs(icon_rs::PLATFORM_LINUX),
+                        size: Some(IconSize::Sm),
+                        class: None,
+                    }}
                     "Linux"
                 </a>
                 <a href="#build" class={link_button(ButtonSize::Lg, ButtonVariant::Outline)}>
-                    {StaticRaw(icons.macos.as_str())}
+                    {Icon {
+                        icon: IconRs(icon_rs::PLATFORM_MACOS),
+                        size: Some(IconSize::Sm),
+                        class: None,
+                    }}
                     "macOS"
                 </a>
             </div>

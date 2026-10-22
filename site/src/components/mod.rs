@@ -7,6 +7,8 @@ pub mod button;
 pub use button::*;
 pub mod card;
 pub use card::*;
+pub mod icon;
+pub use icon::*;
 pub mod separator;
 pub use separator::*;
 pub mod spinner;

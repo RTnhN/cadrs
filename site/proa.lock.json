@@ -175,6 +175,30 @@
         }
       ]
     },
+    "@proa/icon": {
+      "version": "sha256:0d1ea4a319ffcd83de83311e116eec431d7d6f7bc42506b3111cf99dc3515ad7",
+      "registry": "@proa",
+      "mode": "source",
+      "sourceHash": "sha256:132b2250021a437759ea19d571af663bb8ad20c57198ebad8cc61d4605a7bb04",
+      "localHashAtInstall": "sha256:132b2250021a437759ea19d571af663bb8ad20c57198ebad8cc61d4605a7bb04",
+      "installedFiles": [
+        "src/components/icon/icon.rs",
+        "src/components/icon/md.rs",
+        "src/components/icon/mod.rs"
+      ],
+      "dependencies": [
+        "@proa/foundation"
+      ],
+      "rustModules": [
+        {
+          "target": "src/components/mod.rs",
+          "modules": [
+            "icon"
+          ]
+        }
+      ],
+      "cargoDependencies": []
+    },
     "@proa/separator": {
       "version": "sha256:eb062be2c066ffeb0cec5412a8cb1373d29d4e1df397af93267d8883647a8430",
       "registry": "@proa",

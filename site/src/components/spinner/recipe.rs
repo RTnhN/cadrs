@@ -148,9 +148,7 @@ impl crate::components::_proa::variant_spec::ComponentSpec for SpinnerRecipe {
     }
 
     fn variant_metadata(&self) -> Vec<crate::components::_proa::variant_spec::VariantMetadata> {
-        vec![crate::components::_proa::variant_spec::variant_metadata::<
-            SpinnerSize,
-        >()]
+        vec![crate::components::_proa::variant_spec::variant_metadata::<SpinnerSize>()]
     }
 }
 

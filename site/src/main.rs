@@ -4,12 +4,14 @@ use tokio::net::TcpListener;
 use tracing_subscriber::EnvFilter;
 
 mod app;
-// Vendored Proa UI source: the site uses part of it.
+// Vendored Proa UI source, kept byte for byte as `proa ui add` installed it (see fmt.sh);
+// the site uses part of it.
 #[allow(unused)]
 mod components;
 mod config;
 mod endpoints;
 mod error;
+mod icons;
 mod layouts;
 mod pages;
 mod routes;
