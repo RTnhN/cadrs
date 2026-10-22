@@ -410,32 +410,45 @@ fn coedge_points(body: &Body, c: &Coedge, es: &[(Vec<f64>, Vec<P3>)], dom: &Doma
     // one point): along the p-curve across the pole, all at its point (the last at the end
     // vertex, should it be a hair off).
     let collapsed = e.degenerate || (ps.len() == 2 && (ps[0] - ps[1]).norm() <= e.tol.max(super::topo::TOL_MIN));
-    let mut out: Vec<BPt> = if collapsed {
+    // The points with the p-curve's own (u, v) at each.
+    let (mut out, own): (Vec<BPt>, Vec<P2>) = if collapsed {
         let (a, b) = co_range(e, c.fwd);
         let (pa, pb) = if c.fwd { (ps[0], ps[ps.len() - 1]) } else { (ps[ps.len() - 1], ps[0]) };
         let (qa, qb) = (uv_at(a), uv_at(b));
         let turns = (0..2).filter_map(|d| dom.per[d].map(|(_, per)| ((qb[d] - qa[d]) / per).abs())).fold(0.0, f64::max);
         let n = pole_points(turns, (b - a).abs() / p.ang().max(0.05));
-        (0..=n).map(|i| BPt { uv: uv_at(a + (b - a) * i as f64 / n as f64), p: if i == n { pb } else { pa } }).collect()
+        (0..=n)
+            .map(|i| {
+                let uv = uv_at(a + (b - a) * i as f64 / n as f64);
+                (BPt { uv, p: if i == n { pb } else { pa } }, uv)
+            })
+            .unzip()
     } else {
-        let at = |i: usize| BPt { uv: fix_uv(dom, uv_at(ts[i]), &ps[i], fix_tol), p: ps[i] };
-        if c.fwd {
-            (0..ts.len()).map(at).collect()
-        } else {
-            (0..ts.len()).rev().map(at).collect()
-        }
+        let at = |i: usize| {
+            let uv = uv_at(ts[i]);
+            (BPt { uv: fix_uv(dom, uv, &ps[i], fix_tol), p: ps[i] }, uv)
+        };
+        if c.fwd { (0..ts.len()).map(at).unzip() } else { (0..ts.len()).rev().map(at).unzip() }
     };
     // Exactly on a seam or a B-spline's range end when within rounding of it (a projection's
     // 1e-13 off a seam makes slivers along it).
     for b in &mut out {
         b.uv = dom.snap(b.uv);
     }
+    // Each point on the copy of the period that steps from the one before as the p-curve does
+    // (a projection lands on any copy). Mass properties integrate along the p-curve as it is: a
+    // meridian through a sphere's pole whose p-curve steps half a turn there (trj3/4/5_s1's
+    // feet) must turn the same way here, or the mesh covers another part of the sphere. Where
+    // the p-curve itself jumps by about a whole period (a curve wrapped round a seam), the
+    // nearest copy.
     for d in 0..2 {
         if let Some((_, per)) = dom.per[d] {
             for i in 1..out.len() {
                 let jump = out[i].uv[d] - out[i - 1].uv[d];
-                if jump.abs() > 0.5 * per {
-                    out[i].uv[d] -= (jump / per).round() * per;
+                let step = own[i][d] - own[i - 1][d];
+                let along = if step.abs() < 0.75 * per { step } else { 0.0 };
+                if (jump - along).abs() > 0.5 * per {
+                    out[i].uv[d] -= ((jump - along) / per).round() * per;
                 }
             }
         }
@@ -496,6 +509,17 @@ fn chain_loop(mut parts: Vec<Vec<BPt>>, dom: &Domain, tol: f64, ang: f64) -> Vec
             let m = pole_points(turns, turns * TAU / ang.max(0.05));
             out.extend((1..m).map(|i| BPt { uv: a.uv + gap * (i as f64 / m as f64), p: a.p }));
         }
+    }
+    // Neighbours at one point in space and a hair apart in (u, v) are one point: a degenerate
+    // edge across a gap within a file's tolerance at a plain point (trj9_ap209's blocks: an edge
+    // ending 1.5e-6 short of the next on a plane) runs back along the edge before it, and the
+    // triangulation then lost half the face. (Not a pole's run: its points are far apart in
+    // (u, v).)
+    let (mu, mv) = dom.s.metric();
+    let near = |a: &BPt, b: &BPt| (a.p - b.p).norm() <= tol && ((a.uv.x - b.uv.x) * mu).hypot((a.uv.y - b.uv.y) * mv) <= tol;
+    out.dedup_by(|b, a| near(a, b));
+    while out.len() > 3 && near(&out[out.len() - 1], &out[0]) {
+        out.pop();
     }
     out
 }
@@ -1464,6 +1488,95 @@ mod tests {
             }
         }
         assert!(cones > 0);
+    }
+
+    /// A hemisphere bounded by a meridian circle through both poles, closed by its disc: the
+    /// half of the sphere left of the loop in (u, v) (y ≤ 0), or the other half (`far`: the loop
+    /// turned round). The meridian is one closed edge whose p-curve steps half a turn at each
+    /// pole, as fitted meridians of STEP files come (trj3/4/5_s1's feet), and a hair more: the
+    /// nearest copy of the period is then the other way round the pole.
+    fn hemisphere(r: f64, far: bool) -> Body {
+        use super::super::curve::Curve;
+        use super::super::nurbs::{hom, NurbsCurve};
+        use super::super::topo::BodyBuilder;
+        use std::f64::consts::PI;
+        let h = PI / 2.0;
+        let circle = Curve::Circle { c: P3::origin(), x: V3::x(), y: V3::z(), r };
+        // The meridian's leg at u = 0 is on the copy of the period that makes the loop run
+        // counter-clockwise in (u, v) about the material (u in (π, 2π) for the near half).
+        let u0 = if far { -1e-7 } else { 2.0 * PI + 1e-7 };
+        let mut bb = BodyBuilder::new();
+        let v = bb.vertex(circle.point(0.0));
+        let e = bb.edge(circle, 0.0, 4.0 * h, v, v);
+        let cps = [(u0, 0.0), (u0, h), (PI, h), (PI, -h), (u0, -h), (u0, 0.0)].map(|(u, v)| hom(&P3::new(u, v, 0.0), 1.0));
+        let pc = Curve::nurbs(NurbsCurve::new(1, vec![0.0, 0.0, h, h, 3.0 * h, 3.0 * h, 4.0 * h, 4.0 * h], cps.to_vec()).unwrap());
+        // The disc's plane: its normal out of the solid, its p-curve the circle in its (u, v).
+        let (n, y) = if far { (-V3::y(), 1.0) } else { (V3::y(), -1.0) };
+        let disc = Surface::Plane { f: Frame::from_xz(P3::origin(), V3::x(), n) };
+        let disc_pc = Curve::Circle { c: P3::origin(), x: V3::x(), y: V3::new(0.0, y, 0.0), r };
+        let f0 = bb.face(Surface::Sphere { f: Frame::world(), r }, true, vec![vec![Coedge { edge: e, fwd: !far, pc }]]);
+        let f1 = bb.face(disc, true, vec![vec![Coedge { edge: e, fwd: far, pc: disc_pc }]]);
+        let sh = bb.shell(vec![f0, f1], true);
+        bb.solid(vec![sh]);
+        bb.build().unwrap()
+    }
+
+    /// Mass properties and the mesh take the same half of a sphere whose loop crosses its poles
+    /// (the mesh took three quarters of the sphere for trj5_s1's feet, or the other half).
+    #[test]
+    fn hemisphere_through_the_poles_meshes_as_its_mass_says() {
+        use std::f64::consts::PI;
+        let r = 10.0;
+        for far in [false, true] {
+            let b = hemisphere(r, far);
+            let m = super::super::mass::body_mass(&b);
+            assert!((m.volume - 2.0 / 3.0 * PI * r.powi(3)).abs() < 1e-6 * m.volume, "far {far}: volume {}", m.volume);
+            assert!((m.surface_area - 3.0 * PI * r * r).abs() < 1e-6 * m.surface_area, "far {far}: area {}", m.surface_area);
+            // The centre of mass is on the solid's side: y = ∓3r/8.
+            let cy = if far { 3.0 * r / 8.0 } else { -3.0 * r / 8.0 };
+            assert!((m.center_of_mass.y - cy).abs() < 1e-6 * r, "far {far}: centre {:?}", m.center_of_mass);
+            let (fm, _) = mesh_body(&b, 0.01, 0.1);
+            let tris: Vec<[P3; 3]> = fm.iter().flat_map(|f| f.indices.iter().map(|t| t.map(|i| f.positions[i as usize]))).collect();
+            let vol: f64 = tris.iter().map(|[a, b, c]| a.coords.dot(&b.coords.cross(&c.coords)) / 6.0).sum();
+            let area: f64 = tris.iter().map(|[a, b, c]| (b - a).cross(&(c - a)).norm() / 2.0).sum();
+            let cy_mesh: f64 = tris.iter().map(|[a, b, c]| a.coords.dot(&b.coords.cross(&c.coords)) / 6.0 * (a.y + b.y + c.y) / 4.0).sum::<f64>() / vol;
+            assert!((vol - m.volume).abs() < 1e-2 * m.volume, "far {far}: mesh volume {vol} vs {}", m.volume);
+            assert!((area - m.surface_area).abs() < 1e-2 * m.surface_area, "far {far}: mesh area {area} vs {}", m.surface_area);
+            assert!((cy_mesh - cy).abs() < 1e-2 * r, "far {far}: mesh centre y {cy_mesh}");
+            assert!(check_triangles(tris).is_watertight(), "far {far}: mesh not watertight");
+        }
+    }
+
+    /// A rectangle whose right side starts 1.5e-6 below its corner (within the corner's
+    /// tolerance), the gap spanned by a degenerate edge, as trj9_ap209's blocks are read: the
+    /// boundary runs down the gap and back up through the corner, and the mesh covered half the
+    /// face.
+    #[test]
+    fn a_hair_of_degenerate_edge_on_a_plane_keeps_the_face() {
+        use super::super::curve::Curve;
+        use super::super::topo::BodyBuilder;
+        let (w, h, gap) = (5000.0, 2000.0, 1.5e-6);
+        let mut bb = BodyBuilder::new();
+        let c = [P3::new(0.0, 0.0, 0.0), P3::new(w, 0.0, 0.0), P3::new(w, h, 0.0), P3::new(0.0, h, 0.0)];
+        let v: Vec<usize> = c.iter().map(|&p| bb.vertex_with_tol(p, 1e-5)).collect();
+        let mut lp = Vec::new();
+        for k in 0..4 {
+            let a = if k == 1 { P3::new(w, -gap, 0.0) } else { c[k] };
+            let (l, len) = Curve::line(a, c[(k + 1) % 4]);
+            let e = bb.edge(l.clone(), 0.0, len, v[k], v[(k + 1) % 4]);
+            if k == 1 {
+                let de = bb.degenerate_edge(c[1], 0.0, gap, v[1]);
+                lp.push(Coedge { edge: de, fwd: true, pc: Curve::Line { o: c[1], d: -V3::y() } });
+            }
+            lp.push(Coedge { edge: e, fwd: true, pc: l });
+        }
+        let f = bb.face(Surface::Plane { f: Frame::world() }, true, vec![lp]);
+        bb.shell(vec![f], false);
+        let b = bb.build().unwrap();
+        let (fm, _) = mesh_body(&b, 1.0, 0.1);
+        let area: f64 = fm.iter().flat_map(|f| f.indices.iter().map(|t| t.map(|i| f.positions[i as usize]))).map(|[a, b, c]| (b - a).cross(&(c - a)).norm() / 2.0).sum();
+        assert!((area - w * h).abs() < 1e-6 * w * h, "mesh area {area}");
+        assert!((super::super::mass::face_area(&b, 0).0 - w * h).abs() < 1e-6 * w * h);
     }
 
     #[test]
