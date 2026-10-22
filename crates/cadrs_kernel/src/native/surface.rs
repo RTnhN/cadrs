@@ -218,6 +218,19 @@ impl Surface {
                 let rho = (l.x * l.x + l.y * l.y).sqrt();
                 let (sa, ca) = a.sin_cos();
                 let v = (rho - r) * sa + l.z * ca;
+                // A point on the cone's other nappe (past the apex) lies on the generator
+                // across the axis: half a turn round. (Only for a point well off this side's
+                // generator and much nearer that one: a point near this side, or inside the cone
+                // by its axis, keeps this side's foot, as faces expect.)
+                let (d_here, d_across) = (((rho - r) * ca - l.z * sa).abs(), ((-rho - r) * ca - l.z * sa).abs());
+                if d_here > 1e-6 * (1.0 + p.coords.norm()) && d_across < 0.5 * d_here {
+                    let u = ang(f) + PI;
+                    let u = match hint {
+                        Some((hu, _)) => unwrap_near(u, hu, TAU),
+                        None => wrap(u, 0.0, TAU),
+                    };
+                    return (u, (-rho - r) * sa + l.z * ca);
+                }
                 // At the apex side (v below the apex) atan2 is meaningless: keep the hint.
                 (ang(f), v)
             }
@@ -1049,6 +1062,19 @@ fn project_off_plane(f: &Frame, m: &Curve, p: &P3, hint: Option<(f64, f64)>) -> 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A point on a cone's other nappe (past its apex) projects onto itself (regression: the
+    /// projection took the generator on its own side of the axis, 1.41 away).
+    #[test]
+    fn projection_onto_a_cone_past_its_apex() {
+        let f = Frame::from_z(P3::origin(), V3::z());
+        let cone = Surface::Cone { f, r: 0.0, a: -std::f64::consts::FRAC_PI_4 };
+        for (u, v) in [(0.3, 2.0), (2.0, -1.5), (4.0, 0.7)] {
+            let p = cone.eval(u, v);
+            let (pu, pv) = cone.project(&p, None);
+            assert!((cone.eval(pu, pv) - p).norm() < 1e-12, "({u}, {v}): {:?} projects to {:?}", p, cone.eval(pu, pv));
+        }
+    }
 
     /// Projection onto a B-spline surface that folds back on itself between the points of the
     /// start grid (a meander extruded): every point of the surface projects onto itself

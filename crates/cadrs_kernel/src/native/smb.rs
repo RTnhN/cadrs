@@ -523,7 +523,10 @@ fn read_surface_record(st: &mut Stream, fmt: Fmt) -> R<SurfRec> {
 /// The surface a face uses, and whether its normal is opposite SMLib's (the B-spline form's).
 fn face_surface(rec: &SurfRec, warnings: &mut Vec<String>, k: usize) -> (Surface, bool) {
     let nurbs = Surface::Nurbs(Arc::new(rec.nurbs.clone()));
-    let Some(exact) = &rec.exact else { return (nurbs, false) };
+    // A B-spline cone (a side collapsed to its apex) is the analytic one
+    // (`recognize::surface_through_poles`); the other kinds are recognised after the build.
+    let poled = || super::recognize::surface_through_poles(&rec.nurbs).filter(|s| matches!(s, Surface::Cone { .. }));
+    let Some(exact) = &rec.exact.clone().or_else(poled) else { return (nurbs, false) };
     if matches!(exact, Surface::Nurbs(_)) {
         // The legacy offset: its own normal is the base's.
         return (exact.clone(), false);

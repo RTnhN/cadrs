@@ -539,7 +539,7 @@ fn box_cyl_grid_all() {
 /// SMLib boolean: `box_cone_grid.smp#0` ∪ `box_cone_grid.smp#1` (`my_two_prim_test`, smMergeTest.cpp:2080).
 #[test]
 fn box_cone_grid_00() {
-    known_failure(chain(&["box_cone_grid.smp#0", "box_cone_grid.smp#1"], U, &Expect { volume: Some(1204.20345058), area: Some(745.143351263), faces: Some(8), edges: Some(16), solid: Some(true), ..Expect::default() }), "booleans", "box_cone_grid_00");
+    chain(&["box_cone_grid.smp#0", "box_cone_grid.smp#1"], U, &Expect { volume: Some(1204.20345058), area: Some(745.143351263), faces: Some(8), edges: Some(16), solid: Some(true), ..Expect::default() }).unwrap();
 }
 
 /// SMLib boolean: `box_cone_grid.smp#2` ∪ `box_cone_grid.smp#3` (`my_two_prim_test`, smMergeTest.cpp:2080).
@@ -635,7 +635,7 @@ fn box_cone_grid_17() {
 /// SMLib boolean: `box_cone_grid.smp#36` ∪ `box_cone_grid.smp#37` (`my_two_prim_test`, smMergeTest.cpp:2080).
 #[test]
 fn box_cone_grid_18() {
-    known_failure(chain(&["box_cone_grid.smp#36", "box_cone_grid.smp#37"], U, &Expect { volume: Some(1060.7311862), area: Some(673.942957877), faces: Some(9), edges: Some(21), solid: Some(true), ..Expect::default() }), "booleans", "box_cone_grid_18");
+    chain(&["box_cone_grid.smp#36", "box_cone_grid.smp#37"], U, &Expect { volume: Some(1060.7311862), area: Some(673.942957877), faces: Some(9), edges: Some(21), solid: Some(true), ..Expect::default() }).unwrap();
 }
 
 /// SMLib boolean: `box_cone_grid.smp#38` ∪ `box_cone_grid.smp#39` (`my_two_prim_test`, smMergeTest.cpp:2080).
@@ -653,13 +653,13 @@ fn box_cone_grid_20() {
 /// SMLib boolean: `box_cone_grid.smp#42` ∪ `box_cone_grid.smp#43` (`my_two_prim_test`, smMergeTest.cpp:2080).
 #[test]
 fn box_cone_grid_21() {
-    known_failure(chain(&["box_cone_grid.smp#42", "box_cone_grid.smp#43"], U, &Expect { volume: Some(1065.45003153), area: Some(669.815629851), faces: Some(7), edges: Some(14), solid: Some(true), ..Expect::default() }), "booleans", "box_cone_grid_21");
+    chain(&["box_cone_grid.smp#42", "box_cone_grid.smp#43"], U, &Expect { volume: Some(1065.45003153), area: Some(669.815629851), faces: Some(7), edges: Some(14), solid: Some(true), ..Expect::default() }).unwrap();
 }
 
 /// SMLib boolean: `box_cone_grid.smp#44` ∪ `box_cone_grid.smp#45` (`my_two_prim_test`, smMergeTest.cpp:2080).
 #[test]
 fn box_cone_grid_22() {
-    known_failure(chain(&["box_cone_grid.smp#44", "box_cone_grid.smp#45"], U, &Expect { volume: Some(2271.39440012), area: Some(1136.37584705), faces: Some(9), edges: Some(21), solid: Some(true), ..Expect::default() }), "booleans", "box_cone_grid_22");
+    chain(&["box_cone_grid.smp#44", "box_cone_grid.smp#45"], U, &Expect { volume: Some(2271.39440012), area: Some(1136.37584705), faces: Some(9), edges: Some(21), solid: Some(true), ..Expect::default() }).unwrap();
 }
 
 /// SMLib boolean: `box_cone_grid.smp#46` ∪ `box_cone_grid.smp#47` (`my_two_prim_test`, smMergeTest.cpp:2080).
@@ -671,11 +671,11 @@ fn box_cone_grid_23() {
 /// SMLib boolean: `box_cone_grid.smp#48` ∪ `box_cone_grid.smp#49` (`my_two_prim_test`, smMergeTest.cpp:2080).
 #[test]
 fn box_cone_grid_24() {
-    known_failure(chain(&["box_cone_grid.smp#48", "box_cone_grid.smp#49"], U, &Expect { volume: Some(1132.49974811), area: Some(680.796557623), faces: Some(9), edges: Some(19), solid: Some(true), ..Expect::default() }), "booleans", "box_cone_grid_24");
+    chain(&["box_cone_grid.smp#48", "box_cone_grid.smp#49"], U, &Expect { volume: Some(1132.49974811), area: Some(680.796557623), faces: Some(9), edges: Some(19), solid: Some(true), ..Expect::default() }).unwrap();
 }
 
 /// SMLib boolean: the unions of `box_cone_grid.smp` (`my_two_prim_test`, smMergeTest.cpp:2080): SMLib asserts 447 edges for all 25; without the non-manifold pairs 8, 9, 414 (compared for planar inputs).
 #[test]
 fn box_cone_grid_all() {
-    known_failure(grid("box_cone_grid.smp", &[0, 1, 2, 3, 4, 5, 6, 7, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24], Some(414)), "booleans", "box_cone_grid_all");
+    grid("box_cone_grid.smp", &[0, 1, 2, 3, 4, 5, 6, 7, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24], Some(414)).unwrap();
 }
