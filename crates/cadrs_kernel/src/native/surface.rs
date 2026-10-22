@@ -354,6 +354,12 @@ impl Surface {
                 // Only steps that bring the point closer (far from it the distance's Hessian
                 // needn't be positive and Newton can climb): halved until they do, else a step
                 // down the gradient (scaled per direction), halved the same way.
+                // (A step down to rounding noise has converged: no point checking it, as the
+                // distance it changes is noise too.)
+                if (nu - u).abs() + (nv - v).abs() < 1e-12 * (1.0 + u.abs() + v.abs()) {
+                    (u, v) = (nu, nv);
+                    break;
+                }
                 let here = r.norm_squared();
                 let closer = |nu: f64, nv: f64| (self.eval(nu, nv) - p).norm_squared() < here;
                 let mut tries = 0;

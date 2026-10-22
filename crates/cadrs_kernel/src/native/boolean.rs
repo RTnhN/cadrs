@@ -1750,7 +1750,10 @@ fn run(a: &Body, b: &Body, mode: Mode, opts: RunOpts) -> Result<BoolOut> {
     out.fit_tolerances(run_tol * 10.0);
     prof.mark("unify");
     assemble_shells(&mut out)?;
-    let (dropped, volumes) = drop_empty_solids(&mut out, &mut from);
+    // Faces of the two inputs on one surface (by input face): only a solid holding both of a
+    // pair can enclose nothing.
+    let pairs: std::collections::HashSet<(usize, usize)> = (0..na_faces).flat_map(|fa| coincident[fa].iter().map(move |&fb| (fa, fb))).map(|(fa, fb)| (faces[fa].orig, faces[fb].orig)).collect();
+    let (dropped, volumes) = drop_empty_solids(&mut out, &mut from, &pairs);
     if dropped && out.faces.is_empty() {
         return Err(KernelError::EmptyResult("the result is empty".into()));
     }
@@ -1760,11 +1763,12 @@ fn run(a: &Body, b: &Body, mode: Mode, opts: RunOpts) -> Result<BoolOut> {
     if let Some(why) = uv_gap(&out) {
         return Err(KernelError::OperationFailed(format!("the boolean built a face that doesn't close: {why}")));
     }
-    // Nor any other invalid body ([`Body::check`]; the solids' volumes known from above).
+    // Nor any other invalid body ([`Body::check`]; the volumes of the solids that hold faces on
+    // one surface known from above, the others' shells oriented by ray parity).
     if matches!(mode, Mode::Bool(_)) {
         let why = out.check_structure().into_iter().next().or_else(|| {
-            let si = volumes.iter().position(|v| !(*v > 0.0))?;
-            Some(format!("solid {si} encloses a volume of {:.3e} (its faces point in)", volumes[si]))
+            let (si, v) = volumes.iter().enumerate().find_map(|(si, v)| v.filter(|v| !(*v > 0.0)).map(|v| (si, v)))?;
+            Some(format!("solid {si} encloses a volume of {v:.3e} (its faces point in)"))
         });
         if let Some(why) = why {
             return Err(KernelError::OperationFailed(format!("the boolean's result is invalid: {why}")));
@@ -1779,23 +1783,32 @@ fn run(a: &Body, b: &Body, mode: Mode, opts: RunOpts) -> Result<BoolOut> {
     Ok(BoolOut { body: out, from })
 }
 
-/// Splits edges used by more than two faces (solids touching along an edge) into one edge per
-/// pair of faces bounding the same material wedge, pairing the faces in their order around
-/// the edge.
 /// Drops the solids of `b` that enclose no volume (to 1e-9 of the body's box, cubed): a closed
 /// shell of faces of the two inputs that met face to face, both kept, is a sheet-thin sliver,
-/// not a solid. Their faces go too (and their entries in `from`). Returns whether any went,
-/// and the volumes of the solids left.
-fn drop_empty_solids(b: &mut Body, from: &mut Vec<Vec<(usize, usize)>>) -> (bool, Vec<f64>) {
+/// not a solid, as are two faces closing on each other. Only solids of a few faces, or holding
+/// faces from both faces of a pair in `pairs` (input faces of the two bodies on one surface:
+/// (face of a, face of b)), are measured. Their faces go too (and
+/// their entries in `from`). Returns whether any went, and the volumes of the solids left
+/// (None: not measured).
+fn drop_empty_solids(b: &mut Body, from: &mut Vec<Vec<(usize, usize)>>, pairs: &std::collections::HashSet<(usize, usize)>) -> (bool, Vec<Option<f64>>) {
     let size = b.bbox().diagonal();
-    let volumes: Vec<f64> = (0..b.solids.len())
-        .map(|si| super::mass::body_mass(&super::kernel::subset(b, &b.solid_faces(si), true)).volume)
+    let suspect = |si: usize| {
+        let faces = b.solid_faces(si);
+        // (A few faces are cheap to measure: two faces closing on each other are a sliver too.)
+        if faces.len() <= 8 {
+            return true;
+        }
+        let origins: Vec<(usize, usize)> = faces.iter().flat_map(|&f| from.get(f).into_iter().flatten().copied()).collect();
+        origins.iter().filter(|o| o.0 == 0).any(|&(_, x)| origins.iter().any(|&(w, y)| w == 1 && pairs.contains(&(x, y))))
+    };
+    let volumes: Vec<Option<f64>> = (0..b.solids.len())
+        .map(|si| suspect(si).then(|| super::mass::body_mass(&super::kernel::subset(b, &b.solid_faces(si), true)).volume))
         .collect();
-    let empty: Vec<usize> = (0..b.solids.len()).filter(|&si| volumes[si].abs() <= 1e-9 * size * size * size).collect();
+    let empty: Vec<usize> = (0..b.solids.len()).filter(|&si| volumes[si].is_some_and(|v| v.abs() <= 1e-9 * size * size * size)).collect();
     if empty.is_empty() {
         return (false, volumes);
     }
-    let left: Vec<f64> = (0..b.solids.len()).filter(|si| !empty.contains(si)).map(|si| volumes[si]).collect();
+    let left: Vec<Option<f64>> = (0..b.solids.len()).filter(|si| !empty.contains(si)).map(|si| volumes[si]).collect();
     let mut dead = vec![false; b.faces.len()];
     for &si in &empty {
         for f in b.solid_faces(si) {
@@ -1840,6 +1853,9 @@ fn drop_empty_solids(b: &mut Body, from: &mut Vec<Vec<(usize, usize)>>) -> (bool
     (true, left)
 }
 
+/// Splits edges used by more than two faces (solids touching along an edge) into one edge per
+/// pair of faces bounding the same material wedge, pairing the faces in their order around
+/// the edge.
 pub fn split_nonmanifold(b: &mut Body) {
     let ne = b.edges.len();
     let mut uses: Vec<Vec<(usize, usize, usize)>> = vec![Vec::new(); ne]; // (face, loop, index)

@@ -186,11 +186,8 @@ smlib! {
     // branch, 21.5595, is ours to 2e-4. Ours: the two branches, each checked on both surfaces.
     smlib_clasic_ruled: "ssi_clasic_ruled.smp", 43.537537;
     smlib_cone_2pln: "ssi_cone_2pln.smp", 20.402487;
-    #[ignore = "needs the .smp cone faces read (smb: a loop doesn't close)"]
     smlib_cone_cyl1: "ssi_cone_cyl1.smp", 14.482707;
-    #[ignore = "needs the .smp cone faces read (smb: a loop doesn't close)"]
     smlib_cone_cyl2: "ssi_cone_cyl2.smp", 11.478492;
-    #[ignore = "needs the .smp cone faces read (smb: a loop doesn't close)"]
     smlib_cone_plane1: "ssi_cone_plane1.smp", 14.142136;
     smlib_cyl_bicub: "ssi_cyl_bicub.smp", 28.494004;
     smlib_cylcyl1: "ssi_cylcyl1.smp", 18.046928;
@@ -234,7 +231,6 @@ smlib! {
     smlib_tor_overlap: "ssi_tor_overlap.smp", 42.004784;
     smlib_tor_purpen_tor_sing: "ssi_tor_purpen_tor_sing.smp", 125.77828;
     smlib_tor_sph_tan: "ssi_tor_sph_tan.smp", 31.415643;
-    #[ignore = "needs the .smp torus face read (smb: a loop doesn't close)"]
     smlib_tor_sph_tan2: "ssi_tor_sph_tan2.smp", 31.415886;
     smlib_tor_sph_touch: "ssi_tor_sph_touch.smp", 0.0;
 }
