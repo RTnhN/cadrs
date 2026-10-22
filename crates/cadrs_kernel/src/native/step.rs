@@ -1845,6 +1845,13 @@ impl<'a> Model<'a> {
     }
 }
 
+/// The largest gap (of an edge from its faces, a vertex from its edges) a read body's
+/// tolerances grow to, relative to the model's size.
+const FIT_REL: f64 = 1e-4;
+
+/// ... and in the file's stated uncertainties, when that is larger.
+const FIT_UNCERTAINTY: f64 = 10.0;
+
 /// Builds shape items (each with the representation holding it and a placement) into one body,
 /// with its faces' colours (empty when the file styles none).
 fn build_shapes(m: &mut Model, shapes: &[(u64, u64, Affine)], warnings: &mut Vec<String>) -> Option<(Body, Vec<Option<Rgba>>)> {
@@ -1955,7 +1962,8 @@ fn build_shapes(m: &mut Model, shapes: &[(u64, u64, Affine)], warnings: &mut Vec
             }
         }
         // The file's precision is its entities' tolerance (OCCT's reader does the same).
-        if let Some(u) = m.rep_uncertainty(rep).filter(|u| *u > super::topo::TOL_MIN) {
+        let u = m.rep_uncertainty(rep).filter(|u| *u > super::topo::TOL_MIN);
+        if let Some(u) = u {
             for v in &mut b.verts {
                 v.tol = v.tol.max(u);
             }
@@ -1963,6 +1971,11 @@ fn build_shapes(m: &mut Model, shapes: &[(u64, u64, Affine)], warnings: &mut Vec
                 e.tol = e.tol.max(u);
             }
         }
+        // Files' edges stray from their surfaces and vertices further than they say: as
+        // ShapeFix's same-parameter, the tolerances grow to the gaps, up to a fraction of the
+        // model's size (a larger gap is a defect, left to the check).
+        let cap = (b.bbox().diagonal() * FIT_REL).max(u.unwrap_or(0.0) * FIT_UNCERTAINTY);
+        b.fit_tolerances_searched(cap);
         let b = if at == Affine::identity() { b } else { b.transformed(&at) };
         body.append(&b);
         colors.extend(cols);

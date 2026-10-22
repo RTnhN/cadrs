@@ -102,7 +102,8 @@ pub fn natural_boundary(surf: &Surface) -> Result<Vec<LooseSeg>, String> {
 /// surfaces), sewn by their boundary curves: vertices welded within `tol`, segments matched to
 /// the edges other faces already have, each connected group of faces a shell (a solid when
 /// closed). `unoriented`: the file says nothing of the faces' sides (they are then made
-/// consistent and outward). Returns the body and the problems met.
+/// consistent and outward). The vertices and edges take the gaps left (up to ten weld
+/// distances) as their tolerances. Returns the body and the problems met.
 pub fn sew_loose(faces: Vec<(Surface, Vec<Vec<LooseSeg>>)>, tol: f64, unoriented: bool) -> (Body, Vec<String>) {
     let mut xb = XBuilder::new();
     let mut weld: Vec<P3> = Vec::new();
@@ -209,7 +210,11 @@ pub fn sew_loose(faces: Vec<(Surface, Vec<Vec<LooseSeg>>)>, tol: f64, unoriented
         }
     }
     xb.unoriented = unoriented;
-    xb.finish()
+    let (mut body, w) = xb.finish();
+    // The faces' curves meet within the weld distance, not exactly: the vertices and edges
+    // take their gaps as their tolerances.
+    body.fit_tolerances(tol * LOOSE_SHARE);
+    (body, w)
 }
 
 /// How close (in weld distances) a loose face's boundary segment must run to another face's
@@ -1921,5 +1926,27 @@ mod tests {
                 }
             }
         }
+    }
+
+    /// Loose faces whose boundary curves meet only within the weld distance (as IGES trimmed
+    /// surfaces do): two triangles sharing an edge, one's copy of the shared corner 4e-4 off.
+    /// The sewn sheet's vertices take the gap as their tolerance, so it checks clean.
+    #[test]
+    fn loose_faces_sew_within_the_weld_distance() {
+        let tri = |p: [P3; 3]| {
+            let n = (p[1] - p[0]).cross(&(p[2] - p[0])).normalize();
+            let f = Frame::from_xz(p[0], (p[1] - p[0]).normalize(), n);
+            let segs = (0..3).map(|k| {
+                let (a, b) = (p[k], p[(k + 1) % 3]);
+                LooseSeg { c: Curve::line(a, b).0, a, b }
+            });
+            (Surface::Plane { f }, vec![segs.collect()])
+        };
+        let off = P3::new(1.0004, 0.0, 0.0);
+        let faces = vec![tri([P3::origin(), P3::new(1.0, 0.0, 0.0), P3::new(0.0, 1.0, 0.0)]), tri([off, P3::new(1.0, 1.0, 0.0), P3::new(0.0, 1.0, 0.0)])];
+        let (b, _) = sew_loose(faces, 1e-3, true);
+        assert_eq!(b.faces.len(), 2);
+        assert_eq!(b.verts.len(), 4);
+        assert!(b.check().is_empty(), "{:?}", b.check());
     }
 }
