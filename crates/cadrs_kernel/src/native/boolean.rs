@@ -656,6 +656,26 @@ pub fn boolean_bodies_with(a: &Body, b: &Body, op: BoolOp, opts: BoolOptions) ->
     if let Some(Ok(r)) = per_target_solid(a, b, op, opts).or_else(|| per_tool_solid(a, b, op, opts)) {
         return Ok(r);
     }
+    // A ring whose start and end caps touch (a blend swept all the way round): closed up, and
+    // run again at each tolerance.
+    let (ga, gb) = (glue_touching_caps(a, opts.tol.point), glue_touching_caps(b, opts.tol.point));
+    if ga.is_some() || gb.is_some() {
+        let (a2, b2) = (ga.as_ref().map_or(a, |g| &g.0), gb.as_ref().map_or(b, |g| &g.0));
+        let retries = opts.tol.retries.into_iter().filter(|_| std::env::var_os("CADRS_DEBUG_NO_RETRY").is_none());
+        for t in std::iter::once(opts.tol.point).chain(retries) {
+            if let Ok(mut r) = run(a2, b2, Mode::Bool(op), at(t)) {
+                // Back to the inputs' face numbers.
+                for srcs in &mut r.from {
+                    for (o, f) in srcs.iter_mut() {
+                        if let Some((_, keep)) = if *o == 0 { &ga } else { &gb } {
+                            *f = keep[*f];
+                        }
+                    }
+                }
+                return Ok(r);
+            }
+        }
+    }
     for t in opts.tol.retries.into_iter().filter(|_| std::env::var_os("CADRS_DEBUG_NO_RETRY").is_none()) {
         if let Ok(r) = run(a, b, Mode::Bool(op), at(t)) {
             return Ok(r);
@@ -820,6 +840,262 @@ fn near_coincident_tolerances(a: &Body, b: &Body, tol: f64) -> Option<(Body, Bod
     Some((a2, b2))
 }
 
+/// A body whose two planar faces lie on one plane facing each other with matching boundaries
+/// (a ring swept all the way round, its start and end caps a hair apart): the caps dropped and
+/// their edges glued pairwise, so the ring closes on itself; None when there are none. The
+/// glued edges take the caps' gap as tolerance.
+fn glue_touching_caps(b: &Body, tol: f64) -> Option<(Body, Vec<usize>)> {
+    if b.solids.len() != 1 {
+        return None;
+    }
+    // (The caps' edges within ten times the run's tolerance of each other.)
+    let gap_max = tol * 10.0;
+    let planes: Vec<usize> = (0..b.faces.len()).filter(|&f| matches!(b.faces[f].surf, Surface::Plane { .. }) && b.faces[f].loops.len() == 1).collect();
+    let mut out = b.clone();
+    let mut drop = vec![false; b.faces.len()];
+    let mut glued = false;
+    for (i, &f) in planes.iter().enumerate() {
+        for &g in &planes[i + 1..] {
+            if drop[f] || drop[g] {
+                continue;
+            }
+            let (lf, lg) = (&b.faces[f].loops[0], &b.faces[g].loops[0]);
+            if lf.len() != lg.len() {
+                continue;
+            }
+            let (Surface::Plane { f: pf }, Surface::Plane { f: pg }) = (&b.faces[f].surf, &b.faces[g].surf) else { continue };
+            let nf = pf.z * if b.faces[f].sense { 1.0 } else { -1.0 };
+            let ng = pg.z * if b.faces[g].sense { 1.0 } else { -1.0 };
+            if nf.dot(&ng) > -1.0 + tol::ANGULAR_POINT {
+                continue;
+            }
+            // Each edge of f against the edge of g with the same ends (either way round).
+            let ends = |e: usize| (b.verts[b.edges[e].v[0]].p, b.verts[b.edges[e].v[1]].p);
+            let mut pairs: Vec<(usize, usize, bool, f64)> = Vec::new(); // (keep, drop, same direction, gap)
+            for cf in lf {
+                let (p0, p1) = ends(cf.edge);
+                let found = lg.iter().find_map(|cg| {
+                    let (q0, q1) = ends(cg.edge);
+                    let same = (p0 - q0).norm().max((p1 - q1).norm());
+                    let rev = (p0 - q1).norm().max((p1 - q0).norm());
+                    let (d, dir) = if same <= rev { (same, true) } else { (rev, false) };
+                    let e = &b.edges[cf.edge];
+                    let ge = &b.edges[cg.edge];
+                    let tm = 0.5 * (ge.t[0] + ge.t[1]);
+                    let q = ge.curve.point(tm);
+                    let dm = (e.curve.point(e.curve.closest(&q, e.t[0].min(e.t[1]), e.t[0].max(e.t[1]))) - q).norm();
+                    (d.max(dm) <= gap_max && cg.edge != cf.edge).then_some((cg.edge, dir, d.max(dm)))
+                });
+                let Some((ge, dir, d)) = found else { break };
+                pairs.push((cf.edge, ge, dir, d));
+            }
+            if pairs.len() != lf.len() {
+                continue;
+            }
+            drop[f] = true;
+            drop[g] = true;
+            glued = true;
+            for (keep, gone, dir, d) in pairs {
+                let t = (d * 1.5).max(out.edges[keep].tol);
+                out.edges[keep].tol = t;
+                let (kv, gv) = (out.edges[keep].v, out.edges[gone].v);
+                for (k, gvx) in [(0, gv[0]), (1, gv[1])] {
+                    let kvx = if dir { kv[k] } else { kv[1 - k] };
+                    out.verts[kvx].tol = out.verts[kvx].tol.max(t);
+                    // Every edge ending at the dropped edge's vertex ends at the kept one's.
+                    if gvx != kvx {
+                        for e in out.edges.iter_mut() {
+                            for v in e.v.iter_mut() {
+                                if *v == gvx {
+                                    *v = kvx;
+                                }
+                            }
+                        }
+                    }
+                }
+                let keep_edge = out.edges[keep].clone();
+                for fi in 0..out.faces.len() {
+                    if fi == f || fi == g {
+                        continue;
+                    }
+                    let surf = out.faces[fi].surf.clone();
+                    for l in &mut out.faces[fi].loops {
+                        for c in l.iter_mut() {
+                            if c.edge != gone {
+                                continue;
+                            }
+                            let ge = &b.edges[gone];
+                            let near = c.pc.point(0.5 * (ge.t[0] + ge.t[1]));
+                            c.edge = keep;
+                            c.fwd = if dir { c.fwd } else { !c.fwd };
+                            if !(dir && ge.t == keep_edge.t) {
+                                c.pc = super::pcurve::pcurve(&surf, &keep_edge.curve, keep_edge.t[0], keep_edge.t[1], Some(P2::new(near.x, near.y)));
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    if !glued {
+        return None;
+    }
+    // Edges now ending at a kept vertex a hair from their curve's end: that as tolerance.
+    for e in 0..out.edges.len() {
+        let ed = &out.edges[e];
+        let gap = (0..2).map(|k| (ed.curve.point(ed.t[k]) - out.verts[ed.v[k]].p).norm()).fold(0.0, f64::max);
+        if gap > ed.tol {
+            let t = gap * 1.5;
+            out.edges[e].tol = t;
+            for v in out.edges[e].v {
+                out.verts[v].tol = out.verts[v].tol.max(t);
+            }
+        }
+    }
+    let keep: Vec<usize> = (0..out.faces.len()).filter(|&f| !drop[f]).collect();
+    out.faces = keep.iter().map(|&f| out.faces[f].clone()).collect();
+    super::unify::compact(&mut out);
+    assemble_shells(&mut out).ok()?;
+    (out.solids.len() == 1 && out.shells.iter().all(|s| s.closed)).then_some((out, keep))
+}
+
+/// Faces of `b` on a periodic surface whose seam edge runs across one of their holes (an
+/// earlier operation left the seam whole where a hole opened over it): the seam is cut at the
+/// hole's two vertices on it, its piece inside the hole dropped and the hole's two halves joined
+/// into the outer loop, each on its side of the seam. True when any face changed.
+fn cut_seams_at_holes(b: &mut Body, tol: f64) -> bool {
+    let mut changed = false;
+    for fi in 0..b.faces.len() {
+        let surf = b.faces[fi].surf.clone();
+        if !(surf.u_periodic() || surf.v_periodic()) || b.faces[fi].loops.len() < 2 {
+            continue;
+        }
+        let l0 = b.faces[fi].loops[0].clone();
+        // Seam edges: used twice in the outer loop, once each way.
+        let seams: Vec<usize> = l0
+            .iter()
+            .filter(|c| c.fwd && !b.edges[c.edge].degenerate && l0.iter().any(|d| d.edge == c.edge && !d.fwd))
+            .map(|c| c.edge)
+            .collect();
+        for s in seams {
+            let l0 = b.faces[fi].loops[0].clone();
+            for hi in 1..b.faces[fi].loops.len() {
+                let hole = b.faces[fi].loops[hi].clone();
+                let se = b.edges[s].clone();
+                let start = |b: &Body, c: &Coedge| if c.fwd { b.edges[c.edge].v[0] } else { b.edges[c.edge].v[1] };
+                // The hole's vertices on the seam, inside it.
+                let mut on: Vec<(f64, usize)> = Vec::new();
+                for c in &hole {
+                    let w = start(b, c);
+                    let vt = b.verts[w].tol.max(tol);
+                    if let Some(t) = on_curve(&se.curve, se.t[0], se.t[1], &b.verts[w].p, vt)
+                        && t > se.t[0] + tol::ROUNDOFF
+                        && t < se.t[1] - tol::ROUNDOFF
+                        && !on.iter().any(|x| x.1 == w)
+                    {
+                        on.push((t, w));
+                    }
+                }
+                if on.len() != 2 {
+                    continue;
+                }
+                on.sort_by(|x, y| x.0.total_cmp(&y.0));
+                let ((t1, w1), (t2, w2)) = (on[0], on[1]);
+                let k1 = hole.iter().position(|c| start(b, c) == w1).expect("w1 starts a coedge of the hole");
+                let k2 = hole.iter().position(|c| start(b, c) == w2).expect("w2 starts a coedge of the hole");
+                // The seam's two pieces outside the hole.
+                let a = Edge { t: [se.t[0], t1], v: [se.v[0], w1], ..se.clone() };
+                let bb = Edge { t: [t2, se.t[1]], v: [w2, se.v[1]], ..se.clone() };
+                b.edges[s] = a;
+                b.edges.push(bb);
+                let eb = b.edges.len() - 1;
+                // The hole's two paths between w1 and w2, each in the hole's direction.
+                let n = hole.len();
+                let path = |from: usize, to: usize| -> Vec<Coedge> {
+                    let mut out = Vec::new();
+                    let mut k = from;
+                    while k != to {
+                        out.push(hole[k].clone());
+                        k = (k + 1) % n;
+                    }
+                    out
+                };
+                let (p12, p21) = (path(k1, k2), path(k2, k1));
+                // A path's p-curves moved by whole periods to start where `uv` is.
+                let placed = |b: &Body, p: &[Coedge], uv: P3| -> Vec<Coedge> {
+                    let Some(c0) = p.first() else { return Vec::new() };
+                    let e0 = &b.edges[c0.edge];
+                    let q = c0.pc.point(if c0.fwd { e0.t[0] } else { e0.t[1] });
+                    let per = |d: f64, periodic: bool| if periodic { (d / std::f64::consts::TAU).round() * std::f64::consts::TAU } else { 0.0 };
+                    let (du, dv) = (per(uv.x - q.x, surf.u_periodic()), per(uv.y - q.y, surf.v_periodic()));
+                    p.iter().map(|c| Coedge { pc: c.pc.transformed(&Affine::translation(V3::new(du, dv, 0.0))), ..c.clone() }).collect()
+                };
+                let mut out: Vec<Coedge> = Vec::new();
+                for c in &l0 {
+                    if c.edge != s {
+                        out.push(c.clone());
+                    } else if c.fwd {
+                        // Along the seam to w1, round the hole to w2, on to the seam's end.
+                        out.push(Coedge { edge: s, fwd: true, pc: c.pc.clone() });
+                        out.extend(placed(b, &p12, c.pc.point(t1)));
+                        out.push(Coedge { edge: eb, fwd: true, pc: c.pc.clone() });
+                    } else {
+                        out.push(Coedge { edge: eb, fwd: false, pc: c.pc.clone() });
+                        out.extend(placed(b, &p21, c.pc.point(t2)));
+                        out.push(Coedge { edge: s, fwd: false, pc: c.pc.clone() });
+                    }
+                }
+                // The seam meets the hole's vertices within their tolerance: the p-curves' ends
+                // there may stand that far apart.
+                let (mu, mv) = surf.metric();
+                for k in 0..out.len() {
+                    let (x, y) = (&out[k], &out[(k + 1) % out.len()]);
+                    let (ex, ey) = (&b.edges[x.edge], &b.edges[y.edge]);
+                    let pa = x.pc.point(if x.fwd { ex.t[1] } else { ex.t[0] });
+                    let pb = y.pc.point(if y.fwd { ey.t[0] } else { ey.t[1] });
+                    let gap = ((pa.x - pb.x) * mu).hypot((pa.y - pb.y) * mv);
+                    let w = if x.fwd { ex.v[1] } else { ex.v[0] };
+                    if gap > b.verts[w].tol {
+                        b.verts[w].tol = gap * 1.5;
+                    }
+                }
+                b.faces[fi].loops[0] = out;
+                b.faces[fi].loops.remove(hi);
+                changed = true;
+                break;
+            }
+        }
+    }
+    changed
+}
+
+/// `pc` (the p-curve of `c` over `t` on `s`) or its copy a whole parameter range over in a
+/// direction of a B-spline `s`, whichever passes nearer `near` while still on the curve.
+fn seam_side(s: &Surface, c: &Curve, t: [f64; 2], pc: Curve, near: P2) -> Curve {
+    let Surface::Nurbs(n) = s else { return pc };
+    let ((u0, u1), (v0, v1)) = n.range();
+    let tm = 0.5 * (t[0] + t[1]);
+    let m = pc.point(tm);
+    let fits = |q: &Curve| {
+        (0..=8).all(|k| {
+            let x = t[0] + (t[1] - t[0]) * k as f64 / 8.0;
+            let w = q.point(x);
+            w.x >= u0 - tol::ROUNDOFF && w.x <= u1 + tol::ROUNDOFF && w.y >= v0 - tol::ROUNDOFF && w.y <= v1 + tol::ROUNDOFF && (s.eval(w.x, w.y) - c.point(x)).norm() <= tol::LOOP_GAP
+        })
+    };
+    let mut best = ((m.x - near.x).hypot(m.y - near.y), pc.clone());
+    for (du, dv) in [(u1 - u0, 0.0), (u0 - u1, 0.0), (0.0, v1 - v0), (0.0, v0 - v1)] {
+        let d = (m.x + du - near.x).hypot(m.y + dv - near.y);
+        if d < best.0 {
+            let q = pc.transformed(&Affine::translation(V3::new(du, dv, 0.0)));
+            if fits(&q) {
+                best = (d, q);
+            }
+        }
+    }
+    best.1
+}
+
 /// [`boolean_bodies`], with faces of the two inputs on one surface merged whatever the
 /// operation (a blend's tool face flush with a face it ends against becomes part of it).
 pub fn boolean_bodies_flush(a: &Body, b: &Body, op: BoolOp) -> Result<BoolOut> {
@@ -952,8 +1228,10 @@ fn run(a: &Body, b: &Body, mode: Mode, opts: RunOpts) -> Result<BoolOut> {
     let (a, b) = {
         let mut a2 = a.clone();
         let mut b2 = b.clone();
-        let ca = snap_to(&mut a2, b, run_tol);
-        let cb = snap_to(&mut b2, a, run_tol);
+        let seams_a = cut_seams_at_holes(&mut a2, run_tol);
+        let seams_b = cut_seams_at_holes(&mut b2, run_tol);
+        let ca = snap_to(&mut a2, b, run_tol) || seams_a;
+        let cb = snap_to(&mut b2, a, run_tol) || seams_b;
         sa = a2;
         sb = b2;
         (if ca { &sa } else { a }, if cb { &sb } else { b })
@@ -1711,6 +1989,10 @@ fn run(a: &Body, b: &Body, mode: Mode, opts: RunOpts) -> Result<BoolOut> {
         let ce = &pool.edges[c];
         let near = a.uv_at(0.5);
         let pc = pcurve::pcurve(&f.surf, &ce.curve, ce.t[0], ce.t[1], Some(near));
+        // On a B-spline surface closing on itself within a tolerance only (a ring glued at
+        // its seam), the projection may land on the seam's other side: the copy a whole range
+        // over, where the arc was, when it fits the curve as well.
+        let pc = seam_side(&f.surf, &ce.curve, ce.t, pc, near);
         // Same direction when the canonical edge runs from the arc's start vertex (or, closed,
         // when the tangents agree).
         let ae = &pool.edges[a.edge];
@@ -2025,6 +2307,31 @@ fn run(a: &Body, b: &Body, mode: Mode, opts: RunOpts) -> Result<BoolOut> {
             if g <= wide && g * 1.01 > e.tol {
                 out.edges[c.edge].tol = g * 1.01;
             }
+        }
+    }
+    // Likewise a vertex where the p-curves of a loop meet a hair apart (up to the same part
+    // in 10⁵), as `uv_gap` measures it.
+    for fi in 0..out.faces.len() {
+        let f = &out.faces[fi];
+        let (mu, mv) = f.surf.metric();
+        let off = |d: f64, periodic: bool| if periodic { (d - (d / std::f64::consts::TAU).round() * std::f64::consts::TAU).abs() } else { d.abs() };
+        let mut raise: Vec<(usize, f64)> = Vec::new();
+        for l in &f.loops {
+            for k in 0..l.len() {
+                let (x, y) = (&l[k], &l[(k + 1) % l.len()]);
+                let (ex, ey) = (&out.edges[x.edge], &out.edges[y.edge]);
+                let (_, t1) = super::topo::co_range(ex, x.fwd);
+                let (t0, _) = super::topo::co_range(ey, y.fwd);
+                let (pa, pb) = (x.pc.point(t1), y.pc.point(t0));
+                let g = (off(pa.x - pb.x, f.surf.u_periodic()) * mu).max(off(pa.y - pb.y, f.surf.v_periodic()) * mv);
+                let v = if x.fwd { ex.v[1] } else { ex.v[0] };
+                if g <= wide && g * 1.01 > out.verts[v].tol {
+                    raise.push((v, g * 1.01));
+                }
+            }
+        }
+        for (v, t) in raise {
+            out.verts[v].tol = out.verts[v].tol.max(t);
         }
     }
     prof.mark("unify");
@@ -2550,6 +2857,138 @@ mod tests {
         let merged: Vec<&Vec<(usize, usize)>> = r.from.iter().filter(|s| s.iter().any(|x| x.0 == 0) && s.iter().any(|x| x.0 == 1)).collect();
         assert_eq!(merged.len(), 4, "{:?}", r.from);
         assert!(merged.iter().all(|s| s[0].0 == 0), "{:?}", r.from);
+    }
+
+    /// A cylinder face whose seam runs straight through a hole (the hole's vertices on it at
+    /// z = 1 and 2, its edges either side of u = 0): the seam is cut there, the piece in the
+    /// hole dropped, and the face is one valid loop (Dr Browns cap's torus, Fillet 1).
+    #[test]
+    fn seam_through_a_hole_is_cut() {
+        use super::super::topo::Vertex;
+        let (r, h, w) = (5.0, 3.0, 0.2);
+        let line_pc = |o: (f64, f64), d: (f64, f64)| Curve::Line { o: P3::new(o.0, o.1, 0.0), d: V3::new(d.0, d.1, 0.0) };
+        let at = |u: f64, z: f64| P3::new(r * u.cos(), r * u.sin(), z);
+        let circle = |z: f64| Curve::Circle { c: P3::new(0.0, 0.0, z), x: V3::x(), y: V3::y(), r };
+        let mut b = Body::default();
+        // P0, P1 (the seam's ends), A, B (the hole's vertices on the seam), C, D (u = w), E, F (u = −w).
+        for p in [at(0.0, 0.0), at(0.0, h), at(0.0, 1.0), at(0.0, 2.0), at(w, 1.0), at(w, 2.0), at(-w, 1.0), at(-w, 2.0)] {
+            b.verts.push(Vertex { p, tol: tol::CONFUSION });
+        }
+        let edge = |curve: Curve, t: [f64; 2], v: [usize; 2]| Edge { curve, t, v, degenerate: false, tol: tol::CONFUSION };
+        let up = |u: f64| Curve::Line { o: at(u, 0.0), d: V3::z() };
+        b.edges = vec![
+            edge(circle(0.0), [0.0, TAU], [0, 0]), // 0 bottom
+            edge(circle(h), [0.0, TAU], [1, 1]),   // 1 top
+            edge(up(0.0), [0.0, h], [0, 1]),       // 2 seam
+            edge(up(w), [1.0, 2.0], [4, 5]),       // 3 C→D
+            edge(circle(2.0), [0.0, w], [3, 5]),   // 4 B→D
+            edge(circle(2.0), [-w, 0.0], [7, 3]),  // 5 F→B
+            edge(up(-w), [1.0, 2.0], [6, 7]),      // 6 E→F
+            edge(circle(1.0), [-w, 0.0], [6, 2]),  // 7 E→A
+            edge(circle(1.0), [0.0, w], [2, 4]),   // 8 A→C
+        ];
+        let co = |edge: usize, fwd: bool, pc: Curve| Coedge { edge, fwd, pc };
+        let outer = vec![
+            co(0, true, line_pc((0.0, 0.0), (1.0, 0.0))),
+            co(2, true, line_pc((TAU, 0.0), (0.0, 1.0))),
+            co(1, false, line_pc((0.0, h), (1.0, 0.0))),
+            co(2, false, line_pc((0.0, 0.0), (0.0, 1.0))),
+        ];
+        // Clockwise round the hole: C, A, E, F, B, D.
+        let hole = vec![
+            co(8, false, line_pc((0.0, 1.0), (1.0, 0.0))),
+            co(7, false, line_pc((0.0, 1.0), (1.0, 0.0))),
+            co(6, true, line_pc((-w, 0.0), (0.0, 1.0))),
+            co(5, true, line_pc((0.0, 2.0), (1.0, 0.0))),
+            co(4, true, line_pc((0.0, 2.0), (1.0, 0.0))),
+            co(3, false, line_pc((w, 0.0), (0.0, 1.0))),
+        ];
+        b.faces.push(Face { surf: Surface::Cylinder { f: Frame::world(), r }, sense: true, loops: vec![outer, hole] });
+        b.shells.push(Shell { faces: vec![0], closed: false });
+        assert!(cut_seams_at_holes(&mut b, tol::POINT));
+        let f = &b.faces[0];
+        assert_eq!(f.loops.len(), 1);
+        // The seam's two pieces (each up one side and down the other), the hole's six edges,
+        // the two circles.
+        assert_eq!(f.loops[0].len(), 4 + 6 + 2);
+        assert_eq!(b.check(), Vec::<String>::new());
+        // The seam piece inside the hole is gone: no edge of the face runs from A to B.
+        assert!(!f.loops[0].iter().any(|c| { let e = &b.edges[c.edge]; e.v == [2, 3] || e.v == [3, 2] }));
+    }
+
+    /// A p-curve on a B-spline tube closing on itself only within 1e-6 (not exactly closed:
+    /// no period to shift by) goes to the side of the seam the arc it replaces was on.
+    #[test]
+    fn seam_side_follows_the_arc() {
+        use super::super::nurbs::{H, NurbsSurface};
+        let ring = [(1.0, 0.0), (0.0, 1.0), (-1.0, 0.0), (0.0, -1.0), (1.0, 1e-6)];
+        let cps: Vec<Vec<H>> = [0.0, 1.0].iter().map(|&z| ring.iter().map(|&(x, y)| H::new(x, y, z, 1.0)).collect()).collect();
+        let n = NurbsSurface::new(1, 1, vec![0.0, 0.0, 1.0, 1.0], vec![0.0, 0.0, 0.25, 0.5, 0.75, 1.0, 1.0], cps).unwrap();
+        let surf = Surface::Nurbs(std::sync::Arc::new(n));
+        let seam = Curve::Line { o: P3::new(1.0, 0.0, 0.0), d: V3::z() };
+        for v in [0.0, 1.0] {
+            let pc = pcurve::pcurve(&surf, &seam, 0.0, 1.0, Some(P2::new(0.5, v)));
+            let pc = seam_side(&surf, &seam, [0.0, 1.0], pc, P2::new(0.5, v));
+            let m = pc.point(0.5);
+            assert!((m.y - v).abs() < 1e-3, "near v = {v}: the p-curve runs at v = {}", m.y);
+        }
+    }
+
+    /// A face whose loop's p-curves meet 5e-5 apart at two vertices (beyond the 1e-5 a loop
+    /// closes within, a part in 10⁵ of the body's size): the result's vertices there take the
+    /// gap as tolerance, and the face closes.
+    #[test]
+    fn loop_gaps_become_vertex_tolerance() {
+        let mut k = NativeKernel::new();
+        let mut cube = |x: f64, z: f64| {
+            let super::super::draw::Shape::Body(id) = k.box_at(x, 2.0, z, 10.0, 6.0, 10.0).unwrap() else { unreachable!() };
+            (**k.get(id).unwrap()).clone()
+        };
+        let mut a = cube(0.0, 0.0);
+        let b = cube(5.0, 5.0);
+        for f in 0..a.faces.len() {
+            let c = &mut a.faces[f].loops[0][0];
+            c.pc = c.pc.transformed(&Affine::translation(V3::new(5e-5, 0.0, 0.0)));
+        }
+        assert!(uv_gap(&a).is_some());
+        // (One run at the default tolerance: the retries at coarser ones would hide it.)
+        let opts = RunOpts { tol: tol::POINT, flush: false, merge_coplanar: true, work_budget: DEFAULT_WORK_BUDGET };
+        let r = run(&a, &b, Mode::Bool(BoolOp::Union), opts).unwrap();
+        assert_eq!(r.body.solids.len(), 1);
+        assert!(uv_gap(&r.body).is_none());
+    }
+
+    /// A ring revolved all but a hair round (its start and end caps 1e-6 apart) closes on
+    /// itself: the caps dropped, their edges glued, one closed solid (Dr Browns cap's blend
+    /// tool, Fillet 1).
+    #[test]
+    fn touching_caps_glue_into_a_ring() {
+        use crate::{Axis, Curve2, Kernel, Loop, Plane, Profile, Region};
+        let mut k = NativeKernel::new();
+        let (r0, r1, z1) = (10.0, 12.0, 3.0);
+        let pt = |x: f64, y: f64| nalgebra::Point2::new(x, y);
+        let corners = [pt(r0, 0.0), pt(r1, 0.0), pt(r1, z1), pt(r0, z1)];
+        let curves = (0..4).map(|i| Curve2::Line { a: corners[i], b: corners[(i + 1) % 4], source: None }).collect();
+        let region = Region { outer: Loop { curves }, holes: vec![], source: None };
+        // The XZ plane, in-plane y along +Z.
+        let front = Plane { origin: P3::origin(), x_dir: nalgebra::Vector3::x_axis(), normal: -nalgebra::Vector3::y_axis() };
+        let axis = Axis { origin: P3::origin(), dir: nalgebra::Vector3::z_axis() };
+        let id = k.revolve(&Profile::new(front, vec![region]), axis, TAU - 1e-6 / r1).unwrap().bodies[0];
+        let ring = (**k.get(id).unwrap()).clone();
+        assert_eq!(ring.faces.iter().filter(|f| matches!(f.surf, Surface::Plane { .. })).count(), 4);
+        let (glued, keep) = glue_touching_caps(&ring, tol::POINT).expect("the caps glue");
+        assert_eq!(glued.faces.len(), ring.faces.len() - 2);
+        assert_eq!(keep.len(), glued.faces.len());
+        assert_eq!((glued.solids.len(), glued.shells.iter().all(|s| s.closed)), (1, true));
+        assert_eq!(glued.check(), Vec::<String>::new());
+        // A body of two solids (boxes touching face to face) has no caps to glue.
+        let cube = |k: &mut NativeKernel, x: f64| {
+            let super::super::draw::Shape::Body(id) = k.box_at(x, 0.0, 0.0, 1.0, 1.0, 1.0).unwrap() else { unreachable!() };
+            (**k.get(id).unwrap()).clone()
+        };
+        let mut two = cube(&mut k, 0.0);
+        two.append(&cube(&mut k, 1.0));
+        assert!(glue_touching_caps(&two, tol::POINT).is_none());
     }
 
     /// Curves running along each other within the tolerance meet in one stretch, its two ends,
