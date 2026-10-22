@@ -237,9 +237,6 @@ pub fn sweep_full(faces: &[MergedFace], chains: &[Vec<Piece>], kind: &dyn SweepK
             sides.extend(st.sides);
             bottom_loops.push(st.bottom);
             top_loops.push(st.top);
-            if !solid {
-                // Each loop's sheet is its own shell.
-            }
         }
         let n_sides = b.faces.len() - face_start;
         if solid && !whole {
@@ -264,11 +261,16 @@ pub fn sweep_full(faces: &[MergedFace], chains: &[Vec<Piece>], kind: &dyn SweepK
             }
         }
         fix_senses(b, face_start..face_start + n_sides);
+        // The caps join the loops' strands into one shell. Without them (a whole turn, a sheet)
+        // each loop sweeps a surface of its own: a shell each, edge-connected as shells must
+        // be, the outer loop's first (pieces come in face order; a hole's closed tube is a
+        // void of the solid).
         let fs: Vec<usize> = (face_start..b.faces.len()).collect();
-        b.shells.push(Shell { faces: fs, closed: solid });
+        let pieces = b.face_components(&fs);
+        let first = b.shells.len();
+        b.shells.extend(pieces.into_iter().map(|faces| Shell { faces, closed: solid }));
         if solid {
-            let s = b.shells.len() - 1;
-            b.solids.push(Solid { shells: vec![s] });
+            b.solids.push(Solid { shells: (first..b.shells.len()).collect() });
         }
     }
     for ch in chains {

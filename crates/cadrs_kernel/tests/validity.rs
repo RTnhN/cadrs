@@ -311,3 +311,33 @@ fn a_sweep_round_a_sharp_corner_is_mitred() {
     let named: std::collections::HashSet<u64> = r.history.generated.iter().map(|(f, _)| f.0).collect();
     assert_eq!(named.len(), k.faces(id).unwrap().len());
 }
+
+#[test]
+fn a_whole_turn_of_a_holed_region_keeps_its_hole_as_a_void() {
+    // A 4 × 4 square with a round hole at its middle, 5 to 9 off the axis, turned a whole turn:
+    // no caps join the two loops' sweeps, so the hole's torus is a void shell of its own (one
+    // shell holding both wasn't edge-connected). Volume by Pappus: (16 − π)·2π·7.
+    let mut k = NativeKernel::new();
+    let z = Axis { origin: Point3::origin(), dir: Vector3::z_axis() };
+    let r = region(rect(5.0, -2.0, 9.0, 2.0), vec![circle(7.0, 0.0, 1.0)]);
+    let id = k.revolve(&Profile::new(front(), vec![r]), z, TAU).unwrap().bodies[0];
+    let b = body(&k, id);
+    valid(&b);
+    assert_eq!(b.solids.len(), 1);
+    assert_eq!(b.solids[0].shells.len(), 2, "the outer shell and the hole's void");
+    let v = k.mass_properties(id).unwrap().volume;
+    let want = (16.0 - PI) * TAU * 7.0;
+    assert!((v - want).abs() < 1e-6 * want, "{v} vs {want}");
+}
+
+#[test]
+fn a_sheet_extrude_of_a_holed_region_has_a_shell_per_loop() {
+    // The walls the outer loop and the hole sweep share no edge: two shells.
+    let mut k = NativeKernel::new();
+    let p = Profile::new(Plane::top(), vec![region(rect(0.0, 0.0, 10.0, 10.0), vec![circle(5.0, 5.0, 2.0)])]);
+    let spec = ExtrudeSpec { body: BodyKind::Surface, ..ExtrudeSpec::blind(Vector3::z_axis(), 3.0) };
+    let id = k.extrude_with(&p, &spec).unwrap().bodies[0];
+    let b = body(&k, id);
+    valid(&b);
+    assert_eq!(b.shells.len(), 2);
+}
