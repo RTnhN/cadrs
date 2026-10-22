@@ -358,3 +358,17 @@ fn crossing_spline_tori_symmetric() {
     assert!(l1 > 1.0 && (l1 - l2).abs() < 1e-5 * l1, "{l1} vs {l2}");
 }
 
+
+/// SMLib's ssi_cone_cyl1 with the cone analytic: a cone (apex (5, 0, 0), base radius 5 at x = 0,
+/// its seam on +z) against a cylinder of radius 5 along x, touching it along the generator to
+/// the apex. The curve through the apex crosses the cone's seam; its two marches met there
+/// overlapping (14.517 against SMLib's 14.483). Regression: they meet at the earlier one's end.
+#[test]
+fn cone_seam_curves_meet_without_overlap() {
+    let cone = Surface::Cone { f: Frame { o: P3::origin(), x: V3::z(), y: V3::x().cross(&V3::z()), z: V3::x() }, r: 5.0, a: -std::f64::consts::FRAC_PI_4 };
+    let cyl = Surface::Cylinder { f: frame(P3::new(0.0, -5.0, 0.0), V3::x()), r: 5.0 };
+    let cs = ssi::surface_surface(&cyl, ((0.0, TAU), (0.0, 5.0)), &cone, ((0.0, TAU), (0.0, 5.0 * 2f64.sqrt())), &region(10.0));
+    assert_on_both(&cs, &cyl, &cone, 1e-6);
+    let len = total_length(&cs);
+    assert!((len - 14.48270673448).abs() < 5e-3, "length {len}");
+}

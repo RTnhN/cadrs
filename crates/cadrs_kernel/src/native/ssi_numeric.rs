@@ -936,7 +936,11 @@ fn march(ctx: &Ctx, seed: Pt, traced: &[(Traced, Bbox)]) -> Option<Traced> {
                 let (_, su, sv) = s2.d1(uv.0, uv.1);
                 let d = t * h;
                 let (du, dv) = solve2(su.dot(&su), su.dot(&sv), su.dot(&sv), sv.dot(&sv), su.dot(&d), sv.dot(&d)).unwrap_or((0.0, 0.0));
-                (uv.0 + du, uv.1 + dv)
+                // An angle moves by less than half a turn (by a pole, as a cone's apex, where the
+                // angle's derivative vanishes, the solve gives any amount: unbounded, the angle
+                // grows past where its cosine resolves the step, and the march sticks).
+                let turn = |x: f64, periodic: bool| if periodic && x.is_finite() { super::math::wrap(x, -PI, TAU) } else { x };
+                (uv.0 + turn(du, s2.u_periodic()), uv.1 + turn(dv, s2.v_periodic()))
             };
             let pred = Pt { p: target, a: move_on(sa, s.a), b: move_on(sb, s.b) };
             let next = correct(ctx, pred, &step).filter(|n| (n.p - target).norm() < 0.5 * h);
