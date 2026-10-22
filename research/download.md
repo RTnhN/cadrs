@@ -6,14 +6,12 @@ Open each link in your normal browser and save the PDF in the folder of its head
 
 **Free** means it should open without a login. ScienceDirect links (`sciencedirect.com/.../pdfft`) show the PDF only if the article is open access or your library subscribes. Older CAGD papers are often in Elsevier's free archive. The links go straight to the PDF; if one shows an article page instead, use its "View PDF" button.
 
-Already fetched automatically are 16 papers, listed at the end.
+Already fetched automatically are 19 papers, listed at the end.
 
 ## `research/papers/intersection/`
 
 | Paper | Link | Save as |
 |---|---|---|
-| **free** Sherbrooke 1994, MIT thesis on the IPP solver (MIT throttles scripts) | https://dspace.mit.edu/bitstreams/add86c41-188c-45cc-a01e-aa72856f9d69/download | `Sherbrooke-1994-MIT-thesis-IPP-solver.pdf` |
-| **free** Mukundan 2005, MIT thesis on validated surface intersection | https://dspace.mit.edu/bitstreams/0514eb3a-4734-410b-9de7-41fa448928f3/download | `Mukundan-2005-MIT-thesis-surface-intersection.pdf` |
 | **free** Hu & Wallner 2005, second-order orthogonal projection (server was down on 2026-10-22) | http://www.geometrie.tugraz.at/wallner/sproj.pdf | `Hu-Wallner-2005-second-order-orthogonal-projection.pdf` |
 | Grandine & Klein 1997, a new approach to the surface intersection problem | https://www.sciencedirect.com/science/article/pii/S0167839696000246/pdfft | `Grandine-Klein-1997-new-approach-surface-intersection.pdf` |
 | Wang, Goldman & Tu 2003, enhancing Levin's method | https://www.sciencedirect.com/science/article/pii/S0167839603000815/pdfft | `Wang-Goldman-Tu-2003-enhancing-Levins-method-quadric-intersections.pdf` |
@@ -59,7 +57,6 @@ Already fetched automatically are 16 papers, listed at the end.
 
 | Paper | Link | Save as |
 |---|---|---|
-| **free** Shen 2000, MIT thesis on B-rep model rectification (MIT throttles scripts) | https://dspace.mit.edu/bitstreams/a4e9727d-8dad-4b90-9db2-05e0e321cbf4/download | `Shen-2000-MIT-thesis-brep-model-rectification.pdf` |
 | **free** Farjana & Han 2018, persistent identification review (open access) | https://www.sciencedirect.com/science/article/pii/S1110016818300814/pdfft | `Farjana-Han-2018-persistent-identification-topological-entities-review.pdf` |
 | **free** Marcheix & Pierra 2002, survey of the persistent naming problem (ACM) | https://dl.acm.org/doi/pdf/10.1145/566282.566288 | `Marcheix-Pierra-2002-survey-persistent-naming-problem.pdf` |
 | Capoyleas, Chen & Hoffmann 1996, generic naming in generative design | https://www.sciencedirect.com/science/article/pii/0010448595000143/pdfft | `Capoyleas-Chen-Hoffmann-1996-generic-naming-generative-design.pdf` |
@@ -68,9 +65,9 @@ Already fetched automatically are 16 papers, listed at the end.
 
 ## Already fetched
 
-These came through `~/tools/playwright/fetch_pdf.sh` on 2026-10-22. It drives a visible Chrome window, which gets past challenges that block curl and wget, but not a "verify you are human" checkbox.
+These came through `~/tools/playwright/fetch_pdf.sh` on 2026-10-22. It drives a visible Chrome window, which gets past challenges that block curl and wget, but not a "verify you are human" checkbox. The MIT theses came by opening their DSpace item page and clicking its Download link; MIT rate-limits direct requests to the file.
 
-- **intersection:** Krishnan & Manocha 1997, Manocha & Canny 1991, Sederberg & Zundel 1996, Dupont et al. 2008 I–III, Mourrain & Pavone 2009
+- **intersection:** Krishnan & Manocha 1997, Manocha & Canny 1991, Sederberg & Zundel 1996, Dupont et al. 2008 I–III, Mourrain & Pavone 2009, Sherbrooke 1993 MIT thesis, Mukundan 2005 MIT thesis
 - **tessellation_mass_queries:** Gonzalez-Ochoa et al. 1998, Chen et al. 2006, Elber & Cohen 1990, Appel 1967, Johnson & Cohen 2005, Bénard, Hertzmann & Kass 2014
 - **booleans:** Attene 2020
-- **exchange_healing_naming:** Bi et al. 2023, Marussig & Hughes 2018
+- **exchange_healing_naming:** Bi et al. 2023, Marussig & Hughes 2018, Shen 2000 MIT thesis
