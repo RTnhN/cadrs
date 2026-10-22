@@ -59,3 +59,15 @@
     -webkit-font-smoothing: antialiased;
   }
 }
+
+/* The theme button shows the icon of the current mode (data-theme-mode, set by the theme
+   script); before the script runs, the system one. */
+[data-theme-icon] {
+  display: none;
+}
+html:not([data-theme-mode]) [data-theme-icon="system"],
+html[data-theme-mode="system"] [data-theme-icon="system"],
+html[data-theme-mode="light"] [data-theme-icon="light"],
+html[data-theme-mode="dark"] [data-theme-icon="dark"] {
+  display: inline-flex;
+}

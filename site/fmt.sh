@@ -6,11 +6,11 @@
 set -euo pipefail
 cd "$(dirname "$0")"
 
-proa fmt src/pages src/layouts
+proa fmt src/pages src/layouts src/theme.rs
 
 # Files whose modules are all the site's own.
 rustfmt --edition 2021 build.rs src/app.rs src/config.rs src/error.rs src/icons.rs \
-    src/routes.rs src/static_assets.rs src/endpoints/*.rs src/layouts/*.rs src/pages/*.rs \
+    src/routes.rs src/static_assets.rs src/theme.rs src/endpoints/*.rs src/layouts/*.rs src/pages/*.rs \
     tests/smoke.rs
 
 # main.rs and the representations test declare `mod components`; only rustfmt's unstable

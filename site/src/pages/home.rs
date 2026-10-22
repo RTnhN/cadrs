@@ -11,6 +11,7 @@ use crate::components::{
     SeparatorOrientation,
 };
 use crate::icons::IconRs;
+use crate::theme::ThemeSwitcher;
 
 const RELEASES: &str = "https://github.com/rvdende/cadrs/releases";
 const LATEST_RELEASE: &str = "https://github.com/rvdende/cadrs/releases/latest";
@@ -287,19 +288,29 @@ impl<L: DataLoader> WebRenderSync<L> for HomePage {
                         />
                         "cadrs"
                     </a>
-                    <div class="flex items-center gap-6">
-                        <div class="hidden items-center gap-6 text-sm text-muted-foreground md:flex">
-                            <a href="#features" class="transition-colors hover:text-foreground">
-                                "Features"
-                            </a>
-                            <a href="#download" class="transition-colors hover:text-foreground">
-                                "Download"
-                            </a>
-                        </div>
+                    <div class="flex items-center gap-1">
+                        <a
+                            href="https://github.com/sponsors/rvdende"
+                            aria-label="Sponsor cadrs"
+                            title="Sponsor cadrs"
+                            class={link_button(ButtonSize::Icon, ButtonVariant::Ghost)}
+                        >
+                            {Icon {
+                                icon: IconRs(icon_rs::HEART),
+                                size: Some(IconSize::Sm),
+                                class: Some("text-pink-500 dark:text-pink-400"),
+                            }}
+                        </a>
+                        {ThemeSwitcher}
                         <a
                             href="https://github.com/rvdende/cadrs"
                             class={link_button(ButtonSize::Sm, ButtonVariant::Outline)}
                         >
+                            {Icon {
+                                icon: IconRs(icon_rs::GITHUB),
+                                size: Some(IconSize::Sm),
+                                class: None,
+                            }}
                             "GitHub"
                         </a>
                     </div>

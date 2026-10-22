@@ -27,6 +27,8 @@ mod pages;
 mod routes;
 #[path = "../src/static_assets.rs"]
 mod static_assets;
+#[path = "../src/theme.rs"]
+mod theme;
 
 mod __proa_fonts_generated {
     include!(concat!(env!("OUT_DIR"), "/proa_fonts.rs"));

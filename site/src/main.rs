@@ -16,6 +16,7 @@ mod layouts;
 mod pages;
 mod routes;
 mod static_assets;
+mod theme;
 
 mod __proa_fonts_generated {
     include!(concat!(env!("OUT_DIR"), "/proa_fonts.rs"));

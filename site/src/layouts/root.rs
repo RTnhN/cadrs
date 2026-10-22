@@ -16,10 +16,6 @@ static SANS: Font = google_font!(
     variable = "--font-inter"
 );
 
-/// Runs before first paint: follows the OS colour scheme with the `dark` class the Proa UI
-/// recipes key their dark styles on.
-const THEME_BOOTSTRAP: &str = "<script>(function(){var m=window.matchMedia(\"(prefers-color-scheme: dark)\");function a(){document.documentElement.classList.toggle(\"dark\",m.matches)}a();m.addEventListener(\"change\",a)})()</script>";
-
 pub struct RootDocument<C> {
     pub title: &'static str,
     pub description: &'static str,
@@ -54,7 +50,7 @@ where
                         <meta name="color-scheme" content="light dark" />
                         <meta name="description" content={description} />
                         <meta name="theme-color" content="#1d4fb8" />
-                        {StaticRaw(THEME_BOOTSTRAP)}
+                        {StaticRaw(crate::theme::THEME_SCRIPT)}
                         <title>{raw_text_ok(title)}</title>
                         <link rel="icon" type="image/png" href={icon} />
                         {fonts}
