@@ -1,0 +1,620 @@
+                                                                       Indirect predicates for geometric constructions
+
+                                                                                                      Marco Attenea
+                                                                                     a CNR-IMATI, Via De Marni 6, 16149 Genova, Italy
+
+
+
+
+                      Abstract
+                      Geometric predicates are a basic ingredient to implement a vast range of algorithms in computational geometry. Modern implemen-
+                      tations employ floating point filtering techniques to combine efficiency and robustness, and state-of-the-art predicates are guaranteed
+                      to be always exact while being only slightly slower than corresponding (inexact) floating point implementations. Unfortunately, if
+                      the input to these predicates is an intermediate construction of an algorithm, its floating point representation may be affected by an
+                      approximation error, and correctness is no longer guaranteed.
+                         This paper introduces the concept of indirect geometric predicate: instead of taking the intermediate construction as an explicit input,
+                      an indirect predicate considers the primitive geometric elements which are combined to produce such a construction. This makes it
+
+
+
+
+arXiv:2105.09772v2 [cs.CG] 23 Jan 2025
+                      possible to keep track of the floating point approximation, and thus to exploit efficient filters and expansion arithmetic to exactly
+                      resolve the predicate with minimal overhead with respect to a naive floating point implementation. As a representative example, we
+                      show how to extend standard predicates to the case of points of intersection of linear elements (i.e. lines and planes) and show that, on
+                      classical problems, this approach outperforms state-of-the-art solutions based on lazy exact intermediate representations.
+                      Keywords: Geometric predicates, Exact arithmetic, Filtering
+
+
+                      1. Introduction                                                                          of the predicate, independently of how cleverly it has been im-
+                                                                                                               plemented. Unfortunately, many useful algorithms require such
+                         The study and design of computational geometry algorithms is                          intermediate constructions, and for these cases state-of-the-art
+                      widely based on the so-called Real Arithmetic Model. Accord-                             robust solutions mostly rely on exact or lazy exact arithmetic
+                      ing to that model, coordinates, lengths, angles, and many other                          kernels, which are still significantly slower and more memory
+                      entities, are all considered real numbers, and the algorithm cor-                        intensive than floating point implementations.
+                      rectness is based on this assumption. Practical implementations,                            In this paper, we show that most of these algorithms can be ro-
+                      however, are typically based on floating point (FP) arithmetic,                          bustly implemented thanks to a novel concept of indirect geomet-
+                      and the aforementioned entities are represented by FP numbers.                           ric predicate. In particular, we show that the geometric construc-
+                      Floating point operations produce approximated results and, in                           tion itself can be filtered along with the predicate, thus leading
+                      some cases, the mismatch with the theoretical exact result might                         to provably robust algorithms which are comparable with naive
+                      put the algorithm in an inconsistent state, cause infinite loops,                        floating point implementations in terms of both performances
+                      and lead to crashes [1] [2]. An easy solution to this problem is                         and memory footprint. The reference implementation and the
+                      to replace FP numbers with exact number types, but the conse-                            scripts to reproduce the results in the paper are provided in the ad-
+                      quent slowdown is rarely acceptable for practical applications.                          ditional material and will be released as an open-source project.
+                      Geometric algorithms have the peculiar property that their flow
+                      depends on the analysis of geometric entities and their configu-
+                      ration, and geometric predicates are the basic building blocks to
+                      perform such an analysis. Broadly speaking, a geometric pred-                            2. Background and prior art
+                      icate is a function that maps a set of geometric entities to an
+                      element of a (small) set of values. For example, the predicate
+                      collinear maps a triplet of points to a value in the set {true,                             The majority of geometric predicates evaluate the sign of a
+                      false}, whereas the predicate orient2d maps a triplet of points                          (homogeneous) polynomial, typically a matrix determinant. As
+                      to a value in the set {left turn, collinear, right turn}. To                             an example, the Cartesian 2D orientation of three points a, b, and
+                      avoid inconsistencies, it is often essential that each predicate that                    c corresponds to the sign of the determinant of the 2 × 2 matrix
+                      determines the program flow produces exact results.                                      whose rows are the vectors b − a and c − a. Instead of using exact
+                         Arithmetic filtering techniques (see Sect. 2.1) allow imple-                          arithmetic everywhere, which is too slow, modern implementa-
+                      menting predicates so that they are always exact, while being                            tions use arithmetic filtering. These implementations evaluate
+                      only slightly slower than a corresponding naive floating point                           the polynomial sign using only FP arithmetic, but while keep-
+                      implementation [3]. These techniques are appropriate when the                            ing track of the approximation error. If this error is large enough
+                      predicate parameters are all input values and hence not computed                         to make the sign ambiguous (i.e. when the filter “fails”), they
+                      as intermediate constructions by the algorithm. Conversely, if                           switch to exact arithmetic. The idea is that the failure rate is low
+                      intermediate constructions are used as predicate parameters, an                          enough to make the impact of exact arithmetic virtually negligi-
+                      approximation during their computation may corrupt the result                            ble. Several approaches exist to bound the accumulated error. In
+                                                                                                               general, calculating a precise bound is slower but minimizes the
+                                                                                                               probability of filter failures. Conversely, conservatively approxi-
+                                         Email address: marco.attene@ge.imati.cnr.it (Marco Attene)            mating the bound is faster but less precise.
+                      Authors post-print - Elsevier                                                                                                                  January 24, 2025
+2.1. Static, semi-static and dynamic filtering                               the construction is also approximately evaluated using interval
+   Given an arithmetic expression involving a number of vari-                arithmetic [6]. Since predicate expressions are also evaluated us-
+ables (e.g. the polynomial of a predicate), its evaluation using             ing interval arithmetic, their parameters can be intermediate con-
+FP arithmetic is subject to a roundoff error that depends on the             structions whose intervals propagate throughout the predicate’s
+values assumed by the variables. This error can be bounded by                expression evaluation. If the resulting interval contains the zero,
+a constant threshold that, in turn, can be computed analytically             it means that the sign is ambiguous, and all the involved symbolic
+and initialized at compilation time. At runtime, if the magnitude            representations are tracked back and explicitly evaluated using
+of the evaluated expression is larger than this threshold, its sign          exact arithmetic. The expectation is that in most of the cases in-
+is guaranteed to be correct. This approach is known as static fil-           terval arithmetic is sufficiently precise to reach an unambiguous
+tering [4], and the overhead with respect to a plain FP implemen-            conclusion, and hence exact evaluation is necessary only in a mi-
+tation is due to a simple comparison. Without any assumption on              nority of the cases. Nonetheless, even in the ideal case where
+the input, the threshold is typically too large and hence not really         exact arithmetic is never called into play, interval arithmetic can
+useful in practice. Nonetheless, if all the potential input values           be up to eight times slower than FP arithmetic [6], and keeping
+are known at the beginning of the program, the threshold can be              track of the whole history has its own cost too.
+computed once for all and then used to filter all the calls to the              Note that all the mechanisms described so far have been de-
+predicate.                                                                   signed to compensate for numerical imprecision. Nonetheless,
+   Since the actual input to a predicate is typically made of points         numerical imprecision is not the only source of ambiguity in ge-
+which are close to each other, considering only these points to de-          ometric computation: many algorithms assume that their input is
+rive a ”local” threshold leads to tighter error bounds and, hence,           in so-called general position and, if this is not the case, this pre-
+to less filter failures. This approach is known as semi-static fil-          condition needs to be simulated [14]. This is rather orthogonal to
+tering, and the overhead is due to a few additional operations to            compensating for numerical imprecision, and the two techniques
+compute the threshold at each predicate call [5].                            should be combined when necessary.
+   Instead of computing an explicit threshold, interval arithmetic
+can be used to tightly bound the exact result. Basically, the result
+of any single operation is rounded by both excess and defect, thus           3. Geometric algorithm classification
+leading to an interval containing the exact result. All the opera-
+tions accumulate these approximations into growing intervals. If                Herewith, we classify geometric algorithms based on the num-
+the interval representing the eventual result does not contain the           ber of steps that require intermediate constructions. There are al-
+zero, then its sign is defined without ambiguity. This approach              gorithms that have no such steps, that is, where all the predicates
+is an example of dynamic filtering, and evaluating the predicate             depend directly on input values. Then, there are algorithms hav-
+in this way takes from three to eight times longer than plain FP             ing only one such step, where predicates depend either on input
+calculation [6].                                                             values or on intermediate constructions that, in their turn, depend
+   It is often advantageous to use all these approaches in a cas-            directly on input values. And so on, up to arbitrarily complicated
+caded multi-stage evaluation. Thus, the first attempt is based on            algorithms with cascaded sequences of predicate evaluations and
+plain FP calculation, and a single additional comparison allows              intermediate constructions that mutually depend on each other.
+implementing a static filter. If this filter fails, a few more compar-       Our key observation is that the vast majority of state-of-the-art
+isons (e.g. four for the orient2d predicate) allow implementing              practical algorithms belong to the first two classes.
+a semi-static filter. If this filter also fails, the polynomial is re-          If S is a set of 2D points whose coordinates are FP numbers,
+evaluated using interval arithmetic, which is the last attempt. As           calculating their Delaunay triangulation amounts to repeatedly
+mentioned above, the first (static) filter makes sense only if a             evaluate orient2d and incircle predicates whose input are
+reasonably tight bound can be computed based on the input. In                points in S . Thus, this is a typical example of algorithm of
+general, the process may safely start from the semi static filter            the first class. Other examples include calculating convex hulls,
+while keeping the overhead reasonably small.                                 Voronoi diagrams, surface interpolation, and many others.
+                                                                                If S is a set of 2D segments that possibly intersect, calculat-
+                                                                             ing the constrained Delaunay triangulation of their arrangement
+2.2. Exact and lazy exact evaluation                                         is an example of algorithm of the second class. Indeed, the in-
+   When all the filters fail, the predicate expression must be eval-         tersection of two segments is an intermediate construction used
+uated using exact arithmetic. State-of-the-art libraries allow, for          as input by the orient2d and incircle predicates. Other ex-
+example, to represent intermediate results using rational num-               amples include the calculation of Minkowski sums [15], mesh
+bers, thus without any loss of precision [7]. Also, polynomi-                booleans [16], exact mesh repairing [17], and so on.
+als can be exactly evaluated by using arbitrary precision float-                Current techniques allow combining robustness and efficiency
+ing point numbers [8] or so-called floating point expansions [9].            only for algorithms of the first class thanks to arithmetic filtering.
+This latter approach is particularly efficient as it fully exploits          In this paper, we propose a novel approach to move forward and
+the floating point hardware. Shewchuck’s geometric predicates                include algorithms of the second class too, thus covering a much
+[10] and Levy’s Geogram [11] exploit floating point expansions               wider subset of fundamental geometric algorithms.
+and are nearly as efficient as plain FP implementations on classi-
+cal test beds. At the time of writing, Geogram predicates can be
+considered to represent the state of the art.                                4. Indirect geometric predicates
+   When intermediate constructions are used as input to a predi-
+cate, current robust solutions are based on lazy exact evaluation               The core intuition behind our contribution is the following: if
+[12]. This is the approach adopted in CGAL’s Lazy Exact kernel:              the code to calculate the intermediate construction is included
+any intermediate construction is symbolically represented by the             in the predicate itself, arithmetic filtering may be applied to that
+history of all the operations that combine input values to build             code as well, and the predicate can be evaluated using FP arith-
+the construction [13]. Besides keeping track of the operations,              metic as long as the filter does not fail.
+                                                                         2
+   When intermediate constructions are used as parameters for
+a predicate, they are passed to the predicate in an unevaluated
+form: in this case, we say that these parameters are implicit and
+the predicate is indirect. An indirect predicate must accept at
+least one implicit parameter, but may accept standard explicit pa-
+rameters too. In the latter case, the parameter has an explicit
+value and can be assumed to be exact (e.g. it is an input value or
+the result of an operation that does not introduce approximation
+errors). Conversely, in the former case the parameter is defined
+as an unevaluated function of explicit values (e.g. the average                Figure 1: Implicit point examples. Left - line-line intersection: four explicit 2D
+of input values). Since most geometric predicates have points as               points define the implicit point p. Right - line-plane intersection: five explicit 3D
+                                                                               points define the implicit point p.
+parameters, we extend this terminology to points and say that an
+explicit point is represented by its explicit coordinates, whereas
+an implicit point is represented by a geometric construction over              4.2. Line-plane intersections in 3D
+explicit points (e.g. by the intersection of two lines, each defined              Let p be an implicit 3D point defined as the intersection of a
+by two explicit points).                                                       straight line L and a plane Π, let L be defined by two points q1 ,
+   The idea is to rewrite the expression of an implicit parameter              q2 , and let Π be defined by three points r, s, t in the Euclidean
+i as a fraction λ/d where both the numerator λ and the denom-                  space (Fig. 1-right). Therefore:
+inator d are polynomials. Then, any standard predicate can be
+rewritten by substituting, in its own polynomial Λ, explicit pa-
+                                                                                                                     λ x λy λz
+rameters with polynomial fractions representing implicit param-                                               p=(       , , )
+eters, thus reducing the whole predicate expression to another                                                       d d d
+polynomial fraction Λ′ /D′ . Evaluating the sign of such a frac-                  where
+tion amounts to evaluate the sign of both the numerator Λ′ and
+denominator D′ , and both can be done robustly and efficiently                                                q1 − q2     q1 − r
+through arithmetic filtering.
+                                                                                                        d=     s − r ,n = s − r
+   When an implicit parameter is a point, we derive a common
+                                                                                                               t−r         t−r
+denominator for all the fractions representing its Cartesian co-
+ordinates. Hence, an implicit point i = (i x , iy , iz ) is rewritten as                                   λ x = dq1x + nq2x − nq1x
+i = (λix /di , λiy /di , λiz /di ) or, using homogeneous coordinates, as                                   λy = dq1y + nq2y − nq1y
+(λix , λiy , λiz , di ).
+   Note that possible singular/degenerate configurations must be                                            λz = dq1z + nq2z − nq1z
+detected and appropriately handled. Typically, this amounts to                    Note that p is undefined if d = 0, which happens if L and Π
+check whether d becomes zero for each of the implicit input val-               are parallel, if q1 = q2 , or if r, s, t are collinear or coincident.
+ues.
+   In the following subsections, we show how to apply this trans-              4.3. orient2d
+formation to some non-trivial geometric constructions, and how                    Let p1 , p2 , p3 be three points on the Euclidean plane. The
+to apply them to fundamental geometric predicates.                             polynomial expression of the classical orient2d predicate is
+                                                                               Λ = det|p2 − p1 ; p3 − p1 | = (p2x − p1x )(p3y − p1y ) − (p2y −
+4.1. Line-line intersections in 2D                                             p1y )(p3x − p1x ). To start with, consider the simple case where
+                                                                               just one of the points is an intermediate construction. Let it be
+   Let p be an implicit 2D point defined as the intersection of two            p1 , and let us assume that we are able to rewrite its Cartesian co-
+lines la and lb , each defined by two points. Specifically, ea1 and            ordinates as polynomial fractions (e.g. as described in Sect. 4.1).
+ea2 define la , whereas eb1 and eb2 define lb (Fig. 1-left). There-            Therefore:
+fore:
+                                                                                                                 λx          λy
+                                                                                                             p1x =   , p1y =
+                                                                                                                  d           d
+                                   λ x λy
+                             p=(      , )                                          By substituting p1 with (λ x /d, λy /d), we obtain Λ = (p2x −
+                                   d d                                         λ x /d)(p3y − λy /d) − (p2y − λy /d)(p3x − λ x /d) = Λ′ /D′ , where
+  where:                                                                       Λ′ = (d p2x − λ x )(d p3y − λy ) − (d p2y − λy )(d p3x − λ x ) and D′ = d2 .
+                                                                               Since the denominator is a square, it can be safely dropped and
+                                                                               the sign is unambiguously defined by Λ′ .
+                                                                                   Now, let us consider the most generic case where all the three
+    λ x = (ea1x ea2y − ea2x ea1y )(eb1x − eb2x )+
+                                                                               points are intermediate constructions. We obtain:
+       − (eb1x eb2y − eb2x eb1y )(ea1x − ea2x )
+    λy = (ea1x ea2y − ea2x ea1y )(eb1y − eb2y )+                                                                 λ1x         λ1y
+                                                                                                           p1x =     , p1y =
+       − (eb1x eb2y − eb2x eb1y )(ea1y − ea2y )                                                                  d1          d1
+                                                                                                                 λ2x         λ2y
+     d = (ea1x − ea2x )(eb1y − eb2y ) − (ea1y − ea2y )(eb1x − eb2x )                                       p2x =     , p2y =
+                                                                                                                 d2          d2
+   Note that p is undefined if d = 0, which happens if la and lb                                                 λ3x         λ3y
+                                                                                                           p3x =     , p3y =
+are parallel or if either of the two point pairs is degenerate.                                                  d3          d3
+                                                                           3
+   Where the λi and the di are computed as above. By substi-                        now on we assume that we are dropping the Z coordinate
+tuting p1 , p2 , p3 with their corresponding fractions, we obtain                   or, equivalently, that we are projecting on the XY plane (i.e.
+Λ = (λ2x /d2 −λ1x /d1 )(λ3y /d3 −λ1y /d1 )−(λ2y /d2 −λ1y /d1 )(λ3x /d3 −            Γ(< p x , py , pz >) =< p x , py >).
+λ1x /d1 ) = Λ′ /D′ , where                                                             Now, let us suppose that p1 is implicitly defined (e.g. as de-
+                                                                                    scribed in Sect. 4.2). Therefore:
+Λ′ = (d1 λ2x − d2 λ1x )(d1 λ3y − d3 λ1y ) − (d1 λ2y − d2 λ1y )(d1 λ3x − d3 λ1x )
+D′ = d12 d2 d3 .                                                                                               λx        λy       λz
+                                                                                                       p1x =      , p1y = , p1z =
+                                                                                                               d         d        d
+4.4. incircle
+                                                                                        Since we are projecting on XY, we do not even need to
+   Let p1 , p2 , p3 , p4 be four points on the Euclidean plane. The
+                                                                                    calculate λz , and simply re-write Λ = (p2x − p1x )(p3y −
+polynomial expression of the classical incircle predicate is the
+                                                                                    p1y ) − (p2y − p1y )(p3x − p1x ) = (p2x − λ x /d)(p3y − λy /d) −
+following:
+                                                                                    (p2y − λy /d)(p3x − λ x /d) = Λ′ /D′ , where Λ′ = (d p2x −
+                                                                                    λ x )(d p3y − λy ) − (d p2y − λy )(d p3x − λ x ) and D′ = d2 . Hence,
+         p1x − p4x       p1y − p4y      (p1x − p4x )2 + (p1y − p4y )2               orient2d(Γ(p1 ), Γ(p2 ), Γ(p3 )) = sign(Λ′ ).
+     Λ = p2x − p4x       p2y − p4y      (p2x − p4x )2 + (p2y − p4y )2
+         p3x − p4x       p3y − p4y      (p3x − p4x )2 + (p3y − p4y )2
+                                                                                    4.6. orient3d
+   If each of the four points is implicitly defined, we can rewrite
+this expression as:                                                                    Similar arguments hold for the orient3d predicate. When all
+                                                                                    its input points are explicit, the orient3d polynomial is:
+              λ1x  λ4x      λ1y  λ4y                          λ       λ
+              d1 − d4       d1 − d4     ( λd1x1 − λd4x4 )2 + ( d1y1 − d4y4 )2
+                   λ4x      λ2y  λ4y                          λ       λ                              p1x − p4x      p1y − p4y       p1z − p4z
+       Λ=     λ2x
+              d2 − d4       d2 − d4     ( λd2x2 − λd4x4 )2 + ( d2y2 − d4y4 )2
+                            λ3y  λ4y                          λ       λ                          Λ = p2x − p4x      p2y − p4y       p2z − p4z
+              λ3x  λ4x
+              d3 − d4       d3 − d4     ( λd3x3 − λd4x4 )2 + ( d3y3 − d4y4 )2                        p3x − p4x      p3y − p4y       p3z − p4z
+  The common denominator to all the nine elements is D′ =
+(d1 d2 d3 d4 )2 . When none of the d’s is zero, the sign of Λ corre-                  If we replace p1 with an implicit point we obtain the following
+sponds to the sign of the following Λ′ :                                            expression for an indirect orient3d predicate:
+
+
+            m1,1     m1,2     m1,3                                                                  λ x − d p4x      λy − d p4y       λz − d p4z
+       Λ′ = m2,1     m2,2     m2,3                                                           Λ′′ = d p2x − d p4x    d p2y − d p4y    d p2z − d p4z
+            m3,1     m3,2     m3,3                                                                 d p3x − d p4x    d p3y − d p4y    d p3z − d p4z
+ m1,1 = d1 d42 λ1x − d12 d4 λ4x
+                                                                                      which, if d , 0, has the same sign as the simpler:
+ m1,2 = d1 d42 λ1y − d12 d4 λ4y
+ m1,3 = d42 (λ21x + λ21y ) + d12 (λ24x + λ24y ) − 2d1 d4 (λ1x λ4x + λ1y λ4y )
+                                                                                                      λ x − d p4x   λy − d p4y      λz − d p4z
+ m2,1 = d2 d42 λ2x − d22 d4 λ4x                                                                  Λ′ = p2x − p4x     p2y − p4y       p2z − p4z
+ m2,2 = d2 d42 λ2y − d22 d4 λ4y                                                                       p3x − p4x     p3y − p4y       p3z − p4z
+ m2,3 = d42 (λ22x + λ22y ) + d22 (λ24x + λ24y ) − 2d2 d4 (λ2x λ4x + λ2y λ4y )
+                                                                                      where the corresponding D′ is d.
+ m3,1 = d3 d42 λ3x − d32 d4 λ4x                                                       Formulas for the case where more than one point is implicit
+ m3,2 = d3 d42 λ3y − d32 d4 λ4y                                                     can be easily derived using a similar rewriting.
+ m3,3 = d42 (λ23x + λ23y ) + d32 (λ24x + λ24y ) − 2d3 d4 (λ3x λ4x + λ3y λ4y )
+
+4.5. orient2d3d                                                                     5. Computational models and implementation
+   Let Π be an oriented plane identified by three non-aligned
+points r, s and t in the Euclidean 3D space. Also, let p1 ,                             The input to an indirect predicate is a set of points, each being
+p2 , p3 be three points on Π. The orient2d3d predicate                              either explicit or implicit. In the former case, the point is a stan-
+generalizes the standard orient2d predicate, and states                             dard array of Cartesian coordinates, each encoded as a double
+whether p1 , p2 , p3 form a right turn, a left turn, or a straight                  precision FP number; in the latter case, it is a collection of ex-
+line on Π. It turns out that orient2d3d(p1 , p2 , p3 , r, s, t) =                   plicit points to be combined. Upon invocation, an indirect pred-
+orient2d(Γ(p1 ), Γ(p2 ), Γ(p3 )) ∗ orient2d(Γ(r), Γ(s), Γ(t)),                      icate determines which of its input parameters are implicit, and
+where Γ(pi ) indicates the 2D projection of pi on one of the three                  internally calculates λ and d for each of them. In our implementa-
+axis-aligned planes such that orient2d(Γ(r), Γ(s), Γ(t)) , 0.                       tion we consider three computation models: floating point arith-
+An effective way to select an appropriate projection plane is to                    metic (with semi-static filter), interval arithmetic (with dynamic
+consider a normal vector at Π and simply drop the coordinate                        filter), expansion arithmetic (exact). The predicate is evaluated
+with largest magnitude. Without loss of generality, from                            with the fastest model which guarantees exactness.
+                                                                                4
+5.1. Filtered evaluation in floating point                                    storing these values for the exact model is not advantageous:
+   We begin by calculating the d’s and, for each of them, use a               indeed, storing expansions for each point requires a significant
+semi-static filter that states whether its sign is unambiguous. If            amount of memory, and the time overhead due to the manage-
+the filter succeeds for all the d’s, we compute the λ’s, evaluate             ment of all this additional data is higher than what we save in the
+Λ′ , and use another semi-static filter to guarantee that its sign is         few switches which are required in typical cases (Table 3). Note
+correct. If the former filter fails for one of the d’s, it means that         that pre-calculated intervals are also used in CGAL Lazy exact
+precision is insufficient to exclude that the implicit point is unde-         kernel [18], but the use of cached FP filters makes our predicate
+fined (e.g. intersection of parallel lines). In this case, it makes no        evaluaton significantly faster (Sect. 7).
+sense to proceed with this arithmetic model. As soon as a filter
+fails, we stop and switch to interval arithmetic (Sect. 5.2). Upon
+success, the sign of Λ′ is possibly inverted depending on the sign
+                                                                              6. Code generation
+of D′ . We observe that D′ is just a product of the d’s, therefore we
+simply count how many of them have a negative sign (possible
+multiplicities must be considered). If they are an even number,                  An indirect predicate must consider all the possible configura-
+we return the sign of Λ′ , otherwise its inverse. Semi-static filters         tions of its input parameters. For example, the orient2d predi-
+for the floating point model are calculated using a variation of [5]          cate has three points as parameters, and the type of each of these
+(see Appendix A for details).                                                 points can be either implicit or explicit. The most generic im-
+                                                                              plementation may assume that all the points are implicit and, if
+5.2. Filtered evaluation using intervals                                      any of them is explicit, its λ’s can be simply replaced with the
+   When starting with this arithmetic model, we first set the CPU             Cartesian coordinates and its d with 1. Though this approach
+rounding mode to towards infinity. This is required to cor-                   is correct, such a naive implementation would lead to unnec-
+rectly and efficiently evaluate the subsequent interval arithmetic            essarily loose filters which, in turn, would require unnecessary
+block. Then, we calculate the d’s and check that their sign is not            switches to more precise models. Consequently, this implemen-
+ambiguous (i.e. their intervals do not contain the zero). If this dy-         tation would be unnecessarily slow.
+namic filter succeeds for all the d’s, we compute the λ’s, evaluate              A much more efficient approach is based on the implementa-
+Λ′ , and check that the resulting sign is not ambiguous. As soon              tion of a specific instance of the predicate for each of the pos-
+as one of the filters fail we stop and switch to exact arithmetic             sible input configurations. If the three input points of our indi-
+(Sect. 5.3). If all the filters succeed, the sign of Λ′ is possibly in-       rect orient2d predicate are all explicit, the predicate reduces to
+verted depending on the sign of the d’s. Upon termination (both               the standard orient2d, which is very efficient and accumulates
+with success or failure), we reset the rounding to the standard               small errors. If only the first point is implicit, we may use a ded-
+to nearest mode required by the other computational models.                   icated implementation based on the Λ and D described earlier in
+                                                                              Sect. 4.3. This is slightly less efficient than the previous version
+5.3. Exact evaluation using expansions                                        and produces a slightly higher error. And so on. Hence, an indi-
+                                                                              rect orient2d predicate might be efficiently implemented using
+   When the predicate is computed using an exact arithmetic                   eight instances (EEE, EEI, EIE, EII, IEE, IEI, IIE, III, where
+model there is a minor difference. Indeed, when computing the                 the three characters indicate the type of each input point). Ac-
+d’s it might happen that some of them are exactly zero. If so, the            tually, many of these instances can be reduced to each other by
+predicate cannot be evaluated because at least one of its implicit            transposing their input parameters and possibly inverting the re-
+parameters is undefined. Conversely, if all the d’s are nonzero,              sulting sign (e.g. orient2d(a, b, c) = orient2d(b, c, a) = -
+we calculate Λ′ and check whether it is zero. If so, there is no              orient2d(a, c, b)). It is easy to verify that four versions (EEE,
+need to check the d’s and the predicate returns zero. Otherwise,              IEE, IIE, III) of orient2d are sufficient to cover all the cases.
+we possibly invert the sign as in the previous models.
+                                                                                 Implementing even a single instance with proper semi-static
+   Since Λ′ is a polynomial, we may exactly evaluate its sign
+                                                                              and dynamic filtering, and with expansion-based evaluation, is a
+using floating point expansions. Roughly speaking, an expansion
+                                                                              tedious and error-prone process. Fortunately, this process can
+is an array of FP numbers whose sum is the exact number being
+                                                                              be mostly automated [19]. If the predicate is naively imple-
+represented. Under certain assumptions, FP expansions can be
+                                                                              mented as a C function using FP arithmetic, software tools ex-
+efficiently summed, subtracted, and multiplied, all without error
+                                                                              ist [5] to parse such a function and produce another C func-
+and while exploiting the floating point hardware [9].
+                                                                              tion which includes a semi-static filter. These tools analyze the
+                                                                              polynomial and calculate an upper bound for the roundoff error.
+5.4. Caching                                                                  In the produced code, the magnitude of the resulting determi-
+   If the same implicit point is used as input to many predicate              nant is compared with such a bound and, if smaller, the predi-
+calls, its λ’s and d are recomputed many times. Therefore, upon               cate returns a particular value indicating that the filter failed (e.g.
+the first occurrence it is worth storing their values for future              FPG UNCERTAIN). Meyer and Pion’s tool has been used and ex-
+reuse. For the sake of implementing filters, besides these values             tended by Levy in the Predicate Construction Kit [11], where
+we must also store information to accumulate error bounds. For                both the semi-static filtered and the exact versions of the predi-
+semi-static filters, this amounts to store an additional FP number            cate are produced.
+(see Appendix A). For dynamic filters, this amounts to store the                 We have further extended upon this approach, and have imple-
+λ’s and d using intervals.                                                    mented a software that parses a text-based formula representing
+   Clearly, such a caching mechanism speeds up the computation                the polynomial. Starting from such a formula, our tool produces
+at the expense of a higher memory usage. Our experiments (see                 three C++ functions, each implementing the formula using one
+Sect. 7) show that caching λ’s and d’s for floating point and inter-          of the arithmetic models described earlier. A further fourth func-
+val arithmetic models produces relevant speed ups while requir-               tion is generated that calls the other three in order and terminates
+ing a relatively low increase in memory footprint. Conversely,                as soon as one of them returns a guaranteed result.
+                                                                          5
+        N. Points           Exp. 1.1                 Exp. 2.1                          defined as the intersection of line pairs. Even in this case, a pa-
+        1000            0.000691 (2.74)           0.000862 (2.77)                      rameter allows controlling the percentage of implicit points over
+        10000           0.008698 (6.29)           0.008864 (6.49)                      the total. This dataset stresses the predicates that are largely re-
+        100000          0.117321 (27.99)          0.12001 (25.56)                      quired to switch to exact arithmetic.
+        1000000         1.79624 (268.53)         1.82953 (284.55)
+                                                                                       7.4. Experiment 2.1 - Random explicit 3D points
+Table 1: Results of our experiments 1.1 and 2.1. Elapsed time in seconds and, in          For this experiment, we created a set of genericPoint ob-
+parenthesis, peak memory usage in Mbytes.                                              jects, each specialized to represent an explicit 3D point whose
+                                                                                       Cartesian coordinates are randomly sampled within the unit cube
+                                                                                       [0, 1] × [0, 1] × [0, 1]. The Delaunay triangulation is calculated
+7. Experiments                                                                         on the projection of these points on the XY plane. As for Exper-
+   For the sake of experimentation, we have implemented a                              iment 1.1, the objective is to define a reference for the following
+C++ library with an API defining a genericPoint class. A                               Experiments 2.2 and 2.3.
+genericPoint can be specialized to be either 2D or 3D, im-
+plicit or explicit. The library also provides functions implement-                     7.5. Experiment 2.2 - Random mixed 3D points
+ing both standard and indirect predicates. Each such function                             Here, our set of genericPoint objects contains 3D points,
+takes a number of genericPoint objects as input, internally                            both explicit and implicit, and the Delaunay triangulation is cal-
+determines their type, and properly handles all the cases as de-                       culated on their projection on the XY plane. As in the previous
+scribed in Sect. 6. The library has been used as a basis to im-                        experiment, the first half of the set is made of explicit points,
+plement a simple Delaunay triangulation algorithm that can deal                        whereas the other half are implicitly defined as the intersection
+with genericPoint objects. Both the library and the triangula-                         of lines and planes. Explicit points are randomly scattered within
+tion algorithm have been compiled and tested on an MS Windows                          the unit cube [0, 1] × [0, 1] × [0, 1]. Line-plane pairs are created
+10 OS using Visual C++ 2019. The objectives are measuring                              so that their intersections belong to the unit cube. A parameter
+the efficiency of our predicates, the overhead of indirect predi-                      allows controlling the percentage of implicit points over a total
+cates when compared to their direct versions, the impact of all the                    of 1 million points constituting the entire set.
+possible caching levels, and the improvement with respect to the
+state of the art. Tests were run on a standard PC equipped with                        7.6. Experiment 2.3 - Regular mixed 3D points
+an Intel Core i7-4770 with 16 Gb RAM. Based on this setting,
+the following experiments were run. Results are summarized in                             This dataset of 1000000 genericPoint objects contains
+Tables 1 and 2.                                                                        mixed 3D points as in Experiment 2.2 but, instead of being ran-
+                                                                                       domly scattered, their projections on the XY plane form a regular
+                                                                                       grid within the unit square. Their Z coordinate is still randomnly
+7.1. Experiment 1.1 - Random explicit 2D points
+                                                                                       selected in the interval [0,1]. A subset of the points are explicit,
+   For this experiment, we created and triangulated a set of                           whereas the others are implicitly defined as the intersection of
+genericPoint objects, each specialized to represent an explicit                        properly configured line-plane pairs. Even in this case, a param-
+2D point. Their Cartesian coordinates are randomly sampled                             eter allows controlling the percentage of implicit points over the
+within the unit square [0, 1] × [0, 1]. Since all the points are ex-                   total. This dataset stresses the predicates that are largely required
+plicit, the orient2d and incircle predicates used by the algo-                         to switch to exact arithmetic.
+rithm always switch to the standard direct version of the predi-
+cates. A parameter allows controlling the cardinality of the point
+                                                                                       7.7. Comparison with state of the art
+set in the range [1, 1000000]. The objective of this test is to de-
+fine a reference for the other tests, in order to evaluate the over-                      CGAL [18] is probably one of the most used libraries when ro-
+head due to the use of indirect predicates when compared with                          bustness and efficiency must be combined, in particular when
+their classical direct version.                                                        important fundamental algorithms come into play (e.g. Delau-
+                                                                                       nay triangulations). That is why we compare our results with
+7.2. Experiment 1.2 - Random mixed 2D points                                           CGAL. In our comparison, we always strive to exploit CGAL in
+                                                                                       its most efficient configuration while providing a guarantee of
+   Herewith, our set of genericPoint objects still contains 2D                         correctness. Namely, we want to guarantee that the resulting De-
+points, but their type is mixed. A subset of them are explicit,                        launay triangulation has the correct topology.
+whereas the others are implicitly defined as the intersection of                          We re-run all our tests using CGAL Delaunay triangu-
+line pairs. Explicit points are randomly scattered within the unit                     lation algorithm.      For experiments 1.1 and 2.1, where
+square as in the previous experiment. Also, line pairs are created                     all the points are explicit, we configure CGAL to use the
+so that their intersections are randomly scattered within the unit                     Exact Predicates Inexact Constructions                    kernel,
+square. A parameter allows controlling the percentage of implicit                      whereas for the others we need exact constructions to rep-
+points over a total of 1 million points constituting the entire set.                   resent the intersections. Implicit points are generated using
+In this case, both orient2d and incircle may either switch to                          CGAL::intersection(). For experiments that require projec-
+the direct version or select the proper indirect predicate instance,                   tion on the XY plane, CGAL::Projection traits xy 3 was
+depending on the type of the genericPoints.                                            used. We assume that CGAL implements efficient state-of-the-art
+                                                                                       algorithms but, since using two different implementations may
+7.3. Experiment 1.3 - Regular mixed 2D points                                          introduce a bias independently of our contribution, we have also
+   This dataset of 1000000 genericPoint objects contains                               re-implemented our own triangulation algorithm using CGAL’s
+mixed 2D points as in Experiment 1.2 but, instead of being ran-                        exact number type CGAL::Lazy exact nt<CGAL::Gmpq>
+domly scattered, they form a regular grid within the unit square.                      and      its    predicates      CGAL::orientation()          and
+A subset of them are explicit, whereas the others are implicitly                       CGAL::side of oriented circle().               However, after
+                                                                                   6
+                         % implicit            Exp. 1.2                 Exp. 1.3                  Exp. 2.2               Exp. 2.3
+                         0                 1.79624 (268.53)         2.63308 (268.36)          1.82953 (284.55)       2.64815 (284.37)
+                         10                2.23134 (292.84)         5.0791 (292.99)           2.56663 (321.96)       7.14617 (322.95)
+                         25                2.82864 (328.84)         8.45898 (329.3)           3.41211 (377.43)       16.6439 (379.75)
+                         50                3.62846 (389.14)         14.0788 (390.61)          4.24588 (469.68)       38.3586 (472.40)
+                         100               3.81999 (509.93)         27.1925 (511.29)          4.29742 (654.52)       75.0639 (657.06)
+
+                Table 2: Results of our experiments 1.2, 1.3, 2.2 and 2.3. Elapsed time in seconds and, in parenthesis, peak memory usage in Mbytes.
+
+                         % implicit            no cache                   FP                      Interval                Exact
+                         0                 1.79552 (268.51)         1.78396 (268.53)          1.79624 (268.53)       1.82953 (268.53)
+                         10                2.49302 (283.07)         2.4852 (286.20)           2.23134 (292.84)       2.27749 (358.66)
+                         25                3.5918 (304.77)          3.39718 (312.93)          2.82864 (328.84)       2.86765 (494.35)
+                         50                5.25428 (341.23)         5.00143 (357.23)          3.62846 (389.14)       3.79824 614.96)
+                         100               7.16629 (413.65)         6.9816 (445.84)           3.81999 (509.93)       3.9589 (1167.84)
+
+Table 3: Results of our experiment 1.2 using different caching approaches. λ’s and d were cached only for the FP model (column FP), for both the FP and interval
+arithmetic models (column Interval), or for all the available models (column Exact). Elapsed time in seconds and, in parenthesis, peak memory usage in Mbytes.
+
+
+       N. Points            Exp. 1.1                  Exp. 2.1                             Our results also demonstrate that indirect predicates outper-
+       1000             0.000253 (3.52)            0.000273 (3.29)                      form state of the art methods with same guarantees. Even if
+       10000            0.015636 (4.68)            0.015622 (4.72)                      CGAL is faster when inexact constructions are allowed (Exper-
+       100000           0.098743 (16.64)          0.109367 (19.62)                      iments 1.1 and 2.1, see Tables 1 and 4), its lazy exact kernel
+                                                                                        becomes necessary to represent implicit points and, in this case,
+       1000000         1.168691 (135.81)          1.15617 (167.65)                      our implementation is from 3.86 to 11.7 times faster than CGAL,
+Table 4: Results of our experiments 1.1 and 2.1 using CGAL with exact predi-
+                                                                                        while requiring up to 3.5 times less memory (see Tables 2 and 5
+cates and inexact constructions kernel. Elapsed time in seconds and, in parenthe-       and Fig. 2).
+sis, peak memory usage in Mbytes.
+
+                                                                                        8. Conclusions
+having verified that this re-implementation is slower than CGAL’s
+native algorithm, we have abandoned it. Tables 4 and 5 report                              We have shown that, even if intermediate geometric construc-
+the results of our experiments using CGAL.                                              tions are necessary, the efficiency of floating point hardware can
+                                                                                        be exploited to quickly evaluate geometric predicates with guar-
+                                                                                        antees of correctness. This partly solves a problem introduced
+7.8. Results discussion
+                                                                                        by Meyer and Pion [5] more than ten years ago. The problem is
+   In all the experiments, the total number of predicate calls de-                      only partly solved because our approach requires that interme-
+pends on the input size. For Experiment 1.1, these numbers are as                       diate constructions can be represented as polynomial fractions.
+follows: 1000 points ⇒ 4395 calls to orient2d and 7502 calls                            Though this is sufficient for most of the algorithms of the second
+to incircle; 10K points ⇒ 45K and 94K calls; 100K points                                type introduced in Sect. 3, there are still a few useful algorithms
+⇒ 469K and 1.14M calls; 1M points ⇒ 4.8M and 13.3M calls.                               that do not satisfy this requirement. One noticeable example is
+These numbers do not vary significantly across different experi-                        the constrained Delaunay triangulation in 3D, where state of the
+ments with same input size.                                                             art algorithms use irrational numbers to generate Steiner points
+   Tables 1 and 2 show that the impact of having implicit points in                     [20]. Furthermore, more numerically complex techniques exist
+the input is rather limited. The maximum increase in both time                          which involve cascaded predicates and constructions, and hence
+and memory usage is around 2x in 2D and 2.5x in 3D, which                               do not belong to our second class of algorithms (e.g. [21]). Un-
+happens when all the points are implicit. Most importantly, the                         fortunately, indirect predicates do not help in these cases, and at-
+resource demand gradually increases as the relative amount of                           tempting to generalize their paradigm is a challenging research
+implicit points in the set grows. Hence, our approach is partic-                        direction: indeed, the combination of cascaded constructions
+ularly convenient in cases where implicit points are sparse. Ex-                        would easily lead to rather complicated expressions whose filters
+periments 1.3 and 2.3 show that our predicates behave reasonably                        become too large to be useful in practice. Nonetheless, indirect
+well even in extremely degenerate cases where exact arithmetic is                       predicates enable much faster implementations for a wide range
+used extensively. In particular, we observe that the peak memory                        of useful algorithms of the second class.
+usage in these cases is virtually equivalent to that of correspond-                        We also observe that indirect predicates allow implementing
+ing non-degenerate input sets. The impact on the elapsed time                           algorithms with guarantees of robustness and combinatorial cor-
+is of course more significant but, even in this case, we observe                        rectness. Nonetheless, if their results are the input to other al-
+that it gracefully grows as the percentage of implicit points in-                       gorithms which expect floating point coordinates, implicit points
+creases. Table 3 shows the impact of caching the λ’s and d’s:                           must be evaluated and their coordinates approximated. Such an
+when these values are stored for the FP model only the overall                          approximation may lead to invalid configurations (e.g. with self
+gain in speed is modest, but when the Interval model is included                        intersections) even if the combinatorics is exact. This problem is
+the algorithm becomes nearly twice as fast with only 23% more                           known as snap rounding and, though effective algorithms exist
+memory requirements.                                                                    for the 2D case, no practical guaranteed implementation exists
+                                                                                    7
+                       % implicit              Exp. 1.2                    Exp. 1.3                     Exp. 2.2                 Exp. 2.3
+                       0                   6.92141 (168.86)            26.4514 (362.26)             33.2009 (193.40)         68.7454 (483.43)
+                       10                  8.09864 (252.48)            27.9512 (492.32)             35.0445 (338.69)         76.5043 (716.04)
+                       25                  9.76497 (377.75)            32.0291 (698.53)             38.7077 (553.73)         88.9425 (1060.50)
+                       50                  11.9211 (586.53)            40.966 (1040.29)             42.2784 (908.59)         111.112 (1634.54)
+                       100                15.9442 (1006.73)           60.9706 (1682.76)            50.1841 (1605.84)              crashed
+
+Table 5: Results of our experiments 1.2, 1.3, 2.2 and 2.3 using CGAL with exact predicates and exact constructions kernel. Elapsed time in seconds and, in parenthesis,
+peak memory usage in Mbytes.
+
+
+
+
+                            Figure 2: Elapsed time for experiments 1.2, 1.3, 2.2 and 2.3 using indirect predicates (blue) and CGAL (orange).
+
+
+yet for the 3D case. This problem is worth a further investigation                          [11] B. Lévy, Robustness and efficiency of geometric programs, Comput. Aided
+[22].                                                                                            Des. 72 (C) (2016) 3–12. doi:10.1016/j.cad.2015.10.004.
+                                                                                            [12] S. Pion, A. Fabri, A generic lazy evaluation scheme for exact geometric
+                                                                                                 computations, Science of Computer Programming 76 (4) (2011) 307 – 323,
+Acknowledgements                                                                                 special issue on library-centric software design (LCSD 2006). doi:https:
+                                                                                                 //doi.org/10.1016/j.scico.2010.09.003.
+   This work is partly supported by the EU ERC Advanced Grant                               [13] S. Schirra, On the use of adaptive, exact decisions number types based on
+CHANGE, agreement No 694515. Thanks are due to the col-                                          expression-dags in geometric computing, in: Proceedings of the 26th Cana-
+                                                                                                 dian Conference on Computational Geometry, CCCG ’14, 2014.
+leagues at CNR-IMATI for helpful discussions.                                               [14] H. Edelsbrunner, E. P. Mücke, Simulation of simplicity: A technique to
+                                                                                                 cope with degenerate cases in geometric algorithms, ACM Trans. Graph.
+                                                                                                 9 (1) (1990) 66–104. doi:10.1145/77635.77639.
+References                                                                                       URL https://doi.org/10.1145/77635.77639
+                                                                                            [15] P. Hachenberger, Exact minkowksi sums of polyhedra and exact and effi-
+ [1] L. Kettner, K. Mehlhorn, S. Pion, S. Schirra, C. Yap, Classroom examples
+                                                                                                 cient decomposition of polyhedra into convex pieces, Algorithmica 55 (2)
+     of robustness problems in geometric computations, in: S. Albers, T. Radzik
+                                                                                                 (2009) 329–345. doi:10.1007/s00453-008-9219-6.
+     (Eds.), Algorithms – ESA 2004, Springer Berlin Heidelberg, Berlin, Hei-
+                                                                                            [16] Q. Zhou, E. Grinspun, D. Zorin, A. Jacobson, Mesh arrangements for solid
+     delberg, 2004, pp. 702–713.
+                                                                                                 geometry, ACM Trans. Graph. 35 (4) (2016) 39:1–39:15. doi:10.1145/
+ [2] C. Li, S. Pion, C. Yap, Recent progress in exact geometric computation,
+                                                                                                 2897824.2925901.
+     The Journal of Logic and Algebraic Programming 64 (1) (2005) 85 – 111,
+                                                                                            [17] M. Attene, As-exact-as-possible repair of unprintable stl files,
+     practical development of exact real number computation. doi:https://
+                                                                                                 Rapid Prototyping Journal 24 (5) (2018) 855–864.                    doi:
+     doi.org/10.1016/j.jlap.2004.07.006.
+                                                                                                 10.1108/RPJ-11-2016-0185.
+ [3] O. Devillers, F. P. Preparata, A probabilistic analysis of the power of arith-
+                                                                                            [18] The CGAL Project, CGAL User and Reference Manual, 5.0 Edition, CGAL
+     metic filters, Discrete & Computational Geometry 20 (4) (1998) 523–547.
+                                                                                                 Editorial Board, 2019.
+     doi:10.1007/PL00009400.
+                                                                                                 URL https://doc.cgal.org/5.0/Manual/packages.html
+ [4] S. Fortune, C. J. Van Wyk, Static analysis yields efficient exact integer arith-
+                                                                                            [19] A. Nanevski, G. Blelloch, R. Harper, Automatic generation of staged geo-
+     metic for computational geometry, ACM Trans. Graph. 15 (3) (1996) 223–
+                                                                                                 metric predicates, Higher-Order and Symbolic Computation 16 (4) (2003)
+     248. doi:10.1145/231731.231735.
+                                                                                                 379–400. doi:10.1023/A:1025876920522.
+ [5] A. Meyer, S. Pion, FPG: A code generator for fast and certified geometric
+                                                                                            [20] H. Si, Tetgen, a delaunay-based quality tetrahedral mesh generator, ACM
+     predicates, in: Real Numbers and Computers, 2008, pp. 47–60.
+                                                                                                 Trans. Math. Softw. 41 (2) (2015) 11:1–11:36. doi:10.1145/2629697.
+ [6] H. Brönnimann, C. Burnikel, S. Pion, Interval arithmetic yields efficient dy-
+                                                                                            [21] F. Cazals, A. Parameswaran, S. Pion, Robust construction of the three-
+     namic filters for computational geometry, in: Proceedings of the Fourteenth
+                                                                                                 dimensional flow complex, in: Proceedings of the Twenty-Fourth An-
+     Annual Symposium on Computational Geometry, SCG ’98, ACM, New
+                                                                                                 nual Symposium on Computational Geometry, SCG ’08, Association for
+     York, NY, USA, 1998, pp. 165–174. doi:10.1145/276884.276903.
+                                                                                                 Computing Machinery, New York, NY, USA, 2008, p. 182–191. doi:
+ [7] S. Fortune, C. J. Van Wyk, Efficient exact arithmetic for computational
+                                                                                                 10.1145/1377676.1377705.
+     geometry, in: Proceedings of the Ninth Annual Symposium on Computa-
+                                                                                                 URL https://doi.org/10.1145/1377676.1377705
+     tional Geometry, SCG ’93, ACM, New York, NY, USA, 1993, pp. 163–172.
+                                                                                            [22] O. Devillers, S. Lazard, W. J. Lenhart, 3D Snap Rounding, in: B. Speck-
+     doi:10.1145/160985.161015.
+                                                                                                 mann, C. D. Tóth (Eds.), 34th International Symposium on Computational
+ [8] L. Fousse, G. Hanrot, V. Lefèvre, P. Pélissier, P. Zimmermann, Mpfr:
+                                                                                                 Geometry (SoCG 2018), Vol. 99 of Leibniz International Proceedings in
+     A multiple-precision binary floating-point library with correct rounding,
+                                                                                                 Informatics (LIPIcs), Schloss Dagstuhl–Leibniz-Zentrum fuer Informatik,
+     ACM Trans. Math. Softw. 33 (2). doi:10.1145/1236463.1236468.
+                                                                                                 Dagstuhl, Germany, 2018, pp. 30:1–30:14. doi:10.4230/LIPIcs.SoCG.
+ [9] M. Joldes, O. Marty, J.-M. Muller, V. Popescu, Arithmetic algorithms
+                                                                                                 2018.30.
+     for extended precision using floating-point expansions, IEEE TRANSAC-
+     TIONS ON COMPUTERS 65 (4) (2016) 1197–1210.
+[10] J. R. Shewchuk, Adaptive precision floating-point arithmetic and fast robust
+     geometric predicates, Discrete & Computational Geometry 18 (3) (1997)
+     305–363.
+
+                                                                                        8
+A. Semi-static filter calculation
+
+   A semi-static filter needs to (1) calculate a threshold value
+as a function of input parameters vi and (2) verify that |Λ′ | is
+larger than this value. In our code, the threshold ϵ(v1 , ..., vn )
+is calculated as a product δ(1)B(v1 , ..., vn ), where δ(1) is a con-
+stant value which depends only on the predicate’s expression and
+is computed at compile time as described in [5]. Conversely,
+B(v1 , ..., vn ) depends on the input values vi and must be calcu-
+lated at each predicate call. This dynamic part of the filter is the
+product of k factors b1 b2 . . . bk , where b j is the absolute value of
+either one of the input variables vi or a difference va − vb between
+two of them. Note that factors need not be different from each
+other (e.g. bi and b j may be the same for i , j). Differently from
+[5], we slightly overestimate B(v1 , ..., vn ) for the sake of efficient
+caching. Specifically, we replace the product b1 b2 . . . bk with the
+power βk , where β = argmax{b1 , . . . , bk }. The reason for this is
+the following.
+   Let P(v1 , . . . , vk , i1 , . . . , in ) be a predicate where the vi ’s are ex-
+plicit parameters whereas the i j ’s are implicit. Any of the im-
+plicit parameters i is defined as a composition of explicit values
+w1 . . . wm . Upon evaluation using the FP model, we first use the
+w’s to calculate the λ’s and d’s, and then use these λ’s and d’s
+together with the explicit parameters v’s to evaluate the whole
+predicate. The semi-static filter for this composed calculation
+must take all the variables into account. Thus, the dynamic com-
+ponent of our filter is βk , where β is the maximum of the bi ’s de-
+riving from explicit variables v and the b j ’s deriving from the w’s.
+The maximum over the b j ’s is computed only once for each im-
+plicit point and cached for later use. Hence, replacing the product
+with the power allows using a single variable to cache the bounds
+for any λ and d. When compared with the caching benefits, the
+performance loss due to our overestimation is virtually negligi-
+ble. Fig. 3 shows an example of the code produced by our tool.
+
+
+
+
+                                                                                          Figure 3: Code produced by our tool for an indirect version of the orient2d
+                                                                                          predicate. The first of the three points is implicitly defined by the intersection of
+                                                                                          two lines that, in turn, are defined by explicit points w1 , . . . , w4 . The values for
+                                                                                          λ x , λy and d (l1x, l1y, d1) are calculated externally and passed to this function
+                                                                                          along with the maximum β deriving from the w’s (prev maxval). The constant
+                                                                                          value of δ(1) ( = 1.048458195263004e-13) accumulates the error bounds of
+                                                                                          this function and those of the external function that calculates the λ’s and d.
+
+
+
+
+                                                                                      9
+
