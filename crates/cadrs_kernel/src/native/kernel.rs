@@ -487,7 +487,19 @@ impl Kernel for NativeKernel {
     }
 
     fn extrude_with(&mut self, profile: &Profile, spec: &ExtrudeSpec) -> Result<OpResult> {
-        super::features::extrude_with(self, profile, spec)
+        let r = super::features::extrude_with(self, profile, spec)?;
+        // A gap the profile closed is how far its curves and the faces they sweep may be from
+        // where the sketch drew them: its edges and vertices carry it (OCCT's did), so a
+        // boolean finds the faces of the sketch's other features there coincident.
+        let gap = profile::closed_gap(profile);
+        if gap > profile::JOIN {
+            for id in &r.bodies {
+                if let Some(e) = self.bodies.get_mut(&id.0) {
+                    profile::carry_gap(Arc::make_mut(&mut e.body), gap);
+                }
+            }
+        }
+        Ok(r)
     }
 
     fn revolve(&mut self, profile: &Profile, axis: Axis, angle: f64) -> Result<OpResult> {

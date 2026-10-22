@@ -539,6 +539,42 @@ fn moved_end(p: &Piece, at_start: bool, to: P2) -> Option<Piece> {
     }
 }
 
+/// The widest gap [`regions`] closes between consecutive curves of the profile's loops (0 when
+/// they all join within [`JOIN`]).
+pub fn closed_gap(profile: &Profile) -> f64 {
+    let snap = profile_snap(profile);
+    let mut widest: f64 = 0.0;
+    for (ri, r) in profile.regions.iter().enumerate() {
+        let source = r.source.unwrap_or(ri as u64);
+        for (li, l) in std::iter::once(&r.outer).chain(r.holes.iter()).enumerate() {
+            let pieces: Result<Vec<Piece>> = l
+                .curves
+                .iter()
+                .enumerate()
+                .map(|(ci, c)| piece_of(c, Src::Curve { region: source, curve: c.source().unwrap_or(unsourced_curve(li, ci)) }))
+                .collect();
+            let Ok(chain) = pieces.and_then(|p| chain_loop_within(p, snap)) else { continue };
+            for (k, a) in chain.iter().enumerate() {
+                let gap = (a.end() - chain[(k + 1) % chain.len()].start()).norm();
+                if gap <= snap {
+                    widest = widest.max(gap);
+                }
+            }
+        }
+    }
+    widest
+}
+
+/// Raises the tolerance of a body's edges and vertices to `gap` (see [`closed_gap`]).
+pub fn carry_gap(b: &mut super::topo::Body, gap: f64) {
+    for e in &mut b.edges {
+        e.tol = e.tol.max(gap);
+    }
+    for v in &mut b.verts {
+        v.tol = v.tol.max(gap);
+    }
+}
+
 pub fn check_closed(l: &[Piece]) -> Result<()> {
     if l.is_empty() {
         return Err(KernelError::InvalidProfile("an empty loop".into()));

@@ -203,3 +203,25 @@ fn lines_in_line_make_one_side_whose_far_edge_runs_back() {
     assert!(near[0].end.x > near[0].start.x, "near: {:?} → {:?}", near[0].start, near[0].end);
     assert!(far[0].end.x < far[0].start.x, "far: {:?} → {:?}", far[0].start, far[0].end);
 }
+
+/// squish_bottle_adapter, Extrude 6: a feature's extrude of a loop with a gap closed carries the
+/// gap as the tolerance of its edges and vertices (OCCT's did), so a boolean can take its faces
+/// for the faces of the sketch's other features they are that close to.
+#[test]
+fn a_closed_gap_is_carried_as_tolerance() {
+    let gap = 3e-4;
+    let curves = vec![
+        line(p(0.0, 0.0), p(10.0, 0.0)),
+        line(p(10.0, 0.0), p(10.0, 10.0)),
+        line(p(10.0, 10.0), p(0.0, 10.0)),
+        line(p(0.0, 10.0), p(0.0, gap)),
+    ];
+    let mut k = NativeKernel::new();
+    let region = Region { outer: Loop { curves }, holes: vec![], source: None };
+    let spec = ExtrudeSpec::blind(nalgebra::Vector3::z_axis(), 2.0);
+    let id = k.extrude_with(&Profile::new(Plane::top(), vec![region]), &spec).unwrap().bodies[0];
+    let b = k.get(id).unwrap();
+    let carried = gap - tol::ROUNDOFF;
+    assert!(b.edges.iter().all(|e| e.tol >= carried) && b.verts.iter().all(|v| v.tol >= carried));
+    assert!(b.check_with(CheckLevel::Full).is_empty());
+}
