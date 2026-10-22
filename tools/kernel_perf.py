@@ -114,6 +114,10 @@ def flatten(arg):
         return [os.path.join(DATA, m.group(1))]
     if arg.startswith("&"):
         arg = arg[1:].strip()
+    # `draw::sub(&list, n, "of", "kind")?`: the list's nth (1-based) shape.
+    m = re.fullmatch(r'draw::sub\(&(\w+),\s*(\d+),[^)]*\)\??', arg)
+    if m:
+        return [f"{m.group(1)}.{int(m.group(2)) - 1}"]
     if arg[:1] in "[(":
         toks = []
         for a in split_args(arg[1:-1]):

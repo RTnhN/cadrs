@@ -218,6 +218,40 @@ pub fn ball_in_plane(f: [&Face; 2], k: [f64; 2], p0: &P3, t: &V3, guess: [P2; 2]
     None
 }
 
+/// How a ball touching faces `f[0]` and `f[1]` in the plane through `p0` square to `t` moves as
+/// the plane moves on (blends card 1, the tangent of the solution curve; OCCT
+/// `BlendFunc_ConstRad::Derivatives`, `Blend_Walking_4.gxx`): with `dp0` and `dt` the plane's
+/// point's and normal's derivatives along the spine and `dk` the offsets' (a varying radius),
+/// the derivatives of the contacts' points and (u, v) along the spine, from one linear solve
+/// on the ball's own Newton matrix. `None` where that matrix is singular (the faces tangent:
+/// the contacts coincide).
+#[allow(clippy::too_many_arguments)]
+pub fn ball_tangent(f: [&Face; 2], k: [f64; 2], dk: [f64; 2], ball: &Ball, p0: &P3, t: &V3, dp0: &V3, dt: &V3) -> Option<[(V3, Vector2<f64>); 2]> {
+    let a = offset(f[0], k[0], ball.q[0].uv)?;
+    let b = offset(f[1], k[1], ball.q[1].uv)?;
+    let m = Matrix4::new(
+        a.du.x, a.dv.x, -b.du.x, -b.dv.x, //
+        a.du.y, a.dv.y, -b.du.y, -b.dv.y, //
+        a.du.z, a.dv.z, -b.du.z, -b.dv.z, //
+        t.dot(&a.du), t.dot(&a.dv), 0.0, 0.0,
+    );
+    // The residual's derivative along the spine at fixed (u, v): the offsets grow with the
+    // radius, the plane moves and turns.
+    let (na, nb) = (a.contact.n * dk[0], b.contact.n * dk[1]);
+    let r3 = na - nb;
+    let rp = (a.o - p0).dot(dt) + (na - dp0).dot(t);
+    let d = SVector::<f64, 4>::new(r3.x, r3.y, r3.z, rp);
+    let x = m.lu().solve(&(-d))?;
+    if !x.iter().all(|v| v.is_finite()) {
+        return None;
+    }
+    let vel = |fc: &Face, uv: P2, du: f64, dv: f64| -> (V3, Vector2<f64>) {
+        let (_, su, sv) = fc.surf.d1(uv.x, uv.y);
+        (su * du + sv * dv, Vector2::new(du, dv))
+    };
+    Some([vel(f[0], ball.q[0].uv, x[0], x[1]), vel(f[1], ball.q[1].uv, x[2], x[3])])
+}
+
 /// The ball touching three faces (offsets `k`): its centre and the contacts, from contacts
 /// near `guess`.
 pub fn ball3(f: [&Face; 3], k: [f64; 3], guess: [P2; 3]) -> Option<(P3, [Contact; 3])> {
@@ -391,6 +425,23 @@ impl Spine {
         (p + d * (t - e), d.normalize())
     }
 
+    /// The point and unit tangent at parameter t with their derivatives along t.
+    pub fn at_d(&self, t: f64) -> (P3, V3, V3, V3) {
+        let tc = self.on_curve(t);
+        let natural = matches!(self.curve, Curve::Line { .. } | Curve::Circle { .. });
+        let (lo, hi) = (self.t[0].min(self.t[1]), self.t[0].max(self.t[1]));
+        if natural || (tc >= lo && tc <= hi) {
+            let (p, d1, d2) = self.curve.d2(tc);
+            let speed = d1.norm().max(tol::TINY);
+            let tn = d1 / speed;
+            return (p, tn, d1, (d2 - tn * tn.dot(&d2)) / speed);
+        }
+        // Run on straight past the ends.
+        let e = if tc < lo { lo } else { hi };
+        let (p, d, _) = self.curve.d2(e);
+        (p + d * (tc - e), d.normalize(), d, V3::zeros())
+    }
+
     /// The parameter whose section plane holds `c`, starting from `t`.
     pub fn param_of(&self, c: &P3, t: f64) -> f64 {
         // Closed forms: a line's projection, a circle's angle about its axis (near t).
@@ -476,6 +527,10 @@ pub struct Strip {
     pub surf: Surface,
     pub rails: [Curve; 2],
     pub kind: StripKind,
+    /// A B-spline strip's rails on their faces: the contacts' (u, v) at its stations
+    /// interpolated at their spine parameters, as the rails are (blends card 2: the rails'
+    /// p-curves from the sections, no projection).
+    pub on_faces: Option<[Curve; 2]>,
 }
 
 #[derive(Debug, Clone)]
@@ -512,7 +567,7 @@ pub fn exact_strip(kind: Exact, b: &Ball, spine: &Spine) -> Option<Strip> {
             let x = (b.q[0].p - b.c).normalize();
             let surf = Surface::Cylinder { f: Frame { o: b.c, x, y: d.cross(&x), z: d }, r };
             let rails = [Curve::Line { o: b.q[0].p, d }, Curve::Line { o: b.q[1].p, d }];
-            Some(Strip { surf, rails, kind: StripKind::Exact(kind) })
+            Some(Strip { surf, rails, kind: StripKind::Exact(kind), on_faces: None })
         }
         (Exact::Torus, Curve::Circle { c, x, y, .. }) => {
             let z = x.cross(y).normalize();
@@ -531,7 +586,7 @@ pub fn exact_strip(kind: Exact, b: &Ball, spine: &Spine) -> Option<Strip> {
                 let rr = (q - cq).norm();
                 Curve::Circle { c: cq, x: *x, y: z.cross(x), r: rr }
             };
-            Some(Strip { surf, rails: [rail(&b.q[0].p), rail(&b.q[1].p)], kind: StripKind::Exact(kind) })
+            Some(Strip { surf, rails: [rail(&b.q[0].p), rail(&b.q[1].p)], kind: StripKind::Exact(kind), on_faces: None })
         }
         _ => None,
     }
@@ -548,7 +603,7 @@ fn exact_flat(kind: Exact, b: &Ball, spine: &Spine) -> Option<Strip> {
             let x = (q1 - q0).normalize();
             let surf = Surface::Plane { f: Frame { o: q0, x, y: d, z: x.cross(&d) } };
             let rails = [Curve::Line { o: q0, d }, Curve::Line { o: q1, d }];
-            Some(Strip { surf, rails, kind: StripKind::Exact(kind) })
+            Some(Strip { surf, rails, kind: StripKind::Exact(kind), on_faces: None })
         }
         (Exact::Torus, Curve::Circle { c, x, y, .. }) => {
             let z = x.cross(y).normalize();
@@ -569,7 +624,7 @@ fn exact_flat(kind: Exact, b: &Ball, spine: &Spine) -> Option<Strip> {
                 let a = (r1 - r0).atan2(h1 - h0);
                 Surface::Cone { f: Frame { o: c + z * h0, x: *x, y: yy, z }, r: r0, a }
             };
-            Some(Strip { surf, rails, kind: StripKind::Exact(kind) })
+            Some(Strip { surf, rails, kind: StripKind::Exact(kind), on_faces: None })
         }
         _ => None,
     }
@@ -663,7 +718,15 @@ pub fn nurbs_strip(balls: &[Ball], ts: &[f64], closed: bool, kinks: &[usize]) ->
     let rail = |c: &NurbsCurve| -> Option<Curve> { Some(Curve::nurbs(NurbsCurve::new(c.degree, c.knots.clone(), c.cps.clone()).ok()?)) };
     let rails = [rail(&r0)?, rail(&r2)?];
     let surf = NurbsSurface::new(du, 2, ku, vec![0.0, 0.0, 0.0, 1.0, 1.0, 1.0], rows).ok()?;
-    Some(Strip { surf: Surface::Nurbs(std::sync::Arc::new(surf)), rails, kind: StripKind::Nurbs })
+    // The rails on their faces, where the faces' curvature doesn't jump along them.
+    let on_faces = (kinks.is_empty() && !closed && balls.len() >= 4).then(|| -> Option<[Curve; 2]> {
+        let on = |k: usize| -> Option<Curve> {
+            let pts: Vec<P3> = balls.iter().map(|b| P3::new(b.q[k].uv.x, b.q[k].uv.y, 0.0)).collect();
+            Some(Curve::nurbs(NurbsCurve::interpolate(&pts, ts, 3, None, None)))
+        };
+        Some([on(0)?, on(1)?])
+    });
+    Some(Strip { surf: Surface::Nurbs(std::sync::Arc::new(surf)), rails, kind: StripKind::Nurbs, on_faces: on_faces.flatten() })
 }
 
 /// How far the B-spline strip strays from the true sections `truth` at the parameters `ts`
@@ -680,4 +743,48 @@ pub fn strip_error(s: &Strip, truth: &[(f64, Ball)]) -> Vec<f64> {
             e
         })
         .collect()
+}
+
+/// A root of `f` between `a` and `b`, where its values `a.1` and `b.1` differ in sign: the
+/// Illinois method (regula falsi with the stale end's value halved), falling back on bisection
+/// where it gains less than a halving, to the parameter's resolution. As fast as Newton's method
+/// on a smooth function (a few evaluations) where bisection takes fifty; on a function that
+/// fails (`None`) it stops there, at the bracket's middle.
+pub fn bracket_root(mut f: impl FnMut(f64) -> Option<f64>, a: (f64, f64), b: (f64, f64)) -> f64 {
+    let ((mut a, mut fa), (mut b, mut fb)) = (a, b);
+    let res = 4.0 * f64::EPSILON * (1.0 + a.abs().max(b.abs()));
+    // Which end moved last (−1: a, 1: b), and the bracket's width two steps ago.
+    let mut side = 0;
+    let mut widths = [f64::INFINITY; 2];
+    for _ in 0..200 {
+        let w = (b - a).abs();
+        if w <= res {
+            break;
+        }
+        let mut x = (a * fb - b * fa) / (fb - fa);
+        // Bisect where the secant leaves the bracket or the bracket stopped halving.
+        if !x.is_finite() || x <= a.min(b) || x >= a.max(b) || w > 0.5 * widths[0] {
+            x = 0.5 * (a + b);
+            side = 0;
+        }
+        widths = [widths[1], w];
+        let Some(fx) = f(x) else { break };
+        if fx == 0.0 {
+            return x;
+        }
+        if (fx < 0.0) == (fa < 0.0) {
+            (a, fa) = (x, fx);
+            if side == -1 {
+                fb *= 0.5;
+            }
+            side = -1;
+        } else {
+            (b, fb) = (x, fx);
+            if side == 1 {
+                fa *= 0.5;
+            }
+            side = 1;
+        }
+    }
+    0.5 * (a + b)
 }

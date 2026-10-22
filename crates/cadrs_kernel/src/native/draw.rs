@@ -3346,6 +3346,20 @@ impl NativeKernel {
     /// all at once: where edges of different radii meet, the corners differ.
     pub fn blend_radii(&mut self, s: &Shape, edges: &[(f64, &Shape)]) -> Result<Shape> {
         let b0 = self.body_of(s)?;
+        // All at once, as OCCT's blend does (each edge its own constant radius, corners between
+        // radii patched); else one radius after another.
+        let laws: Option<Vec<FilletLaw>> = edges
+            .iter()
+            .map(|(r, e)| match e {
+                Shape::BodyEdge(eb, id) if *eb == b0 => Some(FilletLaw { edge: *id, radii: vec![(0.0, *r), (1.0, *r)] }),
+                _ => None,
+            })
+            .collect();
+        if let Some(laws) = laws
+            && let Ok(r) = super::blend::fillet_laws_local(self, b0, &laws)
+        {
+            return Ok(Shape::Body(r.bodies[0]));
+        }
         let original = (**self.get(b0)?).clone();
         let mut radii: Vec<f64> = Vec::new();
         for (r, _) in edges {

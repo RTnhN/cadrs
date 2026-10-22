@@ -364,16 +364,12 @@ draft angle_l4
 draft angle_h5
 # blend: a boolean of the feature fails (open shell).
 blend bfuseblend_a6
-blend complex_d2
 blend encoderegularity_a2
 blend encoderegularity_a4
 blend simple_r1
 blend simple_r2
 blend simple_r6
 blend simple_y9
-blend tolblend_simple_a2
-blend tolblend_simple_a8
-blend tolblend_simple_a9
 blend tolblend_simple_f3
 blend tolblend_simple_f8
 # blend: the measured property differs from OCCT's.
@@ -400,14 +396,11 @@ blend buildevol_k8
 blend bfuseblend_b6
 blend buildevol_b3  # the area differs from OCCT's (by 1.02 %)
 blend buildevol_d6  # unsupported: variable fillets between curved faces (the local fillet's result doesn't close)
-blend complex_c2
 blend complex_h4
 blend encoderegularity_a5  # the loft's surface isn't valid (a weight along v isn't positive)
 blend simple_r4
 blend simple_r5
-blend tolblend_simple_a4  # the blend's boolean leaves an edge used by three faces (refused, not manifold)
 blend tolblend_simple_a6
-blend tolblend_simple_b2
 blend tolblend_simple_e2
 blend tolblend_simple_f1
 blend tolblend_simple_f4
@@ -423,7 +416,6 @@ blend encoderegularity_a6
 blend simple_j7
 blend simple_j8
 blend simple_j9
-blend tolblend_simple_e9
 # blend: radius laws reaching 0 (OCCT ends evolutive blends at a point).
 blend tolblend_buildvol_a3
 blend tolblend_buildvol_a4
@@ -450,8 +442,6 @@ heal split_number_d1
 feat featdprism_a6
 # feat: ribs whose thickness lies in their plane, and fillets after them that fail.
 feat featlf_a4
-feat featlf_e2
-feat featlf_e3
 # feat: a boolean of the feature fails (open shell).
 feat featlf_c2
 feat featlf_c3

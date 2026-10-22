@@ -73,6 +73,30 @@ impl Tracked {
         Ok(Tracked { body: r.body, src })
     }
 
+    /// With no more solids than the input had (`n`): the largest kept. A blend never splits a
+    /// solid: the pieces beyond are what its tools left of a corner (an island where two
+    /// chamfers' cuts nearly meet, a fill run on past its corner).
+    pub fn with_solids_of_input(self, n: usize) -> Result<Tracked> {
+        let m = self.body.solids.len();
+        if n == 0 || m <= n {
+            return Ok(self);
+        }
+        let mut by_volume: Vec<(f64, Vec<usize>)> = (0..m)
+            .map(|s| {
+                let fs = self.body.solid_faces(s);
+                (super::mass::body_volume(&super::kernel::subset(&self.body, &fs, true)).abs(), fs)
+            })
+            .collect();
+        by_volume.sort_by(|x, y| y.0.total_cmp(&x.0));
+        let mut keep: Vec<usize> = by_volume.into_iter().take(n).flat_map(|(_, fs)| fs).collect();
+        keep.sort_unstable();
+        keep.dedup();
+        let mut body = super::kernel::subset(&self.body, &keep, false);
+        super::boolean::assemble_shells(&mut body)?;
+        let src = keep.iter().map(|&f| self.src[f].clone()).collect();
+        Ok(Tracked { body, src })
+    }
+
     pub fn into_result(mut self, k: &mut NativeKernel, input: BodyId) -> OpResult {
         // Edges split where tools met and left joining in a line or circle between the same
         // faces become one again (faces keep their indices).
@@ -1150,6 +1174,7 @@ pub fn blend(k: &mut NativeKernel, body: BodyId, edges: &[EdgeBlend], corners: b
             cur = cur.apply(&tool, &src, BoolOp::Subtract)?;
         }
     }
+    let cur = cur.with_solids_of_input(b.solids.len())?;
     // A solid must stay a solid (an open result means a tool went wrong).
     if !b.solids.is_empty() && cur.body.solids.is_empty() {
         return Err(KernelError::InvalidResult { op: "blend", why: "the blend left an open body".into() });
@@ -1309,8 +1334,8 @@ fn local_problem(input: &Body, out: &Body) -> Option<String> {
 
 /// Flat faces two of `edges` bound on opposite sides, parallel lines exactly two radii `r`
 /// apart (the fillets on them meet across the face and consume it whole: a full round), when
-/// two such faces meet: the width of one. A single full round builds; two meeting at a corner
-/// don't yet.
+/// two such faces meet: the width of one. A single full round builds as any fillet; rounds
+/// meeting square at a corner between the same walls by [`full_round_corners`], others not.
 fn consumed_face(b: &Body, edges: &[EdgeId], r: f64) -> Option<f64> {
     let consumed: Vec<(usize, f64)> = (0..b.faces.len()).filter_map(|f| consumed_width(b, f, edges, r).map(|w| (f, w))).collect();
     let edges_of = |f: usize| -> Vec<usize> { b.faces[f].loops.iter().flatten().map(|c| c.edge).collect() };
@@ -1354,6 +1379,344 @@ fn consumed_width(b: &Body, f: usize, edges: &[EdgeId], r: f64) -> Option<f64> {
     None
 }
 
+/// A flat face a full round consumes whole: two picked straight edges along it, parallel and
+/// exactly two radii apart, between flat walls square to it that face away from each other,
+/// and two straight ends square to them closing it.
+struct RoundFace {
+    /// The face.
+    face: usize,
+    /// The picked edges along it.
+    sides: [usize; 2],
+    /// The walls: the faces across `sides`.
+    walls: [usize; 2],
+    /// Its outward normal.
+    n: V3,
+    /// The unit direction of the round's axis.
+    d: V3,
+    /// A point on the axis: halfway between the walls, a radius under the face.
+    c: P3,
+    /// Where its two ends lie along `d` from `c`, the lower first.
+    span: [f64; 2],
+    /// The edges ending it there.
+    ends: [usize; 2],
+}
+
+/// Whether point `p` (on face `f`'s surface) lies on the face.
+fn on_face(b: &Body, f: usize, p: &P3) -> bool {
+    let face = &b.faces[f];
+    let polys = super::classify::face_polygons(b, face);
+    let (u, v) = face.surf.project(p, None);
+    super::classify::periodic_candidates(&face.surf, u, v, &polys)
+        .into_iter()
+        .any(|uv| super::classify::in_face(&polys, &face.surf, uv, 1e-7) != super::classify::InFace::Outside)
+}
+
+/// Face `f` as a [`RoundFace`] of the `picked` edges' fillets of radius `r`, when it is one
+/// (and its walls reach a radius under it all along, so the round cuts nothing beyond them).
+fn round_face(b: &Body, f: usize, picked: &[usize], r: f64) -> Option<RoundFace> {
+    let close = tol::POINT.max(tol::REL_POINT * r);
+    let (_, n) = face_plane(b, f)?;
+    let [lp] = &b.faces[f].loops[..] else { return None };
+    if lp.len() != 4 {
+        return None;
+    }
+    let line = |e: usize| -> Option<(P3, V3)> {
+        let ed = &b.edges[e];
+        let Curve::Line { .. } = ed.curve else { return None };
+        let (p, q) = (ed.point(ed.t[0]), ed.point(ed.t[1]));
+        let d = q - p;
+        (d.norm() > tol::POINT).then(|| (p, d / d.norm()))
+    };
+    // The picked pair of opposite edges two radii apart (one pair only: a square face of
+    // side 2r with all four edges picked has no direction).
+    let pairs: Vec<(usize, usize, P3, V3, P3)> = [(0, 2), (1, 3)]
+        .into_iter()
+        .filter_map(|(i, j)| {
+            let (a, c) = (lp[i].edge, lp[j].edge);
+            if !picked.contains(&a) || !picked.contains(&c) {
+                return None;
+            }
+            let ((p, d), (q, d2)) = (line(a)?, line(c)?);
+            let w = q - p;
+            let across = w - d * w.dot(&d);
+            (d.cross(&d2).norm() <= tol::ANGULAR_POINT && (across.norm() - 2.0 * r).abs() <= close).then_some((i, j, p, d, p + across * 0.5))
+        })
+        .collect();
+    let [(i, j, _, d, mid)] = pairs[..] else { return None };
+    let sides = [lp[i].edge, lp[j].edge];
+    let ends = [lp[(i + 1) % 4].edge, lp[(j + 1) % 4].edge];
+    // The walls: flat, facing away from each other, square to the face and the axis.
+    let wall = |e: usize| -> Option<(usize, V3)> {
+        let [s1, s2] = edge_sides(b, e).ok()?;
+        let g = if s1.0 == f { s2.0 } else { s1.0 };
+        let (_, m) = face_plane(b, g)?;
+        (m.dot(&n).abs() < tol::ANGULAR && m.dot(&d).abs() < tol::ANGULAR).then_some((g, m))
+    };
+    let ((w0, m0), (w1, m1)) = (wall(sides[0])?, wall(sides[1])?);
+    let c = mid - n * r;
+    let (p0, p1) = (b.edges[sides[0]].point(b.edges[sides[0]].t[0]), b.edges[sides[1]].point(b.edges[sides[1]].t[0]));
+    if w0 == w1 || m0.dot(&m1) > -1.0 + tol::ANGULAR || m0.dot(&(p0 - c)) <= 0.0 || m1.dot(&(p1 - c)) <= 0.0 {
+        return None;
+    }
+    // The ends square to the axis: both vertices of each the same distance along it.
+    let mut at = [0.0; 2];
+    for (k, &e) in ends.iter().enumerate() {
+        let ed = &b.edges[e];
+        let (a, z) = ((b.verts[ed.v[0]].p - c).dot(&d), (b.verts[ed.v[1]].p - c).dot(&d));
+        if (a - z).abs() > close || line(e).is_none() {
+            return None;
+        }
+        at[k] = a;
+    }
+    let (span, ends) = if at[0] <= at[1] { ([at[0], at[1]], ends) } else { ([at[1], at[0]], [ends[1], ends[0]]) };
+    if span[1] - span[0] <= close {
+        return None;
+    }
+    // The walls reach a radius under the face all along it (the round's tangent lines lie on
+    // them).
+    for (w, m) in [(w0, m0), (w1, m1)] {
+        for k in 0..=4 {
+            let s = span[0] + (span[1] - span[0]) * (0.01 + 0.98 * k as f64 / 4.0);
+            for h in [0.0, 0.5 * r] {
+                if !on_face(b, w, &(c + d * s + m * r + n * h)) {
+                    return None;
+                }
+            }
+        }
+    }
+    Some(RoundFace { face: f, sides, walls: [w0, w1], n, d, c, span, ends })
+}
+
+/// The section of a full round's tool in its plane (x across between the walls, y up out of
+/// the face, the axis at the origin): the strip between the walls from the axis to half a
+/// radius above the face, less the half disc of the round (curve source 1).
+fn round_section(plane: Plane, r: f64) -> Result<Vec<MergedFace>> {
+    let top = r * 1.5 + 1e-3;
+    let p2 = |a: f64, c: f64| nalgebra::Point2::new(a, c);
+    let l = |a, c| Curve2::Line { a, b: c, source: None };
+    let region = Region {
+        outer: Loop {
+            curves: vec![
+                Curve2::Arc { center: p2(0.0, 0.0), radius: r, start_angle: 0.0, sweep: PI, source: Some(1) },
+                l(p2(-r, 0.0), p2(-r, top)),
+                l(p2(-r, top), p2(r, top)),
+                l(p2(r, top), p2(r, 0.0)),
+            ],
+        },
+        holes: vec![],
+        source: None,
+    };
+    super::profile::merge_regions(&super::profile::regions(&Profile::new(plane, vec![region]))?)
+}
+
+/// The faces' sources of a full round's tool: the round's surface (swept by curve 1) `src`,
+/// the rest none (they lie on the walls, past the face, or inside where tools meet).
+fn round_src(built: &super::build::Built, src: &FaceSrc) -> Vec<Vec<FaceSrc>> {
+    let mut out = vec![Vec::new(); built.body.faces.len()];
+    for (f, o) in &built.origins {
+        if let Origin::ProfileCurve { curve: 1, .. } = o {
+            out[*f].push(src.clone());
+        }
+    }
+    out
+}
+
+/// The tool of full round `rf` between `range` along its axis: its section swept straight.
+fn round_prism(rf: &RoundFace, r: f64, range: [f64; 2], src: FaceSrc) -> Result<(Body, Vec<Vec<FaceSrc>>)> {
+    // x = n × d across, so y = d × x is the face's normal.
+    let x = rf.n.cross(&rf.d);
+    let plane = Plane { origin: rf.c, x_dir: nalgebra::Unit::new_normalize(x), normal: nalgebra::Unit::new_normalize(rf.d) };
+    let mf = round_section(plane, r)?;
+    let built = sweep::sweep_full(&mf, &[], &Prism { plane, dir: rf.d }, range[0], range[1], false, true)?;
+    let src = round_src(&built, &src);
+    Ok((built.body, src))
+}
+
+/// The tool of the corner where a full round (face normal `n`, running `out` into the corner)
+/// meets another turning down square to it, about the ball centre `centre`: the round's
+/// section turned a quarter about the line through the centre across the walls, so the ball's
+/// quarter sphere joins the two half cylinders.
+fn round_corner(centre: P3, n: V3, out: V3, r: f64, src: FaceSrc) -> Result<(Body, Vec<Vec<FaceSrc>>)> {
+    // The section plane holds the axis (z = n × out) and the start direction n: x = n
+    // (radial, the section's y above), plane y = z (the section's x across).
+    let z = n.cross(&out);
+    let plane = Plane { origin: centre, x_dir: nalgebra::Unit::new_normalize(n), normal: nalgebra::Unit::new_normalize(-out) };
+    // The same section as the straight tools', in (radial, across) coordinates: the strip
+    // from the axis out to `top`, less the half disc (from (0, −r) round through (r, 0)).
+    let top = r * 1.5 + 1e-3;
+    let p2 = |a: f64, c: f64| nalgebra::Point2::new(a, c);
+    let l = |a, c| Curve2::Line { a, b: c, source: None };
+    let region = Region {
+        outer: Loop {
+            curves: vec![
+                Curve2::Arc { center: p2(0.0, 0.0), radius: r, start_angle: -PI / 2.0, sweep: PI, source: Some(1) },
+                l(p2(0.0, r), p2(top, r)),
+                l(p2(top, r), p2(top, -r)),
+                l(p2(top, -r), p2(0.0, -r)),
+            ],
+        },
+        holes: vec![],
+        source: None,
+    };
+    let mf = super::profile::merge_regions(&super::profile::regions(&Profile::new(plane, vec![region]))?)?;
+    let kind = Revolve { plane, f: Frame { o: centre, x: n, y: out, z } };
+    let built = sweep::sweep_full(&mf, &[], &kind, 0.0, PI / 2.0, false, true)?;
+    let src = round_src(&built, &src);
+    Ok((built.body, src))
+}
+
+/// Fillets making full rounds that meet at corners (two flat faces each consumed by the
+/// fillets of its two long edges, joined at a picked edge square to both, between the same
+/// walls): as the rolling ball, each face becomes a half cylinder and each corner the ball's
+/// quarter sphere. The rounds and corners are cut by exact tools (the round's section swept
+/// along its axis, stopped at the corner's ball centre; turned a quarter about the ball at the
+/// corner), then the other picked edges are filleted on the result as usual (an edge where a
+/// round ran into a wall is now the half circle there). `None` when no rounds meet so (or not
+/// in a way these tools build).
+fn full_round_corners(k: &mut NativeKernel, body: BodyId, all: &[EdgeId], spec: &FilletSpec, r: f64) -> Result<Option<OpResult>> {
+    let b = (**k.get(body)?).clone();
+    let picked: Vec<usize> = all.iter().map(|e| e.0 as usize).filter(|&e| e < b.edges.len()).collect();
+    let rounds: Vec<RoundFace> = (0..b.faces.len()).filter_map(|f| round_face(&b, f, &picked, r)).collect();
+    let close = tol::POINT.max(tol::REL_POINT * r);
+    // Each round's tool's range along its axis, and the corners: (round, its end, the edge
+    // there, the ball centre).
+    let mut ranges: Vec<[f64; 2]> = Vec::new();
+    let mut corners: Vec<(usize, usize, usize, P3)> = Vec::new();
+    for (i, rf) in rounds.iter().enumerate() {
+        let mut range = rf.span;
+        for end in 0..2 {
+            let e = rf.ends[end];
+            let sign = if end == 0 { -1.0 } else { 1.0 };
+            let out = rf.d * sign;
+            let Ok([s1, s2]) = edge_sides(&b, e) else { return Ok(None) };
+            let g = if s1.0 == rf.face { s2.0 } else { s1.0 };
+            match rounds.iter().find(|o| o.face == g) {
+                // Another round across a picked end edge: a corner, the other turning down
+                // square to this one between the same walls; both stop at the ball centre.
+                Some(o) if picked.contains(&e) => {
+                    let same_walls = o.walls.iter().all(|w| rf.walls.contains(w));
+                    if !same_walls || o.n.dot(&out) < 1.0 - tol::ANGULAR || rf.n.dot(&o.d).abs() < 1.0 - tol::ANGULAR {
+                        return Ok(None);
+                    }
+                    range[end] = rf.span[end] - sign * r;
+                    let centre = rf.c + rf.d * range[end];
+                    let off = centre - o.c;
+                    if (off - o.d * off.dot(&o.d)).norm() > close {
+                        return Ok(None);
+                    }
+                    if !corners.iter().any(|x| x.2 == e) {
+                        corners.push((i, end, e, centre));
+                    }
+                }
+                // Rounds crossing at an edge left sharp: not built.
+                Some(_) => return Ok(None),
+                // A free end at a flat face square to the axis: one the round runs out of
+                // (convex) is passed by half a radius; at a wall it runs into (concave) the
+                // tool stops flush.
+                None => {
+                    let Some((_, m)) = face_plane(&b, g) else { return Ok(None) };
+                    if m.dot(&out).abs() < 1.0 - tol::ANGULAR {
+                        return Ok(None);
+                    }
+                    if m.dot(&out) > 0.0 {
+                        range[end] += sign * 0.5 * r;
+                    }
+                }
+            }
+        }
+        ranges.push(range);
+    }
+    if corners.is_empty() {
+        return Ok(None);
+    }
+    // The rounds, then the corners (each corner's tool meets its rounds' flush on their ends).
+    let mut cur = Tracked::of(b.clone());
+    for (rf, range) in rounds.iter().zip(&ranges) {
+        let (tool, src) = round_prism(rf, r, *range, FaceSrc::Input(rf.face))?;
+        cur = cur.apply(&tool, &src, BoolOp::Subtract)?;
+    }
+    for &(i, end, e, centre) in &corners {
+        let rf = &rounds[i];
+        let out = if end == 0 { -rf.d } else { rf.d };
+        let (tool, src) = round_corner(centre, rf.n, out, r, FaceSrc::New(Origin::FromEdge { body, edge: EdgeId(e as u64) }))?;
+        cur = cur.apply(&tool, &src, BoolOp::Subtract)?;
+    }
+    if cur.body.solids.len() != b.solids.len() {
+        return Err(KernelError::InvalidResult { op: "fillet", why: "the full rounds split the solid".into() });
+    }
+    let mid = cur.into_result(k, body);
+    let mid_id = mid.bodies[0];
+    // The other picked edges, on the result: the edges between the faces continuing theirs,
+    // within a radius of where they were.
+    let consumed: Vec<usize> = rounds.iter().flat_map(|rf| rf.sides).chain(corners.iter().map(|x| x.2)).collect();
+    let rest: Vec<usize> = picked.iter().copied().filter(|e| !consumed.contains(e)).collect();
+    if rest.is_empty() {
+        return Ok(Some(mid));
+    }
+    let out = (**k.get(mid_id)?).clone();
+    let ef = out.edge_faces();
+    let continues = |g: usize, f: usize| mid.history.modified.iter().any(|(x, i)| x.0 as usize == g && i.face.0 as usize == f);
+    // (new edge, the picked edge it continues)
+    let mut back: Vec<(usize, usize)> = Vec::new();
+    for &e in &rest {
+        let ed = &b.edges[e];
+        let Ok([s1, s2]) = edge_sides(&b, e) else { continue };
+        let (f1, f2) = (s1.0, s2.0);
+        let found: Vec<usize> = (0..out.edges.len())
+            .filter(|&x| {
+                let [g1, g2] = ef[x][..] else { return false };
+                let between = (continues(g1, f1) && continues(g2, f2)) || (continues(g1, f2) && continues(g2, f1));
+                let oe = &out.edges[x];
+                let p = oe.point(oe.mid_t());
+                between && !oe.degenerate && (ed.point(ed.curve.closest(&p, ed.t[0], ed.t[1])) - p).norm() <= r + close
+            })
+            .collect();
+        if found.is_empty() {
+            k.release(mid_id);
+            return Err(KernelError::InvalidResult { op: "fillet", why: format!("edge {e} is gone after the full rounds") });
+        }
+        back.extend(found.into_iter().map(|x| (x, e)));
+    }
+    let mapped: Vec<EdgeId> = back.iter().map(|&(x, _)| EdgeId(x as u64)).collect();
+    let res = fillet(k, mid_id, &mapped, &FilletSpec { propagate: false, ..*spec });
+    k.release(mid_id);
+    let res = res?;
+    // The history back to the input: through the full rounds' faces, and the fillets' faces
+    // from the picked edges they continue.
+    let mut history = History::default();
+    for (f, i) in &res.history.modified {
+        for (g, x) in &mid.history.modified {
+            if *g == i.face {
+                history.modified.push((*f, *x));
+            }
+        }
+        for (g, o) in &mid.history.generated {
+            if *g == i.face {
+                history.generated.push((*f, *o));
+            }
+        }
+    }
+    let from_edge = |x: usize| Origin::FromEdge { body, edge: EdgeId(back.iter().find(|(m, _)| *m == x).map_or(rest[0], |(_, e)| *e) as u64) };
+    for (f, o) in &res.history.generated {
+        let o = match o {
+            Origin::FromEdge { edge, .. } => from_edge(edge.0 as usize),
+            // A corner patch: from the edge whose fillet ends there.
+            Origin::FromVertex { vertex, .. } => {
+                let at = back.iter().find(|(m, _)| out.edges[*m].v.iter().any(|&v| vertex_index(&out, v) == vertex.0 as usize));
+                from_edge(at.map_or(back[0].0, |(m, _)| *m))
+            }
+            o => *o,
+        };
+        history.generated.push((*f, o));
+    }
+    for i in 0..b.faces.len() {
+        if !history.modified.iter().any(|(_, x)| x.face.0 as usize == i) {
+            history.deleted.push(InputFace { body, face: FaceId(i as u64) });
+        }
+    }
+    Ok(Some(OpResult { bodies: res.bodies, history }))
+}
+
 pub fn fillet(k: &mut NativeKernel, body: BodyId, edges: &[EdgeId], spec: &FilletSpec) -> Result<OpResult> {
     let (FilletSize::Radius(r) | FilletSize::Width(r)) = spec.size;
     if !(r > 0.0) {
@@ -1385,6 +1748,25 @@ pub fn fillet(k: &mut NativeKernel, body: BodyId, edges: &[EdgeId], spec: &Fille
     // A width: the radius whose contacts lie that far apart, on each edge whose faces meet at
     // one angle (normals φ apart: r = w / (2 sin(φ/2))).
     let b = (**k.get(body)?).clone();
+    // Full rounds meeting at corners: by their own exact tools, the other edges after.
+    if let (FilletSize::Radius(r), FilletProfile::Circular) = (spec.size, spec.profile)
+        && consumed_face(&b, &all, r).is_some()
+    {
+        match full_round_corners(k, body, &all, spec, r) {
+            Ok(Some(res)) => {
+                if !spec.allow_overflow {
+                    check_overflow(k, body, &all, &res)?;
+                }
+                return Ok(res);
+            }
+            Ok(None) => {}
+            Err(e) => {
+                if std::env::var_os("CADRS_BLEND_DEBUG").is_some() {
+                    eprintln!("full rounds meeting at corners: {e}");
+                }
+            }
+        }
+    }
     // (Local trimming passes over edges whose faces join smoothly.)
     let sharp = sharp_edges(&b, &all)?;
     let laws: Option<Vec<super::fillet::RadiusLaw>> = sharp
@@ -1800,6 +2182,33 @@ pub fn fillet_partial(k: &mut NativeKernel, body: BodyId, edge: EdgeId, spec: &F
     Ok(out.into_result(k, body))
 }
 
+/// Fillets of a radius law each by local trimming alone (no tool and boolean): the edges'
+/// strips and their corners, edges of different radii meeting in patched corners.
+pub fn fillet_laws_local(k: &mut NativeKernel, body: BodyId, laws: &[FilletLaw]) -> Result<OpResult> {
+    let b = (**k.get(body)?).clone();
+    if !laws.iter().all(|l| (l.edge.0 as usize) < b.edges.len() && !l.radii.is_empty()) {
+        return Err(KernelError::InvalidParameter("unknown edge or empty law".into()));
+    }
+    if std::env::var_os("CADRS_NO_LOCAL_FILLET").is_some() {
+        return Err(KernelError::Unsupported("local fillets (CADRS_NO_LOCAL_FILLET is set)"));
+    }
+    let edges: Vec<super::fillet::RadiusLaw> = laws
+        .iter()
+        .map(|l| {
+            let mut pts = l.radii.clone();
+            pts.sort_by(|a, c| a.0.total_cmp(&c.0));
+            (l.edge.0 as usize, pts)
+        })
+        .collect();
+    let (out, src) = super::fillet::fillet_edges_laws(&b, body, &edges, false)?;
+    let mut merged = out.clone();
+    merge_edges(&mut merged);
+    if let Some(e) = local_problem(&b, &merged) {
+        return Err(KernelError::InvalidResult { op: "fillet", why: format!("the local fillet isn't valid: {e}") });
+    }
+    Ok(Tracked { body: out, src }.into_result(k, body))
+}
+
 /// A variable fillet: circular sections whose radius follows a law along each edge, lofted
 /// through sections at the law's points (and past the edge's ends).
 pub fn fillet_variable(k: &mut NativeKernel, body: BodyId, laws: &[FilletLaw], _allow_overflow: bool) -> Result<OpResult> {
@@ -1809,32 +2218,14 @@ pub fn fillet_variable(k: &mut NativeKernel, body: BodyId, laws: &[FilletLaw], _
     let laws = &laws[..];
     // By local trimming first (any edge and faces), then the tool for straight edges between
     // flat faces.
-    if laws.iter().all(|l| (l.edge.0 as usize) < b.edges.len() && !l.radii.is_empty()) && std::env::var_os("CADRS_NO_LOCAL_FILLET").is_none() {
-        let edges: Vec<super::fillet::RadiusLaw> = laws
-            .iter()
-            .map(|l| {
-                let mut pts = l.radii.clone();
-                pts.sort_by(|a, c| a.0.total_cmp(&c.0));
-                (l.edge.0 as usize, pts)
-            })
-            .collect();
-        let local = super::fillet::fillet_edges_laws(&b, body, &edges, false).and_then(|(out, src)| {
-            let mut merged = out.clone();
-            merge_edges(&mut merged);
-            match local_problem(&b, &merged) {
-                Some(e) => Err(KernelError::InvalidResult { op: "fillet", why: format!("the local fillet isn't valid: {e}") }),
-                None => Ok((out, src)),
+    match fillet_laws_local(k, body, laws) {
+        Ok(r) => return Ok(r),
+        Err(e) => {
+            if std::env::var_os("CADRS_LOCAL_FILLET_ONLY").is_some() {
+                return Err(e);
             }
-        });
-        match local {
-            Ok((out, src)) => return Ok(Tracked { body: out, src }.into_result(k, body)),
-            Err(e) => {
-                if std::env::var_os("CADRS_LOCAL_FILLET_ONLY").is_some() {
-                    return Err(e);
-                }
-                if std::env::var_os("CADRS_BLEND_DEBUG").is_some() {
-                    eprintln!("local variable fillet: {e}; falling back to the blend tool");
-                }
+            if std::env::var_os("CADRS_BLEND_DEBUG").is_some() {
+                eprintln!("local variable fillet: {e}; falling back to the blend tool");
             }
         }
     }
