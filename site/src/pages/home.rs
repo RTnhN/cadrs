@@ -346,16 +346,6 @@ impl<L: DataLoader> WebRenderSync<L> for HomePage {
                                     "View the source"
                                 </a>
                             </p>
-                            <p class="mt-6 flex items-start gap-3 text-sm leading-6 text-muted-foreground">
-                                {Badge {
-                                    variant: BadgeVariant::Warning,
-                                    class: Some("mt-0.5 shrink-0 rounded-full"),
-                                    children: Some("Early"),
-                                }}
-                                <span>
-                                    "Moving fast through the Onshape Learning Center's CAD Basics courses. Expect rough edges, and file formats that may still change."
-                                </span>
-                            </p>
                         </div>
                         <div class="relative mx-auto w-full max-w-2xl">
                             <div
@@ -515,8 +505,6 @@ impl<L: DataLoader, B: WriteBuf> MdRenderSync<L, B> for HomePage {
             Open source under MIT or Apache\-2\.0\.
 
             Sketch on a plane, constrain and dimension, build parts from features, put them together in assemblies, and make drawings from them\. cadrs follows Onshape's workflow, with a Bevy UI and an OpenCASCADE kernel, and runs on your own machine\.
-
-            **Early\.** Moving fast through the Onshape Learning Center's CAD Basics courses\. Expect rough edges, and file formats that may still change\.
 
             From sketch to part to PCB, in one document: [watch the 90\-second demo](https://youtu.be/qT1FKZqUAxA)\.
 
