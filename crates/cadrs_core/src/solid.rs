@@ -181,12 +181,16 @@ pub type Bounds = (Vec3, Vec3);
 
 /// A [`Solid`]'s boxes for picking: its own, and each face's and edge's (by index). A pick
 /// tests a box before the triangles or segments in it, so a ray through a big part costs about
-/// the faces it passes near, not all of its triangles.
+/// the faces it passes near, not all of its triangles. A face of many triangles (a lofted
+/// ground of a whole site) has a tree of boxes over them too ([`TriangleTree`]), so a ray costs
+/// about the triangles it passes near.
 #[derive(Debug, Clone, PartialEq)]
 pub struct PickIndex {
     pub bounds: Option<Bounds>,
     pub faces: Vec<Option<Bounds>>,
     pub edges: Vec<Option<Bounds>>,
+    /// Each face's [`TriangleTree`], for a face of more than [`TREE_LEAF`] triangles.
+    pub trees: Vec<Option<TriangleTree>>,
     /// The solid's counts when this was built, to catch geometry changed afterwards.
     shape: [usize; 4],
 }
@@ -213,6 +217,85 @@ impl PartialEq for PickCache {
 impl std::fmt::Debug for PickCache {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str("PickCache")
+    }
+}
+
+/// The most triangles in a leaf of a [`TriangleTree`] (a face of no more has no tree).
+pub const TREE_LEAF: usize = 16;
+
+/// A bounding volume tree over a face's triangles: each node's box holds its triangles, split
+/// at the median along the longest axis of their centres.
+#[derive(Debug, Clone, PartialEq)]
+pub struct TriangleTree {
+    /// Node 0 is the root.
+    nodes: Vec<TreeNode>,
+    /// The triangles (solid triangle indices), in the order the leaves cover.
+    order: Vec<u32>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+struct TreeNode {
+    bounds: Bounds,
+    /// A leaf: `order[first..first + count]`; a branch (count 0): children `first`, `first + 1`.
+    first: u32,
+    count: u32,
+}
+
+impl TriangleTree {
+    fn build(solid: &Solid, tris: std::ops::Range<usize>) -> Option<Self> {
+        let corners = |t: usize| [0, 1, 2].map(|k| solid.indices.get(3 * t + k).and_then(|&i| solid.positions.get(i as usize)).copied());
+        let mut items: Vec<(u32, Vec3)> = Vec::with_capacity(tris.len());
+        for t in tris {
+            let [Some(a), Some(b), Some(c)] = corners(t) else { return None };
+            items.push((t as u32, [0, 1, 2].map(|i| (a[i] + b[i] + c[i]) / 3.0)));
+        }
+        let mut tree = TriangleTree { nodes: Vec::new(), order: Vec::with_capacity(items.len()) };
+        let bounds = |items: &[(u32, Vec3)]| {
+            bounds_of(items.iter().flat_map(|(t, _)| corners(*t as usize).into_iter().flatten()))
+        };
+        tree.nodes.push(TreeNode { bounds: bounds(&items)?, first: 0, count: 0 });
+        // (node, its items), split until the leaves are small.
+        let mut todo = vec![(0usize, items)];
+        while let Some((node, mut items)) = todo.pop() {
+            if items.len() <= TREE_LEAF {
+                tree.nodes[node].first = tree.order.len() as u32;
+                tree.nodes[node].count = items.len() as u32;
+                tree.order.extend(items.iter().map(|(t, _)| *t));
+                continue;
+            }
+            let (lo, hi) = items.iter().fold(([f64::INFINITY; 3], [f64::NEG_INFINITY; 3]), |(lo, hi), (_, c)| {
+                ([0, 1, 2].map(|i| lo[i].min(c[i])), [0, 1, 2].map(|i| hi[i].max(c[i])))
+            });
+            let axis = (0..3).max_by(|&a, &b| (hi[a] - lo[a]).total_cmp(&(hi[b] - lo[b]))).unwrap_or(0);
+            let mid = items.len() / 2;
+            items.select_nth_unstable_by(mid, |a, b| a.1[axis].total_cmp(&b.1[axis]));
+            let right = items.split_off(mid);
+            let first = tree.nodes.len();
+            for half in [&items, &right] {
+                tree.nodes.push(TreeNode { bounds: bounds(half)?, first: 0, count: 0 });
+            }
+            tree.nodes[node].first = first as u32;
+            todo.push((first, items));
+            todo.push((first + 1, right));
+        }
+        Some(tree)
+    }
+
+    /// The solid triangle indices in the leaves whose boxes the line passes through.
+    fn along(&self, origin: Vec3, dir: Vec3, mut each: impl FnMut(usize)) {
+        let mut stack = vec![0usize];
+        while let Some(n) = stack.pop() {
+            let node = &self.nodes[n];
+            if !line_hits_box(origin, dir, &node.bounds) {
+                continue;
+            }
+            let first = node.first as usize;
+            if node.count == 0 {
+                stack.extend([first, first + 1]);
+            } else {
+                self.order[first..first + node.count as usize].iter().for_each(|&t| each(t as usize));
+            }
+        }
     }
 }
 
@@ -750,6 +833,11 @@ impl Solid {
             bounds: bounds_of(self.positions.iter().copied()),
             faces: self.faces.iter().map(face).collect(),
             edges: self.edges.iter().map(|e| bounds_of(e.points.iter().copied())).collect(),
+            trees: self
+                .faces
+                .iter()
+                .map(|f| (f.triangle_count > TREE_LEAF).then(|| TriangleTree::build(self, f.first_triangle..f.first_triangle + f.triangle_count)).flatten())
+                .collect(),
             shape: [self.positions.len(), self.indices.len(), self.faces.len(), self.edges.len()],
         }
     }
@@ -765,14 +853,17 @@ impl Solid {
             if !index.faces[fi].as_ref().is_some_and(|b| line_hits_box(origin, dir, b)) || !keep(f) {
                 continue;
             }
-            for tri in f.first_triangle..f.first_triangle + f.triangle_count {
+            let mut hit = |tri: usize| {
                 let [a, b, c] = [0, 1, 2].map(|k| self.positions[self.indices[3 * tri + k] as usize]);
-                let Some(t) = ray_triangle(origin, dir, a, b, c) else {
-                    continue;
-                };
-                if best.is_none_or(|(_, bt)| t < bt) {
+                if let Some(t) = ray_triangle(origin, dir, a, b, c)
+                    && best.is_none_or(|(_, bt)| t < bt)
+                {
                     best = Some((fi, t));
                 }
+            };
+            match index.trees.get(fi).and_then(Option::as_ref) {
+                Some(tree) => tree.along(origin, dir, &mut hit),
+                None => (f.first_triangle..f.first_triangle + f.triangle_count).for_each(hit),
             }
         }
         best
@@ -1421,11 +1512,14 @@ mod tests {
                     let o = [i as f64 * 4.3, j as f64 * 3.9, 12.5];
                     let (a, b) = (solid.pick(o, d), brute(o, d));
                     assert_eq!(a.map(|x| x.0), b.map(|x| x.0), "ray from {o:?} along {d:?}");
+                    assert!(a.zip(b).is_none_or(|(a, b)| (a.1 - b.1).abs() < 1e-9));
                     hits += a.is_some() as usize;
                 }
             }
         }
         assert!(hits > 100, "most rays hit the part ({hits})");
+        // The holes' walls have more triangles than a leaf: they are picked through a tree.
+        assert!(solid.pick_index().trees.iter().any(Option::is_some));
         // A moved copy gets its own boxes.
         let mut moved = solid.clone();
         moved.positions.iter_mut().for_each(|p| p[0] += 100.0);
