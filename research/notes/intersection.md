@@ -229,6 +229,7 @@ read in this session, it is marked "(recollection)"; treat those sentences as un
   10.1016/S0167-8396(96)00024-9.
 - **Canonical URL.** https://doi.org/10.1016/S0167-8396(96)00024-9 (publisher page refused
   automated access; the paper is paywalled).
+- **Local copy.** [../papers/intersection/Grandine-Klein-1997-new-approach-surface-intersection.md](../papers/intersection/Grandine-Klein-1997-new-approach-surface-intersection.md), added later; the summary below was written before it was read.
 - **Open-access PDF.** None found. Related: T. A. Grandine, "Applications of contouring", *SIAM
   Review* 42(2), 2000 (not fetched); J. Hass, R. T. Farouki, C. Y. Han, X. Song, T. W.
   Sederberg, "Guaranteed consistency of surface intersections and trimmed surfaces using a

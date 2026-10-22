@@ -1,16 +1,10 @@
 # Papers to download by hand
 
-These 12 papers matter to the research, and no free copy turned up on 2026-10-22. Publisher sites, author homepages, university repositories, OpenAlex and the Wayback Machine were all searched. They need a library login.
+These 11 papers matter to the research, and no free copy turned up on 2026-10-22. Publisher sites, author homepages, university repositories, OpenAlex and the Wayback Machine were all searched. They need a library login.
 
 Open each link in your normal browser and save the PDF in the folder of its heading, under the file name given. When some are in, ask Claude to convert them (`.md` with docling, `.txt` with pdftotext) and commit them.
 
 ScienceDirect links (`sciencedirect.com/.../pdfft`) show the PDF only if the article is open access or your library subscribes. Older CAGD papers are often in Elsevier's free archive. The links go straight to the PDF; if one shows an article page instead, use its "View PDF" button.
-
-## `research/papers/intersection/`
-
-| Paper | Link | Save as |
-|---|---|---|
-| Grandine & Klein 1997, a new approach to the surface intersection problem | https://www.sciencedirect.com/science/article/pii/S0167839696000246/pdfft | `Grandine-Klein-1997-new-approach-surface-intersection.pdf` |
 
 ## `research/papers/blends/`
 
@@ -45,9 +39,9 @@ ScienceDirect links (`sciencedirect.com/.../pdfft`) show the PDF only if the art
 
 ## Already fetched
 
-32 papers from the original list were fetched on 2026-10-22, some as an earlier or preprint version:
+33 papers from the original list were fetched on 2026-10-22, some as an earlier or preprint version:
 
-- **intersection:** Krishnan & Manocha 1997, Manocha & Canny 1991, Sederberg & Zundel 1996, Dupont et al. 2008 I–III, Mourrain & Pavone 2009, Sherbrooke 1993 MIT thesis, Mukundan 2005 MIT thesis, Hu & Wallner 2005 (article-in-press copy, Tsinghua), Wang, Goldman & Tu 2003 (Wayback copy of the HKU file), Lin et al. 2014 (author's page, Zhejiang)
+- **intersection:** Krishnan & Manocha 1997, Manocha & Canny 1991, Sederberg & Zundel 1996, Dupont et al. 2008 I–III, Mourrain & Pavone 2009, Sherbrooke 1993 MIT thesis, Mukundan 2005 MIT thesis, Hu & Wallner 2005 (article-in-press copy, Tsinghua), Wang, Goldman & Tu 2003 (Wayback copy of the HKU file), Lin et al. 2014 (author's page, Zhejiang), Grandine & Klein 1997 (saved by hand)
 - **blends:** Chuang & Hwang 1997 (NYCU repository); Dahl & Krasauskas 2012 as chapter 2 of Heidi Dahl's 2014 Oslo PhD thesis
 - **offsets_sweeps_lofts:** Forsyth 1995
 - **tessellation_mass_queries:** Gonzalez-Ochoa et al. 1998, Chen et al. 2006, Elber & Cohen 1990, Appel 1967, Johnson & Cohen 2005, Bénard, Hertzmann & Kass 2014, Hughes, Reali & Sangalli 2010 (as ICES Report 08-27)

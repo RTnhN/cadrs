@@ -1,6 +1,6 @@
 # Findings
 
-The research is distilled into 49 implementation cards in [algorithms/](algorithms/), with the full report in [README.md](README.md), the per-area notes in [notes/](notes/), and 168 papers as Markdown in [papers/](papers/). The PDFs are git-ignored.
+The research is distilled into 49 implementation cards in [algorithms/](algorithms/), with the full report in [README.md](README.md), the per-area notes in [notes/](notes/), and 169 papers as Markdown in [papers/](papers/). The PDFs are git-ignored.
 
 Each card gives the algorithm's steps, equations and constants, where it plugs into cadrs, and its sources. It also says whether it was checked against the paper text or OCCT source, or comes only from the notes. The build order in [algorithms/README.md](algorithms/README.md) starts with five cheap measurements, because none of the payoffs has been timed in cadrs.
 
@@ -22,10 +22,10 @@ Each card gives the algorithm's steps, equations and constants, where it plugs i
 
 | | Count |
 |---|---|
-| Papers | 168 |
-| With Markdown (docling) | 168 |
-| With text (pdftotext) | 158 |
+| Papers | 169 |
+| With Markdown (docling) | 169 |
+| With text (pdftotext) | 159 |
 
 The other 10 are scans or image-only PDFs, so their Markdown comes from OCR. The paper text adds about 24 MB to the repo.
 
-Of the 44 papers the report listed as missing, 32 were later found free. That includes author copies, repository copies, tech-report versions and archived copies of dead links. The 12 still missing need a library login; [download.md](download.md) lists them with links and file names.
+Of the 44 papers the report listed as missing, 33 were later found. That includes author copies, repository copies, tech-report versions and archived copies of dead links. The 11 still missing need a library login; [download.md](download.md) lists them with links and file names.
