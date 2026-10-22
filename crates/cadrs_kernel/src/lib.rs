@@ -864,8 +864,10 @@ pub trait Kernel {
     /// `t` (hits behind the origin have negative `t`). Up to next uses it to find what lies
     /// ahead of a profile.
     fn ray_hits(&self, body: BodyId, origin: Point3<f64>, dir: Vector3<f64>) -> Result<Vec<RayHit>>;
-    /// Writes bodies as OpenCASCADE text BREP (geometry only, one compound). No backend
-    /// writes it yet: the native kernel returns [`KernelError::Unsupported`].
+    /// Writes bodies as OpenCASCADE text BREP (geometry only, one compound of their solids,
+    /// sheets, wires and points), as `BRepTools::Read` and DRAW's `restore` read it. The
+    /// native kernel writes exact geometry and its tolerances; a backend without a writer
+    /// returns [`KernelError::Unsupported`].
     fn export_brep(&self, _bodies: &[BodyId]) -> Result<Vec<u8>> {
         Err(KernelError::Unsupported("OpenCASCADE BREP export"))
     }

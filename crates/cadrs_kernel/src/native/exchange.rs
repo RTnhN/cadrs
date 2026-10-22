@@ -1,7 +1,7 @@
 //! The native kernel's side of data exchange (P3F.2): [`crate::Kernel::import_model`] /
 //! `export_model` over [`super::step`] and [`super::iges`], the plain `import_step` /
-//! `export_step`, `mesh_solid` ([`super::meshsolid`]) and `write_body` / `read_body`
-//! ([`super::bodyio`]).
+//! `export_step`, `export_brep` ([`super::brep_write`]), `mesh_solid` ([`super::meshsolid`])
+//! and `write_body` / `read_body` ([`super::bodyio`]).
 //!
 //! **Colours.** STEP surface styles become the parts' face colours (kept by the session:
 //! [`crate::Kernel::face_colors`]) and occurrence colours; `export_model` and `export_step`
@@ -105,6 +105,13 @@ pub fn export_step(k: &NativeKernel, bodies: &[BodyId]) -> Result<Vec<u8>> {
     let named: Vec<(&Body, &str)> = bs.iter().zip(&names).map(|(b, n)| (*b, n.as_str())).collect();
     let colors: Vec<&[Option<[u8; 4]>]> = bodies.iter().map(|b| k.colors(*b)).collect();
     Ok(super::step::write_colored("cadrs", &named, &colors, &[]))
+}
+
+/// Writes bodies as one compound in OCCT's BRep text format ([`super::brep_write`]).
+pub fn export_brep(k: &NativeKernel, bodies: &[BodyId]) -> Result<Vec<u8>> {
+    let bs: Vec<&Body> = bodies.iter().map(|b| k.get(*b).map(|a| a.as_ref())).collect::<Result<_>>()?;
+    writable(&bs)?;
+    Ok(super::brep_write::write(&bs).into_bytes())
 }
 
 /// One body per solid of `b` (with its void shells), the shells of no solid together as one
@@ -315,6 +322,73 @@ mod tests {
             let m2 = k.import_model(ExchangeFormat::Step, &again).unwrap();
             check_same(&k, name, b, m2.parts[0].body, vol, 1e-9);
         }
+    }
+
+    /// OCCT BRep export reads back (with our reader) to the same topology and volume, each body
+    /// alone and all of them as one compound. With `CADRS_BREP_SAMPLES` set, the files are
+    /// written to that folder too (to check them with OCCT's `BRepCheck_Analyzer`).
+    #[test]
+    fn brep_round_trips() {
+        let mut k = NativeKernel::new();
+        let mut all = bodies(&mut k);
+        let nb = nurbs_top_box(&mut k);
+        all.push(("NURBS top face", nb, 6000.0));
+        // Scaled: lines along vectors that aren't unit vectors, extrusions along longer ones.
+        let bz = all.iter().find(|a| a.0 == "Bézier side").map(|a| (a.1, a.2)).unwrap();
+        let big = k.scale(bz.0, Point3::new(1.0, 2.0, 3.0), 2.5).unwrap().bodies[0];
+        all.push(("scaled Bézier side", big, bz.1 * 2.5f64.powi(3)));
+        // Rounds (cylinders, tori, blends), an oblique cut (ellipses), a union.
+        let cube = extrude(&mut k, vec![region(poly(&[p(0., 0.), p(10., 0.), p(10., 10.), p(0., 10.)]), vec![])], 10.0);
+        let edges: Vec<EdgeId> = (0..k.edges(cube).unwrap().len() as u64).map(EdgeId).collect();
+        let round = k.fillet(cube, &edges, 2.0).unwrap().bodies[0];
+        let cyl = extrude(&mut k, vec![region(circle(p(0., 0.), 5.0), vec![])], 30.0);
+        let tilt = Motion { linear: *nalgebra::Rotation3::from_axis_angle(&Vector3::x_axis(), 0.6).matrix(), translation: Vector3::new(-20.0, -20.0, 15.0) };
+        let slab = extrude(&mut k, vec![region(poly(&[p(0., 0.), p(40., 0.), p(40., 40.), p(0., 40.)]), vec![])], 40.0);
+        let slab = k.transform_motion(slab, &tilt).unwrap().bodies[0];
+        let cut = k.boolean(BoolOp::Subtract, cyl, &[slab]).unwrap().bodies[0];
+        let union = k.boolean(BoolOp::Union, cube, &[cyl]).unwrap().bodies[0];
+        for (name, b) in [("rounded cube", round), ("oblique cut", cut), ("union", union)] {
+            all.push((name, b, k.mass_properties(b).unwrap().volume));
+        }
+        let out = std::env::var("CADRS_BREP_SAMPLES").ok().map(std::path::PathBuf::from);
+        let counts = |b: &Body| (b.verts.len(), b.edges.iter().filter(|e| !e.degenerate).count(), b.faces.len(), b.shells.len(), b.solids.len());
+        for (name, b, vol) in &all {
+            let bytes = k.export_brep(&[*b]).unwrap();
+            if let Some(dir) = &out {
+                std::fs::write(dir.join(format!("{}.brep", name.replace(' ', "_"))), &bytes).unwrap();
+            }
+            let (read, warnings) = crate::native::brep_occt::read(&bytes).unwrap();
+            assert!(warnings.is_empty(), "{name}: {warnings:?}");
+            assert_eq!(counts(&read), counts(k.get(*b).unwrap()), "{name}");
+            let r = k.insert(read);
+            check_same(&k, name, *b, r, *vol, 1e-9);
+        }
+        let ids: Vec<BodyId> = all.iter().map(|a| a.1).collect();
+        let bytes = k.export_brep(&ids).unwrap();
+        if let Some(dir) = &out {
+            std::fs::write(dir.join("all.brep"), &bytes).unwrap();
+        }
+        let (read, _) = crate::native::brep_occt::read(&bytes).unwrap();
+        assert_eq!(read.solids.len(), all.len());
+        let vol: f64 = all.iter().map(|a| a.2).sum();
+        let r = k.insert(read);
+        let got = k.mass_properties(r).unwrap().volume;
+        assert!((got - vol).abs() <= 1e-9 * vol, "{got} vs {vol}");
+        // A sheet, a wire and points.
+        let sheet = crate::native::kernel::subset(k.get(cube).unwrap(), &[0, 1, 2], false);
+        let wire = crate::native::kernel::wire_of_curves(&[(crate::native::curve::Curve::Line { o: Point3::origin(), d: Vector3::x() }, 0.0, 10.0), (crate::native::curve::Curve::Circle { c: Point3::new(10.0, 5.0, 0.0), x: -Vector3::y(), y: Vector3::x(), r: 5.0 }, 0.0, PI)]).unwrap();
+        let pts = k.create_points(&[Point3::new(1.0, 2.0, 3.0), Point3::new(4.0, 5.0, 6.0)]).unwrap().bodies[0];
+        let loose: Vec<BodyId> = vec![k.insert(sheet), k.insert(wire), pts];
+        let bytes = k.export_brep(&loose).unwrap();
+        if let Some(dir) = &out {
+            std::fs::write(dir.join("loose.brep"), &bytes).unwrap();
+        }
+        let (read, _) = crate::native::brep_occt::read(&bytes).unwrap();
+        assert_eq!((read.faces.len(), read.solids.len(), read.shells.len()), (3, 0, 1));
+        // (Our reader leaves loose edges and vertices out: the wire's edges and the points are
+        // in the file, under the compound with the sheet. OCCT reads all of them.)
+        let text = String::from_utf8(bytes).unwrap();
+        assert_eq!((text.matches("\nVe\n").count(), text.matches("\nEd\n").count()), (8 + 3 + 2, 10 + 2));
     }
 
     #[test]

@@ -934,6 +934,10 @@ impl Kernel for NativeKernel {
         super::exchange::export_step(self, bodies)
     }
 
+    fn export_brep(&self, bodies: &[BodyId]) -> Result<Vec<u8>> {
+        super::exchange::export_brep(self, bodies)
+    }
+
     fn import_step(&mut self, bytes: &[u8]) -> Result<Vec<BodyId>> {
         super::exchange::import_step(self, bytes)
     }

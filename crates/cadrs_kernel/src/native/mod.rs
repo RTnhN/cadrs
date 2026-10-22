@@ -40,6 +40,7 @@ internal! {
     boolean;
     boolean_kinds;
     brep_occt;
+    brep_write;
     build;
     bvh;
     cells;
