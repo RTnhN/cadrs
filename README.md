@@ -13,10 +13,6 @@ build parts from features, put them together in assemblies, and make drawings fr
 
 *From sketch to part to PCB, in one document. [Watch the 90-second demo](https://youtu.be/qT1FKZqUAxA).*
 
-> **Status: early and moving fast.** cadrs works through the Onshape Learning Center's CAD
-> Basics courses exercise by exercise, but it is not yet a finished tool. Expect rough edges,
-> and file formats that may still change.
-
 ## Features
 
 - **Sketching**: lines, rectangles, circles, arcs, splines, Bézier curves, ellipses, polygons,

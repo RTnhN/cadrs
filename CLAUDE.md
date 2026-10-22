@@ -22,6 +22,8 @@ Onshape-style CAD in Rust + Bevy 0.19.1. Local notes in `docs/` (git-ignored: `P
   `cargo gpu build --shader-crate crates/cadrs_router_kernels --output-dir crates/cadrs_router/shaders`
   (rust-gpu; commit the `.spv`). Without one the router runs on the CPU.
 - Cold builds take 4+ minutes. Never run two cargo builds at once.
+- Project site: `site/` is a Proa app of its own (stable toolchain, built with `RUSTFLAGS=`),
+  exported to GitHub Pages by `.github/workflows/pages.yml`; see `site/README.md`.
 
 ## Layout
 - Crates in `crates/*`; shared versions in root `[workspace.dependencies]`.
