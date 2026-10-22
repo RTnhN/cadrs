@@ -98,11 +98,12 @@ fn extruded_many_span_spline_face() {
     assert!((area - len * 7.0).abs() < 1e-9 * len * 7.0, "area {area} vs {}", len * 7.0);
 }
 
-/// `body_volume` (the volume's integrand alone, which booleans and offsets weigh solids by) is
-/// `body_mass`'s volume to the bit, over every kind of face: analytic, B-spline (trimmed and
-/// iso-rectangles), extrusions and revolutions, on SMLib's models.
+/// `body_volume` (the volume's integrand alone, which booleans and offsets weigh solids by, on
+/// the fewer points it needs: exact on polynomial B-spline spans) is `body_mass`'s volume to
+/// rounding, over every kind of face: analytic, B-spline (trimmed and iso-rectangles), extrusions
+/// and revolutions, on SMLib's models.
 #[test]
-fn volume_alone_matches_mass_properties_to_the_bit() {
+fn volume_alone_matches_mass_properties() {
     use cadrs_kernel::native::smb;
     let dir = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/data/smlib");
     let mut seen = 0;
@@ -112,7 +113,7 @@ fn volume_alone_matches_mass_properties_to_the_bit() {
         for p in files {
             let Ok(b) = smb::read_brep(&std::fs::read(&p).unwrap()) else { continue };
             let (full, alone) = (mass::body_mass(&b.body).volume, mass::body_volume(&b.body));
-            assert_eq!(full.to_bits(), alone.to_bits(), "{}: {full} vs {alone}", p.display());
+            assert!((full - alone).abs() <= 1e-11 * full.abs().max(1.0), "{}: {full} vs {alone}", p.display());
             seen += 1;
         }
     }

@@ -467,8 +467,13 @@ fn snap_tiny(c: Curve) -> Curve {
 }
 
 fn pcurve_unsnapped(s: &Surface, c: &Curve, t0: f64, t1: f64, etol: f64) -> Curve {
+    pcurve_unsnapped_on(s, &periods(s), c, t0, t1, etol)
+}
+
+/// [`pcurve_unsnapped`] with the surface's [`Periods`] (its seed grid made once for all the
+/// edges of a face).
+fn pcurve_unsnapped_on(s: &Surface, per: &Periods, c: &Curve, t0: f64, t1: f64, etol: f64) -> Curve {
     let pieces = c.pieces(t0, t1);
-    let per = periods(s);
     // Tolerances relative to the model's size (files come in metres-long models too).
     let size = {
         let mut bb = Bbox::empty();
@@ -489,7 +494,7 @@ fn pcurve_unsnapped(s: &Surface, c: &Curve, t0: f64, t1: f64, etol: f64) -> Curv
     // A spline on a curved surface, or anything on a spline surface, has no exact p-curve: fit
     // it directly.
     if ((matches!(c, Curve::Nurbs(_)) && !matches!(s, Surface::Plane { .. })) || matches!(s, Surface::Nurbs(_)))
-        && let Some(pc) = fit_pieces(s, &per, c, &pieces, &tol)
+        && let Some(pc) = fit_pieces(s, per, c, &pieces, &tol)
     {
         return pc;
     }
@@ -528,10 +533,10 @@ fn pcurve_unsnapped(s: &Surface, c: &Curve, t0: f64, t1: f64, etol: f64) -> Curv
             return m;
         }
     }
-    if samples(&pc).iter().all(|&t| pc_error(s, &per, c, &pc, t, tol.off) < tol.fit) {
+    if samples(&pc).iter().all(|&t| pc_error(s, per, c, &pc, t, tol.off) < tol.fit) {
         return pc;
     }
-    fit_pieces(s, &per, c, &pieces, &tol).unwrap_or(pc)
+    fit_pieces(s, per, c, &pieces, &tol).unwrap_or(pc)
 }
 
 /// The p-curve of a torus's meridian (a tube circle), in the half plane of the circle's
@@ -848,6 +853,34 @@ impl XBuilder {
         if du == 0.0 && dv == 0.0 { pc } else { pc.transformed(&Affine::translation(V3::new(du, dv, 0.0))) }
     }
 
+    /// The p-curves of every face's edges (into the cache the traces read), the faces in
+    /// parallel (research/algorithms/offsets_sweeps_import.md card 4): each a function of the
+    /// face's surface and the edge alone, so the same whatever the threads.
+    fn fit_pcurves(&mut self, dropped: &[bool]) {
+        use rayon::prelude::*;
+        let edges = &self.body.edges;
+        let fits: Vec<Vec<((usize, usize), Curve)>> = self
+            .faces
+            .par_iter()
+            .enumerate()
+            .filter(|(fi, _)| !dropped[*fi])
+            .map(|(fi, f)| {
+                let per = periods(&f.surf);
+                let mut seen = std::collections::HashSet::new();
+                f.loops
+                    .iter()
+                    .flatten()
+                    .filter(|(e, _)| seen.insert(*e))
+                    .map(|&(e, _)| {
+                        let ed = &edges[e];
+                        ((fi, e), snap_tiny(pcurve_unsnapped_on(&f.surf, &per, &ed.curve, ed.t[0], ed.t[1], ed.tol)))
+                    })
+                    .collect()
+            })
+            .collect();
+        self.pc_cache.get_mut().extend(fits.into_iter().flatten());
+    }
+
     /// The p-curve of edge `e` on `s`.
     fn pc_raw(&self, s: &Surface, e: usize) -> Curve {
         let ed = &self.body.edges[e];
@@ -1149,7 +1182,8 @@ impl XBuilder {
 
     /// Splits edge `e` at `t` in every face description using it; returns the new vertex.
     fn split_edge(&mut self, e: usize, t: f64) -> usize {
-        self.pc_cache.borrow_mut().clear();
+        // (Only the split edge's p-curves change: the others' edges stay as they are.)
+        self.pc_cache.borrow_mut().retain(|k, _| k.1 != e);
         let p = self.body.edges[e].point(t);
         let v = self.body.add_vertex(p);
         let old = self.body.edges[e].clone();
@@ -1434,6 +1468,7 @@ impl XBuilder {
     /// [`finish`](Self::finish), with the body face each builder face became (None when it was
     /// dropped), by builder face id.
     pub fn finish_mapped(mut self) -> (Body, Vec<String>, Vec<Option<usize>>) {
+        let mut prof = super::boolean::Prof::new();
         let nf = self.faces.len();
         let mut dropped = vec![false; nf];
         for fi in 0..nf {
@@ -1475,6 +1510,9 @@ impl XBuilder {
                 dropped[fi] = true;
             }
         }
+        prof.mark("loops and surfaces");
+        self.fit_pcurves(&dropped);
+        prof.mark("p-curves");
         // The file's senses against the loops of faces whose loops alone say which way round
         // they go (no jumps at poles, no turns round the surface): when most disagree, the file
         // writes its senses the other way about, and the faces whose loops can close either way
@@ -1506,6 +1544,7 @@ impl XBuilder {
                 f.sense = !f.sense;
             }
         }
+        prof.mark("senses");
         // A whole sphere or torus bounded only by slits (a seam and a cut, each edge used both
         // ways: loops enclosing no area, as SMLib writes some spheres) is bounded by its seams
         // instead, as SMLib reads it; the slits' edges are dropped.
@@ -1533,6 +1572,7 @@ impl XBuilder {
                 self.close_whole(fi);
             }
         }
+        prof.mark("slits");
         // Seams (they may split edges of other faces, so trace again after each).
         for _round in 0..4 {
             let mut changed = false;
@@ -1565,6 +1605,7 @@ impl XBuilder {
                 break;
             }
         }
+        prof.mark("seams");
         // Faces.
         let mut new_index = vec![usize::MAX; nf];
         let faces = std::mem::take(&mut self.faces);
@@ -1650,6 +1691,7 @@ impl XBuilder {
             self.body.faces.push(Face { surf: s.clone(), sense, loops: ls });
             new_index[fi] = self.body.faces.len() - 1;
         }
+        prof.mark("faces");
         let shells = std::mem::take(&mut self.shells);
         let mut shell_index = Vec::new();
         for (fs, closed) in &shells {
@@ -1674,6 +1716,8 @@ impl XBuilder {
             self.warnings.push(format!("{flipped} faces turned round to orient their shells consistently"));
         }
         drop_unused(&mut self.body);
+        prof.mark("shells");
+        prof.report(&format!("XBuilder::finish ({nf} faces, {} p-curves)", self.pc_cache.borrow().len()));
         let map = new_index.iter().map(|&i| (i != usize::MAX).then_some(i)).collect();
         (self.body, self.warnings, map)
     }

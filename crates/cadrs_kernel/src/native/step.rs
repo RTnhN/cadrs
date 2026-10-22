@@ -1928,6 +1928,7 @@ fn build_shapes(m: &mut Model, shapes: &[(u64, u64, Affine)], warnings: &mut Vec
     let groups: Vec<(u64, Affine, Vec<u64>)> = shapes.iter().zip(is_wire.iter().zip(&is_tess)).filter(|(_, (w, t))| !**w && !**t).map(|((it, rep, at), _)| (*rep, *at, vec![*it])).collect();
     for (rep, at, items) in groups {
         let g = m.geo(rep);
+        let mut prof = super::boolean::Prof::new();
         let mut tr = TopoReader { g, xb: XBuilder::new(), verts: HashMap::new(), edges: HashMap::new(), segs: HashMap::new(), errors: Vec::new(), faces_of: HashMap::new() };
         for &it in &items {
             if let Err(e) = tr.item(it) {
@@ -1937,7 +1938,9 @@ fn build_shapes(m: &mut Model, shapes: &[(u64, u64, Affine)], warnings: &mut Vec
         let errors = std::mem::take(&mut tr.errors);
         warnings.extend(errors);
         let faces_of = std::mem::take(&mut tr.faces_of);
+        prof.mark("entities");
         let (mut b, w, map) = tr.xb.finish_mapped();
+        prof.mark("finish");
         warnings.extend(w);
         // Styles of the items, then of their shells, then of their faces: the most specific wins.
         let mut cols: Vec<Option<Rgba>> = vec![None; b.faces.len()];
@@ -1976,17 +1979,20 @@ fn build_shapes(m: &mut Model, shapes: &[(u64, u64, Affine)], warnings: &mut Vec
         // model's size (a larger gap is a defect, left to the check).
         let cap = (b.bbox().diagonal() * FIT_REL).max(u.unwrap_or(0.0) * FIT_UNCERTAINTY);
         b.fit_tolerances_searched(cap);
+        prof.mark("tolerances");
         // A solid whose faces all point in (a sphere or cylinder band whose loops are only
         // seams and circles, read against the file's own sense): turned round.
         for si in 0..b.solids.len() {
             let faces = b.solid_faces(si);
             let sub = super::kernel::subset(&b, &faces, true);
-            if super::mass::body_volume(&sub) < 0.0 {
+            if super::topo::points_in(&sub) {
                 for f in faces {
                     Body::reverse_face(&mut b.faces[f]);
                 }
             }
         }
+        prof.mark("orientation");
+        prof.report(&format!("STEP part ({} faces)", b.faces.len()));
         let b = if at == Affine::identity() { b } else { b.transformed(&at) };
         body.append(&b);
         colors.extend(cols);
@@ -2010,7 +2016,10 @@ fn build_shapes(m: &mut Model, shapes: &[(u64, u64, Affine)], warnings: &mut Vec
 
 /// Reads a STEP file's parts and assembly structure.
 pub fn read(bytes: &[u8]) -> Result<ReadModel, String> {
+    let mut prof = super::boolean::Prof::new();
     let f = parse(bytes)?;
+    prof.mark("parse");
+    prof.report("STEP file");
     let mut m = Model { f: &f, units: HashMap::new(), styles: Styles::read(&f) };
     let mut out = ReadModel::default();
     let mut warnings = Vec::new();

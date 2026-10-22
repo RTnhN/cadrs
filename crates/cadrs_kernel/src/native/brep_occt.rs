@@ -1707,7 +1707,7 @@ pub fn read_ordered(bytes: &[u8]) -> R<BrepRead> {
         for si in 0..x.solids.len() {
             let faces = x.solid_faces(si);
             let sub = super::kernel::subset(&x, &faces, true);
-            if super::mass::body_volume(&sub) < 0.0 {
+            if super::topo::points_in(&sub) {
                 for f in faces {
                     Body::reverse_face(&mut x.faces[f]);
                 }

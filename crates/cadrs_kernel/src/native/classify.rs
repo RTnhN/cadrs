@@ -324,8 +324,14 @@ fn ray_parametric(s: &Surface, o: &P3, d: &V3) -> Vec<(f64, f64, f64)> {
     out
 }
 
+/// Rays cast (parity votes and [`ray_hits`]), and points classified, since the start: the counts
+/// `CADRS_PROFILE` reports per boolean (research/algorithms/booleans.md, "Measure first").
+pub(crate) static RAYS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+pub(crate) static POINTS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
 /// Every crossing of the line with the faces of the body: (t, face, point), sorted by t.
 pub fn ray_hits(body: &Body, polys: &[Vec<Vec<P2>>], o: &P3, d: &V3) -> Vec<(f64, usize, P3)> {
+    RAYS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     let bb = body.bbox().grow(1.0);
     let span = bb.diagonal() + (bb.center() - o).norm();
     let mut out = Vec::new();
@@ -483,6 +489,7 @@ impl<'a> Classifier<'a> {
 
     /// Inside / outside / on the boundary of the body's solids (on a face within `tol`).
     pub fn classify(&self, p: &P3, tol: f64) -> crate::PointClass {
+        POINTS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         let tol = tol.max(tol::ROUNDOFF);
         for (fi, f) in self.body.faces.iter().enumerate() {
             if !self.boxes[fi].grow(tol).contains(p) {
@@ -526,6 +533,7 @@ impl<'a> Classifier<'a> {
         let span = bb.diagonal() + (bb.center() - p).norm();
         let mut votes = (0, 0);
         for d in dirs {
+            RAYS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
             let d = d.normalize();
             let mut count = 0;
             let mut bad = false;

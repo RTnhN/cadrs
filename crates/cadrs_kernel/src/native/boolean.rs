@@ -29,31 +29,49 @@ use super::topo::{Body, Coedge, Edge, Face, Shell, Solid};
 use crate::*;
 use super::tol;
 
-/// Accumulated time per boolean phase (CADRS_PROFILE=1 prints it after each boolean).
-struct Prof {
+/// Accumulated time per phase of an operation (CADRS_PROFILE=1 prints it after each one).
+pub(crate) struct Prof {
     t: std::time::Instant,
     on: bool,
     phases: Vec<(&'static str, std::time::Duration)>,
 }
 
+/// Whether `CADRS_PROFILE` is set (read once).
+pub(crate) fn profiling() -> bool {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ON.get_or_init(|| std::env::var_os("CADRS_PROFILE").is_some())
+}
+
 impl Prof {
-    fn new() -> Self {
-        Self { t: std::time::Instant::now(), on: std::env::var("CADRS_PROFILE").is_ok(), phases: Vec::new() }
+    pub(crate) fn new() -> Self {
+        Self { t: std::time::Instant::now(), on: profiling(), phases: Vec::new() }
     }
-    fn mark(&mut self, name: &'static str) {
+    pub(crate) fn mark(&mut self, name: &'static str) {
         if self.on {
             let now = std::time::Instant::now();
             self.phases.push((name, now - self.t));
             self.t = now;
         }
     }
-    fn report(&self, what: &str) {
+    pub(crate) fn report(&self, what: &str) {
         if self.on {
             let total: std::time::Duration = self.phases.iter().map(|p| p.1).sum();
             let parts: Vec<String> = self.phases.iter().map(|(n, d)| format!("{n} {:.1}ms", d.as_secs_f64() * 1e3)).collect();
             eprintln!("[profile] {what}: {:.1}ms = {}", total.as_secs_f64() * 1e3, parts.join(", "));
         }
     }
+}
+
+/// Boolean runs and face pairs sent to surface intersection since the start (with
+/// [`classify::RAYS`], what `CADRS_PROFILE` reports per boolean).
+static RUNS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+static PAIRS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+/// The counts of [`RUNS`], [`PAIRS`], [`classify::RAYS`], [`classify::POINTS`],
+/// [`pcurve::FITTED`] and [`pcurve::FITTED_NS`] now.
+fn counts() -> [u64; 6] {
+    use std::sync::atomic::Ordering::Relaxed;
+    [RUNS.load(Relaxed), PAIRS.load(Relaxed), classify::RAYS.load(Relaxed), classify::POINTS.load(Relaxed), pcurve::FITTED.load(Relaxed), pcurve::FITTED_NS.load(Relaxed)]
 }
 
 /// The default distance under which two points of a boolean are one (mm; [`tol::POINT`]; a
@@ -641,6 +659,18 @@ pub fn boolean_bodies(a: &Body, b: &Body, op: BoolOp) -> Result<BoolOut> {
 
 /// The boolean of two bodies with explicit options.
 pub fn boolean_bodies_with(a: &Body, b: &Body, op: BoolOp, opts: BoolOptions) -> Result<BoolOut> {
+    if !profiling() {
+        return boolean_bodies_counted(a, b, op, opts);
+    }
+    let c0 = counts();
+    let r = boolean_bodies_counted(a, b, op, opts);
+    let c = counts();
+    eprintln!("[profile] boolean {op:?}: {} runs, {} face pairs intersected, {} rays for {} points classified, {} p-curves fitted in {:.1}ms", c[0] - c0[0], c[1] - c0[1], c[2] - c0[2], c[3] - c0[3], c[4] - c0[4], (c[5] - c0[5]) as f64 * 1e-6);
+    r
+}
+
+/// [`boolean_bodies_with`] (counted with `CADRS_PROFILE`).
+fn boolean_bodies_counted(a: &Body, b: &Body, op: BoolOp, opts: BoolOptions) -> Result<BoolOut> {
     // At the default tolerance first; when that leaves the result broken (near-coincident
     // geometry the tolerance splits into slivers or gaps: a surface through a corner within
     // 1e-5), again at growing tolerances, as OCCT grows its entities' tolerances.
@@ -1424,6 +1454,7 @@ pub fn imprint(a: &Body, b: &Body, faces: Option<Vec<usize>>) -> Result<BoolOut>
 
 /// One run of the boolean.
 fn run(a: &Body, b: &Body, mode: Mode, opts: RunOpts) -> Result<BoolOut> {
+    RUNS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     let RunOpts { tol: run_tol, flush, merge_coplanar, work_budget } = opts;
     // The work done so far, against the budget.
     let mut work = Work { done: 0, budget: work_budget };
@@ -1732,6 +1763,7 @@ fn run(a: &Body, b: &Body, mode: Mode, opts: RunOpts) -> Result<BoolOut> {
     // (With the boundary of a region where the two surfaces coincide, when they do over part.)
     type Found = (Vec<ssi::IntCurve>, Vec<P3>, std::time::Duration, Vec<ssi::IntCurve>);
     let mut ssis: Vec<Found> = Vec::with_capacity(pairs.len());
+    PAIRS.fetch_add(pairs.len() as u64, std::sync::atomic::Ordering::Relaxed);
     for chunk in pairs.chunks(64) {
         let done: Vec<(Found, u64)> = chunk
             .par_iter()
@@ -2548,11 +2580,14 @@ fn run(a: &Body, b: &Body, mode: Mode, opts: RunOpts) -> Result<BoolOut> {
         eprintln!("boolean work: {}", work.done);
     }
     assemble_shells(&mut out)?;
+    prof.mark("shells");
     touch_voids(&mut out, run_tol * 10.0);
+    prof.mark("voids");
     // Faces of the two inputs on one surface (by input face): only a solid holding both of a
     // pair can enclose nothing.
     let pairs: std::collections::HashSet<(usize, usize)> = (0..na_faces).flat_map(|fa| coincident[fa].iter().map(move |&fb| (fa, fb))).map(|(fa, fb)| (faces[fa].orig, faces[fb].orig)).collect();
     let (dropped, volumes) = drop_empty_solids(&mut out, &mut from, &pairs);
+    prof.mark("empty solids");
     if dropped && out.faces.is_empty() {
         return Err(KernelError::EmptyResult("the result is empty".into()));
     }
@@ -2577,7 +2612,7 @@ fn run(a: &Body, b: &Body, mode: Mode, opts: RunOpts) -> Result<BoolOut> {
     if !a.solids.is_empty() && !b.solids.is_empty() && !out.faces.is_empty() && out.solids.is_empty() {
         return Err(KernelError::OpenResult("the boolean left an open shell".into()));
     }
-    prof.mark("shells");
+    prof.mark("checks");
     prof.report(&format!("{op:?} {}×{} faces", a.faces.len(), b.faces.len()));
     Ok(BoolOut { body: out, from })
 }

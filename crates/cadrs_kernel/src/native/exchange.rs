@@ -158,7 +158,9 @@ pub fn split_into_solids_mapped(b: &Body) -> Vec<(Body, Vec<usize>)> {
 }
 
 pub fn import_step(k: &mut NativeKernel, bytes: &[u8]) -> Result<Vec<BodyId>> {
+    let mut prof = super::boolean::Prof::new();
     let m = read(ExchangeFormat::Step, bytes)?;
+    prof.mark("read");
     let mut solids = Vec::new();
     let mut sheets = (Body::default(), Vec::new());
     for o in &m.occurrences {
@@ -176,12 +178,15 @@ pub fn import_step(k: &mut NativeKernel, bytes: &[u8]) -> Result<Vec<BodyId>> {
             }
         }
     }
+    prof.mark("split into solids");
     let mut out = Vec::new();
     for (b, colors) in solids.into_iter().chain((!sheets.0.faces.is_empty()).then_some(sheets)) {
         let id = k.insert(b);
         k.set_colors(id, colors);
         out.push(id);
     }
+    prof.mark("insert");
+    prof.report("STEP import");
     if out.is_empty() {
         return Err(failed("STEP import", "the file has no geometry".into()));
     }

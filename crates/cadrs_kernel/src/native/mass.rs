@@ -1,12 +1,25 @@
 //! Exact mass properties by the divergence theorem, integrated over each face's trimmed (u, v)
 //! domain with Green's theorem: ∫∫_D h du dv = ∮_∂D H dv, H(u, v) = ∫_{u₀}^{u} h(s, v) ds,
 //! where the boundary runs along the exact p-curves. Both integrals are composite
-//! Gauss–Legendre, so analytic faces come out to rounding error.
+//! Gauss–Legendre, with rules matched to the integrands where they are polynomials
+//! (research/algorithms/mass_tessellation_hlr.md, cards 1 and 3):
+//! - along a cylinder's, cone's or extrusion's rulings and over a plane the integrands are
+//!   polynomials of degree 4 at most (2 or 3 points);
+//! - round an axis they are trigonometric polynomials of degree 4 at most, which 8 points on
+//!   pieces of a quarter turn integrate to rounding;
+//! - on a polynomial B-spline surface of degree p the volume's integrand is a polynomial of degree
+//!   3p − 2 in u on each knot span, exact with ⌈(3p − 1)/2⌉ points ([`body_volume`]); the area's
+//!   |N| is only smooth, so the full properties keep 16 points a span (⌈5p/2⌉, the inertia's,
+//!   from degree 7).
+//!
+//! So analytic faces come out to rounding error.
 
 use rayon::prelude::*;
+use std::sync::OnceLock;
 
 use super::math::*;
 use super::curve::Curve;
+use super::nurbs::NurbsSurface;
 use super::surface::Surface;
 use super::topo::{co_range, Body, Face};
 use super::tol;
@@ -18,12 +31,18 @@ pub const NQ: usize = 14;
 /// is no geometry, only a parameter range a file got wrong, which must not loop for ever.
 const MAX_PIECES: f64 = 4096.0;
 
+/// The pieces (radians) an angle round an axis is integrated in, with [`ANGLE_POINTS`] points
+/// each: the integrands are trigonometric polynomials of degree 4 at most in it (degree 6 with
+/// the other direction's), which that rule integrates to about 1e-17 of their coefficients.
+const ANGLE_STEP: f64 = PI / 4.0;
+const ANGLE_POINTS: usize = 8;
+
 pub type Q = [f64; NQ];
 
 /// The integrand at (u, v) relative to `shift`: area terms (scaled by |N|) and volume terms
 /// (by the vector N = Su × Sv; the divergence theorem turns them into volume integrals). With
-/// `ALL` false only the volume's (`out[4]`, the same to the bit): this and the integrators
-/// below take `ALL` so [`body_volume`] runs the same arithmetic for the one quantity.
+/// `ALL` false only the volume's (`out[4]`): this and the integrators below take `ALL` so
+/// [`body_volume`] runs only the one quantity, on the fewer points its integrand needs.
 #[inline]
 fn integrand<const ALL: bool>(s: &Surface, u: f64, v: f64, shift: &V3, out: &mut Q, w: f64) {
     let (p, su, sv) = s.d1(u, v);
@@ -57,59 +76,52 @@ fn accumulate<const ALL: bool>(p: &P3, su: &V3, sv: &V3, shift: &V3, out: &mut Q
     out[13] += z * z * x * 0.5 * nz;
 }
 
-/// Breakpoints in u between `a` and `b` for the inner integral.
-fn u_breaks(s: &Surface, a: f64, b: f64, out: &mut Vec<f64>) {
-    out.clear();
-    out.push(a);
-    let span = (b - a).abs();
-    let n = match s {
-        Surface::Plane { .. } => 1,
-        Surface::Nurbs(_) | Surface::Extrusion { .. } => ((span / (s_u_scale(s))).ceil() as usize).clamp(1, 64),
-        _ => ((span / (PI / 8.0)).ceil() as usize).max(1),
-    };
-    if let Surface::Nurbs(ns) = s {
-        let (bu, _) = ns.breaks();
-        let (lo, hi) = if a < b { (a, b) } else { (b, a) };
-        let mut ks: Vec<f64> = bu.into_iter().filter(|k| *k > lo + 1e-14 && *k < hi - 1e-14).collect();
-        if a > b {
-            ks.reverse();
-        }
-        let mut pts = vec![a];
-        pts.extend(ks);
-        pts.push(b);
-        // One or two spans: split each (|N| varies within a long span); more are short already
-        // (the GPU kernel's `inner_job` does the same).
-        let m = if pts.len() <= 3 { 4 } else { 1 };
-        for w in pts.windows(2) {
-            for i in 1..=m {
-                out.push(w[0] + (w[1] - w[0]) * i as f64 / m as f64);
-            }
-        }
-        return;
+/// The most points a rule here has.
+const MAX_GAUSS: usize = 24;
+
+/// The Gauss–Legendre rule with `n` points on [−1, 1] (1 to [`MAX_GAUSS`]): math's tables for 4,
+/// 8 and 16, the others from the Legendre polynomials' roots (Newton's method, to rounding).
+fn gauss(n: usize) -> Gauss {
+    static RULES: OnceLock<Vec<(Vec<f64>, Vec<f64>)>> = OnceLock::new();
+    match n {
+        4 => return Gauss { x: GAUSS4.x, w: GAUSS4.w },
+        8 => return Gauss { x: GAUSS8.x, w: GAUSS8.w },
+        16 => return Gauss { x: GAUSS16.x, w: GAUSS16.w },
+        _ => {}
     }
-    if let Surface::Extrusion { c, .. } = s {
-        let (lo, hi) = if a < b { (a, b) } else { (b, a) };
-        let mut pts = c.pieces(lo, hi);
-        if a > b {
-            pts.reverse();
-        }
-        out.clear();
-        out.push(a);
-        for w in pts.windows(2) {
-            let m = 4;
-            for i in 1..=m {
-                out.push(w[0] + (w[1] - w[0]) * i as f64 / m as f64);
-            }
-        }
-        return;
-    }
-    for i in 1..=n {
-        out.push(a + (b - a) * i as f64 / n as f64);
-    }
+    let (x, w) = &RULES.get_or_init(|| (0..=MAX_GAUSS).map(legendre_rule).collect())[n.clamp(1, MAX_GAUSS)];
+    Gauss { x, w }
 }
 
-fn s_u_scale(_s: &Surface) -> f64 {
-    0.25
+/// The nodes and weights of the n-point Gauss–Legendre rule, ascending.
+fn legendre_rule(n: usize) -> (Vec<f64>, Vec<f64>) {
+    let (mut x, mut w) = (vec![0.0; n], vec![0.0; n]);
+    // P_n(z) and P_n'(z) by the three-term recurrence.
+    let legendre = |z: f64| {
+        let (mut p0, mut p1) = (1.0, z);
+        for k in 2..=n {
+            let k = k as f64;
+            (p0, p1) = (p1, ((2.0 * k - 1.0) * z * p1 - (k - 1.0) * p0) / k);
+        }
+        (p1, n as f64 * (z * p1 - p0) / (z * z - 1.0))
+    };
+    for i in 0..n.div_ceil(2) {
+        let mut z = (PI * (i as f64 + 0.75) / (n as f64 + 0.5)).cos();
+        for _ in 0..100 {
+            let (p, dp) = legendre(z);
+            let dz = p / dp;
+            z -= dz;
+            if dz.abs() <= 1e-16 {
+                break;
+            }
+        }
+        let (_, dp) = legendre(z);
+        x[i] = -z;
+        x[n - 1 - i] = z;
+        w[i] = 2.0 / ((1.0 - z * z) * dp * dp);
+        w[n - 1 - i] = w[i];
+    }
+    (x, w)
 }
 
 /// Four-point Gauss–Legendre on [−1, 1].
@@ -118,49 +130,227 @@ const GAUSS4: Gauss = Gauss {
     w: &[0.347_854_845_137_453_9, 0.652_145_154_862_546_1, 0.652_145_154_862_546_1, 0.347_854_845_137_453_9],
 };
 
+/// Whether a B-spline surface is polynomial: its weights all equal (files often flag polynomial
+/// patches rational).
+fn polynomial(ns: &NurbsSurface) -> bool {
+    let w0 = ns.cps[0][0].w;
+    ns.cps.iter().flatten().all(|c| (c.w - w0).abs() <= 1e-14 * w0.abs())
+}
+
+/// How a face's inner integral along u is cut and sampled (once per face).
+struct Inner {
+    /// The pieces: a B-spline surface's knot spans in u (its interior knots), each cut into
+    /// `cut`; else pieces of at most `step` (one piece when infinite).
+    knots: Vec<f64>,
+    cut: usize,
+    step: f64,
+    /// Points per piece.
+    n: usize,
+}
+
+impl Inner {
+    fn of<const ALL: bool>(s: &Surface) -> Self {
+        match s {
+            Surface::Nurbs(ns) => {
+                let (bu, _) = ns.breaks();
+                let knots = bu[1..bu.len() - 1].to_vec();
+                if !ALL && polynomial(ns) {
+                    // The volume's integrand: a polynomial of degree 3p − 2 a span.
+                    let n = (3 * ns.du).saturating_sub(1).div_ceil(2);
+                    return Self { knots, cut: 1, step: f64::INFINITY, n: n.clamp(1, MAX_GAUSS) };
+                }
+                // The area's |N| is only smooth (a polynomial's square root, near zero by a
+                // collapsed edge): 16 points a span, and one or two long spans cut in four (the GPU
+                // kernel's `inner_job` does the same); more on a polynomial surface of degree 7 or
+                // more, whose inertia integrands need ⌈5p/2⌉. (8 points a bicubic span, exact for
+                // the rest, leave the area 1e-9 to 2e-4 off on SMLib's models: card 2's distortion
+                // check, |N| varying 4 times over a span's points, misses those spans.)
+                let n = if polynomial(ns) { (5 * ns.du).div_ceil(2).max(16) } else { 16 };
+                Self { knots, cut: 4, step: f64::INFINITY, n: n.min(MAX_GAUSS) }
+            }
+            // Linear in u and v with a constant normal: polynomials of degree 3 at most.
+            Surface::Plane { .. } => Self { knots: Vec::new(), cut: 1, step: f64::INFINITY, n: if ALL { 2 } else { 1 } },
+            // Round the axis (spheres, tori, surfaces of revolution).
+            _ => Self { knots: Vec::new(), cut: 1, step: ANGLE_STEP, n: ANGLE_POINTS },
+        }
+    }
+
+    /// The pieces between `a` and `b` (either way round), into `out`.
+    fn pieces(&self, a: f64, b: f64, out: &mut Vec<f64>) {
+        out.clear();
+        out.push(a);
+        if self.step.is_finite() {
+            let n = ((b - a).abs() / self.step).ceil().max(1.0) as usize;
+            for i in 1..n {
+                out.push(a + (b - a) * i as f64 / n as f64);
+            }
+            out.push(b);
+            return;
+        }
+        let (lo, hi) = if a < b { (a, b) } else { (b, a) };
+        let i0 = self.knots.partition_point(|k| *k <= lo + 1e-14);
+        let i1 = self.knots.partition_point(|k| *k < hi - 1e-14);
+        let inside = &self.knots[i0..i1.max(i0)];
+        // One or two spans of a rational surface: cut each (|N| varies within a long span).
+        let cut = if inside.len() <= 1 { self.cut } else { 1 };
+        let mut prev = a;
+        let mut push = |x: f64, out: &mut Vec<f64>| {
+            for i in 1..=cut {
+                out.push(prev + (x - prev) * i as f64 / cut as f64);
+            }
+            prev = x;
+        };
+        if a < b {
+            for &k in inside {
+                push(k, out);
+            }
+        } else {
+            for &k in inside.iter().rev() {
+                push(k, out);
+            }
+        }
+        push(b, out);
+    }
+}
+
 /// H(u, v) for all quantities, weighted by `w` (the outer quadrature weight × v'(t)).
 #[allow(clippy::too_many_arguments)]
-fn inner<const ALL: bool>(s: &Surface, u0: f64, u: f64, v: f64, shift: &V3, w: f64, acc: &mut Q, scratch: &mut Vec<f64>) {
+fn inner<const ALL: bool>(s: &Surface, plan: &Inner, u0: f64, u: f64, v: f64, shift: &V3, w: f64, acc: &mut Q, scratch: &mut Vec<f64>) {
     if (u - u0).abs() < tol::TINY {
         return;
     }
-    u_breaks(s, u0, u, scratch);
-    // Along u an analytic surface's integrand is a low trigonometric polynomial over pieces of
-    // at most π/8: eight points are exact to rounding there.
-    let g = if matches!(s, Surface::Nurbs(_) | Surface::Extrusion { .. }) { &GAUSS16 } else { &GAUSS8 };
+    plan.pieces(u0, u, scratch);
+    let g = gauss(plan.n);
     // A B-spline surface along u at this v: its control net contracted along v once, then a
     // curve's evaluation per point.
     let iso = if let Surface::Nurbs(ns) = s { Some(ns.iso_v(v, u0, u)) } else { None };
+    let eval = |t: f64| match &iso {
+        Some(iso) => iso.d1(t),
+        None => s.d1(t, v),
+    };
     for k in 0..scratch.len() - 1 {
         let (lo, hi) = (scratch[k], scratch[k + 1]);
         let (m, r) = ((lo + hi) * 0.5, (hi - lo) * 0.5);
         for (x, gw) in g.x.iter().zip(g.w) {
-            match &iso {
-                Some(iso) => {
-                    let (p, su, sv) = iso.d1(m + r * x);
-                    accumulate::<ALL>(&p, &su, &sv, shift, acc, w * gw * r);
-                }
-                None => integrand::<ALL>(s, m + r * x, v, shift, acc, w * gw * r),
-            }
+            let (p, su, sv) = eval(m + r * x);
+            accumulate::<ALL>(&p, &su, &sv, shift, acc, w * gw * r);
         }
     }
 }
 
 /// Surfaces whose integrand is a low-degree polynomial along v (ruled along v): their inner
-/// integral runs along v, exactly with one 8-point rule.
+/// integral runs along v, exactly with a few points.
 fn ruled_in_v(s: &Surface) -> bool {
     matches!(s, Surface::Cylinder { .. } | Surface::Cone { .. } | Surface::Extrusion { .. } | Surface::Plane { .. })
 }
 
-/// G(u, v) = ∫_{v0}^{v} h(u, s) ds for all quantities, weighted by `w`.
+/// G(u, v) = ∫_{v0}^{v} h(u, s) ds for all quantities, weighted by `w`. Along the rulings x is
+/// linear in v and N constant (a cylinder's, an extrusion's) or linear (a cone's): the inertia
+/// integrands are cubics or quartics, the volume's linear or quadratic (exact with 2 or 3, 1 or 2
+/// points). A cone's |N| has a kink at the apex: the pieces either side of it apart.
 fn inner_v<const ALL: bool>(s: &Surface, u: f64, v0: f64, v: f64, shift: &V3, w: f64, acc: &mut Q) {
     if (v - v0).abs() < tol::TINY {
         return;
     }
-    let (m, r) = ((v0 + v) * 0.5, (v - v0) * 0.5);
-    for (x, gw) in GAUSS8.x.iter().zip(GAUSS8.w) {
-        integrand::<ALL>(s, u, m + r * x, shift, acc, w * gw * r);
+    let (n, apex) = match s {
+        Surface::Cone { r, a, .. } => (if ALL { 3 } else { 2 }, (a.sin().abs() > tol::ANGULAR_FINE).then(|| -r / a.sin())),
+        _ => (if ALL { 2 } else { 1 }, None),
+    };
+    let g = gauss(n);
+    let mut run = |a: f64, b: f64| {
+        let (m, r) = ((a + b) * 0.5, (b - a) * 0.5);
+        for (x, gw) in g.x.iter().zip(g.w) {
+            integrand::<ALL>(s, u, m + r * x, shift, acc, w * gw * r);
+        }
+    };
+    match apex.filter(|va| (va - v0) * (va - v) < 0.0) {
+        Some(va) => {
+            run(v0, va);
+            run(va, v);
+        }
+        None => run(v0, v),
     }
+}
+
+/// The outer rule along a p-curve: how finely its pieces are cut further (`extra` pieces per
+/// piece over a turn of `step`, none when infinite) and the points per piece (None: by the
+/// number of pieces, for p-curves the integrand is only smooth along).
+struct Outer {
+    step: f64,
+    n: Option<usize>,
+}
+
+/// [`Outer`] for p-curve `pc` on surface `s`, the inner integral along u (`along_v` false) or v.
+fn outer_rule<const ALL: bool>(s: &Surface, pc: &Curve, along_v: bool) -> Outer {
+    let old = || {
+        let periodic = s.u_periodic() || (!along_v && (s.v_periodic() || matches!(s, Surface::Sphere { .. })));
+        Outer { step: if periodic { PI / 8.0 } else { f64::INFINITY }, n: None }
+    };
+    let poly_pc = |c: &Curve| match c {
+        Curve::Nurbs(n) if !n.is_rational() => Some(n.degree),
+        _ => None,
+    };
+    match (s, pc) {
+        // Round a cylinder's or cone's axis along a line in (u, v): a trigonometric polynomial
+        // times a polynomial of low degree in the line's parameter.
+        (Surface::Cylinder { .. } | Surface::Cone { .. }, Curve::Line { .. }) if along_v => Outer { step: ANGLE_STEP, n: Some(ANGLE_POINTS) },
+        // A plane: H is a polynomial of degree 4 (the volume's 2) in (u, v), so along a p-curve of
+        // degree r the integrand is one of degree 5r − 1 (3r − 1); round a circle, trigonometric.
+        (Surface::Plane { .. }, Curve::Line { .. }) => Outer { step: f64::INFINITY, n: Some(if ALL { 3 } else { 2 }) },
+        (Surface::Plane { .. }, Curve::Circle { .. } | Curve::Ellipse { .. }) => Outer { step: f64::INFINITY, n: Some(ANGLE_POINTS) },
+        (Surface::Plane { .. }, _) if poly_pc(pc).is_some() => {
+            let r = poly_pc(pc).unwrap_or(3);
+            Outer { step: f64::INFINITY, n: Some(if ALL { (5 * r).div_ceil(2) } else { (3 * r).div_ceil(2) }.min(16)) }
+        }
+        // Along a sphere's or torus's meridian (u fixed): a trigonometric polynomial in v.
+        (Surface::Sphere { .. } | Surface::Torus { .. }, Curve::Line { d, .. }) if !along_v && d.x == 0.0 => Outer { step: ANGLE_STEP, n: Some(ANGLE_POINTS) },
+        // A line across a polynomial B-spline surface's knot cells: the volume's H has degree
+        // (3p − 1, 3q − 2) there.
+        (Surface::Nurbs(ns), Curve::Line { .. }) if !ALL && polynomial(ns) => Outer { step: f64::INFINITY, n: Some((3 * ns.du + 3 * ns.dv).saturating_sub(2).div_ceil(2).clamp(1, 16)) },
+        _ => old(),
+    }
+}
+
+/// `ts` with each piece of p-curve `pc` cut into pieces sweeping at most `step` in u (and in v
+/// with `v_too`), by the sweep between its ends (a long p-curve's many short pieces stay whole).
+fn cut_pieces(pc: &Curve, ts: Vec<f64>, step: f64, v_too: bool) -> Vec<f64> {
+    if !step.is_finite() {
+        return ts;
+    }
+    let mut r = Vec::with_capacity(ts.len());
+    r.push(ts[0]);
+    let mut pa = pc.point(ts[0]);
+    for w in ts.windows(2) {
+        let pb = pc.point(w[1]);
+        let sweep = (pb.x - pa.x).abs().max(if v_too { (pb.y - pa.y).abs() } else { 0.0 });
+        let extra = (sweep / step).ceil().clamp(1.0, MAX_PIECES) as usize;
+        for i in 1..extra {
+            r.push(w[0] + (w[1] - w[0]) * i as f64 / extra as f64);
+        }
+        r.push(w[1]);
+        pa = pb;
+    }
+    r
+}
+
+/// `ts` with each piece cut into `n` equal pieces.
+fn cut_each(ts: Vec<f64>, n: usize) -> Vec<f64> {
+    let mut r = Vec::with_capacity((ts.len() - 1) * n + 1);
+    r.push(ts[0]);
+    for w in ts.windows(2) {
+        for i in 1..=n {
+            r.push(w[0] + (w[1] - w[0]) * i as f64 / n as f64);
+        }
+    }
+    r
+}
+
+/// The points per piece along a p-curve the integrand is only smooth along: 16, or fewer on one
+/// of hundreds of short pieces (an intersection curve's, a fitted one's: four points a piece are
+/// plenty; for the volume alone, which booleans and imports weigh solids by, from 64 pieces).
+fn smooth_rule<const ALL: bool>(pc: &Curve, pieces: usize) -> usize {
+    let fine = matches!(pc, Curve::Nurbs(_)) && pieces > 64;
+    if fine && (pieces > 512 || !ALL) { 4 } else if fine { 8 } else { 16 }
 }
 
 /// Face integrals with the inner integral along v: ∫∫ h = −∮ G du.
@@ -182,28 +372,13 @@ fn face_integrals_v<const ALL: bool>(body: &Body, f: &Face, shift: &V3) -> Q {
             let (t0, t1) = co_range(e, c.fwd);
             let (lo, hi) = (t0.min(t1), t0.max(t1));
             let mut ts = c.pc.pieces(lo, hi);
-            let p0 = c.pc.point(lo);
-            let p1 = c.pc.point(hi);
-            let du = (p1.x - p0.x).abs();
-            // Periodic: pieces of at most π/8; a general extrusion's curve pieces in four (|N|
-            // varies along them).
-            let extra = if f.surf.u_periodic() {
-                (du / (PI / 8.0)).ceil().min(MAX_PIECES) as usize
+            let rule = outer_rule::<ALL>(&f.surf, &c.pc, true);
+            // Periodic: pieces of at most a quarter or an eighth turn; a general extrusion's curve
+            // pieces in four (|N| varies along them).
+            if rule.step.is_finite() {
+                ts = cut_pieces(&c.pc, ts, rule.step, false);
             } else if matches!(f.surf, Surface::Extrusion { .. }) && !matches!(c.pc, Curve::Nurbs(_)) {
-                4
-            } else {
-                1
-            }
-            .max(1);
-            if extra > 1 {
-                let mut r = Vec::new();
-                for w in ts.windows(2) {
-                    for i in 0..extra {
-                        r.push(w[0] + (w[1] - w[0]) * i as f64 / extra as f64);
-                    }
-                }
-                r.push(hi);
-                ts = r;
+                ts = cut_each(ts, 4);
             }
             // And where the p-curve crosses the surface's knots (the integrand is only piecewise
             // polynomial there: a straight p-curve across a loft's many spans), or an extruded
@@ -216,10 +391,7 @@ fn face_integrals_v<const ALL: bool>(body: &Body, f: &Face, shift: &V3) -> Q {
             if t0 > t1 {
                 ts.reverse();
             }
-            let fine = matches!(c.pc, Curve::Nurbs(_)) && ts.len() > 64;
-            // (A p-curve of hundreds of short pieces, an intersection curve's: four points a
-            // piece are plenty.)
-            let g = if fine && ts.len() > 512 { &GAUSS4 } else if fine { &GAUSS8 } else { &GAUSS16 };
+            let g = gauss(rule.n.unwrap_or_else(|| smooth_rule::<ALL>(&c.pc, ts.len())));
             for w in ts.windows(2) {
                 let (a, b) = (w[0], w[1]);
                 let (m, r) = ((a + b) * 0.5, (b - a) * 0.5);
@@ -288,38 +460,40 @@ fn iso_rectangle(body: &Body, f: &Face) -> Option<([f64; 4], f64)> {
 /// The face integrals over an iso-rectangle of a B-spline surface: a tensor Gauss rule on each
 /// knot span (the integrand is polynomial along polynomial directions, smooth along rational
 /// ones).
-fn rect_integrals<const ALL: bool>(s: &Surface, ns: &super::nurbs::NurbsSurface, r: [f64; 4], shift: &V3) -> Q {
+fn rect_integrals<const ALL: bool>(s: &Surface, ns: &NurbsSurface, r: [f64; 4], shift: &V3) -> Q {
     let mut acc = [0.0; NQ];
-    let (bu, bv) = ns.breaks();
-    let cut = |ks: Vec<f64>, a: f64, b: f64| -> Vec<f64> {
-        let mut pts = vec![a];
-        pts.extend(ks.into_iter().filter(|k| *k > a + 1e-14 && *k < b - 1e-14));
-        pts.push(b);
-        // One or two spans: split each (|N| varies within a span); more are short already.
-        let m = if pts.len() <= 3 { 4 } else { 1 };
-        let mut out = vec![a];
-        for w in pts.windows(2) {
-            for i in 1..=m {
-                out.push(w[0] + (w[1] - w[0]) * i as f64 / m as f64);
+    let (_, bv) = ns.breaks();
+    let mut vs = vec![r[2]];
+    vs.extend(bv.into_iter().filter(|k| *k > r[2] + 1e-14 && *k < r[3] - 1e-14));
+    vs.push(r[3]);
+    // Along v a polynomial surface's volume integrand has degree 3q − 2 a span (exact with
+    // ⌈(3q − 1)/2⌉ points). The area's |N| is only smooth: 16 points a span (one or two spans cut
+    // in four; across many short spans 8), as for a rational surface's.
+    let g = if !ALL && polynomial(ns) {
+        gauss((3 * ns.dv).saturating_sub(1).div_ceil(2).clamp(1, MAX_GAUSS))
+    } else {
+        if vs.len() <= 3 {
+            let mut out = vec![r[2]];
+            for w in vs.windows(2) {
+                for i in 1..=4 {
+                    out.push(w[0] + (w[1] - w[0]) * i as f64 / 4.0);
+                }
             }
+            vs = out;
         }
-        out
+        gauss(if vs.len() > 17 { 8 } else { 16 })
     };
-    let vs = cut(bv, r[2], r[3]);
-    // The area integrand |N| is only smooth: 16 points a span; across many short spans 8.
-    let gv = if vs.len() > 17 { &GAUSS8 } else { &GAUSS16 };
     // Along v the points and weights; along u the inner integral (as Green's theorem's jobs, so
     // a GPU can take them).
-    let mut jobs: Vec<[f64; 4]> = Vec::with_capacity((vs.len() - 1) * gv.x.len());
+    let mut jobs: Vec<[f64; 4]> = Vec::with_capacity((vs.len() - 1) * g.x.len());
     for wv in vs.windows(2) {
         let (mv, rv) = ((wv[0] + wv[1]) * 0.5, (wv[1] - wv[0]) * 0.5);
-        for (y, hw) in gv.x.iter().zip(gv.w) {
+        for (y, hw) in g.x.iter().zip(g.w) {
             jobs.push([r[0], r[1], mv + rv * y, hw * rv]);
         }
     }
-    let _ = bu;
     let mut scratch = Vec::with_capacity(64);
-    run_jobs::<ALL>(s, &jobs, shift, &mut acc, &mut scratch);
+    run_jobs::<ALL>(s, &Inner::of::<ALL>(s), &jobs, shift, &mut acc, &mut scratch);
     acc
 }
 
@@ -360,6 +534,7 @@ fn face_integrals_of<const ALL: bool>(body: &Body, f: &Face, shift: &V3) -> Q {
     if !u_ref.is_finite() {
         return acc;
     }
+    let plan = Inner::of::<ALL>(&f.surf);
     let v_periodic = f.surf.v_periodic() || matches!(f.surf, Surface::Sphere { .. });
     // B-spline faces gather their inner integrals as jobs (run on the GPU when there are many).
     let mut jobs: Option<Vec<[f64; 4]>> = matches!(f.surf, Surface::Nurbs(_)).then(Vec::new);
@@ -371,26 +546,8 @@ fn face_integrals_of<const ALL: bool>(body: &Body, f: &Face, shift: &V3) -> Q {
             let (lo, hi) = (t0.min(t1), t0.max(t1));
             let mut ts = c.pc.pieces(lo, hi);
             // Refine where u or v sweep far on periodic surfaces.
-            let p0 = c.pc.point(lo);
-            let p1 = c.pc.point(hi);
-            let du = (p1.x - p0.x).abs();
-            let dv = (p1.y - p0.y).abs();
-            let extra = if f.surf.u_periodic() || v_periodic {
-                ((du.max(if v_periodic { dv } else { 0.0 })) / (PI / 8.0)).ceil().min(MAX_PIECES) as usize
-            } else {
-                1
-            }
-            .max(1);
-            if extra > 1 {
-                let mut r = Vec::new();
-                for w in ts.windows(2) {
-                    for i in 0..extra {
-                        r.push(w[0] + (w[1] - w[0]) * i as f64 / extra as f64);
-                    }
-                }
-                r.push(hi);
-                ts = r;
-            }
+            let rule = outer_rule::<ALL>(&f.surf, &c.pc, false);
+            ts = cut_pieces(&c.pc, ts, rule.step, v_periodic);
             // And where the p-curve crosses the surface's knots (the integrand is only piecewise
             // polynomial there: a straight p-curve across a loft's many spans), or a revolved
             // B-spline's (along v).
@@ -402,10 +559,7 @@ fn face_integrals_of<const ALL: bool>(body: &Body, f: &Face, shift: &V3) -> Q {
             if t0 > t1 {
                 ts.reverse();
             }
-            let fine = matches!(c.pc, Curve::Nurbs(_)) && ts.len() > 64;
-            // (A p-curve of hundreds of short pieces, an intersection curve's: four points a
-            // piece are plenty.)
-            let g = if fine && ts.len() > 512 { &GAUSS4 } else if fine { &GAUSS8 } else { &GAUSS16 };
+            let g = gauss(rule.n.unwrap_or_else(|| smooth_rule::<ALL>(&c.pc, ts.len())));
             for w in ts.windows(2) {
                 let (a, b) = (w[0], w[1]);
                 let (m, r) = ((a + b) * 0.5, (b - a) * 0.5);
@@ -419,14 +573,14 @@ fn face_integrals_of<const ALL: bool>(body: &Body, f: &Face, shift: &V3) -> Q {
                     if let Some(jobs) = jobs.as_mut() {
                         jobs.push([u_ref, uv.x, uv.y, gw * r * dv]);
                     } else {
-                        inner::<ALL>(&f.surf, u_ref, uv.x, uv.y, shift, gw * r * dv, &mut acc, &mut scratch);
+                        inner::<ALL>(&f.surf, &plan, u_ref, uv.x, uv.y, shift, gw * r * dv, &mut acc, &mut scratch);
                     }
                 }
             }
         }
     }
     if let Some(jobs) = jobs {
-        run_jobs::<ALL>(&f.surf, &jobs, shift, &mut acc, &mut scratch);
+        run_jobs::<ALL>(&f.surf, &plan, &jobs, shift, &mut acc, &mut scratch);
     }
     if !f.sense {
         for q in acc.iter_mut().take(4) {
@@ -515,7 +669,7 @@ pub fn gpu_active() -> bool {
 
 /// The inner integrals `[u0, u, v, w]` of a face, summed into `acc`: on the GPU when the kernel
 /// is built with it, one is there and there are enough jobs; else here.
-fn run_jobs<const ALL: bool>(s: &Surface, jobs: &[[f64; 4]], shift: &V3, acc: &mut Q, scratch: &mut Vec<f64>) {
+fn run_jobs<const ALL: bool>(s: &Surface, plan: &Inner, jobs: &[[f64; 4]], shift: &V3, acc: &mut Q, scratch: &mut Vec<f64>) {
     #[cfg(feature = "gpu")]
     if jobs.len() >= GPU_MIN_JOBS && GPU_ON.load(std::sync::atomic::Ordering::Relaxed) {
         if let (Surface::Nurbs(ns), Some(gpu)) = (s, cadrs_gpu::get()) {
@@ -536,11 +690,12 @@ fn run_jobs<const ALL: bool>(s: &Surface, jobs: &[[f64; 4]], shift: &V3, acc: &m
         }
     }
     for j in jobs {
-        inner::<ALL>(s, j[0], j[1], j[2], shift, j[3], acc, scratch);
+        inner::<ALL>(s, plan, j[0], j[1], j[2], shift, j[3], acc, scratch);
     }
 }
 
-/// [`body_mass`]'s volume, to the bit, for a fraction of the work: only the volume's integrand.
+/// [`body_mass`]'s volume (to rounding) for a fraction of the work: only the volume's integrand,
+/// on the fewer points it needs.
 /// (Booleans and offsets weigh solids by it to drop slivers and check orientation.)
 pub fn body_volume(body: &Body) -> f64 {
     if !body.is_solid() {
@@ -634,4 +789,43 @@ pub fn face_area(body: &Body, fi: usize) -> (f64, P3) {
     let a = q[0];
     let c = if a.abs() > tol::TINY { V3::new(q[1], q[2], q[3]) / a + shift } else { shift };
     (a, P3::from(c))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Each rule integrates the monomials up to degree 2n − 1 over [−1, 1] exactly (to rounding),
+    /// and not degree 2n (whose error shrinks fast with n: checked up to 8 points).
+    #[test]
+    fn gauss_rules_are_exact_to_their_degree() {
+        for n in 1..=MAX_GAUSS {
+            let g = gauss(n);
+            assert_eq!(g.x.len(), n);
+            let int = |k: i32| g.x.iter().zip(g.w).map(|(x, w)| w * x.powi(k)).sum::<f64>();
+            for k in 0..2 * n as i32 {
+                let exact = if k % 2 == 0 { 2.0 / (k + 1) as f64 } else { 0.0 };
+                assert!((int(k) - exact).abs() < 1e-14, "{n} points, x^{k}: {} vs {exact}", int(k));
+            }
+            let k = 2 * n as i32;
+            assert!(n > 8 || (int(k) - 2.0 / (k + 1) as f64).abs() > 1e-6, "{n} points exact past its degree");
+        }
+    }
+
+    /// A cone whose face runs through the apex (|N| has a kink there): the ruling's two sides
+    /// apart, so its few points stay exact. The cone r = v, 0 ≤ v ≤ 2 (half-angle 45°), over a
+    /// quarter turn, holds the area √2·π/4·(2² − 0)/2 on each side of v = 0 over [−2, 2].
+    #[test]
+    fn rulings_through_a_cone_apex() {
+        let s = Surface::Cone { f: Frame::world(), r: 0.0, a: PI / 4.0 };
+        let mut q = [0.0; NQ];
+        // ∫ over u ∈ [0, π/2] of G(u, 2) − G(u, −2), each G from v = −2.
+        let g = gauss(8);
+        for (x, w) in g.x.iter().zip(g.w) {
+            let u = PI / 4.0 * (1.0 + x);
+            inner_v::<true>(&s, u, -2.0, 2.0, &V3::zeros(), w * PI / 4.0, &mut q);
+        }
+        let exact = 2.0 * 2.0_f64.sqrt() * PI / 4.0 * 2.0;
+        assert!((q[0] - exact).abs() < 1e-12 * exact, "area {} vs {exact}", q[0]);
+    }
 }

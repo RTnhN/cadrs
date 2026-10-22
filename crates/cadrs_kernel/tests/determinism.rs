@@ -160,3 +160,20 @@ fn thread_count_does_not_change_results() {
     let four = on_threads(4);
     same(&one, &four, "1 vs 4 threads");
 }
+
+/// A STEP file of B-spline faces (OCCT's dataset, when it is there: `$CADRS_OCCT_DATA`, else
+/// beside the checkout) reads to the same bodies on 1 and 4 threads: its faces' p-curves are
+/// fitted in parallel.
+#[test]
+fn step_import_is_the_same_on_any_thread_count() {
+    let root = std::env::var("CADRS_OCCT_DATA").unwrap_or_else(|_| format!("{}/../../../occt-dataset/opencascade-dataset-7.8.0", env!("CARGO_MANIFEST_DIR")));
+    let Ok(bytes) = std::fs::read(format!("{root}/step/bug24595_281390.stp")) else { return };
+    let read = |n: usize| {
+        rayon::ThreadPoolBuilder::new().num_threads(n).build().unwrap().install(|| {
+            let mut k = NativeKernel::new();
+            let ids = k.import_step(&bytes).unwrap();
+            ids.iter().map(|&b| k.write_body(b).unwrap()).collect::<Vec<_>>()
+        })
+    };
+    assert!(read(1) == read(4), "the bodies differ");
+}

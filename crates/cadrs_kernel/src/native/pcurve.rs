@@ -15,10 +15,23 @@ fn line2(o: P2, d: V2) -> Curve {
     Curve::Line { o: P3::new(o.x, o.y, 0.0), d: V3::new(d.x, d.y, 0.0) }
 }
 
+/// P-curves fitted (projected and interpolated) and the time it took (ns), counted with
+/// `CADRS_PROFILE`.
+pub(crate) static FITTED: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+pub(crate) static FITTED_NS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
 /// The p-curve of `c` on [t0, t1] on `s`, its periodic coordinates shifted so its middle lies
 /// near `near` (in the face's chart) when given.
 pub fn pcurve(s: &Surface, c: &Curve, t0: f64, t1: f64, near: Option<P2>) -> Curve {
-    let pc = exact(s, c, t0, t1).or_else(|| iso_line(s, c, t0, t1)).unwrap_or_else(|| fitted(s, c, t0, t1));
+    let pc = exact(s, c, t0, t1).or_else(|| iso_line(s, c, t0, t1)).unwrap_or_else(|| {
+        let t = super::boolean::profiling().then(std::time::Instant::now);
+        let pc = fitted(s, c, t0, t1);
+        if let Some(t) = t {
+            FITTED.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            FITTED_NS.fetch_add(t.elapsed().as_nanos() as u64, std::sync::atomic::Ordering::Relaxed);
+        }
+        pc
+    });
     let pc = into_closed_range(s, pc, t0, t1, near);
     shift_into(s, pc, (t0 + t1) * 0.5, near)
 }

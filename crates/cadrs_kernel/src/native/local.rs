@@ -626,6 +626,7 @@ fn in_domain(s: &Surface, dom: &UvBox, p: &P3) -> bool {
 /// is the crossing inside it.
 pub fn replace_surfaces_in(b: &Body, surfs: &[Surface], domains: &[Option<UvBox>]) -> Result<Body> {
     let dom = |f: usize| domains.get(f).copied().flatten();
+    let mut prof = super::boolean::Prof::new();
     let mut out = b.clone();
     let vf = vertex_faces(b);
     let ef = b.edge_faces();
@@ -677,6 +678,7 @@ pub fn replace_surfaces_in(b: &Body, surfs: &[Surface], domains: &[Option<UvBox>
         out.verts[v].p = p;
     }
     let seams = slide_seam_ends(b, &mut out, surfs, &ef);
+    prof.mark("vertices");
     // Edges.
     for e in 0..b.edges.len() {
         let ed = &b.edges[e];
@@ -838,6 +840,7 @@ pub fn replace_surfaces_in(b: &Body, surfs: &[Surface], domains: &[Option<UvBox>
         out.edges[e].curve = curve;
         out.edges[e].t = [t0, t1];
     }
+    prof.mark("edges");
     for (fi, s) in surfs.iter().enumerate() {
         out.faces[fi].surf = s.clone();
     }
@@ -1014,6 +1017,7 @@ pub fn replace_surfaces_in(b: &Body, surfs: &[Surface], domains: &[Option<UvBox>
         }
     }
     super::build::fix_senses(&mut out, 0..b.faces.len());
+    prof.mark("p-curves");
     // Tolerances: an edge between moved faces is a new intersection curve, its p-curves fits
     // on the new surfaces: its tolerance is how far they stray from one another (not the old
     // edge's, which a read model sets for its own geometry); likewise a moved vertex's.
@@ -1058,7 +1062,10 @@ pub fn replace_surfaces_in(b: &Body, surfs: &[Surface], domains: &[Option<UvBox>
         // (The swallowed poles' point edges and vertices.)
         super::unify::compact(&mut out);
     }
+    prof.mark("tolerances");
     let errs = out.check();
+    prof.mark("check");
+    prof.report(&format!("replace surfaces ({} faces)", out.faces.len()));
     if !errs.is_empty() {
         if std::env::var_os("CADRS_DRAFT_DEBUG").is_some() {
             for (fi, f) in out.faces.iter().enumerate() {

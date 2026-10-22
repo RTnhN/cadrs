@@ -70,6 +70,21 @@ fn rounded_offset_past_a_hole_radius() {
     close(volume(&k, out), grown_box(10.0, 10.0, 10.0, d) - 2.0 * dimple, 1e-6);
 }
 
+/// A cylinder (radius 3, height 5) grown by a ball of radius 1: the side moved out, the caps
+/// up, the rims' tubes quarter tori. The vertex on each rim (where the seam meets it) is no
+/// corner: the rim runs on through it, so it gets no ball (research/algorithms/
+/// offsets_sweeps_import.md card 5); the volume is still the exact one,
+/// π(r + d)²h + 2πr²d + π²rd² + 4πd³/3.
+#[test]
+fn rounded_offset_of_a_cylinder() {
+    let mut k = NativeKernel::new();
+    let (r, h, d) = (3.0, 5.0, 1.0);
+    let b = prism(&mut k, circle((0.0, 0.0), r), vec![], h);
+    let out = one(k.offset(b, &OffsetSpec { distance: d, faces: vec![], sharp: false }).unwrap());
+    let want = PI * (r + d) * (r + d) * h + 2.0 * PI * r * r * d + PI * PI * r * d * d + 4.0 / 3.0 * PI * d * d * d;
+    close(volume(&k, out), want, 1e-9);
+}
+
 /// An L-shaped block (a 10 × 10 square less its 5 × 5 corner, 8 tall) inset by 1, rounded
 /// (SMLib's inset, `SetExtendConvexEdges(FALSE)`):
 /// the faces move in by 1 and the concave edge, which every point within 1 of keeps away,

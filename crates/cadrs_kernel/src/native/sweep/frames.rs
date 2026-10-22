@@ -46,6 +46,9 @@ pub struct PathSweep {
     /// The path point and frame rotation (relative to the start frame) at the fine steps.
     pts: Vec<P3>,
     rots: Vec<nalgebra::UnitQuaternion<f64>>,
+    /// How the frame between the fine steps is found: exactly at s (a locked direction, or one
+    /// more double-reflection step from the fine step before s), else by interpolating `rots`.
+    exact: Option<ExactFrames>,
     /// The sections' parameters.
     v: Vec<f64>,
     deg: usize,
@@ -55,6 +58,47 @@ pub struct PathSweep {
     helix: Option<Helix>,
     /// The helix's angle at the fine steps (unwrapped along the path).
     angles: Vec<f64>,
+}
+
+/// Frames found exactly at any s, so the profile's motion is smooth between the fine steps (a
+/// rotation interpolated between them turns at a rate that jumps at each step: the rails then
+/// have kinks no cubic through sections finer than the steps follows).
+struct ExactFrames {
+    /// The locked direction, or None for rotation-minimizing frames.
+    lock: Option<V3>,
+    /// The reference vectors and tangents at the fine steps (rotation-minimizing).
+    refs: Vec<V3>,
+    tans: Vec<V3>,
+    /// The start frame's inverse.
+    start: nalgebra::Rotation3<f64>,
+}
+
+impl ExactFrames {
+    /// The frame at s (point `p` of the path there, after fine step `i`) relative to the start's.
+    fn frame(&self, sweep: &PathSweep, i: usize, p: &P3, s: f64) -> Option<nalgebra::Rotation3<f64>> {
+        let t = sweep.dir(s);
+        let r = match self.lock {
+            Some(d) => d - t * d.dot(&t),
+            // One double-reflection step (Wang, Jüttler, Zheng & Liu 2008, Table 1) from the fine
+            // step before s: it reaches the next step's frame exactly at it, and for a planar path
+            // it is exact everywhere.
+            None => {
+                let (r0, t0) = (self.refs[i], self.tans[i]);
+                let v1 = p - sweep.pts[i];
+                let c1 = v1.norm_squared();
+                if c1 < 1e-24 {
+                    r0
+                } else {
+                    let rl = r0 - v1 * (2.0 / c1) * v1.dot(&r0);
+                    let tl = t0 - v1 * (2.0 / c1) * v1.dot(&t0);
+                    let v2 = t - tl;
+                    let c2 = v2.norm_squared();
+                    if c2 < 1e-24 { rl } else { rl - v2 * (2.0 / c2) * v2.dot(&rl) }
+                }
+            }
+        };
+        (r.norm() > tol::ANGULAR).then(|| frame_of(&t, &r) * self.start)
+    }
 }
 
 /// A helix: axis through `o` along unit `a`, radius `r`, rising `c` per radian, `e1`/`e2`
@@ -218,7 +262,7 @@ impl PathSweep {
             *end = 1.0;
         }
         let fine = FINE * segs.len();
-        let mut me = Self { plane, segs: segs.to_vec(), cum, arc, pts: vec![], rots: vec![], v: vec![], deg: 3, reach, helix: None, angles: vec![] };
+        let mut me = Self { plane, segs: segs.to_vec(), cum, arc, pts: vec![], rots: vec![], exact: None, v: vec![], deg: 3, reach, helix: None, angles: vec![] };
         let pts: Vec<P3> = (0..=fine).map(|i| me.at(i as f64 / fine as f64)).collect();
         let tans: Vec<V3> = (0..=fine).map(|i| me.dir(i as f64 / fine as f64)).collect();
         if tans.iter().any(|t| !t.iter().all(|x| x.is_finite())) {
@@ -270,6 +314,7 @@ impl PathSweep {
             }
             (SweepControl::KeepOrientation, _) => {}
             (SweepControl::LockDirection(d), _) => {
+                me.exact = Some(ExactFrames { lock: Some(d.into_inner()), refs: Vec::new(), tans: Vec::new(), start: nalgebra::Rotation3::identity() });
                 for t in &tans {
                     let r = d.into_inner() - t * d.dot(t);
                     if r.norm() < tol::ANGULAR {
@@ -304,6 +349,8 @@ impl PathSweep {
                         r = if c2 < 1e-24 { rl } else { rl - v2 * (2.0 / c2) * v2.dot(&rl) };
                         frames.push(frame_of(&tans[i + 1], &r));
                     }
+                    let refs = frames.iter().map(|f| f.matrix().column(1).into_owned()).collect();
+                    me.exact = Some(ExactFrames { lock: None, refs, tans: tans.clone(), start: nalgebra::Rotation3::identity() });
                 }
             },
         }
@@ -311,73 +358,110 @@ impl PathSweep {
             vec![nalgebra::UnitQuaternion::identity(); fine + 1]
         } else {
             let f0 = frames[0].inverse();
+            if let Some(x) = me.exact.as_mut() {
+                x.start = f0;
+            }
             frames.iter().map(|f| nalgebra::UnitQuaternion::from_rotation_matrix(&(f * f0))).collect()
         };
-        // Sections: more where the path turns or twists.
-        let mut turn = 0.0;
-        for i in 0..fine {
-            turn += rots[i].angle_to(&rots[i + 1]) + tans[i].angle(&tans[i + 1]);
-        }
-        // Enough sections for the cubic interpolation between them to stay within about 1e-8
-        // of the true sweep: spacing h with h⁴κ³/384 ≤ tol along rails of curvature κ (the
-        // path's, grown by the profile's reach from it).
+        // Sections spaced by the local bend (research/algorithms/offsets_sweeps_import.md card 1):
+        // cubic interpolation of a rail of curvature κ (the path's, grown by the profile's reach)
+        // through sections h apart strays about h⁴κ³/384 from it, so a stretch of the path needs
+        // ds·(κ³/384·tol)^¼ sections to hold `tol`, and at least one per π/24 it turns or twists.
+        // The sections are spread by that density (cumulated over the fine steps), not evenly: one
+        // tight bend on a long run no longer sets the spacing of all of it.
         let reach = me.profile_reach();
-        let mut kmax: f64 = 0.0;
+        let tol = SECTION_TOL * (1.0 + reach);
+        let mut density = Vec::with_capacity(fine + 1);
+        density.push(0.0);
         for i in 0..fine {
             let ds = (pts[i + 1] - pts[i]).norm();
-            if ds > tol::ROUNDOFF_FINE {
-                kmax = kmax.max(tans[i].angle(&tans[i + 1]) / ds);
-            }
+            let bend = tans[i].angle(&tans[i + 1]);
+            let by_err = if ds > tol::ROUNDOFF_FINE {
+                let k = bend / ds;
+                let k_rail = k * (1.0 + reach * k);
+                if k_rail > tol::ROUNDOFF_FINE { ds / (384.0 * tol / k_rail.powi(3)).powf(0.25) } else { 0.0 }
+            } else {
+                0.0
+            };
+            let by_turn = (rots[i].angle_to(&rots[i + 1]) + bend) / (PI / 24.0);
+            density.push(density[i] + by_err.max(by_turn));
         }
-        let length: f64 = (0..fine).map(|i| (pts[i + 1] - pts[i]).norm()).sum();
-        let k_rail = kmax * (1.0 + reach * kmax);
-        let by_err = if k_rail > tol::ROUNDOFF_FINE {
-            let h = (384.0 * 1e-8 / k_rail.powi(3)).powf(0.25);
-            length / h
-        } else {
-            0.0
-        };
-        let mut n = (8.0 + turn / (PI / 24.0)).max(by_err).ceil().clamp(8.0, MAX_SECTIONS as f64) as usize;
+        // Eight sections on top, spread evenly, so no stretch goes without (a straight one between
+        // bends would otherwise be one interval long beside short ones).
+        let even = 8.0;
+        let total = density[fine] + even;
+        let n = total.ceil().clamp(8.0, MAX_SECTIONS as f64) as usize;
+        let mut v = Vec::with_capacity(n + 1);
+        v.push(0.0);
+        let mut i = 0;
+        for k in 1..n {
+            let target = total * k as f64 / n as f64;
+            let at = |j: usize| density[j] + even * j as f64 / fine as f64;
+            while i + 1 < fine && at(i + 1) < target {
+                i += 1;
+            }
+            let (a, b) = (at(i), at(i + 1));
+            let f = if b > a { ((target - a) / (b - a)).clamp(0.0, 1.0) } else { 0.0 };
+            v.push((i as f64 + f) / fine as f64);
+        }
+        v.push(1.0);
         me.pts = pts;
         me.rots = rots;
         // The estimate assumes rails parametrized by length; a path whose speed varies along its
         // parameter (a B-spline's) bends them in s more. Check the rails of the profile's reach
-        // between the sections and double the sections until they hold (each doubling cuts the
-        // cubic's error about 16 times; one that cuts it less than 4 times is following frames
-        // that aren't smooth, where more sections only cost, so the doubling stops there).
-        let tol = SECTION_TOL * (1.0 + me.reach);
-        let mut err = me.rail_error(n);
-        while n < MAX_SECTIONS && err > tol {
-            let more = (2 * n).min(MAX_SECTIONS);
-            let e = me.rail_error(more);
-            if e > err / 4.0 {
+        // midway between the sections and add a section in each interval that strays more than
+        // `tol` until they hold (each halving cuts the cubic's error about 16 times, 4 where the
+        // curvature jumps; a pass that cuts the worst less than 2 times is following frames that
+        // aren't smooth, where more sections only cost, so the refinement stops there and keeps
+        // the sections before it). Neighbouring intervals differ at most twofold: the
+        // interpolating cubic overshoots in a long interval beside short ones.
+        graded(&mut v);
+        let mut errs = me.rail_errors(&v);
+        loop {
+            let worst = errs.iter().copied().fold(0.0, f64::max);
+            if worst <= tol {
                 break;
             }
-            (n, err) = (more, e);
+            let mut more = Vec::with_capacity(2 * v.len());
+            more.push(v[0]);
+            for (w, e) in v.windows(2).zip(&errs) {
+                if *e > tol {
+                    more.push(0.5 * (w[0] + w[1]));
+                }
+                more.push(w[1]);
+            }
+            graded(&mut more);
+            if more.len() > MAX_SECTIONS + 1 {
+                break;
+            }
+            let e = me.rail_errors(&more);
+            if e.iter().copied().fold(0.0, f64::max) > worst / 2.0 {
+                break;
+            }
+            (v, errs) = (more, e);
         }
-        me.v = (0..=n).map(|k| k as f64 / n as f64).collect();
+        me.v = v;
         Ok(me)
     }
 
-    /// How far the cubic interpolation through `n` equal sections strays from the true sweep
-    /// midway between sections: the path point's rail, and the rails of points `reach` from it
+    /// How far the cubic interpolation through sections at `v` strays from the true sweep midway
+    /// between each two of them: the path point's rail, and the rails of points `reach` from it
     /// in the profile's plane along the path (how far the profile tilts off square to the
     /// path; a turn within its plane only twists the sampled frames, which are approximate
     /// anyway).
-    fn rail_error(&self, n: usize) -> f64 {
+    fn rail_errors(&self, v: &[f64]) -> Vec<f64> {
         let (x, y) = (self.plane.x_dir.into_inner(), self.plane.y_dir().into_inner());
         let p0 = self.pts[0];
         let r = self.reach.max(tol::ROUNDOFF);
-        let v: Vec<f64> = (0..=n).map(|k| k as f64 / n as f64).collect();
-        let deg = self.deg.min(n);
-        let mut worst: f64 = 0.0;
+        let deg = self.deg.min(v.len() - 1);
+        let mut worst = vec![0.0f64; v.len() - 1];
         for (k, q) in [p0, p0 + x * r, p0 - x * r, p0 + y * r, p0 - y * r].into_iter().enumerate() {
             let at: Vec<P3> = v.iter().map(|&s| self.motion(s).point(&q)).collect();
-            let rail = NurbsCurve::interpolate(&at, &v, deg, None, None);
-            for w in v.windows(2) {
+            let rail = NurbsCurve::interpolate(&at, v, deg, None, None);
+            for (w, e) in v.windows(2).zip(worst.iter_mut()) {
                 let m = 0.5 * (w[0] + w[1]);
-                let e = rail.point(m) - self.motion(m).point(&q);
-                worst = worst.max(if k == 0 { e.norm() } else { e.dot(&self.dir(m)).abs() });
+                let d = rail.point(m) - self.motion(m).point(&q);
+                *e = e.max(if k == 0 { d.norm() } else { d.dot(&self.dir(m)).abs() });
             }
         }
         worst
@@ -477,9 +561,11 @@ impl PathSweep {
         let x = s.clamp(0.0, 1.0) * fine as f64;
         let i = (x.floor() as usize).min(fine - 1);
         let f = x - i as f64;
-        let q = self.rots[i].slerp(&self.rots[i + 1], f);
         let p = self.at(s);
-        let m = q.to_rotation_matrix().into_inner();
+        let m = match self.exact.as_ref().and_then(|e| e.frame(self, i, &p, s)) {
+            Some(r) => r.into_inner(),
+            None => self.rots[i].slerp(&self.rots[i + 1], f).to_rotation_matrix().into_inner(),
+        };
         Affine { m, t: p.coords - m * self.pts[0].coords }
     }
 
@@ -510,6 +596,32 @@ impl PathSweep {
             cols.push(a.cps.iter().map(|p| H::new(p.x, p.y, p.z, p.w * w)).collect());
         }
         NurbsSurface { du: n0.degree, dv: q, ku: n0.knots.clone(), kv, cps: cols }
+    }
+}
+
+/// Splits section intervals in halves until each is at most twice as long as its neighbours (or
+/// there are [`MAX_SECTIONS`]).
+fn graded(v: &mut Vec<f64>) {
+    loop {
+        let n = v.len() - 1;
+        let h = |k: usize| v[k + 1] - v[k];
+        let mut out = Vec::with_capacity(v.len() + 8);
+        out.push(v[0]);
+        for k in 0..n {
+            let left = if k > 0 { h(k - 1) } else { f64::INFINITY };
+            let right = if k + 1 < n { h(k + 1) } else { f64::INFINITY };
+            if h(k) > 2.0 * left.min(right) {
+                out.push(0.5 * (v[k] + v[k + 1]));
+            }
+            out.push(v[k + 1]);
+        }
+        let done = out.len() == v.len() || out.len() > MAX_SECTIONS + 1;
+        if out.len() <= MAX_SECTIONS + 1 {
+            *v = out;
+        }
+        if done {
+            return;
+        }
     }
 }
 
@@ -711,4 +823,29 @@ pub fn sweep_seg(faces: &[MergedFace], chains: &[Vec<Piece>], plane: Plane, segs
         eprintln!("[profile] sweep piece: frames {t1:?}, faces {:?}, recognise {:?} ({} sections)", t2 - t1, t0.elapsed() - t2, kind.v.len());
     }
     Ok((b, kind.end_plane()))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::f64::consts::FRAC_PI_2;
+
+    /// A quarter ellipse, bending tightly at one end and hardly at the other: the sections gather
+    /// where it bends (spaced by the local curvature; spaced by the tightest bend everywhere, it
+    /// took about 950), and the rails between them stay within the section tolerance.
+    #[test]
+    fn sections_gather_where_the_path_bends() {
+        let ellipse = Curve::Ellipse { c: P3::origin(), x: V3::x(), y: V3::y(), a: 40.0, b: 8.0 };
+        let seg = Seg { c: ellipse, t0: 0.0, t1: FRAC_PI_2, rev: false };
+        let plane = Plane { origin: P3::new(40.0, 0.0, 0.0), x_dir: nalgebra::Unit::new_normalize(V3::x()), normal: nalgebra::Unit::new_normalize(V3::y()) };
+        let sweep = PathSweep::new(plane, &[seg], Frames::Control(SweepControl::None), 1.0, None).unwrap();
+        let n = sweep.v.len() - 1;
+        assert!((8..300).contains(&n), "{n} sections");
+        // Its first fifth (by length) bends the most and holds most of the sections.
+        let tight = sweep.v.iter().filter(|&&s| s < 0.2).count();
+        assert!(tight * 2 > n, "{tight} of {n} sections where it bends most");
+        let tol = SECTION_TOL * 2.0;
+        let worst = sweep.rail_errors(&sweep.v).into_iter().fold(0.0, f64::max);
+        assert!(worst <= tol, "rails stray {worst:e} (tolerance {tol:e})");
+    }
 }

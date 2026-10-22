@@ -154,8 +154,20 @@ fn edge_tube(b: &Body, e: usize, r: f64) -> Result<Body> {
     }
 }
 
-/// Whether an edge is convex (its faces' material inside the wedge).
-fn convex(b: &Body, e: usize) -> Option<bool> {
+/// How an edge's two faces meet.
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum Dihedral {
+    /// The material inside the wedge.
+    Convex,
+    Concave,
+    /// Tangent faces, or a seam across which its face's normal turns no more than
+    /// [`tol::ANGULAR`].
+    Smooth,
+    /// Not two faces (a boundary or non-manifold edge), or a seam across which the face kinks.
+    Unknown,
+}
+
+fn dihedral(b: &Body, e: usize) -> Dihedral {
     let ed = &b.edges[e];
     let tm = ed.mid_t();
     let mut sides = Vec::new();
@@ -169,15 +181,62 @@ fn convex(b: &Body, e: usize) -> Option<bool> {
             }
         }
     }
-    if sides.len() != 2 || sides[0].0 == sides[1].0 {
-        return None;
+    if sides.len() != 2 {
+        return Dihedral::Unknown;
     }
-    let (n1, _w1) = (sides[0].1, sides[0].2);
-    let w2 = sides[1].2;
-    if n1.cross(&sides[1].1).norm() < tol::ANGULAR {
-        return None; // tangent faces: smooth
+    let (n1, n2) = (sides[0].1, sides[1].1);
+    if sides[0].0 == sides[1].0 {
+        return if n1.cross(&n2).norm() < tol::ANGULAR && n1.dot(&n2) > 0.0 { Dihedral::Smooth } else { Dihedral::Unknown };
     }
-    Some(w2.dot(&n1) < 0.0)
+    if n1.cross(&n2).norm() < tol::ANGULAR {
+        return Dihedral::Smooth;
+    }
+    if sides[1].2.dot(&n1) < 0.0 { Dihedral::Convex } else { Dihedral::Concave }
+}
+
+/// Whether an edge is convex (its faces' material inside the wedge); None for tangent faces,
+/// a seam or an edge not between two faces.
+fn convex(b: &Body, e: usize) -> Option<bool> {
+    match dihedral(b, e) {
+        Dihedral::Convex => Some(true),
+        Dihedral::Concave => Some(false),
+        Dihedral::Smooth | Dihedral::Unknown => None,
+    }
+}
+
+/// Whether the offset by a ball needs a ball at vertex `v` (research/algorithms/
+/// offsets_sweeps_import.md card 5, Rossignac & Requicha 1986 §2.6, §4.1): a ball adds boundary
+/// only where `v` is the nearest point of the body, which takes edges of the offset's kind
+/// (`rounded`: convex ones outward, concave ones inward) meeting at a corner. No ball where
+/// only smooth edges meet (a vertex between fillets), or where the only two of that kind run on
+/// through it tangentially (a circle's seam vertex) and the rest are smooth. A vertex with a
+/// point edge (an apex, a pole), an edge of unknown kind or one of the other kind keeps its
+/// ball: by the rule it needs none either, but without it the slabs meeting there leave the
+/// booleans tangent configurations they can't settle (SMLib's offset_bracket2 by 3.5).
+fn needs_ball(b: &Body, kinds: &[Dihedral], v: usize, rounded: Dihedral) -> bool {
+    let mut leaving: Vec<V3> = Vec::new();
+    let mut others_smooth = true;
+    for (e, ed) in b.edges.iter().enumerate() {
+        for (end, &w) in ed.v.iter().enumerate() {
+            if w != v {
+                continue;
+            }
+            if ed.degenerate || kinds[e] == Dihedral::Unknown {
+                return true;
+            }
+            if kinds[e] == rounded {
+                let t = ed.curve.tangent(ed.t[end]).normalize();
+                leaving.push(if end == 0 { t } else { -t });
+            } else if kinds[e] != Dihedral::Smooth {
+                others_smooth = false;
+            }
+        }
+    }
+    match leaving.as_slice() {
+        [] => !others_smooth,
+        [s, t] => !(others_smooth && s.dot(t) < -1.0 + tol::ANGULAR),
+        _ => true,
+    }
 }
 
 /// `acc` (op) `piece`; a failure says which piece (`what`) with `CADRS_OFFSET_DEBUG`, and
@@ -284,6 +343,7 @@ fn grown_except(b: &Body, d: f64, cut: &[(P3, V3)]) -> Result<Body> {
             }
         }
     }
+    let kinds: Vec<Dihedral> = (0..b.edges.len()).map(|e| dihedral(b, e)).collect();
     let mut done: Vec<P3> = Vec::new();
     for e in &b.edges {
         for v in e.v {
@@ -292,6 +352,9 @@ fn grown_except(b: &Body, d: f64, cut: &[(P3, V3)]) -> Result<Body> {
                 continue;
             }
             done.push(p);
+            if !needs_ball(b, &kinds, v, Dihedral::Convex) {
+                continue;
+            }
             let beyond = vf[v].iter().any(|&f| on_cut[f].is_some_and(|m| vf[v].iter().all(|&g| above(g, &m, &p))));
             if !beyond {
                 pieces.push((ball_body(p, d)?, format!("the ball at {p:?}")));
@@ -654,10 +717,11 @@ fn rounds(b: &Body, still: &[usize], t: f64, round_still: bool) -> Result<Vec<(B
     let ef = b.edge_faces();
     let at_still = |e: usize| !round_still && ef[e].iter().any(|f| still.contains(f));
     let still_verts: Vec<usize> = (0..b.edges.len()).filter(|&e| at_still(e)).flat_map(|e| b.edges[e].v).collect();
+    let kinds: Vec<Dihedral> = (0..b.edges.len()).map(|e| dihedral(b, e)).collect();
     let mut pieces: Vec<(Body, String)> = Vec::new();
     let mut balls: Vec<P3> = Vec::new();
     for e in 0..b.edges.len() {
-        if b.edges[e].degenerate || convex(b, e) != Some(false) || at_still(e) {
+        if b.edges[e].degenerate || kinds[e] != Dihedral::Concave || at_still(e) {
             continue;
         }
         pieces.push((edge_tube(b, e, t)?, format!("the tube round edge {e}")));
@@ -667,7 +731,7 @@ fn rounds(b: &Body, still: &[usize], t: f64, round_still: bool) -> Result<Vec<(B
         }
         for v in b.edges[e].v {
             let p = b.verts[v].p;
-            if !still_verts.contains(&v) && !balls.iter().any(|q| (q - p).norm() < tol::ROUNDOFF) {
+            if !still_verts.contains(&v) && needs_ball(b, &kinds, v, Dihedral::Concave) && !balls.iter().any(|q| (q - p).norm() < tol::ROUNDOFF) {
                 balls.push(p);
             }
         }

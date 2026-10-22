@@ -28,6 +28,17 @@ use super::tol;
 /// ([`super::tol::CONFUSION`]).
 pub const TOL_MIN: f64 = super::tol::CONFUSION;
 
+/// Whether a closed shell or solid (as a body of its own) encloses a negative volume (its faces
+/// point in): by ray parity where every probe agrees ([`parity_orientation`], a few rays), else
+/// by the sign of its volume (an integral over every face, which on a large B-spline model
+/// costs far more).
+pub(crate) fn points_in(shell: &Body) -> bool {
+    match parity_orientation(shell) {
+        Some(out) => !out,
+        None => super::mass::body_volume(shell) < 0.0,
+    }
+}
+
 /// Whether a closed shell (as a body of its own) points out by ray parity, without integrating:
 /// at points just off a few of its faces, along their normals, the one behind the face
 /// inside and the one in front outside. A face's normal here is the one its volume integral
