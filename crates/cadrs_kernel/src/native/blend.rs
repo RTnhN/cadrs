@@ -757,6 +757,10 @@ fn fillet_section(spec: &FilletSpec, phi: f64) -> SectionKind {
 /// Blends the edges (each with its section) and the corners where three circular fillets of
 /// one radius meet between planes.
 pub fn blend(k: &mut NativeKernel, body: BodyId, edges: &[EdgeBlend], corners: bool) -> Result<OpResult> {
+    // For measuring what local trimming covers: no tool at all.
+    if std::env::var_os("CADRS_LOCAL_FILLET_ONLY").is_some() {
+        return Err(KernelError::Unsupported("the blend tool (CADRS_LOCAL_FILLET_ONLY is set)"));
+    }
     let b = (**k.get(body)?).clone();
     let picked: Vec<usize> = edges.iter().map(|(e, _, _)| e.0 as usize).collect();
     for &e in &picked {

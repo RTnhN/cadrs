@@ -639,7 +639,12 @@ fn free_end(b: &Body, ef: &EdgeFillet, j: usize) -> Result<[Exit; 2]> {
                     found = Some((d, Exit { ball, t, into: x.into, ext: Some((c.edge, ty)) }));
                 }
             }
-            let y = found.ok_or_else(|| unsupported("a rail that doesn't leave its face"))?.1;
+            // Else the rail leaves its face over another edge (its face ends short of the end
+            // face there: a step in it).
+            let y = match found {
+                Some(f) => f.1,
+                None => crossing(k, false)?.ok_or_else(|| unsupported("a rail that doesn't leave its face"))?,
+            };
             if k == 0 { [y, x] } else { [x, y] }
         }
         [None, None] => {
