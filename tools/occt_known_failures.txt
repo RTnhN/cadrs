@@ -731,10 +731,12 @@ feat featrf_b2
 feat featrevol_a8
 # offsetcompshape / offsetonface / thickshell cases made runnable by those commands: thick solids
 # whose expected volume is the input's ("real volume of result shape is unknown yet": compshape a1,
-# ours 434000; a4, where OCCT's command fails inside a catch, ours 67007), booleans (a2).
+# ours 434000; a4, where OCCT's command fails inside a catch, ours 67007; offsetshape's shape a1,
+# 2.80312e+07 the input's 28031240, ours 2128159), booleans (a2).
 offset compshape_a1
 offset compshape_a2
 offset compshape_a4
+offset shape_a1
 # boolean: topology counts differ from OCCT's (faces split or merged differently).
 boolean bopcut_complex_e5
 boolean cells_test_j1

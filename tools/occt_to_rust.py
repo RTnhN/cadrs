@@ -328,6 +328,16 @@ class Case:
                 self.bind(a[0], f"k.offsetperform_on({self.shape(s_)}, {L(d_)}, &[{own}], {arc})?")
             else:
                 self.bind(a[0], f"k.offsetperform({self.shape(s_)}, {L(d_)}, &[{', '.join(self.shape(f) for f in fs)}], {arc})?")
+        elif c == "offsetshape" and len(a) >= 3:
+            # `offsetshape r s d [tol] [face ...]`: as offsetcompshape (OCCT runs both through one
+            # function, arc joins), its optional tolerance skipped.
+            rest = a[3:]
+            try:
+                float(rest[0])
+                rest = rest[1:]
+            except (IndexError, ValueError):
+                pass
+            self.bind(a[0], f"k.offsetcompshape({self.shape(a[1])}, {L(a[2])}, &[{', '.join(self.shape(f) for f in rest)}], false)?")
         elif c == "offsetcompshape" and len(a) >= 3:
             opts = [x for x in a[3:] if x.startswith("-")]
             if any(x not in ("-i", "-t") for x in opts):
