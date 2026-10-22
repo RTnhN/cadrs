@@ -4,7 +4,7 @@
 //! after a Hem (and the other way round), a Make joint and a Bend in either order, the table reordered with later features' bends, a form kept through a later
 //! refold, and the features moved, undone and redone, with the parts keeping their ids. Folded
 //! volumes are checked against the flat pattern as in `tests/sheetmetal.rs`.
-#![cfg(feature = "occt")]
+#![cfg(feature = "brep")]
 
 use cadrs_core::applied::EdgeOrFace;
 use cadrs_core::commands::{AddFeature, AddSketch, EditSketch, MoveFeature, ReplaceFeature};

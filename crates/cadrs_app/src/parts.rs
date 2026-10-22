@@ -80,7 +80,7 @@ impl Plugin for PartsPlugin {
             .add_systems(Update, set_snapshot_store.run_if(resource_changed::<crate::DocumentStore>))
             .add_systems(
                 Update,
-                (update_part_cache, crate::assembly::in_context::sync_context_parts, sync_part_meshes, shade_parts, draw_part_edges, draw_sketch_curve_picks, tint_selection, tint_sketch_plane)
+                (update_part_cache, crate::assembly::in_context::sync_context_parts, sync_part_meshes, sync_ghost_meshes, draw_ghost_edges, shade_parts, draw_part_edges, draw_sketch_curve_picks, tint_selection, tint_sketch_plane)
                     .chain()
                     .in_set(PartsSet)
                     .after(crate::viewport::apply_view_to_camera)
@@ -431,6 +431,12 @@ pub struct PartCache {
     pub missing: HashMap<FeatureId, Vec<usize>>,
     /// True while a rebuild is running (the parts on screen are the previous ones).
     pub rebuilding: bool,
+    /// The parts as they were before the feature whose dialog is open (Onshape's ghost): drawn
+    /// faint over the result and pickable, so edges the feature consumed (a chamfered edge) can
+    /// still be picked. Empty when no dialog is open.
+    pub ghost: Vec<Part>,
+    /// Bumped when [`Self::ghost`] changes (its meshes are rebuilt).
+    pub ghost_generation: u64,
     /// Sketches consumed by an extrude (other than the one being edited): hidden in the view and
     /// greyed out in the feature list.
     pub hidden_sketches: HashSet<FeatureId>,
@@ -663,8 +669,31 @@ impl PartCache {
 
     /// The shown parts that can be picked (MC2.3: not an assembly context's while Select
     /// transparent geometry is off).
-    pub fn pickable(&self) -> impl Iterator<Item = &Part> {
-        self.shown().filter(|p| !self.unpickable.contains(&p.id))
+    /// The parts picks land on: the ghost while a feature's dialog shows one (picks go to the
+    /// parts before the feature, as in Onshape), else the shown parts.
+    pub fn pickable(&self) -> Box<dyn Iterator<Item = &Part> + '_> {
+        if self.ghost.is_empty() {
+            Box::new(self.shown().filter(|p| !self.unpickable.contains(&p.id)))
+        } else {
+            Box::new(self.ghost.iter())
+        }
+    }
+
+    /// The geometry hover and selection are drawn on for `part`: its ghost while there is one.
+    pub fn picked_geometry<'a>(&'a self, part: &'a Part) -> &'a Part {
+        self.ghost.iter().find(|g| g.id == part.id).unwrap_or(part)
+    }
+
+    /// The part `id` that has `edge`: the shown one, else its ghost (an edge the edited
+    /// feature consumed).
+    pub fn part_with_edge(&self, id: PartId, edge: &EdgeName) -> Option<&Part> {
+        self.part(id).filter(|p| p.solid.edge(edge).is_some()).or_else(|| self.ghost.iter().find(|p| p.id == id && p.solid.edge(edge).is_some()))
+    }
+
+    /// The part `id` that has `face`: the shown one, else its ghost.
+    pub fn part_or_ghost_with_face(&self, id: PartId, face: &FaceName) -> Option<&Part> {
+        let has = |p: &&Part| p.solid.faces.iter().any(|f| &f.name == face);
+        self.part(id).filter(has).or_else(|| self.ghost.iter().find(|p| p.id == id && has(p)))
     }
 
     /// A shown part, or the Add preview's body, by id (what the part meshes draw).
@@ -1755,6 +1784,75 @@ fn sync_part_meshes(
     }
 }
 
+/// A mesh of [`PartCache::ghost`].
+#[derive(Component)]
+pub struct GhostMesh;
+
+/// The ghost's opacity: faint enough to read the result through it.
+const GHOST_PART_ALPHA: f32 = 0.18;
+
+/// Keeps one faint mesh per ghost part (the parts before the edited feature).
+#[allow(clippy::too_many_arguments)]
+fn sync_ghost_meshes(
+    cache: Res<PartCache>,
+    faces: Res<FaceSelection>,
+    highlight: Res<PlaneHighlight>,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<PartShading>>,
+    mut mat: Local<Option<Handle<PartShading>>>,
+    q: Query<Entity, With<GhostMesh>>,
+    mut last: Local<Option<(u64, Vec<Pick>, Option<Pick>)>>,
+    mut commands: Commands,
+) {
+    // The selected faces filled in a subtle yellow, the hovered one lighter: picks land on the
+    // ghost, so it shows them.
+    let hovered = highlight.viewport.filter(|p| matches!(p, Pick::Face(..)));
+    let key = (cache.ghost_generation, faces.0.clone(), hovered);
+    if last.as_ref() == Some(&key) {
+        return;
+    }
+    *last = Some(key);
+    for e in &q {
+        commands.entity(e).try_despawn();
+    }
+    let mat = mat.get_or_insert_with(|| materials.add(PartShading::new(true, true))).clone();
+    for part in &cache.ghost {
+        let mut bases = cache.bases(part);
+        for (fi, b) in bases.iter_mut().enumerate() {
+            b.alpha = b.alpha.min(GHOST_PART_ALPHA);
+            let pick = part.solid.faces.get(fi).map(|f| Pick::Face(part.id, f.name));
+            if pick.is_some_and(|p| faces.0.contains(&p)) {
+                *b = FaceBase { rgb: SELECTED_BASE, alpha: if pick == hovered { 0.6 } else { 0.42 } };
+            } else if pick.is_some() && pick == hovered {
+                *b = FaceBase { rgb: [255.0, 214.0, 140.0], alpha: 0.32 };
+            }
+        }
+        let mesh = meshes.add(part_base_mesh(part, true, &bases));
+        commands.spawn((
+            Name::new(format!("ghost-{}", part.name.to_lowercase().replace(' ', "-"))),
+            GhostMesh,
+            Mesh3d(mesh),
+            MeshMaterial3d(mat.clone()),
+            Transform::IDENTITY,
+            DespawnOnExit(AppState::Document),
+        ));
+    }
+}
+
+/// The ghost's edges that the edited feature consumed (gone from the result: a chamfered or
+/// filleted edge), faint, as Onshape draws them to pick on.
+fn draw_ghost_edges(cache: Res<PartCache>, section: Res<crate::section_view::SectionClip>, mut g: Gizmos<PreviewEdgeGizmos>) {
+    for part in &cache.ghost {
+        let shown = cache.part(part.id);
+        for e in part.solid.edges.iter().filter(|e| !e.smooth) {
+            if shown.is_some_and(|s| s.solid.edge(&e.name).is_some()) {
+                continue;
+            }
+            strip(&mut g, section.clip_for(part.id), e.points.iter().map(|p| v3(*p)), Color::srgba(0.08, 0.08, 0.08, 0.55));
+        }
+    }
+}
+
 /// Re-colours a selected part (or face) in the selection's orange. The light is the GPU's
 /// ([`PartShading`]): turning the view changes nothing here.
 #[allow(clippy::type_complexity, clippy::too_many_arguments)]
@@ -1959,7 +2057,9 @@ fn draw_part_edges(
         } else {
             Vec::new()
         };
-        for (fi, face) in part.solid.faces.iter().enumerate() {
+        // Hover and selection on the ghost while a dialog shows one (picks land there).
+        let hp = cache.picked_geometry(part);
+        for (fi, face) in hp.solid.faces.iter().enumerate() {
             let pick = Pick::Face(part.id, face.name);
             let hovered = hovered_pick(pick) || list_feature.is_some_and(|f| face.name.op == f.0);
             if !hovered && !selected(pick) {
@@ -2015,9 +2115,12 @@ fn draw_part_edges(
             }
         }
         // Edges: hovered or selected.
-        for e in &part.solid.edges {
+        for e in &hp.solid.edges {
             let pick = Pick::Edge(part.id, e.name);
-            let color = if hovered_pick(pick) {
+            let color = if hovered_pick(pick) && selected(pick) {
+                // Hovering a selected edge: a click deselects it.
+                EDGE_HOVER_SELECTED
+            } else if hovered_pick(pick) {
                 EDGE_HOVER
             } else if selected(pick) {
                 SELECTED
@@ -2031,7 +2134,7 @@ fn draw_part_edges(
         }
         // Vertices: a dot about 9 px across, facing the viewer.
         let rot = Quat::from_rotation_arc(Vec3::Z, v.back());
-        for vx in &part.solid.vertices {
+        for vx in &hp.solid.vertices {
             if clip.is_some_and(|c| c.removes(v3(vx.point))) {
                 continue;
             }
@@ -2070,6 +2173,9 @@ pub const HOVER: Color = Color::srgb(1.0, 198.0 / 255.0, 133.0 / 255.0);
 /// A hovered edge: the same orange, more saturated so the thin line reads as clearly as the
 /// face outline of `screens/24a` (P3.2 judge).
 pub const EDGE_HOVER: Color = Color::srgb(1.0, 170.0 / 255.0, 60.0 / 255.0);
+
+/// A selected edge under the pointer: a bright yellow, apart from the selection's orange.
+pub const EDGE_HOVER_SELECTED: Color = Color::srgb(1.0, 0.95, 0.35);
 
 /// The amber of selected part faces, edges, vertices and parts, sampled from the course's
 /// screenshots (`ex3-step3.png`, `ex3-step9.png`, `lesson-fillet-and-chamfer.png`: about

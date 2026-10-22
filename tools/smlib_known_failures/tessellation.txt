@@ -1,0 +1,1 @@
+# SMLib tessellation cases (tests/smlib_tessellation.rs, from tools/smlib/tessellation.py) that fail.

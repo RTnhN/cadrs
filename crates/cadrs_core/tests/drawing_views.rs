@@ -10,7 +10,7 @@
 //! - a 20 mm cube with a Ø10 through hole shows exactly 2 dashed lines in its side view (the
 //!   hole's two sides, 5 mm either side of its axis, 20 mm long);
 //! - at 1:2 every projected line is half as long as at 1:1.
-#![cfg(feature = "occt")]
+#![cfg(feature = "brep")]
 
 use cadrs_core::commands::{AddSketch, EditSketch};
 use cadrs_core::document::{Document, Element};

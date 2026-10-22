@@ -1,0 +1,3 @@
+# SMLib advanced silhouette cases (tests/smlib_silhouette.rs, from tools/smlib/silhouette.py)
+# that fail: `name`, or `name slow` (over a minute).
+

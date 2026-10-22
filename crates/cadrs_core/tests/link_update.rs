@@ -4,7 +4,7 @@
 //! The source is the linked-documents block ([`cadrs_core::samples::linked_block`]): a
 //! 50 × 30 × h box, so V = 50·30·h: 37 500 mm³ at h = 25, 60 000 at h = 40 and 82 500 at h = 55
 //! (computed here from the dimensions, not read back from the model).
-#![cfg(feature = "occt")]
+#![cfg(feature = "brep")]
 
 use std::sync::Arc;
 

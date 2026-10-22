@@ -9,7 +9,7 @@
 //! - the plates: π(100² − 6·5²)·10 = 98 500π and π(80² − 6·5²)·10 = 62 500π, centroids z 5 and
 //!   116 + 5;
 //! - the Hexapod: both plates and six pistons raised 20.
-#![cfg(feature = "occt")]
+#![cfg(feature = "brep")]
 
 use std::f64::consts::PI;
 use std::sync::Arc;

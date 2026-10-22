@@ -14,7 +14,7 @@
 //! Assumed where the pictures are ambiguous: the Ø1.750 circle is a boss (not the bolt circle),
 //! the angles' sides, the pocket, flats, fillet, chamfer and bolt circle. The module docs of
 //! `samples::ujoint` give the details; `CADRS_WRITE_FIXTURES=1` regenerates the file.
-#![cfg(feature = "occt")]
+#![cfg(feature = "brep")]
 
 use cadrs_core::rebuild;
 use cadrs_core::samples::ujoint as uj;

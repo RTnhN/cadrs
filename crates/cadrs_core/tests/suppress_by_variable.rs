@@ -1,7 +1,7 @@
 //! IR5.5: Dynamic suppression ▸ Suppress by variable. The plate of
 //! [`cadrs_core::samples::with_hole`]: 60 × 40 × 10 = 24 000 mm³, its Ø16 through hole (Extrude 2,
 //! Remove) π·8²·10 = 2 010.619 mm³, so the plate with the hole is 21 989.381 mm³.
-#![cfg(feature = "occt")]
+#![cfg(feature = "brep")]
 
 use cadrs_core::commands::{SetFeature, SetSuppressByVariable, SetSuppressed};
 use cadrs_core::document::{Document, FeatureKind};

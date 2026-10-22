@@ -1,7 +1,7 @@
 //! Inspection and Repair Tools (stage 3D): the feature error states of P3D.1. A lost input fails
 //! only the features that use it, and each failed feature says which of its inputs is gone
 //! (the dialog shows it as "Missing Face of Sketch 1"), until the loss is undone.
-#![cfg(feature = "occt")]
+#![cfg(feature = "brep")]
 
 use cadrs_core::applied::{EdgeOrFace, FilletFeature};
 use cadrs_core::commands::{AddExtrude, AddFeature, AddSketch, EditSketch, SetExtrude};

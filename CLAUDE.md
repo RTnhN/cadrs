@@ -20,7 +20,12 @@ Onshape-style CAD in Rust + Bevy 0.19.1. Local notes in `docs/` (git-ignored: `P
 - Windows exe: `cargo build -r --target x86_64-pc-windows-gnu` (MinGW is installed).
 - Autorouter GPU shader: after changing `crates/cadrs_router_kernels`, rebuild its SPIR-V with
   `cargo gpu build --shader-crate crates/cadrs_router_kernels --output-dir crates/cadrs_router/shaders`
-  (rust-gpu; commit the `.spv`). Without one the router runs on the CPU.
+  (rust-gpu; commit the `.spv`). Without one the router runs on the CPU. Same for the kernel's
+  GPU spike (`crates/cadrs_gpu_kernels` → `crates/cadrs_gpu/shaders`). Install cargo-gpu with
+  `cargo +nightly-2026-07-03 install cargo-gpu --version 0.11.0 --locked`.
+- Kernel debugging: `CADRS_PROFILE=1`, `CADRS_BOOL_DEBUG=1` and `CADRS_DUMP_DIR=<dir>` (inputs of
+  failing shells/fillets, replayed by `crates/cadrs_kernel/tests/native_debug.rs`); see the
+  kernel README. The kernel is pure Rust (`cadrs_kernel::native`); there is no OCCT any more.
 - Cold builds take 4+ minutes. Never run two cargo builds at once.
 - Project site: `site/` is a Proa app of its own (stable toolchain, built with `RUSTFLAGS=`),
   exported to GitHub Pages by `.github/workflows/pages.yml`; see `site/README.md`.

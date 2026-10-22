@@ -1,7 +1,7 @@
 //! Sketch splines through the kernel: a closed spline's region extruded, an open spline closed
 //! by a line, a thin wall along an open spline, and a spline as a sweep path (volumes from the
 //! kernel against the spline's exact area and length).
-#![cfg(feature = "occt")]
+#![cfg(feature = "brep")]
 
 use cadrs_core::advanced::{PathRef, SweepFeature};
 use cadrs_core::commands::{AddExtrude, AddFeature, AddSketch, EditSketch, SetExtrude};

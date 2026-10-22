@@ -26,6 +26,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::naming::{EdgeName, FaceName};
 use crate::{EdgeId, FaceId, FaceInfo, SurfaceKind};
+use crate::native::tol;
 
 /// Where a view looks from.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
@@ -93,7 +94,9 @@ impl Default for ProjectOptions {
 /// Seen or hidden behind material.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum ProjVisibility {
+    /// In front of everything.
     Visible,
+    /// Behind some face.
     Hidden,
 }
 
@@ -110,12 +113,15 @@ pub enum ProjClass {
 
 /// The exact 2D curve of a projected edge, where it is a line or a circular arc.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[allow(missing_docs, reason = "the fields are described with each variant")]
 pub enum ProjCurve {
+    /// A line from `start` to `end`.
     Line {
         start: Point2<f64>,
         end: Point2<f64>,
     },
-    /// An arc from `start` through `mid` to `end` (a whole circle when `full`).
+    /// An arc of `center` and `radius` from `start` through `mid` to `end` (a whole circle when
+    /// `full`).
     Arc {
         center: Point2<f64>,
         radius: f64,
@@ -139,17 +145,22 @@ pub struct ProjSource {
     pub face: Option<FaceId>,
     /// Persistent names, filled in by the caller that knows the body's names (`cadrs_core`).
     pub edge_name: Option<EdgeName>,
+    /// The face's persistent name, as `edge_name`.
     pub face_name: Option<FaceName>,
 }
 
 /// One projected edge (or a piece of one: HLR splits edges where they go behind something).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ProjEdge {
+    /// Seen or hidden.
     pub visibility: ProjVisibility,
+    /// Sharp, smooth or outline.
     pub class: ProjClass,
+    /// The exact 2D curve, where it is a line or an arc.
     pub curve: ProjCurve,
     /// The edge as a polyline within the tolerance (at least two points).
     pub points: Vec<Point2<f64>>,
+    /// The model edge or face it came from.
     pub source: Option<ProjSource>,
 }
 
@@ -177,6 +188,7 @@ impl ProjEdge {
 /// The projected edges of a view.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct Projection {
+    /// The edges, visible and hidden.
     pub edges: Vec<ProjEdge>,
 }
 
@@ -215,8 +227,11 @@ fn segment_distance(p: Point2<f64>, a: Point2<f64>, b: Point2<f64>) -> (f64, f64
 /// A body's topology for [`attach_sources`]: its edges as 3D polylines, its faces and its seam
 /// edges (an edge with the same face on both sides, such as a cylinder's) with their face.
 pub struct SourceBody<'a> {
+    /// The edges as polylines.
     pub edges: &'a [(EdgeId, Vec<Point3<f64>>)],
+    /// The faces.
     pub faces: &'a [FaceInfo],
+    /// The seam edges and their face.
     pub seams: &'a [(EdgeId, FaceId)],
 }
 
@@ -227,12 +242,12 @@ fn cylinder_outline(frame: &ViewFrame, f: &FaceInfo, start: Point2<f64>, end: Po
         return false;
     };
     let d = end - start;
-    if d.norm() < 1e-9 {
+    if d.norm() < tol::ROUNDOFF {
         return false;
     }
     let dn = d.normalize();
     let a2 = frame.dir_2d(&axis.dir);
-    if a2.norm() < 1e-6 {
+    if a2.norm() < tol::POINT {
         return false;
     }
     let a2 = a2.normalize();
@@ -328,8 +343,8 @@ pub fn attach_sources(proj: &mut Projection, frame: &ViewFrame, bodies: &[Source
                     }
                     let better = match (best, e.visibility) {
                         (None, _) => true,
-                        (Some((_, bd)), ProjVisibility::Visible) => depth < bd - 1e-9,
-                        (Some((_, bd)), ProjVisibility::Hidden) => depth > bd + 1e-9,
+                        (Some((_, bd)), ProjVisibility::Visible) => depth < bd - tol::ROUNDOFF,
+                        (Some((_, bd)), ProjVisibility::Hidden) => depth > bd + tol::ROUNDOFF,
                     };
                     if better {
                         best = Some((ci, depth));
@@ -448,7 +463,7 @@ pub fn reveal_unoccluded(
         .filter(|t| {
             let n = (t[1] - t[0]).cross(&(t[2] - t[0]));
             let len = n.norm();
-            len > 1e-12 && n.dot(&dir).abs() > 1e-6 * len
+            len > tol::DEGENERATE && n.dot(&dir).abs() > tol::REL_POINT * len
         })
         .map(|t| {
             let q = t.map(|p| frame.to_2d(&p));
@@ -462,7 +477,7 @@ pub fn reveal_unoccluded(
         let q = frame.to_2d(&p);
         let rd = -dir;
         for (t, min, max) in &tris {
-            if q.x < min.x - 1e-9 || q.y < min.y - 1e-9 || q.x > max.x + 1e-9 || q.y > max.y + 1e-9 {
+            if q.x < min.x - tol::ROUNDOFF || q.y < min.y - tol::ROUNDOFF || q.x > max.x + tol::ROUNDOFF || q.y > max.y + tol::ROUNDOFF {
                 continue;
             }
             let (e1, e2) = (t[1] - t[0], t[2] - t[0]);
@@ -474,12 +489,12 @@ pub fn reveal_unoccluded(
             let f = 1.0 / det;
             let sv = p - t[0];
             let u = f * sv.dot(&h);
-            if !(-1e-9..=1.0 + 1e-9).contains(&u) {
+            if !(-tol::REL..=1.0 + tol::REL).contains(&u) {
                 continue;
             }
             let qv = sv.cross(&e1);
             let v = f * rd.dot(&qv);
-            if v < -1e-9 || u + v > 1.0 + 1e-9 {
+            if v < -tol::REL || u + v > 1.0 + tol::REL {
                 continue;
             }
             if f * e2.dot(&qv) > skin {
@@ -500,7 +515,7 @@ pub fn reveal_unoccluded(
                 let sd = w[1] - w[0];
                 let sl = sd.norm();
                 // Parallel to within about 17°: a mesh's chords of a small circle turn that much.
-                if d > tol || sl < 1e-12 || (sd.x * along.y - sd.y * along.x).abs() > 0.3 * sl {
+                if d > tol || sl < tol::DEGENERATE || (sd.x * along.y - sd.y * along.x).abs() > 0.3 * sl {
                     continue;
                 }
                 if clear(c.p3[i] + (c.p3[i + 1] - c.p3[i]) * t) {
@@ -519,8 +534,8 @@ pub fn reveal_unoccluded(
                 let sl = sd.norm();
                 let (d, t) = segment_distance(q, w[0], w[1]);
                 // Beside the segment, not past its end: a line ending short of `q` leaves it bare.
-                let beside = (t > 1e-9 && t < 1.0 - 1e-9) || d < 1e-6;
-                sl > 1e-12 && d <= tol && beside && (sd.x * along.y - sd.y * along.x).abs() <= 0.3 * sl
+                let beside = (t > tol::REL && t < 1.0 - tol::REL) || d < tol::POINT;
+                sl > tol::DEGENERATE && d <= tol && beside && (sd.x * along.y - sd.y * along.x).abs() <= 0.3 * sl
             })
         })
     };
@@ -546,7 +561,7 @@ pub fn reveal_unoccluded(
             let q = e.point_at(t);
             let dt = (0.25 / len).min(0.01);
             let along = e.point_at((t + dt).min(1.0)) - e.point_at((t - dt).max(0.0));
-            if along.norm() <= 1e-12 {
+            if along.norm() <= tol::DEGENERATE {
                 At::Hidden
             } else if on(q, along.normalize(), &visible) {
                 At::Covered

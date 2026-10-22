@@ -593,7 +593,7 @@ pub fn mesh_mass(s: &Solid) -> Option<cadrs_kernel::MassProperties> {
     let com = first / volume;
     let c = cov - volume * com * com.transpose();
     let inertia = Matrix3::identity() * c.trace() - c;
-    Some(cadrs_kernel::MassProperties { volume, surface_area: area, center_of_mass: Point3::from(com), inertia })
+    Some(cadrs_kernel::MassProperties { volume, surface_area: area, center_of_mass: Point3::from(com), inertia, length: 0.0 })
 }
 
 #[cfg(test)]

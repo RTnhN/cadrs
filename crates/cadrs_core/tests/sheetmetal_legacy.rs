@@ -4,7 +4,7 @@
 //! picked as **Edges or cylinders to bend**, the import then removed with **Delete part**. The
 //! result is the part it came from: the same volume, flat and bends. Two parts: a C-channel, and
 //! a Case (an open box with relieved corners: propagation goes round the corner gaps).
-#![cfg(feature = "occt")]
+#![cfg(feature = "brep")]
 
 use cadrs_core::applied::EdgeOrFace;
 use cadrs_core::document::{DeletePartFeature, FaceRef, FeatureKind};

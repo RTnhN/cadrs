@@ -17,14 +17,14 @@ fn main() {
         }
         std::process::exit(cadrs_core::rebuild::process::main(&args[at + 1..]));
     }
-    #[cfg(feature = "occt")]
+    #[cfg(feature = "brep")]
     {
         tests::the_kernel_process_builds_and_survives_a_crash();
         println!("test the_kernel_process_builds_and_survives_a_crash ... ok");
     }
 }
 
-#[cfg(feature = "occt")]
+#[cfg(feature = "brep")]
 mod tests {
     use cadrs_core::commands::{AddExtrude, AddFeature, AddSketch, EditSketch, SetExtrude};
     use cadrs_core::document::{BooleanOp, Document, ExtrudeFeature, FeatureKind};

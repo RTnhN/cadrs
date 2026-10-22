@@ -1,7 +1,7 @@
 //! P3.4: the Revolve feature through the document's commands and the rebuild: its types, a
 //! torus, and the course's Reducer Coupling (PS8) in inches, with its mass properties. Every
 //! expected value is derived by hand in the test's comment.
-#![cfg(feature = "occt")]
+#![cfg(feature = "brep")]
 
 use std::f64::consts::PI;
 

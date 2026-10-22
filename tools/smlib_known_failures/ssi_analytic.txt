@@ -1,0 +1,12 @@
+# SMLib analytic SSI cases (tests/smlib_ssi_analytic.rs, from tools/smlib/ssi_analytic.py) that
+# fail: `name`, or `name slow`.
+
+# Coincident surfaces (cylinders on each other, coplanar squares meeting along an edge): SMLib
+# returns the shared region's boundary and the lines where they meet; ssi gives nothing.
+
+# No intersection found where SMLib finds some (the half spheres).
+analytic_16
+
+# The reader makes surf_sphere150.smb's B-spline a sphere: SMLib's uv sub-domain isn't known in
+# its parameters (the test, not the kernel).
+analytic_09

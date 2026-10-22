@@ -4,10 +4,11 @@
 Part Studio features need a B-rep kernel: exact solids with faces, edges and curved surfaces,
 plus booleans, fillets, shells and so on. We keep that kernel **behind our own crate** so that:
 - the rest of cadrs (`cadrs_core`, `cadrs_app`) never touches a kernel's types;
-- backends can be swapped or combined, e.g. OpenCascade for robustness and a pure-Rust kernel for
-  WASM, or our own code for a single operation;
-- we can add operations a backend lacks (for example mass properties on monstertruck) in one place;
-- **persistent naming** (stable face and edge IDs across rebuilds) is ours, not the backend's.
+- the kernel is ours, in pure Rust (no C or C++: it builds in seconds, cross-compiles to Windows
+  without a C++ toolchain, and could go to WASM or the GPU), and its operations can be
+  rewritten one at a time behind the same API;
+- **persistent naming** (stable face and edge IDs across rebuilds) works from the kernel's
+  operation history, independent of how an operation is implemented.
 
 ## Shape of the crate
 ```
@@ -16,48 +17,98 @@ crates/cadrs_kernel/
   src/types.rs        # Profile, Curve2, Plane, Frame, MassProperties, TriMesh, ids
   src/naming.rs       # persistent naming: FaceName/EdgeName/VertexName from op history (P3.2)
   src/projection.rs   # drawing-view projection types and source matching (P3C.2)
-  src/backend/occt.rs         # feature "occt": fork of opencascade-rs (implemented)
-  src/backend/monstertruck.rs # feature "monstertruck" (not planned for now)
-  tests/conformance.rs        # the same suite for every enabled backend (implemented)
+  src/native/          # the B-rep kernel (see "The native kernel" below)
+  src/backend/mod.rs   # `backend::native::NativeKernel` (also `cadrs_kernel::DefaultKernel`)
+  tests/conformance.rs # the conformance suite, 84 cases
+  tests/occt_*.rs, smlib_*.rs # suites generated from OCCT's and SMLib's tests (see "Tests")
+  tests/fuzz_readers.rs # property tests: no input panics a reader or a B-spline constructor
+  tests/exchange_corpus.rs # OCCT's dataset STEP and IGES files read and checked (needs the dataset)
+  tests/native_debug.rs # reproductions and timings (several replay CADRS_DUMP_DIR dumps)
 ```
 There's no Bevy dependency. `cadrs_core` depends on `cadrs_kernel`, and features rebuild through it
 (see "Rebuilding the feature list" below).
 
-## API sketch
+## Using the kernel
+The rest of cadrs uses the kernel through the `Kernel` trait (`src/lib.rs`) and the types in
+`src/types.rs`; `DefaultKernel` is the native kernel. Every public item there is documented
+(`#![warn(missing_docs)]`), each operation with its contract, and the main operations have
+doctests (`cargo test --profile kernel -p cadrs_kernel --doc`).
+
 ```rust
-pub struct BodyId;   // a solid/body owned by the kernel session
-pub struct FaceId;   // an index into one body; FaceName is the persistent name (see naming)
-pub struct EdgeId;
+use cadrs_kernel::{BoolOp, DefaultKernel, Extent, Kernel, Tessellation};
 
-pub trait Kernel {
-    // creation
-    fn extrude(&mut self, profile: &Profile, extent: Extent) -> Result<OpResult>;
-    fn revolve(&mut self, profile: &Profile, axis: Axis, angle: Angle) -> Result<OpResult>;
-    fn sweep(&mut self, profile: &Profile, path: &Path3) -> Result<OpResult>;
-    fn loft(&mut self, sections: &[Profile], opts: LoftOpts) -> Result<OpResult>;
-    // combination and editing
-    fn boolean(&mut self, op: BoolOp, target: BodyId, tools: &[BodyId]) -> Result<OpResult>;
-    fn fillet(&mut self, body: BodyId, edges: &[EdgeId], radius: f64) -> Result<OpResult>;
-    fn chamfer(&mut self, body: BodyId, edges: &[EdgeId], spec: ChamferSpec) -> Result<OpResult>;
-    fn shell(&mut self, body: BodyId, remove: &[FaceId], thickness: f64) -> Result<OpResult>;
-    fn transform(&mut self, body: BodyId, t: Isometry3) -> Result<OpResult>; // patterns, mirror
-    // queries
-    fn faces(&self, body: BodyId) -> Vec<FaceInfo>;   // id, surface kind, plane if planar
-    fn edges(&self, body: BodyId) -> Vec<EdgeInfo>;
-    fn mass_properties(&self, body: BodyId) -> MassProperties; // exact where possible
-    fn tessellate(&self, body: BodyId, tol: Tolerance) -> TriMesh; // with face and edge ids
-    fn export_step(&self, bodies: &[BodyId]) -> Result<Vec<u8>>;
-}
-
-pub struct OpResult {
-    pub bodies: Vec<BodyId>,
-    pub history: History, // generated/modified/deleted sub-shapes → feeds naming
-}
+let mut k = DefaultKernel::new();                       // a session: it owns the bodies
+let block = k.extrude(&rect, Extent::Blind(5.0))?.bodies[0];
+let cut = k.boolean(BoolOp::Subtract, block, &[tool])?; // OpResult { bodies, history }
+let edge = k.edges(cut.bodies[0])?[0].id;               // ids come from the queries
+let round = k.fillet(cut.bodies[0], &[edge], 1.0)?;
+let m = k.mass_properties(round.bodies[0])?;            // exact volume, area, inertia
+let mesh = k.tessellate(round.bodies[0], Tessellation::default())?;
+let step = k.export_step(&round.bodies)?;               // and import_step / import_model
 ```
+- **Session and ids.** A session owns its bodies; a `BodyId` is valid until `release`, and ids
+  are never reused. `FaceId`/`EdgeId`/`VertexId` are indices into one body, as `faces`, `edges`
+  and `vertices` list them; names that survive rebuilds are `naming`'s (see "Persistent
+  naming"), built from each operation's `History`.
+- **Operations** never change their inputs. Each returns an `OpResult`: the new bodies and a
+  `History` listing every result face as `generated` (with an `Origin`: profile curve, cap,
+  input edge or vertex) or `modified` (from an input face), and the input faces `deleted`.
+- **Errors** (`KernelError`) say what a caller can do: `InvalidParameter` (a size or selection
+  that can't build: tell the user), `InvalidProfile`, `EmptyResult` (an Intersect that finds
+  nothing), `OpenResult`/`OperationFailed` (the algorithm gave up: try other options),
+  `InvalidInput` (a bad file or body), `Unsupported`, `UnknownBody`. A wrong body is never
+  returned instead of an error.
+- **Units and tolerances.** mm and radians. Exact geometry is within `tol::POINT` (1e-6 mm);
+  read and healed bodies carry their own vertex and edge tolerances. See "Tolerances" below.
+- **Validity.** Every result passes `Body::check()` (`native::topo`): the fast structural check
+  operations run on their own results (references, loops closing in 3D and in (u, v), p-curves
+  on their edges, edge uses, body kinds, positive volume). `Body::check_with(CheckLevel::Full)`
+  adds what is too slow for every operation: loops crossing in (u, v) by exact segment tests,
+  loop nesting and orientation, shell connectivity and orientation, adaptive edge and vertex
+  consistency, faces of a shell crossing each other away from their shared edges
+  (`native::check_faces`), and void shells inside their solid; it is meant for tests, and
+  every generated suite (DRAW's `checkshape`, the SMLib suites' result checks) runs it.
+- **Healing.** `Kernel::heal(body, &[HealOp])` makes an imported or damaged body sound and
+  upgrades its geometry, step by step (`native::heal`, `native::heal_split`): fix (loops
+  reordered and closed, small edges dropped, missing seams added, face senses and shell
+  orientation, p-curves refitted, tolerances fitted), gaps, same-parameter, tolerance update,
+  direct faces, conversion to surfaces of revolution and to B-splines, splits by angle, of
+  closed faces, at C0 breaks and into Bézier patches, unify and wire tails.
+- **Exchange.** `export_step`/`import_step` for plain STEP, `export_model`/`import_model` for
+  STEP or IGES with names and assemblies, `mesh_solid` for STL triangles; `write_body` and
+  `read_body` are the exact native body format (`native::bodyio`), which keeps every face,
+  edge and vertex in order, so names stay valid across a cache or the network.
+- **Determinism.** The same inputs are to give the same bytes (bodies, meshes, STEP text)
+  whatever the number of rayon threads; `tests/determinism.rs` checks it for every family of
+  operation (extrude, revolve, the three booleans, fillet, chamfer, shell, offsets, draft, sweep,
+  loft, sew, heal, tessellation, mass properties, STEP export and import), run twice and on 1
+  and 4 threads.
 - `Profile` is built from `cadrs_sketch` regions using **exact** boundary curves (lines, arcs,
-  circles, ellipses, later splines) on a sketch `Plane`, never the polyline used for display.
-- Hole, pattern, mirror and draft are built on top of these operations in `cadrs_core`, unless a
-  backend provides a better native version.
+  circles, ellipses, Béziers) on a sketch `Plane`, never the polyline used for display.
+- About 45 trait methods default to `Unsupported` so a backend can start small; the native
+  kernel implements them all.
+
+### Curated API
+`native/mod.rs` declares the kernel's modules `pub(crate)` and re-exports a small stable set:
+`NativeKernel`; the B-rep data model (`Body`, `BodyBuilder`, `Vertex`, `Edge`, `Coedge`, `Face`,
+`Shell`, `Solid`, `Wire`, `CheckLevel`: a `Body`'s entity lists are read through `Body::verts`,
+`edges`, `faces`, … and a body is built with `BodyBuilder`, which checks it; the lists are
+`pub` only under `testkit`); its geometry (`Curve`, `Surface`, `NurbsCurve`, `NurbsSurface`)
+and vector types (`P3`, `V3`, `Frame`, `Affine`); and the modules `tol` (the tolerance model)
+and `bodyio` (the body format). That, `Kernel`, `DefaultKernel` and the types are the public
+surface, all documented (`#![warn(missing_docs)]` holds for the whole crate without features).
+No other cadrs crate names anything else.
+
+The internals are for the crate's own tests and tools: the `testkit` feature (which the crate's
+tests turn on through their dev-dependency) makes every module `pub` again and adds
+`cadrs_kernel::testkit`, which re-exports the modules the tests use (`draw`, `oracle`, `smb`,
+`brep_occt`, `step`, `iges`, `ssi`, `classify`, `mass`, `tess`, `unify`, `features`, `evolved`,
+`surfacing`, ...). The tests still name them as `native::<module>`, which keeps working under
+`testkit`; they move to `testkit::` one file at a time (the generators, `tools/occt_to_rust.py`
+and the SMLib ones, switch their `use` lines in the same change), after which the `native::`
+paths can be sealed. Without `testkit`, what only the DRAW harness reaches (the OCCT BRep and
+SMLib readers, 2D offsets, wire tails, faces from loose edges, area splits) is unused code.
+`cargo check -p cadrs_kernel` (no features) and `cargo check -p cadrs_core` are the gate.
 
 ## Persistent naming
 Every operation returns a `History` (what was generated or modified from which input face, edge
@@ -104,12 +155,239 @@ of the two extrudes, every sketch on a face, Use and Pierce link and stored edge
 its exact name to the geometrically matching entity; a redrawn curve is found again by the
 geometric fallback; a removed region is a lost reference; a version 3 document loads).
 
-## Backends
-| Backend | Status | Notes |
+
+## The native kernel
+`cadrs_kernel::native` is a B-rep kernel written for cadrs in Rust: exact geometry, boundary
+representation, booleans, features, tessellation, mass properties, hidden-line removal and
+STEP/IGES exchange. It replaced the OpenCASCADE backend (removed after the native kernel passed
+the conformance suite and the `cadrs_core` tests; OCCT had passed all 83 cases in 0.84 s, after a
+7 min 54 s cold build).
+
+**Geometry.** Curves (`curve.rs`): lines, circles, ellipses and rational B-splines (`nurbs.rs`,
+homogeneous control points; banded B-spline interpolation, so large fits are O(n)). Surfaces
+(`surface.rs`): plane, cylinder, cone, sphere, torus, surfaces of revolution and extrusion of any
+curve, and rational B-spline surfaces. Lengths are mm; tolerances are in "Tolerances" below.
+B-splines from outside the kernel (files, scripts) go through the checked constructors
+`NurbsCurve::new`, `NurbsSurface::new` and `NurbsCurve::try_bezier` (knot count, monotone finite
+knots, degree, finite poles, positive weights), so a malformed one is an error, not an index
+panic in an evaluator.
+
+**Topology** (`topo.rs`). A `Body` has vertices, edges (a curve on [t0, t1]; a closed edge, a whole
+circle, has one vertex; degenerate edges sit at surface poles), faces (a surface, a sense and
+loops of coedges, each with a p-curve parametrised by the edge's t), shells and solids. Loops run
+counter-clockwise about the face's outward normal; the sense is derived from the uv loop
+orientation (`build::fix_senses`). Periodic faces have seams (an edge used twice by one face).
+
+**Operations, by module.**
+| Module | What it does |
+|---|---|
+| `profile`, `sweep`, `build`, `features` | Sketch regions to profile pieces (merged across shared curves), and one sweep builder for prisms and revolutions (`SweepKind`: the side surface per piece and its p-curves); extrudes and revolves with every end type, thin walls and surfaces. |
+| `sweep::path`, `sweep::frames`, `sweep::corner`, `sweep::body` | Sweeps along paths: lines and arcs exactly (prism and revolve pieces glued at their caps); other curves with rotation-minimizing frames (double reflection), one skinned B-spline surface per profile curve over a tangent run of path curves, whose rails are exactly the surfaces' iso-curves; mitred and round corner joins; points, wires and sheets swept one kind higher. |
+| `evolved`, `cells` | Evolved solids (`Kernel::evolved`: a profile swept square to a planar spine of lines and arcs, arc joins at its outer corners; DRAW's `evolved` with wire profiles, open ones closed by lids, cut into strips that reach the spine) and the cells of an arrangement of solids (`Kernel::cells`). |
+| `loft_build` | Lofts: exact skinning of compatible section curves (two sections give ruled surfaces), or sampled interpolation with end conditions. `loft_pieces` skins sections that already correspond. |
+| `ssi` | Surface intersections: analytic cases (planes, quadrics, tori, coaxial surfaces of revolution, plane × extrusion, plane × cone as exact conics), and numeric contouring of one surface's signed distance over the other's uv box, refined onto both and fitted (projections hinted by the neighbouring point). Curve–curve and curve–surface hits. |
+| `boolean`, `boolean_kinds`, `split`, `classify`, `unify` | Booleans: a pool of the inputs' vertices and edges, split at vertex-on-edge, edge–edge, edge–face and face–face intersections; coincident faces imprinted and coincident pieces made one edge; faces split in uv; pieces classified by exact ray parity; the kept faces assembled into shells; coplanar and same-surface faces merged (`unify`). Sheets, wires and points (`boolean_kinds`): sheets split by `imprint` and their pieces kept by a point inside each, solid − sheet a split into solids, wires through `edge_bop`; the result kind per operation is tabled in the module. |
+| `fillet`, `fillet_geom` | Constant-radius fillets by local trimming (SMLib's fillet executive): the rolling ball's contact curves on both faces, the strip imprinted into its faces in place of the edge (no boolean), three-edge corners a sphere patch, other corners (some of a vertex's edges filleted, or more than three) set back with one patch filling the hole; end faces that meet past the vertex grow over the fillet's end, faces the strip hangs over grow to its cut (seams run on to it); width fillets where the faces' angle varies take a law of radii, two-distance chamfers on a face curving across a straight edge measure round it; what it doesn't cover falls back to `blend`. |
+| `blend`, `blend_chain`, `blend_corner` | Fillets and chamfers as tool bodies (an exact prism or revolution of the rolling-ball or chamfer section where the edge allows, a lofted chain tool otherwise) subtracted or added; corner tools where three blended edges meet; variable, partial, asymmetric, conic and curvature sections; overlap and fit checks. |
+| `local`, `offset_round`, `slab` | Offsets (sharp: the faces' new surfaces re-intersected; rounded: the body ∪ each face's slab ∪ a tube round each convex edge ∪ a ball at each vertex, a concave cylinder's slab its wedge out to the axis when the distance passes its radius; rounded insets: the body less each face's inward slab, a tube round each concave edge and a ball at each of its vertices), drafts, face replacement (`Kernel::replace_faces`, SMLib's local operation, the new surface's domain picking the crossings), shells (inward and outward, hollow, corners rounded or sharp; the cavity built from its definition: the body less each kept face's slab, tubes and balls). Slabs keep the body's edge and vertex tolerances. |
+| `surfacing` | Thicken (a sewn sheet with flat open ends shelled as the solid it bounds), fill (planar, Coons), sew, simplify, delete faces. |
+| `mass` | Exact mass properties: the divergence theorem on each face, integrated by Green's theorem over the uv domain (nested Gauss–Legendre), along v for ruled faces, and by a tensor rule on knot spans for untrimmed B-spline patches. |
+| `tess` | Tessellation: every edge sampled once (chord deflection and half the angle step), each face triangulated by a constrained Delaunay triangulation (spade) in metric-scaled uv, in parallel (rayon). |
+| `hlr` | Hidden-line removal for drawing views: exact silhouettes and edges, crossings refined by Newton, visibility by rays against the faces. |
+| `silhouette`, `distance`, `face_build`, `uvdomain` | Queries (`Kernel::silhouettes`, `min_distance`, `max_distance`, `face_from_surface`): silhouette curves of faces for parallel and perspective views (exact generators and circles on quadrics, elsewhere n·w = 0 traced by marching squares through saddle crossings and refined onto the zero, clipped to the face; `hlr` draws its outlines from them); minimum and maximum distances between points, edges, faces and bodies (each entity cut into faces, edges and vertices; branch and bound on cell boxes, then damped Newton with all second derivatives); a sheet face of a bare surface over its natural or a given uv domain (iso-curve edges, poles as degenerate edges, seams where the domain closes); a face's trimmed uv domain for these. |
+| `step`, `iges`, `xbuild`, `exchange`, `bodyio`, `meshsolid` | STEP (AP214) and IGES read and write with assemblies; other systems' files rebuilt into valid bodies; an exact binary body format (`write_body`/`read_body`, the rebuild cache's); triangle meshes to solids. |
+
+**Tolerances** (`native::tol`). One model, three levels ten times apart (mm):
+- `CONFUSION` 1e-7: exact geometry; points closer are one point, and no entity's own tolerance is
+  smaller (`topo::TOL_MIN`, OCCT's `Precision::Confusion`).
+- `POINT` 1e-6: what an operation merges. A boolean pools vertices closer than this
+  (`boolean::VTOL`); `Body::check` allows an edge end or a p-curve this far off when the entity's
+  own tolerance is smaller.
+- `LOOP_GAP` 1e-5: the largest gap between consecutive p-curves of a loop that `check` accepts at
+  a vertex of smaller tolerance.
+- `SIZE` 1e8: the size box. Beyond it a double no longer resolves `CONFUSION`; the readers refuse
+  geometry outside it.
+
+Below these, the code's round-off margins are named by meaning (all 1e-9, so results are what
+they were as literals): `tol::REL` (relative: scaled by a size, a span or `1 + |t|`, or a
+parameter fraction), `tol::ANGULAR` (unit vectors parallel or square, angles in radians),
+`tol::ROUNDOFF` (absolute lengths and parameters of exact geometry), and `tol::TINY` (1e-300, the
+guard of a division or normalisation against zero). A thousandth of them (1e-12) for values
+computed exactly: `tol::REL_FINE`, `ANGULAR_FINE`, `ROUNDOFF_FINE`, and `tol::DEGENERATE` (a
+computed length, norm or denominator taken as zero: no direction, nothing to divide by). At the
+merge level (1e-6): `tol::POINT` (absolute), `REL_POINT` (a fraction of a size or span),
+`ANGULAR_POINT` (directions or angles taken as the same) and `DIFF_STEP` (the step of a finite
+difference or of a nudge off a point). Bare literals of these values are left only in tests and
+where a constant names them already.
+
+Above these, vertices and edges carry their own tolerance (a read or healed body's gaps,
+`Body::fit_tolerances`, as OCCT), and operations take the larger of their own and the entities'.
+The values an operation runs with are a `tol::Tolerances` carried by the session
+(`NativeKernel::tolerances`, `set_tolerances`; the default is the model above) and passed
+explicitly: `boolean::boolean_bodies_with(a, b, op, BoolOptions { tol, .. })`. A boolean whose
+first run leaves an open shell runs again at `Tolerances::retries` (1e-5, then 1e-4). A run
+passes its merge distance down to its helpers and the intersections it calls as an argument
+(no thread-local or global state); `BoolOptions` also says whether faces on one surface are
+merged afterwards (`merge_coplanar`, off for the DRAW harness, as OCCT). A boolean never returns
+an invalid body: a result that fails `Body::check` is an error, retried at the larger tolerances.
+
+**Errors.** Every operation returns `Result<_, KernelError>`, with a message in words for the
+user. The variant says what a caller can do: `EmptyResult` (an Intersect of bodies that don't
+meet: cadrs reads it as "no interference" or "nothing left of the part"), `OpenResult` (faces
+that don't close into a solid; a boolean retries at larger tolerances on it), `InvalidInput`
+(a file or body that doesn't read, malformed B-splines, non-finite numbers, geometry outside the
+size box), `InvalidParameter` and `InvalidProfile` (the caller's values), `Unsupported`,
+`UnknownBody`. When an algorithm gives up (`KernelError::is_failure`), the variant says where:
+`TooLarge { op }` (a radius, distance or thickness the geometry can't hold: a smaller one may
+work), `InvalidGeometry { op }` (tangent faces at a blended edge, a degenerate section, faces
+that no longer meet), `BooleanFailed { stage }` (`"face closure"`, `"validity"`, `"sheet
+union"`), `BlendFailed { stage }` (a local fillet or chamfer that gave up: `"rolling ball"`,
+`"corner"`, `"end"`, `"surface"`, `"trimming"`), `BudgetExhausted { stage }` (a boolean's or a
+blend's deterministic work budget ran out), `InvalidResult { op }` (a built body failed its check and was not returned), and
+`OperationFailed` for the rest. The enum is `#[non_exhaustive]`. `KernelError::message` gives
+the words without the kind's prefix; `Display` is "operation failed: ..." for every failure.
+
+**Environment variables.** None is needed in normal use. Every one the kernel reads is listed
+here; `tools/kernel_gate.sh` and CI run with none of the switches set.
+
+Debug output (on stderr; results don't change):
+- `CADRS_PROFILE=1`: each boolean's phases, slow mass properties and tessellations, sweeps.
+  `CADRS_TESS_PROFILE=1`: a face tessellation's phases.
+- `CADRS_BOOL_DEBUG=1`, `CADRS_SPLIT_DEBUG=1`, `CADRS_SHELL_DEBUG=1`, `CADRS_VERTEX_DEBUG=1`,
+  `CADRS_PCURVE_DEBUG=1`, `CADRS_OFFSET_DEBUG=1`, `CADRS_SLAB_DEBUG=1`: the boolean's
+  intersections, face splits and output faces; face splitting in uv; a shell's cavity steps;
+  vertex merging; p-curve fits that don't converge; the offset's piece whose boolean fails
+  (with `CADRS_DUMP_DIR`, both inputs are written); a face slab's build warnings.
+- `CADRS_SNAP_DEBUG=1`, `CADRS_TANGENT_DEBUG=1`, `CADRS_EBOP_DEBUG=1`: a boolean's snapping of
+  B-spline faces onto planes and cylinders, its tangent B-spline contacts, an edge boolean's
+  splits.
+- `CADRS_SSI_DEBUG=1` (with `CADRS_SSI_SEEDS=1` and `CADRS_SSI_DUMP=1` for the seeds and the
+  traced points): surface-surface intersection.
+- `CADRS_FILLET_DEBUG=1`, `CADRS_BLEND_DEBUG=1`, `CADRS_DRAFT_DEBUG=1`, `CADRS_SWEEP_DEBUG=1`:
+  the local fillet's progress, with times; the blend tool's chains, stations and corners (and why
+  a local fillet fell back to it); a draft's edges and unsupported faces; a sweep's path and
+  helix fits.
+- `CADRS_BOOL_WORK=1` (`boolean.rs`): each boolean's work count against its budget.
+- `CADRS_EXCHANGE_DEBUG=1`: the warnings of a STEP, IGES or BRep import. `CADRS_ORDER_DEBUG=1`:
+  the DRAW harness's edge order (`explode e`, test code).
+- `CADRS_DUMP_DIR=<dir>`: shells, fillets and chamfers write their input body (exact bytes) and
+  parameters there, with the outcome; slow mass properties too. `tests/native_debug.rs` replays
+  them (`CADRS_REPRO=<file.body> cargo test -r -p cadrs_kernel --test native_debug debug_repro_shell`).
+
+Debug switches that **change results** (to isolate a stage when a case fails; never set them
+otherwise):
+- `CADRS_DEBUG_NO_RETRY=1` (`boolean.rs`): no retries of a boolean at larger tolerances, to
+  see the first run's failure.
+- `CADRS_DEBUG_NO_SNAP=1` (`boolean.rs`): no snapping of B-spline faces onto the other body's
+  planes and cylinders before a boolean.
+- `CADRS_DEBUG_NO_PROPAGATE=1` (`boolean.rs`): each split face is classified on its own, without
+  the in/out propagation through its connected group.
+- `CADRS_NO_LOCAL_FILLET=1` (`blend.rs`): circular fillets (by radius or width) and chamfers
+  skip the local (boolean-free) blend and go straight to the blend tool.
+  `CADRS_LOCAL_FILLET_ONLY=1`: the opposite, the blend tool is never used (a local blend's
+  failure is the result), for measuring what local trimming covers.
+- `CADRS_NO_RECOG_S=1`, `CADRS_NO_RECOG_C=1` (`xbuild.rs`): imported B-spline surfaces and
+  curves are kept as B-splines instead of being recognised as planes, cylinders, cones, spheres,
+  lines and circles.
+- `CADRS_OCCT_REBUILD=1` (`brep_occt.rs`): an OCCT BRep file's faces are always rebuilt from
+  their edges instead of being read directly.
+
+Test harness (tests only): `CADRS_OCCT_DATA` (OCCT's dataset for the generated OCCT suites,
+default `../occt-dataset/opencascade-dataset-7.8.0` beside the checkout), `CADRS_SMLIB_ORACLE`
+(the SMLib oracle binary), `CADRS_USD_BREP` (a usd-brep checkout, for the ignored
+`smb::every_ssi_part_reads`, which skips without it),
+`CADRS_EXCHANGE_FILES` and `CADRS_EXPORT_DIR` (the ignored corpus tests in `exchange.rs`),
+`PROPTEST_CASES`, `FUZZ_TRACE`, `FUZZ_REPRO` (`tests/fuzz_readers.rs`) and the `CADRS_REPRO*`
+inputs of `tests/native_debug.rs`'s replays.
+
+**Status.** All 84 conformance cases pass (`cargo test -r -p cadrs_kernel --test conformance`,
+about 3 s). The measured state of every suite is the gate's: `tools/kernel_gate.sh` (below).
+`python3 -I tools/kernel_scoreboard.py` shows its last results per test binary (cases run,
+passing, known failures, stale ones, regressions, hangs, and why the rest don't run yet); with no
+results, or with `--static`, it falls back to reading the suites' source, which runs nothing.
+
+**Tests.**
+- Unit tests in the modules (`cargo test -r -p cadrs_kernel --lib`), the conformance suite, and
+  the suites generated from OCCT's DRAW scripts (`tests/occt_*.rs`, `tools/occt_to_rust.py`) and
+  SMLib's tests (`tests/smlib_*.rs`). A generated case listed in `tools/occt_known_failures.txt`
+  or `tools/smlib_known_failures*` asserts that it still fails, and that it fails by returning
+  its error: a panic (an index out of bounds in the test code, an unwrap) fails the test, and
+  the gate calls it a PANIC. When it passes, remove the line and regenerate the file. Every line
+  of `tools/occt_known_failures.txt` gives its reason, inline (`group case  # why`) or in the
+  comment just above its group of lines (a blank line ends a group); the generator refuses a
+  line without one, copies the reason above the generated case, and warns about lines that
+  aren't a converted case. A reason holding `[panic: text]` lets the case panic with that text.
+  The DRAW harness reports a script's sub-shape past the end of an `explode` as a "topology
+  mismatch" failure (`draw::sub`): the shape exploded has other topology than OCCT's.
+- The generated suites run on a DRAW-style harness (`native::draw`) and the SMLib oracle's body
+  writer (`native::oracle`): test code, built only for tests and with the `testkit` feature
+  (the crate's own tests turn it on through a dev-dependency on itself), not kernel API.
+- `tests/fuzz_readers.rs`: property tests (proptest) that feed the STEP, IGES, OCCT BRep, SMLib
+  and body readers edited files (numbers swapped for extreme ones, bytes flipped, cut short) and
+  random bytes, and the B-spline constructors random knots, degrees, weights and points; nothing
+  may panic. `PROPTEST_CASES=<n>` runs more cases, `FUZZ_TRACE=1` prints each, and the ignored
+  `replay` test reads the file `FUZZ_REPRO` names with every reader (the one ignored test).
+- Clippy is a gate: `tools/kernel_clippy.sh` (all targets, warnings denied; CI runs it). The lint
+  levels are in the crate's `Cargo.toml` (`unsafe_code` denied).
+- The full `cargo test -r -p cadrs_kernel` takes about 12 minutes; run the suites a change
+  touches and the conformance suite.
+- The gate, `tools/kernel_gate.sh`, makes "HEAD is green" a measured fact. It exports a clean
+  tree (`git archive HEAD`, or `--rev`; `--tree DIR` tests a tree as it is) and regenerates the
+  gitignored OCCT suites there (`OCCT_TESTS`: OCCT 7.8.1's `tests/`; `CADRS_OCCT_DATA`). It
+  checks that the library builds without features (`cargo check -p cadrs_kernel`: every test
+  turns `testkit` on), that `cargo check -p cadrs_core`, the kernel's consumer, passes, and that
+  `tools/kernel_clippy.sh` is clean. Then
+  it builds with `--profile kernel` and runs every test binary, `RUST_TEST_THREADS` (3) at a
+  time, with every kind of ignored test that can run: the known failures, `slow`, and the ones
+  ignored with a reason (not the OCCT suites' cases waiting for a command, whose bodies are
+  comments, nor debugging tools and tests that need a file, a checkout or the SMLib oracle they
+  aren't given). Each case is a pass, a known failure still failing, STALE (a listed known
+  failure that passes: take it off the list), STALE-IGNORE (an ignored test that passes:
+  un-ignore it), a PANIC (a listed known failure that panicked instead of returning its
+  error), a REGRESSION (an unlisted failure), a HANG (over `--hang`, 900 s; the binary
+  goes on without it) or a CRASH; slow over 60 s is flagged. With a baseline (`--baseline`, the
+  durations of an earlier run; `--write-baseline` writes one when the gate passes), a case more
+  than 3× and 5 s slower than its baseline, scaled by the run's load (the median ratio of the
+  durations), is a SLOW-REGRESSION. It writes `results.json` and `summary.txt` (a table per
+  suite, the lists, the slowest 20 cases) to `$CARGO_TARGET_DIR/kernel_gate/` and exits 1 when
+  any list or check fails. `results.json` records the commit measured: the exported revision,
+  or for `--tree` the tree's git HEAD (`+dirty` with uncommitted changes), `--commit SHA` or
+  `$CADRS_GATE_COMMIT`; a baseline records the commit of the run it came from
+  (`kernel_gate.py --make-baseline RESULTS FILE [--commit SHA]`). `--only
+  occt_blend,smlib_fillets` builds and runs some binaries; `--sample occt_boolean=4` runs every
+  4th case of a binary. CI runs the checks, clippy and a fast subset of the gate on every push
+  and pull request (the merge requirement: the unit tests, conformance, smlib_booleans,
+  validity, determinism and every 4th runnable case of the OCCT boolean suite, generated
+  without the dataset), and the whole gate nightly on main and kernel-10 against the branch's
+  last passing run (delete its `kernel-gate-baseline-<branch>-*` Actions cache to accept a
+  slowdown).
+
+**GPU** (spike, `crates/cadrs_gpu_kernels`, `crates/cadrs_gpu`; see `bench/gpu_spike.md` in the
+working notes): kernels written in Rust compile to SPIR-V with rust-gpu (f64 included) and run
+on Vulkan, 8–20× faster than rayon on the CPU for surface sampling, tessellation points, point
+classification by ray parity and quadrature. Topology, booleans and intersection stay on the
+CPU. Build the shaders with `cargo gpu build --shader-crate crates/cadrs_gpu_kernels
+--output-dir crates/cadrs_gpu/shaders` (cargo-gpu: `cargo +nightly-2026-07-03 install
+cargo-gpu --version 0.11.0 --locked`).
+
+## Performance
+
+`tools/kernel_perf.py` times the kernel against OCCT 7.8 on the same operations and inputs and
+writes `PERF.md` (per case, per category, the 20 worst ratios). Both sides read one
+DRAW-like case file: `examples/kernel_bench.rs` runs it on the native kernel, `tools/occt_bench`
+(C++, a static OCCT) on OCCT. The cases are OCCT's own boolean, blend, offset, pipe and draft
+cases that pass here, SMLib's fillet, boolean and offset cases, meshes and mass properties of the
+largest SMLib models, and STEP files of OCCT's dataset; plus the conformance suite against its
+former OCCT backend's times. Time is CPU time on one thread (the machine is shared). Geometric
+mean of native / OCCT per category, 2026-10-21:
+
+| Faster than OCCT | About even | Slower |
 |---|---|---|
-| `occt` | **chosen primary, implemented** (`backend::occt::OcctKernel`) | Fork of `bschwind/opencascade-rs`, local at `~/work/opencascade-rs`, branch `main` (the `cadrs` branch was merged into it on 2026-09-30). It builds OCCT 7.8.1 from source (about 6 min cold). Our fork adds `Shape::mass_properties()`. Spike (2026-09-26): the Control Arm volume is 368 749.705 mm³, exact to 0.0002, and its area 50 179.711 mm² matches the course self-check. STEP export works. See "OCCT backend" below. |
-| `monstertruck` | rejected as the primary | Pure Rust (Apache-2.0), 0.4.1. Spike (2026-09-26): every boolean in the Control Arm failed (`EmptyOutputShell`) on coplanar caps, on tangent contact, and where a plane cuts a cylinder wall. Its fillet silently did nothing on curved edges, and one fillet left an open shell. There are no exact mass properties, and no chamfer, shell or draft. Tessellation and STEP export are good, so it may be useful later for a viewer or WASM. |
-| `cgalrs` | helper | `~/work/cgalrs`: pure-Rust CGAL port for mesh and computational-geometry utilities (triangulation, spatial queries), not a B-rep kernel. |
+| booleans 0.48 (OCCT cases), 0.17 (SMLib); 2D offsets and offset shapes 0.17; STEP export 0.16; mass properties 0.52 against OCCT's adaptive integration to 1e-9; conformance 0.36 | meshing 0.97 | fillets 9.2 (OCCT blend), 10.3 (SMLib); sweeps 2.4; drafts 1.9; STEP import 1.9; mass properties 11 against OCCT's fixed Gauss rules (1e-3 off on the blade hubs) |
+
+All 648 cases: 0.65; `PERF.md` lists the slowest. B-spline evaluation (`native::nurbs`) is
+allocation-free up to degree 7, and mass properties contract a B-spline face along v once per
+inner integral (`NurbsSurface::iso_v`).
 
 ## Conformance suite
 The expected values come from the Onshape course exercises (see `reference/onshape/training/`):
@@ -124,8 +402,38 @@ The expected values come from the Onshape course exercises (see `reference/onsha
   (`conrod_stand_in_repairs_as_the_course_does`).
 - Further primitive-level cases for each operation.
 
-Each enabled backend must pass the suite. Failures are recorded per backend, so a gap in one
-backend is visible instead of silent.
+The kernel must pass the suite; a case it can't do yet fails visibly (see "Status" above).
+
+### SMLib suites
+NVIDIA's SMLib (usd-brep, Apache-2.0) has a test program, `tests/prog_test/src/*.cpp`, of
+numbered cases on models in `TestFiles/`. `tools/smlib_to_rust.py <usd-brep> [suite...]` turns
+them into `tests/smlib_<suite>.rs`:
+- `tools/smlib/<suite>.py`, one per suite, finds the cases in its source file. It turns each
+  into a call of the suite's runner, the Rust in its `PRELUDE`, and lists the blocks it leaves
+  out with the reason. Suites are separate files so they can be added side by side.
+- The driver splits the source into blocks (`if (lCount == N)`, `case N:`) for the suite
+  modules. It copies the models into `tests/data/smlib/<suite>/` with a licence README. Cases
+  listed in `tools/smlib_known_failures/<suite>.txt` (`name`, or `name slow`) must still
+  fail, so one that starts to pass has to come off the list. Slow cases are `#[ignore]`d.
+- With `CADRS_SMLIB_ORACLE` set to `tools/smlib_oracle`'s binary, the driver runs SMLib once per
+  case. It bakes SMLib's volume, area, face and edge counts and solidity into the test. Volume
+  and area must agree to a relative 1e-4. A result that SMLib itself doesn't call a manifold
+  solid is not used (most of these enclose no volume). Without the oracle, a case checks
+  SMLib's asserted counts and the invariants: `check()` is clean, the shells are closed, the
+  Euler characteristic is possible, and the volume is positive. Face and edge counts are
+  compared only when the input model is all planes.
+- `tests/smlib_common/mod.rs` is shared by every suite. It reads models (`file.smb`, or
+  `file.smp#k`), checks results, and finds SMLib's edges and faces in our bodies by their
+  middle points and centroids. A pick that is ambiguous, or that finds nothing, panics.
+  `examples/smlib_points.rs` gives the driver the same points to hand to the oracle.
+
+`native::smb` reads every SMLib ASCII format the suites use:
+- B-reps (`.smb`), with the legacy B-spline layout and the versioned (38, 42) layout of
+  `Object Type` records: lines, circles, planes, cones and cylinders, surfaces of revolution
+  and of extrusion.
+- Parts (`.smp`: curves, surfaces, B-reps) and bare curves and surfaces (`.smc`, `.sms`).
+
+Free curves and surfaces keep SMLib's parametrisation. Faces get the exact analytic surface.
 
 **P3B.9 (assemblies: Check interference, assembly export).** No new `Kernel` operation: an
 assembly's interference is the existing `transform` of each part's body to its placement,
@@ -138,44 +446,33 @@ each Part Studio's bodies come from its cache): `Rebuilder::placed_body` (a part
 a placement, released by the caller), `common_volume` and `step_of` (several placed bodies in
 one STEP file with their product names), used by `assembly::interference::{check, export_step}`.
 
-**P3F.2 (import and export).** Two new `Kernel` operations, with their types in
+
+**P3F.2 (import and export).** Two `Kernel` operations, with their types in
 `cadrs_kernel::exchange`:
 - `import_model(format, bytes) -> ImportedModel`: reads a STEP or IGES file.
   - Each distinct part comes once as a body, with its product name.
   - Every occurrence comes with its part, its placement (a `Motion` in the file's coordinates, mm)
     and its instance name.
   - A file without assemblies has one occurrence per part, at the identity.
-  - Invalid shapes are healed with OCCT's `ShapeFix_Shape` (kept only if the healed shape is
-    valid).
 - `export_model(format, name, parts, instances) -> bytes`: writes bodies with product names. With
   `instances`, it writes one assembly `name` holding the parts at those placements (STEP
-  `NEXT_ASSEMBLY_USAGE_OCCURRENCE`s). IGES writes solids as MSBO solids
-  (`write.iges.brep.mode = 1`), so they read back as solids.
+  `NEXT_ASSEMBLY_USAGE_OCCURRENCE`s). IGES writes solids as MSBO solids, so they read back as
+  solids.
 
-- `export_brep(bodies) -> bytes`: experimental OpenCASCADE text `.brep` export. Bodies are
-  collected into a compound, preserving exact geometry but no names, feature history, or
-  assembly structure. The application's export worker applies instance placements and Y-up
-  orientation before writing, and can write separate files. This export will be removed if
-  cadrs switches to another geometry kernel; prefer STEP for portable geometry.
-
-STEP reading uses the local color-aware XDE bridge (`backend/step_colors.rs` and
-`step_colors.cc`) because the dependency's reader disables colors. It returns exact binary
-BREP shapes and sRGB/alpha surface styles, including solid/shell defaults, face colors, and
-component overrides. Styles follow transforms and split bodies through face history. The
-application retains them in display solids and session snapshots; assembly overrides are
-saved with instances. Explicit user appearances take precedence. The original STEP blob
-remains with the document, so rebuilding also restores its colors.
-
-IGES reading and neutral-file writing use the fork's XDE bindings: `opencascade::xde`
-and `opencascade_sys::cadrs_xde`, fork commits `277175f` and `a475208`.
-- **Reading:** `STEPCAFControl_Reader` / `IGESCAFControl_Reader` into an XCAF document in mm. The
-  free shapes are walked: assemblies' components are followed with their locations composed, and
-  each non-assembly label is a part, listed once.
-- **Writing:** an XCAF document of parts (`AddShape`, `TDataStd_Name`) and one assembly
-  (`NewShape`, `AddComponent`), written by `STEPCAFControl_Writer` / `IGESCAFControl_Writer`.
-- Linking adds `TKVCAF`, `TKV3d`, `TKService` and `TKCDF` (and `gdi32`, `advapi32`, `ole32` and `windowscodecs` on Windows; the MinGW cross-link of the conformance tests was checked).
-- OCCT reads and writes files and keeps global state, so calls go through a temporary file under a
-  mutex.
+The native reader and writer are `native::step` and `native::iges`, sharing `native::xbuild`,
+which rebuilds the files' faces into valid bodies (p-curves fitted where a file has none; faces
+sewn by their edges). `tests/exchange_corpus.rs` reads every STEP and IGES file of OCCT's public
+dataset (389: OCCT's samples and its bug-report files, many broken on purpose) and checks each
+part (valid topology within the file's own tolerance, each solid's volume positive, equal to its
+tessellation's within 1 % and unchanged by a move, no face dropped): 315 read clean, 198 of them
+with solids. The other 74 are listed in the test with the first problem each hits (the commonest:
+p-curves off their edges by more than a ten-thousandth of the model, loops that don't close,
+files with no geometry of their own), and the
+test fails when a listed file reads clean or an unlisted one doesn't. The gate runs it (it needs
+the dataset, so CI's per-push subset doesn't). An earlier count, 624 of 638 files from OCCT's
+samples, Onshape, FreeCAD and KiCad, was taken on a corpus that isn't in the repository; it is
+superseded by this one. FreeCAD reads
+our STEP and IGES exports as valid solids with the same volume and area to about 1e-14.
 
 **Mesh files are ours**, not a backend's: `exchange::write_stl_binary`, `write_stl_ascii` and
 `write_obj` write the `TriMesh` of `tessellate` at the asked chord and angle tolerance.
@@ -193,546 +490,26 @@ Conformance case `exchange_round_trips`:
 `cadrs_core` uses these for the Import feature (`rebuild::kernel_ops::import`) and for
 `rebuild::exchange`, the import plan and export jobs (see `essential-tips-gaps.md`, P3F.2).
 
-## OCCT backend
-Build and test it with the `occt` feature. `cadrs_kernel` has no default features, so the rest of
-the workspace does not compile OCCT:
-```
-cargo build -p cadrs_kernel --features occt   # ~6.5 min cold (OCCT 7.8.1 from source), then seconds
-cargo test  -p cadrs_kernel --features occt   # conformance suite, 58 cases
-```
-The dependency is `opencascade` from `github.com/rvdende/opencascade-rs`, branch `main`
-(declared in the root `[workspace.dependencies]`).
-
-Status (2026-09-27, P3.1; P3.3 and P3.4 rows marked):
-| Operation | Status |
-|---|---|
-| extrude | Blind (±), Symmetric (total depth), TwoSided. One planar face per region with exact lines, arcs, circles, ellipses and ellipse arcs; holes as inner wires. Each loop is built through shared joint points, so OCCT sees a connected wire. Loops are reoriented (outer CCW, holes CW), so sketch loop direction doesn't matter. Several regions are fused into one body (the caps stay split along the regions' shared curves). |
-| revolve | Any angle up to ±2π. |
-| revolve_with (P3.4) | The full revolve (`RevolveSpec`): Solid, Surface, Thin; Full, an angle, Symmetric, Up to next / face / part / vertex with an offset angle, a second end. See "The full revolve" below. |
-| extrude_with (P3.3) | The full extrude (`ExtrudeSpec`): Solid, Surface, Thin; Blind, Up to next / face / part / vertex with an offset, Through all; Symmetric; a second end; a starting offset; any direction out of the plane; planar faces of bodies as input. See "The full extrude" below. |
-| boolean | Union, Subtract, Intersect; several tools are applied in turn. |
-| split_solids (P3.3) | One body per solid (`TopExp` solids of the result; each face `modified` from the same face of the input). |
-| compound (P3H.6) | Copies of several bodies gathered into one `TopoDS_Compound`, not merged (Composite part): faces in input order, each `modified` from its input face; volume and area are the sums. Conformance case `compound_gathers_bodies` (a 10 × 20 × 30 box and a 10 × 10 × 5 plate on it: 6500, 12 faces, 2 solids). |
-| solid_count, bounding_box, ray_hits (P3.3) | Solids in a body; a tight `Bnd_Box` (`BRepBndLib::AddOptimal`, exact geometry); every crossing of a line with the faces (`BRepIntCurveSurface_Inter`), sorted by distance. |
-| transform | Rotation then translation (`Isometry3`). |
-| fillet | Constant radius. |
-| fillet_with (P3.6) | Radius or constant **Width** (a radius per sample along each edge from the faces' angle), the edges' tangent chains, **Allow edge overflow** off refusing a fillet that runs onto another face; **Conic** (Rho) and **Curvature** (G2, Magnitude) sections on straight edges between flat faces. See "Applied features" below. |
-| full_round (P3.6) | Onshape's Full round: a flat rectangular middle face replaced by a half-cylinder tangent to two parallel flat side faces (r = half their distance); anything else is an `InvalidParameter` error saying what it needs. |
-| chamfer | `EqualDistance`, `TwoDistances` and `DistanceAngle` (the first distance on the edge's first face in explorer order). |
-| chamfer_with (P3.6) | The same types, **Offset** or **Tangent** measurement, the opposite direction for all edges and per-edge **Direction overrides**. |
-| shell | Inward (`BRepOffsetAPI_MakeThickSolid`). |
-| shell_with (P3.6) | Faces removed or **Hollow**, inward or **outward**; walls that would cross are an error (`InvalidParameter`), never a wrong body; an inward shell OCCT can't build is built from its definition. |
-| faces | Area exact. `SurfaceKind` from `BRepAdaptor_Surface::GetType` (Plane, Cylinder, Cone, Sphere, Torus, Other). P3.4: `axis` of a cylinder, cone, sphere, torus or surface of revolution (fork `Shape::face_axes`). |
-| edges | Adjacent faces; length exact for lines and circular arcs, polyline length otherwise. P3.3: an edge with one face is a seam when the face runs along it twice (`faces: [f, f]`), else a free edge of a surface (`faces: [f, None]`). P3.4: `circle` (center, plane normal, radius) of a circular edge or arc (fork `Shape::edge_circles`). |
-| mass_properties | Exact (`BRepGProp`). A surface body (no solids) has volume 0 and its area centroid. P3.5: the inertia tensor at unit density about the centroid (`GProp_GProps::MatrixOfInertia`, fork `7278a45`); zero for a surface body. |
-| tessellate | `Tessellation { deflection, angle }` (BRepMesh, parallel over faces). Positions, outward normals, counter-clockwise indices, per-triangle `FaceId`, and edge polylines made of the mesh's own points (so drawn edges sit on the triangles). |
-| release | Drops a body (the rebuild cache evicts old feature outputs). |
-| export_step | Writes through a temp file. OCCT prints a line to stdout per write. |
-| sweep_with (P3.7) | A profile (regions, open chains or planar faces) along a 3D path of sketch curves and body edges (`PathCurve`), chained end to end; Solid, Surface, Thin; profile control None (corrected Frenet), Keep profile orientation (fixed), Lock profile direction (binormal). See "Sweep, loft, split" below. |
-| loft_with (P3.7) | Ordered sections (profiles, planar faces, a point first or last); start and end conditions None, Normal to profile, Tangent to profile, with magnitudes; Solid, Surface, Thin. |
-| split (P3.7) | A body split by a plane, a face (a planar face by its whole plane) or another body (`BRepAlgoAPI_Splitter`), one body holding the pieces. |
-| transform_motion (P3.8) | A copy moved by a `Motion` (x ↦ M·x + t, M orthonormal: a rotation or a **reflection**); `BRepBuilderAPI_Transform` with copy, so a mirrored body is a valid solid with outward faces. A matrix that scales or shears is refused. |
-| face_tool (P3.8) | The solid the picked faces bound with flat caps across their free-edge loops (sewing, `ShapeAnalysis_FreeBounds::ConnectEdgesToWires`, planar `MakeFace`, `MakeSolid`, `OrientClosedSolid`): a pocket's or a boss's volume, which a Face pattern or Face mirror copies and cuts or adds. Caps are `StartCap { region: source }`; a tool under 1e-9 mm³ is an error. |
-| classify (P3.8) | Where a point is relative to a solid (`BRepClass3d_SolidClassifier`): Inside, Outside, OnBoundary. A face tool whose centroid is outside its body is a pocket (cut), inside a boss (added). |
-| split_faces (P3.8) | The picked faces cut where a tool (plane, face, sheet) crosses them (`BRepAlgoAPI_Section` for the curves, `BRepFeat_SplitShape`): still one body, each split face `modified` into its pieces. The Split feature's Face type. |
-| project (P3C.2) | Hidden-line removal for drawing views: bodies seen along a `ViewFrame`, as 2D `ProjEdge`s (visible or hidden; sharp, smooth or outline; line, arc or polyline), each with its source body edge or face. Fork `opencascade::hlr` (`HLRBRep_Algo`, exact), fork commit `9c4bc31`. See "Drawing-view projection" below. |
-
-| draft (P3.10) | Faces turned about the neutral plane for a pull direction (`BRepOffsetAPI_DraftAngle`, fork `Shape::try_draft_h`); planes, cylinders and cones. |
-| offset (P3.10) | A solid's faces moved outward by a distance, or each by its own (`BRepOffset_MakeOffset`, skin mode, intersection joins for sharp edges; fork `Shape::try_offset_h`). |
-| fillet_variable (P3.10) | A `(t, r)` law per edge (the P3.6 `Shape::try_fillet_variable_h`). |
-
-**Exceptions.** Every call the backend makes that can fail goes through the fork's
-`opencascade::safe` API (`opencascade-sys/include/cadrs_safe.hxx`). Those functions return cxx
-`Result`s, and the header defines a `rust::behavior::trycatch` that also catches OCCT's
-`Standard_Failure` (which is not a `std::exception`, so cxx's default would call
-`std::terminate`). A failed wire, face, prism, boolean, fillet, chamfer, shell or mesh is now an
-`OperationFailed` error with OCCT's message; `failures_are_errors` in the conformance suite
-checks it.
-
-**Trait changes in Final** (phase 3 Final; all additive, defaults `Unsupported`).
-- `Curve2::Bezier { poles: [Point2; 4], source }`: a sketch's cubic Bézier curve (S12.14) in a
-  profile, built as an exact `Geom_BezierCurve` edge (`Edge::try_bezier`, no fork change); its
-  loop area by three-point Gauss–Legendre (the integrand is a quintic, so it's exact). Thin
-  walls along one are refused. Conformance `bezier_profiles` (the region under the Bézier
-  (0,0) (0,10) (20,10) (20,0) closed by its chord is exactly 120 mm², so 600 mm³ at 5 mm, either
-  way round; as a hole in a square, 8000 − 600).
-- `fillet_smooth(body, edges, &FilletSpec, setback)`: Onshape's **Smooth fillet corners**
-  (PS14.6). See "Smooth fillet corners" below. Conformance `fillet_smooth_corner`.
-- `face_normals_at(body, face, points)`: a face's exact outward normals at the points nearest
-  those given (fork `Shape::face_derivatives`), for checking that faces meet tangentially.
-
-**Smooth fillet corners** (Final, `backend/occt_smooth.rs`; fork commit `f65c3e1`, pushed to the
-`cadrs` branch). ChFi3d closes a corner where three fillets meet with its own patch and has no
-setback, so the smooth corner is built on the filleted solid afterwards: at every vertex of the
-input where three or more filleted edges (with their tangent chains) meet, a ball of radius
-`ρ = √(setback² + r²)` about the vertex is cut away (its seam and poles turned away from the
-material), which leaves one spherical face where the corner was, bounded by the section of
-every face round it (on a cube corner: three flat faces and three fillets, six edges). That
-face is replaced by an N-sided filling through the same edges, G1 to each neighbouring face
-(fork `Shape::try_fill_face`, `BRepOffsetAPI_MakeFilling` with each edge's other face as its
-support), and the faces are sewn back into an outward solid; each output face is traced back
-through the sewing to the face it continues, the patch generated `FromVertex`. The app sets the
-setback to 1.5 × the radius (the fillets' contact lines end there). Measured on the conformance
-cube's corner (R3, setback 4.5): the patch meets its six neighbours within 0.37° (the worst at
-the hole's corners), the filling's own G1 error 0.02°. Findings: MakeFilling refuses G2 against
-these supports ("the continuity is not G0 G1 or G2"), so the corner is G1; its default
-approximation (degree ≤ 8 in ≤ 9 segments) leaves 0.95° at the hole's corners, so the backend
-asks for up to degree 10 in 30 segments; degree 4 or 5 surfaces meet their constraints but bulge
-far out of the corner (a 27 543 mm³ cube), so a patch that leaves the ball is refused
-("gave a patch that bulges out of the corner"), as are a non-circular or width fillet and a
-corner OCCT can't cut or fill (each an `OperationFailed` error naming the corner). Where no three
-filleted edges meet it is the plain fillet. None of the course parts has such a corner (probed:
-every fillet of the fixtures with the option on builds the same volume).
-
-**Trait changes in P3.10** (all additive; defaults `Unsupported`).
-- `draft(body, &DraftSpec { faces, angle, pull, neutral, tangent_propagation })`: a positive
-  angle leans the faces in towards the material as they run along `pull` from the neutral
-  plane (through `neutral`, normal `pull`). OCCT's `BRepOffsetAPI_DraftAngle` has the same sign
-  (pinned by `draft_cube_sides`). Its `Flag = false` (no tangent propagation) can crash OCCT on
-  a face with a seam or a tangent neighbour, so the backend always propagates, and without
-  Tangent propagation refuses a pick with an unpicked tangent neighbour (as the fillet does).
-  Every result is checked with `BRepCheck_Analyzer`.
-- `offset(body, &OffsetSpec { distance, faces: Vec<(FaceId, f64)>, sharp })`: the Boolean's
-  Subtract offset. The result must be one valid solid whose volume moved the right way (OCCT's
-  offset can fail quietly with an inside-out solid); a zero offset is a copy.
-- `fillet_variable(body, &[FilletLaw { edge, radii: Vec<(t, r)> }], allow_overflow)`: every edge
-  tangent to a listed edge must be listed too; laws with more than one point are extended to
-  `t = 0` and `1`. OCCT interpolates the law smoothly (`Law_Interpol`); a linear law is sampled
-  finely by `cadrs_core` (8 points per span) when Smooth transition is off.
-- `FilletProfile::Asymmetric { second, flip }`: built with the conic sections of P3.6 (straight
-  edges between flat faces): contact lines at the circular fillet's for the size on the edge's
-  first face and for `second` on the other (`flip` swaps them), the rational quadratic with the
-  circle's middle weight `sin(θ/2)`: an affine image of the circular fillet, which at 90° is the
-  quarter ellipse with those semi-axes (`fillet_asymmetric`: (1 − π/4)·2·4 per mm).
-- `LoftCondition::MatchTangent`, `MatchCurvature` (face sections only): at every sample of the
-  section the direction in the neighbouring face's tangent plane square to the boundary
-  (`t × n` of the section's tangent and the neighbour's outward normal, leaving the first face
-  away from its body and arriving into the last), `magnitude × L` long; Match curvature also
-  sets the second derivative to `κ(d) L² n`, `κ(d)` the neighbour's normal curvature in that
-  direction from its first and second fundamental forms (fork `Shape::face_derivatives`,
-  projected with `ShapeAnalysis_Surface::ValueOfUV`, which also finds points on a face's
-  boundary where `GeomAPI_ProjectPointOnSurf` finds none). With curvature the columns are
-  quintic Hermite Béziers, so Match curvature takes exactly two profiles.
-- `LoftSection::Face` may be non-planar (PS20.1): without end conditions `ThruSections` runs
-  through its outer wire as a shell and the face itself is sewn on as the cap (fork
-  `Shape::try_sew_solid`); with conditions the face's boundary is sampled densely (4096 chords
-  per curved edge, so the sampled loop is within a few µm of the edge) and every face end —
-  planar too — is capped by the face itself, sewn within 1e-4 mm (a flat cap made from the
-  interpolated section would lie a hair off the face, and an Add onto the face's part would
-  leave slivers that don't mesh).
-- `cadrs_kernel::loft::SectionCurves` gained `polylines` (3D pieces in loop order, for face
-  sections) and the constructors `new` and `sampled`.
-
-**Trait changes in P3.11** (additive; no fork change).
-- Fix round 1: `fillet_partial(body, edge, &FilletSpec, from, to)` (default `Unsupported`), the
-  partial fillet below.
-- `LoftCondition::NormalDirection([f64; 3])` and `TangentDirection([f64; 3])` (PS20.4): Normal to
-  profile and Tangent to profile with a picked vector in place of the section's normal (the
-  vector is normalized and turned to point along the loft: the same way as the section's normal,
-  or, square to it, from the section towards its neighbour); a zero vector is an error.
-  `LoftCondition` is no longer `Eq` (it holds floats). Conformance `loft_direction_conditions`.
-- `draft`: `BRepOffsetAPI_DraftAngle`'s history reports the drafted faces as deleted, so their
-  persistent names were lost (a later feature on a drafted face, or the dialog's tint of the
-  faces to draft, found nothing). The backend now carries each lost input face to the new face
-  nearest its centroid that the history doesn't account for, of the same surface kind and with a
-  normal within the draft angle of its own (core test `draft_feature_on_a_cube`).
-
-**P3.10 fork commit** (branch `cadrs`, pushed to `origin`): `f7d8eba`: `Shape::try_draft_h`
-(`BRepOffsetAPI_DraftAngle`), `Shape::try_offset_h` (`BRepOffset_MakeOffset` with per-face
-offsets), `Shape::face_derivatives` (point, outward normal, D1U, D1V, D2U, D2V, D2UV) with
-`FaceDerivatives::normal_curvature`, `Shape::try_sew_solid`, and `LoftDerivative::Samples` in
-`try_loft_solid` (a vector per sample, optionally a second derivative: quintic columns).
-
-**Partial fillet** (P3.11 fix round 1, PS14.6; `Kernel::fillet_partial(body, edge, &FilletSpec,
-from, to)`, `backend/occt_partial.rs`). `BRepFilletAPI_MakeFillet` always runs a contour to the
-ends of its edges (and on along tangent edges), and splitting the edge first doesn't stop it: the
-pieces are tangent, so the contour runs on across the split (tried in P3.10). So the partial
-fillet is built from the whole edge's fillet: what that fillet removes (`body − filleted`, a
-convex edge) or adds (`filleted − body`, a concave one) is cut down to the part between the
-planes square to the edge at the two bounds (each plane a large half-space block, intersected),
-and only that part is cut from or added to the body (`apply_tools`). The fillet face is the whole
-fillet's face between the bounds and each bound gets a flat end face square to the edge, as
-Onshape's partial fillet ends; the section and so the volume are exactly the whole fillet's
-there: (1 − π/4)·R²·ℓ on a 90° straight edge (conformance `fillet_partial`: 0.25–0.75 of the
-box's 30 mm edge, R2; the whole range equals the whole fillet; a circular rim's half removes half
-the round's volume; a concave edge adds the same section). A curved edge is taken in pieces that
-each turn less than 60°, so each piece lies in the wedge between its planes. At a bound of 0 or 1
-whose vertex has no tangent neighbour, the plane moves out past the vertex (4 × the size) so the
-fillet ends there as the whole fillet does. History: the fillet face is generated `FromEdge`, the
-end faces `StartCap`/`EndCap { region: 0 }`. Any profile of `fillet_with` works (asymmetric,
-conic, width).
-
-**What OCCT can't do here** (P3.10, PS14.6):
-- *Smooth fillet corners*: built in the Final stage (see "Smooth fillet corners" above). The
-  P3.11 investigation stands for OCCT's own fillet: ChFi3d builds the corner as the exact sphere
-  or a `GeomFill_ConstrainedFilling` patch between the fillets' ends, and `SetParams`,
-  `SetContinuity` and `SetFilletShape` don't move where the fillets end; hence the cut-and-fill
-  corner builder.
-- The variable fillet's *Magnitude* belongs to Onshape's Curvature cross section: out of scope
-  (niche; out of scope by user decision 2026-09-29), with the full round/conic/curvature options
-  beyond P3.6.
-- Asymmetric and variable fillets only with the Distance control; asymmetric only on straight
-  edges between flat faces (as Conic and Curvature). A variable fillet's radius law is exact at
-  its points; between them OCCT's evolving surface removes up to ~1 % more than circular
-  sections of the interpolated radius would (`fillet_variable_radius`: 60.619 against 60.089
-  mm³ for 2 → 4 mm over 30 mm).
-- The Draft feature's *Parting line* type (a draft about a parting curve with a split): not
-  built; `DraftAngle` drafts about a plane only.
-
-**Trait changes in P3.8.**
-- `transform_motion(body, &Motion)`: `Motion { linear: Matrix3, translation: Vector3 }` with
-  `identity`, `translation`, `rotation(&Axis, angle)`, `reflection(point, normal)`,
-  `from_isometry`, `then`, `inverse`, `point`, `vector`, `is_reflection`, `to_isometry`. The
-  old `transform(Isometry3)` stays (it can't mirror).
-- `face_tool(body, &[FaceId], source) -> OpResult`, `classify(body, Point3, tol) -> PointClass
-  { Inside, Outside, OnBoundary }` and `split_faces(body, &[FaceId], &SplitTool) -> OpResult`.
-  All default to `Unsupported`.
-- Naming: `FaceOrigin::Instance { of: OpId, face: u64, instance: u32 }` (`face_bytes` tag 5,
-  `naming::face_hash`): the face of a pattern or mirror copy, named after the op and face it
-  copies and the instance's index, so faces of different instances never collide.
-- **Unions and UnifySameDomain.** `try_union_clean_h` measures the fused volume before merging
-  coplanar faces; if the merged shape's volume differs (UnifySameDomain edits the fused shape in
-  place and can drop a mirrored half cylinder's faces: π·500 came out as 523.6), the union is
-  made again without merging. The price: a mirrored part joined with Add keeps the seam faces
-  along the mirror plane.
-
-**P3.8 fork commits** (branch `cadrs`, pushed to `origin` only): `c8cfc22` (`try_transform_h`,
-`try_face_tool_h`, `classify`), `36b5a3b` and `05806b0` (the union's volume check and the
-unmerged fallback), `86000a6` (the final union path, after dropping the `ShapeCustom::DirectFaces`
-reflections of `f308296`, which didn't help and made later booleans hang, and the input swap of
-`86f8715`), `506f409` (`try_split_faces_h`).
-
-**Trait changes in P3.7.**
-- `sweep(profile, &[Curve2])` and `loft(&[Profile])` (defaults, never implemented) are replaced
-  by `sweep_with(&Profile, &SweepSpec { body, path: Vec<PathCurve>, control: SweepControl, faces })`
-  and `loft_with(&LoftSpec { body, sections: Vec<LoftSection>, start: LoftEnd, end: LoftEnd,
-  source })` (`LoftSection::{Profile, Face(FaceInput), Point}`, `LoftEnd { condition:
-  LoftCondition::{Default, NormalToProfile, TangentToProfile}, magnitude }`), and
-  `split(body, &SplitTool::{Plane, Face { body, face }, Body}, source)` is added. All three
-  default to `Unsupported`.
-- `Curve2::OffsetEllipseArc { center, major_radius, minor_radius, rotation, start, sweep, offset,
-  source }`: the exact offset of an ellipse (PS21.2, X13). It is not an ellipse; the backend
-  approximates it by a C2 B-spline to 1e-8 (`GeomConvert_ApproxCurve` of a `Geom_OffsetCurve`),
-  and refuses an inward offset past the smallest radius of curvature (b²/a). `Curve2::is_closed`.
-- New module `cadrs_kernel::loft` (backend-free): section loops (a region's pieces joined into
-  one closed contour, else `InvalidProfile("one closed contour")`), orientation and start
-  alignment, sampling.
-
-**Sweep, loft, split (P3.7, `backend/occt_sweep.rs`).**
-- The path's edges are chained end to end (joins within 1e-5 mm; edges shorter than 1e-4 mm, a
-  fillet's sliver where two faces of a rim meet, are left out; `cadrs_core::brep` also leaves
-  such slivers out of a solid's edges and joins the tangent chains across them, so Create
-  selection → Tangent connected finds the funnel's 8 edges). A profile whose plane crosses
-  the path partway sweeps both ways (two spines, the backward one's caps swapped); on a closed
-  path the spine restarts at the crossing. Open paths use `BRepOffsetAPI_MakePipe`, closed ones
-  and Lock profile direction `BRepOffsetAPI_MakePipeShell` (`MakePipe` on a closed path leaves two
-  coincident caps inside the solid). Thin sweeps the thin profile (`thin::thin_profile`).
-- A loft without end conditions is `BRepOffsetAPI_ThruSections` (ruled off, faces tagged from its
-  history). With conditions, cadrs builds the surface itself (`cadrs_loft_solid` in the fork):
-  each section is sampled at the same parameters, every column is interpolated through the
-  sections (`GeomAPI_Interpolate`, parameters by the centroids' chord length, normalized) with the
-  end derivative = magnitude × total chord length × the section plane's normal (Normal) or the
-  radial direction in it (Tangent), then caps are added, sewn and made a solid. With this
-  convention the course's funnel (magnitudes 0.5 and 1) is within 0.04 % of Onshape's volume.
-  Profiles with different numbers of edges (PS20.3, judge round 1): the profile with the most
-  edges gives the corners; every other one is cut where its direction from its centre (about the
-  loft's axis) is nearest each corner's, and each piece is resampled by arc length (a square's
-  sides meet a circle's quarters).
-- A whole offset-ellipse loop is split into two half edges before a face is made from it: a
-  closed non-periodic B-spline seam made the union of the funnel's rim and its shelled loft
-  produce a bogus face (fuzzy, glue, ShapeFix and periodic B-splines didn't help).
-
-**P3.7 fork additions** (commit `08628ab` on `cadrs`): `Edge::try_offset_ellipse`,
-`Edge::try_split_at`, `Edge::try_reversed`, `Edge::edge_samples`, `Shape::try_vertex`,
-`Wire::try_pipe_h` (`MakePipe`, modes corrected Frenet, fixed, Frenet, discrete),
-`Wire::try_pipe_shell_h` (`MakePipeShell`, also binormal; `MakeSolid`), `try_thru_sections_h`,
-`try_loft_solid` (the interpolated loft above) and `try_split_h` (`BRepAlgoAPI_Splitter`), each
-with its history.
-
-**Trait changes in P3.6.**
-- `fillet_with(body, edges, &FilletSpec { size: FilletSize::Radius(r) | Width(w), allow_overflow })`
-  (default: a radius with overflow maps onto `fillet`).
-- `chamfer_with(body, edges, &ChamferOpts { spec: ChamferSpec, measurement: ChamferMeasure::Offset
-  | Tangent, flip, flipped: Vec<EdgeId> })` (default: Offset without flips maps onto `chamfer`).
-- `shell_with(body, &ShellSpec { remove, thickness, outward, hollow })` (default: an inward shell
-  maps onto `shell`).
-- `FaceInfo.radius: Option<f64>` (serde default): a cylinder's or sphere's radius (a cone's
-  reference radius, a torus's major one), from the fork's `face_axes`.
-- (Judge round 1) `FilletSpec.profile: FilletProfile::{Circular, Conic { rho }, Curvature {
-  magnitude }}` (serde default Circular), and `full_round(body, side1, center, side2)` (default
-  `Unsupported`).
-
-**Applied features (P3.6, `backend/occt.rs`).**
-- **Fillet.** Every edge's tangent chain is filleted with it (OCCT's fillet contours always
-  continue along G1 edges, so the chain is listed explicitly and each edge gets its own radii).
-  *Width* `w`: at 9 samples along an edge the fork's `Shape::edge_normals` gives the two faces'
-  outward normals, `φ` apart; the fillet's arc then spans `φ` and its chord is `2r sin(φ/2)`, so
-  `r = w / (2 sin(φ/2))`; an edge whose angle doesn't change gets one radius, others a law through
-  the samples (`BRepFilletAPI_MakeFillet::SetRadius(UandR, IC, IinC)`, fork
-  `Shape::try_fillet_variable_h`). *Allow edge overflow* off: the result is refused when a fillet
-  face touches a face that continues an input face other than the ones meeting at its edge or at
-  its edge's end vertices (checked on OCCT's history and the result's edge–face map). OCCT has no
-  Parasolid-style overflow: where Onshape would spill a fillet onto a neighbour, OCCT either
-  trims it against the neighbour (the overflow the check catches, e.g. a fillet running into a
-  hole next to its edge) or fails.
-- **Fillet sections** (Conic, Curvature). `BRepFilletAPI_MakeFillet` only rolls a ball: its
-  `ChFi3d_FilletShape` (Rational, QuasiAngular, Polynomial) chooses how the circular section's
-  surface is approximated, and its `Law_Function`s vary only the radius, so OCCT has no conic
-  (rho) or curvature-continuous section. They are built here for straight edges between flat
-  faces: the contact points are the circular fillet's (`d = r / tan(θ/2)` from the corner, θ the
-  angle between the faces inside the section; Width: `d = w / (2 sin(θ/2))`); the section between
-  the corner and the curve (a rational quadratic Bezier with poles contact–corner–contact and middle
-  weight `rho/(1 − rho)`, which is exactly the circle at the circle's rho; or a quintic Bezier
-  with its first three and last three poles on the faces' lines, so its curvature is zero where it
-  meets them) is swept along the edge and cut from a convex edge or added to a concave one (by
-  ray parity, as the shell's concave test). The rest of the tool runs out past the faces so no
-  tool face lies on a body face. The tool's faces are named from the edge (`Origin::FromEdge`).
-  Other edges are refused with that reason. Where two section fillets meet at a corner the
-  corner isn't blended.
-- **Full round.** The two corner slivers between the middle face's edges and the round (each a
-  quarter-disc's complement, swept along the middle face) are cut, so the round is two quarter
-  cylinders that continue the middle face (its name); the volume removed is checked against
-  `(2 − π/2) r² L`, which catches side faces too shallow for the radius.
-- **Chamfer.** The first distance (and the angle) go on the edge's first face in explorer order,
-  on the other face when flipped (all edges) or overridden (that edge). *Tangent* measurement:
-  the tangent-plane distance `d` differs from the distance along the face only where the face
-  curves across the edge: a sphere, or a cylinder whose axis runs along a straight edge; there,
-  for radius R, it is the chord `2R sin(atan(d/R)/2)`, on that side only (judge round 1: it was
-  applied to any cylinder, so a cylinder's rim got a smaller bevel; a rim's side face is straight
-  across the rim, so Tangent = Offset there). OCCT takes one chamfer kind per call, so edges
-  needing different distances (Tangent on mixed faces) are refused for now.
-- **Shell.** Walls facing each other across the body (kept, planar, axis-aligned, anti-parallel,
-  not adjacent, their extents overlapping) closer than twice the thickness are refused first
-  ("The shell's walls would intersect themselves; reduce the thickness"), since OCCT may return
-  a wrong body there (even the input unchanged). *Outward*: OCCT's offset rounds the outer edges
-  and corners (arc join), so outward walls are exactly `t` from the body everywhere. *Hollow*: the
-  offset solid with no face removed (OCCT's `MakeThickSolidByJoin` with an empty list returns the
-  offset body itself) subtracted from the body (outward: the body from it). Every result is checked
-  (`BRepCheck_Analyzer`, fork `Shape::is_valid`; one solid; the volume moved the right way).
-  **`shell_by_regions`**: OCCT's thick solid can't drop an offset face that vanishes (a
-  counterbore's floor, 2.2 mm wide, under a 4 mm wall: the Gear Cover's Shell after its holes,
-  PS17.6), so an inward shell it fails on or gets wrong is built from its definition: the walls
-  are the body's points within `t` of its kept faces, i.e. the union of each kept face swept
-  inward by `t` (`Shape::try_thicken_h` of the face), a tube round each concave edge (a cylinder
-  along a line, a torus section round a circle or arc; concave: the point `m + δ(n₁ − n₂)` next to
-  the edge's middle is inside the body, by ray parity) and a ball at each vertex of a concave edge
-  (convex edges and vertices need none: their nearest points lie outside). The cavity is the body
-  less those (subtracted one at a time: a compound of overlapping solids is not a valid boolean
-  argument) and the shell the body less the cavity. The kernel's `shell_around_a_counterbore` and
-  `cadrs_core/tests/gear_cover.rs` check it against closed forms (Pappus for the rounded concave
-  corners) to 1e-6 mm³.
-- **Hole** is not a kernel op: `cadrs_core` revolves each hole's half section about its axis and
-  subtracts the tools (see "Rebuilding the feature list" below).
-
-**P3.6 fork additions** (commit `8fcc94f` on `cadrs`): `Shape::try_fillet_variable_h` (a radius per
-edge, constant or a `(t, r)` law), `Shape::edge_normals` (points and the two faces' outward normals
-along an edge, from the faces' p-curves and `BRepLProp_SLProps`) and `Shape::is_valid`
-(`BRepCheck_Analyzer`). Commit `53c1041`: `Edge::try_bezier(poles, weights)` (a rational
-`Geom_BezierCurve` edge, for the conic and curvature sections).
-
-**Trait changes in P3.5.**
-- `MassProperties.inertia: Matrix3<f64>` (serde default): the volume's inertia tensor at unit
-  density (mm⁵) about `center_of_mass`, axes parallel to the model's, `I = ∫(|r|²E − r rᵀ) dV`
-  (the diagonal holds the moments, the products carry the minus sign, as OCCT's
-  `MatrixOfInertia`). `MassProperties::inertia_about(point)` moves it to another point (parallel
-  axes). A density (kg/mm³) times it gives kg·mm².
-- **Convention** (recorded for the Mass properties panel): the tensor is about the **centre of
-  mass**, aligned with the Part Studio's axes, which is what Onshape's Mass and section properties
-  shows when no mate connector is set as the reference frame. Several parts measured together are
-  combined about their common mass-weighted centre (`cadrs_core::parts::mass_report`).
-- Conformance `inertia_tensor`: the 10 × 20 × 30 box about its centre (V(b²+c²)/12 = 650 000,
-  500 000, 250 000; no products) and about the origin (2 600 000, Ixy −300 000); an L whose
-  product is +100 000/3 (the sign convention); a cylinder r 5 h 10 (Izz = V r²/2, Ixx =
-  V(3r² + h²)/12). `cadrs_core/tests/material.rs`: a 100 mm steel cube (7850 kg/m³) is 7.85 kg with
-  Ixx = Iyy = Izz = 13 083.333 kg·mm²; the Control Arm in Polypropylene (900 kg/m³) is
-  V × ρ = 0.331 875 kg; two cubes of steel and aluminium combine about their mass centre.
-
-**Trait changes in P3.4.**
-- `revolve_with(&mut self, profile, &RevolveSpec) -> OpResult`: `RevolveSpec { body: BodyKind,
-  axis: Axis, full, end: RevolveEnd, symmetric, second: Option<RevolveEnd>, scene }`,
-  `RevolveEnd = Angle(rad) | UpToNext { offset } | UpToFace { body, face, offset } |
-  UpToPart { body, offset } | UpToVertex { point, offset }` (offsets are angles: positive stops
-  short of the target, negative goes past it), `faces: Vec<FaceInput>` (planar faces of bodies,
-  solid revolves only). The first end turns counter-clockwise about
-  `axis.dir`, the second the other way. The default implementation maps a solid Full or single
-  angle onto `revolve` and refuses the rest.
-- `FaceInfo.axis: Option<Axis>` and `EdgeInfo.circle: Option<Circle3 { center, normal, radius }>`
-  (serde default): a revolve axis can be a cylindrical face or a circular edge, and Use projects
-  the exact circle.
-
-**The full revolve (P3.4, `backend/occt_revolve.rs`).**
-- The profile must not cross an axis lying in its plane, and the axis must not be normal to the
-  plane (`InvalidParameter`). Angles are measured about the axis from the half plane holding the
-  profile.
-- Ends that are an angle (an angle, Up to vertex: the vertex's angle less the offset; Up to face
-  of a plane through the axis: its angle) make one revolution: the profile's plane is turned back
-  to where the second end starts and swept through both angles together (at most a turn).
-- Up to part, Up to next and Up to any other face **conform**, as the extrude's do: the profile is
-  turned almost a whole turn (2π·(1 − 10⁻⁴)), split by the targets (turned back by the offset
-  angle) into `sweep − targets` and `sweep ∩ targets`, and the solids that hold the start cap are
-  kept; a kept piece that still has the far cap means part of the profile met nothing (an error).
-  Up to next takes the scene's bodies the almost-full sweep overlaps. Faces a trim makes are the
-  end cap of the region they end (the point turned back onto the profile's plane).
-- Surface: each region loop and open chain is a wire revolved into a sheet (fork
-  `Wire::try_revolve_h`); angle ends only. Thin: the bands of `thin_profile`, revolved as a solid.
-- Faces are tagged through OCCT's history exactly as the extrude's: the side of each profile
-  curve, the start cap (the profile, or the second end's far face) and the end cap; a whole turn
-  has no caps.
-
-**Trait changes in P3.3.**
-- `extrude_with(&mut self, profile, &ExtrudeSpec) -> OpResult`: `ExtrudeSpec { body: BodyKind
-  (Solid | Surface | Thin { left, right }), direction: Unit<Vector3>, start_offset,
-  end: ExtrudeEnd, symmetric, second: Option<ExtrudeEnd>, scene: Vec<BodyId>, faces:
-  Vec<FaceInput> }`, `ExtrudeEnd = Blind(d) | UpToNext { offset } | UpToFace { body, face,
-  offset } | UpToPart { body, offset } | UpToVertex { point, offset } | ThroughAll`
-  (`offset > 0` stops short of the target, `< 0` goes past it), `FaceInput { body, face,
-  source }`. The default implementation maps what `extrude` can do (a blind or symmetric solid
-  along the normal) and refuses the rest.
-- `Profile.chains: Vec<Chain>` (open chains of curves, `Chain { curves, source }`, serde
-  default) for surface and thin extrudes; `Profile::new(plane, regions)`.
-- `compound(bodies) -> OpResult` (P3H.6; default `Unsupported`): the bodies gathered unmerged.
-- `split_solids(body) -> Vec<OpResult>`, `solid_count(body)` (default 1), `bounding_box(body) ->
-  Aabb`, `ray_hits(body, origin, dir) -> Vec<RayHit { face, t, point }>` (defaults:
-  `Unsupported`).
-- `cadrs_kernel::thin`: `thin_profile(profile, left, right)` turns a profile into the regions of
-  a thin wall (backend-independent; see below). `THIN_LEFT`/`THIN_RIGHT` mark the curve ids of a
-  wall's offset sides.
-- `naming::name_edges` names a free edge (one face) as `EdgeName { faces: [f, f] }`, so a
-  surface's boundary is drawn and can be referenced.
-
-**The full extrude (P3.3, `backend/occt_extrude.rs`).**
-- Ends that are a depth (Blind; Up to vertex: the vertex's height less the offset; Through all:
-  the far side of the scene bodies' boxes; Up to face of a planar face square to the direction:
-  its height less the offset) make one prism from the second end to the first. Symmetric
-  splits a Blind depth (or goes Through all both ways).
-- Other ends are trimmed: an oblique planar face cuts the long prism with the half space beyond
-  its plane (a slab built from a large square). Up to part, Up to next and Up to a curved face
-  **conform**: the long prism is split by the target bodies (moved by the offset along the
-  direction) into `prism − targets` and `prism ∩ targets`, and the solids touching the start
-  plane are kept, so every point of the profile stops at the first target face it meets,
-  entering or leaving it (a cut from a part's face "up to next" stops at the part's other
-  side). A kept piece that still reaches the far end means part of the profile met nothing:
-  an error, not a guess. Up to next first finds the bodies ahead with rays from sample points
-  of the profile (and errors when there are none). Faces a trim makes are the end cap (the
-  start cap for a second end) of the region under them.
-- Surface: each region loop and open chain is a wire swept into a sheet (`Wire::try_extrude_h`);
-  the sheets are one compound body. Up to next/part/face ends are not supported for surfaces
-  yet.
-- Thin: `thin_profile` builds exact 2D bands along every curve (a line's rectangle, an arc's
-  annular sector, a circle's annulus) and fills the outer side of each corner up to where the
-  offset lines meet (a mitred corner); the bands are regions, so the thin wall takes every end
-  type, and their offset sides and the fills' outer sides are named after the curve (with
-  `THIN_LEFT`/`THIN_RIGHT`), so no seams show. `MakeThickSolidBySimple` (bound as
-  `Shape::try_thicken_h`) was tried first: it doesn't join offset faces at corners (a 20 × 20
-  square came out at −920 mm³ instead of 1440). Ellipses can't be offset this way (an error).
-- A planar face as input is swept with its own history: its sides are `FromEdge` of the body's
-  edges, its caps named after the caller's `source`.
-
-**Trait changes in P3.2.**
-- `History` is `generated: Vec<(FaceId, Origin)>`, `modified: Vec<(FaceId, InputFace)>`,
-  `deleted: Vec<InputFace>` (`InputFace { body, face }`). `Origin` is `ProfileCurve { region,
-  curve }`, `StartCap { region }`, `EndCap { region }`, `FromEdge { body, edge }`,
-  `FromVertex { body, vertex }` (was `ProfileCurve(u64)`, `StartCap`, `EndCap`, `FromEdge`,
-  `FromFace`).
-- `Region.source: Option<u64>`: the caller's id for a profile region (its index if `None`).
-- `FaceInfo.center` (area centroid). `EdgeInfo` gains `curve: CurveKind`, `start`, `end`, `mid`,
-  `start_tangent`, `end_tangent`, and `length` is exact for every curve (was polyline length for
-  ellipses and B-splines).
-- `vertices(body) -> Vec<VertexInfo { id, point, edges }>` (default: the distinct ends of
-  `edges()`; OCCT overrides it with its own vertex list).
-- `adjacent_faces(body, face)` and `tangent_chain(body, edge)` (default methods over `edges()`
-  and `vertices()`). A tangent chain is `edge` and every edge reached through vertices where the
-  tangents are parallel within `TANGENT_ANGLE` (0.1°), Onshape's tangent propagation.
-- `KernelError::InvalidParameter(String)`: a parameter the kernel can't build with, worded for
-  the user. The OCCT extrude refuses depths below `MIN_DEPTH` (1e-6 mm, ten times
-  `Precision::Confusion`) with it; the app shows the reason on the failed feature row.
-
-**Trait changes in P3.1.**
-- `tessellate(&self, body, quality: Tessellation)` replaces the `tolerance: f64` argument (an
-  angular limit is needed for smooth curved faces).
-- `release(&mut self, body)` (default: no-op).
-- `Curve2::EllipseArc { center, major_radius, minor_radius, rotation, start, sweep, source }`,
-  and `Curve2::start`/`end`/`point_at`/`source`. The minor radius may be larger than the major
-  one or negative (the sketch's conventions); the backend restates it for OCCT.
-
-**Ids.** `FaceId(i)`, `EdgeId(i)` and `VertexId(i)` are indices in `TopExp::MapShapes` order (the
-explorer's order, each sub-shape once). They are only valid for the body they were read from;
-documents store names (see "Persistent naming").
-
-**History (P3.2).** The fork's `*_h` operations (commit `c249012` on `cadrs`: prism, revolve,
-boolean, fillet, chamfer, thick solid) return OCCT's own history as indices: for every face of the
-inputs the result faces it became (`Modified`, itself if kept, none if `IsDeleted`), for every
-input edge and vertex the faces generated from it (`Generated`), and a sweep's
-`FirstShape`/`LastShape`. The backend turns it into our `History`:
-- extrude and revolve: each profile edge's generated face is the side of the profile curve the
-  edge lies on (matched by the edge's midpoint against the exact curves), the first and last
-  shapes are the start and end caps; several regions are fused with the tags carried through
-  the fusion's history, so the result has only `generated` entries;
-- boolean: every result face `modified` from the target's or a tool's face it continues (all
-  pieces of a split face), the rest `deleted`. A Union also merges a face of the target with a
-  face of the tool it meets on the same surface (`ShapeUpgrade_UnifySameDomain` keeping every
-  edge between two faces of one input: fork `cadrs_fuse_clean_h`, P3.3 judge round 3), so no
-  seam is left where the bodies met; the merged face continues the target's face (the first
-  input wins), so references to it keep resolving. Faces of one body are never merged (the
-  caps of regions extruded together stay apart);
-- transform: every face modified from the same face (a copy keeps the topology);
-- fillet, chamfer, shell: kept faces modified, faces from edges and vertices generated.
-
-**Topology queries (P3.2).** Also from the fork: exact edge geometry (ends, midpoint, unit end
-tangents, exact length via `GCPnts_AbscissaPoint`, curve type), the faces around each edge
-(`MapShapesAndUniqueAncestors`), and each vertex's point and edges.
-
-**P3.5 fork addition** (commit `7278a45` on `cadrs`): `MassProperties.inertia` in
-`Shape::mass_properties` (`GProp_GProps::MatrixOfInertia` of the volume properties, through a
-`GProp_GProps_MatrixOfInertia` helper that fills a slice).
-
-**P3.4 fork additions** (commit `df2e7c4` on `cadrs`): `Shape::try_revolve_h` and
-`Wire::try_revolve_h` (revolves of any shape with history: surfaces of wires),
-`Shape::face_axes` (`BRepAdaptor_Surface` cylinder, cone, sphere, torus, surface of revolution
-axes) and `Shape::edge_circles` (`BRepAdaptor_Curve::Circle`).
-
-**P3.3 fork additions** (commit `b45eb6d` on `cadrs`): `Shape::sub_count`/`sub_shapes`
-(solids, shells, faces, wires, edges of a shape, sharing its sub-shapes), `Shape::try_compound`,
-`Shape::try_thicken_h` (MakeThickSolidBySimple, with history; not used, see Thin), `Shape::ray_hits`,
-`Shape::bbox`, `Wire::try_extrude_h`, `Wire::edges_geometry`, `Wire::to_shape`.
-
-**Known gaps in the fork**, to add on the fork's `main` branch when needed:
-- `Face::normal_at` projects the point onto the surface, which throws when the projection is
-  degenerate (for example a cylinder's centroid on its axis). The backend only calls it for
-  planar faces, with a point on the face.
-- The older, non-`safe` API of the fork still aborts on OCCT exceptions; the backend doesn't use
-  it for anything that can fail (`translated`/`rotated`, explorers, `mass_properties`,
-  STEP export).
 
 ## Drawing-view projection (P3C.2)
 `Kernel::project(bodies, frame, opts) -> Projection` is the kernel side of drawing views
 (`cadrs_drawing::view`, `cadrs_core::views`). It is a query: it makes no bodies.
-- **Types** (`src/projection.rs`, no backend types): `ViewFrame { origin, dir, x }` (the
-  direction of sight, eye → model, and the sheet-right direction; 2D y is `x × dir`, so a front
-  view looking along +Y with x = +X has y = +Z); `ProjectOptions { tolerance, hidden }`;
-  `Projection { edges }` of `ProjEdge { visibility: Visible | Hidden, class: Sharp | Smooth |
-  Outline, curve: Line | Arc | Polyline, points, source }`. `ProjSource { body, edge, face,
-  edge_name, face_name }` says where an edge came from: the index of the body in the call, the
-  body's `EdgeId` (sharp and smooth edges) or `FaceId` (a cylinder's outline). The kernel fills
-  the ids; `cadrs_core` adds the persistent names from the body's `BodyNames`, so P3C.3
-  annotations attach to model topology.
-- **OCCT** (fork `opencascade::hlr::hlr_project`, commit `9c4bc31`): exact `HLRBRep_Algo` on the
-  body (several bodies as one compound, so they hide each other). Hidden edges lying on visible
-  ones (a box's back edges behind its front ones) are dropped
-  (`remove_hidden_behind_visible`). HLR reports no topology, so `attach_sources` finds it by
-  geometry: a projected piece belongs to the 3D edge (its display-mesh polyline, 0.05 mm) whose
-  projection runs through its 25/50/75 % points; where several do (edges behind each other), a
-  visible piece takes the one nearest the eye and a hidden piece the farthest. A straight
-  outline belongs to the cylinder whose projected axis is parallel to it, the radius away.
-  **Seams**: OCCT reports a cylinder's seam as a sharp edge (and drops the outline it lies on
-  when the seam is on the silhouette); a piece that comes from a seam becomes that cylinder's
-  outline if it is one, and is dropped otherwise (seams aren't drawing lines).
-- **Caveats** (from the fork): visible edges may be split at silhouette points (merge collinear
-  pieces before dimensioning); circles seen edge-on come back as lines; some fillet boundaries
-  are classed sharp; exact HLR takes about 6.5 ms on a filleted box (debug) and grows with the
-  model, so `cadrs_core` runs it on the rebuild worker thread and the app caches each view.
+- **Types** (`src/projection.rs`): `ViewFrame { origin, dir, x }` (the direction of sight,
+  eye → model, and the sheet-right direction; 2D y is `x × dir`, so a front view looking along
+  +Y with x = +X has y = +Z); `ProjectOptions { tolerance, hidden }`; `Projection { edges }` of
+  `ProjEdge { visibility: Visible | Hidden, class: Sharp | Smooth | Outline, curve: Line | Arc |
+  Polyline, points, source }`. `ProjSource { body, edge, face, edge_name, face_name }` says where
+  an edge came from: the index of the body in the call, the body's `EdgeId` (sharp and smooth
+  edges) or `FaceId` (a curved face's outline). The kernel fills the ids; `cadrs_core` adds the
+  persistent names from the body's `BodyNames`, so P3C.3 annotations attach to model topology.
+- **Native** (`native::hlr`): the bodies' edges and the exact silhouettes of their curved faces
+  (cylinders and cones in closed form, spheres, others traced), split where they cross on the
+  sheet (Newton on the exact curves) and at collinear overlaps; each piece is visible when a ray
+  from it towards the eye meets no face (exact surfaces for planes and quadrics, the mesh
+  otherwise; a ray leaving through an edge between two faces is blocked). Hidden edges under
+  visible lines are dropped; hidden silhouettes are kept. Seams are not drawn.
 
-**Section and broken-out views (P3C.8).** No new kernel operation and no fork change: the cut is
+**Section and broken-out views (P3C.8).** No new kernel operation: the cut is
 made from existing ones in `cadrs_core::section` (`ViewRequest::cut`). The tool is an
 `extrude` of the cut region (the whole view plus a margin for a section, the broken-out boundary
 otherwise) on a plane in front of the parts, facing along the direction of sight, blind to the
@@ -748,7 +525,7 @@ in all, and the input body keeps its volume.
 ## Rebuilding the feature list (`cadrs_core`, P3.1; names since P3.2; parts and booleans since P3.3; revolves since P3.4)
 **P3G.1 (linked elements; no kernel change, no new conformance case).** A reference to another
 document or to a version (`cadrs_core::external`) keeps a frozen copy of the referenced element's
-*features* in the consumer (`Document::linked`), never bodies: OCCT bodies can't move between
+*features* in the consumer (`Document::linked`), never bodies: kernel bodies can't move between
 kernel sessions and cadrs has no BRep read/write, so a copy is rebuilt from its features in the
 consumer's own session by the ordinary `rebuild::build`, whose per-feature cache key is the
 features themselves (a copy with other contents is other features and another key; the copy's
@@ -908,14 +685,14 @@ properties), so an edit recomputes from the first changed feature and reuses the
   another).
 
 
-`cadrs_core` depends on `cadrs_kernel` with the `occt` feature (its default feature `occt`;
-without it, extrudes fall back to the old prism mesh of `solid::extrude`).
+`cadrs_core` rebuilds through the kernel with its default `brep` feature (without it, extrudes
+fall back to the old prism mesh of `solid::extrude`).
 - `cadrs_core::rebuild` rebuilds a Part Studio's features. Each feature's output (its kernel
   `BodyId`, display mesh, exact mass properties and error) is cached under a key that chains the
   keys of the features before it with its own parameters, so an edit recomputes from the first
   changed feature. Outputs no rebuild used in the last 48 rebuilds are evicted and their bodies
   released.
-- All kernel work runs on one worker thread that owns the `OcctKernel` and the cache.
+- All kernel work runs on one worker thread that owns the kernel (`DefaultKernel`) and the cache.
   `rebuild::request` returns at once; the app waits at most 30 ms per frame (`RebuildBudget`) and
   otherwise keeps showing the old parts, so a slow rebuild never freezes the UI (scripted runs
   wait, for reproducible screenshots). `rebuild::build` waits, for code that needs parts now
@@ -938,8 +715,7 @@ without it, extrudes fall back to the old prism mesh of `solid::extrude`).
   `crates/cadrs_core/tests/fixtures/v3_control_arm.ron`).
 - Rebuild errors (kernel failures, regions that no longer exist) are in `Build::errors`; the
   feature list shows the feature in red with the message as its tooltip.
-- Display tessellation: 0.05 mm and 5°. BRepMesh dominates an extrude's rebuild time (about
-  1.5 ms of 2.5 ms for a plate with a hole in a debug build).
+- Display tessellation: 0.05 mm and 5°.
 
 Measured (debug build, `cadrs_core/tests/kernel_rebuild.rs`): a 20-feature studio (10 sketches,
 10 extrudes of slots with holes) rebuilds from scratch in about 40 ms, and in about 4 ms after an
@@ -947,23 +723,10 @@ edit to the last extrude. With persistent naming (P3.2: the history, and naming 
 and vertex) it is about 54 ms and 5 ms. The Control Arm built through the feature list with both extrudes as New
 gives two parts totalling 368 749.7048 mm³.
 
-**Windows.** `cargo build -p cadrs_kernel --features occt --release --target x86_64-pc-windows-gnu`
-works with the installed MinGW (GCC 13, win32 threads); the cold build takes about 7 min. Two
-fixes were needed, both in this repo rather than in the fork:
-- `crates/cadrs_kernel/build.rs` links `advapi32`, which OCCT's OSD layer uses (security
-  descriptors, registry, `GetUserNameW`) and `opencascade-sys` doesn't link.
-- `.cargo/config.toml` sets `CXXSTDLIB_x86_64_pc_windows_gnu = "static:-bundle=stdc++"`, so the
-  exe doesn't need `libstdc++-6.dll`. The test exe then imports only system DLLs (KERNEL32,
-  ADVAPI32, USER32, msvcrt, ...).
-The Windows test exe links, but it hasn't been run yet: there's no Wine here, so it needs a
-Windows machine.
+**Windows.** `cargo build --release --target x86_64-pc-windows-gnu` cross-compiles the app with
+MinGW; the kernel needs no C++ toolchain or runtime DLLs.
 
-P3.1 (2026-09-27): the whole app with OCCT, `cargo build --release --target x86_64-pc-windows-gnu`,
-builds and links (10.5 min cold in a fresh target dir; 257 MB exe, copied to
-`dist/cadrs-P3.1.exe`). It imports only system DLLs (KERNEL32, USER32, ADVAPI32, msvcrt,
-combase, …). It hasn't been launched: there's still no Windows machine or Wine here.
-
-Conformance results (OCCT): all 77 cases pass (Final: `bezier_profiles` and `fillet_smooth_corner`
+Conformance history (the cases as they were added; first run on the OCCT backend): all 77 cases pass (Final: `bezier_profiles` and `fillet_smooth_corner`
 added to 75). Before: all 71 cases pass (the phase3c merge of main's P3.10/P3.11, 69 cases, with
 3C's `project_view` and `section_cut`). P3C.8 added `section_cut` (see "Drawing-view projection").
 P3C.2 added `project_view` (a 20 mm cube with a
@@ -1050,7 +813,7 @@ a Profile with exact arcs, lines and circles (Extrude 1: hub ring, right web, ri
 area 50 179.7110 mm² (expected 368 749.705 and 50 179.71).
 
 **P3G.4 (Derived feature).** `FeatureKind::Derived` (`cadrs_core::derived`,
-`rebuild/kernel_ops/derived.rs`). No new kernel operation and no fork change:
+`rebuild/kernel_ops/derived.rs`). No new kernel operation:
 - The source's features travel inside the feature (`DerivedFeature::studio`, with its part
   settings), so every rebuild of the host (the app's, an assembly's, a drawing's, an export's)
   builds them, and the cache key (the feature's `Debug`) changes exactly when the source does.
@@ -1058,7 +821,7 @@ area 50 179.7110 mm² (expected 368 749.705 and 50 179.71).
   (`derived::refresh`, called by `History`).
 - The source is rebuilt **inside** the host's rebuild, in the same kernel session and cache
   (`Rebuilder::sub_build`: it saves and restores `trail`, `last`, `stage_for` and the sketch
-  times, and nests at most 8 deep), because bodies can't move between OCCT sessions.
+  times, and nests at most 8 deep), because bodies can't move between kernel sessions.
 - Each location's copy is `transform_motion` by the rigid motion that takes the base frame (the
   origin, or a source mate connector's frame) onto the location's frame
   (`motion_between(base, to) = L·Bᵀ, t = oₗ − L·Bᵀ·o_b`).
@@ -1074,8 +837,8 @@ area 50 179.7110 mm² (expected 368 749.705 and 50 179.71).
   a quarter: V 6000, centroid (0, 0, 85), every face `modified` from its original).
 
 ## The kernel in its own process (`cadrs_core::rebuild::process`)
-OpenCASCADE can crash (a segfault no `catch_unwind` stops: the per-face offset of Move face did,
-before `check_face_moves`). The app therefore runs the kernel in a **process of its own**, its
+A kernel bug can take the process down (with OpenCASCADE, a segfault no `catch_unwind` stopped
+did). The app therefore runs the kernel in a **process of its own**, its
 own executable started with `--kernel-process <port> <token>`; a crash there costs a rebuild,
 not the app. `CADRS_KERNEL=thread` keeps the kernel on a thread of the app (for debugging), and
 tests and tools (`rebuild::build` without `process::use_process`) always do.
@@ -1085,8 +848,8 @@ tests and tools (`rebuild::build` without `process::use_process`) always do.
   is a named `rebuild::task::Task` (section caps, interference, import plans, model exports, the
   stage preview, Full rebuild, PCB Sync, ...); tasks of other crates are registered at start
   (`cadrs_app::register_kernel_tasks`), in the app and the kernel process alike.
-- **The connection**: a loopback TCP socket the app listens on (not stdout, which OpenCASCADE
-  writes to), checked with a random token. Messages are MessagePack with named fields
+- **The connection**: a loopback TCP socket the app listens on (not stdout, which libraries may
+  write to), checked with a random token. Messages are MessagePack with named fields
   (`rmp-serde`; the documents' optional fields are skipped when empty, which bincode can't
   read), each after its length. A rebuild sends each part's mesh once: one sent before goes as
   its id, and the app hands out the `Arc` it already holds (so an edit costs what it did on the

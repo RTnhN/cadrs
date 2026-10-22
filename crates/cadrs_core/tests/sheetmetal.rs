@@ -4,7 +4,7 @@
 //! The folded volume of a model is its flat area × thickness, except in the bends: a bend region
 //! is `θ·(R + K·T)` wide flat but holds `θ·T·(R + T/2)` of material per unit length folded, so
 //! `volume = area·T + Σ θ·L·T²·(½ − K)` over the bends (L their lengths).
-#![cfg(feature = "occt")]
+#![cfg(feature = "brep")]
 
 use std::f64::consts::FRAC_PI_2;
 

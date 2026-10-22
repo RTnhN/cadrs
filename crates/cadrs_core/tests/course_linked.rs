@@ -16,7 +16,7 @@
 //!   edge), the top plate on the six eyes (z 88 + L..98 + L); every part centred on its axis and
 //!   the pistons 6-fold symmetric about Z, so x̄ = ȳ = 0;
 //! - Aluminum 6061: 2.70 g/cm³ = 0.0027 g/mm³.
-#![cfg(feature = "occt")]
+#![cfg(feature = "brep")]
 
 use std::f64::consts::PI;
 

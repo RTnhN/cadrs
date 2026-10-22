@@ -69,7 +69,7 @@ impl Rebuilder {
         let bytes = crate::blobs::get(&x.blob).ok_or_else(|| format!("The data of {} is missing", x.file_name))?;
         let mut warning = None;
         let mut bodies: Vec<(BodyId, String)> = Vec::new();
-        let release = |k: &mut cadrs_kernel::backend::occt::OcctKernel, b: &[(BodyId, String)]| b.iter().for_each(|(b, _)| k.release(*b));
+        let release = |k: &mut cadrs_kernel::DefaultKernel, b: &[(BodyId, String)]| b.iter().for_each(|(b, _)| k.release(*b));
         match x.format {
             // IGES, and STEP with its assembly structure: the XDE reader (`import.rs`).
             ImportFormat::Iges => bodies = self.read_structured(x, &bytes, x.structure.unwrap_or(ImportMode::Flatten))?,

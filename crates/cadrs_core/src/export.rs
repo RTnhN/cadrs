@@ -1,12 +1,12 @@
 //! Exporting parts to STEP (right-click a part → Export…, as in Onshape).
 //!
-//! - The kernel writes the parts' exact B-rep bodies (OpenCascade's STEP writer, AP214, mm) on
+//! - The kernel writes the parts' exact B-rep bodies (its STEP writer, AP214, mm) on
 //!   the rebuild worker ([`crate::rebuild::export_step`]), one file per part or all of them in
 //!   one file.
 //! - **Y axis up**: the bodies are turned −90° about X first, so the Part Studio's Top (+Z)
 //!   becomes +Y, for tools that expect Y up.
-//! - Each STEP product is named after its part ([`name_products`]); OpenCascade's writer calls
-//!   them all "Open CASCADE STEP translator …".
+//! - Each STEP product is named after its part ([`name_products`]) rather than the writer's
+//!   generic product names.
 //! - File names: the name typed in the dialog (the Part Studio's by default) with " - <part
 //!   name>" appended when the file holds one part ([`file_name`]), made safe for the file system
 //!   and never overwriting a file already there ([`unique_path`]).

@@ -115,32 +115,6 @@ impl Rebuilder {
         Ok(out)
     }
 
-    /// With Tangent propagation off, only the picked edges may be rounded; OpenCascade always
-    /// continues a fillet or chamfer along the edges tangent to them, so a pick with an unpicked
-    /// tangent neighbour is an error rather than a silently larger result.
-    fn check_no_propagation(&self, groups: &[PartEdges], what: &str) -> Result<(), String> {
-        let mut extra = 0;
-        for g in groups {
-            let mut seen: Vec<EdgeId> = Vec::new();
-            for &e in &g.edges {
-                for c in self.kernel.tangent_chain(g.body, e).map_err(|e| e.to_string())? {
-                    if !g.edges.contains(&c) && !seen.contains(&c) {
-                        seen.push(c);
-                    }
-                }
-            }
-            extra += seen.len();
-        }
-        if extra == 0 {
-            return Ok(());
-        }
-        let edges = if extra == 1 { "1 tangent edge".to_string() } else { format!("{extra} tangent edges") };
-        Err(format!(
-            "Without tangent propagation the {what} would stop part-way along a smooth edge chain \
-             ({edges} not picked), which OpenCascade cannot do; turn on Tangent propagation or pick the whole chain"
-        ))
-    }
-
     /// Runs `op` on each part's body and puts the results in place of the parts (the largest
     /// piece keeps the part's id).
     pub(in crate::rebuild) fn per_part(
@@ -258,9 +232,6 @@ impl Rebuilder {
             return self.full_round(id, x, state);
         }
         let groups = self.entity_edges(state, &x.entities)?;
-        if !x.tangent_propagation && !x.partial {
-            self.check_no_propagation(&groups, "fillet")?;
-        }
         if x.variable {
             return self.variable_fillet(id, x, groups, state);
         }
@@ -278,6 +249,7 @@ impl Rebuilder {
             },
             allow_overflow: x.allow_overflow,
             profile,
+            propagate: x.tangent_propagation,
         };
         if x.partial {
             return self.partial_fillet(id, x, &groups, &spec, state);
@@ -406,8 +378,6 @@ impl Rebuilder {
                 }
                 g.edges = all;
             }
-        } else {
-            self.check_no_propagation(&groups, "chamfer")?;
         }
         let spec = match x.kind {
             ChamferType::EqualDistance => ChamferSpec::EqualDistance(x.distance),
@@ -482,6 +452,7 @@ impl Rebuilder {
                 thickness: t,
                 outward,
                 hollow,
+                sharp: false,
             };
             this.kernel.shell_with(body, &spec)
         })

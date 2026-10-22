@@ -13,7 +13,7 @@
 //! 6. Fillet R1 with overflow on the bottom rim (three edges picked, their tangent chain).
 //! 7. Fillet Width 3 mm on the slope's edge.
 //! 8. Mass properties in kg.
-#![cfg(feature = "occt")]
+#![cfg(feature = "brep")]
 #![allow(clippy::field_reassign_with_default)]
 
 use std::f64::consts::PI;

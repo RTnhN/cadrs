@@ -14,6 +14,9 @@ cadrs_harness.workspace = true
 cadrs_ui.workspace = true
 
 [features]
+default = ["gpu"]
+# The kernel's GPU compute (see cadrs_kernel's `gpu` feature); `CADRS_GPU=0` turns it off.
+gpu = ["cadrs_core/gpu"]
 # Faster dev builds: Bevy as a shared library (`cargo run -F dev`). Not for shipped builds.
 dev = ["bevy/dynamic_linking"]
 # The app's tests (they build the whole app): a plain `cargo test` leaves them out.

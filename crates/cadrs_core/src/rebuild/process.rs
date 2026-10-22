@@ -708,9 +708,9 @@ pub fn main(args: &[String]) -> i32 {
         let reply = match request {
             Request::Configure { documents, snapshots } => {
                 crate::derived::set_document_loader(documents.map(|d| crate::derived::store_loader(crate::Store::new(d))));
-                #[cfg(feature = "occt")]
+                #[cfg(feature = "brep")]
                 super::session::set_store(snapshots.map(|d| Arc::new(crate::blob_store::DiskStore::new(d)) as Arc<dyn crate::blob_store::BlobStore>));
-                #[cfg(not(feature = "occt"))]
+                #[cfg(not(feature = "brep"))]
                 let _ = snapshots;
                 continue;
             }

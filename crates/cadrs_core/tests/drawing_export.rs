@@ -1,7 +1,7 @@
 //! P3C.7 (D2.10, X13): exporting drawings to PDF, DXF, DWG and images, and importing DXF onto a
 //! sheet, on the Ex1 drawing of the Universal Joint Flange stand-in
 //! (`cadrs_core::samples::ujoint_drawing`) and the three-sheet Hand Brake drawing.
-#![cfg(feature = "occt")]
+#![cfg(feature = "brep")]
 
 use std::path::PathBuf;
 

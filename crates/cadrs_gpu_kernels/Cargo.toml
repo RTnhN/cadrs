@@ -1,0 +1,27 @@
+[package]
+name = "cadrs_gpu_kernels"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+# Feasibility spike: B-rep kernel workloads (NURBS surface evaluation, point-in-solid
+# classification) in plain no_std Rust. The CPU calls them directly (`cadrs_gpu`'s reference
+# path) and rust-gpu compiles the same source to a SPIR-V compute shader:
+#   cargo gpu build --shader-crate crates/cadrs_gpu_kernels --output-dir crates/cadrs_gpu/shaders
+[lib]
+crate-type = ["lib", "dylib"]
+
+[target.'cfg(target_arch = "spirv")'.dependencies]
+spirv-std = "=0.10.0-alpha.1"
+glam = { version = "0.33", default-features = false, features = ["libm", "all-types"] }
+
+[dependencies]
+libm = "0.2"
+
+[lints.rust]
+unexpected_cfgs = { level = "allow", check-cfg = ['cfg(target_arch, values("spirv"))'] }
+
+[features]
+# Adds the `nurbs_f64` entry point (needs the Float64 capability).
+f64 = []

@@ -1,0 +1,2 @@
+# SMLib local-operation cases (tests/smlib_local_ops.rs, from tools/smlib/local_ops.py) that fail:
+# `name`, or `name slow` when it takes over a minute (run only with --ignored).

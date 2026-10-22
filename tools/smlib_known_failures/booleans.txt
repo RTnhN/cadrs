@@ -1,0 +1,2 @@
+# SMLib boolean cases (tests/smlib_booleans.rs, from tools/smlib/booleans.py) that fail: `name`, or
+# `name slow` when it takes over a minute (run only with --ignored).

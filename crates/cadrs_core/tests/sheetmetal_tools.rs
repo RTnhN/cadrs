@@ -3,7 +3,7 @@
 //! ordinary features that act on an active model as sheet metal (perpendicular cuts, corner
 //! fillets, face mirrors). Folded volumes are checked against the flat pattern as in
 //! `tests/sheetmetal.rs`.
-#![cfg(feature = "occt")]
+#![cfg(feature = "brep")]
 
 use cadrs_core::applied::EdgeOrFace;
 use cadrs_core::commands::{AddExtrude, AddFeature, AddSketch, EditSketch, SetExtrude, SetFeature};

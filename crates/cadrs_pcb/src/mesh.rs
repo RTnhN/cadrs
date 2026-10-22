@@ -103,10 +103,10 @@ pub fn package_mesh_in(kernel: &mut dyn Kernel, pkg: &cadrs_idf::Package) -> Res
     })
 }
 
-/// [`package_mesh_in`] with a kernel of its own (OpenCascade).
-#[cfg(feature = "occt")]
+/// [`package_mesh_in`] with a kernel of its own.
+#[cfg(feature = "brep")]
 pub fn package_mesh(pkg: &cadrs_idf::Package) -> Result<BodyMesh, String> {
-    let mut k = cadrs_kernel::backend::occt::OcctKernel::new();
+    let mut k = cadrs_kernel::DefaultKernel::new();
     package_mesh_in(&mut k, pkg)
 }
 
@@ -164,10 +164,10 @@ pub fn board_mesh_in(kernel: &mut dyn Kernel, pcb: &PcbBoard) -> Result<BoardMes
     Ok(out)
 }
 
-/// [`board_mesh_in`] with a kernel of its own (OpenCascade).
-#[cfg(feature = "occt")]
+/// [`board_mesh_in`] with a kernel of its own.
+#[cfg(feature = "brep")]
 pub fn board_mesh(pcb: &PcbBoard) -> Result<BoardMesh, String> {
-    let mut k = cadrs_kernel::backend::occt::OcctKernel::new();
+    let mut k = cadrs_kernel::DefaultKernel::new();
     board_mesh_in(&mut k, pcb)
 }
 
@@ -198,7 +198,7 @@ pub fn generated_bodies(m: &cadrs_eda::footprint::Model3d, name: &str, class: Bo
         .collect()
 }
 
-#[cfg(feature = "occt")]
+#[cfg(feature = "brep")]
 pub use cadrs_core::pcb::model::file_meshes;
 
 /// A model file's meshes (from [`file_meshes`]) as display meshes in the package frame.

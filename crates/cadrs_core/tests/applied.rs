@@ -1,6 +1,6 @@
 //! P3.6: the applied features through the feature list (Fillet, Chamfer, Shell, Hole), reorder
 //! and folders. Every expected value is derived by hand in the test's comment.
-#![cfg(feature = "occt")]
+#![cfg(feature = "brep")]
 #![allow(clippy::field_reassign_with_default)]
 
 use std::f64::consts::PI;
@@ -171,29 +171,35 @@ fn fillet_width_and_overflow() {
 }
 
 #[test]
-fn tangent_propagation_off_is_refused_on_a_chain() {
+fn tangent_propagation_off_stops_at_the_chain() {
     // A 10 × 20 × 30 block with its vertical edge at (10, 20) rounded R5: the top face's edge
-    // y = 20 now runs tangentially into the arc and on into x = 10. Filleting that one edge with
-    // Tangent propagation off would have to stop at the arc, which OpenCascade can't: an error
-    // naming the cause. On, the whole chain (2 lines + the arc) is rounded.
+    // y = 20 now runs tangentially into the arc and on into x = 10. With Tangent propagation off
+    // only that edge is rounded, stopping square where it meets the arc; on, the whole chain
+    // (2 lines + the arc) is, removing more.
     let mut d = Doc::new();
     d.block(0.0, 0.0, 10.0, 20.0, 30.0);
     let part = d.parts()[0].clone();
     let vertical = edge_at(&part, [10.0, 20.0, 15.0]);
     let fillet = |entities, size: f64| FilletFeature { entities, size, size_expr: format!("{size} mm"), ..FilletFeature::default() };
     d.add(AddFeature::fillet(d.el, FeatureId::new(), fillet(vec![EdgeOrFace::Edge(vertical)], 5.0)));
+    let vol = |d: &mut Doc| cadrs_core::parts::combined_mass([&d.parts()[0]]).unwrap().volume;
+    let before = vol(&mut d);
     let part = d.parts()[0].clone();
     let top_edge = edge_at(&part, [2.0, 20.0, 30.0]);
     let off = FilletFeature { tangent_propagation: false, ..fillet(vec![EdgeOrFace::Edge(top_edge)], 1.0) };
     let f = d.add(AddFeature::fillet(d.el, FeatureId::new(), off.clone()));
     let errors = d.build().errors.clone();
-    assert_eq!(errors.len(), 1, "{errors:?}");
-    let message = format!("{:?}", errors[0]);
-    assert!(message.contains("Tangent propagation") && message.contains("2 tangent edges"), "{message}");
+    assert!(errors.is_empty(), "{errors:?}");
+    let removed_off = before - vol(&mut d);
+    // One R1 round along the 5 mm straight part of the edge: (1 − π/4) mm² × 5 mm.
+    let one = (1.0 - std::f64::consts::FRAC_PI_4) * 5.0;
+    assert!((removed_off - one).abs() < 0.02 * one, "{removed_off} vs {one}");
     let on = FilletFeature { tangent_propagation: true, ..off };
     d.h.execute(&mut d.d, &SetFeature { element: d.el, feature: f, kind: FeatureKind::Fillet(on), label: "On".into() })
         .unwrap();
     assert!(d.build().errors.is_empty());
+    let removed_on = before - vol(&mut d);
+    assert!(removed_on > removed_off * 2.0, "{removed_on} vs {removed_off}");
 }
 
 #[test]

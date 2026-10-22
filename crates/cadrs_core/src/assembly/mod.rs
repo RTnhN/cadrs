@@ -584,6 +584,7 @@ pub fn transform_mass(m: &cadrs_kernel::MassProperties, pose: &Pose) -> cadrs_ke
         surface_area: m.surface_area,
         center_of_mass: Point3::from(c),
         inertia: r * m.inertia * r.transpose(),
+        length: m.length,
     }
 }
 

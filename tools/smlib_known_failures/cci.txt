@@ -1,0 +1,8 @@
+# SMLib CCI/CSI cases (tests/smlib_cci.rs, from tools/smlib/cci.py) that fail: `name`, or `name slow`.
+
+# Near misses within the tolerance (1e-5) not reported by ssi::curve_curve (a line passing a
+# circle out of its plane, or ending just short of it).
+
+# Coincident curves (overlapping lines, the same circle): no points at all.
+
+# Crossings of cubic B-spline zigzags missed (13 of 16, 5 of 8; checked independently).

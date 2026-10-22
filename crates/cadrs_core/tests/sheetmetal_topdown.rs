@@ -4,7 +4,7 @@
 //! thickened on the other two; the models named after their parts; editing the master in its own
 //! studio updates both. The parts rename, take a material, measure and export like any part,
 //! through refolds.
-#![cfg(feature = "occt")]
+#![cfg(feature = "brep")]
 
 use std::sync::Arc;
 

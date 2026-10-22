@@ -3,7 +3,7 @@
 //! inserted into a sketch on Top in millimetres closes 7 sheet regions (split by the 6 bend
 //! lines) around 9 cut-outs, and the Sheet metal model's Thicken of the 7 makes a flat part of
 //! the flat's area.
-#![cfg(feature = "occt")]
+#![cfg(feature = "brep")]
 
 use cadrs_core::commands::{AddFeature, AddSketch};
 use cadrs_core::document::{Document, FeatureKind, RegionRef, interior_point};

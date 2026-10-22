@@ -1,7 +1,7 @@
 //! Extruded solids: the display mesh of a part ([`Solid`]), with the persistent name of every
 //! face, edge and vertex (P3.2, [`cadrs_kernel::naming`]). Parts come from the kernel
 //! (`crate::brep` converts its tessellation into a [`Solid`]); [`extrude`] is the M9 prism
-//! mesh, kept as the fallback without the `occt` feature and as the reference the kernel's
+//! mesh, kept as the fallback without the `brep` feature and as the reference the kernel's
 //! names are tested against. The prism is the region's triangulated caps plus one side face per
 //! sketch curve, named as the kernel names them (by region key and sketch curve).
 //!

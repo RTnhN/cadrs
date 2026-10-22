@@ -1,0 +1,3 @@
+# SMLib advanced section cases (tests/smlib_section.rs, from tools/smlib/section.py) that fail.
+
+# The B-spline torus cut by planes: pieces of the section missing (open chains, lengths short).

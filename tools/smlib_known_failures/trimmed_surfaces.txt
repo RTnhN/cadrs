@@ -1,0 +1,1 @@
+# SMLib trimmed-surface cases (tests/smlib_trimmed_surfaces.rs, from tools/smlib/trimmed_surfaces.py) that fail: none.

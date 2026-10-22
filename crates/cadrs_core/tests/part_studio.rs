@@ -1,7 +1,7 @@
 //! P3.3: extrude end types and booleans, whole-sketch input, the Boolean feature, parts and
 //! their mass properties, through the document's commands and the rebuild. Every expected value
 //! is derived by hand in the test's comment.
-#![cfg(feature = "occt")]
+#![cfg(feature = "brep")]
 
 use std::f64::consts::PI;
 

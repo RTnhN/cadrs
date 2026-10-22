@@ -10,7 +10,7 @@
 //!   assembly instances (the Hexapod), a drawing's views (the Bar drawing), a Derived feature and
 //!   its linked copy (of "Block source" V1). Checked by the reference lists and by volumes
 //!   computed here from the dimensions.
-#![cfg(feature = "occt")]
+#![cfg(feature = "brep")]
 
 use std::f64::consts::PI;
 

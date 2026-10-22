@@ -16,6 +16,7 @@ use std::fmt::Write as _;
 use nalgebra::{Point3, Vector3};
 
 use crate::{BodyId, Motion, TriMesh};
+use crate::native::tol;
 
 /// A neutral B-rep file format.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -27,6 +28,7 @@ pub enum ExchangeFormat {
 }
 
 impl ExchangeFormat {
+    /// The format's name for the user ("STEP", "IGES").
     pub fn label(self) -> &'static str {
         match self {
             ExchangeFormat::Step => "STEP",
@@ -49,7 +51,9 @@ impl ExchangeFormat {
 /// its product name (empty when the file gives none).
 #[derive(Debug, Clone, PartialEq)]
 pub struct ImportedPart {
+    /// The part's body.
     pub body: BodyId,
+    /// The product name.
     pub name: String,
 }
 
@@ -59,8 +63,11 @@ pub struct ImportedPart {
 pub struct ImportedOccurrence {
     /// Instance-level surface color overriding the source part.
     pub color: Option<[u8; 4]>,
+    /// The index of the part in [`ImportedModel::parts`].
     pub part: usize,
+    /// Where the part is placed.
     pub placement: Motion,
+    /// The instance's name.
     pub name: String,
 }
 
@@ -69,7 +76,9 @@ pub struct ImportedOccurrence {
 pub struct ImportedModel {
     /// The top-level product's name (empty when the file gives none).
     pub name: String,
+    /// Each distinct part once.
     pub parts: Vec<ImportedPart>,
+    /// Every use of a part.
     pub occurrences: Vec<ImportedOccurrence>,
 }
 
@@ -82,7 +91,7 @@ impl ImportedModel {
             if let Some(n) = seen.get_mut(o.part) {
                 *n += 1;
             }
-            let moved = (o.placement.linear - nalgebra::Matrix3::identity()).norm() > 1e-12 || o.placement.translation.norm() > 1e-12;
+            let moved = (o.placement.linear - nalgebra::Matrix3::identity()).norm() > tol::ROUNDOFF_FINE || o.placement.translation.norm() > tol::ROUNDOFF_FINE;
             if moved {
                 return true;
             }
@@ -94,8 +103,11 @@ impl ImportedModel {
 /// An instance to export: which of the exported parts, where, and its name.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ExportInstance {
+    /// The index of the part in the exported parts.
     pub part: usize,
+    /// Where the part is placed in the assembly.
     pub placement: Motion,
+    /// The instance's name.
     pub name: String,
 }
 
@@ -199,10 +211,11 @@ pub fn mesh_volume(tris: impl IntoIterator<Item = [Point3<f64>; 3]>) -> f64 {
 /// The triangles of a binary STL file.
 pub fn read_stl_binary(bytes: &[u8]) -> Option<Vec<[Point3<f64>; 3]>> {
     let n = u32::from_le_bytes(bytes.get(80..84)?.try_into().ok()?) as usize;
-    let mut out = Vec::with_capacity(n);
+    // (Capacity only for the records the file can hold: the count is the file's word.)
+    let mut out = Vec::with_capacity(n.min(bytes.len().saturating_sub(84) / 50));
     for k in 0..n {
-        let rec = bytes.get(84 + k * 50..84 + (k + 1) * 50)?;
-        let f = |i: usize| f32::from_le_bytes(rec[i * 4..i * 4 + 4].try_into().unwrap()) as f64;
+        let rec: &[u8; 50] = bytes.get(84 + k * 50..84 + (k + 1) * 50)?.try_into().ok()?;
+        let f = |i: usize| f32::from_le_bytes([rec[i * 4], rec[i * 4 + 1], rec[i * 4 + 2], rec[i * 4 + 3]]) as f64;
         let p = |j: usize| Point3::new(f(3 + j * 3), f(4 + j * 3), f(5 + j * 3));
         out.push([p(0), p(1), p(2)]);
     }

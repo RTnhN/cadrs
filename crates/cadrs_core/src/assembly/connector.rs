@@ -788,19 +788,34 @@ fn point_triangle(p: Vector3<f64>, a: Vector3<f64>, b: Vector3<f64>, c: Vector3<
 
 /// The mesh normal of face `f` at its vertex nearest `p`.
 fn normal_near(s: &Solid, f: &FaceName, p: Vec3) -> Option<Vector3<f64>> {
+    // The mesh normal interpolated at the closest point of the closest triangle (the nearest
+    // vertex may lie well inside the face, where a curved face has turned).
     let face = s.face(f)?;
+    let pv = v(p);
     let mut best: Option<(f64, usize)> = None;
     for t in face.first_triangle..face.first_triangle + face.triangle_count {
-        for k in 0..3 {
-            let i = s.indices[3 * t + k] as usize;
-            let d = dist(s.positions[i], p);
-            if best.is_none_or(|(b, _)| d < b) {
-                best = Some((d, i));
-            }
+        let [a, b, c] = [0, 1, 2].map(|k| v(s.positions[s.indices[3 * t + k] as usize]));
+        let d = point_triangle(pv, a, b, c);
+        if best.is_none_or(|(bd, _)| d < bd) {
+            best = Some((d, t));
         }
     }
-    let (_, i) = best?;
-    v(*s.normals.get(i)?).try_normalize(1e-12)
+    let (_, t) = best?;
+    let ids = [0, 1, 2].map(|k| s.indices[3 * t + k] as usize);
+    let [a, b, c] = ids.map(|i| v(s.positions[i]));
+    let q = v(crate::solid::closest_on_triangle(p, s.positions[ids[0]], s.positions[ids[1]], s.positions[ids[2]]));
+    // Barycentric weights of q.
+    let n = (b - a).cross(&(c - a));
+    let nn = n.norm_squared();
+    if nn < 1e-300 {
+        return v(*s.normals.get(ids[0])?).try_normalize(1e-12);
+    }
+    let wa = (c - b).cross(&(q - b)).dot(&n) / nn;
+    let wb = (a - c).cross(&(q - c)).dot(&n) / nn;
+    let wc = 1.0 - wa - wb;
+    let ns = ids.map(|i| s.normals.get(i).map(|x| v(*x)));
+    let [Some(na), Some(nb), Some(nc)] = ns else { return None };
+    (na * wa + nb * wb + nc * wc).try_normalize(1e-12)
 }
 
 /// The faces tangent-continuous with `f` (its smooth neighbours, and theirs), for **Tangent

@@ -292,7 +292,7 @@ impl crate::rebuild::task::Task for Caps {
     }
 }
 
-#[cfg(feature = "occt")]
+#[cfg(feature = "brep")]
 fn caps_on(r: &mut crate::rebuild::Rebuilder, items: &[SectionItem], plane: &SectionPlane) -> Vec<(crate::ids::PartId, Cap)> {
     let mut out = Vec::new();
     for it in items {
@@ -308,7 +308,7 @@ fn caps_on(r: &mut crate::rebuild::Rebuilder, items: &[SectionItem], plane: &Sec
     out
 }
 
-#[cfg(not(feature = "occt"))]
+#[cfg(not(feature = "brep"))]
 fn caps_on(_r: &mut crate::rebuild::Rebuilder, _items: &[SectionItem], _plane: &SectionPlane) -> Vec<(crate::ids::PartId, Cap)> {
     Vec::new()
 }
@@ -404,11 +404,11 @@ mod tests {
     /// P3E.3a (PS2.9): a section through a Ø40 cylinder, 30 tall, at mid height caps with its
     /// circle: area 400π = 1256.6371 mm², the cap's boundary a circle of radius 20 on the
     /// plane; flipped, the same cap; a plane above it leaves none.
-    #[cfg(feature = "occt")]
+    #[cfg(feature = "brep")]
     #[test]
     fn a_section_through_a_40_mm_cylinder_caps_with_its_circle() {
-        use cadrs_kernel::backend::occt::OcctKernel;
-        let mut k = OcctKernel::new();
+        use cadrs_kernel::DefaultKernel;
+        let mut k = DefaultKernel::new();
         let circle = Curve2::Circle { center: Point2::new(5.0, -3.0), radius: 20.0, source: Some(1) };
         let profile = Profile::new(Plane::top(), vec![Region { outer: Loop { curves: vec![circle] }, holes: Vec::new(), source: Some(1) }]);
         let body = k.extrude(&profile, Extent::Blind(30.0)).unwrap().bodies[0];

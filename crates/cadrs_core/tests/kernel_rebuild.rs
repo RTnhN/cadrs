@@ -1,9 +1,9 @@
-//! P3.1: Part Studio rebuilds through the kernel (`cadrs_core::rebuild`, OCCT backend).
+//! P3.1: Part Studio rebuilds through the kernel (`cadrs_core::rebuild`).
 //!
 //! The acceptance numbers of `reference/onshape/training/intro-to-part-studios-gaps.md` (P3.1):
 //! a 100 × 60 × 25 box, the Control Arm with both extrudes as New, and the time to rebuild a
 //! 20-feature studio.
-#![cfg(feature = "occt")]
+#![cfg(feature = "brep")]
 
 use std::f64::consts::PI;
 use std::time::{Duration, Instant};
@@ -155,8 +155,7 @@ fn control_arm_both_new() {
 
 /// A 20-feature studio (10 sketches, each with a rounded slot and a hole, and 10 extrudes)
 /// rebuilds from scratch in under 200 ms, debug or release (measured: about 40 ms in debug,
-/// 110 ms of CPU in release on the 2026-10-01 nightly; our crates build at opt-level 1 in debug,
-/// OCCT is always optimised).
+/// 110 ms of CPU in release on the 2026-10-01 nightly; our crates build at opt-level 1 in debug).
 #[test]
 fn twenty_feature_rebuild_time() {
     let mut features = Vec::new();
@@ -189,7 +188,7 @@ fn twenty_feature_rebuild_time() {
         features.push(e);
     }
     let mut rb = Rebuilder::new();
-    // The first rebuild in a process also loads OCCT's lazily initialised tables.
+    // The first rebuild in a process also warms the rebuild worker.
     let _ = Rebuilder::new().rebuild(&features[..2]);
     let start = Instant::now();
     let cpu_start = thread_cpu_time();

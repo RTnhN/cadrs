@@ -1,5 +1,5 @@
 //! The geometry fingerprint: a hash of the source that decides what a rebuild makes (this
-//! crate, the kernel, the sketcher and the sheet metal definitions), of the locked OpenCASCADE and of the compiler, as
+//! crate, the kernel, the sketcher and the sheet metal definitions) and of the compiler, as
 //! `CADRS_GEOMETRY_FINGERPRINT`. On-disk caches of built geometry are keyed by it, so a fix to a
 //! feature's implementation, committed or not, never reuses a result the old code built.
 
@@ -21,15 +21,6 @@ fn main() {
             h.write(&std::fs::read(&f).unwrap_or_default());
         }
     }
-    // The OpenCASCADE bindings and build the lock file pins.
-    let lock = workspace.join("Cargo.lock");
-    println!("cargo:rerun-if-changed={}", lock.display());
-    let text = std::fs::read_to_string(&lock).unwrap_or_default();
-    for package in text.split("[[package]]") {
-        if package.contains("name = \"opencascade") || package.contains("name = \"occt-sys\"") {
-            h.write(package.as_bytes());
-        }
-    }
     // The compiler: its code generation can change floating-point results.
     let rustc = std::env::var("RUSTC").unwrap_or_else(|_| "rustc".into());
     if let Ok(out) = std::process::Command::new(rustc).arg("-vV").output() {
@@ -44,7 +35,7 @@ fn collect(dir: &Path, out: &mut Vec<PathBuf>) {
         let p = e.path();
         if p.is_dir() {
             collect(&p, out);
-        } else if p.extension().is_some_and(|x| x == "rs" || x == "cc" || x == "hxx") {
+        } else if p.extension().is_some_and(|x| x == "rs") {
             out.push(p);
         }
     }

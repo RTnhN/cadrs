@@ -3,7 +3,7 @@
 //! versioned, inserted as version-pinned references; reused by later Creates; edited, versioned
 //! and updated; moved to another folder. The expected numbers are worked out by hand in each
 //! test from the fixtures' `.emp` outlines and heights.
-#![cfg(feature = "occt")]
+#![cfg(feature = "brep")]
 
 use std::sync::Arc;
 

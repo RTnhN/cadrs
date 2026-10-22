@@ -7,7 +7,7 @@
 //! 40 × 30 rectangle less a Ø20 bore and two Ø5.5 holes,
 //! A = 40·30 − π(10² + 2·2.75²) = 1200 − 115.125π = 838.3241 mm², so the gasket extruded from it
 //! is 2·A = 1676.6483 mm³ at 2 mm and 1·A = 838.3241 mm³ at 1 mm.
-#![cfg(feature = "occt")]
+#![cfg(feature = "brep")]
 
 use std::f64::consts::PI;
 

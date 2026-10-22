@@ -3,7 +3,7 @@
 //! sketch on a face, every Use and Pierce link and every stored edge name still resolves to the
 //! geometrically matching entity. A version 3 document still loads. P3.3: the same when
 //! Extrude 2 is an Add, so the names cross a boolean (one part).
-#![cfg(feature = "occt")]
+#![cfg(feature = "brep")]
 
 use cadrs_core::commands::{AddExtrude, AddSketch, EditSketch, MoveFeature, SetExtrude};
 use cadrs_core::document::{BooleanOp, Document, ExtrudeFeature};

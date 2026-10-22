@@ -1,7 +1,6 @@
-//! Thicken and Fill of the OCCT backend ([`Kernel::thicken_surfaces`], [`Kernel::fill`]).
-#![cfg(feature = "occt")]
+//! Thicken and Fill ([`Kernel::thicken_surfaces`], [`Kernel::fill`]).
 
-use cadrs_kernel::backend::occt::OcctKernel;
+use cadrs_kernel::DefaultKernel;
 use cadrs_kernel::*;
 use nalgebra::{Point2, Point3, Unit, Vector3};
 
@@ -23,7 +22,7 @@ fn segment(a: Point3<f64>, b: Point3<f64>) -> FillCurve {
 
 #[test]
 fn fill_a_skew_quadrilateral_with_its_bilinear_patch() {
-    let mut k = OcctKernel::new();
+    let mut k = DefaultKernel::new();
     let (a, b, c, d) = (Point3::new(0.0, 0.0, 0.0), Point3::new(10.0, 0.0, 0.0), Point3::new(10.0, 10.0, 5.0), Point3::new(0.0, 10.0, 0.0));
     let spec = FillSpec { curves: vec![segment(a, b), segment(b, c), segment(c, d), segment(d, a)], source: 1 };
     let r = k.fill(&spec).unwrap();
@@ -58,7 +57,7 @@ fn fill_a_skew_quadrilateral_with_its_bilinear_patch() {
 
 #[test]
 fn thicken_a_face_both_ways() {
-    let mut k = OcctKernel::new();
+    let mut k = DefaultKernel::new();
     let e = |a: Point3<f64>, b: Point3<f64>| segment(a, b);
     let (a, b, c, d) = (Point3::new(0.0, 0.0, 0.0), Point3::new(10.0, 0.0, 0.0), Point3::new(10.0, 5.0, 0.0), Point3::new(0.0, 5.0, 0.0));
     let sheet = k.fill(&FillSpec { curves: vec![e(a, b), e(b, c), e(c, d), e(d, a)], source: 1 }).unwrap().bodies[0];

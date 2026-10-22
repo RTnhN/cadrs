@@ -1,10 +1,6 @@
-//! Kernel backends, each behind its own cargo feature.
+//! Kernel backends: `native`, the pure-Rust B-rep kernel.
 
-#[cfg(feature = "occt")]
-pub mod occt;
-
-#[cfg(feature = "occt")]
-mod step_colors;
-
-#[cfg(feature = "occt")]
-mod shell_sectors;
+/// The native (pure Rust) kernel: [`NativeKernel`](crate::native::NativeKernel).
+pub mod native {
+    pub use crate::native::NativeKernel;
+}

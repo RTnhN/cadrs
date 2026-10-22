@@ -4,7 +4,7 @@
 //! offset and tool order (PS5.5), Loft Match tangent from a face (PS20.4), a sweep of a whole
 //! sketch (PS1.6) and the Mass properties options (X7). Every expected value is derived by hand
 //! in the test's comment, from the geometry, not from a run.
-#![cfg(feature = "occt")]
+#![cfg(feature = "brep")]
 #![allow(clippy::field_reassign_with_default)]
 
 use std::f64::consts::PI;

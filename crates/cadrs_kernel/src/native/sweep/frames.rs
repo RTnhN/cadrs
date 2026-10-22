@@ -1,0 +1,714 @@
+//! Sweeps along general path curves (B-splines, ellipses, arcs the profile isn't square to,
+//! curves out of a plane) with sampled frames: the profile is carried along the segment by
+//! rotation-minimizing frames (double reflection; or no rotation, or a locked direction), each
+//! profile piece is placed at sections along the segment and the sections are skinned (cubic
+//! interpolation of the homogeneous poles, so conics stay exact in each section). The rails
+//! (the paths of the profile's corners) are interpolated with the same parameters and degree,
+//! so they are exactly the side surfaces' boundary iso-curves. The generic sweep builder
+//! assembles the faces and caps.
+
+use crate::native::build::Built;
+use crate::native::curve::Curve;
+use crate::native::math::*;
+use crate::native::nurbs::{NurbsCurve, NurbsSurface, H};
+use crate::native::profile::{MergedFace, Piece};
+use crate::native::surface::Surface;
+use super::{Frames, SideGeo, SweepKind};
+use super::path::Seg;
+use crate::*;
+use std::sync::Arc;
+use crate::native::tol;
+
+/// Rotation-minimizing steps per segment (the frames between them are interpolated).
+const FINE: usize = 256;
+
+/// The most sections a run is skinned through.
+const MAX_SECTIONS: usize = 1024;
+
+/// How far (mm, per mm of the profile's reach from the path, plus one) the skinned sections may
+/// stray from the true sweep between them: the gap a loop may have ([`crate::native::tol::LOOP_GAP`]).
+const SECTION_TOL: f64 = crate::native::tol::LOOP_GAP;
+
+/// The most a path's curvature may vary along it (max / min) for the profile to follow its
+/// principal normal (Frenet frames, for threads); else frames are rotation-minimizing.
+const FRENET_SPREAD: f64 = 2.0;
+
+/// A sweep along a run of path segments meeting tangentially; s ∈ [0, 1] runs along them by
+/// length.
+pub struct PathSweep {
+    plane: Plane,
+    segs: Vec<Seg>,
+    /// The segments' starts in s (and 1 at the end).
+    cum: Vec<f64>,
+    /// Each segment's length from its start at travel fractions i / [`ARC_STEPS`]: s runs along
+    /// the path by length, so the sections' motion has no jump in speed where segments meet.
+    arc: Vec<ArcTable>,
+    /// The path point and frame rotation (relative to the start frame) at the fine steps.
+    pts: Vec<P3>,
+    rots: Vec<nalgebra::UnitQuaternion<f64>>,
+    /// The sections' parameters.
+    v: Vec<f64>,
+    deg: usize,
+    /// How far the profile reaches from the path (for the section count).
+    reach: f64,
+    /// The helix the path follows (within its approximation), swept by its exact screw motion.
+    helix: Option<Helix>,
+    /// The helix's angle at the fine steps (unwrapped along the path).
+    angles: Vec<f64>,
+}
+
+/// A helix: axis through `o` along unit `a`, radius `r`, rising `c` per radian, `e1`/`e2`
+/// square to `a`; angle `th0` where the path starts.
+#[derive(Debug, Clone, Copy)]
+pub struct Helix {
+    o: P3,
+    a: V3,
+    e1: V3,
+    e2: V3,
+    r: f64,
+    c: f64,
+    th0: f64,
+}
+
+impl Helix {
+    fn point(&self, th: f64) -> P3 {
+        self.o + (self.e1 * th.cos() + self.e2 * th.sin()) * self.r + self.a * (self.c * th)
+    }
+    fn tangent(&self, th: f64) -> V3 {
+        ((-self.e1 * th.sin() + self.e2 * th.cos()) * self.r + self.a * self.c).normalize()
+    }
+    /// The angle of a point near the helix, unwrapped next to `near`.
+    fn angle(&self, p: &P3, near: f64) -> f64 {
+        let w = p - self.o;
+        let a = w.dot(&self.e2).atan2(w.dot(&self.e1));
+        a + ((near - a) / TAU).round() * TAU
+    }
+    /// The angle of a point on the helix, its turn told by its height (when the helix rises).
+    fn angle_of(&self, p: &P3, near: f64) -> f64 {
+        let w = p - self.o;
+        let a = w.dot(&self.e2).atan2(w.dot(&self.e1));
+        let guess = if self.c.abs() > tol::DEGENERATE { w.dot(&self.a) / self.c } else { near };
+        a + ((guess - a) / TAU).round() * TAU
+    }
+    /// The screw motion that turns the helix by `phi` along itself.
+    fn screw(&self, phi: f64) -> Affine {
+        let m = nalgebra::Rotation3::from_axis_angle(&nalgebra::Unit::new_normalize(self.a), phi).into_inner();
+        Affine { m, t: self.o.coords - m * self.o.coords + self.a * (self.c * phi) }
+    }
+}
+
+/// The helix a chain of path segments follows (within its approximation), if any.
+pub fn fit_helix_segs(segs: &[Seg]) -> Option<Helix> {
+    let mut pts = Vec::new();
+    let mut tans = Vec::new();
+    for g in segs {
+        for i in 0..64 {
+            let f = i as f64 / 64.0;
+            pts.push(g.c.point(travel_t(g, f)));
+            tans.push(g.dir(f));
+        }
+    }
+    let last = segs.last()?;
+    pts.push(last.end());
+    tans.push(last.dir(1.0));
+    let size = pts.iter().map(|p| (p - pts[0]).norm()).fold(0.0, f64::max);
+    let h = fit_helix(&pts, &tans, 1e-4 * (1.0 + size));
+    if std::env::var("CADRS_SWEEP_DEBUG").is_ok() {
+        eprintln!("helix fit over {} segments: {h:?}", segs.len());
+    }
+    h
+}
+
+/// The helix through points of a path (with their travel fractions), when they all lie on one
+/// within `tol` (an approximated helix: Bézier pieces through points of it).
+fn fit_helix(pts: &[P3], tans: &[V3], tol: f64) -> Option<Helix> {
+    let n = pts.len();
+    if n < 8 {
+        return None;
+    }
+    // The axis: the tangents make one angle with it, so it is square to their differences.
+    let mean = tans.iter().fold(V3::zeros(), |acc, t| acc + t) / n as f64;
+    let mut m = nalgebra::Matrix3::zeros();
+    for t in tans {
+        let d = t - mean;
+        m += d * d.transpose();
+    }
+    let eig = m.symmetric_eigen();
+    let k = (0..3).min_by(|&x, &y| eig.eigenvalues[x].total_cmp(&eig.eigenvalues[y])).unwrap();
+    let mut a = eig.eigenvectors.column(k).into_owned().normalize();
+    // The tangents must turn round it (not a straight line or a plane curve's single direction).
+    if eig.eigenvalues.iter().filter(|e| **e > tol::REL_POINT * n as f64).count() < 2 {
+        return None;
+    }
+    if mean.dot(&a) < 0.0 {
+        a = -a;
+    }
+    // The circle of the points projected square to the axis.
+    let fr = Frame::from_z(P3::origin(), a);
+    let mut mm = nalgebra::Matrix3::zeros();
+    let mut rhs = V3::zeros();
+    for p in pts {
+        let (x, y) = (p.coords.dot(&fr.x), p.coords.dot(&fr.y));
+        let row = V3::new(x, y, 1.0);
+        mm += row * row.transpose();
+        rhs += row * (x * x + y * y);
+    }
+    let sol = mm.lu().solve(&rhs)?;
+    let (cx, cy) = (sol.x / 2.0, sol.y / 2.0);
+    let r = (sol.z + cx * cx + cy * cy).sqrt();
+    if !(r.is_finite() && r > tol::ROUNDOFF) {
+        return None;
+    }
+    let o0 = P3::from(fr.x * cx + fr.y * cy);
+    let h0 = Helix { o: o0, a, e1: fr.x, e2: fr.y, r, c: 0.0, th0: 0.0 };
+    // Angles (unwrapped) and heights: z = c θ + z0 by least squares.
+    let mut ths = Vec::with_capacity(n);
+    let mut prev = h0.angle(&pts[0], 0.0);
+    for p in pts {
+        prev = h0.angle(p, prev);
+        ths.push(prev);
+    }
+    let zs: Vec<f64> = pts.iter().map(|p| (p - o0).dot(&a)).collect();
+    let (st, sz) = (ths.iter().sum::<f64>() / n as f64, zs.iter().sum::<f64>() / n as f64);
+    let (mut num, mut den) = (0.0, 0.0);
+    for (t, z) in ths.iter().zip(&zs) {
+        num += (t - st) * (z - sz);
+        den += (t - st) * (t - st);
+    }
+    if den < tol::DEGENERATE {
+        return None;
+    }
+    let c = num / den;
+    let z0 = sz - c * st;
+    let o = o0 + a * z0;
+    let h = Helix { o, a, e1: fr.x, e2: fr.y, r, c, th0: ths[0] };
+    for (p, t) in pts.iter().zip(&ths) {
+        if (h.point(*t) - p).norm() > tol {
+            return None;
+        }
+    }
+    Some(h)
+}
+
+fn frame_of(t: &V3, r: &V3) -> nalgebra::Rotation3<f64> {
+    let t = t.normalize();
+    let r = (r - t * r.dot(&t)).normalize();
+    nalgebra::Rotation3::from_matrix_unchecked(nalgebra::Matrix3::from_columns(&[t, r, t.cross(&r)]))
+}
+
+/// Any unit vector square to `t`.
+fn square_to(t: &V3) -> V3 {
+    let a = if t.x.abs() < 0.9 { V3::x() } else { V3::y() };
+    t.cross(&a).normalize()
+}
+
+impl PathSweep {
+    pub fn new(plane: Plane, segs: &[Seg], frames: Frames, reach: f64, helix: Option<Helix>) -> Result<Self> {
+        let control = frames.control();
+        let any_spread = frames == Frames::Frenet;
+        let arc: Vec<ArcTable> = segs.iter().map(ArcTable::new).collect();
+        let lens: Vec<f64> = arc.iter().map(ArcTable::total).collect();
+        let total: f64 = lens.iter().sum();
+        let mut at = 0.0;
+        let mut cum: Vec<f64> = std::iter::once(0.0).chain(lens.iter().map(|l| {
+            at += l / total;
+            at
+        })).collect();
+        if let Some(end) = cum.last_mut() {
+            *end = 1.0;
+        }
+        let fine = FINE * segs.len();
+        let mut me = Self { plane, segs: segs.to_vec(), cum, arc, pts: vec![], rots: vec![], v: vec![], deg: 3, reach, helix: None, angles: vec![] };
+        let pts: Vec<P3> = (0..=fine).map(|i| me.at(i as f64 / fine as f64)).collect();
+        let tans: Vec<V3> = (0..=fine).map(|i| me.dir(i as f64 / fine as f64)).collect();
+        if tans.iter().any(|t| !t.iter().all(|x| x.is_finite())) {
+            return Err(KernelError::InvalidParameter("The sweep path has a point with no direction".into()));
+        }
+        let mut frames: Vec<nalgebra::Rotation3<f64>> = Vec::with_capacity(fine + 1);
+        // A helix (within its Bézier approximation): the exact screw motion, of the helix the
+        // caller fitted to the whole chain (so neighbouring pieces share it), else this run's.
+        if control == SweepControl::None {
+            me.helix = match helix {
+                Some(h) => {
+                    let th0 = h.angle_of(&pts[0], h.th0);
+                    if std::env::var("CADRS_SWEEP_DEBUG").is_ok() {
+                        let end = &pts[fine];
+                        eprintln!("run of {} segments: th0 {th0} (end angle {}), start {:?}", segs.len(), h.angle_of(end, th0), pts[0]);
+                    }
+                    Some(Helix { th0, ..h })
+                }
+                None => {
+                    let size = pts.iter().map(|p| (p - pts[0]).norm()).fold(0.0, f64::max);
+                    fit_helix(&pts, &tans, 1e-4 * (1.0 + size))
+                }
+            };
+        }
+        if let Some(h) = me.helix {
+            let mut th = h.th0;
+            me.angles = (0..=fine)
+                .map(|i| {
+                    th = h.angle(&me.path_at(i as f64 / fine as f64), th);
+                    th
+                })
+                .collect();
+        }
+        let (pts, tans) = match me.helix {
+            Some(_) => {
+                let p: Vec<P3> = (0..=fine).map(|i| me.at(i as f64 / fine as f64)).collect();
+                let t: Vec<V3> = (0..=fine).map(|i| me.dir(i as f64 / fine as f64)).collect();
+                (p, t)
+            }
+            None => (pts, tans),
+        };
+        match (control, me.helix) {
+            (SweepControl::None, Some(h)) => {
+                let mut prev = h.th0;
+                for p in &pts {
+                    prev = h.angle(p, prev);
+                    frames.push(nalgebra::Rotation3::from_axis_angle(&nalgebra::Unit::new_normalize(h.a), prev - h.th0));
+                }
+            }
+            (SweepControl::KeepOrientation, _) => {}
+            (SweepControl::LockDirection(d), _) => {
+                for t in &tans {
+                    let r = d.into_inner() - t * d.dot(t);
+                    if r.norm() < tol::ANGULAR {
+                        return Err(KernelError::InvalidParameter("The sweep path runs along the locked direction".into()));
+                    }
+                    frames.push(frame_of(t, &r));
+                }
+            }
+            (SweepControl::None, None) => match me.frenet(&tans, any_spread) {
+                // A path that bends everywhere (a helix): its principal normal, so the profile
+                // keeps its place relative to the curve (a thread stays on its cylinder).
+                Some(normals) => {
+                    for (t, n) in tans.iter().zip(normals) {
+                        frames.push(frame_of(t, &n));
+                    }
+                }
+                None => {
+                    // Double reflection (Wang, Jüttler, Zheng & Liu 2008).
+                    let mut r = square_to(&tans[0]);
+                    frames.push(frame_of(&tans[0], &r));
+                    for i in 0..fine {
+                        let v1 = pts[i + 1] - pts[i];
+                        let c1 = v1.norm_squared();
+                        if c1 < 1e-24 {
+                            frames.push(frame_of(&tans[i + 1], &r));
+                            continue;
+                        }
+                        let rl = r - v1 * (2.0 / c1) * v1.dot(&r);
+                        let tl = tans[i] - v1 * (2.0 / c1) * v1.dot(&tans[i]);
+                        let v2 = tans[i + 1] - tl;
+                        let c2 = v2.norm_squared();
+                        r = if c2 < 1e-24 { rl } else { rl - v2 * (2.0 / c2) * v2.dot(&rl) };
+                        frames.push(frame_of(&tans[i + 1], &r));
+                    }
+                }
+            },
+        }
+        let rots: Vec<nalgebra::UnitQuaternion<f64>> = if frames.is_empty() {
+            vec![nalgebra::UnitQuaternion::identity(); fine + 1]
+        } else {
+            let f0 = frames[0].inverse();
+            frames.iter().map(|f| nalgebra::UnitQuaternion::from_rotation_matrix(&(f * f0))).collect()
+        };
+        // Sections: more where the path turns or twists.
+        let mut turn = 0.0;
+        for i in 0..fine {
+            turn += rots[i].angle_to(&rots[i + 1]) + tans[i].angle(&tans[i + 1]);
+        }
+        // Enough sections for the cubic interpolation between them to stay within about 1e-8
+        // of the true sweep: spacing h with h⁴κ³/384 ≤ tol along rails of curvature κ (the
+        // path's, grown by the profile's reach from it).
+        let reach = me.profile_reach();
+        let mut kmax: f64 = 0.0;
+        for i in 0..fine {
+            let ds = (pts[i + 1] - pts[i]).norm();
+            if ds > tol::ROUNDOFF_FINE {
+                kmax = kmax.max(tans[i].angle(&tans[i + 1]) / ds);
+            }
+        }
+        let length: f64 = (0..fine).map(|i| (pts[i + 1] - pts[i]).norm()).sum();
+        let k_rail = kmax * (1.0 + reach * kmax);
+        let by_err = if k_rail > tol::ROUNDOFF_FINE {
+            let h = (384.0 * 1e-8 / k_rail.powi(3)).powf(0.25);
+            length / h
+        } else {
+            0.0
+        };
+        let mut n = (8.0 + turn / (PI / 24.0)).max(by_err).ceil().clamp(8.0, MAX_SECTIONS as f64) as usize;
+        me.pts = pts;
+        me.rots = rots;
+        // The estimate assumes rails parametrized by length; a path whose speed varies along its
+        // parameter (a B-spline's) bends them in s more. Check the rails of the profile's reach
+        // between the sections and double the sections until they hold (each doubling cuts the
+        // cubic's error about 16 times; one that cuts it less than 4 times is following frames
+        // that aren't smooth, where more sections only cost, so the doubling stops there).
+        let tol = SECTION_TOL * (1.0 + me.reach);
+        let mut err = me.rail_error(n);
+        while n < MAX_SECTIONS && err > tol {
+            let more = (2 * n).min(MAX_SECTIONS);
+            let e = me.rail_error(more);
+            if e > err / 4.0 {
+                break;
+            }
+            (n, err) = (more, e);
+        }
+        me.v = (0..=n).map(|k| k as f64 / n as f64).collect();
+        Ok(me)
+    }
+
+    /// How far the cubic interpolation through `n` equal sections strays from the true sweep
+    /// midway between sections: the path point's rail, and the rails of points `reach` from it
+    /// in the profile's plane along the path (how far the profile tilts off square to the
+    /// path; a turn within its plane only twists the sampled frames, which are approximate
+    /// anyway).
+    fn rail_error(&self, n: usize) -> f64 {
+        let (x, y) = (self.plane.x_dir.into_inner(), self.plane.y_dir().into_inner());
+        let p0 = self.pts[0];
+        let r = self.reach.max(tol::ROUNDOFF);
+        let v: Vec<f64> = (0..=n).map(|k| k as f64 / n as f64).collect();
+        let deg = self.deg.min(n);
+        let mut worst: f64 = 0.0;
+        for (k, q) in [p0, p0 + x * r, p0 - x * r, p0 + y * r, p0 - y * r].into_iter().enumerate() {
+            let at: Vec<P3> = v.iter().map(|&s| self.motion(s).point(&q)).collect();
+            let rail = NurbsCurve::interpolate(&at, &v, deg, None, None);
+            for w in v.windows(2) {
+                let m = 0.5 * (w[0] + w[1]);
+                let e = rail.point(m) - self.motion(m).point(&q);
+                worst = worst.max(if k == 0 { e.norm() } else { e.dot(&self.dir(m)).abs() });
+            }
+        }
+        worst
+    }
+
+    /// How far the profile reaches from the path's start (an upper bound, from the profile
+    /// plane's frame: set by the caller through `reach`).
+    fn profile_reach(&self) -> f64 {
+        self.reach
+    }
+
+    /// The principal normals at the fine steps when the path bends about as much everywhere
+    /// along it (its curvature never drops near zero or, unless `any_spread`, varies more than
+    /// [`FRENET_SPREAD`], and the normal turns smoothly), else None.
+    fn frenet(&self, tans: &[V3], any_spread: bool) -> Option<Vec<V3>> {
+        let fine = tans.len() - 1;
+        let mut size = 0.0f64;
+        for g in &self.segs {
+            size = size.max((g.end() - g.start()).norm()).max(g.length() / TAU);
+        }
+        let mut out: Vec<V3> = Vec::with_capacity(fine + 1);
+        let (mut kmin, mut kmax) = (f64::INFINITY, 0.0f64);
+        for i in 0..=fine {
+            let (k, f) = self.seg_at(i as f64 / fine as f64);
+            let g = &self.segs[k];
+            let (_, d1, d2) = g.c.d2(travel_t(g, f));
+            let l2 = d1.norm_squared();
+            if l2 < tol::TINY {
+                return None;
+            }
+            let kn = (d2 - d1 * (d1.dot(&d2) / l2)) / l2;
+            if kn.norm() * size.max(tol::ROUNDOFF) < 1e-3 {
+                return None;
+            }
+            (kmin, kmax) = (kmin.min(kn.norm()), kmax.max(kn.norm()));
+            let n = kn.normalize();
+            if out.last().is_some_and(|m: &V3| m.dot(&n) < 0.5) {
+                return None;
+            }
+            out.push(n);
+        }
+        // Only a path that bends about as much everywhere (a thread's): where the curvature
+        // drops the principal normal spins, and the profile would twist with it.
+        (any_spread || kmax <= FRENET_SPREAD * kmin).then_some(out)
+    }
+
+    /// The segment and its travel fraction at s (s by length along the run).
+    fn seg_at(&self, s: f64) -> (usize, f64) {
+        let s = s.clamp(0.0, 1.0);
+        let k = self.cum.partition_point(|c| *c <= s).saturating_sub(1).min(self.segs.len() - 1);
+        let (a, b) = (self.cum[k], self.cum[k + 1]);
+        let frac = if b > a { ((s - a) / (b - a)).clamp(0.0, 1.0) } else { 0.0 };
+        (k, self.arc[k].frac_at(frac * self.arc[k].total()))
+    }
+    fn path_at(&self, s: f64) -> P3 {
+        let (k, f) = self.seg_at(s);
+        self.segs[k].c.point(travel_t(&self.segs[k], f))
+    }
+    /// The helix's angle at s (from the path's point there).
+    fn helix_angle(&self, h: &Helix, s: f64) -> f64 {
+        // Unwrapped next to the angle at the fine step before s.
+        let s = s.clamp(0.0, 1.0);
+        let fine = self.angles.len().saturating_sub(1);
+        if fine == 0 {
+            return h.angle(&self.path_at(s), h.th0);
+        }
+        let i = ((s * fine as f64).floor() as usize).min(fine);
+        h.angle(&self.path_at(s), self.angles[i])
+    }
+    fn at(&self, s: f64) -> P3 {
+        match &self.helix {
+            Some(h) => h.point(self.helix_angle(h, s)),
+            None => self.path_at(s),
+        }
+    }
+    fn dir(&self, s: f64) -> V3 {
+        match &self.helix {
+            Some(h) => {
+                let (k, f) = self.seg_at(s);
+                let t = h.tangent(self.helix_angle(h, s));
+                // In the direction of travel.
+                if t.dot(&self.segs[k].dir(f)) < 0.0 { -t } else { t }
+            }
+            None => {
+                let (k, f) = self.seg_at(s);
+                self.segs[k].dir(f)
+            }
+        }
+    }
+
+    /// The rigid motion of the profile from the start of the segment to s.
+    fn motion(&self, s: f64) -> Affine {
+        if let Some(h) = &self.helix {
+            return h.screw(self.helix_angle(h, s) - h.th0);
+        }
+        let fine = self.pts.len() - 1;
+        let x = s.clamp(0.0, 1.0) * fine as f64;
+        let i = (x.floor() as usize).min(fine - 1);
+        let f = x - i as f64;
+        let q = self.rots[i].slerp(&self.rots[i + 1], f);
+        let p = self.at(s);
+        let m = q.to_rotation_matrix().into_inner();
+        Affine { m, t: p.coords - m * self.pts[0].coords }
+    }
+
+    /// The profile's plane where the segment ends.
+    pub fn end_plane(&self) -> Plane {
+        let m = self.motion(1.0);
+        Plane { origin: m.point(&self.plane.origin), x_dir: nalgebra::Unit::new_normalize(m.vector(&self.plane.x_dir)), normal: nalgebra::Unit::new_normalize(m.vector(&self.plane.normal)) }
+    }
+
+    fn rail_nurbs(&self, q: P2) -> NurbsCurve {
+        let pts: Vec<P3> = self.v.iter().map(|&s| self.place(s).point(&P3::new(q.x, q.y, 0.0))).collect();
+        NurbsCurve::interpolate(&pts, &self.v, self.deg.min(pts.len() - 1), None, None)
+    }
+
+    /// The side surface of a piece: its NURBS placed at the sections, skinned.
+    fn skin(&self, piece: &Piece) -> NurbsSurface {
+        let n0 = piece.c.to_nurbs(piece.t0, piece.t1);
+        let curves: Vec<NurbsCurve> = self.v.iter().map(|&s| n0.transformed(&self.place(s))).collect();
+        let q = self.deg.min(curves.len() - 1);
+        let ncp = n0.cps.len();
+        let mut cols: Vec<Vec<H>> = Vec::with_capacity(ncp);
+        let mut kv = Vec::new();
+        for i in 0..ncp {
+            let xyz: Vec<P3> = curves.iter().map(|c| P3::new(c.cps[i].x, c.cps[i].y, c.cps[i].z)).collect();
+            let a = NurbsCurve::interpolate(&xyz, &self.v, q, None, None);
+            let w = n0.cps[i].w;
+            kv = a.knots.clone();
+            cols.push(a.cps.iter().map(|p| H::new(p.x, p.y, p.z, p.w * w)).collect());
+        }
+        NurbsSurface { du: n0.degree, dv: q, ku: n0.knots.clone(), kv, cps: cols }
+    }
+}
+
+/// Steps of a segment's length table.
+const ARC_STEPS: usize = 64;
+
+/// How fast a segment's point moves with its travel fraction.
+fn speed(seg: &Seg, f: f64) -> f64 {
+    seg.c.d2(travel_t(seg, f)).1.norm() * (seg.t1 - seg.t0)
+}
+
+/// A segment's length from its start to fraction `f1` from fraction `f0` (8-point Gauss).
+fn length_between(seg: &Seg, f0: f64, f1: f64) -> f64 {
+    let (m, r) = ((f0 + f1) * 0.5, (f1 - f0) * 0.5);
+    GAUSS8.x.iter().zip(GAUSS8.w).map(|(x, w)| w * speed(seg, m + r * x)).sum::<f64>() * r
+}
+
+/// A segment's length table: its length from its start and its speed at travel fractions
+/// i / [`ARC_STEPS`] (lengths by 8-point Gauss over each step), computed once per segment.
+#[derive(Debug, Clone)]
+struct ArcTable {
+    len: Vec<f64>,
+    speed: Vec<f64>,
+}
+
+impl ArcTable {
+    fn new(seg: &Seg) -> Self {
+        let mut len = vec![0.0];
+        for i in 0..ARC_STEPS {
+            let (f0, f1) = (i as f64 / ARC_STEPS as f64, (i + 1) as f64 / ARC_STEPS as f64);
+            len.push(len[i] + length_between(seg, f0, f1));
+        }
+        let speed = (0..=ARC_STEPS).map(|i| speed(seg, i as f64 / ARC_STEPS as f64)).collect();
+        Self { len, speed }
+    }
+
+    fn total(&self) -> f64 {
+        self.len[ARC_STEPS]
+    }
+
+    /// The travel fraction where the segment has run `len`: the cubic Hermite interpolation of
+    /// the fraction against length through the table (the fraction's slope is 1 / speed), so
+    /// the motion stays smooth, O(h⁴) from the exact inverse and with no curve evaluations.
+    fn frac_at(&self, len: f64) -> f64 {
+        let i = self.len.partition_point(|l| *l <= len).saturating_sub(1).min(ARC_STEPS - 1);
+        let (la, lb) = (self.len[i], self.len[i + 1]);
+        let h = lb - la;
+        let (fa, fb) = (i as f64 / ARC_STEPS as f64, (i + 1) as f64 / ARC_STEPS as f64);
+        if !(h > tol::TINY) {
+            return fa;
+        }
+        let x = ((len - la) / h).clamp(0.0, 1.0);
+        let slope = |v: f64| if v > tol::TINY { h / v } else { fb - fa };
+        let (ma, mb) = (slope(self.speed[i]), slope(self.speed[i + 1]));
+        let (x2, x3) = (x * x, x * x * x);
+        let f = (2.0 * x3 - 3.0 * x2 + 1.0) * fa + (x3 - 2.0 * x2 + x) * ma + (-2.0 * x3 + 3.0 * x2) * fb + (x3 - x2) * mb;
+        f.clamp(fa, fb)
+    }
+}
+
+/// The curve parameter at travel fraction s of a segment.
+fn travel_t(seg: &Seg, s: f64) -> f64 {
+    if seg.rev { seg.t1 + (seg.t0 - seg.t1) * s } else { seg.t0 + (seg.t1 - seg.t0) * s }
+}
+
+impl SweepKind for PathSweep {
+    fn place(&self, s: f64) -> Affine {
+        let base = crate::native::build::plane_map(&self.plane, &V3::zeros(), 0.0);
+        let m = self.motion(s);
+        Affine { m: m.m * base.m, t: m.m * base.t + m.t }
+    }
+    fn rail(&self, q: P2) -> Option<Curve> {
+        Some(Curve::Nurbs(Arc::new(self.rail_nurbs(q))))
+    }
+    fn side(&self, piece: &Piece, _c3: &Curve) -> Option<SideGeo> {
+        let sk = self.skin(piece);
+        let (ua, ub) = (sk.ku[0], sk.ku[sk.ku.len() - 1]);
+        // The surface's u runs from the piece's t0 to its t1.
+        let n0 = piece.c.to_nurbs(piece.t0, piece.t1);
+        let (ua, ub) = if (n0.point(n0.range().0) - piece.c.point(piece.t0)).norm() <= (n0.point(n0.range().0) - piece.c.point(piece.t1)).norm() { (ua, ub) } else { (ub, ua) };
+        let linear = n0.degree == 1 && !n0.is_rational() && n0.cps.len() == 2;
+        let surf = Surface::Nurbs(Arc::new(sk));
+        let c = piece.c.clone();
+        let (t0, t1) = (piece.t0, piece.t1);
+        let n0c = n0.clone();
+        Some(SideGeo {
+            surf,
+            along: Box::new(move |s| {
+                let v = if s < 0.5 { 0.0 } else { 1.0 };
+                if linear {
+                    let k = (ub - ua) / (t1 - t0);
+                    return super::line2(P2::new(ua - t0 * k, v), V2::new(k, 0.0));
+                }
+                iso_pcurve(&n0c, &c, t0, t1, ua, ub, v)
+            }),
+            across: Box::new(move |t| {
+                let u = if (t - t0).abs() <= (t - t1).abs() { ua } else { ub };
+                super::line2(P2::new(u, 0.0), V2::new(0.0, 1.0))
+            }),
+        })
+    }
+    fn up(&self) -> bool {
+        // Which way the profile leaves its plane at the start.
+        let d = self.pts[1] - self.pts[0];
+        d.dot(&self.plane.normal) > 0.0
+    }
+}
+
+/// The p-curve of a profile piece's iso-line v of its skin: u(t) the parameter of the piece's
+/// own B-spline `n0` (the skin's u) at the piece's point c(t), u(t0) = ua and u(t1) = ub (a whole
+/// circle's ends are its seam), interpolated until it maps onto the piece within 1e-12.
+fn iso_pcurve(n0: &NurbsCurve, c: &Curve, t0: f64, t1: f64, ua: f64, ub: f64, v: f64) -> Curve {
+    let invert = |t: f64, guess: f64| -> f64 {
+        let p = c.point(t);
+        let (lo, hi) = (ua.min(ub), ua.max(ub));
+        let mut u = guess.clamp(lo, hi);
+        for _ in 0..40 {
+            let d = n0.ders(u, 2);
+            let (q, d1, d2) = (P3::from(d[0]), d[1], d[2]);
+            let r = q - p;
+            let f = r.dot(&d1);
+            let df = d1.norm_squared() + r.dot(&d2);
+            if df.abs() < tol::TINY {
+                break;
+            }
+            let step = f / df;
+            u = (u - step).clamp(lo, hi);
+            if step.abs() < 1e-15 * (1.0 + u.abs()) {
+                break;
+            }
+        }
+        u
+    };
+    let u_at = |ts: &[f64]| -> Vec<f64> {
+        let n = ts.len();
+        ts.iter()
+            .enumerate()
+            .map(|(i, &t)| {
+                if i == 0 {
+                    ua
+                } else if i + 1 == n {
+                    ub
+                } else {
+                    invert(t, ua + (ub - ua) * (t - t0) / (t1 - t0))
+                }
+            })
+            .collect()
+    };
+    let mut ts: Vec<f64> = (0..=32).map(|i| t0 + (t1 - t0) * i as f64 / 32.0).collect();
+    for _ in 0..10 {
+        let us = u_at(&ts);
+        let pts: Vec<P3> = us.iter().map(|&u| P3::new(u, v, 0.0)).collect();
+        let fit = NurbsCurve::interpolate(&pts, &ts, 3, None, None);
+        let mut ins = Vec::new();
+        for k in 0..ts.len() - 1 {
+            let tm = 0.5 * (ts[k] + ts[k + 1]);
+            let q = fit.point(tm);
+            if (n0.point(q.x) - c.point(tm)).norm() > tol::REL_FINE * (1.0 + c.point(tm).coords.norm()) {
+                ins.push(tm);
+            }
+        }
+        if ins.is_empty() || ts.len() > 4096 {
+            return Curve::Nurbs(Arc::new(fit));
+        }
+        ts.extend(ins);
+        ts.sort_by(f64::total_cmp);
+    }
+    let us = u_at(&ts);
+    let pts: Vec<P3> = us.iter().map(|&u| P3::new(u, v, 0.0)).collect();
+    Curve::Nurbs(Arc::new(NurbsCurve::interpolate(&pts, &ts, 3, None, None)))
+}
+
+/// Sweeps the profile along a run of tangent-continuous segments; the profile's plane where it
+/// ends.
+pub fn sweep_seg(faces: &[MergedFace], chains: &[Vec<Piece>], plane: Plane, segs: &[Seg], frames: Frames, solid: bool, helix: Option<Helix>) -> Result<(Built, Plane)> {
+    // The profile's reach from the path's start.
+    let m = crate::native::build::plane_map(&plane, &V3::zeros(), 0.0);
+    let start = segs[0].start();
+    let mut reach: f64 = 0.0;
+    for p in faces.iter().flat_map(|f| std::iter::once(&f.outer).chain(f.holes.iter())).flatten().chain(chains.iter().flatten()) {
+        for k in 0..=4 {
+            let q = p.at(k as f64 / 4.0);
+            reach = reach.max((m.point(&P3::new(q.x, q.y, 0.0)) - start).norm());
+        }
+    }
+    let t0 = std::time::Instant::now();
+    let kind = PathSweep::new(plane, segs, frames, reach, helix)?;
+    let t1 = t0.elapsed();
+    if (kind.pts[1] - kind.pts[0]).dot(&plane.normal).abs() < tol::REL * (kind.pts[1] - kind.pts[0]).norm().max(tol::TINY) {
+        return Err(KernelError::InvalidParameter("The sweep path runs in the profile's plane".into()));
+    }
+    let mut b = super::sweep_full(faces, chains, &kind, 0.0, 1.0, false, solid)?;
+    let t2 = t0.elapsed();
+    // Sides that came out flat or on a cylinder (a profile edge along a helix's axis) as those
+    // surfaces, so booleans see them coincide with faces of the same surface.
+    crate::native::unify::planarize(&mut b.body);
+    crate::native::unify::cylindrize(&mut b.body);
+    if std::env::var("CADRS_PROFILE").is_ok() {
+        eprintln!("[profile] sweep piece: frames {t1:?}, faces {:?}, recognise {:?} ({} sections)", t2 - t1, t0.elapsed() - t2, kind.v.len());
+    }
+    Ok((b, kind.end_plane()))
+}

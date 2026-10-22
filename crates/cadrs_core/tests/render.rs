@@ -5,7 +5,7 @@
 //!   flat image's 0).
 //! - Rendering twice with the same seed gives identical bytes; another seed doesn't.
 //! - Settings change through `SetRenderStudio` and undo.
-#![cfg(feature = "occt")]
+#![cfg(feature = "brep")]
 
 use std::sync::Arc;
 

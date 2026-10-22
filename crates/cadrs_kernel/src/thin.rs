@@ -18,6 +18,7 @@
 use nalgebra::{Point2, Vector2};
 
 use crate::{Chain, Curve2, KernelError, Loop, Profile, Region, Result};
+use crate::native::tol;
 
 /// Set in the curve id of a thin wall's left-hand offset side.
 pub const THIN_LEFT: u64 = 1 << 61;
@@ -29,7 +30,7 @@ const EPS: f64 = 1e-9;
 /// The regions of a thin wall along every curve of `profile` (its regions' loops and its open
 /// chains). Each band and fill keeps the source of the region or chain it came from.
 pub fn thin_profile(profile: &Profile, left: f64, right: f64) -> Result<Profile> {
-    if !(left >= 0.0 && right >= 0.0 && left + right > 1e-6) {
+    if !(left >= 0.0 && right >= 0.0 && left + right > tol::POINT) {
         return Err(KernelError::InvalidParameter(
             "the wall thickness must be greater than zero".into(),
         ));
@@ -119,7 +120,7 @@ fn band(c: &Curve2, whole: bool, left: f64, right: f64, source: u64) -> Result<R
                 vec![],
             ))
         }
-        Curve2::Arc { center, radius, start_angle, sweep, .. } if !whole && sweep.abs() < std::f64::consts::TAU - 1e-9 => {
+        Curve2::Arc { center, radius, start_angle, sweep, .. } if !whole && sweep.abs() < std::f64::consts::TAU - tol::ANGULAR => {
             // Left of a counter-clockwise arc is toward its centre.
             let ccw = sweep > 0.0;
             let rl = if ccw { radius - left } else { radius + left };
@@ -242,7 +243,7 @@ fn fill(
     source: u64,
 ) -> Option<Region> {
     let cross = ta.x * tb.y - ta.y * tb.x;
-    if cross.abs() < 1e-9 {
+    if cross.abs() < tol::ANGULAR {
         return None;
     }
     // Turning left, the outside of the corner is on the right.
@@ -292,10 +293,10 @@ fn tangent(c: &Curve2, s: f64) -> Vector2<f64> {
             // they get no corner fill).
             let u = 1.0 - s;
             let v = (poles[1] - poles[0]) * (u * u) + (poles[2] - poles[1]) * (2.0 * u * s) + (poles[3] - poles[2]) * (s * s);
-            if v.norm() > 1e-12 { v.normalize() } else { (poles[3] - poles[0]).normalize() }
+            if v.norm() > tol::DEGENERATE { v.normalize() } else { (poles[3] - poles[0]).normalize() }
         }
         _ => {
-            let (a, b) = (c.point_at((s - 1e-6).max(0.0)), c.point_at((s + 1e-6).min(1.0)));
+            let (a, b) = (c.point_at((s - tol::DIFF_STEP).max(0.0)), c.point_at((s + tol::DIFF_STEP).min(1.0)));
             (b - a).normalize()
         }
     }
