@@ -23,7 +23,13 @@ pub(crate) static FITTED_NS: std::sync::atomic::AtomicU64 = std::sync::atomic::A
 /// The p-curve of `c` on [t0, t1] on `s`, its periodic coordinates shifted so its middle lies
 /// near `near` (in the face's chart) when given.
 pub fn pcurve(s: &Surface, c: &Curve, t0: f64, t1: f64, near: Option<P2>) -> Curve {
-    let pc = exact(s, c, t0, t1).or_else(|| iso_line(s, c, t0, t1)).unwrap_or_else(|| {
+    pcurve_or(s, c, t0, t1, near, None)
+}
+
+/// [`pcurve`], with `fit` (a p-curve already known, an intersection curve's from its tracer)
+/// in place of fitting projections where no exact p-curve applies.
+pub fn pcurve_or(s: &Surface, c: &Curve, t0: f64, t1: f64, near: Option<P2>, fit: Option<Curve>) -> Curve {
+    let pc = exact(s, c, t0, t1).or_else(|| iso_line(s, c, t0, t1)).or(fit).unwrap_or_else(|| {
         let t = super::boolean::profiling().then(std::time::Instant::now);
         let pc = fitted(s, c, t0, t1);
         if let Some(t) = t {

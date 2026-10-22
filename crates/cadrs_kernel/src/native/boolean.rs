@@ -158,6 +158,8 @@ struct WEdge {
     tol: f64,
     /// Split points (t, vertex).
     splits: Vec<(f64, usize)>,
+    /// A traced intersection curve's p-curves on its two surfaces ([`ssi::IntCurve::pcs`]).
+    pcs: Option<std::sync::Arc<[Option<Curve>; 2]>>,
 }
 
 #[derive(Debug, Clone)]
@@ -333,7 +335,7 @@ fn import(pool: &mut Pool, faces: &mut Vec<WFace>, b: &Body, owner: usize, merge
     let vmap: Vec<usize> = b.verts.iter().map(|v| if merge { pool.vertex_tol(v.p, own(v.tol)) } else { pool.new_vertex_tol(v.p, own(v.tol)) }).collect();
     let e0 = pool.edges.len();
     for e in &b.edges {
-        pool.edges.push(WEdge { curve: e.curve.clone(), t: e.t, v: [vmap[e.v[0]], vmap[e.v[1]]], degenerate: e.degenerate, tol: own(e.tol), splits: Vec::new() });
+        pool.edges.push(WEdge { curve: e.curve.clone(), t: e.t, v: [vmap[e.v[0]], vmap[e.v[1]]], degenerate: e.degenerate, tol: own(e.tol), splits: Vec::new(), pcs: None });
     }
     for (fi, f) in b.faces.iter().enumerate() {
         let mut loops: Vec<Vec<(usize, bool, Curve)>> = f.loops.iter().map(|l| l.iter().map(|c| (c.edge + e0, c.fwd, c.pc.clone())).collect()).collect();
@@ -2056,7 +2058,7 @@ fn run(a: &Body, b: &Body, mode: Mode, opts: RunOpts) -> Result<BoolOut> {
                         // Unwrap the parameter range for the curve (closed curves may run past
                         // t1).
                         let (ta, tb) = (ta, tb);
-                        pool.edges.push(WEdge { curve: ic.c.clone(), t: [ta, tb], v: [va, vb], degenerate: false, tol: ft, splits: Vec::new() });
+                        pool.edges.push(WEdge { curve: ic.c.clone(), t: [ta, tb], v: [va, vb], degenerate: false, tol: ft, splits: Vec::new(), pcs: ic.pcs.clone() });
                         new_edges.push(pool.edges.len() - 1);
                         pool.edges.len() - 1
                     }
@@ -2136,7 +2138,7 @@ fn run(a: &Body, b: &Body, mode: Mode, opts: RunOpts) -> Result<BoolOut> {
         bounds.push((ed.t[1], ed.v[1]));
         let mut ps = Vec::new();
         for w in bounds.windows(2) {
-            pool.edges.push(WEdge { curve: ed.curve.clone(), t: [w[0].0, w[1].0], v: [w[0].1, w[1].1], degenerate: false, tol: ed.tol, splits: Vec::new() });
+            pool.edges.push(WEdge { curve: ed.curve.clone(), t: [w[0].0, w[1].0], v: [w[0].1, w[1].1], degenerate: false, tol: ed.tol, splits: Vec::new(), pcs: ed.pcs.clone() });
             ps.push(pool.edges.len() - 1);
         }
         pieces.push(ps);
@@ -2228,7 +2230,8 @@ fn run(a: &Body, b: &Body, mode: Mode, opts: RunOpts) -> Result<BoolOut> {
         }
         let ce = &pool.edges[c];
         let near = a.uv_at(0.5);
-        let pc = pcurve::pcurve(&f.surf, &ce.curve, ce.t[0], ce.t[1], Some(near));
+        let fit = ce.pcs.as_ref().and_then(|p| ssi::pcurve_from(p, &f.surf, &ce.curve, ce.t[0], ce.t[1]));
+        let pc = pcurve::pcurve_or(&f.surf, &ce.curve, ce.t[0], ce.t[1], Some(near), fit);
         // On a B-spline surface closing on itself within a tolerance only (a ring glued at
         // its seam), the projection may land on the seam's other side: the copy a whole range
         // over, where the arc was, when it fits the curve as well.
@@ -2280,7 +2283,10 @@ fn run(a: &Body, b: &Body, mode: Mode, opts: RunOpts) -> Result<BoolOut> {
                     continue;
                 }
                 let ed = &pool.edges[c];
-                let pc = pcurve::pcurve(&f.surf, &ed.curve, ed.t[0], ed.t[1], Some(f.uv_center));
+                // A traced curve's own p-curve on this face's surface where it has one (no
+                // projection), else the curve projected.
+                let fit = ed.pcs.as_ref().and_then(|p| ssi::pcurve_from(p, &f.surf, &ed.curve, ed.t[0], ed.t[1]));
+                let pc = pcurve::pcurve_or(&f.surf, &ed.curve, ed.t[0], ed.t[1], Some(f.uv_center), fit);
                 if std::env::var("CADRS_BOOL_DEBUG").is_ok() {
                     for (k, t) in ed.t.iter().enumerate() {
                         let q = pc.point(*t);

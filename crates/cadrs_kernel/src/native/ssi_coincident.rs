@@ -161,7 +161,7 @@ fn side_runs(s: &Surface, fix_u: bool, val: f64, (t0, t1): (f64, f64), o: &Surfa
             _ => s.iso_v(val),
         };
         let c = match iso {
-            Some(c) => IntCurve { c, t0: ra, t1: rb, closed: (at(ra) - at(rb)).norm() <= tol },
+            Some(c) => IntCurve { c, t0: ra, t1: rb, closed: (at(ra) - at(rb)).norm() <= tol, pcs: None },
             None => {
                 // A side with no iso curve of its own (a surface of revolution's): interpolated
                 // through its points (exact on `s`).
@@ -169,7 +169,7 @@ fn side_runs(s: &Surface, fix_u: bool, val: f64, (t0, t1): (f64, f64), o: &Surfa
                 let ts: Vec<f64> = (0..=128).map(|i| ra + (rb - ra) * i as f64 / 128.0).collect();
                 let n = NurbsCurve::interpolate(&pts, &ts, 3, None, None);
                 let r = n.range();
-                IntCurve { c: Curve::Nurbs(Arc::new(n)), t0: r.0, t1: r.1, closed: false }
+                IntCurve { c: Curve::Nurbs(Arc::new(n)), t0: r.0, t1: r.1, closed: false, pcs: None }
             }
         };
         out.push((c, (ra, rb)));
@@ -550,7 +550,7 @@ fn fit_on(s: &Surface, mut uvs: Vec<(f64, f64)>, closed: bool, between: &dyn Fn(
         }
         if ins.is_empty() || uvs.len() > 4000 {
             let r = c.range();
-            return (Some(IntCurve { c: Curve::Nurbs(Arc::new(c)), t0: r.0, t1: r.1, closed }), work);
+            return (Some(IntCurve { c: Curve::Nurbs(Arc::new(c)), t0: r.0, t1: r.1, closed, pcs: None }), work);
         }
         for (k, m) in ins.into_iter().rev() {
             uvs.insert(k, m);
@@ -558,7 +558,7 @@ fn fit_on(s: &Surface, mut uvs: Vec<(f64, f64)>, closed: bool, between: &dyn Fn(
     }
     let (c, _) = fit(&uvs);
     let r = c.range();
-    (Some(IntCurve { c: Curve::Nurbs(Arc::new(c)), t0: r.0, t1: r.1, closed }), work)
+    (Some(IntCurve { c: Curve::Nurbs(Arc::new(c)), t0: r.0, t1: r.1, closed, pcs: None }), work)
 }
 
 /// The iso curve u = `val` (v = `val` when not `fix_u`) of a B-spline surface, exactly: the

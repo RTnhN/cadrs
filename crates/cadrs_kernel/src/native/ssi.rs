@@ -18,6 +18,24 @@ pub struct IntCurve {
     pub t0: f64,
     pub t1: f64,
     pub closed: bool,
+    /// For a traced curve, its p-curves on the two surfaces, fitted with the 3D curve from the
+    /// tracer's (u, v) (z = 0; for either surface, None where they don't follow the curve). A
+    /// consumer checks one against its surface and the curve before taking it
+    /// ([`pcurve_from`]): a curve changed since (trimmed, rebuilt) leaves them behind.
+    pub pcs: Option<Arc<[Option<Curve>; 2]>>,
+}
+
+/// The p-curve on `s` among `ic`'s fitted ones that puts `s` on the curve (within 1e-7 of its
+/// size at 9 points over [t0, t1]), if any.
+pub fn pcurve_from(pcs: &[Option<Curve>; 2], s: &Surface, c: &Curve, t0: f64, t1: f64) -> Option<Curve> {
+    let size = 1.0 + c.point(t0).coords.amax().max(c.point(t1).coords.amax());
+    pcs.iter().flatten().find(|pc| {
+        (0..=8).all(|k| {
+            let t = t0 + (t1 - t0) * k as f64 / 8.0;
+            let q = pc.point(t);
+            (s.eval(q.x, q.y) - c.point(t)).norm() <= 1e-7 * size
+        })
+    }).cloned()
 }
 
 /// The intersection of two surfaces near the box `bb` (the overlap of the two faces' boxes),
@@ -33,7 +51,7 @@ pub fn surface_surface(a: &Surface, ua: ((f64, f64), (f64, f64)), b: &Surface, u
         }
     }
     // (A point of contact as a curve of no length.)
-    let points = r.points.into_iter().map(|p| IntCurve { c: Curve::Line { o: p, d: V3::x() }, t0: 0.0, t1: 0.0, closed: false });
+    let points = r.points.into_iter().map(|p| IntCurve { c: Curve::Line { o: p, d: V3::x() }, t0: 0.0, t1: 0.0, closed: false, pcs: None });
     r.curves.into_iter().chain(r.tangent).chain(r.coincident).chain(points).collect()
 }
 
@@ -142,7 +160,7 @@ fn plane_extrusion(p: &Surface, e: &Surface, ue: ((f64, f64), (f64, f64)), bb: &
         Curve::Nurbs(nc) => Curve::Nurbs(Arc::new(nc.transformed(&aff))),
     };
     let closed = c.is_periodic() && (hi - lo) >= TAU - tol::ANGULAR;
-    Some(vec![IntCurve { c: curve, t0: lo, t1: hi, closed }])
+    Some(vec![IntCurve { c: curve, t0: lo, t1: hi, closed, pcs: None }])
 }
 
 /// A plane and a cone meet in a conic: in the cone's frame, with g(u) = n_x cos u + n_y sin u,
@@ -316,7 +334,7 @@ fn plane_cone(fp: &Frame, fc: &Frame, r: f64, ang: f64, bb: &Bbox) -> Option<Vec
         }
         let nc = NurbsCurve { degree: 2, knots, cps };
         let (t0, t1) = nc.range();
-        out.push(IntCurve { c: Curve::Nurbs(std::sync::Arc::new(nc)), t0, t1, closed });
+        out.push(IntCurve { c: Curve::Nurbs(std::sync::Arc::new(nc)), t0, t1, closed, pcs: None });
     }
     Some(out)
 }
@@ -340,12 +358,12 @@ fn bound_line(o: P3, d: V3, bb: &Bbox) -> Option<IntCurve> {
     if t1 - t0 < tol::ROUNDOFF {
         return None;
     }
-    Some(IntCurve { c: Curve::Line { o, d }, t0, t1, closed: false })
+    Some(IntCurve { c: Curve::Line { o, d }, t0, t1, closed: false, pcs: None })
 }
 
 fn circle(c: P3, n: V3, r: f64) -> IntCurve {
     let f = Frame::from_z(c, n);
-    IntCurve { c: Curve::Circle { c, x: f.x, y: f.y, r }, t0: 0.0, t1: TAU, closed: true }
+    IntCurve { c: Curve::Circle { c, x: f.x, y: f.y, r }, t0: 0.0, t1: TAU, closed: true, pcs: None }
 }
 
 fn plane_n(f: &Frame) -> V3 {
@@ -382,7 +400,7 @@ fn analytic(a: &Surface, b: &Surface, bb: &Bbox, run_tol: f64) -> Option<Vec<Int
                 // Square to the axis: a circle.
                 let t = (fp.o - fc.o).dot(&n) / cz;
                 let c = fc.o + z * t;
-                return Some(vec![IntCurve { c: Curve::Circle { c, x: fc.x, y: fc.y, r: *r }, t0: 0.0, t1: TAU, closed: true }]);
+                return Some(vec![IntCurve { c: Curve::Circle { c, x: fc.x, y: fc.y, r: *r }, t0: 0.0, t1: TAU, closed: true, pcs: None }]);
             }
             // Nearly parallel (single-precision data tilt a plane by 1e-8): the ellipse is huge
             // and its parts in the region are straight to second order in the tilt; each is the
@@ -453,7 +471,7 @@ fn analytic(a: &Surface, b: &Surface, bb: &Bbox, run_tol: f64) -> Option<Vec<Int
             if a_len > 4.0 * bbig.diagonal() {
                 return plane_cone(fp, fc, *r, 0.0, &bbig);
             }
-            Some(vec![IntCurve { c: Curve::Ellipse { c, x: major, y: minor, a: a_len, b: *r }, t0: 0.0, t1: TAU, closed: true }])
+            Some(vec![IntCurve { c: Curve::Ellipse { c, x: major, y: minor, a: a_len, b: *r }, t0: 0.0, t1: TAU, closed: true, pcs: None }])
         }
         (Surface::Plane { f: fp }, Surface::Sphere { f: fs, r }) => {
             let n = plane_n(fp);
@@ -475,7 +493,7 @@ fn analytic(a: &Surface, b: &Surface, bb: &Bbox, run_tol: f64) -> Option<Vec<Int
                     return Some(vec![]);
                 }
                 let c = fc.o + fc.z * h;
-                return Some(vec![IntCurve { c: Curve::Circle { c, x: fc.x, y: fc.y, r: rr }, t0: 0.0, t1: TAU, closed: true }]);
+                return Some(vec![IntCurve { c: Curve::Circle { c, x: fc.x, y: fc.y, r: rr }, t0: 0.0, t1: TAU, closed: true, pcs: None }]);
             }
             // Through the apex and containing the axis: two rulings.
             let apex = fc.o - fc.z * (r / ang.tan());
@@ -512,20 +530,20 @@ fn analytic(a: &Surface, b: &Surface, bb: &Bbox, run_tol: f64) -> Option<Vec<Int
                 let c = ft.o + ft.z * h;
                 if h.abs() >= *rmin - tol {
                     // Tangent (a blend's plane): the circle the tube touches it along.
-                    return Some(vec![IntCurve { c: Curve::Circle { c, x: ft.x, y: ft.y, r: *rmaj }, t0: 0.0, t1: TAU, closed: true }]);
+                    return Some(vec![IntCurve { c: Curve::Circle { c, x: ft.x, y: ft.y, r: *rmaj }, t0: 0.0, t1: TAU, closed: true, pcs: None }]);
                 }
                 let w = (rmin * rmin - h * h).sqrt();
                 return Some(vec![
-                    IntCurve { c: Curve::Circle { c, x: ft.x, y: ft.y, r: rmaj + w }, t0: 0.0, t1: TAU, closed: true },
-                    IntCurve { c: Curve::Circle { c, x: ft.x, y: ft.y, r: rmaj - w }, t0: 0.0, t1: TAU, closed: true },
+                    IntCurve { c: Curve::Circle { c, x: ft.x, y: ft.y, r: rmaj + w }, t0: 0.0, t1: TAU, closed: true, pcs: None },
+                    IntCurve { c: Curve::Circle { c, x: ft.x, y: ft.y, r: rmaj - w }, t0: 0.0, t1: TAU, closed: true, pcs: None },
                 ]);
             }
             if cz.abs() < tol::ANGULAR_FINE && (ft.o - fp.o).dot(&n).abs() < tol::ROUNDOFF {
                 // A plane through the axis: two meridian circles.
                 let w = ft.z.cross(&n).normalize();
                 return Some(vec![
-                    IntCurve { c: Curve::Circle { c: ft.o + w * *rmaj, x: w, y: ft.z, r: *rmin }, t0: 0.0, t1: TAU, closed: true },
-                    IntCurve { c: Curve::Circle { c: ft.o - w * *rmaj, x: -w, y: ft.z, r: *rmin }, t0: 0.0, t1: TAU, closed: true },
+                    IntCurve { c: Curve::Circle { c: ft.o + w * *rmaj, x: w, y: ft.z, r: *rmin }, t0: 0.0, t1: TAU, closed: true, pcs: None },
+                    IntCurve { c: Curve::Circle { c: ft.o - w * *rmaj, x: -w, y: ft.z, r: *rmin }, t0: 0.0, t1: TAU, closed: true, pcs: None },
                 ]);
             }
             None
@@ -702,7 +720,7 @@ fn coaxial(a: &Surface, b: &Surface, o: &P3, z: &V3, bb: &Bbox) -> Vec<IntCurve>
     meridian_points(ma, mb, 1e-7)
         .into_iter()
         .filter(|(r, _)| *r > tol::ROUNDOFF)
-        .map(|(r, h)| IntCurve { c: Curve::Circle { c: o + z * h, x: f.x, y: f.y, r }, t0: 0.0, t1: TAU, closed: true })
+        .map(|(r, h)| IntCurve { c: Curve::Circle { c: o + z * h, x: f.x, y: f.y, r }, t0: 0.0, t1: TAU, closed: true, pcs: None })
         .collect()
 }
 
@@ -966,7 +984,7 @@ fn fit_points(mut pts: Vec<P3>, closed: bool) -> Option<IntCurve> {
     let t = chord(&pts);
     let c = NurbsCurve::interpolate(&pts, &t, 3.min(pts.len() - 1), None, None);
     let n = c.range();
-    Some(IntCurve { c: Curve::Nurbs(Arc::new(c)), t0: n.0, t1: n.1, closed })
+    Some(IntCurve { c: Curve::Nurbs(Arc::new(c)), t0: n.0, t1: n.1, closed, pcs: None })
 }
 
 /// A point on both surfaces near a's (u, v): Newton on a's parameters for sd_b = 0, with the
@@ -1142,15 +1160,50 @@ fn fit_curve(a: &Surface, b: &Surface, mut pts: Vec<super::ssi_numeric::Pt>, clo
         }
         if ins.is_empty() || pts.len() > 20000 {
             let n = c.range();
-            return IntCurve { c: Curve::Nurbs(Arc::new(c)), t0: n.0, t1: n.1, closed };
+            let pcs = uv_fits(a, b, &pts, &t, &c, 4.0 * tol);
+            return IntCurve { c: Curve::Nurbs(Arc::new(c)), t0: n.0, t1: n.1, closed, pcs };
         }
         for (k, p) in ins.into_iter().rev() {
             pts.insert(k, p);
         }
     }
-    let (c, _) = fit(&pts);
+    let (c, t) = fit(&pts);
     let n = c.range();
-    IntCurve { c: Curve::Nurbs(Arc::new(c)), t0: n.0, t1: n.1, closed }
+    let pcs = uv_fits(a, b, &pts, &t, &c, 4.0 * tol);
+    IntCurve { c: Curve::Nurbs(Arc::new(c)), t0: n.0, t1: n.1, closed, pcs }
+}
+
+/// The p-curves of a fitted intersection curve `c` on `a` and `b`: the tracer's (u, v) on each
+/// interpolated with the 3D points' parameters `t` (one knot vector for all three, so they share
+/// the curve's parameter; research/algorithms/intersection_solvers.md card 1, OCCT's
+/// `GeomInt_WLApprox`). Each is kept when its surface point stays within `tol` of the curve
+/// midway along every span, and none runs through a pole of its surface (where the tracer's
+/// free coordinate is arbitrary); else None for it (its consumers project).
+fn uv_fits(a: &Surface, b: &Surface, pts: &[super::ssi_numeric::Pt], t: &[f64], c: &NurbsCurve, tol: f64) -> Option<Arc<[Option<Curve>; 2]>> {
+    if pts.len() < 2 {
+        return None;
+    }
+    let deg = 3.min(pts.len() - 1);
+    let one = |s: &Surface, uv: &dyn Fn(&super::ssi_numeric::Pt) -> (f64, f64)| -> Option<Curve> {
+        let qs: Vec<P3> = pts.iter().map(|q| { let (u, v) = uv(q); P3::new(u, v, 0.0) }).collect();
+        // (At a pole or an apex the surface's derivatives along one direction vanish.)
+        let pole = qs.iter().any(|q| {
+            let (_, su, sv) = s.d1(q.x, q.y);
+            su.norm() < tol::DEGENERATE || sv.norm() < tol::DEGENERATE
+        });
+        if pole {
+            return None;
+        }
+        let pc = NurbsCurve::interpolate(&qs, t, deg, None, None);
+        let ok = t.windows(2).all(|w| {
+            let tm = 0.5 * (w[0] + w[1]);
+            let q = pc.point(tm);
+            (s.eval(q.x, q.y) - c.point(tm)).norm() <= tol
+        });
+        ok.then(|| Curve::Nurbs(Arc::new(pc)))
+    };
+    let pcs = [one(a, &|q| q.a), one(b, &|q| q.b)];
+    pcs.iter().any(Option::is_some).then(|| Arc::new(pcs))
 }
 
 fn chord(pts: &[P3]) -> Vec<f64> {

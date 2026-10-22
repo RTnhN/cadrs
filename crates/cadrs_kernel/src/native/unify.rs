@@ -107,6 +107,16 @@ pub fn split_edge(b: &mut Body, e: usize, t: f64) -> usize {
     v
 }
 
+/// Whether the middle of face `f`'s first edge other than `e` lies on surface `s` as
+/// [`boundary_on`] measures (true when `f` has no other edge): one of the points that test takes.
+fn edge_mid_on(b: &Body, f: usize, e: usize, s: &Surface) -> bool {
+    let Some(c) = b.faces[f].loops.iter().flatten().find(|c| c.edge != e && !b.edges[c.edge].degenerate) else { return true };
+    let ed = &b.edges[c.edge];
+    let p = ed.point(ed.t[0] + (ed.t[1] - ed.t[0]) * 2.0 / 4.0);
+    let (u, v) = s.project(&p, None);
+    (s.eval(u, v) - p).norm() <= tol::REL_POINT * (1.0 + p.coords.norm())
+}
+
 /// Whether face `f`'s edges lie on surface `s` (a few points of each, within 1e-6 of their
 /// size), where `s` is: inside a B-spline's range, not on its extension.
 fn boundary_on(b: &Body, f: usize, s: &Surface) -> bool {
@@ -127,7 +137,7 @@ pub fn unify_faces(b: &mut Body, from: Vec<Vec<(usize, usize)>>, can_merge: &dyn
     let nf = b.faces.len();
     let ef = b.edge_faces();
     let mut dsu = Dsu((0..nf).collect());
-    for fs in ef.iter() {
+    for (e, fs) in ef.iter().enumerate() {
         if fs.len() != 2 || fs[0] == fs[1] {
             continue;
         }
@@ -140,6 +150,12 @@ pub fn unify_faces(b: &mut Body, from: Vec<Vec<(usize, usize)>>, can_merge: &dyn
         // parametrization, so two different ones (coinciding by a sampled test, perhaps over
         // part of their extents) merge only when each one's boundary lies on the other.
         let sampled = |s: &Surface| matches!(s, Surface::Nurbs(_) | Surface::Extrusion { .. });
+        // (Which takes, first, the middle of one of each face's other edges lying on the other's
+        // surface: one projection each, where the sampled comparison of the two surfaces takes
+        // eighty-odd; adjacent pieces of different surfaces mostly fail it.)
+        if a.surf != c.surf && (sampled(&a.surf) || sampled(&c.surf)) && !(edge_mid_on(b, f, e, &c.surf) && edge_mid_on(b, g, e, &a.surf)) {
+            continue;
+        }
         let same = if a.surf == c.surf { Some(true) } else { a.surf.same_domain(&c.surf, tol::POINT) };
         if let Some(same) = same
             && same == (a.sense == c.sense)
