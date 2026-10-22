@@ -5,9 +5,9 @@ exported to static files for GitHub Pages by `.github/workflows/pages.yml`.
 
 - `src/pages/home.rs`: the page, as HTML and as Markdown (`/index.md`).
 - `src/components/`: [Proa UI](https://ui.proa.so) components, vendored with `proa ui add`.
-  The platform icons on the download buttons come from [icon-rs](https://github.com/rvdende/icon-rs),
-  drawn by Proa UI's `Icon` through the adapter in `src/icons.rs`.
   The page's layout follows its `hero_saas` and `features_bento` blocks.
+- `src/icons.rs`: draws [icon-rs](https://github.com/rvdende/icon-rs) icons (the platform
+  icons on the download buttons) with Proa UI's `Icon`.
 - `styles/input.css`: Tailwind, with the Proa UI theme tokens and the cadrs blue.
 - The screenshots (`/images`) and the app icon (`/icons`) are served from the repository's
   `.github/images` and `assets/icons`, so the README and the site share one copy.
