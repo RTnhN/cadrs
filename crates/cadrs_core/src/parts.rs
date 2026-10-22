@@ -405,7 +405,10 @@ pub fn face_plane(features: &[Feature], extrude: FeatureId, face: FaceName) -> O
 /// build it; `None` if it doesn't build.
 pub fn plane_feature_ref(features: &[Feature], plane: FeatureId) -> Option<PlaneRef> {
     let i = features.iter().position(|f| f.id == plane)?;
-    let frame = *rebuild::build(&features[..=i]).planes.get(&plane)?;
+    let frame = match plain_plane_frame(&features[..=i], plane, &mut Default::default()) {
+        Some(f) => f,
+        None => *rebuild::build(&features[..=i]).planes.get(&plane)?,
+    };
     Some(PlaneRef::Feature(cadrs_sketch::FeaturePlane::new(
         plane.0, frame,
     )))
@@ -498,6 +501,45 @@ fn face_of(solid: &Solid, fp: &FacePlane) -> Option<(usize, bool)> {
 /// extruded from a sketch on a face follows along. Only sketches that depend on parts ask for
 /// them: the parts before such a sketch are rebuilt (mostly from the rebuild cache) with the
 /// sketches before it already regenerated.
+/// The frame of Plane feature `plane` (among `features`) when it is made from default planes and
+/// such Plane features alone, without a rebuild; `None` when it needs parts (a face, an edge, a
+/// point), is not among `features`, or fails. `memo` keeps the frames worked out.
+fn plain_plane_frame(
+    features: &[Feature],
+    plane: FeatureId,
+    memo: &mut std::collections::HashMap<FeatureId, Option<cadrs_sketch::PlaneFrame>>,
+) -> Option<cadrs_sketch::PlaneFrame> {
+    if let Some(f) = memo.get(&plane) {
+        return *f;
+    }
+    let i = features.iter().position(|f| f.id == plane)?;
+    let frame = (|| {
+        let crate::FeatureKind::Plane(x) = &features[i].kind else {
+            return None;
+        };
+        if x.problem().is_some() {
+            return None;
+        }
+        let mut geoms = Vec::new();
+        for e in &x.entities {
+            let crate::plane::PlaneEntity::Plane(r) = e else {
+                return None;
+            };
+            let f = match r {
+                PlaneRef::Feature(other) => {
+                    plain_plane_frame(&features[..i], FeatureId(other.feature), memo)?
+                }
+                PlaneRef::Face(_) => return None,
+                default => default.frame(),
+            };
+            geoms.push(crate::plane::RefGeom::Plane(f));
+        }
+        crate::plane::frame(x, &geoms).ok()
+    })();
+    memo.insert(plane, frame);
+    frame
+}
+
 pub fn regenerate(features: &mut [Feature]) {
     regenerate_with(features, &[]);
 }
@@ -509,6 +551,7 @@ pub fn regenerate_with(
     features: &mut [Feature],
     context: &[(FeatureId, u32, std::sync::Arc<Solid>)],
 ) {
+    let mut frames = std::collections::HashMap::new();
     for i in 0..features.len() {
         let needs_parts = features[i].sketch().is_some_and(|sk| {
             matches!(sk.plane, Some(PlaneRef::Face(_) | PlaneRef::Feature(_)))
@@ -517,6 +560,32 @@ pub fn regenerate_with(
                 || !sk.geometry.imprint.is_empty()
         });
         if !needs_parts {
+            continue;
+        }
+        // A sketch on a Plane feature made from default planes alone (the usual offset plane)
+        // needs no parts: its frame is worked out here, without waiting for a rebuild (with
+        // many such sketches, one rebuild each made every edit of a big Part Studio take
+        // seconds).
+        let only_plane = features[i].sketch().and_then(|sk| match sk.plane {
+            Some(PlaneRef::Feature(fp))
+                if sk.geometry.links().is_empty()
+                    && sk.geometry.broken.is_empty()
+                    && sk.geometry.imprint.is_empty() =>
+            {
+                Some(fp)
+            }
+            _ => None,
+        });
+        if let Some(fp) = only_plane
+            && let Some(frame) =
+                plain_plane_frame(&features[..i], FeatureId(fp.feature), &mut frames)
+        {
+            let new = PlaneRef::Feature(cadrs_sketch::FeaturePlane::new(fp.feature, frame));
+            if let Some(sk) = features[i].sketch_mut()
+                && sk.plane != Some(new)
+            {
+                sk.plane = Some(new);
+            }
             continue;
         }
         let build = rebuild::build(&features[..i]);
