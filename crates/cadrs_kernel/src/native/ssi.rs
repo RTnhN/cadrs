@@ -734,8 +734,10 @@ fn numeric(a: &Surface, ua: ((f64, f64), (f64, f64)), b: &Surface, ub: ((f64, f6
     if super::ssi_coincident::lies_on(a, ua, b, tc) || super::ssi_coincident::lies_on(b, ub, a, tc) {
         return Ssi { coincident: super::ssi_coincident::region_boundary(a, ua, b, ub, tc), ..Ssi::default() };
     }
-    let (res, stats) = intersect_stats(a, uvbox(a, ua), b, uvbox(b, ub), bb);
-    let work = (stats.pairs + res.curves.iter().map(|c| c.pts.len()).sum::<usize>()) as u64;
+    let (box_a, box_b) = (uvbox(a, ua), uvbox(b, ub));
+    let (res, stats) = intersect_stats(a, box_a, b, box_b, bb);
+    let mut work = (stats.pairs + res.curves.iter().map(|c| c.pts.len()).sum::<usize>()) as u64;
+    let (ta, tb) = ((box_a.u, box_a.v), (box_b.u, box_b.v));
     let res_singular: Vec<P3> = res.singular.iter().map(|q| q.p).collect();
     let h = bb.diagonal().max(1e-9) / 96.0;
     let mut polys: Vec<(Vec<super::ssi_numeric::Pt>, bool)> = Vec::new();
@@ -745,6 +747,20 @@ fn numeric(a: &Surface, ua: ((f64, f64), (f64, f64)), b: &Surface, ub: ((f64, f6
             tangents.push((c.pts.iter().map(|p| p.p).collect(), c.closed));
         } else {
             polys.push((c.pts, c.closed));
+        }
+    }
+    // A side of either box lying on the other surface, the two crossing there: the intersection
+    // runs along it exactly, where a march stays inside the box only by rounding (and so comes
+    // in pieces). The side is the curve; traced points along it go.
+    let mut side_curves: Vec<IntCurve> = Vec::new();
+    let mut side_ends: Vec<P3> = Vec::new();
+    if !res.coincident {
+        let (sides, w) = super::ssi_coincident::crossing_sides(a, ta, b, tb, tc);
+        work += w;
+        if !sides.is_empty() {
+            let near = (10.0 * tc).max(1e-7 * bb.diagonal());
+            polys = off_sides(polys, &sides, a, b, near, &mut side_ends);
+            side_curves = sides.into_iter().map(|s| s.curve).collect();
         }
     }
     // A curve traced twice (from seeds the first march didn't pass): the copy goes.
@@ -777,14 +793,128 @@ fn numeric(a: &Surface, ua: ((f64, f64), (f64, f64)), b: &Surface, ub: ((f64, f6
     if dbg {
         eprintln!("numeric: {} after: {:?}", polys.len(), polys.iter().map(|(p, c)| (p.len(), *c)).collect::<Vec<_>>());
     }
-    let curves: Vec<IntCurve> = polys.into_iter().filter(|(p, _)| p.len() >= 2).map(|(p, closed)| fit_curve(a, b, p, closed)).collect();
+    let mut curves: Vec<IntCurve> = polys.into_iter().filter(|(p, _)| p.len() >= 2).map(|(p, closed)| fit_curve(a, b, p, closed, &side_ends)).collect();
+    curves.extend(side_curves);
     let tangent: Vec<IntCurve> = tangents.into_iter().filter_map(|(p, closed)| fit_points(p, closed)).collect();
-    let coincident = if res.coincident { super::ssi_coincident::region_boundary(a, ua, b, ub, coincidence_tol(bb)) } else { Vec::new() };
+    // Where the surfaces coincide over an area: its boundary, the sides of either box on the
+    // other surface and where the two part inside a's box.
+    let coincident = if res.coincident {
+        // (Within ten times the coincidence tolerance: surfaces made to coincide often differ by
+        // about that much along their sides, and a region's edge traced at their noise is
+        // noise.)
+        let tr = 10.0 * tc;
+        let mut c = super::ssi_coincident::region_boundary(a, ta, b, tb, tr);
+        let (inner, w) = super::ssi_coincident::interior_boundary(a, ta, b, tb, tr, &c);
+        work += w;
+        c.extend(inner);
+        c
+    } else {
+        Vec::new()
+    };
     // (Where the surfaces coincide, touching points chain along the region's edge: its
     // boundary stands for them.)
     let tangent = if res.coincident { Vec::new() } else { tangent };
     let points = res.points.iter().map(|q| q.p).collect();
     Ssi { curves, tangent, singular: res_singular, coincident, points, work }
+}
+
+/// The traced polylines without their points along the sides (each within `near` of its side):
+/// the runs between, each ended on the side where it leaves it (those ends added to `ends`). A
+/// run that stays within twenty times `near` of a side all along is the side's rounding, not a
+/// branch: it goes too.
+fn off_sides(polys: Vec<(Vec<super::ssi_numeric::Pt>, bool)>, sides: &[super::ssi_coincident::Side], a: &Surface, b: &Surface, near: f64, ends: &mut Vec<P3>) -> Vec<(Vec<super::ssi_numeric::Pt>, bool)> {
+    use super::ssi_numeric::Pt;
+    // The nearest side's point at the same parameter along it, and how far.
+    let to_side = |q: &Pt| -> Option<(f64, Pt)> {
+        sides
+            .iter()
+            .filter_map(|sd| {
+                let (s, o, uv, ouv) = if sd.on_a { (a, b, q.a, q.b) } else { (b, a, q.b, q.a) };
+                let (along, periodic) = if sd.fix_u { (uv.1, s.v_periodic()) } else { (uv.0, s.u_periodic()) };
+                let (lo, hi) = (sd.range.0.min(sd.range.1), sd.range.0.max(sd.range.1));
+                let e = 1e-6 * (hi - lo);
+                let t = if periodic { wrap(along, lo - e, TAU) } else { along };
+                if t < lo - e || t > hi + e {
+                    return None;
+                }
+                let t = t.clamp(lo, hi);
+                let own = if sd.fix_u { (sd.val, t) } else { (t, sd.val) };
+                let p = s.eval(own.0, own.1);
+                let other = o.project(&p, Some(ouv));
+                let pt = if sd.on_a { Pt { p, a: own, b: other } } else { Pt { p, a: other, b: own } };
+                Some(((p - q.p).norm(), pt))
+            })
+            .min_by(|x, y| x.0.total_cmp(&y.0))
+    };
+    let mut out = Vec::new();
+    for (mut pts, closed) in polys {
+        let near_side: Vec<Option<(f64, Pt)>> = pts.iter().map(to_side).collect();
+        let mut flags: Vec<bool> = near_side.iter().map(|x| x.as_ref().is_some_and(|x| x.0 <= near)).collect();
+        if !flags.iter().any(|&f| f) {
+            out.push((pts, closed));
+            continue;
+        }
+        let mut feet: Vec<Option<Pt>> = near_side.iter().map(|x| x.as_ref().map(|x| x.1)).collect();
+        let mut dist: Vec<f64> = near_side.iter().map(|x| x.as_ref().map_or(f64::INFINITY, |x| x.0)).collect();
+        if closed {
+            // Opened at a point on a side (and back to it).
+            let k = flags.iter().position(|&f| f).unwrap_or(0);
+            pts.rotate_left(k);
+            flags.rotate_left(k);
+            feet.rotate_left(k);
+            dist.rotate_left(k);
+            pts.push(pts[0]);
+            flags.push(true);
+            feet.push(feet[0]);
+            dist.push(dist[0]);
+        }
+        let n = pts.len();
+        let mut k = 0;
+        while k < n {
+            if flags[k] {
+                k += 1;
+                continue;
+            }
+            let mut e = k;
+            while e + 1 < n && !flags[e + 1] {
+                e += 1;
+            }
+            if dist[k..=e].iter().any(|&d| d > 20.0 * near) {
+                // Where the run meets the side the two branches come together (the surfaces
+                // touch there) and its last points, within twenty times `near`, may follow
+                // either: the run ends at the side's point by its last point beyond them.
+                let (mut s0, mut s1) = (k, e);
+                if k > 0 {
+                    while s0 < s1 && dist[s0] <= 20.0 * near {
+                        s0 += 1;
+                    }
+                }
+                if e + 1 < n {
+                    while s1 > s0 && dist[s1] <= 20.0 * near {
+                        s1 -= 1;
+                    }
+                }
+                let mut run: Vec<Pt> = Vec::with_capacity(s1 - s0 + 3);
+                if k > 0 {
+                    run.extend(feet[s0].or(feet[k - 1]));
+                }
+                run.extend_from_slice(&pts[s0..=s1]);
+                if e + 1 < n {
+                    run.extend(feet[s1].or(feet[e + 1]));
+                }
+                for (i, j) in [(k > 0, 0), (e + 1 < n, run.len() - 1)] {
+                    if i {
+                        ends.push(run[j].p);
+                    }
+                }
+                if run.len() >= 2 {
+                    out.push((run, false));
+                }
+            }
+            k = e + 1;
+        }
+    }
+    out
 }
 
 /// A cubic B-spline through points as they are (a tangent curve's touching points, which
@@ -914,8 +1044,10 @@ fn join_polylines<T: Clone>(polys: &mut Vec<(Vec<T>, bool)>, tol: f64, at: impl 
 
 /// Fits a cubic B-spline through exact points of a traced curve, adding points of both
 /// surfaces (refined on the plane square to the chord) where the fit strays from the
-/// intersection by more than 1e-9 (relative on a big curve).
-fn fit_curve(a: &Surface, b: &Surface, mut pts: Vec<super::ssi_numeric::Pt>, closed: bool) -> IntCurve {
+/// intersection by more than 1e-9 (relative on a big curve). An end among `fixed` (where the
+/// curve meets a side the intersection runs along: two branches there, a refined point may
+/// land on either) keeps its first span as it is.
+fn fit_curve(a: &Surface, b: &Surface, mut pts: Vec<super::ssi_numeric::Pt>, closed: bool, fixed: &[P3]) -> IntCurve {
     if closed {
         pts.push(pts[0]);
     }
@@ -950,11 +1082,17 @@ fn fit_curve(a: &Surface, b: &Surface, mut pts: Vec<super::ssi_numeric::Pt>, clo
         pts.iter().for_each(|q| bb.add(&q.p));
         1e-9f64.max(2e-10 * bb.diagonal())
     };
+    let is_fixed = |q: &super::ssi_numeric::Pt| fixed.contains(&q.p);
+    let fixed_ends = [!closed && pts.first().is_some_and(is_fixed), !closed && pts.last().is_some_and(is_fixed)];
     for _round in 0..6 {
         let (c, t) = fit(&pts);
+        let last = pts.len() - 2;
         let found: Vec<Option<(usize, super::ssi_numeric::Pt)>> = (0..pts.len() - 1)
             .into_par_iter()
             .map(|k| {
+                if (k == 0 && fixed_ends[0]) || (k == last && fixed_ends[1]) {
+                    return None;
+                }
                 let q = c.point((t[k] + t[k + 1]) / 2.0);
                 let chord = (pts[k + 1].p - pts[k].p).norm();
                 let exact = super::ssi_numeric::refine_between(a, b, &pts[k], &pts[k + 1], &q)?;

@@ -116,7 +116,8 @@ pub struct Intersection {
     /// Points on the curves where the surfaces are tangent (branch points, touching points):
     /// each curve passing one goes through it exactly.
     pub singular: Vec<Pt>,
-    /// Whether some part of the surfaces coincides (an area of contact, reported only).
+    /// Whether some part of the surfaces coincides (an area of contact: its boundary is
+    /// [`super::ssi_coincident`]'s; what the march finds inside it is rounding, left out).
     pub coincident: bool,
 }
 
@@ -401,7 +402,8 @@ impl Ctx<'_> {
 struct Found {
     seeds: Vec<Pt>,
     touches: Vec<Pt>,
-    coincident: bool,
+    /// The cells of a found lying on b.
+    coincident: Vec<UvBox>,
     pairs: usize,
 }
 
@@ -665,7 +667,7 @@ fn search(ctx: &Ctx, ca: Cell, cb: Cell) -> Found {
             continue;
         }
         if ca.size > 8.0 * ctx.tiny && cb.size > 8.0 * ctx.tiny && coincident(ctx, &ca, &cb) {
-            out.coincident = true;
+            out.coincident.push(ca.uv);
             continue;
         }
         if ca.size >= cb.size {
@@ -1152,12 +1154,24 @@ pub fn intersect_stats(a: &Surface, ua: UvBox, b: &Surface, ub: UvBox, region: &
     let found: Vec<Found> = pairs.into_par_iter().map(|(ca, cb)| search(&ctx, ca, cb)).collect();
     let mut seeds = Vec::new();
     let mut touches = Vec::new();
-    let mut coincident = false;
+    let mut coin: Vec<UvBox> = Vec::new();
     for f in found {
         stats.pairs += f.pairs;
         seeds.extend(f.seeds);
         touches.extend(f.touches);
-        coincident |= f.coincident;
+        coin.extend(f.coincident);
+    }
+    let coincident = !coin.is_empty();
+    // Inside a cell of a lying on b the surfaces are one: a seed, a touching point or a traced
+    // point there is rounding (the region's boundary is found apart).
+    let in_coin = |uv: (f64, f64)| {
+        let Some((ou, ov)) = ctx.a.locate(uv, 1e-9) else { return false };
+        let (u, v) = (uv.0 - ou, uv.1 - ov);
+        coin.iter().any(|c| u > c.u.0 && u < c.u.1 && v > c.v.0 && v < c.v.1)
+    };
+    if coincident {
+        seeds.retain(|p| !in_coin(p.a));
+        touches.retain(|p| !in_coin(p.a));
     }
     stats.seeds = seeds.len();
     if std::env::var_os("CADRS_SSI_SEEDS").is_some() {
@@ -1188,6 +1202,9 @@ pub fn intersect_stats(a: &Surface, ua: UvBox, b: &Surface, ub: UvBox, region: &
         } else if dbg {
             eprintln!("  no march from {:?} (tangent {:?})", sd, t);
         }
+    }
+    if coincident {
+        traced.retain(|(c, _)| c.pts.iter().filter(|q| in_coin(q.a)).count() * 2 <= c.pts.len());
     }
     // A piece run onto curves traced before at both ends, and alongside them all the way (from
     // seeds by a branch point, where the curves come together), adds nothing.

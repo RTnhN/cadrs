@@ -1105,22 +1105,35 @@ fn run(a: &Body, b: &Body, mode: Mode, opts: RunOpts) -> Result<BoolOut> {
     // Their intersections, each a function of the two faces alone: computed in parallel and
     // used below in the pairs' order, so the result doesn't depend on the scheduling.
     // (In chunks of pairs, the budget checked after each: a run past it stops within a chunk.)
-    let mut ssis: Vec<(Vec<ssi::IntCurve>, Vec<P3>, std::time::Duration)> = Vec::with_capacity(pairs.len());
+    // (With the boundary of a region where the two surfaces coincide, when they do over part.)
+    type Found = (Vec<ssi::IntCurve>, Vec<P3>, std::time::Duration, Vec<ssi::IntCurve>);
+    let mut ssis: Vec<Found> = Vec::with_capacity(pairs.len());
     for chunk in pairs.chunks(64) {
-        let done: Vec<(Vec<ssi::IntCurve>, Vec<P3>, std::time::Duration, u64)> = chunk
+        let done: Vec<(Found, u64)> = chunk
             .par_iter()
             .map(|&(fa, fb)| {
                 let t = std::time::Instant::now();
                 // (The curves the surfaces only touch along are left out: the faces' tangent
                 // contact is found from their boundaries, as for faces tangent along an edge.)
                 let r = ssi::surface_surface_tol(&faces[fa].surf, uvbox(&faces[fa]), &faces[fb].surf, uvbox(&faces[fb]), &overlap(fa, fb), run_tol);
-                (r.curves, r.singular, t.elapsed(), r.work)
+                ((r.curves, r.singular, t.elapsed(), r.coincident), r.work)
             })
             .collect();
-        work.spend(done.iter().map(|d| d.3).sum(), "surface intersection")?;
-        ssis.extend(done.into_iter().map(|(c, s, t, _)| (c, s, t)));
+        work.spend(done.iter().map(|d| d.1).sum(), "surface intersection")?;
+        ssis.extend(done.into_iter().map(|(f, _)| f));
     }
-    for (&(fa, fb), (curves, singular, el)) in pairs.iter().zip(ssis) {
+    // Pairs of faces whose surfaces coincide over part of the faces (from the intersections): their
+    // sub-faces on the other face's surface classify as on it, as a coincident pair's do.
+    let mut partial: std::collections::HashSet<(usize, usize)> = std::collections::HashSet::new();
+    for (&(fa, fb), (mut curves, singular, el, shared)) in pairs.iter().zip(ssis) {
+        // The shared region's boundary cuts both faces, as a crossing does.
+        if !shared.is_empty() {
+            partial.insert((fa, fb));
+            partial.insert((fb, fa));
+            coincident[fa].push(fb);
+            coincident[fb].push(fa);
+            curves.extend(shared);
+        }
         let ob = overlap(fa, fb);
         if std::env::var("CADRS_BOOL_DEBUG").is_ok() {
             eprintln!("ssi {fa}×{fb} {:?}×{:?}: {} curves in {el:?}", faces[fa].surf.kind(), faces[fb].surf.kind(), curves.len());
@@ -1474,7 +1487,8 @@ fn run(a: &Body, b: &Body, mode: Mode, opts: RunOpts) -> Result<BoolOut> {
             for &e in &face_edges[fb].clone() {
                 for &pe in &pieces[e] {
                     let ed = &pool.edges[pe];
-                    if ed.degenerate {
+                    // (Of a pair coinciding over part, only the pieces lying on fa's surface.)
+                    if ed.degenerate || (partial.contains(&(fa, fb)) && !edge_on_surface(ed, &faces[fa].surf, run_tol * 10.0)) {
                         continue;
                     }
                     let pm = ed.curve.point((ed.t[0] + ed.t[1]) * 0.5);
@@ -1653,7 +1667,9 @@ fn run(a: &Body, b: &Body, mode: Mode, opts: RunOpts) -> Result<BoolOut> {
         let mut class = None;
         for &g in &coincident[fi] {
             let gf = &faces[g];
-            if point_in_face(gf, &p, run_tol * 10.0) != InFace::Outside {
+            // (A face coinciding with g over part: where this sub-face lies on g's surface.)
+            let on_g = !partial.contains(&(fi, g)) || gf.surf.distance(&p) <= (run_tol * 10.0).max(f.tol).max(gf.tol);
+            if on_g && point_in_face(gf, &p, run_tol * 10.0) != InFace::Outside {
                 let (gu, gv) = gf.surf.project(&p, Some((gf.uv_center.x, gf.uv_center.y)));
                 let gn = gf.surf.normal(gu, gv) * if gf.sense { 1.0 } else { -1.0 };
                 // Against a sheet an overlap is an overlap, whichever way the faces face.

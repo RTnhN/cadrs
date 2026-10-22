@@ -2,10 +2,19 @@
 # fail: `name`, or `name slow` when it takes over a minute (run only with --ignored). Grouped by
 # cause (W2's SSI rewrite is the target).
 
-# Coincident surfaces: SMLib returns the boundary of the shared region; ssi gives nothing (or less).
+# Coincident surfaces: both give the boundary of the shared region, by different conventions
+# (an oracle convention, not a missing curve).
+# - 41, 42 (whole spheres, tori): SMLib counts a box side the two surfaces share twice, once
+#   from each (31.4/37.7 here are each side once).
+# - 01 (extrusions), 16, 17 (surfaces of revolution), partly coincident: SMLib's region runs on
+#   to the end of a patch where the surfaces are 6e-4 apart (x = 98.375 in 01, -55.87 in 16),
+#   and 01 counts its edge three times; ours ends where they part (within 1e-6: x = 98.04,
+#   -55.98), traced across the boxes (lengths 42.9, 26.2, 23.8 against 53.5, 26.3, 24.1).
 ssi_01_ext_ext_coin
 ssi_41_coincident_spheres2
 ssi_42_coincident_torii
+ssi_16_rev_rev_coin
+ssi_17_rev_rev_coin_touch slow
 
 # Touching at points or along curves: no point contacts or tangent curves found.
 ssi_15_rev_rev_180_pts
@@ -13,8 +22,6 @@ ssi_15_rev_rev_180_pts
 # Curves missing or partial (length short of SMLib's, or none).
 
 # Curves inside both faces lying off a surface by more than 1e-3.
-ssi_16_rev_rev_coin
-ssi_17_rev_rev_coin_touch slow
 ssi_35_rev_rev_sing
 
 # An oracle error: the plane holds both side meridians of the surface of revolution (u = 0 and

@@ -372,3 +372,54 @@ fn cone_seam_curves_meet_without_overlap() {
     let len = total_length(&cs);
     assert!((len - 14.48270673448).abs() < 5e-3, "length {len}");
 }
+
+/// A B-spline face whose side v = 0 lies on a cylinder (within 1e-8: shape_type_a_a1's offset,
+/// the wall of a hole round a cylinder's Steinmetz curve), crossing it at an angle, and crossing
+/// it again at a shallow one in four narrow bands. Marched, the intersection along the side
+/// left the box at every rounding: 55 overlapping pieces, which a boolean cut at every touch.
+/// Now the side itself (one curve) and the eight crossings, each from the side to the far side.
+#[test]
+fn box_side_on_the_other_surface() {
+    let body = cadrs_kernel::native::bodyio::read(include_bytes!("data/ssi_side_on_cylinder.body")).unwrap();
+    let (cyl, wall) = (&body.faces[0].surf, &body.faces[1].surf);
+    let region = Bbox { min: P3::new(-0.07701975090180072, -0.11003187651919082, 0.298583911423951), max: P3::new(0.11003456216815335, 0.11003869235335319, 0.50071534336464) };
+    let r = ssi::surface_surface_full(cyl, ((0.0, TAU), (0.0, 1.0)), wall, ((0.0, 1.0), (0.0, 1.0)), &region);
+    let len = |c: &IntCurve| c.c.length(c.t0.min(c.t1), c.t0.max(c.t1));
+    let (long, short): (Vec<&IntCurve>, Vec<&IntCurve>) = r.curves.iter().partition(|c| len(c) > 0.5);
+    assert_eq!(long.len(), 1, "the side, once: {:?}", r.curves.iter().map(len).collect::<Vec<_>>());
+    assert!((len(long[0]) - 1.1675).abs() < 1e-3, "the side's length {}", len(long[0]));
+    assert_eq!(short.len(), 8, "the crossings: {:?}", short.iter().map(|c| len(c)).collect::<Vec<_>>());
+    // Each crossing runs from the side (on the cylinder of radius 0.1 round z) to the face's
+    // far side (radius 0.11).
+    let rho = |p: P3| (p.x * p.x + p.y * p.y).sqrt();
+    for c in short {
+        let (a, b) = (rho(c.c.point(c.t0)), rho(c.c.point(c.t1)));
+        let (lo, hi) = (a.min(b), a.max(b));
+        assert!((lo - 0.1).abs() < 1e-6 && (hi - 0.11).abs() < 1e-6, "a crossing from radius {lo} to {hi}");
+    }
+}
+
+/// Two B-splines one over part: a bends up from z = 0 at x = 1 (a quadratic knot there), b is
+/// flat. Their intersection is the shared region's boundary: the sides of a on b (x = 0, and
+/// y = 0 and 1 up to where a leaves b) and where a leaves b inside the boxes (the line x ≈ 1).
+#[test]
+fn partly_coincident_region_boundary() {
+    use cadrs_kernel::native::nurbs::{hom, NurbsSurface};
+    let row = |x: f64, z: f64| vec![hom(&P3::new(x, 0.0, z), 1.0), hom(&P3::new(x, 1.0, z), 1.0)];
+    let a = NurbsSurface::new(2, 1, vec![0.0, 0.0, 0.0, 1.0, 2.0, 2.0, 2.0], vec![0.0, 0.0, 1.0, 1.0], vec![row(0.0, 0.0), row(0.5, 0.0), row(1.5, 0.0), row(2.0, 1.0)]).unwrap();
+    let b = NurbsSurface::new(1, 1, vec![0.0, 0.0, 1.0, 1.0], vec![0.0, 0.0, 1.0, 1.0], vec![vec![hom(&P3::new(-0.5, -0.5, 0.0), 1.0), hom(&P3::new(-0.5, 1.5, 0.0), 1.0)], vec![hom(&P3::new(2.5, -0.5, 0.0), 1.0), hom(&P3::new(2.5, 1.5, 0.0), 1.0)]]).unwrap();
+    let (a, b) = (Surface::Nurbs(Arc::new(a)), Surface::Nurbs(Arc::new(b)));
+    let r = ssi::surface_surface_full(&a, ((0.0, 2.0), (0.0, 1.0)), &b, ((0.0, 1.0), (0.0, 1.0)), &region(3.0));
+    let len = |c: &IntCurve| c.c.length(c.t0.min(c.t1), c.t0.max(c.t1));
+    let total: f64 = r.coincident.iter().map(len).sum();
+    assert!(r.curves.is_empty() && r.tangent.is_empty(), "nothing but the region's boundary: {} crossing, {} tangent", r.curves.len(), r.tangent.len());
+    // x = 0 (1), the two sides to x ≈ 1 (each a little over 1), and the line where a parts.
+    assert!((total - 4.0).abs() < 0.05, "the boundary's length {total}");
+    let parting = r.coincident.iter().find(|c| [0.0, 0.5, 1.0].iter().all(|f| (c.c.point(c.t0 + (c.t1 - c.t0) * f).x - 1.0).abs() < 0.02));
+    let parting = parting.expect("a boundary curve along x ≈ 1");
+    assert!((len(parting) - 1.0).abs() < 1e-3, "the parting line's length {}", len(parting));
+    for f in [0.0, 0.25, 0.5, 0.75, 1.0] {
+        let p = parting.c.point(parting.t0 + (parting.t1 - parting.t0) * f);
+        assert!(p.z.abs() < 1e-5, "the parting line off b: {p:?}");
+    }
+}
