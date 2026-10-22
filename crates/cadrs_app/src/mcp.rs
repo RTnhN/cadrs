@@ -34,6 +34,7 @@ impl Plugin for McpPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<McpServer>()
             .init_resource::<WaitingShots>()
+            .init_resource::<WaitingBuilds>()
             .add_systems(Update, (sync_server, run_calls).chain())
             .add_systems(Last, take_screenshots);
     }
@@ -114,7 +115,71 @@ fn sync_server(world: &mut World) {
 }
 
 /// Runs the tool calls waiting for the app.
+/// What a call does once its Part Studio is rebuilt: on the main thread, so it may change the
+/// document.
+type Finish =
+    Box<dyn FnOnce(&mut World, &cadrs_core::rebuild::Build) -> Result<Value, String> + Send + Sync>;
+
+thread_local! {
+    /// The rebuild the call being run waits for ([`after_build`]), taken by [`run_calls`].
+    static DEFERRED: std::cell::RefCell<Option<(Vec<cadrs_core::Feature>, Finish)>> =
+        const { std::cell::RefCell::new(None) };
+}
+
+/// Calls waiting for their rebuild on the rebuild thread, answered as each finishes. Waiting for
+/// it on the main thread instead froze the app ("not responding") while a big Part Studio
+/// rebuilt.
+#[derive(Resource, Default)]
+struct WaitingBuilds(Vec<(cadrs_mcp::Request, cadrs_core::rebuild::Pending, Finish)>);
+
+/// Answers the call with what `finish` makes of the rebuild of `features`. In the app the
+/// rebuild runs on the rebuild thread and the call is answered when it is done; elsewhere (the
+/// tests) it is waited for here.
+fn after_build(
+    world: &World,
+    features: Vec<cadrs_core::Feature>,
+    finish: impl FnOnce(&cadrs_core::rebuild::Build) -> Result<Value, String> + Send + Sync + 'static,
+) -> Result<Value, String> {
+    if !world.contains_resource::<WaitingBuilds>() {
+        return finish(&cadrs_core::rebuild::build(&features));
+    }
+    let finish: Finish = Box::new(move |_, b| finish(b));
+    DEFERRED.with(|d| *d.borrow_mut() = Some((features, finish)));
+    Ok(Value::Null)
+}
+
+/// [`after_build`] for a call that changes the document with what the rebuild made.
+fn after_build_mut(
+    world: &mut World,
+    features: Vec<cadrs_core::Feature>,
+    finish: impl FnOnce(&mut World, &cadrs_core::rebuild::Build) -> Result<Value, String>
+    + Send
+    + Sync
+    + 'static,
+) -> Result<Value, String> {
+    if !world.contains_resource::<WaitingBuilds>() {
+        let b = cadrs_core::rebuild::build(&features);
+        return finish(world, &b);
+    }
+    DEFERRED.with(|d| *d.borrow_mut() = Some((features, Box::new(finish))));
+    Ok(Value::Null)
+}
+
+/// Answers the calls whose rebuild finished.
+fn answer_built(world: &mut World) {
+    let waiting = std::mem::take(&mut world.resource_mut::<WaitingBuilds>().0);
+    let mut still = Vec::new();
+    for (req, mut pending, finish) in waiting {
+        match pending.poll() {
+            Some(build) => req.reply(finish(world, &build)),
+            None => still.push((req, pending, finish)),
+        }
+    }
+    world.resource_mut::<WaitingBuilds>().0.extend(still);
+}
+
 fn run_calls(world: &mut World) {
+    answer_built(world);
     let Some(server) = world.resource::<McpServer>().server.as_ref() else {
         return;
     };
@@ -169,11 +234,34 @@ fn run_calls(world: &mut World) {
             });
             continue;
         }
+        let started = std::time::Instant::now();
         let result = run(world, &req.call);
+        let took = started.elapsed();
+        if took > std::time::Duration::from_millis(100) {
+            warn!(
+                "MCP call {:?} held the main thread {:.0} ms",
+                std::mem::discriminant(&req.call),
+                took.as_secs_f64() * 1e3
+            );
+        }
         if let Err(e) = &result {
             info!("MCP call {:?} failed: {e}", req.call);
         }
-        req.reply(result);
+        match (result, DEFERRED.with(|d| d.borrow_mut().take())) {
+            (Ok(_), Some((features, finish))) => {
+                if features.iter().any(cadrs_core::Feature::is_part_feature) {
+                    let pending = cadrs_core::rebuild::request(features);
+                    world
+                        .resource_mut::<WaitingBuilds>()
+                        .0
+                        .push((req, pending, finish));
+                } else {
+                    let b = cadrs_core::rebuild::Build::default();
+                    req.reply(finish(world, &b));
+                }
+            }
+            (result, _) => req.reply(result),
+        }
     }
 }
 
@@ -206,6 +294,9 @@ fn run(world: &mut World, call: &Call) -> Result<Value, String> {
         }
         Call::GetFeature(p) => get_feature(world, p),
         Call::DeleteFeature(p) => delete_feature(world, p),
+        Call::RenameFeature(p) => rename_feature(world, p),
+        Call::SetPart(p) => set_part(world, p),
+        Call::SetFeatureVisible(p) => set_feature_visible(world, p),
         Call::ListFaces(p) => list_faces(world, p.part_studio.as_deref()),
         Call::ListEdges(p) => list_edges(world, p.part_studio.as_deref()),
         Call::Undo => {
@@ -487,7 +578,10 @@ fn describe_assembly(d: &ActiveDocument, element: ElementId) -> Result<Value, St
         .instances
         .iter()
         .map(|i| {
-            let build = d.doc.element(i.source.element()).map(|s| cadrs_core::rebuild::build(s.features()));
+            // Only a part instance's name needs its Part Studio rebuilt (the part's name).
+            let build = matches!(i.source, InstanceSource::Part { .. })
+                .then(|| d.doc.element(i.source.element()).map(|s| cadrs_core::rebuild::build(s.features())))
+                .flatten();
             let mut v = json!({
                 "name": i.name(&cadrs_core::assembly::source_part_name(&d.doc, &i.source, build.as_deref())),
                 "id": i.id.to_string(),
@@ -530,49 +624,50 @@ fn insert_instance(world: &mut World, p: &tools::InsertInstance) -> Result<Value
     };
     let element = assembly(doc(world)?, p.assembly.as_deref())?;
     let studio = part_studio(doc(world)?, Some(&p.part_studio))?;
-    let d = doc(world)?;
-    let parts = cadrs_core::rebuild::build(
-        d.doc
-            .element(studio)
-            .ok_or("the Part Studio is gone")?
-            .features(),
-    )
-    .parts
-    .clone();
-    if parts.is_empty() {
-        return Err(format!("{:?} has no parts", p.part_studio));
-    }
-    let pose = p
-        .translation
-        .map(Pose::translation)
-        .unwrap_or(Pose::IDENTITY);
-    let id = InstanceId::new();
-    let mut instance = match &p.part {
-        None => Instance::studio(id, studio, parts.iter().map(|q| q.id).collect(), pose),
-        Some(name) => {
-            let part = parts.iter().find(|q| q.name == *name).ok_or_else(|| {
-                let names: Vec<&str> = parts.iter().map(|q| q.name.as_str()).collect();
-                format!(
-                    "no part named {name:?} in {:?}; its parts are {}",
-                    p.part_studio,
-                    names.join(", ")
-                )
-            })?;
-            Instance::new(
-                id,
-                InstanceSource::Part {
-                    element: studio,
-                    part: part.id,
-                },
-                pose,
-            )
+    let features = doc(world)?
+        .doc
+        .element(studio)
+        .ok_or("the Part Studio is gone")?
+        .features()
+        .to_vec();
+    let p = p.clone();
+    after_build_mut(world, features, move |world, b| {
+        let parts = &b.parts;
+        if parts.is_empty() {
+            return Err(format!("{:?} has no parts", p.part_studio));
         }
-    };
-    instance.fixed = p.fixed;
-    doc_mut(world)?
-        .execute(&InsertInstance { element, instance })
-        .map_err(|e| e.to_string())?;
-    describe_assembly(doc(world)?, element)
+        let pose = p
+            .translation
+            .map(Pose::translation)
+            .unwrap_or(Pose::IDENTITY);
+        let id = InstanceId::new();
+        let mut instance = match &p.part {
+            None => Instance::studio(id, studio, parts.iter().map(|q| q.id).collect(), pose),
+            Some(name) => {
+                let part = parts.iter().find(|q| q.name == *name).ok_or_else(|| {
+                    let names: Vec<&str> = parts.iter().map(|q| q.name.as_str()).collect();
+                    format!(
+                        "no part named {name:?} in {:?}; its parts are {}",
+                        p.part_studio,
+                        names.join(", ")
+                    )
+                })?;
+                Instance::new(
+                    id,
+                    InstanceSource::Part {
+                        element: studio,
+                        part: part.id,
+                    },
+                    pose,
+                )
+            }
+        };
+        instance.fixed = p.fixed;
+        doc_mut(world)?
+            .execute(&InsertInstance { element, instance })
+            .map_err(|e| e.to_string())?;
+        describe_assembly(doc(world)?, element)
+    })
 }
 
 /// Turns the 3D view to a standard view and zooms to fit.
@@ -777,21 +872,33 @@ fn describe(world: &World) -> Result<Value, String> {
         .map(|e| json!({ "name": e.name, "kind": kind_label(&e.kind), "active": d.active == Some(e.id) }))
         .collect();
     let mut out = json!({ "document": d.doc.name, "tabs": tabs });
-    if let Some(e) = d
-        .active_element()
-        .filter(|e| matches!(e.kind, ElementKind::PartStudio { .. }))
-    {
-        out["part_studio"] = studio_state(e.name.as_str(), e.features());
-    }
     if d.meta.is_some() {
         out["id"] = json!(d.doc.id.to_string());
     }
-    Ok(out)
+    let Some(e) = d
+        .active_element()
+        .filter(|e| matches!(e.kind, ElementKind::PartStudio { .. }))
+    else {
+        return Ok(out);
+    };
+    let (name, features, props) = (
+        e.name.clone(),
+        e.features().to_vec(),
+        e.part_props().to_vec(),
+    );
+    after_build(world, features.clone(), move |b| {
+        out["part_studio"] = studio_state(&name, &features, &props, b);
+        Ok(out)
+    })
 }
 
 /// A Part Studio's features (with their rebuild errors and warnings) and parts.
-fn studio_state(name: &str, features: &[cadrs_core::Feature]) -> Value {
-    let build = cadrs_core::rebuild::build(features);
+fn studio_state(
+    name: &str,
+    features: &[cadrs_core::Feature],
+    props: &[cadrs_core::PartProps],
+    build: &cadrs_core::rebuild::Build,
+) -> Value {
     let problem = |id: FeatureId, list: &[(FeatureId, String)]| {
         list.iter().find(|(f, _)| *f == id).map(|(_, m)| m.clone())
     };
@@ -813,7 +920,7 @@ fn studio_state(name: &str, features: &[cadrs_core::Feature]) -> Value {
         .parts
         .iter()
         .map(|p| {
-            let mut v = json!({ "name": p.name, "id": p.id });
+            let mut v = json!({ "name": cadrs_core::parts::display_name(p, props), "id": p.id });
             if let Some(m) = &p.mass {
                 v["volume_mm3"] = json!(round(m.volume));
             }
@@ -1180,19 +1287,26 @@ fn outcome(world: &World, element: ElementId, feature: FeatureId) -> Result<Valu
         .feature(feature)
         .map(|f| f.name.clone())
         .unwrap_or_default();
-    let state = studio_state(e.name.as_str(), e.features());
-    let mut out = json!({ "feature": name, "parts": state["parts"] });
-    if let Some(f) = state["features"]
-        .as_array()
-        .and_then(|fs| fs.iter().find(|f| f["name"] == name.as_str()))
-    {
-        for k in ["error", "warning"] {
-            if let Some(m) = f.get(k) {
-                out[k] = m.clone();
+    let (studio, features, props) = (
+        e.name.clone(),
+        e.features().to_vec(),
+        e.part_props().to_vec(),
+    );
+    after_build(world, features.clone(), move |b| {
+        let state = studio_state(&studio, &features, &props, b);
+        let mut out = json!({ "feature": name, "parts": state["parts"] });
+        if let Some(f) = state["features"]
+            .as_array()
+            .and_then(|fs| fs.iter().find(|f| f["name"] == name.as_str()))
+        {
+            for k in ["error", "warning"] {
+                if let Some(m) = f.get(k) {
+                    out[k] = m.clone();
+                }
             }
         }
-    }
-    Ok(out)
+        Ok(out)
+    })
 }
 
 fn feature_named(
@@ -1441,17 +1555,91 @@ fn delete_feature(world: &mut World, p: &tools::FeatureName) -> Result<Value, St
     describe(world)
 }
 
-/// The parts of a Part Studio as the rebuild makes them.
-fn parts_of(world: &World, studio: Option<&str>) -> Result<Vec<cadrs_core::parts::Part>, String> {
+fn rename_feature(world: &mut World, p: &tools::RenameFeature) -> Result<Value, String> {
+    let mut d = doc_mut(world)?;
+    let element = part_studio(&d, p.part_studio.as_deref())?;
+    let f = feature_named(&d, element, &p.name)?;
+    d.execute(&cadrs_core::commands::RenameFeature {
+        element,
+        feature: f.id,
+        name: p.to.clone(),
+    })
+    .map_err(|e| e.to_string())?;
+    Ok(json!({ "renamed": p.name, "to": p.to }))
+}
+
+/// Shows or hides a sketch or plane with its eye.
+fn set_feature_visible(world: &mut World, p: &tools::SetFeatureVisible) -> Result<Value, String> {
+    let mut d = doc_mut(world)?;
+    let element = part_studio(&d, p.part_studio.as_deref())?;
+    let f = feature_named(&d, element, &p.name)?;
+    d.execute(&cadrs_core::commands::SetSketchVisibility {
+        element,
+        sketch: f.id,
+        visible: Some(p.visible),
+    })
+    .map_err(|e| e.to_string())?;
+    Ok(json!({ "feature": p.name, "visible": p.visible }))
+}
+
+/// Renames a part and/or sets its colour.
+fn set_part(world: &mut World, p: &tools::SetPart) -> Result<Value, String> {
+    let (element, features, props) = {
+        let d = doc(world)?;
+        let element = part_studio(d, p.part_studio.as_deref())?;
+        let e = d.doc.element(element).ok_or("the Part Studio is gone")?;
+        (element, e.features().to_vec(), e.part_props().to_vec())
+    };
+    let p = p.clone();
+    after_build_mut(world, features, move |world, b| {
+        let part = b
+            .parts
+            .iter()
+            .find(|q| cadrs_core::parts::display_name(q, &props) == p.part || q.name == p.part)
+            .ok_or_else(|| format!("no part named {:?}", p.part))?
+            .id;
+        let mut d = doc_mut(world)?;
+        if let Some(rgb) = p.color {
+            let appearance = cadrs_core::Appearance::rgb(rgb[0], rgb[1], rgb[2])
+                .with_alpha(p.alpha.unwrap_or(255));
+            d.execute(&cadrs_core::commands::SetPartAppearance {
+                element,
+                parts: vec![part],
+                appearance: Some(appearance),
+            })
+            .map_err(|e| e.to_string())?;
+        }
+        if let Some(name) = &p.name {
+            d.execute(&cadrs_core::commands::RenamePart {
+                element,
+                part,
+                name: name.clone(),
+            })
+            .map_err(|e| e.to_string())?;
+        }
+        Ok(json!({ "part": p.name.as_ref().unwrap_or(&p.part), "id": part }))
+    })
+}
+
+/// A Part Studio's features (the active one's, or the named one's).
+fn studio_features(
+    world: &World,
+    studio: Option<&str>,
+) -> Result<Vec<cadrs_core::Feature>, String> {
     let d = doc(world)?;
     let element = part_studio(d, studio)?;
     let e = d.doc.element(element).ok_or("the Part Studio is gone")?;
-    Ok(cadrs_core::rebuild::build(e.features()).parts.clone())
+    Ok(e.features().to_vec())
 }
 
 fn list_faces(world: &mut World, studio: Option<&str>) -> Result<Value, String> {
+    let features = studio_features(world, studio)?;
+    after_build(world, features, |b| Ok(faces_of(&b.parts)))
+}
+
+fn faces_of(parts: &[cadrs_core::parts::Part]) -> Value {
     let mut out = Vec::new();
-    for p in parts_of(world, studio)? {
+    for p in parts {
         for (i, f) in p.solid.faces.iter().enumerate() {
             let Some(seed) = p.solid.face_point(i) else {
                 continue;
@@ -1483,12 +1671,17 @@ fn list_faces(world: &mut World, studio: Option<&str>) -> Result<Value, String> 
             out.push(v);
         }
     }
-    Ok(json!({ "faces": out }))
+    json!({ "faces": out })
 }
 
 fn list_edges(world: &mut World, studio: Option<&str>) -> Result<Value, String> {
+    let features = studio_features(world, studio)?;
+    after_build(world, features, |b| Ok(edges_of(&b.parts)))
+}
+
+fn edges_of(parts: &[cadrs_core::parts::Part]) -> Value {
     let mut out = Vec::new();
-    for p in parts_of(world, studio)? {
+    for p in parts {
         for e in &p.solid.edges {
             let (Some(a), Some(b)) = (e.points.first(), e.points.last()) else {
                 continue;
@@ -1517,7 +1710,7 @@ fn list_edges(world: &mut World, studio: Option<&str>) -> Result<Value, String> 
             out.push(v);
         }
     }
-    Ok(json!({ "edges": out }))
+    json!({ "edges": out })
 }
 
 /// Imports a STEP file as a new stored document (its parts flattened into a Part Studio) and
@@ -1648,22 +1841,8 @@ fn extrude(world: &mut World, p: &tools::Extrude) -> Result<Value, String> {
         extrude,
     })
     .map_err(|e| e.to_string())?;
-    let e = d.doc.element(element).ok_or("the Part Studio is gone")?;
-    let name = e
-        .feature(feature)
-        .map(|f| f.name.clone())
-        .unwrap_or_default();
-    let state = studio_state(e.name.as_str(), e.features());
-    let error = state["features"]
-        .as_array()
-        .and_then(|fs| fs.iter().find(|f| f["name"] == name.as_str()))
-        .and_then(|f| f.get("error"))
-        .cloned();
-    let mut out = json!({ "feature": name, "parts": state["parts"] });
-    if let Some(e) = error {
-        out["error"] = e;
-    }
-    Ok(out)
+    drop(d);
+    outcome(world, element, feature)
 }
 
 #[cfg(test)]
