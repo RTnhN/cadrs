@@ -6,13 +6,12 @@ Open each link in your normal browser and save the PDF in the folder of its head
 
 **Free** means it should open without a login. ScienceDirect links (`sciencedirect.com/.../pdfft`) show the PDF only if the article is open access or your library subscribes. Older CAGD papers are often in Elsevier's free archive. The links go straight to the PDF; if one shows an article page instead, use its "View PDF" button.
 
-Already fetched automatically are 19 papers, listed at the end.
+Already fetched automatically are 20 papers, listed at the end.
 
 ## `research/papers/intersection/`
 
 | Paper | Link | Save as |
 |---|---|---|
-| **free** Hu & Wallner 2005, second-order orthogonal projection (server was down on 2026-10-22) | http://www.geometrie.tugraz.at/wallner/sproj.pdf | `Hu-Wallner-2005-second-order-orthogonal-projection.pdf` |
 | Grandine & Klein 1997, a new approach to the surface intersection problem | https://www.sciencedirect.com/science/article/pii/S0167839696000246/pdfft | `Grandine-Klein-1997-new-approach-surface-intersection.pdf` |
 | Wang, Goldman & Tu 2003, enhancing Levin's method | https://www.sciencedirect.com/science/article/pii/S0167839603000815/pdfft | `Wang-Goldman-Tu-2003-enhancing-Levins-method-quadric-intersections.pdf` |
 | Lin et al. 2014, affine-arithmetic B-spline intersection on the GPU (IEEE) | https://doi.org/10.1109/TVCG.2013.237 | `Lin-Qin-Liao-Xiong-2014-affine-arithmetic-BSpline-intersection-GPU.pdf` |
@@ -67,7 +66,7 @@ Already fetched automatically are 19 papers, listed at the end.
 
 These came through `~/tools/playwright/fetch_pdf.sh` on 2026-10-22. It drives a visible Chrome window, which gets past challenges that block curl and wget, but not a "verify you are human" checkbox. The MIT theses came by opening their DSpace item page and clicking its Download link; MIT rate-limits direct requests to the file.
 
-- **intersection:** Krishnan & Manocha 1997, Manocha & Canny 1991, Sederberg & Zundel 1996, Dupont et al. 2008 I–III, Mourrain & Pavone 2009, Sherbrooke 1993 MIT thesis, Mukundan 2005 MIT thesis
+- **intersection:** Krishnan & Manocha 1997, Manocha & Canny 1991, Sederberg & Zundel 1996, Dupont et al. 2008 I–III, Mourrain & Pavone 2009, Sherbrooke 1993 MIT thesis, Mukundan 2005 MIT thesis, Hu & Wallner 2005 (preprint from Shi-Min Hu's Tsinghua page)
 - **tessellation_mass_queries:** Gonzalez-Ochoa et al. 1998, Chen et al. 2006, Elber & Cohen 1990, Appel 1967, Johnson & Cohen 2005, Bénard, Hertzmann & Kass 2014
 - **booleans:** Attene 2020
 - **exchange_healing_naming:** Bi et al. 2023, Marussig & Hughes 2018, Shen 2000 MIT thesis
