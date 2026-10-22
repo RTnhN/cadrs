@@ -1,5 +1,8 @@
 //! icon-rs icons drawn by Proa UI's `Icon` component.
 
+use std::collections::HashMap;
+use std::sync::{Mutex, OnceLock};
+
 use crate::components::IconDataRef;
 
 /// An icon-rs line or glyph icon for Proa UI's `Icon`: its own elements, with the ink in
@@ -35,12 +38,21 @@ impl IconDataRef for IconRs {
         Some("round")
     }
 
-    /// The elements inside the icon's `<svg>` root, borrowed from its embedded source.
+    /// The elements inside the icon's `<svg>` root, with the ink in `currentColor`. Filled icons
+    /// write the ink on their elements, not only the root, so each icon is recoloured once and
+    /// kept for the life of the process.
     fn data(&self) -> &'static str {
-        let svg = self.0.svg;
-        let start = svg.find('>').map_or(0, |at| at + 1);
-        let end = svg.rfind("</svg>").unwrap_or(svg.len());
-        &svg[start..end]
+        static RECOLOURED: OnceLock<Mutex<HashMap<&'static str, &'static str>>> = OnceLock::new();
+        let mut cache = RECOLOURED
+            .get_or_init(Default::default)
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        cache.entry(self.0.name).or_insert_with(|| {
+            let svg: &'static str = Box::leak(self.0.current_color().into_boxed_str());
+            let start = svg.find('>').map_or(0, |at| at + 1);
+            let end = svg.rfind("</svg>").unwrap_or(svg.len());
+            &svg[start..end]
+        })
     }
 }
 
@@ -53,9 +65,10 @@ mod tests {
         let data = IconRs(icon_rs::PLATFORM_LINUX).data();
         assert!(data.trim_start().starts_with("<path"));
         assert!(!data.contains("<svg") && !data.contains("</svg>"));
+        assert!(!data.contains("#262626"), "the ink is currentColor");
         assert!(
-            !data.contains("#262626"),
-            "the ink comes from the root's currentColor"
+            data.contains(r#"fill="currentColor""#),
+            "the solid shapes follow the text colour"
         );
     }
 }

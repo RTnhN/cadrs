@@ -872,8 +872,8 @@ dependencies = [
 
 [[package]]
 name = "icon-rs"
-version = "0.4.1"
-source = "git+https://github.com/rvdende/icon-rs?rev=99f03976d094d7422a6ddaa181d625b99d488da6#99f03976d094d7422a6ddaa181d625b99d488da6"
+version = "0.4.2"
+source = "git+https://github.com/rvdende/icon-rs?rev=26d4e56db2945cd638bb6069ff9f5b383e5b8693#26d4e56db2945cd638bb6069ff9f5b383e5b8693"
 
 [[package]]
 name = "icu_collections"

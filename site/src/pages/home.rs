@@ -324,24 +324,6 @@ impl<L: DataLoader> WebRenderSync<L> for HomePage {
                             <p class="mt-6 max-w-lg text-pretty text-lg leading-8 text-muted-foreground">
                                 "Sketch on a plane, constrain and dimension, build parts from features, put them together in assemblies, and make drawings from them. cadrs follows Onshape's workflow, with a Bevy UI and an OpenCASCADE kernel, and runs on your own machine."
                             </p>
-                            <div class="mt-8">{PlatformButtons}</div>
-                            <p class="mt-3 text-sm text-muted-foreground">
-                                {release().label.as_str()}
-                                " for 64-bit Windows and Linux. On a Mac, "
-                                <a
-                                    href="#build"
-                                    class="font-medium text-primary underline-offset-4 hover:underline"
-                                >
-                                    "build from source"
-                                </a>
-                                ". "
-                                <a
-                                    href="https://github.com/rvdende/cadrs"
-                                    class="font-medium text-primary underline-offset-4 hover:underline"
-                                >
-                                    "View the source"
-                                </a>
-                            </p>
                         </div>
                         <div class="relative mx-auto w-full max-w-2xl">
                             <div
