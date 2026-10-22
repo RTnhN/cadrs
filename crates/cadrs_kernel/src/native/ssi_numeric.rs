@@ -45,6 +45,7 @@ const REL_TOL: f64 = 1e-9;
 
 use super::math::*;
 use super::surface::Surface;
+use super::tol;
 
 /// A rectangle of surface parameters.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -146,7 +147,7 @@ struct Dom<'a> {
 impl<'a> Dom<'a> {
     fn new(s: &'a Surface, bx: UvBox) -> Self {
         let (pu, pv) = (s.u_periodic(), s.v_periodic());
-        let full = |d: f64| d >= TAU - 1e-9;
+        let full = |d: f64| d >= TAU - tol::ANGULAR;
         Dom {
             s,
             bx,
@@ -225,7 +226,7 @@ fn cell(s: &Surface, uv: UvBox) -> Cell {
             mvv = mvv.max(d[5].norm());
             let c = d[1].cross(&d[2]);
             let l = c.norm();
-            if l > 1e-12 * (d[1].norm() * d[2].norm()).max(1e-300) {
+            if l > 1e-12 * (d[1].norm() * d[2].norm()).max(tol::TINY) {
                 *n = c / l;
             } else {
                 // A pole or an apex: the normal there is a limit, and the cone is wide.
@@ -239,7 +240,7 @@ fn cell(s: &Surface, uv: UvBox) -> Cell {
     let scale = (bb.max - bb.min).abs().max() + bb.min.coords.abs().max().max(bb.max.coords.abs().max());
     let bb = bb.grow(sag + 1e-12 * (1.0 + scale));
     let sum: V3 = ns.iter().flatten().sum();
-    let (axis, half) = match sum.try_normalize(1e-9) {
+    let (axis, half) = match sum.try_normalize(tol::ANGULAR) {
         Some(axis) if !degenerate => {
             let spread = ns.iter().flatten().map(|n| angle(&axis, n)).fold(0.0, f64::max);
             let mut step = 0.0f64;
@@ -337,8 +338,8 @@ fn cuts(lo: f64, hi: f64, knots: &[f64], angular: bool) -> Vec<f64> {
     if angular {
         let q = PI / 2.0;
         let mut k = (lo / q).floor() + 1.0;
-        while k * q < hi - 1e-9 {
-            if k * q > lo + 1e-9 {
+        while k * q < hi - tol::ROUNDOFF {
+            if k * q > lo + tol::ROUNDOFF {
                 xs.push(k * q);
             }
             k += 1.0;
@@ -419,7 +420,7 @@ fn sdist(s: &Surface, p: &P3, hint: (f64, f64)) -> (f64, (f64, f64)) {
     let d = s.d2(uv.0, uv.1);
     let n = d[1].cross(&d[2]);
     let r = p - P3::from(d[0]);
-    match n.try_normalize(1e-300) {
+    match n.try_normalize(tol::TINY) {
         Some(n) => (r.dot(&n), uv),
         None => (r.norm(), uv),
     }
@@ -549,10 +550,10 @@ fn edge_seeds(ctx: &Ctx, on_a: bool, fix_u: bool, val: f64, range: (f64, f64), o
     }
     for (t, ouv) in starts {
         let Some((t, ouv, p)) = edge_newton(s, Iso { fix_u, val, range }, t, o, ouv, ctx.tol) else { continue };
-        if t < range.0 - (range.1 - range.0) * 1e-9 || t > range.1 + (range.1 - range.0) * 1e-9 {
+        if t < range.0 - (range.1 - range.0) * tol::REL || t > range.1 + (range.1 - range.0) * tol::REL {
             continue;
         }
-        if odom.locate(ouv, 1e-9).is_none() || !ctx.region.contains(&p) {
+        if odom.locate(ouv, tol::ROUNDOFF).is_none() || !ctx.region.contains(&p) {
             continue;
         }
         let own = at(t.clamp(range.0, range.1));
@@ -585,7 +586,7 @@ fn meet(ctx: &Ctx, mut a: (f64, f64), mut b: (f64, f64)) -> Option<Pt> {
         }
         let j = nalgebra::Matrix3x4::from_columns(&[da[1], da[2], -db[1], -db[2]]);
         let jjt = j * j.transpose();
-        let lambda = 1e-14 * jjt.trace().max(1e-300);
+        let lambda = 1e-14 * jjt.trace().max(tol::TINY);
         let y = (jjt + nalgebra::Matrix3::identity() * lambda).lu().solve(&(-f))?;
         let dx = j.transpose() * y;
         if !dx.iter().all(|x| x.is_finite()) {
@@ -607,7 +608,7 @@ fn touch(ctx: &Ctx, ca: &Cell, cb: &Cell, out: &mut Found) {
         let r = c.uv;
         uv.0 >= r.u.0 - r.du() * 0.5 && uv.0 <= r.u.1 + r.du() * 0.5 && uv.1 >= r.v.0 - r.dv() * 0.5 && uv.1 <= r.v.1 + r.dv() * 0.5
     };
-    if !inside(ca, pt.a) || !inside(cb, pt.b) || !ctx.region.contains(&pt.p) || ctx.a.locate(pt.a, 1e-9).is_none() || ctx.b.locate(pt.b, 1e-9).is_none() {
+    if !inside(ca, pt.a) || !inside(cb, pt.b) || !ctx.region.contains(&pt.p) || ctx.a.locate(pt.a, tol::ROUNDOFF).is_none() || ctx.b.locate(pt.b, tol::ROUNDOFF).is_none() {
         return;
     }
     if transversal(ctx, &pt) {
@@ -619,7 +620,7 @@ fn touch(ctx: &Ctx, ca: &Cell, cb: &Cell, out: &mut Found) {
 
 /// Whether the cell of a lies on b (all its samples within a hair of it): an area of contact.
 fn coincident(ctx: &Ctx, ca: &Cell, cb: &Cell) -> bool {
-    let lim = super::tol::CONFUSION.max(1e-9 * ctx.size);
+    let lim = super::tol::CONFUSION.max(tol::REL * ctx.size);
     let mut hint = cb.uv.mid();
     for i in 0..3 {
         for j in 0..3 {
@@ -715,10 +716,10 @@ fn correct(ctx: &Ctx, s: Pt, extra: &Extra<'_>) -> Option<Pt> {
 /// points of a traced curve), from their parameters' average: where a fitted curve between
 /// them should pass.
 pub fn refine_between(a: &Surface, b: &Surface, p0: &Pt, p1: &Pt, q: &P3) -> Option<Pt> {
-    let d = (p1.p - p0.p).try_normalize(1e-300)?;
+    let d = (p1.p - p0.p).try_normalize(tol::TINY)?;
     let mid = |x: (f64, f64), y: (f64, f64)| (0.5 * (x.0 + y.0), 0.5 * (x.1 + y.1));
     let start = Pt { p: *q, a: mid(p0.a, p1.a), b: mid(p0.b, p1.b) };
-    let tol = 1e-9 * (1.0 + q.coords.abs().max());
+    let tol = tol::REL * (1.0 + q.coords.abs().max());
     let plane = |x: &Pt, pa: &P3| {
         let (_, su, sv) = a.d1(x.a.0, x.a.1);
         ((pa - q).dot(&d), [su.dot(&d), sv.dot(&d), 0.0, 0.0])
@@ -781,7 +782,7 @@ fn traced_at(ctx: &Ctx, p: &P3, t: Option<&V3>, traced: &[(Traced, Bbox)]) -> Op
                 let (a, b) = (&c.pts[k].p, &c.pts[(k + 1) % n].p);
                 let ab = b - a;
                 let l = ab.norm();
-                seg_dist3(p, a, b) < (0.02 * l).max(floor) && t.is_none_or(|t| l < 1e-300 || (t.dot(&ab) / l).abs() > 0.9)
+                seg_dist3(p, a, b) < (0.02 * l).max(floor) && t.is_none_or(|t| l < tol::TINY || (t.dot(&ab) / l).abs() > 0.9)
             })
             .map(|k| (i, k))
     })
@@ -791,7 +792,7 @@ fn traced_at(ctx: &Ctx, p: &P3, t: Option<&V3>, traced: &[(Traced, Bbox)]) -> Op
 fn seg_dist3(p: &P3, a: &P3, b: &P3) -> f64 {
     let d = b - a;
     let l = d.norm_squared();
-    let t = if l < 1e-300 { 0.0 } else { ((p - a).dot(&d) / l).clamp(0.0, 1.0) };
+    let t = if l < tol::TINY { 0.0 } else { ((p - a).dot(&d) / l).clamp(0.0, 1.0) };
     (a + d * t - p).norm()
 }
 
@@ -809,17 +810,17 @@ fn boundary_end(ctx: &Ctx, s: &Pt, out: &Pt) -> Option<Pt> {
             }
             let o = if axis == 0 { off.0 } else { off.1 };
             let d = x1 - x0;
-            if d.abs() < 1e-300 {
+            if d.abs() < tol::TINY {
                 continue;
             }
             for side in [lo + o, hi + o] {
                 // (A curve running along a side, as where both surfaces end on one rim,
                 // doesn't leave by it.)
-                if (x0 - side).abs() <= 1e-9 * (hi - lo) {
+                if (x0 - side).abs() <= tol::REL * (hi - lo) {
                     continue;
                 }
                 let f = (side - x0) / d;
-                if (-1e-9..=1.0).contains(&f) && best.is_none_or(|b| f < b.0) {
+                if (-tol::REL..=1.0).contains(&f) && best.is_none_or(|b| f < b.0) {
                     best = Some((f.max(0.0), k + axis, side));
                 }
             }
@@ -892,7 +893,7 @@ fn seam_crossing(ctx: &Ctx, pts: &[Pt]) -> Option<(usize, Option<Pt>)> {
 /// Marches the curve through `seed` both ways.
 fn march(ctx: &Ctx, seed: Pt, traced: &[(Traced, Bbox)]) -> Option<Traced> {
     let start = correct(ctx, seed, &|_, _| (0.0, [0.0; 4]))?;
-    if ctx.a.locate(start.a, 1e-9).is_none() || ctx.bt.locate(start.b, 1e-9).is_none() {
+    if ctx.a.locate(start.a, tol::ROUNDOFF).is_none() || ctx.bt.locate(start.b, tol::ROUNDOFF).is_none() {
         return None;
     }
     let t0 = tangent(ctx, &start)?;
@@ -961,7 +962,7 @@ fn march(ctx: &Ctx, seed: Pt, traced: &[(Traced, Bbox)]) -> Option<Traced> {
                 continue;
             }
             // Leaving a box: the end on its side.
-            if ctx.a.locate(next.a, 1e-9).is_none() || ctx.bt.locate(next.b, 1e-9).is_none() {
+            if ctx.a.locate(next.a, tol::ROUNDOFF).is_none() || ctx.bt.locate(next.b, tol::ROUNDOFF).is_none() {
                 match boundary_end(ctx, &s, &next) {
                     Some(e) if (e.p - s.p).norm() > ctx.tol => out.push(e),
                     // The side not solved from this far, or solved where this point already is
@@ -1045,7 +1046,7 @@ fn chain_touches(pts: Vec<Pt>, link: f64, merge: f64) -> (Vec<Traced>, Vec<Pt>) 
     // Drop duplicates (a grid of cells the merge distance wide).
     let mut uniq: Vec<Pt> = Vec::new();
     let mut seen: HashMap<(i64, i64, i64), Vec<usize>> = HashMap::new();
-    let merge = merge.max(1e-300);
+    let merge = merge.max(tol::TINY);
     for p in pts {
         let k = key(&p.p, merge);
         if around(k).any(|c| seen.get(&c).is_some_and(|v| v.iter().any(|&i| (uniq[i].p - p.p).norm() < merge))) {
@@ -1055,7 +1056,7 @@ fn chain_touches(pts: Vec<Pt>, link: f64, merge: f64) -> (Vec<Traced>, Vec<Pt>) 
         uniq.push(p);
     }
     // Components of the points nearer than `link`.
-    let link = link.max(1e-300);
+    let link = link.max(tol::TINY);
     let mut grid: HashMap<(i64, i64, i64), Vec<usize>> = HashMap::new();
     for (i, p) in uniq.iter().enumerate() {
         grid.entry(key(&p.p, link)).or_default().push(i);
@@ -1143,7 +1144,7 @@ pub fn intersect_stats(a: &Surface, ua: UvBox, b: &Surface, ub: UvBox, region: &
         }
         return (Intersection::default(), stats);
     }
-    let size = r.diagonal().max(1e-9);
+    let size = r.diagonal().max(tol::ROUNDOFF);
     let tol = REL_TOL * size.max(1.0);
     let r = r.grow(1e-6 * size + tol);
     let ((pu0, pu1), (pv0, pv1)) = b.param_box();
@@ -1288,7 +1289,7 @@ pub fn intersect_stats(a: &Surface, ua: UvBox, b: &Surface, ub: UvBox, region: &
 /// latter scaled by the problem's size), with central-difference derivatives.
 fn singular_point(ctx: &Ctx, mut p: Pt) -> Option<Pt> {
     let (sa, sb) = (ctx.a.s, ctx.b.s);
-    let w = ctx.size.max(1e-9);
+    let w = ctx.size.max(tol::ROUNDOFF);
     let res = |x: &[f64; 4]| -> [f64; 6] {
         let d = sa.eval(x[0], x[1]) - sb.eval(x[2], x[3]);
         let c = sa.normal(x[0], x[1]).cross(&sb.normal(x[2], x[3])) * w;
@@ -1311,7 +1312,7 @@ fn singular_point(ctx: &Ctx, mut p: Pt) -> Option<Pt> {
         let rv = nalgebra::Vector6::from_column_slice(&r);
         let jt = j.transpose();
         let m = jt * j;
-        let lambda = 1e-12 * m.trace().max(1e-300);
+        let lambda = 1e-12 * m.trace().max(tol::TINY);
         let dx = (m + nalgebra::Matrix4::identity() * lambda).lu().solve(&(-(jt * rv)))?;
         if !dx.iter().all(|v| v.is_finite()) {
             return None;
@@ -1337,7 +1338,7 @@ fn singular_point(ctx: &Ctx, mut p: Pt) -> Option<Pt> {
         return None;
     }
     p = Pt { p: pa, a: (x[0], x[1]), b: (x[2], x[3]) };
-    (ctx.a.locate(p.a, 1e-9).is_some() && ctx.b.locate(p.b, 1e-9).is_some()).then_some(p)
+    (ctx.a.locate(p.a, tol::ROUNDOFF).is_some() && ctx.b.locate(p.b, tol::ROUNDOFF).is_some()).then_some(p)
 }
 
 /// The passes of a traced curve by `q`: the points nearer `q` than their neighbours, within
@@ -1358,7 +1359,7 @@ fn passes(c: &Traced, q: &P3, tol: f64) -> Vec<(usize, V3)> {
             let near = prev(m).is_none_or(|o| dist(o) > dm) && next(m).is_none_or(|o| dist(o) >= dm) && dm <= 0.5 * lp.max(ln) + tol;
             let a = c.pts[prev(m).unwrap_or(m)].p;
             let b = c.pts[next(m).unwrap_or(m)].p;
-            near.then(|| (m, (b - a).try_normalize(1e-300).unwrap_or_else(V3::zeros)))
+            near.then(|| (m, (b - a).try_normalize(tol::TINY).unwrap_or_else(V3::zeros)))
         })
         .collect()
 }

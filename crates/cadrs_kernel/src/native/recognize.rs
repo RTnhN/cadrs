@@ -11,6 +11,7 @@ use super::curve::Curve;
 use super::math::*;
 use super::nurbs::{dehom, NurbsCurve, NurbsSurface};
 use super::surface::Surface;
+use super::tol;
 
 const REL: f64 = 1e-7;
 
@@ -53,7 +54,7 @@ fn circle3(a: &P3, b: &P3, c: &P3) -> Option<(P3, V3, f64)> {
     let (u, v) = (b - a, c - a);
     let w = u.cross(&v);
     let ww = w.norm_squared();
-    if ww < 1e-24 * (u.norm_squared() * v.norm_squared()).max(1e-300) {
+    if ww < 1e-24 * (u.norm_squared() * v.norm_squared()).max(tol::TINY) {
         return None;
     }
     let cc = a + (v * u.norm_squared() - u * v.norm_squared()).cross(&w) * (0.5 / ww);
@@ -73,7 +74,7 @@ fn extrusion(n: &NurbsSurface) -> Option<Surface> {
             let t = dehom(&r[1]) - dehom(&r[0]);
             match d {
                 None => d = Some(t),
-                Some(d0) if (t - d0).norm() <= 1e-9 * (1.0 + d0.norm()) => {}
+                Some(d0) if (t - d0).norm() <= tol::REL * (1.0 + d0.norm()) => {}
                 _ => return None,
             }
         }
@@ -188,7 +189,7 @@ fn candidate(n: &NurbsSurface, poles: bool) -> Option<Surface> {
             // (Not at a pole or apex, where a derivative vanishes and the cross product is
             // rounding noise.)
             let c = d[1].cross(&d[2]);
-            if (!poles || c.norm() > 1e-9 * d[1].norm_squared().max(d[2].norm_squared()))
+            if (!poles || c.norm() > tol::REL * d[1].norm_squared().max(d[2].norm_squared()))
                 && let Some(nn) = c.try_normalize(1e-12)
             {
                 nrms.push((P3::from(d[0]), nn));
@@ -227,7 +228,7 @@ fn candidate(n: &NurbsSurface, poles: bool) -> Option<Surface> {
     if let Some(c) = centre_of(nrms[0], nrms[k / 2]) {
         let r = (pts[0] - c).norm();
         if r > tol && pts.iter().all(|p| ((p - c).norm() - r).abs() < tol) {
-            let x = (pts[0] - c).try_normalize(1e-12).map(|d| (d - V3::z() * d.z).try_normalize(1e-9).unwrap_or(V3::x())).unwrap_or(V3::x());
+            let x = (pts[0] - c).try_normalize(1e-12).map(|d| (d - V3::z() * d.z).try_normalize(tol::ANGULAR).unwrap_or(V3::x())).unwrap_or(V3::x());
             return Some(Surface::Sphere { f: Frame { o: c, x, y: V3::z().cross(&x), z: V3::z() }, r });
         }
     }
@@ -243,7 +244,7 @@ fn candidate(n: &NurbsSurface, poles: bool) -> Option<Surface> {
     let ev = eig.eigenvectors.column(imin);
     let ax = V3::new(ev[0], ev[1], ev[2]);
     let axn = ax.norm();
-    if axn < 1e-9 {
+    if axn < tol::ROUNDOFF {
         return None;
     }
     let a = ax / axn;
@@ -309,7 +310,7 @@ fn candidate(n: &NurbsSurface, poles: bool) -> Option<Surface> {
     let corner = pts[0];
     let radial = ((corner - c0) - a * (corner - c0).dot(&a)).try_normalize(1e-12).unwrap_or_else(|| any_perpendicular(&a));
     let seam_frame = Frame { o: c0, x: radial, y: a.cross(&radial), z: a };
-    if s.abs() < 1e-9 {
+    if s.abs() < tol::ROUNDOFF {
         let r = s0.1;
         if pts.iter().all(|p| (dist_axis(p) - r).abs() < tol) {
             return Some(Surface::Cylinder { f: seam_frame, r });

@@ -25,6 +25,7 @@ use super::nurbs::{hom, NurbsCurve, NurbsSurface, H};
 use super::surface::Surface;
 use super::topo::Face;
 use nalgebra::{Matrix3, Matrix4, SMatrix, SVector, Vector2};
+use super::tol;
 
 /// A point where the ball touches a face: (u, v) on the face's surface, the point and the
 /// face's outward unit normal there.
@@ -90,7 +91,7 @@ impl Ball {
         if self.flat {
             let chord = self.q[1].p - self.q[0].p;
             let out = (self.q[0].p - self.c) + (self.q[1].p - self.c);
-            let n = (out - chord * (out.dot(&chord) / chord.norm_squared().max(1e-300))).normalize();
+            let n = (out - chord * (out.dot(&chord) / chord.norm_squared().max(tol::TINY))).normalize();
             return (x - self.q[0].p).dot(&n);
         }
         (x - self.c).norm() - (self.q[0].p - self.c).norm()
@@ -101,7 +102,7 @@ impl Ball {
         let (a, o) = (self.q[k].p, self.q[1 - k].p);
         if self.flat {
             let d = o - a;
-            return (x - a).dot(&d) / d.norm_squared().max(1e-300);
+            return (x - a).dot(&d) / d.norm_squared().max(tol::TINY);
         }
         let (a, o) = (a - self.c, o - self.c);
         let whole = a.angle(&o);
@@ -193,7 +194,7 @@ pub fn ball_in_plane(f: [&Face; 2], k: [f64; 2], p0: &P3, t: &V3, guess: [P2; 2]
         let a = offset(f[0], k[0], x[0])?;
         let b = offset(f[1], k[1], x[1])?;
         if it == 0 {
-            lim = lim.max(2.0 * (a.contact.p - b.contact.p).norm()).max(1e-9 * sc);
+            lim = lim.max(2.0 * (a.contact.p - b.contact.p).norm()).max(tol::REL * sc);
         }
         let r3 = a.o - b.o;
         let rp = (a.o - p0).dot(t);
@@ -249,7 +250,7 @@ pub fn ball3(f: [&Face; 3], k: [f64; 3], guess: [P2; 3]) -> Option<(P3, [Contact
         let dx = m.lu().solve(&(-res))?;
         let d: [Vector2<f64>; 3] = [Vector2::new(dx[0], dx[1]), Vector2::new(dx[2], dx[3]), Vector2::new(dx[4], dx[5])];
         let len = [(&a, d[0]), (&b, d[1]), (&c, d[2])].iter().map(|(o, s)| (o.du * s.x + o.dv * s.y).norm()).fold(0.0, f64::max);
-        let g = damp(len, (2.0 * k[0].abs()).max(1e-9 * sc));
+        let g = damp(len, (2.0 * k[0].abs()).max(tol::REL * sc));
         x = [step(f[0], &a, x[0], d[0], g), step(f[1], &b, x[1], d[1], g), step(f[2], &c, x[2], d[2], g)];
     }
     None
@@ -338,7 +339,7 @@ pub fn rail_crossings(f: [&Face; 2], k: [f64; 2], side: usize, bd: &Boundary, ne
             uvo = clamp_uv(fo, uvo + Vector2::new(dx[1], dx[2]));
         }
         if let Some(x) = ok
-            && !out.iter().any(|(t2, _)| (t2 - x.0).abs() < 1e-9 * (1.0 + x.0.abs())) {
+            && !out.iter().any(|(t2, _)| (t2 - x.0).abs() < tol::REL * (1.0 + x.0.abs())) {
                 out.push(x);
             }
     }
@@ -407,12 +408,12 @@ impl Spine {
         for _ in 0..50 {
             let (p, d) = self.at(t);
             let (_, d1, d2) = self.curve.d2(self.on_curve(t));
-            let speed = d1.norm().max(1e-300);
+            let speed = d1.norm().max(tol::TINY);
             let g = (c - p).dot(&d);
             // d/dt of (c − p)·T ≈ −|p'| + (c − p)·T' (T' = curvature normal · speed).
             let tp = (d2 - d * d2.dot(&d)) / speed;
             let dg = -speed + (c - p).dot(&tp);
-            if dg.abs() < 1e-300 {
+            if dg.abs() < tol::TINY {
                 break;
             }
             let dt = -g / dg;
@@ -450,8 +451,8 @@ pub fn exact_kind(f: [&Face; 2], spine: &Spine) -> Option<Exact> {
         Curve::Circle { c, x, y, .. } => {
             let z = x.cross(y).normalize();
             let coaxial = |s: &Surface| match s {
-                Surface::Plane { f } => f.x.cross(&f.y).cross(&z).norm() < 1e-9,
-                _ => s.axis().is_some_and(|(o, a)| a.cross(&z).norm() < 1e-9 && (o - c).cross(&z).norm() < 1e-7),
+                Surface::Plane { f } => f.x.cross(&f.y).cross(&z).norm() < tol::ANGULAR,
+                _ => s.axis().is_some_and(|(o, a)| a.cross(&z).norm() < tol::ANGULAR && (o - c).cross(&z).norm() < 1e-7),
             };
             (coaxial(&f[0].surf) && coaxial(&f[1].surf)).then_some(Exact::Torus)
         }
@@ -510,7 +511,7 @@ pub fn exact_strip(kind: Exact, b: &Ball, spine: &Spine) -> Option<Strip> {
             let axis_pt = c + z * h;
             let rho = b.c - axis_pt;
             let rmaj = rho.norm();
-            if rmaj <= r * (1.0 + 1e-9) {
+            if rmaj <= r * (1.0 + tol::REL) {
                 return None;
             }
             // The torus's frame and rails share the spine's x and y so their angles agree.

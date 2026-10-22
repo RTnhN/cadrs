@@ -27,6 +27,7 @@ use super::ssi;
 use super::surface::Surface;
 use super::topo::{Body, Coedge, Edge, Face, Shell, Solid};
 use crate::*;
+use super::tol;
 
 /// Accumulated time per boolean phase (CADRS_PROFILE=1 prints it after each boolean).
 struct Prof {
@@ -384,7 +385,7 @@ fn refine_param(c: &Curve, t0: f64, t1: f64, p: &P3, t: f64) -> f64 {
                 let r = q - p;
                 let f = r.dot(&d1);
                 let df = d1.norm_squared() + r.dot(&d2);
-                if df.abs() < 1e-300 {
+                if df.abs() < tol::TINY {
                     break;
                 }
                 let nx = (x - f / df).clamp(t0, t1);
@@ -497,13 +498,13 @@ fn point_in_face(f: &WFace, p: &P3, tol: f64) -> InFace {
     let (mut u, mut v) = f.surf.project(p, Some((f.uv_center.x, f.uv_center.y)));
     // A projection from the face's middle can stop short on a B-spline or an extrusion (a
     // local minimum, the end of the range): from the whole surface then.
-    if (f.surf.eval(u, v) - p).norm() > tol * 10.0 + 1e-9 && matches!(f.surf, Surface::Nurbs(_) | Surface::Extrusion { .. }) {
+    if (f.surf.eval(u, v) - p).norm() > tol * 10.0 + tol::ROUNDOFF && matches!(f.surf, Surface::Nurbs(_) | Surface::Extrusion { .. }) {
         let (u2, v2) = f.surf.project(p, None);
         if (f.surf.eval(u2, v2) - p).norm() < (f.surf.eval(u, v) - p).norm() {
             (u, v) = (u2, v2);
         }
     }
-    if (f.surf.eval(u, v) - p).norm() > tol * 10.0 + 1e-9 {
+    if (f.surf.eval(u, v) - p).norm() > tol * 10.0 + tol::ROUNDOFF {
         return InFace::Outside;
     }
     let mut res = InFace::Outside;
@@ -555,7 +556,7 @@ pub fn interior_points_of_polys(polys: &[Vec<P2>]) -> Vec<P2> {
         return Vec::new();
     }
     // Distance from a point to the boundary, scaled to the box.
-    let (su, sv) = (1.0 / (ub.1 - ub.0).max(1e-300), 1.0 / (vb.1 - vb.0).max(1e-300));
+    let (su, sv) = (1.0 / (ub.1 - ub.0).max(tol::TINY), 1.0 / (vb.1 - vb.0).max(tol::TINY));
     let clearance = |q: &P2| -> f64 {
         let qs = P2::new(q.x * su, q.y * sv);
         let mut d = f64::INFINITY;
@@ -1285,7 +1286,7 @@ fn run(a: &Body, b: &Body, mode: Mode, opts: RunOpts) -> Result<BoolOut> {
                         }
                         let tc = 0.5 * (lo + hi);
                         let pc = ic.c.point(tc);
-                        if !ps.iter().any(|(pt, v)| (pt - tc).abs() < 1e-9 * (1.0 + span.abs()) || (pool.verts[*v] - pc).norm() < tf * 10.0) {
+                        if !ps.iter().any(|(pt, v)| (pt - tc).abs() < tol::REL * (1.0 + span.abs()) || (pool.verts[*v] - pc).norm() < tf * 10.0) {
                             let v = pool.vertex_tol(pc, ft);
                             ps.push((tc, v));
                         }
@@ -2008,7 +2009,7 @@ fn drop_empty_solids(b: &mut Body, from: &mut Vec<Vec<(usize, usize)>>, pairs: &
     let volumes: Vec<Option<f64>> = (0..b.solids.len())
         .map(|si| suspect(si).then(|| super::mass::body_mass(&super::kernel::subset(b, &b.solid_faces(si), true)).volume))
         .collect();
-    let empty: Vec<usize> = (0..b.solids.len()).filter(|&si| volumes[si].is_some_and(|v| v.abs() <= 1e-9 * size * size * size)).collect();
+    let empty: Vec<usize> = (0..b.solids.len()).filter(|&si| volumes[si].is_some_and(|v| v.abs() <= tol::REL * size * size * size)).collect();
     if empty.is_empty() {
         return (false, volumes);
     }
@@ -2100,7 +2101,7 @@ pub fn split_nonmanifold(b: &mut Body) {
             let (pu, su, sv) = f.surf.d1(uv.x, uv.y);
             let g = su * perp.x + sv * perp.y;
             let sgn = if g.dot(&w0) >= 0.0 { 1.0 } else { -1.0 };
-            let scale = step / g.norm().max(1e-300);
+            let scale = step / g.norm().max(tol::TINY);
             let q = f.surf.eval(uv.x + perp.x * scale * sgn, uv.y + perp.y * scale * sgn);
             let w = {
                 let r = q - pu;
@@ -2272,7 +2273,7 @@ pub fn assemble_shells(b: &mut Body) -> Result<()> {
 /// from points inside a few of its faces, rays along the outward normal (and two tilts of it)
 /// cross the shell an even number of times when they do. None when the votes don't settle it.
 fn shell_points_out(b: &Body, faces: &[usize], polys: &[Vec<Vec<P2>>]) -> Option<bool> {
-    let size = b.bbox().diagonal().max(1e-9);
+    let size = b.bbox().diagonal().max(tol::ROUNDOFF);
     let (mut out, mut inward) = (0, 0);
     for &f in faces.iter().take(3) {
         let fc = &b.faces[f];

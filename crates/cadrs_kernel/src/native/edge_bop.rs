@@ -15,6 +15,7 @@ use super::curve::Curve;
 use super::math::*;
 use super::topo::Body;
 use crate::{BoolOp, PointClass};
+use super::tol;
 
 /// An edge: its curve on [t0, t1].
 #[derive(Debug, Clone)]
@@ -105,7 +106,7 @@ impl Ctx<'_> {
                 let (_, z) = (ed.t[0].min(ed.t[1]), ed.t[0].max(ed.t[1]));
                 let (a, _) = (ed.t[0].min(ed.t[1]), z);
                 // Not at the edge's ends (a corner: the polygon decides).
-                if (t - a).abs() > 1e-9 * (1.0 + a.abs()) && (z - t).abs() > 1e-9 * (1.0 + z.abs()) {
+                if (t - a).abs() > tol::REL * (1.0 + a.abs()) && (z - t).abs() > tol::REL * (1.0 + z.abs()) {
                     let (qu, qv) = f.surf.project(&q, Some((u, v)));
                     let n = f.surf.normal(qu, qv) * if f.sense { 1.0 } else { -1.0 };
                     let tan = ed.curve.tangent(t) * if fwd { 1.0 } else { -1.0 };
@@ -408,7 +409,7 @@ fn size_of(edges: &[Piece], other: &Other) -> f64 {
         Other::Edges(es) => es.iter().for_each(&mut add_edge),
         Other::Body(b) => b.verts.iter().for_each(|v| add(v.p)),
     }
-    (hi - lo).norm().max(1e-9)
+    (hi - lo).norm().max(tol::ROUNDOFF)
 }
 
 /// `edges` op `other`: the pieces of the edges (common: inside or on the other argument; cut:

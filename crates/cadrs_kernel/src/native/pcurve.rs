@@ -9,6 +9,7 @@ use super::curve::Curve;
 use super::math::*;
 use super::nurbs::NurbsCurve;
 use super::surface::Surface;
+use super::tol;
 
 fn line2(o: P2, d: V2) -> Curve {
     Curve::Line { o: P3::new(o.x, o.y, 0.0), d: V3::new(d.x, d.y, 0.0) }
@@ -33,7 +34,7 @@ pub fn closed_periods(s: &Surface) -> [Option<f64>; 2] {
     let meets = |a: &dyn Fn(f64) -> (P3, P3)| {
         (0..5).all(|i| {
             let (p, q) = a(0.1 + 0.2 * i as f64);
-            (p - q).norm() <= 1e-9 * (1.0 + p.coords.norm())
+            (p - q).norm() <= tol::REL * (1.0 + p.coords.norm())
         })
     };
     let uc = meets(&|f| (s.eval(u0, v0 + (v1 - v0) * f), s.eval(u1, v0 + (v1 - v0) * f)));
@@ -98,7 +99,7 @@ pub fn project_along(s: &Surface, p: &P3, hint: Option<(f64, f64)>, periods: [Op
 fn beyond_range(s: &Surface, p: &P3, q: P2) -> Option<P2> {
     let Surface::Nurbs(n) = s else { return None };
     let ((u0, u1), (v0, v1)) = n.range();
-    let at_end = |x: f64, a: f64, b: f64| (x - a).abs() <= (b - a) * 1e-9 || (x - b).abs() <= (b - a) * 1e-9;
+    let at_end = |x: f64, a: f64, b: f64| (x - a).abs() <= (b - a) * tol::REL || (x - b).abs() <= (b - a) * tol::REL;
     if !at_end(q.x, u0, u1) && !at_end(q.y, v0, v1) {
         return None;
     }
@@ -111,7 +112,7 @@ fn beyond_range(s: &Surface, p: &P3, q: P2) -> Option<P2> {
         let b = d[1].dot(&d[2]) + r.dot(&d[4]);
         let c = d[2].norm_squared() + r.dot(&d[5]);
         let det = a * c - b * b;
-        if det.abs() <= 1e-300 {
+        if det.abs() <= tol::TINY {
             return None;
         }
         let (du, dv) = ((-fu * c + fv * b) / det, (-fv * a + fu * b) / det);
@@ -131,7 +132,7 @@ fn beyond_range(s: &Surface, p: &P3, q: P2) -> Option<P2> {
 /// there (a pole).
 fn free_at(s: &Surface, q: P2) -> (bool, bool) {
     let (_, su, sv) = s.d1(q.x, q.y);
-    let scale = 1e-9 * (su.norm() + sv.norm()).max(1e-300);
+    let scale = tol::REL * (su.norm() + sv.norm()).max(tol::TINY);
     (su.norm() <= scale, sv.norm() <= scale)
 }
 
@@ -165,7 +166,7 @@ fn into_closed_range(s: &Surface, pc: Curve, t0: f64, t1: f64, near: Option<P2>)
     let pts: Vec<P2> = (0..=16).map(|i| pc.point(t0 + (t1 - t0) * i as f64 / 16.0)).map(|q| P2::new(q.x, q.y)).collect();
     // The shift (in whole periods) putting [lo, hi] most inside [a, b].
     let best = |lo: f64, hi: f64, a: f64, b: f64, per: f64, at: Option<f64>| -> f64 {
-        let eps = (b - a) * 1e-9;
+        let eps = (b - a) * tol::REL;
         let mut cands: Vec<(f64, f64, f64)> = Vec::new();
         for k in -2i32..=2 {
             let d = k as f64 * per;
@@ -263,13 +264,13 @@ fn exact(s: &Surface, c: &Curve, t0: f64, t1: f64) -> Option<Curve> {
                 // A ruling: in a plane through the axis, along the cone's slope.
                 let l = f.local(o);
                 let rho = (l.x * l.x + l.y * l.y).sqrt();
-                let u = if rho > 1e-9 { l.y.atan2(l.x) } else {
+                let u = if rho > tol::ROUNDOFF { l.y.atan2(l.x) } else {
                     let ld = V3::new(d.dot(&f.x), d.dot(&f.y), 0.0);
                     ld.y.atan2(ld.x)
                 };
                 let radial = f.x * u.cos() + f.y * u.sin();
                 let ruling = radial * a.sin() + f.z * a.cos();
-                if d.cross(&ruling).norm() > 1e-9 * d.norm() {
+                if d.cross(&ruling).norm() > tol::REL * d.norm() {
                     return None;
                 }
                 let _ = r;
@@ -285,17 +286,17 @@ fn exact(s: &Surface, c: &Curve, t0: f64, t1: f64) -> Option<Curve> {
                 let v = l.z.atan2((l.x * l.x + l.y * l.y).sqrt());
                 Some(line2(P2::new(ang(f, x), v), V2::new(sgn, 0.0)))
             }
-            Curve::Circle { c: cc, x, y, .. } if (cc - f.o).norm() < 1e-9 && x.cross(y).dot(&f.z).abs() < 1e-12 => {
+            Curve::Circle { c: cc, x, y, .. } if (cc - f.o).norm() < tol::ROUNDOFF && x.cross(y).dot(&f.z).abs() < 1e-12 => {
                 // A meridian: u const, v = ±t + v0, in the half plane holding the arc.
                 let m = c.point((t0 + t1) * 0.5) - f.o;
                 let side = m - f.z * m.dot(&f.z);
-                if side.norm() < 1e-9 {
+                if side.norm() < tol::ROUNDOFF {
                     return None;
                 }
                 // The arc must stay in that half plane (not run over a pole).
                 for s in [0.0, 1.0] {
                     let q = c.point(t0 + (t1 - t0) * s) - f.o;
-                    if (q - f.z * q.dot(&f.z)).dot(&side) < -1e-9 {
+                    if (q - f.z * q.dot(&f.z)).dot(&side) < -tol::ROUNDOFF {
                         return None;
                     }
                 }
@@ -312,7 +313,7 @@ fn exact(s: &Surface, c: &Curve, t0: f64, t1: f64) -> Option<Curve> {
             }
             Curve::Circle { c: cc, x, y, .. } if x.cross(y).dot(&f.z).abs() < 1e-12 => {
                 let l = f.local(cc);
-                if l.z.abs() > 1e-9 || ((l.x * l.x + l.y * l.y).sqrt() - rmaj).abs() > 1e-9 {
+                if l.z.abs() > tol::ROUNDOFF || ((l.x * l.x + l.y * l.y).sqrt() - rmaj).abs() > tol::ROUNDOFF {
                     return None;
                 }
                 // The half plane of the circle's centre.
@@ -360,7 +361,7 @@ fn coaxial_circle(f: &Frame, cc: &P3, x: &V3, y: &V3) -> bool {
         return false;
     }
     let w = cc - f.o;
-    (w - f.z * w.dot(&f.z)).norm() < 1e-9
+    (w - f.z * w.dot(&f.z)).norm() < tol::ROUNDOFF
 }
 
 /// Drops the z coordinate of a 2D curve (numerical noise from projecting into a plane).
@@ -393,7 +394,7 @@ pub(super) fn iso_line(s: &Surface, c: &Curve, t0: f64, t1: f64) -> Option<Curve
         let p = c.point(t);
         let q = project_along(s, &p, hint, periods);
         let (u, v) = (q.x, q.y);
-        if (s.eval(u, v) - p).norm() > 1e-9 {
+        if (s.eval(u, v) - p).norm() > tol::ROUNDOFF {
             return None;
         }
         hint = Some((u, v));
@@ -404,7 +405,7 @@ pub(super) fn iso_line(s: &Surface, c: &Curve, t0: f64, t1: f64) -> Option<Curve
     let d = (b - a) / (t1 - t0);
     let line = Curve::Line { o: P3::new(a.x - d.x * t0, a.y - d.y * t0, 0.0), d: V3::new(d.x, d.y, 0.0) };
     // Straight in uv and affine in t, and an iso-line (u or v constant).
-    if d.x.abs() > 1e-12 * d.y.abs().max(1e-300) && d.y.abs() > 1e-12 * d.x.abs().max(1e-300) {
+    if d.x.abs() > 1e-12 * d.y.abs().max(tol::TINY) && d.y.abs() > 1e-12 * d.x.abs().max(tol::TINY) {
         return None;
     }
     let tol = 1e-10 * (1.0 + a.coords.norm() + b.coords.norm());
@@ -419,7 +420,7 @@ pub(super) fn iso_line(s: &Surface, c: &Curve, t0: f64, t1: f64) -> Option<Curve
     for i in 0..n {
         let t = t0 + (t1 - t0) * (i as f64 + 0.5) / n as f64;
         let l = line.point(t);
-        if (s.eval(l.x, l.y) - c.point(t)).norm() > 1e-9 {
+        if (s.eval(l.x, l.y) - c.point(t)).norm() > tol::ROUNDOFF {
             return None;
         }
     }

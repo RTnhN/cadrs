@@ -22,6 +22,7 @@
 use super::curve::Curve;
 use super::math::*;
 use super::surface::Surface;
+use super::tol;
 
 /// The smallest tolerance an entity has (OCCT's `Precision::Confusion`): exact geometry
 /// ([`super::tol::CONFUSION`]).
@@ -1241,7 +1242,7 @@ fn uv_scale(surf: &Surface, u: (f64, f64), v: (f64, f64)) -> (f64, f64) {
     if matches!(surf, Surface::Plane { .. } | Surface::Cylinder { .. } | Surface::Cone { .. } | Surface::Sphere { .. } | Surface::Torus { .. }) {
         return surf.metric();
     }
-    let (hu, hv) = (((u.1 - u.0) * 1e-4).max(1e-9), ((v.1 - v.0) * 1e-4).max(1e-9));
+    let (hu, hv) = (((u.1 - u.0) * 1e-4).max(tol::ROUNDOFF), ((v.1 - v.0) * 1e-4).max(tol::ROUNDOFF));
     let (mut du, mut dv) = (Vec::with_capacity(25), Vec::with_capacity(25));
     for i in 0..5 {
         for j in 0..5 {
@@ -1410,7 +1411,7 @@ fn loop_crossings(rings: &[Ring]) -> Vec<(usize, usize, P2)> {
         hi = P2::new(hi.x.max(s.hi.x), hi.y.max(s.hi.y));
     }
     let g = ((segs.len() as f64).sqrt().ceil() as usize).clamp(1, 512);
-    let (w, h) = ((hi.x - lo.x).max(1e-300), (hi.y - lo.y).max(1e-300));
+    let (w, h) = ((hi.x - lo.x).max(tol::TINY), (hi.y - lo.y).max(tol::TINY));
     let cell = |x: f64, y: f64| (((x - lo.x) / w * g as f64) as usize).min(g - 1) + g * (((y - lo.y) / h * g as f64) as usize).min(g - 1);
     let mut bins: Vec<Vec<usize>> = vec![Vec::new(); g * g];
     for (k, s) in segs.iter().enumerate() {
@@ -1452,7 +1453,7 @@ fn crosses(a: &P2, b: &P2, c: &P2, d: &P2, tol: f64) -> bool {
     if o1 * o2 >= 0 || o3 * o4 >= 0 {
         return false;
     }
-    let side = |p: &P2, q: &P2, r: &P2| ((q.x - p.x) * (r.y - p.y) - (q.y - p.y) * (r.x - p.x)).abs() / (q - p).norm().max(1e-300);
+    let side = |p: &P2, q: &P2, r: &P2| ((q.x - p.x) * (r.y - p.y) - (q.y - p.y) * (r.x - p.x)).abs() / (q - p).norm().max(tol::TINY);
     side(a, b, c) > tol && side(a, b, d) > tol && side(c, d, a) > tol && side(c, d, b) > tol
 }
 
@@ -1507,7 +1508,7 @@ fn self_crossing(p: &[P2]) -> Option<(usize, usize)> {
     for q in p {
         size = size.max(q.x.abs()).max(q.y.abs());
     }
-    let eps = 1e-9 * (1.0 + size);
+    let eps = tol::REL * (1.0 + size);
     let cross = |a: &P2, b: &P2, c: &P2| (b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x);
     for i in 0..n {
         let (a, b) = (p[i], p[(i + 1) % n]);
@@ -1520,8 +1521,8 @@ fn self_crossing(p: &[P2]) -> Option<(usize, usize)> {
                 continue;
             }
             let (d1, d2, d3, d4) = (cross(&a, &b, &c), cross(&a, &b, &d), cross(&c, &d, &a), cross(&c, &d, &b));
-            let l1 = (b - a).norm() * eps.max(1e-300);
-            let l2 = (d - c).norm() * eps.max(1e-300);
+            let l1 = (b - a).norm() * eps.max(tol::TINY);
+            let l2 = (d - c).norm() * eps.max(tol::TINY);
             if ((d1 > l1 && d2 < -l1) || (d1 < -l1 && d2 > l1)) && ((d3 > l2 && d4 < -l2) || (d3 < -l2 && d4 > l2)) {
                 return Some((i, j));
             }

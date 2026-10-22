@@ -16,6 +16,7 @@ use super::math::*;
 use super::surface::Surface;
 use super::topo::Body;
 use crate::*;
+use super::tol;
 
 /// A planar face swept along its outward normal by `d` (negative: inward).
 fn face_slab(b: &Body, fi: usize, d: f64) -> Result<Body> {
@@ -25,7 +26,7 @@ fn face_slab(b: &Body, fi: usize, d: f64) -> Result<Body> {
         if let Surface::Cylinder { f: fr, r } = &f.surf
             && d > 0.0
             && f.sense != fr.right_handed()
-            && d >= r * (1.0 - 1e-9)
+            && d >= r * (1.0 - tol::REL)
             && let Some(w) = cylinder_wedge(b, fi)?
         {
             return Ok(w);
@@ -45,7 +46,7 @@ fn face_slab(b: &Body, fi: usize, d: f64) -> Result<Body> {
         *l = l
             .drain(..)
             .flat_map(|p| {
-                let closed = matches!(p.c, Curve::Nurbs(_)) && (p.c.point(p.t0) - p.c.point(p.t1)).norm() < 1e-9 * (1.0 + p.c.point(p.t0).coords.norm());
+                let closed = matches!(p.c, Curve::Nurbs(_)) && (p.c.point(p.t0) - p.c.point(p.t1)).norm() < tol::REL * (1.0 + p.c.point(p.t0).coords.norm());
                 if closed {
                     let m = 0.5 * (p.t0 + p.t1);
                     let (mut a, mut b) = (p.clone(), p);
@@ -96,7 +97,7 @@ fn edge_tube(b: &Body, e: usize, r: f64) -> Result<Body> {
             // The profile plane's x runs out from the axis, its y down it (−axis); the axis is
             // the line x = −rc.
             let plane = Plane { origin: q, x_dir: nalgebra::Unit::new_normalize(radial), normal: nalgebra::Unit::new_normalize(tangent) };
-            let outer = if r < rc * (1.0 - 1e-9) {
+            let outer = if r < rc * (1.0 - tol::REL) {
                 Loop { curves: vec![Curve2::Circle { center: nalgebra::Point2::origin(), radius: r, source: None }] }
             } else {
                 // A tube wider than its arc's radius (a spindle torus): the balls along the
@@ -122,7 +123,7 @@ fn edge_tube(b: &Body, e: usize, r: f64) -> Result<Body> {
             let mf = super::profile::merge_regions(&regions)?;
             let f = Frame { o: *c, x: radial, y: axis.cross(&radial), z: axis };
             let span = ed.t[1] - ed.t[0];
-            let whole = span >= TAU - 1e-9;
+            let whole = span >= TAU - tol::ANGULAR;
             let kind = super::sweep::Revolve { plane, f };
             Ok(super::sweep::sweep_full(&mf, &[], &kind, 0.0, if whole { TAU } else { span }, whole, true)?.body)
         }
@@ -173,7 +174,7 @@ fn convex(b: &Body, e: usize) -> Option<bool> {
     }
     let (n1, _w1) = (sides[0].1, sides[0].2);
     let w2 = sides[1].2;
-    if n1.cross(&sides[1].1).norm() < 1e-9 {
+    if n1.cross(&sides[1].1).norm() < tol::ANGULAR {
         return None; // tangent faces: smooth
     }
     Some(w2.dot(&n1) < 0.0)
@@ -247,11 +248,11 @@ fn grown_except(b: &Body, d: f64, cut: &[(P3, V3)]) -> Result<Body> {
         .map(|fi| {
             let Surface::Plane { f: fr } = &b.faces[fi].surf else { return None };
             let n = fr.x.cross(&fr.y).normalize() * if b.faces[fi].sense { 1.0 } else { -1.0 };
-            cut.iter().find(|(o, m)| n.dot(m) > 1.0 - 1e-9 && (fr.o - o).dot(m).abs() < 1e-9 * size).map(|(_, m)| *m)
+            cut.iter().find(|(o, m)| n.dot(m) > 1.0 - tol::ANGULAR && (fr.o - o).dot(m).abs() < tol::REL * size).map(|(_, m)| *m)
         })
         .collect();
     // A face that doesn't point below the cut plane `m` at `p`.
-    let above = |fi: usize, m: &V3, p: &P3| outward_normal(b, fi, p).dot(m) >= -1e-9;
+    let above = |fi: usize, m: &V3, p: &P3| outward_normal(b, fi, p).dot(m) >= -tol::ANGULAR;
     let mut pieces: Vec<(Body, String)> = Vec::new();
     for fi in 0..b.faces.len() {
         if on_cut[fi].is_none() {
@@ -287,7 +288,7 @@ fn grown_except(b: &Body, d: f64, cut: &[(P3, V3)]) -> Result<Body> {
     for e in &b.edges {
         for v in e.v {
             let p = b.verts[v].p;
-            if done.iter().any(|q| (q - p).norm() < 1e-9) {
+            if done.iter().any(|q| (q - p).norm() < tol::ROUNDOFF) {
                 continue;
             }
             done.push(p);
@@ -390,11 +391,11 @@ pub fn shell(k: &mut NativeKernel, body: BodyId, spec: &ShellSpec) -> Result<OpR
                     out.body.solids[0].shells.sort();
                 }
                 let v1 = super::mass::body_mass(&out.body).volume;
-                if v1 <= 1e-9 || v1 > v0 + 1e-9 {
+                if v1 <= tol::ROUNDOFF || v1 > v0 + tol::ROUNDOFF {
                     return Err(KernelError::InvalidResult { op: "shell", why: "the shell came out wrong".into() });
                 }
                 // Walls that meet everywhere leave no cavity.
-                if crossing && v1 >= v0 * (1.0 - 1e-9) {
+                if crossing && v1 >= v0 * (1.0 - tol::REL) {
                     return Err(too_thick());
                 }
                 Ok(out)
@@ -483,7 +484,7 @@ pub fn shell(k: &mut NativeKernel, body: BodyId, spec: &ShellSpec) -> Result<OpR
     if std::env::var("CADRS_SHELL_DEBUG").is_ok() {
         eprintln!("shell: body {v0} result {v1} solids {} faces {}", result.body.solids.len(), result.body.faces.len());
     }
-    if v1 <= 1e-9 || (!spec.outward && v1 > v0 + 1e-9) {
+    if v1 <= tol::ROUNDOFF || (!spec.outward && v1 > v0 + tol::ROUNDOFF) {
         return Err(KernelError::InvalidResult { op: "shell", why: "the shell came out wrong".into() });
     }
     Ok(result.into_result(k, body))
@@ -546,7 +547,7 @@ pub fn offset_sources(b: &Body, input: BodyId, out: &Body, dist: &[f64], rounded
             let p = f.surf.eval(sum.x / n, sum.y / n);
             // (Offsets of splines are fits.)
             let near = |s: &Surface| s.distance(&p) < if matches!(s, Surface::Nurbs(_)) { 1e-5 } else { 1e-7 } * size;
-            let faces: Vec<FaceSrc> = (0..b.faces.len()).filter(|&fi| moved[fi].as_ref().is_some_and(&near)).map(FaceSrc::Input).collect();
+            let faces: Vec<FaceSrc> = (0..b.faces.len()).filter(|&fi| moved[fi].as_ref().is_some_and(near)).map(FaceSrc::Input).collect();
             if !faces.is_empty() || reach == 0.0 {
                 return faces;
             }
@@ -562,7 +563,7 @@ pub fn offset_sources(b: &Body, input: BodyId, out: &Body, dist: &[f64], rounded
                 .filter_map(|e| {
                     let ed = &b.edges[e];
                     let t = ed.curve.closest(&p, ed.t[0], ed.t[1]);
-                    let inside = (t - ed.t[0]).abs().min((ed.t[1] - t).abs()) > 1e-9 * (ed.t[1] - ed.t[0]).abs();
+                    let inside = (t - ed.t[0]).abs().min((ed.t[1] - t).abs()) > tol::REL * (ed.t[1] - ed.t[0]).abs();
                     inside.then(|| (e, off((ed.curve.point(t) - p).norm())))
                 })
                 .filter(|x| x.1 < tol)
@@ -613,13 +614,13 @@ fn walls_cross(b: &Body, remove: &[usize], t: f64) -> bool {
         .collect();
     for (i, oa, na, ba) in &planes {
         for (j, ob, nb, bb) in &planes {
-            if i >= j || na.dot(nb) > -1.0 + 1e-9 {
+            if i >= j || na.dot(nb) > -1.0 + tol::ANGULAR {
                 continue;
             }
             let gap = (ob - oa).dot(na).abs();
             // Overlap of the faces' boxes across the gap direction.
             let pa = ba.grow(gap);
-            if gap < 2.0 * t + 1e-9 && pa.overlaps(bb) {
+            if gap < 2.0 * t + tol::ROUNDOFF && pa.overlaps(bb) {
                 return true;
             }
         }
@@ -666,7 +667,7 @@ fn rounds(b: &Body, still: &[usize], t: f64, round_still: bool) -> Result<Vec<(B
         }
         for v in b.edges[e].v {
             let p = b.verts[v].p;
-            if !still_verts.contains(&v) && !balls.iter().any(|q| (q - p).norm() < 1e-9) {
+            if !still_verts.contains(&v) && !balls.iter().any(|q| (q - p).norm() < tol::ROUNDOFF) {
                 balls.push(p);
             }
         }
@@ -829,7 +830,7 @@ fn cylinder_band(b: &Body, fi: usize, r0: f64, r1: f64) -> Result<Option<Body>> 
     let circ = |rr: f64| Loop { curves: vec![Curve2::Circle { center: nalgebra::Point2::origin(), radius: rr, source: None }] };
     // The angles in the plane (whose y is z × x: the frame's y for a right-handed frame, else
     // the other way).
-    let whole = !(u1 - u0 < TAU - 1e-9);
+    let whole = !(u1 - u0 < TAU - tol::ANGULAR);
     let (u0, u1) = if fr.right_handed() { (u0, u1) } else { (-u1, -u0) };
     let o = nalgebra::Point2::origin();
     let at = |rr: f64, u: f64| nalgebra::Point2::new(rr * u.cos(), rr * u.sin());
@@ -878,10 +879,10 @@ fn cylinder_domain(b: &Body, fi: usize) -> Option<(f64, f64, f64, f64)> {
         let e = &b.edges[c.edge];
         e.degenerate
             || match &e.curve {
-                Curve::Line { d, .. } => d.normalize().cross(&fr.z).norm() < 1e-9,
+                Curve::Line { d, .. } => d.normalize().cross(&fr.z).norm() < tol::ANGULAR,
                 Curve::Circle { c: cc, x, y, r: rc } => {
                     let w = cc - fr.o;
-                    x.cross(y).normalize().cross(&fr.z).norm() < 1e-9 && (w - fr.z * w.dot(&fr.z)).norm() < 1e-7 * size && (rc - r).abs() < 1e-7 * size
+                    x.cross(y).normalize().cross(&fr.z).norm() < tol::ANGULAR && (w - fr.z * w.dot(&fr.z)).norm() < 1e-7 * size && (rc - r).abs() < 1e-7 * size
                 }
                 _ => false,
             }

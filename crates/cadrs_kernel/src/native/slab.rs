@@ -14,6 +14,7 @@ use super::xbuild::{XBuilder, XFace};
 use crate::{KernelError, Result};
 use std::collections::HashMap;
 use std::sync::Arc;
+use super::tol;
 
 fn unsupported(m: &'static str) -> KernelError {
     KernelError::Unsupported(m)
@@ -29,7 +30,7 @@ fn normal_at(s: &Surface, sense: bool, p: &P3) -> V3 {
 /// exact (lines, circles), else a cubic through samples on [t0, t1].
 fn offset_curve(normal: &dyn Fn(f64) -> V3, c: &Curve, t0: f64, t1: f64, d: f64, fit: f64) -> Curve {
     let at = |t: f64| c.point(t) + end_normal(normal, t, t0, t1) * d;
-    let tol = 1e-9 * (1.0 + d.abs() + (c.point(t0) - c.point(t1)).norm());
+    let tol = tol::REL * (1.0 + d.abs() + (c.point(t0) - c.point(t1)).norm());
     match c {
         Curve::Line { o, d: dir } => {
             let (a, b) = (at(t0), at(t1));
@@ -50,7 +51,7 @@ fn offset_curve(normal: &dyn Fn(f64) -> V3, c: &Curve, t0: f64, t1: f64, d: f64,
                 let ok = (0..=8).all(|i| {
                     let t = t0 + (t1 - t0) * i as f64 / 8.0;
                     (cand.point(t) - at(t)).norm() < tol * 1e3
-                }) && x.dot(&nn).abs() < 1e-9;
+                }) && x.dot(&nn).abs() < tol::ANGULAR;
                 if ok {
                     return cand;
                 }
@@ -78,7 +79,7 @@ fn offset_curve(normal: &dyn Fn(f64) -> V3, c: &Curve, t0: f64, t1: f64, d: f64,
 /// curve: the normal a hair inside.
 fn end_normal(normal: &dyn Fn(f64) -> V3, t: f64, t0: f64, t1: f64) -> V3 {
     let n = normal(t);
-    let step = 1e-9 * (t1 - t0);
+    let step = tol::REL * (t1 - t0);
     let inner = if t == t0 {
         t0 + step
     } else if t == t1 {
@@ -122,7 +123,7 @@ fn side_surface(c: &Curve, t0: f64, t1: f64, o: &Curve) -> Surface {
     if let Some(x) = (far - p0).try_normalize(1e-12)
         && let Some(n) = pts.iter().map(|p| x.cross(&(p - p0))).max_by(|a, b| a.norm().total_cmp(&b.norm())).and_then(|n| n.try_normalize(1e-12)) {
             let size = (far - p0).norm();
-            if pts.iter().all(|p| (p - p0).dot(&n).abs() < 1e-9 * (1.0 + size)) {
+            if pts.iter().all(|p| (p - p0).dot(&n).abs() < tol::REL * (1.0 + size)) {
                 return Surface::Plane { f: Frame { o: p0, x, y: n.cross(&x), z: n } };
             }
         }

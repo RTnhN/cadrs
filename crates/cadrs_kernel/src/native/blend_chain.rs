@@ -16,6 +16,7 @@ use super::math::*;
 use super::profile::{Piece, Src};
 use super::topo::*;
 use crate::*;
+use super::tol;
 
 /// A station's section: its pieces in its plane and the faces its contacts lie on.
 struct Station {
@@ -111,7 +112,7 @@ impl Chain<'_> {
     fn section(&self, s: f64, faces: [(usize, bool); 2]) -> Result<(Vec<Piece>, Plane, [bool; 2])> {
         let b = self.b;
         let k = self.edge_at(s);
-        let fr = (s - self.starts[k]) / self.lens[k].max(1e-300);
+        let fr = (s - self.starts[k]) / self.lens[k].max(tol::TINY);
         let (e, fwd) = self.chain[k];
         let ed = &b.edges[e];
         let fr = if fwd { fr } else { 1.0 - fr };
@@ -274,7 +275,7 @@ pub fn chain_tool(b: &Body, input: BodyId, chain: &[(usize, bool)], kind: &dyn F
                     let (ub, vb) = fb.surf.project(&m, None);
                     let na = fa.surf.normal(ua, va) * if fa.sense { 1.0 } else { -1.0 };
                     let nb = fb.surf.normal(ub, vb) * if fb.sense { 1.0 } else { -1.0 };
-                    if na.dot(&nb) > 1.0 - 1e-9 {
+                    if na.dot(&nb) > 1.0 - tol::ANGULAR {
                         out.push(g);
                     }
                 }
@@ -293,7 +294,7 @@ pub fn chain_tool(b: &Body, input: BodyId, chain: &[(usize, bool)], kind: &dyn F
     let total_hi = rb + if extend.1 { ext_len } else { 0.0 };
     // A station: the contacts on the faces they lie on (the edge's own, or the neighbour the
     // contact moved onto; outside the chain's ends, the end edge's own faces).
-    let within = |s: f64| (-1e-9..=len + 1e-9).contains(&s);
+    let within = |s: f64| (-tol::ROUNDOFF..=len + tol::ROUNDOFF).contains(&s);
     let station = |s: f64, prefer: Option<[usize; 2]>| -> Result<Station> {
         let k = ch.edge_at(s);
         let own = sides[k];
@@ -373,7 +374,7 @@ pub fn chain_tool(b: &Body, input: BodyId, chain: &[(usize, bool)], kind: &dyn F
     const MAX_STATIONS: usize = 5000;
     const MAX_SECTIONS: usize = 4_000;
     let mut solved = 0usize;
-    while stations.last().unwrap().s < total_hi - 1e-9 {
+    while stations.last().unwrap().s < total_hi - tol::ROUNDOFF {
         if solved > MAX_SECTIONS {
             return Err(KernelError::BudgetExhausted { stage: "sections", why: format!("the blend's path needs more than {MAX_SECTIONS} sections solved") });
         }
@@ -381,7 +382,7 @@ pub fn chain_tool(b: &Body, input: BodyId, chain: &[(usize, bool)], kind: &dyn F
             return Err(KernelError::BudgetExhausted { stage: "sections", why: format!("the blend's path needs more than {MAX_STATIONS} sections (at {:.4} of [{total_lo:.3}, {total_hi:.3}], step {step:.2e})", stations.last().unwrap().s) });
         }
         let s0 = stations.last().unwrap().s;
-        while breaks[bi] <= s0 + 1e-9 {
+        while breaks[bi] <= s0 + tol::ROUNDOFF {
             bi += 1;
         }
         let prev = within(s0).then(|| stations.last().map(|x| x.faces)).flatten();

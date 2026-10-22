@@ -3,6 +3,7 @@
 use super::math::*;
 use super::surface::Surface;
 use super::topo::{co_range, Body, Face};
+use super::tol;
 
 /// Where a (u, v) point lies relative to a face's trimmed domain.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -98,7 +99,7 @@ pub fn ray_surface(s: &Surface, o: &P3, d: &V3, tmin: f64, tmax: f64) -> Vec<(f6
             let qc = l.x * l.x + l.y * l.y - c0 * c0;
             for t in quadratic(qa, qb, qc) {
                 // Keep the sheet where r + z tan a >= 0.
-                if c0 + c1 * t >= -1e-9 {
+                if c0 + c1 * t >= -tol::ROUNDOFF {
                     ts.push(t);
                 }
             }
@@ -204,7 +205,7 @@ fn ray_parametric(s: &Surface, o: &P3, d: &V3) -> Vec<(f64, f64, f64)> {
         let (e1, e2) = (b - a, c - a);
         let h = d.cross(&e2);
         let det = e1.dot(&h);
-        if det.abs() < 1e-300 {
+        if det.abs() < tol::TINY {
             return None;
         }
         let f = 1.0 / det;
@@ -243,11 +244,11 @@ fn ray_parametric(s: &Surface, o: &P3, d: &V3) -> Vec<(f64, f64, f64)> {
                     v += dx.y;
                     tt += dx.z;
                     if dx.norm() < 1e-14 {
-                        ok = (s.eval(u, v) - (o + d * tt)).norm() < 1e-9;
+                        ok = (s.eval(u, v) - (o + d * tt)).norm() < tol::ROUNDOFF;
                         break;
                     }
                 }
-                if ok && !out.iter().any(|(x, ..)| (x - tt).abs() < 1e-9) {
+                if ok && !out.iter().any(|(x, ..)| (x - tt).abs() < tol::ROUNDOFF) {
                     out.push((tt, u, v));
                 }
             }
@@ -265,7 +266,7 @@ pub fn ray_hits(body: &Body, polys: &[Vec<Vec<P2>>], o: &P3, d: &V3) -> Vec<(f64
         for (t, u, v) in ray_surface(&f.surf, o, d, -span, span) {
             let uvs = periodic_candidates(&f.surf, u, v, &polys[fi]);
             for uv in uvs {
-                if in_face(&polys[fi], &f.surf, uv, 1e-9) != InFace::Outside {
+                if in_face(&polys[fi], &f.surf, uv, tol::ROUNDOFF) != InFace::Outside {
                     out.push((t, fi, o + d * t));
                     break;
                 }
@@ -275,7 +276,7 @@ pub fn ray_hits(body: &Body, polys: &[Vec<Vec<P2>>], o: &P3, d: &V3) -> Vec<(f64
     out.sort_by(|a, b| a.0.total_cmp(&b.0));
     // Hits on a shared edge are reported once per face; keep them (OCCT reports both too) but
     // drop exact duplicates on the same face.
-    out.dedup_by(|a, b| a.1 == b.1 && (a.0 - b.0).abs() < 1e-9);
+    out.dedup_by(|a, b| a.1 == b.1 && (a.0 - b.0).abs() < tol::ROUNDOFF);
     out
 }
 
@@ -293,7 +294,7 @@ pub fn periodic_candidates(s: &Surface, u: f64, v: f64, polys: &[Vec<P2>]) -> Ve
         let mut v = Vec::new();
         for k in -2..=2 {
             let x = u + TAU * k as f64;
-            if x >= ub.0 - 1e-9 && x <= ub.1 + 1e-9 {
+            if x >= ub.0 - tol::ROUNDOFF && x <= ub.1 + tol::ROUNDOFF {
                 v.push(x);
             }
         }
@@ -308,7 +309,7 @@ pub fn periodic_candidates(s: &Surface, u: f64, v: f64, polys: &[Vec<P2>]) -> Ve
         let mut w = Vec::new();
         for k in -2..=2 {
             let x = v + TAU * k as f64;
-            if x >= vb.0 - 1e-9 && x <= vb.1 + 1e-9 {
+            if x >= vb.0 - tol::ROUNDOFF && x <= vb.1 + tol::ROUNDOFF {
                 w.push(x);
             }
         }
@@ -389,7 +390,7 @@ impl<'a> Classifier<'a> {
 
     /// Inside / outside / on the boundary of the body's solids (on a face within `tol`).
     pub fn classify(&self, p: &P3, tol: f64) -> crate::PointClass {
-        let tol = tol.max(1e-9);
+        let tol = tol.max(tol::ROUNDOFF);
         for (fi, f) in self.body.faces.iter().enumerate() {
             if !self.boxes[fi].grow(tol).contains(p) {
                 continue;
@@ -436,7 +437,7 @@ impl<'a> Classifier<'a> {
             let mut count = 0;
             let mut bad = false;
             'faces: for (fi, f) in self.body.faces.iter().enumerate() {
-                if !ray_meets_box(p, &d, &self.boxes[fi].grow(1e-9 * (1.0 + span))) {
+                if !ray_meets_box(p, &d, &self.boxes[fi].grow(tol::REL * (1.0 + span))) {
                     continue;
                 }
                 for (t, u, v) in ray_surface(&f.surf, p, &d, -span, span) {
@@ -509,7 +510,7 @@ fn ray_meets_box(o: &P3, d: &V3, b: &Bbox) -> bool {
     }
     let (mut lo, mut hi) = (0.0f64, f64::INFINITY);
     for k in 0..3 {
-        if d[k].abs() < 1e-300 {
+        if d[k].abs() < tol::TINY {
             if o[k] < b.min[k] || o[k] > b.max[k] {
                 return false;
             }

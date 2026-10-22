@@ -22,6 +22,7 @@ use super::surface::Surface;
 use super::sweep::{self, Prism, Revolve};
 use super::topo::{co_range, Body, Face};
 use crate::*;
+use super::tol;
 
 /// What each face of a body continues: an input face, or a new face with an origin.
 #[derive(Debug, Clone, PartialEq)]
@@ -226,7 +227,7 @@ pub(crate) fn ball_in_plane(f1: &Face, f2: &Face, p: &P3, tan: &V3, w1: &V3, w2:
     }
     let (d1, _, q1) = out_dist(f1, &x);
     let (d2, _, q2) = out_dist(f2, &x);
-    let ok = (d1 - s * r).abs() < 1e-9 * (1.0 + r) && (d2 - s * r).abs() < 1e-9 * (1.0 + r) && (x - p).dot(tan).abs() < 1e-9 * (1.0 + r);
+    let ok = (d1 - s * r).abs() < tol::REL * (1.0 + r) && (d2 - s * r).abs() < tol::REL * (1.0 + r) && (x - p).dot(tan).abs() < tol::REL * (1.0 + r);
     // The contacts on the faces' sides of the edge (not a far branch of a curved surface).
     let near = (q1 - p).dot(w1) > 0.0 && (q2 - p).dot(w2) > 0.0;
     (ok && near).then_some((x, q1, q2))
@@ -342,8 +343,8 @@ pub fn edge_tool_range(b: &Body, input: BodyId, e: usize, kind: &dyn Fn(f64) -> 
             // revolution; the section is the same all round, so the tool is a revolve.
             let axis_dir = cx.cross(cy).normalize();
             let coaxial = |s: &Surface| match s {
-                Surface::Plane { f } => f.x.cross(&f.y).cross(&axis_dir).norm() < 1e-9,
-                _ => s.axis().is_some_and(|(o, z)| z.cross(&axis_dir).norm() < 1e-9 && (o - c).cross(&axis_dir).norm() < 1e-7),
+                Surface::Plane { f } => f.x.cross(&f.y).cross(&axis_dir).norm() < tol::ANGULAR,
+                _ => s.axis().is_some_and(|(o, z)| z.cross(&axis_dir).norm() < tol::ANGULAR && (o - c).cross(&axis_dir).norm() < 1e-7),
             };
             if !coaxial(f1) || !coaxial(f2) {
                 return edge_tool_general(b, input, e, kind, swap, range, extend);
@@ -424,7 +425,7 @@ pub fn corner_tool(b: &Body, v: usize, r: f64, vertex_origin: Origin) -> Result<
         }
         let Surface::Plane { f: fr } = &f.surf else { return Ok(None) };
         let n = fr.x.cross(&fr.y) * if f.sense { 1.0 } else { -1.0 };
-        if !normals.iter().any(|m| m.dot(&n) > 1.0 - 1e-9) {
+        if !normals.iter().any(|m| m.dot(&n) > 1.0 - tol::ANGULAR) {
             normals.push(n);
         }
     }
@@ -446,7 +447,7 @@ pub fn corner_tool(b: &Body, v: usize, r: f64, vertex_origin: Origin) -> Result<
         // Along the edge towards the vertex (from its ends: a line may run either way).
         let other = if ed.v[0] == v { ed.v[1] } else { ed.v[0] };
         let towards = (p - b.verts[other].p).normalize();
-        if !dirs.iter().any(|m| m.dot(&towards) > 1.0 - 1e-9) {
+        if !dirs.iter().any(|m| m.dot(&towards) > 1.0 - tol::ANGULAR) {
             dirs.push(towards);
         }
     }
@@ -486,8 +487,8 @@ pub fn corner_tool(b: &Body, v: usize, r: f64, vertex_origin: Origin) -> Result<
     let z = normals[0];
     let side = d - z * d.dot(&z);
     // A corner that isn't square: the poles and seam turned away from it instead.
-    let square = dirs.iter().all(|a| dirs.iter().all(|b2| (a - b2).norm() < 1e-9 || a.dot(b2).abs() < 1e-9));
-    let ball = if square && side.norm() > 1e-9 { ball_frame(c, r, z, -side.normalize())? } else { ball_towards(c, r, d)? };
+    let square = dirs.iter().all(|a| dirs.iter().all(|b2| (a - b2).norm() < tol::ANGULAR || a.dot(b2).abs() < tol::ANGULAR));
+    let ball = if square && side.norm() > tol::ROUNDOFF { ball_frame(c, r, z, -side.normalize())? } else { ball_towards(c, r, d)? };
     let r = boolean_bodies(&block, &ball, BoolOp::Subtract).inspect_err(|x| {
         if std::env::var("CADRS_BLEND_DEBUG").is_ok() {
             eprintln!("corner tool at {p:?}: {x}; centre {c:?} r {r} dirs {dirs:?} square {square}");
@@ -667,7 +668,7 @@ fn edge_convex(b: &Body, e: usize) -> Option<bool> {
     // Into face 1, square to the edge (material lies left of a coedge about the normal).
     let w1 = n1.cross(&dir);
     let c = w1.dot(&n2);
-    if c.abs() < 1e-9 { None } else { Some(c < 0.0) }
+    if c.abs() < tol::ANGULAR { None } else { Some(c < 0.0) }
 }
 
 /// Whether the solid is convex round vertex `v`: every edge there convex.
@@ -849,8 +850,8 @@ pub fn blend(k: &mut NativeKernel, body: BodyId, edges: &[EdgeBlend], corners: b
                 Curve::Circle { c, x, y, .. } => {
                     let axis = x.cross(y).normalize();
                     let coax = |s: &Surface| match s {
-                        Surface::Plane { f } => f.x.cross(&f.y).cross(&axis).norm() < 1e-9,
-                        _ => s.axis().is_some_and(|(o, z)| z.cross(&axis).norm() < 1e-9 && (o - c).cross(&axis).norm() < 1e-7),
+                        Surface::Plane { f } => f.x.cross(&f.y).cross(&axis).norm() < tol::ANGULAR,
+                        _ => s.axis().is_some_and(|(o, z)| z.cross(&axis).norm() < tol::ANGULAR && (o - c).cross(&axis).norm() < 1e-7),
                     };
                     coax(f1) && coax(f2)
                 }
@@ -942,7 +943,7 @@ pub fn blend(k: &mut NativeKernel, body: BodyId, edges: &[EdgeBlend], corners: b
         // on itself.
         if ed.closed() {
             let (t0, t1) = (ed.curve.tangent(ed.t[0]), ed.curve.tangent(ed.t[1]));
-            if t0.normalize().dot(&t1.normalize()) > 1.0 - 1e-9 {
+            if t0.normalize().dot(&t1.normalize()) > 1.0 - tol::ANGULAR {
                 extend = (false, false);
             }
         }
@@ -995,7 +996,7 @@ pub fn blend(k: &mut NativeKernel, body: BodyId, edges: &[EdgeBlend], corners: b
                     // the other edge's side, which is cut away.
                     let od = other_dir(others[0], v);
                     let n = out + od;
-                    if n.norm() < 1e-9 {
+                    if n.norm() < tol::ROUNDOFF {
                         continue;
                     }
                     // Chamfers where the solid is convex round the vertex: each tool, run on
@@ -1134,7 +1135,7 @@ fn ball_centre(b: &Body, v: usize, r: f64) -> Option<P3> {
         }
         let Surface::Plane { f: fr } = &f.surf else { return None };
         let n = fr.x.cross(&fr.y) * if f.sense { 1.0 } else { -1.0 };
-        if !normals.iter().any(|m| m.dot(&n) > 1.0 - 1e-9) {
+        if !normals.iter().any(|m| m.dot(&n) > 1.0 - tol::ANGULAR) {
             normals.push(n);
         }
     }
@@ -1447,7 +1448,7 @@ pub fn chamfer(k: &mut NativeKernel, body: BodyId, edges: &[EdgeId], opts: &Cham
                         return d;
                     }
                     let across = match (&b.faces[sides[side].0].surf, &ed.curve) {
-                        (Surface::Cylinder { f: fr, r }, Curve::Line { d: dl, .. }) if dl.normalize().cross(&fr.z).norm() < 1e-9 => Some(*r),
+                        (Surface::Cylinder { f: fr, r }, Curve::Line { d: dl, .. }) if dl.normalize().cross(&fr.z).norm() < tol::ANGULAR => Some(*r),
                         (Surface::Sphere { r, .. }, _) => Some(*r),
                         _ => None,
                     };
@@ -1508,7 +1509,7 @@ pub fn chamfer(k: &mut NativeKernel, body: BodyId, edges: &[EdgeId], opts: &Cham
             let f = &b.faces[sides[side].0];
             let ed = &b.edges[ei];
             let across = match (&f.surf, &ed.curve) {
-                (Surface::Cylinder { f: fr, r }, Curve::Line { d: dl, .. }) if dl.normalize().cross(&fr.z).norm() < 1e-9 => Some(*r),
+                (Surface::Cylinder { f: fr, r }, Curve::Line { d: dl, .. }) if dl.normalize().cross(&fr.z).norm() < tol::ANGULAR => Some(*r),
                 (Surface::Sphere { r, .. }, _) => Some(*r),
                 _ => None,
             };
@@ -1552,10 +1553,10 @@ pub fn full_round(k: &mut NativeKernel, body: BodyId, side1: FaceId, center: Fac
     let (o1, n1) = plane_of(side1)?;
     let (o2, n2) = plane_of(side2)?;
     let (om, nm) = plane_of(center)?;
-    if n1.dot(&n2) > -1.0 + 1e-9 {
+    if n1.dot(&n2) > -1.0 + tol::ANGULAR {
         return Err(KernelError::InvalidParameter("A full round needs two parallel side faces facing away from each other".into()));
     }
-    if n1.dot(&nm).abs() > 1e-9 {
+    if n1.dot(&nm).abs() > tol::ANGULAR {
         return Err(KernelError::InvalidParameter("The middle face must be square to the parallel side faces".into()));
     }
     let width = (o2 - o1).dot(&n1).abs();
@@ -1574,7 +1575,7 @@ pub fn full_round(k: &mut NativeKernel, body: BodyId, side1: FaceId, center: Fac
             .map(|p| (om - p).dot(&nm))
             .fold(f64::NEG_INFINITY, f64::max)
     };
-    if depth(side1).min(depth(side2)) < r - 1e-9 * (1.0 + r) {
+    if depth(side1).min(depth(side2)) < r - tol::REL * (1.0 + r) {
         return Err(KernelError::InvalidParameter("The side faces are too shallow for the full round".into()));
     }
     // The round's axis: in the middle face's plane moved r into the material, midway between
@@ -1633,7 +1634,7 @@ pub fn full_round(k: &mut NativeKernel, body: BodyId, side1: FaceId, center: Fac
 /// the fractions `from` and `to`; at an end of the edge with no tangent neighbour the tool runs
 /// past the vertex, as the whole fillet does.
 pub fn fillet_partial(k: &mut NativeKernel, body: BodyId, edge: EdgeId, spec: &FilletSpec, from: f64, to: f64) -> Result<OpResult> {
-    if !(0.0..=1.0).contains(&from) || !(0.0..=1.0).contains(&to) || to <= from + 1e-9 {
+    if !(0.0..=1.0).contains(&from) || !(0.0..=1.0).contains(&to) || to <= from + tol::ROUNDOFF {
         return Err(KernelError::InvalidParameter("A partial fillet needs 0 ≤ from < to ≤ 1".into()));
     }
     let b = (**k.get(body)?).clone();
@@ -1801,7 +1802,7 @@ fn is_arc_face(b: &Body, f: usize) -> bool {
     let face = &b.faces[f];
     let (u0, v0) = (0.5, 0.5);
     let d = face.surf.d2(u0, v0);
-    d[3].norm() > 1e-9
+    d[3].norm() > tol::ROUNDOFF
 }
 
 /// The outward signed distance of a point from a face's surface.
@@ -1893,7 +1894,7 @@ fn chain_tool_lofted(b: &Body, input: BodyId, chain: &[(usize, bool)], kind: &dy
         if k >= chain.len() {
             k = chain.len() - 1;
         }
-        let f = (s - starts[k]) / lens[k].max(1e-300);
+        let f = (s - starts[k]) / lens[k].max(tol::TINY);
         stations.push((k, f));
     }
     // Also a station exactly at each joint.

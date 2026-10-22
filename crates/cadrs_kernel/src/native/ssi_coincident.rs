@@ -9,6 +9,7 @@ use super::math::*;
 use super::nurbs::NurbsCurve;
 use super::ssi::IntCurve;
 use super::surface::Surface;
+use super::tol;
 
 type UvBox = ((f64, f64), (f64, f64));
 
@@ -17,7 +18,7 @@ fn in_box(s: &Surface, bx: UvBox, (u, v): (f64, f64), e: f64) -> bool {
     let ok = |x: f64, (lo, hi): (f64, f64), periodic: bool| {
         let m = (hi - lo) * e + 1e-12 * (1.0 + lo.abs().max(hi.abs()));
         if periodic {
-            hi - lo >= TAU - 1e-9 || wrap(x, lo - m, TAU) <= hi + m
+            hi - lo >= TAU - tol::ANGULAR || wrap(x, lo - m, TAU) <= hi + m
         } else {
             x >= lo - m && x <= hi + m
         }
@@ -110,7 +111,7 @@ fn side_runs(s: &Surface, fix_u: bool, val: f64, (t0, t1): (f64, f64), o: &Surfa
     let at = |t: f64| if fix_u { s.eval(val, t) } else { s.eval(t, val) };
     let on = |t: f64, hint: Option<(f64, f64)>| -> (bool, (f64, f64)) {
         let (d, uv) = foot(o, &at(t), hint);
-        (d <= tol && in_box(o, obx, uv, 1e-9), uv)
+        (d <= tol && in_box(o, obx, uv, tol::ROUNDOFF), uv)
     };
     const N: usize = 64;
     let mut hint = None;
@@ -210,7 +211,7 @@ pub fn crossing_sides(a: &Surface, ua: UvBox, b: &Surface, ub: UvBox, tol: f64) 
             let any = (0..5).any(|i| {
                 let p = at(range.0 + (range.1 - range.0) * (0.1 + 0.2 * i as f64));
                 let (d, uv) = foot(o, &p, None);
-                d <= tol && in_box(o, obx, uv, 1e-9)
+                d <= tol && in_box(o, obx, uv, tol::ROUNDOFF)
             });
             if !any {
                 continue;

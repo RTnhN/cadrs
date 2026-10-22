@@ -11,6 +11,7 @@ use super::nurbs::NurbsCurve;
 use super::surface::Surface;
 use super::topo::{Body, Coedge};
 use crate::*;
+use super::tol;
 
 /// The faces around each vertex (distinct).
 fn vertex_faces(b: &Body) -> Vec<Vec<usize>> {
@@ -83,7 +84,7 @@ fn tangent_lines(b: &Body, surfs: &[Surface], ef: &[Vec<usize>]) -> Vec<(usize, 
         for &t in &ts {
             let q = ed.point(t);
             let (na, nb) = (normal(&fa.surf, fa.sense, &q), normal(&fb.surf, fb.sense, &q));
-            if na.dot(&nb) < 1.0 - 1e-9 {
+            if na.dot(&nb) < 1.0 - tol::ANGULAR {
                 break;
             }
             // Along the normal onto the first new surface (Newton on the signed distance).
@@ -112,8 +113,8 @@ fn tangent_lines(b: &Body, surfs: &[Surface], ef: &[Vec<usize>]) -> Vec<(usize, 
         // Still a line on both new surfaces, and still tangent there.
         let ok = moved.iter().all(|p| {
             let off = (p - moved[0]) - dir * (p - moved[0]).dot(&dir);
-            off.norm() < 1e-9 * (1.0 + len)
-                && fs.iter().all(|&f| surfs[f].distance(p) < 1e-9 * (1.0 + len))
+            off.norm() < tol::REL * (1.0 + len)
+                && fs.iter().all(|&f| surfs[f].distance(p) < tol::REL * (1.0 + len))
                 && normal(&surfs[fs[0]], true, p).cross(&normal(&surfs[fs[1]], true, p)).norm() < 1e-7
         });
         if ok {
@@ -194,13 +195,13 @@ fn closed_spline_shift(s: &Surface, pc: &Curve, t0: f64, t1: f64, at: [f64; 2]) 
     let (q, r) = (pc.point(t0), pc.point(t1));
     let (q, r) = ([q.x, q.y], [r.x, r.y]);
     let mut shift = [0.0; 2];
-    for (k, (a, b), closed) in [(0, (u0, u1), (0..=4).all(|j| (s.eval(u0, v0 + (v1 - v0) * j as f64 / 4.0) - s.eval(u1, v0 + (v1 - v0) * j as f64 / 4.0)).norm() < 1e-9)), (1, (v0, v1), (0..=4).all(|i| (s.eval(u0 + (u1 - u0) * i as f64 / 4.0, v0) - s.eval(u0 + (u1 - u0) * i as f64 / 4.0, v1)).norm() < 1e-9))] {
+    for (k, (a, b), closed) in [(0, (u0, u1), (0..=4).all(|j| (s.eval(u0, v0 + (v1 - v0) * j as f64 / 4.0) - s.eval(u1, v0 + (v1 - v0) * j as f64 / 4.0)).norm() < tol::ROUNDOFF)), (1, (v0, v1), (0..=4).all(|i| (s.eval(u0 + (u1 - u0) * i as f64 / 4.0, v0) - s.eval(u0 + (u1 - u0) * i as f64 / 4.0, v1)).norm() < tol::ROUNDOFF))] {
         let w = b - a;
         if !closed || w <= 0.0 {
             continue;
         }
         let m = ((at[k] - q[k]) / w).round();
-        let tol = 1e-9 * w;
+        let tol = tol::REL * w;
         let inside = |x: f64| x >= a - tol && x <= b + tol;
         if m != 0.0 && inside(q[k] + m * w) && inside(r[k] + m * w) {
             shift[k] = m * w;
@@ -260,7 +261,7 @@ fn swept_line(surfs: &[Surface], fs: &[usize], old: &Curve, p0: &P3, p1: &P3) ->
     let line = Curve::Line { o: *p0, d };
     let w = p1 - p0;
     let size = 1.0 + w.norm() + p0.coords.norm();
-    let on = (w - d * w.dot(&d)).norm() < 1e-9 * size && fs.iter().all(|&f| [p0, p1].iter().all(|p| surfs[f].distance(p) < 1e-7 * size));
+    let on = (w - d * w.dot(&d)).norm() < tol::REL * size && fs.iter().all(|&f| [p0, p1].iter().all(|p| surfs[f].distance(p) < 1e-7 * size));
     on.then_some(line)
 }
 
@@ -311,7 +312,7 @@ fn reseat_seam(out: &mut Body, fi: usize) {
                 hi = hi.max(u);
             }
         }
-        if hi - lo >= TAU - 1e-9 {
+        if hi - lo >= TAU - tol::ANGULAR {
             return;
         }
         let a = wrap(lo - u0);
@@ -612,7 +613,7 @@ fn swallow_pole(out: &mut Body, fi: usize, li: usize) -> Option<(usize, usize)> 
 fn in_domain(s: &Surface, dom: &UvBox, p: &P3) -> bool {
     let (u, v) = s.project(p, None);
     let inside = |x: f64, (a, b): (f64, f64), periodic: bool| {
-        let tol = 1e-9 * (1.0 + (b - a).abs() + a.abs());
+        let tol = tol::REL * (1.0 + (b - a).abs() + a.abs());
         let x = if periodic { a + (x - a).rem_euclid(TAU) } else { x };
         x >= a - tol && x <= b + tol || (periodic && x - TAU >= a - tol && x - TAU <= b + tol)
     };
@@ -1150,7 +1151,7 @@ fn closed_arc(c: &Curve, p0: &P3, p1: &P3, closed_edge: bool, dir0: &V3) -> Opti
     let Curve::Nurbs(n) = c else { return None };
     let (a, b) = n.range();
     let (s, e) = (n.point(a), n.point(b));
-    if (s - e).norm() > 1e-9 * (1.0 + s.coords.norm()) {
+    if (s - e).norm() > tol::REL * (1.0 + s.coords.norm()) {
         return None;
     }
     let t0 = nurbs_passes(c, p0).into_iter().next().unwrap_or_else(|| c.closest(p0, a, b));
@@ -1320,21 +1321,21 @@ pub fn offset_surface(s: &Surface, sense: bool, d: f64) -> Option<Surface> {
         }
         Surface::Cylinder { f, r } => {
             let r2 = r + d * if f.right_handed() { 1.0 } else { -1.0 };
-            if r2 <= 1e-9 {
+            if r2 <= tol::ROUNDOFF {
                 return None;
             }
             Surface::Cylinder { f: *f, r: r2 }
         }
         Surface::Sphere { f, r } => {
             let r2 = r + d * if f.right_handed() { 1.0 } else { -1.0 };
-            if r2 <= 1e-9 {
+            if r2 <= tol::ROUNDOFF {
                 return None;
             }
             Surface::Sphere { f: *f, r: r2 }
         }
         Surface::Torus { f, rmaj, rmin } => {
             let r2 = rmin + d * if f.right_handed() { 1.0 } else { -1.0 };
-            if r2 <= 1e-9 {
+            if r2 <= tol::ROUNDOFF {
                 return None;
             }
             Surface::Torus { f: *f, rmaj: *rmaj, rmin: r2 }
@@ -1381,7 +1382,7 @@ pub fn offset_surface(s: &Surface, sense: bool, d: f64) -> Option<Surface> {
                     .collect()
             };
             let sides: Vec<Vec<P3>> = (0..4).map(side).collect();
-            let same = |p: &P3, q: &P3| (p - q).norm() < 1e-9 * size;
+            let same = |p: &P3, q: &P3| (p - q).norm() < tol::REL * size;
             let closed = |k: usize| sides[k].iter().zip(&sides[k + 1]).all(|(p, q)| same(p, q));
             let pole = |k: usize| sides[k].iter().all(|p| same(p, &sides[k][0]));
             // (Nor a rational one: past its domain its weights can reach zero.)
@@ -1478,7 +1479,7 @@ fn offset_curve_along(c: &Curve, n: &dyn Fn(f64) -> V3, d: f64) -> Option<Curve>
     match c {
         Curve::Line { o, d: dir } => {
             let (a, b) = (n(t0), n(t1));
-            if (a - b).norm() < 1e-9 {
+            if (a - b).norm() < tol::ROUNDOFF {
                 return Some(Curve::Line { o: o + a * d, d: *dir });
             }
         }
@@ -1488,13 +1489,13 @@ fn offset_curve_along(c: &Curve, n: &dyn Fn(f64) -> V3, d: f64) -> Option<Curve>
             let radial = (p - cc) / *r;
             let nn = n(0.0);
             let along = nn.dot(&radial);
-            if (along.abs() - 1.0).abs() < 1e-9 {
+            if (along.abs() - 1.0).abs() < tol::ANGULAR {
                 let r2 = r + d * along;
-                return (r2 > 1e-9).then_some(Curve::Circle { c: *cc, x: *x, y: *y, r: r2 });
+                return (r2 > tol::ROUNDOFF).then_some(Curve::Circle { c: *cc, x: *x, y: *y, r: r2 });
             }
             // Normal across the plane: the circle moved along it.
             let z = x.cross(y);
-            if (nn.dot(&z).abs() - 1.0).abs() < 1e-9 {
+            if (nn.dot(&z).abs() - 1.0).abs() < tol::ANGULAR {
                 return Some(Curve::Circle { c: cc + nn * d, x: *x, y: *y, r: *r });
             }
         }
@@ -1677,7 +1678,7 @@ fn union_offset(b: &Body, dist: &[f64], bot: usize, top: usize, sides: &[(V2, f6
         .map(|ol| Region { outer: to_loop(ol), holes: holes.iter().filter(|h| inside(&h[0], ol)).map(|h| to_loop(h)).collect(), source: None })
         .collect();
     let (z0, z1) = (-dist[bot], (b.verts[b.edges[b.faces[top].loops[0][0].edge].v[0]].p - o).dot(&n) + dist[top]);
-    if z1 - z0 <= 1e-9 {
+    if z1 - z0 <= tol::ROUNDOFF {
         return Err(KernelError::OperationFailed("the offset prism has no height".into()));
     }
     let plane = Plane { origin: o + n * z0, x_dir: nalgebra::Unit::new_normalize(fr.x), normal: nalgebra::Unit::new_normalize(n) };
@@ -1888,7 +1889,7 @@ fn prism_offset(b: &Body, dist: &[f64]) -> Option<Result<Body>> {
             for i in 0..n_live {
                 let (p, q) = (meet(&live[(i + n_live - 1) % n_live], &live[i])?, meet(&live[i], &live[(i + 1) % n_live])?);
                 let along = (q - p).dot(&dir(&live[i].0));
-                if along < worst.0 - 1e-9 {
+                if along < worst.0 - tol::ROUNDOFF {
                     worst = (along, Some(i));
                 }
             }
@@ -1914,8 +1915,8 @@ fn prism_offset(b: &Body, dist: &[f64]) -> Option<Result<Body>> {
     // corners are one.
     let scale = 1.0 + poly.iter().map(|p| p.coords.norm()).fold(0.0, f64::max);
     let mut poly: Vec<P2> = poly;
-    poly.dedup_by(|a, b| (*a - *b).norm() < 1e-9 * scale);
-    while poly.len() > 1 && (poly[0] - poly[poly.len() - 1]).norm() < 1e-9 * scale {
+    poly.dedup_by(|a, b| (*a - *b).norm() < tol::REL * scale);
+    while poly.len() > 1 && (poly[0] - poly[poly.len() - 1]).norm() < tol::REL * scale {
         poly.pop();
     }
     let n_live = poly.len();
@@ -1923,7 +1924,7 @@ fn prism_offset(b: &Body, dist: &[f64]) -> Option<Result<Body>> {
         return Some(Err(KernelError::TooLarge { op: "offset", why: "the offset profile vanishes".into() }));
     }
     let (z0, z1) = (-dist[bot], (b.verts[b.edges[b.faces[top].loops[0][0].edge].v[0]].p - o).dot(&n) + dist[top]);
-    if z1 - z0 <= 1e-9 {
+    if z1 - z0 <= tol::ROUNDOFF {
         return Some(Err(KernelError::TooLarge { op: "offset", why: "the offset prism has no height".into() }));
     }
     let plane = Plane { origin: o + n * z0, x_dir: nalgebra::Unit::new_normalize(fr.x), normal: nalgebra::Unit::new_normalize(n) };
@@ -1971,7 +1972,7 @@ pub fn offset(k: &mut NativeKernel, body: BodyId, spec: &OffsetSpec) -> Result<O
     let v1 = super::mass::body_mass(&out).volume;
     let grow = dist.iter().any(|d| *d > 0.0);
     let shrink = dist.iter().any(|d| *d < 0.0);
-    if (grow && !shrink && v1 < v0 - 1e-9) || (shrink && !grow && v1 > v0 + 1e-9) || v1 <= 0.0 {
+    if (grow && !shrink && v1 < v0 - tol::ROUNDOFF) || (shrink && !grow && v1 > v0 + tol::ROUNDOFF) || v1 <= 0.0 {
         return Err(KernelError::TooLarge { op: "offset", why: "the offset turned the body inside out".into() });
     }
     // History: each face the offset of input faces (modified) or a round of an edge or vertex
@@ -2052,7 +2053,7 @@ pub fn draft(k: &mut NativeKernel, body: BodyId, spec: &DraftSpec) -> Result<OpR
         surfs[fi] = match &f.surf {
             Surface::Plane { f: fr } => {
                 let n = fr.x.cross(&fr.y) * if f.sense { 1.0 } else { -1.0 };
-                if n.cross(&pull).norm() < 1e-9 {
+                if n.cross(&pull).norm() < tol::ANGULAR {
                     return Err(KernelError::InvalidParameter("A face square to the pull direction can't be drafted".into()));
                 }
                 // The line where the face meets the neutral plane (the hinge), and the face
@@ -2060,7 +2061,7 @@ pub fn draft(k: &mut NativeKernel, body: BodyId, spec: &DraftSpec) -> Result<OpR
                 // already inclined takes the angle given), its outward normal tipping towards
                 // the pull (the face leans in as it rises).
                 let nn = spec.neutral_normal.map_or(pull, |x| x.into_inner());
-                let t = nn.cross(&n).try_normalize(1e-9).ok_or_else(|| KernelError::InvalidParameter("A face parallel to the neutral plane can't be drafted".into()))?;
+                let t = nn.cross(&n).try_normalize(tol::ANGULAR).ok_or_else(|| KernelError::InvalidParameter("A face parallel to the neutral plane can't be drafted".into()))?;
                 let m = t.cross(&n);
                 let alpha = -(fr.o - spec.neutral).dot(&nn) / m.dot(&nn);
                 let on = fr.o + m * alpha;
@@ -2084,7 +2085,7 @@ pub fn draft(k: &mut NativeKernel, body: BodyId, spec: &DraftSpec) -> Result<OpR
                 if spec.neutral_normal.is_some() {
                     return Err(KernelError::Unsupported("drafting a cylinder or cone about a neutral plane at an angle to the pull"));
                 }
-                if fr.z.cross(&pull).norm() > 1e-9 {
+                if fr.z.cross(&pull).norm() > tol::ANGULAR {
                     return Err(KernelError::Unsupported("drafting a cylinder or cone not along the pull"));
                 }
                 let (r, a0) = match &f.surf {

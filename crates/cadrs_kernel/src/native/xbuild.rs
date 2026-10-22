@@ -39,6 +39,7 @@ use super::nurbs::NurbsCurve;
 use super::pcurve;
 use super::surface::Surface;
 use super::topo::*;
+use super::tol;
 
 /// A face as a file describes it: a surface, the sense the file gives (used only to settle
 /// ambiguous loops) and loops of (edge, along the edge).
@@ -253,7 +254,7 @@ fn project(s: &Surface, per: &Periods, p: &P3, hint: Option<(f64, f64)>, off: f6
                     Some(uv) if (s.eval(uv.0, uv.1) - p).norm() < off => uv,
                     _ => s.project(p, None),
                 };
-                if (s.eval(u2, v2) - p).norm() < d - 1e-9 {
+                if (s.eval(u2, v2) - p).norm() < d - tol::ROUNDOFF {
                     (u, v) = (u2, v2);
                 }
             }
@@ -350,7 +351,7 @@ fn pcurve_unsnapped(s: &Surface, c: &Curve, t0: f64, t1: f64, etol: f64) -> Curv
         let vm = pc.point((t0 + t1) / 2.0).y;
         let k = ((vm - wrap(vm, -PI, TAU)) / TAU).round() * TAU;
         let (o, vm) = (P3::new(o.x, o.y - k, 0.0), vm - k);
-        pc = if vm.abs() > PI / 2.0 + 1e-9 {
+        pc = if vm.abs() > PI / 2.0 + tol::ANGULAR {
             let pole = if vm > 0.0 { PI } else { -PI };
             Curve::Line { o: P3::new(o.x + PI, pole - o.y, 0.0), d: V3::new(0.0, -d.y, 0.0) }
         } else {
@@ -387,7 +388,7 @@ fn pcurve_unsnapped(s: &Surface, c: &Curve, t0: f64, t1: f64, etol: f64) -> Curv
 fn torus_meridian(s: &Surface, c: &Curve) -> Option<Curve> {
     let (Surface::Torus { f, rmaj, .. }, Curve::Circle { c: cc, x, y, .. }) = (s, c) else { return None };
     let l = f.local(cc);
-    if l.z.abs() > 1e-7 || (l.x.hypot(l.y) - rmaj).abs() > 1e-7 || x.cross(y).dot(&f.z).abs() > 1e-9 {
+    if l.z.abs() > 1e-7 || (l.x.hypot(l.y) - rmaj).abs() > 1e-7 || x.cross(y).dot(&f.z).abs() > tol::ANGULAR {
         return None;
     }
     let radial = (f.x * l.x + f.y * l.y).normalize();
@@ -430,7 +431,7 @@ fn fit_pieces(s: &Surface, per: &Periods, c: &Curve, pieces: &[f64], tol: &Tol) 
         let pts: Vec<P3> = (0..=16).map(|i| pc.point(a + (b - a) * i as f64 / 16.0)).collect();
         let shift = |lo: f64, hi: f64, period: Option<f64>, get: &dyn Fn(&P3) -> f64| -> f64 {
             let Some(p) = period else { return 0.0 };
-            let eps = 1e-9 * (hi - lo).abs().max(1.0);
+            let eps = tol::REL * (hi - lo).abs().max(1.0);
             let (mn, mx) = pts.iter().map(get).fold((f64::INFINITY, f64::NEG_INFINITY), |(a, b), x| (a.min(x), b.max(x)));
             if mx > hi + eps { -((mx - hi - eps) / p).ceil() * p } else if mn < lo - eps { ((lo - eps - mn) / p).ceil() * p } else { 0.0 }
         };
@@ -501,7 +502,7 @@ impl Periods {
         let Some(((u0, u1), (v0, v1))) = self.domain else { return (u, v) };
         let f = |x: f64, lo: f64, hi: f64, p: Option<f64>| -> f64 {
             match p {
-                Some(p) if x < lo - 1e-9 * p || x > hi + 1e-9 * p => wrap(x, lo, p),
+                Some(p) if x < lo - tol::REL * p || x > hi + tol::REL * p => wrap(x, lo, p),
                 _ => x,
             }
         };
@@ -607,7 +608,7 @@ impl XBuilder {
         };
         // Empty? (A sampled length: exact lengths of long splines cost.)
         let len: f64 = (0..8).map(|i| (curve.point(t0 + (t1 - t0) * (i + 1) as f64 / 8.0) - curve.point(t0 + (t1 - t0) * i as f64 / 8.0)).norm()).sum();
-        if len < 1e-9 {
+        if len < tol::ROUNDOFF {
             return None;
         }
         // Rounding residue (atan2(1e-49, 1)) would reach the triangulator, which rejects it.
@@ -658,7 +659,7 @@ impl XBuilder {
         let mut du = per.pu.map_or(0.0, |pu| ((at.x - p.x) / pu).round() * pu);
         let mut dv = per.pv.map_or(0.0, |pv| ((at.y - p.y) / pv).round() * pv);
         if let Some(((u0, u1), (v0, v1))) = per.domain {
-            let inside = |x: f64, lo: f64, hi: f64| x >= lo - 1e-9 * (hi - lo).abs().max(1.0) && x <= hi + 1e-9 * (hi - lo).abs().max(1.0);
+            let inside = |x: f64, lo: f64, hi: f64| x >= lo - tol::REL * (hi - lo).abs().max(1.0) && x <= hi + tol::REL * (hi - lo).abs().max(1.0);
             let ts = [ed.t[0], ed.mid_t(), ed.t[1]];
             if !ts.iter().all(|&t| inside(pc.point(t).x + du, u0, u1)) {
                 du = 0.0;
@@ -711,7 +712,7 @@ impl XBuilder {
                 (Some(p), true) => {
                     // A period over, within a closed spline surface's range.
                     let over = |x: f64, p: f64, range: Option<(f64, f64)>| match range {
-                        Some((_, hi)) if x + p > hi + 1e-9 * p => x - p,
+                        Some((_, hi)) if x + p > hi + tol::REL * p => x - p,
                         _ => x + p,
                     };
                     // (From where the way out started: along the pole its p-curve may drift.)
@@ -870,7 +871,7 @@ impl XBuilder {
             if m.iter().sum::<i64>() != -w {
                 continue;
             }
-            let ok = free.iter().zip(&m).all(|(&j, &mj)| (gaps[j] + mj as f64 * p).abs() <= p * (1.0 + 1e-9));
+            let ok = free.iter().zip(&m).all(|(&j, &mj)| (gaps[j] + mj as f64 * p).abs() <= p * (1.0 + tol::REL));
             if !ok {
                 continue;
             }
@@ -1013,7 +1014,7 @@ impl XBuilder {
     fn find_u(&self, l: &[(usize, bool)], t: &Trace, u: f64) -> Option<(usize, Option<f64>)> {
         let off = |x: f64| wrap(x - u, -PI, P);
         for (k, &(e, fwd)) in l.iter().enumerate() {
-            if off(t.ends[k].0.x).abs() < 1e-9 {
+            if off(t.ends[k].0.x).abs() < tol::ROUNDOFF {
                 return Some((k, None));
             }
             let ed = &self.body.edges[e];
@@ -1348,7 +1349,7 @@ impl XBuilder {
                 let Some((su, sv)) = self.resolve(&s, l, &t, self.faces[fi].sense) else { return false };
                 let area = Self::trace_area(&s, &self.body, l, &t, &su, &sv);
                 let (mu, mv) = s.metric();
-                area.abs() < 1e-9 * mu * mv && uses.iter().all(|(&e, &(f, r))| self.body.edges[e].degenerate || f == r)
+                area.abs() < tol::REL * mu * mv && uses.iter().all(|(&e, &(f, r))| self.body.edges[e].degenerate || f == r)
             });
             if slits {
                 self.faces[fi].loops.clear();
@@ -1429,7 +1430,7 @@ impl XBuilder {
                         let mid = prev + d * 0.5;
                         (s.eval(start.x, start.y) - p0).norm() < JOIN && (s.eval(mid.x, mid.y) - p0).norm() < JOIN
                     };
-                    if len > 1e-9 && (t.free[k] || t.free_v[k] || collapsed()) {
+                    if len > tol::ROUNDOFF && (t.free[k] || t.free_v[k] || collapsed()) {
                         let vtx = self.co_start(l[k].0, l[k].1);
                         let p = self.body.verts[vtx].p;
                         let de = self.body.add_degenerate(p, 0.0, len, vtx);

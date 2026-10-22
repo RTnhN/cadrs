@@ -4,6 +4,7 @@
 use super::curve::Curve;
 use super::math::*;
 use super::surface::Surface;
+use super::tol;
 
 /// A directed piece of an edge in a face: the edge (index in the caller's pool), its direction,
 /// its p-curve (parametrized by the edge's t) and the edge's parameter range.
@@ -74,7 +75,7 @@ fn one_chart(surf: &Surface, boundary: &[Vec<Arc>], cuts: &[Arc]) -> (Vec<Vec<Ar
     let into_range = |c: P2| -> (f64, f64) {
         let m = mid(lo, hi);
         let step = |x: f64, a: f64, b: f64, mm: f64, per: Option<f64>| match per {
-            Some(p) if x < a - 1e-9 || x > b + 1e-9 => ((mm - x) / p).round() * p,
+            Some(p) if x < a - tol::ROUNDOFF || x > b + tol::ROUNDOFF => ((mm - x) / p).round() * p,
             _ => 0.0,
         };
         (step(c.x, lo.x, hi.x, m.x, periods[0]), step(c.y, lo.y, hi.y, m.y, periods[1]))
@@ -145,16 +146,16 @@ pub fn split_face(surf: &Surface, flip: bool, boundary: &[Vec<Arc>], cuts: &[Arc
             .iter()
             .filter(|(v, _)| *v == a.v[0])
             .filter_map(|(_, q)| {
-                if span < 1e-300 {
+                if span < tol::TINY {
                     return None;
                 }
                 let s = (q - u0).dot(&(u1 - u0)) / (span * span);
                 let off = (u0 + (u1 - u0) * s - q).norm();
-                (s > 1e-9 && s < 1.0 - 1e-9 && off < 1e-6 * (1.0 + span)).then_some(s)
+                (s > tol::REL && s < 1.0 - tol::REL && off < 1e-6 * (1.0 + span)).then_some(s)
             })
             .collect();
         fr.sort_by(f64::total_cmp);
-        fr.dedup_by(|x, y| (*x - *y).abs() < 1e-9);
+        fr.dedup_by(|x, y| (*x - *y).abs() < tol::ROUNDOFF);
         if fr.is_empty() {
             arcs.push(a.clone());
             continue;
@@ -179,7 +180,7 @@ pub fn split_face(surf: &Surface, flip: bool, boundary: &[Vec<Arc>], cuts: &[Arc
             let p = o(a.uv_at(0.0));
             bb.add(&P3::new(p.x, p.y, 0.0));
         }
-        bb.diagonal().max(1e-9)
+        bb.diagonal().max(tol::ROUNDOFF)
     };
     let ntol = (size * 1e-7).max(1e-7);
     let mut nodes: Vec<(usize, P2)> = Vec::new();
@@ -266,7 +267,7 @@ pub fn split_face(surf: &Surface, flip: bool, boundary: &[Vec<Arc>], cuts: &[Arc
             let d2 = dep2[c];
             let ang2 = cross2(&din, &d2).atan2(din.dot(&d2));
             let key = (ang, ang2);
-            if best.is_none_or(|(a, b, _)| key.0 > a + 1e-9 || ((key.0 - a).abs() <= 1e-9 && key.1 > b)) {
+            if best.is_none_or(|(a, b, _)| key.0 > a + tol::ROUNDOFF || ((key.0 - a).abs() <= tol::ROUNDOFF && key.1 > b)) {
                 best = Some((key.0, key.1, c));
             }
         }

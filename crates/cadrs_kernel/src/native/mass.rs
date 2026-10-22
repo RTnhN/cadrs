@@ -9,6 +9,7 @@ use super::math::*;
 use super::curve::Curve;
 use super::surface::Surface;
 use super::topo::{co_range, Body, Face};
+use super::tol;
 
 /// Number of integrated quantities (see `integrand`).
 pub const NQ: usize = 14;
@@ -114,7 +115,7 @@ const GAUSS4: Gauss = Gauss {
 /// H(u, v) for all quantities, weighted by `w` (the outer quadrature weight × v'(t)).
 #[allow(clippy::too_many_arguments)]
 fn inner(s: &Surface, u0: f64, u: f64, v: f64, shift: &V3, w: f64, acc: &mut Q, scratch: &mut Vec<f64>) {
-    if (u - u0).abs() < 1e-300 {
+    if (u - u0).abs() < tol::TINY {
         return;
     }
     u_breaks(s, u0, u, scratch);
@@ -147,7 +148,7 @@ fn ruled_in_v(s: &Surface) -> bool {
 
 /// G(u, v) = ∫_{v0}^{v} h(u, s) ds for all quantities, weighted by `w`.
 fn inner_v(s: &Surface, u: f64, v0: f64, v: f64, shift: &V3, w: f64, acc: &mut Q) {
-    if (v - v0).abs() < 1e-300 {
+    if (v - v0).abs() < tol::TINY {
         return;
     }
     let (m, r) = ((v0 + v) * 0.5, (v - v0) * 0.5);
@@ -272,7 +273,7 @@ fn iso_rectangle(body: &Body, f: &Face) -> Option<([f64; 4], f64)> {
         twice += a.x * b.y - b.x * a.y;
     }
     let area = (u1 - u0) * (v1 - v0);
-    if !(area > 0.0) || ((twice.abs() * 0.5) - area).abs() > 1e-9 * area {
+    if !(area > 0.0) || ((twice.abs() * 0.5) - area).abs() > tol::REL * area {
         return None;
     }
     Some(([u0, u1, v0, v1], twice.signum()))
@@ -544,7 +545,7 @@ pub fn body_mass(body: &Body) -> crate::MassProperties {
     let (length, moment) = wire_length(body);
     let solid = body.is_solid();
     let vol = if solid { q[4] } else { 0.0 };
-    let (center, inertia) = if solid && vol.abs() > 1e-300 {
+    let (center, inertia) = if solid && vol.abs() > tol::TINY {
         let c = V3::new(q[5], q[6], q[7]) / vol;
         let (xx, yy, zz) = (q[8], q[9], q[10]);
         let (xy, yz, zx) = (q[11], q[12], q[13]);
@@ -552,9 +553,9 @@ pub fn body_mass(body: &Body) -> crate::MassProperties {
         let io = nalgebra::Matrix3::new(yy + zz, -xy, -zx, -xy, xx + zz, -yz, -zx, -yz, xx + yy);
         let ic = io - (nalgebra::Matrix3::identity() * c.norm_squared() - c * c.transpose()) * vol;
         (P3::from(c + shift), ic)
-    } else if area.abs() > 1e-300 {
+    } else if area.abs() > tol::TINY {
         (P3::from(V3::new(q[1], q[2], q[3]) / area + shift), nalgebra::Matrix3::zeros())
-    } else if length > 1e-300 {
+    } else if length > tol::TINY {
         (P3::from(moment / length), nalgebra::Matrix3::zeros())
     } else if !body.points.is_empty() {
         let sum = body.points.iter().fold(V3::zeros(), |s, &v| s + body.verts[v].p.coords);
@@ -603,6 +604,6 @@ pub fn face_area(body: &Body, fi: usize) -> (f64, P3) {
     let shift = if bb.is_empty() { V3::zeros() } else { bb.center().coords };
     let q = face_integrals(body, f, &shift);
     let a = q[0];
-    let c = if a.abs() > 1e-300 { V3::new(q[1], q[2], q[3]) / a + shift } else { shift };
+    let c = if a.abs() > tol::TINY { V3::new(q[1], q[2], q[3]) / a + shift } else { shift };
     (a, P3::from(c))
 }

@@ -39,6 +39,7 @@ use super::nurbs::{NurbsCurve, NurbsSurface, H};
 use super::surface::Surface;
 use super::topo::{Body, TOL_MIN};
 use super::xbuild::{XBuilder, XFace};
+use super::tol;
 
 /// The largest gap (mm) between a read model's curves and the p-curves read or fitted for them
 /// that its tolerances are raised to cover (OCCT's readers record the gaps they find the same
@@ -757,7 +758,7 @@ fn build(t: Topo, curves: Vec<NurbsCurve>, surfs: Vec<SurfRec>) -> R<Brep> {
         let (lo, hi) = cur.range();
         let (p0, p1) = (p0.max(lo), p1.min(hi));
         let span = hi - lo;
-        let cur = if p1 > p0 + span * 1e-9 && (p0 > lo + span * 1e-9 || p1 < hi - span * 1e-9) {
+        let cur = if p1 > p0 + span * tol::REL && (p0 > lo + span * tol::REL || p1 < hi - span * tol::REL) {
             Curve::Nurbs(Arc::new(cur.clone())).to_nurbs(p0, p1)
         } else {
             cur.clone()

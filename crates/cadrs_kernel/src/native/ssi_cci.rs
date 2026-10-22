@@ -7,6 +7,7 @@
 
 use super::curve::Curve;
 use super::math::*;
+use super::tol;
 
 /// A piece of a curve: its range, a box sure to hold it, its size.
 #[derive(Clone, Copy)]
@@ -108,7 +109,7 @@ pub fn curve_curve(a: &Curve, a0: f64, a1: f64, b: &Curve, b0: f64, b1: f64, tol
         if (x.size <= small && y.size <= small) || budget == 0 {
             let (s, t) = nearest(a, ra, b, rb, 0.5 * (x.t0 + x.t1), 0.5 * (y.t0 + y.t1));
             // (A gap of exactly the tolerance counts: the rounding of its computation aside.)
-            if (a.point(s) - b.point(t)).norm() <= tol * (1.0 + 1e-9) {
+            if (a.point(s) - b.point(t)).norm() <= tol * (1.0 + tol::REL) {
                 out.push((s, t));
             }
             continue;

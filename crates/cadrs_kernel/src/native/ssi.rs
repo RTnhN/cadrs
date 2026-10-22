@@ -9,6 +9,7 @@ use super::math::*;
 use rayon::prelude::*;
 use super::nurbs::NurbsCurve;
 use super::surface::Surface;
+use super::tol;
 
 /// A piece of an intersection curve.
 #[derive(Debug, Clone)]
@@ -61,7 +62,7 @@ pub struct Ssi {
 /// How near two surfaces must be to coincide (within a part in 10⁹ of the problem's size,
 /// and at least [`super::tol::CONFUSION`]).
 fn coincidence_tol(bb: &Bbox) -> f64 {
-    super::tol::CONFUSION.max(1e-9 * bb.diagonal())
+    super::tol::CONFUSION.max(tol::REL * bb.diagonal())
 }
 
 /// [`surface_surface`] in parts.
@@ -140,7 +141,7 @@ fn plane_extrusion(p: &Surface, e: &Surface, ue: ((f64, f64), (f64, f64)), bb: &
         Curve::Circle { .. } | Curve::Ellipse { .. } => Curve::Nurbs(Arc::new(c.to_nurbs(lo, hi).transformed(&aff))),
         Curve::Nurbs(nc) => Curve::Nurbs(Arc::new(nc.transformed(&aff))),
     };
-    let closed = c.is_periodic() && (hi - lo) >= TAU - 1e-9;
+    let closed = c.is_periodic() && (hi - lo) >= TAU - tol::ANGULAR;
     Some(vec![IntCurve { c: curve, t0: lo, t1: hi, closed }])
 }
 
@@ -158,7 +159,7 @@ fn plane_cone(fp: &Frame, fc: &Frame, r: f64, ang: f64, bb: &Bbox) -> Option<Vec
     let (s, k) = ang.sin_cos();
     let q = nl.z * k;
     let a = r * q + s * c;
-    if a.abs() < 1e-9 * (1.0 + r.abs() + c.abs()) {
+    if a.abs() < tol::REL * (1.0 + r.abs() + c.abs()) {
         return None;
     }
     let local_point = |u: f64| -> Option<P3> {
@@ -236,7 +237,7 @@ fn plane_cone(fp: &Frame, fc: &Frame, r: f64, ang: f64, bb: &Bbox) -> Option<Vec
     };
     let mut out = Vec::new();
     for (ua, ub, closed) in runs {
-        if ub - ua < 1e-9 {
+        if ub - ua < tol::ROUNDOFF {
             continue;
         }
         // Pieces of at most π/4 whose weights share one sign.
@@ -245,8 +246,8 @@ fn plane_cone(fp: &Frame, fc: &Frame, r: f64, ang: f64, bb: &Bbox) -> Option<Vec
         let mut stack: Vec<(f64, f64)> = (0..n0).rev().map(|i| (ua + (ub - ua) * i as f64 / n0 as f64, ua + (ub - ua) * (i + 1) as f64 / n0 as f64)).collect();
         while let Some((x, y)) = stack.pop() {
             let b = piece(x, y);
-            let pos = b.iter().all(|h| h.w > 1e-300);
-            let neg = b.iter().all(|h| h.w < -1e-300);
+            let pos = b.iter().all(|h| h.w > tol::TINY);
+            let neg = b.iter().all(|h| h.w < -tol::TINY);
             if pos || neg || y - x < 1e-6 {
                 spans.push((x, y));
             } else {
@@ -294,7 +295,7 @@ fn bound_line(o: P3, d: V3, bb: &Bbox) -> Option<IntCurve> {
     for k in 0..3 {
         let (lo, hi) = (bb.min[k], bb.max[k]);
         if d[k].abs() < 1e-14 {
-            if o[k] < lo - 1e-9 || o[k] > hi + 1e-9 {
+            if o[k] < lo - tol::ROUNDOFF || o[k] > hi + tol::ROUNDOFF {
                 return None;
             }
             continue;
@@ -304,7 +305,7 @@ fn bound_line(o: P3, d: V3, bb: &Bbox) -> Option<IntCurve> {
         t0 = t0.max(a);
         t1 = t1.min(b);
     }
-    if t1 - t0 < 1e-9 {
+    if t1 - t0 < tol::ROUNDOFF {
         return None;
     }
     Some(IntCurve { c: Curve::Line { o, d }, t0, t1, closed: false })
@@ -400,7 +401,7 @@ fn analytic(a: &Surface, b: &Surface, bb: &Bbox, run_tol: f64) -> Option<Vec<Int
                 let mut out = Vec::new();
                 // Tangent (to within a tenth of the boolean's tolerance in distance; the two lines
                 // of a plane 1e-16 inside are still 1.5e-8 apart): one line.
-                if h < 1e-9 || r - d.abs() < 1e-7 * r.max(1.0) {
+                if h < tol::ROUNDOFF || r - d.abs() < 1e-7 * r.max(1.0) {
                     out.extend(bound_line(foot, z, &bbig));
                 } else {
                     out.extend(bound_line(foot + w * h, z, &bbig));
@@ -446,7 +447,7 @@ fn analytic(a: &Surface, b: &Surface, bb: &Bbox, run_tol: f64) -> Option<Vec<Int
             }
             // Through the apex and containing the axis: two rulings.
             let apex = fc.o - fc.z * (r / ang.tan());
-            if cz.abs() < 1e-12 && (apex - fp.o).dot(&n).abs() < 1e-9 {
+            if cz.abs() < 1e-12 && (apex - fp.o).dot(&n).abs() < tol::ROUNDOFF {
                 let w = fc.z.cross(&n).normalize();
                 let open = if ang.tan() * ang.cos().signum() > 0.0 { fc.z } else { -fc.z };
                 let k = ang.tan().abs();
@@ -455,7 +456,7 @@ fn analytic(a: &Surface, b: &Surface, bb: &Bbox, run_tol: f64) -> Option<Vec<Int
                     let d = (open + w * (k * s)).normalize();
                     if let Some(mut l) = bound_line(apex, d, &bbig) {
                         l.t0 = l.t0.max(0.0);
-                        if l.t1 > l.t0 + 1e-9 {
+                        if l.t1 > l.t0 + tol::ROUNDOFF {
                             out.push(l);
                         }
                     }
@@ -469,7 +470,7 @@ fn analytic(a: &Surface, b: &Surface, bb: &Bbox, run_tol: f64) -> Option<Vec<Int
             let cz = n.dot(&ft.z);
             if (1.0 - cz.abs()) < 1e-12 {
                 let h = (fp.o - ft.o).dot(&ft.z);
-                let tol = 1e-9 * (1.0 + rmaj + rmin);
+                let tol = tol::REL * (1.0 + rmaj + rmin);
                 if h.abs() > *rmin + tol {
                     return Some(vec![]);
                 }
@@ -484,7 +485,7 @@ fn analytic(a: &Surface, b: &Surface, bb: &Bbox, run_tol: f64) -> Option<Vec<Int
                     IntCurve { c: Curve::Circle { c, x: ft.x, y: ft.y, r: rmaj - w }, t0: 0.0, t1: TAU, closed: true },
                 ]);
             }
-            if cz.abs() < 1e-12 && (ft.o - fp.o).dot(&n).abs() < 1e-9 {
+            if cz.abs() < 1e-12 && (ft.o - fp.o).dot(&n).abs() < tol::ROUNDOFF {
                 // A plane through the axis: two meridian circles.
                 let w = ft.z.cross(&n).normalize();
                 return Some(vec![
@@ -505,7 +506,7 @@ fn analytic(a: &Surface, b: &Surface, bb: &Bbox, run_tol: f64) -> Option<Vec<Int
             if l < 1e-12 {
                 return Some(vec![]); // coaxial: no curve (or the same surface)
             }
-            let tol = 1e-9 * (1.0 + r1 + r2);
+            let tol = tol::REL * (1.0 + r1 + r2);
             if l > r1 + r2 + tol || l < (r1 - r2).abs() - tol {
                 return Some(vec![]);
             }
@@ -516,7 +517,7 @@ fn analytic(a: &Surface, b: &Surface, bb: &Bbox, run_tol: f64) -> Option<Vec<Int
             let base = f1.o + ex * x;
             let mut out = Vec::new();
             let tangent = (l - (r1 + r2)).abs() <= tol || (l - (r1 - r2).abs()).abs() <= tol;
-            if tangent || h < 1e-9 {
+            if tangent || h < tol::ROUNDOFF {
                 out.extend(bound_line(base, f1.z, &bbig));
             } else {
                 out.extend(bound_line(base + ey * h, f1.z, &bbig));
@@ -542,14 +543,14 @@ fn analytic(a: &Surface, b: &Surface, bb: &Bbox, run_tol: f64) -> Option<Vec<Int
             let (Some((mut oa, mut za)), Some((ob, zb))) = (a.axis(), b.axis()) else { return None };
             if let Surface::Sphere { f, .. } = a {
                 let w = f.o - ob;
-                if (w - zb * w.dot(&zb)).norm() < 1e-9 {
+                if (w - zb * w.dot(&zb)).norm() < tol::ROUNDOFF {
                     oa = ob;
                     za = zb;
                 }
             }
             let (ob, zb) = if let Surface::Sphere { f, .. } = b {
                 let w = f.o - oa;
-                if (w - za * w.dot(&za)).norm() < 1e-9 { (oa, za) } else { (ob, zb) }
+                if (w - za * w.dot(&za)).norm() < tol::ROUNDOFF { (oa, za) } else { (ob, zb) }
             } else {
                 (ob, zb)
             };
@@ -563,7 +564,7 @@ fn analytic(a: &Surface, b: &Surface, bb: &Bbox, run_tol: f64) -> Option<Vec<Int
                 return None;
             }
             let w = ob - oa;
-            if (w - za * w.dot(&za)).norm() > 1e-9 {
+            if (w - za * w.dot(&za)).norm() > tol::ROUNDOFF {
                 return None;
             }
             Some(coaxial(a, b, &oa, &za, bb))
@@ -665,7 +666,7 @@ fn coaxial(a: &Surface, b: &Surface, o: &P3, z: &V3, bb: &Bbox) -> Vec<IntCurve>
     let _ = bb;
     meridian_points(ma, mb, 1e-7)
         .into_iter()
-        .filter(|(r, _)| *r > 1e-9)
+        .filter(|(r, _)| *r > tol::ROUNDOFF)
         .map(|(r, h)| IntCurve { c: Curve::Circle { c: o + z * h, x: f.x, y: f.y, r }, t0: 0.0, t1: TAU, closed: true })
         .collect()
 }
@@ -680,7 +681,7 @@ pub fn sdist_hint(s: &Surface, p: &P3, hint: &mut Option<(f64, f64)>) -> f64 {
     // A hinted Newton may stall on the wrong side of a fold or on the domain's edge: when the
     // foot isn't square to the surface, check against a projection from a coarse grid.
     let r = p - q;
-    let tang = (r.dot(&su) / su.norm().max(1e-300)).abs() + (r.dot(&sv) / sv.norm().max(1e-300)).abs();
+    let tang = (r.dot(&su) / su.norm().max(tol::TINY)).abs() + (r.dot(&sv) / sv.norm().max(tol::TINY)).abs();
     if hint.is_some() && tang > 1e-7 * (1.0 + r.norm()) {
         let (u2, v2) = s.project_coarse(p, 8);
         let (q2, su2, sv2) = s.d1(u2, v2);
@@ -691,7 +692,7 @@ pub fn sdist_hint(s: &Surface, p: &P3, hint: &mut Option<(f64, f64)>) -> f64 {
     let n = su.cross(&sv);
     let l = n.norm();
     *hint = Some((u, v));
-    if l < 1e-300 {
+    if l < tol::TINY {
         return (p - q).norm();
     }
     (p - q).dot(&(n / l))
@@ -706,7 +707,7 @@ pub fn sdist(s: &Surface, p: &P3) -> f64 {
     let (q, su, sv) = s.d1(u, v);
     let n = su.cross(&sv);
     let l = n.norm();
-    if l < 1e-300 {
+    if l < tol::TINY {
         return (p - q).norm();
     }
     (p - q).dot(&(n / l))
@@ -739,7 +740,7 @@ fn numeric(a: &Surface, ua: ((f64, f64), (f64, f64)), b: &Surface, ub: ((f64, f6
     let mut work = (stats.pairs + res.curves.iter().map(|c| c.pts.len()).sum::<usize>()) as u64;
     let (ta, tb) = ((box_a.u, box_a.v), (box_b.u, box_b.v));
     let res_singular: Vec<P3> = res.singular.iter().map(|q| q.p).collect();
-    let h = bb.diagonal().max(1e-9) / 96.0;
+    let h = bb.diagonal().max(tol::ROUNDOFF) / 96.0;
     let mut polys: Vec<(Vec<super::ssi_numeric::Pt>, bool)> = Vec::new();
     let mut tangents: Vec<(Vec<P3>, bool)> = Vec::new();
     for c in res.curves {
@@ -923,7 +924,7 @@ fn fit_points(mut pts: Vec<P3>, closed: bool) -> Option<IntCurve> {
     if closed {
         pts.push(pts[0]);
     }
-    pts.dedup_by(|x, y| (*x - *y).norm() < 1e-9);
+    pts.dedup_by(|x, y| (*x - *y).norm() < tol::ROUNDOFF);
     if pts.len() < 2 {
         return None;
     }
@@ -954,7 +955,7 @@ pub fn refine_point_uv(a: &Surface, b: &Surface, uv: P2) -> (P3, P2) {
         let gu = (sdist_hint(b, &(p + su * e), &mut h1) - sdist_hint(b, &(p - su * e), &mut h2)) / (2.0 * e);
         let gv = (sdist_hint(b, &(p + sv * e), &mut h3) - sdist_hint(b, &(p - sv * e), &mut h4)) / (2.0 * e);
         let l = gu * gu + gv * gv;
-        if l < 1e-300 {
+        if l < tol::TINY {
             break;
         }
         u -= g0 * gu / l;
@@ -967,7 +968,7 @@ pub fn refine_point_uv(a: &Surface, b: &Surface, uv: P2) -> (P3, P2) {
 fn seg_dist3(p: &P3, a: &P3, b: &P3) -> f64 {
     let d = b - a;
     let l = d.norm_squared();
-    let t = if l < 1e-300 { 0.0 } else { ((p - a).dot(&d) / l).clamp(0.0, 1.0) };
+    let t = if l < tol::TINY { 0.0 } else { ((p - a).dot(&d) / l).clamp(0.0, 1.0) };
     (a + d * t - p).norm()
 }
 
@@ -995,7 +996,7 @@ fn join_polylines<T: Clone>(polys: &mut Vec<(Vec<T>, bool)>, tol: f64, at: impl 
                         return V3::zeros();
                     }
                     let (x, y) = if end { (at(&p[n - 2]), at(&p[n - 1])) } else { (at(&p[1]), at(&p[0])) };
-                    (y - x).try_normalize(1e-300).unwrap_or_else(V3::zeros)
+                    (y - x).try_normalize(tol::TINY).unwrap_or_else(V3::zeros)
                 };
                 let smooth = |ei: bool, ej: bool| out_dir(&polys[i].0, ei).dot(&out_dir(&polys[j].0, ej)) < -0.85;
                 let mut pj = polys[j].0.clone();
@@ -1051,7 +1052,7 @@ fn fit_curve(a: &Surface, b: &Surface, mut pts: Vec<super::ssi_numeric::Pt>, clo
     if closed {
         pts.push(pts[0]);
     }
-    pts.dedup_by(|x, y| (x.p - y.p).norm() < 1e-9);
+    pts.dedup_by(|x, y| (x.p - y.p).norm() < tol::ROUNDOFF);
     // Angles continuous along the curve (joined pieces may differ by turns), so that the
     // parameters of neighbours average to a start between them.
     for k in 1..pts.len() {
@@ -1170,7 +1171,7 @@ pub fn curve_surface(c: &Curve, t0: f64, t1: f64, s: &Surface) -> Vec<f64> {
     if let (Curve::Line { o, d }, true) = (c, s.signed_distance(&P3::origin()).is_some()) {
         let ts: Vec<f64> = super::classify::ray_surface(s, o, d, t0 - 1.0, t1 + 1.0).into_iter().map(|(t, _, _)| t).collect();
         if !matches!(s, Surface::Torus { .. } | Surface::Revolution { .. } | Surface::Extrusion { .. } | Surface::Nurbs(_)) {
-            return ts.into_iter().map(|t| touching_root(c, s, t)).filter(|t| *t >= t0 - 1e-9 && *t <= t1 + 1e-9).map(|t| t.clamp(t0, t1)).collect();
+            return ts.into_iter().map(|t| touching_root(c, s, t)).filter(|t| *t >= t0 - tol::ROUNDOFF && *t <= t1 + tol::ROUNDOFF).map(|t| t.clamp(t0, t1)).collect();
         }
     }
     let n = match c {
@@ -1246,7 +1247,7 @@ pub fn curve_surface(c: &Curve, t0: f64, t1: f64, s: &Surface) -> Vec<f64> {
                     }
                 }
                 let m = 0.5 * (a + b);
-                if f(m).abs() < 1e-9 {
+                if f(m).abs() < tol::ROUNDOFF {
                     out.push(m);
                 }
             }
@@ -1275,7 +1276,7 @@ pub fn curve_surface(c: &Curve, t0: f64, t1: f64, s: &Surface) -> Vec<f64> {
         i = e + 1;
     }
     out.sort_by(f64::total_cmp);
-    out.dedup_by(|a, b| (*a - *b).abs() < 1e-9);
+    out.dedup_by(|a, b| (*a - *b).abs() < tol::ROUNDOFF);
     out
 }
 
@@ -1288,7 +1289,7 @@ fn touching_root(c: &Curve, s: &Surface, t: f64) -> f64 {
     if f(t).is_none() {
         return t;
     }
-    let speed = c.d2(t).1.norm().max(1e-300);
+    let speed = c.d2(t).1.norm().max(tol::TINY);
     let h = 1e-5 / speed;
     let slope = |x: f64| (f(x + h).unwrap_or(0.0) - f(x - h).unwrap_or(0.0)) / (2.0 * h);
     if slope(t).abs() > 1e-3 * speed {
@@ -1298,7 +1299,7 @@ fn touching_root(c: &Curve, s: &Surface, t: f64) -> f64 {
     for _ in 0..20 {
         let g = slope(x);
         let g2 = (f(x + h).unwrap_or(0.0) - 2.0 * f(x).unwrap_or(0.0) + f(x - h).unwrap_or(0.0)) / (h * h);
-        if g2.abs() < 1e-300 {
+        if g2.abs() < tol::TINY {
             break;
         }
         let dx = -g / g2;
@@ -1339,7 +1340,7 @@ fn curve_curve_closed(a: &Curve, a0: f64, a1: f64, b: &Curve, b0: f64, b1: f64, 
         }
         let s = (bb * ee - cc * dd) / den;
         let t = (aa * ee - bb * dd) / den;
-        if s >= a0 - 1e-9 && s <= a1 + 1e-9 && t >= b0 - 1e-9 && t <= b1 + 1e-9 {
+        if s >= a0 - tol::ROUNDOFF && s <= a1 + tol::ROUNDOFF && t >= b0 - tol::ROUNDOFF && t <= b1 + tol::ROUNDOFF {
             let (p, q) = (a.point(s), b.point(t));
             if (p - q).norm() < tol {
                 out.push((s.clamp(a0, a1), t.clamp(b0, b1)));
@@ -1385,7 +1386,7 @@ fn curve_curve_closed(a: &Curve, a0: f64, a1: f64, b: &Curve, b0: f64, b1: f64, 
             let tl = (p - o).dot(d) / (dd * dd);
             let ang = w.dot(y).atan2(w.dot(x));
             let tc = super::curve::clamp_periodic(ang, c0, c1);
-            if tl >= l0 - 1e-9 && tl <= l1 + 1e-9 && (c.point(tc) - p).norm() < tol {
+            if tl >= l0 - tol::ROUNDOFF && tl <= l1 + tol::ROUNDOFF && (c.point(tc) - p).norm() < tol {
                 out.push((tl.clamp(l0, l1), tc));
             }
         }
@@ -1412,7 +1413,7 @@ fn curve_curve_closed(a: &Curve, a0: f64, a1: f64, b: &Curve, b0: f64, b1: f64, 
             if dl < tol && (ra - rb).abs() < tol {
                 return out; // the same circle: overlaps are found from the end points
             }
-            if dl < 1e-300 || dl > ra + rb + tol || dl < (ra - rb).abs() - tol {
+            if dl < tol::TINY || dl > ra + rb + tol || dl < (ra - rb).abs() - tol {
                 return out;
             }
             // Radical line: distance along d from ca.
