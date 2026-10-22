@@ -69,55 +69,98 @@ pub fn in_face(polys: &[Vec<P2>], surf: &Surface, uv: P2, tol: f64) -> InFace {
 /// surface's metric (as [`in_face`] scales them), each polygon's and all of them together.
 pub struct FacePolys<'a> {
     polys: &'a [Vec<P2>],
-    /// Per polygon: its (u, v) box and its scaled box, as (min x, max x, min y, max y).
-    boxes: Vec<([f64; 4], [f64; 4])>,
+    /// Per polygon: its (u, v) box and its scaled box ([`PolyBoxes`]).
+    boxes: PolyBoxes,
     range: ((f64, f64), (f64, f64)),
 }
 
-impl<'a> FacePolys<'a> {
-    pub fn new(polys: &'a [Vec<P2>], surf: &Surface) -> Self {
-        let (mu, mv) = surf.metric();
-        let boxes = polys
-            .iter()
-            .map(|p| {
-                let mut b = [f64::INFINITY, f64::NEG_INFINITY, f64::INFINITY, f64::NEG_INFINITY];
-                let mut m = b;
-                for q in p {
-                    b = [b[0].min(q.x), b[1].max(q.x), b[2].min(q.y), b[3].max(q.y)];
-                    let (x, y) = (q.x * mu, q.y * mv);
-                    m = [m[0].min(x), m[1].max(x), m[2].min(y), m[3].max(y)];
-                }
-                (b, m)
-            })
-            .collect();
-        FacePolys { polys, boxes, range: uv_range(polys) }
-    }
+/// A face's polygon prepared for point tests: its (u, v) box and its box in the
+/// metric-scaled (u, v), as (min x, max x, min y, max y), and, for a long polygon, its sides
+/// bucketed by rows of v (a point's tests then look at the sides of its rows only).
+#[derive(Debug, Clone)]
+pub struct PolyBox {
+    b: [f64; 4],
+    m: [f64; 4],
+    rows: Option<Rows>,
+}
 
-    /// [`periodic_candidates`] for these polygons.
-    pub fn candidates(&self, s: &Surface, u: f64, v: f64) -> Vec<P2> {
-        periodic_candidates_in(s, u, v, self.range)
-    }
+/// A polygon's sides (by their first point's index) in rows of equal height over its v range.
+#[derive(Debug, Clone)]
+struct Rows {
+    y0: f64,
+    dy: f64,
+    sides: Vec<Vec<u32>>,
+}
 
-    /// [`in_face`], the same answer: a polygon whose boxes the point lies well outside (in the
-    /// metric beyond `tol` of every side, and in (u, v) outside, where the crossings to its right
-    /// are even) can neither hold it on its boundary nor flip its parity, and is skipped.
-    pub fn in_face(&self, surf: &Surface, uv: P2, tol: f64) -> InFace {
-        let (mu, mv) = surf.metric();
-        let mut inside = false;
-        for (p, (b, m)) in self.polys.iter().zip(&self.boxes) {
-            let uv = shifted_into(surf, uv, (b[0], b[1]), (b[2], b[3]));
-            let q = P2::new(uv.x * mu, uv.y * mv);
-            let gm = tol * (1.0 + tol::REL) + tol::REL_FINE * (1.0 + q.x.abs().max(q.y.abs()) + m[1].abs().max(m[0].abs()).max(m[3].abs()).max(m[2].abs()));
-            let gb = tol::REL_FINE * (1.0 + uv.x.abs().max(uv.y.abs()) + b[1].abs().max(b[0].abs()).max(b[3].abs()).max(b[2].abs()));
-            let far_m = q.x < m[0] - gm || q.x > m[1] + gm || q.y < m[2] - gm || q.y > m[3] + gm;
-            let far_b = uv.x < b[0] - gb || uv.x > b[1] + gb || uv.y < b[2] - gb || uv.y > b[3] + gb;
-            if far_m && far_b {
-                continue;
+impl Rows {
+    /// The rows [y0, y1] reaches, clamped to the polygon's.
+    fn span(&self, y0: f64, y1: f64) -> std::ops::RangeInclusive<usize> {
+        let n = self.sides.len() as f64;
+        let at = |y: f64| ((y - self.y0) / self.dy).floor().clamp(0.0, n - 1.0) as usize;
+        at(y0)..=at(y1)
+    }
+}
+
+/// Per polygon of a face, a [`PolyBox`]: what [`in_face_boxed`] culls by.
+pub type PolyBoxes = Vec<PolyBox>;
+
+/// The [`PolyBoxes`] of a face's polygons.
+pub fn poly_boxes(polys: &[Vec<P2>], surf: &Surface) -> PolyBoxes {
+    let (mu, mv) = surf.metric();
+    polys
+        .iter()
+        .map(|p| {
+            let mut b = [f64::INFINITY, f64::NEG_INFINITY, f64::INFINITY, f64::NEG_INFINITY];
+            let mut m = b;
+            for q in p {
+                b = [b[0].min(q.x), b[1].max(q.x), b[2].min(q.y), b[3].max(q.y)];
+                let (x, y) = (q.x * mu, q.y * mv);
+                m = [m[0].min(x), m[1].max(x), m[2].min(y), m[3].max(y)];
             }
             let n = p.len();
+            let rows = (n > 64 && b[3] > b[2]).then(|| {
+                let count = (n / 8).clamp(1, 256);
+                let mut r = Rows { y0: b[2], dy: (b[3] - b[2]) / count as f64, sides: vec![Vec::new(); count] };
+                for i in 0..n {
+                    let (a, c) = (p[i], p[(i + 1) % n]);
+                    for k in r.span(a.y.min(c.y), a.y.max(c.y)) {
+                        r.sides[k].push(i as u32);
+                    }
+                }
+                r
+            });
+            PolyBox { b, m, rows }
+        })
+        .collect()
+}
+
+/// [`in_face`], the same answer: a polygon whose boxes (`boxes`, [`poly_boxes`] of `polys`)
+/// the point lies well outside (in the metric beyond `tol` of every side, and in (u, v)
+/// outside, where the crossings to its right are even) can neither hold it on its boundary nor
+/// flip its parity, and is skipped; of a long polygon only the sides in the point's rows (those
+/// that come within `tol` of it, and those that cross its v) are looked at.
+pub fn in_face_boxed(polys: &[Vec<P2>], boxes: &[PolyBox], surf: &Surface, uv: P2, tol: f64) -> InFace {
+    let (mu, mv) = surf.metric();
+    let mut inside = false;
+    for (p, pb) in polys.iter().zip(boxes) {
+        let (b, m) = (&pb.b, &pb.m);
+        let uv = shifted_into(surf, uv, (b[0], b[1]), (b[2], b[3]));
+        let q = P2::new(uv.x * mu, uv.y * mv);
+        let gm = tol * (1.0 + tol::REL) + tol::REL_FINE * (1.0 + q.x.abs().max(q.y.abs()) + m[1].abs().max(m[0].abs()).max(m[3].abs()).max(m[2].abs()));
+        let gb = tol::REL_FINE * (1.0 + uv.x.abs().max(uv.y.abs()) + b[1].abs().max(b[0].abs()).max(b[3].abs()).max(b[2].abs()));
+        let far_m = q.x < m[0] - gm || q.x > m[1] + gm || q.y < m[2] - gm || q.y > m[3] + gm;
+        let far_b = uv.x < b[0] - gb || uv.x > b[1] + gb || uv.y < b[2] - gb || uv.y > b[3] + gb;
+        if far_m && far_b {
+            continue;
+        }
+        let n = p.len();
+        let side = |i: usize| {
+            let (a, b) = (p[i], p[(i + 1) % n]);
+            (P2::new(a.x * mu, a.y * mv), P2::new(b.x * mu, b.y * mv))
+        };
+        let Some(rows) = &pb.rows else {
             for i in 0..n {
-                let (a, b) = (p[i], p[(i + 1) % n]);
-                let (a, b) = (P2::new(a.x * mu, a.y * mv), P2::new(b.x * mu, b.y * mv));
+                let (a, b) = side(i);
                 if seg_dist2(&q, &a, &b) < tol {
                     return InFace::Boundary;
                 }
@@ -125,8 +168,52 @@ impl<'a> FacePolys<'a> {
             if point_in_polygon(&uv, p) {
                 inside = !inside;
             }
+            continue;
+        };
+        // (The rows within `tol` of the point in v, a little more for rounding: a side outside
+        // them is farther than `tol` everywhere.)
+        let reach = gm / mv.max(tol::TINY) + gb;
+        for k in rows.span(uv.y - reach, uv.y + reach) {
+            for &i in &rows.sides[k] {
+                let (a, b) = side(i as usize);
+                if seg_dist2(&q, &a, &b) < tol {
+                    return InFace::Boundary;
+                }
+            }
         }
-        if inside { InFace::Inside } else { InFace::Outside }
+        // Parity: the sides crossing the point's v, all in its row.
+        let mut odd = false;
+        for k in rows.span(uv.y, uv.y) {
+            for &i in &rows.sides[k] {
+                let (a, c) = (p[i as usize], p[(i as usize + 1) % n]);
+                if (a.y > uv.y) != (c.y > uv.y) {
+                    let x = a.x + (uv.y - a.y) / (c.y - a.y) * (c.x - a.x);
+                    if uv.x < x {
+                        odd = !odd;
+                    }
+                }
+            }
+        }
+        if odd {
+            inside = !inside;
+        }
+    }
+    if inside { InFace::Inside } else { InFace::Outside }
+}
+
+impl<'a> FacePolys<'a> {
+    pub fn new(polys: &'a [Vec<P2>], surf: &Surface) -> Self {
+        FacePolys { polys, boxes: poly_boxes(polys, surf), range: uv_range(polys) }
+    }
+
+    /// [`periodic_candidates`] for these polygons.
+    pub fn candidates(&self, s: &Surface, u: f64, v: f64) -> Vec<P2> {
+        periodic_candidates_in(s, u, v, self.range)
+    }
+
+    /// [`in_face`], the same answer, culling by the polygons' boxes ([`in_face_boxed`]).
+    pub fn in_face(&self, surf: &Surface, uv: P2, tol: f64) -> InFace {
+        in_face_boxed(self.polys, &self.boxes, surf, uv, tol)
     }
 }
 
@@ -356,6 +443,16 @@ pub fn ray_hits(body: &Body, polys: &[Vec<Vec<P2>>], o: &P3, d: &V3) -> Vec<(f64
 /// The (u, v) shifted by whole periods into the face's uv box.
 pub fn periodic_candidates(s: &Surface, u: f64, v: f64, polys: &[Vec<P2>]) -> Vec<P2> {
     periodic_candidates_in(s, u, v, uv_range(polys))
+}
+
+/// [`periodic_candidates`] for the polygons of `boxes` ([`poly_boxes`]): their range from
+/// their boxes (the same as from their points, for none of the points' passes).
+pub fn periodic_candidates_boxed(s: &Surface, u: f64, v: f64, boxes: &[PolyBox]) -> Vec<P2> {
+    let mut r = ((f64::INFINITY, f64::NEG_INFINITY), (f64::INFINITY, f64::NEG_INFINITY));
+    for pb in boxes {
+        r = ((r.0.0.min(pb.b[0]), r.0.1.max(pb.b[1])), (r.1.0.min(pb.b[2]), r.1.1.max(pb.b[3])));
+    }
+    periodic_candidates_in(s, u, v, r)
 }
 
 /// `uv` moved by whole turns along the surface's periodic directions into the box (lo: the u
@@ -683,6 +780,36 @@ mod tests {
             let uv = P2::new(uv.0, uv.1);
             assert_eq!(in_face(&polys, &surf, uv, 1e-9), want, "{uv:?}");
             assert_eq!(fp.in_face(&surf, uv, 1e-9), want, "{uv:?}");
+        }
+    }
+}
+
+#[cfg(test)]
+mod boxed_tests {
+    use super::*;
+
+    /// The boxed and row-bucketed point test answers as the plain one, over a long polygon (a
+    /// wavy outline of 2000 points) with small holes, at points inside, outside, on and near the
+    /// boundary.
+    #[test]
+    fn boxed_in_face_matches_in_face() {
+        let s = Surface::Plane { f: Frame::world() };
+        let outer: Vec<P2> = (0..2000).map(|i| { let a = TAU * i as f64 / 2000.0; let r = 10.0 + 0.5 * (7.0 * a).sin(); P2::new(r * a.cos(), r * a.sin()) }).collect();
+        let mut polys = vec![outer];
+        for k in 0..6 {
+            let c = P2::new(-6.0 + 2.4 * k as f64, 0.5);
+            polys.push((0..100).rev().map(|i| { let a = TAU * i as f64 / 100.0; P2::new(c.x + 0.8 * a.cos(), c.y + 0.8 * a.sin()) }).collect());
+        }
+        let boxes = poly_boxes(&polys, &s);
+        let mut seed = 12345u64;
+        let mut rnd = || { seed = seed.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407); (seed >> 11) as f64 / (1u64 << 53) as f64 };
+        let mut pts: Vec<P2> = (0..4000).map(|_| P2::new(-13.0 + 26.0 * rnd(), -13.0 + 26.0 * rnd())).collect();
+        // On and a hair off the sides.
+        pts.extend(polys.iter().flat_map(|p| p.iter().step_by(37).flat_map(|q| [*q, P2::new(q.x + 1e-8, q.y), P2::new(q.x, q.y - 3e-7)])));
+        for q in pts {
+            for tol in [1e-7, 1e-3] {
+                assert_eq!(in_face_boxed(&polys, &boxes, &s, q, tol), in_face(&polys, &s, q, tol), "at {q:?}, tol {tol}");
+            }
         }
     }
 }

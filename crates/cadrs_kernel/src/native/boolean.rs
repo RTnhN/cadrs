@@ -170,6 +170,8 @@ struct WFace {
     owner: usize,
     orig: usize,
     polys: Vec<Vec<P2>>,
+    /// The polygons' boxes and rows, to cull them by ([`classify::poly_boxes`]).
+    boxes: classify::PolyBoxes,
     bbox: Bbox,
     uv_center: P2,
     /// The face's own tolerance (0: exact, the run's applies).
@@ -374,6 +376,7 @@ fn import(pool: &mut Pool, faces: &mut Vec<WFace>, b: &Body, owner: usize, merge
             loops,
             owner,
             orig: fi,
+            boxes: classify::poly_boxes(&polys, &f.surf),
             polys,
             bbox: bb.grow(pool.tol * 10.0 + ftol),
             uv_center: P2::new(center.x, center.y),
@@ -550,8 +553,10 @@ fn point_in_face(f: &WFace, p: &P3, tol: f64) -> InFace {
         return InFace::Outside;
     }
     let mut res = InFace::Outside;
-    for uv in classify::periodic_candidates(&f.surf, u, v, &f.polys) {
-        match classify::in_face(&f.polys, &f.surf, uv, tol) {
+    // (The polygons' range and boxes kept from the start: a face of hundreds of holes holds a
+    // million polygon points, which every test went over.)
+    for uv in classify::periodic_candidates_boxed(&f.surf, u, v, &f.boxes) {
+        match classify::in_face_boxed(&f.polys, &f.boxes, &f.surf, uv, tol) {
             InFace::Inside => return InFace::Inside,
             InFace::Boundary => res = InFace::Boundary,
             InFace::Outside => {}

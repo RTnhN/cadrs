@@ -51,6 +51,19 @@ Differences without errors, still to check:
   - 16 cases still need the tool-and-boolean fallback.
 - [ ] Booleans: 166 occt_boolean known failures (section lengths, sub-shape counts, open shells, areas).
 - [ ] Offsets: 193 occt_offset known failures (101 of them B-spline wire offsets); smlib_offset 23/29.
+- [ ] A merged face's new seam can run through one of its holes. The boolean merges the
+  pieces of one face back (`unify::merge_group`) and gives the merged face a seam at a vertex of
+  its boundary chain. In Dr Browns cap that put the seam at u = 0, inside the span of a window
+  across the dome's seam. The fillet then can't place its cuts; `fillet::open_seam_holes` works
+  around it. Three fixes each fixed the cap, or broke `smlib_offset offset_12_offset_bracket2`
+  ("open shell") on the Ryzen box, where it still passes on gray:
+  (a) cutting the seam at the hole afterwards (`cut_seams_at_holes` on the merged face or the
+  boolean's output) fixed the cap but broke offset_12;
+  (b) choosing a seam vertex clear of the holes kept offset_12, but the cap's chain has no such
+  vertex;
+  (c) splitting the chain at a clear u fixed the cap but broke offset_12 again.
+  The inputs are in `doc_fixtures/drbrowns_window_{target,tool}.body` (private, outside the
+  repository).
 - [ ] `explode` should list degenerated edges as OCCT's does. That would turn 13 blend topology
   mismatches into real comparisons.
 - [ ] The BRep reader:

@@ -1042,8 +1042,11 @@ pub fn mesh_face_with(body: &Body, f: &Face, es: &[(Vec<f64>, Vec<P3>)], p: &Tes
     // B-spline parameters carry no length: scale them by the surface's mean speeds over the
     // face's box, so the grid's steps and the triangulation work in about true lengths (a long
     // straight-along-v fillet strip with v in [0, 1] would otherwise get no interior rows).
+    // Likewise an extrusion's (its curve's parameter and its direction's length) and a surface
+    // of revolution's along its meridian: unscaled, a 0.02 mm extrusion of a spline over a
+    // parameter range of 0.0016 took a 14 000-point grid.
     let scale = f.surf.metric();
-    let scale = if matches!(f.surf, Surface::Nurbs(_)) { mean_speeds(&dom, ubox, vbox).unwrap_or(scale) } else { scale };
+    let scale = if matches!(f.surf, Surface::Nurbs(_) | Surface::Extrusion { .. } | Surface::Revolution { .. }) { mean_speeds(&dom, ubox, vbox).unwrap_or(scale) } else { scale };
     let pts_uv: Vec<P2> = pts.iter().map(|b| b.uv).collect();
     let grid = seed_grid(&dom, &pts_uv, &loops, ubox, vbox, scale, p);
     if prof {
@@ -1519,6 +1522,44 @@ mod tests {
         let sh = bb.shell(vec![f0, f1], true);
         bb.solid(vec![sh]);
         bb.build().unwrap()
+    }
+
+    /// A tiny extrusion (a 0.02 mm spline over a parameter range of 0.0016, swept 0.01 along a
+    /// direction of length 0.01) meshes in a few hundred triangles at a 0.05 chord: its (u, v)
+    /// are scaled by the surface's speeds, as a B-spline's are (unscaled, a 14 000-point grid
+    /// and 28 000 triangles: Raspberry Pi Pico 2's pins, 300 000 a body).
+    #[test]
+    fn tiny_extrusion_meshes_coarsely() {
+        use super::super::curve::Curve;
+        use super::super::nurbs::{hom, NurbsCurve};
+        use super::super::topo::BodyBuilder;
+        let (a, b) = (-0.0016, 0.0);
+        let pts = [(6.0823, -26.3369), (6.0841, -26.3348), (6.0876, -26.3307), (6.0931, -26.3301), (6.0958, -26.3298)];
+        let cps: Vec<_> = pts.iter().map(|&(x, y)| hom(&P3::new(x, y, 1.95), 1.0)).collect();
+        let c = Curve::nurbs(NurbsCurve::new(3, vec![a, a, a, a, -0.0008, b, b, b, b], cps).unwrap());
+        let d = V3::new(0.0, 0.0, 0.01);
+        let top = c.transformed(&Affine::translation(d));
+        let mut bb = BodyBuilder::new();
+        let [v0, v1, v2, v3] = [c.point(a), c.point(b), top.point(b), top.point(a)].map(|p| bb.vertex(p));
+        let e0 = bb.edge(c.clone(), a, b, v0, v1);
+        let (s1, _) = Curve::line(c.point(b), top.point(b));
+        let e1 = bb.edge(s1, 0.0, 0.01, v1, v2);
+        let (s3, _) = Curve::line(c.point(a), top.point(a));
+        let e2 = bb.edge(top, a, b, v3, v2);
+        let e3 = bb.edge(s3, 0.0, 0.01, v0, v3);
+        let line = |o: (f64, f64), dir: (f64, f64)| Curve::Line { o: P3::new(o.0, o.1, 0.0), d: V3::new(dir.0, dir.1, 0.0) };
+        let lp = vec![
+            Coedge { edge: e0, fwd: true, pc: line((0.0, 0.0), (1.0, 0.0)) },
+            Coedge { edge: e1, fwd: true, pc: line((b, 0.0), (0.0, 100.0)) },
+            Coedge { edge: e2, fwd: false, pc: line((0.0, 1.0), (1.0, 0.0)) },
+            Coedge { edge: e3, fwd: false, pc: line((a, 0.0), (0.0, 100.0)) },
+        ];
+        let f = bb.face(Surface::Extrusion { c, d }, true, vec![lp]);
+        bb.shell(vec![f], false);
+        let body = bb.build().unwrap();
+        let (fm, _) = mesh_body(&body, 0.05, 0.08726646259971647);
+        let n = fm[0].indices.len();
+        assert!(n > 0 && n < 2000, "{n} triangles");
     }
 
     /// Mass properties and the mesh take the same half of a sphere whose loop crosses its poles
