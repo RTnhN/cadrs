@@ -402,9 +402,14 @@ impl<L: DataLoader> WebRenderSync<L> for HomePage {
                                     children: Some(html_sync! {
                                         <pre class="overflow-x-auto rounded-lg border border-border bg-muted/50 p-4 text-sm leading-6">
                                             <code>
-                                                "git clone https://github.com/rvdende/cadrs\ncd cadrs\ncargo run --release"
+                                                "git clone https://github.com/rvdende/cadrs\ncd cadrs\ncargo install-local"
                                             </code>
                                         </pre>
+                                        <p class="text-sm text-muted-foreground">
+                                            "This builds in release and installs cadrs for your user, with a launcher entry. Run it again to update. To run without installing, use "
+                                            <code>"cargo run --release"</code>
+                                            "."
+                                        </p>
                                         <a
                                             href="https://github.com/rvdende/cadrs#building"
                                             class="text-sm font-medium text-primary underline-offset-4 hover:underline"
@@ -496,7 +501,9 @@ impl<L: DataLoader, B: WriteBuf> MdRenderSync<L, B> for HomePage {
 
                 git clone https://github.com/rvdende/cadrs
                 cd cadrs
-                cargo run --release
+                cargo install-local
+
+            `cargo install-local` builds in release and installs cadrs for your user, with a launcher entry\. Run it again to update\. To run without installing, use `cargo run --release`\.
 
             ## From sketch to assembly to drawing
 
