@@ -1,8 +1,11 @@
 //! Offsets of planar wires (DRAW's `mkoffset`, OCCT's `BRepOffsetAPI_MakeOffset` with arc
 //! joins), in the wire's plane (z = 0 here).
 //!
-//! 0. The edges are cut where their curvature has an extremum or changes sign, as OCCT cuts the
-//!    spine (so the result has OCCT's edges); a nearly planar wire is first flattened.
+//! 0. The edges are cut where their curvature has an extremum or changes sign, found exactly as
+//!    OCCT finds them (`MAT2d_CutCurve`, `math_FunctionRoots`), so the result has OCCT's edges;
+//!    a nearly planar wire is first flattened. A piece whose curvature radius at an end lies
+//!    within the distance on the side offset to (its offset would have a cusp) is replaced by a
+//!    polyline within 1% of the distance, as OCCT's `BRepFill_OffsetWire` does.
 //! 1. Every edge is offset to one side: lines and arcs exactly (an arc whose radius would fall
 //!    to nothing is dropped), other curves as cubics through offset samples.
 //! 2. Consecutive offsets are joined by arcs about the vertex between them, turning as the
@@ -177,9 +180,12 @@ fn flattened(c: &Curve, t0: f64, t1: f64) -> (Curve, f64, f64) {
 
 /// The parameters of `c` on [t0, t1] where its signed curvature has an extremum or changes sign
 /// (OCCT's `Geom2dLProp_CurAndInf2d`), in order: none on lines and circles, the vertices of an
-/// ellipse, and on a B-spline the sign changes of κ' and κ sampled 100 times over each of its
-/// C3 pieces.
+/// ellipse, and on a B-spline the roots of κ' and κ found as OCCT finds them
+/// ([`bspline_curvature_points`]).
 fn curvature_points(c: &Curve, t0: f64, t1: f64) -> Vec<f64> {
+    if let Curve::Nurbs(n) = c {
+        return bspline_curvature_points(n, t0, t1);
+    }
     let mut out = Vec::new();
     match c {
         Curve::Line { .. } | Curve::Circle { .. } => {}
@@ -192,77 +198,475 @@ fn curvature_points(c: &Curve, t0: f64, t1: f64) -> Vec<f64> {
                 }
             }
         }
-        Curve::Nurbs(n) => {
-            // The C3 pieces: interior knots of multiplicity above degree − 3.
-            let p = n.degree;
-            let mut breaks = vec![t0];
-            let mut i = 0;
-            while i < n.knots.len() {
-                let k = n.knots[i];
-                let m = n.knots[i..].iter().take_while(|&&x| x == k).count();
-                if k > t0 && k < t1 && p < m + 3 {
-                    breaks.push(k);
-                }
-                i += m;
-            }
-            breaks.push(t1);
-            // κ' · |D1|⁵ and κ · |D1|³ have the signs of κ' and κ.
-            let dk = |u: f64| {
-                let d = n.ders(u, 3);
-                let (d1, d2, d3) = (V2::new(d[1].x, d[1].y), V2::new(d[2].x, d[2].y), V2::new(d[3].x, d[3].y));
-                let cr = |a: V2, b: V2| a.x * b.y - a.y * b.x;
-                let s = d1.norm_squared();
-                let f = cr(d1, d3) * s - 3.0 * cr(d1, d2) * d1.dot(&d2);
-                (f / (s * s * s.sqrt()).max(tol::TINY), cr(d1, d2) / (d1.norm() * d2.norm()).max(tol::TINY))
-            };
-            for w in breaks.windows(2) {
-                let (a, b) = (w[0], w[1]);
-                if b - a < tol::ROUNDOFF_FINE {
-                    continue;
-                }
-                let ns = 100;
-                // (The last sample just inside: at the knot itself the next piece would count.)
-                let us: Vec<f64> = (0..=ns).map(|i| if i == ns { b - (b - a) * tol::REL } else { a + (b - a) * i as f64 / ns as f64 }).collect();
-                let fs: Vec<(f64, f64)> = us.iter().map(|&u| dk(u)).collect();
-                for which in 0..2 {
-                    let val = |u: f64| if which == 0 { dk(u).0 } else { dk(u).1 };
-                    let get = |f: &(f64, f64)| if which == 0 { f.0 } else { f.1 };
-                    let scale = fs.iter().map(|f| get(f).abs()).fold(0.0, f64::max);
-                    if scale == 0.0 {
-                        continue;
-                    }
-                    // Values this near zero count as zero (OCCT's tolerances: 1e-4 of the
-                    // piece's span for κ', 1e-6 for the sine of κ).
-                    let null = if which == 0 { 1e-4 * (b - a) } else { tol::POINT };
-                    // Sign changes between samples (null samples skipped), refined by bisection.
-                    let mut last: Option<(f64, f64)> = None;
-                    for (u, f) in us.iter().zip(&fs) {
-                        let f = get(f);
-                        if f.abs() <= null {
-                            continue;
-                        }
-                        if let Some((u0, f0)) = last
-                            && f0 * f < 0.0
-                        {
-                            let (mut lo, mut hi) = (u0, *u);
-                            for _ in 0..60 {
-                                let m = 0.5 * (lo + hi);
-                                if val(m) * f0 > 0.0 {
-                                    lo = m;
-                                } else {
-                                    hi = m;
-                                }
-                            }
-                            out.push(0.5 * (lo + hi));
-                        }
-                        last = Some((*u, f));
-                    }
-                }
-            }
-            out.sort_by(f64::total_cmp);
+        Curve::Nurbs(_) => {}
+    }
+    out
+}
+
+// OCCT's constants for finding the spine's cuts, by the names they have there.
+/// `Precision::PConfusion`: parameters closer than this are one.
+const P_CONFUSION: f64 = 1e-9;
+/// `gp::Resolution`: the smallest magnitude a division may take.
+const RESOLUTION: f64 = f64::MIN_POSITIVE;
+/// `Geom2dLProp_NumericCurInf2d`: the tolerances of κ' roots, as a fraction of the piece's span.
+const CUR_EXT_EPS: f64 = 1e-4;
+/// `Geom2dLProp_NumericCurInf2d`: the tolerances of κ roots (absolute).
+const CUR_NUL_EPS: f64 = 1e-6;
+/// `Geom2dLProp_FuncCurNul`: a second derivative this small makes the sine of κ zero.
+const CUR_NUL_D2: f64 = 1e-4;
+/// `math_FunctionRoots`: roots closer than this fraction of the range's magnitude are one.
+const ROOTS_SAME: f64 = 1e-10;
+/// `math_FunctionRoots`: a derivative this small is taken as zero.
+const ROOTS_FLAT: f64 = 1e-10;
+
+/// The roots of κ' (curvature extrema) and of κ (inflections) of the B-spline `n` on [t0, t1],
+/// in order, as OCCT's `Geom2dLProp_CurAndInf2d` finds them for `MAT2d_CutCurve`, so an
+/// offset's spine is cut where OCCT cuts it:
+/// - κ' on each C3 piece (interior knots of multiplicity above degree − 3): OCCT's
+///   `Geom2dLProp_FuncCurExt` (κ'·|D1|, its derivative by a difference of 1e-6 of the piece's
+///   span) through [`function_roots`] with 100 samples and tolerances of 1e-4 of the span, each
+///   root polished by [`bracketed_root`] within that tolerance;
+/// - κ the same way through `Geom2dLProp_FuncCurNul` (the sine between D1 and D2, taken as
+///   zero where |D2| < 1e-4) with 30 samples and tolerances of 1e-6.
+///
+/// A piece's last sample is the knot that ends it, where the curve is evaluated on the next
+/// piece (as OCCT's `BSplCLib::LocateParameter` picks the span): a jump of κ' there is a root.
+fn bspline_curvature_points(n: &NurbsCurve, t0: f64, t1: f64) -> Vec<f64> {
+    // The C3 pieces.
+    let p = n.degree;
+    let mut breaks = vec![t0];
+    let mut i = 0;
+    while i < n.knots.len() {
+        let k = n.knots[i];
+        let m = n.knots[i..].iter().take_while(|&&x| x == k).count();
+        if k > t0 && k < t1 && p < m + 3 {
+            breaks.push(k);
+        }
+        i += m;
+    }
+    breaks.push(t1);
+    let d123 = |u: f64| {
+        let d = n.ders(u, 3);
+        (V2::new(d[1].x, d[1].y), V2::new(d[2].x, d[2].y), V2::new(d[3].x, d[3].y))
+    };
+    // κ'·|D1| (Geom2dLProp_FuncCurExt::Value).
+    let cur_ext = |u: f64| -> Option<f64> {
+        let (v1, v2, v3) = d123(u);
+        let v1v1 = v1.norm_squared();
+        let v13 = v1v1 * v1v1.sqrt();
+        let v15 = v13 * v1v1;
+        if v15 < RESOLUTION {
+            return None;
+        }
+        Some(cross2(v1, v3) / v13 - 3.0 * cross2(v1, v2) * v1.dot(&v2) / v15)
+    };
+    let mut out: Vec<f64> = Vec::new();
+    // LProp_CurAndInf: kept in order, a parameter already there dropped.
+    let add = |out: &mut Vec<f64>, t: f64| match out.iter().position(|&x| x > t) {
+        Some(i) => out.insert(i, t),
+        None if out.last().is_none_or(|&l| t > l) => out.push(t),
+        None => {}
+    };
+    for w in breaks.windows(2) {
+        let (a, b) = (w[0], w[1]);
+        let eps_h = CUR_EXT_EPS * (b - a);
+        let func = CurExt { f: &cur_ext, eps: eps_h, last: t1 };
+        for r in function_roots(&func, a, b, 100, eps_h, eps_h, eps_h).unwrap_or_default() {
+            let polished = bracketed_root(&cur_ext, r - eps_h, r + eps_h, P_CONFUSION).map_or(r, |(x, _)| x);
+            add(&mut out, polished);
+        }
+    }
+    let nul = CurNul(d123);
+    for w in breaks.windows(2) {
+        for r in function_roots(&nul, w[0], w[1], 30, CUR_NUL_EPS, CUR_NUL_EPS, CUR_NUL_EPS).unwrap_or_default() {
+            add(&mut out, r);
         }
     }
     out
+}
+
+fn cross2(a: V2, b: V2) -> f64 {
+    a.x * b.y - a.y * b.x
+}
+
+/// A function and its derivative, for [`function_roots`] (OCCT's
+/// `math_FunctionWithDerivative`).
+trait RootFn {
+    /// F(x), or None where it isn't defined.
+    fn value(&self, x: f64) -> Option<f64>;
+    /// F(x) and F'(x), or None where they aren't defined.
+    fn values(&self, x: f64) -> Option<(f64, f64)>;
+}
+
+/// κ'·|D1| with its derivative by a difference of `eps / 100` (backwards past `last`): OCCT's
+/// `Geom2dLProp_FuncCurExt`.
+struct CurExt<'a, F: Fn(f64) -> Option<f64>> {
+    f: &'a F,
+    eps: f64,
+    last: f64,
+}
+
+impl<F: Fn(f64) -> Option<f64>> RootFn for CurExt<'_, F> {
+    fn value(&self, x: f64) -> Option<f64> {
+        (self.f)(x)
+    }
+    fn values(&self, x: f64) -> Option<(f64, f64)> {
+        let mut dx = self.eps / 100.0;
+        if x + dx > self.last {
+            dx = -dx;
+        }
+        let f = (self.f)(x).unwrap_or(0.0);
+        let f2 = (self.f)(x + dx).unwrap_or(0.0);
+        Some((f, (f2 - f) / dx))
+    }
+}
+
+/// The sine between D1 and D2 and its derivative, from D1, D2, D3 (OCCT's
+/// `Geom2dLProp_FuncCurNul`: zero where |D2| < 1e-4).
+struct CurNul<F: Fn(f64) -> (V2, V2, V2)>(F);
+
+impl<F: Fn(f64) -> (V2, V2, V2)> RootFn for CurNul<F> {
+    fn value(&self, x: f64) -> Option<f64> {
+        self.values(x).map(|v| v.0)
+    }
+    fn values(&self, x: f64) -> Option<(f64, f64)> {
+        let (v1, v2, v3) = (self.0)(x);
+        let (cp1, cp2) = (cross2(v1, v2), cross2(v1, v3));
+        let (nv1, nv2) = (v1.norm(), v2.norm());
+        if nv2 < CUR_NUL_D2 {
+            Some((0.0, 0.0))
+        } else if nv1 * nv2 < RESOLUTION {
+            None
+        } else {
+            let f = cp1 / (nv1 * nv2);
+            let d = (cp2 - cp1 * v1.dot(&v2) / (nv1 * nv1) - cp1 * v2.dot(&v3) / (nv2 * nv2)) / (nv1 * nv2);
+            Some((f, d))
+        }
+    }
+}
+
+/// The roots of `f` on [a, b] as OCCT's `math_FunctionRoots` (its "new code") finds them, so
+/// spine cuts land where OCCT's do: `2·nsample` (at least 20) samples; Brent's method on every
+/// strict sign change; samples exactly zero and ends within `eps_f` taken as roots; and where
+/// the samples have a minimum of |f| that a step from a neighbour says may reach zero, the
+/// minimum searched ([`refine_minimum`]) and taken when within `eps_f`. Roots closer than 1e-10
+/// of the range's magnitude are one. None when `f` isn't defined at a sample; empty when every
+/// sample lies within `eps_null` of zero.
+fn function_roots<F: RootFn>(f: &F, a: f64, b: f64, nsample: usize, eps_x_in: f64, eps_f: f64, eps_null: f64) -> Option<Vec<f64>> {
+    let (x0, xn) = if b < a { (b, a) } else { (a, b) };
+    let n = (nsample * 2).max(20);
+    let neps_x = ROOTS_SAME * (x0.abs() + xn.abs());
+    let tol = eps_x_in.max(neps_x);
+    let dx = (xn - x0) / n as f64;
+    // (The samples step by dx, as OCCT's, rather than x0 + i·dx.)
+    let mut vals = Vec::with_capacity(n + 1);
+    let mut x = x0;
+    for _ in 0..=n {
+        if x > xn {
+            x = xn;
+        }
+        vals.push(f.value(x)?);
+        x += dx;
+    }
+    let mut sol = Vec::new();
+    if vals.iter().all(|v| v.abs() <= eps_null) {
+        return Some(sol);
+    }
+    // Strict sign changes between samples.
+    let mut x = x0;
+    for i in 0..n {
+        let x2 = (x + dx).min(xn);
+        if (vals[i] < 0.0 && vals[i + 1] > 0.0) || (vals[i] >= 0.0 && vals[i + 1] < 0.0) {
+            brent(f, x, vals[i], x2, vals[i + 1], tol, neps_x, &mut sol);
+        }
+        x += dx;
+    }
+    // Samples where f is exactly zero but not half a step on. (OCCT looks at the point half a
+    // step on twice, so never solves between two points there.)
+    for (i, v) in vals.iter().enumerate() {
+        if *v == 0.0 {
+            let x = (x0 + i as f64 * dx).min(xn);
+            let y = f.value((x + dx * 0.5).clamp(x0, xn)).unwrap_or(0.0);
+            if y != 0.0 {
+                append_root(&mut sol, x, neps_x);
+            }
+        }
+    }
+    if vals[0].abs() <= eps_f {
+        append_root(&mut sol, x0, neps_x);
+    }
+    if vals[n].abs() <= eps_f {
+        append_root(&mut sol, xn, neps_x);
+    }
+    // Minima of |f| over the samples that may reach zero between them.
+    let majdx = 5.0 * dx;
+    let near_zero = |x: f64| {
+        let (y, d) = f.values(x).unwrap_or((0.0, 0.0));
+        d.abs() > ROOTS_FLAT && (y / d).abs() < majdx
+    };
+    let mut xm = x0 + dx;
+    for i in 1..n {
+        if xm > xn {
+            xm = xn;
+        }
+        let (fm, f0, f3) = (vals[i], vals[i - 1], vals[i + 1]);
+        // (For a maximum below zero OCCT steps from the sample before only.)
+        let rediscr = if fm > 0.0 && f0 > fm && f3 > fm {
+            near_zero((xm - dx).max(x0)) || near_zero((xm + dx).min(xn))
+        } else if fm < 0.0 && f0 < fm && f3 < fm {
+            near_zero((xm - dx).max(x0))
+        } else {
+            false
+        };
+        if rediscr {
+            refine_minimum(f, MinSearch { xm, dx, lo: x0, hi: xn, f0, f3, eps_x: eps_x_in, eps_f, tol, neps_x }, &mut sol);
+        }
+        xm += dx;
+    }
+    Some(sol)
+}
+
+/// Where [`refine_minimum`] searches: about the sample `xm` (neighbours `dx` away, values `f0`
+/// and `f3`, inside [lo, hi]), with [`function_roots`]' tolerances.
+struct MinSearch {
+    xm: f64,
+    dx: f64,
+    lo: f64,
+    hi: f64,
+    f0: f64,
+    f3: f64,
+    eps_x: f64,
+    eps_f: f64,
+    tol: f64,
+    neps_x: f64,
+}
+
+/// The part of [`function_roots`] that looks for a root at a minimum of |f| near a sample: the
+/// derivative's root by [`bracketed_root`] and a golden-section search (solving on any sign
+/// change it meets), the one nearer zero kept when within `eps_f`.
+fn refine_minimum<F: RootFn>(f: &F, s: MinSearch, sol: &mut Vec<f64>) {
+    let MinSearch { xm, dx, lo, hi, mut f0, mut f3, eps_x, eps_f, tol, neps_x } = s;
+    let mut x0 = (xm - dx).max(lo);
+    let mut x3 = (xm + dx).min(hi);
+    let val = |x: f64| f.value(x).unwrap_or(0.0);
+    let deriv = |x: f64| f.values(x).map(|v| v.1);
+    // The derivative's root.
+    let by_deriv = bracketed_root(&deriv, x0, x3, eps_x).and_then(|(x, d)| {
+        let v = val(x).abs();
+        (v < eps_f).then_some((x, v, d))
+    });
+    // The golden-section search.
+    const R: f64 = 0.61803399;
+    const C: f64 = 1.0 - R;
+    let tol_cr = neps_x * 10.0;
+    let minimum = f0 > 0.0;
+    let (mut x1, mut x2) = if (x3 - xm).abs() > (x0 - xm).abs() { (xm, xm + C * (x3 - xm)) } else { (xm - C * (xm - x0), xm) };
+    let (mut f1, mut f2) = (val(x1), val(x2));
+    let tol_x = 0.001 * neps_x;
+    // (A cap OCCT doesn't have: the interval shrinks by 0.618 a step, so 2000 steps are far
+    // more than a double needs.)
+    let mut steps = 0;
+    while (x3 - x0).abs() > tol_cr * (x1.abs() + x2.abs()) && (x1 - x2).abs() > tol_x && steps < 2000 {
+        steps += 1;
+        let right = if minimum { f2 < f1 } else { f2 > f1 };
+        if right {
+            x0 = x1;
+            x1 = x2;
+            x2 = R * x1 + C * x3;
+            f0 = f1;
+            f1 = f2;
+            f2 = val(x2);
+        } else {
+            x3 = x2;
+            x2 = x1;
+            x1 = R * x2 + C * x0;
+            f3 = f2;
+            f2 = f1;
+            f1 = val(x1);
+        }
+        if f1 * f0 < 0.0 {
+            brent(f, x0, f0, x1, f1, tol, neps_x, sol);
+        }
+        if f2 * f3 < 0.0 {
+            brent(f, x2, f2, x3, f3, tol, neps_x, sol);
+        }
+    }
+    let by_search = if (minimum && f1 < f2) || (!minimum && f1 > f2) {
+        (f1.abs() < eps_f).then_some((x1, f1.abs()))
+    } else {
+        (f2.abs() < eps_f).then_some((x2, f2.abs()))
+    };
+    let pick = match (by_deriv, by_search) {
+        (Some((xa, va, da)), Some((xb, vb))) => {
+            if vb - va > eps_f {
+                xa
+            } else if va - vb > eps_f || da.abs() >= deriv(xb).unwrap_or(0.0).abs() {
+                xb
+            } else {
+                xa
+            }
+        }
+        (Some((xa, ..)), None) => xa,
+        (None, Some((xb, _))) => xb,
+        (None, None) => return,
+    };
+    append_root(sol, pick, neps_x);
+}
+
+/// `x` added to the ordered roots unless one lies within `dx` of it (OCCT's `AppendRoot`: the
+/// roots up to the first at or past `x` are compared).
+fn append_root(sol: &mut Vec<f64>, x: f64, dx: f64) {
+    let mut at = Some(sol.len());
+    for (i, &t) in sol.iter().enumerate() {
+        let near = (x - t).abs() <= dx;
+        if near {
+            at = None;
+        } else if t >= x {
+            at = Some(i);
+        }
+        if near || t >= x {
+            break;
+        }
+    }
+    if let Some(i) = at {
+        sol.insert(i, x);
+    }
+}
+
+/// Brent's method between `x1` and `x2` (values `y1`, `y2` of opposite signs) to `tol`, the root
+/// polished by up to six Newton steps that stay inside and get nearer zero, then added by
+/// [`append_root`] within `dx` (OCCT's `Solve` in `math_FunctionRoots`).
+#[allow(clippy::too_many_arguments)]
+fn brent<F: RootFn>(f: &F, x1: f64, y1: f64, x2: f64, y2: f64, tol: f64, dx: f64, sol: &mut Vec<f64>) {
+    const ITMAX: usize = 100;
+    const EPSEPS: f64 = 2e-14;
+    let tols2 = 0.5 * tol;
+    let (mut a, mut b, mut c) = (x1, x2, x2);
+    let (mut fa, mut fb, mut fc) = (y1, y2, y2);
+    let (mut d, mut e) = (0.0, 0.0);
+    for _ in 0..ITMAX {
+        if (fb > 0.0 && fc > 0.0) || (fb < 0.0 && fc < 0.0) {
+            c = a;
+            fc = fa;
+            d = b - a;
+            e = d;
+        }
+        if fc.abs() < fb.abs() {
+            a = b;
+            b = c;
+            c = a;
+            fa = fb;
+            fb = fc;
+            fc = fa;
+        }
+        let tol1 = EPSEPS * b.abs() + tols2;
+        let xm = 0.5 * (c - b);
+        if xm.abs() < tol1 || fb == 0.0 {
+            let mut xp = b;
+            for _ in 0..6 {
+                let Some((yp, dp)) = f.values(xp) else { break };
+                if dp.abs() > ROOTS_FLAT {
+                    xp -= yp / dp;
+                }
+                if !(xp <= x2 && xp >= x1) {
+                    break;
+                }
+                let yp = f.value(xp).unwrap_or(yp);
+                if yp.abs() >= fb.abs() {
+                    break;
+                }
+                b = xp;
+                fb = yp;
+            }
+            append_root(sol, b, dx);
+            return;
+        }
+        (d, e) = brent_step(a, b, c, fa, fb, fc, d, e, xm, tol1);
+        a = b;
+        fa = fb;
+        if d.abs() > tol1 {
+            b += d;
+        } else {
+            b += if xm >= 0.0 { tol1.abs() } else { -tol1.abs() };
+        }
+        fb = f.value(b).unwrap_or(fb);
+    }
+}
+
+/// One step of Brent's method from the root `b` (other end `c`, last point `a`): the inverse
+/// quadratic (or secant) step when it falls well inside, else bisection; the new (d, e).
+#[allow(clippy::too_many_arguments)]
+fn brent_step(a: f64, b: f64, c: f64, fa: f64, fb: f64, fc: f64, d: f64, e: f64, xm: f64, tol1: f64) -> (f64, f64) {
+    if e.abs() < tol1 || fa.abs() <= fb.abs() {
+        return (xm, xm);
+    }
+    let s = fb / fa;
+    let (mut p, mut q);
+    if a == c {
+        p = 2.0 * xm * s;
+        q = 1.0 - s;
+    } else {
+        q = fa / fc;
+        let r = fb / fc;
+        p = s * (2.0 * xm * q * (q - r) - (b - a) * (r - 1.0));
+        q = (q - 1.0) * (r - 1.0) * (s - 1.0);
+    }
+    if p > 0.0 {
+        q = -q;
+    }
+    p = p.abs();
+    let min1 = 3.0 * xm * q - (tol1 * q).abs();
+    let min2 = (e * q).abs();
+    if 2.0 * p < min1.min(min2) { (p / q, d) } else { (xm, xm) }
+}
+
+/// The root of `g` between `b1` and `b2` (values of opposite signs) to `tolerance`, with `g`
+/// there, by OCCT's `math_BracketedRoot` (Brent's method in at most 100 steps); None when the
+/// ends' values have the same sign or it doesn't converge.
+fn bracketed_root(g: &dyn Fn(f64) -> Option<f64>, b1: f64, b2: f64, tolerance: f64) -> Option<(f64, f64)> {
+    const ZEPS: f64 = 1e-12;
+    let mut a = b1;
+    let mut root = b2;
+    let mut fa = g(a).unwrap_or(0.0);
+    let mut err = g(root).unwrap_or(0.0);
+    if fa * err > 0.0 {
+        return None;
+    }
+    let mut fc = err;
+    let (mut c, mut d, mut e) = (0.0, 0.0, 0.0);
+    for _ in 0..100 {
+        if err * fc > 0.0 {
+            c = a;
+            fc = fa;
+            d = root - a;
+            e = d;
+        }
+        // (OCCT compares the far end with the last point here, not with the root.)
+        if fc.abs() < fa.abs() {
+            a = root;
+            root = c;
+            c = a;
+            fa = err;
+            err = fc;
+            fc = fa;
+        }
+        let tol1 = 2.0 * ZEPS * root.abs() + 0.5 * tolerance;
+        let xm = 0.5 * (c - root);
+        if xm.abs() <= tol1 || err == 0.0 {
+            return Some((root, err));
+        }
+        // (The same step as Brent's in `brent`, with the root's value `err`.)
+        (d, e) = brent_step(a, root, c, fa, err, fc, d, e, xm, tol1);
+        a = root;
+        fa = err;
+        if d.abs() > tol1 {
+            root += d;
+        } else {
+            root += if xm > 0.0 { tol1.abs() } else { -tol1.abs() };
+        }
+        err = g(root).unwrap_or(err);
+    }
+    None
 }
 
 /// `e` cut at `ts` as OCCT's `MAT2d_CutCurve` does: in order, skipping cuts within 1e-8 in
@@ -295,17 +699,55 @@ fn cut_even(e: &Piece2, n: usize) -> Vec<Piece2> {
     cut_at(e, &ts)
 }
 
-/// The wire's edges cut where their curvature has extrema or changes sign, as OCCT prepares the
-/// spine of a planar offset (`BRepFill_OffsetWire::PrepareSpine`): every piece offsets to an edge
-/// of its own. A wire of one edge has it cut in three at least (a closed edge otherwise has no
-/// vertex to start from), and of two edges the second in two when the first stays whole.
-fn prepare_spine(wire: Vec<Piece2>) -> Vec<Piece2> {
+/// A piece of the spine: `p` runs over the source curve `src` on [lo, hi] (lo < hi), one way or
+/// the other. OCCT works on each edge in its own parameter direction, so the cuts and polylines
+/// are computed there.
+#[derive(Debug, Clone)]
+struct SpineEdge {
+    p: Piece2,
+    src: Curve,
+    lo: f64,
+    hi: f64,
+}
+
+impl SpineEdge {
+    /// The edge (c run from `a` to `b`, either way round) on [lo, hi].
+    fn new(c: &Curve, a: f64, b: f64, lo: f64, hi: f64) -> Self {
+        let p = if a <= b { forward(c, lo, hi) } else { forward(c, hi, lo) };
+        SpineEdge { p, src: c.clone(), lo, hi }
+    }
+
+    /// Whether `p` runs the source curve backwards.
+    fn backwards(&self) -> bool {
+        let s = self.p.start();
+        (s - self.src.point(self.hi)).norm() < (s - self.src.point(self.lo)).norm()
+    }
+
+    fn reversed(&self) -> Self {
+        let (c, a, b) = self.p.c.reversed(self.p.t0, self.p.t1);
+        SpineEdge { p: Piece2 { c, t0: a, t1: b }, ..self.clone() }
+    }
+}
+
+/// The wire's edges (in the wire's order, each run from its first to its second parameter) cut
+/// where their curvature has extrema or changes sign, as OCCT prepares the spine of a planar
+/// offset (`BRepFill_OffsetWire::PrepareSpine`, `CutEdge`): every piece offsets to an edge of
+/// its own. Each edge is cut in its own parameter direction. A wire of one edge has it cut in
+/// three at least (a closed edge otherwise has no vertex to start from), and of two edges the
+/// second in two when the first stays whole; an arc of a circle of half a turn or more isn't
+/// cut when the wire has other edges.
+fn prepare_spine(wire: &[(Curve, f64, f64)]) -> Vec<SpineEdge> {
     let n = wire.len();
     let mut out = Vec::new();
     let mut first_cut = 0;
-    for (i, e) in wire.into_iter().enumerate() {
-        let cuts = cut_at(&e, &curvature_points(&e.c, e.t0, e.t1));
-        let force = if n == 1 {
+    for (i, (c, a, b)) in wire.iter().enumerate() {
+        let (lo, hi) = (a.min(*b), a.max(*b));
+        let e = Piece2 { c: c.clone(), t0: lo, t1: hi };
+        let half_circle = n > 1 && matches!(c, Curve::Circle { .. }) && hi - lo >= PI;
+        let cuts = if half_circle { Vec::new() } else { cut_at(&e, &curvature_points(c, lo, hi)) };
+        let force = if half_circle {
+            0
+        } else if n == 1 {
             2
         } else if n == 2 && i == 1 && first_cut == 0 {
             1
@@ -330,10 +772,115 @@ fn prepare_spine(wire: Vec<Piece2>) -> Vec<Piece2> {
         if i == 0 {
             first_cut = pieces.len();
         }
-        if pieces.is_empty() {
-            out.push(e);
-        } else {
-            out.extend(pieces);
+        let pieces = if pieces.is_empty() { vec![e] } else { pieces };
+        let mut edges: Vec<SpineEdge> = pieces.iter().map(|p| SpineEdge::new(c, *a, *b, p.t0, p.t1)).collect();
+        if a > b {
+            edges.reverse();
+        }
+        out.extend(edges);
+    }
+    out
+}
+
+/// Whether the spine piece's offset by `dist` towards `side` (+1 its left, −1 its right) would
+/// have a cusp at one of its ends: there its centre of curvature lies on that side within
+/// `dist` (OCCT's `CheckBadEdges`, through `Geom2dLProp_CLProps2d` at its tolerance). Lines and
+/// circles are never bad.
+fn is_bad_edge(e: &Piece2, side: f64, dist: f64) -> bool {
+    if matches!(e.c, Curve::Line { .. } | Curve::Circle { .. }) {
+        return false;
+    }
+    let eps = tol::CONFUSION;
+    [e.t0, e.t1].iter().any(|&t| {
+        let (_, d1, d2) = e.c.d2(t);
+        let (d1, d2) = (V2::new(d1.x, d1.y), V2::new(d2.x, d2.y));
+        // (No tangent: OCCT takes the edge as bad.)
+        if d1.norm() <= eps {
+            return true;
+        }
+        let (dd1, dd2) = (d1.norm_squared(), d2.norm_squared());
+        let nn = cross2(d1, d2);
+        let crv = if dd2 <= eps * eps || nn.abs() / (dd1 * dd2) <= eps * eps { 0.0 } else { nn.abs() / (dd1 * dd1.sqrt()) };
+        crv >= eps && nn * side > 0.0 && 1.0 / dist <= crv + eps
+    })
+}
+
+/// The points OCCT's `PerformCurve` (`QuasiFleche`) puts along `c` on [lo, hi] for a polyline
+/// within `defl` of it: from `lo`, each span halved until the sag estimated from its end
+/// tangents is within `defl`.
+fn polyline_points(c: &Curve, lo: f64, hi: f64, defl: f64) -> Vec<P3> {
+    let eps = tol::CONFUSION * tol::CONFUSION;
+    let (pdeb, ddeb, _) = c.d2(lo);
+    let (pfin, dfin, _) = c.d2(hi);
+    let mut pts = vec![pdeb];
+    // (OCCT's guard against a curve whose ends coincide however long its range.)
+    if (hi - lo) / (pfin - pdeb).norm() > 5e-14 {
+        quasi_fleche(c, defl * defl, (lo, pdeb, ddeb), (hi, pfin, dfin), 2, eps, &mut pts, 0);
+    }
+    pts
+}
+
+/// One step of OCCT's `QuasiFleche` between `deb` and `fin` (parameter, point, derivative): with
+/// `nbmin` > 2 the span is split in `nbmin − 1`, else whole; a span whose sag (from its end
+/// tangents, or its midpoint) exceeds √`defl2` is halved.
+#[allow(clippy::too_many_arguments)]
+fn quasi_fleche(c: &Curve, defl2: f64, deb: (f64, P3, V3), fin: (f64, P3, V3), nbmin: i64, eps: f64, pts: &mut Vec<P3>, depth: usize) {
+    let (udeb, pdeb, vdeb) = deb;
+    let (ufin, pfin, vfin) = fin;
+    let start_len = pts.len() as i64;
+    let mut udelta = ufin - udeb;
+    let (pdelta, vdelta) = if nbmin > 2 {
+        udelta /= (nbmin - 1) as f64;
+        let (p, v, _) = c.d2(udeb + udelta);
+        (p, v)
+    } else {
+        (pfin, vfin)
+    };
+    let norme = (pdelta - pdeb).norm_squared();
+    let mut fleche = None;
+    if norme > eps && vdeb.norm_squared() > eps && vdelta.norm_squared() > eps {
+        let diff = (vdeb.normalize() - vdelta.normalize()).norm_squared();
+        if diff > eps {
+            fleche = Some(diff * norme / 64.0);
+        }
+    }
+    let fleche = fleche.unwrap_or_else(|| (P3::from((pdeb.coords + pdelta.coords) / 2.0) - c.point(udeb + udelta / 2.0)).norm_squared());
+    // (A depth cap OCCT doesn't have, against a curve that never flattens: 2⁴⁰ pieces.)
+    if fleche < defl2 || depth > 40 {
+        pts.push(pdelta);
+    } else {
+        quasi_fleche(c, defl2, deb, (udeb + udelta, pdelta, vdelta), 3, eps, pts, depth + 1);
+    }
+    if nbmin > 2 {
+        quasi_fleche(c, defl2, (udeb + udelta, pdelta, vdelta), fin, nbmin - (pts.len() as i64 - start_len), eps, pts, depth + 1);
+    }
+}
+
+/// The spine with its bad edges ([`is_bad_edge`] towards `side`) replaced by polylines within
+/// 1% of `dist` (OCCT's `BRepFill_OffsetWire::Perform`): the offset of an edge whose curvature
+/// radius at an end is within the distance would have a cusp there.
+fn polyline_bad_edges(spine: Vec<SpineEdge>, side: f64, dist: f64) -> Vec<SpineEdge> {
+    let mut out = Vec::with_capacity(spine.len());
+    for s in spine {
+        if !is_bad_edge(&s.p, side, dist) {
+            out.push(s);
+            continue;
+        }
+        let mut pts = polyline_points(&s.src, s.lo, s.hi, 0.01 * dist);
+        // The interior points, between the edge's own ends.
+        let (a, b) = (s.src.point(s.lo), s.src.point(s.hi));
+        pts.remove(0);
+        pts.pop();
+        let mut corners = vec![a];
+        corners.extend(pts);
+        corners.push(b);
+        corners.dedup_by(|q, p| (*q - *p).norm() <= tol::CONFUSION);
+        if s.backwards() {
+            corners.reverse();
+        }
+        for w in corners.windows(2) {
+            let (c, len) = Curve::line(w[0], w[1]);
+            out.push(SpineEdge { p: Piece2 { c: c.clone(), t0: 0.0, t1: len }, src: c, lo: 0.0, hi: len });
         }
     }
     out
@@ -346,12 +893,13 @@ pub fn offset_wire(edges: &[(Curve, f64, f64)], d: f64) -> Result<Vec<Vec<Piece2
         return Err(KernelError::InvalidParameter("an offset needs edges and a distance".into()));
     }
     let clock = std::time::Instant::now();
-    let wire = chained(edges.iter().map(|(c, a, b)| flattened(c, *a, *b)).map(|(c, a, b)| forward(&c, a, b)).collect());
+    let flat: Vec<(Curve, f64, f64)> = edges.iter().map(|(c, a, b)| flattened(c, *a, *b)).collect();
     let mut bb = Bbox::empty();
     // Each edge's length in the plane (its chords): an edge square to the plane (a wire not in
     // z = 0) flattens to a point, which has no direction to offset along.
-    let mut lens = Vec::with_capacity(wire.len());
-    for e in &wire {
+    let mut lens = Vec::with_capacity(flat.len());
+    for (c, a, b) in &flat {
+        let e = forward(c, *a, *b);
         let pts: Vec<P3> = (0..=8).map(|k| e.c.point(e.t0 + (e.t1 - e.t0) * k as f64 / 8.0)).collect();
         if !(e.t0.is_finite() && e.t1.is_finite()) || pts.iter().any(|p| !(p.x.is_finite() && p.y.is_finite())) {
             return Err(KernelError::InvalidParameter("an offset of a wire with an edge of no length in its plane".into()));
@@ -365,33 +913,42 @@ pub fn offset_wire(edges: &[(Curve, f64, f64)], d: f64) -> Result<Vec<Vec<Piece2
     let size = bb.diagonal().max(d.abs());
     let tol = size * 1e-7;
     // (Edges however short are kept: OCCT offsets them to edges of their own.)
+    let spine = chained(prepare_spine(&flat));
     // The wire's own gaps between edges (vertex tolerances) set the closure and chaining.
-    let gap = wire.windows(2).map(|w| (w[0].end() - w[1].start()).norm()).fold(0.0, f64::max);
-    let closing = (wire[0].start() - wire.last().unwrap().end()).norm();
-    let closed = (wire[0].start() - wire.last().unwrap().end()).norm() < (tol * 10.0).max(size * 1e-4).max(gap * 3.0);
-    let wire = prepare_spine(wire);
-    if std::env::var_os("CADRS_OFFSET_DEBUG").is_some() {
-        eprintln!("spine: {} pieces", wire.len());
-    }
-    // The loop to offset to its left by l: a closed wire (counter-clockwise: outwards is the
-    // right), or an open one out and back.
-    let (seq, l): (Vec<Piece2>, f64) = if closed {
-        // Outwards is the right of a counter-clockwise loop.
+    let gap = spine.windows(2).map(|w| (w[0].p.end() - w[1].p.start()).norm()).fold(0.0, f64::max);
+    let (first, last) = (spine[0].p.start(), spine[spine.len() - 1].p.end());
+    let closing = (first - last).norm();
+    let closed = closing < (tol * 10.0).max(size * 1e-4).max(gap * 3.0);
+    // The side to offset to (to the left by l): outwards, the right of a counter-clockwise
+    // closed wire; an open one is run out and back.
+    let l = if closed {
         let mut area = 0.0;
-        for e in &wire {
+        for e in spine.iter().map(|s| &s.p) {
             for k in 0..32 {
                 let (a, b) = (e.c.point(e.t0 + (e.t1 - e.t0) * k as f64 / 32.0), e.c.point(e.t0 + (e.t1 - e.t0) * (k + 1) as f64 / 32.0));
                 area += a.x * b.y - b.x * a.y;
             }
         }
-        (wire.clone(), if area >= 0.0 { -d } else { d })
+        if area >= 0.0 { -d } else { d }
+    } else {
+        d.abs()
+    };
+    // OCCT checks the edges of an open wire on one side only, which depends on how the wire
+    // and its plane are oriented: as OCCT's mostly, the right of the wire as chained.
+    let side = if closed { l.signum() } else { -1.0 };
+    let wire: Vec<Piece2> = polyline_bad_edges(spine, side, d.abs()).into_iter().map(|s| s.p).collect();
+    if std::env::var_os("CADRS_OFFSET_DEBUG").is_some() {
+        eprintln!("spine: {} pieces", wire.len());
+    }
+    let seq: Vec<Piece2> = if closed {
+        wire.clone()
     } else {
         let mut s = wire.clone();
         s.extend(wire.iter().rev().map(|e| {
             let (c, a, b) = e.c.reversed(e.t0, e.t1);
             Piece2 { c, t0: a, t1: b }
         }));
-        (s, d.abs())
+        s
     };
     let chain_tol = (size * tol::REL_POINT).max(l.abs() * tol::REL_POINT).max(gap * 3.0).max(if closed { closing * 3.0 } else { 0.0 });
     let n = seq.len();
@@ -401,11 +958,19 @@ pub fn offset_wire(edges: &[(Curve, f64, f64)], d: f64) -> Result<Vec<Vec<Piece2
         }
     };
     let mut raw: Vec<Raw> = Vec::new();
+    // Each edge's offset in `raw` (none for an arc that shrinks away), and whether the corner
+    // after it is concave.
+    let mut edge_raw: Vec<Option<usize>> = Vec::with_capacity(n);
+    let mut concave_after = vec![false; n];
+    // The arcs at concave corners too slight to tell from the wire's gaps: the corner's index,
+    // the arc's in `raw`, and the corner.
+    let mut slight_concave: Vec<(usize, usize, P3)> = Vec::new();
     for i in 0..n {
         let e = &seq[i];
-        if let Some((o, err)) = offset_edge(e, l, size) {
+        edge_raw.push(offset_edge(e, l, size).map(|(o, err)| {
             raw.push(Raw { p: o, err });
-        }
+            raw.len() - 1
+        }));
         // The join to the next edge.
         let next = &seq[(i + 1) % n];
         let (t1, t2) = (e.dir(e.t1), next.dir(next.t0));
@@ -414,11 +979,16 @@ pub fn offset_wire(edges: &[(Curve, f64, f64)], d: f64) -> Result<Vec<Vec<Piece2
         // offset (as OCCT's, from an angle of 1e-7 up); a concave one within the wire's gaps
         // closes up in the chaining.
         let convex = phi * l < 0.0;
+        // (A corner the wire's gaps could account for closes up in the chaining.)
+        concave_after[i] = !convex && (l * phi).abs() > 10.0 * chain_tol;
         if phi.abs() < 1e-7 || (!convex && (l * phi).abs() <= chain_tol) {
             continue;
         }
         if phi.abs() > PI - tol::ANGULAR {
             phi = -PI * l.signum();
+        }
+        if !convex && !concave_after[i] {
+            slight_concave.push((i, raw.len(), e.end()));
         }
         raw.push(Raw { p: join_arc(e.end(), left(t1), phi, l), err: 0.0 });
     }
@@ -458,6 +1028,8 @@ pub fn offset_wire(edges: &[(Curve, f64, f64)], d: f64) -> Result<Vec<Vec<Piece2
     tick(&format!("{} segments", segs.len()));
     segs.sort_by(|a, b| a.lo.total_cmp(&b.lo));
     let mut cuts: Vec<Vec<f64>> = vec![Vec::new(); raw.len()];
+    // The pairs of elements found crossing, at what parameters, and where.
+    let mut crossed: Vec<(usize, f64, usize, f64, P3)> = Vec::new();
     let near_end = |el: usize, t: f64| {
         let p = &raw[el].p;
         let span = (p.t1 - p.t0).abs().max(tol::TINY);
@@ -494,12 +1066,55 @@ pub fn offset_wire(edges: &[(Curve, f64, f64)], d: f64) -> Result<Vec<Vec<Piece2
             if ea && eb {
                 continue;
             }
+            crossed.push((s.el, ta, o.el, tb, raw[s.el].p.c.point(ta)));
             if !ea {
                 cuts[s.el].push(ta);
             }
             if !eb {
                 cuts[o.el].push(tb);
             }
+        }
+    }
+    // The offsets either side of a concave corner cross near it, often at so slight an angle
+    // (a polyline's chord after an arc, say) that the polygons above miss it: Newton from the
+    // corner.
+    for i in 0..n {
+        let (Some(a), Some(b)) = (edge_raw[i], edge_raw[(i + 1) % n]) else { continue };
+        if !concave_after[i] || a == b {
+            continue;
+        }
+        let (pa, pb) = (&raw[a].p, &raw[b].p);
+        if let Some((ta, tb)) = refine(pa, pb, pa.t1, pb.t0, tol) {
+            let (ea, eb) = (near_end(a, ta), near_end(b, tb));
+            if !(ea && eb) {
+                crossed.push((a, ta, b, tb, pa.c.point(ta)));
+            }
+            if !ea {
+                cuts[a].push(ta);
+            }
+            if !eb {
+                cuts[b].push(tb);
+            }
+        }
+    }
+    // At a concave corner so slight that the keep test below can't tell its pieces apart
+    // (within the wire's gaps of the distance), where the offsets either side cross near the
+    // corner, the arc is left out and the offsets end at the crossing: the arc only bridges
+    // offsets that don't cross.
+    let mut dropped: Vec<usize> = Vec::new();
+    // Per element, the parameter it ends at and the one it starts from.
+    let mut trim: Vec<(f64, f64)> = raw.iter().map(|r| (r.p.t1, r.p.t0)).collect();
+    for (i, k, v) in &slight_concave {
+        let (Some(a), Some(b)) = (edge_raw[*i], edge_raw[(i + 1) % n]) else { continue };
+        let near = crossed.iter().filter(|c| (c.4 - v).norm() < 2.0 * l.abs()).find_map(|&(x, tx, y, ty, _)| match (x, y) {
+            _ if x == a && y == b => Some((tx, ty)),
+            _ if x == b && y == a => Some((ty, tx)),
+            _ => None,
+        });
+        if let Some((ta, tb)) = near {
+            dropped.push(*k);
+            trim[a].0 = trim[a].0.min(ta);
+            trim[b].1 = trim[b].1.max(tb);
         }
     }
     tick("crossings");
@@ -524,6 +1139,10 @@ pub fn offset_wire(edges: &[(Curve, f64, f64)], d: f64) -> Result<Vec<Vec<Piece2
     };
     let mut kept: Vec<(usize, Piece2)> = Vec::new();
     for (el, r) in raw.iter().enumerate() {
+        if dropped.contains(&el) {
+            continue;
+        }
+        let (t_end, t_start) = trim[el];
         let mut ts = cuts[el].clone();
         ts.push(r.p.t0);
         ts.push(r.p.t1);
@@ -547,6 +1166,20 @@ pub fn offset_wire(edges: &[(Curve, f64, f64)], d: f64) -> Result<Vec<Vec<Piece2
         if merged.len() < 2 {
             merged = vec![r.p.t0, r.p.t1];
         }
+        // A trim falls exactly on a boundary (it ends the offset where the next begins): the
+        // cut merged nearest it moves there.
+        for t in [t_end, t_start] {
+            if t > r.p.t0 && t < r.p.t1 {
+                let k = (1..merged.len() - 1).min_by(|&i, &j| (merged[i] - t).abs().total_cmp(&(merged[j] - t).abs()));
+                match k {
+                    Some(k) if near(merged[k], t) => merged[k] = t,
+                    _ => {
+                        let at = merged.partition_point(|&x| x < t);
+                        merged.insert(at, t);
+                    }
+                }
+            }
+        }
         let ts = merged;
         let mut run: Option<Piece2> = None;
         for w in ts.windows(2) {
@@ -554,7 +1187,10 @@ pub fn offset_wire(edges: &[(Curve, f64, f64)], d: f64) -> Result<Vec<Vec<Piece2
             if b - a < 1e-14 * (1.0 + a.abs()) {
                 continue;
             }
-            let good = [0.25, 0.5, 0.75].iter().all(|f| far(&r.p.c.point(a + (b - a) * f), r.err));
+            // (By the piece's middle: a trim may have merged with a cut close by.)
+            let mid = 0.5 * (a + b);
+            let inside = mid >= t_start && mid <= t_end;
+            let good = inside && [0.25, 0.5, 0.75].iter().all(|f| far(&r.p.c.point(a + (b - a) * f), r.err));
             match (&mut run, good) {
                 (Some(p), true) => p.t1 = b,
                 (None, true) => run = Some(Piece2 { c: r.p.c.clone(), t0: a, t1: b }),
@@ -659,38 +1295,35 @@ fn edge_box(e: &Piece2) -> Bbox {
 
 /// The edges in the order and direction they chain in (each next the one whose end is nearest
 /// the last end), from the first edge; an open wire from one of its free ends.
-fn chained(mut rest: Vec<Piece2>) -> Vec<Piece2> {
-    let rev = |e: &Piece2| {
-        let (c, a, b) = e.c.reversed(e.t0, e.t1);
-        Piece2 { c, t0: a, t1: b }
-    };
+fn chained(mut rest: Vec<SpineEdge>) -> Vec<SpineEdge> {
     // Start at an end no other edge reaches (an open wire's), else at the first edge.
-    let free = |p: P3, skip: usize, all: &[Piece2]| {
-        all.iter().enumerate().filter(|(j, _)| *j != skip).map(|(_, e)| (e.start() - p).norm().min((e.end() - p).norm())).fold(f64::INFINITY, f64::min)
+    let free = |p: P3, skip: usize, all: &[SpineEdge]| {
+        all.iter().enumerate().filter(|(j, _)| *j != skip).map(|(_, e)| (e.p.start() - p).norm().min((e.p.end() - p).norm())).fold(f64::INFINITY, f64::min)
     };
     let mut start = (0, false, 0.0);
     for (i, e) in rest.iter().enumerate() {
-        for (flip, p) in [(false, e.start()), (true, e.end())] {
+        for (flip, p) in [(false, e.p.start()), (true, e.p.end())] {
             let d = free(p, i, &rest);
             if d > start.2 * 10.0 + tol::ROUNDOFF_FINE && d > tol::ROUNDOFF {
                 start = (i, flip, d);
             }
         }
     }
-    let lens: f64 = rest.iter().map(|e| (e.end() - e.start()).norm()).sum();
+    let lens: f64 = rest.iter().map(|e| (e.p.end() - e.p.start()).norm()).sum();
     let mut out = Vec::new();
     let first = rest.remove(start.0);
-    out.push(if start.1 && start.2 > lens * 1e-4 { rev(&first) } else { first });
-    while !rest.is_empty() {
-        let end = out.last().unwrap().end();
-        let (j, flip, _) = rest
+    out.push(if start.1 && start.2 > lens * 1e-4 { first.reversed() } else { first });
+    while let Some(end) = out.last().map(|e: &SpineEdge| e.p.end()) {
+        let Some((j, flip, _)) = rest
             .iter()
             .enumerate()
-            .flat_map(|(j, e)| [(j, false, (e.start() - end).norm()), (j, true, (e.end() - end).norm())])
+            .flat_map(|(j, e)| [(j, false, (e.p.start() - end).norm()), (j, true, (e.p.end() - end).norm())])
             .min_by(|a, b| a.2.total_cmp(&b.2))
-            .unwrap();
+        else {
+            break;
+        };
         let e = rest.remove(j);
-        out.push(if flip { rev(&e) } else { e });
+        out.push(if flip { e.reversed() } else { e });
     }
     out
 }
@@ -748,7 +1381,7 @@ mod tests {
         let c = Curve::Ellipse { c: P3::origin(), x: V3::x(), y: V3::y(), a: 3.0, b: 1.0 };
         let ts = curvature_points(&c, 0.0, 2.0 * PI);
         assert_eq!(ts.len(), 5);
-        let spine = prepare_spine(vec![Piece2 { c, t0: 0.0, t1: 2.0 * PI }]);
+        let spine = prepare_spine(&[(c, 0.0, 2.0 * PI)]);
         assert_eq!(spine.len(), 4);
     }
 
@@ -768,6 +1401,64 @@ mod tests {
         let n = NurbsCurve::bezier(&[P3::new(0.0, 0.0, 0.0), P3::new(1.0, 2.0, 0.0), P3::new(3.0, 2.0, 0.0), P3::new(4.0, 0.0, 0.0)], &[1.0; 4]);
         let ts = curvature_points(&Curve::nurbs(n), 0.0, 1.0);
         assert!(ts.iter().any(|t| (t - 0.5).abs() < 1e-6), "{ts:?}");
+    }
+
+    /// The quadratic B-spline through (0,0) … (6,1) with simple knots at 1 and 2.
+    fn quadratic() -> NurbsCurve {
+        let poles = [(0.0, 0.0), (1.0, 2.0), (3.0, 2.0), (4.0, 0.0), (6.0, 1.0)];
+        let cps = poles.iter().map(|&(x, y)| super::super::nurbs::hom(&P3::new(x, y, 0.0), 1.0)).collect();
+        NurbsCurve::new(2, vec![0.0, 0.0, 0.0, 1.0, 2.0, 3.0, 3.0, 3.0], cps).unwrap()
+    }
+
+    /// A quarter of the unit circle as a rational quadratic, counter-clockwise from (1, 0).
+    fn quarter_circle() -> Curve {
+        let h = |x: f64, y: f64, w: f64| super::super::nurbs::hom(&P3::new(x, y, 0.0), w);
+        Curve::nurbs(NurbsCurve::new(2, vec![0.0, 0.0, 0.0, 1.0, 1.0, 1.0], vec![h(1.0, 0.0, 1.0), h(1.0, 1.0, 0.5f64.sqrt()), h(0.0, 1.0, 1.0)]).unwrap())
+    }
+
+    #[test]
+    fn b_spline_cut_where_occt_cuts() {
+        // OCCT 7.8's Geom2dLProp_CurAndInf2d on this curve: extrema of curvature in each span,
+        // and a root of κ' where it jumps at the knot 1 (sampled on the next span there).
+        let ts = curvature_points(&Curve::nurbs(quadratic()), 0.0, 3.0);
+        let occt = [0.999999999365578, 1.4000000005028, 2.1999999994956];
+        assert_eq!(ts.len(), occt.len(), "{ts:?}");
+        for (t, o) in ts.iter().zip(occt) {
+            assert!((t - o).abs() < 1e-8, "{ts:?}");
+        }
+    }
+
+    #[test]
+    fn polyline_points_as_occt() {
+        // OCCT's PerformCurve (QuasiFleche) on the quarter circle: its parameters.
+        let c = quarter_circle();
+        for (defl, occt) in [(0.02, vec![0.0, 0.25, 0.375, 0.5, 0.625, 0.75, 1.0]), (0.005, vec![0.0, 0.125, 0.25, 0.3125, 0.375, 0.4375, 0.5, 0.5625, 0.625, 0.6875, 0.75, 0.875, 1.0])] {
+            let pts = polyline_points(&c, 0.0, 1.0, defl);
+            assert_eq!(pts.len(), occt.len());
+            for (p, t) in pts.iter().zip(occt) {
+                assert!((p - c.point(t)).norm() < 1e-12);
+            }
+        }
+    }
+
+    #[test]
+    fn edge_curving_within_the_distance_becomes_a_polyline() {
+        // The quarter circle (radius 1, centre to its left) offset 2 to its left would have a
+        // cusp: it's replaced by a polyline within 0.02. Offset 0.5, or to its right, it stays.
+        let c = quarter_circle();
+        let e = SpineEdge::new(&c, 0.0, 1.0, 0.0, 1.0);
+        assert!(is_bad_edge(&e.p, 1.0, 2.0));
+        assert!(!is_bad_edge(&e.p, 1.0, 0.5));
+        assert!(!is_bad_edge(&e.p, -1.0, 2.0));
+        let lines = polyline_bad_edges(vec![e.clone()], 1.0, 2.0);
+        assert_eq!(lines.len(), 6);
+        assert!(lines.iter().all(|s| matches!(s.p.c, Curve::Line { .. })));
+        assert!((lines[0].p.start() - P3::new(1.0, 0.0, 0.0)).norm() < 1e-12);
+        assert!((lines[5].p.end() - P3::new(0.0, 1.0, 0.0)).norm() < 1e-12);
+        // Run the other way, the polyline runs the other way too.
+        let back = polyline_bad_edges(vec![e.reversed()], -1.0, 2.0);
+        assert!((back[0].p.start() - P3::new(0.0, 1.0, 0.0)).norm() < 1e-12);
+        assert_eq!(polyline_bad_edges(vec![e], 1.0, 0.5).len(), 1);
     }
 
     #[test]

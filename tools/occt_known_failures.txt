@@ -225,16 +225,9 @@ blend simple_j6  # the area differs from OCCT's
 boolean bopcut_2d_d5  # the length differs from OCCT's
 offset wire_closed_inside_0_005_a4  # the result's vertex count differs from OCCT's (a B-spline wire's offset is split at other points)
 offset wire_closed_inside_0_005_a5  # the result's vertex count differs from OCCT's (a B-spline wire's offset is split at other points)
-offset wire_closed_inside_0_005_a8  # the result's vertex count differs from OCCT's (a B-spline wire's offset is split at other points)
 offset wire_closed_inside_0_005_b2  # the result's vertex count differs from OCCT's (a B-spline wire's offset is split at other points)
 offset wire_closed_inside_0_005_b7  # the length differs from OCCT's
-offset wire_closed_inside_0_005_c5  # the result's vertex count differs from OCCT's (a B-spline wire's offset is split at other points)
-offset wire_closed_inside_0_005_c6  # the result's vertex count differs from OCCT's (a B-spline wire's offset is split at other points)
-offset wire_closed_inside_0_005_c7  # the result's vertex count differs from OCCT's (a B-spline wire's offset is split at other points)
-offset wire_closed_inside_0_005_d2  # the result's vertex count differs from OCCT's (a B-spline wire's offset is split at other points)
 offset wire_closed_inside_0_005_e4  # the result's vertex count differs from OCCT's (a B-spline wire's offset is split at other points)
-offset wire_closed_inside_0_005_f5  # the result's vertex count differs from OCCT's (a B-spline wire's offset is split at other points)
-offset wire_closed_inside_0_005_f6  # the result's vertex count differs from OCCT's (a B-spline wire's offset is split at other points)
 offset wire_closed_inside_0_005_g1  # the result's vertex count differs from OCCT's (a B-spline wire's offset is split at other points)
 offset wire_closed_inside_0_005_g2  # the result's vertex count differs from OCCT's (a B-spline wire's offset is split at other points)
 offset wire_closed_inside_0_005_g4  # the result's vertex count differs from OCCT's (a B-spline wire's offset is split at other points)
@@ -243,16 +236,8 @@ offset wire_closed_inside_0_005_h6  # the result's wire count differs from OCCT'
 offset wire_closed_inside_0_005_i8  # the result's vertex count differs from OCCT's (a B-spline wire's offset is split at other points)
 offset wire_closed_inside_0_025_a4  # the result's vertex count differs from OCCT's (a B-spline wire's offset is split at other points)
 offset wire_closed_inside_0_025_a5  # the result's vertex count differs from OCCT's (a B-spline wire's offset is split at other points)
-offset wire_closed_inside_0_025_a6  # the result's vertex count differs from OCCT's (a B-spline wire's offset is split at other points)
-offset wire_closed_inside_0_025_a8  # the result's vertex count differs from OCCT's (a B-spline wire's offset is split at other points)
 offset wire_closed_inside_0_025_b2  # the result's vertex count differs from OCCT's (a B-spline wire's offset is split at other points)
-offset wire_closed_inside_0_025_c5  # the result's vertex count differs from OCCT's (a B-spline wire's offset is split at other points)
-offset wire_closed_inside_0_025_c6  # the result's vertex count differs from OCCT's (a B-spline wire's offset is split at other points)
-offset wire_closed_inside_0_025_c7  # the result's vertex count differs from OCCT's (a B-spline wire's offset is split at other points)
-offset wire_closed_inside_0_025_d2  # the result's vertex count differs from OCCT's (a B-spline wire's offset is split at other points)
 offset wire_closed_inside_0_025_e4  # the result's vertex count differs from OCCT's (a B-spline wire's offset is split at other points)
-offset wire_closed_inside_0_025_f5  # the result's vertex count differs from OCCT's (a B-spline wire's offset is split at other points)
-offset wire_closed_inside_0_025_f6  # the result's vertex count differs from OCCT's (a B-spline wire's offset is split at other points)
 offset wire_closed_inside_0_025_g1  # the result's vertex count differs from OCCT's (a B-spline wire's offset is split at other points)
 offset wire_closed_inside_0_025_g2  # the result's vertex count differs from OCCT's (a B-spline wire's offset is split at other points)
 offset wire_closed_inside_0_025_g4  # the length differs from OCCT's
@@ -260,91 +245,53 @@ offset wire_closed_inside_0_025_h3  # the result's vertex count differs from OCC
 offset wire_closed_inside_0_025_h6  # the result's wire count differs from OCCT's
 offset wire_closed_inside_0_025_i8  # the result's vertex count differs from OCCT's (a B-spline wire's offset is split at other points)
 offset wire_closed_inside_0_075_a5  # the result's vertex count differs from OCCT's (a B-spline wire's offset is split at other points)
-offset wire_closed_inside_0_075_a6  # the result's vertex count differs from OCCT's (a B-spline wire's offset is split at other points)
 offset wire_closed_inside_0_075_b2  # the result's vertex count differs from OCCT's (a B-spline wire's offset is split at other points)
-offset wire_closed_inside_0_075_c5  # the result's vertex count differs from OCCT's (a B-spline wire's offset is split at other points)
-offset wire_closed_inside_0_075_c6  # the result's vertex count differs from OCCT's (a B-spline wire's offset is split at other points)
-offset wire_closed_inside_0_075_c7  # the result's vertex count differs from OCCT's (a B-spline wire's offset is split at other points)
-offset wire_closed_inside_0_075_c8  # the result's vertex count differs from OCCT's (a B-spline wire's offset is split at other points)
 offset wire_closed_inside_0_075_e4  # the result's vertex count differs from OCCT's (a B-spline wire's offset is split at other points)
-offset wire_closed_inside_0_075_f6  # the result's vertex count differs from OCCT's (a B-spline wire's offset is split at other points)
 offset wire_closed_inside_0_075_g2  # the length differs from OCCT's
 offset wire_closed_inside_0_075_h6  # the result's wire count differs from OCCT's
 offset wire_closed_inside_0_075_i8  # the result's vertex count differs from OCCT's (a B-spline wire's offset is split at other points)
 offset wire_closed_outside_0_005_a4  # the result's vertex count differs from OCCT's (a B-spline wire's offset is split at other points)
 offset wire_closed_outside_0_005_a5  # the result's vertex count differs from OCCT's (a B-spline wire's offset is split at other points)
-offset wire_closed_outside_0_005_a6  # the result's vertex count differs from OCCT's (a B-spline wire's offset is split at other points)
-offset wire_closed_outside_0_005_a8  # the result's vertex count differs from OCCT's (a B-spline wire's offset is split at other points)
 offset wire_closed_outside_0_005_a9  # the result's vertex count differs from OCCT's (a B-spline wire's offset is split at other points)
 offset wire_closed_outside_0_005_b2  # the result's vertex count differs from OCCT's (a B-spline wire's offset is split at other points)
-offset wire_closed_outside_0_005_c5  # the result's vertex count differs from OCCT's (a B-spline wire's offset is split at other points)
 offset wire_closed_outside_0_005_c6  # the result's vertex count differs from OCCT's (a B-spline wire's offset is split at other points)
-offset wire_closed_outside_0_005_c7  # the result's vertex count differs from OCCT's (a B-spline wire's offset is split at other points)
-offset wire_closed_outside_0_005_d2  # the result's vertex count differs from OCCT's (a B-spline wire's offset is split at other points)
 offset wire_closed_outside_0_005_e4  # the result's vertex count differs from OCCT's (a B-spline wire's offset is split at other points)
-offset wire_closed_outside_0_005_f5  # the result's vertex count differs from OCCT's (a B-spline wire's offset is split at other points)
-offset wire_closed_outside_0_005_f6  # the result's vertex count differs from OCCT's (a B-spline wire's offset is split at other points)
 offset wire_closed_outside_0_005_g1  # the result's vertex count differs from OCCT's (a B-spline wire's offset is split at other points)
 offset wire_closed_outside_0_005_g2  # the result's vertex count differs from OCCT's (a B-spline wire's offset is split at other points)
 offset wire_closed_outside_0_005_g4  # the result's vertex count differs from OCCT's (a B-spline wire's offset is split at other points)
 offset wire_closed_outside_0_005_g5  # the length differs from OCCT's
 offset wire_closed_outside_0_005_h6  # the result's wire count differs from OCCT's
-offset wire_closed_outside_0_005_i8  # the result's vertex count differs from OCCT's (a B-spline wire's offset is split at other points)
 offset wire_closed_outside_0_025_a4  # the result's vertex count differs from OCCT's (a B-spline wire's offset is split at other points)
 offset wire_closed_outside_0_025_a5  # the result's vertex count differs from OCCT's (a B-spline wire's offset is split at other points)
 offset wire_closed_outside_0_025_a6  # the result's vertex count differs from OCCT's (a B-spline wire's offset is split at other points)
 offset wire_closed_outside_0_025_a9  # the result's vertex count differs from OCCT's (a B-spline wire's offset is split at other points)
 offset wire_closed_outside_0_025_b2  # the result's vertex count differs from OCCT's (a B-spline wire's offset is split at other points)
-offset wire_closed_outside_0_025_c5  # the result's vertex count differs from OCCT's (a B-spline wire's offset is split at other points)
-offset wire_closed_outside_0_025_c7  # the result's vertex count differs from OCCT's (a B-spline wire's offset is split at other points)
-offset wire_closed_outside_0_025_d2  # the result's vertex count differs from OCCT's (a B-spline wire's offset is split at other points)
 offset wire_closed_outside_0_025_e4  # the result's vertex count differs from OCCT's (a B-spline wire's offset is split at other points)
-offset wire_closed_outside_0_025_f5  # the result's vertex count differs from OCCT's (a B-spline wire's offset is split at other points)
-offset wire_closed_outside_0_025_f6  # the result's vertex count differs from OCCT's (a B-spline wire's offset is split at other points)
 offset wire_closed_outside_0_025_g1  # the result's edge count differs from OCCT's
 offset wire_closed_outside_0_025_g4  # the result's vertex count differs from OCCT's (a B-spline wire's offset is split at other points)
-offset wire_closed_outside_0_025_g5  # the length differs from OCCT's
 offset wire_closed_outside_0_025_h3  # the length differs from OCCT's
 offset wire_closed_outside_0_025_h6  # the result's wire count differs from OCCT's
-offset wire_closed_outside_0_025_i8  # the result's vertex count differs from OCCT's (a B-spline wire's offset is split at other points)
 offset wire_closed_outside_0_075_a4  # the result's vertex count differs from OCCT's (a B-spline wire's offset is split at other points)
 offset wire_closed_outside_0_075_a5  # the result's vertex count differs from OCCT's (a B-spline wire's offset is split at other points)
 offset wire_closed_outside_0_075_a6  # the result's vertex count differs from OCCT's (a B-spline wire's offset is split at other points)
 offset wire_closed_outside_0_075_a9  # the result's vertex count differs from OCCT's (a B-spline wire's offset is split at other points)
 offset wire_closed_outside_0_075_b2  # the result's vertex count differs from OCCT's (a B-spline wire's offset is split at other points)
-offset wire_closed_outside_0_075_c5  # the result's vertex count differs from OCCT's (a B-spline wire's offset is split at other points)
-offset wire_closed_outside_0_075_c7  # the result's vertex count differs from OCCT's (a B-spline wire's offset is split at other points)
-offset wire_closed_outside_0_075_d2  # the result's vertex count differs from OCCT's (a B-spline wire's offset is split at other points)
 offset wire_closed_outside_0_075_e4  # the result's vertex count differs from OCCT's (a B-spline wire's offset is split at other points)
-offset wire_closed_outside_0_075_f5  # the result's vertex count differs from OCCT's (a B-spline wire's offset is split at other points)
-offset wire_closed_outside_0_075_f6  # the result's vertex count differs from OCCT's (a B-spline wire's offset is split at other points)
 offset wire_closed_outside_0_075_g1  # the result's edge count differs from OCCT's
 offset wire_closed_outside_0_075_g4  # the result's vertex count differs from OCCT's (a B-spline wire's offset is split at other points)
-offset wire_closed_outside_0_075_g5  # the length differs from OCCT's
 offset wire_closed_outside_0_075_h3  # the result's vertex count differs from OCCT's (a B-spline wire's offset is split at other points)
 offset wire_closed_outside_0_075_h6  # the result's wire count differs from OCCT's
-offset wire_unclosed_outside_0_005_a3  # the result's vertex count differs from OCCT's (a B-spline wire's offset is split at other points)
-offset wire_unclosed_outside_0_005_a9  # the result's vertex count differs from OCCT's (a B-spline wire's offset is split at other points)
-offset wire_unclosed_outside_0_005_b3  # the result's vertex count differs from OCCT's (a B-spline wire's offset is split at other points)
 offset wire_unclosed_outside_0_005_b4  # the result's vertex count differs from OCCT's (a B-spline wire's offset is split at other points)
 offset wire_unclosed_outside_0_005_b6  # the length differs from OCCT's
-offset wire_unclosed_outside_0_005_c4  # the result's vertex count differs from OCCT's (a B-spline wire's offset is split at other points)
 offset wire_unclosed_outside_0_025_a1  # the result's vertex count differs from OCCT's (a B-spline wire's offset is split at other points)
 offset wire_unclosed_outside_0_025_a2  # the result's vertex count differs from OCCT's (a B-spline wire's offset is split at other points)
-offset wire_unclosed_outside_0_025_a3  # the result's vertex count differs from OCCT's (a B-spline wire's offset is split at other points)
 offset wire_unclosed_outside_0_025_a9  # the length differs from OCCT's
 offset wire_unclosed_outside_0_025_b2  # the result's vertex count differs from OCCT's (a B-spline wire's offset is split at other points)
-offset wire_unclosed_outside_0_025_b3  # the length differs from OCCT's
 offset wire_unclosed_outside_0_025_b6  # the length differs from OCCT's
 offset wire_unclosed_outside_0_025_c4  # the result's vertex count differs from OCCT's (a B-spline wire's offset is split at other points)
 offset wire_unclosed_outside_0_075_a2  # the result's vertex count differs from OCCT's (a B-spline wire's offset is split at other points)
-offset wire_unclosed_outside_0_075_a3  # the length differs from OCCT's
 offset wire_unclosed_outside_0_075_a9  # the result's vertex count differs from OCCT's (a B-spline wire's offset is split at other points)
-offset wire_unclosed_outside_0_075_b1  # the result's vertex count differs from OCCT's (a B-spline wire's offset is split at other points)
-offset wire_unclosed_outside_0_075_b2  # the length differs from OCCT's
-offset wire_unclosed_outside_0_075_b3  # the result's vertex count differs from OCCT's (a B-spline wire's offset is split at other points)
 offset wire_unclosed_outside_0_075_b4  # the result's vertex count differs from OCCT's (a B-spline wire's offset is split at other points)
-offset wire_unclosed_outside_0_075_b5  # the result's vertex count differs from OCCT's (a B-spline wire's offset is split at other points)
 offset wire_unclosed_outside_0_075_b6  # the length differs from OCCT's
 offset wire_unclosed_outside_0_075_c4  # the result's vertex count differs from OCCT's (a B-spline wire's offset is split at other points)
 offset faces_type_a_a3  # the volume differs from OCCT's
