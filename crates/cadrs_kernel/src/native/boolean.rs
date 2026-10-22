@@ -77,7 +77,15 @@ pub struct BoolOptions {
     /// and the classified and assembled faces (counts of the inputs, so the same run always
     /// spends the same). [`DEFAULT_WORK_BUDGET`] by default; a caller may pass less.
     pub work_budget: u64,
+    /// OCCT's fuzzy value: entities of the two inputs within this distance of each other are
+    /// one (faces on surfaces this far apart coincide). None: the larger of the tolerances
+    /// the inputs' edges and vertices carry (a gap closed when they were made), at most
+    /// [`FUZZY_MAX`] of their size.
+    pub fuzzy: Option<f64>,
 }
+
+/// The largest default fuzzy value, as a part of the inputs' size.
+pub const FUZZY_MAX: f64 = 1e-5;
 
 /// The default work budget of a boolean run ([`BoolOptions::work_budget`]): about three times
 /// the most a passing case of the test suites spends (7.1 million units, an OCCT boolean case);
@@ -86,7 +94,7 @@ pub const DEFAULT_WORK_BUDGET: u64 = 20_000_000;
 
 impl Default for BoolOptions {
     fn default() -> Self {
-        BoolOptions { tol: super::tol::Tolerances::default(), flush: false, merge_coplanar: true, work_budget: DEFAULT_WORK_BUDGET }
+        BoolOptions { tol: super::tol::Tolerances::default(), flush: false, merge_coplanar: true, work_budget: DEFAULT_WORK_BUDGET, fuzzy: None }
     }
 }
 
@@ -638,7 +646,8 @@ pub fn boolean_bodies_with(a: &Body, b: &Body, op: BoolOp, opts: BoolOptions) ->
     // 1e-5), again at growing tolerances, as OCCT grows its entities' tolerances.
     // Faces of the two bodies on one surface but for float noise (made apart: radii 25 and
     // 25.0000015) get the gap as their edges' and vertices' tolerance, so they meet.
-    let raised = near_coincident_tolerances(a, b, opts.tol.point);
+    let fuzzy = opts.fuzzy.unwrap_or_else(|| carried_fuzzy(a, b));
+    let raised = near_coincident_tolerances(a, b, opts.tol.point, fuzzy);
     let (a, b) = match &raised {
         Some((x, y)) => (x, y),
         None => (a, b),
@@ -650,6 +659,28 @@ pub fn boolean_bodies_with(a: &Body, b: &Body, op: BoolOp, opts: BoolOptions) ->
     let broken = |m: &str| ["open shell", "left", "doesn't close", "is invalid"].iter().any(|w| m.contains(w));
     if !matches!(&first, Err(KernelError::OpenResult(_))) && !matches!(&first, Err(e) if e.is_failure() && broken(&e.message())) {
         return first;
+    }
+    // Within the fuzzy value: faces a gap off the other input's surfaces moved onto them, and
+    // the slivers that leaves collapsed.
+    if let Some((fa, fb, keep_a, keep_b)) = fuzzy_merge(a, b, fuzzy, opts.tol.point) {
+        if std::env::var_os("CADRS_BOOL_DEBUG").is_some() {
+            eprintln!("fuzzy merge ({fuzzy:e}): faces {} -> {}, {} -> {}; check {:?} {:?}", a.faces.len(), fa.faces.len(), b.faces.len(), fb.faces.len(), fa.check(), fb.check());
+        }
+        match run(&fa, &fb, Mode::Bool(op), at(opts.tol.point)) {
+            Ok(mut r) => {
+                for srcs in &mut r.from {
+                    for (o, f) in srcs.iter_mut() {
+                        *f = if *o == 0 { keep_a[*f] } else { keep_b[*f] };
+                    }
+                }
+                return Ok(r);
+            }
+            Err(e) => {
+                if std::env::var_os("CADRS_BOOL_DEBUG").is_some() {
+                    eprintln!("fuzzy run: {e}");
+                }
+            }
+        }
     }
     // Inputs of several solids (an extrude of regions that share an edge, solids touching face
     // to face or along an edge): one solid at a time.
@@ -774,7 +805,14 @@ fn per_tool_solid(a: &Body, b: &Body, op: BoolOp, opts: BoolOptions) -> Option<R
 /// The faces of `a` and `b` that lie on one surface only within 1e-7 of their size (beyond the
 /// run's tolerance): the two bodies with those faces' edges and vertices given the gap (with
 /// margin) as tolerance; None when there are none.
-fn near_coincident_tolerances(a: &Body, b: &Body, tol: f64) -> Option<(Body, Body)> {
+/// The default fuzzy value of a boolean of `a` and `b` ([`BoolOptions::fuzzy`]).
+fn carried_fuzzy(a: &Body, b: &Body) -> f64 {
+    let carried = [a, b].iter().flat_map(|x| x.edges.iter().map(|e| e.tol).chain(x.verts.iter().map(|v| v.tol))).fold(0.0, f64::max);
+    let size = a.bbox().diagonal().max(b.bbox().diagonal());
+    carried.min(size * FUZZY_MAX)
+}
+
+fn near_coincident_tolerances(a: &Body, b: &Body, tol: f64, fuzzy: f64) -> Option<(Body, Body)> {
     let face_pts = |body: &Body, f: usize| -> Vec<P3> {
         let mut pts = Vec::new();
         for c in body.faces[f].loops.iter().flatten() {
@@ -802,7 +840,8 @@ fn near_coincident_tolerances(a: &Body, b: &Body, tol: f64) -> Option<(Body, Bod
     for (fa, (pa, xa)) in ba.iter().enumerate() {
         for (fb, (pb, xb)) in bb.iter().enumerate() {
             let size = xa.diagonal().max(xb.diagonal());
-            let ctol = size * 1e-7;
+            // (Within the fuzzy value, with half again for the faces' own deviations.)
+            let ctol = (size * 1e-7).max(1.5 * fuzzy);
             if ctol <= tol || !xa.grow(ctol).overlaps(&xb.grow(ctol)) {
                 continue;
             }
@@ -1094,6 +1133,173 @@ fn seam_side(s: &Surface, c: &Curve, t: [f64; 2], pc: Curve, near: P2) -> Curve 
         }
     }
     best.1
+}
+
+/// Faces of one input lying within the fuzzy value of an analytic face of the other on a
+/// surface of their own (an arc a gap off the circle it continues, a strip bridging the gap):
+/// they take that face's surface, their edges the distance as tolerance. Then faces of either
+/// input left a fuzzy width wide (two long edges side by side, the rest no longer than the
+/// width) are collapsed onto one of their long edges. None when nothing moved; else the two
+/// bodies and, for each, its faces' indices in the input.
+fn fuzzy_merge(a: &Body, b: &Body, fuzzy: f64, tol: f64) -> Option<(Body, Body, Vec<usize>, Vec<usize>)> {
+    let lim = 1.5 * fuzzy;
+    if fuzzy <= tol {
+        return None;
+    }
+    let (mut a2, mut b2) = (a.clone(), b.clone());
+    let moved_a = snap_within(&mut a2, b, lim, tol);
+    let moved_b = snap_within(&mut b2, &a2, lim, tol);
+    if moved_a.is_empty() && moved_b.is_empty() {
+        return None;
+    }
+    let keep_a = collapse_slivers(&mut a2, lim, &moved_a);
+    let keep_b = collapse_slivers(&mut b2, lim, &moved_b);
+    // (Only when both are still valid: a body flattened onto a face isn't a merge.)
+    (a2.check().is_empty() && b2.check().is_empty()).then_some((a2, b2, keep_a, keep_b))
+}
+
+/// [`fuzzy_merge`]'s first step on `x` against `other`: the faces moved.
+fn snap_within(x: &mut Body, other: &Body, lim: f64, tol: f64) -> Vec<usize> {
+    let analytic = |s: &Surface| matches!(s, Surface::Plane { .. } | Surface::Cylinder { .. } | Surface::Cone { .. } | Surface::Sphere { .. } | Surface::Torus { .. });
+    let targets: Vec<(usize, Bbox)> = (0..other.faces.len())
+        .filter(|&g| analytic(&other.faces[g].surf))
+        .map(|g| (g, super::kernel::subset(other, &[g], false).bbox().grow(lim)))
+        .collect();
+    let mut moved = Vec::new();
+    for fi in 0..x.faces.len() {
+        let f = &x.faces[fi];
+        let mut pts: Vec<P3> = Vec::new();
+        for c in f.loops.iter().flatten() {
+            let e = &x.edges[c.edge];
+            pts.extend((0..=8).map(|k| e.point(e.t[0] + (e.t[1] - e.t[0]) * k as f64 / 8.0)));
+        }
+        for uv in interior_points_of_polys(&classify::face_polygons(x, f)).into_iter().take(16) {
+            pts.push(f.surf.eval(uv.x, uv.y));
+        }
+        let mut fb = Bbox::empty();
+        for p in &pts {
+            fb.add(p);
+        }
+        for &(g, ref gb) in &targets {
+            let t = &other.faces[g].surf;
+            if !gb.overlaps(&fb) || f.surf.same_domain(t, tol).is_some() {
+                continue;
+            }
+            let dev = pts.iter().map(|p| t.distance(p)).fold(0.0, f64::max);
+            if dev > lim {
+                continue;
+            }
+            let surf = t.clone();
+            let edges = x.edges.clone();
+            let mid = fb.center();
+            let near = surf.project(&mid, None);
+            for l in &mut x.faces[fi].loops {
+                for co in l.iter_mut() {
+                    let e = &edges[co.edge];
+                    co.pc = super::pcurve::pcurve(&surf, &e.curve, e.t[0], e.t[1], Some(P2::new(near.0, near.1)));
+                }
+            }
+            x.faces[fi].surf = surf;
+            super::build::fix_senses(x, [fi]);
+            let t = (dev * 1.5).max(tol::CONFUSION);
+            let es: Vec<usize> = x.faces[fi].loops.iter().flatten().map(|c| c.edge).collect();
+            for e in es {
+                x.edges[e].tol = x.edges[e].tol.max(t);
+                for v in x.edges[e].v {
+                    x.verts[v].tol = x.verts[v].tol.max(t);
+                }
+            }
+            moved.push(fi);
+            break;
+        }
+    }
+    moved
+}
+
+/// [`fuzzy_merge`]'s second step: faces `lim` wide collapsed, and moved faces (`moved`) up to
+/// ten times that (a strip bridging the gap at a slant, folded back over its neighbours once
+/// on one surface with them). The faces kept, by input index.
+fn collapse_slivers(x: &mut Body, lim: f64, moved: &[usize]) -> Vec<usize> {
+    let mut drop = vec![false; x.faces.len()];
+    for fi in 0..x.faces.len() {
+        if x.faces[fi].loops.len() != 1 {
+            continue;
+        }
+        let l = x.faces[fi].loops[0].clone();
+        let width = if moved.contains(&fi) { 10.0 * lim } else { lim };
+        let long: Vec<usize> = (0..l.len()).filter(|&k| { let e = &x.edges[l[k].edge]; !e.degenerate && e.curve.longer_than(e.t[0], e.t[1], 2.0 * width) }).collect();
+        if long.len() != 2 {
+            continue;
+        }
+        // The edge kept: one whose other face hasn't moved (its geometry exact), if either.
+        let other_moved = |e: usize| x.faces.iter().enumerate().any(|(g, gf)| g != fi && moved.contains(&g) && gf.loops.iter().flatten().any(|c| c.edge == e));
+        let (mut e1, mut e2) = (l[long[0]].edge, l[long[1]].edge);
+        if other_moved(e1) && !other_moved(e2) {
+            std::mem::swap(&mut e1, &mut e2);
+        }
+        if e1 == e2 {
+            continue;
+        }
+        // The second long edge along the first within the width.
+        let (c1, c2) = (x.edges[e1].clone(), x.edges[e2].clone());
+        let side = (0..=8).all(|k| {
+            let q = c2.point(c2.t[0] + (c2.t[1] - c2.t[0]) * k as f64 / 8.0);
+            (c1.point(c1.curve.closest(&q, c1.t[0], c1.t[1])) - q).norm() <= width
+        });
+        if !side {
+            continue;
+        }
+        // e2's ends onto e1's (nearest), the short edges between them gone.
+        let ends = |e: &Edge| [e.v[0], e.v[1]];
+        let (v1, v2) = (ends(&c1), ends(&c2));
+        let same = (x.verts[v2[0]].p - x.verts[v1[0]].p).norm() + (x.verts[v2[1]].p - x.verts[v1[1]].p).norm()
+            <= (x.verts[v2[0]].p - x.verts[v1[1]].p).norm() + (x.verts[v2[1]].p - x.verts[v1[0]].p).norm();
+        let map = if same { [(v2[0], v1[0]), (v2[1], v1[1])] } else { [(v2[0], v1[1]), (v2[1], v1[0])] };
+        let short: Vec<usize> = (0..l.len()).filter(|k| !long.contains(k)).map(|k| l[k].edge).collect();
+        for (gone, keep) in map {
+            let gap = (x.verts[gone].p - x.verts[keep].p).norm();
+            x.verts[keep].tol = x.verts[keep].tol.max(gap * 1.5);
+            for e in x.edges.iter_mut() {
+                for v in e.v.iter_mut() {
+                    if *v == gone {
+                        *v = keep;
+                    }
+                }
+            }
+        }
+        x.edges[e1].tol = x.edges[e1].tol.max(width);
+        // The short edges become points (their faces' p-curves still bridge the gap in (u, v)).
+        for &e in &short {
+            x.edges[e].degenerate = true;
+            x.edges[e].tol = x.edges[e].tol.max(width);
+        }
+        // Other faces: e2 becomes e1.
+        let ke = x.edges[e1].clone();
+        for gi in 0..x.faces.len() {
+            if gi == fi {
+                continue;
+            }
+            let surf = x.faces[gi].surf.clone();
+            for lp in &mut x.faces[gi].loops {
+                for c in lp.iter_mut() {
+                    if c.edge == e2 {
+                        let near = c.pc.point(0.5 * (c2.t[0] + c2.t[1]));
+                        c.edge = e1;
+                        c.fwd = if same { c.fwd } else { !c.fwd };
+                        c.pc = super::pcurve::pcurve(&surf, &ke.curve, ke.t[0], ke.t[1], Some(P2::new(near.x, near.y)));
+                    }
+                }
+            }
+        }
+        drop[fi] = true;
+    }
+    let keep: Vec<usize> = (0..x.faces.len()).filter(|&f| !drop[f]).collect();
+    if keep.len() < x.faces.len() {
+        x.faces = keep.iter().map(|&f| x.faces[f].clone()).collect();
+        super::unify::compact(x);
+        let _ = assemble_shells(x);
+    }
+    keep
 }
 
 /// [`boolean_bodies`], with faces of the two inputs on one surface merged whatever the
@@ -1928,9 +2134,11 @@ fn run(a: &Body, b: &Body, mode: Mode, opts: RunOpts) -> Result<BoolOut> {
                         continue;
                     }
                     let (p, q) = (&pool.edges[g[i]], &pool.edges[g[j]]);
+                    // (Within the pieces' own tolerances too: edges a fuzzy gap apart are one.)
+                    let within = (run_tol * 10.0).max(p.tol.min(q.tol));
                     let ok = [0.25, 0.5, 0.75].iter().all(|f| {
                         let m = q.curve.point(q.t[0] + (q.t[1] - q.t[0]) * f);
-                        on_curve(&p.curve, p.t[0], p.t[1], &m, run_tol * 10.0).is_some()
+                        on_curve(&p.curve, p.t[0], p.t[1], &m, within).is_some()
                     });
                     if ok {
                         canon[g[j]] = g[i];
@@ -2989,6 +3197,73 @@ mod tests {
         let mut two = cube(&mut k, 0.0);
         two.append(&cube(&mut k, 1.0));
         assert!(glue_touching_caps(&two, tol::POINT).is_none());
+    }
+
+    /// A tool carrying a closed profile gap of 7.1e-5 as its edges' tolerance (squish bottle
+    /// adapter, Extrude 6) united with a target whose wall steps in by that much part of the
+    /// way round: within the fuzzy value the two walls are one, the step's sliver goes, and the
+    /// union is one valid solid.
+    #[test]
+    fn fuzzy_union_merges_a_stepped_wall() {
+        let mut k = NativeKernel::new();
+        let (r, gap) = (18.375, 7.1e-5);
+        // (A sector of `degrees`, all the way round at 360.)
+        let cyl = |k: &mut NativeKernel, r: f64, z: f64, h: f64, degrees: f64, from: f64| {
+            let x = V3::new(from.to_radians().cos(), from.to_radians().sin(), 0.0);
+            let ax = super::super::draw::Ax3 { origin: P3::new(0.0, 0.0, z), z: V3::z(), x };
+            let super::super::draw::Shape::Body(id) = k.pcylinder_a(Some(&ax), r, h, degrees).unwrap() else { unreachable!() };
+            (**k.get(id).unwrap()).clone()
+        };
+        // The target: a full cylinder above; below, a third of the way round a gap smaller,
+        // the rest as above (two sliver steps a gap wide where they meet).
+        let upper = cyl(&mut k, r, 0.0, 10.0, 360.0, 0.0);
+        let lower_in = cyl(&mut k, r - gap, -5.0, 5.0, 120.0, 0.0);
+        let lower_out = cyl(&mut k, r, -5.0, 5.0, 240.0, 120.0);
+        let target = boolean_bodies(&upper, &lower_in, BoolOp::Union).unwrap().body;
+        let target = boolean_bodies(&target, &lower_out, BoolOp::Union).unwrap().body;
+        assert_eq!(target.solids.len(), 1);
+        // The tool: a full cylinder over the step, its edges carrying the gap.
+        let mut tool = cyl(&mut k, r, -5.0, 8.0, 360.0, 0.0);
+        for e in &mut tool.edges {
+            e.tol = gap;
+        }
+        for v in &mut tool.verts {
+            v.tol = gap;
+        }
+        let out = boolean_bodies(&target, &tool, BoolOp::Union).unwrap().body;
+        assert_eq!(out.check(), Vec::<String>::new());
+        assert_eq!(out.solids.len(), 1);
+        let v = super::super::mass::body_volume(&out);
+        let expected = std::f64::consts::PI * r * r * 15.0;
+        assert!(!(0..out.faces.len()).any(|f| super::super::mass::face_area(&out, f).0 < 1e-2), "a sliver face is left");
+        assert!((v - expected).abs() < 1e-3 * expected, "volume {v} vs {expected}");
+    }
+
+    /// The stepped wall of [`fuzzy_union_merges_a_stepped_wall`] united with a tool carrying no
+    /// gap: the fuzzy value is the inputs' own tolerance and the union is as without it
+    /// (squish bottle adapter, Sweep 2: its walls a gap apart stay two).
+    #[test]
+    fn exact_union_keeps_a_stepped_wall() {
+        let mut k = NativeKernel::new();
+        let (r, gap) = (18.375, 7.1e-5);
+        let cyl = |k: &mut NativeKernel, r: f64, z: f64, h: f64, degrees: f64, from: f64| {
+            let x = V3::new(from.to_radians().cos(), from.to_radians().sin(), 0.0);
+            let ax = super::super::draw::Ax3 { origin: P3::new(0.0, 0.0, z), z: V3::z(), x };
+            let super::super::draw::Shape::Body(id) = k.pcylinder_a(Some(&ax), r, h, degrees).unwrap() else { unreachable!() };
+            (**k.get(id).unwrap()).clone()
+        };
+        let upper = cyl(&mut k, r, 0.0, 10.0, 360.0, 0.0);
+        let lower_in = cyl(&mut k, r - gap, -5.0, 5.0, 120.0, 0.0);
+        let lower_out = cyl(&mut k, r, -5.0, 5.0, 240.0, 120.0);
+        let target = boolean_bodies(&upper, &lower_in, BoolOp::Union).unwrap().body;
+        let target = boolean_bodies(&target, &lower_out, BoolOp::Union).unwrap().body;
+        assert_eq!(carried_fuzzy(&target, &target), tol::CONFUSION);
+        // A ring round the lower part, inside it, exact.
+        let ring = cyl(&mut k, r - 1.0, -4.0, 3.0, 360.0, 0.0);
+        let out = boolean_bodies(&target, &ring, BoolOp::Union).unwrap().body;
+        assert_eq!(out.check(), Vec::<String>::new());
+        assert_eq!(out.solids.len(), 1);
+        assert_eq!(out.faces.len(), target.faces.len());
     }
 
     /// Curves running along each other within the tolerance meet in one stretch, its two ends,
