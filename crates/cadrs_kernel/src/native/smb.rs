@@ -1101,6 +1101,21 @@ mod tests {
         }
     }
 
+    /// OffsetBoxSphOnCorner's corner spline (a sphere closed in v with poles at u = 0 and 1):
+    /// its loop runs out along the seam to a pole and straight back, round the pole, so the way
+    /// back is the seam's other side. Both uses on one side made a slit and dropped the ring
+    /// round that pole: an area of 5306 where SMLib has 12187, the body 980189 for 1197774.
+    #[test]
+    fn a_loop_goes_round_a_pole_between_a_seams_two_uses() {
+        let b = read_brep(&fixture("offset/OffsetBoxSphOnCorner.smb")).unwrap();
+        solid(&b, "OffsetBoxSphOnCorner");
+        // SMLib's (its props of the file): volume 1197773.92576, the face 12187.311.
+        let v = super::super::mass::body_mass(&b.body).volume;
+        assert!((v - 1197773.92576).abs() < 1e-6 * v, "volume {v}");
+        let big = (0..b.body.faces.len()).filter(|&f| matches!(b.body.faces[f].surf, Surface::Nurbs(_))).map(|f| super::super::mass::face_area(&b.body, f).0).fold(0.0, f64::max);
+        assert!((big - 12187.311).abs() < 1e-4 * big, "the corner face's area {big}");
+    }
+
     /// Files the checks used to refuse: two solids sharing an edge (each closed shell uses it
     /// once each way), and loops whose coarse polylines cross where their p-curves don't (a
     /// tightly curved p-curve), all valid at the full level too; and the tolerances a file's

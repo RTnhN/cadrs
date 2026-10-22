@@ -692,10 +692,37 @@ impl XBuilder {
 
     fn trace(&self, fi: usize, s: &Surface, l: &[(usize, bool)]) -> Trace {
         let mut pcs = Vec::with_capacity(l.len());
-        let mut ends = Vec::with_capacity(l.len());
+        let mut ends: Vec<(P2, P2)> = Vec::with_capacity(l.len());
         let mut at: Option<P2> = None;
-        for &(e, fwd) in l {
-            let pc = self.pc_from(fi, s, e, fwd, at);
+        let per = periods(s);
+        // Joints where the loop runs out along a seam to a pole and straight back along it: it
+        // goes round the pole there, so the way back is the seam's other side, a period over.
+        let mut round_pole = vec![false; l.len()];
+        for (k, &(e, fwd)) in l.iter().enumerate() {
+            let back = k > 0 && l[k - 1] == (e, !fwd);
+            let from = match (at, back) {
+                (Some(p), true) => {
+                    // A period over, within a closed spline surface's range.
+                    let over = |x: f64, p: f64, range: Option<(f64, f64)>| match range {
+                        Some((_, hi)) if x + p > hi + 1e-9 * p => x - p,
+                        _ => x + p,
+                    };
+                    // (From where the way out started: along the pole its p-curve may drift.)
+                    let dom = per.domain;
+                    let start: P2 = ends[k - 1].0;
+                    if let Some(pv) = per.pv.filter(|_| Self::collapsed_v(s, &per, p)) {
+                        round_pole[k] = true;
+                        Some(P2::new(p.x, over(start.y, pv, dom.map(|d| d.1))))
+                    } else if let Some(pu) = per.pu.filter(|_| Self::collapsed_u(s, &per, p)) {
+                        round_pole[k] = true;
+                        Some(P2::new(over(start.x, pu, dom.map(|d| d.0)), p.y))
+                    } else {
+                        Some(p)
+                    }
+                }
+                (a, _) => a,
+            };
+            let pc = self.pc_from(fi, s, e, fwd, from);
             let ed = &self.body.edges[e];
             let (a, b) = co_range(ed, fwd);
             let (pa, pb) = (pc.point(a), pc.point(b));
@@ -708,7 +735,6 @@ impl XBuilder {
         let mut free = Vec::with_capacity(n);
         let mut free_v = Vec::with_capacity(n);
         let (mut wu, mut wv) = (0i64, 0i64);
-        let per = periods(s);
         // On a closed spline surface the p-curves stay in its range (`pc_from`), so a loop
         // crossing the seam inside a coedge's run (a whole circle starting at the far side) jumps
         // by a whole period from one coedge to the next: the coedges after it are a period over
@@ -720,7 +746,8 @@ impl XBuilder {
                 base[j] = base[j - 1];
                 let g = ends[j].0.x - ends[j - 1].1.x + (base[j] - base[j - 1]) as f64 * pu;
                 let k = (g / pu).round();
-                if k != 0.0 && (g - k * pu).abs() <= 1e-7 * pu {
+                // (Not the jump round a pole: a jump in the loop, which a pole edge spans.)
+                if k != 0.0 && (g - k * pu).abs() <= 1e-7 * pu && !round_pole[j] {
                     base[j] -= k as i64;
                 }
             }
@@ -731,7 +758,7 @@ impl XBuilder {
                 base_v[j] = base_v[j - 1];
                 let g = ends[j].0.y - ends[j - 1].1.y;
                 let k = (g / pv).round();
-                if k != 0.0 && (g - k * pv).abs() <= 1e-7 * pv {
+                if k != 0.0 && (g - k * pv).abs() <= 1e-7 * pv && !round_pole[j] {
                     base_v[j] -= k as i64;
                 }
             }
