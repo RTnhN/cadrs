@@ -218,7 +218,7 @@ fn setup_thumbnail(
             scaling_mode: ScalingMode::WindowSize,
             scale: v.scale / SS as f32,
             near: 0.0,
-            far: crate::camera::CAMERA_FAR,
+            far: crate::camera::camera_far(v.scale),
             ..OrthographicProjection::default_3d()
         }),
         Tonemapping::None,
@@ -388,6 +388,7 @@ fn prepare_thumbnail_scene(world: &mut World) {
         *t = Transform::from_translation(v.camera_position()).with_rotation(v.rotation());
         if let Projection::Orthographic(o) = &mut *p {
             o.scale = v.scale / SS as f32;
+            o.far = crate::camera::camera_far(v.scale);
         }
     }
     let show_planes = sketches.is_empty() && parts.is_empty() && board.is_none();

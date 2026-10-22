@@ -188,6 +188,9 @@ fn run(world: &mut World, call: &Call) -> Result<Value, String> {
         Call::CreateDrawing(p) => create_drawing(world, p),
         Call::AddAnnotation(p) => add_annotation(world, p),
         Call::RenameTab(p) => rename_tab(world, p),
+        Call::DeleteTab(p) => delete_tab(world, &p.name),
+        Call::GetAssembly(p) => describe_assembly(doc(world)?, assembly(doc(world)?, p.assembly.as_deref())?),
+        Call::InsertInstance(p) => insert_instance(world, p),
         Call::GetBoard(p) => crate::mcp_board::get_board(world, p),
         Call::GetBoardFit(p) => crate::mcp_board::get_board_fit(world, p),
         Call::DeriveBoard(p) => crate::mcp_board::derive_board(world, p),
@@ -328,6 +331,105 @@ fn rename_tab(world: &mut World, p: &tools::RenameTab) -> Result<Value, String> 
     let id = d.doc.elements.iter().find(|e| e.name == p.name).map(|e| e.id).ok_or_else(|| format!("no tab named {:?}", p.name))?;
     d.execute(&cadrs_core::commands::RenameElement { id, name: p.to.clone() }).map_err(|e| e.to_string())?;
     describe(world)
+}
+
+/// Deletes a tab, unless an assembly has instances of it.
+fn delete_tab(world: &mut World, name: &str) -> Result<Value, String> {
+    let mut d = doc_mut(world)?;
+    let id = d.doc.elements.iter().find(|e| e.name == name).map(|e| e.id).ok_or_else(|| format!("no tab named {name:?}"))?;
+    let users: Vec<&str> = d
+        .doc
+        .elements
+        .iter()
+        .filter(|e| e.assembly_model().is_some_and(|a| a.instances.iter().any(|i| i.source.element() == id)))
+        .map(|e| e.name.as_str())
+        .collect();
+    if !users.is_empty() {
+        return Err(format!("{name:?} has instances in {}: delete them first", users.join(", ")));
+    }
+    d.execute(&cadrs_core::commands::DeleteElement { id }).map_err(|e| e.to_string())?;
+    describe(world)
+}
+
+/// The Assembly tab a call names, or the active tab.
+fn assembly(d: &ActiveDocument, name: Option<&str>) -> Result<ElementId, String> {
+    let e = match name {
+        Some(n) => d.doc.elements.iter().find(|e| e.name == n).ok_or_else(|| format!("no tab named {n:?}"))?,
+        None => d.active_element().ok_or("no tab is active")?,
+    };
+    if !matches!(e.kind, ElementKind::Assembly) {
+        return Err(format!("{:?} is a {}, not an Assembly", e.name, kind_label(&e.kind)));
+    }
+    Ok(e.id)
+}
+
+/// An assembly's instances and mate features.
+fn describe_assembly(d: &ActiveDocument, element: ElementId) -> Result<Value, String> {
+    use cadrs_core::assembly::InstanceSource;
+    let e = d.doc.element(element).ok_or("the Assembly is gone")?;
+    let asm = e.assembly_model().ok_or("not an Assembly")?;
+    let tab = |id: ElementId| d.doc.element(id).map(|e| e.name.clone()).unwrap_or_default();
+    let instances: Vec<Value> = asm
+        .instances
+        .iter()
+        .map(|i| {
+            let build = d.doc.element(i.source.element()).map(|s| cadrs_core::rebuild::build(s.features()));
+            let mut v = json!({
+                "name": i.name(&cadrs_core::assembly::source_part_name(&d.doc, &i.source, build.as_deref())),
+                "id": i.id.to_string(),
+                "source": tab(i.source.element()),
+                "translation_mm": i.pose.translation.map(round),
+            });
+            match i.source {
+                InstanceSource::Part { .. } => v["kind"] = json!("part"),
+                InstanceSource::Studio { board: None, .. } => {
+                    v["kind"] = json!("Part Studio (rigid)");
+                    v["parts"] = json!(i.parts.len());
+                }
+                InstanceSource::Studio { board: Some(_), .. } => v["kind"] = json!("board"),
+                InstanceSource::Assembly { .. } => v["kind"] = json!("subassembly"),
+            }
+            if i.pose.rotation != cadrs_core::assembly::Pose::IDENTITY.rotation {
+                v["rotation"] = json!(i.pose.rotation);
+            }
+            for (k, on) in [("fixed", i.fixed), ("hidden", i.hidden), ("suppressed", i.suppressed)] {
+                if on {
+                    v[k] = json!(true);
+                }
+            }
+            v
+        })
+        .collect();
+    let mates: Vec<Value> = asm.mates.iter().map(|m| json!({ "name": m.name, "suppressed": m.suppressed })).collect();
+    Ok(json!({ "assembly": e.name, "instances": instances, "mates": mates }))
+}
+
+/// Inserts a whole Part Studio (one rigid instance) or one of its parts into an assembly, as the
+/// Insert dialog does.
+fn insert_instance(world: &mut World, p: &tools::InsertInstance) -> Result<Value, String> {
+    use cadrs_core::assembly::{Instance, InstanceId, InstanceSource, Pose, commands::InsertInstance};
+    let element = assembly(doc(world)?, p.assembly.as_deref())?;
+    let studio = part_studio(doc(world)?, Some(&p.part_studio))?;
+    let d = doc(world)?;
+    let parts = cadrs_core::rebuild::build(d.doc.element(studio).ok_or("the Part Studio is gone")?.features()).parts.clone();
+    if parts.is_empty() {
+        return Err(format!("{:?} has no parts", p.part_studio));
+    }
+    let pose = p.translation.map(Pose::translation).unwrap_or(Pose::IDENTITY);
+    let id = InstanceId::new();
+    let mut instance = match &p.part {
+        None => Instance::studio(id, studio, parts.iter().map(|q| q.id).collect(), pose),
+        Some(name) => {
+            let part = parts.iter().find(|q| q.name == *name).ok_or_else(|| {
+                let names: Vec<&str> = parts.iter().map(|q| q.name.as_str()).collect();
+                format!("no part named {name:?} in {:?}; its parts are {}", p.part_studio, names.join(", "))
+            })?;
+            Instance::new(id, InstanceSource::Part { element: studio, part: part.id }, pose)
+        }
+    };
+    instance.fixed = p.fixed;
+    doc_mut(world)?.execute(&InsertInstance { element, instance }).map_err(|e| e.to_string())?;
+    describe_assembly(doc(world)?, element)
 }
 
 /// Turns the 3D view to a standard view and zooms to fit.
@@ -1271,6 +1373,42 @@ mod tests {
         // Base 2232 × 6 + 1872 × 4, upright 1836.9 × 8, boss 690.3 × 5, gusset 418 × 10.
         let volume = part.mass.as_ref().expect("mass").volume;
         assert!((volume - 43206.8).abs() < 5.0, "volume {volume}");
+    }
+
+    /// insert_instance puts a whole Part Studio (rigid) or one part into the assembly, get_assembly
+    /// lists them, and delete_tab refuses a tab an assembly uses.
+    #[test]
+    fn studios_and_parts_go_into_an_assembly() {
+        let mut world = World::new();
+        world.insert_resource(ActiveDocument::new(Document::new("Doc")));
+        fn p<T: serde::de::DeserializeOwned>(v: Value) -> T {
+            serde_json::from_value(v).unwrap()
+        }
+        let sketch = add_sketch(&mut world, &p(json!({ "plane": "Top", "entities": [
+            { "type": "rectangle", "x0": 0, "y0": 0, "x1": 10, "y1": 10 },
+            { "type": "rectangle", "x0": 20, "y0": 0, "x1": 30, "y1": 10 },
+        ] })))
+        .unwrap();
+        super::extrude(&mut world, &p(json!({ "sketch": sketch["sketch"], "depth": 5 }))).unwrap();
+
+        let asm = insert_instance(&mut world, &p(json!({ "assembly": "Assembly 1", "part_studio": "Part Studio 1", "fixed": true }))).unwrap();
+        assert_eq!(asm["instances"][0]["kind"], "Part Studio (rigid)");
+        assert_eq!(asm["instances"][0]["parts"], 2);
+        assert_eq!(asm["instances"][0]["fixed"], true);
+        let asm = insert_instance(&mut world, &p(json!({ "assembly": "Assembly 1", "part_studio": "Part Studio 1", "part": "Part 2", "translation": [0, 0, 50] }))).unwrap();
+        assert_eq!(asm["instances"][1]["name"], "Part 2 <1>");
+        assert_eq!(asm["instances"][1]["translation_mm"], json!([0.0, 0.0, 50.0]));
+        let e = insert_instance(&mut world, &p(json!({ "assembly": "Assembly 1", "part_studio": "Part Studio 1", "part": "Part 9" }))).unwrap_err();
+        assert!(e.contains("Part 1, Part 2"), "{e}");
+        assert!(insert_instance(&mut world, &p(json!({ "assembly": "Part Studio 1", "part_studio": "Part Studio 1" }))).is_err());
+        let listed = run(&mut world, &Call::GetAssembly(p(json!({ "assembly": "Assembly 1" })))).unwrap();
+        assert_eq!(listed["instances"].as_array().unwrap().len(), 2);
+
+        let e = delete_tab(&mut world, "Part Studio 1").unwrap_err();
+        assert!(e.contains("Assembly 1"), "{e}");
+        let doc = delete_tab(&mut world, "Assembly 1").unwrap();
+        assert_eq!(doc["tabs"].as_array().unwrap().len(), 1);
+        assert!(delete_tab(&mut world, "Part Studio 1").is_err(), "the last tab stays");
     }
 
     #[test]
