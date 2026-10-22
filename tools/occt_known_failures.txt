@@ -53,7 +53,6 @@ blend simple_x4  # a boolean leaves an open shell
 blend simple_y6  # the blends of two edges overlap: the size is too large for the face between them (OCCT builds it)
 blend simple_y7  # the blend is too large for the faces at the edge (OCCT builds it)
 blend simple_z1  # the edges blended aren't the shape's (the script's edges come from another shape)
-blend tolblend_simple_a3  # topology mismatch before the blend: our OCCT BRep reader reads CFI_5_b12fgg.rle with 7 edges (none degenerated) where OCCT's explode lists at least 8, so the script's s_8 is past ours (W2d reader, W1d)
 blend tolblend_simple_b4  # the blend's section degenerates along the edge
 blend tolblend_simple_b5  # the blend's section degenerates along the edge
 blend tolblend_simple_b6  # the blend's section degenerates along the edge
@@ -64,9 +63,6 @@ blend tolblend_simple_c2  # the blend's section degenerates along the edge
 blend tolblend_simple_c3  # the blend's section degenerates along the edge
 blend tolblend_simple_c5  # the blend's section degenerates along the edge
 blend tolblend_simple_d2  # a boolean's result has an edge used by three faces (refused, not manifold)
-blend tolblend_simple_d6  # topology mismatch before the blend: our OCCT BRep reader reads CFI_5_b12fgg.rle with 7 edges (none degenerated) where OCCT's explode lists at least 8, so the script's s_8 is past ours (W2d reader, W1d)
-blend tolblend_simple_d7  # blends of edges the kernel sees on one face only (seams, sheet edges)
-blend tolblend_simple_d8  # topology mismatch before the blend: our OCCT BRep reader reads CFI_5_b12fgg.rle with 7 edges (none degenerated) where OCCT's explode lists at least 8, so the script's s_8 is past ours (W2d reader, W1d)
 blend tolblend_simple_d9  # a boolean leaves an open shell
 blend tolblend_simple_e1  # a boolean leaves an open shell
 blend tolblend_simple_e3  # the blend tool runs out of its budget of sections
@@ -200,7 +196,6 @@ sewing tol_0_01_e5  # the result's free edges differ from OCCT's
 sewing tol_0_01_e7  # the result's free edges differ from OCCT's
 sewing tol_0_01_f5  # the result's free edges differ from OCCT's
 sewing tol_0_01_q8  # the result's free edges differ from OCCT's
-sewing tol_0_01_z2  # the result's free edges differ from OCCT's
 sewing tol_100_c3  # the result's free edges differ from OCCT's
 sewing tol_100_c5  # the result's free edges differ from OCCT's
 sewing tol_100_d3  # the result's free edges differ from OCCT's
@@ -518,7 +513,7 @@ blend encoderegularity_a1  # topology mismatch before the blend: our `explode m 
 blend encoderegularity_a5  # topology mismatch before the blend: our `explode m e` leaves out CFI901_congefkc.rle's 2 degenerated edges, which OCCT's lists, so the script's m_31 is past our 30 edges (W1d)
 blend simple_r4
 blend simple_r5
-blend tolblend_simple_a4  # topology mismatch before the blend: our OCCT BRep reader reads CFI_5_b12fgg.rle with 7 edges (none degenerated) where OCCT's explode lists at least 8, so the script's s_8 is past ours (W2d reader, W1d)
+blend tolblend_simple_a4  # the blend's boolean leaves an edge used by three faces (refused, not manifold)
 blend tolblend_simple_a6
 blend tolblend_simple_b2
 blend tolblend_simple_e2

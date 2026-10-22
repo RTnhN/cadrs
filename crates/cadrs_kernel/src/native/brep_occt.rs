@@ -499,6 +499,15 @@ fn curve_range(g: &GCurve) -> Option<(f64, f64)> {
     }
 }
 
+/// A line (through trims), as our curve; None for other curves.
+fn base_line(g: &GCurve) -> Option<Curve> {
+    match g {
+        GCurve::Line(o, d) => Some(Curve::Line { o: *o, d: d.normalize() }),
+        GCurve::Trimmed(c) => base_line(c),
+        _ => None,
+    }
+}
+
 /// Our surface and whether its natural normal is OCCT's.
 fn to_surface(g: &GSurf, exact: bool) -> R<(Surface, bool)> {
     let fr = |ax: &Ax| if exact { ax.frame_exact() } else { ax.frame() };
@@ -510,8 +519,13 @@ fn to_surface(g: &GSurf, exact: bool) -> R<(Surface, bool)> {
         GSurf::Sphere(ax, r) => (Surface::Sphere { f: fr(ax), r: *r }, hand(ax)),
         GSurf::Torus(ax, rmaj, rmin) => (Surface::Torus { f: fr(ax), rmaj: *rmaj, rmin: *rmin }, hand(ax)),
         GSurf::Extrusion(d, c) => {
-            let (a, b) = curve_range(c).ok_or("an extrusion of an unbounded curve")?;
-            let c = to_curve(c, a, b)?;
+            // A line (unbounded, its parameter the length along it) needs no range: the
+            // extrusion of one is a plane, parametrized as OCCT's.
+            let c = match (curve_range(c), base_line(c)) {
+                (Some((a, b)), _) => to_curve(c, a, b)?,
+                (None, Some(line)) => line,
+                (None, None) => return Err("an extrusion of an unbounded curve".into()),
+            };
             // OCCT's normal is C' × d, ours Su × Sv: the same.
             (Surface::Extrusion { c, d: d.normalize() }, true)
         }
@@ -1754,6 +1768,17 @@ mod tests {
         assert_eq!((b.verts.len(), b.edges.len(), b.faces.len(), b.solids.len()), (8, 12, 6, 1), "{w:?}");
         let v = super::super::mass::body_mass(&b).volume;
         assert!((v - 6.0).abs() < 1e-9, "{v}");
+    }
+
+    /// A surface of linear extrusion of a line (unbounded: no parameter range of its own) is
+    /// read, parametrized as OCCT's (CFI_5_b12fgg.rle's two such faces were dropped, leaving 7
+    /// of its 12 edges).
+    #[test]
+    fn reads_extrusions_of_lines() {
+        let g = GSurf::Extrusion(V3::z(), GCurve::Line(P3::new(1.0, 2.0, 0.0), V3::new(2.0, 0.0, 0.0)));
+        let (s, same) = to_surface(&g, false).unwrap();
+        assert!(same);
+        assert!((s.eval(3.0, 4.0) - P3::new(4.0, 2.0, 4.0)).norm() < 1e-12);
     }
 
     #[test]
