@@ -88,8 +88,15 @@ pub struct PartSource {
 impl PartSource {
     /// "Model › Part Studio 1 › Part 1 (V1)".
     pub fn label(&self) -> String {
-        let v = self.version_name.as_deref().map(|v| format!(" ({v})")).unwrap_or_default();
-        format!("{} › {} › {}{v}", self.document_name, self.element_name, self.part_name)
+        let v = self
+            .version_name
+            .as_deref()
+            .map(|v| format!(" ({v})"))
+            .unwrap_or_default();
+        format!(
+            "{} › {} › {}{v}",
+            self.document_name, self.element_name, self.part_name
+        )
     }
 }
 
@@ -115,7 +122,10 @@ impl PartTransform {
     pub fn motion(&self) -> Motion {
         let [rx, ry, rz] = self.rotate;
         let linear = rot(2, rz) * rot(1, ry) * rot(0, rx);
-        Motion { linear, translation: Vector3::from(self.translate) }
+        Motion {
+            linear,
+            translation: Vector3::from(self.translate),
+        }
     }
 
     /// The same placement turned to `rotate`, about the part's middle (the centre of its box,
@@ -133,18 +143,39 @@ impl PartTransform {
                 hi[i] = hi[i].max(p[i]);
             }
         }
-        let c = Vector3::new((lo[0] + hi[0]) / 2.0, (lo[1] + hi[1]) / 2.0, (lo[2] + hi[2]) / 2.0);
-        let old = PartTransform { translate: [0.0; 3], rotate: self.rotate }.motion().linear;
-        let new = PartTransform { translate: [0.0; 3], rotate }.motion().linear;
+        let c = Vector3::new(
+            (lo[0] + hi[0]) / 2.0,
+            (lo[1] + hi[1]) / 2.0,
+            (lo[2] + hi[2]) / 2.0,
+        );
+        let old = PartTransform {
+            translate: [0.0; 3],
+            rotate: self.rotate,
+        }
+        .motion()
+        .linear;
+        let new = PartTransform {
+            translate: [0.0; 3],
+            rotate,
+        }
+        .motion()
+        .linear;
         let t = Vector3::from(self.translate) + old * c - new * c;
         let clean = |v: f64| if v.abs() < 1e-12 { 0.0 } else { v };
-        PartTransform { translate: [clean(t.x), clean(t.y), clean(t.z)], rotate }
+        PartTransform {
+            translate: [clean(t.x), clean(t.y), clean(t.z)],
+            rotate,
+        }
     }
 
     /// Center (PCB11.6): the same rotation, moved so the part (its points `pts`, in the part's
     /// frame) is centred on the footprint's origin in x and y and stands on z = 0.
     pub fn centered(&self, pts: &[[f64; 3]]) -> PartTransform {
-        let rotated = PartTransform { translate: [0.0; 3], rotate: self.rotate }.motion();
+        let rotated = PartTransform {
+            translate: [0.0; 3],
+            rotate: self.rotate,
+        }
+        .motion();
         let mut lo = [f64::INFINITY; 3];
         let mut hi = [f64::NEG_INFINITY; 3];
         for p in pts {
@@ -155,10 +186,20 @@ impl PartTransform {
             }
         }
         if pts.is_empty() {
-            return PartTransform { translate: [0.0; 3], rotate: self.rotate };
+            return PartTransform {
+                translate: [0.0; 3],
+                rotate: self.rotate,
+            };
         }
         let clean = |v: f64| if v.abs() < 1e-12 { 0.0 } else { v };
-        PartTransform { translate: [clean(-(lo[0] + hi[0]) / 2.0), clean(-(lo[1] + hi[1]) / 2.0), clean(-lo[2])], rotate: self.rotate }
+        PartTransform {
+            translate: [
+                clean(-(lo[0] + hi[0]) / 2.0),
+                clean(-(lo[1] + hi[1]) / 2.0),
+                clean(-lo[2]),
+            ],
+            rotate: self.rotate,
+        }
     }
 }
 
@@ -214,7 +255,10 @@ impl PcbWorkspace {
 
     /// Reads the workspace settings; a missing or unreadable file gives the defaults.
     pub fn load(root: &Path) -> PcbWorkspace {
-        std::fs::read_to_string(Self::path(root)).ok().and_then(|t| ron::from_str(&t).ok()).unwrap_or_default()
+        std::fs::read_to_string(Self::path(root))
+            .ok()
+            .and_then(|t| ron::from_str(&t).ok())
+            .unwrap_or_default()
     }
 
     pub fn save(&self, root: &Path) -> Result<(), StoreError> {
@@ -223,7 +267,8 @@ impl PcbWorkspace {
 }
 
 fn write_ron<T: Serialize>(path: &Path, v: &T) -> Result<(), StoreError> {
-    let text = ron::ser::to_string_pretty(v, ron::ser::PrettyConfig::default()).map_err(|e| StoreError::Parse(e.to_string()))?;
+    let text = ron::ser::to_string_pretty(v, ron::ser::PrettyConfig::default())
+        .map_err(|e| StoreError::Parse(e.to_string()))?;
     if let Some(dir) = path.parent() {
         std::fs::create_dir_all(dir)?;
     }
@@ -243,13 +288,17 @@ pub fn library_element(doc: &Document) -> Option<&Element> {
 
 /// The mappings a library document holds (none if it has no PCB Studio tab yet).
 pub fn library_of(doc: &Document) -> ComponentLibrary {
-    library_element(doc).and_then(|e| e.pcb()).map(|s| s.library.clone()).unwrap_or_default()
+    library_element(doc)
+        .and_then(|e| e.pcb())
+        .map(|s| s.library.clone())
+        .unwrap_or_default()
 }
 
 /// Writes the mappings into a library document, adding its PCB Studio tab if it has none.
 pub fn set_library_of(doc: &mut Document, lib: &ComponentLibrary) {
     if library_element(doc).is_none() {
-        doc.elements.push(Element::pcb_studio(LIBRARY_DOCUMENT_NAME));
+        doc.elements
+            .push(Element::pcb_studio(LIBRARY_DOCUMENT_NAME));
     }
     if let Some(s) = doc.elements.iter_mut().find_map(|e| e.pcb_mut()) {
         s.library = lib.clone();
@@ -257,7 +306,12 @@ pub fn set_library_of(doc: &mut Document, lib: &ComponentLibrary) {
 }
 
 /// A new, blank library document (PCB2.3): one empty PCB Studio tab, saved in `store`.
-pub fn create_library_document(store: &Store, name: &str, user: &str, now: Timestamp) -> Result<DocumentEntry, StoreError> {
+pub fn create_library_document(
+    store: &Store,
+    name: &str,
+    user: &str,
+    now: Timestamp,
+) -> Result<DocumentEntry, StoreError> {
     let mut doc = Document::new(name);
     doc.elements = vec![Element::pcb_studio(LIBRARY_DOCUMENT_NAME)];
     store.create(&doc, &DocumentMeta::new(user, now))
@@ -270,7 +324,11 @@ fn library_file(store: &Store) -> PathBuf {
 
 /// Reads the mappings for `settings`. `open` is the document being edited: when it is the
 /// library document itself, its (unsaved) contents are used.
-pub fn load_library(store: &Store, settings: &PcbSettings, open: &Document) -> Result<ComponentLibrary, StoreError> {
+pub fn load_library(
+    store: &Store,
+    settings: &PcbSettings,
+    open: &Document,
+) -> Result<ComponentLibrary, StoreError> {
     match &settings.library {
         Some(l) if l.document == open.id => Ok(library_of(open)),
         Some(l) => Ok(library_of(&store.load(l.document)?.document)),
@@ -286,7 +344,12 @@ pub fn load_library(store: &Store, settings: &PcbSettings, open: &Document) -> R
 }
 
 /// Writes the mappings for `settings` (see [`load_library`] for `open`).
-pub fn save_library(store: &Store, settings: &PcbSettings, lib: &ComponentLibrary, open: &mut Document) -> Result<(), StoreError> {
+pub fn save_library(
+    store: &Store,
+    settings: &PcbSettings,
+    lib: &ComponentLibrary,
+    open: &mut Document,
+) -> Result<(), StoreError> {
     match &settings.library {
         Some(l) if l.document == open.id => {
             set_library_of(open, lib);
@@ -334,7 +397,11 @@ pub struct LibrarySync {
 }
 
 fn studio_ids(doc: &Document) -> Vec<ElementId> {
-    doc.elements.iter().filter(|e| e.pcb().is_some()).map(|e| e.id).collect()
+    doc.elements
+        .iter()
+        .filter(|e| e.pcb().is_some())
+        .map(|e| e.id)
+        .collect()
 }
 
 fn copies(s: &PcbStudio) -> (PcbSettings, ComponentLibrary) {
@@ -355,14 +422,21 @@ impl LibrarySync {
         self.seen.retain(|id, _| ids.contains(id));
         // Pushes: copies that changed since they were last seen.
         for id in &ids {
-            let Some(cur) = doc.element(*id).and_then(|e| e.pcb()).map(copies) else { continue };
-            let Some(prev) = self.seen.get(id).cloned() else { continue };
+            let Some(cur) = doc.element(*id).and_then(|e| e.pcb()).map(copies) else {
+                continue;
+            };
+            let Some(prev) = self.seen.get(id).cloned() else {
+                continue;
+            };
             if prev == cur {
                 continue;
             }
             let mut now = cur.clone();
             if cur.0 != prev.0 {
-                let ws = PcbWorkspace { version: 1, settings: cur.0.clone() };
+                let ws = PcbWorkspace {
+                    version: 1,
+                    settings: cur.0.clone(),
+                };
                 match ws.save(store.root()) {
                     Ok(()) => out.pushed_settings = true,
                     Err(e) => out.errors.push(format!("PCB settings: {e}")),
@@ -393,7 +467,11 @@ impl LibrarySync {
             }
         }
         // Pulls: studios not seen yet.
-        let unseen: Vec<ElementId> = ids.iter().copied().filter(|id| !self.seen.contains_key(id)).collect();
+        let unseen: Vec<ElementId> = ids
+            .iter()
+            .copied()
+            .filter(|id| !self.seen.contains_key(id))
+            .collect();
         if !unseen.is_empty() {
             let settings = PcbWorkspace::load(store.root()).settings;
             let lib = match load_library(store, &settings, doc) {

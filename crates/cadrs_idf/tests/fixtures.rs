@@ -16,8 +16,10 @@ fn read(rel: &str) -> String {
 
 /// Parse a fixture pair, asserting there are no warnings.
 fn pair(dir: &str, base: &str) -> (Board, Library) {
-    let emn = parse_emn(&read(&format!("{dir}/{base}.emn"))).unwrap_or_else(|e| panic!("{dir}/{base}.emn: {e}"));
-    let emp = parse_emp(&read(&format!("{dir}/{base}.emp"))).unwrap_or_else(|e| panic!("{dir}/{base}.emp: {e}"));
+    let emn = parse_emn(&read(&format!("{dir}/{base}.emn")))
+        .unwrap_or_else(|e| panic!("{dir}/{base}.emn: {e}"));
+    let emp = parse_emp(&read(&format!("{dir}/{base}.emp")))
+        .unwrap_or_else(|e| panic!("{dir}/{base}.emp: {e}"));
     assert!(emn.warnings.is_empty(), "{:?}", emn.warnings);
     assert!(emp.warnings.is_empty(), "{:?}", emp.warnings);
     (emn.value, emp.value)
@@ -56,7 +58,12 @@ fn every_fixture_parses() {
         assert!(outline(&b).loops[0].is_closed(), "{dir}");
         // Every placement's package is in the library.
         for p in &b.placements {
-            assert!(l.package(&p.package, &p.part_number).is_some(), "{dir}: {} {}", p.package, p.part_number);
+            assert!(
+                l.package(&p.package, &p.part_number).is_some(),
+                "{dir}: {} {}",
+                p.package,
+                p.part_number
+            );
         }
         for pk in &l.packages {
             assert!(pk.loops.iter().all(Loop::is_closed), "{dir}: {}", pk.name);
@@ -122,7 +129,13 @@ fn cell_phone_outline_hand_values() {
     let arcs: Vec<_> = lp
         .segments()
         .filter_map(|s| match s {
-            Segment::Arc { start, end, center, radius, sweep } => Some((start, end, center, radius, sweep)),
+            Segment::Arc {
+                start,
+                end,
+                center,
+                radius,
+                sweep,
+            } => Some((start, end, center, radius, sweep)),
             _ => None,
         })
         .collect();
@@ -138,7 +151,12 @@ fn cell_phone_outline_hand_values() {
         assert_close(a.2[1], w[1], 1e-12);
         assert_close(a.3, 8.0, 1e-12);
     }
-    assert_eq!(lp.segments().filter(|s| matches!(s, Segment::Line { .. })).count(), 4);
+    assert_eq!(
+        lp.segments()
+            .filter(|s| matches!(s, Segment::Line { .. }))
+            .count(),
+        4
+    );
 
     // Area = 81·146 − (4 − π)·8² = 11826 − 64(4 − π) ≈ 11771.06 mm², counter-clockwise.
     let area = 81.0 * 146.0 - (4.0 - PI) * 64.0;
@@ -154,17 +172,29 @@ fn cell_phone_keepouts() {
     let battery = &b.place_keepouts[0];
     let antenna = &b.place_keepouts[1];
     for k in [battery, antenna] {
-        assert_eq!((k.owner, k.side, k.height, k.min_height), (Owner::Mcad, Side::Bottom, Some(1.0), None));
+        assert_eq!(
+            (k.owner, k.side, k.height, k.min_height),
+            (Owner::Mcad, Side::Bottom, Some(1.0), None)
+        );
     }
     // Battery 60 × 90; antenna 60 × 12 plus a 60 × 6 triangle.
     assert_eq!(battery.loops[0].area(), 5400.0);
     assert_eq!(antenna.loops[0].area(), 900.0);
-    assert_eq!(antenna.loops[0].points.len() - 1, 5, "the antenna keep-out has 5 edges");
+    assert_eq!(
+        antenna.loops[0].points.len() - 1,
+        5,
+        "the antenna keep-out has 5 edges"
+    );
     // Both lie inside the board outline's bbox.
     let bb = outline(&b).loops[0].bbox();
     for k in &b.place_keepouts {
         let kb = k.loops[0].bbox();
-        assert!(kb.min[0] >= bb.min[0] && kb.max[0] <= bb.max[0] && kb.min[1] >= bb.min[1] && kb.max[1] <= bb.max[1]);
+        assert!(
+            kb.min[0] >= bb.min[0]
+                && kb.max[0] <= bb.max[0]
+                && kb.min[1] >= bb.min[1]
+                && kb.max[1] <= bb.max[1]
+        );
     }
 }
 
@@ -180,7 +210,17 @@ fn ex3_keepout(b: &Board) -> Loop {
     let bb = outline(b).loops[0].bbox();
     let (x0, y0) = (bb.min[0], bb.min[1]);
     let (xr, yt, r) = (x0 + 12.7, y0 + 9.525, 6.35);
-    Loop::from_triples(0, &[(x0, y0, 0.0), (xr, y0, 0.0), (xr, yt - r, 0.0), (xr - r, yt, 90.0), (x0, yt, 0.0), (x0, y0, 0.0)])
+    Loop::from_triples(
+        0,
+        &[
+            (x0, y0, 0.0),
+            (xr, y0, 0.0),
+            (xr, yt - r, 0.0),
+            (xr - r, yt, 90.0),
+            (x0, yt, 0.0),
+            (x0, y0, 0.0),
+        ],
+    )
 }
 
 #[test]
@@ -196,20 +236,44 @@ fn secondary_board_hand_values() {
     assert!(b.holes.is_empty());
     let refdes: Vec<_> = b.placements.iter().map(|p| p.refdes.clone()).collect();
     assert_eq!(refdes, (0..20).map(|i| format!("X{i}")).collect::<Vec<_>>());
-    assert_eq!(b.placements.iter().filter(|p| p.side == MountSide::Bottom).count(), 2);
+    assert_eq!(
+        b.placements
+            .iter()
+            .filter(|p| p.side == MountSide::Bottom)
+            .count(),
+        2
+    );
 
     let x0 = b.placement("X0").unwrap();
-    assert_eq!((x0.package.as_str(), x0.part_number.as_str()), ("BUTTON_EVQPUA02", "5209001"));
-    assert_eq!((x0.x, x0.y, x0.mount_offset, x0.rotation), (24.47, -9.48, 0.0, 270.0));
+    assert_eq!(
+        (x0.package.as_str(), x0.part_number.as_str()),
+        ("BUTTON_EVQPUA02", "5209001")
+    );
+    assert_eq!(
+        (x0.x, x0.y, x0.mount_offset, x0.rotation),
+        (24.47, -9.48, 0.0, 270.0)
+    );
     assert_eq!((x0.side, x0.status), (MountSide::Top, Status::Placed));
     let x1 = b.placement("X1").unwrap();
-    assert_eq!((x1.package.as_str(), x1.part_number.as_str()), ("CRYSTAL_CX_4V", "4510219"));
+    assert_eq!(
+        (x1.package.as_str(), x1.part_number.as_str()),
+        ("CRYSTAL_CX_4V", "4510219")
+    );
     assert_eq!(x1.mount_offset, -5.55e-15);
 
     let bga: Vec<_> = b.placements_for("uBGA48_7.4X7.1").collect();
     assert_eq!(bga.len(), 1);
     let u = bga[0];
-    assert_eq!((u.x, u.y, u.rotation, u.side, u.status), (4.064182376174947, -16.5, 90.0, MountSide::Top, Status::Placed));
+    assert_eq!(
+        (u.x, u.y, u.rotation, u.side, u.status),
+        (
+            4.064182376174947,
+            -16.5,
+            90.0,
+            MountSide::Top,
+            Status::Placed
+        )
+    );
     let pk = l.package("uBGA48_7.4X7.1", &u.part_number).unwrap();
     let pbb = loops_bbox(&pk.loops);
     assert_eq!((pbb.width(), pbb.height()), (7.4, 7.1));
@@ -219,9 +283,20 @@ fn secondary_board_hand_values() {
     assert_eq!(r.props[0], ("RESISTANCE".to_string(), "10000".to_string()));
 
     // Every footprint lies on the board, and no two top-side footprints overlap.
-    let fps: Vec<_> = b.placements.iter().map(|p| (p, footprint(&b, &l, p))).collect();
+    let fps: Vec<_> = b
+        .placements
+        .iter()
+        .map(|p| (p, footprint(&b, &l, p)))
+        .collect();
     for (p, f) in &fps {
-        assert!(f.min[0] >= bb.min[0] && f.max[0] <= bb.max[0] && f.min[1] >= bb.min[1] && f.max[1] <= bb.max[1], "{} off the board", p.refdes);
+        assert!(
+            f.min[0] >= bb.min[0]
+                && f.max[0] <= bb.max[0]
+                && f.min[1] >= bb.min[1]
+                && f.max[1] <= bb.max[1],
+            "{} off the board",
+            p.refdes
+        );
     }
     for (i, (p, f)) in fps.iter().enumerate() {
         for (q, g) in &fps[i + 1..] {
@@ -238,7 +313,11 @@ fn secondary_board_keepout_interference_and_move() {
     let ko = ex3_keepout(&b);
     assert!(ko.is_closed());
     // 0.5 × 0.375 in minus the fillet's corner: 12.7·9.525 − (1 − π/4)·6.35².
-    assert_close(ko.signed_area(), 12.7 * 9.525 - (1.0 - PI / 4.0) * 6.35 * 6.35, 1e-9);
+    assert_close(
+        ko.signed_area(),
+        12.7 * 9.525 - (1.0 - PI / 4.0) * 6.35 * 6.35,
+        1e-9,
+    );
     let kbb = ko.bbox();
 
     // The uBGA's footprint (7.1 × 7.4 after the 90° turn) at its original position.
@@ -248,7 +327,12 @@ fn secondary_board_keepout_interference_and_move() {
     assert_close(f.min[0], 4.064182376174947 - 3.55, 1e-12);
     assert_close(f.max[1], -16.5 + 3.7, 1e-12);
     // It is the only top-side component over the keep-out.
-    let hits: Vec<_> = b.placements.iter().filter(|p| p.side == MountSide::Top && footprint(&b, &l, p).overlaps(&kbb)).map(|p| p.refdes.clone()).collect();
+    let hits: Vec<_> = b
+        .placements
+        .iter()
+        .filter(|p| p.side == MountSide::Top && footprint(&b, &l, p).overlaps(&kbb))
+        .map(|p| p.refdes.clone())
+        .collect();
     assert_eq!(hits, ["X2"]);
     // And it really overlaps the filleted profile, not just its box: (1.0, −19.0) is in both
     // (left of the fillet centre x = 1.14028, so the fillet doesn't remove it).
@@ -265,12 +349,22 @@ fn secondary_board_keepout_interference_and_move() {
     assert!(!f2.overlaps(&kbb));
     for p in &b.placements {
         if p.refdes != "X2" && p.side == MountSide::Top {
-            assert!(!footprint(&b, &l, p).overlaps(&f2), "moved X2 hits {}", p.refdes);
+            assert!(
+                !footprint(&b, &l, p).overlaps(&f2),
+                "moved X2 hits {}",
+                p.refdes
+            );
         }
     }
 
     // Add the keep-out and export IDF 3.0: the moved Y and a PLACE_KEEPOUT come back.
-    b.place_keepouts.push(PlaceKeepout { owner: Owner::Mcad, side: Side::Top, height: Some(0.0), min_height: None, loops: vec![ko] });
+    b.place_keepouts.push(PlaceKeepout {
+        owner: Owner::Mcad,
+        side: Side::Top,
+        height: Some(0.0),
+        min_height: None,
+        loops: vec![ko],
+    });
     let (b2, _) = read_zip(&write_zip(&b, &l, IdfVersion::V3)).unwrap();
     let u2 = b2.placement("X2").unwrap();
     assert_eq!((u2.x, u2.y), (4.064182376174947, moved_y));
@@ -293,14 +387,26 @@ fn vision_controller_hand_values() {
     // Four NPTH mounting holes, one near each corner.
     assert_eq!(b.holes.len(), 4);
     for h in &b.holes {
-        assert_eq!((h.plating, &h.assoc, &h.kind, h.owner), (Plating::Npth, &HoleAssoc::Board, &Some(HoleKind::Mtg), Owner::Mcad));
+        assert_eq!(
+            (h.plating, &h.assoc, &h.kind, h.owner),
+            (
+                Plating::Npth,
+                &HoleAssoc::Board,
+                &Some(HoleKind::Mtg),
+                Owner::Mcad
+            )
+        );
         assert_eq!(h.dia, 3.175);
         assert!(h.x.min(101.6 - h.x) < 4.0 && h.y.min(76.2 - h.y) < 4.0);
     }
     // Route keepout circles around the holes.
     assert_eq!(b.route_keepouts.len(), 4);
     assert!(b.route_keepouts.iter().all(|k| k.loops[0].is_circle()));
-    assert_close(b.route_keepouts[0].loops[0].area(), PI * 3.175 * 3.175, 1e-9);
+    assert_close(
+        b.route_keepouts[0].loops[0].area(),
+        PI * 3.175 * 3.175,
+        1e-9,
+    );
     assert_eq!(b.notes[0].text, "Vision controller rev A");
 
     // Two long header strips, 50.8 mm (20 × 2.54).
@@ -336,13 +442,20 @@ fn thou_and_mm_variants_are_the_same_board() {
     assert_boards_close(&conv, &mm, 1e-9);
     for (a, b) in lthou.packages.iter().zip(&lmm.packages) {
         let a = a.converted(Units::Mm);
-        assert_eq!((&a.name, &a.part_number, a.units), (&b.name, &b.part_number, b.units));
+        assert_eq!(
+            (&a.name, &a.part_number, a.units),
+            (&b.name, &b.part_number, b.units)
+        );
         assert_close(a.height, b.height, 1e-9);
         assert_loops_close(&a.loops, &b.loops, 1e-9);
     }
     // And placing a component gives the same geometry from either file.
-    let la = thou.placed_outline(thou.placement("U1").unwrap(), &lthou).unwrap();
-    let lb = mm.placed_outline(mm.placement("U1").unwrap(), &lmm).unwrap();
+    let la = thou
+        .placed_outline(thou.placement("U1").unwrap(), &lthou)
+        .unwrap();
+    let lb = mm
+        .placed_outline(mm.placement("U1").unwrap(), &lmm)
+        .unwrap();
     assert_loops_close(&la, &lb, 1e-9);
     // Back to thou is (nearly) the identity.
     assert_boards_close(&mm.converted(Units::Thou), &thou, 1e-7);
@@ -376,7 +489,10 @@ fn assert_boards_close(a: &Board, b: &Board, tol: f64) {
     }
     assert_eq!(a.placements.len(), b.placements.len());
     for (x, y) in a.placements.iter().zip(&b.placements) {
-        assert_eq!((&x.refdes, &x.package, x.rotation, x.side), (&y.refdes, &y.package, y.rotation, y.side));
+        assert_eq!(
+            (&x.refdes, &x.package, x.rotation, x.side),
+            (&y.refdes, &y.package, y.rotation, y.side)
+        );
         assert_close(x.x, y.x, tol);
         assert_close(x.y, y.y, tol);
     }
@@ -394,7 +510,10 @@ fn v2_sample_reads_2_0_syntax() {
     assert_eq!(b.header.file_type, FileType::Board);
     assert_eq!((b.name.as_str(), b.units), ("v2_sample", Units::Thou));
     let o = outline(&b);
-    assert_eq!((o.owner, o.thickness, o.loops.len()), (Owner::Unowned, 62.0, 2));
+    assert_eq!(
+        (o.owner, o.thickness, o.loops.len()),
+        (Owner::Unowned, 62.0, 2)
+    );
     // The circular cut-out as two 180° arcs: a 200 thou circle around (1000, 750).
     let cut = &o.loops[1];
     assert_eq!(cut.label, 1);
@@ -408,20 +527,42 @@ fn v2_sample_reads_2_0_syntax() {
     assert_eq!(b.other_outlines[0].id, "HEATSINK");
     assert_eq!(b.other_outlines[0].side, None);
     assert_eq!(b.route_outlines[0].layers, None);
-    assert_eq!((b.place_outlines[0].side, b.place_outlines[0].height), (None, None));
+    assert_eq!(
+        (b.place_outlines[0].side, b.place_outlines[0].height),
+        (None, None)
+    );
     assert_eq!(b.route_keepouts[0].layers, Layers::All);
     assert_eq!(b.via_keepouts.len(), 1);
     let pk = &b.place_keepouts[0];
-    assert_eq!((pk.side, pk.height, pk.min_height), (Side::Bottom, Some(250.0), Some(0.0)));
-    assert_eq!((b.place_regions[0].side, b.place_regions[0].group.as_str()), (Side::Top, "memory"));
+    assert_eq!(
+        (pk.side, pk.height, pk.min_height),
+        (Side::Bottom, Some(250.0), Some(0.0))
+    );
+    assert_eq!(
+        (b.place_regions[0].side, b.place_regions[0].group.as_str()),
+        (Side::Top, "memory")
+    );
     assert!(b.has_keep_areas());
 
     assert_eq!(b.holes.len(), 4);
     assert_eq!(b.holes[2].assoc, HoleAssoc::Refdes("J1".into()));
-    assert!(b.holes.iter().all(|h| h.kind.is_none() && h.owner == Owner::Unowned));
+    assert!(
+        b.holes
+            .iter()
+            .all(|h| h.kind.is_none() && h.owner == Owner::Unowned)
+    );
 
     let st: Vec<_> = b.placements.iter().map(|p| p.status).collect();
-    assert_eq!(st, [Status::Placed, Status::Placed, Status::Fixed, Status::Unplaced, Status::Placed]);
+    assert_eq!(
+        st,
+        [
+            Status::Placed,
+            Status::Placed,
+            Status::Fixed,
+            Status::Unplaced,
+            Status::Placed
+        ]
+    );
     assert_eq!(b.placements[1].side, MountSide::Bottom);
     assert_eq!(b.placements[1].rotation, 90.0);
     assert!(b.placements.iter().all(|p| p.mount_offset == 0.0));
@@ -525,7 +666,15 @@ fn bottom_side_mirrors_x() {
     // Mirroring flips the loop's orientation, keeps its area, and negates arc angles so arcs
     // keep their centres (mirrored).
     let arc = Package {
-        loops: vec![Loop::from_triples(0, &[(0.0, 0.0, 0.0), (1.0, 0.0, 0.0), (0.0, 1.0, 90.0), (0.0, 0.0, 0.0)])],
+        loops: vec![Loop::from_triples(
+            0,
+            &[
+                (0.0, 0.0, 0.0),
+                (1.0, 0.0, 0.0),
+                (0.0, 1.0, 90.0),
+                (0.0, 0.0, 0.0),
+            ],
+        )],
         ..pk.clone()
     };
     let top = placement(0.0, 0.0, 0.0, MountSide::Top).place_loops(&arc, Units::Mm);
@@ -553,7 +702,10 @@ fn v2_export_drops_keep_areas() {
     assert!(b.has_keep_areas());
     // The spec's 2.0 has PLACE_KEEPOUT (max and min heights), so write_emn keeps it...
     let spec_v2 = write_emn(&b, IdfVersion::V2);
-    assert!(spec_v2.contains(".PLACE_KEEPOUT\nBOTTOM 1 0\n"), "{spec_v2}");
+    assert!(
+        spec_v2.contains(".PLACE_KEEPOUT\nBOTTOM 1 0\n"),
+        "{spec_v2}"
+    );
     assert!(spec_v2.contains(".BOARD_OUTLINE\n0.062\n"));
     // ...but PCB Studio's "IDF 2.0" export drops every keep area (PCB9.7).
     let (b2, _) = read_zip(&write_zip(&b, &l, IdfVersion::V2)).unwrap();
@@ -562,7 +714,9 @@ fn v2_export_drops_keep_areas() {
     assert_eq!(b2.outline, b.for_version(IdfVersion::V2).outline);
     let entries = zip_entries(&write_zip(&b, &l, IdfVersion::V2)).unwrap();
     let emn = String::from_utf8(entries[0].1.clone()).unwrap();
-    assert!(!emn.contains("KEEPOUT") && !emn.contains("PLACE_REGION") && !emn.contains("_OUTLINE MCAD"));
+    assert!(
+        !emn.contains("KEEPOUT") && !emn.contains("PLACE_REGION") && !emn.contains("_OUTLINE MCAD")
+    );
     // IDF 3.0 keeps them.
     let (b3, _) = read_zip(&write_zip(&b, &l, IdfVersion::V3)).unwrap();
     assert_eq!(b3.place_keepouts, b.place_keepouts);
@@ -570,7 +724,11 @@ fn v2_export_drops_keep_areas() {
     let (v2, lv2) = pair("v2 sample", "v2 sample");
     let (v2e, _) = read_zip(&write_zip(&v2, &lv2, IdfVersion::V2)).unwrap();
     assert!(!v2e.has_keep_areas());
-    assert_eq!(v2e.other_outlines.len(), 1, "other outlines aren't keep areas");
+    assert_eq!(
+        v2e.other_outlines.len(),
+        1,
+        "other outlines aren't keep areas"
+    );
     assert_eq!(v2e.holes.len(), 4);
 }
 
@@ -581,16 +739,25 @@ fn zip_holds_a_folder_with_the_two_files() {
     assert_eq!(&z[..4], b"PK\x03\x04");
     let entries = zip_entries(&z).unwrap();
     let names: Vec<_> = entries.iter().map(|(n, _)| n.as_str()).collect();
-    assert_eq!(names, ["Cell phone/Cell phone.emn", "Cell phone/Cell phone.emp"]);
+    assert_eq!(
+        names,
+        ["Cell phone/Cell phone.emn", "Cell phone/Cell phone.emp"]
+    );
     let emn = String::from_utf8(entries[0].1.clone()).unwrap();
     assert!(emn.starts_with(".HEADER\nBOARD_FILE 3.0 \"cadrs PCB Studio v0.1\" 2026/09/29.12:00:00 1\n\"Cell phone\" MM\n.END_HEADER\n.BOARD_OUTLINE MCAD\n0.062\n0 32.5 -73 0\n0 40.5 -65 90\n"), "{emn}");
     assert!(emn.contains(".DRILLED_HOLES\n.END_DRILLED_HOLES\n.PLACEMENT\n.END_PLACEMENT\n"));
     let emp = String::from_utf8(entries[1].1.clone()).unwrap();
-    assert_eq!(emp, ".HEADER\nLIBRARY_FILE 3.0 \"cadrs PCB Studio v0.1\" 2026/09/29.12:00:00 1\n.END_HEADER\n");
+    assert_eq!(
+        emp,
+        ".HEADER\nLIBRARY_FILE 3.0 \"cadrs PCB Studio v0.1\" 2026/09/29.12:00:00 1\n.END_HEADER\n"
+    );
     let (b2, l2) = read_zip(&z).unwrap();
     assert_eq!(b2, b);
     assert_eq!(l2, l);
-    assert_eq!(zip_paths("secondary board").0, "secondary board/secondary board.emn");
+    assert_eq!(
+        zip_paths("secondary board").0,
+        "secondary board/secondary board.emn"
+    );
     assert_eq!(safe_file_name("a/b:c"), "a_b_c");
 }
 
@@ -674,19 +841,45 @@ fn course_ex3_placement_snippet() {
     let b = parse_emn(COURSE_EX3_PLACEMENT).unwrap().value;
     let x0 = &b.placements[0];
     assert_eq!(
-        (x0.package.as_str(), x0.part_number.as_str(), x0.refdes.as_str(), x0.x, x0.y, x0.mount_offset, x0.rotation, x0.side, x0.status),
-        ("BUTTON_EVQPUA02", "5209001", "X0", 24.47, -9.48, 0.0, 270.0, MountSide::Top, Status::Placed)
+        (
+            x0.package.as_str(),
+            x0.part_number.as_str(),
+            x0.refdes.as_str(),
+            x0.x,
+            x0.y,
+            x0.mount_offset,
+            x0.rotation,
+            x0.side,
+            x0.status
+        ),
+        (
+            "BUTTON_EVQPUA02",
+            "5209001",
+            "X0",
+            24.47,
+            -9.48,
+            0.0,
+            270.0,
+            MountSide::Top,
+            Status::Placed
+        )
     );
     let x1 = &b.placements[1];
     assert_eq!((x1.y, x1.mount_offset), (3.1, -5.55e-15));
     assert_eq!(b.placements[2].x, 4.064182376174947);
     let out = write_emn(&b, IdfVersion::V3);
-    assert!(out.contains("BUTTON_EVQPUA02 5209001 X0\n24.47 -9.48 0 270 TOP PLACED\n"), "{out}");
+    assert!(
+        out.contains("BUTTON_EVQPUA02 5209001 X0\n24.47 -9.48 0 270 TOP PLACED\n"),
+        "{out}"
+    );
     assert!(out.contains("32.37 3.1 -5.55e-15 270 TOP PLACED\n"));
     assert!(out.contains("uBGA48_7.4X7.1 7401048 X2\n4.064182376174947 8.9 0 90 TOP PLACED\n"));
     assert_eq!(parse_emn(&out).unwrap().value, b);
     // 2.0 has no mount offset field.
-    assert!(write_emn(&b, IdfVersion::V2).contains("BUTTON_EVQPUA02 5209001 X0\n24.47 -9.48 270 TOP PLACED\n"));
+    assert!(
+        write_emn(&b, IdfVersion::V2)
+            .contains("BUTTON_EVQPUA02 5209001 X0\n24.47 -9.48 270 TOP PLACED\n")
+    );
 }
 
 #[test]
@@ -700,7 +893,14 @@ fn number_formatting() {
     assert_eq!(fmt_num(-5.55e-15), "-5.55e-15");
     assert_eq!(fmt_num(4.064182376174947), "4.064182376174947");
     assert_eq!(fmt_num(1e20), "1e20");
-    for v in [0.1 + 0.2, 1.0 / 3.0, -1e-300, 123456789.123, f64::MIN_POSITIVE, 5e-324] {
+    for v in [
+        0.1 + 0.2,
+        1.0 / 3.0,
+        -1e-300,
+        123456789.123,
+        f64::MIN_POSITIVE,
+        5e-324,
+    ] {
         assert_eq!(fmt_num(v).parse::<f64>().unwrap(), v);
     }
 }
@@ -719,10 +919,21 @@ fn tolerant_input() {
     assert_eq!(b.header.file_version, 7);
     assert_eq!((b.name.as_str(), b.units), ("a board", Units::Mm));
     let o = outline(&b);
-    assert_eq!((o.owner, o.thickness, o.loops[0].points.len()), (Owner::Unowned, 1.6, 4));
+    assert_eq!(
+        (o.owner, o.thickness, o.loops[0].points.len()),
+        (Owner::Unowned, 1.6, 4)
+    );
     assert_eq!(b.notes[0].text, "hello   world");
     let pl = &b.placements[0];
-    assert_eq!((pl.package.as_str(), pl.part_number.as_str(), pl.side, pl.status), ("pkg with space", "PN 1", MountSide::Bottom, Status::Ecad));
+    assert_eq!(
+        (
+            pl.package.as_str(),
+            pl.part_number.as_str(),
+            pl.side,
+            pl.status
+        ),
+        ("pkg with space", "PN 1", MountSide::Bottom, Status::Ecad)
+    );
     assert_eq!(p.warnings.len(), 1);
     assert_eq!(p.warnings[0].line, 15);
     assert!(p.warnings[0].message.contains("WEIRD_SECTION"));
@@ -740,7 +951,9 @@ const HEAD: &str = ".HEADER\nBOARD_FILE 3.0 \"x\" 2026/09/29.12:00:00 1\nb MM\n.
 #[test]
 fn errors_carry_line_numbers() {
     // Bad number in a loop point.
-    let (line, msg) = err_line(&format!("{HEAD}.BOARD_OUTLINE MCAD\n1.6\n0 0 0 0\n0 1O 0 0\n.END_BOARD_OUTLINE\n"));
+    let (line, msg) = err_line(&format!(
+        "{HEAD}.BOARD_OUTLINE MCAD\n1.6\n0 0 0 0\n0 1O 0 0\n.END_BOARD_OUTLINE\n"
+    ));
     assert_eq!(line, 8);
     assert!(msg.contains("'1O'"), "{msg}");
     // Missing section end.
@@ -748,25 +961,50 @@ fn errors_carry_line_numbers() {
     assert_eq!(line, 5);
     assert!(msg.contains("END_BOARD_OUTLINE"), "{msg}");
     // A section starting inside another.
-    let (line, _) = err_line(&format!("{HEAD}.DRILLED_HOLES\n.PLACEMENT\n.END_PLACEMENT\n"));
+    let (line, _) = err_line(&format!(
+        "{HEAD}.DRILLED_HOLES\n.PLACEMENT\n.END_PLACEMENT\n"
+    ));
     assert_eq!(line, 6);
     // Unterminated string.
     let (line, msg) = err_line(".HEADER\nBOARD_FILE 3.0 \"x 2026 1\nb MM\n.END_HEADER\n");
     assert_eq!(line, 2);
     assert!(msg.contains("unterminated"));
     // Unknown units, unsupported version, wrong file type.
-    assert_eq!(err_line(".HEADER\nBOARD_FILE 3.0 \"x\" d 1\nb INCH\n.END_HEADER\n").0, 3);
-    assert!(err_line(".HEADER\nBOARD_FILE 1.0 \"x\" d 1\nb MM\n.END_HEADER\n").1.contains("unsupported IDF version"));
-    assert!(err_line(".HEADER\nLIBRARY_FILE 3.0 \"x\" d 1\n.END_HEADER\n").1.contains("expected BOARD_FILE"));
+    assert_eq!(
+        err_line(".HEADER\nBOARD_FILE 3.0 \"x\" d 1\nb INCH\n.END_HEADER\n").0,
+        3
+    );
+    assert!(
+        err_line(".HEADER\nBOARD_FILE 1.0 \"x\" d 1\nb MM\n.END_HEADER\n")
+            .1
+            .contains("unsupported IDF version")
+    );
+    assert!(
+        err_line(".HEADER\nLIBRARY_FILE 3.0 \"x\" d 1\n.END_HEADER\n")
+            .1
+            .contains("expected BOARD_FILE")
+    );
     // Odd number of placement records.
-    assert_eq!(err_line(&format!("{HEAD}.PLACEMENT\np n R1\n1 2 0 0 TOP PLACED\np n R2\n.END_PLACEMENT\n")).0, 8);
+    assert_eq!(
+        err_line(&format!(
+            "{HEAD}.PLACEMENT\np n R1\n1 2 0 0 TOP PLACED\np n R2\n.END_PLACEMENT\n"
+        ))
+        .0,
+        8
+    );
     // Bad enum value.
-    let (line, msg) = err_line(&format!("{HEAD}.PLACEMENT\np n R1\n1 2 0 0 SIDEWAYS PLACED\n.END_PLACEMENT\n"));
+    let (line, msg) = err_line(&format!(
+        "{HEAD}.PLACEMENT\np n R1\n1 2 0 0 SIDEWAYS PLACED\n.END_PLACEMENT\n"
+    ));
     assert_eq!(line, 7);
     assert!(msg.contains("SIDEWAYS"));
     // Data outside a section, and no header.
     assert_eq!(err_line(&format!("{HEAD}0 1 2 3\n")).0, 5);
-    assert!(err_line(".BOARD_OUTLINE\n1\n.END_BOARD_OUTLINE\n").1.contains("HEADER"));
+    assert!(
+        err_line(".BOARD_OUTLINE\n1\n.END_BOARD_OUTLINE\n")
+            .1
+            .contains("HEADER")
+    );
     // Library errors are prefixed by read_pair.
     let e = read_pair(HEAD, ".HEADER\nLIBRARY_FILE 3.0 \"x\" d 1\n.END_HEADER\n.ELECTRICAL\np n MM tall\n.END_ELECTRICAL\n").unwrap_err();
     assert_eq!(e.line, 5);

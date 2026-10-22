@@ -14,24 +14,24 @@
 //! Names: `eda-mode-schematic`, `eda-mode-layout`, `eda-mode-3d` (the switch).
 
 pub mod browser;
+pub(crate) mod lay_dialogs;
+pub mod layers_panel;
+pub mod layout_tools;
 pub mod libraries;
 #[cfg(feature = "easyeda")]
 pub mod online;
-pub mod layers_panel;
-pub mod layout_tools;
-pub(crate) mod lay_dialogs;
 mod part_dialogs;
 pub mod part_tools;
 mod sch_dialogs;
-pub mod ui;
 pub mod schematic_tools;
+pub mod ui;
 
 use cadrs_ui::ShortcutKey;
 use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
 
-use bevy::camera::visibility::RenderLayers;
 use bevy::camera::ScalingMode;
+use bevy::camera::visibility::RenderLayers;
 use bevy::core_pipeline::tonemapping::{DebandDither, Tonemapping};
 use bevy::input::mouse::MouseScrollUnit;
 use bevy::picking::hover::HoverMap;
@@ -189,7 +189,6 @@ pub struct EdaCross;
 #[derive(Resource, Default, Debug, PartialEq)]
 pub struct Crosshair(pub Option<(cadrs_eda::units::Pt, bool)>);
 
-
 pub struct EdaPlugin;
 
 impl Plugin for EdaPlugin {
@@ -209,12 +208,24 @@ impl Plugin for EdaPlugin {
             .add_systems(Startup, (spawn_camera, configure_gizmos))
             .add_systems(
                 Update,
-                (track_context, sync_mode_bar, navigate, fit_views, place_camera, rebuild_scene, set_line_widths, draw_overlay)
+                (
+                    track_context,
+                    sync_mode_bar,
+                    navigate,
+                    fit_views,
+                    place_camera,
+                    rebuild_scene,
+                    set_line_widths,
+                    draw_overlay,
+                )
                     .chain()
                     .run_if(in_state(AppState::Document)),
             )
             .add_systems(OnExit(AppState::Document), reset)
-            .add_systems(Update, run_script_commands.run_if(in_state(AppState::Document)))
+            .add_systems(
+                Update,
+                run_script_commands.run_if(in_state(AppState::Document)),
+            )
             .add_observer(on_mode_button);
         schematic_tools::register(app);
         layout_tools::register(app);
@@ -231,8 +242,16 @@ fn spawn_camera(mut commands: Commands, surface: Res<RenderSurface>) {
         EdaCamera,
         Camera2d,
         surface.target.clone(),
-        Camera { order: 1, is_active: false, clear_color: ClearColorConfig::None, ..default() },
-        Projection::Orthographic(OrthographicProjection { scaling_mode: ScalingMode::WindowSize, ..OrthographicProjection::default_2d() }),
+        Camera {
+            order: 1,
+            is_active: false,
+            clear_color: ClearColorConfig::None,
+            ..default()
+        },
+        Projection::Orthographic(OrthographicProjection {
+            scaling_mode: ScalingMode::WindowSize,
+            ..OrthographicProjection::default_2d()
+        }),
         RenderLayers::layer(EDA_LAYER),
         Tonemapping::None,
         DebandDither::Disabled,
@@ -250,7 +269,13 @@ fn configure_gizmos(mut store: ResMut<GizmoConfigStore>) {
     store.config_mut::<EdaCross>().0.line.width = 1.5;
 }
 
-fn reset(mut ui: ResMut<EdaUi>, mut scene: ResMut<EdaScene>, mut eda: ResMut<Eda2d>, q: Query<Entity, With<EdaEntity>>, mut commands: Commands) {
+fn reset(
+    mut ui: ResMut<EdaUi>,
+    mut scene: ResMut<EdaScene>,
+    mut eda: ResMut<Eda2d>,
+    q: Query<Entity, With<EdaEntity>>,
+    mut commands: Commands,
+) {
     *ui = EdaUi::default();
     *scene = EdaScene::default();
     eda.0 = None;
@@ -276,20 +301,26 @@ fn track_context(
     cache: Res<crate::parts::PartCache>,
     mut eda: ResMut<Eda2d>,
 ) {
-    let plane = doc.as_deref().filter(|_| matches!(*kind, ActiveKind::PartStudio | ActiveKind::Assembly)).and_then(|doc| crate::board_in_studio::edited_board(doc, &editing, &cache));
+    let plane = doc
+        .as_deref()
+        .filter(|_| matches!(*kind, ActiveKind::PartStudio | ActiveKind::Assembly))
+        .and_then(|doc| crate::board_in_studio::edited_board(doc, &editing, &cache));
     let now = match plane {
         Some((el, b, _)) => Some((el, Subject::Board(b), Mode::Layout)),
-        None => doc.as_deref().filter(|_| *kind == ActiveKind::PcbStudio && pcb.view == PcbView::Board).and_then(|doc| {
-            let (el, s) = active_studio(doc)?;
-            if let Some(c) = ui.editing.get(&el).filter(|c| s.component(**c).is_some()) {
-                let subject = Subject::Component(*c);
-                return Some((el, subject, ui.mode(el, subject)));
-            }
-            let b = pcb.shown_board(el, s)?;
-            s.board(b)?.design()?;
-            let subject = Subject::Board(b);
-            Some((el, subject, ui.mode(el, subject)))
-        }),
+        None => doc
+            .as_deref()
+            .filter(|_| *kind == ActiveKind::PcbStudio && pcb.view == PcbView::Board)
+            .and_then(|doc| {
+                let (el, s) = active_studio(doc)?;
+                if let Some(c) = ui.editing.get(&el).filter(|c| s.component(**c).is_some()) {
+                    let subject = Subject::Component(*c);
+                    return Some((el, subject, ui.mode(el, subject)));
+                }
+                let b = pcb.shown_board(el, s)?;
+                s.board(b)?.design()?;
+                let subject = Subject::Board(b);
+                Some((el, subject, ui.mode(el, subject)))
+            }),
     };
     let host = plane.map_or(LayoutHost::Flat, |(_, _, h)| LayoutHost::Plane(h));
     if eda.0 != now || eda.1 != host {
@@ -327,7 +358,10 @@ fn sync_mode_bar(
     mut commands: Commands,
 ) {
     // No mode bar on a board edited in a Part Studio: it stays 3D.
-    let want = eda.0.filter(|_| eda.1 == LayoutHost::Flat).map(|(_, s, _)| matches!(s, Subject::Component(_)));
+    let want = eda
+        .0
+        .filter(|_| eda.1 == LayoutHost::Flat)
+        .map(|(_, s, _)| matches!(s, Subject::Component(_)));
     let mut bar = q_bar.single().ok().map(|(e, b)| (e, b.0));
     // The other kind's bar goes.
     if let Some((e, kind)) = bar
@@ -337,9 +371,17 @@ fn sync_mode_bar(
         bar = None;
     }
     let modes: &[(Mode, &str, &str)] = if want == Some(true) {
-        &[(Mode::Symbol, "eda-mode-symbol", "Symbol"), (Mode::Footprint, "eda-mode-footprint", "Footprint"), (Mode::ThreeD, "eda-mode-3d", "3D")]
+        &[
+            (Mode::Symbol, "eda-mode-symbol", "Symbol"),
+            (Mode::Footprint, "eda-mode-footprint", "Footprint"),
+            (Mode::ThreeD, "eda-mode-3d", "3D"),
+        ]
     } else {
-        &[(Mode::Schematic, "eda-mode-schematic", "Schematic"), (Mode::Layout, "eda-mode-layout", "Layout"), (Mode::ThreeD, "eda-mode-3d", "3D")]
+        &[
+            (Mode::Schematic, "eda-mode-schematic", "Schematic"),
+            (Mode::Layout, "eda-mode-layout", "Layout"),
+            (Mode::ThreeD, "eda-mode-3d", "3D"),
+        ]
     };
     match (want, bar) {
         (Some(kind), None) => {
@@ -364,7 +406,10 @@ fn sync_mode_bar(
                 ))
                 .with_children(|b| {
                     for (mode, name, label) in modes.iter().copied() {
-                        b.spawn((cadrs_ui::Button::new(name).label(label).small().build(&t), ModeButton(mode)));
+                        b.spawn((
+                            cadrs_ui::Button::new(name).label(label).small().build(&t),
+                            ModeButton(mode),
+                        ));
                     }
                 });
             });
@@ -394,7 +439,10 @@ fn on_mode_button(a: On<Activate>, q: Query<&ModeButton>, eda: Res<Eda2d>, mut u
 /// Switches a board's view (also the scenario command `eda-mode schematic|layout|3d`).
 /// Shows `mode` for the board `b` of the PCB Studio `el` (when it is next shown).
 pub fn set_mode_of(world: &mut World, el: ElementId, b: BoardId, mode: Mode) {
-    world.resource_mut::<EdaUi>().modes.insert((el, Subject::Board(b)), mode);
+    world
+        .resource_mut::<EdaUi>()
+        .modes
+        .insert((el, Subject::Board(b)), mode);
 }
 
 pub fn set_mode(world: &mut World, mode: Mode) {
@@ -423,8 +471,15 @@ fn current_view(ui: &EdaUi, eda: &Eda2d) -> Option<View> {
 
 /// A view shown the first time is fitted; a fitted view stays fitted when the area resizes
 /// (a schematic's to the box it was first fitted to: it doesn't jump as it is drawn on).
-fn fit_views(eda: Res<Eda2d>, rect: Res<ViewportRect>, scene: Res<EdaScene>, mut ui: ResMut<EdaUi>) {
-    let Some(key @ (_, _, mode)) = eda.0 else { return };
+fn fit_views(
+    eda: Res<Eda2d>,
+    rect: Res<ViewportRect>,
+    scene: Res<EdaScene>,
+    mut ui: ResMut<EdaUi>,
+) {
+    let Some(key @ (_, _, mode)) = eda.0 else {
+        return;
+    };
     if mode == Mode::ThreeD || scene.key.is_none() {
         return;
     }
@@ -453,7 +508,9 @@ fn fit_views(eda: Res<Eda2d>, rect: Res<ViewportRect>, scene: Res<EdaScene>, mut
 
 /// Fits the shown 2D view (F).
 pub fn fit(world: &mut World) {
-    let Some(key) = world.resource::<Eda2d>().0 else { return };
+    let Some(key) = world.resource::<Eda2d>().0 else {
+        return;
+    };
     let size = view_size(world.resource::<ViewportRect>());
     let b = fit_box(&world.resource::<EdaScene>().list);
     let mut ui = world.resource_mut::<EdaUi>();
@@ -485,12 +542,23 @@ type Presses<'a> = (Local<'a, Option<(f64, Vec2)>>, Local<'a, Option<Vec2>>);
 /// A left-button event on the 2D view, for the tools.
 #[derive(Message, Clone, Copy, Debug)]
 pub enum EdaClick {
-    Press { at: cadrs_eda::units::Pt, shift: bool, ctrl: bool },
-    Release { at: cadrs_eda::units::Pt },
+    Press {
+        at: cadrs_eda::units::Pt,
+        shift: bool,
+        ctrl: bool,
+    },
+    Release {
+        at: cadrs_eda::units::Pt,
+    },
     /// A second press soon after the first, at the same place (with Shift: adds to what is selected).
-    Double { at: cadrs_eda::units::Pt, shift: bool },
+    Double {
+        at: cadrs_eda::units::Pt,
+        shift: bool,
+    },
     /// A right-click (pressed and let go without panning): ends what is being drawn.
-    Secondary { at: cadrs_eda::units::Pt },
+    Secondary {
+        at: cadrs_eda::units::Pt,
+    },
 }
 
 /// Pans (right or middle drag), zooms about the pointer (wheel) and fits (F); records the
@@ -522,7 +590,9 @@ pub(crate) fn navigate(
         return;
     }
     let key = eda.0.unwrap();
-    let Some((mut view, mut fitted)) = ui.views.get(&key).copied() else { return };
+    let Some((mut view, mut fitted)) = ui.views.get(&key).copied() else {
+        return;
+    };
     let over = crate::viewport::pointer_over_viewport(&hover, &q_area);
     let local = |c: Vec2| [(c.x - rect.0.min.x) as f64, (c.y - rect.0.min.y) as f64];
     let shift = keys.any_pressed([KeyCode::ShiftLeft, KeyCode::ShiftRight]);
@@ -550,7 +620,8 @@ pub(crate) fn navigate(
                 PointerButton::Primary if over => {
                     let at = view.to_design_pt(local(pos));
                     let now = time.elapsed_secs_f64();
-                    let double = last_press.is_some_and(|(t, p)| now - t < 0.4 && p.distance(pos) < 4.0);
+                    let double =
+                        last_press.is_some_and(|(t, p)| now - t < 0.4 && p.distance(pos) < 4.0);
                     *last_press = Some((now, pos));
                     clicks.write(EdaClick::Press { at, shift, ctrl });
                     if double {
@@ -564,12 +635,18 @@ pub(crate) fn navigate(
                 PointerButton::Secondary | PointerButton::Middle => {
                     ui.pan_from = None;
                     // Let go where it was pressed (no pan): a right-click.
-                    if b == PointerButton::Secondary && right_press.take().is_some_and(|p| p.distance(pos) < 4.0) {
-                        clicks.write(EdaClick::Secondary { at: view.to_design_pt(local(pos)) });
+                    if b == PointerButton::Secondary
+                        && right_press.take().is_some_and(|p| p.distance(pos) < 4.0)
+                    {
+                        clicks.write(EdaClick::Secondary {
+                            at: view.to_design_pt(local(pos)),
+                        });
                     }
                 }
                 PointerButton::Primary => {
-                    clicks.write(EdaClick::Release { at: view.to_design_pt(local(pos)) });
+                    clicks.write(EdaClick::Release {
+                        at: view.to_design_pt(local(pos)),
+                    });
                 }
             },
             PointerAction::Scroll { unit, y, .. } if over => {
@@ -594,13 +671,25 @@ pub(crate) fn navigate(
     for k in key_events {
         // In the Layout, F flips what is selected (`layout_tools`); with nothing, it fits.
         let flips = key.2 == Mode::Layout && !layout.selection.is_empty();
-        if k.state == bevy::input::ButtonState::Pressed && !typing && !flips && k.shortcut_code() == KeyCode::KeyF && !ctrl && !shift {
+        if k.state == bevy::input::ButtonState::Pressed
+            && !typing
+            && !flips
+            && k.shortcut_code() == KeyCode::KeyF
+            && !ctrl
+            && !shift
+        {
             commands.queue(fit);
         }
     }
 }
 
-fn place_camera(eda: Res<Eda2d>, ui: Res<EdaUi>, rect: Res<ViewportRect>, surface: Res<RenderSurface>, mut q: Query<(&mut Camera, &mut Transform, &mut Projection), With<EdaCamera>>) {
+fn place_camera(
+    eda: Res<Eda2d>,
+    ui: Res<EdaUi>,
+    rect: Res<ViewportRect>,
+    surface: Res<RenderSurface>,
+    mut q: Query<(&mut Camera, &mut Transform, &mut Projection), With<EdaCamera>>,
+) {
     let view = current_view(&ui, &eda).filter(|_| eda.flat());
     for (mut cam, mut t, mut proj) in &mut q {
         let active = view.is_some();
@@ -608,9 +697,14 @@ fn place_camera(eda: Res<Eda2d>, ui: Res<EdaUi>, rect: Res<ViewportRect>, surfac
             cam.is_active = active;
         }
         let Some(v) = view else { continue };
-        let window = cam.logical_viewport_size().unwrap_or(surface.size.as_vec2());
+        let window = cam
+            .logical_viewport_size()
+            .unwrap_or(surface.size.as_vec2());
         // The design point at the window's centre (the view is centred on the viewport area).
-        let win_center = [(window.x / 2.0 - rect.0.min.x) as f64, (window.y / 2.0 - rect.0.min.y) as f64];
+        let win_center = [
+            (window.x / 2.0 - rect.0.min.x) as f64,
+            (window.y / 2.0 - rect.0.min.y) as f64,
+        ];
         let c = v.to_design(win_center);
         let want = Vec3::new((c[0] / 1e6) as f32, (c[1] / 1e6) as f32, 0.0);
         if t.translation != want {
@@ -727,7 +821,15 @@ fn rebuild_scene(
     let (el, subject, mode) = eda.0.unwrap();
     let inputs = inputs.map(|i| i.clone()).unwrap_or_default();
     let mut h = std::collections::hash_map::DefaultHasher::new();
-    (el, subject, mode, doc.history.undo_len(), doc.history.redo_len(), &inputs).hash(&mut h);
+    (
+        el,
+        subject,
+        mode,
+        doc.history.undo_len(),
+        doc.history.redo_len(),
+        &inputs,
+    )
+        .hash(&mut h);
     let preview_design = preview.as_ref().and_then(|p| p.get());
     let preview_component = preview.as_ref().and_then(|p| p.component());
     if preview_design.is_some() || preview_component.is_some() {
@@ -739,13 +841,24 @@ fn rebuild_scene(
     }
     let list = match (subject, mode) {
         (Subject::Board(b), _) => {
-            let Some(d) = preview_design.or_else(|| design(&doc, el, b)) else { return };
+            let Some(d) = preview_design.or_else(|| design(&doc, el, b)) else {
+                return;
+            };
             match mode {
                 Mode::Schematic => {
-                    let hl = render::Highlight { items: inputs.sch_highlight.clone(), pin_ends: inputs.sch_pin_ends, hot_pin: inputs.sch_hot_pin };
+                    let hl = render::Highlight {
+                        items: inputs.sch_highlight.clone(),
+                        pin_ends: inputs.sch_pin_ends,
+                        hot_pin: inputs.sch_hot_pin,
+                    };
                     if d.schematic.sheets.is_empty() {
                         // A board imported alone: its (first) sheet is blank until edited.
-                        render::schematic(&Design::new().schematic, 0, &render::SchematicTheme::default(), &hl)
+                        render::schematic(
+                            &Design::new().schematic,
+                            0,
+                            &render::SchematicTheme::default(),
+                            &hl,
+                        )
                     } else {
                         render::schematic(&d.schematic, 0, &render::SchematicTheme::default(), &hl)
                     }
@@ -770,11 +883,25 @@ fn rebuild_scene(
             }
         }
         (Subject::Component(c), _) => {
-            let comp = preview_component.or_else(|| doc.doc.element(el).and_then(|e| e.pcb()).and_then(|s| s.component(c)).map(|c| &c.component));
+            let comp = preview_component.or_else(|| {
+                doc.doc
+                    .element(el)
+                    .and_then(|e| e.pcb())
+                    .and_then(|s| s.component(c))
+                    .map(|c| &c.component)
+            });
             let Some(comp) = comp else { return };
             match mode {
-                Mode::Footprint => render::footprint_view(comp.footprint.as_ref(), &render::BoardTheme::default(), &inputs.board_selected),
-                _ => render::symbol_view(comp.symbol.as_ref(), &render::SchematicTheme::default(), &inputs.sym_selected),
+                Mode::Footprint => render::footprint_view(
+                    comp.footprint.as_ref(),
+                    &render::BoardTheme::default(),
+                    &inputs.board_selected,
+                ),
+                _ => render::symbol_view(
+                    comp.symbol.as_ref(),
+                    &render::SchematicTheme::default(),
+                    &inputs.sym_selected,
+                ),
             }
         }
     };
@@ -783,11 +910,20 @@ fn rebuild_scene(
     }
     let layer = RenderLayers::layer(EDA_LAYER);
     // The ground: the camera draws over the 3D view, so it paints its own background.
-    commands.spawn((Name::new("eda-ground"), EdaEntity, Sprite::from_color(rgba(list.background), Vec2::splat(1.0e6)), Transform::from_xyz(0.0, 0.0, -100.0), layer.clone()));
+    commands.spawn((
+        Name::new("eda-ground"),
+        EdaEntity,
+        Sprite::from_color(rgba(list.background), Vec2::splat(1.0e6)),
+        Transform::from_xyz(0.0, 0.0, -100.0),
+        layer.clone(),
+    ));
     // One mesh per colour and depth.
     let mut groups: Vec<(AreaKey, Vec<[f32; 3]>)> = vec![];
     for a in &list.areas {
-        let pts = a.tris.iter().map(|t| [(t[0] / 1e6) as f32, (t[1] / 1e6) as f32, 0.0]);
+        let pts = a
+            .tris
+            .iter()
+            .map(|t| [(t[0] / 1e6) as f32, (t[1] / 1e6) as f32, 0.0]);
         match groups.iter_mut().find(|(k, _)| *k == (a.color, a.z)) {
             Some((_, v)) => v.extend(pts),
             None => groups.push(((a.color, a.z), pts.collect())),
@@ -795,7 +931,10 @@ fn rebuild_scene(
     }
     for ((color, z), positions) in groups {
         let n = positions.len();
-        let mut mesh = Mesh::new(bevy::mesh::PrimitiveTopology::TriangleList, bevy::asset::RenderAssetUsages::default());
+        let mut mesh = Mesh::new(
+            bevy::mesh::PrimitiveTopology::TriangleList,
+            bevy::asset::RenderAssetUsages::default(),
+        );
         mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, positions);
         mesh.insert_attribute(Mesh::ATTRIBUTE_NORMAL, vec![[0.0, 0.0, 1.0]; n]);
         mesh.insert_attribute(Mesh::ATTRIBUTE_UV_0, vec![[0.0, 0.0]; n]);
@@ -820,7 +959,11 @@ fn rebuild_scene(
         };
         // A closed outline runs on past its start, so its first corner gets a joint too.
         let closed = l.pts.len() > 2 && l.pts.first() == l.pts.last();
-        let pts = l.pts.iter().chain(l.pts.get(1).filter(|_| closed)).map(|p| Vec2::new((p.x as f64 / 1e6) as f32, (p.y as f64 / 1e6) as f32));
+        let pts = l
+            .pts
+            .iter()
+            .chain(l.pts.get(1).filter(|_| closed))
+            .map(|p| Vec2::new((p.x as f64 / 1e6) as f32, (p.y as f64 / 1e6) as f32));
         by_width[i].1.linestrip_2d(pts, rgba(l.color));
     }
     for (width, asset) in by_width {
@@ -832,7 +975,11 @@ fn rebuild_scene(
                 handle: gizmo_assets.add(asset),
                 // Round joints: without them a thick curve (an arc, a stroke-font glyph) is a
                 // row of separate quads with gaps on the outside of every bend.
-                line_config: GizmoLineConfig { width: 1.0, joints: GizmoLineJoint::Round(6), ..default() },
+                line_config: GizmoLineConfig {
+                    width: 1.0,
+                    joints: GizmoLineJoint::Round(6),
+                    ..default()
+                },
                 ..default()
             },
             layer.clone(),
@@ -845,7 +992,9 @@ fn rebuild_scene(
 /// Each line width's pixel width at the current zoom (at least a pixel): a line is as wide as
 /// it is in the design, so small stroke text stays in proportion.
 fn set_line_widths(eda: Res<Eda2d>, ui: Res<EdaUi>, mut q: Query<(&EdaLines, &mut Gizmo)>) {
-    let Some(v) = current_view(&ui, &eda).filter(|_| eda.flat()) else { return };
+    let Some(v) = current_view(&ui, &eda).filter(|_| eda.flat()) else {
+        return;
+    };
     for (lines, mut g) in &mut q {
         let px = ((lines.0 as f64 / 1e6 * v.scale) as f32).max(1.0);
         if g.line_config.width != px {
@@ -856,12 +1005,21 @@ fn set_line_widths(eda: Res<Eda2d>, ui: Res<EdaUi>, mut q: Query<(&EdaLines, &mu
 
 /// The schematic grid as dots (every grid point, or every 2nd, 4th, … when they'd be closer
 /// than 10 px), and the placing crosshair ([`Crosshair`]).
-fn draw_overlay(eda: Res<Eda2d>, ui: Res<EdaUi>, scene: Res<EdaScene>, cross: Res<Crosshair>, mut dots: Gizmos<EdaDots>, mut cg: Gizmos<EdaCross>) {
+fn draw_overlay(
+    eda: Res<Eda2d>,
+    ui: Res<EdaUi>,
+    scene: Res<EdaScene>,
+    cross: Res<Crosshair>,
+    mut dots: Gizmos<EdaDots>,
+    mut cg: Gizmos<EdaCross>,
+) {
     let Some((_, _, mode)) = eda.0 else { return };
     if !matches!(mode, Mode::Schematic | Mode::Symbol) {
         return;
     }
-    let Some(v) = current_view(&ui, &eda) else { return };
+    let Some(v) = current_view(&ui, &eda) else {
+        return;
+    };
     let mm = |nm: i64| nm as f32 / 1e6;
     let mut step = cadrs_eda::units::SCHEMATIC_GRID;
     while (step as f64 / 1e6) * v.scale < 10.0 {
@@ -880,9 +1038,24 @@ fn draw_overlay(eda: Res<Eda2d>, ui: Res<EdaUi>, scene: Res<EdaScene>, cross: Re
         .areas
         .iter()
         .filter(|a| a.color == body && !a.tris.is_empty())
-        .map(|a| a.tris.iter().fold([f64::MAX, f64::MAX, f64::MIN, f64::MIN], |b, t| [b[0].min(t[0]), b[1].min(t[1]), b[2].max(t[0]), b[3].max(t[1])]))
+        .map(|a| {
+            a.tris
+                .iter()
+                .fold([f64::MAX, f64::MAX, f64::MIN, f64::MIN], |b, t| {
+                    [
+                        b[0].min(t[0]),
+                        b[1].min(t[1]),
+                        b[2].max(t[0]),
+                        b[3].max(t[1]),
+                    ]
+                })
+        })
         .collect();
-    let hidden = |x: i64, y: i64| filled.iter().any(|b| (x as f64) > b[0] && (x as f64) < b[2] && (y as f64) > b[1] && (y as f64) < b[3]);
+    let hidden = |x: i64, y: i64| {
+        filled.iter().any(|b| {
+            (x as f64) > b[0] && (x as f64) < b[2] && (y as f64) > b[1] && (y as f64) < b[3]
+        })
+    };
     if (x1 - x0) * (y1 - y0) < 40_000 {
         for i in x0..=x1 {
             for j in y0..=y1 {
@@ -890,7 +1063,11 @@ fn draw_overlay(eda: Res<Eda2d>, ui: Res<EdaUi>, scene: Res<EdaScene>, cross: Re
                     continue;
                 }
                 let (x, y) = (mm(i * step), mm(j * step));
-                dots.line_2d(Vec2::new(x - len / 2.0, y), Vec2::new(x + len / 2.0, y), dot);
+                dots.line_2d(
+                    Vec2::new(x - len / 2.0, y),
+                    Vec2::new(x + len / 2.0, y),
+                    dot,
+                );
             }
         }
     }
@@ -900,7 +1077,11 @@ fn draw_overlay(eda: Res<Eda2d>, ui: Res<EdaUi>, scene: Res<EdaScene>, cross: Re
         let ink = Color::srgb(0.1, 0.1, 0.1);
         cg.line_2d(c - Vec2::X * 36.0 * px, c + Vec2::X * 36.0 * px, ink);
         cg.line_2d(c - Vec2::Y * 36.0 * px, c + Vec2::Y * 36.0 * px, ink);
-        let sq = if connects { Color::srgb(0.1, 0.6, 0.2) } else { Color::srgb(0.75, 0.55, 0.1) };
+        let sq = if connects {
+            Color::srgb(0.1, 0.6, 0.2)
+        } else {
+            Color::srgb(0.75, 0.55, 0.1)
+        };
         cg.rect_2d(Isometry2d::from_translation(c), Vec2::splat(11.0 * px), sq);
         if connects {
             cg.rect_2d(Isometry2d::from_translation(c), Vec2::splat(8.0 * px), sq);
@@ -946,12 +1127,30 @@ fn course_stage(stage: &str) -> Option<(&'static str, Design, Vec<cadrs_eda::Com
         "power-monitor" => {
             use cadrs_eda::power_monitor as pm;
             let (d, lib) = pm::design();
-            let header = lib.footprint("Connector_PinHeader_2.54mm:PinHeader_2x10_P2.54mm_Vertical").cloned();
+            let header = lib
+                .footprint("Connector_PinHeader_2.54mm:PinHeader_2x10_P2.54mm_Vertical")
+                .cloned();
             let parts = vec![
-                cadrs_eda::Component { name: "RA-01SH".into(), symbol: Some(pm::ra01sh_symbol()), footprint: Some(pm::ra01sh_footprint()) },
-                cadrs_eda::Component { name: "ESP32 header left".into(), symbol: Some(pm::esp32_header_symbol(false)), footprint: header.clone() },
-                cadrs_eda::Component { name: "ESP32 header right".into(), symbol: Some(pm::esp32_header_symbol(true)), footprint: header },
-                cadrs_eda::Component { name: "PCB antenna".into(), symbol: lib.symbol("Device:Antenna").cloned(), footprint: Some(pm::swra416_footprint()) },
+                cadrs_eda::Component {
+                    name: "RA-01SH".into(),
+                    symbol: Some(pm::ra01sh_symbol()),
+                    footprint: Some(pm::ra01sh_footprint()),
+                },
+                cadrs_eda::Component {
+                    name: "ESP32 header left".into(),
+                    symbol: Some(pm::esp32_header_symbol(false)),
+                    footprint: header.clone(),
+                },
+                cadrs_eda::Component {
+                    name: "ESP32 header right".into(),
+                    symbol: Some(pm::esp32_header_symbol(true)),
+                    footprint: header,
+                },
+                cadrs_eda::Component {
+                    name: "PCB antenna".into(),
+                    symbol: lib.symbol("Device:Antenna").cloned(),
+                    footprint: Some(pm::swra416_footprint()),
+                },
             ];
             Some(("power-monitor", d, parts))
         }
@@ -966,18 +1165,36 @@ fn course_stage(stage: &str) -> Option<(&'static str, Design, Vec<cadrs_eda::Com
 fn redraw_power_monitor(w: &mut World) {
     use cadrs_eda::power_monitor as pm;
     let lib = ui::libraries(w);
-    let module = lib.symbol("LCSC:RA-01SH").cloned().zip(lib.footprint("LCSC:WIRELM-SMD_RA-01SH").cloned());
+    let module = lib
+        .symbol("LCSC:RA-01SH")
+        .cloned()
+        .zip(lib.footprint("LCSC:WIRELM-SMD_RA-01SH").cloned());
     if module.is_none() {
         warn!("eda-redraw: no LCSC:RA-01SH in the libraries; the drawn module is used");
     }
     let (design, plib) = pm::design_from(pm::libraries_with(module));
-    let Some((element, studio)) = w.get_resource::<ActiveDocument>().and_then(|d| active_studio(d).map(|(el, s)| (el, s.clone()))) else { return };
+    let Some((element, studio)) = w
+        .get_resource::<ActiveDocument>()
+        .and_then(|d| active_studio(d).map(|(el, s)| (el, s.clone())))
+    else {
+        return;
+    };
     let board = w.resource::<PcbUi>().shown_board(element, &studio);
     let mark = w.resource::<ActiveDocument>().history.undo_len();
     let mut doc = w.resource_mut::<ActiveDocument>();
     let r = match board {
-        Some(board) => doc.execute(&cadrs_core::pcb::SetDesign { element, board, design: Box::new(design.clone()), label: "Redraw".into() }),
-        None => doc.execute(&cadrs_core::pcb::AddBoard { element, name: Some("power-monitor".into()), design: Box::new(design.clone()), imported_from: None }),
+        Some(board) => doc.execute(&cadrs_core::pcb::SetDesign {
+            element,
+            board,
+            design: Box::new(design.clone()),
+            label: "Redraw".into(),
+        }),
+        None => doc.execute(&cadrs_core::pcb::AddBoard {
+            element,
+            name: Some("power-monitor".into()),
+            design: Box::new(design.clone()),
+            imported_from: None,
+        }),
     };
     if let Err(e) = r {
         warn!("eda-redraw: {e}");
@@ -985,20 +1202,36 @@ fn redraw_power_monitor(w: &mut World) {
     }
     // Components: one per part the schematic uses (power ports aside), with its footprint.
     for c in &studio.components {
-        let _ = doc.execute(&cadrs_core::pcb::DeleteComponent { element, component: c.id });
+        let _ = doc.execute(&cadrs_core::pcb::DeleteComponent {
+            element,
+            component: c.id,
+        });
     }
     let sch = &design.schematic;
     let mut seen = vec![];
     for s in sch.sheets.iter().flat_map(|sh| &sh.symbols) {
-        let Some(def) = sch.symbol(&s.symbol) else { continue };
+        let Some(def) = sch.symbol(&s.symbol) else {
+            continue;
+        };
         if def.power || seen.contains(&def.id) {
             continue;
         }
         seen.push(def.id.clone());
-        let fp_id = s.field(cadrs_eda::symbol::fields::FOOTPRINT).map(|f| f.value().to_string()).unwrap_or_default();
+        let fp_id = s
+            .field(cadrs_eda::symbol::fields::FOOTPRINT)
+            .map(|f| f.value().to_string())
+            .unwrap_or_default();
         let footprint = plib.footprint(&fp_id).cloned();
-        let value = cadrs_eda::Component { name: def.name().to_string(), symbol: Some(def.clone()), footprint };
-        let _ = doc.execute(&cadrs_core::pcb::AddComponent { element, name: None, value: Some(Box::new(value)) });
+        let value = cadrs_eda::Component {
+            name: def.name().to_string(),
+            symbol: Some(def.clone()),
+            footprint,
+        };
+        let _ = doc.execute(&cadrs_core::pcb::AddComponent {
+            element,
+            name: None,
+            value: Some(Box::new(value)),
+        });
     }
     doc.squash_element_since(mark, element, "Redraw the power monitor board");
 }
@@ -1012,24 +1245,54 @@ fn run_script_commands(mut msgs: MessageReader<cadrs_ui::ScriptCommand>, mut com
                     warn!("eda-example: no stage {stage}");
                     return;
                 };
-                let Some(mut doc) = w.get_resource_mut::<ActiveDocument>() else { return };
-                let Some(element) = doc.active_element().filter(|e| e.pcb().is_some()).map(|e| e.id) else { return };
-                let cmd = cadrs_core::pcb::AddBoard { element, name: Some(name.into()), design: Box::new(design), imported_from: None };
+                let Some(mut doc) = w.get_resource_mut::<ActiveDocument>() else {
+                    return;
+                };
+                let Some(element) = doc
+                    .active_element()
+                    .filter(|e| e.pcb().is_some())
+                    .map(|e| e.id)
+                else {
+                    return;
+                };
+                let cmd = cadrs_core::pcb::AddBoard {
+                    element,
+                    name: Some(name.into()),
+                    design: Box::new(design),
+                    imported_from: None,
+                };
                 if let Err(e) = doc.execute(&cmd) {
                     warn!("eda-example: {e}");
                 }
                 // The project library's parts as components.
                 for part in parts {
-                    let added = doc.execute(&cadrs_core::pcb::AddComponent { element, name: Some(part.name.clone()), value: None });
-                    let id = doc.doc.element(element).and_then(|e| e.pcb()).and_then(|s| s.components.last()).map(|c| c.id);
+                    let added = doc.execute(&cadrs_core::pcb::AddComponent {
+                        element,
+                        name: Some(part.name.clone()),
+                        value: None,
+                    });
+                    let id = doc
+                        .doc
+                        .element(element)
+                        .and_then(|e| e.pcb())
+                        .and_then(|s| s.components.last())
+                        .map(|c| c.id);
                     if let (Ok(()), Some(component)) = (added, id) {
-                        let set = cadrs_core::pcb::SetComponent { element, component, value: Box::new(part), label: "Example part".into() };
+                        let set = cadrs_core::pcb::SetComponent {
+                            element,
+                            component,
+                            value: Box::new(part),
+                            label: "Example part".into(),
+                        };
                         if let Err(e) = doc.execute(&set) {
                             warn!("eda-example: {e}");
                         }
                     }
                 }
-            } else if s.strip_prefix("eda-redraw ").is_some_and(|x| x.trim() == "power-monitor") {
+            } else if s
+                .strip_prefix("eda-redraw ")
+                .is_some_and(|x| x.trim() == "power-monitor")
+            {
                 redraw_power_monitor(w);
             } else if let Some(m) = s.strip_prefix("eda-mode ") {
                 let mode = match m.trim() {
@@ -1040,7 +1303,8 @@ fn run_script_commands(mut msgs: MessageReader<cadrs_ui::ScriptCommand>, mut com
                 // The board may only just have been added: set the mode for the shown one.
                 let doc = w.resource::<ActiveDocument>();
                 let pcb = w.resource::<PcbUi>();
-                let target = active_studio(doc).and_then(|(el, st)| Some((el, Subject::Board(pcb.shown_board(el, st)?))));
+                let target = active_studio(doc)
+                    .and_then(|(el, st)| Some((el, Subject::Board(pcb.shown_board(el, st)?))));
                 if let Some(key) = target {
                     w.resource_mut::<EdaUi>().modes.insert(key, mode);
                 }
@@ -1053,11 +1317,19 @@ fn run_script_commands(mut msgs: MessageReader<cadrs_ui::ScriptCommand>, mut com
                 fit(w);
             } else if let Some(args) = s.strip_prefix("eda-zoom ") {
                 // Shows the box x0 y0 x1 y1 (mm).
-                let v: Vec<f64> = args.split_whitespace().filter_map(|x| x.parse().ok()).collect();
-                let Some(key) = w.resource::<Eda2d>().0 else { return };
+                let v: Vec<f64> = args
+                    .split_whitespace()
+                    .filter_map(|x| x.parse().ok())
+                    .collect();
+                let Some(key) = w.resource::<Eda2d>().0 else {
+                    return;
+                };
                 if v.len() == 4 {
                     let size = view_size(w.resource::<ViewportRect>());
-                    let b = Bounds { min: cadrs_eda::units::Pt::mm(v[0], v[1]), max: cadrs_eda::units::Pt::mm(v[2], v[3]) };
+                    let b = Bounds {
+                        min: cadrs_eda::units::Pt::mm(v[0], v[1]),
+                        max: cadrs_eda::units::Pt::mm(v[2], v[3]),
+                    };
                     let mut view = View::new(size);
                     view.fit(b, 0.0);
                     w.resource_mut::<EdaUi>().views.insert(key, (view, false));

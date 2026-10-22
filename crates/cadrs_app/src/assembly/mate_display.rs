@@ -23,7 +23,9 @@ use cadrs_ui::prelude::*;
 
 use super::connectors::{ConnectorGizmos, ConnectorHaloGizmos, draw_glyph};
 use crate::parts::HoverParts;
-use crate::viewport::{Pick, PickRequest, PlaneHighlight, ViewportArea, ViewportRect, ViewportView};
+use crate::viewport::{
+    Pick, PickRequest, PlaneHighlight, ViewportArea, ViewportRect, ViewportView,
+};
 use crate::{ActiveDocument, AppState};
 
 pub struct MateDisplayPlugin;
@@ -41,11 +43,19 @@ impl Plugin for MateDisplayPlugin {
                     .after(super::triad::TriadSet)
                     .run_if(in_state(AppState::Document)),
             )
-            .add_systems(PostUpdate, (place_badges, show_mode_chip).before(bevy::ui::UiSystems::Layout).run_if(in_state(AppState::Document)))
-            .add_systems(OnExit(AppState::Document), |mut d: ResMut<MateDisplay>, mut s: ResMut<MateSelection>| {
-                *d = MateDisplay::default();
-                s.0 = None;
-            });
+            .add_systems(
+                PostUpdate,
+                (place_badges, show_mode_chip)
+                    .before(bevy::ui::UiSystems::Layout)
+                    .run_if(in_state(AppState::Document)),
+            )
+            .add_systems(
+                OnExit(AppState::Document),
+                |mut d: ResMut<MateDisplay>, mut s: ResMut<MateSelection>| {
+                    *d = MateDisplay::default();
+                    s.0 = None;
+                },
+            );
     }
 }
 
@@ -64,7 +74,12 @@ impl MateDisplay {
     /// J: all mates, or none when any is shown.
     pub fn toggle_all(&mut self, model: &Assembly) {
         if self.shown.is_empty() {
-            self.shown = model.mates.iter().filter(|f| f.mate().is_some()).map(|f| f.id).collect();
+            self.shown = model
+                .mates
+                .iter()
+                .filter(|f| f.mate().is_some())
+                .map(|f| f.id)
+                .collect();
         } else {
             self.shown.clear();
         }
@@ -72,7 +87,11 @@ impl MateDisplay {
 
     /// Shows or hides every mate of `instances` (the instance menu's Show / Hide mates).
     pub fn set_for_instances(&mut self, model: &Assembly, instances: &[InstanceId], show: bool) {
-        for f in model.mates.iter().filter(|f| f.mate().is_some() && instances.iter().any(|i| f.involves(*i))) {
+        for f in model
+            .mates
+            .iter()
+            .filter(|f| f.mate().is_some() && instances.iter().any(|i| f.involves(*i)))
+        {
             if show {
                 self.shown.insert(f.id);
             } else {
@@ -92,15 +111,24 @@ pub struct MateSelection(pub Option<MateId>);
 
 /// The instance the pointer is over (in the view, or its row in the Instances list).
 fn hovered_instance(h: &PlaneHighlight) -> Option<InstanceId> {
-    h.viewport.as_ref().and_then(|p| p.part()).map(super::occurrence_of).or_else(|| match h.list {
-        Some(Pick::Part(p)) => Some(super::occurrence_of(p)),
-        _ => None,
-    })
+    h.viewport
+        .as_ref()
+        .and_then(|p| p.part())
+        .map(super::occurrence_of)
+        .or_else(|| match h.list {
+            Some(Pick::Part(p)) => Some(super::occurrence_of(p)),
+            _ => None,
+        })
 }
 
 /// The mates shown now: shown ones, the hovered row's, and in show mates mode the hovered and
 /// pinned instances'.
-pub fn visible(model: &Assembly, d: &MateDisplay, h: &PlaneHighlight, hover: &MateHover) -> Vec<MateId> {
+pub fn visible(
+    model: &Assembly,
+    d: &MateDisplay,
+    h: &PlaneHighlight,
+    hover: &MateHover,
+) -> Vec<MateId> {
     let over = if d.mode { hovered_instance(h) } else { None };
     model
         .mates
@@ -109,7 +137,9 @@ pub fn visible(model: &Assembly, d: &MateDisplay, h: &PlaneHighlight, hover: &Ma
         .filter(|f| {
             d.shown.contains(&f.id)
                 || hover.0 == Some(f.id)
-                || (d.mode && (over.is_some_and(|i| f.involves(i)) || d.pinned.iter().any(|i| f.involves(*i))))
+                || (d.mode
+                    && (over.is_some_and(|i| f.involves(i))
+                        || d.pinned.iter().any(|i| f.involves(*i))))
         })
         .map(|f| f.id)
         .collect()
@@ -117,14 +147,31 @@ pub fn visible(model: &Assembly, d: &MateDisplay, h: &PlaneHighlight, hover: &Ma
 
 /// Where a mate is drawn: its first connector (Width: the middle of its width pair; Tangent: the
 /// middle of its two entities).
-pub fn mate_frame(model: &Assembly, preview: &std::collections::HashMap<InstanceId, Pose>, f: &MateFeature) -> Option<ConnectorFrame> {
-    let MateKind::Mate(m) = &f.kind else { return None };
-    let pose = |i: InstanceId| preview.get(&i).copied().or_else(|| model.instance(i).map(|x| x.pose));
-    let world = |c: &cadrs_core::assembly::connector::MateConnector| Some(c.adjust(c.frame).moved(&pose(c.instance)?));
+pub fn mate_frame(
+    model: &Assembly,
+    preview: &std::collections::HashMap<InstanceId, Pose>,
+    f: &MateFeature,
+) -> Option<ConnectorFrame> {
+    let MateKind::Mate(m) = &f.kind else {
+        return None;
+    };
+    let pose = |i: InstanceId| {
+        preview
+            .get(&i)
+            .copied()
+            .or_else(|| model.instance(i).map(|x| x.pose))
+    };
+    let world = |c: &cadrs_core::assembly::connector::MateConnector| {
+        Some(c.adjust(c.frame).moved(&pose(c.instance)?))
+    };
     match m.mate_type {
         MateType::Width | MateType::Tangent => {
             let (a, b) = (world(&m.connectors[0])?, world(&m.connectors[1])?);
-            let o = [(a.origin[0] + b.origin[0]) / 2.0, (a.origin[1] + b.origin[1]) / 2.0, (a.origin[2] + b.origin[2]) / 2.0];
+            let o = [
+                (a.origin[0] + b.origin[0]) / 2.0,
+                (a.origin[1] + b.origin[1]) / 2.0,
+                (a.origin[2] + b.origin[2]) / 2.0,
+            ];
             Some(ConnectorFrame { origin: o, ..a })
         }
         // The pin of a pin slot, the part moving in a plane: where the motion shows.
@@ -157,10 +204,20 @@ fn pin_in_show_mode(
 }
 
 /// A hovered mate row (or glyph) highlights the mate's instances (A14.2).
-fn hover_parts(doc: Option<Res<ActiveDocument>>, hover: Res<MateHover>, mut parts: ResMut<HoverParts>) {
+fn hover_parts(
+    doc: Option<Res<ActiveDocument>>,
+    hover: Res<MateHover>,
+    mut parts: ResMut<HoverParts>,
+) {
     let want: Vec<cadrs_core::PartId> = hover
         .0
-        .and_then(|id| doc.as_ref()?.active_element()?.assembly_model()?.mate(id).map(|f| f.instances()))
+        .and_then(|id| {
+            doc.as_ref()?
+                .active_element()?
+                .assembly_model()?
+                .mate(id)
+                .map(|f| f.instances())
+        })
         .unwrap_or_default()
         .into_iter()
         .map(super::occurrence_part)
@@ -185,12 +242,16 @@ fn draw_mates(
     mut halo: Gizmos<ConnectorHaloGizmos>,
 ) {
     let Some(doc) = doc else { return };
-    let Some(model) = doc.active_element().and_then(|e| e.assembly_model()) else { return };
+    let Some(model) = doc.active_element().and_then(|e| e.assembly_model()) else {
+        return;
+    };
     // Connectors name parts at any depth (P3B.4).
     let flat = cadrs_core::assembly::structure::solver_model(&doc.doc, model);
     for id in visible(model, &d, &h, &hover) {
         let Some(f) = model.mate(id) else { continue };
-        let Some(frame) = mate_frame(&flat, &asm.preview, f) else { continue };
+        let Some(frame) = mate_frame(&flat, &asm.preview, f) else {
+            continue;
+        };
         let ring = if sel.0 == Some(id) {
             crate::parts::SELECTED
         } else if hover.0 == Some(id) {
@@ -220,11 +281,23 @@ fn place_badges(
     rect: Res<ViewportRect>,
     theme: Res<Theme>,
     q_area: Query<Entity, With<ViewportArea>>,
-    mut q: Query<(Entity, &MateBadge, &mut Node, &mut BackgroundColor, &mut BorderColor)>,
+    mut q: Query<(
+        Entity,
+        &MateBadge,
+        &mut Node,
+        &mut BackgroundColor,
+        &mut BorderColor,
+    )>,
     mut commands: Commands,
 ) {
-    let model = doc.as_ref().and_then(|d| d.active_element()?.assembly_model());
-    let flat = doc.as_ref().zip(model).map(|(d, m)| cadrs_core::assembly::structure::solver_model(&d.doc, m)).unwrap_or_default();
+    let model = doc
+        .as_ref()
+        .and_then(|d| d.active_element()?.assembly_model());
+    let flat = doc
+        .as_ref()
+        .zip(model)
+        .map(|(d, m)| cadrs_core::assembly::structure::solver_model(&d.doc, m))
+        .unwrap_or_default();
     let spots: Vec<(MateId, usize, Vec2, &'static str)> = model
         .map(|model| {
             visible(model, &d, &h, &hover)
@@ -233,8 +306,15 @@ fn place_badges(
                     let k = model.mates.iter().position(|f| f.id == id)?;
                     let f = &model.mates[k];
                     let frame = mate_frame(&flat, &asm.preview, f)?;
-                    let at = rect.to_screen(view.view.project(super::connectors::v3(frame.origin))) - rect.0.min + Vec2::new(10.0, -BADGE - 8.0);
-                    Some((id, k + 1, at, super::mates_list::type_icon(f.mate().map(|m| m.mate_type))))
+                    let at = rect.to_screen(view.view.project(super::connectors::v3(frame.origin)))
+                        - rect.0.min
+                        + Vec2::new(10.0, -BADGE - 8.0);
+                    Some((
+                        id,
+                        k + 1,
+                        at,
+                        super::mates_list::type_icon(f.mate().map(|m| m.mate_type)),
+                    ))
                 })
                 .collect()
         })
@@ -259,7 +339,9 @@ fn place_badges(
             None => commands.entity(e).try_despawn(),
         }
     }
-    let Some(area) = q_area.iter().next() else { return };
+    let Some(area) = q_area.iter().next() else {
+        return;
+    };
     for (id, k, at, icon_name) in spots {
         if have.contains(&id) {
             continue;
@@ -284,7 +366,10 @@ fn place_badges(
                 BorderColor::all(Color::srgb_u8(0xa0, 0xa4, 0xa8)),
                 Hovered::default(),
                 DespawnOnExit(AppState::Document),
-                children![(icon(icon_name, 15.0, Color::srgb_u8(0x50, 0x55, 0x5a)), Pickable::IGNORE)],
+                children![(
+                    icon(icon_name, 15.0, Color::srgb_u8(0x50, 0x55, 0x5a)),
+                    Pickable::IGNORE
+                )],
             ))
             .observe(on_badge_click)
             .observe(on_badge_over)
@@ -294,7 +379,12 @@ fn place_badges(
     }
 }
 
-fn on_badge_click(click: On<Pointer<Click>>, q: Query<&MateBadge>, mut sel: ResMut<MateSelection>, mut commands: Commands) {
+fn on_badge_click(
+    click: On<Pointer<Click>>,
+    q: Query<&MateBadge>,
+    mut sel: ResMut<MateSelection>,
+    mut commands: Commands,
+) {
     let Ok(b) = q.get(click.entity) else { return };
     let id = b.0;
     match click.button {
@@ -302,7 +392,8 @@ fn on_badge_click(click: On<Pointer<Click>>, q: Query<&MateBadge>, mut sel: ResM
         PointerButton::Secondary => {
             sel.0 = Some(id);
             let at = click.pointer_location.position;
-            commands.queue(move |world: &mut World| super::mates_list::open_mate_menu(world, at, id));
+            commands
+                .queue(move |world: &mut World| super::mates_list::open_mate_menu(world, at, id));
         }
         _ => {}
     }
@@ -326,11 +417,19 @@ fn on_badge_out(ev: On<Pointer<Out>>, q: Query<&MateBadge>, mut hover: ResMut<Ma
 #[derive(Component)]
 struct ModeChip;
 
-fn show_mode_chip(d: Res<MateDisplay>, theme: Res<Theme>, q: Query<Entity, With<ModeChip>>, q_area: Query<Entity, With<ViewportArea>>, mut commands: Commands) {
+fn show_mode_chip(
+    d: Res<MateDisplay>,
+    theme: Res<Theme>,
+    q: Query<Entity, With<ModeChip>>,
+    q_area: Query<Entity, With<ViewportArea>>,
+    mut commands: Commands,
+) {
     let on = d.mode;
     match (on, q.iter().next()) {
         (true, None) => {
-            let Some(area) = q_area.iter().next() else { return };
+            let Some(area) = q_area.iter().next() else {
+                return;
+            };
             let e = commands
                 .spawn((
                     Name::new("show-mates-mode"),
@@ -352,7 +451,15 @@ fn show_mode_chip(d: Res<MateDisplay>, theme: Res<Theme>, q: Query<Entity, With<
                     DespawnOnExit(AppState::Document),
                     children![
                         (icon("mate-fastened", 14.0, theme.primary), Pickable::IGNORE),
-                        (theme.text("Show mates mode (H): hover an instance, click to pin", 11.5, bevy::text::FontWeight::MEDIUM, theme.foreground), Pickable::IGNORE),
+                        (
+                            theme.text(
+                                "Show mates mode (H): hover an instance, click to pin",
+                                11.5,
+                                bevy::text::FontWeight::MEDIUM,
+                                theme.foreground
+                            ),
+                            Pickable::IGNORE
+                        ),
                     ],
                 ))
                 .id();

@@ -21,15 +21,27 @@ fn path(poly: &Polygon, flip: impl Fn(P2) -> (f64, f64)) -> String {
 
 /// The flat pattern as an SVG document `px` wide, with `title` above it.
 pub fn flat_svg(flat: &FlatPattern, title: &str, px: f64) -> String {
-    let bounds = flat.parts.iter().filter_map(FlatPart::bounds).reduce(|(a, b), (c, d)| {
-        (P2::new(a.x.min(c.x), a.y.min(c.y)), P2::new(b.x.max(d.x), b.y.max(d.y)))
-    });
+    let bounds = flat
+        .parts
+        .iter()
+        .filter_map(FlatPart::bounds)
+        .reduce(|(a, b), (c, d)| {
+            (
+                P2::new(a.x.min(c.x), a.y.min(c.y)),
+                P2::new(b.x.max(d.x), b.y.max(d.y)),
+            )
+        });
     let (lo, hi) = bounds.unwrap_or((P2::origin(), P2::new(1.0, 1.0)));
     let margin = 0.08 * (hi - lo).norm().max(1.0);
     let (w, h) = (hi.x - lo.x + 2.0 * margin, hi.y - lo.y + 2.0 * margin);
     let scale = px / w;
     let title_h = 28.0;
-    let flip = |p: P2| ((p.x - lo.x + margin) * scale, title_h + (hi.y - p.y + margin) * scale);
+    let flip = |p: P2| {
+        (
+            (p.x - lo.x + margin) * scale,
+            title_h + (hi.y - p.y + margin) * scale,
+        )
+    };
     let colliding: Vec<PieceSource> = flat
         .errors
         .iter()
@@ -52,29 +64,56 @@ pub fn flat_svg(flat: &FlatPattern, title: &str, px: f64) -> String {
     } else {
         format!(" — {}", flat.errors[0].message())
     };
-    let _ = writeln!(s, r#"<text x="8" y="19" font-size="14" fill="{}">{title}{status}</text>"#, if flat.is_ok() { "#222" } else { "#c62828" });
+    let _ = writeln!(
+        s,
+        r#"<text x="8" y="19" font-size="14" fill="{}">{title}{status}</text>"#,
+        if flat.is_ok() { "#222" } else { "#c62828" }
+    );
     for part in &flat.parts {
         for o in &part.outline {
-            let _ = writeln!(s, r##"<path d="{}" fill="#c9cdd2" fill-rule="evenodd" stroke="#333" stroke-width="1"/>"##, path(o, flip));
+            let _ = writeln!(
+                s,
+                r##"<path d="{}" fill="#c9cdd2" fill-rule="evenodd" stroke="#333" stroke-width="1"/>"##,
+                path(o, flip)
+            );
         }
         for c in &part.cuts {
             for shape in &c.shapes {
-                let _ = writeln!(s, r##"<path d="{}" fill="none" stroke="#7a7a7a" stroke-width="0.6" stroke-dasharray="2,2"/>"##, path(shape, flip));
+                let _ = writeln!(
+                    s,
+                    r##"<path d="{}" fill="none" stroke="#7a7a7a" stroke-width="0.6" stroke-dasharray="2,2"/>"##,
+                    path(shape, flip)
+                );
             }
             if let Some(slit) = c.slit {
                 let ((x1, y1), (x2, y2)) = (flip(slit.a), flip(slit.b));
-                let _ = writeln!(s, r##"<line x1="{x1:.2}" y1="{y1:.2}" x2="{x2:.2}" y2="{y2:.2}" stroke="#333" stroke-width="1"/>"##);
+                let _ = writeln!(
+                    s,
+                    r##"<line x1="{x1:.2}" y1="{y1:.2}" x2="{x2:.2}" y2="{y2:.2}" stroke="#333" stroke-width="1"/>"##
+                );
             }
         }
-        for pc in part.pieces.iter().filter(|pc| colliding.contains(&pc.source)) {
+        for pc in part
+            .pieces
+            .iter()
+            .filter(|pc| colliding.contains(&pc.source))
+        {
             for c in &pc.cut {
-                let _ = writeln!(s, r##"<path d="{}" fill="#e53935" fill-opacity="0.2" stroke="#c62828" stroke-width="0.8"/>"##, path(c, flip));
+                let _ = writeln!(
+                    s,
+                    r##"<path d="{}" fill="#e53935" fill-opacity="0.2" stroke="#c62828" stroke-width="0.8"/>"##,
+                    path(c, flip)
+                );
             }
         }
         for e in &flat.errors {
             if let FlatError::Collision { region, .. } = e {
                 for r in region {
-                    let _ = writeln!(s, r##"<path d="{}" fill="#c62828" fill-opacity="0.75" stroke="none"/>"##, path(r, flip));
+                    let _ = writeln!(
+                        s,
+                        r##"<path d="{}" fill="#c62828" fill-opacity="0.75" stroke="none"/>"##,
+                        path(r, flip)
+                    );
                 }
             }
         }
@@ -82,7 +121,10 @@ pub fn flat_svg(flat: &FlatPattern, title: &str, px: f64) -> String {
             let colour = if b.up { "#263238" } else { "#e65100" };
             for t in &b.tangent_visible {
                 let ((x1, y1), (x2, y2)) = (flip(t.a), flip(t.b));
-                let _ = writeln!(s, r##"<line x1="{x1:.2}" y1="{y1:.2}" x2="{x2:.2}" y2="{y2:.2}" stroke="#555" stroke-width="0.5"/>"##);
+                let _ = writeln!(
+                    s,
+                    r##"<line x1="{x1:.2}" y1="{y1:.2}" x2="{x2:.2}" y2="{y2:.2}" stroke="#555" stroke-width="0.5"/>"##
+                );
             }
             for c in &b.center_visible {
                 let ((x1, y1), (x2, y2)) = (flip(c.a), flip(c.b));
@@ -111,10 +153,20 @@ pub fn flat_svg(flat: &FlatPattern, title: &str, px: f64) -> String {
                 if l.closed {
                     d.push('Z');
                 }
-                let _ = writeln!(s, r##"<path d="{d}" fill="none" stroke="#1a237e" stroke-width="0.9"/>"##);
+                let _ = writeln!(
+                    s,
+                    r##"<path d="{d}" fill="none" stroke="#1a237e" stroke-width="0.9"/>"##
+                );
             }
             let (cx, cy) = flip(f.center);
-            let _ = writeln!(s, r##"<path d="M{:.2},{cy:.2} L{:.2},{cy:.2} M{cx:.2},{:.2} L{cx:.2},{:.2}" stroke="#1a237e" stroke-width="0.7"/>"##, cx - 5.0, cx + 5.0, cy - 5.0, cy + 5.0);
+            let _ = writeln!(
+                s,
+                r##"<path d="M{:.2},{cy:.2} L{:.2},{cy:.2} M{cx:.2},{:.2} L{cx:.2},{:.2}" stroke="#1a237e" stroke-width="0.7"/>"##,
+                cx - 5.0,
+                cx + 5.0,
+                cy - 5.0,
+                cy + 5.0
+            );
         }
     }
     s.push_str("</svg>\n");

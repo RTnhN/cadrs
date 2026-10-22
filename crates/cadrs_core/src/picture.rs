@@ -35,7 +35,10 @@ pub enum ImageFormat {
 impl ImageFormat {
     /// The format of a file with this name (by its extension, in any case), if Image reads it.
     pub fn of_file_name(name: &str) -> Option<Self> {
-        let ext = std::path::Path::new(name).extension()?.to_str()?.to_ascii_lowercase();
+        let ext = std::path::Path::new(name)
+            .extension()?
+            .to_str()?
+            .to_ascii_lowercase();
         match ext.as_str() {
             "png" => Some(Self::Png),
             "jpg" | "jpeg" => Some(Self::Jpeg),
@@ -93,14 +96,28 @@ fn is_zero(v: &f64) -> bool {
 impl ImageFeature {
     /// An image of the file `file_name` (its bytes stored as a blob), centred at `center` on
     /// `plane`, its longer side [`DEFAULT_SIZE`] mm.
-    pub fn from_file(file_name: &str, bytes: Vec<u8>, plane: PlaneRef, center: [f64; 2]) -> Result<Self, String> {
+    pub fn from_file(
+        file_name: &str,
+        bytes: Vec<u8>,
+        plane: PlaneRef,
+        center: [f64; 2],
+    ) -> Result<Self, String> {
         let format = ImageFormat::of_file_name(file_name)
             .or_else(|| sniff(&bytes))
             .ok_or_else(|| format!("{file_name}: not a PNG, JPEG or GIF file"))?;
         let (w, h) = pixel_size(&bytes, format).map_err(|e| format!("{file_name}: {e}"))?;
         let k = DEFAULT_SIZE / w.max(h) as f64;
         let blob = crate::blobs::insert(bytes);
-        Ok(Self { blob, file_name: file_name.to_string(), format, plane, center, width: w as f64 * k, height: h as f64 * k, rotation: 0.0 })
+        Ok(Self {
+            blob,
+            file_name: file_name.to_string(),
+            format,
+            plane,
+            center,
+            width: w as f64 * k,
+            height: h as f64 * k,
+            rotation: 0.0,
+        })
     }
 
     /// Why it can't be built, if it can't.
@@ -144,7 +161,13 @@ impl ImageFeature {
         let at = |[x, y]: [f64; 2]| f.to_world(cadrs_sketch::Vec2::new(x, y));
         let (corner, right, top) = (at(c0), at(c1), at(c2));
         let d = |a: [f64; 3], b: [f64; 3]| [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
-        crate::solid::SolidImage { blob: self.blob.clone(), corner, u: d(right, corner), v: d(top, right), facing: None }
+        crate::solid::SolidImage {
+            blob: self.blob.clone(),
+            corner,
+            u: d(right, corner),
+            v: d(top, right),
+            facing: None,
+        }
     }
 
     /// Its corners in the plane's coordinates, counter-clockwise from the lower left (turned by
@@ -152,7 +175,12 @@ impl ImageFeature {
     pub fn corners(&self) -> [[f64; 2]; 4] {
         let (s, c) = self.rotation.to_radians().sin_cos();
         let (hw, hh) = (self.width / 2.0, self.height / 2.0);
-        [(-hw, -hh), (hw, -hh), (hw, hh), (-hw, hh)].map(|(x, y)| [self.center[0] + x * c - y * s, self.center[1] + x * s + y * c])
+        [(-hw, -hh), (hw, -hh), (hw, hh), (-hw, hh)].map(|(x, y)| {
+            [
+                self.center[0] + x * c - y * s,
+                self.center[1] + x * s + y * c,
+            ]
+        })
     }
 }
 
@@ -200,7 +228,13 @@ impl Command for AddImage {
         Scope::Element(self.element)
     }
     fn apply(&self, doc: &mut Document) -> Result<(), CommandError> {
-        let x = ImageFeature::from_file(&self.file_name, self.bytes.to_vec(), self.plane, self.center).map_err(CommandError::Invalid)?;
+        let x = ImageFeature::from_file(
+            &self.file_name,
+            self.bytes.to_vec(),
+            self.plane,
+            self.center,
+        )
+        .map_err(CommandError::Invalid)?;
         crate::commands::AddFeature {
             element: self.element,
             feature: self.feature,
@@ -234,7 +268,8 @@ mod tests {
 
     #[test]
     fn a_picture_keeps_its_aspect_with_its_longer_side_the_default_size() {
-        let x = ImageFeature::from_file("logo.png", png(40, 20), PlaneRef::Front, [5.0, 0.0]).unwrap();
+        let x =
+            ImageFeature::from_file("logo.png", png(40, 20), PlaneRef::Front, [5.0, 0.0]).unwrap();
         assert_eq!((x.width, x.height), (DEFAULT_SIZE, DEFAULT_SIZE / 2.0));
         assert_eq!(x.stem(), "logo");
         assert!(crate::blobs::contains(&x.blob));
@@ -245,12 +280,21 @@ mod tests {
         assert_eq!(p.v, [0.0, 0.0, 50.0]);
         // The bytes say what a misnamed file is.
         assert!(ImageFeature::from_file("logo.jpg", png(4, 4), PlaneRef::Top, [0.0, 0.0]).is_ok());
-        assert!(ImageFeature::from_file("notes.png", b"not a picture".to_vec(), PlaneRef::Top, [0.0, 0.0]).is_err());
+        assert!(
+            ImageFeature::from_file(
+                "notes.png",
+                b"not a picture".to_vec(),
+                PlaneRef::Top,
+                [0.0, 0.0]
+            )
+            .is_err()
+        );
     }
 
     #[test]
     fn a_turned_picture_turns_about_its_centre() {
-        let mut x = ImageFeature::from_file("logo.png", png(40, 20), PlaneRef::Top, [10.0, 0.0]).unwrap();
+        let mut x =
+            ImageFeature::from_file("logo.png", png(40, 20), PlaneRef::Top, [10.0, 0.0]).unwrap();
         x.rotation = 90.0;
         // On Top (u = +X, v = +Y): its width now runs along +Y, its height along -X.
         let p = x.placement();

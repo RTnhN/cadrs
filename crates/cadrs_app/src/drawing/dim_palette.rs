@@ -12,7 +12,9 @@
 
 use bevy::prelude::*;
 use bevy::text::FontWeight;
-use cadrs_drawing::annotation::{Annotation, AnnotationId, AnnotationKind, DimFormat, Tolerance, ValueKind};
+use cadrs_drawing::annotation::{
+    Annotation, AnnotationId, AnnotationKind, DimFormat, Tolerance, ValueKind,
+};
 use cadrs_drawing::{DrawingOp, ViewId};
 use cadrs_ui::prelude::*;
 use cadrs_ui::{Button, CheckboxChange, Select, SelectChange};
@@ -79,7 +81,10 @@ fn dim_format(a: &Annotation) -> Option<&DimFormat> {
 /// Where the palette button goes (screen px): above the right end of the dimension's text.
 fn button_at(world: &World, view: ViewId, id: AnnotationId) -> Option<Vec2> {
     let scene = world.resource::<AnnotationScene>();
-    let (_, _, g) = scene.items.iter().find(|(v, i, _)| *v == view && *i == id)?;
+    let (_, _, g) = scene
+        .items
+        .iter()
+        .find(|(v, i, _)| *v == view && *i == id)?;
     let (_, max) = g.boxes.first()?;
     let doc = world.get_resource::<ActiveDocument>()?;
     let ui = world.resource::<DrawingUi>();
@@ -112,7 +117,10 @@ fn sync_palette(world: &mut World) {
     }
     // Only the button moved: move it, keep the panel (and its fields' focus).
     if let (Some(w), [(e, h)]) = (&want, have.as_slice())
-        && (PaletteRoot { at: w.at, ..h.clone() }) == *w
+        && (PaletteRoot {
+            at: w.at,
+            ..h.clone()
+        }) == *w
     {
         if let Some(mut n) = world.get_mut::<Node>(*e) {
             n.left = Val::Px(w.at.x);
@@ -136,7 +144,9 @@ fn sync_palette(world: &mut World) {
         let (v, a) = find_annotation(d, w.view, w.id)?;
         let g = world.resource::<ViewCache>().geometry(&v)?;
         match &a.kind {
-            AnnotationKind::Dimension(dim) => cadrs_drawing::annotation::measure(&v, &*g, dim).map(|m| (m.kind, d.style.clone())),
+            AnnotationKind::Dimension(dim) => {
+                cadrs_drawing::annotation::measure(&v, &*g, dim).map(|m| (m.kind, d.style.clone()))
+            }
             _ => None,
         }
     })();
@@ -182,7 +192,13 @@ fn sync_palette(world: &mut World) {
                     border_radius: BorderRadius::all(Val::Px(3.0)),
                     ..default()
                 },
-                BoxShadow::new(Color::srgba(0.0, 0.0, 0.0, 0.3), Val::Px(0.0), Val::Px(1.0), Val::Px(0.0), Val::Px(3.0)),
+                BoxShadow::new(
+                    Color::srgba(0.0, 0.0, 0.0, 0.3),
+                    Val::Px(0.0),
+                    Val::Px(1.0),
+                    Val::Px(0.0),
+                    Val::Px(3.0),
+                ),
             ));
             if w.open {
                 palette_panel(r, &theme, &w.format, value_kind, &style);
@@ -208,17 +224,29 @@ fn tolerance_index(t: &Tolerance) -> usize {
 
 /// A tolerance value as the fields show it (drawing units or degrees).
 fn value_text(v: f64, kind: ValueKind, style: &cadrs_drawing::DrawingStyle) -> String {
-    let v = if kind == ValueKind::Angle { v } else { v / style.units.mm() };
+    let v = if kind == ValueKind::Angle {
+        v
+    } else {
+        v / style.units.mm()
+    };
     let s = format!("{v:.4}");
     let s = s.trim_end_matches('0').trim_end_matches('.').to_string();
     if s == "-0" { "0".into() } else { s }
 }
 
-fn palette_panel(r: &mut ChildSpawnerCommands, t: &Theme, f: &DimFormat, kind: ValueKind, style: &cadrs_drawing::DrawingStyle) {
+fn palette_panel(
+    r: &mut ChildSpawnerCommands,
+    t: &Theme,
+    f: &DimFormat,
+    kind: ValueKind,
+    style: &cadrs_drawing::DrawingStyle,
+) {
     let (upper, lower) = match f.tolerance {
         Tolerance::None => (None, None),
         Tolerance::Symmetric(v) => (Some(v), None),
-        Tolerance::Deviation { upper, lower } | Tolerance::Limits { upper, lower } => (Some(upper), Some(lower)),
+        Tolerance::Deviation { upper, lower } | Tolerance::Limits { upper, lower } => {
+            (Some(upper), Some(lower))
+        }
     };
     let label_w = 72.0;
     let row = |p: &mut ChildSpawnerCommands, name: &str, label: &str| {
@@ -255,7 +283,13 @@ fn palette_panel(r: &mut ChildSpawnerCommands, t: &Theme, f: &DimFormat, kind: V
         },
         BackgroundColor(t.background),
         BorderColor::all(Color::srgb_u8(0xd8, 0xd8, 0xd8)),
-        BoxShadow::new(Color::srgba(0.0, 0.0, 0.0, 0.3), Val::Px(1.0), Val::Px(2.0), Val::Px(0.0), Val::Px(6.0)),
+        BoxShadow::new(
+            Color::srgba(0.0, 0.0, 0.0, 0.3),
+            Val::Px(1.0),
+            Val::Px(2.0),
+            Val::Px(0.0),
+            Val::Px(6.0),
+        ),
     ))
     .with_children(|p| {
         p.spawn(t.text("Dimension", t.font_base, FontWeight::BOLD, t.foreground));
@@ -303,11 +337,25 @@ fn palette_panel(r: &mut ChildSpawnerCommands, t: &Theme, f: &DimFormat, kind: V
         for o in TOLERANCES {
             sel = sel.option(o, true);
         }
-        p.commands().entity(e).with_child(sel.selected(tolerance_index(&f.tolerance)).build(t));
-        let e = row(p, "dim-palette-upper", if matches!(f.tolerance, Tolerance::Symmetric(_)) { "±" } else { "Upper" });
+        p.commands()
+            .entity(e)
+            .with_child(sel.selected(tolerance_index(&f.tolerance)).build(t));
+        let e = row(
+            p,
+            "dim-palette-upper",
+            if matches!(f.tolerance, Tolerance::Symmetric(_)) {
+                "±"
+            } else {
+                "Upper"
+            },
+        );
         p.commands().entity(e).with_child(
             TextInput::new("dim-palette-upper")
-                .value(upper.map(|v| value_text(v, kind, style)).unwrap_or_default())
+                .value(
+                    upper
+                        .map(|v| value_text(v, kind, style))
+                        .unwrap_or_default(),
+                )
                 .disabled(upper.is_none())
                 .width(Val::Px(150.0))
                 .build(t),
@@ -315,7 +363,11 @@ fn palette_panel(r: &mut ChildSpawnerCommands, t: &Theme, f: &DimFormat, kind: V
         let e = row(p, "dim-palette-lower", "Lower");
         p.commands().entity(e).with_child(
             TextInput::new("dim-palette-lower")
-                .value(lower.map(|v| value_text(v, kind, style)).unwrap_or_default())
+                .value(
+                    lower
+                        .map(|v| value_text(v, kind, style))
+                        .unwrap_or_default(),
+                )
                 .disabled(lower.is_none())
                 .width(Val::Px(150.0))
                 .build(t),
@@ -325,9 +377,10 @@ fn palette_panel(r: &mut ChildSpawnerCommands, t: &Theme, f: &DimFormat, kind: V
         for o in PRECISIONS {
             sel = sel.option(o, true);
         }
-        p.commands()
-            .entity(e)
-            .with_child(sel.selected(f.precision.map_or(0, |d| d as usize + 1)).build(t));
+        p.commands().entity(e).with_child(
+            sel.selected(f.precision.map_or(0, |d| d as usize + 1))
+                .build(t),
+        );
         if kind != ValueKind::Angle {
             let dual = f.dual.unwrap_or(style.show_dual);
             p.spawn(
@@ -426,13 +479,20 @@ fn symbol_glyph(b: &mut ChildSpawnerCommands, t: &Theme, c: char) {
             });
         }
         _ => {
-            b.spawn((t.text(c.to_string(), t.font_base, FontWeight::NORMAL, ink), Pickable::IGNORE));
+            b.spawn((
+                t.text(c.to_string(), t.font_base, FontWeight::NORMAL, ink),
+                Pickable::IGNORE,
+            ));
         }
     }
 }
 
 /// Changes the selected dimension's format with `f`.
-fn set_format(world: &mut World, label: &str, f: impl FnOnce(&mut DimFormat, ValueKind, &cadrs_drawing::DrawingStyle)) {
+fn set_format(
+    world: &mut World,
+    label: &str,
+    f: impl FnOnce(&mut DimFormat, ValueKind, &cadrs_drawing::DrawingStyle),
+) {
     let Some((view, a)) = selected_dimension(world) else {
         return;
     };
@@ -456,7 +516,14 @@ fn set_format(world: &mut World, label: &str, f: impl FnOnce(&mut DimFormat, Val
     let before = d.format.clone();
     f(&mut d.format, m.kind, &style);
     if d.format != before {
-        edit_drawing(world, DrawingOp::SetAnnotation { view, annotation: a, label: label.into() });
+        edit_drawing(
+            world,
+            DrawingOp::SetAnnotation {
+                view,
+                annotation: a,
+                label: label.into(),
+            },
+        );
     }
 }
 
@@ -485,12 +552,20 @@ fn on_select(ev: On<SelectChange>, q: Query<&Name>, mut commands: Commands) {
                 let (up, lo) = match f.tolerance {
                     Tolerance::None => (t, -t),
                     Tolerance::Symmetric(v) => (v, -v),
-                    Tolerance::Deviation { upper, lower } | Tolerance::Limits { upper, lower } => (upper, lower),
+                    Tolerance::Deviation { upper, lower } | Tolerance::Limits { upper, lower } => {
+                        (upper, lower)
+                    }
                 };
                 f.tolerance = match i {
                     1 => Tolerance::Symmetric(up.abs()),
-                    2 => Tolerance::Deviation { upper: up, lower: lo },
-                    3 => Tolerance::Limits { upper: up, lower: lo },
+                    2 => Tolerance::Deviation {
+                        upper: up,
+                        lower: lo,
+                    },
+                    3 => Tolerance::Limits {
+                        upper: up,
+                        lower: lo,
+                    },
                     _ => Tolerance::None,
                 };
             });
@@ -505,7 +580,9 @@ fn on_select(ev: On<SelectChange>, q: Query<&Name>, mut commands: Commands) {
 }
 
 fn on_check(ev: On<CheckboxChange>, q: Query<&Name>, mut commands: Commands) {
-    if q.get(ev.entity).is_ok_and(|n| n.as_str() == "dim-palette-dual") {
+    if q.get(ev.entity)
+        .is_ok_and(|n| n.as_str() == "dim-palette-dual")
+    {
         let on = ev.checked;
         commands.queue(move |w: &mut World| {
             set_format(w, "Edit dimension dual units", |f, _, _| f.dual = Some(on));
@@ -514,12 +591,19 @@ fn on_check(ev: On<CheckboxChange>, q: Query<&Name>, mut commands: Commands) {
 }
 
 /// Enter in a palette field or the Hole callout dialog's prefix.
-fn on_submit(ev: On<TextSubmit>, q: Query<(&Name, Option<&ChildOf>)>, q_names: Query<&Name>, mut commands: Commands) {
+fn on_submit(
+    ev: On<TextSubmit>,
+    q: Query<(&Name, Option<&ChildOf>)>,
+    q_names: Query<&Name>,
+    mut commands: Commands,
+) {
     // The field entity is inside the named TextInput frame.
     let Ok((name, parent)) = q.get(ev.entity) else {
         return;
     };
-    let frame = parent.and_then(|p| q_names.get(p.parent()).ok()).map(|n| n.as_str().to_string());
+    let frame = parent
+        .and_then(|p| q_names.get(p.parent()).ok())
+        .map(|n| n.as_str().to_string());
     let name = frame.unwrap_or_else(|| name.as_str().trim_end_matches("-field").to_string());
     let value = ev.value.clone();
     match name.as_str() {
@@ -536,13 +620,25 @@ fn on_submit(ev: On<TextSubmit>, q: Query<(&Name, Option<&ChildOf>)>, q_names: Q
                     let Ok(v) = value.trim().trim_start_matches('+').parse::<f64>() else {
                         return;
                     };
-                    let v = if kind == ValueKind::Angle { v } else { v * style.units.mm() };
+                    let v = if kind == ValueKind::Angle {
+                        v
+                    } else {
+                        v * style.units.mm()
+                    };
                     f.tolerance = match (f.tolerance, upper) {
                         (Tolerance::Symmetric(_), _) => Tolerance::Symmetric(v.abs()),
-                        (Tolerance::Deviation { lower, .. }, true) => Tolerance::Deviation { upper: v, lower },
-                        (Tolerance::Deviation { upper: u, .. }, false) => Tolerance::Deviation { upper: u, lower: v },
-                        (Tolerance::Limits { lower, .. }, true) => Tolerance::Limits { upper: v, lower },
-                        (Tolerance::Limits { upper: u, .. }, false) => Tolerance::Limits { upper: u, lower: v },
+                        (Tolerance::Deviation { lower, .. }, true) => {
+                            Tolerance::Deviation { upper: v, lower }
+                        }
+                        (Tolerance::Deviation { upper: u, .. }, false) => {
+                            Tolerance::Deviation { upper: u, lower: v }
+                        }
+                        (Tolerance::Limits { lower, .. }, true) => {
+                            Tolerance::Limits { upper: v, lower }
+                        }
+                        (Tolerance::Limits { upper: u, .. }, false) => {
+                            Tolerance::Limits { upper: u, lower: v }
+                        }
                         (t, _) => t,
                     };
                 });
@@ -583,7 +679,10 @@ pub fn open_callout_dialog(world: &mut World, view: ViewId, id: AnnotationId) {
     // Above the callout's text, like `ex1-step8.png`.
     let at = (|| {
         let scene = world.resource::<AnnotationScene>();
-        let (_, _, g) = scene.items.iter().find(|(v, i, _)| *v == view && *i == id)?;
+        let (_, _, g) = scene
+            .items
+            .iter()
+            .find(|(v, i, _)| *v == view && *i == id)?;
         let (min, max) = g.boxes.first()?;
         let doc = world.get_resource::<ActiveDocument>()?;
         let ui = world.resource::<DrawingUi>();
@@ -611,7 +710,13 @@ pub fn open_callout_dialog(world: &mut World, view: ViewId, id: AnnotationId) {
             },
             BackgroundColor(t.background),
             BorderColor::all(Color::srgb_u8(0xe0, 0xe0, 0xe0)),
-            BoxShadow::new(Color::srgba(0.0, 0.0, 0.0, 0.35), Val::Px(1.0), Val::Px(2.0), Val::Px(0.0), Val::Px(6.0)),
+            BoxShadow::new(
+                Color::srgba(0.0, 0.0, 0.0, 0.35),
+                Val::Px(1.0),
+                Val::Px(2.0),
+                Val::Px(0.0),
+                Val::Px(6.0),
+            ),
             GlobalZIndex(cadrs_ui::z::DIALOG - 10),
             DespawnOnExit(AppState::Document),
         ))
@@ -637,7 +742,12 @@ pub fn open_callout_dialog(world: &mut World, view: ViewId, id: AnnotationId) {
                 ));
                 // A green ✓ like the feature dialogs' (`ex1-step8.png`).
                 let accept = cadrs_ui::Visuals {
-                    background: cadrs_ui::StateColors::new(t.accept, t.accept.darker(0.04), t.accept.darker(0.08), t.accept_disabled),
+                    background: cadrs_ui::StateColors::new(
+                        t.accept,
+                        t.accept.darker(0.04),
+                        t.accept.darker(0.08),
+                        t.accept_disabled,
+                    ),
                     border: cadrs_ui::StateColors::all(Color::NONE),
                     foreground: cadrs_ui::StateColors::all(Color::WHITE),
                     focus_ring: t.focus_ring,
@@ -705,7 +815,12 @@ fn preview_callout(
 ) {
     let want = (|| {
         let d = q_dialog.iter().next()?;
-        let typed = q_fields.iter().find(|(n, _)| n.as_str() == "hole-callout-prefix-field")?.1.value().to_string();
+        let typed = q_fields
+            .iter()
+            .find(|(n, _)| n.as_str() == "hole-callout-prefix-field")?
+            .1
+            .value()
+            .to_string();
         let (_, dr) = active_drawing(doc.as_deref()?)?;
         let (_, mut a) = find_annotation(dr, d.view, d.id)?;
         if let AnnotationKind::HoleCallout(c) = &mut a.kind {
@@ -755,6 +870,13 @@ fn apply_callout_dialog(world: &mut World) {
         }
         c.prefix = p;
     }
-    edit_drawing(world, DrawingOp::SetAnnotation { view: dialog.view, annotation: a, label: "Edit hole callout".into() });
+    edit_drawing(
+        world,
+        DrawingOp::SetAnnotation {
+            view: dialog.view,
+            annotation: a,
+            label: "Edit hole callout".into(),
+        },
+    );
     world.resource_mut::<AnnotationUi>().selected.clear();
 }

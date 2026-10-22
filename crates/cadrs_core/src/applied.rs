@@ -39,7 +39,11 @@ impl EdgeOrFace {
         match self {
             EdgeOrFace::Edge(e) => {
                 let [a, b] = e.edge.faces;
-                if a.op == b.op { vec![a.op] } else { vec![a.op, b.op] }
+                if a.op == b.op {
+                    vec![a.op]
+                } else {
+                    vec![a.op, b.op]
+                }
             }
             EdgeOrFace::Face(f) => vec![f.face.op],
         }
@@ -77,7 +81,11 @@ pub enum FilletControl {
 }
 
 impl FilletControl {
-    pub const ALL: [FilletControl; 3] = [FilletControl::Distance, FilletControl::Conic, FilletControl::Curvature];
+    pub const ALL: [FilletControl; 3] = [
+        FilletControl::Distance,
+        FilletControl::Conic,
+        FilletControl::Curvature,
+    ];
 
     pub fn label(self) -> &'static str {
         match self {
@@ -315,7 +323,9 @@ impl FilletFeature {
         }
         let (lo, hi) = (a.min(b), a.max(b));
         if lo < -1e-9 || hi > 1.0 + 1e-9 {
-            return Err(format!("A partial fillet's bounds must lie on the edge (it is {length:.3} mm long)"));
+            return Err(format!(
+                "A partial fillet's bounds must lie on the edge (it is {length:.3} mm long)"
+            ));
         }
         Ok((lo.max(0.0), hi.min(1.0)))
     }
@@ -337,7 +347,11 @@ impl FilletFeature {
         let text = |v: f64| {
             let s = format!("{v:.4}");
             let s = s.trim_end_matches('0').trim_end_matches('.').to_string();
-            if bound == PartialBound::Length { format!("{s} mm") } else { s }
+            if bound == PartialBound::Length {
+                format!("{s} mm")
+            } else {
+                s
+            }
         };
         self.partial_first_expr = text(self.partial_first);
         self.partial_second_expr = text(self.partial_second);
@@ -367,14 +381,22 @@ impl FilletFeature {
             return Some("The second radius must be greater than zero");
         }
         let bad = |r: f64| r.is_nan() || r <= 0.0;
-        if self.variable && (self.vertices.iter().any(|v| bad(v.radius)) || self.edge_points.iter().any(|p| bad(p.radius))) {
+        if self.variable
+            && (self.vertices.iter().any(|v| bad(v.radius))
+                || self.edge_points.iter().any(|p| bad(p.radius)))
+        {
             return Some("Every radius of a variable fillet must be greater than zero");
         }
         if self.partial {
             if self.variable {
                 return Some("A partial fillet can't be a variable fillet too");
             }
-            if !self.entities.iter().all(|e| matches!(e, EdgeOrFace::Edge(_))) || self.entities.len() != 1 {
+            if !self
+                .entities
+                .iter()
+                .all(|e| matches!(e, EdgeOrFace::Edge(_)))
+                || self.entities.len() != 1
+            {
                 return Some("A partial fillet takes one edge");
             }
             let ok = |v: f64| match self.partial_bound {
@@ -391,11 +413,18 @@ impl FilletFeature {
                 return Some("A partial fillet's bounds must differ");
             }
         }
-        if self.variable && self.edge_points.iter().any(|p| !(0.0..=1.0).contains(&p.location)) {
+        if self.variable
+            && self
+                .edge_points
+                .iter()
+                .any(|p| !(0.0..=1.0).contains(&p.location))
+        {
             return Some("A point's location must be between 0 and 1");
         }
         match self.control {
-            FilletControl::Conic if !(self.rho > 0.0 && self.rho < 1.0) => Some("Rho must be between 0 and 1"),
+            FilletControl::Conic if !(self.rho > 0.0 && self.rho < 1.0) => {
+                Some("Rho must be between 0 and 1")
+            }
             FilletControl::Curvature if !(self.magnitude > 0.0 && self.magnitude <= 1.0) => {
                 Some("The magnitude must be between 0 and 1")
             }
@@ -413,7 +442,8 @@ pub enum ChamferMeasurement {
 }
 
 impl ChamferMeasurement {
-    pub const ALL: [ChamferMeasurement; 2] = [ChamferMeasurement::Offset, ChamferMeasurement::Tangent];
+    pub const ALL: [ChamferMeasurement; 2] =
+        [ChamferMeasurement::Offset, ChamferMeasurement::Tangent];
 
     pub fn label(self) -> &'static str {
         match self {
@@ -433,7 +463,11 @@ pub enum ChamferType {
 }
 
 impl ChamferType {
-    pub const ALL: [ChamferType; 3] = [ChamferType::EqualDistance, ChamferType::TwoDistances, ChamferType::DistanceAngle];
+    pub const ALL: [ChamferType; 3] = [
+        ChamferType::EqualDistance,
+        ChamferType::TwoDistances,
+        ChamferType::DistanceAngle,
+    ];
 
     pub fn label(self) -> &'static str {
         match self {
@@ -498,7 +532,9 @@ impl ChamferFeature {
         if !(self.distance > 0.0 && self.distance.is_finite()) {
             return Some("The distance must be greater than zero");
         }
-        if self.kind == ChamferType::TwoDistances && !(self.distance2 > 0.0 && self.distance2.is_finite()) {
+        if self.kind == ChamferType::TwoDistances
+            && !(self.distance2 > 0.0 && self.distance2.is_finite())
+        {
             return Some("The distance must be greater than zero");
         }
         if self.kind == ChamferType::DistanceAngle && !(self.angle > 0.0 && self.angle < 90.0) {
@@ -604,7 +640,9 @@ impl HoleFeature {
         if self.spec.end == crate::hole::HoleEnd::UpToEntity && self.up_to.is_none() {
             return Some("Select a face or plane to go up to");
         }
-        if self.spec.hole_type == crate::hole::HoleType::Tapped && self.spec.tap_type == crate::hole::TapType::Tapered {
+        if self.spec.hole_type == crate::hole::HoleType::Tapped
+            && self.spec.tap_type == crate::hole::TapType::Tapered
+        {
             return Some("Tapered taps aren't available; use Straight tap");
         }
         self.spec.problem()

@@ -38,10 +38,15 @@ use bevy::prelude::*;
 use bevy::text::FontWeight;
 use bevy::ui_widgets::Activate;
 use cadrs_core::assembly::InstanceId;
-use cadrs_core::assembly::context::{self, AddContext, ContextNo, ContextStatus, RemoveContext, RenameContext, SetContextHidden, StudioContext, UpdateContext};
+use cadrs_core::assembly::context::{
+    self, AddContext, ContextNo, ContextStatus, RemoveContext, RenameContext, SetContextHidden,
+    StudioContext, UpdateContext,
+};
 use cadrs_core::{Document, DocumentId, ElementId, FeatureId, PartId, Solid};
 use cadrs_ui::prelude::*;
-use cadrs_ui::{CheckboxChange, MenuAction, NamePopup, NamePopupCancel, NamePopupCommit, SliderChange};
+use cadrs_ui::{
+    CheckboxChange, MenuAction, NamePopup, NamePopupCancel, NamePopupCommit, SliderChange,
+};
 
 use crate::parts::{FaceBase, PartCache};
 use crate::viewport::ViewportArea;
@@ -56,7 +61,15 @@ impl Plugin for InContextPlugin {
             .init_resource::<Statuses>()
             .add_systems(
                 Update,
-                (open_contexts, leave_contexts, update_statuses, sync_context_bar, sync_contexts_row, sync_feature_arrows, sync_instance_arrows)
+                (
+                    open_contexts,
+                    leave_contexts,
+                    update_statuses,
+                    sync_context_bar,
+                    sync_contexts_row,
+                    sync_feature_arrows,
+                    sync_instance_arrows,
+                )
                     .chain()
                     .after(crate::parts::PartsSet)
                     .run_if(in_state(AppState::Document)),
@@ -84,7 +97,10 @@ pub struct ContextView {
 
 impl Default for ContextView {
     fn default() -> Self {
-        Self { opacity: 0.45, select_transparent: true }
+        Self {
+            opacity: 0.45,
+            select_transparent: true,
+        }
     }
 }
 
@@ -103,11 +119,19 @@ pub struct Statuses {
 
 impl Statuses {
     pub fn get(&self, studio: ElementId, id: ContextNo) -> ContextStatus {
-        self.status.get(&(studio, id)).copied().unwrap_or(ContextStatus::Unknown)
+        self.status
+            .get(&(studio, id))
+            .copied()
+            .unwrap_or(ContextStatus::Unknown)
     }
 }
 
-fn reset(mut active: ResMut<ActiveContexts>, mut statuses: ResMut<Statuses>, doc: Option<Res<ActiveDocument>>, mut commands: Commands) {
+fn reset(
+    mut active: ResMut<ActiveContexts>,
+    mut statuses: ResMut<Statuses>,
+    doc: Option<Res<ActiveDocument>>,
+    mut commands: Commands,
+) {
     commands.remove_resource::<super::linked_context::InContextSession>();
     if let Some(doc) = doc {
         for e in &doc.doc.elements {
@@ -120,7 +144,11 @@ fn reset(mut active: ResMut<ActiveContexts>, mut statuses: ResMut<Statuses>, doc
 
 /// A document just opened: its Part Studios start in the context they open in
 /// ([`cadrs_core::Element::open_context`]).
-fn open_contexts(doc: Option<Res<ActiveDocument>>, mut active: ResMut<ActiveContexts>, mut last: Local<Option<cadrs_core::DocumentId>>) {
+fn open_contexts(
+    doc: Option<Res<ActiveDocument>>,
+    mut active: ResMut<ActiveContexts>,
+    mut last: Local<Option<cadrs_core::DocumentId>>,
+) {
     let Some(doc) = doc else { return };
     if *last == Some(doc.doc.id) && !doc.is_added() {
         return;
@@ -135,17 +163,24 @@ fn open_contexts(doc: Option<Res<ActiveDocument>>, mut active: ResMut<ActiveCont
 
 /// The context `id` of the Part Studio `studio`: in the document, or pending.
 pub fn find_context(doc: &Document, studio: ElementId, id: ContextNo) -> Option<StudioContext> {
-    context::with_pending(doc, studio).into_iter().find(|c| c.id == id)
+    context::with_pending(doc, studio)
+        .into_iter()
+        .find(|c| c.id == id)
 }
 
 /// The active context of the Part Studio `studio`, if any.
-pub fn active_context(doc: &Document, active: &ActiveContexts, studio: ElementId) -> Option<StudioContext> {
+pub fn active_context(
+    doc: &Document,
+    active: &ActiveContexts,
+    studio: ElementId,
+) -> Option<StudioContext> {
     find_context(doc, studio, *active.0.get(&studio)?)
 }
 
 /// Whether the context is only pending (not referenced yet, MC2.5).
 pub fn is_pending(doc: &Document, studio: ElementId, id: ContextNo) -> bool {
-    doc.element(studio).is_some_and(|e| e.context(id).is_none()) && context::pending_id(doc.id, studio) == Some(id)
+    doc.element(studio).is_some_and(|e| e.context(id).is_none())
+        && context::pending_id(doc.id, studio) == Some(id)
 }
 
 /// Makes `id` the active context of `studio` (`None`: edit outside of context). Leaving a
@@ -153,7 +188,9 @@ pub fn is_pending(doc: &Document, studio: ElementId, id: ContextNo) -> bool {
 pub fn set_active(world: &mut World, studio: ElementId, id: Option<ContextNo>) {
     let doc = &world.resource::<ActiveDocument>().doc;
     let doc_id = doc.id;
-    let drop_pending = context::pending_id(doc_id, studio).is_some_and(|p| Some(p) != id && doc.element(studio).is_some_and(|e| e.context(p).is_none()));
+    let drop_pending = context::pending_id(doc_id, studio).is_some_and(|p| {
+        Some(p) != id && doc.element(studio).is_some_and(|e| e.context(p).is_none())
+    });
     if drop_pending {
         context::set_pending(doc_id, studio, None);
     }
@@ -178,7 +215,9 @@ pub enum Which {
 pub fn edit_in_context(world: &mut World, assembly: ElementId, instance: InstanceId, which: Which) {
     let (studio, id) = {
         let doc = &world.resource::<ActiveDocument>().doc;
-        let Some(studio) = context::studio_of(doc, assembly, instance) else { return };
+        let Some(studio) = context::studio_of(doc, assembly, instance) else {
+            return;
+        };
         let id = match which {
             Which::Context(id) => {
                 if find_context(doc, studio, id).is_none() {
@@ -187,7 +226,11 @@ pub fn edit_in_context(world: &mut World, assembly: ElementId, instance: Instanc
                 id
             }
             Which::New => {
-                let next = context::with_pending(doc, studio).iter().map(|c| c.id + 1).max().unwrap_or(0);
+                let next = context::with_pending(doc, studio)
+                    .iter()
+                    .map(|c| c.id + 1)
+                    .max()
+                    .unwrap_or(0);
                 let id = next.max(doc.element(studio).map_or(0, |e| e.next_context_id()));
                 match context::snapshot_as(doc, assembly, instance, id) {
                     Ok(c) => {
@@ -210,7 +253,11 @@ pub fn edit_in_context(world: &mut World, assembly: ElementId, instance: Instanc
 
 /// Drops a pending context when its studio is left (MC2.5), and forgets the active context of
 /// a context that is gone.
-fn leave_contexts(doc: Option<Res<ActiveDocument>>, mut active: ResMut<ActiveContexts>, mut last: Local<Option<ElementId>>) {
+fn leave_contexts(
+    doc: Option<Res<ActiveDocument>>,
+    mut active: ResMut<ActiveContexts>,
+    mut last: Local<Option<ElementId>>,
+) {
     let Some(doc) = doc else { return };
     let now = doc.active;
     if *last != now {
@@ -219,7 +266,9 @@ fn leave_contexts(doc: Option<Res<ActiveDocument>>, mut active: ResMut<ActiveCon
             && let Some(p) = context::pending_id(d, prev)
         {
             // Not referenced: gone (and no longer active). Committed: the document has it.
-            if doc.doc.element(prev).is_none_or(|e| e.context(p).is_none()) && active.0.get(&prev) == Some(&p) {
+            if doc.doc.element(prev).is_none_or(|e| e.context(p).is_none())
+                && active.0.get(&prev) == Some(&p)
+            {
                 active.0.remove(&prev);
             }
             context::set_pending(d, prev, None);
@@ -229,7 +278,12 @@ fn leave_contexts(doc: Option<Res<ActiveDocument>>, mut active: ResMut<ActiveCon
     if !doc.is_changed() {
         return;
     }
-    let gone: Vec<ElementId> = active.0.iter().filter(|(s, id)| find_context(&doc.doc, **s, **id).is_none()).map(|(s, _)| *s).collect();
+    let gone: Vec<ElementId> = active
+        .0
+        .iter()
+        .filter(|(s, id)| find_context(&doc.doc, **s, **id).is_none())
+        .map(|(s, _)| *s)
+        .collect();
     for s in gone {
         active.0.remove(&s);
     }
@@ -240,10 +294,20 @@ fn leave_contexts(doc: Option<Res<ActiveDocument>>, mut active: ResMut<ActiveCon
 type StatusKey = (DocumentId, usize, usize, Option<ElementId>, f64);
 
 fn update_statuses(world: &mut World, mut last: Local<Option<StatusKey>>) {
-    let Some(doc) = world.get_resource::<ActiveDocument>() else { return };
+    let Some(doc) = world.get_resource::<ActiveDocument>() else {
+        return;
+    };
     let t = world.resource::<Time>().elapsed_secs_f64();
-    let key = (doc.doc.id, doc.history.undo_len(), doc.history.redo_len(), doc.active);
-    if last.as_ref().is_some_and(|l| (l.0, l.1, l.2, l.3) == key && t - l.4 < 3.0) {
+    let key = (
+        doc.doc.id,
+        doc.history.undo_len(),
+        doc.history.redo_len(),
+        doc.active,
+    );
+    if last
+        .as_ref()
+        .is_some_and(|l| (l.0, l.1, l.2, l.3) == key && t - l.4 < 3.0)
+    {
         return;
     }
     *last = Some((key.0, key.1, key.2, key.3, t));
@@ -256,7 +320,8 @@ fn update_statuses(world: &mut World, mut last: Local<Option<StatusKey>>) {
                 Some(d) => match super::linked_context::document(world, d) {
                     Some(asm_doc) => {
                         if let Some(a) = asm_doc.element(c.assembly) {
-                            now.assembly_names.insert((el.id, c.id), format!("{} ({})", a.name, asm_doc.name));
+                            now.assembly_names
+                                .insert((el.id, c.id), format!("{} ({})", a.name, asm_doc.name));
                         }
                         context::external_status(&asm_doc, c)
                     }
@@ -267,19 +332,45 @@ fn update_statuses(world: &mut World, mut last: Local<Option<StatusKey>>) {
         }
     }
     // The active assembly's linked instances whose Part Studios have contexts made in it.
-    let asm = world.resource::<ActiveDocument>().active_element().filter(|e| e.assembly_model().is_some()).map(|e| e.id);
+    let asm = world
+        .resource::<ActiveDocument>()
+        .active_element()
+        .filter(|e| e.assembly_model().is_some())
+        .map(|e| e.id);
     if let Some(asm) = asm {
-        let instances: Vec<InstanceId> = doc.element(asm).and_then(|e| e.assembly_model()).map(|m| m.instances.iter().filter(|i| i.link.is_some()).map(|i| i.id).collect()).unwrap_or_default();
+        let instances: Vec<InstanceId> = doc
+            .element(asm)
+            .and_then(|e| e.assembly_model())
+            .map(|m| {
+                m.instances
+                    .iter()
+                    .filter(|i| i.link.is_some())
+                    .map(|i| i.id)
+                    .collect()
+            })
+            .unwrap_or_default();
         for i in instances {
-            let Some((d, studio)) = context::linked_studio_of(&doc, asm, i) else { continue };
-            let Some(part_doc) = super::linked_context::document(world, d) else { continue };
-            let Some(el) = part_doc.element(studio) else { continue };
-            let ctxs: Vec<&StudioContext> = el.contexts.iter().filter(|c| c.document == Some(doc.id) && c.assembly == asm).collect();
+            let Some((d, studio)) = context::linked_studio_of(&doc, asm, i) else {
+                continue;
+            };
+            let Some(part_doc) = super::linked_context::document(world, d) else {
+                continue;
+            };
+            let Some(el) = part_doc.element(studio) else {
+                continue;
+            };
+            let ctxs: Vec<&StudioContext> = el
+                .contexts
+                .iter()
+                .filter(|c| c.document == Some(doc.id) && c.assembly == asm)
+                .collect();
             if ctxs.is_empty() {
                 continue;
             }
             let primary = ctxs.iter().any(|c| c.instance == i);
-            let stale = ctxs.iter().any(|c| context::external_status(&doc, c) == ContextStatus::OutOfDate);
+            let stale = ctxs
+                .iter()
+                .any(|c| context::external_status(&doc, c) == ContextStatus::OutOfDate);
             now.linked.insert(i, (primary, stale, el.name.clone()));
         }
     }
@@ -300,7 +391,10 @@ const CONTEXT_RGB: [f32; 3] = [196.0, 202.0, 210.0];
 
 /// The part in the view of a context part's face, for a sketch plane on it (the view's face
 /// picks name the context part's feature, which is not a feature of the studio).
-pub fn context_face_plane(feature: FeatureId, face: cadrs_core::solid::FaceName) -> Option<cadrs_sketch::PlaneRef> {
+pub fn context_face_plane(
+    feature: FeatureId,
+    face: cadrs_core::solid::FaceName,
+) -> Option<cadrs_sketch::PlaneRef> {
     let solids = SOLIDS.read().ok()?;
     let (_, s) = solids.iter().find(|(f, _)| *f == feature)?;
     context::face_plane_on(s, feature, face)
@@ -332,8 +426,13 @@ pub fn sync_context_parts(
     let Some(doc) = doc else { return };
     let changed = doc.is_changed() || active.is_changed() || ghost.key.is_none();
     if changed {
-        let studio = doc.active_element().filter(|e| e.assembly_model().is_none()).map(|e| e.id);
-        let ctx = studio.and_then(|s| active_context(&doc.doc, &active, s)).filter(|c| !c.hidden);
+        let studio = doc
+            .active_element()
+            .filter(|e| e.assembly_model().is_none())
+            .map(|e| e.id);
+        let ctx = studio
+            .and_then(|s| active_context(&doc.doc, &active, s))
+            .filter(|c| !c.hidden);
         ghost.ctx = studio.zip(ctx);
     }
     let Some((studio, ctx)) = ghost.ctx.clone() else {
@@ -343,7 +442,12 @@ pub fn sync_context_parts(
         }
         // Only the ghost's own tints (others, such as Check interference's, stay).
         if cache.tints.keys().any(|p| context::is_context(p.feature)) {
-            let rest = cache.tints.iter().filter(|(p, _)| !context::is_context(p.feature)).map(|(p, b)| (*p, *b)).collect();
+            let rest = cache
+                .tints
+                .iter()
+                .filter(|(p, _)| !context::is_context(p.feature))
+                .map(|(p, b)| (*p, *b))
+                .collect();
             cache.set_tints(rest);
         }
         if !cache.unpickable.is_empty() {
@@ -356,7 +460,10 @@ pub fn sync_context_parts(
         return;
     };
     if changed || ghost.key.is_none() {
-        let key = (studio, format!("{:?}", (&ctx.id, &ctx.parts, &ctx.studios, &ctx.sources)));
+        let key = (
+            studio,
+            format!("{:?}", (&ctx.id, &ctx.parts, &ctx.studios, &ctx.sources)),
+        );
         if ghost.key.as_ref() != Some(&key) {
             // Rebuild each source studio from the snapshot's features.
             let mut sources: Vec<ElementId> = ctx.parts.iter().map(|p| p.element).collect();
@@ -364,7 +471,12 @@ pub fn sync_context_parts(
             sources.dedup();
             ghost.pending = sources
                 .into_iter()
-                .filter_map(|e| Some((e, cadrs_core::rebuild::request(context::source_features(&doc.doc, &ctx, e)?))))
+                .filter_map(|e| {
+                    Some((
+                        e,
+                        cadrs_core::rebuild::request(context::source_features(&doc.doc, &ctx, e)?),
+                    ))
+                })
                 .collect();
             ghost.builds.clear();
             ghost.key = Some(key);
@@ -398,12 +510,20 @@ pub fn sync_context_parts(
         .doc
         .element(studio)
         .map(|el| {
-            let editing = applied.as_ref().filter(|a| a.element == el.id).map(|a| a.feature);
+            let editing = applied
+                .as_ref()
+                .filter(|a| a.element == el.id)
+                .map(|a| a.feature);
             el.features()[..el.rollback_index()]
                 .iter()
                 .filter(|f| Some(f.id) != editing && !el.is_suppressed(f.id))
                 .filter_map(|f| match &f.kind {
-                    cadrs_core::document::FeatureKind::Transform(x) if x.transform_type == cadrs_core::transform::TransformType::CopyInPlace => Some(x.context.iter().map(|c| c.id)),
+                    cadrs_core::document::FeatureKind::Transform(x)
+                        if x.transform_type
+                            == cadrs_core::transform::TransformType::CopyInPlace =>
+                    {
+                        Some(x.context.iter().map(|c| c.id))
+                    }
                     _ => None,
                 })
                 .flatten()
@@ -414,22 +534,50 @@ pub fn sync_context_parts(
     let parts: &Vec<cadrs_core::Part> = if copied.is_empty() {
         &ghost.parts
     } else {
-        shown = ghost.parts.iter().filter(|p| !copied.contains(&p.feature)).cloned().collect();
+        shown = ghost
+            .parts
+            .iter()
+            .filter(|p| !copied.contains(&p.feature))
+            .cloned()
+            .collect();
         &shown
     };
-    let present: Vec<PartId> = cache.parts.iter().filter(|p| context::is_context(p.feature)).map(|p| p.id).collect();
+    let present: Vec<PartId> = cache
+        .parts
+        .iter()
+        .filter(|p| context::is_context(p.feature))
+        .map(|p| p.id)
+        .collect();
     let want: Vec<PartId> = parts.iter().map(|p| p.id).collect();
-    let fresh = present != want || cache.parts.iter().filter(|p| context::is_context(p.feature)).zip(parts).any(|(a, b)| !Arc::ptr_eq(&a.solid, &b.solid));
+    let fresh = present != want
+        || cache
+            .parts
+            .iter()
+            .filter(|p| context::is_context(p.feature))
+            .zip(parts)
+            .any(|(a, b)| !Arc::ptr_eq(&a.solid, &b.solid));
     if fresh {
         cache.parts.retain(|p| !context::is_context(p.feature));
         cache.parts.extend(parts.iter().cloned());
         cache.generation += 1;
     }
-    let base = FaceBase { rgb: CONTEXT_RGB, alpha: view.opacity.clamp(0.05, 0.95) };
-    let mut tints: HashMap<PartId, FaceBase> = cache.tints.iter().filter(|(p, _)| !context::is_context(p.feature)).map(|(p, b)| (*p, *b)).collect();
+    let base = FaceBase {
+        rgb: CONTEXT_RGB,
+        alpha: view.opacity.clamp(0.05, 0.95),
+    };
+    let mut tints: HashMap<PartId, FaceBase> = cache
+        .tints
+        .iter()
+        .filter(|(p, _)| !context::is_context(p.feature))
+        .map(|(p, b)| (*p, *b))
+        .collect();
     tints.extend(want.iter().map(|p| (*p, base)));
     cache.set_tints(tints);
-    let unpickable: std::collections::HashSet<PartId> = if view.select_transparent { Default::default() } else { want.iter().copied().collect() };
+    let unpickable: std::collections::HashSet<PartId> = if view.select_transparent {
+        Default::default()
+    } else {
+        want.iter().copied().collect()
+    };
     if cache.unpickable != unpickable {
         cache.unpickable = unpickable;
     }
@@ -469,32 +617,58 @@ fn sync_context_bar(
     mut commands: Commands,
 ) {
     let Some(doc) = doc else { return };
-    if !(doc.is_changed() || active.is_changed() || statuses.is_changed() || view.is_changed() || q_area.iter().next().is_some_and(|_| q.is_empty())) {
+    if !(doc.is_changed()
+        || active.is_changed()
+        || statuses.is_changed()
+        || view.is_changed()
+        || q_area.iter().next().is_some_and(|_| q.is_empty()))
+    {
         return;
     }
-    let want = doc.active_element().filter(|e| e.assembly_model().is_none()).and_then(|el| {
-        let ctx = active_context(&doc.doc, &active, el.id)?;
-        let external = ctx.document.is_some_and(|d| d != doc.doc.id);
-        let asm = if external {
-            statuses.assembly_names.get(&(el.id, ctx.id)).cloned().unwrap_or_else(|| "the assembly".into())
-        } else {
-            doc.doc.element(ctx.assembly).map(|a| a.name.clone()).unwrap_or_else(|| "the assembly".into())
-        };
-        let pending = is_pending(&doc.doc, el.id, ctx.id);
-        let status = if pending { context::status(&doc.doc, el.id, &ctx) } else { statuses.get(el.id, ctx.id) };
-        Some(BarKey {
-            studio: el.id,
-            id: ctx.id,
-            label: ctx.label(),
-            assembly: asm,
-            primary: if external { None } else { cadrs_core::assembly::managed_context::origin_name(&doc.doc, &ctx) },
-            status,
-            pending,
-            hidden: ctx.hidden,
-            view: ((view.opacity * 100.0).round() as u32, view.select_transparent),
-            external,
-        })
-    });
+    let want = doc
+        .active_element()
+        .filter(|e| e.assembly_model().is_none())
+        .and_then(|el| {
+            let ctx = active_context(&doc.doc, &active, el.id)?;
+            let external = ctx.document.is_some_and(|d| d != doc.doc.id);
+            let asm = if external {
+                statuses
+                    .assembly_names
+                    .get(&(el.id, ctx.id))
+                    .cloned()
+                    .unwrap_or_else(|| "the assembly".into())
+            } else {
+                doc.doc
+                    .element(ctx.assembly)
+                    .map(|a| a.name.clone())
+                    .unwrap_or_else(|| "the assembly".into())
+            };
+            let pending = is_pending(&doc.doc, el.id, ctx.id);
+            let status = if pending {
+                context::status(&doc.doc, el.id, &ctx)
+            } else {
+                statuses.get(el.id, ctx.id)
+            };
+            Some(BarKey {
+                studio: el.id,
+                id: ctx.id,
+                label: ctx.label(),
+                assembly: asm,
+                primary: if external {
+                    None
+                } else {
+                    cadrs_core::assembly::managed_context::origin_name(&doc.doc, &ctx)
+                },
+                status,
+                pending,
+                hidden: ctx.hidden,
+                view: (
+                    (view.opacity * 100.0).round() as u32,
+                    view.select_transparent,
+                ),
+                external,
+            })
+        });
     let key = want.as_ref().map(|w| format!("{w:?}")).unwrap_or_default();
     if let Some((e, k)) = q.iter().next() {
         if k.0 == key {
@@ -503,7 +677,9 @@ fn sync_context_bar(
         commands.entity(e).try_despawn();
     }
     let Some(w) = want else { return };
-    let Some(area) = q_area.iter().next() else { return };
+    let Some(area) = q_area.iter().next() else {
+        return;
+    };
     // The bar is the in-context yellow (as the arrows of the active context's features), with
     // the light theme's text and controls on it in either theme.
     let t = Theme::light();
@@ -541,28 +717,68 @@ fn sync_context_bar(
             },
             BackgroundColor(BAR_YELLOW),
             BorderColor::all(ACTIVE_ARROW),
-            BoxShadow::new(t.shadow, Val::Px(0.0), Val::Px(1.0), Val::Px(0.0), Val::Px(4.0)),
+            BoxShadow::new(
+                t.shadow,
+                Val::Px(0.0),
+                Val::Px(1.0),
+                Val::Px(0.0),
+                Val::Px(4.0),
+            ),
         ))
         .id();
     commands.entity(panel).with_children(|p| {
-        p.spawn(Node { align_items: AlignItems::Center, column_gap: Val::Px(6.0), ..default() }).with_children(|b| {
+        p.spawn(Node {
+            align_items: AlignItems::Center,
+            column_gap: Val::Px(6.0),
+            ..default()
+        })
+        .with_children(|b| {
             b.spawn((icon("assembly", 15.0, t.primary), Pickable::IGNORE));
-            b.spawn((Name::new("context-title"), t.text(format!("{} of {}", w.label, w.assembly), 12.0, FontWeight::SEMIBOLD, t.foreground), Pickable::IGNORE));
+            b.spawn((
+                Name::new("context-title"),
+                t.text(
+                    format!("{} of {}", w.label, w.assembly),
+                    12.0,
+                    FontWeight::SEMIBOLD,
+                    t.foreground,
+                ),
+                Pickable::IGNORE,
+            ));
             if let Some(n) = &w.primary {
-                b.spawn((t.text(format!("· {n}"), 12.0, FontWeight::NORMAL, t.muted_foreground), Pickable::IGNORE));
+                b.spawn((
+                    t.text(
+                        format!("· {n}"),
+                        12.0,
+                        FontWeight::NORMAL,
+                        t.muted_foreground,
+                    ),
+                    Pickable::IGNORE,
+                ));
             }
             match w.status {
                 ContextStatus::OutOfDate => {
                     b.spawn((
                         Name::new("context-changed"),
-                        t.text("Assembly changed", 11.0, FontWeight::MEDIUM, Color::srgb_u8(0xc2, 0x6a, 0x00)),
-                        Tooltip::new("The assembly has changed since this context was taken: Update context"),
+                        t.text(
+                            "Assembly changed",
+                            11.0,
+                            FontWeight::MEDIUM,
+                            Color::srgb_u8(0xc2, 0x6a, 0x00),
+                        ),
+                        Tooltip::new(
+                            "The assembly has changed since this context was taken: Update context",
+                        ),
                     ));
                 }
                 ContextStatus::NoPrimary => {
                     b.spawn((
                         Name::new("context-no-primary"),
-                        t.text("No primary instance", 11.0, FontWeight::MEDIUM, t.feature_error),
+                        t.text(
+                            "No primary instance",
+                            11.0,
+                            FontWeight::MEDIUM,
+                            t.feature_error,
+                        ),
                         Tooltip::new(context::NO_PRIMARY),
                     ));
                 }
@@ -576,49 +792,120 @@ fn sync_context_bar(
                     .small()
                     .ghost()
                     .disabled(!can_update)
-                    .tooltip(if can_update { "Take the assembly as it is now; the features that reference it follow" } else { context::NO_PRIMARY })
+                    .tooltip(if can_update {
+                        "Take the assembly as it is now; the features that reference it follow"
+                    } else {
+                        context::NO_PRIMARY
+                    })
                     .build(&t),
             )
             .observe(move |_: On<Activate>, mut commands: Commands| {
                 commands.queue(move |world: &mut World| update_context(world, studio, id));
             });
-            b.spawn(IconButton::new("context-eye", if w.hidden { "hidden" } else { "visible" }).icon_size(15.0).tooltip(if w.hidden { "Show context" } else { "Hide context" }).build(&t))
-                .observe(move |_: On<Activate>, mut commands: Commands| {
-                    commands.queue(move |world: &mut World| set_hidden(world, studio, id));
-                });
-            b.spawn(cadrs_ui::Button::new("context-go").label("Go to assembly").small().ghost().dropdown_caret().build(&t)).observe(
-                move |a: On<Activate>, q: Query<(&ComputedNode, &UiGlobalTransform)>, theme: Res<Theme>, mut commands: Commands| {
+            b.spawn(
+                IconButton::new("context-eye", if w.hidden { "hidden" } else { "visible" })
+                    .icon_size(15.0)
+                    .tooltip(if w.hidden {
+                        "Show context"
+                    } else {
+                        "Hide context"
+                    })
+                    .build(&t),
+            )
+            .observe(move |_: On<Activate>, mut commands: Commands| {
+                commands.queue(move |world: &mut World| set_hidden(world, studio, id));
+            });
+            b.spawn(
+                cadrs_ui::Button::new("context-go")
+                    .label("Go to assembly")
+                    .small()
+                    .ghost()
+                    .dropdown_caret()
+                    .build(&t),
+            )
+            .observe(
+                move |a: On<Activate>,
+                      q: Query<(&ComputedNode, &UiGlobalTransform)>,
+                      theme: Res<Theme>,
+                      mut commands: Commands| {
                     let at = below(&q, a.entity);
-                    let mut menu = Menu::new("context-go-menu").min_width(210.0).item(MenuItem::new("context-go-menu-assembly", "Go to assembly").icon("assembly"));
+                    let mut menu = Menu::new("context-go-menu").min_width(210.0).item(
+                        MenuItem::new("context-go-menu-assembly", "Go to assembly")
+                            .icon("assembly"),
+                    );
                     // MC5.5: the part's document is another than the assembly's; MC5.6: parts
                     // made in context are always in the assembly's document.
                     menu = if external {
-                        menu.item(MenuItem::new("context-go-menu-version", "Create version and go to assembly").icon("versions"))
+                        menu.item(
+                            MenuItem::new(
+                                "context-go-menu-version",
+                                "Create version and go to assembly",
+                            )
+                            .icon("versions"),
+                        )
                     } else {
-                        menu.item(MenuItem::new("context-go-menu-insert", "Insert and go to assembly").icon("file-import"))
+                        menu.item(
+                            MenuItem::new("context-go-menu-insert", "Insert and go to assembly")
+                                .icon("file-import"),
+                        )
                     };
-                    let anchor = cadrs_ui::menu::open_context_menu(&mut commands, at, menu.build(&theme));
-                    commands.entity(anchor).observe(move |ev: On<MenuAction>, mut commands: Commands| {
-                        let item = ev.item.clone();
-                        commands.queue(move |world: &mut World| match item.as_str() {
-                            "context-go-menu-assembly" => go_to_assembly(world, studio, id),
-                            "context-go-menu-insert" => super::managed_context::open_insert_dialog(world, studio),
-                            "context-go-menu-version" => super::linked_context::go_back(world, true),
-                            _ => {}
-                        });
-                    });
+                    let anchor =
+                        cadrs_ui::menu::open_context_menu(&mut commands, at, menu.build(&theme));
+                    commands.entity(anchor).observe(
+                        move |ev: On<MenuAction>, mut commands: Commands| {
+                            let item = ev.item.clone();
+                            commands.queue(move |world: &mut World| match item.as_str() {
+                                "context-go-menu-assembly" => go_to_assembly(world, studio, id),
+                                "context-go-menu-insert" => {
+                                    super::managed_context::open_insert_dialog(world, studio)
+                                }
+                                "context-go-menu-version" => {
+                                    super::linked_context::go_back(world, true)
+                                }
+                                _ => {}
+                            });
+                        },
+                    );
                 },
             );
-            b.spawn(cadrs_ui::Button::new("context-done").label("Done").small().secondary().tooltip("Edit outside of the context").build(&t))
-                .observe(move |_: On<Activate>, mut commands: Commands| {
-                    commands.queue(move |world: &mut World| set_active(world, studio, None));
-                });
+            b.spawn(
+                cadrs_ui::Button::new("context-done")
+                    .label("Done")
+                    .small()
+                    .secondary()
+                    .tooltip("Edit outside of the context")
+                    .build(&t),
+            )
+            .observe(move |_: On<Activate>, mut commands: Commands| {
+                commands.queue(move |world: &mut World| set_active(world, studio, None));
+            });
         });
-        p.spawn(Node { align_items: AlignItems::Center, column_gap: Val::Px(10.0), padding: UiRect::left(Val::Px(21.0)), ..default() }).with_children(|b| {
-            b.spawn(cadrs_ui::Checkbox::new("context-select-transparent").label("Select transparent geometry").checked(w.view.1).height(18.0).build(&t));
-            b.spawn((t.text("Transparency", 11.0, FontWeight::NORMAL, t.muted_foreground), Pickable::IGNORE));
+        p.spawn(Node {
+            align_items: AlignItems::Center,
+            column_gap: Val::Px(10.0),
+            padding: UiRect::left(Val::Px(21.0)),
+            ..default()
+        })
+        .with_children(|b| {
+            b.spawn(
+                cadrs_ui::Checkbox::new("context-select-transparent")
+                    .label("Select transparent geometry")
+                    .checked(w.view.1)
+                    .height(18.0)
+                    .build(&t),
+            );
+            b.spawn((
+                t.text("Transparency", 11.0, FontWeight::NORMAL, t.muted_foreground),
+                Pickable::IGNORE,
+            ));
             // Left: see-through; right: solid.
-            b.spawn(cadrs_ui::Slider::new("context-opacity").value((w.view.0 as f32 / 100.0 - 0.05) / 0.9).width(110.0).tooltip("How see-through the context is").build(&t));
+            b.spawn(
+                cadrs_ui::Slider::new("context-opacity")
+                    .value((w.view.0 as f32 / 100.0 - 0.05) / 0.9)
+                    .width(110.0)
+                    .tooltip("How see-through the context is")
+                    .build(&t),
+            );
         });
     });
     commands.entity(area).add_child(row);
@@ -663,8 +950,21 @@ fn set_hidden(world: &mut World, studio: ElementId, id: ContextNo) {
         }
         return;
     }
-    let Some(hidden) = doc.element(studio).and_then(|e| e.context(id)).map(|c| c.hidden) else { return };
-    super::run(world, &SetContextHidden { studio, id, hidden: !hidden });
+    let Some(hidden) = doc
+        .element(studio)
+        .and_then(|e| e.context(id))
+        .map(|c| c.hidden)
+    else {
+        return;
+    };
+    super::run(
+        world,
+        &SetContextHidden {
+            studio,
+            id,
+            hidden: !hidden,
+        },
+    );
 }
 
 /// **Go to assembly**: the context's assembly.
@@ -674,7 +974,10 @@ pub fn go_to_assembly(world: &mut World, studio: ElementId, id: ContextNo) {
         && ctx.document.is_some_and(|d| d != this)
     {
         // MC5.4: back to the assembly's document, without a version.
-        if world.get_resource::<super::linked_context::InContextSession>().is_some_and(|s| s.part_doc == this) {
+        if world
+            .get_resource::<super::linked_context::InContextSession>()
+            .is_some_and(|s| s.part_doc == this)
+        {
             super::linked_context::go_back(world, false);
         } else {
             super::linked_context::open_assembly(world, &ctx);
@@ -694,9 +997,15 @@ pub fn go_to_assembly(world: &mut World, studio: ElementId, id: ContextNo) {
 pub fn update_context(world: &mut World, studio: ElementId, id: ContextNo) {
     let doc = world.resource::<ActiveDocument>().doc.clone();
     let doc = &doc;
-    let Some(ctx) = find_context(doc, studio, id) else { return };
+    let Some(ctx) = find_context(doc, studio, id) else {
+        return;
+    };
     // MC5.8.2: a context made from another document takes that assembly as it is now.
-    let now = if ctx.document.is_some_and(|d| d != doc.id) { super::linked_context::resnapshot(world, &ctx).map_err(cadrs_core::CommandError::Invalid) } else { context::resnapshot(doc, studio, &ctx) };
+    let now = if ctx.document.is_some_and(|d| d != doc.id) {
+        super::linked_context::resnapshot(world, &ctx).map_err(cadrs_core::CommandError::Invalid)
+    } else {
+        context::resnapshot(doc, studio, &ctx)
+    };
     let now = match now {
         Ok(n) => n,
         Err(e) => {
@@ -710,7 +1019,13 @@ pub fn update_context(world: &mut World, studio: ElementId, id: ContextNo) {
         return;
     }
     if now != ctx {
-        super::run(world, &UpdateContext { studio, context: now });
+        super::run(
+            world,
+            &UpdateContext {
+                studio,
+                context: now,
+            },
+        );
     }
 }
 
@@ -733,22 +1048,41 @@ fn sync_contexts_row(
     if !(doc.is_changed() || active.is_changed() || statuses.is_changed() || q.is_empty()) {
         return;
     }
-    let want = doc.active_element().filter(|e| e.assembly_model().is_none()).and_then(|el| {
-        let all = context::with_pending(&doc.doc, el.id);
-        if all.is_empty() {
-            return None;
-        }
-        let act = active.0.get(&el.id).copied();
-        let current = act.and_then(|a| all.iter().find(|c| c.id == a)).map(|c| c.label()).unwrap_or_else(|| "Edit outside of context".into());
-        let items: Vec<(ContextNo, String, bool)> = all
-            .iter()
-            .map(|c| {
-                let asm = statuses.assembly_names.get(&(el.id, c.id)).cloned().or_else(|| doc.doc.element(c.assembly).map(|a| a.name.clone())).unwrap_or_default();
-                (c.id, if asm.is_empty() { c.label() } else { format!("{} · {asm}", c.label()) }, statuses.get(el.id, c.id) == ContextStatus::OutOfDate)
-            })
-            .collect();
-        Some((el.id, act, items, current))
-    });
+    let want = doc
+        .active_element()
+        .filter(|e| e.assembly_model().is_none())
+        .and_then(|el| {
+            let all = context::with_pending(&doc.doc, el.id);
+            if all.is_empty() {
+                return None;
+            }
+            let act = active.0.get(&el.id).copied();
+            let current = act
+                .and_then(|a| all.iter().find(|c| c.id == a))
+                .map(|c| c.label())
+                .unwrap_or_else(|| "Edit outside of context".into());
+            let items: Vec<(ContextNo, String, bool)> = all
+                .iter()
+                .map(|c| {
+                    let asm = statuses
+                        .assembly_names
+                        .get(&(el.id, c.id))
+                        .cloned()
+                        .or_else(|| doc.doc.element(c.assembly).map(|a| a.name.clone()))
+                        .unwrap_or_default();
+                    (
+                        c.id,
+                        if asm.is_empty() {
+                            c.label()
+                        } else {
+                            format!("{} · {asm}", c.label())
+                        },
+                        statuses.get(el.id, c.id) == ContextStatus::OutOfDate,
+                    )
+                })
+                .collect();
+            Some((el.id, act, items, current))
+        });
     let key = want.as_ref().map(|w| format!("{w:?}")).unwrap_or_default();
     if let Some((e, k)) = q.iter().next() {
         if k.0 == key {
@@ -756,8 +1090,16 @@ fn sync_contexts_row(
         }
         commands.entity(e).try_despawn();
     }
-    let Some((studio, act, items, current)) = want else { return };
-    let Some(pane) = q_pane.iter().find(|(_, n)| n.as_str() == "features-pane").map(|(e, _)| e) else { return };
+    let Some((studio, act, items, current)) = want else {
+        return;
+    };
+    let Some(pane) = q_pane
+        .iter()
+        .find(|(_, n)| n.as_str() == "features-pane")
+        .map(|(e, _)| e)
+    else {
+        return;
+    };
     let t = theme.clone();
     let items_menu = items.clone();
     let row = commands
@@ -775,54 +1117,128 @@ fn sync_contexts_row(
             BorderColor::all(t.border),
         ))
         .with_children(|r| {
-            r.spawn((t.text("Assembly contexts", t.font_sm, FontWeight::SEMIBOLD, t.foreground), Pickable::IGNORE));
-            r.spawn(Node { align_items: AlignItems::Center, column_gap: Val::Px(4.0), ..default() }).with_children(|b| {
-                b.spawn(cadrs_ui::Button::new("context-select").label(current).small().outline().dropdown_caret().width(Val::Px(140.0)).tooltip("The context shown, or editing outside of context").build(&t))
-                    .observe(move |a: On<Activate>, q: Query<(&ComputedNode, &UiGlobalTransform)>, theme: Res<Theme>, mut commands: Commands| {
+            r.spawn((
+                t.text(
+                    "Assembly contexts",
+                    t.font_sm,
+                    FontWeight::SEMIBOLD,
+                    t.foreground,
+                ),
+                Pickable::IGNORE,
+            ));
+            r.spawn(Node {
+                align_items: AlignItems::Center,
+                column_gap: Val::Px(4.0),
+                ..default()
+            })
+            .with_children(|b| {
+                b.spawn(
+                    cadrs_ui::Button::new("context-select")
+                        .label(current)
+                        .small()
+                        .outline()
+                        .dropdown_caret()
+                        .width(Val::Px(140.0))
+                        .tooltip("The context shown, or editing outside of context")
+                        .build(&t),
+                )
+                .observe(
+                    move |a: On<Activate>,
+                          q: Query<(&ComputedNode, &UiGlobalTransform)>,
+                          theme: Res<Theme>,
+                          mut commands: Commands| {
                         let at = below(&q, a.entity);
                         let mut menu = Menu::new("context-select-menu").min_width(190.0);
                         for (i, label, stale) in &items_menu {
-                            let mut item = MenuItem::new(format!("context-select-menu-{i}"), label.clone()).checked(act == Some(*i));
+                            let mut item =
+                                MenuItem::new(format!("context-select-menu-{i}"), label.clone())
+                                    .checked(act == Some(*i));
                             if *stale {
                                 item = item.dot(STALE).tooltip("An update is available");
                             }
                             menu = menu.item(item);
                         }
-                        menu = menu.separator().item(MenuItem::new("context-select-menu-outside", "Edit outside of context").checked(act.is_none()));
-                        let anchor = cadrs_ui::menu::open_context_menu(&mut commands, at, menu.build(&theme));
-                        commands.entity(anchor).observe(move |ev: On<MenuAction>, mut commands: Commands| {
-                            let item = ev.item.clone();
-                            commands.queue(move |world: &mut World| {
-                                if item == "context-select-menu-outside" {
-                                    set_active(world, studio, None);
-                                } else if let Some(i) = item.strip_prefix("context-select-menu-").and_then(|n| n.parse::<ContextNo>().ok()) {
-                                    set_active(world, studio, Some(i));
-                                }
-                            });
-                        });
-                    });
-                b.spawn(IconButton::new("context-more", "more-horizontal").icon_size(15.0).tooltip("Rename, update or delete the context").build(&t)).observe(
-                    move |a: On<Activate>, q: Query<(&ComputedNode, &UiGlobalTransform)>, theme: Res<Theme>, mut commands: Commands| {
+                        menu = menu.separator().item(
+                            MenuItem::new("context-select-menu-outside", "Edit outside of context")
+                                .checked(act.is_none()),
+                        );
+                        let anchor = cadrs_ui::menu::open_context_menu(
+                            &mut commands,
+                            at,
+                            menu.build(&theme),
+                        );
+                        commands.entity(anchor).observe(
+                            move |ev: On<MenuAction>, mut commands: Commands| {
+                                let item = ev.item.clone();
+                                commands.queue(move |world: &mut World| {
+                                    if item == "context-select-menu-outside" {
+                                        set_active(world, studio, None);
+                                    } else if let Some(i) = item
+                                        .strip_prefix("context-select-menu-")
+                                        .and_then(|n| n.parse::<ContextNo>().ok())
+                                    {
+                                        set_active(world, studio, Some(i));
+                                    }
+                                });
+                            },
+                        );
+                    },
+                );
+                b.spawn(
+                    IconButton::new("context-more", "more-horizontal")
+                        .icon_size(15.0)
+                        .tooltip("Rename, update or delete the context")
+                        .build(&t),
+                )
+                .observe(
+                    move |a: On<Activate>,
+                          q: Query<(&ComputedNode, &UiGlobalTransform)>,
+                          theme: Res<Theme>,
+                          mut commands: Commands| {
                         let at = below(&q, a.entity);
                         let none = act.is_none();
                         let menu = Menu::new("context-more-menu")
                             .min_width(170.0)
-                            .item(MenuItem::new("context-more-menu-rename", "Rename…").icon("edit").disabled(none))
-                            .item(MenuItem::new("context-more-menu-update", "Update context").icon("restore").disabled(none))
-                            .item(MenuItem::new("context-more-menu-delete", "Delete context").icon("delete").disabled(none));
-                        let anchor = cadrs_ui::menu::open_context_menu(&mut commands, at, menu.build(&theme));
-                        commands.entity(anchor).observe(move |ev: On<MenuAction>, mut commands: Commands| {
-                            let (item, at) = (ev.item.clone(), at);
-                            commands.queue(move |world: &mut World| {
-                                let Some(id) = act else { return };
-                                match item.as_str() {
-                                    "context-more-menu-rename" => open_rename(world, studio, id, at),
-                                    "context-more-menu-update" => update_context(world, studio, id),
-                                    "context-more-menu-delete" => delete_context(world, studio, id),
-                                    _ => {}
-                                }
-                            });
-                        });
+                            .item(
+                                MenuItem::new("context-more-menu-rename", "Rename…")
+                                    .icon("edit")
+                                    .disabled(none),
+                            )
+                            .item(
+                                MenuItem::new("context-more-menu-update", "Update context")
+                                    .icon("restore")
+                                    .disabled(none),
+                            )
+                            .item(
+                                MenuItem::new("context-more-menu-delete", "Delete context")
+                                    .icon("delete")
+                                    .disabled(none),
+                            );
+                        let anchor = cadrs_ui::menu::open_context_menu(
+                            &mut commands,
+                            at,
+                            menu.build(&theme),
+                        );
+                        commands.entity(anchor).observe(
+                            move |ev: On<MenuAction>, mut commands: Commands| {
+                                let (item, at) = (ev.item.clone(), at);
+                                commands.queue(move |world: &mut World| {
+                                    let Some(id) = act else { return };
+                                    match item.as_str() {
+                                        "context-more-menu-rename" => {
+                                            open_rename(world, studio, id, at)
+                                        }
+                                        "context-more-menu-update" => {
+                                            update_context(world, studio, id)
+                                        }
+                                        "context-more-menu-delete" => {
+                                            delete_context(world, studio, id)
+                                        }
+                                        _ => {}
+                                    }
+                                });
+                            },
+                        );
                     },
                 );
             });
@@ -839,11 +1255,15 @@ const STALE: Color = Color::srgb(0.17, 0.49, 0.91);
 struct Renaming(ElementId, ContextNo);
 
 fn open_rename(world: &mut World, studio: ElementId, id: ContextNo, at: Vec2) {
-    let Some(ctx) = find_context(&world.resource::<ActiveDocument>().doc, studio, id) else { return };
+    let Some(ctx) = find_context(&world.resource::<ActiveDocument>().doc, studio, id) else {
+        return;
+    };
     world.insert_resource(Renaming(studio, id));
     let theme = world.resource::<Theme>().clone();
     let mut commands = world.commands();
-    NamePopup::new("context-rename", "Rename context", at).value(ctx.label()).spawn(&mut commands, &theme);
+    NamePopup::new("context-rename", "Rename context", at)
+        .value(ctx.label())
+        .spawn(&mut commands, &theme);
     world.flush();
 }
 
@@ -897,9 +1317,22 @@ pub fn delete_context(world: &mut World, studio: ElementId, id: ContextNo) {
 
 /// Adds a context to the document now (not waiting for a reference): for scripts and tests.
 pub fn commit_pending(world: &mut World, studio: ElementId) {
-    let Some(ctx) = context::pending(world.resource::<ActiveDocument>().doc.id, studio) else { return };
-    if world.resource::<ActiveDocument>().doc.element(studio).is_some_and(|e| e.context(ctx.id).is_none()) {
-        super::run(world, &AddContext { studio, context: ctx });
+    let Some(ctx) = context::pending(world.resource::<ActiveDocument>().doc.id, studio) else {
+        return;
+    };
+    if world
+        .resource::<ActiveDocument>()
+        .doc
+        .element(studio)
+        .is_some_and(|e| e.context(ctx.id).is_none())
+    {
+        super::run(
+            world,
+            &AddContext {
+                studio,
+                context: ctx,
+            },
+        );
     }
 }
 
@@ -932,7 +1365,15 @@ fn arrow_node(t: &Theme, name: String, s: &ArrowState) -> impl Bundle {
     let _ = t;
     (
         Name::new(name),
-        Node { width: Val::Px(16.0), height: Val::Px(14.0), flex_shrink: 0.0, align_items: AlignItems::Center, justify_content: JustifyContent::Center, margin: UiRect::left(Val::Px(2.0)), ..default() },
+        Node {
+            width: Val::Px(16.0),
+            height: Val::Px(14.0),
+            flex_shrink: 0.0,
+            align_items: AlignItems::Center,
+            justify_content: JustifyContent::Center,
+            margin: UiRect::left(Val::Px(2.0)),
+            ..default()
+        },
         Tooltip::new(s.tip.clone()),
         Pickable::default(),
         Children::spawn((
@@ -942,11 +1383,25 @@ fn arrow_node(t: &Theme, name: String, s: &ArrowState) -> impl Bundle {
             SpawnWith({
                 let (solid, color) = (s.solid, s.color);
                 move |p: &mut ChildSpawner| {
-                    let name = if solid { "in-context" } else { "in-context-secondary" };
+                    let name = if solid {
+                        "in-context"
+                    } else {
+                        "in-context-secondary"
+                    };
                     if cadrs_ui::icon::has_icon(name) {
                         p.spawn(icon(name, 14.0, color));
                     } else {
-                        p.spawn((icon("arrow-up", 14.0, if solid { color } else { color.with_alpha(0.5) }), bevy::ui::UiTransform { rotation: Rot2::degrees(-90.0), ..default() }));
+                        p.spawn((
+                            icon(
+                                "arrow-up",
+                                14.0,
+                                if solid { color } else { color.with_alpha(0.5) },
+                            ),
+                            bevy::ui::UiTransform {
+                                rotation: Rot2::degrees(-90.0),
+                                ..default()
+                            },
+                        ));
                     }
                 }
             }),
@@ -975,7 +1430,14 @@ fn arrow_node(t: &Theme, name: String, s: &ArrowState) -> impl Bundle {
 }
 
 /// Puts `want` on the row `row` (named `name`), replacing what it had.
-fn place_arrow(commands: &mut Commands, t: &Theme, row: Entity, name: &str, have: Option<&Arrow>, want: Option<ArrowState>) {
+fn place_arrow(
+    commands: &mut Commands,
+    t: &Theme,
+    row: Entity,
+    name: &str,
+    have: Option<&Arrow>,
+    want: Option<ArrowState>,
+) {
     if have.map(|a| &a.state) == want.as_ref() {
         return;
     }
@@ -984,8 +1446,13 @@ fn place_arrow(commands: &mut Commands, t: &Theme, row: Entity, name: &str, have
         commands.entity(row).remove::<Arrow>();
     }
     if let Some(s) = want {
-        let node = commands.spawn(arrow_node(t, format!("{name}-in-context"), &s)).id();
-        commands.entity(row).add_child(node).insert(Arrow { state: s, node });
+        let node = commands
+            .spawn(arrow_node(t, format!("{name}-in-context"), &s))
+            .id();
+        commands
+            .entity(row)
+            .add_child(node)
+            .insert(Arrow { state: s, node });
     }
 }
 
@@ -1002,7 +1469,12 @@ fn sync_feature_arrows(
     if !(doc.is_changed() || active.is_changed() || statuses.is_changed() || !added.is_empty()) {
         return;
     }
-    let Some(el) = doc.active_element().filter(|e| e.assembly_model().is_none()) else { return };
+    let Some(el) = doc
+        .active_element()
+        .filter(|e| e.assembly_model().is_none())
+    else {
+        return;
+    };
     if el.contexts.is_empty() && q.iter().all(|(.., a)| a.is_none()) {
         return;
     }
@@ -1014,13 +1486,24 @@ fn sync_feature_arrows(
                 return None;
             }
             let on_active = act.is_some_and(|a| uses.contains(&a));
-            let stale = uses.iter().any(|c| statuses.get(el.id, *c) == ContextStatus::OutOfDate);
-            let names: Vec<String> = uses.iter().filter_map(|c| el.context(*c)).map(|c| c.label()).collect();
+            let stale = uses
+                .iter()
+                .any(|c| statuses.get(el.id, *c) == ContextStatus::OutOfDate);
+            let names: Vec<String> = uses
+                .iter()
+                .filter_map(|c| el.context(*c))
+                .map(|c| c.label())
+                .collect();
             let mut tip = format!("In context: {}", names.join(", "));
             if stale {
                 tip.push_str(" · an update is available");
             }
-            Some(ArrowState { solid: true, color: if on_active { ACTIVE_ARROW } else { OTHER_ARROW }, stale, tip })
+            Some(ArrowState {
+                solid: true,
+                color: if on_active { ACTIVE_ARROW } else { OTHER_ARROW },
+                stale,
+                tip,
+            })
         });
         place_arrow(&mut commands, &theme, row, name.as_str(), have, want);
     }
@@ -1038,7 +1521,12 @@ fn sync_instance_arrows(
     if !(doc.is_changed() || statuses.is_changed() || !added.is_empty()) {
         return;
     }
-    let Some(asm_el) = doc.active_element().filter(|e| e.assembly_model().is_some()) else { return };
+    let Some(asm_el) = doc
+        .active_element()
+        .filter(|e| e.assembly_model().is_some())
+    else {
+        return;
+    };
     let assembly = asm_el.id;
     let by_studio = context::contexts_in(&doc.doc, assembly);
     if by_studio.is_empty() && statuses.linked.is_empty() && q.iter().all(|(.., a)| a.is_none()) {
@@ -1047,19 +1535,41 @@ fn sync_instance_arrows(
     for (row, ir, name, have) in &q {
         // MC5: a linked instance's Part Studio is in another document.
         if let Some((primary, stale, studio)) = statuses.linked.get(&ir.0) {
-            let mut tip = if *primary { format!("Primary instance of an in-context Part Studio ({studio})") } else { format!("Secondary instance: {studio} has in-context references") };
+            let mut tip = if *primary {
+                format!("Primary instance of an in-context Part Studio ({studio})")
+            } else {
+                format!("Secondary instance: {studio} has in-context references")
+            };
             if *stale {
                 tip.push_str(" · an update is available");
             }
-            place_arrow(&mut commands, &theme, row, name.as_str(), have, Some(ArrowState { solid: *primary, color: theme.muted_foreground, stale: *stale, tip }));
+            place_arrow(
+                &mut commands,
+                &theme,
+                row,
+                name.as_str(),
+                have,
+                Some(ArrowState {
+                    solid: *primary,
+                    color: theme.muted_foreground,
+                    stale: *stale,
+                    tip,
+                }),
+            );
             continue;
         }
         let want = context::studio_of(&doc.doc, assembly, ir.0).and_then(|studio| {
             let (_, ids) = by_studio.iter().find(|(s, _)| *s == studio)?;
             let el = doc.doc.element(studio)?;
             let ctxs: Vec<&StudioContext> = ids.iter().filter_map(|i| el.context(*i)).collect();
-            let primary: Vec<String> = ctxs.iter().filter(|c| c.instance == ir.0).map(|c| c.label()).collect();
-            let stale = ctxs.iter().any(|c| statuses.get(studio, c.id) == ContextStatus::OutOfDate);
+            let primary: Vec<String> = ctxs
+                .iter()
+                .filter(|c| c.instance == ir.0)
+                .map(|c| c.label())
+                .collect();
+            let stale = ctxs
+                .iter()
+                .any(|c| statuses.get(studio, c.id) == ContextStatus::OutOfDate);
             let solid = !primary.is_empty();
             let mut tip = if solid {
                 format!("Primary instance of {} ({})", primary.join(", "), el.name)
@@ -1069,7 +1579,12 @@ fn sync_instance_arrows(
             if stale {
                 tip.push_str(" · an update is available");
             }
-            Some(ArrowState { solid, color: theme.muted_foreground, stale, tip })
+            Some(ArrowState {
+                solid,
+                color: theme.muted_foreground,
+                stale,
+                tip,
+            })
         });
         place_arrow(&mut commands, &theme, row, name.as_str(), have, want);
     }

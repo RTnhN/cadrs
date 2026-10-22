@@ -15,7 +15,6 @@
 //! - Measuring is a view: nothing in the document changes, and nothing is undone.
 //! - Not while a sketch or a feature dialog is open (the selection belongs to it then).
 
-use cadrs_ui::ShortcutKey;
 use bevy::input::ButtonState;
 use bevy::input::keyboard::KeyboardInput;
 use bevy::input_focus::InputFocus;
@@ -24,6 +23,7 @@ use bevy::text::FontWeight;
 use bevy::ui_widgets::{Activate, observe};
 use cadrs_core::measure::{self, Entity as Measured, Measurement, Mode};
 use cadrs_sketch::units::Units;
+use cadrs_ui::ShortcutKey;
 use cadrs_ui::prelude::*;
 use cadrs_ui::{FloatingPanel, FloatingPanelBody, FloatingPanelClose, TabStrip, TabStripSelect};
 
@@ -41,7 +41,14 @@ impl Plugin for MeasurePlugin {
             .add_systems(Startup, configure_gizmos)
             .add_systems(
                 Update,
-                (measure_keys, compute, sync_summary, sync_panel, place_panel, draw_measure)
+                (
+                    measure_keys,
+                    compute,
+                    sync_summary,
+                    sync_panel,
+                    place_panel,
+                    draw_measure,
+                )
                     .chain()
                     .after(crate::parts::PartsSet)
                     .run_if(in_state(AppState::Document)),
@@ -82,7 +89,8 @@ fn configure_gizmos(mut store: ResMut<GizmoConfigStore>) {
     config.depth_bias = -1.0;
     // On top of the parts (depth off): a distance between faces often runs inside a part
     // (P3E.3b judge: measure 08, two blocks' top faces 5 mm apart).
-    config.render_layers = bevy::camera::visibility::RenderLayers::layer(crate::viewport::OVERLAY_LAYER);
+    config.render_layers =
+        bevy::camera::visibility::RenderLayers::layer(crate::viewport::OVERLAY_LAYER);
 }
 
 /// The bottom-right readout.
@@ -121,7 +129,11 @@ pub fn entity_of(pick: Pick, cache: &PartCache) -> Option<Measured> {
         Pick::Origin => Measured::point([0.0; 3]),
         Pick::Plane(k) => {
             let k: PlaneKind = k;
-            Measured::plane(&cadrs_sketch::PlaneFrame { origin: [0.0; 3], u: v3(k.u()), v: v3(k.v()) })
+            Measured::plane(&cadrs_sketch::PlaneFrame {
+                origin: [0.0; 3],
+                u: v3(k.u()),
+                v: v3(k.v()),
+            })
         }
         Pick::Feature(f) => {
             if let Some(frame) = cache.planes.get(&f) {
@@ -161,7 +173,11 @@ fn distance_label(mode: Mode) -> &'static str {
 pub fn summary(m: &Measurement, units: &Units) -> Vec<String> {
     let mut out = Vec::new();
     if let Some(d) = m.distance {
-        out.push(format!("{}: {}", distance_label(m.mode), units.fixed_length(d.value)));
+        out.push(format!(
+            "{}: {}",
+            distance_label(m.mode),
+            units.fixed_length(d.value)
+        ));
     }
     if let Some(a) = m.angle {
         out.push(format!("Angle: {}", degrees(units, a)));
@@ -183,20 +199,39 @@ pub fn summary(m: &Measurement, units: &Units) -> Vec<String> {
 
 /// The panel's rows.
 fn rows(m: &Measurement, units: &Units) -> Vec<Row> {
-    let row = |name: &str, label: &str, value: String, color: Option<[u8; 3]>| (format!("measure-{name}"), label.to_string(), value, color);
+    let row = |name: &str, label: &str, value: String, color: Option<[u8; 3]>| {
+        (format!("measure-{name}"), label.to_string(), value, color)
+    };
     let mut out = Vec::new();
     if let Some(d) = m.distance {
-        out.push(row("distance", distance_label(m.mode), units.fixed_length(d.value), None));
+        out.push(row(
+            "distance",
+            distance_label(m.mode),
+            units.fixed_length(d.value),
+            None,
+        ));
         let c = d.components();
-        for ((name, label), (v, color)) in [("dx", "\u{394}X"), ("dy", "\u{394}Y"), ("dz", "\u{394}Z")].into_iter().zip(c.into_iter().zip([RED, GREEN, BLUE])) {
-            out.push(row(name, label, units.fixed_length_of(v, d.value), Some(color)));
+        for ((name, label), (v, color)) in
+            [("dx", "\u{394}X"), ("dy", "\u{394}Y"), ("dz", "\u{394}Z")]
+                .into_iter()
+                .zip(c.into_iter().zip([RED, GREEN, BLUE]))
+        {
+            out.push(row(
+                name,
+                label,
+                units.fixed_length_of(v, d.value),
+                Some(color),
+            ));
         }
     }
     if let Some(a) = m.angle {
         out.push(row("angle", "Angle", degrees(units, a), None));
     }
     if let Some(p) = m.point {
-        for ((name, label), (v, color)) in [("x", "X"), ("y", "Y"), ("z", "Z")].into_iter().zip(p.into_iter().zip([RED, GREEN, BLUE])) {
+        for ((name, label), (v, color)) in [("x", "X"), ("y", "Y"), ("z", "Z")]
+            .into_iter()
+            .zip(p.into_iter().zip([RED, GREEN, BLUE]))
+        {
             out.push(row(name, label, units.fixed_length(v), Some(color)));
         }
     }
@@ -208,7 +243,12 @@ fn rows(m: &Measurement, units: &Units) -> Vec<Row> {
     }
     if let Some(r) = m.radius {
         out.push(row("radius", "Radius", units.fixed_length(r), None));
-        out.push(row("diameter", "Diameter", units.fixed_length(2.0 * r), None));
+        out.push(row(
+            "diameter",
+            "Diameter",
+            units.fixed_length(2.0 * r),
+            None,
+        ));
     }
     out
 }
@@ -224,8 +264,14 @@ fn compute(
     q_dialogs: Query<(), With<cadrs_ui::FeatureDialogState>>,
     mut out: ResMut<MeasureResult>,
 ) {
-    let active = matches!(*kind, ActiveKind::PartStudio | ActiveKind::Assembly) && sketch.is_none() && q_dialogs.is_empty();
-    let picks = if active { selection.0.clone() } else { Vec::new() };
+    let active = matches!(*kind, ActiveKind::PartStudio | ActiveKind::Assembly)
+        && sketch.is_none()
+        && q_dialogs.is_empty();
+    let picks = if active {
+        selection.0.clone()
+    } else {
+        Vec::new()
+    };
     let key = (picks, cache.generation, mode.0);
     if out.key.as_ref() == Some(&key) {
         return;
@@ -250,7 +296,11 @@ fn sync_summary(
     mut commands: Commands,
 ) {
     let triad = q_names.iter().any(|(_, n)| n.as_str() == "measure-readout");
-    let items = if triad { Vec::new() } else { summary(&result.measurement, &units.0) };
+    let items = if triad {
+        Vec::new()
+    } else {
+        summary(&result.measurement, &units.0)
+    };
     let text = items.join("   ");
     let shown = q_summary.iter().next();
     if last.as_ref() == Some(&items) && shown.is_some() != items.is_empty() {
@@ -271,7 +321,9 @@ fn sync_summary(
         }
         return;
     }
-    let Some((tools, _)) = q_names.iter().find(|(_, n)| n.as_str() == "viewport-tools") else { return };
+    let Some((tools, _)) = q_names.iter().find(|(_, n)| n.as_str() == "viewport-tools") else {
+        return;
+    };
     let e = commands
         .spawn((
             Name::new("measure-summary"),
@@ -285,8 +337,14 @@ fn sync_summary(
             },
             observe(|_: On<Pointer<Click>>, mut commands: Commands| commands.queue(toggle_panel)),
             children![
-                (cadrs_ui::icon::icon("measure", 14.0, theme.muted_foreground), Pickable::IGNORE),
-                (theme.text(text, 11.5, FontWeight::MEDIUM, theme.foreground), Pickable::IGNORE),
+                (
+                    cadrs_ui::icon::icon("measure", 14.0, theme.muted_foreground),
+                    Pickable::IGNORE
+                ),
+                (
+                    theme.text(text, 11.5, FontWeight::MEDIUM, theme.foreground),
+                    Pickable::IGNORE
+                ),
             ],
         ))
         .id();
@@ -303,7 +361,9 @@ fn toggle_panel(world: &mut World) {
 
 /// The bottom-right Measure tool, and the assembly toolbar's Measure.
 fn on_tool(a: On<Activate>, q: Query<&Name>, mut commands: Commands) {
-    if q.get(a.entity).is_ok_and(|n| matches!(n.as_str(), "view-measure" | "measure")) {
+    if q.get(a.entity)
+        .is_ok_and(|n| matches!(n.as_str(), "view-measure" | "measure"))
+    {
         commands.queue(toggle_panel);
     }
 }
@@ -314,7 +374,12 @@ fn on_close(ev: On<FloatingPanelClose>, q: Query<(), With<PanelRoot>>, mut comma
     }
 }
 
-fn on_mode(ev: On<TabStripSelect>, q: Query<&Name>, result: Res<MeasureResult>, mut mode: ResMut<MeasureMode>) {
+fn on_mode(
+    ev: On<TabStripSelect>,
+    q: Query<&Name>,
+    result: Res<MeasureResult>,
+    mut mode: ResMut<MeasureMode>,
+) {
     if !q.get(ev.entity).is_ok_and(|n| n.as_str() == "measure-mode") {
         return;
     }
@@ -344,10 +409,23 @@ fn measure_keys(
     mut commands: Commands,
 ) {
     let typing = focus.get().is_some_and(|e| q_fields.contains(e));
-    let modifier = keys.any_pressed([KeyCode::ControlLeft, KeyCode::ControlRight, KeyCode::AltLeft, KeyCode::AltRight, KeyCode::ShiftLeft, KeyCode::ShiftRight]);
-    let viewing = matches!(*kind, ActiveKind::PartStudio | ActiveKind::Assembly) && sketch.is_none();
+    let modifier = keys.any_pressed([
+        KeyCode::ControlLeft,
+        KeyCode::ControlRight,
+        KeyCode::AltLeft,
+        KeyCode::AltRight,
+        KeyCode::ShiftLeft,
+        KeyCode::ShiftRight,
+    ]);
+    let viewing =
+        matches!(*kind, ActiveKind::PartStudio | ActiveKind::Assembly) && sketch.is_none();
     for k in keys_in.read() {
-        if k.state != ButtonState::Pressed || typing || !q_dialogs.is_empty() || !q_menus.is_empty() || !viewing {
+        if k.state != ButtonState::Pressed
+            || typing
+            || !q_dialogs.is_empty()
+            || !q_menus.is_empty()
+            || !viewing
+        {
             continue;
         }
         match k.shortcut_code() {
@@ -381,10 +459,14 @@ fn sync_panel(
         return;
     }
     let Some((root, mut state)) = q_panel.iter_mut().next() else {
-        let Some(area) = q_area.iter().next() else { return };
+        let Some(area) = q_area.iter().next() else {
+            return;
+        };
         let e = commands
             .spawn((
-                FloatingPanel::new("measure-dialog", "Measure").width(PANEL_WIDTH).build(&theme),
+                FloatingPanel::new("measure-dialog", "Measure")
+                    .width(PANEL_WIDTH)
+                    .build(&theme),
                 PanelRoot::default(),
                 Visibility::Hidden,
                 DespawnOnExit(AppState::Document),
@@ -398,12 +480,22 @@ fn sync_panel(
     // The mode strip's state is part of what is built.
     let two = result.count == 2;
     if two {
-        built.insert(0, ("measure-mode".into(), format!("{:?}", mode.0), m.has_center.to_string(), None));
+        built.insert(
+            0,
+            (
+                "measure-mode".into(),
+                format!("{:?}", mode.0),
+                m.has_center.to_string(),
+                None,
+            ),
+        );
     }
     if state.built.as_ref() == Some(&built) {
         return;
     }
-    let Some((body, _)) = q_body.iter().find(|(_, b)| b.0 == root) else { return };
+    let Some((body, _)) = q_body.iter().find(|(_, b)| b.0 == root) else {
+        return;
+    };
     state.built = Some(built.clone());
     commands.entity(body).despawn_related::<Children>();
     let t = theme.clone();
@@ -415,18 +507,33 @@ fn sync_panel(
     commands.entity(body).with_children(move |b| {
         let mut rows = built.as_slice();
         if two {
-            let mut strip = TabStrip::new("measure-mode").compact().tab("Minimum").tab("Maximum");
+            let mut strip = TabStrip::new("measure-mode")
+                .compact()
+                .tab("Minimum")
+                .tab("Maximum");
             if m_has_center(&built) {
                 strip = strip.tab("Center to center");
             }
-            b.spawn(Node { margin: UiRect::bottom(Val::Px(4.0)), ..default() }).with_child(strip.selected(selected).build(&t));
+            b.spawn(Node {
+                margin: UiRect::bottom(Val::Px(4.0)),
+                ..default()
+            })
+            .with_child(strip.selected(selected).build(&t));
             rows = &built[1..];
         }
         if rows.is_empty() {
             b.spawn((
                 Name::new("measure-empty"),
-                t.text("Select entities to measure", 11.5, FontWeight::MEDIUM, t.muted_foreground),
-                Node { margin: UiRect::vertical(Val::Px(6.0)), ..default() },
+                t.text(
+                    "Select entities to measure",
+                    11.5,
+                    FontWeight::MEDIUM,
+                    t.muted_foreground,
+                ),
+                Node {
+                    margin: UiRect::vertical(Val::Px(6.0)),
+                    ..default()
+                },
             ));
         }
         for (name, label, value, color) in rows {
@@ -437,15 +544,34 @@ fn sync_panel(
 
 /// Whether the built mode strip offers Center to center.
 fn m_has_center(built: &[Row]) -> bool {
-    built.first().is_some_and(|r| r.0 == "measure-mode" && r.2 == "true")
+    built
+        .first()
+        .is_some_and(|r| r.0 == "measure-mode" && r.2 == "true")
 }
 
-fn value_row(p: &mut ChildSpawnerCommands, t: &Theme, name: &str, label: &str, value: &str, color: Option<[u8; 3]>) {
+fn value_row(
+    p: &mut ChildSpawnerCommands,
+    t: &Theme,
+    name: &str,
+    label: &str,
+    value: &str,
+    color: Option<[u8; 3]>,
+) {
     let label_color = color.map_or(t.foreground, |[r, g, b]| Color::srgb_u8(r, g, b));
-    p.spawn(Node { height: Val::Px(24.0), align_items: AlignItems::Center, column_gap: Val::Px(6.0), ..default() }).with_children(|r| {
+    p.spawn(Node {
+        height: Val::Px(24.0),
+        align_items: AlignItems::Center,
+        column_gap: Val::Px(6.0),
+        ..default()
+    })
+    .with_children(|r| {
         r.spawn((
             t.text(label.to_string(), 11.5, FontWeight::MEDIUM, label_color),
-            Node { width: Val::Px(110.0), flex_shrink: 0.0, ..default() },
+            Node {
+                width: Val::Px(110.0),
+                flex_shrink: 0.0,
+                ..default()
+            },
         ));
         r.spawn((
             Node {
@@ -458,7 +584,15 @@ fn value_row(p: &mut ChildSpawnerCommands, t: &Theme, name: &str, label: &str, v
             },
             BorderColor::all(Color::srgb_u8(0xd8, 0xd8, 0xd8)),
         ))
-        .with_child((Name::new(name.to_string()), t.text(value.to_string(), 12.0, FontWeight::MEDIUM, t.tool_foreground)));
+        .with_child((
+            Name::new(name.to_string()),
+            t.text(
+                value.to_string(),
+                12.0,
+                FontWeight::MEDIUM,
+                t.tool_foreground,
+            ),
+        ));
     });
 }
 
@@ -468,7 +602,9 @@ fn place_panel(
     q_area: Query<&ComputedNode, With<ViewportArea>>,
     mut q_panel: Query<(&mut PanelRoot, &mut Node, &ComputedNode, &mut Visibility)>,
 ) {
-    let Some(area) = q_area.iter().next() else { return };
+    let Some(area) = q_area.iter().next() else {
+        return;
+    };
     for (mut state, mut node, computed, mut vis) in &mut q_panel {
         let px = |v: Val| if let Val::Px(x) = v { x } else { 0.0 };
         let now = Vec2::new(px(node.left), px(node.top));
@@ -476,11 +612,17 @@ fn place_panel(
             continue;
         }
         let s = area.inverse_scale_factor();
-        let (size, own) = (area.size() * s, computed.size() * computed.inverse_scale_factor());
+        let (size, own) = (
+            area.size() * s,
+            computed.size() * computed.inverse_scale_factor(),
+        );
         if own.y <= 0.0 {
             continue;
         }
-        let at = Vec2::new((size.x - PANEL_WIDTH - 8.0).max(0.0), (size.y - own.y - 34.0).max(0.0));
+        let at = Vec2::new(
+            (size.x - PANEL_WIDTH - 8.0).max(0.0),
+            (size.y - own.y - 34.0).max(0.0),
+        );
         if now != at {
             node.left = Val::Px(at.x);
             node.top = Val::Px(at.y);
@@ -494,13 +636,20 @@ fn place_panel(
 
 /// The distance in the view: the line between its two points, and while the panel is open its
 /// X, Y and Z components.
-fn draw_measure(result: Res<MeasureResult>, panel: Option<Res<MeasurePanel>>, q_summary: Query<(), With<Summary>>, mut g: Gizmos<MeasureGizmos>) {
+fn draw_measure(
+    result: Res<MeasureResult>,
+    panel: Option<Res<MeasurePanel>>,
+    q_summary: Query<(), With<Summary>>,
+    mut g: Gizmos<MeasureGizmos>,
+) {
     // Only with the readout or the panel showing the distance: not while the triad's readout
     // stands in for it (P3E.5 judge: a line between two selected hole edges, unexplained).
     if panel.is_none() && q_summary.is_empty() {
         return;
     }
-    let Some(d) = result.measurement.distance else { return };
+    let Some(d) = result.measurement.distance else {
+        return;
+    };
     if d.value < 1e-9 {
         return;
     }
@@ -530,17 +679,40 @@ mod tests {
     fn summary_reads_like_onshape() {
         let u = Units::default();
         let m = Measurement {
-            distance: Some(Distance { value: 15.0, from: [0.0; 3], to: [15.0, 0.0, 0.0] }),
+            distance: Some(Distance {
+                value: 15.0,
+                from: [0.0; 3],
+                to: [15.0, 0.0, 0.0],
+            }),
             angle: Some(90.0),
             ..Default::default()
         };
-        assert_eq!(summary(&m, &u), vec!["Distance: 15.000 mm".to_string(), "Angle: 90.000\u{b0}".to_string()]);
-        let m = Measurement { length: Some(62.832), radius: Some(10.0), ..Default::default() };
+        assert_eq!(
+            summary(&m, &u),
+            vec![
+                "Distance: 15.000 mm".to_string(),
+                "Angle: 90.000\u{b0}".to_string()
+            ]
+        );
+        let m = Measurement {
+            length: Some(62.832),
+            radius: Some(10.0),
+            ..Default::default()
+        };
         assert_eq!(summary(&m, &u), vec!["Diameter: 20.000 mm".to_string()]);
         let r = rows(&m, &u);
-        assert!(r.iter().any(|x| x.0 == "measure-length" && x.2 == "62.832 mm"));
-        assert!(r.iter().any(|x| x.0 == "measure-radius" && x.2 == "10.000 mm"));
-        let m = Measurement { area: Some(6000.0), ..Default::default() };
+        assert!(
+            r.iter()
+                .any(|x| x.0 == "measure-length" && x.2 == "62.832 mm")
+        );
+        assert!(
+            r.iter()
+                .any(|x| x.0 == "measure-radius" && x.2 == "10.000 mm")
+        );
+        let m = Measurement {
+            area: Some(6000.0),
+            ..Default::default()
+        };
         assert_eq!(summary(&m, &u), vec!["Area: 6000.000 mm\u{b2}".to_string()]);
     }
 }

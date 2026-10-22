@@ -24,7 +24,9 @@ pub struct NamePopupPlugin;
 
 impl Plugin for NamePopupPlugin {
     fn build(&self, app: &mut App) {
-        app.add_observer(on_submit).add_observer(on_cancel).add_observer(on_button);
+        app.add_observer(on_submit)
+            .add_observer(on_cancel)
+            .add_observer(on_button);
     }
 }
 
@@ -66,7 +68,13 @@ pub struct NamePopup {
 impl NamePopup {
     /// `at`: its top-left corner, in window coordinates.
     pub fn new(name: impl Into<Cow<'static, str>>, title: impl Into<String>, at: Vec2) -> Self {
-        Self { name: name.into(), title: title.into(), value: String::new(), at, description: None }
+        Self {
+            name: name.into(),
+            title: title.into(),
+            value: String::new(),
+            at,
+            description: None,
+        }
     }
 
     /// A second, optional field under the name, with this placeholder.
@@ -91,7 +99,11 @@ impl NamePopup {
                     position_type: PositionType::Absolute,
                     left: Val::Px(self.at.x),
                     top: Val::Px(self.at.y),
-                    width: Val::Px(if self.description.is_some() { 220.0 } else { 150.0 }),
+                    width: Val::Px(if self.description.is_some() {
+                        220.0
+                    } else {
+                        150.0
+                    }),
                     flex_direction: FlexDirection::Column,
                     row_gap: Val::Px(5.0),
                     padding: UiRect::all(Val::Px(6.0)),
@@ -100,25 +112,63 @@ impl NamePopup {
                 },
                 BackgroundColor(t.popover),
                 BorderColor::all(t.border),
-                BoxShadow::new(Color::srgba(0.0, 0.0, 0.0, 0.18), Val::ZERO, Val::Px(2.0), Val::ZERO, Val::Px(6.0)),
+                BoxShadow::new(
+                    Color::srgba(0.0, 0.0, 0.0, 0.18),
+                    Val::ZERO,
+                    Val::Px(2.0),
+                    Val::ZERO,
+                    Val::Px(6.0),
+                ),
                 GlobalZIndex(crate::z::DIALOG),
             ))
             .id();
         let name = self.name.to_string();
         commands.entity(popup).with_children(|p| {
-            p.spawn(Node { align_items: AlignItems::Center, column_gap: Val::Px(2.0), ..default() }).with_children(|r| {
-                r.spawn((t.text(self.title.clone(), t.font_sm, FontWeight::MEDIUM, t.foreground), Node { flex_grow: 1.0, ..default() }));
+            p.spawn(Node {
+                align_items: AlignItems::Center,
+                column_gap: Val::Px(2.0),
+                ..default()
+            })
+            .with_children(|r| {
+                r.spawn((
+                    t.text(
+                        self.title.clone(),
+                        t.font_sm,
+                        FontWeight::MEDIUM,
+                        t.foreground,
+                    ),
+                    Node {
+                        flex_grow: 1.0,
+                        ..default()
+                    },
+                ));
                 // A white check on green, a red cross (as Onshape's).
                 for (accept, icon, bg, fg) in [
-                    (true, "check", Color::srgb_u8(0x2e, 0x9e, 0x44), Color::WHITE),
-                    (false, "close", Color::NONE, Color::srgb_u8(0xd0, 0x2c, 0x2c)),
+                    (
+                        true,
+                        "check",
+                        Color::srgb_u8(0x2e, 0x9e, 0x44),
+                        Color::WHITE,
+                    ),
+                    (
+                        false,
+                        "close",
+                        Color::NONE,
+                        Color::srgb_u8(0xd0, 0x2c, 0x2c),
+                    ),
                 ] {
                     let suffix = if accept { "accept" } else { "cancel" };
                     r.spawn((
                         Name::new(format!("{name}-{suffix}")),
                         bevy::ui_widgets::Button,
                         PopupButton { popup, accept },
-                        Node { width: Val::Px(20.0), height: Val::Px(20.0), justify_content: JustifyContent::Center, align_items: AlignItems::Center, ..default() },
+                        Node {
+                            width: Val::Px(20.0),
+                            height: Val::Px(20.0),
+                            justify_content: JustifyContent::Center,
+                            align_items: AlignItems::Center,
+                            ..default()
+                        },
                         BackgroundColor(bg),
                         crate::tooltip::Tooltip::new(if accept { "Accept" } else { "Cancel" }),
                         children![(crate::icon::icon(icon, 15.0, fg), Pickable::IGNORE)],
@@ -148,7 +198,11 @@ impl NamePopup {
     }
 }
 
-fn popup_of(mut e: Entity, q_parent: &Query<&ChildOf>, q_root: &Query<(), With<NamePopupRoot>>) -> Option<Entity> {
+fn popup_of(
+    mut e: Entity,
+    q_parent: &Query<&ChildOf>,
+    q_root: &Query<(), With<NamePopupRoot>>,
+) -> Option<Entity> {
     for _ in 0..12 {
         if q_root.contains(e) {
             return Some(e);
@@ -159,8 +213,17 @@ fn popup_of(mut e: Entity, q_parent: &Query<&ChildOf>, q_root: &Query<(), With<N
 }
 
 /// The fields' texts, in order (the name first).
-fn field_values(popup: Entity, q_children: &Query<&Children>, q_text: &Query<&EditableText>) -> Vec<String> {
-    fn walk(e: Entity, q_children: &Query<&Children>, q_text: &Query<&EditableText>, out: &mut Vec<String>) {
+fn field_values(
+    popup: Entity,
+    q_children: &Query<&Children>,
+    q_text: &Query<&EditableText>,
+) -> Vec<String> {
+    fn walk(
+        e: Entity,
+        q_children: &Query<&Children>,
+        q_text: &Query<&EditableText>,
+        out: &mut Vec<String>,
+    ) {
         if let Ok(t) = q_text.get(e) {
             out.push(t.value().to_string());
             return;
@@ -188,25 +251,46 @@ fn on_submit(
         let v = field_values(popup, &q_children, &q_text);
         let value = v.first().cloned().unwrap_or_else(|| ev.value.clone());
         let description = v.get(1).cloned().unwrap_or_default();
-        commands.trigger(NamePopupCommit { entity: popup, value, description });
+        commands.trigger(NamePopupCommit {
+            entity: popup,
+            value,
+            description,
+        });
         commands.entity(popup).try_despawn();
     }
 }
 
-fn on_cancel(ev: On<TextCancel>, q_parent: Query<&ChildOf>, q_root: Query<(), With<NamePopupRoot>>, mut commands: Commands) {
+fn on_cancel(
+    ev: On<TextCancel>,
+    q_parent: Query<&ChildOf>,
+    q_root: Query<(), With<NamePopupRoot>>,
+    mut commands: Commands,
+) {
     if let Some(popup) = popup_of(ev.entity, &q_parent, &q_root) {
         commands.trigger(NamePopupCancel { entity: popup });
         commands.entity(popup).try_despawn();
     }
 }
 
-fn on_button(a: On<Activate>, q: Query<&PopupButton>, q_children: Query<&Children>, q_text: Query<&EditableText>, mut commands: Commands) {
-    let Ok(b) = q.get(a.entity).copied() else { return };
+fn on_button(
+    a: On<Activate>,
+    q: Query<&PopupButton>,
+    q_children: Query<&Children>,
+    q_text: Query<&EditableText>,
+    mut commands: Commands,
+) {
+    let Ok(b) = q.get(a.entity).copied() else {
+        return;
+    };
     if b.accept {
         let v = field_values(b.popup, &q_children, &q_text);
         let value = v.first().cloned().unwrap_or_default();
         let description = v.get(1).cloned().unwrap_or_default();
-        commands.trigger(NamePopupCommit { entity: b.popup, value, description });
+        commands.trigger(NamePopupCommit {
+            entity: b.popup,
+            value,
+            description,
+        });
     } else {
         commands.trigger(NamePopupCancel { entity: b.popup });
     }

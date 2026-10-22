@@ -22,7 +22,9 @@ impl Command for SetSuppressed {
         Scope::Element(self.element)
     }
     fn apply(&self, doc: &mut Document) -> Result<(), CommandError> {
-        let el = doc.element_mut(self.element).ok_or(CommandError::ElementNotFound(self.element))?;
+        let el = doc
+            .element_mut(self.element)
+            .ok_or(CommandError::ElementNotFound(self.element))?;
         if self.features.iter().any(|f| el.feature(*f).is_none()) {
             return Err(CommandError::Invalid("feature not found".into()));
         }
@@ -100,13 +102,19 @@ impl Command for SetRollback {
         Scope::Element(self.element)
     }
     fn apply(&self, doc: &mut Document) -> Result<(), CommandError> {
-        let el = doc.element_mut(self.element).ok_or(CommandError::ElementNotFound(self.element))?;
+        let el = doc
+            .element_mut(self.element)
+            .ok_or(CommandError::ElementNotFound(self.element))?;
         let n = el.features().len();
         let ElementKind::PartStudio { rollback, .. } = &mut el.kind else {
             return Err(CommandError::Invalid("features need a Part Studio".into()));
         };
         *rollback = match self.index {
-            Some(i) if i > n => return Err(CommandError::Invalid("no such place in the feature list".into())),
+            Some(i) if i > n => {
+                return Err(CommandError::Invalid(
+                    "no such place in the feature list".into(),
+                ));
+            }
             Some(i) if i == n => None,
             other => other,
         };
@@ -129,7 +137,9 @@ impl Command for DeleteFolder {
         Scope::Element(self.element)
     }
     fn apply(&self, doc: &mut Document) -> Result<(), CommandError> {
-        let el = doc.element_mut(self.element).ok_or(CommandError::ElementNotFound(self.element))?;
+        let el = doc
+            .element_mut(self.element)
+            .ok_or(CommandError::ElementNotFound(self.element))?;
         let inside = el
             .folders()
             .iter()
@@ -158,10 +168,19 @@ impl Command for DeleteFolder {
 /// After features at `removed` (their indices before the removal) left the list: the rollback
 /// bar keeps its place among the others, and the suppressed list forgets them.
 pub(super) fn forget_removed(doc: &mut Document, element: ElementId, removed: &[usize]) {
-    let Some(el) = doc.element_mut(element) else { return };
+    let Some(el) = doc.element_mut(element) else {
+        return;
+    };
     let ids: Vec<FeatureId> = el.features().iter().map(|f| f.id).collect();
     let n = ids.len();
-    let ElementKind::PartStudio { rollback, suppressed, .. } = &mut el.kind else { return };
+    let ElementKind::PartStudio {
+        rollback,
+        suppressed,
+        ..
+    } = &mut el.kind
+    else {
+        return;
+    };
     suppressed.retain(|f| ids.contains(f));
     if let Some(r) = rollback {
         let above = removed.iter().filter(|i| **i < *r).count();

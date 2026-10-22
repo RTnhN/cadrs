@@ -64,7 +64,10 @@ pub fn via_layers(board: &Board, from: Layer, to: Layer, kind: ViaKind) -> Vec<L
     if kind == ViaKind::Through {
         return all;
     }
-    let (i, j) = (all.iter().position(|l| *l == from).unwrap_or(0), all.iter().position(|l| *l == to).unwrap_or(all.len() - 1));
+    let (i, j) = (
+        all.iter().position(|l| *l == from).unwrap_or(0),
+        all.iter().position(|l| *l == to).unwrap_or(all.len() - 1),
+    );
     all[i.min(j)..=i.max(j)].to_vec()
 }
 
@@ -91,7 +94,11 @@ pub fn items(board: &Board) -> Vec<Copper> {
     for (fi, f) in board.footprints.iter().enumerate() {
         let loose_net = footprint_net(&f.footprint);
         for (pi, pad) in f.footprint.pads.iter().enumerate() {
-            let layers: Vec<Layer> = copper.iter().copied().filter(|l| f.placement.layers(pad.layers).contains(*l)).collect();
+            let layers: Vec<Layer> = copper
+                .iter()
+                .copied()
+                .filter(|l| f.placement.layers(pad.layers).contains(*l))
+                .collect();
             if layers.is_empty() && pad.kind != PadKind::NonPlated {
                 continue;
             }
@@ -107,7 +114,11 @@ pub fn items(board: &Board) -> Vec<Copper> {
                     _ => String::new(),
                 },
                 bounds: bounds_of(&[&r]),
-                layers: if plated { layers.iter().map(|l| (*l, r.clone())).collect() } else { vec![] },
+                layers: if plated {
+                    layers.iter().map(|l| (*l, r.clone())).collect()
+                } else {
+                    vec![]
+                },
                 hole,
                 anchors: vec![f.placement.apply(pad.at)],
             });
@@ -115,11 +126,21 @@ pub fn items(board: &Board) -> Vec<Copper> {
     }
     for t in &board.tracks {
         let pts: Vec<Pt> = match t.mid {
-            Some(m) => crate::geom::arc_points(t.a, m, t.b, poly::MAX_ERROR).into_iter().map(|q| Pt::new(q[0].round() as Nm, q[1].round() as Nm)).collect(),
+            Some(m) => crate::geom::arc_points(t.a, m, t.b, poly::MAX_ERROR)
+                .into_iter()
+                .map(|q| Pt::new(q[0].round() as Nm, q[1].round() as Nm))
+                .collect(),
             None => vec![t.a, t.b],
         };
         let r = poly::stroke(&pts, t.width);
-        out.push(Copper { item: Item::Track(t.id), net: t.net.clone(), bounds: bounds_of(&[&r]), layers: vec![(t.layer, r)], hole: None, anchors: vec![t.a, t.b] });
+        out.push(Copper {
+            item: Item::Track(t.id),
+            net: t.net.clone(),
+            bounds: bounds_of(&[&r]),
+            layers: vec![(t.layer, r)],
+            hole: None,
+            anchors: vec![t.a, t.b],
+        });
     }
     for v in &board.vias {
         let r = poly::circle(v.at, v.diameter / 2);
@@ -141,14 +162,37 @@ pub fn items(board: &Board) -> Vec<Copper> {
                 continue;
             }
             let r = poly::map(&poly::shape_region(&s.shape), |p| f.placement.apply(p));
-            let anchors = poly::geom_points(&s.shape.geom).0.into_iter().take(1).map(|p| f.placement.apply(p)).collect();
-            out.push(Copper { item: Item::FpShape(f.id, si), net: net.clone(), bounds: bounds_of(&[&r]), layers: vec![(layer, r)], hole: None, anchors });
+            let anchors = poly::geom_points(&s.shape.geom)
+                .0
+                .into_iter()
+                .take(1)
+                .map(|p| f.placement.apply(p))
+                .collect();
+            out.push(Copper {
+                item: Item::FpShape(f.id, si),
+                net: net.clone(),
+                bounds: bounds_of(&[&r]),
+                layers: vec![(layer, r)],
+                hole: None,
+                anchors,
+            });
         }
     }
     for s in board.shapes.iter().filter(|s| copper.contains(&s.layer)) {
         let r = poly::shape_region(&s.shape);
-        let anchors = poly::geom_points(&s.shape.geom).0.into_iter().take(1).collect();
-        out.push(Copper { item: Item::Shape(s.id), net: s.net.clone(), bounds: bounds_of(&[&r]), layers: vec![(s.layer, r)], hole: None, anchors });
+        let anchors = poly::geom_points(&s.shape.geom)
+            .0
+            .into_iter()
+            .take(1)
+            .collect();
+        out.push(Copper {
+            item: Item::Shape(s.id),
+            net: s.net.clone(),
+            bounds: bounds_of(&[&r]),
+            layers: vec![(s.layer, r)],
+            hole: None,
+            anchors,
+        });
     }
     for z in board.zones.iter().filter(|z| z.keepout.is_none()) {
         for (l, polys) in &z.filled {
@@ -156,7 +200,14 @@ pub fn items(board: &Board) -> Vec<Copper> {
                 let mut r: Region = vec![pg.outer.clone()];
                 r.extend(pg.holes.iter().cloned());
                 let anchors = pg.outer.first().copied().into_iter().collect();
-                out.push(Copper { item: Item::Zone(z.id, *l, i), net: z.net.clone(), bounds: bounds_of(&[&r]), layers: vec![(*l, r)], hole: None, anchors });
+                out.push(Copper {
+                    item: Item::Zone(z.id, *l, i),
+                    net: z.net.clone(),
+                    bounds: bounds_of(&[&r]),
+                    layers: vec![(*l, r)],
+                    hole: None,
+                    anchors,
+                });
             }
         }
     }
@@ -172,7 +223,10 @@ pub fn touching(a: &Copper, b: &Copper) -> bool {
     if !bounds_touch(&a.bounds, &b.bounds) {
         return false;
     }
-    a.layers.iter().any(|(l, ra)| b.on(*l).is_some_and(|rb| poly::overlaps(ra, rb) || poly::distance(ra, rb) < 1.0))
+    a.layers.iter().any(|(l, ra)| {
+        b.on(*l)
+            .is_some_and(|rb| poly::overlaps(ra, rb) || poly::distance(ra, rb) < 1.0)
+    })
 }
 
 /// Groups of touching items (indices into `items`), each group one piece of copper.
@@ -216,17 +270,27 @@ pub struct Airwire {
 pub fn ratsnest(board: &Board) -> Vec<Airwire> {
     let all = items(board);
     let mut out = vec![];
-    let mut nets: Vec<&str> = all.iter().map(|c| c.net.as_str()).filter(|n| !n.is_empty()).collect();
+    let mut nets: Vec<&str> = all
+        .iter()
+        .map(|c| c.net.as_str())
+        .filter(|n| !n.is_empty())
+        .collect();
     nets.sort();
     nets.dedup();
     for net in nets {
         let mine: Vec<Copper> = all.iter().filter(|c| c.net == net).cloned().collect();
         // Islands of loose copper alone need no connection.
-        let groups: Vec<Vec<usize>> = islands(&mine).into_iter().filter(|g| g.iter().any(|&i| needs_connection(board, &mine[i]))).collect();
+        let groups: Vec<Vec<usize>> = islands(&mine)
+            .into_iter()
+            .filter(|g| g.iter().any(|&i| needs_connection(board, &mine[i])))
+            .collect();
         if groups.len() < 2 {
             continue;
         }
-        let anchors: Vec<Vec<Pt>> = groups.iter().map(|g| g.iter().flat_map(|&i| mine[i].anchors.clone()).collect()).collect();
+        let anchors: Vec<Vec<Pt>> = groups
+            .iter()
+            .map(|g| g.iter().flat_map(|&i| mine[i].anchors.clone()).collect())
+            .collect();
         // Prim's algorithm over the groups.
         let mut joined = vec![false; groups.len()];
         joined[0] = true;
@@ -247,7 +311,11 @@ pub fn ratsnest(board: &Board) -> Vec<Airwire> {
             }
             let Some((_, j, a, b)) = best else { break };
             joined[j] = true;
-            out.push(Airwire { net: net.to_string(), a, b });
+            out.push(Airwire {
+                net: net.to_string(),
+                a,
+                b,
+            });
         }
     }
     out
@@ -256,9 +324,16 @@ pub fn ratsnest(board: &Board) -> Vec<Airwire> {
 /// The net a footprint's loose copper (drawings on copper, unnumbered pads) belongs to: its
 /// numbered pads' net when they all have the same one, else none.
 pub fn footprint_net(f: &crate::footprint::Footprint) -> String {
-    let mut nets = f.pads.iter().filter_map(|p| p.net.as_deref()).filter(|n| !n.is_empty());
+    let mut nets = f
+        .pads
+        .iter()
+        .filter_map(|p| p.net.as_deref())
+        .filter(|n| !n.is_empty());
     let first = nets.next();
-    first.filter(|n| nets.all(|m| m == *n)).unwrap_or("").to_string()
+    first
+        .filter(|n| nets.all(|m| m == *n))
+        .unwrap_or("")
+        .to_string()
 }
 
 /// Whether an item has to be connected to the rest of its net: not a footprint's loose copper
@@ -266,7 +341,11 @@ pub fn footprint_net(f: &crate::footprint::Footprint) -> String {
 pub fn needs_connection(board: &Board, c: &Copper) -> bool {
     match c.item {
         Item::FpShape(..) | Item::Shape(..) => false,
-        Item::Pad(f, i) => board.footprints.iter().find(|x| x.id == f).is_some_and(|x| !x.footprint.pads[i].number.is_empty()),
+        Item::Pad(f, i) => board
+            .footprints
+            .iter()
+            .find(|x| x.id == f)
+            .is_some_and(|x| !x.footprint.pads[i].number.is_empty()),
         _ => true,
     }
 }

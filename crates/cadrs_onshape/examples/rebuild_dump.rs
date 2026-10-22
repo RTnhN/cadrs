@@ -17,7 +17,16 @@ fn main() {
         eprint!("{n:3} {:<24} ", f.name);
         let started = std::time::Instant::now();
         let b = cadrs_core::rebuild::build(&features[..n]);
-        let err = b.errors.iter().find(|(id, _)| *id == f.id).map(|(_, e)| e.as_str()).unwrap_or("");
-        eprintln!("{:8.3} s  {} parts  {err}", started.elapsed().as_secs_f64(), b.parts.len());
+        let err = b
+            .errors
+            .iter()
+            .find(|(id, _)| *id == f.id)
+            .map(|(_, e)| e.as_str())
+            .unwrap_or("");
+        eprintln!(
+            "{:8.3} s  {} parts  {err}",
+            started.elapsed().as_secs_f64(),
+            b.parts.len()
+        );
     }
 }

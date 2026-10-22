@@ -4,8 +4,8 @@
 
 use std::io::{Read, Write};
 
-use flate2::Crc;
 use flate2::Compression;
+use flate2::Crc;
 use flate2::read::DeflateDecoder;
 use flate2::write::DeflateEncoder;
 
@@ -13,7 +13,11 @@ use crate::parse::IdfError;
 
 /// MS-DOS time and date for a `yyyy/mm/dd.hh:mm:ss` string (1980-01-01 if it doesn't parse).
 pub fn dos_datetime(date: &str) -> (u16, u16) {
-    let nums: Vec<u32> = date.split(|c: char| !c.is_ascii_digit()).filter(|s| !s.is_empty()).filter_map(|s| s.parse().ok()).collect();
+    let nums: Vec<u32> = date
+        .split(|c: char| !c.is_ascii_digit())
+        .filter(|s| !s.is_empty())
+        .filter_map(|s| s.parse().ok())
+        .collect();
     if let [y, mo, d, h, mi, s, ..] = nums[..]
         && (1980..=2107).contains(&y)
         && (1..=12).contains(&mo)
@@ -92,11 +96,15 @@ fn err(m: &str) -> IdfError {
 }
 
 fn u16_at(b: &[u8], i: usize) -> Result<u16, IdfError> {
-    b.get(i..i + 2).map(|s| u16::from_le_bytes([s[0], s[1]])).ok_or_else(|| err("truncated archive"))
+    b.get(i..i + 2)
+        .map(|s| u16::from_le_bytes([s[0], s[1]]))
+        .ok_or_else(|| err("truncated archive"))
 }
 
 fn u32_at(b: &[u8], i: usize) -> Result<u32, IdfError> {
-    b.get(i..i + 4).map(|s| u32::from_le_bytes([s[0], s[1], s[2], s[3]])).ok_or_else(|| err("truncated archive"))
+    b.get(i..i + 4)
+        .map(|s| u32::from_le_bytes([s[0], s[1], s[2], s[3]]))
+        .ok_or_else(|| err("truncated archive"))
 }
 
 /// Read every file entry of a zip archive as `(path, bytes)`. Directory entries are skipped.
@@ -123,7 +131,12 @@ pub fn zip_entries(bytes: &[u8]) -> Result<Vec<(String, Vec<u8>)>, IdfError> {
         let xlen = u16_at(bytes, p + 30)? as usize;
         let clen = u16_at(bytes, p + 32)? as usize;
         let local = u32_at(bytes, p + 42)? as usize;
-        let name = String::from_utf8_lossy(bytes.get(p + 46..p + 46 + nlen).ok_or_else(|| err("truncated name"))?).into_owned();
+        let name = String::from_utf8_lossy(
+            bytes
+                .get(p + 46..p + 46 + nlen)
+                .ok_or_else(|| err("truncated name"))?,
+        )
+        .into_owned();
         p += 46 + nlen + xlen + clen;
         if name.ends_with('/') {
             continue;
@@ -131,16 +144,25 @@ pub fn zip_entries(bytes: &[u8]) -> Result<Vec<(String, Vec<u8>)>, IdfError> {
         if u32_at(bytes, local)? != 0x04034b50 {
             return Err(err("bad local header"));
         }
-        let start = local + 30 + u16_at(bytes, local + 26)? as usize + u16_at(bytes, local + 28)? as usize;
-        let comp = bytes.get(start..start + csize).ok_or_else(|| err("truncated entry data"))?;
+        let start =
+            local + 30 + u16_at(bytes, local + 26)? as usize + u16_at(bytes, local + 28)? as usize;
+        let comp = bytes
+            .get(start..start + csize)
+            .ok_or_else(|| err("truncated entry data"))?;
         let data = match method {
             0 => comp.to_vec(),
             8 => {
                 let mut v = Vec::with_capacity(usize_);
-                DeflateDecoder::new(comp).read_to_end(&mut v).map_err(|e| err(&format!("inflate {name}: {e}")))?;
+                DeflateDecoder::new(comp)
+                    .read_to_end(&mut v)
+                    .map_err(|e| err(&format!("inflate {name}: {e}")))?;
                 v
             }
-            m => return Err(err(&format!("unsupported compression method {m} for {name}"))),
+            m => {
+                return Err(err(&format!(
+                    "unsupported compression method {m} for {name}"
+                )));
+            }
         };
         if crc32(&data) != crc {
             return Err(err(&format!("CRC mismatch in {name}")));

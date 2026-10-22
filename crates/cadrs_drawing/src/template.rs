@@ -168,8 +168,14 @@ mod tests {
             ]
         );
         assert!(names.contains(&"ISO_A0_MM.dwt".to_string()));
-        assert_eq!(builtin("ISO_A4_MM.dwt").unwrap().projection, Projection::First);
-        assert_eq!(builtin("ANSI_C_MM.dwt").unwrap().projection, Projection::Third);
+        assert_eq!(
+            builtin("ISO_A4_MM.dwt").unwrap().projection,
+            Projection::First
+        );
+        assert_eq!(
+            builtin("ANSI_C_MM.dwt").unwrap().projection,
+            Projection::Third
+        );
     }
 
     #[test]

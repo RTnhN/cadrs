@@ -38,7 +38,11 @@ fn split(r: &str) -> (&str, Option<u64>) {
     let i = r.trim_end_matches(|c: char| c.is_ascii_digit()).len();
     let (p, n) = r.split_at(i);
     // "R01" is not in a run with "R2".
-    let n = if n.is_empty() || (n.len() > 1 && n.starts_with('0')) { None } else { n.parse().ok() };
+    let n = if n.is_empty() || (n.len() > 1 && n.starts_with('0')) {
+        None
+    } else {
+        n.parse().ok()
+    };
     (p, n)
 }
 
@@ -76,12 +80,20 @@ pub fn bom(board: &PcbBoard) -> Vec<BomRow> {
     let mut comps: Vec<(ItemId, &cadrs_idf::Placement)> = board.components().collect();
     comps.sort_by(|a, b| natural_cmp(&a.1.refdes, &b.1.refdes).then_with(|| a.0.cmp(&b.0)));
     for (id, p) in comps {
-        match rows.iter_mut().find(|r| r.part_number == p.part_number && r.package == p.package) {
+        match rows
+            .iter_mut()
+            .find(|r| r.part_number == p.part_number && r.package == p.package)
+        {
             Some(r) => {
                 r.items.push(id);
                 r.refdes.push(p.refdes.clone());
             }
-            None => rows.push(BomRow { package: p.package.clone(), part_number: p.part_number.clone(), items: vec![id], refdes: vec![p.refdes.clone()] }),
+            None => rows.push(BomRow {
+                package: p.package.clone(),
+                part_number: p.part_number.clone(),
+                items: vec![id],
+                refdes: vec![p.refdes.clone()],
+            }),
         }
     }
     rows.sort_by(|a, b| match (a.refdes.first(), b.refdes.first()) {

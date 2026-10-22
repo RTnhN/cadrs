@@ -125,7 +125,11 @@ pub struct SolveOptions {
 /// The instances that can't move: fixed, or grouped with a fixed instance.
 pub fn grounded(asm: &Assembly) -> std::collections::HashSet<InstanceId> {
     let (bodies, _) = bodies_of(asm);
-    bodies.iter().filter(|b| b.ground).flat_map(|b| b.members.iter().map(|(m, _)| *m)).collect()
+    bodies
+        .iter()
+        .filter(|b| b.ground)
+        .flat_map(|b| b.members.iter().map(|(m, _)| *m))
+        .collect()
 }
 
 /// The solved placements.
@@ -151,7 +155,10 @@ impl Solution {
 }
 
 fn same_pose(a: &Pose, b: &Pose) -> bool {
-    (0..3).all(|i| (a.translation[i] - b.translation[i]).abs() < 1e-9 && (0..3).all(|j| (a.rotation[i][j] - b.rotation[i][j]).abs() < 1e-12))
+    (0..3).all(|i| {
+        (a.translation[i] - b.translation[i]).abs() < 1e-9
+            && (0..3).all(|j| (a.rotation[i][j] - b.rotation[i][j]).abs() < 1e-12)
+    })
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -203,7 +210,11 @@ fn surface_rank(k: SurfaceKind) -> u8 {
 /// How many rows a Tangent between `a` and `b` has (0: not supported).
 fn tangent_len(a: SurfaceKind, b: SurfaceKind) -> usize {
     use SurfaceKind::*;
-    let (a, b) = if surface_rank(a) <= surface_rank(b) { (a, b) } else { (b, a) };
+    let (a, b) = if surface_rank(a) <= surface_rank(b) {
+        (a, b)
+    } else {
+        (b, a)
+    };
     match (a, b) {
         (Plane, Plane) => 4,
         (Plane, Cylinder { .. }) | (Plane, Line) => 2,
@@ -221,10 +232,19 @@ pub fn tangent_supported(a: SurfaceKind, b: SurfaceKind) -> bool {
 }
 
 /// How far two surfaces (world frames) are from tangent: the largest Tangent row (mm).
-pub fn tangent_error(ka: SurfaceKind, a: &ConnectorFrame, kb: SurfaceKind, b: &ConnectorFrame, flip: bool) -> f64 {
+pub fn tangent_error(
+    ka: SurfaceKind,
+    a: &ConnectorFrame,
+    kb: SurfaceKind,
+    b: &ConnectorFrame,
+    flip: bool,
+) -> f64 {
     let mut out = Vec::new();
     tangent_rows(ka, a, kb, b, flip, &mut out);
-    out.iter().fold(if out.is_empty() { f64::INFINITY } else { 0.0 }, |m, x| m.max(x.abs()))
+    out.iter()
+        .fold(if out.is_empty() { f64::INFINITY } else { 0.0 }, |m, x| {
+            m.max(x.abs())
+        })
 }
 
 impl Row {
@@ -287,9 +307,20 @@ fn from_axis(p: V3, o: V3, z: V3) -> f64 {
 }
 
 /// The rows of a Tangent between surfaces `ka` at `a` and `kb` at `b` (world frames).
-fn tangent_rows(ka: SurfaceKind, a: &ConnectorFrame, kb: SurfaceKind, b: &ConnectorFrame, flip: bool, out: &mut Vec<f64>) {
+fn tangent_rows(
+    ka: SurfaceKind,
+    a: &ConnectorFrame,
+    kb: SurfaceKind,
+    b: &ConnectorFrame,
+    flip: bool,
+    out: &mut Vec<f64>,
+) {
     use SurfaceKind::*;
-    let (ka, a, kb, b) = if surface_rank(ka) <= surface_rank(kb) { (ka, a, kb, b) } else { (kb, b, ka, a) };
+    let (ka, a, kb, b) = if surface_rank(ka) <= surface_rank(kb) {
+        (ka, a, kb, b)
+    } else {
+        (kb, b, ka, a)
+    };
     let (oa, za, ob, zb) = (v(a.origin), v(a.z), v(b.origin), v(b.z));
     let s = if flip { -1.0 } else { 1.0 };
     let sum = |ra: f64, rb: f64| if flip { (ra - rb).abs() } else { ra + rb };
@@ -315,7 +346,9 @@ fn tangent_rows(ka: SurfaceKind, a: &ConnectorFrame, kb: SurfaceKind, b: &Connec
             out.extend_from_slice(&[e.x, e.y, e.z]);
             out.push(from_axis(ob, oa, za) - sum(ra, rb));
         }
-        (Cylinder { radius: ra }, Sphere { radius: rb }) => out.push(from_axis(ob, oa, za) - sum(ra, rb)),
+        (Cylinder { radius: ra }, Sphere { radius: rb }) => {
+            out.push(from_axis(ob, oa, za) - sum(ra, rb))
+        }
         (Cylinder { radius }, Line) => {
             let e = za.cross(&zb) * L;
             out.extend_from_slice(&[e.x, e.y, e.z]);
@@ -389,7 +422,11 @@ fn residuals(rows: &[Row], f: &[ConnectorFrame], out: &mut Vec<f64>) {
             Row::Axis2 => out.extend_from_slice(&[za.dot(&xg) * L, za.dot(&yg) * L]),
             Row::Drive(dof, target) => {
                 let val = dof_value(a, g, dof);
-                out.push(if dof.is_angle() { wrap(val - target) * L } else { val - target });
+                out.push(if dof.is_angle() {
+                    wrap(val - target) * L
+                } else {
+                    val - target
+                });
             }
             Row::Tangent(ka, kb, flip) => tangent_rows(ka, a, kb, g, flip, out),
             Row::Relation(c) => {
@@ -405,7 +442,9 @@ fn residuals(rows: &[Row], f: &[ConnectorFrame], out: &mut Vec<f64>) {
                 let tabs = &f[2..];
                 let mid = tabs.iter().map(|t| v(t.origin)).sum::<V3>() / tabs.len().max(1) as f64;
                 out.push(n.dot(&(mid - centre)));
-                let axis = |z: V3, out: &mut Vec<f64>| out.extend_from_slice(&[z.dot(&x1) * L, z.dot(&y1) * L]);
+                let axis = |z: V3, out: &mut Vec<f64>| {
+                    out.extend_from_slice(&[z.dot(&x1) * L, z.dot(&y1) * L])
+                };
                 if two && tabs.len() > 1 {
                     axis(v(tabs[0].z), out);
                     axis(v(tabs[1].z), out);
@@ -434,7 +473,11 @@ fn mat(p: &Pose) -> Matrix3<f64> {
 
 fn pose_of(r: Matrix3<f64>, t: V3) -> Pose {
     Pose {
-        rotation: [[r[(0, 0)], r[(0, 1)], r[(0, 2)]], [r[(1, 0)], r[(1, 1)], r[(1, 2)]], [r[(2, 0)], r[(2, 1)], r[(2, 2)]]],
+        rotation: [
+            [r[(0, 0)], r[(0, 1)], r[(0, 2)]],
+            [r[(1, 0)], r[(1, 1)], r[(1, 2)]],
+            [r[(2, 0)], r[(2, 1)], r[(2, 2)]],
+        ],
         translation: [t.x, t.y, t.z],
     }
 }
@@ -479,7 +522,10 @@ fn bodies_of(asm: &Assembly) -> (Vec<Body>, HashMap<InstanceId, usize>) {
     }
     for f in asm.mates.iter().filter(|f| !f.suppressed) {
         if let MateKind::Group { instances } = &f.kind {
-            let members: Vec<usize> = instances.iter().filter_map(|i| index.get(i).copied()).collect();
+            let members: Vec<usize> = instances
+                .iter()
+                .filter_map(|i| index.get(i).copied())
+                .collect();
             for w in members.windows(2) {
                 let (a, b) = (find(&mut parent, w[0]), find(&mut parent, w[1]));
                 if a != b {
@@ -494,7 +540,13 @@ fn bodies_of(asm: &Assembly) -> (Vec<Body>, HashMap<InstanceId, usize>) {
     for (k, inst) in asm.instances.iter().enumerate() {
         let r = find(&mut parent, k);
         let b = *root_body.entry(r).or_insert_with(|| {
-            bodies.push(Body { members: Vec::new(), pose: inst.pose, ground: false, var: None, mobility: 1.0 });
+            bodies.push(Body {
+                members: Vec::new(),
+                pose: inst.pose,
+                ground: false,
+                var: None,
+                mobility: 1.0,
+            });
             bodies.len() - 1
         });
         let body = &mut bodies[b];
@@ -504,19 +556,37 @@ fn bodies_of(asm: &Assembly) -> (Vec<Body>, HashMap<InstanceId, usize>) {
         of.insert(inst.id, b);
     }
     // P3B.7 (A16.3): the assembly's Origin, ground at the identity, when a mate uses it.
-    let uses_origin = asm.mates.iter().filter(|f| !f.suppressed).any(|f| f.mate().is_some_and(|m| m.all_connectors().any(|c| c.is_origin())));
+    let uses_origin = asm.mates.iter().filter(|f| !f.suppressed).any(|f| {
+        f.mate()
+            .is_some_and(|m| m.all_connectors().any(|c| c.is_origin()))
+    });
     if uses_origin && !of.contains_key(&InstanceId::ORIGIN) {
-        bodies.push(Body { members: vec![(InstanceId::ORIGIN, Pose::IDENTITY)], pose: Pose::IDENTITY, ground: true, var: None, mobility: 1.0 });
+        bodies.push(Body {
+            members: vec![(InstanceId::ORIGIN, Pose::IDENTITY)],
+            pose: Pose::IDENTITY,
+            ground: true,
+            var: None,
+            mobility: 1.0,
+        });
         of.insert(InstanceId::ORIGIN, bodies.len() - 1);
     }
     (bodies, of)
 }
 
 impl Problem {
-    fn new(asm: &Assembly, frame: &dyn Fn(&MateConnector) -> ConnectorFrame, opts: &SolveOptions) -> Self {
+    fn new(
+        asm: &Assembly,
+        frame: &dyn Fn(&MateConnector) -> ConnectorFrame,
+        opts: &SolveOptions,
+    ) -> Self {
         let (mut bodies, of) = bodies_of(asm);
         let rel = |bodies: &[Body], b: usize, i: InstanceId| -> Pose {
-            bodies[b].members.iter().find(|(m, _)| *m == i).map(|(_, p)| *p).unwrap_or(Pose::IDENTITY)
+            bodies[b]
+                .members
+                .iter()
+                .find(|(m, _)| *m == i)
+                .map(|(_, p)| *p)
+                .unwrap_or(Pose::IDENTITY)
         };
         let mut cons = Vec::new();
         let mut mates = HashMap::new();
@@ -532,11 +602,22 @@ impl Problem {
             } else {
                 m.connectors.iter().collect()
             };
-            let Some(bs) = conns.iter().map(|c| of.get(&c.instance).copied()).collect::<Option<Vec<usize>>>() else { continue };
+            let Some(bs) = conns
+                .iter()
+                .map(|c| of.get(&c.instance).copied())
+                .collect::<Option<Vec<usize>>>()
+            else {
+                continue;
+            };
             mates.insert(f.id, m.clone());
-            let local: Vec<ConnectorFrame> = conns.iter().zip(&bs).map(|(c, b)| frame(c).moved(&rel(&bodies, *b, c.instance))).collect();
+            let local: Vec<ConnectorFrame> = conns
+                .iter()
+                .zip(&bs)
+                .map(|(c, b)| frame(c).moved(&rel(&bodies, *b, c.instance)))
+                .collect();
             if !matches!(m.mate_type, MateType::Tangent | MateType::Width) {
-                let mut ends: Vec<(usize, ConnectorFrame)> = bs.iter().copied().zip(local.iter().copied()).collect();
+                let mut ends: Vec<(usize, ConnectorFrame)> =
+                    bs.iter().copied().zip(local.iter().copied()).collect();
                 ends[1].1 = m.target(&ends[1].1);
                 pair_ends.insert(f.id, ends);
             }
@@ -545,7 +626,12 @@ impl Problem {
             }
             let (rows, pair) = match m.mate_type {
                 MateType::Tangent => {
-                    let (Some(ka), Some(kb)) = (m.connectors[0].surface_kind(), m.connectors[1].surface_kind()) else { continue };
+                    let (Some(ka), Some(kb)) = (
+                        m.connectors[0].surface_kind(),
+                        m.connectors[1].surface_kind(),
+                    ) else {
+                        continue;
+                    };
                     (vec![Row::Tangent(ka, kb, m.flip)], false)
                 }
                 MateType::Width => (vec![Row::Width(bs.len() > 3 && bs[3] != bs[2])], false),
@@ -554,39 +640,89 @@ impl Problem {
             let mut ends: Vec<(usize, ConnectorFrame)> = bs.iter().copied().zip(local).collect();
             if pair {
                 ends[1].1 = m.target(&ends[1].1);
-                let drives: Vec<Row> = opts.drives.iter().filter(|d| d.mate == f.id).map(|d| Row::Drive(d.dof, d.value)).collect();
+                let drives: Vec<Row> = opts
+                    .drives
+                    .iter()
+                    .filter(|d| d.mate == f.id)
+                    .map(|d| Row::Drive(d.dof, d.value))
+                    .collect();
                 if !drives.is_empty() {
-                    cons.push(Con { mate: f.id, ends: ends.clone(), rows: drives, is_mate: false, pair });
+                    cons.push(Con {
+                        mate: f.id,
+                        ends: ends.clone(),
+                        rows: drives,
+                        is_mate: false,
+                        pair,
+                    });
                 }
             }
             let is_mate = !rows.is_empty();
-            cons.push(Con { mate: f.id, ends, rows, is_mate, pair });
+            cons.push(Con {
+                mate: f.id,
+                ends,
+                rows,
+                is_mate,
+                pair,
+            });
         }
         // P3B.9: relations couple two mates' positions (Screw: one mate's two).
         for f in asm.mates.iter().filter(|f| !f.suppressed) {
-            let MateKind::Relation(r) = &f.kind else { continue };
-            let types: Option<Vec<MateType>> = r.mates.iter().map(|id| mates.get(id).map(|m: &Mate| m.mate_type)).collect();
+            let MateKind::Relation(r) = &f.kind else {
+                continue;
+            };
+            let types: Option<Vec<MateType>> = r
+                .mates
+                .iter()
+                .map(|id| mates.get(id).map(|m: &Mate| m.mate_type))
+                .collect();
             let Some(types) = types else { continue };
-            let Some(c) = super::relation::coupling(r, &types) else { continue };
+            let Some(c) = super::relation::coupling(r, &types) else {
+                continue;
+            };
             let first = r.mates.first().and_then(|m| pair_ends.get(m));
-            let second = r.mates.get(1).or(r.mates.first()).and_then(|m| pair_ends.get(m));
-            let (Some(a), Some(b)) = (first, second) else { continue };
+            let second = r
+                .mates
+                .get(1)
+                .or(r.mates.first())
+                .and_then(|m| pair_ends.get(m));
+            let (Some(a), Some(b)) = (first, second) else {
+                continue;
+            };
             let ends: Vec<(usize, ConnectorFrame)> = a.iter().chain(b.iter()).copied().collect();
             if ends.iter().all(|e| bodies[e.0].ground) {
                 continue;
             }
-            cons.push(Con { mate: f.id, ends, rows: vec![Row::Relation(c)], is_mate: true, pair: false });
+            cons.push(Con {
+                mate: f.id,
+                ends,
+                rows: vec![Row::Relation(c)],
+                is_mate: true,
+                pair: false,
+            });
         }
-        let movers: Vec<usize> = opts.movers.iter().filter_map(|i| of.get(i).copied()).collect();
+        let movers: Vec<usize> = opts
+            .movers
+            .iter()
+            .filter_map(|i| of.get(i).copied())
+            .collect();
         let mut n = 0;
         for (k, b) in bodies.iter_mut().enumerate() {
             if !b.ground {
                 b.var = Some(n);
                 n += 6;
-                b.mobility = if movers.is_empty() || movers.contains(&k) { 1.0 } else { 1e-3 };
+                b.mobility = if movers.is_empty() || movers.contains(&k) {
+                    1.0
+                } else {
+                    1e-3
+                };
             }
         }
-        Self { bodies, cons, mates, n }
+        Self {
+            bodies,
+            cons,
+            mates,
+            n,
+        }
     }
 
     fn world(&self, (b, f): &(usize, ConnectorFrame)) -> ConnectorFrame {
@@ -617,7 +753,13 @@ impl Problem {
         }
         sum.iter()
             .enumerate()
-            .map(|(k, (s, n))| if *n > 0 { s / *n as f64 } else { v(self.bodies[k].pose.translation) })
+            .map(|(k, (s, n))| {
+                if *n > 0 {
+                    s / *n as f64
+                } else {
+                    v(self.bodies[k].pose.translation)
+                }
+            })
             .collect()
     }
 
@@ -648,8 +790,17 @@ impl Problem {
                         let mut x = [0.0; 6];
                         x[k] = s * if k >= 3 { h / L } else { h };
                         let p = step(&self.bodies[b].pose, &x, pivots[b]);
-                        let frames: Vec<ConnectorFrame> =
-                            c.ends.iter().map(|e| if e.0 == b { e.1.moved(&p) } else { self.world(e) }).collect();
+                        let frames: Vec<ConnectorFrame> = c
+                            .ends
+                            .iter()
+                            .map(|e| {
+                                if e.0 == b {
+                                    e.1.moved(&p)
+                                } else {
+                                    self.world(e)
+                                }
+                            })
+                            .collect();
                         let mut out = Vec::new();
                         residuals(&c.rows, &frames, &mut out);
                         out
@@ -715,7 +866,9 @@ impl Problem {
         let mut dx = vec![0.0; self.n];
         for (i, row) in jac.iter().enumerate() {
             for (b, vals) in row {
-                let Some(o) = self.bodies[*b].var else { continue };
+                let Some(o) = self.bodies[*b].var else {
+                    continue;
+                };
                 for k in 0..6 {
                     dx[o + k] -= self.mobility(*b, k) * vals[k] * y[i];
                 }
@@ -778,7 +931,9 @@ impl Problem {
     fn snap_values(&self, ci: usize, drives: &[Drive], hold_free: bool) -> [f64; 4] {
         let c = &self.cons[ci];
         let (a, g) = (self.world(&c.ends[0]), self.world(&c.ends[1]));
-        let Some(m) = self.mates.get(&c.mate) else { return [0.0; 4] };
+        let Some(m) = self.mates.get(&c.mate) else {
+            return [0.0; 4];
+        };
         let mut vals = [0.0; 4];
         for (k, dof) in [Dof::X, Dof::Y, Dof::Z, Dof::Angle].into_iter().enumerate() {
             if !m.mate_type.dof().contains(&dof) {
@@ -802,8 +957,11 @@ impl Problem {
         }
         let (a, g) = (c.ends[0], c.ends[1]);
         // D = F₁⁻¹ G at the drive: G = F₁ · D.
-        let d = Pose::rotation_about([0.0; 3], [0.0, 0.0, 1.0], at[3]).then(&Pose::translation([at[0], at[1], at[2]]));
-        let place = |local: &ConnectorFrame, want: &ConnectorFrame| -> Pose { local.pose().inverse().then(&want.pose()) };
+        let d = Pose::rotation_about([0.0; 3], [0.0, 0.0, 1.0], at[3])
+            .then(&Pose::translation([at[0], at[1], at[2]]));
+        let place = |local: &ConnectorFrame, want: &ConnectorFrame| -> Pose {
+            local.pose().inverse().then(&want.pose())
+        };
         if !self.bodies[a.0].ground {
             // F₁ = G · D⁻¹.
             let gw = self.world(&g);
@@ -845,15 +1003,25 @@ impl Problem {
             if !c.is_mate || !c.pair {
                 continue;
             }
-            let Some(m) = self.mates.get(&c.mate) else { continue };
+            let Some(m) = self.mates.get(&c.mate) else {
+                continue;
+            };
             let (a, g) = (self.world(&c.ends[0]), self.world(&c.ends[1]));
             for dof in m.mate_type.limit_dofs() {
-                let Some((lo, hi)) = m.limit(*dof) else { continue };
+                let Some((lo, hi)) = m.limit(*dof) else {
+                    continue;
+                };
                 let val = dof_value(&a, &g, *dof);
                 let eps = if dof.is_angle() { 1e-9 } else { 1e-7 };
                 if val < lo - eps || val > hi + eps {
                     let at = val.clamp(lo, hi);
-                    out.push(Con { mate: c.mate, ends: c.ends.clone(), rows: vec![Row::Drive(*dof, at)], is_mate: false, pair: true });
+                    out.push(Con {
+                        mate: c.mate,
+                        ends: c.ends.clone(),
+                        rows: vec![Row::Drive(*dof, at)],
+                        is_mate: false,
+                        pair: true,
+                    });
                 }
             }
         }
@@ -882,9 +1050,19 @@ impl Problem {
         asm.instances
             .iter()
             .filter_map(|i| {
-                let b = self.bodies.iter().find(|b| b.members.iter().any(|(m, _)| *m == i.id))?;
+                let b = self
+                    .bodies
+                    .iter()
+                    .find(|b| b.members.iter().any(|(m, _)| *m == i.id))?;
                 let rel = b.members.iter().find(|(m, _)| *m == i.id)?.1;
-                Some((i.id, if b.ground || b.var.is_none() { i.pose } else { rel.then(&b.pose) }))
+                Some((
+                    i.id,
+                    if b.ground || b.var.is_none() {
+                        i.pose
+                    } else {
+                        rel.then(&b.pose)
+                    },
+                ))
             })
             .collect()
     }
@@ -893,7 +1071,11 @@ impl Problem {
 /// Solves the assembly's mates (see the module doc). `frame` gives a connector's frame in its
 /// instance's coordinates, flip and reorient applied ([`MateConnector::local_frame`] on the
 /// source part as it is now).
-pub fn solve(asm: &Assembly, frame: &dyn Fn(&MateConnector) -> ConnectorFrame, opts: &SolveOptions) -> Solution {
+pub fn solve(
+    asm: &Assembly,
+    frame: &dyn Fn(&MateConnector) -> ConnectorFrame,
+    opts: &SolveOptions,
+) -> Solution {
     let mut p = Problem::new(asm, frame, opts);
     if let Some(id) = opts.snap
         && let Some(ci) = p.cons.iter().position(|c| c.mate == id && c.is_mate)
@@ -909,7 +1091,12 @@ pub fn solve(asm: &Assembly, frame: &dyn Fn(&MateConnector) -> ConnectorFrame, o
         }
     }
     if opts.snap_only {
-        return Solution { poses: p.poses(asm), converged: true, residual: 0.0, iterations: 0 };
+        return Solution {
+            poses: p.poses(asm),
+            converged: true,
+            residual: 0.0,
+            iterations: 0,
+        };
     }
     let (_, _, mut its) = p.iterate(MAX_ITERATIONS);
     // A false solution (axes opposite): snap that mate and try again, once.
@@ -923,7 +1110,12 @@ pub fn solve(asm: &Assembly, frame: &dyn Fn(&MateConnector) -> ConnectorFrame, o
     }
     // Limits: an active set, a few rounds (it first finishes the equalities).
     let (ok, res, c) = p.solve_with_limits();
-    Solution { poses: p.poses(asm), converged: ok, residual: res, iterations: its + c }
+    Solution {
+        poses: p.poses(asm),
+        converged: ok,
+        residual: res,
+        iterations: its + c,
+    }
 }
 
 /// A point of an instance pulled toward a target while dragging (A16.4).
@@ -945,14 +1137,22 @@ const DRAG_TURN_WEIGHT: f64 = 10.0;
 /// Moves the assembly toward `pulls` as far as the mates and limits allow (see the module doc):
 /// the placements after the drag. Starts from the assembly's placements (which should satisfy
 /// the mates: a drag continues from the last frame's result).
-pub fn drag(asm: &Assembly, frame: &dyn Fn(&MateConnector) -> ConnectorFrame, pulls: &[Pull]) -> Solution {
+pub fn drag(
+    asm: &Assembly,
+    frame: &dyn Fn(&MateConnector) -> ConnectorFrame,
+    pulls: &[Pull],
+) -> Solution {
     let mut p = Problem::new(asm, frame, &SolveOptions::default());
     let (_, of) = bodies_of(asm);
     let pulls: Vec<(usize, Pose, Pull)> = pulls
         .iter()
         .filter_map(|q| {
             let b = *of.get(&q.instance)?;
-            let rel = p.bodies[b].members.iter().find(|(m, _)| *m == q.instance)?.1;
+            let rel = p.bodies[b]
+                .members
+                .iter()
+                .find(|(m, _)| *m == q.instance)?
+                .1;
             p.bodies[b].var.is_some().then_some((b, rel, *q))
         })
         .collect();
@@ -961,20 +1161,29 @@ pub fn drag(asm: &Assembly, frame: &dyn Fn(&MateConnector) -> ConnectorFrame, pu
         let n = p.n;
         let base = p.cons.len();
         // Scaled unknowns: moves in mm, turns in mm × L × weight.
-        let scale = |k: usize| if k % 6 >= 3 { 1.0 / (L * DRAG_TURN_WEIGHT) } else { 1.0 };
+        let scale = |k: usize| {
+            if k % 6 >= 3 {
+                1.0 / (L * DRAG_TURN_WEIGHT)
+            } else {
+                1.0
+            }
+        };
         // Each pull's projector: the identity, or off its view direction.
         let proj: Vec<Matrix3<f64>> = pulls
             .iter()
-            .map(|(_, _, q)| match q.view.and_then(|n| v(n).try_normalize(1e-12)) {
-                Some(n) => Matrix3::identity() - n * n.transpose(),
-                None => Matrix3::identity(),
-            })
+            .map(
+                |(_, _, q)| match q.view.and_then(|n| v(n).try_normalize(1e-12)) {
+                    Some(n) => Matrix3::identity() - n * n.transpose(),
+                    None => Matrix3::identity(),
+                },
+            )
             .collect();
         let error = |p: &Problem| -> Vec<f64> {
             let mut e = Vec::new();
             for (k, (b, rel, q)) in pulls.iter().enumerate() {
                 let w = rel.then(&p.bodies[*b].pose).apply(q.point);
-                let d = proj[k] * V3::new(w[0] - q.target[0], w[1] - q.target[1], w[2] - q.target[2]);
+                let d =
+                    proj[k] * V3::new(w[0] - q.target[0], w[1] - q.target[1], w[2] - q.target[2]);
                 e.extend_from_slice(&[d.x, d.y, d.z]);
             }
             e
@@ -1000,7 +1209,11 @@ pub fn drag(asm: &Assembly, frame: &dyn Fn(&MateConnector) -> ConnectorFrame, pu
                     }
                 }
             }
-            let null = if jac.is_empty() { DMatrix::identity(n, n) } else { null_space(&jc) };
+            let null = if jac.is_empty() {
+                DMatrix::identity(n, n)
+            } else {
+                null_space(&jc)
+            };
             if null.ncols() == 0 {
                 break;
             }
@@ -1025,13 +1238,20 @@ pub fn drag(asm: &Assembly, frame: &dyn Fn(&MateConnector) -> ConnectorFrame, pu
             let ata = am.transpose() * &am;
             let mu = 1e-9 * ata.diagonal().iter().fold(1.0f64, |m, x| m.max(*x));
             let rhs = -(am.transpose() * DVector::from_column_slice(&e));
-            let Some(z) = (ata + DMatrix::identity(null.ncols(), null.ncols()) * mu).cholesky().map(|c| c.solve(&rhs)) else { break };
+            let Some(z) = (ata + DMatrix::identity(null.ncols(), null.ncols()) * mu)
+                .cholesky()
+                .map(|c| c.solve(&rhs))
+            else {
+                break;
+            };
             let mut dx: Vec<f64> = (&null * z).iter().copied().collect();
             for (k, x) in dx.iter_mut().enumerate() {
                 *x *= scale(k);
             }
             // At most ~0.3 rad of turn per step.
-            let turn = (0..n / 6).map(|b| V3::new(dx[6 * b + 3], dx[6 * b + 4], dx[6 * b + 5]).norm()).fold(0.0f64, f64::max);
+            let turn = (0..n / 6)
+                .map(|b| V3::new(dx[6 * b + 3], dx[6 * b + 4], dx[6 * b + 5]).norm())
+                .fold(0.0f64, f64::max);
             if turn > 0.3 {
                 let s = 0.3 / turn;
                 dx.iter_mut().for_each(|x| *x *= s);
@@ -1058,13 +1278,21 @@ pub fn drag(asm: &Assembly, frame: &dyn Fn(&MateConnector) -> ConnectorFrame, pu
     }
     let r = p.residual_vec();
     let res = r.iter().fold(0.0f64, |m, x| m.max(x.abs()));
-    Solution { poses: p.poses(asm), converged: res < 1e-6, residual: res, iterations: its }
+    Solution {
+        poses: p.poses(asm),
+        converged: res < 1e-6,
+        residual: res,
+        iterations: its,
+    }
 }
 
 /// The degrees of freedom each instance has left under the mates (A16.1; 0 for grounded and
 /// fully constrained ones): the rank of its body's rows of the null space of the mate rows'
 /// Jacobian at the current placements.
-pub fn dof_counts(asm: &Assembly, frame: &dyn Fn(&MateConnector) -> ConnectorFrame) -> HashMap<InstanceId, u32> {
+pub fn dof_counts(
+    asm: &Assembly,
+    frame: &dyn Fn(&MateConnector) -> ConnectorFrame,
+) -> HashMap<InstanceId, u32> {
     let p = Problem::new(asm, frame, &SolveOptions::default());
     let mut out: HashMap<InstanceId, u32> = asm.instances.iter().map(|i| (i.id, 0)).collect();
     if p.n == 0 {
@@ -1076,7 +1304,9 @@ pub fn dof_counts(asm: &Assembly, frame: &dyn Fn(&MateConnector) -> ConnectorFra
     // its 6 DOF, and each group's DOF come from its own Jacobian. One matrix over every body cost
     // O(n³) in all the assembly's bodies (thousands with flexible subassemblies: it never
     // finished).
-    let free: Vec<usize> = (0..p.bodies.len()).filter(|b| p.bodies[*b].var.is_some()).collect();
+    let free: Vec<usize> = (0..p.bodies.len())
+        .filter(|b| p.bodies[*b].var.is_some())
+        .collect();
     let mut group: HashMap<usize, usize> = free.iter().map(|b| (*b, *b)).collect();
     fn find(g: &mut HashMap<usize, usize>, b: usize) -> usize {
         let parent = g[&b];
@@ -1088,7 +1318,11 @@ pub fn dof_counts(asm: &Assembly, frame: &dyn Fn(&MateConnector) -> ConnectorFra
         root
     }
     for row in &jac {
-        let bodies: Vec<usize> = row.iter().map(|(b, _)| *b).filter(|b| group.contains_key(b)).collect();
+        let bodies: Vec<usize> = row
+            .iter()
+            .map(|(b, _)| *b)
+            .filter(|b| group.contains_key(b))
+            .collect();
         for w in bodies.windows(2) {
             let (a, c) = (find(&mut group, w[0]), find(&mut group, w[1]));
             if a != c {
@@ -1114,7 +1348,11 @@ pub fn dof_counts(asm: &Assembly, frame: &dyn Fn(&MateConnector) -> ConnectorFra
             vec![6; bodies.len()]
         } else {
             // Columns scaled so rotations weigh like L mm (the same metric as the solve).
-            let col: HashMap<usize, usize> = bodies.iter().enumerate().map(|(k, b)| (*b, k * 6)).collect();
+            let col: HashMap<usize, usize> = bodies
+                .iter()
+                .enumerate()
+                .map(|(k, b)| (*b, k * 6))
+                .collect();
             let mut j = DMatrix::<f64>::zeros(rows.len(), bodies.len() * 6);
             for (i, r) in rows.iter().enumerate() {
                 for (b, vals) in &jac[*r] {
@@ -1126,7 +1364,15 @@ pub fn dof_counts(asm: &Assembly, frame: &dyn Fn(&MateConnector) -> ConnectorFra
                 }
             }
             let null = null_space(&j);
-            (0..bodies.len()).map(|k| if null.ncols() == 0 { 0 } else { rank(&null.rows(k * 6, 6).into_owned()) as u32 }).collect()
+            (0..bodies.len())
+                .map(|k| {
+                    if null.ncols() == 0 {
+                        0
+                    } else {
+                        rank(&null.rows(k * 6, 6).into_owned()) as u32
+                    }
+                })
+                .collect()
         };
         for (b, dof) in bodies.iter().zip(dofs) {
             for (m, _) in &p.bodies[*b].members {
@@ -1142,12 +1388,20 @@ fn null_space(j: &DMatrix<f64>) -> DMatrix<f64> {
     let n = j.ncols();
     let jtj = j.transpose() * j;
     let eig = nalgebra::SymmetricEigen::new(jtj);
-    let top = eig.eigenvalues.iter().fold(0.0f64, |m, x| m.max(x.abs())).max(1e-300);
+    let top = eig
+        .eigenvalues
+        .iter()
+        .fold(0.0f64, |m, x| m.max(x.abs()))
+        .max(1e-300);
     let cols: Vec<DVector<f64>> = (0..n)
         .filter(|&k| eig.eigenvalues[k].abs() <= 1e-10 * top.max(1.0))
         .map(|k| eig.eigenvectors.column(k).into_owned())
         .collect();
-    if cols.is_empty() { DMatrix::zeros(n, 0) } else { DMatrix::from_columns(&cols) }
+    if cols.is_empty() {
+        DMatrix::zeros(n, 0)
+    } else {
+        DMatrix::from_columns(&cols)
+    }
 }
 
 fn rank(m: &DMatrix<f64>) -> usize {
@@ -1156,7 +1410,9 @@ fn rank(m: &DMatrix<f64>) -> usize {
     }
     let s = m.clone().svd(false, false).singular_values;
     let top = s.iter().fold(0.0f64, |a, x| a.max(*x));
-    s.iter().filter(|x| **x > 1e-6 * top.max(1e-300) && **x > 1e-9).count()
+    s.iter()
+        .filter(|x| **x > 1e-6 * top.max(1e-300) && **x > 1e-9)
+        .count()
 }
 
 /// The rank of one connector mate's constraint Jacobian, with its first connector's instance
@@ -1164,17 +1420,43 @@ fn rank(m: &DMatrix<f64>) -> usize {
 pub fn mate_rank(mate: &Mate, f1: ConnectorFrame, f2: ConnectorFrame) -> usize {
     let a = InstanceId::from_u128(1);
     let b = InstanceId::from_u128(2);
-    let src = super::InstanceSource::Part { element: crate::ids::ElementId::from_u128(0), part: crate::ids::PartId::new(crate::ids::FeatureId::from_u128(0), 0) };
+    let src = super::InstanceSource::Part {
+        element: crate::ids::ElementId::from_u128(0),
+        part: crate::ids::PartId::new(crate::ids::FeatureId::from_u128(0), 0),
+    };
     let mut ia = super::Instance::new(a, src, Pose::IDENTITY);
     ia.index = 1;
     let mut ib = super::Instance::new(b, src, Pose::IDENTITY);
     ib.index = 2;
     ib.fixed = true;
     let mut m = mate.clone();
-    m.connectors = [MateConnector { instance: a, frame: f1, ..mate.connectors[0] }, MateConnector { instance: b, frame: f2, ..mate.connectors[1] }];
+    m.connectors = [
+        MateConnector {
+            instance: a,
+            frame: f1,
+            ..mate.connectors[0]
+        },
+        MateConnector {
+            instance: b,
+            frame: f2,
+            ..mate.connectors[1]
+        },
+    ];
     m.tabs.clear();
-    let asm = Assembly { instances: vec![ia, ib], mates: vec![super::mate::MateFeature::new(MateId::from_u128(1), "m", MateKind::Mate(m))], ..Default::default() };
-    let p = Problem::new(&asm, &|c: &MateConnector| c.adjust(c.frame), &SolveOptions::default());
+    let asm = Assembly {
+        instances: vec![ia, ib],
+        mates: vec![super::mate::MateFeature::new(
+            MateId::from_u128(1),
+            "m",
+            MateKind::Mate(m),
+        )],
+        ..Default::default()
+    };
+    let p = Problem::new(
+        &asm,
+        &|c: &MateConnector| c.adjust(c.frame),
+        &SolveOptions::default(),
+    );
     let pivots = p.pivots();
     let jac = p.jacobian(&pivots, true);
     let mut j = DMatrix::<f64>::zeros(jac.len().max(1), 6);

@@ -59,7 +59,10 @@ pub enum SketchEntity {
     /// one ended, and the last must end at `start`. For rounded corners and fillets: a corner
     /// rounded with radius r is an arc whose center lies r in from both edges, and its two ends are
     /// where it leaves each edge. Holes are circles inside the loop.
-    Outline { start: [f64; 2], segments: Vec<PathSegment> },
+    Outline {
+        start: [f64; 2],
+        segments: Vec<PathSegment>,
+    },
     /// An axis-aligned rectangle from corner (x0, y0) to the opposite corner (x1, y1), with
     /// horizontal and vertical constraints.
     Rectangle { x0: f64, y0: f64, x1: f64, y1: f64 },
@@ -70,7 +73,14 @@ pub enum SketchEntity {
     /// A line segment (lines whose ends meet close regions).
     Line { x0: f64, y0: f64, x1: f64, y1: f64 },
     /// An arc about (cx, cy), counter-clockwise from (sx, sy) to (ex, ey).
-    Arc { cx: f64, cy: f64, sx: f64, sy: f64, ex: f64, ey: f64 },
+    Arc {
+        cx: f64,
+        cy: f64,
+        sx: f64,
+        sy: f64,
+        ex: f64,
+        ey: f64,
+    },
     /// A sketch point.
     Point { x: f64, y: f64 },
 }
@@ -336,7 +346,9 @@ mod tests {
             ]
         }))
         .unwrap();
-        let SketchEntity::Outline { segments, .. } = e else { panic!("not an outline") };
+        let SketchEntity::Outline { segments, .. } = e else {
+            panic!("not an outline")
+        };
         assert!(matches!(segments[2], PathSegment::Arc { ccw: false, .. }));
     }
 }

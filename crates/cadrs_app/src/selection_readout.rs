@@ -61,7 +61,10 @@ fn sync_readout(
     mut last: Local<Option<Vec<(Pick, String)>>>,
     mut commands: Commands,
 ) {
-    let modeling = enabled.0 && sessions.0.is_none() && sessions.1.is_none() && *kind == ActiveKind::PartStudio;
+    let modeling = enabled.0
+        && sessions.0.is_none()
+        && sessions.1.is_none()
+        && *kind == ActiveKind::PartStudio;
     let features = doc
         .as_deref()
         .and_then(|d| d.active_element())
@@ -156,7 +159,11 @@ fn sync_readout(
 }
 
 /// A field's ✕ deselects its entity.
-fn on_clear(ev: On<SelectionFieldClear>, q: Query<&ReadoutField>, mut selection: ResMut<Selection>) {
+fn on_clear(
+    ev: On<SelectionFieldClear>,
+    q: Query<&ReadoutField>,
+    mut selection: ResMut<Selection>,
+) {
     if let Ok(f) = q.get(ev.entity) {
         selection.0.retain(|p| *p != f.0);
     }

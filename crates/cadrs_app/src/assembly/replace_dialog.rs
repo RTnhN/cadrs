@@ -19,7 +19,10 @@ use cadrs_core::assembly::replace::{self, ReplaceInstances};
 use cadrs_core::assembly::{InstanceId, InstanceSource};
 use cadrs_core::{ElementId, PartId};
 use cadrs_ui::prelude::*;
-use cadrs_ui::{FeatureDialogAccept, FeatureDialogCancel, FeatureDialogState, SelectionList, SelectionListRemove, SelectionListState};
+use cadrs_ui::{
+    FeatureDialogAccept, FeatureDialogCancel, FeatureDialogState, SelectionList,
+    SelectionListRemove, SelectionListState,
+};
 
 use crate::parts::PartCache;
 use crate::viewport::{Pick, Selection, ViewportArea};
@@ -29,11 +32,19 @@ pub struct ReplaceDialogPlugin;
 
 impl Plugin for ReplaceDialogPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Update, (follow_selection, sync_dialog).chain().after(crate::parts::PartsSet).run_if(in_state(AppState::Document)))
-            .add_systems(OnExit(AppState::Document), |mut commands: Commands| commands.remove_resource::<ReplaceSession>())
-            .add_observer(on_accept)
-            .add_observer(on_cancel)
-            .add_observer(on_remove);
+        app.add_systems(
+            Update,
+            (follow_selection, sync_dialog)
+                .chain()
+                .after(crate::parts::PartsSet)
+                .run_if(in_state(AppState::Document)),
+        )
+        .add_systems(OnExit(AppState::Document), |mut commands: Commands| {
+            commands.remove_resource::<ReplaceSession>()
+        })
+        .add_observer(on_accept)
+        .add_observer(on_cancel)
+        .add_observer(on_remove);
     }
 }
 
@@ -59,25 +70,50 @@ struct PartRow(ElementId, PartId);
 
 /// The part instances among `ids` (subassemblies and rigid studios are not replaced).
 fn part_instances(doc: &ActiveDocument, ids: &[InstanceId]) -> Vec<InstanceId> {
-    let Some(model) = doc.active_element().and_then(|e| e.assembly_model()) else { return Vec::new() };
-    ids.iter().copied().filter(|i| model.instance(*i).is_some_and(|x| x.source.part().is_some())).collect()
+    let Some(model) = doc.active_element().and_then(|e| e.assembly_model()) else {
+        return Vec::new();
+    };
+    ids.iter()
+        .copied()
+        .filter(|i| {
+            model
+                .instance(*i)
+                .is_some_and(|x| x.source.part().is_some())
+        })
+        .collect()
 }
 
 /// Opens the dialog on `instances` (the menu's targets).
 pub fn open(world: &mut World, instances: Vec<InstanceId>) {
-    let Some(element) = world.get_resource::<ActiveDocument>().and_then(super::active_assembly) else { return };
+    let Some(element) = world
+        .get_resource::<ActiveDocument>()
+        .and_then(super::active_assembly)
+    else {
+        return;
+    };
     let instances = part_instances(world.resource::<ActiveDocument>(), &instances);
     if instances.is_empty() {
         return;
     }
     world.remove_resource::<super::mate_dialog::MateSession>();
     world.remove_resource::<super::group_dialog::GroupSession>();
-    world.resource_mut::<Selection>().0 = instances.iter().map(|i| Pick::Part(i.part_id())).collect();
-    world.insert_resource(ReplaceSession { element, instances, with: None });
+    world.resource_mut::<Selection>().0 =
+        instances.iter().map(|i| Pick::Part(i.part_id())).collect();
+    world.insert_resource(ReplaceSession {
+        element,
+        instances,
+        with: None,
+    });
 }
 
-fn follow_selection(selection: Res<Selection>, doc: Option<Res<ActiveDocument>>, session: Option<ResMut<ReplaceSession>>) {
-    let (Some(mut s), Some(doc)) = (session, doc) else { return };
+fn follow_selection(
+    selection: Res<Selection>,
+    doc: Option<Res<ActiveDocument>>,
+    session: Option<ResMut<ReplaceSession>>,
+) {
+    let (Some(mut s), Some(doc)) = (session, doc) else {
+        return;
+    };
     if !selection.is_changed() {
         return;
     }
@@ -93,14 +129,28 @@ fn on_remove(ev: On<SelectionListRemove>, q: Query<&Name>, mut commands: Command
     }
     let i = ev.index;
     commands.queue(move |world: &mut World| {
-        let Some(id) = world.get_resource::<ReplaceSession>().and_then(|s| s.instances.get(i).copied()) else { return };
-        world.resource_mut::<Selection>().0.retain(|p| super::instance_of(p) != Some(id));
+        let Some(id) = world
+            .get_resource::<ReplaceSession>()
+            .and_then(|s| s.instances.get(i).copied())
+        else {
+            return;
+        };
+        world
+            .resource_mut::<Selection>()
+            .0
+            .retain(|p| super::instance_of(p) != Some(id));
     });
 }
 
 /// The mates of `s`'s plan: (kept, removed) names, and the plan itself.
 #[allow(clippy::type_complexity)]
-fn plan(world: &mut World, s: &ReplaceSession) -> Option<(Vec<cadrs_core::assembly::mate::MateFeature>, Vec<cadrs_core::assembly::mate::MateId>)> {
+fn plan(
+    world: &mut World,
+    s: &ReplaceSession,
+) -> Option<(
+    Vec<cadrs_core::assembly::mate::MateFeature>,
+    Vec<cadrs_core::assembly::mate::MateId>,
+)> {
     let (el, part) = s.with?;
     world.resource_scope(|world, mut parts: Mut<super::AssemblyParts>| {
         let doc = world.get_resource::<ActiveDocument>()?;
@@ -113,34 +163,69 @@ fn plan(world: &mut World, s: &ReplaceSession) -> Option<(Vec<cadrs_core::assemb
 
 /// ✓: the instances take the chosen part, with the mates that match (one undo step).
 pub fn accept(world: &mut World) {
-    let Some(s) = world.get_resource::<ReplaceSession>().cloned() else { return };
+    let Some(s) = world.get_resource::<ReplaceSession>().cloned() else {
+        return;
+    };
     let Some((el, part)) = s.with else { return };
     if s.instances.is_empty() {
         return;
     }
-    let Some((mates, dropped)) = plan(world, &s) else { return };
+    let Some((mates, dropped)) = plan(world, &s) else {
+        return;
+    };
     let n = dropped.len();
     let source = InstanceSource::Part { element: el, part };
-    if super::run(world, &ReplaceInstances { element: s.element, instances: s.instances.clone(), source, mates, dropped }) {
+    if super::run(
+        world,
+        &ReplaceInstances {
+            element: s.element,
+            instances: s.instances.clone(),
+            source,
+            mates,
+            dropped,
+        },
+    ) {
         world.remove_resource::<ReplaceSession>();
-        world.resource_mut::<Selection>().0 = s.instances.iter().map(|i| Pick::Part(i.part_id())).collect();
+        world.resource_mut::<Selection>().0 = s
+            .instances
+            .iter()
+            .map(|i| Pick::Part(i.part_id()))
+            .collect();
         if n > 0 {
             let theme = world.resource::<Theme>().clone();
-            let text = if n == 1 { "1 mate removed (no matching geometry)".to_string() } else { format!("{n} mates removed (no matching geometry)") };
+            let text = if n == 1 {
+                "1 mate removed (no matching geometry)".to_string()
+            } else {
+                format!("{n} mates removed (no matching geometry)")
+            };
             let mut c = world.commands();
-            cadrs_ui::toast::show_notification(&mut c, &theme, cadrs_ui::toast::Notification::info(text).max_width(420.0).name("replace-toast"));
+            cadrs_ui::toast::show_notification(
+                &mut c,
+                &theme,
+                cadrs_ui::toast::Notification::info(text)
+                    .max_width(420.0)
+                    .name("replace-toast"),
+            );
             world.flush();
         }
     }
 }
 
-fn on_accept(ev: On<FeatureDialogAccept>, q: Query<(), With<ReplaceDialog>>, mut commands: Commands) {
+fn on_accept(
+    ev: On<FeatureDialogAccept>,
+    q: Query<(), With<ReplaceDialog>>,
+    mut commands: Commands,
+) {
     if q.contains(ev.entity) {
         commands.queue(accept);
     }
 }
 
-fn on_cancel(ev: On<FeatureDialogCancel>, q: Query<(), With<ReplaceDialog>>, mut commands: Commands) {
+fn on_cancel(
+    ev: On<FeatureDialogCancel>,
+    q: Query<(), With<ReplaceDialog>>,
+    mut commands: Commands,
+) {
     if q.contains(ev.entity) {
         commands.remove_resource::<ReplaceSession>();
     }
@@ -149,12 +234,32 @@ fn on_cancel(ev: On<FeatureDialogCancel>, q: Query<(), With<ReplaceDialog>>, mut
 /// Every part of the document's Part Studios: (studio, part, "Part", "Studio").
 fn candidates(world: &mut World) -> Vec<(ElementId, PartId, String, String)> {
     world.resource_scope(|world, mut parts: Mut<super::AssemblyParts>| {
-        let Some(doc) = world.get_resource::<ActiveDocument>() else { return Vec::new() };
+        let Some(doc) = world.get_resource::<ActiveDocument>() else {
+            return Vec::new();
+        };
         let mut out = Vec::new();
-        for e in doc.doc.elements.iter().filter(|e| e.assembly_model().is_none()) {
-            let Some(b) = parts.build(&doc.doc, e.id) else { continue };
-            for p in b.parts.iter().filter(|p| p.kind == cadrs_core::PartKind::Solid) {
-                let name = cadrs_core::assembly::source_part_name(&doc.doc, &InstanceSource::Part { element: e.id, part: p.id }, Some(&b));
+        for e in doc
+            .doc
+            .elements
+            .iter()
+            .filter(|e| e.assembly_model().is_none())
+        {
+            let Some(b) = parts.build(&doc.doc, e.id) else {
+                continue;
+            };
+            for p in b
+                .parts
+                .iter()
+                .filter(|p| p.kind == cadrs_core::PartKind::Solid)
+            {
+                let name = cadrs_core::assembly::source_part_name(
+                    &doc.doc,
+                    &InstanceSource::Part {
+                        element: e.id,
+                        part: p.id,
+                    },
+                    Some(&b),
+                );
                 out.push((e.id, p.id, name, e.name.clone()));
             }
         }
@@ -174,10 +279,21 @@ fn sync_dialog(world: &mut World) {
     };
     let names: Vec<String> = {
         let cache = world.resource::<PartCache>();
-        s.instances.iter().map(|i| cache.part_name(i.part_id()).unwrap_or("instance").to_string()).collect()
+        s.instances
+            .iter()
+            .map(|i| {
+                cache
+                    .part_name(i.part_id())
+                    .unwrap_or("instance")
+                    .to_string()
+            })
+            .collect()
     };
     // Nothing changed: nothing to do (the plan is worked out only when something did).
-    if existing.first().is_some_and(|(_, k)| k.0 == names && k.1 == s.with) {
+    if existing
+        .first()
+        .is_some_and(|(_, k)| k.0 == names && k.1 == s.with)
+    {
         return;
     }
     let summary = match plan(world, &s) {
@@ -186,9 +302,19 @@ fn sync_dialog(world: &mut World) {
         Some((kept, dropped)) => {
             let mut t = format!("Mates kept: {}", kept.len());
             if !dropped.is_empty() {
-                let model = world.resource::<ActiveDocument>().doc.element(s.element).and_then(|e| e.assembly_model().cloned());
-                let names: Vec<String> = dropped.iter().filter_map(|id| model.as_ref()?.mate(*id).map(|f| f.name.clone())).collect();
-                t.push_str(&format!(" · removed (no matching geometry): {}", names.join(", ")));
+                let model = world
+                    .resource::<ActiveDocument>()
+                    .doc
+                    .element(s.element)
+                    .and_then(|e| e.assembly_model().cloned());
+                let names: Vec<String> = dropped
+                    .iter()
+                    .filter_map(|id| model.as_ref()?.mate(*id).map(|f| f.name.clone()))
+                    .collect();
+                t.push_str(&format!(
+                    " · removed (no matching geometry): {}",
+                    names.join(", ")
+                ));
             }
             t
         }
@@ -223,7 +349,13 @@ fn sync_dialog(world: &mut World) {
             world.resource_scope(|world, mut parts: Mut<super::AssemblyParts>| {
                 let doc = world.resource::<ActiveDocument>();
                 for (el, p, ..) in &cands {
-                    thumbs.push(super::insert::thumbnail(&mut store, &mut images, doc, &mut parts, (*el, Some(*p))));
+                    thumbs.push(super::insert::thumbnail(
+                        &mut store,
+                        &mut images,
+                        doc,
+                        &mut parts,
+                        (*el, Some(*p)),
+                    ));
                 }
             });
         });
@@ -242,12 +374,19 @@ fn sync_dialog(world: &mut World) {
             .width(280.0)
             .body(move |b| {
                 let t = &tb;
-                b.spawn(SelectionList::new("replace-instances").placeholder("Instances to replace").tint_filled().items(names).active(true).build(t))
-                    .entry::<Node>()
-                    .and_modify(|mut n| {
-                        n.flex_grow = 0.0;
-                        n.margin = UiRect::new(Val::ZERO, Val::Px(2.0), Val::Px(2.0), Val::Px(6.0));
-                    });
+                b.spawn(
+                    SelectionList::new("replace-instances")
+                        .placeholder("Instances to replace")
+                        .tint_filled()
+                        .items(names)
+                        .active(true)
+                        .build(t),
+                )
+                .entry::<Node>()
+                .and_modify(|mut n| {
+                    n.flex_grow = 0.0;
+                    n.margin = UiRect::new(Val::ZERO, Val::Px(2.0), Val::Px(2.0), Val::Px(6.0));
+                });
                 b.spawn(t.text("Replace with", 12.0, FontWeight::SEMIBOLD, t.foreground));
                 b.spawn((
                     Name::new("replace-with"),
@@ -266,35 +405,76 @@ fn sync_dialog(world: &mut World) {
                     for ((el, p, name, studio), img) in cands.into_iter().zip(thumbs) {
                         let on = chosen == Some((el, p));
                         let mut row = l.spawn((
-                            TreeItem::new(format!("replace-part-{}", super::insert::slug(&name)), name.clone()).height(36.0).left(4.0).selected(on).build(t),
+                            TreeItem::new(
+                                format!("replace-part-{}", super::insert::slug(&name)),
+                                name.clone(),
+                            )
+                            .height(36.0)
+                            .left(4.0)
+                            .selected(on)
+                            .build(t),
                             PartRow(el, p),
                             Tooltip::new(format!("{name} (Part Studio {studio})")),
                         ));
-                        row.observe(|click: On<Pointer<Click>>, q: Query<&PartRow>, mut commands: Commands| {
-                            if let Ok(r) = q.get(click.entity).copied() {
-                                commands.queue(move |world: &mut World| {
-                                    if let Some(mut s) = world.get_resource_mut::<ReplaceSession>() {
-                                        s.with = Some((r.0, r.1));
-                                    }
-                                });
-                            }
-                        });
+                        row.observe(
+                            |click: On<Pointer<Click>>,
+                             q: Query<&PartRow>,
+                             mut commands: Commands| {
+                                if let Ok(r) = q.get(click.entity).copied() {
+                                    commands.queue(move |world: &mut World| {
+                                        if let Some(mut s) =
+                                            world.get_resource_mut::<ReplaceSession>()
+                                        {
+                                            s.with = Some((r.0, r.1));
+                                        }
+                                    });
+                                }
+                            },
+                        );
                         if let Some(img) = img {
-                            let th = row.world_scope(|w| w.spawn((Node { width: Val::Px(30.0), height: Val::Px(30.0), flex_shrink: 0.0, ..default() }, ImageNode::new(img), Pickable::IGNORE)).id());
+                            let th = row.world_scope(|w| {
+                                w.spawn((
+                                    Node {
+                                        width: Val::Px(30.0),
+                                        height: Val::Px(30.0),
+                                        flex_shrink: 0.0,
+                                        ..default()
+                                    },
+                                    ImageNode::new(img),
+                                    Pickable::IGNORE,
+                                ))
+                                .id()
+                            });
                             row.insert_children(0, &[th]);
                         }
                         // Its Part Studio, when named otherwise.
                         if studio != name {
-                            row.with_child((t.text(studio, 10.5, FontWeight::NORMAL, t.muted_foreground), Pickable::IGNORE, Node { margin: UiRect::right(Val::Px(6.0)), ..default() }));
+                            row.with_child((
+                                t.text(studio, 10.5, FontWeight::NORMAL, t.muted_foreground),
+                                Pickable::IGNORE,
+                                Node {
+                                    margin: UiRect::right(Val::Px(6.0)),
+                                    ..default()
+                                },
+                            ));
                         }
                     }
                 });
-                b.spawn((Name::new("replace-summary"), t.text(summary, 11.5, FontWeight::NORMAL, t.muted_foreground), Node { margin: UiRect::top(Val::Px(4.0)), ..default() }));
+                b.spawn((
+                    Name::new("replace-summary"),
+                    t.text(summary, 11.5, FontWeight::NORMAL, t.muted_foreground),
+                    Node {
+                        margin: UiRect::top(Val::Px(4.0)),
+                        ..default()
+                    },
+                ));
             })
             .build(&t),
     );
     let mut qa = world.query_filtered::<Entity, With<ViewportArea>>();
-    let Some(area) = qa.iter(world).next() else { return };
+    let Some(area) = qa.iter(world).next() else {
+        return;
+    };
     let d = world.spawn(bundle).id();
     world.entity_mut(area).add_child(d);
 }

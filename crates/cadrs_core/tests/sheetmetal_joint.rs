@@ -8,7 +8,9 @@ use cadrs_core::commands::{AddExtrude, AddFeature, AddSketch, EditSketch, SetExt
 use cadrs_core::document::{Document, EdgeRef, ExtrudeFeature, FeatureKind};
 use cadrs_core::rebuild::Build;
 use cadrs_core::sheetmetal::{SheetMetalExprs, SheetMetalModelFeature, SheetMetalOp};
-use cadrs_core::sheetmetal_joint::{PutModifyJoint, SetTableOrder, TableEdit, modify_joint_of, table_edit};
+use cadrs_core::sheetmetal_joint::{
+    PutModifyJoint, SetTableOrder, TableEdit, modify_joint_of, table_edit,
+};
 use cadrs_core::{ElementId, Feature, FeatureId, History, Part, rebuild};
 use cadrs_sheetmetal::{JointId, JointKind, Params, RipStyle};
 use cadrs_sketch::{PlaneRef, SketchOp, Vec2};
@@ -23,7 +25,11 @@ impl Studio {
     fn new() -> Self {
         let d = Document::new("Sheet metal");
         let el = d.elements[0].id;
-        Self { d, h: History::default(), el }
+        Self {
+            d,
+            h: History::default(),
+            el,
+        }
     }
 
     fn features(&self) -> Vec<Feature> {
@@ -44,33 +50,118 @@ impl Studio {
     /// box and the separate top.
     fn open_box(&mut self) -> FeatureId {
         let s = FeatureId::new();
-        self.h.execute(&mut self.d, &AddSketch { element: self.el, feature: s, plane: Some(PlaneRef::Top) }).unwrap();
+        self.h
+            .execute(
+                &mut self.d,
+                &AddSketch {
+                    element: self.el,
+                    feature: s,
+                    plane: Some(PlaneRef::Top),
+                },
+            )
+            .unwrap();
         let op = SketchOp::AddPolyline {
-            points: vec![Vec2::new(0.0, 0.0), Vec2::new(100.0, 0.0), Vec2::new(100.0, 60.0), Vec2::new(0.0, 60.0)],
+            points: vec![
+                Vec2::new(0.0, 0.0),
+                Vec2::new(100.0, 0.0),
+                Vec2::new(100.0, 60.0),
+                Vec2::new(0.0, 60.0),
+            ],
             closed: true,
             construction: false,
             label: "Add rectangle",
         };
-        self.h.execute(&mut self.d, &EditSketch { element: self.el, feature: s, op }).unwrap();
+        self.h
+            .execute(
+                &mut self.d,
+                &EditSketch {
+                    element: self.el,
+                    feature: s,
+                    op,
+                },
+            )
+            .unwrap();
         let e = FeatureId::new();
-        self.h.execute(&mut self.d, &AddExtrude { element: self.el, feature: e, extrude: ExtrudeFeature::default() }).unwrap();
-        let ex = ExtrudeFeature { sketches: vec![s], depth: 40.0, depth_expr: "40 mm".into(), ..Default::default() };
-        self.h.execute(&mut self.d, &SetExtrude { element: self.el, feature: e, extrude: ex, label: "Extrude".into() }).unwrap();
+        self.h
+            .execute(
+                &mut self.d,
+                &AddExtrude {
+                    element: self.el,
+                    feature: e,
+                    extrude: ExtrudeFeature::default(),
+                },
+            )
+            .unwrap();
+        let ex = ExtrudeFeature {
+            sketches: vec![s],
+            depth: 40.0,
+            depth_expr: "40 mm".into(),
+            ..Default::default()
+        };
+        self.h
+            .execute(
+                &mut self.d,
+                &SetExtrude {
+                    element: self.el,
+                    feature: e,
+                    extrude: ex,
+                    label: "Extrude".into(),
+                },
+            )
+            .unwrap();
         let block = self.ok().parts[0].clone();
-        let p = Params { thickness: 2.0, bend_radius: 3.0, k_factor: 0.45, minimal_gap: 0.2, ..SheetMetalModelFeature::default_params() };
-        let mut x = SheetMetalModelFeature { operation: SheetMetalOp::Convert, params: p, exprs: SheetMetalExprs::of(&p), ..Default::default() };
+        let p = Params {
+            thickness: 2.0,
+            bend_radius: 3.0,
+            k_factor: 0.45,
+            minimal_gap: 0.2,
+            ..SheetMetalModelFeature::default_params()
+        };
+        let mut x = SheetMetalModelFeature {
+            operation: SheetMetalOp::Convert,
+            params: p,
+            exprs: SheetMetalExprs::of(&p),
+            ..Default::default()
+        };
         x.parts = vec![block.id];
-        x.bends = [[50.0, 0.0, 0.0], [100.0, 30.0, 0.0], [50.0, 60.0, 0.0], [0.0, 30.0, 0.0]].iter().map(|q| EdgeOrFace::Edge(edge_near(&block, *q))).collect();
+        x.bends = [
+            [50.0, 0.0, 0.0],
+            [100.0, 30.0, 0.0],
+            [50.0, 60.0, 0.0],
+            [0.0, 30.0, 0.0],
+        ]
+        .iter()
+        .map(|q| EdgeOrFace::Edge(edge_near(&block, *q)))
+        .collect();
         let f = FeatureId::new();
-        self.h.execute(&mut self.d, &AddFeature { element: self.el, feature: f, base_name: "Sheet metal model".into(), kind: FeatureKind::SheetMetalModel(x) }).unwrap();
+        self.h
+            .execute(
+                &mut self.d,
+                &AddFeature {
+                    element: self.el,
+                    feature: f,
+                    base_name: "Sheet metal model".into(),
+                    kind: FeatureKind::SheetMetalModel(x),
+                },
+            )
+            .unwrap();
         f
     }
 
     /// A table edit, as the panel makes it: the joint's Modify joint edited, or a new one.
     fn table(&mut self, model: FeatureId, joint: &str, edit: TableEdit) -> FeatureId {
         let b = self.build();
-        let ctx = b.sheet_metal.iter().find(|c| c.feature == model).expect("context");
-        let j = ctx.model.joints.iter().find(|j| j.name == joint).unwrap_or_else(|| panic!("no {joint}"));
+        let ctx = b
+            .sheet_metal
+            .iter()
+            .find(|c| c.feature == model)
+            .expect("context");
+        let j = ctx
+            .model
+            .joints
+            .iter()
+            .find(|j| j.name == joint)
+            .unwrap_or_else(|| panic!("no {joint}"));
         let features = self.features();
         let existing = modify_joint_of(&features, model, j.id);
         let prev = existing.and_then(|f| match &f.kind {
@@ -81,7 +172,18 @@ impl Studio {
         let x = table_edit(model, prev.as_ref(), j, &ctx.model.params, &edit);
         let label = edit.label(joint);
         let after = ctx.editors.clone();
-        self.h.execute(&mut self.d, &PutModifyJoint { element: self.el, feature, joint: x, after, label }).unwrap();
+        self.h
+            .execute(
+                &mut self.d,
+                &PutModifyJoint {
+                    element: self.el,
+                    feature,
+                    joint: x,
+                    after,
+                    label,
+                },
+            )
+            .unwrap();
         feature
     }
 
@@ -91,9 +193,18 @@ impl Studio {
 }
 
 fn edge_near(part: &Part, p: [f64; 3]) -> EdgeRef {
-    let e = part.solid.edges.iter().min_by(|a, b| a.distance(p).total_cmp(&b.distance(p))).unwrap();
+    let e = part
+        .solid
+        .edges
+        .iter()
+        .min_by(|a, b| a.distance(p).total_cmp(&b.distance(p)))
+        .unwrap();
     assert!(e.distance(p) < 1e-3, "no edge at {p:?}");
-    EdgeRef { part: part.id, edge: e.name, seed: p }
+    EdgeRef {
+        part: part.id,
+        edge: e.name,
+        seed: p,
+    }
 }
 
 fn volume(p: &Part) -> f64 {
@@ -108,7 +219,11 @@ fn ids(b: &Build) -> Vec<cadrs_core::PartId> {
 
 fn joint<'a>(b: &'a Build, model: FeatureId, name: &str) -> &'a cadrs_sheetmetal::Joint {
     let ctx = b.sheet_metal.iter().find(|c| c.feature == model).unwrap();
-    ctx.model.joints.iter().find(|j| j.name == name).unwrap_or_else(|| panic!("no {name}"))
+    ctx.model
+        .joints
+        .iter()
+        .find(|j| j.name == name)
+        .unwrap_or_else(|| panic!("no {name}"))
 }
 
 #[test]
@@ -116,24 +231,45 @@ fn a_radius_and_a_k_factor_from_the_table_refold_the_part_in_place() {
     let mut st = Studio::new();
     let m = st.open_box();
     let before = st.ok();
-    let box_before = before.parts.iter().max_by(|a, b| volume(a).total_cmp(&volume(b))).unwrap().clone();
+    let box_before = before
+        .parts
+        .iter()
+        .max_by(|a, b| volume(a).total_cmp(&volume(b)))
+        .unwrap()
+        .clone();
     // Double-click Bend B's radius: 6 mm. A Modify joint appears right after the model.
     let f = st.table(m, "Bend B", TableEdit::Radius(6.0, "6 mm".into()));
     let names: Vec<String> = st.features().iter().map(|f| f.name.clone()).collect();
-    assert_eq!(names.last().map(String::as_str), Some("Modify joint 1"), "{names:?}");
+    assert_eq!(
+        names.last().map(String::as_str),
+        Some("Modify joint 1"),
+        "{names:?}"
+    );
     let after = st.ok();
     assert_eq!(ids(&after), ids(&before), "the parts keep their ids");
     let bend = joint(&after, m, "Bend B").bend().unwrap();
     assert_eq!(bend.radius, 6.0);
     let box_after = after.parts.iter().find(|p| p.id == box_before.id).unwrap();
-    assert!((volume(box_after) - volume(&box_before)).abs() > 1.0, "the box changed");
+    assert!(
+        (volume(box_after) - volume(&box_before)).abs() > 1.0,
+        "the box changed"
+    );
     // The K factor cell: the same Modify joint, edited.
     let g = st.table(m, "Bend B", TableEdit::Value(0.3, "0.3".into()));
     assert_eq!(g, f);
-    assert_eq!(st.features().iter().filter(|f| matches!(f.kind, FeatureKind::ModifyJoint(_))).count(), 1);
+    assert_eq!(
+        st.features()
+            .iter()
+            .filter(|f| matches!(f.kind, FeatureKind::ModifyJoint(_)))
+            .count(),
+        1
+    );
     let after = st.ok();
     let bend = joint(&after, m, "Bend B").bend().unwrap();
-    assert_eq!((bend.radius, bend.value), (6.0, Some(cadrs_sheetmetal::BendValue::KFactor(0.3))));
+    assert_eq!(
+        (bend.radius, bend.value),
+        (6.0, Some(cadrs_sheetmetal::BendValue::KFactor(0.3)))
+    );
     // In closed form: the flat across Bend B loses the two setbacks' growth, (R + T) from 5 to
     // 8 on each wall, and gains the allowance's, π/2·(R + K·T) from 3.9 to 6.6:
     // −2·(8 − 5) + π/2·(6.6 − 3.9) ≈ −1.759 mm; the other way it keeps its size.
@@ -147,21 +283,44 @@ fn a_radius_and_a_k_factor_from_the_table_refold_the_part_in_place() {
     let want = -2.0 * (8.0 - 5.0) + std::f64::consts::FRAC_PI_2 * (6.6 - 3.9);
     assert!((want + 1.759).abs() < 1e-3);
     let (dx, dy) = (e1.x - e0.x, e1.y - e0.y);
-    let (along, other) = if dx.abs() > dy.abs() { (dx, dy) } else { (dy, dx) };
-    assert!((along - want).abs() < 1e-6, "the flat across Bend B changed by {along}, not {want}");
-    assert!(other.abs() < 1e-6, "the flat along Bend B changed by {other}");
+    let (along, other) = if dx.abs() > dy.abs() {
+        (dx, dy)
+    } else {
+        (dy, dx)
+    };
+    assert!(
+        (along - want).abs() < 1e-6,
+        "the flat across Bend B changed by {along}, not {want}"
+    );
+    assert!(
+        other.abs() < 1e-6,
+        "the flat along Bend B changed by {other}"
+    );
     // Out of range: the feature fails with the range, the model stays as it was.
     st.table(m, "Bend B", TableEdit::Value(1.2, "1.2".into()));
     let bad = st.build();
-    assert_eq!(bad.errors.iter().find(|(id, _)| *id == f).map(|(_, e)| e.as_str()), Some("K Factor must be between -1.5 and 1"));
+    assert_eq!(
+        bad.errors
+            .iter()
+            .find(|(id, _)| *id == f)
+            .map(|(_, e)| e.as_str()),
+        Some("K Factor must be between -1.5 and 1")
+    );
     assert_eq!(joint(&bad, m, "Bend B").bend().unwrap().radius, 3.0);
     // Undo, twice: back to radius 6, K 0.3, then K from the model.
     st.undo();
-    assert_eq!(joint(&st.ok(), m, "Bend B").bend().unwrap().value, Some(cadrs_sheetmetal::BendValue::KFactor(0.3)));
+    assert_eq!(
+        joint(&st.ok(), m, "Bend B").bend().unwrap().value,
+        Some(cadrs_sheetmetal::BendValue::KFactor(0.3))
+    );
     st.undo();
     assert_eq!(joint(&st.ok(), m, "Bend B").bend().unwrap().value, None);
     st.undo();
-    assert!(st.features().iter().all(|f| !matches!(f.kind, FeatureKind::ModifyJoint(_))));
+    assert!(
+        st.features()
+            .iter()
+            .all(|f| !matches!(f.kind, FeatureKind::ModifyJoint(_)))
+    );
     assert_eq!(joint(&st.ok(), m, "Bend B").bend().unwrap().radius, 3.0);
 }
 
@@ -175,7 +334,13 @@ fn a_bend_converted_to_a_rip_and_back_and_a_rip_style() {
     st.table(m, "Bend A", TableEdit::ConvertToRip);
     let after = st.ok();
     let a = joint(&after, m, "Joint A");
-    assert!(matches!(a.kind, JointKind::Rip { style: RipStyle::EdgeJoint, .. }));
+    assert!(matches!(
+        a.kind,
+        JointKind::Rip {
+            style: RipStyle::EdgeJoint,
+            ..
+        }
+    ));
     assert_eq!(after.parts.len(), 3);
     for p in &before.parts {
         assert!(after.parts.iter().any(|q| q.id == p.id), "{} kept", p.name);
@@ -183,23 +348,42 @@ fn a_bend_converted_to_a_rip_and_back_and_a_rip_style() {
     // Its Style: Butt joint – Direction 1 (a 90° joint).
     st.table(m, "Joint A", TableEdit::RipStyle(RipStyle::ButtDirection1));
     let styled = st.ok();
-    assert!(matches!(joint(&styled, m, "Joint A").kind, JointKind::Rip { style: RipStyle::ButtDirection1, .. }));
+    assert!(matches!(
+        joint(&styled, m, "Joint A").kind,
+        JointKind::Rip {
+            style: RipStyle::ButtDirection1,
+            ..
+        }
+    ));
     // Its Type back to Bend: one Modify joint all along, and two parts again.
     st.table(m, "Joint A", TableEdit::ConvertToBend);
     let back = st.ok();
     assert!(joint(&back, m, "Bend A").bend().is_some());
     assert_eq!(back.parts.len(), 2);
-    assert_eq!(st.features().iter().filter(|f| matches!(f.kind, FeatureKind::ModifyJoint(_))).count(), 1);
+    assert_eq!(
+        st.features()
+            .iter()
+            .filter(|f| matches!(f.kind, FeatureKind::ModifyJoint(_)))
+            .count(),
+        1
+    );
     // A rip of the model made a bend: the top joins the box (one part).
-    let rip = before.sheet_metal[0].model.joints.iter().find(|j| matches!(j.kind, JointKind::Rip { .. }) && {
-        let ctx = &before.sheet_metal[0];
-        let top = ctx.parts.iter().find(|(_, w)| w.len() == 1).unwrap().1[0];
-        j.a == top || j.b == top
+    let rip = before.sheet_metal[0].model.joints.iter().find(|j| {
+        matches!(j.kind, JointKind::Rip { .. }) && {
+            let ctx = &before.sheet_metal[0];
+            let top = ctx.parts.iter().find(|(_, w)| w.len() == 1).unwrap().1[0];
+            j.a == top || j.b == top
+        }
     });
     let name = rip.unwrap().name.clone();
     st.table(m, &name, TableEdit::ConvertToBend);
     let joined = st.ok();
-    assert_eq!(joined.parts.len(), 1, "{:?}", joined.parts.iter().map(|p| &p.name).collect::<Vec<_>>());
+    assert_eq!(
+        joined.parts.len(),
+        1,
+        "{:?}",
+        joined.parts.iter().map(|p| &p.name).collect::<Vec<_>>()
+    );
 }
 
 #[test]
@@ -210,9 +394,24 @@ fn move_up_and_down_keep_the_table_order_with_the_model() {
     let ctx = b.sheet_metal.iter().find(|c| c.feature == m).unwrap();
     let c = joint(&b, m, "Bend C").id;
     let order = cadrs_sheetmetal::joint_edit::moved(&ctx.model, c, -1).unwrap();
-    st.h.execute(&mut st.d, &SetTableOrder { element: st.el, model: m, order, label: "Move up Bend C".into() }).unwrap();
+    st.h.execute(
+        &mut st.d,
+        &SetTableOrder {
+            element: st.el,
+            model: m,
+            order,
+            label: "Move up Bend C".into(),
+        },
+    )
+    .unwrap();
     let names = |b: &Build| -> Vec<String> {
-        b.sheet_metal[0].model.joints.iter().filter(|j| j.bend().is_some()).map(|j| j.name.clone()).collect()
+        b.sheet_metal[0]
+            .model
+            .joints
+            .iter()
+            .filter(|j| j.bend().is_some())
+            .map(|j| j.name.clone())
+            .collect()
     };
     let moved = st.ok();
     assert_eq!(names(&moved), ["Bend A", "Bend C", "Bend B", "Bend D"]);

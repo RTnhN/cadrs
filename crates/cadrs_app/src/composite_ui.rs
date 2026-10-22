@@ -11,7 +11,6 @@
 //!
 //! Names: `composite-dialog`, `composite-parts-field`, `composite-closed(-checkbox)`.
 
-use cadrs_ui::ShortcutKey;
 use bevy::input::ButtonState;
 use bevy::input::keyboard::KeyboardInput;
 use bevy::prelude::*;
@@ -19,10 +18,11 @@ use cadrs_core::assembly::context::is_context;
 use cadrs_core::commands::{AddFeature, ReplaceFeature};
 use cadrs_core::transform::CompositeFeature;
 use cadrs_core::{ElementId, ElementKind, Feature, FeatureId, FeatureKind, PartId};
+use cadrs_ui::ShortcutKey;
 use cadrs_ui::prelude::*;
 use cadrs_ui::{
-    CheckboxChange, FeatureDialogAccept, FeatureDialogCancel, FeatureDialogState, OptionRow, SelectionList, SelectionListRemove,
-    SelectionListState,
+    CheckboxChange, FeatureDialogAccept, FeatureDialogCancel, FeatureDialogState, OptionRow,
+    SelectionList, SelectionListRemove, SelectionListState,
 };
 
 use crate::parts::PartCache;
@@ -35,9 +35,17 @@ impl Plugin for CompositeUiPlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(
             Update,
-            (composite_picks, composite_keys, sync_dialog, preview).chain().before(crate::parts::PartsSet).run_if(in_state(AppState::Document)),
+            (composite_picks, composite_keys, sync_dialog, preview)
+                .chain()
+                .before(crate::parts::PartsSet)
+                .run_if(in_state(AppState::Document)),
         )
-        .add_systems(Update, show_parts.after(crate::parts::PartsSet).run_if(in_state(AppState::Document)))
+        .add_systems(
+            Update,
+            show_parts
+                .after(crate::parts::PartsSet)
+                .run_if(in_state(AppState::Document)),
+        )
         .add_systems(OnExit(AppState::Document), |world: &mut World| {
             if world.contains_resource::<CompositeSession>() {
                 finish(world);
@@ -92,15 +100,35 @@ pub fn begin(world: &mut World) {
         finish(world);
     }
     close_others(world);
-    let parts: Vec<PartId> = world.resource::<Selection>().0.iter().filter_map(|p| p.part()).filter(|p| !is_context(p.feature)).collect();
-    let Some(mut doc) = world.get_resource_mut::<ActiveDocument>() else { return };
-    let Some(element) = doc.active_element().filter(|e| matches!(e.kind, ElementKind::PartStudio { .. })).map(|e| e.id) else {
+    let parts: Vec<PartId> = world
+        .resource::<Selection>()
+        .0
+        .iter()
+        .filter_map(|p| p.part())
+        .filter(|p| !is_context(p.feature))
+        .collect();
+    let Some(mut doc) = world.get_resource_mut::<ActiveDocument>() else {
+        return;
+    };
+    let Some(element) = doc
+        .active_element()
+        .filter(|e| matches!(e.kind, ElementKind::PartStudio { .. }))
+        .map(|e| e.id)
+    else {
         return;
     };
     let feature = FeatureId::new();
     let mark = doc.history.undo_len();
-    let kind = FeatureKind::Composite(CompositeFeature { parts, closed: false });
-    if let Err(e) = doc.execute(&AddFeature { element, feature, base_name: "Composite part".into(), kind }) {
+    let kind = FeatureKind::Composite(CompositeFeature {
+        parts,
+        closed: false,
+    });
+    if let Err(e) = doc.execute(&AddFeature {
+        element,
+        feature,
+        base_name: "Composite part".into(),
+        kind,
+    }) {
         warn!("cannot insert a composite part: {e}");
         return;
     }
@@ -109,25 +137,51 @@ pub fn begin(world: &mut World) {
 
 /// Opens an existing Composite part for editing (a feature row's double-click).
 pub fn edit(world: &mut World, feature: FeatureId) {
-    if world.get_resource::<CompositeSession>().is_some_and(|s| s.feature == feature) {
+    if world
+        .get_resource::<CompositeSession>()
+        .is_some_and(|s| s.feature == feature)
+    {
         return;
     }
     if world.contains_resource::<CompositeSession>() {
         finish(world);
     }
     close_others(world);
-    let Some(mut doc) = world.get_resource_mut::<ActiveDocument>() else { return };
-    let Some(el) = doc.active_element() else { return };
+    let Some(mut doc) = world.get_resource_mut::<ActiveDocument>() else {
+        return;
+    };
+    let Some(el) = doc.active_element() else {
+        return;
+    };
     let element = el.id;
-    let Some(before) = el.feature(feature).filter(|f| matches!(f.kind, FeatureKind::Composite(_))).cloned() else { return };
+    let Some(before) = el
+        .feature(feature)
+        .filter(|f| matches!(f.kind, FeatureKind::Composite(_)))
+        .cloned()
+    else {
+        return;
+    };
     let mark = doc.history.undo_len();
     doc.discard_since(mark);
     start(world, element, feature, false, mark, Some(before));
 }
 
-fn start(world: &mut World, element: ElementId, feature: FeatureId, is_new: bool, mark: usize, before: Option<Feature>) {
+fn start(
+    world: &mut World,
+    element: ElementId,
+    feature: FeatureId,
+    is_new: bool,
+    mark: usize,
+    before: Option<Feature>,
+) {
     world.resource_mut::<Selection>().0.clear();
-    world.insert_resource(CompositeSession { element, feature, is_new, mark, before });
+    world.insert_resource(CompositeSession {
+        element,
+        feature,
+        is_new,
+        mark,
+        before,
+    });
 }
 
 fn end(world: &mut World) {
@@ -137,7 +191,12 @@ fn end(world: &mut World) {
 }
 
 fn current(world: &World, s: &CompositeSession) -> Option<Feature> {
-    world.get_resource::<ActiveDocument>()?.doc.element(s.element)?.feature(s.feature).cloned()
+    world
+        .get_resource::<ActiveDocument>()?
+        .doc
+        .element(s.element)?
+        .feature(s.feature)
+        .cloned()
 }
 
 fn params(world: &World) -> Option<CompositeFeature> {
@@ -150,15 +209,25 @@ fn params(world: &World) -> Option<CompositeFeature> {
 
 /// Replaces the open feature's parameters (one command).
 fn set(world: &mut World, c: CompositeFeature, label: &str) {
-    let Some(s) = world.get_resource::<CompositeSession>().cloned() else { return };
-    let Some(mut f) = current(world, &s) else { return };
+    let Some(s) = world.get_resource::<CompositeSession>().cloned() else {
+        return;
+    };
+    let Some(mut f) = current(world, &s) else {
+        return;
+    };
     let kind = FeatureKind::Composite(c);
     if f.kind == kind {
         return;
     }
     f.kind = kind;
-    let Some(mut doc) = world.get_resource_mut::<ActiveDocument>() else { return };
-    if let Err(e) = doc.execute(&ReplaceFeature { element: s.element, feature: f, label: label.into() }) {
+    let Some(mut doc) = world.get_resource_mut::<ActiveDocument>() else {
+        return;
+    };
+    if let Err(e) = doc.execute(&ReplaceFeature {
+        element: s.element,
+        feature: f,
+        label: label.into(),
+    }) {
         warn!("cannot change the composite part: {e}");
     }
 }
@@ -181,13 +250,24 @@ pub fn pick_parts(world: &mut World, parts: &[PartId], toggle: bool) {
 
 /// ✓ / Enter: keeps the feature if it rebuilds.
 pub fn accept(world: &mut World) {
-    let Some(s) = world.get_resource::<CompositeSession>().cloned() else { return };
-    let Some(f) = current(world, &s).filter(|f| f.is_valid()) else { return };
-    let features = world.get_resource::<ActiveDocument>().and_then(|d| Some(d.doc.element(s.element)?.active_features())).unwrap_or_default();
+    let Some(s) = world.get_resource::<CompositeSession>().cloned() else {
+        return;
+    };
+    let Some(f) = current(world, &s).filter(|f| f.is_valid()) else {
+        return;
+    };
+    let features = world
+        .get_resource::<ActiveDocument>()
+        .and_then(|d| Some(d.doc.element(s.element)?.active_features()))
+        .unwrap_or_default();
     if crate::accept::builds(world, "composite", features, f.id, accept) != Some(true) {
         return;
     }
-    let label = if s.is_new { format!("Insert {}", f.name) } else { format!("Edit {}", f.name) };
+    let label = if s.is_new {
+        format!("Insert {}", f.name)
+    } else {
+        format!("Edit {}", f.name)
+    };
     if let Some(mut doc) = world.get_resource_mut::<ActiveDocument>() {
         doc.squash_element_since(s.mark, s.element, label);
     }
@@ -196,7 +276,9 @@ pub fn accept(world: &mut World) {
 
 /// ✕ / Esc: removes a new feature or reverts an edit.
 pub fn cancel(world: &mut World) {
-    let Some(s) = world.get_resource::<CompositeSession>().cloned() else { return };
+    let Some(s) = world.get_resource::<CompositeSession>().cloned() else {
+        return;
+    };
     let cur = current(world, &s);
     if let Some(mut doc) = world.get_resource_mut::<ActiveDocument>() {
         let name = cur.as_ref().map(|f| f.name.clone()).unwrap_or_default();
@@ -207,7 +289,11 @@ pub fn cancel(world: &mut World) {
             if let (Some(before), Some(f)) = (s.before.clone(), cur)
                 && f != before
             {
-                let _ = doc.execute(&ReplaceFeature { element: s.element, feature: before, label: format!("Cancel {name}") });
+                let _ = doc.execute(&ReplaceFeature {
+                    element: s.element,
+                    feature: before,
+                    label: format!("Cancel {name}"),
+                });
             }
         }
     }
@@ -223,9 +309,22 @@ pub fn finish(world: &mut World) {
 }
 
 /// The dialog's parts show as selected.
-fn show_parts(session: Option<Res<CompositeSession>>, doc: Option<Res<ActiveDocument>>, mut selection: ResMut<Selection>) {
-    let Some((s, doc)) = session.zip(doc) else { return };
-    let Some(FeatureKind::Composite(c)) = doc.doc.element(s.element).and_then(|e| e.feature(s.feature)).map(|f| &f.kind) else { return };
+fn show_parts(
+    session: Option<Res<CompositeSession>>,
+    doc: Option<Res<ActiveDocument>>,
+    mut selection: ResMut<Selection>,
+) {
+    let Some((s, doc)) = session.zip(doc) else {
+        return;
+    };
+    let Some(FeatureKind::Composite(c)) = doc
+        .doc
+        .element(s.element)
+        .and_then(|e| e.feature(s.feature))
+        .map(|f| &f.kind)
+    else {
+        return;
+    };
     let want: Vec<Pick> = c.parts.iter().map(|p| Pick::Part(*p)).collect();
     if selection.0 != want {
         selection.0 = want;
@@ -234,7 +333,11 @@ fn show_parts(session: Option<Res<CompositeSession>>, doc: Option<Res<ActiveDocu
 
 /// The view shows the studio without the composite (its members pickable), and up to it when
 /// it isn't the last feature.
-fn preview(session: Option<Res<CompositeSession>>, doc: Option<Res<ActiveDocument>>, mut over: ResMut<crate::parts::PartOverride>) {
+fn preview(
+    session: Option<Res<CompositeSession>>,
+    doc: Option<Res<ActiveDocument>>,
+    mut over: ResMut<crate::parts::PartOverride>,
+) {
     let Some(s) = session else { return };
     let rollback_to = doc.and_then(|d| {
         let el = d.doc.element(s.element)?;
@@ -251,13 +354,19 @@ fn preview(session: Option<Res<CompositeSession>>, doc: Option<Res<ActiveDocumen
 // ---------------------------------------------------------------------------------------------
 // Input
 
-fn composite_picks(mut picks: MessageReader<PickRequest>, session: Option<Res<CompositeSession>>, mut commands: Commands) {
+fn composite_picks(
+    mut picks: MessageReader<PickRequest>,
+    session: Option<Res<CompositeSession>>,
+    mut commands: Commands,
+) {
     if session.is_none() {
         picks.clear();
         return;
     }
     for p in picks.read() {
-        let Some(part) = p.0.and_then(|p| p.part()) else { continue };
+        let Some(part) = p.0.and_then(|p| p.part()) else {
+            continue;
+        };
         commands.queue(move |world: &mut World| pick_parts(world, &[part], true));
     }
 }
@@ -285,13 +394,21 @@ fn composite_keys(
     }
 }
 
-fn on_accept(ev: On<FeatureDialogAccept>, q: Query<(), With<CompositeDialog>>, mut commands: Commands) {
+fn on_accept(
+    ev: On<FeatureDialogAccept>,
+    q: Query<(), With<CompositeDialog>>,
+    mut commands: Commands,
+) {
     if q.contains(ev.entity) {
         commands.queue(accept);
     }
 }
 
-fn on_cancel(ev: On<FeatureDialogCancel>, q: Query<(), With<CompositeDialog>>, mut commands: Commands) {
+fn on_cancel(
+    ev: On<FeatureDialogCancel>,
+    q: Query<(), With<CompositeDialog>>,
+    mut commands: Commands,
+) {
     if q.contains(ev.entity) {
         commands.queue(cancel);
     }
@@ -299,7 +416,10 @@ fn on_cancel(ev: On<FeatureDialogCancel>, q: Query<(), With<CompositeDialog>>, m
 
 /// Closed.
 fn on_checkbox(ev: On<CheckboxChange>, q: Query<&Name>, mut commands: Commands) {
-    if !q.get(ev.entity).is_ok_and(|n| n.as_str() == "composite-closed-checkbox") {
+    if !q
+        .get(ev.entity)
+        .is_ok_and(|n| n.as_str() == "composite-closed-checkbox")
+    {
         return;
     }
     let on = ev.checked;
@@ -343,9 +463,21 @@ fn sync_dialog(
         }
         return;
     };
-    let Some(f) = doc.doc.element(s.element).and_then(|e| e.feature(s.feature)) else { return };
-    let FeatureKind::Composite(c) = &f.kind else { return };
-    let names: Vec<String> = c.parts.iter().map(|p| cache.part_name(*p).unwrap_or("Part").to_string()).collect();
+    let Some(f) = doc
+        .doc
+        .element(s.element)
+        .and_then(|e| e.feature(s.feature))
+    else {
+        return;
+    };
+    let FeatureKind::Composite(c) = &f.kind else {
+        return;
+    };
+    let names: Vec<String> = c
+        .parts
+        .iter()
+        .map(|p| cache.part_name(*p).unwrap_or("Part").to_string())
+        .collect();
     let valid = f.is_valid() && !cache.errors.contains_key(&f.id) && !cache.rebuilding;
     let layout = BuiltFor(c.closed);
     let built = q_dialog.iter().next().map(|(e, k, _)| (e, *k));
@@ -353,7 +485,9 @@ fn sync_dialog(
         if let Some((e, _)) = built {
             commands.entity(e).try_despawn();
         }
-        let Some(area) = q_area.iter().next() else { return };
+        let Some(area) = q_area.iter().next() else {
+            return;
+        };
         let t = theme.clone();
         let items = names.clone();
         let closed = c.closed;
@@ -366,12 +500,30 @@ fn sync_dialog(
                     .title(f.name.clone())
                     .valid(valid)
                     .body(move |b| {
-                        b.spawn((PartsField, SelectionList::new("composite-parts-field").placeholder("Parts and composite parts").items(items).active(true).build(&t)));
-                        b.spawn(OptionRow::new("composite-closed", "Closed").checked(closed).build(&t));
+                        b.spawn((
+                            PartsField,
+                            SelectionList::new("composite-parts-field")
+                                .placeholder("Parts and composite parts")
+                                .items(items)
+                                .active(true)
+                                .build(&t),
+                        ));
+                        b.spawn(
+                            OptionRow::new("composite-closed", "Closed")
+                                .checked(closed)
+                                .build(&t),
+                        );
                     })
                     .footer(|f| {
-                        f.spawn(Node { flex_grow: 1.0, ..default() });
-                        f.spawn((Name::new("composite-dialog-help"), cadrs_ui::icon("help-filled", 14.0, Color::srgb_u8(0xa8, 0xa8, 0xa8)), Tooltip::new("Help")));
+                        f.spawn(Node {
+                            flex_grow: 1.0,
+                            ..default()
+                        });
+                        f.spawn((
+                            Name::new("composite-dialog-help"),
+                            cadrs_ui::icon("help-filled", 14.0, Color::srgb_u8(0xa8, 0xa8, 0xa8)),
+                            Tooltip::new("Help"),
+                        ));
                     })
                     .build(&theme),
             ))
@@ -380,13 +532,23 @@ fn sync_dialog(
         return;
     }
     for (_, _, mut st) in &mut q_dialog {
-        let want = FeatureDialogState { title: f.name.clone(), valid, error: false };
+        let want = FeatureDialogState {
+            title: f.name.clone(),
+            valid,
+            error: false,
+        };
         if *st != want {
             *st = want;
         }
     }
     for mut l in &mut q_list {
-        let want = SelectionListState { items: names.clone(), active: true, error: false, red_items: false, red: Vec::new() };
+        let want = SelectionListState {
+            items: names.clone(),
+            active: true,
+            error: false,
+            red_items: false,
+            red: Vec::new(),
+        };
         if *l != want {
             *l = want;
         }

@@ -33,8 +33,8 @@ use cadrs_core::commands::EditDrawing;
 use cadrs_core::{ElementId, ElementKind, PartId};
 use cadrs_drawing::view::{Placement, auxiliary_view, placement_for, projected_view, rotate};
 use cadrs_drawing::{DrawingOp, NamedView, ObjectRef, Scale, SheetId, View, ViewId};
-use cadrs_ui::prelude::*;
 use cadrs_ui::input::TextInputField;
+use cadrs_ui::prelude::*;
 use cadrs_ui::{Select, SelectChange, TabStrip, TabStripSelect, TreeToggle};
 
 use super::views::{ViewCache, edge_at, sheet_bounds, view_at};
@@ -68,9 +68,12 @@ impl Plugin for ViewToolsPlugin {
                     .before(super::views::ViewsSet)
                     .run_if(in_state(AppState::Document)),
             )
-            .add_systems(OnExit(AppState::Document), |mut s: ResMut<InsertViewState>| {
-                *s = InsertViewState::default();
-            })
+            .add_systems(
+                OnExit(AppState::Document),
+                |mut s: ResMut<InsertViewState>| {
+                    *s = InsertViewState::default();
+                },
+            )
             .add_observer(on_insert_select)
             .add_observer(on_browser_tab)
             .add_observer(on_browser_toggle);
@@ -91,16 +94,33 @@ pub enum ViewTool {
     /// Align view vertical (or horizontal): click an edge of the view.
     Align { view: ViewId, vertical: bool },
     /// Section view (P3C.8): the parent and the cutting line's points (its 2D frame).
-    Section { parent: Option<ViewId>, a: Option<[f64; 2]>, b: Option<[f64; 2]> },
+    Section {
+        parent: Option<ViewId>,
+        a: Option<[f64; 2]>,
+        b: Option<[f64; 2]>,
+    },
     /// Detail view: the parent, the circle's centre and radius.
-    Detail { parent: Option<ViewId>, center: Option<[f64; 2]>, radius: Option<f64> },
+    Detail {
+        parent: Option<ViewId>,
+        center: Option<[f64; 2]>,
+        radius: Option<f64>,
+    },
     /// Crop view (rectangle): the view and the first corner.
-    Crop { view: Option<ViewId>, a: Option<[f64; 2]> },
+    Crop {
+        view: Option<ViewId>,
+        a: Option<[f64; 2]>,
+    },
     /// Break view: the view and the first break line.
-    Break { view: Option<ViewId>, a: Option<[f64; 2]> },
+    Break {
+        view: Option<ViewId>,
+        a: Option<[f64; 2]>,
+    },
     /// A boundary drawn point by point (spline crop, broken-out section); the points are in
     /// [`DrawingUi::tool_points`].
-    Boundary { view: Option<ViewId>, use_: super::view_kind_tools::BoundaryUse },
+    Boundary {
+        view: Option<ViewId>,
+        use_: super::view_kind_tools::BoundaryUse,
+    },
 }
 
 impl ViewTool {
@@ -108,7 +128,11 @@ impl ViewTool {
     pub fn is_view_kind(&self) -> bool {
         matches!(
             self,
-            ViewTool::Section { .. } | ViewTool::Detail { .. } | ViewTool::Crop { .. } | ViewTool::Break { .. } | ViewTool::Boundary { .. }
+            ViewTool::Section { .. }
+                | ViewTool::Detail { .. }
+                | ViewTool::Crop { .. }
+                | ViewTool::Break { .. }
+                | ViewTool::Boundary { .. }
         )
     }
 
@@ -229,7 +253,10 @@ pub fn edit_drawing(world: &mut World, op: DrawingOp) -> bool {
 /// (with that state's hash of its part); the first view of a studio records the studio as it is
 /// now, in the same undoable step.
 pub fn insert_view_op(world: &World, sheet: SheetId, mut v: View) -> DrawingOp {
-    let Some((d, doc)) = world.get_resource::<ActiveDocument>().and_then(|doc| Some((active_drawing(doc)?.1, &doc.doc))) else {
+    let Some((d, doc)) = world
+        .get_resource::<ActiveDocument>()
+        .and_then(|doc| Some((active_drawing(doc)?.1, &doc.doc)))
+    else {
         return DrawingOp::InsertView { sheet, view: v };
     };
     if let Some(src) = d.source(v.reference.element) {
@@ -241,7 +268,10 @@ pub fn insert_view_op(world: &World, sheet: SheetId, mut v: View) -> DrawingOp {
             v.source_hash = src.hash_of(v.reference.part);
             let insert = DrawingOp::InsertView { sheet, view: v };
             let label = insert.label();
-            DrawingOp::Batch { ops: vec![DrawingOp::SetSource(src), insert], label }
+            DrawingOp::Batch {
+                ops: vec![DrawingOp::SetSource(src), insert],
+                label,
+            }
         }
         None => DrawingOp::InsertView { sheet, view: v },
     }
@@ -272,8 +302,13 @@ pub fn open_insert_view(world: &mut World) {
     let ui = world.resource::<DrawingUi>();
     let sheet = d.sheets.get(ui.sheet_index(id, d));
     // The sheet's scale once it has views (D4.7); the referenced studio opened in the tree.
-    let scale = sheet.filter(|s| !s.views.is_empty()).map(|s| s.scale).unwrap_or(Scale::new(1, 1));
-    let expand = sheet.and_then(|s| s.reference).map(|r| ElementId(r.element));
+    let scale = sheet
+        .filter(|s| !s.views.is_empty())
+        .map(|s| s.scale)
+        .unwrap_or(Scale::new(1, 1));
+    let expand = sheet
+        .and_then(|s| s.reference)
+        .map(|r| ElementId(r.element));
     let mut studios = Vec::new();
     let mut assemblies = Vec::new();
     let mut flats = Vec::new();
@@ -285,7 +320,14 @@ pub fn open_insert_view(world: &mut World) {
                 // P3I.7: every sheet metal part's flat pattern.
                 for p in cadrs_core::flat_drawing::flat_parts(&build.sheet_metal) {
                     if let Some(part) = build.part(p) {
-                        flats.push((el.id, p, format!("Flat pattern of {}", cadrs_core::parts::display_name(part, props))));
+                        flats.push((
+                            el.id,
+                            p,
+                            format!(
+                                "Flat pattern of {}",
+                                cadrs_core::parts::display_name(part, props)
+                            ),
+                        ));
                     }
                 }
                 let parts = build
@@ -328,7 +370,10 @@ pub fn open_insert_view(world: &mut World) {
         document,
         expanded,
         tab: if sheet_asm.is_some() { 1 } else { 0 },
-        reference: sheet_asm.filter(|_| empty_sheet).map(|e| ObjectRef { element: e.0, part: None }),
+        reference: sheet_asm.filter(|_| empty_sheet).map(|e| ObjectRef {
+            element: e.0,
+            part: None,
+        }),
         flats,
         ..default()
     };
@@ -364,7 +409,10 @@ fn reference_label(state: &InsertViewState) -> Option<(String, bool)> {
                 feature: cadrs_core::FeatureId(f),
                 index,
             };
-            s.parts.iter().find(|(p, _)| *p == id).map(|(_, n)| (n.clone(), true))
+            s.parts
+                .iter()
+                .find(|(p, _)| *p == id)
+                .map(|(_, n)| (n.clone(), true))
         }
         None => Some((s.name.clone(), false)),
     }
@@ -397,28 +445,52 @@ fn sync_insert_dialog(
     // A new search only rebuilds the list, so the search field keeps its focus and caret.
     if let Some(prev) = last.as_ref()
         && !q_root.is_empty()
-        && (InsertViewState { search: state.search.clone(), ..prev.clone() }) == *state
+        && (InsertViewState {
+            search: state.search.clone(),
+            ..prev.clone()
+        }) == *state
         && let Ok(tree) = q_tree.single()
     {
         *last = Some(state.clone());
         let t = theme.clone();
         let st = state.clone();
         commands.entity(tree).despawn_children();
-        commands.entity(tree).with_children(|tr| tree_rows(tr, &t, &st));
+        commands
+            .entity(tree)
+            .with_children(|tr| tree_rows(tr, &t, &st));
         return;
     }
     // P3G.1: the same for the Other documents search: only the documents below the field.
     if let Some(prev) = last.as_ref()
         && !q_root.is_empty()
-        && (InsertViewState { browse: state.browse.clone(), other_list: state.other_list.clone(), other_thumbs: state.other_thumbs.clone(), ..prev.clone() }) == *state
-        && (crate::linked::Browse { search: state.browse.search.clone(), ..prev.browse.clone() }) == state.browse
-        && let Some((list, _, parent)) = q_named.iter().find(|(_, n, _)| n.as_str() == "insert-view-other-list")
+        && (InsertViewState {
+            browse: state.browse.clone(),
+            other_list: state.other_list.clone(),
+            other_thumbs: state.other_thumbs.clone(),
+            ..prev.clone()
+        }) == *state
+        && (crate::linked::Browse {
+            search: state.browse.search.clone(),
+            ..prev.browse.clone()
+        }) == state.browse
+        && let Some((list, _, parent)) = q_named
+            .iter()
+            .find(|(_, n, _)| n.as_str() == "insert-view-other-list")
     {
         *last = Some(state.clone());
         let t = theme.clone();
         let st = state.clone();
         commands.entity(list).despawn();
-        commands.entity(parent.parent()).with_children(|p| crate::linked::spawn_browser_list(p, &t, crate::linked::Owner::InsertView, &st.browse, &st.other_list, &st.other_thumbs));
+        commands.entity(parent.parent()).with_children(|p| {
+            crate::linked::spawn_browser_list(
+                p,
+                &t,
+                crate::linked::Owner::InsertView,
+                &st.browse,
+                &st.other_list,
+                &st.other_thumbs,
+            )
+        });
         return;
     }
     state.built = true;
@@ -431,7 +503,11 @@ fn sync_insert_dialog(
     };
     let t = theme.clone();
     let st = state.clone();
-    let left = if ui.sheets_open { super::panels::SHEETS_WIDTH } else { 0.0 };
+    let left = if ui.sheets_open {
+        super::panels::SHEETS_WIDTH
+    } else {
+        0.0
+    };
     commands.entity(area).with_children(|vp| {
         vp.spawn((
             Name::new("insert-view-root"),
@@ -468,7 +544,13 @@ fn card_node() -> Node {
 }
 
 fn card_shadow() -> BoxShadow {
-    BoxShadow::new(Color::srgba(0.0, 0.0, 0.0, 0.35), Val::Px(1.0), Val::Px(2.0), Val::Px(0.0), Val::Px(6.0))
+    BoxShadow::new(
+        Color::srgba(0.0, 0.0, 0.0, 0.35),
+        Val::Px(1.0),
+        Val::Px(2.0),
+        Val::Px(0.0),
+        Val::Px(6.0),
+    )
 }
 
 fn insert_card(p: &mut ChildSpawnerCommands, t: &Theme, st: &InsertViewState) {
@@ -666,7 +748,12 @@ fn browser(p: &mut ChildSpawnerCommands, t: &Theme, st: &InsertViewState) {
         ))
         .with_children(|h| {
             h.spawn((
-                t.text("Select a part or assembly", t.font_base, FontWeight::SEMIBOLD, t.foreground),
+                t.text(
+                    "Select a part or assembly",
+                    t.font_base,
+                    FontWeight::SEMIBOLD,
+                    t.foreground,
+                ),
                 Node {
                     flex_grow: 1.0,
                     ..default()
@@ -714,7 +801,11 @@ fn browser(p: &mut ChildSpawnerCommands, t: &Theme, st: &InsertViewState) {
         .with_children(|s| {
             s.spawn(
                 TextInput::new("insert-view-search")
-                    .placeholder(if st.tab == 0 { "Search parts or sketches" } else { "Search assemblies" })
+                    .placeholder(if st.tab == 0 {
+                        "Search parts or sketches"
+                    } else {
+                        "Search assemblies"
+                    })
                     .value(st.search.clone())
                     .width(Val::Percent(100.0))
                     .build(t),
@@ -776,7 +867,12 @@ fn tree_rows(tree: &mut ChildSpawnerCommands, t: &Theme, st: &InsertViewState) {
     if st.tab == 1 {
         if st.assemblies.is_empty() {
             tree.spawn((
-                t.text("No assemblies in this document", t.font_sm, FontWeight::NORMAL, t.muted_foreground),
+                t.text(
+                    "No assemblies in this document",
+                    t.font_sm,
+                    FontWeight::NORMAL,
+                    t.muted_foreground,
+                ),
                 Node {
                     margin: UiRect::all(Val::Px(10.0)),
                     ..default()
@@ -787,7 +883,10 @@ fn tree_rows(tree: &mut ChildSpawnerCommands, t: &Theme, st: &InsertViewState) {
             if !q.is_empty() && !a.to_lowercase().contains(&q) {
                 continue;
             }
-            let r = ObjectRef { element: id.0, part: None };
+            let r = ObjectRef {
+                element: id.0,
+                part: None,
+            };
             tree.spawn((
                 TreeItem::new(format!("browser-assembly-{}", i + 1), a.clone())
                     .icon("assembly", 22.0)
@@ -809,13 +908,17 @@ fn tree_rows(tree: &mut ChildSpawnerCommands, t: &Theme, st: &InsertViewState) {
         let parts: Vec<&(PartId, String)> = s
             .parts
             .iter()
-            .filter(|(_, n)| q.is_empty() || n.to_lowercase().contains(&q) || s.name.to_lowercase().contains(&q))
+            .filter(|(_, n)| {
+                q.is_empty() || n.to_lowercase().contains(&q) || s.name.to_lowercase().contains(&q)
+            })
             .collect();
         if !q.is_empty() && parts.is_empty() && !s.name.to_lowercase().contains(&q) {
             continue;
         }
         let open = st.expanded.contains(&s.id) || !q.is_empty();
-        let studio_selected = st.reference.is_some_and(|r| r.element == s.id.0 && r.part.is_none());
+        let studio_selected = st
+            .reference
+            .is_some_and(|r| r.element == s.id.0 && r.part.is_none());
         let sid = s.id;
         tree.spawn((
             TreeItem::new(format!("browser-studio-{}", si + 1), s.name.clone())
@@ -860,7 +963,11 @@ fn tree_rows(tree: &mut ChildSpawnerCommands, t: &Theme, st: &InsertViewState) {
     }
 }
 
-fn on_browser_toggle(ev: On<TreeToggle>, q: Query<&BrowserStudioRow>, mut state: ResMut<InsertViewState>) {
+fn on_browser_toggle(
+    ev: On<TreeToggle>,
+    q: Query<&BrowserStudioRow>,
+    mut state: ResMut<InsertViewState>,
+) {
     if let Ok(row) = q.get(ev.entity)
         && !state.expanded.remove(&row.0)
     {
@@ -869,7 +976,10 @@ fn on_browser_toggle(ev: On<TreeToggle>, q: Query<&BrowserStudioRow>, mut state:
 }
 
 fn on_browser_tab(ev: On<TabStripSelect>, q: Query<&Name>, mut state: ResMut<InsertViewState>) {
-    if q.get(ev.entity).is_ok_and(|n| n.as_str() == "insert-view-kind-tabs") && state.tab != ev.index {
+    if q.get(ev.entity)
+        .is_ok_and(|n| n.as_str() == "insert-view-kind-tabs")
+        && state.tab != ev.index
+    {
         state.tab = ev.index;
         state.search.clear();
     }
@@ -894,15 +1004,24 @@ fn on_insert_select(ev: On<SelectChange>, q: Query<&Name>, mut state: ResMut<Ins
     }
 }
 
-fn read_browser_search(q: Query<(&Name, &bevy::text::EditableText)>, mut state: ResMut<InsertViewState>) {
-    if let Some((_, t)) = q.iter().find(|(n, _)| n.as_str() == "insert-view-search-field") {
+fn read_browser_search(
+    q: Query<(&Name, &bevy::text::EditableText)>,
+    mut state: ResMut<InsertViewState>,
+) {
+    if let Some((_, t)) = q
+        .iter()
+        .find(|(n, _)| n.as_str() == "insert-view-search-field")
+    {
         let v = t.value().to_string();
         if state.search != v {
             state.search = v;
         }
     }
     // P3G.1: the Other documents search.
-    if let Some((_, t)) = q.iter().find(|(n, _)| n.as_str() == "insert-view-other-search-field") {
+    if let Some((_, t)) = q
+        .iter()
+        .find(|(n, _)| n.as_str() == "insert-view-other-search-field")
+    {
         let v = t.value().to_string();
         if state.browse.search != v {
             state.browse.search = v;
@@ -913,7 +1032,10 @@ fn read_browser_search(q: Query<(&Name, &bevy::text::EditableText)>, mut state: 
 // ---------------------------------------------------------------------------------------------
 // The pointer
 
-pub(super) fn pointer_over_sheet(hover: &HoverMap, q_area: &Query<Entity, With<ViewportArea>>) -> bool {
+pub(super) fn pointer_over_sheet(
+    hover: &HoverMap,
+    q_area: &Query<Entity, With<ViewportArea>>,
+) -> bool {
     let Some(hits) = hover.get(&PointerId::Mouse) else {
         return false;
     };
@@ -922,7 +1044,9 @@ pub(super) fn pointer_over_sheet(hover: &HoverMap, q_area: &Query<Entity, With<V
 
 /// Sheet millimetres per logical pixel now.
 fn mm_per_px(doc: &ActiveDocument, ui: &DrawingUi) -> f64 {
-    current_view(doc, ui).map(|(_, v)| 1.0 / v.ppm as f64).unwrap_or(1.0)
+    current_view(doc, ui)
+        .map(|(_, v)| 1.0 / v.ppm as f64)
+        .unwrap_or(1.0)
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -947,7 +1071,8 @@ fn view_pointer(
         inputs.clear();
         return;
     };
-    let Some((((element, _), view), (_, d))) = current_view(&doc, &ui).zip(active_drawing(&doc)) else {
+    let Some((((element, _), view), (_, d))) = current_view(&doc, &ui).zip(active_drawing(&doc))
+    else {
         inputs.clear();
         return;
     };
@@ -1018,7 +1143,10 @@ fn view_pointer(
                     });
                     continue;
                 }
-                let pressed_here = ui.press.take().is_some_and(|q| (q - p).length() as f64 <= pad);
+                let pressed_here = ui
+                    .press
+                    .take()
+                    .is_some_and(|q| (q - p).length() as f64 <= pad);
                 if over && pressed_here && ui.tool != ViewTool::None {
                     commands.queue(move |w: &mut World| tool_click(w, p));
                 }
@@ -1035,9 +1163,15 @@ fn view_pointer(
     if !q_menus.is_empty() {
         return;
     }
-    let hovered = match (ui.pointer, over && !ui.annotating && !ui.annotation_hover, ui.view_drag.is_some()) {
+    let hovered = match (
+        ui.pointer,
+        over && !ui.annotating && !ui.annotation_hover,
+        ui.view_drag.is_some(),
+    ) {
         (Some(p), true, false) => match ui.tool {
-            ViewTool::None | ViewTool::Projected { .. } | ViewTool::Auxiliary { from: None } => view_at(d, index, &cache, p, pad),
+            ViewTool::None | ViewTool::Projected { .. } | ViewTool::Auxiliary { from: None } => {
+                view_at(d, index, &cache, p, pad)
+            }
             t if t.picks_view() => view_at(d, index, &cache, p, pad),
             ViewTool::Align { view, .. } => Some(view),
             _ => None,
@@ -1049,7 +1183,8 @@ fn view_pointer(
     }
     // The edge an auxiliary view or an alignment would use.
     let highlight = match (ui.tool, ui.pointer, over) {
-        (ViewTool::Auxiliary { from: None }, Some(p), true) | (ViewTool::Align { .. }, Some(p), true) => {
+        (ViewTool::Auxiliary { from: None }, Some(p), true)
+        | (ViewTool::Align { .. }, Some(p), true) => {
             let target = match ui.tool {
                 ViewTool::Align { view, .. } => Some(view),
                 _ => view_at(d, index, &cache, p, pad),
@@ -1070,7 +1205,9 @@ fn view_pointer(
 /// The centre of a view's projection in its 2D frame, if known.
 fn center2d(cache: &ViewCache, v: &View) -> Option<[f64; 2]> {
     let g = cache.geometry(v)?;
-    let (lo, hi) = g.bounds.or_else(|| g.projection.bounds().map(|(a, b)| ([a.x, a.y], [b.x, b.y])))?;
+    let (lo, hi) = g
+        .bounds
+        .or_else(|| g.projection.bounds().map(|(a, b)| ([a.x, a.y], [b.x, b.y])))?;
     Some([(lo[0] + hi[0]) / 2.0, (lo[1] + hi[1]) / 2.0])
 }
 
@@ -1085,7 +1222,10 @@ pub fn sheet_center(cache: &ViewCache, v: &View) -> [f64; 2] {
 /// place along the line.
 fn center_on_line(v: &mut View, n: [f64; 2], c: Option<[f64; 2]>) {
     if let Some(c) = c {
-        let off = rotate([c[0] * v.scale.factor(), c[1] * v.scale.factor()], v.rotation);
+        let off = rotate(
+            [c[0] * v.scale.factor(), c[1] * v.scale.factor()],
+            v.rotation,
+        );
         let t = off[0] * n[0] + off[1] * n[1];
         v.anchor = [v.anchor[0] - n[0] * t, v.anchor[1] - n[1] * t];
     }
@@ -1114,7 +1254,14 @@ fn update_ghost(
             ViewTool::Insert => {
                 let r = insert.reference?;
                 // P3I.7: a flat pattern view only from the Flat patterns filter (SM16.2).
-                let mut v = inserted_view(insert.flat, r, insert.orientation, insert.scale, cursor, &d.style);
+                let mut v = inserted_view(
+                    insert.flat,
+                    r,
+                    insert.orientation,
+                    insert.scale,
+                    cursor,
+                    &d.style,
+                );
                 v.id = ghost_id;
                 // P3G.1: a linked source's copy, not in the document until the view is placed.
                 match super::view_linked::ghost_doc(&doc.doc, &insert) {
@@ -1144,14 +1291,19 @@ fn update_ghost(
                     Placement::Ortho(n) => center_on_line(&mut v, rotate(n, parent.rotation), c),
                     Placement::Iso(..) => {
                         if let Some(c) = c {
-                            let off = rotate([c[0] * v.scale.factor(), c[1] * v.scale.factor()], v.rotation);
+                            let off = rotate(
+                                [c[0] * v.scale.factor(), c[1] * v.scale.factor()],
+                                v.rotation,
+                            );
                             v.anchor = [cursor[0] - off[0], cursor[1] - off[1]];
                         }
                     }
                 }
                 Some(v)
             }
-            ViewTool::Auxiliary { from: Some((pid, edge)) } => {
+            ViewTool::Auxiliary {
+                from: Some((pid, edge)),
+            } => {
                 let parent = d.sheets.get(index)?.view(pid)?;
                 if ui.hovered == Some(pid) {
                     return None;
@@ -1208,7 +1360,10 @@ fn tool_click(world: &mut World, p: Vec2) {
                     let doc = world.resource::<ActiveDocument>();
                     let with = crate::linked::with_links(&doc.doc, &links);
                     let op = super::view_linked::insert_view_op_in(&with, &d, sheet_id, v.clone());
-                    let cmd = cadrs_core::external::WithLinks { links, command: EditDrawing { element, op } };
+                    let cmd = cadrs_core::external::WithLinks {
+                        links,
+                        command: EditDrawing { element, op },
+                    };
                     match world.resource_mut::<ActiveDocument>().execute(&cmd) {
                         Ok(()) => true,
                         Err(e) => {
@@ -1247,11 +1402,15 @@ fn tool_click(world: &mut World, p: Vec2) {
         ViewTool::Auxiliary { from: None } => {
             let Some(h) = hit else { return };
             let cache = world.resource::<ViewCache>();
-            let Some(v) = d.sheets[index].view(h) else { return };
+            let Some(v) = d.sheets[index].view(h) else {
+                return;
+            };
             let Some(g) = cache.geometry(v) else { return };
             if let Some((_, dir)) = edge_at(v, &g, p, 2.0 * pad) {
                 let mut ui = world.resource_mut::<DrawingUi>();
-                ui.tool = ViewTool::Auxiliary { from: Some((h, dir)) };
+                ui.tool = ViewTool::Auxiliary {
+                    from: Some((h, dir)),
+                };
                 ui.selected.clear();
                 ui.highlight_edge = None;
             }
@@ -1271,16 +1430,30 @@ fn tool_click(world: &mut World, p: Vec2) {
         }
         ViewTool::Align { view, vertical } => {
             let cache = world.resource::<ViewCache>();
-            let Some(v) = d.sheets[index].view(view).cloned() else { return };
+            let Some(v) = d.sheets[index].view(view).cloned() else {
+                return;
+            };
             let Some(g) = cache.geometry(&v) else { return };
-            let Some((_, dir)) = edge_at(&v, &g, p, 2.0 * pad) else { return };
+            let Some((_, dir)) = edge_at(&v, &g, p, 2.0 * pad) else {
+                return;
+            };
             let mut nv = v.clone();
             nv.rotation = align_rotation(v.rotation, dir, vertical);
             if nv.fold.is_some() {
                 nv.align_suppressed = true;
             }
-            let label = if vertical { "Align view vertical" } else { "Align view horizontal" };
-            exec(world, DrawingOp::SetView { view: nv, label: label.into() });
+            let label = if vertical {
+                "Align view vertical"
+            } else {
+                "Align view horizontal"
+            };
+            exec(
+                world,
+                DrawingOp::SetView {
+                    view: nv,
+                    label: label.into(),
+                },
+            );
             end_tool(world);
             world.resource_mut::<DrawingUi>().selected.clear();
         }
@@ -1323,11 +1496,17 @@ fn view_keys(
     }
     let typing = focus.get().is_some_and(|e| q_fields.contains(e));
     for k in keys_in.read() {
-        if k.state != bevy::input::ButtonState::Pressed || typing || !q_dialogs.is_empty() || !q_menus.is_empty() {
+        if k.state != bevy::input::ButtonState::Pressed
+            || typing
+            || !q_dialogs.is_empty()
+            || !q_menus.is_empty()
+        {
             continue;
         }
         match k.shortcut_code() {
-            KeyCode::Enter | KeyCode::NumpadEnter if matches!(ui.tool, ViewTool::Boundary { view: Some(_), .. }) => {
+            KeyCode::Enter | KeyCode::NumpadEnter
+                if matches!(ui.tool, ViewTool::Boundary { view: Some(_), .. }) =>
+            {
                 commands.queue(|w: &mut World| {
                     super::view_kind_tools::enter(w);
                 });
@@ -1337,7 +1516,10 @@ fn view_keys(
                 ui.tool_strokes.clear();
                 if ui.tool != ViewTool::None {
                     // Ending Projected view drops the parent's highlight too.
-                    if matches!(ui.tool, ViewTool::Projected { .. } | ViewTool::Auxiliary { .. }) {
+                    if matches!(
+                        ui.tool,
+                        ViewTool::Projected { .. } | ViewTool::Auxiliary { .. }
+                    ) {
                         ui.selected.clear();
                     }
                     ui.tool = ViewTool::None;
@@ -1347,7 +1529,9 @@ fn view_keys(
                     ui.selected.clear();
                 }
             }
-            KeyCode::Delete | KeyCode::Backspace if ui.tool == ViewTool::None && !ui.selected.is_empty() => {
+            KeyCode::Delete | KeyCode::Backspace
+                if ui.tool == ViewTool::None && !ui.selected.is_empty() =>
+            {
                 let ids = std::mem::take(&mut ui.selected);
                 commands.queue(move |w: &mut World| {
                     exec(w, DrawingOp::DeleteViews { ids });
@@ -1380,16 +1564,29 @@ fn sync_tool_hint(
     } else {
         match ui.tool {
             ViewTool::None => None,
-            ViewTool::Insert if insert.reference.is_none() => Some("Select a part or assembly to insert".to_string()),
+            ViewTool::Insert if insert.reference.is_none() => {
+                Some("Select a part or assembly to insert".to_string())
+            }
             ViewTool::Insert => Some("Click on the sheet to place the view".to_string()),
-            ViewTool::Projected { parent: None } => Some("Projected view: click a view to project from".to_string()),
+            ViewTool::Projected { parent: None } => {
+                Some("Projected view: click a view to project from".to_string())
+            }
             ViewTool::Projected { parent: Some(_) } => Some(
-                "Projected view: move away from the view and click to place · Esc to finish".to_string(),
+                "Projected view: move away from the view and click to place · Esc to finish"
+                    .to_string(),
             ),
-            ViewTool::Auxiliary { from: None } => Some("Auxiliary view: click a straight edge of a view".to_string()),
-            ViewTool::Auxiliary { from: Some(_) } => Some("Auxiliary view: click to place the view".to_string()),
-            ViewTool::Align { vertical: true, .. } => Some("Align view vertical: click an edge of the view".to_string()),
-            ViewTool::Align { vertical: false, .. } => Some("Align view horizontal: click an edge of the view".to_string()),
+            ViewTool::Auxiliary { from: None } => {
+                Some("Auxiliary view: click a straight edge of a view".to_string())
+            }
+            ViewTool::Auxiliary { from: Some(_) } => {
+                Some("Auxiliary view: click to place the view".to_string())
+            }
+            ViewTool::Align { vertical: true, .. } => {
+                Some("Align view vertical: click an edge of the view".to_string())
+            }
+            ViewTool::Align {
+                vertical: false, ..
+            } => Some("Align view horizontal: click an edge of the view".to_string()),
             t => super::view_kind_tools::hint(t).map(str::to_string),
         }
     };
@@ -1446,8 +1643,19 @@ fn sync_tool_hint(
 /// The view Insert view places: a part view takes the drawing's hidden line and tangent edge
 /// defaults; a flat pattern view (P3I.7) keeps its tangent edges hidden, so its bend lines'
 /// chain lines stay clean.
-pub fn inserted_view(flat: bool, r: ObjectRef, orientation: NamedView, scale: Scale, at: [f64; 2], style: &cadrs_drawing::DrawingStyle) -> View {
-    let mut v = if flat { View::flat_pattern(r, orientation, scale, at) } else { View::base(r, orientation, scale, at) };
+pub fn inserted_view(
+    flat: bool,
+    r: ObjectRef,
+    orientation: NamedView,
+    scale: Scale,
+    at: [f64; 2],
+    style: &cadrs_drawing::DrawingStyle,
+) -> View {
+    let mut v = if flat {
+        View::flat_pattern(r, orientation, scale, at)
+    } else {
+        View::base(r, orientation, scale, at)
+    };
     v.hidden_lines = style.hidden_lines;
     if !flat {
         v.tangent_edges = style.tangent_edges;
@@ -1461,20 +1669,48 @@ mod tests {
 
     #[test]
     fn flat_views_keep_tangent_edges_hidden_whatever_the_style() {
-        let style = cadrs_drawing::DrawingStyle { tangent_edges: cadrs_drawing::style::TangentEdges::Solid, ..Default::default() };
-        let r = ObjectRef { element: uuid::Uuid::nil(), part: None };
-        let flat = inserted_view(true, r, NamedView::Top, Scale::new(1, 5), [0.0, 0.0], &style);
-        assert_eq!(flat.tangent_edges, cadrs_drawing::style::TangentEdges::Hidden);
-        let part = inserted_view(false, r, NamedView::Top, Scale::new(1, 5), [0.0, 0.0], &style);
-        assert_eq!(part.tangent_edges, cadrs_drawing::style::TangentEdges::Solid);
+        let style = cadrs_drawing::DrawingStyle {
+            tangent_edges: cadrs_drawing::style::TangentEdges::Solid,
+            ..Default::default()
+        };
+        let r = ObjectRef {
+            element: uuid::Uuid::nil(),
+            part: None,
+        };
+        let flat = inserted_view(
+            true,
+            r,
+            NamedView::Top,
+            Scale::new(1, 5),
+            [0.0, 0.0],
+            &style,
+        );
+        assert_eq!(
+            flat.tangent_edges,
+            cadrs_drawing::style::TangentEdges::Hidden
+        );
+        let part = inserted_view(
+            false,
+            r,
+            NamedView::Top,
+            Scale::new(1, 5),
+            [0.0, 0.0],
+            &style,
+        );
+        assert_eq!(
+            part.tangent_edges,
+            cadrs_drawing::style::TangentEdges::Solid
+        );
     }
 
     #[test]
     fn align_turns_by_the_smallest_angle() {
         use std::f64::consts::FRAC_PI_2;
         // A horizontal edge made vertical: a quarter turn.
-        assert!((align_rotation(0.0, [1.0, 0.0], true) - FRAC_PI_2).abs() < 1e-12
-            || (align_rotation(0.0, [1.0, 0.0], true) + FRAC_PI_2).abs() < 1e-12);
+        assert!(
+            (align_rotation(0.0, [1.0, 0.0], true) - FRAC_PI_2).abs() < 1e-12
+                || (align_rotation(0.0, [1.0, 0.0], true) + FRAC_PI_2).abs() < 1e-12
+        );
         // An edge at 30° made horizontal: −30°.
         let a = 30f64.to_radians();
         assert!((align_rotation(0.0, [a.cos(), a.sin()], false) + a).abs() < 1e-12);

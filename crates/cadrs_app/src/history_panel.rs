@@ -54,10 +54,22 @@ impl Plugin for HistoryPlugin {
             .add_observer(on_row_menu)
             .add_observer(on_row_menu_action)
             .add_observer(on_version_commit)
-            .add_systems(Last, (track_history.run_if(in_state(AppState::Document)), close_on_exit).chain())
+            .add_systems(
+                Last,
+                (
+                    track_history.run_if(in_state(AppState::Document)),
+                    close_on_exit,
+                )
+                    .chain(),
+            )
             .add_systems(
                 Update,
-                (note_healthy.after(crate::parts::PartsSet), sync_panel, sync_rail_button, refit_when_opened)
+                (
+                    note_healthy.after(crate::parts::PartsSet),
+                    sync_panel,
+                    sync_rail_button,
+                    refit_when_opened,
+                )
                     .chain()
                     .run_if(in_state(AppState::Document)),
             )
@@ -131,7 +143,13 @@ fn refit_when_opened(
     mut commands: Commands,
 ) {
     let width = rect.0.width();
-    if panel.open && !*was_open && matches!(*kind, crate::viewport::ActiveKind::PartStudio | crate::viewport::ActiveKind::Assembly) {
+    if panel.open
+        && !*was_open
+        && matches!(
+            *kind,
+            crate::viewport::ActiveKind::PartStudio | crate::viewport::ActiveKind::Assembly
+        )
+    {
         *pending = Some((width, 0));
     }
     *was_open = panel.open;
@@ -176,21 +194,35 @@ fn track_history(world: &mut World) {
         return;
     };
     // Another document was opened in its place: the last one's log is done with.
-    if world.resource::<DocLog>().log.as_ref().is_some_and(|l| l.document != id) {
+    if world
+        .resource::<DocLog>()
+        .log
+        .as_ref()
+        .is_some_and(|l| l.document != id)
+    {
         world.resource_mut::<DocLog>().close();
     }
     let doc = world.resource::<ActiveDocument>();
     let now = world.get_resource::<AppClock>().map_or(0, |c| c.now());
-    let user = world.get_resource::<UserProfile>().map(|u| u.id.clone()).unwrap_or_default();
+    let user = world
+        .get_resource::<UserProfile>()
+        .map(|u| u.id.clone())
+        .unwrap_or_default();
     let store = world.get_resource::<DocumentStore>().map(|s| s.0.clone());
     let stored = doc.meta.is_some();
     let stacks = (doc.history.undo_len(), doc.history.redo_len());
-    let opened = world.resource::<DocLog>().log.as_ref().is_none_or(|l| l.document != id);
+    let opened = world
+        .resource::<DocLog>()
+        .log
+        .as_ref()
+        .is_none_or(|l| l.document != id);
     // P3G.3: a linked document open read-only at a version shows its history as it is on disk
     // and never writes to it.
     if doc.read_only.is_some() {
         if opened {
-            let log = store.as_ref().and_then(|s| HistoryLog::load(s, id).ok().flatten());
+            let log = store
+                .as_ref()
+                .and_then(|s| HistoryLog::load(s, id).ok().flatten());
             let mut l = world.resource_mut::<DocLog>();
             l.log = log;
             l.stacks = stacks;
@@ -202,7 +234,10 @@ fn track_history(world: &mut World) {
     if opened {
         let doc = world.resource::<ActiveDocument>();
         let created = doc.meta.as_ref().map_or(now, |m| m.created);
-        let loaded = store.as_ref().filter(|_| stored).and_then(|s| HistoryLog::load(s, id).ok().flatten());
+        let loaded = store
+            .as_ref()
+            .filter(|_| stored)
+            .and_then(|s| HistoryLog::load(s, id).ok().flatten());
         // Written only when the log was started or caught up: rewriting an unchanged (possibly
         // large) history on every open stalled the first frame.
         let mut changed = loaded.as_ref().is_none_or(HistoryLog::upgraded);
@@ -284,7 +319,12 @@ fn note_healthy(
         return;
     }
     let generation = cache.generation;
-    let DocLog { log: Some(l), noted, .. } = &mut *log else {
+    let DocLog {
+        log: Some(l),
+        noted,
+        ..
+    } = &mut *log
+    else {
         return;
     };
     let key = (l.head_index(), generation);
@@ -355,7 +395,13 @@ pub enum RailItem {
 pub fn rail(log: &HistoryLog) -> Vec<RailItem> {
     let mut out: Vec<RailItem> = Vec::new();
     let here = log.current_workspace();
-    let versions_at = |k: usize| log.versions().iter().enumerate().filter(move |(_, v)| v.entry() == k && v.workspace() == here).map(|(i, _)| i);
+    let versions_at = |k: usize| {
+        log.versions()
+            .iter()
+            .enumerate()
+            .filter(move |(_, v)| v.entry() == k && v.workspace() == here)
+            .map(|(i, _)| i)
+    };
     for k in (0..log.entries.len()).rev() {
         let vs: Vec<usize> = versions_at(k).collect();
         for i in vs.into_iter().rev() {
@@ -366,7 +412,8 @@ pub fn rail(log: &HistoryLog) -> Vec<RailItem> {
         }
         // A merge is a group of its own, so the rail shows it by its label (P3E.5 judge).
         let merge = |j: usize| log.entries[j].action == "Merge";
-        let same = !merge(k) && matches!(out.last(), Some(RailItem::Group(g)) if g.last().is_some_and(|&j| log.entries[j].user == log.entries[k].user && !merge(j)));
+        let same = !merge(k)
+            && matches!(out.last(), Some(RailItem::Group(g)) if g.last().is_some_and(|&j| log.entries[j].user == log.entries[k].user && !merge(j)));
         match out.last_mut() {
             Some(RailItem::Group(g)) if same => g.push(k),
             _ => out.push(RailItem::Group(vec![k])),
@@ -427,7 +474,10 @@ fn sync_panel(
         commands.entity(e).try_despawn();
     }
     // Beside the feature list, on its left (`ex1-step11.png`).
-    let Some((_, _, parent)) = q_named.iter().find(|(_, n, _)| n.as_str() == "feature-panel") else {
+    let Some((_, _, parent)) = q_named
+        .iter()
+        .find(|(_, n, _)| n.as_str() == "feature-panel")
+    else {
         return;
     };
     let parent = parent.parent();
@@ -435,7 +485,13 @@ fn sync_panel(
     let rows = rows(&log, &panel, &clock, &user);
     let others = other_rows(&log, &clock, &user);
     let root = commands
-        .spawn((Name::new("history-panel"), PanelRoot, want, DespawnOnExit(AppState::Document), panel_node(&t)))
+        .spawn((
+            Name::new("history-panel"),
+            PanelRoot,
+            want,
+            DespawnOnExit(AppState::Document),
+            panel_node(&t),
+        ))
         .with_children(|p| {
             // Header: title, the Repair icon, ×.
             p.spawn((
@@ -453,12 +509,31 @@ fn sync_panel(
             .with_children(|h| {
                 h.spawn((
                     t.text("Versions and history", 13.0, FontWeight::BOLD, t.foreground),
-                    Node { flex_grow: 1.0, ..default() },
+                    Node {
+                        flex_grow: 1.0,
+                        ..default()
+                    },
                 ));
-                h.spawn(IconButton::new("history-create-version", "versions").tooltip("Create version…").build(&t));
-                h.spawn(IconButton::new("history-repair", "tool").tooltip("Repair").build(&t))
-                    .insert(cadrs_ui::style::InitState { disabled: false, selected: panel.repair_pick, force: None });
-                h.spawn(IconButton::new("history-close", "close").tooltip("Close").build(&t));
+                h.spawn(
+                    IconButton::new("history-create-version", "versions")
+                        .tooltip("Create version…")
+                        .build(&t),
+                );
+                h.spawn(
+                    IconButton::new("history-repair", "tool")
+                        .tooltip("Repair")
+                        .build(&t),
+                )
+                .insert(cadrs_ui::style::InitState {
+                    disabled: false,
+                    selected: panel.repair_pick,
+                    force: None,
+                });
+                h.spawn(
+                    IconButton::new("history-close", "close")
+                        .tooltip("Close")
+                        .build(&t),
+                );
             });
             if panel.repair_pick {
                 p.spawn((
@@ -472,8 +547,19 @@ fn sync_panel(
                     BackgroundColor(Color::srgb_u8(0xdc, 0xeb, 0xfa)),
                 ))
                 .with_children(|b| {
-                    b.spawn(t.text("Select a history entry to repair this Part Studio.", 11.5, FontWeight::NORMAL, t.foreground))
-                        .insert((TextLayout::default(), Node { max_width: Val::Px(240.0), ..default() }));
+                    b.spawn(t.text(
+                        "Select a history entry to repair this Part Studio.",
+                        11.5,
+                        FontWeight::NORMAL,
+                        t.foreground,
+                    ))
+                    .insert((
+                        TextLayout::default(),
+                        Node {
+                            max_width: Val::Px(240.0),
+                            ..default()
+                        },
+                    ));
                 });
             }
             p.spawn((
@@ -493,7 +579,18 @@ fn sync_panel(
                 for (row, b) in rows {
                     // P3G.2 carried: a version's whole subtitle (it is cut at the panel's edge).
                     let tip = match &row {
-                        Row::Version(i) => log.log.as_ref().and_then(|x| x.versions().get(*i)).map(|v| format!("{}\n{}", v.name(), version_subtitle(v, &clock, &user).replace(" · ", "\n"))),
+                        Row::Version(i) => {
+                            log.log
+                                .as_ref()
+                                .and_then(|x| x.versions().get(*i))
+                                .map(|v| {
+                                    format!(
+                                        "{}\n{}",
+                                        v.name(),
+                                        version_subtitle(v, &clock, &user).replace(" · ", "\n")
+                                    )
+                                })
+                        }
                         _ => None,
                     };
                     let mut e = l.spawn((row, b.build(&t)));
@@ -508,15 +605,26 @@ fn sync_panel(
                         Name::new("history-other-workspaces"),
                         Node {
                             margin: UiRect::top(Val::Px(8.0)),
-                            padding: UiRect::new(Val::Px(10.0), Val::Px(6.0), Val::Px(6.0), Val::Px(2.0)),
+                            padding: UiRect::new(
+                                Val::Px(10.0),
+                                Val::Px(6.0),
+                                Val::Px(6.0),
+                                Val::Px(2.0),
+                            ),
                             border: UiRect::top(Val::Px(1.0)),
                             ..default()
                         },
                         BorderColor::all(t.panel_border),
                     ))
-                    .with_child(t.text("Other workspaces", 10.5, FontWeight::BOLD, t.muted_foreground));
+                    .with_child(t.text(
+                        "Other workspaces",
+                        10.5,
+                        FontWeight::BOLD,
+                        t.muted_foreground,
+                    ));
                     for (row, b) in others {
-                        l.spawn((row, b.build(&t))).insert(Tooltip::new("Click to switch; right-click to merge"));
+                        l.spawn((row, b.build(&t)))
+                            .insert(Tooltip::new("Click to switch; right-click to merge"));
                     }
                 }
             });
@@ -531,7 +639,12 @@ fn sync_panel(
                 },
                 BorderColor::all(t.panel_border),
             ))
-            .with_child(t.text("Right-click a row for actions", 10.5, FontWeight::NORMAL, t.muted_foreground));
+            .with_child(t.text(
+                "Right-click a row for actions",
+                10.5,
+                FontWeight::NORMAL,
+                t.muted_foreground,
+            ));
         })
         .id();
     commands.entity(parent).insert_children(0, &[root]);
@@ -541,7 +654,11 @@ fn sync_panel(
 /// The panel's rows, top to bottom.
 /// A version's second line: who and when, as the change groups; "Auto version" first for one
 /// Update all references or Move to document made (P3G.2, ER4.7); then the description, if any.
-fn version_subtitle(v: &cadrs_core::history_log::Version, clock: &AppClock, user: &UserProfile) -> String {
+fn version_subtitle(
+    v: &cadrs_core::history_log::Version,
+    clock: &AppClock,
+    user: &UserProfile,
+) -> String {
     let mut sub = format!("{} · {}", user.display(v.user()), clock.format(v.time()));
     if v.auto() {
         sub = format!("Auto version · {sub}");
@@ -552,8 +669,15 @@ fn version_subtitle(v: &cadrs_core::history_log::Version, clock: &AppClock, user
     sub
 }
 
-fn rows(log: &DocLog, panel: &HistoryPanel, clock: &AppClock, user: &UserProfile) -> Vec<(Row, TimelineRow)> {
-    let Some(l) = log.log.as_ref() else { return Vec::new() };
+fn rows(
+    log: &DocLog,
+    panel: &HistoryPanel,
+    clock: &AppClock,
+    user: &UserProfile,
+) -> Vec<(Row, TimelineRow)> {
+    let Some(l) = log.log.as_ref() else {
+        return Vec::new();
+    };
     let when = |k: usize| {
         let e = &l.entries[k];
         format!("{} · {}", user.display(&e.user), clock.format(e.time))
@@ -578,7 +702,11 @@ fn rows(log: &DocLog, panel: &HistoryPanel, clock: &AppClock, user: &UserProfile
                     Row::Version(i),
                     TimelineRow::new(format!("history-version-{}", i + 1), v.name().to_string())
                         .subtitle(sub)
-                        .marker(if v.auto() { TimelineMarker::AutoVersion } else { TimelineMarker::Version })
+                        .marker(if v.auto() {
+                            TimelineMarker::AutoVersion
+                        } else {
+                            TimelineMarker::Version
+                        })
                         .selected(panel.selected_version == Some(i)),
                 ));
                 continue;
@@ -597,7 +725,10 @@ fn rows(log: &DocLog, panel: &HistoryPanel, clock: &AppClock, user: &UserProfile
         };
         out.push((
             Row::Group(oldest),
-            TimelineRow::new(format!("history-group-{oldest}"), title).subtitle(when(newest)).chevron(open).indent(true),
+            TimelineRow::new(format!("history-group-{oldest}"), title)
+                .subtitle(when(newest))
+                .chevron(open)
+                .indent(true),
         ));
         if open {
             for k in g {
@@ -613,21 +744,34 @@ fn rows(log: &DocLog, panel: &HistoryPanel, clock: &AppClock, user: &UserProfile
         }
     }
     // A branch starts at the version it was made from (P3E.4).
-    let origin = l.branch_info(l.current_workspace()).and_then(|w| l.version(w.from_version()).map(|v| (v.clone(), w.clone())));
+    let origin = l
+        .branch_info(l.current_workspace())
+        .and_then(|w| l.version(w.from_version()).map(|v| (v.clone(), w.clone())));
     let start = match &origin {
         Some((v, w)) => TimelineRow::new("history-start", v.name().to_string())
-            .subtitle(format!("{} · branched {}", l.workspace_name(v.workspace()), clock.format(w.time())))
+            .subtitle(format!(
+                "{} · branched {}",
+                l.workspace_name(v.workspace()),
+                clock.format(w.time())
+            ))
             .marker(TimelineMarker::Version),
-        None => TimelineRow::new("history-start", "Start").subtitle(when(0)).marker(TimelineMarker::Start),
+        None => TimelineRow::new("history-start", "Start")
+            .subtitle(when(0))
+            .marker(TimelineMarker::Start),
     };
-    out.push((Row::Entry(0), start.last(true).selected(panel.selected == Some(0))));
+    out.push((
+        Row::Entry(0),
+        start.last(true).selected(panel.selected == Some(0)),
+    ));
     out
 }
 
 /// P3E.4: the other workspaces, Main first: who changed each last and when, or the version a
 /// branch came from.
 fn other_rows(log: &DocLog, clock: &AppClock, user: &UserProfile) -> Vec<(Row, TimelineRow)> {
-    let Some(l) = log.log.as_ref() else { return Vec::new() };
+    let Some(l) = log.log.as_ref() else {
+        return Vec::new();
+    };
     let current = l.current_workspace();
     l.workspace_ids()
         .into_iter()
@@ -635,19 +779,32 @@ fn other_rows(log: &DocLog, clock: &AppClock, user: &UserProfile) -> Vec<(Row, T
         .enumerate()
         .map(|(i, w)| {
             let last = l.workspace_entries(w).and_then(|e| e.last());
-            let mut sub = last.map(|e| format!("{} · {}", user.display(&e.user), clock.format(e.time))).unwrap_or_default();
+            let mut sub = last
+                .map(|e| format!("{} · {}", user.display(&e.user), clock.format(e.time)))
+                .unwrap_or_default();
             if let Some(b) = l.branch_info(w)
                 && let Some(v) = l.version(b.from_version())
             {
                 sub = format!("From {} · {sub}", v.name());
             }
-            (Row::Workspace(w), TimelineRow::new(format!("history-workspace-{}", i + 1), l.workspace_name(w)).subtitle(sub).marker(TimelineMarker::Workspace).first(true).last(true))
+            (
+                Row::Workspace(w),
+                TimelineRow::new(format!("history-workspace-{}", i + 1), l.workspace_name(w))
+                    .subtitle(sub)
+                    .marker(TimelineMarker::Workspace)
+                    .first(true)
+                    .last(true),
+            )
         })
         .collect()
 }
 
 /// The rail's History button shows pressed while the panel is open.
-fn sync_rail_button(panel: Res<HistoryPanel>, q: Query<(Entity, &Name, Has<cadrs_ui::style::Selected>)>, mut commands: Commands) {
+fn sync_rail_button(
+    panel: Res<HistoryPanel>,
+    q: Query<(Entity, &Name, Has<cadrs_ui::style::Selected>)>,
+    mut commands: Commands,
+) {
     if !panel.is_changed() {
         return;
     }
@@ -663,7 +820,12 @@ fn sync_rail_button(panel: Res<HistoryPanel>, q: Query<(Entity, &Name, Has<cadrs
     }
 }
 
-fn on_button(a: On<Activate>, q: Query<&Name>, mut panel: ResMut<HistoryPanel>, mut commands: Commands) {
+fn on_button(
+    a: On<Activate>,
+    q: Query<&Name>,
+    mut panel: ResMut<HistoryPanel>,
+    mut commands: Commands,
+) {
     let Ok(n) = q.get(a.entity) else { return };
     match n.as_str() {
         "rail-history" => {
@@ -687,7 +849,11 @@ fn on_button(a: On<Activate>, q: Query<&Name>, mut panel: ResMut<HistoryPanel>, 
 
 /// The Create version popup: a name (the next "V<n>") and an optional description.
 pub fn open_create_version(world: &mut World, at: Vec2) {
-    let Some(name) = world.get_resource::<DocLog>().and_then(|l| l.log.as_ref()).map(|l| l.next_version_name()) else {
+    let Some(name) = world
+        .get_resource::<DocLog>()
+        .and_then(|l| l.log.as_ref())
+        .map(|l| l.next_version_name())
+    else {
         return;
     };
     let theme = world.resource::<Theme>().clone();
@@ -700,7 +866,10 @@ pub fn open_create_version(world: &mut World, at: Vec2) {
 }
 
 fn on_version_commit(ev: On<cadrs_ui::NamePopupCommit>, q: Query<&Name>, mut commands: Commands) {
-    if !q.get(ev.entity).is_ok_and(|n| n.as_str() == "version-popup") {
+    if !q
+        .get(ev.entity)
+        .is_ok_and(|n| n.as_str() == "version-popup")
+    {
         return;
     }
     let (name, description) = (ev.value.clone(), ev.description.clone());
@@ -714,9 +883,14 @@ pub fn create_version(world: &mut World, name: &str, description: &str) {
         return;
     }
     let now = world.get_resource::<AppClock>().map_or(0, |c| c.now());
-    let user = world.get_resource::<UserProfile>().map(|u| u.id.clone()).unwrap_or_default();
+    let user = world
+        .get_resource::<UserProfile>()
+        .map(|u| u.id.clone())
+        .unwrap_or_default();
     let store = world.get_resource::<DocumentStore>().map(|s| s.0.clone());
-    let stored = world.get_resource::<ActiveDocument>().is_some_and(|d| d.meta.is_some());
+    let stored = world
+        .get_resource::<ActiveDocument>()
+        .is_some_and(|d| d.meta.is_some());
     let mut l = world.resource_mut::<DocLog>();
     let Some(log) = l.log.as_mut() else { return };
     log.create_version(name, description, now, &user);
@@ -727,7 +901,13 @@ pub fn create_version(world: &mut World, name: &str, description: &str) {
     world.resource_mut::<HistoryPanel>().open = true;
 }
 
-fn on_row_activate(a: On<Activate>, q: Query<&Row>, button: Res<cadrs_ui::menu::LastPointerButton>, mut panel: ResMut<HistoryPanel>, mut commands: Commands) {
+fn on_row_activate(
+    a: On<Activate>,
+    q: Query<&Row>,
+    button: Res<cadrs_ui::menu::LastPointerButton>,
+    mut panel: ResMut<HistoryPanel>,
+    mut commands: Commands,
+) {
     let Ok(row) = q.get(a.entity) else { return };
     match *row {
         Row::Main => {
@@ -759,7 +939,13 @@ fn on_row_activate(a: On<Activate>, q: Query<&Row>, button: Res<cadrs_ui::menu::
     }
 }
 
-fn on_row_menu(ev: On<ContextMenuRequested>, q: Query<&Row>, log: Res<DocLog>, theme: Res<Theme>, mut commands: Commands) {
+fn on_row_menu(
+    ev: On<ContextMenuRequested>,
+    q: Query<&Row>,
+    log: Res<DocLog>,
+    theme: Res<Theme>,
+    mut commands: Commands,
+) {
     let Some(l) = log.log.as_ref() else { return };
     let head = l.head_index();
     let (menu, target) = match q.get(ev.entity) {
@@ -781,7 +967,10 @@ fn on_row_menu(ev: On<ContextMenuRequested>, q: Query<&Row>, log: Res<DocLog>, t
                     .text_only()
                     .item(MenuItem::new("history-open-read-only", "Open read-only"))
                     .item(MenuItem::new("history-restore", "Restore").disabled(at == head))
-                    .item(MenuItem::new("history-branch", "Branch to create workspace…")),
+                    .item(MenuItem::new(
+                        "history-branch",
+                        "Branch to create workspace…",
+                    )),
                 MenuFor::Version(i),
             )
         }
@@ -791,30 +980,58 @@ fn on_row_menu(ev: On<ContextMenuRequested>, q: Query<&Row>, log: Res<DocLog>, t
                 .item_height(22.0)
                 .text_only()
                 .item(MenuItem::new("history-switch", "Switch to workspace"))
-                .item(MenuItem::new("history-merge", "Merge into current workspace…")),
+                .item(MenuItem::new(
+                    "history-merge",
+                    "Merge into current workspace…",
+                )),
             MenuFor::Workspace(w),
         ),
         _ => return,
     };
     let anchor = open_context_menu(&mut commands, ev.position, menu.build(&theme));
-    commands.entity(anchor).insert((target, DespawnOnExit(AppState::Document)));
+    commands
+        .entity(anchor)
+        .insert((target, DespawnOnExit(AppState::Document)));
 }
 
-fn on_row_menu_action(ev: On<MenuAction>, q: Query<&MenuFor, With<ContextMenuAnchor>>, log: Res<DocLog>, mut commands: Commands) {
-    let Ok(&target) = q.get(ev.entity) else { return };
-    let version_entry = |i: usize| log.log.as_ref().and_then(|l| l.versions().get(i).map(|v| v.entry()));
+fn on_row_menu_action(
+    ev: On<MenuAction>,
+    q: Query<&MenuFor, With<ContextMenuAnchor>>,
+    log: Res<DocLog>,
+    mut commands: Commands,
+) {
+    let Ok(&target) = q.get(ev.entity) else {
+        return;
+    };
+    let version_entry = |i: usize| {
+        log.log
+            .as_ref()
+            .and_then(|l| l.versions().get(i).map(|v| v.entry()))
+    };
     match (ev.item.as_str(), target) {
-        ("history-restore", MenuFor::Entry(k)) => commands.queue(move |world: &mut World| restore(world, k)),
+        ("history-restore", MenuFor::Entry(k)) => {
+            commands.queue(move |world: &mut World| restore(world, k))
+        }
         ("history-restore", MenuFor::Version(i)) => {
             if let Some(k) = version_entry(i) {
                 commands.queue(move |world: &mut World| restore(world, k));
             }
         }
-        ("history-view-repair", MenuFor::Entry(k)) => commands.queue(move |world: &mut World| crate::repair::open_at(world, k)),
-        ("history-open-read-only", MenuFor::Version(i)) => commands.queue(move |world: &mut World| crate::repair::open_version(world, i)),
-        ("history-branch", MenuFor::Version(i)) => commands.queue(move |world: &mut World| crate::workspaces::open_branch_dialog(world, i)),
-        ("history-switch", MenuFor::Workspace(w)) => commands.queue(move |world: &mut World| crate::workspaces::switch_workspace(world, w)),
-        ("history-merge", MenuFor::Workspace(w)) => commands.queue(move |world: &mut World| crate::workspaces::open_merge_dialog(world, w)),
+        ("history-view-repair", MenuFor::Entry(k)) => {
+            commands.queue(move |world: &mut World| crate::repair::open_at(world, k))
+        }
+        ("history-open-read-only", MenuFor::Version(i)) => {
+            commands.queue(move |world: &mut World| crate::repair::open_version(world, i))
+        }
+        ("history-branch", MenuFor::Version(i)) => {
+            commands.queue(move |world: &mut World| crate::workspaces::open_branch_dialog(world, i))
+        }
+        ("history-switch", MenuFor::Workspace(w)) => {
+            commands.queue(move |world: &mut World| crate::workspaces::switch_workspace(world, w))
+        }
+        ("history-merge", MenuFor::Workspace(w)) => {
+            commands.queue(move |world: &mut World| crate::workspaces::open_merge_dialog(world, w))
+        }
         _ => {}
     }
 }
@@ -832,8 +1049,13 @@ pub fn restore(world: &mut World, k: usize) {
     else {
         return;
     };
-    let Some(mut doc) = world.get_resource_mut::<ActiveDocument>() else { return };
-    if let Err(e) = doc.execute(&RestoreDocument { state: Box::new(state), entry }) {
+    let Some(mut doc) = world.get_resource_mut::<ActiveDocument>() else {
+        return;
+    };
+    if let Err(e) = doc.execute(&RestoreDocument {
+        state: Box::new(state),
+        entry,
+    }) {
         warn!("restore: {e}");
     }
 }

@@ -15,16 +15,18 @@
 
 use bevy::prelude::*;
 use cadrs_core::document::{AxisRef, BooleanOp, FaceRef, RegionRef};
-use cadrs_core::surfacing::{Continuity, FillEdge, FillFeature, HelixFeature, HelixPath, HelixType, ThickenFeature};
+use cadrs_core::surfacing::{
+    Continuity, FillEdge, FillFeature, HelixFeature, HelixPath, HelixType, ThickenFeature,
+};
 use cadrs_core::{Feature, FeatureId, FeatureKind};
 use cadrs_ui::prelude::*;
 use cadrs_ui::{OptionRow, TabStrip};
 
+use crate::ActiveDocument;
 use crate::applied::{AppliedField, AppliedKind};
 use crate::applied_dialog::{Role, body_column, index_of, list, number, opts, select_row};
 use crate::parts::PartCache;
 use crate::viewport::Pick;
-use crate::ActiveDocument;
 
 fn toggle<T: PartialEq>(list: &mut Vec<T>, x: T) {
     if let Some(i) = list.iter().position(|y| *y == x) {
@@ -39,7 +41,11 @@ fn is_sketch(features: &[Feature], f: FeatureId) -> bool {
 }
 
 fn region_of(cache: &PartCache, sketch: FeatureId, index: u32) -> Option<RegionRef> {
-    let r = cache.sketch_regions(sketch)?.regions.get(index as usize)?.clone();
+    let r = cache
+        .sketch_regions(sketch)?
+        .regions
+        .get(index as usize)?
+        .clone();
     Some(RegionRef::new(sketch, &r))
 }
 
@@ -58,8 +64,16 @@ fn edge_ref(cache: &PartCache, pick: Pick) -> Option<cadrs_core::EdgeRef> {
 }
 
 /// A new feature's base name, parameters and first field, from the selection.
-pub fn initial(world: &World, kind: AppliedKind, picked: &[Pick]) -> Option<(&'static str, FeatureKind, AppliedField)> {
-    let features = world.get_resource::<ActiveDocument>()?.active_element()?.features().to_vec();
+pub fn initial(
+    world: &World,
+    kind: AppliedKind,
+    picked: &[Pick],
+) -> Option<(&'static str, FeatureKind, AppliedField)> {
+    let features = world
+        .get_resource::<ActiveDocument>()?
+        .active_element()?
+        .features()
+        .to_vec();
     let cache = world.resource::<PartCache>();
     Some(match kind {
         AppliedKind::Thicken => {
@@ -69,11 +83,21 @@ pub fn initial(world: &World, kind: AppliedKind, picked: &[Pick]) -> Option<(&'s
                     Pick::Face(..) => x.faces.extend(face_ref(cache, *p)),
                     Pick::Region(s, i) => x.regions.extend(region_of(cache, s, i)),
                     Pick::Feature(f) if is_sketch(&features, f) => x.sketches.push(f),
-                    Pick::Part(part) if cache.part(part).is_some_and(|p| p.kind == cadrs_core::PartKind::Surface) => x.parts.push(part),
+                    Pick::Part(part)
+                        if cache
+                            .part(part)
+                            .is_some_and(|p| p.kind == cadrs_core::PartKind::Surface) =>
+                    {
+                        x.parts.push(part)
+                    }
                     _ => {}
                 }
             }
-            ("Thicken", FeatureKind::Thicken(x), AppliedField::ThickenEntities)
+            (
+                "Thicken",
+                FeatureKind::Thicken(x),
+                AppliedField::ThickenEntities,
+            )
         }
         AppliedKind::Helix => {
             let mut x = HelixFeature::default();
@@ -87,7 +111,9 @@ pub fn initial(world: &World, kind: AppliedKind, picked: &[Pick]) -> Option<(&'s
             for p in picked {
                 match *p {
                     Pick::Edge(..) => x.edges.extend(edge_ref(cache, *p).map(FillEdge::Edge)),
-                    Pick::SketchCurve(sketch, curve) => x.edges.push(FillEdge::SketchCurve { sketch, curve }),
+                    Pick::SketchCurve(sketch, curve) => {
+                        x.edges.push(FillEdge::SketchCurve { sketch, curve })
+                    }
                     _ => {}
                 }
             }
@@ -100,15 +126,25 @@ pub fn initial(world: &World, kind: AppliedKind, picked: &[Pick]) -> Option<(&'s
 
 /// A pick into the surfacing features' fields. Returns false if it doesn't fit.
 pub fn pick(world: &mut World, kind: &mut FeatureKind, field: AppliedField, pick: Pick) -> bool {
-    let Some(features) = world.get_resource::<ActiveDocument>().and_then(|d| d.active_element()).map(|e| e.features().to_vec()) else {
+    let Some(features) = world
+        .get_resource::<ActiveDocument>()
+        .and_then(|d| d.active_element())
+        .map(|e| e.features().to_vec())
+    else {
         return false;
     };
     let cache = world.resource::<PartCache>();
     match (kind, field) {
         (FeatureKind::Thicken(x), AppliedField::ThickenEntities) => match pick {
             Pick::Region(s, i) => {
-                let Some(r) = region_of(cache, s, i) else { return false };
-                match x.regions.iter().position(|y| y.sketch == r.sketch && y.curves == r.curves) {
+                let Some(r) = region_of(cache, s, i) else {
+                    return false;
+                };
+                match x
+                    .regions
+                    .iter()
+                    .position(|y| y.sketch == r.sketch && y.curves == r.curves)
+                {
                     Some(k) => {
                         x.regions.remove(k);
                     }
@@ -117,7 +153,9 @@ pub fn pick(world: &mut World, kind: &mut FeatureKind, field: AppliedField, pick
             }
             Pick::Feature(f) if is_sketch(&features, f) => toggle(&mut x.sketches, f),
             Pick::Face(..) => {
-                let Some(f) = face_ref(cache, pick) else { return false };
+                let Some(f) = face_ref(cache, pick) else {
+                    return false;
+                };
                 match x.faces.iter().position(|g| g.face == f.face) {
                     Some(i) => {
                         x.faces.remove(i);
@@ -134,11 +172,19 @@ pub fn pick(world: &mut World, kind: &mut FeatureKind, field: AppliedField, pick
         },
         (FeatureKind::Helix(x), AppliedField::HelixEntity) => match x.helix_type {
             HelixType::CylinderCone => {
-                let Some(f) = face_ref(cache, pick) else { return false };
-                x.face = if x.face.is_some_and(|g| g.face == f.face) { None } else { Some(f) };
+                let Some(f) = face_ref(cache, pick) else {
+                    return false;
+                };
+                x.face = if x.face.is_some_and(|g| g.face == f.face) {
+                    None
+                } else {
+                    Some(f)
+                };
             }
             HelixType::Axis | HelixType::Circle => {
-                let Some(a) = crate::pattern::axis_of(&features, cache, pick) else { return false };
+                let Some(a) = crate::pattern::axis_of(&features, cache, pick) else {
+                    return false;
+                };
                 x.axis = if x.axis == Some(a) { None } else { Some(a) };
             }
         },
@@ -177,8 +223,20 @@ pub fn pick(world: &mut World, kind: &mut FeatureKind, field: AppliedField, pick
 
 /// What their fields refer to, shown selected in the view while the dialog is open.
 pub fn references(kind: &FeatureKind, cache: &PartCache) -> Vec<Pick> {
-    let face = |f: &FaceRef| cache.parts.iter().find(|p| p.solid.face(&f.face).is_some()).map(|p| Pick::Face(p.id, f.face));
-    let edge = |e: &cadrs_core::EdgeRef| cache.parts.iter().find(|p| p.solid.edge(&e.edge).is_some()).map(|p| Pick::Edge(p.id, e.edge));
+    let face = |f: &FaceRef| {
+        cache
+            .parts
+            .iter()
+            .find(|p| p.solid.face(&f.face).is_some())
+            .map(|p| Pick::Face(p.id, f.face))
+    };
+    let edge = |e: &cadrs_core::EdgeRef| {
+        cache
+            .parts
+            .iter()
+            .find(|p| p.solid.edge(&e.edge).is_some())
+            .map(|p| Pick::Edge(p.id, e.edge))
+    };
     let axis = |a: &AxisRef| match a {
         AxisRef::SketchCurve { sketch, curve } => Some(Pick::SketchCurve(*sketch, *curve)),
         AxisRef::Edge(e) => edge(e),
@@ -191,7 +249,12 @@ pub fn references(kind: &FeatureKind, cache: &PartCache) -> Vec<Pick> {
             v.extend(x.parts.iter().map(|p| Pick::Part(*p)));
             v
         }
-        FeatureKind::Helix(x) => x.face.iter().filter_map(face).chain(x.axis.iter().filter_map(axis)).collect(),
+        FeatureKind::Helix(x) => x
+            .face
+            .iter()
+            .filter_map(face)
+            .chain(x.axis.iter().filter_map(axis))
+            .collect(),
         FeatureKind::Fill(x) => x
             .edges
             .iter()
@@ -219,45 +282,87 @@ pub(crate) fn name(kind: &FeatureKind) -> Option<&'static str> {
 
 pub(crate) fn layout(kind: &FeatureKind) -> Option<String> {
     Some(match kind {
-        FeatureKind::Thicken(x) => format!("thicken {:?} {} {} {} {}", x.op, x.mid_plane, x.flip, x.keep_tools, x.merge_all),
-        FeatureKind::Helix(x) => format!("helix {:?} {:?} {} {}", x.helix_type, x.path, x.clockwise, x.flip),
+        FeatureKind::Thicken(x) => format!(
+            "thicken {:?} {} {} {} {}",
+            x.op, x.mid_plane, x.flip, x.keep_tools, x.merge_all
+        ),
+        FeatureKind::Helix(x) => format!(
+            "helix {:?} {:?} {} {}",
+            x.helix_type, x.path, x.clockwise, x.flip
+        ),
         FeatureKind::Fill(x) => format!("fill {} {:?}", x.add, x.continuity.first()),
         k => return crate::flat_ui::layout(k),
     })
 }
 
 fn op_name(features: &[Feature], op: cadrs_sketch::OpId) -> String {
-    features.iter().find(|f| f.id.0 == op).map_or("part".into(), |f| f.name.clone())
+    features
+        .iter()
+        .find(|f| f.id.0 == op)
+        .map_or("part".into(), |f| f.name.clone())
 }
 
 fn name_of(features: &[Feature], id: FeatureId) -> String {
-    features.iter().find(|f| f.id == id).map_or("sketch".into(), |f| f.name.clone())
+    features
+        .iter()
+        .find(|f| f.id == id)
+        .map_or("sketch".into(), |f| f.name.clone())
 }
 
-pub(crate) fn items(features: &[Feature], cache: &PartCache, kind: &FeatureKind, role: Role) -> Option<Vec<String>> {
+pub(crate) fn items(
+    features: &[Feature],
+    cache: &PartCache,
+    kind: &FeatureKind,
+    role: Role,
+) -> Option<Vec<String>> {
     Some(match (kind, role) {
         (FeatureKind::Thicken(x), Role::ThickenEntities) => {
-            let mut v: Vec<String> = x.faces.iter().map(|f| format!("Face of {}", op_name(features, f.face.op))).collect();
-            v.extend(x.regions.iter().map(|r| format!("Face of {}", name_of(features, r.sketch))));
+            let mut v: Vec<String> = x
+                .faces
+                .iter()
+                .map(|f| format!("Face of {}", op_name(features, f.face.op)))
+                .collect();
+            v.extend(
+                x.regions
+                    .iter()
+                    .map(|r| format!("Face of {}", name_of(features, r.sketch))),
+            );
             v.extend(x.sketches.iter().map(|s| name_of(features, *s)));
             v.extend(crate::applied::part_names(cache, &x.parts));
             v
         }
-        (FeatureKind::Thicken(x), Role::MergeScope) => crate::applied::part_names(cache, &x.merge_scope),
+        (FeatureKind::Thicken(x), Role::MergeScope) => {
+            crate::applied::part_names(cache, &x.merge_scope)
+        }
         (FeatureKind::Helix(x), Role::HelixEntity) => {
-            let mut v: Vec<String> = x.face.iter().map(|f| format!("Face of {}", op_name(features, f.face.op))).collect();
-            v.extend(x.axis.iter().map(|a| crate::revolve::axis_label(features, a)));
+            let mut v: Vec<String> = x
+                .face
+                .iter()
+                .map(|f| format!("Face of {}", op_name(features, f.face.op)))
+                .collect();
+            v.extend(
+                x.axis
+                    .iter()
+                    .map(|a| crate::revolve::axis_label(features, a)),
+            );
             v
         }
         (FeatureKind::Fill(x), Role::FillEdges) => x
             .edges
             .iter()
             .map(|e| match e {
-                FillEdge::Edge(r) => format!("Edge of {}", op_name(features, crate::parts::edge_maker(features, &r.edge))),
-                FillEdge::SketchCurve { sketch, .. } => format!("Curve of {}", name_of(features, *sketch)),
+                FillEdge::Edge(r) => format!(
+                    "Edge of {}",
+                    op_name(features, crate::parts::edge_maker(features, &r.edge))
+                ),
+                FillEdge::SketchCurve { sketch, .. } => {
+                    format!("Curve of {}", name_of(features, *sketch))
+                }
             })
             .collect(),
-        (FeatureKind::Fill(x), Role::MergeScope) => crate::applied::part_names(cache, &x.merge_scope),
+        (FeatureKind::Fill(x), Role::MergeScope) => {
+            crate::applied::part_names(cache, &x.merge_scope)
+        }
         (k, r) => return crate::flat_ui::items(features, k, r),
     })
 }
@@ -279,7 +384,13 @@ fn op_tabs(b: &mut ChildSpawner, t: &Theme, name: &str, labels: &[&str], selecte
     b.spawn((Role::OpTab, strip.selected(selected).build(t)));
 }
 
-pub(crate) fn body(b: &mut ChildSpawner, t: &Theme, kind: &FeatureKind, field: AppliedField, items_of: &dyn Fn(Role) -> Vec<String>) {
+pub(crate) fn body(
+    b: &mut ChildSpawner,
+    t: &Theme,
+    kind: &FeatureKind,
+    field: AppliedField,
+    items_of: &dyn Fn(Role) -> Vec<String>,
+) {
     match kind {
         FeatureKind::Thicken(x) => {
             let labels: Vec<&str> = BooleanOp::ALL.iter().map(|o| o.label()).collect();
@@ -294,64 +405,239 @@ pub(crate) fn body(b: &mut ChildSpawner, t: &Theme, kind: &FeatureKind, field: A
                     items_of(Role::ThickenEntities),
                     field == AppliedField::ThickenEntities,
                 );
-                b.spawn(OptionRow::new("thicken-mid-plane", "Mid plane").checked(x.mid_plane).build(t));
+                b.spawn(
+                    OptionRow::new("thicken-mid-plane", "Mid plane")
+                        .checked(x.mid_plane)
+                        .build(t),
+                );
                 if x.mid_plane {
-                    number(b, t, "thicken-thickness", "Thickness", Role::ThickenThickness1, &x.thickness1_expr, None);
+                    number(
+                        b,
+                        t,
+                        "thicken-thickness",
+                        "Thickness",
+                        Role::ThickenThickness1,
+                        &x.thickness1_expr,
+                        None,
+                    );
                 } else {
-                    number(b, t, "thicken-thickness1", "Thickness 1", Role::ThickenThickness1, &x.thickness1_expr, Some(x.flip));
-                    number(b, t, "thicken-thickness2", "Thickness 2", Role::ThickenThickness2, &x.thickness2_expr, None);
+                    number(
+                        b,
+                        t,
+                        "thicken-thickness1",
+                        "Thickness 1",
+                        Role::ThickenThickness1,
+                        &x.thickness1_expr,
+                        Some(x.flip),
+                    );
+                    number(
+                        b,
+                        t,
+                        "thicken-thickness2",
+                        "Thickness 2",
+                        Role::ThickenThickness2,
+                        &x.thickness2_expr,
+                        None,
+                    );
                 }
-                b.spawn(OptionRow::new("thicken-keep-tools", "Keep tools").checked(x.keep_tools).build(t));
+                b.spawn(
+                    OptionRow::new("thicken-keep-tools", "Keep tools")
+                        .checked(x.keep_tools)
+                        .build(t),
+                );
                 if x.op != BooleanOp::New {
-                    b.spawn(OptionRow::new("thicken-merge-all", "Merge with all").checked(x.merge_all).build(t));
+                    b.spawn(
+                        OptionRow::new("thicken-merge-all", "Merge with all")
+                            .checked(x.merge_all)
+                            .build(t),
+                    );
                     if !x.merge_all {
-                        list(b, t, "thicken-merge-scope-field", "Merge scope", Role::MergeScope, items_of(Role::MergeScope), field == AppliedField::MergeScope);
+                        list(
+                            b,
+                            t,
+                            "thicken-merge-scope-field",
+                            "Merge scope",
+                            Role::MergeScope,
+                            items_of(Role::MergeScope),
+                            field == AppliedField::MergeScope,
+                        );
                     }
                 }
             });
         }
         FeatureKind::Helix(x) => body_column(b, |b| {
             let types = opts(&HelixType::ALL, |m| m.label(), |_| true);
-            select_row(b, t, "helix-type", "", Role::HelixType, &types, index_of(&HelixType::ALL, &x.helix_type), None);
+            select_row(
+                b,
+                t,
+                "helix-type",
+                "",
+                Role::HelixType,
+                &types,
+                index_of(&HelixType::ALL, &x.helix_type),
+                None,
+            );
             let (placeholder, flip) = match x.helix_type {
                 HelixType::CylinderCone => ("Cylindrical or conical face", x.flip),
                 HelixType::Axis => ("Axis", x.flip),
                 HelixType::Circle => ("Circle", x.flip),
             };
-            b.spawn(Node { align_items: AlignItems::FlexStart, column_gap: Val::Px(2.0), ..default() }).with_children(|r| {
-                r.spawn(Node { flex_grow: 1.0, flex_basis: Val::Px(0.0), min_width: Val::Px(0.0), flex_direction: FlexDirection::Column, ..default() })
-                    .with_children(|c| list(c, t, "helix-entity-field", placeholder, Role::HelixEntity, items_of(Role::HelixEntity), field == AppliedField::HelixEntity));
-                r.spawn(Node { margin: UiRect::top(Val::Px(4.0)), ..default() }).with_children(|c| {
-                    crate::extrude_dialog::flip_button_any(c, t, "helix-entity-field-flip", Role::Flip, flip, "Opposite direction");
+            b.spawn(Node {
+                align_items: AlignItems::FlexStart,
+                column_gap: Val::Px(2.0),
+                ..default()
+            })
+            .with_children(|r| {
+                r.spawn(Node {
+                    flex_grow: 1.0,
+                    flex_basis: Val::Px(0.0),
+                    min_width: Val::Px(0.0),
+                    flex_direction: FlexDirection::Column,
+                    ..default()
+                })
+                .with_children(|c| {
+                    list(
+                        c,
+                        t,
+                        "helix-entity-field",
+                        placeholder,
+                        Role::HelixEntity,
+                        items_of(Role::HelixEntity),
+                        field == AppliedField::HelixEntity,
+                    )
+                });
+                r.spawn(Node {
+                    margin: UiRect::top(Val::Px(4.0)),
+                    ..default()
+                })
+                .with_children(|c| {
+                    crate::extrude_dialog::flip_button_any(
+                        c,
+                        t,
+                        "helix-entity-field-flip",
+                        Role::Flip,
+                        flip,
+                        "Opposite direction",
+                    );
                 });
             });
             let paths = opts(&HelixPath::ALL, |m| m.label(), |_| true);
-            select_row(b, t, "helix-input", "Input type", Role::HelixPathType, &paths, index_of(&HelixPath::ALL, &x.path), None);
+            select_row(
+                b,
+                t,
+                "helix-input",
+                "Input type",
+                Role::HelixPathType,
+                &paths,
+                index_of(&HelixPath::ALL, &x.path),
+                None,
+            );
             if matches!(x.path, HelixPath::Turns | HelixPath::TurnsAndPitch) {
-                number(b, t, "helix-revolutions", "Revolutions", Role::HelixRevolutions, &x.revolutions_expr, None);
+                number(
+                    b,
+                    t,
+                    "helix-revolutions",
+                    "Revolutions",
+                    Role::HelixRevolutions,
+                    &x.revolutions_expr,
+                    None,
+                );
             }
             if matches!(x.path, HelixPath::Pitch | HelixPath::TurnsAndPitch) {
-                number(b, t, "helix-pitch", "Pitch", Role::HelixPitch, &x.pitch_expr, None);
+                number(
+                    b,
+                    t,
+                    "helix-pitch",
+                    "Pitch",
+                    Role::HelixPitch,
+                    &x.pitch_expr,
+                    None,
+                );
             }
             if x.helix_type != HelixType::CylinderCone && x.path != HelixPath::TurnsAndPitch {
-                number(b, t, "helix-height", "Height", Role::HelixHeight, &x.height_expr, None);
+                number(
+                    b,
+                    t,
+                    "helix-height",
+                    "Height",
+                    Role::HelixHeight,
+                    &x.height_expr,
+                    None,
+                );
             }
             if x.helix_type == HelixType::Axis {
-                number(b, t, "helix-radius", "Radius", Role::HelixRadius, &x.radius_expr, None);
+                number(
+                    b,
+                    t,
+                    "helix-radius",
+                    "Radius",
+                    Role::HelixRadius,
+                    &x.radius_expr,
+                    None,
+                );
             }
-            number(b, t, "helix-start-angle", "Start angle", Role::HelixStartAngle, &x.start_angle_expr, None);
-            let hands = [("Clockwise".to_string(), true), ("Counterclockwise".to_string(), true)];
-            select_row(b, t, "helix-direction", "Direction", Role::HelixHandedness, &hands, usize::from(!x.clockwise), None);
+            number(
+                b,
+                t,
+                "helix-start-angle",
+                "Start angle",
+                Role::HelixStartAngle,
+                &x.start_angle_expr,
+                None,
+            );
+            let hands = [
+                ("Clockwise".to_string(), true),
+                ("Counterclockwise".to_string(), true),
+            ];
+            select_row(
+                b,
+                t,
+                "helix-direction",
+                "Direction",
+                Role::HelixHandedness,
+                &hands,
+                usize::from(!x.clockwise),
+                None,
+            );
         }),
         FeatureKind::Fill(x) => {
             op_tabs(b, t, "fill", &["New", "Add"], usize::from(x.add));
             body_column(b, |b| {
-                list(b, t, "fill-edges-field", "Edges and curves", Role::FillEdges, items_of(Role::FillEdges), field == AppliedField::FillEdges);
-                let c = opts(&Continuity::ALL, |m| m.label(), |m| m == Continuity::Position);
+                list(
+                    b,
+                    t,
+                    "fill-edges-field",
+                    "Edges and curves",
+                    Role::FillEdges,
+                    items_of(Role::FillEdges),
+                    field == AppliedField::FillEdges,
+                );
+                let c = opts(
+                    &Continuity::ALL,
+                    |m| m.label(),
+                    |m| m == Continuity::Position,
+                );
                 let now = x.continuity.first().copied().unwrap_or_default();
-                select_row(b, t, "fill-continuity", "Continuity", Role::FillContinuity, &c, index_of(&Continuity::ALL, &now), None);
+                select_row(
+                    b,
+                    t,
+                    "fill-continuity",
+                    "Continuity",
+                    Role::FillContinuity,
+                    &c,
+                    index_of(&Continuity::ALL, &now),
+                    None,
+                );
                 if x.add {
-                    list(b, t, "fill-merge-scope-field", "Merge scope (surfaces it meets)", Role::MergeScope, items_of(Role::MergeScope), field == AppliedField::MergeScope);
+                    list(
+                        b,
+                        t,
+                        "fill-merge-scope-field",
+                        "Merge scope (surfaces it meets)",
+                        Role::MergeScope,
+                        items_of(Role::MergeScope),
+                        field == AppliedField::MergeScope,
+                    );
                 }
             });
         }
@@ -380,7 +666,10 @@ pub(crate) fn select_index(kind: &FeatureKind, role: Role) -> Option<usize> {
         (FeatureKind::Helix(x), Role::HelixType) => index_of(&HelixType::ALL, &x.helix_type),
         (FeatureKind::Helix(x), Role::HelixPathType) => index_of(&HelixPath::ALL, &x.path),
         (FeatureKind::Helix(x), Role::HelixHandedness) => usize::from(!x.clockwise),
-        (FeatureKind::Fill(x), Role::FillContinuity) => index_of(&Continuity::ALL, &x.continuity.first().copied().unwrap_or_default()),
+        (FeatureKind::Fill(x), Role::FillContinuity) => index_of(
+            &Continuity::ALL,
+            &x.continuity.first().copied().unwrap_or_default(),
+        ),
         _ => return None,
     })
 }
@@ -395,7 +684,9 @@ pub(crate) fn select(k: &mut FeatureKind, role: Role, i: usize) {
                 x.axis = None;
             }
         }
-        (FeatureKind::Helix(x), Role::HelixPathType) => x.path = HelixPath::ALL[i.min(HelixPath::ALL.len() - 1)],
+        (FeatureKind::Helix(x), Role::HelixPathType) => {
+            x.path = HelixPath::ALL[i.min(HelixPath::ALL.len() - 1)]
+        }
         (FeatureKind::Helix(x), Role::HelixHandedness) => x.clockwise = i == 0,
         (FeatureKind::Fill(x), Role::FillContinuity) => {
             let c = Continuity::ALL[i.min(2)];
@@ -418,11 +709,16 @@ pub(crate) fn tab(k: &mut FeatureKind, role: Role, i: usize) {
 }
 
 pub(crate) fn is_checkbox(name: &str) -> bool {
-    matches!(name, "thicken-mid-plane-checkbox" | "thicken-keep-tools-checkbox" | "thicken-merge-all-checkbox")
+    matches!(
+        name,
+        "thicken-mid-plane-checkbox" | "thicken-keep-tools-checkbox" | "thicken-merge-all-checkbox"
+    )
 }
 
 pub(crate) fn checkbox(k: &mut FeatureKind, name: &str, on: bool) -> Option<&'static str> {
-    let FeatureKind::Thicken(x) = k else { return None };
+    let FeatureKind::Thicken(x) = k else {
+        return None;
+    };
     Some(match name {
         "thicken-mid-plane-checkbox" => {
             x.mid_plane = on;
@@ -442,7 +738,8 @@ pub(crate) fn checkbox(k: &mut FeatureKind, name: &str, on: bool) -> Option<&'st
 
 /// Numbers that may be zero or of any sign (the second thickness may be 0; the start angle).
 pub(crate) fn is_signed(role: Role) -> bool {
-    matches!(role, Role::ThickenThickness2 | Role::HelixStartAngle) || crate::direct_edit_ui::is_signed(role)
+    matches!(role, Role::ThickenThickness2 | Role::HelixStartAngle)
+        || crate::direct_edit_ui::is_signed(role)
 }
 
 /// The revolutions: a plain number greater than zero.
@@ -469,13 +766,21 @@ pub(crate) fn number_label(role: Role) -> Option<&'static str> {
 
 pub(crate) fn set_number(k: &mut FeatureKind, role: Role, v: f64, expr: String) {
     let (value, text) = match (k, role) {
-        (FeatureKind::Thicken(x), Role::ThickenThickness1) => (&mut x.thickness1, &mut x.thickness1_expr),
-        (FeatureKind::Thicken(x), Role::ThickenThickness2) => (&mut x.thickness2, &mut x.thickness2_expr),
-        (FeatureKind::Helix(x), Role::HelixRevolutions) => (&mut x.revolutions, &mut x.revolutions_expr),
+        (FeatureKind::Thicken(x), Role::ThickenThickness1) => {
+            (&mut x.thickness1, &mut x.thickness1_expr)
+        }
+        (FeatureKind::Thicken(x), Role::ThickenThickness2) => {
+            (&mut x.thickness2, &mut x.thickness2_expr)
+        }
+        (FeatureKind::Helix(x), Role::HelixRevolutions) => {
+            (&mut x.revolutions, &mut x.revolutions_expr)
+        }
         (FeatureKind::Helix(x), Role::HelixPitch) => (&mut x.pitch, &mut x.pitch_expr),
         (FeatureKind::Helix(x), Role::HelixHeight) => (&mut x.height, &mut x.height_expr),
         (FeatureKind::Helix(x), Role::HelixRadius) => (&mut x.radius, &mut x.radius_expr),
-        (FeatureKind::Helix(x), Role::HelixStartAngle) => (&mut x.start_angle, &mut x.start_angle_expr),
+        (FeatureKind::Helix(x), Role::HelixStartAngle) => {
+            (&mut x.start_angle, &mut x.start_angle_expr)
+        }
         (k, r) => return crate::direct_edit_ui::set_number(k, r, v, expr),
     };
     *value = v;

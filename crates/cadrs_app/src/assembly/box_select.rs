@@ -14,9 +14,11 @@ use bevy::picking::pointer::{PointerAction, PointerButton, PointerId, PointerInp
 use bevy::prelude::*;
 
 use super::InstanceId;
-use crate::parts::PartCache;
-use crate::viewport::{Pick, Selection, ViewportArea, ViewportRect, ViewportView, pointer_over_viewport};
 use crate::ActiveDocument;
+use crate::parts::PartCache;
+use crate::viewport::{
+    Pick, Selection, ViewportArea, ViewportRect, ViewportView, pointer_over_viewport,
+};
 
 /// A box being dragged: where it started (window px), and whether the press was on empty space.
 #[derive(Resource, Default)]
@@ -37,7 +39,12 @@ use cadrs_ui::selection_box::crossing;
 /// The parts a box from `a` to `b` (viewport offsets) selects: every shown part's projected
 /// points inside the box (window), or its projected extent overlapping it (crossing), in the
 /// view's order.
-pub fn parts_in_box(cache: &PartCache, view: &crate::camera::ViewState, a: Vec2, b: Vec2) -> Vec<cadrs_core::PartId> {
+pub fn parts_in_box(
+    cache: &PartCache,
+    view: &crate::camera::ViewState,
+    a: Vec2,
+    b: Vec2,
+) -> Vec<cadrs_core::PartId> {
     let (lo, hi) = (a.min(b), a.max(b));
     let cross = crossing(a, b);
     let mut out = Vec::new();
@@ -46,7 +53,9 @@ pub fn parts_in_box(cache: &PartCache, view: &crate::camera::ViewState, a: Vec2,
         if pts.is_empty() {
             continue;
         }
-        let proj = pts.iter().map(|p| view.project(Vec3::new(p[0] as f32, p[1] as f32, p[2] as f32)));
+        let proj = pts
+            .iter()
+            .map(|p| view.project(Vec3::new(p[0] as f32, p[1] as f32, p[2] as f32)));
         let hit = if cross {
             let (mut pmin, mut pmax) = (Vec2::splat(f32::INFINITY), Vec2::splat(f32::NEG_INFINITY));
             for q in proj {
@@ -55,7 +64,8 @@ pub fn parts_in_box(cache: &PartCache, view: &crate::camera::ViewState, a: Vec2,
             }
             pmin.x <= hi.x && pmax.x >= lo.x && pmin.y <= hi.y && pmax.y >= lo.y
         } else {
-            proj.into_iter().all(|q| q.x >= lo.x && q.x <= hi.x && q.y >= lo.y && q.y <= hi.y)
+            proj.into_iter()
+                .all(|q| q.x >= lo.x && q.x <= hi.x && q.y >= lo.y && q.y <= hi.y)
         };
         if hit && !out.contains(&part.id) {
             out.push(part.id);
@@ -66,7 +76,12 @@ pub fn parts_in_box(cache: &PartCache, view: &crate::camera::ViewState, a: Vec2,
 
 /// The instances a box from `a` to `b` (viewport offsets) selects ([`parts_in_box`]), as their
 /// top-level instances.
-pub fn instances_in_box(cache: &PartCache, view: &crate::camera::ViewState, a: Vec2, b: Vec2) -> Vec<InstanceId> {
+pub fn instances_in_box(
+    cache: &PartCache,
+    view: &crate::camera::ViewState,
+    a: Vec2,
+    b: Vec2,
+) -> Vec<InstanceId> {
     let mut out: Vec<InstanceId> = Vec::new();
     for p in parts_in_box(cache, view, a, b) {
         let i = InstanceId::of_part(p);
@@ -105,22 +120,40 @@ pub(super) fn box_select(
         Option<Res<crate::applied::AppliedSession>>,
         Commands,
     ),
-    (mode, q_dialogs): (Option<Res<State<crate::sketch::PartStudioMode>>>, Query<(), With<cadrs_ui::FeatureDialogState>>),
+    (mode, q_dialogs): (
+        Option<Res<State<crate::sketch::PartStudioMode>>>,
+        Query<(), With<cadrs_ui::FeatureDialogState>>,
+    ),
 ) {
-    let in_assembly = doc.as_deref().is_some_and(|d| super::active_assembly(d).is_some());
+    let in_assembly = doc
+        .as_deref()
+        .is_some_and(|d| super::active_assembly(d).is_some());
     // P3H.6: in a Part Studio, the Composite part dialog and the Transform's Parts to transform
     // take a box's parts.
-    let to_transform = applied.is_some_and(|s| s.field == crate::applied::AppliedField::TransformParts);
+    let to_transform =
+        applied.is_some_and(|s| s.field == crate::applied::AppliedField::TransformParts);
     let studio_box = !in_assembly && (composite.is_some() || to_transform);
     // In a Part Studio with no dialog open and no sketch edited, a box selects parts.
-    let in_studio = doc.as_deref().and_then(|d| d.active_element()).is_some_and(|e| matches!(e.kind, cadrs_core::ElementKind::PartStudio { .. }));
-    let plain_studio = !in_assembly && !studio_box && in_studio && mode.is_some_and(|m| *m.get() == crate::sketch::PartStudioMode::Modeling) && q_dialogs.is_empty();
+    let in_studio = doc
+        .as_deref()
+        .and_then(|d| d.active_element())
+        .is_some_and(|e| matches!(e.kind, cadrs_core::ElementKind::PartStudio { .. }));
+    let plain_studio = !in_assembly
+        && !studio_box
+        && in_studio
+        && mode.is_some_and(|m| *m.get() == crate::sketch::PartStudioMode::Modeling)
+        && q_dialogs.is_empty();
     if !in_assembly && !studio_box && !plain_studio {
         inputs.clear();
         *state = AssemblyBox::default();
         return;
     }
-    let blocked = busy.0.is_some() || busy.1.is_some() || busy.2.is_some() || busy.3.is_some() || busy.4.editing() || busy.6.plane().is_some();
+    let blocked = busy.0.is_some()
+        || busy.1.is_some()
+        || busy.2.is_some()
+        || busy.3.is_some()
+        || busy.4.editing()
+        || busy.6.plane().is_some();
     let over = pointer_over_viewport(&hover, &q_area);
     for input in inputs.read() {
         if input.pointer_id != PointerId::Mouse {
@@ -162,13 +195,22 @@ pub(super) fn box_select(
                 if studio_box {
                     let parts = parts_in_box(&cache, &view.view, rect.offset(s), rect.offset(pos));
                     if to_transform {
-                        commands.queue(move |world: &mut World| crate::transform_ui::add_parts(world, &parts));
+                        commands.queue(move |world: &mut World| {
+                            crate::transform_ui::add_parts(world, &parts)
+                        });
                     } else {
-                        commands.queue(move |world: &mut World| crate::composite_ui::pick_parts(world, &parts, false));
+                        commands.queue(move |world: &mut World| {
+                            crate::composite_ui::pick_parts(world, &parts, false)
+                        });
                     }
                     continue;
                 }
-                let add = keys.any_pressed([KeyCode::ControlLeft, KeyCode::ControlRight, KeyCode::ShiftLeft, KeyCode::ShiftRight]);
+                let add = keys.any_pressed([
+                    KeyCode::ControlLeft,
+                    KeyCode::ControlRight,
+                    KeyCode::ShiftLeft,
+                    KeyCode::ShiftRight,
+                ]);
                 let mut picks: Vec<Pick> = if add { selection.0.clone() } else { Vec::new() };
                 if plain_studio {
                     for p in parts_in_box(&cache, &view.view, rect.offset(s), rect.offset(pos)) {
@@ -209,18 +251,32 @@ pub(super) fn draw_box(
         (Some(s), Some(c), true) => Some((s - rect.0.min, c - rect.0.min)),
         _ => None,
     };
-    cadrs_ui::selection_box::sync(&mut commands, &mut boxes, "asm-box-select", q_area.iter().next(), span);
+    cadrs_ui::selection_box::sync(
+        &mut commands,
+        &mut boxes,
+        "asm-box-select",
+        q_area.iter().next(),
+        span,
+    );
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use bevy::picking::{backend::HitData, hover::HoverMap, pointer::Location};
-    use cadrs_core::{Document, Element, FeatureId, PartId, parts::{Part, PartKind}, solid::Solid};
+    use cadrs_core::{
+        Document, Element, FeatureId, PartId,
+        parts::{Part, PartKind},
+        solid::Solid,
+    };
 
     fn scene(assembly: bool) -> (App, Entity, Pick) {
         let mut doc = Document::empty("Box selection");
-        doc.elements.push(if assembly { Element::assembly("Assembly") } else { Element::part_studio("Parts") });
+        doc.elements.push(if assembly {
+            Element::assembly("Assembly")
+        } else {
+            Element::part_studio("Parts")
+        });
         let element = doc.elements[0].id;
         let mut cache = PartCache::default();
         cache.assembly = assembly.then_some(element);
@@ -229,9 +285,19 @@ mod tests {
             let x = (i % 9) as f64 * 10.0 - 40.0;
             let y = (i / 9) as f64 * 10.0 - 25.0;
             cache.parts.push(Part {
-                id: PartId::new(feature, 0), feature, name: format!("Part {i}"),
-                kind: PartKind::Solid, palette: i, mass: None, features: vec![feature], source: None, derived: None,
-                solid: std::sync::Arc::new(Solid { positions: vec![[x - 1.0, y - 1.0, 0.0], [x + 1.0, y + 1.0, 0.0]], ..default() }),
+                id: PartId::new(feature, 0),
+                feature,
+                name: format!("Part {i}"),
+                kind: PartKind::Solid,
+                palette: i,
+                mass: None,
+                features: vec![feature],
+                source: None,
+                derived: None,
+                solid: std::sync::Arc::new(Solid {
+                    positions: vec![[x - 1.0, y - 1.0, 0.0], [x + 1.0, y + 1.0, 0.0]],
+                    ..default()
+                }),
             });
         }
         let existing = Pick::Part(PartId::new(FeatureId::new(), 0));
@@ -239,7 +305,13 @@ mod tests {
         app.add_message::<PointerInput>()
             .insert_resource(ActiveDocument::new(doc))
             .insert_resource(cache)
-            .insert_resource(ViewportView { view: crate::camera::ViewState { scale: 1.0, ..crate::camera::ViewState::standard(crate::camera::StandardView::Top) }, ..default() })
+            .insert_resource(ViewportView {
+                view: crate::camera::ViewState {
+                    scale: 1.0,
+                    ..crate::camera::ViewState::standard(crate::camera::StandardView::Top)
+                },
+                ..default()
+            })
             .insert_resource(ViewportRect(Rect::new(0.0, 0.0, 200.0, 200.0)))
             .insert_resource(State::new(crate::sketch::PartStudioMode::Modeling))
             .insert_resource(Selection(vec![existing]))
@@ -253,25 +325,51 @@ mod tests {
             .add_systems(Update, box_select);
         let area = app.world_mut().spawn(ViewportArea).id();
         let mut hover = HoverMap::default();
-        hover.entry(PointerId::Mouse).or_default().insert(area, HitData::new(area, 0.0, None, None));
+        hover
+            .entry(PointerId::Mouse)
+            .or_default()
+            .insert(area, HitData::new(area, 0.0, None, None));
         app.insert_resource(hover);
         (app, area, existing)
     }
 
     fn pointer(app: &mut App, area: Entity, action: PointerAction, position: Vec2) {
-        let target = bevy::camera::RenderTarget::Window(bevy::window::WindowRef::Entity(area)).normalize(None).unwrap();
-        app.world_mut().write_message(PointerInput::new(PointerId::Mouse, Location { target, position }, action));
+        let target = bevy::camera::RenderTarget::Window(bevy::window::WindowRef::Entity(area))
+            .normalize(None)
+            .unwrap();
+        app.world_mut().write_message(PointerInput::new(
+            PointerId::Mouse,
+            Location { target, position },
+            action,
+        ));
         app.update();
     }
 
     fn drag(app: &mut App, area: Entity, crossing: bool) -> Vec2 {
-        let start = if crossing { Vec2::splat(160.0) } else { Vec2::splat(40.0) };
-        let end = if crossing { Vec2::splat(40.0) } else { Vec2::splat(160.0) };
-        pointer(app, area, PointerAction::Press(PointerButton::Primary), start);
+        let start = if crossing {
+            Vec2::splat(160.0)
+        } else {
+            Vec2::splat(40.0)
+        };
+        let end = if crossing {
+            Vec2::splat(40.0)
+        } else {
+            Vec2::splat(160.0)
+        };
+        pointer(
+            app,
+            area,
+            PointerAction::Press(PointerButton::Primary),
+            start,
+        );
         for at in [Vec2::splat(100.0), end] {
             pointer(app, area, PointerAction::Move { delta: at - start }, at);
             assert!(app.world().resource::<AssemblyBox>().active());
-            assert_eq!(*app.world().resource::<crate::parts::HoverParts>(), crate::parts::HoverParts::default(), "dragging must not pre-highlight the enclosed parts");
+            assert_eq!(
+                *app.world().resource::<crate::parts::HoverParts>(),
+                crate::parts::HoverParts::default(),
+                "dragging must not pre-highlight the enclosed parts"
+            );
         }
         end
     }
@@ -283,7 +381,12 @@ mod tests {
                 let (mut app, area, existing) = scene(assembly);
                 let end = drag(&mut app, area, crossing);
                 assert_eq!(app.world().resource::<Selection>().0, vec![existing]);
-                pointer(&mut app, area, PointerAction::Release(PointerButton::Primary), end);
+                pointer(
+                    &mut app,
+                    area,
+                    PointerAction::Release(PointerButton::Primary),
+                    end,
+                );
                 let selection = &app.world().resource::<Selection>().0;
                 assert_eq!(selection.len(), 54);
                 assert!(!selection.contains(&existing));
@@ -296,10 +399,17 @@ mod tests {
     fn additive_box_selection_is_committed_on_release_and_cancel_keeps_selection() {
         for key in [KeyCode::ControlLeft, KeyCode::ShiftLeft] {
             let (mut app, area, existing) = scene(true);
-            app.world_mut().resource_mut::<ButtonInput<KeyCode>>().press(key);
+            app.world_mut()
+                .resource_mut::<ButtonInput<KeyCode>>()
+                .press(key);
             let end = drag(&mut app, area, false);
             assert_eq!(app.world().resource::<Selection>().0, vec![existing]);
-            pointer(&mut app, area, PointerAction::Release(PointerButton::Primary), end);
+            pointer(
+                &mut app,
+                area,
+                PointerAction::Release(PointerButton::Primary),
+                end,
+            );
             assert_eq!(app.world().resource::<Selection>().0.len(), 55);
             assert!(app.world().resource::<Selection>().0.contains(&existing));
         }

@@ -31,7 +31,11 @@ impl V3 {
         self.x * o.x + self.y * o.y + self.z * o.z
     }
     pub fn cross(self, o: V3) -> V3 {
-        v3(self.y * o.z - self.z * o.y, self.z * o.x - self.x * o.z, self.x * o.y - self.y * o.x)
+        v3(
+            self.y * o.z - self.z * o.y,
+            self.z * o.x - self.x * o.z,
+            self.x * o.y - self.y * o.x,
+        )
     }
     pub fn length(self) -> f32 {
         self.dot(self).sqrt()
@@ -71,7 +75,10 @@ impl V3 {
         let s = if self.z >= 0.0 { 1.0 } else { -1.0 };
         let a = -1.0 / (s + self.z);
         let b = self.x * self.y * a;
-        (v3(1.0 + s * self.x * self.x * a, s * b, -s * self.x), v3(b, s + self.y * self.y * a, -self.y))
+        (
+            v3(1.0 + s * self.x * self.x * a, s * b, -s * self.x),
+            v3(b, s + self.y * self.y * a, -self.y),
+        )
     }
 }
 
@@ -133,7 +140,10 @@ fn mix(mut z: u64) -> u64 {
 impl Rng {
     pub fn new(seed: u64, pixel: u64, sample: u64) -> Self {
         let a = mix(seed ^ mix(pixel.wrapping_mul(0x2545_F491_4F6C_DD1D) ^ mix(sample)));
-        let mut r = Rng { state: 0, inc: (mix(a ^ 0xDA3E_39CB_94B9_5BDB) << 1) | 1 };
+        let mut r = Rng {
+            state: 0,
+            inc: (mix(a ^ 0xDA3E_39CB_94B9_5BDB) << 1) | 1,
+        };
         r.next_u32();
         r.state = r.state.wrapping_add(a);
         r.next_u32();
@@ -142,7 +152,9 @@ impl Rng {
 
     pub fn next_u32(&mut self) -> u32 {
         let old = self.state;
-        self.state = old.wrapping_mul(6_364_136_223_846_793_005).wrapping_add(self.inc);
+        self.state = old
+            .wrapping_mul(6_364_136_223_846_793_005)
+            .wrapping_add(self.inc);
         let xorshifted = (((old >> 18) ^ old) >> 27) as u32;
         let rot = (old >> 59) as u32;
         xorshifted.rotate_right(rot)
@@ -156,18 +168,30 @@ impl Rng {
 
 /// sRGB (0–1) to linear.
 pub fn srgb_to_linear(c: f32) -> f32 {
-    if c <= 0.04045 { c / 12.92 } else { ((c + 0.055) / 1.055).powf(2.4) }
+    if c <= 0.04045 {
+        c / 12.92
+    } else {
+        ((c + 0.055) / 1.055).powf(2.4)
+    }
 }
 
 /// Linear to sRGB (0–1).
 pub fn linear_to_srgb(c: f32) -> f32 {
     let c = c.clamp(0.0, 1.0);
-    if c <= 0.003_130_8 { c * 12.92 } else { 1.055 * c.powf(1.0 / 2.4) - 0.055 }
+    if c <= 0.003_130_8 {
+        c * 12.92
+    } else {
+        1.055 * c.powf(1.0 / 2.4) - 0.055
+    }
 }
 
 /// An sRGB byte colour as linear.
 pub fn rgb8(r: u8, g: u8, b: u8) -> V3 {
-    v3(srgb_to_linear(r as f32 / 255.0), srgb_to_linear(g as f32 / 255.0), srgb_to_linear(b as f32 / 255.0))
+    v3(
+        srgb_to_linear(r as f32 / 255.0),
+        srgb_to_linear(g as f32 / 255.0),
+        srgb_to_linear(b as f32 / 255.0),
+    )
 }
 
 #[cfg(test)]
@@ -176,7 +200,11 @@ mod tests {
 
     #[test]
     fn basis_is_orthonormal() {
-        for n in [v3(0.0, 0.0, 1.0), v3(0.0, 0.0, -1.0), v3(1.0, 2.0, -3.0).normalize()] {
+        for n in [
+            v3(0.0, 0.0, 1.0),
+            v3(0.0, 0.0, -1.0),
+            v3(1.0, 2.0, -3.0).normalize(),
+        ] {
             let (a, b) = n.basis();
             assert!((a.length() - 1.0).abs() < 1e-5 && (b.length() - 1.0).abs() < 1e-5);
             assert!(a.dot(b).abs() < 1e-5 && a.dot(n).abs() < 1e-5 && b.dot(n).abs() < 1e-5);

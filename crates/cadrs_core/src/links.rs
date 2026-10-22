@@ -11,8 +11,8 @@
 
 use cadrs_sketch::projection::Projected;
 use cadrs_sketch::{
-    CurveId, CurveKind, EdgeName, FaceName, Imprint, ImprintShape, Link, PlaneFrame, Sketch,
-    Vec2, Vec3, synthetic_curve,
+    CurveId, CurveKind, EdgeName, FaceName, Imprint, ImprintShape, Link, PlaneFrame, Sketch, Vec2,
+    Vec3, synthetic_curve,
 };
 
 use crate::document::Feature;
@@ -78,7 +78,10 @@ pub enum Curve3 {
     },
     /// Any other curve (a spline edge, a cylinder's edge cut at a slant), as points on it in
     /// order (a closed curve lists each once).
-    Sampled { points: Vec<Vec3>, closed: bool },
+    Sampled {
+        points: Vec<Vec3>,
+        closed: bool,
+    },
 }
 
 /// At most this many points of a curve are kept for [`Curve3::Sampled`] (and so for the
@@ -96,14 +99,22 @@ pub fn sampled(pts: &[Vec3]) -> Option<Curve3> {
     let pts = if closed { &pts[..n - 1] } else { pts };
     let m = pts.len();
     if m <= MAX_SAMPLES {
-        return Some(Curve3::Sampled { points: pts.to_vec(), closed });
+        return Some(Curve3::Sampled {
+            points: pts.to_vec(),
+            closed,
+        });
     }
     // Arc length at each point (closing back to the first for a closed curve).
     let mut at = vec![0.0];
     for w in pts.windows(2) {
         at.push(at.last().unwrap() + len(sub(w[1], w[0])));
     }
-    let total = at[m - 1] + if closed { len(sub(pts[0], pts[m - 1])) } else { 0.0 };
+    let total = at[m - 1]
+        + if closed {
+            len(sub(pts[0], pts[m - 1]))
+        } else {
+            0.0
+        };
     let k = if closed { MAX_SAMPLES } else { MAX_SAMPLES - 1 };
     let mut out: Vec<Vec3> = Vec::new();
     let mut j = 0;
@@ -116,7 +127,11 @@ pub fn sampled(pts: &[Vec3]) -> Option<Curve3> {
             j += 1;
         }
         // The nearer of the two points around it.
-        let pick = if j + 1 < m && at[j + 1] - want < want - at[j] { j + 1 } else { j };
+        let pick = if j + 1 < m && at[j + 1] - want < want - at[j] {
+            j + 1
+        } else {
+            j
+        };
         if out.last().is_none_or(|q| len(sub(*q, pts[pick])) > 0.0) {
             out.push(pts[pick]);
         }
@@ -124,7 +139,10 @@ pub fn sampled(pts: &[Vec3]) -> Option<Curve3> {
     if !closed && out.last().is_some_and(|q| len(sub(*q, pts[m - 1])) > 0.0) {
         out.push(pts[m - 1]);
     }
-    Some(Curve3::Sampled { points: out, closed })
+    Some(Curve3::Sampled {
+        points: out,
+        closed,
+    })
 }
 
 /// The circle through three points in space: center and unit normal.
@@ -278,10 +296,21 @@ pub fn project(c: Curve3, frame: &PlaneFrame) -> Option<Projected> {
                 // Edge-on: a segment between the extreme points.
                 let pts = [s(start), s(mid), s(end)];
                 let dir = pts[2] - pts[0];
-                let dir = if dir.length() < 1e-9 { pts[1] - pts[0] } else { dir }.normalize();
+                let dir = if dir.length() < 1e-9 {
+                    pts[1] - pts[0]
+                } else {
+                    dir
+                }
+                .normalize();
                 let key = |p: &Vec2| p.dot(dir);
-                let lo = pts.iter().copied().min_by(|a, b| key(a).total_cmp(&key(b)))?;
-                let hi = pts.iter().copied().max_by(|a, b| key(a).total_cmp(&key(b)))?;
+                let lo = pts
+                    .iter()
+                    .copied()
+                    .min_by(|a, b| key(a).total_cmp(&key(b)))?;
+                let hi = pts
+                    .iter()
+                    .copied()
+                    .max_by(|a, b| key(a).total_cmp(&key(b)))?;
                 Projected::Line(lo, hi)
             } else {
                 // An elliptical arc: on the circle's projection (as for a whole circle), from
@@ -290,26 +319,52 @@ pub fn project(c: Curve3, frame: &PlaneFrame) -> Option<Projected> {
                 let (c, major, minor) = (s(center), s(add(center, scale(d, radius))), radius * cos);
                 let e = cadrs_sketch::geom::EllipseGeom::new(c, major, minor);
                 let (ts, tm, te) = (e.param_of(s(start)), e.param_of(s(mid)), e.param_of(s(end)));
-                let ccw = cadrs_sketch::geom::norm_angle(tm - ts) < cadrs_sketch::geom::norm_angle(te - ts);
-                let (start, end) = if ccw { (s(start), s(end)) } else { (s(end), s(start)) };
-                Projected::EllipseArc { center: c, major, minor, start, end }
+                let ccw = cadrs_sketch::geom::norm_angle(tm - ts)
+                    < cadrs_sketch::geom::norm_angle(te - ts);
+                let (start, end) = if ccw {
+                    (s(start), s(end))
+                } else {
+                    (s(end), s(start))
+                };
+                Projected::EllipseArc {
+                    center: c,
+                    major,
+                    minor,
+                    start,
+                    end,
+                }
             }
         }
         Curve3::Sampled { points, closed } => {
             let pts: Vec<Vec2> = points.iter().map(|p| s(*p)).collect();
             // Seen edge-on (all on one line): the segment between its extremes.
             let lo = *pts.first()?;
-            let hi = pts.iter().copied().max_by(|a, b| a.distance(lo).total_cmp(&b.distance(lo)))?;
+            let hi = pts
+                .iter()
+                .copied()
+                .max_by(|a, b| a.distance(lo).total_cmp(&b.distance(lo)))?;
             let size = hi.distance(lo);
             let dir = (hi - lo).normalize();
-            let straight = size > 0.0 && pts.iter().all(|p| dir.cross(*p - lo).abs() < 1e-9 * (1.0 + size));
+            let straight = size > 0.0
+                && pts
+                    .iter()
+                    .all(|p| dir.cross(*p - lo).abs() < 1e-9 * (1.0 + size));
             if straight {
                 let key = |p: &Vec2| p.dot(dir);
-                let a = pts.iter().copied().min_by(|x, y| key(x).total_cmp(&key(y)))?;
-                let b = pts.iter().copied().max_by(|x, y| key(x).total_cmp(&key(y)))?;
+                let a = pts
+                    .iter()
+                    .copied()
+                    .min_by(|x, y| key(x).total_cmp(&key(y)))?;
+                let b = pts
+                    .iter()
+                    .copied()
+                    .max_by(|x, y| key(x).total_cmp(&key(y)))?;
                 Projected::Line(a, b)
             } else {
-                Projected::Spline { points: pts, closed }
+                Projected::Spline {
+                    points: pts,
+                    closed,
+                }
             }
         }
         Curve3::Ellipse {
@@ -363,7 +418,12 @@ pub fn crossings(c: Curve3, frame: &PlaneFrame) -> Vec<Vec2> {
         let off = (-d / r).clamp(-1.0, 1.0).acos();
         [base + off, base - off]
             .iter()
-            .map(|t| add(center, add(scale(u, radius * t.cos()), scale(v, radius * t.sin()))))
+            .map(|t| {
+                add(
+                    center,
+                    add(scale(u, radius * t.cos()), scale(v, radius * t.sin())),
+                )
+            })
             .collect()
     };
     let pts: Vec<Vec3> = match c {
@@ -408,8 +468,13 @@ pub fn crossings(c: Curve3, frame: &PlaneFrame) -> Vec<Vec2> {
                 .filter_map(|i| {
                     let (a, b) = (points[i], points[(i + 1) % n]);
                     let (da, db) = (dist(a), dist(b));
-                    (da.signum() != db.signum() || da == 0.0)
-                        .then(|| if (da - db).abs() < 1e-300 { a } else { add(a, scale(sub(b, a), da / (da - db))) })
+                    (da.signum() != db.signum() || da == 0.0).then(|| {
+                        if (da - db).abs() < 1e-300 {
+                            a
+                        } else {
+                            add(a, scale(sub(b, a), da / (da - db)))
+                        }
+                    })
                 })
                 .collect()
         }
@@ -438,7 +503,10 @@ pub fn plane_trace(p: &PlaneFrame, frame: &PlaneFrame) -> Option<Curve3> {
     }
     let t = dot(sub(p.origin, frame.origin), np) / k;
     let c = add(frame.origin, scale(w, t));
-    Some(Curve3::Line(add(c, scale(d, -PLANE_TRACE_HALF)), add(c, scale(d, PLANE_TRACE_HALF))))
+    Some(Curve3::Line(
+        add(c, scale(d, -PLANE_TRACE_HALF)),
+        add(c, scale(d, PLANE_TRACE_HALF)),
+    ))
 }
 
 /// What links resolve against: the parts made before the sketch and the features before it.
@@ -451,23 +519,46 @@ impl<'a> LinkContext<'a> {
     /// The solid of a part `feature` made that `has` the entity: among its parts first, then
     /// any part (a boolean may have joined its part to another); else its first part.
     fn solid_where(&self, feature: uuid::Uuid, has: impl Fn(&Solid) -> bool) -> Option<&'a Solid> {
-        let mine = || self.solids.iter().filter(|(id, _)| id.0 == feature).map(|(_, s)| *s);
+        let mine = || {
+            self.solids
+                .iter()
+                .filter(|(id, _)| id.0 == feature)
+                .map(|(_, s)| *s)
+        };
         mine()
             .find(|s| has(s))
             .or_else(|| self.solids.iter().map(|(_, s)| *s).find(|s| has(s)))
             .or_else(|| mine().next())
     }
 
-    fn solid_with_edge(&self, feature: uuid::Uuid, edge: &crate::solid::EdgeName) -> Option<&'a Solid> {
-        self.solid_where(feature, |s| s.edges.iter().any(|e| e.name.base() == edge.base()))
+    fn solid_with_edge(
+        &self,
+        feature: uuid::Uuid,
+        edge: &crate::solid::EdgeName,
+    ) -> Option<&'a Solid> {
+        self.solid_where(feature, |s| {
+            s.edges.iter().any(|e| e.name.base() == edge.base())
+        })
     }
 
-    fn solid_with_face(&self, feature: uuid::Uuid, face: &cadrs_sketch::FaceName) -> Option<&'a Solid> {
-        self.solid_where(feature, |s| s.faces.iter().any(|f| f.name.base() == face.base()))
+    fn solid_with_face(
+        &self,
+        feature: uuid::Uuid,
+        face: &cadrs_sketch::FaceName,
+    ) -> Option<&'a Solid> {
+        self.solid_where(feature, |s| {
+            s.faces.iter().any(|f| f.name.base() == face.base())
+        })
     }
 
-    fn solid_with_vertex(&self, feature: uuid::Uuid, vertex: &cadrs_sketch::VertexName) -> Option<&'a Solid> {
-        self.solid_where(feature, |s| s.vertices.iter().any(|v| v.name.base() == vertex.base()))
+    fn solid_with_vertex(
+        &self,
+        feature: uuid::Uuid,
+        vertex: &cadrs_sketch::VertexName,
+    ) -> Option<&'a Solid> {
+        self.solid_where(feature, |s| {
+            s.vertices.iter().any(|v| v.name.base() == vertex.base())
+        })
     }
 
     /// The exact curve of an edge an extrude swept from a sketch ellipse or offset ellipse (P3.7,
@@ -480,32 +571,55 @@ impl<'a> LinkContext<'a> {
             let cadrs_sketch::FaceOrigin::Side { curve, .. } = face.origin else {
                 continue;
             };
-            let Some(ext) = self.features.iter().find(|f| f.id.0 == face.op).and_then(|f| f.extrude()) else {
+            let Some(ext) = self
+                .features
+                .iter()
+                .find(|f| f.id.0 == face.op)
+                .and_then(|f| f.extrude())
+            else {
                 continue;
             };
             if ext.direction.is_some() {
                 continue;
             }
             for sk_id in ext.sketches() {
-                let Some(sk) = self.features.iter().find(|f| f.id == sk_id).and_then(|f| f.sketch()) else {
+                let Some(sk) = self
+                    .features
+                    .iter()
+                    .find(|f| f.id == sk_id)
+                    .and_then(|f| f.sketch())
+                else {
                     continue;
                 };
                 let Some(plane) = sk.plane else { continue };
                 let frame = plane.frame();
                 let g = &sk.geometry;
-                let Some((_, c)) = g.curves.iter().find(|(id, _)| id.data().as_ffi() == curve) else {
+                let Some((_, c)) = g.curves.iter().find(|(id, _)| id.data().as_ffi() == curve)
+                else {
                     continue;
                 };
                 let (center, major, minor, offset) = match c.kind {
-                    CurveKind::Ellipse { center, major, minor } => (center, major, minor, 0.0),
-                    CurveKind::EllipseOffset { center, major, minor, distance } => (center, major, minor, distance),
+                    CurveKind::Ellipse {
+                        center,
+                        major,
+                        minor,
+                    } => (center, major, minor, 0.0),
+                    CurveKind::EllipseOffset {
+                        center,
+                        major,
+                        minor,
+                        distance,
+                    } => (center, major, minor, distance),
                     _ => return None,
                 };
                 let n = unit(frame.normal());
                 let h = |p: Vec3| dot(sub(p, frame.origin), n);
                 let first = *e.points.first()?;
                 let size = 1.0 + len(sub(first, frame.origin));
-                if e.points.iter().any(|p| (h(*p) - h(first)).abs() > 1e-6 * size) {
+                if e.points
+                    .iter()
+                    .any(|p| (h(*p) - h(first)).abs() > 1e-6 * size)
+                {
                     return None;
                 }
                 let w = |p: Vec2| add(frame.to_world(p), scale(n, h(first)));
@@ -534,7 +648,8 @@ impl<'a> LinkContext<'a> {
                 face,
                 index,
             } => {
-                let lines = silhouettes(self.solid_with_face(feature, &face)?, &face, frame.normal());
+                let lines =
+                    silhouettes(self.solid_with_face(feature, &face)?, &face, frame.normal());
                 let (a, b) = *lines.get(index as usize)?;
                 Some(Curve3::Line(a, b))
             }
@@ -570,14 +685,23 @@ impl<'a> LinkContext<'a> {
                             end: w(a.end()),
                         }
                     }
-                    CurveKind::Ellipse { center, major, minor } => Curve3::Ellipse {
+                    CurveKind::Ellipse {
+                        center,
+                        major,
+                        minor,
+                    } => Curve3::Ellipse {
                         center: w(g.pos(center)),
                         major: w(g.pos(major)),
                         minor,
                         normal,
                         offset: 0.0,
                     },
-                    CurveKind::EllipseOffset { center, major, minor, distance } => Curve3::Ellipse {
+                    CurveKind::EllipseOffset {
+                        center,
+                        major,
+                        minor,
+                        distance,
+                    } => Curve3::Ellipse {
                         center: w(g.pos(center)),
                         major: w(g.pos(major)),
                         minor,
@@ -585,8 +709,13 @@ impl<'a> LinkContext<'a> {
                         offset: distance,
                     },
                     // Other curves as points along them.
-                    CurveKind::Spline { .. } | CurveKind::Bezier { .. } | CurveKind::EllipseArc { .. } => {
-                        let pts: Vec<Vec3> = cadrs_sketch::hit::curve_polyline(g, curve).into_iter().map(w).collect();
+                    CurveKind::Spline { .. }
+                    | CurveKind::Bezier { .. }
+                    | CurveKind::EllipseArc { .. } => {
+                        let pts: Vec<Vec3> = cadrs_sketch::hit::curve_polyline(g, curve)
+                            .into_iter()
+                            .map(w)
+                            .collect();
                         return sampled(&pts);
                     }
                 })
@@ -600,7 +729,13 @@ impl<'a> LinkContext<'a> {
     /// projection still lies on it. `at` are points of the linked sketch geometry as the last
     /// regeneration left it (on a projected curve, or the pierced point); `pierce`: the link
     /// holds a pierced point. `None`: a lost reference.
-    pub fn resolve(&self, link: Link, frame: &PlaneFrame, at: &[Vec2], pierce: bool) -> Option<Link> {
+    pub fn resolve(
+        &self,
+        link: Link,
+        frame: &PlaneFrame,
+        at: &[Vec2],
+        pierce: bool,
+    ) -> Option<Link> {
         match link {
             Link::Edge { feature, edge } => {
                 let solid = self.solid_with_edge(feature, &edge)?;
@@ -613,16 +748,20 @@ impl<'a> LinkContext<'a> {
                     if pierce {
                         let hits = crossings(c, frame);
                         at.iter()
-                            .map(|p| hits.iter().map(|h| h.distance(*p)).fold(f64::INFINITY, f64::min))
+                            .map(|p| {
+                                hits.iter()
+                                    .map(|h| h.distance(*p))
+                                    .fold(f64::INFINITY, f64::min)
+                            })
                             .reduce(f64::max)
                     } else {
                         let shape = project(c, frame)?;
-                        at.iter().map(|p| projected_distance(&shape, *p)).reduce(|a, b| {
-                            match (a, b) {
+                        at.iter()
+                            .map(|p| projected_distance(&shape, *p))
+                            .reduce(|a, b| match (a, b) {
                                 (Some(a), Some(b)) => Some(a.max(b)),
                                 _ => None,
-                            }
-                        })?
+                            })?
                     }
                 };
                 let (i, _) = solid.resolve_edge(&edge, distance).ok()?;
@@ -658,7 +797,10 @@ impl<'a> LinkContext<'a> {
                     .iter()
                     .filter(|v| v.name.base() == base)
                     .min_by(|a, b| d(a).total_cmp(&d(b)))
-                    .map(|v| Link::Vertex { feature, vertex: v.name })
+                    .map(|v| Link::Vertex {
+                        feature,
+                        vertex: v.name,
+                    })
             }
             Link::SketchCurve { .. } | Link::Plane(_) | Link::FlatLine { .. } => Some(link),
         }
@@ -674,7 +816,13 @@ impl<'a> LinkContext<'a> {
     pub fn pierce(&self, link: Link, frame: &PlaneFrame, near: Vec2) -> Option<Vec2> {
         // A part vertex: where it is seen along the normal.
         if let Link::Vertex { feature, vertex } = link {
-            return Some(frame.to_sketch(self.solid_with_vertex(feature, &vertex)?.vertex(&vertex)?.point));
+            return Some(
+                frame.to_sketch(
+                    self.solid_with_vertex(feature, &vertex)?
+                        .vertex(&vertex)?
+                        .point,
+                ),
+            );
         }
         crossings(self.curve(link, frame)?, frame)
             .into_iter()
@@ -697,12 +845,21 @@ pub fn projected_distance(shape: &Projected, p: Vec2) -> Option<f64> {
             let spans = cadrs_sketch::spline::spans(points, closed, None, None);
             cadrs_sketch::spline::nearest(&spans, p)?.2
         }
-        Projected::EllipseArc { center, major, minor, start, end } => {
-            cadrs_sketch::EllipseArcGeom::ccw(center, major, minor, start, end).distance(p)
-        }
-        Projected::EllipseOffset { center, major, minor, distance } => {
-            cadrs_sketch::geom::EllipseGeom::new(center, major, minor).with_offset(distance).distance(p)
-        }
+        Projected::EllipseArc {
+            center,
+            major,
+            minor,
+            start,
+            end,
+        } => cadrs_sketch::EllipseArcGeom::ccw(center, major, minor, start, end).distance(p),
+        Projected::EllipseOffset {
+            center,
+            major,
+            minor,
+            distance,
+        } => cadrs_sketch::geom::EllipseGeom::new(center, major, minor)
+            .with_offset(distance)
+            .distance(p),
     })
 }
 
@@ -735,7 +892,11 @@ pub fn curve_samples(g: &Sketch, c: CurveId) -> Vec<Vec2> {
             .unwrap_or_default(),
         CurveKind::EllipseOffset { .. } => g
             .ellipse_geom(c)
-            .map(|e| (0..4).map(|k| e.point_at(k as f64 * std::f64::consts::FRAC_PI_2)).collect())
+            .map(|e| {
+                (0..4)
+                    .map(|k| e.point_at(k as f64 * std::f64::consts::FRAC_PI_2))
+                    .collect()
+            })
             .unwrap_or_default(),
         CurveKind::Spline { .. } => g.curve_points(c).iter().map(|p| g.pos(*p)).collect(),
         CurveKind::Bezier { .. } => g
@@ -822,7 +983,10 @@ pub fn imprint(solids: &[(FeatureId, &Solid)], frame: &PlaneFrame) -> Vec<Imprin
                 out.push(Imprint {
                     id: synthetic_curve(1, out.len() as u32),
                     shape,
-                    link: Some(Link::Edge { feature: feature.0, edge: e.name }),
+                    link: Some(Link::Edge {
+                        feature: feature.0,
+                        edge: e.name,
+                    }),
                 });
             }
         }

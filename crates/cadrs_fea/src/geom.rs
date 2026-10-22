@@ -20,7 +20,11 @@ pub fn dot(a: V3, b: V3) -> f64 {
 }
 #[inline]
 pub fn cross(a: V3, b: V3) -> V3 {
-    [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]]
+    [
+        a[1] * b[2] - a[2] * b[1],
+        a[2] * b[0] - a[0] * b[2],
+        a[0] * b[1] - a[1] * b[0],
+    ]
 }
 #[inline]
 pub fn len(a: V3) -> f64 {
@@ -28,7 +32,11 @@ pub fn len(a: V3) -> f64 {
 }
 #[inline]
 pub fn mid(a: V3, b: V3) -> V3 {
-    [(a[0] + b[0]) * 0.5, (a[1] + b[1]) * 0.5, (a[2] + b[2]) * 0.5]
+    [
+        (a[0] + b[0]) * 0.5,
+        (a[1] + b[1]) * 0.5,
+        (a[2] + b[2]) * 0.5,
+    ]
 }
 #[inline]
 pub fn normalize(a: V3) -> V3 {
@@ -51,7 +59,11 @@ pub fn vol6(a: V3, b: V3, c: V3, d: V3) -> f64 {
 
 #[inline]
 fn c3(p: V3) -> robust::Coord3D<f64> {
-    robust::Coord3D { x: p[0], y: p[1], z: p[2] }
+    robust::Coord3D {
+        x: p[0],
+        y: p[1],
+        z: p[2],
+    }
 }
 
 /// The exact orientation of (a, b, c, d), with the sign of [`vol6`] (robust's `orient3d` is
@@ -72,7 +84,11 @@ pub fn insphere(a: V3, b: V3, c: V3, d: V3, e: V3) -> f64 {
 /// Exact 2D orientation: positive when (a, b, c) turn counter-clockwise.
 #[inline]
 pub fn orient2(a: [f64; 2], b: [f64; 2], c: [f64; 2]) -> f64 {
-    robust::orient2d(robust::Coord { x: a[0], y: a[1] }, robust::Coord { x: b[0], y: b[1] }, robust::Coord { x: c[0], y: c[1] })
+    robust::orient2d(
+        robust::Coord { x: a[0], y: a[1] },
+        robust::Coord { x: b[0], y: b[1] },
+        robust::Coord { x: c[0], y: c[1] },
+    )
 }
 
 /// The point of triangle (a, b, c) closest to `p` (Ericson, "Real-Time Collision Detection"
@@ -150,7 +166,12 @@ mod tests {
 
     #[test]
     fn orientation_signs_agree() {
-        let (a, b, c, d) = ([0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]);
+        let (a, b, c, d) = (
+            [0.0, 0.0, 0.0],
+            [1.0, 0.0, 0.0],
+            [0.0, 1.0, 0.0],
+            [0.0, 0.0, 1.0],
+        );
         assert!(vol6(a, b, c, d) > 0.0);
         assert!(orient(a, b, c, d) > 0.0);
         assert!(orient(a, c, b, d) < 0.0);

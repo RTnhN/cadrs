@@ -58,7 +58,11 @@ impl Units {
 
     /// Convert a value in `self` units to `to` units.
     pub fn convert(self, v: f64, to: Units) -> f64 {
-        if self == to { v } else { v * self.nm_per_unit() / to.nm_per_unit() }
+        if self == to {
+            v
+        } else {
+            v * self.nm_per_unit() / to.nm_per_unit()
+        }
     }
 
     pub fn to_mm(self, v: f64) -> f64 {
@@ -444,11 +448,16 @@ impl Board {
 
     /// Board thickness in mm (0 without an outline).
     pub fn thickness_mm(&self) -> f64 {
-        self.outline.as_ref().map_or(0.0, |o| self.units.to_mm(o.thickness))
+        self.outline
+            .as_ref()
+            .map_or(0.0, |o| self.units.to_mm(o.thickness))
     }
 
     /// All placements of a package (by package name).
-    pub fn placements_for<'a>(&'a self, package: &'a str) -> impl Iterator<Item = &'a Placement> + 'a {
+    pub fn placements_for<'a>(
+        &'a self,
+        package: &'a str,
+    ) -> impl Iterator<Item = &'a Placement> + 'a {
         self.placements.iter().filter(move |p| p.package == package)
     }
 
@@ -642,7 +651,8 @@ impl Board {
                     o.min_height = None;
                 }
                 for h in &mut b.holes {
-                    h.kind.get_or_insert_with(|| HoleKind::Other("OTHER".to_string()));
+                    h.kind
+                        .get_or_insert_with(|| HoleKind::Other("OTHER".to_string()));
                 }
                 for p in &mut b.placements {
                     if p.status == Status::Fixed {
@@ -684,12 +694,17 @@ impl Package {
 
 impl Library {
     pub fn new(version: IdfVersion) -> Library {
-        Library { header: Header::cadrs(FileType::Library, version, DEFAULT_DATE), packages: vec![] }
+        Library {
+            header: Header::cadrs(FileType::Library, version, DEFAULT_DATE),
+            packages: vec![],
+        }
     }
 
     /// The package with this geometry name and part number.
     pub fn package(&self, name: &str, part_number: &str) -> Option<&Package> {
-        self.packages.iter().find(|p| p.name == name && p.part_number == part_number)
+        self.packages
+            .iter()
+            .find(|p| p.name == name && p.part_number == part_number)
     }
 
     /// See [`Board::for_version`]: 2.0 drops PROP records and circles; 3.0 converts TNM to MM.

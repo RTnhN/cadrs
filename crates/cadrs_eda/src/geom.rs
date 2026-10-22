@@ -6,7 +6,9 @@ use std::f64::consts::TAU;
 
 /// The centre and radius of the circle through `a`, `b` and `c`; `None` when they are in line.
 pub fn circle_through(a: Pt, b: Pt, c: Pt) -> Option<([f64; 2], f64)> {
-    let (ax, ay, bx, by, cx, cy) = (a.x as f64, a.y as f64, b.x as f64, b.y as f64, c.x as f64, c.y as f64);
+    let (ax, ay, bx, by, cx, cy) = (
+        a.x as f64, a.y as f64, b.x as f64, b.y as f64, c.x as f64, c.y as f64,
+    );
     let d = 2.0 * (ax * (by - cy) + bx * (cy - ay) + cx * (ay - by));
     if d.abs() < 1e-6 {
         return None;
@@ -24,7 +26,11 @@ pub fn arc_params(start: Pt, mid: Pt, end: Pt) -> Option<([f64; 2], f64, f64, f6
     let ang = |p: Pt| (p.y as f64 - c[1]).atan2(p.x as f64 - c[0]);
     let (a0, am, a1) = (ang(start), ang(mid), ang(end));
     let ccw = |from: f64, to: f64| (to - from).rem_euclid(TAU);
-    let sweep = if ccw(a0, am) <= ccw(a0, a1) { ccw(a0, a1) } else { ccw(a0, a1) - TAU };
+    let sweep = if ccw(a0, am) <= ccw(a0, a1) {
+        ccw(a0, a1)
+    } else {
+        ccw(a0, a1) - TAU
+    };
     Some((c, r, a0, sweep))
 }
 
@@ -73,7 +79,9 @@ pub fn circle_points(center: Pt, radius: Nm, max_err: Nm) -> Vec<[f64; 2]> {
 /// A cubic Bézier as points.
 pub fn bezier_points(p: [Pt; 4], max_err: Nm) -> Vec<[f64; 2]> {
     let q = p.map(|p| [p.x as f64, p.y as f64]);
-    let hull = (0..3).map(|i| (q[i + 1][0] - q[i][0]).hypot(q[i + 1][1] - q[i][1])).sum::<f64>();
+    let hull = (0..3)
+        .map(|i| (q[i + 1][0] - q[i][0]).hypot(q[i + 1][1] - q[i][1]))
+        .sum::<f64>();
     let n = ((hull / (max_err.max(1) as f64 * 8.0)).sqrt().ceil() as usize).clamp(2, 256);
     (0..=n)
         .map(|i| {
@@ -107,6 +115,9 @@ mod tests {
 
     #[test]
     fn line_when_in_line() {
-        assert_eq!(arc_points(Pt::mm(0.0, 0.0), Pt::mm(1.0, 0.0), Pt::mm(2.0, 0.0), 1000).len(), 2);
+        assert_eq!(
+            arc_points(Pt::mm(0.0, 0.0), Pt::mm(1.0, 0.0), Pt::mm(2.0, 0.0), 1000).len(),
+            2
+        );
     }
 }

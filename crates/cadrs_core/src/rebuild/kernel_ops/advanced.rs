@@ -5,14 +5,15 @@ use super::applied::edge_ids;
 use super::*;
 use cadrs_kernel::naming::{self, BodyNames};
 use cadrs_kernel::{
-    Curve2, ExtrudeEnd, ExtrudeSpec, Kernel, LoftEnd, LoftSection, LoftSpec, PathCurve, SplitTool, SweepControl,
-    SweepSpec,
+    Curve2, ExtrudeEnd, ExtrudeSpec, Kernel, LoftEnd, LoftSection, LoftSpec, PathCurve, SplitTool,
+    SweepControl, SweepSpec,
 };
 use cadrs_sketch::{PlaneFrame, PlaneRef, Sketch};
 use nalgebra::{Point2, Point3, Unit, Vector3};
 
 use crate::advanced::{
-    LoftCondition, LoftFeature, LoftProfile, PathRef, ProfileControl, SplitFeature, SplitToolRef, SplitType, SweepFeature,
+    LoftCondition, LoftFeature, LoftProfile, PathRef, ProfileControl, SplitFeature, SplitToolRef,
+    SplitType, SweepFeature,
 };
 use crate::plane::{PlaneEntity, PlaneFeature, RefGeom};
 
@@ -41,20 +42,46 @@ pub(super) fn sketch_curves2(g: &Sketch, id: CurveId) -> Option<Vec<Curve2>> {
     if let CurveKind::Spline { .. } = g.curves.get(id)?.kind {
         let spans = g.spline_spans(id)?;
         return (!spans.is_empty()).then(|| {
-            spans.iter().map(|b| Curve2::Bezier { poles: b.map(p), source }).collect()
+            spans
+                .iter()
+                .map(|b| Curve2::Bezier {
+                    poles: b.map(p),
+                    source,
+                })
+                .collect()
         });
     }
     Some(vec![match g.curves.get(id)?.kind {
-        CurveKind::Line { a, b } => Curve2::Line { a: p(g.pos(a)), b: p(g.pos(b)), source },
+        CurveKind::Line { a, b } => Curve2::Line {
+            a: p(g.pos(a)),
+            b: p(g.pos(b)),
+            source,
+        },
         CurveKind::Arc { .. } => {
             let a = g.arc_geom(id)?;
-            Curve2::Arc { center: p(a.center), radius: a.radius, start_angle: a.start_angle, sweep: a.sweep, source }
+            Curve2::Arc {
+                center: p(a.center),
+                radius: a.radius,
+                start_angle: a.start_angle,
+                sweep: a.sweep,
+                source,
+            }
         }
-        CurveKind::Circle { center, radius } => Curve2::Circle { center: p(g.pos(center)), radius, source },
+        CurveKind::Circle { center, radius } => Curve2::Circle {
+            center: p(g.pos(center)),
+            radius,
+            source,
+        },
         CurveKind::Ellipse { .. } | CurveKind::EllipseOffset { .. } => {
             let e = g.ellipse_geom(id)?;
             if e.offset == 0.0 {
-                Curve2::Ellipse { center: p(e.center), major_radius: e.major(), minor_radius: e.minor, rotation: e.u().angle(), source }
+                Curve2::Ellipse {
+                    center: p(e.center),
+                    major_radius: e.major(),
+                    minor_radius: e.minor,
+                    rotation: e.u().angle(),
+                    source,
+                }
             } else {
                 Curve2::OffsetEllipseArc {
                     center: p(e.center),
@@ -80,7 +107,10 @@ pub(super) fn sketch_curves2(g: &Sketch, id: CurveId) -> Option<Vec<Curve2>> {
                 source,
             }
         }
-        CurveKind::Bezier { .. } => Curve2::Bezier { poles: g.bezier_geom(id)?.p.map(p), source },
+        CurveKind::Bezier { .. } => Curve2::Bezier {
+            poles: g.bezier_geom(id)?.p.map(p),
+            source,
+        },
         CurveKind::Spline { .. } => return None,
     }])
 }
@@ -94,10 +124,13 @@ fn sketch_of(before: &[Feature], sketch: FeatureId) -> Option<(&Sketch, PlaneFra
 /// The point of a vertex reference (by name, else the vertex still at the stored point).
 fn vertex_point(state: &State, v: &crate::document::VertexRef) -> Option<[f64; 3]> {
     let solid = state.part(v.part).map(|p| p.part.solid.clone())?;
-    solid
-        .vertex(&v.vertex)
-        .map(|x| x.point)
-        .or_else(|| solid.vertices.iter().find(|x| crate::solid::dist3(x.point, v.point) < 1e-6).map(|x| x.point))
+    solid.vertex(&v.vertex).map(|x| x.point).or_else(|| {
+        solid
+            .vertices
+            .iter()
+            .find(|x| crate::solid::dist3(x.point, v.point) < 1e-6)
+            .map(|x| x.point)
+    })
 }
 
 impl Rebuilder {
@@ -105,7 +138,12 @@ impl Rebuilder {
     // Plane
 
     /// What a Plane feature's entity is geometrically.
-    fn ref_geom(&self, before: &[Feature], state: &State, e: &PlaneEntity) -> Result<RefGeom, String> {
+    fn ref_geom(
+        &self,
+        before: &[Feature],
+        state: &State,
+        e: &PlaneEntity,
+    ) -> Result<RefGeom, String> {
         let lost = || "A selected entity no longer exists".to_string();
         Ok(match e {
             PlaneEntity::Origin => RefGeom::Point([0.0; 3]),
@@ -118,17 +156,30 @@ impl Rebuilder {
                 // A cylindrical or conical face (the Tangent type).
                 let body = part.body.ok_or_else(|| super::super::no_body(part))?;
                 let infos = self.kernel.faces(body).map_err(|e| e.to_string())?;
-                let info = ids.iter().find_map(|id| infos.iter().find(|i| i.id == *id)).ok_or_else(lost)?;
-                let axis = info.axis.ok_or("Select a planar, cylindrical or conical face")?;
-                let (c, a) = ([axis.origin.x, axis.origin.y, axis.origin.z], [axis.dir.x, axis.dir.y, axis.dir.z]);
+                let info = ids
+                    .iter()
+                    .find_map(|id| infos.iter().find(|i| i.id == *id))
+                    .ok_or_else(lost)?;
+                let axis = info
+                    .axis
+                    .ok_or("Select a planar, cylindrical or conical face")?;
+                let (c, a) = (
+                    [axis.origin.x, axis.origin.y, axis.origin.z],
+                    [axis.dir.x, axis.dir.y, axis.dir.z],
+                );
                 match info.kind {
-                    cadrs_kernel::SurfaceKind::Cylinder => {
-                        RefGeom::Cone { point: c, axis: a, radius: info.radius.ok_or_else(lost)?, slope: 0.0 }
-                    }
+                    cadrs_kernel::SurfaceKind::Cylinder => RefGeom::Cone {
+                        point: c,
+                        axis: a,
+                        radius: info.radius.ok_or_else(lost)?,
+                        slope: 0.0,
+                    },
                     cadrs_kernel::SurfaceKind::Cone => {
                         // The radius along the axis, fitted to the face's mesh: r = r0 + k·h.
                         let solid = &part.part.solid;
-                        let (i, _) = solid.resolve_face(&f.face, None, Some(f.seed)).map_err(|_| lost())?;
+                        let (i, _) = solid
+                            .resolve_face(&f.face, None, Some(f.seed))
+                            .map_err(|_| lost())?;
                         let face = &solid.faces[i];
                         let (mut n, mut sh, mut sr, mut shh, mut shr) = (0.0, 0.0, 0.0, 0.0, 0.0);
                         for t in face.first_triangle..face.first_triangle + face.triangle_count {
@@ -150,7 +201,12 @@ impl Rebuilder {
                             return Err(lost());
                         }
                         let slope = (n * shr - sh * sr) / den;
-                        RefGeom::Cone { point: c, axis: a, radius: (sr - slope * sh) / n, slope }
+                        RefGeom::Cone {
+                            point: c,
+                            axis: a,
+                            radius: (sr - slope * sh) / n,
+                            slope,
+                        }
                     }
                     _ => return Err("Select a planar, cylindrical or conical face".into()),
                 }
@@ -172,7 +228,10 @@ impl Rebuilder {
                         if l < 1e-12 {
                             return Err(lost());
                         }
-                        RefGeom::Line { point: pa, dir: [d[0] / l, d[1] / l, d[2] / l] }
+                        RefGeom::Line {
+                            point: pa,
+                            dir: [d[0] / l, d[1] / l, d[2] / l],
+                        }
                     }
                     CurveKind::Circle { center, radius } => RefGeom::Circle {
                         center: w(g.pos(center)),
@@ -205,18 +264,31 @@ impl Rebuilder {
                 let part = state
                     .part(r.part)
                     .filter(|p| p.part.solid.edge(&r.edge).is_some())
-                    .or_else(|| state.parts.iter().find(|p| p.part.solid.edge(&r.edge).is_some()))
+                    .or_else(|| {
+                        state
+                            .parts
+                            .iter()
+                            .find(|p| p.part.solid.edge(&r.edge).is_some())
+                    })
                     .ok_or_else(lost)?;
                 let edge = part.part.solid.edge(&r.edge).ok_or_else(lost)?;
                 // The kernel's exact curve where it has one.
                 if let Some(c) = edge.circle {
-                    return Ok(RefGeom::Circle { center: c.center, normal: c.normal, radius: c.radius, start: edge.points[0] });
+                    return Ok(RefGeom::Circle {
+                        center: c.center,
+                        normal: c.normal,
+                        radius: c.radius,
+                        start: edge.points[0],
+                    });
                 }
                 match crate::links::edge_curve(edge) {
                     Some(crate::links::Curve3::Line(a, b)) => {
                         let d = crate::solid::sub3(b, a);
                         let l = crate::solid::dot3(d, d).sqrt().max(1e-300);
-                        RefGeom::Line { point: a, dir: [d[0] / l, d[1] / l, d[2] / l] }
+                        RefGeom::Line {
+                            point: a,
+                            dir: [d[0] / l, d[1] / l, d[2] / l],
+                        }
                     }
                     _ => RefGeom::Curve(edge.points.clone()),
                 }
@@ -225,11 +297,21 @@ impl Rebuilder {
     }
 
     /// The Plane feature (PS12.2): its frame from its entities.
-    pub(in crate::rebuild) fn plane(&mut self, before: &[Feature], id: FeatureId, x: &PlaneFeature, state: &Arc<State>) -> Result<Output, String> {
+    pub(in crate::rebuild) fn plane(
+        &mut self,
+        before: &[Feature],
+        id: FeatureId,
+        x: &PlaneFeature,
+        state: &Arc<State>,
+    ) -> Result<Output, String> {
         if let Some(p) = x.problem() {
             return Err(p.into());
         }
-        let geoms = x.entities.iter().map(|e| self.ref_geom(before, state, e)).collect::<Result<Vec<_>, _>>()?;
+        let geoms = x
+            .entities
+            .iter()
+            .map(|e| self.ref_geom(before, state, e))
+            .collect::<Result<Vec<_>, _>>()?;
         let frame = crate::plane::frame(x, &geoms)?;
         let mut next = (**state).clone();
         next.planes.insert(id, frame);
@@ -251,7 +333,12 @@ impl Rebuilder {
     // Sweep
 
     /// A sweep path's curves as kernel path curves.
-    fn path_curves(&self, before: &[Feature], state: &State, path: &[PathRef]) -> Result<Vec<PathCurve>, String> {
+    fn path_curves(
+        &self,
+        before: &[Feature],
+        state: &State,
+        path: &[PathRef],
+    ) -> Result<Vec<PathCurve>, String> {
         let lost = || "A path curve no longer exists".to_string();
         let mut out = Vec::new();
         for p in path {
@@ -266,13 +353,19 @@ impl Rebuilder {
                 PathRef::SketchCurve { sketch, curve } => {
                     let (g, frame) = sketch_of(before, *sketch).ok_or_else(lost)?;
                     for c in sketch_curves2(g, *curve).ok_or_else(lost)? {
-                        out.push(PathCurve::Sketch { plane: kernel_plane(&frame), curve: c });
+                        out.push(PathCurve::Sketch {
+                            plane: kernel_plane(&frame),
+                            curve: c,
+                        });
                     }
                 }
                 PathRef::Curve(f) => {
                     let h = state.curves.get(f).ok_or_else(lost)?;
                     for (poles, weights) in h.beziers() {
-                        out.push(PathCurve::Bezier3 { poles: poles.iter().map(|p| Point3::from(*p)).collect(), weights });
+                        out.push(PathCurve::Bezier3 {
+                            poles: poles.iter().map(|p| Point3::from(*p)).collect(),
+                            weights,
+                        });
                     }
                 }
                 PathRef::Sketch(sketch) => {
@@ -282,7 +375,10 @@ impl Rebuilder {
                             continue;
                         }
                         for c in sketch_curves2(g, cid).unwrap_or_default() {
-                            out.push(PathCurve::Sketch { plane: kernel_plane(&frame), curve: c });
+                            out.push(PathCurve::Sketch {
+                                plane: kernel_plane(&frame),
+                                curve: c,
+                            });
                         }
                     }
                 }
@@ -295,24 +391,47 @@ impl Rebuilder {
     }
 
     /// Names a new body the feature `op` made (its inputs: the parts before it).
-    pub(super) fn name_new(&self, state: &State, op: cadrs_kernel::OpId, r: &OpResult) -> cadrs_kernel::Result<(BodyId, BodyNames)> {
+    pub(super) fn name_new(
+        &self,
+        state: &State,
+        op: cadrs_kernel::OpId,
+        r: &OpResult,
+    ) -> cadrs_kernel::Result<(BodyId, BodyNames)> {
         let body = r.bodies[0];
-        let inputs: Vec<(BodyId, &BodyNames)> = state.parts.iter().filter_map(|p| Some((p.body?, &*p.names))).collect();
-        Ok((body, naming::name_body(&self.kernel, body, op, &r.history, &inputs)?))
+        let inputs: Vec<(BodyId, &BodyNames)> = state
+            .parts
+            .iter()
+            .filter_map(|p| Some((p.body?, &*p.names)))
+            .collect();
+        Ok((
+            body,
+            naming::name_body(&self.kernel, body, op, &r.history, &inputs)?,
+        ))
     }
 
     /// Fuses the bodies a feature made into one (releasing them).
-    fn fuse_made(&mut self, op: cadrs_kernel::OpId, what: &str, mut made: Vec<(BodyId, BodyNames)>) -> Result<(BodyId, BodyNames), String> {
+    fn fuse_made(
+        &mut self,
+        op: cadrs_kernel::OpId,
+        what: &str,
+        mut made: Vec<(BodyId, BodyNames)>,
+    ) -> Result<(BodyId, BodyNames), String> {
         if made.len() == 1 {
             return Ok(made.pop().expect("one"));
         }
         let (first_b, _) = made[0];
         let rest: Vec<BodyId> = made[1..].iter().map(|(b, _)| *b).collect();
-        let merged = self.kernel.boolean(BoolOp::Union, first_b, &rest).and_then(|res| {
-            let body = res.bodies[0];
-            let inputs: Vec<(BodyId, &BodyNames)> = made.iter().map(|(b, n)| (*b, n)).collect();
-            Ok((body, naming::name_body(&self.kernel, body, op, &res.history, &inputs)?))
-        });
+        let merged = self
+            .kernel
+            .boolean(BoolOp::Union, first_b, &rest)
+            .and_then(|res| {
+                let body = res.bodies[0];
+                let inputs: Vec<(BodyId, &BodyNames)> = made.iter().map(|(b, n)| (*b, n)).collect();
+                Ok((
+                    body,
+                    naming::name_body(&self.kernel, body, op, &res.history, &inputs)?,
+                ))
+            });
         for (b, _) in &made {
             self.kernel.release(*b);
         }
@@ -321,7 +440,13 @@ impl Rebuilder {
 
     /// The Sweep feature (PS19): each profile group swept along the path, fused, then combined
     /// with the parts like an extrude.
-    pub(in crate::rebuild) fn sweep(&mut self, before: &[Feature], id: FeatureId, x: &SweepFeature, state: &Arc<State>) -> Result<Output, String> {
+    pub(in crate::rebuild) fn sweep(
+        &mut self,
+        before: &[Feature],
+        id: FeatureId,
+        x: &SweepFeature,
+        state: &Arc<State>,
+    ) -> Result<Output, String> {
         if let Some(p) = x.problem() {
             return Err(p.into());
         }
@@ -336,7 +461,10 @@ impl Rebuilder {
             ProfileControl::None => SweepControl::None,
             ProfileControl::KeepOrientation => SweepControl::KeepOrientation,
             ProfileControl::LockDirection => {
-                let d = x.lock_direction.as_ref().ok_or("Select a direction to lock")?;
+                let d = x
+                    .lock_direction
+                    .as_ref()
+                    .ok_or("Select a direction to lock")?;
                 SweepControl::LockDirection(self.direction(before, state, d)?)
             }
         };
@@ -365,8 +493,17 @@ impl Rebuilder {
         }
         let mut made: Vec<(BodyId, BodyNames)> = Vec::new();
         for (profile, inputs) in &sweeps {
-            let spec = SweepSpec { body: body_kind, path: path.clone(), control, faces: inputs.clone() };
-            match self.kernel.sweep_with(profile, &spec).and_then(|r| self.name_new(state, op, &r)) {
+            let spec = SweepSpec {
+                body: body_kind,
+                path: path.clone(),
+                control,
+                faces: inputs.clone(),
+            };
+            match self
+                .kernel
+                .sweep_with(profile, &spec)
+                .and_then(|r| self.name_new(state, op, &r))
+            {
                 Ok(b) => made.push(b),
                 Err(err) => {
                     for (b, _) in made {
@@ -377,12 +514,19 @@ impl Rebuilder {
             }
         }
         let tool = self.fuse_made(op, "Sweep", made)?;
-        let merge = Merge { op: x.op, merge_all: x.merge_all, scope: &x.merge_scope, surface: x.body == BodyType::Surface };
+        let merge = Merge {
+            op: x.op,
+            merge_all: x.merge_all,
+            scope: &x.merge_scope,
+            surface: x.body == BodyType::Surface,
+        };
         let geoms = state.geoms.clone();
         self.combine(id, &merge, tool, state, geoms).map(|mut o| {
             // PS11.1: the rest is swept; a warning (Onshape's yellow), as the extrude's.
             if missing > 0 {
-                o.warning = o.warning.or(Some("A selected sketch region no longer exists".into()));
+                o.warning = o
+                    .warning
+                    .or(Some("A selected sketch region no longer exists".into()));
             }
             o
         })
@@ -392,7 +536,12 @@ impl Rebuilder {
     // Loft
 
     /// The kernel section of a loft profile.
-    fn loft_section(&self, before: &[Feature], state: &State, p: &LoftProfile) -> Result<LoftSection, String> {
+    fn loft_section(
+        &self,
+        before: &[Feature],
+        state: &State,
+        p: &LoftProfile,
+    ) -> Result<LoftSection, String> {
         let lost = || "A loft profile no longer exists".to_string();
         Ok(match p {
             LoftProfile::Regions { sketch, regions } => {
@@ -422,12 +571,20 @@ impl Rebuilder {
                 let q = frame.to_world(g.points.get(*point).ok_or_else(lost)?.pos);
                 LoftSection::Point(Point3::from(q))
             }
-            LoftProfile::Vertex(v) => LoftSection::Point(Point3::from(vertex_point(state, v).ok_or_else(lost)?)),
+            LoftProfile::Vertex(v) => {
+                LoftSection::Point(Point3::from(vertex_point(state, v).ok_or_else(lost)?))
+            }
         })
     }
 
     /// The Loft feature (PS20).
-    pub(in crate::rebuild) fn loft(&mut self, before: &[Feature], id: FeatureId, x: &LoftFeature, state: &Arc<State>) -> Result<Output, String> {
+    pub(in crate::rebuild) fn loft(
+        &mut self,
+        before: &[Feature],
+        id: FeatureId,
+        x: &LoftFeature,
+        state: &Arc<State>,
+    ) -> Result<Output, String> {
         if let Some(p) = x.problem() {
             return Err(p.into());
         }
@@ -438,20 +595,34 @@ impl Rebuilder {
             .collect::<Result<Vec<_>, _>>()?;
         // The picked directions (P3.11), resolved as the sweep's locked direction is.
         let dir = |d: &Option<crate::document::DirectionRef>| -> Result<[f64; 3], String> {
-            let d = d.as_ref().ok_or("Select a direction for the profile condition")?;
+            let d = d
+                .as_ref()
+                .ok_or("Select a direction for the profile condition")?;
             let v = self.direction(before, state, d)?;
             Ok([v.x, v.y, v.z])
         };
-        let start_dir = if x.start.takes_direction() { Some(dir(&x.start_direction)?) } else { None };
-        let end_dir = if x.end.takes_direction() { Some(dir(&x.end_direction)?) } else { None };
+        let start_dir = if x.start.takes_direction() {
+            Some(dir(&x.start_direction)?)
+        } else {
+            None
+        };
+        let end_dir = if x.end.takes_direction() {
+            Some(dir(&x.end_direction)?)
+        } else {
+            None
+        };
         let end = |c: LoftCondition, m: f64, d: Option<[f64; 3]>| LoftEnd {
             condition: match c {
                 LoftCondition::NormalToProfile => cadrs_kernel::LoftCondition::NormalToProfile,
                 LoftCondition::TangentToProfile => cadrs_kernel::LoftCondition::TangentToProfile,
                 LoftCondition::MatchTangent => cadrs_kernel::LoftCondition::MatchTangent,
                 LoftCondition::MatchCurvature => cadrs_kernel::LoftCondition::MatchCurvature,
-                LoftCondition::NormalDirection => cadrs_kernel::LoftCondition::NormalDirection(d.unwrap_or([0.0, 0.0, 1.0])),
-                LoftCondition::TangentDirection => cadrs_kernel::LoftCondition::TangentDirection(d.unwrap_or([0.0, 0.0, 1.0])),
+                LoftCondition::NormalDirection => {
+                    cadrs_kernel::LoftCondition::NormalDirection(d.unwrap_or([0.0, 0.0, 1.0]))
+                }
+                LoftCondition::TangentDirection => {
+                    cadrs_kernel::LoftCondition::TangentDirection(d.unwrap_or([0.0, 0.0, 1.0]))
+                }
                 LoftCondition::None => cadrs_kernel::LoftCondition::Default,
             },
             magnitude: m,
@@ -492,11 +663,20 @@ impl Rebuilder {
                 if n < 1e-12 {
                     continue;
                 }
-                let s = if d[0] * along[0] + d[1] * along[1] + d[2] * along[2] < 0.0 { -1.0 / n } else { 1.0 / n };
+                let s = if d[0] * along[0] + d[1] * along[1] + d[2] * along[2] < 0.0 {
+                    -1.0 / n
+                } else {
+                    1.0 / n
+                };
                 arrows.push((c, [d[0] * s, d[1] * s, d[2] * s]));
             }
         }
-        let merge = Merge { op: x.op, merge_all: x.merge_all, scope: &x.merge_scope, surface: x.body == BodyType::Surface };
+        let merge = Merge {
+            op: x.op,
+            merge_all: x.merge_all,
+            scope: &x.merge_scope,
+            surface: x.body == BodyType::Surface,
+        };
         let geoms = state.geoms.clone();
         self.combine(id, &merge, tool, state, geoms).map(|mut o| {
             o.arrows = arrows;
@@ -516,21 +696,34 @@ impl Rebuilder {
                     .iter()
                     .map(|c| match *c {
                         cadrs_kernel::Curve2::Circle { center, .. } => center,
-                        cadrs_kernel::Curve2::Arc { center, sweep, .. } if sweep.abs() > std::f64::consts::PI => center,
+                        cadrs_kernel::Curve2::Arc { center, sweep, .. }
+                            if sweep.abs() > std::f64::consts::PI =>
+                        {
+                            center
+                        }
                         ref other => other.start(),
                     })
                     .collect();
                 if pts.is_empty() {
                     return None;
                 }
-                let m = pts.iter().fold(nalgebra::Vector2::zeros(), |acc, q| acc + q.coords) / pts.len() as f64;
+                let m = pts
+                    .iter()
+                    .fold(nalgebra::Vector2::zeros(), |acc, q| acc + q.coords)
+                    / pts.len() as f64;
                 let pl = &p.plane;
                 let y = pl.normal.cross(&pl.x_dir);
                 let w = pl.origin + pl.x_dir.into_inner() * m.x + y * m.y;
                 Some([w.x, w.y, w.z])
             }
             LoftSection::Face(f) => {
-                let c = self.kernel.faces(f.body).ok()?.into_iter().find(|i| i.id == f.face)?.center;
+                let c = self
+                    .kernel
+                    .faces(f.body)
+                    .ok()?
+                    .into_iter()
+                    .find(|i| i.id == f.face)?
+                    .center;
                 Some([c.x, c.y, c.z])
             }
             LoftSection::Point(q) => Some([q.x, q.y, q.z]),
@@ -541,7 +734,13 @@ impl Rebuilder {
     // Split
 
     /// The Split feature (PS18.5): each part split by the tool; its largest piece keeps it.
-    pub(in crate::rebuild) fn split_parts(&mut self, before: &[Feature], id: FeatureId, x: &SplitFeature, state: &Arc<State>) -> Result<Output, String> {
+    pub(in crate::rebuild) fn split_parts(
+        &mut self,
+        before: &[Feature],
+        id: FeatureId,
+        x: &SplitFeature,
+        state: &Arc<State>,
+    ) -> Result<Output, String> {
         if let Some(p) = x.problem() {
             return Err(p.into());
         }
@@ -553,14 +752,19 @@ impl Rebuilder {
             SplitType::Part => {
                 for p in &x.parts {
                     let part = state.part(*p).ok_or("A selected part no longer exists")?;
-                    let Some(body) = self.body_or_skip(part) else { continue };
+                    let Some(body) = self.body_or_skip(part) else {
+                        continue;
+                    };
                     bodies.push((*p, body));
                 }
             }
             SplitType::Face => {
                 for f in &x.faces {
-                    let (part, ids) = face_ids(state, f).ok_or("A face to split no longer exists")?;
-                    let Some(body) = self.body_or_skip(part) else { continue };
+                    let (part, ids) =
+                        face_ids(state, f).ok_or("A face to split no longer exists")?;
+                    let Some(body) = self.body_or_skip(part) else {
+                        continue;
+                    };
                     match bodies.iter().position(|(p, _)| *p == part.part.id) {
                         Some(i) => faces[i].extend(ids),
                         None => {
@@ -575,13 +779,18 @@ impl Rebuilder {
         // A sheet made for a sketch tool, released at the end.
         let mut sheet: Option<BodyId> = None;
         let tool = match x.tool.as_ref().ok_or_else(lost)? {
-            SplitToolRef::Plane(p) => SplitTool::Plane(kernel_plane(&plane_of(state, p).ok_or_else(lost)?)),
+            SplitToolRef::Plane(p) => {
+                SplitTool::Plane(kernel_plane(&plane_of(state, p).ok_or_else(lost)?))
+            }
             SplitToolRef::Face(f) => {
                 let (part, ids) = face_ids(state, f).ok_or_else(lost)?;
                 // Trim to face boundaries: a planar face splits only within its edges.
                 match face_frame(part, f).filter(|_| !x.trim) {
                     Some(frame) => SplitTool::Plane(kernel_plane(&frame)),
-                    None => SplitTool::Face { body: part.body.ok_or_else(|| super::super::no_body(part))?, face: *ids.first().ok_or_else(lost)? },
+                    None => SplitTool::Face {
+                        body: part.body.ok_or_else(|| super::super::no_body(part))?,
+                        face: *ids.first().ok_or_else(lost)?,
+                    },
                 }
             }
             SplitToolRef::Sketch(s) => {
@@ -599,7 +808,10 @@ impl Rebuilder {
                     scene: bodies.iter().map(|(_, b)| *b).collect(),
                     faces: Vec::new(),
                 };
-                let r = self.kernel.extrude_with(&profile, &spec).map_err(|e| format!("Split failed: {e}"))?;
+                let r = self
+                    .kernel
+                    .extrude_with(&profile, &spec)
+                    .map_err(|e| format!("Split failed: {e}"))?;
                 sheet = Some(r.bodies[0]);
                 SplitTool::Body(r.bodies[0])
             }
@@ -628,12 +840,15 @@ impl Rebuilder {
                 |this, _, body| this.kernel.split(body, &tool, source),
                 |this, body| match side {
                     None => true,
-                    Some((o, n)) => this.kernel.mass_properties(body).is_ok_and(|m| (m.center_of_mass - o).dot(&n) > 0.0),
+                    Some((o, n)) => this
+                        .kernel
+                        .mass_properties(body)
+                        .is_ok_and(|m| (m.center_of_mass - o).dot(&n) > 0.0),
                 },
             ),
-            SplitType::Face => {
-                self.per_part(id, "Split", state, bodies, |this, i, body| this.kernel.split_faces(body, &faces[i], &tool))
-            }
+            SplitType::Face => self.per_part(id, "Split", state, bodies, |this, i, body| {
+                this.kernel.split_faces(body, &faces[i], &tool)
+            }),
         };
         if let Some(b) = sheet {
             self.kernel.release(b);
@@ -643,7 +858,9 @@ impl Rebuilder {
         if let Some(SplitToolRef::Face(f)) = &x.tool
             && !x.keep_tools
             && !x.parts.contains(&f.part)
-            && state.part(f.part).is_some_and(|p| p.part.kind == crate::parts::PartKind::Surface)
+            && state
+                .part(f.part)
+                .is_some_and(|p| p.part.kind == crate::parts::PartKind::Surface)
         {
             let mut next = (*out.state).clone();
             next.parts.retain(|p| p.part.id != f.part);
@@ -667,17 +884,62 @@ fn grown(p: &cadrs_kernel::Profile, k: f64) -> cadrs_kernel::Profile {
         return p.clone();
     }
     let n = pts.len() as f64;
-    let m = Point2::new(pts.iter().map(|q| q.x).sum::<f64>() / n, pts.iter().map(|q| q.y).sum::<f64>() / n);
+    let m = Point2::new(
+        pts.iter().map(|q| q.x).sum::<f64>() / n,
+        pts.iter().map(|q| q.y).sum::<f64>() / n,
+    );
     let f = 1.0 + k;
     let sp = |q: Point2<f64>| m + (q - m) * f;
     let sc = |c: &Curve2| match c.clone() {
-        Curve2::Line { a, b, source } => Curve2::Line { a: sp(a), b: sp(b), source },
-        Curve2::Arc { center, radius, start_angle, sweep, source } => Curve2::Arc { center: sp(center), radius: radius * f, start_angle, sweep, source },
-        Curve2::Circle { center, radius, source } => Curve2::Circle { center: sp(center), radius: radius * f, source },
-        Curve2::Ellipse { center, major_radius, minor_radius, rotation, source } => {
-            Curve2::Ellipse { center: sp(center), major_radius: major_radius * f, minor_radius: minor_radius * f, rotation, source }
-        }
-        Curve2::EllipseArc { center, major_radius, minor_radius, rotation, start, sweep, source } => Curve2::EllipseArc {
+        Curve2::Line { a, b, source } => Curve2::Line {
+            a: sp(a),
+            b: sp(b),
+            source,
+        },
+        Curve2::Arc {
+            center,
+            radius,
+            start_angle,
+            sweep,
+            source,
+        } => Curve2::Arc {
+            center: sp(center),
+            radius: radius * f,
+            start_angle,
+            sweep,
+            source,
+        },
+        Curve2::Circle {
+            center,
+            radius,
+            source,
+        } => Curve2::Circle {
+            center: sp(center),
+            radius: radius * f,
+            source,
+        },
+        Curve2::Ellipse {
+            center,
+            major_radius,
+            minor_radius,
+            rotation,
+            source,
+        } => Curve2::Ellipse {
+            center: sp(center),
+            major_radius: major_radius * f,
+            minor_radius: minor_radius * f,
+            rotation,
+            source,
+        },
+        Curve2::EllipseArc {
+            center,
+            major_radius,
+            minor_radius,
+            rotation,
+            start,
+            sweep,
+            source,
+        } => Curve2::EllipseArc {
             center: sp(center),
             major_radius: major_radius * f,
             minor_radius: minor_radius * f,
@@ -686,7 +948,16 @@ fn grown(p: &cadrs_kernel::Profile, k: f64) -> cadrs_kernel::Profile {
             sweep,
             source,
         },
-        Curve2::OffsetEllipseArc { center, major_radius, minor_radius, rotation, start, sweep, offset, source } => Curve2::OffsetEllipseArc {
+        Curve2::OffsetEllipseArc {
+            center,
+            major_radius,
+            minor_radius,
+            rotation,
+            start,
+            sweep,
+            offset,
+            source,
+        } => Curve2::OffsetEllipseArc {
             center: sp(center),
             major_radius: major_radius * f,
             minor_radius: minor_radius * f,
@@ -696,12 +967,32 @@ fn grown(p: &cadrs_kernel::Profile, k: f64) -> cadrs_kernel::Profile {
             offset: offset * f,
             source,
         },
-        Curve2::Bezier { poles, source } => Curve2::Bezier { poles: poles.map(sp), source },
+        Curve2::Bezier { poles, source } => Curve2::Bezier {
+            poles: poles.map(sp),
+            source,
+        },
     };
-    let lp = |l: &cadrs_kernel::Loop| cadrs_kernel::Loop { curves: l.curves.iter().map(sc).collect() };
+    let lp = |l: &cadrs_kernel::Loop| cadrs_kernel::Loop {
+        curves: l.curves.iter().map(sc).collect(),
+    };
     cadrs_kernel::Profile {
         plane: p.plane,
-        regions: p.regions.iter().map(|r| cadrs_kernel::Region { outer: lp(&r.outer), holes: r.holes.iter().map(lp).collect(), source: r.source }).collect(),
-        chains: p.chains.iter().map(|c| cadrs_kernel::Chain { curves: c.curves.iter().map(sc).collect(), source: c.source }).collect(),
+        regions: p
+            .regions
+            .iter()
+            .map(|r| cadrs_kernel::Region {
+                outer: lp(&r.outer),
+                holes: r.holes.iter().map(lp).collect(),
+                source: r.source,
+            })
+            .collect(),
+        chains: p
+            .chains
+            .iter()
+            .map(|c| cadrs_kernel::Chain {
+                curves: c.curves.iter().map(sc).collect(),
+                source: c.source,
+            })
+            .collect(),
     }
 }

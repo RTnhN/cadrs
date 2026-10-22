@@ -6,8 +6,8 @@
 //! after the classic desktop cursors: white arrow and hand with a black outline; black caret,
 //! crosshair and move arrows with a white halo so they read on any background.
 
-use image::RgbImage;
 use cadrs_ui::CursorKind;
+use image::RgbImage;
 
 /// A sprite: rows of `B` (black), `W` (white) and ` ` (transparent), and its hotspot.
 struct Sprite {
@@ -294,7 +294,10 @@ mod tests {
             // Rows of a sprite have equal widths (a typo would shift the art).
             let s = sprite(kind);
             let w = s.rows[0].len();
-            assert!(s.rows.iter().all(|r| r.len() == w), "{kind:?} rows differ in width");
+            assert!(
+                s.rows.iter().all(|r| r.len() == w),
+                "{kind:?} rows differ in width"
+            );
         }
         // Drawing off the image edge is fine.
         let mut img = RgbImage::new(8, 8);

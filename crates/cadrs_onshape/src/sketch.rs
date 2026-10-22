@@ -18,8 +18,8 @@ use cadrs_core::commands::{AddSketch, EditSketch, RenameFeature};
 use cadrs_core::ids::{ElementId, FeatureId};
 use cadrs_sketch::constraint::{ConstraintOf, ConstraintSpec, CurveSpec, Orient, PointSpec};
 use cadrs_sketch::{
-    CurveId, CurveKind, CurveRef, Dimension, DimensionKind, PlaneFrame, PlaneRef, PointId, PointRef, Sketch, SketchOp,
-    Vec2, Vec3,
+    CurveId, CurveKind, CurveRef, Dimension, DimensionKind, PlaneFrame, PlaneRef, PointId,
+    PointRef, Sketch, SketchOp, Vec2, Vec3,
 };
 use serde_json::Value;
 
@@ -93,7 +93,11 @@ fn dot(a: Vec3, b: Vec3) -> f64 {
     a[0] * b[0] + a[1] * b[1] + a[2] * b[2]
 }
 fn cross(a: Vec3, b: Vec3) -> Vec3 {
-    [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]]
+    [
+        a[1] * b[2] - a[2] * b[1],
+        a[2] * b[0] - a[0] * b[2],
+        a[0] * b[1] - a[1] * b[0],
+    ]
 }
 
 fn v2(v: &Value) -> Option<[f64; 2]> {
@@ -109,11 +113,28 @@ pub struct Solved<'a> {
 
 impl<'a> Solved<'a> {
     pub fn find(sketches: &'a Value, feature_id: &str) -> Option<Self> {
-        let s = sketches["sketches"].as_array()?.iter().find(|s| s["featureId"].as_str() == Some(feature_id))?;
-        let matrix = s["sketchMatrix"].as_array()?.iter().filter_map(Value::as_f64).collect();
-        let entities: Vec<&Value> = s["entities"].as_array().map(|a| a.iter().collect()).unwrap_or_default();
-        let by_id = entities.iter().filter_map(|e| Some((e["sketchEntityId"].as_str()?, *e))).collect();
-        Some(Self { matrix, entities, by_id })
+        let s = sketches["sketches"]
+            .as_array()?
+            .iter()
+            .find(|s| s["featureId"].as_str() == Some(feature_id))?;
+        let matrix = s["sketchMatrix"]
+            .as_array()?
+            .iter()
+            .filter_map(Value::as_f64)
+            .collect();
+        let entities: Vec<&Value> = s["entities"]
+            .as_array()
+            .map(|a| a.iter().collect())
+            .unwrap_or_default();
+        let by_id = entities
+            .iter()
+            .filter_map(|e| Some((e["sketchEntityId"].as_str()?, *e)))
+            .collect();
+        Some(Self {
+            matrix,
+            entities,
+            by_id,
+        })
     }
 
     fn point(&self, id: &str) -> Option<[f64; 2]> {
@@ -125,21 +146,43 @@ impl<'a> Solved<'a> {
 /// deterministic id or, in older documents that have none, by query: `Top.planeOp`, …).
 pub fn default_plane(feature: &Value) -> Option<PlaneRef> {
     let p = param(feature, "sketchPlane")?;
-    let ids = p["queries"][0]["deterministicIds"].as_array().into_iter().flatten().filter_map(Value::as_str).map(String::from).collect();
-    crate::refs::Pick::Opaque(ids).default_plane().or_else(|| crate::refs::picks(Some(p)).first()?.default_plane())
+    let ids = p["queries"][0]["deterministicIds"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(Value::as_str)
+        .map(String::from)
+        .collect();
+    crate::refs::Pick::Opaque(ids)
+        .default_plane()
+        .or_else(|| crate::refs::picks(Some(p)).first()?.default_plane())
 }
 
 /// A feature parameter by id.
 pub fn param<'a>(feature: &'a Value, id: &str) -> Option<&'a Value> {
-    feature["parameters"].as_array()?.iter().find(|p| p["parameterId"].as_str() == Some(id))
+    feature["parameters"]
+        .as_array()?
+        .iter()
+        .find(|p| p["parameterId"].as_str() == Some(id))
 }
 
 /// The sketch's points (curve ends, centres, sketch points) in world coordinates (mm).
 pub fn world_points(solved: &Solved) -> Vec<Vec3> {
-    let Some((o, x, y)) = onshape_frame(&solved.matrix) else { return Vec::new() };
-    let to = PlaneFrame { origin: o, u: x, v: y };
+    let Some((o, x, y)) = onshape_frame(&solved.matrix) else {
+        return Vec::new();
+    };
+    let to = PlaneFrame {
+        origin: o,
+        u: x,
+        v: y,
+    };
     let xf = Xf { o, x, y, to };
-    solved.entities.iter().filter_map(|e| v2(&e["position2d"])).map(|p| xf.world(p)).collect()
+    solved
+        .entities
+        .iter()
+        .filter_map(|e| v2(&e["position2d"]))
+        .map(|p| xf.world(p))
+        .collect()
 }
 
 /// The world plane (normal, point) a sketch lies on, from its solved matrix.
@@ -167,27 +210,54 @@ pub fn import(
         }
     };
     trace("add");
-    s.run(&AddSketch { element: el, feature: id, plane: Some(plane) })?;
+    s.run(&AddSketch {
+        element: el,
+        feature: id,
+        plane: Some(plane),
+    })?;
     trace("added");
     if let Some(name) = feature["name"].as_str() {
-        s.run(&RenameFeature { element: el, feature: id, name: name.to_string() })?;
+        s.run(&RenameFeature {
+            element: el,
+            feature: id,
+            name: name.to_string(),
+        })?;
     }
-    let (o, x, y) = onshape_frame(&solved.matrix).ok_or_else(|| CommandError::Invalid("sketch without a matrix".into()))?;
-    let xf = Xf { o, x, y, to: plane.frame() };
-    let mut map = SketchMap { feature: id, ..Default::default() };
+    let (o, x, y) = onshape_frame(&solved.matrix)
+        .ok_or_else(|| CommandError::Invalid("sketch without a matrix".into()))?;
+    let xf = Xf {
+        o,
+        x,
+        y,
+        to: plane.frame(),
+    };
+    let mut map = SketchMap {
+        feature: id,
+        ..Default::default()
+    };
 
     // Geometry, curve by curve.
     let construction_of: HashMap<&str, bool> = feature["entities"]
         .as_array()
         .into_iter()
         .flatten()
-        .filter_map(|e| Some((e["entityId"].as_str()?, e["isConstruction"].as_bool().unwrap_or(false))))
+        .filter_map(|e| {
+            Some((
+                e["entityId"].as_str()?,
+                e["isConstruction"].as_bool().unwrap_or(false),
+            ))
+        })
         .collect();
     let mut endpoint_ids = std::collections::HashSet::new();
     let mut skipped: HashMap<String, usize> = HashMap::new();
     for e in &solved.entities {
-        let Some(eid) = e["sketchEntityId"].as_str() else { continue };
-        let construction = e["isConstruction"].as_bool().or_else(|| construction_of.get(eid).copied()).unwrap_or(false);
+        let Some(eid) = e["sketchEntityId"].as_str() else {
+            continue;
+        };
+        let construction = e["isConstruction"]
+            .as_bool()
+            .or_else(|| construction_of.get(eid).copied())
+            .unwrap_or(false);
         let g = &e["geometry"];
         let mut reversed = false;
         let op = match e["sketchEntityType"].as_str().unwrap_or_default() {
@@ -198,14 +268,31 @@ pub fn import(
                 ) else {
                     continue;
                 };
-                endpoint_ids.extend(e["startPointId"].as_str().into_iter().chain(e["endPointId"].as_str()).map(String::from));
-                SketchOp::AddPolyline { points: vec![xf.apply(a), xf.apply(b)], closed: false, construction, label: "Add line" }
+                endpoint_ids.extend(
+                    e["startPointId"]
+                        .as_str()
+                        .into_iter()
+                        .chain(e["endPointId"].as_str())
+                        .map(String::from),
+                );
+                SketchOp::AddPolyline {
+                    points: vec![xf.apply(a), xf.apply(b)],
+                    closed: false,
+                    construction,
+                    label: "Add line",
+                }
             }
             "skCircle" => {
-                let (Some(c), Some(r)) = (v2(&g["center2d"]), g["radius"].as_f64()) else { continue };
+                let (Some(c), Some(r)) = (v2(&g["center2d"]), g["radius"].as_f64()) else {
+                    continue;
+                };
                 endpoint_ids.extend(e["centerId"].as_str().map(String::from));
                 reversed = g["clockWise"].as_bool().unwrap_or(false);
-                SketchOp::AddCircle { center: xf.apply(c), radius: r * 1000.0, construction }
+                SketchOp::AddCircle {
+                    center: xf.apply(c),
+                    radius: r * 1000.0,
+                    construction,
+                }
             }
             "skArc" => {
                 let (Some(c), Some(a), Some(b)) = (
@@ -216,14 +303,27 @@ pub fn import(
                     continue;
                 };
                 endpoint_ids.extend(
-                    ["startPointId", "endPointId", "centerId"].iter().filter_map(|k| e[*k].as_str()).map(String::from),
+                    ["startPointId", "endPointId", "centerId"]
+                        .iter()
+                        .filter_map(|k| e[*k].as_str())
+                        .map(String::from),
                 );
-                let (t0, t1) = (e["startParameter"].as_f64().unwrap_or(0.0), e["endParameter"].as_f64().unwrap_or(0.0));
+                let (t0, t1) = (
+                    e["startParameter"].as_f64().unwrap_or(0.0),
+                    e["endParameter"].as_f64().unwrap_or(0.0),
+                );
                 // The arc's middle, in Onshape's coordinates: its parameter is the angle from
                 // the start's, counter-clockwise, or clockwise for a `clockWise` arc (a mirrored
                 // one). The span alone can't tell the two halves of a half circle apart.
-                let dir = if g["clockWise"].as_bool().unwrap_or(false) { -1.0 } else { 1.0 };
-                let (r, at_start) = (((a[0] - c[0]).powi(2) + (a[1] - c[1]).powi(2)).sqrt(), (a[1] - c[1]).atan2(a[0] - c[0]));
+                let dir = if g["clockWise"].as_bool().unwrap_or(false) {
+                    -1.0
+                } else {
+                    1.0
+                };
+                let (r, at_start) = (
+                    ((a[0] - c[0]).powi(2) + (a[1] - c[1]).powi(2)).sqrt(),
+                    (a[1] - c[1]).atan2(a[0] - c[0]),
+                );
                 let tm = at_start + dir * (t1 - t0) / 2.0;
                 let mid = xf.apply([c[0] + r * tm.cos(), c[1] + r * tm.sin()]);
                 let (c, a, b) = (xf.apply(c), xf.apply(a), xf.apply(b));
@@ -236,7 +336,12 @@ pub fn import(
                 let forward = ccw(a, mid) <= ccw(a, b);
                 let (start, end) = if forward { (a, b) } else { (b, a) };
                 reversed = !forward;
-                SketchOp::AddArc { center: c, start, end, construction }
+                SketchOp::AddArc {
+                    center: c,
+                    start,
+                    end,
+                    construction,
+                }
             }
             "skInterpolatedSpline" | "skInterpolatedSplineSegment" => {
                 let pts: Vec<Vec2> = g["interpolationPoints2d"]
@@ -251,14 +356,30 @@ pub fn import(
                 // zero one is a free (natural) end.
                 let o = xf.apply([0.0, 0.0]);
                 let deriv = |k: &str| {
-                    v2(&g[k]).filter(|d| d[0] != 0.0 || d[1] != 0.0).map(|d| xf.apply(d) - o)
+                    v2(&g[k])
+                        .filter(|d| d[0] != 0.0 || d[1] != 0.0)
+                        .map(|d| xf.apply(d) - o)
                 };
-                endpoint_ids.extend(e["startPointId"].as_str().into_iter().chain(e["endPointId"].as_str()).map(String::from));
+                endpoint_ids.extend(
+                    e["startPointId"]
+                        .as_str()
+                        .into_iter()
+                        .chain(e["endPointId"].as_str())
+                        .map(String::from),
+                );
                 SketchOp::AddSpline {
                     points: pts,
                     periodic,
-                    start_tangent: if periodic { None } else { deriv("startDerivative2d") },
-                    end_tangent: if periodic { None } else { deriv("endDerivative2d") },
+                    start_tangent: if periodic {
+                        None
+                    } else {
+                        deriv("startDerivative2d")
+                    },
+                    end_tangent: if periodic {
+                        None
+                    } else {
+                        deriv("endDerivative2d")
+                    },
                     construction,
                 }
             }
@@ -266,8 +387,12 @@ pub fn import(
                 // A control-point B-spline (a projected edge, say): only its features.json
                 // entity has the geometry. Brought in as an interpolated spline through points
                 // sampled on it.
-                let Some(op) = bspline_entity(feature, eid).and_then(|b| sampled_bspline(b, &xf, construction)) else {
-                    *skipped.entry("skSpline (unreadable geometry)".to_string()).or_default() += 1;
+                let Some(op) = bspline_entity(feature, eid)
+                    .and_then(|b| sampled_bspline(b, &xf, construction))
+                else {
+                    *skipped
+                        .entry("skSpline (unreadable geometry)".to_string())
+                        .or_default() += 1;
                     continue;
                 };
                 let note = "skSpline (control-point spline) imported as an interpolated spline through points on it";
@@ -283,8 +408,13 @@ pub fn import(
             }
         };
         trace(&format!("entity {eid}"));
-        let before: std::collections::HashSet<CurveId> = sketch_of(s, el, id)?.curves.keys().collect();
-        match s.run(&EditSketch { element: el, feature: id, op }) {
+        let before: std::collections::HashSet<CurveId> =
+            sketch_of(s, el, id)?.curves.keys().collect();
+        match s.run(&EditSketch {
+            element: el,
+            feature: id,
+            op,
+        }) {
             Ok(()) => {
                 let after = sketch_of(s, el, id)?;
                 if let Some(c) = after.curves.keys().find(|c| !before.contains(c)) {
@@ -299,14 +429,25 @@ pub fn import(
     }
     // Standalone sketch points (not the ends or centres of curves).
     for e in &solved.entities {
-        let (Some(eid), Some("skPoint")) = (e["sketchEntityId"].as_str(), e["sketchEntityType"].as_str()) else { continue };
+        let (Some(eid), Some("skPoint")) =
+            (e["sketchEntityId"].as_str(), e["sketchEntityType"].as_str())
+        else {
+            continue;
+        };
         if endpoint_ids.contains(eid) {
             continue;
         }
-        let Some(p) = v2(&e["position2d"]) else { continue };
+        let Some(p) = v2(&e["position2d"]) else {
+            continue;
+        };
         let p = xf.apply(p);
         if nearest_point(&sketch_of(s, el, id)?, p).is_none() {
-            s.run(&EditSketch { element: el, feature: id, op: SketchOp::AddPoint { pos: p } }).ok();
+            s.run(&EditSketch {
+                element: el,
+                feature: id,
+                op: SketchOp::AddPoint { pos: p },
+            })
+            .ok();
         }
     }
     for (k, n) in skipped {
@@ -316,7 +457,11 @@ pub fn import(
     // Every Onshape point id to the cadrs point where it landed.
     let g = sketch_of(s, el, id)?;
     for e in &solved.entities {
-        let (Some(eid), Some("skPoint")) = (e["sketchEntityId"].as_str(), e["sketchEntityType"].as_str()) else { continue };
+        let (Some(eid), Some("skPoint")) =
+            (e["sketchEntityId"].as_str(), e["sketchEntityType"].as_str())
+        else {
+            continue;
+        };
         if let Some(p) = v2(&e["position2d"]).and_then(|p| nearest_point(&g, xf.apply(p))) {
             map.points.insert(eid.to_string(), p);
         }
@@ -336,17 +481,55 @@ pub fn import(
     // Model edges the constraints refer to (Onshape keeps them as bare topology ids): found by
     // where the constrained points are, and brought in as construction Use curves.
     let vertices = model_vertices(feature, &map, &g, &plane, parts);
-    let (uses, unmatched) = model_edges(s, el, id, feature, &map, &g, &plane, parts, &vertices, model_points, swap, report)?;
-    let projected = projected_vertices(s, el, id, feature, &map, &plane, swap, parts, model_points, &vertices, &uses)?;
+    let (uses, unmatched) = model_edges(
+        s,
+        el,
+        id,
+        feature,
+        &map,
+        &g,
+        &plane,
+        parts,
+        &vertices,
+        model_points,
+        swap,
+        report,
+    )?;
+    let projected = projected_vertices(
+        s,
+        el,
+        id,
+        feature,
+        &map,
+        &plane,
+        swap,
+        parts,
+        model_points,
+        &vertices,
+        &uses,
+    )?;
     // (A bare id no edge took may be a vertex or another sketch's point the search above found.)
-    let left = unmatched.iter().filter(|e| !projected.contains_key(*e)).count();
+    let left = unmatched
+        .iter()
+        .filter(|e| !projected.contains_key(*e))
+        .count();
     if left > 0 {
         report.notes.push(format!("{left} model edge(s) not found"));
     }
     let origin_at = origin_traces(s, el, id, feature, &plane)?;
     let pattern_lines = pattern_lines(s, el, id, feature, &map)?;
     let g = sketch_of(s, el, id)?;
-    let ctx = Ctx { map: &map, g: &g, plane: &plane, swap, uses: &uses, vertices: &vertices, projected: &projected, origin_at, pattern_lines: &pattern_lines };
+    let ctx = Ctx {
+        map: &map,
+        g: &g,
+        plane: &plane,
+        swap,
+        uses: &uses,
+        vertices: &vertices,
+        projected: &projected,
+        origin_at,
+        pattern_lines: &pattern_lines,
+    };
     let mut specs = Vec::new();
     let mut dims = Vec::new();
     let mut dropped: HashMap<String, usize> = HashMap::new();
@@ -360,23 +543,37 @@ pub fn import(
         }
     }
 
-    trace(&format!("{} constraints, {} dimensions", specs.len(), dims.len()));
+    trace(&format!(
+        "{} constraints, {} dimensions",
+        specs.len(),
+        dims.len()
+    ));
     // Constraints and dimensions must hold the geometry where Onshape solved it. Any that
     // would move it (a translation that means something else in cadrs, a tangency that picks
     // the other solution) are found on a copy of the sketch and left out.
     let ops: Vec<SketchOp> = specs
         .into_iter()
         .map(|c| SketchOp::AddConstraints(vec![c]))
-        .chain(dims.into_iter().map(|d| SketchOp::SetDimension { dimension: d, moves: Vec::new(), radii: Vec::new() }))
+        .chain(dims.into_iter().map(|d| SketchOp::SetDimension {
+            dimension: d,
+            moves: Vec::new(),
+            radii: Vec::new(),
+        }))
         .collect();
     let (kept, moved, refused) = keep_in_place(&g, ops);
     if moved > 0 {
-        report.notes.push(format!("{moved} constraint(s) or dimension(s) left out: they moved the geometry"));
+        report.notes.push(format!(
+            "{moved} constraint(s) or dimension(s) left out: they moved the geometry"
+        ));
     }
     if refused > 0 {
-        report.notes.push(format!("{refused} constraint(s) or dimension(s) refused by the solver"));
+        report.notes.push(format!(
+            "{refused} constraint(s) or dimension(s) refused by the solver"
+        ));
     }
-    let (constraints, dimensions): (Vec<SketchOp>, Vec<SketchOp>) = kept.into_iter().partition(|op| matches!(op, SketchOp::AddConstraints(_)));
+    let (constraints, dimensions): (Vec<SketchOp>, Vec<SketchOp>) = kept
+        .into_iter()
+        .partition(|op| matches!(op, SketchOp::AddConstraints(_)));
     let specs: Vec<ConstraintSpec> = constraints
         .into_iter()
         .flat_map(|op| match op {
@@ -385,12 +582,20 @@ pub fn import(
         })
         .collect();
     if !specs.is_empty()
-        && let Err(e) = s.run(&EditSketch { element: el, feature: id, op: SketchOp::AddConstraints(specs) })
+        && let Err(e) = s.run(&EditSketch {
+            element: el,
+            feature: id,
+            op: SketchOp::AddConstraints(specs),
+        })
     {
         report.notes.push(format!("constraints: {e}"));
     }
     for op in dimensions {
-        if let Err(e) = s.run(&EditSketch { element: el, feature: id, op }) {
+        if let Err(e) = s.run(&EditSketch {
+            element: el,
+            feature: id,
+            op,
+        }) {
             report.notes.push(format!("dimension: {e}"));
         }
     }
@@ -411,13 +616,27 @@ pub fn import(
                 eprintln!("CONFLICT {:?}", g.constraints.get(*c));
             }
             for d in &a.conflicting_dimensions {
-                eprintln!("CONFLICT dim {:?}", g.dimensions.get(*d).map(|x| (x.kind, x.value)));
+                eprintln!(
+                    "CONFLICT dim {:?}",
+                    g.dimensions.get(*d).map(|x| (x.kind, x.value))
+                );
             }
         }
         let n = a.conflicting.len() + a.conflicting_dimensions.len();
-        let op = SketchOp::Delete { curves: Vec::new(), points: Vec::new(), dimensions: a.conflicting_dimensions, constraints: a.conflicting };
-        match s.run(&EditSketch { element: el, feature: id, op }) {
-            Ok(()) => report.notes.push(format!("{n} constraint(s) or dimension(s) left out: they conflict with the others")),
+        let op = SketchOp::Delete {
+            curves: Vec::new(),
+            points: Vec::new(),
+            dimensions: a.conflicting_dimensions,
+            constraints: a.conflicting,
+        };
+        match s.run(&EditSketch {
+            element: el,
+            feature: id,
+            op,
+        }) {
+            Ok(()) => report.notes.push(format!(
+                "{n} constraint(s) or dimension(s) left out: they conflict with the others"
+            )),
             Err(e) => report.notes.push(format!("conflicting constraints: {e}")),
         }
     }
@@ -431,7 +650,9 @@ pub fn import(
         }
     }
     if worst > 1e-4 {
-        report.notes.push(format!("geometry moved by up to {worst:.4} mm while solving"));
+        report.notes.push(format!(
+            "geometry moved by up to {worst:.4} mm while solving"
+        ));
     }
     if !report.notes.is_empty() && report.outcome == Outcome::Full {
         report.outcome = Outcome::Partial;
@@ -441,9 +662,15 @@ pub fn import(
 
 /// The features.json geometry of sketch entity `eid` (a `BTCurveGeometrySpline`).
 fn bspline_entity<'a>(feature: &'a Value, eid: &str) -> Option<&'a Value> {
-    let e = feature["entities"].as_array()?.iter().find(|e| e["entityId"].as_str() == Some(eid))?;
+    let e = feature["entities"]
+        .as_array()?
+        .iter()
+        .find(|e| e["entityId"].as_str() == Some(eid))?;
     let g = &e["geometry"];
-    g["btType"].as_str()?.starts_with("BTCurveGeometrySpline").then_some(g)
+    g["btType"]
+        .as_str()?
+        .starts_with("BTCurveGeometrySpline")
+        .then_some(g)
 }
 
 /// A B-spline (Onshape's `controlPoints`, `knots`, `degree`, `isPeriodic`; unweighted) as an
@@ -453,9 +680,21 @@ fn sampled_bspline(g: &Value, xf: &Xf, construction: bool) -> Option<SketchOp> {
         return None;
     }
     let degree = g["degree"].as_u64()? as usize;
-    let cp: Vec<f64> = g["controlPoints"].as_array()?.iter().filter_map(Value::as_f64).collect();
-    let knots: Vec<f64> = g["knots"].as_array()?.iter().filter_map(Value::as_f64).collect();
-    let dim = if cp.len() == 2 * (knots.len().checked_sub(degree + 1)?) { 2 } else { 3 };
+    let cp: Vec<f64> = g["controlPoints"]
+        .as_array()?
+        .iter()
+        .filter_map(Value::as_f64)
+        .collect();
+    let knots: Vec<f64> = g["knots"]
+        .as_array()?
+        .iter()
+        .filter_map(Value::as_f64)
+        .collect();
+    let dim = if cp.len() == 2 * (knots.len().checked_sub(degree + 1)?) {
+        2
+    } else {
+        3
+    };
     let poles: Vec<[f64; 2]> = cp.chunks_exact(dim).map(|c| [c[0], c[1]]).collect();
     let n = poles.len();
     if n <= degree || knots.len() != n + degree + 1 {
@@ -474,24 +713,44 @@ fn sampled_bspline(g: &Value, xf: &Xf, construction: bool) -> Option<SketchOp> {
             for j in (r..=degree).rev() {
                 let i = j + k - degree;
                 let den = knots[i + degree + 1 - r] - knots[i];
-                let a = if den.abs() < 1e-300 { 0.0 } else { (t - knots[i]) / den };
-                d[j] = [(1.0 - a) * d[j - 1][0] + a * d[j][0], (1.0 - a) * d[j - 1][1] + a * d[j][1]];
+                let a = if den.abs() < 1e-300 {
+                    0.0
+                } else {
+                    (t - knots[i]) / den
+                };
+                d[j] = [
+                    (1.0 - a) * d[j - 1][0] + a * d[j][0],
+                    (1.0 - a) * d[j - 1][1] + a * d[j][1],
+                ];
             }
         }
         d[degree]
     };
     const N: usize = 24;
     let pts: Vec<Vec2> = if periodic {
-        (0..N).map(|i| xf.apply(eval(lo + (hi - lo) * i as f64 / N as f64))).collect()
+        (0..N)
+            .map(|i| xf.apply(eval(lo + (hi - lo) * i as f64 / N as f64)))
+            .collect()
     } else {
-        (0..=N).map(|i| xf.apply(eval(lo + (hi - lo) * i as f64 / N as f64))).collect()
+        (0..=N)
+            .map(|i| xf.apply(eval(lo + (hi - lo) * i as f64 / N as f64)))
+            .collect()
     };
-    Some(SketchOp::AddSpline { points: pts, periodic, start_tangent: None, end_tangent: None, construction })
+    Some(SketchOp::AddSpline {
+        points: pts,
+        periodic,
+        start_tangent: None,
+        end_tangent: None,
+        construction,
+    })
 }
 
 /// How far any point of `g` moved from where it is in `base` (points only in `g` ignored).
 fn drift(base: &Sketch, g: &Sketch) -> f64 {
-    base.points.iter().filter_map(|(id, p)| g.points.get(id).map(|q| q.pos.distance(p.pos))).fold(0.0, f64::max)
+    base.points
+        .iter()
+        .filter_map(|(id, p)| g.points.get(id).map(|q| q.pos.distance(p.pos)))
+        .fold(0.0, f64::max)
 }
 
 /// The ops (constraints, dimensions) that can be applied to `g` together without moving its
@@ -529,7 +788,13 @@ fn keep_in_place(g: &Sketch, ops: Vec<SketchOp>) -> (Vec<SketchOp>, usize, usize
 /// (a corner of the part the sketch lies on), with that edge as the link a Pierce constraint
 /// fixes the point by: fully, as Onshape's coincidence with a vertex, and with no projected
 /// curve drawn.
-fn model_vertices(feature: &Value, map: &SketchMap, g: &Sketch, plane: &PlaneRef, parts: &[cadrs_core::parts::Part]) -> HashMap<String, (Vec2, cadrs_sketch::Link)> {
+fn model_vertices(
+    feature: &Value,
+    map: &SketchMap,
+    g: &Sketch,
+    plane: &PlaneRef,
+    parts: &[cadrs_core::parts::Part],
+) -> HashMap<String, (Vec2, cadrs_sketch::Link)> {
     let tol = 1e-4;
     let mut at: HashMap<String, Vec<Vec2>> = HashMap::new();
     for c in feature["constraints"].as_array().into_iter().flatten() {
@@ -538,12 +803,37 @@ fn model_vertices(feature: &Value, map: &SketchMap, g: &Sketch, plane: &PlaneRef
         }
         let params = c["parameters"].as_array().cloned().unwrap_or_default();
         let point = params.iter().find_map(|p| {
-            let local = p["parameterId"].as_str().is_some_and(|i| i.starts_with("local"));
-            local.then(|| p["value"].as_str().and_then(|v| map.points.get(v)).and_then(|q| g.points.get(*q)).map(|q| q.pos)).flatten()
+            let local = p["parameterId"]
+                .as_str()
+                .is_some_and(|i| i.starts_with("local"));
+            local
+                .then(|| {
+                    p["value"]
+                        .as_str()
+                        .and_then(|v| map.points.get(v))
+                        .and_then(|q| g.points.get(*q))
+                        .map(|q| q.pos)
+                })
+                .flatten()
         });
         let Some(point) = point else { continue };
-        for p in params.iter().filter(|p| p["parameterId"].as_str().is_some_and(|i| i.starts_with("external"))) {
-            let ids: Vec<&str> = p["queries"].as_array().into_iter().flatten().flat_map(|q| q["deterministicIds"].as_array().into_iter().flatten().filter_map(Value::as_str)).collect();
+        for p in params.iter().filter(|p| {
+            p["parameterId"]
+                .as_str()
+                .is_some_and(|i| i.starts_with("external"))
+        }) {
+            let ids: Vec<&str> = p["queries"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .flat_map(|q| {
+                    q["deterministicIds"]
+                        .as_array()
+                        .into_iter()
+                        .flatten()
+                        .filter_map(Value::as_str)
+                })
+                .collect();
             if let [eid] = ids.as_slice()
                 && !matches!(*eid, ORIGIN_ID | TOP_ID | FRONT_ID | RIGHT_ID)
             {
@@ -560,9 +850,23 @@ fn model_vertices(feature: &Value, map: &SketchMap, g: &Sketch, plane: &PlaneRef
         }
         'search: for part in parts {
             for e in &part.solid.edges {
-                let Some(curve) = cadrs_core::links::edge_curve(e) else { continue };
-                if cadrs_core::links::crossings(curve, &frame).iter().any(|x| x.distance(p) < tol) {
-                    out.insert(eid.clone(), (p, cadrs_sketch::Link::Edge { feature: part.id.feature.0, edge: e.name }));
+                let Some(curve) = cadrs_core::links::edge_curve(e) else {
+                    continue;
+                };
+                if cadrs_core::links::crossings(curve, &frame)
+                    .iter()
+                    .any(|x| x.distance(p) < tol)
+                {
+                    out.insert(
+                        eid.clone(),
+                        (
+                            p,
+                            cadrs_sketch::Link::Edge {
+                                feature: part.id.feature.0,
+                                edge: e.name,
+                            },
+                        ),
+                    );
                     break 'search;
                 }
             }
@@ -574,10 +878,25 @@ fn model_vertices(feature: &Value, map: &SketchMap, g: &Sketch, plane: &PlaneRef
 /// For a sketch whose constraints name the Part Studio's origin while the sketch's own origin is
 /// elsewhere (a sketch on a face): two default planes' traces through the origin's projection,
 /// brought in as construction Use lines (they follow the planes), and where they meet.
-fn origin_traces(s: &mut dyn Studio, el: ElementId, id: FeatureId, feature: &Value, plane: &PlaneRef) -> Result<Option<(Vec2, CurveId, CurveId)>, CommandError> {
-    let names_origin = feature["constraints"].as_array().into_iter().flatten().flat_map(|c| c["parameters"].as_array().into_iter().flatten()).any(|p| {
-        p["queries"].as_array().into_iter().flatten().any(|q| q["deterministicIds"].as_array().is_some_and(|ids| matches!(ids.as_slice(), [i] if i.as_str() == Some(ORIGIN_ID))))
-    });
+fn origin_traces(
+    s: &mut dyn Studio,
+    el: ElementId,
+    id: FeatureId,
+    feature: &Value,
+    plane: &PlaneRef,
+) -> Result<Option<(Vec2, CurveId, CurveId)>, CommandError> {
+    let names_origin = feature["constraints"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .flat_map(|c| c["parameters"].as_array().into_iter().flatten())
+        .any(|p| {
+            p["queries"].as_array().into_iter().flatten().any(|q| {
+                q["deterministicIds"].as_array().is_some_and(
+                    |ids| matches!(ids.as_slice(), [i] if i.as_str() == Some(ORIGIN_ID)),
+                )
+            })
+        });
     let frame = plane.frame();
     let q = frame.to_sketch([0.0; 3]);
     if !names_origin || q.length() < 1e-9 {
@@ -586,25 +905,52 @@ fn origin_traces(s: &mut dyn Studio, el: ElementId, id: FeatureId, feature: &Val
     // The default planes the projection lies on (seen edge-on from the sketch).
     let mut traces = Vec::new();
     for p in [PlaneRef::Top, PlaneRef::Front, PlaneRef::Right] {
-        let Some(curve) = cadrs_core::links::plane_trace(&p.frame(), &frame) else { continue };
-        let Some(shape) = cadrs_core::links::project(curve, &frame) else { continue };
-        let cadrs_sketch::projection::Projected::Line(a, b) = shape else { continue };
+        let Some(curve) = cadrs_core::links::plane_trace(&p.frame(), &frame) else {
+            continue;
+        };
+        let Some(shape) = cadrs_core::links::project(curve, &frame) else {
+            continue;
+        };
+        let cadrs_sketch::projection::Projected::Line(a, b) = shape else {
+            continue;
+        };
         let ab = b - a;
         if ((q - a).x * ab.y - (q - a).y * ab.x).abs() / ab.length().max(1e-300) < 1e-6 {
             traces.push((shape, p, ab));
         }
     }
-    let [(s1, p1, d1), (s2, p2, d2), ..] = traces.as_slice() else { return Ok(None) };
+    let [(s1, p1, d1), (s2, p2, d2), ..] = traces.as_slice() else {
+        return Ok(None);
+    };
     if (d1.x * d2.y - d1.y * d2.x).abs() < 1e-9 * d1.length() * d2.length() {
         return Ok(None);
     }
     let mut lines = Vec::new();
     for (shape, p) in [(s1.clone(), *p1), (s2.clone(), *p2)] {
         let before = sketch_of(s, el, id)?;
-        s.run(&EditSketch { element: el, feature: id, op: SketchOp::Use { items: vec![(shape, cadrs_sketch::Link::Plane(p))] } })?;
+        s.run(&EditSketch {
+            element: el,
+            feature: id,
+            op: SketchOp::Use {
+                items: vec![(shape, cadrs_sketch::Link::Plane(p))],
+            },
+        })?;
         let after = sketch_of(s, el, id)?;
-        let Some(c) = after.curves.keys().find(|c| !before.curves.contains_key(*c)) else { return Ok(None) };
-        s.run(&EditSketch { element: el, feature: id, op: SketchOp::SetConstruction { curves: vec![c], construction: true } })?;
+        let Some(c) = after
+            .curves
+            .keys()
+            .find(|c| !before.curves.contains_key(*c))
+        else {
+            return Ok(None);
+        };
+        s.run(&EditSketch {
+            element: el,
+            feature: id,
+            op: SketchOp::SetConstruction {
+                curves: vec![c],
+                construction: true,
+            },
+        })?;
         lines.push(c);
     }
     Ok(Some((q, lines[0], lines[1])))
@@ -642,25 +988,42 @@ fn projected_vertices(
     let normal_edge = |v: Vec3| {
         parts.iter().find_map(|part| {
             part.solid.edges.iter().find_map(|e| {
-                let Some(cadrs_core::links::Curve3::Line(a, b)) = cadrs_core::links::edge_curve(e) else { return None };
+                let Some(cadrs_core::links::Curve3::Line(a, b)) = cadrs_core::links::edge_curve(e)
+                else {
+                    return None;
+                };
                 let along = dot(unit(sub(b, a)), n).abs() > 1.0 - 1e-9;
-                (along && (near(a, v) || near(b, v))).then_some(cadrs_sketch::Link::Edge { feature: part.id.feature.0, edge: e.name })
+                (along && (near(a, v) || near(b, v))).then_some(cadrs_sketch::Link::Edge {
+                    feature: part.id.feature.0,
+                    edge: e.name,
+                })
             })
         })
     };
     // What holds a point at a vertex's projection: a point pierced by that edge, else (no edge
     // along the normal) an edge ending at the vertex, used: its projection ends there.
-    let anchor = |v: Vec3| -> Option<(Option<cadrs_sketch::projection::Projected>, cadrs_sketch::Link)> {
+    let anchor = |v: Vec3| -> Option<(
+        Option<cadrs_sketch::projection::Projected>,
+        cadrs_sketch::Link,
+    )> {
         normal_edge(v).map(|l| (None, l)).or_else(|| {
             parts.iter().find_map(|part| {
                 part.solid.edges.iter().find_map(|e| {
                     let curve = cadrs_core::links::edge_curve(e)?;
-                    let cadrs_core::links::Curve3::Line(a, b) = curve else { return None };
+                    let cadrs_core::links::Curve3::Line(a, b) = curve else {
+                        return None;
+                    };
                     if !(near(a, v) || near(b, v)) {
                         return None;
                     }
                     let shape = cadrs_core::links::project(curve, &frame)?;
-                    Some((Some(shape), cadrs_sketch::Link::Edge { feature: part.id.feature.0, edge: e.name }))
+                    Some((
+                        Some(shape),
+                        cadrs_sketch::Link::Edge {
+                            feature: part.id.feature.0,
+                            edge: e.name,
+                        },
+                    ))
                 })
             })
         })
@@ -669,10 +1032,29 @@ fn projected_vertices(
     for c in feature["constraints"].as_array().into_iter().flatten() {
         let kind = c["constraintType"].as_str().unwrap_or_default();
         let params = c["parameters"].as_array().cloned().unwrap_or_default();
-        for p in params.iter().filter(|p| p["parameterId"].as_str().is_some_and(|i| i.starts_with("external"))) {
-            let ids: Vec<&str> = p["queries"].as_array().into_iter().flatten().flat_map(|q| q["deterministicIds"].as_array().into_iter().flatten().filter_map(Value::as_str)).collect();
+        for p in params.iter().filter(|p| {
+            p["parameterId"]
+                .as_str()
+                .is_some_and(|i| i.starts_with("external"))
+        }) {
+            let ids: Vec<&str> = p["queries"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .flat_map(|q| {
+                    q["deterministicIds"]
+                        .as_array()
+                        .into_iter()
+                        .flatten()
+                        .filter_map(Value::as_str)
+                })
+                .collect();
             let [vid] = ids.as_slice() else { continue };
-            if matches!(*vid, ORIGIN_ID | TOP_ID | FRONT_ID | RIGHT_ID) || vertices.contains_key(*vid) || uses.contains_key(*vid) || out.contains_key(*vid) {
+            if matches!(*vid, ORIGIN_ID | TOP_ID | FRONT_ID | RIGHT_ID)
+                || vertices.contains_key(*vid)
+                || uses.contains_key(*vid)
+                || out.contains_key(*vid)
+            {
                 continue;
             }
             // Where Onshape's final parts have it, when the model here has it there too.
@@ -685,14 +1067,32 @@ fn projected_vertices(
             let level = || {
                 let at = params
                     .iter()
-                    .filter(|p| p["parameterId"].as_str().is_some_and(|i| i.starts_with("local")))
-                    .find_map(|p| map.points.get(p["value"].as_str()?).and_then(|k| g.points.get(*k)).map(|x| x.pos))?;
+                    .filter(|p| {
+                        p["parameterId"]
+                            .as_str()
+                            .is_some_and(|i| i.starts_with("local"))
+                    })
+                    .find_map(|p| {
+                        map.points
+                            .get(p["value"].as_str()?)
+                            .and_then(|k| g.points.get(*k))
+                            .map(|x| x.pos)
+                    })?;
                 // Which coordinate they share in cadrs's frame (0: x, 1: y), and how far apart in it
                 // (a Horizontal or Vertical Distance: its value, along the axis it measures).
                 let length = || {
-                    params.iter().find(|p| p["parameterId"] == "length").and_then(|p| p["expression"].as_str()).and_then(|e| crate::expr::eval(e, &HashMap::<String, String>::new()).ok()).filter(|q| q.len == 1).map(|q| q.v)
+                    params
+                        .iter()
+                        .find(|p| p["parameterId"] == "length")
+                        .and_then(|p| p["expression"].as_str())
+                        .and_then(|e| crate::expr::eval(e, &HashMap::<String, String>::new()).ok())
+                        .filter(|q| q.len == 1)
+                        .map(|q| q.v)
                 };
-                let direction = params.iter().find(|p| p["parameterId"] == "direction").and_then(|p| p["value"].as_str());
+                let direction = params
+                    .iter()
+                    .find(|p| p["parameterId"] == "direction")
+                    .and_then(|p| p["value"].as_str());
                 let (axis, apart) = match (kind, direction, swap?) {
                     ("HORIZONTAL", _, sw) => (if sw { 0 } else { 1 }, 0.0),
                     ("VERTICAL", _, sw) => (if sw { 1 } else { 0 }, 0.0),
@@ -705,27 +1105,57 @@ fn projected_vertices(
                     .iter()
                     .flat_map(|part| part.solid.vertices.iter())
                     .map(|v| (frame.to_sketch(v.point), v.point))
-                    .filter(|(q, _)| ((coord(*q) - coord(at)).abs() - apart).abs() < 1e-4 && q.distance(at) > 1e-6)
+                    .filter(|(q, _)| {
+                        ((coord(*q) - coord(at)).abs() - apart).abs() < 1e-4
+                            && q.distance(at) > 1e-6
+                    })
                     .filter_map(|(q, v)| anchor(v).map(|l| (q, l)))
                     .min_by(|a, b| a.0.distance(at).total_cmp(&b.0.distance(at)))
                     // Else an end of an earlier sketch's line there: that line used, its
                     // projection ending at the point.
                     .or_else(|| {
                         let doc = s.document().element(el)?;
-                        let mut best: Option<(Vec2, (Option<cadrs_sketch::projection::Projected>, cadrs_sketch::Link))> = None;
+                        let mut best: Option<(
+                            Vec2,
+                            (
+                                Option<cadrs_sketch::projection::Projected>,
+                                cadrs_sketch::Link,
+                            ),
+                        )> = None;
                         for f in doc.features().iter().take_while(|f| f.id != id) {
                             let Some(sk) = f.sketch() else { continue };
                             let Some(pl) = sk.plane else { continue };
                             let other = pl.frame();
                             for (k, c) in &sk.geometry.curves {
-                                let CurveKind::Line { a, b } = c.kind else { continue };
-                                let (qa, qb) = (frame.to_sketch(other.to_world(sk.geometry.pos(a))), frame.to_sketch(other.to_world(sk.geometry.pos(b))));
+                                let CurveKind::Line { a, b } = c.kind else {
+                                    continue;
+                                };
+                                let (qa, qb) = (
+                                    frame.to_sketch(other.to_world(sk.geometry.pos(a))),
+                                    frame.to_sketch(other.to_world(sk.geometry.pos(b))),
+                                );
                                 if qa.distance(qb) < 1e-6 {
                                     continue;
                                 }
                                 for q in [qa, qb] {
-                                    if ((coord(q) - coord(at)).abs() - apart).abs() < 1e-4 && q.distance(at) > 1e-6 && best.as_ref().is_none_or(|(b, _)| q.distance(at) < b.distance(at)) {
-                                        best = Some((q, (Some(cadrs_sketch::projection::Projected::Line(qa, qb)), cadrs_sketch::Link::SketchCurve { feature: f.id.0, curve: k })));
+                                    if ((coord(q) - coord(at)).abs() - apart).abs() < 1e-4
+                                        && q.distance(at) > 1e-6
+                                        && best
+                                            .as_ref()
+                                            .is_none_or(|(b, _)| q.distance(at) < b.distance(at))
+                                    {
+                                        best = Some((
+                                            q,
+                                            (
+                                                Some(cadrs_sketch::projection::Projected::Line(
+                                                    qa, qb,
+                                                )),
+                                                cadrs_sketch::Link::SketchCurve {
+                                                    feature: f.id.0,
+                                                    curve: k,
+                                                },
+                                            ),
+                                        ));
                                     }
                                 }
                             }
@@ -733,13 +1163,23 @@ fn projected_vertices(
                         best
                     });
                 if found.is_none() && std::env::var_os("CADRS_ONSHAPE_DEBUG_EDGES").is_some() {
-                    let level: Vec<(Vec2, bool)> = parts.iter().flat_map(|part| part.solid.vertices.iter()).map(|v| (frame.to_sketch(v.point), anchor(v.point).is_some())).filter(|(q, _)| ((coord(*q) - coord(at)).abs() - apart).abs() < 1e-3).collect();
-                    eprintln!("LEVEL {vid} {kind} at {at:?}: {} vertices level with it {level:?}", level.len());
+                    let level: Vec<(Vec2, bool)> = parts
+                        .iter()
+                        .flat_map(|part| part.solid.vertices.iter())
+                        .map(|v| (frame.to_sketch(v.point), anchor(v.point).is_some()))
+                        .filter(|(q, _)| ((coord(*q) - coord(at)).abs() - apart).abs() < 1e-3)
+                        .collect();
+                    eprintln!(
+                        "LEVEL {vid} {kind} at {at:?}: {} vertices level with it {level:?}",
+                        level.len()
+                    );
                 }
                 found
             };
             let found = recorded.or_else(level);
-            let Some((q, (shape, link))) = found else { continue };
+            let Some((q, (shape, link))) = found else {
+                continue;
+            };
             // A sketch point already there (as a rule, one held to the same model point): that
             // one, rather than a second point tied to it.
             let before = sketch_of(s, el, id)?;
@@ -749,18 +1189,52 @@ fn projected_vertices(
             }
             match shape {
                 None => {
-                    if s.run(&EditSketch { element: el, feature: id, op: SketchOp::AddPoint { pos: q } }).is_err() {
+                    if s.run(&EditSketch {
+                        element: el,
+                        feature: id,
+                        op: SketchOp::AddPoint { pos: q },
+                    })
+                    .is_err()
+                    {
                         continue;
                     }
-                    s.run(&EditSketch { element: el, feature: id, op: SketchOp::AddConstraints(vec![ConstraintOf::Pierce(PointSpec::At(q), link)]) }).ok();
+                    s.run(&EditSketch {
+                        element: el,
+                        feature: id,
+                        op: SketchOp::AddConstraints(vec![ConstraintOf::Pierce(
+                            PointSpec::At(q),
+                            link,
+                        )]),
+                    })
+                    .ok();
                 }
                 Some(shape) => {
-                    if s.run(&EditSketch { element: el, feature: id, op: SketchOp::Use { items: vec![(shape, link)] } }).is_err() {
+                    if s.run(&EditSketch {
+                        element: el,
+                        feature: id,
+                        op: SketchOp::Use {
+                            items: vec![(shape, link)],
+                        },
+                    })
+                    .is_err()
+                    {
                         continue;
                     }
                     let after = sketch_of(s, el, id)?;
-                    let new: Vec<CurveId> = after.curves.keys().filter(|c| !before.curves.contains_key(*c)).collect();
-                    s.run(&EditSketch { element: el, feature: id, op: SketchOp::SetConstruction { curves: new, construction: true } }).ok();
+                    let new: Vec<CurveId> = after
+                        .curves
+                        .keys()
+                        .filter(|c| !before.curves.contains_key(*c))
+                        .collect();
+                    s.run(&EditSketch {
+                        element: el,
+                        feature: id,
+                        op: SketchOp::SetConstruction {
+                            curves: new,
+                            construction: true,
+                        },
+                    })
+                    .ok();
                     if nearest_point(&after, q).is_none() {
                         continue;
                     }
@@ -801,18 +1275,35 @@ fn model_edges(
     let mut dists: HashMap<String, Vec<(Vec2, f64, Option<usize>)>> = HashMap::new();
     // Per edge id: lines of the sketch parallel (false) or perpendicular (true) to it.
     let mut squares: HashMap<String, Vec<(Vec2, Vec2, bool)>> = HashMap::new();
-    let point_of = |v: &str| map.points.get(v).and_then(|p| g.points.get(*p)).map(|p| p.pos);
+    let point_of = |v: &str| {
+        map.points
+            .get(v)
+            .and_then(|p| g.points.get(*p))
+            .map(|p| p.pos)
+    };
     // Points on a curve: a line's ends, three points round a circle, an arc's ends and middle
     // (counterclockwise from its start).
     let curve_points = |v: &str| -> Vec<Vec2> {
         let pos = |p: PointId| g.points.get(p).map(|p| p.pos);
-        match map.curves.get(v).and_then(|c| g.curves.get(*c)).map(|c| c.kind) {
+        match map
+            .curves
+            .get(v)
+            .and_then(|c| g.curves.get(*c))
+            .map(|c| c.kind)
+        {
             Some(CurveKind::Line { a, b }) => [a, b].iter().filter_map(|p| pos(*p)).collect(),
             Some(CurveKind::Circle { center, radius }) => pos(center)
-                .map(|c| (0..3).map(|k| f64::from(k) * std::f64::consts::TAU / 3.0).map(|t| Vec2::new(c.x + radius * t.cos(), c.y + radius * t.sin())).collect())
+                .map(|c| {
+                    (0..3)
+                        .map(|k| f64::from(k) * std::f64::consts::TAU / 3.0)
+                        .map(|t| Vec2::new(c.x + radius * t.cos(), c.y + radius * t.sin()))
+                        .collect()
+                })
                 .unwrap_or_default(),
             Some(CurveKind::Arc { center, start, end }) => {
-                let (Some(c), Some(a), Some(b)) = (pos(center), pos(start), pos(end)) else { return Vec::new() };
+                let (Some(c), Some(a), Some(b)) = (pos(center), pos(start), pos(end)) else {
+                    return Vec::new();
+                };
                 let (t0, mut t1) = ((a.y - c.y).atan2(a.x - c.x), (b.y - c.y).atan2(b.x - c.x));
                 if t1 <= t0 {
                     t1 += std::f64::consts::TAU;
@@ -825,8 +1316,15 @@ fn model_edges(
     };
     // A circle's or arc's centre (a CONCENTRIC constraint's local entity).
     let centre_of = |v: &str| -> Option<Vec2> {
-        match map.curves.get(v).and_then(|c| g.curves.get(*c)).map(|c| c.kind) {
-            Some(CurveKind::Circle { center, .. } | CurveKind::Arc { center, .. }) => g.points.get(center).map(|p| p.pos),
+        match map
+            .curves
+            .get(v)
+            .and_then(|c| g.curves.get(*c))
+            .map(|c| c.kind)
+        {
+            Some(CurveKind::Circle { center, .. } | CurveKind::Arc { center, .. }) => {
+                g.points.get(center).map(|p| p.pos)
+            }
             _ => point_of(v),
         }
     };
@@ -834,7 +1332,10 @@ fn model_edges(
         // A horizontal or vertical alignment with a model entity says nothing about which
         // edge its point is on (it is level with a vertex): finding an edge through the point
         // projected a stray line into the sketch.
-        if matches!(c["constraintType"].as_str(), Some("HORIZONTAL" | "VERTICAL")) {
+        if matches!(
+            c["constraintType"].as_str(),
+            Some("HORIZONTAL" | "VERTICAL")
+        ) {
             continue;
         }
         let params = c["parameters"].as_array().cloned().unwrap_or_default();
@@ -842,9 +1343,22 @@ fn model_edges(
         let kind = c["constraintType"].as_str();
         // An Offset of a circle or arc shares its centre; of a line, it is parallel.
         let round_offset = kind == Some("OFFSET")
-            && params.iter().filter(|p| p["parameterId"].as_str().is_some_and(|i| i.starts_with("local"))).any(|p| {
-                p["value"].as_str().and_then(|v| map.curves.get(v)).and_then(|k| g.curves.get(*k)).is_some_and(|x| matches!(x.kind, CurveKind::Circle { .. } | CurveKind::Arc { .. }))
-            });
+            && params
+                .iter()
+                .filter(|p| {
+                    p["parameterId"]
+                        .as_str()
+                        .is_some_and(|i| i.starts_with("local"))
+                })
+                .any(|p| {
+                    p["value"]
+                        .as_str()
+                        .and_then(|v| map.curves.get(v))
+                        .and_then(|k| g.curves.get(*k))
+                        .is_some_and(|x| {
+                            matches!(x.kind, CurveKind::Circle { .. } | CurveKind::Arc { .. })
+                        })
+                });
         let concentric = kind == Some("CONCENTRIC") || round_offset;
         let square = match kind {
             Some("PARALLEL" | "OFFSET") => Some(false),
@@ -854,13 +1368,24 @@ fn model_edges(
         // A distance from a point (or a line: both its ends): the edge is that far off it,
         // not through it.
         // A Horizontal or Vertical distance: along which of cadrs's axes.
-        let along = match (params.iter().find(|p| p["parameterId"] == "direction").and_then(|p| p["value"].as_str()), swap) {
+        let along = match (
+            params
+                .iter()
+                .find(|p| p["parameterId"] == "direction")
+                .and_then(|p| p["value"].as_str()),
+            swap,
+        ) {
             (Some("HORIZONTAL"), Some(sw)) => Some(if sw { 1 } else { 0 }),
             (Some("VERTICAL"), Some(sw)) => Some(if sw { 0 } else { 1 }),
             _ => None,
         };
         let distance = (c["constraintType"].as_str() == Some("DISTANCE"))
-            .then(|| params.iter().find(|p| p["parameterId"] == "length").and_then(|p| p["expression"].as_str()))
+            .then(|| {
+                params
+                    .iter()
+                    .find(|p| p["parameterId"] == "length")
+                    .and_then(|p| p["expression"].as_str())
+            })
             .flatten()
             .and_then(|e| crate::expr::eval(e, &HashMap::<String, String>::new()).ok())
             .filter(|q| q.len == 1)
@@ -868,17 +1393,33 @@ fn model_edges(
         let mut local_points = Vec::new();
         // A distance from a circle or arc: from its centre, its radius further.
         let round = distance.and_then(|d| {
-            params.iter().filter(|p| p["parameterId"].as_str().is_some_and(|i| i.starts_with("local"))).find_map(|p| {
-                let pos = |k: PointId| g.points.get(k).map(|x| x.pos);
-                match map.curves.get(p["value"].as_str()?).and_then(|c| g.curves.get(*c)).map(|c| c.kind)? {
-                    CurveKind::Circle { center, radius } => Some((pos(center)?, d + radius)),
-                    CurveKind::Arc { center, start, .. } => Some((pos(center)?, d + pos(center)?.distance(pos(start)?))),
-                    _ => None,
-                }
-            })
+            params
+                .iter()
+                .filter(|p| {
+                    p["parameterId"]
+                        .as_str()
+                        .is_some_and(|i| i.starts_with("local"))
+                })
+                .find_map(|p| {
+                    let pos = |k: PointId| g.points.get(k).map(|x| x.pos);
+                    match map
+                        .curves
+                        .get(p["value"].as_str()?)
+                        .and_then(|c| g.curves.get(*c))
+                        .map(|c| c.kind)?
+                    {
+                        CurveKind::Circle { center, radius } => Some((pos(center)?, d + radius)),
+                        CurveKind::Arc { center, start, .. } => {
+                            Some((pos(center)?, d + pos(center)?.distance(pos(start)?)))
+                        }
+                        _ => None,
+                    }
+                })
         });
         for p in &params {
-            if p["parameterId"].as_str().is_some_and(|i| i.starts_with("local"))
+            if p["parameterId"]
+                .as_str()
+                .is_some_and(|i| i.starts_with("local"))
                 && let Some(v) = p["value"].as_str()
             {
                 if concentric {
@@ -892,44 +1433,101 @@ fn model_edges(
             }
         }
         for p in &params {
-            if !p["parameterId"].as_str().is_some_and(|i| i.starts_with("external")) {
+            if !p["parameterId"]
+                .as_str()
+                .is_some_and(|i| i.starts_with("external"))
+            {
                 continue;
             }
-            let ids: Vec<&str> = p["queries"].as_array().into_iter().flatten().flat_map(|q| q["deterministicIds"].as_array().into_iter().flatten().filter_map(Value::as_str)).collect();
+            let ids: Vec<&str> = p["queries"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .flat_map(|q| {
+                    q["deterministicIds"]
+                        .as_array()
+                        .into_iter()
+                        .flatten()
+                        .filter_map(Value::as_str)
+                })
+                .collect();
             let [eid] = ids.as_slice() else { continue };
-            if matches!(*eid, ORIGIN_ID | TOP_ID | FRONT_ID | RIGHT_ID) || vertices.contains_key(*eid) {
+            if matches!(*eid, ORIGIN_ID | TOP_ID | FRONT_ID | RIGHT_ID)
+                || vertices.contains_key(*eid)
+            {
                 continue;
             }
             let h = hints.entry(eid.to_string()).or_default();
             // An Offset's master: the offset curves it is the master of (a corner's second
             // master has the second curve), parallel or concentric.
             if kind == Some("OFFSET") {
-                let has_second = params.iter().any(|q| matches!(q["parameterId"].as_str(), Some("externalSecond" | "localSecond")) && (q["value"].is_string() || q["queries"].as_array().is_some_and(|a| !a.is_empty())));
+                let has_second = params.iter().any(|q| {
+                    matches!(
+                        q["parameterId"].as_str(),
+                        Some("externalSecond" | "localSecond")
+                    ) && (q["value"].is_string()
+                        || q["queries"].as_array().is_some_and(|a| !a.is_empty()))
+                });
                 let keys: &[&str] = match p["parameterId"].as_str() {
                     Some("externalSecond") => &["localSecondOffset"],
                     _ if has_second => &["localOffset"],
                     _ => &["localOffset", "localSecondOffset"],
                 };
                 // The Offset's distance: the Distance on its first curve (both pairs are that far).
-                let first = params.iter().find(|q| q["parameterId"] == "localOffset").and_then(|q| q["value"].as_str());
-                let apart = first.and_then(|first| {
-                    feature["constraints"].as_array().into_iter().flatten().filter(|d| d["constraintType"].as_str() == Some("DISTANCE")).find_map(|d| {
-                        let ps = d["parameters"].as_array()?;
-                        ps.iter().any(|p| p["value"].as_str() == Some(first)).then(|| ps.iter().find(|p| p["parameterId"] == "length").and_then(|p| p["expression"].as_str()))?
+                let first = params
+                    .iter()
+                    .find(|q| q["parameterId"] == "localOffset")
+                    .and_then(|q| q["value"].as_str());
+                let apart = first
+                    .and_then(|first| {
+                        feature["constraints"]
+                            .as_array()
+                            .into_iter()
+                            .flatten()
+                            .filter(|d| d["constraintType"].as_str() == Some("DISTANCE"))
+                            .find_map(|d| {
+                                let ps = d["parameters"].as_array()?;
+                                ps.iter().any(|p| p["value"].as_str() == Some(first)).then(
+                                    || {
+                                        ps.iter()
+                                            .find(|p| p["parameterId"] == "length")
+                                            .and_then(|p| p["expression"].as_str())
+                                    },
+                                )?
+                            })
                     })
-                })
-                .and_then(|e| crate::expr::eval(e, &HashMap::<String, String>::new()).ok())
-                .filter(|q| q.len == 1)
-                .map(|q| q.v);
+                    .and_then(|e| crate::expr::eval(e, &HashMap::<String, String>::new()).ok())
+                    .filter(|q| q.len == 1)
+                    .map(|q| q.v);
                 for k in keys {
-                    let Some(v) = params.iter().find(|q| q["parameterId"] == *k).and_then(|q| q["value"].as_str()) else { continue };
-                    match map.curves.get(v).and_then(|c| g.curves.get(*c)).map(|c| c.kind) {
-                        Some(CurveKind::Circle { .. } | CurveKind::Arc { .. }) => centres.entry(eid.to_string()).or_default().extend(centre_of(v)),
+                    let Some(v) = params
+                        .iter()
+                        .find(|q| q["parameterId"] == *k)
+                        .and_then(|q| q["value"].as_str())
+                    else {
+                        continue;
+                    };
+                    match map
+                        .curves
+                        .get(v)
+                        .and_then(|c| g.curves.get(*c))
+                        .map(|c| c.kind)
+                    {
+                        Some(CurveKind::Circle { .. } | CurveKind::Arc { .. }) => centres
+                            .entry(eid.to_string())
+                            .or_default()
+                            .extend(centre_of(v)),
                         _ => {
                             if let [a, b] = curve_points(v).as_slice() {
-                                squares.entry(eid.to_string()).or_default().push((*a, *b, false));
+                                squares
+                                    .entry(eid.to_string())
+                                    .or_default()
+                                    .push((*a, *b, false));
                                 if let Some(d) = apart {
-                                    dists.entry(eid.to_string()).or_default().extend([(*a, d, None), (*b, d, None)]);
+                                    dists
+                                        .entry(eid.to_string())
+                                        .or_default()
+                                        .extend([(*a, d, None), (*b, d, None)]);
                                 }
                             }
                         }
@@ -938,14 +1536,29 @@ fn model_edges(
                 continue;
             }
             // Each line its own pair of ends (an Offset may have one each side).
-            if let Some(perp) = square.filter(|_| !concentric && !local_points.is_empty() && local_points.len() % 2 == 0) {
-                squares.entry(eid.to_string()).or_default().extend(local_points.chunks(2).map(|ab| (ab[0], ab[1], perp)));
+            if let Some(perp) = square
+                .filter(|_| !concentric && !local_points.is_empty() && local_points.len() % 2 == 0)
+            {
+                squares
+                    .entry(eid.to_string())
+                    .or_default()
+                    .extend(local_points.chunks(2).map(|ab| (ab[0], ab[1], perp)));
             } else if let Some(r) = round {
-                dists.entry(eid.to_string()).or_default().push((r.0, r.1, None));
+                dists
+                    .entry(eid.to_string())
+                    .or_default()
+                    .push((r.0, r.1, None));
             } else if distance.is_some() && matches!(local_points.as_slice(), [_] | [_, _]) {
-                dists.entry(eid.to_string()).or_default().extend(local_points.iter().map(|p| (*p, distance.unwrap_or_default(), along)));
+                dists.entry(eid.to_string()).or_default().extend(
+                    local_points
+                        .iter()
+                        .map(|p| (*p, distance.unwrap_or_default(), along)),
+                );
             } else if concentric {
-                centres.entry(eid.to_string()).or_default().extend(local_points.iter().copied());
+                centres
+                    .entry(eid.to_string())
+                    .or_default()
+                    .extend(local_points.iter().copied());
             } else if midpoint {
                 h.1.extend(local_points.iter().copied());
             } else {
@@ -959,7 +1572,11 @@ fn model_edges(
     let mut unmatched: Vec<String> = Vec::new();
     // The ids with the most hints first; an edge one of them took is another's last resort
     // (each id is its own edge).
-    let count = |eid: &String, on: usize| on + centres.get(eid).map_or(0, Vec::len) + dists.get(eid).map_or(0, Vec::len) + squares.get(eid).map_or(0, Vec::len);
+    let count = |eid: &String, on: usize| {
+        on + centres.get(eid).map_or(0, Vec::len)
+            + dists.get(eid).map_or(0, Vec::len)
+            + squares.get(eid).map_or(0, Vec::len)
+    };
     let mut order: Vec<_> = hints.into_iter().collect();
     order.sort_by_key(|(eid, (on, mids))| std::cmp::Reverse(count(eid, on.len() + mids.len())));
     let mut taken: Vec<cadrs_sketch::Link> = Vec::new();
@@ -970,8 +1587,17 @@ fn model_edges(
         // Where Onshape's final parts have the edge, when they still do: its start, middle and
         // end on the sketch plane (they pick among the edges the hints fit equally: ids name
         // the final parts', which can differ from the model this sketch saw).
-        let known: Vec<Vec2> = model_points.get(&eid).filter(|p| p.len() == 3).map(|p| p.iter().map(|q| frame.to_sketch(*q)).collect()).unwrap_or_default();
-        if on.is_empty() && mids.is_empty() && centred.is_empty() && off.is_empty() && along.is_empty() {
+        let known: Vec<Vec2> = model_points
+            .get(&eid)
+            .filter(|p| p.len() == 3)
+            .map(|p| p.iter().map(|q| frame.to_sketch(*q)).collect())
+            .unwrap_or_default();
+        if on.is_empty()
+            && mids.is_empty()
+            && centred.is_empty()
+            && off.is_empty()
+            && along.is_empty()
+        {
             if std::env::var_os("CADRS_ONSHAPE_DEBUG_EDGES").is_some() {
                 eprintln!("EDGE {eid}: no points to find it by");
             }
@@ -980,11 +1606,21 @@ fn model_edges(
         }
         // The edge satisfying the most hints (then the one closest to them).
         // (Score, error, the edge as projected, its link, the hints on it.)
-        type Best = ((usize, bool, usize), f64, cadrs_sketch::projection::Projected, cadrs_sketch::Link, usize);
+        type Best = (
+            (usize, bool, usize),
+            f64,
+            cadrs_sketch::projection::Projected,
+            cadrs_sketch::Link,
+            usize,
+        );
         let mut best: Option<Best> = None;
         for part in parts {
             for e in &part.solid.edges {
-                let Some(shape) = cadrs_core::links::edge_curve(e).and_then(|c| cadrs_core::links::project(c, &frame)) else { continue };
+                let Some(shape) = cadrs_core::links::edge_curve(e)
+                    .and_then(|c| cadrs_core::links::project(c, &frame))
+                else {
+                    continue;
+                };
                 let mut hits = 0;
                 let mut err = 0.0;
                 for p in &on {
@@ -993,7 +1629,9 @@ fn model_edges(
                     // keeps whole that cadrs has in collinear pieces); the piece it is on is
                     // the closer.
                     let on_line = match shape {
-                        cadrs_sketch::projection::Projected::Line(a, b) if (b - a).length() > 1e-9 => {
+                        cadrs_sketch::projection::Projected::Line(a, b)
+                            if (b - a).length() > 1e-9 =>
+                        {
                             let ab = b - a;
                             ((*p - a).x * ab.y - (*p - a).y * ab.x).abs() / ab.length()
                         }
@@ -1006,7 +1644,9 @@ fn model_edges(
                 }
                 for p in &mids {
                     let d = match shape {
-                        cadrs_sketch::projection::Projected::Line(a, b) => p.distance(Vec2::new((a.x + b.x) / 2.0, (a.y + b.y) / 2.0)),
+                        cadrs_sketch::projection::Projected::Line(a, b) => {
+                            p.distance(Vec2::new((a.x + b.x) / 2.0, (a.y + b.y) / 2.0))
+                        }
                         _ => f64::MAX,
                     };
                     if d < tol {
@@ -1016,7 +1656,9 @@ fn model_edges(
                 }
                 for (a0, b0, perp) in &along {
                     // A straight edge square to (or along) the line: the nearest such.
-                    let cadrs_sketch::projection::Projected::Line(a, b) = shape else { continue };
+                    let cadrs_sketch::projection::Projected::Line(a, b) = shape else {
+                        continue;
+                    };
                     let (u, w) = (b - a, *b0 - *a0);
                     let (lu, lw) = (u.length(), w.length());
                     if lu < 1e-9 || lw < 1e-9 {
@@ -1032,7 +1674,9 @@ fn model_edges(
                 for (p, want, axis) in &off {
                     // A straight edge: its line that far from the point (then the one whose
                     // segment the point is beside).
-                    let cadrs_sketch::projection::Projected::Line(a, b) = shape else { continue };
+                    let cadrs_sketch::projection::Projected::Line(a, b) = shape else {
+                        continue;
+                    };
                     let ab = b - a;
                     let l = ab.length();
                     if l < 1e-9 {
@@ -1050,11 +1694,21 @@ fn model_edges(
                     if (across - want).abs() < tol {
                         hits += 1;
                     }
-                    err += (across - want).abs().min(1.0) + (if t < 0.0 { -t } else if t > 1.0 { t - 1.0 } else { 0.0 }) * l;
+                    err += (across - want).abs().min(1.0)
+                        + (if t < 0.0 {
+                            -t
+                        } else if t > 1.0 {
+                            t - 1.0
+                        } else {
+                            0.0
+                        }) * l;
                 }
                 for p in &centred {
                     let d = match shape {
-                        cadrs_sketch::projection::Projected::Circle(c, _) | cadrs_sketch::projection::Projected::Arc { center: c, .. } => p.distance(c),
+                        cadrs_sketch::projection::Projected::Circle(c, _)
+                        | cadrs_sketch::projection::Projected::Arc { center: c, .. } => {
+                            p.distance(c)
+                        }
                         _ => f64::MAX,
                     };
                     if d < tol {
@@ -1062,15 +1716,26 @@ fn model_edges(
                     }
                     err += d.min(1.0);
                 }
-                let fits = known.iter().filter(|q| cadrs_core::links::projected_distance(&shape, **q).is_some_and(|d| d < tol)).count();
+                let fits = known
+                    .iter()
+                    .filter(|q| {
+                        cadrs_core::links::projected_distance(&shape, **q).is_some_and(|d| d < tol)
+                    })
+                    .count();
                 if hits == 0 {
                     continue;
                 }
                 // The most hints, then one no other id took, then the most of Onshape's own
                 // points, then the closest.
-                let link = cadrs_sketch::Link::Edge { feature: part.id.feature.0, edge: e.name };
+                let link = cadrs_sketch::Link::Edge {
+                    feature: part.id.feature.0,
+                    edge: e.name,
+                };
                 let score = (hits, !taken.contains(&link), fits);
-                if best.as_ref().is_none_or(|(h, e2, ..)| score > *h || (score == *h && err < *e2)) {
+                if best
+                    .as_ref()
+                    .is_none_or(|(h, e2, ..)| score > *h || (score == *h && err < *e2))
+                {
                     best = Some((score, err, shape, link, hits));
                 }
             }
@@ -1081,32 +1746,54 @@ fn model_edges(
                 let mut near = f64::MAX;
                 for part in parts {
                     for e in &part.solid.edges {
-                        let Some(shape) = cadrs_core::links::edge_curve(e).and_then(|c| cadrs_core::links::project(c, &frame)) else { continue };
+                        let Some(shape) = cadrs_core::links::edge_curve(e)
+                            .and_then(|c| cadrs_core::links::project(c, &frame))
+                        else {
+                            continue;
+                        };
                         for p in on.iter().chain(&mids) {
-                            near = near.min(cadrs_core::links::projected_distance(&shape, *p).unwrap_or(f64::MAX));
+                            near = near.min(
+                                cadrs_core::links::projected_distance(&shape, *p)
+                                    .unwrap_or(f64::MAX),
+                            );
                         }
                     }
                 }
-                eprintln!("EDGE {eid}: {} hints, nearest edge {near:.6} mm, {} parts", on.len() + mids.len(), parts.len());
+                eprintln!(
+                    "EDGE {eid}: {} hints, nearest edge {near:.6} mm, {} parts",
+                    on.len() + mids.len(),
+                    parts.len()
+                );
             }
             unmatched.push(eid.clone());
             continue;
         };
         taken.push(link);
         if hits < on.len() + mids.len() + centred.len() + off.len() + along.len() {
-            report.notes.push(format!("model edge {eid}: {hits} of {} constrained points on it", on.len() + mids.len() + centred.len() + off.len() + along.len()));
+            report.notes.push(format!(
+                "model edge {eid}: {hits} of {} constrained points on it",
+                on.len() + mids.len() + centred.len() + off.len() + along.len()
+            ));
         }
         let current = sketch_of(s, el, id)?;
         // Used already (by another reference to the same edge, or to one of its ends): that curve.
         if let Some(c) = current.constraints.values().find_map(|c| match *c {
-            cadrs_sketch::constraint::ConstraintOf::Use(CurveRef::Curve(k), l) if l == link => Some(k),
+            cadrs_sketch::constraint::ConstraintOf::Use(CurveRef::Curve(k), l) if l == link => {
+                Some(k)
+            }
             _ => None,
         }) {
             out.insert(eid, c);
             continue;
         }
         let before: std::collections::HashSet<CurveId> = current.curves.keys().collect();
-        if let Err(e) = s.run(&EditSketch { element: el, feature: id, op: SketchOp::Use { items: vec![(shape, link)] } }) {
+        if let Err(e) = s.run(&EditSketch {
+            element: el,
+            feature: id,
+            op: SketchOp::Use {
+                items: vec![(shape, link)],
+            },
+        }) {
             if std::env::var_os("CADRS_ONSHAPE_DEBUG_EDGES").is_some() {
                 eprintln!("EDGE {eid}: found ({hits} hits), but Use failed: {e}");
             }
@@ -1115,7 +1802,14 @@ fn model_edges(
         }
         let after = sketch_of(s, el, id)?;
         if let Some(c) = after.curves.keys().find(|c| !before.contains(c)) {
-            s.run(&EditSketch { element: el, feature: id, op: SketchOp::SetConstruction { curves: vec![c], construction: true } })?;
+            s.run(&EditSketch {
+                element: el,
+                feature: id,
+                op: SketchOp::SetConstruction {
+                    curves: vec![c],
+                    construction: true,
+                },
+            })?;
             out.insert(eid, c);
         }
     }
@@ -1205,13 +1899,24 @@ impl Ctx<'_> {
                     .as_array()
                     .into_iter()
                     .flatten()
-                    .flat_map(|q| q["deterministicIds"].as_array().into_iter().flatten().filter_map(Value::as_str))
+                    .flat_map(|q| {
+                        q["deterministicIds"]
+                            .as_array()
+                            .into_iter()
+                            .flatten()
+                            .filter_map(Value::as_str)
+                    })
                     .collect();
                 return match ids.as_slice() {
-                    [ORIGIN_ID] => Some(self.origin_at.map_or(Ent::Origin, |(_, a, b)| Ent::OriginTraces(a, b))),
+                    [ORIGIN_ID] => Some(
+                        self.origin_at
+                            .map_or(Ent::Origin, |(_, a, b)| Ent::OriginTraces(a, b)),
+                    ),
                     [plane @ (TOP_ID | FRONT_ID | RIGHT_ID)] => Some(self.axis_of_plane(plane)),
                     [v] if self.vertices.contains_key(*v) => Some(Ent::Vertex(self.vertices[*v].1)),
-                    [v] if let Some(&q) = self.projected.get(*v) => nearest_point(self.g, q).map(|p| Ent::Point(p, q)),
+                    [v] if let Some(&q) = self.projected.get(*v) => {
+                        nearest_point(self.g, q).map(|p| Ent::Point(p, q))
+                    }
                     [edge] if self.uses.contains_key(*edge) => Some(Ent::Curve(self.uses[*edge])),
                     _ => Some(Ent::Model),
                 };
@@ -1269,11 +1974,16 @@ impl Ctx<'_> {
             "COINCIDENT" => match (first, second) {
                 (Some(Ent::Point(a, _)), Some(Ent::Point(b, _))) if a == b => Nothing,
                 // On a model vertex: pierced by the part edge there.
-                (Some(Ent::Point(_, p)), Some(Ent::Vertex(l))) | (Some(Ent::Vertex(l)), Some(Ent::Point(_, p))) => one(ConstraintOf::Pierce(PointSpec::At(p), l)),
-                // On the origin, away from the sketch's: on the two plane traces through it.
-                (Some(Ent::Point(_, p)), Some(Ent::OriginTraces(a, b))) | (Some(Ent::OriginTraces(a, b)), Some(Ent::Point(_, p))) => {
-                    Specs(vec![ConstraintOf::PointOnCurve(PointSpec::At(p), CurveSpec::Id(a)), ConstraintOf::PointOnCurve(PointSpec::At(p), CurveSpec::Id(b))])
+                (Some(Ent::Point(_, p)), Some(Ent::Vertex(l)))
+                | (Some(Ent::Vertex(l)), Some(Ent::Point(_, p))) => {
+                    one(ConstraintOf::Pierce(PointSpec::At(p), l))
                 }
+                // On the origin, away from the sketch's: on the two plane traces through it.
+                (Some(Ent::Point(_, p)), Some(Ent::OriginTraces(a, b)))
+                | (Some(Ent::OriginTraces(a, b)), Some(Ent::Point(_, p))) => Specs(vec![
+                    ConstraintOf::PointOnCurve(PointSpec::At(p), CurveSpec::Id(a)),
+                    ConstraintOf::PointOnCurve(PointSpec::At(p), CurveSpec::Id(b)),
+                ]),
                 _ if model(first) || model(second) => Dropped("to model geometry"),
                 _ => {
                     if let (Some(a), Some(b)) = (pt(first), pt(second)) {
@@ -1292,12 +2002,18 @@ impl Ctx<'_> {
             "HORIZONTAL" | "VERTICAL" => {
                 // A model vertex on the plane: the sketch point pierced there.
                 let at_vertex = |e: Option<Ent>| match e {
-                    Some(Ent::Vertex(l)) => self.vertices.values().find(|(_, x)| *x == l).map(|(p, _)| PointSpec::At(*p)),
+                    Some(Ent::Vertex(l)) => self
+                        .vertices
+                        .values()
+                        .find(|(_, x)| *x == l)
+                        .map(|(p, _)| PointSpec::At(*p)),
                     e => pt(e),
                 };
                 let o = match (first, second) {
                     (Some(Ent::Curve(l)), None) => Some(Orient::Line(CurveSpec::Id(l))),
-                    _ => at_vertex(first).zip(at_vertex(second)).map(|(a, b)| Orient::Points(a, b)),
+                    _ => at_vertex(first)
+                        .zip(at_vertex(second))
+                        .map(|(a, b)| Orient::Points(a, b)),
                 };
                 let Some(swap) = self.swap else {
                     return Dropped("the sketch's axes are turned against cadrs's");
@@ -1306,48 +2022,79 @@ impl Ctx<'_> {
                     Some(o) if (kind == "HORIZONTAL") != swap => one(ConstraintOf::Horizontal(o)),
                     Some(o) => one(ConstraintOf::Vertical(o)),
                     None if model(first) || model(second) => Dropped("to model geometry"),
-                    None if matches!(first, Some(Ent::Vertex(_))) || matches!(second, Some(Ent::Vertex(_))) => Dropped("level with a model vertex: cadrs has no such reference yet"),
+                    None if matches!(first, Some(Ent::Vertex(_)))
+                        || matches!(second, Some(Ent::Vertex(_))) =>
+                    {
+                        Dropped("level with a model vertex: cadrs has no such reference yet")
+                    }
                     None => Dropped("unsupported references"),
                 }
             }
-            "PARALLEL" | "PERPENDICULAR" | "TANGENT" | "EQUAL" | "CONCENTRIC" => match (cv(first), cv(second)) {
-                (Some(a), Some(b)) => one(match kind {
-                    "PARALLEL" => ConstraintOf::Parallel(a, b),
-                    "PERPENDICULAR" => ConstraintOf::Perpendicular(a, b),
-                    "TANGENT" => ConstraintOf::Tangent(a, b),
-                    "EQUAL" => ConstraintOf::Equal(a, b),
-                    _ => ConstraintOf::Concentric(a, b),
-                }),
-                // A point concentric with a circle (a circle's centre with a model edge): on its
-                // centre.
-                _ if kind == "CONCENTRIC" && matches!((first, second), (Some(Ent::Point(..)), Some(Ent::Curve(_))) | (Some(Ent::Curve(_)), Some(Ent::Point(..)))) => {
-                    let (p, cid) = match (first, second) {
-                        (Some(Ent::Point(..)), Some(Ent::Curve(c))) => (pt(first), c),
-                        (_, _) => (pt(second), if let Some(Ent::Curve(c)) = first { c } else { unreachable!() }),
-                    };
-                    match (p, self.center_of(cid)) {
-                        (Some(p), Some(c)) => one(ConstraintOf::Coincident(p, c)),
-                        _ => Dropped("no centre"),
+            "PARALLEL" | "PERPENDICULAR" | "TANGENT" | "EQUAL" | "CONCENTRIC" => {
+                match (cv(first), cv(second)) {
+                    (Some(a), Some(b)) => one(match kind {
+                        "PARALLEL" => ConstraintOf::Parallel(a, b),
+                        "PERPENDICULAR" => ConstraintOf::Perpendicular(a, b),
+                        "TANGENT" => ConstraintOf::Tangent(a, b),
+                        "EQUAL" => ConstraintOf::Equal(a, b),
+                        _ => ConstraintOf::Concentric(a, b),
+                    }),
+                    // A point concentric with a circle (a circle's centre with a model edge): on its
+                    // centre.
+                    _ if kind == "CONCENTRIC"
+                        && matches!(
+                            (first, second),
+                            (Some(Ent::Point(..)), Some(Ent::Curve(_)))
+                                | (Some(Ent::Curve(_)), Some(Ent::Point(..)))
+                        ) =>
+                    {
+                        let (p, cid) = match (first, second) {
+                            (Some(Ent::Point(..)), Some(Ent::Curve(c))) => (pt(first), c),
+                            (_, _) => (
+                                pt(second),
+                                if let Some(Ent::Curve(c)) = first {
+                                    c
+                                } else {
+                                    unreachable!()
+                                },
+                            ),
+                        };
+                        match (p, self.center_of(cid)) {
+                            (Some(p), Some(c)) => one(ConstraintOf::Coincident(p, c)),
+                            _ => Dropped("no centre"),
+                        }
                     }
-                }
-                _ if kind == "CONCENTRIC" && matches!(second, Some(Ent::Origin)) => match first {
-                    Some(Ent::Curve(cid)) => self.center_of(cid).map_or(Dropped("no centre"), |p| one(ConstraintOf::Coincident(p, PointSpec::Origin))),
+                    _ if kind == "CONCENTRIC" && matches!(second, Some(Ent::Origin)) => match first
+                    {
+                        Some(Ent::Curve(cid)) => {
+                            self.center_of(cid).map_or(Dropped("no centre"), |p| {
+                                one(ConstraintOf::Coincident(p, PointSpec::Origin))
+                            })
+                        }
+                        _ => Dropped("unsupported references"),
+                    },
+                    _ if model(first) || model(second) => Dropped("to model geometry"),
                     _ => Dropped("unsupported references"),
-                },
-                _ if model(first) || model(second) => Dropped("to model geometry"),
-                _ => Dropped("unsupported references"),
-            },
+                }
+            }
             "MIDPOINT" => {
                 let e1 = self.ent(c, "localEntity1");
                 let e2 = self.ent(c, "localEntity2");
                 let mid = self.ent(c, "localMidpoint");
                 match (e1, e2, mid) {
-                    (a, b, Some(m)) if pt(a).is_some() && pt(b).is_some() && pt(Some(m)).is_some() => {
-                        one(ConstraintOf::Center(pt(Some(m)).unwrap(), pt(a).unwrap(), pt(b).unwrap()))
+                    (a, b, Some(m))
+                        if pt(a).is_some() && pt(b).is_some() && pt(Some(m)).is_some() =>
+                    {
+                        one(ConstraintOf::Center(
+                            pt(Some(m)).unwrap(),
+                            pt(a).unwrap(),
+                            pt(b).unwrap(),
+                        ))
                     }
-                    (Some(p @ (Ent::Point(..) | Ent::Origin)), Some(Ent::Curve(l)), None) | (Some(Ent::Curve(l)), Some(p @ (Ent::Point(..) | Ent::Origin)), None) => {
-                        one(ConstraintOf::Midpoint(pt(Some(p)).unwrap(), CurveSpec::Id(l)))
-                    }
+                    (Some(p @ (Ent::Point(..) | Ent::Origin)), Some(Ent::Curve(l)), None)
+                    | (Some(Ent::Curve(l)), Some(p @ (Ent::Point(..) | Ent::Origin)), None) => one(
+                        ConstraintOf::Midpoint(pt(Some(p)).unwrap(), CurveSpec::Id(l)),
+                    ),
                     _ if model(e1) || model(e2) => Dropped("to model geometry"),
                     _ => Dropped("unsupported references"),
                 }
@@ -1360,11 +2107,19 @@ impl Ctx<'_> {
             "MIRROR" => {
                 let axis = self.ent(c, "localMirror");
                 let Some(axis) = cv(axis) else {
-                    return if model(axis) { Dropped("mirror line on the model") } else { Dropped("unsupported mirror line") };
+                    return if model(axis) {
+                        Dropped("mirror line on the model")
+                    } else {
+                        Dropped("unsupported mirror line")
+                    };
                 };
                 match (first, second) {
-                    (a, b) if pt(a).is_some() && pt(b).is_some() => one(ConstraintOf::SymmetricPoints(pt(a).unwrap(), pt(b).unwrap(), axis)),
-                    (Some(Ent::Curve(a)), Some(Ent::Curve(b))) => one(ConstraintOf::SymmetricCurves(CurveSpec::Id(a), CurveSpec::Id(b), axis)),
+                    (a, b) if pt(a).is_some() && pt(b).is_some() => one(
+                        ConstraintOf::SymmetricPoints(pt(a).unwrap(), pt(b).unwrap(), axis),
+                    ),
+                    (Some(Ent::Curve(a)), Some(Ent::Curve(b))) => one(
+                        ConstraintOf::SymmetricCurves(CurveSpec::Id(a), CurveSpec::Id(b), axis),
+                    ),
                     _ => Dropped("unsupported references"),
                 }
             }
@@ -1377,22 +2132,37 @@ impl Ctx<'_> {
                 let master = self.ent(c, "localMaster");
                 let second = self.ent(c, "localSecond").or(master);
                 let mut out = Vec::new();
-                for (offset, master) in [(self.ent(c, "localOffset"), master), (self.ent(c, "localSecondOffset"), second)] {
+                for (offset, master) in [
+                    (self.ent(c, "localOffset"), master),
+                    (self.ent(c, "localSecondOffset"), second),
+                ] {
                     if offset.is_none() {
                         continue;
                     }
                     match (cv(offset), cv(master)) {
-                        (Some(a), Some(b)) if round(offset) && round(master) => out.push(ConstraintOf::Concentric(a, b)),
-                        (Some(a), Some(b)) if !round(offset) && !round(master) => out.push(ConstraintOf::Parallel(a, b)),
-                        _ if model(master) => return Dropped("offset of a model edge cadrs didn't find"),
+                        (Some(a), Some(b)) if round(offset) && round(master) => {
+                            out.push(ConstraintOf::Concentric(a, b))
+                        }
+                        (Some(a), Some(b)) if !round(offset) && !round(master) => {
+                            out.push(ConstraintOf::Parallel(a, b))
+                        }
+                        _ if model(master) => {
+                            return Dropped("offset of a model edge cadrs didn't find");
+                        }
                         _ => return Dropped("unsupported references"),
                     }
                 }
                 let (o1, o2) = (self.ent(c, "localOffset"), self.ent(c, "localSecondOffset"));
-                if let (Some(m1), Some(o1), Some(m2), Some(o2)) = (cv(master), cv(o1), cv(second), cv(o2)) {
+                if let (Some(m1), Some(o1), Some(m2), Some(o2)) =
+                    (cv(master), cv(o1), cv(second), cv(o2))
+                {
                     out.push(ConstraintOf::EqualOffset(m1, o1, m2, o2));
                 }
-                if out.is_empty() { Dropped("unsupported references") } else { Specs(out) }
+                if out.is_empty() {
+                    Dropped("unsupported references")
+                } else {
+                    Specs(out)
+                }
             }
             // A sketch Linear pattern (one row): each copy of a curve the seed's size (a line its
             // direction too), each row of points equally spaced along its construction line, the
@@ -1400,32 +2170,70 @@ impl Ctx<'_> {
             // a seed and its first copy.)
             "LINEAR_PATTERN" => {
                 let (instances, n1, n2) = pattern_instances(c);
-                let Some(lines) = c["entityId"].as_str().and_then(|k| self.pattern_lines.get(k)) else {
-                    return Dropped(if n2 > 1 { "two-way pattern: no cadrs equivalent yet" } else { "unsupported references" });
+                let Some(lines) = c["entityId"]
+                    .as_str()
+                    .and_then(|k| self.pattern_lines.get(k))
+                else {
+                    return Dropped(if n2 > 1 {
+                        "two-way pattern: no cadrs equivalent yet"
+                    } else {
+                        "unsupported references"
+                    });
                 };
                 let mut out = Vec::new();
-                let groups: std::collections::BTreeSet<usize> = instances.keys().map(|k| k.0).collect();
+                let groups: std::collections::BTreeSet<usize> =
+                    instances.keys().map(|k| k.0).collect();
                 for g in groups {
-                    let ent = |i: usize| instances.get(&(g, i, 0)).and_then(|v| self.map.points.get(v).map(|p| Ent::Point(*p, self.g.points.get(*p).map(|x| x.pos).unwrap_or_default())).or_else(|| self.map.curves.get(v).map(|k| Ent::Curve(*k))));
+                    let ent = |i: usize| {
+                        instances.get(&(g, i, 0)).and_then(|v| {
+                            self.map
+                                .points
+                                .get(v)
+                                .map(|p| {
+                                    Ent::Point(
+                                        *p,
+                                        self.g.points.get(*p).map(|x| x.pos).unwrap_or_default(),
+                                    )
+                                })
+                                .or_else(|| self.map.curves.get(v).map(|k| Ent::Curve(*k)))
+                        })
+                    };
                     match lines.iter().find(|(lg, _)| *lg == g) {
                         // A row of points.
                         Some((_, line)) => {
                             let l = CurveSpec::Id(*line);
                             for i in 1..n1 - 1 {
-                                let (Some(p), Some(a), Some(b)) = (pt(ent(i)), pt(ent(i - 1)), pt(ent(i + 1))) else { return Dropped("unsupported references") };
+                                let (Some(p), Some(a), Some(b)) =
+                                    (pt(ent(i)), pt(ent(i - 1)), pt(ent(i + 1)))
+                                else {
+                                    return Dropped("unsupported references");
+                                };
                                 out.push(ConstraintOf::PointOnCurve(p, l));
                                 out.push(ConstraintOf::EqualDistance(p, a, b));
                             }
                         }
                         // A copied curve.
                         None => {
-                            let Some(Ent::Curve(seed)) = ent(0) else { continue };
-                            let line = matches!(self.g.curves.get(seed).map(|x| x.kind), Some(CurveKind::Line { .. }));
+                            let Some(Ent::Curve(seed)) = ent(0) else {
+                                continue;
+                            };
+                            let line = matches!(
+                                self.g.curves.get(seed).map(|x| x.kind),
+                                Some(CurveKind::Line { .. })
+                            );
                             for i in 1..n1 {
-                                let Some(Ent::Curve(k)) = ent(i) else { return Dropped("unsupported references") };
-                                out.push(ConstraintOf::Equal(CurveSpec::Id(k), CurveSpec::Id(seed)));
+                                let Some(Ent::Curve(k)) = ent(i) else {
+                                    return Dropped("unsupported references");
+                                };
+                                out.push(ConstraintOf::Equal(
+                                    CurveSpec::Id(k),
+                                    CurveSpec::Id(seed),
+                                ));
                                 if line {
-                                    out.push(ConstraintOf::Parallel(CurveSpec::Id(k), CurveSpec::Id(seed)));
+                                    out.push(ConstraintOf::Parallel(
+                                        CurveSpec::Id(k),
+                                        CurveSpec::Id(seed),
+                                    ));
                                 }
                             }
                         }
@@ -1434,11 +2242,21 @@ impl Ctx<'_> {
                 // The rows alike.
                 if let Some(((_, first), rest)) = lines.split_first() {
                     for (_, l) in rest {
-                        out.push(ConstraintOf::Parallel(CurveSpec::Id(*l), CurveSpec::Id(*first)));
-                        out.push(ConstraintOf::Equal(CurveSpec::Id(*l), CurveSpec::Id(*first)));
+                        out.push(ConstraintOf::Parallel(
+                            CurveSpec::Id(*l),
+                            CurveSpec::Id(*first),
+                        ));
+                        out.push(ConstraintOf::Equal(
+                            CurveSpec::Id(*l),
+                            CurveSpec::Id(*first),
+                        ));
                     }
                 }
-                if out.is_empty() { Dropped("unsupported references") } else { Specs(out) }
+                if out.is_empty() {
+                    Dropped("unsupported references")
+                } else {
+                    Specs(out)
+                }
             }
             "PROJECTED" => match first {
                 // The projected curve keeps its place; the link to the model is not imported.
@@ -1448,7 +2266,11 @@ impl Ctx<'_> {
             },
             "DISTANCE" | "LENGTH" | "DIAMETER" | "RADIUS" | "ANGLE" => {
                 // A driven one shows its measured value and holds nothing.
-                let driven = c["parameters"].as_array().into_iter().flatten().any(|p| p["parameterId"] == "driven" && p["value"] == true);
+                let driven = c["parameters"]
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+                    .any(|p| p["parameterId"] == "driven" && p["value"] == true);
                 match self.dimension(kind, c, first, second) {
                     Some(mut d) => {
                         d.driven = driven;
@@ -1475,7 +2297,9 @@ impl Ctx<'_> {
 
     fn center_of(&self, c: CurveId) -> Option<PointSpec> {
         match self.g.curves.get(c)?.kind {
-            CurveKind::Circle { center, .. } | CurveKind::Arc { center, .. } => Some(PointSpec::At(self.g.points.get(center)?.pos)),
+            CurveKind::Circle { center, .. } | CurveKind::Arc { center, .. } => {
+                Some(PointSpec::At(self.g.points.get(center)?.pos))
+            }
             _ => None,
         }
     }
@@ -1492,17 +2316,30 @@ impl Ctx<'_> {
                     .collect(),
             ),
             (Some(CurveKind::Circle { .. } | CurveKind::Arc { .. }), CurveSpec::Id(b)) => {
-                Converted::Specs(vec![ConstraintOf::Concentric(CurveSpec::Id(a), CurveSpec::Id(b)), ConstraintOf::Equal(CurveSpec::Id(a), CurveSpec::Id(b))])
+                Converted::Specs(vec![
+                    ConstraintOf::Concentric(CurveSpec::Id(a), CurveSpec::Id(b)),
+                    ConstraintOf::Equal(CurveSpec::Id(a), CurveSpec::Id(b)),
+                ])
             }
             _ => Converted::Dropped("unsupported references"),
         }
     }
 
     fn param_str(c: &Value, id: &str) -> Option<String> {
-        c["parameters"].as_array()?.iter().find(|p| p["parameterId"] == id).and_then(|p| p["value"].as_str().map(String::from))
+        c["parameters"]
+            .as_array()?
+            .iter()
+            .find(|p| p["parameterId"] == id)
+            .and_then(|p| p["value"].as_str().map(String::from))
     }
 
-    fn dimension(&self, kind: &str, c: &Value, first: Option<Ent>, second: Option<Ent>) -> Option<Dimension> {
+    fn dimension(
+        &self,
+        kind: &str,
+        c: &Value,
+        first: Option<Ent>,
+        second: Option<Ent>,
+    ) -> Option<Dimension> {
         let pref = |e: Ent| match e {
             Ent::Point(p, _) => Some(PointRef::Point(p)),
             Ent::Origin => Some(PointRef::Origin),
@@ -1518,10 +2355,17 @@ impl Ctx<'_> {
             CurveKind::Line { a, b } => Some((a, b)),
             _ => None,
         };
-        let is_round = |c: CurveId| matches!(self.g.curves.get(c).map(|c| c.kind), Some(CurveKind::Circle { .. } | CurveKind::Arc { .. }));
+        let is_round = |c: CurveId| {
+            matches!(
+                self.g.curves.get(c).map(|c| c.kind),
+                Some(CurveKind::Circle { .. } | CurveKind::Arc { .. })
+            )
+        };
         let kind = match kind {
             "LENGTH" => {
-                let Some(Ent::Curve(l)) = first else { return None };
+                let Some(Ent::Curve(l)) = first else {
+                    return None;
+                };
                 let (a, b) = line_ends(l)?;
                 match self.hv(Self::param_str(c, "direction").as_deref()) {
                     Some("HORIZONTAL") => DimensionKind::Horizontal { a, b },
@@ -1539,7 +2383,12 @@ impl Ctx<'_> {
             },
             "ANGLE" => {
                 let (a, b) = (cref(first?)?, cref(second?)?);
-                DimensionKind::Angle { a, b, flip_a: false, flip_b: false }
+                DimensionKind::Angle {
+                    a,
+                    b,
+                    flip_a: false,
+                    flip_b: false,
+                }
             }
             _ => {
                 // DISTANCE between two of: points, lines, circles.
@@ -1551,27 +2400,63 @@ impl Ctx<'_> {
                         Some("VERTICAL") => DimensionKind::Vertical { a, b },
                         _ => DimensionKind::Aligned { a, b },
                     },
-                    (p @ (Ent::Point(..) | Ent::Origin), l) | (l, p @ (Ent::Point(..) | Ent::Origin))
+                    (p @ (Ent::Point(..) | Ent::Origin), l)
+                    | (l, p @ (Ent::Point(..) | Ent::Origin))
                         if cref(l).is_some() && !matches!(l, Ent::Curve(c) if is_round(c)) =>
                     {
-                        DimensionKind::PointLine { p: pref(p)?, line: cref(l)? }
+                        DimensionKind::PointLine {
+                            p: pref(p)?,
+                            line: cref(l)?,
+                        }
                     }
                     (Ent::Curve(a), Ent::Curve(b)) if !is_round(a) && !is_round(b) => {
                         // Parallel lines: from an end of the first to the second.
                         let (p, _) = line_ends(a)?;
-                        DimensionKind::PointLine { p: PointRef::Point(p), line: CurveRef::Curve(b) }
+                        DimensionKind::PointLine {
+                            p: PointRef::Point(p),
+                            line: CurveRef::Curve(b),
+                        }
                     }
-                    (l @ (Ent::XAxis | Ent::YAxis), Ent::Curve(b)) | (Ent::Curve(b), l @ (Ent::XAxis | Ent::YAxis)) if !is_round(b) => {
+                    (l @ (Ent::XAxis | Ent::YAxis), Ent::Curve(b))
+                    | (Ent::Curve(b), l @ (Ent::XAxis | Ent::YAxis))
+                        if !is_round(b) =>
+                    {
                         let (p, _) = line_ends(b)?;
-                        DimensionKind::PointLine { p: PointRef::Point(p), line: cref(l)? }
+                        DimensionKind::PointLine {
+                            p: PointRef::Point(p),
+                            line: cref(l)?,
+                        }
                     }
-                    (p @ (Ent::Point(..) | Ent::Origin), Ent::Curve(circle)) | (Ent::Curve(circle), p @ (Ent::Point(..) | Ent::Origin)) if is_round(circle) => {
-                        DimensionKind::PointCircle { p: pref(p)?, circle, far: false }
+                    (p @ (Ent::Point(..) | Ent::Origin), Ent::Curve(circle))
+                    | (Ent::Curve(circle), p @ (Ent::Point(..) | Ent::Origin))
+                        if is_round(circle) =>
+                    {
+                        DimensionKind::PointCircle {
+                            p: pref(p)?,
+                            circle,
+                            far: false,
+                        }
                     }
-                    (l, Ent::Curve(circle)) | (Ent::Curve(circle), l) if is_round(circle) && cref(l).is_some() && !matches!(l, Ent::Curve(x) if is_round(x)) => {
-                        DimensionKind::LineCircle { line: cref(l)?, circle, far: false }
+                    (l, Ent::Curve(circle)) | (Ent::Curve(circle), l)
+                        if is_round(circle)
+                            && cref(l).is_some()
+                            && !matches!(l, Ent::Curve(x) if is_round(x)) =>
+                    {
+                        DimensionKind::LineCircle {
+                            line: cref(l)?,
+                            circle,
+                            far: false,
+                        }
                     }
-                    (Ent::Curve(a), Ent::Curve(b)) if is_round(a) && is_round(b) => DimensionKind::CircleCircle { a, b, far_a: false, far_b: false, axis: None },
+                    (Ent::Curve(a), Ent::Curve(b)) if is_round(a) && is_round(b) => {
+                        DimensionKind::CircleCircle {
+                            a,
+                            b,
+                            far_a: false,
+                            far_b: false,
+                            axis: None,
+                        }
+                    }
                     _ => return None,
                 }
             }
@@ -1584,18 +2469,34 @@ impl Ctx<'_> {
 
 /// A sketch Linear pattern's instances: `localInstance<entity>,<i>,<j>` → its entity id, with
 /// the pattern's counts.
-fn pattern_instances(c: &Value) -> (std::collections::BTreeMap<(usize, usize, usize), String>, usize, usize) {
+fn pattern_instances(
+    c: &Value,
+) -> (
+    std::collections::BTreeMap<(usize, usize, usize), String>,
+    usize,
+    usize,
+) {
     let mut out = std::collections::BTreeMap::new();
     let mut counts = (0, 0);
     for p in c["parameters"].as_array().into_iter().flatten() {
         let pid = p["parameterId"].as_str().unwrap_or_default();
         if let Some(rest) = pid.strip_prefix("localInstance")
-            && let [g, i, j] = rest.split(',').filter_map(|x| x.parse::<usize>().ok()).collect::<Vec<_>>().as_slice()
+            && let [g, i, j] = rest
+                .split(',')
+                .filter_map(|x| x.parse::<usize>().ok())
+                .collect::<Vec<_>>()
+                .as_slice()
             && let Some(v) = p["value"].as_str()
         {
             out.insert((*g, *i, *j), v.to_string());
         }
-        let n = || p["expression"].as_str().and_then(|e| e.trim().parse::<f64>().ok()).map(|x| x as usize).unwrap_or(0);
+        let n = || {
+            p["expression"]
+                .as_str()
+                .and_then(|e| e.trim().parse::<f64>().ok())
+                .map(|x| x as usize)
+                .unwrap_or(0)
+        };
         match pid {
             "patternc1" => counts.0 = n(),
             "patternc2" => counts.1 = n(),
@@ -1608,9 +2509,20 @@ fn pattern_instances(c: &Value) -> (std::collections::BTreeMap<(usize, usize, us
 /// For each sketch Linear pattern (one row of copies): a construction line through each of its
 /// rows of points (a copied circle's centres), from the seed's to the last copy's, which the
 /// pattern's constraints keep the points on.
-fn pattern_lines(s: &mut dyn Studio, el: ElementId, id: FeatureId, feature: &Value, map: &SketchMap) -> Result<HashMap<String, Vec<(usize, CurveId)>>, CommandError> {
+fn pattern_lines(
+    s: &mut dyn Studio,
+    el: ElementId,
+    id: FeatureId,
+    feature: &Value,
+    map: &SketchMap,
+) -> Result<HashMap<String, Vec<(usize, CurveId)>>, CommandError> {
     let mut out = HashMap::new();
-    for c in feature["constraints"].as_array().into_iter().flatten().filter(|c| c["constraintType"].as_str() == Some("LINEAR_PATTERN")) {
+    for c in feature["constraints"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter(|c| c["constraintType"].as_str() == Some("LINEAR_PATTERN"))
+    {
         let (instances, n1, n2) = pattern_instances(c);
         if n1 < 3 || n2 > 1 {
             continue;
@@ -1619,11 +2531,32 @@ fn pattern_lines(s: &mut dyn Studio, el: ElementId, id: FeatureId, feature: &Val
         let mut lines = Vec::new();
         for g in groups {
             let g_now = sketch_of(s, el, id)?;
-            let pos = |i: usize| instances.get(&(g, i, 0)).and_then(|v| map.points.get(v)).and_then(|p| g_now.points.get(*p)).map(|p| p.pos);
-            let (Some(a), Some(b)) = (pos(0), pos(n1 - 1)) else { continue };
+            let pos = |i: usize| {
+                instances
+                    .get(&(g, i, 0))
+                    .and_then(|v| map.points.get(v))
+                    .and_then(|p| g_now.points.get(*p))
+                    .map(|p| p.pos)
+            };
+            let (Some(a), Some(b)) = (pos(0), pos(n1 - 1)) else {
+                continue;
+            };
             let before: std::collections::HashSet<CurveId> = g_now.curves.keys().collect();
-            s.run(&EditSketch { element: el, feature: id, op: SketchOp::AddPolyline { points: vec![a, b], closed: false, construction: true, label: "Add line" } })?;
-            if let Some(line) = sketch_of(s, el, id)?.curves.keys().find(|k| !before.contains(k)) {
+            s.run(&EditSketch {
+                element: el,
+                feature: id,
+                op: SketchOp::AddPolyline {
+                    points: vec![a, b],
+                    closed: false,
+                    construction: true,
+                    label: "Add line",
+                },
+            })?;
+            if let Some(line) = sketch_of(s, el, id)?
+                .curves
+                .keys()
+                .find(|k| !before.contains(k))
+            {
                 lines.push((g, line));
             }
         }

@@ -18,7 +18,11 @@ pub struct Q {
 
 impl Q {
     fn num(v: f64) -> Self {
-        Self { v, len: 0, angle: false }
+        Self {
+            v,
+            len: 0,
+            angle: false,
+        }
     }
 }
 
@@ -43,7 +47,12 @@ fn eval_depth(text: &str, vars: &dyn Vars, depth: usize) -> Result<Q, String> {
         return Err("variables refer to each other in a loop".into());
     }
     let toks = tokenize(text)?;
-    let mut p = P { t: &toks, i: 0, vars, depth };
+    let mut p = P {
+        t: &toks,
+        i: 0,
+        vars,
+        depth,
+    };
     let v = p.sum()?;
     if p.i != toks.len() {
         return Err(format!("unexpected {:?}", toks[p.i]));
@@ -67,7 +76,9 @@ fn tokenize(s: &str) -> Result<Vec<Tok>, String> {
         let ch = c[i];
         if ch.is_whitespace() {
             i += 1;
-        } else if ch.is_ascii_digit() || (ch == '.' && c.get(i + 1).is_some_and(char::is_ascii_digit)) {
+        } else if ch.is_ascii_digit()
+            || (ch == '.' && c.get(i + 1).is_some_and(char::is_ascii_digit))
+        {
             let start = i;
             while i < c.len() && (c[i].is_ascii_digit() || c[i] == '.') {
                 i += 1;
@@ -118,7 +129,11 @@ fn tokenize(s: &str) -> Result<Vec<Tok>, String> {
 
 /// A unit word's value.
 fn unit(w: &str) -> Option<Q> {
-    let len = |mm: f64| Q { v: mm, len: 1, angle: false };
+    let len = |mm: f64| Q {
+        v: mm,
+        len: 1,
+        angle: false,
+    };
     Some(match w {
         "mm" | "millimeter" | "millimeters" => len(1.0),
         "cm" | "centimeter" | "centimeters" => len(10.0),
@@ -126,8 +141,16 @@ fn unit(w: &str) -> Option<Q> {
         "in" | "inch" | "inches" => len(25.4),
         "ft" | "foot" | "feet" => len(304.8),
         "yd" | "yard" | "yards" => len(914.4),
-        "deg" | "degree" | "degrees" => Q { v: std::f64::consts::PI / 180.0, len: 0, angle: true },
-        "rad" | "radian" | "radians" => Q { v: 1.0, len: 0, angle: true },
+        "deg" | "degree" | "degrees" => Q {
+            v: std::f64::consts::PI / 180.0,
+            len: 0,
+            angle: true,
+        },
+        "rad" | "radian" | "radians" => Q {
+            v: 1.0,
+            len: 0,
+            angle: true,
+        },
         _ => return None,
     })
 }
@@ -176,14 +199,23 @@ impl P<'_> {
                 a = mul(a, b);
             } else if self.eat('/') {
                 let b = self.unary()?;
-                a = mul(a, Q { v: 1.0 / b.v, len: -b.len, angle: b.angle });
+                a = mul(
+                    a,
+                    Q {
+                        v: 1.0 / b.v,
+                        len: -b.len,
+                        angle: b.angle,
+                    },
+                );
                 // An angle divided by an angle is a plain number.
                 if b.angle {
                     a.angle = false;
                 }
             } else if matches!(self.peek(), Some(Tok::Word(w)) if unit(w).is_some()) {
                 // `2 in`, `(3 + 4) mm`: juxtaposed units multiply.
-                let Some(Tok::Word(w)) = self.peek().cloned() else { unreachable!() };
+                let Some(Tok::Word(w)) = self.peek().cloned() else {
+                    unreachable!()
+                };
                 self.i += 1;
                 a = mul(a, unit(&w).expect("a unit"));
             } else {
@@ -215,7 +247,11 @@ impl P<'_> {
             if (len - len.round()).abs() > 1e-9 {
                 return Err("fractional power of a length".into());
             }
-            return Ok(Q { v: base.v.powf(n), len: len.round() as i32, angle: base.angle && n == 1.0 });
+            return Ok(Q {
+                v: base.v.powf(n),
+                len: len.round() as i32,
+                angle: base.angle && n == 1.0,
+            });
         }
         Ok(base)
     }
@@ -228,7 +264,10 @@ impl P<'_> {
             }
             Some(Tok::Var(name)) => {
                 self.i += 1;
-                let e = self.vars.expr(&name).ok_or_else(|| format!("unknown variable #{name}"))?;
+                let e = self
+                    .vars
+                    .expr(&name)
+                    .ok_or_else(|| format!("unknown variable #{name}"))?;
                 eval_depth(&e, self.vars, self.depth + 1)
             }
             Some(Tok::Op('(')) => {
@@ -283,11 +322,19 @@ fn add(a: Q, b: Q) -> Result<Q, String> {
 }
 
 fn mul(a: Q, b: Q) -> Q {
-    Q { v: a.v * b.v, len: a.len + b.len, angle: a.angle ^ b.angle }
+    Q {
+        v: a.v * b.v,
+        len: a.len + b.len,
+        angle: a.angle ^ b.angle,
+    }
 }
 
 fn call(f: &str, a: &[Q]) -> Result<Q, String> {
-    let one = || -> Result<Q, String> { a.first().copied().ok_or_else(|| format!("{f} needs an argument")) };
+    let one = || -> Result<Q, String> {
+        a.first()
+            .copied()
+            .ok_or_else(|| format!("{f} needs an argument"))
+    };
     let plain = |v: f64| Q::num(v);
     let radians = |q: Q| q.v; // an angle is in radians; a plain number is taken as radians too
     Ok(match f {
@@ -296,7 +343,11 @@ fn call(f: &str, a: &[Q]) -> Result<Q, String> {
             if x.len % 2 != 0 {
                 return Err("square root of an odd power of length".into());
             }
-            Q { v: x.v.sqrt(), len: x.len / 2, angle: false }
+            Q {
+                v: x.v.sqrt(),
+                len: x.len / 2,
+                angle: false,
+            }
         }
         "abs" => {
             let x = one()?;
@@ -305,21 +356,46 @@ fn call(f: &str, a: &[Q]) -> Result<Q, String> {
         "sin" => plain(radians(one()?).sin()),
         "cos" => plain(radians(one()?).cos()),
         "tan" => plain(radians(one()?).tan()),
-        "asin" => Q { v: one()?.v.asin(), len: 0, angle: true },
-        "acos" => Q { v: one()?.v.acos(), len: 0, angle: true },
-        "atan" => Q { v: one()?.v.atan(), len: 0, angle: true },
+        "asin" => Q {
+            v: one()?.v.asin(),
+            len: 0,
+            angle: true,
+        },
+        "acos" => Q {
+            v: one()?.v.acos(),
+            len: 0,
+            angle: true,
+        },
+        "atan" => Q {
+            v: one()?.v.atan(),
+            len: 0,
+            angle: true,
+        },
         "atan2" => {
-            let (y, x) = (a.first().ok_or("atan2 needs two arguments")?, a.get(1).ok_or("atan2 needs two arguments")?);
-            Q { v: y.v.atan2(x.v), len: 0, angle: true }
+            let (y, x) = (
+                a.first().ok_or("atan2 needs two arguments")?,
+                a.get(1).ok_or("atan2 needs two arguments")?,
+            );
+            Q {
+                v: y.v.atan2(x.v),
+                len: 0,
+                angle: true,
+            }
         }
         "min" | "max" => {
             let mut it = a.iter().copied();
             let first = it.next().ok_or_else(|| format!("{f} needs arguments"))?;
-            it.fold(first, |m, x| if (f == "min") == (x.v < m.v) { x } else { m })
+            it.fold(
+                first,
+                |m, x| if (f == "min") == (x.v < m.v) { x } else { m },
+            )
         }
         "floor" => {
             let x = one()?;
-            Q { v: x.v.floor(), ..x }
+            Q {
+                v: x.v.floor(),
+                ..x
+            }
         }
         "ceil" => {
             let x = one()?;
@@ -327,7 +403,10 @@ fn call(f: &str, a: &[Q]) -> Result<Q, String> {
         }
         "round" => {
             let x = one()?;
-            Q { v: x.v.round(), ..x }
+            Q {
+                v: x.v.round(),
+                ..x
+            }
         }
         "exp" => plain(one()?.v.exp()),
         "log" => plain(one()?.v.ln()),
@@ -357,7 +436,14 @@ mod tests {
     #[test]
     fn units_and_arithmetic() {
         let v = HashMap::new();
-        assert_eq!(eval("25 mm", &v).unwrap(), Q { v: 25.0, len: 1, angle: false });
+        assert_eq!(
+            eval("25 mm", &v).unwrap(),
+            Q {
+                v: 25.0,
+                len: 1,
+                angle: false
+            }
+        );
         assert!((eval("9.6*mm", &v).unwrap().v - 9.6).abs() < 1e-12);
         assert!((eval("1 in + 5 mm", &v).unwrap().v - 30.4).abs() < 1e-12);
         assert!((eval("(3 + 4) cm", &v).unwrap().v - 70.0).abs() < 1e-12);

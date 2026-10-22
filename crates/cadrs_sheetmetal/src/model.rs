@@ -62,7 +62,11 @@ impl Surface {
         match *self {
             Surface::Planar { u, v, .. } => u.cross(&v).normalize(),
             Surface::Rolled {
-                axis, start, radius, material_outside, ..
+                axis,
+                start,
+                radius,
+                material_outside,
+                ..
             } => {
                 let a = axis.normalize();
                 let x = start.normalize();
@@ -78,7 +82,12 @@ impl Surface {
     pub fn direction_at(&self, p: P2, d: V2) -> V3 {
         match *self {
             Surface::Planar { u, v, .. } => (u * d.x + v * d.y).normalize(),
-            Surface::Rolled { axis, start, radius, .. } => {
+            Surface::Rolled {
+                axis,
+                start,
+                radius,
+                ..
+            } => {
                 let a = axis.normalize();
                 let x = start.normalize();
                 let y = a.cross(&x);
@@ -112,7 +121,10 @@ impl Surface {
     /// 3D → local 2D (planar surfaces; the point is projected onto the plane).
     pub fn local(&self, p: P3) -> P2 {
         match *self {
-            Surface::Planar { origin, u, v } => P2::new((p - origin).dot(&u) / u.norm_squared(), (p - origin).dot(&v) / v.norm_squared()),
+            Surface::Planar { origin, u, v } => P2::new(
+                (p - origin).dot(&u) / u.norm_squared(),
+                (p - origin).dot(&v) / v.norm_squared(),
+            ),
             Surface::Rolled {
                 axis_origin,
                 axis,
@@ -152,7 +164,11 @@ impl Wall {
                 material_outside,
                 ..
             } => {
-                let inner = if material_outside { radius } else { radius - p.thickness };
+                let inner = if material_outside {
+                    radius
+                } else {
+                    radius - p.thickness
+                };
                 (inner + p.rolled_k_factor * p.thickness) / radius
             }
         }
@@ -177,7 +193,11 @@ pub enum RipStyle {
 }
 
 impl RipStyle {
-    pub const ALL: [RipStyle; 3] = [RipStyle::EdgeJoint, RipStyle::ButtDirection1, RipStyle::ButtDirection2];
+    pub const ALL: [RipStyle; 3] = [
+        RipStyle::EdgeJoint,
+        RipStyle::ButtDirection1,
+        RipStyle::ButtDirection2,
+    ];
 
     pub fn label(self) -> &'static str {
         match self {
@@ -222,10 +242,19 @@ impl Bend {
     /// own value use the model's K factor. (`None` only for a bend's own deduction there.)
     /// An assumption until checked against Onshape, which doesn't document hems in these modes.
     pub fn allowance(&self, p: &Params) -> Option<f64> {
-        if self.value.is_none() && self.angle >= std::f64::consts::PI - 1e-9 && p.bend_calc != crate::params::BendCalc::KFactor {
-            return Some(bend::bend_allowance(self.radius, p.thickness, self.angle, p.k_factor));
+        if self.value.is_none()
+            && self.angle >= std::f64::consts::PI - 1e-9
+            && p.bend_calc != crate::params::BendCalc::KFactor
+        {
+            return Some(bend::bend_allowance(
+                self.radius,
+                p.thickness,
+                self.angle,
+                p.k_factor,
+            ));
         }
-        self.value_or_model(p).allowance(self.radius, p.thickness, self.angle)
+        self.value_or_model(p)
+            .allowance(self.radius, p.thickness, self.angle)
     }
 }
 
@@ -233,9 +262,16 @@ impl Bend {
 pub enum JointKind {
     Bend(Bend),
     /// A cut between two walls; `on_a`/`on_b` are the walls' edges at the rip.
-    Rip { on_a: Seg2, on_b: Seg2, style: RipStyle },
+    Rip {
+        on_a: Seg2,
+        on_b: Seg2,
+        style: RipStyle,
+    },
     /// A planar wall running into a rolled one (or two rolled walls); their common edge.
-    Tangent { on_a: Seg2, on_b: Seg2 },
+    Tangent {
+        on_a: Seg2,
+        on_b: Seg2,
+    },
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -342,9 +378,18 @@ impl BendGeom {
     /// cuts whose sides aren't along or across the bend (a round relief, a slanted slot): their
     /// faces follow the outline instead of a staircase. `None` for polygons with holes or
     /// spanning more than 170° of the bend.
-    pub fn cut_mesh(&self, cut: &crate::poly::Polygon, allowance: f64, thickness: f64) -> Option<Vec<[P3; 3]>> {
+    pub fn cut_mesh(
+        &self,
+        cut: &crate::poly::Polygon,
+        allowance: f64,
+        thickness: f64,
+    ) -> Option<Vec<[P3; 3]>> {
         use crate::poly::P2;
-        if !cut.holes.is_empty() || cut.outer.len() < 3 || allowance <= 1e-9 || self.sweep.abs() <= 1e-9 {
+        if !cut.holes.is_empty()
+            || cut.outer.len() < 3
+            || allowance <= 1e-9
+            || self.sweep.abs() <= 1e-9
+        {
             return None;
         }
         let span = self.ends.1 - self.ends.0;
@@ -354,10 +399,25 @@ impl BendGeom {
         }
         let es = span / total;
         // Past the bend's ends and sides a little, so no skin is left there.
-        let (ds, du) = (1e-3 * thickness.max(0.01), 1e-4 / self.sweep.abs() * allowance);
+        let (ds, du) = (
+            1e-3 * thickness.max(0.01),
+            1e-4 / self.sweep.abs() * allowance,
+        );
         let out = |q: P2| {
-            let s = if q.x <= 1e-9 { q.x - ds } else if q.x >= total - 1e-9 { q.x + ds } else { q.x };
-            let u = if q.y <= 1e-9 { q.y - du } else if q.y >= allowance - 1e-9 { q.y + du } else { q.y };
+            let s = if q.x <= 1e-9 {
+                q.x - ds
+            } else if q.x >= total - 1e-9 {
+                q.x + ds
+            } else {
+                q.x
+            };
+            let u = if q.y <= 1e-9 {
+                q.y - du
+            } else if q.y >= allowance - 1e-9 {
+                q.y + du
+            } else {
+                q.y
+            };
             (s, u / allowance * self.sweep)
         };
         // The outline, each edge in steps of at most 2°.
@@ -371,7 +431,11 @@ impl BendGeom {
                 lp.push((a.0 + (b.0 - a.0) * t, a.1 + (b.1 - a.1) * t));
             }
         }
-        let (lo, hi) = lp.iter().fold((f64::INFINITY, f64::NEG_INFINITY), |(l, h), p| (l.min(p.1), h.max(p.1)));
+        let (lo, hi) = lp
+            .iter()
+            .fold((f64::INFINITY, f64::NEG_INFINITY), |(l, h), p| {
+                (l.min(p.1), h.max(p.1))
+            });
         if hi - lo > 170f64.to_radians() {
             return None;
         }
@@ -379,7 +443,9 @@ impl BendGeom {
         // material); the sides run through the sheet to just outside it, then on out to the outer
         // cap, far enough that its chords stay clear of the material.
         let gap = 0.05 * thickness.max(0.01);
-        let rin = (self.inner_radius - gap).max(0.5 * self.inner_radius).max(1e-4);
+        let rin = (self.inner_radius - gap)
+            .max(0.5 * self.inner_radius)
+            .max(1e-4);
         let rmid = self.outer_radius + gap;
         let rout = (self.outer_radius + 0.5 * thickness + 0.1) / ((hi - lo) / 2.0).cos();
         let rm = (self.inner_radius + self.outer_radius) / 2.0;
@@ -388,17 +454,25 @@ impl BendGeom {
         if idx.len() < 3 {
             return None;
         }
-        let at = |(s, a): (f64, f64), r: f64| self.ends.0 + es * s + self.rotate_vec(self.start, a) * r;
+        let at =
+            |(s, a): (f64, f64), r: f64| self.ends.0 + es * s + self.rotate_vec(self.start, a) * r;
         // Every triangle wound to face out of the tool (its faces then come out of the boolean
         // facing the right way, not dark): the caps away from the bend's surfaces, the sides
         // away from the outline's inside.
         let ccw = {
             let m = lp.len();
-            (0..m).map(|i| lp[i].0 * lp[(i + 1) % m].1 - lp[(i + 1) % m].0 * lp[i].1).sum::<f64>() > 0.0
+            (0..m)
+                .map(|i| lp[i].0 * lp[(i + 1) % m].1 - lp[(i + 1) % m].0 * lp[i].1)
+                .sum::<f64>()
+                > 0.0
         };
         let wound = |t: [P3; 3], out: V3| {
             let n = (t[1] - t[0]).cross(&(t[2] - t[0]));
-            if n.dot(&out) >= 0.0 { t } else { [t[0], t[2], t[1]] }
+            if n.dot(&out) >= 0.0 {
+                t
+            } else {
+                [t[0], t[2], t[1]]
+            }
         };
         let radial = |(_, a): (f64, f64)| self.rotate_vec(self.start, a);
         let mut tris: Vec<[P3; 3]> = Vec::with_capacity(idx.len() * 2 / 3 + lp.len() * 2);
@@ -420,7 +494,15 @@ impl BendGeom {
             // Through the sheet in eight rings: the true side (radial lines at the outline) is
             // twisted, so each ring's two triangles stay nearly flat to each other.
             const RINGS: usize = 8;
-            let ring = |k: usize| if k < RINGS { rin + (rmid - rin) * k as f64 / RINGS as f64 } else if k == RINGS { rmid } else { rout };
+            let ring = |k: usize| {
+                if k < RINGS {
+                    rin + (rmid - rin) * k as f64 / RINGS as f64
+                } else if k == RINGS {
+                    rmid
+                } else {
+                    rout
+                }
+            };
             for (r0, r1) in (0..=RINGS).map(|k| (ring(k), ring(k + 1))) {
                 tris.push(wound([at(a, r0), at(b, r0), at(b, r1)], out));
                 tris.push(wound([at(a, r0), at(b, r1), at(a, r1)], out));
@@ -446,7 +528,9 @@ pub enum ModelErrorKind {
     /// The bend's first wall isn't planar.
     NotPlanar,
     /// The joint's segment doesn't run along its wall's edge (`wall` is the joint's `a` or `b`).
-    NotOnEdge { second: bool },
+    NotOnEdge {
+        second: bool,
+    },
     /// The second wall's tangent line isn't where the bend puts it.
     Misplaced,
     /// The second wall's material side doesn't follow the bend.
@@ -467,7 +551,9 @@ impl ModelError {
             ModelErrorKind::NotPlanar => "The bend's first wall isn't flat",
             ModelErrorKind::NotOnEdge { .. } => "The joint doesn't run along its wall's edge",
             ModelErrorKind::Misplaced => "The second wall isn't where the bend puts it",
-            ModelErrorKind::MaterialSide => "The second wall's material side doesn't follow the bend",
+            ModelErrorKind::MaterialSide => {
+                "The second wall's material side doesn't follow the bend"
+            }
             ModelErrorKind::NotRunningOn => "The second wall doesn't run on from the bend",
             ModelErrorKind::TangentApart => "The tangent joint's edges don't meet",
             ModelErrorKind::NotSmooth => "The walls don't meet smoothly at the tangent joint",
@@ -526,7 +612,10 @@ impl Model {
         let to = if by < 0 {
             self.joints[..i].iter().rposition(same)
         } else if by > 0 {
-            self.joints[i + 1..].iter().position(same).map(|k| i + 1 + k)
+            self.joints[i + 1..]
+                .iter()
+                .position(same)
+                .map(|k| i + 1 + k)
         } else {
             None
         };
@@ -549,8 +638,17 @@ impl Model {
         let n = wa.surface.normal_at(b.on_a.a);
         let into_a = crate::poly::inward_normal(&wa.outline, b.on_a)?;
         let c = -wa.surface.direction_at(b.on_a.a, into_a); // a's continuation past the bend
-        let (side, def_radius) = if b.toward_material { (n, b.radius + t) } else { (-n, b.radius) };
-        let shift = side * if b.toward_material { b.radius + t } else { b.radius };
+        let (side, def_radius) = if b.toward_material {
+            (n, b.radius + t)
+        } else {
+            (-n, b.radius)
+        };
+        let shift = side
+            * if b.toward_material {
+                b.radius + t
+            } else {
+                b.radius
+            };
         let (pa, pb) = (wa.surface.point(b.on_a.a), wa.surface.point(b.on_a.b));
         Some(BendGeom {
             ends: (pa + shift, pb + shift),
@@ -584,7 +682,10 @@ impl Model {
                 .joints
                 .iter()
                 .filter(|k| k.id != j.id && [k.a, k.b].iter().any(|w| *w == j.a || *w == j.b))
-                .filter_map(|k| k.bend().filter(|b| !b.hem && b.angle < std::f64::consts::PI - 1e-9))
+                .filter_map(|k| {
+                    k.bend()
+                        .filter(|b| !b.hem && b.angle < std::f64::consts::PI - 1e-9)
+                })
                 .map(|b| (b.radius + t) * (b.angle / 2.0).tan())
                 .fold(0.0, f64::max)
                 + t
@@ -629,18 +730,25 @@ impl Model {
                         out.push(err(ModelErrorKind::MaterialSide));
                         continue;
                     }
-                    let ia = crate::poly::inward_normal(&wa.outline, b.on_a).expect("checked above");
-                    let ib = crate::poly::inward_normal(&wb.outline, b.on_b).expect("checked above");
+                    let ia =
+                        crate::poly::inward_normal(&wa.outline, b.on_a).expect("checked above");
+                    let ib =
+                        crate::poly::inward_normal(&wb.outline, b.on_b).expect("checked above");
                     let c = -wa.surface.direction_at(b.on_a.a, ia);
-                    if (g.rotate_vec(c, g.sweep) - wb.surface.direction_at(b.on_b.a, ib)).norm() > 1e-6 {
+                    if (g.rotate_vec(c, g.sweep) - wb.surface.direction_at(b.on_b.a, ib)).norm()
+                        > 1e-6
+                    {
                         out.push(err(ModelErrorKind::NotRunningOn));
                     }
                 }
                 JointKind::Tangent { on_a, on_b } => {
-                    let close = |p: P2, q: P2| (wa.surface.point(p) - wb.surface.point(q)).norm() <= tol;
+                    let close =
+                        |p: P2, q: P2| (wa.surface.point(p) - wb.surface.point(q)).norm() <= tol;
                     if !close(on_a.a, on_b.a) || !close(on_a.b, on_b.b) {
                         out.push(err(ModelErrorKind::TangentApart));
-                    } else if (wa.surface.normal_at(on_a.a) - wb.surface.normal_at(on_b.a)).norm() > 1e-6 {
+                    } else if (wa.surface.normal_at(on_a.a) - wb.surface.normal_at(on_b.a)).norm()
+                        > 1e-6
+                    {
                         out.push(err(ModelErrorKind::NotSmooth));
                     }
                 }
@@ -715,8 +823,13 @@ pub struct SharpJoint {
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 pub enum SharpJointKind {
     /// `radius: None` uses the model's; `value: None` the model's K factor/allowance/deduction.
-    Bend { radius: Option<f64>, value: Option<BendValue> },
-    Rip { style: RipStyle },
+    Bend {
+        radius: Option<f64>,
+        value: Option<BendValue>,
+    },
+    Rip {
+        style: RipStyle,
+    },
 }
 
 /// Why a sharp definition couldn't be built. `joint` and `wall` index the builder's lists (hems
@@ -724,35 +837,61 @@ pub enum SharpJointKind {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub enum BuildError {
     /// The joint's edge isn't on the edge of one of its walls.
-    EdgeNotOnWall { joint: usize, wall: usize },
+    EdgeNotOnWall {
+        joint: usize,
+        wall: usize,
+    },
     /// The two walls of a joint are coplanar (no bend) or fold flat onto each other.
-    NoAngle { joint: usize },
+    NoAngle {
+        joint: usize,
+    },
     /// The walls disagree on which side the material is (one wall's normal is flipped).
-    InconsistentSide { joint: usize },
+    InconsistentSide {
+        joint: usize,
+    },
     /// A butt joint between walls that aren't at 90°.
-    ButtNot90 { joint: usize },
+    ButtNot90 {
+        joint: usize,
+    },
     /// The bend doesn't fit: its setback trims a wall away entirely.
-    WallTrimmedAway { joint: usize, wall: usize },
+    WallTrimmedAway {
+        joint: usize,
+        wall: usize,
+    },
     /// A bend of 180° or more: build hems with [`SharpBuilder::hem`] instead.
-    TooSharp { joint: usize },
+    TooSharp {
+        joint: usize,
+    },
     /// A hem with no length, or a hem edge that isn't on its wall.
-    BadHem { hem: usize },
+    BadHem {
+        hem: usize,
+    },
     /// Two walls or two joints were given the same id.
-    DuplicateWallId { id: WallId },
-    DuplicateJointId { id: JointId },
+    DuplicateWallId {
+        id: WallId,
+    },
+    DuplicateJointId {
+        id: JointId,
+    },
 }
 
 impl BuildError {
     /// The feature error text.
     pub fn message(&self) -> String {
         match self {
-            BuildError::EdgeNotOnWall { .. } => "The joint's edge isn't on the edge of its wall".into(),
+            BuildError::EdgeNotOnWall { .. } => {
+                "The joint's edge isn't on the edge of its wall".into()
+            }
             BuildError::NoAngle { .. } => "The walls are in line: there is nothing to bend".into(),
-            BuildError::InconsistentSide { .. } => "The walls' material sides don't match across the joint".into(),
+            BuildError::InconsistentSide { .. } => {
+                "The walls' material sides don't match across the joint".into()
+            }
             BuildError::ButtNot90 { .. } => "Only 90° joints can be butt joints".into(),
             BuildError::WallTrimmedAway { .. } => "The bend is too large for its wall".into(),
             BuildError::TooSharp { .. } => "Bends of 180° or more must be hems".into(),
-            BuildError::BadHem { .. } => "The hem has no length or isn't on an edge of its wall".into(),
+            BuildError::BadHem { .. } => {
+                "The hem has no length or isn't on an edge of its wall".into()
+            }
             BuildError::DuplicateWallId { id } => format!("Two walls have the id {}", id.0),
             BuildError::DuplicateJointId { id } => format!("Two joints have the id {}", id.0),
         }
@@ -885,7 +1024,15 @@ impl SharpBuilder {
     }
 
     pub fn bend(&mut self, a: usize, b: usize, edge: (P3, P3)) -> usize {
-        self.joint(a, b, edge, SharpJointKind::Bend { radius: None, value: None })
+        self.joint(
+            a,
+            b,
+            edge,
+            SharpJointKind::Bend {
+                radius: None,
+                value: None,
+            },
+        )
     }
 
     pub fn rip(&mut self, a: usize, b: usize, edge: (P3, P3), style: RipStyle) -> usize {
@@ -907,7 +1054,14 @@ impl SharpBuilder {
     }
 
     /// A hem on `wall`'s edge `edge` (SM4): the edge folded back 180°, `length` long.
-    pub fn hem(&mut self, wall: usize, edge: (P3, P3), length: f64, toward_material: bool, alignment: HemAlignment) -> usize {
+    pub fn hem(
+        &mut self,
+        wall: usize,
+        edge: (P3, P3),
+        length: f64,
+        toward_material: bool,
+        alignment: HemAlignment,
+    ) -> usize {
         self.hems.push(SharpHem {
             wall,
             edge,
@@ -927,7 +1081,8 @@ impl SharpBuilder {
     }
 
     fn side(&self, joint: usize, wall: usize) -> Result<Side, BuildError> {
-        self.side_of(self.joints[joint].edge, wall).ok_or(BuildError::EdgeNotOnWall { joint, wall })
+        self.side_of(self.joints[joint].edge, wall)
+            .ok_or(BuildError::EdgeNotOnWall { joint, wall })
     }
 
     fn side_of(&self, edge3: (P3, P3), wall: usize) -> Option<Side> {
@@ -939,17 +1094,26 @@ impl SharpBuilder {
         };
         let (p0, p1) = edge3;
         let edge = Seg2::new(s.local(p0), s.local(p1));
-        let size = w.outline.bounds().map(|(lo, hi)| (hi - lo).norm()).unwrap_or(1.0).max(1e-9);
+        let size = w
+            .outline
+            .bounds()
+            .map(|(lo, hi)| (hi - lo).norm())
+            .unwrap_or(1.0)
+            .max(1e-9);
         let tol = 1e-6 * size;
         // Both ends must lie in the wall's plane and on its outline's boundary.
         let n = s.normal().expect("planar");
-        if ((p0 - w.origin).dot(&n)).abs() > tol || ((p1 - w.origin).dot(&n)).abs() > tol || edge.len() < tol {
+        if ((p0 - w.origin).dot(&n)).abs() > tol
+            || ((p1 - w.origin).dot(&n)).abs() > tol
+            || edge.len() < tol
+        {
             return None;
         }
         let mid = P2::from((edge.a.coords + edge.b.coords) / 2.0);
         let nrm = perp(edge.dir());
         let step = 1e-4 * size;
-        let into = if w.outline.contains(mid + nrm * step) && !w.outline.contains(mid - nrm * step) {
+        let into = if w.outline.contains(mid + nrm * step) && !w.outline.contains(mid - nrm * step)
+        {
             nrm
         } else if w.outline.contains(mid - nrm * step) && !w.outline.contains(mid + nrm * step) {
             -nrm
@@ -997,22 +1161,35 @@ impl SharpBuilder {
             if expected.dot(&nb) < 0.5 {
                 return Err(BuildError::InconsistentSide { joint: ji });
             }
-            geos.push(Geo { sa, sb, theta, toward });
+            geos.push(Geo {
+                sa,
+                sb,
+                theta,
+                toward,
+            });
         }
 
         // Rips: trim (or extend) each wall at its edge.
         for (ji, j) in self.joints.iter().enumerate() {
-            let SharpJointKind::Rip { style } = j.kind else { continue };
+            let SharpJointKind::Rip { style } = j.kind else {
+                continue;
+            };
             let g = &geos[ji];
             let alpha = std::f64::consts::PI - g.theta; // interior angle between the walls
             let gap = p.minimal_gap;
             // Where the inner faces meet, measured along each wall from the sharp: 0 when the
             // definition surface is the inside, T·cot(α/2) when it is the outside.
-            let inner = if g.toward { t / (alpha / 2.0).tan() } else { 0.0 };
+            let inner = if g.toward {
+                t / (alpha / 2.0).tan()
+            } else {
+                0.0
+            };
             let ninety = (g.theta - std::f64::consts::FRAC_PI_2).abs() < 1e-6;
             let (ta, tb) = match style {
                 RipStyle::EdgeJoint => (inner + gap / 2.0, inner + gap / 2.0),
-                RipStyle::ButtDirection1 | RipStyle::ButtDirection2 if !ninety => return Err(BuildError::ButtNot90 { joint: ji }),
+                RipStyle::ButtDirection1 | RipStyle::ButtDirection2 if !ninety => {
+                    return Err(BuildError::ButtNot90 { joint: ji });
+                }
                 // Direction 1: wall a stops short of b's face; b runs on over a's end.
                 RipStyle::ButtDirection1 => {
                     if g.toward {
@@ -1029,8 +1206,16 @@ impl SharpBuilder {
                     }
                 }
             };
-            outlines[j.a] = trim_band(&outlines[j.a], &g.sa, ta).ok_or(BuildError::WallTrimmedAway { joint: ji, wall: j.a })?;
-            outlines[j.b] = trim_band(&outlines[j.b], &g.sb, tb).ok_or(BuildError::WallTrimmedAway { joint: ji, wall: j.b })?;
+            outlines[j.a] =
+                trim_band(&outlines[j.a], &g.sa, ta).ok_or(BuildError::WallTrimmedAway {
+                    joint: ji,
+                    wall: j.a,
+                })?;
+            outlines[j.b] =
+                trim_band(&outlines[j.b], &g.sb, tb).ok_or(BuildError::WallTrimmedAway {
+                    joint: ji,
+                    wall: j.b,
+                })?;
             joints[ji] = Some(JointKind::Rip {
                 on_a: g.sa.edge.offset(g.sa.into * ta),
                 on_b: g.sb.edge.offset(g.sb.into * tb),
@@ -1042,21 +1227,33 @@ impl SharpBuilder {
         // trims, so it doesn't depend on the order of the bends), then trim by the setback.
         let after_rips = outlines.clone();
         for (ji, j) in self.joints.iter().enumerate() {
-            let SharpJointKind::Bend { radius, value } = j.kind else { continue };
+            let SharpJointKind::Bend { radius, value } = j.kind else {
+                continue;
+            };
             let g = &geos[ji];
             let r = radius.unwrap_or(p.bend_radius);
-            let setback = if g.toward { bend::outside_setback(r, t, g.theta) } else { bend::inside_setback(r, g.theta) };
+            let setback = if g.toward {
+                bend::outside_setback(r, t, g.theta)
+            } else {
+                bend::inside_setback(r, g.theta)
+            };
             let sb = setback.ok_or(BuildError::TooSharp { joint: ji })?;
             let ia = on_line_interval(&after_rips[j.a], &g.sa.edge);
             let ib = on_line_interval(&after_rips[j.b], &g.sb.edge);
             let (Some((a0, a1)), Some((b0, b1))) = (ia, ib) else {
-                return Err(BuildError::EdgeNotOnWall { joint: ji, wall: j.a });
+                return Err(BuildError::EdgeNotOnWall {
+                    joint: ji,
+                    wall: j.a,
+                });
             };
             // Both walls' edges are parametrised the same way (same 3D end points), so the
             // intervals compare directly.
             let (lo, hi) = (a0.max(b0), a1.min(b1));
             if hi - lo < 1e-9 {
-                return Err(BuildError::EdgeNotOnWall { joint: ji, wall: j.b });
+                return Err(BuildError::EdgeNotOnWall {
+                    joint: ji,
+                    wall: j.b,
+                });
             }
             let sub = |s: &Seg2| Seg2::new(s.a + (s.b - s.a) * lo, s.a + (s.b - s.a) * hi);
             let (ea, eb) = (sub(&g.sa.edge), sub(&g.sb.edge));
@@ -1070,8 +1267,16 @@ impl SharpBuilder {
                 into: g.sb.into,
                 into3: g.sb.into3,
             };
-            outlines[j.a] = trim_band(&outlines[j.a], &side_a, sb).ok_or(BuildError::WallTrimmedAway { joint: ji, wall: j.a })?;
-            outlines[j.b] = trim_band(&outlines[j.b], &side_b, sb).ok_or(BuildError::WallTrimmedAway { joint: ji, wall: j.b })?;
+            outlines[j.a] =
+                trim_band(&outlines[j.a], &side_a, sb).ok_or(BuildError::WallTrimmedAway {
+                    joint: ji,
+                    wall: j.a,
+                })?;
+            outlines[j.b] =
+                trim_band(&outlines[j.b], &side_b, sb).ok_or(BuildError::WallTrimmedAway {
+                    joint: ji,
+                    wall: j.b,
+                })?;
             joints[ji] = Some(JointKind::Bend(Bend {
                 on_a: ea.offset(g.sa.into * sb),
                 on_b: eb.offset(g.sb.into * sb),
@@ -1094,7 +1299,10 @@ impl SharpBuilder {
             let side = self.side_of(h.edge, h.wall).ok_or(bad.clone())?;
             let r = h.radius.unwrap_or(p.bend_radius);
             let (lo, hi_) = on_line_interval(&outlines[h.wall], &side.edge).ok_or(bad.clone())?;
-            let sub = Seg2::new(side.edge.a + (side.edge.b - side.edge.a) * lo, side.edge.a + (side.edge.b - side.edge.a) * hi_);
+            let sub = Seg2::new(
+                side.edge.a + (side.edge.b - side.edge.a) * lo,
+                side.edge.a + (side.edge.b - side.edge.a) * hi_,
+            );
             let trim = match h.alignment {
                 HemAlignment::Outer => r + t,
                 HemAlignment::InPlace => 0.0,
@@ -1104,7 +1312,11 @@ impl SharpBuilder {
                 into: side.into,
                 into3: side.into3,
             };
-            outlines[h.wall] = trim_band(&outlines[h.wall], &ts, trim).ok_or(BuildError::WallTrimmedAway { joint: self.joints.len() + hi, wall: h.wall })?;
+            outlines[h.wall] =
+                trim_band(&outlines[h.wall], &ts, trim).ok_or(BuildError::WallTrimmedAway {
+                    joint: self.joints.len() + hi,
+                    wall: h.wall,
+                })?;
             tangents.push(sub.offset(side.into * trim));
         }
         let mut hem_walls: Vec<(Surface, Polygon)> = Vec::new();
@@ -1120,7 +1332,10 @@ impl SharpBuilder {
             let r = h.radius.unwrap_or(p.bend_radius);
             let line = tangents[hi];
             let (lo, hi_) = on_line_interval(&outlines[h.wall], &line).ok_or(bad.clone())?;
-            let on_a = Seg2::new(line.a + (line.b - line.a) * lo, line.a + (line.b - line.a) * hi_);
+            let on_a = Seg2::new(
+                line.a + (line.b - line.a) * lo,
+                line.a + (line.b - line.a) * hi_,
+            );
             if on_a.len() < 1e-9 {
                 return Err(bad);
             }
@@ -1140,7 +1355,11 @@ impl SharpBuilder {
             let axis_pt = pa + side_n * rdef;
             let c = -side.into3; // the wall's continuation past the edge
             let k = c.cross(&side_n).normalize();
-            let rot = |v: V3| v * h.angle.cos() + k.cross(&v) * h.angle.sin() + k * k.dot(&v) * (1.0 - h.angle.cos());
+            let rot = |v: V3| {
+                v * h.angle.cos()
+                    + k.cross(&v) * h.angle.sin()
+                    + k * k.dot(&v) * (1.0 - h.angle.cos())
+            };
             let (qa, qb) = (axis_pt + rot(pa - axis_pt), axis_pt + rot(pb - axis_pt));
             let nb = rot(n);
             let u = rot(c); // the hem runs on from its bend
@@ -1191,7 +1410,12 @@ impl SharpBuilder {
         }
 
         // Walls: given ids, the rest numbered from the first free id.
-        let given_walls: Vec<WallId> = self.walls.iter().filter_map(|w| w.id).chain(self.hems.iter().filter_map(|h| h.wall_id)).collect();
+        let given_walls: Vec<WallId> = self
+            .walls
+            .iter()
+            .filter_map(|w| w.id)
+            .chain(self.hems.iter().filter_map(|h| h.wall_id))
+            .collect();
         if let Some(d) = first_duplicate(&given_walls) {
             return Err(BuildError::DuplicateWallId { id: d });
         }
@@ -1208,9 +1432,17 @@ impl SharpBuilder {
                 outline,
             });
         }
-        let hem_wall_ids: Vec<WallId> = self.hems.iter().map(|h| h.wall_id.unwrap_or_else(|| free_wall.next().expect("ids"))).collect();
+        let hem_wall_ids: Vec<WallId> = self
+            .hems
+            .iter()
+            .map(|h| h.wall_id.unwrap_or_else(|| free_wall.next().expect("ids")))
+            .collect();
         for ((surface, outline), id) in hem_walls.into_iter().zip(&hem_wall_ids) {
-            walls.push(Wall { id: *id, surface, outline });
+            walls.push(Wall {
+                id: *id,
+                surface,
+                outline,
+            });
         }
         let wall_id = |i: usize| walls[i].id;
 
@@ -1284,10 +1516,16 @@ impl SharpBuilder {
 /// other bend at the corner took the wall away: the corner relief settles that, so the rest only
 /// has to be close.)
 fn along_edge(outline: &Polygon, s: Seg2, size: f64, reach: f64) -> bool {
-    let Some(n) = crate::poly::inward_normal(outline, s) else { return false };
+    let Some(n) = crate::poly::inward_normal(outline, s) else {
+        return false;
+    };
     let d = 1e-5 * size.max(s.len());
-    let samples: Vec<P2> = (0..=20).map(|i| s.a + (s.b - s.a) * (i as f64 / 20.0)).collect();
-    let on = samples.iter().any(|p| outline.contains(p + n * d) && !outline.contains(p - n * d));
+    let samples: Vec<P2> = (0..=20)
+        .map(|i| s.a + (s.b - s.a) * (i as f64 / 20.0))
+        .collect();
+    let on = samples
+        .iter()
+        .any(|p| outline.contains(p + n * d) && !outline.contains(p - n * d));
     on && samples.iter().all(|p| distance_to(outline, *p) <= reach)
 }
 
@@ -1312,7 +1550,15 @@ fn distance_to(poly: &Polygon, p: P2) -> f64 {
 /// past it. `None` if nothing is left. (P3I.4: features that move a wall's edge to a new
 /// virtual sharp.)
 pub fn shift_edge(outline: &Polygon, edge: Seg2, into: V2, depth: f64) -> Option<Polygon> {
-    trim_band(outline, &Side { edge, into, into3: V3::zeros() }, depth)
+    trim_band(
+        outline,
+        &Side {
+            edge,
+            into,
+            into3: V3::zeros(),
+        },
+        depth,
+    )
 }
 
 /// Removes the band `[0, depth)` into the wall along the side's edge (or, for a negative depth,
@@ -1322,7 +1568,12 @@ fn trim_band(outline: &Polygon, side: &Side, depth: f64) -> Option<Polygon> {
         return Some(outline.clone());
     }
     let e = side.edge;
-    let band = Polygon::new(vec![e.a, e.b, e.b + side.into * depth, e.a + side.into * depth]);
+    let band = Polygon::new(vec![
+        e.a,
+        e.b,
+        e.b + side.into * depth,
+        e.a + side.into * depth,
+    ]);
     let out = if depth > 0.0 {
         crate::poly::difference(std::slice::from_ref(outline), std::slice::from_ref(&band))
     } else {
@@ -1330,14 +1581,24 @@ fn trim_band(outline: &Polygon, side: &Side, depth: f64) -> Option<Polygon> {
     };
     // Keep the biggest piece (a trim never splits a sane wall; slivers can appear), with its
     // vertices put back on the exact inputs the booleans rounded.
-    let mut exact: Vec<P2> = outline.outer.iter().chain(outline.holes.iter().flatten()).copied().collect();
+    let mut exact: Vec<P2> = outline
+        .outer
+        .iter()
+        .chain(outline.holes.iter().flatten())
+        .copied()
+        .collect();
     exact.extend(band.outer.iter().copied());
     // Where the band's sides cross the outline's edges.
     let (n, d) = (side.into, e.b - e.a);
     let l = &outline.outer;
     for i in 0..l.len() {
         let (p, q) = (l[i], l[(i + 1) % l.len()]);
-        for (o, dir) in [(e.a, side.into), (e.b, side.into), (e.a + n * depth, d), (e.a, d)] {
+        for (o, dir) in [
+            (e.a, side.into),
+            (e.b, side.into),
+            (e.a + n * depth, d),
+            (e.a, d),
+        ] {
             let den = (q - p).perp(&dir);
             if den.abs() > 1e-15 {
                 let t = (o - p).perp(&dir) / den;
@@ -1389,7 +1650,10 @@ impl JointNamer {
 }
 
 fn first_duplicate<T: PartialEq + Copy>(ids: &[T]) -> Option<T> {
-    ids.iter().enumerate().find(|(i, a)| ids[..*i].contains(a)).map(|(_, a)| *a)
+    ids.iter()
+        .enumerate()
+        .find(|(i, a)| ids[..*i].contains(a))
+        .map(|(_, a)| *a)
 }
 
 /// The parameter interval `[t0, t1]` (along `edge`, 0 at `edge.a`, 1 at `edge.b`) of the

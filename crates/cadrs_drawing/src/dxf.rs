@@ -56,7 +56,14 @@ impl DxfVersion {
     pub const ALL: [DxfVersion; 2] = [DxfVersion::R2013, DxfVersion::R2000];
 
     /// Every version the writer writes, oldest first (the flat pattern export's Version list).
-    pub const WRITTEN: [DxfVersion; 6] = [DxfVersion::R2000, DxfVersion::R2004, DxfVersion::R2007, DxfVersion::R2010, DxfVersion::R2013, DxfVersion::R2018];
+    pub const WRITTEN: [DxfVersion; 6] = [
+        DxfVersion::R2000,
+        DxfVersion::R2004,
+        DxfVersion::R2007,
+        DxfVersion::R2010,
+        DxfVersion::R2013,
+        DxfVersion::R2018,
+    ];
 
     pub fn label(self) -> &'static str {
         match self {
@@ -123,17 +130,36 @@ impl Out {
 
 /// A line weight in hundredths of a mm (the nearest standard DXF weight).
 fn lineweight(mm: f64) -> i32 {
-    const W: [i32; 24] = [0, 5, 9, 13, 15, 18, 20, 25, 30, 35, 40, 50, 53, 60, 70, 80, 90, 100, 106, 120, 140, 158, 200, 211];
+    const W: [i32; 24] = [
+        0, 5, 9, 13, 15, 18, 20, 25, 30, 35, 40, 50, 53, 60, 70, 80, 90, 100, 106, 120, 140, 158,
+        200, 211,
+    ];
     let want = mm * 100.0;
-    *W.iter().min_by(|a, b| (**a as f64 - want).abs().total_cmp(&(**b as f64 - want).abs())).unwrap_or(&25)
+    *W.iter()
+        .min_by(|a, b| {
+            (**a as f64 - want)
+                .abs()
+                .total_cmp(&(**b as f64 - want).abs())
+        })
+        .unwrap_or(&25)
 }
 
 /// (name, description, pattern: dash, gap, …) of the linetypes we write.
 fn linetypes() -> [(&'static str, &'static str, Vec<f64>); 3] {
-    let hidden = crate::view::LineKind::Hidden.pattern().unwrap_or(&[2.0, 0.8]).to_vec();
-    let phantom = crate::view::LineKind::Phantom.pattern().unwrap_or(&[4.0, 0.8, 0.8, 0.8, 0.8, 0.8]).to_vec();
+    let hidden = crate::view::LineKind::Hidden
+        .pattern()
+        .unwrap_or(&[2.0, 0.8])
+        .to_vec();
+    let phantom = crate::view::LineKind::Phantom
+        .pattern()
+        .unwrap_or(&[4.0, 0.8, 0.8, 0.8, 0.8, 0.8])
+        .to_vec();
     let center = crate::flat_view::BEND_PATTERN.to_vec();
-    [("HIDDEN", "Hidden __ __ __", hidden), ("PHANTOM", "Phantom ____ _ _ ____", phantom), ("CENTER", "Center ____ _ ____ _", center)]
+    [
+        ("HIDDEN", "Hidden __ __ __", hidden),
+        ("PHANTOM", "Phantom ____ _ _ ____", phantom),
+        ("CENTER", "Center ____ _ ____ _", center),
+    ]
 }
 
 /// The drawing's extents. A page of strokes only (a sketch or a face laid flat, P3F.2 judge: one
@@ -152,10 +178,16 @@ pub fn extents(page: &Page) -> (P2, P2) {
             }
         }
     }
-    let only_strokes = page.items.iter().all(|i| matches!(i, crate::export::Item::Stroke(..)));
+    let only_strokes = page
+        .items
+        .iter()
+        .all(|i| matches!(i, crate::export::Item::Stroke(..)));
     match (lo[0].is_finite() && hi[0].is_finite(), only_strokes) {
         (true, true) => (lo, hi),
-        (true, false) => ([lo[0].min(0.0), lo[1].min(0.0)], [hi[0].max(page.width), hi[1].max(page.height)]),
+        (true, false) => (
+            [lo[0].min(0.0), lo[1].min(0.0)],
+            [hi[0].max(page.width), hi[1].max(page.height)],
+        ),
         (false, _) => ([0.0, 0.0], [page.width, page.height]),
     }
 }
@@ -167,7 +199,11 @@ pub fn write_dxf(page: &Page) -> String {
 
 /// Writes a page as an ASCII DXF of `version`.
 pub fn write_dxf_version(page: &Page, version: DxfVersion) -> String {
-    let mut o = Out { s: String::new(), handle: 0x10, version };
+    let mut o = Out {
+        s: String::new(),
+        handle: 0x10,
+        version,
+    };
     // Handles fixed up front for the owners.
     let h_vport_t = o.next();
     let h_ltype_t = o.next();
@@ -269,7 +305,10 @@ pub fn write_dxf_version(page: &Page, version: DxfVersion) -> String {
     o.num(17, 0.0);
     o.num(27, 0.0);
     o.num(37, 0.0);
-    let (ext_w, ext_h) = ((ext_hi[0] - ext_lo[0]).max(1.0), (ext_hi[1] - ext_lo[1]).max(1.0));
+    let (ext_w, ext_h) = (
+        (ext_hi[0] - ext_lo[0]).max(1.0),
+        (ext_hi[1] - ext_lo[1]).max(1.0),
+    );
     o.num(40, ext_h * 1.1);
     o.num(41, ext_w / ext_h);
     o.num(42, 50.0);
@@ -293,7 +332,14 @@ pub fn write_dxf_version(page: &Page, version: DxfVersion) -> String {
         record(&mut o, "LTYPE", &h_ltype_t, "AcDbLinetypeTableRecord");
         o.pair(2, name);
         o.pair(70, 0);
-        o.pair(3, if name == "Continuous" { "Solid line" } else { "" });
+        o.pair(
+            3,
+            if name == "Continuous" {
+                "Solid line"
+            } else {
+                ""
+            },
+        );
         o.pair(72, 65);
         o.pair(73, 0);
         o.num(40, 0.0);
@@ -315,9 +361,22 @@ pub fn write_dxf_version(page: &Page, version: DxfVersion) -> String {
     // LAYER
     // The flat pattern layers (P3I.6) only when the page uses them; a flat pattern's page (one
     // using any of them) lists only the layers it uses, not the drawings' ones.
-    let used = |l: Layer| page.items.iter().any(|it| matches!(it, Item::Stroke(_, pen) if pen.layer == l));
+    let used = |l: Layer| {
+        page.items
+            .iter()
+            .any(|it| matches!(it, Item::Stroke(_, pen) if pen.layer == l))
+    };
     let flat_page = Layer::ALL.into_iter().any(|l| l.is_flat() && used(l));
-    let layers: Vec<Layer> = Layer::ALL.into_iter().filter(|l| if flat_page { used(*l) } else { !l.is_flat() || used(*l) }).collect();
+    let layers: Vec<Layer> = Layer::ALL
+        .into_iter()
+        .filter(|l| {
+            if flat_page {
+                used(*l)
+            } else {
+                !l.is_flat() || used(*l)
+            }
+        })
+        .collect();
     table(&mut o, "LAYER", &h_layer_t, 1 + layers.len());
     let layer_rec = |o: &mut Out, name: &str, lt: &str, color: i32| {
         record(o, "LAYER", &h_layer_t, "AcDbLayerTableRecord");
@@ -394,7 +453,10 @@ pub fn write_dxf_version(page: &Page, version: DxfVersion) -> String {
     // BLOCKS
     o.pair(0, "SECTION");
     o.pair(2, "BLOCKS");
-    for (name, rec, ps) in [("*Model_Space", &h_ms_rec, false), ("*Paper_Space", &h_ps_rec, true)] {
+    for (name, rec, ps) in [
+        ("*Model_Space", &h_ms_rec, false),
+        ("*Paper_Space", &h_ps_rec, true),
+    ] {
         o.pair(0, "BLOCK");
         let h = o.next();
         o.pair(5, &h);
@@ -456,7 +518,14 @@ pub fn write_dxf_version(page: &Page, version: DxfVersion) -> String {
     o.s
 }
 
-fn entity_head(o: &mut Out, owner: &str, kind: &str, layer: Layer, pen: Option<&Pen>, color: [u8; 3]) {
+fn entity_head(
+    o: &mut Out,
+    owner: &str,
+    kind: &str,
+    layer: Layer,
+    pen: Option<&Pen>,
+    color: [u8; 3],
+) {
     o.pair(0, kind);
     let h = o.next();
     o.pair(5, &h);
@@ -472,7 +541,10 @@ fn entity_head(o: &mut Out, owner: &str, kind: &str, layer: Layer, pen: Option<&
         o.pair(62, 1);
     } else if color != crate::export::INK && matches!(layer, Layer::BendUp | Layer::BendDown) {
         // A bend line's own colour (P3I.7), as a true colour.
-        o.pair(420, ((color[0] as i32) << 16) | ((color[1] as i32) << 8) | color[2] as i32);
+        o.pair(
+            420,
+            ((color[0] as i32) << 16) | ((color[1] as i32) << 8) | color[2] as i32,
+        );
     }
     if let Some(p) = pen {
         o.pair(370, lineweight(p.width));
@@ -488,7 +560,12 @@ fn write_item(o: &mut Out, owner: &str, it: &Item) {
                 o.point(10, *a);
                 o.point(11, *b);
             }
-            Shape::Arc { center, radius, start, end } => {
+            Shape::Arc {
+                center,
+                radius,
+                start,
+                end,
+            } => {
                 entity_head(o, owner, "ARC", pen.layer, Some(pen), pen.color);
                 o.pair(100, "AcDbCircle");
                 o.point(10, *center);
@@ -503,8 +580,15 @@ fn write_item(o: &mut Out, owner: &str, it: &Item) {
                 o.point(10, *center);
                 o.num(40, *radius);
             }
-            Shape::Polyline { points, closed } => lwpolyline(o, owner, points, *closed, pen.layer, Some(pen), pen.color),
-            Shape::Spline { knots, control, fit, .. } => {
+            Shape::Polyline { points, closed } => {
+                lwpolyline(o, owner, points, *closed, pen.layer, Some(pen), pen.color)
+            }
+            Shape::Spline {
+                knots,
+                control,
+                fit,
+                ..
+            } => {
                 entity_head(o, owner, "SPLINE", pen.layer, Some(pen), pen.color);
                 o.pair(100, "AcDbSpline");
                 o.num(210, 0.0);
@@ -531,7 +615,11 @@ fn write_item(o: &mut Out, owner: &str, it: &Item) {
                 }
             }
         },
-        Item::Fill { points, color, layer } => {
+        Item::Fill {
+            points,
+            color,
+            layer,
+        } => {
             if *layer == Layer::Shaded {
                 return;
             }
@@ -544,11 +632,19 @@ fn write_item(o: &mut Out, owner: &str, it: &Item) {
                 if points.len() == 4 && k == 2 {
                     break;
                 }
-                let tri: Vec<P2> = if points.len() == 4 { points.clone() } else { vec![points[0], points[k], points[k + 1]] };
+                let tri: Vec<P2> = if points.len() == 4 {
+                    points.clone()
+                } else {
+                    vec![points[0], points[k], points[k + 1]]
+                };
                 entity_head(o, owner, "SOLID", *layer, None, *color);
                 o.pair(100, "AcDbTrace");
                 // SOLID's corners go 1, 2, 4, 3.
-                let (p1, p2, p3, p4) = if tri.len() == 4 { (tri[0], tri[1], tri[3], tri[2]) } else { (tri[0], tri[1], tri[2], tri[2]) };
+                let (p1, p2, p3, p4) = if tri.len() == 4 {
+                    (tri[0], tri[1], tri[3], tri[2])
+                } else {
+                    (tri[0], tri[1], tri[2], tri[2])
+                };
                 o.point(10, p1);
                 o.point(11, p2);
                 o.point(12, p3);
@@ -561,7 +657,11 @@ fn write_item(o: &mut Out, owner: &str, it: &Item) {
             o.point(10, t.pos);
             o.num(40, t.height);
             let text = dxf_text(&t.text);
-            let text = if o.version.utf8() { text } else { ascii_escaped(&text) };
+            let text = if o.version.utf8() {
+                text
+            } else {
+                ascii_escaped(&text)
+            };
             o.pair(1, text);
             if t.rotation != 0.0 {
                 o.num(50, t.rotation);
@@ -607,7 +707,15 @@ fn dxf_text(s: &str) -> String {
     out
 }
 
-fn lwpolyline(o: &mut Out, owner: &str, points: &[P2], closed: bool, layer: Layer, pen: Option<&Pen>, color: [u8; 3]) {
+fn lwpolyline(
+    o: &mut Out,
+    owner: &str,
+    points: &[P2],
+    closed: bool,
+    layer: Layer,
+    pen: Option<&Pen>,
+    color: [u8; 3],
+) {
     entity_head(o, owner, "LWPOLYLINE", layer, pen, color);
     o.pair(100, "AcDbPolyline");
     o.pair(90, points.len());
@@ -644,7 +752,9 @@ fn pairs(text: &str) -> Result<Pairs, String> {
         if code.is_empty() {
             continue;
         }
-        let code: i32 = code.parse().map_err(|_| format!("bad group code {code:?}"))?;
+        let code: i32 = code
+            .parse()
+            .map_err(|_| format!("bad group code {code:?}"))?;
         let value = lines.next().ok_or("the file ends inside a group")?;
         let value = value.strip_suffix('\r').unwrap_or(value);
         out.push((code, value.trim_start().to_string()));
@@ -661,19 +771,32 @@ struct Raw {
 
 impl Raw {
     fn f(&self, code: i32) -> Option<f64> {
-        self.groups.iter().find(|(c, _)| *c == code).and_then(|(_, v)| v.trim().parse().ok())
+        self.groups
+            .iter()
+            .find(|(c, _)| *c == code)
+            .and_then(|(_, v)| v.trim().parse().ok())
     }
     fn fd(&self, code: i32, d: f64) -> f64 {
         self.f(code).unwrap_or(d)
     }
     fn i(&self, code: i32) -> Option<i64> {
-        self.groups.iter().find(|(c, _)| *c == code).and_then(|(_, v)| v.trim().parse().ok())
+        self.groups
+            .iter()
+            .find(|(c, _)| *c == code)
+            .and_then(|(_, v)| v.trim().parse().ok())
     }
     fn s(&self, code: i32) -> Option<&str> {
-        self.groups.iter().find(|(c, _)| *c == code).map(|(_, v)| v.as_str())
+        self.groups
+            .iter()
+            .find(|(c, _)| *c == code)
+            .map(|(_, v)| v.as_str())
     }
     fn all(&self, code: i32) -> Vec<f64> {
-        self.groups.iter().filter(|(c, _)| *c == code).filter_map(|(_, v)| v.trim().parse().ok()).collect()
+        self.groups
+            .iter()
+            .filter(|(c, _)| *c == code)
+            .filter_map(|(_, v)| v.trim().parse().ok())
+            .collect()
     }
     fn p(&self, code: i32) -> P2 {
         [self.fd(code, 0.0), self.fd(code + 10, 0.0)]
@@ -703,7 +826,10 @@ fn raws(p: &[(i32, String)]) -> Vec<Raw> {
     let mut out: Vec<Raw> = Vec::new();
     for (c, v) in p {
         if *c == 0 {
-            out.push(Raw { kind: v.trim().to_string(), groups: Vec::new() });
+            out.push(Raw {
+                kind: v.trim().to_string(),
+                groups: Vec::new(),
+            });
         } else if let Some(r) = out.last_mut() {
             r.groups.push((*c, v.clone()));
         }
@@ -737,12 +863,19 @@ struct Xf {
 }
 
 impl Xf {
-    const ID: Xf = Xf { t: [0.0, 0.0], s: [1.0, 1.0], rot: 0.0 };
+    const ID: Xf = Xf {
+        t: [0.0, 0.0],
+        s: [1.0, 1.0],
+        rot: 0.0,
+    };
 
     fn apply(&self, p: P2) -> P2 {
         let q = [p[0] * self.s[0], p[1] * self.s[1]];
         let (s, c) = self.rot.to_radians().sin_cos();
-        [self.t[0] + c * q[0] - s * q[1], self.t[1] + s * q[0] + c * q[1]]
+        [
+            self.t[0] + c * q[0] - s * q[1],
+            self.t[1] + s * q[0] + c * q[1],
+        ]
     }
 
     fn uniform(&self) -> bool {
@@ -786,10 +919,14 @@ pub fn read_dxf(text: &str) -> Result<DxfDrawing, String> {
             i += 1;
         }
     }
-    let entities = sections.get("ENTITIES").ok_or("no ENTITIES section: not a DXF drawing")?;
+    let entities = sections
+        .get("ENTITIES")
+        .ok_or("no ENTITIES section: not a DXF drawing")?;
     let mut unit = 4;
     if let Some(h) = sections.get("HEADER")
-        && let Some(k) = h.iter().position(|(c, v)| *c == 9 && v.trim() == "$INSUNITS")
+        && let Some(k) = h
+            .iter()
+            .position(|(c, v)| *c == 9 && v.trim() == "$INSUNITS")
         && let Some((_, v)) = h.get(k + 1)
     {
         unit = v.trim().parse().unwrap_or(4);
@@ -815,9 +952,17 @@ pub fn read_dxf(text: &str) -> Result<DxfDrawing, String> {
             }
         }
     }
-    let mut out = DxfDrawing { unit_mm: units_mm(unit), ..DxfDrawing::default() };
+    let mut out = DxfDrawing {
+        unit_mm: units_mm(unit),
+        ..DxfDrawing::default()
+    };
     let rs = raws(entities);
-    let mut ctx = Ctx { blocks: &blocks, out: &mut out, skipped: HashMap::new(), depth: 0 };
+    let mut ctx = Ctx {
+        blocks: &blocks,
+        out: &mut out,
+        skipped: HashMap::new(),
+        depth: 0,
+    };
     convert(&mut ctx, &rs, Xf::ID);
     let mut skipped: Vec<(String, usize)> = ctx.skipped.into_iter().collect();
     skipped.sort();
@@ -842,21 +987,48 @@ fn convert(ctx: &mut Ctx, rs: &[Raw], xf: Xf) {
         }
         let m = |p: P2| xf.apply(p);
         match r.kind.as_str() {
-            "LINE" => push(ctx, Entity::Line { a: m(r.p(10)), b: m(r.p(11)) }, &layer),
+            "LINE" => push(
+                ctx,
+                Entity::Line {
+                    a: m(r.p(10)),
+                    b: m(r.p(11)),
+                },
+                &layer,
+            ),
             "CIRCLE" | "ARC" => {
                 let c = r.p(10);
                 let rad = r.fd(40, 0.0);
-                let (a0, a1) = if r.kind == "ARC" { (r.fd(50, 0.0), r.fd(51, 360.0)) } else { (0.0, 360.0) };
+                let (a0, a1) = if r.kind == "ARC" {
+                    (r.fd(50, 0.0), r.fd(51, 360.0))
+                } else {
+                    (0.0, 360.0)
+                };
                 if xf.uniform() && xf.s[0] > 0.0 {
                     let e = if r.kind == "ARC" {
-                        Entity::Arc { center: m(c), radius: rad * xf.s[0], start: (a0 + xf.rot).rem_euclid(360.0), end: (a1 + xf.rot).rem_euclid(360.0) }
+                        Entity::Arc {
+                            center: m(c),
+                            radius: rad * xf.s[0],
+                            start: (a0 + xf.rot).rem_euclid(360.0),
+                            end: (a1 + xf.rot).rem_euclid(360.0),
+                        }
                     } else {
-                        Entity::Circle { center: m(c), radius: rad * xf.s[0] }
+                        Entity::Circle {
+                            center: m(c),
+                            radius: rad * xf.s[0],
+                        }
                     };
                     push(ctx, e, &layer);
                 } else {
                     let pts = arc_polyline(c, rad, a0, a1).into_iter().map(m).collect();
-                    push(ctx, Entity::Polyline { points: pts, bulges: Vec::new(), closed: false }, &layer);
+                    push(
+                        ctx,
+                        Entity::Polyline {
+                            points: pts,
+                            bulges: Vec::new(),
+                            closed: false,
+                        },
+                        &layer,
+                    );
                 }
             }
             "LWPOLYLINE" => {
@@ -905,11 +1077,31 @@ fn convert(ctx: &mut Ctx, rs: &[Raw], xf: Xf) {
                 let control: Vec<P2> = r.points(10).into_iter().map(m).collect();
                 let fit: Vec<P2> = r.points(11).into_iter().map(m).collect();
                 if control.len() >= 2 && knots.len() > control.len() + degree {
-                    push(ctx, Entity::Spline { degree, knots, control, weights, fit }, &layer);
+                    push(
+                        ctx,
+                        Entity::Spline {
+                            degree,
+                            knots,
+                            control,
+                            weights,
+                            fit,
+                        },
+                        &layer,
+                    );
                 } else if fit.len() >= 2 {
                     // Fit points only: our spline through them.
                     let (knots, control) = crate::sheet_sketch::spline_nurbs(&fit);
-                    push(ctx, Entity::Spline { degree: 3, knots, control, weights: Vec::new(), fit }, &layer);
+                    push(
+                        ctx,
+                        Entity::Spline {
+                            degree: 3,
+                            knots,
+                            control,
+                            weights: Vec::new(),
+                            fit,
+                        },
+                        &layer,
+                    );
                 } else {
                     *ctx.skipped.entry("SPLINE".into()).or_default() += 1;
                 }
@@ -928,10 +1120,21 @@ fn convert(ctx: &mut Ctx, rs: &[Raw], xf: Xf) {
                 let pts: Vec<P2> = (0..=n)
                     .map(|i| {
                         let t = t0 + sweep * i as f64 / n as f64;
-                        m([c[0] + major[0] * t.cos() + minor[0] * t.sin(), c[1] + major[1] * t.cos() + minor[1] * t.sin()])
+                        m([
+                            c[0] + major[0] * t.cos() + minor[0] * t.sin(),
+                            c[1] + major[1] * t.cos() + minor[1] * t.sin(),
+                        ])
                     })
                     .collect();
-                push(ctx, Entity::Polyline { points: pts, bulges: Vec::new(), closed: false }, &layer);
+                push(
+                    ctx,
+                    Entity::Polyline {
+                        points: pts,
+                        bulges: Vec::new(),
+                        closed: false,
+                    },
+                    &layer,
+                );
             }
             "SOLID" | "TRACE" => {
                 let (p1, p2, p3, p4) = (r.p(10), r.p(11), r.p(12), r.p(13));
@@ -1012,7 +1215,9 @@ fn convert(ctx: &mut Ctx, rs: &[Raw], xf: Xf) {
                 }
             }
             "INSERT" | "DIMENSION" => {
-                let Some(name) = r.s(2).map(str::to_string) else { continue };
+                let Some(name) = r.s(2).map(str::to_string) else {
+                    continue;
+                };
                 let Some((base, es)) = ctx.blocks.get(&name) else {
                     *ctx.skipped.entry(format!("{} {name}", r.kind)).or_default() += 1;
                     continue;
@@ -1024,9 +1229,18 @@ fn convert(ctx: &mut Ctx, rs: &[Raw], xf: Xf) {
                     let at = r.p(10);
                     let s = [r.fd(41, 1.0), r.fd(42, 1.0)];
                     let rot = r.fd(50, 0.0);
-                    let local = Xf { t: [0.0, 0.0], s, rot };
+                    let local = Xf {
+                        t: [0.0, 0.0],
+                        s,
+                        rot,
+                    };
                     let b = local.apply(*base);
-                    Xf { t: [at[0] - b[0], at[1] - b[1]], s, rot }.then(&xf)
+                    Xf {
+                        t: [at[0] - b[0], at[1] - b[1]],
+                        s,
+                        rot,
+                    }
+                    .then(&xf)
                 } else {
                     xf
                 };
@@ -1042,26 +1256,68 @@ fn convert(ctx: &mut Ctx, rs: &[Raw], xf: Xf) {
 }
 
 fn text_entity(at: P2, h: f64, text: String, rot: f64, xf: Xf) -> Entity {
-    let s = if xf.uniform() { xf.s[0].abs() } else { (xf.s[0].abs() * xf.s[1].abs()).sqrt() };
-    Entity::Text { at: xf.apply(at), height: h * s, text, rotation: rot + xf.rot }
+    let s = if xf.uniform() {
+        xf.s[0].abs()
+    } else {
+        (xf.s[0].abs() * xf.s[1].abs()).sqrt()
+    };
+    Entity::Text {
+        at: xf.apply(at),
+        height: h * s,
+        text,
+        rotation: rot + xf.rot,
+    }
 }
 
-fn push_polyline(ctx: &mut Ctx, points: Vec<P2>, bulges: Vec<f64>, closed: bool, xf: Xf, layer: &str) {
+fn push_polyline(
+    ctx: &mut Ctx,
+    points: Vec<P2>,
+    bulges: Vec<f64>,
+    closed: bool,
+    xf: Xf,
+    layer: &str,
+) {
     if points.len() < 2 {
         return;
     }
     if xf.uniform() && xf.s[0] > 0.0 {
         let pts = points.into_iter().map(|p| xf.apply(p)).collect();
-        push(ctx, Entity::Polyline { points: pts, bulges: if bulges.iter().all(|b| *b == 0.0) { Vec::new() } else { bulges }, closed }, layer);
+        push(
+            ctx,
+            Entity::Polyline {
+                points: pts,
+                bulges: if bulges.iter().all(|b| *b == 0.0) {
+                    Vec::new()
+                } else {
+                    bulges
+                },
+                closed,
+            },
+            layer,
+        );
     } else {
         let flat = crate::sheet_sketch::bulge_polyline(&points, &bulges, closed);
-        push(ctx, Entity::Polyline { points: flat.into_iter().map(|p| xf.apply(p)).collect(), bulges: Vec::new(), closed: false }, layer);
+        push(
+            ctx,
+            Entity::Polyline {
+                points: flat.into_iter().map(|p| xf.apply(p)).collect(),
+                bulges: Vec::new(),
+                closed: false,
+            },
+            layer,
+        );
     }
 }
 
 /// `\U+00D8` escapes and `%%c`, `%%d`, `%%p` in TEXT.
 fn decode_text(s: &str) -> String {
-    let s = s.replace("%%c", "Ø").replace("%%C", "Ø").replace("%%d", "°").replace("%%D", "°").replace("%%p", "±").replace("%%P", "±");
+    let s = s
+        .replace("%%c", "Ø")
+        .replace("%%C", "Ø")
+        .replace("%%d", "°")
+        .replace("%%D", "°")
+        .replace("%%p", "±")
+        .replace("%%P", "±");
     let mut out = String::new();
     let mut rest = s.as_str();
     while let Some(i) = rest.find("\\U+") {
@@ -1102,7 +1358,10 @@ fn mtext_lines(raw: &str) -> Vec<String> {
                         if d == ';' {
                             break;
                         }
-                        lines.last_mut().unwrap().push(if d == '^' || d == '#' { '/' } else { d });
+                        lines
+                            .last_mut()
+                            .unwrap()
+                            .push(if d == '^' || d == '#' { '/' } else { d });
                     }
                 }
                 Some('L' | 'l' | 'O' | 'o' | 'K' | 'k') => {}
@@ -1139,7 +1398,13 @@ pub fn counts(d: &DxfDrawing) -> (usize, usize, usize) {
 /// A spline's polyline, for callers that draw read entities.
 pub fn spline_points(e: &Entity) -> Vec<P2> {
     match e {
-        Entity::Spline { degree, knots, control, weights, .. } => bspline_polyline(*degree, knots, control, weights, 16),
+        Entity::Spline {
+            degree,
+            knots,
+            control,
+            weights,
+            ..
+        } => bspline_polyline(*degree, knots, control, weights, 16),
         _ => Vec::new(),
     }
 }
@@ -1151,16 +1416,59 @@ mod tests {
 
     #[test]
     fn a_page_round_trips() {
-        let mut page = Page { name: "S".into(), width: 279.4, height: 215.9, items: Vec::new() };
+        let mut page = Page {
+            name: "S".into(),
+            width: 279.4,
+            height: 215.9,
+            items: Vec::new(),
+        };
         let pen = |l| Pen::new(0.35, l);
-        page.items.push(Item::Stroke(Shape::Line { a: [1.0 / 3.0, 2.0], b: [100.123456789, 50.5] }, pen(Layer::Visible)));
-        page.items.push(Item::Stroke(Shape::Arc { center: [50.0, 60.0], radius: 7.25, start: 350.0, end: 20.0 }, pen(Layer::Hidden)));
-        page.items.push(Item::Stroke(Shape::Circle { center: [10.0, 10.0], radius: 3.0 }, pen(Layer::Visible)));
-        page.items.push(Item::Stroke(Shape::Polyline { points: vec![[0.0, 0.0], [5.0, 1.0], [7.0, 4.0]], closed: false }, pen(Layer::Tangent)));
+        page.items.push(Item::Stroke(
+            Shape::Line {
+                a: [1.0 / 3.0, 2.0],
+                b: [100.123456789, 50.5],
+            },
+            pen(Layer::Visible),
+        ));
+        page.items.push(Item::Stroke(
+            Shape::Arc {
+                center: [50.0, 60.0],
+                radius: 7.25,
+                start: 350.0,
+                end: 20.0,
+            },
+            pen(Layer::Hidden),
+        ));
+        page.items.push(Item::Stroke(
+            Shape::Circle {
+                center: [10.0, 10.0],
+                radius: 3.0,
+            },
+            pen(Layer::Visible),
+        ));
+        page.items.push(Item::Stroke(
+            Shape::Polyline {
+                points: vec![[0.0, 0.0], [5.0, 1.0], [7.0, 4.0]],
+                closed: false,
+            },
+            pen(Layer::Tangent),
+        ));
         let pts = [[0.0, 0.0], [10.0, 5.0], [20.0, 0.0]];
         let (knots, control) = crate::sheet_sketch::spline_nurbs(&pts);
-        page.items.push(Item::Stroke(Shape::Spline { knots, control, fit: pts.to_vec(), points: Vec::new() }, pen(Layer::SheetSketch)));
-        page.items.push(Item::Fill { points: vec![[0.0, 0.0], [1.0, 0.0], [0.5, 1.0]], color: [0, 0, 0], layer: Layer::Annotation });
+        page.items.push(Item::Stroke(
+            Shape::Spline {
+                knots,
+                control,
+                fit: pts.to_vec(),
+                points: Vec::new(),
+            },
+            pen(Layer::SheetSketch),
+        ));
+        page.items.push(Item::Fill {
+            points: vec![[0.0, 0.0], [1.0, 0.0], [0.5, 1.0]],
+            color: [0, 0, 0],
+            layer: Layer::Annotation,
+        });
         page.items.push(Item::Text(Text {
             pos: [5.0, 6.0],
             height: 3.0,
@@ -1176,11 +1484,27 @@ mod tests {
         let d = read_dxf(&text).unwrap();
         assert_eq!(counts(&d), (1, 1, 1));
         assert_eq!(d.unit_mm, 1.0);
-        assert_eq!(d.entities[0], Entity::Line { a: [1.0 / 3.0, 2.0], b: [100.123456789, 50.5] });
-        assert_eq!(d.entities[1], Entity::Arc { center: [50.0, 60.0], radius: 7.25, start: 350.0, end: 20.0 });
+        assert_eq!(
+            d.entities[0],
+            Entity::Line {
+                a: [1.0 / 3.0, 2.0],
+                b: [100.123456789, 50.5]
+            }
+        );
+        assert_eq!(
+            d.entities[1],
+            Entity::Arc {
+                center: [50.0, 60.0],
+                radius: 7.25,
+                start: 350.0,
+                end: 20.0
+            }
+        );
         assert!(matches!(&d.entities[4], Entity::Spline { degree: 3, fit, .. } if fit.len() == 3));
         assert!(matches!(&d.entities[5], Entity::Solid { points } if points.len() == 3));
-        assert!(matches!(&d.entities[6], Entity::Text { text, rotation, .. } if text == "Ø4.750" && *rotation == 90.0));
+        assert!(
+            matches!(&d.entities[6], Entity::Text { text, rotation, .. } if text == "Ø4.750" && *rotation == 90.0)
+        );
         assert_eq!(d.layers[1], "HIDDEN");
         assert!(d.skipped.is_empty(), "{:?}", d.skipped);
         // R2000: ASCII with \U+ escapes, read back as the same text; hidden lines carry their
@@ -1199,8 +1523,24 @@ mod tests {
         assert_eq!(d.unit_mm, 25.4);
         assert!(matches!(&d.entities[0], Entity::Polyline { bulges, .. } if bulges[0] == 1.0));
         // The block's base (1, 0) lands on the insertion point, scaled 2.
-        assert_eq!(d.entities[1], Entity::Line { a: [10.0, 5.0], b: [12.0, 5.0] });
-        let texts: Vec<&str> = d.entities.iter().filter_map(|e| if let Entity::Text { text, .. } = e { Some(text.as_str()) } else { None }).collect();
+        assert_eq!(
+            d.entities[1],
+            Entity::Line {
+                a: [10.0, 5.0],
+                b: [12.0, 5.0]
+            }
+        );
+        let texts: Vec<&str> = d
+            .entities
+            .iter()
+            .filter_map(|e| {
+                if let Entity::Text { text, .. } = e {
+                    Some(text.as_str())
+                } else {
+                    None
+                }
+            })
+            .collect();
         assert_eq!(texts, ["AB", "CD"]);
     }
 }

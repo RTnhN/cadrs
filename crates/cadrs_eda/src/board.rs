@@ -23,7 +23,9 @@ pub struct PlacedFootprint {
 
 impl PlacedFootprint {
     pub fn reference(&self) -> &str {
-        self.footprint.field(crate::symbol::fields::REFERENCE).map_or("", |f| &f.text.text.text)
+        self.footprint
+            .field(crate::symbol::fields::REFERENCE)
+            .map_or("", |f| &f.text.text.text)
     }
 }
 
@@ -252,7 +254,12 @@ impl Rules {
     /// pattern matches, else Default (the first class).
     pub fn class_of(&self, net: &str) -> &NetClass {
         let by_name = |n: &str| self.net_classes.iter().find(|c| c.name == n);
-        if let Some(c) = self.net_class_of.iter().find(|(n, _)| n == net).and_then(|(_, c)| by_name(c)) {
+        if let Some(c) = self
+            .net_class_of
+            .iter()
+            .find(|(n, _)| n == net)
+            .and_then(|(_, c)| by_name(c))
+        {
             return c;
         }
         self.net_classes
@@ -265,7 +272,10 @@ impl Rules {
 
     /// The clearance two nets need: the larger of their classes' (and the board minimum).
     pub fn clearance(&self, a: &str, b: &str) -> Nm {
-        self.class_of(a).clearance.max(self.class_of(b).clearance).max(self.min_clearance)
+        self.class_of(a)
+            .clearance
+            .max(self.class_of(b).clearance)
+            .max(self.min_clearance)
     }
 
     pub fn class_mut(&mut self, name: &str) -> Option<&mut NetClass> {
@@ -311,10 +321,26 @@ impl Stackup {
         let cores = (copper - 1) as Nm;
         let core = (thickness - cu * copper as Nm - 2 * mask) / cores;
         let mut layers = vec![];
-        let simple = |name: &str, kind, layer, t| StackLayer { name: name.into(), kind, layer: Some(layer), thickness: t, material: String::new(), epsilon_r: 0.0, loss_tangent: 0.0 };
-        layers.push(simple("F.Silkscreen", StackKind::Silkscreen, Layer::TopSilk, 0));
+        let simple = |name: &str, kind, layer, t| StackLayer {
+            name: name.into(),
+            kind,
+            layer: Some(layer),
+            thickness: t,
+            material: String::new(),
+            epsilon_r: 0.0,
+            loss_tangent: 0.0,
+        };
+        layers.push(simple(
+            "F.Silkscreen",
+            StackKind::Silkscreen,
+            Layer::TopSilk,
+            0,
+        ));
         layers.push(simple("F.Paste", StackKind::Paste, Layer::TopPaste, 0));
-        layers.push(StackLayer { epsilon_r: 3.3, ..simple("F.Mask", StackKind::Mask, Layer::TopMask, mask) });
+        layers.push(StackLayer {
+            epsilon_r: 3.3,
+            ..simple("F.Mask", StackKind::Mask, Layer::TopMask, mask)
+        });
         for (i, l) in Layer::copper(copper).enumerate() {
             let name = match l {
                 Layer::TopCopper => "F.Cu".to_string(),
@@ -335,9 +361,17 @@ impl Stackup {
                 });
             }
         }
-        layers.push(StackLayer { epsilon_r: 3.3, ..simple("B.Mask", StackKind::Mask, Layer::BottomMask, mask) });
+        layers.push(StackLayer {
+            epsilon_r: 3.3,
+            ..simple("B.Mask", StackKind::Mask, Layer::BottomMask, mask)
+        });
         layers.push(simple("B.Paste", StackKind::Paste, Layer::BottomPaste, 0));
-        layers.push(simple("B.Silkscreen", StackKind::Silkscreen, Layer::BottomSilk, 0));
+        layers.push(simple(
+            "B.Silkscreen",
+            StackKind::Silkscreen,
+            Layer::BottomSilk,
+            0,
+        ));
         Stackup { layers }
     }
 
@@ -410,12 +444,27 @@ impl Board {
 
     /// The outline shapes (on [`Layer::Outline`]), the board's own and its footprints'.
     pub fn outline_shapes(&self) -> Vec<Shape> {
-        let own = self.shapes.iter().filter(|s| s.layer == Layer::Outline).map(|s| s.shape.clone());
+        let own = self
+            .shapes
+            .iter()
+            .filter(|s| s.layer == Layer::Outline)
+            .map(|s| s.shape.clone());
         let fps = self.footprints.iter().flat_map(|f| {
-            f.footprint.shapes.iter().filter(|s| f.placement.layer(s.layer) == Layer::Outline).map(|s| {
-                let g = if f.placement.angle % 90.0 == 0.0 { s.shape.geom.clone() } else { s.shape.geom.rect_as_polyline() };
-                Shape { geom: g.map(|p| f.placement.apply(p)), ..s.shape.clone() }
-            })
+            f.footprint
+                .shapes
+                .iter()
+                .filter(|s| f.placement.layer(s.layer) == Layer::Outline)
+                .map(|s| {
+                    let g = if f.placement.angle % 90.0 == 0.0 {
+                        s.shape.geom.clone()
+                    } else {
+                        s.shape.geom.rect_as_polyline()
+                    };
+                    Shape {
+                        geom: g.map(|p| f.placement.apply(p)),
+                        ..s.shape.clone()
+                    }
+                })
         });
         own.chain(fps).collect()
     }
@@ -427,7 +476,10 @@ impl Board {
         b.shapes.push(BoardShape {
             id: Uuid::new_v4(),
             shape: Shape {
-                geom: crate::graphics::Geom::Rect { a: Pt::ZERO, b: Pt::new(w, h) },
+                geom: crate::graphics::Geom::Rect {
+                    a: Pt::ZERO,
+                    b: Pt::new(w, h),
+                },
                 stroke: crate::graphics::Stroke::width(mm(0.05)),
                 fill: crate::graphics::Fill::None,
             },

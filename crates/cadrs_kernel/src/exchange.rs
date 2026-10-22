@@ -15,8 +15,8 @@ use std::fmt::Write as _;
 
 use nalgebra::{Point3, Vector3};
 
-use crate::{BodyId, Motion, TriMesh};
 use crate::native::tol;
+use crate::{BodyId, Motion, TriMesh};
 
 /// A neutral B-rep file format.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -91,7 +91,9 @@ impl ImportedModel {
             if let Some(n) = seen.get_mut(o.part) {
                 *n += 1;
             }
-            let moved = (o.placement.linear - nalgebra::Matrix3::identity()).norm() > tol::ROUNDOFF_FINE || o.placement.translation.norm() > tol::ROUNDOFF_FINE;
+            let moved = (o.placement.linear - nalgebra::Matrix3::identity()).norm()
+                > tol::ROUNDOFF_FINE
+                || o.placement.translation.norm() > tol::ROUNDOFF_FINE;
             if moved {
                 return true;
             }
@@ -157,7 +159,10 @@ pub fn write_stl_binary(mesh: &TriMesh, header: &str) -> Vec<u8> {
 
 /// An ASCII STL file (`solid <name>` … `endsolid <name>`).
 pub fn write_stl_ascii(mesh: &TriMesh, name: &str) -> String {
-    let name: String = name.chars().map(|c| if c.is_whitespace() { '_' } else { c }).collect();
+    let name: String = name
+        .chars()
+        .map(|c| if c.is_whitespace() { '_' } else { c })
+        .collect();
     let mut s = format!("solid {name}\n");
     for t in triangles(mesh) {
         let n = facet_normal(&t);
@@ -178,7 +183,10 @@ pub fn write_obj(meshes: &[(&str, &TriMesh)]) -> String {
     let mut s = String::from("# cadrs OBJ export (millimetres)\n");
     let mut base = 1usize;
     for (name, mesh) in meshes {
-        let name: String = name.chars().map(|c| if c.is_whitespace() { '_' } else { c }).collect();
+        let name: String = name
+            .chars()
+            .map(|c| if c.is_whitespace() { '_' } else { c })
+            .collect();
         let _ = writeln!(s, "o {name}");
         for p in &mesh.positions {
             let _ = writeln!(s, "v {} {} {}", p.x, p.y, p.z);
@@ -205,7 +213,10 @@ pub fn write_obj(meshes: &[(&str, &TriMesh)]) -> String {
 /// The volume a closed, outward-oriented triangle mesh encloses: Σ (a · (b × c)) / 6 over its
 /// triangles (the divergence theorem; exact for a mesh of flat faces).
 pub fn mesh_volume(tris: impl IntoIterator<Item = [Point3<f64>; 3]>) -> f64 {
-    tris.into_iter().map(|[a, b, c]| a.coords.dot(&b.coords.cross(&c.coords))).sum::<f64>() / 6.0
+    tris.into_iter()
+        .map(|[a, b, c]| a.coords.dot(&b.coords.cross(&c.coords)))
+        .sum::<f64>()
+        / 6.0
 }
 
 /// The triangles of a binary STL file.
@@ -215,7 +226,9 @@ pub fn read_stl_binary(bytes: &[u8]) -> Option<Vec<[Point3<f64>; 3]>> {
     let mut out = Vec::with_capacity(n.min(bytes.len().saturating_sub(84) / 50));
     for k in 0..n {
         let rec: &[u8; 50] = bytes.get(84 + k * 50..84 + (k + 1) * 50)?.try_into().ok()?;
-        let f = |i: usize| f32::from_le_bytes([rec[i * 4], rec[i * 4 + 1], rec[i * 4 + 2], rec[i * 4 + 3]]) as f64;
+        let f = |i: usize| {
+            f32::from_le_bytes([rec[i * 4], rec[i * 4 + 1], rec[i * 4 + 2], rec[i * 4 + 3]]) as f64
+        };
         let p = |j: usize| Point3::new(f(3 + j * 3), f(4 + j * 3), f(5 + j * 3));
         out.push([p(0), p(1), p(2)]);
     }
@@ -256,7 +269,9 @@ pub fn read_obj(text: &str) -> Vec<[Point3<f64>; 3]> {
                 }
             }
             Some("f") => {
-                let idx: Vec<usize> = w.filter_map(|x| x.split('/').next()?.parse::<usize>().ok()).collect();
+                let idx: Vec<usize> = w
+                    .filter_map(|x| x.split('/').next()?.parse::<usize>().ok())
+                    .collect();
                 for k in 1..idx.len().saturating_sub(1) {
                     let g = |i: usize| vs.get(i.wrapping_sub(1)).copied();
                     if let (Some(a), Some(b), Some(c)) = (g(idx[0]), g(idx[k]), g(idx[k + 1])) {
@@ -277,12 +292,36 @@ mod tests {
     /// A unit cube as 12 outward triangles.
     fn cube() -> TriMesh {
         let p = |x: f64, y: f64, z: f64| Point3::new(x, y, z);
-        let positions = vec![p(0., 0., 0.), p(1., 0., 0.), p(1., 1., 0.), p(0., 1., 0.), p(0., 0., 1.), p(1., 0., 1.), p(1., 1., 1.), p(0., 1., 1.)];
-        let indices = vec![
-            [0, 2, 1], [0, 3, 2], [4, 5, 6], [4, 6, 7], [0, 1, 5], [0, 5, 4],
-            [1, 2, 6], [1, 6, 5], [2, 3, 7], [2, 7, 6], [3, 0, 4], [3, 4, 7],
+        let positions = vec![
+            p(0., 0., 0.),
+            p(1., 0., 0.),
+            p(1., 1., 0.),
+            p(0., 1., 0.),
+            p(0., 0., 1.),
+            p(1., 0., 1.),
+            p(1., 1., 1.),
+            p(0., 1., 1.),
         ];
-        TriMesh { normals: vec![Vector3::zeros(); 8], positions, indices, ..TriMesh::default() }
+        let indices = vec![
+            [0, 2, 1],
+            [0, 3, 2],
+            [4, 5, 6],
+            [4, 6, 7],
+            [0, 1, 5],
+            [0, 5, 4],
+            [1, 2, 6],
+            [1, 6, 5],
+            [2, 3, 7],
+            [2, 7, 6],
+            [3, 0, 4],
+            [3, 4, 7],
+        ];
+        TriMesh {
+            normals: vec![Vector3::zeros(); 8],
+            positions,
+            indices,
+            ..TriMesh::default()
+        }
     }
 
     #[test]

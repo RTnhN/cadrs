@@ -42,7 +42,9 @@ fn side_distance(m: &Model, w: crate::model::WallId, s: Seg2, p: P3) -> Option<f
 /// Whether `p` lies in a bend's region (between its radii, along its length, within its
 /// sweep), with tolerance `tol`.
 fn in_bend(m: &Model, j: JointId, p: P3, tol: f64) -> bool {
-    let Some(g) = m.bend_geometry(j) else { return false };
+    let Some(g) = m.bend_geometry(j) else {
+        return false;
+    };
     let span = g.ends.1 - g.ends.0;
     let len = span.norm();
     if len < 1e-12 {
@@ -67,7 +69,11 @@ fn in_bend(m: &Model, j: JointId, p: P3, tol: f64) -> bool {
     let y = g.axis.cross(&x);
     let phi = radial.dot(&y).atan2(radial.dot(&x));
     let slack = tol / r.max(1e-9);
-    let phi = if phi < -slack { phi + std::f64::consts::TAU } else { phi };
+    let phi = if phi < -slack {
+        phi + std::f64::consts::TAU
+    } else {
+        phi
+    };
     phi >= -slack && phi <= g.sweep + slack
 }
 
@@ -169,7 +175,10 @@ pub struct FlatScene {
 impl FlatScene {
     /// The flat pattern's parts side by side along +X, a gap apart, the first where it lies.
     pub fn new(m: &Model, flat: &FlatPattern) -> FlatScene {
-        let mut out = FlatScene { thickness: m.params.thickness, ..Default::default() };
+        let mut out = FlatScene {
+            thickness: m.params.thickness,
+            ..Default::default()
+        };
         let size = flat
             .parts
             .iter()
@@ -192,18 +201,29 @@ impl FlatScene {
             out.shifts.push(shift);
             let mv = |q: P2| q + shift;
             for f in &part.forms {
-                let lines = f.lines.iter().map(|l| crate::forms::FormLine { points: l.points.iter().map(|q| mv(*q)).collect(), closed: l.closed }).collect();
+                let lines = f
+                    .lines
+                    .iter()
+                    .map(|l| crate::forms::FormLine {
+                        points: l.points.iter().map(|q| mv(*q)).collect(),
+                        closed: l.closed,
+                    })
+                    .collect();
                 out.forms.push((lines, mv(f.center), f.source));
             }
             let mvs = |s: &Seg2| Seg2::new(s.a + shift, s.b + shift);
             for piece in &part.pieces {
-                out.pieces.push((piece.source, piece.cut.iter().map(|p| p.map(mv)).collect()));
+                out.pieces
+                    .push((piece.source, piece.cut.iter().map(|p| p.map(mv)).collect()));
                 out.piece_part.push(out.shifts.len() - 1);
             }
             out.outlines.extend(part.outline.iter().map(|p| p.map(mv)));
             out.slits.extend(part.slits().map(|s| mvs(&s)));
             for b in &part.bends {
-                let region = part.piece(PieceSource::Bend(b.joint)).map(|p| p.cut.iter().map(|q| q.map(mv)).collect()).unwrap_or_default();
+                let region = part
+                    .piece(PieceSource::Bend(b.joint))
+                    .map(|p| p.cut.iter().map(|q| q.map(mv)).collect())
+                    .unwrap_or_default();
                 out.bends.push(SceneBend {
                     joint: b.joint,
                     name: b.name.clone(),
@@ -221,8 +241,15 @@ impl FlatScene {
                 }
                 let mut edges = Vec::new();
                 for w in [j.a, j.b] {
-                    let (Some(place), Some(wall), Some(s)) = (part.placement(w), m.wall(w), j.segment_on(w)) else { continue };
-                    let s = Seg2::new(wall.flat_local(&m.params, s.a), wall.flat_local(&m.params, s.b));
+                    let (Some(place), Some(wall), Some(s)) =
+                        (part.placement(w), m.wall(w), j.segment_on(w))
+                    else {
+                        continue;
+                    };
+                    let s = Seg2::new(
+                        wall.flat_local(&m.params, s.a),
+                        wall.flat_local(&m.params, s.b),
+                    );
                     edges.push(Seg2::new(mv(place.apply(s.a)), mv(place.apply(s.b))));
                 }
                 if edges.is_empty() {
@@ -230,7 +257,12 @@ impl FlatScene {
                 }
                 match out.joints.iter_mut().find(|x| x.joint == j.id) {
                     Some(x) => x.edges.extend(edges),
-                    None => out.joints.push(SceneJoint { joint: j.id, name: j.name.clone(), edges, tangent: matches!(j.kind, JointKind::Tangent { .. }) }),
+                    None => out.joints.push(SceneJoint {
+                        joint: j.id,
+                        name: j.name.clone(),
+                        edges,
+                        tangent: matches!(j.kind, JointKind::Tangent { .. }),
+                    }),
                 }
             }
         }
@@ -238,8 +270,14 @@ impl FlatScene {
         // X6 frame showed it apart from the walls that collide).
         for e in &flat.errors {
             if let crate::flat::FlatError::Collision { a, region, .. } = e {
-                let shift = flat.parts.iter().position(|p| p.piece(*a).is_some()).and_then(|k| out.shifts.get(k).copied()).unwrap_or_else(V2::zeros);
-                out.collisions.extend(region.iter().map(|r| r.map(|q| q + shift)));
+                let shift = flat
+                    .parts
+                    .iter()
+                    .position(|p| p.piece(*a).is_some())
+                    .and_then(|k| out.shifts.get(k).copied())
+                    .unwrap_or_else(V2::zeros);
+                out.collisions
+                    .extend(region.iter().map(|r| r.map(|q| q + shift)));
             }
         }
         out
@@ -251,23 +289,42 @@ impl FlatScene {
             .iter()
             .chain(self.pieces.iter().flat_map(|(_, v)| v.iter()))
             .filter_map(Polygon::bounds)
-            .reduce(|(a, b), (c, d)| (P2::new(a.x.min(c.x), a.y.min(c.y)), P2::new(b.x.max(d.x), b.y.max(d.y))))
+            .reduce(|(a, b), (c, d)| {
+                (
+                    P2::new(a.x.min(c.x), a.y.min(c.y)),
+                    P2::new(b.x.max(d.x), b.y.max(d.y)),
+                )
+            })
     }
 
     /// The joint at a flat point: a bend region it is in, else a rip edge within `tol`.
     pub fn joint_at(&self, p: P2, tol: f64) -> Option<JointId> {
-        if let Some(b) = self.bends.iter().find(|b| b.region.iter().any(|r| r.contains(p))) {
+        if let Some(b) = self
+            .bends
+            .iter()
+            .find(|b| b.region.iter().any(|r| r.contains(p)))
+        {
             return Some(b.joint);
         }
         let near = |s: &Seg2| {
             let d = s.b - s.a;
             let l2 = d.norm_squared();
-            let t = if l2 > 0.0 { ((p - s.a).dot(&d) / l2).clamp(0.0, 1.0) } else { 0.0 };
+            let t = if l2 > 0.0 {
+                ((p - s.a).dot(&d) / l2).clamp(0.0, 1.0)
+            } else {
+                0.0
+            };
             (p - (s.a + d * t)).norm()
         };
         self.joints
             .iter()
-            .filter_map(|j| j.edges.iter().map(near).reduce(f64::min).map(|d| (j.joint, d)))
+            .filter_map(|j| {
+                j.edges
+                    .iter()
+                    .map(near)
+                    .reduce(f64::min)
+                    .map(|d| (j.joint, d))
+            })
             .filter(|(_, d)| *d <= tol)
             .min_by(|a, b| a.1.total_cmp(&b.1))
             .map(|(j, _)| j)
@@ -275,17 +332,22 @@ impl FlatScene {
 
     /// Whether a flat point is on material.
     pub fn on_material(&self, p: P2) -> bool {
-        self.pieces.iter().any(|(_, v)| v.iter().any(|q| q.contains(p)))
+        self.pieces
+            .iter()
+            .any(|(_, v)| v.iter().any(|q| q.contains(p)))
     }
 
     /// The piece (its index in [`FlatScene::pieces`]) a flat point is on.
     pub fn piece_at(&self, p: P2) -> Option<usize> {
-        self.pieces.iter().position(|(_, v)| v.iter().any(|q| q.contains(p)))
+        self.pieces
+            .iter()
+            .position(|(_, v)| v.iter().any(|q| q.contains(p)))
     }
 
     /// The flat-pattern part (its index, the context's part order) a flat point is on.
     pub fn part_at(&self, p: P2) -> Option<usize> {
-        self.piece_at(p).and_then(|i| self.piece_part.get(i).copied())
+        self.piece_at(p)
+            .and_then(|i| self.piece_part.get(i).copied())
     }
 
     /// The wall a flat point is on (not a bend region).
@@ -298,12 +360,21 @@ impl FlatScene {
 
     /// A wall's material in the flat (for its highlight).
     pub fn wall_region(&self, w: WallId) -> Vec<Polygon> {
-        self.pieces.iter().filter(|(s, _)| *s == PieceSource::Wall(w)).flat_map(|(_, v)| v.iter().cloned()).collect()
+        self.pieces
+            .iter()
+            .filter(|(s, _)| *s == PieceSource::Wall(w))
+            .flat_map(|(_, v)| v.iter().cloned())
+            .collect()
     }
 
     /// A part's material in the flat.
     pub fn part_region(&self, part: usize) -> Vec<Polygon> {
-        self.pieces.iter().zip(&self.piece_part).filter(|(_, i)| **i == part).flat_map(|((_, v), _)| v.iter().cloned()).collect()
+        self.pieces
+            .iter()
+            .zip(&self.piece_part)
+            .filter(|(_, i)| **i == part)
+            .flat_map(|((_, v), _)| v.iter().cloned())
+            .collect()
     }
 
     /// Where a joint's label goes in the flat, and the way it reads off from there (a unit
@@ -325,13 +396,20 @@ impl FlatScene {
                 self.bends
                     .iter()
                     .filter(|o| o.joint != j)
-                    .map(|o| (P2::from((o.center.a.coords + o.center.b.coords) / 2.0) - mid).dot(&side))
+                    .map(|o| {
+                        (P2::from((o.center.a.coords + o.center.b.coords) / 2.0) - mid).dot(&side)
+                    })
                     .filter(|d| *d > 1e-6)
                     .fold(f64::INFINITY, f64::min)
             };
             let side = if room(-n) > room(n) + 1e-6 { -n } else { n };
             // Just past the bend region's edge (its tangent line) on that side.
-            let half = b.region.iter().flat_map(|r| r.outer.iter()).map(|q| (q - mid).dot(&side)).fold(0.0, f64::max);
+            let half = b
+                .region
+                .iter()
+                .flat_map(|r| r.outer.iter())
+                .map(|q| (q - mid).dot(&side))
+                .fold(0.0, f64::max);
             return Some((mid + side * half, side));
         }
         self.label_places(j).into_iter().next()
@@ -343,7 +421,9 @@ impl FlatScene {
         if self.bends.iter().any(|b| b.joint == j) {
             return self.label_place(j).into_iter().collect();
         }
-        let Some(x) = self.joints.iter().find(|x| x.joint == j) else { return Vec::new() };
+        let Some(x) = self.joints.iter().find(|x| x.joint == j) else {
+            return Vec::new();
+        };
         x.edges
             .iter()
             .map(|s| {
@@ -351,7 +431,11 @@ impl FlatScene {
                 let d = s.dir();
                 let n = V2::new(-d.y, d.x);
                 let eps = (0.02 * s.len()).clamp(0.05, 1.0);
-                let side = if self.on_material(mid + n * eps) && !self.on_material(mid - n * eps) { -n } else { n };
+                let side = if self.on_material(mid + n * eps) && !self.on_material(mid - n * eps) {
+                    -n
+                } else {
+                    n
+                };
                 (mid, side)
             })
             .collect()
@@ -368,7 +452,11 @@ pub fn wall_at(m: &Model, p: P3, tol: f64) -> Option<WallId> {
 /// inverse of [`to_flat`]).
 pub fn from_flat(m: &Model, flat: &FlatPattern, scene: &FlatScene, w: WallId, q: P2) -> Option<P3> {
     let wall = m.wall(w)?;
-    let (i, part) = flat.parts.iter().enumerate().find(|(_, x)| x.placement(w).is_some())?;
+    let (i, part) = flat
+        .parts
+        .iter()
+        .enumerate()
+        .find(|(_, x)| x.placement(w).is_some())?;
     let inv = part.placement(w)?.inverse()?;
     let local = inv.apply(q - scene.shifts.get(i).copied().unwrap_or_else(V2::zeros));
     let k = wall.flat_scale(&m.params);
@@ -417,14 +505,20 @@ impl FlatScene {
                 }
             }
         }
-        best_corner.map(|(_, w, q)| OutlineHit::Corner(w, q)).or(best_side.map(|(_, w, q)| OutlineHit::Side(w, q)))
+        best_corner
+            .map(|(_, w, q)| OutlineHit::Corner(w, q))
+            .or(best_side.map(|(_, w, q)| OutlineHit::Side(w, q)))
     }
 }
 
 /// A point of the folded solid on wall `w`, where it lies in the flat scene.
 pub fn to_flat(m: &Model, flat: &FlatPattern, scene: &FlatScene, w: WallId, p: P3) -> Option<P2> {
     let wall = m.wall(w)?;
-    let (i, part) = flat.parts.iter().enumerate().find(|(_, x)| x.placement(w).is_some())?;
+    let (i, part) = flat
+        .parts
+        .iter()
+        .enumerate()
+        .find(|(_, x)| x.placement(w).is_some())?;
     let place = part.placement(w)?;
     let q = place.apply(wall.flat_local(&m.params, wall.surface.local(p)));
     Some(q + scene.shifts.get(i).copied().unwrap_or_else(V2::zeros))
@@ -467,9 +561,18 @@ fn face(p: &Polygon, z: f64, up: bool) -> Tris {
             flat.extend([q.x, q.y]);
         }
     }
-    let Ok(idx) = earcutr::earcut(&flat, &holes, 2) else { return Tris::default() };
-    let n = if up { [0.0, 0.0, 1.0] } else { [0.0, 0.0, -1.0] };
-    let positions: Vec<[f32; 3]> = flat.chunks(2).map(|c| [c[0] as f32, c[1] as f32, z as f32]).collect();
+    let Ok(idx) = earcutr::earcut(&flat, &holes, 2) else {
+        return Tris::default();
+    };
+    let n = if up {
+        [0.0, 0.0, 1.0]
+    } else {
+        [0.0, 0.0, -1.0]
+    };
+    let positions: Vec<[f32; 3]> = flat
+        .chunks(2)
+        .map(|c| [c[0] as f32, c[1] as f32, z as f32])
+        .collect();
     let normals = vec![n; positions.len()];
     let mut indices: Vec<u32> = idx.into_iter().map(|i| i as u32).collect();
     if !up {
@@ -479,13 +582,21 @@ fn face(p: &Polygon, z: f64, up: bool) -> Tris {
     }
     // earcut gives either winding: make the triangles face their normal.
     for t in indices.chunks_mut(3) {
-        let (a, b, c) = (positions[t[0] as usize], positions[t[1] as usize], positions[t[2] as usize]);
+        let (a, b, c) = (
+            positions[t[0] as usize],
+            positions[t[1] as usize],
+            positions[t[2] as usize],
+        );
         let cross = (b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0]);
         if (cross > 0.0) != up {
             t.swap(1, 2);
         }
     }
-    Tris { positions, normals, indices }
+    Tris {
+        positions,
+        normals,
+        indices,
+    }
 }
 
 /// Polygons filled at height `z`, facing up.
@@ -519,7 +630,8 @@ pub fn slab(polys: &[Polygon], z0: f64, z1: f64) -> Tris {
                     out.positions.push([q.x as f32, q.y as f32, z as f32]);
                     out.normals.push(nn);
                 }
-                out.indices.extend([base, base + 1, base + 2, base, base + 2, base + 3]);
+                out.indices
+                    .extend([base, base + 1, base + 2, base, base + 2, base + 3]);
             }
         }
     }
@@ -548,7 +660,10 @@ mod tests {
         assert_eq!(joint_at(&m, inside, 1e-3), Some(j));
         let outer = mid + g.rotate_vec(g.start, g.sweep / 2.0) * g.outer_radius;
         assert_eq!(joint_at(&m, outer, 1e-3), Some(j));
-        assert_eq!(label_spot(&m, j).map(|p| (p - outer).norm() < 1e-9), Some(true));
+        assert_eq!(
+            label_spot(&m, j).map(|p| (p - outer).norm() < 1e-9),
+            Some(true)
+        );
         // Well off the bend.
         let off = mid + g.rotate_vec(g.start, g.sweep / 2.0) * (g.outer_radius + 5.0);
         assert_eq!(joint_at(&m, off, 1e-3), None);
@@ -564,7 +679,12 @@ mod tests {
         assert_eq!(s.bends.len(), bends);
         assert_eq!(s.joints.len(), others);
         for x in &s.joints {
-            assert_eq!(x.edges.len(), 2, "{}: a rip has an edge on each wall", x.name);
+            assert_eq!(
+                x.edges.len(),
+                2,
+                "{}: a rip has an edge on each wall",
+                x.name
+            );
         }
         // A point in each bend region picks it.
         for b in &s.bends {
@@ -576,16 +696,27 @@ mod tests {
         let area = |t: &Tris, z: f32| -> f64 {
             t.indices
                 .chunks(3)
-                .filter(|c| c.iter().all(|i| (t.positions[*i as usize][2] - z).abs() < 1e-6) && t.normals[c[0] as usize][2] > 0.5)
+                .filter(|c| {
+                    c.iter()
+                        .all(|i| (t.positions[*i as usize][2] - z).abs() < 1e-6)
+                        && t.normals[c[0] as usize][2] > 0.5
+                })
                 .map(|c| {
-                    let (a, b, d) = (t.positions[c[0] as usize], t.positions[c[1] as usize], t.positions[c[2] as usize]);
+                    let (a, b, d) = (
+                        t.positions[c[0] as usize],
+                        t.positions[c[1] as usize],
+                        t.positions[c[2] as usize],
+                    );
                     (((b[0] - a[0]) * (d[1] - a[1]) - (b[1] - a[1]) * (d[0] - a[0])) / 2.0) as f64
                 })
                 .sum()
         };
         let want: f64 = s.outlines.iter().map(Polygon::area).sum();
         let got = area(&mesh, m.params.thickness as f32);
-        assert!((got - want).abs() < 1e-3 * want, "top area {got} vs outline {want}");
+        assert!(
+            (got - want).abs() < 1e-3 * want,
+            "top area {got} vs outline {want}"
+        );
     }
 
     #[test]
@@ -604,7 +735,12 @@ mod tests {
             let p = w.surface.point(c);
             assert_eq!(wall_at(&m, p, 1e-3), Some(w.id), "{:?}", w.id);
             let q = to_flat(&m, &flat, &s, w.id, p).expect("in the flat");
-            assert_eq!(s.wall_at(q), Some(w.id), "{:?} lands on its own piece", w.id);
+            assert_eq!(
+                s.wall_at(q),
+                Some(w.id),
+                "{:?} lands on its own piece",
+                w.id
+            );
             let part = s.part_at(q).expect("on a part");
             assert!(flat.parts[part].walls.contains(&w.id));
             assert!(!s.wall_region(w.id).is_empty());
@@ -620,8 +756,16 @@ mod tests {
         for b in &s.bends {
             let (at, dir) = s.label_place(b.joint).unwrap();
             let mid = P2::from((b.center.a.coords + b.center.b.coords) / 2.0);
-            assert!(dir.dot(&b.center.dir()).abs() < 1e-9, "{}: across the line", b.name);
-            assert!((at - mid).dot(&b.center.dir()).abs() < 1e-9, "{}: by the centre line's middle", b.name);
+            assert!(
+                dir.dot(&b.center.dir()).abs() < 1e-9,
+                "{}: across the line",
+                b.name
+            );
+            assert!(
+                (at - mid).dot(&b.center.dir()).abs() < 1e-9,
+                "{}: by the centre line's middle",
+                b.name
+            );
             assert!((at - mid).norm() > 0.5, "{}: past the bend region", b.name);
         }
         for x in &s.joints {
@@ -636,7 +780,9 @@ mod tests {
         let flat = flatten(&m);
         let s = FlatScene::new(&m, &flat);
         for w in &m.walls {
-            let Some(&q) = w.outline.outer.first() else { continue };
+            let Some(&q) = w.outline.outer.first() else {
+                continue;
+            };
             let p = w.surface.point(q);
             let f = to_flat(&m, &flat, &s, w.id, p).unwrap();
             let back = from_flat(&m, &flat, &s, w.id, f).unwrap();
@@ -644,9 +790,13 @@ mod tests {
             // A piece's corner is picked as a corner, a point along a side as a side.
             let piece = &s.wall_region(w.id)[0].outer;
             let (a, b) = (piece[0], piece[1]);
-            assert!(matches!(s.outline_at(a, 0.01, 0.01), Some(OutlineHit::Corner(_, c)) if (c - a).norm() < 1e-9));
+            assert!(
+                matches!(s.outline_at(a, 0.01, 0.01), Some(OutlineHit::Corner(_, c)) if (c - a).norm() < 1e-9)
+            );
             let mid = P2::from((a.coords + b.coords) / 2.0);
-            assert!(matches!(s.outline_at(mid, 1e-6, 0.01), Some(OutlineHit::Side(_, q)) if (q - mid).norm() < 1e-9));
+            assert!(
+                matches!(s.outline_at(mid, 1e-6, 0.01), Some(OutlineHit::Side(_, q)) if (q - mid).norm() < 1e-9)
+            );
         }
     }
 }

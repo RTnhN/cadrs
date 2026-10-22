@@ -199,7 +199,10 @@ pub fn prepare_data_from(from: &Path, to: &Path) -> Result<(), String> {
             ));
         }
         if !from.is_dir() && start.elapsed() > Duration::from_secs(5) {
-            return Err(format!("{} does not exist: run that scenario first", from.display()));
+            return Err(format!(
+                "{} does not exist: run that scenario first",
+                from.display()
+            ));
         }
         std::thread::sleep(Duration::from_millis(200));
     }

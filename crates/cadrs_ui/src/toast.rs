@@ -173,7 +173,11 @@ pub fn close_toasts(world: &mut World) {
 /// action, so undoing or redoing makes them stale. Prompts that stay (autohide off) are kept.
 pub fn close_transient_toasts(world: &mut World) {
     let mut q = world.query::<(Entity, &Toast)>();
-    let old: Vec<Entity> = q.iter(world).filter(|(_, t)| t.autohide).map(|(e, _)| e).collect();
+    let old: Vec<Entity> = q
+        .iter(world)
+        .filter(|(_, t)| t.autohide)
+        .map(|(e, _)| e)
+        .collect();
     for e in old {
         world.entity_mut(e).despawn();
     }
@@ -228,10 +232,19 @@ pub fn show_notification(commands: &mut Commands, theme: &Theme, n: Notification
                 // long message wraps onto a second line inside a capped width, so the toast
                 // never runs past the graphics area or over the view cube, and its action and ✕
                 // stay visible.
-                height: if max_width.is_some() { Val::Px(if warning { 26.0 } else { 31.0 }) } else { Val::Auto },
+                height: if max_width.is_some() {
+                    Val::Px(if warning { 26.0 } else { 31.0 })
+                } else {
+                    Val::Auto
+                },
                 min_height: Val::Px(if warning { 26.0 } else { 31.0 }),
                 max_width: Val::Px(max_width.unwrap_or(DEFAULT_MAX_WIDTH)),
-                padding: UiRect::new(Val::Px(15.0), Val::Px(10.0), Val::Px(if max_width.is_some() { 0.0 } else { 4.0 }), Val::Px(if max_width.is_some() { 0.0 } else { 4.0 })),
+                padding: UiRect::new(
+                    Val::Px(15.0),
+                    Val::Px(10.0),
+                    Val::Px(if max_width.is_some() { 0.0 } else { 4.0 }),
+                    Val::Px(if max_width.is_some() { 0.0 } else { 4.0 }),
+                ),
                 align_items: AlignItems::Center,
                 column_gap: Val::Px(6.0),
                 border: UiRect::all(Val::Px(1.0)),
@@ -239,7 +252,11 @@ pub fn show_notification(commands: &mut Commands, theme: &Theme, n: Notification
                 ..default()
             },
             UiTransform::from_translation(Val2::new(
-                if at.is_some() { Val::Px(0.0) } else { Val::Percent(-50.0) },
+                if at.is_some() {
+                    Val::Px(0.0)
+                } else {
+                    Val::Percent(-50.0)
+                },
                 Val::Px(0.0),
             )),
             BackgroundColor(background),
@@ -262,7 +279,11 @@ pub fn show_notification(commands: &mut Commands, theme: &Theme, n: Notification
                 t.text(
                     n.message,
                     t.font_base,
-                    if warning { FontWeight::NORMAL } else { FontWeight::MEDIUM },
+                    if warning {
+                        FontWeight::NORMAL
+                    } else {
+                        FontWeight::MEDIUM
+                    },
                     foreground,
                 ),
                 Pickable::IGNORE,
@@ -271,8 +292,14 @@ pub fn show_notification(commands: &mut Commands, theme: &Theme, n: Notification
                 text.insert((Ellipsis::default().with_tooltip(), Ellipsis::node()));
             } else {
                 text.insert((
-                    Node { flex_shrink: 1.0, ..default() },
-                    TextLayout::new(bevy::text::Justify::Left, bevy::text::LineBreak::WordBoundary),
+                    Node {
+                        flex_shrink: 1.0,
+                        ..default()
+                    },
+                    TextLayout::new(
+                        bevy::text::Justify::Left,
+                        bevy::text::LineBreak::WordBoundary,
+                    ),
                 ));
             }
             p.spawn((
@@ -301,17 +328,22 @@ pub fn show_notification(commands: &mut Commands, theme: &Theme, n: Notification
                             .icon_size(14.0)
                             .ghost()
                             .build(&t),
-                        observe(|a: On<Activate>, q: Query<&ChildOf>, qt: Query<(), With<Toast>>, mut commands: Commands| {
-                            // The ✕ sits in the actions row of the toast.
-                            let mut e = a.entity;
-                            while let Ok(parent) = q.get(e) {
-                                e = parent.parent();
-                                if qt.contains(e) {
-                                    commands.entity(e).try_despawn();
-                                    break;
+                        observe(
+                            |a: On<Activate>,
+                             q: Query<&ChildOf>,
+                             qt: Query<(), With<Toast>>,
+                             mut commands: Commands| {
+                                // The ✕ sits in the actions row of the toast.
+                                let mut e = a.entity;
+                                while let Ok(parent) = q.get(e) {
+                                    e = parent.parent();
+                                    if qt.contains(e) {
+                                        commands.entity(e).try_despawn();
+                                        break;
+                                    }
                                 }
-                            }
-                        }),
+                            },
+                        ),
                     ))
                     .insert((
                         ghost,

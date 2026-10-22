@@ -61,7 +61,11 @@ pub fn sources(doc: &Document) -> Vec<SyncSourceTab> {
             } else {
                 return None;
             };
-            Some(SyncSourceTab { element: e.id, name: e.name.clone(), label: format!("{} ({kind})", e.name) })
+            Some(SyncSourceTab {
+                element: e.id,
+                name: e.name.clone(),
+                label: format!("{} ({kind})", e.name),
+            })
         })
         .collect()
 }
@@ -120,23 +124,45 @@ pub struct SyncOutcome {
 }
 
 fn motion_of(p: &AsmPose) -> Motion {
-    Motion { linear: Matrix3::from_row_slice(&p.rotation.concat()), translation: Vector3::from(p.translation) }
+    Motion {
+        linear: Matrix3::from_row_slice(&p.rotation.concat()),
+        translation: Vector3::from(p.translation),
+    }
 }
 
 fn pose_of(m: &Motion) -> AsmPose {
     let l = &m.linear;
-    AsmPose { rotation: [[l[(0, 0)], l[(0, 1)], l[(0, 2)]], [l[(1, 0)], l[(1, 1)], l[(1, 2)]], [l[(2, 0)], l[(2, 1)], l[(2, 2)]]], translation: [m.translation.x, m.translation.y, m.translation.z] }
+    AsmPose {
+        rotation: [
+            [l[(0, 0)], l[(0, 1)], l[(0, 2)]],
+            [l[(1, 0)], l[(1, 1)], l[(1, 2)]],
+            [l[(2, 0)], l[(2, 1)], l[(2, 2)]],
+        ],
+        translation: [m.translation.x, m.translation.y, m.translation.z],
+    }
 }
 
 /// The placement a part name stands for: the board synced before first, then the others.
-fn component_of<'a>(name: &str, studio: &'a PcbStudio, target: Option<BoardId>) -> Option<(&'a Placement, f64, &'a Library)> {
+fn component_of<'a>(
+    name: &str,
+    studio: &'a PcbStudio,
+    target: Option<BoardId>,
+) -> Option<(&'a Placement, f64, &'a Library)> {
     let mut words = name.split_whitespace();
     let refdes = words.next()?;
     let package: String = words.collect::<Vec<_>>().join(" ");
-    let order = target.into_iter().chain(studio.boards.iter().map(|b| b.id).filter(|b| Some(*b) != target));
+    let order = target.into_iter().chain(
+        studio
+            .boards
+            .iter()
+            .map(|b| b.id)
+            .filter(|b| Some(*b) != target),
+    );
     for id in order {
         let Some(b) = studio.board(id) else { continue };
-        if let Some((_, p)) = b.board.components().find(|(_, p)| p.refdes.eq_ignore_ascii_case(refdes) && (package.is_empty() || p.package == package)) {
+        if let Some((_, p)) = b.board.components().find(|(_, p)| {
+            p.refdes.eq_ignore_ascii_case(refdes) && (package.is_empty() || p.package == package)
+        }) {
             return Some((p, b.board.thickness(), &b.board.library));
         }
     }
@@ -154,16 +180,30 @@ struct Link {
 /// The component instances of the Assembly tab `asm` that Create assembly tied to placements
 /// of a board of `studio`, by their occurrence id in `asm` (as
 /// [`cadrs_core::assembly::structure::occurrences`] derives it), at any depth.
-fn linked_components(doc: &Document, studio: &PcbStudio, asm: ElementId, depth: usize) -> HashMap<InstanceId, Link> {
+fn linked_components(
+    doc: &Document,
+    studio: &PcbStudio,
+    asm: ElementId,
+    depth: usize,
+) -> HashMap<InstanceId, Link> {
     let mut out = HashMap::new();
-    let Some(model) = doc.element(asm).and_then(|e| e.assembly_model()) else { return out };
+    let Some(model) = doc.element(asm).and_then(|e| e.assembly_model()) else {
+        return out;
+    };
     if depth > 16 {
         return out;
     }
     if let Some(g) = studio.generated.iter().rev().find(|g| g.assembly == asm) {
         for c in &g.components {
             if model.instance(c.instance).is_some() {
-                out.insert(c.instance, Link { board: g.board, refdes: c.refdes.clone(), frame: c.frame });
+                out.insert(
+                    c.instance,
+                    Link {
+                        board: g.board,
+                        refdes: c.refdes.clone(),
+                        frame: c.frame,
+                    },
+                );
             }
         }
     }
@@ -179,25 +219,46 @@ fn linked_components(doc: &Document, studio: &PcbStudio, asm: ElementId, depth: 
 
 /// Gathers the parts of the tab `source` for a sync into the PCB Studio `pcb` (see the module
 /// docs). The target is the board synced from `source` before (the shown one first).
-pub fn plan(doc: &Document, pcb: ElementId, source: ElementId, plane: SyncPlaneChoice, shown: Option<BoardId>) -> Result<SyncPlan, String> {
-    let studio = doc.element(pcb).and_then(|e| e.pcb()).ok_or("not a PCB Studio")?;
-    let src = doc.element(source).ok_or("The Part Studio or assembly is gone")?;
+pub fn plan(
+    doc: &Document,
+    pcb: ElementId,
+    source: ElementId,
+    plane: SyncPlaneChoice,
+    shown: Option<BoardId>,
+) -> Result<SyncPlan, String> {
+    let studio = doc
+        .element(pcb)
+        .and_then(|e| e.pcb())
+        .ok_or("not a PCB Studio")?;
+    let src = doc
+        .element(source)
+        .ok_or("The Part Studio or assembly is gone")?;
     let target = studio.synced_from(source, shown);
     // (element, part, pose, occurrence) of every part.
-    let items: Vec<(ElementId, PartId, AsmPose, Option<InstanceId>)> = if let Some(asm) = src.assembly_model() {
-        occurrences(doc, asm).into_iter().map(|o| (o.element, o.part, o.pose, Some(o.id))).collect()
-    } else {
-        let build = cadrs_core::rebuild::build(&src.active_features());
-        build.parts.iter().map(|p| (source, p.id, AsmPose::IDENTITY, None)).collect()
-    };
+    let items: Vec<(ElementId, PartId, AsmPose, Option<InstanceId>)> =
+        if let Some(asm) = src.assembly_model() {
+            occurrences(doc, asm)
+                .into_iter()
+                .map(|o| (o.element, o.part, o.pose, Some(o.id)))
+                .collect()
+        } else {
+            let build = cadrs_core::rebuild::build(&src.active_features());
+            build
+                .parts
+                .iter()
+                .map(|p| (source, p.id, AsmPose::IDENTITY, None))
+                .collect()
+        };
     let linked = linked_components(doc, studio, source, 0);
     if items.is_empty() {
         return Err(format!("{} has no parts", src.name));
     }
-    let frames = target.and_then(|t| studio.board(t)).and_then(|b| match &b.source {
-        BoardSource::Mcad(m) => Some(m.clone()),
-        _ => None,
-    });
+    let frames = target
+        .and_then(|t| studio.board(t))
+        .and_then(|b| match &b.source {
+            BoardSource::Mcad(m) => Some(m.clone()),
+            _ => None,
+        });
     let mut plan = SyncPlan {
         pcb,
         target,
@@ -210,19 +271,39 @@ pub fn plan(doc: &Document, pcb: ElementId, source: ElementId, plane: SyncPlaneC
         unrecognised: Vec::new(),
     };
     // P3H.7: the component documents this PCB Studio's Create assemblies used, by document.
-    let component_docs: HashMap<cadrs_core::DocumentId, (String, String)> =
-        studio.generated.iter().flat_map(|g| g.documents.iter()).map(|d| (d.document, (d.package.clone(), d.part_number.clone()))).collect();
+    let component_docs: HashMap<cadrs_core::DocumentId, (String, String)> = studio
+        .generated
+        .iter()
+        .flat_map(|g| g.documents.iter())
+        .map(|d| (d.document, (d.package.clone(), d.part_number.clone())))
+        .collect();
     let mut by_document: Vec<(String, String, AsmPose)> = Vec::new();
     for (element, part, pose, occurrence) in items {
         let name = source_part_name(doc, &InstanceSource::Part { element, part }, None);
         // P3H.6: an instance Create assembly made stands for its placement, by designator.
         let link = occurrence.and_then(|o| linked.get(&o));
         let found = match link {
-            Some(l) => component_of(&l.refdes, studio, Some(l.board).or(target)).map(|(p, _, lib)| (p, l.frame, lib)),
-            None => component_of(&name, studio, target).map(|(p, t, lib)| (p, frames.as_ref().and_then(|m| m.frame(&p.refdes)).unwrap_or_else(|| pose_of(&placement_motion(p, t))), lib)),
+            Some(l) => component_of(&l.refdes, studio, Some(l.board).or(target))
+                .map(|(p, _, lib)| (p, l.frame, lib)),
+            None => component_of(&name, studio, target).map(|(p, t, lib)| {
+                (
+                    p,
+                    frames
+                        .as_ref()
+                        .and_then(|m| m.frame(&p.refdes))
+                        .unwrap_or_else(|| pose_of(&placement_motion(p, t))),
+                    lib,
+                )
+            }),
         };
         if let Some((p, frame, lib)) = found {
-            plan.components.push(SyncComponent { refdes: p.refdes.clone(), package: p.package.clone(), part_number: p.part_number.clone(), frame, pose });
+            plan.components.push(SyncComponent {
+                refdes: p.refdes.clone(),
+                package: p.package.clone(),
+                part_number: p.part_number.clone(),
+                frame,
+                pose,
+            });
             if let Some(pk) = lib.package(&p.package, &p.part_number)
                 && plan.library.package(&pk.name, &pk.part_number).is_none()
             {
@@ -234,14 +315,25 @@ pub fn plan(doc: &Document, pcb: ElementId, source: ElementId, plane: SyncPlaneC
         // folder) that Create assembly didn't tie to a placement (inserted by hand, or its tie
         // lost): matched below by its package, whatever the part or document is called now.
         if link.is_none()
-            && let Some(k) = doc.linked_element(element).and_then(|l| l.source.document).and_then(|d| component_docs.get(&d))
+            && let Some(k) = doc
+                .linked_element(element)
+                .and_then(|l| l.source.document)
+                .and_then(|d| component_docs.get(&d))
         {
             by_document.push((k.0.clone(), k.1.clone(), pose));
             continue;
         }
         if role_of(&name).is_some() {
-            let features = doc.element(element).map(|e| e.active_features()).unwrap_or_default();
-            plan.parts.push(SyncPart { name, features, part, pose });
+            let features = doc
+                .element(element)
+                .map(|e| e.active_features())
+                .unwrap_or_default();
+            plan.parts.push(SyncPart {
+                name,
+                features,
+                part,
+                pose,
+            });
         } else if !plan.unrecognised.contains(&name) {
             plan.unrecognised.push(name);
         }
@@ -254,33 +346,84 @@ pub fn plan(doc: &Document, pcb: ElementId, source: ElementId, plane: SyncPlaneC
     // assigned nearest first over all instances (not instance by instance), so the order the
     // instances were inserted in doesn't decide which placement each gets.
     let frame = sync_plane(plane).plane();
-    let (origin, xd, yd) = (frame.origin, frame.x_dir.into_inner(), frame.y_dir().into_inner());
+    let (origin, xd, yd) = (
+        frame.origin,
+        frame.x_dir.into_inner(),
+        frame.y_dir().into_inner(),
+    );
     let uv = |t: [f64; 3]| {
         let d = nalgebra::Point3::from(t) - origin;
         [d.dot(&xd), d.dot(&yd)]
     };
-    let order: Vec<BoardId> = target.into_iter().chain(studio.boards.iter().map(|b| b.id).filter(|b| Some(*b) != target)).collect();
+    let order: Vec<BoardId> = target
+        .into_iter()
+        .chain(
+            studio
+                .boards
+                .iter()
+                .map(|b| b.id)
+                .filter(|b| Some(*b) != target),
+        )
+        .collect();
     // (distance, instance, board rank, placement) for every free placement of the first board
     // (in `order`) that has a free placement of the instance's package.
     let mut pairs: Vec<(f64, usize, usize, Placement)> = Vec::new();
     for (i, (package, part_number, pose)) in by_document.iter().enumerate() {
         let at = uv(pose.translation);
-        let of_package = |p: &&Placement| &p.package == package && (part_number.is_empty() || &p.part_number == part_number);
-        let found = order.iter().enumerate().filter_map(|(rank, id)| studio.board(*id).map(|b| (rank, b))).find(|(_, b)| b.board.components().map(|(_, p)| p).any(|p| of_package(&p) && !plan.components.iter().any(|c| c.refdes.eq_ignore_ascii_case(&p.refdes))));
+        let of_package = |p: &&Placement| {
+            &p.package == package && (part_number.is_empty() || &p.part_number == part_number)
+        };
+        let found = order
+            .iter()
+            .enumerate()
+            .filter_map(|(rank, id)| studio.board(*id).map(|b| (rank, b)))
+            .find(|(_, b)| {
+                b.board.components().map(|(_, p)| p).any(|p| {
+                    of_package(&p)
+                        && !plan
+                            .components
+                            .iter()
+                            .any(|c| c.refdes.eq_ignore_ascii_case(&p.refdes))
+                })
+            });
         let Some((rank, b)) = found else { continue };
-        for p in b.board.components().map(|(_, p)| p).filter(of_package).filter(|p| !plan.components.iter().any(|c| c.refdes.eq_ignore_ascii_case(&p.refdes))) {
+        for p in b
+            .board
+            .components()
+            .map(|(_, p)| p)
+            .filter(of_package)
+            .filter(|p| {
+                !plan
+                    .components
+                    .iter()
+                    .any(|c| c.refdes.eq_ignore_ascii_case(&p.refdes))
+            })
+        {
             pairs.push(((p.x - at[0]).hypot(p.y - at[1]), i, rank, p.clone()));
         }
     }
     pairs.sort_by(|a, b| a.0.total_cmp(&b.0).then_with(|| a.1.cmp(&b.1)));
     let mut taken = vec![false; by_document.len()];
     for (_, i, rank, p) in pairs {
-        if taken[i] || plan.components.iter().any(|c| c.refdes.eq_ignore_ascii_case(&p.refdes)) {
+        if taken[i]
+            || plan
+                .components
+                .iter()
+                .any(|c| c.refdes.eq_ignore_ascii_case(&p.refdes))
+        {
             continue;
         }
         taken[i] = true;
-        plan.components.push(SyncComponent { refdes: p.refdes.clone(), package: p.package.clone(), part_number: p.part_number.clone(), frame: AsmPose::IDENTITY, pose: by_document[i].2 });
-        if let Some(pk) = studio.board(order[rank]).and_then(|b| b.board.library.package(&p.package, &p.part_number))
+        plan.components.push(SyncComponent {
+            refdes: p.refdes.clone(),
+            package: p.package.clone(),
+            part_number: p.part_number.clone(),
+            frame: AsmPose::IDENTITY,
+            pose: by_document[i].2,
+        });
+        if let Some(pk) = studio
+            .board(order[rank])
+            .and_then(|b| b.board.library.package(&p.package, &p.part_number))
             && plan.library.package(&pk.name, &pk.part_number).is_none()
         {
             plan.library.packages.push(Package::clone(pk));
@@ -319,7 +462,9 @@ pub fn register_tasks() {
 
 /// [`run`], waiting for the result.
 pub fn run_now(plan: SyncPlan) -> Result<SyncOutcome, String> {
-    run(plan).wait().unwrap_or_else(|| Err("The kernel thread stopped".into()))
+    run(plan)
+        .wait()
+        .unwrap_or_else(|| Err("The kernel thread stopped".into()))
 }
 
 #[cfg(feature = "brep")]
@@ -328,7 +473,10 @@ fn run_on(r: &mut cadrs_core::rebuild::Rebuilder, plan: &SyncPlan) -> Result<Syn
     let mut result = Ok(());
     for p in &plan.parts {
         match r.placed_body(&p.features, p.part, p.pose.rotation, p.pose.translation) {
-            Ok(body) => parts.push(McadPart { name: p.name.clone(), body }),
+            Ok(body) => parts.push(McadPart {
+                name: p.name.clone(),
+                body,
+            }),
             Err(e) => {
                 result = Err(format!("{}: {e}", p.name));
                 break;
@@ -338,9 +486,22 @@ fn run_on(r: &mut cadrs_core::rebuild::Rebuilder, plan: &SyncPlan) -> Result<Syn
     let instances: Vec<McadInstance> = plan
         .components
         .iter()
-        .map(|c| McadInstance { refdes: c.refdes.clone(), package: c.package.clone(), part_number: c.part_number.clone(), motion: motion_of(&c.frame).then(&motion_of(&c.pose)) })
+        .map(|c| McadInstance {
+            refdes: c.refdes.clone(),
+            package: c.package.clone(),
+            part_number: c.part_number.clone(),
+            motion: motion_of(&c.frame).then(&motion_of(&c.pose)),
+        })
         .collect();
-    let out = result.and_then(|_| board_from_mcad(r.kernel(), &plan.source_name, &parts, &instances, &sync_plane(plan.plane).plane()));
+    let out = result.and_then(|_| {
+        board_from_mcad(
+            r.kernel(),
+            &plan.source_name,
+            &parts,
+            &instances,
+            &sync_plane(plan.plane).plane(),
+        )
+    });
     for p in parts {
         r.release_body(p.body);
     }
@@ -363,19 +524,34 @@ fn run_on(r: &mut cadrs_core::rebuild::Rebuilder, plan: &SyncPlan) -> Result<Syn
         keepin_parts: m.keepin_parts,
         source: plan.source,
         plane: plan.plane,
-        frames: plan.components.iter().map(|c| (c.refdes.clone(), c.frame)).collect(),
+        frames: plan
+            .components
+            .iter()
+            .map(|c| (c.refdes.clone(), c.frame))
+            .collect(),
     };
-    Ok(SyncOutcome { command, unrecognised, warnings: m.warnings })
+    Ok(SyncOutcome {
+        command,
+        unrecognised,
+        warnings: m.warnings,
+    })
 }
 
 #[cfg(not(feature = "brep"))]
-fn run_on(_r: &mut cadrs_core::rebuild::Rebuilder, _plan: &SyncPlan) -> Result<SyncOutcome, String> {
+fn run_on(
+    _r: &mut cadrs_core::rebuild::Rebuilder,
+    _plan: &SyncPlan,
+) -> Result<SyncOutcome, String> {
     Err("Sync needs the solid-modelling kernel".into())
 }
 
 /// The toast after a sync: the board and what wasn't translated (PCB5.4).
 pub fn message(o: &SyncOutcome, board: &str) -> String {
-    let what = if o.command.target.is_some() { format!("Updated {board}") } else { format!("Added {board}") };
+    let what = if o.command.target.is_some() {
+        format!("Updated {board}")
+    } else {
+        format!("Added {board}")
+    };
     let mut s = what;
     if !o.unrecognised.is_empty() {
         s.push_str(&format!(". Not translated: {}", o.unrecognised.join(", ")));

@@ -27,7 +27,9 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use cadrs_drawing::ModelSource;
-use cadrs_drawing::assembly::{AssemblyInfo, BomData, BomOrder, BomRowData, BomType, OccurrenceInfo};
+use cadrs_drawing::assembly::{
+    AssemblyInfo, BomData, BomOrder, BomRowData, BomType, OccurrenceInfo,
+};
 use serde::{Deserialize, Serialize};
 
 use crate::assembly::bom::{BomColumn, BomOptions, BomView};
@@ -80,7 +82,14 @@ impl AssemblyState {
             {
                 out.studios.push((o.element, st));
             }
-            out.occurrences.push(OccState { id: o.id, element: o.element, part: o.part, pose: o.pose, hidden: o.hidden, index: o.index });
+            out.occurrences.push(OccState {
+                id: o.id,
+                element: o.element,
+                part: o.part,
+                pose: o.pose,
+                hidden: o.hidden,
+                index: o.index,
+            });
         }
         Some(out)
     }
@@ -94,13 +103,17 @@ impl AssemblyState {
     }
 
     pub fn studio(&self, element: ElementId) -> Option<&StudioState> {
-        self.studios.iter().find(|(e, _)| *e == element).map(|(_, s)| s)
+        self.studios
+            .iter()
+            .find(|(e, _)| *e == element)
+            .map(|(_, s)| s)
     }
 }
 
 /// Whether `element` of `doc` is an Assembly tab.
 pub fn is_assembly(doc: &Document, element: ElementId) -> bool {
-    doc.element(element).is_some_and(|e| e.assembly_model().is_some())
+    doc.element(element)
+        .is_some_and(|e| e.assembly_model().is_some())
 }
 
 /// The properties callouts read, by label.
@@ -114,20 +127,44 @@ const PROPS: [(PropertyKey, &str); 6] = [
 ];
 
 /// The occurrences' names, origins and part properties (callouts' `Part:` fields).
-pub fn assembly_info(doc: &Document, state: &AssemblyState, builds: &HashMap<ElementId, Arc<Build>>) -> AssemblyInfo {
+pub fn assembly_info(
+    doc: &Document,
+    state: &AssemblyState,
+    builds: &HashMap<ElementId, Arc<Build>>,
+) -> AssemblyInfo {
     let occurrences = state
         .occurrences
         .iter()
         .map(|o| {
-            let owner = PropertyOwner::Part { element: o.element, part: o.part };
+            let owner = PropertyOwner::Part {
+                element: o.element,
+                part: o.part,
+            };
             let build = builds.get(&o.element).map(|b| &**b);
             let props = PROPS
                 .iter()
-                .map(|(k, label)| (label.to_string(), crate::properties::text(doc, owner, *k, build)))
+                .map(|(k, label)| {
+                    (
+                        label.to_string(),
+                        crate::properties::text(doc, owner, *k, build),
+                    )
+                })
                 .filter(|(_, v)| !v.is_empty())
                 .collect();
-            let part_name = crate::assembly::source_part_name(doc, &InstanceSource::Part { element: o.element, part: o.part }, build);
-            OccurrenceInfo { id: o.id.0, name: format!("{part_name} <{}>", o.index), origin: o.pose.translation, props }
+            let part_name = crate::assembly::source_part_name(
+                doc,
+                &InstanceSource::Part {
+                    element: o.element,
+                    part: o.part,
+                },
+                build,
+            );
+            OccurrenceInfo {
+                id: o.id.0,
+                name: format!("{part_name} <{}>", o.index),
+                origin: o.pose.translation,
+                props,
+            }
         })
         .collect();
     AssemblyInfo { occurrences }
@@ -138,11 +175,19 @@ fn push_f(bytes: &mut Vec<u8>, v: f64) {
 }
 
 /// The dependency hash of an assembly view (see the module docs).
-pub fn assembly_hash(doc: &Document, element: ElementId, state: &AssemblyState, info: &AssemblyInfo, builds: &HashMap<ElementId, Arc<Build>>) -> u64 {
+pub fn assembly_hash(
+    doc: &Document,
+    element: ElementId,
+    state: &AssemblyState,
+    info: &AssemblyInfo,
+    builds: &HashMap<ElementId, Arc<Build>>,
+) -> u64 {
     let mut bytes = Vec::new();
     let mut seen: Vec<(ElementId, PartId)> = Vec::new();
     for o in &state.occurrences {
-        bytes.extend_from_slice(format!("{:?}{:?}{:?}{}", o.id, o.element, o.part, o.hidden).as_bytes());
+        bytes.extend_from_slice(
+            format!("{:?}{:?}{:?}{}", o.id, o.element, o.part, o.hidden).as_bytes(),
+        );
         for row in &o.pose.rotation {
             for v in row {
                 push_f(&mut bytes, *v);
@@ -168,7 +213,12 @@ pub fn assembly_hash(doc: &Document, element: ElementId, state: &AssemblyState, 
 }
 
 /// The drawing source of assembly `element` in state `state` (the studios' `builds` given).
-pub fn source_of(doc: &Document, element: ElementId, state: &AssemblyState, builds: &HashMap<ElementId, Arc<Build>>) -> ModelSource {
+pub fn source_of(
+    doc: &Document,
+    element: ElementId,
+    state: &AssemblyState,
+    builds: &HashMap<ElementId, Arc<Build>>,
+) -> ModelSource {
     let info = assembly_info(doc, state, builds);
     let hash = assembly_hash(doc, element, state, &info, builds);
     ModelSource {
@@ -182,7 +232,11 @@ pub fn source_of(doc: &Document, element: ElementId, state: &AssemblyState, buil
 
 /// Each studio of `state` rebuilt (waits; cached features are free).
 pub fn builds(state: &AssemblyState) -> HashMap<ElementId, Arc<Build>> {
-    state.studios.iter().map(|(e, st)| (*e, crate::rebuild::build(&st.features))).collect()
+    state
+        .studios
+        .iter()
+        .map(|(e, st)| (*e, crate::rebuild::build(&st.features)))
+        .collect()
 }
 
 /// The workspace state of assembly `element` as a drawing source (rebuilds its studios on the
@@ -199,7 +253,10 @@ pub fn view_request(v: &cadrs_drawing::View) -> crate::views::ViewRequest {
     crate::views::ViewRequest {
         part: None,
         frame: v.frame.view_frame(),
-        options: cadrs_kernel::ProjectOptions { tolerance: 0.01, hidden: true },
+        options: cadrs_kernel::ProjectOptions {
+            tolerance: 0.01,
+            hidden: true,
+        },
         shaded: v.shaded,
         props: Vec::new(),
         appearances: Vec::new(),
@@ -215,7 +272,10 @@ pub fn request(state: AssemblyState, v: &cadrs_drawing::View) -> crate::views::P
 }
 
 /// Projects and waits (tests, export).
-pub fn project(state: &AssemblyState, v: &cadrs_drawing::View) -> Result<Arc<crate::views::ViewGeometry>, String> {
+pub fn project(
+    state: &AssemblyState,
+    v: &cadrs_drawing::View,
+) -> Result<Arc<crate::views::ViewGeometry>, String> {
     request(state.clone(), v).wait()
 }
 
@@ -237,16 +297,34 @@ pub fn bom_data(
     hash: u64,
     build_of: &mut dyn FnMut(ElementId) -> Option<Arc<Build>>,
 ) -> Result<BomData, CommandError> {
-    let asm = doc.element(element).and_then(|e| e.assembly_model()).ok_or(CommandError::ElementNotFound(element))?;
+    let asm = doc
+        .element(element)
+        .and_then(|e| e.assembly_model())
+        .ok_or(CommandError::ElementNotFound(element))?;
     let mut settings = asm.bom.clone();
-    settings.view = if kind == BomType::Flattened { BomView::Flattened } else { BomView::Structured };
-    let options = BomOptions { expand_all: kind == BomType::MultiLevel, ..BomOptions::default() };
-    let bom = crate::assembly::bom::compute_with(doc, element, &settings, &options, &doc.units, build_of)?;
+    settings.view = if kind == BomType::Flattened {
+        BomView::Flattened
+    } else {
+        BomView::Structured
+    };
+    let options = BomOptions {
+        expand_all: kind == BomType::MultiLevel,
+        ..BomOptions::default()
+    };
+    let bom = crate::assembly::bom::compute_with(
+        doc, element, &settings, &options, &doc.units, build_of,
+    )?;
     let columns = bom
         .columns
         .iter()
         .zip(&bom.labels)
-        .map(|(c, l)| if *c == BomColumn::Item { "Item No.".to_string() } else { l.clone() })
+        .map(|(c, l)| {
+            if *c == BomColumn::Item {
+                "Item No.".to_string()
+            } else {
+                l.clone()
+            }
+        })
         .collect();
     let rows = bom
         .rows
@@ -260,14 +338,23 @@ pub fn bom_data(
             cells: r.cells.clone(),
         })
         .collect();
-    Ok(BomData { assembly: element.0, kind, order, columns, rows, source_hash: hash })
+    Ok(BomData {
+        assembly: element.0,
+        kind,
+        order,
+        columns,
+        rows,
+        source_hash: hash,
+    })
 }
 
 /// How a BOM row names its part or assembly: `part:<studio uuid>:<feature uuid>:<index>` or
 /// `assembly:<uuid>`.
 pub fn owner_key(o: &PropertyOwner) -> String {
     match o {
-        PropertyOwner::Part { element, part } => format!("part:{}:{}:{}", element.0, part.feature.0, part.index),
+        PropertyOwner::Part { element, part } => {
+            format!("part:{}:{}:{}", element.0, part.feature.0, part.index)
+        }
         PropertyOwner::Assembly { element } => format!("assembly:{}", element.0),
         PropertyOwner::Item { element, item } => format!("item:{}:{}", element.0, item.0),
     }
@@ -281,9 +368,14 @@ pub fn owner_of(key: &str) -> Option<PropertyOwner> {
             let element = ElementId(it.next()?.parse().ok()?);
             let feature = FeatureId(it.next()?.parse().ok()?);
             let index = it.next()?.parse().ok()?;
-            Some(PropertyOwner::Part { element, part: PartId::new(feature, index) })
+            Some(PropertyOwner::Part {
+                element,
+                part: PartId::new(feature, index),
+            })
         }
-        "assembly" => Some(PropertyOwner::Assembly { element: ElementId(it.next()?.parse().ok()?) }),
+        "assembly" => Some(PropertyOwner::Assembly {
+            element: ElementId(it.next()?.parse().ok()?),
+        }),
         "item" => {
             let element = ElementId(it.next()?.parse().ok()?);
             let item = crate::assembly::items::ItemId(it.next()?.parse().ok()?);
@@ -294,7 +386,12 @@ pub fn owner_of(key: &str) -> Option<PropertyOwner> {
 }
 
 /// The rows of a BOM table of `element` as the workspace has them now (rebuilds and waits).
-pub fn live_bom(doc: &Document, element: ElementId, kind: BomType, order: BomOrder) -> Result<BomData, CommandError> {
+pub fn live_bom(
+    doc: &Document,
+    element: ElementId,
+    kind: BomType,
+    order: BomOrder,
+) -> Result<BomData, CommandError> {
     let src = live_source(doc, element).ok_or(CommandError::ElementNotFound(element))?;
     let hash = src.hash_of(None).unwrap_or(0);
     let mut cache: HashMap<ElementId, Arc<Build>> = HashMap::new();

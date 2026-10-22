@@ -13,8 +13,8 @@
 
 use nalgebra::{Point2, Point3, Vector3};
 
-use crate::{Curve2, KernelError, Plane, Profile, Result};
 use crate::native::tol;
+use crate::{Curve2, KernelError, Plane, Profile, Result};
 
 /// How close two curve ends must be to join (mm).
 const JOIN: f64 = 1e-6;
@@ -26,21 +26,37 @@ impl Curve2 {
         use std::f64::consts::TAU;
         match self.clone() {
             Curve2::Line { a, b, source } => Curve2::Line { a: b, b: a, source },
-            Curve2::Arc { center, radius, start_angle, sweep, source } => Curve2::Arc {
+            Curve2::Arc {
+                center,
+                radius,
+                start_angle,
+                sweep,
+                source,
+            } => Curve2::Arc {
                 center,
                 radius,
                 start_angle: start_angle + sweep,
                 sweep: -sweep,
                 source,
             },
-            Curve2::Circle { center, radius, source } => Curve2::Arc {
+            Curve2::Circle {
+                center,
+                radius,
+                source,
+            } => Curve2::Arc {
                 center,
                 radius: radius.abs(),
                 start_angle: 0.0,
                 sweep: -TAU,
                 source,
             },
-            Curve2::Ellipse { center, major_radius, minor_radius, rotation, source } => Curve2::EllipseArc {
+            Curve2::Ellipse {
+                center,
+                major_radius,
+                minor_radius,
+                rotation,
+                source,
+            } => Curve2::EllipseArc {
                 center,
                 major_radius,
                 minor_radius,
@@ -49,30 +65,49 @@ impl Curve2 {
                 sweep: -TAU,
                 source,
             },
-            Curve2::EllipseArc { center, major_radius, minor_radius, rotation, start, sweep, source } => {
-                Curve2::EllipseArc {
-                    center,
-                    major_radius,
-                    minor_radius,
-                    rotation,
-                    start: start + sweep,
-                    sweep: -sweep,
-                    source,
-                }
-            }
-            Curve2::OffsetEllipseArc { center, major_radius, minor_radius, rotation, start, sweep, offset, source } => {
-                Curve2::OffsetEllipseArc {
-                    center,
-                    major_radius,
-                    minor_radius,
-                    rotation,
-                    start: start + sweep,
-                    sweep: -sweep,
-                    offset,
-                    source,
-                }
-            }
-            Curve2::Bezier { poles: [a, b, c, d], source } => Curve2::Bezier { poles: [d, c, b, a], source },
+            Curve2::EllipseArc {
+                center,
+                major_radius,
+                minor_radius,
+                rotation,
+                start,
+                sweep,
+                source,
+            } => Curve2::EllipseArc {
+                center,
+                major_radius,
+                minor_radius,
+                rotation,
+                start: start + sweep,
+                sweep: -sweep,
+                source,
+            },
+            Curve2::OffsetEllipseArc {
+                center,
+                major_radius,
+                minor_radius,
+                rotation,
+                start,
+                sweep,
+                offset,
+                source,
+            } => Curve2::OffsetEllipseArc {
+                center,
+                major_radius,
+                minor_radius,
+                rotation,
+                start: start + sweep,
+                sweep: -sweep,
+                offset,
+                source,
+            },
+            Curve2::Bezier {
+                poles: [a, b, c, d],
+                source,
+            } => Curve2::Bezier {
+                poles: [d, c, b, a],
+                source,
+            },
         }
     }
 
@@ -126,7 +161,9 @@ pub fn section_loop(profile: &Profile) -> Result<Vec<Curve2>> {
         }
     }
     if pieces.is_empty() {
-        return Err(KernelError::InvalidProfile("a loft profile needs a closed region".into()));
+        return Err(KernelError::InvalidProfile(
+            "a loft profile needs a closed region".into(),
+        ));
     }
     // Drop pairs of the same curve run both ways.
     let same_reversed = |a: &Curve2, b: &Curve2| -> bool {
@@ -141,12 +178,18 @@ pub fn section_loop(profile: &Profile) -> Result<Vec<Curve2>> {
         if !keep[i] {
             continue;
         }
-        if let Some(j) = (i + 1..pieces.len()).find(|&j| keep[j] && same_reversed(&pieces[i], &pieces[j])) {
+        if let Some(j) =
+            (i + 1..pieces.len()).find(|&j| keep[j] && same_reversed(&pieces[i], &pieces[j]))
+        {
             keep[i] = false;
             keep[j] = false;
         }
     }
-    let mut left: Vec<Curve2> = pieces.into_iter().zip(keep).filter_map(|(c, k)| k.then_some(c)).collect();
+    let mut left: Vec<Curve2> = pieces
+        .into_iter()
+        .zip(keep)
+        .filter_map(|(c, k)| k.then_some(c))
+        .collect();
     // Chain what is left into loops.
     let mut loops: Vec<Vec<Curve2>> = Vec::new();
     while let Some(first) = left.pop() {
@@ -173,7 +216,9 @@ pub fn section_loop(profile: &Profile) -> Result<Vec<Curve2>> {
     }
     match loops.len() {
         1 => Ok(oriented_loop(&loops[0], true)),
-        0 => Err(KernelError::InvalidProfile("a loft profile needs a closed region".into())),
+        0 => Err(KernelError::InvalidProfile(
+            "a loft profile needs a closed region".into(),
+        )),
         n => Err(KernelError::InvalidProfile(format!(
             "a loft profile must be one closed contour; the selection has {n}"
         ))),
@@ -197,12 +242,20 @@ pub struct SectionCurves {
 impl SectionCurves {
     /// A section of curves in a plane.
     pub fn new(plane: Plane, curves: Vec<Curve2>) -> Self {
-        Self { plane, curves, polylines: Vec::new() }
+        Self {
+            plane,
+            curves,
+            polylines: Vec::new(),
+        }
     }
 
     /// A section made of 3D polylines (a face's boundary edges, in loop order).
     pub fn sampled(plane: Plane, polylines: Vec<(Vec<Point3<f64>>, Option<u64>)>) -> Self {
-        Self { plane, curves: Vec::new(), polylines }
+        Self {
+            plane,
+            curves: Vec::new(),
+            polylines,
+        }
     }
 }
 
@@ -210,7 +263,12 @@ impl SectionCurves {
 #[derive(Debug, Clone)]
 enum Piece {
     Exact(Curve2),
-    Dense { pts: Vec<Point3<f64>>, acc: Vec<f64>, closed: bool, source: Option<u64> },
+    Dense {
+        pts: Vec<Point3<f64>>,
+        acc: Vec<f64>,
+        closed: bool,
+        source: Option<u64>,
+    },
 }
 
 impl Piece {
@@ -220,8 +278,14 @@ impl Piece {
             acc.push(acc[acc.len() - 1] + (w[1] - w[0]).norm());
         }
         let total = acc[acc.len() - 1];
-        let closed = pts.len() > 2 && (pts[0] - pts[pts.len() - 1]).norm() < tol::REL_POINT * total.max(1.0);
-        Piece::Dense { pts, acc, closed, source }
+        let closed =
+            pts.len() > 2 && (pts[0] - pts[pts.len() - 1]).norm() < tol::REL_POINT * total.max(1.0);
+        Piece::Dense {
+            pts,
+            acc,
+            closed,
+            source,
+        }
     }
 
     fn is_closed(&self) -> bool {
@@ -241,7 +305,9 @@ impl Piece {
     fn reversed(&self) -> Piece {
         match self {
             Piece::Exact(c) => Piece::Exact(c.reversed()),
-            Piece::Dense { pts, source, .. } => Piece::dense(pts.iter().rev().copied().collect(), *source),
+            Piece::Dense { pts, source, .. } => {
+                Piece::dense(pts.iter().rev().copied().collect(), *source)
+            }
         }
     }
 }
@@ -261,7 +327,8 @@ impl Sec {
                 let total = acc[acc.len() - 1].max(tol::DEGENERATE);
                 let t = total * s.clamp(0.0, 1.0);
                 let k = acc.partition_point(|a| *a < t).clamp(1, pts.len() - 1);
-                let f = ((t - acc[k - 1]) / (acc[k] - acc[k - 1]).max(tol::DEGENERATE)).clamp(0.0, 1.0);
+                let f =
+                    ((t - acc[k - 1]) / (acc[k] - acc[k - 1]).max(tol::DEGENERATE)).clamp(0.0, 1.0);
                 pts[k - 1] + (pts[k] - pts[k - 1]) * f
             }
         }
@@ -270,7 +337,13 @@ impl Sec {
     /// The section's pieces run counter-clockwise (`ccw`) about its plane's normal, or not.
     fn oriented(s: &SectionCurves, ccw: bool) -> Sec {
         if s.polylines.is_empty() {
-            return Sec { plane: s.plane, curves: oriented_loop(&s.curves, ccw).into_iter().map(Piece::Exact).collect() };
+            return Sec {
+                plane: s.plane,
+                curves: oriented_loop(&s.curves, ccw)
+                    .into_iter()
+                    .map(Piece::Exact)
+                    .collect(),
+            };
         }
         let (x, y) = (s.plane.x_dir.into_inner(), s.plane.y_dir().into_inner());
         let pts: Vec<Point2<f64>> = s
@@ -283,10 +356,24 @@ impl Sec {
             })
             .collect();
         let n = pts.len();
-        let area: f64 = (0..n).map(|i| pts[i].x * pts[(i + 1) % n].y - pts[(i + 1) % n].x * pts[i].y).sum::<f64>() / 2.0;
-        let pieces: Vec<Piece> = s.polylines.iter().map(|(p, src)| Piece::dense(p.clone(), *src)).collect();
-        let curves = if (area > 0.0) == ccw { pieces } else { pieces.iter().rev().map(Piece::reversed).collect() };
-        Sec { plane: s.plane, curves }
+        let area: f64 = (0..n)
+            .map(|i| pts[i].x * pts[(i + 1) % n].y - pts[(i + 1) % n].x * pts[i].y)
+            .sum::<f64>()
+            / 2.0;
+        let pieces: Vec<Piece> = s
+            .polylines
+            .iter()
+            .map(|(p, src)| Piece::dense(p.clone(), *src))
+            .collect();
+        let curves = if (area > 0.0) == ccw {
+            pieces
+        } else {
+            pieces.iter().rev().map(Piece::reversed).collect()
+        };
+        Sec {
+            plane: s.plane,
+            curves,
+        }
     }
 }
 
@@ -315,7 +402,9 @@ pub const SAMPLES: usize = 96;
 /// of curves, and each curve is a patch.
 pub fn sample_sections(sections: &[SectionCurves]) -> Result<Samples> {
     if sections.len() < 2 {
-        return Err(KernelError::InvalidParameter("a loft needs at least two profiles".into()));
+        return Err(KernelError::InvalidParameter(
+            "a loft needs at least two profiles".into(),
+        ));
     }
     let centroid = |s: &Sec| -> Point3<f64> {
         let mut acc = Vector3::zeros();
@@ -331,7 +420,9 @@ pub fn sample_sections(sections: &[SectionCurves]) -> Result<Samples> {
     let raw: Vec<Sec> = sections.iter().map(|s| Sec::oriented(s, true)).collect();
     let axis = centroid(&raw[raw.len() - 1]) - centroid(&raw[0]);
     if axis.norm() < tol::ROUNDOFF {
-        return Err(KernelError::InvalidParameter("the loft's profiles lie on top of each other".into()));
+        return Err(KernelError::InvalidParameter(
+            "the loft's profiles lie on top of each other".into(),
+        ));
     }
     // Every loop runs counter-clockwise about the loft's axis.
     let mut secs: Vec<Sec> = sections
@@ -353,7 +444,11 @@ pub fn sample_sections(sections: &[SectionCurves]) -> Result<Samples> {
         // resampled by length (a square's sides meet a circle's quarters).
         let n_axis = axis.normalize();
         let e1 = {
-            let t = if n_axis.x.abs() < 0.9 { Vector3::x() } else { Vector3::y() };
+            let t = if n_axis.x.abs() < 0.9 {
+                Vector3::x()
+            } else {
+                Vector3::y()
+            };
             (t - n_axis * t.dot(&n_axis)).normalize()
         };
         let e2 = n_axis.cross(&e1);
@@ -361,10 +456,14 @@ pub fn sample_sections(sections: &[SectionCurves]) -> Result<Samples> {
             let d = p - c;
             d.dot(&e2).atan2(d.dot(&e1))
         };
-        let reference = (0..secs.len()).max_by_key(|&i| secs[i].curves.len()).unwrap_or(0);
+        let reference = (0..secs.len())
+            .max_by_key(|&i| secs[i].curves.len())
+            .unwrap_or(0);
         let n = secs[reference].curves.len();
         let rc = centroid(&secs[reference]);
-        let corners: Vec<f64> = (0..n).map(|k| polar(&rc, &secs[reference].point(k, 0.0))).collect();
+        let corners: Vec<f64> = (0..n)
+            .map(|k| polar(&rc, &secs[reference].point(k, 0.0)))
+            .collect();
         let resample = |pts: &[Point3<f64>]| -> Vec<Point3<f64>> {
             let mut acc = vec![0.0];
             for w in pts.windows(2) {
@@ -375,7 +474,8 @@ pub fn sample_sections(sections: &[SectionCurves]) -> Result<Samples> {
                 .map(|j| {
                     let t = total * j as f64 / (SAMPLES - 1) as f64;
                     let k = acc.partition_point(|a| *a < t).clamp(1, pts.len() - 1);
-                    let f = ((t - acc[k - 1]) / (acc[k] - acc[k - 1]).max(tol::DEGENERATE)).clamp(0.0, 1.0);
+                    let f = ((t - acc[k - 1]) / (acc[k] - acc[k - 1]).max(tol::DEGENERATE))
+                        .clamp(0.0, 1.0);
                     pts[k - 1] + (pts[k] - pts[k - 1]) * f
                 })
                 .collect()
@@ -383,7 +483,15 @@ pub fn sample_sections(sections: &[SectionCurves]) -> Result<Samples> {
         let mut per_section: Vec<Vec<Vec<Point3<f64>>>> = Vec::new();
         for (i, sec) in secs.iter().enumerate() {
             if sec.curves.len() == n && i == reference {
-                per_section.push((0..n).map(|k| (0..SAMPLES).map(|j| sec.point(k, j as f64 / (SAMPLES - 1) as f64)).collect()).collect());
+                per_section.push(
+                    (0..n)
+                        .map(|k| {
+                            (0..SAMPLES)
+                                .map(|j| sec.point(k, j as f64 / (SAMPLES - 1) as f64))
+                                .collect()
+                        })
+                        .collect(),
+                );
                 continue;
             }
             // The whole loop, densely.
@@ -398,7 +506,14 @@ pub fn sample_sections(sections: &[SectionCurves]) -> Result<Samples> {
             };
             let cuts: Vec<usize> = corners
                 .iter()
-                .map(|&a| (0..dense.len()).min_by(|&x, &y| angle_gap(polar(&c, &dense[x]), a).total_cmp(&angle_gap(polar(&c, &dense[y]), a))).unwrap_or(0))
+                .map(|&a| {
+                    (0..dense.len())
+                        .min_by(|&x, &y| {
+                            angle_gap(polar(&c, &dense[x]), a)
+                                .total_cmp(&angle_gap(polar(&c, &dense[y]), a))
+                        })
+                        .unwrap_or(0)
+                })
                 .collect();
             let m = dense.len();
             let pieces = (0..n)
@@ -421,7 +536,11 @@ pub fn sample_sections(sections: &[SectionCurves]) -> Result<Samples> {
         // best matches the previous section's samples.
         let mut rings: Vec<Vec<Point3<f64>>> = secs
             .iter()
-            .map(|s| (0..SAMPLES).map(|j| s.point(0, j as f64 / SAMPLES as f64)).collect())
+            .map(|s| {
+                (0..SAMPLES)
+                    .map(|j| s.point(0, j as f64 / SAMPLES as f64))
+                    .collect()
+            })
             .collect();
         for i in 1..rings.len() {
             let dirs = |r: &[Point3<f64>]| -> Vec<Vector3<f64>> {
@@ -431,7 +550,11 @@ pub fn sample_sections(sections: &[SectionCurves]) -> Result<Samples> {
             let (prev, cur) = (dirs(&rings[i - 1]), dirs(&rings[i]));
             let best = (0..SAMPLES)
                 .min_by(|&a, &b| {
-                    let cost = |r: usize| (0..SAMPLES).map(|j| (cur[(j + r) % SAMPLES] - prev[j]).norm_squared()).sum::<f64>();
+                    let cost = |r: usize| {
+                        (0..SAMPLES)
+                            .map(|j| (cur[(j + r) % SAMPLES] - prev[j]).norm_squared())
+                            .sum::<f64>()
+                    };
                     cost(a).total_cmp(&cost(b))
                 })
                 .unwrap_or(0);
@@ -447,7 +570,8 @@ pub fn sample_sections(sections: &[SectionCurves]) -> Result<Samples> {
             let d0 = (secs[i - 1].point(0, 0.0) - c0).normalize();
             let best = (0..count)
                 .min_by(|&a, &b| {
-                    let cost = |r: usize| ((secs[i].point(r, 0.0) - c1).normalize() - d0).norm_squared();
+                    let cost =
+                        |r: usize| ((secs[i].point(r, 0.0) - c1).normalize() - d0).norm_squared();
                     cost(a).total_cmp(&cost(b))
                 })
                 .unwrap_or(0);
@@ -456,7 +580,11 @@ pub fn sample_sections(sections: &[SectionCurves]) -> Result<Samples> {
         for p in 0..count {
             let patch: Vec<Vec<Point3<f64>>> = secs
                 .iter()
-                .map(|s| (0..SAMPLES).map(|j| s.point(p, j as f64 / (SAMPLES - 1) as f64)).collect())
+                .map(|s| {
+                    (0..SAMPLES)
+                        .map(|j| s.point(p, j as f64 / (SAMPLES - 1) as f64))
+                        .collect()
+                })
                 .collect();
             patches.push(patch);
             sources.push(secs[0].curves[p].source());
@@ -470,7 +598,13 @@ pub fn sample_sections(sections: &[SectionCurves]) -> Result<Samples> {
             if n.dot(&axis) >= 0.0 { n } else { -n }
         })
         .collect();
-    Ok(Samples { patches, periodic, centers, normals, sources })
+    Ok(Samples {
+        patches,
+        periodic,
+        centers,
+        normals,
+        sources,
+    })
 }
 
 #[cfg(test)]
@@ -480,7 +614,11 @@ mod tests {
     use nalgebra::Point2;
 
     fn line(a: (f64, f64), b: (f64, f64), s: u64) -> Curve2 {
-        Curve2::Line { a: Point2::new(a.0, a.1), b: Point2::new(b.0, b.1), source: Some(s) }
+        Curve2::Line {
+            a: Point2::new(a.0, a.1),
+            b: Point2::new(b.0, b.1),
+            source: Some(s),
+        }
     }
 
     /// Two squares sharing a side join into the 2 × 1 rectangle around them (the shared side
@@ -489,12 +627,26 @@ mod tests {
     #[test]
     fn regions_join_into_one_contour() {
         let a = Region {
-            outer: Loop { curves: vec![line((0., 0.), (1., 0.), 1), line((1., 0.), (1., 1.), 2), line((1., 1.), (0., 1.), 3), line((0., 1.), (0., 0.), 4)] },
+            outer: Loop {
+                curves: vec![
+                    line((0., 0.), (1., 0.), 1),
+                    line((1., 0.), (1., 1.), 2),
+                    line((1., 1.), (0., 1.), 3),
+                    line((0., 1.), (0., 0.), 4),
+                ],
+            },
             holes: vec![],
             source: Some(1),
         };
         let b = Region {
-            outer: Loop { curves: vec![line((1., 0.), (2., 0.), 5), line((2., 0.), (2., 1.), 6), line((2., 1.), (1., 1.), 7), line((1., 1.), (1., 0.), 2)] },
+            outer: Loop {
+                curves: vec![
+                    line((1., 0.), (2., 0.), 5),
+                    line((2., 0.), (2., 1.), 6),
+                    line((2., 1.), (1., 1.), 7),
+                    line((1., 1.), (1., 0.), 2),
+                ],
+            },
             holes: vec![],
             source: Some(2),
         };
@@ -502,21 +654,56 @@ mod tests {
         let lp = section_loop(&p).unwrap();
         assert_eq!(lp.len(), 6);
         assert!((signed_area(&lp) - 2.0).abs() < 1e-9);
-        let circle = |r: f64, s: u64| Curve2::Circle { center: Point2::origin(), radius: r, source: Some(s) };
-        let disc = Region { outer: Loop { curves: vec![circle(1.0, 10)] }, holes: vec![], source: Some(1) };
-        let ring = Region { outer: Loop { curves: vec![circle(2.0, 11)] }, holes: vec![Loop { curves: vec![circle(1.0, 10)] }], source: Some(2) };
+        let circle = |r: f64, s: u64| Curve2::Circle {
+            center: Point2::origin(),
+            radius: r,
+            source: Some(s),
+        };
+        let disc = Region {
+            outer: Loop {
+                curves: vec![circle(1.0, 10)],
+            },
+            holes: vec![],
+            source: Some(1),
+        };
+        let ring = Region {
+            outer: Loop {
+                curves: vec![circle(2.0, 11)],
+            },
+            holes: vec![Loop {
+                curves: vec![circle(1.0, 10)],
+            }],
+            source: Some(2),
+        };
         let lp = section_loop(&Profile::new(Plane::top(), vec![disc, ring])).unwrap();
         assert_eq!(lp.len(), 1);
         assert_eq!(lp[0].source(), Some(11));
-        assert!((signed_area(&lp) - std::f64::consts::PI * 4.0).abs() < 0.05, "a 64-gon");
+        assert!(
+            (signed_area(&lp) - std::f64::consts::PI * 4.0).abs() < 0.05,
+            "a 64-gon"
+        );
         // Two separate squares are two contours: an error.
         let far = Region {
-            outer: Loop { curves: vec![line((5., 0.), (6., 0.), 8), line((6., 0.), (6., 1.), 9), line((6., 1.), (5., 1.), 10), line((5., 1.), (5., 0.), 11)] },
+            outer: Loop {
+                curves: vec![
+                    line((5., 0.), (6., 0.), 8),
+                    line((6., 0.), (6., 1.), 9),
+                    line((6., 1.), (5., 1.), 10),
+                    line((5., 1.), (5., 0.), 11),
+                ],
+            },
             holes: vec![],
             source: Some(3),
         };
         let a2 = Region {
-            outer: Loop { curves: vec![line((0., 0.), (1., 0.), 1), line((1., 0.), (1., 1.), 2), line((1., 1.), (0., 1.), 3), line((0., 1.), (0., 0.), 4)] },
+            outer: Loop {
+                curves: vec![
+                    line((0., 0.), (1., 0.), 1),
+                    line((1., 0.), (1., 1.), 2),
+                    line((1., 1.), (0., 1.), 3),
+                    line((0., 1.), (0., 0.), 4),
+                ],
+            },
             holes: vec![],
             source: Some(1),
         };

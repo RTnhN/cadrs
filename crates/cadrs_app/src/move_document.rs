@@ -43,14 +43,25 @@ pub struct MoveDocumentPlugin;
 
 impl Plugin for MoveDocumentPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Update, (read_fields, sync_sections, sync_other, sync_summary, sync_status).chain().run_if(in_state(AppState::Document)))
-            .add_systems(OnExit(AppState::Document), |mut commands: Commands| {
-                commands.remove_resource::<MoveSession>();
-            })
-            .add_observer(on_tab)
-            .add_observer(on_button)
-            .add_observer(on_check)
-            .add_observer(on_dialog_close);
+        app.add_systems(
+            Update,
+            (
+                read_fields,
+                sync_sections,
+                sync_other,
+                sync_summary,
+                sync_status,
+            )
+                .chain()
+                .run_if(in_state(AppState::Document)),
+        )
+        .add_systems(OnExit(AppState::Document), |mut commands: Commands| {
+            commands.remove_resource::<MoveSession>();
+        })
+        .add_observer(on_tab)
+        .add_observer(on_button)
+        .add_observer(on_check)
+        .add_observer(on_dialog_close);
     }
 }
 
@@ -78,15 +89,28 @@ pub struct MoveSession {
 impl MoveSession {
     /// Every tab that moves, in the document's order.
     pub fn moving(&self, doc: &cadrs_core::Document) -> Vec<ElementId> {
-        doc.elements.iter().map(|e| e.id).filter(|e| self.tabs.contains(e) || self.referenced.iter().any(|(r, on)| r == e && *on)).collect()
+        doc.elements
+            .iter()
+            .map(|e| e.id)
+            .filter(|e| {
+                self.tabs.contains(e) || self.referenced.iter().any(|(r, on)| r == e && *on)
+            })
+            .collect()
     }
 
     /// The target's name as the footer says it.
     fn target_name(&self) -> String {
         if self.tab == 0 {
-            if self.name.trim().is_empty() { "a new document".into() } else { self.name.trim().to_string() }
+            if self.name.trim().is_empty() {
+                "a new document".into()
+            } else {
+                self.name.trim().to_string()
+            }
         } else {
-            self.target.as_ref().map(|t| t.1.clone()).unwrap_or_else(|| "…".into())
+            self.target
+                .as_ref()
+                .map(|t| t.1.clone())
+                .unwrap_or_else(|| "…".into())
         }
     }
 }
@@ -121,12 +145,34 @@ pub fn open_move_dialog_named(world: &mut World, tabs: Vec<ElementId>, name: Opt
         return;
     }
     let doc = world.resource::<ActiveDocument>().doc.clone();
-    let tabs: Vec<ElementId> = doc.elements.iter().map(|e| e.id).filter(|e| tabs.contains(e)).collect();
-    let Some(first) = tabs.first().and_then(|e| doc.elements.iter().find(|x| x.id == *e)) else { return };
+    let tabs: Vec<ElementId> = doc
+        .elements
+        .iter()
+        .map(|e| e.id)
+        .filter(|e| tabs.contains(e))
+        .collect();
+    let Some(first) = tabs
+        .first()
+        .and_then(|e| doc.elements.iter().find(|x| x.id == *e))
+    else {
+        return;
+    };
     close_dialog(world);
-    let referenced = move_doc::referenced_tabs(&doc, &tabs).into_iter().map(|e| (e, true)).collect();
+    let referenced = move_doc::referenced_tabs(&doc, &tabs)
+        .into_iter()
+        .map(|e| (e, true))
+        .collect();
     let name = name.unwrap_or_else(|| first.name.clone());
-    world.insert_resource(MoveSession { tabs, referenced, tab: 0, details: false, browse: linked::Browse::default(), target: None, name: name.clone(), version_name: String::new() });
+    world.insert_resource(MoveSession {
+        tabs,
+        referenced,
+        tab: 0,
+        details: false,
+        browse: linked::Browse::default(),
+        target: None,
+        name: name.clone(),
+        version_name: String::new(),
+    });
     let theme = world.resource::<Theme>().clone();
     let (tb, tf) = (theme.clone(), theme.clone());
     world.spawn((
@@ -136,13 +182,54 @@ pub fn open_move_dialog_named(world: &mut World, tabs: Vec<ElementId>, name: Opt
             .title_font(theme.font_lg, FontWeight::MEDIUM)
             .body(move |b| {
                 let t = &tb;
-                b.spawn(TabStrip::new("move-tabs").tab("New document").tab("Other documents").selected(0).equal().build(t));
-                b.spawn((NewSection, Node { flex_direction: FlexDirection::Column, row_gap: Val::Px(6.0), margin: UiRect::top(Val::Px(10.0)), ..default() })).with_children(|n| {
+                b.spawn(
+                    TabStrip::new("move-tabs")
+                        .tab("New document")
+                        .tab("Other documents")
+                        .selected(0)
+                        .equal()
+                        .build(t),
+                );
+                b.spawn((
+                    NewSection,
+                    Node {
+                        flex_direction: FlexDirection::Column,
+                        row_gap: Val::Px(6.0),
+                        margin: UiRect::top(Val::Px(10.0)),
+                        ..default()
+                    },
+                ))
+                .with_children(|n| {
                     n.spawn(t.text("Document name", t.font_base, FontWeight::BOLD, t.foreground));
-                    n.spawn(TextInput::new("move-name").value(name).select_all_on_focus().autofocus().width(Val::Percent(100.0)).height(30.0).build(t));
+                    n.spawn(
+                        TextInput::new("move-name")
+                            .value(name)
+                            .select_all_on_focus()
+                            .autofocus()
+                            .width(Val::Percent(100.0))
+                            .height(30.0)
+                            .build(t),
+                    );
                 });
-                b.spawn((OtherSection, Name::new("move-other"), Node { flex_direction: FlexDirection::Column, display: Display::None, margin: UiRect::top(Val::Px(6.0)), ..default() }));
-                b.spawn((SummarySection, Name::new("move-summary"), Node { flex_direction: FlexDirection::Column, margin: UiRect::top(Val::Px(12.0)), ..default() }));
+                b.spawn((
+                    OtherSection,
+                    Name::new("move-other"),
+                    Node {
+                        flex_direction: FlexDirection::Column,
+                        display: Display::None,
+                        margin: UiRect::top(Val::Px(6.0)),
+                        ..default()
+                    },
+                ));
+                b.spawn((
+                    SummarySection,
+                    Name::new("move-summary"),
+                    Node {
+                        flex_direction: FlexDirection::Column,
+                        margin: UiRect::top(Val::Px(12.0)),
+                        ..default()
+                    },
+                ));
             })
             .footer(move |f| {
                 let t = &tf;
@@ -150,10 +237,23 @@ pub fn open_move_dialog_named(world: &mut World, tabs: Vec<ElementId>, name: Opt
                     StatusText,
                     Name::new("move-status"),
                     t.text("", t.font_sm, FontWeight::NORMAL, t.muted_foreground),
-                    Node { flex_grow: 1.0, align_self: AlignSelf::Center, ..default() },
+                    Node {
+                        flex_grow: 1.0,
+                        align_self: AlignSelf::Center,
+                        ..default()
+                    },
                 ));
-                f.spawn(cadrs_ui::Button::new("move-confirm").label("Move").primary().build(t));
-                f.spawn(cadrs_ui::Button::new("move-cancel").label("Cancel").build(t));
+                f.spawn(
+                    cadrs_ui::Button::new("move-confirm")
+                        .label("Move")
+                        .primary()
+                        .build(t),
+                );
+                f.spawn(
+                    cadrs_ui::Button::new("move-cancel")
+                        .label("Cancel")
+                        .build(t),
+                );
             })
             .build(&theme),
         MoveDialog,
@@ -165,8 +265,15 @@ pub fn open_move_dialog_named(world: &mut World, tabs: Vec<ElementId>, name: Opt
 /// A tab's menu → Move to document…: the Tab manager's selection when it holds this tab and
 /// others, else this tab.
 pub fn open_for_tab(world: &mut World, tab: ElementId) {
-    let sel = world.resource::<crate::tab_manager::TabManager>().selected.clone();
-    let tabs = if sel.len() > 1 && sel.contains(&tab) { sel } else { vec![tab] };
+    let sel = world
+        .resource::<crate::tab_manager::TabManager>()
+        .selected
+        .clone();
+    let tabs = if sel.len() > 1 && sel.contains(&tab) {
+        sel
+    } else {
+        vec![tab]
+    };
     open_move_dialog(world, tabs);
 }
 
@@ -186,7 +293,9 @@ fn on_dialog_close(ev: On<DialogClose>, q: Query<(), With<MoveDialog>>, mut comm
 }
 
 fn text_of(q: &Query<(&Name, &bevy::text::EditableText)>, name: &str) -> Option<String> {
-    q.iter().find(|(n, _)| n.as_str() == name).map(|(_, t)| t.value().to_string())
+    q.iter()
+        .find(|(n, _)| n.as_str() == name)
+        .map(|(_, t)| t.value().to_string())
 }
 
 /// The fields and the browser's search, into the session (without rebuilding anything).
@@ -206,9 +315,17 @@ fn read_fields(q: Query<(&Name, &bevy::text::EditableText)>, session: Option<Res
     }
 }
 
-fn sync_sections(session: Option<Res<MoveSession>>, mut q_new: Query<&mut Node, (With<NewSection>, Without<OtherSection>)>, mut q_other: Query<&mut Node, (With<OtherSection>, Without<NewSection>)>) {
+fn sync_sections(
+    session: Option<Res<MoveSession>>,
+    mut q_new: Query<&mut Node, (With<NewSection>, Without<OtherSection>)>,
+    mut q_other: Query<&mut Node, (With<OtherSection>, Without<NewSection>)>,
+) {
     let Some(s) = session else { return };
-    let (a, b) = if s.tab == 0 { (Display::Flex, Display::None) } else { (Display::None, Display::Flex) };
+    let (a, b) = if s.tab == 0 {
+        (Display::Flex, Display::None)
+    } else {
+        (Display::None, Display::Flex)
+    };
     for mut n in &mut q_new {
         if n.display != a {
             n.display = a;
@@ -233,31 +350,62 @@ fn sync_other(world: &mut World, mut last: Local<Option<(OtherKey, u64)>>) {
     let key: OtherKey = (s.browse.clone(), s.target.clone());
     let generation = world.resource::<linked::LibrarySnapshot>().generation;
     let mut q = world.query_filtered::<(Entity, Ref<OtherSection>), ()>();
-    let Some((panel, added)) = q.iter(world).next().map(|(e, r)| (e, r.is_added())) else { return };
-    if !added && last.as_ref().is_some_and(|(k, g)| k == &key && *g == generation) {
+    let Some((panel, added)) = q.iter(world).next().map(|(e, r)| (e, r.is_added())) else {
+        return;
+    };
+    if !added
+        && last
+            .as_ref()
+            .is_some_and(|(k, g)| k == &key && *g == generation)
+    {
         return;
     }
     let theme = world.resource::<Theme>().clone();
     let (browse, target) = key.clone();
     let only_search = !added
         && target.is_none()
-        && last.as_ref().is_some_and(|((b, t), g)| t.is_none() && b.location == browse.location && (b.search != browse.search || *g != generation));
+        && last.as_ref().is_some_and(|((b, t), g)| {
+            t.is_none()
+                && b.location == browse.location
+                && (b.search != browse.search || *g != generation)
+        });
     if added {
         world.resource_mut::<linked::LibrarySnapshot>().invalidate();
     }
-    let list = if target.is_none() { linked::browser_list(world, &browse) } else { linked::BrowserList::default() };
+    let list = if target.is_none() {
+        linked::browser_list(world, &browse)
+    } else {
+        linked::BrowserList::default()
+    };
     let thumbs = linked::browser_thumbs(world, &list.rows);
     let mut qn = world.query::<(Entity, &Name)>();
-    let list_node = qn.iter(world).find(|(_, n)| n.as_str() == "move-other-list").map(|(e, _)| e);
+    let list_node = qn
+        .iter(world)
+        .find(|(_, n)| n.as_str() == "move-other-list")
+        .map(|(e, _)| e);
     if let (true, Some(node)) = (only_search, list_node) {
         world.entity_mut(node).despawn();
         let mut commands = world.commands();
-        commands.entity(panel).with_children(|p| linked::spawn_browser_list(p, &theme, Owner::Move, &browse, &list, &thumbs));
+        commands.entity(panel).with_children(|p| {
+            linked::spawn_browser_list(p, &theme, Owner::Move, &browse, &list, &thumbs)
+        });
         world.flush();
         *last = Some((key, generation));
         return;
     }
-    let target_thumb = target.as_ref().and_then(|(d, n, _)| linked::thumbs_for(world, &[linked::DocListRow { id: *d, name: n.clone(), subtitle: String::new(), versions: true, count: 1 }]).remove(d));
+    let target_thumb = target.as_ref().and_then(|(d, n, _)| {
+        linked::thumbs_for(
+            world,
+            &[linked::DocListRow {
+                id: *d,
+                name: n.clone(),
+                subtitle: String::new(),
+                versions: true,
+                count: 1,
+            }],
+        )
+        .remove(d)
+    });
     world.entity_mut(panel).despawn_children();
     let mut commands = world.commands();
     commands.entity(panel).with_children(|p| {
@@ -298,7 +446,10 @@ pub fn pick_target(world: &mut World, document: DocumentId) {
         linked::error_toast(world, m);
         return;
     }
-    let name = store.load(document).map(|f| f.document.name).unwrap_or_default();
+    let name = store
+        .load(document)
+        .map(|f| f.document.name)
+        .unwrap_or_default();
     let versions = linked::resolver(world).0.versions(document).len();
     if let Some(mut s) = world.get_resource_mut::<MoveSession>() {
         s.version_name = format!("V{}", versions + 1);
@@ -309,7 +460,11 @@ pub fn pick_target(world: &mut World, document: DocumentId) {
 /// The tabs the details list: the picked ones, then the referenced ones, each in tab order.
 fn listed_tabs(doc: &cadrs_core::Document, s: &MoveSession) -> Vec<ElementId> {
     let order = doc.elements.iter().map(|e| e.id);
-    order.clone().filter(|e| s.tabs.contains(e)).chain(order.filter(|e| s.referenced.iter().any(|(r, _)| r == e))).collect()
+    order
+        .clone()
+        .filter(|e| s.tabs.contains(e))
+        .chain(order.filter(|e| s.referenced.iter().any(|(r, _)| r == e)))
+        .collect()
 }
 
 type SummaryKey = (Vec<ElementId>, Vec<(ElementId, bool)>, bool);
@@ -332,7 +487,9 @@ fn sync_summary(world: &mut World, mut last: Local<Option<SummaryKey>>) {
     };
     let key: SummaryKey = (s.tabs.clone(), s.referenced.clone(), s.details);
     let mut q = world.query_filtered::<(Entity, Ref<SummarySection>), ()>();
-    let Some((panel, added)) = q.iter(world).next().map(|(e, r)| (e, r.is_added())) else { return };
+    let Some((panel, added)) = q.iter(world).next().map(|(e, r)| (e, r.is_added())) else {
+        return;
+    };
     if !added && last.as_ref() == Some(&key) {
         return;
     }
@@ -383,10 +540,22 @@ fn sync_summary(world: &mut World, mut last: Local<Option<SummaryKey>>) {
 }
 
 /// "Moving 2 tabs to Pneumatic Piston", and Move enabled when there is a target.
-fn sync_status(session: Option<Res<MoveSession>>, doc: Option<Res<ActiveDocument>>, mut q: Query<&mut Text, With<StatusText>>, q_btn: Query<(Entity, &Name, Has<InteractionDisabled>)>, mut commands: Commands) {
-    let (Some(s), Some(doc)) = (session, doc) else { return };
+fn sync_status(
+    session: Option<Res<MoveSession>>,
+    doc: Option<Res<ActiveDocument>>,
+    mut q: Query<&mut Text, With<StatusText>>,
+    q_btn: Query<(Entity, &Name, Has<InteractionDisabled>)>,
+    mut commands: Commands,
+) {
+    let (Some(s), Some(doc)) = (session, doc) else {
+        return;
+    };
     let n = s.moving(&doc.doc).len();
-    let want = format!("Moving {n} tab{} to {}", if n == 1 { "" } else { "s" }, s.target_name());
+    let want = format!(
+        "Moving {n} tab{} to {}",
+        if n == 1 { "" } else { "s" },
+        s.target_name()
+    );
     for mut t in &mut q {
         if t.0 != want {
             t.0 = want.clone();
@@ -405,23 +574,45 @@ fn sync_status(session: Option<Res<MoveSession>>, doc: Option<Res<ActiveDocument
 }
 
 fn on_tab(ev: On<TabStripSelect>, q: Query<&Name>, session: Option<ResMut<MoveSession>>) {
-    let (Some(mut s), Ok(n)) = (session, q.get(ev.entity)) else { return };
+    let (Some(mut s), Ok(n)) = (session, q.get(ev.entity)) else {
+        return;
+    };
     if n.as_str() == "move-tabs" && s.tab != ev.index {
         s.tab = ev.index;
     }
 }
 
-fn on_check(ev: On<CheckboxChange>, q: Query<&Name>, session: Option<ResMut<MoveSession>>, doc: Option<Res<ActiveDocument>>) {
-    let (Some(mut s), Some(doc), Ok(n)) = (session, doc, q.get(ev.entity)) else { return };
-    let Some(k) = n.as_str().strip_prefix("move-tab-").and_then(|k| k.parse::<usize>().ok()) else { return };
+fn on_check(
+    ev: On<CheckboxChange>,
+    q: Query<&Name>,
+    session: Option<ResMut<MoveSession>>,
+    doc: Option<Res<ActiveDocument>>,
+) {
+    let (Some(mut s), Some(doc), Ok(n)) = (session, doc, q.get(ev.entity)) else {
+        return;
+    };
+    let Some(k) = n
+        .as_str()
+        .strip_prefix("move-tab-")
+        .and_then(|k| k.parse::<usize>().ok())
+    else {
+        return;
+    };
     let listed = listed_tabs(&doc.doc, &s);
-    let Some(e) = listed.get(k - 1).copied() else { return };
+    let Some(e) = listed.get(k - 1).copied() else {
+        return;
+    };
     if let Some(r) = s.referenced.iter_mut().find(|(x, _)| *x == e) {
         r.1 = ev.checked;
     }
 }
 
-fn on_button(a: On<Activate>, q: Query<&Name>, session: Option<Res<MoveSession>>, mut commands: Commands) {
+fn on_button(
+    a: On<Activate>,
+    q: Query<&Name>,
+    session: Option<Res<MoveSession>>,
+    mut commands: Commands,
+) {
     let Ok(n) = q.get(a.entity) else { return };
     match n.as_str() {
         "move-confirm" if session.is_some() => commands.queue(commit),
@@ -442,13 +633,22 @@ fn on_button(a: On<Activate>, q: Query<&Name>, session: Option<Res<MoveSession>>
 
 /// Move: the target is written, then this document's command runs (one undo step).
 fn commit(world: &mut World) {
-    let Some(s) = world.get_resource::<MoveSession>().cloned() else { return };
+    let Some(s) = world.get_resource::<MoveSession>().cloned() else {
+        return;
+    };
     let doc = world.resource::<ActiveDocument>().doc.clone();
     let target = if s.tab == 0 {
-        MoveTarget::New { name: s.name.clone() }
+        MoveTarget::New {
+            name: s.name.clone(),
+        }
     } else {
-        let Some((d, _, _)) = s.target.clone() else { return };
-        MoveTarget::Existing { document: d, version_name: s.version_name.clone() }
+        let Some((d, _, _)) = s.target.clone() else {
+            return;
+        };
+        MoveTarget::Existing {
+            document: d,
+            version_name: s.version_name.clone(),
+        }
     };
     let tabs = s.moving(&doc);
     let store = world.resource::<DocumentStore>().0.clone();
@@ -477,56 +677,106 @@ fn commit(world: &mut World) {
     }
     linked::resolver(world).0.forget(out.target);
     linked::resolver(world).0.forget(doc.id);
-    let moving_active = world.resource::<ActiveDocument>().active.is_some_and(|a| tabs.contains(&a));
+    let moving_active = world
+        .resource::<ActiveDocument>()
+        .active
+        .is_some_and(|a| tabs.contains(&a));
     if let Err(e) = world.resource_mut::<ActiveDocument>().execute(&out.command) {
-        linked::error_toast(world, format!("{} was written, but this document couldn't be changed: {e}", out.target_name));
+        linked::error_toast(
+            world,
+            format!(
+                "{} was written, but this document couldn't be changed: {e}",
+                out.target_name
+            ),
+        );
         return;
     }
     // The open tab moved: show the tab that used it (the Hexapod, `ex2-step4.png`).
     if moving_active {
         let d = &world.resource::<ActiveDocument>().doc;
-        let user_of = cadrs_core::link_update::uses(d).into_iter().find(|u| tabs.contains(&u.reference.element)).map(|u| u.site.tab());
-        if let Some(t) = out.command.changes.first().map(|c| c.site.tab()).or(user_of).or(d.elements.first().map(|e| e.id)) {
+        let user_of = cadrs_core::link_update::uses(d)
+            .into_iter()
+            .find(|u| tabs.contains(&u.reference.element))
+            .map(|u| u.site.tab());
+        if let Some(t) = out
+            .command
+            .changes
+            .first()
+            .map(|c| c.site.tab())
+            .or(user_of)
+            .or(d.elements.first().map(|e| e.id))
+        {
             world.resource_mut::<ActiveDocument>().set_active(t);
         }
     }
-    world.resource_mut::<crate::tab_manager::TabManager>().selected.clear();
-    world.resource_mut::<crate::linked::LinkStatus>().invalidate();
+    world
+        .resource_mut::<crate::tab_manager::TabManager>()
+        .selected
+        .clear();
+    world
+        .resource_mut::<crate::linked::LinkStatus>()
+        .invalidate();
     // P3G.4 (P3G.3 carried): "now references" only when uses were re-pointed; references to
     // an older version of a moved tab (ER7.6) are counted and left to the Reference manager.
     let mut text = format!("{}.", out.summary());
     if !out.command.changes.is_empty() {
-        text.push_str(&format!(" This document now references its {}.", out.version_name));
+        text.push_str(&format!(
+            " This document now references its {}.",
+            out.version_name
+        ));
     }
     {
         let d = &world.resource::<ActiveDocument>().doc;
         let left: Vec<cadrs_core::link_update::RefUse> = cadrs_core::link_update::uses(d)
             .into_iter()
-            .filter(|u| tabs.contains(&u.reference.element) && u.reference.document_or(d.id) == d.id && u.is_version())
+            .filter(|u| {
+                tabs.contains(&u.reference.element)
+                    && u.reference.document_or(d.id) == d.id
+                    && u.is_version()
+            })
             .collect();
         if let Some(first) = left.first() {
-            let v = d.linked_element(first.source).map(|l| l.version_name.clone()).unwrap_or_default();
+            let v = d
+                .linked_element(first.source)
+                .map(|l| l.version_name.clone())
+                .unwrap_or_default();
             let n = left.len();
-            let s = if n == 1 { "reference still points" } else { "references still point" };
-            text.push_str(&format!(" {n} {s} at {v} here; update them in the Reference manager."));
+            let s = if n == 1 {
+                "reference still points"
+            } else {
+                "references still point"
+            };
+            text.push_str(&format!(
+                " {n} {s} at {v} here; update them in the Reference manager."
+            ));
         }
     }
     if let Some((_, v)) = &out.source_version {
-        text.push_str(&format!(" {v} of this document was made for the tabs left here."));
+        text.push_str(&format!(
+            " {v} of this document was made for the tabs left here."
+        ));
     }
     text.push_str(" Undo puts the tabs back here; the other document and the versions stay.");
     let theme = world.resource::<Theme>().clone();
     let target = out.target;
     let label = format!("Open {}", out.target_name);
     let mut commands = world.commands();
-    let toast = cadrs_ui::show_notification(&mut commands, &theme, cadrs_ui::Notification::info(text).name("move-toast").seconds(10.0));
+    let toast = cadrs_ui::show_notification(
+        &mut commands,
+        &theme,
+        cadrs_ui::Notification::info(text)
+            .name("move-toast")
+            .seconds(10.0),
+    );
     let link = cadrs_ui::toast_action(&mut commands, &theme, toast, "move-open-target", label);
-    commands.entity(link).observe(move |_: On<Activate>, mut commands: Commands| {
-        commands.queue(move |w: &mut World| {
-            cadrs_ui::close_toasts(w);
-            open_document(w, target);
+    commands
+        .entity(link)
+        .observe(move |_: On<Activate>, mut commands: Commands| {
+            commands.queue(move |w: &mut World| {
+                cadrs_ui::close_toasts(w);
+                open_document(w, target);
+            });
         });
-    });
     world.flush();
 }
 
@@ -534,9 +784,25 @@ fn commit(world: &mut World) {
 fn write_thumbnail(world: &mut World, id: DocumentId) {
     let store = world.resource::<DocumentStore>().0.clone();
     let Ok(file) = store.load(id) else { return };
-    let Some(el) = file.document.elements.iter().find(|e| matches!(e.kind, ElementKind::PartStudio { .. })) else { return };
+    let Some(el) = file
+        .document
+        .elements
+        .iter()
+        .find(|e| matches!(e.kind, ElementKind::PartStudio { .. }))
+    else {
+        return;
+    };
     let build = cadrs_core::rebuild::build(el.features());
-    let list: Vec<(&cadrs_core::Solid, [u8; 3])> = build.parts.iter().map(|p| (&*p.solid, cadrs_core::appearance::part_appearance(p, el.part_props()).rgb)).collect();
+    let list: Vec<(&cadrs_core::Solid, [u8; 3])> = build
+        .parts
+        .iter()
+        .map(|p| {
+            (
+                &*p.solid,
+                cadrs_core::appearance::part_appearance(p, el.part_props()).rgb,
+            )
+        })
+        .collect();
     if list.is_empty() {
         return;
     }
@@ -569,9 +835,13 @@ pub fn open_document(world: &mut World, id: DocumentId) {
     let _ = store.save(&file.document, &file.meta);
     crate::reference_manager::close(world);
     world.insert_resource(ActiveDocument::stored(file.document, file.meta));
-    world.resource_mut::<crate::linked::LinkStatus>().invalidate();
+    world
+        .resource_mut::<crate::linked::LinkStatus>()
+        .invalidate();
     if *world.resource::<State<AppState>>().get() != AppState::Document {
-        world.resource_mut::<NextState<AppState>>().set(AppState::Document);
+        world
+            .resource_mut::<NextState<AppState>>()
+            .set(AppState::Document);
     }
 }
 
@@ -618,7 +888,12 @@ pub fn script(world: &mut World, arg: &str) {
         }
         // Drawing 1: a Front view of the whole Pneumatic Piston (D2.10: a drawing tab to move).
         Some("drawing") => {
-            crate::script::add_front_view_drawing_of(world, ps::PISTON_STUDIO, None, [140.0, 110.0]);
+            crate::script::add_front_view_drawing_of(
+                world,
+                ps::PISTON_STUDIO,
+                None,
+                [140.0, 110.0],
+            );
         }
         // ER7.6: V1 of the open document, and the Hexapod's six pistons pointed at it (as
         // Change to version… does), one undo step.
@@ -628,7 +903,12 @@ pub fn script(world: &mut World, arg: &str) {
                 let mut l = world.resource_mut::<DocLog>();
                 let Some(log) = l.log.as_mut() else { return };
                 if log.head() != &doc {
-                    log.record(&doc, cadrs_core::history_log::Origin::Command("Move to document".into()), now, &user);
+                    log.record(
+                        &doc,
+                        cadrs_core::history_log::Origin::Command("Move to document".into()),
+                        now,
+                        &user,
+                    );
                 }
                 let v = log.create_version("", "", now, &user);
                 let _ = log.save(&store);
@@ -640,16 +920,32 @@ pub fn script(world: &mut World, arg: &str) {
             {
                 let mut r = linked::resolver(world);
                 for k in 0..6 {
-                    let site = cadrs_core::link_update::RefSite::Instance { element: ps::HEXAPOD, instance: ps::piston(k) };
-                    let Some(u) = cadrs_core::link_update::use_at(&doc, site) else { continue };
-                    match cadrs_core::link_update::change_for(&mut r.0, &doc, log.as_ref(), &u, cadrs_core::link_update::Target::Version(v)) {
+                    let site = cadrs_core::link_update::RefSite::Instance {
+                        element: ps::HEXAPOD,
+                        instance: ps::piston(k),
+                    };
+                    let Some(u) = cadrs_core::link_update::use_at(&doc, site) else {
+                        continue;
+                    };
+                    match cadrs_core::link_update::change_for(
+                        &mut r.0,
+                        &doc,
+                        log.as_ref(),
+                        &u,
+                        cadrs_core::link_update::Target::Version(v),
+                    ) {
                         Ok(Some(c)) => changes.push(c),
                         Ok(None) => {}
                         Err(e) => warn!("move-doc version-ref: {e}"),
                     }
                 }
             }
-            if let Err(e) = world.resource_mut::<ActiveDocument>().execute(&cadrs_core::link_update::UpdateReferences { changes, label: "Change to version".into() }) {
+            if let Err(e) = world.resource_mut::<ActiveDocument>().execute(
+                &cadrs_core::link_update::UpdateReferences {
+                    changes,
+                    label: "Change to version".into(),
+                },
+            ) {
                 warn!("move-doc version-ref: {e}");
             }
         }

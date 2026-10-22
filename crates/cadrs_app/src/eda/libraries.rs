@@ -31,7 +31,12 @@ pub struct UserLibraries {
 impl UserLibraries {
     /// The user's folder (see the module docs).
     pub fn default_dir() -> Option<PathBuf> {
-        std::env::var_os("CADRS_USER_LIBRARIES").filter(|d| !d.is_empty()).map(PathBuf::from).or_else(|| directories::BaseDirs::new().map(|d| d.data_dir().join("cadrs").join("libraries")))
+        std::env::var_os("CADRS_USER_LIBRARIES")
+            .filter(|d| !d.is_empty())
+            .map(PathBuf::from)
+            .or_else(|| {
+                directories::BaseDirs::new().map(|d| d.data_dir().join("cadrs").join("libraries"))
+            })
     }
 
     pub fn load(dir: Option<PathBuf>) -> UserLibraries {
@@ -43,7 +48,8 @@ impl UserLibraries {
     /// Reads the folder again.
     pub fn reload(&mut self) {
         let Some(dir) = &self.dir else { return };
-        let (mut libs, errors) = cadrs_eda::library::load_libraries(std::slice::from_ref(dir), Scope::Global);
+        let (mut libs, errors) =
+            cadrs_eda::library::load_libraries(std::slice::from_ref(dir), Scope::Global);
         for e in &errors {
             warn!("user libraries: {e}");
         }
@@ -62,7 +68,11 @@ impl UserLibraries {
     pub fn has_part(&self, c: &cadrs_eda::Component) -> bool {
         let fps = || self.libraries.iter().flat_map(|l| &l.footprints);
         match (&c.symbol, &c.footprint) {
-            (Some(s), _) => self.libraries.iter().flat_map(|l| &l.symbols).any(|x| x.name() == s.name()),
+            (Some(s), _) => self
+                .libraries
+                .iter()
+                .flat_map(|l| &l.symbols)
+                .any(|x| x.name() == s.name()),
             (None, Some(f)) => fps().any(|x| x.name() == f.name()),
             (None, None) => true,
         }
@@ -72,17 +82,26 @@ impl UserLibraries {
     /// footprint, and the 3D model files it has, beside them. Returns the symbol's (else the
     /// footprint's) library id.
     pub fn add_part(&mut self, c: &cadrs_eda::Component) -> Result<String, String> {
-        let dir = self.library_dir(MY_LIBRARY).ok_or("There's no folder to keep libraries in")?;
+        let dir = self
+            .library_dir(MY_LIBRARY)
+            .ok_or("There's no folder to keep libraries in")?;
         cadrs_eda::library::ensure_library(&dir, "Parts added from PCB Studios' components")?;
         let mut fp = c.footprint.clone();
         if let Some(f) = &mut fp {
             let stem = cadrs_eda::library::file_stem(f.name());
             for (i, m) in f.models.iter_mut().enumerate() {
-                let Some(bytes) = m.blob.as_ref().and_then(|h| cadrs_core::blobs::get(h)) else { continue };
+                let Some(bytes) = m.blob.as_ref().and_then(|h| cadrs_core::blobs::get(h)) else {
+                    continue;
+                };
                 let ext = cadrs_core::pcb::model::model_ext(m);
-                let file = if i == 0 { format!("{stem}.{ext}") } else { format!("{stem}_{i}.{ext}") };
+                let file = if i == 0 {
+                    format!("{stem}.{ext}")
+                } else {
+                    format!("{stem}_{i}.{ext}")
+                };
                 let path = dir.join(file);
-                std::fs::write(&path, &bytes[..]).map_err(|e| format!("{}: {e}", path.display()))?;
+                std::fs::write(&path, &bytes[..])
+                    .map_err(|e| format!("{}: {e}", path.display()))?;
                 m.source = path.to_string_lossy().into_owned();
             }
             cadrs_eda::library::write_footprint(&dir, f)?;
@@ -91,7 +110,11 @@ impl UserLibraries {
             (Some(s), _) => {
                 let mut s = s.clone();
                 if let Some(f) = &fp {
-                    cadrs_eda::lib_edit::set_symbol_field(&mut s, cadrs_eda::symbol::fields::FOOTPRINT, &format!("{MY_LIBRARY}:{}", f.name()));
+                    cadrs_eda::lib_edit::set_symbol_field(
+                        &mut s,
+                        cadrs_eda::symbol::fields::FOOTPRINT,
+                        &format!("{MY_LIBRARY}:{}", f.name()),
+                    );
                 }
                 cadrs_eda::library::write_symbol(&dir, &s)?;
                 format!("{MY_LIBRARY}:{}", s.name())
@@ -120,7 +143,10 @@ pub fn attach_model_files(libs: &mut [Library]) {
             if m.blob.is_some() || m.source.is_empty() || !Path::new(&m.source).is_absolute() {
                 continue;
             }
-            m.blob = read.entry(m.source.clone()).or_insert_with(|| std::fs::read(&m.source).ok().map(cadrs_core::blobs::insert)).clone();
+            m.blob = read
+                .entry(m.source.clone())
+                .or_insert_with(|| std::fs::read(&m.source).ok().map(cadrs_core::blobs::insert))
+                .clone();
         }
     }
 }

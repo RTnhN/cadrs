@@ -17,10 +17,34 @@ const R: f64 = WIDTH / 2.0;
 
 /// A box from `lo` to `hi` (x, y) extruded from height `z0` by `h`.
 fn block(k: &mut NativeKernel, lo: (f64, f64), hi: (f64, f64), z0: f64, h: f64) -> BodyId {
-    let c = [(lo.0, lo.1), (hi.0, lo.1), (hi.0, hi.1), (lo.0, hi.1)].map(|(x, y)| Point2::new(x, y));
-    let outer = Loop { curves: (0..4).map(|i| Curve2::Line { a: c[i], b: c[(i + 1) % 4], source: None }).collect() };
-    let plane = Plane { origin: Point3::new(0.0, 0.0, z0), ..Plane::top() };
-    k.extrude(&Profile::new(plane, vec![Region { outer, holes: vec![], source: None }]), Extent::Blind(h)).unwrap().bodies[0]
+    let c =
+        [(lo.0, lo.1), (hi.0, lo.1), (hi.0, hi.1), (lo.0, hi.1)].map(|(x, y)| Point2::new(x, y));
+    let outer = Loop {
+        curves: (0..4)
+            .map(|i| Curve2::Line {
+                a: c[i],
+                b: c[(i + 1) % 4],
+                source: None,
+            })
+            .collect(),
+    };
+    let plane = Plane {
+        origin: Point3::new(0.0, 0.0, z0),
+        ..Plane::top()
+    };
+    k.extrude(
+        &Profile::new(
+            plane,
+            vec![Region {
+                outer,
+                holes: vec![],
+                source: None,
+            }],
+        ),
+        Extent::Blind(h),
+    )
+    .unwrap()
+    .bodies[0]
 }
 
 /// A rib LENGTH × WIDTH × HEIGHT and its edges.
@@ -32,7 +56,12 @@ fn rib() -> (NativeKernel, BodyId, Vec<EdgeInfo>) {
 }
 
 fn spec() -> FilletSpec {
-    FilletSpec { size: FilletSize::Radius(R), allow_overflow: true, profile: FilletProfile::Circular, propagate: true }
+    FilletSpec {
+        size: FilletSize::Radius(R),
+        allow_overflow: true,
+        profile: FilletProfile::Circular,
+        propagate: true,
+    }
 }
 
 fn at(v: f64, w: f64) -> bool {
@@ -51,18 +80,27 @@ fn top_and_end(e: &EdgeInfo) -> bool {
 /// less the half disc (r²(2 − π/2) per length) up to the ball centre (LENGTH − r along the top,
 /// HEIGHT − r down the end), the corner the r × 2r × r block less the quarter ball.
 fn rounded_rib_volume() -> f64 {
-    LENGTH * WIDTH * HEIGHT - R * R * (2.0 - PI / 2.0) * (LENGTH - R + HEIGHT - R) - (2.0 * R * R * R - PI * R * R * R / 3.0)
+    LENGTH * WIDTH * HEIGHT
+        - R * R * (2.0 - PI / 2.0) * (LENGTH - R + HEIGHT - R)
+        - (2.0 * R * R * R - PI * R * R * R / 3.0)
 }
 
 /// The rib's top long edges: one full round across the top.
 #[test]
 fn one_full_round_builds() {
     let (mut k, id, edges) = rib();
-    let top: Vec<EdgeId> = edges.iter().filter(|e| at(e.start.z, HEIGHT) && at(e.end.z, HEIGHT) && !at(e.start.x, e.end.x)).map(|e| e.id).collect();
+    let top: Vec<EdgeId> = edges
+        .iter()
+        .filter(|e| at(e.start.z, HEIGHT) && at(e.end.z, HEIGHT) && !at(e.start.x, e.end.x))
+        .map(|e| e.id)
+        .collect();
     let r = k.fillet_with(id, &top, &spec()).unwrap();
     let v = k.mass_properties(r.bodies[0]).unwrap().volume;
     let want = LENGTH * WIDTH * HEIGHT - 2.0 * (1.0 - PI / 4.0) * R * R * LENGTH;
-    assert!((v - want).abs() < tol::POINT * want, "volume {v}, want {want}");
+    assert!(
+        (v - want).abs() < tol::POINT * want,
+        "volume {v}, want {want}"
+    );
 }
 
 /// The top's and the end's edges: two full rounds meeting at the corner, joined by the ball's
@@ -70,7 +108,11 @@ fn one_full_round_builds() {
 #[test]
 fn full_rounds_meeting_at_a_corner_build() {
     let (mut k, id, edges) = rib();
-    let picked: Vec<EdgeId> = edges.iter().filter(|e| top_and_end(e)).map(|e| e.id).collect();
+    let picked: Vec<EdgeId> = edges
+        .iter()
+        .filter(|e| top_and_end(e))
+        .map(|e| e.id)
+        .collect();
     assert_eq!(picked.len(), 5);
     let r = k.fillet_with(id, &picked, &spec()).unwrap();
     let out = k.get(r.bodies[0]).unwrap();
@@ -80,9 +122,21 @@ fn full_rounds_meeting_at_a_corner_build() {
     let want = rounded_rib_volume();
     assert!((v - want).abs() < 1e-6 * want, "volume {v}, want {want}");
     // The corner face is a sphere about the ball centre, named from the top end edge.
-    let sphere = (0..out.faces.len()).filter(|&f| matches!(out.faces[f].surf, cadrs_kernel::native::surface::Surface::Sphere { .. })).collect::<Vec<_>>();
+    let sphere = (0..out.faces.len())
+        .filter(|&f| {
+            matches!(
+                out.faces[f].surf,
+                cadrs_kernel::native::surface::Surface::Sphere { .. }
+            )
+        })
+        .collect::<Vec<_>>();
     assert_eq!(sphere.len(), 1, "one quarter sphere");
-    assert!(r.history.generated.iter().any(|(f, o)| f.0 as usize == sphere[0] && matches!(o, Origin::FromEdge { .. })));
+    assert!(
+        r.history
+            .generated
+            .iter()
+            .any(|(f, o)| f.0 as usize == sphere[0] && matches!(o, Origin::FromEdge { .. }))
+    );
 }
 
 /// The rib standing on a plate, its end round running down into the plate: the end face's
@@ -96,8 +150,14 @@ fn full_round_into_a_wall_with_its_root_filleted() {
     let rib = block(&mut k, (0.0, 0.0), (LENGTH, WIDTH), 0.0, HEIGHT);
     let id = k.boolean(BoolOp::Union, plate, &[rib]).unwrap().bodies[0];
     let edges = k.edges(id).unwrap();
-    let root = |e: &EdgeInfo| at(e.start.x, LENGTH) && at(e.end.x, LENGTH) && at(e.start.z, 0.0) && at(e.end.z, 0.0);
-    let picked: Vec<EdgeId> = edges.iter().filter(|e| top_and_end(e) || root(e)).map(|e| e.id).collect();
+    let root = |e: &EdgeInfo| {
+        at(e.start.x, LENGTH) && at(e.end.x, LENGTH) && at(e.start.z, 0.0) && at(e.end.z, 0.0)
+    };
+    let picked: Vec<EdgeId> = edges
+        .iter()
+        .filter(|e| top_and_end(e) || root(e))
+        .map(|e| e.id)
+        .collect();
     assert_eq!(picked.len(), 6);
     let v0 = k.mass_properties(id).unwrap().volume;
     let r = k.fillet_with(id, &picked, &spec()).unwrap();
@@ -123,14 +183,53 @@ fn full_round_into_a_wall_with_its_root_filleted() {
 fn comb_of_prongs_like_the_cable_organizer() {
     let (len, tip, step, high, gap) = (40.0, 3.0, 8.0, 11.0, 4.0);
     let mut k = NativeKernel::new();
-    let mut comb = block(&mut k, (0.0, 0.0), (5.0, 3.0 * WIDTH + 2.0 * gap), 0.0, step);
+    let mut comb = block(
+        &mut k,
+        (0.0, 0.0),
+        (5.0, 3.0 * WIDTH + 2.0 * gap),
+        0.0,
+        step,
+    );
     for i in 0..3 {
         // The prong's side profile in the xz plane, extruded across y.
         let y0 = i as f64 * (WIDTH + gap);
-        let c = [(0.0, 0.0), (len, 0.0), (len, high), (len - tip, high), (len - tip, step), (0.0, step)].map(|(x, z)| Point2::new(x, z));
-        let outer = Loop { curves: (0..6).map(|i| Curve2::Line { a: c[i], b: c[(i + 1) % 6], source: None }).collect() };
-        let xz = Plane { origin: Point3::new(0.0, y0 + WIDTH, 0.0), x_dir: nalgebra::Vector3::x_axis(), normal: -nalgebra::Vector3::y_axis() };
-        let prong = k.extrude(&Profile::new(xz, vec![Region { outer, holes: vec![], source: None }]), Extent::Blind(WIDTH)).unwrap().bodies[0];
+        let c = [
+            (0.0, 0.0),
+            (len, 0.0),
+            (len, high),
+            (len - tip, high),
+            (len - tip, step),
+            (0.0, step),
+        ]
+        .map(|(x, z)| Point2::new(x, z));
+        let outer = Loop {
+            curves: (0..6)
+                .map(|i| Curve2::Line {
+                    a: c[i],
+                    b: c[(i + 1) % 6],
+                    source: None,
+                })
+                .collect(),
+        };
+        let xz = Plane {
+            origin: Point3::new(0.0, y0 + WIDTH, 0.0),
+            x_dir: nalgebra::Vector3::x_axis(),
+            normal: -nalgebra::Vector3::y_axis(),
+        };
+        let prong = k
+            .extrude(
+                &Profile::new(
+                    xz,
+                    vec![Region {
+                        outer,
+                        holes: vec![],
+                        source: None,
+                    }],
+                ),
+                Extent::Blind(WIDTH),
+            )
+            .unwrap()
+            .bodies[0];
         comb = k.boolean(BoolOp::Union, comb, &[prong]).unwrap().bodies[0];
     }
     let edges = k.edges(comb).unwrap();

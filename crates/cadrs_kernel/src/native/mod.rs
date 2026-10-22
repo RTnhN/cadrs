@@ -104,5 +104,5 @@ pub use curve::Curve;
 pub use kernel::NativeKernel;
 pub use math::{Affine, Frame, P3, V3};
 pub use nurbs::{NurbsCurve, NurbsSurface};
-pub use surface::{Surface, D2};
+pub use surface::{D2, Surface};
 pub use topo::{Body, BodyBuilder, CheckLevel, Coedge, Edge, Face, Shell, Solid, Vertex, Wire};

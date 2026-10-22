@@ -38,20 +38,25 @@ use bevy::prelude::*;
 use cadrs_core::ElementId;
 use cadrs_core::assembly::commands::{AddMateFeature, SetMateFeature};
 use cadrs_core::assembly::connector::{ConnectorAnchor, EntityRef, MateConnector, surface_of};
-use cadrs_core::assembly::mate::{Dof, Mate, MateFeature, MateId, MateKind, MateLimits, MateOffset, MateType, next_name};
+use cadrs_core::assembly::mate::{
+    Dof, Mate, MateFeature, MateId, MateKind, MateLimits, MateOffset, MateType, next_name,
+};
 use cadrs_core::assembly::solver::{Drive, SolveOptions, tangent_supported};
 use cadrs_core::assembly::{Assembly, InstanceId, Pose};
 use cadrs_sketch::units::Quantity;
 use cadrs_ui::prelude::*;
 use cadrs_ui::{
-    CheckboxChange, FeatureDialogAccept, FeatureDialogCancel, FeatureDialogState, NumberField, NumberFieldCommit,
-    NumberFieldState, OptionRow, Select, SelectChange, SelectState, SelectionList, SelectionListActivate, SelectionListMove,
-    SelectionListRemove, SelectionListState,
+    CheckboxChange, FeatureDialogAccept, FeatureDialogCancel, FeatureDialogState, NumberField,
+    NumberFieldCommit, NumberFieldState, OptionRow, Select, SelectChange, SelectState,
+    SelectionList, SelectionListActivate, SelectionListMove, SelectionListRemove,
+    SelectionListState,
 };
 
 use super::connectors::{self, ConnectorGizmos, ConnectorHaloGizmos, entity_of, v3};
 use crate::parts::PartCache;
-use crate::viewport::{PickRequest, PlaneHighlight, ViewportArea, ViewportDrag, ViewportRect, ViewportView};
+use crate::viewport::{
+    PickRequest, PlaneHighlight, ViewportArea, ViewportDrag, ViewportRect, ViewportView,
+};
 use crate::{ActiveDocument, AppState};
 
 pub struct MateDialogPlugin;
@@ -64,14 +69,22 @@ impl Plugin for MateDialogPlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(
             Update,
-            (mate_picks, mate_lock, sync_preview, sync_mate_dialog, draw_mate)
+            (
+                mate_picks,
+                mate_lock,
+                sync_preview,
+                sync_mate_dialog,
+                draw_mate,
+            )
                 .chain()
                 .in_set(MateDialogSet)
                 .after(crate::viewport::apply_view_to_camera)
                 .before(crate::parts::PartsSet)
                 .run_if(in_state(AppState::Document)),
         )
-        .add_systems(OnExit(AppState::Document), |mut commands: Commands| commands.remove_resource::<MateSession>())
+        .add_systems(OnExit(AppState::Document), |mut commands: Commands| {
+            commands.remove_resource::<MateSession>()
+        })
         .add_observer(on_accept)
         .add_observer(on_cancel)
         .add_observer(on_select)
@@ -223,7 +236,11 @@ impl MateSession {
     fn adjusted(&self, doc: &Assembly) -> usize {
         let ground = cadrs_core::assembly::solver::grounded(doc);
         match self.connectors.first() {
-            Some(c) if (ground.contains(&c.instance) || c.is_origin()) && self.connectors.len() > 1 => 1,
+            Some(c)
+                if (ground.contains(&c.instance) || c.is_origin()) && self.connectors.len() > 1 =>
+            {
+                1
+            }
             _ => 0,
         }
     }
@@ -232,7 +249,12 @@ impl MateSession {
     pub fn mover(&self, doc: &Assembly) -> Option<InstanceId> {
         if self.mate_type == MateType::Width {
             let ground = cadrs_core::assembly::solver::grounded(doc);
-            return self.tabs.iter().chain(&self.connectors).map(|c| c.instance).find(|i| !ground.contains(i));
+            return self
+                .tabs
+                .iter()
+                .chain(&self.connectors)
+                .map(|c| c.instance)
+                .find(|i| !ground.contains(i));
         }
         let k = self.adjusted(doc);
         self.connectors.get(k).map(|c| c.instance)
@@ -240,11 +262,17 @@ impl MateSession {
 
     /// Drives that keep the snap inside the limits (0, clamped).
     fn drives(&self) -> Vec<Drive> {
-        let Some(m) = self.mate() else { return Vec::new() };
+        let Some(m) = self.mate() else {
+            return Vec::new();
+        };
         let mut out = Vec::new();
         for d in self.mate_type.limit_dofs() {
             if let Some((lo, hi)) = m.limit(*d) {
-                out.push(Drive { mate: self.id, dof: *d, value: 0.0f64.clamp(lo, hi) });
+                out.push(Drive {
+                    mate: self.id,
+                    dof: *d,
+                    value: 0.0f64.clamp(lo, hi),
+                });
             }
         }
         out
@@ -258,7 +286,10 @@ impl MateSession {
     /// Whether another pick is wanted.
     fn wants_pick(&self) -> bool {
         match self.mate_type {
-            MateType::Width => (self.field == 0 && self.tabs.len() < 2) || (self.field == 1 && self.connectors.len() < 2),
+            MateType::Width => {
+                (self.field == 0 && self.tabs.len() < 2)
+                    || (self.field == 1 && self.connectors.len() < 2)
+            }
             _ => self.connectors.len() < 2,
         }
     }
@@ -280,7 +311,13 @@ struct MateLayout {
 
 impl MateLayout {
     fn of(s: &MateSession) -> Self {
-        Self { name: s.name.clone(), mate_type: s.mate_type, offset_on: s.offset_on, limits_on: s.limits_on, propagate: s.propagate }
+        Self {
+            name: s.name.clone(),
+            mate_type: s.mate_type,
+            offset_on: s.offset_on,
+            limits_on: s.limits_on,
+            propagate: s.propagate,
+        }
     }
 }
 
@@ -329,9 +366,15 @@ pub fn open_mate_dialog(world: &mut World, t: MateType) {
     world.remove_resource::<super::relation_dialog::RelationSession>();
     world.remove_resource::<super::group_dialog::GroupSession>();
     super::animate::stop(world);
-    let Some(doc) = world.get_resource::<ActiveDocument>() else { return };
-    let Some(element) = super::active_assembly(doc) else { return };
-    let Some(model) = doc.active_element().and_then(|e| e.assembly_model()) else { return };
+    let Some(doc) = world.get_resource::<ActiveDocument>() else {
+        return;
+    };
+    let Some(element) = super::active_assembly(doc) else {
+        return;
+    };
+    let Some(model) = doc.active_element().and_then(|e| e.assembly_model()) else {
+        return;
+    };
     let name = next_name(&model.mates, t.label());
     world.insert_resource(MateSession::new(element, MateId::new(), name, t));
     world.resource_mut::<crate::viewport::Selection>().0.clear();
@@ -339,9 +382,18 @@ pub fn open_mate_dialog(world: &mut World, t: MateType) {
 
 /// Opens the dialog on an existing mate (Edit…, double-click).
 pub fn edit_mate(world: &mut World, id: MateId) {
-    let Some(doc) = world.get_resource::<ActiveDocument>() else { return };
-    let Some(element) = super::active_assembly(doc) else { return };
-    let Some(f) = doc.active_element().and_then(|e| e.assembly_model()?.mate(id).cloned()) else { return };
+    let Some(doc) = world.get_resource::<ActiveDocument>() else {
+        return;
+    };
+    let Some(element) = super::active_assembly(doc) else {
+        return;
+    };
+    let Some(f) = doc
+        .active_element()
+        .and_then(|e| e.assembly_model()?.mate(id).cloned())
+    else {
+        return;
+    };
     let MateKind::Mate(m) = &f.kind else {
         if matches!(f.kind, MateKind::Replicate(_)) {
             super::replicate_dialog::edit(world, id);
@@ -388,7 +440,11 @@ fn set_type(s: &mut MateSession, t: MateType) {
     }
     // A default name follows the type ("Fastened 1" → "Slider 1").
     let old = s.mate_type.label();
-    if !s.editing || s.name.strip_prefix(old).is_some_and(|r| r.trim().parse::<u32>().is_ok()) {
+    if !s.editing
+        || s.name
+            .strip_prefix(old)
+            .is_some_and(|r| r.trim().parse::<u32>().is_ok())
+    {
         s.name = s.name.replacen(old, t.label(), 1);
     }
     let was = s.mate_type;
@@ -413,7 +469,12 @@ fn set_type(s: &mut MateSession, t: MateType) {
 }
 
 /// The document's assembly and the source part solids of its instances.
-pub fn model_and_solids(world: &mut World) -> Option<(Assembly, HashMap<InstanceId, std::sync::Arc<cadrs_core::Solid>>)> {
+pub fn model_and_solids(
+    world: &mut World,
+) -> Option<(
+    Assembly,
+    HashMap<InstanceId, std::sync::Arc<cadrs_core::Solid>>,
+)> {
     world.resource_scope(|world, mut parts: Mut<super::AssemblyParts>| {
         let doc = world.get_resource::<ActiveDocument>()?;
         let element_model = doc.active_element()?.assembly_model()?;
@@ -421,7 +482,9 @@ pub fn model_and_solids(world: &mut World) -> Option<(Assembly, HashMap<Instance
         // them; the solutions are placements of these occurrences.
         let model = cadrs_core::assembly::structure::solver_model(&doc.doc, element_model);
         // The source studios' rebuilds (cached in AssemblyParts).
-        let solids = cadrs_core::assembly::occurrence_solids(&doc.doc, element_model, |e| parts.build(&doc.doc, e));
+        let solids = cadrs_core::assembly::occurrence_solids(&doc.doc, element_model, |e| {
+            parts.build(&doc.doc, e)
+        });
         Some((model, solids))
     })
 }
@@ -433,7 +496,11 @@ fn local_solve(world: &mut World, s: MateSession) {
 }
 
 /// Solves (every mate unless `snap_only`) and shows the result.
-fn run_solve(world: &mut World, mut s: MateSession, snap_only: bool) -> Option<Vec<(InstanceId, Pose)>> {
+fn run_solve(
+    world: &mut World,
+    mut s: MateSession,
+    snap_only: bool,
+) -> Option<Vec<(InstanceId, Pose)>> {
     let (doc_model, solids) = model_and_solids(world)?;
     let mut model = s.model(&doc_model);
     if s.mate().is_none() {
@@ -450,13 +517,21 @@ fn run_solve(world: &mut World, mut s: MateSession, snap_only: bool) -> Option<V
         model.mates.retain(|f| f.id == id || f.mate().is_none());
         let ground = cadrs_core::assembly::solver::grounded(&doc_model);
         let movers: Vec<InstanceId> = if s.mate_type == MateType::Width {
-            let mut v: Vec<InstanceId> = s.tabs.iter().map(|c| c.instance).filter(|i| !ground.contains(i)).collect();
+            let mut v: Vec<InstanceId> = s
+                .tabs
+                .iter()
+                .map(|c| c.instance)
+                .filter(|i| !ground.contains(i))
+                .collect();
             v.dedup();
             v
         } else {
             mover.into_iter().collect()
         };
-        SolveOptions { movers, ..Default::default() }
+        SolveOptions {
+            movers,
+            ..Default::default()
+        }
     } else {
         SolveOptions {
             movers: mover.into_iter().collect(),
@@ -472,9 +547,13 @@ fn run_solve(world: &mut World, mut s: MateSession, snap_only: bool) -> Option<V
     }
     // A Tangent's first placement: the moving entity is also drawn toward the picked face, so
     // the contact lands on the face that was picked, not somewhere on its unbounded surface.
-    if snap_only && s.mate_type == MateType::Tangent
+    if snap_only
+        && s.mate_type == MateType::Tangent
         && let (Some(mover), Some(m)) = (mover, s.mate())
-        && let (Some(own), Some(other)) = (m.connectors.iter().find(|c| c.instance == mover), m.connectors.iter().find(|c| c.instance != mover))
+        && let (Some(own), Some(other)) = (
+            m.connectors.iter().find(|c| c.instance == mover),
+            m.connectors.iter().find(|c| c.instance != mover),
+        )
     {
         let mut solved = model.clone();
         for (id, p) in &sol.poses {
@@ -485,7 +564,12 @@ fn run_solve(world: &mut World, mut s: MateSession, snap_only: bool) -> Option<V
         let frame = |c: &MateConnector| c.local_frame(solids.get(&c.instance).map(|x| &**x));
         if let Some(op) = solved.instance(other.instance).map(|i| i.pose) {
             let target = frame(other).moved(&op).origin;
-            let pull = cadrs_core::assembly::solver::Pull { view: None, instance: mover, point: frame(own).origin, target };
+            let pull = cadrs_core::assembly::solver::Pull {
+                view: None,
+                instance: mover,
+                point: frame(own).origin,
+                target,
+            };
             sol = cadrs_core::assembly::drag(&solved, &solids, &[pull]);
         }
     }
@@ -496,16 +580,34 @@ fn run_solve(world: &mut World, mut s: MateSession, snap_only: bool) -> Option<V
 }
 
 pub fn accept(world: &mut World) {
-    let Some(s) = world.get_resource::<MateSession>().cloned() else { return };
+    let Some(s) = world.get_resource::<MateSession>().cloned() else {
+        return;
+    };
     let Some(feature) = s.feature() else { return };
     let element = s.element;
     let editing = s.editing;
     super::animate::stop(world);
-    let Some(poses) = run_solve(world, s, false) else { return };
+    let Some(poses) = run_solve(world, s, false) else {
+        return;
+    };
     let ok = if editing {
-        super::run(world, &SetMateFeature { element, feature, poses })
+        super::run(
+            world,
+            &SetMateFeature {
+                element,
+                feature,
+                poses,
+            },
+        )
     } else {
-        super::run(world, &AddMateFeature { element, feature, poses })
+        super::run(
+            world,
+            &AddMateFeature {
+                element,
+                feature,
+                poses,
+            },
+        )
     };
     if ok {
         cancel(world);
@@ -537,7 +639,9 @@ fn on_cancel(ev: On<FeatureDialogCancel>, q: Query<(), With<MateDialog>>, mut co
 /// Changes the session, then places the moving instance again.
 fn change(commands: &mut Commands, f: impl FnOnce(&mut MateSession) + Send + 'static) {
     commands.queue(move |world: &mut World| {
-        let Some(mut s) = world.get_resource::<MateSession>().cloned() else { return };
+        let Some(mut s) = world.get_resource::<MateSession>().cloned() else {
+            return;
+        };
         f(&mut s);
         local_solve(world, s);
     });
@@ -576,10 +680,19 @@ fn on_number(
     vars: Res<crate::variables_ui::ActiveVariables>,
     mut commands: Commands,
 ) {
-    let Ok(role) = q.get(ev.entity).copied() else { return };
+    let Ok(role) = q.get(ev.entity).copied() else {
+        return;
+    };
     let text = ev.text.trim().to_string();
-    let angle = matches!(role, Role::RotationAngle | Role::Min(Dof::Angle) | Role::Max(Dof::Angle));
-    let quantity = if angle { Quantity::Angle } else { Quantity::Length };
+    let angle = matches!(
+        role,
+        Role::RotationAngle | Role::Min(Dof::Angle) | Role::Max(Dof::Angle)
+    );
+    let quantity = if angle {
+        Quantity::Angle
+    } else {
+        Quantity::Length
+    };
     // P3F.4: an offset may name the assembly's variables (`#gap / 2`).
     use cadrs_core::assembly::mate::OffsetSlot;
     let slot = match role {
@@ -656,32 +769,55 @@ fn on_button(a: On<bevy::ui_widgets::Activate>, q: Query<&Name>, mut commands: C
     match name.as_str() {
         "relations" => {
             let e = a.entity;
-            commands.queue(move |world: &mut World| super::relation_dialog::open_relations_menu(world, e));
+            commands.queue(move |world: &mut World| {
+                super::relation_dialog::open_relations_menu(world, e)
+            });
         }
         "group" => commands.queue(super::group_dialog::open_group_dialog),
         // P3B.8: Replicate, and the Named positions and Exploded views panels.
         "replicate" => commands.queue(super::replicate_dialog::open),
         "named-positions" | "explode" => {
-            let panel = if name.as_str() == "explode" { crate::appearance::SidePanel::ExplodedViews } else { crate::appearance::SidePanel::NamedPositions };
+            let panel = if name.as_str() == "explode" {
+                crate::appearance::SidePanel::ExplodedViews
+            } else {
+                crate::appearance::SidePanel::NamedPositions
+            };
             commands.queue(move |world: &mut World| {
                 let mut open = world.resource_mut::<crate::appearance::SidePanel>();
-                *open = if *open == panel { crate::appearance::SidePanel::None } else { panel };
+                *open = if *open == panel {
+                    crate::appearance::SidePanel::None
+                } else {
+                    panel
+                };
             });
         }
         "mate-flip" | "mate-reorient" => {
             let flip = name.as_str() == "mate-flip";
             commands.queue(move |world: &mut World| {
-                let Some(mut s) = world.get_resource::<MateSession>().cloned() else { return };
+                let Some(mut s) = world.get_resource::<MateSession>().cloned() else {
+                    return;
+                };
                 if s.mate_type == MateType::Tangent {
                     // A11.3: the other side.
                     if flip {
                         s.flip = !s.flip;
                     }
                 } else {
-                    let Some(doc) = world.get_resource::<ActiveDocument>().and_then(|d| d.active_element()?.assembly_model().cloned()) else { return };
+                    let Some(doc) = world
+                        .get_resource::<ActiveDocument>()
+                        .and_then(|d| d.active_element()?.assembly_model().cloned())
+                    else {
+                        return;
+                    };
                     let k = s.adjusted(&doc);
-                    let list = if s.mate_type == MateType::Width { &mut s.tabs } else { &mut s.connectors };
-                    if let Some(c) = list.get_mut(if s.mate_type == MateType::Width { 0 } else { k }) {
+                    let list = if s.mate_type == MateType::Width {
+                        &mut s.tabs
+                    } else {
+                        &mut s.connectors
+                    };
+                    if let Some(c) =
+                        list.get_mut(if s.mate_type == MateType::Width { 0 } else { k })
+                    {
                         if flip {
                             c.flip = !c.flip;
                         } else {
@@ -705,14 +841,20 @@ fn on_button(a: On<bevy::ui_widgets::Activate>, q: Query<&Name>, mut commands: C
 }
 
 fn on_list_remove(ev: On<SelectionListRemove>, q: Query<&Role>, mut commands: Commands) {
-    let Ok(role) = q.get(ev.entity).copied() else { return };
+    let Ok(role) = q.get(ev.entity).copied() else {
+        return;
+    };
     if !matches!(role, Role::Connectors | Role::Tabs | Role::Widths) {
         return;
     }
     let i = ev.index;
     commands.queue(move |world: &mut World| {
         if let Some(mut s) = world.get_resource_mut::<MateSession>() {
-            let list = if role == Role::Tabs { &mut s.tabs } else { &mut s.connectors };
+            let list = if role == Role::Tabs {
+                &mut s.tabs
+            } else {
+                &mut s.connectors
+            };
             if i < list.len() {
                 list.remove(i);
             }
@@ -726,13 +868,19 @@ fn on_list_remove(ev: On<SelectionListRemove>, q: Query<&Role>, mut commands: Co
 }
 
 fn on_list_move(ev: On<SelectionListMove>, q: Query<&Role>, mut commands: Commands) {
-    let Ok(role) = q.get(ev.entity).copied() else { return };
+    let Ok(role) = q.get(ev.entity).copied() else {
+        return;
+    };
     if !matches!(role, Role::Connectors | Role::Tabs | Role::Widths) {
         return;
     }
     let (from, to) = (ev.from, ev.to);
     change(&mut commands, move |s| {
-        let list = if role == Role::Tabs { &mut s.tabs } else { &mut s.connectors };
+        let list = if role == Role::Tabs {
+            &mut s.tabs
+        } else {
+            &mut s.connectors
+        };
         if from < list.len() && to < list.len() {
             let c = list.remove(from);
             list.insert(to, c);
@@ -741,8 +889,14 @@ fn on_list_move(ev: On<SelectionListMove>, q: Query<&Role>, mut commands: Comman
 }
 
 /// Clicking a Width field makes it take the picks.
-fn on_list_activate(ev: On<SelectionListActivate>, q: Query<&Role>, session: Option<ResMut<MateSession>>) {
-    let (Ok(role), Some(mut s)) = (q.get(ev.entity), session) else { return };
+fn on_list_activate(
+    ev: On<SelectionListActivate>,
+    q: Query<&Role>,
+    session: Option<ResMut<MateSession>>,
+) {
+    let (Ok(role), Some(mut s)) = (q.get(ev.entity), session) else {
+        return;
+    };
     let field = match role {
         Role::Tabs => 0,
         Role::Widths => 1,
@@ -759,12 +913,25 @@ fn on_list_activate(ev: On<SelectionListActivate>, q: Query<&Role>, session: Opt
 /// The Tangent side the two picked entities are nearer to now: flipped (the other side of a
 /// plane, inside a hole) when that is nearer to tangent.
 fn tangent_side(world: &World, s: &MateSession) -> bool {
-    let Some(model) = world.get_resource::<ActiveDocument>().and_then(|d| d.active_element()?.assembly_model()) else { return false };
+    let Some(model) = world
+        .get_resource::<ActiveDocument>()
+        .and_then(|d| d.active_element()?.assembly_model())
+    else {
+        return false;
+    };
     let world_frame = |c: &MateConnector| {
-        let pose = s.preview.get(&c.instance).copied().or_else(|| model.instance(c.instance).map(|i| i.pose))?;
+        let pose = s
+            .preview
+            .get(&c.instance)
+            .copied()
+            .or_else(|| model.instance(c.instance).map(|i| i.pose))?;
         Some((c.surface_kind()?, c.frame.moved(&pose)))
     };
-    let (Some((ka, fa)), Some((kb, fb))) = (world_frame(&s.connectors[0]), world_frame(&s.connectors[1])) else { return false };
+    let (Some((ka, fa)), Some((kb, fb))) =
+        (world_frame(&s.connectors[0]), world_frame(&s.connectors[1]))
+    else {
+        return false;
+    };
     let err = |flip| cadrs_core::assembly::solver::tangent_error(ka, &fa, kb, &fb, flip);
     err(true) < err(false)
 }
@@ -848,7 +1015,9 @@ fn mate_picks(
         // the implicit point of the entity under the pointer.
         // (Not on the first connector's instance: two connectors can sit on one spot, as a
         // hinge's two do.)
-        let first = (s.mate_type != MateType::Width).then(|| s.connectors.first().map(|c| c.instance)).flatten();
+        let first = (s.mate_type != MateType::Width)
+            .then(|| s.connectors.first().map(|c| c.instance))
+            .flatten();
         let explicit = (shown.0 && s.mate_type.uses_connectors() && s.locked.is_none())
             .then(|| {
                 let mut list = super::connector_tool::explicit_connectors(&doc, &mut parts, &cache);
@@ -857,27 +1026,52 @@ fn mate_picks(
             })
             .flatten()
             .map(|(c, _)| c);
-        let origin = (s.mate_type.uses_connectors() && p.0 == Some(crate::viewport::Pick::Origin)).then(MateConnector::origin);
+        let origin = (s.mate_type.uses_connectors() && p.0 == Some(crate::viewport::Pick::Origin))
+            .then(MateConnector::origin);
         let conn = match explicit.or(origin) {
             Some(c) => {
-                if s.mate_type != MateType::Width && s.connectors.first().is_some_and(|x| x.instance == c.instance) {
+                if s.mate_type != MateType::Width
+                    && s.connectors
+                        .first()
+                        .is_some_and(|x| x.instance == c.instance)
+                {
                     continue;
                 }
                 c
             }
             None => {
                 let hovered = p.0.as_ref().and_then(entity_of);
-                let entity = if s.mate_type == MateType::Tangent { s.locked.or(hovered) } else { working_entity(&s, hovered, &doc, &mut parts, &view.view, at) };
-                let Some((instance, entity)) = entity else { continue };
-                if s.mate_type != MateType::Width && s.connectors.first().is_some_and(|c| c.instance == instance) {
+                let entity = if s.mate_type == MateType::Tangent {
+                    s.locked.or(hovered)
+                } else {
+                    working_entity(&s, hovered, &doc, &mut parts, &view.view, at)
+                };
+                let Some((instance, entity)) = entity else {
+                    continue;
+                };
+                if s.mate_type != MateType::Width
+                    && s.connectors.first().is_some_and(|c| c.instance == instance)
+                {
                     continue;
                 }
-                let Some(conn) = pick_connector(&s, &doc, &mut parts, instance, entity, &view.view, rect.offset(vdrag.pointer())) else { continue };
+                let Some(conn) = pick_connector(
+                    &s,
+                    &doc,
+                    &mut parts,
+                    instance,
+                    entity,
+                    &view.view,
+                    rect.offset(vdrag.pointer()),
+                ) else {
+                    continue;
+                };
                 conn
             }
         };
         commands.queue(move |world: &mut World| {
-            let Some(mut s) = world.get_resource::<MateSession>().cloned() else { return };
+            let Some(mut s) = world.get_resource::<MateSession>().cloned() else {
+                return;
+            };
             if !s.wants_pick() {
                 return;
             }
@@ -951,7 +1145,11 @@ fn mate_lock(
 }
 
 /// The session's placements are shown in the view (unless an animation is playing).
-fn sync_preview(session: Option<Res<MateSession>>, playing: Option<Res<super::animate::Playback>>, mut parts: ResMut<super::AssemblyParts>) {
+fn sync_preview(
+    session: Option<Res<MateSession>>,
+    playing: Option<Res<super::animate::Playback>>,
+    mut parts: ResMut<super::AssemblyParts>,
+) {
     let Some(s) = session else { return };
     if playing.is_some() {
         return;
@@ -977,11 +1175,15 @@ fn draw_mate(
     mut line: Gizmos<ConnectorGizmos>,
     mut edges: Gizmos<crate::parts::EdgeHighlightGizmos>,
 ) {
-    let (Some(s), Some(doc)) = (session, doc) else { return };
+    let (Some(s), Some(doc)) = (session, doc) else {
+        return;
+    };
     let v = view.view;
     // The picked connectors (and entities).
     for c in s.all() {
-        let Some(part) = cache.part(super::occurrence_part(c.instance)) else { continue };
+        let Some(part) = cache.part(super::occurrence_part(c.instance)) else {
+            continue;
+        };
         let owner = match c.anchor {
             ConnectorAnchor::Implicit { owner, .. } => Some(owner),
             ConnectorAnchor::Surface { entity, .. } => Some(entity),
@@ -1008,7 +1210,10 @@ fn draw_mate(
             continue;
         }
         let pose = s.preview.get(&c.instance).copied().or_else(|| {
-            doc.active_element()?.assembly_model()?.instance(c.instance).map(|i| i.pose)
+            doc.active_element()?
+                .assembly_model()?
+                .instance(c.instance)
+                .map(|i| i.pose)
         });
         if let Some(pose) = pose {
             let f = c.adjust(c.base_frame(None)).moved(&pose);
@@ -1017,22 +1222,45 @@ fn draw_mate(
     }
     // The Origin (A16.3) as a picked connector.
     for c in s.all().filter(|c| c.is_origin()) {
-        connectors::draw_glyph(&mut line, &mut halo, &v, &c.local_frame(None), crate::parts::SELECTED);
+        connectors::draw_glyph(
+            &mut line,
+            &mut halo,
+            &v,
+            &c.local_frame(None),
+            crate::parts::SELECTED,
+        );
     }
     if !s.wants_pick() || s.mate_type == MateType::Tangent {
         return;
     }
     // The entity under the pointer (or locked, or just left).
     let at = rect.offset(vdrag.pointer());
-    let Some((instance, entity)) = working_entity(&s, highlight.viewport.as_ref().and_then(entity_of), &doc, &mut parts, &v, at) else { return };
-    if s.mate_type != MateType::Width && s.connectors.first().is_some_and(|c| c.instance == instance) {
+    let Some((instance, entity)) = working_entity(
+        &s,
+        highlight.viewport.as_ref().and_then(entity_of),
+        &doc,
+        &mut parts,
+        &v,
+        at,
+    ) else {
+        return;
+    };
+    if s.mate_type != MateType::Width
+        && s.connectors.first().is_some_and(|c| c.instance == instance)
+    {
         return;
     }
-    let Some(pts) = connectors::entity_points(&doc, &mut parts, instance, entity) else { return };
+    let Some(pts) = connectors::entity_points(&doc, &mut parts, instance, entity) else {
+        return;
+    };
     let dots: Vec<Vec3> = pts.points.iter().map(|p| v3(pts.world(p).origin)).collect();
     connectors::draw_points(&mut halo, &mut line, &v, &dots);
     if let Some(best) = pts.nearest(&v, rect.offset(vdrag.pointer())) {
-        let ring = if s.locked.is_some() { Color::srgb_u8(0x22, 0x55, 0xe0) } else { crate::parts::HOVER };
+        let ring = if s.locked.is_some() {
+            Color::srgb_u8(0x22, 0x55, 0xe0)
+        } else {
+            crate::parts::HOVER
+        };
         connectors::draw_glyph(&mut line, &mut halo, &v, &pts.world(&best), ring);
     }
 }
@@ -1058,12 +1286,21 @@ fn texts(s: &MateSession, units: &cadrs_sketch::units::Units) -> Texts {
         .into_iter()
         .map(|d| {
             let (lo, hi) = s.limits(d);
-            if d.is_angle() { (d, deg(lo), deg(hi)) } else { (d, len(lo), len(hi)) }
+            if d.is_angle() {
+                (d, deg(lo), deg(hi))
+            } else {
+                (d, len(lo), len(hi))
+            }
         })
         .collect();
     // P3F.4: an offset typed as an expression shows it.
     use cadrs_core::assembly::mate::OffsetSlot;
-    let or_expr = |slot: OffsetSlot, v: String| s.exprs.iter().find(|(k, _)| *k == slot).map_or(v, |(_, e)| e.clone());
+    let or_expr = |slot: OffsetSlot, v: String| {
+        s.exprs
+            .iter()
+            .find(|(k, _)| *k == slot)
+            .map_or(v, |(_, e)| e.clone())
+    };
     Texts {
         offset: [
             or_expr(OffsetSlot::X, len(s.offset.translation[0])),
@@ -1075,8 +1312,18 @@ fn texts(s: &MateSession, units: &cadrs_sketch::units::Units) -> Texts {
     }
 }
 
-fn field(b: &mut ChildSpawner, t: &Theme, role: Role, name: &str, label: &str, icon: Option<(&'static str, Color)>, text: &str) {
-    let mut f = NumberField::new(name.to_string(), label.to_string()).text(text.to_string()).label_width(if label.len() > 2 { 84.0 } else { 28.0 });
+fn field(
+    b: &mut ChildSpawner,
+    t: &Theme,
+    role: Role,
+    name: &str,
+    label: &str,
+    icon: Option<(&'static str, Color)>,
+    text: &str,
+) {
+    let mut f = NumberField::new(name.to_string(), label.to_string())
+        .text(text.to_string())
+        .label_width(if label.len() > 2 { 84.0 } else { 28.0 });
     if let Some((i, c)) = icon {
         f = f.label_icon(i, c);
     }
@@ -1088,7 +1335,15 @@ const GREEN: Color = Color::srgb(0.16, 0.62, 0.25);
 const BLUE: Color = Color::srgb(0.16, 0.36, 0.86);
 
 /// The limit fields of a DOF: (name part, label, min icon, max icon, colour).
-fn limit_look(d: Dof) -> (&'static str, &'static str, &'static str, &'static str, Color) {
+fn limit_look(
+    d: Dof,
+) -> (
+    &'static str,
+    &'static str,
+    &'static str,
+    &'static str,
+    Color,
+) {
     match d {
         Dof::X => ("x", "X", "chevron-left", "chevron-right", RED),
         Dof::Y => ("y", "Y", "chevron-down", "chevron-up", GREEN),
@@ -1103,7 +1358,16 @@ struct Lists {
 }
 
 #[allow(clippy::too_many_arguments)]
-fn connector_list(t: &Theme, role: Role, name: &'static str, placeholder: &str, items: Vec<String>, active: bool, error: bool, reorder: bool) -> impl Bundle {
+fn connector_list(
+    t: &Theme,
+    role: Role,
+    name: &'static str,
+    placeholder: &str,
+    items: Vec<String>,
+    active: bool,
+    error: bool,
+    reorder: bool,
+) -> impl Bundle {
     let mut l = SelectionList::new(name)
         .placeholder(placeholder)
         .item_icon("mate-connector", "Mate connector")
@@ -1123,7 +1387,13 @@ fn mate_dialog(theme: &Theme, s: &MateSession, lists: Lists, tx: Texts) -> impl 
     let tb = theme.clone();
     let tf = theme.clone();
     let layout = MateLayout::of(s);
-    let (mate_type, offset_on, limits_on, axis, propagate) = (s.mate_type, s.offset_on, s.limits_on, s.offset.axis, s.propagate);
+    let (mate_type, offset_on, limits_on, axis, propagate) = (
+        s.mate_type,
+        s.offset_on,
+        s.limits_on,
+        s.offset.axis,
+        s.propagate,
+    );
     let simulation = s.simulation;
     let (active_field, error) = (s.field, s.error);
     let valid = s.mate().is_some();
@@ -1142,46 +1412,123 @@ fn mate_dialog(theme: &Theme, s: &MateSession, lists: Lists, tx: Texts) -> impl 
                 for mt in MateType::ALL {
                     select = select.option(mt.label(), true);
                 }
-                let i = MateType::ALL.iter().position(|x| *x == mate_type).unwrap_or(0);
-                b.spawn(Node { height: Val::Px(28.0), align_items: AlignItems::Center, ..default() })
-                    .with_child((Role::Type, select.selected(i).build(t)));
+                let i = MateType::ALL
+                    .iter()
+                    .position(|x| *x == mate_type)
+                    .unwrap_or(0);
+                b.spawn(Node {
+                    height: Val::Px(28.0),
+                    align_items: AlignItems::Center,
+                    ..default()
+                })
+                .with_child((Role::Type, select.selected(i).build(t)));
                 let margin = |mut n: Mut<Node>| {
                     n.flex_grow = 0.0;
                     n.margin = UiRect::new(Val::ZERO, Val::Px(2.0), Val::Px(3.0), Val::Px(4.0));
                 };
                 match mate_type {
                     MateType::Width => {
-                        b.spawn(connector_list(t, Role::Tabs, "mate-tabs", "Tab mate connectors", lists.tabs, active_field == 0, error == Some(0), false))
-                            .entry::<Node>()
-                            .and_modify(margin);
-                        b.spawn(connector_list(t, Role::Widths, "mate-widths", "Width mate connectors", lists.connectors, active_field == 1, error == Some(1), false))
-                            .entry::<Node>()
-                            .and_modify(margin);
+                        b.spawn(connector_list(
+                            t,
+                            Role::Tabs,
+                            "mate-tabs",
+                            "Tab mate connectors",
+                            lists.tabs,
+                            active_field == 0,
+                            error == Some(0),
+                            false,
+                        ))
+                        .entry::<Node>()
+                        .and_modify(margin);
+                        b.spawn(connector_list(
+                            t,
+                            Role::Widths,
+                            "mate-widths",
+                            "Width mate connectors",
+                            lists.connectors,
+                            active_field == 1,
+                            error == Some(1),
+                            false,
+                        ))
+                        .entry::<Node>()
+                        .and_modify(margin);
                     }
                     MateType::Tangent => {
                         let active = lists.connectors.len() < 2;
                         b.spawn((
                             Role::Connectors,
-                            SelectionList::new("mate-entities").placeholder("Entities").tint_filled().items(lists.connectors).active(active).build(t),
+                            SelectionList::new("mate-entities")
+                                .placeholder("Entities")
+                                .tint_filled()
+                                .items(lists.connectors)
+                                .active(active)
+                                .build(t),
                         ))
                         .entry::<Node>()
                         .and_modify(margin);
-                        b.spawn(OptionRow::new("mate-propagation", "Tangent propagation").checked(propagate).build(t));
+                        b.spawn(
+                            OptionRow::new("mate-propagation", "Tangent propagation")
+                                .checked(propagate)
+                                .build(t),
+                        );
                     }
                     _ => {
                         let active = lists.connectors.len() < 2;
-                        b.spawn(connector_list(t, Role::Connectors, "mate-connectors", "Mate connectors", lists.connectors, active, false, true))
-                            .entry::<Node>()
-                            .and_modify(margin);
+                        b.spawn(connector_list(
+                            t,
+                            Role::Connectors,
+                            "mate-connectors",
+                            "Mate connectors",
+                            lists.connectors,
+                            active,
+                            false,
+                            true,
+                        ))
+                        .entry::<Node>()
+                        .and_modify(margin);
                     }
                 }
                 if mate_type.has_offset() {
-                    b.spawn(OptionRow::new("mate-offset", "Offset").checked(offset_on).build(t));
+                    b.spawn(
+                        OptionRow::new("mate-offset", "Offset")
+                            .checked(offset_on)
+                            .build(t),
+                    );
                     if offset_on {
-                        field(b, t, Role::OffsetX, "mate-offset-x", "X", Some(("arrow-down-right", RED)), &tx.offset[0]);
-                        field(b, t, Role::OffsetY, "mate-offset-y", "Y", Some(("arrow-up-right", GREEN)), &tx.offset[1]);
-                        field(b, t, Role::OffsetZ, "mate-offset-z", "Z", Some(("arrow-up", BLUE)), &tx.offset[2]);
-                        b.spawn(Node { height: Val::Px(28.0), align_items: AlignItems::Center, margin: UiRect::left(Val::Px(18.0)), ..default() }).with_child((
+                        field(
+                            b,
+                            t,
+                            Role::OffsetX,
+                            "mate-offset-x",
+                            "X",
+                            Some(("arrow-down-right", RED)),
+                            &tx.offset[0],
+                        );
+                        field(
+                            b,
+                            t,
+                            Role::OffsetY,
+                            "mate-offset-y",
+                            "Y",
+                            Some(("arrow-up-right", GREEN)),
+                            &tx.offset[1],
+                        );
+                        field(
+                            b,
+                            t,
+                            Role::OffsetZ,
+                            "mate-offset-z",
+                            "Z",
+                            Some(("arrow-up", BLUE)),
+                            &tx.offset[2],
+                        );
+                        b.spawn(Node {
+                            height: Val::Px(28.0),
+                            align_items: AlignItems::Center,
+                            margin: UiRect::left(Val::Px(18.0)),
+                            ..default()
+                        })
+                        .with_child((
                             Role::RotateAbout,
                             Select::new("mate-rotate-about")
                                 .option("Rotate about X", true)
@@ -1190,27 +1537,75 @@ fn mate_dialog(theme: &Theme, s: &MateSession, lists: Lists, tx: Texts) -> impl 
                                 .selected(axis.min(2) as usize)
                                 .build(t),
                         ));
-                        field(b, t, Role::RotationAngle, "mate-rotation-angle", "Rotation angle", None, &tx.offset[3]);
+                        field(
+                            b,
+                            t,
+                            Role::RotationAngle,
+                            "mate-rotation-angle",
+                            "Rotation angle",
+                            None,
+                            &tx.offset[3],
+                        );
                     }
                 }
                 if mate_type.has_limits() {
-                    b.spawn(OptionRow::new("mate-limits", "Limits").checked(limits_on).build(t));
+                    b.spawn(
+                        OptionRow::new("mate-limits", "Limits")
+                            .checked(limits_on)
+                            .build(t),
+                    );
                     if limits_on {
                         for d in mate_type.limit_dofs() {
                             let (key, label, lo_icon, hi_icon, color) = limit_look(*d);
-                            let (_, lo, hi) = tx.limits.iter().find(|(x, ..)| x == d).cloned().unwrap_or((*d, String::new(), String::new()));
-                            field(b, t, Role::Min(*d), &format!("mate-limit-{key}-min"), label, Some((lo_icon, color)), &lo);
-                            field(b, t, Role::Max(*d), &format!("mate-limit-{key}-max"), label, Some((hi_icon, color)), &hi);
+                            let (_, lo, hi) = tx
+                                .limits
+                                .iter()
+                                .find(|(x, ..)| x == d)
+                                .cloned()
+                                .unwrap_or((*d, String::new(), String::new()));
+                            field(
+                                b,
+                                t,
+                                Role::Min(*d),
+                                &format!("mate-limit-{key}-min"),
+                                label,
+                                Some((lo_icon, color)),
+                                &lo,
+                            );
+                            field(
+                                b,
+                                t,
+                                Role::Max(*d),
+                                &format!("mate-limit-{key}-max"),
+                                label,
+                                Some((hi_icon, color)),
+                                &hi,
+                            );
                         }
                     }
                 }
                 // P3F.5: bonds the two parts in a simulation (the Simulation panel).
-                b.spawn(OptionRow::new("mate-simulation", "Simulation connection").checked(simulation).build(t));
+                b.spawn(
+                    OptionRow::new("mate-simulation", "Simulation connection")
+                        .checked(simulation)
+                        .build(t),
+                );
             })
             .footer(move |f| {
                 let t = &tf;
-                f.spawn(Node { flex_grow: 1.0, align_items: AlignItems::Center, column_gap: Val::Px(3.0), ..default() }).with_children(|r| {
-                    r.spawn(IconButton::new("mate-flip", "flip-direction-up").icon_size(16.0).tooltip("Flip primary axis").build(t));
+                f.spawn(Node {
+                    flex_grow: 1.0,
+                    align_items: AlignItems::Center,
+                    column_gap: Val::Px(3.0),
+                    ..default()
+                })
+                .with_children(|r| {
+                    r.spawn(
+                        IconButton::new("mate-flip", "flip-direction-up")
+                            .icon_size(16.0)
+                            .tooltip("Flip primary axis")
+                            .build(t),
+                    );
                     r.spawn(
                         IconButton::new("mate-reorient", "revolve")
                             .icon_size(16.0)
@@ -1230,9 +1625,23 @@ fn mate_dialog(theme: &Theme, s: &MateSession, lists: Lists, tx: Texts) -> impl 
                         n.width = Val::Px(26.0);
                         n.height = Val::Px(26.0);
                     });
-                    r.spawn(cadrs_ui::Button::new("mate-solve").label("Solve").outline().small().tooltip("Solve all mates").build(t));
-                    r.spawn(Node { flex_grow: 1.0, ..default() });
-                    r.spawn((Name::new("mate-help"), icon("help-filled", 14.0, Color::srgb_u8(0xa8, 0xa8, 0xa8)), Tooltip::new("Help")));
+                    r.spawn(
+                        cadrs_ui::Button::new("mate-solve")
+                            .label("Solve")
+                            .outline()
+                            .small()
+                            .tooltip("Solve all mates")
+                            .build(t),
+                    );
+                    r.spawn(Node {
+                        flex_grow: 1.0,
+                        ..default()
+                    });
+                    r.spawn((
+                        Name::new("mate-help"),
+                        icon("help-filled", 14.0, Color::srgb_u8(0xa8, 0xa8, 0xa8)),
+                        Tooltip::new("Help"),
+                    ));
                 });
             })
             .build(theme),
@@ -1265,8 +1674,16 @@ fn sync_mate_dialog(
         return;
     };
     let Some(doc) = doc else { return };
-    let connectors: Vec<String> = s.connectors.iter().map(|c| connector_label(&doc, &cache, c)).collect();
-    let tabs: Vec<String> = s.tabs.iter().map(|c| connector_label(&doc, &cache, c)).collect();
+    let connectors: Vec<String> = s
+        .connectors
+        .iter()
+        .map(|c| connector_label(&doc, &cache, c))
+        .collect();
+    let tabs: Vec<String> = s
+        .tabs
+        .iter()
+        .map(|c| connector_label(&doc, &cache, c))
+        .collect();
     let layout = MateLayout::of(&s);
     let valid = s.mate().is_some();
     let footer = Footer(valid);
@@ -1284,8 +1701,15 @@ fn sync_mate_dialog(
             if let Some((e, ..)) = other {
                 commands.entity(e).try_despawn();
             }
-            let Some(area) = q_area.iter().next() else { return };
-            let d = commands.spawn((mate_dialog(&theme, &s, Lists { connectors, tabs }, tx), footer)).id();
+            let Some(area) = q_area.iter().next() else {
+                return;
+            };
+            let d = commands
+                .spawn((
+                    mate_dialog(&theme, &s, Lists { connectors, tabs }, tx),
+                    footer,
+                ))
+                .id();
             commands.entity(area).add_child(d);
             return;
         }
@@ -1305,7 +1729,10 @@ fn sync_mate_dialog(
     }
     for (role, mut st) in &mut q_select {
         let want = match role {
-            Role::Type => MateType::ALL.iter().position(|x| *x == s.mate_type).unwrap_or(0),
+            Role::Type => MateType::ALL
+                .iter()
+                .position(|x| *x == s.mate_type)
+                .unwrap_or(0),
             Role::RotateAbout => s.offset.axis.min(2) as usize,
             _ => continue,
         };
@@ -1319,8 +1746,18 @@ fn sync_mate_dialog(
             Role::OffsetY => tx.offset[1].clone(),
             Role::OffsetZ => tx.offset[2].clone(),
             Role::RotationAngle => tx.offset[3].clone(),
-            Role::Min(d) => tx.limits.iter().find(|(x, ..)| x == d).map(|l| l.1.clone()).unwrap_or_default(),
-            Role::Max(d) => tx.limits.iter().find(|(x, ..)| x == d).map(|l| l.2.clone()).unwrap_or_default(),
+            Role::Min(d) => tx
+                .limits
+                .iter()
+                .find(|(x, ..)| x == d)
+                .map(|l| l.1.clone())
+                .unwrap_or_default(),
+            Role::Max(d) => tx
+                .limits
+                .iter()
+                .find(|(x, ..)| x == d)
+                .map(|l| l.2.clone())
+                .unwrap_or_default(),
             _ => continue,
         };
         if !st.error && st.text != want {

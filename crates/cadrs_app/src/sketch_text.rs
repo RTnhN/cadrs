@@ -14,7 +14,10 @@ use bevy::prelude::*;
 use cadrs_sketch::text::{TextFont, TextStyle, layout};
 use cadrs_sketch::{SketchEntity, SketchOp, TextId, Vec2 as SVec2};
 use cadrs_ui::menu::{Menu, MenuAction, MenuItem};
-use cadrs_ui::{FeatureDialogAccept, FeatureDialogCancel, TextCancel, TextDialog, TextDialogState, TextSubmit, Theme};
+use cadrs_ui::{
+    FeatureDialogAccept, FeatureDialogCancel, TextCancel, TextDialog, TextDialogState, TextSubmit,
+    Theme,
+};
 
 use crate::sketch::{PartStudioMode, SketchSession};
 use crate::sketch_draw::SketchRubberGizmos;
@@ -114,9 +117,19 @@ pub fn open_text_dialog(world: &mut World, mode: TextMode) {
     else {
         return;
     };
-    let font = TextFont::ALL.iter().position(|f| *f == start.font).unwrap_or(0);
+    let font = TextFont::ALL
+        .iter()
+        .position(|f| *f == start.font)
+        .unwrap_or(0);
     let dialog = TextDialog::new("text-dialog", &fonts())
-        .state(start.text, font, start.bold, start.italic, start.mirror_h, start.mirror_v)
+        .state(
+            start.text,
+            font,
+            start.bold,
+            start.italic,
+            start.mirror_h,
+            start.mirror_v,
+        )
         .build(&theme);
     // Beside the sketch dialog.
     let wrapper = world
@@ -178,7 +191,10 @@ fn accept(world: &mut World, dialog: Entity) {
     };
     let op = match mode {
         TextMode::New {
-            origin, dir, height, ..
+            origin,
+            dir,
+            height,
+            ..
         } => SketchOp::AddText {
             origin,
             dir,
@@ -206,7 +222,10 @@ pub fn accept_open(world: &mut World) {
 }
 
 fn is_ours(world: &World, e: Entity) -> bool {
-    world.resource::<TextEditing>().open.is_some_and(|(d, _)| d == e)
+    world
+        .resource::<TextEditing>()
+        .open
+        .is_some_and(|(d, _)| d == e)
 }
 
 fn on_accept(ev: On<FeatureDialogAccept>, mut commands: Commands) {
@@ -252,12 +271,16 @@ fn draw_text_preview(
     doc: Option<Res<ActiveDocument>>,
     mut g: Gizmos<SketchRubberGizmos>,
 ) {
-    let Some((d, mode)) = editing.open else { return };
-    let Ok(state) = q.get(d) else { return };
-    let Some(sketch) = crate::sketch_tools::session_sketch(session.as_deref(), doc.as_deref()) else {
+    let Some((d, mode)) = editing.open else {
         return;
     };
-    let Some(frame) = crate::sketch_tools::session_plane(session.as_deref(), doc.as_deref()).map(|p| p.frame())
+    let Ok(state) = q.get(d) else { return };
+    let Some(sketch) = crate::sketch_tools::session_sketch(session.as_deref(), doc.as_deref())
+    else {
+        return;
+    };
+    let Some(frame) =
+        crate::sketch_tools::session_plane(session.as_deref(), doc.as_deref()).map(|p| p.frame())
     else {
         return;
     };
@@ -271,11 +294,17 @@ fn draw_text_preview(
             width,
         } => {
             // The box as drawn until there is text (not a square).
-            let w = if empty { width } else { layout(&style).width * height };
+            let w = if empty {
+                width
+            } else {
+                layout(&style).width * height
+            };
             (origin, dir * w, dir.perp() * height)
         }
         TextMode::Edit(id) => {
-            let Some(t) = sketch.texts.get(id) else { return };
+            let Some(t) = sketch.texts.get(id) else {
+                return;
+            };
             let [a, b, _, dd] = t.corners.map(|p| sketch.pos(p));
             let h = a.distance(dd);
             let dir = (b - a).normalize();
@@ -309,7 +338,11 @@ fn draw_text_preview(
         let (a, b) = (w(corners[i]), w(corners[(i + 1) % 4]));
         let n = 24;
         for k in (0..n).step_by(2) {
-            g.line(a.lerp(b, k as f32 / n as f32), a.lerp(b, (k + 1) as f32 / n as f32), color);
+            g.line(
+                a.lerp(b, k as f32 / n as f32),
+                a.lerp(b, (k + 1) as f32 / n as f32),
+                color,
+            );
         }
     }
 }
@@ -360,10 +393,15 @@ fn on_text_menu(ev: On<MenuAction>, q: Query<&TextMenuFor>, mut commands: Comman
         "sketch-text-delete" => {
             commands.queue(move |world: &mut World| {
                 world.resource_mut::<SketchSelection>().0.clear();
-                let Some(line) = world_sketch(world).and_then(|s| s.texts.get(id)).map(|t| t.lines[0]) else {
+                let Some(line) = world_sketch(world)
+                    .and_then(|s| s.texts.get(id))
+                    .map(|t| t.lines[0])
+                else {
                     return;
                 };
-                let Some(s) = world.get_resource::<SketchSession>().cloned() else { return };
+                let Some(s) = world.get_resource::<SketchSession>().cloned() else {
+                    return;
+                };
                 if let Some(mut doc) = world.get_resource_mut::<ActiveDocument>() {
                     let _ = doc.execute(&cadrs_core::commands::EditSketch {
                         element: s.element,

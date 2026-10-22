@@ -39,12 +39,12 @@
 pub mod backend;
 pub mod exchange;
 pub mod loft;
+pub mod naming;
 /// The native kernel: [`DefaultKernel`] and the curated B-rep API (data model, geometry,
 /// tolerances, body format) it re-exports; its other modules are internal.
 // With `testkit`, every internal module is public too, and not all of their items are documented.
 #[cfg_attr(feature = "testkit", allow(missing_docs))]
 pub mod native;
-pub mod naming;
 pub mod projection;
 pub mod query;
 pub mod thin;
@@ -57,16 +57,20 @@ pub mod types;
 #[allow(missing_docs)]
 pub mod testkit {
     pub use crate::native::{
-        blend, boolean, brep_occt, classify, curve, draw, evolved, exchange, face_build, features, iges, kernel, local, mass, math, nurbs,
-        offset, oracle, profile, silhouette, smb, ssi, ssi_numeric, step, surface, surfacing, tess, topo, unify, xbuild,
+        blend, boolean, brep_occt, classify, curve, draw, evolved, exchange, face_build, features,
+        iges, kernel, local, mass, math, nurbs, offset, oracle, profile, silhouette, smb, ssi,
+        ssi_numeric, step, surface, surfacing, tess, topo, unify, xbuild,
     };
 }
 
 pub use naming::{BodyNames, EdgeName, FaceName, FaceOrigin, OpId, VertexName};
 pub use projection::{
-    ProjClass, ProjCurve, ProjEdge, ProjSource, ProjVisibility, ProjectOptions, Projection, ViewFrame,
+    ProjClass, ProjCurve, ProjEdge, ProjSource, ProjVisibility, ProjectOptions, Projection,
+    ViewFrame,
 };
-pub use query::{DistanceLocation, DistanceResult, DistanceTarget, SilhouetteCurve, SilhouetteView, UvRect};
+pub use query::{
+    DistanceLocation, DistanceResult, DistanceTarget, SilhouetteCurve, SilhouetteView, UvRect,
+};
 pub use types::*;
 
 /// The kernel cadrs builds with: the native (pure Rust) B-rep kernel.
@@ -74,8 +78,8 @@ pub use native::NativeKernel as DefaultKernel;
 
 use std::fmt;
 
-use nalgebra::{Point3, Vector3};
 use crate::native::tol;
+use nalgebra::{Point3, Vector3};
 
 /// Why an operation failed. Each variant carries a message in words for the user; the variant
 /// says what a caller can do about it (e.g. read `EmptyResult` of an Intersect as "no
@@ -213,7 +217,9 @@ impl fmt::Display for KernelError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::InvalidProfile(why) => write!(f, "invalid profile: {why}"),
-            Self::OperationFailed(why) | Self::EmptyResult(why) | Self::OpenResult(why) => write!(f, "operation failed: {why}"),
+            Self::OperationFailed(why) | Self::EmptyResult(why) | Self::OpenResult(why) => {
+                write!(f, "operation failed: {why}")
+            }
             Self::BooleanFailed { why, .. }
             | Self::BlendFailed { why, .. }
             | Self::BudgetExhausted { why, .. }
@@ -379,11 +385,18 @@ pub trait Kernel {
             && spec.faces.is_empty()
             && normal;
         match (simple, spec.end, spec.symmetric, spec.second) {
-            (true, ExtrudeEnd::Blind(d), false, None) => self.extrude(profile, Extent::Blind(d * along.signum())),
-            (true, ExtrudeEnd::Blind(d), true, None) => self.extrude(profile, Extent::Symmetric(d)),
-            (true, ExtrudeEnd::Blind(f), false, Some(ExtrudeEnd::Blind(b))) if along > 0.0 => {
-                self.extrude(profile, Extent::TwoSided { forward: f, backward: b })
+            (true, ExtrudeEnd::Blind(d), false, None) => {
+                self.extrude(profile, Extent::Blind(d * along.signum()))
             }
+            (true, ExtrudeEnd::Blind(d), true, None) => self.extrude(profile, Extent::Symmetric(d)),
+            (true, ExtrudeEnd::Blind(f), false, Some(ExtrudeEnd::Blind(b))) if along > 0.0 => self
+                .extrude(
+                    profile,
+                    Extent::TwoSided {
+                        forward: f,
+                        backward: b,
+                    },
+                ),
             _ => Err(KernelError::Unsupported("this extrude")),
         }
     }
@@ -422,7 +435,8 @@ pub trait Kernel {
     /// The default handles what [`Kernel::revolve`] can (a solid of regions, a whole turn or one
     /// angle) and refuses the rest.
     fn revolve_with(&mut self, profile: &Profile, spec: &RevolveSpec) -> Result<OpResult> {
-        let simple = spec.body == BodyKind::Solid && profile.chains.is_empty() && spec.faces.is_empty();
+        let simple =
+            spec.body == BodyKind::Solid && profile.chains.is_empty() && spec.faces.is_empty();
         match (simple, spec.full, spec.end, spec.symmetric, spec.second) {
             (true, true, ..) => self.revolve(profile, spec.axis, std::f64::consts::TAU),
             (true, false, RevolveEnd::Angle(a), false, None) => self.revolve(profile, spec.axis, a),
@@ -521,7 +535,8 @@ pub trait Kernel {
     /// Splits the faces `faces` of a body where a tool crosses them (P3.8, a Face split): still
     /// one body, with more faces. Each split face is `modified` into its pieces; no face is
     /// generated. An error when the tool crosses none of them.
-    fn split_faces(&mut self, body: BodyId, faces: &[FaceId], tool: &SplitTool) -> Result<OpResult>;
+    fn split_faces(&mut self, body: BodyId, faces: &[FaceId], tool: &SplitTool)
+    -> Result<OpResult>;
 
     // Combining and editing bodies.
 
@@ -759,7 +774,12 @@ pub trait Kernel {
     /// whether it may run over onto neighbouring faces. The edges' tangent chains are filleted
     /// too (OpenCascade continues a fillet along tangent edges). The default handles a radius
     /// with overflow allowed.
-    fn fillet_with(&mut self, body: BodyId, edges: &[EdgeId], spec: &FilletSpec) -> Result<OpResult> {
+    fn fillet_with(
+        &mut self,
+        body: BodyId,
+        edges: &[EdgeId],
+        spec: &FilletSpec,
+    ) -> Result<OpResult> {
         match (spec.size, spec.allow_overflow) {
             (FilletSize::Radius(r), true) => self.fillet(body, edges, r),
             _ => Err(KernelError::Unsupported("this fillet")),
@@ -770,12 +790,23 @@ pub trait Kernel {
     /// tangent to the two `side` faces. Built for a flat rectangular centre face between two
     /// parallel flat side faces at least half their distance apart deep (radius = half the
     /// distance); anything else is an `InvalidParameter` error saying so.
-    fn full_round(&mut self, body: BodyId, side1: FaceId, center: FaceId, side2: FaceId) -> Result<OpResult>;
+    fn full_round(
+        &mut self,
+        body: BodyId,
+        side1: FaceId,
+        center: FaceId,
+        side2: FaceId,
+    ) -> Result<OpResult>;
 
     /// The chamfer of Onshape's dialog (P3.6, PS14.7–14.8): its type, Offset or Tangent
     /// measurement, and which face takes the first distance (flipped for all edges, or per
     /// edge). The default handles Offset without flips.
-    fn chamfer_with(&mut self, body: BodyId, edges: &[EdgeId], opts: &ChamferOpts) -> Result<OpResult> {
+    fn chamfer_with(
+        &mut self,
+        body: BodyId,
+        edges: &[EdgeId],
+        opts: &ChamferOpts,
+    ) -> Result<OpResult> {
         if opts.measurement == ChamferMeasure::Offset && !opts.flip && opts.flipped.is_empty() {
             self.chamfer(body, edges, opts.spec)
         } else {
@@ -859,20 +890,34 @@ pub trait Kernel {
     /// face it doesn't border) is an `InvalidParameter` error, never a wrong body.
     fn move_faces(&mut self, body: BodyId, faces: &[FaceId], motion: &Motion) -> Result<OpResult> {
         let _ = (body, faces, motion);
-        Err(KernelError::Unsupported("Move face by a translation or rotation"))
+        Err(KernelError::Unsupported(
+            "Move face by a translation or rotation",
+        ))
     }
 
     /// A fillet whose radius varies along each edge (P3.10, PS14.6 Variable fillet). Every edge
     /// tangent to a listed edge must be listed too (OCCT continues a fillet along them). With
     /// `allow_overflow` off it is refused where it runs onto another face, as `fillet_with`.
-    fn fillet_variable(&mut self, body: BodyId, laws: &[FilletLaw], allow_overflow: bool) -> Result<OpResult>;
+    fn fillet_variable(
+        &mut self,
+        body: BodyId,
+        laws: &[FilletLaw],
+        allow_overflow: bool,
+    ) -> Result<OpResult>;
 
     /// A partial fillet (P3.11, PS14.6): `spec`'s fillet on `edge` only between the fractions
     /// `from < to` of its length (in the direction the edge runs, 0 at its start). The fillet
     /// stops at a flat end face square to the edge at each bound, as Onshape's does; at a bound
     /// of 0 or 1 it ends as the whole edge's fillet would. The fillet's face is generated
     /// `FromEdge`, the end faces `StartCap`/`EndCap` with region 0.
-    fn fillet_partial(&mut self, body: BodyId, edge: EdgeId, spec: &FilletSpec, from: f64, to: f64) -> Result<OpResult>;
+    fn fillet_partial(
+        &mut self,
+        body: BodyId,
+        edge: EdgeId,
+        spec: &FilletSpec,
+        from: f64,
+        to: f64,
+    ) -> Result<OpResult>;
 
     /// Onshape's *Smooth fillet corners* (Final, PS14.6): the fillet of `edges` as
     /// [`Kernel::fillet_with`] (a constant-radius circular one), then at every vertex of `body`
@@ -882,11 +927,22 @@ pub trait Kernel {
     /// N-sided patch meeting every face around it tangentially (G1). The patch is generated
     /// `FromVertex`. A corner the kernel can't fill is an error saying so (`InvalidGeometry`, or
     /// `InvalidResult` for a patch that doesn't close).
-    fn fillet_smooth(&mut self, body: BodyId, edges: &[EdgeId], spec: &FilletSpec, setback: f64) -> Result<OpResult>;
+    fn fillet_smooth(
+        &mut self,
+        body: BodyId,
+        edges: &[EdgeId],
+        spec: &FilletSpec,
+        setback: f64,
+    ) -> Result<OpResult>;
 
     /// The outward unit normals of `face` at the points of it nearest `points` (exact, from
     /// its surface; Final: to check that faces meet tangentially).
-    fn face_normals_at(&self, body: BodyId, face: FaceId, points: &[Point3<f64>]) -> Result<Vec<Vector3<f64>>>;
+    fn face_normals_at(
+        &self,
+        body: BodyId,
+        face: FaceId,
+        points: &[Point3<f64>],
+    ) -> Result<Vec<Vector3<f64>>>;
 
     /// Splits a body into one body per solid (a boolean can leave several pieces; Onshape makes
     /// each a part). Each result's history has every face `modified` from the same face of
@@ -1047,7 +1103,10 @@ pub trait Kernel {
     /// question (the parts a new body's Remove cuts), like [`Kernel::joins`].
     fn overlaps(&mut self, a: BodyId, b: BodyId) -> Result<bool> {
         let r = self.boolean(BoolOp::Intersect, a, &[b])?;
-        let v = self.mass_properties(r.bodies[0]).map(|m| m.volume).unwrap_or(0.0);
+        let v = self
+            .mass_properties(r.bodies[0])
+            .map(|m| m.volume)
+            .unwrap_or(0.0);
         self.release(r.bodies[0]);
         Ok(v > tol::ROUNDOFF)
     }
@@ -1058,7 +1117,8 @@ pub trait Kernel {
     /// Where the line through `origin` along the unit `dir` crosses the body's faces, sorted by
     /// `t` (hits behind the origin have negative `t`). Up to next uses it to find what lies
     /// ahead of a profile.
-    fn ray_hits(&self, body: BodyId, origin: Point3<f64>, dir: Vector3<f64>) -> Result<Vec<RayHit>>;
+    fn ray_hits(&self, body: BodyId, origin: Point3<f64>, dir: Vector3<f64>)
+    -> Result<Vec<RayHit>>;
     /// Writes bodies as OpenCASCADE text BREP (geometry only, one compound of their solids,
     /// sheets, wires and points), as `BRepTools::Read` and DRAW's `restore` read it. The
     /// native kernel writes exact geometry and its tolerances; a backend without a writer
@@ -1126,7 +1186,11 @@ pub trait Kernel {
     /// assert!((k.mass_properties(m.parts[0].body)?.volume - 1000.0).abs() < 1e-6);
     /// # Ok::<(), cadrs_kernel::KernelError>(())
     /// ```
-    fn import_model(&mut self, format: exchange::ExchangeFormat, bytes: &[u8]) -> Result<exchange::ImportedModel>;
+    fn import_model(
+        &mut self,
+        format: exchange::ExchangeFormat,
+        bytes: &[u8],
+    ) -> Result<exchange::ImportedModel>;
 
     /// Writes `parts` (bodies with names) to STEP or IGES (P3F.2). With `instances`, the file
     /// holds one assembly called `name` with the parts at those placements.
@@ -1141,14 +1205,24 @@ pub trait Kernel {
     /// Hidden-line removal for a drawing view (P3C.2): `bodies` seen along `frame`, as 2D edges
     /// sorted into visible and hidden, sharp, smooth (tangent) and outline, each with the body
     /// edge or face it came from (see [`projection`]). The bodies hide each other.
-    fn project(&self, bodies: &[BodyId], frame: &ViewFrame, opts: &ProjectOptions) -> Result<Projection>;
+    fn project(
+        &self,
+        bodies: &[BodyId],
+        frame: &ViewFrame,
+        opts: &ProjectOptions,
+    ) -> Result<Projection>;
 
     /// The silhouette curves of every face of `body` seen along a direction or from an eye
     /// point: where the face's normal is square to the line of sight (SMLib's
     /// `CreateSilhouetteCurves` clipped to the face), hidden or not, as model-space polylines
     /// within `tolerance` (mm), with their (u, v). A face seen edge-on (wholly on its
     /// silhouette) gives the sides of its uv box that lie in it, as SMLib does.
-    fn silhouettes(&self, body: BodyId, view: &SilhouetteView, tolerance: f64) -> Result<Vec<SilhouetteCurve>>;
+    fn silhouettes(
+        &self,
+        body: BodyId,
+        view: &SilhouetteView,
+        tolerance: f64,
+    ) -> Result<Vec<SilhouetteCurve>>;
 
     /// The minimum distance between two points, edges, faces or bodies (their boundaries), and
     /// the closest points. `EmptyResult` when either side has no geometry.
@@ -1163,7 +1237,12 @@ pub trait Kernel {
     /// iso-curves, with poles as degenerate edges and seams where the domain closes round
     /// (SMLib's `CreateFaceFromSurface`). The result has no history. `InvalidParameter` for an
     /// unbounded surface without a domain, or a domain outside the surface.
-    fn face_from_surface(&mut self, body: BodyId, face: FaceId, domain: Option<UvRect>) -> Result<OpResult>;
+    fn face_from_surface(
+        &mut self,
+        body: BodyId,
+        face: FaceId,
+        domain: Option<UvRect>,
+    ) -> Result<OpResult>;
 
     /// The body's vertices. The default finds them as the distinct ends of [`Kernel::edges`]
     /// (closed edges, such as whole circles, have none); backends with a vertex list override
@@ -1218,7 +1297,11 @@ pub trait Kernel {
 
 /// [`Kernel::tangent_chain`] over a body's edges and vertices (their lengths aren't used: a
 /// kernel may leave them out).
-pub(crate) fn tangent_chain_of(edges: &[EdgeInfo], vertices: &[VertexInfo], edge: EdgeId) -> Result<Vec<EdgeId>> {
+pub(crate) fn tangent_chain_of(
+    edges: &[EdgeInfo],
+    vertices: &[VertexInfo],
+    edge: EdgeId,
+) -> Result<Vec<EdgeId>> {
     let tol = naming::joint_tolerance(edges);
     let get = |id: EdgeId| edges.iter().find(|e| e.id == id);
     if get(edge).is_none() {

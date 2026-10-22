@@ -4,92 +4,90 @@
 // Bevy's `AsBindGroup` derive (`part_shading`) nests deeper than the default 128.
 #![recursion_limit = "256"]
 
-pub mod analysis;
-pub mod appearance;
+pub mod accept;
 pub mod advanced;
-pub mod assembly;
 pub mod advanced_dialog;
+pub mod analysis;
+pub mod app_icon;
+pub mod appearance;
 pub mod applied;
 pub mod applied_dialog;
-pub mod camera;
-pub mod create_selection;
-pub mod cursor;
-pub mod document;
-pub mod drawing;
-pub mod eda;
-pub mod draft_ui;
-pub mod accept;
-pub mod boolean;
+pub mod assembly;
 pub mod board_fit;
 pub mod board_in_studio;
+pub mod boolean;
+pub mod camera;
+pub mod change_preview;
+pub mod composite_ui;
+pub mod create_selection;
+pub mod cursor;
 pub mod derived_ui;
+pub mod direct_edit_ui;
+pub mod document;
+pub mod draft_ui;
+pub mod drawing;
+pub mod drop_import;
+pub mod eda;
+pub mod export_dialog;
+pub mod export_image;
 pub mod extrude;
 pub mod extrude_dialog;
-pub mod export_dialog;
 pub mod feature_folders;
 pub mod feature_list;
 pub mod feature_menu;
-pub mod revolve;
-pub mod revolve_dialog;
-pub mod gallery;
-pub mod history_panel;
-pub mod drop_import;
-pub mod app_icon;
-pub mod window_title;
 pub mod file_drop;
+pub mod flat_export_dialog;
+pub mod flat_ui;
+pub mod frame_profile;
+pub mod frame_stats;
+pub mod gallery;
+pub mod hidden_edges;
+pub mod history_panel;
 pub mod image_dialog;
 pub mod import_dialog;
-pub mod picture;
 pub mod import_file;
 pub mod landing;
 pub mod linked;
 pub mod linked_exercises;
 pub mod linked_session;
-pub mod move_document;
-pub mod tab_folders;
-pub mod tab_manager;
-pub mod rebuild_indicator;
-pub mod frame_stats;
-pub mod frame_profile;
-pub mod reference_manager;
 pub mod manipulator;
 pub mod mass_props;
+pub mod material_dialog;
 pub mod mcp;
 pub mod mcp_board;
 pub mod measure;
-pub mod material_dialog;
+pub mod move_document;
+pub mod native_document;
 pub mod panel_tab;
-pub mod change_preview;
 pub mod part_shading;
 pub mod parts;
+pub mod parts_list;
 pub mod pattern;
 pub mod pattern_dialog;
 pub mod pcb;
-pub mod preferences_ui;
-pub mod sheetmetal_features_ui;
-pub mod sheetmetal_ui;
-pub mod sheetmetal_joint_ui;
-pub mod sheetmetal_table;
-pub mod sheetmetal_p3i9_ui;
-pub mod sheetmetal_tools_ui;
-pub mod flat_ui;
-pub mod direct_edit_ui;
-pub mod flat_export_dialog;
-pub mod sketch_dxf;
-pub mod surfacing_ui;
-pub mod transform_ui;
-pub mod properties_dialog;
-pub mod parts_list;
+pub mod picture;
 pub mod plane_display;
+pub mod preferences_ui;
+pub mod properties_dialog;
+pub mod rebuild_indicator;
+pub mod reference_manager;
 pub mod region_select;
 pub mod render_ui;
-pub mod export_image;
-pub mod native_document;
 pub mod repair;
 pub mod replace_reference;
-pub mod selection_readout;
+pub mod revolve;
+pub mod revolve_dialog;
+pub mod scale_ui;
 pub mod script;
 pub mod search_tools;
+pub mod section_view;
+pub mod selection_readout;
+pub mod sheetmetal_features_ui;
+pub mod sheetmetal_joint_ui;
+pub mod sheetmetal_p3i9_ui;
+pub mod sheetmetal_table;
+pub mod sheetmetal_tools_ui;
+pub mod sheetmetal_ui;
 pub mod shortcuts;
 pub mod simulation_ui;
 pub mod sketch;
@@ -97,27 +95,29 @@ pub mod sketch_constrain;
 pub mod sketch_diagnostics;
 pub mod sketch_dimension;
 pub mod sketch_draw;
+pub mod sketch_dxf;
 pub mod sketch_edit_tools;
 pub mod sketch_entity_tools;
 pub mod sketch_glyphs;
 pub mod sketch_links;
-pub mod sketch_text;
 pub mod sketch_modify_tools;
+pub mod sketch_text;
 pub mod sketch_tools;
+pub mod suppress_variable;
+pub mod surfacing_ui;
+pub mod tab_folders;
+pub mod tab_manager;
+pub mod threads_ui;
 pub mod thumbnail;
 pub mod tool_input;
-pub mod composite_ui;
-pub mod scale_ui;
-pub mod threads_ui;
+pub mod transform_ui;
 pub mod units_dialog;
 pub mod variables_ui;
 pub mod view_cube;
-pub mod viewport_menu;
-pub mod viewport;
 pub mod view_options;
-pub mod section_view;
-pub mod suppress_variable;
-pub mod hidden_edges;
+pub mod viewport;
+pub mod viewport_menu;
+pub mod window_title;
 pub mod workspaces;
 
 use bevy::prelude::*;
@@ -250,9 +250,15 @@ pub fn register_kernel_tasks() {
 }
 
 pub fn export_dir(world: &World) -> Option<std::path::PathBuf> {
-    let env = std::env::var_os("CADRS_EXPORT_DIR").filter(|d| !d.is_empty()).map(std::path::PathBuf::from);
+    let env = std::env::var_os("CADRS_EXPORT_DIR")
+        .filter(|d| !d.is_empty())
+        .map(std::path::PathBuf::from);
     let dir = env
-        .or_else(|| world.get_resource::<ExportDirOverride>().and_then(|d| d.0.clone()))
+        .or_else(|| {
+            world
+                .get_resource::<ExportDirOverride>()
+                .and_then(|d| d.0.clone())
+        })
         .or_else(cadrs_core::export::default_dir)?;
     // "scenarios/../target/…" read as "target/…".
     let mut clean = std::path::PathBuf::new();
@@ -265,7 +271,12 @@ pub fn export_dir(world: &World) -> Option<std::path::PathBuf> {
             other => clean.push(other),
         }
     }
-    let rel = std::env::current_dir().ok().and_then(|cwd| clean.strip_prefix(&cwd).ok().map(std::path::Path::to_path_buf));
+    let rel = std::env::current_dir().ok().and_then(|cwd| {
+        clean
+            .strip_prefix(&cwd)
+            .ok()
+            .map(std::path::Path::to_path_buf)
+    });
     Some(rel.filter(|r| !r.as_os_str().is_empty()).unwrap_or(clean))
 }
 
@@ -365,12 +376,23 @@ impl ActiveDocument {
             }
             // MC2.5: a pending assembly context is created by the first command that references
             // it, in that command's undo step.
-            if let Some((studio, context)) = cadrs_core::assembly::context::pending_to_commit(&self.doc)
-                && self.history.execute(&mut self.doc, &cadrs_core::assembly::context::AddContext { studio, context }).is_ok()
+            if let Some((studio, context)) =
+                cadrs_core::assembly::context::pending_to_commit(&self.doc)
+                && self
+                    .history
+                    .execute(
+                        &mut self.doc,
+                        &cadrs_core::assembly::context::AddContext { studio, context },
+                    )
+                    .is_ok()
             {
                 // The document has it now (deleting it later must not bring it back).
                 cadrs_core::assembly::context::set_pending(self.doc.id, studio, None);
-                self.history.squash_element_since(undo0.min(self.history.undo_len()), studio, cmd.label());
+                self.history.squash_element_since(
+                    undo0.min(self.history.undo_len()),
+                    studio,
+                    cmd.label(),
+                );
                 let keep = self.history.undo_len();
                 while self.undo_active.len() < keep {
                     self.undo_active.push(before);
@@ -448,7 +470,9 @@ impl ActiveDocument {
         label: impl Into<String>,
     ) {
         let (idx, pushed) = self.history.squash_element_since(mark, element, label);
-        let first = idx.first().and_then(|i| self.undo_active.get(*i).copied().flatten());
+        let first = idx
+            .first()
+            .and_then(|i| self.undo_active.get(*i).copied().flatten());
         for i in idx.iter().rev() {
             if *i < self.undo_active.len() {
                 self.undo_active.remove(*i);
@@ -463,7 +487,9 @@ impl ActiveDocument {
     /// Reverts and forgets the steps above `mark` that edit `element`'s contents (see
     /// [`History::discard_element_since`]); other steps stay.
     pub fn discard_element_since(&mut self, mark: usize, element: ElementId) {
-        let idx = self.history.discard_element_since(&mut self.doc, mark, element);
+        let idx = self
+            .history
+            .discard_element_since(&mut self.doc, mark, element);
         for i in idx.iter().rev() {
             if *i < self.undo_active.len() {
                 self.undo_active.remove(*i);
@@ -613,7 +639,12 @@ impl Plugin for CadrsAppPlugin {
                 shortcuts::ShortcutsPlugin,
                 script::ScriptPlugin,
             ))
-            .add_plugins((rebuild_indicator::RebuildIndicatorPlugin, accept::AcceptPlugin, frame_stats::FrameStatsPlugin, frame_profile::FrameProfilePlugin))
+            .add_plugins((
+                rebuild_indicator::RebuildIndicatorPlugin,
+                accept::AcceptPlugin,
+                frame_stats::FrameStatsPlugin,
+                frame_profile::FrameProfilePlugin,
+            ))
             .add_plugins((
                 parts::PartsPlugin,
                 parts_list::PartsListPlugin,
@@ -631,25 +662,101 @@ impl Plugin for CadrsAppPlugin {
                 sketch_text::SketchTextPlugin,
                 viewport_menu::ViewportMenuPlugin,
             ))
-            .add_plugins((sketch_diagnostics::SketchDiagnosticsPlugin, feature_menu::FeatureMenuPlugin))
+            .add_plugins((
+                sketch_diagnostics::SketchDiagnosticsPlugin,
+                feature_menu::FeatureMenuPlugin,
+            ))
             // P3I.6: the flat pattern export and the sketch's Insert DXF or DWG.
-            .add_plugins((flat_export_dialog::FlatExportDialogPlugin, sketch_dxf::SketchDxfPlugin, flat_ui::FlatUiPlugin))
-            .add_plugins((history_panel::HistoryPlugin, workspaces::WorkspacesPlugin, repair::RepairPlugin, replace_reference::ReplaceReferencePlugin, panel_tab::PanelTabPlugin))
-            .add_plugins((appearance::AppearancePlugin, material_dialog::MaterialDialogPlugin, applied::AppliedPlugin, sheetmetal_features_ui::SheetMetalFeaturesPlugin, feature_folders::FeatureFoldersPlugin, feature_list::FeatureListPlugin, search_tools::SearchToolsPlugin, plane_display::PlaneDisplayPlugin, create_selection::CreateSelectionPlugin, pattern::PatternPlugin, export_dialog::ExportDialogPlugin, assembly::AssemblyPlugin, properties_dialog::PropertiesDialogPlugin))
-            .add_plugins((drawing::DrawingPlugin, linked::LinkedPlugin, reference_manager::ReferenceManagerPlugin, linked_session::LinkedSessionPlugin, move_document::MoveDocumentPlugin, derived_ui::DerivedPlugin, board_in_studio::BoardInStudioPlugin, board_fit::BoardFitPlugin))
-            .add_plugins((pcb::PcbPlugin, eda::EdaPlugin, measure::MeasurePlugin, view_options::ViewOptionsPlugin, section_view::SectionViewPlugin, hidden_edges::HiddenEdgesPlugin, sheetmetal_p3i9_ui::Sm9Plugin))
+            .add_plugins((
+                flat_export_dialog::FlatExportDialogPlugin,
+                sketch_dxf::SketchDxfPlugin,
+                flat_ui::FlatUiPlugin,
+            ))
+            .add_plugins((
+                history_panel::HistoryPlugin,
+                workspaces::WorkspacesPlugin,
+                repair::RepairPlugin,
+                replace_reference::ReplaceReferencePlugin,
+                panel_tab::PanelTabPlugin,
+            ))
+            .add_plugins((
+                appearance::AppearancePlugin,
+                material_dialog::MaterialDialogPlugin,
+                applied::AppliedPlugin,
+                sheetmetal_features_ui::SheetMetalFeaturesPlugin,
+                feature_folders::FeatureFoldersPlugin,
+                feature_list::FeatureListPlugin,
+                search_tools::SearchToolsPlugin,
+                plane_display::PlaneDisplayPlugin,
+                create_selection::CreateSelectionPlugin,
+                pattern::PatternPlugin,
+                export_dialog::ExportDialogPlugin,
+                assembly::AssemblyPlugin,
+                properties_dialog::PropertiesDialogPlugin,
+            ))
+            .add_plugins((
+                drawing::DrawingPlugin,
+                linked::LinkedPlugin,
+                reference_manager::ReferenceManagerPlugin,
+                linked_session::LinkedSessionPlugin,
+                move_document::MoveDocumentPlugin,
+                derived_ui::DerivedPlugin,
+                board_in_studio::BoardInStudioPlugin,
+                board_fit::BoardFitPlugin,
+            ))
+            .add_plugins((
+                pcb::PcbPlugin,
+                eda::EdaPlugin,
+                measure::MeasurePlugin,
+                view_options::ViewOptionsPlugin,
+                section_view::SectionViewPlugin,
+                hidden_edges::HiddenEdgesPlugin,
+                sheetmetal_p3i9_ui::Sm9Plugin,
+            ))
             // P3I.3: the Sheet metal table and flat view, and the Modify joint dialog.
-            .add_plugins((sheetmetal_table::SheetMetalTablePlugin, sheetmetal_joint_ui::ModifyJointUiPlugin))
+            .add_plugins((
+                sheetmetal_table::SheetMetalTablePlugin,
+                sheetmetal_joint_ui::ModifyJointUiPlugin,
+            ))
             .add_plugins(sheetmetal_tools_ui::SheetMetalToolsPlugin)
-            .add_plugins((tab_folders::TabFoldersPlugin, tab_manager::TabManagerPlugin, analysis::AnalysisPlugin, preferences_ui::PreferencesPlugin, manipulator::ManipulatorPlugin, mcp::McpPlugin))
-            .add_plugins((variables_ui::VariablesPlugin, scale_ui::ScalePlugin, threads_ui::ThreadsPlugin, simulation_ui::SimulationPlugin, render_ui::RenderUiPlugin, export_image::ExportImagePlugin))
+            .add_plugins((
+                tab_folders::TabFoldersPlugin,
+                tab_manager::TabManagerPlugin,
+                analysis::AnalysisPlugin,
+                preferences_ui::PreferencesPlugin,
+                manipulator::ManipulatorPlugin,
+                mcp::McpPlugin,
+            ))
+            .add_plugins((
+                variables_ui::VariablesPlugin,
+                scale_ui::ScalePlugin,
+                threads_ui::ThreadsPlugin,
+                simulation_ui::SimulationPlugin,
+                render_ui::RenderUiPlugin,
+                export_image::ExportImagePlugin,
+            ))
             .add_plugins(native_document::NativeDocumentPlugin)
-            .add_plugins((import_dialog::ImportDialogPlugin, import_file::ImportFilePlugin, picture::PicturePlugin, file_drop::FileDropPlugin, drop_import::DropImportPlugin, image_dialog::ImageDialogPlugin, app_icon::AppIconPlugin, window_title::WindowTitlePlugin))
+            .add_plugins((
+                import_dialog::ImportDialogPlugin,
+                import_file::ImportFilePlugin,
+                picture::PicturePlugin,
+                file_drop::FileDropPlugin,
+                drop_import::DropImportPlugin,
+                image_dialog::ImageDialogPlugin,
+                app_icon::AppIconPlugin,
+                window_title::WindowTitlePlugin,
+            ))
             .init_resource::<ExportDirOverride>()
             // A long menu that has to be capped keeps clear of the tab strip (Final part 3:
             // `course_asm_triad` 08, `course_asm_std_bulk_edit` 02).
-            .insert_resource(cadrs_ui::menu::MenuInsets { top: 0.0, bottom: cadrs_ui::Theme::default().tab_bar_height })
-            .add_systems(Startup, (apply_start_state, flush_deleted, set_document_loader));
+            .insert_resource(cadrs_ui::menu::MenuInsets {
+                top: 0.0,
+                bottom: cadrs_ui::Theme::default().tab_bar_height,
+            })
+            .add_systems(
+                Startup,
+                (apply_start_state, flush_deleted, set_document_loader),
+            );
     }
 }
 
@@ -657,7 +764,9 @@ impl Plugin for CadrsAppPlugin {
 /// removed for good the next time the app starts.
 /// Derived features load other documents from the store (Onshape import).
 fn set_document_loader(store: Res<DocumentStore>) {
-    cadrs_core::derived::set_document_loader(Some(cadrs_core::derived::store_loader(store.0.clone())));
+    cadrs_core::derived::set_document_loader(Some(cadrs_core::derived::store_loader(
+        store.0.clone(),
+    )));
     cadrs_core::rebuild::process::set_documents(Some(store.0.root().to_path_buf()));
 }
 
@@ -712,7 +821,12 @@ mod tests {
         let ps = d.doc.elements[0].id;
         d.read_only = Some("V1 of Doc".into());
         let before = d.doc.clone();
-        let r = d.execute(&AddElement { id: ElementId::new(), kind: NewElementKind::Assembly, name: None, after: Some(ps) });
+        let r = d.execute(&AddElement {
+            id: ElementId::new(),
+            kind: NewElementKind::Assembly,
+            name: None,
+            after: Some(ps),
+        });
         assert_eq!(r.unwrap_err().to_string(), READ_ONLY);
         assert!(d.execute(&DeleteElement { id: ps }).is_err());
         assert_eq!(d.undo(), None);

@@ -39,10 +39,15 @@ use crate::appearance::Appearance;
 use crate::assembly::bom::{BomColumn, SetBomSettings};
 use crate::assembly::commands::{InsertInstance, SetInstancesFixed};
 use crate::assembly::mate::MateId;
-use crate::assembly::standard::{SetStandardProperties, StandardPart, StandardSpec, Stacking, plan_insert, site_of_edge};
+use crate::assembly::standard::{
+    SetStandardProperties, Stacking, StandardPart, StandardSpec, plan_insert, site_of_edge,
+};
 use crate::assembly::{self, Instance, InstanceId, InstanceSource, Pose};
 use crate::command::{CommandError, History};
-use crate::commands::{AddElement, AddExtrude, AddSketch, EditSketch, NewElementKind, RenameElement, RenamePart, SetExtrude, SetPartAppearance};
+use crate::commands::{
+    AddElement, AddExtrude, AddSketch, EditSketch, NewElementKind, RenameElement, RenamePart,
+    SetExtrude, SetPartAppearance,
+};
 use crate::document::{BooleanOp, Document, ExtrudeFeature, Offset};
 use crate::ids::{ElementId, FeatureId, PartId};
 use crate::properties::{PropertyKey, PropertyOwner, PropertyValue, SetProperties};
@@ -62,7 +67,8 @@ const fn inst(n: u128) -> InstanceId {
 
 pub const DOCUMENT_NAME: &str = "Universal Joint Assembly Drawing (stand-in)";
 /// The flange's studio, the components' studio and the assembly.
-pub const FLANGE_STUDIO: ElementId = ElementId::from_u128(0x0a1f_2a00_0000_0000_0000_0000_0000_0101);
+pub const FLANGE_STUDIO: ElementId =
+    ElementId::from_u128(0x0a1f_2a00_0000_0000_0000_0000_0000_0101);
 pub const COMPONENTS: ElementId = ElementId::from_u128(0x0a1f_2a00_0000_0000_0000_0000_0000_0102);
 pub const ASSEMBLY: ElementId = ElementId::from_u128(0x0a1f_2a00_0000_0000_0000_0000_0000_0103);
 pub const ASSEMBLY_NAME: &str = "Universal Joint Assembly";
@@ -92,11 +98,31 @@ const fn mate(k: usize) -> MateId {
 
 /// The course's BOM (`ex2-drawing.png`): Name, Quantity, Part number, Description.
 pub const COURSE_BOM: [(&str, u32, &str, &str); 5] = [
-    ("Universal Joint Flange", 2, "MSB-0004", "Universal joint flange"),
-    ("Universal Joint Centre Block", 1, "MSB-0001xC", "Universal Joint Center Block"),
-    ("Graphite Phosphor Bronze Bushes", 4, "MSB-0002", "Bushes for main bearing"),
+    (
+        "Universal Joint Flange",
+        2,
+        "MSB-0004",
+        "Universal joint flange",
+    ),
+    (
+        "Universal Joint Centre Block",
+        1,
+        "MSB-0001xC",
+        "Universal Joint Center Block",
+    ),
+    (
+        "Graphite Phosphor Bronze Bushes",
+        4,
+        "MSB-0002",
+        "Bushes for main bearing",
+    ),
     ("Universal Joint Axle", 4, "MSB-0003", "Central Axle"),
-    ("Pan head machine screw 1/4-28 x 0.75", 16, "STD-03923", "Pan head machine screw 1/4-28 x 0.75 Stainless Steel"),
+    (
+        "Pan head machine screw 1/4-28 x 0.75",
+        16,
+        "STD-03923",
+        "Pan head machine screw 1/4-28 x 0.75 Stainless Steel",
+    ),
 ];
 
 /// Where the cross holes meet (z, in).
@@ -114,7 +140,13 @@ pub const AXLE_OUT: f64 = 0.25;
 
 /// The screws' configuration: ANSI inch pan head machine screw 1/4-28 × 0.75, Stainless Steel.
 pub fn screw_spec() -> StandardSpec {
-    let mut s = StandardSpec::new("ANSI inch", "Bolts & screws", "Machine screws", "Pan head machine screw").expect("in the library");
+    let mut s = StandardSpec::new(
+        "ANSI inch",
+        "Bolts & screws",
+        "Machine screws",
+        "Pan head machine screw",
+    )
+    .expect("in the library");
     s.size = "1/4-28".into();
     s.length = Some(0.75);
     s.material = "Stainless Steel".into();
@@ -127,14 +159,36 @@ fn v(x: f64, y: f64) -> Vec2 {
 }
 
 fn circle(x: f64, y: f64, d: f64) -> SketchOp {
-    SketchOp::AddCircle { center: v(x, y), radius: d / 2.0 * IN, construction: false }
+    SketchOp::AddCircle {
+        center: v(x, y),
+        radius: d / 2.0 * IN,
+        construction: false,
+    }
 }
 
 /// A sketch on Top of `ops` and an extrude of the region at `seed` from z0 to z1 (in).
 #[allow(clippy::too_many_arguments)]
-fn feature(s: &mut dyn Studio, el: ElementId, sketch: FeatureId, extrude: FeatureId, ops: Vec<SketchOp>, seed: (f64, f64), z: (f64, f64), op: BooleanOp, scope: &[PartId]) -> Result<(), CommandError> {
-    s.run(&AddSketch { element: el, feature: sketch, plane: Some(PlaneRef::Top) })?;
-    s.run(&EditSketch { element: el, feature: sketch, op: SketchOp::Batch(ops) })?;
+fn feature(
+    s: &mut dyn Studio,
+    el: ElementId,
+    sketch: FeatureId,
+    extrude: FeatureId,
+    ops: Vec<SketchOp>,
+    seed: (f64, f64),
+    z: (f64, f64),
+    op: BooleanOp,
+    scope: &[PartId],
+) -> Result<(), CommandError> {
+    s.run(&AddSketch {
+        element: el,
+        feature: sketch,
+        plane: Some(PlaneRef::Top),
+    })?;
+    s.run(&EditSketch {
+        element: el,
+        feature: sketch,
+        op: SketchOp::Batch(ops),
+    })?;
     let g = s
         .document()
         .element(el)
@@ -144,7 +198,9 @@ fn feature(s: &mut dyn Studio, el: ElementId, sketch: FeatureId, extrude: Featur
         .ok_or_else(|| CommandError::Invalid("sketch not found".into()))?;
     let regions = super::region_refs(sketch, &g, &[v(seed.0, seed.1)]);
     if regions.len() != 1 {
-        return Err(CommandError::Invalid("a region of the stand-in is missing".into()));
+        return Err(CommandError::Invalid(
+            "a region of the stand-in is missing".into(),
+        ));
     }
     let (z0, z1) = z;
     let fmt = |x: f64| format!("{} in", (x * 1000.0).round() / 1000.0);
@@ -153,10 +209,23 @@ fn feature(s: &mut dyn Studio, el: ElementId, sketch: FeatureId, extrude: Featur
     x.op = op;
     x.merge_scope = scope.to_vec();
     if z0 != 0.0 {
-        x.start_offset = Some(Offset { value: z0.abs() * IN, expr: fmt(z0.abs()), flip: z0 < 0.0 });
+        x.start_offset = Some(Offset {
+            value: z0.abs() * IN,
+            expr: fmt(z0.abs()),
+            flip: z0 < 0.0,
+        });
     }
-    s.run(&AddExtrude { element: el, feature: extrude, extrude: ExtrudeFeature::default() })?;
-    s.run(&SetExtrude { element: el, feature: extrude, extrude: x, label: "Extrude".into() })?;
+    s.run(&AddExtrude {
+        element: el,
+        feature: extrude,
+        extrude: ExtrudeFeature::default(),
+    })?;
+    s.run(&SetExtrude {
+        element: el,
+        feature: extrude,
+        extrude: x,
+        label: "Extrude".into(),
+    })?;
     Ok(())
 }
 
@@ -170,22 +239,83 @@ fn bush_holes() -> Vec<(f64, f64)> {
 pub fn build_components(s: &mut dyn Studio, el: ElementId) -> Result<(), CommandError> {
     use BooleanOp::{Add, New};
     let h = BLOCK_SIDE / 2.0;
-    let square = SketchOp::AddPolyline { points: vec![v(-h, -h), v(h, -h), v(h, h), v(-h, h)], closed: true, construction: false, label: "Add rectangle" };
-    feature(s, el, fid(0x11), BLOCK_E, vec![square], (0.0, 0.0), (-h, h), New, &[])?;
+    let square = SketchOp::AddPolyline {
+        points: vec![v(-h, -h), v(h, -h), v(h, h), v(-h, h)],
+        closed: true,
+        construction: false,
+        label: "Add rectangle",
+    };
+    feature(
+        s,
+        el,
+        fid(0x11),
+        BLOCK_E,
+        vec![square],
+        (0.0, 0.0),
+        (-h, h),
+        New,
+        &[],
+    )?;
     let mut flange = vec![circle(0.0, 0.0, BUSH_D), circle(0.0, 0.0, BORE_D)];
-    flange.extend(bush_holes().into_iter().map(|(x, y)| circle(x, y, super::ujoint::HOLE_D)));
-    feature(s, el, fid(0x21), BUSH_E, flange, (1.25, 0.0), (0.0, BUSH_T), New, &[])?;
-    feature(s, el, fid(0x23), SLEEVE_E, vec![circle(0.0, 0.0, SLEEVE_D), circle(0.0, 0.0, BORE_D)], (0.5, 0.0), (-SLEEVE_L, 0.0), Add, &[BUSH])?;
-    feature(s, el, fid(0x31), AXLE_E, vec![circle(0.0, 0.0, BORE_D)], (0.0, 0.0), (BUSH_T + AXLE_OUT - AXLE_L, BUSH_T + AXLE_OUT), New, &[])?;
-    for (p, n) in [(BLOCK, COURSE_BOM[1].0), (BUSH, COURSE_BOM[2].0), (AXLE, COURSE_BOM[3].0)] {
-        s.run(&RenamePart { element: el, part: p, name: n.into() })?;
+    flange.extend(
+        bush_holes()
+            .into_iter()
+            .map(|(x, y)| circle(x, y, super::ujoint::HOLE_D)),
+    );
+    feature(
+        s,
+        el,
+        fid(0x21),
+        BUSH_E,
+        flange,
+        (1.25, 0.0),
+        (0.0, BUSH_T),
+        New,
+        &[],
+    )?;
+    feature(
+        s,
+        el,
+        fid(0x23),
+        SLEEVE_E,
+        vec![circle(0.0, 0.0, SLEEVE_D), circle(0.0, 0.0, BORE_D)],
+        (0.5, 0.0),
+        (-SLEEVE_L, 0.0),
+        Add,
+        &[BUSH],
+    )?;
+    feature(
+        s,
+        el,
+        fid(0x31),
+        AXLE_E,
+        vec![circle(0.0, 0.0, BORE_D)],
+        (0.0, 0.0),
+        (BUSH_T + AXLE_OUT - AXLE_L, BUSH_T + AXLE_OUT),
+        New,
+        &[],
+    )?;
+    for (p, n) in [
+        (BLOCK, COURSE_BOM[1].0),
+        (BUSH, COURSE_BOM[2].0),
+        (AXLE, COURSE_BOM[3].0),
+    ] {
+        s.run(&RenamePart {
+            element: el,
+            part: p,
+            name: n.into(),
+        })?;
     }
     for (parts, a) in [
         (vec![BLOCK], Appearance::rgb(178, 182, 188)),
         (vec![BUSH], Appearance::rgb(38, 72, 158)),
         (vec![AXLE], Appearance::rgb(150, 154, 160)),
     ] {
-        s.run(&SetPartAppearance { element: el, parts, appearance: Some(a) })?;
+        s.run(&SetPartAppearance {
+            element: el,
+            parts,
+            appearance: Some(a),
+        })?;
     }
     Ok(())
 }
@@ -197,10 +327,14 @@ pub fn boss_poses() -> [Pose; 4] {
     let c = CENTRE_Z * IN;
     let x = super::ujoint::BOSS_X * IN;
     [
-        Pose::rotation_about([0.0; 3], [0.0, 1.0, 0.0], FRAC_PI_2).then(&Pose::translation([x, 0.0, c])),
-        Pose::rotation_about([0.0; 3], [0.0, 1.0, 0.0], -FRAC_PI_2).then(&Pose::translation([-x, 0.0, c])),
-        Pose::rotation_about([0.0; 3], [1.0, 0.0, 0.0], -FRAC_PI_2).then(&Pose::translation([0.0, x, c])),
-        Pose::rotation_about([0.0; 3], [1.0, 0.0, 0.0], FRAC_PI_2).then(&Pose::translation([0.0, -x, c])),
+        Pose::rotation_about([0.0; 3], [0.0, 1.0, 0.0], FRAC_PI_2)
+            .then(&Pose::translation([x, 0.0, c])),
+        Pose::rotation_about([0.0; 3], [0.0, 1.0, 0.0], -FRAC_PI_2)
+            .then(&Pose::translation([-x, 0.0, c])),
+        Pose::rotation_about([0.0; 3], [1.0, 0.0, 0.0], -FRAC_PI_2)
+            .then(&Pose::translation([0.0, x, c])),
+        Pose::rotation_about([0.0; 3], [1.0, 0.0, 0.0], FRAC_PI_2)
+            .then(&Pose::translation([0.0, -x, c])),
     ]
 }
 
@@ -213,12 +347,20 @@ pub fn second_flange() -> Pose {
         .then(&Pose::translation([0.0, 0.0, 2.0 * CENTRE_Z * IN]))
 }
 
-fn set_props(s: &mut dyn Studio, owner: PropertyOwner, number: &str, description: &str) -> Result<(), CommandError> {
+fn set_props(
+    s: &mut dyn Studio,
+    owner: PropertyOwner,
+    number: &str,
+    description: &str,
+) -> Result<(), CommandError> {
     s.run(&SetProperties {
         owners: vec![owner],
         values: vec![
             (PropertyKey::PartNumber, PropertyValue::Text(number.into())),
-            (PropertyKey::Description, PropertyValue::Text(description.into())),
+            (
+                PropertyKey::Description,
+                PropertyValue::Text(description.into()),
+            ),
         ],
         label: "Set properties".into(),
     })
@@ -227,13 +369,40 @@ fn set_props(s: &mut dyn Studio, owner: PropertyOwner, number: &str, description
 /// Adds the assembly "Universal Joint Assembly" (its instances, the screws with their mates, the
 /// BOM columns) to `doc`, whose studios are built.
 pub fn build_assembly(doc: &mut Document, h: &mut History) -> Result<(), CommandError> {
-    h.execute(doc, &AddElement { id: ASSEMBLY, kind: NewElementKind::Assembly, name: Some(ASSEMBLY_NAME.into()), after: None })?;
-    let flange = InstanceSource::Part { element: FLANGE_STUDIO, part: super::ujoint::PART };
-    let comp = |part| InstanceSource::Part { element: COMPONENTS, part };
-    let mut add = |doc: &mut Document, id, source, pose| h.execute(doc, &InsertInstance { element: ASSEMBLY, instance: Instance::new(id, source, pose) });
+    h.execute(
+        doc,
+        &AddElement {
+            id: ASSEMBLY,
+            kind: NewElementKind::Assembly,
+            name: Some(ASSEMBLY_NAME.into()),
+            after: None,
+        },
+    )?;
+    let flange = InstanceSource::Part {
+        element: FLANGE_STUDIO,
+        part: super::ujoint::PART,
+    };
+    let comp = |part| InstanceSource::Part {
+        element: COMPONENTS,
+        part,
+    };
+    let mut add = |doc: &mut Document, id, source, pose| {
+        h.execute(
+            doc,
+            &InsertInstance {
+                element: ASSEMBLY,
+                instance: Instance::new(id, source, pose),
+            },
+        )
+    };
     add(doc, FLANGES[0], flange, Pose::IDENTITY)?;
     add(doc, FLANGES[1], flange, second_flange())?;
-    add(doc, CENTRE_BLOCK, comp(BLOCK), Pose::translation([0.0, 0.0, CENTRE_Z * IN]))?;
+    add(
+        doc,
+        CENTRE_BLOCK,
+        comp(BLOCK),
+        Pose::translation([0.0, 0.0, CENTRE_Z * IN]),
+    )?;
     let poses = boss_poses();
     for (i, p) in BUSHES.iter().zip(poses) {
         add(doc, *i, comp(BUSH), p)?;
@@ -241,9 +410,20 @@ pub fn build_assembly(doc: &mut Document, h: &mut History) -> Result<(), Command
     for (i, p) in AXLES.iter().zip(poses) {
         add(doc, *i, comp(AXLE), p)?;
     }
-    h.execute(doc, &SetInstancesFixed { element: ASSEMBLY, instances: vec![FLANGES[0]], fixed: true })?;
+    h.execute(
+        doc,
+        &SetInstancesFixed {
+            element: ASSEMBLY,
+            instances: vec![FLANGES[0]],
+            fixed: true,
+        },
+    )?;
     // The screws: on each bush's four hole edges on its outer face (z = BUSH_T in its frame).
-    let asm = doc.element(ASSEMBLY).and_then(|e| e.assembly_model()).cloned().ok_or(CommandError::ElementNotFound(ASSEMBLY))?;
+    let asm = doc
+        .element(ASSEMBLY)
+        .and_then(|e| e.assembly_model())
+        .cloned()
+        .ok_or(CommandError::ElementNotFound(ASSEMBLY))?;
     let mut builds: HashMap<ElementId, Arc<crate::rebuild::Build>> = HashMap::new();
     for o in assembly::structure::occurrences(doc, &asm) {
         if let std::collections::hash_map::Entry::Vacant(e) = builds.entry(o.element)
@@ -255,19 +435,35 @@ pub fn build_assembly(doc: &mut Document, h: &mut History) -> Result<(), Command
     let solids = assembly::occurrence_solids(doc, &asm, |e| builds.get(&e).cloned());
     let mut sites = Vec::new();
     for b in BUSHES {
-        let solid = solids.get(&b).ok_or_else(|| CommandError::Invalid("no bush".into()))?;
+        let solid = solids
+            .get(&b)
+            .ok_or_else(|| CommandError::Invalid("no bush".into()))?;
         let mut here: Vec<_> = solid
             .edges
             .iter()
-            .filter(|e| e.circle.is_some_and(|c| (2.0 * c.radius - super::ujoint::HOLE_D * IN).abs() < 1e-3 && (c.center[2] - BUSH_T * IN).abs() < 1e-3))
+            .filter(|e| {
+                e.circle.is_some_and(|c| {
+                    (2.0 * c.radius - super::ujoint::HOLE_D * IN).abs() < 1e-3
+                        && (c.center[2] - BUSH_T * IN).abs() < 1e-3
+                })
+            })
             .filter_map(|e| site_of_edge(solid, b, &e.name))
             .collect();
         here.sort_by(|a, b| {
-            let c = |s: &crate::assembly::standard::HoleSite| solid.edge(&s.edge).and_then(|e| e.circle).map(|c| (c.center[0], c.center[1])).unwrap_or_default();
+            let c = |s: &crate::assembly::standard::HoleSite| {
+                solid
+                    .edge(&s.edge)
+                    .and_then(|e| e.circle)
+                    .map(|c| (c.center[0], c.center[1]))
+                    .unwrap_or_default()
+            };
             c(a).partial_cmp(&c(b)).unwrap_or(std::cmp::Ordering::Equal)
         });
         if here.len() != 4 {
-            return Err(CommandError::Invalid(format!("a bush has {} screw holes", here.len())));
+            return Err(CommandError::Invalid(format!(
+                "a bush has {} screw holes",
+                here.len()
+            )));
         }
         sites.extend(here);
     }
@@ -279,22 +475,43 @@ pub fn build_assembly(doc: &mut Document, h: &mut History) -> Result<(), Command
     }
     let screw_el = cmd.part.element.id;
     h.execute(doc, &cmd)?;
-    h.execute(doc, &SetStandardProperties { element: screw_el, part_number: COURSE_BOM[4].2.into(), description: COURSE_BOM[4].3.into() })?;
+    h.execute(
+        doc,
+        &SetStandardProperties {
+            element: screw_el,
+            part_number: COURSE_BOM[4].2.into(),
+            description: COURSE_BOM[4].3.into(),
+        },
+    )?;
     // The BOM's columns before D12.2: the default ones less Name.
-    let mut settings = doc.element(ASSEMBLY).and_then(|e| e.assembly_model()).map(|a| a.bom.clone()).unwrap_or_default();
+    let mut settings = doc
+        .element(ASSEMBLY)
+        .and_then(|e| e.assembly_model())
+        .map(|a| a.bom.clone())
+        .unwrap_or_default();
     settings.columns = vec![
         BomColumn::Item,
         BomColumn::Quantity,
         BomColumn::Property(PropertyKey::PartNumber),
         BomColumn::Property(PropertyKey::Description),
     ];
-    h.execute(doc, &SetBomSettings { element: ASSEMBLY, settings, label: "BOM columns".into() })?;
+    h.execute(
+        doc,
+        &SetBomSettings {
+            element: ASSEMBLY,
+            settings,
+            label: "BOM columns".into(),
+        },
+    )?;
     // The title block's second line, like the course's "Made by Onshape".
     h.execute(
         doc,
         &SetProperties {
             owners: vec![PropertyOwner::Assembly { element: ASSEMBLY }],
-            values: vec![(PropertyKey::Description, PropertyValue::Text("Made by cadrs".into()))],
+            values: vec![(
+                PropertyKey::Description,
+                PropertyValue::Text("Made by cadrs".into()),
+            )],
             label: "Description".into(),
         },
     )?;
@@ -313,15 +530,47 @@ pub fn document() -> Result<Document, CommandError> {
     super::ujoint::build(&mut doc, &mut h, FLANGE_STUDIO)?;
     {
         let mut s = DocHistory(&mut doc, &mut h);
-        s.run(&RenamePart { element: FLANGE_STUDIO, part: super::ujoint::PART, name: COURSE_BOM[0].0.into() })?;
-        s.run(&SetPartAppearance { element: FLANGE_STUDIO, parts: vec![super::ujoint::PART], appearance: Some(Appearance::rgb(232, 172, 36)) })?;
-        set_props(&mut s, PropertyOwner::Part { element: FLANGE_STUDIO, part: super::ujoint::PART }, COURSE_BOM[0].2, COURSE_BOM[0].3)?;
-        s.run(&AddElement { id: COMPONENTS, kind: NewElementKind::PartStudio, name: Some("Universal Joint Components".into()), after: Some(FLANGE_STUDIO) })?;
+        s.run(&RenamePart {
+            element: FLANGE_STUDIO,
+            part: super::ujoint::PART,
+            name: COURSE_BOM[0].0.into(),
+        })?;
+        s.run(&SetPartAppearance {
+            element: FLANGE_STUDIO,
+            parts: vec![super::ujoint::PART],
+            appearance: Some(Appearance::rgb(232, 172, 36)),
+        })?;
+        set_props(
+            &mut s,
+            PropertyOwner::Part {
+                element: FLANGE_STUDIO,
+                part: super::ujoint::PART,
+            },
+            COURSE_BOM[0].2,
+            COURSE_BOM[0].3,
+        )?;
+        s.run(&AddElement {
+            id: COMPONENTS,
+            kind: NewElementKind::PartStudio,
+            name: Some("Universal Joint Components".into()),
+            after: Some(FLANGE_STUDIO),
+        })?;
         build_components(&mut s, COMPONENTS)?;
         for (i, p) in [(1, BLOCK), (2, BUSH), (3, AXLE)] {
-            set_props(&mut s, PropertyOwner::Part { element: COMPONENTS, part: p }, COURSE_BOM[i].2, COURSE_BOM[i].3)?;
+            set_props(
+                &mut s,
+                PropertyOwner::Part {
+                    element: COMPONENTS,
+                    part: p,
+                },
+                COURSE_BOM[i].2,
+                COURSE_BOM[i].3,
+            )?;
         }
-        s.run(&RenameElement { id: FLANGE_STUDIO, name: "Universal Joint".into() })?;
+        s.run(&RenameElement {
+            id: FLANGE_STUDIO,
+            name: "Universal Joint".into(),
+        })?;
     }
     build_assembly(&mut doc, &mut h)?;
     Ok(doc)

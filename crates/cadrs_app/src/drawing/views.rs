@@ -20,8 +20,8 @@
 //! - **Picking.** [`view_at`] finds the view under a sheet point (its bounds, padded), and
 //!   [`edge_at`] the straight projected edge nearest a point (auxiliary views and Align view).
 
-use std::collections::hash_map::DefaultHasher;
 use std::collections::HashMap;
+use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
 use std::sync::Arc;
 
@@ -58,16 +58,26 @@ impl Plugin for ViewsPlugin {
             .add_systems(Startup, configure_view_gizmos)
             .add_systems(
                 Update,
-                (drive_view_cache, rebuild_view_scene, sync_view_entities, sync_view_pictures, size_view_lines, draw_view_strokes)
+                (
+                    drive_view_cache,
+                    rebuild_view_scene,
+                    sync_view_entities,
+                    sync_view_pictures,
+                    size_view_lines,
+                    draw_view_strokes,
+                )
                     .chain()
                     .in_set(ViewsSet)
                     .after(super::size_sheet_texts)
                     .run_if(in_state(crate::AppState::Document)),
             )
-            .add_systems(OnExit(crate::AppState::Document), |mut c: ResMut<ViewCache>, mut s: ResMut<ViewScene>| {
-                *c = ViewCache::default();
-                *s = ViewScene::default();
-            });
+            .add_systems(
+                OnExit(crate::AppState::Document),
+                |mut c: ResMut<ViewCache>, mut s: ResMut<ViewScene>| {
+                    *c = ViewCache::default();
+                    *s = ViewScene::default();
+                },
+            );
     }
 }
 
@@ -89,7 +99,11 @@ fn configure_view_gizmos(mut store: ResMut<GizmoConfigStore>) {
 /// View line widths follow the zoom: thin lines are 0.25 mm on paper and at least 1.25 px, so a
 /// dashed hidden line reads as black, not grey; visible (medium) lines 0.5 mm and at least
 /// 2 px, clearly heavier (`ex1-step6.png`, `ex1-drawing.png`).
-fn size_view_lines(doc: Option<Res<ActiveDocument>>, ui: Res<DrawingUi>, mut store: ResMut<GizmoConfigStore>) {
+fn size_view_lines(
+    doc: Option<Res<ActiveDocument>>,
+    ui: Res<DrawingUi>,
+    mut store: ResMut<GizmoConfigStore>,
+) {
     let Some(doc) = doc else {
         return;
     };
@@ -206,7 +220,10 @@ pub struct StudioRef<'a> {
 }
 
 /// The Part Studio a view or sheet references.
-pub fn studio<'a>(doc: &'a cadrs_core::Document, r: &cadrs_drawing::ObjectRef) -> Option<StudioRef<'a>> {
+pub fn studio<'a>(
+    doc: &'a cadrs_core::Document,
+    r: &cadrs_drawing::ObjectRef,
+) -> Option<StudioRef<'a>> {
     let el = doc.element(ElementId(r.element))?;
     match &el.kind {
         ElementKind::PartStudio { .. } => Some(StudioRef {
@@ -249,16 +266,26 @@ pub fn snapshot_hash(snapshot: &str) -> u64 {
 impl ViewCache {
     /// The studio state `v` shows in drawing `d` (the drawing's snapshot, else the workspace):
     /// its studio, its state hash and, when `want` is set, the state itself.
-    fn state_of(&mut self, doc: &cadrs_core::Document, d: Option<&Drawing>, v: &View, want: bool) -> Option<(ElementId, u64, Option<Arc<StudioState>>)> {
+    fn state_of(
+        &mut self,
+        doc: &cadrs_core::Document,
+        d: Option<&Drawing>,
+        v: &View,
+        want: bool,
+    ) -> Option<(ElementId, u64, Option<Arc<StudioState>>)> {
         if let Some(src) = d.and_then(|d| d.source(v.reference.element)) {
             let key = (src.snapshot.as_ptr() as usize, src.snapshot.len());
-            let h = *self.snapshot_hashes.entry(key).or_insert_with(|| snapshot_hash(&src.snapshot));
+            let h = *self
+                .snapshot_hashes
+                .entry(key)
+                .or_insert_with(|| snapshot_hash(&src.snapshot));
             let state = if want {
                 if !self.parsed.contains_key(&h) {
                     if self.parsed.len() > 16 {
                         self.parsed.clear();
                     }
-                    self.parsed.insert(h, Arc::new(StudioState::parse(&src.snapshot)?));
+                    self.parsed
+                        .insert(h, Arc::new(StudioState::parse(&src.snapshot)?));
                 }
                 self.parsed.get(&h).cloned()
             } else {
@@ -282,17 +309,30 @@ impl ViewCache {
     }
 
     /// The assembly state view `v` shows (P3C.5): the drawing's snapshot, else the workspace's.
-    fn assembly_of(&mut self, doc: &cadrs_core::Document, d: Option<&Drawing>, v: &View) -> Option<(ElementId, u64, Arc<cadrs_core::drawing_assembly::AssemblyState>)> {
+    fn assembly_of(
+        &mut self,
+        doc: &cadrs_core::Document,
+        d: Option<&Drawing>,
+        v: &View,
+    ) -> Option<(
+        ElementId,
+        u64,
+        Arc<cadrs_core::drawing_assembly::AssemblyState>,
+    )> {
         use cadrs_core::drawing_assembly::AssemblyState;
         let el = ElementId(v.reference.element);
         if let Some(src) = d.and_then(|d| d.source(v.reference.element)) {
             let key = (src.snapshot.as_ptr() as usize, src.snapshot.len());
-            let h = *self.snapshot_hashes.entry(key).or_insert_with(|| snapshot_hash(&src.snapshot));
+            let h = *self
+                .snapshot_hashes
+                .entry(key)
+                .or_insert_with(|| snapshot_hash(&src.snapshot));
             if !self.parsed_assemblies.contains_key(&h) {
                 if self.parsed_assemblies.len() > 8 {
                     self.parsed_assemblies.clear();
                 }
-                self.parsed_assemblies.insert(h, Arc::new(AssemblyState::parse(&src.snapshot)?));
+                self.parsed_assemblies
+                    .insert(h, Arc::new(AssemblyState::parse(&src.snapshot)?));
             }
             return self.parsed_assemblies.get(&h).map(|st| (el, h, st.clone()));
         }
@@ -301,13 +341,29 @@ impl ViewCache {
             let h = snapshot_hash(&st.to_snapshot());
             e.insert((h, Arc::new(st)));
         }
-        self.live_assemblies.get(&el).map(|(h, st)| (el, *h, st.clone()))
+        self.live_assemblies
+            .get(&el)
+            .map(|(h, st)| (el, *h, st.clone()))
     }
 
-    fn key_of(&mut self, doc: &cadrs_core::Document, d: Option<&Drawing>, v: &View) -> Option<ViewKey> {
+    fn key_of(
+        &mut self,
+        doc: &cadrs_core::Document,
+        d: Option<&Drawing>,
+        v: &View,
+    ) -> Option<ViewKey> {
         if cadrs_core::drawing_assembly::is_assembly(doc, ElementId(v.reference.element)) {
             let (element, state, _) = self.assembly_of(doc, d, v)?;
-            return Some(ViewKey { element, state, part: None, frame: v.frame.key(), shaded: v.shaded, cut: 0, intersections: v.part_intersections, flat: false });
+            return Some(ViewKey {
+                element,
+                state,
+                part: None,
+                frame: v.frame.key(),
+                shaded: v.shaded,
+                cut: 0,
+                intersections: v.part_intersections,
+                flat: false,
+            });
         }
         let (element, state, _) = self.state_of(doc, d, v, false)?;
         Some(ViewKey {
@@ -338,7 +394,16 @@ impl ViewCache {
 
     /// The key an assembly view would have with the assembly state `snapshot` (P3C.5).
     pub fn assembly_key_with(snapshot: &str, v: &View) -> ViewKey {
-        ViewKey { element: ElementId(v.reference.element), state: snapshot_hash(snapshot), part: None, frame: v.frame.key(), shaded: v.shaded, cut: 0, intersections: v.part_intersections, flat: false }
+        ViewKey {
+            element: ElementId(v.reference.element),
+            state: snapshot_hash(snapshot),
+            part: None,
+            frame: v.frame.key(),
+            shaded: v.shaded,
+            cut: 0,
+            intersections: v.part_intersections,
+            flat: false,
+        }
     }
 
     /// Stores a projection made elsewhere (an update's) under `key`.
@@ -354,20 +419,34 @@ impl ViewCache {
 
     /// Makes sure `v` is being generated; returns its geometry if it is ready (or the last one it
     /// had), and whether that is current.
-    pub fn ensure(&mut self, doc: &cadrs_core::Document, d: Option<&Drawing>, v: &View) -> (Option<Arc<ViewGeometry>>, bool) {
+    pub fn ensure(
+        &mut self,
+        doc: &cadrs_core::Document,
+        d: Option<&Drawing>,
+        v: &View,
+    ) -> (Option<Arc<ViewGeometry>>, bool) {
         let Some(key) = self.key_of(doc, d, v) else {
             return (None, false);
         };
         let frame = self.frame;
         if !self.entries.contains_key(&key) {
-            let shown = if key.part.is_none() && cadrs_core::drawing_assembly::is_assembly(doc, key.element) {
-                self.assembly_of(doc, d, v).map(|(_, _, st)| Shown::Assembly(st))
+            let shown = if key.part.is_none()
+                && cadrs_core::drawing_assembly::is_assembly(doc, key.element)
+            {
+                self.assembly_of(doc, d, v)
+                    .map(|(_, _, st)| Shown::Assembly(st))
             } else {
-                self.state_of(doc, d, v, true).and_then(|(_, _, st)| st.map(Shown::Studio))
+                self.state_of(doc, d, v, true)
+                    .and_then(|(_, _, st)| st.map(Shown::Studio))
             };
             let pending = match shown {
-                Some(Shown::Studio(state)) => Some(cadrs_core::views::request(state.features.clone(), Self::request(&state, v))),
-                Some(Shown::Assembly(state)) => Some(cadrs_core::drawing_assembly::request((*state).clone(), v)),
+                Some(Shown::Studio(state)) => Some(cadrs_core::views::request(
+                    state.features.clone(),
+                    Self::request(&state, v),
+                )),
+                Some(Shown::Assembly(state)) => {
+                    Some(cadrs_core::drawing_assembly::request((*state).clone(), v))
+                }
                 None => None,
             };
             if let Some(pending) = pending {
@@ -402,7 +481,12 @@ impl ViewCache {
     }
 
     /// Why the view could not be generated, if it failed.
-    pub fn error(&mut self, doc: &cadrs_core::Document, d: Option<&Drawing>, v: &View) -> Option<String> {
+    pub fn error(
+        &mut self,
+        doc: &cadrs_core::Document,
+        d: Option<&Drawing>,
+        v: &View,
+    ) -> Option<String> {
         let key = self.key_of(doc, d, v)?;
         match self.entries.get(&key) {
             Some((Entry::Failed(e), _)) => Some(e.clone()),
@@ -412,7 +496,9 @@ impl ViewCache {
 
     /// Whether any view is still being generated.
     pub fn busy(&self) -> bool {
-        self.entries.values().any(|(e, _)| matches!(e, Entry::Pending(_)))
+        self.entries
+            .values()
+            .any(|(e, _)| matches!(e, Entry::Pending(_)))
     }
 }
 
@@ -453,10 +539,18 @@ fn drive_view_cache(
         cache.ensure(&doc.doc, Some(d), g);
     }
     let frame = cache.frame;
-    cache.entries.retain(|_, (_, used)| *used + KEEP_FRAMES > frame);
-    let live: std::collections::HashSet<ViewId> = d.sheets.iter().flat_map(|s| s.views.iter().map(|v| v.id)).collect();
+    cache
+        .entries
+        .retain(|_, (_, used)| *used + KEEP_FRAMES > frame);
+    let live: std::collections::HashSet<ViewId> = d
+        .sheets
+        .iter()
+        .flat_map(|s| s.views.iter().map(|v| v.id))
+        .collect();
     let ghost = ui.ghost.as_ref().map(|g| g.id);
-    cache.last.retain(|v, _| live.contains(v) || Some(*v) == ghost);
+    cache
+        .last
+        .retain(|v, _| live.contains(v) || Some(*v) == ghost);
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -478,7 +572,13 @@ pub fn sheet_bounds(v: &View, g: Option<&ViewGeometry>) -> ([f64; 2], [f64; 2]) 
     });
     match b {
         Some((lo, hi)) => {
-            let corners = [[lo[0], lo[1]], [hi[0], lo[1]], [hi[0], hi[1]], [lo[0], hi[1]]].map(|p| v.to_sheet(p));
+            let corners = [
+                [lo[0], lo[1]],
+                [hi[0], lo[1]],
+                [hi[0], hi[1]],
+                [lo[0], hi[1]],
+            ]
+            .map(|p| v.to_sheet(p));
             let mut min = corners[0];
             let mut max = corners[0];
             for c in corners {
@@ -487,7 +587,10 @@ pub fn sheet_bounds(v: &View, g: Option<&ViewGeometry>) -> ([f64; 2], [f64; 2]) 
             }
             (min, max)
         }
-        None => ([v.anchor[0] - 20.0, v.anchor[1] - 15.0], [v.anchor[0] + 20.0, v.anchor[1] + 15.0]),
+        None => (
+            [v.anchor[0] - 20.0, v.anchor[1] - 15.0],
+            [v.anchor[0] + 20.0, v.anchor[1] + 15.0],
+        ),
     }
 }
 
@@ -498,7 +601,8 @@ pub fn view_at(d: &Drawing, index: usize, cache: &ViewCache, p: Vec2, pad: f64) 
         let g = cache.geometry(v);
         let (lo, hi) = sheet_bounds(v, g.as_deref());
         let (x, y) = (p.x as f64, p.y as f64);
-        (x >= lo[0] - pad && x <= hi[0] + pad && y >= lo[1] - pad && y <= hi[1] + pad).then_some(v.id)
+        (x >= lo[0] - pad && x <= hi[0] + pad && y >= lo[1] - pad && y <= hi[1] + pad)
+            .then_some(v.id)
     })
 }
 
@@ -656,23 +760,42 @@ fn decor_strokes(strokes: &mut Vec<Stroke>, d: &cadrs_drawing::view_kinds::Decor
     let v2 = |p: &[f64; 2]| Vec2::new(p[0] as f32, p[1] as f32);
     for (lines, medium) in [(&d.thin, false), (&d.medium, true)] {
         for l in lines {
-            strokes.push(Stroke { points: l.iter().map(v2).collect(), medium, color });
+            strokes.push(Stroke {
+                points: l.iter().map(v2).collect(),
+                medium,
+                color,
+            });
         }
     }
 }
 
 /// The strokes of one view.
-fn view_strokes(strokes: &mut Vec<Stroke>, v: &View, g: &ViewGeometry, color: Color, sketches: &[Vec<[f64; 3]>], highlight: Option<usize>) {
+fn view_strokes(
+    strokes: &mut Vec<Stroke>,
+    v: &View,
+    g: &ViewGeometry,
+    color: Color,
+    sketches: &[Vec<[f64; 3]>],
+    highlight: Option<usize>,
+) {
     for l in view_lines(v, &g.projection) {
         // A shaded view shows its visible edges only.
         if v.shaded && l.kind == LineKind::Hidden {
             continue;
         }
-        let c = if Some(l.edge) == highlight { Color::srgb_u8(0x1f, 0x7a, 0xe0) } else { color };
+        let c = if Some(l.edge) == highlight {
+            Color::srgb_u8(0x1f, 0x7a, 0xe0)
+        } else {
+            color
+        };
         push_line(strokes, &l.points, l.kind, c);
     }
     // A flat pattern's bend lines, in their own pens unless highlighted (P3I.7).
-    strokes.extend(super::flat_views::bend_strokes(v, g, (color != ink()).then_some(color)));
+    strokes.extend(super::flat_views::bend_strokes(
+        v,
+        g,
+        (color != ink()).then_some(color),
+    ));
     if !sketches.is_empty() {
         let frame = v.frame.view_frame();
         let sketch_color = sketch_color();
@@ -685,7 +808,14 @@ fn view_strokes(strokes: &mut Vec<Stroke>, v: &View, g: &ViewGeometry, color: Co
                 })
                 .collect();
             // With the medium lines, after the edges: on top of the outline it traces.
-            strokes.push(Stroke { points: pts.iter().map(|p| Vec2::new(p[0] as f32, p[1] as f32)).collect(), medium: true, color: sketch_color });
+            strokes.push(Stroke {
+                points: pts
+                    .iter()
+                    .map(|p| Vec2::new(p[0] as f32, p[1] as f32))
+                    .collect(),
+                medium: true,
+                color: sketch_color,
+            });
         }
     }
 }
@@ -712,9 +842,13 @@ fn rebuild_view_scene(
     };
     let index = ui.sheet_index(id, d);
     let views = shown_views(d, index, &ui);
-    let geometry: Vec<Option<Arc<ViewGeometry>>> = views.iter().map(|v| cache.geometry(v)).collect();
+    let geometry: Vec<Option<Arc<ViewGeometry>>> =
+        views.iter().map(|v| cache.geometry(v)).collect();
     let ghost_geometry = ui.ghost.as_ref().and_then(|g| cache.geometry(g));
-    let errors: Vec<Option<String>> = views.iter().map(|v| cache.error(&doc.doc, Some(d), v)).collect();
+    let errors: Vec<Option<String>> = views
+        .iter()
+        .map(|v| cache.error(&doc.doc, Some(d), v))
+        .collect();
     let key = SceneKey {
         views: views.clone(),
         geometry: geometry.iter().map(geom_ptr).collect(),
@@ -723,13 +857,20 @@ fn rebuild_view_scene(
         ghost: ui.ghost.clone(),
         ghost_geometry: geom_ptr(&ghost_geometry),
         highlight_edge: ui.highlight_edge,
-        sketches: views.iter().map(|v| (v.id, sketch_hash(&doc.doc, v))).collect(),
+        sketches: views
+            .iter()
+            .map(|v| (v.id, sketch_hash(&doc.doc, v)))
+            .collect(),
         errors: errors.clone(),
         style: d.style.clone(),
         tool_strokes: ui.tool_strokes.clone(),
     };
     // Children being placed show their cutting line or circle on their parent too.
-    let avoid = d.sheets.get(index).map(cadrs_drawing::view_kinds::label_avoid).unwrap_or_default();
+    let avoid = d
+        .sheets
+        .get(index)
+        .map(cadrs_drawing::view_kinds::label_avoid)
+        .unwrap_or_default();
     let mut decor_views = views.clone();
     if let Some(g) = &ui.ghost {
         decor_views.push(g.clone());
@@ -759,16 +900,36 @@ fn rebuild_view_scene(
                     pictures.push((v.clone(), g.clone()));
                 }
                 let sketches = sketch_polylines(&doc.doc, v);
-                let hl = ui.highlight_edge.filter(|(id, _)| *id == v.id).map(|(_, e)| e);
+                let hl = ui
+                    .highlight_edge
+                    .filter(|(id, _)| *id == v.id)
+                    .map(|(_, e)| e);
                 view_strokes(&mut strokes, v, g, color, &sketches, hl);
                 strokes.extend(super::flat_views::centermark_strokes(&d.style, v, g, color));
-                let decor = cadrs_drawing::view_kinds::view_decor(&d.style, &decor_views, v, Some(&**g), &avoid);
+                let decor = cadrs_drawing::view_kinds::view_decor(
+                    &d.style,
+                    &decor_views,
+                    v,
+                    Some(&**g),
+                    &avoid,
+                );
                 decor_strokes(&mut strokes, &decor, color);
             }
             None => {
                 let (lo, hi) = sheet_bounds(v, None);
-                let rect = [[lo[0], lo[1]], [hi[0], lo[1]], [hi[0], hi[1]], [lo[0], hi[1]], [lo[0], lo[1]]];
-                push_line(&mut strokes, &rect, LineKind::Hidden, Color::srgb_u8(0x9a, 0x9a, 0x9a));
+                let rect = [
+                    [lo[0], lo[1]],
+                    [hi[0], lo[1]],
+                    [hi[0], hi[1]],
+                    [lo[0], hi[1]],
+                    [lo[0], lo[1]],
+                ];
+                push_line(
+                    &mut strokes,
+                    &rect,
+                    LineKind::Hidden,
+                    Color::srgb_u8(0x9a, 0x9a, 0x9a),
+                );
                 let label = match err {
                     Some(e) => format!("View failed: {e}"),
                     None => "Generating view…".to_string(),
@@ -781,12 +942,23 @@ fn rebuild_view_scene(
         let mut gv = gv.clone();
         gv.hidden_lines = false;
         view_strokes(&mut strokes, &gv, g, ghost_color(), &[], None);
-        strokes.extend(super::flat_views::centermark_strokes(&d.style, &gv, g, ghost_color()));
+        strokes.extend(super::flat_views::centermark_strokes(
+            &d.style,
+            &gv,
+            g,
+            ghost_color(),
+        ));
         let decor = cadrs_drawing::view_kinds::view_decor(&d.style, &[], &gv, Some(&**g), &avoid);
         decor_strokes(&mut strokes, &decor, ghost_color());
     } else if let Some(gv) = &ui.ghost {
         let (lo, hi) = sheet_bounds(gv, None);
-        let rect = [[lo[0], lo[1]], [hi[0], lo[1]], [hi[0], hi[1]], [lo[0], hi[1]], [lo[0], lo[1]]];
+        let rect = [
+            [lo[0], lo[1]],
+            [hi[0], lo[1]],
+            [hi[0], hi[1]],
+            [lo[0], hi[1]],
+            [lo[0], lo[1]],
+        ];
         push_line(&mut strokes, &rect, LineKind::Hidden, ghost_color());
     }
     for l in &ui.tool_strokes {
@@ -819,7 +991,11 @@ fn sync_view_pictures(
     use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
     let mut keep = Vec::new();
     for (e, m, mut t) in &mut q {
-        match scene.pictures.iter().find(|(v, g)| v.id == m.view && Arc::as_ptr(g) as usize == m.geometry) {
+        match scene
+            .pictures
+            .iter()
+            .find(|(v, g)| v.id == m.view && Arc::as_ptr(g) as usize == m.geometry)
+        {
             Some((v, _)) => {
                 keep.push(v.id);
                 let want = view_transform(v);
@@ -836,14 +1012,24 @@ fn sync_view_pictures(
         }
         // The shaded mesh's depth scale (`sync_view_entities`).
         let span = (v.shaded && !g.shaded.is_empty()).then(|| {
-            let (lo, hi) = g.shaded.iter().flat_map(|t| t.depths).fold((f64::MAX, f64::MIN), |(lo, hi), d| (lo.min(d), hi.max(d)));
+            let (lo, hi) = g
+                .shaded
+                .iter()
+                .flat_map(|t| t.depths)
+                .fold((f64::MAX, f64::MIN), |(lo, hi), d| (lo.min(d), hi.max(d)));
             (hi, (hi - lo).max(1e-9))
         });
         for (i, pic) in g.pictures.iter().enumerate() {
-            let Ok(rgba) = cadrs_drawing::export::decode_image(&pic.data) else { continue };
+            let Ok(rgba) = cadrs_drawing::export::decode_image(&pic.data) else {
+                continue;
+            };
             let (w, h) = rgba.dimensions();
             let image = Image::new(
-                Extent3d { width: w, height: h, depth_or_array_layers: 1 },
+                Extent3d {
+                    width: w,
+                    height: h,
+                    depth_or_array_layers: 1,
+                },
                 TextureDimension::D2,
                 rgba.into_raw(),
                 TextureFormat::Rgba8UnormSrgb,
@@ -853,19 +1039,32 @@ fn sync_view_pictures(
                 (Some((hi, span)), Some(d)) => (0.4 * (hi - d) / span) as f32 + 0.002,
                 _ => 0.0,
             };
-            let p = |a: [f64; 2], b: [f64; 2], c: [f64; 2]| [(a[0] + b[0] + c[0]) as f32, (a[1] + b[1] + c[1]) as f32, z];
+            let p = |a: [f64; 2], b: [f64; 2], c: [f64; 2]| {
+                [(a[0] + b[0] + c[0]) as f32, (a[1] + b[1] + c[1]) as f32, z]
+            };
             let o = [0.0, 0.0];
             // Corners: bottom-left, bottom-right, top-right, top-left (row 0 of the image at the top).
-            let positions = vec![p(pic.at, o, o), p(pic.at, pic.u, o), p(pic.at, pic.u, pic.v), p(pic.at, o, pic.v)];
+            let positions = vec![
+                p(pic.at, o, o),
+                p(pic.at, pic.u, o),
+                p(pic.at, pic.u, pic.v),
+                p(pic.at, o, pic.v),
+            ];
             let uvs = vec![[0.0f32, 1.0], [1.0, 1.0], [1.0, 0.0], [0.0, 0.0]];
-            let mut mesh = Mesh::new(PrimitiveTopology::TriangleList, RenderAssetUsages::default());
+            let mut mesh = Mesh::new(
+                PrimitiveTopology::TriangleList,
+                RenderAssetUsages::default(),
+            );
             mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, positions);
             mesh.insert_attribute(Mesh::ATTRIBUTE_UV_0, uvs);
             // Both windings (a mirrored picture turns its triangles over).
             mesh.insert_indices(Indices::U32(vec![0, 1, 2, 0, 2, 3, 0, 2, 1, 0, 3, 2]));
             commands.spawn((
                 Name::new(format!("view-picture-{}-{i}", v.name.to_lowercase())),
-                ViewPictureMesh { view: v.id, geometry: Arc::as_ptr(g) as usize },
+                ViewPictureMesh {
+                    view: v.id,
+                    geometry: Arc::as_ptr(g) as usize,
+                },
                 Mesh2d(meshes.add(mesh)),
                 MeshMaterial2d(materials.add(ColorMaterial {
                     texture: Some(images.add(image)),
@@ -901,14 +1100,21 @@ fn sync_view_entities(
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<ColorMaterial>>,
     mut q_mesh: Query<(Entity, &ShadedMesh, &mut Transform), Without<PlaceholderLabel>>,
-    mut q_label: Query<(Entity, &PlaceholderLabel, &mut Transform, &mut TextFont), Without<ShadedMesh>>,
+    mut q_label: Query<
+        (Entity, &PlaceholderLabel, &mut Transform, &mut TextFont),
+        Without<ShadedMesh>,
+    >,
     mut commands: Commands,
 ) {
     let layer = RenderLayers::layer(DRAWING_LAYER);
     // Shaded meshes.
     let mut keep = Vec::new();
     for (e, m, mut t) in &mut q_mesh {
-        match scene.shaded.iter().find(|(v, g)| v.id == m.view && Arc::as_ptr(g) as usize == m.geometry) {
+        match scene
+            .shaded
+            .iter()
+            .find(|(v, g)| v.id == m.view && Arc::as_ptr(g) as usize == m.geometry)
+        {
             Some((v, _)) => {
                 keep.push(v.id);
                 let want = view_transform(v);
@@ -942,7 +1148,10 @@ fn sync_view_entities(
             }
         }
         let count = positions.len() as u32;
-        let mut mesh = Mesh::new(PrimitiveTopology::TriangleList, RenderAssetUsages::default());
+        let mut mesh = Mesh::new(
+            PrimitiveTopology::TriangleList,
+            RenderAssetUsages::default(),
+        );
         mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, positions);
         mesh.insert_attribute(Mesh::ATTRIBUTE_COLOR, colors);
         mesh.insert_indices(Indices::U32((0..count).collect()));
@@ -971,7 +1180,11 @@ fn sync_view_entities(
         match scene.placeholders.iter().find(|p| p.0 == l.0 && p.3 == l.1) {
             Some((_, lo, hi, _)) => {
                 have.push(l.0);
-                let pos = Vec3::new(((lo[0] + hi[0]) / 2.0) as f32, ((lo[1] + hi[1]) / 2.0) as f32, 1.0);
+                let pos = Vec3::new(
+                    ((lo[0] + hi[0]) / 2.0) as f32,
+                    ((lo[1] + hi[1]) / 2.0) as f32,
+                    1.0,
+                );
                 let s = em / px;
                 let want = Transform::from_translation(pos).with_scale(Vec3::new(s, s, 1.0));
                 if *t != want {
@@ -989,7 +1202,11 @@ fn sync_view_entities(
         if have.contains(id) {
             continue;
         }
-        let pos = Vec3::new(((lo[0] + hi[0]) / 2.0) as f32, ((lo[1] + hi[1]) / 2.0) as f32, 1.0);
+        let pos = Vec3::new(
+            ((lo[0] + hi[0]) / 2.0) as f32,
+            ((lo[1] + hi[1]) / 2.0) as f32,
+            1.0,
+        );
         commands.spawn((
             Name::new("view-placeholder"),
             PlaceholderLabel(*id, label.clone()),
@@ -1013,14 +1230,24 @@ fn view_transform(v: &View) -> Transform {
     }
 }
 
-fn draw_view_strokes(scene: Res<ViewScene>, notes: Option<Res<super::notes::NoteScene>>, mut thin: Gizmos<ViewThin>, mut medium: Gizmos<ViewMedium>) {
+fn draw_view_strokes(
+    scene: Res<ViewScene>,
+    notes: Option<Res<super::notes::NoteScene>>,
+    mut thin: Gizmos<ViewThin>,
+    mut medium: Gizmos<ViewMedium>,
+) {
     let rects: &[(Vec2, Vec2)] = notes.as_deref().map_or(&[], |n| &n.table_rects);
     for s in &scene.strokes {
         if s.points.len() < 2 {
             continue;
         }
-        let (min, max) = s.points.iter().fold((Vec2::MAX, Vec2::MIN), |(a, b), p| (a.min(*p), b.max(*p)));
-        let touches = rects.iter().any(|(lo, hi)| min.x <= hi.x && max.x >= lo.x && min.y <= hi.y && max.y >= lo.y);
+        let (min, max) = s
+            .points
+            .iter()
+            .fold((Vec2::MAX, Vec2::MIN), |(a, b), p| (a.min(*p), b.max(*p)));
+        let touches = rects
+            .iter()
+            .any(|(lo, hi)| min.x <= hi.x && max.x >= lo.x && min.y <= hi.y && max.y >= lo.y);
         if !touches {
             let pts = s.points.iter().copied();
             if s.medium {
@@ -1051,7 +1278,12 @@ pub(crate) fn outside_rects(a: Vec2, b: Vec2, rects: &[(Vec2, Vec2)]) -> Vec<(Ve
     for (lo, hi) in rects {
         let (mut t0, mut t1) = (0.0f32, 1.0f32);
         let mut ok = true;
-        for (p, q) in [(-d.x, a.x - lo.x), (d.x, hi.x - a.x), (-d.y, a.y - lo.y), (d.y, hi.y - a.y)] {
+        for (p, q) in [
+            (-d.x, a.x - lo.x),
+            (d.x, hi.x - a.x),
+            (-d.y, a.y - lo.y),
+            (d.y, hi.y - a.y),
+        ] {
             if p.abs() < 1e-12 {
                 if q < 0.0 {
                     ok = false;
@@ -1093,11 +1325,23 @@ mod tests {
     /// Tables are opaque (P3C wrap-up): a view line loses its part inside a table's box.
     #[test]
     fn view_lines_are_cut_out_of_tables() {
-        let rects = [(Vec2::new(10.0, -5.0), Vec2::new(20.0, 5.0)), (Vec2::new(15.0, -1.0), Vec2::new(30.0, 1.0))];
+        let rects = [
+            (Vec2::new(10.0, -5.0), Vec2::new(20.0, 5.0)),
+            (Vec2::new(15.0, -1.0), Vec2::new(30.0, 1.0)),
+        ];
         let parts = outside_rects(Vec2::new(0.0, 0.0), Vec2::new(40.0, 0.0), &rects);
-        assert_eq!(parts, vec![(Vec2::new(0.0, 0.0), Vec2::new(10.0, 0.0)), (Vec2::new(30.0, 0.0), Vec2::new(40.0, 0.0))]);
+        assert_eq!(
+            parts,
+            vec![
+                (Vec2::new(0.0, 0.0), Vec2::new(10.0, 0.0)),
+                (Vec2::new(30.0, 0.0), Vec2::new(40.0, 0.0))
+            ]
+        );
         // A line clear of the boxes stays whole; one inside is gone.
-        assert_eq!(outside_rects(Vec2::new(0.0, 10.0), Vec2::new(40.0, 10.0), &rects).len(), 1);
+        assert_eq!(
+            outside_rects(Vec2::new(0.0, 10.0), Vec2::new(40.0, 10.0), &rects).len(),
+            1
+        );
         assert!(outside_rects(Vec2::new(11.0, 0.0), Vec2::new(19.0, 2.0), &rects).is_empty());
     }
 }

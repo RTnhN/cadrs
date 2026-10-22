@@ -27,7 +27,9 @@ impl Command for SetFeature {
             .find(|f| f.id == self.feature)
             .ok_or_else(|| CommandError::Invalid("feature not found".into()))?;
         if std::mem::discriminant(&f.kind) != std::mem::discriminant(&self.kind) {
-            return Err(CommandError::Invalid("a feature can't change its type".into()));
+            return Err(CommandError::Invalid(
+                "a feature can't change its type".into(),
+            ));
         }
         f.kind = self.kind.clone();
         if let FeatureKind::Hole(h) = &f.kind
@@ -49,38 +51,89 @@ impl Command for SetFeature {
 
 impl AddFeature {
     /// A Variable (P3F.4), listed as "#name".
-    pub fn variable(element: ElementId, feature: FeatureId, x: crate::variables::VariableFeature) -> Self {
-        Self { element, feature, base_name: "Variable".into(), kind: FeatureKind::Variable(x) }
+    pub fn variable(
+        element: ElementId,
+        feature: FeatureId,
+        x: crate::variables::VariableFeature,
+    ) -> Self {
+        Self {
+            element,
+            feature,
+            base_name: "Variable".into(),
+            kind: FeatureKind::Variable(x),
+        }
     }
 
     /// A Fillet ("Fillet N").
-    pub fn fillet(element: ElementId, feature: FeatureId, x: crate::applied::FilletFeature) -> Self {
-        Self { element, feature, base_name: "Fillet".into(), kind: FeatureKind::Fillet(x) }
+    pub fn fillet(
+        element: ElementId,
+        feature: FeatureId,
+        x: crate::applied::FilletFeature,
+    ) -> Self {
+        Self {
+            element,
+            feature,
+            base_name: "Fillet".into(),
+            kind: FeatureKind::Fillet(x),
+        }
     }
 
     /// A Chamfer ("Chamfer N").
-    pub fn chamfer(element: ElementId, feature: FeatureId, x: crate::applied::ChamferFeature) -> Self {
-        Self { element, feature, base_name: "Chamfer".into(), kind: FeatureKind::Chamfer(x) }
+    pub fn chamfer(
+        element: ElementId,
+        feature: FeatureId,
+        x: crate::applied::ChamferFeature,
+    ) -> Self {
+        Self {
+            element,
+            feature,
+            base_name: "Chamfer".into(),
+            kind: FeatureKind::Chamfer(x),
+        }
     }
 
     /// A Shell ("Shell N").
     pub fn shell(element: ElementId, feature: FeatureId, x: crate::applied::ShellFeature) -> Self {
-        Self { element, feature, base_name: "Shell".into(), kind: FeatureKind::Shell(x) }
+        Self {
+            element,
+            feature,
+            base_name: "Shell".into(),
+            kind: FeatureKind::Shell(x),
+        }
     }
 
     /// A Hole, named by its callout.
     pub fn hole(element: ElementId, feature: FeatureId, x: crate::applied::HoleFeature) -> Self {
-        Self { element, feature, base_name: "Hole".into(), kind: FeatureKind::Hole(x) }
+        Self {
+            element,
+            feature,
+            base_name: "Hole".into(),
+            kind: FeatureKind::Hole(x),
+        }
     }
 
     /// A Draft ("Draft N", P3.10).
     pub fn draft(element: ElementId, feature: FeatureId, x: crate::draft::DraftFeature) -> Self {
-        Self { element, feature, base_name: "Draft".into(), kind: FeatureKind::Draft(x) }
+        Self {
+            element,
+            feature,
+            base_name: "Draft".into(),
+            kind: FeatureKind::Draft(x),
+        }
     }
 
     /// A Transform ("Transform N").
-    pub fn transform(element: ElementId, feature: FeatureId, x: crate::transform::TransformFeature) -> Self {
-        Self { element, feature, base_name: "Transform".into(), kind: FeatureKind::Transform(x) }
+    pub fn transform(
+        element: ElementId,
+        feature: FeatureId,
+        x: crate::transform::TransformFeature,
+    ) -> Self {
+        Self {
+            element,
+            feature,
+            base_name: "Transform".into(),
+            kind: FeatureKind::Transform(x),
+        }
     }
 }
 
@@ -105,7 +158,9 @@ impl Command for MoveFeatures {
         Scope::Element(self.element)
     }
     fn apply(&self, doc: &mut Document) -> Result<(), CommandError> {
-        let el = doc.element_mut(self.element).ok_or(CommandError::ElementNotFound(self.element))?;
+        let el = doc
+            .element_mut(self.element)
+            .ok_or(CommandError::ElementNotFound(self.element))?;
         let features = el
             .features_mut()
             .ok_or_else(|| CommandError::Invalid("features need a Part Studio".into()))?;
@@ -118,7 +173,9 @@ impl Command for MoveFeatures {
             moved.push(features.remove(i));
         }
         if self.to > features.len() {
-            return Err(CommandError::Invalid("no such place in the feature list".into()));
+            return Err(CommandError::Invalid(
+                "no such place in the feature list".into(),
+            ));
         }
         for (k, f) in moved.into_iter().enumerate() {
             features.insert(self.to + k, f);
@@ -129,7 +186,9 @@ impl Command for MoveFeatures {
             // A folder being moved keeps its features; otherwise they leave their folders.
             let whole: Vec<FeatureId> = folders
                 .iter()
-                .filter(|f| !f.features.is_empty() && f.features.iter().all(|x| self.features.contains(x)))
+                .filter(|f| {
+                    !f.features.is_empty() && f.features.iter().all(|x| self.features.contains(x))
+                })
                 .map(|f| f.id)
                 .collect();
             for f in folders.iter_mut() {
@@ -158,10 +217,12 @@ impl Command for MoveFeatures {
 pub fn normalize_folders(folders: &mut [FeatureFolder], order: &[FeatureId]) {
     for f in folders.iter_mut() {
         f.features.retain(|x| order.contains(x));
-        f.features.sort_by_key(|x| order.iter().position(|o| o == x));
+        f.features
+            .sort_by_key(|x| order.iter().position(|o| o == x));
     }
     for i in 0..folders.len() {
-        let (Some(first), Some(last)) = (folders[i].features.first(), folders[i].features.last()) else {
+        let (Some(first), Some(last)) = (folders[i].features.first(), folders[i].features.last())
+        else {
             continue;
         };
         let a = order.iter().position(|o| o == first).unwrap_or(0);
@@ -193,7 +254,9 @@ impl Command for CreateFolder {
         Scope::Element(self.element)
     }
     fn apply(&self, doc: &mut Document) -> Result<(), CommandError> {
-        let el = doc.element_mut(self.element).ok_or(CommandError::ElementNotFound(self.element))?;
+        let el = doc
+            .element_mut(self.element)
+            .ok_or(CommandError::ElementNotFound(self.element))?;
         let order: Vec<FeatureId> = el.features().iter().map(|f| f.id).collect();
         let name = match &self.name {
             Some(n) => non_empty(n)?,

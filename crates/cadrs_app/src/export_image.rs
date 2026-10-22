@@ -20,7 +20,10 @@ use bevy::render::view::screenshot::{Screenshot, ScreenshotCaptured};
 use bevy::text::{EditableText, FontWeight, TextEdit};
 use bevy::ui_widgets::Activate;
 use cadrs_ui::prelude::*;
-use cadrs_ui::{Button, CheckboxState, DialogClose, Notification, Select, SelectState, TextInputField, TextSubmit, show_notification};
+use cadrs_ui::{
+    Button, CheckboxState, DialogClose, Notification, Select, SelectState, TextInputField,
+    TextSubmit, show_notification,
+};
 use image::RgbaImage;
 
 use crate::viewport::{MainCamera, ViewportRect};
@@ -30,10 +33,16 @@ pub struct ExportImagePlugin;
 
 impl Plugin for ExportImagePlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Update, (sync_rows, drive_capture, on_folder_picked).run_if(in_state(AppState::Document)))
-            .add_systems(PostUpdate, flag_pending_work.run_if(in_state(AppState::Document)))
-            .add_observer(on_activate)
-            .add_observer(on_submit);
+        app.add_systems(
+            Update,
+            (sync_rows, drive_capture, on_folder_picked).run_if(in_state(AppState::Document)),
+        )
+        .add_systems(
+            PostUpdate,
+            flag_pending_work.run_if(in_state(AppState::Document)),
+        )
+        .add_observer(on_activate)
+        .add_observer(on_submit);
     }
 }
 
@@ -41,7 +50,11 @@ impl Plugin for ExportImagePlugin {
 pub const MAX_SIDE: u32 = 8192;
 
 /// The sizes offered after "Viewport": (width, height, label).
-const SIZES: [(u32, u32, &str); 3] = [(1280, 720, "1280 × 720 (HD)"), (1920, 1080, "1920 × 1080 (Full HD)"), (3840, 2160, "3840 × 2160 (4K)")];
+const SIZES: [(u32, u32, &str); 3] = [
+    (1280, 720, "1280 × 720 (HD)"),
+    (1920, 1080, "1920 × 1080 (Full HD)"),
+    (3840, 2160, "3840 × 2160 (4K)"),
+];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ImageFormat {
@@ -84,11 +97,21 @@ struct PendingCapture {
 /// Opens the dialog for the active 3D tab; `name` is the file name to start with (the tab's
 /// name by default).
 pub fn open(world: &mut World, name: Option<String>) {
-    let Some(tab) = world.get_resource::<ActiveDocument>().and_then(|d| d.active_element().map(|e| e.name.clone())) else { return };
+    let Some(tab) = world
+        .get_resource::<ActiveDocument>()
+        .and_then(|d| d.active_element().map(|e| e.name.clone()))
+    else {
+        return;
+    };
     let base = name.unwrap_or(tab);
     let r = world.resource::<ViewportRect>().0;
-    let viewport = (r.width().round().max(1.0) as u32, r.height().round().max(1.0) as u32);
-    let dir = crate::export_dir(world).map(|d| d.display().to_string()).unwrap_or_default();
+    let viewport = (
+        r.width().round().max(1.0) as u32,
+        r.height().round().max(1.0) as u32,
+    );
+    let dir = crate::export_dir(world)
+        .map(|d| d.display().to_string())
+        .unwrap_or_default();
     let theme = world.resource::<Theme>().clone();
     let (tb, tf) = (theme.clone(), theme.clone());
     let mut commands = world.commands();
@@ -100,53 +123,137 @@ pub fn open(world: &mut World, name: Option<String>) {
                 let t = &tb;
                 let full = || Val::Percent(100.0);
                 let row = |name: &str| {
-                    (Name::new(name.to_string()), Node { flex_direction: FlexDirection::Column, width: Val::Percent(100.0), row_gap: Val::Px(4.0), margin: UiRect::bottom(Val::Px(10.0)), ..default() })
+                    (
+                        Name::new(name.to_string()),
+                        Node {
+                            flex_direction: FlexDirection::Column,
+                            width: Val::Percent(100.0),
+                            row_gap: Val::Px(4.0),
+                            margin: UiRect::bottom(Val::Px(10.0)),
+                            ..default()
+                        },
+                    )
                 };
                 let label = |g: &mut ChildSpawner, s: &str| {
                     g.spawn(t.text(s, t.font_base, FontWeight::BOLD, t.foreground));
                 };
                 b.spawn(row("export-image-name-row")).with_children(|g| {
                     label(g, "File name");
-                    g.spawn(TextInput::new("export-image-name").value(base).select_all_on_focus().autofocus().width(full()).height(26.0).build(t));
-                    g.spawn(t.text("The view as shown: its orientation, shading, edges and any exploded view.", t.font_sm, FontWeight::NORMAL, t.muted_foreground));
+                    g.spawn(
+                        TextInput::new("export-image-name")
+                            .value(base)
+                            .select_all_on_focus()
+                            .autofocus()
+                            .width(full())
+                            .height(26.0)
+                            .build(t),
+                    );
+                    g.spawn(t.text(
+                        "The view as shown: its orientation, shading, edges and any exploded view.",
+                        t.font_sm,
+                        FontWeight::NORMAL,
+                        t.muted_foreground,
+                    ));
                 });
                 b.spawn(row("export-image-format-row")).with_children(|g| {
                     label(g, "Format");
-                    g.spawn(Select::new("export-image-format").bordered().width(full()).option("PNG", true).option("JPEG", true).build(t));
+                    g.spawn(
+                        Select::new("export-image-format")
+                            .bordered()
+                            .width(full())
+                            .option("PNG", true)
+                            .option("JPEG", true)
+                            .build(t),
+                    );
                 });
                 b.spawn(row("export-image-size-row")).with_children(|g| {
                     label(g, "Size");
-                    let mut s = Select::new("export-image-size").bordered().width(full()).option(format!("Viewport ({} × {})", viewport.0, viewport.1), true);
+                    let mut s = Select::new("export-image-size")
+                        .bordered()
+                        .width(full())
+                        .option(format!("Viewport ({} × {})", viewport.0, viewport.1), true);
                     for (_, _, l) in SIZES {
                         s = s.option(l, true);
                     }
                     g.spawn(s.option("Custom", true).selected(2).build(t));
                 });
                 b.spawn(row("export-image-custom-row")).with_children(|g| {
-                    g.spawn(Node { column_gap: Val::Px(10.0), width: full(), ..default() }).with_children(|r| {
-                        for (name, text, value) in [("export-image-width", "Width (px)", "1920"), ("export-image-height", "Height (px)", "1080")] {
-                            r.spawn(Node { flex_direction: FlexDirection::Column, row_gap: Val::Px(4.0), flex_grow: 1.0, flex_basis: Val::Px(0.0), ..default() }).with_children(|c| {
+                    g.spawn(Node {
+                        column_gap: Val::Px(10.0),
+                        width: full(),
+                        ..default()
+                    })
+                    .with_children(|r| {
+                        for (name, text, value) in [
+                            ("export-image-width", "Width (px)", "1920"),
+                            ("export-image-height", "Height (px)", "1080"),
+                        ] {
+                            r.spawn(Node {
+                                flex_direction: FlexDirection::Column,
+                                row_gap: Val::Px(4.0),
+                                flex_grow: 1.0,
+                                flex_basis: Val::Px(0.0),
+                                ..default()
+                            })
+                            .with_children(|c| {
                                 label(c, text);
-                                c.spawn(TextInput::new(name).value(value).select_all_on_focus().width(full()).height(26.0).build(t));
+                                c.spawn(
+                                    TextInput::new(name)
+                                        .value(value)
+                                        .select_all_on_focus()
+                                        .width(full())
+                                        .height(26.0)
+                                        .build(t),
+                                );
                             });
                         }
                     });
-                    g.spawn((Name::new("export-image-size-error"), t.text("", 11.0, FontWeight::NORMAL, t.feature_error)));
+                    g.spawn((
+                        Name::new("export-image-size-error"),
+                        t.text("", 11.0, FontWeight::NORMAL, t.feature_error),
+                    ));
                 });
                 b.spawn(row("export-image-options-row")).with_children(|g| {
-                    g.spawn(Checkbox::new("export-image-transparent").label("Transparent background (PNG)").height(24.0).build(t));
+                    g.spawn(
+                        Checkbox::new("export-image-transparent")
+                            .label("Transparent background (PNG)")
+                            .height(24.0)
+                            .build(t),
+                    );
                 });
                 b.spawn(row("export-image-folder-row")).with_children(|g| {
                     label(g, "Folder");
-                    g.spawn(Node { column_gap: Val::Px(6.0), align_items: AlignItems::Center, width: full(), ..default() }).with_children(|r| {
-                        r.spawn(TextInput::new("export-image-folder").value(dir).width(full()).height(26.0).build(t));
-                        r.spawn(Button::new("export-image-browse").label("Browse…").outline().build(t));
+                    g.spawn(Node {
+                        column_gap: Val::Px(6.0),
+                        align_items: AlignItems::Center,
+                        width: full(),
+                        ..default()
+                    })
+                    .with_children(|r| {
+                        r.spawn(
+                            TextInput::new("export-image-folder")
+                                .value(dir)
+                                .width(full())
+                                .height(26.0)
+                                .build(t),
+                        );
+                        r.spawn(
+                            Button::new("export-image-browse")
+                                .label("Browse…")
+                                .outline()
+                                .build(t),
+                        );
                     });
                 });
             })
             .footer(move |f| {
                 let t = &tf;
-                f.spawn(Button::new("export-image-ok").label("Export").primary().build(t));
+                f.spawn(
+                    Button::new("export-image-ok")
+                        .label("Export")
+                        .primary()
+                        .build(t),
+                );
                 f.spawn(Button::new("export-image-cancel").label("Cancel").build(t));
             })
             .build(&theme),
@@ -158,12 +265,18 @@ pub fn open(world: &mut World, name: Option<String>) {
 
 fn field(w: &mut World, name: &str) -> String {
     let mut q = w.query_filtered::<(&Name, &EditableText), With<TextInputField>>();
-    q.iter(w).find(|(n, _)| n.as_str() == name).map(|(_, t)| t.value().to_string()).unwrap_or_default()
+    q.iter(w)
+        .find(|(n, _)| n.as_str() == name)
+        .map(|(_, t)| t.value().to_string())
+        .unwrap_or_default()
 }
 
 fn select(w: &mut World, name: &str) -> usize {
     let mut q = w.query::<(&Name, &SelectState)>();
-    q.iter(w).find(|(n, _)| n.as_str() == name).map(|(_, s)| s.selected).unwrap_or(0)
+    q.iter(w)
+        .find(|(n, _)| n.as_str() == name)
+        .map(|(_, s)| s.selected)
+        .unwrap_or(0)
 }
 
 fn checked(w: &mut World, name: &str) -> bool {
@@ -199,17 +312,26 @@ fn sync_rows(
     if q.is_empty() {
         return;
     }
-    let jpeg = q_sel.iter().any(|(n, s)| n.as_str() == "export-image-format" && s.selected == 1);
+    let jpeg = q_sel
+        .iter()
+        .any(|(n, s)| n.as_str() == "export-image-format" && s.selected == 1);
     for (e, n, disabled) in &q_check {
         if n.as_str() == "export-image-transparent" && disabled != jpeg {
             if jpeg {
-                commands.entity(e).try_insert((bevy::ui::InteractionDisabled, cadrs_ui::Tooltip::card(JPEG_NO_TRANSPARENCY)));
+                commands.entity(e).try_insert((
+                    bevy::ui::InteractionDisabled,
+                    cadrs_ui::Tooltip::card(JPEG_NO_TRANSPARENCY),
+                ));
             } else {
-                commands.entity(e).try_remove::<(bevy::ui::InteractionDisabled, cadrs_ui::Tooltip)>();
+                commands
+                    .entity(e)
+                    .try_remove::<(bevy::ui::InteractionDisabled, cadrs_ui::Tooltip)>();
             }
         }
     }
-    let custom = q_sel.iter().any(|(n, s)| n.as_str() == "export-image-size" && s.selected == SIZES.len() + 1);
+    let custom = q_sel
+        .iter()
+        .any(|(n, s)| n.as_str() == "export-image-size" && s.selected == SIZES.len() + 1);
     for (n, mut node) in &mut q_rows {
         if n.as_str() == "export-image-custom-row" {
             let d = if custom { Display::Flex } else { Display::None };
@@ -218,8 +340,17 @@ fn sync_rows(
             }
         }
     }
-    let text = |name: &str| q_fields.iter().find(|(n, _)| n.as_str() == name).map(|(_, t)| t.value().to_string()).unwrap_or_default();
-    let err = parse_side(&text("export-image-width-field")).and(parse_side(&text("export-image-height-field"))).err().unwrap_or_default();
+    let text = |name: &str| {
+        q_fields
+            .iter()
+            .find(|(n, _)| n.as_str() == name)
+            .map(|(_, t)| t.value().to_string())
+            .unwrap_or_default()
+    };
+    let err = parse_side(&text("export-image-width-field"))
+        .and(parse_side(&text("export-image-height-field")))
+        .err()
+        .unwrap_or_default();
     for (n, mut t) in &mut q_text {
         if n.as_str() == "export-image-size-error" && t.0 != err {
             t.0 = err.clone();
@@ -228,7 +359,9 @@ fn sync_rows(
 }
 
 fn on_submit(ev: On<TextSubmit>, q: Query<&Name>, mut commands: Commands) {
-    if q.get(ev.entity).is_ok_and(|n| n.as_str() == "export-image-name-field") {
+    if q.get(ev.entity)
+        .is_ok_and(|n| n.as_str() == "export-image-name-field")
+    {
         commands.queue(start);
     }
 }
@@ -241,10 +374,21 @@ fn on_activate(ev: On<Activate>, q: Query<&Name>, mut commands: Commands) {
         "export-image-browse" => commands.queue(|world: &mut World| {
             let typed = field(world, "export-image-folder-field");
             let dir = PathBuf::from(typed.trim());
-            let dir = if dir.is_dir() { dir } else { std::env::current_dir().unwrap_or_default() };
+            let dir = if dir.is_dir() {
+                dir
+            } else {
+                std::env::current_dir().unwrap_or_default()
+            };
             let theme = world.resource::<Theme>().clone();
             let mut commands = world.commands();
-            cadrs_ui::file_picker::open_folder_picker(&mut commands, &theme, "folder-picker", "Choose a folder", "export-image-folder", dir);
+            cadrs_ui::file_picker::open_folder_picker(
+                &mut commands,
+                &theme,
+                "folder-picker",
+                "Choose a folder",
+                "export-image-folder",
+                dir,
+            );
             world.flush();
         }),
         _ => {}
@@ -259,7 +403,10 @@ fn on_folder_picked(mut msgs: MessageReader<cadrs_ui::FilePicked>, mut commands:
         let text = m.path.display().to_string();
         commands.queue(move |w: &mut World| {
             let mut q = w.query_filtered::<(&Name, &mut EditableText), With<TextInputField>>();
-            if let Some((_, mut t)) = q.iter_mut(w).find(|(n, _)| n.as_str() == "export-image-folder-field") {
+            if let Some((_, mut t)) = q
+                .iter_mut(w)
+                .find(|(n, _)| n.as_str() == "export-image-folder-field")
+            {
                 t.queue_edit(TextEdit::SelectAll);
                 t.queue_edit(TextEdit::Insert(text.clone().into()));
             }
@@ -290,18 +437,27 @@ pub fn export_scale(scale: f32, viewport: (u32, u32), size: (u32, u32)) -> f32 {
 /// Export: an offscreen camera like the viewport's renders into an image of the chosen size.
 fn start(world: &mut World) {
     let mut q = world.query::<(Entity, &ExportImageDialog)>();
-    let Some((_, viewport)) = q.iter(world).next().map(|(e, d)| (e, d.viewport)) else { return };
+    let Some((_, viewport)) = q.iter(world).next().map(|(e, d)| (e, d.viewport)) else {
+        return;
+    };
     if world.contains_resource::<PendingCapture>() {
         return;
     }
     let base = field(world, "export-image-name-field").trim().to_string();
     let folder = field(world, "export-image-folder-field").trim().to_string();
-    let format = if select(world, "export-image-format") == 1 { ImageFormat::Jpeg } else { ImageFormat::Png };
+    let format = if select(world, "export-image-format") == 1 {
+        ImageFormat::Jpeg
+    } else {
+        ImageFormat::Png
+    };
     let transparent = checked(world, "export-image-transparent") && format == ImageFormat::Png;
     let size = match select(world, "export-image-size") {
         0 => viewport,
         i if i <= SIZES.len() => (SIZES[i - 1].0, SIZES[i - 1].1),
-        _ => match (parse_side(&field(world, "export-image-width-field")), parse_side(&field(world, "export-image-height-field"))) {
+        _ => match (
+            parse_side(&field(world, "export-image-width-field")),
+            parse_side(&field(world, "export-image-height-field")),
+        ) {
             (Ok(w), Ok(h)) => (w, h),
             // The error shows under the fields; the dialog stays open.
             _ => return,
@@ -316,7 +472,9 @@ fn start(world: &mut World) {
     let path = cadrs_core::export::unique_path_ext(&dir, &stem, format.extension());
     // The viewport camera's placement and zoom.
     let mut qc = world.query_filtered::<(&Transform, &Projection), With<MainCamera>>();
-    let Some((transform, projection)) = qc.iter(world).next().map(|(t, p)| (*t, p.clone())) else { return };
+    let Some((transform, projection)) = qc.iter(world).next().map(|(t, p)| (*t, p.clone())) else {
+        return;
+    };
     let mut image = Image::new_target_texture(size.0, size.1, TextureFormat::Rgba8UnormSrgb, None);
     image.asset_usage = RenderAssetUsages::default();
     let target = world.resource_mut::<Assets<Image>>().add(image);
@@ -328,13 +486,21 @@ fn start(world: &mut World) {
         }
         p => p,
     };
-    let background = if transparent { Color::NONE } else { world.resource::<Theme>().viewport_background };
+    let background = if transparent {
+        Color::NONE
+    } else {
+        world.resource::<Theme>().viewport_background
+    };
     let camera = world
         .spawn((
             Name::new("export-image-camera"),
             Camera3d::default(),
             RenderTarget::Image(target.clone().into()),
-            Camera { order: -3, clear_color: ClearColorConfig::Custom(background), ..default() },
+            Camera {
+                order: -3,
+                clear_color: ClearColorConfig::Custom(background),
+                ..default()
+            },
             projection,
             Tonemapping::None,
             DebandDither::Disabled,
@@ -345,19 +511,39 @@ fn start(world: &mut World) {
     let blocker = world
         .spawn((
             Name::new("export-image-busy"),
-            Node { position_type: PositionType::Absolute, left: Val::Px(0.0), top: Val::Px(0.0), width: Val::Percent(100.0), height: Val::Percent(100.0), ..default() },
+            Node {
+                position_type: PositionType::Absolute,
+                left: Val::Px(0.0),
+                top: Val::Px(0.0),
+                width: Val::Percent(100.0),
+                height: Val::Percent(100.0),
+                ..default()
+            },
             GlobalZIndex(cadrs_ui::z::DIALOG + 10),
             DespawnOnExit(AppState::Document),
         ))
         .id();
-    world.insert_resource(PendingCapture { camera, blocker, target, frames: 0, requested: false, path, format, transparent, size, result: Arc::new(Mutex::new(None)) });
+    world.insert_resource(PendingCapture {
+        camera,
+        blocker,
+        target,
+        frames: 0,
+        requested: false,
+        path,
+        format,
+        transparent,
+        size,
+        result: Arc::new(Mutex::new(None)),
+    });
 }
 
 /// Frames to wait before giving up on a capture.
 const TIMEOUT: u32 = 240;
 
 fn drive_capture(world: &mut World) {
-    let Some(mut p) = world.remove_resource::<PendingCapture>() else { return };
+    let Some(mut p) = world.remove_resource::<PendingCapture>() else {
+        return;
+    };
     p.frames += 1;
     let done = p.result.lock().unwrap().take();
     if done.is_some() || p.frames > TIMEOUT {
@@ -369,7 +555,13 @@ fn drive_capture(world: &mut World) {
         let note = match done {
             Some(Ok(path)) => {
                 info!("exported {}", path.display());
-                Notification::info(format!("Exported {} ({} × {})", path.display(), p.size.0, p.size.1)).seconds(8.0)
+                Notification::info(format!(
+                    "Exported {} ({} × {})",
+                    path.display(),
+                    p.size.0,
+                    p.size.1
+                ))
+                .seconds(8.0)
             }
             Some(Err(e)) => Notification::warning(format!("Export failed: {e}")),
             None => Notification::warning("Export failed: the image wasn't rendered"),
@@ -379,21 +571,29 @@ fn drive_capture(world: &mut World) {
     // A few frames for the camera to render (and the hover to clear).
     if p.frames >= 4 && !p.requested {
         p.requested = true;
-        let (path, format, transparent, result) = (p.path.clone(), p.format, p.transparent, p.result.clone());
-        world.spawn(Screenshot(RenderTarget::Image(p.target.clone().into()))).observe(move |shot: On<ScreenshotCaptured>| {
-            let r = match shot.image.clone().try_into_dynamic() {
-                Ok(img) => write_image(img.to_rgba8(), &path, format, transparent),
-                Err(e) => Err(format!("cannot read the image back: {e:?}")),
-            };
-            *result.lock().unwrap() = Some(r);
-        });
+        let (path, format, transparent, result) =
+            (p.path.clone(), p.format, p.transparent, p.result.clone());
+        world
+            .spawn(Screenshot(RenderTarget::Image(p.target.clone().into())))
+            .observe(move |shot: On<ScreenshotCaptured>| {
+                let r = match shot.image.clone().try_into_dynamic() {
+                    Ok(img) => write_image(img.to_rgba8(), &path, format, transparent),
+                    Err(e) => Err(format!("cannot read the image back: {e:?}")),
+                };
+                *result.lock().unwrap() = Some(r);
+            });
     }
     world.insert_resource(p);
 }
 
 /// Writes the captured image: a transparent one un-premultiplied (it was blended over nothing),
 /// a JPEG without alpha.
-pub fn write_image(mut img: RgbaImage, path: &std::path::Path, format: ImageFormat, transparent: bool) -> Result<PathBuf, String> {
+pub fn write_image(
+    mut img: RgbaImage,
+    path: &std::path::Path,
+    format: ImageFormat,
+    transparent: bool,
+) -> Result<PathBuf, String> {
     if transparent {
         unpremultiply(&mut img);
     } else {
@@ -416,11 +616,19 @@ pub fn write_image(mut img: RgbaImage, path: &std::path::Path, format: ImageForm
 fn unpremultiply(img: &mut RgbaImage) {
     let to_lin = |c: u8| {
         let c = c as f32 / 255.0;
-        if c <= 0.04045 { c / 12.92 } else { ((c + 0.055) / 1.055).powf(2.4) }
+        if c <= 0.04045 {
+            c / 12.92
+        } else {
+            ((c + 0.055) / 1.055).powf(2.4)
+        }
     };
     let to_srgb = |c: f32| {
         let c = c.clamp(0.0, 1.0);
-        let s = if c <= 0.003_130_8 { c * 12.92 } else { 1.055 * c.powf(1.0 / 2.4) - 0.055 };
+        let s = if c <= 0.003_130_8 {
+            c * 12.92
+        } else {
+            1.055 * c.powf(1.0 / 2.4) - 0.055
+        };
         (s * 255.0).round() as u8
     };
     for p in img.pixels_mut() {

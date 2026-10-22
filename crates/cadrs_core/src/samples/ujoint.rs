@@ -45,9 +45,13 @@
 
 use cadrs_sketch::{PlaneRef, SketchOp, Vec2};
 
-use crate::applied::{ChamferFeature, ChamferType, EdgeOrFace, FilletFeature, HoleFeature, HolePoint};
+use crate::applied::{
+    ChamferFeature, ChamferType, EdgeOrFace, FilletFeature, HoleFeature, HolePoint,
+};
 use crate::command::{CommandError, History};
-use crate::commands::{AddFeature, AddSketch, EditSketch, RenameFeature, RenamePart, SetPartDescription};
+use crate::commands::{
+    AddFeature, AddSketch, EditSketch, RenameFeature, RenamePart, SetPartDescription,
+};
 use crate::document::{BooleanOp, Document, EdgeRef, Offset};
 use crate::hole::{Fit, HoleEnd, HoleSpec, HoleStandard, HoleStart, HoleStyle, HoleType, Length};
 use crate::ids::{ElementId, FeatureId, PartId};
@@ -170,13 +174,31 @@ fn circle(c: Vec2, d: f64) -> SketchOp {
     }
 }
 
-fn sketch(s: &mut dyn Studio, el: ElementId, f: FeatureId, plane: PlaneRef, ops: Vec<SketchOp>) -> Result<(), CommandError> {
-    s.run(&AddSketch { element: el, feature: f, plane: Some(plane) })?;
-    s.run(&EditSketch { element: el, feature: f, op: SketchOp::Batch(ops) })
+fn sketch(
+    s: &mut dyn Studio,
+    el: ElementId,
+    f: FeatureId,
+    plane: PlaneRef,
+    ops: Vec<SketchOp>,
+) -> Result<(), CommandError> {
+    s.run(&AddSketch {
+        element: el,
+        feature: f,
+        plane: Some(plane),
+    })?;
+    s.run(&EditSketch {
+        element: el,
+        feature: f,
+        op: SketchOp::Batch(ops),
+    })
 }
 
 fn rename(s: &mut dyn Studio, el: ElementId, f: FeatureId, name: &str) -> Result<(), CommandError> {
-    s.run(&RenameFeature { element: el, feature: f, name: name.into() })
+    s.run(&RenameFeature {
+        element: el,
+        feature: f,
+        name: name.into(),
+    })
 }
 
 /// The points of sketch `f` (every point, in the order they were made).
@@ -188,7 +210,10 @@ fn points_of(s: &dyn Studio, el: ElementId, f: FeatureId) -> Result<Vec<HolePoin
         .and_then(|f| f.sketch())
         .ok_or_else(|| CommandError::Invalid("sketch not found".into()))?
         .geometry;
-    Ok(g.points.keys().map(|point| HolePoint { sketch: f, point }).collect())
+    Ok(g.points
+        .keys()
+        .map(|point| HolePoint { sketch: f, point })
+        .collect())
 }
 
 /// The edge of the built part nearest `p` (inches).
@@ -199,11 +224,9 @@ fn edge_at(s: &dyn Studio, el: ElementId, p: [f64; 3]) -> Result<EdgeRef, Comman
         .map(|e| e.features().to_vec())
         .ok_or_else(|| CommandError::Invalid("studio not found".into()))?;
     let build = crate::rebuild::build(&features);
-    let part = build
-        .parts
-        .iter()
-        .find(|q| q.id == PART)
-        .ok_or_else(|| CommandError::Invalid(format!("the flange did not build: {:?}", build.errors)))?;
+    let part = build.parts.iter().find(|q| q.id == PART).ok_or_else(|| {
+        CommandError::Invalid(format!("the flange did not build: {:?}", build.errors))
+    })?;
     let p = [p[0] * IN, p[1] * IN, p[2] * IN];
     let e = part
         .solid
@@ -212,7 +235,11 @@ fn edge_at(s: &dyn Studio, el: ElementId, p: [f64; 3]) -> Result<EdgeRef, Comman
         .min_by(|a, b| a.distance(p).total_cmp(&b.distance(p)))
         .filter(|e| e.distance(p) < 1e-3)
         .ok_or_else(|| CommandError::Invalid(format!("no edge at {p:?}")))?;
-    Ok(EdgeRef { part: PART, edge: e.name, seed: p })
+    Ok(EdgeRef {
+        part: PART,
+        edge: e.name,
+        seed: p,
+    })
 }
 
 fn ansi_clearance(style: HoleStyle) -> HoleSpec {
@@ -252,12 +279,22 @@ pub fn build(doc: &mut Document, h: &mut History, el: ElementId) -> Result<(), C
 pub fn build_in(s: &mut dyn Studio, el: ElementId) -> Result<(), CommandError> {
     let r = FLANGE_D / 2.0;
     // Main Body: the disc from z = −0.5 up to the lugs' top.
-    sketch(s, el, SKETCH_1, PlaneRef::Top, vec![circle(v(0.0, 0.0), FLANGE_D)])?;
+    sketch(
+        s,
+        el,
+        SKETCH_1,
+        PlaneRef::Top,
+        vec![circle(v(0.0, 0.0), FLANGE_D)],
+    )?;
     rename(s, el, SKETCH_1, "Main Body")?;
     extrude(s, el, SKETCH_1, EXTRUDE_1, &[v(0.0, 0.0)], |e| {
         e.depth = HEIGHT * IN;
         e.depth_expr = inch(HEIGHT);
-        e.start_offset = Some(Offset { value: FLANGE_T * IN, expr: inch(FLANGE_T), flip: true });
+        e.start_offset = Some(Offset {
+            value: FLANGE_T * IN,
+            expr: inch(FLANGE_T),
+            flip: true,
+        });
     })?;
     // The slot, on Front (sketch x = X, y = Z), through the part along Y.
     let h = SLOT / 2.0;
@@ -266,7 +303,10 @@ pub fn build_in(s: &mut dyn Studio, el: ElementId) -> Result<(), CommandError> {
         el,
         SKETCH_2,
         PlaneRef::Front,
-        vec![polyline(vec![v(-h, 0.0), v(h, 0.0), v(h, TOP + 1.0), v(-h, TOP + 1.0)], "Add rectangle")],
+        vec![polyline(
+            vec![v(-h, 0.0), v(h, 0.0), v(h, TOP + 1.0), v(-h, TOP + 1.0)],
+            "Add rectangle",
+        )],
     )?;
     rename(s, el, SKETCH_2, "Slot")?;
     extrude(s, el, SKETCH_2, EXTRUDE_2, &[v(0.0, 1.0)], |e| {
@@ -337,18 +377,42 @@ pub fn build_in(s: &mut dyn Studio, el: ElementId) -> Result<(), CommandError> {
         SKETCH_9,
         PlaneRef::Top,
         vec![
-            polyline(vec![v(FLAT_X, -big), v(big, -big), v(big, big), v(FLAT_X, big)], "Add rectangle"),
-            polyline(vec![v(-big, -big), v(-FLAT_X, -big), v(-FLAT_X, big), v(-big, big)], "Add rectangle"),
+            polyline(
+                vec![v(FLAT_X, -big), v(big, -big), v(big, big), v(FLAT_X, big)],
+                "Add rectangle",
+            ),
+            polyline(
+                vec![
+                    v(-big, -big),
+                    v(-FLAT_X, -big),
+                    v(-FLAT_X, big),
+                    v(-big, big),
+                ],
+                "Add rectangle",
+            ),
         ],
     )?;
     rename(s, el, SKETCH_9, "Flats")?;
-    extrude(s, el, SKETCH_9, EXTRUDE_8, &[v(FLAT_X + 0.5, 0.0), v(-FLAT_X - 0.5, 0.0)], |e| {
-        e.op = BooleanOp::Remove;
-        e.depth = HEIGHT * IN;
-        e.depth_expr = inch(HEIGHT);
-    })?;
+    extrude(
+        s,
+        el,
+        SKETCH_9,
+        EXTRUDE_8,
+        &[v(FLAT_X + 0.5, 0.0), v(-FLAT_X - 0.5, 0.0)],
+        |e| {
+            e.op = BooleanOp::Remove;
+            e.depth = HEIGHT * IN;
+            e.depth_expr = inch(HEIGHT);
+        },
+    )?;
     // The bosses: one extrude out of each lug's flat.
-    sketch(s, el, SKETCH_4, PlaneRef::Right, vec![circle(v(0.0, CROSS_Z), BOSS_D)])?;
+    sketch(
+        s,
+        el,
+        SKETCH_4,
+        PlaneRef::Right,
+        vec![circle(v(0.0, CROSS_Z), BOSS_D)],
+    )?;
     rename(s, el, SKETCH_4, "Bosses")?;
     for (f, flip) in [(EXTRUDE_4, false), (EXTRUDE_5, true)] {
         extrude(s, el, SKETCH_4, f, &[v(0.0, CROSS_Z)], |e| {
@@ -356,11 +420,21 @@ pub fn build_in(s: &mut dyn Studio, el: ElementId) -> Result<(), CommandError> {
             e.flip = flip;
             e.depth = (BOSS_X - FLAT_X + 0.1) * IN;
             e.depth_expr = inch(BOSS_X - FLAT_X + 0.1);
-            e.start_offset = Some(Offset { value: (FLAT_X - 0.1) * IN, expr: inch(FLAT_X - 0.1), flip: false });
+            e.start_offset = Some(Offset {
+                value: (FLAT_X - 0.1) * IN,
+                expr: inch(FLAT_X - 0.1),
+                flip: false,
+            });
         })?;
     }
     // The cross hole through both lugs.
-    sketch(s, el, SKETCH_5, PlaneRef::Right, vec![circle(v(0.0, CROSS_Z), CROSS_D)])?;
+    sketch(
+        s,
+        el,
+        SKETCH_5,
+        PlaneRef::Right,
+        vec![circle(v(0.0, CROSS_Z), CROSS_D)],
+    )?;
     rename(s, el, SKETCH_5, "Cross hole")?;
     extrude(s, el, SKETCH_5, EXTRUDE_6, &[v(0.0, CROSS_Z)], |e| {
         e.op = BooleanOp::Remove;
@@ -375,7 +449,10 @@ pub fn build_in(s: &mut dyn Studio, el: ElementId) -> Result<(), CommandError> {
         el,
         SKETCH_6,
         PlaneRef::Top,
-        vec![polyline(vec![v(-p, -p), v(p, -p), v(p, p), v(-p, p)], "Add rectangle")],
+        vec![polyline(
+            vec![v(-p, -p), v(p, -p), v(p, p), v(-p, p)],
+            "Add rectangle",
+        )],
     )?;
     rename(s, el, SKETCH_6, "Pocket")?;
     extrude(s, el, SKETCH_6, EXTRUDE_7, &[v(0.0, 0.0)], |e| {
@@ -401,7 +478,12 @@ pub fn build_in(s: &mut dyn Studio, el: ElementId) -> Result<(), CommandError> {
     s.run(&AddFeature::hole(
         el,
         HOLE_1,
-        HoleFeature { points, merge_scope: vec![PART], spec: counterbore_spec(), ..HoleFeature::default() },
+        HoleFeature {
+            points,
+            merge_scope: vec![PART],
+            spec: counterbore_spec(),
+            ..HoleFeature::default()
+        },
     ))?;
     // The lug holes: four points on the bolt circle, drilled both ways from the Right plane.
     let b = BOLT_D / 2.0 * std::f64::consts::FRAC_1_SQRT_2;
@@ -412,7 +494,9 @@ pub fn build_in(s: &mut dyn Studio, el: ElementId) -> Result<(), CommandError> {
         PlaneRef::Right,
         [(-b, -b), (b, -b), (b, b), (-b, b)]
             .into_iter()
-            .map(|(y, z)| SketchOp::AddPoint { pos: v(y, CROSS_Z + z) })
+            .map(|(y, z)| SketchOp::AddPoint {
+                pos: v(y, CROSS_Z + z),
+            })
             .collect(),
     )?;
     rename(s, el, SKETCH_8, "Lug holes")?;
@@ -421,7 +505,13 @@ pub fn build_in(s: &mut dyn Studio, el: ElementId) -> Result<(), CommandError> {
         s.run(&AddFeature::hole(
             el,
             f,
-            HoleFeature { points, merge_scope: vec![PART], spec: lug_hole_spec(), flip, ..HoleFeature::default() },
+            HoleFeature {
+                points,
+                merge_scope: vec![PART],
+                spec: lug_hole_spec(),
+                flip,
+                ..HoleFeature::default()
+            },
         ))?;
     }
     // Chamfer 1 on the flange's bottom rim.
@@ -437,8 +527,16 @@ pub fn build_in(s: &mut dyn Studio, el: ElementId) -> Result<(), CommandError> {
             ..ChamferFeature::default()
         },
     ))?;
-    s.run(&RenamePart { element: el, part: PART, name: PART_NAME.into() })?;
-    s.run(&SetPartDescription { element: el, part: PART, description: Some(PART_DESCRIPTION.into()) })?;
+    s.run(&RenamePart {
+        element: el,
+        part: PART,
+        name: PART_NAME.into(),
+    })?;
+    s.run(&SetPartDescription {
+        element: el,
+        part: PART,
+        description: Some(PART_DESCRIPTION.into()),
+    })?;
     Ok(())
 }
 

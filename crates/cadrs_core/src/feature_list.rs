@@ -164,14 +164,22 @@ impl Filter {
             Some(t) => (true, t.strip_suffix('"').unwrap_or(t)),
             None => (false, text),
         };
-        let text = if field == FilterField::Variable { inner.to_string() } else { inner.to_lowercase() };
+        let text = if field == FilterField::Variable {
+            inner.to_string()
+        } else {
+            inner.to_lowercase()
+        };
         Filter { field, text, exact }
     }
 
     /// True if `s` matches the text (lower-cased, contains; or equal when quoted).
     fn hit(&self, s: &str) -> bool {
         let s = s.to_lowercase();
-        if self.exact { s == self.text } else { s.contains(&self.text) }
+        if self.exact {
+            s == self.text
+        } else {
+            s.contains(&self.text)
+        }
     }
 
     /// True if the feature shows in the filtered list.
@@ -186,7 +194,13 @@ impl Filter {
             // P3F.4: the variable and the features using it.
             FilterField::Variable => {
                 let want = self.text.trim_start_matches('#');
-                f.variables.iter().any(|v| if self.exact || want.is_empty() { want.is_empty() || v == want } else { v.contains(want) })
+                f.variables.iter().any(|v| {
+                    if self.exact || want.is_empty() {
+                        want.is_empty() || v == want
+                    } else {
+                        v.contains(want)
+                    }
+                })
             }
         }
     }
@@ -195,7 +209,9 @@ impl Filter {
 /// A feature's parents in `features` (PS11.2): what it refers to, and for a sketch the feature
 /// its plane or face comes from. In list order.
 pub fn parents(features: &[Feature], id: FeatureId) -> Vec<FeatureId> {
-    let Some(f) = features.iter().find(|f| f.id == id) else { return Vec::new() };
+    let Some(f) = features.iter().find(|f| f.id == id) else {
+        return Vec::new();
+    };
     let mut out = f.parents();
     if let Some(s) = f.sketch()
         && let Some(plane) = s.plane
@@ -222,7 +238,11 @@ fn plane_parent(plane: &cadrs_sketch::PlaneRef) -> Option<FeatureId> {
 /// A feature's children in `features` (PS11.2): the features that have it as a parent. In list
 /// order.
 pub fn children(features: &[Feature], id: FeatureId) -> Vec<FeatureId> {
-    features.iter().filter(|f| f.id != id && parents(features, f.id).contains(&id)).map(|f| f.id).collect()
+    features
+        .iter()
+        .filter(|f| f.id != id && parents(features, f.id).contains(&id))
+        .map(|f| f.id)
+        .collect()
 }
 
 /// [`parents`] with what the rebuild knows (P3.11, PS11.2): a feature that changed a part it
@@ -230,7 +250,12 @@ pub fn children(features: &[Feature], id: FeatureId) -> Vec<FeatureId> {
 /// also has the feature that made that part as a parent. `parts` are the built parts, each with
 /// every feature that made or changed it ([`Part::features`]); `uses` is
 /// [`crate::rebuild::Build::uses`] (a fillet's tangent chain over another fillet's faces).
-pub fn parents_with(features: &[Feature], parts: &[Part], uses: &HashMap<FeatureId, Vec<FeatureId>>, id: FeatureId) -> Vec<FeatureId> {
+pub fn parents_with(
+    features: &[Feature],
+    parts: &[Part],
+    uses: &HashMap<FeatureId, Vec<FeatureId>>,
+    id: FeatureId,
+) -> Vec<FeatureId> {
     let mut out = parents(features, id);
     for u in uses.get(&id).into_iter().flatten() {
         if *u != id && !out.contains(u) && features.iter().any(|g| g.id == *u) {
@@ -238,7 +263,11 @@ pub fn parents_with(features: &[Feature], parts: &[Part], uses: &HashMap<Feature
         }
     }
     for p in parts {
-        if p.feature != id && p.features.contains(&id) && !out.contains(&p.feature) && features.iter().any(|g| g.id == p.feature) {
+        if p.feature != id
+            && p.features.contains(&id)
+            && !out.contains(&p.feature)
+            && features.iter().any(|g| g.id == p.feature)
+        {
             out.push(p.feature);
         }
     }
@@ -247,8 +276,17 @@ pub fn parents_with(features: &[Feature], parts: &[Part], uses: &HashMap<Feature
 }
 
 /// [`children`] with what the rebuild knows (see [`parents_with`]).
-pub fn children_with(features: &[Feature], parts: &[Part], uses: &HashMap<FeatureId, Vec<FeatureId>>, id: FeatureId) -> Vec<FeatureId> {
-    features.iter().filter(|f| f.id != id && parents_with(features, parts, uses, f.id).contains(&id)).map(|f| f.id).collect()
+pub fn children_with(
+    features: &[Feature],
+    parts: &[Part],
+    uses: &HashMap<FeatureId, Vec<FeatureId>>,
+    id: FeatureId,
+) -> Vec<FeatureId> {
+    features
+        .iter()
+        .filter(|f| f.id != id && parents_with(features, parts, uses, f.id).contains(&id))
+        .map(|f| f.id)
+        .collect()
 }
 
 #[cfg(test)]
@@ -256,13 +294,24 @@ mod tests {
     use super::*;
 
     fn facts<'a>(name: &'a str, ty: &'a str) -> FeatureFacts<'a> {
-        FeatureFacts { name, type_label: ty, ..Default::default() }
+        FeatureFacts {
+            name,
+            type_label: ty,
+            ..Default::default()
+        }
     }
 
     #[test]
     fn plain_text_matches_name_or_type() {
         let f = Filter::parse("Extrude").unwrap();
-        assert_eq!(f, Filter { field: FilterField::NameOrType, text: "extrude".into(), exact: false });
+        assert_eq!(
+            f,
+            Filter {
+                field: FilterField::NameOrType,
+                text: "extrude".into(),
+                exact: false
+            }
+        );
         assert!(f.matches(&facts("Extrude 1", "Extrude")));
         // Renamed, but still an extrude.
         assert!(f.matches(&facts("Base plate", "Extrude")));
@@ -283,15 +332,37 @@ mod tests {
         assert!(f.matches(&facts("extrude 1", "Extrude")));
         assert!(!f.matches(&facts("Extrude 10", "Extrude")));
         // A quoted type is not a name.
-        assert!(!Filter::parse("\"Extrude\"").unwrap().matches(&facts("Extrude 1", "Extrude")));
+        assert!(
+            !Filter::parse("\"Extrude\"")
+                .unwrap()
+                .matches(&facts("Extrude 1", "Extrude"))
+        );
         // An unclosed quote still means exact.
-        assert!(Filter::parse("\"Extrude 1").unwrap().matches(&facts("Extrude 1", "Extrude")));
+        assert!(
+            Filter::parse("\"Extrude 1")
+                .unwrap()
+                .matches(&facts("Extrude 1", "Extrude"))
+        );
     }
 
     #[test]
     fn prefixes() {
-        let fillet = FeatureFacts { name: "Round edges", type_label: "Fillet", folder: Some("Base Features"), error: false, parts: vec!["Gear Cover"], variables: vec![] };
-        let bad = FeatureFacts { name: "Hole 1", type_label: "Hole", folder: None, error: true, parts: vec![], variables: vec![] };
+        let fillet = FeatureFacts {
+            name: "Round edges",
+            type_label: "Fillet",
+            folder: Some("Base Features"),
+            error: false,
+            parts: vec!["Gear Cover"],
+            variables: vec![],
+        };
+        let bad = FeatureFacts {
+            name: "Hole 1",
+            type_label: "Hole",
+            folder: None,
+            error: true,
+            parts: vec![],
+            variables: vec![],
+        };
         let t = Filter::parse(":type Fillet").unwrap();
         assert_eq!(t.field, FilterField::Type);
         assert!(t.matches(&fillet));
@@ -300,7 +371,11 @@ mod tests {
         assert!(n.matches(&fillet) && !n.matches(&facts("Fillet 1", "Fillet")));
         assert!(Filter::parse(":part gear").unwrap().matches(&fillet));
         assert!(!Filter::parse(":part gear").unwrap().matches(&bad));
-        assert!(Filter::parse(":folder \"base features\"").unwrap().matches(&fillet));
+        assert!(
+            Filter::parse(":folder \"base features\"")
+                .unwrap()
+                .matches(&fillet)
+        );
         assert!(!Filter::parse(":folder base").unwrap().matches(&bad));
         let e = Filter::parse(":errors").unwrap();
         assert!(e.matches(&bad) && !e.matches(&fillet));
@@ -310,14 +385,25 @@ mod tests {
         let v = Filter::parse(":variable Depth").unwrap();
         assert_eq!((v.field, v.text.as_str()), (FilterField::Variable, "Depth"));
         assert!(!v.matches(&fillet));
-        let uses = FeatureFacts { name: "Extrude 1", type_label: "Extrude", variables: vec!["Depth".into()], ..Default::default() };
+        let uses = FeatureFacts {
+            name: "Extrude 1",
+            type_label: "Extrude",
+            variables: vec!["Depth".into()],
+            ..Default::default()
+        };
         assert!(v.matches(&uses));
         assert!(Filter::parse(":variable #Depth").unwrap().matches(&uses));
         assert!(!Filter::parse(":variable depth").unwrap().matches(&uses));
-        assert!(Filter::parse(":variable").unwrap().matches(&uses) && !Filter::parse(":variable").unwrap().matches(&fillet));
+        assert!(
+            Filter::parse(":variable").unwrap().matches(&uses)
+                && !Filter::parse(":variable").unwrap().matches(&fillet)
+        );
         assert!(!Filter::parse(":variable \"Dep\"").unwrap().matches(&uses));
         // An unknown prefix is plain text.
-        assert_eq!(Filter::parse(":foo").unwrap().field, FilterField::NameOrType);
+        assert_eq!(
+            Filter::parse(":foo").unwrap().field,
+            FilterField::NameOrType
+        );
     }
 
     #[test]
@@ -327,15 +413,31 @@ mod tests {
         let e1 = FeatureId::new();
         let s2 = FeatureId::new();
         let e2 = FeatureId::new();
-        let sketch = |id, plane| Feature { id, name: "S".into(), kind: FeatureKind::Sketch(SketchFeature::new(plane)), suppress_by: None };
+        let sketch = |id, plane| Feature {
+            id,
+            name: "S".into(),
+            kind: FeatureKind::Sketch(SketchFeature::new(plane)),
+            suppress_by: None,
+        };
         let extrude = |id, s: FeatureId| {
             let mut x = ExtrudeFeature::default();
             x.sketches.push(s);
-            Feature { id, name: "E".into(), kind: FeatureKind::Extrude(x), suppress_by: None }
+            Feature {
+                id,
+                name: "E".into(),
+                kind: FeatureKind::Extrude(x),
+                suppress_by: None,
+            }
         };
         let face = cadrs_sketch::FacePlane {
             feature: e1.0,
-            face: cadrs_sketch::FaceName::new(e1.0, cadrs_sketch::FaceOrigin::Cap { region: 1, end: true }),
+            face: cadrs_sketch::FaceName::new(
+                e1.0,
+                cadrs_sketch::FaceOrigin::Cap {
+                    region: 1,
+                    end: true,
+                },
+            ),
             origin: [0.0, 0.0, 10.0],
             u: [1.0, 0.0, 0.0],
             v: [0.0, 1.0, 0.0],

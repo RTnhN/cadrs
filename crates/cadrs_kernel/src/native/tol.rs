@@ -107,7 +107,11 @@ pub struct Tolerances {
 impl Default for Tolerances {
     fn default() -> Self {
         // (Written out: 10.0 * POINT isn't exactly 1e-5 in floating point.)
-        Self { point: POINT, retries: [LOOP_GAP, 1e-4], confusion: CONFUSION }
+        Self {
+            point: POINT,
+            retries: [LOOP_GAP, 1e-4],
+            confusion: CONFUSION,
+        }
     }
 }
 
@@ -117,7 +121,9 @@ impl Tolerances {
     pub fn validate(&self) -> crate::Result<()> {
         let all = [self.confusion, self.point, self.retries[0], self.retries[1]];
         if all.iter().any(|t| !t.is_finite() || *t <= 0.0) || all.windows(2).any(|w| w[1] < w[0]) {
-            return Err(crate::KernelError::InvalidParameter(format!("tolerances must be positive and growing: {self:?}")));
+            return Err(crate::KernelError::InvalidParameter(format!(
+                "tolerances must be positive and growing: {self:?}"
+            )));
         }
         Ok(())
     }
@@ -132,17 +138,37 @@ mod tests {
     #[test]
     fn defaults_are_the_model() {
         let t = Tolerances::default();
-        assert_eq!((t.confusion, t.point, t.retries), (1e-7, 1e-6, [1e-5, 1e-4]));
+        assert_eq!(
+            (t.confusion, t.point, t.retries),
+            (1e-7, 1e-6, [1e-5, 1e-4])
+        );
         assert_eq!(super::super::topo::TOL_MIN, CONFUSION);
         assert_eq!(super::super::boolean::VTOL, POINT);
         assert!(t.validate().is_ok());
         // The named round-off margins are the literals they replaced, bit for bit.
         assert_eq!([REL, ANGULAR, ROUNDOFF], [1e-9; 3]);
-        assert_eq!([REL_FINE, ANGULAR_FINE, ROUNDOFF_FINE, DEGENERATE], [1e-12; 4]);
+        assert_eq!(
+            [REL_FINE, ANGULAR_FINE, ROUNDOFF_FINE, DEGENERATE],
+            [1e-12; 4]
+        );
         assert_eq!([POINT, REL_POINT, ANGULAR_POINT, DIFF_STEP], [1e-6; 4]);
-        assert!(Tolerances { point: f64::NAN, ..t }.validate().is_err());
+        assert!(
+            Tolerances {
+                point: f64::NAN,
+                ..t
+            }
+            .validate()
+            .is_err()
+        );
         assert!(Tolerances { point: 1e-3, ..t }.validate().is_err());
-        assert!(Tolerances { confusion: 0.0, ..t }.validate().is_err());
+        assert!(
+            Tolerances {
+                confusion: 0.0,
+                ..t
+            }
+            .validate()
+            .is_err()
+        );
     }
 
     /// The session holds its tolerances, refusing unusable ones.
@@ -150,9 +176,19 @@ mod tests {
     fn session_tolerances() {
         let mut k = super::super::NativeKernel::new();
         assert_eq!(k.tolerances(), Tolerances::default());
-        assert!(k.set_tolerances(Tolerances { point: -1.0, ..Tolerances::default() }).is_err());
+        assert!(
+            k.set_tolerances(Tolerances {
+                point: -1.0,
+                ..Tolerances::default()
+            })
+            .is_err()
+        );
         assert_eq!(k.tolerances(), Tolerances::default());
-        k.set_tolerances(Tolerances { point: 2e-6, ..Tolerances::default() }).unwrap();
+        k.set_tolerances(Tolerances {
+            point: 2e-6,
+            ..Tolerances::default()
+        })
+        .unwrap();
         assert_eq!(k.tolerances().point, 2e-6);
     }
 }

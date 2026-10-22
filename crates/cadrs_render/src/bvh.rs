@@ -10,14 +10,20 @@ pub struct Aabb {
 }
 
 impl Aabb {
-    pub const EMPTY: Aabb = Aabb { min: v3(f32::MAX, f32::MAX, f32::MAX), max: v3(f32::MIN, f32::MIN, f32::MIN) };
+    pub const EMPTY: Aabb = Aabb {
+        min: v3(f32::MAX, f32::MAX, f32::MAX),
+        max: v3(f32::MIN, f32::MIN, f32::MIN),
+    };
 
     pub fn grow(&mut self, p: V3) {
         self.min = self.min.min(p);
         self.max = self.max.max(p);
     }
     pub fn union(&self, o: &Aabb) -> Aabb {
-        Aabb { min: self.min.min(o.min), max: self.max.max(o.max) }
+        Aabb {
+            min: self.min.min(o.min),
+            max: self.max.max(o.max),
+        }
     }
     pub fn is_empty(&self) -> bool {
         self.min.x > self.max.x
@@ -95,7 +101,11 @@ impl Bvh {
             .collect();
         let centers: Vec<V3> = boxes.iter().map(|b| b.center()).collect();
         let mut nodes = Vec::with_capacity(tris.len() * 2 / LEAF + 1);
-        nodes.push(Node { bounds: Aabb::EMPTY, first: 0, count: tris.len() as u32 });
+        nodes.push(Node {
+            bounds: Aabb::EMPTY,
+            first: 0,
+            count: tris.len() as u32,
+        });
         if !tris.is_empty() {
             Self::split(&mut nodes, 0, &mut order, &boxes, &centers);
         }
@@ -103,13 +113,27 @@ impl Bvh {
             .iter()
             .map(|&i| {
                 let [a, b, c] = tris[i as usize];
-                Tri { v0: a, e1: b - a, e2: c - a }
+                Tri {
+                    v0: a,
+                    e1: b - a,
+                    e2: c - a,
+                }
             })
             .collect();
-        Bvh { nodes, tris: ordered, order }
+        Bvh {
+            nodes,
+            tris: ordered,
+            order,
+        }
     }
 
-    fn split(nodes: &mut Vec<Node>, index: usize, order: &mut [u32], boxes: &[Aabb], centers: &[V3]) {
+    fn split(
+        nodes: &mut Vec<Node>,
+        index: usize,
+        order: &mut [u32],
+        boxes: &[Aabb],
+        centers: &[V3],
+    ) {
         let (first, count) = (nodes[index].first as usize, nodes[index].count as usize);
         let items = &mut order[first..first + count];
         let mut bounds = Aabb::EMPTY;
@@ -132,7 +156,8 @@ impl Bvh {
             }
             let mut bins = [(Aabb::EMPTY, 0usize); BINS];
             for &i in items.iter() {
-                let b = (((centers[i as usize].axis(axis) - lo) / extent * BINS as f32) as usize).min(BINS - 1);
+                let b = (((centers[i as usize].axis(axis) - lo) / extent * BINS as f32) as usize)
+                    .min(BINS - 1);
                 bins[b].0 = bins[b].0.union(&boxes[i as usize]);
                 bins[b].1 += 1;
             }
@@ -185,8 +210,16 @@ impl Bvh {
             return;
         }
         let left = nodes.len();
-        nodes.push(Node { bounds: Aabb::EMPTY, first: first as u32, count: mid as u32 });
-        nodes.push(Node { bounds: Aabb::EMPTY, first: (first + mid) as u32, count: (count - mid) as u32 });
+        nodes.push(Node {
+            bounds: Aabb::EMPTY,
+            first: first as u32,
+            count: mid as u32,
+        });
+        nodes.push(Node {
+            bounds: Aabb::EMPTY,
+            first: (first + mid) as u32,
+            count: (count - mid) as u32,
+        });
         nodes[index].first = left as u32;
         nodes[index].count = 0;
         Self::split(nodes, left, order, boxes, centers);
@@ -248,7 +281,12 @@ impl Bvh {
                 for k in first..first + node.count as usize {
                     if let Some((t, u, v)) = Self::intersect_tri(&self.tris[k], o, d, tmax) {
                         tmax = t;
-                        best = Some(Hit { tri: self.order[k], t, u, v });
+                        best = Some(Hit {
+                            tri: self.order[k],
+                            t,
+                            u,
+                            v,
+                        });
                         if any {
                             return best;
                         }
@@ -293,8 +331,16 @@ mod tests {
         for i in 0..n {
             for j in 0..n {
                 let (x, y) = (i as f32, j as f32);
-                out.push([v3(x, y, 0.0), v3(x + 1.0, y, 0.0), v3(x + 1.0, y + 1.0, 0.0)]);
-                out.push([v3(x, y, 0.0), v3(x + 1.0, y + 1.0, 0.0), v3(x, y + 1.0, 0.0)]);
+                out.push([
+                    v3(x, y, 0.0),
+                    v3(x + 1.0, y, 0.0),
+                    v3(x + 1.0, y + 1.0, 0.0),
+                ]);
+                out.push([
+                    v3(x, y, 0.0),
+                    v3(x + 1.0, y + 1.0, 0.0),
+                    v3(x, y + 1.0, 0.0),
+                ]);
             }
         }
         out
@@ -311,7 +357,11 @@ mod tests {
             let hit = bvh.intersect(o, d, f32::MAX);
             let mut brute = None::<(u32, f32)>;
             for (i, t) in tris.iter().enumerate() {
-                let tri = Tri { v0: t[0], e1: t[1] - t[0], e2: t[2] - t[0] };
+                let tri = Tri {
+                    v0: t[0],
+                    e1: t[1] - t[0],
+                    e2: t[2] - t[0],
+                };
                 if let Some((dist, _, _)) = Bvh::intersect_tri(&tri, o, d, f32::MAX)
                     && brute.is_none_or(|(_, b)| dist < b)
                 {

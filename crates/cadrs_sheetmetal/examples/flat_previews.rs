@@ -32,7 +32,9 @@ fn with_bend_relief(kind: BendReliefKind, extend: bool) -> Params {
 }
 
 fn main() {
-    let out = std::env::args().nth(1).unwrap_or_else(|| "target/sheetmetal".into());
+    let out = std::env::args()
+        .nth(1)
+        .unwrap_or_else(|| "target/sheetmetal".into());
     std::fs::create_dir_all(&out).expect("output folder");
     let ok = |m: Result<Model, _>| m.expect("sample builds");
     let mut cases: Vec<(&str, Model)> = vec![
@@ -41,17 +43,45 @@ fn main() {
         ("03-u-channel", ok(samples::u_channel(base()))),
         ("04-hem", ok(samples::hem(base()))),
         ("05-tube", samples::tube(base())),
-        ("06-wall-into-half-tube", samples::wall_into_half_tube(base())),
-        ("07-box-butt-direction-1", ok(samples::open_box(base(), RipStyle::ButtDirection1))),
+        (
+            "06-wall-into-half-tube",
+            samples::wall_into_half_tube(base()),
+        ),
+        (
+            "07-box-butt-direction-1",
+            ok(samples::open_box(base(), RipStyle::ButtDirection1)),
+        ),
     ];
     for kind in CornerReliefKind::ALL {
-        let name: &'static str = Box::leak(format!("10-box-corner-{}", kind.label().to_lowercase().replace(" - ", "-")).into_boxed_str());
-        cases.push((name, ok(samples::open_box(with_corner(kind), RipStyle::EdgeJoint))));
+        let name: &'static str = Box::leak(
+            format!(
+                "10-box-corner-{}",
+                kind.label().to_lowercase().replace(" - ", "-")
+            )
+            .into_boxed_str(),
+        );
+        cases.push((
+            name,
+            ok(samples::open_box(with_corner(kind), RipStyle::EdgeJoint)),
+        ));
     }
-    for (kind, extend) in BendReliefKind::ALL.iter().map(|k| (*k, false)).chain([(BendReliefKind::RectangleScaled, true)]) {
+    for (kind, extend) in BendReliefKind::ALL
+        .iter()
+        .map(|k| (*k, false))
+        .chain([(BendReliefKind::RectangleScaled, true)])
+    {
         let label = kind.label().to_lowercase().replace(" - ", "-");
-        let name: &'static str = Box::leak(format!("20-partial-flange-{label}{}", if extend { "-extended" } else { "" }).into_boxed_str());
-        cases.push((name, ok(samples::partial_flange(with_bend_relief(kind, extend)))));
+        let name: &'static str = Box::leak(
+            format!(
+                "20-partial-flange-{label}{}",
+                if extend { "-extended" } else { "" }
+            )
+            .into_boxed_str(),
+        );
+        cases.push((
+            name,
+            ok(samples::partial_flange(with_bend_relief(kind, extend))),
+        ));
     }
     cases.push(("30-collision", ok(samples::hook_collision(base()))));
     cases.push(("31-bend-loop", ok(samples::bend_loop(base()))));
@@ -60,25 +90,60 @@ fn main() {
         use cadrs_sheetmetal::loft::{LoftOpts, ProfileIn, arc_pieces, loft};
         use cadrs_sheetmetal::model::P3;
         let rect = |z: f64, w: f64, h: f64| ProfileIn {
-            points: vec![P3::new(-w / 2.0, -h / 2.0, z), P3::new(w / 2.0, -h / 2.0, z), P3::new(w / 2.0, h / 2.0, z), P3::new(-w / 2.0, h / 2.0, z)],
+            points: vec![
+                P3::new(-w / 2.0, -h / 2.0, z),
+                P3::new(w / 2.0, -h / 2.0, z),
+                P3::new(w / 2.0, h / 2.0, z),
+                P3::new(-w / 2.0, h / 2.0, z),
+            ],
             closed: true,
         };
         let n = arc_pieces(30.0, std::f64::consts::TAU, 1.0);
         let circle = ProfileIn {
-            points: (0..n).map(|i| {
-                let a = i as f64 / n as f64 * std::f64::consts::TAU;
-                P3::new(30.0 * a.cos(), 30.0 * a.sin(), 60.0)
-            }).collect(),
+            points: (0..n)
+                .map(|i| {
+                    let a = i as f64 / n as f64 * std::f64::consts::TAU;
+                    P3::new(30.0 * a.cos(), 30.0 * a.sin(), 60.0)
+                })
+                .collect(),
             closed: true,
         };
-        cases.push(("40-loft-rect-to-circle", loft(base(), &rect(0.0, 100.0, 80.0), &circle, &LoftOpts::default()).expect("loft").model));
-        cases.push(("41-loft-frustum", loft(base(), &rect(0.0, 100.0, 100.0), &rect(50.0, 50.0, 50.0), &LoftOpts { bends: true, ..Default::default() }).expect("loft").model));
+        cases.push((
+            "40-loft-rect-to-circle",
+            loft(
+                base(),
+                &rect(0.0, 100.0, 80.0),
+                &circle,
+                &LoftOpts::default(),
+            )
+            .expect("loft")
+            .model,
+        ));
+        cases.push((
+            "41-loft-frustum",
+            loft(
+                base(),
+                &rect(0.0, 100.0, 100.0),
+                &rect(50.0, 50.0, 50.0),
+                &LoftOpts {
+                    bends: true,
+                    ..Default::default()
+                },
+            )
+            .expect("loft")
+            .model,
+        ));
     }
 
     let mut opt = resvg::usvg::Options::default();
     // The project's Inter (CLAUDE.md), else whatever sans-serif the system has.
     let fonts = opt.fontdb_mut();
-    fonts.load_font_file(concat!(env!("CARGO_MANIFEST_DIR"), "/../../assets/fonts/Inter-Regular.ttf")).ok();
+    fonts
+        .load_font_file(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../assets/fonts/Inter-Regular.ttf"
+        ))
+        .ok();
     fonts.load_system_fonts();
     fonts.set_sans_serif_family("Inter");
     for (name, model) in cases {
@@ -87,9 +152,24 @@ fn main() {
         std::fs::write(format!("{out}/{name}.svg"), &doc).expect("write svg");
         let tree = resvg::usvg::Tree::from_str(&doc, &opt).expect("valid svg");
         let size = tree.size().to_int_size();
-        let mut pixmap = resvg::tiny_skia::Pixmap::new(size.width(), size.height()).expect("pixmap");
-        resvg::render(&tree, resvg::tiny_skia::Transform::identity(), &mut pixmap.as_mut());
-        pixmap.save_png(format!("{out}/{name}.png")).expect("write png");
-        println!("{name}: {} part(s), {}", flat.parts.len(), if flat.is_ok() { "ok".to_string() } else { flat.errors[0].message() });
+        let mut pixmap =
+            resvg::tiny_skia::Pixmap::new(size.width(), size.height()).expect("pixmap");
+        resvg::render(
+            &tree,
+            resvg::tiny_skia::Transform::identity(),
+            &mut pixmap.as_mut(),
+        );
+        pixmap
+            .save_png(format!("{out}/{name}.png"))
+            .expect("write png");
+        println!(
+            "{name}: {} part(s), {}",
+            flat.parts.len(),
+            if flat.is_ok() {
+                "ok".to_string()
+            } else {
+                flat.errors[0].message()
+            }
+        );
     }
 }

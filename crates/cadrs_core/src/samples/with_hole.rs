@@ -38,7 +38,12 @@ pub const HOLE_VOLUME: f64 = std::f64::consts::PI * 64.0 * 10.0;
 
 /// The `#withHole` Variable: a Number, `expr`.
 pub fn with_hole(expr: &str) -> VariableFeature {
-    let mut v = VariableFeature { name: "withHole".into(), var_type: VariableType::Number, expr: expr.into(), ..VariableFeature::default() };
+    let mut v = VariableFeature {
+        name: "withHole".into(),
+        var_type: VariableType::Number,
+        expr: expr.into(),
+        ..VariableFeature::default()
+    };
     let _ = v.evaluate(&Units::default(), &Vec::new());
     v
 }
@@ -52,17 +57,40 @@ pub fn build_in(s: &mut dyn Studio, el: ElementId) -> Result<(), CommandError> {
             PLATE,
             BooleanOp::New,
             SketchOp::AddPolyline {
-                points: vec![Vec2::new(0.0, 0.0), Vec2::new(60.0, 0.0), Vec2::new(60.0, 40.0), Vec2::new(0.0, 40.0)],
+                points: vec![
+                    Vec2::new(0.0, 0.0),
+                    Vec2::new(60.0, 0.0),
+                    Vec2::new(60.0, 40.0),
+                    Vec2::new(0.0, 40.0),
+                ],
                 closed: true,
                 construction: false,
                 label: "Add rectangle",
             },
             Vec2::new(5.0, 5.0),
         ),
-        (HOLE_SKETCH, HOLE, BooleanOp::Remove, SketchOp::AddCircle { center: Vec2::new(30.0, 20.0), radius: 8.0, construction: false }, Vec2::new(30.0, 20.0)),
+        (
+            HOLE_SKETCH,
+            HOLE,
+            BooleanOp::Remove,
+            SketchOp::AddCircle {
+                center: Vec2::new(30.0, 20.0),
+                radius: 8.0,
+                construction: false,
+            },
+            Vec2::new(30.0, 20.0),
+        ),
     ] {
-        s.run(&AddSketch { element: el, feature: sketch, plane: Some(PlaneRef::Top) })?;
-        s.run(&EditSketch { element: el, feature: sketch, op: shape })?;
+        s.run(&AddSketch {
+            element: el,
+            feature: sketch,
+            plane: Some(PlaneRef::Top),
+        })?;
+        s.run(&EditSketch {
+            element: el,
+            feature: sketch,
+            op: shape,
+        })?;
         let g = s
             .document()
             .element(el)
@@ -76,8 +104,17 @@ pub fn build_in(s: &mut dyn Studio, el: ElementId) -> Result<(), CommandError> {
         }
         let mut x = super::extrude_of(regions, 10.0);
         x.op = op;
-        s.run(&AddExtrude { element: el, feature: extrude, extrude: ExtrudeFeature::default() })?;
-        s.run(&SetExtrude { element: el, feature: extrude, extrude: x, label: "Extrude".into() })?;
+        s.run(&AddExtrude {
+            element: el,
+            feature: extrude,
+            extrude: ExtrudeFeature::default(),
+        })?;
+        s.run(&SetExtrude {
+            element: el,
+            feature: extrude,
+            extrude: x,
+            label: "Extrude".into(),
+        })?;
     }
     Ok(())
 }

@@ -94,23 +94,46 @@ pub fn check(sch: &Schematic) -> Vec<Violation> {
 pub fn check_with(sch: &Schematic, nl: &Netlist) -> Vec<Violation> {
     let mut out = vec![];
     for net in &nl.nets {
-        let drivers = net.pins.iter().filter(|p| p.kind == PinType::PowerOut).count();
+        let drivers = net
+            .pins
+            .iter()
+            .filter(|p| p.kind == PinType::PowerOut)
+            .count();
         if drivers == 0 {
             // One violation per net, at its first power input.
             if let Some(p) = net.pins.iter().find(|p| p.kind == PinType::PowerIn) {
                 out.push(Violation {
                     rule: Rule::PowerPinNotDriven,
-                    items: vec![format!("Symbol {} Pin {} [{}, Line]", p.reference, p.number, type_name(p.kind))],
+                    items: vec![format!(
+                        "Symbol {} Pin {} [{}, Line]",
+                        p.reference,
+                        p.number,
+                        type_name(p.kind)
+                    )],
                     at: p.at,
                     sheet: p.sheet,
                 });
             }
         }
-        let outputs: Vec<_> = net.pins.iter().filter(|p| matches!(p.kind, PinType::Output | PinType::PowerOut) && !p.power).collect();
+        let outputs: Vec<_> = net
+            .pins
+            .iter()
+            .filter(|p| matches!(p.kind, PinType::Output | PinType::PowerOut) && !p.power)
+            .collect();
         if outputs.len() > 1 {
             out.push(Violation {
                 rule: Rule::ConflictingOutputs,
-                items: outputs.iter().map(|p| format!("Symbol {} Pin {} [{}]", p.reference, p.number, type_name(p.kind))).collect(),
+                items: outputs
+                    .iter()
+                    .map(|p| {
+                        format!(
+                            "Symbol {} Pin {} [{}]",
+                            p.reference,
+                            p.number,
+                            type_name(p.kind)
+                        )
+                    })
+                    .collect(),
                 at: outputs[1].at,
                 sheet: outputs[1].sheet,
             });
@@ -120,14 +143,24 @@ pub fn check_with(sch: &Schematic, nl: &Netlist) -> Vec<Violation> {
             if p.kind != PinType::NoConnect {
                 out.push(Violation {
                     rule: Rule::PinNotConnected,
-                    items: vec![format!("Symbol {} Pin {} [{}, Line]", p.reference, p.number, type_name(p.kind))],
+                    items: vec![format!(
+                        "Symbol {} Pin {} [{}, Line]",
+                        p.reference,
+                        p.number,
+                        type_name(p.kind)
+                    )],
                     at: p.at,
                     sheet: p.sheet,
                 });
             }
         }
         if net.pins.is_empty() && net.labels.len() == 1 {
-            out.push(Violation { rule: Rule::LabelNotConnected, items: vec![format!("Label '{}'", net.labels[0])], at: Pt::ZERO, sheet: 0 });
+            out.push(Violation {
+                rule: Rule::LabelNotConnected,
+                items: vec![format!("Label '{}'", net.labels[0])],
+                at: Pt::ZERO,
+                sheet: 0,
+            });
         }
     }
     let mut seen: Vec<(String, usize)> = vec![];
@@ -135,22 +168,45 @@ pub fn check_with(sch: &Schematic, nl: &Netlist) -> Vec<Violation> {
         for s in &sheet.symbols {
             let r = s.reference();
             if crate::sch_edit::unannotated(r) {
-                out.push(Violation { rule: Rule::Unannotated, items: vec![format!("Symbol {r}")], at: s.placement.at, sheet: si });
+                out.push(Violation {
+                    rule: Rule::Unannotated,
+                    items: vec![format!("Symbol {r}")],
+                    at: s.placement.at,
+                    sheet: si,
+                });
             } else if seen.iter().any(|(x, _)| x == r) {
-                out.push(Violation { rule: Rule::DuplicateReference, items: vec![format!("Symbol {r}")], at: s.placement.at, sheet: si });
+                out.push(Violation {
+                    rule: Rule::DuplicateReference,
+                    items: vec![format!("Symbol {r}")],
+                    at: s.placement.at,
+                    sheet: si,
+                });
             } else {
                 seen.push((r.to_string(), si));
             }
         }
         // Dangling wire ends: a wire end that touches no other wire, pin, label or junction.
-        let pins: Vec<Pt> = sheet.symbols.iter().flat_map(|s| sch.placed_pins(s).map(|(_, p)| p).collect::<Vec<_>>()).collect();
+        let pins: Vec<Pt> = sheet
+            .symbols
+            .iter()
+            .flat_map(|s| sch.placed_pins(s).map(|(_, p)| p).collect::<Vec<_>>())
+            .collect();
         for (i, w) in sheet.wires.iter().enumerate() {
             for end in [w.a, w.b] {
                 let touches = pins.contains(&end)
                     || sheet.labels.iter().any(|l| l.text.at == end)
-                    || sheet.wires.iter().enumerate().any(|(j, o)| j != i && crate::connectivity::on_segment(end, o.a, o.b));
+                    || sheet
+                        .wires
+                        .iter()
+                        .enumerate()
+                        .any(|(j, o)| j != i && crate::connectivity::on_segment(end, o.a, o.b));
                 if !touches {
-                    out.push(Violation { rule: Rule::DanglingWire, items: vec!["Wire".into()], at: end, sheet: si });
+                    out.push(Violation {
+                        rule: Rule::DanglingWire,
+                        items: vec!["Wire".into()],
+                        at: end,
+                        sheet: si,
+                    });
                 }
             }
         }

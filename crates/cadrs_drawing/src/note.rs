@@ -91,7 +91,10 @@ impl Note {
 
     /// A sheet point in the box's frame.
     pub fn from_sheet(&self, s: P2) -> P2 {
-        rotate([s[0] - self.at[0], s[1] - self.at[1]], -self.rotation.to_radians())
+        rotate(
+            [s[0] - self.at[0], s[1] - self.at[1]],
+            -self.rotation.to_radians(),
+        )
     }
 }
 
@@ -149,20 +152,27 @@ impl NoteGraphics {
             return 0.0;
         }
         let mut d = f64::MAX;
-        for s in self.strokes.iter().chain(std::iter::once(&self.frame.to_vec())) {
+        for s in self
+            .strokes
+            .iter()
+            .chain(std::iter::once(&self.frame.to_vec()))
+        {
             for w in s.windows(2) {
                 d = d.min(seg_distance(p, w[0], w[1]));
             }
         }
         d
     }
-
 }
 
 fn seg_distance(p: P2, a: P2, b: P2) -> f64 {
     let d = [b[0] - a[0], b[1] - a[1]];
     let l2 = d[0] * d[0] + d[1] * d[1];
-    let t = if l2 < 1e-300 { 0.0 } else { (((p[0] - a[0]) * d[0] + (p[1] - a[1]) * d[1]) / l2).clamp(0.0, 1.0) };
+    let t = if l2 < 1e-300 {
+        0.0
+    } else {
+        (((p[0] - a[0]) * d[0] + (p[1] - a[1]) * d[1]) / l2).clamp(0.0, 1.0)
+    };
     (p[0] - a[0] - d[0] * t).hypot(p[1] - a[1] - d[1] * t)
 }
 
@@ -215,13 +225,23 @@ pub const LEADER_ARROW: f64 = 1.3;
 const MARGIN: f64 = 0.45;
 
 /// A note on the sheet (see the module docs). `arrow` is the leader arrowhead's length.
-pub fn note_graphics(note: &Note, ctx: &FieldContext, views: &ViewLookup, arrow: f64, grips: bool) -> NoteGraphics {
+pub fn note_graphics(
+    note: &Note,
+    ctx: &FieldContext,
+    views: &ViewLookup,
+    arrow: f64,
+    grips: bool,
+) -> NoteGraphics {
     let h = note.height;
     let l = rich::layout(&note.text, ctx, h, note.width);
     let mut g = NoteGraphics::default();
     let s = |p: P2| note.to_sheet(p);
     for p in &l.pieces {
-        g.texts.push(NoteText { piece: p.clone(), pos: s(p.pos), rotation: note.rotation });
+        g.texts.push(NoteText {
+            piece: p.clone(),
+            pos: s(p.pos),
+            rotation: note.rotation,
+        });
     }
     for st in &l.strokes {
         g.strokes.push(st.iter().map(|p| s(*p)).collect());
@@ -229,13 +249,33 @@ pub fn note_graphics(note: &Note, ctx: &FieldContext, views: &ViewLookup, arrow:
     let m = MARGIN * h;
     let (w, bh) = (l.width.max(h), l.height.max(h));
     let lo_y = -bh - 0.35 * h; // room for descenders
-    g.frame = [s([-m, m]), s([w + m, m]), s([w + m, lo_y - m]), s([-m, lo_y - m])];
+    g.frame = [
+        s([-m, m]),
+        s([w + m, m]),
+        s([w + m, lo_y - m]),
+        s([-m, lo_y - m]),
+    ];
     g.stops = l
         .stops
         .iter()
-        .map(|Stop { x, baseline, height }| (s([*x, *baseline - 0.25 * height]), s([*x, *baseline + 1.15 * height])))
+        .map(
+            |Stop {
+                 x,
+                 baseline,
+                 height,
+             }| {
+                (
+                    s([*x, *baseline - 0.25 * height]),
+                    s([*x, *baseline + 1.15 * height]),
+                )
+            },
+        )
         .collect();
-    g.fields = l.fields.iter().map(|(lo, hi)| [s(*lo), s([hi[0], lo[1]]), s(*hi), s([lo[0], hi[1]])]).collect();
+    g.fields = l
+        .fields
+        .iter()
+        .map(|(lo, hi)| [s(*lo), s([hi[0], lo[1]]), s(*hi), s([lo[0], hi[1]])])
+        .collect();
     // Leaders: from the side of the box nearer the target, with a short landing.
     let mid_y = (lo_y) / 2.0;
     for (i, ld) in note.leaders.iter().enumerate() {
@@ -249,7 +289,11 @@ pub fn note_graphics(note: &Note, ctx: &FieldContext, views: &ViewLookup, arrow:
         let local = note.from_sheet(tip);
         let right = local[0] > w / 2.0;
         let side = if right { [w + m, mid_y] } else { [-m, mid_y] };
-        let landing = if right { [w + m + h, mid_y] } else { [-m - h, mid_y] };
+        let landing = if right {
+            [w + m + h, mid_y]
+        } else {
+            [-m - h, mid_y]
+        };
         let (a, b) = (s(side), s(landing));
         g.strokes.push(vec![a, b, tip]);
         let d = [tip[0] - b[0], tip[1] - b[1]];
@@ -261,7 +305,11 @@ pub fn note_graphics(note: &Note, ctx: &FieldContext, views: &ViewLookup, arrow:
             let u = [d[0] / dl, d[1] / dl];
             let base = [tip[0] - u[0] * arrow, tip[1] - u[1] * arrow];
             let n = [-u[1] * arrow * 0.2, u[0] * arrow * 0.2];
-            g.fills.push([tip, [base[0] + n[0], base[1] + n[1]], [base[0] - n[0], base[1] - n[1]]]);
+            g.fills.push([
+                tip,
+                [base[0] + n[0], base[1] + n[1]],
+                [base[0] - n[0], base[1] - n[1]],
+            ]);
         }
         if grips {
             g.grips.push((tip, NoteGrip::Leader(i)));
@@ -269,8 +317,10 @@ pub fn note_graphics(note: &Note, ctx: &FieldContext, views: &ViewLookup, arrow:
     }
     if grips {
         let top_mid = [w / 2.0, m];
-        g.grips.push((s([top_mid[0], m + 2.2 * h]), NoteGrip::Rotate));
-        g.strokes.push(vec![s(top_mid), s([top_mid[0], m + 1.6 * h])]);
+        g.grips
+            .push((s([top_mid[0], m + 2.2 * h]), NoteGrip::Rotate));
+        g.strokes
+            .push(vec![s(top_mid), s([top_mid[0], m + 1.6 * h])]);
         g.grips.push((s([-m, mid_y]), NoteGrip::Left));
         g.grips.push((s([w + m, mid_y]), NoteGrip::Right));
         g.grips.push((s([w + m, lo_y - m]), NoteGrip::Scale));
@@ -346,14 +396,23 @@ mod tests {
     fn grips_resize_rotate_and_scale() {
         let r = ReferenceProps::default();
         let d = DrawingContext::default();
-        let ctx = FieldContext { reference: &r, drawing: &d };
+        let ctx = FieldContext {
+            reference: &r,
+            drawing: &d,
+        };
         let mut n = Note::new([50.0, 100.0], 3.0);
         n.text = RichText::plain("GENERAL NOTES APPLY TO ALL SHEETS");
         let g = note_graphics(&n, &ctx, &no_views, 3.0, true);
         let at = |k: NoteGrip| g.grips.iter().find(|(_, x)| *x == k).unwrap().0;
         // The right handle sets a wrap width: the text wraps to more lines.
         let right = at(NoteGrip::Right);
-        let narrow = drag_grip(&n, &ctx, NoteGrip::Right, right, [right[0] - 40.0, right[1]]);
+        let narrow = drag_grip(
+            &n,
+            &ctx,
+            NoteGrip::Right,
+            right,
+            [right[0] - 40.0, right[1]],
+        );
         assert!(narrow.width.is_some());
         assert_eq!(narrow.at, n.at);
         let gn = note_graphics(&narrow, &ctx, &no_views, 3.0, false);
@@ -366,7 +425,10 @@ mod tests {
         assert!(gl.layout.width < g.layout.width);
         // Rotation about the centre, in 5° steps.
         let rot = at(NoteGrip::Rotate);
-        let c = [(g.frame[0][0] + g.frame[2][0]) / 2.0, (g.frame[0][1] + g.frame[2][1]) / 2.0];
+        let c = [
+            (g.frame[0][0] + g.frame[2][0]) / 2.0,
+            (g.frame[0][1] + g.frame[2][1]) / 2.0,
+        ];
         let to = [c[0] - (rot[1] - c[1]), c[1] + 0.001];
         let turned = drag_grip(&n, &ctx, NoteGrip::Rotate, rot, to);
         assert_eq!(turned.rotation, 90.0);

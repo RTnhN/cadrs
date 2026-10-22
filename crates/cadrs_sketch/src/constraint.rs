@@ -485,7 +485,9 @@ enum Pick {
 
 /// True if the two curves meet end to end (share an end point).
 fn share_end(s: &Sketch, a: CurveRef, b: CurveRef) -> bool {
-    let (CurveRef::Curve(a), CurveRef::Curve(b)) = (a, b) else { return false };
+    let (CurveRef::Curve(a), CurveRef::Curve(b)) = (a, b) else {
+        return false;
+    };
     match (s.curve_ends(a), s.curve_ends(b)) {
         (Some((a0, a1)), Some((b0, b1))) => a != b && [a0, a1].iter().any(|p| *p == b0 || *p == b1),
         _ => false,
@@ -500,7 +502,9 @@ fn classify(s: &Sketch, e: crate::SketchEntity) -> Option<Pick> {
         E::Curve(c) => match s.curves.get(c)?.kind {
             CurveKind::Line { .. } => Pick::Line(CurveRef::Curve(c)),
             // An elliptical arc constrains as its ellipse.
-            CurveKind::Ellipse { .. } | CurveKind::EllipseArc { .. } => Pick::Ellipse(CurveRef::Curve(c)),
+            CurveKind::Ellipse { .. } | CurveKind::EllipseArc { .. } => {
+                Pick::Ellipse(CurveRef::Curve(c))
+            }
             CurveKind::Bezier { .. } => Pick::Bezier(CurveRef::Curve(c)),
             _ => Pick::Round(CurveRef::Curve(c)),
         },
@@ -523,13 +527,20 @@ pub enum FitOp {
 /// [`fit`] for a selection that may hold part vertices ([`crate::SketchEntity::Link`]): those
 /// not used yet are used first, as points where `at` projects them, and the constraints refer
 /// to them by link (one undoable edit). `None` from `at`: the vertex is gone (invalid).
-pub fn fit_op(kind: ConstraintKind, s: &Sketch, sel: &[crate::SketchEntity], at: impl Fn(crate::Link) -> Option<Vec2>) -> FitOp {
+pub fn fit_op(
+    kind: ConstraintKind,
+    s: &Sketch,
+    sel: &[crate::SketchEntity],
+    at: impl Fn(crate::Link) -> Option<Vec2>,
+) -> FitOp {
     let mut items = Vec::new();
     for e in sel {
         if let crate::SketchEntity::Link(l) = *e
             && s.linked_point(l).is_none()
         {
-            let Some(p) = at(l) else { return FitOp::Invalid };
+            let Some(p) = at(l) else {
+                return FitOp::Invalid;
+            };
             items.push((crate::projection::Projected::Point(p), l));
         }
     }
@@ -556,9 +567,12 @@ pub fn fit_op(kind: ConstraintKind, s: &Sketch, sel: &[crate::SketchEntity], at:
             let point = |p: PointRef| {
                 Some(match p {
                     PointRef::Point(id) if s.points.contains_key(id) => PointSpec::Point(id),
-                    PointRef::Point(id) => {
-                        PointSpec::Linked(items.iter().map(|(_, l)| *l).find(|l| trial.linked_point(*l) == Some(id))?)
-                    }
+                    PointRef::Point(id) => PointSpec::Linked(
+                        items
+                            .iter()
+                            .map(|(_, l)| *l)
+                            .find(|l| trial.linked_point(*l) == Some(id))?,
+                    ),
                     PointRef::Origin => PointSpec::Origin,
                 })
             };
@@ -569,7 +583,11 @@ pub fn fit_op(kind: ConstraintKind, s: &Sketch, sel: &[crate::SketchEntity], at:
                     CurveRef::YAxis => CurveSpec::YAxis,
                 })
             };
-            let Some(specs) = cs.iter().map(|c| c.map(&point, &curve)).collect::<Option<Vec<ConstraintSpec>>>() else {
+            let Some(specs) = cs
+                .iter()
+                .map(|c| c.map(&point, &curve))
+                .collect::<Option<Vec<ConstraintSpec>>>()
+            else {
                 return FitOp::Invalid;
             };
             FitOp::Complete(Box::new(crate::SketchOp::Batch(vec![
@@ -687,7 +705,9 @@ pub fn fit(kind: ConstraintKind, s: &Sketch, sel: &[crate::SketchEntity]) -> Fit
             | (Pick::Round(a), Pick::Line(b))
             | (Pick::Round(a), Pick::Round(b)) => Some(vec![C::Tangent(a, b)]),
             // A line tangent to an ellipse (Final re-audit, S8).
-            (Pick::Line(a), Pick::Ellipse(b)) | (Pick::Ellipse(b), Pick::Line(a)) => Some(vec![C::Tangent(a, b)]),
+            (Pick::Line(a), Pick::Ellipse(b)) | (Pick::Ellipse(b), Pick::Line(a)) => {
+                Some(vec![C::Tangent(a, b)])
+            }
             // A Bézier curve is tangent where it meets the other curve end to end.
             (Pick::Bezier(a), Pick::Line(b) | Pick::Round(b) | Pick::Bezier(b))
             | (Pick::Line(a) | Pick::Round(a), Pick::Bezier(b))
@@ -722,9 +742,7 @@ pub fn fit(kind: ConstraintKind, s: &Sketch, sel: &[crate::SketchEntity]) -> Fit
         // S12.10: a line and a circle, arc or ellipse, the line first.
         ConstraintKind::Normal if picks.len() <= 2 => pairwise(&|a, b| match (a, b) {
             (Pick::Line(l), Pick::Round(c) | Pick::Ellipse(c))
-            | (Pick::Round(c) | Pick::Ellipse(c), Pick::Line(l)) => {
-                Some(vec![C::Normal(l, c)])
-            }
+            | (Pick::Round(c) | Pick::Ellipse(c), Pick::Line(l)) => Some(vec![C::Normal(l, c)]),
             _ => None,
         }),
         ConstraintKind::Concentric => pairwise(&|a, b| match (a, b) {
@@ -738,7 +756,9 @@ pub fn fit(kind: ConstraintKind, s: &Sketch, sel: &[crate::SketchEntity]) -> Fit
             [Pick::Line(_)] | [Pick::Line(_), _] => Fit::Partial,
             [Pick::Line(axis), a, b] => {
                 let kind_of = |c: CurveRef| match c {
-                    CurveRef::Curve(id) => s.curves.get(id).map(|c| std::mem::discriminant(&c.kind)),
+                    CurveRef::Curve(id) => {
+                        s.curves.get(id).map(|c| std::mem::discriminant(&c.kind))
+                    }
                     _ => None,
                 };
                 match (*a, *b) {
@@ -748,12 +768,11 @@ pub fn fit(kind: ConstraintKind, s: &Sketch, sel: &[crate::SketchEntity]) -> Fit
                     (
                         Pick::Line(x) | Pick::Round(x) | Pick::Bezier(x),
                         Pick::Line(y) | Pick::Round(y) | Pick::Bezier(y),
-                    )
-                        if x != y
-                            && x != *axis
-                            && y != *axis
-                            && kind_of(x).is_some()
-                            && kind_of(x) == kind_of(y) =>
+                    ) if x != y
+                        && x != *axis
+                        && y != *axis
+                        && kind_of(x).is_some()
+                        && kind_of(x) == kind_of(y) =>
                     {
                         Fit::Complete(vec![C::SymmetricCurves(x, y, *axis)])
                     }
@@ -766,7 +785,9 @@ pub fn fit(kind: ConstraintKind, s: &Sketch, sel: &[crate::SketchEntity]) -> Fit
             for p in &picks {
                 out.push(match *p {
                     Pick::Point(p) => C::FixPoint(p),
-                    Pick::Line(c) | Pick::Round(c) | Pick::Ellipse(c) | Pick::Bezier(c) => C::FixCurve(c),
+                    Pick::Line(c) | Pick::Round(c) | Pick::Ellipse(c) | Pick::Bezier(c) => {
+                        C::FixCurve(c)
+                    }
                 });
             }
             Fit::Complete(out)
@@ -943,25 +964,35 @@ mod tests {
         let face = |curve| FaceName::new(uuid::Uuid::nil(), FaceOrigin::Side { region: 1, curve });
         let vertex = Link::Vertex {
             feature: uuid::Uuid::nil(),
-            vertex: VertexName { faces: [face(1), face(2), face(3)], index: 0 },
+            vertex: VertexName {
+                faces: [face(1), face(2), face(3)],
+                index: 0,
+            },
         };
         let corner = Vec2::new(20.0, 10.0);
         let mut s = Sketch::new();
         let line = s.add_line(Vec2::new(0.0, 0.0), Vec2::new(15.0, 5.0));
-        let Some(CurveKind::Line { a, b }) = s.curves.get(line).map(|c| c.kind) else { unreachable!() };
+        let Some(CurveKind::Line { a, b }) = s.curves.get(line).map(|c| c.kind) else {
+            unreachable!()
+        };
         let sel = [SketchEntity::Point(b), SketchEntity::Link(vertex)];
-        let FitOp::Complete(op) = fit_op(ConstraintKind::Coincident, &s, &sel, |_| Some(corner)) else {
+        let FitOp::Complete(op) = fit_op(ConstraintKind::Coincident, &s, &sel, |_| Some(corner))
+        else {
             panic!("a point and a vertex fit Coincident");
         };
         op.apply(&mut s).unwrap();
         let p = s.linked_point(vertex).expect("the vertex is used");
         assert_ne!(p, b, "the vertex keeps its own point");
         assert!(s.is_used_vertex(p));
-        assert!(s.pos(b).distance(corner) < 1e-9, "the line's end is on the vertex");
+        assert!(
+            s.pos(b).distance(corner) < 1e-9,
+            "the line's end is on the vertex"
+        );
         // Horizontal from the other end to the (now used) vertex: no second point.
         let points = s.points.len();
         let sel = [SketchEntity::Point(a), SketchEntity::Link(vertex)];
-        let FitOp::Complete(op) = fit_op(ConstraintKind::Horizontal, &s, &sel, |_| Some(corner)) else {
+        let FitOp::Complete(op) = fit_op(ConstraintKind::Horizontal, &s, &sel, |_| Some(corner))
+        else {
             panic!("two points fit Horizontal");
         };
         op.apply(&mut s).unwrap();
@@ -970,9 +1001,15 @@ mod tests {
         // A vertex that is gone does not fit.
         let other = Link::Vertex {
             feature: uuid::Uuid::nil(),
-            vertex: VertexName { faces: [face(4), face(5), face(6)], index: 0 },
+            vertex: VertexName {
+                faces: [face(4), face(5), face(6)],
+                index: 0,
+            },
         };
         let sel = [SketchEntity::Point(a), SketchEntity::Link(other)];
-        assert_eq!(fit_op(ConstraintKind::Coincident, &s, &sel, |_| None), FitOp::Invalid);
+        assert_eq!(
+            fit_op(ConstraintKind::Coincident, &s, &sel, |_| None),
+            FitOp::Invalid
+        );
     }
 }

@@ -147,18 +147,34 @@ pub fn glyph(p: &mut ChildSpawnerCommands, theme: &Theme, g: Glyph, color: Color
             }
             Glyph::RowAbove | Glyph::RowBelow | Glyph::DeleteRow => {
                 // A 2 × 2 grid with the new (or removed) row highlighted.
-                let (y_new, y_old) = if g == Glyph::RowBelow { (9.0, 2.0) } else { (2.0, 9.0) };
+                let (y_new, y_old) = if g == Glyph::RowBelow {
+                    (9.0, 2.0)
+                } else {
+                    (2.0, 9.0)
+                };
                 b.spawn(frame(1.0, y_old, 14.0, 6.0, color));
                 b.spawn(bar(8.0, y_old, 1.2, 6.0, color));
-                let c = if g == Glyph::DeleteRow { Color::srgb_u8(0xd9, 0x3b, 0x30) } else { accent };
+                let c = if g == Glyph::DeleteRow {
+                    Color::srgb_u8(0xd9, 0x3b, 0x30)
+                } else {
+                    accent
+                };
                 b.spawn(frame(1.0, y_new, 14.0, 6.0, c));
                 b.spawn(bar(8.0, y_new, 1.2, 6.0, c));
             }
             Glyph::ColumnLeft | Glyph::ColumnRight | Glyph::DeleteColumn => {
-                let (x_new, x_old) = if g == Glyph::ColumnRight { (9.0, 2.0) } else { (2.0, 9.0) };
+                let (x_new, x_old) = if g == Glyph::ColumnRight {
+                    (9.0, 2.0)
+                } else {
+                    (2.0, 9.0)
+                };
                 b.spawn(frame(x_old, 1.0, 6.0, 14.0, color));
                 b.spawn(bar(x_old, 8.0, 6.0, 1.2, color));
-                let c = if g == Glyph::DeleteColumn { Color::srgb_u8(0xd9, 0x3b, 0x30) } else { accent };
+                let c = if g == Glyph::DeleteColumn {
+                    Color::srgb_u8(0xd9, 0x3b, 0x30)
+                } else {
+                    accent
+                };
                 b.spawn(frame(x_new, 1.0, 6.0, 14.0, c));
                 b.spawn(bar(x_new, 8.0, 6.0, 1.2, c));
             }
@@ -186,19 +202,45 @@ pub fn thumbtack(size: f32, color: Color) -> impl Bundle {
     let px = move |v: f32| Val::Px(v * k);
     let part = move |w: f32, h: f32, r: f32| {
         (
-            Node { width: px(w), height: px(h), flex_shrink: 0.0, border_radius: BorderRadius::all(px(r)), ..default() },
+            Node {
+                width: px(w),
+                height: px(h),
+                flex_shrink: 0.0,
+                border_radius: BorderRadius::all(px(r)),
+                ..default()
+            },
             BackgroundColor(color),
             Pickable::IGNORE,
         )
     };
     (
-        Node { width: Val::Px(size), height: Val::Px(size), flex_shrink: 0.0, justify_content: JustifyContent::Center, ..default() },
+        Node {
+            width: Val::Px(size),
+            height: Val::Px(size),
+            flex_shrink: 0.0,
+            justify_content: JustifyContent::Center,
+            ..default()
+        },
         Pickable::IGNORE,
         children![(
-            Node { width: px(9.0), height: px(14.0), flex_direction: FlexDirection::Column, align_items: AlignItems::Center, ..default() },
-            bevy::ui::UiTransform { rotation: Rot2::degrees(40.0), ..default() },
+            Node {
+                width: px(9.0),
+                height: px(14.0),
+                flex_direction: FlexDirection::Column,
+                align_items: AlignItems::Center,
+                ..default()
+            },
+            bevy::ui::UiTransform {
+                rotation: Rot2::degrees(40.0),
+                ..default()
+            },
             Pickable::IGNORE,
-            children![part(6.5, 2.4, 1.0), part(4.2, 4.2, 0.6), part(9.0, 2.4, 1.0), part(1.7, 5.0, 0.8)],
+            children![
+                part(6.5, 2.4, 1.0),
+                part(4.2, 4.2, 0.6),
+                part(9.0, 2.4, 1.0),
+                part(1.7, 5.0, 0.8)
+            ],
         )],
     )
 }
@@ -208,14 +250,38 @@ pub fn thumbtack(size: f32, color: Color) -> impl Bundle {
 pub fn down_arrow(size: f32, color: Color) -> impl Bundle {
     let k = size / 10.0;
     (
-        Node { width: Val::Px(size), height: Val::Px(size), flex_shrink: 0.0, flex_direction: FlexDirection::Column, align_items: AlignItems::Center, ..default() },
+        Node {
+            width: Val::Px(size),
+            height: Val::Px(size),
+            flex_shrink: 0.0,
+            flex_direction: FlexDirection::Column,
+            align_items: AlignItems::Center,
+            ..default()
+        },
         Pickable::IGNORE,
         children![
-            (Node { width: Val::Px(2.0 * k), height: Val::Px(4.5 * k), flex_shrink: 0.0, ..default() }, BackgroundColor(color), Pickable::IGNORE),
             (
-                Node { margin: UiRect::top(Val::Px(-2.5 * k)), flex_shrink: 0.0, ..default() },
+                Node {
+                    width: Val::Px(2.0 * k),
+                    height: Val::Px(4.5 * k),
+                    flex_shrink: 0.0,
+                    ..default()
+                },
+                BackgroundColor(color),
+                Pickable::IGNORE
+            ),
+            (
+                Node {
+                    margin: UiRect::top(Val::Px(-2.5 * k)),
+                    flex_shrink: 0.0,
+                    ..default()
+                },
                 Pickable::IGNORE,
-                children![(crate::icon::icon("caret-down-filled", 8.0 * k, color), crate::icon::SolidTint, Pickable::IGNORE)],
+                children![(
+                    crate::icon::icon("caret-down-filled", 8.0 * k, color),
+                    crate::icon::SolidTint,
+                    Pickable::IGNORE
+                )],
             ),
         ],
     )

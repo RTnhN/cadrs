@@ -73,7 +73,11 @@ impl TabItem {
 #[derive(Debug, Clone, PartialEq)]
 pub enum TabNode {
     Tab(ElementId),
-    Folder { id: ElementId, name: String, children: Vec<TabNode> },
+    Folder {
+        id: ElementId,
+        name: String,
+        children: Vec<TabNode>,
+    },
 }
 
 impl TabNode {
@@ -133,12 +137,18 @@ pub fn layout(doc: &Document) -> Vec<TabNode> {
                     }
                 }
                 TabItem::Folder(f) => {
-                    let Some(folder) = tree.folder(f) else { continue };
+                    let Some(folder) = tree.folder(f) else {
+                        continue;
+                    };
                     if !seen_folders.insert(f) {
                         continue;
                     }
                     let children = build(&folder.items, tree, exists, seen_tabs, seen_folders);
-                    out.push(TabNode::Folder { id: f, name: folder.name.clone(), children });
+                    out.push(TabNode::Folder {
+                        id: f,
+                        name: folder.name.clone(),
+                        children,
+                    });
                 }
             }
         }
@@ -150,7 +160,11 @@ pub fn layout(doc: &Document) -> Vec<TabNode> {
         if !seen_folders.contains(&f.id) {
             seen_folders.insert(f.id);
             let children = build(&f.items, tree, &exists, &mut seen_tabs, &mut seen_folders);
-            root.push(TabNode::Folder { id: f.id, name: f.name.clone(), children });
+            root.push(TabNode::Folder {
+                id: f.id,
+                name: f.name.clone(),
+                children,
+            });
         }
     }
     // Tabs nobody mentions: after the element before them.
@@ -158,7 +172,11 @@ pub fn layout(doc: &Document) -> Vec<TabNode> {
         if seen_tabs.contains(&e.id) {
             continue;
         }
-        let prev = doc.elements[..i].iter().rev().map(|x| x.id).find(|x| seen_tabs.contains(x));
+        let prev = doc.elements[..i]
+            .iter()
+            .rev()
+            .map(|x| x.id)
+            .find(|x| seen_tabs.contains(x));
         match prev.and_then(|p| path_to(&root, TabItem::Tab(p))) {
             Some(mut path) => {
                 let k = path.pop().unwrap_or(0);
@@ -228,7 +246,11 @@ fn find_folder(nodes: &[TabNode], f: ElementId) -> Option<&TabNode> {
 
 /// The folder that holds `item` (`None`: the top level, or not found).
 pub fn parent_of(nodes: &[TabNode], item: TabItem) -> Option<ElementId> {
-    fn walk(nodes: &[TabNode], item: TabItem, parent: Option<ElementId>) -> Option<Option<ElementId>> {
+    fn walk(
+        nodes: &[TabNode],
+        item: TabItem,
+        parent: Option<ElementId>,
+    ) -> Option<Option<ElementId>> {
         for n in nodes {
             if n.item() == item {
                 return Some(parent);
@@ -265,7 +287,9 @@ pub fn folder_path(nodes: &[TabNode], folder: ElementId) -> Vec<(ElementId, Stri
 
 /// The tabs inside `folder`, at any depth.
 pub fn tabs_in(nodes: &[TabNode], folder: ElementId) -> Vec<ElementId> {
-    find_folder(nodes, folder).map(|n| n.tabs()).unwrap_or_default()
+    find_folder(nodes, folder)
+        .map(|n| n.tabs())
+        .unwrap_or_default()
 }
 
 /// Every folder's (id, name), depth first.
@@ -288,7 +312,8 @@ pub fn folders(nodes: &[TabNode]) -> Vec<(ElementId, String, usize)> {
 pub fn store(doc: &mut Document, nodes: Vec<TabNode>) {
     let order = flatten(&nodes);
     let mut rest: Vec<crate::document::Element> = Vec::new();
-    let mut by_id: std::collections::HashMap<ElementId, crate::document::Element> = std::collections::HashMap::new();
+    let mut by_id: std::collections::HashMap<ElementId, crate::document::Element> =
+        std::collections::HashMap::new();
     for e in std::mem::take(&mut doc.elements) {
         if order.contains(&e.id) {
             by_id.insert(e.id, e);
@@ -310,7 +335,11 @@ pub fn store(doc: &mut Document, nodes: Vec<TabNode>) {
             .map(|n| {
                 if let TabNode::Folder { id, name, children } = n {
                     let items = put(children, tree);
-                    tree.folders.push(TabFolder { id: *id, name: name.clone(), items });
+                    tree.folders.push(TabFolder {
+                        id: *id,
+                        name: name.clone(),
+                        items,
+                    });
                 }
                 n.item()
             })
@@ -352,7 +381,12 @@ fn children_mut(nodes: &mut Vec<TabNode>, folder: Option<ElementId>) -> Option<&
 
 /// The next free default folder name ("Folder 1", "Folder 2", …).
 pub fn next_folder_name(doc: &Document) -> String {
-    let names: Vec<String> = doc.tab_tree.folders.iter().map(|f| f.name.clone()).collect();
+    let names: Vec<String> = doc
+        .tab_tree
+        .folders
+        .iter()
+        .map(|f| f.name.clone())
+        .collect();
     let mut n = 1;
     loop {
         let name = format!("Folder {n}");
@@ -373,14 +407,21 @@ fn non_empty(s: &str) -> Result<String, CommandError> {
 
 /// Moves `items` (in the order given) into `parent` (`None`: the top level), before `before`
 /// (`None`: at the end). Shared by the commands below.
-fn move_items(nodes: &mut Vec<TabNode>, items: &[TabItem], parent: Option<ElementId>, before: Option<TabItem>) -> Result<(), CommandError> {
+fn move_items(
+    nodes: &mut Vec<TabNode>,
+    items: &[TabItem],
+    parent: Option<ElementId>,
+    before: Option<TabItem>,
+) -> Result<(), CommandError> {
     // A folder can't go into itself or its own subfolders.
     if let Some(p) = parent {
         for it in items {
             if let TabItem::Folder(f) = it
                 && (*f == p || folder_path(nodes, p).iter().any(|(id, _)| id == f))
             {
-                return Err(CommandError::Invalid("a folder can't go inside itself".into()));
+                return Err(CommandError::Invalid(
+                    "a folder can't go inside itself".into(),
+                ));
             }
         }
         if find_folder(nodes, p).is_none() {
@@ -395,8 +436,11 @@ fn move_items(nodes: &mut Vec<TabNode>, items: &[TabItem], parent: Option<Elemen
             None => return Err(CommandError::ElementNotFound(it.id())),
         }
     }
-    let level = children_mut(nodes, parent).ok_or(CommandError::Invalid("no such folder".into()))?;
-    let at = before.and_then(|b| level.iter().position(|n| n.item() == b)).unwrap_or(level.len());
+    let level =
+        children_mut(nodes, parent).ok_or(CommandError::Invalid("no such folder".into()))?;
+    let at = before
+        .and_then(|b| level.iter().position(|n| n.item() == b))
+        .unwrap_or(level.len());
     for (k, n) in taken.into_iter().enumerate() {
         level.insert(at + k, n);
     }
@@ -433,9 +477,19 @@ impl Command for CreateTabFolder {
         let mut nodes = layout(doc);
         // The folder goes where the first of its items was (in `parent`), unless a place is given.
         let before = self.before.or_else(|| self.items.first().copied());
-        let level = children_mut(&mut nodes, self.parent).ok_or(CommandError::Invalid("no such folder".into()))?;
-        let at = before.and_then(|b| level.iter().position(|n| n.item() == b)).unwrap_or(level.len());
-        level.insert(at, TabNode::Folder { id: self.id, name, children: Vec::new() });
+        let level = children_mut(&mut nodes, self.parent)
+            .ok_or(CommandError::Invalid("no such folder".into()))?;
+        let at = before
+            .and_then(|b| level.iter().position(|n| n.item() == b))
+            .unwrap_or(level.len());
+        level.insert(
+            at,
+            TabNode::Folder {
+                id: self.id,
+                name,
+                children: Vec::new(),
+            },
+        );
         move_items(&mut nodes, &self.items, Some(self.id), None)?;
         store(doc, nodes);
         Ok(())
@@ -458,7 +512,12 @@ impl Command for RenameTabFolder {
     }
     fn apply(&self, doc: &mut Document) -> Result<(), CommandError> {
         let name = non_empty(&self.name)?;
-        let f = doc.tab_tree.folders.iter_mut().find(|f| f.id == self.id).ok_or(CommandError::ElementNotFound(self.id))?;
+        let f = doc
+            .tab_tree
+            .folders
+            .iter_mut()
+            .find(|f| f.id == self.id)
+            .ok_or(CommandError::ElementNotFound(self.id))?;
         f.name = name;
         Ok(())
     }
@@ -474,7 +533,11 @@ pub struct DeleteTabFolder {
 
 impl Command for DeleteTabFolder {
     fn label(&self) -> String {
-        if self.delete_tabs { "Delete folder and its tabs".into() } else { "Delete folder".into() }
+        if self.delete_tabs {
+            "Delete folder and its tabs".into()
+        } else {
+            "Delete folder".into()
+        }
     }
     fn scope(&self) -> Scope {
         Scope::Document
@@ -482,9 +545,15 @@ impl Command for DeleteTabFolder {
     fn apply(&self, doc: &mut Document) -> Result<(), CommandError> {
         let mut nodes = layout(doc);
         let parent = parent_of(&nodes, TabItem::Folder(self.id));
-        let level = children_mut(&mut nodes, parent).ok_or(CommandError::ElementNotFound(self.id))?;
-        let k = level.iter().position(|n| n.item() == TabItem::Folder(self.id)).ok_or(CommandError::ElementNotFound(self.id))?;
-        let TabNode::Folder { children, .. } = level.remove(k) else { unreachable!() };
+        let level =
+            children_mut(&mut nodes, parent).ok_or(CommandError::ElementNotFound(self.id))?;
+        let k = level
+            .iter()
+            .position(|n| n.item() == TabItem::Folder(self.id))
+            .ok_or(CommandError::ElementNotFound(self.id))?;
+        let TabNode::Folder { children, .. } = level.remove(k) else {
+            unreachable!()
+        };
         if self.delete_tabs {
             let gone: Vec<ElementId> = flatten(&children);
             if gone.len() >= doc.elements.len() {
@@ -539,7 +608,8 @@ mod tests {
     fn doc(n: usize) -> Document {
         let mut d = Document::empty("T");
         for k in 0..n {
-            d.elements.push(Element::part_studio(format!("Tab {}", k + 1)));
+            d.elements
+                .push(Element::part_studio(format!("Tab {}", k + 1)));
         }
         d
     }
@@ -548,7 +618,10 @@ mod tests {
     fn no_folders_is_the_element_order() {
         let d = doc(3);
         let l = layout(&d);
-        assert_eq!(flatten(&l), d.elements.iter().map(|e| e.id).collect::<Vec<_>>());
+        assert_eq!(
+            flatten(&l),
+            d.elements.iter().map(|e| e.id).collect::<Vec<_>>()
+        );
     }
 
     #[test]
@@ -556,7 +629,15 @@ mod tests {
         let mut d = doc(3);
         let ids: Vec<ElementId> = d.elements.iter().map(|e| e.id).collect();
         let f = ElementId::new();
-        CreateTabFolder { id: f, name: None, parent: None, before: None, items: vec![TabItem::Tab(ids[1])] }.apply(&mut d).unwrap();
+        CreateTabFolder {
+            id: f,
+            name: None,
+            parent: None,
+            before: None,
+            items: vec![TabItem::Tab(ids[1])],
+        }
+        .apply(&mut d)
+        .unwrap();
         // A tab inserted right after Tab 2 in the element list joins Folder 1.
         let e = Element::part_studio("New");
         let new = e.id;

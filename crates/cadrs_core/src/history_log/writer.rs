@@ -32,12 +32,16 @@ fn writer() -> &'static Writer {
                 while let Ok(first) = rx.recv() {
                     let jobs: Vec<_> = std::iter::once(first).chain(rx.try_iter()).collect();
                     let n = jobs.len();
-                    let last: Vec<bool> = (0..n).map(|i| !jobs[i + 1..].iter().any(|(p, _)| *p == jobs[i].0)).collect();
+                    let last: Vec<bool> = (0..n)
+                        .map(|i| !jobs[i + 1..].iter().any(|(p, _)| *p == jobs[i].0))
+                        .collect();
                     for ((path, make), last) in jobs.into_iter().zip(last) {
                         if !last {
                             continue;
                         }
-                        let done = make().map_err(|e| StoreError::Parse(e.to_string())).and_then(|text| write(&path, &text));
+                        let done = make()
+                            .map_err(|e| StoreError::Parse(e.to_string()))
+                            .and_then(|text| write(&path, &text));
                         if let Err(e) = done {
                             eprintln!("cannot save {}: {e}", path.display());
                         }
@@ -51,19 +55,32 @@ fn writer() -> &'static Writer {
                 }
             })
             .expect("cannot start the history writer");
-        Writer { jobs: Mutex::new(tx), queued }
+        Writer {
+            jobs: Mutex::new(tx),
+            queued,
+        }
     })
 }
 
 /// Writes `make()`'s text to `path` on the writer's thread.
-pub(super) fn queue(path: PathBuf, make: impl FnOnce() -> Result<String, ron::Error> + Send + 'static) {
+pub(super) fn queue(
+    path: PathBuf,
+    make: impl FnOnce() -> Result<String, ron::Error> + Send + 'static,
+) {
     let w = writer();
     *w.queued.0.lock().unwrap_or_else(|e| e.into_inner()) += 1;
-    let sent = w.jobs.lock().unwrap_or_else(|e| e.into_inner()).send((path, Box::new(make)));
+    let sent = w
+        .jobs
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .send((path, Box::new(make)));
     if let Err(mpsc::SendError((path, make))) = sent {
         // (The thread is gone: write it here.)
         *w.queued.0.lock().unwrap_or_else(|e| e.into_inner()) -= 1;
-        if let Err(e) = make().map_err(|e| StoreError::Parse(e.to_string())).and_then(|text| write(&path, &text)) {
+        if let Err(e) = make()
+            .map_err(|e| StoreError::Parse(e.to_string()))
+            .and_then(|text| write(&path, &text))
+        {
             eprintln!("cannot save {}: {e}", path.display());
         }
     }

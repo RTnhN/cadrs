@@ -47,9 +47,24 @@ impl Plugin for LinkedSessionPlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(
             Update,
-            (sync_banner, sync_edit_banner, sync_branch_label, disable_editing, sync_veil, notify_refused, apply_pending_selection, apply_restore_selection).run_if(in_state(AppState::Document)),
+            (
+                sync_banner,
+                sync_edit_banner,
+                sync_branch_label,
+                disable_editing,
+                sync_veil,
+                notify_refused,
+                apply_pending_selection,
+                apply_restore_selection,
+            )
+                .run_if(in_state(AppState::Document)),
         )
-        .add_systems(OnExit(AppState::Document), (leave, |mut commands: Commands| commands.remove_resource::<EditingSource>()))
+        .add_systems(
+            OnExit(AppState::Document),
+            (leave, |mut commands: Commands| {
+                commands.remove_resource::<EditingSource>()
+            }),
+        )
         .add_observer(on_back);
     }
 }
@@ -79,7 +94,9 @@ impl LinkedSession {
 
 /// True while a linked document is open read-only.
 pub fn is_read_only(world: &World) -> bool {
-    world.get_resource::<ActiveDocument>().is_some_and(|d| d.read_only.is_some())
+    world
+        .get_resource::<ActiveDocument>()
+        .is_some_and(|d| d.read_only.is_some())
 }
 
 /// Refuses an edit that doesn't go through a command (opening a feature to edit it): true, with
@@ -95,13 +112,22 @@ pub fn refuse(world: &mut World) -> bool {
 /// Whether a use can be opened: a version reference whose source can be reached (DV1.7: not a
 /// trashed, deleted or unreadable document).
 pub fn can_open(doc: &Document, status: &LinkStatus, u: &RefUse) -> bool {
-    matches!(u.reference.at, RefAt::Version(_)) && (u.reference.document_or(doc.id) == doc.id || status.state(u.reference.document_or(doc.id)) == LinkState::Ok)
+    matches!(u.reference.at, RefAt::Version(_))
+        && (u.reference.document_or(doc.id) == doc.id
+            || status.state(u.reference.document_or(doc.id)) == LinkState::Ok)
 }
 
 /// The part an instance use references (selected when its source opens).
 fn part_of(doc: &Document, u: &RefUse) -> Option<PartId> {
-    let RefSite::Instance { element, instance } = u.site else { return None };
-    match doc.element(element)?.assembly_model()?.instance(instance)?.source {
+    let RefSite::Instance { element, instance } = u.site else {
+        return None;
+    };
+    match doc
+        .element(element)?
+        .assembly_model()?
+        .instance(instance)?
+        .source
+    {
         InstanceSource::Part { part, .. } => Some(part),
         _ => None,
     }
@@ -111,7 +137,10 @@ fn part_of(doc: &Document, u: &RefUse) -> Option<PartId> {
 pub fn open_use(world: &mut World, u: RefUse) {
     let doc = world.resource::<ActiveDocument>().doc.clone();
     let RefAt::Version(v) = u.reference.at else {
-        linked::toast(world, "It references the workspace: switch to its tab instead");
+        linked::toast(
+            world,
+            "It references the workspace: switch to its tab instead",
+        );
         return;
     };
     let d = u.reference.document_or(doc.id);
@@ -124,7 +153,10 @@ pub fn open_use(world: &mut World, u: RefUse) {
             linked::error_toast(world, "The version can't be read");
             return;
         };
-        let vn = log.as_ref().and_then(|l| l.version(v).map(|x| x.name().to_string())).unwrap_or_default();
+        let vn = log
+            .as_ref()
+            .and_then(|l| l.version(v).map(|x| x.name().to_string()))
+            .unwrap_or_default();
         (at, doc.name.clone(), vn)
     } else {
         let mut r = linked::resolver(world);
@@ -140,7 +172,13 @@ pub fn open_use(world: &mut World, u: RefUse) {
                 return;
             }
         };
-        let vn = r.0.versions(d).into_iter().find(|x| x.id() == v).map(|x| x.name().to_string()).or_else(|| copy.as_ref().map(|c| c.version_name.clone())).unwrap_or_default();
+        let vn =
+            r.0.versions(d)
+                .into_iter()
+                .find(|x| x.id() == v)
+                .map(|x| x.name().to_string())
+                .or_else(|| copy.as_ref().map(|c| c.version_name.clone()))
+                .unwrap_or_default();
         let name = at.name.clone();
         (at, name, vn)
     };
@@ -175,7 +213,15 @@ pub fn open_use(world: &mut World, u: RefUse) {
     open.read_only = Some(label);
     open.set_active(element);
     world.insert_resource(open);
-    world.insert_resource(LinkedSession { back, document: d, name, version: v, version_name, pending: part.map(|p| (element, p)), selection });
+    world.insert_resource(LinkedSession {
+        back,
+        document: d,
+        name,
+        version: v,
+        version_name,
+        pending: part.map(|p| (element, p)),
+        selection,
+    });
     world.resource_mut::<LinkStatus>().invalidate();
 }
 
@@ -183,9 +229,15 @@ pub fn open_use(world: &mut World, u: RefUse) {
 /// with its label "Block source (V1)" (the tab menu's Open linked document).
 pub fn tab_sources(doc: &Document, tab: ElementId) -> Vec<(String, RefUse)> {
     let mut out: Vec<(String, RefUse)> = Vec::new();
-    for u in cadrs_core::link_update::uses(doc).into_iter().filter(|u| u.site.tab() == tab) {
+    for u in cadrs_core::link_update::uses(doc)
+        .into_iter()
+        .filter(|u| u.site.tab() == tab)
+    {
         let key = (u.reference.document_or(doc.id), u.reference.at);
-        if out.iter().any(|(_, x)| (x.reference.document_or(doc.id), x.reference.at) == key) {
+        if out
+            .iter()
+            .any(|(_, x)| (x.reference.document_or(doc.id), x.reference.at) == key)
+        {
             continue;
         }
         let label = match doc.linked_element(u.source) {
@@ -200,18 +252,26 @@ pub fn tab_sources(doc: &Document, tab: ElementId) -> Vec<(String, RefUse)> {
 
 /// Opens the source of the use at `site`.
 pub fn open_site(world: &mut World, site: RefSite) {
-    let Some(u) = cadrs_core::link_update::use_at(&world.resource::<ActiveDocument>().doc, site) else { return };
+    let Some(u) = cadrs_core::link_update::use_at(&world.resource::<ActiveDocument>().doc, site)
+    else {
+        return;
+    };
     open_use(world, u);
 }
 
 /// Back to the document the session was opened from.
 pub fn back(world: &mut World) {
-    let Some(s) = world.remove_resource::<LinkedSession>() else { return };
+    let Some(s) = world.remove_resource::<LinkedSession>() else {
+        return;
+    };
     crate::reference_manager::close(world);
     let element = s.back.active;
     world.insert_resource(s.back);
     // Given back once its tab shows (switching tabs clears the selection).
-    world.insert_resource(RestoreSelection { element, picks: s.selection });
+    world.insert_resource(RestoreSelection {
+        element,
+        picks: s.selection,
+    });
     world.resource_mut::<LinkStatus>().invalidate();
 }
 
@@ -241,7 +301,9 @@ pub struct EditingSource {
 /// Edit Main: the linked session's document at its workspace, editable (saved as usual), on the
 /// tab that was shown.
 pub fn edit_main(world: &mut World) {
-    let Some(s) = world.remove_resource::<LinkedSession>() else { return };
+    let Some(s) = world.remove_resource::<LinkedSession>() else {
+        return;
+    };
     if s.document == s.back.doc.id {
         world.insert_resource(s);
         return;
@@ -271,14 +333,20 @@ pub fn edit_main(world: &mut World) {
         open.set_active(e);
     }
     world.insert_resource(open);
-    world.insert_resource(EditingSource { back: s.back, document: s.document, name });
+    world.insert_resource(EditingSource {
+        back: s.back,
+        document: s.document,
+        name,
+    });
     world.resource_mut::<LinkStatus>().invalidate();
 }
 
 /// Back from Edit Main: the edited document saved, the document the linked session was opened
 /// from shown again as it was.
 pub fn back_from_main(world: &mut World) {
-    let Some(e) = world.remove_resource::<EditingSource>() else { return };
+    let Some(e) = world.remove_resource::<EditingSource>() else {
+        return;
+    };
     let store = world.resource::<DocumentStore>().0.clone();
     let now = world.resource::<AppClock>().now();
     let user = world.resource::<UserProfile>().id.clone();
@@ -298,9 +366,18 @@ pub fn back_from_main(world: &mut World) {
 #[derive(Component)]
 struct Banner(String);
 
-fn sync_banner(session: Option<Res<LinkedSession>>, doc: Option<Res<ActiveDocument>>, q: Query<(Entity, &Banner)>, qa: Query<Entity, With<ViewportArea>>, theme: Res<Theme>, mut commands: Commands) {
+fn sync_banner(
+    session: Option<Res<LinkedSession>>,
+    doc: Option<Res<ActiveDocument>>,
+    q: Query<(Entity, &Banner)>,
+    qa: Query<Entity, With<ViewportArea>>,
+    theme: Res<Theme>,
+    mut commands: Commands,
+) {
     let want = match (&session, &doc) {
-        (Some(s), Some(d)) if d.read_only.is_some() => Some(format!("{}|{}", s.label(), s.back.doc.name)),
+        (Some(s), Some(d)) if d.read_only.is_some() => {
+            Some(format!("{}|{}", s.label(), s.back.doc.name))
+        }
         _ => None,
     };
     let have = q.iter().next().map(|(e, b)| (e, b.0.clone()));
@@ -310,7 +387,9 @@ fn sync_banner(session: Option<Res<LinkedSession>>, doc: Option<Res<ActiveDocume
     if let Some((e, _)) = have {
         commands.entity(e).despawn();
     }
-    let (Some(s), Some(key)) = (session, want) else { return };
+    let (Some(s), Some(key)) = (session, want) else {
+        return;
+    };
     let Some(area) = qa.iter().next() else { return };
     let t = &*theme;
     let blue = Color::srgb_u8(0xe3, 0xef, 0xfc);
@@ -318,7 +397,14 @@ fn sync_banner(session: Option<Res<LinkedSession>>, doc: Option<Res<ActiveDocume
     let banner = commands
         .spawn((
             Banner(key),
-            Node { position_type: PositionType::Absolute, left: Val::Px(0.0), right: Val::Px(0.0), bottom: Val::Px(14.0), justify_content: JustifyContent::Center, ..default() },
+            Node {
+                position_type: PositionType::Absolute,
+                left: Val::Px(0.0),
+                right: Val::Px(0.0),
+                bottom: Val::Px(14.0),
+                justify_content: JustifyContent::Center,
+                ..default()
+            },
             Pickable::IGNORE,
             GlobalZIndex(40),
         ))
@@ -339,18 +425,40 @@ fn sync_banner(session: Option<Res<LinkedSession>>, doc: Option<Res<ActiveDocume
                 BorderColor::all(linked::UPDATE_BLUE),
             ))
             .with_children(|b| {
-                b.spawn((cadrs_ui::icon::icon("info-filled", 16.0, linked::UPDATE_BLUE), cadrs_ui::icon::SolidTint));
+                b.spawn((
+                    cadrs_ui::icon::icon("info-filled", 16.0, linked::UPDATE_BLUE),
+                    cadrs_ui::icon::SolidTint,
+                ));
                 b.spawn((
                     Name::new("linked-session-banner-text"),
-                    t.text(format!("Viewing {} (read-only). Edits are turned off.", s.label()), t.font_sm, FontWeight::MEDIUM, t.foreground),
+                    t.text(
+                        format!("Viewing {} (read-only). Edits are turned off.", s.label()),
+                        t.font_sm,
+                        FontWeight::MEDIUM,
+                        t.foreground,
+                    ),
                 ))
                 .insert(TextLayout::no_wrap());
                 // Edit Main: another document's workspace (a version of this document goes back
                 // to it with Back).
                 if s.document != s.back.doc.id {
-                    b.spawn(cadrs_ui::Button::new("linked-session-main").label("Edit Main").icon("edit").tooltip(format!("Open {}'s workspace (Main) to edit it", s.name)).small().build(t));
+                    b.spawn(
+                        cadrs_ui::Button::new("linked-session-main")
+                            .label("Edit Main")
+                            .icon("edit")
+                            .tooltip(format!("Open {}'s workspace (Main) to edit it", s.name))
+                            .small()
+                            .build(t),
+                    );
                 }
-                b.spawn(cadrs_ui::Button::new("linked-session-back").label(format!("Back to {}", s.back.doc.name)).icon("chevron-left").primary().small().build(t));
+                b.spawn(
+                    cadrs_ui::Button::new("linked-session-back")
+                        .label(format!("Back to {}", s.back.doc.name))
+                        .icon("chevron-left")
+                        .primary()
+                        .small()
+                        .build(t),
+                );
             });
         })
         .id();
@@ -361,7 +469,14 @@ fn sync_banner(session: Option<Res<LinkedSession>>, doc: Option<Res<ActiveDocume
 #[derive(Component)]
 struct EditBanner(String);
 
-fn sync_edit_banner(editing: Option<Res<EditingSource>>, doc: Option<Res<ActiveDocument>>, q: Query<(Entity, &EditBanner)>, qa: Query<Entity, With<ViewportArea>>, theme: Res<Theme>, mut commands: Commands) {
+fn sync_edit_banner(
+    editing: Option<Res<EditingSource>>,
+    doc: Option<Res<ActiveDocument>>,
+    q: Query<(Entity, &EditBanner)>,
+    qa: Query<Entity, With<ViewportArea>>,
+    theme: Res<Theme>,
+    mut commands: Commands,
+) {
     // Opening another document (the documents page, Open linked document) ends it.
     if let (Some(e), Some(d)) = (&editing, &doc)
         && (d.doc.id != e.document || d.read_only.is_some())
@@ -369,7 +484,9 @@ fn sync_edit_banner(editing: Option<Res<EditingSource>>, doc: Option<Res<ActiveD
         commands.remove_resource::<EditingSource>();
     }
     let want = match (&editing, &doc) {
-        (Some(e), Some(d)) if d.doc.id == e.document && d.read_only.is_none() => Some(format!("{}|{}", e.name, e.back.doc.name)),
+        (Some(e), Some(d)) if d.doc.id == e.document && d.read_only.is_none() => {
+            Some(format!("{}|{}", e.name, e.back.doc.name))
+        }
         _ => None,
     };
     let have = q.iter().next().map(|(e, b)| (e, b.0.clone()));
@@ -379,7 +496,9 @@ fn sync_edit_banner(editing: Option<Res<EditingSource>>, doc: Option<Res<ActiveD
     if let Some((e, _)) = have {
         commands.entity(e).despawn();
     }
-    let (Some(e), Some(key)) = (editing, want) else { return };
+    let (Some(e), Some(key)) = (editing, want) else {
+        return;
+    };
     let Some(area) = qa.iter().next() else { return };
     let t = &*theme;
     let banner = commands
@@ -427,10 +546,18 @@ fn sync_edit_banner(editing: Option<Res<EditingSource>>, doc: Option<Res<ActiveD
 
 /// The top bar says which version is shown ("V1") instead of the workspace's name ("Main", or
 /// the branch open, P3E.4).
-fn sync_branch_label(session: Option<Res<LinkedSession>>, doc: Option<Res<ActiveDocument>>, log: Option<Res<crate::history_panel::DocLog>>, mut q: Query<(&Name, &mut Text)>) {
+fn sync_branch_label(
+    session: Option<Res<LinkedSession>>,
+    doc: Option<Res<ActiveDocument>>,
+    log: Option<Res<crate::history_panel::DocLog>>,
+    mut q: Query<(&Name, &mut Text)>,
+) {
     let want = match (&session, &doc) {
         (Some(s), Some(d)) if d.read_only.is_some() => s.version_name.clone(),
-        _ => log.as_ref().and_then(|l| l.log.as_ref()).map_or_else(|| "Main".to_string(), |l| l.current_name()),
+        _ => log
+            .as_ref()
+            .and_then(|l| l.log.as_ref())
+            .map_or_else(|| "Main".to_string(), |l| l.current_name()),
     };
     for (n, mut t) in &mut q {
         if n.as_str() == "branch-label" && t.0 != want {
@@ -442,7 +569,12 @@ fn sync_branch_label(session: Option<Res<LinkedSession>>, doc: Option<Res<Active
 /// While read-only, the toolbar's tools, the tab bar's "+" and Create version are disabled
 /// (and enabled again after).
 /// A button, whether it is disabled, and whether read-only disabled it.
-type ButtonState<'a> = (Entity, &'a Name, Has<InteractionDisabled>, Has<ReadOnlyDisabled>);
+type ButtonState<'a> = (
+    Entity,
+    &'a Name,
+    Has<InteractionDisabled>,
+    Has<ReadOnlyDisabled>,
+);
 
 fn disable_editing(
     doc: Option<Res<ActiveDocument>>,
@@ -455,7 +587,9 @@ fn disable_editing(
     for (e, name, disabled, ours) in &q {
         if !ro {
             if ours {
-                commands.entity(e).try_remove::<(ReadOnlyDisabled, InteractionDisabled)>();
+                commands
+                    .entity(e)
+                    .try_remove::<(ReadOnlyDisabled, InteractionDisabled)>();
             }
             continue;
         }
@@ -463,9 +597,13 @@ fn disable_editing(
             continue;
         }
         let named = matches!(name.as_str(), "insert-tab" | "document-create-version");
-        let in_toolbar = q_parent.iter_ancestors(e).any(|a| q_name.get(a).is_ok_and(|n| n.as_str() == "toolbar"));
+        let in_toolbar = q_parent
+            .iter_ancestors(e)
+            .any(|a| q_name.get(a).is_ok_and(|n| n.as_str() == "toolbar"));
         if named || in_toolbar {
-            commands.entity(e).try_insert((ReadOnlyDisabled, InteractionDisabled));
+            commands
+                .entity(e)
+                .try_insert((ReadOnlyDisabled, InteractionDisabled));
         }
     }
 }
@@ -479,9 +617,17 @@ struct ReadOnlyDisabled;
 #[derive(Component)]
 struct ToolbarVeil;
 
-fn sync_veil(doc: Option<Res<ActiveDocument>>, q_veil: Query<(Entity, &ChildOf), With<ToolbarVeil>>, q_bar: Query<(Entity, &Name)>, mut commands: Commands) {
+fn sync_veil(
+    doc: Option<Res<ActiveDocument>>,
+    q_veil: Query<(Entity, &ChildOf), With<ToolbarVeil>>,
+    q_bar: Query<(Entity, &Name)>,
+    mut commands: Commands,
+) {
     let ro = doc.is_some_and(|d| d.read_only.is_some());
-    let bar = q_bar.iter().find(|(_, n)| n.as_str() == "toolbar").map(|(e, _)| e);
+    let bar = q_bar
+        .iter()
+        .find(|(_, n)| n.as_str() == "toolbar")
+        .map(|(e, _)| e);
     let have: Vec<(Entity, Entity)> = q_veil.iter().map(|(e, p)| (e, p.parent())).collect();
     let ok = ro && bar.is_some() && have.len() == 1 && have.first().map(|h| h.1) == bar;
     if ok || (!ro && have.is_empty()) {
@@ -495,7 +641,14 @@ fn sync_veil(doc: Option<Res<ActiveDocument>>, q_veil: Query<(Entity, &ChildOf),
             .spawn((
                 Name::new("read-only-toolbar-veil"),
                 ToolbarVeil,
-                Node { position_type: PositionType::Absolute, left: Val::Px(0.0), right: Val::Px(0.0), top: Val::Px(0.0), bottom: Val::Px(0.0), ..default() },
+                Node {
+                    position_type: PositionType::Absolute,
+                    left: Val::Px(0.0),
+                    right: Val::Px(0.0),
+                    top: Val::Px(0.0),
+                    bottom: Val::Px(0.0),
+                    ..default()
+                },
                 BackgroundColor(Color::srgba(0.97, 0.97, 0.97, 0.62)),
                 Tooltip::new("This version is open read-only: its tools are turned off"),
             ))
@@ -505,7 +658,13 @@ fn sync_veil(doc: Option<Res<ActiveDocument>>, q_veil: Query<(Entity, &ChildOf),
 }
 
 /// A toast for every refused edit.
-fn notify_refused(doc: Option<Res<ActiveDocument>>, session: Option<Res<LinkedSession>>, mut last: Local<u32>, theme: Res<Theme>, mut commands: Commands) {
+fn notify_refused(
+    doc: Option<Res<ActiveDocument>>,
+    session: Option<Res<LinkedSession>>,
+    mut last: Local<u32>,
+    theme: Res<Theme>,
+    mut commands: Commands,
+) {
     let Some(doc) = doc else { return };
     if doc.refused == *last {
         return;
@@ -516,10 +675,20 @@ fn notify_refused(doc: Option<Res<ActiveDocument>>, session: Option<Res<LinkedSe
         return;
     }
     let text = match session {
-        Some(s) => format!("{} is open read-only: it can't be edited. Go back to {} to edit.", s.label(), s.back.doc.name),
+        Some(s) => format!(
+            "{} is open read-only: it can't be edited. Go back to {} to edit.",
+            s.label(),
+            s.back.doc.name
+        ),
         None => crate::READ_ONLY.to_string(),
     };
-    cadrs_ui::show_notification(&mut commands, &theme, cadrs_ui::Notification::info(text).name("read-only-toast").seconds(5.0));
+    cadrs_ui::show_notification(
+        &mut commands,
+        &theme,
+        cadrs_ui::Notification::info(text)
+            .name("read-only-toast")
+            .seconds(5.0),
+    );
 }
 
 /// The selection to give back after Back, once `element` shows.
@@ -529,7 +698,12 @@ struct RestoreSelection {
     picks: Vec<Pick>,
 }
 
-fn apply_restore_selection(restore: Option<Res<RestoreSelection>>, view: Res<ViewportView>, mut selection: ResMut<Selection>, mut commands: Commands) {
+fn apply_restore_selection(
+    restore: Option<Res<RestoreSelection>>,
+    view: Res<ViewportView>,
+    mut selection: ResMut<Selection>,
+    mut commands: Commands,
+) {
     let Some(r) = restore else { return };
     if r.element.is_some() && view.element != r.element {
         return;
@@ -539,9 +713,15 @@ fn apply_restore_selection(restore: Option<Res<RestoreSelection>>, view: Res<Vie
 }
 
 /// Selects the referenced part once its tab shows (switching tabs clears the selection).
-fn apply_pending_selection(session: Option<ResMut<LinkedSession>>, view: Res<ViewportView>, mut selection: ResMut<Selection>) {
+fn apply_pending_selection(
+    session: Option<ResMut<LinkedSession>>,
+    view: Res<ViewportView>,
+    mut selection: ResMut<Selection>,
+) {
     let Some(mut s) = session else { return };
-    let Some((element, part)) = s.pending else { return };
+    let Some((element, part)) = s.pending else {
+        return;
+    };
     if view.element != Some(element) {
         return;
     }

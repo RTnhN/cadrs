@@ -91,8 +91,16 @@ fn extents(step: &str) -> [(f64, f64); 3] {
 /// Two boxes on Top: 100 × 60 × 25 at the origin and 10 × 10 × 5 beside it.
 fn two_boxes() -> (Vec<Feature>, Vec<PartId>) {
     let mut g = Sketch::new();
-    polyline(&mut g, &[v(0.0, 0.0), v(100.0, 0.0), v(100.0, 60.0), v(0.0, 60.0)], true);
-    polyline(&mut g, &[v(200.0, 0.0), v(210.0, 0.0), v(210.0, 10.0), v(200.0, 10.0)], true);
+    polyline(
+        &mut g,
+        &[v(0.0, 0.0), v(100.0, 0.0), v(100.0, 60.0), v(0.0, 60.0)],
+        true,
+    );
+    polyline(
+        &mut g,
+        &[v(200.0, 0.0), v(210.0, 0.0), v(210.0, 10.0), v(200.0, 10.0)],
+        true,
+    );
     let s = sketch("Sketch 1", PlaneRef::Top, g);
     let e1 = extrude("Extrude 1", &s, &[v(50.0, 30.0)], 25.0);
     let e2 = extrude("Extrude 2", &s, &[v(205.0, 5.0)], 5.0);
@@ -105,7 +113,11 @@ fn two_boxes() -> (Vec<Feature>, Vec<PartId>) {
 
 fn request(parts: &[PartId], y_up: bool, individual: bool) -> StepRequest {
     StepRequest {
-        parts: parts.iter().enumerate().map(|(i, p)| (*p, format!("Bracket {}", i + 1))).collect(),
+        parts: parts
+            .iter()
+            .enumerate()
+            .map(|(i, p)| (*p, format!("Bracket {}", i + 1)))
+            .collect(),
         y_up,
         individual,
     }
@@ -114,12 +126,21 @@ fn request(parts: &[PartId], y_up: bool, individual: bool) -> StepRequest {
 #[test]
 fn one_part_exports_as_named_mm_step() {
     let (features, parts) = two_boxes();
-    let files = Rebuilder::new().export_step(&features, &request(&parts[..1], false, true)).unwrap();
+    let files = Rebuilder::new()
+        .export_step(&features, &request(&parts[..1], false, true))
+        .unwrap();
     assert_eq!(files.len(), 1);
     assert_eq!(files[0].part.as_deref(), Some("Bracket 1"));
     let text = String::from_utf8(files[0].bytes.clone()).unwrap();
-    assert!(text.starts_with("ISO-10303-21;"), "{}", &text[..80.min(text.len())]);
-    assert!(text.contains("PRODUCT('Bracket 1','Bracket 1'"), "product not named");
+    assert!(
+        text.starts_with("ISO-10303-21;"),
+        "{}",
+        &text[..80.min(text.len())]
+    );
+    assert!(
+        text.contains("PRODUCT('Bracket 1','Bracket 1'"),
+        "product not named"
+    );
     assert!(!text.contains("PRODUCT('Open CASCADE"));
     assert!(text.contains(".MILLI."), "not in millimetres");
     assert!(text.contains("MANIFOLD_SOLID_BREP"));
@@ -134,7 +155,9 @@ fn one_part_exports_as_named_mm_step() {
 #[test]
 fn y_up_turns_top_to_y() {
     let (features, parts) = two_boxes();
-    let files = Rebuilder::new().export_step(&features, &request(&parts[..1], true, true)).unwrap();
+    let files = Rebuilder::new()
+        .export_step(&features, &request(&parts[..1], true, true))
+        .unwrap();
     let [x, y, z] = extents(std::str::from_utf8(&files[0].bytes).unwrap());
     close(x.1 - x.0, 100.0, 1e-9);
     close(y.0, 0.0, 1e-9);
@@ -147,10 +170,14 @@ fn y_up_turns_top_to_y() {
 fn several_parts_one_file_or_one_each() {
     let (features, parts) = two_boxes();
     let mut rb = Rebuilder::new();
-    let each = rb.export_step(&features, &request(&parts, false, true)).unwrap();
+    let each = rb
+        .export_step(&features, &request(&parts, false, true))
+        .unwrap();
     assert_eq!(each.len(), 2);
     assert_eq!(each[1].part.as_deref(), Some("Bracket 2"));
-    let one = rb.export_step(&features, &request(&parts, false, false)).unwrap();
+    let one = rb
+        .export_step(&features, &request(&parts, false, false))
+        .unwrap();
     assert_eq!(one.len(), 1);
     assert_eq!(one[0].part, None);
     let text = std::str::from_utf8(&one[0].bytes).unwrap();
@@ -161,13 +188,17 @@ fn several_parts_one_file_or_one_each() {
 #[test]
 fn missing_part_is_an_error() {
     let (features, parts) = two_boxes();
-    let err = Rebuilder::new().export_step(&features[..2], &request(&parts, false, true)).unwrap_err();
+    let err = Rebuilder::new()
+        .export_step(&features[..2], &request(&parts, false, true))
+        .unwrap_err();
     assert_eq!(err, "Bracket 2 no longer exists");
 }
 
 #[test]
 fn worker_thread_exports() {
     let (features, parts) = two_boxes();
-    let files = cadrs_core::rebuild::export_step(features, request(&parts, false, true)).wait().unwrap();
+    let files = cadrs_core::rebuild::export_step(features, request(&parts, false, true))
+        .wait()
+        .unwrap();
     assert_eq!(files.len(), 2);
 }

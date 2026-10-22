@@ -69,7 +69,13 @@ struct ThumbnailSketches(
 
 /// The board a document with no Part Studio geometry shows: its first PCB Studio's board (the
 /// one shown there last), as element, board and mechanical board.
-fn document_board(doc: &cadrs_core::Document) -> Option<(cadrs_core::ElementId, cadrs_core::pcb::BoardId, cadrs_core::pcb::PcbBoard)> {
+fn document_board(
+    doc: &cadrs_core::Document,
+) -> Option<(
+    cadrs_core::ElementId,
+    cadrs_core::pcb::BoardId,
+    cadrs_core::pcb::PcbBoard,
+)> {
     doc.elements.iter().find_map(|e| {
         let s = e.pcb()?;
         let b = s.active.and_then(|id| s.board(id)).or(s.boards.first())?;
@@ -80,7 +86,9 @@ fn document_board(doc: &cadrs_core::Document) -> Option<(cadrs_core::ElementId, 
 /// Whether the thumbnail shows a board: the document has one and its first Part Studio has
 /// neither parts nor sketches.
 fn shows_board(doc: &cadrs_core::Document) -> bool {
-    document_board(doc).is_some() && document_sketches(doc).is_empty() && document_parts(doc).is_empty()
+    document_board(doc).is_some()
+        && document_sketches(doc).is_empty()
+        && document_parts(doc).is_empty()
 }
 
 /// The parts of a document's first Part Studio.
@@ -259,7 +267,10 @@ fn draw_thumbnail_scene(
     // With sketches or parts the thumbnail shows only them (zoomed to fit); otherwise the
     // planes.
     for line in &sketches.2 {
-        gizmos.linestrip(line.iter().map(|p| *p + sketches.1 * 0.5), Color::srgb_u8(0x14, 0x14, 0x14));
+        gizmos.linestrip(
+            line.iter().map(|p| *p + sketches.1 * 0.5),
+            Color::srgb_u8(0x14, 0x14, 0x14),
+        );
     }
     if sketches.0.is_empty() && sketches.2.is_empty() && !sketches.3 {
         let edge = Color::srgb_u8(0x3f, 0x5f, 0x8c);
@@ -305,37 +316,95 @@ fn prepare_thumbnail_scene(world: &mut World) {
     let (props, appearances) = world
         .get_resource::<ActiveDocument>()
         .and_then(|d| {
-            let e = d.doc.elements.iter().find(|e| matches!(e.kind, cadrs_core::ElementKind::PartStudio { .. }))?;
+            let e = d
+                .doc
+                .elements
+                .iter()
+                .find(|e| matches!(e.kind, cadrs_core::ElementKind::PartStudio { .. }))?;
             Some((e.part_props().to_vec(), e.feature_appearances().to_vec()))
         })
         .unwrap_or_default();
     let mut part_pts: Vec<Vec3> = parts
         .iter()
-        .flat_map(|p| p.solid.positions.iter().map(|q| Vec3::new(q[0] as f32, q[1] as f32, q[2] as f32)))
+        .flat_map(|p| {
+            p.solid
+                .positions
+                .iter()
+                .map(|q| Vec3::new(q[0] as f32, q[1] as f32, q[2] as f32))
+        })
         .collect();
     // With no Part Studio geometry, the document's board as its 3D view shows it.
-    let board = if sketches.is_empty() && parts.is_empty() { world.get_resource::<ActiveDocument>().and_then(|d| document_board(&d.doc)) } else { None };
+    let board = if sketches.is_empty() && parts.is_empty() {
+        world
+            .get_resource::<ActiveDocument>()
+            .and_then(|d| document_board(&d.doc))
+    } else {
+        None
+    };
     let board_bodies = match &board {
-        Some((e, b, board)) => crate::pcb::view::board_view_bodies(world, *e, *b, board, &mut std::collections::hash_map::DefaultHasher::new()),
+        Some((e, b, board)) => crate::pcb::view::board_view_bodies(
+            world,
+            *e,
+            *b,
+            board,
+            &mut std::collections::hash_map::DefaultHasher::new(),
+        ),
         None => vec![],
     };
-    part_pts.extend(board_bodies.iter().flat_map(|b| b.positions.iter().map(|p| Vec3::from_array(*p))));
+    part_pts.extend(
+        board_bodies
+            .iter()
+            .flat_map(|b| b.positions.iter().map(|p| Vec3::from_array(*p))),
+    );
     let v = thumbnail_view_with(&sketches, &part_pts);
     if let Some((e, b, board)) = &board {
         let (opaque, blended) = {
             let mut mats = world.resource_mut::<Assets<StandardMaterial>>();
-            (mats.add(crate::parts::part_material(false)), mats.add(crate::parts::part_material(true)))
+            (
+                mats.add(crate::parts::part_material(false)),
+                mats.add(crate::parts::part_material(true)),
+            )
         };
         for body in &board_bodies {
-            let base = crate::parts::FaceBase { rgb: [body.color[0] as f32, body.color[1] as f32, body.color[2] as f32], alpha: body.color[3] as f32 / 255.0 };
-            let mesh = world.resource_mut::<Assets<Mesh>>().add(crate::pcb::view::body_mesh(body, &v, base, 0));
-            let material = if base.alpha < 1.0 { blended.clone() } else { opaque.clone() };
-            world.spawn((Name::new("thumbnail-board"), ThumbSketch, Mesh3d(mesh), MeshMaterial3d(material), Transform::IDENTITY, RenderLayers::layer(THUMB_LAYER)));
+            let base = crate::parts::FaceBase {
+                rgb: [
+                    body.color[0] as f32,
+                    body.color[1] as f32,
+                    body.color[2] as f32,
+                ],
+                alpha: body.color[3] as f32 / 255.0,
+            };
+            let mesh = world
+                .resource_mut::<Assets<Mesh>>()
+                .add(crate::pcb::view::body_mesh(body, &v, base, 0));
+            let material = if base.alpha < 1.0 {
+                blended.clone()
+            } else {
+                opaque.clone()
+            };
+            world.spawn((
+                Name::new("thumbnail-board"),
+                ThumbSketch,
+                Mesh3d(mesh),
+                MeshMaterial3d(material),
+                Transform::IDENTITY,
+                RenderLayers::layer(THUMB_LAYER),
+            ));
         }
         // A native board's mask, copper, pads and silkscreen.
         let design = crate::eda::design(world.resource::<ActiveDocument>(), *e, *b).cloned();
-        for (_, mesh, material) in design.map(|d| crate::pcb::view::skins(world, &d, board.thickness())).unwrap_or_default() {
-            world.spawn((Name::new("thumbnail-board-skin"), ThumbSketch, Mesh3d(mesh), MeshMaterial3d(material), Transform::IDENTITY, RenderLayers::layer(THUMB_LAYER)));
+        for (_, mesh, material) in design
+            .map(|d| crate::pcb::view::skins(world, &d, board.thickness()))
+            .unwrap_or_default()
+        {
+            world.spawn((
+                Name::new("thumbnail-board-skin"),
+                ThumbSketch,
+                Mesh3d(mesh),
+                MeshMaterial3d(material),
+                Transform::IDENTITY,
+                RenderLayers::layer(THUMB_LAYER),
+            ));
         }
     }
     let part_material = world
@@ -343,10 +412,11 @@ fn prepare_thumbnail_scene(world: &mut World) {
         .add(crate::parts::part_material(false));
     let mut part_lines = Vec::new();
     for part in &parts {
-        let bases: Vec<crate::parts::FaceBase> = crate::parts::face_bases(part, &props, &appearances)
-            .into_iter()
-            .map(|b| crate::parts::FaceBase { alpha: 1.0, ..b })
-            .collect();
+        let bases: Vec<crate::parts::FaceBase> =
+            crate::parts::face_bases(part, &props, &appearances)
+                .into_iter()
+                .map(|b| crate::parts::FaceBase { alpha: 1.0, ..b })
+                .collect();
         let mesh = crate::parts::part_mesh(part, &v, false, &bases);
         let mesh = world.resource_mut::<Assets<Mesh>>().add(mesh);
         world.spawn((
@@ -381,8 +451,8 @@ fn prepare_thumbnail_scene(world: &mut World) {
             RenderLayers::layer(THUMB_LAYER),
         ));
     }
-    let mut q = world
-        .query_filtered::<(&mut Camera, &mut Transform, &mut Projection), With<ThumbCamera>>();
+    let mut q =
+        world.query_filtered::<(&mut Camera, &mut Transform, &mut Projection), With<ThumbCamera>>();
     for (mut c, mut t, mut p) in q.iter_mut(world) {
         c.is_active = true;
         *t = Transform::from_translation(v.camera_position()).with_rotation(v.rotation());
@@ -433,7 +503,10 @@ pub fn close_document(world: &mut World) {
     let store = world.resource::<DocumentStore>().0.clone();
     let rerender = world.get_resource::<ActiveDocument>().is_some_and(|d| {
         d.meta.as_ref().is_some_and(|m| {
-            d.fresh || d.changed_since_open() || store.thumbnail_outdated(d.doc.id, m.modified) || shows_board(&d.doc)
+            d.fresh
+                || d.changed_since_open()
+                || store.thumbnail_outdated(d.doc.id, m.modified)
+                || shows_board(&d.doc)
         })
     });
     if !rerender {
@@ -477,7 +550,9 @@ fn drive_close(
     }
     pending.requested = true;
     let Some(id) = doc.as_ref().map(|d| d.doc.id) else {
-        pending.done.store(true, std::sync::atomic::Ordering::SeqCst);
+        pending
+            .done
+            .store(true, std::sync::atomic::Ordering::SeqCst);
         return;
     };
     let store = store.0.clone();
@@ -526,7 +601,12 @@ pub fn finish_thumbnail(mut img: RgbaImage) -> RgbaImage {
             }
         }
     }
-    image::imageops::resize(&img, THUMB_LARGE_W, THUMB_LARGE_H, image::imageops::FilterType::Triangle)
+    image::imageops::resize(
+        &img,
+        THUMB_LARGE_W,
+        THUMB_LARGE_H,
+        image::imageops::FilterType::Triangle,
+    )
 }
 
 #[cfg(test)]
@@ -543,9 +623,13 @@ mod tests {
                 hi = hi.max(s.abs());
             }
         }
-        assert!(hi.x <= THUMB_LARGE_W as f32 / 2.0 + 0.01 && hi.y <= THUMB_LARGE_H as f32 / 2.0 + 0.01);
+        assert!(
+            hi.x <= THUMB_LARGE_W as f32 / 2.0 + 0.01 && hi.y <= THUMB_LARGE_H as f32 / 2.0 + 0.01
+        );
         // It fills one dimension.
-        assert!(hi.x > THUMB_LARGE_W as f32 / 2.0 - 16.0 || hi.y > THUMB_LARGE_H as f32 / 2.0 - 16.0);
+        assert!(
+            hi.x > THUMB_LARGE_W as f32 / 2.0 - 16.0 || hi.y > THUMB_LARGE_H as f32 / 2.0 - 16.0
+        );
     }
 
     #[test]
@@ -591,10 +675,18 @@ mod tests {
         for (x, y) in (80..120).flat_map(|x| (40..80).map(move |y| (x, y))) {
             img.put_pixel(x, y, image::Rgba([255, 0, 0, 255]));
         }
-        store.write_thumbnail(doc.id, &finish_thumbnail(img)).unwrap();
+        store
+            .write_thumbnail(doc.id, &finish_thumbnail(img))
+            .unwrap();
         // The lists' small copy, and the details panel's large one.
         let back = store.read_thumbnail(doc.id).unwrap();
-        assert_eq!(back.dimensions(), (cadrs_core::thumbnail::THUMB_W, cadrs_core::thumbnail::THUMB_H));
+        assert_eq!(
+            back.dimensions(),
+            (
+                cadrs_core::thumbnail::THUMB_W,
+                cadrs_core::thumbnail::THUMB_H
+            )
+        );
         assert!(back.get_pixel(11, 7)[0] > 0);
         let large = store.read_thumbnail_large(doc.id).unwrap();
         assert_eq!(large.dimensions(), (THUMB_LARGE_W, THUMB_LARGE_H));

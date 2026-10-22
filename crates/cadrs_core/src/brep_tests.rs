@@ -29,7 +29,11 @@ fn circle(s: &mut Sketch, x: f64, y: f64, r: f64) {
 
 fn rect(s: &mut Sketch, x: f64, y: f64, w: f64, h: f64) {
     let v = Vec2::new;
-    polyline(s, &[v(x, y), v(x + w, y), v(x + w, y + h), v(x, y + h)], true);
+    polyline(
+        s,
+        &[v(x, y), v(x + w, y), v(x + w, y + h), v(x, y + h)],
+        true,
+    );
 }
 
 fn close3(a: Vec3, b: Vec3) -> bool {
@@ -67,7 +71,11 @@ fn same_as_prism_names(
     let part = extrude(&mut k, OP, &[group], 12.0, flip).unwrap();
     let kern = part.solid;
     // Every face is named from the kernel's history, not from geometry.
-    assert!(part.names.faces.iter().all(|n| n.is_stable()), "{:?}", part.names.faces);
+    assert!(
+        part.names.faces.iter().all(|n| n.is_stable()),
+        "{:?}",
+        part.names.faces
+    );
 
     let mut want: Vec<FaceName> = prism.faces.iter().map(|f| f.name).collect();
     let mut got: Vec<FaceName> = kern.faces.iter().map(|f| f.name).collect();
@@ -79,7 +87,11 @@ fn same_as_prism_names(
         match (f.plane, g.plane) {
             (None, None) => {}
             (Some(a), Some(b)) => {
-                assert!(close3(a.u, b.u) && close3(a.v, b.v), "{:?}: {a:?} vs {b:?}", f.name);
+                assert!(
+                    close3(a.u, b.u) && close3(a.v, b.v),
+                    "{:?}: {a:?} vs {b:?}",
+                    f.name
+                );
                 assert!(close3(a.origin, b.origin), "{:?}: {a:?} vs {b:?}", f.name);
             }
             (a, b) => panic!("{:?}: plane {a:?} vs {b:?}", f.name),
@@ -164,9 +176,23 @@ fn half_disc_matches_prism_tags() {
     // A circle cut by a longer line (as an imprinted face edge cuts it).
     let mut s = Sketch::new();
     circle(&mut s, 0.0, 0.0, 10.0);
-    polyline(&mut s, &[Vec2::new(4.0, -20.0), Vec2::new(4.0, 20.0)], false);
-    same_as_prism(&s, |r| r.contains(Vec2::new(8.0, 0.0)), PlaneRef::Top, false);
-    same_as_prism(&s, |r| r.contains(Vec2::new(-5.0, 0.0)), PlaneRef::Front, false);
+    polyline(
+        &mut s,
+        &[Vec2::new(4.0, -20.0), Vec2::new(4.0, 20.0)],
+        false,
+    );
+    same_as_prism(
+        &s,
+        |r| r.contains(Vec2::new(8.0, 0.0)),
+        PlaneRef::Top,
+        false,
+    );
+    same_as_prism(
+        &s,
+        |r| r.contains(Vec2::new(-5.0, 0.0)),
+        PlaneRef::Front,
+        false,
+    );
 }
 
 /// A rectangle with a circle on the middle of its right side, all three regions extruded: a
@@ -176,22 +202,43 @@ fn round_end_bar() {
     let mut s = Sketch::new();
     rect(&mut s, 0.0, 0.0, 50.0, 30.0);
     circle(&mut s, 50.0, 15.0, 12.0);
-    let rs: Vec<(u64, Region)> = regions(&s).into_iter().enumerate().map(|(i, r)| (i as u64, r)).collect();
+    let rs: Vec<(u64, Region)> = regions(&s)
+        .into_iter()
+        .enumerate()
+        .map(|(i, r)| (i as u64, r))
+        .collect();
     assert_eq!(rs.len(), 3);
     let mut k = DefaultKernel::new();
     let frame = PlaneRef::Top.frame();
-    let part = extrude(&mut k, OP, &[ProfileGroup::new(frame, rs.clone())], 25.0, false).unwrap();
+    let part = extrude(
+        &mut k,
+        OP,
+        &[ProfileGroup::new(frame, rs.clone())],
+        25.0,
+        false,
+    )
+    .unwrap();
     let area = 1500.0 + std::f64::consts::PI * 144.0 / 2.0;
-    assert!((part.mass.volume - area * 25.0).abs() < 1e-6, "{}", part.mass.volume);
+    assert!(
+        (part.mass.volume - area * 25.0).abs() < 1e-6,
+        "{}",
+        part.mass.volume
+    );
     let v = part.solid.volume();
-    assert!((v - area * 25.0).abs() / (area * 25.0) < 2e-3, "mesh volume {v}");
+    assert!(
+        (v - area * 25.0).abs() / (area * 25.0) < 2e-3,
+        "mesh volume {v}"
+    );
     // The round end has one silhouette seen from the isometric view (at 45°).
     let round = part.solid.faces.iter().find(|f| f.plane.is_none()).unwrap();
     let lines = crate::links::silhouettes(&part.solid, &round.name, [1.0, -1.0, 1.0]);
     assert_eq!(lines.len(), 1, "{lines:?}");
     let q = lines[0].0;
     let at = [50.0 + 12.0 * 0.5f64.sqrt(), 15.0 + 12.0 * 0.5f64.sqrt()];
-    assert!((q[0] - at[0]).abs() < 0.1 && (q[1] - at[1]).abs() < 0.1, "{q:?}");
+    assert!(
+        (q[0] - at[0]).abs() < 0.1 && (q[1] - at[1]).abs() < 0.1,
+        "{q:?}"
+    );
     // (Not compared with the prism mesh: it left out every side face of a curve two selected
     // regions share, here the rectangle's right side and the circle, so its sides had gaps.)
 }
@@ -205,29 +252,64 @@ fn touching_regions_merge() {
     let mut s = Sketch::new();
     rect(&mut s, 0.0, 0.0, 10.0, 10.0);
     rect(&mut s, 10.0, 0.0, 10.0, 10.0);
-    let rs: Vec<(u64, Region)> = regions(&s).into_iter().enumerate().map(|(i, r)| (i as u64, r)).collect();
+    let rs: Vec<(u64, Region)> = regions(&s)
+        .into_iter()
+        .enumerate()
+        .map(|(i, r)| (i as u64, r))
+        .collect();
     assert_eq!(rs.len(), 2);
     let frame = PlaneRef::Top.frame();
     let prism = crate::solid::extrude(OP, &frame, &rs, 12.0, false);
     let mut k = DefaultKernel::new();
     let part = extrude(&mut k, OP, &[ProfileGroup::new(frame, rs)], 12.0, false).unwrap();
     let kern = part.solid;
-    assert!((part.mass.volume - 2400.0).abs() < 1e-6, "{}", part.mass.volume);
-    assert_eq!(kern.faces.len(), 6, "{:?}", kern.faces.iter().map(|f| f.name).collect::<Vec<_>>());
+    assert!(
+        (part.mass.volume - 2400.0).abs() < 1e-6,
+        "{}",
+        part.mass.volume
+    );
+    assert_eq!(
+        kern.faces.len(),
+        6,
+        "{:?}",
+        kern.faces.iter().map(|f| f.name).collect::<Vec<_>>()
+    );
     assert_eq!(kern.edges.len(), 12);
     // Two caps merged at each end, and the two sides along y = 0 and y = 10 merged.
     assert_eq!(kern.face_aliases.len(), 4, "{:?}", kern.face_aliases);
     for f in &prism.faces {
-        let i = kern.faces.iter().position(|g| g.name == kern.canonical_face(&f.name));
+        let i = kern
+            .faces
+            .iter()
+            .position(|g| g.name == kern.canonical_face(&f.name));
         let i = i.unwrap_or_else(|| panic!("{:?} has no kernel face", f.name));
-        let (Some(a), Some(b)) = (f.plane, kern.face_plane_as(i, &f.name)) else { panic!("{:?}: not planar", f.name) };
-        assert!(close3(a.u, b.u) && close3(a.v, b.v) && close3(a.origin, b.origin), "{:?}: {a:?} vs {b:?}", f.name);
+        let (Some(a), Some(b)) = (f.plane, kern.face_plane_as(i, &f.name)) else {
+            panic!("{:?}: not planar", f.name)
+        };
+        assert!(
+            close3(a.u, b.u) && close3(a.v, b.v) && close3(a.origin, b.origin),
+            "{:?}: {a:?} vs {b:?}",
+            f.name
+        );
         assert!(kern.face(&f.name).is_some());
     }
     // An edge named by a merged-away cap's name finds the merged edge.
-    let cap1 = kern.face_aliases.iter().find(|a| matches!(a.name.origin, FaceOrigin::Cap { end: true, .. })).unwrap();
-    let side = kern.edges.iter().find(|e| e.name.touches(&cap1.face)).unwrap().name;
-    let other = if side.faces[0] == cap1.face { side.faces[1] } else { side.faces[0] };
+    let cap1 = kern
+        .face_aliases
+        .iter()
+        .find(|a| matches!(a.name.origin, FaceOrigin::Cap { end: true, .. }))
+        .unwrap();
+    let side = kern
+        .edges
+        .iter()
+        .find(|e| e.name.touches(&cap1.face))
+        .unwrap()
+        .name;
+    let other = if side.faces[0] == cap1.face {
+        side.faces[1]
+    } else {
+        side.faces[0]
+    };
     let by_alias = EdgeName::new(cap1.name, other, side.index);
     assert_eq!(kern.edge(&by_alias).map(|e| e.name), Some(side));
 }
@@ -248,7 +330,11 @@ fn ellipse_extrudes() {
     let group = ProfileGroup::new(PlaneRef::Top.frame(), rs);
     let part = extrude(&mut k, OP, &[group], 5.0, false).unwrap();
     let want = std::f64::consts::PI * 20.0 * 8.0 * 5.0;
-    assert!((part.mass.volume - want).abs() < 1e-6, "{}", part.mass.volume);
+    assert!(
+        (part.mass.volume - want).abs() < 1e-6,
+        "{}",
+        part.mass.volume
+    );
     // Two caps and one curved side, bounded by two ellipse edges.
     assert_eq!(part.solid.faces.len(), 3);
     assert_eq!(part.solid.edges.len(), 2);
@@ -275,7 +361,12 @@ fn silhouettes_match_prism() {
     let group = ProfileGroup::new(frame, rs);
     let kern = extrude(&mut k, OP, &[group], 4.0, false).unwrap().solid;
     let curved = prism.faces.iter().find(|f| f.plane.is_none()).unwrap().name;
-    for dir in [[1.0, 1.0, 1.0], [-1.0, 0.3, 0.5], [0.0, 1.0, 0.2], [-1.0, -1.0, 1.0]] {
+    for dir in [
+        [1.0, 1.0, 1.0],
+        [-1.0, 0.3, 0.5],
+        [0.0, 1.0, 0.2],
+        [-1.0, -1.0, 1.0],
+    ] {
         let a = crate::links::silhouettes(&prism, &curved, dir);
         let b = crate::links::silhouettes(&kern, &curved, dir);
         assert_eq!(a.len(), b.len(), "{dir:?}: {a:?} vs {b:?}");
@@ -314,11 +405,14 @@ fn profile_stages() {
         let _ = k.mass_properties(body).unwrap();
         let t4 = t.elapsed();
         let names = naming::name_body(&k, body, OP, &kernel::History::default(), &[]).unwrap();
-        let geoms: Geoms = std::iter::once((OP, std::sync::Arc::new(OpGeom::new(
-            std::slice::from_ref(&group),
-            [0.0, 0.0, 1.0],
-            10.0,
-        ))))
+        let geoms: Geoms = std::iter::once((
+            OP,
+            std::sync::Arc::new(OpGeom::new(
+                std::slice::from_ref(&group),
+                [0.0, 0.0, 1.0],
+                10.0,
+            )),
+        ))
         .collect();
         let _ = solid_of(&k, body, &names, &geoms, Some(OP)).unwrap();
         let t5 = t.elapsed();

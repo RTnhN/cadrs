@@ -17,7 +17,6 @@
 //!
 //! Every edit is an [`EditSketch`](cadrs_core::commands::EditSketch) command.
 
-use cadrs_ui::ShortcutKey;
 use bevy::input::ButtonState;
 use bevy::input::keyboard::KeyboardInput;
 use bevy::input_focus::InputFocus;
@@ -28,6 +27,7 @@ use cadrs_sketch::hit::{CURVE_TOLERANCE_PX, POINT_TOLERANCE_PX, curve_distance_p
 use cadrs_sketch::infer::{self, ToolContext};
 use cadrs_sketch::modify::{closest_on, extension, free_end_near, trim_removed_path};
 use cadrs_sketch::{CurveId, CurveKind, PlaneFrame, PointId, Sketch, SketchOp};
+use cadrs_ui::ShortcutKey;
 use cadrs_ui::input::TextInputField;
 
 use crate::sketch::{ActiveSketchTool, PartStudioMode, SketchSession, SketchTool};
@@ -196,7 +196,9 @@ fn split_at(s: &Sketch, map: &ScreenMap, curve: CurveId, pos: Vec2) -> Option<SV
     let snapped = infer::infer(raw, map.px_per_mm() as f64, s, &ToolContext::default())
         .into_iter()
         .map(|c| c.pos)
-        .find(|p| closest_on(s, curve, *p).is_some_and(|q| q.distance(*p) < 1e-6 * (1.0 + p.length())));
+        .find(|p| {
+            closest_on(s, curve, *p).is_some_and(|q| q.distance(*p) < 1e-6 * (1.0 + p.length()))
+        });
     Some(snapped.unwrap_or(on))
 }
 
@@ -302,7 +304,11 @@ fn modify_pointer(
                     let last = *d.trail.last().unwrap_or(&down);
                     let before = d.picks.len();
                     for (_, k, at) in trail_crossings(&d.base, &map, last, pos) {
-                        if !d.picks.iter().any(|(c, p)| *c == k && p.distance(at) < 1e-6) {
+                        if !d
+                            .picks
+                            .iter()
+                            .any(|(c, p)| *c == k && p.distance(at) < 1e-6)
+                        {
                             d.picks.push((k, at));
                         }
                     }
@@ -383,7 +389,8 @@ fn modify_pointer(
                                 },
                             );
                         } else if let Some(c) = curve_at(sketch, &map, pos)
-                            && let Some(at) = map.to_sketch(pos).and_then(|p| closest_on(sketch, c, p))
+                            && let Some(at) =
+                                map.to_sketch(pos).and_then(|p| closest_on(sketch, c, p))
                         {
                             execute(
                                 &mut commands,
@@ -403,7 +410,9 @@ fn modify_pointer(
                             Some(_) if t.picked_on_press && !moved => {}
                             // The second click (or the release of a drag) extends.
                             Some((c, end)) => {
-                                if let Some(ext) = cursor.and_then(|p| extension(sketch, c, end, Some(p))) {
+                                if let Some(ext) =
+                                    cursor.and_then(|p| extension(sketch, c, end, Some(p)))
+                                {
                                     execute(
                                         &mut commands,
                                         target,
@@ -475,7 +484,10 @@ fn modify_pointer(
         }
     }
     // The preview for the cursor's position.
-    let Some(cursor) = t.cursor.filter(|_| over || t.drag.is_some() || t.extend.is_some()) else {
+    let Some(cursor) = t
+        .cursor
+        .filter(|_| over || t.drag.is_some() || t.extend.is_some())
+    else {
         if t.preview != Preview::None {
             t.preview = Preview::None;
         }
@@ -495,12 +507,16 @@ fn modify_pointer(
             }
         }
         SketchTool::Extend => match t.extend {
-            Some((c, end)) => raw
-                .and_then(|p| extension(sketch, c, end, Some(p)))
-                .map_or(Preview::Extend { curve: c, path: vec![] }, |e| Preview::Extend {
+            Some((c, end)) => raw.and_then(|p| extension(sketch, c, end, Some(p))).map_or(
+                Preview::Extend {
+                    curve: c,
+                    path: vec![],
+                },
+                |e| Preview::Extend {
                     curve: c,
                     path: e.path,
-                }),
+                },
+            ),
             None => curve_at(sketch, &map, cursor)
                 .filter(|c| extendable(sketch, *c))
                 .zip(raw)
@@ -508,7 +524,9 @@ fn modify_pointer(
                     let end = free_end_near(sketch, c, p)?;
                     Some(Preview::Extend {
                         curve: c,
-                        path: extension(sketch, c, end, None).map(|e| e.path).unwrap_or_default(),
+                        path: extension(sketch, c, end, None)
+                            .map(|e| e.path)
+                            .unwrap_or_default(),
                     })
                 })
                 .unwrap_or_default(),
@@ -605,7 +623,10 @@ fn draw_modify_preview(
         Preview::TrimPoint(p) => dot(*p, 4.0, tan()),
         Preview::Extend { path, .. } => {
             if path.len() > 1 {
-                rubber.linestrip(path.iter().map(|p| world(&frame, *p)), Color::srgb_u8(0x44, 0x9c, 0xcd));
+                rubber.linestrip(
+                    path.iter().map(|p| world(&frame, *p)),
+                    Color::srgb_u8(0x44, 0x9c, 0xcd),
+                );
                 if let Some(e) = path.last() {
                     dot(*e, 2.5, Color::srgb_u8(0x44, 0x9c, 0xcd));
                 }

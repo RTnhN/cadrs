@@ -27,7 +27,9 @@ use bevy::prelude::*;
 use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
 use cadrs_drawing::DrawingOp;
 use cadrs_drawing::annotation::PlacedText;
-use cadrs_drawing::sheet_sketch::{self as sk, Entity as DxfEntity, ItemGrip, ItemId, ItemKind, SketchItem};
+use cadrs_drawing::sheet_sketch::{
+    self as sk, Entity as DxfEntity, ItemGrip, ItemId, ItemKind, SketchItem,
+};
 use cadrs_ui::input::TextInputField;
 use cadrs_ui::{FilePicked, Notification, Theme, show_notification};
 
@@ -52,7 +54,9 @@ impl Plugin for SheetItemsPlugin {
             )
             .add_systems(
                 Update,
-                items_keys.after(super::annotations::AnnotationInputSet).run_if(in_state(AppState::Document)),
+                items_keys
+                    .after(super::annotations::AnnotationInputSet)
+                    .run_if(in_state(AppState::Document)),
             )
             .add_systems(Update, on_file_picked.run_if(in_state(AppState::Document)))
             .add_systems(
@@ -63,10 +67,13 @@ impl Plugin for SheetItemsPlugin {
                     .before(super::annotations::AnnotationDrawSet)
                     .run_if(in_state(AppState::Document)),
             )
-            .add_systems(OnExit(AppState::Document), |mut u: ResMut<SheetItemsUi>, mut s: ResMut<ItemScene>| {
-                *u = SheetItemsUi::default();
-                *s = ItemScene::default();
-            });
+            .add_systems(
+                OnExit(AppState::Document),
+                |mut u: ResMut<SheetItemsUi>, mut s: ResMut<ItemScene>| {
+                    *u = SheetItemsUi::default();
+                    *s = ItemScene::default();
+                },
+            );
     }
 }
 
@@ -158,7 +165,10 @@ fn v2(p: [f64; 2]) -> Vec2 {
 }
 
 /// The active sheet's items.
-fn sheet_items(doc: &ActiveDocument, dui: &DrawingUi) -> Option<(cadrs_drawing::SheetId, Vec<SketchItem>)> {
+fn sheet_items(
+    doc: &ActiveDocument,
+    dui: &DrawingUi,
+) -> Option<(cadrs_drawing::SheetId, Vec<SketchItem>)> {
     let (id, d) = active_drawing(doc)?;
     let s = d.sheets.get(dui.sheet_index(id, d))?;
     Some((s.id, s.sketch.clone()))
@@ -167,7 +177,10 @@ fn sheet_items(doc: &ActiveDocument, dui: &DrawingUi) -> Option<(cadrs_drawing::
 /// The item as the drag would leave it.
 fn dragged(item: &SketchItem, d: &ItemDrag) -> SketchItem {
     match d.grip {
-        None => sk::moved(item, [(d.at.x - d.start.x) as f64, (d.at.y - d.start.y) as f64]),
+        None => sk::moved(
+            item,
+            [(d.at.x - d.start.x) as f64, (d.at.y - d.start.y) as f64],
+        ),
         Some(g) => sk::drag_grip(item, g, f2(d.at)),
     }
 }
@@ -194,7 +207,12 @@ pub enum Inference {
 
 /// Where a line tool click lands: a snapped point, else horizontal or vertical from the chain's
 /// start when within 3° or 8 px of it, else the cursor.
-fn line_point(items: &[SketchItem], chain: Option<[f64; 2]>, p: Vec2, px: f64) -> ([f64; 2], Option<Inference>) {
+fn line_point(
+    items: &[SketchItem],
+    chain: Option<[f64; 2]>,
+    p: Vec2,
+    px: f64,
+) -> ([f64; 2], Option<Inference>) {
     if let Some(q) = snap(items, p, 6.0 * px, None) {
         return (q, Some(Inference::Point));
     }
@@ -228,7 +246,10 @@ const DOUBLE_TIME: f64 = 0.45;
 
 /// A click with a sheet sketch tool at sheet point `p`.
 pub fn tool_click(w: &mut World, tool: AnnTool, p: Vec2) {
-    let Some((sheet, items)) = w.get_resource::<ActiveDocument>().and_then(|doc| sheet_items(doc, w.resource::<DrawingUi>())) else {
+    let Some((sheet, items)) = w
+        .get_resource::<ActiveDocument>()
+        .and_then(|doc| sheet_items(doc, w.resource::<DrawingUi>()))
+    else {
         return;
     };
     let px = w
@@ -241,7 +262,8 @@ pub fn tool_click(w: &mut World, tool: AnnTool, p: Vec2) {
     w.resource_mut::<SheetItemsUi>().tool_press = Some(frame);
     let double = {
         let ui = w.resource::<SheetItemsUi>();
-        ui.last_click.is_some_and(|(t, at)| now - t < DOUBLE_TIME && (at - p).length() as f64 <= 5.0 * px)
+        ui.last_click
+            .is_some_and(|(t, at)| now - t < DOUBLE_TIME && (at - p).length() as f64 <= 5.0 * px)
     };
     w.resource_mut::<SheetItemsUi>().last_click = Some((now, p));
     match tool {
@@ -251,7 +273,13 @@ pub fn tool_click(w: &mut World, tool: AnnTool, p: Vec2) {
             match chain {
                 Some(a) if (a[0] - q[0]).hypot(a[1] - q[1]) > 1e-6 => {
                     let item = SketchItem::new(ItemKind::Line { a, b: q });
-                    if edit_drawing(w, DrawingOp::AddSketchItems { sheet, items: vec![item] }) {
+                    if edit_drawing(
+                        w,
+                        DrawingOp::AddSketchItems {
+                            sheet,
+                            items: vec![item],
+                        },
+                    ) {
                         w.resource_mut::<SheetItemsUi>().chain = Some(q);
                     }
                 }
@@ -273,10 +301,18 @@ pub fn tool_click(w: &mut World, tool: AnnTool, p: Vec2) {
             w.resource_mut::<SheetItemsUi>().spline.push(q);
         }
         AnnTool::PlaceImport => {
-            let Some(item) = w.resource_mut::<SheetItemsUi>().placing.take() else { return };
+            let Some(item) = w.resource_mut::<SheetItemsUi>().placing.take() else {
+                return;
+            };
             let placed = sk::moved(&item, f2(p));
             let id = placed.id;
-            if edit_drawing(w, DrawingOp::AddSketchItems { sheet, items: vec![placed] }) {
+            if edit_drawing(
+                w,
+                DrawingOp::AddSketchItems {
+                    sheet,
+                    items: vec![placed],
+                },
+            ) {
                 w.resource_mut::<AnnotationUi>().tool = AnnTool::None;
                 let mut ui = w.resource_mut::<SheetItemsUi>();
                 ui.reset_tool();
@@ -293,17 +329,29 @@ fn finish_spline(w: &mut World) {
     w.resource_mut::<SheetItemsUi>().last_click = None;
     let mut clean: Vec<[f64; 2]> = Vec::new();
     for p in pts {
-        if clean.last().is_none_or(|q| (q[0] - p[0]).hypot(q[1] - p[1]) > 1e-6) {
+        if clean
+            .last()
+            .is_none_or(|q| (q[0] - p[0]).hypot(q[1] - p[1]) > 1e-6)
+        {
             clean.push(p);
         }
     }
     if clean.len() < 2 {
         return;
     }
-    let Some((sheet, _)) = w.get_resource::<ActiveDocument>().and_then(|doc| sheet_items(doc, w.resource::<DrawingUi>())) else {
+    let Some((sheet, _)) = w
+        .get_resource::<ActiveDocument>()
+        .and_then(|doc| sheet_items(doc, w.resource::<DrawingUi>()))
+    else {
         return;
     };
-    edit_drawing(w, DrawingOp::AddSketchItems { sheet, items: vec![SketchItem::new(ItemKind::Spline { points: clean })] });
+    edit_drawing(
+        w,
+        DrawingOp::AddSketchItems {
+            sheet,
+            items: vec![SketchItem::new(ItemKind::Spline { points: clean })],
+        },
+    );
 }
 
 /// Where the pickers start: the last folder used, else `$CADRS_IMPORT_DIR`, else the working
@@ -322,7 +370,15 @@ pub fn open_dxf_picker(w: &mut World) {
     let dir = start_dir(w);
     let theme = w.resource::<Theme>().clone();
     let mut commands = w.commands();
-    cadrs_ui::open_file_picker(&mut commands, &theme, "dxf-picker", "Insert DXF or DWG", "insert-dxf", dir, &["dxf", "dwg"]);
+    cadrs_ui::open_file_picker(
+        &mut commands,
+        &theme,
+        "dxf-picker",
+        "Insert DXF or DWG",
+        "insert-dxf",
+        dir,
+        &["dxf", "dwg"],
+    );
     w.flush();
 }
 
@@ -331,7 +387,15 @@ pub fn open_image_picker(w: &mut World) {
     let dir = start_dir(w);
     let theme = w.resource::<Theme>().clone();
     let mut commands = w.commands();
-    cadrs_ui::open_file_picker(&mut commands, &theme, "image-picker", "Insert image", "insert-image", dir, &["png", "jpg", "jpeg"]);
+    cadrs_ui::open_file_picker(
+        &mut commands,
+        &theme,
+        "image-picker",
+        "Insert image",
+        "insert-image",
+        dir,
+        &["png", "jpg", "jpeg"],
+    );
     w.flush();
 }
 
@@ -340,12 +404,23 @@ const IMAGE_WIDTH: f64 = 18.0;
 
 fn load_import(tag: &str, path: &std::path::Path) -> Result<SketchItem, String> {
     match tag {
-        "insert-dxf" => cadrs_drawing::export::block_from_file(path, [0.0, 0.0]).map(|b| SketchItem::new(ItemKind::Block(b))),
+        "insert-dxf" => cadrs_drawing::export::block_from_file(path, [0.0, 0.0])
+            .map(|b| SketchItem::new(ItemKind::Block(b))),
         "insert-image" => {
             let data = std::fs::read(path).map_err(|e| format!("{}: {e}", path.display()))?;
             let px = cadrs_drawing::export::image_size(&data).ok_or("not a PNG or JPEG image")?;
-            let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("image").to_string();
-            Ok(SketchItem::new(ItemKind::Image(sk::image_item(&name, data, px, [0.0, 0.0], IMAGE_WIDTH))))
+            let name = path
+                .file_name()
+                .and_then(|n| n.to_str())
+                .unwrap_or("image")
+                .to_string();
+            Ok(SketchItem::new(ItemKind::Image(sk::image_item(
+                &name,
+                data,
+                px,
+                [0.0, 0.0],
+                IMAGE_WIDTH,
+            ))))
         }
         _ => Err("unknown import".into()),
     }
@@ -371,7 +446,12 @@ fn on_file_picked(mut msgs: MessageReader<FilePicked>, mut commands: Commands) {
                 Err(e) => {
                     let theme = w.resource::<Theme>().clone();
                     let mut commands = w.commands();
-                    show_notification(&mut commands, &theme, Notification::warning(format!("Cannot insert {}: {e}", path.display())).name("insert-toast"));
+                    show_notification(
+                        &mut commands,
+                        &theme,
+                        Notification::warning(format!("Cannot insert {}: {e}", path.display()))
+                            .name("insert-toast"),
+                    );
                     w.flush();
                 }
             }
@@ -416,7 +496,9 @@ fn items_pointer(
         return;
     };
     let area = sheet_area(&rect, &dui);
-    let over = super::view_tools::pointer_over_sheet(&hover_map, &q_area) && q_menus.is_empty() && q_dialogs.is_empty();
+    let over = super::view_tools::pointer_over_sheet(&hover_map, &q_area)
+        && q_menus.is_empty()
+        && q_dialogs.is_empty();
     let px = 1.0 / view.ppm as f64;
     let ctrl = keys.any_pressed([KeyCode::ControlLeft, KeyCode::ControlRight]);
     let hit = |p: Vec2, tol: f64| {
@@ -454,15 +536,24 @@ fn items_pointer(
                     continue;
                 }
                 // A grip of a selected item first.
-                let grip = items.iter().filter(|i| ui.selected.contains(&i.id)).find_map(|i| {
-                    sk::item_grips(i)
-                        .into_iter()
-                        .find(|(q, _)| (q[0] - p.x as f64).hypot(q[1] - p.y as f64) <= 6.0 * px)
-                        .map(|(_, g)| (i.id, g))
-                });
+                let grip = items
+                    .iter()
+                    .filter(|i| ui.selected.contains(&i.id))
+                    .find_map(|i| {
+                        sk::item_grips(i)
+                            .into_iter()
+                            .find(|(q, _)| (q[0] - p.x as f64).hypot(q[1] - p.y as f64) <= 6.0 * px)
+                            .map(|(_, g)| (i.id, g))
+                    });
                 if let Some((id, g)) = grip {
                     dui.annotation_press = true;
-                    ui.drag = Some(ItemDrag { id, grip: Some(g), start: p, at: p, moving: false });
+                    ui.drag = Some(ItemDrag {
+                        id,
+                        grip: Some(g),
+                        start: p,
+                        at: p,
+                        moving: false,
+                    });
                     continue;
                 }
                 match hit(p, 4.0 * px) {
@@ -478,7 +569,13 @@ fn items_pointer(
                         } else if !ui.selected.contains(&id) {
                             ui.selected = vec![id];
                         }
-                        ui.drag = Some(ItemDrag { id, grip: None, start: p, at: p, moving: false });
+                        ui.drag = Some(ItemDrag {
+                            id,
+                            grip: None,
+                            start: p,
+                            at: p,
+                            moving: false,
+                        });
                     }
                     None => {
                         if !ctrl {
@@ -512,14 +609,23 @@ fn items_pointer(
 }
 
 fn finish_drag(w: &mut World, d: ItemDrag) {
-    let Some((sheet, items)) = w.get_resource::<ActiveDocument>().and_then(|doc| sheet_items(doc, w.resource::<DrawingUi>())) else {
+    let Some((sheet, items)) = w
+        .get_resource::<ActiveDocument>()
+        .and_then(|doc| sheet_items(doc, w.resource::<DrawingUi>()))
+    else {
         return;
     };
-    let Some(item) = items.iter().find(|i| i.id == d.id) else { return };
+    let Some(item) = items.iter().find(|i| i.id == d.id) else {
+        return;
+    };
     // Moving a selection moves every selected item.
     let selected = w.resource::<SheetItemsUi>().selected.clone();
     let moved: Vec<SketchItem> = match d.grip {
-        None if selected.contains(&d.id) => items.iter().filter(|i| selected.contains(&i.id)).map(|i| dragged(i, &d)).collect(),
+        None if selected.contains(&d.id) => items
+            .iter()
+            .filter(|i| selected.contains(&i.id))
+            .map(|i| dragged(i, &d))
+            .collect(),
         _ => vec![dragged(item, &d)],
     };
     if moved.iter().all(|m| items.contains(m)) {
@@ -533,7 +639,14 @@ fn finish_drag(w: &mut World, d: ItemDrag) {
         (Some(_), ItemKind::Line { .. }) => "Drag line end".to_string(),
         (Some(_), _) => "Drag spline point".to_string(),
     };
-    edit_drawing(w, DrawingOp::SetSketchItems { sheet, items: moved, label });
+    edit_drawing(
+        w,
+        DrawingOp::SetSketchItems {
+            sheet,
+            items: moved,
+            label,
+        },
+    );
 }
 
 /// Delete removes the selected items; Esc and Enter finish a line chain or spline; Esc then
@@ -558,7 +671,12 @@ fn items_keys(
     let typing = focus.get().is_some_and(|e| q_fields.contains(e));
     let ctrl = keys.any_pressed([KeyCode::ControlLeft, KeyCode::ControlRight]);
     for k in keys_in.read() {
-        if k.state != bevy::input::ButtonState::Pressed || typing || !q_dialogs.is_empty() || !q_menus.is_empty() || ctrl {
+        if k.state != bevy::input::ButtonState::Pressed
+            || typing
+            || !q_dialogs.is_empty()
+            || !q_menus.is_empty()
+            || ctrl
+        {
             continue;
         }
         match k.shortcut_code() {
@@ -567,14 +685,24 @@ fn items_keys(
             }
             KeyCode::Escape if ui.chain.is_some() => ui.chain = None,
             KeyCode::Escape if ui.placing.is_some() => ui.placing = None,
-            KeyCode::Escape if ann.tool == AnnTool::None && !ui.selected.is_empty() => ui.selected.clear(),
-            KeyCode::Delete | KeyCode::Backspace if ann.tool == AnnTool::None && !ui.selected.is_empty() => {
+            KeyCode::Escape if ann.tool == AnnTool::None && !ui.selected.is_empty() => {
+                ui.selected.clear()
+            }
+            KeyCode::Delete | KeyCode::Backspace
+                if ann.tool == AnnTool::None && !ui.selected.is_empty() =>
+            {
                 let ids = std::mem::take(&mut ui.selected);
                 commands.queue(move |w: &mut World| {
-                    let Some((sheet, items)) = w.get_resource::<ActiveDocument>().and_then(|doc| sheet_items(doc, w.resource::<DrawingUi>())) else {
+                    let Some((sheet, items)) = w
+                        .get_resource::<ActiveDocument>()
+                        .and_then(|doc| sheet_items(doc, w.resource::<DrawingUi>()))
+                    else {
                         return;
                     };
-                    let ids: Vec<ItemId> = ids.into_iter().filter(|id| items.iter().any(|i| i.id == *id)).collect();
+                    let ids: Vec<ItemId> = ids
+                        .into_iter()
+                        .filter(|id| items.iter().any(|i| i.id == *id))
+                        .collect();
                     if !ids.is_empty() {
                         edit_drawing(w, DrawingOp::DeleteSketchItems { sheet, ids });
                     }
@@ -584,8 +712,10 @@ fn items_keys(
         }
     }
     // A tool that ended (Esc, another tool) drops what it was drawing.
-    if !matches!(ann.tool, AnnTool::SheetLine | AnnTool::SheetSpline | AnnTool::PlaceImport)
-        && (ui.chain.is_some() || !ui.spline.is_empty() || ui.placing.is_some())
+    if !matches!(
+        ann.tool,
+        AnnTool::SheetLine | AnnTool::SheetSpline | AnnTool::PlaceImport
+    ) && (ui.chain.is_some() || !ui.spline.is_empty() || ui.placing.is_some())
     {
         ui.reset_tool();
     }
@@ -638,7 +768,12 @@ fn rebuild_item_scene(
     for it in &items {
         let selected = ui.selected.contains(&it.id);
         let it = match drag {
-            Some(d) if d.id == it.id || (d.grip.is_none() && selected && ui.selected.contains(&d.id)) => dragged(it, &d),
+            Some(d)
+                if d.id == it.id
+                    || (d.grip.is_none() && selected && ui.selected.contains(&d.id)) =>
+            {
+                dragged(it, &d)
+            }
             _ => it.clone(),
         };
         let color = if selected {
@@ -670,11 +805,20 @@ fn rebuild_item_scene(
                     let h = 11.0 * px;
                     let at = [q[0] + 9.0 * px, q[1] + 11.0 * px];
                     let (w, pad) = (0.9 * h, 3.0 * px);
-                    let (lo, hi) = ([at[0] - pad, at[1] - h / 2.0 - pad], [at[0] + w + pad, at[1] + h / 2.0 + pad]);
-                    out.fills.push(([v2(lo), v2([hi[0], lo[1]]), v2(hi)], orange()));
-                    out.fills.push(([v2(lo), v2(hi), v2([lo[0], hi[1]])], orange()));
+                    let (lo, hi) = (
+                        [at[0] - pad, at[1] - h / 2.0 - pad],
+                        [at[0] + w + pad, at[1] + h / 2.0 + pad],
+                    );
+                    out.fills
+                        .push(([v2(lo), v2([hi[0], lo[1]]), v2(hi)], orange()));
+                    out.fills
+                        .push(([v2(lo), v2(hi), v2([lo[0], hi[1]])], orange()));
                     out.texts.push(SceneText {
-                        text: PlacedText { pos: at, height: h, text: tag.into() },
+                        text: PlacedText {
+                            pos: at,
+                            height: h,
+                            text: tag.into(),
+                        },
                         color: Color::WHITE,
                         bold: true,
                         italic: false,
@@ -686,7 +830,11 @@ fn rebuild_item_scene(
                 let mut pts = ui.spline.clone();
                 pts.push(snap(&items, p, 6.0 * px, None).unwrap_or(f2(p)));
                 if pts.len() >= 2 {
-                    out.strokes.push((sk::spline_polyline(&pts, 24).into_iter().map(v2).collect(), orange(), true));
+                    out.strokes.push((
+                        sk::spline_polyline(&pts, 24).into_iter().map(v2).collect(),
+                        orange(),
+                        true,
+                    ));
                 }
                 for q in &pts {
                     out.fills.extend(square(v2(*q), grip_h * 0.8, orange()));
@@ -704,19 +852,29 @@ fn rebuild_item_scene(
         match &it.kind {
             ItemKind::Line { .. } | ItemKind::Spline { .. } => {
                 for pl in sk::item_polylines(it) {
-                    out.strokes.push((pl.into_iter().map(v2).collect(), *color, true));
+                    out.strokes
+                        .push((pl.into_iter().map(v2).collect(), *color, true));
                 }
             }
             ItemKind::Block(b) => {
                 for e in &b.entities {
                     match e {
-                        DxfEntity::Text { at, height, text, rotation } => {
+                        DxfEntity::Text {
+                            at,
+                            height,
+                            text,
+                            rotation,
+                        } => {
                             let (s, c) = rotation.to_radians().sin_cos();
                             let h = height * b.scale;
                             let base = sk::block_to_sheet(b, *at);
                             let mid = [base[0] - s * h / 2.0, base[1] + c * h / 2.0];
                             out.texts.push(SceneText {
-                                text: PlacedText { pos: mid, height: h, text: text.clone() },
+                                text: PlacedText {
+                                    pos: mid,
+                                    height: h,
+                                    text: text.clone(),
+                                },
                                 color: *color,
                                 bold: false,
                                 italic: false,
@@ -724,28 +882,48 @@ fn rebuild_item_scene(
                             });
                         }
                         DxfEntity::Solid { points } => {
-                            let pts: Vec<Vec2> = points.iter().map(|p| v2(sk::block_to_sheet(b, *p))).collect();
+                            let pts: Vec<Vec2> = points
+                                .iter()
+                                .map(|p| v2(sk::block_to_sheet(b, *p)))
+                                .collect();
                             for k in 1..pts.len().saturating_sub(1) {
                                 out.fills.push(([pts[0], pts[k], pts[k + 1]], *color));
                             }
                         }
                         e => {
                             for pl in sk::entity_polylines(e) {
-                                out.strokes.push((pl.into_iter().map(|p| v2(sk::block_to_sheet(b, p))).collect(), *color, false));
+                                out.strokes.push((
+                                    pl.into_iter()
+                                        .map(|p| v2(sk::block_to_sheet(b, p)))
+                                        .collect(),
+                                    *color,
+                                    false,
+                                ));
                             }
                         }
                     }
                 }
                 if *selected && let Some((lo, hi)) = sk::item_bounds(it) {
-                    let r = [v2(lo), v2([hi[0], lo[1]]), v2(hi), v2([lo[0], hi[1]]), v2(lo)];
-                    out.strokes.push((r.to_vec(), Color::srgb_u8(0xf3, 0xc0, 0x90), false));
+                    let r = [
+                        v2(lo),
+                        v2([hi[0], lo[1]]),
+                        v2(hi),
+                        v2([lo[0], hi[1]]),
+                        v2(lo),
+                    ];
+                    out.strokes
+                        .push((r.to_vec(), Color::srgb_u8(0xf3, 0xc0, 0x90), false));
                 }
             }
             ItemKind::Image(img) => {
                 out.images.push((it.id, img.clone()));
                 if *color != ink() {
                     let c = img.corners();
-                    out.strokes.push((vec![v2(c[0]), v2(c[1]), v2(c[2]), v2(c[3]), v2(c[0])], *color, false));
+                    out.strokes.push((
+                        vec![v2(c[0]), v2(c[1]), v2(c[2]), v2(c[3]), v2(c[0])],
+                        *color,
+                        false,
+                    ));
                 }
             }
         }
@@ -793,7 +971,11 @@ fn image_key(img: &sk::SheetImage) -> (usize, u64, [i64; 4]) {
     let mut h = std::collections::hash_map::DefaultHasher::new();
     img.data.hash(&mut h);
     let q = |x: f64| (x * 1000.0).round() as i64;
-    (img.data.len(), h.finish(), [q(img.at[0]), q(img.at[1]), q(img.width), q(img.height)])
+    (
+        img.data.len(),
+        h.finish(),
+        [q(img.at[0]), q(img.at[1]), q(img.width), q(img.height)],
+    )
 }
 
 /// Spawns, moves and removes the images' sprites.
@@ -808,10 +990,18 @@ fn sync_images(
     q: Query<(Entity, &ImageSprite)>,
     mut commands: Commands,
 ) {
-    let want: &[(ItemId, sk::SheetImage)] = if *kind == ActiveKind::Drawing { &scene.images } else { &[] };
+    let want: &[(ItemId, sk::SheetImage)] = if *kind == ActiveKind::Drawing {
+        &scene.images
+    } else {
+        &[]
+    };
     let mut have = Vec::new();
     for (e, s) in &q {
-        if want.iter().any(|(id, img)| *id == s.id && image_key(img) == s.key) && !have.contains(&s.key) {
+        if want
+            .iter()
+            .any(|(id, img)| *id == s.id && image_key(img) == s.key)
+            && !have.contains(&s.key)
+        {
             have.push(s.key);
         } else {
             commands.entity(e).despawn();
@@ -825,10 +1015,16 @@ fn sync_images(
         let handle = match cache.get(&key.1) {
             Some(h) => h.clone(),
             None => {
-                let Ok(rgba) = cadrs_drawing::export::decode_image(&img.data) else { continue };
+                let Ok(rgba) = cadrs_drawing::export::decode_image(&img.data) else {
+                    continue;
+                };
                 let (w, h) = rgba.dimensions();
                 let image = Image::new(
-                    Extent3d { width: w, height: h, depth_or_array_layers: 1 },
+                    Extent3d {
+                        width: w,
+                        height: h,
+                        depth_or_array_layers: 1,
+                    },
                     TextureDimension::D2,
                     rgba.into_raw(),
                     TextureFormat::Rgba8UnormSrgb,
@@ -853,7 +1049,11 @@ fn sync_images(
                 alpha_mode: bevy::sprite_render::AlphaMode2d::Mask(0.5),
                 ..ColorMaterial::from(Color::WHITE)
             })),
-            Transform::from_xyz(img.at[0] as f32 + size.x / 2.0, img.at[1] as f32 + size.y / 2.0, -0.8),
+            Transform::from_xyz(
+                img.at[0] as f32 + size.x / 2.0,
+                img.at[1] as f32 + size.y / 2.0,
+                -0.8,
+            ),
             RenderLayers::layer(DRAWING_LAYER),
             DespawnOnExit(AppState::Document),
         ));

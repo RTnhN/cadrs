@@ -17,7 +17,10 @@ use crate::assembly::connector::{ConnectorFrame, MateConnector};
 use crate::assembly::mate::{Mate, MateFeature, MateId, MateKind, MateType};
 use crate::assembly::{Instance, InstanceId, InstanceSource, Pose};
 use crate::command::{CommandError, History};
-use crate::commands::{AddElement, AddExtrude, AddSketch, EditSketch, NewElementKind, RenamePart, SetExtrude, SetPartMaterial};
+use crate::commands::{
+    AddElement, AddExtrude, AddSketch, EditSketch, NewElementKind, RenamePart, SetExtrude,
+    SetPartMaterial,
+};
 use crate::document::{BooleanOp, Document, ExtrudeFeature};
 use crate::ids::{ElementId, FeatureId, PartId};
 
@@ -32,11 +35,41 @@ pub const MATERIAL: &str = "Steel - A36";
 
 /// A box part: a rectangle on Top from (`x0`, 0) to (`x1`, 10) extruded 10 mm, named, in
 /// [`MATERIAL`]. `n` numbers its sketch and extrude (`fid(n)`, `fid(n + 1)`).
-fn bar(s: &mut dyn Studio, el: ElementId, n: u128, x0: f64, x1: f64, name: &str, ids: bool) -> Result<PartId, CommandError> {
-    let (sk, ex) = if ids { (fid(n), fid(n + 1)) } else { (FeatureId::new(), FeatureId::new()) };
-    s.run(&AddSketch { element: el, feature: sk, plane: Some(PlaneRef::Top) })?;
-    let pts = vec![Vec2::new(x0, 0.0), Vec2::new(x1, 0.0), Vec2::new(x1, 10.0), Vec2::new(x0, 10.0)];
-    s.run(&EditSketch { element: el, feature: sk, op: SketchOp::Batch(vec![SketchOp::AddPolyline { points: pts, closed: true, construction: false, label: "Add rectangle" }]) })?;
+fn bar(
+    s: &mut dyn Studio,
+    el: ElementId,
+    n: u128,
+    x0: f64,
+    x1: f64,
+    name: &str,
+    ids: bool,
+) -> Result<PartId, CommandError> {
+    let (sk, ex) = if ids {
+        (fid(n), fid(n + 1))
+    } else {
+        (FeatureId::new(), FeatureId::new())
+    };
+    s.run(&AddSketch {
+        element: el,
+        feature: sk,
+        plane: Some(PlaneRef::Top),
+    })?;
+    let pts = vec![
+        Vec2::new(x0, 0.0),
+        Vec2::new(x1, 0.0),
+        Vec2::new(x1, 10.0),
+        Vec2::new(x0, 10.0),
+    ];
+    s.run(&EditSketch {
+        element: el,
+        feature: sk,
+        op: SketchOp::Batch(vec![SketchOp::AddPolyline {
+            points: pts,
+            closed: true,
+            construction: false,
+            label: "Add rectangle",
+        }]),
+    })?;
     let g = s
         .document()
         .element(el)
@@ -50,11 +83,28 @@ fn bar(s: &mut dyn Studio, el: ElementId, n: u128, x0: f64, x1: f64, name: &str,
     }
     let mut x = super::extrude_of(regions, 10.0);
     x.op = BooleanOp::New;
-    s.run(&AddExtrude { element: el, feature: ex, extrude: ExtrudeFeature::default() })?;
-    s.run(&SetExtrude { element: el, feature: ex, extrude: x, label: "Extrude".into() })?;
+    s.run(&AddExtrude {
+        element: el,
+        feature: ex,
+        extrude: ExtrudeFeature::default(),
+    })?;
+    s.run(&SetExtrude {
+        element: el,
+        feature: ex,
+        extrude: x,
+        label: "Extrude".into(),
+    })?;
     let p = PartId::new(ex, 0);
-    s.run(&RenamePart { element: el, part: p, name: name.into() })?;
-    s.run(&SetPartMaterial { element: el, parts: vec![p], material: crate::material::library(MATERIAL) })?;
+    s.run(&RenamePart {
+        element: el,
+        part: p,
+        name: name.into(),
+    })?;
+    s.run(&SetPartMaterial {
+        element: el,
+        parts: vec![p],
+        material: crate::material::library(MATERIAL),
+    })?;
     Ok(p)
 }
 
@@ -64,7 +114,8 @@ pub fn beam_in(s: &mut dyn Studio, el: ElementId) -> Result<PartId, CommandError
 }
 
 pub const HALVES: ElementId = ElementId::from_u128(0x3f05_0000_0000_0000_0000_0000_0000_0101);
-pub const BEAM_ASSEMBLY: ElementId = ElementId::from_u128(0x3f05_0000_0000_0000_0000_0000_0000_0102);
+pub const BEAM_ASSEMBLY: ElementId =
+    ElementId::from_u128(0x3f05_0000_0000_0000_0000_0000_0000_0102);
 pub const HALF_1: InstanceId = InstanceId::from_u128(0x3f05_0000_0000_0000_0000_0000_0000_1001);
 pub const HALF_2: InstanceId = InstanceId::from_u128(0x3f05_0000_0000_0000_0000_0000_0000_1002);
 pub const FASTENED_1: MateId = MateId::from_u128(0x3f05_0000_0000_0000_0000_0000_0000_2001);
@@ -79,18 +130,60 @@ pub fn halves_document() -> Result<Document, CommandError> {
     let mut h = History::default();
     let (p1, p2) = {
         let s = &mut DocHistory(&mut doc, &mut h);
-        (bar(s, HALVES, 0x10, 0.0, 50.0, "Half 1", true)?, bar(s, HALVES, 0x20, 50.0, 100.0, "Half 2", true)?)
+        (
+            bar(s, HALVES, 0x10, 0.0, 50.0, "Half 1", true)?,
+            bar(s, HALVES, 0x20, 50.0, 100.0, "Half 2", true)?,
+        )
     };
-    h.execute(&mut doc, &AddElement { id: BEAM_ASSEMBLY, kind: NewElementKind::Assembly, name: Some("Beam Assembly".into()), after: None })?;
+    h.execute(
+        &mut doc,
+        &AddElement {
+            id: BEAM_ASSEMBLY,
+            kind: NewElementKind::Assembly,
+            name: Some("Beam Assembly".into()),
+            after: None,
+        },
+    )?;
     for (i, p) in [(HALF_1, p1), (HALF_2, p2)] {
-        h.execute(&mut doc, &InsertInstance { element: BEAM_ASSEMBLY, instance: Instance::new(i, InstanceSource::Part { element: HALVES, part: p }, Pose::IDENTITY) })?;
+        h.execute(
+            &mut doc,
+            &InsertInstance {
+                element: BEAM_ASSEMBLY,
+                instance: Instance::new(
+                    i,
+                    InstanceSource::Part {
+                        element: HALVES,
+                        part: p,
+                    },
+                    Pose::IDENTITY,
+                ),
+            },
+        )?;
     }
-    h.execute(&mut doc, &SetInstancesFixed { element: BEAM_ASSEMBLY, instances: vec![HALF_1], fixed: true })?;
+    h.execute(
+        &mut doc,
+        &SetInstancesFixed {
+            element: BEAM_ASSEMBLY,
+            instances: vec![HALF_1],
+            fixed: true,
+        },
+    )?;
     // The joint's centre, Z along the beam.
     let f = ConnectorFrame::new([50.0, 5.0, 5.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]);
-    let mut m = Mate::new(MateType::Fastened, MateConnector::at(HALF_2, f), MateConnector::at(HALF_1, f));
+    let mut m = Mate::new(
+        MateType::Fastened,
+        MateConnector::at(HALF_2, f),
+        MateConnector::at(HALF_1, f),
+    );
     m.simulation = true;
-    h.execute(&mut doc, &AddMateFeature { element: BEAM_ASSEMBLY, feature: MateFeature::new(FASTENED_1, "Fastened 1", MateKind::Mate(m)), poses: Vec::new() })?;
+    h.execute(
+        &mut doc,
+        &AddMateFeature {
+            element: BEAM_ASSEMBLY,
+            feature: MateFeature::new(FASTENED_1, "Fastened 1", MateKind::Mate(m)),
+            poses: Vec::new(),
+        },
+    )?;
     if let Some(k) = doc.elements.iter().position(|e| e.id == BEAM_ASSEMBLY) {
         let a = doc.elements.remove(k);
         doc.elements.insert(0, a);

@@ -15,7 +15,9 @@ use std::net::{Ipv4Addr, SocketAddr};
 use bevy::prelude::*;
 use cadrs_core::commands::{AddElement, AddExtrude, AddSketch, NewElementKind};
 use cadrs_core::document::ElementKind;
-use cadrs_core::{BooleanOp, Document, DocumentMeta, ElementId, ExtrudeFeature, FeatureId, FeatureKind};
+use cadrs_core::{
+    BooleanOp, Document, DocumentMeta, ElementId, ExtrudeFeature, FeatureId, FeatureKind,
+};
 use cadrs_mcp::tools::{self, Operation, Plane, SketchEntity};
 use cadrs_mcp::{Call, Server};
 use cadrs_sketch::constraint::rectangle_constraints;
@@ -99,7 +101,10 @@ fn sync_server(world: &mut World) {
         }
         Err(e) => {
             warn!("cannot start the MCP server on {addr}: {e}");
-            cadrs_ui::Notification::error(format!("Cannot start the MCP server on port {}: {e}", mcp.port))
+            cadrs_ui::Notification::error(format!(
+                "Cannot start the MCP server on port {}: {e}",
+                mcp.port
+            ))
         }
     };
     let theme = world.resource::<Theme>().clone();
@@ -110,7 +115,9 @@ fn sync_server(world: &mut World) {
 
 /// Runs the tool calls waiting for the app.
 fn run_calls(world: &mut World) {
-    let Some(server) = world.resource::<McpServer>().server.as_ref() else { return };
+    let Some(server) = world.resource::<McpServer>().server.as_ref() else {
+        return;
+    };
     let requests: Vec<_> = std::iter::from_fn(|| server.try_next()).collect();
     for req in requests {
         if let Call::RunScenario(p) = &req.call {
@@ -123,10 +130,13 @@ fn run_calls(world: &mut World) {
             let slot = std::sync::Arc::new(std::sync::Mutex::new(Some(req)));
             let answer = slot.clone();
             let done: ScenarioDone = Box::new(move |result| {
-                let Some(req) = answer.lock().ok().and_then(|mut r| r.take()) else { return };
+                let Some(req) = answer.lock().ok().and_then(|mut r| r.take()) else {
+                    return;
+                };
                 match result {
                     Ok(shots) => {
-                        let paths: Vec<String> = shots.iter().map(|p| p.display().to_string()).collect();
+                        let paths: Vec<String> =
+                            shots.iter().map(|p| p.display().to_string()).collect();
                         let caption = json!({ "screenshots": paths }).to_string();
                         match shots.last().and_then(|p| std::fs::read(p).ok()) {
                             Some(png) => req.reply_image(png, caption),
@@ -151,7 +161,12 @@ fn run_calls(world: &mut World) {
                     continue;
                 }
             }
-            world.resource_mut::<WaitingShots>().0.push(WaitingShot { req, max, frames: 0, idle: 0 });
+            world.resource_mut::<WaitingShots>().0.push(WaitingShot {
+                req,
+                max,
+                frames: 0,
+                idle: 0,
+            });
             continue;
         }
         let result = run(world, &req.call);
@@ -168,8 +183,13 @@ fn run(world: &mut World, call: &Call) -> Result<Value, String> {
         Call::OpenDocument(p) => open_document(world, &p.name),
         Call::GetDocument => describe(world),
         Call::GetFrameStats => {
-            let mut stats = world.resource::<crate::frame_stats::FrameStats>().describe();
-            if let (Some(o), Some(p)) = (stats.as_object_mut(), world.get_resource::<crate::frame_profile::FrameProfile>()) {
+            let mut stats = world
+                .resource::<crate::frame_stats::FrameStats>()
+                .describe();
+            if let (Some(o), Some(p)) = (
+                stats.as_object_mut(),
+                world.get_resource::<crate::frame_profile::FrameProfile>(),
+            ) {
                 o.insert("profile".into(), p.describe(25));
             }
             Ok(stats)
@@ -181,7 +201,9 @@ fn run(world: &mut World, call: &Call) -> Result<Value, String> {
         Call::Screenshot(_) | Call::RunScenario(_) => Err("handled by run_calls".into()),
         Call::AddFeature(p) => add_feature(world, p),
         Call::EditFeature(p) => edit_feature(world, p),
-        Call::EditSketch(p) => edit_sketch(world, p).and_then(|r| serde_json::to_value(r).map_err(|e| e.to_string())),
+        Call::EditSketch(p) => {
+            edit_sketch(world, p).and_then(|r| serde_json::to_value(r).map_err(|e| e.to_string()))
+        }
         Call::GetFeature(p) => get_feature(world, p),
         Call::DeleteFeature(p) => delete_feature(world, p),
         Call::ListFaces(p) => list_faces(world, p.part_studio.as_deref()),
@@ -197,7 +219,9 @@ fn run(world: &mut World, call: &Call) -> Result<Value, String> {
         Call::AddAnnotation(p) => add_annotation(world, p),
         Call::RenameTab(p) => rename_tab(world, p),
         Call::DeleteTab(p) => delete_tab(world, &p.name),
-        Call::GetAssembly(p) => describe_assembly(doc(world)?, assembly(doc(world)?, p.assembly.as_deref())?),
+        Call::GetAssembly(p) => {
+            describe_assembly(doc(world)?, assembly(doc(world)?, p.assembly.as_deref())?)
+        }
         Call::InsertInstance(p) => insert_instance(world, p),
         Call::GetBoard(p) => crate::mcp_board::get_board(world, p),
         Call::GetBoardFit(p) => crate::mcp_board::get_board_fit(world, p),
@@ -242,18 +266,39 @@ fn view_json(v: &cadrs_drawing::View) -> Value {
 fn create_drawing(world: &mut World, p: &tools::CreateDrawing) -> Result<Value, String> {
     let template_name = p.template.as_deref().unwrap_or(DEFAULT_TEMPLATE);
     let templates = cadrs_drawing::template::builtin_templates();
-    let template = templates.iter().find(|t| t.name.eq_ignore_ascii_case(template_name)).cloned().ok_or_else(|| {
-        let names: Vec<&str> = templates.iter().map(|t| t.name.as_str()).collect();
-        format!("no sheet template named {template_name:?}; the built-in ones are {}", names.join(", "))
-    })?;
+    let template = templates
+        .iter()
+        .find(|t| t.name.eq_ignore_ascii_case(template_name))
+        .cloned()
+        .ok_or_else(|| {
+            let names: Vec<&str> = templates.iter().map(|t| t.name.as_str()).collect();
+            format!(
+                "no sheet template named {template_name:?}; the built-in ones are {}",
+                names.join(", ")
+            )
+        })?;
     let scale = p.scale.as_deref().map(parse_scale).transpose()?;
     let element = part_studio(doc(world)?, p.part_studio.as_deref())?;
-    let r = cadrs_drawing::ObjectRef { element: element.0, part: None };
-    let drawings = doc(world)?.doc.elements.iter().filter(|e| matches!(e.kind, ElementKind::Drawing(_))).count();
-    let name = p.name.clone().filter(|n| !n.trim().is_empty()).unwrap_or_else(|| format!("Drawing {}", drawings + 1));
+    let r = cadrs_drawing::ObjectRef {
+        element: element.0,
+        part: None,
+    };
+    let drawings = doc(world)?
+        .doc
+        .elements
+        .iter()
+        .filter(|e| matches!(e.kind, ElementKind::Drawing(_)))
+        .count();
+    let name = p
+        .name
+        .clone()
+        .filter(|n| !n.trim().is_empty())
+        .unwrap_or_else(|| format!("Drawing {}", drawings + 1));
     let mut drawing = cadrs_drawing::Drawing::from_template(&template, Some(r));
     drawing.title.drawn_by = Some(world.resource::<UserProfile>().display_name.clone());
-    drawing.title.drawn_date = Some(crate::drawing::create_dialog::today(world.resource::<AppClock>()));
+    drawing.title.drawn_date = Some(crate::drawing::create_dialog::today(
+        world.resource::<AppClock>(),
+    ));
     if p.four_views.unwrap_or(true) {
         let mut views = crate::drawing::create_dialog::four_views_of(&doc(world)?.doc, &drawing, r);
         if views.is_empty() {
@@ -281,14 +326,26 @@ fn create_drawing(world: &mut World, p: &tools::CreateDrawing) -> Result<Value, 
             v.scale = s;
         }
     }
-    let views: Vec<Value> = drawing.sheets.first().map(|s| s.views.iter().map(view_json).collect()).unwrap_or_default();
-    let sheet_scale = drawing.sheets.first().map(|s| format!("{}:{}", s.scale.num, s.scale.den)).unwrap_or_default();
+    let views: Vec<Value> = drawing
+        .sheets
+        .first()
+        .map(|s| s.views.iter().map(view_json).collect())
+        .unwrap_or_default();
+    let sheet_scale = drawing
+        .sheets
+        .first()
+        .map(|s| format!("{}:{}", s.scale.num, s.scale.den))
+        .unwrap_or_default();
     let element_drawing = cadrs_core::Element::drawing(name.clone(), drawing);
     let id = element_drawing.id;
     let mut d = doc_mut(world)?;
     let after = d.active;
-    d.execute(&cadrs_core::commands::InsertElement { element: element_drawing, after, label: "Create Drawing".into() })
-        .map_err(|e| e.to_string())?;
+    d.execute(&cadrs_core::commands::InsertElement {
+        element: element_drawing,
+        after,
+        label: "Create Drawing".into(),
+    })
+    .map_err(|e| e.to_string())?;
     d.set_active(id);
     Ok(json!({ "drawing": name, "template": template.name, "scale": sheet_scale, "views": views }))
 }
@@ -314,20 +371,32 @@ fn add_annotation(world: &mut World, p: &tools::AddAnnotation) -> Result<Value, 
         let ElementKind::Drawing(drawing) = &el.kind else {
             return Err(format!("{:?} is not a drawing", el.name));
         };
-        let views: Vec<(&str, cadrs_drawing::ViewId)> =
-            drawing.sheets.iter().flat_map(|s| s.views.iter()).map(|v| (v.name.as_str(), v.id)).collect();
+        let views: Vec<(&str, cadrs_drawing::ViewId)> = drawing
+            .sheets
+            .iter()
+            .flat_map(|s| s.views.iter())
+            .map(|v| (v.name.as_str(), v.id))
+            .collect();
         views
             .iter()
             .find(|(n, _)| n.eq_ignore_ascii_case(&p.view))
             .map(|(_, id)| *id)
             .ok_or_else(|| {
                 let names: Vec<&str> = views.iter().map(|(n, _)| *n).collect();
-                format!("no view named {:?} in {:?}; its views are {}", p.view, el.name, names.join(", "))
+                format!(
+                    "no view named {:?} in {:?}; its views are {}",
+                    p.view,
+                    el.name,
+                    names.join(", ")
+                )
             })?
     };
     let annotation = cadrs_drawing::annotation::Annotation::new(kind);
     let id = annotation.id;
-    if !crate::drawing::view_tools::edit_drawing(world, cadrs_drawing::DrawingOp::AddAnnotation { view, annotation }) {
+    if !crate::drawing::view_tools::edit_drawing(
+        world,
+        cadrs_drawing::DrawingOp::AddAnnotation { view, annotation },
+    ) {
         return Err("the annotation could not be added".into());
     }
     Ok(json!({ "view": p.view, "annotation": serde_json::to_value(id).unwrap_or(Value::Null) }))
@@ -336,37 +405,69 @@ fn add_annotation(world: &mut World, p: &tools::AddAnnotation) -> Result<Value, 
 /// Renames a tab.
 fn rename_tab(world: &mut World, p: &tools::RenameTab) -> Result<Value, String> {
     let mut d = doc_mut(world)?;
-    let id = d.doc.elements.iter().find(|e| e.name == p.name).map(|e| e.id).ok_or_else(|| format!("no tab named {:?}", p.name))?;
-    d.execute(&cadrs_core::commands::RenameElement { id, name: p.to.clone() }).map_err(|e| e.to_string())?;
+    let id = d
+        .doc
+        .elements
+        .iter()
+        .find(|e| e.name == p.name)
+        .map(|e| e.id)
+        .ok_or_else(|| format!("no tab named {:?}", p.name))?;
+    d.execute(&cadrs_core::commands::RenameElement {
+        id,
+        name: p.to.clone(),
+    })
+    .map_err(|e| e.to_string())?;
     describe(world)
 }
 
 /// Deletes a tab, unless an assembly has instances of it.
 fn delete_tab(world: &mut World, name: &str) -> Result<Value, String> {
     let mut d = doc_mut(world)?;
-    let id = d.doc.elements.iter().find(|e| e.name == name).map(|e| e.id).ok_or_else(|| format!("no tab named {name:?}"))?;
+    let id = d
+        .doc
+        .elements
+        .iter()
+        .find(|e| e.name == name)
+        .map(|e| e.id)
+        .ok_or_else(|| format!("no tab named {name:?}"))?;
     let users: Vec<&str> = d
         .doc
         .elements
         .iter()
-        .filter(|e| e.assembly_model().is_some_and(|a| a.instances.iter().any(|i| i.source.element() == id)))
+        .filter(|e| {
+            e.assembly_model()
+                .is_some_and(|a| a.instances.iter().any(|i| i.source.element() == id))
+        })
         .map(|e| e.name.as_str())
         .collect();
     if !users.is_empty() {
-        return Err(format!("{name:?} has instances in {}: delete them first", users.join(", ")));
+        return Err(format!(
+            "{name:?} has instances in {}: delete them first",
+            users.join(", ")
+        ));
     }
-    d.execute(&cadrs_core::commands::DeleteElement { id }).map_err(|e| e.to_string())?;
+    d.execute(&cadrs_core::commands::DeleteElement { id })
+        .map_err(|e| e.to_string())?;
     describe(world)
 }
 
 /// The Assembly tab a call names, or the active tab.
 fn assembly(d: &ActiveDocument, name: Option<&str>) -> Result<ElementId, String> {
     let e = match name {
-        Some(n) => d.doc.elements.iter().find(|e| e.name == n).ok_or_else(|| format!("no tab named {n:?}"))?,
+        Some(n) => d
+            .doc
+            .elements
+            .iter()
+            .find(|e| e.name == n)
+            .ok_or_else(|| format!("no tab named {n:?}"))?,
         None => d.active_element().ok_or("no tab is active")?,
     };
     if !matches!(e.kind, ElementKind::Assembly) {
-        return Err(format!("{:?} is a {}, not an Assembly", e.name, kind_label(&e.kind)));
+        return Err(format!(
+            "{:?} is a {}, not an Assembly",
+            e.name,
+            kind_label(&e.kind)
+        ));
     }
     Ok(e.id)
 }
@@ -376,7 +477,12 @@ fn describe_assembly(d: &ActiveDocument, element: ElementId) -> Result<Value, St
     use cadrs_core::assembly::InstanceSource;
     let e = d.doc.element(element).ok_or("the Assembly is gone")?;
     let asm = e.assembly_model().ok_or("not an Assembly")?;
-    let tab = |id: ElementId| d.doc.element(id).map(|e| e.name.clone()).unwrap_or_default();
+    let tab = |id: ElementId| {
+        d.doc
+            .element(id)
+            .map(|e| e.name.clone())
+            .unwrap_or_default()
+    };
     let instances: Vec<Value> = asm
         .instances
         .iter()
@@ -408,35 +514,64 @@ fn describe_assembly(d: &ActiveDocument, element: ElementId) -> Result<Value, St
             v
         })
         .collect();
-    let mates: Vec<Value> = asm.mates.iter().map(|m| json!({ "name": m.name, "suppressed": m.suppressed })).collect();
+    let mates: Vec<Value> = asm
+        .mates
+        .iter()
+        .map(|m| json!({ "name": m.name, "suppressed": m.suppressed }))
+        .collect();
     Ok(json!({ "assembly": e.name, "instances": instances, "mates": mates }))
 }
 
 /// Inserts a whole Part Studio (one rigid instance) or one of its parts into an assembly, as the
 /// Insert dialog does.
 fn insert_instance(world: &mut World, p: &tools::InsertInstance) -> Result<Value, String> {
-    use cadrs_core::assembly::{Instance, InstanceId, InstanceSource, Pose, commands::InsertInstance};
+    use cadrs_core::assembly::{
+        Instance, InstanceId, InstanceSource, Pose, commands::InsertInstance,
+    };
     let element = assembly(doc(world)?, p.assembly.as_deref())?;
     let studio = part_studio(doc(world)?, Some(&p.part_studio))?;
     let d = doc(world)?;
-    let parts = cadrs_core::rebuild::build(d.doc.element(studio).ok_or("the Part Studio is gone")?.features()).parts.clone();
+    let parts = cadrs_core::rebuild::build(
+        d.doc
+            .element(studio)
+            .ok_or("the Part Studio is gone")?
+            .features(),
+    )
+    .parts
+    .clone();
     if parts.is_empty() {
         return Err(format!("{:?} has no parts", p.part_studio));
     }
-    let pose = p.translation.map(Pose::translation).unwrap_or(Pose::IDENTITY);
+    let pose = p
+        .translation
+        .map(Pose::translation)
+        .unwrap_or(Pose::IDENTITY);
     let id = InstanceId::new();
     let mut instance = match &p.part {
         None => Instance::studio(id, studio, parts.iter().map(|q| q.id).collect(), pose),
         Some(name) => {
             let part = parts.iter().find(|q| q.name == *name).ok_or_else(|| {
                 let names: Vec<&str> = parts.iter().map(|q| q.name.as_str()).collect();
-                format!("no part named {name:?} in {:?}; its parts are {}", p.part_studio, names.join(", "))
+                format!(
+                    "no part named {name:?} in {:?}; its parts are {}",
+                    p.part_studio,
+                    names.join(", ")
+                )
             })?;
-            Instance::new(id, InstanceSource::Part { element: studio, part: part.id }, pose)
+            Instance::new(
+                id,
+                InstanceSource::Part {
+                    element: studio,
+                    part: part.id,
+                },
+                pose,
+            )
         }
     };
     instance.fixed = p.fixed;
-    doc_mut(world)?.execute(&InsertInstance { element, instance }).map_err(|e| e.to_string())?;
+    doc_mut(world)?
+        .execute(&InsertInstance { element, instance })
+        .map_err(|e| e.to_string())?;
     describe_assembly(doc(world)?, element)
 }
 
@@ -451,7 +586,11 @@ fn turn_view(world: &mut World, name: &str) -> Result<(), String> {
         "top" => V::Top,
         "bottom" => V::Bottom,
         "iso" | "isometric" => V::Isometric,
-        _ => return Err(format!("unknown view {name:?}: front, back, left, right, top, bottom or iso")),
+        _ => {
+            return Err(format!(
+                "unknown view {name:?}: front, back, left, right, top, bottom or iso"
+            ));
+        }
     };
     let mut view = world.resource_mut::<crate::viewport::ViewportView>();
     let to = view.target().oriented(s);
@@ -466,8 +605,13 @@ fn take_screenshots(world: &mut World) {
     if world.resource::<WaitingShots>().0.is_empty() {
         return;
     }
-    let busy = world.get_resource::<cadrs_ui::PendingWork>().is_some_and(|w| w.0);
-    let why = world.get_resource::<cadrs_ui::PendingWhy>().map(|w| w.0.join(", ")).unwrap_or_default();
+    let busy = world
+        .get_resource::<cadrs_ui::PendingWork>()
+        .is_some_and(|w| w.0);
+    let why = world
+        .get_resource::<cadrs_ui::PendingWhy>()
+        .map(|w| w.0.join(", "))
+        .unwrap_or_default();
     let shots = std::mem::take(&mut world.resource_mut::<WaitingShots>().0);
     let mut keep = Vec::new();
     for mut shot in shots {
@@ -490,7 +634,12 @@ fn capture(world: &mut World, req: cadrs_mcp::Request, max: u32, busy: Option<St
     use bevy::render::view::screenshot::{Screenshot, ScreenshotCaptured};
     let screenshot = if let Some(surface) = world.get_resource::<cadrs_ui::RenderSurface>() {
         Screenshot(surface.target.clone())
-    } else if world.query_filtered::<(), With<bevy::window::PrimaryWindow>>().iter(world).next().is_some() {
+    } else if world
+        .query_filtered::<(), With<bevy::window::PrimaryWindow>>()
+        .iter(world)
+        .next()
+        .is_some()
+    {
         Screenshot::primary_window()
     } else {
         req.reply(Err("cadrs has no window to capture".into()));
@@ -498,27 +647,42 @@ fn capture(world: &mut World, req: cadrs_mcp::Request, max: u32, busy: Option<St
     };
     // The observer may run more than once in principle; the request is answered once.
     let req = std::sync::Mutex::new(Some(req));
-    world.spawn(screenshot).observe(move |shot: On<ScreenshotCaptured>| {
-        let Some(req) = req.lock().ok().and_then(|mut r| r.take()) else { return };
-        let img = match shot.image.clone().try_into_dynamic() {
-            Ok(img) => img,
-            Err(e) => {
-                req.reply(Err(format!("cannot read the screenshot: {e:?}")));
+    world
+        .spawn(screenshot)
+        .observe(move |shot: On<ScreenshotCaptured>| {
+            let Some(req) = req.lock().ok().and_then(|mut r| r.take()) else {
                 return;
+            };
+            let img = match shot.image.clone().try_into_dynamic() {
+                Ok(img) => img,
+                Err(e) => {
+                    req.reply(Err(format!("cannot read the screenshot: {e:?}")));
+                    return;
+                }
+            };
+            let (w, h) = (img.width(), img.height());
+            let img = if w.max(h) > max {
+                img.resize(max, max, image::imageops::FilterType::Triangle)
+            } else {
+                img
+            };
+            let mut caption = format!(
+                "The cadrs window ({w} × {h} px, shown at {} × {}).",
+                img.width(),
+                img.height()
+            );
+            if let Some(why) = &busy {
+                caption += &format!(" Taken while cadrs was still busy ({why}).");
             }
-        };
-        let (w, h) = (img.width(), img.height());
-        let img = if w.max(h) > max { img.resize(max, max, image::imageops::FilterType::Triangle) } else { img };
-        let mut caption = format!("The cadrs window ({w} × {h} px, shown at {} × {}).", img.width(), img.height());
-        if let Some(why) = &busy {
-            caption += &format!(" Taken while cadrs was still busy ({why}).");
-        }
-        let mut png = Vec::new();
-        match img.to_rgb8().write_to(&mut std::io::Cursor::new(&mut png), image::ImageFormat::Png) {
-            Ok(()) => req.reply_image(png, caption),
-            Err(e) => req.reply(Err(format!("cannot encode the screenshot: {e}"))),
-        }
-    });
+            let mut png = Vec::new();
+            match img
+                .to_rgb8()
+                .write_to(&mut std::io::Cursor::new(&mut png), image::ImageFormat::Png)
+            {
+                Ok(()) => req.reply_image(png, caption),
+                Err(e) => req.reply(Err(format!("cannot encode the screenshot: {e}"))),
+            }
+        });
 }
 
 /// Creates a stored document (Part Studio 1 and Assembly 1) and opens it, as the documents
@@ -534,9 +698,13 @@ fn create_document(world: &mut World, name: &str) -> Result<Value, String> {
     let doc = Document::new(name);
     let meta = DocumentMeta::new(&user, now);
     let id = doc.id;
-    store.create(&doc, &meta).map_err(|e| format!("cannot create the document: {e}"))?;
+    store
+        .create(&doc, &meta)
+        .map_err(|e| format!("cannot create the document: {e}"))?;
     crate::move_document::open_document(world, id);
-    let mut active = world.get_resource_mut::<ActiveDocument>().ok_or("the document did not open")?;
+    let mut active = world
+        .get_resource_mut::<ActiveDocument>()
+        .ok_or("the document did not open")?;
     active.fresh = true;
     describe(world)
 }
@@ -557,11 +725,15 @@ fn open_document(world: &mut World, name: &str) -> Result<Value, String> {
 }
 
 fn doc(world: &World) -> Result<&ActiveDocument, String> {
-    world.get_resource::<ActiveDocument>().ok_or_else(|| "no document is open: call create_document or open_document first".into())
+    world
+        .get_resource::<ActiveDocument>()
+        .ok_or_else(|| "no document is open: call create_document or open_document first".into())
 }
 
 fn doc_mut(world: &mut World) -> Result<Mut<'_, ActiveDocument>, String> {
-    world.get_resource_mut::<ActiveDocument>().ok_or_else(|| "no document is open: call create_document or open_document first".into())
+    world
+        .get_resource_mut::<ActiveDocument>()
+        .ok_or_else(|| "no document is open: call create_document or open_document first".into())
 }
 
 fn kind_label(kind: &ElementKind) -> &'static str {
@@ -577,11 +749,20 @@ fn kind_label(kind: &ElementKind) -> &'static str {
 /// The Part Studio a call names, or the active tab.
 fn part_studio(d: &ActiveDocument, name: Option<&str>) -> Result<ElementId, String> {
     let e = match name {
-        Some(n) => d.doc.elements.iter().find(|e| e.name == n).ok_or_else(|| format!("no tab named {n:?}"))?,
+        Some(n) => d
+            .doc
+            .elements
+            .iter()
+            .find(|e| e.name == n)
+            .ok_or_else(|| format!("no tab named {n:?}"))?,
         None => d.active_element().ok_or("no tab is active")?,
     };
     if !matches!(e.kind, ElementKind::PartStudio { .. }) {
-        return Err(format!("{:?} is a {}, not a Part Studio", e.name, kind_label(&e.kind)));
+        return Err(format!(
+            "{:?} is a {}, not a Part Studio",
+            e.name,
+            kind_label(&e.kind)
+        ));
     }
     Ok(e.id)
 }
@@ -596,7 +777,10 @@ fn describe(world: &World) -> Result<Value, String> {
         .map(|e| json!({ "name": e.name, "kind": kind_label(&e.kind), "active": d.active == Some(e.id) }))
         .collect();
     let mut out = json!({ "document": d.doc.name, "tabs": tabs });
-    if let Some(e) = d.active_element().filter(|e| matches!(e.kind, ElementKind::PartStudio { .. })) {
+    if let Some(e) = d
+        .active_element()
+        .filter(|e| matches!(e.kind, ElementKind::PartStudio { .. }))
+    {
         out["part_studio"] = studio_state(e.name.as_str(), e.features());
     }
     if d.meta.is_some() {
@@ -608,11 +792,14 @@ fn describe(world: &World) -> Result<Value, String> {
 /// A Part Studio's features (with their rebuild errors and warnings) and parts.
 fn studio_state(name: &str, features: &[cadrs_core::Feature]) -> Value {
     let build = cadrs_core::rebuild::build(features);
-    let problem = |id: FeatureId, list: &[(FeatureId, String)]| list.iter().find(|(f, _)| *f == id).map(|(_, m)| m.clone());
+    let problem = |id: FeatureId, list: &[(FeatureId, String)]| {
+        list.iter().find(|(f, _)| *f == id).map(|(_, m)| m.clone())
+    };
     let features: Vec<Value> = features
         .iter()
         .map(|f| {
-            let mut v = json!({ "name": f.name, "type": cadrs_core::feature_list::type_label(&f.kind) });
+            let mut v =
+                json!({ "name": f.name, "type": cadrs_core::feature_list::type_label(&f.kind) });
             if let Some(e) = problem(f.id, &build.errors) {
                 v["error"] = json!(e);
             }
@@ -649,7 +836,13 @@ fn add_part_studio(world: &mut World, p: &tools::AddPartStudio) -> Result<Value,
     let mut d = doc_mut(world)?;
     let id = ElementId::new();
     let after = d.active;
-    d.execute(&AddElement { id, kind: NewElementKind::PartStudio, name: p.name.clone(), after }).map_err(|e| e.to_string())?;
+    d.execute(&AddElement {
+        id,
+        kind: NewElementKind::PartStudio,
+        name: p.name.clone(),
+        after,
+    })
+    .map_err(|e| e.to_string())?;
     d.set_active(id);
     describe(world)
 }
@@ -660,7 +853,13 @@ fn add_assembly(world: &mut World, p: &tools::AddPartStudio) -> Result<Value, St
     let mut d = doc_mut(world)?;
     let id = ElementId::new();
     let after = d.active;
-    d.execute(&AddElement { id, kind: NewElementKind::Assembly, name: p.name.clone(), after }).map_err(|e| e.to_string())?;
+    d.execute(&AddElement {
+        id,
+        kind: NewElementKind::Assembly,
+        name: p.name.clone(),
+        after,
+    })
+    .map_err(|e| e.to_string())?;
     describe_assembly(&d, id)
 }
 
@@ -683,14 +882,23 @@ fn sketch_ops(entities: &[SketchEntity]) -> Result<Vec<SketchOp>, String> {
                     return Err("a rectangle needs a width and a height".into());
                 }
                 let corners = [v(x0, y0), v(x1, y0), v(x1, y1), v(x0, y1)];
-                ops.push(SketchOp::AddPolyline { points: corners.to_vec(), closed: true, construction: false, label: "Add rectangle" });
+                ops.push(SketchOp::AddPolyline {
+                    points: corners.to_vec(),
+                    closed: true,
+                    construction: false,
+                    label: "Add rectangle",
+                });
                 ops.push(SketchOp::AddConstraints(rectangle_constraints(corners)));
             }
             SketchEntity::Circle { cx, cy, r } => {
                 if r <= 0.0 {
                     return Err("a circle's radius must be positive".into());
                 }
-                ops.push(SketchOp::AddCircle { center: v(cx, cy), radius: r, construction: false });
+                ops.push(SketchOp::AddCircle {
+                    center: v(cx, cy),
+                    radius: r,
+                    construction: false,
+                });
             }
             SketchEntity::Polygon { ref points } => {
                 if points.len() < 3 {
@@ -704,11 +912,31 @@ fn sketch_ops(entities: &[SketchEntity]) -> Result<Vec<SketchOp>, String> {
                 });
             }
             SketchEntity::Line { x0, y0, x1, y1 } => {
-                ops.push(SketchOp::AddPolyline { points: vec![v(x0, y0), v(x1, y1)], closed: false, construction: false, label: "Add line" });
+                ops.push(SketchOp::AddPolyline {
+                    points: vec![v(x0, y0), v(x1, y1)],
+                    closed: false,
+                    construction: false,
+                    label: "Add line",
+                });
             }
-            SketchEntity::Outline { start, ref segments } => ops.extend(outline_ops(start, segments)?),
-            SketchEntity::Arc { cx, cy, sx, sy, ex, ey } => {
-                ops.push(SketchOp::AddArc { center: v(cx, cy), start: v(sx, sy), end: v(ex, ey), construction: false });
+            SketchEntity::Outline {
+                start,
+                ref segments,
+            } => ops.extend(outline_ops(start, segments)?),
+            SketchEntity::Arc {
+                cx,
+                cy,
+                sx,
+                sy,
+                ex,
+                ey,
+            } => {
+                ops.push(SketchOp::AddArc {
+                    center: v(cx, cy),
+                    start: v(sx, sy),
+                    end: v(ex, ey),
+                    construction: false,
+                });
             }
             SketchEntity::Point { x, y } => ops.push(SketchOp::AddPoint { pos: v(x, y) }),
         }
@@ -732,21 +960,33 @@ fn outline_ops(start: [f64; 2], segments: &[tools::PathSegment]) -> Result<Vec<S
                 if v(*to).distance(v(from)) < 1e-9 {
                     return Err(format!("outline segment {n} has no length"));
                 }
-                ops.push(SketchOp::AddPolyline { points: vec![v(from), v(*to)], closed: false, construction: false, label: "Add line" });
+                ops.push(SketchOp::AddPolyline {
+                    points: vec![v(from), v(*to)],
+                    closed: false,
+                    construction: false,
+                    label: "Add line",
+                });
                 from = *to;
             }
             tools::PathSegment::Arc { to, center, ccw } => {
                 let c = v(*center);
                 let r = c.distance(v(from));
                 if r < 1e-9 || (c.distance(v(*to)) - r).abs() > 1e-6 * r.max(1.0) {
-                    return Err(format!("outline segment {n}: the arc's end is not on its circle about its center"));
+                    return Err(format!(
+                        "outline segment {n}: the arc's end is not on its circle about its center"
+                    ));
                 }
                 if v(*to).distance(v(from)) < 1e-9 {
                     return Err(format!("outline segment {n} has no length"));
                 }
                 // AddArc runs counter-clockwise from its start: a clockwise arc is one from `to` back to `from`.
                 let (s, e) = if *ccw { (from, *to) } else { (*to, from) };
-                ops.push(SketchOp::AddArc { center: c, start: v(s), end: v(e), construction: false });
+                ops.push(SketchOp::AddArc {
+                    center: c,
+                    start: v(s),
+                    end: v(e),
+                    construction: false,
+                });
                 from = *to;
             }
         }
@@ -765,7 +1005,10 @@ fn inside(r: &cadrs_sketch::region::Region) -> SVec2 {
         let (a, b, c) = (pts[t[0] as usize], pts[t[1] as usize], pts[t[2] as usize]);
         let area = ((b.x - a.x) * (c.y - a.y) - (c.x - a.x) * (b.y - a.y)).abs() / 2.0;
         if area > best.0 {
-            best = (area, SVec2::new((a.x + b.x + c.x) / 3.0, (a.y + b.y + c.y) / 3.0));
+            best = (
+                area,
+                SVec2::new((a.x + b.x + c.x) / 3.0, (a.y + b.y + c.y) / 3.0),
+            );
         }
     }
     best.1
@@ -785,26 +1028,52 @@ fn add_sketch(world: &mut World, p: &tools::AddSketch) -> Result<Value, String> 
     let ops = sketch_ops(&p.entities)?;
     let mut d = doc_mut(world)?;
     let element = part_studio(&d, p.part_studio.as_deref())?;
-    let features = d.doc.element(element).ok_or("the Part Studio is gone")?.features().to_vec();
+    let features = d
+        .doc
+        .element(element)
+        .ok_or("the Part Studio is gone")?
+        .features()
+        .to_vec();
     let plane = match (&p.plane, &p.face, &p.plane_feature) {
         (Some(pl), None, None) => plane_ref(*pl),
         (None, Some(face), None) => {
-            let face: cadrs_core::FaceRef = serde_json::from_value(face.clone()).map_err(|e| format!("face: {e}"))?;
-            cadrs_core::parts::face_plane(&features, FeatureId(face.face.op), face.face).ok_or("that face is not a planar face of a part")?
+            let face: cadrs_core::FaceRef =
+                serde_json::from_value(face.clone()).map_err(|e| format!("face: {e}"))?;
+            cadrs_core::parts::face_plane(&features, FeatureId(face.face.op), face.face)
+                .ok_or("that face is not a planar face of a part")?
         }
         (None, None, Some(name)) => {
-            let f = features.iter().find(|f| &f.name == name).ok_or_else(|| format!("no feature named {name:?}"))?;
-            cadrs_core::parts::plane_feature_ref(&features, f.id).ok_or_else(|| format!("{name:?} is not a Plane feature"))?
+            let f = features
+                .iter()
+                .find(|f| &f.name == name)
+                .ok_or_else(|| format!("no feature named {name:?}"))?;
+            cadrs_core::parts::plane_feature_ref(&features, f.id)
+                .ok_or_else(|| format!("{name:?} is not a Plane feature"))?
         }
         _ => return Err("give exactly one of plane, face or plane_feature".into()),
     };
     let frame = plane.frame();
     let feature = FeatureId::new();
-    d.execute(&AddSketch { element, feature, plane: Some(plane) }).map_err(|e| e.to_string())?;
-    let before: std::collections::HashSet<cadrs_sketch::CurveId> =
-        d.doc.element(element).and_then(|e| e.feature(feature)).and_then(|f| f.sketch()).map(|s| s.geometry.curves.keys().collect()).unwrap_or_default();
+    d.execute(&AddSketch {
+        element,
+        feature,
+        plane: Some(plane),
+    })
+    .map_err(|e| e.to_string())?;
+    let before: std::collections::HashSet<cadrs_sketch::CurveId> = d
+        .doc
+        .element(element)
+        .and_then(|e| e.feature(feature))
+        .and_then(|f| f.sketch())
+        .map(|s| s.geometry.curves.keys().collect())
+        .unwrap_or_default();
     if !ops.is_empty() {
-        d.execute(&cadrs_core::commands::EditSketch { element, feature, op: SketchOp::Batch(ops) }).map_err(|e| e.to_string())?;
+        d.execute(&cadrs_core::commands::EditSketch {
+            element,
+            feature,
+            op: SketchOp::Batch(ops),
+        })
+        .map_err(|e| e.to_string())?;
     }
     let e = d.doc.element(element).ok_or("the Part Studio is gone")?;
     let f = e.feature(feature).ok_or("the sketch is gone")?;
@@ -827,43 +1096,55 @@ fn add_sketch(world: &mut World, p: &tools::AddSketch) -> Result<Value, String> 
 }
 
 fn cross(a: [f64; 3], b: [f64; 3]) -> [f64; 3] {
-    [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]]
+    [
+        a[1] * b[2] - a[2] * b[1],
+        a[2] * b[0] - a[0] * b[2],
+        a[0] * b[1] - a[1] * b[0],
+    ]
 }
 
 /// A feature type's defaults, for add_feature.
 fn template(kind: &str) -> Option<FeatureKind> {
     use cadrs_core::{advanced, applied, draft, pattern, plane, surfacing, transform};
-    Some(match kind.to_ascii_lowercase().replace([' ', '_'], "").as_str() {
-        "extrude" => FeatureKind::Extrude(ExtrudeFeature::default()),
-        "revolve" => FeatureKind::Revolve(Default::default()),
-        "fillet" => FeatureKind::Fillet(applied::FilletFeature::default()),
-        "chamfer" => FeatureKind::Chamfer(applied::ChamferFeature::default()),
-        "hole" => FeatureKind::Hole(applied::HoleFeature::default()),
-        "shell" => FeatureKind::Shell(applied::ShellFeature::default()),
-        "plane" => FeatureKind::Plane(plane::PlaneFeature::default()),
-        "sweep" => FeatureKind::Sweep(advanced::SweepFeature::default()),
-        "loft" => FeatureKind::Loft(advanced::LoftFeature::default()),
-        "split" => FeatureKind::Split(advanced::SplitFeature::default()),
-        "pattern" | "linearpattern" => FeatureKind::Pattern(pattern::PatternFeature::new(pattern::PatternKind::Linear)),
-        "circularpattern" => FeatureKind::Pattern(pattern::PatternFeature::new(pattern::PatternKind::Circular)),
-        "mirror" => FeatureKind::Mirror(pattern::MirrorFeature::default()),
-        "draft" => FeatureKind::Draft(draft::DraftFeature::default()),
-        "boolean" => FeatureKind::Boolean(Default::default()),
-        "deletepart" => FeatureKind::DeletePart(Default::default()),
-        "transform" => FeatureKind::Transform(transform::TransformFeature::default()),
-        "thicken" => FeatureKind::Thicken(surfacing::ThickenFeature::default()),
-        "helix" => FeatureKind::Helix(surfacing::HelixFeature::default()),
-        "deleteface" => FeatureKind::DirectEdit(cadrs_core::direct_edit::DirectEditFeature::default()),
-        "simplify" => FeatureKind::DirectEdit(cadrs_core::direct_edit::DirectEditFeature {
-            kind: cadrs_core::direct_edit::DirectEditKind::Simplify,
-            ..Default::default()
-        }),
-        "moveface" => FeatureKind::DirectEdit(cadrs_core::direct_edit::DirectEditFeature {
-            kind: cadrs_core::direct_edit::DirectEditKind::MoveFace,
-            ..Default::default()
-        }),
-        _ => return None,
-    })
+    Some(
+        match kind.to_ascii_lowercase().replace([' ', '_'], "").as_str() {
+            "extrude" => FeatureKind::Extrude(ExtrudeFeature::default()),
+            "revolve" => FeatureKind::Revolve(Default::default()),
+            "fillet" => FeatureKind::Fillet(applied::FilletFeature::default()),
+            "chamfer" => FeatureKind::Chamfer(applied::ChamferFeature::default()),
+            "hole" => FeatureKind::Hole(applied::HoleFeature::default()),
+            "shell" => FeatureKind::Shell(applied::ShellFeature::default()),
+            "plane" => FeatureKind::Plane(plane::PlaneFeature::default()),
+            "sweep" => FeatureKind::Sweep(advanced::SweepFeature::default()),
+            "loft" => FeatureKind::Loft(advanced::LoftFeature::default()),
+            "split" => FeatureKind::Split(advanced::SplitFeature::default()),
+            "pattern" | "linearpattern" => {
+                FeatureKind::Pattern(pattern::PatternFeature::new(pattern::PatternKind::Linear))
+            }
+            "circularpattern" => {
+                FeatureKind::Pattern(pattern::PatternFeature::new(pattern::PatternKind::Circular))
+            }
+            "mirror" => FeatureKind::Mirror(pattern::MirrorFeature::default()),
+            "draft" => FeatureKind::Draft(draft::DraftFeature::default()),
+            "boolean" => FeatureKind::Boolean(Default::default()),
+            "deletepart" => FeatureKind::DeletePart(Default::default()),
+            "transform" => FeatureKind::Transform(transform::TransformFeature::default()),
+            "thicken" => FeatureKind::Thicken(surfacing::ThickenFeature::default()),
+            "helix" => FeatureKind::Helix(surfacing::HelixFeature::default()),
+            "deleteface" => {
+                FeatureKind::DirectEdit(cadrs_core::direct_edit::DirectEditFeature::default())
+            }
+            "simplify" => FeatureKind::DirectEdit(cadrs_core::direct_edit::DirectEditFeature {
+                kind: cadrs_core::direct_edit::DirectEditKind::Simplify,
+                ..Default::default()
+            }),
+            "moveface" => FeatureKind::DirectEdit(cadrs_core::direct_edit::DirectEditFeature {
+                kind: cadrs_core::direct_edit::DirectEditKind::MoveFace,
+                ..Default::default()
+            }),
+            _ => return None,
+        },
+    )
 }
 
 /// `patch` merged into `base`: objects key by key, anything else replaced.
@@ -882,7 +1163,10 @@ fn merge(base: &mut Value, patch: &Value) {
 fn patched(kind: &FeatureKind, patch: &Value) -> Result<FeatureKind, String> {
     let mut v = serde_json::to_value(kind).map_err(|e| e.to_string())?;
     if !patch.is_null() {
-        let inner = v.as_object_mut().and_then(|o| o.values_mut().next()).ok_or("this feature has no fields to set")?;
+        let inner = v
+            .as_object_mut()
+            .and_then(|o| o.values_mut().next())
+            .ok_or("this feature has no fields to set")?;
         merge(inner, patch);
     }
     serde_json::from_value(v).map_err(|e| format!("bad params: {e}"))
@@ -892,10 +1176,16 @@ fn patched(kind: &FeatureKind, patch: &Value) -> Result<FeatureKind, String> {
 fn outcome(world: &World, element: ElementId, feature: FeatureId) -> Result<Value, String> {
     let d = doc(world)?;
     let e = d.doc.element(element).ok_or("the Part Studio is gone")?;
-    let name = e.feature(feature).map(|f| f.name.clone()).unwrap_or_default();
+    let name = e
+        .feature(feature)
+        .map(|f| f.name.clone())
+        .unwrap_or_default();
     let state = studio_state(e.name.as_str(), e.features());
     let mut out = json!({ "feature": name, "parts": state["parts"] });
-    if let Some(f) = state["features"].as_array().and_then(|fs| fs.iter().find(|f| f["name"] == name.as_str())) {
+    if let Some(f) = state["features"]
+        .as_array()
+        .and_then(|fs| fs.iter().find(|f| f["name"] == name.as_str()))
+    {
         for k in ["error", "warning"] {
             if let Some(m) = f.get(k) {
                 out[k] = m.clone();
@@ -905,34 +1195,65 @@ fn outcome(world: &World, element: ElementId, feature: FeatureId) -> Result<Valu
     Ok(out)
 }
 
-fn feature_named(d: &ActiveDocument, element: ElementId, name: &str) -> Result<cadrs_core::Feature, String> {
+fn feature_named(
+    d: &ActiveDocument,
+    element: ElementId,
+    name: &str,
+) -> Result<cadrs_core::Feature, String> {
     let e = d.doc.element(element).ok_or("the Part Studio is gone")?;
-    e.features().iter().find(|f| f.name == name).cloned().ok_or_else(|| format!("no feature named {name:?}"))
+    e.features()
+        .iter()
+        .find(|f| f.name == name)
+        .cloned()
+        .ok_or_else(|| format!("no feature named {name:?}"))
 }
 
 /// Replaces a patch's `region_points` ({"sketch": name, "points": [[x, y], …]}, the points
 /// omitted for every region) with the `regions` they pick.
 fn expand_regions(d: &ActiveDocument, element: ElementId, patch: &Value) -> Result<Value, String> {
     let mut patch = patch.clone();
-    let Some(rp) = patch.as_object_mut().and_then(|o| o.remove("region_points")) else { return Ok(patch) };
-    let name = rp["sketch"].as_str().ok_or("region_points needs a sketch name")?;
+    let Some(rp) = patch
+        .as_object_mut()
+        .and_then(|o| o.remove("region_points"))
+    else {
+        return Ok(patch);
+    };
+    let name = rp["sketch"]
+        .as_str()
+        .ok_or("region_points needs a sketch name")?;
     let e = d.doc.element(element).ok_or("the Part Studio is gone")?;
-    let sketch = e.features().iter().find(|f| f.name == name).ok_or_else(|| format!("no feature named {name:?}"))?;
-    let FeatureKind::Sketch(s) = &sketch.kind else { return Err(format!("{name:?} is not a sketch")) };
+    let sketch = e
+        .features()
+        .iter()
+        .find(|f| f.name == name)
+        .ok_or_else(|| format!("no feature named {name:?}"))?;
+    let FeatureKind::Sketch(s) = &sketch.kind else {
+        return Err(format!("{name:?} is not a sketch"));
+    };
     let regions = cadrs_sketch::region::regions(&s.geometry);
     let picked: Vec<usize> = match rp.get("points").and_then(|p| p.as_array()) {
         None => (0..regions.len()).collect(),
         Some(points) => points
             .iter()
             .map(|q| {
-                let (x, y) = (q[0].as_f64().unwrap_or(f64::NAN), q[1].as_f64().unwrap_or(f64::NAN));
-                cadrs_sketch::region::region_at(&regions, SVec2::new(x, y)).ok_or_else(|| format!("no region of {name:?} contains [{x}, {y}]"))
+                let (x, y) = (
+                    q[0].as_f64().unwrap_or(f64::NAN),
+                    q[1].as_f64().unwrap_or(f64::NAN),
+                );
+                cadrs_sketch::region::region_at(&regions, SVec2::new(x, y))
+                    .ok_or_else(|| format!("no region of {name:?} contains [{x}, {y}]"))
             })
             .collect::<Result<_, _>>()?,
     };
-    let refs: Vec<cadrs_core::RegionRef> = picked.iter().map(|&i| cadrs_core::RegionRef::new(sketch.id, &regions[i])).collect();
+    let refs: Vec<cadrs_core::RegionRef> = picked
+        .iter()
+        .map(|&i| cadrs_core::RegionRef::new(sketch.id, &regions[i]))
+        .collect();
     if let Some(o) = patch.as_object_mut() {
-        o.insert("regions".into(), serde_json::to_value(refs).map_err(|e| e.to_string())?);
+        o.insert(
+            "regions".into(),
+            serde_json::to_value(refs).map_err(|e| e.to_string())?,
+        );
     }
     Ok(patch)
 }
@@ -948,7 +1269,13 @@ fn add_feature(world: &mut World, p: &tools::AddFeature) -> Result<Value, String
     let mut d = doc_mut(world)?;
     let feature = FeatureId::new();
     let base_name = cadrs_core::feature_list::type_label(&kind).to_string();
-    d.execute(&cadrs_core::commands::AddFeature { element, feature, base_name, kind }).map_err(|e| e.to_string())?;
+    d.execute(&cadrs_core::commands::AddFeature {
+        element,
+        feature,
+        base_name,
+        kind,
+    })
+    .map_err(|e| e.to_string())?;
     outcome(world, element, feature)
 }
 
@@ -958,7 +1285,13 @@ fn edit_feature(world: &mut World, p: &tools::EditFeature) -> Result<Value, Stri
     let f = feature_named(&d, element, &p.name)?;
     let params = expand_regions(&d, element, &p.params)?;
     let kind = patched(&f.kind, &params)?;
-    d.execute(&cadrs_core::commands::SetFeature { element, feature: f.id, kind, label: format!("Edit {}", f.name) }).map_err(|e| e.to_string())?;
+    d.execute(&cadrs_core::commands::SetFeature {
+        element,
+        feature: f.id,
+        kind,
+        label: format!("Edit {}", f.name),
+    })
+    .map_err(|e| e.to_string())?;
     outcome(world, element, f.id)
 }
 
@@ -967,7 +1300,12 @@ fn edit_feature(world: &mut World, p: &tools::EditFeature) -> Result<Value, Stri
 /// hand: the engine's `Batch` and `AddConstraints` are tuple variants, which tagged JSON can't carry.
 fn sketch_op_from_json(v: &Value) -> Result<SketchOp, String> {
     let ops = |items: &Value| -> Result<Vec<SketchOp>, String> {
-        items.as_array().ok_or("expected an array of edits")?.iter().map(sketch_op_from_json).collect()
+        items
+            .as_array()
+            .ok_or("expected an array of edits")?
+            .iter()
+            .map(sketch_op_from_json)
+            .collect()
     };
     if v.is_array() {
         return Ok(SketchOp::Batch(ops(v)?));
@@ -975,7 +1313,8 @@ fn sketch_op_from_json(v: &Value) -> Result<SketchOp, String> {
     match v.get("type").and_then(Value::as_str) {
         Some("batch") => Ok(SketchOp::Batch(ops(v.get("ops").unwrap_or(&Value::Null))?)),
         Some("add_constraints") => {
-            let specs = serde_json::from_value(v.get("specs").cloned().unwrap_or(Value::Null)).map_err(|e| format!("specs: {e}"))?;
+            let specs = serde_json::from_value(v.get("specs").cloned().unwrap_or(Value::Null))
+                .map_err(|e| format!("specs: {e}"))?;
             Ok(SketchOp::AddConstraints(specs))
         }
         _ => serde_json::from_value(v.clone()).map_err(|e| format!("bad sketch edit: {e}")),
@@ -1000,7 +1339,12 @@ fn sketch_ids(s: &Sketch) -> tools::SketchIds {
 
 /// The ids in `now` that `was` lacks.
 fn new_ids(now: &tools::SketchIds, was: &tools::SketchIds) -> tools::SketchIds {
-    let only = |a: &[tools::EntityId], b: &[tools::EntityId]| a.iter().copied().filter(|id| !b.contains(id)).collect::<Vec<_>>();
+    let only = |a: &[tools::EntityId], b: &[tools::EntityId]| {
+        a.iter()
+            .copied()
+            .filter(|id| !b.contains(id))
+            .collect::<Vec<_>>()
+    };
     tools::SketchIds {
         curves: only(&now.curves, &was.curves),
         points: only(&now.points, &was.points),
@@ -1015,7 +1359,10 @@ fn typed_regions(g: &Sketch) -> Vec<tools::SketchRegion> {
         .iter()
         .map(|r| {
             let p = inside(r);
-            tools::SketchRegion { point: [round(p.x), round(p.y)], area_mm2: round(r.area()) }
+            tools::SketchRegion {
+                point: [round(p.x), round(p.y)],
+                area_mm2: round(r.area()),
+            }
         })
         .collect()
 }
@@ -1026,19 +1373,40 @@ fn edit_sketch(world: &mut World, p: &tools::EditSketch) -> Result<tools::Sketch
     let mut d = doc_mut(world)?;
     let element = part_studio(&d, p.part_studio.as_deref())?;
     let f = feature_named(&d, element, &p.sketch)?;
-    let before = sketch_ids(&f.sketch().ok_or_else(|| format!("{:?} is not a sketch", p.sketch))?.geometry);
-    d.execute(&cadrs_core::commands::EditSketch { element, feature: f.id, op }).map_err(|e| e.to_string())?;
+    let before = sketch_ids(
+        &f.sketch()
+            .ok_or_else(|| format!("{:?} is not a sketch", p.sketch))?
+            .geometry,
+    );
+    d.execute(&cadrs_core::commands::EditSketch {
+        element,
+        feature: f.id,
+        op,
+    })
+    .map_err(|e| e.to_string())?;
     let e = d.doc.element(element).ok_or("the Part Studio is gone")?;
-    let g = &e.feature(f.id).and_then(|f| f.sketch()).ok_or("the sketch is gone")?.geometry;
+    let g = &e
+        .feature(f.id)
+        .and_then(|f| f.sketch())
+        .ok_or("the sketch is gone")?
+        .geometry;
     let after = sketch_ids(g);
     let analysis = cadrs_sketch::solve::analyze(g);
     let conflicts = cadrs_sketch::solve::conflicts(g)
         .into_iter()
         .map(|c| match c {
-            cadrs_sketch::solve::Source::Constraint(id) => tools::SketchConflict::Constraint { id: entity_id(id) },
-            cadrs_sketch::solve::Source::Dimension(id) => tools::SketchConflict::Dimension { id: entity_id(id) },
-            cadrs_sketch::solve::Source::Arc(curve) => tools::SketchConflict::Arc { curve: entity_id(curve) },
-            _ => tools::SketchConflict::Other { description: format!("{c:?}") },
+            cadrs_sketch::solve::Source::Constraint(id) => {
+                tools::SketchConflict::Constraint { id: entity_id(id) }
+            }
+            cadrs_sketch::solve::Source::Dimension(id) => {
+                tools::SketchConflict::Dimension { id: entity_id(id) }
+            }
+            cadrs_sketch::solve::Source::Arc(curve) => tools::SketchConflict::Arc {
+                curve: entity_id(curve),
+            },
+            _ => tools::SketchConflict::Other {
+                description: format!("{c:?}"),
+            },
         })
         .collect();
     Ok(tools::SketchEdited {
@@ -1064,7 +1432,12 @@ fn delete_feature(world: &mut World, p: &tools::FeatureName) -> Result<Value, St
     let mut d = doc_mut(world)?;
     let element = part_studio(&d, p.part_studio.as_deref())?;
     let f = feature_named(&d, element, &p.name)?;
-    d.execute(&cadrs_core::commands::DeleteFeature { element, feature: f.id, label: format!("Delete {}", f.name) }).map_err(|e| e.to_string())?;
+    d.execute(&cadrs_core::commands::DeleteFeature {
+        element,
+        feature: f.id,
+        label: format!("Delete {}", f.name),
+    })
+    .map_err(|e| e.to_string())?;
     describe(world)
 }
 
@@ -1080,8 +1453,14 @@ fn list_faces(world: &mut World, studio: Option<&str>) -> Result<Value, String> 
     let mut out = Vec::new();
     for p in parts_of(world, studio)? {
         for (i, f) in p.solid.faces.iter().enumerate() {
-            let Some(seed) = p.solid.face_point(i) else { continue };
-            let r = cadrs_core::FaceRef { part: p.id, face: f.name, seed };
+            let Some(seed) = p.solid.face_point(i) else {
+                continue;
+            };
+            let r = cadrs_core::FaceRef {
+                part: p.id,
+                face: f.name,
+                seed,
+            };
             let mut v = json!({ "ref": r, "part": p.name });
             if let Some(k) = &f.kind {
                 v["surface"] = json!(format!("{k:?}"));
@@ -1111,9 +1490,24 @@ fn list_edges(world: &mut World, studio: Option<&str>) -> Result<Value, String> 
     let mut out = Vec::new();
     for p in parts_of(world, studio)? {
         for e in &p.solid.edges {
-            let (Some(a), Some(b)) = (e.points.first(), e.points.last()) else { continue };
-            let r = cadrs_core::EdgeRef { part: p.id, edge: e.name, seed: e.midpoint() };
-            let len: f64 = e.points.windows(2).map(|w| ((w[1][0] - w[0][0]).powi(2) + (w[1][1] - w[0][1]).powi(2) + (w[1][2] - w[0][2]).powi(2)).sqrt()).sum();
+            let (Some(a), Some(b)) = (e.points.first(), e.points.last()) else {
+                continue;
+            };
+            let r = cadrs_core::EdgeRef {
+                part: p.id,
+                edge: e.name,
+                seed: e.midpoint(),
+            };
+            let len: f64 = e
+                .points
+                .windows(2)
+                .map(|w| {
+                    ((w[1][0] - w[0][0]).powi(2)
+                        + (w[1][1] - w[0][1]).powi(2)
+                        + (w[1][2] - w[0][2]).powi(2))
+                    .sqrt()
+                })
+                .sum();
             let mut v = json!({ "ref": r, "part": p.name, "start": a.map(round), "end": b.map(round), "length": round(len) });
             if let Some(c) = &e.circle {
                 v["circle"] = json!({ "center": c.center.map(round), "normal": c.normal.map(round), "radius": round(c.radius) });
@@ -1131,22 +1525,43 @@ fn list_edges(world: &mut World, studio: Option<&str>) -> Result<Value, String> 
 fn import_step(world: &mut World, path: &str) -> Result<Value, String> {
     use cadrs_core::import::{ImportAs, ImportFormat, ImportIds, imported_document};
     let path = std::path::Path::new(path);
-    let format = ImportFormat::of_path(path).filter(|f| f.kernel().is_some()).ok_or("only STEP and IGES files can be imported")?;
+    let format = ImportFormat::of_path(path)
+        .filter(|f| f.kernel().is_some())
+        .ok_or("only STEP and IGES files can be imported")?;
     let bytes = std::fs::read(path).map_err(|e| format!("{}: {e}", path.display()))?;
     let data = String::from_utf8_lossy(&bytes).into_owned();
-    let plan = cadrs_core::rebuild::exchange::plan_import(format, data.clone().into_bytes()).wait().ok_or("the kernel thread stopped")??;
-    let file_name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
-    let doc = imported_document(&plan, &file_name, data, ImportAs::PartStudio, ImportIds::fresh());
+    let plan = cadrs_core::rebuild::exchange::plan_import(format, data.clone().into_bytes())
+        .wait()
+        .ok_or("the kernel thread stopped")??;
+    let file_name = path
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    let doc = imported_document(
+        &plan,
+        &file_name,
+        data,
+        ImportAs::PartStudio,
+        ImportIds::fresh(),
+    );
     let store = world.resource::<DocumentStore>().0.clone();
     let now = world.resource::<AppClock>().now();
     let user = world.resource::<UserProfile>().id.clone();
     let meta = DocumentMeta::new(&user, now);
     let id = doc.id;
-    store.create(&doc, &meta).map_err(|e| format!("cannot create the document: {e}"))?;
+    store
+        .create(&doc, &meta)
+        .map_err(|e| format!("cannot create the document: {e}"))?;
     crate::move_document::open_document(world, id);
     let mut d = doc_mut(world)?;
     d.fresh = true;
-    if let Some(ps) = d.doc.elements.iter().find(|e| matches!(e.kind, ElementKind::PartStudio { .. })).map(|e| e.id) {
+    if let Some(ps) = d
+        .doc
+        .elements
+        .iter()
+        .find(|e| matches!(e.kind, ElementKind::PartStudio { .. }))
+        .map(|e| e.id)
+    {
         d.set_active(ps);
     }
     describe(world)
@@ -1155,16 +1570,27 @@ fn import_step(world: &mut World, path: &str) -> Result<Value, String> {
 fn export_step(world: &mut World, p: &tools::ExportStep) -> Result<Value, String> {
     let d = doc(world)?;
     let element = part_studio(d, p.part_studio.as_deref())?;
-    let features = d.doc.element(element).ok_or("the Part Studio is gone")?.features().to_vec();
+    let features = d
+        .doc
+        .element(element)
+        .ok_or("the Part Studio is gone")?
+        .features()
+        .to_vec();
     let parts = cadrs_core::rebuild::build(&features).parts.clone();
     if parts.is_empty() {
         return Err("the Part Studio has no parts".into());
     }
-    let request = cadrs_core::export::StepRequest { parts: parts.iter().map(|p| (p.id, p.name.clone())).collect(), y_up: false, individual: false };
+    let request = cadrs_core::export::StepRequest {
+        parts: parts.iter().map(|p| (p.id, p.name.clone())).collect(),
+        y_up: false,
+        individual: false,
+    };
     let files = cadrs_core::rebuild::export_step(features, request).wait()?;
     let file = files.into_iter().next().ok_or("nothing was written")?;
     std::fs::write(&p.path, &file.bytes).map_err(|e| format!("{}: {e}", p.path))?;
-    Ok(json!({ "path": p.path, "bytes": file.bytes.len(), "parts": parts.iter().map(|p| p.name.clone()).collect::<Vec<_>>() }))
+    Ok(
+        json!({ "path": p.path, "bytes": file.bytes.len(), "parts": parts.iter().map(|p| p.name.clone()).collect::<Vec<_>>() }),
+    )
 }
 
 fn extrude(world: &mut World, p: &tools::Extrude) -> Result<Value, String> {
@@ -1174,7 +1600,11 @@ fn extrude(world: &mut World, p: &tools::Extrude) -> Result<Value, String> {
     let mut d = doc_mut(world)?;
     let element = part_studio(&d, p.part_studio.as_deref())?;
     let e = d.doc.element(element).ok_or("the Part Studio is gone")?;
-    let sketch = e.features().iter().find(|f| f.name == p.sketch).ok_or_else(|| format!("no feature named {:?}", p.sketch))?;
+    let sketch = e
+        .features()
+        .iter()
+        .find(|f| f.name == p.sketch)
+        .ok_or_else(|| format!("no feature named {:?}", p.sketch))?;
     let FeatureKind::Sketch(s) = &sketch.kind else {
         return Err(format!("{:?} is not a sketch", p.sketch));
     };
@@ -1186,10 +1616,17 @@ fn extrude(world: &mut World, p: &tools::Extrude) -> Result<Value, String> {
         None => (0..regions.len()).collect(),
         Some(points) => points
             .iter()
-            .map(|q| cadrs_sketch::region::region_at(&regions, SVec2::new(q[0], q[1])).ok_or_else(|| format!("no region of {:?} contains [{}, {}]", p.sketch, q[0], q[1])))
+            .map(|q| {
+                cadrs_sketch::region::region_at(&regions, SVec2::new(q[0], q[1])).ok_or_else(|| {
+                    format!("no region of {:?} contains [{}, {}]", p.sketch, q[0], q[1])
+                })
+            })
             .collect::<Result<_, _>>()?,
     };
-    let refs = picked.iter().map(|&i| cadrs_core::RegionRef::new(sketch.id, &regions[i])).collect();
+    let refs = picked
+        .iter()
+        .map(|&i| cadrs_core::RegionRef::new(sketch.id, &regions[i]))
+        .collect();
     let extrude = ExtrudeFeature {
         regions: refs,
         depth: p.depth,
@@ -1205,11 +1642,23 @@ fn extrude(world: &mut World, p: &tools::Extrude) -> Result<Value, String> {
         ..ExtrudeFeature::default()
     };
     let feature = FeatureId::new();
-    d.execute(&AddExtrude { element, feature, extrude }).map_err(|e| e.to_string())?;
+    d.execute(&AddExtrude {
+        element,
+        feature,
+        extrude,
+    })
+    .map_err(|e| e.to_string())?;
     let e = d.doc.element(element).ok_or("the Part Studio is gone")?;
-    let name = e.feature(feature).map(|f| f.name.clone()).unwrap_or_default();
+    let name = e
+        .feature(feature)
+        .map(|f| f.name.clone())
+        .unwrap_or_default();
     let state = studio_state(e.name.as_str(), e.features());
-    let error = state["features"].as_array().and_then(|fs| fs.iter().find(|f| f["name"] == name.as_str())).and_then(|f| f.get("error")).cloned();
+    let error = state["features"]
+        .as_array()
+        .and_then(|fs| fs.iter().find(|f| f["name"] == name.as_str()))
+        .and_then(|f| f.get("error"))
+        .cloned();
     let mut out = json!({ "feature": name, "parts": state["parts"] });
     if let Some(e) = error {
         out["error"] = e;
@@ -1258,11 +1707,17 @@ mod tests {
         let regions = cadrs_sketch::region::regions(&s);
         // Each hole circle is also a region of its own; the outline's region has both as holes.
         assert_eq!(regions.len(), 3);
-        let base = regions.iter().find(|r| r.holes.len() == 2).expect("the outline with its holes");
+        let base = regions
+            .iter()
+            .find(|r| r.holes.len() == 2)
+            .expect("the outline with its holes");
         // 72 × 35, less two R12 corners (2 × (144 − 36π)), less two Ø12 holes (2 × 36π).
         assert!((base.area() - 2232.0).abs() < 0.01, "area {}", base.area());
         // Extrude takes the region at a point: the outline at (0, 17.5) keeps the holes, the hole at (24, 12) is the pin.
-        let at = |x, y| cadrs_sketch::region::region_at(&regions, SVec2::new(x, y)).map(|i| regions[i].holes.len());
+        let at = |x, y| {
+            cadrs_sketch::region::region_at(&regions, SVec2::new(x, y))
+                .map(|i| regions[i].holes.len())
+        };
         assert_eq!(at(0.0, 17.5), Some(2));
         assert_eq!(at(24.0, 12.0), Some(0));
     }
@@ -1276,25 +1731,43 @@ mod tests {
     }
 
     /// A sketch feature on `plane` with `entities`, and its id.
-    fn sketch(features: &mut Vec<Feature>, name: &str, plane: PlaneRef, entities: &[SketchEntity]) -> FeatureId {
+    fn sketch(
+        features: &mut Vec<Feature>,
+        name: &str,
+        plane: PlaneRef,
+        entities: &[SketchEntity],
+    ) -> FeatureId {
         let mut geometry = Sketch::new();
         for op in sketch_ops(entities).unwrap() {
             op.apply(&mut geometry).unwrap();
         }
         let id = FeatureId::new();
-        let kind = FeatureKind::Sketch(cadrs_core::document::SketchFeature { plane: Some(plane), disable_imprinting: false, geometry });
+        let kind = FeatureKind::Sketch(cadrs_core::document::SketchFeature {
+            plane: Some(plane),
+            disable_imprinting: false,
+            geometry,
+        });
         features.push(Feature::new(id, name, kind));
         id
     }
 
     /// An extrude of the sketch region at `point` (the loop's point, not a hole's).
-    fn extrude(features: &mut Vec<Feature>, sketch_id: FeatureId, point: [f64; 2], depth: f64, op: BooleanOp, flip: bool, symmetric: bool) {
+    fn extrude(
+        features: &mut Vec<Feature>,
+        sketch_id: FeatureId,
+        point: [f64; 2],
+        depth: f64,
+        op: BooleanOp,
+        flip: bool,
+        symmetric: bool,
+    ) {
         let geometry = match &features.iter().find(|f| f.id == sketch_id).unwrap().kind {
             FeatureKind::Sketch(s) => s.geometry.clone(),
             _ => unreachable!(),
         };
         let regions = cadrs_sketch::region::regions(&geometry);
-        let i = cadrs_sketch::region::region_at(&regions, SVec2::new(point[0], point[1])).expect("no region at the point");
+        let i = cadrs_sketch::region::region_at(&regions, SVec2::new(point[0], point[1]))
+            .expect("no region at the point");
         let feature = ExtrudeFeature {
             regions: vec![cadrs_core::RegionRef::new(sketch_id, &regions[i])],
             depth,
@@ -1304,7 +1777,11 @@ mod tests {
             flip,
             ..ExtrudeFeature::default()
         };
-        features.push(Feature::new(FeatureId::new(), "Extrude", FeatureKind::Extrude(feature)));
+        features.push(Feature::new(
+            FeatureId::new(),
+            "Extrude",
+            FeatureKind::Extrude(feature),
+        ));
     }
 
     /// A Plane offset from the Front plane (as the add_feature call would make it).
@@ -1339,10 +1816,44 @@ mod tests {
         let mut f = Vec::new();
 
         // Base: the full 72 × 35 footprint 6 thick, then the 72 × 30 part 10 high.
-        let base_low = sketch(&mut f, "Sketch 1", PlaneRef::Top, &[rounded_base(35.0), hole(24.0, 12.0, 6.0), hole(-24.0, 12.0, 6.0)]);
-        extrude(&mut f, base_low, [0.0, 17.5], 6.0, BooleanOp::New, false, false);
-        let base_high = sketch(&mut f, "Sketch 2", PlaneRef::Top, &[rounded_base(30.0), hole(24.0, 12.0, 6.0), hole(-24.0, 12.0, 6.0)]);
-        extrude(&mut f, base_high, [0.0, 15.0], 10.0, BooleanOp::Add, false, false);
+        let base_low = sketch(
+            &mut f,
+            "Sketch 1",
+            PlaneRef::Top,
+            &[
+                rounded_base(35.0),
+                hole(24.0, 12.0, 6.0),
+                hole(-24.0, 12.0, 6.0),
+            ],
+        );
+        extrude(
+            &mut f,
+            base_low,
+            [0.0, 17.5],
+            6.0,
+            BooleanOp::New,
+            false,
+            false,
+        );
+        let base_high = sketch(
+            &mut f,
+            "Sketch 2",
+            PlaneRef::Top,
+            &[
+                rounded_base(30.0),
+                hole(24.0, 12.0, 6.0),
+                hole(-24.0, 12.0, 6.0),
+            ],
+        );
+        extrude(
+            &mut f,
+            base_high,
+            [0.0, 15.0],
+            10.0,
+            BooleanOp::Add,
+            false,
+            false,
+        );
 
         // Upright, 22 mm from the front (its face), 8 deep toward the back.
         let face = plane_from_front(&mut f, 22.0);
@@ -1361,31 +1872,70 @@ mod tests {
             hole(0.0, 60.0, 6.0),
         ];
         let upright_id = sketch(&mut f, "Sketch 3", face, &upright);
-        extrude(&mut f, upright_id, [0.0, 30.0], 8.0, BooleanOp::Add, true, false);
+        extrude(
+            &mut f,
+            upright_id,
+            [0.0, 30.0],
+            8.0,
+            BooleanOp::Add,
+            true,
+            false,
+        );
 
         // Boss: the top 13 deep, 5 more toward the back.
         let back = plane_from_front(&mut f, 30.0);
         let boss = [
             SketchEntity::Outline {
                 start: [-15.0, 45.0],
-                segments: vec![line(15.0, 45.0), line(15.0, 60.0), arc([-15.0, 60.0], [0.0, 60.0], true), line(-15.0, 45.0)],
+                segments: vec![
+                    line(15.0, 45.0),
+                    line(15.0, 60.0),
+                    arc([-15.0, 60.0], [0.0, 60.0], true),
+                    line(-15.0, 45.0),
+                ],
             },
             hole(0.0, 60.0, 6.0),
         ];
         let boss_id = sketch(&mut f, "Sketch 4", back, &boss);
-        extrude(&mut f, boss_id, [0.0, 50.0], 5.0, BooleanOp::Add, true, false);
+        extrude(
+            &mut f,
+            boss_id,
+            [0.0, 50.0],
+            5.0,
+            BooleanOp::Add,
+            true,
+            false,
+        );
 
         // Gusset: 10 wide, from the front edge up the 60° slope to the upright.
-        let gusset = [SketchEntity::Polygon { points: vec![[0.0, 10.0], [22.0, 10.0], [22.0, 48.0]] }];
+        let gusset = [SketchEntity::Polygon {
+            points: vec![[0.0, 10.0], [22.0, 10.0], [22.0, 48.0]],
+        }];
         let gusset_id = sketch(&mut f, "Sketch 5", PlaneRef::Right, &gusset);
-        extrude(&mut f, gusset_id, [15.0, 25.0], 10.0, BooleanOp::Add, false, true);
+        extrude(
+            &mut f,
+            gusset_id,
+            [15.0, 25.0],
+            10.0,
+            BooleanOp::Add,
+            false,
+            true,
+        );
 
         let build = cadrs_core::rebuild::build(&f);
-        assert!(build.errors.is_empty(), "rebuild errors: {:?}", build.errors);
+        assert!(
+            build.errors.is_empty(),
+            "rebuild errors: {:?}",
+            build.errors
+        );
         assert_eq!(build.parts.len(), 1);
         let part = &build.parts[0];
         let (lo, hi) = part.solid.bounds().expect("bounds");
-        for (got, want) in lo.iter().chain(hi.iter()).zip([-36.0, 0.0, 0.0, 36.0, 35.0, 75.0]) {
+        for (got, want) in lo
+            .iter()
+            .chain(hi.iter())
+            .zip([-36.0, 0.0, 0.0, 36.0, 35.0, 75.0])
+        {
             assert!((got - want).abs() < 1e-3, "bounds {lo:?} {hi:?}");
         }
         // Base 2232 × 6 + 1872 × 4, upright 1836.9 × 8, boss 690.3 × 5, gusset 418 × 10.
@@ -1402,36 +1952,67 @@ mod tests {
         fn p<T: serde::de::DeserializeOwned>(v: Value) -> T {
             serde_json::from_value(v).unwrap()
         }
-        let sketch = add_sketch(&mut world, &p(json!({ "plane": "Top", "entities": [
+        let sketch = add_sketch(
+            &mut world,
+            &p(json!({ "plane": "Top", "entities": [
             { "type": "rectangle", "x0": 0, "y0": 0, "x1": 10, "y1": 10 },
             { "type": "rectangle", "x0": 20, "y0": 0, "x1": 30, "y1": 10 },
-        ] })))
+        ] })),
+        )
         .unwrap();
-        super::extrude(&mut world, &p(json!({ "sketch": sketch["sketch"], "depth": 5 }))).unwrap();
+        super::extrude(
+            &mut world,
+            &p(json!({ "sketch": sketch["sketch"], "depth": 5 })),
+        )
+        .unwrap();
 
-        let asm = insert_instance(&mut world, &p(json!({ "assembly": "Assembly 1", "part_studio": "Part Studio 1", "fixed": true }))).unwrap();
+        let asm = insert_instance(
+            &mut world,
+            &p(json!({ "assembly": "Assembly 1", "part_studio": "Part Studio 1", "fixed": true })),
+        )
+        .unwrap();
         assert_eq!(asm["instances"][0]["kind"], "Part Studio (rigid)");
         assert_eq!(asm["instances"][0]["parts"], 2);
         assert_eq!(asm["instances"][0]["fixed"], true);
         let asm = insert_instance(&mut world, &p(json!({ "assembly": "Assembly 1", "part_studio": "Part Studio 1", "part": "Part 2", "translation": [0, 0, 50] }))).unwrap();
         assert_eq!(asm["instances"][1]["name"], "Part 2 <1>");
-        assert_eq!(asm["instances"][1]["translation_mm"], json!([0.0, 0.0, 50.0]));
+        assert_eq!(
+            asm["instances"][1]["translation_mm"],
+            json!([0.0, 0.0, 50.0])
+        );
         let e = insert_instance(&mut world, &p(json!({ "assembly": "Assembly 1", "part_studio": "Part Studio 1", "part": "Part 9" }))).unwrap_err();
         assert!(e.contains("Part 1, Part 2"), "{e}");
-        assert!(insert_instance(&mut world, &p(json!({ "assembly": "Part Studio 1", "part_studio": "Part Studio 1" }))).is_err());
-        let listed = run(&mut world, &Call::GetAssembly(p(json!({ "assembly": "Assembly 1" })))).unwrap();
+        assert!(
+            insert_instance(
+                &mut world,
+                &p(json!({ "assembly": "Part Studio 1", "part_studio": "Part Studio 1" }))
+            )
+            .is_err()
+        );
+        let listed = run(
+            &mut world,
+            &Call::GetAssembly(p(json!({ "assembly": "Assembly 1" }))),
+        )
+        .unwrap();
         assert_eq!(listed["instances"].as_array().unwrap().len(), 2);
 
         let e = delete_tab(&mut world, "Part Studio 1").unwrap_err();
         assert!(e.contains("Assembly 1"), "{e}");
         let doc = delete_tab(&mut world, "Assembly 1").unwrap();
         assert_eq!(doc["tabs"].as_array().unwrap().len(), 1);
-        assert!(delete_tab(&mut world, "Part Studio 1").is_err(), "the last tab stays");
+        assert!(
+            delete_tab(&mut world, "Part Studio 1").is_err(),
+            "the last tab stays"
+        );
 
         // A new, empty assembly; the Part Studio stays active.
         let site = run(&mut world, &Call::AddAssembly(p(json!({ "name": "Site" })))).unwrap();
         assert_eq!(site["instances"].as_array().unwrap().len(), 0);
-        let asm = insert_instance(&mut world, &p(json!({ "assembly": "Site", "part_studio": "Part Studio 1" }))).unwrap();
+        let asm = insert_instance(
+            &mut world,
+            &p(json!({ "assembly": "Site", "part_studio": "Part Studio 1" })),
+        )
+        .unwrap();
         assert_eq!(asm["instances"].as_array().unwrap().len(), 1);
     }
 
@@ -1440,30 +2021,352 @@ mod tests {
     #[test]
     fn ground_sections_loft_without_twisting() {
         let sections: &[(f64, &[[f64; 2]])] = &[
-        (15000.0, &[[-16000.0, 600.0], [-14000.0, 250.0], [-12000.0, 448.0], [-10000.0, 255.0], [-8000.0, -44.0], [-6000.0, -362.0], [-4000.0, -730.0], [-2000.0, -1058.0], [0.0, -1353.0], [2000.0, -1604.0], [4000.0, -1899.0], [6000.0, -2231.0], [8000.0, -2751.0], [10000.0, -3196.0], [12000.0, -3643.0], [14000.0, -4108.0], [16000.0, -4490.0], [18000.0, -4859.0], [20000.0, -5271.0], [22000.0, -5696.0], [24000.0, -6048.0], [26000.0, -6390.0], [28000.0, -6732.0], [30000.0, -7090.0], [32000.0, -7453.0], [34000.0, -7841.0], [36000.0, -8318.0], [38000.0, -8674.0], [40000.0, -8500.0]]),
-        (10000.0, &[[-16000.0, 600.0], [-14000.0, 650.0], [-12000.0, 455.0], [-10000.0, 260.0], [-8000.0, 33.0], [-6000.0, -195.0], [-4000.0, -468.0], [-2000.0, -753.0], [0.0, -1027.0], [2000.0, -1277.0], [4000.0, -1494.0], [6000.0, -1711.0], [8000.0, -2038.0], [10000.0, -2518.0], [12000.0, -2970.0], [14000.0, -3489.0], [16000.0, -4029.0], [18000.0, -4486.0], [20000.0, -4925.0], [22000.0, -5371.0], [24000.0, -5808.0], [26000.0, -6177.0], [28000.0, -6561.0], [30000.0, -6913.0], [32000.0, -7273.0], [34000.0, -7661.0], [36000.0, -8121.0], [38000.0, -8499.0], [40000.0, -8500.0]]),
-        (5000.0, &[[-16000.0, 600.0], [-14000.0, 604.0], [-12000.0, 432.0], [-10000.0, 259.0], [-8000.0, 57.0], [-6000.0, -146.0], [-4000.0, -363.0], [-2000.0, -591.0], [0.0, -816.0], [2000.0, -1043.0], [4000.0, -1267.0], [6000.0, -1483.0], [8000.0, -1700.0], [10000.0, -2177.0], [12000.0, -2250.0], [14000.0, -2640.0], [16000.0, -3308.0], [18000.0, -4010.0], [20000.0, -4612.0], [22000.0, -5110.0], [24000.0, -5588.0], [26000.0, -6011.0], [28000.0, -6391.0], [30000.0, -6745.0], [32000.0, -7116.0], [34000.0, -7507.0], [36000.0, -7924.0], [38000.0, -8356.0], [40000.0, -8500.0]]),
-        (0.0, &[[-16000.0, 600.0], [-14000.0, 532.0], [-12000.0, 372.0], [-10000.0, 203.0], [-8000.0, 9.0], [-6000.0, -181.0], [-4000.0, -381.0], [-2000.0, -584.0], [0.0, -797.0], [2000.0, -1027.0], [4000.0, -1239.0], [6000.0, -1451.0], [8000.0, -1663.0], [10000.0, -1881.0], [12000.0, -2084.0], [14000.0, -2232.0], [16000.0, -2958.0], [18000.0, -3510.0], [20000.0, -4021.0], [22000.0, -4737.0], [24000.0, -5167.0], [26000.0, -5370.0], [28000.0, -6156.0], [30000.0, -6571.0], [32000.0, -6977.0], [34000.0, -7389.0], [36000.0, -7819.0], [38000.0, -8231.0], [40000.0, -8500.0]]),
-        (-5000.0, &[[-16000.0, 600.0], [-14000.0, 445.0], [-12000.0, 277.0], [-10000.0, 77.0], [-8000.0, -126.0], [-6000.0, -327.0], [-4000.0, -534.0], [-2000.0, -735.0], [0.0, -960.0], [2000.0, -1169.0], [4000.0, -1378.0], [6000.0, -1586.0], [8000.0, -1795.0], [10000.0, -2004.0], [12000.0, -2213.0], [14000.0, -2423.0], [16000.0, -3209.0], [18000.0, -3439.0], [20000.0, -3640.0], [22000.0, -4057.0], [24000.0, -4827.0], [26000.0, -5345.0], [28000.0, -5853.0], [30000.0, -6303.0], [32000.0, -6745.0], [34000.0, -7208.0], [36000.0, -7661.0], [38000.0, -8083.0], [40000.0, -8500.0]]),
-        (-10000.0, &[[-16000.0, 600.0], [-14000.0, 342.0], [-12000.0, 138.0], [-10000.0, -102.0], [-8000.0, -324.0], [-6000.0, -483.0], [-4000.0, -642.0], [-2000.0, -801.0], [0.0, -1037.0], [2000.0, -1347.0], [4000.0, -1657.0], [6000.0, -1895.0], [8000.0, -2104.0], [10000.0, -2313.0], [12000.0, -2522.0], [14000.0, -2731.0], [16000.0, -2984.0], [18000.0, -3490.0], [20000.0, -3623.0], [22000.0, -3826.0], [24000.0, -4245.0], [26000.0, -4992.0], [28000.0, -5511.0], [30000.0, -6017.0], [32000.0, -6496.0], [34000.0, -6972.0], [36000.0, -7457.0], [38000.0, -7918.0], [40000.0, -8500.0]]),
-        (-15000.0, &[[-16000.0, 600.0], [-14000.0, 92.0], [-12000.0, -135.0], [-10000.0, -357.0], [-8000.0, -470.0], [-6000.0, -549.0], [-4000.0, -708.0], [-2000.0, -867.0], [0.0, -1053.0], [2000.0, -1363.0], [4000.0, -1674.0], [6000.0, -1984.0], [8000.0, -2294.0], [10000.0, -2605.0], [12000.0, -2830.0], [14000.0, -3039.0], [16000.0, -3248.0], [18000.0, -3563.0], [20000.0, -3735.0], [22000.0, -3993.0], [24000.0, -4298.0], [26000.0, -4678.0], [28000.0, -5180.0], [30000.0, -5709.0], [32000.0, -6257.0], [34000.0, -6713.0], [36000.0, -7254.0], [38000.0, -7751.0], [40000.0, -8500.0]]),
-        (-20000.0, &[[-16000.0, 600.0], [-14000.0, -187.0], [-12000.0, -408.0], [-10000.0, -618.0], [-8000.0, -741.0], [-6000.0, -785.0], [-4000.0, -830.0], [-2000.0, -933.0], [0.0, -1092.0], [2000.0, -1380.0], [4000.0, -1690.0], [6000.0, -2000.0], [8000.0, -2310.0], [10000.0, -2621.0], [12000.0, -2931.0], [14000.0, -3241.0], [16000.0, -3552.0], [18000.0, -3767.0], [20000.0, -3999.0], [22000.0, -4234.0], [24000.0, -4550.0], [26000.0, -4846.0], [28000.0, -5193.0], [30000.0, -5574.0], [32000.0, -5950.0], [34000.0, -6501.0], [36000.0, -7078.0], [38000.0, -7601.0], [40000.0, -8500.0]]),
-        (-25000.0, &[[-16000.0, 600.0], [-14000.0, -250.0], [-12000.0, -679.0], [-10000.0, -803.0], [-8000.0, -881.0], [-6000.0, -959.0], [-4000.0, -1037.0], [-2000.0, -1117.0], [0.0, -1190.0], [2000.0, -1396.0], [4000.0, -1722.0], [6000.0, -2086.0], [8000.0, -2454.0], [10000.0, -2822.0], [12000.0, -3191.0], [14000.0, -3560.0], [16000.0, -3859.0], [18000.0, -4086.0], [20000.0, -4331.0], [22000.0, -4633.0], [24000.0, -4899.0], [26000.0, -5144.0], [28000.0, -5390.0], [30000.0, -5653.0], [32000.0, -5976.0], [34000.0, -6361.0], [36000.0, -6877.0], [38000.0, -7406.0], [40000.0, -8500.0]]),
+            (
+                15000.0,
+                &[
+                    [-16000.0, 600.0],
+                    [-14000.0, 250.0],
+                    [-12000.0, 448.0],
+                    [-10000.0, 255.0],
+                    [-8000.0, -44.0],
+                    [-6000.0, -362.0],
+                    [-4000.0, -730.0],
+                    [-2000.0, -1058.0],
+                    [0.0, -1353.0],
+                    [2000.0, -1604.0],
+                    [4000.0, -1899.0],
+                    [6000.0, -2231.0],
+                    [8000.0, -2751.0],
+                    [10000.0, -3196.0],
+                    [12000.0, -3643.0],
+                    [14000.0, -4108.0],
+                    [16000.0, -4490.0],
+                    [18000.0, -4859.0],
+                    [20000.0, -5271.0],
+                    [22000.0, -5696.0],
+                    [24000.0, -6048.0],
+                    [26000.0, -6390.0],
+                    [28000.0, -6732.0],
+                    [30000.0, -7090.0],
+                    [32000.0, -7453.0],
+                    [34000.0, -7841.0],
+                    [36000.0, -8318.0],
+                    [38000.0, -8674.0],
+                    [40000.0, -8500.0],
+                ],
+            ),
+            (
+                10000.0,
+                &[
+                    [-16000.0, 600.0],
+                    [-14000.0, 650.0],
+                    [-12000.0, 455.0],
+                    [-10000.0, 260.0],
+                    [-8000.0, 33.0],
+                    [-6000.0, -195.0],
+                    [-4000.0, -468.0],
+                    [-2000.0, -753.0],
+                    [0.0, -1027.0],
+                    [2000.0, -1277.0],
+                    [4000.0, -1494.0],
+                    [6000.0, -1711.0],
+                    [8000.0, -2038.0],
+                    [10000.0, -2518.0],
+                    [12000.0, -2970.0],
+                    [14000.0, -3489.0],
+                    [16000.0, -4029.0],
+                    [18000.0, -4486.0],
+                    [20000.0, -4925.0],
+                    [22000.0, -5371.0],
+                    [24000.0, -5808.0],
+                    [26000.0, -6177.0],
+                    [28000.0, -6561.0],
+                    [30000.0, -6913.0],
+                    [32000.0, -7273.0],
+                    [34000.0, -7661.0],
+                    [36000.0, -8121.0],
+                    [38000.0, -8499.0],
+                    [40000.0, -8500.0],
+                ],
+            ),
+            (
+                5000.0,
+                &[
+                    [-16000.0, 600.0],
+                    [-14000.0, 604.0],
+                    [-12000.0, 432.0],
+                    [-10000.0, 259.0],
+                    [-8000.0, 57.0],
+                    [-6000.0, -146.0],
+                    [-4000.0, -363.0],
+                    [-2000.0, -591.0],
+                    [0.0, -816.0],
+                    [2000.0, -1043.0],
+                    [4000.0, -1267.0],
+                    [6000.0, -1483.0],
+                    [8000.0, -1700.0],
+                    [10000.0, -2177.0],
+                    [12000.0, -2250.0],
+                    [14000.0, -2640.0],
+                    [16000.0, -3308.0],
+                    [18000.0, -4010.0],
+                    [20000.0, -4612.0],
+                    [22000.0, -5110.0],
+                    [24000.0, -5588.0],
+                    [26000.0, -6011.0],
+                    [28000.0, -6391.0],
+                    [30000.0, -6745.0],
+                    [32000.0, -7116.0],
+                    [34000.0, -7507.0],
+                    [36000.0, -7924.0],
+                    [38000.0, -8356.0],
+                    [40000.0, -8500.0],
+                ],
+            ),
+            (
+                0.0,
+                &[
+                    [-16000.0, 600.0],
+                    [-14000.0, 532.0],
+                    [-12000.0, 372.0],
+                    [-10000.0, 203.0],
+                    [-8000.0, 9.0],
+                    [-6000.0, -181.0],
+                    [-4000.0, -381.0],
+                    [-2000.0, -584.0],
+                    [0.0, -797.0],
+                    [2000.0, -1027.0],
+                    [4000.0, -1239.0],
+                    [6000.0, -1451.0],
+                    [8000.0, -1663.0],
+                    [10000.0, -1881.0],
+                    [12000.0, -2084.0],
+                    [14000.0, -2232.0],
+                    [16000.0, -2958.0],
+                    [18000.0, -3510.0],
+                    [20000.0, -4021.0],
+                    [22000.0, -4737.0],
+                    [24000.0, -5167.0],
+                    [26000.0, -5370.0],
+                    [28000.0, -6156.0],
+                    [30000.0, -6571.0],
+                    [32000.0, -6977.0],
+                    [34000.0, -7389.0],
+                    [36000.0, -7819.0],
+                    [38000.0, -8231.0],
+                    [40000.0, -8500.0],
+                ],
+            ),
+            (
+                -5000.0,
+                &[
+                    [-16000.0, 600.0],
+                    [-14000.0, 445.0],
+                    [-12000.0, 277.0],
+                    [-10000.0, 77.0],
+                    [-8000.0, -126.0],
+                    [-6000.0, -327.0],
+                    [-4000.0, -534.0],
+                    [-2000.0, -735.0],
+                    [0.0, -960.0],
+                    [2000.0, -1169.0],
+                    [4000.0, -1378.0],
+                    [6000.0, -1586.0],
+                    [8000.0, -1795.0],
+                    [10000.0, -2004.0],
+                    [12000.0, -2213.0],
+                    [14000.0, -2423.0],
+                    [16000.0, -3209.0],
+                    [18000.0, -3439.0],
+                    [20000.0, -3640.0],
+                    [22000.0, -4057.0],
+                    [24000.0, -4827.0],
+                    [26000.0, -5345.0],
+                    [28000.0, -5853.0],
+                    [30000.0, -6303.0],
+                    [32000.0, -6745.0],
+                    [34000.0, -7208.0],
+                    [36000.0, -7661.0],
+                    [38000.0, -8083.0],
+                    [40000.0, -8500.0],
+                ],
+            ),
+            (
+                -10000.0,
+                &[
+                    [-16000.0, 600.0],
+                    [-14000.0, 342.0],
+                    [-12000.0, 138.0],
+                    [-10000.0, -102.0],
+                    [-8000.0, -324.0],
+                    [-6000.0, -483.0],
+                    [-4000.0, -642.0],
+                    [-2000.0, -801.0],
+                    [0.0, -1037.0],
+                    [2000.0, -1347.0],
+                    [4000.0, -1657.0],
+                    [6000.0, -1895.0],
+                    [8000.0, -2104.0],
+                    [10000.0, -2313.0],
+                    [12000.0, -2522.0],
+                    [14000.0, -2731.0],
+                    [16000.0, -2984.0],
+                    [18000.0, -3490.0],
+                    [20000.0, -3623.0],
+                    [22000.0, -3826.0],
+                    [24000.0, -4245.0],
+                    [26000.0, -4992.0],
+                    [28000.0, -5511.0],
+                    [30000.0, -6017.0],
+                    [32000.0, -6496.0],
+                    [34000.0, -6972.0],
+                    [36000.0, -7457.0],
+                    [38000.0, -7918.0],
+                    [40000.0, -8500.0],
+                ],
+            ),
+            (
+                -15000.0,
+                &[
+                    [-16000.0, 600.0],
+                    [-14000.0, 92.0],
+                    [-12000.0, -135.0],
+                    [-10000.0, -357.0],
+                    [-8000.0, -470.0],
+                    [-6000.0, -549.0],
+                    [-4000.0, -708.0],
+                    [-2000.0, -867.0],
+                    [0.0, -1053.0],
+                    [2000.0, -1363.0],
+                    [4000.0, -1674.0],
+                    [6000.0, -1984.0],
+                    [8000.0, -2294.0],
+                    [10000.0, -2605.0],
+                    [12000.0, -2830.0],
+                    [14000.0, -3039.0],
+                    [16000.0, -3248.0],
+                    [18000.0, -3563.0],
+                    [20000.0, -3735.0],
+                    [22000.0, -3993.0],
+                    [24000.0, -4298.0],
+                    [26000.0, -4678.0],
+                    [28000.0, -5180.0],
+                    [30000.0, -5709.0],
+                    [32000.0, -6257.0],
+                    [34000.0, -6713.0],
+                    [36000.0, -7254.0],
+                    [38000.0, -7751.0],
+                    [40000.0, -8500.0],
+                ],
+            ),
+            (
+                -20000.0,
+                &[
+                    [-16000.0, 600.0],
+                    [-14000.0, -187.0],
+                    [-12000.0, -408.0],
+                    [-10000.0, -618.0],
+                    [-8000.0, -741.0],
+                    [-6000.0, -785.0],
+                    [-4000.0, -830.0],
+                    [-2000.0, -933.0],
+                    [0.0, -1092.0],
+                    [2000.0, -1380.0],
+                    [4000.0, -1690.0],
+                    [6000.0, -2000.0],
+                    [8000.0, -2310.0],
+                    [10000.0, -2621.0],
+                    [12000.0, -2931.0],
+                    [14000.0, -3241.0],
+                    [16000.0, -3552.0],
+                    [18000.0, -3767.0],
+                    [20000.0, -3999.0],
+                    [22000.0, -4234.0],
+                    [24000.0, -4550.0],
+                    [26000.0, -4846.0],
+                    [28000.0, -5193.0],
+                    [30000.0, -5574.0],
+                    [32000.0, -5950.0],
+                    [34000.0, -6501.0],
+                    [36000.0, -7078.0],
+                    [38000.0, -7601.0],
+                    [40000.0, -8500.0],
+                ],
+            ),
+            (
+                -25000.0,
+                &[
+                    [-16000.0, 600.0],
+                    [-14000.0, -250.0],
+                    [-12000.0, -679.0],
+                    [-10000.0, -803.0],
+                    [-8000.0, -881.0],
+                    [-6000.0, -959.0],
+                    [-4000.0, -1037.0],
+                    [-2000.0, -1117.0],
+                    [0.0, -1190.0],
+                    [2000.0, -1396.0],
+                    [4000.0, -1722.0],
+                    [6000.0, -2086.0],
+                    [8000.0, -2454.0],
+                    [10000.0, -2822.0],
+                    [12000.0, -3191.0],
+                    [14000.0, -3560.0],
+                    [16000.0, -3859.0],
+                    [18000.0, -4086.0],
+                    [20000.0, -4331.0],
+                    [22000.0, -4633.0],
+                    [24000.0, -4899.0],
+                    [26000.0, -5144.0],
+                    [28000.0, -5390.0],
+                    [30000.0, -5653.0],
+                    [32000.0, -5976.0],
+                    [34000.0, -6361.0],
+                    [36000.0, -6877.0],
+                    [38000.0, -7406.0],
+                    [40000.0, -8500.0],
+                ],
+            ),
         ];
         let mut f = Vec::new();
         let mut ids = Vec::new();
         let mut areas = Vec::new();
         for (y, top) in sections {
-            let plane = if *y == 0.0 { PlaneRef::Front } else { plane_from_front(&mut f, -*y) };
+            let plane = if *y == 0.0 {
+                PlaneRef::Front
+            } else {
+                plane_from_front(&mut f, -*y)
+            };
             let (l, r) = (top[0], top[top.len() - 1]);
             let mut geometry = Sketch::new();
             let mut ops = sketch_ops(&[
-                SketchEntity::Line { x0: l[0], y0: l[1], x1: l[0], y1: -16000.0 },
-                SketchEntity::Line { x0: l[0], y0: -16000.0, x1: r[0], y1: -16000.0 },
-                SketchEntity::Line { x0: r[0], y0: -16000.0, x1: r[0], y1: r[1] },
+                SketchEntity::Line {
+                    x0: l[0],
+                    y0: l[1],
+                    x1: l[0],
+                    y1: -16000.0,
+                },
+                SketchEntity::Line {
+                    x0: l[0],
+                    y0: -16000.0,
+                    x1: r[0],
+                    y1: -16000.0,
+                },
+                SketchEntity::Line {
+                    x0: r[0],
+                    y0: -16000.0,
+                    x1: r[0],
+                    y1: r[1],
+                },
             ])
             .unwrap();
-            ops.push(SketchOp::AddSpline { points: top.iter().map(|p| SVec2::new(p[0], p[1])).collect(), periodic: false, start_tangent: None, end_tangent: None, construction: false });
+            ops.push(SketchOp::AddSpline {
+                points: top.iter().map(|p| SVec2::new(p[0], p[1])).collect(),
+                periodic: false,
+                start_tangent: None,
+                end_tangent: None,
+                construction: false,
+            });
             for op in ops {
                 op.apply(&mut geometry).unwrap();
             }
@@ -1471,7 +2374,11 @@ mod tests {
             assert_eq!(regions.len(), 1);
             areas.push(regions[0].area());
             let id = FeatureId::new();
-            let kind = FeatureKind::Sketch(cadrs_core::document::SketchFeature { plane: Some(plane), disable_imprinting: false, geometry });
+            let kind = FeatureKind::Sketch(cadrs_core::document::SketchFeature {
+                plane: Some(plane),
+                disable_imprinting: false,
+                geometry,
+            });
             f.push(Feature::new(id, "Section", kind));
             ids.push(id);
         }
@@ -1479,14 +2386,30 @@ mod tests {
         for i in 0..ids.len() - 1 {
             let mut g = f.clone();
             let loft = cadrs_core::advanced::LoftFeature {
-                profiles: vec![cadrs_core::advanced::LoftProfile::Sketch(ids[i]), cadrs_core::advanced::LoftProfile::Sketch(ids[i + 1])],
+                profiles: vec![
+                    cadrs_core::advanced::LoftProfile::Sketch(ids[i]),
+                    cadrs_core::advanced::LoftProfile::Sketch(ids[i + 1]),
+                ],
                 ..Default::default()
             };
-            g.push(Feature::new(FeatureId::new(), "Loft", FeatureKind::Loft(loft)));
+            g.push(Feature::new(
+                FeatureId::new(),
+                "Loft",
+                FeatureKind::Loft(loft),
+            ));
             let build = cadrs_core::rebuild::build(&g);
-            let volume = build.parts.first().and_then(|p| p.mass.as_ref()).map(|m| m.volume).unwrap_or(0.0);
+            let volume = build
+                .parts
+                .first()
+                .and_then(|p| p.mass.as_ref())
+                .map(|m| m.volume)
+                .unwrap_or(0.0);
             let want = (areas[i] + areas[i + 1]) / 2.0 * 5000.0;
-            eprintln!("loft {i}->{}: {volume:.4e} want {want:.4e} errors {:?}", i + 1, build.errors);
+            eprintln!(
+                "loft {i}->{}: {volume:.4e} want {want:.4e} errors {:?}",
+                i + 1,
+                build.errors
+            );
             if (volume / want - 1.0).abs() > 0.01 {
                 bad.push(i);
             }
@@ -1494,23 +2417,52 @@ mod tests {
         assert!(bad.is_empty(), "twisted lofts: {bad:?}");
         // All nine in one loft: the same ground, smooth across the sections.
         let mut g = f.clone();
-        let loft = cadrs_core::advanced::LoftFeature { profiles: ids.iter().map(|id| cadrs_core::advanced::LoftProfile::Sketch(*id)).collect(), ..Default::default() };
-        g.push(Feature::new(FeatureId::new(), "Loft", FeatureKind::Loft(loft)));
+        let loft = cadrs_core::advanced::LoftFeature {
+            profiles: ids
+                .iter()
+                .map(|id| cadrs_core::advanced::LoftProfile::Sketch(*id))
+                .collect(),
+            ..Default::default()
+        };
+        g.push(Feature::new(
+            FeatureId::new(),
+            "Loft",
+            FeatureKind::Loft(loft),
+        ));
         let t = std::time::Instant::now();
         let build = cadrs_core::rebuild::build(&g);
-        let volume = build.parts.first().and_then(|p| p.mass.as_ref()).map(|m| m.volume).unwrap_or(0.0);
-        let want: f64 = (0..ids.len() - 1).map(|i| (areas[i] + areas[i + 1]) / 2.0 * 5000.0).sum();
-        eprintln!("loft all: {volume:.4e} want {want:.4e} in {:?} errors {:?}", t.elapsed(), build.errors);
-        assert!((volume / want - 1.0).abs() < 0.01, "the nine-section loft: {volume} against {want}");
+        let volume = build
+            .parts
+            .first()
+            .and_then(|p| p.mass.as_ref())
+            .map(|m| m.volume)
+            .unwrap_or(0.0);
+        let want: f64 = (0..ids.len() - 1)
+            .map(|i| (areas[i] + areas[i + 1]) / 2.0 * 5000.0)
+            .sum();
+        eprintln!(
+            "loft all: {volume:.4e} want {want:.4e} in {:?} errors {:?}",
+            t.elapsed(),
+            build.errors
+        );
+        assert!(
+            (volume / want - 1.0).abs() < 0.01,
+            "the nine-section loft: {volume} against {want}"
+        );
     }
 
     #[test]
     fn a_plane_offset_from_front_takes_json_params() {
         // The upright's front face: 22 mm from the Front plane, on the side it faces away from.
         let params = json!({ "entities": [{ "Plane": "Front" }], "offset": 22.0, "offset_expr": "22 mm", "flip": true });
-        let FeatureKind::Plane(p) = patched(&template("plane").unwrap(), &params).unwrap() else { panic!("not a plane") };
+        let FeatureKind::Plane(p) = patched(&template("plane").unwrap(), &params).unwrap() else {
+            panic!("not a plane")
+        };
         assert_eq!(p.kind, cadrs_core::plane::PlaneType::Offset);
-        assert_eq!(p.entities, vec![cadrs_core::plane::PlaneEntity::Plane(PlaneRef::Front)]);
+        assert_eq!(
+            p.entities,
+            vec![cadrs_core::plane::PlaneEntity::Plane(PlaneRef::Front)]
+        );
         assert_eq!(p.offset, 22.0);
         assert!(p.flip);
     }
@@ -1518,30 +2470,47 @@ mod tests {
     #[test]
     fn sketch_ids_are_the_ids_the_sketch_serializes_with() {
         let mut s = Sketch::new();
-        SketchOp::AddCircle { center: SVec2::new(0.0, 0.0), radius: 5.0, construction: false }.apply(&mut s).unwrap();
+        SketchOp::AddCircle {
+            center: SVec2::new(0.0, 0.0),
+            radius: 5.0,
+            construction: false,
+        }
+        .apply(&mut s)
+        .unwrap();
         let ids = sketch_ids(&s);
         assert_eq!(ids.curves.len(), 1);
         assert_eq!(ids.points.len(), 1);
         assert_ne!(ids.curves[0].idx, 0);
         let json = serde_json::to_string(&s).unwrap();
         let c = ids.curves[0];
-        assert!(json.contains(&format!("{{\"idx\":{},\"version\":{}}}", c.idx, c.version)), "curve id {c:?} not in {json}");
+        assert!(
+            json.contains(&format!("{{\"idx\":{},\"version\":{}}}", c.idx, c.version)),
+            "curve id {c:?} not in {json}"
+        );
         // Created: what is in `after` and not `before`.
         let created = new_ids(&ids, &tools::SketchIds::default());
         assert_eq!(created, ids);
-        assert_eq!(new_ids(&tools::SketchIds::default(), &ids), tools::SketchIds::default());
+        assert_eq!(
+            new_ids(&tools::SketchIds::default(), &ids),
+            tools::SketchIds::default()
+        );
     }
 
     #[test]
     fn sketch_edits_come_as_an_object_an_array_or_a_batch() {
         let circle = json!({ "type": "add_circle", "center": { "x": 0.0, "y": 0.0 }, "radius": 5.0, "construction": false });
-        assert!(matches!(sketch_op_from_json(&circle), Ok(SketchOp::AddCircle { .. })));
+        assert!(matches!(
+            sketch_op_from_json(&circle),
+            Ok(SketchOp::AddCircle { .. })
+        ));
         let array = json!([circle.clone(), circle.clone()]);
         assert!(matches!(sketch_op_from_json(&array), Ok(SketchOp::Batch(ops)) if ops.len() == 2));
         let batch = json!({ "type": "batch", "ops": [circle.clone()] });
         assert!(matches!(sketch_op_from_json(&batch), Ok(SketchOp::Batch(ops)) if ops.len() == 1));
         let specs = json!({ "type": "add_constraints", "specs": [] });
-        assert!(matches!(sketch_op_from_json(&specs), Ok(SketchOp::AddConstraints(v)) if v.is_empty()));
+        assert!(
+            matches!(sketch_op_from_json(&specs), Ok(SketchOp::AddConstraints(v)) if v.is_empty())
+        );
         assert!(sketch_op_from_json(&json!({ "type": "not_an_edit" })).is_err());
     }
 

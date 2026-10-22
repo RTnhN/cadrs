@@ -30,10 +30,12 @@ use cadrs_core::assembly::{Instance, InstanceId, InstanceSource, Pose as AsmPose
 use cadrs_core::command::{Command, CommandError};
 use cadrs_core::commands::{AddElement, CreateFolder, NewElementKind};
 use cadrs_core::document::Document;
-use cadrs_core::ids::{ElementId, FeatureId, PartId};
 use cadrs_core::external::{LinkedElement, SourceRef};
+use cadrs_core::ids::{ElementId, FeatureId, PartId};
 use cadrs_core::pcb::component_docs::ComponentDocument;
-use cadrs_core::pcb::{BoardId, CreatePcbAssembly, GeneratedAssembly, GeneratedPackage, LinkedComponent};
+use cadrs_core::pcb::{
+    BoardId, CreatePcbAssembly, GeneratedAssembly, GeneratedPackage, LinkedComponent,
+};
 use cadrs_core::properties::{PropertyKey, PropertyOwner, PropertyValue, SetProperties};
 use cadrs_core::studio::Studio;
 use cadrs_idf::{Package, Placement};
@@ -41,7 +43,9 @@ use cadrs_kernel::Motion;
 
 use crate::board::{KeepKind, PcbBoard};
 use crate::colors::{BodyClass, component_kind};
-use crate::geometry::{BodyPlan, MARKER, all_keep_plans, board_plan, find_package, placeholder_package};
+use crate::geometry::{
+    BodyPlan, MARKER, all_keep_plans, board_plan, find_package, placeholder_package,
+};
 use crate::placement::placement_motion;
 use crate::sample::{build_plan, fid, name_hash};
 
@@ -56,7 +60,11 @@ pub struct CreateOptions {
 
 impl Default for CreateOptions {
     fn default() -> Self {
-        Self { board: true, components: true, keep_areas: false }
+        Self {
+            board: true,
+            components: true,
+            keep_areas: false,
+        }
     }
 }
 
@@ -69,15 +77,25 @@ pub enum ComponentSource {
     InDocument { studio: ElementId, part: PartId },
     /// A part of a component document at a version: the reference, and the id of its frozen copy
     /// in this document (`Document::linked`).
-    External { reference: SourceRef, copy: ElementId, part: PartId },
+    External {
+        reference: SourceRef,
+        copy: ElementId,
+        part: PartId,
+    },
 }
 
 impl ComponentSource {
     /// The assembly instance source for it.
     pub fn instance_source(&self) -> InstanceSource {
         match self {
-            ComponentSource::InDocument { studio, part } => InstanceSource::Part { element: *studio, part: *part },
-            ComponentSource::External { copy, part, .. } => InstanceSource::Part { element: *copy, part: *part },
+            ComponentSource::InDocument { studio, part } => InstanceSource::Part {
+                element: *studio,
+                part: *part,
+            },
+            ComponentSource::External { copy, part, .. } => InstanceSource::Part {
+                element: *copy,
+                part: *part,
+            },
         }
     }
 
@@ -102,11 +120,20 @@ pub struct PackageComponent {
 pub trait ComponentProvider {
     /// The part for the package of `placement` (`package` is its library entry; a
     /// [`placeholder_package`] when the library lacks it).
-    fn component(&mut self, s: &mut dyn Studio, package: &Package) -> Result<PackageComponent, CommandError>;
+    fn component(
+        &mut self,
+        s: &mut dyn Studio,
+        package: &Package,
+    ) -> Result<PackageComponent, CommandError>;
     /// The part for a package the component library maps to a **custom part** (PCB11.4, X10),
     /// placed on the footprint by the mapping's transform; `None` when this provider can't use it
     /// (the package's own part is used then).
-    fn custom(&mut self, _s: &mut dyn Studio, _package: &Package, _custom: &cadrs_core::pcb::CustomPart) -> Option<Result<PackageComponent, CommandError>> {
+    fn custom(
+        &mut self,
+        _s: &mut dyn Studio,
+        _package: &Package,
+        _custom: &cadrs_core::pcb::CustomPart,
+    ) -> Option<Result<PackageComponent, CommandError>> {
         None
     }
     /// Tidies up once every component is made (folders, …).
@@ -151,13 +178,29 @@ impl InDocumentComponents {
 
     /// A provider that reuses `packages` (made earlier in `studio`).
     pub fn seeded(studio: ElementId, salt: u64, packages: &[GeneratedPackage]) -> Self {
-        let mut me = Self { studio, salt, next_x: 0.0, made: HashMap::new(), packages: Vec::new(), features: Vec::new() };
+        let mut me = Self {
+            studio,
+            salt,
+            next_x: 0.0,
+            made: HashMap::new(),
+            packages: Vec::new(),
+            features: Vec::new(),
+        };
         for g in packages {
             let key = (g.package.clone(), g.part_number.clone());
             if me.made.contains_key(&key) {
                 continue;
             }
-            me.made.insert(key, PackageComponent { source: ComponentSource::InDocument { studio, part: g.part }, frame: g.frame });
+            me.made.insert(
+                key,
+                PackageComponent {
+                    source: ComponentSource::InDocument {
+                        studio,
+                        part: g.part,
+                    },
+                    frame: g.frame,
+                },
+            );
             me.next_x = me.next_x.max(g.x_range[1] + GAP);
             me.packages.push(g.clone());
         }
@@ -180,8 +223,22 @@ fn loop_x_range(loops: &[cadrs_idf::Loop]) -> (f64, f64) {
         for s in l.segments() {
             let pts: Vec<[f64; 2]> = match s {
                 cadrs_idf::Segment::Line { start, end } => vec![start, end],
-                cadrs_idf::Segment::Arc { start, end, center, radius, .. } => vec![start, end, [center[0] - radius, center[1]], [center[0] + radius, center[1]]],
-                cadrs_idf::Segment::Circle { center, radius } => vec![[center[0] - radius, center[1]], [center[0] + radius, center[1]]],
+                cadrs_idf::Segment::Arc {
+                    start,
+                    end,
+                    center,
+                    radius,
+                    ..
+                } => vec![
+                    start,
+                    end,
+                    [center[0] - radius, center[1]],
+                    [center[0] + radius, center[1]],
+                ],
+                cadrs_idf::Segment::Circle { center, radius } => vec![
+                    [center[0] - radius, center[1]],
+                    [center[0] + radius, center[1]],
+                ],
             };
             for p in pts {
                 lo = lo.min(p[0]);
@@ -193,13 +250,21 @@ fn loop_x_range(loops: &[cadrs_idf::Loop]) -> (f64, f64) {
 }
 
 impl ComponentProvider for InDocumentComponents {
-    fn component(&mut self, s: &mut dyn Studio, pkg: &Package) -> Result<PackageComponent, CommandError> {
+    fn component(
+        &mut self,
+        s: &mut dyn Studio,
+        pkg: &Package,
+    ) -> Result<PackageComponent, CommandError> {
         let key = (pkg.name.clone(), pkg.part_number.clone());
         if let Some(c) = self.made.get(&key) {
             return Ok(c.clone());
         }
         let (lo, hi) = loop_x_range(&pkg.loops);
-        let dx = if self.made.is_empty() { 0.0 } else { self.next_x - lo };
+        let dx = if self.made.is_empty() {
+            0.0
+        } else {
+            self.next_x - lo
+        };
         let x_range = [lo + dx, hi + dx];
         self.next_x = hi + dx + GAP;
         let n = self.made.len() as u64;
@@ -211,21 +276,46 @@ impl ComponentProvider for InDocumentComponents {
             z0: 0.0,
             depth: pkg.height.max(MARKER),
         };
-        let (sketch, extrude) = (fid(self.salt, 0x1000 + 2 * n), fid(self.salt, 0x1001 + 2 * n));
+        let (sketch, extrude) = (
+            fid(self.salt, 0x1000 + 2 * n),
+            fid(self.salt, 0x1001 + 2 * n),
+        );
         let part = build_plan(s, self.studio, &plan, sketch, extrude)?;
         self.features.extend([sketch, extrude]);
         let mut values = Vec::new();
         if !pkg.part_number.is_empty() {
-            values.push((PropertyKey::PartNumber, PropertyValue::Text(pkg.part_number.clone())));
+            values.push((
+                PropertyKey::PartNumber,
+                PropertyValue::Text(pkg.part_number.clone()),
+            ));
         }
         if let Some(d) = description(pkg) {
             values.push((PropertyKey::Description, PropertyValue::Text(d)));
         }
         if !values.is_empty() {
-            s.run(&SetProperties { owners: vec![PropertyOwner::Part { element: self.studio, part }], values, label: "Component properties".into() })?;
+            s.run(&SetProperties {
+                owners: vec![PropertyOwner::Part {
+                    element: self.studio,
+                    part,
+                }],
+                values,
+                label: "Component properties".into(),
+            })?;
         }
-        let c = PackageComponent { source: ComponentSource::InDocument { studio: self.studio, part }, frame: AsmPose::translation([dx, 0.0, 0.0]) };
-        self.packages.push(GeneratedPackage { package: pkg.name.clone(), part_number: pkg.part_number.clone(), part, frame: c.frame, x_range });
+        let c = PackageComponent {
+            source: ComponentSource::InDocument {
+                studio: self.studio,
+                part,
+            },
+            frame: AsmPose::translation([dx, 0.0, 0.0]),
+        };
+        self.packages.push(GeneratedPackage {
+            package: pkg.name.clone(),
+            part_number: pkg.part_number.clone(),
+            part,
+            frame: c.frame,
+            x_range,
+        });
         self.made.insert(key, c.clone());
         Ok(c)
     }
@@ -241,12 +331,19 @@ impl ComponentProvider for InDocumentComponents {
 /// ("INDUCTANCE" in µH) or a crystal ("FREQUENCY" in Hz). `None` without any of them (thermal
 /// and other records don't describe the part).
 pub fn description(pkg: &Package) -> Option<String> {
-    let get = |k: &str| pkg.props.iter().find(|(n, _)| n.eq_ignore_ascii_case(k)).map(|(_, v)| v.trim().to_string());
+    let get = |k: &str| {
+        pkg.props
+            .iter()
+            .find(|(n, _)| n.eq_ignore_ascii_case(k))
+            .map(|(_, v)| v.trim().to_string())
+    };
     let num = |k: &str| get(k).and_then(|v| v.parse::<f64>().ok());
     if let Some(d) = get("DESCRIPTION").filter(|d| !d.is_empty()) {
         return Some(d.trim_matches('"').to_string());
     }
-    let tol = get("TOLERANCE").map(|t| format!(" ±{t}%")).unwrap_or_default();
+    let tol = get("TOLERANCE")
+        .map(|t| format!(" ±{t}%"))
+        .unwrap_or_default();
     if let Some(r) = num("RESISTANCE") {
         return Some(format!("Resistor {} OHM{tol}", engineering(r)));
     }
@@ -270,7 +367,16 @@ pub fn board_properties(b: &PcbBoard) -> (Option<String>, String) {
         b.board.notes.iter().find_map(|n| {
             let t = n.text.trim().trim_matches('"').trim();
             let up = t.to_ascii_uppercase();
-            keys.iter().find_map(|k| up.strip_prefix(k).map(|_| t[k.len()..].trim_start_matches([':', '=', ' ']).trim().to_string())).filter(|v| !v.is_empty())
+            keys.iter()
+                .find_map(|k| {
+                    up.strip_prefix(k).map(|_| {
+                        t[k.len()..]
+                            .trim_start_matches([':', '=', ' '])
+                            .trim()
+                            .to_string()
+                    })
+                })
+                .filter(|v| !v.is_empty())
         })
     };
     let pn = field(&["PART NUMBER", "PART_NUMBER", "P/N"]);
@@ -309,14 +415,20 @@ impl Studio for Direct<'_> {
 pub(crate) fn pose_of(m: &Motion) -> AsmPose {
     let l = &m.linear;
     AsmPose {
-        rotation: [[l[(0, 0)], l[(0, 1)], l[(0, 2)]], [l[(1, 0)], l[(1, 1)], l[(1, 2)]], [l[(2, 0)], l[(2, 1)], l[(2, 2)]]],
+        rotation: [
+            [l[(0, 0)], l[(0, 1)], l[(0, 2)]],
+            [l[(1, 0)], l[(1, 1)], l[(1, 2)]],
+            [l[(2, 0)], l[(2, 1)], l[(2, 2)]],
+        ],
         translation: [m.translation.x, m.translation.y, m.translation.z],
     }
 }
 
 /// Where the instance of a placement goes: the part's package frame moved onto the board.
 pub fn instance_pose(p: &Placement, thickness: f64, frame: &AsmPose) -> AsmPose {
-    frame.inverse().then(&pose_of(&placement_motion(p, thickness)))
+    frame
+        .inverse()
+        .then(&pose_of(&placement_motion(p, thickness)))
 }
 
 /// The name of the components Part Studio.
@@ -327,35 +439,73 @@ pub fn components_studio_name(board: &str) -> String {
 /// Builds the tabs for the board `board` of the PCB Studio `pcb` (see the module docs) on a copy
 /// of `doc`, with the components as in-document parts (the fallback with no document store),
 /// and returns the command that adds them.
-pub fn generate(doc: &Document, pcb: ElementId, board: BoardId, opts: &CreateOptions) -> Result<CreatePcbAssembly, CommandError> {
+pub fn generate(
+    doc: &Document,
+    pcb: ElementId,
+    board: BoardId,
+    opts: &CreateOptions,
+) -> Result<CreatePcbAssembly, CommandError> {
     generate_with(doc, pcb, board, opts, None)
 }
 
 /// [`generate`] with the components in **component documents** (P3H.7): `docs` makes or reuses
 /// one stored document per package and the instances reference their versions.
-pub fn generate_linked(doc: &Document, pcb: ElementId, board: BoardId, opts: &CreateOptions, docs: &mut crate::component_docs::ComponentDocuments) -> Result<CreatePcbAssembly, CommandError> {
+pub fn generate_linked(
+    doc: &Document,
+    pcb: ElementId,
+    board: BoardId,
+    opts: &CreateOptions,
+    docs: &mut crate::component_docs::ComponentDocuments,
+) -> Result<CreatePcbAssembly, CommandError> {
     generate_with(doc, pcb, board, opts, Some(docs))
 }
 
-fn generate_with(doc: &Document, pcb: ElementId, board: BoardId, opts: &CreateOptions, docs: Option<&mut crate::component_docs::ComponentDocuments>) -> Result<CreatePcbAssembly, CommandError> {
-    let sb = doc.element(pcb).and_then(|e| e.pcb()).and_then(|s| s.board(board)).ok_or_else(|| CommandError::Invalid("the board is gone".into()))?;
+fn generate_with(
+    doc: &Document,
+    pcb: ElementId,
+    board: BoardId,
+    opts: &CreateOptions,
+    docs: Option<&mut crate::component_docs::ComponentDocuments>,
+) -> Result<CreatePcbAssembly, CommandError> {
+    let sb = doc
+        .element(pcb)
+        .and_then(|e| e.pcb())
+        .and_then(|s| s.board(board))
+        .ok_or_else(|| CommandError::Invalid("the board is gone".into()))?;
     let pcb_board: PcbBoard = sb.board.clone();
     let name = pcb_board.name().to_string();
     // A components Part Studio an earlier Create made (still there) is reused, with the packages
     // it already has (PCB7.3: the component documents are reused).
     let external = docs.is_some();
-    let reused: Option<(ElementId, Vec<GeneratedPackage>)> = if external { None } else { doc.element(pcb).and_then(|e| e.pcb()).and_then(|st| {
-        let c = st.generated.iter().rev().find_map(|g| g.components_studio.filter(|c| doc.element(*c).is_some_and(|e| matches!(e.kind, cadrs_core::ElementKind::PartStudio { .. }))))?;
-        let mut packages: Vec<GeneratedPackage> = Vec::new();
-        for g in st.generated.iter().filter(|g| g.components_studio == Some(c)) {
-            for p in &g.packages {
-                if !packages.iter().any(|q| q.package == p.package && q.part_number == p.part_number) {
-                    packages.push(p.clone());
+    let reused: Option<(ElementId, Vec<GeneratedPackage>)> = if external {
+        None
+    } else {
+        doc.element(pcb).and_then(|e| e.pcb()).and_then(|st| {
+            let c = st.generated.iter().rev().find_map(|g| {
+                g.components_studio.filter(|c| {
+                    doc.element(*c).is_some_and(|e| {
+                        matches!(e.kind, cadrs_core::ElementKind::PartStudio { .. })
+                    })
+                })
+            })?;
+            let mut packages: Vec<GeneratedPackage> = Vec::new();
+            for g in st
+                .generated
+                .iter()
+                .filter(|g| g.components_studio == Some(c))
+            {
+                for p in &g.packages {
+                    if !packages
+                        .iter()
+                        .any(|q| q.package == p.package && q.part_number == p.part_number)
+                    {
+                        packages.push(p.clone());
+                    }
                 }
             }
-        }
-        Some((c, packages))
-    }) };
+            Some((c, packages))
+        })
+    };
     let mut scratch = doc.clone();
     let mut s = Direct(&mut scratch);
     let (studio, assembly) = (ElementId::new(), ElementId::new());
@@ -363,11 +513,26 @@ fn generate_with(doc: &Document, pcb: ElementId, board: BoardId, opts: &CreateOp
     let salt = name_hash(&format!("{name}\u{0}{}", studio.0));
     let with_components = opts.components && !pcb_board.board.placements.is_empty();
     let in_document = with_components && !external;
-    s.run(&AddElement { id: studio, kind: NewElementKind::PartStudio, name: Some(name.clone()), after: None })?;
+    s.run(&AddElement {
+        id: studio,
+        kind: NewElementKind::PartStudio,
+        name: Some(name.clone()),
+        after: None,
+    })?;
     if in_document && reused.is_none() {
-        s.run(&AddElement { id: components, kind: NewElementKind::PartStudio, name: Some(components_studio_name(&name)), after: None })?;
+        s.run(&AddElement {
+            id: components,
+            kind: NewElementKind::PartStudio,
+            name: Some(components_studio_name(&name)),
+            after: None,
+        })?;
     }
-    s.run(&AddElement { id: assembly, kind: NewElementKind::Assembly, name: Some(name.clone()), after: None })?;
+    s.run(&AddElement {
+        id: assembly,
+        kind: NewElementKind::Assembly,
+        name: Some(name.clone()),
+        after: None,
+    })?;
 
     // The board and keep parts, in the board frame.
     let mut studio_parts: Vec<PartId> = Vec::new();
@@ -387,23 +552,49 @@ fn generate_with(doc: &Document, pcb: ElementId, board: BoardId, opts: &CreateOp
         if let Some(pn) = pn {
             values.insert(0, (PropertyKey::PartNumber, PropertyValue::Text(pn)));
         }
-        s.run(&SetProperties { owners: vec![PropertyOwner::Part { element: studio, part }], values, label: "Board properties".into() })?;
+        s.run(&SetProperties {
+            owners: vec![PropertyOwner::Part {
+                element: studio,
+                part,
+            }],
+            values,
+            label: "Board properties".into(),
+        })?;
         studio_parts.push(part);
     }
     if opts.keep_areas {
         let mut keep_features = Vec::new();
-        for plan in all_keep_plans(&pcb_board, |k| matches!(k.kind, KeepKind::PlaceKeepout | KeepKind::PlaceRegion | KeepKind::PlaceOutline)) {
+        for plan in all_keep_plans(&pcb_board, |k| {
+            matches!(
+                k.kind,
+                KeepKind::PlaceKeepout | KeepKind::PlaceRegion | KeepKind::PlaceOutline
+            )
+        }) {
             let (sk, ex) = next();
             studio_parts.push(build_plan(&mut s, studio, &plan, sk, ex)?);
             keep_features.extend([sk, ex]);
         }
         if !keep_features.is_empty() {
-            s.run(&CreateFolder { element: studio, folder: fid(salt, 1), name: Some("Keep areas".into()), features: keep_features })?;
+            s.run(&CreateFolder {
+                element: studio,
+                folder: fid(salt, 1),
+                name: Some("Keep areas".into()),
+                features: keep_features,
+            })?;
         }
     }
     let at = |source: InstanceSource, pose: AsmPose| Instance::new(InstanceId::new(), source, pose);
     for part in &studio_parts {
-        s.run(&InsertInstance { element: assembly, instance: at(InstanceSource::Part { element: studio, part: *part }, AsmPose::IDENTITY) })?;
+        s.run(&InsertInstance {
+            element: assembly,
+            instance: at(
+                InstanceSource::Part {
+                    element: studio,
+                    part: *part,
+                },
+                AsmPose::IDENTITY,
+            ),
+        })?;
     }
 
     // The components (PCB7.3–7.5).
@@ -416,7 +607,11 @@ fn generate_with(doc: &Document, pcb: ElementId, board: BoardId, opts: &CreateOp
         let provider: &mut dyn ComponentProvider = match docs {
             Some(d) => d,
             None => {
-                in_doc = InDocumentComponents::seeded(components, salt, reused.as_ref().map_or(&[][..], |(_, p)| &p[..]));
+                in_doc = InDocumentComponents::seeded(
+                    components,
+                    salt,
+                    reused.as_ref().map_or(&[][..], |(_, p)| &p[..]),
+                );
                 &mut in_doc
             }
         };
@@ -424,16 +619,29 @@ fn generate_with(doc: &Document, pcb: ElementId, board: BoardId, opts: &CreateOp
         // P3H stage close (PCB11.4): a package the library maps to a custom part is inserted as
         // that part (where the provider can reference it), so a mapping change reaches the next
         // Create; None and From ECAD data use the package's own part.
-        let mappings = doc.element(pcb).and_then(|e| e.pcb()).map(|st| st.library.clone()).unwrap_or_default();
+        let mappings = doc
+            .element(pcb)
+            .and_then(|e| e.pcb())
+            .map(|st| st.library.clone())
+            .unwrap_or_default();
         for (_, p) in pcb_board.components() {
-            let pkg = find_package(&pcb_board, p).cloned().unwrap_or_else(|| placeholder_package(p));
-            let custom = mappings.get(&pkg.name).custom().and_then(|c| provider.custom(&mut s, &pkg, c));
+            let pkg = find_package(&pcb_board, p)
+                .cloned()
+                .unwrap_or_else(|| placeholder_package(p));
+            let custom = mappings
+                .get(&pkg.name)
+                .custom()
+                .and_then(|c| provider.custom(&mut s, &pkg, c));
             let c = match custom {
                 Some(c) => c?,
                 None => provider.component(&mut s, &pkg)?,
             };
             let mut inst = at(c.source.instance_source(), instance_pose(p, t, &c.frame));
-            linked.push(LinkedComponent { instance: inst.id, refdes: p.refdes.clone(), frame: c.frame });
+            linked.push(LinkedComponent {
+                instance: inst.id,
+                refdes: p.refdes.clone(),
+                frame: c.frame,
+            });
             if let Some(r) = c.source.link() {
                 // The copies first (the instance's name comes from its part there).
                 for l in provider.links() {
@@ -446,7 +654,10 @@ fn generate_with(doc: &Document, pcb: ElementId, board: BoardId, opts: &CreateOp
                 }
                 inst.link = Some(r);
             }
-            s.run(&InsertInstance { element: assembly, instance: inst })?;
+            s.run(&InsertInstance {
+                element: assembly,
+                instance: inst,
+            })?;
         }
         provider.finish(&mut s)?;
         documents = provider.documents();
@@ -454,18 +665,34 @@ fn generate_with(doc: &Document, pcb: ElementId, board: BoardId, opts: &CreateOp
     }
 
     let fresh_components = in_document && reused.is_none();
-    let replaced = reused.filter(|_| in_document).and_then(|(c, _)| scratch.element(c).cloned()).into_iter().collect();
-    let elements = [Some(studio), fresh_components.then_some(components), Some(assembly)]
+    let replaced = reused
+        .filter(|_| in_document)
+        .and_then(|(c, _)| scratch.element(c).cloned())
         .into_iter()
-        .flatten()
-        .filter_map(|id| scratch.element(id).cloned())
         .collect();
+    let elements = [
+        Some(studio),
+        fresh_components.then_some(components),
+        Some(assembly),
+    ]
+    .into_iter()
+    .flatten()
+    .filter_map(|id| scratch.element(id).cloned())
+    .collect();
     Ok(CreatePcbAssembly {
         element: pcb,
         board_name: name,
         elements,
         replaced,
-        generated: GeneratedAssembly { board, studio, components_studio: in_document.then_some(components), assembly, components: linked, packages, documents },
+        generated: GeneratedAssembly {
+            board,
+            studio,
+            components_studio: in_document.then_some(components),
+            assembly,
+            components: linked,
+            packages,
+            documents,
+        },
         links,
     })
 }

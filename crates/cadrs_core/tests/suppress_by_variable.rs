@@ -7,13 +7,18 @@ use cadrs_core::commands::{SetFeature, SetSuppressByVariable, SetSuppressed};
 use cadrs_core::document::{Document, FeatureKind};
 use cadrs_core::rebuild::{self, Build};
 use cadrs_core::samples::gear_cover::DocHistory;
-use cadrs_core::samples::with_hole::{self as wh, HOLE, HOLE_VOLUME, PLATE_PART, PLATE_VOLUME, WITH_HOLE};
+use cadrs_core::samples::with_hole::{
+    self as wh, HOLE, HOLE_VOLUME, PLATE_PART, PLATE_VOLUME, WITH_HOLE,
+};
 use cadrs_core::variables::SuppressByVariable;
 use cadrs_core::{DocumentMeta, ElementId, History, Store};
 
 #[track_caller]
 fn rel(a: f64, b: f64, tol: f64) {
-    assert!(((a - b) / b).abs() <= tol, "got {a}, expected {b} (relative {tol})");
+    assert!(
+        ((a - b) / b).abs() <= tol,
+        "got {a}, expected {b} (relative {tol})"
+    );
 }
 
 struct Doc {
@@ -42,12 +47,31 @@ impl Doc {
     }
 
     fn bind(&mut self, rule: Option<SuppressByVariable>) {
-        self.h.execute(&mut self.d, &SetSuppressByVariable { element: self.el, feature: HOLE, rule }).unwrap();
+        self.h
+            .execute(
+                &mut self.d,
+                &SetSuppressByVariable {
+                    element: self.el,
+                    feature: HOLE,
+                    rule,
+                },
+            )
+            .unwrap();
     }
 
     fn set_with_hole(&mut self, expr: &str) {
         let kind = FeatureKind::Variable(wh::with_hole(expr));
-        self.h.execute(&mut self.d, &SetFeature { element: self.el, feature: WITH_HOLE, kind, label: "Edit #withHole".into() }).unwrap();
+        self.h
+            .execute(
+                &mut self.d,
+                &SetFeature {
+                    element: self.el,
+                    feature: WITH_HOLE,
+                    kind,
+                    label: "Edit #withHole".into(),
+                },
+            )
+            .unwrap();
     }
 
     fn hole_suppressed(&self) -> bool {
@@ -80,12 +104,24 @@ fn the_variable_suppresses_and_unsuppresses_the_cut() {
     assert!(!d.hole_suppressed());
     rel(d.volume(), WITH, 1e-6);
     // Inverted (suppressed when true): #withHole = 1 now suppresses it.
-    d.bind(Some(SuppressByVariable { invert: true, ..SuppressByVariable::variable("withHole") }));
+    d.bind(Some(SuppressByVariable {
+        invert: true,
+        ..SuppressByVariable::variable("withHole")
+    }));
     assert!(d.hole_suppressed());
     rel(d.volume(), PLATE_VOLUME, 1e-6);
     // Suppress still suppresses whatever the variable says.
     d.bind(Some(SuppressByVariable::variable("withHole")));
-    d.h.execute(&mut d.d, &SetSuppressed { element: d.el, features: vec![HOLE], suppressed: true, label: "Suppress".into() }).unwrap();
+    d.h.execute(
+        &mut d.d,
+        &SetSuppressed {
+            element: d.el,
+            features: vec![HOLE],
+            suppressed: true,
+            label: "Suppress".into(),
+        },
+    )
+    .unwrap();
     assert!(d.hole_suppressed());
     rel(d.volume(), PLATE_VOLUME, 1e-6);
 }
@@ -99,7 +135,14 @@ fn binding_is_one_undo_step_each_way() {
     assert_eq!(d.h.undo_label(), Some("Suppress by #withHole"));
     rel(d.volume(), PLATE_VOLUME, 1e-6);
     assert_eq!(d.h.undo(&mut d.d).as_deref(), Some("Suppress by #withHole"));
-    assert!(d.d.element(d.el).unwrap().feature(HOLE).unwrap().suppress_by.is_none());
+    assert!(
+        d.d.element(d.el)
+            .unwrap()
+            .feature(HOLE)
+            .unwrap()
+            .suppress_by
+            .is_none()
+    );
     rel(d.volume(), WITH, 1e-6);
     d.h.redo(&mut d.d);
     assert!(d.hole_suppressed());
@@ -112,7 +155,17 @@ fn binding_is_one_undo_step_each_way() {
     d.h.undo(&mut d.d);
     assert!(d.hole_suppressed());
     // A suppression variable needs a variable.
-    let r = d.h.execute(&mut d.d, &SetSuppressByVariable { element: d.el, feature: HOLE, rule: Some(SuppressByVariable { expr: "1".into(), invert: false }) });
+    let r = d.h.execute(
+        &mut d.d,
+        &SetSuppressByVariable {
+            element: d.el,
+            feature: HOLE,
+            rule: Some(SuppressByVariable {
+                expr: "1".into(),
+                invert: false,
+            }),
+        },
+    );
     assert!(r.is_err());
 }
 
@@ -124,7 +177,11 @@ fn an_unknown_variable_fails_the_feature() {
     assert!(!d.hole_suppressed());
     let b = d.build();
     assert_eq!(b.error(HOLE), Some("Suppression: #nothere is not defined"));
-    rel(b.part(PLATE_PART).unwrap().mass.unwrap().volume, PLATE_VOLUME, 1e-6);
+    rel(
+        b.part(PLATE_PART).unwrap().mass.unwrap().volume,
+        PLATE_VOLUME,
+        1e-6,
+    );
     // A variable defined only below the feature: used before it is defined.
     let el = d.d.element_mut(d.el).unwrap();
     let features = el.features_mut().unwrap();
@@ -132,7 +189,12 @@ fn an_unknown_variable_fails_the_feature() {
     features.push(v);
     d.bind(Some(SuppressByVariable::variable("withHole")));
     let b = d.build();
-    assert_eq!(b.error(HOLE), Some("Suppression: #withHole is used before it is defined; move its Variable above this feature"));
+    assert_eq!(
+        b.error(HOLE),
+        Some(
+            "Suppression: #withHole is used before it is defined; move its Variable above this feature"
+        )
+    );
 }
 
 #[test]
@@ -141,15 +203,34 @@ fn the_binding_is_saved_and_old_files_load() {
     // A document without one saves as before: no `suppress_by` anywhere.
     let before = ron::to_string(&d.d).unwrap();
     assert!(!before.contains("suppress_by"));
-    d.bind(Some(SuppressByVariable { invert: true, ..SuppressByVariable::variable("withHole") }));
+    d.bind(Some(SuppressByVariable {
+        invert: true,
+        ..SuppressByVariable::variable("withHole")
+    }));
     d.set_with_hole("0");
-    let dir = std::env::temp_dir().join(format!("cadrs-suppress-by-variable-{}-{}", std::process::id(), uuid::Uuid::new_v4()));
+    let dir = std::env::temp_dir().join(format!(
+        "cadrs-suppress-by-variable-{}-{}",
+        std::process::id(),
+        uuid::Uuid::new_v4()
+    ));
     let store = Store::new(&dir);
     store.create(&d.d, &DocumentMeta::new("me", 1_000)).unwrap();
     let back = store.load(d.d.id).unwrap().document;
     let _ = std::fs::remove_dir_all(&dir);
-    let rule = back.element(d.el).unwrap().feature(HOLE).unwrap().suppress_by.clone();
-    assert_eq!(rule, Some(SuppressByVariable { expr: "#withHole".into(), invert: true }));
+    let rule = back
+        .element(d.el)
+        .unwrap()
+        .feature(HOLE)
+        .unwrap()
+        .suppress_by
+        .clone();
+    assert_eq!(
+        rule,
+        Some(SuppressByVariable {
+            expr: "#withHole".into(),
+            invert: true
+        })
+    );
     // #withHole = 0 and inverted: built.
     assert!(!back.element(d.el).unwrap().is_suppressed(HOLE));
     // An older file (no field) loads without one.
@@ -157,7 +238,13 @@ fn the_binding_is_saved_and_old_files_load() {
     let old = text.replace(",suppress_by:Some((expr:\"#withHole\",invert:true))", "");
     assert_ne!(old, text);
     let old: Document = ron::from_str(&old).unwrap();
-    assert!(old.element(d.el).unwrap().features().iter().all(|f| f.suppress_by.is_none()));
+    assert!(
+        old.element(d.el)
+            .unwrap()
+            .features()
+            .iter()
+            .all(|f| f.suppress_by.is_none())
+    );
     assert_eq!(old.element(d.el).unwrap().features().len(), 5);
 }
 
@@ -166,7 +253,12 @@ fn a_suppressed_variable_defines_nothing_below() {
     use cadrs_core::variables::{self, VariableFeature, VariableType};
     use cadrs_core::{Feature, FeatureId};
     let number = |name: &str, expr: &str| {
-        let mut v = VariableFeature { name: name.into(), var_type: VariableType::Number, expr: expr.into(), ..VariableFeature::default() };
+        let mut v = VariableFeature {
+            name: name.into(),
+            var_type: VariableType::Number,
+            expr: expr.into(),
+            ..VariableFeature::default()
+        };
         let _ = v.evaluate(&Default::default(), &Vec::new());
         FeatureKind::Variable(v)
     };
@@ -174,19 +266,30 @@ fn a_suppressed_variable_defines_nothing_below() {
     // #a = 0; #b = 1, suppressed while #a is 0; #c = #b + 1, suppressed while #b is 0.
     let mut features = vec![
         Feature::new(a, "#a", number("a", "0")),
-        Feature { suppress_by: Some(SuppressByVariable::variable("a")), ..Feature::new(b, "#b", number("b", "1")) },
-        Feature { suppress_by: Some(SuppressByVariable::variable("b")), ..Feature::new(c, "#c", number("c", "#b + 1")) },
+        Feature {
+            suppress_by: Some(SuppressByVariable::variable("a")),
+            ..Feature::new(b, "#b", number("b", "1"))
+        },
+        Feature {
+            suppress_by: Some(SuppressByVariable::variable("b")),
+            ..Feature::new(c, "#c", number("c", "#b + 1"))
+        },
     ];
     // #b is suppressed, so #c's variable isn't defined: #c isn't suppressed, and fails.
     assert_eq!(variables::suppressed_by_variables(&features, &[]), vec![b]);
     let active: Vec<Feature> = features.iter().filter(|f| f.id != b).cloned().collect();
     let errors = variables::check(&active, &Default::default());
-    assert!(errors.contains(&(c, "Suppression: #b is not defined".to_string())), "{errors:?}");
+    assert!(
+        errors.contains(&(c, "Suppression: #b is not defined".to_string())),
+        "{errors:?}"
+    );
     // #a = 1: neither is suppressed, and #c evaluates to 2 on refresh.
     features[0].kind = number("a", "1");
     assert!(variables::suppressed_by_variables(&features, &[]).is_empty());
     variables::refresh(&mut features, &[], &Default::default());
-    let FeatureKind::Variable(v) = &features[2].kind else { unreachable!() };
+    let FeatureKind::Variable(v) = &features[2].kind else {
+        unreachable!()
+    };
     assert_eq!(v.value, 2.0);
 }
 
@@ -197,15 +300,34 @@ fn renaming_the_variable_leaves_the_binding_on_the_old_name() {
     // bound again.
     let mut d = Doc::new();
     d.bind(Some(SuppressByVariable::variable("withHole")));
-    let v = cadrs_core::variables::VariableFeature { name: "hasHole".into(), ..wh::with_hole("0") };
-    d.h.execute(&mut d.d, &SetFeature { element: d.el, feature: WITH_HOLE, kind: FeatureKind::Variable(v), label: "Variable name".into() }).unwrap();
+    let v = cadrs_core::variables::VariableFeature {
+        name: "hasHole".into(),
+        ..wh::with_hole("0")
+    };
+    d.h.execute(
+        &mut d.d,
+        &SetFeature {
+            element: d.el,
+            feature: WITH_HOLE,
+            kind: FeatureKind::Variable(v),
+            label: "Variable name".into(),
+        },
+    )
+    .unwrap();
     let el = d.d.element(d.el).unwrap();
     assert_eq!(el.feature(WITH_HOLE).unwrap().name, "#hasHole");
-    assert_eq!(el.feature(HOLE).unwrap().suppress_by, Some(SuppressByVariable::variable("withHole")));
+    assert_eq!(
+        el.feature(HOLE).unwrap().suppress_by,
+        Some(SuppressByVariable::variable("withHole"))
+    );
     assert!(!d.hole_suppressed());
     let b = d.build();
     assert_eq!(b.error(HOLE), Some("Suppression: #withHole is not defined"));
-    rel(b.part(PLATE_PART).unwrap().mass.unwrap().volume, PLATE_VOLUME, 1e-6);
+    rel(
+        b.part(PLATE_PART).unwrap().mass.unwrap().volume,
+        PLATE_VOLUME,
+        1e-6,
+    );
     // Bound to the new name: #hasHole = 0 suppresses it.
     d.bind(Some(SuppressByVariable::variable("hasHole")));
     assert!(d.hole_suppressed());

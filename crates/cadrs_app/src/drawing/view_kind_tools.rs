@@ -20,7 +20,9 @@ use bevy::prelude::*;
 use bevy::text::FontWeight;
 use bevy::ui_widgets::{Activate, observe};
 use cadrs_drawing::view::rotate;
-use cadrs_drawing::view_kinds::{Boundary, Break, BrokenOut, detail_view, double, next_letter, section_view};
+use cadrs_drawing::view_kinds::{
+    Boundary, Break, BrokenOut, detail_view, double, next_letter, section_view,
+};
 use cadrs_drawing::{DrawingOp, View, ViewId};
 use cadrs_ui::prelude::*;
 use cadrs_ui::{Button, DialogClose, form_row};
@@ -55,12 +57,32 @@ pub fn start(world: &mut World, name: &str) {
         ann.selected.clear();
     }
     let tool = match name {
-        "drawing-section-view" => ViewTool::Section { parent: None, a: None, b: None },
-        "drawing-view-detail" => ViewTool::Detail { parent: None, center: None, radius: None },
-        "drawing-view-crop" => ViewTool::Crop { view: None, a: None },
-        "drawing-view-crop-spline" => ViewTool::Boundary { view: None, use_: BoundaryUse::CropSpline },
-        "drawing-view-broken-out" => ViewTool::Boundary { view: None, use_: BoundaryUse::BrokenOut },
-        "drawing-view-break" => ViewTool::Break { view: None, a: None },
+        "drawing-section-view" => ViewTool::Section {
+            parent: None,
+            a: None,
+            b: None,
+        },
+        "drawing-view-detail" => ViewTool::Detail {
+            parent: None,
+            center: None,
+            radius: None,
+        },
+        "drawing-view-crop" => ViewTool::Crop {
+            view: None,
+            a: None,
+        },
+        "drawing-view-crop-spline" => ViewTool::Boundary {
+            view: None,
+            use_: BoundaryUse::CropSpline,
+        },
+        "drawing-view-broken-out" => ViewTool::Boundary {
+            view: None,
+            use_: BoundaryUse::BrokenOut,
+        },
+        "drawing-view-break" => ViewTool::Break {
+            view: None,
+            a: None,
+        },
         _ => return,
     };
     let mut ui = world.resource_mut::<DrawingUi>();
@@ -73,7 +95,12 @@ pub fn start(world: &mut World, name: &str) {
 }
 
 /// The view the tool works in and the pointer in its 2D frame.
-fn local(d: &cadrs_drawing::Drawing, index: usize, id: ViewId, p: Vec2) -> Option<(View, [f64; 2])> {
+fn local(
+    d: &cadrs_drawing::Drawing,
+    index: usize,
+    id: ViewId,
+    p: Vec2,
+) -> Option<(View, [f64; 2])> {
     let v = d.sheets.get(index)?.view(id)?.clone();
     let q = v.from_sheet([p.x as f64, p.y as f64]);
     Some((v, q))
@@ -84,7 +111,11 @@ fn snap_hv(a: [f64; 2], b: [f64; 2]) -> [f64; 2] {
     let (dx, dy) = (b[0] - a[0], b[1] - a[1]);
     let ang = dy.atan2(dx).to_degrees().rem_euclid(90.0);
     if !(4.0..=86.0).contains(&ang) {
-        if dx.abs() >= dy.abs() { [b[0], a[1]] } else { [a[0], b[1]] }
+        if dx.abs() >= dy.abs() {
+            [b[0], a[1]]
+        } else {
+            [a[0], b[1]]
+        }
     } else {
         b
     }
@@ -95,7 +126,11 @@ pub fn preview(world: &mut World) {
     let tool = world.resource::<DrawingUi>().tool;
     if !matches!(
         tool,
-        ViewTool::Section { .. } | ViewTool::Detail { .. } | ViewTool::Crop { .. } | ViewTool::Break { .. } | ViewTool::Boundary { .. }
+        ViewTool::Section { .. }
+            | ViewTool::Detail { .. }
+            | ViewTool::Crop { .. }
+            | ViewTool::Break { .. }
+            | ViewTool::Boundary { .. }
     ) {
         return;
     }
@@ -114,7 +149,11 @@ pub fn preview(world: &mut World) {
     let mut strokes: Vec<Vec<[f64; 2]>> = Vec::new();
     let mut ghost: Option<View> = None;
     match tool {
-        ViewTool::Section { parent: Some(pid), a: Some(a), b } => {
+        ViewTool::Section {
+            parent: Some(pid),
+            a: Some(a),
+            b,
+        } => {
             if let Some((v, q)) = local(&d, index, pid, p) {
                 match b {
                     None => {
@@ -132,7 +171,11 @@ pub fn preview(world: &mut World) {
                 }
             }
         }
-        ViewTool::Detail { parent: Some(pid), center: Some(c), radius } => {
+        ViewTool::Detail {
+            parent: Some(pid),
+            center: Some(c),
+            radius,
+        } => {
             if let Some((v, q)) = local(&d, index, pid, p) {
                 match radius {
                     None => {
@@ -152,7 +195,14 @@ pub fn preview(world: &mut World) {
                 }
             }
         }
-        ViewTool::Crop { view: Some(vid), a: Some(a) } | ViewTool::Break { view: Some(vid), a: Some(a) } => {
+        ViewTool::Crop {
+            view: Some(vid),
+            a: Some(a),
+        }
+        | ViewTool::Break {
+            view: Some(vid),
+            a: Some(a),
+        } => {
             if let Some((v, q)) = local(&d, index, vid, p) {
                 if matches!(tool, ViewTool::Crop { .. }) {
                     let r = Boundary::rectangle(a, q).polygon();
@@ -175,7 +225,10 @@ pub fn preview(world: &mut World) {
                 }
             }
         }
-        ViewTool::Boundary { view: Some(vid), use_ } => {
+        ViewTool::Boundary {
+            view: Some(vid),
+            use_,
+        } => {
             if let Some((v, q)) = local(&d, index, vid, p) {
                 let mut pts = points.clone();
                 pts.push(q);
@@ -199,14 +252,24 @@ pub fn preview(world: &mut World) {
                 cache.ensure(&doc.doc, active_drawing(doc).map(|(_, d)| d), g);
             }
         });
-        if let (Some(n), Some(parent)) = (g.fold, g.parent.and_then(|pid| d.sheets.get(index).and_then(|s| s.view(pid)))) {
+        if let (Some(n), Some(parent)) = (
+            g.fold,
+            g.parent
+                .and_then(|pid| d.sheets.get(index).and_then(|s| s.view(pid))),
+        ) {
             let cache = world.resource::<ViewCache>();
             if let Some(geo) = cache.geometry(g)
-                && let Some((lo, hi)) = geo.projection.bounds().map(|(a, b)| ([a.x, a.y], [b.x, b.y]))
+                && let Some((lo, hi)) = geo
+                    .projection
+                    .bounds()
+                    .map(|(a, b)| ([a.x, a.y], [b.x, b.y]))
             {
                 let c = [(lo[0] + hi[0]) / 2.0, (lo[1] + hi[1]) / 2.0];
                 let n = rotate(n, parent.rotation);
-                let off = rotate([c[0] * g.scale.factor(), c[1] * g.scale.factor()], g.rotation);
+                let off = rotate(
+                    [c[0] * g.scale.factor(), c[1] * g.scale.factor()],
+                    g.rotation,
+                );
                 let t = off[0] * n[0] + off[1] * n[1];
                 g.anchor = [g.anchor[0] - n[0] * t, g.anchor[1] - n[1] * t];
             }
@@ -228,7 +291,9 @@ pub fn click(world: &mut World, p: Vec2, double: bool) -> bool {
         let (id, d) = active_drawing(doc)?;
         let ui = world.resource::<DrawingUi>();
         let index = ui.sheet_index(id, d);
-        let pad = super::current_view(doc, ui).map(|(_, v)| 6.0 / v.ppm as f64).unwrap_or(1.0);
+        let pad = super::current_view(doc, ui)
+            .map(|(_, v)| 6.0 / v.ppm as f64)
+            .unwrap_or(1.0);
         Some((d.clone(), index, d.sheets[index].id, pad))
     }) else {
         return false;
@@ -247,18 +312,43 @@ pub fn click(world: &mut World, p: Vec2, double: bool) -> bool {
             if let Some(h) = hit
                 && let Some((_, q)) = local(&d, index, h, p)
             {
-                set_tool(world, ViewTool::Section { parent: Some(h), a: Some(q), b: None });
+                set_tool(
+                    world,
+                    ViewTool::Section {
+                        parent: Some(h),
+                        a: Some(q),
+                        b: None,
+                    },
+                );
             }
         }
-        ViewTool::Section { parent: Some(pid), a: Some(a), b: None } => {
+        ViewTool::Section {
+            parent: Some(pid),
+            a: Some(a),
+            b: None,
+        } => {
             if let Some((_, q)) = local(&d, index, pid, p) {
                 let b = snap_hv(a, q);
                 if (b[0] - a[0]).hypot(b[1] - a[1]) > 1e-3 {
-                    set_tool(world, ViewTool::Section { parent: Some(pid), a: Some(a), b: Some(b) });
+                    set_tool(
+                        world,
+                        ViewTool::Section {
+                            parent: Some(pid),
+                            a: Some(a),
+                            b: Some(b),
+                        },
+                    );
                 }
             }
         }
-        ViewTool::Section { parent: Some(_), b: Some(_), .. } | ViewTool::Detail { radius: Some(_), .. } => {
+        ViewTool::Section {
+            parent: Some(_),
+            b: Some(_),
+            ..
+        }
+        | ViewTool::Detail {
+            radius: Some(_), ..
+        } => {
             if let Some(mut v) = ghost {
                 v.id = ViewId::new();
                 let op = insert_view_op(world, sheet_id, v);
@@ -276,14 +366,32 @@ pub fn click(world: &mut World, p: Vec2, double: bool) -> bool {
             if let Some(h) = hit
                 && let Some((_, q)) = local(&d, index, h, p)
             {
-                set_tool(world, ViewTool::Detail { parent: Some(h), center: Some(q), radius: None });
+                set_tool(
+                    world,
+                    ViewTool::Detail {
+                        parent: Some(h),
+                        center: Some(q),
+                        radius: None,
+                    },
+                );
             }
         }
-        ViewTool::Detail { parent: Some(pid), center: Some(c), radius: None } => {
+        ViewTool::Detail {
+            parent: Some(pid),
+            center: Some(c),
+            radius: None,
+        } => {
             if let Some((_, q)) = local(&d, index, pid, p) {
                 let r = (q[0] - c[0]).hypot(q[1] - c[1]);
                 if r > 1e-3 {
-                    set_tool(world, ViewTool::Detail { parent: Some(pid), center: Some(c), radius: Some(r) });
+                    set_tool(
+                        world,
+                        ViewTool::Detail {
+                            parent: Some(pid),
+                            center: Some(c),
+                            radius: Some(r),
+                        },
+                    );
                 }
             }
         }
@@ -292,24 +400,42 @@ pub fn click(world: &mut World, p: Vec2, double: bool) -> bool {
                 && let Some((_, q)) = local(&d, index, h, p)
             {
                 let t = if matches!(tool, ViewTool::Crop { .. }) {
-                    ViewTool::Crop { view: Some(h), a: Some(q) }
+                    ViewTool::Crop {
+                        view: Some(h),
+                        a: Some(q),
+                    }
                 } else {
-                    ViewTool::Break { view: Some(h), a: Some(q) }
+                    ViewTool::Break {
+                        view: Some(h),
+                        a: Some(q),
+                    }
                 };
                 set_tool(world, t);
             }
         }
-        ViewTool::Crop { view: Some(vid), a: Some(a) } => {
+        ViewTool::Crop {
+            view: Some(vid),
+            a: Some(a),
+        } => {
             if let Some((mut v, q)) = local(&d, index, vid, p) {
                 if (q[0] - a[0]).abs() < 1e-3 || (q[1] - a[1]).abs() < 1e-3 {
                     return true;
                 }
                 v.crop = Some(Boundary::rectangle(a, q));
-                edit_drawing(world, DrawingOp::SetView { view: v, label: "Crop view".into() });
+                edit_drawing(
+                    world,
+                    DrawingOp::SetView {
+                        view: v,
+                        label: "Crop view".into(),
+                    },
+                );
                 super::view_tools::end_tool(world);
             }
         }
-        ViewTool::Break { view: Some(vid), a: Some(a) } => {
+        ViewTool::Break {
+            view: Some(vid),
+            a: Some(a),
+        } => {
             if let Some((mut v, q)) = local(&d, index, vid, p) {
                 let vertical = (q[0] - a[0]).abs() >= (q[1] - a[1]).abs();
                 let i = if vertical { 0 } else { 1 };
@@ -318,7 +444,13 @@ pub fn click(world: &mut World, p: Vec2, double: bool) -> bool {
                     return true;
                 }
                 v.breaks.push(Break { vertical, lo, hi });
-                edit_drawing(world, DrawingOp::SetView { view: v, label: "Break view".into() });
+                edit_drawing(
+                    world,
+                    DrawingOp::SetView {
+                        view: v,
+                        label: "Break view".into(),
+                    },
+                );
                 super::view_tools::end_tool(world);
             }
         }
@@ -330,7 +462,9 @@ pub fn click(world: &mut World, p: Vec2, double: bool) -> bool {
                     None => return true,
                 },
             };
-            let Some((v, q)) = local(&d, index, vid, p) else { return true };
+            let Some((v, q)) = local(&d, index, vid, p) else {
+                return true;
+            };
             let pts = world.resource::<DrawingUi>().tool_points.clone();
             // A click on the first point (or a double click) closes the boundary.
             let near_first = pts.first().is_some_and(|f| {
@@ -342,7 +476,10 @@ pub fn click(world: &mut World, p: Vec2, double: bool) -> bool {
                 return true;
             }
             let mut ui = world.resource_mut::<DrawingUi>();
-            ui.tool = ViewTool::Boundary { view: Some(vid), use_ };
+            ui.tool = ViewTool::Boundary {
+                view: Some(vid),
+                use_,
+            };
             ui.tool_points.push(q);
         }
         _ => return false,
@@ -368,7 +505,13 @@ pub fn finish_boundary(world: &mut World, vid: ViewId, use_: BoundaryUse) {
     match use_ {
         BoundaryUse::CropSpline => {
             v.crop = Some(Boundary::spline(pts));
-            edit_drawing(world, DrawingOp::SetView { view: v, label: "Crop view".into() });
+            edit_drawing(
+                world,
+                DrawingOp::SetView {
+                    view: v,
+                    label: "Crop view".into(),
+                },
+            );
         }
         BoundaryUse::BrokenOut => open_depth_dialog(world, vid, pts),
     }
@@ -376,7 +519,11 @@ pub fn finish_boundary(world: &mut World, vid: ViewId, use_: BoundaryUse) {
 
 /// Enter closes a boundary being drawn.
 pub fn enter(world: &mut World) -> bool {
-    if let ViewTool::Boundary { view: Some(v), use_ } = world.resource::<DrawingUi>().tool {
+    if let ViewTool::Boundary {
+        view: Some(v),
+        use_,
+    } = world.resource::<DrawingUi>().tool
+    {
         finish_boundary(world, v, use_);
         return true;
     }
@@ -451,7 +598,11 @@ pub fn parse_mm(s: &str) -> Option<f64> {
     } else {
         (s, 1.0)
     };
-    num.trim().parse::<f64>().ok().filter(|v| v.is_finite()).map(|v| v * k)
+    num.trim()
+        .parse::<f64>()
+        .ok()
+        .filter(|v| v.is_finite())
+        .map(|v| v * k)
 }
 
 fn apply_depth_dialog(world: &mut World) {
@@ -472,8 +623,17 @@ fn apply_depth_dialog(world: &mut World) {
         .and_then(|doc| active_drawing(doc))
         .and_then(|(_, d)| d.view(dialog.view).map(|(_, v)| v.clone()));
     if let Some(mut v) = view {
-        v.broken_out = Some(BrokenOut { boundary: Boundary::spline(dialog.points.clone()), depth });
-        edit_drawing(world, DrawingOp::SetView { view: v, label: "Broken-out section".into() });
+        v.broken_out = Some(BrokenOut {
+            boundary: Boundary::spline(dialog.points.clone()),
+            depth,
+        });
+        edit_drawing(
+            world,
+            DrawingOp::SetView {
+                view: v,
+                label: "Broken-out section".into(),
+            },
+        );
     }
     world.trigger(DialogClose { entity });
 }
@@ -481,21 +641,32 @@ fn apply_depth_dialog(world: &mut World) {
 /// The tool's hint.
 pub fn hint(tool: ViewTool) -> Option<&'static str> {
     Some(match tool {
-        ViewTool::Section { parent: None, .. } => "Section view: click the cutting line's start on a view",
+        ViewTool::Section { parent: None, .. } => {
+            "Section view: click the cutting line's start on a view"
+        }
         ViewTool::Section { b: None, .. } => "Section view: click the cutting line's end",
-        ViewTool::Section { .. } => "Section view: move to either side and click to place · Esc to cancel",
-        ViewTool::Detail { parent: None, .. } => "Detail view: click the centre of the detail circle on a view",
+        ViewTool::Section { .. } => {
+            "Section view: move to either side and click to place · Esc to cancel"
+        }
+        ViewTool::Detail { parent: None, .. } => {
+            "Detail view: click the centre of the detail circle on a view"
+        }
         ViewTool::Detail { radius: None, .. } => "Detail view: click a point on the circle",
         ViewTool::Detail { .. } => "Detail view: click to place the detail · Esc to cancel",
-        ViewTool::Crop { view: None, .. } => "Crop view: click a corner of the crop rectangle on a view",
+        ViewTool::Crop { view: None, .. } => {
+            "Crop view: click a corner of the crop rectangle on a view"
+        }
         ViewTool::Crop { .. } => "Crop view: click the opposite corner",
         ViewTool::Break { view: None, .. } => "Break view: click the first break line on a view",
         ViewTool::Break { .. } => "Break view: click the second break line",
         ViewTool::Boundary { view: None, .. } => "Click the boundary's points on a view",
-        ViewTool::Boundary { use_: BoundaryUse::CropSpline, .. } => {
-            "Crop view: click the boundary's points · Enter or the first point closes it"
+        ViewTool::Boundary {
+            use_: BoundaryUse::CropSpline,
+            ..
+        } => "Crop view: click the boundary's points · Enter or the first point closes it",
+        ViewTool::Boundary { .. } => {
+            "Broken-out section: click the boundary's points · Enter or the first point closes it"
         }
-        ViewTool::Boundary { .. } => "Broken-out section: click the boundary's points · Enter or the first point closes it",
         _ => return None,
     })
 }

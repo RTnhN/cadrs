@@ -57,7 +57,17 @@ pub struct VersionNode {
 
 impl VersionNode {
     pub fn new(title: impl Into<String>, kind: VersionNodeKind) -> Self {
-        Self { title: title.into(), subtitle: None, kind, selectable: matches!(kind, VersionNodeKind::Version | VersionNodeKind::AutoVersion), reason: None, selected: false }
+        Self {
+            title: title.into(),
+            subtitle: None,
+            kind,
+            selectable: matches!(
+                kind,
+                VersionNodeKind::Version | VersionNodeKind::AutoVersion
+            ),
+            reason: None,
+            selected: false,
+        }
     }
 
     pub fn subtitle(mut self, s: impl Into<String>) -> Self {
@@ -107,7 +117,10 @@ pub struct VersionGraph {
 
 impl VersionGraph {
     pub fn new(name: impl Into<Cow<'static, str>>) -> Self {
-        Self { name: name.into(), nodes: Vec::new() }
+        Self {
+            name: name.into(),
+            nodes: Vec::new(),
+        }
     }
 
     /// Adds a node below the others.
@@ -122,7 +135,11 @@ impl VersionGraph {
         let root_name = name.to_string();
         (
             Name::new(root_name),
-            Node { flex_direction: FlexDirection::Column, padding: UiRect::vertical(Val::Px(4.0)), ..default() },
+            Node {
+                flex_direction: FlexDirection::Column,
+                padding: UiRect::vertical(Val::Px(4.0)),
+                ..default()
+            },
             Children::spawn(SpawnWith(move |p: &mut ChildSpawner| {
                 let auto = nodes.iter().any(|n| n.kind == VersionNodeKind::AutoVersion);
                 legend(p, &t, &name, auto);
@@ -143,7 +160,14 @@ impl VersionGraph {
                     if let Some(s) = &n.subtitle {
                         row = row.subtitle(s.clone());
                     }
-                    let mut e = p.spawn((row.build(&t), VersionGraphNode { graph: name.clone(), index: k, selectable: n.selectable }));
+                    let mut e = p.spawn((
+                        row.build(&t),
+                        VersionGraphNode {
+                            graph: name.clone(),
+                            index: k,
+                            selectable: n.selectable,
+                        },
+                    ));
                     if let Some(r) = n.reason {
                         e.insert(Tooltip::new(r));
                     }
@@ -158,7 +182,12 @@ fn legend(p: &mut ChildSpawner, t: &Theme, name: &str, auto: bool) {
     let line = Color::srgb_u8(0x2f, 0x5f, 0xb3);
     p.spawn((
         Name::new(format!("{name}-legend")),
-        Node { padding: UiRect::new(Val::Px(8.0), Val::Px(8.0), Val::Px(2.0), Val::Px(6.0)), column_gap: Val::Px(10.0), align_items: AlignItems::Center, ..default() },
+        Node {
+            padding: UiRect::new(Val::Px(8.0), Val::Px(8.0), Val::Px(2.0), Val::Px(6.0)),
+            column_gap: Val::Px(10.0),
+            align_items: AlignItems::Center,
+            ..default()
+        },
         Pickable::IGNORE,
     ))
     .with_children(|r| {
@@ -167,21 +196,36 @@ fn legend(p: &mut ChildSpawner, t: &Theme, name: &str, auto: bool) {
             items.push(("Auto version", false, true));
         }
         for (label, circle, open) in items {
-            r.spawn((Node { align_items: AlignItems::Center, column_gap: Val::Px(4.0), ..default() }, Pickable::IGNORE)).with_children(|c| {
+            r.spawn((
+                Node {
+                    align_items: AlignItems::Center,
+                    column_gap: Val::Px(4.0),
+                    ..default()
+                },
+                Pickable::IGNORE,
+            ))
+            .with_children(|c| {
                 let size = if circle || open { 10.0 } else { 8.0 };
                 c.spawn((
                     Node {
                         width: Val::Px(size),
                         height: Val::Px(size),
                         border: UiRect::all(Val::Px(if circle || open { 2.0 } else { 0.0 })),
-                        border_radius: if circle { BorderRadius::MAX } else { BorderRadius::all(Val::Px(1.5)) },
+                        border_radius: if circle {
+                            BorderRadius::MAX
+                        } else {
+                            BorderRadius::all(Val::Px(1.5))
+                        },
                         ..default()
                     },
                     BackgroundColor(if circle || open { Color::WHITE } else { line }),
                     BorderColor::all(line),
                     Pickable::IGNORE,
                 ));
-                c.spawn((t.text(label, 11.0, FontWeight::NORMAL, t.foreground), Pickable::IGNORE));
+                c.spawn((
+                    t.text(label, 11.0, FontWeight::NORMAL, t.foreground),
+                    Pickable::IGNORE,
+                ));
             });
         }
     });
@@ -192,5 +236,9 @@ fn on_node_activate(a: On<Activate>, q: Query<&VersionGraphNode>, mut commands: 
     if !n.selectable {
         return;
     }
-    commands.trigger(VersionGraphSelect { entity: a.entity, graph: n.graph.clone(), index: n.index });
+    commands.trigger(VersionGraphSelect {
+        entity: a.entity,
+        graph: n.graph.clone(),
+        index: n.index,
+    });
 }

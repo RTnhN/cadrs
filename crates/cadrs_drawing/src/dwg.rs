@@ -11,14 +11,16 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 /// What to install for DWG, for tooltips and errors.
-pub const INSTALL_HINT: &str =
-    "DWG needs a converter on PATH: install LibreDWG (dxf2dwg and dwg2dxf) or the ODA File Converter (ODAFileConverter)";
+pub const INSTALL_HINT: &str = "DWG needs a converter on PATH: install LibreDWG (dxf2dwg and dwg2dxf) or the ODA File Converter (ODAFileConverter)";
 
 /// A DWG converter program.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Converter {
     /// LibreDWG's command-line tools.
-    LibreDwg { dxf2dwg: Option<PathBuf>, dwg2dxf: Option<PathBuf> },
+    LibreDwg {
+        dxf2dwg: Option<PathBuf>,
+        dwg2dxf: Option<PathBuf>,
+    },
     /// The ODA File Converter.
     Oda(PathBuf),
 }
@@ -68,18 +70,26 @@ pub fn find_converter() -> Option<Converter> {
     }
     let (w, r) = (which("dxf2dwg"), which("dwg2dxf"));
     if w.is_some() || r.is_some() {
-        return Some(Converter::LibreDwg { dxf2dwg: w, dwg2dxf: r });
+        return Some(Converter::LibreDwg {
+            dxf2dwg: w,
+            dwg2dxf: r,
+        });
     }
     which("ODAFileConverter").map(Converter::Oda)
 }
 
 fn run(mut c: Command) -> Result<(), String> {
-    let out = c.output().map_err(|e| format!("cannot run the converter: {e}"))?;
+    let out = c
+        .output()
+        .map_err(|e| format!("cannot run the converter: {e}"))?;
     if out.status.success() {
         Ok(())
     } else {
         let err = String::from_utf8_lossy(&out.stderr);
-        Err(format!("the converter failed: {}", err.lines().last().unwrap_or("").trim()))
+        Err(format!(
+            "the converter failed: {}",
+            err.lines().last().unwrap_or("").trim()
+        ))
     }
 }
 
@@ -90,18 +100,31 @@ fn temp_dir() -> Result<PathBuf, String> {
 }
 
 /// Writes `dxf` (our DXF text) as the DWG file `out`.
-pub fn dxf_to_dwg(conv: &Converter, dxf: &str, out: &Path, version: crate::dxf::DxfVersion) -> Result<(), String> {
+pub fn dxf_to_dwg(
+    conv: &Converter,
+    dxf: &str,
+    out: &Path,
+    version: crate::dxf::DxfVersion,
+) -> Result<(), String> {
     let tmp = temp_dir()?;
-    let stem = out.file_stem().and_then(|s| s.to_str()).unwrap_or("drawing").to_string();
+    let stem = out
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or("drawing")
+        .to_string();
     let src = tmp.join(format!("{stem}.dxf"));
     std::fs::write(&src, dxf).map_err(|e| e.to_string())?;
     let result = match conv {
-        Converter::LibreDwg { dxf2dwg: Some(p), .. } => {
+        Converter::LibreDwg {
+            dxf2dwg: Some(p), ..
+        } => {
             let mut c = Command::new(p);
             c.arg("-y").arg("-o").arg(out).arg(&src);
             run(c)
         }
-        Converter::LibreDwg { dxf2dwg: None, .. } => Err("LibreDWG's dxf2dwg is not installed".into()),
+        Converter::LibreDwg { dxf2dwg: None, .. } => {
+            Err("LibreDWG's dxf2dwg is not installed".into())
+        }
         Converter::Oda(p) => {
             let odir = tmp.join("out");
             let _ = std::fs::create_dir_all(&odir);
@@ -114,9 +137,17 @@ pub fn dxf_to_dwg(conv: &Converter, dxf: &str, out: &Path, version: crate::dxf::
                 crate::dxf::DxfVersion::R2010 => "ACAD2010",
                 crate::dxf::DxfVersion::R2018 => "ACAD2018",
             };
-            c.arg(&tmp).arg(&odir).arg(v).arg("DWG").arg("0").arg("1").arg("*.DXF");
+            c.arg(&tmp)
+                .arg(&odir)
+                .arg(v)
+                .arg("DWG")
+                .arg("0")
+                .arg("1")
+                .arg("*.DXF");
             run(c).and_then(|_| {
-                std::fs::copy(odir.join(format!("{stem}.dwg")), out).map(|_| ()).map_err(|e| format!("the converter wrote no DWG: {e}"))
+                std::fs::copy(odir.join(format!("{stem}.dwg")), out)
+                    .map(|_| ())
+                    .map_err(|e| format!("the converter wrote no DWG: {e}"))
             })
         }
     };
@@ -130,21 +161,35 @@ pub fn dxf_to_dwg(conv: &Converter, dxf: &str, out: &Path, version: crate::dxf::
 /// Reads the DWG file `dwg` as DXF text.
 pub fn dwg_to_dxf(conv: &Converter, dwg: &Path) -> Result<String, String> {
     let tmp = temp_dir()?;
-    let stem = dwg.file_stem().and_then(|s| s.to_str()).unwrap_or("drawing").to_string();
+    let stem = dwg
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or("drawing")
+        .to_string();
     let out = tmp.join(format!("{stem}.dxf"));
     let result = match conv {
-        Converter::LibreDwg { dwg2dxf: Some(p), .. } => {
+        Converter::LibreDwg {
+            dwg2dxf: Some(p), ..
+        } => {
             let mut c = Command::new(p);
             c.arg("-y").arg("-o").arg(&out).arg(dwg);
             run(c)
         }
-        Converter::LibreDwg { dwg2dxf: None, .. } => Err("LibreDWG's dwg2dxf is not installed".into()),
+        Converter::LibreDwg { dwg2dxf: None, .. } => {
+            Err("LibreDWG's dwg2dxf is not installed".into())
+        }
         Converter::Oda(p) => {
             let idir = tmp.join("in");
             let _ = std::fs::create_dir_all(&idir);
             std::fs::copy(dwg, idir.join(format!("{stem}.dwg"))).map_err(|e| e.to_string())?;
             let mut c = Command::new(p);
-            c.arg(&idir).arg(&tmp).arg("ACAD2013").arg("DXF").arg("0").arg("1").arg("*.DWG");
+            c.arg(&idir)
+                .arg(&tmp)
+                .arg("ACAD2013")
+                .arg("DXF")
+                .arg("0")
+                .arg("1")
+                .arg("*.DWG");
             run(c)
         }
     }

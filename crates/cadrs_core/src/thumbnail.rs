@@ -224,8 +224,8 @@ pub fn placeholder(seed: u64) -> RgbaImage {
                     let mut color: Option<[f32; 3]> = None;
                     for (poly, c) in &polys {
                         if inside(poly, x, y) {
-                            let edge = (0..4)
-                                .any(|i| seg_dist(x, y, poly[i], poly[(i + 1) % 4]) < 0.55);
+                            let edge =
+                                (0..4).any(|i| seg_dist(x, y, poly[i], poly[(i + 1) % 4]) < 0.55);
                             color = Some(if edge { EDGE } else { *c });
                         }
                     }

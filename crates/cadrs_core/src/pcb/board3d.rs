@@ -43,7 +43,12 @@ pub enum ComponentFilter {
 }
 
 impl ComponentFilter {
-    pub const ALL: [ComponentFilter; 4] = [ComponentFilter::All, ComponentFilter::Top, ComponentFilter::Bottom, ComponentFilter::None];
+    pub const ALL: [ComponentFilter; 4] = [
+        ComponentFilter::All,
+        ComponentFilter::Top,
+        ComponentFilter::Bottom,
+        ComponentFilter::None,
+    ];
 
     pub fn label(self) -> &'static str {
         match self {
@@ -133,7 +138,15 @@ fn origin() -> BoardAnchor {
 
 impl Default for BoardOptions {
     fn default() -> Self {
-        BoardOptions { view: BoardView::ThreeD, components: ComponentFilter::All, exclude: vec![], skins: true, seat: BoardSeat::Bottom, anchor: BoardAnchor::Pending, off_board: false }
+        BoardOptions {
+            view: BoardView::ThreeD,
+            components: ComponentFilter::All,
+            exclude: vec![],
+            skins: true,
+            seat: BoardSeat::Bottom,
+            anchor: BoardAnchor::Pending,
+            off_board: false,
+        }
     }
 }
 
@@ -145,8 +158,16 @@ pub fn thickness(b: &Board) -> f64 {
 /// The middle of the board outline's box (mm), the origin without an outline.
 pub fn outline_center(b: &Board) -> [f64; 2] {
     let r = cadrs_eda::outline::board_region(b);
-    match r.iter().flatten().fold(None, |acc, p| Some(cadrs_eda::units::Bounds::union(acc, cadrs_eda::units::Bounds::of(*p)))) {
-        Some(bb) => [to_mm((bb.min.x + bb.max.x) / 2), to_mm((bb.min.y + bb.max.y) / 2)],
+    match r.iter().flatten().fold(None, |acc, p| {
+        Some(cadrs_eda::units::Bounds::union(
+            acc,
+            cadrs_eda::units::Bounds::of(*p),
+        ))
+    }) {
+        Some(bb) => [
+            to_mm((bb.min.x + bb.max.x) / 2),
+            to_mm((bb.min.y + bb.max.y) / 2),
+        ],
         None => [0.0, 0.0],
     }
 }
@@ -157,7 +178,13 @@ pub fn anchor_point(b: &Board, o: &BoardOptions) -> [f64; 3] {
         BoardAnchor::Origin => [0.0, 0.0],
         BoardAnchor::At { x, y } => [x, y],
         BoardAnchor::Center | BoardAnchor::Pending => outline_center(b),
-        BoardAnchor::Footprint(id) => b.footprints.iter().find(|f| f.id == id).map_or([0.0, 0.0], |f| [to_mm(f.placement.at.x), to_mm(f.placement.at.y)]),
+        BoardAnchor::Footprint(id) => b
+            .footprints
+            .iter()
+            .find(|f| f.id == id)
+            .map_or([0.0, 0.0], |f| {
+                [to_mm(f.placement.at.x), to_mm(f.placement.at.y)]
+            }),
     };
     let z = match o.seat {
         BoardSeat::Bottom => 0.0,
@@ -169,7 +196,11 @@ pub fn anchor_point(b: &Board, o: &BoardOptions) -> [f64; 3] {
 /// Whether a footprint sits on the board: its origin inside the outline's outer edge (a
 /// cut-out doesn't count: a wire pad's footprint cuts a hole around its own origin).
 pub fn on_board(region: &cadrs_eda::poly::Region, f: &cadrs_eda::board::PlacedFootprint) -> bool {
-    let outer: cadrs_eda::poly::Region = region.iter().filter(|r| cadrs_eda::poly::ring_area(r) > 0.0).cloned().collect();
+    let outer: cadrs_eda::poly::Region = region
+        .iter()
+        .filter(|r| cadrs_eda::poly::ring_area(r) > 0.0)
+        .cloned()
+        .collect();
     cadrs_eda::poly::contains(&outer, f.placement.at)
 }
 
@@ -181,15 +212,30 @@ pub fn idf_loop_to_kernel(l: &cadrs_idf::Loop) -> Loop {
     let curves = l
         .segments()
         .filter_map(|s| match s {
-            Segment::Line { start, end } => ((start[0] - end[0]).hypot(start[1] - end[1]) > 1e-12).then(|| Curve2::Line { a: p(start), b: p(end), source: None }),
-            Segment::Arc { start, center, radius, sweep, .. } => (radius > 1e-12).then(|| Curve2::Arc {
+            Segment::Line { start, end } => ((start[0] - end[0]).hypot(start[1] - end[1]) > 1e-12)
+                .then(|| Curve2::Line {
+                    a: p(start),
+                    b: p(end),
+                    source: None,
+                }),
+            Segment::Arc {
+                start,
+                center,
+                radius,
+                sweep,
+                ..
+            } => (radius > 1e-12).then(|| Curve2::Arc {
                 center: p(center),
                 radius,
                 start_angle: (start[1] - center[1]).atan2(start[0] - center[0]),
                 sweep: sweep.to_radians(),
                 source: None,
             }),
-            Segment::Circle { center, radius } => (radius > 1e-12).then(|| Curve2::Circle { center: p(center), radius, source: None }),
+            Segment::Circle { center, radius } => (radius > 1e-12).then(|| Curve2::Circle {
+                center: p(center),
+                radius,
+                source: None,
+            }),
         })
         .collect();
     Loop { curves }
@@ -208,10 +254,30 @@ fn slot(c: [f64; 2], w: f64, h: f64, angle: f64) -> Loop {
     let (e1, e2) = (p(c[0] + dx, c[1] + dy), p(c[0] - dx, c[1] - dy));
     Loop {
         curves: vec![
-            Curve2::Line { a: p(e2.x - nx, e2.y - ny), b: p(e1.x - nx, e1.y - ny), source: None },
-            Curve2::Arc { center: e1, radius: r, start_angle: a - std::f64::consts::FRAC_PI_2, sweep: std::f64::consts::PI, source: None },
-            Curve2::Line { a: p(e1.x + nx, e1.y + ny), b: p(e2.x + nx, e2.y + ny), source: None },
-            Curve2::Arc { center: e2, radius: r, start_angle: a + std::f64::consts::FRAC_PI_2, sweep: std::f64::consts::PI, source: None },
+            Curve2::Line {
+                a: p(e2.x - nx, e2.y - ny),
+                b: p(e1.x - nx, e1.y - ny),
+                source: None,
+            },
+            Curve2::Arc {
+                center: e1,
+                radius: r,
+                start_angle: a - std::f64::consts::FRAC_PI_2,
+                sweep: std::f64::consts::PI,
+                source: None,
+            },
+            Curve2::Line {
+                a: p(e1.x + nx, e1.y + ny),
+                b: p(e2.x + nx, e2.y + ny),
+                source: None,
+            },
+            Curve2::Arc {
+                center: e2,
+                radius: r,
+                start_angle: a + std::f64::consts::FRAC_PI_2,
+                sweep: std::f64::consts::PI,
+                source: None,
+            },
         ],
     }
 }
@@ -242,12 +308,30 @@ fn segment_tag(c: &Curve2) -> u64 {
             let (p, r) = ((q(a.x), q(a.y)), (q(b.x), q(b.y)));
             format!("line{:?}", if p <= r { (p, r) } else { (r, p) })
         }
-        Curve2::Arc { center, radius, start_angle, sweep, .. } => {
-            let at = |t: f64| (q(center.x + radius * t.cos()), q(center.y + radius * t.sin()));
+        Curve2::Arc {
+            center,
+            radius,
+            start_angle,
+            sweep,
+            ..
+        } => {
+            let at = |t: f64| {
+                (
+                    q(center.x + radius * t.cos()),
+                    q(center.y + radius * t.sin()),
+                )
+            };
             let (p, r) = (at(*start_angle), at(start_angle + sweep));
-            format!("arc{:?}{}{:?}", (q(center.x), q(center.y)), q(*radius), if p <= r { (p, r) } else { (r, p) })
+            format!(
+                "arc{:?}{}{:?}",
+                (q(center.x), q(center.y)),
+                q(*radius),
+                if p <= r { (p, r) } else { (r, p) }
+            )
         }
-        Curve2::Circle { center, radius, .. } => format!("circle{:?}{}", (q(center.x), q(center.y)), q(*radius)),
+        Curve2::Circle { center, radius, .. } => {
+            format!("circle{:?}{}", (q(center.x), q(center.y)), q(*radius))
+        }
         other => format!("{other:?}"),
     };
     stable_hash(key.as_bytes())
@@ -257,7 +341,9 @@ fn segment_tag(c: &Curve2) -> u64 {
 /// the board and clear of each other; footprints waiting off the board don't count.
 pub fn board_profile(b: &Board) -> Result<BoardPlan, String> {
     let loops = crate::pcb::design::board_outline_loops(b);
-    let Some((outer, cuts)) = loops.split_first() else { return Err("The board has no closed outline".into()) };
+    let Some((outer, cuts)) = loops.split_first() else {
+        return Err("The board has no closed outline".into());
+    };
     let region = cadrs_eda::outline::board_region(b);
     let inside = |at: cadrs_eda::units::Pt, r: f64| {
         // The hole and 0.05 mm round it within the board area.
@@ -266,22 +352,38 @@ pub fn board_profile(b: &Board) -> Result<BoardPlan, String> {
     };
     let mut plan = BoardPlan::default();
     let outer = idf_loop_to_kernel(outer);
-    plan.curves.extend(outer.curves.iter().map(|c| TaggedCurve { curve: c.clone(), tag: segment_tag(c) }));
+    plan.curves.extend(outer.curves.iter().map(|c| TaggedCurve {
+        curve: c.clone(),
+        tag: segment_tag(c),
+    }));
     let mut holes: Vec<Loop> = cuts.iter().map(idf_loop_to_kernel).collect();
     for l in &holes {
-        plan.curves.extend(l.curves.iter().map(|c| TaggedCurve { curve: c.clone(), tag: segment_tag(c) }));
+        plan.curves.extend(l.curves.iter().map(|c| TaggedCurve {
+            curve: c.clone(),
+            tag: segment_tag(c),
+        }));
     }
     // Every hole with what names it: (centre, size, angle, key).
     let mut all: Vec<(cadrs_eda::units::Pt, cadrs_eda::units::Size, f64, String)> = Vec::new();
     for f in &b.footprints {
         for p in &f.footprint.pads {
             if let Some(d) = p.drill {
-                all.push((f.placement.apply(p.at + d.offset.rotated(p.angle)), d.size, f.placement.apply_angle(p.angle), format!("pad{}{}", f.id, p.number)));
+                all.push((
+                    f.placement.apply(p.at + d.offset.rotated(p.angle)),
+                    d.size,
+                    f.placement.apply_angle(p.angle),
+                    format!("pad{}{}", f.id, p.number),
+                ));
             }
         }
     }
     for v in &b.vias {
-        all.push((v.at, cadrs_eda::units::Size::new(v.drill, v.drill), 0.0, format!("via{}", v.id)));
+        all.push((
+            v.at,
+            cadrs_eda::units::Size::new(v.drill, v.drill),
+            0.0,
+            format!("via{}", v.id),
+        ));
     }
     let mut placed: Vec<([f64; 2], f64)> = vec![];
     let mut dropped = 0;
@@ -297,40 +399,76 @@ pub fn board_profile(b: &Board) -> Result<BoardPlan, String> {
         if cadrs_eda::poly::area(&cadrs_eda::poly::intersection(&disc, &region)) < 1e6 {
             continue;
         }
-        if !inside(at, r) || placed.iter().any(|(q, s)| (q[0] - c[0]).hypot(q[1] - c[1]) < r + s + 0.01) {
+        if !inside(at, r)
+            || placed
+                .iter()
+                .any(|(q, s)| (q[0] - c[0]).hypot(q[1] - c[1]) < r + s + 0.01)
+        {
             dropped += 1;
             continue;
         }
         placed.push((c, r));
         let l = if (w - hh).abs() < 1e-6 {
-            Loop { curves: vec![Curve2::Circle { center: Point2::new(c[0], c[1]), radius: w / 2.0, source: None }] }
+            Loop {
+                curves: vec![Curve2::Circle {
+                    center: Point2::new(c[0], c[1]),
+                    radius: w / 2.0,
+                    source: None,
+                }],
+            }
         } else {
             slot(c, w, hh, angle)
         };
         for (i, curve) in l.curves.iter().enumerate() {
-            plan.curves.push(TaggedCurve { curve: curve.clone(), tag: stable_hash(format!("{key}/{i}").as_bytes()) });
+            plan.curves.push(TaggedCurve {
+                curve: curve.clone(),
+                tag: stable_hash(format!("{key}/{i}").as_bytes()),
+            });
         }
         holes.push(l);
     }
     if dropped > 0 {
-        plan.warnings.push(format!("{dropped} hole{} not cut (overlapping another or the board's edge)", if dropped == 1 { "" } else { "s" }));
+        plan.warnings.push(format!(
+            "{dropped} hole{} not cut (overlapping another or the board's edge)",
+            if dropped == 1 { "" } else { "s" }
+        ));
     }
-    plan.regions = vec![Region { outer, holes, source: None }];
+    plan.regions = vec![Region {
+        outer,
+        holes,
+        source: None,
+    }];
     Ok(plan)
 }
 
 /// The board as a kernel solid in the board frame, its plan's curves, and warnings.
-pub fn board_body(k: &mut dyn Kernel, b: &Board) -> Result<(BodyId, Vec<TaggedCurve>, Vec<String>), String> {
+pub fn board_body(
+    k: &mut dyn Kernel,
+    b: &Board,
+) -> Result<(BodyId, Vec<TaggedCurve>, Vec<String>), String> {
     let plan = board_profile(b)?;
     let t = thickness(b).max(1e-3);
-    let r = k.extrude(&Profile::new(Plane::top(), plan.regions.clone()), Extent::Blind(t));
+    let r = k.extrude(
+        &Profile::new(Plane::top(), plan.regions.clone()),
+        Extent::Blind(t),
+    );
     match r {
         Ok(r) if !r.bodies.is_empty() => Ok((r.bodies[0], plan.curves, plan.warnings)),
         // A hole the kernel refuses: try the outline alone, and say so.
         _ => {
-            let bare = Region { outer: plan.regions[0].outer.clone(), holes: vec![], source: None };
-            let r = k.extrude(&Profile::new(Plane::top(), vec![bare]), Extent::Blind(t)).map_err(|e| format!("The board outline doesn't make a solid: {e}"))?;
-            let body = r.bodies.into_iter().next().ok_or("The board outline doesn't make a solid")?;
+            let bare = Region {
+                outer: plan.regions[0].outer.clone(),
+                holes: vec![],
+                source: None,
+            };
+            let r = k
+                .extrude(&Profile::new(Plane::top(), vec![bare]), Extent::Blind(t))
+                .map_err(|e| format!("The board outline doesn't make a solid: {e}"))?;
+            let body = r
+                .bodies
+                .into_iter()
+                .next()
+                .ok_or("The board outline doesn't make a solid")?;
             let mut w = plan.warnings;
             w.push("The board's holes and cut-outs couldn't be cut".into());
             Ok((body, plan.curves, w))
@@ -346,7 +484,9 @@ fn curve_distance(c: &Curve2, p: Point2<f64>) -> f64 {
             let t = ((p - a).dot(&d) / d.norm_squared().max(1e-300)).clamp(0.0, 1.0);
             (p - (a + d * t)).norm()
         }
-        Curve2::Arc { center, radius, .. } | Curve2::Circle { center, radius, .. } => ((p - center).norm() - radius).abs(),
+        Curve2::Arc { center, radius, .. } | Curve2::Circle { center, radius, .. } => {
+            ((p - center).norm() - radius).abs()
+        }
         _ => f64::MAX,
     }
 }
@@ -356,7 +496,13 @@ fn curve_distance(c: &Curve2, p: Point2<f64>) -> f64 {
 /// and bottom caps; a side face is named after the plan curve it was swept from
 /// (`FaceOrigin::Side` with its tag, [`TaggedCurve`]), so adding a hole or moving an outline
 /// segment renames no other face; anything else by its place.
-pub fn board_face_names(k: &dyn Kernel, body: BodyId, op: OpId, m: &Motion, curves: &[TaggedCurve]) -> Result<Vec<FaceName>, String> {
+pub fn board_face_names(
+    k: &dyn Kernel,
+    body: BodyId,
+    op: OpId,
+    m: &Motion,
+    curves: &[TaggedCurve],
+) -> Result<Vec<FaceName>, String> {
     let faces = k.faces(body).map_err(|e| e.to_string())?;
     let back = m.inverse();
     let up = m.linear * Vector3::z();
@@ -369,8 +515,24 @@ pub fn board_face_names(k: &dyn Kernel, body: BodyId, op: OpId, m: &Motion, curv
         .iter()
         .map(|f| {
             match f.plane.as_ref().map(|pl| pl.normal.dot(&up)) {
-                Some(d) if d > 0.999 => return FaceName::new(op, FaceOrigin::Cap { region: 0, end: true }),
-                Some(d) if d < -0.999 => return FaceName::new(op, FaceOrigin::Cap { region: 0, end: false }),
+                Some(d) if d > 0.999 => {
+                    return FaceName::new(
+                        op,
+                        FaceOrigin::Cap {
+                            region: 0,
+                            end: true,
+                        },
+                    );
+                }
+                Some(d) if d < -0.999 => {
+                    return FaceName::new(
+                        op,
+                        FaceOrigin::Cap {
+                            region: 0,
+                            end: false,
+                        },
+                    );
+                }
                 _ => {}
             }
             // A wall: the plan curve under its middle (a cylinder's by its axis and radius).
@@ -378,20 +540,41 @@ pub fn board_face_names(k: &dyn Kernel, body: BodyId, op: OpId, m: &Motion, curv
                 (Some(axis), Some(r)) => {
                     let c = to_board(&axis.origin);
                     curves.iter().find(|tc| match &tc.curve {
-                        Curve2::Arc { center, radius, .. } | Curve2::Circle { center, radius, .. } => (center - c).norm() < 1e-3 && (radius - r).abs() < 1e-3,
+                        Curve2::Arc { center, radius, .. }
+                        | Curve2::Circle { center, radius, .. } => {
+                            (center - c).norm() < 1e-3 && (radius - r).abs() < 1e-3
+                        }
                         _ => false,
                     })
                 }
                 _ => {
                     let c = to_board(&f.center);
-                    curves.iter().filter(|tc| matches!(tc.curve, Curve2::Line { .. })).min_by(|a, b| curve_distance(&a.curve, c).total_cmp(&curve_distance(&b.curve, c))).filter(|tc| curve_distance(&tc.curve, c) < 1e-3)
+                    curves
+                        .iter()
+                        .filter(|tc| matches!(tc.curve, Curve2::Line { .. }))
+                        .min_by(|a, b| {
+                            curve_distance(&a.curve, c).total_cmp(&curve_distance(&b.curve, c))
+                        })
+                        .filter(|tc| curve_distance(&tc.curve, c) < 1e-3)
                 }
             };
             match found {
-                Some(tc) => FaceName::new(op, FaceOrigin::Side { region: 0, curve: tc.tag }),
+                Some(tc) => FaceName::new(
+                    op,
+                    FaceOrigin::Side {
+                        region: 0,
+                        curve: tc.tag,
+                    },
+                ),
                 None => {
                     other += 1;
-                    FaceName::new(op, FaceOrigin::Imported { body: 0, face: other })
+                    FaceName::new(
+                        op,
+                        FaceOrigin::Imported {
+                            body: 0,
+                            face: other,
+                        },
+                    )
                 }
             }
         })
@@ -421,16 +604,30 @@ fn solid_cache() -> &'static RwLock<HashMap<SolidKey, Arc<Solid>>> {
 /// The mesh part of a footprint's visible model, made once per model (by its file, generated
 /// body, placement in the footprint and opacity).
 fn footprint_solid(fp: &cadrs_eda::footprint::Footprint) -> Result<Option<Arc<Solid>>, String> {
-    let Some(m) = crate::pcb::model::shown_model(fp) else { return Ok(None) };
+    let Some(m) = crate::pcb::model::shown_model(fp) else {
+        return Ok(None);
+    };
     // Whether the file is loaded too: a model shown by its generated body until its file
     // arrives is made again then.
     let loaded = m.blob.as_ref().is_some_and(|h| crate::blobs::contains(h));
-    let key = stable_hash(format!("{:?}{loaded}{:?}{:?}{:?}{}{:?}", m.blob, m.offset, m.rotation, m.scale, m.opacity, m.body).as_bytes());
+    let key = stable_hash(
+        format!(
+            "{:?}{loaded}{:?}{:?}{:?}{}{:?}",
+            m.blob, m.offset, m.rotation, m.scale, m.opacity, m.body
+        )
+        .as_bytes(),
+    );
     if let Some(s) = solid_cache().read().ok().and_then(|c| c.get(&key).cloned()) {
         return Ok(Some(s));
     }
-    let Some((meshes, opacity)) = crate::pcb::model::footprint_meshes(fp)? else { return Ok(None) };
-    let s = Arc::new(crate::pcb::mesh_solid::mesh_solid(&meshes, Uuid::nil(), opacity));
+    let Some((meshes, opacity)) = crate::pcb::model::footprint_meshes(fp)? else {
+        return Ok(None);
+    };
+    let s = Arc::new(crate::pcb::mesh_solid::mesh_solid(
+        &meshes,
+        Uuid::nil(),
+        opacity,
+    ));
     if let Ok(mut c) = solid_cache().write() {
         c.insert(key, s.clone());
     }
@@ -439,7 +636,9 @@ fn footprint_solid(fp: &cadrs_eda::footprint::Footprint) -> Result<Option<Arc<So
 
 /// The value field of a footprint ("10k"), empty when it has none.
 fn value_of(fp: &cadrs_eda::footprint::Footprint) -> String {
-    fp.field(cadrs_eda::symbol::fields::VALUE).map(|v| v.text.text.text.clone()).unwrap_or_default()
+    fp.field(cadrs_eda::symbol::fields::VALUE)
+        .map(|v| v.text.text.text.clone())
+        .unwrap_or_default()
 }
 
 /// The components `o` takes from `b`, with warnings for models that can't be shown.
@@ -449,15 +648,28 @@ pub fn components(b: &Board, o: &BoardOptions) -> (Vec<Component>, Vec<String>) 
     let mut warnings = vec![];
     let region = cadrs_eda::outline::board_region(b);
     for f in &b.footprints {
-        if !o.components.takes(f.placement.side) || o.exclude.contains(&f.id) || !(o.off_board || on_board(&region, f)) {
+        if !o.components.takes(f.placement.side)
+            || o.exclude.contains(&f.id)
+            || !(o.off_board || on_board(&region, f))
+        {
             continue;
         }
         let reference = f.reference().to_string();
         match footprint_solid(&f.footprint) {
             Ok(Some(solid)) => {
                 let value = value_of(&f.footprint);
-                let name = if value.is_empty() { reference.clone() } else { format!("{reference} {value}") };
-                out.push(Component { footprint: f.id, name, reference, solid, motion: crate::pcb::model::footprint_motion(&f.placement, t) });
+                let name = if value.is_empty() {
+                    reference.clone()
+                } else {
+                    format!("{reference} {value}")
+                };
+                out.push(Component {
+                    footprint: f.id,
+                    name,
+                    reference,
+                    solid,
+                    motion: crate::pcb::model::footprint_motion(&f.placement, t),
+                });
             }
             Ok(None) => {}
             Err(e) => warnings.push(format!("{reference}: {e}")),
@@ -483,7 +695,10 @@ pub fn renamed_by(s: &Solid, f: impl Fn(FaceName) -> FaceName) -> Solid {
         e.name = EdgeName::new(f(e.name.faces[0]), f(e.name.faces[1]), e.name.index);
     }
     for v in &mut out.vertices {
-        v.name = VertexName { faces: v.name.faces.map(&f), ..v.name };
+        v.name = VertexName {
+            faces: v.name.faces.map(&f),
+            ..v.name
+        };
     }
     for l in &mut out.looks {
         l.0 = f(l.0);
@@ -494,8 +709,15 @@ pub fn renamed_by(s: &Solid, f: impl Fn(FaceName) -> FaceName) -> Solid {
 /// `s` moved by the rigid motion `m`.
 pub fn moved(s: &Solid, m: &Motion) -> Solid {
     let r = m.linear;
-    let rows = [[r[(0, 0)], r[(0, 1)], r[(0, 2)]], [r[(1, 0)], r[(1, 1)], r[(1, 2)]], [r[(2, 0)], r[(2, 1)], r[(2, 2)]]];
-    let pose = crate::assembly::Pose { rotation: rows, translation: [m.translation.x, m.translation.y, m.translation.z] };
+    let rows = [
+        [r[(0, 0)], r[(0, 1)], r[(0, 2)]],
+        [r[(1, 0)], r[(1, 1)], r[(1, 2)]],
+        [r[(2, 0)], r[(2, 1)], r[(2, 2)]],
+    ];
+    let pose = crate::assembly::Pose {
+        rotation: rows,
+        translation: [m.translation.x, m.translation.y, m.translation.z],
+    };
     crate::assembly::transform_solid(s, &pose)
 }
 
@@ -525,7 +747,15 @@ fn skin_blob(b: &Board, hash: u64, owner: u64, side: Side) -> Option<(String, [f
     let made = cadrs_eda::skin::board_skin(b, side, SKIN_PX_PER_MM, 4096).and_then(|s| {
         let png = s.png()?;
         let bb = s.bounds;
-        Some((crate::blobs::insert(png), [to_mm(bb.min.x), to_mm(bb.min.y), to_mm(bb.size().w), to_mm(bb.size().h)]))
+        Some((
+            crate::blobs::insert(png),
+            [
+                to_mm(bb.min.x),
+                to_mm(bb.min.y),
+                to_mm(bb.size().w),
+                to_mm(bb.size().h),
+            ],
+        ))
     });
     if let Ok(mut c) = skin_cache().write() {
         c.insert(key, (hash, made.clone()));
@@ -539,7 +769,10 @@ fn skin_blob(b: &Board, hash: u64, owner: u64, side: Side) -> Option<(String, [f
         }
         while recent.len() > KEPT_SKINS {
             let Some(old) = recent.pop_back() else { break };
-            if !c.values().any(|(_, s)| s.as_ref().is_some_and(|(b, _)| *b == old)) {
+            if !c
+                .values()
+                .any(|(_, s)| s.as_ref().is_some_and(|(b, _)| *b == old))
+            {
                 crate::blobs::forget(&old);
             }
         }
@@ -551,7 +784,10 @@ fn skin_blob(b: &Board, hash: u64, owner: u64, side: Side) -> Option<(String, [f
 /// or never made in this run (a rebuild restored from the last run's snapshot names skins only
 /// that run made). A rebuild's cached output showing it is made again (which makes the skin).
 pub fn shows_forgotten_skin(solid: &Solid) -> bool {
-    solid.images.iter().any(|i| i.facing.is_some() && !crate::blobs::contains(&i.blob))
+    solid
+        .images
+        .iter()
+        .any(|i| i.facing.is_some() && !crate::blobs::contains(&i.blob))
 }
 
 /// How many of the latest skins stay loaded whatever their owners show now.
@@ -569,8 +805,16 @@ pub fn skins(b: &Board, hash: u64, owner: u64) -> Vec<SolidImage> {
     let mut out = vec![];
     // Each seen only from outside its face: through the board, the other face's would show.
     for (side, z, n) in [(Side::Top, t + 0.01, 1.0), (Side::Bottom, -0.01, -1.0)] {
-        let Some((blob, [x0, y0, w, h])) = skin_blob(b, hash, owner, side) else { continue };
-        out.push(SolidImage { blob, corner: [x0, y0, z], u: [w, 0.0, 0.0], v: [0.0, h, 0.0], facing: Some([0.0, 0.0, n]) });
+        let Some((blob, [x0, y0, w, h])) = skin_blob(b, hash, owner, side) else {
+            continue;
+        };
+        out.push(SolidImage {
+            blob,
+            corner: [x0, y0, z],
+            u: [w, 0.0, 0.0],
+            v: [0.0, h, 0.0],
+            facing: Some([0.0, 0.0, n]),
+        });
     }
     out
 }
@@ -622,8 +866,14 @@ mod tests {
         let (regions, warnings) = (plan.regions, plan.warnings);
         assert_eq!(regions.len(), 1);
         // The course board's through-hole parts: BT1's two pins, D1's two, R1's two.
-        let holes = cadrs_eda::fab::holes(&b).iter().filter(|h| to_mm(h.size.w.min(h.size.h)) >= MIN_HOLE).count();
-        let all: Vec<f64> = cadrs_eda::fab::holes(&b).iter().map(|h| to_mm(h.size.w)).collect();
+        let holes = cadrs_eda::fab::holes(&b)
+            .iter()
+            .filter(|h| to_mm(h.size.w.min(h.size.h)) >= MIN_HOLE)
+            .count();
+        let all: Vec<f64> = cadrs_eda::fab::holes(&b)
+            .iter()
+            .map(|h| to_mm(h.size.w))
+            .collect();
         assert_eq!(regions[0].holes.len(), holes, "{warnings:?} {all:?}");
         assert!(holes >= 4, "{all:?}");
     }
@@ -638,16 +888,25 @@ mod tests {
         // BT1 is on the bottom: its model hangs below the board.
         let bt = cs.iter().find(|c| c.reference == "BT1").unwrap();
         let s = moved(&bt.solid, &bt.motion);
-        assert!(s.positions.iter().all(|p| p[2] <= 1e-6), "BT1 below the board");
+        assert!(
+            s.positions.iter().all(|p| p[2] <= 1e-6),
+            "BT1 below the board"
+        );
         let d1 = cs.iter().find(|c| c.reference == "D1").unwrap();
         let s = moved(&d1.solid, &d1.motion);
         // A through-hole LED: its body stands on the top face, its leads go down through it.
         let zmax = s.positions.iter().map(|p| p[2]).fold(f64::MIN, f64::max);
         assert!(zmax > 1.6 + 3.0, "D1 on top: {zmax}");
         // Filters.
-        let top = BoardOptions { components: ComponentFilter::Top, ..Default::default() };
+        let top = BoardOptions {
+            components: ComponentFilter::Top,
+            ..Default::default()
+        };
         assert_eq!(components(&b, &top).0.len(), 2);
-        let ex = BoardOptions { exclude: vec![d1.footprint], ..Default::default() };
+        let ex = BoardOptions {
+            exclude: vec![d1.footprint],
+            ..Default::default()
+        };
         assert!(components(&b, &ex).0.iter().all(|c| c.reference != "D1"));
     }
 
@@ -656,23 +915,56 @@ mod tests {
         // A wire pad whose footprint cuts a ⌀4 hole round its origin, in the middle.
         let mut b = Board::with_rect_outline(mm(40.0), mm(20.0));
         let mut f = cadrs_eda::ac_board::wire_pad();
-        cadrs_eda::lib_edit::add_fp_shape(&mut f, cadrs_eda::graphics::Geom::Circle { center: cadrs_eda::units::Pt::ZERO, radius: mm(2.0) }, cadrs_eda::layer::Layer::Outline, mm(0.05));
-        b.footprints.push(cadrs_eda::board::PlacedFootprint { id: Uuid::new_v4(), footprint: f, placement: cadrs_eda::footprint::FootprintPlacement { at: cadrs_eda::units::Pt::mm(20.0, 10.0), ..Default::default() }, locked: false, symbol: None });
+        cadrs_eda::lib_edit::add_fp_shape(
+            &mut f,
+            cadrs_eda::graphics::Geom::Circle {
+                center: cadrs_eda::units::Pt::ZERO,
+                radius: mm(2.0),
+            },
+            cadrs_eda::layer::Layer::Outline,
+            mm(0.05),
+        );
+        b.footprints.push(cadrs_eda::board::PlacedFootprint {
+            id: Uuid::new_v4(),
+            footprint: f,
+            placement: cadrs_eda::footprint::FootprintPlacement {
+                at: cadrs_eda::units::Pt::mm(20.0, 10.0),
+                ..Default::default()
+            },
+            locked: false,
+            symbol: None,
+        });
         let region = cadrs_eda::outline::board_region(&b);
-        assert!(!cadrs_eda::poly::contains(&region, b.footprints[0].placement.at), "its origin is in its own hole");
+        assert!(
+            !cadrs_eda::poly::contains(&region, b.footprints[0].placement.at),
+            "its origin is in its own hole"
+        );
         assert!(on_board(&region, &b.footprints[0]));
         b.footprints[0].placement.at = cadrs_eda::units::Pt::mm(50.0, 10.0);
-        assert!(!on_board(&cadrs_eda::outline::board_region(&b), &b.footprints[0]));
+        assert!(!on_board(
+            &cadrs_eda::outline::board_region(&b),
+            &b.footprints[0]
+        ));
     }
 
     #[test]
     fn anchors_and_seats() {
         let b = Board::with_rect_outline(mm(40.0), mm(20.0));
-        let centre = BoardOptions { anchor: BoardAnchor::Center, ..Default::default() };
+        let centre = BoardOptions {
+            anchor: BoardAnchor::Center,
+            ..Default::default()
+        };
         assert_eq!(anchor_point(&b, &centre), [20.0, 10.0, 0.0]);
-        let o = BoardOptions { anchor: BoardAnchor::Origin, seat: BoardSeat::Top, ..Default::default() };
+        let o = BoardOptions {
+            anchor: BoardAnchor::Origin,
+            seat: BoardSeat::Top,
+            ..Default::default()
+        };
         assert_eq!(anchor_point(&b, &o), [0.0, 0.0, 1.6]);
-        let o = BoardOptions { anchor: BoardAnchor::At { x: 3.0, y: -2.0 }, ..Default::default() };
+        let o = BoardOptions {
+            anchor: BoardAnchor::At { x: 3.0, y: -2.0 },
+            ..Default::default()
+        };
         assert_eq!(anchor_point(&b, &o), [3.0, -2.0, 0.0]);
     }
 
@@ -680,11 +972,16 @@ mod tests {
     fn renaming_moves_every_name() {
         let mut body = cadrs_eda::model3d::Body::default();
         body.cuboid([0.0; 3], [1.0; 3], [1, 1, 1]);
-        let s = crate::pcb::mesh_solid::mesh_solid(&cadrs_eda::model3d::mesh(&body), Uuid::nil(), 1.0);
+        let s =
+            crate::pcb::mesh_solid::mesh_solid(&cadrs_eda::model3d::mesh(&body), Uuid::nil(), 1.0);
         let op = Uuid::from_u128(7);
         let r = renamed(&s, op);
         assert!(r.faces.iter().all(|f| f.name.op == op));
-        assert!(r.edges.iter().all(|e| e.name.faces.iter().all(|f| f.op == op)));
+        assert!(
+            r.edges
+                .iter()
+                .all(|e| e.name.faces.iter().all(|f| f.op == op))
+        );
         assert!(r.looks.iter().all(|l| l.0.op == op));
     }
 
@@ -696,8 +993,16 @@ mod tests {
             .iter()
             .map(|c| match c {
                 Curve2::Line { a, b, .. } => (*a, *b),
-                Curve2::Arc { center, radius, start_angle, sweep, .. } => {
-                    let at = |t: f64| Point2::new(center.x + radius * t.cos(), center.y + radius * t.sin());
+                Curve2::Arc {
+                    center,
+                    radius,
+                    start_angle,
+                    sweep,
+                    ..
+                } => {
+                    let at = |t: f64| {
+                        Point2::new(center.x + radius * t.cos(), center.y + radius * t.sin())
+                    };
                     (at(*start_angle), at(start_angle + sweep))
                 }
                 _ => unreachable!(),

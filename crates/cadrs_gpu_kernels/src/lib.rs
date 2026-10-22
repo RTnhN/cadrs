@@ -22,7 +22,15 @@ extern crate std;
 use core::ops::{Add, Div, Mul, Neg, Sub};
 
 /// The scalar the kernels are written in (`f32` or `f64`).
-pub trait Real: Copy + PartialOrd + Add<Output = Self> + Sub<Output = Self> + Mul<Output = Self> + Div<Output = Self> + Neg<Output = Self> {
+pub trait Real:
+    Copy
+    + PartialOrd
+    + Add<Output = Self>
+    + Sub<Output = Self>
+    + Mul<Output = Self>
+    + Div<Output = Self>
+    + Neg<Output = Self>
+{
     fn zero() -> Self;
     fn one() -> Self;
     fn from_f32(x: f32) -> Self;
@@ -147,7 +155,14 @@ pub fn basis<R: Real>(k: &[R], span: usize, t: R) -> ([R; 4], [R; 4]) {
 
 /// The surface's point and unit normal at `(u, v)`: `ctrl` holds homogeneous control points
 /// `(w x, w y, w z, w)`, `u` fastest; `ku`, `kv` the clamped knot vectors (`n + 4` each).
-pub fn nurbs_point_normal<R: Real>(p: &SurfParams, ctrl: &[R], ku: &[R], kv: &[R], u: R, v: R) -> [R; 6] {
+pub fn nurbs_point_normal<R: Real>(
+    p: &SurfParams,
+    ctrl: &[R],
+    ku: &[R],
+    kv: &[R],
+    u: R,
+    v: R,
+) -> [R; 6] {
     let nu = p.nu as usize;
     let nv = p.nv as usize;
     let spu = find_span(ku, nu, u);
@@ -184,9 +199,21 @@ pub fn nurbs_point_normal<R: Real>(p: &SurfParams, ctrl: &[R], ku: &[R], kv: &[R
     let iw = R::one() / a[3];
     let s = [a[0] * iw, a[1] * iw, a[2] * iw];
     // S_u = (A_u - w_u S) / w; the 1/w factor doesn't change the normal's direction.
-    let su = [au[0] - au[3] * s[0], au[1] - au[3] * s[1], au[2] - au[3] * s[2]];
-    let sv = [av[0] - av[3] * s[0], av[1] - av[3] * s[1], av[2] - av[3] * s[2]];
-    let n = [su[1] * sv[2] - su[2] * sv[1], su[2] * sv[0] - su[0] * sv[2], su[0] * sv[1] - su[1] * sv[0]];
+    let su = [
+        au[0] - au[3] * s[0],
+        au[1] - au[3] * s[1],
+        au[2] - au[3] * s[2],
+    ];
+    let sv = [
+        av[0] - av[3] * s[0],
+        av[1] - av[3] * s[1],
+        av[2] - av[3] * s[2],
+    ];
+    let n = [
+        su[1] * sv[2] - su[2] * sv[1],
+        su[2] * sv[0] - su[0] * sv[2],
+        su[0] * sv[1] - su[1] * sv[0],
+    ];
     let len = (n[0] * n[0] + n[1] * n[1] + n[2] * n[2]).sqrt();
     let il = if len > z { R::one() / len } else { z };
     [s[0], s[1], s[2], n[0] * il, n[1] * il, n[2] * il]
@@ -222,15 +249,35 @@ pub struct GridParams {
 pub fn cell_of(g: &GridParams, y: f32, z: f32) -> (u32, u32) {
     let fy = (y - g.y0) * g.inv_dy;
     let fz = (z - g.z0) * g.inv_dz;
-    let cy = if fy < 0.0 { 0 } else if fy >= g.gy as f32 { g.gy - 1 } else { fy as u32 };
-    let cz = if fz < 0.0 { 0 } else if fz >= g.gz as f32 { g.gz - 1 } else { fz as u32 };
+    let cy = if fy < 0.0 {
+        0
+    } else if fy >= g.gy as f32 {
+        g.gy - 1
+    } else {
+        fy as u32
+    };
+    let cz = if fz < 0.0 {
+        0
+    } else if fz >= g.gz as f32 {
+        g.gz - 1
+    } else {
+        fz as u32
+    };
     (cy, cz)
 }
 
 /// Whether `(x, y, z)` is inside the closed mesh: the parity of triangles the ray along +X
 /// crosses. `tris` holds 9 floats per triangle; the point's `(y, z)` cell lists the triangles
 /// whose `(y, z)` bounds overlap it. Outside the grid's bounds the point is outside.
-pub fn classify_point(g: &GridParams, tris: &[f32], cell_start: &[u32], cell_tris: &[u32], x: f32, y: f32, z: f32) -> u32 {
+pub fn classify_point(
+    g: &GridParams,
+    tris: &[f32],
+    cell_start: &[u32],
+    cell_tris: &[u32],
+    x: f32,
+    y: f32,
+    z: f32,
+) -> u32 {
     let (cy, cz) = cell_of(g, y, z);
     let cell = (cz * g.gy + cy) as usize;
     let mut k = cell_start[cell];
@@ -256,7 +303,6 @@ pub fn classify_point(g: &GridParams, tris: &[f32], cell_start: &[u32], cell_tri
     }
     parity
 }
-
 
 // ---------------------------------------------------------------------------------------------
 // Mass-property quadrature on B-spline faces (the kernel's `mass` module, Green's theorem):
@@ -391,10 +437,24 @@ pub fn surface_d1<R: Real>(q: &QuadParams, ctrl: &[R], ku: &[R], kv: &[R], u: R,
 }
 
 /// Adds the integrand at (u, v), weighted by `w`, to `out` (the kernel's `mass::integrand`).
-pub fn integrand<R: Real>(q: &QuadParams, ctrl: &[R], ku: &[R], kv: &[R], shift: [R; 3], u: R, v: R, w: R, out: &mut [R; NQ]) {
+pub fn integrand<R: Real>(
+    q: &QuadParams,
+    ctrl: &[R],
+    ku: &[R],
+    kv: &[R],
+    shift: [R; 3],
+    u: R,
+    v: R,
+    w: R,
+    out: &mut [R; NQ],
+) {
     let d = surface_d1(q, ctrl, ku, kv, u, v);
     let (su, sv) = ([d[3], d[4], d[5]], [d[6], d[7], d[8]]);
-    let n = [su[1] * sv[2] - su[2] * sv[1], su[2] * sv[0] - su[0] * sv[2], su[0] * sv[1] - su[1] * sv[0]];
+    let n = [
+        su[1] * sv[2] - su[2] * sv[1],
+        su[2] * sv[0] - su[0] * sv[2],
+        su[0] * sv[1] - su[1] * sv[0],
+    ];
     let a = (n[0] * n[0] + n[1] * n[1] + n[2] * n[2]).sqrt() * w;
     let (x, y, z) = (d[0] - shift[0], d[1] - shift[1], d[2] - shift[2]);
     let (nx, ny, nz) = (n[0] * w, n[1] * w, n[2] * w);
@@ -420,7 +480,17 @@ pub fn integrand<R: Real>(q: &QuadParams, ctrl: &[R], ku: &[R], kv: &[R], shift:
 /// distinct knots between them (each span in four when there are one or two, 16-point
 /// Gauss–Legendre on each piece).
 /// `consts`: the shift (3), then the Gauss nodes (16) and weights (16).
-pub fn inner_job<R: Real>(q: &QuadParams, ctrl: &[R], ku: &[R], kv: &[R], consts: &[R], u0: R, u1: R, v: R, w: R) -> [R; NQ] {
+pub fn inner_job<R: Real>(
+    q: &QuadParams,
+    ctrl: &[R],
+    ku: &[R],
+    kv: &[R],
+    consts: &[R],
+    u0: R,
+    u1: R,
+    v: R,
+    w: R,
+) -> [R; NQ] {
     let z = R::zero();
     let mut acc = [z; NQ];
     let d = u1 - u0;
@@ -482,7 +552,17 @@ pub fn inner_job<R: Real>(q: &QuadParams, ctrl: &[R], ku: &[R], kv: &[R], consts
             let r = (b - a) / R::from_f32(2.0);
             let mut g = 0;
             while g < 16 {
-                integrand(q, ctrl, ku, kv, shift, mid + r * consts[3 + g], v, w * consts[19 + g] * r, &mut acc);
+                integrand(
+                    q,
+                    ctrl,
+                    ku,
+                    kv,
+                    shift,
+                    mid + r * consts[3 + g],
+                    v,
+                    w * consts[19 + g] * r,
+                    &mut acc,
+                );
                 g += 1;
             }
             m += 1;
@@ -566,9 +646,16 @@ pub fn classify(
         return;
     }
     let b = (i * 4) as usize;
-    out[i as usize] = classify_point(g, tris, cell_start, cell_tris, pts[b], pts[b + 1], pts[b + 2]);
+    out[i as usize] = classify_point(
+        g,
+        tris,
+        cell_start,
+        cell_tris,
+        pts[b],
+        pts[b + 1],
+        pts[b + 2],
+    );
 }
-
 
 /// SPIR-V entry `quad_inner_f64`: one invocation per job (`jobs`: 4 doubles each, `u0 u1 v w`),
 /// 14 doubles out each (see [`inner_job`]).
@@ -590,7 +677,17 @@ pub fn quad_inner_f64(
         return;
     }
     let b = (i * 4) as usize;
-    let r = inner_job(q, ctrl, ku, kv, consts, jobs[b], jobs[b + 1], jobs[b + 2], jobs[b + 3]);
+    let r = inner_job(
+        q,
+        ctrl,
+        ku,
+        kv,
+        consts,
+        jobs[b],
+        jobs[b + 1],
+        jobs[b + 2],
+        jobs[b + 3],
+    );
     let o = (i as usize) * NQ;
     let mut c = 0;
     while c < NQ {
@@ -616,7 +713,10 @@ mod tests {
                 let t = i as f64 / 100.0;
                 let s = find_span_p(&k, n, p, t);
                 let (b, d) = basis_p(&k, s, t, p);
-                assert!((b[..=p].iter().sum::<f64>() - 1.0).abs() < 1e-12, "p {p} t {t}");
+                assert!(
+                    (b[..=p].iter().sum::<f64>() - 1.0).abs() < 1e-12,
+                    "p {p} t {t}"
+                );
                 assert!(d[..=p].iter().sum::<f64>().abs() < 1e-9, "p {p} t {t}");
             }
         }
@@ -625,7 +725,9 @@ mod tests {
     /// The basis functions sum to one and their derivatives to zero.
     #[test]
     fn partition_of_unity() {
-        let k = [0.0f64, 0.0, 0.0, 0.0, 0.2, 0.4, 0.6, 0.8, 1.0, 1.0, 1.0, 1.0];
+        let k = [
+            0.0f64, 0.0, 0.0, 0.0, 0.2, 0.4, 0.6, 0.8, 1.0, 1.0, 1.0, 1.0,
+        ];
         for i in 0..=100 {
             let t = i as f64 / 100.0;
             let s = find_span(&k, 8, t);

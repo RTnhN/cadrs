@@ -37,7 +37,9 @@ pub mod sync;
 pub use board::{ItemId, KeepArea, KeepIds, KeepKind, PcbBoard};
 pub use colors::{BodyClass, ComponentKind, Rgba, component_kind};
 pub use geometry::{BoardGeometry, PcbBody, board_geometry, idf_loop_to_kernel};
-pub use mcad::{McadBoard, McadInstance, McadPart, SyncPlane, board_from_mcad, face_loops, loops_equivalent};
-pub use names::{PartRole, Recognised, recognise, role_of};
+pub use mcad::{
+    McadBoard, McadInstance, McadPart, SyncPlane, board_from_mcad, face_loops, loops_equivalent,
+};
 pub use mesh::{BoardMesh, BodyMesh};
+pub use names::{PartRole, Recognised, recognise, role_of};
 pub use placement::{Pose, placement_motion, pose_from_motion, pose_motion};

@@ -37,7 +37,11 @@ use cadrs_core::{Document, DocumentId, DocumentMeta, ElementId, FeatureId, Histo
 const AL: f64 = 0.0027;
 
 fn temp_store(tag: &str) -> Store {
-    Store::new(std::env::temp_dir().join(format!("cadrs-course-linked-{tag}-{}-{}", std::process::id(), uuid::Uuid::new_v4())))
+    Store::new(std::env::temp_dir().join(format!(
+        "cadrs-course-linked-{tag}-{}-{}",
+        std::process::id(),
+        uuid::Uuid::new_v4()
+    )))
 }
 
 #[track_caller]
@@ -46,7 +50,8 @@ fn close(what: &str, got: f64, want: f64, tol: f64) {
 }
 
 fn run(doc: &mut Document, h: &mut History, c: &dyn Command) {
-    h.execute(doc, c).unwrap_or_else(|e| panic!("{}: {e}", c.label()));
+    h.execute(doc, c)
+        .unwrap_or_else(|e| panic!("{}: {e}", c.label()));
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -69,12 +74,25 @@ fn check_fixture(name: &str, doc: Document, log: Option<HistoryLog>) {
             l.save_path(&log_path).unwrap();
         }
     }
-    let on_disk = cadrs_core::Store::load_path(&path).unwrap_or_else(|e| panic!("fixtures/{name}.cadrs: {e}"));
-    assert_eq!(on_disk, file, "fixtures/{name}.cadrs is stale (CADRS_REGENERATE_FIXTURES=1)");
+    let on_disk = cadrs_core::Store::load_path(&path)
+        .unwrap_or_else(|e| panic!("fixtures/{name}.cadrs: {e}"));
+    assert_eq!(
+        on_disk, file,
+        "fixtures/{name}.cadrs is stale (CADRS_REGENERATE_FIXTURES=1)"
+    );
     if let Some(l) = log {
-        let back = HistoryLog::load_path(&log_path).unwrap_or_else(|e| panic!("fixtures/{name}.history.ron: {e}"));
-        assert_eq!(back.entries, l.entries, "fixtures/{name}.history.ron is stale");
-        let names = |x: &HistoryLog| x.versions().iter().map(|v| (v.id(), v.name().to_string())).collect::<Vec<_>>();
+        let back = HistoryLog::load_path(&log_path)
+            .unwrap_or_else(|e| panic!("fixtures/{name}.history.ron: {e}"));
+        assert_eq!(
+            back.entries, l.entries,
+            "fixtures/{name}.history.ron is stale"
+        );
+        let names = |x: &HistoryLog| {
+            x.versions()
+                .iter()
+                .map(|v| (v.id(), v.name().to_string()))
+                .collect::<Vec<_>>()
+        };
         assert_eq!(names(&back), names(&l));
         assert_eq!(back.state_at(back.head_index()).unwrap(), file.document);
     }
@@ -89,7 +107,11 @@ fn linked_block_fixture_is_current() {
 
 #[test]
 fn linked_block_host_fixture_is_current() {
-    check_fixture("linked_block_host_standin", lb::host_document().unwrap(), None);
+    check_fixture(
+        "linked_block_host_standin",
+        lb::host_document().unwrap(),
+        None,
+    );
 }
 
 #[test]
@@ -99,17 +121,29 @@ fn linked_base_fixture_is_current() {
 
 #[test]
 fn linked_piston_fixture_is_current() {
-    check_fixture("linked_piston_standin", ps::piston_document().unwrap(), None);
+    check_fixture(
+        "linked_piston_standin",
+        ps::piston_document().unwrap(),
+        None,
+    );
 }
 
 #[test]
 fn linked_hexapod_fixture_is_current() {
-    check_fixture("linked_hexapod_standin", ps::project_document().unwrap(), None);
+    check_fixture(
+        "linked_hexapod_standin",
+        ps::project_document().unwrap(),
+        None,
+    );
 }
 
 #[test]
 fn move_to_document_fixture_is_current() {
-    check_fixture("move_to_document_standin", ps::move_to_document().unwrap(), None);
+    check_fixture(
+        "move_to_document_standin",
+        ps::move_to_document().unwrap(),
+        None,
+    );
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -152,17 +186,44 @@ const DERIVED: FeatureId = FeatureId::from_u128(0x3a61_0000_0000_0000_0000_0000_
 fn ex_dv1(store: &Store, v: VersionId) -> (Document, History) {
     let mut b = lb::host_document().unwrap();
     let mut h = History::default();
-    let d = DerivedFeature { locations: vec![ConnectorRef::Implicit(ConnectorOrigin::Origin), ConnectorRef::Feature(lb::HOST_CONNECTOR)], ..DerivedFeature::default() };
+    let d = DerivedFeature {
+        locations: vec![
+            ConnectorRef::Implicit(ConnectorOrigin::Origin),
+            ConnectorRef::Feature(lb::HOST_CONNECTOR),
+        ],
+        ..DerivedFeature::default()
+    };
     let mut res = Resolver::new(store.clone());
-    let got = derived::resolve(&mut res, &b, None, d, SourceRef::version(Some(lb::DOCUMENT), lb::STUDIO, v)).unwrap();
-    run(&mut b, &mut h, &AddDerived { element: lb::HOST_STUDIO, feature: DERIVED, derived: got.derived, links: got.links });
+    let got = derived::resolve(
+        &mut res,
+        &b,
+        None,
+        d,
+        SourceRef::version(Some(lb::DOCUMENT), lb::STUDIO, v),
+    )
+    .unwrap();
+    run(
+        &mut b,
+        &mut h,
+        &AddDerived {
+            element: lb::HOST_STUDIO,
+            feature: DERIVED,
+            derived: got.derived,
+            links: got.links,
+        },
+    );
     (b, h)
 }
 
 fn derived_parts(doc: &Document, el: ElementId) -> Vec<Part> {
     let build = cadrs_core::rebuild::build(doc.element(el).unwrap().features());
     assert!(build.errors.is_empty(), "{:?}", build.errors);
-    build.parts.iter().filter(|p| p.feature == DERIVED).cloned().collect()
+    build
+        .parts
+        .iter()
+        .filter(|p| p.feature == DERIVED)
+        .cloned()
+        .collect()
 }
 
 fn mass_of(parts: &[Part]) -> cadrs_kernel::MassProperties {
@@ -186,13 +247,31 @@ fn ex_dv1_two_copies() {
     close("x̄", m.center_of_mass.x, L / 2.0, 1e-9);
     close("ȳ", m.center_of_mass.y, W / 2.0, 1e-9);
     // (12.5 + 112.5) / 2: the source's centroid z plus 50.
-    close("z̄", m.center_of_mass.z, (H / 2.0 + (100.0 + H / 2.0)) / 2.0, 1e-9);
+    close(
+        "z̄",
+        m.center_of_mass.z,
+        (H / 2.0 + (100.0 + H / 2.0)) / 2.0,
+        1e-9,
+    );
     close("z̄ value", m.center_of_mass.z, 62.5, 1e-9);
     let c = m.center_of_mass;
-    let i = parts.iter().map(|p| p.mass.unwrap().inertia_about(c)).fold(nalgebra::Matrix3::zeros(), |x, y| x + y);
+    let i = parts
+        .iter()
+        .map(|p| p.mass.unwrap().inertia_about(c))
+        .fold(nalgebra::Matrix3::zeros(), |x, y| x + y);
     // Each copy's own inertia plus V·d² for its 50 mm offset in z.
-    close("Ixx", i[(0, 0)], 2.0 * (v * (W * W + H * H) / 12.0 + v * 50.0 * 50.0), 1e-3);
-    close("Iyy", i[(1, 1)], 2.0 * (v * (L * L + H * H) / 12.0 + v * 50.0 * 50.0), 1e-3);
+    close(
+        "Ixx",
+        i[(0, 0)],
+        2.0 * (v * (W * W + H * H) / 12.0 + v * 50.0 * 50.0),
+        1e-3,
+    );
+    close(
+        "Iyy",
+        i[(1, 1)],
+        2.0 * (v * (L * L + H * H) / 12.0 + v * 50.0 * 50.0),
+        1e-3,
+    );
     close("Izz", i[(2, 2)], 2.0 * v * (L * L + W * W) / 12.0, 1e-3);
     close("Ixx value", i[(0, 0)], 197_031_250.0, 1e-3);
     // The source's Mate connector 1 comes along (Include mate connectors is off: only the
@@ -207,17 +286,35 @@ fn ex_dv2_update_brings_the_new_version() {
     let store = temp_store("dv2");
     let v1 = save_a(&store);
     let (mut b, mut h) = ex_dv1(&store, v1);
-    let v2 = edit_a(&store, 2_000, |s| lb::set_height(s, lb::STUDIO, 40.0).unwrap());
+    let v2 = edit_a(&store, 2_000, |s| {
+        lb::set_height(s, lb::STUDIO, 40.0).unwrap()
+    });
     assert_ne!(v1, v2);
     let (v25, _) = block(L, W, H);
-    close("unchanged", mass_of(&derived_parts(&b, lb::HOST_STUDIO)).volume, 2.0 * v25, 1e-6);
+    close(
+        "unchanged",
+        mass_of(&derived_parts(&b, lb::HOST_STUDIO)).volume,
+        2.0 * v25,
+        1e-6,
+    );
     let mut res = Resolver::new(store.clone());
     let uses = lu::uses(&b);
     assert_eq!(uses.len(), 1);
-    let stale = lu::staleness(&b, &uses[0], &mut |d: DocumentId| res.latest(d).map(|v| (v.id(), v.name().to_string())));
+    let stale = lu::staleness(&b, &uses[0], &mut |d: DocumentId| {
+        res.latest(d).map(|v| (v.id(), v.name().to_string()))
+    });
     assert!(stale.any(), "the update indicator");
-    let c = lu::change_for(&mut res, &b, None, &uses[0], Target::Latest).unwrap().unwrap();
-    run(&mut b, &mut h, &UpdateReferences { changes: vec![c], label: "Update".into() });
+    let c = lu::change_for(&mut res, &b, None, &uses[0], Target::Latest)
+        .unwrap()
+        .unwrap();
+    run(
+        &mut b,
+        &mut h,
+        &UpdateReferences {
+            changes: vec![c],
+            label: "Update".into(),
+        },
+    );
     let m = mass_of(&derived_parts(&b, lb::HOST_STUDIO));
     let (v40, a40) = block(L, W, 40.0);
     close("volume", m.volume, 2.0 * v40, 1e-6);
@@ -226,7 +323,12 @@ fn ex_dv2_update_brings_the_new_version() {
     close("area value", m.surface_area, 18_800.0, 1e-6);
     close("z̄", m.center_of_mass.z, (20.0 + 120.0) / 2.0, 1e-9);
     h.undo(&mut b);
-    close("undone", mass_of(&derived_parts(&b, lb::HOST_STUDIO)).volume, 75_000.0, 1e-6);
+    close(
+        "undone",
+        mass_of(&derived_parts(&b, lb::HOST_STUDIO)).volume,
+        75_000.0,
+        1e-6,
+    );
 }
 
 /// ex-dv3: in A, Part Studio 2 derives Block at the workspace; Sketch 1's length 50 → 60
@@ -239,29 +341,82 @@ fn ex_dv3_a_workspace_derive_follows_a_length_edit() {
     let ps2_id = ps2.id;
     a.elements.push(ps2);
     let mut res = Resolver::new(temp_store("dv3"));
-    let r = SourceRef { document: None, at: RefAt::Workspace, element: lb::STUDIO, pinned: false };
+    let r = SourceRef {
+        document: None,
+        at: RefAt::Workspace,
+        element: lb::STUDIO,
+        pinned: false,
+    };
     let got = derived::resolve(&mut res, &a, None, DerivedFeature::default(), r).unwrap();
-    run(&mut a, &mut h, &AddDerived { element: ps2_id, feature: DERIVED, derived: got.derived, links: got.links });
-    close("before", mass_of(&derived_parts(&a, ps2_id)).volume, block(L, W, H).0, 1e-6);
+    run(
+        &mut a,
+        &mut h,
+        &AddDerived {
+            element: ps2_id,
+            feature: DERIVED,
+            derived: got.derived,
+            links: got.links,
+        },
+    );
+    close(
+        "before",
+        mass_of(&derived_parts(&a, ps2_id)).volume,
+        block(L, W, H).0,
+        1e-6,
+    );
     lb::set_length(&mut DocHistory(&mut a, &mut h), lb::STUDIO, 60.0).unwrap();
-    close("after", mass_of(&derived_parts(&a, ps2_id)).volume, block(60.0, W, H).0, 1e-6);
-    close("after value", mass_of(&derived_parts(&a, ps2_id)).volume, 45_000.0, 1e-6);
-    assert!(lu::uses(&a).is_empty(), "no version reference: nothing to update");
+    close(
+        "after",
+        mass_of(&derived_parts(&a, ps2_id)).volume,
+        block(60.0, W, H).0,
+        1e-6,
+    );
+    close(
+        "after value",
+        mass_of(&derived_parts(&a, ps2_id)).volume,
+        45_000.0,
+        1e-6,
+    );
+    assert!(
+        lu::uses(&a).is_empty(),
+        "no version reference: nothing to update"
+    );
 }
 
 /// Volume and centroid of every instance of the assembly `asm`.
 fn assembly_mass(doc: &Document, asm: ElementId) -> (f64, [f64; 3]) {
     let model = doc.element(asm).unwrap().assembly_model().unwrap();
-    let (parts, _) = assembly::instance_parts(doc, model, |e| doc.element(e).map(|el| cadrs_core::rebuild::build(el.features())));
+    let (parts, _) = assembly::instance_parts(doc, model, |e| {
+        doc.element(e)
+            .map(|el| cadrs_core::rebuild::build(el.features()))
+    });
     let m = cadrs_core::parts::combined_mass(parts.iter()).unwrap();
-    (m.volume, [m.center_of_mass.x, m.center_of_mass.y, m.center_of_mass.z])
+    (
+        m.volume,
+        [m.center_of_mass.x, m.center_of_mass.y, m.center_of_mass.z],
+    )
 }
 
-fn update_all(store: &Store, doc: &mut Document, h: &mut History, target: impl Fn(&lu::RefUse) -> Target) {
+fn update_all(
+    store: &Store,
+    doc: &mut Document,
+    h: &mut History,
+    target: impl Fn(&lu::RefUse) -> Target,
+) {
     let mut res = Resolver::new(store.clone());
-    let changes: Vec<_> = lu::uses(doc).iter().filter_map(|u| lu::change_for(&mut res, doc, None, u, target(u)).unwrap()).collect();
+    let changes: Vec<_> = lu::uses(doc)
+        .iter()
+        .filter_map(|u| lu::change_for(&mut res, doc, None, u, target(u)).unwrap())
+        .collect();
     assert!(!changes.is_empty());
-    run(doc, h, &UpdateReferences { changes, label: "Update all".into() });
+    run(
+        doc,
+        h,
+        &UpdateReferences {
+            changes,
+            label: "Update all".into(),
+        },
+    );
 }
 
 /// ex-dv4: C's Assembly 1 inserts A's Block at V1, Fastened bottom-face centre on the plate's
@@ -279,13 +434,32 @@ fn ex_dv4_mates_survive_an_update_and_a_lost_face_is_an_error() {
     let r = SourceRef::version(Some(lb::DOCUMENT), lb::STUDIO, v1);
     let snap = res.resolve(r, &c, None).unwrap();
     let blk = InstanceId::from_u128(0x3a61_0000_0000_0000_0000_0000_0000_0c01);
-    let inst = Instance::new(blk, InstanceSource::Part { element: snap.root, part: lb::PART }, Pose::translation([150.0, 0.0, 30.0]));
-    run(&mut c, &mut h, &InsertLinked { element: lb::BASE_ASSEMBLY, snapshot: snap, instances: vec![inst], reference: r });
+    let inst = Instance::new(
+        blk,
+        InstanceSource::Part {
+            element: snap.root,
+            part: lb::PART,
+        },
+        Pose::translation([150.0, 0.0, 30.0]),
+    );
+    run(
+        &mut c,
+        &mut h,
+        &InsertLinked {
+            element: lb::BASE_ASSEMBLY,
+            snapshot: snap,
+            instances: vec![inst],
+            reference: r,
+        },
+    );
     lb::fasten_on_base(&mut DocHistory(&mut c, &mut h), blk).unwrap();
     let plate = 100.0 * 100.0 * 10.0;
     let expect = |hb: f64| {
         let vb = L * W * hb;
-        (plate + vb, (plate * 5.0 + vb * (10.0 + hb / 2.0)) / (plate + vb))
+        (
+            plate + vb,
+            (plate * 5.0 + vb * (10.0 + hb / 2.0)) / (plate + vb),
+        )
     };
     let (v, c0) = assembly_mass(&c, lb::BASE_ASSEMBLY);
     close("V1 volume", v, expect(H).0, 1e-6);
@@ -295,7 +469,9 @@ fn ex_dv4_mates_survive_an_update_and_a_lost_face_is_an_error() {
     close("V1 z̄", c0[2], expect(H).1, 1e-6);
     close("V1 z̄ value", c0[2], 9.7727, 1e-4);
     // V2: the block 40 high.
-    edit_a(&store, 2_000, |s| lb::set_height(s, lb::STUDIO, 40.0).unwrap());
+    edit_a(&store, 2_000, |s| {
+        lb::set_height(s, lb::STUDIO, 40.0).unwrap()
+    });
     update_all(&store, &mut c, &mut h, |_| Target::Latest);
     let (v, c2) = assembly_mass(&c, lb::BASE_ASSEMBLY);
     close("V2 volume", v, expect(40.0).0, 1e-6);
@@ -303,20 +479,50 @@ fn ex_dv4_mates_survive_an_update_and_a_lost_face_is_an_error() {
     close("V2 x̄", c2[0], 50.0, 1e-6);
     close("V2 z̄", c2[2], expect(40.0).1, 1e-6);
     close("V2 z̄ value", c2[2], 14.375, 1e-9);
-    let model = c.element(lb::BASE_ASSEMBLY).unwrap().assembly_model().unwrap().clone();
+    let model = c
+        .element(lb::BASE_ASSEMBLY)
+        .unwrap()
+        .assembly_model()
+        .unwrap()
+        .clone();
     let solids = assembly::document_occurrence_solids(&c, lb::BASE_ASSEMBLY);
-    assert!(assembly::lost_mates(&structure::solver_model(&c, &model), &solids).is_empty(), "the mate survives: its face persists");
+    assert!(
+        assembly::lost_mates(&structure::solver_model(&c, &model), &solids).is_empty(),
+        "the mate survives: its face persists"
+    );
     // V3: the same block, every face renamed. The mate's face is lost: an error.
     edit_a(&store, 3_000, |s| lb::redraw(s, lb::STUDIO).unwrap());
     update_all(&store, &mut c, &mut h, |_| Target::Latest);
-    close("V3 volume", assembly_mass(&c, lb::BASE_ASSEMBLY).0, expect(40.0).0, 1e-6);
-    let model = c.element(lb::BASE_ASSEMBLY).unwrap().assembly_model().unwrap().clone();
+    close(
+        "V3 volume",
+        assembly_mass(&c, lb::BASE_ASSEMBLY).0,
+        expect(40.0).0,
+        1e-6,
+    );
+    let model = c
+        .element(lb::BASE_ASSEMBLY)
+        .unwrap()
+        .assembly_model()
+        .unwrap()
+        .clone();
     let solids = assembly::document_occurrence_solids(&c, lb::BASE_ASSEMBLY);
-    assert_eq!(assembly::lost_mates(&structure::solver_model(&c, &model), &solids), vec![lb::BASE_MATE], "the lost face makes the mate an error");
+    assert_eq!(
+        assembly::lost_mates(&structure::solver_model(&c, &model), &solids),
+        vec![lb::BASE_MATE],
+        "the lost face makes the mate an error"
+    );
     h.undo(&mut c);
-    let model = c.element(lb::BASE_ASSEMBLY).unwrap().assembly_model().unwrap().clone();
+    let model = c
+        .element(lb::BASE_ASSEMBLY)
+        .unwrap()
+        .assembly_model()
+        .unwrap()
+        .clone();
     let solids = assembly::document_occurrence_solids(&c, lb::BASE_ASSEMBLY);
-    assert!(assembly::lost_mates(&structure::solver_model(&c, &model), &solids).is_empty(), "undo: V2 again, no error");
+    assert!(
+        assembly::lost_mates(&structure::solver_model(&c, &model), &solids).is_empty(),
+        "undo: V2 again, no error"
+    );
 }
 
 /// ex-dv5: B derives A's Block at V1 and is versioned; A's Block deriving B's Part Studio 1 at
@@ -334,9 +540,29 @@ fn ex_dv5_a_circular_derive_is_refused() {
     let before = a.clone();
     let mut h = History::default();
     let mut res = Resolver::new(store.clone());
-    let got = derived::resolve(&mut res, &a, None, DerivedFeature::default(), SourceRef::version(Some(lb::HOST_DOCUMENT), lb::HOST_STUDIO, bv1)).unwrap();
-    let e = h.execute(&mut a, &AddDerived { element: lb::STUDIO, feature: FeatureId::new(), derived: got.derived, links: got.links }).unwrap_err();
-    assert_eq!(e.to_string(), "Circular reference: Block source › Block → Block derived › Part Studio 1 → Block source");
+    let got = derived::resolve(
+        &mut res,
+        &a,
+        None,
+        DerivedFeature::default(),
+        SourceRef::version(Some(lb::HOST_DOCUMENT), lb::HOST_STUDIO, bv1),
+    )
+    .unwrap();
+    let e = h
+        .execute(
+            &mut a,
+            &AddDerived {
+                element: lb::STUDIO,
+                feature: FeatureId::new(),
+                derived: got.derived,
+                links: got.links,
+            },
+        )
+        .unwrap_err();
+    assert_eq!(
+        e.to_string(),
+        "Circular reference: Block source › Block → Block derived › Part Studio 1 → Block source"
+    );
     assert_eq!(a, before, "nothing is added");
 }
 
@@ -345,7 +571,12 @@ fn ex_dv5_a_circular_derive_is_refused() {
 
 /// The piston's parts (volume, centroid z) for a cylinder Ø`d` and a rod `l` long.
 fn piston_parts(d: f64, l: f64) -> [(f64, f64); 4] {
-    [(10.0f64.powi(3), -5.0), (60.0 * PI * (d / 2.0).powi(2), 30.0), (PI * 3.0f64.powi(2) * l, 60.0 + l / 2.0), (8.0f64.powi(3), 60.0 + l + 4.0)]
+    [
+        (10.0f64.powi(3), -5.0),
+        (60.0 * PI * (d / 2.0).powi(2), 30.0),
+        (PI * 3.0f64.powi(2) * l, 60.0 + l / 2.0),
+        (8.0f64.powi(3), 60.0 + l + 4.0),
+    ]
 }
 
 fn piston_closed_form(d: f64, l: f64) -> (f64, f64) {
@@ -359,7 +590,10 @@ fn hexapod_closed_form(d: f64, l: f64) -> (f64, f64) {
     let base = PI * (100.0f64.powi(2) - 6.0 * 25.0) * 10.0;
     let top = PI * (80.0f64.powi(2) - 6.0 * 25.0) * 10.0;
     let v = base + top + 6.0 * vp;
-    (v, (base * 5.0 + top * (88.0 + l + 5.0) + 6.0 * vp * (zp + 20.0)) / v)
+    (
+        v,
+        (base * 5.0 + top * (88.0 + l + 5.0) + 6.0 * vp * (zp + 20.0)) / v,
+    )
 }
 
 /// ER8.check: the Piston Assembly of ER Ex2's stand-in.
@@ -405,7 +639,9 @@ fn edit_piston(store: &Store) -> VersionId {
     ps::set_diameter(&mut s, ps::LINKED_PISTON_STUDIO, 20.0).unwrap();
     ps::set_rod_length(&mut s, ps::LINKED_PISTON_STUDIO, 75.0).unwrap();
     store.save(&doc, &file.meta).unwrap();
-    let mut log = HistoryLog::load(store, ps::PISTON_DOCUMENT).unwrap().unwrap();
+    let mut log = HistoryLog::load(store, ps::PISTON_DOCUMENT)
+        .unwrap()
+        .unwrap();
     log.record(&doc, Origin::Command("Edit".into()), 2_000, "me");
     let v = log.create_version("V2", "", 2_001, "me");
     log.save(store).unwrap();
@@ -420,11 +656,23 @@ fn check_hexapod(what: &str, doc: &Document, d: f64, l: f64) {
     close(&format!("{what} ȳ"), c[1], 0.0, 1e-6);
     close(&format!("{what} z̄"), c[2], hz, 1e-6);
     // The Topplate sits on the eyes.
-    let model = doc.element(ps::PROJECT_HEXAPOD).unwrap().assembly_model().unwrap();
+    let model = doc
+        .element(ps::PROJECT_HEXAPOD)
+        .unwrap()
+        .assembly_model()
+        .unwrap();
     let top = model.instance(ps::TOP_INSTANCE).unwrap().pose;
-    close(&format!("{what} Topplate z"), top.translation[2], 88.0 + l, 1e-6);
+    close(
+        &format!("{what} Topplate z"),
+        top.translation[2],
+        88.0 + l,
+        1e-6,
+    );
     let solids = assembly::document_occurrence_solids(doc, ps::PROJECT_HEXAPOD);
-    assert!(assembly::lost_mates(&structure::solver_model(doc, model), &solids).is_empty(), "{what}: every mate resolves");
+    assert!(
+        assembly::lost_mates(&structure::solver_model(doc, model), &solids).is_empty(),
+        "{what}: every mate resolves"
+    );
 }
 
 /// ER6.check: the Hexapod with six linked Piston Assembly instances, mated as the course mates
@@ -443,10 +691,27 @@ fn hexapod_stand_in_updates_as_the_course_does() {
     let instances: Vec<Instance> = (0..6)
         .map(|k| {
             let p = ps::piston_pose(k);
-            Instance::new(ps::piston(k), InstanceSource::Assembly { element: snap.root }, Pose::translation([p.translation[0] * 1.1, p.translation[1] * 1.1, p.translation[2] + 15.0]))
+            Instance::new(
+                ps::piston(k),
+                InstanceSource::Assembly { element: snap.root },
+                Pose::translation([
+                    p.translation[0] * 1.1,
+                    p.translation[1] * 1.1,
+                    p.translation[2] + 15.0,
+                ]),
+            )
         })
         .collect();
-    run(&mut doc, &mut h, &InsertLinked { element: ps::PROJECT_HEXAPOD, snapshot: snap, instances, reference: r });
+    run(
+        &mut doc,
+        &mut h,
+        &InsertLinked {
+            element: ps::PROJECT_HEXAPOD,
+            snapshot: snap,
+            instances,
+            reference: r,
+        },
+    );
     // Steps 6, 8–10: the twelve mates.
     {
         let mut s = DocHistory(&mut doc, &mut h);
@@ -470,7 +735,11 @@ fn hexapod_stand_in_updates_as_the_course_does() {
     close("V2 volume value", v, 640_689.203, 1e-3);
     close("V2 z̄ value", c[2], 65.964, 1e-3);
     close("V2 Al mass", v * AL, 1_729.861, 1e-3);
-    assert!(lu::uses(&doc).iter().all(|u| u.reference.at == RefAt::Version(v2)));
+    assert!(
+        lu::uses(&doc)
+            .iter()
+            .all(|u| u.reference.at == RefAt::Version(v2))
+    );
     // Step 17: Selective update back to V1 restores the V1 numbers.
     update_all(&store, &mut doc, &mut h, |_| Target::Version(v1));
     check_hexapod("back to V1", &doc, 15.725, 28.0);
@@ -492,18 +761,44 @@ fn the_mated_hexapod_places_the_pistons_where_the_placed_one_does() {
     let mut res = Resolver::new(store.clone());
     let r = SourceRef::version(Some(ps::PISTON_DOCUMENT), ps::LINKED_PISTON_ASSEMBLY, v1);
     let snap = res.resolve(r, &doc, None).unwrap();
-    let instances: Vec<Instance> = (0..6).map(|k| Instance::new(ps::piston(k), InstanceSource::Assembly { element: snap.root }, Pose::translation([0.0, 0.0, 200.0]))).collect();
-    run(&mut doc, &mut h, &InsertLinked { element: ps::PROJECT_HEXAPOD, snapshot: snap, instances, reference: r });
+    let instances: Vec<Instance> = (0..6)
+        .map(|k| {
+            Instance::new(
+                ps::piston(k),
+                InstanceSource::Assembly { element: snap.root },
+                Pose::translation([0.0, 0.0, 200.0]),
+            )
+        })
+        .collect();
+    run(
+        &mut doc,
+        &mut h,
+        &InsertLinked {
+            element: ps::PROJECT_HEXAPOD,
+            snapshot: snap,
+            instances,
+            reference: r,
+        },
+    );
     let mut s = DocHistory(&mut doc, &mut h);
     for k in 0..6 {
         ps::revolute_piston(&mut s, ps::PROJECT_HEXAPOD, ps::piston(k), k).unwrap();
     }
-    let model = doc.element(ps::PROJECT_HEXAPOD).unwrap().assembly_model().unwrap();
+    let model = doc
+        .element(ps::PROJECT_HEXAPOD)
+        .unwrap()
+        .assembly_model()
+        .unwrap();
     for k in 0..6 {
         let p = model.instance(ps::piston(k)).unwrap().pose;
         let want = ps::piston_pose(k);
         for i in 0..3 {
-            close(&format!("piston {k} translation {i}"), p.translation[i], want.translation[i], 1e-6);
+            close(
+                &format!("piston {k} translation {i}"),
+                p.translation[i],
+                want.translation[i],
+                1e-6,
+            );
         }
         close(&format!("piston {k} upright"), p.rotation[2][2], 1.0, 1e-9);
     }
@@ -521,11 +816,21 @@ fn no_shipped_assembly_has_a_lost_mate() {
         }
         let doc = cadrs_core::Store::load_path(&path).unwrap().document;
         for el in &doc.elements {
-            let Some(model) = el.assembly_model() else { continue };
+            let Some(model) = el.assembly_model() else {
+                continue;
+            };
             let solids = assembly::document_occurrence_solids(&doc, el.id);
             let lost = assembly::lost_mates(&structure::solver_model(&doc, model), &solids);
-            let names: Vec<&str> = lost.iter().filter_map(|m| model.mate(*m).map(|f| f.name.as_str())).collect();
-            assert!(lost.is_empty(), "{} › {}: {names:?} ({lost:?})", path.display(), el.name);
+            let names: Vec<&str> = lost
+                .iter()
+                .filter_map(|m| model.mate(*m).map(|f| f.name.as_str()))
+                .collect();
+            assert!(
+                lost.is_empty(),
+                "{} › {}: {names:?} ({lost:?})",
+                path.display(),
+                el.name
+            );
             checked += model.mates.len();
         }
     }

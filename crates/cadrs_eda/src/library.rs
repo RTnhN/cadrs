@@ -27,7 +27,12 @@ pub struct Library {
 
 impl Library {
     pub fn new(name: impl Into<String>, scope: Scope) -> Library {
-        Library { name: name.into(), scope, enabled: true, ..Default::default() }
+        Library {
+            name: name.into(),
+            scope,
+            enabled: true,
+            ..Default::default()
+        }
     }
 
     /// Adds or replaces a symbol, giving it this library's prefix.
@@ -70,12 +75,20 @@ impl LibraryTable {
             }
             libs
         });
-        LibraryTable { libraries: libraries.clone() }
+        LibraryTable {
+            libraries: libraries.clone(),
+        }
     }
 
     fn ordered(&self) -> impl Iterator<Item = &Library> {
-        let project = self.libraries.iter().filter(|l| l.enabled && l.scope == Scope::Project);
-        let global = self.libraries.iter().filter(|l| l.enabled && l.scope == Scope::Global);
+        let project = self
+            .libraries
+            .iter()
+            .filter(|l| l.enabled && l.scope == Scope::Project);
+        let global = self
+            .libraries
+            .iter()
+            .filter(|l| l.enabled && l.scope == Scope::Global);
         project.chain(global)
     }
 
@@ -84,12 +97,18 @@ impl LibraryTable {
     }
 
     pub fn library_mut(&mut self, name: &str, scope: Scope) -> Option<&mut Library> {
-        self.libraries.iter_mut().find(|l| l.name == name && l.scope == scope)
+        self.libraries
+            .iter_mut()
+            .find(|l| l.name == name && l.scope == scope)
     }
 
     /// Adds a library (or replaces the one of that name and scope).
     pub fn add(&mut self, lib: Library) {
-        match self.libraries.iter_mut().find(|l| l.name == lib.name && l.scope == lib.scope) {
+        match self
+            .libraries
+            .iter_mut()
+            .find(|l| l.name == lib.name && l.scope == lib.scope)
+        {
             Some(l) => *l = lib,
             None => self.libraries.push(lib),
         }
@@ -98,7 +117,11 @@ impl LibraryTable {
     /// Adds a library's parts to the library of that name and scope (made if missing); its
     /// parts replace ones of the same name.
     pub fn merge(&mut self, lib: Library) {
-        match self.libraries.iter_mut().find(|l| l.name == lib.name && l.scope == lib.scope) {
+        match self
+            .libraries
+            .iter_mut()
+            .find(|l| l.name == lib.name && l.scope == lib.scope)
+        {
             Some(l) => {
                 lib.symbols.into_iter().for_each(|s| l.put_symbol(s));
                 lib.footprints.into_iter().for_each(|f| l.put_footprint(f));
@@ -124,7 +147,11 @@ impl LibraryTable {
             // As a library holds it: no nets.
             let mut f = placed.footprint.clone();
             f.pads.iter_mut().for_each(|p| p.net = None);
-            match self.libraries.iter_mut().find(|l| l.enabled && l.name == lib) {
+            match self
+                .libraries
+                .iter_mut()
+                .find(|l| l.enabled && l.name == lib)
+            {
                 Some(l) => l.put_footprint(f),
                 None => {
                     let mut l = Library::new(lib, Scope::Project);
@@ -138,12 +165,18 @@ impl LibraryTable {
 
     pub fn symbol(&self, id: &str) -> Option<&Symbol> {
         let (lib, name) = split(id);
-        self.ordered().filter(|l| lib.is_empty() || l.name == lib).flat_map(|l| &l.symbols).find(|s| s.name() == name)
+        self.ordered()
+            .filter(|l| lib.is_empty() || l.name == lib)
+            .flat_map(|l| &l.symbols)
+            .find(|s| s.name() == name)
     }
 
     pub fn footprint(&self, id: &str) -> Option<&Footprint> {
         let (lib, name) = split(id);
-        self.ordered().filter(|l| lib.is_empty() || l.name == lib).flat_map(|l| &l.footprints).find(|f| f.name() == name)
+        self.ordered()
+            .filter(|l| lib.is_empty() || l.name == lib)
+            .flat_map(|l| &l.footprints)
+            .find(|f| f.name() == name)
     }
 
     /// Symbols matching `filter` (every word in the id, keywords or description, any case),
@@ -159,14 +192,21 @@ impl LibraryTable {
                     "{} {} {}",
                     s.id,
                     s.keywords,
-                    s.field(crate::symbol::fields::DESCRIPTION).map_or("", |f| f.value())
+                    s.field(crate::symbol::fields::DESCRIPTION)
+                        .map_or("", |f| f.value())
                 )
                 .to_lowercase();
                 words.iter().all(|w| hay.contains(w))
             })
             .collect();
         let f = filter.trim().to_lowercase();
-        hits.sort_by_key(|s| (s.name().to_lowercase() != f, !s.name().to_lowercase().starts_with(&f), s.id.clone()));
+        hits.sort_by_key(|s| {
+            (
+                s.name().to_lowercase() != f,
+                !s.name().to_lowercase().starts_with(&f),
+                s.id.clone(),
+            )
+        });
         hits
     }
 
@@ -182,14 +222,22 @@ impl LibraryTable {
         let words: Vec<String> = filter.split_whitespace().map(str::to_lowercase).collect();
         let mut hits: Vec<&Footprint> = self
             .footprints()
-            .filter(|f| globs.is_empty() || globs.iter().any(|g| glob(g, f.name()) || glob(g, &f.id)))
+            .filter(|f| {
+                globs.is_empty() || globs.iter().any(|g| glob(g, f.name()) || glob(g, &f.id))
+            })
             .filter(|f| {
                 let hay = format!("{} {} {}", f.id, f.keywords, f.description).to_lowercase();
                 words.iter().all(|w| hay.contains(w))
             })
             .collect();
         let f = filter.trim().to_lowercase();
-        hits.sort_by_key(|x| (x.name().to_lowercase() != f, !x.name().to_lowercase().starts_with(&f), x.id.clone()));
+        hits.sort_by_key(|x| {
+            (
+                x.name().to_lowercase() != f,
+                !x.name().to_lowercase().starts_with(&f),
+                x.id.clone(),
+            )
+        });
         hits
     }
 
@@ -226,22 +274,44 @@ pub fn builtin_dirs() -> Vec<PathBuf> {
         return std::env::split_paths(&v).collect();
     }
     let mut dirs = vec![];
-    if let Some(exe_dir) = std::env::current_exe().ok().and_then(|e| e.parent().map(Path::to_path_buf)) {
+    if let Some(exe_dir) = std::env::current_exe()
+        .ok()
+        .and_then(|e| e.parent().map(Path::to_path_buf))
+    {
         dirs.push(exe_dir.join("libraries"));
-        dirs.extend(exe_dir.parent().and_then(Path::parent).map(|d| d.join("libraries")));
+        dirs.extend(
+            exe_dir
+                .parent()
+                .and_then(Path::parent)
+                .map(|d| d.join("libraries")),
+        );
     }
     dirs.push(Path::new(env!("CARGO_MANIFEST_DIR")).join("../../libraries"));
     // The first that exists (the same folder can show up twice).
-    dirs.into_iter().find(|d| d.join("Device").is_dir() || d.is_dir()).into_iter().collect()
+    dirs.into_iter()
+        .find(|d| d.join("Device").is_dir() || d.is_dir())
+        .into_iter()
+        .collect()
 }
 
 fn ron_config() -> ron::ser::PrettyConfig {
-    ron::ser::PrettyConfig::default().struct_names(false).indentor("  ").depth_limit(3)
+    ron::ser::PrettyConfig::default()
+        .struct_names(false)
+        .indentor("  ")
+        .depth_limit(3)
 }
 
 /// A file name for a part name (`/` and the like can't be in one).
 pub fn file_stem(name: &str) -> String {
-    name.chars().map(|c| if matches!(c, '/' | '\\' | ':' | '*' | '?' | '"' | '<' | '>' | '|') { '_' } else { c }).collect()
+    name.chars()
+        .map(|c| {
+            if matches!(c, '/' | '\\' | ':' | '*' | '?' | '"' | '<' | '>' | '|') {
+                '_'
+            } else {
+                c
+            }
+        })
+        .collect()
 }
 
 /// Every id in a footprint set to `id()` (nil when written, so files don't change on rewrite;
@@ -258,8 +328,19 @@ fn set_footprint_ids(f: &mut Footprint, mut id: impl FnMut() -> uuid::Uuid) {
 /// footprints name by a path inside `dir` are written relative to it.
 pub fn save_library(lib: &Library, dir: &Path) -> Result<(), String> {
     std::fs::create_dir_all(dir).map_err(|e| format!("{}: {e}", dir.display()))?;
-    let write = |name: &str, text: String| std::fs::write(dir.join(name), text).map_err(|e| format!("{name}: {e}"));
-    write(LIBRARY_FILE, ron::ser::to_string_pretty(&LibraryInfo { description: lib.description.clone() }, ron_config()).map_err(|e| e.to_string())?)?;
+    let write = |name: &str, text: String| {
+        std::fs::write(dir.join(name), text).map_err(|e| format!("{name}: {e}"))
+    };
+    write(
+        LIBRARY_FILE,
+        ron::ser::to_string_pretty(
+            &LibraryInfo {
+                description: lib.description.clone(),
+            },
+            ron_config(),
+        )
+        .map_err(|e| e.to_string())?,
+    )?;
     for s in &lib.symbols {
         write_symbol(dir, s)?;
     }
@@ -269,7 +350,6 @@ pub fn save_library(lib: &Library, dir: &Path) -> Result<(), String> {
     Ok(())
 }
 
-
 /// Makes `dir` a library folder (with its `library.ron`) unless it is one already.
 pub fn ensure_library(dir: &Path, description: &str) -> Result<(), String> {
     std::fs::create_dir_all(dir).map_err(|e| format!("{}: {e}", dir.display()))?;
@@ -277,7 +357,13 @@ pub fn ensure_library(dir: &Path, description: &str) -> Result<(), String> {
     if info.is_file() {
         return Ok(());
     }
-    let text = ron::ser::to_string_pretty(&LibraryInfo { description: description.into() }, ron_config()).map_err(|e| e.to_string())?;
+    let text = ron::ser::to_string_pretty(
+        &LibraryInfo {
+            description: description.into(),
+        },
+        ron_config(),
+    )
+    .map_err(|e| e.to_string())?;
     std::fs::write(&info, text).map_err(|e| format!("{}: {e}", info.display()))
 }
 /// Writes one symbol into a library folder.
@@ -308,7 +394,10 @@ pub fn write_footprint(dir: &Path, f: &Footprint) -> Result<(), String> {
 /// Reads a library folder (named after the folder). Parts that don't parse are skipped and
 /// reported. Model files beside the parts get their full path as `source`.
 pub fn load_library(dir: &Path, scope: Scope) -> (Library, Vec<String>) {
-    let name = dir.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+    let name = dir
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_default();
     let mut lib = Library::new(name, scope);
     let mut errors = vec![];
     if let Ok(text) = std::fs::read_to_string(dir.join(LIBRARY_FILE)) {
@@ -317,10 +406,18 @@ pub fn load_library(dir: &Path, scope: Scope) -> (Library, Vec<String>) {
             Err(e) => errors.push(format!("{}: {e}", dir.join(LIBRARY_FILE).display())),
         }
     }
-    let mut files: Vec<PathBuf> = std::fs::read_dir(dir).into_iter().flatten().flatten().map(|e| e.path()).collect();
+    let mut files: Vec<PathBuf> = std::fs::read_dir(dir)
+        .into_iter()
+        .flatten()
+        .flatten()
+        .map(|e| e.path())
+        .collect();
     files.sort();
     for path in files {
-        let file = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+        let file = path
+            .file_name()
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_default();
         let text = || std::fs::read_to_string(&path).map_err(|e| e.to_string());
         if file.ends_with(SYMBOL_EXT) {
             match text().and_then(|t| ron::from_str::<Symbol>(&t).map_err(|e| e.to_string())) {
@@ -333,8 +430,12 @@ pub fn load_library(dir: &Path, scope: Scope) -> (Library, Vec<String>) {
                     set_footprint_ids(&mut f, uuid::Uuid::new_v4);
                     for m in &mut f.models {
                         let p = dir.join(&m.source);
-                        if !m.source.is_empty() && Path::new(&m.source).is_relative() && p.is_file() {
-                            m.source = std::path::absolute(&p).unwrap_or(p).to_string_lossy().into_owned();
+                        if !m.source.is_empty() && Path::new(&m.source).is_relative() && p.is_file()
+                        {
+                            m.source = std::path::absolute(&p)
+                                .unwrap_or(p)
+                                .to_string_lossy()
+                                .into_owned();
                         }
                     }
                     lib.put_footprint(f)
@@ -352,7 +453,13 @@ pub fn load_libraries(dirs: &[PathBuf], scope: Scope) -> (Vec<Library>, Vec<Stri
     let mut out: Vec<Library> = vec![];
     let mut errors = vec![];
     for dir in dirs {
-        let mut subs: Vec<PathBuf> = std::fs::read_dir(dir).into_iter().flatten().flatten().map(|e| e.path()).filter(|p| p.is_dir()).collect();
+        let mut subs: Vec<PathBuf> = std::fs::read_dir(dir)
+            .into_iter()
+            .flatten()
+            .flatten()
+            .map(|e| e.path())
+            .filter(|p| p.is_dir())
+            .collect();
         subs.sort();
         for sub in subs {
             let (lib, e) = load_library(&sub, scope);
@@ -420,10 +527,17 @@ mod tests {
         let t = LibraryTable::builtin();
         let r = t.symbol("Device:R").unwrap();
         let hits = t.search_footprints("0805", &r.footprint_filters);
-        assert!(!hits.is_empty() && hits.iter().all(|f| f.name().starts_with("R_")), "{:?}", hits.iter().map(|f| &f.id).collect::<Vec<_>>());
+        assert!(
+            !hits.is_empty() && hits.iter().all(|f| f.name().starts_with("R_")),
+            "{:?}",
+            hits.iter().map(|f| &f.id).collect::<Vec<_>>()
+        );
         let conn = t.symbol("Connector:Conn_01x04").unwrap();
         let hits = t.search_footprints("", &conn.footprint_filters);
-        assert!(hits.iter().any(|f| f.name() == "PinHeader_1x04_P2.54mm_Vertical"));
+        assert!(
+            hits.iter()
+                .any(|f| f.name() == "PinHeader_1x04_P2.54mm_Vertical")
+        );
         assert!(hits.iter().all(|f| f.name().contains("_1x")));
     }
 }
@@ -446,7 +560,13 @@ mod builtin_tests {
         for lib in libraries() {
             for s in &lib.symbols {
                 for pn in &s.pins {
-                    assert_eq!((pn.at.x % SCHEMATIC_GRID, pn.at.y % SCHEMATIC_GRID), (0, 0), "{} pin {}", s.id, pn.number);
+                    assert_eq!(
+                        (pn.at.x % SCHEMATIC_GRID, pn.at.y % SCHEMATIC_GRID),
+                        (0, 0),
+                        "{} pin {}",
+                        s.id,
+                        pn.number
+                    );
                 }
                 assert!(s.field(fields::REFERENCE).is_some() && s.field(fields::VALUE).is_some());
             }
@@ -457,34 +577,58 @@ mod builtin_tests {
     fn files_round_trip() {
         let t = LibraryTable::builtin();
         let lib = t.library("Package_SO").unwrap();
-        let dir = std::env::temp_dir().join(format!("cadrs-lib-{}", uuid::Uuid::new_v4())).join("Package_SO");
+        let dir = std::env::temp_dir()
+            .join(format!("cadrs-lib-{}", uuid::Uuid::new_v4()))
+            .join("Package_SO");
         save_library(lib, &dir).unwrap();
         let (back, errors) = load_library(&dir, Scope::Global);
         std::fs::remove_dir_all(dir.parent().unwrap()).unwrap();
         assert!(errors.is_empty(), "{errors:?}");
-        assert_eq!((back.name.as_str(), &back.description), (lib.name.as_str(), &lib.description));
+        assert_eq!(
+            (back.name.as_str(), &back.description),
+            (lib.name.as_str(), &lib.description)
+        );
         assert_eq!(back.footprints.len(), lib.footprints.len());
         // The same parts, but for the ids (fresh on every read).
         let a = &lib.footprints[0];
         let b = back.footprints.iter().find(|f| f.id == a.id).unwrap();
-        assert_eq!((&a.pads.len(), &a.pads[0].at, &a.models), (&b.pads.len(), &b.pads[0].at, &b.models));
+        assert_eq!(
+            (&a.pads.len(), &a.pads[0].at, &a.models),
+            (&b.pads.len(), &b.pads[0].at, &b.models)
+        );
         assert_ne!(a.pads[0].id, b.pads[0].id);
         assert!(!b.pads[0].id.is_nil());
     }
     #[test]
     fn course_parts_exist() {
         let t = LibraryTable::builtin();
-        for id in ["Device:LED", "Device:R_US", "Device:Battery_Cell", "power:VCC", "power:GND", "power:PWR_FLAG"] {
+        for id in [
+            "Device:LED",
+            "Device:R_US",
+            "Device:Battery_Cell",
+            "power:VCC",
+            "power:GND",
+            "power:PWR_FLAG",
+        ] {
             assert!(t.symbol(id).is_some(), "{id}");
         }
-        for id in ["Battery:BatteryHolder_Keystone_1058_1x2032", "LED_THT:LED_D5.0mm", "Resistor_THT:R_Axial_DIN0309_L9.0mm_D3.2mm_P12.70mm_Horizontal"] {
+        for id in [
+            "Battery:BatteryHolder_Keystone_1058_1x2032",
+            "LED_THT:LED_D5.0mm",
+            "Resistor_THT:R_Axial_DIN0309_L9.0mm_D3.2mm_P12.70mm_Horizontal",
+        ] {
             let f = t.footprint(id).unwrap_or_else(|| panic!("{id}"));
             assert_eq!(f.pads.len(), 2);
         }
-        let r = t.footprint("Resistor_THT:R_Axial_DIN0309_L9.0mm_D3.2mm_P12.70mm_Horizontal").unwrap();
+        let r = t
+            .footprint("Resistor_THT:R_Axial_DIN0309_L9.0mm_D3.2mm_P12.70mm_Horizontal")
+            .unwrap();
         assert_eq!(r.pads[1].at, Pt::mm(12.7, 0.0));
         assert!(t.symbol("power:GND").unwrap().power);
-        assert_eq!(t.symbol("power:PWR_FLAG").unwrap().pins[0].kind, PinType::PowerOut);
+        assert_eq!(
+            t.symbol("power:PWR_FLAG").unwrap().pins[0].kind,
+            PinType::PowerOut
+        );
     }
 
     use crate::units::to_mm;
@@ -513,10 +657,29 @@ mod builtin_tests {
         assert!(symbols > 120, "{symbols} symbols");
         assert!(footprints > 300, "{footprints} footprints");
         let t = LibraryTable::builtin();
-        for id in ["Device:Antenna", "Device:C", "Device:L", "Device:Q_NPN_BEC", "Device:Crystal", "power:GNDREF", "power:+3V3", "Connector:Conn_02x10_Odd_Even", "Switch:SW_Push", "Regulator_Linear:AMS1117-3.3", "LED:WS2812B"] {
+        for id in [
+            "Device:Antenna",
+            "Device:C",
+            "Device:L",
+            "Device:Q_NPN_BEC",
+            "Device:Crystal",
+            "power:GNDREF",
+            "power:+3V3",
+            "Connector:Conn_02x10_Odd_Even",
+            "Switch:SW_Push",
+            "Regulator_Linear:AMS1117-3.3",
+            "LED:WS2812B",
+        ] {
             assert!(t.symbol(id).is_some(), "{id}");
         }
-        for id in ["Capacitor_SMD:C_0805_2012Metric", "Inductor_SMD:L_0805_2012Metric", "Connector_PinHeader_2.54mm:PinHeader_2x10_P2.54mm_Vertical", "Package_TO_SOT_SMD:SOT-223-3_TabPin2", "Package_SO:SOIC-8_3.9x4.9mm_P1.27mm", "Package_DFN_QFN:QFN-32-1EP_5x5mm_P0.5mm_EP3.45x3.45mm"] {
+        for id in [
+            "Capacitor_SMD:C_0805_2012Metric",
+            "Inductor_SMD:L_0805_2012Metric",
+            "Connector_PinHeader_2.54mm:PinHeader_2x10_P2.54mm_Vertical",
+            "Package_TO_SOT_SMD:SOT-223-3_TabPin2",
+            "Package_SO:SOIC-8_3.9x4.9mm_P1.27mm",
+            "Package_DFN_QFN:QFN-32-1EP_5x5mm_P0.5mm_EP3.45x3.45mm",
+        ] {
             assert!(t.footprint(id).is_some(), "{id}");
         }
     }
@@ -525,8 +688,19 @@ mod builtin_tests {
     fn footprints_are_well_formed() {
         for lib in libraries() {
             for f in &lib.footprints {
-                assert_eq!(crate::lib_edit::check_footprint(f), Vec::<String>::new(), "{}", f.id);
-                assert!(f.models.first().and_then(|m| m.body.as_ref()).is_some() || f.id.starts_with("MountingHole") || f.id.starts_with("TestPoint"), "{} has no 3D body", f.id);
+                assert_eq!(
+                    crate::lib_edit::check_footprint(f),
+                    Vec::<String>::new(),
+                    "{}",
+                    f.id
+                );
+                assert!(
+                    f.models.first().and_then(|m| m.body.as_ref()).is_some()
+                        || f.id.starts_with("MountingHole")
+                        || f.id.starts_with("TestPoint"),
+                    "{} has no 3D body",
+                    f.id
+                );
                 // Pads of different numbers don't overlap.
                 for (i, a) in f.pads.iter().enumerate() {
                     for b in &f.pads[i + 1..] {
@@ -535,7 +709,11 @@ mod builtin_tests {
                         }
                         let (p, q) = (pad_box(a), pad_box(b));
                         let overlap = p.0 < q.2 && q.0 < p.2 && p.1 < q.3 && q.1 < p.3;
-                        assert!(!overlap, "{}: pads {} and {} overlap", f.id, a.number, b.number);
+                        assert!(
+                            !overlap,
+                            "{}: pads {} and {} overlap",
+                            f.id, a.number, b.number
+                        );
                     }
                 }
                 // Silkscreen stays off the copper.
@@ -547,11 +725,24 @@ mod builtin_tests {
                         let (a, b) = (pts[k], pts[(k + 1) % n]);
                         for t in 0..=20 {
                             let u = t as f64 / 20.0;
-                            let (x, y) = (to_mm(a.x) + (to_mm(b.x) - to_mm(a.x)) * u, to_mm(a.y) + (to_mm(b.y) - to_mm(a.y)) * u);
+                            let (x, y) = (
+                                to_mm(a.x) + (to_mm(b.x) - to_mm(a.x)) * u,
+                                to_mm(a.y) + (to_mm(b.y) - to_mm(a.y)) * u,
+                            );
                             for pd in &f.pads {
-                                let to_pad = if pd.shape == PadShape::Circle { (x - to_mm(pd.at.x)).hypot(y - to_mm(pd.at.y)) - to_mm(pd.size.w) / 2.0 } else { box_dist(pad_box(pd), x, y) };
+                                let to_pad = if pd.shape == PadShape::Circle {
+                                    (x - to_mm(pd.at.x)).hypot(y - to_mm(pd.at.y))
+                                        - to_mm(pd.size.w) / 2.0
+                                } else {
+                                    box_dist(pad_box(pd), x, y)
+                                };
                                 let d = to_pad - to_mm(s.shape.stroke.width) / 2.0;
-                                assert!(d > 0.05, "{}: silkscreen {d:.3} mm from pad {}", f.id, pd.number);
+                                assert!(
+                                    d > 0.05,
+                                    "{}: silkscreen {d:.3} mm from pad {}",
+                                    f.id,
+                                    pd.number
+                                );
                             }
                         }
                     }
@@ -563,19 +754,45 @@ mod builtin_tests {
     #[test]
     fn footprints_match_kicad_pin_positions() {
         let t = LibraryTable::builtin();
-        let at = |id: &str, n: &str| t.footprint(id).unwrap().pads.iter().find(|p| p.number == n).unwrap().at;
+        let at = |id: &str, n: &str| {
+            t.footprint(id)
+                .unwrap()
+                .pads
+                .iter()
+                .find(|p| p.number == n)
+                .unwrap()
+                .at
+        };
         // Pin headers: pin 1 at the origin, 2 beside it, rows going down.
         let h = "Connector_PinHeader_2.54mm:PinHeader_2x10_P2.54mm_Vertical";
-        assert_eq!((at(h, "1"), at(h, "2"), at(h, "20")), (Pt::ZERO, Pt::mm(2.54, 0.0), Pt::mm(2.54, -22.86)));
+        assert_eq!(
+            (at(h, "1"), at(h, "2"), at(h, "20")),
+            (Pt::ZERO, Pt::mm(2.54, 0.0), Pt::mm(2.54, -22.86))
+        );
         // SOIC-8: pin 1 top-left, 8 top-right.
         let so = "Package_SO:SOIC-8_3.9x4.9mm_P1.27mm";
-        assert_eq!((at(so, "1"), at(so, "4"), at(so, "8")), (Pt::mm(-2.475, 1.905), Pt::mm(-2.475, -1.905), Pt::mm(2.475, 1.905)));
+        assert_eq!(
+            (at(so, "1"), at(so, "4"), at(so, "8")),
+            (
+                Pt::mm(-2.475, 1.905),
+                Pt::mm(-2.475, -1.905),
+                Pt::mm(2.475, 1.905)
+            )
+        );
         // SOT-23: 1 and 2 on the left, 3 on the right.
         let sot = "Package_TO_SOT_SMD:SOT-23";
-        assert_eq!((at(sot, "1"), at(sot, "3")), (Pt::mm(-1.1375, 0.95), Pt::mm(1.1375, 0.0)));
+        assert_eq!(
+            (at(sot, "1"), at(sot, "3")),
+            (Pt::mm(-1.1375, 0.95), Pt::mm(1.1375, 0.0))
+        );
         // QFN-32: 32 pins + the exposed pad 33.
-        let q = t.footprint("Package_DFN_QFN:QFN-32-1EP_5x5mm_P0.5mm_EP3.45x3.45mm").unwrap();
+        let q = t
+            .footprint("Package_DFN_QFN:QFN-32-1EP_5x5mm_P0.5mm_EP3.45x3.45mm")
+            .unwrap();
         assert_eq!(q.pads.len(), 33);
-        assert_eq!(at("Package_DFN_QFN:QFN-32-1EP_5x5mm_P0.5mm_EP3.45x3.45mm", "1"), Pt::mm(-2.45, 1.75));
+        assert_eq!(
+            at("Package_DFN_QFN:QFN-32-1EP_5x5mm_P0.5mm_EP3.45x3.45mm", "1"),
+            Pt::mm(-2.45, 1.75)
+        );
     }
 }

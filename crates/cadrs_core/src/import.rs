@@ -33,8 +33,8 @@ use crate::ids::{ElementId, FeatureId};
 
 pub mod structure;
 pub use structure::{
-    ImportAs, ImportFile, ImportIds, ImportMode, ImportPlan, PlanOccurrence, PlanPart, file_is_y_up, import_elements,
-    imported_document, stem, y_up_turn,
+    ImportAs, ImportFile, ImportIds, ImportMode, ImportPlan, PlanOccurrence, PlanPart,
+    file_is_y_up, import_elements, imported_document, stem, y_up_turn,
 };
 
 /// The file formats Import reads.
@@ -49,7 +49,10 @@ pub enum ImportFormat {
 impl ImportFormat {
     /// The format of a file with this name (by its extension), if Import reads it.
     pub fn of_file_name(name: &str) -> Option<Self> {
-        let ext = std::path::Path::new(name).extension()?.to_str()?.to_ascii_lowercase();
+        let ext = std::path::Path::new(name)
+            .extension()?
+            .to_str()?
+            .to_ascii_lowercase();
         match ext.as_str() {
             "step" | "stp" | "p21" => Some(Self::Step),
             "stl" => Some(Self::Stl),
@@ -100,7 +103,13 @@ pub enum ImportUnit {
 }
 
 impl ImportUnit {
-    pub const ALL: [ImportUnit; 5] = [Self::Millimeter, Self::Centimeter, Self::Meter, Self::Inch, Self::Foot];
+    pub const ALL: [ImportUnit; 5] = [
+        Self::Millimeter,
+        Self::Centimeter,
+        Self::Meter,
+        Self::Inch,
+        Self::Foot,
+    ];
 
     /// Millimetres per unit.
     pub fn mm(self) -> f64 {
@@ -178,7 +187,12 @@ impl ImportFeature {
             .or_else(|| sniff(&bytes))
             .ok_or_else(|| format!("{file_name}: not a STEP, IGES or STL file"))?;
         let blob = crate::blobs::insert(bytes);
-        Ok(Self { blob, file_name: file_name.to_string(), format, ..Self::default() })
+        Ok(Self {
+            blob,
+            file_name: file_name.to_string(),
+            format,
+            ..Self::default()
+        })
     }
 
     /// Why it can't be built, if it can't.
@@ -188,8 +202,15 @@ impl ImportFeature {
 
     /// The file name without its extension ("bracket"), for part names.
     pub fn stem(&self) -> String {
-        let s = std::path::Path::new(&self.file_name).file_stem().and_then(|s| s.to_str()).unwrap_or("");
-        if s.is_empty() { "Imported part".to_string() } else { s.to_string() }
+        let s = std::path::Path::new(&self.file_name)
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or("");
+        if s.is_empty() {
+            "Imported part".to_string()
+        } else {
+            s.to_string()
+        }
     }
 
     /// The extension its blob file gets.
@@ -221,7 +242,11 @@ fn sniff(bytes: &[u8]) -> Option<ImportFormat> {
         return Some(ImportFormat::Step);
     }
     // IGES: 80-column records, the first a Start ('S') line.
-    if head.lines().next().is_some_and(|l| l.trim_end_matches('\r').len() == 80 && l.as_bytes()[72] == b'S') {
+    if head
+        .lines()
+        .next()
+        .is_some_and(|l| l.trim_end_matches('\r').len() == 80 && l.as_bytes()[72] == b'S')
+    {
         return Some(ImportFormat::Iges);
     }
     if parse_stl(bytes).is_ok() {
@@ -251,7 +276,8 @@ impl Command for AddImport {
         Scope::Element(self.element)
     }
     fn apply(&self, doc: &mut Document) -> Result<(), CommandError> {
-        let mut x = ImportFeature::from_file(&self.file_name, self.bytes.to_vec()).map_err(CommandError::Invalid)?;
+        let mut x = ImportFeature::from_file(&self.file_name, self.bytes.to_vec())
+            .map_err(CommandError::Invalid)?;
         x.y_axis_up = self.y_axis_up;
         x.units = self.units;
         crate::commands::AddFeature {
@@ -275,7 +301,9 @@ pub fn parse_stl(bytes: &[u8]) -> Result<Vec<Triangle>, String> {
     if bytes.len() >= 84 {
         let n = u32::from_le_bytes([bytes[80], bytes[81], bytes[82], bytes[83]]) as usize;
         if n.checked_mul(50).and_then(|b| b.checked_add(84)) == Some(bytes.len()) {
-            let f = |o: usize| f32::from_le_bytes([bytes[o], bytes[o + 1], bytes[o + 2], bytes[o + 3]]) as f64;
+            let f = |o: usize| {
+                f32::from_le_bytes([bytes[o], bytes[o + 1], bytes[o + 2], bytes[o + 3]]) as f64
+            };
             return Ok((0..n)
                 .map(|i| {
                     let o = 84 + i * 50 + 12;
@@ -294,7 +322,11 @@ pub fn parse_stl(bytes: &[u8]) -> Result<Vec<Triangle>, String> {
         let mut w = line.split_whitespace();
         match w.next() {
             Some(k) if k.eq_ignore_ascii_case("vertex") => {
-                let v: Vec<f64> = w.take(3).map(|s| s.parse::<f64>()).collect::<Result<_, _>>().map_err(|e| format!("bad vertex: {e}"))?;
+                let v: Vec<f64> = w
+                    .take(3)
+                    .map(|s| s.parse::<f64>())
+                    .collect::<Result<_, _>>()
+                    .map_err(|e| format!("bad vertex: {e}"))?;
                 if v.len() != 3 {
                     return Err("bad vertex".into());
                 }
@@ -463,7 +495,9 @@ fn parse_args(s: &[u8], i: &mut usize) -> Vec<Val> {
                     bytes.push(s[*i]);
                     *i += 1;
                 }
-                out.push(Val::Str(decode_step_string(&String::from_utf8_lossy(&bytes))));
+                out.push(Val::Str(decode_step_string(&String::from_utf8_lossy(
+                    &bytes,
+                ))));
             }
             b'#' => {
                 *i += 1;
@@ -471,7 +505,12 @@ fn parse_args(s: &[u8], i: &mut usize) -> Vec<Val> {
                 while *i < s.len() && s[*i].is_ascii_digit() {
                     *i += 1;
                 }
-                out.push(std::str::from_utf8(&s[st..*i]).ok().and_then(|t| t.parse().ok()).map_or(Val::Other, Val::Ref));
+                out.push(
+                    std::str::from_utf8(&s[st..*i])
+                        .ok()
+                        .and_then(|t| t.parse().ok())
+                        .map_or(Val::Other, Val::Ref),
+                );
             }
             b'(' => out.push(Val::List(parse_args(s, i))),
             _ => {
@@ -491,7 +530,9 @@ fn parse_args(s: &[u8], i: &mut usize) -> Vec<Val> {
 /// The simple entity instances of a STEP file's DATA section, by id.
 fn step_entities(text: &str) -> std::collections::BTreeMap<u64, Entity> {
     let mut out = std::collections::BTreeMap::new();
-    let Some(start) = text.find("DATA;") else { return out };
+    let Some(start) = text.find("DATA;") else {
+        return out;
+    };
     let s = &text.as_bytes()[start + 5..];
     let mut i = 0;
     while i < s.len() {
@@ -525,7 +566,12 @@ fn step_entities(text: &str) -> std::collections::BTreeMap<u64, Entity> {
         while i < s.len() && s[i].is_ascii_digit() {
             i += 1;
         }
-        let Some(id) = std::str::from_utf8(&s[st..i]).ok().and_then(|t| t.parse::<u64>().ok()) else { continue };
+        let Some(id) = std::str::from_utf8(&s[st..i])
+            .ok()
+            .and_then(|t| t.parse::<u64>().ok())
+        else {
+            continue;
+        };
         while i < s.len() && (s[i] as char).is_whitespace() {
             i += 1;
         }
@@ -584,10 +630,15 @@ pub fn step_occurrences(text: &str) -> Vec<(String, usize)> {
         match e.kind.as_str() {
             "PRODUCT" => {
                 let name = arg(e, 1).text().trim().to_string();
-                let name = if name.is_empty() { arg(e, 0).text().trim().to_string() } else { name };
+                let name = if name.is_empty() {
+                    arg(e, 0).text().trim().to_string()
+                } else {
+                    name
+                };
                 product_name.insert(*id, name);
             }
-            "PRODUCT_DEFINITION_FORMATION" | "PRODUCT_DEFINITION_FORMATION_WITH_SPECIFIED_SOURCE" => {
+            "PRODUCT_DEFINITION_FORMATION"
+            | "PRODUCT_DEFINITION_FORMATION_WITH_SPECIFIED_SOURCE" => {
                 if let Some(p) = arg(e, 2).as_ref() {
                     pdf_product.insert(*id, p);
                 }
@@ -639,7 +690,12 @@ pub fn step_occurrences(text: &str) -> Vec<(String, usize)> {
         }
     }
     let pd_name = |pd: u64| -> String {
-        pd_pdf.get(&pd).and_then(|f| pdf_product.get(f)).and_then(|p| product_name.get(p)).cloned().unwrap_or_default()
+        pd_pdf
+            .get(&pd)
+            .and_then(|f| pdf_product.get(f))
+            .and_then(|p| product_name.get(p))
+            .cloned()
+            .unwrap_or_default()
     };
     // Which product definition each representation belongs to.
     let mut rep_pd: HashMap<u64, u64> = HashMap::new();
@@ -676,7 +732,11 @@ pub fn step_occurrences(text: &str) -> Vec<(String, usize)> {
                 pd_breps.entry(*pd).or_default().push((*it, faces, false));
             }
             for s in surface_shells.get(it).into_iter().flatten() {
-                pd_breps.entry(*pd).or_default().push((*s, shell_faces.get(s).copied().unwrap_or(0), true));
+                pd_breps.entry(*pd).or_default().push((
+                    *s,
+                    shell_faces.get(s).copied().unwrap_or(0),
+                    true,
+                ));
             }
         }
     }
@@ -685,7 +745,11 @@ pub fn step_occurrences(text: &str) -> Vec<(String, usize)> {
         v.dedup();
     }
     let children: std::collections::HashSet<u64> = nauo.iter().map(|(_, c)| *c).collect();
-    let mut roots: Vec<u64> = pd_pdf.keys().copied().filter(|pd| !children.contains(pd)).collect();
+    let mut roots: Vec<u64> = pd_pdf
+        .keys()
+        .copied()
+        .filter(|pd| !children.contains(pd))
+        .collect();
     roots.sort();
     let mut out = Vec::new();
     fn visit(
@@ -703,7 +767,11 @@ pub fn step_occurrences(text: &str) -> Vec<(String, usize)> {
         // A product used again: its name numbered, as Onshape numbers it (`R_0805`, `R_0805_1`).
         if let Some(items) = pd_breps.get(&pd) {
             let n = uses.entry(pd).or_default();
-            let label = if *n == 0 { name(pd) } else { format!("{}_{n}", name(pd)) };
+            let label = if *n == 0 {
+                name(pd)
+            } else {
+                format!("{}_{n}", name(pd))
+            };
             *n += 1;
             for (_, faces, surface) in items {
                 out.push((label.clone(), *faces, *surface));
@@ -728,7 +796,11 @@ pub fn step_occurrences(text: &str) -> Vec<(String, usize)> {
 /// Names for the solids a STEP file gave, in the reader's order with their face counts: each
 /// takes the first unused occurrence ([`step_occurrences`]) with the same number of faces, else
 /// the next unused one, else `fallback`.
-pub fn assign_names(solid_faces: &[usize], occurrences: &[(String, usize)], fallback: &str) -> Vec<String> {
+pub fn assign_names(
+    solid_faces: &[usize],
+    occurrences: &[(String, usize)],
+    fallback: &str,
+) -> Vec<String> {
     let mut used = vec![false; occurrences.len()];
     solid_faces
         .iter()
@@ -740,7 +812,11 @@ pub fn assign_names(solid_faces: &[usize], occurrences: &[(String, usize)], fall
                 Some(i) => {
                     used[i] = true;
                     let s = occurrences[i].0.trim();
-                    if s.is_empty() { fallback.to_string() } else { s.to_string() }
+                    if s.is_empty() {
+                        fallback.to_string()
+                    } else {
+                        s.to_string()
+                    }
                 }
                 None => fallback.to_string(),
             }
@@ -770,7 +846,11 @@ ENDSEC;\nEND-ISO-10303-21;\n";
         let occ = step_occurrences(ASM);
         assert_eq!(
             occ,
-            vec![("plate".to_string(), 6), ("Bolt é".to_string(), 3), ("Bolt é_1".to_string(), 3)]
+            vec![
+                ("plate".to_string(), 6),
+                ("Bolt é".to_string(), 3),
+                ("Bolt é_1".to_string(), 3)
+            ]
         );
         // The reader's order differs: matched by face count. The second bolt is numbered.
         let names = assign_names(&[3, 6, 3, 9], &occ, "file");
@@ -797,8 +877,14 @@ ENDSEC;\nEND-ISO-10303-21;\n";
         assert_eq!(tris, vec![tri(0.0), tri(5.0)]);
         assert_eq!(stl_pieces(&tris).len(), 2);
         assert!(parse_stl(b"garbage").is_err());
-        assert_eq!(ImportFormat::of_file_name("a/B.STP"), Some(ImportFormat::Step));
+        assert_eq!(
+            ImportFormat::of_file_name("a/B.STP"),
+            Some(ImportFormat::Step)
+        );
         assert_eq!(ImportFormat::of_file_name("x.stl"), Some(ImportFormat::Stl));
-        assert_eq!(ImportFormat::of_file_name("x.IGS"), Some(ImportFormat::Iges));
+        assert_eq!(
+            ImportFormat::of_file_name("x.IGS"),
+            Some(ImportFormat::Iges)
+        );
     }
 }

@@ -26,26 +26,41 @@ const SUITE: &str = "ssi_analytic";
 
 /// `b` after `a`.
 fn then(a: &Affine, b: &Affine) -> Affine {
-    Affine { m: b.m * a.m, t: b.m * a.t + b.t }
+    Affine {
+        m: b.m * a.m,
+        t: b.m * a.t + b.t,
+    }
 }
 
 /// A turn by `deg` degrees about the line through `o` along `axis`
 /// (`SmAxis2Placement::RotateAboutAxisAtPoint`).
 fn turn(o: P3, axis: V3, deg: f64) -> Affine {
     let m = Rotation3::from_axis_angle(&Unit::new_normalize(axis), deg.to_radians()).into_inner();
-    Affine { m, t: o.coords - m * o.coords }
+    Affine {
+        m,
+        t: o.coords - m * o.coords,
+    }
 }
 
 /// SMLib's `my_create_refframe` as a map: origin (−2, 0, 0), axes turned 0.1 rad about
 /// (1, 1, 1).
 fn refframe() -> Affine {
-    let m = Rotation3::from_axis_angle(&Unit::new_normalize(V3::new(1.0, 1.0, 1.0)), 0.1).into_inner();
-    Affine { m, t: V3::new(-2.0, 0.0, 0.0) }
+    let m =
+        Rotation3::from_axis_angle(&Unit::new_normalize(V3::new(1.0, 1.0, 1.0)), 0.1).into_inner();
+    Affine {
+        m,
+        t: V3::new(-2.0, 0.0, 0.0),
+    }
 }
 
 /// The world frame moved by `m`.
 fn frame_of(m: &Affine) -> Frame {
-    Frame { o: m.point(&P3::origin()), x: m.vector(&V3::x()), y: m.vector(&V3::y()), z: m.vector(&V3::z()) }
+    Frame {
+        o: m.point(&P3::origin()),
+        x: m.vector(&V3::x()),
+        y: m.vector(&V3::y()),
+        z: m.vector(&V3::z()),
+    }
 }
 
 /// Moved `h` along the reference frame's axis and turned `deg` about it.
@@ -59,20 +74,39 @@ fn along_axis(h: f64, deg: f64) -> Affine {
 /// radius 2, height 5, angles 0 to `deg`, then moved by `m`.
 fn cyl(deg: f64, m: &Affine) -> Patch {
     let f = frame_of(&then(&refframe(), m));
-    Patch::rect(Surface::Cylinder { f, r: 2.0 }, ((0.0, deg.to_radians()), (0.0, 5.0)))
+    Patch::rect(
+        Surface::Cylinder { f, r: 2.0 },
+        ((0.0, deg.to_radians()), (0.0, 5.0)),
+    )
 }
 
 /// `my_create_test_extruded_surf2`: the same cylinder as a surface of extrusion.
 fn ext_cyl(deg: f64, m: &Affine) -> Patch {
     let f = frame_of(&then(&refframe(), m));
-    Patch::rect(Surface::Extrusion { c: Curve::Circle { c: f.o, x: f.x, y: f.y, r: 2.0 }, d: f.z }, ((0.0, deg.to_radians()), (0.0, 5.0)))
+    Patch::rect(
+        Surface::Extrusion {
+            c: Curve::Circle {
+                c: f.o,
+                x: f.x,
+                y: f.y,
+                r: 2.0,
+            },
+            d: f.z,
+        },
+        ((0.0, deg.to_radians()), (0.0, 5.0)),
+    )
 }
 
 /// A bilinear plane (`CreateBilinearSurface`) from (x0, y0, 0) to (x0 + 10, y0 + 10, 0) on the
 /// reference frame.
 fn square(x0: f64, y0: f64) -> Patch {
     let r = refframe();
-    let f = Frame { o: r.point(&P3::new(x0, y0, 0.0)), x: r.vector(&V3::x()), y: r.vector(&V3::y()), z: r.vector(&V3::z()) };
+    let f = Frame {
+        o: r.point(&P3::new(x0, y0, 0.0)),
+        x: r.vector(&V3::x()),
+        y: r.vector(&V3::y()),
+        z: r.vector(&V3::z()),
+    };
     Patch::rect(Surface::Plane { f }, ((0.0, 10.0), (0.0, 10.0)))
 }
 
@@ -80,18 +114,28 @@ fn square(x0: f64, y0: f64) -> Patch {
 /// (`SmExtent2d::Evaluate`, `TrimWithDomain`), moved by `m`.
 fn file_surface(file: &str, lo: (f64, f64), hi: (f64, f64), m: &Affine) -> Result<Patch, String> {
     let model = model(SUITE, file)?;
-    let [face] = model.body.faces.as_slice() else { return Err(format!("{file}: {} faces", model.body.faces.len())) };
+    let [face] = model.body.faces.as_slice() else {
+        return Err(format!("{file}: {} faces", model.body.faces.len()));
+    };
     let Surface::Nurbs(n) = &face.surf else {
         // The reader gave the face the analytic surface its B-spline is: the whole face is the
         // same surface, a part of SMLib's domain isn't.
         if (lo, hi) != ((0.0, 0.0), (1.0, 1.0)) {
-            return Err(format!("{file}: the reader made the B-spline analytic; SMLib's sub-domain isn't known in its parameters"));
+            return Err(format!(
+                "{file}: the reader made the B-spline analytic; SMLib's sub-domain isn't known in its parameters"
+            ));
         }
         let p = Patch::face(&model.body, 0);
-        return Ok(Patch { surf: p.surf.transformed(m), ..p });
+        return Ok(Patch {
+            surf: p.surf.transformed(m),
+            ..p
+        });
     };
     let ((u0, u1), (v0, v1)) = n.range();
-    let uv = ((u0 + (u1 - u0) * lo.0, u0 + (u1 - u0) * hi.0), (v0 + (v1 - v0) * lo.1, v0 + (v1 - v0) * hi.1));
+    let uv = (
+        (u0 + (u1 - u0) * lo.0, u0 + (u1 - u0) * hi.0),
+        (v0 + (v1 - v0) * lo.1, v0 + (v1 - v0) * hi.1),
+    );
     Ok(Patch::rect(face.surf.transformed(m), uv))
 }
 
@@ -102,7 +146,9 @@ fn extrusion_vector(p: &Patch) -> Result<V3, String> {
     if let Surface::Extrusion { d, .. } = &p.surf {
         return Ok(d * (v1 - v0));
     }
-    let Surface::Nurbs(n) = &p.surf else { return Err("not an extrusion".into()) };
+    let Surface::Nurbs(n) = &p.surf else {
+        return Err("not an extrusion".into());
+    };
     if n.dv == 1 {
         Ok(p.surf.eval(u0, v1) - p.surf.eval(u0, v0))
     } else if n.du == 1 {
@@ -156,13 +202,26 @@ fn analytic(case: u32, want: &Want) -> Result<(), String> {
         14 => (square(0.0, 0.0), square(10.0, 5.0)),
         15 => {
             let b = file_surface("surf_extrude.smb", (0.0, 0.0), (1.0, 1.0), &refframe())?;
-            let a = file_surface("surf_extrude.smb", (0.0, 0.0), (1.0, 1.0), &then(&Affine::translation(V3::new(1.0, 0.0, 7.0)), &refframe()))?;
+            let a = file_surface(
+                "surf_extrude.smb",
+                (0.0, 0.0),
+                (1.0, 1.0),
+                &then(&Affine::translation(V3::new(1.0, 0.0, 7.0)), &refframe()),
+            )?;
             (a, b)
         }
         16 => {
             let b = file_surface("surf_sphere150.smb", (0.0, 0.0), (1.0, 1.0), &refframe())?;
-            let m = then(&Affine::translation(V3::new(0.0, 1.0, 0.0)), &turn(P3::new(-2.0, 0.0, 0.0), V3::y(), 180.0));
-            let a = file_surface("surf_sphere150.smb", (0.0, 0.0), (1.0, 1.0), &then(&m, &refframe()))?;
+            let m = then(
+                &Affine::translation(V3::new(0.0, 1.0, 0.0)),
+                &turn(P3::new(-2.0, 0.0, 0.0), V3::y(), 180.0),
+            );
+            let a = file_surface(
+                "surf_sphere150.smb",
+                (0.0, 0.0),
+                (1.0, 1.0),
+                &then(&m, &refframe()),
+            )?;
             (a, b)
         }
         17 => (square(0.0, 0.0), square(11.0, 5.0)),
@@ -175,83 +234,201 @@ fn analytic(case: u32, want: &Want) -> Result<(), String> {
 /// SMLib analytic SSI 2: two 240° cylinder patches, the second moved 4 along the axis and turned 180°: two shared regions [0°, 60°] and [180°, 240°] × height 1; SMLib asserts 8 curves, closed-form length 12.3776.
 #[test]
 fn analytic_02() {
-    analytic(2, &Want { any: true, length: Some(12.377580409572781), samples: &[] }).unwrap();
+    analytic(
+        2,
+        &Want {
+            any: true,
+            length: Some(12.377580409572781),
+            samples: &[],
+        },
+    )
+    .unwrap();
 }
 
 /// SMLib analytic SSI 3: two 200° cylinders of extrusion, the second moved 3 and turned 200°: the shared region [0°, 40°] × height 2 and the line where they meet at 200°; SMLib asserts 5 curves, closed-form length 8.79253.
 #[test]
 fn analytic_03() {
-    analytic(3, &Want { any: true, length: Some(8.792526803190928), samples: &[] }).unwrap();
+    analytic(
+        3,
+        &Want {
+            any: true,
+            length: Some(8.792526803190928),
+            samples: &[],
+        },
+    )
+    .unwrap();
 }
 
 /// SMLib analytic SSI 5: `surf_extrude.smb` and a copy shifted (5, 0, 1) along its extrusion frame; SMLib asserts 3 curves.
 #[test]
 fn analytic_05() {
-    analytic(5, &Want { any: true, length: None, samples: &[] }).unwrap();
+    analytic(
+        5,
+        &Want {
+            any: true,
+            length: None,
+            samples: &[],
+        },
+    )
+    .unwrap();
 }
 
 /// SMLib analytic SSI 6: two 200° cylinders of extrusion, the second moved 3 and turned 90°: the shared region [90°, 200°] × height 2; SMLib asserts 4 curves, closed-form length 11.6794.
 #[test]
 fn analytic_06() {
-    analytic(6, &Want { any: true, length: Some(11.67944870877505), samples: &[] }).unwrap();
+    analytic(
+        6,
+        &Want {
+            any: true,
+            length: Some(11.67944870877505),
+            samples: &[],
+        },
+    )
+    .unwrap();
 }
 
 /// SMLib analytic SSI 7: two 180° cylinder patches, the second moved 5 along the axis: they meet along a half circle; SMLib asserts 1 curves, closed-form length 6.28319.
 #[test]
 fn analytic_07() {
-    analytic(7, &Want { any: true, length: Some(6.283185307179586), samples: &[] }).unwrap();
+    analytic(
+        7,
+        &Want {
+            any: true,
+            length: Some(6.283185307179586),
+            samples: &[],
+        },
+    )
+    .unwrap();
 }
 
 /// SMLib analytic SSI 9: parts of `surf_rev.smb` and `surf_sphere150.smb` on the reference frame; SMLib asserts 0 curves.
 #[test]
 fn analytic_09() {
-    known_failure(analytic(9, &Want { any: false, length: None, samples: &[] }), "ssi_analytic", "analytic_09");
+    known_failure(
+        analytic(
+            9,
+            &Want {
+                any: false,
+                length: None,
+                samples: &[],
+            },
+        ),
+        "ssi_analytic",
+        "analytic_09",
+    );
 }
 
 /// SMLib analytic SSI 10: two 180° cylinder patches, the second moved 4 along the axis: the shared region, height 1; SMLib asserts 4 curves, closed-form length 14.5664.
 #[test]
 fn analytic_10() {
-    analytic(10, &Want { any: true, length: Some(14.566370614359172), samples: &[] }).unwrap();
+    analytic(
+        10,
+        &Want {
+            any: true,
+            length: Some(14.566370614359172),
+            samples: &[],
+        },
+    )
+    .unwrap();
 }
 
 /// SMLib analytic SSI 11: two 180° cylinder patches, the second moved 4 and turned 90°: the shared region [90°, 180°] × height 1; SMLib asserts 4 curves, closed-form length 8.28319.
 #[test]
 fn analytic_11() {
-    analytic(11, &Want { any: true, length: Some(8.283185307179586), samples: &[] }).unwrap();
+    analytic(
+        11,
+        &Want {
+            any: true,
+            length: Some(8.283185307179586),
+            samples: &[],
+        },
+    )
+    .unwrap();
 }
 
 /// SMLib analytic SSI 12: two 180° cylinder patches, the second moved 4 and turned 180°: they meet along two lines of length 1; SMLib asserts 2 curves, closed-form length 2.
 #[test]
 fn analytic_12() {
-    analytic(12, &Want { any: true, length: Some(2.0), samples: &[] }).unwrap();
+    analytic(
+        12,
+        &Want {
+            any: true,
+            length: Some(2.0),
+            samples: &[],
+        },
+    )
+    .unwrap();
 }
 
 /// SMLib analytic SSI 13: `surf_extrude.smb` and a copy shifted along its extrusion by its height and 1 across; SMLib asserts 3 curves.
 #[test]
 fn analytic_13() {
-    analytic(13, &Want { any: true, length: None, samples: &[] }).unwrap();
+    analytic(
+        13,
+        &Want {
+            any: true,
+            length: None,
+            samples: &[],
+        },
+    )
+    .unwrap();
 }
 
 /// SMLib analytic SSI 14: two coplanar 10 × 10 squares meeting along an edge of length 5; SMLib asserts 1 curves, closed-form length 5.
 #[test]
 fn analytic_14() {
-    analytic(14, &Want { any: true, length: Some(5.0), samples: &[] }).unwrap();
+    analytic(
+        14,
+        &Want {
+            any: true,
+            length: Some(5.0),
+            samples: &[],
+        },
+    )
+    .unwrap();
 }
 
 /// SMLib analytic SSI 15: `surf_extrude.smb` and a copy moved (1, 0, 7), on the reference frame; SMLib asserts 3 curves.
 #[test]
 fn analytic_15() {
-    analytic(15, &Want { any: true, length: None, samples: &[] }).unwrap();
+    analytic(
+        15,
+        &Want {
+            any: true,
+            length: None,
+            samples: &[],
+        },
+    )
+    .unwrap();
 }
 
 /// SMLib analytic SSI 16: `surf_sphere150.smb` and a copy moved 1 along y and turned 180° about y; SMLib asserts 1 curves.
 #[test]
 fn analytic_16() {
-    known_failure(analytic(16, &Want { any: true, length: None, samples: &[] }), "ssi_analytic", "analytic_16");
+    known_failure(
+        analytic(
+            16,
+            &Want {
+                any: true,
+                length: None,
+                samples: &[],
+            },
+        ),
+        "ssi_analytic",
+        "analytic_16",
+    );
 }
 
 /// SMLib analytic SSI 17: two coplanar 10 × 10 squares 1 apart; SMLib asserts 0 curves, closed-form length 0.
 #[test]
 fn analytic_17() {
-    analytic(17, &Want { any: false, length: Some(0.0), samples: &[] }).unwrap();
+    analytic(
+        17,
+        &Want {
+            any: false,
+            length: Some(0.0),
+            samples: &[],
+        },
+    )
+    .unwrap();
 }

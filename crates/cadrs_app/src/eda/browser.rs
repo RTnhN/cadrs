@@ -94,7 +94,15 @@ const MAX_ROWS: usize = 400;
 const PREVIEW: (u32, u32) = (340, 200);
 
 pub fn register(app: &mut App) {
-    app.add_systems(Update, (poll, refresh, preview).chain().run_if(in_state(AppState::Document))).add_observer(on_row).add_observer(on_double).add_observer(on_submit);
+    app.add_systems(
+        Update,
+        (poll, refresh, preview)
+            .chain()
+            .run_if(in_state(AppState::Document)),
+    )
+    .add_observer(on_row)
+    .add_observer(on_double)
+    .add_observer(on_submit);
     #[cfg(feature = "easyeda")]
     {
         super::online::register(app);
@@ -104,7 +112,15 @@ pub fn register(app: &mut App) {
 
 pub fn open(w: &mut World, kind: Kind, purpose: Purpose) {
     close(w);
-    w.insert_resource(Browser { kind: kind.clone(), purpose, shown: None, chosen: None, open: HashSet::new(), previewed: None, online: false });
+    w.insert_resource(Browser {
+        kind: kind.clone(),
+        purpose,
+        shown: None,
+        chosen: None,
+        open: HashSet::new(),
+        previewed: None,
+        online: false,
+    });
     let online = cfg!(feature = "easyeda");
     let theme = w.resource::<Theme>().clone();
     let (tb, tf) = (theme.clone(), theme.clone());
@@ -119,19 +135,60 @@ pub fn open(w: &mut World, kind: Kind, purpose: Purpose) {
             .title(title)
             .width(820.0)
             .body(move |b| {
-                b.spawn(Node { flex_direction: FlexDirection::Row, column_gap: Val::Px(12.0), ..default() }).with_children(|row| {
-                    row.spawn(Node { flex_direction: FlexDirection::Column, width: Val::Px(430.0), ..default() }).with_children(|left| {
+                b.spawn(Node {
+                    flex_direction: FlexDirection::Row,
+                    column_gap: Val::Px(12.0),
+                    ..default()
+                })
+                .with_children(|row| {
+                    row.spawn(Node {
+                        flex_direction: FlexDirection::Column,
+                        width: Val::Px(430.0),
+                        ..default()
+                    })
+                    .with_children(|left| {
                         if online {
-                            left.spawn(Node { flex_direction: FlexDirection::Column, margin: UiRect::bottom(Val::Px(6.0)), ..default() }).with_children(|t| {
-                                t.spawn(TabStrip::new("eda-chooser-source").compact().tab("Libraries").tab("JLCPCB parts").build(&tb));
+                            left.spawn(Node {
+                                flex_direction: FlexDirection::Column,
+                                margin: UiRect::bottom(Val::Px(6.0)),
+                                ..default()
+                            })
+                            .with_children(|t| {
+                                t.spawn(
+                                    TabStrip::new("eda-chooser-source")
+                                        .compact()
+                                        .tab("Libraries")
+                                        .tab("JLCPCB parts")
+                                        .build(&tb),
+                                );
                             });
                         }
-                        left.spawn(Node { flex_direction: FlexDirection::Row, column_gap: Val::Px(6.0), ..default() }).with_children(|r| {
-                            r.spawn(TextInput::new("eda-chooser-filter").placeholder("Filter").width(Val::Percent(100.0)).height(28.0).build(&tb));
+                        left.spawn(Node {
+                            flex_direction: FlexDirection::Row,
+                            column_gap: Val::Px(6.0),
+                            ..default()
+                        })
+                        .with_children(|r| {
+                            r.spawn(
+                                TextInput::new("eda-chooser-filter")
+                                    .placeholder("Filter")
+                                    .width(Val::Percent(100.0))
+                                    .height(28.0)
+                                    .build(&tb),
+                            );
                             if online {
-                                r.spawn((Name::new("eda-chooser-search-box"), Node { display: Display::None, ..default() })).with_children(|b| {
+                                r.spawn((
+                                    Name::new("eda-chooser-search-box"),
+                                    Node {
+                                        display: Display::None,
+                                        ..default()
+                                    },
+                                ))
+                                .with_children(|b| {
                                     b.spawn((
-                                        cadrs_ui::Button::new("eda-chooser-search").label("Search").build(&tb),
+                                        cadrs_ui::Button::new("eda-chooser-search")
+                                            .label("Search")
+                                            .build(&tb),
                                         observe(|_: On<Activate>, mut commands: Commands| {
                                             commands.queue(submit);
                                         }),
@@ -141,38 +198,100 @@ pub fn open(w: &mut World, kind: Kind, purpose: Purpose) {
                         });
                         // The list in a thin frame, the wheel scrolling it and a scrollbar at its
                         // right while it overflows.
-                        let frame = Node { flex_direction: FlexDirection::Column, height: Val::Px(if online { 370.0 } else { 420.0 }), margin: UiRect::top(Val::Px(6.0)), border: UiRect::all(Val::Px(1.0)), ..default() };
-                        left.spawn((Name::new("eda-chooser-frame"), frame, BorderColor::all(tb.border))).with_children(|frame| {
+                        let frame = Node {
+                            flex_direction: FlexDirection::Column,
+                            height: Val::Px(if online { 370.0 } else { 420.0 }),
+                            margin: UiRect::top(Val::Px(6.0)),
+                            border: UiRect::all(Val::Px(1.0)),
+                            ..default()
+                        };
+                        left.spawn((
+                            Name::new("eda-chooser-frame"),
+                            frame,
+                            BorderColor::all(tb.border),
+                        ))
+                        .with_children(|frame| {
                             let list = frame
                                 .spawn((
                                     Name::new("eda-chooser-list"),
                                     ChooserList,
                                     cadrs_ui::WheelScroll,
                                     cadrs_ui::scrollbar::ScrollGutter(12.0),
-                                    Node { flex_direction: FlexDirection::Column, height: Val::Percent(100.0), padding: UiRect::all(Val::Px(2.0)), overflow: Overflow::scroll_y(), ..default() },
+                                    Node {
+                                        flex_direction: FlexDirection::Column,
+                                        height: Val::Percent(100.0),
+                                        padding: UiRect::all(Val::Px(2.0)),
+                                        overflow: Overflow::scroll_y(),
+                                        ..default()
+                                    },
                                 ))
                                 .id();
-                            frame.spawn(cadrs_ui::vertical_scrollbar(&tb, "eda-chooser-scrollbar", list));
+                            frame.spawn(cadrs_ui::vertical_scrollbar(
+                                &tb,
+                                "eda-chooser-scrollbar",
+                                list,
+                            ));
                         });
                         if online {
-                            left.spawn((Name::new("eda-chooser-status"), tb.text("", tb.font_sm, FontWeight::NORMAL, tb.muted_foreground), Node { margin: UiRect::top(Val::Px(4.0)), ..default() }));
+                            left.spawn((
+                                Name::new("eda-chooser-status"),
+                                tb.text("", tb.font_sm, FontWeight::NORMAL, tb.muted_foreground),
+                                Node {
+                                    margin: UiRect::top(Val::Px(4.0)),
+                                    ..default()
+                                },
+                            ));
                         }
                     });
-                    row.spawn(Node { flex_direction: FlexDirection::Column, row_gap: Val::Px(8.0), width: Val::Px(PREVIEW.0 as f32), ..default() }).with_children(|right| {
-                        let frame = |n: &'static str| (Name::new(n), ImageNode::default(), Node { width: Val::Px(PREVIEW.0 as f32), height: Val::Px(PREVIEW.1 as f32), border: UiRect::all(Val::Px(1.0)), ..default() }, BorderColor::all(tb.border));
+                    row.spawn(Node {
+                        flex_direction: FlexDirection::Column,
+                        row_gap: Val::Px(8.0),
+                        width: Val::Px(PREVIEW.0 as f32),
+                        ..default()
+                    })
+                    .with_children(|right| {
+                        let frame = |n: &'static str| {
+                            (
+                                Name::new(n),
+                                ImageNode::default(),
+                                Node {
+                                    width: Val::Px(PREVIEW.0 as f32),
+                                    height: Val::Px(PREVIEW.1 as f32),
+                                    border: UiRect::all(Val::Px(1.0)),
+                                    ..default()
+                                },
+                                BorderColor::all(tb.border),
+                            )
+                        };
                         right.spawn(frame("eda-chooser-preview"));
                         if !footprints {
                             right.spawn(frame("eda-chooser-preview-footprint"));
                         }
-                        right.spawn((Name::new("eda-chooser-description"), tb.text("", tb.font_sm, FontWeight::NORMAL, tb.muted_foreground), Node { max_width: Val::Px(PREVIEW.0 as f32), ..default() }));
+                        right.spawn((
+                            Name::new("eda-chooser-description"),
+                            tb.text("", tb.font_sm, FontWeight::NORMAL, tb.muted_foreground),
+                            Node {
+                                max_width: Val::Px(PREVIEW.0 as f32),
+                                ..default()
+                            },
+                        ));
                     });
                 });
             })
             .footer(move |f| {
                 if online {
-                    f.spawn((Name::new("eda-chooser-add-box"), Node { display: Display::None, ..default() })).with_children(|b| {
+                    f.spawn((
+                        Name::new("eda-chooser-add-box"),
+                        Node {
+                            display: Display::None,
+                            ..default()
+                        },
+                    ))
+                    .with_children(|b| {
                         b.spawn((
-                            cadrs_ui::Button::new("eda-chooser-add").label("Add to library").build(&tf),
+                            cadrs_ui::Button::new("eda-chooser-add")
+                                .label("Add to library")
+                                .build(&tf),
                             observe(|_: On<Activate>, mut commands: Commands| {
                                 #[cfg(feature = "easyeda")]
                                 commands.queue(|w: &mut World| super::online::add(w, false));
@@ -182,13 +301,18 @@ pub fn open(w: &mut World, kind: Kind, purpose: Purpose) {
                     });
                 }
                 f.spawn((
-                    cadrs_ui::Button::new("eda-chooser-ok").label("OK").primary().build(&tf),
+                    cadrs_ui::Button::new("eda-chooser-ok")
+                        .label("OK")
+                        .primary()
+                        .build(&tf),
                     observe(|_: On<Activate>, mut commands: Commands| {
                         commands.queue(accept);
                     }),
                 ));
                 f.spawn((
-                    cadrs_ui::Button::new("eda-chooser-cancel").label("Cancel").build(&tf),
+                    cadrs_ui::Button::new("eda-chooser-cancel")
+                        .label("Cancel")
+                        .build(&tf),
                     observe(|_: On<Activate>, mut commands: Commands| {
                         commands.queue(close);
                     }),
@@ -210,19 +334,35 @@ pub fn close(w: &mut World) {
 
 /// The items matching the filter, as (library, id, description).
 fn hits(lib: &LibraryTable, kind: &Kind, filter: &str) -> Vec<(String, String, String)> {
-    let lib_of = |id: &str| id.split_once(':').map_or(String::new(), |(l, _)| l.to_string());
+    let lib_of = |id: &str| {
+        id.split_once(':')
+            .map_or(String::new(), |(l, _)| l.to_string())
+    };
     match kind {
         Kind::Symbols { power } => lib
             .search_symbols(filter, *power)
             .into_iter()
-            .map(|s| (lib_of(&s.id), s.id.clone(), s.field(cadrs_eda::symbol::fields::DESCRIPTION).map_or(String::new(), |f| f.value().to_string())))
+            .map(|s| {
+                (
+                    lib_of(&s.id),
+                    s.id.clone(),
+                    s.field(cadrs_eda::symbol::fields::DESCRIPTION)
+                        .map_or(String::new(), |f| f.value().to_string()),
+                )
+            })
             .collect(),
-        Kind::Footprints { globs } => lib.search_footprints(filter, globs).into_iter().map(|f| (lib_of(&f.id), f.id.clone(), f.description.clone())).collect(),
+        Kind::Footprints { globs } => lib
+            .search_footprints(filter, globs)
+            .into_iter()
+            .map(|f| (lib_of(&f.id), f.id.clone(), f.description.clone()))
+            .collect(),
     }
 }
 
 fn accept(w: &mut World) {
-    let Some(b) = w.get_resource::<Browser>() else { return };
+    let Some(b) = w.get_resource::<Browser>() else {
+        return;
+    };
     #[cfg(feature = "easyeda")]
     if b.online {
         // Added first; taken when it's in the library (see `poll`).
@@ -238,12 +378,20 @@ fn accept(w: &mut World) {
     match purpose {
         Purpose::Place => {
             if let Some(sym) = lib.symbol(&id).cloned() {
-                super::schematic_tools::set_tool(w, super::schematic_tools::Tool::Place(Box::new(sym)));
+                super::schematic_tools::set_tool(
+                    w,
+                    super::schematic_tools::Tool::Place(Box::new(sym)),
+                );
             }
         }
         Purpose::ComponentSymbol => {
-            let Some(sym) = lib.symbol(&id).cloned() else { return };
-            let fp = sym.field(cadrs_eda::symbol::fields::FOOTPRINT).and_then(|f| lib.footprint(f.value())).cloned();
+            let Some(sym) = lib.symbol(&id).cloned() else {
+                return;
+            };
+            let fp = sym
+                .field(cadrs_eda::symbol::fields::FOOTPRINT)
+                .and_then(|f| lib.footprint(f.value()))
+                .cloned();
             super::part_tools::commit(w, "Symbol from library", |c| {
                 if c.footprint.as_ref().is_none_or(|f| f.pads.is_empty())
                     && let Some(fp) = fp
@@ -273,9 +421,13 @@ fn accept(w: &mut World) {
 /// Rebuilds the list when the filter or the open libraries change.
 fn refresh(world: &mut World) {
     let mut q = world.query_filtered::<Entity, With<ChooserList>>();
-    let Some(list) = q.iter(world).next() else { return };
+    let Some(list) = q.iter(world).next() else {
+        return;
+    };
     let filter = ui::text_value(world, "eda-chooser-filter");
-    let Some(b) = world.get_resource::<Browser>() else { return };
+    let Some(b) = world.get_resource::<Browser>() else {
+        return;
+    };
     #[cfg(feature = "easyeda")]
     if b.online {
         refresh_online(world, list);
@@ -293,7 +445,11 @@ fn refresh(world: &mut World) {
         if groups.iter().any(|g| g.0 == l.name) {
             continue;
         }
-        let items: Vec<(String, String)> = found.iter().filter(|h| h.0 == l.name).map(|h| (h.1.clone(), h.2.clone())).collect();
+        let items: Vec<(String, String)> = found
+            .iter()
+            .filter(|h| h.0 == l.name)
+            .map(|h| (h.1.clone(), h.2.clone()))
+            .collect();
         if !items.is_empty() {
             groups.push((l.name.clone(), items));
         }
@@ -308,7 +464,12 @@ fn refresh(world: &mut World) {
         for (name, items) in groups {
             let is_open = filtering || open.contains(&name);
             l.spawn((
-                ListItem::new(format!("eda-chooser-lib-{}", crate::pcb::slug(&name))).label(format!("{name} ({})", items.len())).disclosure(Some(is_open)).weight(FontWeight::MEDIUM).height(24.0).build(&theme),
+                ListItem::new(format!("eda-chooser-lib-{}", crate::pcb::slug(&name)))
+                    .label(format!("{name} ({})", items.len()))
+                    .disclosure(Some(is_open))
+                    .weight(FontWeight::MEDIUM)
+                    .height(24.0)
+                    .build(&theme),
                 Row::Library(name.clone()),
             ));
             rows += 1;
@@ -319,11 +480,28 @@ fn refresh(world: &mut World) {
                 if rows >= MAX_ROWS {
                     break;
                 }
-                let short = id.split_once(':').map_or(id.as_str(), |(_, n)| n).to_string();
+                let short = id
+                    .split_once(':')
+                    .map_or(id.as_str(), |(_, n)| n)
+                    .to_string();
                 let row = format!("eda-chooser-{}", crate::pcb::slug(&id));
                 // Long descriptions are cut so they stay clear of the name.
-                let desc = if desc.chars().count() > 44 { format!("{}…", desc.chars().take(43).collect::<String>()) } else { desc };
-                l.spawn((ListItem::new(row).label(short).detail(desc).padding_left(22.0).height(24.0).selected(chosen.as_deref() == Some(id.as_str())).build(&theme), Row::Item(id), cadrs_ui::DoubleClickable));
+                let desc = if desc.chars().count() > 44 {
+                    format!("{}…", desc.chars().take(43).collect::<String>())
+                } else {
+                    desc
+                };
+                l.spawn((
+                    ListItem::new(row)
+                        .label(short)
+                        .detail(desc)
+                        .padding_left(22.0)
+                        .height(24.0)
+                        .selected(chosen.as_deref() == Some(id.as_str()))
+                        .build(&theme),
+                    Row::Item(id),
+                    cadrs_ui::DoubleClickable,
+                ));
                 rows += 1;
             }
         }
@@ -335,7 +513,9 @@ fn on_row(a: On<Activate>, q: Query<&Row>, mut commands: Commands) {
     let Ok(r) = q.get(a.entity) else { return };
     let r = r.clone();
     commands.queue(move |w: &mut World| {
-        let Some(mut b) = w.get_resource_mut::<Browser>() else { return };
+        let Some(mut b) = w.get_resource_mut::<Browser>() else {
+            return;
+        };
         match r {
             Row::Library(name) => {
                 if !b.open.remove(&name) {
@@ -358,7 +538,9 @@ fn on_row(a: On<Activate>, q: Query<&Row>, mut commands: Commands) {
 /// Enter in the filter takes the chosen item, else the first match; on the JLCPCB tab it
 /// searches.
 fn on_submit(ev: On<TextSubmit>, q: Query<&Name>, mut commands: Commands) {
-    if q.get(ev.entity).is_ok_and(|n| n.as_str() == "eda-chooser-filter-field") {
+    if q.get(ev.entity)
+        .is_ok_and(|n| n.as_str() == "eda-chooser-filter-field")
+    {
         commands.queue(submit);
     }
 }
@@ -381,7 +563,17 @@ fn refresh_online(world: &mut World, list: Entity) {
     if world.resource::<Browser>().shown.as_deref() == Some(key.as_str()) {
         return;
     }
-    let rows: Vec<(String, String, String)> = o.hits.iter().map(|h| (h.lcsc.clone(), format!("{}  {}", h.lcsc, h.mpn), super::online::describe(h).0)).collect();
+    let rows: Vec<(String, String, String)> = o
+        .hits
+        .iter()
+        .map(|h| {
+            (
+                h.lcsc.clone(),
+                format!("{}  {}", h.lcsc, h.mpn),
+                super::online::describe(h).0,
+            )
+        })
+        .collect();
     let chosen = o.chosen.clone();
     world.resource_mut::<Browser>().shown = Some(key);
     let theme = world.resource::<Theme>().clone();
@@ -390,8 +582,21 @@ fn refresh_online(world: &mut World, list: Entity) {
     commands.entity(list).with_children(|l| {
         for (lcsc, label, detail) in rows {
             let name = format!("eda-chooser-lcsc-{}", lcsc.to_lowercase());
-            let detail = if detail.chars().count() > 34 { format!("{}…", detail.chars().take(33).collect::<String>()) } else { detail };
-            l.spawn((ListItem::new(name).label(label).detail(detail).height(24.0).selected(chosen.as_deref() == Some(lcsc.as_str())).build(&theme), Row::Part(lcsc), cadrs_ui::DoubleClickable));
+            let detail = if detail.chars().count() > 34 {
+                format!("{}…", detail.chars().take(33).collect::<String>())
+            } else {
+                detail
+            };
+            l.spawn((
+                ListItem::new(name)
+                    .label(label)
+                    .detail(detail)
+                    .height(24.0)
+                    .selected(chosen.as_deref() == Some(lcsc.as_str()))
+                    .build(&theme),
+                Row::Part(lcsc),
+                cadrs_ui::DoubleClickable,
+            ));
         }
     });
     world.flush();
@@ -400,7 +605,9 @@ fn refresh_online(world: &mut World, list: Entity) {
 /// Switching between the Libraries and JLCPCB parts tabs.
 #[cfg(feature = "easyeda")]
 fn on_source(ev: On<TabStripSelect>, q: Query<&Name>, mut commands: Commands) {
-    if q.get(ev.entity).is_ok_and(|n| n.as_str() == "eda-chooser-source") {
+    if q.get(ev.entity)
+        .is_ok_and(|n| n.as_str() == "eda-chooser-source")
+    {
         let online = ev.index == 1;
         commands.queue(move |w: &mut World| set_source(w, online));
     }
@@ -409,7 +616,9 @@ fn on_source(ev: On<TabStripSelect>, q: Query<&Name>, mut commands: Commands) {
 /// Shows a tab: its list, previews, and the Search and Add buttons on the JLCPCB one.
 #[cfg(feature = "easyeda")]
 fn set_source(w: &mut World, online: bool) {
-    let Some(mut b) = w.get_resource_mut::<Browser>() else { return };
+    let Some(mut b) = w.get_resource_mut::<Browser>() else {
+        return;
+    };
     b.online = online;
     b.shown = None;
     b.previewed = Some("\u{1}".into());
@@ -446,10 +655,17 @@ fn poll(w: &mut World) {
             Done::Added(symbol, footprint, take) => {
                 set_source(w, false);
                 let mut b = w.resource_mut::<Browser>();
-                let id = if matches!(b.kind, Kind::Footprints { .. }) { footprint } else { symbol };
+                let id = if matches!(b.kind, Kind::Footprints { .. }) {
+                    footprint
+                } else {
+                    symbol
+                };
                 b.chosen = Some(id.clone());
                 b.open.insert(super::libraries::ONLINE_LIBRARY.into());
-                let name = id.split_once(':').map_or(id.as_str(), |(_, n)| n).to_string();
+                let name = id
+                    .split_once(':')
+                    .map_or(id.as_str(), |(_, n)| n)
+                    .to_string();
                 ui::set_text_value(w, "eda-chooser-filter", &name);
                 if take {
                     accept(w);
@@ -466,16 +682,35 @@ pub fn draw_list_image(d: &DrawList, size: (u32, u32)) -> Option<Image> {
     let tree = usvg::Tree::from_str(&svg, &usvg::Options::default()).ok()?;
     let s = tree.size();
     let k = ((size.0 as f32 * 0.9) / s.width()).min((size.1 as f32 * 0.9) / s.height());
-    let (dx, dy) = ((size.0 as f32 - s.width() * k) / 2.0, (size.1 as f32 - s.height() * k) / 2.0);
+    let (dx, dy) = (
+        (size.0 as f32 - s.width() * k) / 2.0,
+        (size.1 as f32 - s.height() * k) / 2.0,
+    );
     let mut pix = tiny_skia::Pixmap::new(size.0, size.1)?;
     let bg = d.background;
     pix.fill(tiny_skia::Color::from_rgba8(bg[0], bg[1], bg[2], 255));
-    resvg::render(&tree, tiny_skia::Transform::from_scale(k, k).post_translate(dx, dy), &mut pix.as_mut());
-    Some(Image::new(Extent3d { width: size.0, height: size.1, depth_or_array_layers: 1 }, TextureDimension::D2, pix.take(), TextureFormat::Rgba8UnormSrgb, RenderAssetUsages::RENDER_WORLD))
+    resvg::render(
+        &tree,
+        tiny_skia::Transform::from_scale(k, k).post_translate(dx, dy),
+        &mut pix.as_mut(),
+    );
+    Some(Image::new(
+        Extent3d {
+            width: size.0,
+            height: size.1,
+            depth_or_array_layers: 1,
+        },
+        TextureDimension::D2,
+        pix.take(),
+        TextureFormat::Rgba8UnormSrgb,
+        RenderAssetUsages::RENDER_WORLD,
+    ))
 }
 
 fn set_image(w: &mut World, name: &str, list: Option<DrawList>) {
-    let image = list.and_then(|d| draw_list_image(&d, PREVIEW)).map(|i| w.resource_mut::<Assets<Image>>().add(i));
+    let image = list
+        .and_then(|d| draw_list_image(&d, PREVIEW))
+        .map(|i| w.resource_mut::<Assets<Image>>().add(i));
     let mut q = w.query::<(&Name, &mut ImageNode)>();
     if let Some((_, mut node)) = q.iter_mut(w).find(|(n, _)| n.as_str() == name) {
         node.image = image.unwrap_or_default();
@@ -484,7 +719,9 @@ fn set_image(w: &mut World, name: &str, list: Option<DrawList>) {
 
 /// Draws the previews when the chosen item changes.
 fn preview(world: &mut World) {
-    let Some(b) = world.get_resource::<Browser>() else { return };
+    let Some(b) = world.get_resource::<Browser>() else {
+        return;
+    };
     #[cfg(feature = "easyeda")]
     if b.online {
         preview_online(world);
@@ -503,10 +740,23 @@ fn preview(world: &mut World) {
         match kind {
             Kind::Symbols { .. } => {
                 if let Some(s) = lib.symbol(id) {
-                    main = Some(render::tight(render::symbol_view(Some(s), &sch, &[]), cadrs_eda::units::mm(1.5)));
-                    let fp_id = s.field(cadrs_eda::symbol::fields::FOOTPRINT).map(|f| f.value().to_string()).unwrap_or_default();
-                    second = lib.footprint(&fp_id).map(|f| render::tight(render::footprint_view(Some(f), &brd, &[]), cadrs_eda::units::mm(1.0)));
-                    let desc = s.field(cadrs_eda::symbol::fields::DESCRIPTION).map_or("", |f| f.value());
+                    main = Some(render::tight(
+                        render::symbol_view(Some(s), &sch, &[]),
+                        cadrs_eda::units::mm(1.5),
+                    ));
+                    let fp_id = s
+                        .field(cadrs_eda::symbol::fields::FOOTPRINT)
+                        .map(|f| f.value().to_string())
+                        .unwrap_or_default();
+                    second = lib.footprint(&fp_id).map(|f| {
+                        render::tight(
+                            render::footprint_view(Some(f), &brd, &[]),
+                            cadrs_eda::units::mm(1.0),
+                        )
+                    });
+                    let desc = s
+                        .field(cadrs_eda::symbol::fields::DESCRIPTION)
+                        .map_or("", |f| f.value());
                     text = format!("{id}\n{desc}");
                     if !s.keywords.is_empty() {
                         text += &format!("\nKeywords: {}", s.keywords);
@@ -518,7 +768,10 @@ fn preview(world: &mut World) {
             }
             Kind::Footprints { .. } => {
                 if let Some(f) = lib.footprint(id) {
-                    main = Some(render::tight(render::footprint_view(Some(f), &brd, &[]), cadrs_eda::units::mm(1.0)));
+                    main = Some(render::tight(
+                        render::footprint_view(Some(f), &brd, &[]),
+                        cadrs_eda::units::mm(1.0),
+                    ));
                     text = format!("{id}\n{}\n{} pads", f.description, f.pads.len());
                 }
             }
@@ -533,7 +786,11 @@ fn preview(world: &mut World) {
 #[cfg(feature = "easyeda")]
 fn preview_online(world: &mut World) {
     let o = world.resource::<super::online::Online>();
-    let key = format!("\u{2}{:?} {}", o.chosen, o.preview.as_ref().map_or("", |p| p.0.as_str()));
+    let key = format!(
+        "\u{2}{:?} {}",
+        o.chosen,
+        o.preview.as_ref().map_or("", |p| p.0.as_str())
+    );
     if world.resource::<Browser>().previewed.as_deref() == Some(key.as_str()) {
         return;
     }
@@ -541,13 +798,31 @@ fn preview_online(world: &mut World) {
     let (mut main, mut second, mut text) = (None, None, String::new());
     if let Some(lcsc) = &o.chosen {
         let hit = o.hits.iter().find(|h| &h.lcsc == lcsc);
-        text = hit.map(|h| super::online::describe(h).1).unwrap_or_else(|| lcsc.clone());
+        text = hit
+            .map(|h| super::online::describe(h).1)
+            .unwrap_or_else(|| lcsc.clone());
         match o.preview.as_ref().filter(|p| &p.0 == lcsc) {
             Some((_, c)) => {
-                let sym = render::tight(render::symbol_view(Some(&c.symbol), &render::SchematicTheme::default(), &[]), cadrs_eda::units::mm(1.5));
-                let fp = render::tight(render::footprint_view(Some(&c.footprint), &render::BoardTheme::default(), &[]), cadrs_eda::units::mm(1.0));
-                (main, second) = if footprints { (Some(fp), None) } else { (Some(sym), Some(fp)) };
-                text += &format!("\n\n{} · {} pins\n{} · {} pads", c.symbol.id, c.symbol.pins.len(), c.footprint.id, c.footprint.pads.len());
+                let sym = render::tight(
+                    render::symbol_view(Some(&c.symbol), &render::SchematicTheme::default(), &[]),
+                    cadrs_eda::units::mm(1.5),
+                );
+                let fp = render::tight(
+                    render::footprint_view(Some(&c.footprint), &render::BoardTheme::default(), &[]),
+                    cadrs_eda::units::mm(1.0),
+                );
+                (main, second) = if footprints {
+                    (Some(fp), None)
+                } else {
+                    (Some(sym), Some(fp))
+                };
+                text += &format!(
+                    "\n\n{} · {} pins\n{} · {} pads",
+                    c.symbol.id,
+                    c.symbol.pins.len(),
+                    c.footprint.id,
+                    c.footprint.pads.len()
+                );
                 for w in &c.warnings {
                     text += &format!("\n{w}");
                 }

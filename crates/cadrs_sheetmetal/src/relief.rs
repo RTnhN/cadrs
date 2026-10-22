@@ -51,7 +51,12 @@ impl Frame {
 
     /// The rectangle `[x0, x1] × [y0, y1]` in this frame.
     pub fn rect(&self, x0: f64, x1: f64, y0: f64, y1: f64) -> Polygon {
-        Polygon::new(vec![self.at(x0, y0), self.at(x1, y0), self.at(x1, y1), self.at(x0, y1)])
+        Polygon::new(vec![
+            self.at(x0, y0),
+            self.at(x1, y0),
+            self.at(x1, y1),
+            self.at(x0, y1),
+        ])
     }
 }
 
@@ -70,11 +75,20 @@ pub fn corner_shape(relief: &CornerRelief, q: &Polygon, allowances: (f64, f64)) 
             let e = (q.outer[1] - q.outer[0]).normalize();
             let f = V2::new(-e.y, e.x);
             let h = relief.size / 2.0;
-            Some(Polygon::new(vec![c - e * h - f * h, c + e * h - f * h, c + e * h + f * h, c - e * h + f * h]))
+            Some(Polygon::new(vec![
+                c - e * h - f * h,
+                c + e * h - f * h,
+                c + e * h + f * h,
+                c - e * h + f * h,
+            ]))
         }
         CornerReliefKind::RoundSized => Some(circle(c, relief.size / 2.0, ROUND_SEGMENTS)),
         CornerReliefKind::RectangleScaled => Some(q.map(|p| c + (p - c) * relief.scale)),
-        CornerReliefKind::RoundScaled => Some(circle(c, relief.scale * allowances.0.max(allowances.1) / 2.0, ROUND_SEGMENTS)),
+        CornerReliefKind::RoundScaled => Some(circle(
+            c,
+            relief.scale * allowances.0.max(allowances.1) / 2.0,
+            ROUND_SEGMENTS,
+        )),
     }
 }
 
@@ -82,9 +96,10 @@ pub fn corner_shape(relief: &CornerRelief, q: &Polygon, allowances: (f64, f64)) 
 pub fn bend_relief_size(relief: &BendRelief, p: &Params, bend_radius: f64) -> (f64, f64) {
     let t = p.thickness;
     match relief.kind {
-        BendReliefKind::RectangleScaled | BendReliefKind::ObroundScaled => {
-            (t * relief.width_scale, (relief.depth_scale - 1.0).max(0.0) * bend_radius)
-        }
+        BendReliefKind::RectangleScaled | BendReliefKind::ObroundScaled => (
+            t * relief.width_scale,
+            (relief.depth_scale - 1.0).max(0.0) * bend_radius,
+        ),
         BendReliefKind::SquareSized | BendReliefKind::ObroundSized => (t, relief.depth),
         BendReliefKind::Tear => (0.0, 0.0),
     }
@@ -93,7 +108,14 @@ pub fn bend_relief_size(relief: &BendRelief, p: &Params, bend_radius: f64) -> (f
 /// A bend relief in `frame`: `x` along the bend, pointing away from the bend past its end
 /// (x = 0 at the end); `y` across the bend, from the tangent line on the wall that carries on
 /// (y = 0) towards the other (y = `allowance`). `reach` is how far an extended relief runs.
-pub fn bend_relief_shape(relief: &BendRelief, p: &Params, bend_radius: f64, allowance: f64, frame: &Frame, reach: f64) -> Polygon {
+pub fn bend_relief_shape(
+    relief: &BendRelief,
+    p: &Params,
+    bend_radius: f64,
+    allowance: f64,
+    frame: &Frame,
+    reach: f64,
+) -> Polygon {
     let (w, extra) = bend_relief_size(relief, p, bend_radius);
     let len = if relief.extend { reach.max(w) } else { w };
     let deep = -extra;
@@ -103,7 +125,8 @@ pub fn bend_relief_shape(relief: &BendRelief, p: &Params, bend_radius: f64, allo
             let r = w / 2.0;
             let mut pts = vec![frame.at(0.0, allowance), frame.at(0.0, deep + r)];
             for i in 1..ROUND_SEGMENTS / 2 {
-                let a = std::f64::consts::PI + std::f64::consts::PI * i as f64 / (ROUND_SEGMENTS / 2) as f64;
+                let a = std::f64::consts::PI
+                    + std::f64::consts::PI * i as f64 / (ROUND_SEGMENTS / 2) as f64;
                 pts.push(frame.at(r + r * a.cos(), deep + r + r * a.sin()));
             }
             pts.push(frame.at(w, deep + r));
@@ -158,7 +181,10 @@ mod tests {
         };
         let s = bend_relief_shape(&r, &p, 3.0, 4.0, &frame(), 100.0);
         let (lo, hi) = s.bounds().unwrap();
-        assert!(lo.y.abs() < 1e-9, "depth scale 1 just touches the bend: {lo:?}");
+        assert!(
+            lo.y.abs() < 1e-9,
+            "depth scale 1 just touches the bend: {lo:?}"
+        );
         assert!((hi.y - 4.0).abs() < 1e-9);
         assert!((hi.x - lo.x - 2.0).abs() < 1e-9);
     }
@@ -185,7 +211,10 @@ mod tests {
                 size: 4.0,
             };
             match corner_shape(&r, &q, (2.0, 2.0)) {
-                None => assert!(matches!(kind, CornerReliefKind::Simple | CornerReliefKind::Closed)),
+                None => assert!(matches!(
+                    kind,
+                    CornerReliefKind::Simple | CornerReliefKind::Closed
+                )),
                 Some(s) => {
                     let (lo, hi) = s.bounds().unwrap();
                     let c = P2::from((lo.coords + hi.coords) / 2.0);
@@ -197,7 +226,11 @@ mod tests {
                         CornerReliefKind::RoundScaled => std::f64::consts::PI * 2.25,
                         _ => unreachable!(),
                     };
-                    assert!((s.area() - expect).abs() / expect < 0.01, "{kind:?}: {}", s.area());
+                    assert!(
+                        (s.area() - expect).abs() / expect < 0.01,
+                        "{kind:?}: {}",
+                        s.area()
+                    );
                 }
             }
         }

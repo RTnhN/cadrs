@@ -11,7 +11,9 @@
 #![cfg(feature = "brep")]
 
 use cadrs_core::appearance::{PALETTE, palette, part_appearance};
-use cadrs_core::commands::{AddExtrude, AddFeature, AddSketch, EditSketch, SetExtrude, SetPartMaterial};
+use cadrs_core::commands::{
+    AddExtrude, AddFeature, AddSketch, EditSketch, SetExtrude, SetPartMaterial,
+};
 use cadrs_core::document::{BooleanOp, Document, ExtrudeFeature};
 use cadrs_core::material::{self, Material};
 use cadrs_core::parts::mass_report;
@@ -31,7 +33,11 @@ impl Doc {
     fn new() -> Self {
         let d = Document::new("P3.5");
         let el = d.elements[0].id;
-        Self { d, h: History::default(), el }
+        Self {
+            d,
+            h: History::default(),
+            el,
+        }
     }
 
     fn features(&self) -> Vec<Feature> {
@@ -39,28 +45,78 @@ impl Doc {
     }
 
     fn g(&self, f: FeatureId) -> Sketch {
-        self.d.element(self.el).unwrap().feature(f).unwrap().sketch().unwrap().geometry.clone()
+        self.d
+            .element(self.el)
+            .unwrap()
+            .feature(f)
+            .unwrap()
+            .sketch()
+            .unwrap()
+            .geometry
+            .clone()
     }
 
     fn sketch(&mut self, plane: PlaneRef, ops: Vec<SketchOp>) -> FeatureId {
         let f = FeatureId::new();
-        self.h.execute(&mut self.d, &AddSketch { element: self.el, feature: f, plane: Some(plane) }).unwrap();
+        self.h
+            .execute(
+                &mut self.d,
+                &AddSketch {
+                    element: self.el,
+                    feature: f,
+                    plane: Some(plane),
+                },
+            )
+            .unwrap();
         for op in ops {
-            self.h.execute(&mut self.d, &EditSketch { element: self.el, feature: f, op }).unwrap();
+            self.h
+                .execute(
+                    &mut self.d,
+                    &EditSketch {
+                        element: self.el,
+                        feature: f,
+                        op,
+                    },
+                )
+                .unwrap();
         }
         f
     }
 
-    fn extrude(&mut self, sketch: FeatureId, seeds: &[Vec2], depth: f64, op: BooleanOp) -> FeatureId {
+    fn extrude(
+        &mut self,
+        sketch: FeatureId,
+        seeds: &[Vec2],
+        depth: f64,
+        op: BooleanOp,
+    ) -> FeatureId {
         let regions = samples::region_refs(sketch, &self.g(sketch), seeds);
         assert_eq!(regions.len(), seeds.len());
-        let extrude = ExtrudeFeature { op, ..samples::extrude_of(regions, depth) };
+        let extrude = ExtrudeFeature {
+            op,
+            ..samples::extrude_of(regions, depth)
+        };
         let f = FeatureId::new();
         self.h
-            .execute(&mut self.d, &AddExtrude { element: self.el, feature: f, extrude: ExtrudeFeature::default() })
+            .execute(
+                &mut self.d,
+                &AddExtrude {
+                    element: self.el,
+                    feature: f,
+                    extrude: ExtrudeFeature::default(),
+                },
+            )
             .unwrap();
         self.h
-            .execute(&mut self.d, &SetExtrude { element: self.el, feature: f, extrude, label: "Extrude".into() })
+            .execute(
+                &mut self.d,
+                &SetExtrude {
+                    element: self.el,
+                    feature: f,
+                    extrude,
+                    label: "Extrude".into(),
+                },
+            )
             .unwrap();
         f
     }
@@ -72,7 +128,16 @@ impl Doc {
     }
 
     fn assign(&mut self, parts: Vec<PartId>, m: Option<Material>) {
-        self.h.execute(&mut self.d, &SetPartMaterial { element: self.el, parts, material: m }).unwrap();
+        self.h
+            .execute(
+                &mut self.d,
+                &SetPartMaterial {
+                    element: self.el,
+                    parts,
+                    material: m,
+                },
+            )
+            .unwrap();
     }
 
     fn props(&self) -> Vec<cadrs_core::PartProps> {
@@ -130,8 +195,14 @@ fn steel_cube_mass_and_inertia() {
     let inch = Units::new(LengthUnit::Inch, 3).with_mass(MassUnit::Pound);
     assert_eq!(inch.mass(m.mass), "17.306 lb");
     assert_eq!(inch.inertia(m.inertia[(0, 0)]), "44.708");
-    assert_eq!(Units::default().with_mass(MassUnit::Gram).mass(m.mass), "7850.000 g");
-    assert_eq!(Units::default().with_mass(MassUnit::Ounce).mass(m.mass), "276.901 oz");
+    assert_eq!(
+        Units::default().with_mass(MassUnit::Gram).mass(m.mass),
+        "7850.000 g"
+    );
+    assert_eq!(
+        Units::default().with_mass(MassUnit::Ounce).mass(m.mass),
+        "276.901 oz"
+    );
     // Removing the material undoes to no mass.
     doc.assign(vec![cube.id], None);
     assert!(mass_report(&[cube], &doc.props()).unwrap().mass.is_none());
@@ -146,8 +217,18 @@ fn steel_cube_mass_and_inertia() {
 fn control_arm_in_polypropylene() {
     let mut doc = Doc::new();
     let s1 = doc.sketch(PlaneRef::Top, vec![samples::control_arm_geometry()]);
-    doc.extrude(s1, &EXTRUDE_1_SEEDS, samples::EXTRUDE_1_DEPTH, BooleanOp::New);
-    doc.extrude(s1, &EXTRUDE_2_SEEDS, samples::EXTRUDE_2_DEPTH, BooleanOp::Add);
+    doc.extrude(
+        s1,
+        &EXTRUDE_1_SEEDS,
+        samples::EXTRUDE_1_DEPTH,
+        BooleanOp::New,
+    );
+    doc.extrude(
+        s1,
+        &EXTRUDE_2_SEEDS,
+        samples::EXTRUDE_2_DEPTH,
+        BooleanOp::Add,
+    );
     let parts = doc.parts();
     assert_eq!(parts.len(), 1);
     let arm = &parts[0];
@@ -158,7 +239,12 @@ fn control_arm_in_polypropylene() {
     close(m.mass, v * material::POLYPROPYLENE_DENSITY * 1e-9, 1e-12);
     close(m.mass, 0.336_830, 1e-6);
     assert_eq!(Units::default().mass(m.mass), "0.337 kg");
-    assert_eq!(Units::new(LengthUnit::Inch, 3).with_mass(MassUnit::Pound).mass(m.mass), "0.743 lb");
+    assert_eq!(
+        Units::new(LengthUnit::Inch, 3)
+            .with_mass(MassUnit::Pound)
+            .mass(m.mass),
+        "0.743 lb"
+    );
     close(m.center_of_mass.y, 0.0, 1e-6);
     // One material: the volume centroid.
     assert!((m.center_of_mass - arm.mass.unwrap().center_of_mass).norm() < 1e-9);
@@ -170,7 +256,11 @@ fn control_arm_in_polypropylene() {
     close(i[(1, 2)], 0.0, 1e-6);
     assert!(i[(2, 2)] > i[(1, 1)] && i[(1, 1)] > i[(0, 0)] && i[(0, 0)] > 0.0);
     // The kernel's unit-density tensor times ρ.
-    close(i[(2, 2)], arm.mass.unwrap().inertia[(2, 2)] * material::POLYPROPYLENE_DENSITY * 1e-9, 1e-9);
+    close(
+        i[(2, 2)],
+        arm.mass.unwrap().inertia[(2, 2)] * material::POLYPROPYLENE_DENSITY * 1e-9,
+        1e-9,
+    );
 }
 
 /// Two parts measured together, of different materials: a 10 mm steel cube A at (0..10)³
@@ -187,12 +277,30 @@ fn several_parts_of_different_materials() {
     let mut doc = Doc::new();
     let s = doc.sketch(
         PlaneRef::Top,
-        vec![rect(0.0, 0.0, 10.0, 10.0), rect(20.0, 0.0, 30.0, 10.0), rect(40.0, 0.0, 50.0, 10.0)],
+        vec![
+            rect(0.0, 0.0, 10.0, 10.0),
+            rect(20.0, 0.0, 30.0, 10.0),
+            rect(40.0, 0.0, 50.0, 10.0),
+        ],
     );
-    let e = doc.extrude(s, &[Vec2::new(5.0, 5.0), Vec2::new(25.0, 5.0), Vec2::new(45.0, 5.0)], 10.0, BooleanOp::New);
+    let e = doc.extrude(
+        s,
+        &[
+            Vec2::new(5.0, 5.0),
+            Vec2::new(25.0, 5.0),
+            Vec2::new(45.0, 5.0),
+        ],
+        10.0,
+        BooleanOp::New,
+    );
     let parts = doc.parts();
     assert_eq!(parts.len(), 3);
-    let by_x = |x: f64| parts.iter().find(|p| (p.mass.unwrap().center_of_mass.x - x).abs() < 1e-6).unwrap();
+    let by_x = |x: f64| {
+        parts
+            .iter()
+            .find(|p| (p.mass.unwrap().center_of_mass.x - x).abs() < 1e-6)
+            .unwrap()
+    };
     let (a, b, c) = (by_x(5.0), by_x(25.0), by_x(45.0));
     doc.assign(vec![a.id], material::library("Steel"));
     doc.assign(vec![b.id], material::library("Aluminum - 6061"));
@@ -203,10 +311,20 @@ fn several_parts_of_different_materials() {
     let dxa: f64 = 5.0 - 106.75 / 10.55;
     let dxb: f64 = 25.0 - 106.75 / 10.55;
     let own = 10.55e-3 * 200.0 / 12.0;
-    close(m.inertia[(1, 1)], own + 7.85e-3 * dxa * dxa + 2.7e-3 * dxb * dxb, 1e-9);
+    close(
+        m.inertia[(1, 1)],
+        own + 7.85e-3 * dxa * dxa + 2.7e-3 * dxb * dxb,
+        1e-9,
+    );
     close(m.inertia[(1, 1)], 0.979_436, 1e-6);
     close(m.inertia[(0, 0)], own, 1e-9);
-    assert!(mass_report(&[a, b, c], &doc.props()).unwrap().mass.is_none(), "C has no material");
+    assert!(
+        mass_report(&[a, b, c], &doc.props())
+            .unwrap()
+            .mass
+            .is_none(),
+        "C has no material"
+    );
     let r = mass_report(&[a, b, c], &doc.props()).unwrap();
     close(r.volume, 3000.0, 1e-6);
     let _ = e;
@@ -217,11 +335,18 @@ fn several_parts_of_different_materials() {
 #[test]
 fn palette_colours_are_stable() {
     let mut doc = Doc::new();
-    let rects: Vec<SketchOp> = (0..10).map(|i| rect(i as f64 * 20.0, 0.0, i as f64 * 20.0 + 10.0, 10.0)).collect();
+    let rects: Vec<SketchOp> = (0..10)
+        .map(|i| rect(i as f64 * 20.0, 0.0, i as f64 * 20.0 + 10.0, 10.0))
+        .collect();
     let s = doc.sketch(PlaneRef::Top, rects);
     let mut extrudes = Vec::new();
     for i in 0..10 {
-        extrudes.push(doc.extrude(s, &[Vec2::new(i as f64 * 20.0 + 5.0, 5.0)], 10.0, BooleanOp::New));
+        extrudes.push(doc.extrude(
+            s,
+            &[Vec2::new(i as f64 * 20.0 + 5.0, 5.0)],
+            10.0,
+            BooleanOp::New,
+        ));
     }
     let parts = doc.parts();
     let props = doc.props();
@@ -236,7 +361,10 @@ fn palette_colours_are_stable() {
     let el = doc.el;
     let p2 = parts.iter().find(|p| p.feature == extrudes[1]).unwrap().id;
     doc.h
-        .execute(&mut doc.d, &AddFeature::delete_parts(el, FeatureId::new(), vec![p2]))
+        .execute(
+            &mut doc.d,
+            &AddFeature::delete_parts(el, FeatureId::new(), vec![p2]),
+        )
         .unwrap();
     let parts = doc.parts();
     assert_eq!(parts.len(), 9);

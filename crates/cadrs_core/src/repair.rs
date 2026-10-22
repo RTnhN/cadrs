@@ -37,7 +37,9 @@ impl Reference {
     /// boundary curves), the same sketch, or the same persistent name.
     pub fn same(&self, other: &Reference) -> bool {
         match (self, other) {
-            (Reference::Region(a), Reference::Region(b)) => a.sketch == b.sketch && a.curves == b.curves,
+            (Reference::Region(a), Reference::Region(b)) => {
+                a.sketch == b.sketch && a.curves == b.curves
+            }
             (Reference::Sketch(a), Reference::Sketch(b)) => a == b,
             (Reference::Face(a), Reference::Face(b)) => a.face == b.face,
             (Reference::Edge(a), Reference::Edge(b)) => a.edge == b.edge,
@@ -48,7 +50,13 @@ impl Reference {
     /// "Face of Sketch 3", "Edge of Extrude 5": its kind and the feature that made it (by name
     /// in `features`).
     pub fn label(&self, features: &[Feature]) -> String {
-        let name = |id: FeatureId| features.iter().find(|f| f.id == id).map(|f| f.name.clone()).unwrap_or_default();
+        let name = |id: FeatureId| {
+            features
+                .iter()
+                .find(|f| f.id == id)
+                .map(|f| f.name.clone())
+                .unwrap_or_default()
+        };
         match self {
             Reference::Region(r) => format!("Face of {}", name(r.sketch)),
             Reference::Sketch(s) => name(*s),
@@ -124,8 +132,17 @@ pub fn set_references(f: &mut Feature, refs: &[Reference]) -> bool {
 /// Replaces the `index`th reference of feature `feature` in `features` by `with`, and with
 /// `propagate` every use of the same reference by the features after it. Returns the features
 /// changed (in list order).
-pub fn replace(features: &mut [Feature], feature: FeatureId, index: usize, with: &Reference, propagate: bool) -> Result<Vec<FeatureId>, String> {
-    let at = features.iter().position(|f| f.id == feature).ok_or("feature not found")?;
+pub fn replace(
+    features: &mut [Feature],
+    feature: FeatureId,
+    index: usize,
+    with: &Reference,
+    propagate: bool,
+) -> Result<Vec<FeatureId>, String> {
+    let at = features
+        .iter()
+        .position(|f| f.id == feature)
+        .ok_or("feature not found")?;
     let refs = references(&features[at]);
     let old = refs.get(index).cloned().ok_or("no such reference")?;
     let mut changed = Vec::new();
@@ -183,7 +200,14 @@ impl Command for ReplaceReference {
             .ok_or(CommandError::ElementNotFound(self.element))?
             .features_mut()
             .ok_or_else(|| CommandError::Invalid("not a Part Studio".into()))?;
-        let changed = replace(features, self.feature, self.index, &self.with, self.propagate).map_err(CommandError::Invalid)?;
+        let changed = replace(
+            features,
+            self.feature,
+            self.index,
+            &self.with,
+            self.propagate,
+        )
+        .map_err(CommandError::Invalid)?;
         if changed.is_empty() {
             return Err(CommandError::Invalid("nothing to replace".into()));
         }
@@ -195,8 +219,18 @@ impl Command for ReplaceReference {
 /// Where a reference was in a state of the Part Studio (its `features`, and `parts`: the parts
 /// the features before the one holding the reference made), as polylines in model space: a region's or sketch's outlines, a face's boundary
 /// loops, an edge (and, with `tangent`, the rest of its tangent chain).
-pub fn outline(features: &[Feature], parts: &[Part], r: &Reference, tangent: bool) -> Vec<Vec<Vec3>> {
-    let sketch = |id: FeatureId| features.iter().find(|f| f.id == id).and_then(|f| f.sketch());
+pub fn outline(
+    features: &[Feature],
+    parts: &[Part],
+    r: &Reference,
+    tangent: bool,
+) -> Vec<Vec<Vec3>> {
+    let sketch = |id: FeatureId| {
+        features
+            .iter()
+            .find(|f| f.id == id)
+            .and_then(|f| f.sketch())
+    };
     let closed = |pts: &[cadrs_sketch::Vec2], frame: &cadrs_sketch::PlaneFrame| {
         let mut v: Vec<Vec3> = pts.iter().map(|p| frame.to_world(*p)).collect();
         if let Some(first) = v.first().copied() {
@@ -206,16 +240,30 @@ pub fn outline(features: &[Feature], parts: &[Part], r: &Reference, tangent: boo
     };
     match r {
         Reference::Region(rr) => {
-            let Some(sk) = sketch(rr.sketch) else { return Vec::new() };
-            let (Some(plane), Some(region)) = (sk.plane, rr.resolve(&sk.geometry)) else { return Vec::new() };
+            let Some(sk) = sketch(rr.sketch) else {
+                return Vec::new();
+            };
+            let (Some(plane), Some(region)) = (sk.plane, rr.resolve(&sk.geometry)) else {
+                return Vec::new();
+            };
             let frame = plane.frame();
-            std::iter::once(&region.outer).chain(region.holes.iter()).map(|l| closed(l, &frame)).collect()
+            std::iter::once(&region.outer)
+                .chain(region.holes.iter())
+                .map(|l| closed(l, &frame))
+                .collect()
         }
         Reference::Sketch(s) => {
-            let Some(sk) = sketch(*s) else { return Vec::new() };
-            let Some(plane) = sk.plane else { return Vec::new() };
+            let Some(sk) = sketch(*s) else {
+                return Vec::new();
+            };
+            let Some(plane) = sk.plane else {
+                return Vec::new();
+            };
             let frame = plane.frame();
-            crate::rebuild::whole_sketch_regions(&sk.geometry).iter().map(|g| closed(&g.outer, &frame)).collect()
+            crate::rebuild::whole_sketch_regions(&sk.geometry)
+                .iter()
+                .map(|g| closed(&g.outer, &frame))
+                .collect()
         }
         Reference::Face(f) => parts
             .iter()
@@ -238,8 +286,16 @@ pub fn outline(features: &[Feature], parts: &[Part], r: &Reference, tangent: boo
                 if p.solid.edge(&e.edge).is_none() {
                     continue;
                 }
-                let names = if tangent { tangent_chain(&p.solid, &e.edge) } else { vec![e.edge] };
-                return names.iter().filter_map(|n| p.solid.edge(n)).map(|x| x.points.clone()).collect();
+                let names = if tangent {
+                    tangent_chain(&p.solid, &e.edge)
+                } else {
+                    vec![e.edge]
+                };
+                return names
+                    .iter()
+                    .filter_map(|n| p.solid.edge(n))
+                    .map(|x| x.points.clone())
+                    .collect();
             }
             Vec::new()
         }
@@ -248,10 +304,20 @@ pub fn outline(features: &[Feature], parts: &[Part], r: &Reference, tangent: boo
 
 /// The edges of `edge`'s tangent chain (P3.7's tangent groups): the edges meeting it end to
 /// end with parallel tangents, itself included; just the edge without group information.
-pub fn tangent_chain(solid: &crate::solid::Solid, edge: &cadrs_sketch::EdgeName) -> Vec<cadrs_sketch::EdgeName> {
-    let Some(e) = solid.edge(edge) else { return Vec::new() };
+pub fn tangent_chain(
+    solid: &crate::solid::Solid,
+    edge: &cadrs_sketch::EdgeName,
+) -> Vec<cadrs_sketch::EdgeName> {
+    let Some(e) = solid.edge(edge) else {
+        return Vec::new();
+    };
     match e.tangent_group {
-        Some(g) => solid.edges.iter().filter(|x| x.tangent_group == Some(g)).map(|x| x.name).collect(),
+        Some(g) => solid
+            .edges
+            .iter()
+            .filter(|x| x.tangent_group == Some(g))
+            .map(|x| x.name)
+            .collect(),
         None => vec![e.name],
     }
 }
@@ -261,8 +327,12 @@ pub fn tangent_chain(solid: &crate::solid::Solid, edge: &cadrs_sketch::EdgeName)
 pub fn entity_edges(parts: &[Part], r: &Reference) -> usize {
     for p in parts {
         match r {
-            Reference::Edge(e) if p.solid.edge(&e.edge).is_some() => return tangent_chain(&p.solid, &e.edge).len(),
-            Reference::Face(f) if p.solid.face(&f.face).is_some() => return p.solid.face_edges(&f.face).len(),
+            Reference::Edge(e) if p.solid.edge(&e.edge).is_some() => {
+                return tangent_chain(&p.solid, &e.edge).len();
+            }
+            Reference::Face(f) if p.solid.face(&f.face).is_some() => {
+                return p.solid.face_edges(&f.face).len();
+            }
             _ => {}
         }
     }
@@ -277,21 +347,39 @@ pub fn chain_check(old: usize, new: usize, replacement_is_edge: bool) -> Option<
     if old <= 1 || new >= old || new == 0 {
         return None;
     }
-    let tip = if replacement_is_edge { " Its edges aren't tangent-connected: pick the face to take all of them." } else { "" };
-    Some(format!("The replacement stands for {new} of the {old} edges the missing reference's tangent chain had.{tip}"))
+    let tip = if replacement_is_edge {
+        " Its edges aren't tangent-connected: pick the face to take all of them."
+    } else {
+        ""
+    };
+    Some(format!(
+        "The replacement stands for {new} of the {old} edges the missing reference's tangent chain had.{tip}"
+    ))
 }
 
 /// P3D.4 (IR6.10): the outer loop of the face a sketch lies on, as exact curves in the
 /// sketch's plane with their links (what [`cadrs_sketch::SketchOp::OffsetLoop`] takes):
 /// `before` are the features before the sketch and `parts` the parts they made. Empty if the
 /// sketch isn't on a part face.
-pub fn face_loop(before: &[Feature], parts: &[Part], plane: &cadrs_sketch::PlaneRef) -> Vec<(cadrs_sketch::projection::Projected, cadrs_sketch::Link)> {
-    let cadrs_sketch::PlaneRef::Face(fp) = plane else { return Vec::new() };
+pub fn face_loop(
+    before: &[Feature],
+    parts: &[Part],
+    plane: &cadrs_sketch::PlaneRef,
+) -> Vec<(cadrs_sketch::projection::Projected, cadrs_sketch::Link)> {
+    let cadrs_sketch::PlaneRef::Face(fp) = plane else {
+        return Vec::new();
+    };
     let frame = plane.frame();
-    let solids: Vec<(FeatureId, &crate::solid::Solid)> = parts.iter().map(|p| (p.feature, &*p.solid)).collect();
-    let ctx = crate::links::LinkContext { solids: solids.clone(), features: before };
+    let solids: Vec<(FeatureId, &crate::solid::Solid)> =
+        parts.iter().map(|p| (p.feature, &*p.solid)).collect();
+    let ctx = crate::links::LinkContext {
+        solids: solids.clone(),
+        features: before,
+    };
     for (feature, solid) in &solids {
-        let Some(face) = solid.face(&fp.face) else { continue };
+        let Some(face) = solid.face(&fp.face) else {
+            continue;
+        };
         if face.plane.is_none() {
             continue;
         }
@@ -299,7 +387,10 @@ pub fn face_loop(before: &[Feature], parts: &[Part], plane: &cadrs_sketch::Plane
             .face_edges(&fp.face)
             .into_iter()
             .filter_map(|edge| {
-                let link = cadrs_sketch::Link::Edge { feature: feature.0, edge };
+                let link = cadrs_sketch::Link::Edge {
+                    feature: feature.0,
+                    edge,
+                };
                 Some((ctx.shape(link, &frame)?, link))
             })
             .collect();
@@ -316,13 +407,20 @@ mod tests {
         Feature {
             id: FeatureId::from_u128(id),
             name: format!("Extrude {id}"),
-            kind: FeatureKind::Extrude(crate::document::ExtrudeFeature { regions, ..Default::default() }),
+            kind: FeatureKind::Extrude(crate::document::ExtrudeFeature {
+                regions,
+                ..Default::default()
+            }),
             suppress_by: None,
         }
     }
 
     fn region(sketch: u128, seed: f64) -> RegionRef {
-        RegionRef { sketch: FeatureId::from_u128(sketch), curves: vec![], seed: cadrs_sketch::Vec2::new(seed, 0.0) }
+        RegionRef {
+            sketch: FeatureId::from_u128(sketch),
+            curves: vec![],
+            seed: cadrs_sketch::Vec2::new(seed, 0.0),
+        }
     }
 
     /// IR4.4: Propagate changes replaces the same reference in the features after, and only
@@ -336,17 +434,44 @@ mod tests {
             extrude(3, vec![other.clone()]),
         ];
         let mut f = features.clone();
-        let changed = replace(&mut f, FeatureId::from_u128(1), 0, &Reference::Region(new.clone()), true).unwrap();
+        let changed = replace(
+            &mut f,
+            FeatureId::from_u128(1),
+            0,
+            &Reference::Region(new.clone()),
+            true,
+        )
+        .unwrap();
         assert_eq!(changed, [FeatureId::from_u128(1), FeatureId::from_u128(2)]);
-        assert_eq!(references(&f[1]), [Reference::Region(new.clone()), Reference::Region(other.clone())]);
+        assert_eq!(
+            references(&f[1]),
+            [
+                Reference::Region(new.clone()),
+                Reference::Region(other.clone())
+            ]
+        );
         assert_eq!(f[2], features[2]);
         let mut f = features.clone();
-        let changed = replace(&mut f, FeatureId::from_u128(1), 0, &Reference::Region(new.clone()), false).unwrap();
+        let changed = replace(
+            &mut f,
+            FeatureId::from_u128(1),
+            0,
+            &Reference::Region(new.clone()),
+            false,
+        )
+        .unwrap();
         assert_eq!(changed, [FeatureId::from_u128(1)]);
         assert_eq!(f[1], features[1]);
         // A replacement already in the list isn't listed twice.
         let mut f = features.clone();
-        replace(&mut f, FeatureId::from_u128(2), 0, &Reference::Region(other.clone()), false).unwrap();
+        replace(
+            &mut f,
+            FeatureId::from_u128(2),
+            0,
+            &Reference::Region(other.clone()),
+            false,
+        )
+        .unwrap();
         assert_eq!(references(&f[1]), [Reference::Region(other)]);
     }
 

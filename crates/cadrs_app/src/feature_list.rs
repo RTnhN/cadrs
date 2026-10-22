@@ -122,7 +122,11 @@ pub const ROLLED_BACK_ICON: Color = Color::srgb(0.769, 0.769, 0.769);
 /// The tint of a rolled-back or suppressed row's icon: the grey for glyph icons; full-colour
 /// icons keep their colours, so they fade through the tint's alpha instead.
 pub fn rolled_back_icon(full_colour: bool) -> Color {
-    if full_colour { Color::WHITE.with_alpha(0.4) } else { ROLLED_BACK_ICON }
+    if full_colour {
+        Color::WHITE.with_alpha(0.4)
+    } else {
+        ROLLED_BACK_ICON
+    }
 }
 /// Show dependencies: parents (amber) and children (green; blue is the selection).
 pub const PARENT_BG: Color = Color::srgb(0.992, 0.906, 0.776);
@@ -179,7 +183,11 @@ impl ListState {
 
     /// The time shown on a row (P3.11: sketches have one too).
     pub fn time(&self, id: FeatureId) -> Option<String> {
-        self.times.as_ref()?.iter().find(|(f, _)| *f == id).map(|(_, t)| t.clone())
+        self.times
+            .as_ref()?
+            .iter()
+            .find(|(f, _)| *f == id)
+            .map(|(_, t)| t.clone())
     }
 }
 
@@ -266,7 +274,11 @@ pub fn list_state(
     ListState {
         bar,
         suppressed: el.all_suppressed(),
-        suppress_vars: el.features().iter().filter_map(|f| Some((f.id, f.suppress_by.as_ref()?.label()))).collect(),
+        suppress_vars: el
+            .features()
+            .iter()
+            .filter_map(|f| Some((f.id, f.suppress_by.as_ref()?.label())))
+            .collect(),
         shown,
         dependency_of,
         parents,
@@ -341,11 +353,17 @@ pub fn dependency_legend(p: &mut ChildSpawnerCommands, t: &Theme) {
     ))
     .with_children(|l| {
         l.spawn(chip(PARENT_SWATCH));
-        l.spawn((t.text("Parents", t.font_xs, FontWeight::MEDIUM, t.foreground), Pickable::IGNORE));
+        l.spawn((
+            t.text("Parents", t.font_xs, FontWeight::MEDIUM, t.foreground),
+            Pickable::IGNORE,
+        ));
         l.spawn(chip(CHILD_SWATCH));
         l.spawn((
             t.text("Children", t.font_xs, FontWeight::MEDIUM, t.foreground),
-            Node { flex_grow: 1.0, ..default() },
+            Node {
+                flex_grow: 1.0,
+                ..default()
+            },
             Pickable::IGNORE,
         ));
         l.spawn(
@@ -385,7 +403,11 @@ pub fn preview_slider(t: &Theme, name: &str) -> impl Bundle {
 // Filter
 
 fn read_filter(q: Query<(&Name, &EditableText)>, mut filter: ResMut<FeatureFilter>) {
-    let Some(text) = q.iter().find(|(n, _)| n.as_str() == "feature-filter-field").map(|(_, t)| t.value().to_string()) else {
+    let Some(text) = q
+        .iter()
+        .find(|(n, _)| n.as_str() == "feature-filter-field")
+        .map(|(_, t)| t.value().to_string())
+    else {
         return;
     };
     if filter.text != text {
@@ -423,7 +445,9 @@ fn hide_default_geometry(
     }
     for (name, mut node) in &mut q {
         match name.as_str() {
-            "feature-default-geometry" => node.display = if on { Display::None } else { Display::Flex },
+            "feature-default-geometry" => {
+                node.display = if on { Display::None } else { Display::Flex }
+            }
             "default-geometry-children" => {
                 if on {
                     *saved = Some(node.display);
@@ -468,8 +492,15 @@ fn sync_timer_button(
 // ---------------------------------------------------------------------------------------------
 // Dependencies
 
-fn sync_dependency_legend(deps: Res<ShowDependencies>, mut q: Query<&mut Node, With<DependencyLegend>>) {
-    let want = if deps.0.is_some() { Display::Flex } else { Display::None };
+fn sync_dependency_legend(
+    deps: Res<ShowDependencies>,
+    mut q: Query<&mut Node, With<DependencyLegend>>,
+) {
+    let want = if deps.0.is_some() {
+        Display::Flex
+    } else {
+        Display::None
+    };
     for mut n in &mut q {
         if n.display != want {
             n.display = want;
@@ -477,8 +508,14 @@ fn sync_dependency_legend(deps: Res<ShowDependencies>, mut q: Query<&mut Node, W
     }
 }
 
-fn on_legend_close(a: On<bevy::ui_widgets::Activate>, q: Query<&Name>, mut deps: ResMut<ShowDependencies>) {
-    if q.get(a.entity).is_ok_and(|n| n.as_str() == "feature-dependencies-close") {
+fn on_legend_close(
+    a: On<bevy::ui_widgets::Activate>,
+    q: Query<&Name>,
+    mut deps: ResMut<ShowDependencies>,
+) {
+    if q.get(a.entity)
+        .is_ok_and(|n| n.as_str() == "feature-dependencies-close")
+    {
         deps.0 = None;
     }
 }
@@ -492,7 +529,10 @@ fn end_dependencies(
     if deps.0.is_none() {
         return;
     }
-    let gone = doc.as_ref().and_then(|d| d.active_element()).is_none_or(|el| deps.0.is_some_and(|f| el.feature(f).is_none()));
+    let gone = doc
+        .as_ref()
+        .and_then(|d| d.active_element())
+        .is_none_or(|el| deps.0.is_some_and(|f| el.feature(f).is_none()));
     if gone || keys.just_pressed(KeyCode::Escape) {
         deps.0 = None;
     }
@@ -518,27 +558,44 @@ pub fn menu_targets(world: &World, id: FeatureId) -> Vec<FeatureId> {
             _ => None,
         })
         .collect();
-    if picked.contains(&id) { picked } else { vec![id] }
+    if picked.contains(&id) {
+        picked
+    } else {
+        vec![id]
+    }
 }
 
 /// Suppresses (or unsuppresses) the menu's features (one undo step).
 pub fn set_suppressed(world: &mut World, id: FeatureId, suppressed: bool) {
     let targets = menu_targets(world, id);
-    let Some(mut doc) = world.get_resource_mut::<ActiveDocument>() else { return };
-    let Some(el) = doc.active_element() else { return };
+    let Some(mut doc) = world.get_resource_mut::<ActiveDocument>() else {
+        return;
+    };
+    let Some(el) = doc.active_element() else {
+        return;
+    };
     let element = el.id;
     let what = match targets.as_slice() {
         [one] => el.feature(*one).map(|f| f.name.clone()).unwrap_or_default(),
         many => format!("{} features", many.len()),
     };
     let verb = if suppressed { "Suppress" } else { "Unsuppress" };
-    let _ = doc.execute(&SetSuppressed { element, features: targets, suppressed, label: format!("{verb} {what}") });
+    let _ = doc.execute(&SetSuppressed {
+        element,
+        features: targets,
+        suppressed,
+        label: format!("{verb} {what}"),
+    });
 }
 
 /// Moves the rollback bar to just below `id` (`None`: to the end).
 pub fn roll_to(world: &mut World, id: Option<FeatureId>) {
-    let Some(mut doc) = world.get_resource_mut::<ActiveDocument>() else { return };
-    let Some(el) = doc.active_element() else { return };
+    let Some(mut doc) = world.get_resource_mut::<ActiveDocument>() else {
+        return;
+    };
+    let Some(el) = doc.active_element() else {
+        return;
+    };
     let element = el.id;
     let index = match id {
         Some(f) => match el.features().iter().position(|x| x.id == f) {
@@ -554,9 +611,17 @@ pub fn roll_to(world: &mut World, id: Option<FeatureId>) {
     let _ = doc.execute(&SetRollback { element, index });
 }
 
-fn on_bar_drag_start(ev: On<Pointer<DragStart>>, q: Query<(), With<RollbackBar>>, mut drag: ResMut<BarDrag>) {
+fn on_bar_drag_start(
+    ev: On<Pointer<DragStart>>,
+    q: Query<(), With<RollbackBar>>,
+    mut drag: ResMut<BarDrag>,
+) {
     if ev.button == PointerButton::Primary && q.contains(ev.entity) {
-        *drag = BarDrag { active: true, pointer: ev.pointer_location.position, target: None };
+        *drag = BarDrag {
+            active: true,
+            pointer: ev.pointer_location.position,
+            target: None,
+        };
     }
 }
 
@@ -566,21 +631,32 @@ fn on_bar_drag(ev: On<Pointer<Drag>>, q: Query<(), With<RollbackBar>>, mut drag:
     }
 }
 
-fn on_bar_drag_end(ev: On<Pointer<DragEnd>>, q: Query<(), With<RollbackBar>>, mut commands: Commands) {
+fn on_bar_drag_end(
+    ev: On<Pointer<DragEnd>>,
+    q: Query<(), With<RollbackBar>>,
+    mut commands: Commands,
+) {
     if !q.contains(ev.entity) {
         return;
     }
     commands.queue(|world: &mut World| {
         let drag = std::mem::take(&mut *world.resource_mut::<BarDrag>());
         let Some(to) = drag.target else { return };
-        let Some(mut doc) = world.get_resource_mut::<ActiveDocument>() else { return };
-        let Some(el) = doc.active_element() else { return };
+        let Some(mut doc) = world.get_resource_mut::<ActiveDocument>() else {
+            return;
+        };
+        let Some(el) = doc.active_element() else {
+            return;
+        };
         let element = el.id;
         if to == el.rollback_index() {
             return;
         }
         let n = el.features().len();
-        let _ = doc.execute(&SetRollback { element, index: (to < n).then_some(to) });
+        let _ = doc.execute(&SetRollback {
+            element,
+            index: (to < n).then_some(to),
+        });
     });
 }
 
@@ -590,7 +666,12 @@ fn on_bar_drag_end(ev: On<Pointer<DragEnd>>, q: Query<(), With<RollbackBar>>, mu
 fn place_bar_ghost(
     mut drag: ResMut<BarDrag>,
     doc: Option<Res<ActiveDocument>>,
-    q_rows: Query<(&ComputedNode, &bevy::ui::UiGlobalTransform, Option<&FeatureRow>, Option<&FolderRow>)>,
+    q_rows: Query<(
+        &ComputedNode,
+        &bevy::ui::UiGlobalTransform,
+        Option<&FeatureRow>,
+        Option<&FolderRow>,
+    )>,
     mut q_ghost: Query<(Entity, &mut Node), With<BarGhost>>,
     theme: Res<Theme>,
     mut commands: Commands,
@@ -601,7 +682,9 @@ fn place_bar_ghost(
         }
         return;
     }
-    let Some(el) = doc.as_ref().and_then(|d| d.active_element()) else { return };
+    let Some(el) = doc.as_ref().and_then(|d| d.active_element()) else {
+        return;
+    };
     let order: Vec<FeatureId> = el.features().iter().map(|f| f.id).collect();
     // The rows on screen, top to bottom: (top, bottom, left, index before, index after).
     let mut rows: Vec<(f32, f32, f32, usize, usize)> = Vec::new();
@@ -612,9 +695,17 @@ fn place_bar_ghost(
                 None => continue,
             },
             (_, Some(f)) => {
-                let Some(folder) = el.folders().iter().find(|x| x.id == f.0) else { continue };
-                let idx: Vec<usize> = folder.features.iter().filter_map(|x| order.iter().position(|o| o == x)).collect();
-                let (Some(a), Some(b)) = (idx.iter().min(), idx.iter().max()) else { continue };
+                let Some(folder) = el.folders().iter().find(|x| x.id == f.0) else {
+                    continue;
+                };
+                let idx: Vec<usize> = folder
+                    .features
+                    .iter()
+                    .filter_map(|x| order.iter().position(|o| o == x))
+                    .collect();
+                let (Some(a), Some(b)) = (idx.iter().min(), idx.iter().max()) else {
+                    continue;
+                };
                 (*a, if folder.open { *a } else { b + 1 })
             }
             _ => continue,
@@ -624,14 +715,23 @@ fn place_bar_ghost(
             continue;
         }
         let c = t.translation * node.inverse_scale_factor();
-        rows.push((c.y - size.y / 2.0, c.y + size.y / 2.0, c.x - size.x / 2.0, before, after));
+        rows.push((
+            c.y - size.y / 2.0,
+            c.y + size.y / 2.0,
+            c.x - size.x / 2.0,
+            before,
+            after,
+        ));
     }
     rows.sort_by(|a, b| a.0.total_cmp(&b.0));
     if rows.is_empty() {
         return;
     }
     let y = drag.pointer.y;
-    let k = rows.iter().position(|(top, bottom, ..)| y < (top + bottom) / 2.0).unwrap_or(rows.len());
+    let k = rows
+        .iter()
+        .position(|(top, bottom, ..)| y < (top + bottom) / 2.0)
+        .unwrap_or(rows.len());
     let (to, line_y, left) = match rows.get(k) {
         Some((top, _, left, before, _)) => (*before, *top, *left),
         None => {
@@ -653,7 +753,14 @@ fn place_bar_ghost(
             commands.spawn((
                 Name::new("rollback-bar-ghost"),
                 BarGhost,
-                Node { position_type: PositionType::Absolute, top, left: lx, width: Val::Px(172.0), height: Val::Px(5.0), ..default() },
+                Node {
+                    position_type: PositionType::Absolute,
+                    top,
+                    left: lx,
+                    width: Val::Px(172.0),
+                    height: Val::Px(5.0),
+                    ..default()
+                },
                 BackgroundColor(theme.rollback_bar.with_alpha(0.75)),
                 GlobalZIndex(cadrs_ui::z::DIALOG - 20),
                 Pickable::IGNORE,
@@ -668,7 +775,13 @@ fn place_bar_ghost(
 
 /// The feature whose dialog is open: (element, feature).
 #[allow(clippy::type_complexity)]
-fn dialog_feature(world_like: (&Option<Res<crate::extrude::ExtrudeSession>>, &Option<Res<crate::applied::AppliedSession>>, &Option<Res<crate::boolean::BooleanSession>>)) -> Option<(ElementId, FeatureId)> {
+fn dialog_feature(
+    world_like: (
+        &Option<Res<crate::extrude::ExtrudeSession>>,
+        &Option<Res<crate::applied::AppliedSession>>,
+        &Option<Res<crate::boolean::BooleanSession>>,
+    ),
+) -> Option<(ElementId, FeatureId)> {
     let (e, a, b) = world_like;
     a.as_ref()
         .map(|s| (s.element, s.feature))
@@ -676,7 +789,11 @@ fn dialog_feature(world_like: (&Option<Res<crate::extrude::ExtrudeSession>>, &Op
         .or(b.as_ref().map(|s| (s.element, s.feature)))
 }
 
-fn on_preview_slider(ev: On<cadrs_ui::SliderChange>, q: Query<(), With<RollbackSlider>>, mut preview: ResMut<DialogPreview>) {
+fn on_preview_slider(
+    ev: On<cadrs_ui::SliderChange>,
+    q: Query<(), With<RollbackSlider>>,
+    mut preview: ResMut<DialogPreview>,
+) {
     if q.contains(ev.entity) {
         let before = ev.value < 0.5;
         if preview.before != before {
@@ -704,7 +821,10 @@ fn apply_dialog_preview(
 }
 
 /// A dialog rebuilt while on "before" keeps its slider there.
-fn sync_preview_sliders(preview: Res<DialogPreview>, mut q: Query<&mut cadrs_ui::SliderState, With<RollbackSlider>>) {
+fn sync_preview_sliders(
+    preview: Res<DialogPreview>,
+    mut q: Query<&mut cadrs_ui::SliderState, With<RollbackSlider>>,
+) {
     for mut s in &mut q {
         let before = s.value < 0.5;
         if before != preview.before {
@@ -721,10 +841,18 @@ fn sync_final_buttons(
     doc: Option<Res<ActiveDocument>>,
     mut q: Query<&mut Visibility, With<FinalButton>>,
 ) {
-    let last = dialog_feature((&extrude, &applied, &boolean)).zip(doc.as_ref()).is_none_or(|((element, feature), d)| {
-        d.doc.element(element).is_none_or(|el| el.features()[..el.rollback_index()].last().map(|f| f.id) == Some(feature))
-    });
-    let want = if last { Visibility::Hidden } else { Visibility::Inherited };
+    let last = dialog_feature((&extrude, &applied, &boolean))
+        .zip(doc.as_ref())
+        .is_none_or(|((element, feature), d)| {
+            d.doc.element(element).is_none_or(|el| {
+                el.features()[..el.rollback_index()].last().map(|f| f.id) == Some(feature)
+            })
+        });
+    let want = if last {
+        Visibility::Hidden
+    } else {
+        Visibility::Inherited
+    };
     for mut v in &mut q {
         v.set_if_neq(want);
     }

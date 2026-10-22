@@ -150,11 +150,23 @@ pub fn sheet_graphics(drawing: &Drawing, index: usize, reference: &ReferenceProp
         let covers: Vec<([f64; 2], [f64; 2])> = sheet
             .sketch
             .iter()
-            .filter(|i| matches!(i.kind, crate::sheet_sketch::ItemKind::Block(_) | crate::sheet_sketch::ItemKind::Image(_)))
+            .filter(|i| {
+                matches!(
+                    i.kind,
+                    crate::sheet_sketch::ItemKind::Block(_)
+                        | crate::sheet_sketch::ItemKind::Image(_)
+                )
+            })
             .filter_map(crate::sheet_sketch::item_bounds)
             .collect();
         g.texts.retain(|t| {
-            t.text != "--" || !covers.iter().any(|(lo, hi)| t.pos[0] >= lo[0] && t.pos[0] <= hi[0] && t.pos[1] >= lo[1] - t.height && t.pos[1] <= hi[1] + t.height)
+            t.text != "--"
+                || !covers.iter().any(|(lo, hi)| {
+                    t.pos[0] >= lo[0]
+                        && t.pos[0] <= hi[0]
+                        && t.pos[1] >= lo[1] - t.height
+                        && t.pos[1] <= hi[1] + t.height
+                })
         });
     }
     g
@@ -188,8 +200,16 @@ fn border(g: &mut Graphics, sheet: &Sheet) {
                 g.line([z.from, i.max[1]], [z.from, o.max[1]], Weight::Thin);
             }
             let cx = (z.from + z.to) / 2.0;
-            g.text(GText::new([cx, mid(o.min[1], i.min[1])], label_h, z.label.clone()));
-            g.text(GText::new([cx, mid(o.max[1], i.max[1])], label_h, z.label.clone()));
+            g.text(GText::new(
+                [cx, mid(o.min[1], i.min[1])],
+                label_h,
+                z.label.clone(),
+            ));
+            g.text(GText::new(
+                [cx, mid(o.max[1], i.max[1])],
+                label_h,
+                z.label.clone(),
+            ));
         }
         for (k, z) in f.rows.iter().enumerate() {
             if k > 0 {
@@ -197,8 +217,16 @@ fn border(g: &mut Graphics, sheet: &Sheet) {
                 g.line([i.max[0], z.from], [o.max[0], z.from], Weight::Thin);
             }
             let cy = (z.from + z.to) / 2.0;
-            g.text(GText::new([mid(o.min[0], i.min[0]), cy], label_h, z.label.clone()));
-            g.text(GText::new([mid(o.max[0], i.max[0]), cy], label_h, z.label.clone()));
+            g.text(GText::new(
+                [mid(o.min[0], i.min[0]), cy],
+                label_h,
+                z.label.clone(),
+            ));
+            g.text(GText::new(
+                [mid(o.max[0], i.max[0]), cy],
+                label_h,
+                z.label.clone(),
+            ));
         }
     }
     if std == Standard::Iso {

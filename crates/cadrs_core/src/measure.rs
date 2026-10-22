@@ -17,7 +17,9 @@
 //! mesh's chord. A refined point must stay on the entity (within the mesh's sag), so a partial
 //! cylinder or arc is never measured past its end.
 
-use crate::solid::{Solid, SolidEdge, SolidFace, add, closest_on_triangle, cross, dot, len, normalize, scale, sub};
+use crate::solid::{
+    Solid, SolidEdge, SolidFace, add, closest_on_triangle, cross, dot, len, normalize, scale, sub,
+};
 use cadrs_kernel::SurfaceKind;
 use cadrs_sketch::{PlaneFrame, Vec3};
 
@@ -59,10 +61,24 @@ pub enum Exact {
     Point(Vec3),
     /// A straight segment.
     Segment(Vec3, Vec3),
-    Circle { center: Vec3, normal: Vec3, radius: f64 },
-    Plane { origin: Vec3, normal: Vec3 },
-    Cylinder { origin: Vec3, dir: Vec3, radius: f64 },
-    Sphere { center: Vec3, radius: f64 },
+    Circle {
+        center: Vec3,
+        normal: Vec3,
+        radius: f64,
+    },
+    Plane {
+        origin: Vec3,
+        normal: Vec3,
+    },
+    Cylinder {
+        origin: Vec3,
+        dir: Vec3,
+        radius: f64,
+    },
+    Sphere {
+        center: Vec3,
+        radius: f64,
+    },
 }
 
 impl Exact {
@@ -71,7 +87,11 @@ impl Exact {
         match *self {
             Exact::Point(p) => p,
             Exact::Segment(a, b) => closest_on_segment(q, a, b),
-            Exact::Circle { center, normal, radius } => {
+            Exact::Circle {
+                center,
+                normal,
+                radius,
+            } => {
                 let n = normalize(normal);
                 let off = sub(q, center);
                 let inplane = sub(off, scale(n, dot(off, n)));
@@ -84,7 +104,11 @@ impl Exact {
                 let n = normalize(normal);
                 sub(q, scale(n, dot(sub(q, origin), n)))
             }
-            Exact::Cylinder { origin, dir, radius } => {
+            Exact::Cylinder {
+                origin,
+                dir,
+                radius,
+            } => {
                 let d = normalize(dir);
                 let foot = add(origin, scale(d, dot(sub(q, origin), d)));
                 let r = sub(q, foot);
@@ -107,8 +131,16 @@ impl Exact {
     fn farthest(&self, q: Vec3) -> Option<Vec3> {
         match *self {
             Exact::Point(p) => Some(p),
-            Exact::Segment(a, b) => Some(if len(sub(q, a)) >= len(sub(q, b)) { a } else { b }),
-            Exact::Circle { center, normal, radius } => {
+            Exact::Segment(a, b) => Some(if len(sub(q, a)) >= len(sub(q, b)) {
+                a
+            } else {
+                b
+            }),
+            Exact::Circle {
+                center,
+                normal,
+                radius,
+            } => {
                 let n = normalize(normal);
                 let off = sub(q, center);
                 let inplane = sub(off, scale(n, dot(off, n)));
@@ -126,7 +158,9 @@ impl Exact {
     fn sag(&self) -> f64 {
         match *self {
             Exact::Point(_) | Exact::Segment(..) | Exact::Plane { .. } => 1e-6,
-            Exact::Circle { radius, .. } | Exact::Cylinder { radius, .. } | Exact::Sphere { radius, .. } => {
+            Exact::Circle { radius, .. }
+            | Exact::Cylinder { radius, .. }
+            | Exact::Sphere { radius, .. } => {
                 (radius * (1.0 - (ANGLE_STEP / 2.0).cos())).max(MESH_SAG) * 1.5
             }
         }
@@ -225,7 +259,11 @@ impl Entity {
         e.direction = None;
         if let Some(c) = circle {
             let normal = normalize(c.normal);
-            e.exact = Some(Exact::Circle { center: c.center, normal, radius: c.radius });
+            e.exact = Some(Exact::Circle {
+                center: c.center,
+                normal,
+                radius: c.radius,
+            });
             e.radius = Some(c.radius);
             e.center = Some(Center::Point(c.center));
             e.direction = Some(Direction::Normal(normal));
@@ -246,7 +284,14 @@ impl Entity {
         let triangles = (face.first_triangle..face.first_triangle + face.triangle_count)
             .map(|t| [0, 1, 2].map(|k| solid.positions[solid.indices[3 * t + k] as usize]))
             .collect::<Vec<_>>();
-        let area = face.area.or_else(|| Some(triangles.iter().map(|t| len(cross(sub(t[1], t[0]), sub(t[2], t[0]))) / 2.0).sum()));
+        let area = face.area.or_else(|| {
+            Some(
+                triangles
+                    .iter()
+                    .map(|t| len(cross(sub(t[1], t[0]), sub(t[2], t[0]))) / 2.0)
+                    .sum(),
+            )
+        });
         let mut e = Self {
             triangles,
             area,
@@ -254,19 +299,29 @@ impl Entity {
         };
         if let Some(p) = face.plane {
             let n = normalize(p.normal());
-            e.exact = Some(Exact::Plane { origin: p.origin, normal: n });
+            e.exact = Some(Exact::Plane {
+                origin: p.origin,
+                normal: n,
+            });
             e.direction = Some(Direction::Normal(n));
         } else if let Some((origin, dir)) = face.axis {
             let dir = normalize(dir);
             match (face.kind, face.radius) {
                 (Some(SurfaceKind::Cylinder), Some(r)) => {
-                    e.exact = Some(Exact::Cylinder { origin, dir, radius: r });
+                    e.exact = Some(Exact::Cylinder {
+                        origin,
+                        dir,
+                        radius: r,
+                    });
                     e.radius = Some(r);
                     e.center = Some(Center::Axis(origin, dir));
                     e.direction = Some(Direction::Line(dir));
                 }
                 (Some(SurfaceKind::Sphere), Some(r)) => {
-                    e.exact = Some(Exact::Sphere { center: origin, radius: r });
+                    e.exact = Some(Exact::Sphere {
+                        center: origin,
+                        radius: r,
+                    });
                     e.radius = Some(r);
                     e.center = Some(Center::Point(origin));
                 }
@@ -295,11 +350,19 @@ impl Entity {
     pub fn plane(frame: &PlaneFrame) -> Self {
         let n = normalize(frame.normal());
         let (u, v) = (normalize(frame.u), normalize(frame.v));
-        let c = |a: f64, b: f64| add(frame.origin, add(scale(u, a * UNBOUNDED), scale(v, b * UNBOUNDED)));
+        let c = |a: f64, b: f64| {
+            add(
+                frame.origin,
+                add(scale(u, a * UNBOUNDED), scale(v, b * UNBOUNDED)),
+            )
+        };
         let (p00, p10, p11, p01) = (c(-1.0, -1.0), c(1.0, -1.0), c(1.0, 1.0), c(-1.0, 1.0));
         Self {
             triangles: vec![[p00, p10, p11], [p00, p11, p01]],
-            exact: Some(Exact::Plane { origin: frame.origin, normal: n }),
+            exact: Some(Exact::Plane {
+                origin: frame.origin,
+                normal: n,
+            }),
             direction: Some(Direction::Normal(n)),
             ..Self::empty(EntityKind::Plane)
         }
@@ -308,7 +371,10 @@ impl Entity {
     /// An unbounded line (an axis), for centre-to-centre distances.
     fn line(origin: Vec3, dir: Vec3) -> Self {
         let d = normalize(dir);
-        let (a, b) = (sub(origin, scale(d, UNBOUNDED)), add(origin, scale(d, UNBOUNDED)));
+        let (a, b) = (
+            sub(origin, scale(d, UNBOUNDED)),
+            add(origin, scale(d, UNBOUNDED)),
+        );
         Self {
             segments: vec![[a, b]],
             exact: Some(Exact::Segment(a, b)),
@@ -347,7 +413,11 @@ pub struct Distance {
 
 impl Distance {
     fn between(from: Vec3, to: Vec3) -> Self {
-        Self { value: len(sub(to, from)), from, to }
+        Self {
+            value: len(sub(to, from)),
+            from,
+            to,
+        }
     }
 
     /// Its X, Y and Z components (absolute).
@@ -382,14 +452,21 @@ pub struct Measurement {
 impl Measurement {
     /// True when there is nothing to show.
     pub fn is_empty(&self) -> bool {
-        *self == Measurement { mode: self.mode, ..Default::default() }
+        *self
+            == Measurement {
+                mode: self.mode,
+                ..Default::default()
+            }
     }
 }
 
 /// Measures the entities (see the module docs).
 pub fn measure(entities: &[Entity], mode: Mode) -> Measurement {
     let entities: Vec<&Entity> = entities.iter().filter(|e| !e.is_empty()).collect();
-    let mut m = Measurement { mode, ..Default::default() };
+    let mut m = Measurement {
+        mode,
+        ..Default::default()
+    };
     match entities.as_slice() {
         [] => {}
         [e] => {
@@ -402,8 +479,13 @@ pub fn measure(entities: &[Entity], mode: Mode) -> Measurement {
             m.radius = e.radius;
         }
         [a, b] => {
-            m.has_center = (a.center.is_some() && a.kind != EntityKind::Point) || (b.center.is_some() && b.kind != EntityKind::Point);
-            let mode = if mode == Mode::CenterToCenter && !m.has_center { Mode::Minimum } else { mode };
+            m.has_center = (a.center.is_some() && a.kind != EntityKind::Point)
+                || (b.center.is_some() && b.kind != EntityKind::Point);
+            let mode = if mode == Mode::CenterToCenter && !m.has_center {
+                Mode::Minimum
+            } else {
+                mode
+            };
             m.mode = mode;
             m.distance = match mode {
                 Mode::Minimum => min_distance(a, b),
@@ -428,7 +510,9 @@ pub fn angle(a: &Entity, b: &Entity) -> Option<f64> {
     let (da, db) = (a.direction?, b.direction?);
     let cos = |x: Vec3, y: Vec3| dot(normalize(x), normalize(y)).abs().min(1.0);
     let deg = match (da, db) {
-        (Direction::Line(x), Direction::Line(y)) | (Direction::Normal(x), Direction::Normal(y)) => cos(x, y).acos(),
+        (Direction::Line(x), Direction::Line(y)) | (Direction::Normal(x), Direction::Normal(y)) => {
+            cos(x, y).acos()
+        }
         (Direction::Line(x), Direction::Normal(y)) | (Direction::Normal(y), Direction::Line(x)) => {
             std::f64::consts::FRAC_PI_2 - cos(x, y).acos()
         }
@@ -440,7 +524,11 @@ pub fn angle(a: &Entity, b: &Entity) -> Option<f64> {
 /// The shortest distance between two entities.
 pub fn min_distance(a: &Entity, b: &Entity) -> Option<Distance> {
     let (ta, tb) = (Bvh::new(a.prims())?, Bvh::new(b.prims())?);
-    let mut best = Distance { value: f64::INFINITY, from: [0.0; 3], to: [0.0; 3] };
+    let mut best = Distance {
+        value: f64::INFINITY,
+        from: [0.0; 3],
+        to: [0.0; 3],
+    };
     ta.nearest_pair(0, &tb, 0, &mut best);
     if !best.value.is_finite() {
         return None;
@@ -453,7 +541,11 @@ pub fn max_distance(a: &Entity, b: &Entity) -> Option<Distance> {
     let pa: Vec<Prim> = a.vertices().into_iter().map(Prim::P).collect();
     let pb: Vec<Prim> = b.vertices().into_iter().map(Prim::P).collect();
     let (ta, tb) = (Bvh::new(pa)?, Bvh::new(pb)?);
-    let mut best = Distance { value: -1.0, from: [0.0; 3], to: [0.0; 3] };
+    let mut best = Distance {
+        value: -1.0,
+        from: [0.0; 3],
+        to: [0.0; 3],
+    };
     ta.farthest_pair(0, &tb, 0, &mut best);
     if best.value < 0.0 {
         return None;
@@ -463,10 +555,18 @@ pub fn max_distance(a: &Entity, b: &Entity) -> Option<Distance> {
     let (mut from, mut to) = (best.from, best.to);
     for _ in 0..16 {
         let (f0, t0) = (from, to);
-        if let Some(q) = b.exact.and_then(|x| x.farthest(from)).filter(|q| on_entity(&mb, b, *q) && len(sub(*q, from)) > len(sub(to, from))) {
+        if let Some(q) = b
+            .exact
+            .and_then(|x| x.farthest(from))
+            .filter(|q| on_entity(&mb, b, *q) && len(sub(*q, from)) > len(sub(to, from)))
+        {
             to = q;
         }
-        if let Some(q) = a.exact.and_then(|x| x.farthest(to)).filter(|q| on_entity(&ma, a, *q) && len(sub(*q, to)) > len(sub(from, to))) {
+        if let Some(q) = a
+            .exact
+            .and_then(|x| x.farthest(to))
+            .filter(|q| on_entity(&ma, a, *q) && len(sub(*q, to)) > len(sub(from, to)))
+        {
             from = q;
         }
         if len(sub(from, f0)) < 1e-12 && len(sub(to, t0)) < 1e-12 {
@@ -489,14 +589,20 @@ pub fn center_distance(a: &Entity, b: &Entity) -> Option<Distance> {
     // Parallel axes: between the axes' points nearest the entities' own middles, not wherever
     // along the (unbounded) lines the search stopped.
     match (a.center, b.center) {
-        (Some(Center::Axis(oa, da)), Some(Center::Axis(_, db))) if dot(normalize(da), normalize(db)).abs() > 1.0 - 1e-9 => {
+        (Some(Center::Axis(oa, da)), Some(Center::Axis(_, db)))
+            if dot(normalize(da), normalize(db)).abs() > 1.0 - 1e-9 =>
+        {
             let mid = a.middle().unwrap_or(oa);
             let from = closest_on_line(mid, oa, da);
             let to = cb.exact.map_or(d.to, |x| x.nearest(from));
             Some(Distance::between(from, to))
         }
-        (Some(Center::Axis(oa, da)), Some(Center::Point(p))) => Some(Distance::between(closest_on_line(p, oa, da), p)),
-        (Some(Center::Point(p)), Some(Center::Axis(ob, db))) => Some(Distance::between(p, closest_on_line(p, ob, db))),
+        (Some(Center::Axis(oa, da)), Some(Center::Point(p))) => {
+            Some(Distance::between(closest_on_line(p, oa, da), p))
+        }
+        (Some(Center::Point(p)), Some(Center::Axis(ob, db))) => {
+            Some(Distance::between(p, closest_on_line(p, ob, db)))
+        }
         _ => Some(d),
     }
 }
@@ -507,7 +613,10 @@ impl Entity {
         let v = self.vertices();
         let first = *v.first()?;
         let (lo, hi) = v.iter().fold((first, first), |(lo, hi), p| {
-            ([lo[0].min(p[0]), lo[1].min(p[1]), lo[2].min(p[2])], [hi[0].max(p[0]), hi[1].max(p[1]), hi[2].max(p[2])])
+            (
+                [lo[0].min(p[0]), lo[1].min(p[1]), lo[2].min(p[2])],
+                [hi[0].max(p[0]), hi[1].max(p[1]), hi[2].max(p[2])],
+            )
         });
         Some(scale(add(lo, hi), 0.5))
     }
@@ -528,10 +637,18 @@ fn refine_min(a: &Entity, ta: &Bvh, b: &Entity, tb: &Bvh, mesh: Distance) -> Dis
     let (mut from, mut to) = (mesh.from, mesh.to);
     for _ in 0..64 {
         let (f0, t0) = (from, to);
-        if let Some(q) = b.exact.map(|x| x.nearest(from)).filter(|q| on_entity(tb, b, *q)) {
+        if let Some(q) = b
+            .exact
+            .map(|x| x.nearest(from))
+            .filter(|q| on_entity(tb, b, *q))
+        {
             to = q;
         }
-        if let Some(q) = a.exact.map(|x| x.nearest(to)).filter(|q| on_entity(ta, a, *q)) {
+        if let Some(q) = a
+            .exact
+            .map(|x| x.nearest(to))
+            .filter(|q| on_entity(ta, a, *q))
+        {
             from = q;
         }
         if len(sub(from, f0)) < 1e-12 && len(sub(to, t0)) < 1e-12 {
@@ -541,7 +658,11 @@ fn refine_min(a: &Entity, ta: &Bvh, b: &Entity, tb: &Bvh, mesh: Distance) -> Dis
     let refined = Distance::between(from, to);
     // The exact surface is within the sag of the mesh: a larger change is not a refinement.
     let tol = a.exact.map_or(0.0, |x| x.sag()) + b.exact.map_or(0.0, |x| x.sag()) + 1e-9;
-    if (refined.value - mesh.value).abs() <= tol { refined } else { mesh }
+    if (refined.value - mesh.value).abs() <= tol {
+        refined
+    } else {
+        mesh
+    }
 }
 
 /// The length of a circular edge's polyline measured on its circle: the angle it sweeps times
@@ -595,7 +716,11 @@ fn segment_segment(p1: Vec3, q1: Vec3, p2: Vec3, q2: Vec3) -> (Vec3, Vec3) {
         } else {
             let b = dot(d1, d2);
             let denom = a * e - b * b;
-            let mut s0 = if denom > EPS { ((b * f - c * e) / denom).clamp(0.0, 1.0) } else { 0.0 };
+            let mut s0 = if denom > EPS {
+                ((b * f - c * e) / denom).clamp(0.0, 1.0)
+            } else {
+                0.0
+            };
             let mut t0 = (b * s0 + f) / e;
             if t0 < 0.0 {
                 t0 = 0.0;
@@ -684,11 +809,17 @@ fn segment_triangle(p: Vec3, q: Vec3, t: [Vec3; 3]) -> (Vec3, Vec3) {
     if let Some(x) = segment_triangle_hit(p, q, t) {
         return (x, x);
     }
-    let mut cands: Vec<(Vec3, Vec3)> = vec![(p, closest_on_triangle(p, t[0], t[1], t[2])), (q, closest_on_triangle(q, t[0], t[1], t[2]))];
+    let mut cands: Vec<(Vec3, Vec3)> = vec![
+        (p, closest_on_triangle(p, t[0], t[1], t[2])),
+        (q, closest_on_triangle(q, t[0], t[1], t[2])),
+    ];
     for k in 0..3 {
         cands.push(segment_segment(p, q, t[k], t[(k + 1) % 3]));
     }
-    cands.into_iter().min_by(|x, y| len(sub(x.1, x.0)).total_cmp(&len(sub(y.1, y.0)))).unwrap()
+    cands
+        .into_iter()
+        .min_by(|x, y| len(sub(x.1, x.0)).total_cmp(&len(sub(y.1, y.0))))
+        .unwrap()
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -699,7 +830,10 @@ struct Aabb {
 
 impl Aabb {
     fn of(pts: &[Vec3]) -> Self {
-        let mut b = Aabb { lo: [f64::INFINITY; 3], hi: [f64::NEG_INFINITY; 3] };
+        let mut b = Aabb {
+            lo: [f64::INFINITY; 3],
+            hi: [f64::NEG_INFINITY; 3],
+        };
         for p in pts {
             b = b.with(*p);
         }
@@ -708,8 +842,16 @@ impl Aabb {
 
     fn with(self, p: Vec3) -> Self {
         Aabb {
-            lo: [self.lo[0].min(p[0]), self.lo[1].min(p[1]), self.lo[2].min(p[2])],
-            hi: [self.hi[0].max(p[0]), self.hi[1].max(p[1]), self.hi[2].max(p[2])],
+            lo: [
+                self.lo[0].min(p[0]),
+                self.lo[1].min(p[1]),
+                self.lo[2].min(p[2]),
+            ],
+            hi: [
+                self.hi[0].max(p[0]),
+                self.hi[1].max(p[1]),
+                self.hi[2].max(p[2]),
+            ],
         }
     }
 
@@ -719,13 +861,18 @@ impl Aabb {
 
     /// The smallest distance between points of the two boxes.
     fn min_distance(&self, o: &Aabb) -> f64 {
-        let d: Vec3 = std::array::from_fn(|k| (o.lo[k] - self.hi[k]).max(self.lo[k] - o.hi[k]).max(0.0));
+        let d: Vec3 =
+            std::array::from_fn(|k| (o.lo[k] - self.hi[k]).max(self.lo[k] - o.hi[k]).max(0.0));
         len(d)
     }
 
     /// The largest distance between points of the two boxes.
     fn max_distance(&self, o: &Aabb) -> f64 {
-        let d: Vec3 = std::array::from_fn(|k| (o.hi[k] - self.lo[k]).abs().max((self.hi[k] - o.lo[k]).abs()));
+        let d: Vec3 = std::array::from_fn(|k| {
+            (o.hi[k] - self.lo[k])
+                .abs()
+                .max((self.hi[k] - o.lo[k]).abs())
+        });
         len(d)
     }
 
@@ -777,14 +924,24 @@ impl Bvh {
                         let (x, y) = pa.closest(pb);
                         let d = len(sub(y, x));
                         if d < best.value {
-                            *best = Distance { value: d, from: x, to: y };
+                            *best = Distance {
+                                value: d,
+                                from: x,
+                                to: y,
+                            };
                         }
                     }
                 }
             }
-            (NodeKind::Inner(l, r), _) if matches!(b.kind, NodeKind::Leaf(..)) || volume(&a.bounds) >= volume(&b.bounds) => {
+            (NodeKind::Inner(l, r), _)
+                if matches!(b.kind, NodeKind::Leaf(..))
+                    || volume(&a.bounds) >= volume(&b.bounds) =>
+            {
                 let (l, r) = (*l, *r);
-                let (dl, dr) = (self.nodes[l].bounds.min_distance(&b.bounds), self.nodes[r].bounds.min_distance(&b.bounds));
+                let (dl, dr) = (
+                    self.nodes[l].bounds.min_distance(&b.bounds),
+                    self.nodes[r].bounds.min_distance(&b.bounds),
+                );
                 let order = if dl <= dr { [l, r] } else { [r, l] };
                 for c in order {
                     self.nearest_pair(c, o, j, best);
@@ -792,7 +949,10 @@ impl Bvh {
             }
             (_, NodeKind::Inner(l, r)) => {
                 let (l, r) = (*l, *r);
-                let (dl, dr) = (a.bounds.min_distance(&o.nodes[l].bounds), a.bounds.min_distance(&o.nodes[r].bounds));
+                let (dl, dr) = (
+                    a.bounds.min_distance(&o.nodes[l].bounds),
+                    a.bounds.min_distance(&o.nodes[r].bounds),
+                );
                 let order = if dl <= dr { [l, r] } else { [r, l] };
                 for c in order {
                     self.nearest_pair(i, o, c, best);
@@ -816,14 +976,24 @@ impl Bvh {
                         let (x, y) = pa.closest(pb);
                         let d = len(sub(y, x));
                         if d > best.value {
-                            *best = Distance { value: d, from: x, to: y };
+                            *best = Distance {
+                                value: d,
+                                from: x,
+                                to: y,
+                            };
                         }
                     }
                 }
             }
-            (NodeKind::Inner(l, r), _) if matches!(b.kind, NodeKind::Leaf(..)) || volume(&a.bounds) >= volume(&b.bounds) => {
+            (NodeKind::Inner(l, r), _)
+                if matches!(b.kind, NodeKind::Leaf(..))
+                    || volume(&a.bounds) >= volume(&b.bounds) =>
+            {
                 let (l, r) = (*l, *r);
-                let (dl, dr) = (self.nodes[l].bounds.max_distance(&b.bounds), self.nodes[r].bounds.max_distance(&b.bounds));
+                let (dl, dr) = (
+                    self.nodes[l].bounds.max_distance(&b.bounds),
+                    self.nodes[r].bounds.max_distance(&b.bounds),
+                );
                 let order = if dl >= dr { [l, r] } else { [r, l] };
                 for c in order {
                     self.farthest_pair(c, o, j, best);
@@ -831,7 +1001,10 @@ impl Bvh {
             }
             (_, NodeKind::Inner(l, r)) => {
                 let (l, r) = (*l, *r);
-                let (dl, dr) = (a.bounds.max_distance(&o.nodes[l].bounds), a.bounds.max_distance(&o.nodes[r].bounds));
+                let (dl, dr) = (
+                    a.bounds.max_distance(&o.nodes[l].bounds),
+                    a.bounds.max_distance(&o.nodes[r].bounds),
+                );
                 let order = if dl >= dr { [l, r] } else { [r, l] };
                 for c in order {
                     self.farthest_pair(i, o, c, best);
@@ -843,8 +1016,18 @@ impl Bvh {
 
     /// The distance from `q` to the nearest primitive.
     fn distance_to(&self, q: Vec3) -> f64 {
-        let point = Bvh { prims: vec![Prim::P(q)], nodes: vec![Node { bounds: Aabb::of(&[q]), kind: NodeKind::Leaf(0, 1) }] };
-        let mut best = Distance { value: f64::INFINITY, from: q, to: q };
+        let point = Bvh {
+            prims: vec![Prim::P(q)],
+            nodes: vec![Node {
+                bounds: Aabb::of(&[q]),
+                kind: NodeKind::Leaf(0, 1),
+            }],
+        };
+        let mut best = Distance {
+            value: f64::INFINITY,
+            from: q,
+            to: q,
+        };
         point.nearest_pair(0, self, 0, &mut best);
         best.value
     }
@@ -861,13 +1044,22 @@ fn volume(b: &Aabb) -> f64 {
 fn build(prims: &mut [Prim], bounds: &mut [Aabb], offset: usize, nodes: &mut Vec<Node>) -> usize {
     let all = bounds.iter().skip(1).fold(bounds[0], |b, x| b.union(*x));
     let index = nodes.len();
-    nodes.push(Node { bounds: all, kind: NodeKind::Leaf(offset, offset + prims.len()) });
+    nodes.push(Node {
+        bounds: all,
+        kind: NodeKind::Leaf(offset, offset + prims.len()),
+    });
     if prims.len() <= LEAF {
         return index;
     }
     // Split at the median of the boxes' centres along the widest axis.
     let d = sub(all.hi, all.lo);
-    let axis = if d[0] >= d[1] && d[0] >= d[2] { 0 } else if d[1] >= d[2] { 1 } else { 2 };
+    let axis = if d[0] >= d[1] && d[0] >= d[2] {
+        0
+    } else if d[1] >= d[2] {
+        1
+    } else {
+        2
+    };
     let mut order: Vec<usize> = (0..prims.len()).collect();
     order.sort_by(|&x, &y| bounds[x].center()[axis].total_cmp(&bounds[y].center()[axis]));
     let (p2, b2): (Vec<Prim>, Vec<Aabb>) = order.iter().map(|&k| (prims[k], bounds[k])).unzip();
@@ -895,7 +1087,10 @@ mod tests {
         Entity {
             triangles: vec![[a, b, c], [a, c, d]],
             area: Some(len(cross(sub(b, a), sub(d, a)))),
-            exact: Some(Exact::Plane { origin: a, normal: normalize(cross(sub(b, a), sub(d, a))) }),
+            exact: Some(Exact::Plane {
+                origin: a,
+                normal: normalize(cross(sub(b, a), sub(d, a))),
+            }),
             direction: Some(Direction::Normal(normalize(cross(sub(b, a), sub(d, a))))),
             ..Entity::empty(EntityKind::Face)
         }
@@ -907,11 +1102,22 @@ mod tests {
             let t = std::f64::consts::TAU * k as f64 / n as f64;
             [center[0] + r * t.cos(), center[1] + r * t.sin(), z]
         };
-        let triangles = (0..n).flat_map(|k| [[p(k, z0), p(k + 1, z0), p(k + 1, z1)], [p(k, z0), p(k + 1, z1), p(k, z1)]]).collect();
+        let triangles = (0..n)
+            .flat_map(|k| {
+                [
+                    [p(k, z0), p(k + 1, z0), p(k + 1, z1)],
+                    [p(k, z0), p(k + 1, z1), p(k, z1)],
+                ]
+            })
+            .collect();
         let axis = [center[0], center[1], z0];
         Entity {
             triangles,
-            exact: Some(Exact::Cylinder { origin: axis, dir: [0.0, 0.0, 1.0], radius: r }),
+            exact: Some(Exact::Cylinder {
+                origin: axis,
+                dir: [0.0, 0.0, 1.0],
+                radius: r,
+            }),
             radius: Some(r),
             center: Some(Center::Axis(axis, [0.0, 0.0, 1.0])),
             direction: Some(Direction::Line([0.0, 0.0, 1.0])),
@@ -926,7 +1132,14 @@ mod tests {
                 [center[0] + r * t.cos(), center[1] + r * t.sin(), center[2]]
             })
             .collect();
-        Entity::curve(&pts, Some(crate::solid::EdgeCircle { center, normal: [0.0, 0.0, 1.0], radius: r }))
+        Entity::curve(
+            &pts,
+            Some(crate::solid::EdgeCircle {
+                center,
+                normal: [0.0, 0.0, 1.0],
+                radius: r,
+            }),
+        )
     }
 
     fn line(a: Vec3, b: Vec3) -> Entity {
@@ -940,12 +1153,39 @@ mod tests {
         let y = line([0.0; 3], [0.0, 60.0, 0.0]);
         let z = line([0.0; 3], [0.0, 0.0, 25.0]);
         for (e, l) in [(&x, 100.0), (&y, 60.0), (&z, 25.0)] {
-            close(measure(std::slice::from_ref(e), Mode::Minimum).length.unwrap(), l, 1e-12);
+            close(
+                measure(std::slice::from_ref(e), Mode::Minimum)
+                    .length
+                    .unwrap(),
+                l,
+                1e-12,
+            );
         }
-        let top = quad([0.0, 0.0, 25.0], [100.0, 0.0, 25.0], [100.0, 60.0, 25.0], [0.0, 60.0, 25.0]);
-        let bottom = quad([0.0, 0.0, 0.0], [0.0, 60.0, 0.0], [100.0, 60.0, 0.0], [100.0, 0.0, 0.0]);
-        let front = quad([0.0; 3], [100.0, 0.0, 0.0], [100.0, 0.0, 25.0], [0.0, 0.0, 25.0]);
-        close(measure(std::slice::from_ref(&top), Mode::Minimum).area.unwrap(), 6000.0, 1e-9);
+        let top = quad(
+            [0.0, 0.0, 25.0],
+            [100.0, 0.0, 25.0],
+            [100.0, 60.0, 25.0],
+            [0.0, 60.0, 25.0],
+        );
+        let bottom = quad(
+            [0.0, 0.0, 0.0],
+            [0.0, 60.0, 0.0],
+            [100.0, 60.0, 0.0],
+            [100.0, 0.0, 0.0],
+        );
+        let front = quad(
+            [0.0; 3],
+            [100.0, 0.0, 0.0],
+            [100.0, 0.0, 25.0],
+            [0.0, 0.0, 25.0],
+        );
+        close(
+            measure(std::slice::from_ref(&top), Mode::Minimum)
+                .area
+                .unwrap(),
+            6000.0,
+            1e-9,
+        );
         let m = measure(&[top.clone(), bottom.clone()], Mode::Minimum);
         close(m.distance.unwrap().value, 25.0, 1e-12);
         close(m.distance.unwrap().components()[2], 25.0, 1e-12);
@@ -955,19 +1195,36 @@ mod tests {
         close(m.angle.unwrap(), 90.0, 1e-9);
         // Opposite corners: the maximum distance between the top and bottom faces.
         let m = measure(&[top, bottom], Mode::Maximum);
-        close(m.distance.unwrap().value, (100f64.powi(2) + 60f64.powi(2) + 25f64.powi(2)).sqrt(), 1e-9);
+        close(
+            m.distance.unwrap().value,
+            (100f64.powi(2) + 60f64.powi(2) + 25f64.powi(2)).sqrt(),
+            1e-9,
+        );
         // Two edges meeting at a corner: 90°, 0 apart; a vertex's coordinates.
         let m = measure(&[x, z], Mode::Minimum);
         close(m.angle.unwrap(), 90.0, 1e-9);
         close(m.distance.unwrap().value, 0.0, 1e-12);
-        assert_eq!(measure(&[Entity::point([1.0, 2.0, 3.0])], Mode::Minimum).point, Some([1.0, 2.0, 3.0]));
+        assert_eq!(
+            measure(&[Entity::point([1.0, 2.0, 3.0])], Mode::Minimum).point,
+            Some([1.0, 2.0, 3.0])
+        );
     }
 
     #[test]
     fn two_boxes_15_apart() {
         // Facing faces of two boxes 15 apart, offset sideways: the minimum is 15 along X.
-        let a = quad([10.0, 0.0, 0.0], [10.0, 10.0, 0.0], [10.0, 10.0, 10.0], [10.0, 0.0, 10.0]);
-        let b = quad([25.0, 3.0, 2.0], [25.0, 8.0, 2.0], [25.0, 8.0, 7.0], [25.0, 3.0, 7.0]);
+        let a = quad(
+            [10.0, 0.0, 0.0],
+            [10.0, 10.0, 0.0],
+            [10.0, 10.0, 10.0],
+            [10.0, 0.0, 10.0],
+        );
+        let b = quad(
+            [25.0, 3.0, 2.0],
+            [25.0, 8.0, 2.0],
+            [25.0, 8.0, 7.0],
+            [25.0, 3.0, 7.0],
+        );
         let d = min_distance(&a, &b).unwrap();
         close(d.value, 15.0, 1e-12);
         close(d.components()[0], 15.0, 1e-12);
@@ -1000,11 +1257,26 @@ mod tests {
         close(m.radius.unwrap(), 20.0, 1e-12);
         // A point off the circle's plane, beside it: exact, not the polyline's chord.
         let p = Entity::point([0.0, 33.0, 4.0]);
-        close(min_distance(&c, &p).unwrap().value, (13f64.powi(2) + 16.0).sqrt(), 1e-9);
-        close(max_distance(&c, &p).unwrap().value, (53f64.powi(2) + 16.0).sqrt(), 1e-9);
+        close(
+            min_distance(&c, &p).unwrap().value,
+            (13f64.powi(2) + 16.0).sqrt(),
+            1e-9,
+        );
+        close(
+            max_distance(&c, &p).unwrap().value,
+            (53f64.powi(2) + 16.0).sqrt(),
+            1e-9,
+        );
         // Centre to centre of two circles.
         let c2 = circle([30.0, 40.0, 0.0], 5.0, 72);
-        close(measure(&[c, c2], Mode::CenterToCenter).distance.unwrap().value, 50.0, 1e-12);
+        close(
+            measure(&[c, c2], Mode::CenterToCenter)
+                .distance
+                .unwrap()
+                .value,
+            50.0,
+            1e-12,
+        );
     }
 
     #[test]
@@ -1012,12 +1284,20 @@ mod tests {
         let a = line([0.0; 3], [3.0, 4.0, 0.0]);
         let b = line([0.0; 3], [0.0, 0.0, 10.0]);
         let c = line([1.0; 3], [1.0, 1.0, 3.0]);
-        close(measure(&[a, b, c], Mode::Minimum).length.unwrap(), 17.0, 1e-12);
+        close(
+            measure(&[a, b, c], Mode::Minimum).length.unwrap(),
+            17.0,
+            1e-12,
+        );
     }
 
     #[test]
     fn a_plane_is_unbounded() {
-        let top = Entity::plane(&PlaneFrame { origin: [0.0; 3], u: [1.0, 0.0, 0.0], v: [0.0, 1.0, 0.0] });
+        let top = Entity::plane(&PlaneFrame {
+            origin: [0.0; 3],
+            u: [1.0, 0.0, 0.0],
+            v: [0.0, 1.0, 0.0],
+        });
         let p = Entity::point([5000.0, -3000.0, 12.5]);
         close(min_distance(&top, &p).unwrap().value, 12.5, 1e-9);
     }

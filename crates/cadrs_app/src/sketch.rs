@@ -19,7 +19,6 @@
 //! Every change goes through the command layer ([`ActiveDocument::execute`]). Tools (M4 on)
 //! plug into [`ActiveSketchTool`]; Esc first leaves the active tool, then clears the selection.
 
-use cadrs_ui::ShortcutKey;
 use bevy::input::ButtonState;
 use bevy::input::keyboard::KeyboardInput;
 use bevy::input_focus::InputFocus;
@@ -31,6 +30,7 @@ use cadrs_core::commands::{
 };
 use cadrs_core::{ElementId, ElementKind, Feature, FeatureId};
 use cadrs_sketch::{ConstraintKind, PlaneRef};
+use cadrs_ui::ShortcutKey;
 use cadrs_ui::input::TextInputField;
 use cadrs_ui::prelude::*;
 use cadrs_ui::{
@@ -40,7 +40,7 @@ use cadrs_ui::{
 };
 
 use crate::viewport::{
-    PickRequest, Pick, PlaneKind, Selection, ViewportArea, ViewportRect, ViewportView,
+    Pick, PickRequest, PlaneKind, Selection, ViewportArea, ViewportRect, ViewportView,
 };
 use crate::{ActiveDocument, AppState};
 
@@ -221,7 +221,9 @@ impl SketchTool {
     pub fn family(self) -> Self {
         match self {
             SketchTool::MidpointLine => SketchTool::Line,
-            SketchTool::CenterRectangle | SketchTool::AlignedRectangle => SketchTool::CornerRectangle,
+            SketchTool::CenterRectangle | SketchTool::AlignedRectangle => {
+                SketchTool::CornerRectangle
+            }
             SketchTool::ThreePointCircle | SketchTool::Ellipse => SketchTool::Circle,
             SketchTool::TangentArc | SketchTool::CenterArc => SketchTool::Arc,
             SketchTool::CircumscribedPolygon => SketchTool::Polygon,
@@ -400,7 +402,11 @@ pub fn begin_sketch(world: &mut World) {
         let el = world.get_resource::<ActiveDocument>()?.active_element()?;
         cadrs_core::parts::plane_feature_ref(el.features(), f)
     });
-    let plane = selection.plane().map(PlaneKind::plane_ref).or(face_plane).or(feature_plane);
+    let plane = selection
+        .plane()
+        .map(PlaneKind::plane_ref)
+        .or(face_plane)
+        .or(feature_plane);
     begin_sketch_on(world, plane);
 }
 
@@ -432,7 +438,16 @@ pub fn begin_sketch_on(world: &mut World, plane: Option<PlaneRef>) {
         warn!("cannot insert a sketch: {e}");
         return;
     }
-    start_session(world, element, feature, true, mark, None, plane.is_none(), extent);
+    start_session(
+        world,
+        element,
+        feature,
+        true,
+        mark,
+        None,
+        plane.is_none(),
+        extent,
+    );
 }
 
 /// Opens an existing sketch for editing (double-click in the feature list, or Edit).
@@ -451,14 +466,27 @@ pub fn edit_sketch(world: &mut World, feature: FeatureId) {
         return;
     };
     let element = el.id;
-    let Some(before) = el.feature(feature).filter(|f| f.sketch().is_some()).cloned() else {
+    let Some(before) = el
+        .feature(feature)
+        .filter(|f| f.sketch().is_some())
+        .cloned()
+    else {
         return;
     };
     let waiting = before.sketch().is_some_and(|s| s.plane.is_none());
     // Steps undone before the edit cannot be redone inside it.
     let mark = doc.history.undo_len();
     doc.discard_since(mark);
-    start_session(world, element, feature, false, mark, Some(before), waiting, extent);
+    start_session(
+        world,
+        element,
+        feature,
+        false,
+        mark,
+        Some(before),
+        waiting,
+        extent,
+    );
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -495,7 +523,12 @@ fn start_session(
 fn feature_name(world: &World, s: &SketchSession) -> String {
     world
         .get_resource::<ActiveDocument>()
-        .and_then(|d| d.doc.element(s.element)?.feature(s.feature).map(|f| f.name.clone()))
+        .and_then(|d| {
+            d.doc
+                .element(s.element)?
+                .feature(s.feature)
+                .map(|f| f.name.clone())
+        })
         .unwrap_or_else(|| "Sketch".into())
 }
 
@@ -625,8 +658,9 @@ fn cancelled_toast(world: &mut World, name: String, feature: FeatureId) {
         RESTORE_TOAST_SECONDS,
     );
     let restore = toast_action(&mut commands, &theme, toast, "toast-restore", "Restore");
-    commands.entity(restore).insert(observe(
-        move |_: On<Activate>, mut commands: Commands| {
+    commands
+        .entity(restore)
+        .insert(observe(move |_: On<Activate>, mut commands: Commands| {
             commands.queue(move |world: &mut World| {
                 cadrs_ui::close_toasts(world);
                 if let Some(mut d) = world.get_resource_mut::<ActiveDocument>() {
@@ -634,8 +668,7 @@ fn cancelled_toast(world: &mut World, name: String, feature: FeatureId) {
                 }
                 edit_sketch(world, feature);
             });
-        },
-    ));
+        }));
     world.flush();
 }
 
@@ -647,7 +680,13 @@ fn grow_plane_extent(doc: Option<Res<ActiveDocument>>, session: Option<ResMut<Sk
     // Only a face's sketch plane (a default plane's is sized from the view, as Onshape's).
     let on_face = doc
         .as_deref()
-        .and_then(|d| d.doc.element(s.element)?.feature(s.feature)?.sketch()?.plane)
+        .and_then(|d| {
+            d.doc
+                .element(s.element)?
+                .feature(s.feature)?
+                .sketch()?
+                .plane
+        })
         .is_some_and(|p| p.face().is_some());
     if !on_face {
         return;
@@ -662,7 +701,10 @@ fn grow_plane_extent(doc: Option<Res<ActiveDocument>>, session: Option<ResMut<Sk
     for c in g.curves.values() {
         if let cadrs_sketch::CurveKind::Circle { center, radius } = c.kind {
             let p = g.pos(center);
-            reach = reach.max(Vec2::new((p.x.abs() + radius) as f32, (p.y.abs() + radius) as f32));
+            reach = reach.max(Vec2::new(
+                (p.x.abs() + radius) as f32,
+                (p.y.abs() + radius) as f32,
+            ));
         }
     }
     let want = s.plane_extent.max(reach * 1.15);
@@ -807,7 +849,11 @@ pub(crate) fn sketch_keys(
     frame: Res<bevy::diagnostic::FrameCount>,
     mut dim: ResMut<crate::sketch_dimension::DimensionTool>,
     mut regions: ResMut<crate::region_select::SketchRegionSelection>,
-    (text, search, mut commands): (Res<crate::sketch_text::TextEditing>, Res<crate::search_tools::SearchClosedFrame>, Commands),
+    (text, search, mut commands): (
+        Res<crate::sketch_text::TextEditing>,
+        Res<crate::search_tools::SearchClosedFrame>,
+        Commands,
+    ),
 ) {
     use crate::sketch_tools::DrawState;
     // The key that closed Search tools (this frame or the last: its launch is queued) isn't
@@ -859,11 +905,15 @@ pub(crate) fn sketch_keys(
                 })
             }
             // Enter or Esc ends a spline being drawn (it keeps its points).
-            KeyCode::Enter | KeyCode::NumpadEnter | KeyCode::Escape if matches!(draw.state, DrawState::Spline { .. }) => {
+            KeyCode::Enter | KeyCode::NumpadEnter | KeyCode::Escape
+                if matches!(draw.state, DrawState::Spline { .. }) =>
+            {
                 commands.queue(crate::sketch_tools::finish_spline_world)
             }
             // Enter ends the Mirror tool rather than the sketch.
-            KeyCode::Enter | KeyCode::NumpadEnter if tool.tool == SketchTool::Mirror => tool.tool = SketchTool::Select,
+            KeyCode::Enter | KeyCode::NumpadEnter if tool.tool == SketchTool::Mirror => {
+                tool.tool = SketchTool::Select
+            }
             KeyCode::Enter | KeyCode::NumpadEnter => commands.queue(accept_sketch),
             KeyCode::Escape => {
                 // Esc ends what the tool is drawing (a line chain), then leaves the tool, then
@@ -892,7 +942,11 @@ pub(crate) fn sketch_keys(
             }
             code if has_plane => {
                 if let Some(t) = SketchTool::from_key(code, shift) {
-                    tool.tool = if tool.tool == t { SketchTool::Select } else { t };
+                    tool.tool = if tool.tool == t {
+                        SketchTool::Select
+                    } else {
+                        t
+                    };
                 }
             }
             _ => {}
@@ -963,19 +1017,31 @@ fn finish_on_exit(world: &mut World) {
     world.remove_resource::<SketchSession>();
 }
 
-fn on_accept(ev: On<FeatureDialogAccept>, q: Query<(), With<SketchDialog>>, mut commands: Commands) {
+fn on_accept(
+    ev: On<FeatureDialogAccept>,
+    q: Query<(), With<SketchDialog>>,
+    mut commands: Commands,
+) {
     if q.contains(ev.entity) {
         commands.queue(accept_sketch);
     }
 }
 
-fn on_cancel(ev: On<FeatureDialogCancel>, q: Query<(), With<SketchDialog>>, mut commands: Commands) {
+fn on_cancel(
+    ev: On<FeatureDialogCancel>,
+    q: Query<(), With<SketchDialog>>,
+    mut commands: Commands,
+) {
     if q.contains(ev.entity) {
         commands.queue(cancel_sketch);
     }
 }
 
-fn on_plane_clear(ev: On<SelectionFieldClear>, q: Query<(), With<PlaneField>>, mut commands: Commands) {
+fn on_plane_clear(
+    ev: On<SelectionFieldClear>,
+    q: Query<(), With<PlaneField>>,
+    mut commands: Commands,
+) {
     if q.contains(ev.entity) {
         commands.queue(|world: &mut World| set_plane(world, None));
     }
@@ -1009,12 +1075,24 @@ fn on_checkbox(
 
 /// The variants in a tool button's ▾ menu: (menu item name, tool, label, icon, shortcut).
 /// `None` tools are shown disabled (not available yet).
-type Variant = (&'static str, Option<SketchTool>, &'static str, &'static str, &'static str);
+type Variant = (
+    &'static str,
+    Option<SketchTool>,
+    &'static str,
+    &'static str,
+    &'static str,
+);
 
 fn tool_variants(family: SketchTool) -> &'static [Variant] {
     match family {
         SketchTool::Line => &[
-            ("sketch-variant-line", Some(SketchTool::Line), "Line", "line", "L"),
+            (
+                "sketch-variant-line",
+                Some(SketchTool::Line),
+                "Line",
+                "line",
+                "L",
+            ),
             (
                 "sketch-variant-midpoint-line",
                 Some(SketchTool::MidpointLine),
@@ -1061,7 +1139,13 @@ fn tool_variants(family: SketchTool) -> &'static [Variant] {
                 "three-point-circle",
                 "",
             ),
-            ("sketch-variant-ellipse", Some(SketchTool::Ellipse), "Ellipse", "ellipse", ""),
+            (
+                "sketch-variant-ellipse",
+                Some(SketchTool::Ellipse),
+                "Ellipse",
+                "ellipse",
+                "",
+            ),
         ],
         SketchTool::Arc => &[
             (
@@ -1121,18 +1205,54 @@ fn tool_variants(family: SketchTool) -> &'static [Variant] {
         // Onshape groups Extend with Trim (`edit_tools/sketch-toolbar`: Trim ▾); Split is not
         // placed by its help page, so it joins them.
         SketchTool::Trim => &[
-            ("sketch-variant-trim", Some(SketchTool::Trim), "Trim", "trim", "M"),
-            ("sketch-variant-extend", Some(SketchTool::Extend), "Extend", "extend", "X"),
-            ("sketch-variant-split", Some(SketchTool::Split), "Split", "sketch-split", ""),
+            (
+                "sketch-variant-trim",
+                Some(SketchTool::Trim),
+                "Trim",
+                "trim",
+                "M",
+            ),
+            (
+                "sketch-variant-extend",
+                Some(SketchTool::Extend),
+                "Extend",
+                "extend",
+                "X",
+            ),
+            (
+                "sketch-variant-split",
+                Some(SketchTool::Split),
+                "Split",
+                "sketch-split",
+                "",
+            ),
         ],
         // Onshape's Spline ▾: the fit-point Spline (not built) and the Bézier curve.
         SketchTool::Spline => &[
             ("sketch-variant-spline", None, "Spline", "spline", ""),
-            ("sketch-variant-bezier", Some(SketchTool::Bezier), "Bézier curve", "spline", ""),
+            (
+                "sketch-variant-bezier",
+                Some(SketchTool::Bezier),
+                "Bézier curve",
+                "spline",
+                "",
+            ),
         ],
         SketchTool::Offset => &[
-            ("sketch-variant-offset", Some(SketchTool::Offset), "Offset", "offset", "O"),
-            ("sketch-variant-slot", Some(SketchTool::Slot), "Slot", "slot", ""),
+            (
+                "sketch-variant-offset",
+                Some(SketchTool::Offset),
+                "Offset",
+                "offset",
+                "O",
+            ),
+            (
+                "sketch-variant-slot",
+                Some(SketchTool::Slot),
+                "Slot",
+                "slot",
+                "",
+            ),
         ],
         SketchTool::Constrain(_) => CONSTRAINT_VARIANTS,
         _ => &[],
@@ -1145,12 +1265,48 @@ const CONSTRAINT_VARIANTS: &[Variant] = {
     use ConstraintKind as K;
     use SketchTool::Constrain as C;
     &[
-        ("sketch-constraint-coincident", Some(C(K::Coincident)), "Coincident", "constraint-coincident", "I"),
-        ("sketch-constraint-concentric", Some(C(K::Concentric)), "Concentric", "constraint-concentric", "Shift+O"),
-        ("sketch-constraint-parallel", Some(C(K::Parallel)), "Parallel", "constraint-parallel", "B"),
-        ("sketch-constraint-tangent", Some(C(K::Tangent)), "Tangent", "constraint-tangent", "T"),
-        ("sketch-constraint-horizontal", Some(C(K::Horizontal)), "Horizontal", "constraint-horizontal", "H"),
-        ("sketch-constraint-vertical", Some(C(K::Vertical)), "Vertical", "constraint-vertical", "V"),
+        (
+            "sketch-constraint-coincident",
+            Some(C(K::Coincident)),
+            "Coincident",
+            "constraint-coincident",
+            "I",
+        ),
+        (
+            "sketch-constraint-concentric",
+            Some(C(K::Concentric)),
+            "Concentric",
+            "constraint-concentric",
+            "Shift+O",
+        ),
+        (
+            "sketch-constraint-parallel",
+            Some(C(K::Parallel)),
+            "Parallel",
+            "constraint-parallel",
+            "B",
+        ),
+        (
+            "sketch-constraint-tangent",
+            Some(C(K::Tangent)),
+            "Tangent",
+            "constraint-tangent",
+            "T",
+        ),
+        (
+            "sketch-constraint-horizontal",
+            Some(C(K::Horizontal)),
+            "Horizontal",
+            "constraint-horizontal",
+            "H",
+        ),
+        (
+            "sketch-constraint-vertical",
+            Some(C(K::Vertical)),
+            "Vertical",
+            "constraint-vertical",
+            "V",
+        ),
         (
             "sketch-constraint-perpendicular",
             Some(C(K::Perpendicular)),
@@ -1158,10 +1314,34 @@ const CONSTRAINT_VARIANTS: &[Variant] = {
             "constraint-perpendicular",
             "Shift+L",
         ),
-        ("sketch-constraint-equal", Some(C(K::Equal)), "Equal", "constraint-equal", "E"),
-        ("sketch-constraint-midpoint", Some(C(K::Midpoint)), "Midpoint", "constraint-midpoint", "Shift+M"),
-        ("sketch-constraint-normal", Some(C(K::Normal)), "Normal", "constraint-normal", "Shift+K"),
-        ("sketch-constraint-pierce", Some(C(K::Pierce)), "Pierce", "constraint-pierce", "Shift+G"),
+        (
+            "sketch-constraint-equal",
+            Some(C(K::Equal)),
+            "Equal",
+            "constraint-equal",
+            "E",
+        ),
+        (
+            "sketch-constraint-midpoint",
+            Some(C(K::Midpoint)),
+            "Midpoint",
+            "constraint-midpoint",
+            "Shift+M",
+        ),
+        (
+            "sketch-constraint-normal",
+            Some(C(K::Normal)),
+            "Normal",
+            "constraint-normal",
+            "Shift+K",
+        ),
+        (
+            "sketch-constraint-pierce",
+            Some(C(K::Pierce)),
+            "Pierce",
+            "constraint-pierce",
+            "Shift+G",
+        ),
         (
             "sketch-constraint-symmetric",
             Some(C(K::Symmetric)),
@@ -1169,7 +1349,13 @@ const CONSTRAINT_VARIANTS: &[Variant] = {
             "constraint-symmetric",
             "Shift+Q",
         ),
-        ("sketch-constraint-fix", Some(C(K::Fix)), "Fix", "constraint-fix", "Shift+J"),
+        (
+            "sketch-constraint-fix",
+            Some(C(K::Fix)),
+            "Fix",
+            "constraint-fix",
+            "Shift+J",
+        ),
         (
             "sketch-constraint-curvature",
             Some(C(K::Curvature)),
@@ -1193,11 +1379,19 @@ pub fn constraint_icon(k: ConstraintKind) -> &'static str {
 pub(crate) type ToolVariant = (String, String, String, Option<String>, Option<SketchTool>);
 
 pub(crate) fn button_variants(button: SketchToolButton) -> Vec<ToolVariant> {
-    let SketchToolButton::Tool(t) = button else { return Vec::new() };
+    let SketchToolButton::Tool(t) = button else {
+        return Vec::new();
+    };
     tool_variants(t.family())
         .iter()
         .map(|(name, tool, label, icon, key)| {
-            (name.to_string(), label.to_string(), icon.to_string(), (!key.is_empty()).then(|| key.to_string()), *tool)
+            (
+                name.to_string(),
+                label.to_string(),
+                icon.to_string(),
+                (!key.is_empty()).then(|| key.to_string()),
+                *tool,
+            )
         })
         .collect()
 }
@@ -1205,12 +1399,20 @@ pub(crate) fn button_variants(button: SketchToolButton) -> Vec<ToolVariant> {
 /// Makes `tool` (one of the button's variants) the active tool and the button's, as choosing
 /// it from the button's ▾ menu does.
 pub(crate) fn choose_variant(world: &mut World, button: Entity, tool: SketchTool) {
-    let Some(icon_name) = tool_variants(tool.family()).iter().find(|v| v.1 == Some(tool)).map(|v| v.3) else { return };
+    let Some(icon_name) = tool_variants(tool.family())
+        .iter()
+        .find(|v| v.1 == Some(tool))
+        .map(|v| v.3)
+    else {
+        return;
+    };
     if let Some(mut b) = world.get_mut::<SketchToolButton>(button) {
         *b = SketchToolButton::Tool(tool);
     }
     world.resource_mut::<ActiveSketchTool>().tool = tool;
-    let first = world.get::<Children>(button).and_then(|c| c.first().copied());
+    let first = world
+        .get::<Children>(button)
+        .and_then(|c| c.first().copied());
     if let Some(first) = first
         && let Some(mut icon) = world.get_mut::<cadrs_ui::Icon>(first)
         && icon.name != icon_name
@@ -1225,7 +1427,11 @@ const CARET_WIDTH: f32 = 16.0;
 #[allow(clippy::too_many_arguments)]
 fn on_tool_button(
     a: On<Activate>,
-    q: Query<(&SketchToolButton, &ComputedNode, &bevy::ui::UiGlobalTransform)>,
+    q: Query<(
+        &SketchToolButton,
+        &ComputedNode,
+        &bevy::ui::UiGlobalTransform,
+    )>,
     drag: Res<crate::viewport::ViewportDrag>,
     mut tool: ResMut<ActiveSketchTool>,
     theme: Res<Theme>,
@@ -1278,7 +1484,11 @@ fn on_tool_button(
                     .insert((ToolMenuFor(a.entity), DespawnOnExit(AppState::Document)));
                 return;
             }
-            tool.tool = if tool.tool == t { SketchTool::Select } else { t };
+            tool.tool = if tool.tool == t {
+                SketchTool::Select
+            } else {
+                t
+            };
         }
         SketchToolButton::Construction => commands.queue(crate::sketch_tools::toggle_construction),
         // Disabled: not available yet.
@@ -1470,7 +1680,11 @@ fn sync_sketch_dialog(
 
 /// How the "Sketch plane" field shows a plane: "Top plane", or "Face of Extrude 1" (the
 /// feature that made the face, as Onshape names it).
-pub fn plane_label(p: PlaneRef, features: &[cadrs_core::Feature], parts: &crate::parts::PartCache) -> String {
+pub fn plane_label(
+    p: PlaneRef,
+    features: &[cadrs_core::Feature],
+    parts: &crate::parts::PartCache,
+) -> String {
     match p {
         PlaneRef::Face(f) => crate::parts::pick_label(
             features,
@@ -1587,7 +1801,12 @@ fn sketch_dialog(
                 // P3D.1: Final, while the sketch isn't the last built feature (`ex1-step3.png`).
                 f.spawn((
                     SketchFinal,
-                    cadrs_ui::Button::new("sketch-final").label("Final").small().outline().tooltip("Show the final result").build(t),
+                    cadrs_ui::Button::new("sketch-final")
+                        .label("Final")
+                        .small()
+                        .outline()
+                        .tooltip("Show the final result")
+                        .build(t),
                     observe(|_: On<Activate>, mut commands: Commands| {
                         commands.queue(|world: &mut World| {
                             if let Some(mut s) = world.get_resource_mut::<SketchSession>() {
@@ -1640,7 +1859,13 @@ fn sync_sketch_final(
 pub fn sketch_toolbar(tb: &mut ChildSpawnerCommands, t: &Theme) {
     use SketchTool as T;
     use SketchToolButton as B;
-    type Spec = (&'static str, &'static str, bool, &'static str, SketchToolButton);
+    type Spec = (
+        &'static str,
+        &'static str,
+        bool,
+        &'static str,
+        SketchToolButton,
+    );
     let groups: [&[Spec]; 4] = [
         &[
             ("sketch-use", "use", false, "Use (U)", B::Tool(T::Use)),
@@ -1682,8 +1907,20 @@ pub fn sketch_toolbar(tb: &mut ChildSpawnerCommands, t: &Theme) {
                 "Inscribed polygon",
                 B::Tool(T::Polygon),
             ),
-            ("sketch-spline", "spline", true, "Bézier curve", B::Tool(T::Bezier)),
-            ("sketch-point", "point", false, "Point (Shift+S)", B::Tool(T::Point)),
+            (
+                "sketch-spline",
+                "spline",
+                true,
+                "Bézier curve",
+                B::Tool(T::Bezier),
+            ),
+            (
+                "sketch-point",
+                "point",
+                false,
+                "Point (Shift+S)",
+                B::Tool(T::Point),
+            ),
             ("sketch-text", "text", false, "Text", B::Tool(T::Text)),
             (
                 "sketch-construction",
@@ -1710,8 +1947,20 @@ pub fn sketch_toolbar(tb: &mut ChildSpawnerCommands, t: &Theme) {
                 B::Tool(T::Fillet),
             ),
             ("sketch-trim", "trim", true, "Trim (M)", B::Tool(T::Trim)),
-            ("sketch-offset", "offset", true, "Offset (O): pick curves, then click empty space or press Enter", B::Tool(T::Offset)),
-            ("sketch-mirror", "mirror", false, "Mirror", B::Tool(T::Mirror)),
+            (
+                "sketch-offset",
+                "offset",
+                true,
+                "Offset (O): pick curves, then click empty space or press Enter",
+                B::Tool(T::Offset),
+            ),
+            (
+                "sketch-mirror",
+                "mirror",
+                false,
+                "Mirror",
+                B::Tool(T::Mirror),
+            ),
             (
                 "sketch-pattern",
                 "sketch-pattern",
@@ -1940,7 +2189,10 @@ fn face_bounds(
     v: Vec3,
     o: Vec3,
 ) -> Option<Rect> {
-    let solid_face = parts.part_with_face(FeatureId(face.feature), &face.face)?.solid.face(&face.face)?;
+    let solid_face = parts
+        .part_with_face(FeatureId(face.feature), &face.face)?
+        .solid
+        .face(&face.face)?;
     let mut pts = solid_face.loops.iter().flatten().map(|p| {
         let d = to_vec3(*p) - o;
         Vec2::new(d.dot(u), d.dot(v))
@@ -1987,7 +2239,13 @@ fn place_sketch_plane_label(
     theme: Res<Theme>,
     q_area: Query<Entity, With<ViewportArea>>,
     mut q: Query<
-        (Entity, &Children, &mut Node, &mut UiTransform, &mut Visibility),
+        (
+            Entity,
+            &Children,
+            &mut Node,
+            &mut UiTransform,
+            &mut Visibility,
+        ),
         (With<SketchPlaneLabel>, Without<SketchPlaneLabelInner>),
     >,
     mut q_inner: Query<
@@ -2002,7 +2260,9 @@ fn place_sketch_plane_label(
         .filter(|(s, _)| {
             doc.as_ref()
                 .and_then(|d| d.active_element())
-                .is_none_or(|el| cadrs_core::sheetmetal_flat::sketch_target(el.features(), s.feature).is_none())
+                .is_none_or(|el| {
+                    cadrs_core::sheetmetal_flat::sketch_target(el.features(), s.feature).is_none()
+                })
         });
     let Some((s, plane)) = current else {
         for (e, ..) in &q {
@@ -2206,7 +2466,10 @@ mod tests {
         w.resource_mut::<SketchSelection>().0 = vec![SketchEntity::Curve(curve)];
         toggle_construction(w);
         assert!(is_construction(w));
-        assert!(w.resource::<ActiveSketchTool>().construction, "the mode is left alone");
+        assert!(
+            w.resource::<ActiveSketchTool>().construction,
+            "the mode is left alone"
+        );
         w.resource_mut::<ActiveDocument>().undo();
         assert!(!is_construction(w));
         w.resource_mut::<ActiveDocument>().redo();
@@ -2247,7 +2510,9 @@ mod tests {
         let mut app = app();
         app.add_plugins(cadrs_ui::toast::ToastPlugin)
             .add_message::<bevy::picking::pointer::PointerInput>()
-            .insert_resource(TimeUpdateStrategy::ManualDuration(Duration::from_millis(200)));
+            .insert_resource(TimeUpdateStrategy::ManualDuration(Duration::from_millis(
+                200,
+            )));
         let toasts = |app: &mut App| {
             let mut q = app.world_mut().query::<&cadrs_ui::toast::Toast>();
             q.iter(app.world()).count()
@@ -2286,8 +2551,15 @@ mod tests {
             let ps = w.resource::<SketchSession>().element;
             {
                 let mut d = w.resource_mut::<ActiveDocument>();
-                d.execute(&RenameDocument { name: "Bracket v2".into() }).unwrap();
-                d.execute(&RenameElement { id: ps, name: "Plate".into() }).unwrap();
+                d.execute(&RenameDocument {
+                    name: "Bracket v2".into(),
+                })
+                .unwrap();
+                d.execute(&RenameElement {
+                    id: ps,
+                    name: "Plate".into(),
+                })
+                .unwrap();
             }
             // Going back to the documents page finishes the session (accept, else cancel).
             finish_session(w);

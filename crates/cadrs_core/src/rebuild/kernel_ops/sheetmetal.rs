@@ -26,11 +26,11 @@ use crate::document::{EndCondition, EndType, UpTo};
 use crate::sheetmetal::{SheetMetalContext, SheetMetalModelFeature, SheetMetalOp};
 use crate::solid::Solid;
 
+/// The one pipeline every feature that changes a sheet metal model goes through (SM1.6).
+pub(super) mod refold;
 /// P3I.5: the sheet metal features after the model (`crate::sheetmetal_tools`) and the
 /// sheet-metal-aware cuts, fillets and face patterns.
 mod tools;
-/// The one pipeline every feature that changes a sheet metal model goes through (SM1.6).
-pub(super) mod refold;
 
 /// A stable key for a face, edge or curve name.
 pub(super) fn key_of<T: std::fmt::Debug>(x: &T) -> u64 {
@@ -60,7 +60,8 @@ fn simplify(mut pts: Vec<P2>, tol: f64) -> Vec<P2> {
         for i in 0..n {
             let (a, b, c) = (pts[(i + n - 1) % n], pts[i], pts[(i + 1) % n]);
             let (d1, d2) = (b - a, c - b);
-            if d1.perp(&d2).abs() <= 1e-9 * d1.norm() * d2.norm() + tol * 1e-3 && d1.dot(&d2) > 0.0 {
+            if d1.perp(&d2).abs() <= 1e-9 * d1.norm() * d2.norm() + tol * 1e-3 && d1.dot(&d2) > 0.0
+            {
                 pts.remove(i);
                 removed = true;
                 break;
@@ -90,15 +91,32 @@ fn face_in(solid: &Solid, i: usize) -> Option<FaceIn> {
     let mut loops: Vec<Vec<P2>> = f
         .loops
         .iter()
-        .map(|l| simplify(l.iter().map(|p| P2::new((p3(*p) - origin).dot(&u), (p3(*p) - origin).dot(&v))).collect(), tol))
+        .map(|l| {
+            simplify(
+                l.iter()
+                    .map(|p| P2::new((p3(*p) - origin).dot(&u), (p3(*p) - origin).dot(&v)))
+                    .collect(),
+                tol,
+            )
+        })
         .filter(|l| l.len() >= 3)
         .collect();
     if loops.is_empty() {
         return None;
     }
-    let outer = (0..loops.len()).max_by(|a, b| poly::signed_area(&loops[*a]).abs().total_cmp(&poly::signed_area(&loops[*b]).abs()))?;
+    let outer = (0..loops.len()).max_by(|a, b| {
+        poly::signed_area(&loops[*a])
+            .abs()
+            .total_cmp(&poly::signed_area(&loops[*b]).abs())
+    })?;
     let outer = loops.remove(outer);
-    Some(FaceIn { key: key_of(&f.name), origin, u, v, outline: Polygon::with_holes(outer, loops) })
+    Some(FaceIn {
+        key: key_of(&f.name),
+        origin,
+        u,
+        v,
+        outline: Polygon::with_holes(outer, loops),
+    })
 }
 
 /// Whether a polyline is straight (within `tol`).
@@ -139,10 +157,13 @@ fn cyl_in(solid: &Solid, i: usize, planar: &[(usize, usize)], faces: &[FaceIn]) 
     };
     let x = radial(pts[0]);
     let y = axis.cross(&x);
-    let mut angles: Vec<f64> = pts.iter().map(|p| {
-        let r = radial(*p);
-        r.dot(&y).atan2(r.dot(&x)).rem_euclid(std::f64::consts::TAU)
-    }).collect();
+    let mut angles: Vec<f64> = pts
+        .iter()
+        .map(|p| {
+            let r = radial(*p);
+            r.dot(&y).atan2(r.dot(&x)).rem_euclid(std::f64::consts::TAU)
+        })
+        .collect();
     angles.sort_by(f64::total_cmp);
     // The arc it covers: the circle less the largest gap between the points' angles.
     let n = angles.len();
@@ -168,8 +189,16 @@ fn cyl_in(solid: &Solid, i: usize, planar: &[(usize, usize)], faces: &[FaceIn]) 
     let mut neighbours = (None, None);
     for e in &solid.edges {
         let [a, b] = e.name.faces;
-        let other = if a == f.name { b } else if b == f.name { a } else { continue };
-        let Some(&(_, fi)) = planar.iter().find(|(si, _)| solid.faces[*si].name == other) else { continue };
+        let other = if a == f.name {
+            b
+        } else if b == f.name {
+            a
+        } else {
+            continue;
+        };
+        let Some(&(_, fi)) = planar.iter().find(|(si, _)| solid.faces[*si].name == other) else {
+            continue;
+        };
         let nrm = faces[fi].normal();
         if nrm.dot(&axis).abs() > 1e-6 {
             continue;
@@ -180,7 +209,17 @@ fn cyl_in(solid: &Solid, i: usize, planar: &[(usize, usize)], faces: &[FaceIn]) 
             neighbours.1 = Some(fi);
         }
     }
-    Some(CylIn { key: key_of(&f.name), axis_origin: o, axis, radius, convex, start, sweep, z: (z0, z1), neighbours })
+    Some(CylIn {
+        key: key_of(&f.name),
+        axis_origin: o,
+        axis,
+        radius,
+        convex,
+        start,
+        sweep,
+        z: (z0, z1),
+        neighbours,
+    })
 }
 
 /// The faces, cylinders and shared straight edges of one solid's chosen faces.
@@ -213,15 +252,31 @@ impl Gathered {
                 None => self.skipped += 1,
             }
         }
-        let size = solid.positions.iter().map(|p| (p[0] * p[0] + p[1] * p[1] + p[2] * p[2]).sqrt()).fold(1.0, f64::max);
+        let size = solid
+            .positions
+            .iter()
+            .map(|p| (p[0] * p[0] + p[1] * p[1] + p[2] * p[2]).sqrt())
+            .fold(1.0, f64::max);
         for e in &solid.edges {
             let [a, b] = e.name.faces;
-            let find = |n| planar.iter().find(|(s, _)| solid.faces[*s].name == n).map(|(_, f)| *f);
-            let (Some(fa), Some(fb)) = (find(a), find(b)) else { continue };
+            let find = |n| {
+                planar
+                    .iter()
+                    .find(|(s, _)| solid.faces[*s].name == n)
+                    .map(|(_, f)| *f)
+            };
+            let (Some(fa), Some(fb)) = (find(a), find(b)) else {
+                continue;
+            };
             if fa == fb || fa < base || fb < base || !straight(&e.points, 1e-6 * size) {
                 continue;
             }
-            self.edges.push(EdgeIn { key: key_of(&e.name), a: p3(e.points[0]), b: p3(e.points[e.points.len() - 1]), faces: (fa, fb) });
+            self.edges.push(EdgeIn {
+                key: key_of(&e.name),
+                a: p3(e.points[0]),
+                b: p3(e.points[e.points.len() - 1]),
+                faces: (fa, fb),
+            });
         }
     }
 }
@@ -232,7 +287,9 @@ fn pick_key(state: &State, b: &EdgeOrFace) -> Option<u64> {
         EdgeOrFace::Edge(r) => {
             let (part, _) = super::applied::edge_ids(state, r)?;
             let solid = &part.part.solid;
-            let (i, _) = solid.resolve_edge(&r.edge, |e| Some(e.distance(r.seed))).ok()?;
+            let (i, _) = solid
+                .resolve_edge(&r.edge, |e| Some(e.distance(r.seed)))
+                .ok()?;
             Some(key_of(&solid.edges[i].name))
         }
         EdgeOrFace::Face(f) => {
@@ -245,9 +302,16 @@ fn pick_key(state: &State, b: &EdgeOrFace) -> Option<u64> {
 }
 
 /// The face of a reference on its part: (part state, face index).
-pub(super) fn face_index<'a>(state: &'a State, f: &crate::document::FaceRef) -> Option<(&'a PartState, usize)> {
+pub(super) fn face_index<'a>(
+    state: &'a State,
+    f: &crate::document::FaceRef,
+) -> Option<(&'a PartState, usize)> {
     let (part, _) = face_ids(state, f)?;
-    let (i, _) = part.part.solid.resolve_face(&f.face, None, Some(f.seed)).ok()?;
+    let (i, _) = part
+        .part
+        .solid
+        .resolve_face(&f.face, None, Some(f.seed))
+        .ok()?;
     Some((part, i))
 }
 
@@ -259,7 +323,10 @@ pub(super) type Folded = (Vec<WallId>, BodyId, BodyNames, f64);
 
 /// A sketch's curves joined into chains (only the picked ones, unless the whole sketch is),
 /// with how many picked curves are gone.
-fn chains_of(before: &[Feature], x: &SheetMetalModelFeature) -> Result<(SketchChains, usize), String> {
+fn chains_of(
+    before: &[Feature],
+    x: &SheetMetalModelFeature,
+) -> Result<(SketchChains, usize), String> {
     let mut sketches: Vec<FeatureId> = x.sketches.clone();
     for c in &x.curves {
         if !sketches.contains(&c.sketch) {
@@ -279,7 +346,12 @@ fn chains_of(before: &[Feature], x: &SheetMetalModelFeature) -> Result<(SketchCh
         };
         let mut g = sk.geometry.clone();
         if !x.sketches.contains(&s) {
-            let want: Vec<cadrs_sketch::CurveId> = x.curves.iter().filter(|c| c.sketch == s).map(|c| c.curve).collect();
+            let want: Vec<cadrs_sketch::CurveId> = x
+                .curves
+                .iter()
+                .filter(|c| c.sketch == s)
+                .map(|c| c.curve)
+                .collect();
             missing += want.iter().filter(|c| !g.curves.contains_key(**c)).count();
             g.curves.retain(|id, _| want.contains(&id));
         }
@@ -294,8 +366,18 @@ fn chains_of(before: &[Feature], x: &SheetMetalModelFeature) -> Result<(SketchCh
             let mut segs = Vec::new();
             for (pc, id) in &ch.pieces {
                 segs.push(match pc {
-                    cadrs_sketch::region::Piece::Line(a, b) => Seg::Line { a: P2::new(a.x, a.y), b: P2::new(b.x, b.y), key: key(*id) },
-                    cadrs_sketch::region::Piece::Arc(a) => Seg::Arc { center: P2::new(a.center.x, a.center.y), radius: a.radius, start: a.start_angle, sweep: a.sweep, key: key(*id) },
+                    cadrs_sketch::region::Piece::Line(a, b) => Seg::Line {
+                        a: P2::new(a.x, a.y),
+                        b: P2::new(b.x, b.y),
+                        key: key(*id),
+                    },
+                    cadrs_sketch::region::Piece::Arc(a) => Seg::Arc {
+                        center: P2::new(a.center.x, a.center.y),
+                        radius: a.radius,
+                        start: a.start_angle,
+                        sweep: a.sweep,
+                        key: key(*id),
+                    },
                     // P3I.2 judge (SM2.3): a spline or an ellipse rolls too, as tangent arcs that
                     // follow it (a biarc fit at every sample), each its own rolled wall.
                     cadrs_sketch::region::Piece::Bezier(bz) => {
@@ -311,7 +393,8 @@ fn chains_of(before: &[Feature], x: &SheetMetalModelFeature) -> Result<(SketchCh
                         continue;
                     }
                     cadrs_sketch::region::Piece::Ellipse { g, t0, sweep } => {
-                        let n = ((sweep.abs() / (std::f64::consts::PI / 8.0)).ceil() as usize).max(2);
+                        let n =
+                            ((sweep.abs() / (std::f64::consts::PI / 8.0)).ceil() as usize).max(2);
                         let sign = sweep.signum();
                         let samples: Vec<(P2, nalgebra::Vector2<f64>)> = (0..=n)
                             .map(|k| {
@@ -325,7 +408,10 @@ fn chains_of(before: &[Feature], x: &SheetMetalModelFeature) -> Result<(SketchCh
                     }
                 });
             }
-            chains.push(ChainIn { segs, closed: ch.closed });
+            chains.push(ChainIn {
+                segs,
+                closed: ch.closed,
+            });
         }
         if !chains.is_empty() {
             out.push((plane.frame(), chains));
@@ -341,7 +427,8 @@ fn biarcs(samples: &[(P2, nalgebra::Vector2<f64>)], key: u64) -> Result<Vec<Seg>
     use nalgebra::Vector2;
     let cross = |a: Vector2<f64>, b: Vector2<f64>| a.x * b.y - a.y * b.x;
     let mut out = Vec::new();
-    let sub = |k: usize| naming::stable_hash(&[key.to_le_bytes(), (k as u64).to_le_bytes()].concat());
+    let sub =
+        |k: usize| naming::stable_hash(&[key.to_le_bytes(), (k as u64).to_le_bytes()].concat());
     // One arc from `p` leaving along `t` to `q` (a line when it is straight).
     let arc = |p: P2, t: Vector2<f64>, q: P2, out: &mut Vec<Seg>| {
         let c = q - p;
@@ -352,25 +439,48 @@ fn biarcs(samples: &[(P2, nalgebra::Vector2<f64>)], key: u64) -> Result<Vec<Seg>
         let k = out.len();
         let x = cross(t, c);
         if x.abs() <= 1e-9 * len2 {
-            out.push(Seg::Line { a: p, b: q, key: sub(k) });
+            out.push(Seg::Line {
+                a: p,
+                b: q,
+                key: sub(k),
+            });
             return;
         }
         let r = len2 / (2.0 * x);
         let center = p + Vector2::new(-t.y, t.x) * r;
-        let (a0, a1) = ((p - center).y.atan2((p - center).x), (q - center).y.atan2((q - center).x));
+        let (a0, a1) = (
+            (p - center).y.atan2((p - center).x),
+            (q - center).y.atan2((q - center).x),
+        );
         let tau = std::f64::consts::TAU;
-        let sweep = if r > 0.0 { (a1 - a0).rem_euclid(tau) } else { -(a0 - a1).rem_euclid(tau) };
-        out.push(Seg::Arc { center, radius: r.abs(), start: a0, sweep, key: sub(k) });
+        let sweep = if r > 0.0 {
+            (a1 - a0).rem_euclid(tau)
+        } else {
+            -(a0 - a1).rem_euclid(tau)
+        };
+        out.push(Seg::Arc {
+            center,
+            radius: r.abs(),
+            start: a0,
+            sweep,
+            key: sub(k),
+        });
     };
     for w in samples.windows(2) {
         let ((p0, t0), (p1, t1)) = (w[0], w[1]);
-        let (t0, t1) = (t0.try_normalize(1e-12).ok_or("The curve has a cusp")?, t1.try_normalize(1e-12).ok_or("The curve has a cusp")?);
+        let (t0, t1) = (
+            t0.try_normalize(1e-12).ok_or("The curve has a cusp")?,
+            t1.try_normalize(1e-12).ok_or("The curve has a cusp")?,
+        );
         let v = p1 - p0;
         if v.norm() < 1e-9 {
             continue;
         }
         // Straight span: one line.
-        if cross(t0, v).abs() <= 1e-9 * v.norm() && cross(t1, v).abs() <= 1e-9 * v.norm() && t0.dot(&v) > 0.0 {
+        if cross(t0, v).abs() <= 1e-9 * v.norm()
+            && cross(t1, v).abs() <= 1e-9 * v.norm()
+            && t0.dot(&v) > 0.0
+        {
             arc(p0, t0, p1, &mut out);
             continue;
         }
@@ -401,7 +511,14 @@ fn biarcs(samples: &[(P2, nalgebra::Vector2<f64>)], key: u64) -> Result<Vec<Seg>
 }
 
 /// How far an end goes along `dir` from the sketch plane through `origin` (mm).
-fn end_distance(state: &State, origin: P3, dir: V3, end: EndType, depth: f64, up_to: &Option<UpTo>) -> Result<f64, String> {
+fn end_distance(
+    state: &State,
+    origin: P3,
+    dir: V3,
+    end: EndType,
+    depth: f64,
+    up_to: &Option<UpTo>,
+) -> Result<f64, String> {
     let along = |p: Vec3| (p3(p) - origin).dot(&dir);
     match end {
         EndType::Blind | EndType::ThroughAll => Ok(depth),
@@ -411,17 +528,29 @@ fn end_distance(state: &State, origin: P3, dir: V3, end: EndType, depth: f64, up
         },
         EndType::UpToFace => match up_to {
             Some(UpTo::Face(f)) => {
-                let (part, i) = face_index(state, f).ok_or("The face to extrude up to no longer exists")?;
+                let (part, i) =
+                    face_index(state, f).ok_or("The face to extrude up to no longer exists")?;
                 let face = &part.part.solid.faces[i];
-                let c = face.center.or_else(|| face.loops.first()?.first().copied()).ok_or("The face has no boundary")?;
+                let c = face
+                    .center
+                    .or_else(|| face.loops.first()?.first().copied())
+                    .ok_or("The face has no boundary")?;
                 Ok(along(c))
             }
             _ => Err("Select a face to extrude up to".into()),
         },
         EndType::UpToPart => match up_to {
             Some(UpTo::Part(p)) => {
-                let part = state.part(*p).ok_or("The part to extrude up to no longer exists")?;
-                part.part.solid.positions.iter().map(|p| along(*p)).reduce(f64::max).ok_or_else(|| "The part is empty".into())
+                let part = state
+                    .part(*p)
+                    .ok_or("The part to extrude up to no longer exists")?;
+                part.part
+                    .solid
+                    .positions
+                    .iter()
+                    .map(|p| along(*p))
+                    .reduce(f64::max)
+                    .ok_or_else(|| "The part is empty".into())
             }
             _ => Err("Select a part to extrude up to".into()),
         },
@@ -429,18 +558,37 @@ fn end_distance(state: &State, origin: P3, dir: V3, end: EndType, depth: f64, up
             .parts
             .iter()
             .filter(|p| p.part.kind == PartKind::Solid)
-            .filter_map(|p| p.part.solid.positions.iter().map(|q| along(*q)).filter(|d| *d > 1e-6).reduce(f64::min))
+            .filter_map(|p| {
+                p.part
+                    .solid
+                    .positions
+                    .iter()
+                    .map(|q| along(*q))
+                    .filter(|d| *d > 1e-6)
+                    .reduce(f64::min)
+            })
             .reduce(f64::min)
             .ok_or_else(|| "There is no part in the way to extrude up to".into()),
     }
 }
 
 /// A polygon's loops as a kernel region on `plane` (2D points mapped by `to_plane`).
-fn region_of(poly: &Polygon, source: u64, to_plane: &dyn Fn(P2) -> nalgebra::Point2<f64>) -> cadrs_kernel::Region {
-    let lp = |l: &[P2], base: u64| Loop { curves: loop_curves(&l.iter().map(|q| to_plane(*q)).collect::<Vec<_>>(), base) };
+fn region_of(
+    poly: &Polygon,
+    source: u64,
+    to_plane: &dyn Fn(P2) -> nalgebra::Point2<f64>,
+) -> cadrs_kernel::Region {
+    let lp = |l: &[P2], base: u64| Loop {
+        curves: loop_curves(&l.iter().map(|q| to_plane(*q)).collect::<Vec<_>>(), base),
+    };
     cadrs_kernel::Region {
         outer: lp(&poly.outer, 0),
-        holes: poly.holes.iter().enumerate().map(|(h, l)| lp(l, (h as u64 + 1) << 20)).collect(),
+        holes: poly
+            .holes
+            .iter()
+            .enumerate()
+            .map(|(h, l)| lp(l, (h as u64 + 1) << 20))
+            .collect(),
         source: Some(source),
     }
 }
@@ -449,7 +597,11 @@ fn region_of(poly: &Polygon, source: u64, to_plane: &dyn Fn(P2) -> nalgebra::Poi
 const ARC_STEP_MAX: f64 = 0.45;
 
 /// The circle through three points (centre, radius), if they aren't in a line.
-fn circle3(a: nalgebra::Point2<f64>, b: nalgebra::Point2<f64>, c: nalgebra::Point2<f64>) -> Option<(nalgebra::Point2<f64>, f64)> {
+fn circle3(
+    a: nalgebra::Point2<f64>,
+    b: nalgebra::Point2<f64>,
+    c: nalgebra::Point2<f64>,
+) -> Option<(nalgebra::Point2<f64>, f64)> {
     let (ab, ac) = (b - a, c - a);
     let d = 2.0 * ab.perp(&ac);
     if d.abs() < 1e-12 * (ab.norm_squared() + ac.norm_squared()).max(1e-300) {
@@ -467,7 +619,11 @@ fn circle3(a: nalgebra::Point2<f64>, b: nalgebra::Point2<f64>, c: nalgebra::Poin
 /// fillets take) where the flat's outline has its rounds.
 fn loop_curves(pts: &[nalgebra::Point2<f64>], base: u64) -> Vec<Curve2> {
     let n = pts.len();
-    let line = |k: usize| Curve2::Line { a: pts[k], b: pts[(k + 1) % n], source: Some(base + k as u64) };
+    let line = |k: usize| Curve2::Line {
+        a: pts[k],
+        b: pts[(k + 1) % n],
+        source: Some(base + k as u64),
+    };
     if n < 4 {
         return (0..n).map(line).collect();
     }
@@ -484,19 +640,27 @@ fn loop_curves(pts: &[nalgebra::Point2<f64>], base: u64) -> Vec<Curve2> {
     let turns: Vec<f64> = (0..n).map(turn).collect();
     // On a circle: the points of a polygonised round are within a few nm of it (the booleans'
     // grid).
-    let on = |c: nalgebra::Point2<f64>, r: f64, p: nalgebra::Point2<f64>| ((p - c).norm() - r).abs() <= 5e-6 + 1e-9 * r;
+    let on = |c: nalgebra::Point2<f64>, r: f64, p: nalgebra::Point2<f64>| {
+        ((p - c).norm() - r).abs() <= 5e-6 + 1e-9 * r
+    };
     let seg = |i: usize| (at(i + 1) - at(i)).norm();
     // A round's steps are alike; a line running into it tangentially isn't one of them.
     let alike = |a: f64, b: f64| b <= 2.0 * a && a <= 2.0 * b;
     let small = |t: f64| t.is_finite() && t.abs() > 1e-6 && t.abs() <= ARC_STEP_MAX;
     // A whole circle.
     if n >= 8
-        && turns.iter().all(|t| small(*t) && t.signum() == turns[0].signum())
+        && turns
+            .iter()
+            .all(|t| small(*t) && t.signum() == turns[0].signum())
         && let Some((c, r)) = circle3(at(0), at(n / 3), at(2 * n / 3))
         && pts.iter().all(|p| on(c, r, *p))
     {
         let r = if turns[0] > 0.0 { r } else { -r };
-        return vec![Curve2::Circle { center: c, radius: r, source: Some(base) }];
+        return vec![Curve2::Circle {
+            center: c,
+            radius: r,
+            source: Some(base),
+        }];
     }
     // Where to start: a point that isn't inside a run (a corner, or where a circle changes).
     let inside = |i: usize| {
@@ -505,9 +669,15 @@ fn loop_curves(pts: &[nalgebra::Point2<f64>], base: u64) -> Vec<Curve2> {
             && alike(seg(i + n - 1), seg(i))
             && alike(seg(i), seg(i + 1))
             && turns[i % n].signum() == turns[(i + 1) % n].signum()
-            && circle3(at(i + n - 1), at(i), at(i + 1)).zip(circle3(at(i), at(i + 1), at(i + 2))).is_some_and(|((c1, r1), (c2, r2))| (c1 - c2).norm() <= 1e-4 * r1.max(1.0) && (r1 - r2).abs() <= 1e-4 * r1.max(1.0))
+            && circle3(at(i + n - 1), at(i), at(i + 1))
+                .zip(circle3(at(i), at(i + 1), at(i + 2)))
+                .is_some_and(|((c1, r1), (c2, r2))| {
+                    (c1 - c2).norm() <= 1e-4 * r1.max(1.0) && (r1 - r2).abs() <= 1e-4 * r1.max(1.0)
+                })
     };
-    let Some(start) = (0..n).find(|i| !inside(*i + n - 1)) else { return (0..n).map(line).collect() };
+    let Some(start) = (0..n).find(|i| !inside(*i + n - 1)) else {
+        return (0..n).map(line).collect();
+    };
     let mut out = Vec::new();
     let mut k = 0;
     while k < n {
@@ -525,7 +695,12 @@ fn loop_curves(pts: &[nalgebra::Point2<f64>], base: u64) -> Vec<Curve2> {
             let sign = turns[(i + 1) % n].signum();
             let step = seg(i);
             let mut j = k + 2;
-            while j < n && small(turns[(start + j) % n]) && turns[(start + j) % n].signum() == sign && alike(step, seg(start + j)) && on(c, r, at(start + j + 1)) {
+            while j < n
+                && small(turns[(start + j) % n])
+                && turns[(start + j) % n].signum() == sign
+                && alike(step, seg(start + j))
+                && on(c, r, at(start + j + 1))
+            {
                 j += 1;
             }
             // Points k..=j on the circle: j − k segments.
@@ -539,7 +714,13 @@ fn loop_curves(pts: &[nalgebra::Point2<f64>], base: u64) -> Vec<Curve2> {
                     sweep -= tau;
                 }
                 if sweep.abs() > 1e-9 && sweep.abs() < tau - 1e-6 {
-                    out.push(Curve2::Arc { center: c, radius: r, start_angle: a0, sweep, source: Some(base + (i % n) as u64) });
+                    out.push(Curve2::Arc {
+                        center: c,
+                        radius: r,
+                        start_angle: a0,
+                        sweep,
+                        source: Some(base + (i % n) as u64),
+                    });
                     end = j;
                 }
             }
@@ -561,8 +742,20 @@ fn sector(ri: f64, ro: f64, a0: f64, sweep: f64, source: u64) -> cadrs_kernel::R
     let at = |r: f64, a: f64| nalgebra::Point2::new(r * a.cos(), r * a.sin());
     if sweep >= std::f64::consts::TAU - 1e-9 {
         return cadrs_kernel::Region {
-            outer: Loop { curves: vec![Curve2::Circle { center: c, radius: ro, source: Some(0) }] },
-            holes: vec![Loop { curves: vec![Curve2::Circle { center: c, radius: ri, source: Some(1) }] }],
+            outer: Loop {
+                curves: vec![Curve2::Circle {
+                    center: c,
+                    radius: ro,
+                    source: Some(0),
+                }],
+            },
+            holes: vec![Loop {
+                curves: vec![Curve2::Circle {
+                    center: c,
+                    radius: ri,
+                    source: Some(1),
+                }],
+            }],
             source: Some(source),
         };
     }
@@ -570,10 +763,30 @@ fn sector(ri: f64, ro: f64, a0: f64, sweep: f64, source: u64) -> cadrs_kernel::R
     cadrs_kernel::Region {
         outer: Loop {
             curves: vec![
-                Curve2::Arc { center: c, radius: ro, start_angle: a0, sweep, source: Some(0) },
-                Curve2::Line { a: at(ro, a1), b: at(ri, a1), source: Some(1) },
-                Curve2::Arc { center: c, radius: ri, start_angle: a1, sweep: -sweep, source: Some(2) },
-                Curve2::Line { a: at(ri, a0), b: at(ro, a0), source: Some(3) },
+                Curve2::Arc {
+                    center: c,
+                    radius: ro,
+                    start_angle: a0,
+                    sweep,
+                    source: Some(0),
+                },
+                Curve2::Line {
+                    a: at(ro, a1),
+                    b: at(ri, a1),
+                    source: Some(1),
+                },
+                Curve2::Arc {
+                    center: c,
+                    radius: ri,
+                    start_angle: a1,
+                    sweep: -sweep,
+                    source: Some(2),
+                },
+                Curve2::Line {
+                    a: at(ri, a0),
+                    b: at(ro, a0),
+                    source: Some(3),
+                },
             ],
         },
         holes: vec![],
@@ -582,12 +795,24 @@ fn sector(ri: f64, ro: f64, a0: f64, sweep: f64, source: u64) -> cadrs_kernel::R
 }
 
 fn kplane(origin: P3, x: V3, normal: V3) -> Plane {
-    Plane { origin, x_dir: nalgebra::Unit::new_normalize(x), normal: nalgebra::Unit::new_normalize(normal) }
+    Plane {
+        origin,
+        x_dir: nalgebra::Unit::new_normalize(x),
+        normal: nalgebra::Unit::new_normalize(normal),
+    }
 }
 
 /// Where a piece's material is removed by relief cuts (in the piece's own coordinates).
 pub(super) fn removed_of(part: &FlatPart, s: PieceSource) -> Vec<Polygon> {
-    part.cuts.iter().flat_map(|c| c.removed.iter().filter(|(p, _)| *p == s).flat_map(|(_, v)| v.iter().cloned())).collect()
+    part.cuts
+        .iter()
+        .flat_map(|c| {
+            c.removed
+                .iter()
+                .filter(|(p, _)| *p == s)
+                .flat_map(|(_, v)| v.iter().cloned())
+        })
+        .collect()
 }
 
 /// Why a sheet metal model fails flat (X6), the collision first.
@@ -604,7 +829,14 @@ impl Rebuilder {
     /// the sum of its pieces' volumes.
     /// `op_of` names each piece's faces (P3I.4: by the feature that made the wall or bend);
     /// the walls in `slabs` (a loft's) are mitred slabs.
-    pub(super) fn fold(&mut self, op_of: &dyn Fn(PieceSource) -> cadrs_kernel::OpId, op: cadrs_kernel::OpId, model: &Model, flat: &FlatPattern, slabs: &[WallId]) -> Result<Vec<Folded>, String> {
+    pub(super) fn fold(
+        &mut self,
+        op_of: &dyn Fn(PieceSource) -> cadrs_kernel::OpId,
+        op: cadrs_kernel::OpId,
+        model: &Model,
+        flat: &FlatPattern,
+        slabs: &[WallId],
+    ) -> Result<Vec<Folded>, String> {
         let t = model.params.thickness;
         let mut out = Vec::new();
         let release = |k: &mut cadrs_kernel::DefaultKernel, made: &[(BodyId, BodyNames, f64)]| {
@@ -618,7 +850,9 @@ impl Rebuilder {
                 let removed = removed_of(part, piece.source);
                 let r = match piece.source {
                     PieceSource::Wall(w) => match model.wall(w) {
-                        Some(wall) if slabs.contains(&w) => self.slab_bodies(op_of(piece.source), model, wall, &removed, t),
+                        Some(wall) if slabs.contains(&w) => {
+                            self.slab_bodies(op_of(piece.source), model, wall, &removed, t)
+                        }
                         Some(wall) => self.wall_bodies(op_of(piece.source), wall, &removed, t),
                         None => continue,
                     },
@@ -642,11 +876,18 @@ impl Rebuilder {
             } else {
                 let first = made[0].0;
                 let rest: Vec<BodyId> = made[1..].iter().map(|(b, _, _)| *b).collect();
-                let r = self.kernel.boolean(BoolOp::Union, first, &rest).and_then(|res| {
-                    let body = res.bodies[0];
-                    let inputs: Vec<(BodyId, &BodyNames)> = made.iter().map(|(b, n, _)| (*b, n)).collect();
-                    Ok((body, naming::name_body(&self.kernel, body, op, &res.history, &inputs)?))
-                });
+                let r = self
+                    .kernel
+                    .boolean(BoolOp::Union, first, &rest)
+                    .and_then(|res| {
+                        let body = res.bodies[0];
+                        let inputs: Vec<(BodyId, &BodyNames)> =
+                            made.iter().map(|(b, n, _)| (*b, n)).collect();
+                        Ok((
+                            body,
+                            naming::name_body(&self.kernel, body, op, &res.history, &inputs)?,
+                        ))
+                    });
                 release(&mut self.kernel, &made);
                 r.map_err(|e| format!("Couldn't join the sheet metal walls: {e}"))?
             };
@@ -658,12 +899,32 @@ impl Rebuilder {
     /// A loft wall's solid: a slab mitred to its facet neighbours (P3I.9,
     /// [`cadrs_sheetmetal::loft::wall_slab`]), made solid by the kernel; the plain extrusion when
     /// it can't be.
-    fn slab_bodies(&mut self, op: cadrs_kernel::OpId, model: &Model, wall: &Wall, removed: &[Polygon], t: f64) -> Result<Vec<(BodyId, BodyNames, f64)>, String> {
-        let Some(tris) = cadrs_sheetmetal::loft::wall_slab(model, wall.id, removed) else { return self.wall_bodies(op, wall, removed, t) };
-        let size = tris.iter().flatten().map(|p| p.coords.norm()).fold(1.0, f64::max);
-        let Ok(b) = self.kernel.mesh_solid(&tris, 1e-7 * size) else { return self.wall_bodies(op, wall, removed, t) };
-        let names = naming::name_body(&self.kernel, b, op, &cadrs_kernel::History::default(), &[]).map_err(|e| e.to_string());
-        let vol = self.kernel.mass_properties(b).map(|m| m.volume).map_err(|e| e.to_string());
+    fn slab_bodies(
+        &mut self,
+        op: cadrs_kernel::OpId,
+        model: &Model,
+        wall: &Wall,
+        removed: &[Polygon],
+        t: f64,
+    ) -> Result<Vec<(BodyId, BodyNames, f64)>, String> {
+        let Some(tris) = cadrs_sheetmetal::loft::wall_slab(model, wall.id, removed) else {
+            return self.wall_bodies(op, wall, removed, t);
+        };
+        let size = tris
+            .iter()
+            .flatten()
+            .map(|p| p.coords.norm())
+            .fold(1.0, f64::max);
+        let Ok(b) = self.kernel.mesh_solid(&tris, 1e-7 * size) else {
+            return self.wall_bodies(op, wall, removed, t);
+        };
+        let names = naming::name_body(&self.kernel, b, op, &cadrs_kernel::History::default(), &[])
+            .map_err(|e| e.to_string());
+        let vol = self
+            .kernel
+            .mass_properties(b)
+            .map(|m| m.volume)
+            .map_err(|e| e.to_string());
         match (names, vol) {
             (Ok(n), Ok(v)) => Ok(vec![(b, n, v)]),
             (Err(e), _) | (_, Err(e)) => {
@@ -674,7 +935,13 @@ impl Rebuilder {
     }
 
     /// A wall's solid: its outline (less the relief cuts) thickened on its material side.
-    pub(super) fn wall_bodies(&mut self, op: cadrs_kernel::OpId, wall: &Wall, removed: &[Polygon], t: f64) -> Result<Vec<(BodyId, BodyNames, f64)>, String> {
+    pub(super) fn wall_bodies(
+        &mut self,
+        op: cadrs_kernel::OpId,
+        wall: &Wall,
+        removed: &[Polygon],
+        t: f64,
+    ) -> Result<Vec<(BodyId, BodyNames, f64)>, String> {
         let source = 0x5741_4c4c_0000_0000 | wall.id.0 as u64;
         let profile = match wall.surface {
             Surface::Planar { origin, u, v } => {
@@ -701,33 +968,76 @@ impl Rebuilder {
                 }
                 cadrs_kernel::Profile::new(kplane(origin, x, n), regions)
             }
-            Surface::Rolled { axis_origin, axis, start, radius, material_outside } => {
-                let (ri, ro) = if material_outside { (radius, radius + t) } else { (radius - t, radius) };
-                let Some((lo, hi)) = wall.outline.bounds() else { return Ok(Vec::new()) };
+            Surface::Rolled {
+                axis_origin,
+                axis,
+                start,
+                radius,
+                material_outside,
+            } => {
+                let (ri, ro) = if material_outside {
+                    (radius, radius + t)
+                } else {
+                    (radius - t, radius)
+                };
+                let Some((lo, hi)) = wall.outline.bounds() else {
+                    return Ok(Vec::new());
+                };
                 let a = axis.normalize();
                 let x = (start - a * start.dot(&a)).normalize();
                 let origin = axis_origin + a * lo.y;
-                let profile = cadrs_kernel::Profile::new(kplane(origin, x, a), vec![sector(ri, ro, lo.x / radius, (hi.x - lo.x) / radius, source)]);
-                let r = self.kernel.extrude(&profile, Extent::Blind(hi.y - lo.y)).map_err(|e| format!("Sheet metal wall failed: {e}"))?;
+                let profile = cadrs_kernel::Profile::new(
+                    kplane(origin, x, a),
+                    vec![sector(
+                        ri,
+                        ro,
+                        lo.x / radius,
+                        (hi.x - lo.x) / radius,
+                        source,
+                    )],
+                );
+                let r = self
+                    .kernel
+                    .extrude(&profile, Extent::Blind(hi.y - lo.y))
+                    .map_err(|e| format!("Sheet metal wall failed: {e}"))?;
                 return self.named_pieces(op, r);
             }
         };
-        let r = self.kernel.extrude(&profile, Extent::Blind(t)).map_err(|e| format!("Sheet metal wall failed: {e}"))?;
+        let r = self
+            .kernel
+            .extrude(&profile, Extent::Blind(t))
+            .map_err(|e| format!("Sheet metal wall failed: {e}"))?;
         self.named_pieces(op, r)
     }
 
     /// A bend's solid: the shell between its inner and outer radii over its sweep, less the
     /// relief cuts (each as the wedge its extent covers).
-    pub(super) fn bend_body(&mut self, op: cadrs_kernel::OpId, model: &Model, j: cadrs_sheetmetal::JointId, removed: &[Polygon]) -> Result<Vec<(BodyId, BodyNames, f64)>, String> {
-        let Some(g) = model.bend_geometry(j) else { return Ok(Vec::new()) };
-        let Some(bend) = model.joint(j).and_then(|x| x.bend()) else { return Ok(Vec::new()) };
+    pub(super) fn bend_body(
+        &mut self,
+        op: cadrs_kernel::OpId,
+        model: &Model,
+        j: cadrs_sheetmetal::JointId,
+        removed: &[Polygon],
+    ) -> Result<Vec<(BodyId, BodyNames, f64)>, String> {
+        let Some(g) = model.bend_geometry(j) else {
+            return Ok(Vec::new());
+        };
+        let Some(bend) = model.joint(j).and_then(|x| x.bend()) else {
+            return Ok(Vec::new());
+        };
         let source = 0x4245_4e44_0000_0000 | j.0 as u64;
         let span = g.ends.1 - g.ends.0;
         let len = span.dot(&g.axis);
         let base = if len >= 0.0 { g.ends.0 } else { g.ends.1 };
         let plane = kplane(base, g.start, g.axis);
-        let profile = cadrs_kernel::Profile::new(plane, vec![sector(g.inner_radius, g.outer_radius, 0.0, g.sweep, source)]);
-        let r = self.kernel.extrude(&profile, Extent::Blind(len.abs())).map_err(|e| format!("Sheet metal bend failed: {e}"))?;
+        let profile = cadrs_kernel::Profile::new(
+            plane,
+            vec![sector(g.inner_radius, g.outer_radius, 0.0, g.sweep, source)],
+        );
+        let r = self
+            .kernel
+            .extrude(&profile, Extent::Blind(len.abs()))
+            .map_err(|e| format!("Sheet metal bend failed: {e}"))?;
         let mut made = self.named_pieces(op, r)?;
         if removed.is_empty() || made.len() != 1 {
             return Ok(made);
@@ -754,7 +1064,11 @@ impl Rebuilder {
                     && slices.len() > 1
                     && let Some(tris) = g.cut_mesh(c, allowance, model.params.thickness)
                 {
-                    let size = tris.iter().flatten().map(|p| p.coords.norm()).fold(1.0, f64::max);
+                    let size = tris
+                        .iter()
+                        .flatten()
+                        .map(|p| p.coords.norm())
+                        .fold(1.0, f64::max);
                     if let Ok(b) = self.kernel.mesh_solid(&tris, 1e-7 * size) {
                         tools.push(b);
                         meshed = true;
@@ -787,7 +1101,13 @@ impl Rebuilder {
                 }
                 let wedge = cadrs_kernel::Profile::new(
                     kplane(base + g.axis * z0, g.start, g.axis),
-                    vec![sector((g.inner_radius - eps).max(1e-6), g.outer_radius + eps, a0, a1 - a0, 0)],
+                    vec![sector(
+                        (g.inner_radius - eps).max(1e-6),
+                        g.outer_radius + eps,
+                        a0,
+                        a1 - a0,
+                        0,
+                    )],
                 );
                 match self.kernel.extrude(&wedge, Extent::Blind(z1 - z0)) {
                     Ok(r) => tools.push(r.bodies[0]),
@@ -829,10 +1149,19 @@ impl Rebuilder {
     }
 
     /// Names a new body and measures it.
-    pub(super) fn named_pieces(&mut self, op: cadrs_kernel::OpId, r: cadrs_kernel::OpResult) -> Result<Vec<(BodyId, BodyNames, f64)>, String> {
+    pub(super) fn named_pieces(
+        &mut self,
+        op: cadrs_kernel::OpId,
+        r: cadrs_kernel::OpResult,
+    ) -> Result<Vec<(BodyId, BodyNames, f64)>, String> {
         let body = r.bodies[0];
-        let names = naming::name_body(&self.kernel, body, op, &r.history, &[]).map_err(|e| e.to_string());
-        let volume = self.kernel.mass_properties(body).map(|m| m.volume).map_err(|e| e.to_string());
+        let names =
+            naming::name_body(&self.kernel, body, op, &r.history, &[]).map_err(|e| e.to_string());
+        let volume = self
+            .kernel
+            .mass_properties(body)
+            .map(|m| m.volume)
+            .map_err(|e| e.to_string());
         match (names, volume) {
             (Ok(n), Ok(v)) => Ok(vec![(body, n, v)]),
             (Err(e), _) | (_, Err(e)) => {
@@ -842,7 +1171,14 @@ impl Rebuilder {
         }
     }
 
-    pub(in crate::rebuild) fn sheet_metal_model(&mut self, before: &[Feature], id: FeatureId, name: &str, x: &SheetMetalModelFeature, state: &Arc<State>) -> Result<Output, String> {
+    pub(in crate::rebuild) fn sheet_metal_model(
+        &mut self,
+        before: &[Feature],
+        id: FeatureId,
+        name: &str,
+        x: &SheetMetalModelFeature,
+        state: &Arc<State>,
+    ) -> Result<Output, String> {
         if let Some(e) = x.params.validate().first() {
             return Err(e.message());
         }
@@ -866,9 +1202,15 @@ impl Rebuilder {
                         let excluded: Vec<usize> = x
                             .exclude
                             .iter()
-                            .filter_map(|f| face_index(state, f).filter(|(p, _)| p.part.id == *pid).map(|(_, i)| i))
+                            .filter_map(|f| {
+                                face_index(state, f)
+                                    .filter(|(p, _)| p.part.id == *pid)
+                                    .map(|(_, i)| i)
+                            })
                             .collect();
-                        let chosen: Vec<usize> = (0..solid.faces.len()).filter(|i| !excluded.contains(i)).collect();
+                        let chosen: Vec<usize> = (0..solid.faces.len())
+                            .filter(|i| !excluded.contains(i))
+                            .collect();
                         g.add(solid, &chosen);
                         consumed.push(*pid);
                     }
@@ -888,7 +1230,9 @@ impl Rebuilder {
                         }
                     }
                     for (pid, chosen) in &mut by_part {
-                        let Some(part) = state.part(*pid) else { continue };
+                        let Some(part) = state.part(*pid) else {
+                            continue;
+                        };
                         let solid = &part.part.solid;
                         if x.tangent_propagation {
                             // SM17: every face that meets a chosen one smoothly (a flat face
@@ -899,7 +1243,12 @@ impl Rebuilder {
                         g.add(solid, chosen);
                     }
                     // Sketch regions: each sketch's picked regions, joined where they touch.
-                    let (groups, lost) = sweep_groups(before, &x.regions, &x.region_sketches, crate::document::BodyType::Solid);
+                    let (groups, lost) = sweep_groups(
+                        before,
+                        &x.regions,
+                        &x.region_sketches,
+                        crate::document::BodyType::Solid,
+                    );
                     missing += lost;
                     for grp in &groups {
                         let f = &grp.frame;
@@ -907,19 +1256,31 @@ impl Rebuilder {
                             .regions
                             .iter()
                             .map(|(_, r)| {
-                                let ring = |l: &[cadrs_sketch::Vec2]| l.iter().map(|q| P2::new(q.x, q.y)).collect::<Vec<_>>();
-                                Polygon::with_holes(ring(&r.outer), r.holes.iter().map(|h| ring(h)).collect())
+                                let ring = |l: &[cadrs_sketch::Vec2]| {
+                                    l.iter().map(|q| P2::new(q.x, q.y)).collect::<Vec<_>>()
+                                };
+                                Polygon::with_holes(
+                                    ring(&r.outer),
+                                    r.holes.iter().map(|h| ring(h)).collect(),
+                                )
                             })
                             .collect();
                         let first_key = grp.regions.iter().map(|(k, _)| *k).min().unwrap_or(0);
                         let mut joined = poly::union(&polys);
                         joined.sort_by(|a, b| {
-                            let c = |p: &Polygon| p.bounds().map_or((0.0, 0.0), |(lo, _)| (lo.x, lo.y));
+                            let c =
+                                |p: &Polygon| p.bounds().map_or((0.0, 0.0), |(lo, _)| (lo.x, lo.y));
                             c(a).partial_cmp(&c(b)).unwrap_or(std::cmp::Ordering::Equal)
                         });
                         let (u, v) = (v3(f.u).normalize(), v3(f.v).normalize());
                         for (k, outline) in joined.into_iter().enumerate() {
-                            g.faces.push(FaceIn { key: first_key.wrapping_add(k as u64), origin: p3(f.origin), u, v, outline });
+                            g.faces.push(FaceIn {
+                                key: first_key.wrapping_add(k as u64),
+                                origin: p3(f.origin),
+                                u,
+                                v,
+                                outline,
+                            });
                         }
                     }
                 }
@@ -927,7 +1288,12 @@ impl Rebuilder {
                     warning = Some("A selected part, face or region no longer exists".into());
                 }
                 if g.skipped > 0 {
-                    warning = Some(format!("{} curved face{} can't be made sheet metal and {} left out", g.skipped, if g.skipped == 1 { "" } else { "s" }, if g.skipped == 1 { "was" } else { "were" }));
+                    warning = Some(format!(
+                        "{} curved face{} can't be made sheet metal and {} left out",
+                        g.skipped,
+                        if g.skipped == 1 { "" } else { "s" },
+                        if g.skipped == 1 { "was" } else { "were" }
+                    ));
                 }
                 if g.faces.is_empty() && g.cyls.is_empty() {
                     return Err("The selected parts, faces or regions no longer exist".into());
@@ -936,8 +1302,15 @@ impl Rebuilder {
                 if bends.len() < x.bends.len() {
                     warning = Some("A selected edge to bend no longer exists".into());
                 }
-                let o = FaceOpts { material_inside: x.flip_thickness, clearance: x.clearance, include_bends: x.include_bends, bends, ..Default::default() };
-                construct::from_faces(p, &g.faces, &g.cyls, &g.edges, &o).map_err(|e| e.message())?
+                let o = FaceOpts {
+                    material_inside: x.flip_thickness,
+                    clearance: x.clearance,
+                    include_bends: x.include_bends,
+                    bends,
+                    ..Default::default()
+                };
+                construct::from_faces(p, &g.faces, &g.cyls, &g.edges, &o)
+                    .map_err(|e| e.message())?
             }
             SheetMetalOp::Extrude => {
                 let (groups, missing) = chains_of(before, x)?;
@@ -957,7 +1330,10 @@ impl Rebuilder {
                     let d1 = end_distance(state, origin, dir, x.end, x.depth, &x.up_to)?;
                     let (z0, z1) = if x.symmetric && x.end == EndType::Blind {
                         (-x.depth / 2.0, x.depth / 2.0)
-                    } else if let Some(EndCondition { end, depth, up_to, .. }) = &x.second {
+                    } else if let Some(EndCondition {
+                        end, depth, up_to, ..
+                    }) = &x.second
+                    {
                         let d2 = end_distance(state, origin, -dir, *end, *depth, up_to)?;
                         (-d2, d1)
                     } else {
@@ -976,7 +1352,17 @@ impl Rebuilder {
                             naming::stable_hash(&bytes)
                         })
                         .collect();
-                    let o = ChainOpts { origin, x: fx, y: fy, z0, z1, dir, flip_side: x.flip_thickness, arcs_as_bends: arcs, edits: Vec::new() };
+                    let o = ChainOpts {
+                        origin,
+                        x: fx,
+                        y: fy,
+                        z0,
+                        z1,
+                        dir,
+                        flip_side: x.flip_thickness,
+                        arcs_as_bends: arcs,
+                        edits: Vec::new(),
+                    };
                     let b = construct::from_chains(p, chains, &o).map_err(|e| e.message())?;
                     if let Some(w) = b.warnings.first() {
                         warning = Some(w.clone());
@@ -1017,21 +1403,38 @@ impl Rebuilder {
         // A dialog taking picks on the input: the model, table and flat only.
         if x.picking {
             let mut ctx = ctx;
-            let def = ctx.def.clone().ok_or("The sheet metal model has no definition")?;
+            let def = ctx
+                .def
+                .clone()
+                .ok_or("The sheet metal model has no definition")?;
             let model = def.build().map_err(|e| e.message(name))?;
             ctx.flat = flatten(&model);
             ctx.model = model;
             return Ok(refold::plain_output(refold::with_context(state, ctx), None));
         }
-        let consumed = if x.operation == SheetMetalOp::Convert && !x.keep_input { consumed } else { Vec::new() };
+        let consumed = if x.operation == SheetMetalOp::Convert && !x.keep_input {
+            consumed
+        } else {
+            Vec::new()
+        };
         let mut o = self.refold(id, name, state, &[], None, ctx, &consumed)?;
         o.warning = o.warning.or(warning);
         // P3I.2 judge: the dialog's preview while edges to bend or faces to exclude are picked
         // (`02-sheet-metal-model/t0101.0.png`): the folded parts over the parts as they were,
         // whose faces and edges stay pickable.
-        let mut folded = o.state.parts.iter().filter(|p| p.part.features.contains(&id)).map(|p| p.part.solid.clone());
+        let mut folded = o
+            .state
+            .parts
+            .iter()
+            .filter(|p| p.part.features.contains(&id))
+            .map(|p| p.part.solid.clone());
         if let Some(tool) = folded.next() {
-            o.stage = Some(Stage { before: state.parts.iter().map(|p| p.part.clone()).collect(), tool, more: folded.collect(), remove: false });
+            o.stage = Some(Stage {
+                before: state.parts.iter().map(|p| p.part.clone()).collect(),
+                tool,
+                more: folded.collect(),
+                remove: false,
+            });
         }
         Ok(o)
     }
@@ -1048,9 +1451,17 @@ mod tests {
         for c in curves {
             twice += match *c {
                 Curve2::Line { a, b, .. } => a.x * b.y - b.x * a.y,
-                Curve2::Arc { center, radius, start_angle, sweep, .. } => {
+                Curve2::Arc {
+                    center,
+                    radius,
+                    start_angle,
+                    sweep,
+                    ..
+                } => {
                     let (t0, t1) = (start_angle, start_angle + sweep);
-                    radius * center.x * (t1.sin() - t0.sin()) + radius * center.y * (t0.cos() - t1.cos()) + radius * radius * sweep
+                    radius * center.x * (t1.sin() - t0.sin())
+                        + radius * center.y * (t0.cos() - t1.cos())
+                        + radius * radius * sweep
                 }
                 Curve2::Circle { radius, .. } => 2.0 * std::f64::consts::PI * radius * radius.abs(),
                 _ => unreachable!(),
@@ -1061,10 +1472,17 @@ mod tests {
 
     fn plate(kind: CornerBreakKind) -> Vec<nalgebra::Point2<f64>> {
         let mut m = Model {
-            params: cadrs_sheetmetal::Params { thickness: 2.0, ..Default::default() },
+            params: cadrs_sheetmetal::Params {
+                thickness: 2.0,
+                ..Default::default()
+            },
             walls: vec![Wall {
                 id: WallId(0),
-                surface: Surface::Planar { origin: P3::origin(), u: V3::x(), v: V3::y() },
+                surface: Surface::Planar {
+                    origin: P3::origin(),
+                    u: V3::x(),
+                    v: V3::y(),
+                },
                 outline: Polygon::rect(P2::new(0.0, 0.0), P2::new(100.0, 60.0)),
             }],
             ..Default::default()
@@ -1079,23 +1497,47 @@ mod tests {
         // A circular fillet: one exact arc, the closed-form area.
         let l = plate(CornerBreakKind::Fillet { radius: 10.0 });
         let c = loop_curves(&l, 0);
-        assert_eq!(c.iter().filter(|c| matches!(c, Curve2::Arc { .. })).count(), 1, "{c:?}");
+        assert_eq!(
+            c.iter().filter(|c| matches!(c, Curve2::Arc { .. })).count(),
+            1,
+            "{c:?}"
+        );
         assert_eq!(c.len(), 5);
-        assert!((area(&c) - (6000.0 - 100.0 * (1.0 - PI / 4.0))).abs() < 1e-6, "{}", area(&c));
+        assert!(
+            (area(&c) - (6000.0 - 100.0 * (1.0 - PI / 4.0))).abs() < 1e-6,
+            "{}",
+            area(&c)
+        );
         // A quarter ellipse: arcs fitted along it, its area kept.
-        let l = plate(CornerBreakKind::Round { r1: 10.0, r2: 6.0, overflow: false });
+        let l = plate(CornerBreakKind::Round {
+            r1: 10.0,
+            r2: 6.0,
+            overflow: false,
+        });
         let c = loop_curves(&l, 0);
         let want = 6000.0 - 60.0 * (1.0 - PI / 4.0);
-        assert!((area(&c) - want).abs() < 0.02, "{} vs {want}: {c:?}", area(&c));
+        assert!(
+            (area(&c) - want).abs() < 0.02,
+            "{} vs {want}: {c:?}",
+            area(&c)
+        );
         // A circle: one curve.
-        let ring: Vec<nalgebra::Point2<f64>> = (0..48).map(|k| {
-            let a = k as f64 / 48.0 * std::f64::consts::TAU;
-            nalgebra::Point2::new(5.0 + 3.0 * a.cos(), 7.0 + 3.0 * a.sin())
-        }).collect();
+        let ring: Vec<nalgebra::Point2<f64>> = (0..48)
+            .map(|k| {
+                let a = k as f64 / 48.0 * std::f64::consts::TAU;
+                nalgebra::Point2::new(5.0 + 3.0 * a.cos(), 7.0 + 3.0 * a.sin())
+            })
+            .collect();
         let c = loop_curves(&ring, 0);
-        assert!(matches!(c[..], [Curve2::Circle { radius, .. }] if (radius - 3.0).abs() < 1e-9), "{c:?}");
+        assert!(
+            matches!(c[..], [Curve2::Circle { radius, .. }] if (radius - 3.0).abs() < 1e-9),
+            "{c:?}"
+        );
         // A rectangle stays four lines.
-        let r: Vec<nalgebra::Point2<f64>> = [(0.0, 0.0), (4.0, 0.0), (4.0, 2.0), (0.0, 2.0)].iter().map(|(x, y)| nalgebra::Point2::new(*x, *y)).collect();
+        let r: Vec<nalgebra::Point2<f64>> = [(0.0, 0.0), (4.0, 0.0), (4.0, 2.0), (0.0, 2.0)]
+            .iter()
+            .map(|(x, y)| nalgebra::Point2::new(*x, *y))
+            .collect();
         assert_eq!(loop_curves(&r, 0).len(), 4);
     }
 }

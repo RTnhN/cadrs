@@ -48,7 +48,10 @@ impl Plugin for UpdatePlugin {
                     .before(super::views::ViewsSet)
                     .run_if(in_state(crate::AppState::Document)),
             )
-            .add_systems(OnExit(crate::AppState::Document), |mut w: ResMut<Workspace>| *w = Workspace::default());
+            .add_systems(
+                OnExit(crate::AppState::Document),
+                |mut w: ResMut<Workspace>| *w = Workspace::default(),
+            );
     }
 }
 
@@ -127,7 +130,11 @@ fn state_key(s: &StudioState) -> u64 {
 
 /// Keeps the workspace hashes of the active drawing's studios current and finds its
 /// out-of-date views.
-fn track_workspace(doc: Option<Res<ActiveDocument>>, kind: Res<ActiveKind>, mut ws: ResMut<Workspace>) {
+fn track_workspace(
+    doc: Option<Res<ActiveDocument>>,
+    kind: Res<ActiveKind>,
+    mut ws: ResMut<Workspace>,
+) {
     // Edits made in another tab are seen when the drawing is shown again.
     if doc.as_ref().is_some_and(|d| d.is_changed()) {
         ws.dirty = true;
@@ -143,8 +150,18 @@ fn track_workspace(doc: Option<Res<ActiveDocument>>, kind: Res<ActiveKind>, mut 
     };
     let dirty = std::mem::take(&mut ws.dirty);
     // Assemblies (P3C.5): the ones with a source, and the ones BOM tables list.
-    let mut asms: Vec<ElementId> = d.sources.iter().map(|s| ElementId(s.element)).filter(|e| cadrs_core::drawing_assembly::is_assembly(&doc.doc, *e)).collect();
-    for b in d.sheets.iter().flat_map(|s| s.tables.iter()).filter_map(|t| t.bom.as_ref()) {
+    let mut asms: Vec<ElementId> = d
+        .sources
+        .iter()
+        .map(|s| ElementId(s.element))
+        .filter(|e| cadrs_core::drawing_assembly::is_assembly(&doc.doc, *e))
+        .collect();
+    for b in d
+        .sheets
+        .iter()
+        .flat_map(|s| s.tables.iter())
+        .filter_map(|t| t.bom.as_ref())
+    {
         let e = ElementId(b.assembly);
         if !asms.contains(&e) {
             asms.push(e);
@@ -157,16 +174,42 @@ fn track_workspace(doc: Option<Res<ActiveDocument>>, kind: Res<ActiveKind>, mut 
                 continue;
             };
             // The assembly's own settings and properties count too (the BOM reads them).
-            let extra = doc.doc.element(*id).and_then(|e| e.assembly_model()).map(|a| format!("{:?}{:?}", a.bom, a.properties)).unwrap_or_default();
-            let props = format!("{:?}{:?}", doc.doc.standard_content.iter().map(|p| (&p.part_number, &p.description)).collect::<Vec<_>>(), doc.doc.properties);
+            let extra = doc
+                .doc
+                .element(*id)
+                .and_then(|e| e.assembly_model())
+                .map(|a| format!("{:?}{:?}", a.bom, a.properties))
+                .unwrap_or_default();
+            let props = format!(
+                "{:?}{:?}",
+                doc.doc
+                    .standard_content
+                    .iter()
+                    .map(|p| (&p.part_number, &p.description))
+                    .collect::<Vec<_>>(),
+                doc.doc.properties
+            );
             let key = {
                 let mut h = std::collections::hash_map::DefaultHasher::new();
                 format!("{state:?}{extra}{props}").hash(&mut h);
                 h.finish()
             };
             if ws.assemblies.get(id).is_none_or(|l| l.key != key) {
-                let builds = state.studios.iter().map(|(e, st)| (*e, cadrs_core::rebuild::request(st.features.clone()))).collect();
-                ws.assemblies.insert(*id, LiveAsm { key, state: Arc::new(state), builds, done: HashMap::new(), source: None });
+                let builds = state
+                    .studios
+                    .iter()
+                    .map(|(e, st)| (*e, cadrs_core::rebuild::request(st.features.clone())))
+                    .collect();
+                ws.assemblies.insert(
+                    *id,
+                    LiveAsm {
+                        key,
+                        state: Arc::new(state),
+                        builds,
+                        done: HashMap::new(),
+                        source: None,
+                    },
+                );
             }
         }
         if let Some(l) = ws.assemblies.get_mut(id) {
@@ -180,11 +223,18 @@ fn track_workspace(doc: Option<Res<ActiveDocument>>, kind: Res<ActiveKind>, mut 
                 }
             }
             if l.builds.is_empty() && l.source.is_none() {
-                l.source = Some(cadrs_core::drawing_assembly::source_of(&doc.doc, *id, &l.state, &l.done));
+                l.source = Some(cadrs_core::drawing_assembly::source_of(
+                    &doc.doc, *id, &l.state, &l.done,
+                ));
             }
         }
     }
-    let studios: Vec<ElementId> = d.sources.iter().map(|s| ElementId(s.element)).filter(|e| !asms.contains(e)).collect();
+    let studios: Vec<ElementId> = d
+        .sources
+        .iter()
+        .map(|s| ElementId(s.element))
+        .filter(|e| !asms.contains(e))
+        .collect();
     for id in &studios {
         let Some(el) = doc.doc.element(*id) else {
             ws.live.remove(id);
@@ -195,11 +245,21 @@ fn track_workspace(doc: Option<Res<ActiveDocument>>, kind: Res<ActiveKind>, mut 
         }
         // The state is compared only when the document changed (or on first sight).
         if dirty || !ws.live.contains_key(id) {
-            let Some(state) = StudioState::of(el) else { continue };
+            let Some(state) = StudioState::of(el) else {
+                continue;
+            };
             let key = state_key(&state);
             if ws.live.get(id).is_none_or(|l| l.key != key) {
                 let build = Some(cadrs_core::rebuild::request(state.features.clone()));
-                ws.live.insert(*id, Live { key, state: Arc::new(state), build, source: None });
+                ws.live.insert(
+                    *id,
+                    Live {
+                        key,
+                        state: Arc::new(state),
+                        build,
+                        source: None,
+                    },
+                );
             }
         }
         if let Some(l) = ws.live.get_mut(id)
@@ -235,12 +295,22 @@ pub fn start_update(world: &mut World) {
     }
     // Only BOM tables are out of date (P3C.5): their new rows, at once.
     if ws.stale.is_empty() {
-        let op = world
-            .get_resource::<ActiveDocument>()
-            .map(|doc| cadrs_core::drawing_source::with_bom_tables(&doc.doc, &d, cadrs_drawing::DrawingOp::Batch { ops: Vec::new(), label: "Update from this workspace".into() }));
+        let op = world.get_resource::<ActiveDocument>().map(|doc| {
+            cadrs_core::drawing_source::with_bom_tables(
+                &doc.doc,
+                &d,
+                cadrs_drawing::DrawingOp::Batch {
+                    ops: Vec::new(),
+                    label: "Update from this workspace".into(),
+                },
+            )
+        });
         if let Some(op) = op
             && let Some(mut doc) = world.get_resource_mut::<ActiveDocument>()
-            && let Err(e) = doc.execute(&cadrs_core::commands::EditDrawing { element: drawing, op })
+            && let Err(e) = doc.execute(&cadrs_core::commands::EditDrawing {
+                element: drawing,
+                op,
+            })
         {
             warn!("Update refused: {e}");
         }
@@ -262,7 +332,9 @@ pub fn start_update(world: &mut World) {
             asm_work.push((id, v.clone(), live.state.clone()));
             continue;
         }
-        let Some(live) = ws.live.get(&studio) else { continue };
+        let Some(live) = ws.live.get(&studio) else {
+            continue;
+        };
         let Some(src) = &live.source else { continue };
         if !sources.iter().any(|s| s.element == src.element) {
             sources.push(src.clone());
@@ -276,7 +348,10 @@ pub fn start_update(world: &mut World) {
             use cadrs_core::drawing_assembly::{AssemblyState, request};
             let old = match cache.geometry(&v) {
                 Some(g) => Old::Known(Some(g)),
-                None => match d.source(v.reference.element).and_then(|s| AssemblyState::parse(&s.snapshot)) {
+                None => match d
+                    .source(v.reference.element)
+                    .and_then(|s| AssemblyState::parse(&s.snapshot))
+                {
                     Some(st) => Old::Pending(request(st, &v)),
                     None => Old::Known(None),
                 },
@@ -291,17 +366,32 @@ pub fn start_update(world: &mut World) {
             // (a view on a sheet not shown since the drawing was opened).
             let old = match cache.geometry(&v) {
                 Some(g) => Old::Known(Some(g)),
-                None => match d.source(v.reference.element).and_then(|s| StudioState::parse(&s.snapshot)) {
-                    Some(st) => Old::Pending(cadrs_core::views::request(st.features.clone(), ViewCache::request(&st, &v))),
+                None => match d
+                    .source(v.reference.element)
+                    .and_then(|s| StudioState::parse(&s.snapshot))
+                {
+                    Some(st) => Old::Pending(cadrs_core::views::request(
+                        st.features.clone(),
+                        ViewCache::request(&st, &v),
+                    )),
                     None => Old::Known(None),
                 },
             };
             let req = ViewCache::request(&state, &v);
-            (id, old, cadrs_core::views::request(state.features.clone(), req))
+            (
+                id,
+                old,
+                cadrs_core::views::request(state.features.clone(), req),
+            )
         })
         .collect();
     views.extend(asm_views);
-    world.resource_mut::<Workspace>().pending = Some(PendingUpdate { drawing, sources, views, done: Vec::new() });
+    world.resource_mut::<Workspace>().pending = Some(PendingUpdate {
+        drawing,
+        sources,
+        views,
+        done: Vec::new(),
+    });
 }
 
 /// Applies an update once its projections are done.
@@ -340,14 +430,25 @@ fn drive_update(world: &mut World) {
     if !finished {
         return;
     }
-    let Some(p) = world.resource_mut::<Workspace>().pending.take() else { return };
-    let Some(d) = world.get_resource::<ActiveDocument>().and_then(|doc| doc.doc.element(p.drawing)?.drawing_data().cloned()) else {
+    let Some(p) = world.resource_mut::<Workspace>().pending.take() else {
+        return;
+    };
+    let Some(d) = world
+        .get_resource::<ActiveDocument>()
+        .and_then(|doc| doc.doc.element(p.drawing)?.drawing_data().cloned())
+    else {
         return;
     };
     let models: Vec<(ViewId, Option<&dyn ViewModel>, &dyn ViewModel)> = p
         .done
         .iter()
-        .map(|(id, old, new)| (*id, old.as_deref().map(|g| g as &dyn ViewModel), &**new as &dyn ViewModel))
+        .map(|(id, old, new)| {
+            (
+                *id,
+                old.as_deref().map(|g| g as &dyn ViewModel),
+                &**new as &dyn ViewModel,
+            )
+        })
         .collect();
     let op = cadrs_drawing::update::update_op(&d, p.sources.clone(), &models);
     // With the BOM tables of the assemblies (P3C.5, D14.8), in the same step.
@@ -362,13 +463,20 @@ fn drive_update(world: &mut World) {
             if let Some((_, v)) = d.view(*id)
                 && let Some(src) = p.sources.iter().find(|s| s.element == v.reference.element)
             {
-                let key = if src.assembly.is_some() { ViewCache::assembly_key_with(&src.snapshot, v) } else { ViewCache::key_with(&src.snapshot, v) };
+                let key = if src.assembly.is_some() {
+                    ViewCache::assembly_key_with(&src.snapshot, v)
+                } else {
+                    ViewCache::key_with(&src.snapshot, v)
+                };
                 cache.insert(key, g.clone());
             }
         }
     }
     if let Some(mut doc) = world.get_resource_mut::<ActiveDocument>()
-        && let Err(e) = doc.execute(&cadrs_core::commands::EditDrawing { element: p.drawing, op })
+        && let Err(e) = doc.execute(&cadrs_core::commands::EditDrawing {
+            element: p.drawing,
+            op,
+        })
     {
         warn!("Update refused: {e}");
     }
@@ -391,7 +499,13 @@ pub fn gold() -> Color {
 #[allow(clippy::type_complexity)]
 fn sync_update_button(
     ws: Res<Workspace>,
-    mut q: Query<(Entity, &Name, &mut cadrs_ui::Visuals, Option<&NormalVisuals>, Option<&Tooltip>)>,
+    mut q: Query<(
+        Entity,
+        &Name,
+        &mut cadrs_ui::Visuals,
+        Option<&NormalVisuals>,
+        Option<&Tooltip>,
+    )>,
     mut commands: Commands,
 ) {
     for (e, name, mut vis, normal, tip) in &mut q {
@@ -406,7 +520,12 @@ fn sync_update_button(
         // Gold glyph on the usual button (`ex3-step8.png`: the icon itself turns gold).
         let want = if n > 0 {
             let mut v = normal.0.clone();
-            v.foreground = cadrs_ui::StateColors::new(gold(), Color::srgb_u8(0xc9, 0x8e, 0x00), Color::srgb_u8(0xc9, 0x8e, 0x00), gold());
+            v.foreground = cadrs_ui::StateColors::new(
+                gold(),
+                Color::srgb_u8(0xc9, 0x8e, 0x00),
+                Color::srgb_u8(0xc9, 0x8e, 0x00),
+                gold(),
+            );
             v
         } else {
             normal.0.clone()
@@ -425,7 +544,11 @@ fn sync_update_button(
                     1 => "1 view, ".to_string(),
                     v => format!("{v} views, "),
                 };
-                let tables = if b == 1 { "1 BOM table".to_string() } else { format!("{b} BOM tables") };
+                let tables = if b == 1 {
+                    "1 BOM table".to_string()
+                } else {
+                    format!("{b} BOM tables")
+                };
                 format!("Update from this workspace: {views}{tables} out of date (Ctrl+Q)")
             }
             (1, _) => "Update from this workspace: 1 view is out of date (Ctrl+Q)".to_string(),

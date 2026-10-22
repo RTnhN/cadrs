@@ -33,7 +33,6 @@
 //!   right-click or a double-click. Zones are poured again with every change to the board
 //!   (in the same undo step), so they always show filled.
 
-use cadrs_ui::ShortcutKey;
 use bevy::input::ButtonState;
 use bevy::input::keyboard::KeyboardInput;
 use bevy::prelude::*;
@@ -41,6 +40,7 @@ use cadrs_eda::Design;
 use cadrs_eda::board_edit::{self as be, BoardItem};
 use cadrs_eda::layer::Layer;
 use cadrs_eda::units::{Nm, Pt, mm};
+use cadrs_ui::ShortcutKey;
 
 use super::ui::{self, StripAction};
 use super::{EdaClick, EdaPointer, Mode, Preview, SceneInputs};
@@ -49,24 +49,74 @@ use crate::AppState;
 const STRIP: ui::StripSpec = &[
     Some(("pcb-select", "drag-handle", "Select (Esc)", "select")),
     None,
-    Some(("pcb-update", "update-pcb", "Update PCB from schematic (F8)", "update")),
+    Some((
+        "pcb-update",
+        "update-pcb",
+        "Update PCB from schematic (F8)",
+        "update",
+    )),
     Some(("pcb-board-setup", "settings", "Board setup", "setup")),
-    Some(("pcb-outline", "board-outline", "Draw the board outline", "outline")),
+    Some((
+        "pcb-outline",
+        "board-outline",
+        "Draw the board outline",
+        "outline",
+    )),
     Some(("pcb-route", "route-track", "Route tracks (X)", "route")),
-    Some(("pcb-autoroute", "ratsnest", "Auto-route the unconnected nets", "autoroute")),
+    Some((
+        "pcb-autoroute",
+        "ratsnest",
+        "Auto-route the unconnected nets",
+        "autoroute",
+    )),
     Some(("pcb-zone", "copper-zone", "Add a filled zone (Z)", "zone")),
     Some(("pcb-keepout", "keepout-zone", "Add a keep-out", "keepout")),
-    Some(("pcb-draw-line", "line", "Draw lines on the drawing layer", "line")),
-    Some(("pcb-draw-rect", "corner-rectangle", "Draw a rectangle on the drawing layer", "rect")),
-    Some(("pcb-draw-circle", "center-circle", "Draw a circle on the drawing layer", "circle")),
-    Some(("pcb-draw-polygon", "inscribed-polygon", "Draw a filled polygon on the drawing layer (a copper area on a copper layer)", "polygon")),
+    Some((
+        "pcb-draw-line",
+        "line",
+        "Draw lines on the drawing layer",
+        "line",
+    )),
+    Some((
+        "pcb-draw-rect",
+        "corner-rectangle",
+        "Draw a rectangle on the drawing layer",
+        "rect",
+    )),
+    Some((
+        "pcb-draw-circle",
+        "center-circle",
+        "Draw a circle on the drawing layer",
+        "circle",
+    )),
+    Some((
+        "pcb-draw-polygon",
+        "inscribed-polygon",
+        "Draw a filled polygon on the drawing layer (a copper area on a copper layer)",
+        "polygon",
+    )),
     Some(("pcb-text", "text", "Add text on the drawing layer", "text")),
-    Some(("pcb-graphic", "image", "Import a graphic (SVG) onto the drawing layer", "graphic")),
+    Some((
+        "pcb-graphic",
+        "image",
+        "Import a graphic (SVG) onto the drawing layer",
+        "graphic",
+    )),
     Some(("pcb-measure", "ruler", "Measure (Ctrl+Shift+M)", "measure")),
-    Some(("pcb-layer", "layers", "Switch the active layer (front / back)", "layer")),
+    Some((
+        "pcb-layer",
+        "layers",
+        "Switch the active layer (front / back)",
+        "layer",
+    )),
     None,
     Some(("pcb-drc", "drc", "Design rules checker", "drc")),
-    Some(("pcb-plot", "plot-gerbers", "Plot fabrication outputs", "plot")),
+    Some((
+        "pcb-plot",
+        "plot-gerbers",
+        "Plot fabrication outputs",
+        "plot",
+    )),
 ];
 
 #[derive(Clone, Debug, Default)]
@@ -76,9 +126,17 @@ pub enum Tool {
     /// The outline's first corner, once clicked.
     Outline(Option<Pt>),
     /// A route: its points so far on each layer run, the layer now, its net.
-    Route { runs: Vec<(Layer, Vec<Pt>)>, vias: Vec<Pt>, net: String },
+    Route {
+        runs: Vec<(Layer, Vec<Pt>)>,
+        vias: Vec<Pt>,
+        net: String,
+    },
     /// A zone of `net` on `layer`: its corners so far.
-    Zone { net: String, layer: Layer, pts: Vec<Pt> },
+    Zone {
+        net: String,
+        layer: Layer,
+        pts: Vec<Pt>,
+    },
     /// A line, rectangle or circle on the drawing layer: its first point once clicked.
     Draw { kind: DrawKind, start: Option<Pt> },
     /// A filled polygon on the drawing layer: its corners so far (a double-click ends).
@@ -89,7 +147,11 @@ pub enum Tool {
     /// drawing layer with the next click.
     Graphic(Vec<Vec<Pt>>),
     /// A keep-out on `layers` forbidding what `rules` says: its corners so far.
-    Keepout { layers: cadrs_eda::layer::LayerSet, rules: cadrs_eda::board::Keepout, pts: Vec<Pt> },
+    Keepout {
+        layers: cadrs_eda::layer::LayerSet,
+        rules: cadrs_eda::board::Keepout,
+        pts: Vec<Pt>,
+    },
     /// The ruler: its start, and its end once a second click froze it.
     Measure { a: Option<Pt>, b: Option<Pt> },
 }
@@ -109,9 +171,18 @@ impl Tool {
             Tool::Outline(_) => "outline",
             Tool::Route { .. } => "route",
             Tool::Zone { .. } => "zone",
-            Tool::Draw { kind: DrawKind::Line, .. } => "line",
-            Tool::Draw { kind: DrawKind::Rect, .. } => "rect",
-            Tool::Draw { kind: DrawKind::Circle, .. } => "circle",
+            Tool::Draw {
+                kind: DrawKind::Line,
+                ..
+            } => "line",
+            Tool::Draw {
+                kind: DrawKind::Rect,
+                ..
+            } => "rect",
+            Tool::Draw {
+                kind: DrawKind::Circle,
+                ..
+            } => "circle",
             Tool::Polygon(_) => "polygon",
             Tool::Text(_) => "text",
             Tool::Graphic(_) => "graphic",
@@ -185,10 +256,30 @@ pub struct LayoutState {
 
 impl Default for LayoutState {
     fn default() -> Self {
-        LayoutState { facing: None, pick: None, tool: Tool::Select, selection: vec![], hover: None, hot_corner: None, handle: mm(0.25), boxing: None, box_preview: vec![], moving: None, active: Layer::TopCopper, expanded: false, hidden: vec![], dim: false, layers_open: false, draw_layer: Layer::TopSilk, net: None, track_width: None, text_style: TextLook::default(), exact: None }
+        LayoutState {
+            facing: None,
+            pick: None,
+            tool: Tool::Select,
+            selection: vec![],
+            hover: None,
+            hot_corner: None,
+            handle: mm(0.25),
+            boxing: None,
+            box_preview: vec![],
+            moving: None,
+            active: Layer::TopCopper,
+            expanded: false,
+            hidden: vec![],
+            dim: false,
+            layers_open: false,
+            draw_layer: Layer::TopSilk,
+            net: None,
+            track_width: None,
+            text_style: TextLook::default(),
+            exact: None,
+        }
     }
 }
-
 
 /// How the Text tool writes.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -200,7 +291,11 @@ pub struct TextLook {
 
 impl Default for TextLook {
     fn default() -> Self {
-        TextLook { height: 1.0, thickness: 0.15, align: cadrs_eda::graphics::HAlign::Center }
+        TextLook {
+            height: 1.0,
+            thickness: 0.15,
+            align: cadrs_eda::graphics::HAlign::Center,
+        }
     }
 }
 
@@ -236,19 +331,31 @@ fn start_autoroute(w: &mut World) {
     }
     let board = d.board.clone();
     let routed = d.board;
-    let task = bevy::tasks::AsyncComputeTaskPool::get().spawn(async move { cadrs_router::route(&routed, &cadrs_router::Options::default()) });
-    w.insert_resource(Autorouting { task, board, started: std::time::Instant::now() });
+    let task = bevy::tasks::AsyncComputeTaskPool::get()
+        .spawn(async move { cadrs_router::route(&routed, &cadrs_router::Options::default()) });
+    w.insert_resource(Autorouting {
+        task,
+        board,
+        started: std::time::Instant::now(),
+    });
     ui::toast(w, "Auto-routing…");
 }
 
 /// The auto-route's tracks and vias put down when it finishes (one undo step), with what it
 /// left unrouted; not if the board changed meanwhile.
 fn poll_autoroute(world: &mut World) {
-    let Some(mut job) = world.get_resource_mut::<Autorouting>() else { return };
-    let Some(out) = bevy::tasks::futures::check_ready(&mut job.task) else { return };
+    let Some(mut job) = world.get_resource_mut::<Autorouting>() else {
+        return;
+    };
+    let Some(out) = bevy::tasks::futures::check_ready(&mut job.task) else {
+        return;
+    };
     let job = world.remove_resource::<Autorouting>().expect("just polled");
     if board_of(world).map(|d| d.board).as_ref() != Some(&job.board) {
-        ui::toast(world, "The board changed while it was being auto-routed: nothing was put down (auto-route again)");
+        ui::toast(
+            world,
+            "The board changed while it was being auto-routed: nothing was put down (auto-route again)",
+        );
         return;
     }
     let took = job.started.elapsed().as_secs_f64();
@@ -258,11 +365,22 @@ fn poll_autoroute(world: &mut World) {
             Ok(())
         });
     }
-    let on = out.gpu.as_deref().map_or_else(|| "the CPU".to_string(), |g| g.to_string());
-    let mut msg = format!("Auto-routed in {took:.1} s on {on}: {} tracks, {} vias", out.tracks.len(), out.vias.len());
+    let on = out
+        .gpu
+        .as_deref()
+        .map_or_else(|| "the CPU".to_string(), |g| g.to_string());
+    let mut msg = format!(
+        "Auto-routed in {took:.1} s on {on}: {} tracks, {} vias",
+        out.tracks.len(),
+        out.vias.len()
+    );
     if !out.unrouted.is_empty() {
         let shown: Vec<&str> = out.unrouted.iter().take(6).map(|s| s.as_str()).collect();
-        msg.push_str(&format!("; not fully routed: {}{}", shown.join(", "), if out.unrouted.len() > 6 { ", …" } else { "" }));
+        msg.push_str(&format!(
+            "; not fully routed: {}{}",
+            shown.join(", "),
+            if out.unrouted.len() > 6 { ", …" } else { "" }
+        ));
     }
     ui::toast(world, &msg);
 }
@@ -272,20 +390,36 @@ fn pick_graphic(w: &mut World) {
     let theme = w.resource::<cadrs_ui::prelude::Theme>().clone();
     let dir = std::env::current_dir().unwrap_or_default();
     let mut c = w.commands();
-    cadrs_ui::file_picker::open_file_picker(&mut c, &theme, "eda-graphic-picker", "Import a graphic", "eda-graphic-file", dir, &["svg"]);
+    cadrs_ui::file_picker::open_file_picker(
+        &mut c,
+        &theme,
+        "eda-graphic-picker",
+        "Import a graphic",
+        "eda-graphic-file",
+        dir,
+        &["svg"],
+    );
     w.flush();
 }
 
-fn on_graphic_picked(mut msgs: MessageReader<cadrs_ui::file_picker::FilePicked>, mut commands: Commands) {
+fn on_graphic_picked(
+    mut msgs: MessageReader<cadrs_ui::file_picker::FilePicked>,
+    mut commands: Commands,
+) {
     for m in msgs.read() {
         if m.tag != "eda-graphic-file" {
             continue;
         }
         let path = m.path.clone();
         commands.queue(move |w: &mut World| {
-            let polys = std::fs::read_to_string(&path).map_err(|e| e.to_string()).and_then(|t| cadrs_eda::graphic_import::svg_polygons(&t));
+            let polys = std::fs::read_to_string(&path)
+                .map_err(|e| e.to_string())
+                .and_then(|t| cadrs_eda::graphic_import::svg_polygons(&t));
             match polys {
-                Ok(p) => set_tool(w, Tool::Graphic(cadrs_eda::graphic_import::placed_at(&p, Pt::ZERO))),
+                Ok(p) => set_tool(
+                    w,
+                    Tool::Graphic(cadrs_eda::graphic_import::placed_at(&p, Pt::ZERO)),
+                ),
                 Err(e) => ui::toast(w, &format!("{}: {e}", path.display())),
             }
         });
@@ -294,7 +428,22 @@ fn on_graphic_picked(mut msgs: MessageReader<cadrs_ui::file_picker::FilePicked>,
 pub fn register(app: &mut App) {
     app.init_resource::<LayoutState>().add_systems(
         Update,
-        (strip, on_strip, on_click, on_keys, on_graphic_picked, follow_pointer, track_hover, preview_box, poll_autoroute, publish, draw_box).chain().after(super::navigate).run_if(in_state(AppState::Document)),
+        (
+            strip,
+            on_strip,
+            on_click,
+            on_keys,
+            on_graphic_picked,
+            follow_pointer,
+            track_hover,
+            preview_box,
+            poll_autoroute,
+            publish,
+            draw_box,
+        )
+            .chain()
+            .after(super::navigate)
+            .run_if(in_state(AppState::Document)),
     );
     super::lay_dialogs::register(app);
 }
@@ -306,7 +455,9 @@ fn strip(world: &mut World) {
 }
 
 fn shown(w: &World) -> bool {
-    w.resource::<super::Eda2d>().0.is_some_and(|(_, _, m)| m == Mode::Layout)
+    w.resource::<super::Eda2d>()
+        .0
+        .is_some_and(|(_, _, m)| m == Mode::Layout)
 }
 
 /// The routing grid.
@@ -321,7 +472,9 @@ fn snap(p: Pt, g: Nm) -> Pt {
 fn tolerance(world: &World) -> Nm {
     let ui = world.resource::<super::EdaUi>();
     let key = world.resource::<super::Eda2d>().0;
-    let scale = key.and_then(|k| ui.views.get(&k)).map_or(4.0, |v| v.0.scale);
+    let scale = key
+        .and_then(|k| ui.views.get(&k))
+        .map_or(4.0, |v| v.0.scale);
     mm(4.0 / scale)
 }
 
@@ -342,7 +495,10 @@ pub fn run_action(w: &mut World, action: &str) {
         // A linked outline: what is drawn now is a cut-out in it (the sketch keeps the outer
         // edge; its shapes can't be changed here).
         "outline" if !linked_outline(w).is_empty() => {
-            let note = format!("{}. A rectangle drawn now cuts out of the board", outline_link_note(w));
+            let note = format!(
+                "{}. A rectangle drawn now cuts out of the board",
+                outline_link_note(w)
+            );
             ui::toast(w, &note);
             set_tool(w, Tool::Outline(None));
         }
@@ -356,11 +512,36 @@ pub fn run_action(w: &mut World, action: &str) {
         "autoroute" => start_autoroute(w),
         "zone" => {
             let layer = w.resource::<LayoutState>().active;
-            set_tool(w, Tool::Zone { net: String::new(), layer, pts: vec![] });
+            set_tool(
+                w,
+                Tool::Zone {
+                    net: String::new(),
+                    layer,
+                    pts: vec![],
+                },
+            );
         }
-        "line" => set_tool(w, Tool::Draw { kind: DrawKind::Line, start: None }),
-        "rect" => set_tool(w, Tool::Draw { kind: DrawKind::Rect, start: None }),
-        "circle" => set_tool(w, Tool::Draw { kind: DrawKind::Circle, start: None }),
+        "line" => set_tool(
+            w,
+            Tool::Draw {
+                kind: DrawKind::Line,
+                start: None,
+            },
+        ),
+        "rect" => set_tool(
+            w,
+            Tool::Draw {
+                kind: DrawKind::Rect,
+                start: None,
+            },
+        ),
+        "circle" => set_tool(
+            w,
+            Tool::Draw {
+                kind: DrawKind::Circle,
+                start: None,
+            },
+        ),
         "polygon" => set_tool(w, Tool::Polygon(vec![])),
         "text" => super::lay_dialogs::open_text(w),
         "graphic" => pick_graphic(w),
@@ -368,7 +549,11 @@ pub fn run_action(w: &mut World, action: &str) {
         "measure" => set_tool(w, Tool::Measure { a: None, b: None }),
         "layer" => {
             let mut s = w.resource_mut::<LayoutState>();
-            s.active = if s.active == Layer::TopCopper { Layer::BottomCopper } else { Layer::TopCopper };
+            s.active = if s.active == Layer::TopCopper {
+                Layer::BottomCopper
+            } else {
+                Layer::TopCopper
+            };
         }
         "drc" => super::lay_dialogs::open_drc(w),
         "plot" => super::lay_dialogs::open_plot(w),
@@ -378,19 +563,42 @@ pub fn run_action(w: &mut World, action: &str) {
 
 /// The shown board's outline shapes a sketch drives, if its outline follows one.
 fn linked_outline(w: &World) -> Vec<uuid::Uuid> {
-    let Some((el, b, _)) = w.resource::<super::Eda2d>().board() else { return vec![] };
+    let Some((el, b, _)) = w.resource::<super::Eda2d>().board() else {
+        return vec![];
+    };
     let doc = w.resource::<crate::ActiveDocument>();
-    doc.doc.element(el).and_then(|e| e.pcb()).and_then(|s| s.board(b)).and_then(|b| b.outline_link.as_ref()).map(|l| l.shapes.clone()).unwrap_or_default()
+    doc.doc
+        .element(el)
+        .and_then(|e| e.pcb())
+        .and_then(|s| s.board(b))
+        .and_then(|b| b.outline_link.as_ref())
+        .map(|l| l.shapes.clone())
+        .unwrap_or_default()
 }
 
 /// "The outline follows Sketch 1 in Part Studio 1": edit it there, or break the link.
 fn outline_link_note(w: &World) -> String {
-    let Some((el, b, _)) = w.resource::<super::Eda2d>().board() else { return String::new() };
+    let Some((el, b, _)) = w.resource::<super::Eda2d>().board() else {
+        return String::new();
+    };
     let doc = &w.resource::<crate::ActiveDocument>().doc;
-    let Some(link) = doc.element(el).and_then(|e| e.pcb()).and_then(|s| s.board(b)).and_then(|b| b.outline_link.clone()) else { return String::new() };
+    let Some(link) = doc
+        .element(el)
+        .and_then(|e| e.pcb())
+        .and_then(|s| s.board(b))
+        .and_then(|b| b.outline_link.clone())
+    else {
+        return String::new();
+    };
     let studio = doc.element(link.element);
-    let sketch = studio.and_then(|e| e.feature(link.sketch)).map(|f| f.name.clone()).unwrap_or_default();
-    format!("The outline follows {sketch} in {}: edit the sketch, or break the link (the board's Derived feature's menu)", studio.map(|e| e.name.clone()).unwrap_or_default())
+    let sketch = studio
+        .and_then(|e| e.feature(link.sketch))
+        .map(|f| f.name.clone())
+        .unwrap_or_default();
+    format!(
+        "The outline follows {sketch} in {}: edit the sketch, or break the link (the board's Derived feature's menu)",
+        studio.map(|e| e.name.clone()).unwrap_or_default()
+    )
 }
 
 pub fn set_tool(w: &mut World, tool: Tool) {
@@ -409,14 +617,24 @@ fn board_of(w: &World) -> Option<Design> {
 /// A footprint of the shown board as stored (a copy of it alone).
 fn board_of_footprint(w: &World, fp: uuid::Uuid) -> Option<cadrs_eda::board::PlacedFootprint> {
     let (el, b, _) = w.resource::<super::Eda2d>().board()?;
-    super::design(w.resource::<crate::ActiveDocument>(), el, b)?.board.footprints.iter().find(|f| f.id == fp).cloned()
+    super::design(w.resource::<crate::ActiveDocument>(), el, b)?
+        .board
+        .footprints
+        .iter()
+        .find(|f| f.id == fp)
+        .cloned()
 }
 
 /// A point snapped to a pad's centre when on a pad, else to the routing grid.
 fn snap_to_copper(d: &Design, p: Pt) -> Pt {
     match be::pad_at(&d.board, p) {
         Some((fi, pi)) => be::pad_center(&d.board, fi, pi),
-        None => d.board.vias.iter().find(|v| v.at.dist(p) <= v.diameter as f64 / 2.0).map_or(snap(p, grid()), |v| v.at),
+        None => d
+            .board
+            .vias
+            .iter()
+            .find(|v| v.at.dist(p) <= v.diameter as f64 / 2.0)
+            .map_or(snap(p, grid()), |v| v.at),
     }
 }
 
@@ -427,7 +645,14 @@ fn start_route(w: &mut World, at: Pt) {
     let layer = be::start_layer(&d.board, start, active);
     let net = be::net_at(&d.board, start, layer);
     w.resource_mut::<LayoutState>().active = layer;
-    set_tool(w, Tool::Route { runs: vec![(layer, vec![start])], vias: vec![], net });
+    set_tool(
+        w,
+        Tool::Route {
+            runs: vec![(layer, vec![start])],
+            vias: vec![],
+            net,
+        },
+    );
 }
 
 /// Lays the route as tracks and vias (one undo step).
@@ -479,7 +704,12 @@ fn on_click(mut reader: MessageReader<EdaClick>, mut commands: Commands) {
 fn press(w: &mut World, at: Pt, shift: bool) {
     let pick = w.resource_mut::<LayoutState>().pick.take();
     // A move started with M or D ends with a click.
-    if let Some(m) = w.resource::<LayoutState>().moving.clone().filter(|m| !m.on_release) {
+    if let Some(m) = w
+        .resource::<LayoutState>()
+        .moving
+        .clone()
+        .filter(|m| !m.on_release)
+    {
         finish_move(w, &m, at);
         return;
     }
@@ -496,10 +726,21 @@ fn press(w: &mut World, at: Pt, shift: bool) {
                 if !s.selection.contains(&item) {
                     s.selection = vec![item];
                 }
-                s.moving = Some(Moving { fp: uuid::Uuid::nil(), from, drag: false, on_release: true, items: vec![item], corner: Some((ring, i)), points: None, track: None });
+                s.moving = Some(Moving {
+                    fp: uuid::Uuid::nil(),
+                    from,
+                    drag: false,
+                    on_release: true,
+                    items: vec![item],
+                    corner: Some((ring, i)),
+                    points: None,
+                    track: None,
+                });
                 return;
             }
-            let hit = pick.map(BoardItem::Footprint).or_else(|| be::hit_from(&d.board, at, tol, w.resource::<LayoutState>().facing));
+            let hit = pick
+                .map(BoardItem::Footprint)
+                .or_else(|| be::hit_from(&d.board, at, tol, w.resource::<LayoutState>().facing));
             let mut s = w.resource_mut::<LayoutState>();
             s.expanded = false;
             match hit {
@@ -511,7 +752,16 @@ fn press(w: &mut World, at: Pt, shift: bool) {
                 // Pressing on one of several selected items drags them all.
                 Some(h) if s.selection.len() > 1 && s.selection.contains(&h) => {
                     let items = s.selection.clone();
-                    s.moving = Some(Moving { fp: uuid::Uuid::nil(), from: snap(at, grid()), drag: false, on_release: true, items, corner: None, points: None, track: None });
+                    s.moving = Some(Moving {
+                        fp: uuid::Uuid::nil(),
+                        from: snap(at, grid()),
+                        drag: false,
+                        on_release: true,
+                        items,
+                        corner: None,
+                        points: None,
+                        track: None,
+                    });
                 }
                 Some(h) => {
                     // Pressing on a footprint starts dragging it (from the grid point pressed,
@@ -519,15 +769,47 @@ fn press(w: &mut World, at: Pt, shift: bool) {
                     // the tracks joined to it stretching, or near one of its ends that end
                     // alone (it lands on the grid point let go at); on a via, the via and the
                     // track ends on it; on a selected zone, shape or text, that.
-                    let drag = |net: &str, points: Vec<Pt>, from: Pt| Moving { fp: uuid::Uuid::nil(), from, drag: false, on_release: true, items: vec![], corner: None, points: Some((net.to_string(), points)), track: None };
+                    let drag = |net: &str, points: Vec<Pt>, from: Pt| Moving {
+                        fp: uuid::Uuid::nil(),
+                        from,
+                        drag: false,
+                        on_release: true,
+                        items: vec![],
+                        corner: None,
+                        points: Some((net.to_string(), points)),
+                        track: None,
+                    };
                     match h {
-                        BoardItem::Footprint(fp) => s.moving = Some(Moving { fp, from: snap(at, grid()), drag: false, on_release: true, items: vec![], corner: None, points: None, track: None }),
+                        BoardItem::Footprint(fp) => {
+                            s.moving = Some(Moving {
+                                fp,
+                                from: snap(at, grid()),
+                                drag: false,
+                                on_release: true,
+                                items: vec![],
+                                corner: None,
+                                points: None,
+                                track: None,
+                            })
+                        }
                         BoardItem::Track(id) => {
                             if let Some(t) = d.board.tracks.iter().find(|t| t.id == id) {
-                                let end = [t.a, t.b].into_iter().filter(|e| e.dist(at) <= (tol * 3 / 2) as f64).min_by(|a, b| a.dist(at).total_cmp(&b.dist(at)));
+                                let end = [t.a, t.b]
+                                    .into_iter()
+                                    .filter(|e| e.dist(at) <= (tol * 3 / 2) as f64)
+                                    .min_by(|a, b| a.dist(at).total_cmp(&b.dist(at)));
                                 s.moving = Some(match end {
                                     Some(e) => drag(&t.net, vec![e], e),
-                                    None => Moving { fp: uuid::Uuid::nil(), from: snap(at, grid()), drag: false, on_release: true, items: vec![], corner: None, points: None, track: Some(id) },
+                                    None => Moving {
+                                        fp: uuid::Uuid::nil(),
+                                        from: snap(at, grid()),
+                                        drag: false,
+                                        on_release: true,
+                                        items: vec![],
+                                        corner: None,
+                                        points: None,
+                                        track: Some(id),
+                                    },
                                 });
                             }
                         }
@@ -536,7 +818,18 @@ fn press(w: &mut World, at: Pt, shift: bool) {
                                 s.moving = Some(drag(&v.net, vec![v.at], v.at));
                             }
                         }
-                        _ if s.selection.contains(&h) => s.moving = Some(Moving { fp: uuid::Uuid::nil(), from: snap(at, grid()), drag: false, on_release: true, items: vec![h], corner: None, points: None, track: None }),
+                        _ if s.selection.contains(&h) => {
+                            s.moving = Some(Moving {
+                                fp: uuid::Uuid::nil(),
+                                from: snap(at, grid()),
+                                drag: false,
+                                on_release: true,
+                                items: vec![h],
+                                corner: None,
+                                points: None,
+                                track: None,
+                            })
+                        }
                         _ => {}
                     }
                     s.selection = vec![h];
@@ -550,7 +843,9 @@ fn press(w: &mut World, at: Pt, shift: bool) {
                 }
             }
         }
-        Tool::Outline(None) => w.resource_mut::<LayoutState>().tool = Tool::Outline(Some(snap(at, mm(1.0)))),
+        Tool::Outline(None) => {
+            w.resource_mut::<LayoutState>().tool = Tool::Outline(Some(snap(at, mm(1.0))))
+        }
         Tool::Outline(Some(a)) => {
             let b = snap(at, mm(1.0));
             ui::commit(w, "Board outline", |d| {
@@ -559,21 +854,36 @@ fn press(w: &mut World, at: Pt, shift: bool) {
             });
             set_tool(w, Tool::Select);
         }
-        Tool::Route { mut runs, vias, net } => {
+        Tool::Route {
+            mut runs,
+            vias,
+            net,
+        } => {
             let to = snap_to_copper(&d, at);
             let (layer, pts) = runs.last_mut().unwrap();
             let from = *pts.last().unwrap();
             pts.extend(be::posture(from, to, false).into_iter().skip(1));
             let layer = *layer;
             // Ending on copper of the net (a pad, a via) finishes the route.
-            let ends = to != from && be::pad_at(&d.board, to).is_some_and(|(fi, pi)| d.board.footprints[fi].footprint.pads[pi].net.as_deref() == Some(net.as_str()) && d.board.footprints[fi].placement.layers(d.board.footprints[fi].footprint.pads[pi].layers).contains(layer));
+            let ends = to != from
+                && be::pad_at(&d.board, to).is_some_and(|(fi, pi)| {
+                    d.board.footprints[fi].footprint.pads[pi].net.as_deref() == Some(net.as_str())
+                        && d.board.footprints[fi]
+                            .placement
+                            .layers(d.board.footprints[fi].footprint.pads[pi].layers)
+                            .contains(layer)
+                });
             if ends {
                 finish_route(w, runs, vias, net);
             } else {
                 w.resource_mut::<LayoutState>().tool = Tool::Route { runs, vias, net };
             }
         }
-        Tool::Zone { net, layer, mut pts } => {
+        Tool::Zone {
+            net,
+            layer,
+            mut pts,
+        } => {
             pts.push(snap(at, grid()));
             w.resource_mut::<LayoutState>().tool = Tool::Zone { net, layer, pts };
         }
@@ -581,8 +891,16 @@ fn press(w: &mut World, at: Pt, shift: bool) {
             pts.push(snap(at, grid()));
             w.resource_mut::<LayoutState>().tool = Tool::Polygon(pts);
         }
-        Tool::Draw { kind, start: None } => w.resource_mut::<LayoutState>().tool = Tool::Draw { kind, start: Some(snap(at, grid())) },
-        Tool::Draw { kind, start: Some(a) } => {
+        Tool::Draw { kind, start: None } => {
+            w.resource_mut::<LayoutState>().tool = Tool::Draw {
+                kind,
+                start: Some(snap(at, grid())),
+            }
+        }
+        Tool::Draw {
+            kind,
+            start: Some(a),
+        } => {
             let b = snap(at, grid());
             if a == b {
                 return;
@@ -593,7 +911,10 @@ fn press(w: &mut World, at: Pt, shift: bool) {
                 Ok(())
             });
             // Lines chain on from where the last one ended.
-            w.resource_mut::<LayoutState>().tool = Tool::Draw { kind, start: (kind == DrawKind::Line).then_some(b) };
+            w.resource_mut::<LayoutState>().tool = Tool::Draw {
+                kind,
+                start: (kind == DrawKind::Line).then_some(b),
+            };
         }
         Tool::Text(text) => {
             let layer = w.resource::<LayoutState>().draw_layer;
@@ -609,12 +930,20 @@ fn press(w: &mut World, at: Pt, shift: bool) {
             let layer = w.resource::<LayoutState>().draw_layer;
             let at = snap(at, grid());
             ui::commit(w, "Import graphic", |d| {
-                be::add_artwork(&mut d.board, &cadrs_eda::graphic_import::placed_at(&polys, at), layer);
+                be::add_artwork(
+                    &mut d.board,
+                    &cadrs_eda::graphic_import::placed_at(&polys, at),
+                    layer,
+                );
                 Ok(())
             });
             set_tool(w, Tool::Select);
         }
-        Tool::Keepout { layers, rules, mut pts } => {
+        Tool::Keepout {
+            layers,
+            rules,
+            mut pts,
+        } => {
             pts.push(snap(at, grid()));
             w.resource_mut::<LayoutState>().tool = Tool::Keepout { layers, rules, pts };
         }
@@ -622,8 +951,14 @@ fn press(w: &mut World, at: Pt, shift: bool) {
         Tool::Measure { a, b } => {
             let p = snap(at, grid());
             w.resource_mut::<LayoutState>().tool = match (a, b) {
-                (Some(a), None) => Tool::Measure { a: Some(a), b: Some(p) },
-                _ => Tool::Measure { a: Some(p), b: None },
+                (Some(a), None) => Tool::Measure {
+                    a: Some(a),
+                    b: Some(p),
+                },
+                _ => Tool::Measure {
+                    a: Some(p),
+                    b: None,
+                },
             };
         }
     }
@@ -631,10 +966,22 @@ fn press(w: &mut World, at: Pt, shift: bool) {
 
 /// The ruler's line and its reading, on the comments layer.
 fn ruler(d: &mut Design, a: Pt, b: Pt) {
-    let (dx, dy) = (cadrs_eda::units::to_mm(b.x - a.x), cadrs_eda::units::to_mm(b.y - a.y));
-    be::add_shape(&mut d.board, cadrs_eda::graphics::Geom::Line { a, b }, Layer::Comments);
+    let (dx, dy) = (
+        cadrs_eda::units::to_mm(b.x - a.x),
+        cadrs_eda::units::to_mm(b.y - a.y),
+    );
+    be::add_shape(
+        &mut d.board,
+        cadrs_eda::graphics::Geom::Line { a, b },
+        Layer::Comments,
+    );
     let mid = Pt::new((a.x + b.x) / 2, (a.y + b.y) / 2 + mm(1.0));
-    be::add_text(&mut d.board, &format!("{:.3} mm  (dx {dx:.3}, dy {dy:.3})", dx.hypot(dy)), mid, Layer::Comments);
+    be::add_text(
+        &mut d.board,
+        &format!("{:.3} mm  (dx {dx:.3}, dy {dy:.3})", dx.hypot(dy)),
+        mid,
+        Layer::Comments,
+    );
 }
 
 /// The shape a Draw tool makes from `a` to `b`.
@@ -643,7 +990,10 @@ fn draw_geom(kind: DrawKind, a: Pt, b: Pt) -> cadrs_eda::graphics::Geom {
     match kind {
         DrawKind::Line => Geom::Line { a, b },
         DrawKind::Rect => Geom::Rect { a, b },
-        DrawKind::Circle => Geom::Circle { center: a, radius: a.dist(b).round() as Nm },
+        DrawKind::Circle => Geom::Circle {
+            center: a,
+            radius: a.dist(b).round() as Nm,
+        },
     }
 }
 
@@ -654,15 +1004,42 @@ fn double(w: &mut World, at: Pt, shift: bool) {
     }
     // On a track or via: every track and via of its net (with Shift, added to what is selected).
     if let Some(d) = board_of(w) {
-        let under = be::hit_from(&d.board, at, tolerance(w), w.resource::<LayoutState>().facing);
+        let under = be::hit_from(
+            &d.board,
+            at,
+            tolerance(w),
+            w.resource::<LayoutState>().facing,
+        );
         let net = match under {
-            Some(BoardItem::Track(id)) => d.board.tracks.iter().find(|t| t.id == id).map(|t| t.net.clone()),
-            Some(BoardItem::Via(id)) => d.board.vias.iter().find(|v| v.id == id).map(|v| v.net.clone()),
+            Some(BoardItem::Track(id)) => d
+                .board
+                .tracks
+                .iter()
+                .find(|t| t.id == id)
+                .map(|t| t.net.clone()),
+            Some(BoardItem::Via(id)) => d
+                .board
+                .vias
+                .iter()
+                .find(|v| v.id == id)
+                .map(|v| v.net.clone()),
             _ => None,
         };
         if let Some(net) = net.filter(|n| !n.is_empty()) {
-            let mut items: Vec<BoardItem> = d.board.tracks.iter().filter(|t| t.net == net).map(|t| BoardItem::Track(t.id)).collect();
-            items.extend(d.board.vias.iter().filter(|v| v.net == net).map(|v| BoardItem::Via(v.id)));
+            let mut items: Vec<BoardItem> = d
+                .board
+                .tracks
+                .iter()
+                .filter(|t| t.net == net)
+                .map(|t| BoardItem::Track(t.id))
+                .collect();
+            items.extend(
+                d.board
+                    .vias
+                    .iter()
+                    .filter(|v| v.net == net)
+                    .map(|v| BoardItem::Via(v.id)),
+            );
             let mut s = w.resource_mut::<LayoutState>();
             if shift {
                 for i in items {
@@ -688,7 +1065,11 @@ fn finish_drawing(w: &mut World) -> bool {
     let tool = w.resource::<LayoutState>().tool.clone();
     match tool {
         Tool::Route { runs, vias, net } => finish_route(w, runs, vias, net),
-        Tool::Zone { net, layer, mut pts } => {
+        Tool::Zone {
+            net,
+            layer,
+            mut pts,
+        } => {
             // A double-click's second press adds its point twice.
             pts.dedup();
             if pts.len() >= 3 {
@@ -699,7 +1080,11 @@ fn finish_drawing(w: &mut World) -> bool {
             }
             set_tool(w, Tool::Select);
         }
-        Tool::Keepout { layers, rules, mut pts } => {
+        Tool::Keepout {
+            layers,
+            rules,
+            mut pts,
+        } => {
             pts.dedup();
             if pts.len() >= 3 {
                 ui::commit(w, "Add keep-out", |d| {
@@ -714,7 +1099,13 @@ fn finish_drawing(w: &mut World) -> bool {
             if pts.len() >= 3 {
                 let layer = w.resource::<LayoutState>().draw_layer;
                 // On copper: the net of the copper it starts on.
-                let net = if layer.is_copper() { board_of(w).map(|d| be::net_at(&d.board, pts[0], layer)).unwrap_or_default() } else { String::new() };
+                let net = if layer.is_copper() {
+                    board_of(w)
+                        .map(|d| be::net_at(&d.board, pts[0], layer))
+                        .unwrap_or_default()
+                } else {
+                    String::new()
+                };
                 ui::commit(w, "Draw polygon", |d| {
                     be::add_polygon(&mut d.board, pts.clone(), layer, &net);
                     Ok(())
@@ -723,7 +1114,16 @@ fn finish_drawing(w: &mut World) -> bool {
             set_tool(w, Tool::Polygon(vec![]));
         }
         // A chain of lines stops (the next click starts another).
-        Tool::Draw { kind: DrawKind::Line, start: Some(_) } => set_tool(w, Tool::Draw { kind: DrawKind::Line, start: None }),
+        Tool::Draw {
+            kind: DrawKind::Line,
+            start: Some(_),
+        } => set_tool(
+            w,
+            Tool::Draw {
+                kind: DrawKind::Line,
+                start: None,
+            },
+        ),
         _ => return false,
     }
     true
@@ -731,12 +1131,19 @@ fn finish_drawing(w: &mut World) -> bool {
 
 /// Letting go of a footprint being dragged puts it down (where it was: just a selection).
 fn release(w: &mut World, at: Pt) {
-    if let Some(m) = w.resource::<LayoutState>().moving.clone().filter(|m| m.on_release) {
+    if let Some(m) = w
+        .resource::<LayoutState>()
+        .moving
+        .clone()
+        .filter(|m| m.on_release)
+    {
         finish_move(w, &m, at);
         return;
     }
     // A box selection: left to right takes what is wholly inside, right to left what it touches.
-    let Some(start) = w.resource_mut::<LayoutState>().boxing.take() else { return };
+    let Some(start) = w.resource_mut::<LayoutState>().boxing.take() else {
+        return;
+    };
     w.resource_mut::<LayoutState>().box_preview.clear();
     if start.dist(at) < tolerance(w) as f64 {
         return;
@@ -752,11 +1159,19 @@ fn release(w: &mut World, at: Pt) {
 }
 
 fn box_of(a: Pt, b: Pt) -> cadrs_eda::units::Bounds {
-    cadrs_eda::units::Bounds { min: Pt::new(a.x.min(b.x), a.y.min(b.y)), max: Pt::new(a.x.max(b.x), a.y.max(b.y)) }
+    cadrs_eda::units::Bounds {
+        min: Pt::new(a.x.min(b.x), a.y.min(b.y)),
+        max: Pt::new(a.x.max(b.x), a.y.max(b.y)),
+    }
 }
 
 fn finish_move(w: &mut World, m: &Moving, at: Pt) {
-    let d = w.resource_mut::<LayoutState>().exact.take().unwrap_or_else(|| snap(at, grid())) - m.from;
+    let d = w
+        .resource_mut::<LayoutState>()
+        .exact
+        .take()
+        .unwrap_or_else(|| snap(at, grid()))
+        - m.from;
     let (fp, drag) = (m.fp, m.drag);
     w.resource_mut::<LayoutState>().moving = None;
     w.resource_mut::<Preview>().set(None);
@@ -780,30 +1195,52 @@ fn finish_move(w: &mut World, m: &Moving, at: Pt) {
     if !m.items.is_empty() {
         let (items, corner) = (m.items.clone(), m.corner);
         let to = m.from + d;
-        ui::commit(w, if corner.is_some() { "Move corner" } else { "Move" }, |des| {
-            match corner {
-                Some((ring, i)) => be::move_corner(&mut des.board, items[0], ring, i, to),
-                None => be::move_items(&mut des.board, &items, d),
-            }
-            Ok(())
-        });
+        ui::commit(
+            w,
+            if corner.is_some() {
+                "Move corner"
+            } else {
+                "Move"
+            },
+            |des| {
+                match corner {
+                    Some((ring, i)) => be::move_corner(&mut des.board, items[0], ring, i, to),
+                    None => be::move_items(&mut des.board, &items, d),
+                }
+                Ok(())
+            },
+        );
         return;
     }
-    ui::commit(w, if drag { "Drag footprint" } else { "Move footprint" }, |des| {
-        let i = be::footprint_by_id(&des.board, fp).ok_or("The footprint is gone")?;
+    ui::commit(
+        w,
         if drag {
-            be::drag_footprint(&mut des.board, i, d);
+            "Drag footprint"
         } else {
-            let to = des.board.footprints[i].placement.at + d;
-            be::move_footprint(&mut des.board, i, to);
-        }
-        Ok(())
-    });
+            "Move footprint"
+        },
+        |des| {
+            let i = be::footprint_by_id(&des.board, fp).ok_or("The footprint is gone")?;
+            if drag {
+                be::drag_footprint(&mut des.board, i, d);
+            } else {
+                let to = des.board.footprints[i].placement.at + d;
+                be::move_footprint(&mut des.board, i, to);
+            }
+            Ok(())
+        },
+    );
 }
 
 fn selected_footprint(w: &World) -> Option<uuid::Uuid> {
     let s = w.resource::<LayoutState>();
-    s.selection.iter().find_map(|i| if let BoardItem::Footprint(id) = i { Some(*id) } else { None })
+    s.selection.iter().find_map(|i| {
+        if let BoardItem::Footprint(id) = i {
+            Some(*id)
+        } else {
+            None
+        }
+    })
 }
 
 fn on_keys(mut reader: MessageReader<KeyboardInput>, mut commands: Commands) {
@@ -833,7 +1270,8 @@ fn handle_keys(world: &mut World, keys: Vec<KeyboardInput>) {
         let pointer = world.resource::<EdaPointer>().at;
         match k.shortcut_code() {
             KeyCode::Escape => {
-                let busy = !matches!(world.resource::<LayoutState>().tool, Tool::Select) || world.resource::<LayoutState>().moving.is_some();
+                let busy = !matches!(world.resource::<LayoutState>().tool, Tool::Select)
+                    || world.resource::<LayoutState>().moving.is_some();
                 set_tool(world, Tool::Select);
                 if !busy {
                     world.resource_mut::<LayoutState>().selection.clear();
@@ -845,7 +1283,15 @@ fn handle_keys(world: &mut World, keys: Vec<KeyboardInput>) {
             KeyCode::Backquote => {
                 let net = board_of(world).and_then(|d| {
                     let items = cadrs_eda::copper::items(&d.board);
-                    items.iter().find(|c| !c.net.is_empty() && c.layers.iter().any(|(_, r)| cadrs_eda::poly::contains(r, pointer))).map(|c| c.net.clone())
+                    items
+                        .iter()
+                        .find(|c| {
+                            !c.net.is_empty()
+                                && c.layers
+                                    .iter()
+                                    .any(|(_, r)| cadrs_eda::poly::contains(r, pointer))
+                        })
+                        .map(|c| c.net.clone())
                 });
                 let mut s = world.resource_mut::<LayoutState>();
                 s.net = if net == s.net { None } else { net };
@@ -854,14 +1300,24 @@ fn handle_keys(world: &mut World, keys: Vec<KeyboardInput>) {
             KeyCode::KeyW => {
                 let Some(d) = board_of(world) else { continue };
                 let class = d.board.rules.class_of("").track_width;
-                let mut sizes: Vec<Nm> = std::iter::once(class).chain(d.board.rules.track_widths.iter().copied()).chain([mm(0.25), mm(0.4), mm(0.6), mm(1.0)]).collect();
+                let mut sizes: Vec<Nm> = std::iter::once(class)
+                    .chain(d.board.rules.track_widths.iter().copied())
+                    .chain([mm(0.25), mm(0.4), mm(0.6), mm(1.0)])
+                    .collect();
                 sizes.sort();
                 sizes.dedup();
                 let now = world.resource::<LayoutState>().track_width.unwrap_or(class);
                 let i = sizes.iter().position(|s| *s == now).unwrap_or(0);
-                let next = if shift { sizes[i.saturating_sub(1)] } else { sizes[(i + 1).min(sizes.len() - 1)] };
+                let next = if shift {
+                    sizes[i.saturating_sub(1)]
+                } else {
+                    sizes[(i + 1).min(sizes.len() - 1)]
+                };
                 world.resource_mut::<LayoutState>().track_width = Some(next);
-                ui::toast(world, &format!("Track width {} mm", cadrs_eda::units::to_mm(next)));
+                ui::toast(
+                    world,
+                    &format!("Track width {} mm", cadrs_eda::units::to_mm(next)),
+                );
             }
             KeyCode::KeyX => run_action(world, "route"),
             KeyCode::KeyZ => run_action(world, "zone"),
@@ -873,12 +1329,21 @@ fn handle_keys(world: &mut World, keys: Vec<KeyboardInput>) {
             KeyCode::PageDown => world.resource_mut::<LayoutState>().active = Layer::BottomCopper,
             KeyCode::KeyV => {
                 // A via at the pointer, the route going on from it on the other side.
-                if let Tool::Route { mut runs, mut vias, net } = world.resource::<LayoutState>().tool.clone() {
+                if let Tool::Route {
+                    mut runs,
+                    mut vias,
+                    net,
+                } = world.resource::<LayoutState>().tool.clone()
+                {
                     let at = snap(pointer, grid());
                     let (layer, pts) = runs.last_mut().unwrap();
                     let from = *pts.last().unwrap();
                     pts.extend(be::posture(from, at, false).into_iter().skip(1));
-                    let next = if *layer == Layer::TopCopper { Layer::BottomCopper } else { Layer::TopCopper };
+                    let next = if *layer == Layer::TopCopper {
+                        Layer::BottomCopper
+                    } else {
+                        Layer::TopCopper
+                    };
                     vias.push(at);
                     runs.push((next, vec![at]));
                     world.resource_mut::<LayoutState>().active = next;
@@ -888,19 +1353,48 @@ fn handle_keys(world: &mut World, keys: Vec<KeyboardInput>) {
             // Shift+M: Move by (typed distances), the selected footprints (else the one under
             // the pointer).
             KeyCode::KeyM if shift => {
-                let selected: Vec<uuid::Uuid> = world.resource::<LayoutState>().selection.iter().filter_map(|i| if let BoardItem::Footprint(id) = i { Some(*id) } else { None }).collect();
-                let ids = if selected.is_empty() { target_footprint(world, pointer).into_iter().collect() } else { selected };
+                let selected: Vec<uuid::Uuid> = world
+                    .resource::<LayoutState>()
+                    .selection
+                    .iter()
+                    .filter_map(|i| {
+                        if let BoardItem::Footprint(id) = i {
+                            Some(*id)
+                        } else {
+                            None
+                        }
+                    })
+                    .collect();
+                let ids = if selected.is_empty() {
+                    target_footprint(world, pointer).into_iter().collect()
+                } else {
+                    selected
+                };
                 world.resource_mut::<LayoutState>().moving = None;
                 super::lay_dialogs::open_move_by(world, ids);
             }
             KeyCode::KeyM | KeyCode::KeyD => {
                 let fp = target_footprint(world, pointer);
                 // The footprint's anchor follows the pointer: it lands on the clicked grid point.
-                let anchor = fp.and_then(|id| board_of(world).and_then(|d| be::footprint_by_id(&d.board, id).map(|i| d.board.footprints[i].placement.at)));
+                let anchor = fp.and_then(|id| {
+                    board_of(world).and_then(|d| {
+                        be::footprint_by_id(&d.board, id)
+                            .map(|i| d.board.footprints[i].placement.at)
+                    })
+                });
                 if let (Some(fp), Some(from)) = (fp, anchor) {
                     let mut s = world.resource_mut::<LayoutState>();
                     s.selection = vec![BoardItem::Footprint(fp)];
-                    s.moving = Some(Moving { fp, from, drag: k.shortcut_code() == KeyCode::KeyD, on_release: false, items: vec![], corner: None, points: None, track: None });
+                    s.moving = Some(Moving {
+                        fp,
+                        from,
+                        drag: k.shortcut_code() == KeyCode::KeyD,
+                        on_release: false,
+                        items: vec![],
+                        corner: None,
+                        points: None,
+                        track: None,
+                    });
                 }
             }
             // The properties of the footprint or shape under the pointer (else the selected one).
@@ -911,17 +1405,28 @@ fn handle_keys(world: &mut World, keys: Vec<KeyboardInput>) {
             KeyCode::KeyR | KeyCode::KeyF => {
                 let rotate = k.shortcut_code() == KeyCode::KeyR;
                 let sel = world.resource::<LayoutState>().selection.clone();
-                let fp = (sel.len() <= 1).then(|| target_footprint(world, pointer)).flatten();
+                let fp = (sel.len() <= 1)
+                    .then(|| target_footprint(world, pointer))
+                    .flatten();
                 if let Some(fp) = fp {
-                    ui::commit(world, if rotate { "Rotate footprint" } else { "Flip footprint" }, |d| {
-                        let i = be::footprint_by_id(&d.board, fp).ok_or("The footprint is gone")?;
+                    ui::commit(
+                        world,
                         if rotate {
-                            be::rotate_footprint(&mut d.board, i, 90.0);
+                            "Rotate footprint"
                         } else {
-                            be::flip_footprint(&mut d.board, i);
-                        }
-                        Ok(())
-                    });
+                            "Flip footprint"
+                        },
+                        |d| {
+                            let i =
+                                be::footprint_by_id(&d.board, fp).ok_or("The footprint is gone")?;
+                            if rotate {
+                                be::rotate_footprint(&mut d.board, i, 90.0);
+                            } else {
+                                be::flip_footprint(&mut d.board, i);
+                            }
+                            Ok(())
+                        },
+                    );
                 } else if !sel.is_empty() {
                     ui::commit(world, if rotate { "Rotate" } else { "Flip" }, |d| {
                         let c = be::items_center(&d.board, &sel, grid());
@@ -936,11 +1441,26 @@ fn handle_keys(world: &mut World, keys: Vec<KeyboardInput>) {
             }
             KeyCode::KeyU => {
                 let s = world.resource::<LayoutState>();
-                let track = s.selection.iter().find_map(|i| if let BoardItem::Track(id) = i { Some(*id) } else { None });
+                let track = s.selection.iter().find_map(|i| {
+                    if let BoardItem::Track(id) = i {
+                        Some(*id)
+                    } else {
+                        None
+                    }
+                });
                 let through = s.expanded;
                 if let (Some(t), Some(d)) = (track, board_of(world)) {
                     let ids = be::select_connected(&d.board, t, through);
-                    let items: Vec<BoardItem> = ids.into_iter().map(|id| if d.board.vias.iter().any(|v| v.id == id) { BoardItem::Via(id) } else { BoardItem::Track(id) }).collect();
+                    let items: Vec<BoardItem> = ids
+                        .into_iter()
+                        .map(|id| {
+                            if d.board.vias.iter().any(|v| v.id == id) {
+                                BoardItem::Via(id)
+                            } else {
+                                BoardItem::Track(id)
+                            }
+                        })
+                        .collect();
                     let mut s = world.resource_mut::<LayoutState>();
                     s.selection = items;
                     s.expanded = true;
@@ -992,9 +1512,28 @@ fn follow_pointer(world: &mut World, mut last: Local<Option<Pt>>, mut base: Loca
     // The stored board's layout hash: while it is the one the preview was made from, a moved
     // footprint changes only its own place in the preview (no copy of the whole design each
     // frame of a drag, a big zone fill and schematic included).
-    let stored = world.resource::<super::Eda2d>().board().and_then(|(el, b, _)| world.resource::<crate::ActiveDocument>().doc.element(el)?.pcb()?.board(b).map(|x| x.layout_hash()));
-    let reuse = moving.as_ref().is_some_and(|m| !m.drag && m.items.is_empty() && m.points.is_none() && m.track.is_none()) && stored.is_some() && *base == stored;
-    let preview = if reuse { world.resource_mut::<Preview>().take() } else { None };
+    let stored = world
+        .resource::<super::Eda2d>()
+        .board()
+        .and_then(|(el, b, _)| {
+            world
+                .resource::<crate::ActiveDocument>()
+                .doc
+                .element(el)?
+                .pcb()?
+                .board(b)
+                .map(|x| x.layout_hash())
+        });
+    let reuse = moving
+        .as_ref()
+        .is_some_and(|m| !m.drag && m.items.is_empty() && m.points.is_none() && m.track.is_none())
+        && stored.is_some()
+        && *base == stored;
+    let preview = if reuse {
+        world.resource_mut::<Preview>().take()
+    } else {
+        None
+    };
     let d = match preview {
         Some(mut d) => {
             // Back to the stored place first, then moved below.
@@ -1016,7 +1555,9 @@ fn follow_pointer(world: &mut World, mut last: Local<Option<Pt>>, mut base: Loca
         let exact = world.resource::<LayoutState>().exact;
         let delta = exact.unwrap_or_else(|| snap(at, grid())) - m.from;
         match (m.items.first(), m.corner) {
-            (Some(item), Some((ring, i))) => be::move_corner(&mut d.board, *item, ring, i, m.from + delta),
+            (Some(item), Some((ring, i))) => {
+                be::move_corner(&mut d.board, *item, ring, i, m.from + delta)
+            }
             (Some(_), None) => be::move_items(&mut d.board, &m.items, delta),
             _ => {}
         }
@@ -1042,7 +1583,11 @@ fn follow_pointer(world: &mut World, mut last: Local<Option<Pt>>, mut base: Loca
                 for (k, (l, pts)) in runs.iter().enumerate() {
                     let mut p = pts.clone();
                     if k + 1 == runs.len() {
-                        p.extend(be::posture(*pts.last().unwrap(), to, false).into_iter().skip(1));
+                        p.extend(
+                            be::posture(*pts.last().unwrap(), to, false)
+                                .into_iter()
+                                .skip(1),
+                        );
                     }
                     let ids = be::route(&mut d.board, &p, *l, width);
                     for t in d.board.tracks.iter_mut().filter(|t| ids.contains(&t.id)) {
@@ -1056,7 +1601,10 @@ fn follow_pointer(world: &mut World, mut last: Local<Option<Pt>>, mut base: Loca
             Tool::Outline(Some(a)) => {
                 cadrs_eda::outline::add_rect(&mut d.board, a, snap(at, mm(1.0)));
             }
-            Tool::Draw { kind, start: Some(a) } => {
+            Tool::Draw {
+                kind,
+                start: Some(a),
+            } => {
                 let layer = world.resource::<LayoutState>().draw_layer;
                 be::add_shape(&mut d.board, draw_geom(kind, a, snap(at, grid())), layer);
             }
@@ -1067,9 +1615,15 @@ fn follow_pointer(world: &mut World, mut last: Local<Option<Pt>>, mut base: Loca
             }
             Tool::Graphic(polys) => {
                 let layer = world.resource::<LayoutState>().draw_layer;
-                be::add_artwork(&mut d.board, &cadrs_eda::graphic_import::placed_at(&polys, snap(at, grid())), layer);
+                be::add_artwork(
+                    &mut d.board,
+                    &cadrs_eda::graphic_import::placed_at(&polys, snap(at, grid())),
+                    layer,
+                );
             }
-            Tool::Measure { a: Some(a), b } => ruler(&mut d, a, b.unwrap_or_else(|| snap(at, grid()))),
+            Tool::Measure { a: Some(a), b } => {
+                ruler(&mut d, a, b.unwrap_or_else(|| snap(at, grid())))
+            }
             Tool::Polygon(pts) => {
                 // Filled as it will be, on the drawing layer.
                 let mut ring = pts.clone();
@@ -1079,7 +1633,14 @@ fn follow_pointer(world: &mut World, mut last: Local<Option<Pt>>, mut base: Loca
                     be::add_polygon(&mut d.board, ring, layer, "");
                 } else if ring.len() == 2 {
                     let layer = world.resource::<LayoutState>().draw_layer;
-                    be::add_shape(&mut d.board, cadrs_eda::graphics::Geom::Line { a: ring[0], b: ring[1] }, layer);
+                    be::add_shape(
+                        &mut d.board,
+                        cadrs_eda::graphics::Geom::Line {
+                            a: ring[0],
+                            b: ring[1],
+                        },
+                        layer,
+                    );
                 }
             }
             Tool::Keepout { pts, .. } | Tool::Zone { pts, .. } => {
@@ -1088,7 +1649,14 @@ fn follow_pointer(world: &mut World, mut last: Local<Option<Pt>>, mut base: Loca
                 if ring.len() >= 2 {
                     d.board.shapes.push(cadrs_eda::board::BoardShape {
                         id: uuid::Uuid::nil(),
-                        shape: cadrs_eda::graphics::Shape { geom: cadrs_eda::graphics::Geom::Polyline { pts: ring, closed: true }, stroke: cadrs_eda::graphics::Stroke::width(mm(0.1)), fill: Default::default() },
+                        shape: cadrs_eda::graphics::Shape {
+                            geom: cadrs_eda::graphics::Geom::Polyline {
+                                pts: ring,
+                                closed: true,
+                            },
+                            stroke: cadrs_eda::graphics::Stroke::width(mm(0.1)),
+                            fill: Default::default(),
+                        },
                         layer: Layer::Comments,
                         locked: false,
                         net: String::new(),
@@ -1112,7 +1680,11 @@ fn corner_under(w: &World, d: &Design, at: Pt) -> Option<(BoardItem, usize, usiz
     items
         .into_iter()
         .filter(|i| matches!(i, BoardItem::Zone(_) | BoardItem::Shape(_)))
-        .flat_map(|i| be::corners(&d.board, i).into_iter().map(move |(r, k, p)| (i, r, k, p)))
+        .flat_map(|i| {
+            be::corners(&d.board, i)
+                .into_iter()
+                .map(move |(r, k, p)| (i, r, k, p))
+        })
         .filter(|c| c.3.dist(at) <= reach as f64)
         .min_by(|a, b| a.3.dist(at).total_cmp(&b.3.dist(at)))
 }
@@ -1131,7 +1703,10 @@ fn track_hover(world: &mut World, mut last: Local<Option<(Pt, usize)>>) {
         return;
     }
     let at = world.resource::<EdaPointer>().at;
-    let key = (at, world.resource::<crate::ActiveDocument>().history.undo_len());
+    let key = (
+        at,
+        world.resource::<crate::ActiveDocument>().history.undo_len(),
+    );
     if *last == Some(key) {
         return;
     }
@@ -1140,9 +1715,17 @@ fn track_hover(world: &mut World, mut last: Local<Option<(Pt, usize)>>) {
     let tol = tolerance(world);
     let over = world.resource::<EdaPointer>().over;
     // The stored board, read in place (no copy of the design each time the pointer moves).
-    let Some((el, b, _)) = world.resource::<super::Eda2d>().board() else { return };
-    let Some(d) = super::design(world.resource::<crate::ActiveDocument>(), el, b) else { return };
-    let corner = if over { corner_under(world, d, at) } else { None };
+    let Some((el, b, _)) = world.resource::<super::Eda2d>().board() else {
+        return;
+    };
+    let Some(d) = super::design(world.resource::<crate::ActiveDocument>(), el, b) else {
+        return;
+    };
+    let corner = if over {
+        corner_under(world, d, at)
+    } else {
+        None
+    };
     let hover = if !over {
         None
     } else if let Some((item, ..)) = corner {
@@ -1167,7 +1750,10 @@ fn track_hover(world: &mut World, mut last: Local<Option<(Pt, usize)>>) {
 /// What the box being dragged would select ([`LayoutState::box_preview`]), shown selected as
 /// it is dragged.
 fn preview_box(world: &mut World, mut last: Local<Option<(Pt, Pt)>>) {
-    let start = world.resource::<LayoutState>().boxing.filter(|_| shown(world));
+    let start = world
+        .resource::<LayoutState>()
+        .boxing
+        .filter(|_| shown(world));
     let at = world.resource::<EdaPointer>().at;
     let found = match start {
         Some(start) if start.dist(at) >= tolerance(world) as f64 => {
@@ -1179,7 +1765,9 @@ fn preview_box(world: &mut World, mut last: Local<Option<(Pt, Pt)>>) {
                 Some(k) => k,
                 None => return,
             };
-            let Some(d) = super::design(world.resource::<crate::ActiveDocument>(), el, b) else { return };
+            let Some(d) = super::design(world.resource::<crate::ActiveDocument>(), el, b) else {
+                return;
+            };
             be::box_select(&d.board, box_of(start, at), at.x < start.x)
         }
         _ => {
@@ -1215,7 +1803,13 @@ fn draw_box(
         }
         _ => None,
     };
-    cadrs_ui::selection_box::sync(&mut commands, &mut boxes, "pcb-box-select", q_area.iter().next(), span);
+    cadrs_ui::selection_box::sync(
+        &mut commands,
+        &mut boxes,
+        "pcb-box-select",
+        q_area.iter().next(),
+        span,
+    );
 }
 
 fn publish(s: Res<LayoutState>, eda: Res<super::Eda2d>, mut inputs: ResMut<SceneInputs>) {
@@ -1223,7 +1817,12 @@ fn publish(s: Res<LayoutState>, eda: Res<super::Eda2d>, mut inputs: ResMut<Scene
         return;
     }
     let mut sel: Vec<uuid::Uuid> = s.selection.iter().map(|i| i.id()).collect();
-    sel.extend(s.box_preview.iter().map(|i| i.id()).filter(|id| !s.selection.iter().any(|x| x.id() == *id)));
+    sel.extend(
+        s.box_preview
+            .iter()
+            .map(|i| i.id())
+            .filter(|id| !s.selection.iter().any(|x| x.id() == *id)),
+    );
     if inputs.board_selected != sel {
         inputs.board_selected = sel;
     }
@@ -1252,9 +1851,16 @@ fn publish(s: Res<LayoutState>, eda: Res<super::Eda2d>, mut inputs: ResMut<Scene
 
 /// The footprint a key acts on: the one under the pointer, else the selected one.
 fn target_footprint(w: &World, pointer: Pt) -> Option<uuid::Uuid> {
-    let under = board_of(w).and_then(|d| match be::hit_from(&d.board, pointer, tolerance(w), w.resource::<LayoutState>().facing) {
-        Some(BoardItem::Footprint(id)) => Some(id),
-        _ => None,
+    let under = board_of(w).and_then(|d| {
+        match be::hit_from(
+            &d.board,
+            pointer,
+            tolerance(w),
+            w.resource::<LayoutState>().facing,
+        ) {
+            Some(BoardItem::Footprint(id)) => Some(id),
+            _ => None,
+        }
     });
     under.or_else(|| selected_footprint(w))
 }
@@ -1262,7 +1868,14 @@ fn target_footprint(w: &World, pointer: Pt) -> Option<uuid::Uuid> {
 /// E or a double-click: the properties of the footprint or shape at `at` (else the selected
 /// one).
 fn open_properties(w: &mut World, at: Pt) {
-    let under = board_of(w).and_then(|d| be::hit_from(&d.board, at, tolerance(w), w.resource::<LayoutState>().facing));
+    let under = board_of(w).and_then(|d| {
+        be::hit_from(
+            &d.board,
+            at,
+            tolerance(w),
+            w.resource::<LayoutState>().facing,
+        )
+    });
     let target = under.or_else(|| w.resource::<LayoutState>().selection.first().copied());
     match target {
         Some(BoardItem::Footprint(id)) => {

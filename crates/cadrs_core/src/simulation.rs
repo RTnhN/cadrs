@@ -66,7 +66,12 @@ pub enum ForceDirection {
 }
 
 impl ForceDirection {
-    pub const ALL: [ForceDirection; 4] = [ForceDirection::Normal, ForceDirection::X, ForceDirection::Y, ForceDirection::Z];
+    pub const ALL: [ForceDirection; 4] = [
+        ForceDirection::Normal,
+        ForceDirection::X,
+        ForceDirection::Y,
+        ForceDirection::Z,
+    ];
 
     pub fn label(self) -> &'static str {
         match self {
@@ -91,7 +96,9 @@ pub enum LoadKind {
         flip: bool,
     },
     /// A pressure in Pa, pushing into the faces.
-    Pressure { pascals: f64 },
+    Pressure {
+        pascals: f64,
+    },
 }
 
 impl LoadKind {
@@ -108,7 +115,11 @@ impl LoadKind {
     pub fn summary(&self) -> String {
         match *self {
             LoadKind::Fixed => String::new(),
-            LoadKind::Force { newtons, direction, flip } => {
+            LoadKind::Force {
+                newtons,
+                direction,
+                flip,
+            } => {
                 let dir = match (direction, flip) {
                     (ForceDirection::Normal, false) => "normal".to_string(),
                     (ForceDirection::Normal, true) => "normal, out".to_string(),
@@ -188,7 +199,10 @@ impl Simulation {
     /// The next free default name for a load of this kind: "Fixed 1", "Force 2", ….
     pub fn next_name(&self, kind: &LoadKind) -> String {
         let stem = kind.label();
-        (1..).map(|n| format!("{stem} {n}")).find(|n| !self.loads.iter().any(|l| l.name == *n)).unwrap_or_default()
+        (1..)
+            .map(|n| format!("{stem} {n}"))
+            .find(|n| !self.loads.iter().any(|l| l.name == *n))
+            .unwrap_or_default()
     }
 }
 
@@ -197,7 +211,9 @@ impl Simulation {
 
 fn split_number(text: &str) -> Result<(f64, String), String> {
     let t = text.trim().replace(',', ".");
-    let end = t.find(|c: char| !(c.is_ascii_digit() || matches!(c, '.' | '-' | '+' | 'e' | 'E'))).unwrap_or(t.len());
+    let end = t
+        .find(|c: char| !(c.is_ascii_digit() || matches!(c, '.' | '-' | '+' | 'e' | 'E')))
+        .unwrap_or(t.len());
     // "e" may start a unit only if nothing numeric follows; keep it simple: a trailing 'e'/'E'
     // with no exponent digits belongs to the unit.
     let (mut num, mut unit) = t.split_at(end);
@@ -206,7 +222,10 @@ fn split_number(text: &str) -> Result<(f64, String), String> {
         num = &t[..k];
         unit = &t[k..];
     }
-    let v: f64 = num.trim().parse().map_err(|_| format!("\"{}\" isn't a number", text.trim()))?;
+    let v: f64 = num
+        .trim()
+        .parse()
+        .map_err(|_| format!("\"{}\" isn't a number", text.trim()))?;
     Ok((v, unit.trim().to_string()))
 }
 
@@ -233,7 +252,11 @@ pub fn parse_pressure(text: &str) -> Result<f64, String> {
         "gpa" => 1e9,
         "psi" => 6_894.757_293_168,
         "bar" => 1e5,
-        _ => return Err(format!("unknown pressure unit \"{unit}\" (Pa, kPa, MPa, psi, bar)")),
+        _ => {
+            return Err(format!(
+                "unknown pressure unit \"{unit}\" (Pa, kPa, MPa, psi, bar)"
+            ));
+        }
     };
     Ok(v * k)
 }
@@ -246,7 +269,11 @@ fn trim_number(v: f64) -> String {
 
 /// "100 N", "2.5 kN".
 pub fn format_force(n: f64) -> String {
-    if n.abs() >= 1e4 { format!("{} kN", trim_number(n / 1e3)) } else { format!("{} N", trim_number(n)) }
+    if n.abs() >= 1e4 {
+        format!("{} kN", trim_number(n / 1e3))
+    } else {
+        format!("{} N", trim_number(n))
+    }
 }
 
 /// "1 MPa", "250 kPa", "12 Pa".
@@ -264,9 +291,16 @@ pub fn format_pressure(pa: f64) -> String {
 // Commands
 
 fn simulation_mut(doc: &mut Document, element: ElementId) -> Result<&mut Simulation, CommandError> {
-    let el = doc.element_mut(element).ok_or(CommandError::ElementNotFound(element))?;
-    if !matches!(el.kind, crate::document::ElementKind::PartStudio { .. } | crate::document::ElementKind::Assembly) {
-        return Err(CommandError::Invalid("simulations belong to Part Studios and Assemblies".into()));
+    let el = doc
+        .element_mut(element)
+        .ok_or(CommandError::ElementNotFound(element))?;
+    if !matches!(
+        el.kind,
+        crate::document::ElementKind::PartStudio { .. } | crate::document::ElementKind::Assembly
+    ) {
+        return Err(CommandError::Invalid(
+            "simulations belong to Part Studios and Assemblies".into(),
+        ));
     }
     Ok(&mut el.simulation)
 }
@@ -276,8 +310,12 @@ fn check_load(load: &SimLoad) -> Result<(), CommandError> {
         return Err(CommandError::Invalid("a load needs a name".into()));
     }
     match load.kind {
-        LoadKind::Force { newtons, .. } if !newtons.is_finite() => Err(CommandError::Invalid("the force isn't a number".into())),
-        LoadKind::Pressure { pascals } if !pascals.is_finite() => Err(CommandError::Invalid("the pressure isn't a number".into())),
+        LoadKind::Force { newtons, .. } if !newtons.is_finite() => {
+            Err(CommandError::Invalid("the force isn't a number".into()))
+        }
+        LoadKind::Pressure { pascals } if !pascals.is_finite() => {
+            Err(CommandError::Invalid("the pressure isn't a number".into()))
+        }
         _ => Ok(()),
     }
 }
@@ -324,7 +362,11 @@ impl Command for SetLoad {
     fn apply(&self, doc: &mut Document) -> Result<(), CommandError> {
         check_load(&self.load)?;
         let sim = simulation_mut(doc, self.element)?;
-        let slot = sim.loads.iter_mut().find(|l| l.id == self.load.id).ok_or_else(|| CommandError::Invalid("load not found".into()))?;
+        let slot = sim
+            .loads
+            .iter_mut()
+            .find(|l| l.id == self.load.id)
+            .ok_or_else(|| CommandError::Invalid("load not found".into()))?;
         *slot = self.load.clone();
         Ok(())
     }
@@ -400,12 +442,26 @@ pub fn assembly_bonds(asm: &crate::assembly::Assembly) -> (Vec<Bonded>, Vec<Stri
         if !m.simulation {
             continue;
         }
-        let [a, b] = [&m.connectors[0], &m.connectors[1]].map(|c| asm.instances.iter().find(|i| i.id == c.instance));
+        let [a, b] = [&m.connectors[0], &m.connectors[1]]
+            .map(|c| asm.instances.iter().find(|i| i.id == c.instance));
         match (a, b) {
-            (Some(a), Some(b)) if a.source.part().is_some() && b.source.part().is_some() && !a.suppressed && !b.suppressed => {
-                bonds.push(Bonded { name: f.name.clone(), a: a.id.part_id(), b: b.id.part_id(), required: true });
+            (Some(a), Some(b))
+                if a.source.part().is_some()
+                    && b.source.part().is_some()
+                    && !a.suppressed
+                    && !b.suppressed =>
+            {
+                bonds.push(Bonded {
+                    name: f.name.clone(),
+                    a: a.id.part_id(),
+                    b: b.id.part_id(),
+                    required: true,
+                });
             }
-            _ => notes.push(format!("{}: only mates between part instances connect in the simulation", f.name)),
+            _ => notes.push(format!(
+                "{}: only mates between part instances connect in the simulation",
+                f.name
+            )),
         }
     }
     (bonds, notes)
@@ -413,14 +469,22 @@ pub fn assembly_bonds(asm: &crate::assembly::Assembly) -> (Vec<Bonded>, Vec<Stri
 
 /// A Part Studio's contacts: every pair of parts whose bounds touch (optional bonds).
 pub fn studio_bonds(parts: &[Part]) -> Vec<Bonded> {
-    let bounds: Vec<Option<([f64; 3], [f64; 3])>> = parts.iter().map(|p| p.solid.bounds()).collect();
+    let bounds: Vec<Option<([f64; 3], [f64; 3])>> =
+        parts.iter().map(|p| p.solid.bounds()).collect();
     let mut out = Vec::new();
     for i in 0..parts.len() {
         for j in i + 1..parts.len() {
-            let (Some((alo, ahi)), Some((blo, bhi))) = (bounds[i], bounds[j]) else { continue };
+            let (Some((alo, ahi)), Some((blo, bhi))) = (bounds[i], bounds[j]) else {
+                continue;
+            };
             let tol = 1e-6 * (0..3).map(|k| ahi[k] - alo[k]).fold(1.0, f64::max);
             if (0..3).all(|k| alo[k] <= bhi[k] + tol && blo[k] <= ahi[k] + tol) {
-                out.push(Bonded { name: format!("{} – {}", parts[i].name, parts[j].name), a: parts[i].id, b: parts[j].id, required: false });
+                out.push(Bonded {
+                    name: format!("{} – {}", parts[i].name, parts[j].name),
+                    a: parts[i].id,
+                    b: parts[j].id,
+                    required: false,
+                });
             }
         }
     }
@@ -438,7 +502,11 @@ pub fn surface(solid: &Solid) -> cadrs_fea::Surface {
     }
     cadrs_fea::Surface {
         positions: solid.positions.clone(),
-        triangles: solid.indices.chunks_exact(3).map(|c| [c[0], c[1], c[2]]).collect(),
+        triangles: solid
+            .indices
+            .chunks_exact(3)
+            .map(|c| [c[0], c[1], c[2]])
+            .collect(),
         faces,
     }
 }
@@ -446,7 +514,15 @@ pub fn surface(solid: &Solid) -> cadrs_fea::Surface {
 /// The parts an analysis takes (of `parts`, in their order): those a load acts on, and those
 /// bonded to them, directly or through others.
 pub fn parts_in_play(sim: &Simulation, parts: &[PartId], bonds: &[Bonded]) -> Vec<PartId> {
-    let mut used: Vec<bool> = parts.iter().map(|p| sim.loads.iter().filter(|l| !l.suppressed).any(|l| l.faces.iter().any(|f| f.part == *p))).collect();
+    let mut used: Vec<bool> = parts
+        .iter()
+        .map(|p| {
+            sim.loads
+                .iter()
+                .filter(|l| !l.suppressed)
+                .any(|l| l.faces.iter().any(|f| f.part == *p))
+        })
+        .collect();
     let at = |id: PartId| parts.iter().position(|p| *p == id);
     let mut grew = true;
     while grew {
@@ -461,7 +537,12 @@ pub fn parts_in_play(sim: &Simulation, parts: &[PartId], bonds: &[Bonded]) -> Ve
             }
         }
     }
-    parts.iter().zip(used).filter(|(_, u)| *u).map(|(p, _)| *p).collect()
+    parts
+        .iter()
+        .zip(used)
+        .filter(|(_, u)| *u)
+        .map(|(p, _)| *p)
+        .collect()
 }
 
 /// The solver's model and which part each body is.
@@ -476,7 +557,12 @@ pub struct Setup {
 
 /// Builds the analysis from the loads, the parts (with their current solids) and the bonds.
 /// Errors are in words for the Simulation panel.
-pub fn setup(sim: &Simulation, parts: &[Part], props: &[PartProps], bonds: &[Bonded]) -> Result<Setup, String> {
+pub fn setup(
+    sim: &Simulation,
+    parts: &[Part],
+    props: &[PartProps],
+    bonds: &[Bonded],
+) -> Result<Setup, String> {
     let loads: Vec<&SimLoad> = sim.loads.iter().filter(|l| !l.suppressed).collect();
     if !loads.iter().any(|l| l.kind == LoadKind::Fixed) {
         return Err("Add a Fixed load: something has to hold the model.".into());
@@ -493,7 +579,10 @@ pub fn setup(sim: &Simulation, parts: &[Part], props: &[PartProps], bonds: &[Bon
     let part_of = |id: PartId| parts.iter().position(|p| p.id == id);
     for l in &loads {
         if l.faces.iter().any(|f| part_of(f.part).is_none()) {
-            return Err(format!("{}: one of its parts is gone (the model changed). Edit the load.", l.name));
+            return Err(format!(
+                "{}: one of its parts is gone (the model changed). Edit the load.",
+                l.name
+            ));
         }
     }
     let ids: Vec<PartId> = parts.iter().map(|p| p.id).collect();
@@ -505,23 +594,44 @@ pub fn setup(sim: &Simulation, parts: &[Part], props: &[PartProps], bonds: &[Bon
     let mut body_of = vec![usize::MAX; parts.len()];
     for (i, p) in parts.iter().enumerate() {
         if !used[i] {
-            notes.push(format!("{} carries no load and isn't connected: left out.", p.name));
+            notes.push(format!(
+                "{} carries no load and isn't connected: left out.",
+                p.name
+            ));
             continue;
         }
-        let m = crate::parts::part_material(p, props).ok_or_else(|| format!("{} has no material: assign one (right-click it → Assign material).", p.name))?;
+        let m = crate::parts::part_material(p, props).ok_or_else(|| {
+            format!(
+                "{} has no material: assign one (right-click it → Assign material).",
+                p.name
+            )
+        })?;
         let (Some(e), Some(nu)) = (m.youngs_modulus, m.poisson) else {
-            return Err(format!("{}'s material ({}) has no Young's modulus or Poisson's ratio.", p.name, m.name));
+            return Err(format!(
+                "{}'s material ({}) has no Young's modulus or Poisson's ratio.",
+                p.name, m.name
+            ));
         };
         body_of[i] = model.bodies.len();
         ids.push(p.id);
-        model.bodies.push(cadrs_fea::Body { name: p.name.clone(), surface: surface(&p.solid), material: cadrs_fea::Material { youngs: e / 1e6, poisson: nu } });
+        model.bodies.push(cadrs_fea::Body {
+            name: p.name.clone(),
+            surface: surface(&p.solid),
+            material: cadrs_fea::Material {
+                youngs: e / 1e6,
+                poisson: nu,
+            },
+        });
     }
     for l in &loads {
         let mut targets: Vec<(usize, Vec<u32>)> = Vec::new();
         for f in &l.faces {
             let i = part_of(f.part).expect("checked");
             let Some(fi) = parts[i].solid.faces.iter().position(|x| x.name == f.face) else {
-                return Err(format!("{}: one of its faces is gone (the model changed). Edit the load.", l.name));
+                return Err(format!(
+                    "{}: one of its faces is gone (the model changed). Edit the load.",
+                    l.name
+                ));
             };
             let b = body_of[i];
             match targets.iter_mut().find(|t| t.0 == b) {
@@ -531,7 +641,11 @@ pub fn setup(sim: &Simulation, parts: &[Part], props: &[PartProps], bonds: &[Bon
         }
         let kind = match l.kind {
             LoadKind::Fixed => cadrs_fea::LoadKind::Fixed,
-            LoadKind::Force { newtons, direction, flip } => {
+            LoadKind::Force {
+                newtons,
+                direction,
+                flip,
+            } => {
                 let s = if flip { -newtons } else { newtons };
                 match direction {
                     ForceDirection::Normal => cadrs_fea::LoadKind::NormalForce(s),
@@ -542,22 +656,42 @@ pub fn setup(sim: &Simulation, parts: &[Part], props: &[PartProps], bonds: &[Bon
             }
             LoadKind::Pressure { pascals } => cadrs_fea::LoadKind::Pressure(pascals / 1e6),
         };
-        model.loads.push(cadrs_fea::Load { name: l.name.clone(), targets, kind });
+        model.loads.push(cadrs_fea::Load {
+            name: l.name.clone(),
+            targets,
+            kind,
+        });
     }
     for b in bonds {
         let (Some(i), Some(j)) = (part_of(b.a), part_of(b.b)) else {
             if b.required {
-                notes.push(format!("{}: a part is missing, so it doesn't connect.", b.name));
+                notes.push(format!(
+                    "{}: a part is missing, so it doesn't connect.",
+                    b.name
+                ));
             }
             continue;
         };
         if body_of[i] == usize::MAX || body_of[j] == usize::MAX {
             continue;
         }
-        model.bonds.push(cadrs_fea::Bond { name: b.name.clone(), a: body_of[i], b: body_of[j], required: b.required });
+        model.bonds.push(cadrs_fea::Bond {
+            name: b.name.clone(),
+            a: body_of[i],
+            b: body_of[j],
+            required: b.required,
+        });
     }
-    let options = cadrs_fea::Options { target_elements: sim.mesh.target_elements(), ..Default::default() };
-    Ok(Setup { model, parts: ids, options, notes })
+    let options = cadrs_fea::Options {
+        target_elements: sim.mesh.target_elements(),
+        ..Default::default()
+    };
+    Ok(Setup {
+        model,
+        parts: ids,
+        options,
+        notes,
+    })
 }
 
 #[cfg(test)]
@@ -579,17 +713,38 @@ mod tests {
         assert_eq!(format_force(25_000.0), "25 kN");
         assert_eq!(format_pressure(1e6), "1 MPa");
         assert_eq!(format_pressure(2.5e4), "25 kPa");
-        let f = LoadKind::Force { newtons: 100.0, direction: ForceDirection::Z, flip: true };
+        let f = LoadKind::Force {
+            newtons: 100.0,
+            direction: ForceDirection::Z,
+            flip: true,
+        };
         assert_eq!(f.summary(), "100 N along −Z");
-        assert_eq!(LoadKind::Force { newtons: 5.0, direction: ForceDirection::Normal, flip: false }.summary(), "5 N normal");
+        assert_eq!(
+            LoadKind::Force {
+                newtons: 5.0,
+                direction: ForceDirection::Normal,
+                flip: false
+            }
+            .summary(),
+            "5 N normal"
+        );
     }
 
     #[test]
     fn default_names_count_up() {
         let mut sim = Simulation::default();
         assert_eq!(sim.next_name(&LoadKind::Fixed), "Fixed 1");
-        sim.loads.push(SimLoad { id: LoadId::new(), name: "Fixed 1".into(), kind: LoadKind::Fixed, faces: vec![], suppressed: false });
+        sim.loads.push(SimLoad {
+            id: LoadId::new(),
+            name: "Fixed 1".into(),
+            kind: LoadKind::Fixed,
+            faces: vec![],
+            suppressed: false,
+        });
         assert_eq!(sim.next_name(&LoadKind::Fixed), "Fixed 2");
-        assert_eq!(sim.next_name(&LoadKind::Pressure { pascals: 1.0 }), "Pressure 1");
+        assert_eq!(
+            sim.next_name(&LoadKind::Pressure { pascals: 1.0 }),
+            "Pressure 1"
+        );
     }
 }

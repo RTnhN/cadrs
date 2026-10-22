@@ -9,7 +9,10 @@ use bevy::asset::{RenderAssetUsages, embedded_asset};
 use bevy::mesh::{MeshVertexBufferLayoutRef, PrimitiveTopology};
 use bevy::pbr::{MaterialPipeline, MaterialPipelineKey};
 use bevy::prelude::*;
-use bevy::render::render_resource::{AsBindGroup, CompareFunction, RenderPipelineDescriptor, ShaderType, SpecializedMeshPipelineError};
+use bevy::render::render_resource::{
+    AsBindGroup, CompareFunction, RenderPipelineDescriptor, ShaderType,
+    SpecializedMeshPipelineError,
+};
 use bevy::shader::ShaderRef;
 use cadrs_core::PartId;
 
@@ -23,7 +26,13 @@ impl Plugin for HiddenEdgesPlugin {
     fn build(&self, app: &mut App) {
         embedded_asset!(app, "hidden_edges.wgsl");
         app.add_plugins(MaterialPlugin::<HiddenLineMaterial>::default())
-            .add_systems(Update, (sync_hidden_edges, sync_params).chain().after(crate::parts::PartsSet).run_if(in_state(AppState::Document)));
+            .add_systems(
+                Update,
+                (sync_hidden_edges, sync_params)
+                    .chain()
+                    .after(crate::parts::PartsSet)
+                    .run_if(in_state(AppState::Document)),
+            );
     }
 }
 
@@ -35,7 +44,13 @@ const HIDDEN_EDGE_SHADED: Color = Color::srgb(0.10, 0.13, 0.18);
 
 /// The hidden edges' colour in a render mode.
 fn hidden_edge_color(mode: crate::camera::RenderMode) -> Vec4 {
-    if mode.shaded() { HIDDEN_EDGE_SHADED } else { HIDDEN_EDGE }.to_linear().to_vec4()
+    if mode.shaded() {
+        HIDDEN_EDGE_SHADED
+    } else {
+        HIDDEN_EDGE
+    }
+    .to_linear()
+    .to_vec4()
 }
 /// The dash period on screen (px).
 const DASH_PX: f32 = 7.0;
@@ -101,7 +116,10 @@ pub fn edge_lines(part: &cadrs_core::parts::Part) -> Mesh {
     for e in &part.solid.edges {
         let mut along = 0.0f32;
         for w in e.points.windows(2) {
-            let (a, b) = (Vec3::new(w[0][0] as f32, w[0][1] as f32, w[0][2] as f32), Vec3::new(w[1][0] as f32, w[1][1] as f32, w[1][2] as f32));
+            let (a, b) = (
+                Vec3::new(w[0][0] as f32, w[0][1] as f32, w[0][2] as f32),
+                Vec3::new(w[1][0] as f32, w[1][1] as f32, w[1][2] as f32),
+            );
             let l = a.distance(b);
             positions.push(a.to_array());
             positions.push(b.to_array());
@@ -127,7 +145,11 @@ fn sync_hidden_edges(
     mut commands: Commands,
 ) {
     let on = view.view.render.hidden_edges();
-    let shown: Vec<PartId> = if on { cache.shown().map(|p| p.id).collect() } else { Vec::new() };
+    let shown: Vec<PartId> = if on {
+        cache.shown().map(|p| p.id).collect()
+    } else {
+        Vec::new()
+    };
     let key = (cache.generation, shown.clone());
     if last.as_ref() == Some(&key) {
         return;
@@ -141,12 +163,21 @@ fn sync_hidden_edges(
     }
     let material = mat
         .get_or_insert_with(|| {
-            materials.add(HiddenLineMaterial { params: HiddenLineParams { color: HIDDEN_EDGE.to_linear().to_vec4(), clip: [Vec4::ZERO; crate::section_view::MAX_PLANES], dash: Vec4::ZERO } })
+            materials.add(HiddenLineMaterial {
+                params: HiddenLineParams {
+                    color: HIDDEN_EDGE.to_linear().to_vec4(),
+                    clip: [Vec4::ZERO; crate::section_view::MAX_PLANES],
+                    dash: Vec4::ZERO,
+                },
+            })
         })
         .clone();
     for part in cache.shown() {
         commands.spawn((
-            Name::new(format!("hidden-edges-{}", part.name.to_lowercase().replace(' ', "-"))),
+            Name::new(format!(
+                "hidden-edges-{}",
+                part.name.to_lowercase().replace(' ', "-")
+            )),
             HiddenLines,
             Mesh3d(meshes.add(edge_lines(part))),
             MeshMaterial3d(material.clone()),
@@ -157,19 +188,28 @@ fn sync_hidden_edges(
 }
 
 /// The dash length follows the zoom; the clip plane the section view; the colour the mode.
-fn sync_params(view: Res<ViewportView>, clip: Res<crate::section_view::SectionClip>, mut materials: ResMut<Assets<HiddenLineMaterial>>) {
+fn sync_params(
+    view: Res<ViewportView>,
+    clip: Res<crate::section_view::SectionClip>,
+    mut materials: ResMut<Assets<HiddenLineMaterial>>,
+) {
     if !view.view.render.hidden_edges() {
         return;
     }
-    let clip = clip.plane.map_or([Vec4::ZERO; crate::section_view::MAX_PLANES], |c| c.uniforms());
+    let clip = clip
+        .plane
+        .map_or([Vec4::ZERO; crate::section_view::MAX_PLANES], |c| {
+            c.uniforms()
+        });
     // As the part edges' gizmo bias, grown in perspective (`crate::view_options`).
     let k = crate::view_options::bias_factor(&view.view);
     let dash = Vec4::new(DASH_PX * view.view.scale, (6e-5 * k).min(0.05), 0.0, 0.0);
     let color = hidden_edge_color(view.view.render);
     let ids: Vec<AssetId<HiddenLineMaterial>> = materials.ids().collect();
     for id in ids {
-        if materials.get(id).is_some_and(|m| m.params.clip != clip || m.params.dash != dash || m.params.color != color)
-            && let Some(mut m) = materials.get_mut(id)
+        if materials.get(id).is_some_and(|m| {
+            m.params.clip != clip || m.params.dash != dash || m.params.color != color
+        }) && let Some(mut m) = materials.get_mut(id)
         {
             m.params.clip = clip;
             m.params.dash = dash;

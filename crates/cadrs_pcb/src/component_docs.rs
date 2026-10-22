@@ -23,8 +23,10 @@ use cadrs_core::external::{LinkedElement, Resolver, SourceRef};
 use cadrs_core::history_log::{HistoryLog, VersionId};
 use cadrs_core::ids::{DocumentId, ElementId, PartId};
 use cadrs_core::library::{DocumentMeta, FolderEntry, Library, Timestamp};
+use cadrs_core::pcb::component_docs::{
+    ComponentDocument, ComponentKey, ensure_folder, find_component_document,
+};
 use cadrs_core::pcb::{CustomPart, FolderRef};
-use cadrs_core::pcb::component_docs::{ComponentDocument, ComponentKey, ensure_folder, find_component_document};
 use cadrs_core::properties::{PropertyKey, PropertyOwner, PropertyValue, SetProperties};
 use cadrs_core::rebuild::Rebuilder;
 use cadrs_core::store::Store;
@@ -32,7 +34,9 @@ use cadrs_core::studio::Studio;
 use cadrs_idf::Package;
 
 use crate::colors::{BodyClass, component_kind};
-use crate::create_assembly::{ComponentProvider, ComponentSource, Direct, PackageComponent, description};
+use crate::create_assembly::{
+    ComponentProvider, ComponentSource, Direct, PackageComponent, description,
+};
 use crate::geometry::{BodyPlan, MARKER};
 use crate::sample::{build_plan, fid, name_hash};
 
@@ -77,8 +81,16 @@ impl ComponentDocuments {
     /// Component documents for a Create in the document `consumer` (its id is what matters) of
     /// the board `board`, in the settings' folder `folder` (made when missing; see
     /// [`ensure_folder`]).
-    pub fn new(store: &Store, folder: Option<&FolderRef>, consumer: DocumentId, board: &str, user: &str, now: Timestamp) -> Result<Self, String> {
-        let folder = ensure_folder(store, folder, user, now).map_err(|e| format!("The component folder can't be made ({e})"))?;
+    pub fn new(
+        store: &Store,
+        folder: Option<&FolderRef>,
+        consumer: DocumentId,
+        board: &str,
+        user: &str,
+        now: Timestamp,
+    ) -> Result<Self, String> {
+        let folder = ensure_folder(store, folder, user, now)
+            .map_err(|e| format!("The component folder can't be made ({e})"))?;
         let (library, _) = store.list();
         let mut shell = Document::empty("");
         shell.id = consumer;
@@ -116,10 +128,18 @@ impl ComponentDocuments {
             if let ComponentSource::External { reference, .. } = &c.source
                 && let Some(d) = reference.document
             {
-                out.push(ComponentDocument { package: package.clone(), part_number: part_number.clone(), document: d });
+                out.push(ComponentDocument {
+                    package: package.clone(),
+                    part_number: part_number.clone(),
+                    document: d,
+                });
             }
         }
-        out.sort_by(|a, b| a.package.cmp(&b.package).then_with(|| a.part_number.cmp(&b.part_number)));
+        out.sort_by(|a, b| {
+            a.package
+                .cmp(&b.package)
+                .then_with(|| a.part_number.cmp(&b.part_number))
+        });
         out
     }
 
@@ -128,13 +148,21 @@ impl ComponentDocuments {
     }
 
     /// Writes a new component document for `pkg` (see the module docs) and its V1.
-    fn create(&mut self, pkg: &Package) -> Result<(DocumentId, ComponentKey, VersionId), CommandError> {
+    fn create(
+        &mut self,
+        pkg: &Package,
+    ) -> Result<(DocumentId, ComponentKey, VersionId), CommandError> {
         let mut doc = Document::empty(pkg.name.clone());
         let (studio, asm) = (ElementId::new(), ElementId::new());
         let salt = name_hash(&format!("{}\u{0}{}", pkg.name, pkg.part_number));
         let part = {
             let mut s = Direct(&mut doc);
-            s.run(&AddElement { id: studio, kind: NewElementKind::PartStudio, name: Some(pkg.name.clone()), after: None })?;
+            s.run(&AddElement {
+                id: studio,
+                kind: NewElementKind::PartStudio,
+                name: Some(pkg.name.clone()),
+                after: None,
+            })?;
             let plan = BodyPlan {
                 name: pkg.name.clone(),
                 class: BodyClass::Component(component_kind(&pkg.name)),
@@ -146,26 +174,59 @@ impl ComponentDocuments {
             let part = build_plan(&mut s, studio, &plan, fid(salt, 0x10), fid(salt, 0x11))?;
             let mut values = Vec::new();
             if !pkg.part_number.is_empty() {
-                values.push((PropertyKey::PartNumber, PropertyValue::Text(pkg.part_number.clone())));
+                values.push((
+                    PropertyKey::PartNumber,
+                    PropertyValue::Text(pkg.part_number.clone()),
+                ));
             }
             if let Some(d) = description(pkg) {
                 values.push((PropertyKey::Description, PropertyValue::Text(d)));
             }
             if !values.is_empty() {
-                s.run(&SetProperties { owners: vec![PropertyOwner::Part { element: studio, part }], values, label: "Component properties".into() })?;
+                s.run(&SetProperties {
+                    owners: vec![PropertyOwner::Part {
+                        element: studio,
+                        part,
+                    }],
+                    values,
+                    label: "Component properties".into(),
+                })?;
             }
-            s.run(&AddElement { id: asm, kind: NewElementKind::Assembly, name: Some(COMPONENT_ASSEMBLY_NAME.into()), after: None })?;
+            s.run(&AddElement {
+                id: asm,
+                kind: NewElementKind::Assembly,
+                name: Some(COMPONENT_ASSEMBLY_NAME.into()),
+                after: None,
+            })?;
             part
         };
-        let key = ComponentKey { package: pkg.name.clone(), part_number: pkg.part_number.clone(), studio, part };
+        let key = ComponentKey {
+            package: pkg.name.clone(),
+            part_number: pkg.part_number.clone(),
+            studio,
+            part,
+        };
         let mut meta = DocumentMeta::new(&self.user, self.now);
         meta.folder = Some(self.folder.id);
         meta.pcb_component = Some(key.clone());
-        meta.description = format!("PCB component {}{}", pkg.name, if pkg.part_number.is_empty() { String::new() } else { format!(" ({})", pkg.part_number) });
+        meta.description = format!(
+            "PCB component {}{}",
+            pkg.name,
+            if pkg.part_number.is_empty() {
+                String::new()
+            } else {
+                format!(" ({})", pkg.part_number)
+            }
+        );
         let entry = self.store.create(&doc, &meta).map_err(Self::err)?;
         self.library.upsert(entry);
         let mut log = HistoryLog::start(&doc, self.now, &self.user);
-        let v = log.create_version("", &format!("Created by PCB Studio from {}", self.board), self.now, &self.user);
+        let v = log.create_version(
+            "",
+            &format!("Created by PCB Studio from {}", self.board),
+            self.now,
+            &self.user,
+        );
         log.save(&self.store).map_err(Self::err)?;
         Ok((doc.id, key, v))
     }
@@ -174,9 +235,20 @@ impl ComponentDocuments {
     /// key's part when that version still makes it; else (edited away) the first part its Part
     /// Studio makes, else the first part of any of its Part Studios; `None` when the version
     /// makes no part at all (the caller makes a new document for the package).
-    fn part_at(&mut self, document: DocumentId, version: VersionId, key: &ComponentKey) -> Result<Option<(ElementId, PartId)>, CommandError> {
-        let at = self.resolver.document_at(document, version).map_err(Self::err)?;
-        let studios = at.elements.iter().filter(|e| matches!(e.kind, ElementKind::PartStudio { .. }));
+    fn part_at(
+        &mut self,
+        document: DocumentId,
+        version: VersionId,
+        key: &ComponentKey,
+    ) -> Result<Option<(ElementId, PartId)>, CommandError> {
+        let at = self
+            .resolver
+            .document_at(document, version)
+            .map_err(Self::err)?;
+        let studios = at
+            .elements
+            .iter()
+            .filter(|e| matches!(e.kind, ElementKind::PartStudio { .. }));
         // The key's studio first.
         let mut order: Vec<&cadrs_core::document::Element> = studios.collect();
         order.sort_by_key(|e| e.id != key.studio);
@@ -197,14 +269,31 @@ impl ComponentDocuments {
     /// first when it has none), with the part to use; `None` when there is none or it makes no
     /// part any more. Reads the library from the store again (another Create, or an edit on the
     /// documents page, may have changed it since this Create started).
-    fn reuse(&mut self, pkg: &Package) -> Result<Option<(DocumentId, ElementId, PartId, VersionId)>, CommandError> {
+    fn reuse(
+        &mut self,
+        pkg: &Package,
+    ) -> Result<Option<(DocumentId, ElementId, PartId, VersionId)>, CommandError> {
         self.library = self.store.list().0;
-        let Some((d, key)) = find_component_document(&self.library, &pkg.name, &pkg.part_number) else { return Ok(None) };
+        let Some((d, key)) = find_component_document(&self.library, &pkg.name, &pkg.part_number)
+        else {
+            return Ok(None);
+        };
         let v = match self.resolver.latest(d) {
             Some(v) => v.id(),
-            None => self.resolver.create_version(d, "", &format!("Created by PCB Studio for {}", self.board), self.now, &self.user).map_err(Self::err)?,
+            None => self
+                .resolver
+                .create_version(
+                    d,
+                    "",
+                    &format!("Created by PCB Studio for {}", self.board),
+                    self.now,
+                    &self.user,
+                )
+                .map_err(Self::err)?,
         };
-        Ok(self.part_at(d, v, &key)?.map(|(studio, part)| (d, studio, part, v)))
+        Ok(self
+            .part_at(d, v, &key)?
+            .map(|(studio, part)| (d, studio, part, v)))
     }
 
     /// The component of a package mapped to a custom part (PCB11.4, X10): a version-pinned
@@ -212,7 +301,11 @@ impl ComponentDocuments {
     /// none, for a mapping to "the document as it is now"), with the package frame where the
     /// mapping's transform puts it. `None` (the package's own document is used) when the part is
     /// in the board's own document or its version doesn't make that part.
-    fn custom_component(&mut self, pkg: &Package, custom: &CustomPart) -> Result<Option<PackageComponent>, CommandError> {
+    fn custom_component(
+        &mut self,
+        pkg: &Package,
+        custom: &CustomPart,
+    ) -> Result<Option<PackageComponent>, CommandError> {
         let src = &custom.source;
         if src.document == self.consumer.id {
             return Ok(None);
@@ -221,33 +314,76 @@ impl ComponentDocuments {
             Some(v) => v,
             None => match self.resolver.latest(src.document) {
                 Some(v) => v.id(),
-                None => self.resolver.create_version(src.document, "", &format!("Created by PCB Studio for {}", self.board), self.now, &self.user).map_err(Self::err)?,
+                None => self
+                    .resolver
+                    .create_version(
+                        src.document,
+                        "",
+                        &format!("Created by PCB Studio for {}", self.board),
+                        self.now,
+                        &self.user,
+                    )
+                    .map_err(Self::err)?,
             },
         };
-        let Ok(at) = self.resolver.document_at(src.document, version) else { return Ok(None) };
-        let Some(el) = at.element(src.element).filter(|e| matches!(e.kind, ElementKind::PartStudio { .. })) else { return Ok(None) };
-        let build = self.rebuilder.get_or_insert_with(Rebuilder::new).rebuild(&el.active_features());
+        let Ok(at) = self.resolver.document_at(src.document, version) else {
+            return Ok(None);
+        };
+        let Some(el) = at
+            .element(src.element)
+            .filter(|e| matches!(e.kind, ElementKind::PartStudio { .. }))
+        else {
+            return Ok(None);
+        };
+        let build = self
+            .rebuilder
+            .get_or_insert_with(Rebuilder::new)
+            .rebuild(&el.active_features());
         if !build.parts.iter().any(|p| p.id == src.part) {
             return Ok(None);
         }
         let reference = SourceRef::version(Some(src.document), src.element, version);
-        let snap = self.resolver.resolve(reference, &self.consumer, None).map_err(Self::err)?;
+        let snap = self
+            .resolver
+            .resolve(reference, &self.consumer, None)
+            .map_err(Self::err)?;
         for l in &snap.links {
             if self.links.iter().all(|x| x.id() != l.id()) {
                 self.links.push(l.clone());
             }
         }
-        let (name, version_name) = snap.root_link().map(|l| (l.document_name.clone(), l.version_name.clone())).unwrap_or_default();
-        self.used.push(UsedDocument { document: src.document, name, package: pkg.name.clone(), version, version_name, created: false });
+        let (name, version_name) = snap
+            .root_link()
+            .map(|l| (l.document_name.clone(), l.version_name.clone()))
+            .unwrap_or_default();
+        self.used.push(UsedDocument {
+            document: src.document,
+            name,
+            package: pkg.name.clone(),
+            version,
+            version_name,
+            created: false,
+        });
         // The mapping puts the part into the package frame; the package frame in the part's
         // coordinates is its inverse.
         let frame = crate::create_assembly::pose_of(&custom.transform.motion()).inverse();
-        Ok(Some(PackageComponent { source: ComponentSource::External { reference, copy: snap.root, part: src.part }, frame }))
+        Ok(Some(PackageComponent {
+            source: ComponentSource::External {
+                reference,
+                copy: snap.root,
+                part: src.part,
+            },
+            frame,
+        }))
     }
 }
 
 impl ComponentProvider for ComponentDocuments {
-    fn component(&mut self, _s: &mut dyn Studio, pkg: &Package) -> Result<PackageComponent, CommandError> {
+    fn component(
+        &mut self,
+        _s: &mut dyn Studio,
+        pkg: &Package,
+    ) -> Result<PackageComponent, CommandError> {
         let k = (pkg.name.clone(), pkg.part_number.clone());
         if let Some(c) = self.made.get(&k) {
             return Ok(c.clone());
@@ -265,20 +401,45 @@ impl ComponentProvider for ComponentDocuments {
         };
         drop(lock);
         let reference = SourceRef::version(Some(document), studio, version);
-        let snap = self.resolver.resolve(reference, &self.consumer, None).map_err(Self::err)?;
+        let snap = self
+            .resolver
+            .resolve(reference, &self.consumer, None)
+            .map_err(Self::err)?;
         for l in &snap.links {
             if self.links.iter().all(|x| x.id() != l.id()) {
                 self.links.push(l.clone());
             }
         }
-        let (name, version_name) = snap.root_link().map(|l| (l.document_name.clone(), l.version_name.clone())).unwrap_or_default();
-        self.used.push(UsedDocument { document, name, package: pkg.name.clone(), version, version_name, created });
-        let c = PackageComponent { source: ComponentSource::External { reference, copy: snap.root, part }, frame: cadrs_core::assembly::Pose::IDENTITY };
+        let (name, version_name) = snap
+            .root_link()
+            .map(|l| (l.document_name.clone(), l.version_name.clone()))
+            .unwrap_or_default();
+        self.used.push(UsedDocument {
+            document,
+            name,
+            package: pkg.name.clone(),
+            version,
+            version_name,
+            created,
+        });
+        let c = PackageComponent {
+            source: ComponentSource::External {
+                reference,
+                copy: snap.root,
+                part,
+            },
+            frame: cadrs_core::assembly::Pose::IDENTITY,
+        };
         self.made.insert(k, c.clone());
         Ok(c)
     }
 
-    fn custom(&mut self, _s: &mut dyn Studio, pkg: &Package, custom: &CustomPart) -> Option<Result<PackageComponent, CommandError>> {
+    fn custom(
+        &mut self,
+        _s: &mut dyn Studio,
+        pkg: &Package,
+        custom: &CustomPart,
+    ) -> Option<Result<PackageComponent, CommandError>> {
         if let Some(c) = self.custom_made.get(&pkg.name) {
             return c.clone().map(Ok);
         }

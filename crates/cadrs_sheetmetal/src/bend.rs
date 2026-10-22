@@ -97,8 +97,12 @@ impl BendValue {
         let ba = self.allowance(r, t, theta)?;
         match calc {
             BendCalc::BendAllowance => Some(BendValue::Allowance(ba)),
-            BendCalc::KFactor => (theta.abs() > 1e-12 && t > 0.0).then(|| BendValue::KFactor((ba / theta - r) / t)),
-            BendCalc::BendDeduction => outside_setback(r, t, theta).map(|ossb| BendValue::Deduction(2.0 * ossb - ba)),
+            BendCalc::KFactor => {
+                (theta.abs() > 1e-12 && t > 0.0).then(|| BendValue::KFactor((ba / theta - r) / t))
+            }
+            BendCalc::BendDeduction => {
+                outside_setback(r, t, theta).map(|ossb| BendValue::Deduction(2.0 * ossb - ba))
+            }
         }
     }
 }

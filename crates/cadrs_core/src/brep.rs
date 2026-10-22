@@ -188,7 +188,10 @@ fn to_curve(piece: &Piece, curve: CurveId) -> kernel::Curve2 {
             sweep,
             source,
         },
-        Piece::Bezier(g) => kernel::Curve2::Bezier { poles: g.p.map(p), source },
+        Piece::Bezier(g) => kernel::Curve2::Bezier {
+            poles: g.p.map(p),
+            source,
+        },
     }
 }
 
@@ -279,16 +282,22 @@ pub fn extrude(
         [(b, n)] => (*b, n.clone()),
         [(first, _), rest @ ..] => {
             let tools: Vec<BodyId> = rest.iter().map(|(b, _)| *b).collect();
-            let merged = k.boolean(kernel::BoolOp::Union, *first, &tools).and_then(|r| {
-                let body = r.bodies[0];
-                let inputs: Vec<(BodyId, &BodyNames)> = bodies.iter().map(|(b, n)| (*b, n)).collect();
-                Ok((body, naming::name_body(k, body, op, &r.history, &inputs)?))
-            });
+            let merged = k
+                .boolean(kernel::BoolOp::Union, *first, &tools)
+                .and_then(|r| {
+                    let body = r.bodies[0];
+                    let inputs: Vec<(BodyId, &BodyNames)> =
+                        bodies.iter().map(|(b, n)| (*b, n)).collect();
+                    Ok((body, naming::name_body(k, body, op, &r.history, &inputs)?))
+                });
             release_all(k, &bodies);
             merged.map_err(|e| e.to_string())?
         }
     };
-    let n = groups.first().map(|g| normalize(g.frame.normal())).unwrap_or([0.0, 0.0, 1.0]);
+    let n = groups
+        .first()
+        .map(|g| normalize(g.frame.normal()))
+        .unwrap_or([0.0, 0.0, 1.0]);
     let geom = OpGeom::new(groups, if flip { scale_neg(n) } else { n }, depth);
     let geoms: Geoms = std::iter::once((op, std::sync::Arc::new(geom))).collect();
     let built = solid_of(k, body, &names, &geoms, Some(op))
@@ -354,7 +363,10 @@ impl Revolution {
     fn turn(&self, v: Vec3, angle: f64) -> Vec3 {
         let k = self.axis;
         let (s, c) = angle.sin_cos();
-        add(add(scale(v, c), scale(cross(k, v), s)), scale(k, dot(k, v) * (1.0 - c)))
+        add(
+            add(scale(v, c), scale(cross(k, v), s)),
+            scale(k, dot(k, v) * (1.0 - c)),
+        )
     }
 
     fn turn_point(&self, p: Vec3, angle: f64) -> Vec3 {
@@ -365,7 +377,13 @@ impl Revolution {
 impl OpGeom {
     /// A revolve's swept geometry (P3.4): the groups turned about `axis` through `origin`, from
     /// `start` radians through `sweep`.
-    pub fn revolve(groups: &[ProfileGroup], origin: Vec3, axis: Vec3, start: f64, sweep: f64) -> Self {
+    pub fn revolve(
+        groups: &[ProfileGroup],
+        origin: Vec3,
+        axis: Vec3,
+        start: f64,
+        sweep: f64,
+    ) -> Self {
         let axis = normalize(axis);
         Self {
             revolve: Some(Revolution {
@@ -410,14 +428,22 @@ impl OpGeom {
                 .groups
                 .iter()
                 .map(|g| GroupGeom {
-                    frame: PlaneFrame { origin: point(g.frame.origin), u: dir(g.frame.u), v: dir(g.frame.v) },
+                    frame: PlaneFrame {
+                        origin: point(g.frame.origin),
+                        u: dir(g.frame.u),
+                        v: dir(g.frame.v),
+                    },
                     n: dir(g.n),
                     ..g.clone()
                 })
                 .collect(),
             dir: dir(self.dir),
             depth: self.depth,
-            revolve: self.revolve.map(|rv| Revolution { origin: point(rv.origin), axis: dir(rv.axis), ..rv }),
+            revolve: self.revolve.map(|rv| Revolution {
+                origin: point(rv.origin),
+                axis: dir(rv.axis),
+                ..rv
+            }),
         }
     }
 
@@ -433,9 +459,18 @@ pub type Geoms = HashMap<OpId, std::sync::Arc<OpGeom>>;
 /// What a kernel face is.
 #[derive(Debug, Clone, Copy, PartialEq)]
 enum Class {
-    Cap { group: usize, end: bool, region: u64 },
+    Cap {
+        group: usize,
+        end: bool,
+        region: u64,
+    },
     /// `offset`: a thin wall's offset side of the piece.
-    Side { group: usize, ring: usize, piece: usize, offset: bool },
+    Side {
+        group: usize,
+        ring: usize,
+        piece: usize,
+        offset: bool,
+    },
     Unknown,
 }
 
@@ -446,12 +481,17 @@ fn piece_distance(piece: &Piece, p: Vec2) -> f64 {
         Piece::Arc(g) => g.distance(p),
         Piece::Ellipse { g, t0, sweep } => {
             let t = g.nearest_t(p);
-            let (lo, len) = if sweep >= 0.0 { (t0, sweep) } else { (t0 + sweep, -sweep) };
+            let (lo, len) = if sweep >= 0.0 {
+                (t0, sweep)
+            } else {
+                (t0 + sweep, -sweep)
+            };
             let rel = (t - lo).rem_euclid(std::f64::consts::TAU);
             if rel <= len + 1e-9 || len >= std::f64::consts::TAU - 1e-9 {
                 g.point_at(t).distance(p)
             } else {
-                p.distance(g.point_at(t0)).min(p.distance(g.point_at(t0 + sweep)))
+                p.distance(g.point_at(t0))
+                    .min(p.distance(g.point_at(t0 + sweep)))
             }
         }
         Piece::Bezier(g) => g.distance(p),
@@ -486,7 +526,11 @@ fn piece_param(piece: &Piece, p: Vec2) -> f64 {
         (start - t).rem_euclid(TAU)
     };
     // A closed piece's start is also its end: count it as the start.
-    let rel = if piece_closed(piece) && rel > TAU - 1e-9 { 0.0 } else { rel };
+    let rel = if piece_closed(piece) && rel > TAU - 1e-9 {
+        0.0
+    } else {
+        rel
+    };
     rel / sweep.abs().max(1e-300)
 }
 
@@ -534,7 +578,9 @@ fn chain(mut parts: Vec<Vec<Vec3>>, tol: f64) -> Vec<Vec<Vec3>> {
 fn class_name(op: OpId, g: &OpGeom, c: Class) -> Option<FaceName> {
     match c {
         Class::Cap { end, region, .. } => Some(FaceName::new(op, FaceOrigin::Cap { region, end })),
-        Class::Side { group, ring, piece, .. } => {
+        Class::Side {
+            group, ring, piece, ..
+        } => {
             let (region, pieces) = &g.groups[group].rings[ring];
             Some(FaceName::new(
                 op,
@@ -573,7 +619,12 @@ fn class_of_name(geoms: &Geoms, name: &FaceName) -> Class {
                         continue;
                     }
                     if let Some(piece) = pieces.iter().position(|(_, c)| curve_source(*c) == base) {
-                        return Class::Side { group, ring, piece, offset };
+                        return Class::Side {
+                            group,
+                            ring,
+                            piece,
+                            offset,
+                        };
                     }
                 }
             }
@@ -590,7 +641,9 @@ fn class_of_name(geoms: &Geoms, name: &FaceName) -> Class {
 fn inside_caps(name: &EdgeName) -> bool {
     match (name.faces[0].origin, name.faces[1].origin) {
         (FaceOrigin::Cap { end: a, .. }, FaceOrigin::Cap { end: b, .. }) => {
-            a == b && name.faces[0].op == name.faces[1].op && name.faces[0].origin != name.faces[1].origin
+            a == b
+                && name.faces[0].op == name.faces[1].op
+                && name.faces[0].origin != name.faces[1].origin
         }
         _ => false,
     }
@@ -606,7 +659,9 @@ pub fn solid_of(
     geoms: &Geoms,
     op: Option<OpId>,
 ) -> Result<Solid, String> {
-    let mesh = k.tessellate(body, tessellation()).map_err(|e| e.to_string())?;
+    let mesh = k
+        .tessellate(body, tessellation())
+        .map_err(|e| e.to_string())?;
     let edge_info = k.edges(body).map_err(|e| e.to_string())?;
     let face_info = k.faces(body).map_err(|e| e.to_string())?;
     let vertex_info = k.vertices(body).map_err(|e| e.to_string())?;
@@ -614,7 +669,9 @@ pub fn solid_of(
 
     let pos: Vec<Vec3> = mesh.positions.iter().map(|p| [p.x, p.y, p.z]).collect();
     let nrm: Vec<Vec3> = mesh.normals.iter().map(|n| [n.x, n.y, n.z]).collect();
-    let size = pos.iter().fold(0.0f64, |m, p| m.max(p[0].abs()).max(p[1].abs()).max(p[2].abs()));
+    let size = pos.iter().fold(0.0f64, |m, p| {
+        m.max(p[0].abs()).max(p[1].abs()).max(p[2].abs())
+    });
     let depth = op.and_then(|o| geoms.get(&o)).map_or(0.0, |g| g.depth);
     let extent = size.max(depth).max(1.0);
     let tol = 1e-6 * extent;
@@ -668,12 +725,18 @@ pub fn solid_of(
 
     // Edge names from the display faces (the history's names, unless a face was renamed from
     // geometry).
-    let edge_names = naming::name_edges(&face_names, &edge_info, naming::joint_tolerance(&edge_info));
+    let edge_names =
+        naming::name_edges(&face_names, &edge_info, naming::joint_tolerance(&edge_info));
     let mut polylines = HashMap::new();
     for (e, pts) in &mesh.edges {
         polylines.entry(*e).or_insert(pts);
     }
-    let polyline = |id: kernel::EdgeId| -> Vec<Vec3> { polylines.get(&id).map(|pts| pts.iter().map(|p| [p.x, p.y, p.z]).collect()).unwrap_or_default() };
+    let polyline = |id: kernel::EdgeId| -> Vec<Vec3> {
+        polylines
+            .get(&id)
+            .map(|pts| pts.iter().map(|p| [p.x, p.y, p.z]).collect())
+            .unwrap_or_default()
+    };
     // Tangent-connected groups of kernel edges (P3.7, X12 "Tangent connected"): edges meeting at
     // a vertex with parallel tangents (within the kernel's `TANGENT_ANGLE`) are one group.
     let groups = tangent_groups(&edge_info, &vertex_info);
@@ -684,7 +747,11 @@ pub fn solid_of(
     for e in &edge_info {
         for f in e.faces.iter().flatten() {
             if let Some(n) = sides.get_mut(f.0 as usize) {
-                *n += if e.curve == kernel::CurveKind::Line { 1 } else { 4 };
+                *n += if e.curve == kernel::CurveKind::Line {
+                    1
+                } else {
+                    4
+                };
             }
         }
     }
@@ -749,7 +816,10 @@ pub fn solid_of(
             Some(kp) => {
                 let kn = kp.normal.into_inner();
                 if dot(f.normal(), [kn.x, kn.y, kn.z]) < 0.0 {
-                    PlaneFrame { v: [-f.v[0], -f.v[1], -f.v[2]], ..f }
+                    PlaneFrame {
+                        v: [-f.v[0], -f.v[1], -f.v[2]],
+                        ..f
+                    }
                 } else {
                     f
                 }
@@ -779,8 +849,12 @@ pub fn solid_of(
     let mut kernel_planes: Vec<Option<kernel::Plane>> = Vec::new();
     let mut remap: Vec<u32> = vec![u32::MAX; pos.len()];
     for (name, fis) in shown.iter().zip(&members) {
-        if let Some([r, g, b, alpha]) = fis.iter().find_map(|&fi| colors.get(fi).copied().flatten()) {
-            out.looks.push((*name, crate::appearance::Appearance::rgb(r, g, b).with_alpha(alpha)));
+        if let Some([r, g, b, alpha]) = fis.iter().find_map(|&fi| colors.get(fi).copied().flatten())
+        {
+            out.looks.push((
+                *name,
+                crate::appearance::Appearance::rgb(r, g, b).with_alpha(alpha),
+            ));
         }
         let first_triangle = out.triangle_count();
         for &fi in fis {
@@ -812,9 +886,19 @@ pub fn solid_of(
             .collect();
         let face_index = out.faces.len();
         // The exact centroid of its kernel faces together, and the axis of a face of revolution.
-        let (area, moment) = fis.iter().filter_map(|&fi| face_info.get(fi)).fold((0.0, [0.0; 3]), |(a, m), f| {
-            (a + f.area, [m[0] + f.center.x * f.area, m[1] + f.center.y * f.area, m[2] + f.center.z * f.area])
-        });
+        let (area, moment) =
+            fis.iter()
+                .filter_map(|&fi| face_info.get(fi))
+                .fold((0.0, [0.0; 3]), |(a, m), f| {
+                    (
+                        a + f.area,
+                        [
+                            m[0] + f.center.x * f.area,
+                            m[1] + f.center.y * f.area,
+                            m[2] + f.center.z * f.area,
+                        ],
+                    )
+                });
         let center = (area > 0.0).then(|| [moment[0] / area, moment[1] / area, moment[2] / area]);
         let axis = face_info.get(fis[0]).and_then(|f| f.axis).map(|a| {
             let (o, d) = (a.origin, a.dir.into_inner());
@@ -839,11 +923,21 @@ pub fn solid_of(
             (Some(rv), Some((o, d))) => {
                 let off = sub(o, rv.origin);
                 let along = cross(off, rv.axis);
-                dot(normalize(d), rv.axis).abs() > 1.0 - 1e-9 && dot(along, along).sqrt() < tol_piece
+                dot(normalize(d), rv.axis).abs() > 1.0 - 1e-9
+                    && dot(along, along).sqrt() < tol_piece
             }
             _ => true,
         };
-        if let (Class::Side { group, ring, piece, offset }, Some(g)) = (class, geoms.get(&name.op).filter(|g| revolved_here(g))) {
+        if let (
+            Class::Side {
+                group,
+                ring,
+                piece,
+                offset,
+            },
+            Some(g),
+        ) = (class, geoms.get(&name.op).filter(|g| revolved_here(g)))
+        {
             let gr = &g.groups[group];
             let p = &gr.rings[ring].1[piece].0;
             if let Some(rv) = g.revolve {
@@ -852,7 +946,11 @@ pub fn solid_of(
                     let verts: Vec<usize> = {
                         let mut v: Vec<usize> = fis
                             .iter()
-                            .flat_map(|&fi| face_tris[fi].iter().flat_map(|&t| mesh.indices[t].map(|v| v as usize)))
+                            .flat_map(|&fi| {
+                                face_tris[fi]
+                                    .iter()
+                                    .flat_map(|&t| mesh.indices[t].map(|v| v as usize))
+                            })
                             .collect();
                         v.sort_unstable();
                         v.dedup();
@@ -864,7 +962,11 @@ pub fn solid_of(
                 let verts: Vec<usize> = {
                     let mut v: Vec<usize> = fis
                         .iter()
-                        .flat_map(|&fi| face_tris[fi].iter().flat_map(|&t| mesh.indices[t].map(|v| v as usize)))
+                        .flat_map(|&fi| {
+                            face_tris[fi]
+                                .iter()
+                                .flat_map(|&t| mesh.indices[t].map(|v| v as usize))
+                        })
                         .collect();
                     v.sort_unstable();
                     v.dedup();
@@ -872,18 +974,33 @@ pub fn solid_of(
                 };
                 let tris: Vec<[usize; 3]> = fis
                     .iter()
-                    .flat_map(|&fi| face_tris[fi].iter().map(|&t| mesh.indices[t].map(|v| v as usize)))
+                    .flat_map(|&fi| {
+                        face_tris[fi]
+                            .iter()
+                            .map(|&t| mesh.indices[t].map(|v| v as usize))
+                    })
                     .collect();
-                rulings(&mut out, face_index, gr, g.dir, p, &verts, &tris, &pos, &nrm, tol_piece, !offset);
+                rulings(
+                    &mut out, face_index, gr, g.dir, p, &verts, &tris, &pos, &nrm, tol_piece,
+                    !offset,
+                );
             }
         }
     }
 
     // The other names of merged faces, each with the frame the face has under that name.
     for (alias, primary) in &names.aliases {
-        let Some(i) = out.faces.iter().position(|f| f.name == *primary) else { continue };
-        let plane = out.faces[i].plane.and_then(|_| frame_of(alias, kernel_planes[i]));
-        out.face_aliases.push(crate::solid::FaceAlias { name: *alias, face: *primary, plane });
+        let Some(i) = out.faces.iter().position(|f| f.name == *primary) else {
+            continue;
+        };
+        let plane = out.faces[i]
+            .plane
+            .and_then(|_| frame_of(alias, kernel_planes[i]));
+        out.face_aliases.push(crate::solid::FaceAlias {
+            name: *alias,
+            face: *primary,
+            plane,
+        });
     }
 
     // One edge per name where its pieces join up.
@@ -905,7 +1022,8 @@ pub fn solid_of(
             Some(i) => {
                 edge_parts[i].push(pts);
                 edge_smooth[i] &= smooth;
-                let keep = matches!((&edge_circles[i], &circle), (Some(a), Some(b)) if same_circle(a, b));
+                let keep =
+                    matches!((&edge_circles[i], &circle), (Some(a), Some(b)) if same_circle(a, b));
                 if !keep {
                     edge_circles[i] = None;
                 }
@@ -920,9 +1038,21 @@ pub fn solid_of(
             }
         }
     }
-    for ((((name, parts), circle), group), smooth) in edge_order.into_iter().zip(edge_parts).zip(edge_circles).zip(edge_groups).zip(edge_smooth) {
+    for ((((name, parts), circle), group), smooth) in edge_order
+        .into_iter()
+        .zip(edge_parts)
+        .zip(edge_circles)
+        .zip(edge_groups)
+        .zip(edge_smooth)
+    {
         for points in chain(parts, tol_piece) {
-            out.edges.push(SolidEdge { name, points, circle, tangent_group: Some(group), smooth });
+            out.edges.push(SolidEdge {
+                name,
+                points,
+                circle,
+                tangent_group: Some(group),
+                smooth,
+            });
         }
     }
 
@@ -982,7 +1112,10 @@ fn rulings(
     // (A curve's pieces may be cut apart, so any piece of the sketch will do.)
     let off_sketch = |foot: Vec3| {
         let q = g.frame.to_sketch(foot);
-        g.rings.iter().flat_map(|(_, ps)| ps).all(|(p, _)| piece_distance(p, q) > 100.0 * tol)
+        g.rings
+            .iter()
+            .flat_map(|(_, ps)| ps)
+            .all(|(p, _)| piece_distance(p, q) > 100.0 * tol)
     };
     if on_piece && pts.iter().any(|(_, foot, ..)| off_sketch(*foot)) {
         return;
@@ -991,7 +1124,11 @@ fn rulings(
     // (place along the piece, height), crossed by the line at `param`. For a lone mesh point
     // (the face's own top and bottom edges are meshed at different places: a face merged from
     // several, or notched by a boolean).
-    let flat: std::collections::HashMap<usize, (f64, f64)> = verts.iter().zip(&pts).map(|(&v, p)| (v, (p.0, p.2))).collect();
+    let flat: std::collections::HashMap<usize, (f64, f64)> = verts
+        .iter()
+        .zip(&pts)
+        .map(|(&v, p)| (v, (p.0, p.2)))
+        .collect();
     let period = match *piece {
         Piece::Line(..) | Piece::Bezier(..) => None,
         Piece::Arc(a) => Some(std::f64::consts::TAU / a.sweep.abs().max(1e-300)),
@@ -1008,7 +1145,13 @@ fn rulings(
     };
     let mut segs: Vec<(f64, (f64, f64), (f64, f64))> = Vec::new();
     for t in tris {
-        let Some(mut c) = t.iter().map(|v| flat.get(v).copied()).collect::<Option<Vec<(f64, f64)>>>() else { continue };
+        let Some(mut c) = t
+            .iter()
+            .map(|v| flat.get(v).copied())
+            .collect::<Option<Vec<(f64, f64)>>>()
+        else {
+            continue;
+        };
         if let Some(per) = period {
             let q0 = c[0].0;
             for q in c.iter_mut().skip(1) {
@@ -1031,10 +1174,21 @@ fn rulings(
         let m = 1e-9 + 1e-12 * (1.0 + shift.abs() + a.0.abs() + b.0.abs());
         (a.0.min(b.0) - shift - m, a.0.max(b.0) - shift + m)
     };
-    let (plo, phi) = segs.iter().map(span).fold((f64::INFINITY, f64::NEG_INFINITY), |(l, h), (a, b)| (l.min(a), h.max(b)));
+    let (plo, phi) = segs
+        .iter()
+        .map(span)
+        .fold((f64::INFINITY, f64::NEG_INFINITY), |(l, h), (a, b)| {
+            (l.min(a), h.max(b))
+        });
     let nb = (segs.len() / 4).clamp(1, 4096);
     let width = (phi - plo) / nb as f64;
-    let bucket = |x: f64| -> usize { if width > 0.0 { (((x - plo) / width).floor().max(0.0) as usize).min(nb - 1) } else { 0 } };
+    let bucket = |x: f64| -> usize {
+        if width > 0.0 {
+            (((x - plo) / width).floor().max(0.0) as usize).min(nb - 1)
+        } else {
+            0
+        }
+    };
     let mut buckets: Vec<Vec<usize>> = vec![Vec::new(); nb];
     // (Segments without a range, from a coordinate that isn't a number, are tested always.)
     let mut always: Vec<usize> = Vec::new();
@@ -1058,14 +1212,21 @@ fn rulings(
         } else {
             &[]
         };
-        for &i in near.iter().chain(if param.is_nan() { &[][..] } else { &always[..] }) {
+        for &i in near
+            .iter()
+            .chain(if param.is_nan() { &[][..] } else { &always[..] })
+        {
             let (shift, a, b) = segs[i];
             let x = param + shift;
             let (lo, hi) = (a.0.min(b.0), a.0.max(b.0));
             if x < lo - 1e-9 || x > hi + 1e-9 {
                 continue;
             }
-            let h = if hi - lo < 1e-12 { a.1.min(b.1) } else { a.1 + (b.1 - a.1) * (x - a.0) / (b.0 - a.0) };
+            let h = if hi - lo < 1e-12 {
+                a.1.min(b.1)
+            } else {
+                a.1 + (b.1 - a.1) * (x - a.0) / (b.0 - a.0)
+            };
             let h2 = if hi - lo < 1e-12 { a.1.max(b.1) } else { h };
             out = Some(match out {
                 Some((l, u)) => (l.min(h), u.max(h2)),
@@ -1077,14 +1238,21 @@ fn rulings(
     pts.sort_by(|a, b| a.0.total_cmp(&b.0));
     let (hmin, hmax) = pts
         .iter()
-        .fold((f64::INFINITY, f64::NEG_INFINITY), |(lo, hi), p| (lo.min(p.2), hi.max(p.2)));
+        .fold((f64::INFINITY, f64::NEG_INFINITY), |(lo, hi), p| {
+            (lo.min(p.2), hi.max(p.2))
+        });
     if hmax - hmin < tol {
         return;
     }
     // Group points with the same foot.
     let mut groups: Vec<(f64, Vec3, f64, f64, Vec3)> = Vec::new();
     for (param, foot, h, n) in pts {
-        match groups.iter_mut().rev().take(4).find(|g| dist(g.1, foot) < 10.0 * tol) {
+        match groups
+            .iter_mut()
+            .rev()
+            .take(4)
+            .find(|g| dist(g.1, foot) < 10.0 * tol)
+        {
             Some(gr) => {
                 gr.2 = gr.2.min(h);
                 gr.3 = gr.3.max(h);
@@ -1098,8 +1266,18 @@ fn rulings(
         .map(|(param, foot, lo, hi, n)| {
             // A lone point (an end the mesh didn't pair): as far as the face's triangles reach
             // there, else the face's whole height.
-            let (lo, hi) = if hi - lo < tol { reach(param).filter(|(l, h)| h - l >= tol).unwrap_or((hmin, hmax)) } else { (lo, hi) };
-            (add(foot, scale(dir, lo)), add(foot, scale(dir, hi)), normalize(n))
+            let (lo, hi) = if hi - lo < tol {
+                reach(param)
+                    .filter(|(l, h)| h - l >= tol)
+                    .unwrap_or((hmin, hmax))
+            } else {
+                (lo, hi)
+            };
+            (
+                add(foot, scale(dir, lo)),
+                add(foot, scale(dir, hi)),
+                normalize(n),
+            )
         })
         .collect();
     if along.len() < 2 {
@@ -1158,7 +1336,12 @@ fn meridians(
 ) {
     use std::f64::consts::TAU;
     let w = |p: Vec2| g.frame.to_world(p);
-    let dirw = |v: Vec2| add(scale(normalize(g.frame.u), v.x), scale(normalize(g.frame.v), v.y));
+    let dirw = |v: Vec2| {
+        add(
+            scale(normalize(g.frame.u), v.x),
+            scale(normalize(g.frame.v), v.y),
+        )
+    };
     // The piece's points and in-plane normals (one side, consistently).
     let profile: Vec<(Vec3, Vec3)> = match *piece {
         Piece::Line(a, b) => {
@@ -1204,7 +1387,10 @@ fn meridians(
     // The normals point out of the material, as the mesh's do (compared at the mesh point
     // nearest the first profile point, turned to where the sweep starts).
     let profile: Vec<(Vec3, Vec3)> = {
-        let (p0, n0) = (rv.turn_point(profile[0].0, rv.start), rv.turn(profile[0].1, rv.start));
+        let (p0, n0) = (
+            rv.turn_point(profile[0].0, rv.start),
+            rv.turn(profile[0].1, rv.start),
+        );
         let nearest = verts
             .iter()
             .min_by(|a, b| dist(pos[**a], p0).total_cmp(&dist(pos[**b], p0)))
@@ -1220,7 +1406,12 @@ fn meridians(
         let v = sub(p, rv.origin);
         sub(v, scale(rv.axis, dot(v, rv.axis)))
     };
-    let Some(u0) = profile.iter().map(|(p, _)| off(*p)).find(|v| dot(*v, *v) > 1e-18).map(normalize) else {
+    let Some(u0) = profile
+        .iter()
+        .map(|(p, _)| off(*p))
+        .find(|v| dot(*v, *v) > 1e-18)
+        .map(normalize)
+    else {
         return;
     };
     let w0 = cross(rv.axis, u0);
@@ -1284,18 +1475,30 @@ fn meridians(
         let mut rows: Vec<Vec<(Vec3, Vec3)>> = Vec::new();
         let mut prev: Option<f64> = None;
         for &t in &angles {
-            let gap = prev.is_some_and(|p| (t - p).abs() > 1.5 * step && !(closed && t == angles[0]));
+            let gap =
+                prev.is_some_and(|p| (t - p).abs() > 1.5 * step && !(closed && t == angles[0]));
             if gap && rows.len() > 1 {
-                out.grids.push(SurfaceGrid { face: face_index, rows: std::mem::take(&mut rows) });
+                out.grids.push(SurfaceGrid {
+                    face: face_index,
+                    rows: std::mem::take(&mut rows),
+                });
             } else if gap {
                 rows.clear();
             }
             prev = Some(t);
             let theta = rv.start + sign * t;
-            rows.push(profile.iter().map(|(p, nn)| (rv.turn_point(*p, theta), rv.turn(*nn, theta))).collect());
+            rows.push(
+                profile
+                    .iter()
+                    .map(|(p, nn)| (rv.turn_point(*p, theta), rv.turn(*nn, theta)))
+                    .collect(),
+            );
         }
         if rows.len() > 1 {
-            out.grids.push(SurfaceGrid { face: face_index, rows });
+            out.grids.push(SurfaceGrid {
+                face: face_index,
+                rows,
+            });
         }
         return;
     }
@@ -1404,7 +1607,10 @@ fn tangent_groups(edges: &[kernel::EdgeInfo], vertices: &[kernel::VertexInfo]) -
             .collect();
         for a in 0..at.len() {
             for b in a + 1..at.len() {
-                let tangent = at[a].1.iter().any(|x| at[b].1.iter().any(|y| x.dot(y).abs() >= cos));
+                let tangent = at[a]
+                    .1
+                    .iter()
+                    .any(|x| at[b].1.iter().any(|y| x.dot(y).abs() >= cos));
                 if tangent {
                     let (ra, rb) = (find(&mut parent, at[a].0), find(&mut parent, at[b].0));
                     if ra != rb {
@@ -1474,7 +1680,10 @@ fn classify(
                     .take(16)
                     .find_map(|(_, c)| {
                         let p = gr.frame.to_sketch(*c);
-                        gr.regions.iter().find(|(_, r)| r.contains(p)).map(|(i, _)| *i)
+                        gr.regions
+                            .iter()
+                            .find(|(_, r)| r.contains(p))
+                            .map(|(i, _)| *i)
                     })
                     .or_else(|| gr.regions.first().map(|(i, _)| *i));
                 if let Some(region) = region {
@@ -1487,7 +1696,9 @@ fn classify(
             }
             continue;
         }
-        let across = verts.iter().all(|&v| dot(normalize(nrm[v]), gr.n).abs() < 1e-5);
+        let across = verts
+            .iter()
+            .all(|&v| dot(normalize(nrm[v]), gr.n).abs() < 1e-5);
         let within = heights.iter().all(|h| *h > -tol && *h < g.depth + tol);
         if !(across && within) {
             continue;
@@ -1576,7 +1787,11 @@ fn face_frame(g: &OpGeom, class: Class, kernel_plane: Option<kernel::Plane>) -> 
             // The end cap looks along the sweep, the start cap against it.
             let outward = if end { g.dir } else { scale_neg(g.dir) };
             Some(if dot(outward, gr.n) > 0.0 {
-                PlaneFrame { origin, u: f.u, v: f.v }
+                PlaneFrame {
+                    origin,
+                    u: f.u,
+                    v: f.v,
+                }
             } else {
                 PlaneFrame {
                     origin,
@@ -1585,7 +1800,12 @@ fn face_frame(g: &OpGeom, class: Class, kernel_plane: Option<kernel::Plane>) -> 
                 }
             })
         }
-        Class::Side { group, ring, piece, offset: false } => {
+        Class::Side {
+            group,
+            ring,
+            piece,
+            offset: false,
+        } => {
             let gr = &g.groups[group];
             if !g.along_normal(gr) {
                 return None;
@@ -1597,7 +1817,11 @@ fn face_frame(g: &OpGeom, class: Class, kernel_plane: Option<kernel::Plane>) -> 
             let t = normalize(sub(pb, pa));
             let forward = dot(g.dir, gr.n) > 0.0;
             // u × v must be the outward normal.
-            let (u, v) = if forward { (t, g.dir) } else { (scale_neg(t), g.dir) };
+            let (u, v) = if forward {
+                (t, g.dir)
+            } else {
+                (scale_neg(t), g.dir)
+            };
             let outward = cross(u, v);
             let origin = scale(outward, dot(pa, outward));
             Some(PlaneFrame { origin, u, v })

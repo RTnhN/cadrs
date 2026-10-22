@@ -33,7 +33,10 @@ use crate::transform::{Composite, CompositeFeature, TransformFeature, TransformT
 type CopyLook = (PartId, Option<PartId>, u32, PartKind, Option<Appearance>);
 
 fn motion_of(p: &crate::assembly::Pose) -> Motion {
-    Motion { linear: Matrix3::from_row_slice(&p.rotation.concat()), translation: Vector3::from(p.translation) }
+    Motion {
+        linear: Matrix3::from_row_slice(&p.rotation.concat()),
+        translation: Vector3::from(p.translation),
+    }
 }
 
 /// What a Transform does to space.
@@ -64,8 +67,15 @@ impl Map {
         let arr = |a: Vector3<f64>| [a.x, a.y, a.z];
         let origin = self.point(&Point3::from(v(f.origin))).coords;
         match self {
-            Map::Rigid(m) => PlaneFrame { origin: arr(origin), u: arr(m.vector(&v(f.u))), v: arr(m.vector(&v(f.v))) },
-            Map::Scale { .. } => PlaneFrame { origin: arr(origin), ..*f },
+            Map::Rigid(m) => PlaneFrame {
+                origin: arr(origin),
+                u: arr(m.vector(&v(f.u))),
+                v: arr(m.vector(&v(f.v))),
+            },
+            Map::Scale { .. } => PlaneFrame {
+                origin: arr(origin),
+                ..*f
+            },
         }
     }
 }
@@ -85,12 +95,21 @@ fn frame_motion(f: &PlaneFrame) -> Result<Motion, String> {
     let u = u.normalize();
     let n = n.normalize();
     let v = n.cross(&u);
-    Ok(Motion { linear: Matrix3::from_columns(&[u, v, n]), translation: v3(f.origin) })
+    Ok(Motion {
+        linear: Matrix3::from_columns(&[u, v, n]),
+        translation: v3(f.origin),
+    })
 }
 
 impl Rebuilder {
     /// The Transform feature.
-    pub(in crate::rebuild) fn transform(&mut self, before: &[Feature], id: FeatureId, x: &TransformFeature, state: &Arc<State>) -> Result<Output, String> {
+    pub(in crate::rebuild) fn transform(
+        &mut self,
+        before: &[Feature],
+        id: FeatureId,
+        x: &TransformFeature,
+        state: &Arc<State>,
+    ) -> Result<Output, String> {
         if let Some(p) = x.problem() {
             return Err(p.into());
         }
@@ -111,7 +130,10 @@ impl Rebuilder {
         if !x.copies() {
             let boards: Vec<PartId> = parts.clone();
             for out in state.derived.values() {
-                for b in boards.iter().filter(|b| out.boards.iter().any(|c| c.part == **b)) {
+                for b in boards
+                    .iter()
+                    .filter(|b| out.boards.iter().any(|c| c.part == **b))
+                {
                     for c in out.components_of(*b) {
                         if !parts.contains(&c) && state.part(c).is_some() {
                             parts.push(c);
@@ -123,7 +145,18 @@ impl Rebuilder {
         let missing = x.parts.iter().filter(|p| state.part(**p).is_none()).count();
         let map = self.transform_map(before, x, state)?;
         let mut out = if parts.is_empty() && x.context.is_empty() {
-            Output { state: state.clone(), error: None, warning: None, contacts: None, owned: Vec::new(), stage: None, axis: None, dots: None, uses: Vec::new(), arrows: Vec::new() }
+            Output {
+                state: state.clone(),
+                error: None,
+                warning: None,
+                contacts: None,
+                owned: Vec::new(),
+                stage: None,
+                axis: None,
+                dots: None,
+                uses: Vec::new(),
+                arrows: Vec::new(),
+            }
         } else if x.copies() {
             self.transform_copies(id, &parts, x, &map, state)?
         } else {
@@ -133,7 +166,13 @@ impl Rebuilder {
         if !x.connectors.is_empty() {
             let mut next = (*out.state).clone();
             for c in &x.connectors {
-                let frame = super::super::connector_frame(before, state, c).map_err(|e| if e.is_empty() { "A mate connector to transform no longer exists".to_string() } else { e })?;
+                let frame = super::super::connector_frame(before, state, c).map_err(|e| {
+                    if e.is_empty() {
+                        "A mate connector to transform no longer exists".to_string()
+                    } else {
+                        e
+                    }
+                })?;
                 let moved = map.frame(&frame);
                 let owner = match c {
                     crate::mate::ConnectorRef::Feature(f) => state.connector_owners.get(f).copied(),
@@ -141,7 +180,11 @@ impl Rebuilder {
                 };
                 let key = match (x.copies(), c) {
                     (false, crate::mate::ConnectorRef::Feature(f)) => *f,
-                    (false, _) => return Err("An implicit mate connector can only be copied: check Copy part".into()),
+                    (false, _) => {
+                        return Err(
+                            "An implicit mate connector can only be copied: check Copy part".into(),
+                        );
+                    }
                     (true, _) => id,
                 };
                 next.connectors.insert(key, moved);
@@ -163,12 +206,19 @@ impl Rebuilder {
     }
 
     /// What the Transform's type and fields do to space.
-    fn transform_map(&self, before: &[Feature], x: &TransformFeature, state: &State) -> Result<Map, String> {
+    fn transform_map(
+        &self,
+        before: &[Feature],
+        x: &TransformFeature,
+        state: &State,
+    ) -> Result<Map, String> {
         let sign = if x.flip { -1.0 } else { 1.0 };
         Ok(match x.transform_type {
             TransformType::TranslateByLine => {
                 let line = x.line.ok_or("Select a line to translate along")?;
-                Map::Rigid(Motion::translation(self.line_vector(before, state, &line)? * sign))
+                Map::Rigid(Motion::translation(
+                    self.line_vector(before, state, &line)? * sign,
+                ))
             }
             TransformType::TranslateByDistance => {
                 let d = x.direction.ok_or("Select a direction")?;
@@ -178,13 +228,25 @@ impl Rebuilder {
                     .into_inner();
                 Map::Rigid(Motion::translation(u * x.distance * sign))
             }
-            TransformType::TranslateXyz => Map::Rigid(Motion::translation(Vector3::new(x.dx, x.dy, x.dz))),
+            TransformType::TranslateXyz => {
+                Map::Rigid(Motion::translation(Vector3::new(x.dx, x.dy, x.dz)))
+            }
             TransformType::MateConnectors => {
                 let from = x.from.ok_or("Select the mate connector to move from")?;
                 let to = x.to.ok_or("Select the mate connector to move to")?;
-                let lost = |e: String| if e.is_empty() { "A mate connector no longer exists".to_string() } else { e };
-                let a = frame_motion(&super::super::connector_frame(before, state, &from).map_err(lost)?)?;
-                let mut b = frame_motion(&super::super::connector_frame(before, state, &to).map_err(lost)?)?;
+                let lost = |e: String| {
+                    if e.is_empty() {
+                        "A mate connector no longer exists".to_string()
+                    } else {
+                        e
+                    }
+                };
+                let a = frame_motion(
+                    &super::super::connector_frame(before, state, &from).map_err(lost)?,
+                )?;
+                let mut b = frame_motion(
+                    &super::super::connector_frame(before, state, &to).map_err(lost)?,
+                )?;
                 // Flip primary axis: half a turn about the destination's X (its Z and Y reversed);
                 // then the secondary axis turned about the (flipped) Z.
                 if x.flip_primary {
@@ -193,7 +255,10 @@ impl Rebuilder {
                 }
                 let turn = x.secondary.degrees().to_radians();
                 if turn != 0.0 {
-                    let (u, v) = (b.linear.column(0).into_owned(), b.linear.column(1).into_owned());
+                    let (u, v) = (
+                        b.linear.column(0).into_owned(),
+                        b.linear.column(1).into_owned(),
+                    );
                     let (s, c) = turn.sin_cos();
                     b.linear.set_column(0, &(u * c + v * s));
                     b.linear.set_column(1, &(v * c - u * s));
@@ -202,27 +267,42 @@ impl Rebuilder {
             }
             TransformType::Rotate => {
                 let a = x.axis.ok_or("Select an axis of rotation")?;
-                let axis = self.axis(before, state, &a).map_err(|e| e.replace("revolve axis", "axis of rotation"))?;
+                let axis = self
+                    .axis(before, state, &a)
+                    .map_err(|e| e.replace("revolve axis", "axis of rotation"))?;
                 Map::Rigid(Motion::rotation(&axis, x.angle.to_radians() * sign))
             }
             TransformType::CopyInPlace => Map::Rigid(Motion::identity()),
             TransformType::ScaleUniformly => {
                 let center = match &x.scale_point {
                     Some(c) => {
-                        let f = super::super::connector_frame(before, state, c)
-                            .map_err(|e| if e.is_empty() { "The point to scale about no longer exists".to_string() } else { e })?;
+                        let f = super::super::connector_frame(before, state, c).map_err(|e| {
+                            if e.is_empty() {
+                                "The point to scale about no longer exists".to_string()
+                            } else {
+                                e
+                            }
+                        })?;
                         Point3::from(v3(f.origin))
                     }
                     None => Point3::origin(),
                 };
-                Map::Scale { center, factor: x.scale }
+                Map::Scale {
+                    center,
+                    factor: x.scale,
+                }
             }
         })
     }
 
     /// Translate by line: from the line's first end to its second (a straight part edge or a
     /// sketch line).
-    fn line_vector(&self, before: &[Feature], state: &State, line: &DirectionRef) -> Result<Vector3<f64>, String> {
+    fn line_vector(
+        &self,
+        before: &[Feature],
+        state: &State,
+        line: &DirectionRef,
+    ) -> Result<Vector3<f64>, String> {
         let lost = || "The line to translate along no longer exists".to_string();
         let (a, b) = match line {
             DirectionRef::Edge(r) => {
@@ -231,20 +311,34 @@ impl Rebuilder {
                     .and_then(|p| p.part.solid.edge(&r.edge))
                     .or_else(|| state.parts.iter().find_map(|p| p.part.solid.edge(&r.edge)))
                     .ok_or_else(lost)?;
-                let (a, b) = (v3(edge.points[0]), v3(*edge.points.last().ok_or_else(lost)?));
-                let straight = edge.points.iter().all(|p| (b - a).cross(&(v3(*p) - a)).norm() < 1e-6 * (b - a).norm_squared().max(1e-12));
+                let (a, b) = (
+                    v3(edge.points[0]),
+                    v3(*edge.points.last().ok_or_else(lost)?),
+                );
+                let straight = edge.points.iter().all(|p| {
+                    (b - a).cross(&(v3(*p) - a)).norm() < 1e-6 * (b - a).norm_squared().max(1e-12)
+                });
                 if !straight || edge.circle.is_some() {
                     return Err("Translate by line needs a straight edge".into());
                 }
                 (a, b)
             }
             DirectionRef::SketchLine { sketch, curve } => {
-                let sk = before.iter().find(|f| f.id == *sketch).and_then(|f| f.sketch()).ok_or_else(lost)?;
+                let sk = before
+                    .iter()
+                    .find(|f| f.id == *sketch)
+                    .and_then(|f| f.sketch())
+                    .ok_or_else(lost)?;
                 let frame = sk.plane.ok_or_else(lost)?.frame();
-                let CurveKind::Line { a, b } = sk.geometry.curves.get(*curve).ok_or_else(lost)?.kind else {
+                let CurveKind::Line { a, b } =
+                    sk.geometry.curves.get(*curve).ok_or_else(lost)?.kind
+                else {
                     return Err("Translate by line needs a sketch line".into());
                 };
-                (v3(frame.to_world(sk.geometry.pos(a))), v3(frame.to_world(sk.geometry.pos(b))))
+                (
+                    v3(frame.to_world(sk.geometry.pos(a))),
+                    v3(frame.to_world(sk.geometry.pos(b))),
+                )
             }
             _ => return Err("Translate by line needs a straight edge or a sketch line".into()),
         };
@@ -266,31 +360,62 @@ impl Rebuilder {
     /// The names of `new`, a face-for-face copy of `old` (named `source`) moved by `map`: the
     /// faces its originals', the edges and vertices too where they are the original's in the same
     /// order (else named from the faces).
-    fn carried_names(&self, old: BodyId, new: BodyId, history: &cadrs_kernel::History, source: &BodyNames, op: cadrs_kernel::OpId, map: &Map) -> Result<BodyNames, String> {
+    fn carried_names(
+        &self,
+        old: BodyId,
+        new: BodyId,
+        history: &cadrs_kernel::History,
+        source: &BodyNames,
+        op: cadrs_kernel::OpId,
+        map: &Map,
+    ) -> Result<BodyNames, String> {
         let n = self.kernel.faces(new).map_err(|e| e.to_string())?.len();
         let mut faces: Vec<Option<FaceName>> = vec![None; n];
         for (f, input) in &history.modified {
-            if let (Some(slot), Some(name)) = (faces.get_mut(f.0 as usize), source.face(input.face)) {
+            if let (Some(slot), Some(name)) = (faces.get_mut(f.0 as usize), source.face(input.face))
+            {
                 *slot = Some(name);
             }
         }
         let faces: Vec<FaceName> = faces
             .into_iter()
             .enumerate()
-            .map(|(i, f)| f.unwrap_or_else(|| FaceName::new(op, FaceOrigin::Unnamed { index: i as u32 })))
+            .map(|(i, f)| {
+                f.unwrap_or_else(|| FaceName::new(op, FaceOrigin::Unnamed { index: i as u32 }))
+            })
             .collect();
-        let (eo, en) = (self.kernel.edges(old).map_err(|e| e.to_string())?, self.kernel.edges(new).map_err(|e| e.to_string())?);
-        let (vo, vn) = (self.kernel.vertices(old).map_err(|e| e.to_string())?, self.kernel.vertices(new).map_err(|e| e.to_string())?);
-        let size = en.iter().map(|e| e.mid.coords.amax()).fold(1.0f64, f64::max);
+        let (eo, en) = (
+            self.kernel.edges(old).map_err(|e| e.to_string())?,
+            self.kernel.edges(new).map_err(|e| e.to_string())?,
+        );
+        let (vo, vn) = (
+            self.kernel.vertices(old).map_err(|e| e.to_string())?,
+            self.kernel.vertices(new).map_err(|e| e.to_string())?,
+        );
+        let size = en
+            .iter()
+            .map(|e| e.mid.coords.amax())
+            .fold(1.0f64, f64::max);
         let tol = 1e-6 * size;
         let same = eo.len() == en.len()
             && vo.len() == vn.len()
             && source.edges.len() == eo.len()
             && source.vertices.len() == vo.len()
-            && eo.iter().zip(&en).all(|(a, b)| (map.point(&a.mid) - b.mid).norm() < tol)
-            && vo.iter().zip(&vn).all(|(a, b)| (map.point(&a.point) - b.point).norm() < tol);
+            && eo
+                .iter()
+                .zip(&en)
+                .all(|(a, b)| (map.point(&a.mid) - b.mid).norm() < tol)
+            && vo
+                .iter()
+                .zip(&vn)
+                .all(|(a, b)| (map.point(&a.point) - b.point).norm() < tol);
         if same {
-            return Ok(BodyNames { faces, edges: source.edges.clone(), vertices: source.vertices.clone(), aliases: source.aliases.clone() });
+            return Ok(BodyNames {
+                faces,
+                edges: source.edges.clone(),
+                vertices: source.vertices.clone(),
+                aliases: source.aliases.clone(),
+            });
         }
         Ok(BodyNames {
             edges: naming::name_edges(&faces, &en, naming::joint_tolerance(&en)),
@@ -301,7 +426,13 @@ impl Rebuilder {
     }
 
     /// The parts moved (or scaled) in place of themselves.
-    fn transform_moves(&mut self, id: FeatureId, parts: &[PartId], map: &Map, state: &Arc<State>) -> Result<Output, String> {
+    fn transform_moves(
+        &mut self,
+        id: FeatureId,
+        parts: &[PartId],
+        map: &Map,
+        state: &Arc<State>,
+    ) -> Result<Output, String> {
         let mut next = (**state).clone();
         let mut placed: Vec<Placed> = Vec::new();
         let release = |this: &mut Self, placed: &[Placed]| {
@@ -338,20 +469,45 @@ impl Rebuilder {
                     return Err(e);
                 }
             };
-            let volume = self.kernel.mass_properties(moved).map(|m| m.volume).unwrap_or(0.0);
-            placed.push((*pid, Piece { body: moved, names, from: HashSet::new(), volume }));
+            let volume = self
+                .kernel
+                .mass_properties(moved)
+                .map(|m| m.volume)
+                .unwrap_or(0.0);
+            placed.push((
+                *pid,
+                Piece {
+                    body: moved,
+                    names,
+                    from: HashSet::new(),
+                    volume,
+                },
+            ));
         }
         // The swept geometry of the operations whose faces are all on moved parts follows them.
         let ops_of = |p: &PartState| p.names.faces.iter().map(|f| f.op).collect::<HashSet<_>>();
-        let moved_ops: HashSet<cadrs_kernel::OpId> = parts.iter().filter_map(|p| state.part(*p)).flat_map(ops_of).collect();
-        let still_ops: HashSet<cadrs_kernel::OpId> = state.parts.iter().filter(|p| !parts.contains(&p.part.id)).flat_map(ops_of).collect();
+        let moved_ops: HashSet<cadrs_kernel::OpId> = parts
+            .iter()
+            .filter_map(|p| state.part(*p))
+            .flat_map(ops_of)
+            .collect();
+        let still_ops: HashSet<cadrs_kernel::OpId> = state
+            .parts
+            .iter()
+            .filter(|p| !parts.contains(&p.part.id))
+            .flat_map(ops_of)
+            .collect();
         let mut geoms = (*state.geoms).clone();
         for op in moved_ops.difference(&still_ops) {
             match map {
                 Map::Rigid(m) => {
                     if let Some(g) = geoms.get(op) {
                         let l = &m.linear;
-                        let rows = [[l[(0, 0)], l[(0, 1)], l[(0, 2)]], [l[(1, 0)], l[(1, 1)], l[(1, 2)]], [l[(2, 0)], l[(2, 1)], l[(2, 2)]]];
+                        let rows = [
+                            [l[(0, 0)], l[(0, 1)], l[(0, 2)]],
+                            [l[(1, 0)], l[(1, 1)], l[(1, 2)]],
+                            [l[(2, 0)], l[(2, 1)], l[(2, 2)]],
+                        ];
                         let t = [m.translation.x, m.translation.y, m.translation.z];
                         let g = Arc::new(g.moved(rows, t));
                         geoms.insert(*op, g);
@@ -377,14 +533,20 @@ impl Rebuilder {
         // their pictures move with them.
         if let Some(st) = Arc::get_mut(&mut out.state) {
             for pid in parts {
-                let Some(old) = state.part(*pid).map(|p| &p.part.solid) else { continue };
+                let Some(old) = state.part(*pid).map(|p| &p.part.solid) else {
+                    continue;
+                };
                 if old.looks.is_empty() && old.images.is_empty() {
                     continue;
                 }
                 if let Some(p) = st.parts.iter_mut().find(|q| q.part.id == *pid) {
                     let solid = Arc::make_mut(&mut p.part.solid);
                     solid.looks = old.looks.clone();
-                    solid.images = old.images.iter().map(|i| i.mapped(|q| map.world(q))).collect();
+                    solid.images = old
+                        .images
+                        .iter()
+                        .map(|i| i.mapped(|q| map.world(q)))
+                        .collect();
                 }
             }
             if let Map::Rigid(m) = map {
@@ -395,18 +557,35 @@ impl Rebuilder {
                 }
                 // A derived board moved: its frame (where its layout is drawn and edited) too. A
                 // component moved without its board: how, after its place on the layout.
-                if st.derived.values().any(|o| o.boards.iter().any(|b| parts.contains(&b.part)) || meshes.iter().any(|p| o.footprints.iter().any(|(q, _)| q == p))) {
+                if st.derived.values().any(|o| {
+                    o.boards.iter().any(|b| parts.contains(&b.part))
+                        || meshes
+                            .iter()
+                            .any(|p| o.footprints.iter().any(|(q, _)| q == p))
+                }) {
                     let mut all = (*st.derived).clone();
                     for o in all.values_mut() {
-                        let moved: Vec<PartId> = o.boards.iter().filter(|b| parts.contains(&b.part)).flat_map(|b| o.components_of(b.part)).collect();
+                        let moved: Vec<PartId> = o
+                            .boards
+                            .iter()
+                            .filter(|b| parts.contains(&b.part))
+                            .flat_map(|b| o.components_of(b.part))
+                            .collect();
                         for b in o.boards.iter_mut().filter(|b| parts.contains(&b.part)) {
                             let dir = |d: [f64; 3]| {
                                 let v = m.linear * nalgebra::Vector3::new(d[0], d[1], d[2]);
                                 [v.x, v.y, v.z]
                             };
-                            b.frame = cadrs_sketch::PlaneFrame { origin: crate::pcb::board3d::apply(m, b.frame.origin), u: dir(b.frame.u), v: dir(b.frame.v) };
+                            b.frame = cadrs_sketch::PlaneFrame {
+                                origin: crate::pcb::board3d::apply(m, b.frame.origin),
+                                u: dir(b.frame.u),
+                                v: dir(b.frame.v),
+                            };
                         }
-                        for pid in meshes.iter().filter(|p| o.footprints.iter().any(|(q, _)| q == *p)) {
+                        for pid in meshes
+                            .iter()
+                            .filter(|p| o.footprints.iter().any(|(q, _)| q == *p))
+                        {
                             let had = o.moved_apart(*pid);
                             let now = if moved.contains(pid) {
                                 // With its board: the same move apart, seen from the moved board.
@@ -423,13 +602,23 @@ impl Rebuilder {
             }
         }
         if !left.is_empty() {
-            out.warning = Some(format!("Board components can't be scaled (meshes): {}", left.join(", ")));
+            out.warning = Some(format!(
+                "Board components can't be scaled (meshes): {}",
+                left.join(", ")
+            ));
         }
         Ok(out)
     }
 
     /// Copy part (or Copy in place): moved copies as new parts, the originals left.
-    fn transform_copies(&mut self, id: FeatureId, parts: &[PartId], x: &TransformFeature, map: &Map, state: &Arc<State>) -> Result<Output, String> {
+    fn transform_copies(
+        &mut self,
+        id: FeatureId,
+        parts: &[PartId],
+        x: &TransformFeature,
+        map: &Map,
+        state: &Arc<State>,
+    ) -> Result<Output, String> {
         let op = id.0;
         let mut next = (**state).clone();
         let mut placed: Vec<Placed> = Vec::new();
@@ -472,9 +661,23 @@ impl Rebuilder {
             for piece in pieces {
                 let taken: Vec<PartId> = placed.iter().map(|(p, _)| *p).collect();
                 let new = Self::new_id(id, &next, &taken);
-                sources.push((new, Some(*pid), p.part.palette, p.part.kind, p.part.solid.looks.first().map(|(_, a)| *a)));
+                sources.push((
+                    new,
+                    Some(*pid),
+                    p.part.palette,
+                    p.part.kind,
+                    p.part.solid.looks.first().map(|(_, a)| *a),
+                ));
                 if !p.part.solid.images.is_empty() {
-                    pictures.push((new, p.part.solid.images.iter().map(|i| i.mapped(|q| map.world(q))).collect()));
+                    pictures.push((
+                        new,
+                        p.part
+                            .solid
+                            .images
+                            .iter()
+                            .map(|i| i.mapped(|q| map.world(q)))
+                            .collect(),
+                    ));
                 }
                 placed.push((new, piece));
             }
@@ -483,7 +686,8 @@ impl Rebuilder {
         // progress set aside. Each copy is its own instance (several may copy one part).
         let mut instance = 1u32;
         for (si, src) in x.sources.iter().enumerate() {
-            let wanted: Vec<&crate::transform::ContextCopy> = x.context.iter().filter(|c| c.source == si).collect();
+            let wanted: Vec<&crate::transform::ContextCopy> =
+                x.context.iter().filter(|c| c.source == si).collect();
             if wanted.is_empty() {
                 continue;
             }
@@ -562,13 +766,21 @@ impl Rebuilder {
             }
         }
         if !left.is_empty() {
-            out.warning = Some(format!("Board components aren't copied (meshes; derive the board again): {}", left.join(", ")));
+            out.warning = Some(format!(
+                "Board components aren't copied (meshes; derive the board again): {}",
+                left.join(", ")
+            ));
         }
         Ok(out)
     }
 
     /// The Composite part feature (see the module docs).
-    pub(in crate::rebuild) fn composite(&mut self, id: FeatureId, x: &CompositeFeature, state: &Arc<State>) -> Result<Output, String> {
+    pub(in crate::rebuild) fn composite(
+        &mut self,
+        id: FeatureId,
+        x: &CompositeFeature,
+        state: &Arc<State>,
+    ) -> Result<Output, String> {
         if let Some(p) = x.problem() {
             return Err(p.into());
         }
@@ -585,7 +797,10 @@ impl Rebuilder {
             member_looks.extend(ps.part.solid.looks.iter().copied());
         }
         let bodies: Vec<BodyId> = inputs.iter().map(|(b, _)| *b).collect();
-        let r = self.kernel.compound(&bodies).map_err(|e| format!("The composite part failed: {e}"))?;
+        let r = self
+            .kernel
+            .compound(&bodies)
+            .map_err(|e| format!("The composite part failed: {e}"))?;
         let body = r.bodies[0];
         let named: Vec<(BodyId, &BodyNames)> = inputs.iter().map(|(b, n)| (*b, &**n)).collect();
         let names = match naming::name_body(&self.kernel, body, op, &r.history, &named) {
@@ -595,15 +810,38 @@ impl Rebuilder {
                 return Err(format!("The composite part failed: {e}"));
             }
         };
-        let volume = self.kernel.mass_properties(body).map(|m| m.volume).unwrap_or(0.0);
+        let volume = self
+            .kernel
+            .mass_properties(body)
+            .map(|m| m.volume)
+            .unwrap_or(0.0);
         let mut next = (**state).clone();
         let pid = Self::new_id(id, &next, &[]);
         let palette = state.part(x.parts[0]).map(|p| p.part.palette).unwrap_or(0);
         let n = next.composites.len() + 1;
-        next.composites.push(Composite { part: pid, members, closed: x.closed });
+        next.composites.push(Composite {
+            part: pid,
+            members,
+            closed: x.closed,
+        });
         next.geoms = state.geoms.clone();
         let before = next.next_part;
-        let mut out = self.finish(id, vec![(pid, Piece { body, names, from: HashSet::new(), volume })], next, op, state.geoms.clone(), PartKind::Solid)?;
+        let mut out = self.finish(
+            id,
+            vec![(
+                pid,
+                Piece {
+                    body,
+                    names,
+                    from: HashSet::new(),
+                    volume,
+                },
+            )],
+            next,
+            op,
+            state.geoms.clone(),
+            PartKind::Solid,
+        )?;
         if let Some(st) = Arc::get_mut(&mut out.state) {
             // A composite part isn't counted among "Part N".
             st.next_part = before;
@@ -612,7 +850,11 @@ impl Rebuilder {
                 p.part.palette = palette;
                 if !member_looks.is_empty() {
                     let solid = Arc::make_mut(&mut p.part.solid);
-                    solid.looks = solid.faces.iter().filter_map(|f| member_looks.iter().find(|(g, _)| *g == f.name).copied()).collect();
+                    solid.looks = solid
+                        .faces
+                        .iter()
+                        .filter_map(|f| member_looks.iter().find(|(g, _)| *g == f.name).copied())
+                        .collect();
                 }
             }
         }

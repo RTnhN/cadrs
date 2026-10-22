@@ -37,7 +37,11 @@ pub struct ChangedTab {
 
 /// The tabs `source` changed (since `base`, when known) that differ from `dest`, in the
 /// source's order, then the ones it deleted.
-pub fn changed_tabs(base: Option<&Document>, source: &Document, dest: &Document) -> Vec<ChangedTab> {
+pub fn changed_tabs(
+    base: Option<&Document>,
+    source: &Document,
+    dest: &Document,
+) -> Vec<ChangedTab> {
     let mut out = Vec::new();
     let changed_in_source = |id: ElementId, now: Option<&Element>| match base {
         Some(b) => b.elements.iter().find(|e| e.id == id) != now,
@@ -48,13 +52,27 @@ pub fn changed_tabs(base: Option<&Document>, source: &Document, dest: &Document)
         if d == Some(e) || !changed_in_source(e.id, Some(e)) {
             continue;
         }
-        out.push(ChangedTab { element: e.id, name: e.name.clone(), change: if d.is_some() { TabChange::Changed } else { TabChange::Added }, assembly: e.assembly_model().is_some() });
+        out.push(ChangedTab {
+            element: e.id,
+            name: e.name.clone(),
+            change: if d.is_some() {
+                TabChange::Changed
+            } else {
+                TabChange::Added
+            },
+            assembly: e.assembly_model().is_some(),
+        });
     }
     for d in &dest.elements {
         if source.elements.iter().any(|e| e.id == d.id) || !changed_in_source(d.id, None) {
             continue;
         }
-        out.push(ChangedTab { element: d.id, name: d.name.clone(), change: TabChange::Deleted, assembly: d.assembly_model().is_some() });
+        out.push(ChangedTab {
+            element: d.id,
+            name: d.name.clone(),
+            change: TabChange::Deleted,
+            assembly: d.assembly_model().is_some(),
+        });
     }
     out
 }
@@ -70,7 +88,11 @@ pub fn merge(dest: &Document, source: &Document, replace: &[ElementId]) -> Docum
                     *slot = e;
                 } else {
                     // After the nearest tab before it in the source that is here.
-                    let at = source.elements[..si].iter().rev().find_map(|p| out.element_index(p.id)).map_or(0, |i| i + 1);
+                    let at = source.elements[..si]
+                        .iter()
+                        .rev()
+                        .find_map(|p| out.element_index(p.id))
+                        .map_or(0, |i| i + 1);
                     out.elements.insert(at, e);
                 }
             }
@@ -84,7 +106,11 @@ pub fn merge(dest: &Document, source: &Document, replace: &[ElementId]) -> Docum
             }
         }
         for s in &source.standard_content {
-            if !out.standard_content.iter().any(|x| x.element.id == s.element.id) {
+            if !out
+                .standard_content
+                .iter()
+                .any(|x| x.element.id == s.element.id)
+            {
                 out.standard_content.push(s.clone());
             }
         }

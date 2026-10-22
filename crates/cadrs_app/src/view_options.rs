@@ -20,23 +20,25 @@
 //!   under the typed name (a document edit, undone like any other,
 //!   [`cadrs_core::named_views`]), a click on a row restores it, ✕ deletes it.
 
-use cadrs_ui::ShortcutKey;
 use bevy::camera::{CameraProjection, SubCameraView};
 use bevy::input::ButtonState;
 use bevy::input::keyboard::KeyboardInput;
 use bevy::math::Vec3A;
-use bevy::picking::pointer::{PointerAction, PointerButton, PointerId, PointerInput};
 use bevy::picking::hover::HoverMap;
+use bevy::picking::pointer::{PointerAction, PointerButton, PointerId, PointerInput};
 use bevy::prelude::*;
 use bevy::text::{EditableText, FontWeight};
 use bevy::ui_widgets::{Activate, observe};
 use cadrs_core::ElementId;
 use cadrs_core::named_views::{AddNamedView, DeleteNamedView, NamedView, next_name};
+use cadrs_ui::ShortcutKey;
 use cadrs_ui::prelude::*;
 use cadrs_ui::{FloatingPanel, FloatingPanelBody, FloatingPanelClose, TextInputField, TextSubmit};
 
 use crate::camera::{FOCAL_PX, RenderMode, ViewState};
-use crate::viewport::{ActiveKind, Pick, Selection, ViewportArea, ViewportDrag, ViewportRect, ViewportView};
+use crate::viewport::{
+    ActiveKind, Pick, Selection, ViewportArea, ViewportDrag, ViewportRect, ViewportView,
+};
 use crate::{ActiveDocument, AppState};
 
 pub struct ViewOptionsPlugin;
@@ -47,17 +49,25 @@ impl Plugin for ViewOptionsPlugin {
             .init_resource::<RenderGroups>()
             .add_systems(
                 Update,
-                (track_previous, zoom_window_input, sync_zoom_box, sync_named_views)
+                (
+                    track_previous,
+                    zoom_window_input,
+                    sync_zoom_box,
+                    sync_named_views,
+                )
                     .chain()
                     .after(crate::viewport::apply_view_to_camera)
                     .run_if(in_state(AppState::Document)),
             )
             .add_systems(PostUpdate, perspective_gizmo_bias)
-            .add_systems(OnExit(AppState::Document), |mut commands: Commands, mut groups: ResMut<RenderGroups>| {
-                groups.0.clear();
-                commands.remove_resource::<ZoomWindow>();
-                commands.remove_resource::<NamedViewsPanel>();
-            })
+            .add_systems(
+                OnExit(AppState::Document),
+                |mut commands: Commands, mut groups: ResMut<RenderGroups>| {
+                    groups.0.clear();
+                    commands.remove_resource::<ZoomWindow>();
+                    commands.remove_resource::<NamedViewsPanel>();
+                },
+            )
             .add_observer(on_panel_close)
             .add_observer(on_name_submit);
     }
@@ -73,8 +83,14 @@ pub struct RenderGroups(pub std::collections::HashMap<ElementId, (RenderMode, Re
 
 impl RenderGroups {
     /// The shaded group's and the hidden-line group's modes for a tab now in `current`.
-    pub fn labels(&self, element: Option<ElementId>, current: RenderMode) -> (RenderMode, RenderMode) {
-        let (mut shaded, mut line) = element.and_then(|e| self.0.get(&e).copied()).unwrap_or((RenderMode::Shaded, RenderMode::HiddenEdgesRemoved));
+    pub fn labels(
+        &self,
+        element: Option<ElementId>,
+        current: RenderMode,
+    ) -> (RenderMode, RenderMode) {
+        let (mut shaded, mut line) = element
+            .and_then(|e| self.0.get(&e).copied())
+            .unwrap_or((RenderMode::Shaded, RenderMode::HiddenEdgesRemoved));
         if current.line_drawing() {
             line = current;
         } else {
@@ -89,7 +105,10 @@ pub fn set_render_mode(world: &mut World, mode: RenderMode) {
     let element = world.resource::<ViewportView>().element;
     if let Some(el) = element {
         let mut groups = world.resource_mut::<RenderGroups>();
-        let g = groups.0.entry(el).or_insert((RenderMode::Shaded, RenderMode::HiddenEdgesRemoved));
+        let g = groups
+            .0
+            .entry(el)
+            .or_insert((RenderMode::Shaded, RenderMode::HiddenEdgesRemoved));
         if mode.line_drawing() {
             g.1 = mode;
         } else {
@@ -130,13 +149,23 @@ impl ViewportPerspective {
     /// The projection for `view` with the viewport centred at `center` in a target of `size`.
     pub fn of(view: &ViewState, center: Vec2, size: Vec2) -> Self {
         let eye = view.eye_distance();
-        Self { focal: FOCAL_PX, center, size: size.max(Vec2::ONE), near: (eye * 0.01).max(1e-3), far: eye + crate::camera::camera_far(view.scale) }
+        Self {
+            focal: FOCAL_PX,
+            center,
+            size: size.max(Vec2::ONE),
+            near: (eye * 0.01).max(1e-3),
+            far: eye + crate::camera::camera_far(view.scale),
+        }
     }
 
     /// The view-space point (x, y, z with z < 0) at screen `px` (logical px from the target's
     /// top-left) and distance `d` in front of the eye.
     fn at(&self, px: Vec2, d: f32) -> Vec3A {
-        Vec3A::new((px.x - self.center.x) * d / self.focal, (self.center.y - px.y) * d / self.focal, -d)
+        Vec3A::new(
+            (px.x - self.center.x) * d / self.focal,
+            (self.center.y - px.y) * d / self.focal,
+            -d,
+        )
     }
 }
 
@@ -191,7 +220,11 @@ const BIAS_REFERENCE_SCALE: f32 = 0.37;
 /// that far behind a face show through it in a close view: stubs where an edge passes behind
 /// a wall's corner.
 pub fn bias_factor(view: &ViewState) -> f32 {
-    let perspective = if view.perspective { (2990.0 / view.eye_distance().max(1e-3)).clamp(1.0, 400.0) } else { 1.0 };
+    let perspective = if view.perspective {
+        (2990.0 / view.eye_distance().max(1e-3)).clamp(1.0, 400.0)
+    } else {
+        1.0
+    };
     let zoom = (view.scale / BIAS_REFERENCE_SCALE).clamp(0.02, 1.0);
     perspective * zoom
 }
@@ -199,7 +232,12 @@ pub fn bias_factor(view: &ViewState) -> f32 {
 /// The part gizmos' depth bias pulls lines toward the eye by a share of their depth; in
 /// perspective the eye is much nearer than the orthographic camera, so the biases grow to keep
 /// edges over the faces they lie on (about the orthographic half millimetre).
-fn perspective_gizmo_bias(view: Res<ViewportView>, mut store: ResMut<GizmoConfigStore>, mut base: Local<Option<Vec<f32>>>, mut last: Local<f32>) {
+fn perspective_gizmo_bias(
+    view: Res<ViewportView>,
+    mut store: ResMut<GizmoConfigStore>,
+    mut base: Local<Option<Vec<f32>>>,
+    mut last: Local<f32>,
+) {
     use crate::parts::*;
     let k = bias_factor(&view.view);
     if (k - *last).abs() < 1e-3 * k && base.is_some() {
@@ -219,7 +257,9 @@ fn perspective_gizmo_bias(view: Res<ViewportView>, mut store: ResMut<GizmoConfig
         .depth_bias
     }
     const GROUPS: usize = 8;
-    let b = base.get_or_insert_with(|| (0..GROUPS).map(|i| *bias(&mut store, i)).collect()).clone();
+    let b = base
+        .get_or_insert_with(|| (0..GROUPS).map(|i| *bias(&mut store, i)).collect())
+        .clone();
     for (i, b) in b.into_iter().enumerate() {
         // -1 means "over everything" and stays so.
         *bias(&mut store, i) = if b <= -1.0 { b } else { (b * k).max(-0.5) };
@@ -248,12 +288,25 @@ const MAX_PREVIOUS: usize = 30;
 
 /// The two views show the same camera (render mode and projection aside).
 fn same_camera(a: &ViewState, b: &ViewState) -> bool {
-    a.approx_eq(&ViewState { render: a.render, perspective: a.perspective, ..*b })
+    a.approx_eq(&ViewState {
+        render: a.render,
+        perspective: a.perspective,
+        ..*b
+    })
 }
 
-fn track_previous(view: Res<ViewportView>, drag: Res<ViewportDrag>, mut prev: ResMut<PreviousViews>) {
+fn track_previous(
+    view: Res<ViewportView>,
+    drag: Res<ViewportDrag>,
+    mut prev: ResMut<PreviousViews>,
+) {
     if prev.element != view.element {
-        *prev = PreviousViews { element: view.element, settled: Some(view.view), last: Some(view.view), ..default() };
+        *prev = PreviousViews {
+            element: view.element,
+            settled: Some(view.view),
+            last: Some(view.view),
+            ..default()
+        };
         return;
     }
     let now = view.view;
@@ -283,9 +336,14 @@ fn track_previous(view: Res<ViewportView>, drag: Res<ViewportDrag>, mut prev: Re
 
 /// Previous view: back to the camera before the last change (keeping the render mode).
 pub fn previous_view(world: &mut World) {
-    let Some(to) = world.resource_mut::<PreviousViews>().stack.pop() else { return };
+    let Some(to) = world.resource_mut::<PreviousViews>().stack.pop() else {
+        return;
+    };
     let mut view = world.resource_mut::<ViewportView>();
-    let to = ViewState { render: view.view.render, ..to };
+    let to = ViewState {
+        render: view.view.render,
+        ..to
+    };
     let perspective = to.perspective;
     view.view.perspective = perspective;
     view.animate_to(to);
@@ -335,7 +393,10 @@ fn zoom_window_input(
         keys.clear();
         return;
     };
-    if keys.read().any(|k| k.state == ButtonState::Pressed && k.shortcut_code() == KeyCode::Escape) {
+    if keys
+        .read()
+        .any(|k| k.state == ButtonState::Pressed && k.shortcut_code() == KeyCode::Escape)
+    {
         commands.remove_resource::<ZoomWindow>();
         return;
     }
@@ -374,7 +435,12 @@ fn zoom_window_input(
 
 /// A point at the middle depth of the parts seen in the screen box from `a` to `b` (a 7 × 7
 /// grid of picks), on the ray through the box's centre.
-fn box_depth_point(cache: &crate::parts::PartCache, view: &ViewState, a: Vec2, b: Vec2) -> Option<Vec3> {
+fn box_depth_point(
+    cache: &crate::parts::PartCache,
+    view: &ViewState,
+    a: Vec2,
+    b: Vec2,
+) -> Option<Vec3> {
     let mut depths: Vec<f32> = Vec::new();
     for i in 0..7 {
         for j in 0..7 {
@@ -418,12 +484,26 @@ fn sync_zoom_box(
         place(&mut n);
         return;
     }
-    let Some(area) = q_area.iter().next() else { return };
-    let mut n = Node { position_type: PositionType::Absolute, border: UiRect::all(Val::Px(1.0)), ..default() };
+    let Some(area) = q_area.iter().next() else {
+        return;
+    };
+    let mut n = Node {
+        position_type: PositionType::Absolute,
+        border: UiRect::all(Val::Px(1.0)),
+        ..default()
+    };
     place(&mut n);
     let c = theme.primary;
     let e = commands
-        .spawn((Name::new("zoom-window-box"), ZoomBox, n, BorderColor::all(c), BackgroundColor(c.with_alpha(0.08)), Pickable::IGNORE, DespawnOnExit(AppState::Document)))
+        .spawn((
+            Name::new("zoom-window-box"),
+            ZoomBox,
+            n,
+            BorderColor::all(c),
+            BackgroundColor(c.with_alpha(0.08)),
+            Pickable::IGNORE,
+            DespawnOnExit(AppState::Document),
+        ))
         .id();
     commands.entity(area).add_child(e);
 }
@@ -436,23 +516,60 @@ fn pick_points(world: &World, pick: Pick) -> Vec<Vec3> {
     let cache = world.resource::<crate::parts::PartCache>();
     let v3 = |p: [f64; 3]| Vec3::new(p[0] as f32, p[1] as f32, p[2] as f32);
     match pick {
-        Pick::Face(part, name) => cache.part(part).and_then(|p| p.solid.face(&name)).map(|f| f.loops.iter().flatten().map(|q| v3(*q)).collect()).unwrap_or_default(),
-        Pick::Edge(part, name) => cache.part(part).and_then(|p| p.solid.edge(&name)).map(|e| e.points.iter().map(|q| v3(*q)).collect()).unwrap_or_default(),
-        Pick::Vertex(part, name) => cache.part(part).and_then(|p| p.solid.vertex(&name)).map(|v| vec![v3(v.point)]).unwrap_or_default(),
+        Pick::Face(part, name) => cache
+            .part(part)
+            .and_then(|p| p.solid.face(&name))
+            .map(|f| f.loops.iter().flatten().map(|q| v3(*q)).collect())
+            .unwrap_or_default(),
+        Pick::Edge(part, name) => cache
+            .part(part)
+            .and_then(|p| p.solid.edge(&name))
+            .map(|e| e.points.iter().map(|q| v3(*q)).collect())
+            .unwrap_or_default(),
+        Pick::Vertex(part, name) => cache
+            .part(part)
+            .and_then(|p| p.solid.vertex(&name))
+            .map(|v| vec![v3(v.point)])
+            .unwrap_or_default(),
         Pick::Part(part) => {
             // An assembly instance's row selects all of its parts.
             let whole = cache.assembly.is_some() && part.index == 0;
-            cache.parts.iter().filter(|p| p.id == part || (whole && p.id.feature == part.feature)).flat_map(|p| p.solid.positions.iter().map(|q| v3(*q))).collect()
+            cache
+                .parts
+                .iter()
+                .filter(|p| p.id == part || (whole && p.id.feature == part.feature))
+                .flat_map(|p| p.solid.positions.iter().map(|q| v3(*q)))
+                .collect()
         }
         Pick::Plane(k) => {
             let h = crate::viewport::PLANE_HALF;
-            [(-1.0, -1.0), (1.0, -1.0), (1.0, 1.0), (-1.0, 1.0)].into_iter().map(|(a, b)| (k.u() * a + k.v() * b) * h).collect()
+            [(-1.0, -1.0), (1.0, -1.0), (1.0, 1.0), (-1.0, 1.0)]
+                .into_iter()
+                .map(|(a, b)| (k.u() * a + k.v() * b) * h)
+                .collect()
         }
-        Pick::Feature(f) | Pick::Region(f, _) | Pick::SketchCurve(f, _) | Pick::SketchPoint(f, _) => {
-            let mut pts: Vec<Vec3> = cache.sketch_curves.iter().filter(|s| s.sketch == f).flat_map(|s| s.curves.iter().flat_map(|(_, c)| c.iter().map(|q| v3(*q)))).collect();
+        Pick::Feature(f)
+        | Pick::Region(f, _)
+        | Pick::SketchCurve(f, _)
+        | Pick::SketchPoint(f, _) => {
+            let mut pts: Vec<Vec3> = cache
+                .sketch_curves
+                .iter()
+                .filter(|s| s.sketch == f)
+                .flat_map(|s| s.curves.iter().flat_map(|(_, c)| c.iter().map(|q| v3(*q))))
+                .collect();
             if pts.is_empty() {
                 // A part feature: the faces it made.
-                pts = cache.shown().flat_map(|p| p.solid.faces.iter().filter(|x| x.name.op == f.0).flat_map(|x| x.loops.iter().flatten().map(|q| v3(*q)))).collect();
+                pts = cache
+                    .shown()
+                    .flat_map(|p| {
+                        p.solid
+                            .faces
+                            .iter()
+                            .filter(|x| x.name.op == f.0)
+                            .flat_map(|x| x.loops.iter().flatten().map(|q| v3(*q)))
+                    })
+                    .collect();
             }
             if pts.is_empty()
                 && let Some(frame) = cache.planes.get(&f)
@@ -462,7 +579,10 @@ fn pick_points(world: &World, pick: Pick) -> Vec<Vec3> {
             pts
         }
         Pick::Origin => vec![Vec3::ZERO],
-        Pick::Assembly | Pick::Instance(..) => cache.shown().flat_map(|p| p.solid.positions.iter().map(|q| v3(*q))).collect(),
+        Pick::Assembly | Pick::Instance(..) => cache
+            .shown()
+            .flat_map(|p| p.solid.positions.iter().map(|q| v3(*q)))
+            .collect(),
     }
 }
 
@@ -479,7 +599,9 @@ pub fn zoom_to_selection(world: &mut World) {
     let inset = world.resource::<crate::viewport::DialogInset>().0;
     let kind = *world.resource::<ActiveKind>();
     let mut view = world.resource_mut::<ViewportView>();
-    let to = view.target().fitted_beside(&pts, size, crate::viewport::fit_fill(kind), inset);
+    let to = view
+        .target()
+        .fitted_beside(&pts, size, crate::viewport::fit_fill(kind), inset);
     view.animate_to(to);
 }
 
@@ -503,12 +625,22 @@ pub fn open_named_views(world: &mut World) {
 }
 
 fn tab_views(doc: &ActiveDocument) -> Vec<NamedView> {
-    doc.active_element().map(|e| e.named_views.clone()).unwrap_or_default()
+    doc.active_element()
+        .map(|e| e.named_views.clone())
+        .unwrap_or_default()
 }
 
 /// The camera (and projection) a named view stands for, on top of `base`.
 fn named_camera(nv: &NamedView, base: &ViewState) -> ViewState {
-    ViewState { azimuth: nv.azimuth, elevation: nv.elevation, roll: nv.roll, focus: Vec3::from_array(nv.focus), scale: nv.scale, perspective: nv.perspective, ..*base }
+    ViewState {
+        azimuth: nv.azimuth,
+        elevation: nv.elevation,
+        roll: nv.roll,
+        focus: Vec3::from_array(nv.focus),
+        scale: nv.scale,
+        perspective: nv.perspective,
+        ..*base
+    }
 }
 
 /// The render mode a named view was saved in.
@@ -542,16 +674,30 @@ fn sync_named_views(
     let names: Vec<String> = views.iter().map(|v| v.name.clone()).collect();
     // The row of the view on screen (once the camera rests there): shown selected.
     let current = if view.animation.is_some() {
-        q_root.iter().next().and_then(|(_, s)| s.built.as_ref().and_then(|b| b.1))
+        q_root
+            .iter()
+            .next()
+            .and_then(|(_, s)| s.built.as_ref().and_then(|b| b.1))
     } else {
         let now = view.view;
-        views.iter().position(|nv| same_camera(&named_camera(nv, &now), &now) && nv.perspective == now.perspective)
+        views.iter().position(|nv| {
+            same_camera(&named_camera(nv, &now), &now) && nv.perspective == now.perspective
+        })
     };
     let Some((root, mut state)) = q_root.iter_mut().next() else {
-        let Some(area) = q_area.iter().next() else { return };
+        let Some(area) = q_area.iter().next() else {
+            return;
+        };
         let left = (rect.0.width() - PANEL_WIDTH - 12.0).max(0.0);
         let e = commands
-            .spawn((FloatingPanel::new("named-views", "Named views").width(PANEL_WIDTH).at(left, 178.0).build(&theme), PanelRoot::default(), DespawnOnExit(AppState::Document)))
+            .spawn((
+                FloatingPanel::new("named-views", "Named views")
+                    .width(PANEL_WIDTH)
+                    .at(left, 178.0)
+                    .build(&theme),
+                PanelRoot::default(),
+                DespawnOnExit(AppState::Document),
+            ))
             .id();
         commands.entity(area).add_child(e);
         return;
@@ -570,17 +716,37 @@ fn sync_named_views(
     if state.built.as_ref() == Some(&key) {
         return;
     }
-    let Some((body, _)) = q_body.iter().find(|(_, b)| b.0 == root) else { return };
+    let Some((body, _)) = q_body.iter().find(|(_, b)| b.0 == root) else {
+        return;
+    };
     state.built = Some(key);
     let t = theme.clone();
     let default_name = next_name(&views);
-    let rows = commands.spawn((Name::new("named-views-list"), Node { flex_direction: FlexDirection::Column, width: Val::Percent(100.0), row_gap: Val::Px(1.0), ..default() })).id();
+    let rows = commands
+        .spawn((
+            Name::new("named-views-list"),
+            Node {
+                flex_direction: FlexDirection::Column,
+                width: Val::Percent(100.0),
+                row_gap: Val::Px(1.0),
+                ..default()
+            },
+        ))
+        .id();
     commands.entity(rows).with_children(|b| {
         if names.is_empty() {
             b.spawn((
                 Name::new("named-views-empty"),
-                t.text("No named views in this tab yet", t.font_base, FontWeight::NORMAL, t.muted_foreground),
-                Node { margin: UiRect::new(Val::Px(6.0), Val::ZERO, Val::Px(6.0), Val::Px(6.0)), ..default() },
+                t.text(
+                    "No named views in this tab yet",
+                    t.font_base,
+                    FontWeight::NORMAL,
+                    t.muted_foreground,
+                ),
+                Node {
+                    margin: UiRect::new(Val::Px(6.0), Val::ZERO, Val::Px(6.0), Val::Px(6.0)),
+                    ..default()
+                },
             ));
         }
         for (i, name) in names.iter().enumerate() {
@@ -599,10 +765,12 @@ fn sync_named_views(
                     let n = n.clone();
                     commands.queue(move |world: &mut World| restore_named_view(world, &n));
                 }),
-                observe(move |_: On<cadrs_ui::ActionRowAction>, mut commands: Commands| {
-                    let d = d.clone();
-                    commands.queue(move |world: &mut World| delete_named_view(world, &d));
-                }),
+                observe(
+                    move |_: On<cadrs_ui::ActionRowAction>, mut commands: Commands| {
+                        let d = d.clone();
+                        commands.queue(move |world: &mut World| delete_named_view(world, &d));
+                    },
+                ),
             ));
         }
     });
@@ -620,14 +788,27 @@ fn sync_named_views(
         })
         .insert(BorderColor::all(t.border))
         .with_children(|r| {
-            r.spawn(TextInput::new("named-view-name").value(default_name).select_all_on_focus().width(Val::Percent(100.0)).height(26.0).build(&t))
-                .entry::<Node>()
-                .and_modify(|mut n| {
-                    n.flex_grow = 1.0;
-                    n.min_width = Val::Px(0.0);
-                });
+            r.spawn(
+                TextInput::new("named-view-name")
+                    .value(default_name)
+                    .select_all_on_focus()
+                    .width(Val::Percent(100.0))
+                    .height(26.0)
+                    .build(&t),
+            )
+            .entry::<Node>()
+            .and_modify(|mut n| {
+                n.flex_grow = 1.0;
+                n.min_width = Val::Px(0.0);
+            });
             r.spawn((
-                cadrs_ui::Button::new("named-view-add").label("Add view").icon("plus").primary().small().tooltip("Save the current view under this name").build(&t),
+                cadrs_ui::Button::new("named-view-add")
+                    .label("Add view")
+                    .icon("plus")
+                    .primary()
+                    .small()
+                    .tooltip("Save the current view under this name")
+                    .build(&t),
                 observe(|_: On<Activate>, mut commands: Commands| {
                     commands.queue(add_named_view_from_field);
                 }),
@@ -638,28 +819,40 @@ fn sync_named_views(
     });
 }
 
-fn on_panel_close(ev: On<FloatingPanelClose>, q: Query<(), With<PanelRoot>>, mut commands: Commands) {
+fn on_panel_close(
+    ev: On<FloatingPanelClose>,
+    q: Query<(), With<PanelRoot>>,
+    mut commands: Commands,
+) {
     if q.contains(ev.entity) {
         commands.remove_resource::<NamedViewsPanel>();
     }
 }
 
 fn on_name_submit(ev: On<TextSubmit>, q: Query<&Name>, mut commands: Commands) {
-    if q.get(ev.entity).is_ok_and(|n| n.as_str() == "named-view-name-field") {
+    if q.get(ev.entity)
+        .is_ok_and(|n| n.as_str() == "named-view-name-field")
+    {
         commands.queue(add_named_view_from_field);
     }
 }
 
 fn add_named_view_from_field(world: &mut World) {
     let mut q = world.query_filtered::<(&Name, &EditableText), With<TextInputField>>();
-    let name = q.iter(world).find(|(n, _)| n.as_str() == "named-view-name-field").map(|(_, t)| t.value().to_string()).unwrap_or_default();
+    let name = q
+        .iter(world)
+        .find(|(n, _)| n.as_str() == "named-view-name-field")
+        .map(|(_, t)| t.value().to_string())
+        .unwrap_or_default();
     save_named_view(world, &name);
 }
 
 /// Saves the current camera as the named view `name` of the active tab (one undo step).
 pub fn save_named_view(world: &mut World, name: &str) {
     let v = world.resource::<ViewportView>().target();
-    let Some(mut doc) = world.get_resource_mut::<ActiveDocument>() else { return };
+    let Some(mut doc) = world.get_resource_mut::<ActiveDocument>() else {
+        return;
+    };
     let Some(element) = doc.active else { return };
     let view = NamedView {
         name: name.to_string(),
@@ -678,7 +871,11 @@ pub fn save_named_view(world: &mut World, name: &str) {
 
 /// Restores the active tab's named view `name`: its camera, projection and render mode.
 pub fn restore_named_view(world: &mut World, name: &str) {
-    let Some(nv) = world.get_resource::<ActiveDocument>().and_then(|d| tab_views(d).into_iter().find(|v| v.name.eq_ignore_ascii_case(name.trim()))) else {
+    let Some(nv) = world.get_resource::<ActiveDocument>().and_then(|d| {
+        tab_views(d)
+            .into_iter()
+            .find(|v| v.name.eq_ignore_ascii_case(name.trim()))
+    }) else {
         warn!("No named view {name:?}");
         return;
     };
@@ -692,9 +889,14 @@ pub fn restore_named_view(world: &mut World, name: &str) {
 }
 
 pub fn delete_named_view(world: &mut World, name: &str) {
-    let Some(mut doc) = world.get_resource_mut::<ActiveDocument>() else { return };
+    let Some(mut doc) = world.get_resource_mut::<ActiveDocument>() else {
+        return;
+    };
     let Some(element) = doc.active else { return };
-    if let Err(e) = doc.execute(&DeleteNamedView { element, name: name.to_string() }) {
+    if let Err(e) = doc.execute(&DeleteNamedView {
+        element,
+        name: name.to_string(),
+    }) {
         warn!("Delete named view: {e}");
     }
 }
@@ -704,7 +906,11 @@ pub fn render_items(current: RenderMode, line_drawing: bool) -> Vec<cadrs_ui::Me
     RenderMode::ALL
         .into_iter()
         .filter(|m| m.line_drawing() == line_drawing)
-        .map(|m| cadrs_ui::MenuItem::new(format!("view-render-{}", m.slug()), m.label()).checked(m == current).into())
+        .map(|m| {
+            cadrs_ui::MenuItem::new(format!("view-render-{}", m.slug()), m.label())
+                .checked(m == current)
+                .into()
+        })
         .collect()
 }
 
@@ -718,11 +924,18 @@ mod tests {
     #[test]
     fn zoom_to_selection_frames_the_points_beside_the_dialog() {
         let v = ViewState::default();
-        let pts = [Vec3::new(10.0, 0.0, 0.0), Vec3::new(60.0, 0.0, 0.0), Vec3::new(60.0, 0.0, 30.0), Vec3::new(10.0, 0.0, 30.0)];
+        let pts = [
+            Vec3::new(10.0, 0.0, 0.0),
+            Vec3::new(60.0, 0.0, 0.0),
+            Vec3::new(60.0, 0.0, 30.0),
+            Vec3::new(10.0, 0.0, 30.0),
+        ];
         let size = Vec2::new(1000.0, 800.0);
         let to = v.fitted_beside(&pts, size, 0.8, 200.0);
         let screen: Vec<Vec2> = pts.iter().map(|p| to.project(*p)).collect();
-        let (lo, hi) = screen.iter().fold((Vec2::MAX, Vec2::MIN), |(a, b), p| (a.min(*p), b.max(*p)));
+        let (lo, hi) = screen
+            .iter()
+            .fold((Vec2::MAX, Vec2::MIN), |(a, b), p| (a.min(*p), b.max(*p)));
         // 800 px are left beside the 200 px dialog: the larger side fills 80% of them.
         let fill = ((hi - lo).x / 800.0).max((hi - lo).y / 800.0);
         assert!((fill - 0.8).abs() < 1e-3, "{fill}");
@@ -739,11 +952,18 @@ mod tests {
     fn zoom_to_window_centres_and_fills_the_box() {
         let size = Vec2::new(1000.0, 800.0);
         for perspective in [false, true] {
-            let v = ViewState { perspective, ..ViewState::default() };
+            let v = ViewState {
+                perspective,
+                ..ViewState::default()
+            };
             let (a, b) = (Vec2::new(-150.0, -40.0), Vec2::new(50.0, 60.0));
             let target = v.unproject((a + b) / 2.0);
             let to = v.zoomed_to_box(a, b, size);
-            assert!(to.project(target).length() < 0.05, "{perspective}: {:?}", to.project(target));
+            assert!(
+                to.project(target).length() < 0.05,
+                "{perspective}: {:?}",
+                to.project(target)
+            );
             // 200 × 100 px in a 1000 × 800 view: 5× closer.
             assert!((v.scale / to.scale - 5.0).abs() < 1e-3);
         }
@@ -758,16 +978,28 @@ mod tests {
         let (a, b) = (ElementId::new(), ElementId::new());
         world.resource_mut::<ViewportView>().element = Some(a);
         set_render_mode(&mut world, RenderMode::HiddenEdgesVisible);
-        assert_eq!(world.resource::<ViewportView>().view.render, RenderMode::HiddenEdgesVisible);
+        assert_eq!(
+            world.resource::<ViewportView>().view.render,
+            RenderMode::HiddenEdgesVisible
+        );
         world.resource_mut::<ViewportView>().element = Some(b);
         set_render_mode(&mut world, RenderMode::Translucent);
         let groups = world.resource::<RenderGroups>();
         // Tab A in Shaded again: its line-drawing group still reads Hidden edges visible.
-        assert_eq!(groups.labels(Some(a), RenderMode::Shaded), (RenderMode::Shaded, RenderMode::HiddenEdgesVisible));
+        assert_eq!(
+            groups.labels(Some(a), RenderMode::Shaded),
+            (RenderMode::Shaded, RenderMode::HiddenEdgesVisible)
+        );
         // Tab B: Translucent in its shaded group, the default line mode.
-        assert_eq!(groups.labels(Some(b), RenderMode::Translucent), (RenderMode::Translucent, RenderMode::HiddenEdgesRemoved));
+        assert_eq!(
+            groups.labels(Some(b), RenderMode::Translucent),
+            (RenderMode::Translucent, RenderMode::HiddenEdgesRemoved)
+        );
         // A tab never set: the defaults.
-        assert_eq!(groups.labels(Some(ElementId::new()), RenderMode::Shaded), (RenderMode::Shaded, RenderMode::HiddenEdgesRemoved));
+        assert_eq!(
+            groups.labels(Some(ElementId::new()), RenderMode::Shaded),
+            (RenderMode::Shaded, RenderMode::HiddenEdgesRemoved)
+        );
     }
 
     /// Previous view: every camera the view rested at is stacked (not the frames of a move),
@@ -775,7 +1007,10 @@ mod tests {
     #[test]
     fn the_previous_view_stack() {
         let mut app = App::new();
-        app.insert_resource(ViewportView::default()).init_resource::<ViewportDrag>().init_resource::<PreviousViews>().add_systems(Update, track_previous);
+        app.insert_resource(ViewportView::default())
+            .init_resource::<ViewportDrag>()
+            .init_resource::<PreviousViews>()
+            .add_systems(Update, track_previous);
         let settle = |app: &mut App| {
             for _ in 0..SETTLE_FRAMES + 2 {
                 app.update();
@@ -786,12 +1021,18 @@ mod tests {
         assert!(app.world().resource::<PreviousViews>().stack.is_empty());
         // A move over several frames is one change.
         for _ in 0..4 {
-            app.world_mut().resource_mut::<ViewportView>().view.pan(Vec2::new(10.0, 0.0));
+            app.world_mut()
+                .resource_mut::<ViewportView>()
+                .view
+                .pan(Vec2::new(10.0, 0.0));
             app.update();
         }
         settle(&mut app);
         let panned = app.world().resource::<ViewportView>().view;
-        app.world_mut().resource_mut::<ViewportView>().view.rotate_by(20.0, 0.0);
+        app.world_mut()
+            .resource_mut::<ViewportView>()
+            .view
+            .rotate_by(20.0, 0.0);
         settle(&mut app);
         {
             let prev = app.world().resource::<PreviousViews>();
@@ -813,19 +1054,34 @@ mod tests {
     /// centre; nearer points get larger depth values (reversed depth).
     #[test]
     fn the_projection_matches_the_view_maths() {
-        let mut v = ViewState { perspective: true, ..ViewState::default() };
+        let mut v = ViewState {
+            perspective: true,
+            ..ViewState::default()
+        };
         v.pan(Vec2::new(30.0, -12.0));
         let size = Vec2::new(1600.0, 1000.0);
         let center = Vec2::new(930.0, 520.0);
         let proj = ViewportPerspective::of(&v, center, size);
         let m = proj.get_clip_from_view();
-        let view_from_world = Transform::from_translation(v.camera_position()).with_rotation(v.rotation()).to_matrix().inverse();
+        let view_from_world = Transform::from_translation(v.camera_position())
+            .with_rotation(v.rotation())
+            .to_matrix()
+            .inverse();
         let mut last_depth = None;
-        for p in [Vec3::ZERO, Vec3::new(40.0, -30.0, 25.0), Vec3::new(-60.0, 10.0, -20.0), v.focus + v.back() * 50.0] {
+        for p in [
+            Vec3::ZERO,
+            Vec3::new(40.0, -30.0, 25.0),
+            Vec3::new(-60.0, 10.0, -20.0),
+            v.focus + v.back() * 50.0,
+        ] {
             let c = m * view_from_world * p.extend(1.0);
             let ndc = c.truncate() / c.w;
             let px = Vec2::new((ndc.x + 1.0) / 2.0 * size.x, (1.0 - ndc.y) / 2.0 * size.y);
-            assert!((px - center - v.project(p)).length() < 0.05, "{p:?}: {px:?} vs {:?}", v.project(p) + center);
+            assert!(
+                (px - center - v.project(p)).length() < 0.05,
+                "{p:?}: {px:?} vs {:?}",
+                v.project(p) + center
+            );
             assert!(ndc.z > 0.0 && ndc.z <= 1.0);
             last_depth = Some(ndc.z);
         }

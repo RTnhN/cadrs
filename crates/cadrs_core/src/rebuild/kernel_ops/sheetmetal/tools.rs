@@ -23,12 +23,15 @@
 
 use super::*;
 use cadrs_sheetmetal::definition::StepEdit;
-use cadrs_sheetmetal::model_edit::{self as model_edit, BendSpec, CornerBreakKind, CutTool, EditError, JogSpec, Placement, Region3};
 use cadrs_sheetmetal::model::{BendReliefOverride, CornerOverride};
+use cadrs_sheetmetal::model_edit::{
+    self as model_edit, BendSpec, CornerBreakKind, CutTool, EditError, JogSpec, Placement, Region3,
+};
 
 use crate::applied::{ChamferMeasurement, ChamferType, EdgeOrFace, FilletMeasurement};
 use crate::sheetmetal_tools::{
-    AngleControl, BendFeature, CornerBreakFeature, JogBounding, JogFeature, LineRef, SheetMetalTool, TabFeature,
+    AngleControl, BendFeature, CornerBreakFeature, JogBounding, JogFeature, LineRef,
+    SheetMetalTool, TabFeature,
 };
 
 fn err(e: EditError) -> String {
@@ -45,12 +48,19 @@ const PICK_TOL: f64 = 0.05;
 
 /// The active model holding `part`.
 fn context_of(state: &State, part: PartId) -> Option<usize> {
-    state.sheet_metal.iter().position(|c| c.active && c.parts.iter().any(|(p, _)| *p == part))
+    state
+        .sheet_metal
+        .iter()
+        .position(|c| c.active && c.parts.iter().any(|(p, _)| *p == part))
 }
 
 fn need_context(state: &State, part: PartId) -> Result<usize, String> {
     context_of(state, part).ok_or_else(|| {
-        if state.sheet_metal.iter().any(|c| c.parts.iter().any(|(p, _)| *p == part)) {
+        if state
+            .sheet_metal
+            .iter()
+            .any(|c| c.parts.iter().any(|(p, _)| *p == part))
+        {
             "The sheet metal model is finished: its parts are ordinary solids now".to_string()
         } else {
             "Select a face of an active sheet metal part".to_string()
@@ -78,11 +88,20 @@ fn output(state: Arc<State>, owned: Vec<BodyId>) -> Output {
 fn line_points(before: &[Feature], state: &State, l: &LineRef) -> Result<(P3, P3), String> {
     match l {
         LineRef::Sketch(c) => {
-            let sk = before.iter().find(|f| f.id == c.sketch).and_then(|f| f.sketch()).ok_or("The bend line no longer exists")?;
-            let frame = sk.plane.ok_or("The bend line's sketch has no plane")?.frame();
+            let sk = before
+                .iter()
+                .find(|f| f.id == c.sketch)
+                .and_then(|f| f.sketch())
+                .ok_or("The bend line no longer exists")?;
+            let frame = sk
+                .plane
+                .ok_or("The bend line's sketch has no plane")?
+                .frame();
             let g = &sk.geometry;
             match g.curves.get(c.curve).map(|cv| &cv.kind) {
-                Some(cadrs_sketch::CurveKind::Line { a, b }) => Ok((p3(frame.to_world(g.pos(*a))), p3(frame.to_world(g.pos(*b))))),
+                Some(cadrs_sketch::CurveKind::Line { a, b }) => {
+                    Ok((p3(frame.to_world(g.pos(*a))), p3(frame.to_world(g.pos(*b)))))
+                }
                 Some(_) => Err("The bend line must be a line".into()),
                 None => Err("The bend line no longer exists".into()),
             }
@@ -119,7 +138,9 @@ fn reference_direction(state: &State, r: &EdgeOrFace) -> Result<V3, String> {
         }
         EdgeOrFace::Face(f) => {
             let (part, i) = face_index(state, f).ok_or_else(lost)?;
-            let pl = part.part.solid.faces[i].plane.ok_or("The reference face must be flat")?;
+            let pl = part.part.solid.faces[i]
+                .plane
+                .ok_or("The reference face must be flat")?;
             Ok(v3(pl.normal()).normalize())
         }
     }
@@ -133,11 +154,17 @@ fn half_turn(a: f64) -> f64 {
 
 impl Rebuilder {
     /// A Bend's (or a Jog's) settings on its model: (the model's context, the spec).
-    fn bend_spec(&self, before: &[Feature], state: &State, b: &BendFeature) -> Result<(usize, BendSpec), String> {
+    fn bend_spec(
+        &self,
+        before: &[Feature],
+        state: &State,
+        b: &BendFeature,
+    ) -> Result<(usize, BendSpec), String> {
         let face = b.face.ok_or("Select a sheet metal face to bend")?;
         let ci = need_context(state, face.part)?;
         let model = &state.sheet_metal[ci].model;
-        let (wall, other) = model_edit::wall_at(model, p3(face.seed), PICK_TOL).ok_or("The face to bend isn't a flat sheet metal wall")?;
+        let (wall, other) = model_edit::wall_at(model, p3(face.seed), PICK_TOL)
+            .ok_or("The face to bend isn't a flat sheet metal wall")?;
         let line = line_points(before, state, b.line.as_ref().ok_or("Select a bend line")?)?;
         let t = model.params.thickness;
         let mut spec = BendSpec {
@@ -153,12 +180,15 @@ impl Rebuilder {
             k_factor: (!b.use_model_k).then_some(b.k_factor),
         };
         if b.control != AngleControl::BendAngle {
-            let dir = reference_direction(state, b.reference.as_ref().ok_or("Select a reference")?)?;
+            let dir =
+                reference_direction(state, b.reference.as_ref().ok_or("Select a reference")?)?;
             let (c, side) = model_edit::bend_frame(model, &spec).map_err(err)?;
             // The bent wall's direction (cos θ·c + sin θ·side) along the edge, or across the
             // face's normal.
             let theta0 = match b.reference {
-                Some(EdgeOrFace::Face(_)) => half_turn((-dir.dot(&c)).atan2(dir.dot(&side)) + std::f64::consts::PI),
+                Some(EdgeOrFace::Face(_)) => {
+                    half_turn((-dir.dot(&c)).atan2(dir.dot(&side)) + std::f64::consts::PI)
+                }
                 _ => half_turn(dir.dot(&side).atan2(dir.dot(&c))),
             };
             spec.angle = match b.control {
@@ -172,7 +202,14 @@ impl Rebuilder {
         Ok((ci, spec))
     }
 
-    pub(in crate::rebuild) fn sheet_metal_tool(&mut self, before: &[Feature], id: FeatureId, name: &str, x: &SheetMetalTool, state: &Arc<State>) -> Result<Output, String> {
+    pub(in crate::rebuild) fn sheet_metal_tool(
+        &mut self,
+        before: &[Feature],
+        id: FeatureId,
+        name: &str,
+        x: &SheetMetalTool,
+        state: &Arc<State>,
+    ) -> Result<Output, String> {
         if let Some(p) = x.problem() {
             return Err(p.into());
         }
@@ -197,7 +234,8 @@ impl Rebuilder {
                 }
                 next.sheet_metal = Arc::new(all);
                 let mut o = output(Arc::new(next), Vec::new());
-                o.warning = (missing > 0).then(|| "A selected part isn't a sheet metal part".into());
+                o.warning =
+                    (missing > 0).then(|| "A selected part isn't a sheet metal part".into());
                 Ok(o)
             }
             SheetMetalTool::Bend(b) => {
@@ -210,25 +248,54 @@ impl Rebuilder {
                 let pick = c.corner.ok_or("Select a corner")?;
                 let ci = need_context(state, pick.part())?;
                 let ctx = &state.sheet_metal[ci];
-                let (bends, _) = model_edit::corner_near(&ctx.model, &ctx.flat, p3(pick.seed())).ok_or("Select a corner where two bends meet")?;
-                self.step(id, name, state, ci, StepEdit::CornerRelief(CornerOverride { bends, relief: c.relief }))
+                let (bends, _) = model_edit::corner_near(&ctx.model, &ctx.flat, p3(pick.seed()))
+                    .ok_or("Select a corner where two bends meet")?;
+                self.step(
+                    id,
+                    name,
+                    state,
+                    ci,
+                    StepEdit::CornerRelief(CornerOverride {
+                        bends,
+                        relief: c.relief,
+                    }),
+                )
             }
             SheetMetalTool::BendRelief(b) => {
                 let pick = b.end.ok_or("Select a bend relief")?;
                 let ci = need_context(state, pick.part())?;
                 let ctx = &state.sheet_metal[ci];
-                let ((bend, end), _) = model_edit::bend_end_near(&ctx.model, p3(pick.seed())).ok_or("Select the end of a bend")?;
-                self.step(id, name, state, ci, StepEdit::BendRelief(BendReliefOverride { bend, end, relief: b.relief }))
+                let ((bend, end), _) = model_edit::bend_end_near(&ctx.model, p3(pick.seed()))
+                    .ok_or("Select the end of a bend")?;
+                self.step(
+                    id,
+                    name,
+                    state,
+                    ci,
+                    StepEdit::BendRelief(BendReliefOverride {
+                        bend,
+                        end,
+                        relief: b.relief,
+                    }),
+                )
             }
             SheetMetalTool::CornerBreak(c) => {
-                let picks: Vec<(PartId, Vec3)> = c.entities.iter().map(|e| (e.part(), e.seed())).collect();
+                let picks: Vec<(PartId, Vec3)> =
+                    c.entities.iter().map(|e| (e.part(), e.seed())).collect();
                 self.corner_breaks(id, name, &picks, &|beta| corner_kind(c, beta), state)
             }
         }
     }
 
     /// Adds a step to model `ci`'s definition and refolds it.
-    fn step(&mut self, id: FeatureId, name: &str, state: &Arc<State>, ci: usize, edit: StepEdit) -> Result<Output, String> {
+    fn step(
+        &mut self,
+        id: FeatureId,
+        name: &str,
+        state: &Arc<State>,
+        ci: usize,
+        edit: StepEdit,
+    ) -> Result<Output, String> {
         self.edit_sheet_metal(id, name, state, ci, |ctx| {
             ctx.def.as_mut().expect("checked").push(name, edit);
             Ok(None)
@@ -236,7 +303,14 @@ impl Rebuilder {
     }
 
     /// A Jog.
-    fn jog(&mut self, before: &[Feature], id: FeatureId, name: &str, j: &JogFeature, state: &Arc<State>) -> Result<Output, String> {
+    fn jog(
+        &mut self,
+        before: &[Feature],
+        id: FeatureId,
+        name: &str,
+        j: &JogFeature,
+        state: &Arc<State>,
+    ) -> Result<Output, String> {
         let (ci, spec) = self.bend_spec(before, state, &j.bend)?;
         let model = &state.sheet_metal[ci].model;
         let t = model.params.thickness;
@@ -246,30 +320,67 @@ impl Rebuilder {
             JogBounding::UpToEntity => {
                 let target = j.up_to.ok_or("Select the entity to jog up to")?;
                 let face = j.bend.face.ok_or("Select a sheet metal face to bend")?;
-                let w = model.wall(spec.wall).ok_or("The face to bend isn't a sheet metal wall")?;
+                let w = model
+                    .wall(spec.wall)
+                    .ok_or("The face to bend isn't a sheet metal wall")?;
                 let n = w.surface.normal().ok_or("The face to bend isn't flat")?;
                 let side = if spec.toward_material { n } else { -n };
                 let d = (p3(target.seed) - p3(face.seed)).dot(&side);
-                d + if j.up_to_offset_on { j.up_to_offset } else { 0.0 }
+                d + if j.up_to_offset_on {
+                    j.up_to_offset
+                } else {
+                    0.0
+                }
             }
         };
-        let s = JogSpec { bend: spec, offset, anchor: j.anchor, preserve_material: j.preserve_material };
-        self.step(id, name, state, ci, StepEdit::Jog { spec: s, seed: seed_of(id) })
+        let s = JogSpec {
+            bend: spec,
+            offset,
+            anchor: j.anchor,
+            preserve_material: j.preserve_material,
+        };
+        self.step(
+            id,
+            name,
+            state,
+            ci,
+            StepEdit::Jog {
+                spec: s,
+                seed: seed_of(id),
+            },
+        )
     }
 
     /// A Tab: the profiles added to the walls, then the clearance pockets cut.
-    fn tab(&mut self, before: &[Feature], id: FeatureId, name: &str, x: &TabFeature, state: &Arc<State>) -> Result<Output, String> {
-        let (groups, lost) = sweep_groups(before, &x.regions, &x.sketches, crate::document::BodyType::Solid);
+    fn tab(
+        &mut self,
+        before: &[Feature],
+        id: FeatureId,
+        name: &str,
+        x: &TabFeature,
+        state: &Arc<State>,
+    ) -> Result<Output, String> {
+        let (groups, lost) = sweep_groups(
+            before,
+            &x.regions,
+            &x.sketches,
+            crate::document::BodyType::Solid,
+        );
         let mut regions: Vec<Region3> = Vec::new();
         for g in &groups {
             let f = &g.frame;
             for (_, r) in &g.regions {
-                let ring = |l: &[cadrs_sketch::Vec2]| l.iter().map(|q| P2::new(q.x, q.y)).collect::<Vec<_>>();
+                let ring = |l: &[cadrs_sketch::Vec2]| {
+                    l.iter().map(|q| P2::new(q.x, q.y)).collect::<Vec<_>>()
+                };
                 regions.push(Region3 {
                     origin: p3(f.origin),
                     x: v3(f.u).normalize(),
                     y: v3(f.v).normalize(),
-                    polygon: Polygon::with_holes(ring(&r.outer), r.holes.iter().map(|h| ring(h)).collect()),
+                    polygon: Polygon::with_holes(
+                        ring(&r.outer),
+                        r.holes.iter().map(|h| ring(h)).collect(),
+                    ),
                 });
             }
         }
@@ -283,7 +394,9 @@ impl Rebuilder {
         // took it): the clearance pocket runs through it.
         let mut sheets: Vec<Option<(f64, f64)>> = vec![None; regions.len()];
         // The walls each model is to take the tab on.
-        let contexts: Vec<usize> = (0..state.sheet_metal.len()).filter(|i| state.sheet_metal[*i].active).collect();
+        let contexts: Vec<usize> = (0..state.sheet_metal.len())
+            .filter(|i| state.sheet_metal[*i].active)
+            .collect();
         for ci in contexts {
             let ctx = &current.sheet_metal[ci];
             let walls: Vec<cadrs_sheetmetal::WallId> = if x.flanges.is_empty() {
@@ -292,7 +405,9 @@ impl Rebuilder {
                 x.flanges
                     .iter()
                     .filter(|f| ctx.parts.iter().any(|(p, _)| *p == f.part))
-                    .filter_map(|f| model_edit::wall_at(&ctx.model, p3(f.seed), PICK_TOL).map(|(w, _)| w))
+                    .filter_map(|f| {
+                        model_edit::wall_at(&ctx.model, p3(f.seed), PICK_TOL).map(|(w, _)| w)
+                    })
                     .collect()
             };
             if walls.is_empty() {
@@ -306,7 +421,16 @@ impl Rebuilder {
                             sheets[k] = model_edit::tab_sheet(&model, r, &took_walls);
                         }
                     }
-                    let o = self.step(id, name, &current, ci, StepEdit::Tab { regions: regions.clone(), walls })?;
+                    let o = self.step(
+                        id,
+                        name,
+                        &current,
+                        ci,
+                        StepEdit::Tab {
+                            regions: regions.clone(),
+                            walls,
+                        },
+                    )?;
                     if o.error.is_some() {
                         return Ok(o);
                     }
@@ -328,9 +452,16 @@ impl Rebuilder {
             let mut prisms: Vec<(Region3, f64, f64)> = Vec::new();
             for (r, sheet) in regions.iter().zip(&sheets) {
                 let Some((z0, z1)) = sheet else { continue };
-                let grown = Region3 { polygon: model_edit::grow(&r.polygon, x.offset), ..r.clone() };
+                let grown = Region3 {
+                    polygon: model_edit::grow(&r.polygon, x.offset),
+                    ..r.clone()
+                };
                 let (lo, hi) = (z0 - x.offset, z1 + x.offset);
-                tools.push(CutTool { region: grown.clone(), dir: r.normal(), z: Some((lo, hi)) });
+                tools.push(CutTool {
+                    region: grown.clone(),
+                    dir: r.normal(),
+                    z: Some((lo, hi)),
+                });
                 prisms.push((grown, lo, hi));
             }
             let mut plain: Vec<PartId> = Vec::new();
@@ -338,11 +469,26 @@ impl Rebuilder {
                 match context_of(&current, *p) {
                     Some(ci) => {
                         let ctx = &current.sheet_metal[ci];
-                        let walls: Vec<cadrs_sheetmetal::WallId> = ctx.parts.iter().filter(|(q, _)| q == p).flat_map(|(_, w)| w.clone()).collect();
+                        let walls: Vec<cadrs_sheetmetal::WallId> = ctx
+                            .parts
+                            .iter()
+                            .filter(|(q, _)| q == p)
+                            .flat_map(|(_, w)| w.clone())
+                            .collect();
                         let mut model = ctx.model.clone();
-                        let cut = model_edit::cut_walls(&mut model, &tools, Some(&walls)).map_err(err)?;
+                        let cut =
+                            model_edit::cut_walls(&mut model, &tools, Some(&walls)).map_err(err)?;
                         if !cut.is_empty() {
-                            let o = self.step(id, name, &current, ci, StepEdit::Cut { tools: tools.clone(), walls: Some(walls) })?;
+                            let o = self.step(
+                                id,
+                                name,
+                                &current,
+                                ci,
+                                StepEdit::Cut {
+                                    tools: tools.clone(),
+                                    walls: Some(walls),
+                                },
+                            )?;
                             if o.error.is_some() {
                                 return Ok(o);
                             }
@@ -366,7 +512,13 @@ impl Rebuilder {
 
     /// Ordinary parts less the prisms of `regions` (each from `lo` to `hi` along its normal from
     /// its plane).
-    fn pocket(&mut self, id: FeatureId, regions: &[(Region3, f64, f64)], parts: &[PartId], state: &Arc<State>) -> Result<Output, String> {
+    fn pocket(
+        &mut self,
+        id: FeatureId,
+        regions: &[(Region3, f64, f64)],
+        parts: &[PartId],
+        state: &Arc<State>,
+    ) -> Result<Output, String> {
         let op = id.0;
         let mut tools: Vec<(BodyId, BodyNames)> = Vec::new();
         for (k, (r, lo, hi)) in regions.iter().enumerate() {
@@ -376,11 +528,19 @@ impl Rebuilder {
                 let p = r.point(q) + n * *lo;
                 nalgebra::Point2::new((p - origin).dot(&r.x), (p - origin).dot(&n.cross(&r.x)))
             };
-            let profile = cadrs_kernel::Profile::new(kplane(origin, r.x, n), vec![region_of(&r.polygon, 0x5441_4200 + k as u64, &to_plane)]);
-            let made = self.kernel.extrude(&profile, Extent::Blind(hi - lo)).map_err(|e| format!("Tab subtraction failed: {e}"));
+            let profile = cadrs_kernel::Profile::new(
+                kplane(origin, r.x, n),
+                vec![region_of(&r.polygon, 0x5441_4200 + k as u64, &to_plane)],
+            );
+            let made = self
+                .kernel
+                .extrude(&profile, Extent::Blind(hi - lo))
+                .map_err(|e| format!("Tab subtraction failed: {e}"));
             let made = made.and_then(|res| {
                 let b = res.bodies[0];
-                naming::name_body(&self.kernel, b, op, &res.history, &[]).map(|nm| (b, nm)).map_err(|e| e.to_string())
+                naming::name_body(&self.kernel, b, op, &res.history, &[])
+                    .map(|nm| (b, nm))
+                    .map_err(|e| e.to_string())
             });
             match made {
                 Ok(x) => tools.push(x),
@@ -416,7 +576,14 @@ impl Rebuilder {
     }
 
     /// Corner breaks at the picked corners (grouped by model).
-    fn corner_breaks(&mut self, id: FeatureId, name: &str, picks: &[(PartId, Vec3)], kind: &dyn Fn(f64) -> CornerBreakKind, state: &Arc<State>) -> Result<Output, String> {
+    fn corner_breaks(
+        &mut self,
+        id: FeatureId,
+        name: &str,
+        picks: &[(PartId, Vec3)],
+        kind: &dyn Fn(f64) -> CornerBreakKind,
+        state: &Arc<State>,
+    ) -> Result<Output, String> {
         let mut by_ctx: Vec<(usize, Vec<Vec3>)> = Vec::new();
         for (part, seed) in picks {
             let ci = need_context(state, *part)?;
@@ -432,17 +599,25 @@ impl Rebuilder {
             let tol = model.params.thickness + 0.5;
             let mut done: Vec<(cadrs_sheetmetal::WallId, P2, CornerBreakKind)> = Vec::new();
             for s in seeds {
-                let (wall, at) = model_edit::corner_vertex_at(&model, p3(s), tol).ok_or("Select a corner of a sheet metal wall")?;
-                if done.iter().any(|(w, p, _)| *w == wall && (p - at).norm() < 1e-9) {
+                let (wall, at) = model_edit::corner_vertex_at(&model, p3(s), tol)
+                    .ok_or("Select a corner of a sheet metal wall")?;
+                if done
+                    .iter()
+                    .any(|(w, p, _)| *w == wall && (p - at).norm() < 1e-9)
+                {
                     continue;
                 }
-                let beta = model_edit::corner_beta(&model, wall, at).ok_or("Select a corner of a sheet metal wall")?;
+                let beta = model_edit::corner_beta(&model, wall, at)
+                    .ok_or("Select a corner of a sheet metal wall")?;
                 // Broken here too, so the next pick finds the corners as they now are.
                 model_edit::break_corner(&mut model, wall, at, kind(beta)).map_err(err)?;
                 done.push((wall, at, kind(beta)));
             }
             let o = self.edit_sheet_metal(id, name, &current, ci, |ctx| {
-                ctx.def.as_mut().expect("checked").push(name, StepEdit::CornerBreaks { corners: done });
+                ctx.def
+                    .as_mut()
+                    .expect("checked")
+                    .push(name, StepEdit::CornerBreaks { corners: done });
                 ctx.corner_broken = true;
                 Ok(None)
             })?;
@@ -457,7 +632,12 @@ impl Rebuilder {
 
     /// P3I.5 (SM1.6, SM12): an ordinary feature that acts on active sheet metal as sheet metal,
     /// rebuilt as an edit of the definition; `None` for everything else.
-    pub(in crate::rebuild) fn sheet_metal_aware(&mut self, before: &[Feature], f: &Feature, state: &Arc<State>) -> Option<Result<Output, String>> {
+    pub(in crate::rebuild) fn sheet_metal_aware(
+        &mut self,
+        before: &[Feature],
+        f: &Feature,
+        state: &Arc<State>,
+    ) -> Option<Result<Output, String>> {
         if !state.sheet_metal.iter().any(|c| c.active) {
             return None;
         }
@@ -586,17 +766,55 @@ impl Rebuilder {
     }
 
     /// Walls copied to each placement (Face pattern, Face mirror).
-    fn copy_walls(&mut self, id: FeatureId, name: &str, ci: usize, walls: &[cadrs_sheetmetal::WallId], places: &[Placement], state: &Arc<State>) -> Result<Output, String> {
-        self.step(id, name, state, ci, StepEdit::Copy { walls: walls.to_vec(), places: places.to_vec(), seed: seed_of(id) })
+    fn copy_walls(
+        &mut self,
+        id: FeatureId,
+        name: &str,
+        ci: usize,
+        walls: &[cadrs_sheetmetal::WallId],
+        places: &[Placement],
+        state: &Arc<State>,
+    ) -> Result<Output, String> {
+        self.step(
+            id,
+            name,
+            state,
+            ci,
+            StepEdit::Copy {
+                walls: walls.to_vec(),
+                places: places.to_vec(),
+                seed: seed_of(id),
+            },
+        )
     }
 
     /// Extrude → Remove through active sheet metal (SM1.6): the walls cut perpendicular.
-    fn sheet_metal_cut(&mut self, before: &[Feature], id: FeatureId, name: &str, e: &crate::document::ExtrudeFeature, state: &Arc<State>) -> Option<Result<Output, String>> {
-        if e.op != BooleanOp::Remove || !e.faces.is_empty() || e.direction.is_some() || e.body != crate::document::BodyType::Solid {
+    fn sheet_metal_cut(
+        &mut self,
+        before: &[Feature],
+        id: FeatureId,
+        name: &str,
+        e: &crate::document::ExtrudeFeature,
+        state: &Arc<State>,
+    ) -> Option<Result<Output, String>> {
+        if e.op != BooleanOp::Remove
+            || !e.faces.is_empty()
+            || e.direction.is_some()
+            || e.body != crate::document::BodyType::Solid
+        {
             return None;
         }
-        let solids: Vec<PartId> = state.parts.iter().filter(|p| p.part.kind == PartKind::Solid).map(|p| p.part.id).collect();
-        let targets: Vec<PartId> = if e.merge_all || e.merge_scope.is_empty() { solids } else { e.merge_scope.clone() };
+        let solids: Vec<PartId> = state
+            .parts
+            .iter()
+            .filter(|p| p.part.kind == PartKind::Solid)
+            .map(|p| p.part.id)
+            .collect();
+        let targets: Vec<PartId> = if e.merge_all || e.merge_scope.is_empty() {
+            solids
+        } else {
+            e.merge_scope.clone()
+        };
         // Only when every part it may cut is active sheet metal.
         if targets.is_empty() || targets.iter().any(|p| context_of(state, *p).is_none()) {
             return None;
@@ -620,19 +838,40 @@ impl Rebuilder {
             let n = v3(f.normal()).normalize();
             let dir = if e.flip { -n } else { n };
             for (_, r) in &g.regions {
-                let ring = |l: &[cadrs_sketch::Vec2]| l.iter().map(|q| P2::new(q.x, q.y)).collect::<Vec<_>>();
-                let region = Region3 { origin: p3(f.origin), x: v3(f.u).normalize(), y: v3(f.v).normalize(), polygon: Polygon::with_holes(ring(&r.outer), r.holes.iter().map(|h| ring(h)).collect()) };
+                let ring = |l: &[cadrs_sketch::Vec2]| {
+                    l.iter().map(|q| P2::new(q.x, q.y)).collect::<Vec<_>>()
+                };
+                let region = Region3 {
+                    origin: p3(f.origin),
+                    x: v3(f.u).normalize(),
+                    y: v3(f.v).normalize(),
+                    polygon: Polygon::with_holes(
+                        ring(&r.outer),
+                        r.holes.iter().map(|h| ring(h)).collect(),
+                    ),
+                };
                 // Depths run along the extrude direction from the sketch plane.
-                tools.push(CutTool { region, dir, z: Some((z0, z1)) });
+                tools.push(CutTool {
+                    region,
+                    dir,
+                    z: Some((z0, z1)),
+                });
             }
         }
         let mut current = state.clone();
         let mut owned = Vec::new();
         let mut any = false;
-        let contexts: Vec<usize> = (0..state.sheet_metal.len()).filter(|i| state.sheet_metal[*i].active).collect();
+        let contexts: Vec<usize> = (0..state.sheet_metal.len())
+            .filter(|i| state.sheet_metal[*i].active)
+            .collect();
         for ci in contexts {
             let ctx = &current.sheet_metal[ci];
-            let walls: Vec<cadrs_sheetmetal::WallId> = ctx.parts.iter().filter(|(p, _)| targets.contains(p)).flat_map(|(_, w)| w.clone()).collect();
+            let walls: Vec<cadrs_sheetmetal::WallId> = ctx
+                .parts
+                .iter()
+                .filter(|(p, _)| targets.contains(p))
+                .flat_map(|(_, w)| w.clone())
+                .collect();
             if walls.is_empty() {
                 continue;
             }
@@ -645,13 +884,26 @@ impl Rebuilder {
                 continue;
             }
             any = true;
-            match self.step(id, name, &current, ci, StepEdit::Cut { tools: tools.clone(), walls: Some(walls) }) {
+            match self.step(
+                id,
+                name,
+                &current,
+                ci,
+                StepEdit::Cut {
+                    tools: tools.clone(),
+                    walls: Some(walls),
+                },
+            ) {
                 Ok(o) if o.error.is_some() => return Some(Ok(o)),
                 Ok(o) => {
                     owned.extend(o.owned);
                     current = o.state;
                 }
-                Err(x) => return Some(Err(format!("The cut can't be made in the sheet metal: {x}"))),
+                Err(x) => {
+                    return Some(Err(format!(
+                        "The cut can't be made in the sheet metal: {x}"
+                    )));
+                }
             }
         }
         if !any {
@@ -667,13 +919,32 @@ impl Rebuilder {
     /// Remove); a counterbore's or countersink's outer diameter is kept for flat pattern
     /// drawing views ([`crate::sheetmetal::HoleMark`]). Holes at mate connectors, or on parts
     /// that aren't all active sheet metal, fall through to the ordinary Hole.
-    fn sheet_metal_hole(&mut self, before: &[Feature], id: FeatureId, name: &str, h: &crate::applied::HoleFeature, state: &Arc<State>) -> Option<Result<Output, String>> {
+    fn sheet_metal_hole(
+        &mut self,
+        before: &[Feature],
+        id: FeatureId,
+        name: &str,
+        h: &crate::applied::HoleFeature,
+        state: &Arc<State>,
+    ) -> Option<Result<Output, String>> {
         use crate::hole::{HoleEnd, HoleStart, HoleStyle};
-        if h.problem().is_some() || !h.connectors.is_empty() || h.spec.start == HoleStart::SelectedPlane {
+        if h.problem().is_some()
+            || !h.connectors.is_empty()
+            || h.spec.start == HoleStart::SelectedPlane
+        {
             return None;
         }
-        let solids: Vec<PartId> = state.parts.iter().filter(|p| p.part.kind == PartKind::Solid).map(|p| p.part.id).collect();
-        let targets: Vec<PartId> = if h.merge_scope.is_empty() { solids } else { h.merge_scope.clone() };
+        let solids: Vec<PartId> = state
+            .parts
+            .iter()
+            .filter(|p| p.part.kind == PartKind::Solid)
+            .map(|p| p.part.id)
+            .collect();
+        let targets: Vec<PartId> = if h.merge_scope.is_empty() {
+            solids
+        } else {
+            h.merge_scope.clone()
+        };
         if targets.is_empty() || targets.iter().any(|p| context_of(state, *p).is_none()) {
             return None;
         }
@@ -706,10 +977,23 @@ impl Rebuilder {
             .map(|(_, origin, normal)| {
                 let n = V3::new(normal.x, normal.y, normal.z);
                 let dir = if h.flip { n } else { -n };
-                let x = if dir.x.abs() < 0.9 { V3::x().cross(&dir).normalize() } else { V3::y().cross(&dir).normalize() };
+                let x = if dir.x.abs() < 0.9 {
+                    V3::x().cross(&dir).normalize()
+                } else {
+                    V3::y().cross(&dir).normalize()
+                };
                 let y = dir.cross(&x);
-                let region = Region3 { origin: P3::new(origin.x, origin.y, origin.z), x, y, polygon: Polygon::new(ring.clone()) };
-                CutTool { region, dir, z: Some(z) }
+                let region = Region3 {
+                    origin: P3::new(origin.x, origin.y, origin.z),
+                    x,
+                    y,
+                    polygon: Polygon::new(ring.clone()),
+                };
+                CutTool {
+                    region,
+                    dir,
+                    z: Some(z),
+                }
             })
             .collect();
         let outer = match spec.style {
@@ -721,10 +1005,17 @@ impl Rebuilder {
         let mut current = state.clone();
         let mut owned = Vec::new();
         let mut any = false;
-        let contexts: Vec<usize> = (0..state.sheet_metal.len()).filter(|i| state.sheet_metal[*i].active).collect();
+        let contexts: Vec<usize> = (0..state.sheet_metal.len())
+            .filter(|i| state.sheet_metal[*i].active)
+            .collect();
         for ci in contexts {
             let ctx = &current.sheet_metal[ci];
-            let walls: Vec<cadrs_sheetmetal::WallId> = ctx.parts.iter().filter(|(p, _)| targets.contains(p)).flat_map(|(_, w)| w.clone()).collect();
+            let walls: Vec<cadrs_sheetmetal::WallId> = ctx
+                .parts
+                .iter()
+                .filter(|(p, _)| targets.contains(p))
+                .flat_map(|(_, w)| w.clone())
+                .collect();
             if walls.is_empty() {
                 continue;
             }
@@ -733,17 +1024,23 @@ impl Rebuilder {
                 .iter()
                 .flat_map(|t| {
                     let o = t.region.origin;
-                    ctx.model.walls.iter().filter(|w| walls.contains(&w.id)).filter_map(move |w| {
-                        let Surface::Planar { origin, .. } = w.surface else { return None };
-                        let n = w.surface.normal()?;
-                        let along = t.dir.dot(&n);
-                        if along.abs() < 1e-6 {
-                            return None;
-                        }
-                        let hit = o + t.dir * ((origin - o).dot(&n) / along);
-                        let q = w.surface.local(hit);
-                        w.outline.contains(q).then_some((w.id, q))
-                    })
+                    ctx.model
+                        .walls
+                        .iter()
+                        .filter(|w| walls.contains(&w.id))
+                        .filter_map(move |w| {
+                            let Surface::Planar { origin, .. } = w.surface else {
+                                return None;
+                            };
+                            let n = w.surface.normal()?;
+                            let along = t.dir.dot(&n);
+                            if along.abs() < 1e-6 {
+                                return None;
+                            }
+                            let hit = o + t.dir * ((origin - o).dot(&n) / along);
+                            let q = w.surface.local(hit);
+                            w.outline.contains(q).then_some((w.id, q))
+                        })
                 })
                 .collect();
             let mut model = ctx.model.clone();
@@ -753,11 +1050,19 @@ impl Rebuilder {
                 Err(x) => return Some(Err(err(x))),
             }
             any = true;
-            let edit = StepEdit::Cut { tools: tools.clone(), walls: Some(walls) };
+            let edit = StepEdit::Cut {
+                tools: tools.clone(),
+                walls: Some(walls),
+            };
             let r = self.edit_sheet_metal(id, name, &current, ci, |ctx| {
                 ctx.def.as_mut().expect("checked").push(name, edit);
                 if let Some(outer) = outer {
-                    ctx.hole_marks.push(crate::sheetmetal::HoleMark { feature: id, radius, outer, at });
+                    ctx.hole_marks.push(crate::sheetmetal::HoleMark {
+                        feature: id,
+                        radius,
+                        outer,
+                        at,
+                    });
                 }
                 Ok(None)
             });
@@ -767,7 +1072,11 @@ impl Rebuilder {
                     owned.extend(o.owned);
                     current = o.state;
                 }
-                Err(x) => return Some(Err(format!("The hole can't be made in the sheet metal: {x}"))),
+                Err(x) => {
+                    return Some(Err(format!(
+                        "The hole can't be made in the sheet metal: {x}"
+                    )));
+                }
             }
         }
         if !any {
@@ -780,18 +1089,39 @@ impl Rebuilder {
 /// A Corner break's shape at a corner of interior angle `beta`.
 fn corner_kind(c: &CornerBreakFeature, beta: f64) -> CornerBreakKind {
     if !c.chamfer {
-        let r = |s: f64| if c.fillet_measurement == FilletMeasurement::Width { model_edit::radius_for_width(s, beta) } else { s };
-        let (r1, r2) = if c.asymmetric { (r(c.size), r(c.size2)) } else { (r(c.size), r(c.size)) };
-        let (r1, r2) = if c.asymmetric && c.flip_asymmetric { (r2, r1) } else { (r1, r2) };
+        let r = |s: f64| {
+            if c.fillet_measurement == FilletMeasurement::Width {
+                model_edit::radius_for_width(s, beta)
+            } else {
+                s
+            }
+        };
+        let (r1, r2) = if c.asymmetric {
+            (r(c.size), r(c.size2))
+        } else {
+            (r(c.size), r(c.size))
+        };
+        let (r1, r2) = if c.asymmetric && c.flip_asymmetric {
+            (r2, r1)
+        } else {
+            (r1, r2)
+        };
         if !c.asymmetric && !c.allow_overflow {
             return CornerBreakKind::Fillet { radius: r1 };
         }
-        return CornerBreakKind::Round { r1, r2, overflow: c.allow_overflow };
+        return CornerBreakKind::Round {
+            r1,
+            r2,
+            overflow: c.allow_overflow,
+        };
     }
     let (d1, d2) = match c.chamfer_type {
         ChamferType::EqualDistance => (c.distance, c.distance),
         ChamferType::TwoDistances => (c.distance, c.distance2),
-        ChamferType::DistanceAngle => (c.distance, model_edit::chamfer_second(c.distance, c.angle.to_radians(), beta)),
+        ChamferType::DistanceAngle => (
+            c.distance,
+            model_edit::chamfer_second(c.distance, c.angle.to_radians(), beta),
+        ),
     };
     let (d1, d2) = if c.flip { (d2, d1) } else { (d1, d2) };
     // Tangent measures along the edges from the corner (where the faces' tangents meet); Offset
@@ -799,7 +1129,9 @@ fn corner_kind(c: &CornerBreakFeature, beta: f64) -> CornerBreakKind {
     // edges (the same at a square corner). Distance and angle measures its distance along the
     // edge either way.
     let (d1, d2) = match (c.chamfer_measurement, c.chamfer_type) {
-        (ChamferMeasurement::Offset, ChamferType::EqualDistance | ChamferType::TwoDistances) => model_edit::chamfer_offset_setbacks(d1, d2, beta),
+        (ChamferMeasurement::Offset, ChamferType::EqualDistance | ChamferType::TwoDistances) => {
+            model_edit::chamfer_offset_setbacks(d1, d2, beta)
+        }
         _ => (d1, d2),
     };
     CornerBreakKind::Chamfer { d1, d2 }
@@ -844,13 +1176,22 @@ fn part_walls(state: &State, parts: &[PartId]) -> Option<(usize, Vec<cadrs_sheet
             return None;
         }
         ci = Some(c);
-        walls.extend(state.sheet_metal[c].parts.iter().filter(|(q, _)| q == p).flat_map(|(_, w)| w.iter().copied()));
+        walls.extend(
+            state.sheet_metal[c]
+                .parts
+                .iter()
+                .filter(|(q, _)| q == p)
+                .flat_map(|(_, w)| w.iter().copied()),
+        );
     }
     Some((ci?, walls))
 }
 
 /// The walls of picked faces, all of one active model.
-fn face_walls(state: &State, faces: &[crate::document::FaceRef]) -> Option<(usize, Vec<cadrs_sheetmetal::WallId>)> {
+fn face_walls(
+    state: &State,
+    faces: &[crate::document::FaceRef],
+) -> Option<(usize, Vec<cadrs_sheetmetal::WallId>)> {
     let mut ci = None;
     let mut walls = Vec::new();
     for f in faces {

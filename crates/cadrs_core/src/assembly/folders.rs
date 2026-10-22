@@ -73,8 +73,18 @@ pub fn tidy(asm: &mut Assembly) {
 }
 
 /// Moves `items` (in list order) so the first lands at `to`, an index in the list without them.
-fn reorder(asm: &mut Assembly, list: FolderList, items: &[FeatureId], to: usize) -> Result<(), CommandError> {
-    fn go<T>(v: &mut Vec<T>, key: impl Fn(&T) -> FeatureId, items: &[FeatureId], to: usize) -> Result<(), CommandError> {
+fn reorder(
+    asm: &mut Assembly,
+    list: FolderList,
+    items: &[FeatureId],
+    to: usize,
+) -> Result<(), CommandError> {
+    fn go<T>(
+        v: &mut Vec<T>,
+        key: impl Fn(&T) -> FeatureId,
+        items: &[FeatureId],
+        to: usize,
+    ) -> Result<(), CommandError> {
         let mut moved = Vec::new();
         let mut k = 0;
         while k < v.len() {
@@ -103,7 +113,11 @@ fn reorder(asm: &mut Assembly, list: FolderList, items: &[FeatureId], to: usize)
 
 fn non_empty(name: &str) -> Result<String, CommandError> {
     let n = name.trim();
-    if n.is_empty() { Err(CommandError::Invalid("a folder needs a name".into())) } else { Ok(n.to_string()) }
+    if n.is_empty() {
+        Err(CommandError::Invalid("a folder needs a name".into()))
+    } else {
+        Ok(n.to_string())
+    }
 }
 
 /// A new folder (the list header's New folder, Add selection to folder…, A18.2, A18.3): named
@@ -131,16 +145,27 @@ impl Command for CreateAssemblyFolder {
         if self.items.iter().any(|i| !list.contains(i)) {
             return Err(CommandError::Invalid("item not found".into()));
         }
-        let all = [folders(asm, FolderList::Instances), folders(asm, FolderList::Mates)].concat();
+        let all = [
+            folders(asm, FolderList::Instances),
+            folders(asm, FolderList::Mates),
+        ]
+        .concat();
         if all.iter().any(|f| f.id == self.folder) {
             return Err(CommandError::Invalid("folder id already in use".into()));
         }
         let name = match &self.name {
             Some(n) => non_empty(n)?,
-            None => (1..).map(|n| format!("Folder {n}")).find(|n| !all.iter().any(|f| &f.name == n)).unwrap_or_default(),
+            None => (1..)
+                .map(|n| format!("Folder {n}"))
+                .find(|n| !all.iter().any(|f| &f.name == n))
+                .unwrap_or_default(),
         };
         // In list order, gathered at the first (A18.3).
-        let mut items: Vec<FeatureId> = list.iter().copied().filter(|i| self.items.contains(i)).collect();
+        let mut items: Vec<FeatureId> = list
+            .iter()
+            .copied()
+            .filter(|i| self.items.contains(i))
+            .collect();
         items.dedup();
         if let Some(first) = items.first() {
             let at = list.iter().position(|i| i == first).unwrap_or(0);
@@ -151,7 +176,12 @@ impl Command for CreateAssemblyFolder {
         for f in fs.iter_mut() {
             f.features.retain(|x| !items.contains(x));
         }
-        fs.push(FeatureFolder { id: self.folder, name, features: items, open: true });
+        fs.push(FeatureFolder {
+            id: self.folder,
+            name,
+            features: items,
+            open: true,
+        });
         tidy(asm);
         Ok(())
     }
@@ -179,7 +209,11 @@ impl Command for MoveListItems {
     fn apply(&self, doc: &mut Document) -> Result<(), CommandError> {
         let asm = assembly_mut(doc, self.element)?;
         let list = order(asm, self.list);
-        let items: Vec<FeatureId> = list.iter().copied().filter(|i| self.items.contains(i)).collect();
+        let items: Vec<FeatureId> = list
+            .iter()
+            .copied()
+            .filter(|i| self.items.contains(i))
+            .collect();
         if items.len() != self.items.len() || items.is_empty() {
             return Err(CommandError::Invalid("item not found".into()));
         }
@@ -192,13 +226,17 @@ impl Command for MoveListItems {
             .map(|f| f.id)
             .collect();
         for f in fs.iter_mut() {
-            let keeps = Some(f.id) == self.folder || (self.folder.is_none() && whole.contains(&f.id));
+            let keeps =
+                Some(f.id) == self.folder || (self.folder.is_none() && whole.contains(&f.id));
             if !keeps {
                 f.features.retain(|x| !items.contains(x));
             }
         }
         if let Some(target) = self.folder {
-            let f = fs.iter_mut().find(|f| f.id == target).ok_or_else(|| CommandError::Invalid("folder not found".into()))?;
+            let f = fs
+                .iter_mut()
+                .find(|f| f.id == target)
+                .ok_or_else(|| CommandError::Invalid("folder not found".into()))?;
             for x in &items {
                 if !f.features.contains(x) {
                     f.features.push(*x);
@@ -302,11 +340,19 @@ impl Command for DeleteAssemblyFolder {
             match self.list {
                 FolderList::Instances => {
                     let instances = inside.iter().map(|f| InstanceId(f.0)).collect();
-                    DeleteInstances { element: self.element, instances }.apply(doc)?;
+                    DeleteInstances {
+                        element: self.element,
+                        instances,
+                    }
+                    .apply(doc)?;
                 }
                 FolderList::Mates => {
                     let mates = inside.iter().map(|f| MateId(f.0)).collect();
-                    DeleteMateFeatures { element: self.element, mates }.apply(doc)?;
+                    DeleteMateFeatures {
+                        element: self.element,
+                        mates,
+                    }
+                    .apply(doc)?;
                 }
             }
         }

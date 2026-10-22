@@ -9,7 +9,10 @@ use crate::ids::ElementId;
 use super::mate::{MateFeature, MateId, MateKind};
 use super::{Assembly, Instance, InstanceId, Pose};
 
-pub(crate) fn assembly_mut(doc: &mut Document, element: ElementId) -> Result<&mut Assembly, CommandError> {
+pub(crate) fn assembly_mut(
+    doc: &mut Document,
+    element: ElementId,
+) -> Result<&mut Assembly, CommandError> {
     doc.element_mut(element)
         .ok_or(CommandError::ElementNotFound(element))?
         .assembly_model_mut()
@@ -45,35 +48,58 @@ impl Command for InsertInstance {
         let src = self.instance.source.element();
         match self.instance.source {
             super::InstanceSource::Part { .. } => {
-                if !doc.element(src).is_some_and(|e| matches!(e.kind, crate::document::ElementKind::PartStudio { .. })) {
-                    return Err(CommandError::Invalid("the source is not a Part Studio of this document".into()));
+                if !doc.element(src).is_some_and(|e| {
+                    matches!(e.kind, crate::document::ElementKind::PartStudio { .. })
+                }) {
+                    return Err(CommandError::Invalid(
+                        "the source is not a Part Studio of this document".into(),
+                    ));
                 }
             }
             // A17.2: another Assembly tab, which must not be (or contain) this one.
             // A2.4: a whole Part Studio as one rigid instance.
             super::InstanceSource::Studio { board: None, .. } => {
-                if !doc.element(src).is_some_and(|e| matches!(e.kind, crate::document::ElementKind::PartStudio { .. })) {
-                    return Err(CommandError::Invalid("the source is not a Part Studio of this document".into()));
+                if !doc.element(src).is_some_and(|e| {
+                    matches!(e.kind, crate::document::ElementKind::PartStudio { .. })
+                }) {
+                    return Err(CommandError::Invalid(
+                        "the source is not a Part Studio of this document".into(),
+                    ));
                 }
                 if self.instance.parts.is_empty() {
-                    return Err(CommandError::Invalid("a rigid Part Studio instance needs a part".into()));
+                    return Err(CommandError::Invalid(
+                        "a rigid Part Studio instance needs a part".into(),
+                    ));
                 }
             }
             // A PCB Studio's board designed in cadrs (`docs/PCB_IN_PART_STUDIO.md` §9).
             super::InstanceSource::Studio { board: Some(b), .. } => {
-                if doc.element(src).and_then(|e| e.pcb()).and_then(|s| s.board(b)).is_none() {
-                    return Err(CommandError::Invalid("the source is not a board of a PCB Studio of this document".into()));
+                if doc
+                    .element(src)
+                    .and_then(|e| e.pcb())
+                    .and_then(|s| s.board(b))
+                    .is_none()
+                {
+                    return Err(CommandError::Invalid(
+                        "the source is not a board of a PCB Studio of this document".into(),
+                    ));
                 }
                 if self.instance.parts.is_empty() {
-                    return Err(CommandError::Invalid("a rigid Part Studio instance needs a part".into()));
+                    return Err(CommandError::Invalid(
+                        "a rigid Part Studio instance needs a part".into(),
+                    ));
                 }
             }
             super::InstanceSource::Assembly { .. } => {
                 if doc.element(src).and_then(|e| e.assembly_model()).is_none() {
-                    return Err(CommandError::Invalid("the source is not an Assembly of this document".into()));
+                    return Err(CommandError::Invalid(
+                        "the source is not an Assembly of this document".into(),
+                    ));
                 }
                 if super::structure::contains_assembly(doc, src, self.element) {
-                    return Err(CommandError::Invalid("an assembly can't contain itself".into()));
+                    return Err(CommandError::Invalid(
+                        "an assembly can't contain itself".into(),
+                    ));
                 }
             }
         }
@@ -107,7 +133,12 @@ impl Command for DeleteInstances {
         // The parts of deleted subassemblies are gone too.
         let mut gone = self.instances.clone();
         if let Some(asm) = doc.element(self.element).and_then(|e| e.assembly_model()) {
-            gone.extend(super::structure::occurrences(doc, asm).into_iter().filter(|o| self.instances.contains(&o.top)).map(|o| o.id));
+            gone.extend(
+                super::structure::occurrences(doc, asm)
+                    .into_iter()
+                    .filter(|o| self.instances.contains(&o.top))
+                    .map(|o| o.id),
+            );
         }
         let asm = assembly_mut(doc, self.element)?;
         check_ids(asm, &self.instances)?;
@@ -115,8 +146,12 @@ impl Command for DeleteInstances {
         // with it; a copy deleted leaves it.
         let mut with: Vec<InstanceId> = Vec::new();
         for f in &asm.mates {
-            let MateKind::Replicate(r) = &f.kind else { continue };
-            let seed_mate_gone = asm.mate(r.seed_mate).is_none_or(|m| m.instances().iter().any(|i| gone.contains(i)));
+            let MateKind::Replicate(r) = &f.kind else {
+                continue;
+            };
+            let seed_mate_gone = asm
+                .mate(r.seed_mate)
+                .is_none_or(|m| m.instances().iter().any(|i| gone.contains(i)));
             if gone.contains(&r.seed) || seed_mate_gone {
                 with.extend(r.instances.iter().copied());
             }
@@ -133,12 +168,19 @@ impl Command for DeleteInstances {
         // Their mates go too; a group loses them (and goes when fewer than two are left).
         let gone = &gone;
         // P3B.7: their explicit connectors go, and the mates on them.
-        let lost: Vec<super::connector::LocalConnectorId> =
-            asm.connectors.iter().filter(|c| gone.contains(&c.connector.instance)).map(|c| c.id).collect();
+        let lost: Vec<super::connector::LocalConnectorId> = asm
+            .connectors
+            .iter()
+            .filter(|c| gone.contains(&c.connector.instance))
+            .map(|c| c.id)
+            .collect();
         asm.connectors.retain(|c| !lost.contains(&c.id));
         let on_lost = |c: &super::connector::MateConnector| matches!(c.anchor, super::connector::ConnectorAnchor::Local { id } if lost.contains(&id));
         asm.mates.retain_mut(|f| match &mut f.kind {
-            MateKind::Mate(m) => !m.connectors.iter().any(|c| gone.contains(&c.instance) || on_lost(c)),
+            MateKind::Mate(m) => !m
+                .connectors
+                .iter()
+                .any(|c| gone.contains(&c.instance) || on_lost(c)),
             MateKind::Group { instances } => {
                 instances.retain(|i| !gone.contains(i));
                 instances.len() >= 2
@@ -158,7 +200,9 @@ impl Command for DeleteInstances {
         });
         // A Replicate whose seed mate went goes too.
         let mates: Vec<MateId> = asm.mates.iter().map(|m| m.id).collect();
-        asm.retain_mates(|f| !matches!(&f.kind, MateKind::Replicate(r) if !mates.contains(&r.seed_mate)));
+        asm.retain_mates(
+            |f| !matches!(&f.kind, MateKind::Replicate(r) if !mates.contains(&r.seed_mate)),
+        );
         // P3B.9: a relation goes with its mates.
         asm.drop_orphan_relations();
         super::folders::tidy(asm);
@@ -202,7 +246,11 @@ pub struct SetInstancesHidden {
 
 impl Command for SetInstancesHidden {
     fn label(&self) -> String {
-        if self.hidden { "Hide instances".into() } else { "Show instances".into() }
+        if self.hidden {
+            "Hide instances".into()
+        } else {
+            "Show instances".into()
+        }
     }
     fn scope(&self) -> Scope {
         Scope::Element(self.element)
@@ -229,7 +277,11 @@ pub struct SetInstancesFixed {
 
 impl Command for SetInstancesFixed {
     fn label(&self) -> String {
-        if self.fixed { "Fix".into() } else { "Unfix".into() }
+        if self.fixed {
+            "Fix".into()
+        } else {
+            "Unfix".into()
+        }
     }
     fn scope(&self) -> Scope {
         Scope::Element(self.element)
@@ -247,14 +299,26 @@ impl Command for SetInstancesFixed {
 }
 
 fn check_feature(doc: &Document, element: ElementId, f: &MateFeature) -> Result<(), CommandError> {
-    let asm = doc.element(element).and_then(|e| e.assembly_model()).ok_or_else(|| CommandError::Invalid("not an assembly".into()))?;
+    let asm = doc
+        .element(element)
+        .and_then(|e| e.assembly_model())
+        .ok_or_else(|| CommandError::Invalid("not an assembly".into()))?;
     // A mate names occurrences (parts inside subassemblies too); a group, top-level instances.
     match &f.kind {
         MateKind::Mate(m) => {
-            let occ: std::collections::HashSet<InstanceId> = super::structure::occurrences(doc, asm).into_iter().map(|o| o.id).collect();
+            let occ: std::collections::HashSet<InstanceId> =
+                super::structure::occurrences(doc, asm)
+                    .into_iter()
+                    .map(|o| o.id)
+                    .collect();
             // P3B.7: the Origin (A16.3) is a mate's instance too.
-            if let Some(c) = m.all_connectors().find(|c| !c.is_origin() && !occ.contains(&c.instance) && asm.instance(c.instance).is_none()) {
-                return Err(CommandError::Invalid(format!("instance {} not found", c.instance)));
+            if let Some(c) = m.all_connectors().find(|c| {
+                !c.is_origin() && !occ.contains(&c.instance) && asm.instance(c.instance).is_none()
+            }) {
+                return Err(CommandError::Invalid(format!(
+                    "instance {} not found",
+                    c.instance
+                )));
             }
         }
         MateKind::Group { .. } | MateKind::Replicate(_) => check_ids(asm, &f.instances())?,
@@ -274,9 +338,17 @@ fn check_feature(doc: &Document, element: ElementId, f: &MateFeature) -> Result<
         // A12.1, A12.2: one or two tabs, and no instance both a tab and a width.
         MateKind::Mate(m) if m.mate_type == super::mate::MateType::Width => {
             if m.tabs.is_empty() || m.tabs.len() > 2 {
-                Err(CommandError::Invalid("a Width mate needs one or two tabs".into()))
-            } else if m.tabs.iter().any(|t| m.connectors.iter().any(|w| w.instance == t.instance)) {
-                Err(CommandError::Invalid("an instance can't be both a tab and a width".into()))
+                Err(CommandError::Invalid(
+                    "a Width mate needs one or two tabs".into(),
+                ))
+            } else if m
+                .tabs
+                .iter()
+                .any(|t| m.connectors.iter().any(|w| w.instance == t.instance))
+            {
+                Err(CommandError::Invalid(
+                    "an instance can't be both a tab and a width".into(),
+                ))
             } else {
                 Ok(())
             }
@@ -284,7 +356,9 @@ fn check_feature(doc: &Document, element: ElementId, f: &MateFeature) -> Result<
         MateKind::Mate(m) if m.connectors[0].instance == m.connectors[1].instance => {
             Err(CommandError::Invalid("a mate needs two instances".into()))
         }
-        MateKind::Group { instances } if instances.len() < 2 => Err(CommandError::Invalid("a group needs two instances".into())),
+        MateKind::Group { instances } if instances.len() < 2 => {
+            Err(CommandError::Invalid("a group needs two instances".into()))
+        }
         _ => Ok(()),
     }
 }
@@ -368,19 +442,37 @@ impl Command for SetLocalConnector {
         Scope::Element(self.element)
     }
     fn apply(&self, doc: &mut Document) -> Result<(), CommandError> {
-        let asm = doc.element(self.element).and_then(|e| e.assembly_model()).ok_or_else(|| CommandError::Invalid("not an assembly".into()))?;
+        let asm = doc
+            .element(self.element)
+            .and_then(|e| e.assembly_model())
+            .ok_or_else(|| CommandError::Invalid("not an assembly".into()))?;
         let owner = self.connector.connector.instance;
-        let occ: std::collections::HashSet<InstanceId> = super::structure::occurrences(doc, asm).into_iter().map(|o| o.id).collect();
+        let occ: std::collections::HashSet<InstanceId> = super::structure::occurrences(doc, asm)
+            .into_iter()
+            .map(|o| o.id)
+            .collect();
         if !occ.contains(&owner) && asm.instance(owner).is_none() {
             return Err(CommandError::Invalid(format!("instance {owner} not found")));
         }
         let asm = assembly_mut(doc, self.element)?;
         let after = asm.mates.len();
-        match asm.connectors.iter_mut().find(|c| c.id == self.connector.id) {
+        match asm
+            .connectors
+            .iter_mut()
+            .find(|c| c.id == self.connector.id)
+        {
             // An edit keeps its place in the list.
-            Some(slot) => *slot = super::connector::LocalConnector { listed_after: self.connector.listed_after.or(slot.listed_after), ..self.connector.clone() },
+            Some(slot) => {
+                *slot = super::connector::LocalConnector {
+                    listed_after: self.connector.listed_after.or(slot.listed_after),
+                    ..self.connector.clone()
+                }
+            }
             // A new one comes after the mate features there are.
-            None => asm.connectors.push(super::connector::LocalConnector { listed_after: self.connector.listed_after.or(Some(after)), ..self.connector.clone() }),
+            None => asm.connectors.push(super::connector::LocalConnector {
+                listed_after: self.connector.listed_after.or(Some(after)),
+                ..self.connector.clone()
+            }),
         }
         Ok(())
     }
@@ -443,7 +535,10 @@ impl Command for DeleteMateFeatures {
                 copies.extend(r.instances.iter().copied());
             }
         }
-        asm.retain_mates(|m| !self.mates.contains(&m.id) && !matches!(&m.kind, MateKind::Replicate(r) if self.mates.contains(&r.seed_mate)));
+        asm.retain_mates(|m| {
+            !self.mates.contains(&m.id)
+                && !matches!(&m.kind, MateKind::Replicate(r) if self.mates.contains(&r.seed_mate))
+        });
         // P3B.9: a relation goes with its mates.
         asm.drop_orphan_relations();
         if !copies.is_empty() {
@@ -481,7 +576,11 @@ impl Command for RenameMateFeature {
             return Err(CommandError::Invalid("a mate needs a name".into()));
         }
         let asm = assembly_mut(doc, self.element)?;
-        let f = asm.mates.iter_mut().find(|m| m.id == self.mate).ok_or_else(|| CommandError::Invalid("mate not found".into()))?;
+        let f = asm
+            .mates
+            .iter_mut()
+            .find(|m| m.id == self.mate)
+            .ok_or_else(|| CommandError::Invalid("mate not found".into()))?;
         f.name = name.to_string();
         Ok(())
     }
@@ -498,7 +597,11 @@ pub struct SetMatesSuppressed {
 
 impl Command for SetMatesSuppressed {
     fn label(&self) -> String {
-        if self.suppressed { "Suppress mates".into() } else { "Unsuppress mates".into() }
+        if self.suppressed {
+            "Suppress mates".into()
+        } else {
+            "Unsuppress mates".into()
+        }
     }
     fn scope(&self) -> Scope {
         Scope::Element(self.element)
@@ -535,12 +638,18 @@ impl Command for SetStudioParts {
     }
     fn apply(&self, doc: &mut Document) -> Result<(), CommandError> {
         if self.parts.is_empty() {
-            return Err(CommandError::Invalid("a rigid Part Studio instance needs a part".into()));
+            return Err(CommandError::Invalid(
+                "a rigid Part Studio instance needs a part".into(),
+            ));
         }
         let asm = assembly_mut(doc, self.element)?;
-        let inst = asm.instance_mut(self.instance).ok_or_else(|| CommandError::Invalid(format!("instance {} not found", self.instance)))?;
+        let inst = asm.instance_mut(self.instance).ok_or_else(|| {
+            CommandError::Invalid(format!("instance {} not found", self.instance))
+        })?;
         if !inst.source.is_studio() {
-            return Err(CommandError::Invalid("not a rigid Part Studio instance".into()));
+            return Err(CommandError::Invalid(
+                "not a rigid Part Studio instance".into(),
+            ));
         }
         let removed: Vec<InstanceId> = inst
             .parts
@@ -549,7 +658,10 @@ impl Command for SetStudioParts {
             .map(|p| super::structure::derive(self.instance, super::structure::studio_part_key(*p)))
             .collect();
         inst.parts = self.parts.clone();
-        asm.retain_mates(|f| !f.mate().is_some_and(|m| m.all_connectors().any(|c| removed.contains(&c.instance))));
+        asm.retain_mates(|f| {
+            !f.mate()
+                .is_some_and(|m| m.all_connectors().any(|c| removed.contains(&c.instance)))
+        });
         super::folders::tidy(asm);
         Ok(())
     }

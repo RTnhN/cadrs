@@ -21,7 +21,11 @@ pub const MAX_SCALE: f64 = 5000.0;
 
 impl View {
     pub fn new(size: [f64; 2]) -> View {
-        View { center: [0.0, 0.0], scale: 4.0, size }
+        View {
+            center: [0.0, 0.0],
+            scale: 4.0,
+            size,
+        }
     }
 
     fn k(&self) -> f64 {
@@ -31,13 +35,19 @@ impl View {
     /// Design point → screen pixel.
     pub fn to_screen(&self, p: [f64; 2]) -> [f64; 2] {
         let k = self.k();
-        [self.size[0] / 2.0 + (p[0] - self.center[0]) * k, self.size[1] / 2.0 - (p[1] - self.center[1]) * k]
+        [
+            self.size[0] / 2.0 + (p[0] - self.center[0]) * k,
+            self.size[1] / 2.0 - (p[1] - self.center[1]) * k,
+        ]
     }
 
     /// Screen pixel → design point.
     pub fn to_design(&self, s: [f64; 2]) -> [f64; 2] {
         let k = self.k();
-        [self.center[0] + (s[0] - self.size[0] / 2.0) / k, self.center[1] - (s[1] - self.size[1] / 2.0) / k]
+        [
+            self.center[0] + (s[0] - self.size[0] / 2.0) / k,
+            self.center[1] - (s[1] - self.size[1] / 2.0) / k,
+        ]
     }
 
     pub fn to_design_pt(&self, s: [f64; 2]) -> Pt {
@@ -74,16 +84,24 @@ impl View {
         let c = b.center();
         self.center = [c.x as f64, c.y as f64];
         let s = b.size();
-        let (w, h) = ((s.w as f64 / NM_PER_MM as f64).max(1e-3), (s.h as f64 / NM_PER_MM as f64).max(1e-3));
+        let (w, h) = (
+            (s.w as f64 / NM_PER_MM as f64).max(1e-3),
+            (s.h as f64 / NM_PER_MM as f64).max(1e-3),
+        );
         let usable = 1.0 - 2.0 * margin;
-        self.scale = ((self.size[0] * usable) / w).min((self.size[1] * usable) / h).clamp(MIN_SCALE, MAX_SCALE);
+        self.scale = ((self.size[0] * usable) / w)
+            .min((self.size[1] * usable) / h)
+            .clamp(MIN_SCALE, MAX_SCALE);
     }
 
     /// The design box visible on screen.
     pub fn visible(&self) -> Bounds {
         let a = self.to_design([0.0, 0.0]);
         let b = self.to_design(self.size);
-        Bounds { min: Pt::new(a[0].min(b[0]) as i64, a[1].min(b[1]) as i64), max: Pt::new(a[0].max(b[0]) as i64, a[1].max(b[1]) as i64) }
+        Bounds {
+            min: Pt::new(a[0].min(b[0]) as i64, a[1].min(b[1]) as i64),
+            max: Pt::new(a[0].max(b[0]) as i64, a[1].max(b[1]) as i64),
+        }
     }
 }
 
@@ -113,7 +131,13 @@ mod tests {
         let s = v.to_screen(p);
         assert!((s[0] - 410.0).abs() < 1e-9 && (s[1] - 280.0).abs() < 1e-9);
         // Fit a 297 × 210 mm sheet: it fills the height or width with a 5 % margin.
-        v.fit(Bounds { min: Pt::ZERO, max: Pt::mm(297.0, 210.0) }, 0.05);
+        v.fit(
+            Bounds {
+                min: Pt::ZERO,
+                max: Pt::mm(297.0, 210.0),
+            },
+            0.05,
+        );
         let shown = v.visible();
         assert!(shown.contains(Pt::ZERO) && shown.contains(Pt::mm(297.0, 210.0)));
         assert!((v.scale - (800.0 * 0.9 / 297.0)).abs() < 1e-9);

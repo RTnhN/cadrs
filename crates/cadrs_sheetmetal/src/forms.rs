@@ -90,14 +90,22 @@ fn seg_distance(s: Seg2, p: &Polygon) -> f64 {
     let mut best = f64::INFINITY;
     for i in 0..l.len() {
         let (a, b) = (l[i], l[(i + 1) % l.len()]);
-        best = best.min(pt_seg(a, s.a, s.b)).min(pt_seg(s.a, a, b)).min(pt_seg(s.b, a, b));
+        best = best
+            .min(pt_seg(a, s.a, s.b))
+            .min(pt_seg(s.a, a, b))
+            .min(pt_seg(s.b, a, b));
     }
     best
 }
 
 /// Checks a form's footprint (in the wall's local 2D) against the rules (see the module docs).
 /// `clearance` is how close it may come (a hair: touching is what's refused).
-pub fn check_footprint(m: &Model, wall: WallId, footprint: &Polygon, clearance: f64) -> Result<(), FormProblem> {
+pub fn check_footprint(
+    m: &Model,
+    wall: WallId,
+    footprint: &Polygon,
+    clearance: f64,
+) -> Result<(), FormProblem> {
     let w = m.wall(wall).ok_or(FormProblem::NoWall)?;
     if matches!(w.surface, Surface::Rolled { .. }) {
         return Err(FormProblem::RolledWall);
@@ -107,15 +115,22 @@ pub fn check_footprint(m: &Model, wall: WallId, footprint: &Polygon, clearance: 
     }
     // The joints first: they name what is touched.
     for j in m.joints.iter().filter(|j| j.a == wall || j.b == wall) {
-        let Some(s) = j.segment_on(wall) else { continue };
+        let Some(s) = j.segment_on(wall) else {
+            continue;
+        };
         if seg_distance(s, footprint) <= clearance {
             let what = match j.kind {
-                JointKind::Bend(_) | JointKind::Rip { .. } | JointKind::Tangent { .. } => j.name.clone(),
+                JointKind::Bend(_) | JointKind::Rip { .. } | JointKind::Tangent { .. } => {
+                    j.name.clone()
+                }
             };
             return Err(FormProblem::Touches(Some(what)));
         }
     }
-    let inside = poly::intersection(footprint, &w.outline).iter().map(Polygon::area).sum::<f64>();
+    let inside = poly::intersection(footprint, &w.outline)
+        .iter()
+        .map(Polygon::area)
+        .sum::<f64>();
     // (Booleans snap to their grid: allow that much along the footprint's edge.)
     if inside < footprint.area() - 4.0 * poly::GRID * poly::perimeter(footprint) - 1e-12 {
         return Err(FormProblem::OffWall);
@@ -132,11 +147,26 @@ pub fn check_footprint(m: &Model, wall: WallId, footprint: &Polygon, clearance: 
 
 /// A form placed on `wall`, its outline and centre given in the wall's local 2D, as the flat
 /// pattern part shows it (`None` if the wall isn't in that part).
-pub fn on_flat(part: &FlatPart, m: &Model, wall: WallId, center: P2, lines: &[FormLine]) -> Option<(P2, Vec<FormLine>)> {
+pub fn on_flat(
+    part: &FlatPart,
+    m: &Model,
+    wall: WallId,
+    center: P2,
+    lines: &[FormLine],
+) -> Option<(P2, Vec<FormLine>)> {
     let place = part.placement(wall)?;
     let w = m.wall(wall)?;
     let map = |q: P2| place.apply(w.flat_local(&m.params, q));
-    Some((map(center), lines.iter().map(|l| FormLine { points: l.points.iter().map(|q| map(*q)).collect(), closed: l.closed }).collect()))
+    Some((
+        map(center),
+        lines
+            .iter()
+            .map(|l| FormLine {
+                points: l.points.iter().map(|q| map(*q)).collect(),
+                closed: l.closed,
+            })
+            .collect(),
+    ))
 }
 
 /// The convex hull of points (counter-clockwise), for footprints.
@@ -182,7 +212,15 @@ mod tests {
 
     #[test]
     fn a_form_in_the_middle_of_a_wall_is_fine_and_one_on_a_bend_is_not() {
-        let m = samples::l_bracket(Params { thickness: 2.0, bend_radius: 3.0, ..Default::default() }, true).unwrap();
+        let m = samples::l_bracket(
+            Params {
+                thickness: 2.0,
+                bend_radius: 3.0,
+                ..Default::default()
+            },
+            true,
+        )
+        .unwrap();
         let w = m.walls[0].id;
         let (lo, hi) = m.walls[0].outline.bounds().unwrap();
         let mid = P2::from((lo.coords + hi.coords) / 2.0);
@@ -191,9 +229,14 @@ mod tests {
         let bend = m.joints.iter().find(|j| j.bend().is_some()).unwrap();
         let s = bend.segment_on(w).unwrap();
         let on = P2::from((s.a.coords + s.b.coords) / 2.0);
-        assert!(matches!(check_footprint(&m, w, &square(on, 2.0), 1e-6), Err(FormProblem::Touches(Some(_)))));
+        assert!(matches!(
+            check_footprint(&m, w, &square(on, 2.0), 1e-6),
+            Err(FormProblem::Touches(Some(_)))
+        ));
         // Off the wall altogether.
-        assert!(check_footprint(&m, w, &square(P2::new(hi.x + 50.0, hi.y + 50.0), 2.0), 1e-6).is_err());
+        assert!(
+            check_footprint(&m, w, &square(P2::new(hi.x + 50.0, hi.y + 50.0), 2.0), 1e-6).is_err()
+        );
     }
 
     #[test]
@@ -202,7 +245,17 @@ mod tests {
         let flat = flatten(&m);
         let part = &flat.parts[0];
         let w = m.walls[1].id;
-        let (c, lines) = on_flat(part, &m, w, P2::new(1.0, 2.0), &[FormLine { points: vec![P2::new(0.0, 0.0), P2::new(3.0, 0.0)], closed: false }]).unwrap();
+        let (c, lines) = on_flat(
+            part,
+            &m,
+            w,
+            P2::new(1.0, 2.0),
+            &[FormLine {
+                points: vec![P2::new(0.0, 0.0), P2::new(3.0, 0.0)],
+                closed: false,
+            }],
+        )
+        .unwrap();
         let place = part.placement(w).unwrap();
         assert!((c - place.apply(P2::new(1.0, 2.0))).norm() < 1e-12);
         assert!(((lines[0].points[1] - lines[0].points[0]).norm() - 3.0).abs() < 1e-9);
@@ -210,7 +263,13 @@ mod tests {
 
     #[test]
     fn hull_of_a_square_and_its_middle() {
-        let h = hull(&[P2::new(0.0, 0.0), P2::new(2.0, 0.0), P2::new(1.0, 1.0), P2::new(2.0, 2.0), P2::new(0.0, 2.0)]);
+        let h = hull(&[
+            P2::new(0.0, 0.0),
+            P2::new(2.0, 0.0),
+            P2::new(1.0, 1.0),
+            P2::new(2.0, 2.0),
+            P2::new(0.0, 2.0),
+        ]);
         assert_eq!(h.outer.len(), 4);
         assert!((h.area() - 4.0).abs() < 1e-12);
     }

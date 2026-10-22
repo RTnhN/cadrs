@@ -173,7 +173,11 @@ pub(crate) fn apply_visuals(
     )>,
     q_children: Query<&Children>,
     mut q_fg: Query<
-        (Option<&mut TextColor>, Option<&mut ImageNode>, Has<crate::icon::FullColour>),
+        (
+            Option<&mut TextColor>,
+            Option<&mut ImageNode>,
+            Has<crate::icon::FullColour>,
+        ),
         With<InheritFg>,
     >,
     q_nested: Query<(), With<Visuals>>,
@@ -217,7 +221,11 @@ pub(crate) fn apply_visuals(
                     t.set_if_neq(TextColor(fg));
                 }
                 // Full-colour icons keep their colours; the state only fades them.
-                let tint = if full_colour { Color::WHITE.with_alpha(fg.alpha()) } else { fg };
+                let tint = if full_colour {
+                    Color::WHITE.with_alpha(fg.alpha())
+                } else {
+                    fg
+                };
                 if let Some(mut i) = image
                     && i.color != tint
                 {

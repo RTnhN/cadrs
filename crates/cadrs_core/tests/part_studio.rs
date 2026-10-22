@@ -26,7 +26,11 @@ impl Doc {
     fn new() -> Self {
         let d = Document::new("P3.3");
         let el = d.elements[0].id;
-        Self { d, h: History::default(), el }
+        Self {
+            d,
+            h: History::default(),
+            el,
+        }
     }
 
     fn features(&self) -> Vec<Feature> {
@@ -34,23 +38,57 @@ impl Doc {
     }
 
     fn g(&self, f: FeatureId) -> Sketch {
-        self.d.element(self.el).unwrap().feature(f).unwrap().sketch().unwrap().geometry.clone()
+        self.d
+            .element(self.el)
+            .unwrap()
+            .feature(f)
+            .unwrap()
+            .sketch()
+            .unwrap()
+            .geometry
+            .clone()
     }
 
     fn sketch(&mut self, plane: PlaneRef, ops: Vec<SketchOp>) -> FeatureId {
         let f = FeatureId::new();
-        self.h.execute(&mut self.d, &AddSketch { element: self.el, feature: f, plane: Some(plane) }).unwrap();
+        self.h
+            .execute(
+                &mut self.d,
+                &AddSketch {
+                    element: self.el,
+                    feature: f,
+                    plane: Some(plane),
+                },
+            )
+            .unwrap();
         for op in ops {
-            self.h.execute(&mut self.d, &EditSketch { element: self.el, feature: f, op }).unwrap();
+            self.h
+                .execute(
+                    &mut self.d,
+                    &EditSketch {
+                        element: self.el,
+                        feature: f,
+                        op,
+                    },
+                )
+                .unwrap();
         }
         f
     }
 
     /// An extrude of the regions of `sketch` under `seeds`, set up by `edit`.
-    fn extrude(&mut self, sketch: FeatureId, seeds: &[Vec2], edit: impl FnOnce(&mut ExtrudeFeature)) -> FeatureId {
+    fn extrude(
+        &mut self,
+        sketch: FeatureId,
+        seeds: &[Vec2],
+        edit: impl FnOnce(&mut ExtrudeFeature),
+    ) -> FeatureId {
         let refs = samples::region_refs(sketch, &self.g(sketch), seeds);
         assert_eq!(refs.len(), seeds.len(), "every seed is in a region");
-        let mut e = ExtrudeFeature { regions: refs, ..ExtrudeFeature::default() };
+        let mut e = ExtrudeFeature {
+            regions: refs,
+            ..ExtrudeFeature::default()
+        };
         edit(&mut e);
         self.add_extrude(e)
     }
@@ -58,10 +96,25 @@ impl Doc {
     fn add_extrude(&mut self, extrude: ExtrudeFeature) -> FeatureId {
         let f = FeatureId::new();
         self.h
-            .execute(&mut self.d, &AddExtrude { element: self.el, feature: f, extrude: ExtrudeFeature::default() })
+            .execute(
+                &mut self.d,
+                &AddExtrude {
+                    element: self.el,
+                    feature: f,
+                    extrude: ExtrudeFeature::default(),
+                },
+            )
             .unwrap();
         self.h
-            .execute(&mut self.d, &SetExtrude { element: self.el, feature: f, extrude, label: "Extrude".into() })
+            .execute(
+                &mut self.d,
+                &SetExtrude {
+                    element: self.el,
+                    feature: f,
+                    extrude,
+                    label: "Extrude".into(),
+                },
+            )
             .unwrap();
         f
     }
@@ -70,7 +123,12 @@ impl Doc {
     fn push(&mut self, name: &str, kind: FeatureKind) -> FeatureId {
         let f = FeatureId::new();
         let el = self.d.element_mut(self.el).unwrap();
-        el.features_mut().unwrap().push(Feature { id: f, name: name.into(), kind, suppress_by: None });
+        el.features_mut().unwrap().push(Feature {
+            id: f,
+            name: name.into(),
+            kind,
+            suppress_by: None,
+        });
         f
     }
 
@@ -96,7 +154,11 @@ fn rect(x0: f64, y0: f64, x1: f64, y1: f64) -> SketchOp {
 }
 
 fn circle(x: f64, y: f64, r: f64) -> SketchOp {
-    SketchOp::AddCircle { center: Vec2::new(x, y), radius: r, construction: false }
+    SketchOp::AddCircle {
+        center: Vec2::new(x, y),
+        radius: r,
+        construction: false,
+    }
 }
 
 fn volume(p: &Part) -> f64 {
@@ -130,12 +192,36 @@ fn control_arm_self_check() {
     let b = doc.build();
     assert_eq!(b.parts.len(), 2);
     let touches = &b.contacts[&e2].touches;
-    assert_eq!(touches, &vec![PartId::new(e1, 0)], "Extrude 2 touches Part 1");
-    assert!(b.contacts[&e2].overlaps.is_empty(), "only along faces, no overlap");
+    assert_eq!(
+        touches,
+        &vec![PartId::new(e1, 0)],
+        "Extrude 2 touches Part 1"
+    );
+    assert!(
+        b.contacts[&e2].overlaps.is_empty(),
+        "only along faces, no overlap"
+    );
     // Add.
-    let mut e = doc.features().iter().find(|f| f.id == e2).unwrap().extrude().unwrap().clone();
+    let mut e = doc
+        .features()
+        .iter()
+        .find(|f| f.id == e2)
+        .unwrap()
+        .extrude()
+        .unwrap()
+        .clone();
     e.op = BooleanOp::Add;
-    doc.h.execute(&mut doc.d, &SetExtrude { element: doc.el, feature: e2, extrude: e, label: "Add".into() }).unwrap();
+    doc.h
+        .execute(
+            &mut doc.d,
+            &SetExtrude {
+                element: doc.el,
+                feature: e2,
+                extrude: e,
+                label: "Add".into(),
+            },
+        )
+        .unwrap();
     let ps = doc.parts();
     assert_eq!(ps.len(), 1, "one part");
     let arm = &ps[0];
@@ -198,9 +284,15 @@ fn a_remove_that_splits_a_part() {
     });
     let ps = doc.parts();
     assert_eq!(ps.len(), 2);
-    assert_eq!((ps[0].id, ps[0].name.as_str()), (PartId::new(ea, 0), "Part 1"));
+    assert_eq!(
+        (ps[0].id, ps[0].name.as_str()),
+        (PartId::new(ea, 0), "Part 1")
+    );
     close(volume(&ps[0]), 120_000.0, 1e-6);
-    assert_eq!((ps[1].id, ps[1].name.as_str()), (PartId::new(es, 0), "Part 2"));
+    assert_eq!(
+        (ps[1].id, ps[1].name.as_str()),
+        (PartId::new(es, 0), "Part 2")
+    );
     close(volume(&ps[1]), 72_000.0, 1e-6);
 }
 
@@ -212,7 +304,11 @@ fn whole_sketch_input() {
     let mut doc = Doc::new();
     let s = doc.sketch(
         PlaneRef::Top,
-        vec![rect(0.0, 0.0, 100.0, 60.0), circle(50.0, 30.0, 10.0), circle(50.0, 30.0, 4.0)],
+        vec![
+            rect(0.0, 0.0, 100.0, 60.0),
+            circle(50.0, 30.0, 10.0),
+            circle(50.0, 30.0, 4.0),
+        ],
     );
     let e = ExtrudeFeature {
         sketches: vec![s],
@@ -222,7 +318,11 @@ fn whole_sketch_input() {
     };
     doc.add_extrude(e);
     let ps = doc.parts();
-    assert_eq!(ps.len(), 2, "the plate with its hole, and the boss in the hole");
+    assert_eq!(
+        ps.len(),
+        2,
+        "the plate with its hole, and the boss in the hole"
+    );
     let total: f64 = ps.iter().map(volume).sum();
     close(total, (6000.0 - PI * 100.0 + PI * 16.0) * 10.0, 1e-6);
 }
@@ -239,7 +339,11 @@ fn end_types() {
     let sp = doc.sketch(PlaneRef::Top, vec![rect(0.0, 0.0, 100.0, 60.0)]);
     let plate = doc.extrude(sp, &[Vec2::new(10.0, 10.0)], |e| {
         e.depth = 10.0;
-        e.start_offset = Some(Offset { value: 30.0, expr: "30 mm".into(), flip: false });
+        e.start_offset = Some(Offset {
+            value: 30.0,
+            expr: "30 mm".into(),
+            flip: false,
+        });
     });
     let ps = doc.parts();
     close(volume(&ps[0]), 60_000.0, 1e-6);
@@ -250,10 +354,17 @@ fn end_types() {
         .iter()
         .find(|f| f.plane.is_some_and(|p| (p.origin[2] - 30.0).abs() < 1e-9))
         .unwrap();
-    assert!(matches!(under.name.origin, FaceOrigin::Cap { end: false, .. }));
+    assert!(matches!(
+        under.name.origin,
+        FaceOrigin::Cap { end: false, .. }
+    ));
     let under = under.name;
     let seed = [10.0, 10.0, 30.0];
-    let face = FaceRef { part: PartId::new(plate, 0), face: under, seed };
+    let face = FaceRef {
+        part: PartId::new(plate, 0),
+        face: under,
+        seed,
+    };
     let ss = doc.sketch(PlaneRef::Top, vec![rect(40.0, 20.0, 60.0, 40.0)]);
     let up = doc.extrude(ss, &[Vec2::new(50.0, 30.0)], |e| {
         e.end = EndType::UpToFace;
@@ -263,9 +374,30 @@ fn end_types() {
     assert_eq!(ps.len(), 2, "New: a separate part");
     close(volume(&ps[1]), 12_000.0, 1e-6);
     // An offset of 5 stops short.
-    let mut e = doc.features().iter().find(|f| f.id == up).unwrap().extrude().unwrap().clone();
-    e.offset = Some(Offset { value: 5.0, expr: "5 mm".into(), flip: false });
-    doc.h.execute(&mut doc.d, &SetExtrude { element: doc.el, feature: up, extrude: e, label: "Offset".into() }).unwrap();
+    let mut e = doc
+        .features()
+        .iter()
+        .find(|f| f.id == up)
+        .unwrap()
+        .extrude()
+        .unwrap()
+        .clone();
+    e.offset = Some(Offset {
+        value: 5.0,
+        expr: "5 mm".into(),
+        flip: false,
+    });
+    doc.h
+        .execute(
+            &mut doc.d,
+            &SetExtrude {
+                element: doc.el,
+                feature: up,
+                extrude: e,
+                label: "Offset".into(),
+            },
+        )
+        .unwrap();
     close(volume(&doc.parts()[1]), 10_000.0, 1e-6);
     // Symmetric.
     let sc = doc.sketch(PlaneRef::Top, vec![circle(200.0, 0.0, 5.0)]);
@@ -309,7 +441,11 @@ fn merge_scope() {
         assert_eq!(ps.len(), if explicit { 2 } else { 1 });
         let total: f64 = ps.iter().map(volume).sum();
         // Explicit: the bar overlaps C by 10·20·10 counted twice.
-        let want = if explicit { 36_000.0 + 2000.0 } else { 36_000.0 };
+        let want = if explicit {
+            36_000.0 + 2000.0
+        } else {
+            36_000.0
+        };
         close(total, want, 1e-6);
     }
 }
@@ -333,7 +469,13 @@ fn boolean_feature() {
     let (mut doc, a, b) = make();
     doc.push(
         "Boolean 1",
-        FeatureKind::Boolean(BooleanFeature { op: BooleanKind::Union, tools: vec![b, a], targets: vec![], keep_tools: false, offset: None }),
+        FeatureKind::Boolean(BooleanFeature {
+            op: BooleanKind::Union,
+            tools: vec![b, a],
+            targets: vec![],
+            keep_tools: false,
+            offset: None,
+        }),
     );
     let ps = doc.parts();
     assert_eq!(ps.len(), 1);
@@ -343,7 +485,13 @@ fn boolean_feature() {
     let (mut doc, a, b) = make();
     doc.push(
         "Boolean 1",
-        FeatureKind::Boolean(BooleanFeature { op: BooleanKind::Subtract, tools: vec![b], targets: vec![a], keep_tools: true, offset: None }),
+        FeatureKind::Boolean(BooleanFeature {
+            op: BooleanKind::Subtract,
+            tools: vec![b],
+            targets: vec![a],
+            keep_tools: true,
+            offset: None,
+        }),
     );
     let ps = doc.parts();
     assert_eq!(ps.len(), 2);
@@ -353,7 +501,13 @@ fn boolean_feature() {
     let (mut doc, a, b) = make();
     doc.push(
         "Boolean 1",
-        FeatureKind::Boolean(BooleanFeature { op: BooleanKind::Intersect, tools: vec![a, b], targets: vec![], keep_tools: false, offset: None }),
+        FeatureKind::Boolean(BooleanFeature {
+            op: BooleanKind::Intersect,
+            tools: vec![a, b],
+            targets: vec![],
+            keep_tools: false,
+            offset: None,
+        }),
     );
     let ps = doc.parts();
     assert_eq!(ps.len(), 1);
@@ -361,7 +515,10 @@ fn boolean_feature() {
     close(volume(&ps[0]), 50_000.0, 1e-6);
 
     let (mut doc, a, _) = make();
-    doc.push("Delete part 1", FeatureKind::DeletePart(DeletePartFeature { parts: vec![a] }));
+    doc.push(
+        "Delete part 1",
+        FeatureKind::DeletePart(DeletePartFeature { parts: vec![a] }),
+    );
     let ps = doc.parts();
     assert_eq!(ps.len(), 1);
     assert_eq!(ps[0].name, "Part 2");
@@ -379,7 +536,10 @@ fn surface_and_thin() {
         e.body = BodyType::Surface;
     });
     let ps = doc.parts();
-    assert_eq!((ps[0].kind, ps[0].name.as_str()), (PartKind::Surface, "Surface 1"));
+    assert_eq!(
+        (ps[0].kind, ps[0].name.as_str()),
+        (PartKind::Surface, "Surface 1")
+    );
     let m = ps[0].mass.unwrap();
     close(m.surface_area, 300.0, 1e-6);
     close(m.volume, 0.0, 1e-9);
@@ -415,7 +575,11 @@ fn a_face_as_input() {
         .unwrap()
         .name;
     let e = ExtrudeFeature {
-        faces: vec![FaceRef { part: PartId::new(a, 0), face: top, seed: [50.0, 30.0, 40.0] }],
+        faces: vec![FaceRef {
+            part: PartId::new(a, 0),
+            face: top,
+            seed: [50.0, 30.0, 40.0],
+        }],
         depth: 10.0,
         depth_expr: "10 mm".into(),
         op: BooleanOp::Add,
@@ -447,14 +611,21 @@ fn a_failed_boolean_changes_nothing() {
 #[test]
 fn combined_mass_properties() {
     let mut doc = Doc::new();
-    let s = doc.sketch(PlaneRef::Top, vec![rect(0.0, 0.0, 10.0, 10.0), rect(20.0, 0.0, 40.0, 10.0)]);
+    let s = doc.sketch(
+        PlaneRef::Top,
+        vec![rect(0.0, 0.0, 10.0, 10.0), rect(20.0, 0.0, 40.0, 10.0)],
+    );
     doc.extrude(s, &[Vec2::new(5.0, 5.0), Vec2::new(30.0, 5.0)], depth(10.0));
     let ps = doc.parts();
     assert_eq!(ps.len(), 2, "two separate regions make two parts");
     let m = combined_mass(ps.iter()).unwrap();
     close(m.volume, 3000.0, 1e-6);
     close(m.surface_area, 600.0 + 1000.0, 1e-6);
-    close(m.center_of_mass.x, (5.0 * 1000.0 + 30.0 * 2000.0) / 3000.0, 1e-9);
+    close(
+        m.center_of_mass.x,
+        (5.0 * 1000.0 + 30.0 * 2000.0) / 3000.0,
+        1e-9,
+    );
 }
 
 /// The Control Arm sketch with `samples::control_arm_constraints` is fully defined (the course
@@ -468,7 +639,12 @@ fn control_arm_sketch_is_fully_defined() {
     op.apply(&mut g).unwrap();
     cadrs_sketch::solve::solve(&mut g);
     let a = cadrs_sketch::solve::analyze(&g);
-    assert!(!a.has_conflicts(), "conflicts: {:?} {:?}", a.conflicting, a.conflicting_dimensions);
+    assert!(
+        !a.has_conflicts(),
+        "conflicts: {:?} {:?}",
+        a.conflicting,
+        a.conflicting_dimensions
+    );
     assert!(a.fully_constrained(), "{} degrees of freedom left", a.dof);
     assert_eq!(cadrs_sketch::region::regions(&g).len(), before);
 }
@@ -482,7 +658,10 @@ fn new_commands_undo_and_documents_round_trip() {
     use cadrs_core::commands::{AddFeature, RenamePart, SetPartsHidden, SetSketchVisibility};
     use cadrs_core::{Command, DocumentMeta, Store};
     let mut doc = Doc::new();
-    let s = doc.sketch(PlaneRef::Top, vec![rect(0.0, 0.0, 10.0, 10.0), rect(20.0, 0.0, 30.0, 10.0)]);
+    let s = doc.sketch(
+        PlaneRef::Top,
+        vec![rect(0.0, 0.0, 10.0, 10.0), rect(20.0, 0.0, 30.0, 10.0)],
+    );
     let e = doc.extrude(s, &[Vec2::new(5.0, 5.0), Vec2::new(25.0, 5.0)], |e| {
         e.depth = 10.0;
         e.end = EndType::Blind;
@@ -503,20 +682,53 @@ fn new_commands_undo_and_documents_round_trip() {
         doc.h.redo(&mut doc.d).unwrap();
         assert_eq!(doc.d, after, "redo of {}", cmd.label());
     };
-    check(&mut doc, &RenamePart { element: el, part: a, name: "Control Arm".into() });
-    check(&mut doc, &SetPartsHidden { element: el, parts: vec![b], hidden: true });
-    check(&mut doc, &SetSketchVisibility { element: el, sketch: s, visible: Some(true) });
+    check(
+        &mut doc,
+        &RenamePart {
+            element: el,
+            part: a,
+            name: "Control Arm".into(),
+        },
+    );
+    check(
+        &mut doc,
+        &SetPartsHidden {
+            element: el,
+            parts: vec![b],
+            hidden: true,
+        },
+    );
+    check(
+        &mut doc,
+        &SetSketchVisibility {
+            element: el,
+            sketch: s,
+            visible: Some(true),
+        },
+    );
     check(
         &mut doc,
         &AddFeature::boolean(
             el,
             FeatureId::new(),
-            BooleanFeature { op: BooleanKind::Subtract, tools: vec![b], targets: vec![a], keep_tools: true, offset: None },
+            BooleanFeature {
+                op: BooleanKind::Subtract,
+                tools: vec![b],
+                targets: vec![a],
+                keep_tools: true,
+                offset: None,
+            },
         ),
     );
-    check(&mut doc, &AddFeature::delete_parts(el, FeatureId::new(), vec![b]));
+    check(
+        &mut doc,
+        &AddFeature::delete_parts(el, FeatureId::new(), vec![b]),
+    );
     let names: Vec<String> = doc.features().iter().map(|f| f.name.clone()).collect();
-    assert_eq!(names, ["Sketch 1", "Extrude 1", "Boolean 1", "Delete part 1"]);
+    assert_eq!(
+        names,
+        ["Sketch 1", "Extrude 1", "Boolean 1", "Delete part 1"]
+    );
     let props = doc.d.element(el).unwrap().part_props().to_vec();
     assert_eq!(props.len(), 2);
     assert_eq!(doc.d.element(el).unwrap().sketch_visibility(s), Some(true));
@@ -550,12 +762,17 @@ fn a_face_split_by_a_later_cut_is_a_sketch_plane() {
     let tops: Vec<_> = ps
         .iter()
         .flat_map(|p| p.solid.faces.iter())
-        .filter(|f| f.name.op == block.0 && f.plane.is_some_and(|p| (p.origin[2] - 10.0).abs() < 1e-9 && p.normal()[2] > 0.5))
+        .filter(|f| {
+            f.name.op == block.0
+                && f.plane
+                    .is_some_and(|p| (p.origin[2] - 10.0).abs() < 1e-9 && p.normal()[2] > 0.5)
+        })
         .collect();
     assert_eq!(tops.len(), 2, "the slot splits the top in two");
     assert!(tops.iter().any(|f| f.name.split > 0));
     for f in tops {
-        let Some(PlaneRef::Face(fp)) = cadrs_core::parts::face_plane(&features, block, f.name) else {
+        let Some(PlaneRef::Face(fp)) = cadrs_core::parts::face_plane(&features, block, f.name)
+        else {
             panic!("no sketch plane on {:?}", f.name);
         };
         assert!((fp.origin[2] - 10.0).abs() < 1e-9);

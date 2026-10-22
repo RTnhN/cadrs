@@ -15,7 +15,8 @@ pub const EXTENSIONS: [&str; 3] = ["kicad_pro", "kicad_pcb", "kicad_sch"];
 
 /// Whether `p` is a KiCad project file.
 pub fn is_kicad(p: &Path) -> bool {
-    p.extension().is_some_and(|x| EXTENSIONS.iter().any(|e| x == *e))
+    p.extension()
+        .is_some_and(|x| EXTENSIONS.iter().any(|e| x == *e))
 }
 
 /// One board per project among `paths` (a project picked as both `.kicad_pro` and
@@ -30,8 +31,14 @@ pub fn import(world: &mut World, paths: &[PathBuf]) -> (Vec<String>, Vec<String>
         }
     }
     let (mut names, mut warnings, mut errors) = (vec![], vec![], vec![]);
-    let Some(mut doc) = world.get_resource_mut::<ActiveDocument>() else { return (names, warnings, errors) };
-    let Some(element) = doc.active_element().filter(|e| e.pcb().is_some()).map(|e| e.id) else {
+    let Some(mut doc) = world.get_resource_mut::<ActiveDocument>() else {
+        return (names, warnings, errors);
+    };
+    let Some(element) = doc
+        .active_element()
+        .filter(|e| e.pcb().is_some())
+        .map(|e| e.id)
+    else {
         errors.push("Open a PCB Studio tab to import into".into());
         return (names, warnings, errors);
     };
@@ -51,11 +58,20 @@ pub fn import(world: &mut World, paths: &[PathBuf]) -> (Vec<String>, Vec<String>
             element,
             name: Some(project.name.clone()),
             design: Box::new(project.design),
-            imported_from: Some(path.with_extension("kicad_pro").to_string_lossy().into_owned()),
+            imported_from: Some(
+                path.with_extension("kicad_pro")
+                    .to_string_lossy()
+                    .into_owned(),
+            ),
         };
         match doc.execute(&cmd) {
             Ok(()) => {
-                let name = doc.active_element().and_then(|e| e.pcb()).and_then(|s| s.active_board()).map(|b| b.name().to_string()).unwrap_or_default();
+                let name = doc
+                    .active_element()
+                    .and_then(|e| e.pcb())
+                    .and_then(|s| s.active_board())
+                    .map(|b| b.name().to_string())
+                    .unwrap_or_default();
                 names.push(format!("{name} ({n} components)"));
                 warnings.extend(project.warnings);
             }
@@ -82,7 +98,10 @@ fn load_models(design: &mut cadrs_eda::Design, project_dir: &Path) -> Vec<String
                     let wrl = p.with_extension("wrl");
                     let p = if wrl.is_file() { wrl } else { p };
                     let bytes = std::fs::read(&p).ok()?;
-                    Some((cadrs_core::blobs::insert(bytes), p.to_string_lossy().into_owned()))
+                    Some((
+                        cadrs_core::blobs::insert(bytes),
+                        p.to_string_lossy().into_owned(),
+                    ))
                 })
                 .clone();
             match got {
@@ -92,7 +111,10 @@ fn load_models(design: &mut cadrs_eda::Design, project_dir: &Path) -> Vec<String
                 }
                 None => {
                     if m.body.is_none() {
-                        m.body = builtin.footprint(&f.footprint.id).and_then(|b| b.models.first()).and_then(|b| b.body.clone());
+                        m.body = builtin
+                            .footprint(&f.footprint.id)
+                            .and_then(|b| b.models.first())
+                            .and_then(|b| b.body.clone());
                     }
                     if !missing.contains(&m.source) {
                         missing.push(m.source.clone());
@@ -101,5 +123,8 @@ fn load_models(design: &mut cadrs_eda::Design, project_dir: &Path) -> Vec<String
             }
         }
     }
-    missing.into_iter().map(|s| format!("3D model not found: {s}")).collect()
+    missing
+        .into_iter()
+        .map(|s| format!("3D model not found: {s}"))
+        .collect()
 }

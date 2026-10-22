@@ -30,14 +30,23 @@ pub fn reference_props(doc: &Document, r: Option<ObjectRef>) -> ReferenceProps {
     let Some(el) = doc.element(ElementId(r.element)) else {
         return ReferenceProps::default();
     };
-    let mut props = ReferenceProps { name: Some(el.name.clone()), ..Default::default() };
+    let mut props = ReferenceProps {
+        name: Some(el.name.clone()),
+        ..Default::default()
+    };
     let owner = match r.part {
         Some((f, index)) => {
-            let part = PartId { feature: FeatureId(f), index };
+            let part = PartId {
+                feature: FeatureId(f),
+                index,
+            };
             if let Some(n) = el.part_prop(part).and_then(|p| p.name.clone()) {
                 props.name = Some(n);
             }
-            PropertyOwner::Part { element: el.id, part }
+            PropertyOwner::Part {
+                element: el.id,
+                part,
+            }
         }
         None if el.assembly_model().is_some() => PropertyOwner::Assembly { element: el.id },
         None => return props,
@@ -52,7 +61,12 @@ pub fn reference_props(doc: &Document, r: Option<ObjectRef>) -> ReferenceProps {
 }
 
 /// What fields on sheet `index` read (D9.4).
-pub fn drawing_context(drawing_name: &str, d: &Drawing, index: usize, date: Option<(i32, u32, u32)>) -> DrawingContext {
+pub fn drawing_context(
+    drawing_name: &str,
+    d: &Drawing,
+    index: usize,
+    date: Option<(i32, u32, u32)>,
+) -> DrawingContext {
     let s = &d.sheets[index.min(d.sheets.len().saturating_sub(1))];
     DrawingContext {
         drawing_name: drawing_name.to_string(),
@@ -75,7 +89,9 @@ pub fn shown_state(doc: &Document, d: &Drawing, v: &View) -> Option<StudioState>
         return StudioState::parse(&src.snapshot);
     }
     let el = doc.element(ElementId(v.reference.element))?;
-    matches!(el.kind, ElementKind::PartStudio { .. }).then(|| StudioState::of(el)).flatten()
+    matches!(el.kind, ElementKind::PartStudio { .. })
+        .then(|| StudioState::of(el))
+        .flatten()
 }
 
 /// Projects view `v` of `d` (waits).
@@ -143,7 +159,9 @@ pub fn pages(
 ) -> Vec<Page> {
     let mut out = Vec::new();
     for &i in sheets {
-        let Some(sheet) = d.sheets.get(i) else { continue };
+        let Some(sheet) = d.sheets.get(i) else {
+            continue;
+        };
         let mut geo: Vec<Shown> = Vec::new();
         for v in &sheet.views {
             let g = match cached(v) {
@@ -151,7 +169,9 @@ pub fn pages(
                 _ => view_geometry(doc, d, v).ok(),
             };
             let Some(g) = g else { continue };
-            let sketches = shown_state(doc, d, v).map(|s| sketch_polylines(&s, v)).unwrap_or_default();
+            let sketches = shown_state(doc, d, v)
+                .map(|s| sketch_polylines(&s, v))
+                .unwrap_or_default();
             geo.push((v.clone(), g, sketches));
         }
         let mut views = HashMap::new();
@@ -159,16 +179,31 @@ pub fn pages(
             let shaded = if v.shaded {
                 g.shaded
                     .iter()
-                    .map(|t| ShadedTri { points: t.points, colors: t.colors.map(|c| [c[0], c[1], c[2]]), depth: t.depths.iter().sum::<f64>() / 3.0 })
+                    .map(|t| ShadedTri {
+                        points: t.points,
+                        colors: t.colors.map(|c| [c[0], c[1], c[2]]),
+                        depth: t.depths.iter().sum::<f64>() / 3.0,
+                    })
                     .collect()
             } else {
                 Vec::new()
             };
-            views.insert(v.id, ViewInput { model: &**g, shaded, sketches: sketches.clone() });
+            views.insert(
+                v.id,
+                ViewInput {
+                    model: &**g,
+                    shaded,
+                    sketches: sketches.clone(),
+                },
+            );
         }
         let reference = reference_props(doc, sheet.reference);
         let fields = drawing_context(name, d, i, date);
-        let ctx = PageContext { reference: &reference, fields: &fields, views };
+        let ctx = PageContext {
+            reference: &reference,
+            fields: &fields,
+            views,
+        };
         out.push(sheet_page(d, i, &ctx));
     }
     out

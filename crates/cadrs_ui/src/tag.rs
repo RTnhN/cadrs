@@ -18,7 +18,12 @@ pub struct Tag {
 impl Tag {
     /// `name` is the node's `Name`.
     pub fn new(name: impl Into<String>, label: impl Into<String>) -> Self {
-        Self { name: name.into(), label: label.into(), color: None, outline: false }
+        Self {
+            name: name.into(),
+            label: label.into(),
+            color: None,
+            outline: false,
+        }
     }
 
     /// The text (and outline) colour; the theme's muted foreground by default.
@@ -46,10 +51,17 @@ impl Tag {
                 flex_shrink: 0.0,
                 ..default()
             },
-            BackgroundColor(if self.outline { Color::NONE } else { theme.secondary }),
+            BackgroundColor(if self.outline {
+                Color::NONE
+            } else {
+                theme.secondary
+            }),
             BorderColor::all(fg),
             Pickable::IGNORE,
-            children![(theme.text(self.label, theme.font_xs, FontWeight::MEDIUM, fg), Pickable::IGNORE)],
+            children![(
+                theme.text(self.label, theme.font_xs, FontWeight::MEDIUM, fg),
+                Pickable::IGNORE
+            )],
         )
     }
 }

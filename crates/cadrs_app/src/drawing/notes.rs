@@ -32,14 +32,18 @@ use bevy::picking::pointer::{PointerAction, PointerButton, PointerId, PointerInp
 use bevy::prelude::*;
 use cadrs_core::views::ViewGeometry;
 use cadrs_drawing::annotation::{Pick, ViewModel};
-use cadrs_drawing::note::{Leader, LeaderEnd, Note, NoteGraphics, NoteGrip, NoteId, drag_grip, note_graphics};
+use cadrs_drawing::note::{
+    Leader, LeaderEnd, Note, NoteGraphics, NoteGrip, NoteId, drag_grip, note_graphics,
+};
 use cadrs_drawing::rich::{self, Attr, DrawingContext, Editor, FieldContext, RichText};
 use cadrs_drawing::table::{Cell, Table, TableGraphics, TableGrip, TableId, table_graphics};
 use cadrs_drawing::{Drawing, DrawingOp, ReferenceProps, SheetId, View, ViewId};
 use cadrs_ui::input::TextInputField;
 use cadrs_ui::prelude::*;
 
-use super::annotations::{AnnTool, AnnotationUi, Hover, blue, hover_in, hover_orange, ink, orange, sheet_views, square};
+use super::annotations::{
+    AnnTool, AnnotationUi, Hover, blue, hover_in, hover_orange, ink, orange, sheet_views, square,
+};
 use super::view_tools::edit_drawing;
 use super::views::ViewCache;
 use super::{DrawingUi, active_drawing, current_view, screen_to_sheet, sheet_area};
@@ -73,10 +77,13 @@ impl Plugin for NotesPlugin {
                     .before(super::annotations::AnnotationDrawSet)
                     .run_if(in_state(AppState::Document)),
             )
-            .add_systems(OnExit(AppState::Document), |mut u: ResMut<NotesUi>, mut s: ResMut<NoteScene>| {
-                *u = NotesUi::default();
-                *s = NoteScene::default();
-            })
+            .add_systems(
+                OnExit(AppState::Document),
+                |mut u: ResMut<NotesUi>, mut s: ResMut<NoteScene>| {
+                    *u = NotesUi::default();
+                    *s = NoteScene::default();
+                },
+            )
             .add_observer(on_item_menu);
     }
 }
@@ -98,8 +105,14 @@ pub enum Item {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum EditTarget {
     /// A note (`new`: not in the drawing yet).
-    Note { id: NoteId, new: bool },
-    Cell { table: TableId, cell: Cell },
+    Note {
+        id: NoteId,
+        new: bool,
+    },
+    Cell {
+        table: TableId,
+        cell: Cell,
+    },
 }
 
 /// Text being typed on the sheet.
@@ -144,8 +157,14 @@ impl CellSel {
     /// The selected rectangle: (top-left, bottom-right).
     pub fn range(&self) -> (Cell, Cell) {
         (
-            (self.anchor.0.min(self.head.0), self.anchor.1.min(self.head.1)),
-            (self.anchor.0.max(self.head.0), self.anchor.1.max(self.head.1)),
+            (
+                self.anchor.0.min(self.head.0),
+                self.anchor.1.min(self.head.1),
+            ),
+            (
+                self.anchor.0.max(self.head.0),
+                self.anchor.1.max(self.head.1),
+            ),
         )
     }
 
@@ -168,7 +187,14 @@ pub struct TableSpec {
 
 impl Default for TableSpec {
     fn default() -> Self {
-        Self { rows: 3, cols: 4, title: true, header: true, fixed: cadrs_drawing::table::Corner::TopLeft, revision: false }
+        Self {
+            rows: 3,
+            cols: 4,
+            title: true,
+            header: true,
+            fixed: cadrs_drawing::table::Corner::TopLeft,
+            revision: false,
+        }
     }
 }
 
@@ -178,7 +204,15 @@ impl TableSpec {
         if self.revision {
             Table::revision(self.rows, self.fixed, at, style)
         } else {
-            Table::new(self.rows, self.cols, self.title, self.header, self.fixed, at, style)
+            Table::new(
+                self.rows,
+                self.cols,
+                self.title,
+                self.header,
+                self.fixed,
+                at,
+                style,
+            )
         }
     }
 }
@@ -214,7 +248,9 @@ impl NotesUi {
 pub struct EditorFocus(pub Entity);
 
 fn spawn_editor_focus(mut commands: Commands) {
-    let e = commands.spawn((Name::new("note-editor"), TextInputField)).id();
+    let e = commands
+        .spawn((Name::new("note-editor"), TextInputField))
+        .id();
     commands.insert_resource(EditorFocus(e));
 }
 
@@ -222,7 +258,10 @@ fn spawn_editor_focus(mut commands: Commands) {
 // Access
 
 /// The active sheet: (drawing element, sheet index, sheet id).
-fn active_sheet(doc: &ActiveDocument, dui: &DrawingUi) -> Option<(cadrs_core::ElementId, usize, SheetId)> {
+fn active_sheet(
+    doc: &ActiveDocument,
+    dui: &DrawingUi,
+) -> Option<(cadrs_core::ElementId, usize, SheetId)> {
     let (id, d) = active_drawing(doc)?;
     let i = dui.sheet_index(id, d);
     Some((id, i, d.sheets.get(i)?.id))
@@ -245,10 +284,18 @@ pub(crate) fn today(clock: Option<&AppClock>) -> Option<(i32, u32, u32)> {
 }
 
 /// What fields read on sheet `index` (D9.4).
-pub fn drawing_context(doc: &ActiveDocument, d: &Drawing, index: usize, clock: Option<&AppClock>) -> DrawingContext {
+pub fn drawing_context(
+    doc: &ActiveDocument,
+    d: &Drawing,
+    index: usize,
+    clock: Option<&AppClock>,
+) -> DrawingContext {
     let s = &d.sheets[index.min(d.sheets.len().saturating_sub(1))];
     DrawingContext {
-        drawing_name: doc.active_element().map(|e| e.name.clone()).unwrap_or_default(),
+        drawing_name: doc
+            .active_element()
+            .map(|e| e.name.clone())
+            .unwrap_or_default(),
         sheet_name: s.name.clone(),
         sheet_index: index,
         sheet_count: d.sheets.len(),
@@ -274,7 +321,9 @@ pub fn field_sources(world: &World) -> Option<(ReferenceProps, DrawingContext)> 
 }
 
 fn px_mm(doc: &ActiveDocument, dui: &DrawingUi) -> f64 {
-    current_view(doc, dui).map(|(_, v)| 1.0 / v.ppm as f64).unwrap_or(1.0)
+    current_view(doc, dui)
+        .map(|(_, v)| 1.0 / v.ppm as f64)
+        .unwrap_or(1.0)
 }
 
 fn v2(p: [f64; 2]) -> Vec2 {
@@ -343,7 +392,11 @@ pub type Geo<'a> = dyn Fn(ViewId) -> Option<(&'a View, &'a ViewGeometry)> + 'a;
 /// A note as the drag (or edit) would leave it.
 fn shown_note(n: &Note, ui: &NotesUi, ctx: &FieldContext, views: &Geo, px: f64) -> Note {
     if let Some(e) = &ui.edit
-        && e.target == (EditTarget::Note { id: n.id, new: false })
+        && e.target
+            == (EditTarget::Note {
+                id: n.id,
+                new: false,
+            })
         && let Some(note) = &e.note
     {
         let mut shown = note.clone();
@@ -351,7 +404,9 @@ fn shown_note(n: &Note, ui: &NotesUi, ctx: &FieldContext, views: &Geo, px: f64) 
         return shown;
     }
     match ui.drag {
-        Some(d) if d.moving && d.item == Item::Note(n.id) => dragged_note(n, d, ctx, views, px).unwrap_or_else(|| n.clone()),
+        Some(d) if d.moving && d.item == Item::Note(n.id) => {
+            dragged_note(n, d, ctx, views, px).unwrap_or_else(|| n.clone())
+        }
         _ => n.clone(),
     }
 }
@@ -361,7 +416,10 @@ fn dragged_note(n: &Note, d: ItemDrag, ctx: &FieldContext, views: &Geo, px: f64)
     match d.grip {
         DragGrip::Body => {
             let mut m = n.clone();
-            m.at = [n.at[0] + (d.at.x - d.start.x) as f64, n.at[1] + (d.at.y - d.start.y) as f64];
+            m.at = [
+                n.at[0] + (d.at.x - d.start.x) as f64,
+                n.at[1] + (d.at.y - d.start.y) as f64,
+            ];
             Some(m)
         }
         DragGrip::Note(NoteGrip::Leader(i)) => {
@@ -380,7 +438,9 @@ fn dragged_note(n: &Note, d: ItemDrag, ctx: &FieldContext, views: &Geo, px: f64)
 /// A table after a drag of a grip.
 fn dragged_table(t: &Table, d: ItemDrag) -> Option<Table> {
     match d.grip {
-        DragGrip::Table(TableGrip::Corner(_)) => Some(t.moved([(d.at.x - d.start.x) as f64, (d.at.y - d.start.y) as f64])),
+        DragGrip::Table(TableGrip::Corner(_)) => {
+            Some(t.moved([(d.at.x - d.start.x) as f64, (d.at.y - d.start.y) as f64]))
+        }
         DragGrip::Table(TableGrip::Side(s)) => t.resize(s, f2(d.at)).ok(),
         DragGrip::Table(TableGrip::Column(i)) => t.set_column_edge(i, d.at.x as f64).ok(),
         _ => None,
@@ -391,7 +451,10 @@ fn dragged_table(t: &Table, d: ItemDrag) -> Option<Table> {
 pub fn leader_of(h: &Hover, v: &View, at: Vec2) -> Leader {
     let end = match h.pick() {
         Pick::Point(p) => LeaderEnd::Point(p),
-        Pick::Edge(e) => LeaderEnd::Edge { edge: e, at: h.shape.nearest(v.from_sheet(f2(at))) },
+        Pick::Edge(e) => LeaderEnd::Edge {
+            edge: e,
+            at: h.shape.nearest(v.from_sheet(f2(at))),
+        },
     };
     Leader { view: v.id, end }
 }
@@ -429,9 +492,18 @@ fn rebuild_note_scene(
     let key = NoteKey {
         notes: sheet.notes.clone(),
         // BOM Table properties… previews its settings live on its table (P3C wrap-up).
-        tables: sheet.tables.iter().map(|t| super::bom_tools::properties_preview(&bom, t, &d.style).unwrap_or_else(|| t.clone())).collect(),
+        tables: sheet
+            .tables
+            .iter()
+            .map(|t| {
+                super::bom_tools::properties_preview(&bom, t, &d.style).unwrap_or_else(|| t.clone())
+            })
+            .collect(),
         views: views.iter().map(|(v, _)| v.clone()).collect(),
-        geometry: views.iter().map(|(_, g)| g.as_ref().map(|g| Arc::as_ptr(g) as usize)).collect(),
+        geometry: views
+            .iter()
+            .map(|(_, g)| g.as_ref().map(|g| Arc::as_ptr(g) as usize))
+            .collect(),
         props: super::reference_props(&doc.doc, sheet.reference),
         ctx: drawing_context(&doc, d, index, clock.as_deref()),
         arrow: d.style.dim_arrow_length,
@@ -448,7 +520,10 @@ fn rebuild_note_scene(
         ppm,
         table_spec: ui.table_spec,
         bom_preview: match (ann.tool, dui.pointer) {
-            (AnnTool::PlaceBom, Some(p)) if (0.0..=sheet.size_mm().0).contains(&(p.x as f64)) && (0.0..=sheet.size_mm().1).contains(&(p.y as f64)) => {
+            (AnnTool::PlaceBom, Some(p))
+                if (0.0..=sheet.size_mm().0).contains(&(p.x as f64))
+                    && (0.0..=sheet.size_mm().1).contains(&(p.y as f64)) =>
+            {
                 super::bom_tools::preview_table(&bom, d, sheet, f2(p))
             }
             _ => None,
@@ -460,17 +535,34 @@ fn rebuild_note_scene(
     let bom_preview = &key.bom_preview;
     let px = 1.0 / ppm as f64;
     let geo = |id: ViewId| -> Option<(&View, &ViewGeometry)> {
-        views.iter().find(|(v, _)| v.id == id).and_then(|(v, g)| g.as_ref().map(|g| (v, &**g)))
+        views
+            .iter()
+            .find(|(v, _)| v.id == id)
+            .and_then(|(v, g)| g.as_ref().map(|g| (v, &**g)))
     };
-    let lookup = |id: ViewId| -> Option<(&View, &dyn ViewModel)> { geo(id).map(|(v, g)| (v, g as &dyn ViewModel)) };
-    let fctx = FieldContext { reference: &key.props, drawing: &key.ctx };
+    let lookup = |id: ViewId| -> Option<(&View, &dyn ViewModel)> {
+        geo(id).map(|(v, g)| (v, g as &dyn ViewModel))
+    };
+    let fctx = FieldContext {
+        reference: &key.props,
+        drawing: &key.ctx,
+    };
     let mut out = NoteScene::default();
     let grip_h = 3.0 / ppm;
     let sel_back = Color::srgb_u8(0xc6, 0xdc, 0xfa);
     let field_back = Color::srgb_u8(0xe6, 0xe9, 0xee);
-    let quad = |q: [[f64; 2]; 4], c: Color| [([v2(q[0]), v2(q[1]), v2(q[2])], c), ([v2(q[0]), v2(q[2]), v2(q[3])], c)];
+    let quad = |q: [[f64; 2]; 4], c: Color| {
+        [
+            ([v2(q[0]), v2(q[1]), v2(q[2])], c),
+            ([v2(q[0]), v2(q[2]), v2(q[3])], c),
+        ]
+    };
     // Notes (the one being placed or edited too).
-    let mut notes: Vec<(Note, bool)> = sheet.notes.iter().map(|n| (shown_note(n, &ui, &fctx, &geo, px), false)).collect();
+    let mut notes: Vec<(Note, bool)> = sheet
+        .notes
+        .iter()
+        .map(|n| (shown_note(n, &ui, &fctx, &geo, px), false))
+        .collect();
     if let Some(e) = &ui.edit
         && let EditTarget::Note { new: true, .. } = e.target
         && let Some(n) = &e.note
@@ -491,12 +583,18 @@ fn rebuild_note_scene(
     }
     for (n, preview) in &notes {
         let item = Item::Note(n.id);
-        let editing = ui.edit.as_ref().filter(|e| matches!(e.target, EditTarget::Note { id, .. } if id == n.id));
+        let editing = ui
+            .edit
+            .as_ref()
+            .filter(|e| matches!(e.target, EditTarget::Note { id, .. } if id == n.id));
         let selected = ui.selected.contains(&item);
         let g = note_graphics(n, &fctx, &lookup, key.arrow, selected && editing.is_none());
         let color = if editing.is_some() {
             ink()
-        } else if (*preview && ann.tool == AnnTool::Note) || selected || ui.drag.is_some_and(|d| d.moving && d.item == item) {
+        } else if (*preview && ann.tool == AnnTool::Note)
+            || selected
+            || ui.drag.is_some_and(|d| d.moving && d.item == item)
+        {
             orange()
         } else if ui.hovered == Some(item) {
             hover_orange()
@@ -505,9 +603,18 @@ fn rebuild_note_scene(
         };
         emit_texts(&mut out, &g.texts, color);
         // A leader whose geometry is gone is red (P3C.6), unless the note is highlighted.
-        let red = |i: usize, dangling: &[usize]| if color == ink() && dangling.contains(&i) { super::annotations::dangling_red() } else { color };
+        let red = |i: usize, dangling: &[usize]| {
+            if color == ink() && dangling.contains(&i) {
+                super::annotations::dangling_red()
+            } else {
+                color
+            }
+        };
         for (i, s) in g.strokes.iter().enumerate() {
-            out.strokes.push((s.iter().map(|p| v2(*p)).collect(), red(i, &g.dangling_strokes)));
+            out.strokes.push((
+                s.iter().map(|p| v2(*p)).collect(),
+                red(i, &g.dangling_strokes),
+            ));
         }
         for (i, t) in g.fills.iter().enumerate() {
             out.fills.push((t.map(v2), red(i, &g.dangling_fills)));
@@ -525,12 +632,18 @@ fn rebuild_note_scene(
                 out.strokes.push((vec![v2(*base), v2(*top)], ink()));
             }
             let f = g.frame;
-            out.strokes.push((vec![v2(f[0]), v2(f[1]), v2(f[2]), v2(f[3]), v2(f[0])], Color::srgb_u8(0x9a, 0xb4, 0xd8)));
+            out.strokes.push((
+                vec![v2(f[0]), v2(f[1]), v2(f[2]), v2(f[3]), v2(f[0])],
+                Color::srgb_u8(0x9a, 0xb4, 0xd8),
+            ));
             ruler(&mut out, n, &g, key.units, px);
             out.edit_frame = Some(f);
         } else if selected {
             let f = g.frame;
-            out.strokes.push((vec![v2(f[0]), v2(f[1]), v2(f[2]), v2(f[3]), v2(f[0])], Color::srgb_u8(0xf3, 0xc0, 0x90)));
+            out.strokes.push((
+                vec![v2(f[0]), v2(f[1]), v2(f[2]), v2(f[3]), v2(f[0])],
+                Color::srgb_u8(0xf3, 0xc0, 0x90),
+            ));
             for (p, k) in &g.grips {
                 match k {
                     NoteGrip::Rotate => out.fills.extend(disc(v2(*p), grip_h * 1.1, blue())),
@@ -548,7 +661,9 @@ fn rebuild_note_scene(
         .iter()
         .map(|t| {
             let shown = match ui.drag {
-                Some(d) if d.moving && d.item == Item::Table(t.id) => dragged_table(t, d).unwrap_or_else(|| t.clone()),
+                Some(d) if d.moving && d.item == Item::Table(t.id) => {
+                    dragged_table(t, d).unwrap_or_else(|| t.clone())
+                }
                 _ => t.clone(),
             };
             (shown, false)
@@ -578,11 +693,20 @@ fn rebuild_note_scene(
         // Selected cells show as cells (and the cell toolbar), not as the whole table with its
         // grips (P3C.4's delta: table and cell selection were mixed).
         let cell_sel = ui.cells.is_some_and(|c| c.table == t.id);
-        let g = table_graphics(t, &fctx, selected && !preview && !cell_sel, edited.as_ref().map(|(c, text, _)| (*c, text)));
+        let g = table_graphics(
+            t,
+            &fctx,
+            selected && !preview && !cell_sel,
+            edited.as_ref().map(|(c, text, _)| (*c, text)),
+        );
         // A table selected as a whole, or being dragged by a grip: its outline orange (the grid
         // stays ink, P3C.8).
         let dragging = ui.drag.is_some_and(|d| d.moving && d.item == item);
-        let outline_color = if (selected && !cell_sel && !preview) || dragging { orange() } else { Color::NONE };
+        let outline_color = if (selected && !cell_sel && !preview) || dragging {
+            orange()
+        } else {
+            Color::NONE
+        };
         let color = if *preview {
             orange()
         } else if ui.hovered == Some(item) && !selected {
@@ -592,21 +716,31 @@ fn rebuild_note_scene(
         };
         // An opaque sheet-coloured background, so view lines and shading don't show through
         // (placed or following the cursor).
-        out.backs.extend(quad([g.min, [g.max[0], g.min[1]], g.max, [g.min[0], g.max[1]]], Color::WHITE));
+        out.backs.extend(quad(
+            [g.min, [g.max[0], g.min[1]], g.max, [g.min[0], g.max[1]]],
+            Color::WHITE,
+        ));
         out.table_rects.push((v2(g.min), v2(g.max)));
         // Selected cells.
         if let Some(cs) = ui.cells.filter(|c| c.table == t.id) {
             let ((r0, c0), (r1, c1)) = cs.range();
             for (cell, lo, hi) in &g.cells {
                 if cell.0 >= r0 && cell.0 <= r1 && cell.1 >= c0 && cell.1 <= c1 {
-                    out.backs.extend(quad([*lo, [hi[0], lo[1]], *hi, [lo[0], hi[1]]], Color::srgb_u8(0xdd, 0xea, 0xfb)));
+                    out.backs.extend(quad(
+                        [*lo, [hi[0], lo[1]], *hi, [lo[0], hi[1]]],
+                        Color::srgb_u8(0xdd, 0xea, 0xfb),
+                    ));
                 }
             }
         }
         for (a, b) in &g.thin {
             out.strokes.push((vec![v2(*a), v2(*b)], color));
         }
-        let outline = if outline_color == Color::NONE { color } else { outline_color };
+        let outline = if outline_color == Color::NONE {
+            color
+        } else {
+            outline_color
+        };
         for (a, b) in &g.outline {
             out.strokes.push((vec![v2(*a), v2(*b)], outline));
         }
@@ -626,7 +760,8 @@ fn rebuild_note_scene(
         let text_color = if *preview { orange() } else { ink() };
         emit_texts(&mut out, &g.texts, text_color);
         for s in &g.strokes {
-            out.strokes.push((s.iter().map(|p| v2(*p)).collect(), text_color));
+            out.strokes
+                .push((s.iter().map(|p| v2(*p)).collect(), text_color));
         }
         if let Some((cell, _, e)) = &edited
             && let Some((_, origin, l)) = g.layouts.iter().find(|(c, _, _)| c == cell)
@@ -637,17 +772,29 @@ fn rebuild_note_scene(
                 selection_quads(&mut out, l, r, at, sel_back);
             }
             for (lo, hi) in &l.fields {
-                out.backs.extend(quad([at(*lo), at([hi[0], lo[1]]), at(*hi), at([lo[0], hi[1]])], field_back));
+                out.backs.extend(quad(
+                    [at(*lo), at([hi[0], lo[1]]), at(*hi), at([lo[0], hi[1]])],
+                    field_back,
+                ));
             }
             if let Some(s) = l.stops.get(e.editor.caret) {
                 out.strokes.push((
-                    vec![v2(at([s.x, s.baseline - 0.25 * s.height])), v2(at([s.x, s.baseline + 1.15 * s.height]))],
+                    vec![
+                        v2(at([s.x, s.baseline - 0.25 * s.height])),
+                        v2(at([s.x, s.baseline + 1.15 * s.height])),
+                    ],
                     ink(),
                 ));
             }
             if let Some((lo, hi)) = g.cell_box(*cell) {
                 out.strokes.push((
-                    vec![v2(lo), v2([hi[0], lo[1]]), v2(hi), v2([lo[0], hi[1]]), v2(lo)],
+                    vec![
+                        v2(lo),
+                        v2([hi[0], lo[1]]),
+                        v2(hi),
+                        v2([lo[0], hi[1]]),
+                        v2(lo),
+                    ],
                     blue(),
                 ));
                 if e.toolbar {
@@ -679,7 +826,11 @@ fn rebuild_note_scene(
 fn emit_texts(out: &mut NoteScene, texts: &[cadrs_drawing::note::NoteText], color: Color) {
     for t in texts {
         out.texts.push(super::annotations::SceneText {
-            text: cadrs_drawing::annotation::PlacedText { pos: t.pos, height: t.piece.height, text: t.piece.text.clone() },
+            text: cadrs_drawing::annotation::PlacedText {
+                pos: t.pos,
+                height: t.piece.height,
+                text: t.piece.text.clone(),
+            },
             color,
             bold: t.piece.bold,
             italic: t.piece.italic,
@@ -689,7 +840,13 @@ fn emit_texts(out: &mut NoteScene, texts: &[cadrs_drawing::note::NoteText], colo
 }
 
 /// Highlight boxes behind the selected text of a layout (`to` maps its points to the sheet).
-fn selection_quads(out: &mut NoteScene, l: &rich::RichLayout, r: std::ops::Range<usize>, to: impl Fn([f64; 2]) -> [f64; 2], c: Color) {
+fn selection_quads(
+    out: &mut NoteScene,
+    l: &rich::RichLayout,
+    r: std::ops::Range<usize>,
+    to: impl Fn([f64; 2]) -> [f64; 2],
+    c: Color,
+) {
     // One box per line: from the first to the last selected stop on that line.
     let mut i = r.start;
     while i < r.end {
@@ -698,8 +855,15 @@ fn selection_quads(out: &mut NoteScene, l: &rich::RichLayout, r: std::ops::Range
         while j < r.end && (l.stops[j + 1].baseline - s0.baseline).abs() < 1e-9 {
             j += 1;
         }
-        let x1 = if j > i { l.stops[j].x } else { s0.x + 0.6 * s0.height };
-        let (y0, y1) = (s0.baseline - 0.3 * s0.height, s0.baseline + 1.25 * s0.height);
+        let x1 = if j > i {
+            l.stops[j].x
+        } else {
+            s0.x + 0.6 * s0.height
+        };
+        let (y0, y1) = (
+            s0.baseline - 0.3 * s0.height,
+            s0.baseline + 1.25 * s0.height,
+        );
         let q = [to([s0.x, y0]), to([x1, y0]), to([x1, y1]), to([s0.x, y1])];
         out.backs.push(([v2(q[0]), v2(q[1]), v2(q[2])], c));
         out.backs.push(([v2(q[0]), v2(q[2]), v2(q[3])], c));
@@ -714,13 +878,26 @@ fn disc(c: Vec2, r: f32, color: Color) -> Vec<([Vec2; 3], Color)> {
         .map(|k| {
             let a0 = std::f32::consts::TAU * k as f32 / n as f32;
             let a1 = std::f32::consts::TAU * (k + 1) as f32 / n as f32;
-            ([c, c + Vec2::new(a0.cos(), a0.sin()) * r, c + Vec2::new(a1.cos(), a1.sin()) * r], color)
+            (
+                [
+                    c,
+                    c + Vec2::new(a0.cos(), a0.sin()) * r,
+                    c + Vec2::new(a1.cos(), a1.sin()) * r,
+                ],
+                color,
+            )
         })
         .collect()
 }
 
 /// The ruler along the top of the note being edited, with the wrap width's handles (D9.3).
-fn ruler(out: &mut NoteScene, n: &Note, g: &NoteGraphics, units: cadrs_drawing::DrawingUnits, px: f64) {
+fn ruler(
+    out: &mut NoteScene,
+    n: &Note,
+    g: &NoteGraphics,
+    units: cadrs_drawing::DrawingUnits,
+    px: f64,
+) {
     let h = n.height;
     let (left, right) = ruler_ends(n, g);
     let y0 = ruler_y(n, g);
@@ -731,8 +908,10 @@ fn ruler(out: &mut NoteScene, n: &Note, g: &NoteGraphics, units: cadrs_drawing::
     let lo = left - 3.0 * h;
     let hi = right + 6.0 * h;
     let back = Color::srgb_u8(0xf3, 0xf5, 0xf8);
-    out.backs.push(([s(lo, y0), s(hi, y0), s(hi, y0 + band)], back));
-    out.backs.push(([s(lo, y0), s(hi, y0 + band), s(lo, y0 + band)], back));
+    out.backs
+        .push(([s(lo, y0), s(hi, y0), s(hi, y0 + band)], back));
+    out.backs
+        .push(([s(lo, y0), s(hi, y0 + band), s(lo, y0 + band)], back));
     out.strokes.push((vec![s(lo, y0), s(hi, y0)], grey));
     // Ticks: tenths of an inch or millimetres by 2, longer each half inch or centimetre.
     let (minor, every) = match units {
@@ -752,10 +931,27 @@ fn ruler(out: &mut NoteScene, n: &Note, g: &NoteGraphics, units: cadrs_drawing::
     let hs = (h * 0.55).max(4.0 * px);
     for x in [left, right] {
         let c = n.to_sheet([x, y0 + band * 0.5]);
-        let (a, b) = (s(x - hs * 1.6, y0 + band * 0.5), s(x + hs * 1.6, y0 + band * 0.5));
+        let (a, b) = (
+            s(x - hs * 1.6, y0 + band * 0.5),
+            s(x + hs * 1.6, y0 + band * 0.5),
+        );
         let up = s(x, y0 + band * 0.5 + hs) - v2(c);
-        out.fills.push(([a, v2(c) + up * 0.9 - (b - a) * 0.12, v2(c) - up * 0.9 - (b - a) * 0.12], blue()));
-        out.fills.push(([b, v2(c) + up * 0.9 + (b - a) * 0.12, v2(c) - up * 0.9 + (b - a) * 0.12], blue()));
+        out.fills.push((
+            [
+                a,
+                v2(c) + up * 0.9 - (b - a) * 0.12,
+                v2(c) - up * 0.9 - (b - a) * 0.12,
+            ],
+            blue(),
+        ));
+        out.fills.push((
+            [
+                b,
+                v2(c) + up * 0.9 + (b - a) * 0.12,
+                v2(c) - up * 0.9 + (b - a) * 0.12,
+            ],
+            blue(),
+        ));
     }
 }
 
@@ -773,7 +969,10 @@ fn ruler_y(n: &Note, _g: &NoteGraphics) -> f64 {
 fn edit_grips(n: &Note, g: &NoteGraphics) -> Vec<([f64; 2], NoteGrip)> {
     let (l, r) = ruler_ends(n, g);
     let y = ruler_y(n, g) + n.height * 0.55;
-    vec![(n.to_sheet([l, y]), NoteGrip::Left), (n.to_sheet([r, y]), NoteGrip::Right)]
+    vec![
+        (n.to_sheet([l, y]), NoteGrip::Left),
+        (n.to_sheet([r, y]), NoteGrip::Right),
+    ]
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -795,8 +994,16 @@ fn grip_at(scene: &NoteScene, ui: &NotesUi, p: Vec2, tol: f64) -> Option<(Item, 
             continue;
         }
         let grips: Vec<([f64; 2], DragGrip)> = match g {
-            ItemGraphics::Note(n) => n.grips.iter().map(|(p, k)| (*p, DragGrip::Note(*k))).collect(),
-            ItemGraphics::Table(t) => t.grips.iter().map(|(p, k)| (*p, DragGrip::Table(*k))).collect(),
+            ItemGraphics::Note(n) => n
+                .grips
+                .iter()
+                .map(|(p, k)| (*p, DragGrip::Note(*k)))
+                .collect(),
+            ItemGraphics::Table(t) => t
+                .grips
+                .iter()
+                .map(|(p, k)| (*p, DragGrip::Table(*k)))
+                .collect(),
         };
         for (at, k) in grips {
             let d = (at[0] - q[0]).hypot(at[1] - q[1]);
@@ -844,7 +1051,9 @@ fn notes_pointer(
         return;
     };
     let area = sheet_area(&rect, &dui);
-    let over = super::view_tools::pointer_over_sheet(&hover_map, &q_area) && q_menus.is_empty() && q_dialogs.is_empty();
+    let over = super::view_tools::pointer_over_sheet(&hover_map, &q_area)
+        && q_menus.is_empty()
+        && q_dialogs.is_empty();
     let px = px_mm(&doc, &dui);
     let ctrl = keys.any_pressed([KeyCode::ControlLeft, KeyCode::ControlRight]);
     let shift = keys.any_pressed([KeyCode::ShiftLeft, KeyCode::ShiftRight]);
@@ -875,7 +1084,10 @@ fn notes_pointer(
                         shown.text = e.editor.text();
                         let r = ReferenceProps::default();
                         let c = DrawingContext::default();
-                        let ctx = FieldContext { reference: &r, drawing: &c };
+                        let ctx = FieldContext {
+                            reference: &r,
+                            drawing: &c,
+                        };
                         let mut m = drag_grip(&shown, &ctx, g, f2(d.start), f2(d.at));
                         m.text = n.text.clone();
                         e.note = Some(m);
@@ -888,9 +1100,12 @@ fn notes_pointer(
                     continue;
                 }
                 let hit = item_at(&scene, p, 4.0 * px);
-                let double = ui
-                    .last_press
-                    .is_some_and(|(t, at, h)| now - t < DOUBLE_TIME && at.distance(pos) < DOUBLE_DIST && h == hit && hit.is_some());
+                let double = ui.last_press.is_some_and(|(t, at, h)| {
+                    now - t < DOUBLE_TIME
+                        && at.distance(pos) < DOUBLE_DIST
+                        && h == hit
+                        && hit.is_some()
+                });
                 ui.last_press = Some((now, pos, hit));
                 if dui.annotation_press {
                     // An annotation took the press.
@@ -905,22 +1120,35 @@ fn notes_pointer(
                 // Typing on the sheet: the caret, the ruler's handles; elsewhere accepts.
                 if let Some(e) = ui.edit.clone() {
                     if let (Some(n), EditTarget::Note { id, .. }) = (&e.note, e.target)
-                        && let Some((_, ItemGraphics::Note(g))) = scene.items.iter().find(|(i, _)| *i == Item::Note(id))
+                        && let Some((_, ItemGraphics::Note(g))) =
+                            scene.items.iter().find(|(i, _)| *i == Item::Note(id))
                     {
                         let mut shown = n.clone();
                         shown.text = e.editor.text();
-                        let grip = edit_grips(&shown, g)
-                            .into_iter()
-                            .find(|(at, _)| (at[0] - p.x as f64).hypot(at[1] - p.y as f64) <= 6.0 * px);
+                        let grip = edit_grips(&shown, g).into_iter().find(|(at, _)| {
+                            (at[0] - p.x as f64).hypot(at[1] - p.y as f64) <= 6.0 * px
+                        });
                         if let Some((_, k)) = grip {
                             dui.annotation_press = true;
-                            ui.drag = Some(ItemDrag { item: Item::Note(id), grip: DragGrip::Note(k), start: p, at: p, moving: false });
+                            ui.drag = Some(ItemDrag {
+                                item: Item::Note(id),
+                                grip: DragGrip::Note(k),
+                                start: p,
+                                at: p,
+                                moving: false,
+                            });
                             continue;
                         }
                         if g.distance(f2(p)) <= 2.0 * px {
                             dui.annotation_press = true;
                             set_caret_at(&mut ui, &scene, p, shift);
-                            ui.drag = Some(ItemDrag { item: Item::Note(id), grip: DragGrip::Select, start: p, at: p, moving: false });
+                            ui.drag = Some(ItemDrag {
+                                item: Item::Note(id),
+                                grip: DragGrip::Select,
+                                start: p,
+                                at: p,
+                                moving: false,
+                            });
                             continue;
                         }
                     }
@@ -929,14 +1157,26 @@ fn notes_pointer(
                     {
                         dui.annotation_press = true;
                         set_caret_at(&mut ui, &scene, p, shift);
-                        ui.drag = Some(ItemDrag { item: Item::Table(table), grip: DragGrip::Select, start: p, at: p, moving: false });
+                        ui.drag = Some(ItemDrag {
+                            item: Item::Table(table),
+                            grip: DragGrip::Select,
+                            start: p,
+                            at: p,
+                            moving: false,
+                        });
                         continue;
                     }
                     commands.queue(commit_edit);
                 }
                 if let Some((item, grip)) = grip_at(&scene, &ui, p, 5.0 * px) {
                     dui.annotation_press = true;
-                    ui.drag = Some(ItemDrag { item, grip, start: p, at: p, moving: false });
+                    ui.drag = Some(ItemDrag {
+                        item,
+                        grip,
+                        start: p,
+                        at: p,
+                        moving: false,
+                    });
                     continue;
                 }
                 match hit {
@@ -947,8 +1187,14 @@ fn notes_pointer(
                             (Item::Table(t), Some(c)) => {
                                 if double {
                                     ui.selected = vec![item];
-                                    ui.cells = Some(CellSel { table: t, anchor: c, head: c });
-                                    commands.queue(move |w: &mut World| start_cell_edit(w, t, c, true, None));
+                                    ui.cells = Some(CellSel {
+                                        table: t,
+                                        anchor: c,
+                                        head: c,
+                                    });
+                                    commands.queue(move |w: &mut World| {
+                                        start_cell_edit(w, t, c, true, None)
+                                    });
                                 } else if shift && ui.cells.is_some_and(|s| s.table == t) {
                                     if let Some(s) = ui.cells.as_mut() {
                                         s.head = c;
@@ -961,7 +1207,11 @@ fn notes_pointer(
                                     ui.cells = None;
                                 } else {
                                     ui.selected = vec![item];
-                                    ui.cells = Some(CellSel { table: t, anchor: c, head: c });
+                                    ui.cells = Some(CellSel {
+                                        table: t,
+                                        anchor: c,
+                                        head: c,
+                                    });
                                 }
                             }
                             (Item::Note(id), _) => {
@@ -978,7 +1228,13 @@ fn notes_pointer(
                                 if double {
                                     commands.queue(move |w: &mut World| start_note_edit(w, id));
                                 } else {
-                                    ui.drag = Some(ItemDrag { item, grip: DragGrip::Body, start: p, at: p, moving: false });
+                                    ui.drag = Some(ItemDrag {
+                                        item,
+                                        grip: DragGrip::Body,
+                                        start: p,
+                                        at: p,
+                                        moving: false,
+                                    });
                                 }
                             }
                             (Item::Table(_), None) => {
@@ -1015,7 +1271,9 @@ fn notes_pointer(
     // Hover highlight (no tool, not dragging, not editing).
     let hovered = match (ann.tool, dui.pointer, over, ui.drag) {
         // Nothing under a note being edited or its popups (P3C.8: hover showed through them).
-        (AnnTool::None, Some(p), true, None) if !dui.annotation_hover && ui.edit.is_none() => item_at(&scene, p, 4.0 * px).map(|(i, _)| i),
+        (AnnTool::None, Some(p), true, None) if !dui.annotation_hover && ui.edit.is_none() => {
+            item_at(&scene, p, 4.0 * px).map(|(i, _)| i)
+        }
         _ => None,
     };
     if ui.hovered != hovered {
@@ -1034,7 +1292,9 @@ fn set_caret_at(ui: &mut NotesUi, scene: &NoteScene, p: Vec2, extend: bool) {
     let q = f2(p);
     let pos = match e.target {
         EditTarget::Note { id, .. } => {
-            let Some((_, ItemGraphics::Note(g))) = scene.items.iter().find(|(i, _)| *i == Item::Note(id)) else {
+            let Some((_, ItemGraphics::Note(g))) =
+                scene.items.iter().find(|(i, _)| *i == Item::Note(id))
+            else {
                 return;
             };
             let Some(n) = e.note.as_ref() else {
@@ -1043,7 +1303,9 @@ fn set_caret_at(ui: &mut NotesUi, scene: &NoteScene, p: Vec2, extend: bool) {
             rich::stop_at(&g.layout, n.from_sheet(q))
         }
         EditTarget::Cell { table, cell } => {
-            let Some((_, ItemGraphics::Table(g))) = scene.items.iter().find(|(i, _)| *i == Item::Table(table)) else {
+            let Some((_, ItemGraphics::Table(g))) =
+                scene.items.iter().find(|(i, _)| *i == Item::Table(table))
+            else {
                 return;
             };
             let Some((_, origin, l)) = g.layouts.iter().find(|(c, _, _)| *c == cell) else {
@@ -1075,10 +1337,16 @@ fn finish_drag(w: &mut World, d: ItemDrag) {
             let Some((props, ctx)) = field_sources(w) else {
                 return;
             };
-            let fctx = FieldContext { reference: &props, drawing: &ctx };
+            let fctx = FieldContext {
+                reference: &props,
+                drawing: &ctx,
+            };
             let views = sheet_views(doc, dui, w.resource::<ViewCache>());
             let geo = |id: ViewId| -> Option<(&View, &ViewGeometry)> {
-                views.iter().find(|(v, _)| v.id == id).and_then(|(v, g)| g.as_ref().map(|g| (v, &**g)))
+                views
+                    .iter()
+                    .find(|(v, _)| v.id == id)
+                    .and_then(|(v, g)| g.as_ref().map(|g| (v, &**g)))
             };
             let Some(m) = dragged_note(&n, d, &fctx, &geo, px) else {
                 return;
@@ -1093,7 +1361,11 @@ fn finish_drag(w: &mut World, d: ItemDrag) {
                 DragGrip::Note(NoteGrip::Leader(_)) => "Re-attach leader",
                 _ => "Resize note",
             };
-            DrawingOp::SetNote { sheet, note: m, label: label.into() }
+            DrawingOp::SetNote {
+                sheet,
+                note: m,
+                label: label.into(),
+            }
         }
         Item::Table(id) => {
             let Some(t) = find_table(dr, index, id) else {
@@ -1107,7 +1379,11 @@ fn finish_drag(w: &mut World, d: ItemDrag) {
                 DragGrip::Table(TableGrip::Column(_)) => "Resize column",
                 _ => "Move table",
             };
-            DrawingOp::SetTable { sheet, table: fit(w, m), label: label.into() }
+            DrawingOp::SetTable {
+                sheet,
+                table: fit(w, m),
+                label: label.into(),
+            }
         }
     };
     edit_drawing(w, op);
@@ -1165,7 +1441,12 @@ pub fn tool_click(w: &mut World, tool: AnnTool, hover: Option<Hover>, p: Vec2) {
             let editor = Editor::new(&note.text);
             let mut ui = w.resource_mut::<NotesUi>();
             ui.clear_selection();
-            ui.edit = Some(TextEdit { target: EditTarget::Note { id, new: true }, editor, note: Some(note), toolbar: true });
+            ui.edit = Some(TextEdit {
+                target: EditTarget::Note { id, new: true },
+                editor,
+                note: Some(note),
+                toolbar: true,
+            });
             focus_editor(w);
         }
         AnnTool::Table => {
@@ -1179,7 +1460,11 @@ pub fn tool_click(w: &mut World, tool: AnnTool, hover: Option<Hover>, p: Vec2) {
                 {
                     let mut ui = w.resource_mut::<NotesUi>();
                     ui.selected = vec![Item::Table(id)];
-                    ui.cells = Some(CellSel { table: id, anchor: (0, 0), head: (0, 0) });
+                    ui.cells = Some(CellSel {
+                        table: id,
+                        anchor: (0, 0),
+                        head: (0, 0),
+                    });
                 }
                 // Typing goes straight into the first cell (D10.2).
                 start_cell_edit(w, id, (0, 0), false, None);
@@ -1203,7 +1488,14 @@ pub fn tool_click(w: &mut World, tool: AnnTool, hover: Option<Hover>, p: Vec2) {
                 return;
             };
             note.leaders.push(leader_of(&h, &v, p));
-            edit_drawing(w, DrawingOp::SetNote { sheet, note, label: "Add leader".into() });
+            edit_drawing(
+                w,
+                DrawingOp::SetNote {
+                    sheet,
+                    note,
+                    label: "Add leader".into(),
+                },
+            );
             w.resource_mut::<NotesUi>().selected = vec![Item::Note(id)];
         }
         _ => {}
@@ -1222,7 +1514,8 @@ pub fn start_note_tool(w: &mut World, tool: AnnTool) {
 
 fn focus_editor(w: &mut World) {
     let e = w.resource::<EditorFocus>().0;
-    w.resource_mut::<InputFocus>().set(e, bevy::input_focus::FocusCause::Navigated);
+    w.resource_mut::<InputFocus>()
+        .set(e, bevy::input_focus::FocusCause::Navigated);
 }
 
 /// Double-click (or Edit… on its menu, or Enter): edits a note in place with the toolbar.
@@ -1243,13 +1536,24 @@ pub fn start_note_edit(w: &mut World, id: NoteId) {
     let mut ui = w.resource_mut::<NotesUi>();
     ui.selected = vec![Item::Note(id)];
     ui.cells = None;
-    ui.edit = Some(TextEdit { target: EditTarget::Note { id, new: false }, editor, note: Some(note), toolbar: true });
+    ui.edit = Some(TextEdit {
+        target: EditTarget::Note { id, new: false },
+        editor,
+        note: Some(note),
+        toolbar: true,
+    });
     focus_editor(w);
 }
 
 /// Types into a cell: with the note toolbar (a double-click) or without (Tab, typing). `typed`
 /// is the first character.
-pub fn start_cell_edit(w: &mut World, table: TableId, cell: Cell, toolbar: bool, typed: Option<&str>) {
+pub fn start_cell_edit(
+    w: &mut World,
+    table: TableId,
+    cell: Cell,
+    toolbar: bool,
+    typed: Option<&str>,
+) {
     let t = (|| {
         let doc = w.get_resource::<ActiveDocument>()?;
         let dui = w.resource::<DrawingUi>();
@@ -1270,8 +1574,17 @@ pub fn start_cell_edit(w: &mut World, table: TableId, cell: Cell, toolbar: bool,
     }
     let mut ui = w.resource_mut::<NotesUi>();
     ui.selected = vec![Item::Table(table)];
-    ui.cells = Some(CellSel { table, anchor: cell, head: cell });
-    ui.edit = Some(TextEdit { target: EditTarget::Cell { table, cell }, editor, note: None, toolbar });
+    ui.cells = Some(CellSel {
+        table,
+        anchor: cell,
+        head: cell,
+    });
+    ui.edit = Some(TextEdit {
+        target: EditTarget::Cell { table, cell },
+        editor,
+        note: None,
+        toolbar,
+    });
     focus_editor(w);
 }
 
@@ -1303,7 +1616,14 @@ pub fn commit_edit(w: &mut World) {
                     w.resource_mut::<NotesUi>().selected = vec![Item::Note(id)];
                 }
             } else if find_note(&d, index, id) != Some(&n) {
-                edit_drawing(w, DrawingOp::SetNote { sheet, note: n, label: "Edit note".into() });
+                edit_drawing(
+                    w,
+                    DrawingOp::SetNote {
+                        sheet,
+                        note: n,
+                        label: "Edit note".into(),
+                    },
+                );
             }
         }
         EditTarget::Cell { table, cell } => {
@@ -1315,7 +1635,14 @@ pub fn commit_edit(w: &mut World) {
             }
             if let Ok(m) = t.set_cell(cell, text) {
                 let m = fit(w, m);
-                edit_drawing(w, DrawingOp::SetTable { sheet, table: m, label: "Edit cell".into() });
+                edit_drawing(
+                    w,
+                    DrawingOp::SetTable {
+                        sheet,
+                        table: m,
+                        label: "Edit cell".into(),
+                    },
+                );
             }
         }
     }
@@ -1361,7 +1688,11 @@ fn tab_cell(w: &mut World, back: bool) {
     if editing {
         start_cell_edit(w, table, next, false, None);
     } else {
-        w.resource_mut::<NotesUi>().cells = Some(CellSel { table, anchor: next, head: next });
+        w.resource_mut::<NotesUi>().cells = Some(CellSel {
+            table,
+            anchor: next,
+            head: next,
+        });
     }
 }
 
@@ -1401,11 +1732,19 @@ fn notes_keys(
     let shift = keys.any_pressed([KeyCode::ShiftLeft, KeyCode::ShiftRight]);
     let alt = keys.any_pressed([KeyCode::AltLeft, KeyCode::AltRight]);
     for k in keys_in.read() {
-        if k.state != bevy::input::ButtonState::Pressed || typing || !q_dialogs.is_empty() || !q_menus.is_empty() || alt {
+        if k.state != bevy::input::ButtonState::Pressed
+            || typing
+            || !q_dialogs.is_empty()
+            || !q_menus.is_empty()
+            || alt
+        {
             continue;
         }
         if in_editor {
-            let cell = matches!(ui.edit.as_ref().map(|e| e.target), Some(EditTarget::Cell { .. }));
+            let cell = matches!(
+                ui.edit.as_ref().map(|e| e.target),
+                Some(EditTarget::Cell { .. })
+            );
             let e = &mut ui.edit.as_mut().unwrap().editor;
             match k.shortcut_code() {
                 KeyCode::Escape => {
@@ -1431,11 +1770,15 @@ fn notes_keys(
                 KeyCode::KeyU if ctrl => e.toggle(Attr::Underline),
                 _ if ctrl => {}
                 _ => {
-                    let text = k.text.as_ref().map(|t| t.to_string()).or(match &k.logical_key {
-                        Key::Character(c) => Some(c.to_string()),
-                        Key::Space => Some(" ".into()),
-                        _ => None,
-                    });
+                    let text = k
+                        .text
+                        .as_ref()
+                        .map(|t| t.to_string())
+                        .or(match &k.logical_key {
+                            Key::Character(c) => Some(c.to_string()),
+                            Key::Space => Some(" ".into()),
+                            _ => None,
+                        });
                     if let Some(t) = text.filter(|t| t.chars().all(|c| !c.is_control())) {
                         e.insert_str(&t);
                     }
@@ -1461,22 +1804,28 @@ fn notes_keys(
                 ui.cells = None;
                 commands.queue(move |w: &mut World| delete_items(w, &items));
             }
-            KeyCode::Enter if ui.selected.len() == 1 => {
-                match (ui.selected[0], ui.cells) {
-                    (Item::Note(id), _) => commands.queue(move |w: &mut World| start_note_edit(w, id)),
-                    (Item::Table(t), Some(c)) => commands.queue(move |w: &mut World| start_cell_edit(w, t, c.head, true, None)),
-                    _ => {}
+            KeyCode::Enter if ui.selected.len() == 1 => match (ui.selected[0], ui.cells) {
+                (Item::Note(id), _) => commands.queue(move |w: &mut World| start_note_edit(w, id)),
+                (Item::Table(t), Some(c)) => {
+                    commands.queue(move |w: &mut World| start_cell_edit(w, t, c.head, true, None))
                 }
-            }
+                _ => {}
+            },
             KeyCode::Escape => {
                 ui.clear_selection();
             }
             _ => {
                 // Typing into a selected cell starts editing it.
                 if let Some(c) = ui.cells.filter(|c| c.single())
-                    && let Some(t) = k.text.as_ref().map(|t| t.to_string()).filter(|t| t.chars().all(|c| !c.is_control()))
+                    && let Some(t) = k
+                        .text
+                        .as_ref()
+                        .map(|t| t.to_string())
+                        .filter(|t| t.chars().all(|c| !c.is_control()))
                 {
-                    commands.queue(move |w: &mut World| start_cell_edit(w, c.table, c.head, false, Some(&t)));
+                    commands.queue(move |w: &mut World| {
+                        start_cell_edit(w, c.table, c.head, false, Some(&t))
+                    });
                 }
             }
         }
@@ -1485,10 +1834,18 @@ fn notes_keys(
 
 /// Clears the text of the selected cells (one undo step).
 fn clear_cells(w: &mut World, sel: CellSel) {
-    let Some(doc) = w.get_resource::<ActiveDocument>() else { return };
-    let Some((_, index, sheet)) = active_sheet(doc, w.resource::<DrawingUi>()) else { return };
-    let Some((_, d)) = active_drawing(doc) else { return };
-    let Some(t) = find_table(d, index, sel.table).cloned() else { return };
+    let Some(doc) = w.get_resource::<ActiveDocument>() else {
+        return;
+    };
+    let Some((_, index, sheet)) = active_sheet(doc, w.resource::<DrawingUi>()) else {
+        return;
+    };
+    let Some((_, d)) = active_drawing(doc) else {
+        return;
+    };
+    let Some(t) = find_table(d, index, sel.table).cloned() else {
+        return;
+    };
     let ((r0, c0), (r1, c1)) = sel.range();
     let mut m = t.clone();
     for r in r0..=r1.min(t.n_rows().saturating_sub(1)) {
@@ -1500,7 +1857,14 @@ fn clear_cells(w: &mut World, sel: CellSel) {
     }
     if m != t {
         let m = fit(w, m);
-        edit_drawing(w, DrawingOp::SetTable { sheet, table: m, label: "Clear cells".into() });
+        edit_drawing(
+            w,
+            DrawingOp::SetTable {
+                sheet,
+                table: m,
+                label: "Clear cells".into(),
+            },
+        );
     }
 }
 
@@ -1530,19 +1894,53 @@ fn keep_editor_focus(
 /// A table as stored: its rows grown to fit their text.
 pub fn fit(w: &World, t: Table) -> Table {
     match field_sources(w) {
-        Some((r, d)) => cadrs_drawing::table::fit_rows(&t, &FieldContext { reference: &r, drawing: &d }),
+        Some((r, d)) => cadrs_drawing::table::fit_rows(
+            &t,
+            &FieldContext {
+                reference: &r,
+                drawing: &d,
+            },
+        ),
         None => t,
     }
 }
 
 /// Deletes notes and tables.
 pub fn delete_items(w: &mut World, items: &[Item]) {
-    let Some(sheet) = w.get_resource::<ActiveDocument>().and_then(|doc| active_sheet(doc, w.resource::<DrawingUi>()).map(|s| s.2)) else {
+    let Some(sheet) = w
+        .get_resource::<ActiveDocument>()
+        .and_then(|doc| active_sheet(doc, w.resource::<DrawingUi>()).map(|s| s.2))
+    else {
         return;
     };
-    let notes = items.iter().filter_map(|i| if let Item::Note(n) = i { Some(*n) } else { None }).collect();
-    let tables = items.iter().filter_map(|i| if let Item::Table(t) = i { Some(*t) } else { None }).collect();
-    edit_drawing(w, DrawingOp::DeleteSheetItems { sheet, notes, tables });
+    let notes = items
+        .iter()
+        .filter_map(|i| {
+            if let Item::Note(n) = i {
+                Some(*n)
+            } else {
+                None
+            }
+        })
+        .collect();
+    let tables = items
+        .iter()
+        .filter_map(|i| {
+            if let Item::Table(t) = i {
+                Some(*t)
+            } else {
+                None
+            }
+        })
+        .collect();
+    edit_drawing(
+        w,
+        DrawingOp::DeleteSheetItems {
+            sheet,
+            notes,
+            tables,
+        },
+    );
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -1585,25 +1983,39 @@ pub fn open_item_menu(world: &mut World, pos: Vec2) -> bool {
         }
         Item::Table(id) => {
             menu = menu
-                .item(MenuItem::new("table-menu-edit-cell", "Edit cell…").icon("edit").disabled(cell.is_none()))
-                .item(MenuItem::new("table-menu-properties", "Table properties…").icon("properties"));
+                .item(
+                    MenuItem::new("table-menu-edit-cell", "Edit cell…")
+                        .icon("edit")
+                        .disabled(cell.is_none()),
+                )
+                .item(
+                    MenuItem::new("table-menu-properties", "Table properties…").icon("properties"),
+                );
             // A BOM table's own properties (P3C.5, D11.3).
             let is_bom = world
                 .get_resource::<ActiveDocument>()
                 .and_then(|doc| {
                     let (eid, d) = active_drawing(doc)?;
-                    find_table(d, world.resource::<DrawingUi>().sheet_index(eid, d), id).map(|t| t.bom.is_some())
+                    find_table(d, world.resource::<DrawingUi>().sheet_index(eid, d), id)
+                        .map(|t| t.bom.is_some())
                 })
                 .unwrap_or(false);
             if is_bom {
-                menu = menu.item(MenuItem::new("table-menu-bom-properties", "BOM Table properties…").icon("bill-of-materials"));
+                menu = menu.item(
+                    MenuItem::new("table-menu-bom-properties", "BOM Table properties…")
+                        .icon("bill-of-materials"),
+                );
             }
         }
     }
-    menu = menu.separator().item(MenuItem::new("note-menu-delete", "Delete").icon("delete"));
+    menu = menu
+        .separator()
+        .item(MenuItem::new("note-menu-delete", "Delete").icon("delete"));
     let mut commands = world.commands();
     let anchor = open_context_menu(&mut commands, pos, menu.build(&theme));
-    commands.entity(anchor).insert((ItemMenuFor(item, cell), DespawnOnExit(AppState::Document)));
+    commands
+        .entity(anchor)
+        .insert((ItemMenuFor(item, cell), DespawnOnExit(AppState::Document)));
     world.flush();
     true
 }
@@ -1620,13 +2032,20 @@ fn on_item_menu(ev: On<MenuAction>, q: Query<&ItemMenuFor>, mut commands: Comman
             w.resource_mut::<NotesUi>().selected = vec![Item::Note(id)];
         }
         ("table-menu-edit-cell", Item::Table(id)) => {
-            let c = t.1.or_else(|| w.resource::<NotesUi>().cells.filter(|c| c.table == id).map(|c| c.head));
+            let c = t.1.or_else(|| {
+                w.resource::<NotesUi>()
+                    .cells
+                    .filter(|c| c.table == id)
+                    .map(|c| c.head)
+            });
             if let Some(c) = c {
                 start_cell_edit(w, id, c, true, None);
             }
         }
         ("table-menu-properties", Item::Table(id)) => super::note_bar::open_table_properties(w, id),
-        ("table-menu-bom-properties", Item::Table(id)) => super::bom_tools::open_bom_properties(w, id),
+        ("table-menu-bom-properties", Item::Table(id)) => {
+            super::bom_tools::open_bom_properties(w, id)
+        }
         ("note-menu-delete", i) => {
             w.resource_mut::<NotesUi>().clear_selection();
             delete_items(w, &[i]);

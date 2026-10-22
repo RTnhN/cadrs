@@ -32,8 +32,8 @@ use cadrs_ui::prelude::*;
 use cadrs_ui::{
     CheckboxChange, FeatureDialogAccept, FeatureDialogCancel, FeatureDialogState, NumberField,
     NumberFieldCommit, NumberFieldState, OptionRow, Select, SelectChange, SelectState,
-    SelectionList, SelectionListActivate, SelectionListRemove, SelectionListState,
-    TabStrip, TabStripSelect,
+    SelectionList, SelectionListActivate, SelectionListRemove, SelectionListState, TabStrip,
+    TabStripSelect,
 };
 
 use crate::extrude::{ExtrudeField, ExtrudeSession};
@@ -84,7 +84,11 @@ impl RevolveLayout {
             op: r.op,
             kind: r.kind,
             offset: r.offset.is_some(),
-            second: r.second.as_ref().filter(|_| r.kind.one_sided()).map(|s| (s.end, s.offset.is_some())),
+            second: r
+                .second
+                .as_ref()
+                .filter(|_| r.kind.one_sided())
+                .map(|s| (s.end, s.offset.is_some())),
             mid_plane: r.thin.mid_plane,
             merge_all: r.merge_all,
             connector: field == ExtrudeField::AxisConnector,
@@ -132,7 +136,10 @@ struct Labels {
 }
 
 fn feature_name(features: &[Feature], op: cadrs_sketch::OpId) -> String {
-    features.iter().find(|f| f.id.0 == op).map_or("part".into(), |f| f.name.clone())
+    features
+        .iter()
+        .find(|f| f.id.0 == op)
+        .map_or("part".into(), |f| f.name.clone())
 }
 
 fn up_to_label(features: &[Feature], cache: &PartCache, u: &UpTo) -> String {
@@ -143,13 +150,39 @@ fn up_to_label(features: &[Feature], cache: &PartCache, u: &UpTo) -> String {
     }
 }
 
-fn labels(features: &[Feature], cache: &PartCache, feature: FeatureId, r: &RevolveFeature) -> Labels {
-    let name = |id: FeatureId| features.iter().find(|f| f.id == id).map_or("sketch".into(), |f| f.name.clone());
+fn labels(
+    features: &[Feature],
+    cache: &PartCache,
+    feature: FeatureId,
+    r: &RevolveFeature,
+) -> Labels {
+    let name = |id: FeatureId| {
+        features
+            .iter()
+            .find(|f| f.id == id)
+            .map_or("sketch".into(), |f| f.name.clone())
+    };
     // A surface revolves the region's boundary curves: "Curves of Sketch 1" (P3.4 judge).
-    let what = if r.body == cadrs_core::BodyType::Surface { "Curves" } else { "Face" };
-    let mut input: Vec<String> = r.regions.iter().map(|x| format!("{what} of {}", name(x.sketch))).collect();
-    input.extend(r.sketches.iter().map(|s| crate::extrude_dialog::whole_sketch_label(features, *s, r.body)));
-    input.extend(r.faces.iter().map(|f| format!("Face of {}", feature_name(features, f.face.op))));
+    let what = if r.body == cadrs_core::BodyType::Surface {
+        "Curves"
+    } else {
+        "Face"
+    };
+    let mut input: Vec<String> = r
+        .regions
+        .iter()
+        .map(|x| format!("{what} of {}", name(x.sketch)))
+        .collect();
+    input.extend(
+        r.sketches
+            .iter()
+            .map(|s| crate::extrude_dialog::whole_sketch_label(features, *s, r.body)),
+    );
+    input.extend(
+        r.faces
+            .iter()
+            .map(|f| format!("Face of {}", feature_name(features, f.face.op))),
+    );
     let input_missing = crate::extrude_dialog::missing_marks(cache, feature, &mut input);
     let part_name = |p: &PartId| cache.part_name(*p).unwrap_or("Part").to_string();
     let merge_scope = if !r.merge_scope.is_empty() {
@@ -167,8 +200,16 @@ fn labels(features: &[Feature], cache: &PartCache, feature: FeatureId, r: &Revol
     Labels {
         input,
         input_missing,
-        axis: r.axis.iter().map(|a| crate::revolve::axis_label(features, a)).collect(),
-        up_to: r.up_to.iter().map(|u| up_to_label(features, cache, u)).collect(),
+        axis: r
+            .axis
+            .iter()
+            .map(|a| crate::revolve::axis_label(features, a))
+            .collect(),
+        up_to: r
+            .up_to
+            .iter()
+            .map(|u| up_to_label(features, cache, u))
+            .collect(),
         second_up_to: r
             .second
             .iter()
@@ -182,7 +223,15 @@ fn labels(features: &[Feature], cache: &PartCache, feature: FeatureId, r: &Revol
 // ---------------------------------------------------------------------------------------------
 // Building
 
-fn list(b: &mut ChildSpawner, t: &Theme, name: &str, placeholder: &str, role: Role, items: Vec<String>, active: bool) {
+fn list(
+    b: &mut ChildSpawner,
+    t: &Theme,
+    name: &str,
+    placeholder: &str,
+    role: Role,
+    items: Vec<String>,
+    active: bool,
+) {
     b.spawn((
         role,
         SelectionList::new(name.to_string())
@@ -199,7 +248,15 @@ fn list(b: &mut ChildSpawner, t: &Theme, name: &str, placeholder: &str, role: Ro
 }
 
 /// A select row with an optional flip button after it.
-fn select_row(b: &mut ChildSpawner, t: &Theme, name: &str, role: Role, options: &[&'static str], selected: usize, flip: Option<(Role, bool)>) {
+fn select_row(
+    b: &mut ChildSpawner,
+    t: &Theme,
+    name: &str,
+    role: Role,
+    options: &[&'static str],
+    selected: usize,
+    flip: Option<(Role, bool)>,
+) {
     let mut select = Select::new(name.to_string());
     for o in options {
         select = select.option(*o, true);
@@ -214,13 +271,28 @@ fn select_row(b: &mut ChildSpawner, t: &Theme, name: &str, role: Role, options: 
     .with_children(|r| {
         r.spawn((role, select.selected(selected).build(t)));
         if let Some((flip_role, flipped)) = flip {
-            flip_button_any(r, t, &format!("{name}-flip"), flip_role, flipped, "Opposite direction");
+            flip_button_any(
+                r,
+                t,
+                &format!("{name}-flip"),
+                flip_role,
+                flipped,
+                "Opposite direction",
+            );
         }
     });
 }
 
 /// A number field with a flip button after it.
-fn offset_row(b: &mut ChildSpawner, t: &Theme, name: &str, label: &str, role: Role, flip_role: Role, o: &Offset) {
+fn offset_row(
+    b: &mut ChildSpawner,
+    t: &Theme,
+    name: &str,
+    label: &str,
+    role: Role,
+    flip_role: Role,
+    o: &Offset,
+) {
     b.spawn(Node {
         align_items: AlignItems::Center,
         column_gap: Val::Px(4.0),
@@ -237,7 +309,14 @@ fn offset_row(b: &mut ChildSpawner, t: &Theme, name: &str, label: &str, role: Ro
         ))
         .entry::<Node>()
         .and_modify(|mut n| n.flex_grow = 1.0);
-        flip_button_any(r, t, &format!("{name}-flip"), flip_role, o.flip, "Opposite direction");
+        flip_button_any(
+            r,
+            t,
+            &format!("{name}-flip"),
+            flip_role,
+            o.flip,
+            "Opposite direction",
+        );
     });
 }
 
@@ -274,17 +353,44 @@ fn end_fields(
             ));
         }
         EndType::UpToNext | EndType::ThroughAll => {}
-        e => list(b, t, &format!("{prefix}up-to-field"), placeholder(e), up_to_role, up_to_items, up_to_active),
+        e => list(
+            b,
+            t,
+            &format!("{prefix}up-to-field"),
+            placeholder(e),
+            up_to_role,
+            up_to_items,
+            up_to_active,
+        ),
     }
     if end.is_up_to() {
-        b.spawn(OptionRow::new(format!("{prefix}offset"), "Offset angle").checked(offset.is_some()).build(t));
+        b.spawn(
+            OptionRow::new(format!("{prefix}offset"), "Offset angle")
+                .checked(offset.is_some())
+                .build(t),
+        );
         if let Some(o) = offset {
-            offset_row(b, t, &format!("{prefix}offset-angle"), "Offset angle", offset_role, offset_flip_role, o);
+            offset_row(
+                b,
+                t,
+                &format!("{prefix}offset-angle"),
+                "Offset angle",
+                offset_role,
+                offset_flip_role,
+                o,
+            );
         }
     }
 }
 
-fn revolve_dialog(theme: &Theme, title: &str, valid: bool, r: &RevolveFeature, field: ExtrudeField, labels: &Labels) -> impl Bundle {
+fn revolve_dialog(
+    theme: &Theme,
+    title: &str,
+    valid: bool,
+    r: &RevolveFeature,
+    field: ExtrudeField,
+    labels: &Labels,
+) -> impl Bundle {
     let tb = theme.clone();
     let tf = theme.clone();
     let r = r.clone();
@@ -334,7 +440,15 @@ fn revolve_dialog(theme: &Theme, title: &str, valid: bool, r: &RevolveFeature, f
                     } else {
                         "Faces and sketch regions to revolve"
                     };
-                    list(b, t, "revolve-regions-field", input, Role::Input, labels.input.clone(), field == ExtrudeField::Input);
+                    list(
+                        b,
+                        t,
+                        "revolve-regions-field",
+                        input,
+                        Role::Input,
+                        labels.input.clone(),
+                        field == ExtrudeField::Input,
+                    );
                     // The axis field with the mate connector button beside it (`ex2-step5`).
                     b.spawn(Node {
                         align_items: AlignItems::Center,
@@ -347,7 +461,10 @@ fn revolve_dialog(theme: &Theme, title: &str, valid: bool, r: &RevolveFeature, f
                             SelectionList::new("revolve-axis-field")
                                 .placeholder("Revolve axis")
                                 .items(labels.axis.clone())
-                                .active(matches!(field, ExtrudeField::Axis | ExtrudeField::AxisConnector))
+                                .active(matches!(
+                                    field,
+                                    ExtrudeField::Axis | ExtrudeField::AxisConnector
+                                ))
                                 .build(t),
                         ))
                         .entry::<Node>()
@@ -365,8 +482,12 @@ fn revolve_dialog(theme: &Theme, title: &str, valid: bool, r: &RevolveFeature, f
                                 .build(t),
                         ));
                     });
-                    let kinds: Vec<&'static str> = RevolveType::ALL.iter().map(|k| k.label()).collect();
-                    let kind_index = RevolveType::ALL.iter().position(|k| *k == r.kind).unwrap_or(0);
+                    let kinds: Vec<&'static str> =
+                        RevolveType::ALL.iter().map(|k| k.label()).collect();
+                    let kind_index = RevolveType::ALL
+                        .iter()
+                        .position(|k| *k == r.kind)
+                        .unwrap_or(0);
                     let flip = r.kind.one_sided().then_some((Role::Flip, r.flip));
                     select_row(b, t, "revolve-type", Role::Kind, &kinds, kind_index, flip);
                     if r.kind != RevolveType::Full {
@@ -398,9 +519,20 @@ fn revolve_dialog(theme: &Theme, title: &str, valid: bool, r: &RevolveFeature, f
                             ))
                             .entry::<Node>()
                             .and_modify(|mut n| n.flex_grow = 1.0);
-                            flip_button_any(row, t, "revolve-flip-wall", Role::FlipWall, r.thin.flip_wall, "Flip wall");
+                            flip_button_any(
+                                row,
+                                t,
+                                "revolve-flip-wall",
+                                Role::FlipWall,
+                                r.thin.flip_wall,
+                                "Flip wall",
+                            );
                         });
-                        b.spawn(OptionRow::new("revolve-mid-plane", "Mid plane").checked(r.thin.mid_plane).build(t));
+                        b.spawn(
+                            OptionRow::new("revolve-mid-plane", "Mid plane")
+                                .checked(r.thin.mid_plane)
+                                .build(t),
+                        );
                         if !r.thin.mid_plane {
                             b.spawn((
                                 Role::Thickness2,
@@ -419,9 +551,21 @@ fn revolve_dialog(theme: &Theme, title: &str, valid: bool, r: &RevolveFeature, f
                                 .build(t),
                         );
                         if let Some(sec) = &r.second {
-                            let ends: Vec<&'static str> = REVOLVE_SECOND_ENDS.iter().map(|e| e.label()).collect();
-                            let i = REVOLVE_SECOND_ENDS.iter().position(|e| *e == sec.end).unwrap_or(0);
-                            select_row(b, t, "revolve-second-end-type", Role::SecondEndType, &ends, i, Some((Role::SecondFlip, !r.flip)));
+                            let ends: Vec<&'static str> =
+                                REVOLVE_SECOND_ENDS.iter().map(|e| e.label()).collect();
+                            let i = REVOLVE_SECOND_ENDS
+                                .iter()
+                                .position(|e| *e == sec.end)
+                                .unwrap_or(0);
+                            select_row(
+                                b,
+                                t,
+                                "revolve-second-end-type",
+                                Role::SecondEndType,
+                                &ends,
+                                i,
+                                Some((Role::SecondFlip, !r.flip)),
+                            );
                             end_fields(
                                 b,
                                 t,
@@ -431,14 +575,31 @@ fn revolve_dialog(theme: &Theme, title: &str, valid: bool, r: &RevolveFeature, f
                                 &sec.offset,
                                 labels.second_up_to.clone(),
                                 field == ExtrudeField::SecondUpTo,
-                                [Role::SecondAngle, Role::SecondUpTo, Role::SecondOffsetValue, Role::SecondOffsetFlip],
+                                [
+                                    Role::SecondAngle,
+                                    Role::SecondUpTo,
+                                    Role::SecondOffsetValue,
+                                    Role::SecondOffsetFlip,
+                                ],
                             );
                         }
                     }
                     if r.op != BooleanOp::New && r.body != BodyType::Surface {
-                        b.spawn(OptionRow::new("revolve-merge-all", "Merge with all").checked(r.merge_all).build(t));
+                        b.spawn(
+                            OptionRow::new("revolve-merge-all", "Merge with all")
+                                .checked(r.merge_all)
+                                .build(t),
+                        );
                         if !r.merge_all {
-                            list(b, t, "revolve-merge-scope-field", "Merge scope", Role::MergeScope, labels.merge_scope.clone(), field == ExtrudeField::MergeScope);
+                            list(
+                                b,
+                                t,
+                                "revolve-merge-scope-field",
+                                "Merge scope",
+                                Role::MergeScope,
+                                labels.merge_scope.clone(),
+                                field == ExtrudeField::MergeScope,
+                            );
                         }
                     }
                 });
@@ -511,7 +672,14 @@ pub(crate) fn sync_revolve_dialog(
                 return;
             };
             let dialog = commands
-                .spawn(revolve_dialog(&theme, &feature.name, valid, shown, s.field, &labels))
+                .spawn(revolve_dialog(
+                    &theme,
+                    &feature.name,
+                    valid,
+                    shown,
+                    s.field,
+                    &labels,
+                ))
                 .id();
             commands.entity(area).add_child(dialog);
             return;
@@ -530,13 +698,20 @@ pub(crate) fn sync_revolve_dialog(
     for (role, mut l) in &mut q_lists {
         let (items, active) = match role {
             Role::Input => (&labels.input, s.field == ExtrudeField::Input),
-            Role::Axis => (&labels.axis, matches!(s.field, ExtrudeField::Axis | ExtrudeField::AxisConnector)),
+            Role::Axis => (
+                &labels.axis,
+                matches!(s.field, ExtrudeField::Axis | ExtrudeField::AxisConnector),
+            ),
             Role::UpTo => (&labels.up_to, s.field == ExtrudeField::UpTo),
             Role::SecondUpTo => (&labels.second_up_to, s.field == ExtrudeField::SecondUpTo),
             Role::MergeScope => (&labels.merge_scope, s.field == ExtrudeField::MergeScope),
             _ => continue,
         };
-        let red = if matches!(role, Role::Input) { labels.input_missing.clone() } else { Vec::new() };
+        let red = if matches!(role, Role::Input) {
+            labels.input_missing.clone()
+        } else {
+            Vec::new()
+        };
         let want = SelectionListState {
             items: items.clone(),
             active,
@@ -552,8 +727,16 @@ pub(crate) fn sync_revolve_dialog(
     for (entity, role, mut n) in &mut q_numbers {
         let text = match role {
             Role::Angle => shown.angle_expr.clone(),
-            Role::OffsetValue => shown.offset.as_ref().map(|o| o.expr.clone()).unwrap_or_default(),
-            Role::SecondAngle => shown.second.as_ref().map(|s| s.depth_expr.clone()).unwrap_or_default(),
+            Role::OffsetValue => shown
+                .offset
+                .as_ref()
+                .map(|o| o.expr.clone())
+                .unwrap_or_default(),
+            Role::SecondAngle => shown
+                .second
+                .as_ref()
+                .map(|s| s.depth_expr.clone())
+                .unwrap_or_default(),
             Role::SecondOffsetValue => shown
                 .second
                 .as_ref()
@@ -574,9 +757,15 @@ pub(crate) fn sync_revolve_dialog(
     }
     for (role, mut sel) in &mut q_selects {
         let i = match role {
-            Role::Kind => RevolveType::ALL.iter().position(|k| *k == shown.kind).unwrap_or(0),
+            Role::Kind => RevolveType::ALL
+                .iter()
+                .position(|k| *k == shown.kind)
+                .unwrap_or(0),
             Role::SecondEndType => match &shown.second {
-                Some(sec) => REVOLVE_SECOND_ENDS.iter().position(|e| *e == sec.end).unwrap_or(0),
+                Some(sec) => REVOLVE_SECOND_ENDS
+                    .iter()
+                    .position(|e| *e == sec.end)
+                    .unwrap_or(0),
                 None => continue,
             },
             _ => continue,
@@ -590,19 +779,31 @@ pub(crate) fn sync_revolve_dialog(
 // ---------------------------------------------------------------------------------------------
 // Input
 
-fn on_accept(ev: On<FeatureDialogAccept>, q: Query<(), With<RevolveDialog>>, mut commands: Commands) {
+fn on_accept(
+    ev: On<FeatureDialogAccept>,
+    q: Query<(), With<RevolveDialog>>,
+    mut commands: Commands,
+) {
     if q.contains(ev.entity) {
         commands.queue(crate::extrude::accept_extrude);
     }
 }
 
-fn on_cancel(ev: On<FeatureDialogCancel>, q: Query<(), With<RevolveDialog>>, mut commands: Commands) {
+fn on_cancel(
+    ev: On<FeatureDialogCancel>,
+    q: Query<(), With<RevolveDialog>>,
+    mut commands: Commands,
+) {
     if q.contains(ev.entity) {
         commands.queue(crate::extrude::cancel_extrude);
     }
 }
 
-fn change(commands: &mut Commands, label: &'static str, f: impl FnOnce(&mut RevolveFeature) + Send + 'static) {
+fn change(
+    commands: &mut Commands,
+    label: &'static str,
+    f: impl FnOnce(&mut RevolveFeature) + Send + 'static,
+) {
     commands.queue(move |world: &mut World| {
         if let Some(mut r) = rparams(world) {
             let before = r.clone();
@@ -707,8 +908,12 @@ fn on_checkbox(ev: On<CheckboxChange>, q: Query<&Name>, mut commands: Commands) 
         "revolve-second-end-checkbox" => change(&mut commands, "Second end position", move |r| {
             r.second = on.then(default_revolve_second);
         }),
-        "revolve-mid-plane-checkbox" => change(&mut commands, "Mid plane", move |r| r.thin.mid_plane = on),
-        "revolve-merge-all-checkbox" => change(&mut commands, "Merge with all", move |r| r.merge_all = on),
+        "revolve-mid-plane-checkbox" => {
+            change(&mut commands, "Mid plane", move |r| r.thin.mid_plane = on)
+        }
+        "revolve-merge-all-checkbox" => {
+            change(&mut commands, "Merge with all", move |r| r.merge_all = on)
+        }
         _ => {}
     }
 }
@@ -728,11 +933,25 @@ fn on_number(
         return;
     };
     let text = ev.text.trim().to_string();
-    let angle = matches!(role, Role::Angle | Role::SecondAngle | Role::OffsetValue | Role::SecondOffsetValue);
-    let q = if angle { Quantity::Angle } else { Quantity::Length };
+    let angle = matches!(
+        role,
+        Role::Angle | Role::SecondAngle | Role::OffsetValue | Role::SecondOffsetValue
+    );
+    let q = if angle {
+        Quantity::Angle
+    } else {
+        Quantity::Length
+    };
     let parsed = vars.eval(&units.0, &text, q);
-    let zero_ok = matches!(role, Role::OffsetValue | Role::SecondOffsetValue | Role::Thickness2);
-    let max = if matches!(role, Role::Angle | Role::SecondAngle) { 360.0 } else { f64::INFINITY };
+    let zero_ok = matches!(
+        role,
+        Role::OffsetValue | Role::SecondOffsetValue | Role::Thickness2
+    );
+    let max = if matches!(role, Role::Angle | Role::SecondAngle) {
+        360.0
+    } else {
+        f64::INFINITY
+    };
     let v = match parsed {
         Ok(v) if v.is_finite() && (v > 0.0 || (zero_ok && v >= 0.0)) && v <= max + 1e-9 => v,
         _ => {
@@ -754,36 +973,54 @@ fn on_number(
     };
     let enter = ev.enter;
     let (label, f): (&'static str, Change) = match role {
-        Role::Angle => ("Revolve angle", Box::new(move |r| {
-            r.angle = v;
-            r.angle_expr = expr;
-        })),
-        Role::OffsetValue => ("Offset angle", Box::new(move |r| {
-            if let Some(o) = &mut r.offset {
-                o.value = v;
-                o.expr = expr;
-            }
-        })),
-        Role::SecondAngle => ("Second angle", Box::new(move |r| {
-            if let Some(s) = &mut r.second {
-                s.depth = v;
-                s.depth_expr = expr;
-            }
-        })),
-        Role::SecondOffsetValue => ("Offset angle", Box::new(move |r| {
-            if let Some(o) = r.second.as_mut().and_then(|s| s.offset.as_mut()) {
-                o.value = v;
-                o.expr = expr;
-            }
-        })),
-        Role::Thickness1 => ("Thickness 1", Box::new(move |r| {
-            r.thin.thickness1 = v;
-            r.thin.thickness1_expr = expr;
-        })),
-        Role::Thickness2 => ("Thickness 2", Box::new(move |r| {
-            r.thin.thickness2 = v;
-            r.thin.thickness2_expr = expr;
-        })),
+        Role::Angle => (
+            "Revolve angle",
+            Box::new(move |r| {
+                r.angle = v;
+                r.angle_expr = expr;
+            }),
+        ),
+        Role::OffsetValue => (
+            "Offset angle",
+            Box::new(move |r| {
+                if let Some(o) = &mut r.offset {
+                    o.value = v;
+                    o.expr = expr;
+                }
+            }),
+        ),
+        Role::SecondAngle => (
+            "Second angle",
+            Box::new(move |r| {
+                if let Some(s) = &mut r.second {
+                    s.depth = v;
+                    s.depth_expr = expr;
+                }
+            }),
+        ),
+        Role::SecondOffsetValue => (
+            "Offset angle",
+            Box::new(move |r| {
+                if let Some(o) = r.second.as_mut().and_then(|s| s.offset.as_mut()) {
+                    o.value = v;
+                    o.expr = expr;
+                }
+            }),
+        ),
+        Role::Thickness1 => (
+            "Thickness 1",
+            Box::new(move |r| {
+                r.thin.thickness1 = v;
+                r.thin.thickness1_expr = expr;
+            }),
+        ),
+        Role::Thickness2 => (
+            "Thickness 2",
+            Box::new(move |r| {
+                r.thin.thickness2 = v;
+                r.thin.thickness2_expr = expr;
+            }),
+        ),
         _ => return,
     };
     commands.queue(move |world: &mut World| {
@@ -805,10 +1042,16 @@ fn on_button(a: On<Activate>, q: Query<&Role>, mut commands: Commands) {
     match q.get(a.entity) {
         Ok(Role::AxisConnector) => commands.queue(|world: &mut World| {
             if let Some(mut s) = world.get_resource_mut::<ExtrudeSession>() {
-                s.field = if s.field == ExtrudeField::AxisConnector { ExtrudeField::Axis } else { ExtrudeField::AxisConnector };
+                s.field = if s.field == ExtrudeField::AxisConnector {
+                    ExtrudeField::Axis
+                } else {
+                    ExtrudeField::AxisConnector
+                };
             }
         }),
-        Ok(Role::Flip) | Ok(Role::SecondFlip) => change(&mut commands, "Flip direction", |r| r.flip = !r.flip),
+        Ok(Role::Flip) | Ok(Role::SecondFlip) => {
+            change(&mut commands, "Flip direction", |r| r.flip = !r.flip)
+        }
         Ok(Role::OffsetFlip) => change(&mut commands, "Flip offset", |r| {
             if let Some(o) = &mut r.offset {
                 o.flip = !o.flip;
@@ -819,7 +1062,9 @@ fn on_button(a: On<Activate>, q: Query<&Role>, mut commands: Commands) {
                 o.flip = !o.flip;
             }
         }),
-        Ok(Role::FlipWall) => change(&mut commands, "Flip wall", |r| r.thin.flip_wall = !r.thin.flip_wall),
+        Ok(Role::FlipWall) => change(&mut commands, "Flip wall", |r| {
+            r.thin.flip_wall = !r.thin.flip_wall
+        }),
         _ => {}
     }
 }
@@ -851,10 +1096,14 @@ fn on_list_remove(ev: On<SelectionListRemove>, q: Query<&Role>, mut commands: Co
                 };
                 let Some(mut r) = rparams(world) else { return };
                 if r.merge_scope.is_empty() {
-                    let auto = world.resource::<PartCache>().contacts.get(&s).map(|c| match r.op {
-                        BooleanOp::Add => c.touches.clone(),
-                        _ => c.overlaps.clone(),
-                    });
+                    let auto = world
+                        .resource::<PartCache>()
+                        .contacts
+                        .get(&s)
+                        .map(|c| match r.op {
+                            BooleanOp::Add => c.touches.clone(),
+                            _ => c.overlaps.clone(),
+                        });
                     r.merge_scope = auto.unwrap_or_default();
                 }
                 if i < r.merge_scope.len() {

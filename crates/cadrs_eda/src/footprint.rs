@@ -40,13 +40,24 @@ pub enum PadShape {
     /// A stadium: a rectangle with fully rounded ends.
     Oval,
     /// Corner radius = `ratio` × the smaller side (0 … 0.5).
-    RoundRect { ratio: f64 },
+    RoundRect {
+        ratio: f64,
+    },
     /// Opposite sides shortened by `delta` (x: top/bottom, y: left/right).
-    Trapezoid { delta: Size },
+    Trapezoid {
+        delta: Size,
+    },
     /// Corners cut by `ratio` × the smaller side, the rest optionally rounded.
-    Chamfered { ratio: f64, corners: Corners, round_ratio: f64 },
+    Chamfered {
+        ratio: f64,
+        corners: Corners,
+        round_ratio: f64,
+    },
     /// Free shapes on top of an anchor pad (circle or rect).
-    Custom { anchor_rect: bool, shapes: Vec<Shape> },
+    Custom {
+        anchor_rect: bool,
+        shapes: Vec<Shape>,
+    },
 }
 
 /// A pad's hole. Oval when `size.w != size.h`.
@@ -158,7 +169,16 @@ pub struct Model3d {
 impl Model3d {
     /// A model from a file `source`, as it sits by default.
     pub fn file(source: &str) -> Model3d {
-        Model3d { source: source.into(), blob: None, offset: [0.0; 3], rotation: [0.0; 3], scale: [1.0; 3], visible: true, opacity: 1.0, body: None }
+        Model3d {
+            source: source.into(),
+            blob: None,
+            offset: [0.0; 3],
+            rotation: [0.0; 3],
+            scale: [1.0; 3],
+            visible: true,
+            opacity: 1.0,
+            body: None,
+        }
     }
 }
 
@@ -226,22 +246,59 @@ impl Footprint {
 
 /// A text item on `layer` at `at`, `size` mm high with strokes `thickness` mm wide.
 pub fn fp_text(text: &str, at: Pt, layer: Layer, size: f64, thickness: f64) -> FpText {
-    let style = crate::graphics::TextStyle { size: Size::mm(size, size), thickness: Some(crate::units::mm(thickness)), ..Default::default() };
-    FpText { id: Uuid::new_v4(), text: Text { text: text.into(), at, angle: 0.0, style, visible: true }, layer, keep_upright: true }
+    let style = crate::graphics::TextStyle {
+        size: Size::mm(size, size),
+        thickness: Some(crate::units::mm(thickness)),
+        ..Default::default()
+    };
+    FpText {
+        id: Uuid::new_v4(),
+        text: Text {
+            text: text.into(),
+            at,
+            angle: 0.0,
+            style,
+            visible: true,
+        },
+        layer,
+        keep_upright: true,
+    }
 }
 
 /// An empty footprint `lib:name` with Reference on silkscreen at `ref_at`, Value on fab at
 /// `value_at`, and `${REFERENCE}` on fab at the body's centre.
-pub fn new_footprint(id: &str, description: &str, mount: MountKind, ref_at: Pt, value_at: Pt, center: Pt) -> Footprint {
+pub fn new_footprint(
+    id: &str,
+    description: &str,
+    mount: MountKind,
+    ref_at: Pt,
+    value_at: Pt,
+    center: Pt,
+) -> Footprint {
     Footprint {
         id: id.into(),
         description: description.into(),
         keywords: String::new(),
         fields: vec![
-            FpField { name: crate::symbol::fields::REFERENCE.into(), text: fp_text("REF**", ref_at, Layer::TopSilk, 1.0, 0.15) },
-            FpField { name: crate::symbol::fields::VALUE.into(), text: fp_text(id.rsplit(':').next().unwrap_or(id), value_at, Layer::TopFab, 1.0, 0.15) },
+            FpField {
+                name: crate::symbol::fields::REFERENCE.into(),
+                text: fp_text("REF**", ref_at, Layer::TopSilk, 1.0, 0.15),
+            },
+            FpField {
+                name: crate::symbol::fields::VALUE.into(),
+                text: fp_text(
+                    id.rsplit(':').next().unwrap_or(id),
+                    value_at,
+                    Layer::TopFab,
+                    1.0,
+                    0.15,
+                ),
+            },
         ],
-        attrs: FootprintAttrs { mount, ..Default::default() },
+        attrs: FootprintAttrs {
+            mount,
+            ..Default::default()
+        },
         pads: vec![],
         shapes: vec![],
         texts: vec![fp_text("${REFERENCE}", center, Layer::TopFab, 1.0, 0.15)],
@@ -253,8 +310,14 @@ pub fn new_footprint(id: &str, description: &str, mount: MountKind, ref_at: Pt, 
 /// A pad: plated through-hole when `drill` is set, else SMD on the top layers.
 pub fn new_pad(number: &str, shape: PadShape, at: Pt, size: Size, drill: Option<Nm>) -> Pad {
     let (kind, layers) = match drill {
-        Some(_) => (PadKind::ThroughHole, LayerSet::ALL_COPPER.union(LayerSet::of(&[Layer::TopMask, Layer::BottomMask]))),
-        None => (PadKind::Smd, LayerSet::of(&[Layer::TopCopper, Layer::TopMask, Layer::TopPaste])),
+        Some(_) => (
+            PadKind::ThroughHole,
+            LayerSet::ALL_COPPER.union(LayerSet::of(&[Layer::TopMask, Layer::BottomMask])),
+        ),
+        None => (
+            PadKind::Smd,
+            LayerSet::of(&[Layer::TopCopper, Layer::TopMask, Layer::TopPaste]),
+        ),
     };
     Pad {
         id: Uuid::new_v4(),
@@ -264,7 +327,10 @@ pub fn new_pad(number: &str, shape: PadShape, at: Pt, size: Size, drill: Option<
         at,
         angle: 0.0,
         size,
-        drill: drill.map(|d| Drill { size: Size::new(d, d), offset: Pt::ZERO }),
+        drill: drill.map(|d| Drill {
+            size: Size::new(d, d),
+            offset: Pt::ZERO,
+        }),
         layers,
         net: None,
         pin_function: String::new(),
@@ -285,7 +351,11 @@ pub struct FootprintPlacement {
 impl FootprintPlacement {
     /// Mirror (bottom side), then rotate, then move.
     pub fn apply(&self, p: Pt) -> Pt {
-        let p = if self.side == Side::Bottom { p.flip_y() } else { p };
+        let p = if self.side == Side::Bottom {
+            p.flip_y()
+        } else {
+            p
+        };
         self.at + p.rotated(self.angle)
     }
 
@@ -296,10 +366,18 @@ impl FootprintPlacement {
     }
 
     pub fn layer(&self, l: Layer) -> Layer {
-        if self.side == Side::Bottom { l.flipped() } else { l }
+        if self.side == Side::Bottom {
+            l.flipped()
+        } else {
+            l
+        }
     }
 
     pub fn layers(&self, s: LayerSet) -> LayerSet {
-        if self.side == Side::Bottom { s.flipped() } else { s }
+        if self.side == Side::Bottom {
+            s.flipped()
+        } else {
+            s
+        }
     }
 }

@@ -58,27 +58,66 @@ fn rect(x0: f64, y0: f64, x1: f64, y1: f64) -> SketchOp {
 /// Adds the bracket's features, its name and its material to the Part Studio `el`.
 pub fn build_in(s: &mut dyn Studio, el: ElementId) -> Result<(), CommandError> {
     let v = |x: f64, y: f64| Vec2::new(x * IN, y * IN);
-    s.run(&AddSketch { element: el, feature: SKETCH_1, plane: Some(PlaneRef::Top) })?;
-    s.run(&EditSketch { element: el, feature: SKETCH_1, op: rect(-HALF_WIDTH, 0.0, HALF_WIDTH, DEPTH) })?;
+    s.run(&AddSketch {
+        element: el,
+        feature: SKETCH_1,
+        plane: Some(PlaneRef::Top),
+    })?;
     s.run(&EditSketch {
         element: el,
         feature: SKETCH_1,
-        op: SketchOp::AddCircle { center: v(0.0, HOLE_Y), radius: HOLE_D / 2.0 * IN, construction: false },
+        op: rect(-HALF_WIDTH, 0.0, HALF_WIDTH, DEPTH),
+    })?;
+    s.run(&EditSketch {
+        element: el,
+        feature: SKETCH_1,
+        op: SketchOp::AddCircle {
+            center: v(0.0, HOLE_Y),
+            radius: HOLE_D / 2.0 * IN,
+            construction: false,
+        },
     })?;
     extrude(s, el, SKETCH_1, EXTRUDE_1, &[v(0.0, 0.5)], |e| {
         e.depth = BASE * IN;
         e.depth_expr = "0.5 in".into();
     })?;
-    s.run(&AddSketch { element: el, feature: SKETCH_2, plane: Some(PlaneRef::Top) })?;
-    s.run(&EditSketch { element: el, feature: SKETCH_2, op: rect(-HALF_WIDTH, UPRIGHT_Y, HALF_WIDTH, DEPTH) })?;
-    extrude(s, el, SKETCH_2, EXTRUDE_2, &[v(0.0, (UPRIGHT_Y + DEPTH) / 2.0)], |e| {
-        e.op = BooleanOp::Add;
-        e.depth = UPRIGHT_H * IN;
-        e.depth_expr = "3 in".into();
-        e.start_offset = Some(Offset { value: BASE * IN, expr: "0.5 in".into(), flip: false });
+    s.run(&AddSketch {
+        element: el,
+        feature: SKETCH_2,
+        plane: Some(PlaneRef::Top),
     })?;
-    s.run(&RenamePart { element: el, part: PART, name: PART_NAME.into() })?;
-    s.run(&SetPartMaterial { element: el, parts: vec![PART], material: crate::material::library("Aluminum - 6061") })?;
+    s.run(&EditSketch {
+        element: el,
+        feature: SKETCH_2,
+        op: rect(-HALF_WIDTH, UPRIGHT_Y, HALF_WIDTH, DEPTH),
+    })?;
+    extrude(
+        s,
+        el,
+        SKETCH_2,
+        EXTRUDE_2,
+        &[v(0.0, (UPRIGHT_Y + DEPTH) / 2.0)],
+        |e| {
+            e.op = BooleanOp::Add;
+            e.depth = UPRIGHT_H * IN;
+            e.depth_expr = "3 in".into();
+            e.start_offset = Some(Offset {
+                value: BASE * IN,
+                expr: "0.5 in".into(),
+                flip: false,
+            });
+        },
+    )?;
+    s.run(&RenamePart {
+        element: el,
+        part: PART,
+        name: PART_NAME.into(),
+    })?;
+    s.run(&SetPartMaterial {
+        element: el,
+        parts: vec![PART],
+        material: crate::material::library("Aluminum - 6061"),
+    })?;
     Ok(())
 }
 
@@ -99,12 +138,23 @@ fn extrude(
         .ok_or_else(|| CommandError::Invalid("sketch not found".into()))?;
     let regions = super::region_refs(sketch, &g, seeds);
     if regions.len() != seeds.len() {
-        return Err(CommandError::Invalid("a region of the stand-in is missing".into()));
+        return Err(CommandError::Invalid(
+            "a region of the stand-in is missing".into(),
+        ));
     }
     let mut e = super::extrude_of(regions, 25.0);
     set(&mut e);
-    s.run(&AddExtrude { element: el, feature, extrude: ExtrudeFeature::default() })?;
-    s.run(&SetExtrude { element: el, feature, extrude: e, label: "Extrude".into() })?;
+    s.run(&AddExtrude {
+        element: el,
+        feature,
+        extrude: ExtrudeFeature::default(),
+    })?;
+    s.run(&SetExtrude {
+        element: el,
+        feature,
+        extrude: e,
+        label: "Extrude".into(),
+    })?;
     Ok(())
 }
 

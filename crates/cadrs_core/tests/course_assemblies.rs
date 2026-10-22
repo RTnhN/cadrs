@@ -5,7 +5,9 @@
 
 use std::sync::Arc;
 
-use cadrs_core::assembly::commands::{DeleteInstances, InsertInstance, MoveInstances, SetInstancesFixed, SetInstancesHidden};
+use cadrs_core::assembly::commands::{
+    DeleteInstances, InsertInstance, MoveInstances, SetInstancesFixed, SetInstancesHidden,
+};
 use cadrs_core::assembly::{self, Instance, InstanceId, InstanceSource, Pose};
 use cadrs_core::commands::{AddElement, NewElementKind, SetExtrude};
 use cadrs_core::rebuild::Build;
@@ -19,7 +21,10 @@ const RHO: f64 = 2700.0e-9;
 
 fn close(what: &str, got: f64, want: f64, rel: f64) {
     let tol = rel * want.abs().max(1e-9);
-    assert!((got - want).abs() <= tol, "{what}: got {got}, want {want} (±{tol})");
+    assert!(
+        (got - want).abs() <= tol,
+        "{what}: got {got}, want {want} (±{tol})"
+    );
 }
 
 /// The fixture document with an assembly "Mount Assembly".
@@ -27,8 +32,16 @@ fn setup() -> (Document, History, ElementId) {
     let mut doc = mm::document().unwrap();
     let mut h = History::default();
     let asm = ElementId::from_u128(0x3b01_0000_0000_0000_0000_0000_0000_0201);
-    h.execute(&mut doc, &AddElement { id: asm, kind: NewElementKind::Assembly, name: Some("Mount Assembly".into()), after: None })
-        .unwrap();
+    h.execute(
+        &mut doc,
+        &AddElement {
+            id: asm,
+            kind: NewElementKind::Assembly,
+            name: Some("Mount Assembly".into()),
+            after: None,
+        },
+    )
+    .unwrap();
     (doc, h, asm)
 }
 
@@ -37,18 +50,30 @@ fn studio_build(doc: &Document) -> Arc<Build> {
 }
 
 fn source() -> InstanceSource {
-    InstanceSource::Part { element: mm::STUDIO, part: mm::PART }
+    InstanceSource::Part {
+        element: mm::STUDIO,
+        part: mm::PART,
+    }
 }
 
 fn insert(doc: &mut Document, h: &mut History, asm: ElementId, id: InstanceId, pose: Pose) {
-    h.execute(doc, &InsertInstance { element: asm, instance: Instance::new(id, source(), pose) }).unwrap();
+    h.execute(
+        doc,
+        &InsertInstance {
+            element: asm,
+            instance: Instance::new(id, source(), pose),
+        },
+    )
+    .unwrap();
 }
 
 fn parts_of(doc: &Document, asm: ElementId) -> (Vec<cadrs_core::Part>, Vec<cadrs_core::PartProps>) {
     let build = studio_build(doc);
-    assembly::instance_parts(doc, doc.element(asm).unwrap().assembly_model().unwrap(), |e| {
-        (e == mm::STUDIO).then(|| build.clone())
-    })
+    assembly::instance_parts(
+        doc,
+        doc.element(asm).unwrap().assembly_model().unwrap(),
+        |e| (e == mm::STUDIO).then(|| build.clone()),
+    )
 }
 
 /// The bracket's closed form, in inches (unit density): volume, centre of mass and the inertia
@@ -71,11 +96,22 @@ fn bracket_closed_form() -> (f64, [f64; 3], [[f64; 3]; 3]) {
     // (volume, centre, own inertia diagonal)
     let boxes = |a: f64, b: f64, c: f64| {
         let v = a * b * c;
-        (v, [v * (b * b + c * c) / 12.0, v * (a * a + c * c) / 12.0, v * (a * a + b * b) / 12.0])
+        (
+            v,
+            [
+                v * (b * b + c * c) / 12.0,
+                v * (a * a + c * c) / 12.0,
+                v * (a * a + b * b) / 12.0,
+            ],
+        )
     };
     let (v1, i1) = boxes(3.0, 3.0, 0.5);
     let (v2, i2) = boxes(3.0, 0.5, 3.0);
-    let ic = [hole * (3.0 * r * r + 0.25) / 12.0, hole * (3.0 * r * r + 0.25) / 12.0, hole * r * r / 2.0];
+    let ic = [
+        hole * (3.0 * r * r + 0.25) / 12.0,
+        hole * (3.0 * r * r + 0.25) / 12.0,
+        hole * r * r / 2.0,
+    ];
     let pieces = [
         (v1, [0.0, 1.5, 0.25], i1),
         (v2, [0.0, 2.75, 2.0], i2),
@@ -144,9 +180,28 @@ fn ex1_start_an_assembly_mass_properties() {
     // The triad's Z (the hole's axis, into the part) and X, as the instance carries them.
     let (z, x) = (pose.rotate([0.0, 0.0, 1.0]), pose.rotate([1.0, 0.0, 0.0]));
     let pose = assembly::aligned_with_z(&pose, [0.0; 3], z, x, true);
-    assert_eq!(pose.rotation, [[1.0, 0.0, 0.0], [0.0, -1.0, 0.0], [0.0, 0.0, -1.0]]);
-    h.execute(&mut doc, &MoveInstances { element: asm, poses: vec![(id, pose)], label: "Anti-align with Z".into() }).unwrap();
-    h.execute(&mut doc, &SetInstancesFixed { element: asm, instances: vec![id], fixed: true }).unwrap();
+    assert_eq!(
+        pose.rotation,
+        [[1.0, 0.0, 0.0], [0.0, -1.0, 0.0], [0.0, 0.0, -1.0]]
+    );
+    h.execute(
+        &mut doc,
+        &MoveInstances {
+            element: asm,
+            poses: vec![(id, pose)],
+            label: "Anti-align with Z".into(),
+        },
+    )
+    .unwrap();
+    h.execute(
+        &mut doc,
+        &SetInstancesFixed {
+            element: asm,
+            instances: vec![id],
+            fixed: true,
+        },
+    )
+    .unwrap();
 
     let (parts, props) = parts_of(&doc, asm);
     assert_eq!(parts[0].name, "DC Motor Mount (stand-in) <1>");
@@ -180,12 +235,31 @@ fn anti_align_about_the_triad_y_gives_the_mirror_y() {
     insert(&mut doc, &mut h, asm, id, Pose::IDENTITY);
     let pose = assembly::moved_to_origin(&Pose::IDENTITY, [0.0, mm::HOLE_Y * IN, 0.0]);
     let pose = assembly::aligned_with_z(&pose, [0.0; 3], [0.0, 0.0, 1.0], [0.0, 1.0, 0.0], true);
-    assert_eq!(pose.rotation, [[-1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, -1.0]]);
-    h.execute(&mut doc, &MoveInstances { element: asm, poses: vec![(id, pose)], label: "Anti-align with Z".into() }).unwrap();
+    assert_eq!(
+        pose.rotation,
+        [[-1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, -1.0]]
+    );
+    h.execute(
+        &mut doc,
+        &MoveInstances {
+            element: asm,
+            poses: vec![(id, pose)],
+            label: "Anti-align with Z".into(),
+        },
+    )
+    .unwrap();
     let (parts, props) = parts_of(&doc, asm);
-    let m = assembly::mass_report(&parts, &props, &[id]).unwrap().mass.unwrap();
+    let m = assembly::mass_report(&parts, &props, &[id])
+        .unwrap()
+        .mass
+        .unwrap();
     let (_, c, _) = bracket_closed_form();
-    close("CoM y (in)", m.center_of_mass.y / IN, c[1] - mm::HOLE_Y, 1e-4);
+    close(
+        "CoM y (in)",
+        m.center_of_mass.y / IN,
+        c[1] - mm::HOLE_Y,
+        1e-4,
+    );
     close("CoM z (in)", m.center_of_mass.z / IN, -c[2], 1e-4);
 }
 
@@ -194,13 +268,19 @@ fn placement_composition() {
     // Align with Z on an axis that is already +Z does nothing; a tilted axis turns onto Z about
     // the triad origin (which stays put).
     let p = Pose::translation([10.0, 20.0, 30.0]);
-    assert_eq!(assembly::aligned_with_z(&p, [1.0, 2.0, 3.0], [0.0, 0.0, 1.0], [1.0, 0.0, 0.0], false), p);
+    assert_eq!(
+        assembly::aligned_with_z(&p, [1.0, 2.0, 3.0], [0.0, 0.0, 1.0], [1.0, 0.0, 0.0], false),
+        p
+    );
     let at = [5.0, 5.0, 5.0];
     let q = assembly::aligned_with_z(&Pose::IDENTITY, at, [1.0, 0.0, 0.0], [0.0, 1.0, 0.0], false);
     let x = q.rotate([1.0, 0.0, 0.0]);
     assert!((x[2] - 1.0).abs() < 1e-12 && x[0].abs() < 1e-12, "{x:?}");
     let o = q.apply(at);
-    assert!((0..3).all(|i| (o[i] - at[i]).abs() < 1e-9), "the triad origin moved: {o:?}");
+    assert!(
+        (0..3).all(|i| (o[i] - at[i]).abs() < 1e-9),
+        "the triad origin moved: {o:?}"
+    );
     // Rotate 90° twice is 180°; four times is the identity.
     let r90 = |p: &Pose| assembly::rotated(p, at, [0.0, 0.0, 1.0], std::f64::consts::FRAC_PI_2);
     let twice = r90(&r90(&Pose::IDENTITY));
@@ -218,14 +298,34 @@ fn placement_composition() {
 #[test]
 fn undo_removes_inserts_one_by_one() {
     let (mut doc, mut h, asm) = setup();
-    let ids = [InstanceId::from_u128(1), InstanceId::from_u128(2), InstanceId::from_u128(3)];
+    let ids = [
+        InstanceId::from_u128(1),
+        InstanceId::from_u128(2),
+        InstanceId::from_u128(3),
+    ];
     for (k, id) in ids.iter().enumerate() {
-        insert(&mut doc, &mut h, asm, *id, Pose::translation([k as f64 * 100.0, 0.0, 0.0]));
+        insert(
+            &mut doc,
+            &mut h,
+            asm,
+            *id,
+            Pose::translation([k as f64 * 100.0, 0.0, 0.0]),
+        );
     }
-    let names = |doc: &Document| -> Vec<String> { parts_of(doc, asm).0.iter().map(|p| p.name.clone()).collect() };
+    let names = |doc: &Document| -> Vec<String> {
+        parts_of(doc, asm)
+            .0
+            .iter()
+            .map(|p| p.name.clone())
+            .collect()
+    };
     assert_eq!(
         names(&doc),
-        ["DC Motor Mount (stand-in) <1>", "DC Motor Mount (stand-in) <2>", "DC Motor Mount (stand-in) <3>"]
+        [
+            "DC Motor Mount (stand-in) <1>",
+            "DC Motor Mount (stand-in) <2>",
+            "DC Motor Mount (stand-in) <3>"
+        ]
     );
     for left in [2, 1, 0] {
         h.undo(&mut doc).unwrap();
@@ -234,9 +334,24 @@ fn undo_removes_inserts_one_by_one() {
     h.redo(&mut doc).unwrap();
     assert_eq!(names(&doc), ["DC Motor Mount (stand-in) <1>"]);
     // Hide, show, delete: each one step.
-    h.execute(&mut doc, &SetInstancesHidden { element: asm, instances: vec![ids[0]], hidden: true }).unwrap();
+    h.execute(
+        &mut doc,
+        &SetInstancesHidden {
+            element: asm,
+            instances: vec![ids[0]],
+            hidden: true,
+        },
+    )
+    .unwrap();
     assert!(parts_of(&doc, asm).1[0].hidden);
-    h.execute(&mut doc, &DeleteInstances { element: asm, instances: vec![ids[0]] }).unwrap();
+    h.execute(
+        &mut doc,
+        &DeleteInstances {
+            element: asm,
+            instances: vec![ids[0]],
+        },
+    )
+    .unwrap();
     assert!(doc.element(asm).unwrap().assembly.is_empty());
     h.undo(&mut doc).unwrap();
     h.undo(&mut doc).unwrap();
@@ -249,18 +364,44 @@ fn a_studio_edit_updates_the_instances() {
     // 3 × 0.5 × 1 in³.
     let (mut doc, mut h, asm) = setup();
     let id = InstanceId::from_u128(7);
-    insert(&mut doc, &mut h, asm, id, Pose::translation([0.0, 0.0, 50.0]));
+    insert(
+        &mut doc,
+        &mut h,
+        asm,
+        id,
+        Pose::translation([0.0, 0.0, 50.0]),
+    );
     let v0 = parts_of(&doc, asm).0[0].mass.unwrap().volume;
-    let mut e = doc.element(mm::STUDIO).unwrap().feature(mm::EXTRUDE_2).unwrap().extrude().unwrap().clone();
+    let mut e = doc
+        .element(mm::STUDIO)
+        .unwrap()
+        .feature(mm::EXTRUDE_2)
+        .unwrap()
+        .extrude()
+        .unwrap()
+        .clone();
     e.depth = 2.0 * IN;
     e.depth_expr = "2 in".into();
-    h.execute(&mut doc, &SetExtrude { element: mm::STUDIO, feature: mm::EXTRUDE_2, extrude: e, label: "Extrude".into() })
-        .unwrap();
+    h.execute(
+        &mut doc,
+        &SetExtrude {
+            element: mm::STUDIO,
+            feature: mm::EXTRUDE_2,
+            extrude: e,
+            label: "Extrude".into(),
+        },
+    )
+    .unwrap();
     let (parts, _) = parts_of(&doc, asm);
     let v1 = parts[0].mass.unwrap().volume;
     close("volume change (in³)", (v0 - v1) / IN.powi(3), 1.5, 1e-4);
     // The mesh moved with the instance: its lowest point is at z = 50 mm.
-    let zmin = parts[0].solid.positions.iter().map(|p| p[2]).fold(f64::MAX, f64::min);
+    let zmin = parts[0]
+        .solid
+        .positions
+        .iter()
+        .map(|p| p[2])
+        .fold(f64::MAX, f64::min);
     close("lowest z", zmin, 50.0, 1e-9);
 }
 
@@ -270,22 +411,42 @@ fn the_fixture_is_current() {
     // it. Regenerate it with `CADRS_WRITE_FIXTURES=1 cargo test -p cadrs_core --test
     // course_assemblies`.
     let doc = mm::document().unwrap();
-    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../fixtures/motor_mount_standin.cadrs");
+    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../fixtures/motor_mount_standin.cadrs");
     let file = mm::file(doc.clone());
     let text = ron::ser::to_string_pretty(&file, ron::ser::PrettyConfig::default()).unwrap();
     if std::env::var("CADRS_WRITE_FIXTURES").is_ok() {
         std::fs::write(&path, &text).unwrap();
     }
     let stored = cadrs_core::Store::load_path(&path).expect("the fixture loads");
-    assert_eq!(stored.document, doc, "fixtures/motor_mount_standin.cadrs is out of date");
+    assert_eq!(
+        stored.document, doc,
+        "fixtures/motor_mount_standin.cadrs is out of date"
+    );
 }
 
 #[test]
 fn assemblies_round_trip_through_the_store_format() {
     let (mut doc, mut h, asm) = setup();
-    insert(&mut doc, &mut h, asm, InstanceId::from_u128(9), Pose::rotation_about([1.0, 2.0, 3.0], [0.0, 1.0, 0.0], 0.5));
-    h.execute(&mut doc, &SetInstancesFixed { element: asm, instances: vec![InstanceId::from_u128(9)], fixed: true }).unwrap();
-    let text = ron::ser::to_string_pretty(&mm::file(doc.clone()), ron::ser::PrettyConfig::default()).unwrap();
+    insert(
+        &mut doc,
+        &mut h,
+        asm,
+        InstanceId::from_u128(9),
+        Pose::rotation_about([1.0, 2.0, 3.0], [0.0, 1.0, 0.0], 0.5),
+    );
+    h.execute(
+        &mut doc,
+        &SetInstancesFixed {
+            element: asm,
+            instances: vec![InstanceId::from_u128(9)],
+            fixed: true,
+        },
+    )
+    .unwrap();
+    let text =
+        ron::ser::to_string_pretty(&mm::file(doc.clone()), ron::ser::PrettyConfig::default())
+            .unwrap();
     let back: cadrs_core::DocumentFile = ron::from_str(&text).unwrap();
     assert_eq!(back.document, doc);
 }
@@ -335,14 +496,25 @@ mod ex4 {
             let (dy, dz) = (p[1] + 0.5, p[2] - 23.0);
             [p[0], -0.5 + dy * c - dz * s, 23.0 + dy * s + dz * c]
         };
-        let all: Vec<(f64, [f64; 3])> = fixed.into_iter().chain(moving.into_iter().map(|(v, p)| (v, turn(p)))).collect();
+        let all: Vec<(f64, [f64; 3])> = fixed
+            .into_iter()
+            .chain(moving.into_iter().map(|(v, p)| (v, turn(p))))
+            .collect();
         let v: f64 = all.iter().map(|x| x.0).sum();
         let com = [0, 1, 2].map(|k| all.iter().map(|x| x.0 * x.1[k]).sum::<f64>() / v);
         (v, com)
     }
 
     fn builds(doc: &Document) -> HashMap<ElementId, Arc<cadrs_core::rebuild::Build>> {
-        [ss::LARGE_STUDIO, ss::BASE_STUDIO].into_iter().map(|e| (e, cadrs_core::rebuild::build(doc.element(e).unwrap().features()))).collect()
+        [ss::LARGE_STUDIO, ss::BASE_STUDIO]
+            .into_iter()
+            .map(|e| {
+                (
+                    e,
+                    cadrs_core::rebuild::build(doc.element(e).unwrap().features()),
+                )
+            })
+            .collect()
     }
 
     /// The whole assembly's mass (g), volume (in³) and CoM (in).
@@ -354,7 +526,11 @@ mod ex4 {
         let r = assembly::mass_report(&parts, &props, &ids).unwrap();
         let m = r.mass.unwrap();
         let c = m.center_of_mass;
-        (m.mass * G, r.volume / IN.powi(3), [c.x / IN, c.y / IN, c.z / IN])
+        (
+            m.mass * G,
+            r.volume / IN.powi(3),
+            [c.x / IN, c.y / IN, c.z / IN],
+        )
     }
 
     #[test]
@@ -384,15 +560,44 @@ mod ex4 {
         close("CoM y", c[1], c0[1], 1e-4);
         close("CoM z", c[2], c0[2], 1e-4);
         // The panel's rounding (3 decimals): 18 131.792 g, (0, −0.033, 11.642) in.
-        assert_eq!(format!("{mass:.3} {:.3} {:.3}", c[1], c[2]), "18131.792 -0.033 11.642");
+        assert_eq!(
+            format!("{mass:.3} {:.3} {:.3}", c[1], c[2]),
+            "18131.792 -0.033 11.642"
+        );
         // Apply limit position: the hinge at −42.5°.
         let solids = ss::solids(&doc);
-        let model = doc.element(ss::ASSEMBLY).unwrap().assembly_model().unwrap().clone();
-        let drive = Drive { mate: ss::HINGE, dof: Dof::Angle, value: ss::OPEN_ANGLE.to_radians() };
-        let sol = assembly::solve(&model, &solids, &SolveOptions { movers: vec![ss::BASE], snap: Some(ss::HINGE), drives: vec![drive], ..Default::default() });
+        let model = doc
+            .element(ss::ASSEMBLY)
+            .unwrap()
+            .assembly_model()
+            .unwrap()
+            .clone();
+        let drive = Drive {
+            mate: ss::HINGE,
+            dof: Dof::Angle,
+            value: ss::OPEN_ANGLE.to_radians(),
+        };
+        let sol = assembly::solve(
+            &model,
+            &solids,
+            &SolveOptions {
+                movers: vec![ss::BASE],
+                snap: Some(ss::HINGE),
+                drives: vec![drive],
+                ..Default::default()
+            },
+        );
         assert!(sol.converged, "{}", sol.residual);
         let poses = sol.changed(&model);
-        h.execute(&mut doc, &cadrs_core::assembly::commands::MoveInstances { element: ss::ASSEMBLY, poses, label: "Apply limit".into() }).unwrap();
+        h.execute(
+            &mut doc,
+            &cadrs_core::assembly::commands::MoveInstances {
+                element: ss::ASSEMBLY,
+                poses,
+                label: "Apply limit".into(),
+            },
+        )
+        .unwrap();
         let (mass1, _, c) = report(&doc);
         let (_, c1) = closed_form(ss::OPEN_ANGLE);
         close("mass open", mass1, mass, 1e-9);
@@ -406,15 +611,25 @@ mod ex4 {
     fn the_step_stool_fixture_is_current() {
         // Regenerate with `CADRS_WRITE_FIXTURES=1 cargo test -p cadrs_core --test course_assemblies`.
         let doc = ss::document().unwrap();
-        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../fixtures/step_stool_standin.cadrs");
-        let text = ron::ser::to_string_pretty(&ss::file(doc.clone()), ron::ser::PrettyConfig::default()).unwrap();
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../fixtures/step_stool_standin.cadrs");
+        let text =
+            ron::ser::to_string_pretty(&ss::file(doc.clone()), ron::ser::PrettyConfig::default())
+                .unwrap();
         if std::env::var("CADRS_WRITE_FIXTURES").is_ok() {
             std::fs::write(&path, &text).unwrap();
         }
         let b = builds(&doc);
-        assert_eq!(b[&ss::BASE_STUDIO].parts.len(), 3, "Base Frame Bar, Cross Bar, Back Foot");
+        assert_eq!(
+            b[&ss::BASE_STUDIO].parts.len(),
+            3,
+            "Base Frame Bar, Cross Bar, Back Foot"
+        );
         assert_eq!(b[&ss::LARGE_STUDIO].parts.len(), 1);
         let stored = cadrs_core::Store::load_path(&path).expect("the fixture loads");
-        assert_eq!(stored.document, doc, "fixtures/step_stool_standin.cadrs is out of date");
+        assert_eq!(
+            stored.document, doc,
+            "fixtures/step_stool_standin.cadrs is out of date"
+        );
     }
 }

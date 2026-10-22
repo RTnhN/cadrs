@@ -15,18 +15,34 @@ use uuid::Uuid;
 
 /// An 0805 resistor at `at` (degrees `angle`) with its pads on `nets`.
 fn part(lib: &LibraryTable, at: Pt, angle: f64, nets: [&str; 2]) -> PlacedFootprint {
-    let mut fp = lib.footprint("Resistor_SMD:R_0805_2012Metric").expect("0805").clone();
+    let mut fp = lib
+        .footprint("Resistor_SMD:R_0805_2012Metric")
+        .expect("0805")
+        .clone();
     for p in &mut fp.pads {
         p.net = Some(nets[usize::from(p.number == "2")].to_string());
     }
-    PlacedFootprint { id: Uuid::new_v4(), footprint: fp, placement: FootprintPlacement { at, angle, side: Default::default() }, locked: false, symbol: None }
+    PlacedFootprint {
+        id: Uuid::new_v4(),
+        footprint: fp,
+        placement: FootprintPlacement {
+            at,
+            angle,
+            side: Default::default(),
+        },
+        locked: false,
+        symbol: None,
+    }
 }
 
 /// A `w` × `h` mm board holding `parts`.
 fn board(w: f64, h: f64, parts: Vec<PlacedFootprint>) -> Board {
     let mut b = Board::default();
     cadrs_eda::outline::add_rect(&mut b, Pt::mm(0.0, 0.0), Pt::mm(w, h));
-    let mut nets: Vec<String> = parts.iter().flat_map(|f| f.footprint.pads.iter().filter_map(|p| p.net.clone())).collect();
+    let mut nets: Vec<String> = parts
+        .iter()
+        .flat_map(|f| f.footprint.pads.iter().filter_map(|p| p.net.clone()))
+        .collect();
     nets.sort();
     nets.dedup();
     b.nets = nets;
@@ -35,20 +51,38 @@ fn board(w: f64, h: f64, parts: Vec<PlacedFootprint>) -> Board {
 }
 
 fn cpu() -> Options {
-    Options { backend: Backend::Cpu, ..Default::default() }
+    Options {
+        backend: Backend::Cpu,
+        ..Default::default()
+    }
 }
 
 /// The copper rules a route could break.
 fn copper_errors(b: &Board) -> Vec<drc::Violation> {
-    let rules = [Rule::Clearance, Rule::HoleClearance, Rule::EdgeClearance, Rule::KeepoutViolation, Rule::HoleToHole];
-    drc::check(b).violations.into_iter().filter(|v| rules.contains(&v.rule)).collect()
+    let rules = [
+        Rule::Clearance,
+        Rule::HoleClearance,
+        Rule::EdgeClearance,
+        Rule::KeepoutViolation,
+        Rule::HoleToHole,
+    ];
+    drc::check(b)
+        .violations
+        .into_iter()
+        .filter(|v| rules.contains(&v.rule))
+        .collect()
 }
 
 /// Routes `b` and checks it: every net connected, no copper rule broken.
 fn routed(mut b: Board, opts: &Options) -> (Board, cadrs_router::Outcome) {
     let out = route(&b, opts);
     apply(&mut b, &out);
-    assert!(out.unrouted.is_empty(), "unrouted {:?} (conflicts {:?})", out.unrouted, out.conflicts);
+    assert!(
+        out.unrouted.is_empty(),
+        "unrouted {:?} (conflicts {:?})",
+        out.unrouted,
+        out.conflicts
+    );
     assert_eq!(cadrs_eda::copper::ratsnest(&b), vec![], "still unconnected");
     let errors = copper_errors(&b);
     assert!(errors.is_empty(), "{errors:#?}");
@@ -58,7 +92,14 @@ fn routed(mut b: Board, opts: &Options) -> (Board, cadrs_router::Outcome) {
 #[test]
 fn two_pads_are_joined() {
     let lib = LibraryTable::builtin();
-    let b = board(30.0, 20.0, vec![part(&lib, Pt::mm(8.0, 10.0), 0.0, ["A", "B"]), part(&lib, Pt::mm(22.0, 10.0), 0.0, ["A", "C"])]);
+    let b = board(
+        30.0,
+        20.0,
+        vec![
+            part(&lib, Pt::mm(8.0, 10.0), 0.0, ["A", "B"]),
+            part(&lib, Pt::mm(22.0, 10.0), 0.0, ["A", "C"]),
+        ],
+    );
     let (b, out) = routed(b, &cpu());
     assert!(!out.tracks.is_empty());
     assert!(b.tracks.iter().all(|t| t.net == "A"));
@@ -74,14 +115,23 @@ fn keepout(ring: Vec<Pt>, layers: &[Layer]) -> Zone {
         priority: 0,
         outline: vec![ring],
         fill: ZoneFill::default(),
-        keepout: Some(Keepout { tracks: true, vias: true, ..Default::default() }),
+        keepout: Some(Keepout {
+            tracks: true,
+            vias: true,
+            ..Default::default()
+        }),
         locked: false,
         filled: vec![],
     }
 }
 
 fn rect(x0: f64, y0: f64, x1: f64, y1: f64) -> Vec<Pt> {
-    vec![Pt::mm(x0, y0), Pt::mm(x1, y0), Pt::mm(x1, y1), Pt::mm(x0, y1)]
+    vec![
+        Pt::mm(x0, y0),
+        Pt::mm(x1, y0),
+        Pt::mm(x1, y1),
+        Pt::mm(x0, y1),
+    ]
 }
 
 #[test]
@@ -112,26 +162,54 @@ fn crossing_nets_meet_through_vias_and_cannot_on_one_layer() {
         b.zones.push(keepout(rect(36.0, 13.5, 41.0, 16.5), &both));
         b
     };
-    let (_, out) = routed(make(), &Options { directions: Directions::Alternate, ..cpu() });
-    assert!(!out.vias.is_empty(), "two crossing nets on two layers need a via");
+    let (_, out) = routed(
+        make(),
+        &Options {
+            directions: Directions::Alternate,
+            ..cpu()
+        },
+    );
+    assert!(
+        !out.vias.is_empty(),
+        "two crossing nets on two layers need a via"
+    );
     // One layer: a track keep-out over all of the bottom copper.
     let mut b = make();
-    b.zones.push(keepout(rect(-1.0, -1.0, 41.0, 31.0), &[Layer::BottomCopper]));
+    b.zones.push(keepout(
+        rect(-1.0, -1.0, 41.0, 31.0),
+        &[Layer::BottomCopper],
+    ));
     let out = route(&b, &cpu());
     assert!(out.vias.is_empty() && out.tracks.iter().all(|t| t.layer == Layer::TopCopper));
-    assert!(!out.unrouted.is_empty(), "two crossing nets on one layer can't both be routed: {out:?}");
+    assert!(
+        !out.unrouted.is_empty(),
+        "two crossing nets on one layer can't both be routed: {out:?}"
+    );
 }
 
 #[test]
 fn a_keepout_is_routed_round() {
     let lib = LibraryTable::builtin();
-    let mut b = board(40.0, 30.0, vec![part(&lib, Pt::mm(5.0, 15.0), 0.0, ["A", "B"]), part(&lib, Pt::mm(35.0, 15.0), 0.0, ["A", "C"])]);
+    let mut b = board(
+        40.0,
+        30.0,
+        vec![
+            part(&lib, Pt::mm(5.0, 15.0), 0.0, ["A", "B"]),
+            part(&lib, Pt::mm(35.0, 15.0), 0.0, ["A", "C"]),
+        ],
+    );
     // Across the straight way, on both layers, tracks and vias.
-    b.zones.push(keepout(rect(15.0, 5.0, 25.0, 25.0), &[Layer::TopCopper, Layer::BottomCopper]));
+    b.zones.push(keepout(
+        rect(15.0, 5.0, 25.0, 25.0),
+        &[Layer::TopCopper, Layer::BottomCopper],
+    ));
     let (b, _) = routed(b, &cpu());
     for t in &b.tracks {
         for p in [t.a, t.b] {
-            assert!(!(p.x > mm(15.0) && p.x < mm(25.0) && p.y > mm(5.0) && p.y < mm(25.0)), "{t:?} inside the keep-out");
+            assert!(
+                !(p.x > mm(15.0) && p.x < mm(25.0) && p.y > mm(5.0) && p.y < mm(25.0)),
+                "{t:?} inside the keep-out"
+            );
         }
     }
 }
@@ -144,8 +222,18 @@ fn columnar_connectors_joined_pad_for_pad() {
     let mut parts = vec![];
     for k in 0..6 {
         let x = 6.0 + 4.0 * k as f64;
-        parts.push(part(&lib, Pt::mm(x, 6.0), 90.0, [&format!("N{k}a"), &format!("N{k}b")]));
-        parts.push(part(&lib, Pt::mm(x + 2.0, 24.0), 90.0, [&format!("N{k}b"), &format!("N{k}a")]));
+        parts.push(part(
+            &lib,
+            Pt::mm(x, 6.0),
+            90.0,
+            [&format!("N{k}a"), &format!("N{k}b")],
+        ));
+        parts.push(part(
+            &lib,
+            Pt::mm(x + 2.0, 24.0),
+            90.0,
+            [&format!("N{k}b"), &format!("N{k}a")],
+        ));
     }
     let (_, out) = routed(board(34.0, 30.0, parts), &cpu());
     assert!(out.conflicts.is_empty());
@@ -158,13 +246,27 @@ fn the_same_board_routes_the_same_every_time() {
     let parts = || {
         let mut v = vec![];
         for k in 0..4 {
-            v.push(part(&lib, Pt::mm(5.0 + 6.0 * k as f64, 5.0), 0.0, [&format!("N{k}"), "GND"]));
-            v.push(part(&lib, Pt::mm(23.0 - 6.0 * k as f64, 20.0), 0.0, [&format!("N{k}"), "GND"]));
+            v.push(part(
+                &lib,
+                Pt::mm(5.0 + 6.0 * k as f64, 5.0),
+                0.0,
+                [&format!("N{k}"), "GND"],
+            ));
+            v.push(part(
+                &lib,
+                Pt::mm(23.0 - 6.0 * k as f64, 20.0),
+                0.0,
+                [&format!("N{k}"), "GND"],
+            ));
         }
         v
     };
     let key = |o: &cadrs_router::Outcome| {
-        let mut t: Vec<_> = o.tracks.iter().map(|t| (t.net.clone(), t.layer, t.a, t.b)).collect();
+        let mut t: Vec<_> = o
+            .tracks
+            .iter()
+            .map(|t| (t.net.clone(), t.layer, t.a, t.b))
+            .collect();
         t.sort_by(|a, b| format!("{a:?}").cmp(&format!("{b:?}")));
         let mut v: Vec<_> = o.vias.iter().map(|v| (v.net.clone(), v.at)).collect();
         v.sort_by(|a, b| format!("{a:?}").cmp(&format!("{b:?}")));
@@ -181,7 +283,10 @@ fn the_same_board_routes_the_same_every_time() {
 fn the_getting_started_board_routes_clean() {
     let lib = LibraryTable::builtin();
     let d = cadrs_eda::getting_started::gs16(&lib);
-    assert!(!cadrs_eda::copper::ratsnest(&d.board).is_empty(), "the course board starts unrouted");
+    assert!(
+        !cadrs_eda::copper::ratsnest(&d.board).is_empty(),
+        "the course board starts unrouted"
+    );
     routed(d.board, &cpu());
 }
 
@@ -204,10 +309,24 @@ fn the_gpu_routes_as_the_cpu_does() {
     let d = cadrs_eda::getting_started::gs16(&lib);
     let t = std::time::Instant::now();
     let cpu_out = route(&d.board, &cpu());
-    eprintln!("cpu: {:.3} s, {} passes", t.elapsed().as_secs_f64(), cpu_out.passes);
+    eprintln!(
+        "cpu: {:.3} s, {} passes",
+        t.elapsed().as_secs_f64(),
+        cpu_out.passes
+    );
     let t = std::time::Instant::now();
-    let (_, out) = routed(d.board.clone(), &Options { backend: Backend::Gpu, ..Default::default() });
-    eprintln!("gpu: {:.3} s, {} passes", t.elapsed().as_secs_f64(), out.passes);
+    let (_, out) = routed(
+        d.board.clone(),
+        &Options {
+            backend: Backend::Gpu,
+            ..Default::default()
+        },
+    );
+    eprintln!(
+        "gpu: {:.3} s, {} passes",
+        t.elapsed().as_secs_f64(),
+        out.passes
+    );
     assert!(out.gpu.is_some());
 }
 
@@ -216,8 +335,15 @@ fn the_gpu_routes_as_the_cpu_does() {
 #[test]
 #[ignore = "needs CADRS_ROUTER_BOARDS: a folder of .kicad_pcb files"]
 fn real_boards() {
-    let Some(dir) = std::env::var_os("CADRS_ROUTER_BOARDS") else { return };
-    let mut paths: Vec<_> = std::fs::read_dir(dir).unwrap().flatten().map(|e| e.path()).filter(|p| p.extension().is_some_and(|e| e == "kicad_pcb")).collect();
+    let Some(dir) = std::env::var_os("CADRS_ROUTER_BOARDS") else {
+        return;
+    };
+    let mut paths: Vec<_> = std::fs::read_dir(dir)
+        .unwrap()
+        .flatten()
+        .map(|e| e.path())
+        .filter(|p| p.extension().is_some_and(|e| e == "kicad_pcb"))
+        .collect();
     paths.sort();
     for path in paths {
         let text = std::fs::read_to_string(&path).unwrap();
@@ -232,12 +358,27 @@ fn real_boards() {
         // The board's own errors (pads too near the edge or each other) are not the router's.
         let had = copper_errors(&b).len();
         let t = std::time::Instant::now();
-        let out = route(&b, &Options { backend: std::env::var("CADRS_ROUTER_BACKEND").map_or(Backend::Auto, |v| if v == "cpu" { Backend::Cpu } else { Backend::Gpu }), ..Default::default() });
+        let out = route(
+            &b,
+            &Options {
+                backend: std::env::var("CADRS_ROUTER_BACKEND").map_or(Backend::Auto, |v| {
+                    if v == "cpu" {
+                        Backend::Cpu
+                    } else {
+                        Backend::Gpu
+                    }
+                }),
+                ..Default::default()
+            },
+        );
         let took = t.elapsed();
         apply(&mut b, &out);
         let after = cadrs_eda::copper::ratsnest(&b).len();
         if std::env::var_os("CADRS_ROUTER_TRACE").is_some() {
-            eprintln!("  unrouted {:?}, in conflict {:?}", out.unrouted, out.conflicts);
+            eprintln!(
+                "  unrouted {:?}, in conflict {:?}",
+                out.unrouted, out.conflicts
+            );
         }
         let found = copper_errors(&b);
         if std::env::var_os("CADRS_ROUTER_TRACE").is_some() {

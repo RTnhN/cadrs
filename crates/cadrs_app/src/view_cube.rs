@@ -19,9 +19,9 @@ use bevy::text::FontWeight;
 use bevy::ui_widgets::Activate;
 use cadrs_ui::Theme;
 
+use crate::AppState;
 use crate::camera::{StandardView, ViewState, ray_square};
 use crate::viewport::ViewportView;
-use crate::AppState;
 
 pub struct ViewCubePlugin;
 
@@ -220,7 +220,10 @@ pub fn face_label_alpha(facing: f32) -> f32 {
 fn fade_face_labels(
     view: Res<ViewportView>,
     repair: Option<Res<crate::repair::Repair>>,
-    (sm, panel): (Option<Res<crate::sheetmetal_table::SmTable>>, Option<Res<crate::appearance::SidePanel>>),
+    (sm, panel): (
+        Option<Res<crate::sheetmetal_table::SmTable>>,
+        Option<Res<crate::appearance::SidePanel>>,
+    ),
     q: Query<(&FaceLabel, &MeshMaterial3d<StandardMaterial>)>,
     mut materials: ResMut<Assets<StandardMaterial>>,
 ) {
@@ -228,7 +231,11 @@ fn fade_face_labels(
     // P3D.4: the Repair panel's cube shares the faces; a label it faces shows too (a face
     // turned away from the main view is hidden there by the cube itself). So does the Sheet
     // metal table's flat view cube (its Top stays labelled when the main view looks from below).
-    let mut others: Vec<Vec3> = repair.filter(|r| r.open).map(|r| r.view.back()).into_iter().collect();
+    let mut others: Vec<Vec3> = repair
+        .filter(|r| r.open)
+        .map(|r| r.view.back())
+        .into_iter()
+        .collect();
     if panel.is_some_and(|p| *p == crate::appearance::SidePanel::SheetMetal)
         && let Some(t) = sm
     {
@@ -272,12 +279,7 @@ fn setup_cube(
     theme: Res<Theme>,
 ) {
     let size = (CUBE_WIDGET * CUBE_SUPERSAMPLE).as_uvec2();
-    let mut image = Image::new_target_texture(
-        size.x,
-        size.y,
-        TextureFormat::Rgba8UnormSrgb,
-        None,
-    );
+    let mut image = Image::new_target_texture(size.x, size.y, TextureFormat::Rgba8UnormSrgb, None);
     image.asset_usage = RenderAssetUsages::default();
     let handle = images.add(image);
     commands.insert_resource(ViewCubeImage(handle.clone()));
@@ -437,7 +439,12 @@ fn setup_cube(
                 let cf = c.as_vec3();
                 commands
                     .spawn((
-                        Name::new(format!("view-cube-corner-{}{}{}", sign(x), sign(y), sign(z))),
+                        Name::new(format!(
+                            "view-cube-corner-{}{}{}",
+                            sign(x),
+                            sign(y),
+                            sign(z)
+                        )),
                         CornerPatch(c),
                         Transform::default(),
                         Visibility::Hidden,
@@ -451,7 +458,9 @@ fn setup_cube(
                             }
                             let (u, v) = face.frame();
                             let rot = Quat::from_mat3(&Mat3::from_cols(u, v, n));
-                            let at = n * 1.012 + u * (u.dot(cf) * (1.0 - CORNER_SIZE / 2.0)) + v * (v.dot(cf) * (1.0 - CORNER_SIZE / 2.0));
+                            let at = n * 1.012
+                                + u * (u.dot(cf) * (1.0 - CORNER_SIZE / 2.0))
+                                + v * (v.dot(cf) * (1.0 - CORNER_SIZE / 2.0));
                             p.spawn((
                                 Mesh3d(patch.clone()),
                                 MeshMaterial3d(hover_mat.clone()),
@@ -567,7 +576,14 @@ pub fn spawn_view_cube(p: &mut ChildSpawnerCommands, theme: &Theme, image: Handl
         }
         let arrow = theme.view_cube_arrow();
         for (name, icon_name, left, top, yaw, pitch) in [
-            ("view-cube-up", "caret-up-filled", CUBE_CENTER.x - 8.0, 10.0, 0.0, -15.0),
+            (
+                "view-cube-up",
+                "caret-up-filled",
+                CUBE_CENTER.x - 8.0,
+                10.0,
+                0.0,
+                -15.0,
+            ),
             (
                 "view-cube-down",
                 "caret-down-filled",
@@ -576,7 +592,14 @@ pub fn spawn_view_cube(p: &mut ChildSpawnerCommands, theme: &Theme, image: Handl
                 0.0,
                 15.0,
             ),
-            ("view-cube-left", "caret-left-filled", 14.0, CUBE_CENTER.y - 8.0, -15.0, 0.0),
+            (
+                "view-cube-left",
+                "caret-left-filled",
+                14.0,
+                CUBE_CENTER.y - 8.0,
+                -15.0,
+                0.0,
+            ),
             (
                 "view-cube-right",
                 "caret-right-filled",
@@ -670,11 +693,16 @@ impl ViewMenuState {
         let element = world.resource::<ViewportView>().element;
         Self {
             render: view.render,
-            groups: world.resource::<crate::view_options::RenderGroups>().labels(element, view.render),
+            groups: world
+                .resource::<crate::view_options::RenderGroups>()
+                .labels(element, view.render),
             perspective: view.perspective,
             previous: crate::view_options::has_previous(world),
             section: crate::section_view::active(world),
-            modeling: matches!(kind, crate::viewport::ActiveKind::PartStudio | crate::viewport::ActiveKind::Assembly),
+            modeling: matches!(
+                kind,
+                crate::viewport::ActiveKind::PartStudio | crate::viewport::ActiveKind::Assembly
+            ),
         }
     }
 }
@@ -698,7 +726,11 @@ fn view_menu(st: ViewMenuState) -> cadrs_ui::Menu {
         .item(I::new("view-dimetric", "Dimetric"))
         .item(I::new("view-trimetric", "Trimetric"))
         .separator()
-        .item(I::new("view-graphics", "Graphics preferences…").icon("settings").disabled(true))
+        .item(
+            I::new("view-graphics", "Graphics preferences…")
+                .icon("settings")
+                .disabled(true),
+        )
         .separator()
         .item(I::new("view-named", "Named views…").disabled(!st.modeling))
         .item(I::new("view-previous", "Previous view").disabled(!st.previous))
@@ -706,17 +738,41 @@ fn view_menu(st: ViewMenuState) -> cadrs_ui::Menu {
         .item(I::new("view-zoom-to-fit", "Zoom to fit").shortcut("F"))
         .item(I::new("view-zoom-window", "Zoom to window"))
         .separator()
-        .item(check(st.perspective, I::new("view-perspective", "Perspective view")))
+        .item(check(
+            st.perspective,
+            I::new("view-perspective", "Perspective view"),
+        ))
         .item(I::new("view-orient-normal", "Orient normal to sketch on edit").disabled(true))
         .separator()
-        .item(check(!line, I::new("view-shaded", shaded_label)).submenu(crate::view_options::render_items(st.render, false)))
-        .item(check(line, I::new("view-hidden-edges", line_label)).submenu(crate::view_options::render_items(st.render, true)))
-        .item(I::new("view-tangent-edges", "Tangent edges visible").icon("check").submenu(vec![]))
+        .item(
+            check(!line, I::new("view-shaded", shaded_label))
+                .submenu(crate::view_options::render_items(st.render, false)),
+        )
+        .item(
+            check(line, I::new("view-hidden-edges", line_label))
+                .submenu(crate::view_options::render_items(st.render, true)),
+        )
+        .item(
+            I::new("view-tangent-edges", "Tangent edges visible")
+                .icon("check")
+                .submenu(vec![]),
+        )
         .separator()
         .item(I::new("view-high-quality", "View in high quality").disabled(true))
         .item(I::new("view-boundary", "Highlight boundary edges").disabled(true))
         .separator()
-        .item(I::new("view-section-item", if st.section { "Exit section view" } else { "Section view…" }).icon("section-view").disabled(!st.modeling))
+        .item(
+            I::new(
+                "view-section-item",
+                if st.section {
+                    "Exit section view"
+                } else {
+                    "Section view…"
+                },
+            )
+            .icon("section-view")
+            .disabled(!st.modeling),
+        )
 }
 
 fn on_view_menu(
@@ -727,13 +783,19 @@ fn on_view_menu(
 ) {
     let target = view.target();
     if let Some(slug) = ev.item.strip_prefix("view-render-") {
-        if let Some(mode) = crate::camera::RenderMode::ALL.into_iter().find(|m| m.slug() == slug) {
-            commands.queue(move |world: &mut World| crate::view_options::set_render_mode(world, mode));
+        if let Some(mode) = crate::camera::RenderMode::ALL
+            .into_iter()
+            .find(|m| m.slug() == slug)
+        {
+            commands
+                .queue(move |world: &mut World| crate::view_options::set_render_mode(world, mode));
         }
         return;
     }
     let to = match ev.item.as_str() {
-        "view-isometric" => crate::viewport::fitted_isometric_for(view.view.perspective, rect.0.size()),
+        "view-isometric" => {
+            crate::viewport::fitted_isometric_for(view.view.perspective, rect.0.size())
+        }
         // Dimetric: two axes foreshortened equally; trimetric: Onshape's default view.
         "view-dimetric" => ViewState {
             azimuth: DIMETRIC.0,
@@ -759,7 +821,8 @@ fn on_view_menu(
         }
         "view-perspective" => {
             let on = !view.view.perspective;
-            commands.queue(move |world: &mut World| crate::view_options::set_perspective(world, on));
+            commands
+                .queue(move |world: &mut World| crate::view_options::set_perspective(world, on));
             return;
         }
         "view-section-item" => {
@@ -778,7 +841,10 @@ pub(crate) fn cube_projection() -> Projection {
         scale: 1.0 / (CUBE_PX * CUBE_SUPERSAMPLE),
         near: 0.0,
         far: 100.0,
-        viewport_origin: Vec2::new(CUBE_CENTER.x / CUBE_WIDGET.x, 1.0 - CUBE_CENTER.y / CUBE_WIDGET.y),
+        viewport_origin: Vec2::new(
+            CUBE_CENTER.x / CUBE_WIDGET.x,
+            1.0 - CUBE_CENTER.y / CUBE_WIDGET.y,
+        ),
         ..OrthographicProjection::default_3d()
     })
 }
@@ -791,7 +857,12 @@ pub(crate) fn view_at_spot(view: &ViewState, widget_pos: Vec2) -> Option<ViewSta
         CubeSpot::Face(face) => Some(view.oriented(face.view())),
         CubeSpot::Corner(c) => {
             let (azimuth, elevation) = corner_view(c);
-            Some(ViewState { azimuth, elevation, roll: 0.0, ..*view })
+            Some(ViewState {
+                azimuth,
+                elevation,
+                roll: 0.0,
+                ..*view
+            })
         }
     }
 }
@@ -886,7 +957,11 @@ fn cube_hover(
         corner_hover.0 = corner;
     }
     for (p, mut vis) in &mut q_corners {
-        vis.set_if_neq(if Some(p.0) == corner { Visibility::Inherited } else { Visibility::Hidden });
+        vis.set_if_neq(if Some(p.0) == corner {
+            Visibility::Inherited
+        } else {
+            Visibility::Hidden
+        });
     }
     let Some(m) = materials else {
         return;
@@ -939,7 +1014,11 @@ fn draw_cube(
 
 /// The two curved rotate arrows (about 50 px radius) at the cube's top left and top right, drawn
 /// in `view`'s screen plane in front of the cube (the main cube's, and the Repair view's own).
-pub(crate) fn draw_cube_arcs<G: GizmoConfigGroup>(arcs: &mut Gizmos<G>, view: &ViewState, arc_color: Color) {
+pub(crate) fn draw_cube_arcs<G: GizmoConfigGroup>(
+    arcs: &mut Gizmos<G>,
+    view: &ViewState,
+    arc_color: Color,
+) {
     let v = cube_view(view);
     let (r, u, b) = (v.right(), v.up(), v.back());
     let radius = 62.0 / CUBE_PX;
@@ -1035,7 +1114,12 @@ fn on_cube_click(
         }
         Some(CubeSpot::Corner(c)) => {
             let (azimuth, elevation) = corner_view(c);
-            let to = ViewState { azimuth, elevation, roll: 0.0, ..view.target() };
+            let to = ViewState {
+                azimuth,
+                elevation,
+                roll: 0.0,
+                ..view.target()
+            };
             view.animate_to(to);
         }
         None => {}
@@ -1078,23 +1162,38 @@ mod tests {
         assert_eq!(face_at(&top, CUBE_CENTER), Some(CubeFace::Top));
         // In the default view the top face is above the center and the right face to the right.
         let d = ViewState::default();
-        assert_eq!(face_at(&d, CUBE_CENTER + Vec2::new(0.0, -30.0)), Some(CubeFace::Top));
-        assert_eq!(face_at(&d, CUBE_CENTER + Vec2::new(24.0, 4.0)), Some(CubeFace::Right));
-        assert_eq!(face_at(&d, CUBE_CENTER + Vec2::new(-10.0, 12.0)), Some(CubeFace::Front));
+        assert_eq!(
+            face_at(&d, CUBE_CENTER + Vec2::new(0.0, -30.0)),
+            Some(CubeFace::Top)
+        );
+        assert_eq!(
+            face_at(&d, CUBE_CENTER + Vec2::new(24.0, 4.0)),
+            Some(CubeFace::Right)
+        );
+        assert_eq!(
+            face_at(&d, CUBE_CENTER + Vec2::new(-10.0, 12.0)),
+            Some(CubeFace::Front)
+        );
         assert_eq!(face_at(&d, CUBE_CENTER + Vec2::new(80.0, 0.0)), None);
     }
 
     #[test]
     fn axonometric_axis_scales() {
         // P3F.4 (P6.3): the lengths the unit X, Y and Z axes project to.
-        let scales = |v: ViewState| [Vec3::X, Vec3::Y, Vec3::Z].map(|a| v.project_vector(a).length() * v.scale);
+        let scales = |v: ViewState| {
+            [Vec3::X, Vec3::Y, Vec3::Z].map(|a| v.project_vector(a).length() * v.scale)
+        };
         // Isometric (view direction (1, 1, 1)/√3): all three √(2/3) = 0.81650.
         let iso = scales(ViewState::standard(StandardView::Isometric));
         for k in iso {
             assert!((k - (2.0f32 / 3.0).sqrt()).abs() < 1e-5, "{iso:?}");
         }
         // Dimetric: exactly two equal (X and Y), Z different.
-        let di = scales(ViewState { azimuth: DIMETRIC.0, elevation: DIMETRIC.1, ..ViewState::default() });
+        let di = scales(ViewState {
+            azimuth: DIMETRIC.0,
+            elevation: DIMETRIC.1,
+            ..ViewState::default()
+        });
         assert!((di[0] - di[1]).abs() < 1e-5, "{di:?}");
         assert!((di[0] - di[2]).abs() > 0.05, "{di:?}");
         // Trimetric (Onshape's default view, 30° round and 30° up): three different lengths,
@@ -1103,17 +1202,28 @@ mod tests {
         for (k, want) in tri.iter().zip([0.901_388, 0.661_438, 0.866_025]) {
             assert!((k - want).abs() < 1e-5, "{tri:?}");
         }
-        assert!((tri[0] - tri[1]).abs() > 0.01 && (tri[1] - tri[2]).abs() > 0.01 && (tri[0] - tri[2]).abs() > 0.01, "{tri:?}");
+        assert!(
+            (tri[0] - tri[1]).abs() > 0.01
+                && (tri[1] - tri[2]).abs() > 0.01
+                && (tri[0] - tri[2]).abs() > 0.01,
+            "{tri:?}"
+        );
         // Orthographic projections keep the sum of squares at 2 (the axes are orthonormal).
         for k in [iso, di, tri] {
-            assert!((k.iter().map(|x| x * x).sum::<f32>() - 2.0).abs() < 1e-4, "{k:?}");
+            assert!(
+                (k.iter().map(|x| x * x).sum::<f32>() - 2.0).abs() < 1e-4,
+                "{k:?}"
+            );
         }
     }
 
     #[test]
     fn corners_turn_to_trimetric_views() {
         // The default view looks from the front-right-top corner.
-        assert_eq!(corner_view(IVec3::new(1, -1, 1)), StandardView::Default.angles());
+        assert_eq!(
+            corner_view(IVec3::new(1, -1, 1)),
+            StandardView::Default.angles()
+        );
         // Every corner's view looks from that corner (its view direction is in its octant) and
         // no two axes are foreshortened alike (trimetric).
         for x in [-1, 1] {
@@ -1121,18 +1231,36 @@ mod tests {
                 for z in [-1, 1] {
                     let c = IVec3::new(x, y, z);
                     let (azimuth, elevation) = corner_view(c);
-                    let v = ViewState { azimuth, elevation, ..ViewState::default() };
+                    let v = ViewState {
+                        azimuth,
+                        elevation,
+                        ..ViewState::default()
+                    };
                     let b = v.back();
-                    assert!(b.x * x as f32 > 0.0 && b.y * y as f32 > 0.0 && b.z * z as f32 > 0.0, "{c}: {b}");
+                    assert!(
+                        b.x * x as f32 > 0.0 && b.y * y as f32 > 0.0 && b.z * z as f32 > 0.0,
+                        "{c}: {b}"
+                    );
                     let k = [Vec3::X, Vec3::Y, Vec3::Z].map(|a| v.project_vector(a).length());
-                    assert!((k[0] - k[1]).abs() > 0.05 && (k[1] - k[2]).abs() > 0.05 && (k[0] - k[2]).abs() > 0.05, "{k:?}");
+                    assert!(
+                        (k[0] - k[1]).abs() > 0.05
+                            && (k[1] - k[2]).abs() > 0.05
+                            && (k[0] - k[2]).abs() > 0.05,
+                        "{k:?}"
+                    );
                 }
             }
         }
         // A click near a corner of the front face in the Front view hits that corner.
         let front = ViewState::standard(StandardView::Front);
         let near = CUBE_CENTER + Vec2::new(0.9, -0.9) * CUBE_PX;
-        assert_eq!(spot_at(&front, near), Some(CubeSpot::Corner(IVec3::new(1, -1, 1))));
-        assert_eq!(spot_at(&front, CUBE_CENTER), Some(CubeSpot::Face(CubeFace::Front)));
+        assert_eq!(
+            spot_at(&front, near),
+            Some(CubeSpot::Corner(IVec3::new(1, -1, 1)))
+        );
+        assert_eq!(
+            spot_at(&front, CUBE_CENTER),
+            Some(CubeSpot::Face(CubeFace::Front))
+        );
     }
 }

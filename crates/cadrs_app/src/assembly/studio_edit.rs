@@ -23,11 +23,18 @@ pub struct StudioEditPlugin;
 
 impl Plugin for StudioEditPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Update, sync_dialog.after(crate::parts::PartsSet).run_if(in_state(AppState::Document)))
-            .add_systems(OnExit(AppState::Document), |mut commands: Commands| commands.remove_resource::<StudioEditSession>())
-            .add_observer(on_accept)
-            .add_observer(on_cancel)
-            .add_observer(on_check);
+        app.add_systems(
+            Update,
+            sync_dialog
+                .after(crate::parts::PartsSet)
+                .run_if(in_state(AppState::Document)),
+        )
+        .add_systems(OnExit(AppState::Document), |mut commands: Commands| {
+            commands.remove_resource::<StudioEditSession>()
+        })
+        .add_observer(on_accept)
+        .add_observer(on_cancel)
+        .add_observer(on_check);
     }
 }
 
@@ -50,17 +57,52 @@ struct PartRow(usize);
 
 /// Opens the dialog on a rigid Part Studio instance.
 pub fn open(world: &mut World, instance: InstanceId) {
-    let Some(doc) = world.get_resource::<ActiveDocument>() else { return };
-    let Some(element) = super::active_assembly(doc) else { return };
-    let Some(inst) = doc.active_element().and_then(|e| e.assembly_model()?.instance(instance).cloned()) else { return };
-    let cadrs_core::assembly::InstanceSource::Studio { element: studio, board: None } = inst.source else { return };
+    let Some(doc) = world.get_resource::<ActiveDocument>() else {
+        return;
+    };
+    let Some(element) = super::active_assembly(doc) else {
+        return;
+    };
+    let Some(inst) = doc
+        .active_element()
+        .and_then(|e| e.assembly_model()?.instance(instance).cloned())
+    else {
+        return;
+    };
+    let cadrs_core::assembly::InstanceSource::Studio {
+        element: studio,
+        board: None,
+    } = inst.source
+    else {
+        return;
+    };
     let d = doc.doc.clone();
     let Some(el) = d.element(studio) else { return };
     let name = el.name.clone();
     let props = el.part_props().to_vec();
-    let Some(build) = world.resource_mut::<super::AssemblyParts>().build(&d, studio) else { return };
-    let parts = build.parts.iter().map(|p| (p.id, cadrs_core::parts::display_name(p, &props).to_string(), inst.parts.contains(&p.id))).collect();
-    world.insert_resource(StudioEditSession { element, instance, title: format!("Edit {name} <{}>", inst.index), parts });
+    let Some(build) = world
+        .resource_mut::<super::AssemblyParts>()
+        .build(&d, studio)
+    else {
+        return;
+    };
+    let parts = build
+        .parts
+        .iter()
+        .map(|p| {
+            (
+                p.id,
+                cadrs_core::parts::display_name(p, &props).to_string(),
+                inst.parts.contains(&p.id),
+            )
+        })
+        .collect();
+    world.insert_resource(StudioEditSession {
+        element,
+        instance,
+        title: format!("Edit {name} <{}>", inst.index),
+        parts,
+    });
 }
 
 fn on_check(
@@ -72,16 +114,27 @@ fn on_check(
 ) {
     let Some(mut s) = session else { return };
     // The checkbox is the row's child.
-    let Some(row) = q.get(ev.entity).ok().and_then(|c| q_row.get(c.parent()).ok()) else { return };
+    let Some(row) = q
+        .get(ev.entity)
+        .ok()
+        .and_then(|c| q_row.get(c.parent()).ok())
+    else {
+        return;
+    };
     if let Some(p) = s.parts.get_mut(row.0) {
         p.2 = ev.checked;
     }
     // Unticked parts disappear from the view at once (P3B.8 judge).
-    parts.studio_preview = Some((s.instance, s.parts.iter().filter(|p| p.2).map(|p| p.0).collect()));
+    parts.studio_preview = Some((
+        s.instance,
+        s.parts.iter().filter(|p| p.2).map(|p| p.0).collect(),
+    ));
 }
 
 fn accept(world: &mut World) {
-    let Some(s) = world.get_resource::<StudioEditSession>().cloned() else { return };
+    let Some(s) = world.get_resource::<StudioEditSession>().cloned() else {
+        return;
+    };
     let parts: Vec<PartId> = s.parts.iter().filter(|p| p.2).map(|p| p.0).collect();
     if parts.is_empty() {
         return;
@@ -92,18 +145,35 @@ fn accept(world: &mut World) {
         .element(s.element)
         .and_then(|e| e.assembly_model()?.instance(s.instance))
         .is_some_and(|i| i.parts == parts);
-    if same || super::run(world, &SetStudioParts { element: s.element, instance: s.instance, parts }) {
+    if same
+        || super::run(
+            world,
+            &SetStudioParts {
+                element: s.element,
+                instance: s.instance,
+                parts,
+            },
+        )
+    {
         world.remove_resource::<StudioEditSession>();
     }
 }
 
-fn on_accept(ev: On<FeatureDialogAccept>, q: Query<(), With<StudioEditDialog>>, mut commands: Commands) {
+fn on_accept(
+    ev: On<FeatureDialogAccept>,
+    q: Query<(), With<StudioEditDialog>>,
+    mut commands: Commands,
+) {
     if q.contains(ev.entity) {
         commands.queue(accept);
     }
 }
 
-fn on_cancel(ev: On<FeatureDialogCancel>, q: Query<(), With<StudioEditDialog>>, mut commands: Commands) {
+fn on_cancel(
+    ev: On<FeatureDialogCancel>,
+    q: Query<(), With<StudioEditDialog>>,
+    mut commands: Commands,
+) {
     if q.contains(ev.entity) {
         commands.queue(|world: &mut World| {
             world.remove_resource::<StudioEditSession>();
@@ -137,7 +207,9 @@ fn sync_dialog(
         }
         return;
     }
-    let Some(area) = q_area.iter().next() else { return };
+    let Some(area) = q_area.iter().next() else {
+        return;
+    };
     let t = theme.clone();
     let parts = s.parts.clone();
     let d = commands
@@ -151,12 +223,30 @@ fn sync_dialog(
                 .body(move |b| {
                     b.spawn((
                         Name::new("studio-edit-hint"),
-                        t.text("Parts in this rigid instance", t.font_sm, bevy::text::FontWeight::MEDIUM, t.muted_foreground),
-                        Node { margin: UiRect::new(Val::Px(4.0), Val::ZERO, Val::Px(2.0), Val::Px(4.0)), ..default() },
+                        t.text(
+                            "Parts in this rigid instance",
+                            t.font_sm,
+                            bevy::text::FontWeight::MEDIUM,
+                            t.muted_foreground,
+                        ),
+                        Node {
+                            margin: UiRect::new(
+                                Val::Px(4.0),
+                                Val::ZERO,
+                                Val::Px(2.0),
+                                Val::Px(4.0),
+                            ),
+                            ..default()
+                        },
                     ));
                     for (k, (_, name, on)) in parts.iter().enumerate() {
                         let slug = super::insert::slug(name);
-                        b.spawn((OptionRow::new(format!("studio-edit-part-{slug}"), name.clone()).checked(*on).build(&t), PartRow(k)));
+                        b.spawn((
+                            OptionRow::new(format!("studio-edit-part-{slug}"), name.clone())
+                                .checked(*on)
+                                .build(&t),
+                            PartRow(k),
+                        ));
                     }
                 })
                 .build(&theme),

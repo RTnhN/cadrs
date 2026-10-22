@@ -31,13 +31,29 @@ pub fn parse(args: &[String]) -> Option<Result<Check, String>> {
     if !args.iter().any(|a| a == "--check") {
         return None;
     }
-    let value = |flag: &str| args.iter().position(|a| a == flag).and_then(|i| args.get(i + 1)).cloned();
+    let value = |flag: &str| {
+        args.iter()
+            .position(|a| a == flag)
+            .and_then(|i| args.get(i + 1))
+            .cloned()
+    };
     let Some(document) = value("--document") else {
         return Some(Err("--check needs --document <name or id>".into()));
     };
     // Where the app looks: --data-dir, else CADRS_DATA_DIR, else the platform data dir.
-    let data_dir = value("--data-dir").map(PathBuf::from).or_else(|| std::env::var_os("CADRS_DATA_DIR").map(PathBuf::from)).or_else(Store::default_root);
-    Some(Ok(Check { document, data_dir, studio: value("--part-studio"), sketch: value("--sketch"), steps: args.iter().any(|a| a == "--steps"), dof: args.iter().any(|a| a == "--dof"), feature: value("--feature") }))
+    let data_dir = value("--data-dir")
+        .map(PathBuf::from)
+        .or_else(|| std::env::var_os("CADRS_DATA_DIR").map(PathBuf::from))
+        .or_else(Store::default_root);
+    Some(Ok(Check {
+        document,
+        data_dir,
+        studio: value("--part-studio"),
+        sketch: value("--sketch"),
+        steps: args.iter().any(|a| a == "--steps"),
+        dof: args.iter().any(|a| a == "--dof"),
+        feature: value("--feature"),
+    }))
 }
 
 /// `cadrs --list-documents [--data-dir <dir>] [--trash]`: the store's documents, most recently
@@ -46,19 +62,35 @@ pub fn list_documents(args: &[String]) -> Option<u8> {
     if !args.iter().any(|a| a == "--list-documents") {
         return None;
     }
-    let value = |flag: &str| args.iter().position(|a| a == flag).and_then(|i| args.get(i + 1)).cloned();
-    let Some(root) = value("--data-dir").map(PathBuf::from).or_else(|| std::env::var_os("CADRS_DATA_DIR").map(PathBuf::from)).or_else(Store::default_root) else {
+    let value = |flag: &str| {
+        args.iter()
+            .position(|a| a == flag)
+            .and_then(|i| args.get(i + 1))
+            .cloned()
+    };
+    let Some(root) = value("--data-dir")
+        .map(PathBuf::from)
+        .or_else(|| std::env::var_os("CADRS_DATA_DIR").map(PathBuf::from))
+        .or_else(Store::default_root)
+    else {
         eprintln!("no document store: pass --data-dir");
         return Some(2);
     };
     let trash = args.iter().any(|a| a == "--trash");
     let (lib, _) = Store::new(&root).list();
-    let mut entries: Vec<_> = lib.entries.iter().filter(|e| e.meta.trashed.is_some() == trash).collect();
+    let mut entries: Vec<_> = lib
+        .entries
+        .iter()
+        .filter(|e| e.meta.trashed.is_some() == trash)
+        .collect();
     entries.sort_by_key(|e| std::cmp::Reverse(e.meta.modified));
     println!("{} document(s) in {}", entries.len(), root.display());
     for e in entries {
         let t = cadrs_core::time::DateTime::from_timestamp(e.meta.modified, 0);
-        let when = format!("{:04}-{:02}-{:02} {:02}:{:02}", t.year, t.month, t.day, t.hour, t.minute);
+        let when = format!(
+            "{:04}-{:02}-{:02} {:02}:{:02}",
+            t.year, t.month, t.day, t.hour, t.minute
+        );
         println!("{}  {when}  {}", e.id, e.name);
     }
     Some(0)
@@ -72,9 +104,17 @@ pub fn run(c: &Check) -> u8 {
     let store = Store::new(root);
     let (lib, _) = store.list();
     let want = c.document.to_lowercase();
-    let mut found: Vec<_> = lib.entries.iter().filter(|e| e.id.to_string() == want || e.name.to_lowercase() == want).collect();
+    let mut found: Vec<_> = lib
+        .entries
+        .iter()
+        .filter(|e| e.id.to_string() == want || e.name.to_lowercase() == want)
+        .collect();
     if found.is_empty() {
-        found = lib.entries.iter().filter(|e| e.id.to_string().starts_with(&want)).collect();
+        found = lib
+            .entries
+            .iter()
+            .filter(|e| e.id.to_string().starts_with(&want))
+            .collect();
     }
     // Not one in the trash, when there is one that isn't.
     if found.len() > 1 && found.iter().any(|e| e.meta.trashed.is_none()) {
@@ -87,7 +127,11 @@ pub fn run(c: &Check) -> u8 {
             return 2;
         }
         many => {
-            eprintln!("\"{}\" names {} documents; pass the id:", c.document, many.len());
+            eprintln!(
+                "\"{}\" names {} documents; pass the id:",
+                c.document,
+                many.len()
+            );
             for e in many {
                 eprintln!("  {}  {}", e.id, e.name);
             }
@@ -104,7 +148,13 @@ pub fn run(c: &Check) -> u8 {
     println!("{} ({}) in {}", entry.name, entry.id, root.display());
     let (mut errors, mut warnings) = (0, 0);
     for s in cadrs_core::check::check(&file.document, c.studio.as_deref()) {
-        println!("\n# {}: {} features, {} parts, rebuilt in {:.1} s", s.name, s.features, s.parts, s.elapsed.as_secs_f64());
+        println!(
+            "\n# {}: {} features, {} parts, rebuilt in {:.1} s",
+            s.name,
+            s.features,
+            s.parts,
+            s.elapsed.as_secs_f64()
+        );
         if s.issues.is_empty() {
             println!("  no issues");
         }
@@ -130,11 +180,18 @@ pub fn run(c: &Check) -> u8 {
     }
     println!("\n{errors} error(s), {warnings} warning(s)");
     if c.steps
-        && let Some((name, features)) = cadrs_core::check::studio_features(&file.document, c.studio.as_deref())
+        && let Some((name, features)) =
+            cadrs_core::check::studio_features(&file.document, c.studio.as_deref())
     {
         println!("\nSteps of {name} (parts by volume, mm³, @ centre of mass, mm):");
         for (feature, parts) in cadrs_core::check::steps(&features) {
-            let v: Vec<String> = parts.iter().map(|(_, v, c)| match c { Some(c) => format!("{v:.1}@({:.2} {:.2} {:.2})", c[0], c[1], c[2]), None => format!("{v:.1}") }).collect();
+            let v: Vec<String> = parts
+                .iter()
+                .map(|(_, v, c)| match c {
+                    Some(c) => format!("{v:.1}@({:.2} {:.2} {:.2})", c[0], c[1], c[2]),
+                    None => format!("{v:.1}"),
+                })
+                .collect();
             println!("  {feature}: {}", v.join(", "));
         }
     }

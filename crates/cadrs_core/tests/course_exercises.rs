@@ -277,12 +277,18 @@ fn exercise_1_is_fully_defined_and_its_area_matches_the_drawing() {
     let (p3, p6) = (b.point(v(160.0, 21.0)), b.point(v(160.0, -21.0)));
     add(
         &mut b,
-        vec![ConstraintOf::Vertical(Orient::Points(PointRef::Point(p3), PointRef::Point(p6)))],
+        vec![ConstraintOf::Vertical(Orient::Points(
+            PointRef::Point(p3),
+            PointRef::Point(p6),
+        ))],
     );
     let (upper, lower) = (b.line_ref(v(160.0, 45.0)), b.line_ref(v(160.0, -45.0)));
     add(
         &mut b,
-        vec![ConstraintOf::Equal(upper, notch), ConstraintOf::Equal(upper, lower)],
+        vec![
+            ConstraintOf::Equal(upper, notch),
+            ConstraintOf::Equal(upper, lower),
+        ],
     );
     // Step 4: the first dimension, 200 from the circle's center to the right edge, scales
     // the sketch.
@@ -296,9 +302,14 @@ fn exercise_1_is_fully_defined_and_its_area_matches_the_drawing() {
         200.0,
         true,
     );
-    assert!((b.s().pos(b.point(v(200.0, -75.0))).x - 200.0).abs() < 1.0, "scaled 1.25×");
+    assert!(
+        (b.s().pos(b.point(v(200.0, -75.0))).x - 200.0).abs() < 1.0,
+        "scaled 1.25×"
+    );
     // Step 5: 50, 70, and the ring's 35 (big circle clicked inside, small one outside).
-    let CurveRef::Curve(upper_id) = upper else { unreachable!() };
+    let CurveRef::Curve(upper_id) = upper else {
+        unreachable!()
+    };
     let (a, bb) = b.ends(upper_id);
     b.dimension(DimensionKind::Aligned { a, b: bb }, 50.0, false);
     let tab = b.curve(v(165.0, -25.0));
@@ -326,7 +337,9 @@ fn exercise_1_is_fully_defined_and_its_area_matches_the_drawing() {
             construction: false,
         });
         let edge = if y > 0.0 { upper } else { lower };
-        let CurveRef::Curve(edge_id) = edge else { unreachable!() };
+        let CurveRef::Curve(edge_id) = edge else {
+            unreachable!()
+        };
         let (ea, eb) = b.ends(edge_id);
         let mid = b.s().pos(ea).midpoint(b.s().pos(eb));
         b.ops(vec![
@@ -354,7 +367,9 @@ fn exercise_1_is_fully_defined_and_its_area_matches_the_drawing() {
             ConstraintOf::Horizontal(Orient::Line(k2)),
         ],
     );
-    let CurveRef::Curve(k1_id) = k1 else { unreachable!() };
+    let CurveRef::Curve(k1_id) = k1 else {
+        unreachable!()
+    };
     let (a, bb) = b.ends(k1_id);
     b.dimension(DimensionKind::Aligned { a, b: bb }, 35.0, false);
     assert!(b.fully_defined(), "step 6 is fully defined (all black)");
@@ -362,7 +377,11 @@ fn exercise_1_is_fully_defined_and_its_area_matches_the_drawing() {
     let got = b.area_at(v(100.0, 50.0));
     assert!((got - plate).abs() < 0.01, "plate {got} vs {plate}");
     let ring = b.area_at(v(-57.0, 0.0));
-    assert!((got + ring - total).abs() < 0.01, "plate + ring {} vs {total}", got + ring);
+    assert!(
+        (got + ring - total).abs() < 0.01,
+        "plate + ring {} vs {total}",
+        got + ring
+    );
 }
 
 // Exercise 2 (Intermediate Sketching, `ex2-intermediate-drawing.png`), the analytic area of
@@ -408,7 +427,9 @@ fn ex2_expected() -> f64 {
     let a = v(0.0, 200.0);
     let ey = (754.0 + (754.0f64 * 754.0 - 4.0 * 6.76 * 5439.0625).sqrt()) / (2.0 * 6.76);
     let e = v(2.4 * ey - 73.75, ey);
-    assert!((e.distance(a) - 200.0).abs() < 1e-9 && (e.distance(v(62.5, 50.0)) - 125.0).abs() < 1e-9);
+    assert!(
+        (e.distance(a) - 200.0).abs() < 1e-9 && (e.distance(v(62.5, 50.0)) - 125.0).abs() < 1e-9
+    );
     let d = a + (e - a) * (75.0 / 200.0);
     let d2 = v(-d.x, d.y);
     let s = v(62.5, 50.0);
@@ -421,8 +442,14 @@ fn ex2_expected() -> f64 {
     let c = a + (t - a) * (35.0 / 75.0);
     let c2 = v(-c.x, c.y);
     let slot_head = 2.0 * PI - angle(c, c2, a);
-    let keyhole = shoelace(&[v(15.0, 100.0), v(15.0, yt), c2, c, v(-15.0, yt), v(-15.0, 100.0)])
-        + seg(35.0, slot_head)
+    let keyhole = shoelace(&[
+        v(15.0, 100.0),
+        v(15.0, yt),
+        c2,
+        c,
+        v(-15.0, yt),
+        v(-15.0, 100.0),
+    ]) + seg(35.0, slot_head)
         - 2.0 * seg(40.0, angle(c, v(-15.0, yt), t))
         + PI * 15.0 * 15.0 / 2.0;
     outline - keyhole - 80.0 * 20.0
@@ -463,11 +490,16 @@ fn exercise_2_is_fully_defined_and_its_area_matches_the_drawing() {
         },
         SketchOp::AddConstraints(vec![
             ConstraintOf::Horizontal(Orient::Line(CurveSpec::Between(v(0.0, 0.0), v(-60.0, 0.0)))),
-            ConstraintOf::Vertical(Orient::Line(CurveSpec::Between(v(-60.0, 0.0), v(-60.0, 45.0)))),
+            ConstraintOf::Vertical(Orient::Line(CurveSpec::Between(
+                v(-60.0, 0.0),
+                v(-60.0, 45.0),
+            ))),
         ]),
     ]);
     // Step 3: the 3-point arc; step 4: mirror.
-    b.op(arc_op(arc_through(v(-60.0, 45.0), v(-63.0, 160.0), v(-48.0, 100.0)).unwrap()));
+    b.op(arc_op(
+        arc_through(v(-60.0, 45.0), v(-63.0, 160.0), v(-48.0, 100.0)).unwrap(),
+    ));
     let (base, side, waist) = (
         b.curve(v(-30.0, 0.0)),
         b.curve(v(-60.0, 25.0)),
@@ -499,7 +531,10 @@ fn exercise_2_is_fully_defined_and_its_area_matches_the_drawing() {
     let axis_top = b.point(v(0.0, 180.0));
     add(
         &mut b,
-        vec![ConstraintOf::Coincident(PointRef::Point(hc), PointRef::Point(axis_top))],
+        vec![ConstraintOf::Coincident(
+            PointRef::Point(hc),
+            PointRef::Point(axis_top),
+        )],
     );
     // Step 7: R75 (first: scales), 200, 125, 50, R125.
     b.dimension(DimensionKind::Radius { curve: head_id }, 75.0, true);
@@ -559,20 +594,34 @@ fn exercise_2_is_fully_defined_and_its_area_matches_the_drawing() {
     ]);
     let line = b.curve(v(-15.0, 120.0));
     let (sa, sb) = b.ends(slot_head);
-    let left_end = if b.s().pos(sa).x < b.s().pos(sb).x { sa } else { sb };
+    let left_end = if b.s().pos(sa).x < b.s().pos(sb).x {
+        sa
+    } else {
+        sb
+    };
     let p = b.s().pos(left_end);
     let t = tangent_arc(v(-15.0, 145.0), v(0.0, 1.0), p).unwrap();
     let tc = t.to_ccw();
     b.ops(vec![
         arc_op(t),
         SketchOp::AddConstraints(vec![
-            ConstraintOf::Tangent(CurveSpec::Id(line), CurveSpec::Between(tc.start(), tc.end())),
-            ConstraintOf::Tangent(CurveSpec::Id(slot_head), CurveSpec::Between(tc.start(), tc.end())),
+            ConstraintOf::Tangent(
+                CurveSpec::Id(line),
+                CurveSpec::Between(tc.start(), tc.end()),
+            ),
+            ConstraintOf::Tangent(
+                CurveSpec::Id(slot_head),
+                CurveSpec::Between(tc.start(), tc.end()),
+            ),
         ]),
     ]);
     // The arc the tool made: the other curve at the line's top.
     let (la, lb) = b.ends(line);
-    let line_top = if b.s().pos(la).y > b.s().pos(lb).y { la } else { lb };
+    let line_top = if b.s().pos(la).y > b.s().pos(lb).y {
+        la
+    } else {
+        lb
+    };
     let side_arc = b.s().curves_at(line_top).find(|c| *c != line).unwrap();
     // Step 11: mirror both.
     b.op(SketchOp::Mirror {
@@ -581,7 +630,11 @@ fn exercise_2_is_fully_defined_and_its_area_matches_the_drawing() {
     });
     // Step 12: the bottom arc.
     let (la, lb) = b.ends(line);
-    let bottom = if b.s().pos(la).y < b.s().pos(lb).y { la } else { lb };
+    let bottom = if b.s().pos(la).y < b.s().pos(lb).y {
+        la
+    } else {
+        lb
+    };
     let bp = b.s().pos(bottom);
     let right_line = b.curve(v(-bp.x, bp.y + 10.0));
     let arc = tangent_arc(bp, v(0.0, -1.0), v(-bp.x, bp.y)).unwrap();
@@ -589,7 +642,10 @@ fn exercise_2_is_fully_defined_and_its_area_matches_the_drawing() {
     b.ops(vec![
         arc_op(arc),
         SketchOp::AddConstraints(vec![
-            ConstraintOf::Tangent(CurveSpec::Id(line), CurveSpec::Between(ac.start(), ac.end())),
+            ConstraintOf::Tangent(
+                CurveSpec::Id(line),
+                CurveSpec::Between(ac.start(), ac.end()),
+            ),
             ConstraintOf::Tangent(
                 CurveSpec::Id(right_line),
                 CurveSpec::Between(ac.start(), ac.end()),
@@ -600,7 +656,10 @@ fn exercise_2_is_fully_defined_and_its_area_matches_the_drawing() {
     // Step 13: the center-point rectangle, centered on the center line.
     let corners = [v(-40.0, 25.0), v(40.0, 25.0), v(40.0, 45.0), v(-40.0, 45.0)];
     let mut specs = cadrs_sketch::constraint::rectangle_constraints(corners);
-    specs.push(ConstraintOf::PointOnCurve(PointSpec::At(v(0.0, 35.0)), CurveSpec::Id(axis)));
+    specs.push(ConstraintOf::PointOnCurve(
+        PointSpec::At(v(0.0, 35.0)),
+        CurveSpec::Id(axis),
+    ));
     b.ops(vec![
         SketchOp::AddCenterRectangle {
             center: v(0.0, 35.0),
@@ -614,7 +673,11 @@ fn exercise_2_is_fully_defined_and_its_area_matches_the_drawing() {
     b.dimension(DimensionKind::Radius { curve: side_arc }, 40.0, false);
     let a = b.s().curve_points(head_id)[0];
     let (la, lb) = b.ends(line);
-    let bottom = if b.s().pos(la).y < b.s().pos(lb).y { la } else { lb };
+    let bottom = if b.s().pos(la).y < b.s().pos(lb).y {
+        la
+    } else {
+        lb
+    };
     b.dimension(DimensionKind::Vertical { a, b: bottom }, 100.0, false);
     let rect_right = b.curve(v(40.0, 35.0));
     let (ra, rb) = b.ends(rect_right);
@@ -638,7 +701,10 @@ fn exercise_2_is_fully_defined_and_its_area_matches_the_drawing() {
     // The R35 head, R40 sides and R15 bottom are where the drawing puts them.
     let g = b.s().arc_geom(side_arc).unwrap();
     assert!((g.radius - 40.0).abs() < 1e-6 && g.center.distance(v(-55.0, 149.0098)) < 1e-3);
-    let _ = CurveKind::Line { a: corner, b: corner };
+    let _ = CurveKind::Line {
+        a: corner,
+        b: corner,
+    };
 }
 
 /// S13.3: typing the first dimension's value scales the whole sketch about the origin (the
@@ -657,7 +723,10 @@ fn first_dimension_scales_the_sketch_as_one_undo_step() {
         SketchOp::AddConstraints(
             [
                 cadrs_sketch::constraint::rectangle_constraints(corners),
-                vec![ConstraintOf::Coincident(PointSpec::At(v(0.0, 0.0)), PointSpec::Origin)],
+                vec![ConstraintOf::Coincident(
+                    PointSpec::At(v(0.0, 0.0)),
+                    PointSpec::Origin,
+                )],
             ]
             .concat(),
         ),
@@ -678,7 +747,10 @@ fn first_dimension_scales_the_sketch_as_one_undo_step() {
     let placed = b.doc.clone();
     let id = b.s().dimensions.keys().next().unwrap();
     let op = cadrs_sketch::edit::set_value_op(b.s(), id, 100.0, true);
-    assert!(matches!(op, SketchOp::Batch(_)), "the first dimension scales");
+    assert!(
+        matches!(op, SketchOp::Batch(_)),
+        "the first dimension scales"
+    );
     b.op(op);
     // Everything 2.5× about the origin: the far corner and the circle.
     assert!(b.s().point_at(v(100.0, 62.5), 1e-6).is_some());
@@ -698,5 +770,8 @@ fn first_dimension_scales_the_sketch_as_one_undo_step() {
     assert!(matches!(op, SketchOp::SetDimensionValue { .. }));
     b.op(op);
     assert!(b.s().point_at(v(100.0, 25.0), 1e-6).is_some());
-    assert!(b.s().point_at(v(28.0, 12.0), 1e-6).is_some(), "the circle stays");
+    assert!(
+        b.s().point_at(v(28.0, 12.0), 1e-6).is_some(),
+        "the circle stays"
+    );
 }

@@ -86,7 +86,9 @@ impl HistoryLog {
 
     /// Every workspace: Main, then the branches oldest first.
     pub fn workspace_ids(&self) -> Vec<WorkspaceId> {
-        std::iter::once(WorkspaceId::MAIN).chain(self.workspaces.iter().map(|w| w.id)).collect()
+        std::iter::once(WorkspaceId::MAIN)
+            .chain(self.workspaces.iter().map(|w| w.id))
+            .collect()
     }
 
     /// A branch by id (`None` for Main).
@@ -99,7 +101,9 @@ impl HistoryLog {
         if id.is_main() {
             return MAIN_NAME.to_string();
         }
-        self.branch_info(id).map(|w| w.name.clone()).unwrap_or_default()
+        self.branch_info(id)
+            .map(|w| w.name.clone())
+            .unwrap_or_default()
     }
 
     /// The current workspace's name.
@@ -112,7 +116,10 @@ impl HistoryLog {
         if id == self.current {
             return Some(&self.entries);
         }
-        self.parked.iter().find(|t| t.workspace == id).map(|t| t.entries.as_slice())
+        self.parked
+            .iter()
+            .find(|t| t.workspace == id)
+            .map(|t| t.entries.as_slice())
     }
 
     /// A workspace's state after its entry `k`.
@@ -132,7 +139,10 @@ impl HistoryLog {
 
     /// The versions made in workspace `id`, by their index in [`Self::versions`].
     pub fn versions_in(&self, id: WorkspaceId) -> impl Iterator<Item = (usize, &Version)> {
-        self.versions.iter().enumerate().filter(move |(_, v)| v.workspace == id)
+        self.versions
+            .iter()
+            .enumerate()
+            .filter(move |(_, v)| v.workspace == id)
     }
 
     /// The default name of the next branch: "Branch 1", "Branch 2", …
@@ -142,12 +152,27 @@ impl HistoryLog {
 
     /// **Branch to create workspace** (TD12.4): a new workspace `name` (trimmed; the next
     /// "Branch n" when empty) whose start is version `from`, exactly. It isn't switched to.
-    pub fn branch(&mut self, from: VersionId, name: &str, description: &str, time: Timestamp, user: &str) -> Option<WorkspaceId> {
+    pub fn branch(
+        &mut self,
+        from: VersionId,
+        name: &str,
+        description: &str,
+        time: Timestamp,
+        user: &str,
+    ) -> Option<WorkspaceId> {
         self.branch_with_id(WorkspaceId::new(), from, name, description, time, user)
     }
 
     /// [`Self::branch`] with a given id.
-    pub fn branch_with_id(&mut self, id: WorkspaceId, from: VersionId, name: &str, description: &str, time: Timestamp, user: &str) -> Option<WorkspaceId> {
+    pub fn branch_with_id(
+        &mut self,
+        id: WorkspaceId,
+        from: VersionId,
+        name: &str,
+        description: &str,
+        time: Timestamp,
+        user: &str,
+    ) -> Option<WorkspaceId> {
         let version = self.version(from)?.name.clone();
         let doc = self.document_at_version(from)?;
         let name = match name.trim() {
@@ -166,8 +191,20 @@ impl HistoryLog {
             hash: document_hash(&doc),
             delta: Arc::default(),
         };
-        self.workspaces.push(Workspace { id, name, description: description.trim().to_string(), from_version: from, time, user: user.to_string() });
-        self.parked.push(Track { workspace: id, entries: vec![start], snapshots: vec![(0, Arc::new(doc))], healthy: Vec::new() });
+        self.workspaces.push(Workspace {
+            id,
+            name,
+            description: description.trim().to_string(),
+            from_version: from,
+            time,
+            user: user.to_string(),
+        });
+        self.parked.push(Track {
+            workspace: id,
+            entries: vec![start],
+            snapshots: vec![(0, Arc::new(doc))],
+            healthy: Vec::new(),
+        });
         self.sort_parked();
         Some(id)
     }
@@ -206,13 +243,20 @@ impl HistoryLog {
     /// The state both workspaces started from, when one is a branch: the version the source
     /// (else the destination) was made from. For a merge's changed tabs.
     pub fn merge_base(&self, source: WorkspaceId, dest: WorkspaceId) -> Option<Document> {
-        let from = self.branch_info(source).or_else(|| self.branch_info(dest))?.from_version;
+        let from = self
+            .branch_info(source)
+            .or_else(|| self.branch_info(dest))?
+            .from_version;
         self.document_at_version(from)
     }
 
     fn sort_parked(&mut self) {
         let order = self.workspace_ids();
-        self.parked.sort_by_key(|t| order.iter().position(|w| *w == t.workspace).unwrap_or(usize::MAX));
+        self.parked.sort_by_key(|t| {
+            order
+                .iter()
+                .position(|w| *w == t.workspace)
+                .unwrap_or(usize::MAX)
+        });
     }
 }
-

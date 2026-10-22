@@ -115,14 +115,24 @@ fn dist_to_polyline(p: Vec2, pts: &[Vec2]) -> f32 {
 }
 
 /// The parts and features the edited sketch may use: those before it.
-fn before<'a>(features: &'a [Feature], sketch: FeatureId, cache: &'a PartCache) -> (&'a [Feature], Vec<(FeatureId, &'a Solid)>) {
-    let i = features.iter().position(|f| f.id == sketch).unwrap_or(features.len());
+fn before<'a>(
+    features: &'a [Feature],
+    sketch: FeatureId,
+    cache: &'a PartCache,
+) -> (&'a [Feature], Vec<(FeatureId, &'a Solid)>) {
+    let i = features
+        .iter()
+        .position(|f| f.id == sketch)
+        .unwrap_or(features.len());
     let earlier = &features[..i];
     let solids = cache
         .parts
         .iter()
         // P3B.9: the assembly context's parts are references too.
-        .filter(|p| earlier.iter().any(|f| f.id == p.feature) || cadrs_core::assembly::context::is_context(p.feature))
+        .filter(|p| {
+            earlier.iter().any(|f| f.id == p.feature)
+                || cadrs_core::assembly::context::is_context(p.feature)
+        })
         .map(|p| (p.feature, &*p.solid))
         .collect();
     (earlier, solids)
@@ -271,7 +281,8 @@ fn same_shape(a: &Projected, b: &Projected) -> bool {
     const EPS: f64 = 1e-6;
     match (a, b) {
         (&Projected::Line(p, q), &Projected::Line(r, s)) => {
-            (p.distance(r) < EPS && q.distance(s) < EPS) || (p.distance(s) < EPS && q.distance(r) < EPS)
+            (p.distance(r) < EPS && q.distance(s) < EPS)
+                || (p.distance(s) < EPS && q.distance(r) < EPS)
         }
         _ => a == b,
     }
@@ -293,7 +304,10 @@ pub fn vertex_under(
     solids
         .iter()
         .any(|(f, _)| *f == feature)
-        .then_some(Link::Vertex { feature: feature.0, vertex })
+        .then_some(Link::Vertex {
+            feature: feature.0,
+            vertex,
+        })
 }
 
 /// Where a part vertex is in the sketch plane (seen along its normal), and in space; `None` if
@@ -305,7 +319,9 @@ pub fn vertex_at(
     cache: &PartCache,
     link: Link,
 ) -> Option<(cadrs_sketch::Vec2, Vec3)> {
-    let Link::Vertex { feature, vertex } = link else { return None };
+    let Link::Vertex { feature, vertex } = link else {
+        return None;
+    };
     let (earlier, solids) = before(features, sketch, cache);
     let ctx = LinkContext {
         solids: solids.clone(),
@@ -328,7 +344,10 @@ pub fn sketch_vertex_at<'a>(
     s: &SketchSession,
     cache: &'a PartCache,
 ) -> impl Fn(Link) -> Option<cadrs_sketch::Vec2> + 'a {
-    let features = doc.doc.element(s.element).map_or(&[][..], |el| el.features());
+    let features = doc
+        .doc
+        .element(s.element)
+        .map_or(&[][..], |el| el.features());
     let sketch = s.feature;
     let frame = features
         .iter()
@@ -446,17 +465,26 @@ fn link_pointer(
         }
     }
     // The sketch's own points win under the pointer (Pierce picks a point there).
-    let sketch = &features.iter().find(|f| f.id == s.feature).and_then(|f| f.sketch());
+    let sketch = &features
+        .iter()
+        .find(|f| f.id == s.feature)
+        .and_then(|f| f.sketch());
     let own_point = |c: Vec2| {
         let map = crate::sketch_tools::ScreenMap::new(
-            features.iter().find(|f| f.id == s.feature).and_then(|f| f.sketch()?.plane).unwrap_or_default(),
+            features
+                .iter()
+                .find(|f| f.id == s.feature)
+                .and_then(|f| f.sketch()?.plane)
+                .unwrap_or_default(),
             &view.view,
             &rect,
         );
         sketch.and_then(|sk| {
-            cadrs_sketch::hit::hit_test(&sk.geometry, cadrs_sketch::Vec2::new(c.x as f64, c.y as f64), |p| {
-                map.to_screen64(p)
-            })
+            cadrs_sketch::hit::hit_test(
+                &sk.geometry,
+                cadrs_sketch::Vec2::new(c.x as f64, c.y as f64),
+                |p| map.to_screen64(p),
+            )
         })
     };
     let hover = match pick.cursor.filter(|_| over) {
@@ -493,9 +521,7 @@ fn link_pointer(
         }
     }
     // The curve was picked first: the point completes it.
-    if pierce
-        && let (Some(link), Some(p)) = (pick.pending, point)
-    {
+    if pierce && let (Some(link), Some(p)) = (pick.pending, point) {
         add_pierce(&mut commands, target, p, link);
         selection.0.clear();
         pick.pending = None;
@@ -533,7 +559,11 @@ fn draw_link_hover(pick: Res<LinkPick>, view: Res<ViewportView>, mut g: Gizmos<F
             Projected::Line(a, b) => g.line(w(a), w(b), color),
             Projected::Circle(c, r) => {
                 let pts: Vec<Vec3> = (0..=72)
-                    .map(|i| w(c + cadrs_sketch::Vec2::from_angle(i as f64 * std::f64::consts::TAU / 72.0) * r))
+                    .map(|i| {
+                        w(c + cadrs_sketch::Vec2::from_angle(
+                            i as f64 * std::f64::consts::TAU / 72.0,
+                        ) * r)
+                    })
                     .collect();
                 g.linestrip(pts, color);
             }
@@ -541,28 +571,50 @@ fn draw_link_hover(pick: Res<LinkPick>, view: Res<ViewportView>, mut g: Gizmos<F
                 let a = cadrs_sketch::ArcGeom::ccw(center, start, end);
                 g.linestrip(a.tessellate(0.05, 8).into_iter().map(w), color);
             }
-            Projected::Ellipse { center, major, minor } => {
+            Projected::Ellipse {
+                center,
+                major,
+                minor,
+            } => {
                 let e = cadrs_sketch::geom::EllipseGeom::new(center, major, minor);
                 g.linestrip(e.tessellate(0.05, 32).into_iter().map(w), color);
             }
-            Projected::EllipseOffset { center, major, minor, distance } => {
-                let e = cadrs_sketch::geom::EllipseGeom::new(center, major, minor).with_offset(distance);
+            Projected::EllipseOffset {
+                center,
+                major,
+                minor,
+                distance,
+            } => {
+                let e = cadrs_sketch::geom::EllipseGeom::new(center, major, minor)
+                    .with_offset(distance);
                 g.linestrip(e.tessellate(0.05, 32).into_iter().map(w), color);
             }
-            Projected::EllipseArc { center, major, minor, start, end } => {
+            Projected::EllipseArc {
+                center,
+                major,
+                minor,
+                start,
+                end,
+            } => {
                 let e = cadrs_sketch::EllipseArcGeom::ccw(center, major, minor, start, end);
                 g.linestrip(e.tessellate(0.05, 8).into_iter().map(w), color);
             }
             Projected::Spline { ref points, closed } => {
                 let spans = cadrs_sketch::spline::spans(points, closed, None, None);
-                g.linestrip(cadrs_sketch::spline::tessellate(&spans, 8).into_iter().map(w), color);
+                g.linestrip(
+                    cadrs_sketch::spline::tessellate(&spans, 8)
+                        .into_iter()
+                        .map(w),
+                    color,
+                );
             }
             Projected::Point(p) => {
                 // Where the edge pierces the plane: an orange disc about 9 px across, facing the
                 // viewer (clear at any zoom).
                 let rot = Quat::from_rotation_arc(Vec3::Z, view.view.back());
                 for r in [1.0, 2.0, 3.0, 4.5] {
-                    g.circle(Isometry3d::new(w(p), rot), r * px, color).resolution(24);
+                    g.circle(Isometry3d::new(w(p), rot), r * px, color)
+                        .resolution(24);
                 }
             }
         }
@@ -581,9 +633,18 @@ fn draw_vertex_picks(
     view: Res<ViewportView>,
     mut g: Gizmos<FaceOutlineGizmos>,
 ) {
-    let (Some(s), Some(doc)) = (session.as_deref(), doc.as_deref()) else { return };
-    let links = selection.0.iter().map(|e| (*e, true)).chain(hover.0.map(|e| (e, false)));
-    let features = doc.doc.element(s.element).map_or(&[][..], |el| el.features());
+    let (Some(s), Some(doc)) = (session.as_deref(), doc.as_deref()) else {
+        return;
+    };
+    let links = selection
+        .0
+        .iter()
+        .map(|e| (*e, true))
+        .chain(hover.0.map(|e| (e, false)));
+    let features = doc
+        .doc
+        .element(s.element)
+        .map_or(&[][..], |el| el.features());
     let Some(frame) = features
         .iter()
         .find(|f| f.id == s.feature)
@@ -595,15 +656,20 @@ fn draw_vertex_picks(
     let px = view.view.scale;
     let rot = Quat::from_rotation_arc(Vec3::Z, view.view.back());
     for (e, selected) in links {
-        let SketchEntity::Link(link) = e else { continue };
-        let Some((_, at)) = vertex_at(features, s.feature, &frame, &cache, link) else { continue };
+        let SketchEntity::Link(link) = e else {
+            continue;
+        };
+        let Some((_, at)) = vertex_at(features, s.feature, &frame, &cache, link) else {
+            continue;
+        };
         let (color, radii): (Color, &[f32]) = if selected {
             (Color::srgb_u8(0xf6, 0xbc, 0x1a), &[1.0, 2.0, 3.0, 4.0, 5.0])
         } else {
             (Color::srgb_u8(0xf2, 0xb1, 0x3a), &[1.0, 2.0, 3.0, 4.0])
         };
         for r in radii {
-            g.circle(Isometry3d::new(at, rot), r * px, color).resolution(24);
+            g.circle(Isometry3d::new(at, rot), r * px, color)
+                .resolution(24);
         }
     }
 }
@@ -634,8 +700,12 @@ fn shade_hovered_face(
         return;
     };
     let Some(face) = solid.face(&tag) else { return };
-    let idx = &solid.indices[3 * face.first_triangle..3 * (face.first_triangle + face.triangle_count)];
-    let positions: Vec<[f32; 3]> = idx.iter().map(|i| v3(solid.positions[*i as usize]).to_array()).collect();
+    let idx =
+        &solid.indices[3 * face.first_triangle..3 * (face.first_triangle + face.triangle_count)];
+    let positions: Vec<[f32; 3]> = idx
+        .iter()
+        .map(|i| v3(solid.positions[*i as usize]).to_array())
+        .collect();
     let indices: Vec<u32> = (0..positions.len() as u32).collect();
     let mesh = Mesh::new(
         bevy::mesh::PrimitiveTopology::TriangleList,

@@ -7,8 +7,13 @@ use std::f64::consts::PI;
 
 use cadrs_core::advanced::PathRef;
 use cadrs_core::applied::{HoleFeature, HolePoint};
-use cadrs_core::commands::{AddExtrude, AddFeature, AddSketch, EditSketch, SetExtrude, SetFeature, SetPartAppearance, SetPartMaterial};
-use cadrs_core::document::{AxisRef, BooleanOp, DirectionRef, Document, ExtrudeFeature, FaceRef, FeatureKind, Offset};
+use cadrs_core::commands::{
+    AddExtrude, AddFeature, AddSketch, EditSketch, SetExtrude, SetFeature, SetPartAppearance,
+    SetPartMaterial,
+};
+use cadrs_core::document::{
+    AxisRef, BooleanOp, DirectionRef, Document, ExtrudeFeature, FaceRef, FeatureKind, Offset,
+};
 use cadrs_core::hole::{HoleEnd, HoleSpec, HoleStart, Length};
 use cadrs_core::mate::{ConnectorOrigin, ConnectorRef, MateConnectorFeature};
 use cadrs_core::pattern::{MirrorFeature, MirrorPlane, PatternFeature, PatternKind, PatternType};
@@ -31,7 +36,11 @@ impl Doc {
     fn new() -> Self {
         let d = Document::new("P3.8");
         let el = d.elements[0].id;
-        Self { d, h: History::default(), el }
+        Self {
+            d,
+            h: History::default(),
+            el,
+        }
     }
 
     fn features(&self) -> Vec<Feature> {
@@ -54,25 +63,75 @@ impl Doc {
 
     fn sketch(&mut self, plane: PlaneRef, ops: Vec<SketchOp>) -> FeatureId {
         let f = FeatureId::new();
-        self.h.execute(&mut self.d, &AddSketch { element: self.el, feature: f, plane: Some(plane) }).unwrap();
+        self.h
+            .execute(
+                &mut self.d,
+                &AddSketch {
+                    element: self.el,
+                    feature: f,
+                    plane: Some(plane),
+                },
+            )
+            .unwrap();
         for op in ops {
-            self.h.execute(&mut self.d, &EditSketch { element: self.el, feature: f, op }).unwrap();
+            self.h
+                .execute(
+                    &mut self.d,
+                    &EditSketch {
+                        element: self.el,
+                        feature: f,
+                        op,
+                    },
+                )
+                .unwrap();
         }
         f
     }
 
-    fn extrude(&mut self, s: FeatureId, seeds: &[Vec2], set: impl FnOnce(&mut ExtrudeFeature)) -> FeatureId {
-        let g = self.d.element(self.el).unwrap().feature(s).unwrap().sketch().unwrap().geometry.clone();
+    fn extrude(
+        &mut self,
+        s: FeatureId,
+        seeds: &[Vec2],
+        set: impl FnOnce(&mut ExtrudeFeature),
+    ) -> FeatureId {
+        let g = self
+            .d
+            .element(self.el)
+            .unwrap()
+            .feature(s)
+            .unwrap()
+            .sketch()
+            .unwrap()
+            .geometry
+            .clone();
         let regions = samples::region_refs(s, &g, seeds);
         assert_eq!(regions.len(), seeds.len(), "a region is missing");
-        let mut e = ExtrudeFeature { op: BooleanOp::New, ..samples::extrude_of(regions, 10.0) };
+        let mut e = ExtrudeFeature {
+            op: BooleanOp::New,
+            ..samples::extrude_of(regions, 10.0)
+        };
         set(&mut e);
         let f = FeatureId::new();
         self.h
-            .execute(&mut self.d, &AddExtrude { element: self.el, feature: f, extrude: ExtrudeFeature::default() })
+            .execute(
+                &mut self.d,
+                &AddExtrude {
+                    element: self.el,
+                    feature: f,
+                    extrude: ExtrudeFeature::default(),
+                },
+            )
             .unwrap();
         self.h
-            .execute(&mut self.d, &SetExtrude { element: self.el, feature: f, extrude: e, label: "Extrude".into() })
+            .execute(
+                &mut self.d,
+                &SetExtrude {
+                    element: self.el,
+                    feature: f,
+                    extrude: e,
+                    label: "Extrude".into(),
+                },
+            )
             .unwrap();
         f
     }
@@ -89,13 +148,31 @@ impl Doc {
     fn add(&mut self, base: &str, kind: FeatureKind) -> FeatureId {
         let feature = FeatureId::new();
         self.h
-            .execute(&mut self.d, &AddFeature { element: self.el, feature, base_name: base.into(), kind })
+            .execute(
+                &mut self.d,
+                &AddFeature {
+                    element: self.el,
+                    feature,
+                    base_name: base.into(),
+                    kind,
+                },
+            )
             .unwrap();
         feature
     }
 
     fn set(&mut self, feature: FeatureId, kind: FeatureKind) {
-        self.h.execute(&mut self.d, &SetFeature { element: self.el, feature, kind, label: "Edit".into() }).unwrap();
+        self.h
+            .execute(
+                &mut self.d,
+                &SetFeature {
+                    element: self.el,
+                    feature,
+                    kind,
+                    label: "Edit".into(),
+                },
+            )
+            .unwrap();
     }
 }
 
@@ -115,7 +192,11 @@ fn faces_of(parts: &[Part], op: FeatureId) -> Vec<FaceRef> {
     for p in parts {
         for (i, f) in p.solid.faces.iter().enumerate() {
             if f.name.op == op.0 {
-                out.push(FaceRef { part: p.id, face: f.name, seed: p.solid.face_point(i).unwrap() });
+                out.push(FaceRef {
+                    part: p.id,
+                    face: f.name,
+                    seed: p.solid.face_point(i).unwrap(),
+                });
             }
         }
     }
@@ -126,9 +207,17 @@ fn faces_of(parts: &[Part], op: FeatureId) -> Vec<FaceRef> {
 fn top_face(part: &Part, z: f64) -> FaceRef {
     let s = &part.solid;
     let i = (0..s.faces.len())
-        .find(|&i| s.faces[i].plane.is_some_and(|pl| pl.normal()[2] > 0.999 && (pl.origin[2] - z).abs() < 1e-6))
+        .find(|&i| {
+            s.faces[i]
+                .plane
+                .is_some_and(|pl| pl.normal()[2] > 0.999 && (pl.origin[2] - z).abs() < 1e-6)
+        })
         .expect("a top face");
-    FaceRef { part: part.id, face: s.faces[i].name, seed: s.face_point(i).unwrap() }
+    FaceRef {
+        part: part.id,
+        face: s.faces[i].name,
+        seed: s.face_point(i).unwrap(),
+    }
 }
 
 /// A blind Ø`d` hole spec, `depth` deep, from the part, with the 118° point.
@@ -164,7 +253,10 @@ fn linear_part_pattern_of_a_cube() {
     let parts = d.parts();
     assert_eq!(parts.len(), 5);
     close(d.volume(), 5000.0, 1e-6);
-    let far = parts.iter().map(|p| p.mass.unwrap().center_of_mass.x).fold(f64::MIN, f64::max);
+    let far = parts
+        .iter()
+        .map(|p| p.mass.unwrap().center_of_mass.x)
+        .fold(f64::MIN, f64::max);
     close(far, 85.0, 1e-9);
     for c in parts.iter().filter(|p| p.id != seed) {
         assert_eq!(c.source, Some(seed));
@@ -172,10 +264,22 @@ fn linear_part_pattern_of_a_cube() {
         assert_eq!(c.feature, pat);
     }
     let red = Appearance::rgb(200, 30, 30);
-    d.h.execute(&mut d.d, &SetPartAppearance { element: d.el, parts: vec![seed], appearance: Some(red) }).unwrap();
     d.h.execute(
         &mut d.d,
-        &SetPartMaterial { element: d.el, parts: vec![seed], material: cadrs_core::material::library("Steel") },
+        &SetPartAppearance {
+            element: d.el,
+            parts: vec![seed],
+            appearance: Some(red),
+        },
+    )
+    .unwrap();
+    d.h.execute(
+        &mut d.d,
+        &SetPartMaterial {
+            element: d.el,
+            parts: vec![seed],
+            material: cadrs_core::material::library("Steel"),
+        },
     )
     .unwrap();
     let props = d.d.element(d.el).unwrap().part_props().to_vec();
@@ -195,9 +299,21 @@ fn linear_part_pattern_of_a_cube() {
     p.skip_on = false;
     p.first.centered = true;
     d.set(pat, FeatureKind::Pattern(p.clone()));
-    let xs: Vec<f64> = d.parts().iter().map(|p| p.mass.unwrap().center_of_mass.x).collect();
-    close(xs.iter().copied().fold(f64::MAX, f64::min), 5.0 - 40.0, 1e-9);
-    close(xs.iter().copied().fold(f64::MIN, f64::max), 5.0 + 40.0, 1e-9);
+    let xs: Vec<f64> = d
+        .parts()
+        .iter()
+        .map(|p| p.mass.unwrap().center_of_mass.x)
+        .collect();
+    close(
+        xs.iter().copied().fold(f64::MAX, f64::min),
+        5.0 - 40.0,
+        1e-9,
+    );
+    close(
+        xs.iter().copied().fold(f64::MIN, f64::max),
+        5.0 + 40.0,
+        1e-9,
+    );
     // A second direction along Y (Front's normal is −Y: flipped), 2 × 30: a 5 × 2 grid.
     p.first.centered = false;
     p.second_on = true;
@@ -214,12 +330,33 @@ fn linear_part_pattern_of_a_cube() {
 fn plate_with_hole() -> (Doc, FeatureId, f64) {
     let mut d = Doc::new();
     d.block(-50.0, -50.0, 50.0, 50.0, 20.0);
-    let s = d.sketch(PlaneRef::Top, vec![SketchOp::AddPoint { pos: Vec2::new(30.0, 0.0) }]);
-    let g = d.d.element(d.el).unwrap().feature(s).unwrap().sketch().unwrap().geometry.clone();
-    let point = HolePoint { sketch: s, point: g.points.keys().next().unwrap() };
+    let s = d.sketch(
+        PlaneRef::Top,
+        vec![SketchOp::AddPoint {
+            pos: Vec2::new(30.0, 0.0),
+        }],
+    );
+    let g =
+        d.d.element(d.el)
+            .unwrap()
+            .feature(s)
+            .unwrap()
+            .sketch()
+            .unwrap()
+            .geometry
+            .clone();
+    let point = HolePoint {
+        sketch: s,
+        point: g.points.keys().next().unwrap(),
+    };
     let hole = d.add(
         "Hole",
-        FeatureKind::Hole(HoleFeature { points: vec![point], spec: blind(10.0, 12.0), flip: true, ..HoleFeature::default() }),
+        FeatureKind::Hole(HoleFeature {
+            points: vec![point],
+            spec: blind(10.0, 12.0),
+            flip: true,
+            ..HoleFeature::default()
+        }),
     );
     (d, hole, blind_volume(10.0, 12.0))
 }
@@ -234,7 +371,9 @@ fn circular_feature_pattern_of_a_hole() {
     let mut p = PatternFeature::new(PatternKind::Circular);
     p.pattern_type = PatternType::Feature;
     p.features = vec![hole];
-    p.axis = Some(AxisRef::Connector(ConnectorRef::Implicit(ConnectorOrigin::Origin)));
+    p.axis = Some(AxisRef::Connector(ConnectorRef::Implicit(
+        ConnectorOrigin::Origin,
+    )));
     p.first.count = 6;
     let pat = d.add("Circular pattern", FeatureKind::Pattern(p.clone()));
     close(d.volume(), plate - 6.0 * v, 1e-6);
@@ -243,12 +382,22 @@ fn circular_feature_pattern_of_a_hole() {
     close(c.x, 0.0, 1e-9);
     close(c.y, 0.0, 1e-9);
     // The copies' faces are named under the pattern (instance 1..5).
-    let names = d.parts()[0].solid.faces.iter().filter(|f| f.name.op == pat.0).count();
+    let names = d.parts()[0]
+        .solid
+        .faces
+        .iter()
+        .filter(|f| f.name.op == pat.0)
+        .count();
     assert_eq!(names, 10, "two faces (wall and point) per copy");
     p.reapply = true;
     d.set(pat, FeatureKind::Pattern(p.clone()));
     close(d.volume(), plate - 6.0 * v, 1e-6);
-    let names = d.parts()[0].solid.faces.iter().filter(|f| f.name.op == pat.0).count();
+    let names = d.parts()[0]
+        .solid
+        .faces
+        .iter()
+        .filter(|f| f.name.op == pat.0)
+        .count();
     assert_eq!(names, 10);
     // Equal spacing off: 60° is the step (the same six).
     p.equal_spacing = false;
@@ -292,8 +441,12 @@ fn mirror_of_a_half_control_arm() {
     // plane) with Add: one part of the full volume, 368 749.705 mm³ (the course's value).
     let mut d = Doc::new();
     let s = d.sketch(PlaneRef::Top, vec![samples::control_arm_geometry()]);
-    d.extrude(s, &samples::EXTRUDE_1_SEEDS, |e| e.depth = samples::EXTRUDE_1_DEPTH);
-    d.extrude(s, &samples::EXTRUDE_2_SEEDS, |e| e.depth = samples::EXTRUDE_2_DEPTH);
+    d.extrude(s, &samples::EXTRUDE_1_SEEDS, |e| {
+        e.depth = samples::EXTRUDE_1_DEPTH
+    });
+    d.extrude(s, &samples::EXTRUDE_2_SEEDS, |e| {
+        e.depth = samples::EXTRUDE_2_DEPTH
+    });
     close(d.volume(), 368_749.705, 1e-3);
     let cut = d.sketch(PlaneRef::Top, vec![rect(-200.0, -200.0, 200.0, 0.0)]);
     d.extrude(cut, &[Vec2::new(0.0, -100.0)], |e| {
@@ -313,7 +466,11 @@ fn mirror_of_a_half_control_arm() {
     };
     d.add("Mirror", FeatureKind::Mirror(m));
     let parts = d.parts();
-    assert_eq!(parts.len(), 1, "the halves and their mirror images are one part");
+    assert_eq!(
+        parts.len(),
+        1,
+        "the halves and their mirror images are one part"
+    );
     close(parts[0].mass.unwrap().volume, 368_749.705, 1e-3);
     close(parts[0].mass.unwrap().center_of_mass.y, 0.0, 1e-9);
 }
@@ -329,7 +486,11 @@ fn face_and_feature_mirror_of_a_pocket() {
     let pocket = d.extrude(s, &[Vec2::new(20.0, 0.0)], |e| {
         e.op = BooleanOp::Remove;
         e.depth = 10.0;
-        e.start_offset = Some(Offset { value: 15.0, expr: "15 mm".into(), flip: false });
+        e.start_offset = Some(Offset {
+            value: 15.0,
+            expr: "15 mm".into(),
+            flip: false,
+        });
     });
     close(d.volume(), 200_000.0 - 1000.0, 1e-6);
     let faces = faces_of(&d.parts(), pocket);
@@ -370,7 +531,11 @@ fn a_reapplied_mirror_stops_at_its_own_up_to_next() {
         d.extrude(s, &[Vec2::new((x0 + x1) / 2.0, 0.0)], |e| {
             e.depth = 5.0;
             e.depth_expr = "5 mm".into();
-            e.start_offset = Some(Offset { value: z, expr: format!("{z} mm"), flip: false });
+            e.start_offset = Some(Offset {
+                value: z,
+                expr: format!("{z} mm"),
+                flip: false,
+            });
         });
     };
     ceiling(&mut d, 10.0, 40.0, 30.0);
@@ -378,10 +543,19 @@ fn a_reapplied_mirror_stops_at_its_own_up_to_next() {
     let s = d.sketch(PlaneRef::Top, vec![rect(20.0, -5.0, 30.0, 5.0)]);
     let post = d.extrude(s, &[Vec2::new(25.0, 0.0)], |e| {
         e.end = cadrs_core::document::EndType::UpToNext;
-        e.start_offset = Some(Offset { value: 10.0, expr: "10 mm".into(), flip: false });
+        e.start_offset = Some(Offset {
+            value: 10.0,
+            expr: "10 mm".into(),
+            flip: false,
+        });
     });
     let before = d.volume();
-    let mut m = MirrorFeature { mirror_type: PatternType::Feature, features: vec![post], plane: Some(MirrorPlane::Plane(PlaneRef::Right)), ..MirrorFeature::default() };
+    let mut m = MirrorFeature {
+        mirror_type: PatternType::Feature,
+        features: vec![post],
+        plane: Some(MirrorPlane::Plane(PlaneRef::Right)),
+        ..MirrorFeature::default()
+    };
     let mirror = d.add("Mirror", FeatureKind::Mirror(m.clone()));
     let copied = d.volume() - before;
     close(copied, 100.0 * 20.0, 1e-3);
@@ -401,12 +575,31 @@ fn curve_pattern_along_an_arc() {
     let seed = d.parts()[0].id;
     let path = d.sketch(
         PlaneRef::Top,
-        vec![SketchOp::AddArc { center: Vec2::new(0.0, 0.0), start: Vec2::new(50.0, 0.0), end: Vec2::new(0.0, 50.0), construction: false }],
+        vec![SketchOp::AddArc {
+            center: Vec2::new(0.0, 0.0),
+            start: Vec2::new(50.0, 0.0),
+            end: Vec2::new(0.0, 50.0),
+            construction: false,
+        }],
     );
-    let curve = d.d.element(d.el).unwrap().feature(path).unwrap().sketch().unwrap().geometry.curves.keys().next().unwrap();
+    let curve =
+        d.d.element(d.el)
+            .unwrap()
+            .feature(path)
+            .unwrap()
+            .sketch()
+            .unwrap()
+            .geometry
+            .curves
+            .keys()
+            .next()
+            .unwrap();
     let mut p = PatternFeature::new(PatternKind::Curve);
     p.parts = vec![seed];
-    p.path = vec![PathRef::SketchCurve { sketch: path, curve }];
+    p.path = vec![PathRef::SketchCurve {
+        sketch: path,
+        curve,
+    }];
     p.first.count = 3;
     d.add("Curve pattern", FeatureKind::Pattern(p));
     let parts = d.parts();
@@ -433,7 +626,10 @@ fn hole_at_a_mate_connector() {
     let top = top_face(&d.parts()[0], 40.0);
     let mc = d.add(
         "Mate connector",
-        FeatureKind::MateConnector(MateConnectorFeature { origin: Some(ConnectorOrigin::Face(top)), ..MateConnectorFeature::default() }),
+        FeatureKind::MateConnector(MateConnectorFeature {
+            origin: Some(ConnectorOrigin::Face(top)),
+            ..MateConnectorFeature::default()
+        }),
     );
     let b = d.build();
     let f = b.connectors[&mc];
@@ -443,7 +639,11 @@ fn hole_at_a_mate_connector() {
     close(f.normal()[2], 1.0, 1e-12);
     d.add(
         "Hole",
-        FeatureKind::Hole(HoleFeature { connectors: vec![ConnectorRef::Feature(mc)], spec: blind(46.0, 12.0), ..HoleFeature::default() }),
+        FeatureKind::Hole(HoleFeature {
+            connectors: vec![ConnectorRef::Feature(mc)],
+            spec: blind(46.0, 12.0),
+            ..HoleFeature::default()
+        }),
     );
     close(d.volume(), 400_000.0 - blind_volume(46.0, 12.0), 1e-6);
     let c = d.parts()[0].mass.unwrap().center_of_mass;
@@ -462,7 +662,11 @@ fn split_types_and_options() {
     let mut d = Doc::new();
     d.block(-5.0, 0.0, 15.0, 20.0, 10.0);
     let part = d.parts()[0].clone();
-    let mut x = SplitFeature { parts: vec![part.id], tool: Some(SplitToolRef::Plane(PlaneRef::Right)), ..SplitFeature::default() };
+    let mut x = SplitFeature {
+        parts: vec![part.id],
+        tool: Some(SplitToolRef::Plane(PlaneRef::Right)),
+        ..SplitFeature::default()
+    };
     let f = d.add("Split", FeatureKind::Split(x.clone()));
     let mut vols: Vec<f64> = d.parts().iter().map(|p| p.mass.unwrap().volume).collect();
     vols.sort_by(f64::total_cmp);
@@ -495,8 +699,16 @@ fn split_types_and_options() {
     e.block(-5.0, 0.0, 15.0, 20.0, 10.0);
     e.block(20.0, 0.0, 30.0, 20.0, 5.0);
     let parts = e.parts();
-    let (a, b) = if parts[0].mass.unwrap().volume > 3000.0 { (&parts[0], &parts[1]) } else { (&parts[1], &parts[0]) };
-    let mut x = SplitFeature { parts: vec![a.id], tool: Some(SplitToolRef::Face(top_face(b, 5.0))), ..SplitFeature::default() };
+    let (a, b) = if parts[0].mass.unwrap().volume > 3000.0 {
+        (&parts[0], &parts[1])
+    } else {
+        (&parts[1], &parts[0])
+    };
+    let mut x = SplitFeature {
+        parts: vec![a.id],
+        tool: Some(SplitToolRef::Face(top_face(b, 5.0))),
+        ..SplitFeature::default()
+    };
     let g = e.add("Split", FeatureKind::Split(x.clone()));
     assert_eq!(e.parts().len(), 3);
     close(e.volume(), 4000.0 + 1000.0, 1e-6);

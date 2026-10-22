@@ -79,7 +79,13 @@ mod tests {
         ] {
             assert_eq!(role_of(name), role, "{name}");
         }
-        let r = recognise(&["Enclosure", "Mainboard", "Keep-out Battery", "Keep-in", "Antenna"]);
+        let r = recognise(&[
+            "Enclosure",
+            "Mainboard",
+            "Keep-out Battery",
+            "Keep-in",
+            "Antenna",
+        ]);
         assert_eq!(r.boards, vec![1]);
         assert_eq!(r.keep_outs, vec![2]);
         assert_eq!(r.keep_ins, vec![3]);

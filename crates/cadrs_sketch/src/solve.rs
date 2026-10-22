@@ -160,7 +160,10 @@ struct P2 {
 
 impl P2 {
     fn sub(self, o: P2) -> P2 {
-        P2 { x: self.x - o.x, y: self.y - o.y }
+        P2 {
+            x: self.x - o.x,
+            y: self.y - o.y,
+        }
     }
     fn cross(self, o: P2) -> D {
         self.x * o.y - self.y * o.x
@@ -229,7 +232,11 @@ impl Kap {
             Kap::Line => D::c(0.0),
             Kap::Arc(sign) => {
                 let r = pt(x, 2).sub(pt(x, 0)).len();
-                if r.v < 1e-12 { D::c(0.0) } else { D::c(sign) / r }
+                if r.v < 1e-12 {
+                    D::c(0.0)
+                } else {
+                    D::c(sign) / r
+                }
             }
             Kap::Bezier => {
                 let (p0, p1, p2) = (pt(x, 0), pt(x, 2), pt(x, 4));
@@ -259,7 +266,10 @@ impl Tg {
         let d = pt(x, 2).sub(pt(x, 0));
         match self {
             Tg::Dir => d,
-            Tg::Radial(s) => P2 { x: -d.y * s, y: d.x * s },
+            Tg::Radial(s) => P2 {
+                x: -d.y * s,
+                y: d.x * s,
+            },
         }
     }
 }
@@ -373,7 +383,10 @@ pub enum Kind {
 }
 
 fn pt(x: &[D], i: usize) -> P2 {
-    P2 { x: x[i], y: x[i + 1] }
+    P2 {
+        x: x[i],
+        y: x[i + 1],
+    }
 }
 
 impl Kind {
@@ -421,7 +434,11 @@ impl Kind {
                 let c2 = pt(x, o);
                 let b = r2.eval(&x[o + 2..]);
                 let d = c1.sub(c2).len();
-                if internal { d - (a - b).abs() } else { d - (a + b) }
+                if internal {
+                    d - (a - b).abs()
+                } else {
+                    d - (a + b)
+                }
             }
             Kind::EqualLength => pt(x, 2).sub(pt(x, 0)).len() - pt(x, 6).sub(pt(x, 4)).len(),
             Kind::EqualRadius(r1, r2) => r1.eval(x) - r2.eval(&x[r1.width()..]),
@@ -467,7 +484,11 @@ impl Kind {
             Kind::PointCircleDist(r, far, v) => {
                 let d = pt(x, 0).sub(pt(x, 2)).len();
                 let r = r.eval(&x[4..]);
-                if far { d + r - D::c(v) } else { (d - r).abs() - D::c(v) }
+                if far {
+                    d + r - D::c(v)
+                } else {
+                    (d - r).abs() - D::c(v)
+                }
             }
             Kind::LineCircleDist(r, far, v) => {
                 let (a, b, c) = (pt(x, 0), pt(x, 2), pt(x, 4));
@@ -478,7 +499,11 @@ impl Kind {
                 }
                 let h = (d.cross(c.sub(a)) / l).abs();
                 let r = r.eval(&x[6..]);
-                if far { h + r - D::c(v) } else { (h - r).abs() - D::c(v) }
+                if far {
+                    h + r - D::c(v)
+                } else {
+                    (h - r).abs() - D::c(v)
+                }
             }
             Kind::CircleCircleDist(r1, r2, far1, far2, axis, v) => {
                 let c1 = pt(x, 0);
@@ -544,7 +569,10 @@ impl Kind {
                 }
                 let unit = |r: P2| {
                     let d = r.sub(c);
-                    P2 { x: d.dot(axis) / (a * a), y: axis.cross(d) / (a * b.abs()) }
+                    P2 {
+                        x: d.dot(axis) / (a * a),
+                        y: axis.cross(d) / (a * b.abs()),
+                    }
                 };
                 let (p1, q1) = (unit(p), unit(q));
                 let d = q1.sub(p1);
@@ -664,7 +692,8 @@ impl System {
                 | ConstraintOf::Pierce(PointRef::Point(p), _) => {
                     fixed.insert(p, s.pos(p));
                 }
-                ConstraintOf::FixCurve(CurveRef::Curve(k)) | ConstraintOf::Use(CurveRef::Curve(k), _) => {
+                ConstraintOf::FixCurve(CurveRef::Curve(k))
+                | ConstraintOf::Use(CurveRef::Curve(k), _) => {
                     for p in s.curve_points(k) {
                         fixed.insert(p, s.pos(p));
                     }
@@ -698,7 +727,10 @@ impl System {
                 CurveKind::Circle { radius, .. } if !fixed_radius.contains(&k) => {
                     sys.radius_var.insert(k, sys.x.len());
                     sys.x.push(radius);
-                    sys.guards.push((Kind::Radius(Rad::Scalar, 1.0, 0.0), vec![In::Var(sys.x.len() - 1)]));
+                    sys.guards.push((
+                        Kind::Radius(Rad::Scalar, 1.0, 0.0),
+                        vec![In::Var(sys.x.len() - 1)],
+                    ));
                 }
                 CurveKind::Arc { center, start, end } => {
                     let mut inputs = sys.point(s, PointRef::Point(center)).to_vec();
@@ -711,7 +743,11 @@ impl System {
                         source: Source::Arc(k),
                     });
                 }
-                CurveKind::Ellipse { center, major, minor } => {
+                CurveKind::Ellipse {
+                    center,
+                    major,
+                    minor,
+                } => {
                     let mut inputs = sys.point(s, PointRef::Point(center)).to_vec();
                     inputs.extend(sys.point(s, PointRef::Point(major)));
                     sys.guards.push((Kind::Distance(0.0), inputs));
@@ -725,7 +761,13 @@ impl System {
                     }
                 }
                 // An elliptical arc: its ellipse as above, and its ends on the ellipse.
-                CurveKind::EllipseArc { center, major, minor, start, end } => {
+                CurveKind::EllipseArc {
+                    center,
+                    major,
+                    minor,
+                    start,
+                    end,
+                } => {
                     let mut inputs = sys.point(s, PointRef::Point(center)).to_vec();
                     inputs.extend(sys.point(s, PointRef::Point(major)));
                     sys.guards.push((Kind::Distance(0.0), inputs));
@@ -739,8 +781,13 @@ impl System {
                     }
                     if let Some(e) = sys.ellipse(s, CurveRef::Curve(k)) {
                         for p in [start, end] {
-                            let inputs = [sys.point(s, PointRef::Point(p)).to_vec(), e.clone()].concat();
-                            sys.eqs.push(Equation { kind: Kind::PointEllipse, inputs, source: Source::Arc(k) });
+                            let inputs =
+                                [sys.point(s, PointRef::Point(p)).to_vec(), e.clone()].concat();
+                            sys.eqs.push(Equation {
+                                kind: Kind::PointEllipse,
+                                inputs,
+                                source: Source::Arc(k),
+                            });
                         }
                     }
                 }
@@ -828,17 +875,40 @@ impl System {
         let pt = |q: PointId| self.point(s, PointRef::Point(q)).to_vec();
         match s.curves.get(id)?.kind {
             CurveKind::Line { a, b } => {
-                let other = if a == p { b } else if b == p { a } else { return None };
+                let other = if a == p {
+                    b
+                } else if b == p {
+                    a
+                } else {
+                    return None;
+                };
                 Some((Tg::Dir, [pt(p), pt(other)].concat(), Kap::Line, vec![]))
             }
             CurveKind::Arc { center, start, end } => {
-                let sign = if start == p { 1.0 } else if end == p { -1.0 } else { return None };
+                let sign = if start == p {
+                    1.0
+                } else if end == p {
+                    -1.0
+                } else {
+                    return None;
+                };
                 let r = [pt(center), pt(p)].concat();
                 Some((Tg::Radial(sign), r.clone(), Kap::Arc(sign), r))
             }
             CurveKind::Bezier { a, c1, c2, b } => {
-                let [p0, p1, p2] = if a == p { [a, c1, c2] } else if b == p { [b, c2, c1] } else { return None };
-                Some((Tg::Dir, [pt(p0), pt(p1)].concat(), Kap::Bezier, [pt(p0), pt(p1), pt(p2)].concat()))
+                let [p0, p1, p2] = if a == p {
+                    [a, c1, c2]
+                } else if b == p {
+                    [b, c2, c1]
+                } else {
+                    return None;
+                };
+                Some((
+                    Tg::Dir,
+                    [pt(p0), pt(p1)].concat(),
+                    Kap::Bezier,
+                    [pt(p0), pt(p1), pt(p2)].concat(),
+                ))
             }
             _ => None,
         }
@@ -846,8 +916,16 @@ impl System {
 
     /// The tangency (G1) equation where `a` and `b` meet at `p`: the curve runs smoothly on
     /// through the joint (not back on itself, a cusp).
-    fn push_joint_tangent(&mut self, s: &Sketch, a: CurveRef, b: CurveRef, p: PointId, src: Source) -> bool {
-        let (Some((ta, ia, ..)), Some((tb, ib, ..))) = (self.joint(s, a, p), self.joint(s, b, p)) else {
+    fn push_joint_tangent(
+        &mut self,
+        s: &Sketch,
+        a: CurveRef,
+        b: CurveRef,
+        p: PointId,
+        src: Source,
+    ) -> bool {
+        let (Some((ta, ia, ..)), Some((tb, ib, ..))) = (self.joint(s, a, p), self.joint(s, b, p))
+        else {
             return false;
         };
         self.push(Kind::Smooth(ta, tb), [ia, ib].concat(), src);
@@ -859,8 +937,17 @@ impl System {
         let CurveRef::Curve(id) = c else {
             return None;
         };
-        let (CurveKind::Ellipse { center, major, minor } | CurveKind::EllipseArc { center, major, minor, .. }) =
-            s.curves.get(id)?.kind
+        let (CurveKind::Ellipse {
+            center,
+            major,
+            minor,
+        }
+        | CurveKind::EllipseArc {
+            center,
+            major,
+            minor,
+            ..
+        }) = s.curves.get(id)?.kind
         else {
             return None;
         };
@@ -1186,7 +1273,12 @@ impl System {
 
     /// How an offset of `target` from `source` is read: two lines (a point of the target and
     /// the source line), or two circles or arcs (their radii).
-    fn offset_inputs(&self, s: &Sketch, source: CurveRef, target: CurveRef) -> Option<(Off, Vec<In>)> {
+    fn offset_inputs(
+        &self,
+        s: &Sketch,
+        source: CurveRef,
+        target: CurveRef,
+    ) -> Option<(Off, Vec<In>)> {
         if let (Some(src), Some(tgt)) = (self.line(s, source), self.line(s, target)) {
             return Some((Off::Line, [tgt[..2].to_vec(), src].concat()));
         }
@@ -1242,20 +1334,35 @@ impl System {
             DimensionKind::PointCircle { p, circle, far } => {
                 if let Some((c, rad, r)) = self.round(s, CurveRef::Curve(circle)) {
                     let pp = self.point(s, p).to_vec();
-                    self.push(Kind::PointCircleDist(rad, far, v), [pp, c.to_vec(), r].concat(), src);
+                    self.push(
+                        Kind::PointCircleDist(rad, far, v),
+                        [pp, c.to_vec(), r].concat(),
+                        src,
+                    );
                 }
             }
             DimensionKind::LineCircle { line, circle, far } => {
                 if let (Some(l), Some((c, rad, r))) =
                     (self.line(s, line), self.round(s, CurveRef::Curve(circle)))
                 {
-                    self.push(Kind::LineCircleDist(rad, far, v), [l, c.to_vec(), r].concat(), src);
+                    self.push(
+                        Kind::LineCircleDist(rad, far, v),
+                        [l, c.to_vec(), r].concat(),
+                        src,
+                    );
                 }
             }
-            DimensionKind::CircleCircle { a, b, far_a, far_b, axis } => {
-                if let (Some((c1, r1, i1)), Some((c2, r2, i2))) =
-                    (self.round(s, CurveRef::Curve(a)), self.round(s, CurveRef::Curve(b)))
-                {
+            DimensionKind::CircleCircle {
+                a,
+                b,
+                far_a,
+                far_b,
+                axis,
+            } => {
+                if let (Some((c1, r1, i1)), Some((c2, r2, i2))) = (
+                    self.round(s, CurveRef::Curve(a)),
+                    self.round(s, CurveRef::Curve(b)),
+                ) {
                     self.push(
                         Kind::CircleCircleDist(r1, r2, far_a, far_b, axis, v),
                         [c1.to_vec(), i1, c2.to_vec(), i2].concat(),
@@ -1376,7 +1483,9 @@ impl System {
     fn degenerate(&self, vars: &[usize]) -> bool {
         let vars: HashSet<usize> = vars.iter().copied().collect();
         self.guards.iter().any(|(kind, inputs)| {
-            inputs.iter().any(|i| matches!(i, In::Var(k) if vars.contains(k)))
+            inputs
+                .iter()
+                .any(|i| matches!(i, In::Var(k) if vars.contains(k)))
                 && Equation {
                     kind: *kind,
                     inputs: inputs.clone(),
@@ -1394,7 +1503,10 @@ impl System {
     }
 
     fn residuals(&self, eqs: &[usize]) -> DVector<f64> {
-        DVector::from_iterator(eqs.len(), eqs.iter().map(|&e| self.eqs[e].residual(&self.x)))
+        DVector::from_iterator(
+            eqs.len(),
+            eqs.iter().map(|&e| self.eqs[e].residual(&self.x)),
+        )
     }
 
     /// The Jacobian of `eqs` over the unknowns `vars` (columns in that order).
@@ -1506,7 +1618,12 @@ impl System {
     /// candidate's rows: one SVD for the left null space, then a small one per candidate,
     /// instead of a solve each. `None` when no conflicting row is dependent (the conflict is
     /// another kind: the caller tries removals by solving).
-    fn dependent_set(&self, vars: &[usize], eqs: &[usize], conflicting: &[Source]) -> Option<Vec<Source>> {
+    fn dependent_set(
+        &self,
+        vars: &[usize],
+        eqs: &[usize],
+        conflicting: &[Source],
+    ) -> Option<Vec<Source>> {
         let m = eqs.len();
         if m == 0 || vars.is_empty() {
             return None;
@@ -1526,23 +1643,35 @@ impl System {
         let svd = a.svd(true, false);
         let u = svd.u?;
         let smax = svd.singular_values.max().max(1e-12);
-        let null: Vec<usize> = (0..svd.singular_values.len()).filter(|i| svd.singular_values[*i] < smax * 1e-8).collect();
+        let null: Vec<usize> = (0..svd.singular_values.len())
+            .filter(|i| svd.singular_values[*i] < smax * 1e-8)
+            .collect();
         if null.is_empty() {
             return None;
         }
         // The left null space: each column a combination of rows that is zero.
         let nl = DMatrix::from_fn(m, null.len(), |r, c| u[(r, null[c])]);
-        let rows_of = |src: Source| -> Vec<usize> { (0..m).filter(|r| self.eqs[eqs[*r]].source == src).collect() };
+        let rows_of = |src: Source| -> Vec<usize> {
+            (0..m).filter(|r| self.eqs[eqs[*r]].source == src).collect()
+        };
         // A conflicting source's rows in some combination: its conflict is a dependency.
-        let involved = |rows: &[usize], basis: &DMatrix<f64>| rows.iter().any(|r| basis.row(*r).norm() > 1e-6);
-        let targets: Vec<Vec<usize>> = conflicting.iter().map(|c| rows_of(*c)).filter(|rows| involved(rows, &nl)).collect();
+        let involved =
+            |rows: &[usize], basis: &DMatrix<f64>| rows.iter().any(|r| basis.row(*r).norm() > 1e-6);
+        let targets: Vec<Vec<usize>> = conflicting
+            .iter()
+            .map(|c| rows_of(*c))
+            .filter(|rows| involved(rows, &nl))
+            .collect();
         if targets.is_empty() {
             return None;
         }
         let mut sources: Vec<Source> = Vec::new();
         for &e in eqs {
             let src = self.eqs[e].source;
-            if matches!(src, Source::Constraint(_) | Source::Dimension(_)) && !conflicting.contains(&src) && !sources.contains(&src) {
+            if matches!(src, Source::Constraint(_) | Source::Dimension(_))
+                && !conflicting.contains(&src)
+                && !sources.contains(&src)
+            {
                 sources.push(src);
             }
         }
@@ -1554,7 +1683,9 @@ impl System {
             let b = DMatrix::from_fn(rows.len(), k, |r, c| nl[(rows[r], c)]);
             let btb = b.transpose() * &b;
             let eig = nalgebra::SymmetricEigen::new(btb);
-            let keep: Vec<usize> = (0..k).filter(|i| eig.eigenvalues[*i].abs() < 1e-10).collect();
+            let keep: Vec<usize> = (0..k)
+                .filter(|i| eig.eigenvalues[*i].abs() < 1e-10)
+                .collect();
             let left = DMatrix::from_fn(k, keep.len(), |r, c| eig.eigenvectors[(r, keep[c])]);
             let remaining = &nl * left;
             // Freed when some conflicting source is in no combination left.
@@ -1682,11 +1813,18 @@ pub fn sync_offsets(s: &mut Sketch) {
         for &(source, target, value, driven) in &dims {
             let (sm, sd) = match s.curves.get(source).map(|c| c.kind) {
                 Some(CurveKind::Ellipse { minor, .. }) => (minor, 0.0),
-                Some(CurveKind::EllipseOffset { minor, distance, .. }) => (minor, distance),
+                Some(CurveKind::EllipseOffset {
+                    minor, distance, ..
+                }) => (minor, distance),
                 _ => continue,
             };
-            let Some(c) = s.curves.get_mut(target) else { continue };
-            let CurveKind::EllipseOffset { minor, distance, .. } = &mut c.kind else {
+            let Some(c) = s.curves.get_mut(target) else {
+                continue;
+            };
+            let CurveKind::EllipseOffset {
+                minor, distance, ..
+            } = &mut c.kind
+            else {
                 continue;
             };
             let d = if driven {
@@ -1715,7 +1853,10 @@ pub fn solve_weighted(s: &mut Sketch, weights: &[(PointId, f64)], rest: f64) -> 
     let mut sys = System::new(s, &HashSet::new());
     let mut w: HashMap<usize, f64> = HashMap::new();
     for (p, &i) in &sys.point_var {
-        let k = weights.iter().find(|(q, _)| q == p).map_or(rest, |(_, k)| *k);
+        let k = weights
+            .iter()
+            .find(|(q, _)| q == p)
+            .map_or(rest, |(_, k)| *k);
         w.insert(i, k);
         w.insert(i + 1, k);
     }
@@ -1814,7 +1955,10 @@ pub fn conflict_set(s: &Sketch, conflicting: &[Source]) -> Vec<Source> {
     // length, say), linear algebra on the Jacobian finds whose removal frees it.
     let mut quick = false;
     for (vars, eqs) in sys.components(&all) {
-        if !eqs.iter().any(|e| conflicting.contains(&sys.eqs[*e].source)) {
+        if !eqs
+            .iter()
+            .any(|e| conflicting.contains(&sys.eqs[*e].source))
+        {
             continue;
         }
         if let Some(found) = sys.dependent_set(&vars, &eqs, conflicting) {
@@ -1831,12 +1975,18 @@ pub fn conflict_set(s: &Sketch, conflicting: &[Source]) -> Vec<Source> {
     }
     let mut candidates: Vec<Source> = Vec::new();
     for (_, eqs) in sys.components(&all) {
-        if !eqs.iter().any(|e| conflicting.contains(&sys.eqs[*e].source)) {
+        if !eqs
+            .iter()
+            .any(|e| conflicting.contains(&sys.eqs[*e].source))
+        {
             continue;
         }
         for e in eqs {
             let src = sys.eqs[e].source;
-            if matches!(src, Source::Constraint(_) | Source::Dimension(_)) && !candidates.contains(&src) && !out.contains(&src) {
+            if matches!(src, Source::Constraint(_) | Source::Dimension(_))
+                && !candidates.contains(&src)
+                && !out.contains(&src)
+            {
                 candidates.push(src);
             }
         }
@@ -1857,7 +2007,10 @@ pub fn conflict_set(s: &Sketch, conflicting: &[Source]) -> Vec<Source> {
 pub fn conflict_set_cached(s: &Sketch, conflicting: &[Source]) -> Vec<Source> {
     use std::hash::{Hash, Hasher};
     use std::sync::Mutex;
-    if !conflicting.iter().any(|c| matches!(c, Source::Constraint(_) | Source::Dimension(_))) {
+    if !conflicting
+        .iter()
+        .any(|c| matches!(c, Source::Constraint(_) | Source::Dimension(_)))
+    {
         return Vec::new();
     }
     let key = {
@@ -1918,7 +2071,10 @@ pub fn analyze(s: &Sketch) -> Analysis {
     let generic = generic_configuration(s);
     let s_rank = generic.as_ref().unwrap_or(s);
     let sys = System::new(s_rank, &skip);
-    let mut out = Analysis { conflict_set: conflict_set_cached(s, &conflicting), ..Analysis::default() };
+    let mut out = Analysis {
+        conflict_set: conflict_set_cached(s, &conflicting),
+        ..Analysis::default()
+    };
     for src in &conflicting {
         match *src {
             Source::Constraint(k) => out.conflicting.push(k),
@@ -1996,7 +2152,9 @@ pub fn analyze(s: &Sketch) -> Analysis {
                 return false;
             };
             let vars = &bases[bi].0;
-            let Some(i) = vars.iter().position(|x| *x == v) else { return false };
+            let Some(i) = vars.iter().position(|x| *x == v) else {
+                return false;
+            };
             let k = match parts.iter().position(|(b, _)| *b == bi) {
                 Some(k) => k,
                 None => {
@@ -2027,7 +2185,14 @@ pub fn analyze(s: &Sketch) -> Analysis {
         Some(i) => determined(&[(i, n.x), (i + 1, n.y)]),
     };
     for p in s.points.keys() {
-        out.points.insert(p, if point_ok(p) { Status::Full } else { Status::Under });
+        out.points.insert(
+            p,
+            if point_ok(p) {
+                Status::Full
+            } else {
+                Status::Under
+            },
+        );
     }
     for (k, c) in &s.curves {
         let ok = match c.kind {
@@ -2073,7 +2238,13 @@ pub fn analyze(s: &Sketch) -> Analysis {
                         .get(&k)
                         .is_none_or(|&i| determined(&[(i, 1.0)]))
             }
-            CurveKind::EllipseArc { center, major, start, end, .. } => {
+            CurveKind::EllipseArc {
+                center,
+                major,
+                start,
+                end,
+                ..
+            } => {
                 [center, major, start, end].into_iter().all(&point_ok)
                     && sys
                         .radius_var
@@ -2085,14 +2256,20 @@ pub fn analyze(s: &Sketch) -> Analysis {
             CurveKind::Spline { .. } => s.curve_points(k).iter().all(|p| point_ok(*p)),
             CurveKind::Bezier { a, c1, c2, b } => [a, c1, c2, b].into_iter().all(&point_ok),
         };
-        out.curves.insert(k, if ok { Status::Full } else { Status::Under });
+        out.curves
+            .insert(k, if ok { Status::Full } else { Status::Under });
     }
     // Entities of conflicting constraints are red: the whole conflicting set's (P3D.2).
     let set_constraints = out.conflict_set.iter().filter_map(|c| match c {
         Source::Constraint(k) => Some(*k),
         _ => None,
     });
-    for k in out.conflicting.clone().into_iter().chain(set_constraints.collect::<Vec<_>>()) {
+    for k in out
+        .conflicting
+        .clone()
+        .into_iter()
+        .chain(set_constraints.collect::<Vec<_>>())
+    {
         if let Some(c) = s.constraints.get(k) {
             mark_over(s, c, &mut out);
         }
@@ -2333,7 +2510,11 @@ pub fn drag(s: &mut Sketch, drag: &Drag, skip: &HashSet<Source>) -> bool {
                     sys.x[i] = s.pos(center).distance(*t);
                 }
             }
-            Some(CurveKind::Arc { center, start: a, end: b }) => {
+            Some(CurveKind::Arc {
+                center,
+                start: a,
+                end: b,
+            }) => {
                 let o = s.pos(center);
                 let r = o.distance(*t);
                 for p in [a, b] {

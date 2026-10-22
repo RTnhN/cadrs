@@ -32,8 +32,16 @@ pub struct LabelChip {
 
 impl LabelChip {
     /// `colour` is the label's sRGB colour.
-    pub fn new(name: impl Into<Cow<'static, str>>, label: impl Into<String>, colour: [u8; 3]) -> Self {
-        Self { name: name.into(), label: label.into(), colour }
+    pub fn new(
+        name: impl Into<Cow<'static, str>>,
+        label: impl Into<String>,
+        colour: [u8; 3],
+    ) -> Self {
+        Self {
+            name: name.into(),
+            label: label.into(),
+            colour,
+        }
     }
 
     pub fn build(self, theme: &Theme) -> impl Bundle {
@@ -60,19 +68,43 @@ impl LabelChip {
             Pickable::IGNORE,
             Children::spawn(SpawnWith(move |p: &mut ChildSpawner| {
                 p.spawn((
-                    Node { width: Val::Px(6.0), height: Val::Px(6.0), border_radius: BorderRadius::MAX, ..default() },
+                    Node {
+                        width: Val::Px(6.0),
+                        height: Val::Px(6.0),
+                        border_radius: BorderRadius::MAX,
+                        ..default()
+                    },
                     BackgroundColor(base),
                     Pickable::IGNORE,
                 ));
-                p.spawn((Text::new(label), font, TextColor(fg), TextLayout::no_wrap(), Pickable::IGNORE));
+                p.spawn((
+                    Text::new(label),
+                    font,
+                    TextColor(fg),
+                    TextLayout::no_wrap(),
+                    Pickable::IGNORE,
+                ));
             })),
         )
     }
 }
 
 /// An icon button of the details rail: dark icon, a light blue fill while `selected`.
-pub fn side_tab(theme: &Theme, name: impl Into<Cow<'static, str>>, icon: &'static str, tooltip: &str, selected: bool) -> impl Bundle {
-    (IconButton::new(name, icon).icon_size(16.0).tooltip(tooltip).selected(selected).build(theme), SideTab)
+pub fn side_tab(
+    theme: &Theme,
+    name: impl Into<Cow<'static, str>>,
+    icon: &'static str,
+    tooltip: &str,
+    selected: bool,
+) -> impl Bundle {
+    (
+        IconButton::new(name, icon)
+            .icon_size(16.0)
+            .tooltip(tooltip)
+            .selected(selected)
+            .build(theme),
+        SideTab,
+    )
 }
 
 /// Gives a ghost button the rail's look (set on insert, over the button's own visuals).
@@ -81,7 +113,9 @@ pub fn side_tab(theme: &Theme, name: impl Into<Cow<'static, str>>, icon: &'stati
 pub struct SideTab;
 
 fn on_side_tab(mut world: bevy::ecs::world::DeferredWorld, ctx: bevy::ecs::lifecycle::HookContext) {
-    let Some(t) = world.get_resource::<Theme>().cloned() else { return };
+    let Some(t) = world.get_resource::<Theme>().cloned() else {
+        return;
+    };
     let mut v = visuals_for(&t, crate::ButtonVariant::Ghost);
     v.foreground = StateColors::all(t.foreground).with_selected(t.link);
     v.background = v.background.with_selected(t.list_selected);
@@ -91,7 +125,11 @@ fn on_side_tab(mut world: bevy::ecs::world::DeferredWorld, ctx: bevy::ecs::lifec
 }
 
 /// The panel header: `title` in bold and a × named `close`.
-pub fn details_header(theme: &Theme, close: impl Into<Cow<'static, str>>, title: &str) -> impl Bundle {
+pub fn details_header(
+    theme: &Theme,
+    close: impl Into<Cow<'static, str>>,
+    title: &str,
+) -> impl Bundle {
     let t = theme.clone();
     let title = title.to_string();
     let close = close.into();
@@ -105,10 +143,20 @@ pub fn details_header(theme: &Theme, close: impl Into<Cow<'static, str>>, title:
         },
         Children::spawn(SpawnWith(move |p: &mut ChildSpawner| {
             p.spawn(t.text(title, t.font_base, FontWeight::BOLD, t.foreground));
-            p.spawn(Node { flex_grow: 1.0, ..default() });
+            p.spawn(Node {
+                flex_grow: 1.0,
+                ..default()
+            });
             let mut v = visuals_for(&t, crate::ButtonVariant::Ghost);
             v.foreground = StateColors::all(t.muted_foreground);
-            p.spawn(IconButton::new(close, "close").icon_size(14.0).small().tooltip("Close").build(&t)).insert(v);
+            p.spawn(
+                IconButton::new(close, "close")
+                    .icon_size(14.0)
+                    .small()
+                    .tooltip("Close")
+                    .build(&t),
+            )
+            .insert(v);
         })),
     )
 }
@@ -116,20 +164,43 @@ pub fn details_header(theme: &Theme, close: impl Into<Cow<'static, str>>, title:
 /// A field caption (bold).
 pub fn details_caption(theme: &Theme, text: impl Into<String>) -> impl Bundle {
     (
-        theme.text(text.into(), theme.font_base, FontWeight::BOLD, theme.foreground),
-        Node { margin: UiRect::top(Val::Px(8.0)), ..default() },
+        theme.text(
+            text.into(),
+            theme.font_base,
+            FontWeight::BOLD,
+            theme.foreground,
+        ),
+        Node {
+            margin: UiRect::top(Val::Px(8.0)),
+            ..default()
+        },
     )
 }
 
 /// A field value (regular, under its caption).
 pub fn details_value(theme: &Theme, text: impl Into<String>) -> impl Bundle {
     (
-        theme.text(text.into(), theme.font_base, FontWeight::NORMAL, theme.foreground),
-        Node { margin: UiRect::bottom(Val::Px(8.0)), ..default() },
+        theme.text(
+            text.into(),
+            theme.font_base,
+            FontWeight::NORMAL,
+            theme.foreground,
+        ),
+        Node {
+            margin: UiRect::bottom(Val::Px(8.0)),
+            ..default()
+        },
     )
 }
 
 /// A thin line between fields.
 pub fn details_divider(theme: &Theme) -> impl Bundle {
-    (Node { height: Val::Px(1.0), flex_shrink: 0.0, ..default() }, BackgroundColor(theme.separator))
+    (
+        Node {
+            height: Val::Px(1.0),
+            flex_shrink: 0.0,
+            ..default()
+        },
+        BackgroundColor(theme.separator),
+    )
 }

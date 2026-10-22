@@ -64,11 +64,26 @@ pub fn read_project(path: &Path) -> Result<Project, Error> {
         let pro = std::fs::read_dir(path)
             .map_err(|e| io(path, e))?
             .filter_map(|e| e.ok().map(|e| e.path()))
-            .find(|p| p.extension().is_some_and(|x| x == "kicad_pro" || x == "kicad_pcb" || x == "kicad_sch"))
+            .find(|p| {
+                p.extension()
+                    .is_some_and(|x| x == "kicad_pro" || x == "kicad_pcb" || x == "kicad_sch")
+            })
             .ok_or_else(|| Error::Format(format!("no KiCad project in {}", path.display())))?;
-        (path.to_path_buf(), pro.file_stem().unwrap_or_default().to_string_lossy().into_owned())
+        (
+            path.to_path_buf(),
+            pro.file_stem()
+                .unwrap_or_default()
+                .to_string_lossy()
+                .into_owned(),
+        )
     } else {
-        (path.parent().unwrap_or(Path::new(".")).to_path_buf(), path.file_stem().unwrap_or_default().to_string_lossy().into_owned())
+        (
+            path.parent().unwrap_or(Path::new(".")).to_path_buf(),
+            path.file_stem()
+                .unwrap_or_default()
+                .to_string_lossy()
+                .into_owned(),
+        )
     };
     let file = |ext: &str| dir.join(format!("{stem}.{ext}"));
     let mut warnings = vec![];
@@ -94,13 +109,21 @@ pub fn read_project(path: &Path) -> Result<Project, Error> {
             Err(e) => warnings.push(format!("{}: {e}", pro.display())),
         }
     }
-    Ok(Project { name: stem, dir, design, warnings })
+    Ok(Project {
+        name: stem,
+        dir,
+        design,
+        warnings,
+    })
 }
 
 /// Net classes and board rules from the project file's JSON.
 fn read_rules(v: &serde_json::Value, rules: &mut cadrs_eda::board::Rules) {
     let len = |x: &serde_json::Value| x.as_f64().map(mm);
-    if let Some(classes) = v.pointer("/net_settings/classes").and_then(|c| c.as_array()) {
+    if let Some(classes) = v
+        .pointer("/net_settings/classes")
+        .and_then(|c| c.as_array())
+    {
         let d = NetClass::default();
         rules.net_classes = classes
             .iter()
@@ -116,16 +139,27 @@ fn read_rules(v: &serde_json::Value, rules: &mut cadrs_eda::board::Rules) {
             })
             .collect();
     }
-    if let Some(pats) = v.pointer("/net_settings/netclass_patterns").and_then(|c| c.as_array()) {
+    if let Some(pats) = v
+        .pointer("/net_settings/netclass_patterns")
+        .and_then(|c| c.as_array())
+    {
         for p in pats {
-            let (Some(class), Some(pat)) = (p["netclass"].as_str(), p["pattern"].as_str()) else { continue };
+            let (Some(class), Some(pat)) = (p["netclass"].as_str(), p["pattern"].as_str()) else {
+                continue;
+            };
             if let Some(c) = rules.net_classes.iter_mut().find(|c| c.name == class) {
                 c.patterns.push(pat.into());
             }
         }
     }
-    if let Some(map) = v.pointer("/net_settings/netclass_assignments").and_then(|c| c.as_object()) {
-        rules.net_class_of = map.iter().filter_map(|(n, c)| Some((n.clone(), c.as_str()?.to_string()))).collect();
+    if let Some(map) = v
+        .pointer("/net_settings/netclass_assignments")
+        .and_then(|c| c.as_object())
+    {
+        rules.net_class_of = map
+            .iter()
+            .filter_map(|(n, c)| Some((n.clone(), c.as_str()?.to_string())))
+            .collect();
     }
     if let Some(r) = v.pointer("/board/design_settings/rules") {
         let set = |key: &str, slot: &mut i64| {
@@ -138,7 +172,10 @@ fn read_rules(v: &serde_json::Value, rules: &mut cadrs_eda::board::Rules) {
         set("min_via_diameter", &mut rules.min_via_diameter);
         set("min_through_hole_diameter", &mut rules.min_drill);
         set("min_via_annular_width", &mut rules.min_annular_ring);
-        set("min_copper_edge_clearance", &mut rules.copper_edge_clearance);
+        set(
+            "min_copper_edge_clearance",
+            &mut rules.copper_edge_clearance,
+        );
         set("min_hole_clearance", &mut rules.hole_clearance);
     }
 }
@@ -158,7 +195,11 @@ pub fn resolve_model(source: &str, project_dir: &Path) -> Option<PathBuf> {
         } else if let Ok(v) = std::env::var(var) {
             v
         } else if var.starts_with("KICAD") && var.ends_with("3DMODEL_DIR") {
-            model_dirs().into_iter().next()?.to_string_lossy().into_owned()
+            model_dirs()
+                .into_iter()
+                .next()?
+                .to_string_lossy()
+                .into_owned()
         } else {
             return None;
         };
@@ -166,7 +207,10 @@ pub fn resolve_model(source: &str, project_dir: &Path) -> Option<PathBuf> {
     }
     let mut candidates = vec![PathBuf::from(&path)];
     // Other installed library versions.
-    if let Some(rest) = source.split_once("3DMODEL_DIR}").map(|(_, r)| r.trim_start_matches('/')) {
+    if let Some(rest) = source
+        .split_once("3DMODEL_DIR}")
+        .map(|(_, r)| r.trim_start_matches('/'))
+    {
         candidates.extend(model_dirs().into_iter().map(|d| d.join(rest)));
     }
     // By file name in the project.
@@ -181,7 +225,10 @@ pub fn resolve_model(source: &str, project_dir: &Path) -> Option<PathBuf> {
         v.push(p.to_path_buf());
         v
     };
-    candidates.iter().flat_map(|c| with_step(c)).find(|p| p.is_file())
+    candidates
+        .iter()
+        .flat_map(|c| with_step(c))
+        .find(|p| p.is_file())
 }
 
 /// The installed 3D model libraries, newest first.
@@ -190,7 +237,10 @@ fn model_dirs() -> Vec<PathBuf> {
         .into_iter()
         .flatten()
         .filter_map(|e| e.ok().map(|e| e.path()))
-        .filter(|p| p.file_name().is_some_and(|n| n.to_string_lossy().starts_with("kicad")))
+        .filter(|p| {
+            p.file_name()
+                .is_some_and(|n| n.to_string_lossy().starts_with("kicad"))
+        })
         .map(|p| p.join("3dmodels"))
         .filter(|p| p.is_dir())
         .collect();
@@ -201,15 +251,24 @@ fn model_dirs() -> Vec<PathBuf> {
 
 fn find_files(dir: &Path, name: &std::ffi::OsStr, depth: u32) -> Vec<PathBuf> {
     let mut out = vec![];
-    let Ok(rd) = std::fs::read_dir(dir) else { return out };
+    let Ok(rd) = std::fs::read_dir(dir) else {
+        return out;
+    };
     for e in rd.flatten() {
         let p = e.path();
         if p.is_dir() {
-            if depth > 0 && !p.file_name().is_some_and(|n| n.to_string_lossy().starts_with('.')) {
+            if depth > 0
+                && !p
+                    .file_name()
+                    .is_some_and(|n| n.to_string_lossy().starts_with('.'))
+            {
                 out.extend(find_files(&p, name, depth - 1));
             }
         } else if p.file_stem() == Path::new(name).file_stem()
-            && p.extension().is_some_and(|x| ["step", "stp", "wrl", "vrml"].contains(&x.to_string_lossy().to_lowercase().as_str()))
+            && p.extension().is_some_and(|x| {
+                ["step", "stp", "wrl", "vrml"]
+                    .contains(&x.to_string_lossy().to_lowercase().as_str())
+            })
         {
             out.push(p);
         }

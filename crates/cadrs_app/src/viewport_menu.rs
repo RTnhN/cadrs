@@ -58,8 +58,12 @@ pub fn open_modeling_menu(world: &mut World, at: Vec2, pick: Option<Pick>) {
         Some(Pick::Region(..)) | Some(Pick::Feature(_)) | Some(Pick::SketchCurve(..)) | None => {
             let offset = world.resource::<crate::viewport::ViewportRect>().offset(at);
             let view = world.resource::<ViewportView>().view;
-            crate::parts::pick_sketch_curve(world.resource::<crate::parts::PartCache>(), &view, offset)
-                .map(|(s, c, _)| MenuCurve(s, c))
+            crate::parts::pick_sketch_curve(
+                world.resource::<crate::parts::PartCache>(),
+                &view,
+                offset,
+            )
+            .map(|(s, c, _)| MenuCurve(s, c))
         }
         _ => None,
     };
@@ -70,12 +74,17 @@ pub fn open_modeling_menu(world: &mut World, at: Vec2, pick: Option<Pick>) {
     let target = match pick {
         Some(Pick::Plane(k)) => MenuTarget::Plane(k),
         Some(Pick::Face(f, tag)) => MenuTarget::Face(f, tag),
-        Some(Pick::Region(s, _)) | Some(Pick::Feature(s)) | Some(Pick::SketchCurve(s, _)) | Some(Pick::SketchPoint(s, _)) => {
-            MenuTarget::Sketch(s)
-        }
-        Some(Pick::Origin) | Some(Pick::Edge(..)) | Some(Pick::Vertex(..)) | Some(Pick::Part(_)) | Some(Pick::Assembly) | Some(Pick::Instance(..)) | None => {
-            MenuTarget::Empty
-        }
+        Some(Pick::Region(s, _))
+        | Some(Pick::Feature(s))
+        | Some(Pick::SketchCurve(s, _))
+        | Some(Pick::SketchPoint(s, _)) => MenuTarget::Sketch(s),
+        Some(Pick::Origin)
+        | Some(Pick::Edge(..))
+        | Some(Pick::Vertex(..))
+        | Some(Pick::Part(_))
+        | Some(Pick::Assembly)
+        | Some(Pick::Instance(..))
+        | None => MenuTarget::Empty,
     };
     let planar_face = match target {
         MenuTarget::Face(f, tag) => world
@@ -93,17 +102,21 @@ pub fn open_modeling_menu(world: &mut World, at: Vec2, pick: Option<Pick>) {
     // Right-clicking what is already selected keeps the selection (a selected sketch stays
     // whole and orange; the menu acts on it), as Onshape's.
     let already = match pick {
-        Some(Pick::Region(s, _) | Pick::Feature(s) | Pick::SketchCurve(s, _) | Pick::SketchPoint(s, _)) => {
-            world.resource::<Selection>().contains(Pick::Feature(s))
-        }
+        Some(
+            Pick::Region(s, _)
+            | Pick::Feature(s)
+            | Pick::SketchCurve(s, _)
+            | Pick::SketchPoint(s, _),
+        ) => world.resource::<Selection>().contains(Pick::Feature(s)),
         Some(p) => world.resource::<Selection>().contains(p),
         None => false,
     };
     if let Some(p) = pick.filter(|p| *p != Pick::Origin && !already) {
         let p = match (p, curve) {
-            (Pick::Region(s, _) | Pick::Feature(s) | Pick::SketchCurve(s, _), Some(MenuCurve(cs, c))) if cs == s => {
-                Pick::SketchCurve(s, c)
-            }
+            (
+                Pick::Region(s, _) | Pick::Feature(s) | Pick::SketchCurve(s, _),
+                Some(MenuCurve(cs, c)),
+            ) if cs == s => Pick::SketchCurve(s, c),
             (Pick::Region(s, _), _) => Pick::Feature(s),
             (p, _) => p,
         };
@@ -117,9 +130,18 @@ pub fn open_modeling_menu(world: &mut World, at: Vec2, pick: Option<Pick>) {
     };
     let planes_shown = world.resource::<PlanesVisible>().any();
     // A shortcut for the bottom-right Section view tool (Exit section view while one is on).
-    let section = MenuItem::new("viewport-section-view", if crate::section_view::active(world) { "Exit section view" } else { "Section view…" });
+    let section = MenuItem::new(
+        "viewport-section-view",
+        if crate::section_view::active(world) {
+            "Exit section view"
+        } else {
+            "Section view…"
+        },
+    );
     let theme = world.resource::<Theme>().clone();
-    let menu = Menu::new("viewport-context-menu").min_width(200.0).item_height(23.0);
+    let menu = Menu::new("viewport-context-menu")
+        .min_width(200.0)
+        .item_height(23.0);
     // P3F.2 judge: the face's and sketch's menus have an icon column (Export as DXF/DWG… with
     // the file-export icon); the plane's stays text only.
     let menu = match target {
@@ -127,41 +149,86 @@ pub fn open_modeling_menu(world: &mut World, at: Vec2, pick: Option<Pick>) {
             .text_only()
             .item(MenuItem::new("viewport-new-sketch", "New sketch"))
             .separator()
-            .item(MenuItem::new("viewport-hide-plane", format!("Hide {} plane", k.name())))
+            .item(MenuItem::new(
+                "viewport-hide-plane",
+                format!("Hide {} plane", k.name()),
+            ))
             .item(section.clone())
             .separator()
             .item(MenuItem::new("viewport-normal-to", "View normal to plane"))
             .item(MenuItem::new("viewport-zoom-to-fit", "Zoom to fit")),
         MenuTarget::Face(..) => {
             let m = menu
-            .item(MenuItem::new("viewport-new-sketch", "New sketch").icon("sketch").disabled(!planar_face))
-            .separator()
-            .item(MenuItem::new("viewport-face-appearance", "Add appearance to face…").icon("appearance"))
-            .item(MenuItem::new("viewport-part-appearance", "Edit appearance…").icon("appearance"))
-            .item(MenuItem::new("viewport-part-material", "Assign material…").icon("material-library"))
-            .separator()
-            .item(section.clone().icon("section-view"))
-            // P3F.2 (P3.2): a flat face as DXF or DWG, for cutting machines.
-            .item(MenuItem::new("viewport-export-face", "Export as DXF/DWG…").icon("file-export").disabled(!planar_face));
+                .item(
+                    MenuItem::new("viewport-new-sketch", "New sketch")
+                        .icon("sketch")
+                        .disabled(!planar_face),
+                )
+                .separator()
+                .item(
+                    MenuItem::new("viewport-face-appearance", "Add appearance to face…")
+                        .icon("appearance"),
+                )
+                .item(
+                    MenuItem::new("viewport-part-appearance", "Edit appearance…")
+                        .icon("appearance"),
+                )
+                .item(
+                    MenuItem::new("viewport-part-material", "Assign material…")
+                        .icon("material-library"),
+                )
+                .separator()
+                .item(section.clone().icon("section-view"))
+                // P3F.2 (P3.2): a flat face as DXF or DWG, for cutting machines.
+                .item(
+                    MenuItem::new("viewport-export-face", "Export as DXF/DWG…")
+                        .icon("file-export")
+                        .disabled(!planar_face),
+                );
             let m = if flat {
-                m.item(MenuItem::new("viewport-flat-sketch", "New sketch on flat pattern").icon("sketch"))
-                    .item(MenuItem::new("viewport-flat-export", "Export DXF/DWG of flat pattern…").icon("flat-pattern"))
+                m.item(
+                    MenuItem::new("viewport-flat-sketch", "New sketch on flat pattern")
+                        .icon("sketch"),
+                )
+                .item(
+                    MenuItem::new("viewport-flat-export", "Export DXF/DWG of flat pattern…")
+                        .icon("flat-pattern"),
+                )
             } else {
                 m
             };
             m.separator()
-                .item(MenuItem::new("viewport-normal-to", "View normal to face").disabled(!planar_face))
+                .item(
+                    MenuItem::new("viewport-normal-to", "View normal to face")
+                        .disabled(!planar_face),
+                )
                 .item(MenuItem::new("viewport-zoom-to-fit", "Zoom to fit"))
-                .item(MenuItem::new("viewport-zoom-to-selection", "Zoom to selection"))
+                .item(MenuItem::new(
+                    "viewport-zoom-to-selection",
+                    "Zoom to selection",
+                ))
         }
         MenuTarget::Sketch(s) => {
             // Onshape's sketch menu (a selected sketch's regions are its profiles): edit and
             // inspect it, start features from it, show, export, select and view.
             let name = feature_name(world, s);
-            let dims = world.resource::<crate::feature_menu::ShownDimensions>().0.contains(&s);
+            let dims = world
+                .resource::<crate::feature_menu::ShownDimensions>()
+                .0
+                .contains(&s);
             menu.item(MenuItem::new("viewport-edit-sketch", format!("Edit {name}…")).icon("edit"))
-                .item(MenuItem::new("viewport-sketch-dimensions", if dims { "Hide dimensions" } else { "Show dimensions" }))
-                .item(MenuItem::new("viewport-sketch-dependencies", format!("Show dependencies of {name}…")))
+                .item(MenuItem::new(
+                    "viewport-sketch-dimensions",
+                    if dims {
+                        "Hide dimensions"
+                    } else {
+                        "Show dimensions"
+                    },
+                ))
+                .item(MenuItem::new(
+                    "viewport-sketch-dependencies",
+                    format!("Show dependencies of {name}…"),
+                ))
                 .separator()
                 .item(MenuItem::new("viewport-new-sketch", "New sketch…").icon("sketch"))
                 .item(MenuItem::new("viewport-offset-plane", "Offset plane…").icon("plane"))
@@ -170,21 +237,32 @@ pub fn open_modeling_menu(world: &mut World, at: Vec2, pick: Option<Pick>) {
                 .separator()
                 .item(MenuItem::new("viewport-hide-sketch", "Hide").icon("hidden"))
                 .item(section.clone().icon("section-view"))
-                .item(MenuItem::new("viewport-export-sketch", "Export as DXF/DWG…").icon("file-export"))
-                .separator()
-                .item(MenuItem::new("viewport-clear-selection", "Clear selection"))
                 .item(
-                    MenuItem::new("viewport-select", "Select")
-                        .submenu(vec![MenuItem::new("viewport-create-selection", "Create selection…").into()]),
+                    MenuItem::new("viewport-export-sketch", "Export as DXF/DWG…")
+                        .icon("file-export"),
                 )
                 .separator()
+                .item(MenuItem::new("viewport-clear-selection", "Clear selection"))
+                .item(MenuItem::new("viewport-select", "Select").submenu(vec![
+                    MenuItem::new("viewport-create-selection", "Create selection…").into(),
+                ]))
+                .separator()
                 .item(MenuItem::new("viewport-zoom-to-fit", "Zoom to fit"))
-                .item(MenuItem::new("viewport-zoom-to-selection", "Zoom to selection"))
+                .item(MenuItem::new(
+                    "viewport-zoom-to-selection",
+                    "Zoom to selection",
+                ))
                 .item(MenuItem::new("viewport-normal-to", "View normal to"))
                 .separator()
                 .item(MenuItem::new("viewport-rename-sketch", "Rename"))
-                .item(MenuItem::new("viewport-delete-sketch", format!("Delete {name}")).icon("delete"))
-                .item(MenuItem::new("viewport-sketch-appearance", "Edit sketch appearance…").icon("appearance"))
+                .item(
+                    MenuItem::new("viewport-delete-sketch", format!("Delete {name}"))
+                        .icon("delete"),
+                )
+                .item(
+                    MenuItem::new("viewport-sketch-appearance", "Edit sketch appearance…")
+                        .icon("appearance"),
+                )
                 .item(
                     MenuItem::new("viewport-curve-appearance", "Edit curve appearance…")
                         .disabled(curve.is_none_or(|c| c.0 != s)),
@@ -196,14 +274,22 @@ pub fn open_modeling_menu(world: &mut World, at: Vec2, pick: Option<Pick>) {
                 .item(MenuItem::new("viewport-zoom-to-fit", "Zoom to fit"))
                 .item(MenuItem::new(
                     "viewport-toggle-planes",
-                    if planes_shown { "Hide planes" } else { "Show planes" },
+                    if planes_shown {
+                        "Hide planes"
+                    } else {
+                        "Show planes"
+                    },
                 ));
             // Not while sketching (the sketch's own tools).
-            let m = if target == MenuTarget::Empty { m.item(section.clone()) } else { m };
-            m.separator().item(
-                MenuItem::new("viewport-select", "Select")
-                    .submenu(vec![MenuItem::new("viewport-create-selection", "Create selection…").into()]),
-            )
+            let m = if target == MenuTarget::Empty {
+                m.item(section.clone())
+            } else {
+                m
+            };
+            m.separator()
+                .item(MenuItem::new("viewport-select", "Select").submenu(vec![
+                    MenuItem::new("viewport-create-selection", "Create selection…").into(),
+                ]))
         }
     };
     let mut commands = world.commands();
@@ -229,19 +315,29 @@ pub fn open_sketch_menu(world: &mut World, at: Vec2) {
         .min_width(200.0)
         .item_height(23.0)
         .text_only()
-        .item(MenuItem::new("sketch-menu-confirm", format!("Confirm {name}")))
+        .item(MenuItem::new(
+            "sketch-menu-confirm",
+            format!("Confirm {name}"),
+        ))
         .separator()
         .item(MenuItem::new("sketch-menu-copy", "Copy sketch").planned())
         .separator()
         .item(MenuItem::new("sketch-menu-show-all", "Show all"))
         .separator()
-        .item(MenuItem::new("sketch-menu-select", "Select").planned().submenu(vec![]))
+        .item(
+            MenuItem::new("sketch-menu-select", "Select")
+                .planned()
+                .submenu(vec![]),
+        )
         .item(MenuItem::new("sketch-menu-select-other", "Select other…").planned())
         .separator()
         .item(MenuItem::new("sketch-menu-comment", "Add comment").planned())
         .separator()
         .item(MenuItem::new("viewport-zoom-to-fit", "Zoom to fit"))
-        .item(MenuItem::new("viewport-normal-to", "View normal to sketch plane"));
+        .item(MenuItem::new(
+            "viewport-normal-to",
+            "View normal to sketch plane",
+        ));
     let mut commands = world.commands();
     let anchor = open_context_menu(&mut commands, at, menu.build(&theme));
     commands
@@ -254,7 +350,11 @@ pub fn open_sketch_menu(world: &mut World, at: Vec2) {
 #[derive(Component, Debug, Clone, Copy, PartialEq)]
 struct MenuCurve(FeatureId, cadrs_sketch::CurveId);
 
-fn on_viewport_menu(ev: On<MenuAction>, q: Query<(&MenuTarget, Option<&MenuCurve>)>, mut commands: Commands) {
+fn on_viewport_menu(
+    ev: On<MenuAction>,
+    q: Query<(&MenuTarget, Option<&MenuCurve>)>,
+    mut commands: Commands,
+) {
     let Ok((target, curve)) = q.get(ev.entity) else {
         return;
     };
@@ -310,11 +410,17 @@ fn act(world: &mut World, target: MenuTarget, item: &str) {
             }
         }
         ("viewport-edit-sketch", MenuTarget::Sketch(s)) => crate::document::edit_feature(world, s),
-        ("viewport-sketch-dimensions", MenuTarget::Sketch(s)) => crate::feature_menu::toggle_dimensions(world, s),
-        ("viewport-sketch-dependencies", MenuTarget::Sketch(s)) => crate::feature_list::show_dependencies(world, s),
+        ("viewport-sketch-dimensions", MenuTarget::Sketch(s)) => {
+            crate::feature_menu::toggle_dimensions(world, s)
+        }
+        ("viewport-sketch-dependencies", MenuTarget::Sketch(s)) => {
+            crate::feature_list::show_dependencies(world, s)
+        }
         // A new sketch on the sketch's own plane.
         ("viewport-new-sketch", MenuTarget::Sketch(s)) => {
-            let plane = world.get_resource::<ActiveDocument>().and_then(|d| d.active_element()?.feature(s)?.sketch()?.plane);
+            let plane = world
+                .get_resource::<ActiveDocument>()
+                .and_then(|d| d.active_element()?.feature(s)?.sketch()?.plane);
             crate::sketch::begin_sketch_on(world, plane);
         }
         // Features from the selected sketch: its regions are the profiles (the Plane takes the
@@ -332,7 +438,10 @@ fn act(world: &mut World, target: MenuTarget, item: &str) {
             crate::revolve::begin_revolve(world);
         }
         ("viewport-hide-sketch", MenuTarget::Sketch(s)) => {
-            world.resource_mut::<Selection>().0.retain(|p| !matches!(p, Pick::Feature(f) | Pick::SketchCurve(f, _) if *f == s));
+            world
+                .resource_mut::<Selection>()
+                .0
+                .retain(|p| !matches!(p, Pick::Feature(f) | Pick::SketchCurve(f, _) if *f == s));
             crate::feature_menu::set_sketch_visible(world, s, false);
         }
         ("viewport-section-view", MenuTarget::Sketch(s)) => {
@@ -342,8 +451,12 @@ fn act(world: &mut World, target: MenuTarget, item: &str) {
                 crate::section_view::open_for_feature(world, s);
             }
         }
-        ("viewport-section-view", MenuTarget::Plane(k)) => crate::section_view::open_for_pick(world, Some(Pick::Plane(k))),
-        ("viewport-section-view", MenuTarget::Face(part, face)) => crate::section_view::open_for_pick(world, Some(Pick::Face(part, face))),
+        ("viewport-section-view", MenuTarget::Plane(k)) => {
+            crate::section_view::open_for_pick(world, Some(Pick::Plane(k)))
+        }
+        ("viewport-section-view", MenuTarget::Face(part, face)) => {
+            crate::section_view::open_for_pick(world, Some(Pick::Face(part, face)))
+        }
         ("viewport-section-view", _) => crate::section_view::open_for_pick(world, None),
         ("viewport-clear-selection", _) => world.resource_mut::<Selection>().0.clear(),
         ("viewport-rename-sketch", MenuTarget::Sketch(s)) => {
@@ -357,7 +470,10 @@ fn act(world: &mut World, target: MenuTarget, item: &str) {
                 .retain(|p| !matches!(p, Pick::Feature(f) | Pick::Region(f, _) if *f == s));
         }
         ("viewport-face-appearance", MenuTarget::Face(part, face)) => {
-            crate::appearance::open_appearance_dialog(world, AppearanceTarget::Faces(part, vec![face]));
+            crate::appearance::open_appearance_dialog(
+                world,
+                AppearanceTarget::Faces(part, vec![face]),
+            );
         }
         ("viewport-part-appearance", MenuTarget::Face(part, _)) => {
             crate::appearance::open_appearance_dialog(world, AppearanceTarget::Parts(vec![part]));
@@ -374,7 +490,9 @@ fn act(world: &mut World, target: MenuTarget, item: &str) {
                 crate::flat_ui::begin_flat_sketch(world, r.model, r.index);
             }
         }
-        ("viewport-flat-export", MenuTarget::Face(part, _)) => crate::flat_export_dialog::open(world, part),
+        ("viewport-flat-export", MenuTarget::Face(part, _)) => {
+            crate::flat_export_dialog::open(world, part)
+        }
         ("viewport-export-sketch", MenuTarget::Sketch(s)) => {
             crate::export_dialog::open(world, crate::export_dialog::ExportSource::Sketch(s));
         }

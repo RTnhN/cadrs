@@ -31,23 +31,25 @@
 pub mod bend;
 pub mod construct;
 pub mod definition;
-pub mod joint_edit;
-pub mod model_edit;
-pub mod sharp_edit;
 pub mod flat;
-pub mod forms;
-pub mod loft;
 pub mod flat_edit;
+pub mod forms;
+pub mod joint_edit;
+pub mod loft;
 pub mod model;
+pub mod model_edit;
 pub mod params;
 pub mod poly;
 pub mod relief;
 pub mod samples;
+pub mod sharp_edit;
 pub mod svg;
 pub mod table;
 pub mod view;
 
 pub use bend::BendValue;
 pub use flat::{FlatError, FlatPattern, flatten};
-pub use model::{Bend, BuildError, Joint, JointId, JointKind, Model, RipStyle, SharpBuilder, Wall, WallId};
+pub use model::{
+    Bend, BuildError, Joint, JointId, JointKind, Model, RipStyle, SharpBuilder, Wall, WallId,
+};
 pub use params::{BendCalc, BendRelief, BendReliefKind, CornerRelief, CornerReliefKind, Params};

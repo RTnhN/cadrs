@@ -206,7 +206,11 @@ impl FeatureDialog {
                     BorderColor::all(Color::srgb_u8(0xda, 0xda, 0xdc)),
                 ))
                 .with_children(|h| {
-                    let color = if valid || plain_title { t.foreground } else { t.feature_error };
+                    let color = if valid || plain_title {
+                        t.foreground
+                    } else {
+                        t.feature_error
+                    };
                     // A long title (a hole's callout, P3.6) ends in "…" before the ✓.
                     h.spawn(Node {
                         flex_grow: 1.0,
@@ -230,30 +234,34 @@ impl FeatureDialog {
                     });
                     let accept = accept_visuals(&t);
                     if !no_accept {
-                    h.spawn((
-                        AcceptButton(dialog),
-                        Button::new(accept_name)
-                            .icon("check-bold")
-                            .icon_size(16.0)
-                            .tooltip("Accept (Enter)")
-                            .disabled(!valid)
-                            .build(&t),
-                        observe(|a: On<Activate>, q: Query<&AcceptButton>, mut commands: Commands| {
-                            if let Ok(b) = q.get(a.entity) {
-                                commands.trigger(FeatureDialogAccept { entity: b.0 });
-                            }
-                        }),
-                    ))
-                    .insert((
-                        accept,
-                        Node {
-                            width: Val::Px(26.0),
-                            height: Val::Px(26.0),
-                            justify_content: JustifyContent::Center,
-                            align_items: AlignItems::Center,
-                            ..default()
-                        },
-                    ));
+                        h.spawn((
+                            AcceptButton(dialog),
+                            Button::new(accept_name)
+                                .icon("check-bold")
+                                .icon_size(16.0)
+                                .tooltip("Accept (Enter)")
+                                .disabled(!valid)
+                                .build(&t),
+                            observe(
+                                |a: On<Activate>,
+                                 q: Query<&AcceptButton>,
+                                 mut commands: Commands| {
+                                    if let Ok(b) = q.get(a.entity) {
+                                        commands.trigger(FeatureDialogAccept { entity: b.0 });
+                                    }
+                                },
+                            ),
+                        ))
+                        .insert((
+                            accept,
+                            Node {
+                                width: Val::Px(26.0),
+                                height: Val::Px(26.0),
+                                justify_content: JustifyContent::Center,
+                                align_items: AlignItems::Center,
+                                ..default()
+                            },
+                        ));
                     }
                     let mut cancel = visuals_for(&t, crate::ButtonVariant::Ghost);
                     cancel.foreground = StateColors::all(t.cancel);
@@ -264,11 +272,13 @@ impl FeatureDialog {
                             .icon_size(16.0)
                             .tooltip("Cancel (Esc)")
                             .build(&t),
-                        observe(|a: On<Activate>, q: Query<&CancelButton>, mut commands: Commands| {
-                            if let Ok(b) = q.get(a.entity) {
-                                commands.trigger(FeatureDialogCancel { entity: b.0 });
-                            }
-                        }),
+                        observe(
+                            |a: On<Activate>, q: Query<&CancelButton>, mut commands: Commands| {
+                                if let Ok(b) = q.get(a.entity) {
+                                    commands.trigger(FeatureDialogCancel { entity: b.0 });
+                                }
+                            },
+                        ),
                     ))
                     .insert((
                         cancel,

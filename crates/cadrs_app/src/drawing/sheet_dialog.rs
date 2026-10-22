@@ -8,9 +8,11 @@ use bevy::text::FontWeight;
 use bevy::ui_widgets::{Activate, observe};
 use cadrs_core::ElementKind;
 use cadrs_core::commands::EditDrawing;
-use cadrs_drawing::{DrawingOp, ObjectRef, Orientation, Scale, SheetFormat, SheetId, SheetProps, SheetSize};
-use cadrs_ui::prelude::*;
+use cadrs_drawing::{
+    DrawingOp, ObjectRef, Orientation, Scale, SheetFormat, SheetId, SheetProps, SheetSize,
+};
 use cadrs_ui::Button;
+use cadrs_ui::prelude::*;
 use cadrs_ui::{CheckboxState, DialogClose, Select, SelectState, form_row};
 
 use super::{DrawingUi, active_drawing};
@@ -20,7 +22,8 @@ pub struct SheetDialogPlugin;
 
 impl Plugin for SheetDialogPlugin {
     fn build(&self, app: &mut App) {
-        app.add_observer(on_sheet_menu_action).add_observer(on_orientation_change);
+        app.add_observer(on_sheet_menu_action)
+            .add_observer(on_orientation_change);
     }
 }
 
@@ -46,7 +49,11 @@ pub fn open_sheet_menu(world: &mut World, pos: Vec2) {
         .item(MenuItem::new("sheet-space-drawing-properties", "Drawing properties…").icon("tool"))
         .separator()
         .item(MenuItem::new("sheet-space-insert-view", "Insert view…").icon("part"))
-        .item(MenuItem::new("sheet-space-fit", "Zoom to fit").shortcut("F").icon("find"));
+        .item(
+            MenuItem::new("sheet-space-fit", "Zoom to fit")
+                .shortcut("F")
+                .icon("find"),
+        );
     let anchor = open_context_menu(&mut commands, pos, menu.build(&theme));
     commands
         .entity(anchor)
@@ -82,7 +89,9 @@ fn on_sheet_menu_action(
             let Some((sheet, size)) = w.get_resource::<ActiveDocument>().and_then(|doc| {
                 let (id, d) = active_drawing(doc)?;
                 let ui = w.resource::<DrawingUi>();
-                d.sheets.get(ui.sheet_index(id, d)).map(|s| ((id, s.id), s.size_mm()))
+                d.sheets
+                    .get(ui.sheet_index(id, d))
+                    .map(|s| ((id, s.id), s.size_mm()))
             }) else {
                 return;
             };
@@ -109,7 +118,10 @@ pub fn open_sheet_properties(world: &mut World, sheet: SheetId) {
     let mut refs: Vec<Option<ObjectRef>> = vec![None];
     let mut ref_labels = vec!["None".to_string()];
     for el in &doc.doc.elements {
-        if matches!(el.kind, ElementKind::PartStudio { .. } | ElementKind::Assembly) {
+        if matches!(
+            el.kind,
+            ElementKind::PartStudio { .. } | ElementKind::Assembly
+        ) {
             refs.push(Some(ObjectRef {
                 element: el.id.0,
                 part: None,
@@ -124,7 +136,11 @@ pub fn open_sheet_properties(world: &mut World, sheet: SheetId) {
             .position(|x| x.map(|x| x.element) == Some(r.element))
             .unwrap_or_else(|| {
                 refs.push(Some(r));
-                ref_labels.push(super::reference_props(&doc.doc, Some(r)).name.unwrap_or_default());
+                ref_labels.push(
+                    super::reference_props(&doc.doc, Some(r))
+                        .name
+                        .unwrap_or_default(),
+                );
                 refs.len() - 1
             }),
     };
@@ -133,7 +149,10 @@ pub fn open_sheet_properties(world: &mut World, sheet: SheetId) {
         scales.push(s.scale);
     }
     let scale_selected = scales.iter().position(|x| *x == s.scale).unwrap_or(0);
-    let size_selected = SheetSize::ALL.iter().position(|x| *x == s.format.size).unwrap_or(0);
+    let size_selected = SheetSize::ALL
+        .iter()
+        .position(|x| *x == s.format.size)
+        .unwrap_or(0);
     let orient_selected = Orientation::ALL
         .iter()
         .position(|x| *x == s.format.orientation)
@@ -237,8 +256,15 @@ pub fn open_sheet_properties(world: &mut World, sheet: SheetId) {
 }
 
 /// The Size list shows width × height the way the chosen orientation turns the sheet.
-fn on_orientation_change(ev: On<cadrs_ui::SelectChange>, q: Query<&Name>, mut q_sel: Query<(&Name, &mut SelectState)>) {
-    if !q.get(ev.entity).is_ok_and(|n| n.as_str() == "sheet-props-orientation") {
+fn on_orientation_change(
+    ev: On<cadrs_ui::SelectChange>,
+    q: Query<&Name>,
+    mut q_sel: Query<(&Name, &mut SelectState)>,
+) {
+    if !q
+        .get(ev.entity)
+        .is_ok_and(|n| n.as_str() == "sheet-props-orientation")
+    {
         return;
     }
     let orientation = Orientation::ALL[ev.index.min(1)];
@@ -292,8 +318,14 @@ fn apply_sheet_properties(world: &mut World) {
         scale: get("sheet-props-scale")
             .and_then(|i| dialog.scales.get(i).copied())
             .unwrap_or(sheet.scale),
-        border: checks.get("sheet-props-border").copied().unwrap_or(sheet.border),
-        zones: checks.get("sheet-props-zones").copied().unwrap_or(sheet.zones),
+        border: checks
+            .get("sheet-props-border")
+            .copied()
+            .unwrap_or(sheet.border),
+        zones: checks
+            .get("sheet-props-zones")
+            .copied()
+            .unwrap_or(sheet.zones),
         title_block: checks
             .get("sheet-props-title-block")
             .copied()
@@ -310,19 +342,28 @@ fn apply_sheet_properties(world: &mut World) {
         {
             let _ = doc.execute(&EditDrawing {
                 element,
-                op: DrawingOp::RenameSheet { id: sheet.id, name: n },
+                op: DrawingOp::RenameSheet {
+                    id: sheet.id,
+                    name: n,
+                },
             });
         }
         if let Err(e) = doc.execute(&EditDrawing {
             element,
-            op: DrawingOp::SetSheetProps { id: sheet.id, props },
+            op: DrawingOp::SetSheetProps {
+                id: sheet.id,
+                props,
+            },
         }) {
             warn!("cannot change the sheet: {e}");
         }
     }
     if format_changed {
         // A new size: fit it again.
-        world.resource_mut::<DrawingUi>().views.remove(&(element, sheet.id));
+        world
+            .resource_mut::<DrawingUi>()
+            .views
+            .remove(&(element, sheet.id));
     }
     world.trigger(DialogClose { entity });
 }

@@ -81,7 +81,10 @@ impl super::PcbStudio {
     /// The generation that made the tab `element` (its board studio or its assembly), newest
     /// first.
     pub fn generated_from(&self, element: ElementId) -> Option<&GeneratedAssembly> {
-        self.generated.iter().rev().find(|g| g.assembly == element || g.studio == element)
+        self.generated
+            .iter()
+            .rev()
+            .find(|g| g.assembly == element || g.studio == element)
     }
 }
 
@@ -113,7 +116,9 @@ impl Command for CreatePcbAssembly {
     }
     fn apply(&self, doc: &mut Document) -> Result<(), CommandError> {
         if self.elements.iter().any(|e| doc.element(e.id).is_some()) {
-            return Err(CommandError::Invalid("the generated tabs are already in the document".into()));
+            return Err(CommandError::Invalid(
+                "the generated tabs are already in the document".into(),
+            ));
         }
         let s = studio_mut(doc, self.element)?;
         if s.board(self.generated.board).is_none() {
@@ -122,11 +127,15 @@ impl Command for CreatePcbAssembly {
         s.generated.push(self.generated.clone());
         for e in &self.replaced {
             let Some(old) = doc.elements.iter_mut().find(|x| x.id == e.id) else {
-                return Err(CommandError::Invalid("the reused components Part Studio is gone".into()));
+                return Err(CommandError::Invalid(
+                    "the reused components Part Studio is gone".into(),
+                ));
             };
             *old = e.clone();
         }
-        let at = doc.element_index(self.element).map_or(doc.elements.len(), |i| i + 1);
+        let at = doc
+            .element_index(self.element)
+            .map_or(doc.elements.len(), |i| i + 1);
         for (k, e) in self.elements.iter().enumerate() {
             doc.elements.insert(at + k, e.clone());
         }

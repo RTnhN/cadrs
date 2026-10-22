@@ -19,8 +19,8 @@ use cadrs_core::ElementId;
 use cadrs_core::commands::EditDrawing;
 use cadrs_drawing::style::{FIELDS, FieldValue, StyleSection};
 use cadrs_drawing::{Drawing, DrawingOp, SheetId};
-use cadrs_ui::prelude::*;
 use cadrs_ui::Button;
+use cadrs_ui::prelude::*;
 use cadrs_ui::{
     CheckboxChange, DoubleClickable, InlineEditOptions, Select, SelectChange, begin_inline_edit,
 };
@@ -45,9 +45,12 @@ impl Plugin for DrawingPanelsPlugin {
                     .chain()
                     .run_if(in_state(AppState::Document)),
             )
-            .add_systems(OnExit(AppState::Document), |mut s: ResMut<PanelsSnapshot>| {
-                *s = PanelsSnapshot::default();
-            })
+            .add_systems(
+                OnExit(AppState::Document),
+                |mut s: ResMut<PanelsSnapshot>| {
+                    *s = PanelsSnapshot::default();
+                },
+            )
             .add_observer(on_sheet_double_click)
             .add_observer(on_sheet_context_menu)
             .add_observer(on_sheet_menu_action)
@@ -119,9 +122,18 @@ struct RefGroup {
 }
 
 /// The references of `sheet` of drawing `id`, one per source (see [`RefGroup`]).
-fn ref_groups(doc: &crate::ActiveDocument, status: &crate::linked::LinkStatus, id: ElementId, sheet: &cadrs_drawing::Sheet) -> Vec<RefGroup> {
+fn ref_groups(
+    doc: &crate::ActiveDocument,
+    status: &crate::linked::LinkStatus,
+    id: ElementId,
+    sheet: &cadrs_drawing::Sheet,
+) -> Vec<RefGroup> {
     let mut refs: Vec<cadrs_drawing::ObjectRef> = Vec::new();
-    for r in sheet.reference.iter().chain(sheet.views.iter().map(|v| &v.reference)) {
+    for r in sheet
+        .reference
+        .iter()
+        .chain(sheet.views.iter().map(|v| &v.reference))
+    {
         if refs.iter().all(|x| x.element != r.element) {
             refs.push(*r);
         }
@@ -130,15 +142,21 @@ fn ref_groups(doc: &crate::ActiveDocument, status: &crate::linked::LinkStatus, i
         .filter_map(|r| {
             let e = ElementId(r.element);
             let link = doc.doc.linked_element(e).and_then(|l| {
-                let site = cadrs_core::link_update::RefSite::Drawing { element: id, source: e };
+                let site = cadrs_core::link_update::RefSite::Drawing {
+                    element: id,
+                    source: e,
+                };
                 let u = cadrs_core::link_update::use_at(&doc.doc, site)?;
-                let (tip, icon) = crate::linked::link_badge(&doc.doc, status, &u.reference, e, site);
+                let (tip, icon) =
+                    crate::linked::link_badge(&doc.doc, status, &u.reference, e, site);
                 Some((l.version_name.clone(), tip, icon))
             });
             // Another document's copy names its document ("Block · Block source").
             let name = super::reference_props(&doc.doc, Some(r)).name?;
             let name = match doc.doc.linked_element(e) {
-                Some(l) if l.source.document_or(doc.doc.id) != doc.doc.id => format!("{name} · {}", l.document_name),
+                Some(l) if l.source.document_or(doc.doc.id) != doc.doc.id => {
+                    format!("{name} · {}", l.document_name)
+                }
                 _ => name,
             };
             Some(RefGroup {
@@ -265,8 +283,9 @@ fn ensure_overlay(
 /// A white tab with a grey border, like the feature panel's toggle.
 fn edge_visuals(t: &Theme) -> cadrs_ui::Visuals {
     let mut v = cadrs_ui::button::visuals_for(t, cadrs_ui::ButtonVariant::Ghost);
-    v.background = cadrs_ui::StateColors::new(t.background, t.ghost_hover, t.ghost_active, t.background)
-        .with_selected(t.ghost_hover);
+    v.background =
+        cadrs_ui::StateColors::new(t.background, t.ghost_hover, t.ghost_active, t.background)
+            .with_selected(t.ghost_hover);
     v.border = cadrs_ui::StateColors::all(t.panel_border);
     v
 }
@@ -313,11 +332,21 @@ fn sync_panels(
     mut q_props: Query<(Entity, &mut Node), (With<PropsPanel>, Without<SheetsPanel>)>,
     mut q_toggles: Query<
         (&mut Node, Has<SheetsToggle>),
-        (Or<(With<SheetsToggle>, With<PropsToggle>)>, Without<SheetsPanel>, Without<PropsPanel>),
+        (
+            Or<(With<SheetsToggle>, With<PropsToggle>)>,
+            Without<SheetsPanel>,
+            Without<PropsPanel>,
+        ),
     >,
     mut q_chip: Query<
         (&mut Node, &Children),
-        (With<SheetChip>, Without<SheetsPanel>, Without<PropsPanel>, Without<SheetsToggle>, Without<PropsToggle>),
+        (
+            With<SheetChip>,
+            Without<SheetsPanel>,
+            Without<PropsPanel>,
+            Without<SheetsToggle>,
+            Without<PropsToggle>,
+        ),
     >,
     mut q_text: Query<&mut Text>,
     status: Res<crate::linked::LinkStatus>,
@@ -337,12 +366,20 @@ fn sync_panels(
             element: id,
             drawing: d.clone(),
             active: ui.sheet_index(id, d),
-            groups: d.sheets.iter().map(|s| ref_groups(doc, &status, id, s)).collect(),
+            groups: d
+                .sheets
+                .iter()
+                .map(|s| ref_groups(doc, &status, id, s))
+                .collect(),
             view_versions: d
                 .sheets
                 .iter()
                 .flat_map(|s| s.views.iter())
-                .filter_map(|v| doc.doc.linked_element(ElementId(v.reference.element)).map(|l| (v.id, l.version_name.clone())))
+                .filter_map(|v| {
+                    doc.doc
+                        .linked_element(ElementId(v.reference.element))
+                        .map(|l| (v.id, l.version_name.clone()))
+                })
                 .collect(),
             sheets_open: ui.sheets_open,
             props_open: ui.props_open,
@@ -360,19 +397,31 @@ fn sync_panels(
     let t = theme.clone();
     // Panels and the edge buttons beside them.
     if let Ok((e, mut n)) = q_sheets.single_mut() {
-        n.display = if key.sheets_open { Display::Flex } else { Display::None };
+        n.display = if key.sheets_open {
+            Display::Flex
+        } else {
+            Display::None
+        };
         commands.entity(e).despawn_children();
         if key.sheets_open {
             let k = key.clone();
-            commands.entity(e).with_children(|p| sheets_flyout(p, &t, &k));
+            commands
+                .entity(e)
+                .with_children(|p| sheets_flyout(p, &t, &k));
         }
     }
     if let Ok((e, mut n)) = q_props.single_mut() {
-        n.display = if key.props_open { Display::Flex } else { Display::None };
+        n.display = if key.props_open {
+            Display::Flex
+        } else {
+            Display::None
+        };
         commands.entity(e).despawn_children();
         if key.props_open {
             let k = key.clone();
-            commands.entity(e).with_children(|p| properties_panel(p, &t, &k));
+            commands
+                .entity(e)
+                .with_children(|p| properties_panel(p, &t, &k));
         }
     }
     for (mut n, is_sheets) in &mut q_toggles {
@@ -448,7 +497,11 @@ fn sheets_flyout(p: &mut ChildSpawnerCommands, t: &Theme, key: &PanelsKey) {
                 .disclosure((!key.groups[i].is_empty()).then_some(true))
                 .icon("details", 16.0)
                 .icon_color(t.tool_foreground)
-                .weight(if active { FontWeight::SEMIBOLD } else { FontWeight::MEDIUM })
+                .weight(if active {
+                    FontWeight::SEMIBOLD
+                } else {
+                    FontWeight::MEDIUM
+                })
                 .selected(active)
                 .editable()
                 .left(4.0)
@@ -462,12 +515,29 @@ fn sheets_flyout(p: &mut ChildSpawnerCommands, t: &Theme, key: &PanelsKey) {
         // (Pin / Update), and under it the views of that source.
         let mut k = 0;
         for (g_index, g) in key.groups[i].iter().enumerate() {
-            let views: Vec<&cadrs_drawing::View> = sheet.views.iter().filter(|v| v.reference.element == g.source.0).collect();
-            let row_name = if g_index == 0 { format!("sheet-ref-{}", i + 1) } else { format!("sheet-ref-{}-{}", i + 1, g_index + 1) };
+            let views: Vec<&cadrs_drawing::View> = sheet
+                .views
+                .iter()
+                .filter(|v| v.reference.element == g.source.0)
+                .collect();
+            let row_name = if g_index == 0 {
+                format!("sheet-ref-{}", i + 1)
+            } else {
+                format!("sheet-ref-{}-{}", i + 1, g_index + 1)
+            };
             let mut row = p.spawn(
                 TreeItem::new(row_name.clone(), g.name.clone())
                     .disclosure((!views.is_empty()).then_some(true))
-                    .icon(if g.part { "part" } else if g.asm { "assembly" } else { "part-studio" }, 14.0)
+                    .icon(
+                        if g.part {
+                            "part"
+                        } else if g.asm {
+                            "assembly"
+                        } else {
+                            "part-studio"
+                        },
+                        14.0,
+                    )
                     .icon_color(t.tool_foreground)
                     .trailing(g.link.as_ref().map(|l| l.0.clone()), t.muted_foreground)
                     .left(22.0)
@@ -476,24 +546,52 @@ fn sheets_flyout(p: &mut ChildSpawnerCommands, t: &Theme, key: &PanelsKey) {
             );
             // A reference to a version shows its icon (a click, or right-click → Pin reference /
             // Update linked document…, opens the Reference manager).
-            row.insert((crate::reference_manager::SheetRefRow { drawing: key.element, source: g.source }, ContextMenuTarget));
+            row.insert((
+                crate::reference_manager::SheetRefRow {
+                    drawing: key.element,
+                    source: g.source,
+                },
+                ContextMenuTarget,
+            ));
             // P3G.4 (P3G.3 carried): the label is cut in the narrow pane; its tooltip names the
             // source document and version in full.
             let full = match &g.link {
-                Some((_, tip, _)) => tip.lines().next().unwrap_or_default().trim_start_matches("Linked document: ").to_string(),
+                Some((_, tip, _)) => tip
+                    .lines()
+                    .next()
+                    .unwrap_or_default()
+                    .trim_start_matches("Linked document: ")
+                    .to_string(),
                 None => format!("{} (this document)", g.name),
             };
             row.insert(cadrs_ui::Tooltip::new(full));
             if let Some((_, tip, icon)) = g.link.clone() {
                 let (drawing, source) = (key.element, g.source);
                 row.with_children(|r| {
-                    crate::linked::spawn_link_icon(r, format!("{row_name}-linked"), icon, &tip, crate::linked::LinkTarget::Drawing(drawing, source));
+                    crate::linked::spawn_link_icon(
+                        r,
+                        format!("{row_name}-linked"),
+                        icon,
+                        &tip,
+                        crate::linked::LinkTarget::Drawing(drawing, source),
+                    );
                     // Inset from the pane's edge, so the icon isn't clipped.
-                    r.spawn((Node { width: Val::Px(8.0), flex_shrink: 0.0, ..default() }, Pickable::IGNORE));
+                    r.spawn((
+                        Node {
+                            width: Val::Px(8.0),
+                            flex_shrink: 0.0,
+                            ..default()
+                        },
+                        Pickable::IGNORE,
+                    ));
                 });
             }
             // Views: those without a parent on this sheet first, each with its projected views.
-            let roots: Vec<&cadrs_drawing::View> = views.iter().copied().filter(|v| v.parent.is_none_or(|p| sheet.view(p).is_none())).collect();
+            let roots: Vec<&cadrs_drawing::View> = views
+                .iter()
+                .copied()
+                .filter(|v| v.parent.is_none_or(|p| sheet.view(p).is_none()))
+                .collect();
             for root in roots {
                 view_rows(p, t, key, sheet, root, 0, i, &mut k);
             }
@@ -522,20 +620,31 @@ fn view_rows(
         return;
     }
     *k += 1;
-    let children: Vec<&cadrs_drawing::View> = sheet.views.iter().filter(|c| c.parent == Some(v.id)).collect();
+    let children: Vec<&cadrs_drawing::View> = sheet
+        .views
+        .iter()
+        .filter(|c| c.parent == Some(v.id))
+        .collect();
     let (id, sheet_id) = (v.id, sheet.id);
     // P3G.2: a view of a version names it ("V1").
-    let version = key.view_versions.iter().find(|(i, _)| *i == v.id).map(|(_, n)| n.clone());
+    let version = key
+        .view_versions
+        .iter()
+        .find(|(i, _)| *i == v.id)
+        .map(|(_, n)| n.clone());
     p.spawn((
-        TreeItem::new(format!("sheet-view-{}-{}", sheet_index + 1, *k), v.name.clone())
-            .trailing(version, t.muted_foreground)
-            .disclosure((!children.is_empty()).then_some(true))
-            .icon(view_icon(v), 14.0)
-            .icon_color(t.tool_foreground)
-            .selected(key.selected.contains(&v.id))
-            .left(40.0 + 16.0 * depth as f32 + if children.is_empty() { 20.0 } else { 0.0 })
-            .height(24.0)
-            .build(t),
+        TreeItem::new(
+            format!("sheet-view-{}-{}", sheet_index + 1, *k),
+            v.name.clone(),
+        )
+        .trailing(version, t.muted_foreground)
+        .disclosure((!children.is_empty()).then_some(true))
+        .icon(view_icon(v), 14.0)
+        .icon_color(t.tool_foreground)
+        .selected(key.selected.contains(&v.id))
+        .left(40.0 + 16.0 * depth as f32 + if children.is_empty() { 20.0 } else { 0.0 })
+        .height(24.0)
+        .build(t),
         observe(move |_: On<Activate>, mut commands: Commands| {
             commands.queue(move |w: &mut World| {
                 activate_sheet(w, sheet_id);
@@ -586,7 +695,10 @@ pub fn insert_sheet(world: &mut World) {
     };
     let id = SheetId::new();
     if edit(world, DrawingOp::InsertSheet { id, after }) {
-        world.resource_mut::<DrawingUi>().active_sheet.insert(element, id);
+        world
+            .resource_mut::<DrawingUi>()
+            .active_sheet
+            .insert(element, id);
     }
 }
 
@@ -598,7 +710,10 @@ pub fn activate_sheet(world: &mut World, sheet: SheetId) {
     else {
         return;
     };
-    world.resource_mut::<DrawingUi>().active_sheet.insert(element, sheet);
+    world
+        .resource_mut::<DrawingUi>()
+        .active_sheet
+        .insert(element, sheet);
 }
 
 fn on_sheet_double_click(ev: On<DoubleClick>, q: Query<&SheetRow>, mut commands: Commands) {
@@ -618,7 +733,9 @@ fn on_sheet_context_menu(
     let (Ok(row), Some(doc)) = (q.get(ev.entity), doc) else {
         return;
     };
-    let count = active_drawing(&doc).map(|(_, d)| d.sheets.len()).unwrap_or(0);
+    let count = active_drawing(&doc)
+        .map(|(_, d)| d.sheets.len())
+        .unwrap_or(0);
     let menu = Menu::new("sheet-context-menu")
         .min_width(160.0)
         .item(MenuItem::new("sheet-menu-activate", "Activate").icon("details"))
@@ -722,7 +839,12 @@ fn properties_panel(p: &mut ChildSpawnerCommands, t: &Theme, key: &PanelsKey) {
             ..default()
         },
         children![(
-            t.text("Drawing properties", t.font_md, FontWeight::SEMIBOLD, t.primary),
+            t.text(
+                "Drawing properties",
+                t.font_md,
+                FontWeight::SEMIBOLD,
+                t.primary
+            ),
             Pickable::IGNORE,
         )],
     ));
@@ -764,7 +886,12 @@ fn properties_panel(p: &mut ChildSpawnerCommands, t: &Theme, key: &PanelsKey) {
     .with_children(|b| {
         b.spawn((
             Name::new("drawing-properties-section"),
-            t.text(section.label(), t.font_base, FontWeight::SEMIBOLD, t.foreground),
+            t.text(
+                section.label(),
+                t.font_base,
+                FontWeight::SEMIBOLD,
+                t.foreground,
+            ),
             Node {
                 margin: UiRect::new(Val::Px(10.0), Val::ZERO, Val::Px(8.0), Val::Px(4.0)),
                 ..default()
@@ -819,7 +946,11 @@ fn properties_panel(p: &mut ChildSpawnerCommands, t: &Theme, key: &PanelsKey) {
                                 f.label,
                                 t.font_sm,
                                 FontWeight::NORMAL,
-                                if d.locked { t.disabled_foreground } else { t.foreground },
+                                if d.locked {
+                                    t.disabled_foreground
+                                } else {
+                                    t.foreground
+                                },
                             ),
                             Node {
                                 width: Val::Px(118.0),

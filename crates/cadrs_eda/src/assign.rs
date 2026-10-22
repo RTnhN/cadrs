@@ -22,21 +22,44 @@ pub struct Filters {
 
 /// Distinct pad numbers of a footprint (mechanical pads without a number don't count).
 pub fn pad_count(f: &Footprint) -> usize {
-    f.pads.iter().filter(|p| !p.number.is_empty()).map(|p| p.number.as_str()).collect::<BTreeSet<_>>().len()
+    f.pads
+        .iter()
+        .filter(|p| !p.number.is_empty())
+        .map(|p| p.number.as_str())
+        .collect::<BTreeSet<_>>()
+        .len()
 }
 
 /// The footprints `filters` leave for `s`.
-pub fn candidates<'a>(table: &'a LibraryTable, sch: &Schematic, s: &PlacedSymbol, filters: &Filters) -> Vec<&'a Footprint> {
+pub fn candidates<'a>(
+    table: &'a LibraryTable,
+    sch: &Schematic,
+    s: &PlacedSymbol,
+    filters: &Filters,
+) -> Vec<&'a Footprint> {
     let def = sch.symbol(&s.symbol);
-    let pins = def.map_or(0, |d| d.pins.iter().map(|p| p.number.as_str()).collect::<BTreeSet<_>>().len());
-    let words: Vec<String> = filters.text.split_whitespace().map(str::to_lowercase).collect();
+    let pins = def.map_or(0, |d| {
+        d.pins
+            .iter()
+            .map(|p| p.number.as_str())
+            .collect::<BTreeSet<_>>()
+            .len()
+    });
+    let words: Vec<String> = filters
+        .text
+        .split_whitespace()
+        .map(str::to_lowercase)
+        .collect();
     table
         .footprints()
         .filter(|f| {
             if filters.symbol_filters
                 && let Some(d) = def
                 && !d.footprint_filters.is_empty()
-                && !d.footprint_filters.iter().any(|pat| glob(pat, &f.id) || glob(pat, f.name()))
+                && !d
+                    .footprint_filters
+                    .iter()
+                    .any(|pat| glob(pat, &f.id) || glob(pat, f.name()))
             {
                 return false;
             }
@@ -56,6 +79,14 @@ pub fn candidates<'a>(table: &'a LibraryTable, sch: &Schematic, s: &PlacedSymbol
 
 /// Assigns `footprint` (`lib:name`) to the symbol with reference `reference`.
 pub fn assign(sch: &mut Schematic, reference: &str, footprint: &str) -> bool {
-    let Some(id) = sch.sheets.iter().flat_map(|s| &s.symbols).find(|s| s.reference() == reference).map(|s| s.id) else { return false };
+    let Some(id) = sch
+        .sheets
+        .iter()
+        .flat_map(|s| &s.symbols)
+        .find(|s| s.reference() == reference)
+        .map(|s| s.id)
+    else {
+        return false;
+    };
     crate::sch_edit::set_field(sch, id, fields::FOOTPRINT, footprint)
 }

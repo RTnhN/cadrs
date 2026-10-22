@@ -54,9 +54,9 @@ use crate::store::{Store, StoreError};
 mod compact;
 mod workspaces;
 mod writer;
-pub use writer::flush as flush_saves;
 use workspaces::Track;
 pub use workspaces::{MAIN_NAME, Workspace, WorkspaceId};
+pub use writer::flush as flush_saves;
 
 /// A full copy of the document is kept every this many entries.
 pub const SNAPSHOT_EVERY: usize = 16;
@@ -118,16 +118,27 @@ impl StudioPatch {
             .filter(|f| before.features().iter().find(|b| b.id == f.id) != Some(*f))
             .cloned()
             .collect();
-        Self { id: after.id, shell, order, features }
+        Self {
+            id: after.id,
+            shell,
+            order,
+            features,
+        }
     }
 
     /// Applies the change to `element` (the Part Studio it was made from).
     fn apply(&self, element: &mut Element) {
-        let mut old = element.features_mut().map(std::mem::take).unwrap_or_default();
+        let mut old = element
+            .features_mut()
+            .map(std::mem::take)
+            .unwrap_or_default();
         if let Some(shell) = &self.shell {
             *element = (**shell).clone();
         }
-        let order = self.order.clone().unwrap_or_else(|| old.iter().map(|f| f.id).collect());
+        let order = self
+            .order
+            .clone()
+            .unwrap_or_else(|| old.iter().map(|f| f.id).collect());
         let mut features = Vec::with_capacity(order.len());
         for id in order {
             if let Some(f) = self.features.iter().find(|f| f.id == id) {
@@ -170,12 +181,20 @@ impl Delta {
                 _ => elements.push(e.clone()),
             }
         }
-        Self { head, order, elements, studios }
+        Self {
+            head,
+            order,
+            elements,
+            studios,
+        }
     }
 
     /// True if it changes nothing.
     pub fn is_empty(&self) -> bool {
-        self.head.is_none() && self.order.is_none() && self.elements.is_empty() && self.studios.is_empty()
+        self.head.is_none()
+            && self.order.is_none()
+            && self.elements.is_empty()
+            && self.studios.is_empty()
     }
 
     /// Applies the change to `doc` (the state it was made from).
@@ -490,7 +509,13 @@ impl HistoryLog {
 
     /// Appends the change from the current state to `doc`, if there is one. Returns the new
     /// entry's index.
-    pub fn record(&mut self, doc: &Document, origin: Origin, time: Timestamp, user: &str) -> Option<usize> {
+    pub fn record(
+        &mut self,
+        doc: &Document,
+        origin: Origin,
+        time: Timestamp,
+        user: &str,
+    ) -> Option<usize> {
         let before = self.head().clone();
         let delta = Delta::between(&before, doc);
         if delta.is_empty() {
@@ -502,7 +527,11 @@ impl HistoryLog {
             // What was undone or redone, by its command's name ("Conrod :: Undo : Insert
             // Sketch 3", "Conrod :: Undo : Restore to …").
             Origin::Undo(l) | Origin::Redo(l) => {
-                let action = if matches!(origin, Origin::Undo(_)) { "Undo" } else { "Redo" };
+                let action = if matches!(origin, Origin::Undo(_)) {
+                    "Undo"
+                } else {
+                    "Redo"
+                };
                 let label = match (what.element.is_some(), l.is_empty()) {
                     (true, false) => format!("{} :: {action} : {l}", what.element_name),
                     (false, false) => format!("{action} : {l}"),
@@ -554,13 +583,26 @@ impl HistoryLog {
 
     /// Makes a version of the current state: `name` (trimmed; "V<n>" when empty) and an
     /// optional `description`. Returns its id.
-    pub fn create_version(&mut self, name: &str, description: &str, time: Timestamp, user: &str) -> VersionId {
+    pub fn create_version(
+        &mut self,
+        name: &str,
+        description: &str,
+        time: Timestamp,
+        user: &str,
+    ) -> VersionId {
         self.create_version_with_id(VersionId::new(), name, description, time, user)
     }
 
     /// [`Self::create_version`] with a given id (P3G.5: the stand-in fixtures' versions have
     /// fixed ids, so they regenerate exactly).
-    pub fn create_version_with_id(&mut self, id: VersionId, name: &str, description: &str, time: Timestamp, user: &str) -> VersionId {
+    pub fn create_version_with_id(
+        &mut self,
+        id: VersionId,
+        name: &str,
+        description: &str,
+        time: Timestamp,
+        user: &str,
+    ) -> VersionId {
         let name = match name.trim() {
             "" => self.next_version_name(),
             n => n.to_string(),
@@ -580,7 +622,12 @@ impl HistoryLog {
 
     /// Makes an **auto version** (P3G.2, ER4.5): as [`Self::create_version`], marked as made by
     /// Update all references. Like every version it can't be removed (ER4.8).
-    pub fn create_auto_version(&mut self, description: &str, time: Timestamp, user: &str) -> VersionId {
+    pub fn create_auto_version(
+        &mut self,
+        description: &str,
+        time: Timestamp,
+        user: &str,
+    ) -> VersionId {
         let id = self.create_version("", description, time, user);
         if let Some(v) = self.versions.last_mut() {
             v.auto = true;
@@ -609,12 +656,24 @@ impl HistoryLog {
     }
 
     /// Notes that `features` of `element` regenerated without error in the current state.
-    pub fn note_healthy(&mut self, element: ElementId, features: impl IntoIterator<Item = FeatureId>) {
+    pub fn note_healthy(
+        &mut self,
+        element: ElementId,
+        features: impl IntoIterator<Item = FeatureId>,
+    ) {
         let entry = self.head_index();
         for feature in features {
-            match self.healthy.iter_mut().find(|m| m.element == element && m.feature == feature) {
+            match self
+                .healthy
+                .iter_mut()
+                .find(|m| m.element == element && m.feature == feature)
+            {
                 Some(m) => m.entry = entry,
-                None => self.healthy.push(HealthyMark { element, feature, entry }),
+                None => self.healthy.push(HealthyMark {
+                    element,
+                    feature,
+                    entry,
+                }),
             }
         }
     }
@@ -641,7 +700,9 @@ impl HistoryLog {
     /// Writes the log to `path`, after the saves still being written in the background.
     pub fn save_path(&self, path: &Path) -> Result<(), StoreError> {
         writer::flush();
-        let text = self.to_ron().map_err(|e| StoreError::Parse(e.to_string()))?;
+        let text = self
+            .to_ron()
+            .map_err(|e| StoreError::Parse(e.to_string()))?;
         writer::write(path, &text)
     }
 
@@ -733,7 +794,9 @@ impl HistoryLog {
     /// the states must match the full copies (a past state is rebuilt from the nearest one);
     /// otherwise the log is left as it was (still readable, only larger).
     fn upgrade(&mut self) {
-        let Some(mut before) = self.state_at(0) else { return };
+        let Some(mut before) = self.state_at(0) else {
+            return;
+        };
         let mut deltas = Vec::with_capacity(self.entries.len());
         for k in 1..self.entries.len() {
             let mut after = before.clone();
@@ -765,11 +828,18 @@ impl HistoryLog {
 
 /// The document as it was after entry `k` of a workspace's changes: the nearest full copy at or
 /// before it with the deltas after that applied.
-fn track_state_at(entries: &[LogEntry], snapshots: &[(usize, Arc<Document>)], k: usize) -> Option<Document> {
+fn track_state_at(
+    entries: &[LogEntry],
+    snapshots: &[(usize, Arc<Document>)],
+    k: usize,
+) -> Option<Document> {
     if k >= entries.len() {
         return None;
     }
-    let (at, snap) = snapshots.iter().filter(|(i, _)| *i <= k).max_by_key(|(i, _)| *i)?;
+    let (at, snap) = snapshots
+        .iter()
+        .filter(|(i, _)| *i <= k)
+        .max_by_key(|(i, _)| *i)?;
     let mut doc = (**snap).clone();
     for e in &entries[at + 1..=k] {
         e.delta.apply(&mut doc);
@@ -794,7 +864,9 @@ impl Described {
         match (self.element.is_some(), self.feature.is_some()) {
             (true, true) => format!("{} :: {action} : {}", self.element_name, self.feature_name),
             // A tab's own settings: the command says what ("Conrod :: Rename part to Conrod").
-            (true, false) if action == "Edit" && !command.is_empty() => format!("{} :: {command}", self.element_name),
+            (true, false) if action == "Edit" && !command.is_empty() => {
+                format!("{} :: {command}", self.element_name)
+            }
             (true, false) => format!("{} :: {action}", self.element_name),
             _ if !command.is_empty() && action != "Undo" && action != "Redo" => command.to_string(),
             _ => action.to_string(),
@@ -838,7 +910,12 @@ pub fn describe(before: &Document, after: &Document) -> Described {
             element_name: e.name.clone(),
             ..Described::default()
         };
-        if b.name != e.name && (Element { name: e.name.clone(), ..b.clone() }) == *e {
+        if b.name != e.name
+            && (Element {
+                name: e.name.clone(),
+                ..b.clone()
+            }) == *e
+        {
             d.action = "Rename".into();
             return d;
         }
@@ -852,9 +929,15 @@ pub fn describe(before: &Document, after: &Document) -> Described {
             feature(f, "Insert", &mut d);
         } else if let Some(f) = fb.iter().find(|f| fa.iter().all(|x| x.id != f.id)) {
             feature(f, "Delete", &mut d);
-        } else if let Some(f) = fa.iter().find(|f| fb.iter().find(|x| x.id == f.id) != Some(*f)) {
+        } else if let Some(f) = fa
+            .iter()
+            .find(|f| fb.iter().find(|x| x.id == f.id) != Some(*f))
+        {
             let renamed = fb.iter().find(|x| x.id == f.id).is_some_and(|x| {
-                crate::document::Feature { name: f.name.clone(), ..x.clone() } == *f
+                crate::document::Feature {
+                    name: f.name.clone(),
+                    ..x.clone()
+                } == *f
             });
             feature(f, if renamed { "Rename" } else { "Edit" }, &mut d);
         } else {

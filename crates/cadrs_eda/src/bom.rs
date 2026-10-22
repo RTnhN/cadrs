@@ -31,9 +31,22 @@ pub fn rows(sch: &Schematic) -> Vec<BomRow> {
         let datasheet = s.field(fields::DATASHEET).map_or("", |f| f.value());
         let datasheet = if datasheet == "~" { "" } else { datasheet };
         let key = (s.value(), s.footprint(), datasheet, s.dnp);
-        match rows.iter_mut().find(|r| (r.value.as_str(), r.footprint.as_str(), r.datasheet.as_str(), r.dnp) == key) {
+        match rows.iter_mut().find(|r| {
+            (
+                r.value.as_str(),
+                r.footprint.as_str(),
+                r.datasheet.as_str(),
+                r.dnp,
+            ) == key
+        }) {
             Some(r) => r.references.push(s.reference().into()),
-            None => rows.push(BomRow { references: vec![s.reference().into()], value: key.0.into(), footprint: key.1.into(), datasheet: key.2.into(), dnp: s.dnp }),
+            None => rows.push(BomRow {
+                references: vec![s.reference().into()],
+                value: key.0.into(),
+                footprint: key.1.into(),
+                datasheet: key.2.into(),
+                dnp: s.dnp,
+            }),
         }
     }
     for r in &mut rows {
@@ -49,17 +62,20 @@ fn quote(s: &str) -> String {
 
 /// CSV with the columns of a spreadsheet BOM: Reference, Value, Datasheet, Footprint, Qty, DNP.
 pub fn csv(sch: &Schematic) -> String {
-    let mut out = String::from("\"Reference\",\"Value\",\"Datasheet\",\"Footprint\",\"Qty\",\"DNP\"\n");
+    let mut out =
+        String::from("\"Reference\",\"Value\",\"Datasheet\",\"Footprint\",\"Qty\",\"DNP\"\n");
     for r in rows(sch) {
-        out.push_str(&[
-            quote(&r.references.join(",")),
-            quote(&r.value),
-            quote(&r.datasheet),
-            quote(&r.footprint),
-            quote(&r.qty().to_string()),
-            quote(if r.dnp { "DNP" } else { "" }),
-        ]
-        .join(","));
+        out.push_str(
+            &[
+                quote(&r.references.join(",")),
+                quote(&r.value),
+                quote(&r.datasheet),
+                quote(&r.footprint),
+                quote(&r.qty().to_string()),
+                quote(if r.dnp { "DNP" } else { "" }),
+            ]
+            .join(","),
+        );
         out.push('\n');
     }
     out
@@ -80,9 +96,19 @@ pub fn jlcpcb_csv(sch: &Schematic) -> String {
             continue;
         }
         let footprint = s.footprint().rsplit(':').next().unwrap_or("").to_string();
-        let lcsc = LCSC_FIELDS.iter().find_map(|n| s.field(n).map(|f| f.value().trim().to_string()).filter(|v| !v.is_empty())).unwrap_or_default();
+        let lcsc = LCSC_FIELDS
+            .iter()
+            .find_map(|n| {
+                s.field(n)
+                    .map(|f| f.value().trim().to_string())
+                    .filter(|v| !v.is_empty())
+            })
+            .unwrap_or_default();
         let key = (s.value().to_string(), footprint, lcsc);
-        match rows.iter_mut().find(|r| (&r.0, &r.2, &r.3) == (&key.0, &key.1, &key.2)) {
+        match rows
+            .iter_mut()
+            .find(|r| (&r.0, &r.2, &r.3) == (&key.0, &key.1, &key.2))
+        {
             Some(r) => r.1.push(s.reference().into()),
             None => rows.push((key.0, vec![s.reference().into()], key.1, key.2)),
         }
@@ -93,7 +119,15 @@ pub fn jlcpcb_csv(sch: &Schematic) -> String {
     rows.sort_by_key(|r| natural(&r.1[0]));
     let mut out = String::from("Comment,Designator,Footprint,LCSC Part #\n");
     for (value, refs, fp, lcsc) in rows {
-        out.push_str(&[quote(&value), quote(&refs.join(",")), quote(&fp), quote(&lcsc)].join(","));
+        out.push_str(
+            &[
+                quote(&value),
+                quote(&refs.join(",")),
+                quote(&fp),
+                quote(&lcsc),
+            ]
+            .join(","),
+        );
         out.push('\n');
     }
     out

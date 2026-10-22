@@ -43,13 +43,31 @@ fn registry() -> &'static RwLock<HashMap<&'static str, Handler>> {
         };
         add(super::StageOf::NAME, handle::<super::StageOf>);
         add(super::ClearCache::NAME, handle::<super::ClearCache>);
-        add(super::SaveSnapshotNow::NAME, handle::<super::SaveSnapshotNow>);
-        add(super::exchange::PlanImport::NAME, handle::<super::exchange::PlanImport>);
-        add(super::exchange::ExportFiles::NAME, handle::<super::exchange::ExportFiles>);
+        add(
+            super::SaveSnapshotNow::NAME,
+            handle::<super::SaveSnapshotNow>,
+        );
+        add(
+            super::exchange::PlanImport::NAME,
+            handle::<super::exchange::PlanImport>,
+        );
+        add(
+            super::exchange::ExportFiles::NAME,
+            handle::<super::exchange::ExportFiles>,
+        );
         add(crate::section::Caps::NAME, handle::<crate::section::Caps>);
-        add(crate::assembly::interference::Check::NAME, handle::<crate::assembly::interference::Check>);
-        add(crate::assembly::interference::ExportStep::NAME, handle::<crate::assembly::interference::ExportStep>);
-        add(crate::samples::StepFixture::NAME, handle::<crate::samples::StepFixture>);
+        add(
+            crate::assembly::interference::Check::NAME,
+            handle::<crate::assembly::interference::Check>,
+        );
+        add(
+            crate::assembly::interference::ExportStep::NAME,
+            handle::<crate::assembly::interference::ExportStep>,
+        );
+        add(
+            crate::samples::StepFixture::NAME,
+            handle::<crate::samples::StepFixture>,
+        );
         RwLock::new(m)
     })
 }
@@ -87,7 +105,11 @@ pub fn run<T: Task>(task: T) -> PendingJob<T::Output> {
             let _ = reply.send(out);
         }
     });
-    let job = Job::Task { name: T::NAME, input, done };
+    let job = Job::Task {
+        name: T::NAME,
+        input,
+        done,
+    };
     let _ = super::worker().lock().map(|tx| tx.send(job));
     PendingJob { rx: Mutex::new(rx) }
 }

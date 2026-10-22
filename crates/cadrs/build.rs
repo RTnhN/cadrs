@@ -17,17 +17,36 @@ fn main() {
     let out = PathBuf::from(std::env::var("OUT_DIR").expect("OUT_DIR"));
     let rc = out.join("cadrs.rc");
     let ico = ico.canonicalize().expect("assets/icons/cadrs.ico");
-    std::fs::write(&rc, format!("1 ICON \"{}\"\n", ico.display().to_string().replace('\\', "/"))).expect("writing cadrs.rc");
+    std::fs::write(
+        &rc,
+        format!(
+            "1 ICON \"{}\"\n",
+            ico.display().to_string().replace('\\', "/")
+        ),
+    )
+    .expect("writing cadrs.rc");
     let obj = out.join("cadrs-icon.o");
     // The cross toolchain's windres, else a native one (MSYS2 on Windows).
     let windres = ["x86_64-w64-mingw32-windres", "windres"]
         .into_iter()
-        .find(|w| Command::new(w).arg("--version").output().is_ok_and(|o| o.status.success()));
+        .find(|w| {
+            Command::new(w)
+                .arg("--version")
+                .output()
+                .is_ok_and(|o| o.status.success())
+        });
     let Some(windres) = windres else {
         println!("cargo:warning=windres not found: cadrs.exe is built without its icon");
         return;
     };
-    let ok = Command::new(windres).arg(&rc).arg("-O").arg("coff").arg("-o").arg(&obj).status().is_ok_and(|s| s.success());
+    let ok = Command::new(windres)
+        .arg(&rc)
+        .arg("-O")
+        .arg("coff")
+        .arg("-o")
+        .arg(&obj)
+        .status()
+        .is_ok_and(|s| s.success());
     if !ok {
         println!("cargo:warning=windres failed: cadrs.exe is built without its icon");
         return;

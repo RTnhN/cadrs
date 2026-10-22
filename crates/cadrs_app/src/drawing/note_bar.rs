@@ -35,7 +35,12 @@ impl Plugin for NoteBarPlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(
             Update,
-            (sync_note_bar, sync_cell_bar, sync_toggles, read_table_dialog)
+            (
+                sync_note_bar,
+                sync_cell_bar,
+                sync_toggles,
+                read_table_dialog,
+            )
                 .chain()
                 .after(super::annotations::AnnotationDrawSet)
                 .run_if(in_state(AppState::Document)),
@@ -61,7 +66,13 @@ pub(crate) fn card_bundle(t: &Theme, name: &str, at: Vec2) -> impl Bundle {
         },
         BackgroundColor(t.background),
         BorderColor::all(Color::srgb_u8(0xd8, 0xd8, 0xd8)),
-        BoxShadow::new(Color::srgba(0.0, 0.0, 0.0, 0.3), Val::Px(1.0), Val::Px(2.0), Val::Px(0.0), Val::Px(6.0)),
+        BoxShadow::new(
+            Color::srgba(0.0, 0.0, 0.0, 0.3),
+            Val::Px(1.0),
+            Val::Px(2.0),
+            Val::Px(0.0),
+            Val::Px(6.0),
+        ),
         GlobalZIndex(cadrs_ui::z::DIALOG - 12),
         DespawnOnExit(AppState::Document),
     )
@@ -98,13 +109,22 @@ pub(crate) fn header(
         ));
         if let Some(f) = accept {
             let visuals = cadrs_ui::Visuals {
-                background: cadrs_ui::StateColors::new(t.accept, t.accept.darker(0.04), t.accept.darker(0.08), t.accept_disabled),
+                background: cadrs_ui::StateColors::new(
+                    t.accept,
+                    t.accept.darker(0.04),
+                    t.accept.darker(0.08),
+                    t.accept_disabled,
+                ),
                 border: cadrs_ui::StateColors::all(Color::NONE),
                 foreground: cadrs_ui::StateColors::all(Color::WHITE),
                 focus_ring: t.focus_ring,
             };
             h.spawn((
-                Button::new(format!("{prefix}-ok")).icon("check-bold").icon_size(14.0).tooltip("Accept").build(t),
+                Button::new(format!("{prefix}-ok"))
+                    .icon("check-bold")
+                    .icon_size(14.0)
+                    .tooltip("Accept")
+                    .build(t),
                 observe(move |_: On<Activate>, mut commands: Commands| {
                     commands.queue(f);
                 }),
@@ -122,7 +142,12 @@ pub(crate) fn header(
             ));
         }
         h.spawn((
-            Button::new(format!("{prefix}-cancel")).icon("x-bold").icon_size(14.0).ghost().tooltip("Cancel").build(t),
+            Button::new(format!("{prefix}-cancel"))
+                .icon("x-bold")
+                .icon_size(14.0)
+                .ghost()
+                .tooltip("Cancel")
+                .build(t),
             observe(move |_: On<Activate>, mut commands: Commands| {
                 commands.queue(cancel);
             }),
@@ -189,8 +214,15 @@ fn tool_if(
         tool(r, t, name, icon, tip, f);
         return;
     }
-    let why = if name == "cell-merge" { "select two or more cells" } else { "select a merged cell" };
-    let b = Button::new(name.to_string()).ghost().disabled(true).tooltip(format!("{tip}: {why}"));
+    let why = if name == "cell-merge" {
+        "select two or more cells"
+    } else {
+        "select a merged cell"
+    };
+    let b = Button::new(name.to_string())
+        .ghost()
+        .disabled(true)
+        .tooltip(format!("{tip}: {why}"));
     let mut e = r.spawn(b.build(t));
     if let Ok(i) = icon {
         let fg = t.disabled_foreground;
@@ -233,7 +265,11 @@ fn screen_of(world: &World, p: [f64; 2]) -> Option<Vec2> {
     let ui = world.resource::<DrawingUi>();
     let (_, sv) = current_view(doc, ui)?;
     let area = sheet_area(world.resource::<ViewportRect>(), ui);
-    Some(sheet_to_screen(sv, area, Vec2::new(p[0] as f32, p[1] as f32)))
+    Some(sheet_to_screen(
+        sv,
+        area,
+        Vec2::new(p[0] as f32, p[1] as f32),
+    ))
 }
 
 fn drawing_units(world: &World) -> DrawingUnits {
@@ -268,7 +304,11 @@ fn note_bar_at(world: &World) -> Option<Vec2> {
     let top = f.iter().fold(f64::MIN, |a, p| a.max(p[1]));
     let left = f.iter().fold(f64::MAX, |a, p| a.min(p[0]));
     let p = screen_of(world, [left, top + 2.2 * h])?;
-    Some(clear_of_zone_labels(world, (p + Vec2::new(-4.0, -70.0)).round(), NOTE_BAR_SIZE))
+    Some(clear_of_zone_labels(
+        world,
+        (p + Vec2::new(-4.0, -70.0)).round(),
+        NOTE_BAR_SIZE,
+    ))
 }
 
 /// The note and cell toolbars' sizes (px), for keeping them off the zone labels.
@@ -288,7 +328,10 @@ fn clear_of_zone_labels(world: &World, at: Vec2, size: Vec2) -> Vec2 {
             return Some(Vec::new());
         }
         let f = cadrs_drawing::standard::frame(sheet.format);
-        let bands = [(f.outer.max[1] + f.inner.max[1]) / 2.0, (f.outer.min[1] + f.inner.min[1]) / 2.0];
+        let bands = [
+            (f.outer.max[1] + f.inner.max[1]) / 2.0,
+            (f.outer.min[1] + f.inner.min[1]) / 2.0,
+        ];
         let mut out = Vec::new();
         for z in &f.columns {
             for y in bands {
@@ -299,7 +342,11 @@ fn clear_of_zone_labels(world: &World, at: Vec2, size: Vec2) -> Vec2 {
     })()
     .unwrap_or_default();
     let (hw, hh) = (12.0, 11.0);
-    let covers = |x: f32| labels.iter().any(|l| l.x + hw > x && l.x - hw < x + size.x && l.y + hh > at.y && l.y - hh < at.y + size.y);
+    let covers = |x: f32| {
+        labels.iter().any(|l| {
+            l.x + hw > x && l.x - hw < x + size.x && l.y + hh > at.y && l.y - hh < at.y + size.y
+        })
+    };
     if !covers(at.x) {
         return at;
     }
@@ -307,7 +354,11 @@ fn clear_of_zone_labels(world: &World, at: Vec2, size: Vec2) -> Vec2 {
     let mut best: Option<f32> = None;
     for l in &labels {
         for x in [l.x - hw - 4.0 - size.x, l.x + hw + 4.0] {
-            if x >= 4.0 && x + size.x <= right - 4.0 && !covers(x) && best.is_none_or(|b| (x - at.x).abs() < (b - at.x).abs()) {
+            if x >= 4.0
+                && x + size.x <= right - 4.0
+                && !covers(x)
+                && best.is_none_or(|b| (x - at.x).abs() < (b - at.x).abs())
+            {
                 best = Some(x);
             }
         }
@@ -321,7 +372,10 @@ fn sync_note_bar(world: &mut World) {
         .then(|| {
             let ui = world.resource::<NotesUi>();
             let e = ui.edit.as_ref().filter(|e| e.toolbar)?;
-            Some(NoteBar { target: e.target, at: note_bar_at(world)? })
+            Some(NoteBar {
+                target: e.target,
+                at: note_bar_at(world)?,
+            })
         })
         .flatten();
     let mut q = world.query::<(Entity, &NoteBar)>();
@@ -354,10 +408,13 @@ fn sync_note_bar(world: &mut World) {
     let height = {
         let ui = world.resource::<NotesUi>();
         let e = ui.edit.as_ref();
-        let default_h = e.and_then(|e| e.note.as_ref().map(|n| n.height)).unwrap_or_else(|| {
-            let doc = world.get_resource::<ActiveDocument>();
-            doc.and_then(|d| active_drawing(d).map(|(_, d)| d.style.table_text_height)).unwrap_or(3.0)
-        });
+        let default_h = e
+            .and_then(|e| e.note.as_ref().map(|n| n.height))
+            .unwrap_or_else(|| {
+                let doc = world.get_resource::<ActiveDocument>();
+                doc.and_then(|d| active_drawing(d).map(|(_, d)| d.style.table_text_height))
+                    .unwrap_or(3.0)
+            });
         e.and_then(|e| e.editor.height()).unwrap_or(default_h)
     };
     let title = match w.target {
@@ -365,76 +422,177 @@ fn sync_note_bar(world: &mut World) {
         EditTarget::Cell { .. } => "Cell",
     };
     let mut commands = world.commands();
-    commands.spawn((card_bundle(&t, "note-bar", w.at), w.clone())).with_children(|c| {
-        header(c, &t, title, "note", Some(notes::commit_edit), notes::cancel_edit);
-        c.spawn(Node {
-            padding: UiRect::all(Val::Px(4.0)),
-            align_items: AlignItems::Center,
-            column_gap: Val::Px(1.0),
-            ..default()
-        })
-        .with_children(|r| {
-            let toggle = |a: Attr| move |w: &mut World| notes::with_editor(w, |e| e.toggle(a));
-            tool(r, &t, "note-bold", Ok("bold"), "Bold (Ctrl+B)", toggle(Attr::Bold));
-            tool(r, &t, "note-italic", Ok("italic"), "Italic (Ctrl+I)", toggle(Attr::Italic));
-            tool(r, &t, "note-underline", Err(Glyph::Underline), "Underline (Ctrl+U)", toggle(Attr::Underline));
-            tool(r, &t, "note-strike", Err(Glyph::Strike), "Strikethrough", toggle(Attr::Strike));
-            sep(r, &t);
-            let align = |a: HAlign| move |w: &mut World| notes::with_editor(w, |e| e.set_align(a));
-            tool(r, &t, "note-align-left", Err(Glyph::AlignLeft), "Align left", align(HAlign::Left));
-            tool(r, &t, "note-align-center", Err(Glyph::AlignCenter), "Center", align(HAlign::Center));
-            tool(r, &t, "note-align-right", Err(Glyph::AlignRight), "Align right", align(HAlign::Right));
-            sep(r, &t);
-            let list = |l: ListKind| move |w: &mut World| notes::with_editor(w, |e| e.toggle_list(l));
-            tool(r, &t, "note-bullets", Err(Glyph::Bullets), "Bulleted list", list(ListKind::Bullet));
-            tool(r, &t, "note-numbered", Err(Glyph::Numbered), "Numbered list", list(ListKind::Numbered));
-            sep(r, &t);
-            r.spawn(cadrs_ui::icon("text", 14.0, t.muted_foreground));
-            r.spawn(
-                TextInput::new("note-height")
-                    .value(format_len(height / unit_mm(units)))
-                    .width(Val::Px(50.0))
-                    .height(24.0)
-                    .select_all_on_focus()
-                    .build(&t),
-            )
-            .insert(cadrs_ui::Tooltip::new(match units {
-                DrawingUnits::Inch => "Text height (in)",
-                DrawingUnits::Millimeter => "Text height (mm)",
-            }));
-            sep(r, &t);
-            r.spawn((
-                Button::new("note-symbol").label("Ø").dropdown_caret().ghost().tooltip("Insert symbol").build(&t),
-                observe(|a: On<Activate>, mut commands: Commands| {
-                    let b = a.entity;
-                    commands.queue(move |w: &mut World| open_symbol_menu(w, b));
-                }),
-            ))
-            .insert(Node {
-                height: Val::Px(26.0),
-                padding: UiRect::horizontal(Val::Px(5.0)),
+    commands
+        .spawn((card_bundle(&t, "note-bar", w.at), w.clone()))
+        .with_children(|c| {
+            header(
+                c,
+                &t,
+                title,
+                "note",
+                Some(notes::commit_edit),
+                notes::cancel_edit,
+            );
+            c.spawn(Node {
+                padding: UiRect::all(Val::Px(4.0)),
                 align_items: AlignItems::Center,
-                column_gap: Val::Px(2.0),
-                border: UiRect::all(Val::Px(1.0)),
-                border_radius: BorderRadius::all(Val::Px(3.0)),
+                column_gap: Val::Px(1.0),
                 ..default()
+            })
+            .with_children(|r| {
+                let toggle = |a: Attr| move |w: &mut World| notes::with_editor(w, |e| e.toggle(a));
+                tool(
+                    r,
+                    &t,
+                    "note-bold",
+                    Ok("bold"),
+                    "Bold (Ctrl+B)",
+                    toggle(Attr::Bold),
+                );
+                tool(
+                    r,
+                    &t,
+                    "note-italic",
+                    Ok("italic"),
+                    "Italic (Ctrl+I)",
+                    toggle(Attr::Italic),
+                );
+                tool(
+                    r,
+                    &t,
+                    "note-underline",
+                    Err(Glyph::Underline),
+                    "Underline (Ctrl+U)",
+                    toggle(Attr::Underline),
+                );
+                tool(
+                    r,
+                    &t,
+                    "note-strike",
+                    Err(Glyph::Strike),
+                    "Strikethrough",
+                    toggle(Attr::Strike),
+                );
+                sep(r, &t);
+                let align =
+                    |a: HAlign| move |w: &mut World| notes::with_editor(w, |e| e.set_align(a));
+                tool(
+                    r,
+                    &t,
+                    "note-align-left",
+                    Err(Glyph::AlignLeft),
+                    "Align left",
+                    align(HAlign::Left),
+                );
+                tool(
+                    r,
+                    &t,
+                    "note-align-center",
+                    Err(Glyph::AlignCenter),
+                    "Center",
+                    align(HAlign::Center),
+                );
+                tool(
+                    r,
+                    &t,
+                    "note-align-right",
+                    Err(Glyph::AlignRight),
+                    "Align right",
+                    align(HAlign::Right),
+                );
+                sep(r, &t);
+                let list =
+                    |l: ListKind| move |w: &mut World| notes::with_editor(w, |e| e.toggle_list(l));
+                tool(
+                    r,
+                    &t,
+                    "note-bullets",
+                    Err(Glyph::Bullets),
+                    "Bulleted list",
+                    list(ListKind::Bullet),
+                );
+                tool(
+                    r,
+                    &t,
+                    "note-numbered",
+                    Err(Glyph::Numbered),
+                    "Numbered list",
+                    list(ListKind::Numbered),
+                );
+                sep(r, &t);
+                r.spawn(cadrs_ui::icon("text", 14.0, t.muted_foreground));
+                r.spawn(
+                    TextInput::new("note-height")
+                        .value(format_len(height / unit_mm(units)))
+                        .width(Val::Px(50.0))
+                        .height(24.0)
+                        .select_all_on_focus()
+                        .build(&t),
+                )
+                .insert(cadrs_ui::Tooltip::new(match units {
+                    DrawingUnits::Inch => "Text height (in)",
+                    DrawingUnits::Millimeter => "Text height (mm)",
+                }));
+                sep(r, &t);
+                r.spawn((
+                    Button::new("note-symbol")
+                        .label("Ø")
+                        .dropdown_caret()
+                        .ghost()
+                        .tooltip("Insert symbol")
+                        .build(&t),
+                    observe(|a: On<Activate>, mut commands: Commands| {
+                        let b = a.entity;
+                        commands.queue(move |w: &mut World| open_symbol_menu(w, b));
+                    }),
+                ))
+                .insert(Node {
+                    height: Val::Px(26.0),
+                    padding: UiRect::horizontal(Val::Px(5.0)),
+                    align_items: AlignItems::Center,
+                    column_gap: Val::Px(2.0),
+                    border: UiRect::all(Val::Px(1.0)),
+                    border_radius: BorderRadius::all(Val::Px(3.0)),
+                    ..default()
+                });
+                sep(r, &t);
+                tool(
+                    r,
+                    &t,
+                    "note-insert-reference",
+                    Ok("part"),
+                    "Insert sheet reference property",
+                    |w| open_property_card(w, false),
+                );
+                tool(
+                    r,
+                    &t,
+                    "note-insert-drawing",
+                    Ok("file"),
+                    "Insert drawing property",
+                    |w| open_property_card(w, true),
+                );
             });
-            sep(r, &t);
-            tool(r, &t, "note-insert-reference", Ok("part"), "Insert sheet reference property", |w| open_property_card(w, false));
-            tool(r, &t, "note-insert-drawing", Ok("file"), "Insert drawing property", |w| open_property_card(w, true));
         });
-    });
     world.flush();
 }
 
 fn format_len(v: f64) -> String {
     let s = format!("{v:.3}");
     let s = s.trim_end_matches('0').trim_end_matches('.').to_string();
-    if s.starts_with("0.") { s[1..].to_string() } else { s }
+    if s.starts_with("0.") {
+        s[1..].to_string()
+    } else {
+        s
+    }
 }
 
 /// Shows the toolbars' toggles (bold, alignment, …) as the text under the caret has them.
-fn sync_toggles(ui: Res<NotesUi>, q: Query<(Entity, &Name, Has<cadrs_ui::Selected>)>, mut commands: Commands) {
+fn sync_toggles(
+    ui: Res<NotesUi>,
+    q: Query<(Entity, &Name, Has<cadrs_ui::Selected>)>,
+    mut commands: Commands,
+) {
     let Some(e) = ui.edit.as_ref() else {
         return;
     };
@@ -484,11 +642,16 @@ fn open_symbol_menu(world: &mut World, button: Entity) {
     let theme = world.resource::<Theme>().clone();
     let mut menu = Menu::new("note-symbol-menu").min_width(190.0);
     for (name, c, label) in SYMBOLS {
-        menu = menu.item(MenuItem::new(format!("note-symbol-{name}"), format!("{c}    {label}")));
+        menu = menu.item(MenuItem::new(
+            format!("note-symbol-{name}"),
+            format!("{c}    {label}"),
+        ));
     }
     let mut commands = world.commands();
     let anchor = cadrs_ui::menu::open_menu(&mut commands, button, menu.build(&theme));
-    commands.entity(anchor).insert((SymbolMenu, DespawnOnExit(AppState::Document)));
+    commands
+        .entity(anchor)
+        .insert((SymbolMenu, DespawnOnExit(AppState::Document)));
     world.flush();
 }
 
@@ -496,7 +659,11 @@ fn on_symbol(ev: On<MenuAction>, q: Query<(), With<SymbolMenu>>, mut commands: C
     if !q.contains(ev.entity) {
         return;
     }
-    let Some(c) = SYMBOLS.iter().find(|(n, _, _)| ev.item == format!("note-symbol-{n}")).map(|s| s.1) else {
+    let Some(c) = SYMBOLS
+        .iter()
+        .find(|(n, _, _)| ev.item == format!("note-symbol-{n}"))
+        .map(|s| s.1)
+    else {
         return;
     };
     commands.queue(move |w: &mut World| notes::with_editor(w, |e| e.insert_str(&c.to_string())));
@@ -547,7 +714,12 @@ fn close_property_card(world: &mut World) {
 }
 
 fn open_property_card(world: &mut World, drawing: bool) {
-    let state = PropertyCard { drawing, prop: 0, case: 0, date: 0 };
+    let state = PropertyCard {
+        drawing,
+        prop: 0,
+        case: 0,
+        date: 0,
+    };
     spawn_property_card(world, state);
 }
 
@@ -555,18 +727,39 @@ fn spawn_property_card(world: &mut World, s: PropertyCard) {
     close_property_card(world);
     let at = {
         let mut q = world.query::<(&Name, &ComputedNode, &bevy::ui::UiGlobalTransform)>();
-        let button = if s.drawing { "note-insert-drawing" } else { "note-insert-reference" };
-        q.iter(world).find(|(n, _, _)| n.as_str() == button).map(|(_, n, t)| {
-            let k = n.inverse_scale_factor();
-            Vec2::new((t.translation.x - n.size().x / 2.0) * k, (t.translation.y + n.size().y / 2.0) * k + 4.0)
-        })
+        let button = if s.drawing {
+            "note-insert-drawing"
+        } else {
+            "note-insert-reference"
+        };
+        q.iter(world)
+            .find(|(n, _, _)| n.as_str() == button)
+            .map(|(_, n, t)| {
+                let k = n.inverse_scale_factor();
+                Vec2::new(
+                    (t.translation.x - n.size().x / 2.0) * k,
+                    (t.translation.y + n.size().y / 2.0) * k + 4.0,
+                )
+            })
     }
     .unwrap_or(Vec2::new(400.0, 200.0));
     let preview = field_sources(world)
-        .map(|(r, d)| cadrs_drawing::rich::resolve_field(&s.field(), &cadrs_drawing::rich::FieldContext { reference: &r, drawing: &d }))
+        .map(|(r, d)| {
+            cadrs_drawing::rich::resolve_field(
+                &s.field(),
+                &cadrs_drawing::rich::FieldContext {
+                    reference: &r,
+                    drawing: &d,
+                },
+            )
+        })
         .unwrap_or_default();
     let t = world.resource::<Theme>().clone();
-    let title = if s.drawing { "Insert drawing property" } else { "Insert sheet reference property" };
+    let title = if s.drawing {
+        "Insert drawing property"
+    } else {
+        "Insert sheet reference property"
+    };
     let mut commands = world.commands();
     commands
         .spawn((card_bundle(&t, "note-prop-card", at), s))
@@ -583,7 +776,14 @@ fn spawn_property_card(world: &mut World, s: PropertyCard) {
             ..default()
         })
         .with_children(|c| {
-            header(c, &t, title, "note-prop", Some(insert_property), close_property_card);
+            header(
+                c,
+                &t,
+                title,
+                "note-prop",
+                Some(insert_property),
+                close_property_card,
+            );
             c.spawn(Node {
                 flex_direction: FlexDirection::Column,
                 padding: UiRect::all(Val::Px(8.0)),
@@ -646,7 +846,13 @@ fn spawn_property_card(world: &mut World, s: PropertyCard) {
                     BorderColor::all(Color::srgb_u8(0xe0, 0xe4, 0xea)),
                 ))
                 .with_children(|p| {
-                    p.spawn((t.text("Shows", t.font_sm, FontWeight::NORMAL, t.muted_foreground), Node { flex_shrink: 0.0, ..default() }));
+                    p.spawn((
+                        t.text("Shows", t.font_sm, FontWeight::NORMAL, t.muted_foreground),
+                        Node {
+                            flex_shrink: 0.0,
+                            ..default()
+                        },
+                    ));
                     p.spawn((
                         Name::new("note-prop-preview-value"),
                         Text::new(preview.clone()),
@@ -654,7 +860,12 @@ fn spawn_property_card(world: &mut World, s: PropertyCard) {
                         TextColor(t.foreground),
                         // Wraps (theme texts don't).
                         TextLayout::default(),
-                        Node { flex_grow: 1.0, flex_shrink: 1.0, min_width: Val::Px(0.0), ..default() },
+                        Node {
+                            flex_grow: 1.0,
+                            flex_shrink: 1.0,
+                            min_width: Val::Px(0.0),
+                            ..default()
+                        },
                     ));
                 });
             });
@@ -697,11 +908,18 @@ fn on_select(ev: On<SelectChange>, q: Query<&Name>, mut commands: Commands) {
 }
 
 /// Enter in the text height field.
-fn on_submit(ev: On<TextSubmit>, q: Query<(&Name, Option<&ChildOf>)>, q_names: Query<&Name>, mut commands: Commands) {
+fn on_submit(
+    ev: On<TextSubmit>,
+    q: Query<(&Name, Option<&ChildOf>)>,
+    q_names: Query<&Name>,
+    mut commands: Commands,
+) {
     let Ok((name, parent)) = q.get(ev.entity) else {
         return;
     };
-    let frame = parent.and_then(|p| q_names.get(p.parent()).ok()).map(|n| n.as_str().to_string());
+    let frame = parent
+        .and_then(|p| q_names.get(p.parent()).ok())
+        .map(|n| n.as_str().to_string());
     let name = frame.unwrap_or_else(|| name.as_str().trim_end_matches("-field").to_string());
     if name != "note-height" {
         return;
@@ -761,10 +979,17 @@ fn sync_cell_bar(world: &mut World) {
             })?;
             let p = screen_of(world, [g.min[0], g.max[1]])?;
             let (_, t, ((r0, c0), (r1, c1))) = selected_table(world)?;
-            let one = t.merge_at(r0, c0).is_some_and(|m| m.contains(r1, c1)) || (r0, c0) == (r1, c1);
+            let one =
+                t.merge_at(r0, c0).is_some_and(|m| m.contains(r1, c1)) || (r0, c0) == (r1, c1);
             let unmerge = (r0..=r1).any(|r| (c0..=c1).any(|c| t.merge_at(r, c).is_some()));
-            let at = clear_of_zone_labels(world, (p + Vec2::new(0.0, -44.0)).round(), CELL_BAR_SIZE);
-            Some(CellBar { table: sel.table, at, merge: !one, unmerge })
+            let at =
+                clear_of_zone_labels(world, (p + Vec2::new(0.0, -44.0)).round(), CELL_BAR_SIZE);
+            Some(CellBar {
+                table: sel.table,
+                at,
+                merge: !one,
+                unmerge,
+            })
         })
         .flatten();
     let mut q = world.query::<(Entity, &CellBar)>();
@@ -783,47 +1008,133 @@ fn sync_cell_bar(world: &mut World) {
     };
     let t = world.resource::<Theme>().clone();
     let mut commands = world.commands();
-    commands.spawn((card_bundle(&t, "cell-bar", w.at), w.clone())).with_children(|c| {
-        c.spawn(Node {
-            padding: UiRect::all(Val::Px(4.0)),
-            align_items: AlignItems::Center,
-            column_gap: Val::Px(1.0),
-            ..default()
-        })
-        .with_children(|r| {
-            tool(r, &t, "cell-row-above", Err(Glyph::RowAbove), "Insert row above", |w| {
-                table_op(w, "Insert row", |t, (a, _)| t.insert_row(a.0))
+    commands
+        .spawn((card_bundle(&t, "cell-bar", w.at), w.clone()))
+        .with_children(|c| {
+            c.spawn(Node {
+                padding: UiRect::all(Val::Px(4.0)),
+                align_items: AlignItems::Center,
+                column_gap: Val::Px(1.0),
+                ..default()
+            })
+            .with_children(|r| {
+                tool(
+                    r,
+                    &t,
+                    "cell-row-above",
+                    Err(Glyph::RowAbove),
+                    "Insert row above",
+                    |w| table_op(w, "Insert row", |t, (a, _)| t.insert_row(a.0)),
+                );
+                tool(
+                    r,
+                    &t,
+                    "cell-row-below",
+                    Err(Glyph::RowBelow),
+                    "Insert row below",
+                    |w| {
+                        table_op(w, "Insert row", |t, (_, b)| {
+                            t.insert_row(b.0 + t.span(b.0, b.1).0)
+                        })
+                    },
+                );
+                tool(
+                    r,
+                    &t,
+                    "cell-col-left",
+                    Err(Glyph::ColumnLeft),
+                    "Insert column left",
+                    |w| table_op(w, "Insert column", |t, (a, _)| t.insert_col(a.1)),
+                );
+                tool(
+                    r,
+                    &t,
+                    "cell-col-right",
+                    Err(Glyph::ColumnRight),
+                    "Insert column right",
+                    |w| {
+                        table_op(w, "Insert column", |t, (_, b)| {
+                            t.insert_col(b.1 + t.span(b.0, b.1).1)
+                        })
+                    },
+                );
+                tool(
+                    r,
+                    &t,
+                    "cell-row-delete",
+                    Err(Glyph::DeleteRow),
+                    "Delete row",
+                    |w| table_op(w, "Delete row", |t, (a, _)| t.remove_row(a.0)),
+                );
+                tool(
+                    r,
+                    &t,
+                    "cell-col-delete",
+                    Err(Glyph::DeleteColumn),
+                    "Delete column",
+                    |w| table_op(w, "Delete column", |t, (a, _)| t.remove_col(a.1)),
+                );
+                sep(r, &t);
+                tool_if(
+                    r,
+                    &t,
+                    "cell-merge",
+                    Err(Glyph::Merge),
+                    "Merge cells",
+                    w.merge,
+                    |w| table_op(w, "Merge cells", |t, (a, b)| t.merge(a, b)),
+                );
+                tool_if(
+                    r,
+                    &t,
+                    "cell-unmerge",
+                    Err(Glyph::Unmerge),
+                    "Unmerge cell",
+                    w.unmerge,
+                    |w| table_op(w, "Unmerge cell", |t, (a, _)| t.unmerge(a)),
+                );
+                sep(r, &t);
+                tool(r, &t, "cell-bold", Ok("bold"), "Bold", |w| {
+                    format_cells(w, Some(Attr::Bold), None)
+                });
+                tool(r, &t, "cell-italic", Ok("italic"), "Italic", |w| {
+                    format_cells(w, Some(Attr::Italic), None)
+                });
+                tool(
+                    r,
+                    &t,
+                    "cell-underline",
+                    Err(Glyph::Underline),
+                    "Underline",
+                    |w| format_cells(w, Some(Attr::Underline), None),
+                );
+                sep(r, &t);
+                tool(
+                    r,
+                    &t,
+                    "cell-align-left",
+                    Err(Glyph::AlignLeft),
+                    "Align left",
+                    |w| format_cells(w, None, Some(HAlign::Left)),
+                );
+                tool(
+                    r,
+                    &t,
+                    "cell-align-center",
+                    Err(Glyph::AlignCenter),
+                    "Center",
+                    |w| format_cells(w, None, Some(HAlign::Center)),
+                );
+                tool(
+                    r,
+                    &t,
+                    "cell-align-right",
+                    Err(Glyph::AlignRight),
+                    "Align right",
+                    |w| format_cells(w, None, Some(HAlign::Right)),
+                );
             });
-            tool(r, &t, "cell-row-below", Err(Glyph::RowBelow), "Insert row below", |w| {
-                table_op(w, "Insert row", |t, (_, b)| t.insert_row(b.0 + t.span(b.0, b.1).0))
-            });
-            tool(r, &t, "cell-col-left", Err(Glyph::ColumnLeft), "Insert column left", |w| {
-                table_op(w, "Insert column", |t, (a, _)| t.insert_col(a.1))
-            });
-            tool(r, &t, "cell-col-right", Err(Glyph::ColumnRight), "Insert column right", |w| {
-                table_op(w, "Insert column", |t, (_, b)| t.insert_col(b.1 + t.span(b.0, b.1).1))
-            });
-            tool(r, &t, "cell-row-delete", Err(Glyph::DeleteRow), "Delete row", |w| {
-                table_op(w, "Delete row", |t, (a, _)| t.remove_row(a.0))
-            });
-            tool(r, &t, "cell-col-delete", Err(Glyph::DeleteColumn), "Delete column", |w| {
-                table_op(w, "Delete column", |t, (a, _)| t.remove_col(a.1))
-            });
-            sep(r, &t);
-            tool_if(r, &t, "cell-merge", Err(Glyph::Merge), "Merge cells", w.merge, |w| table_op(w, "Merge cells", |t, (a, b)| t.merge(a, b)));
-            tool_if(r, &t, "cell-unmerge", Err(Glyph::Unmerge), "Unmerge cell", w.unmerge, |w| {
-                table_op(w, "Unmerge cell", |t, (a, _)| t.unmerge(a))
-            });
-            sep(r, &t);
-            tool(r, &t, "cell-bold", Ok("bold"), "Bold", |w| format_cells(w, Some(Attr::Bold), None));
-            tool(r, &t, "cell-italic", Ok("italic"), "Italic", |w| format_cells(w, Some(Attr::Italic), None));
-            tool(r, &t, "cell-underline", Err(Glyph::Underline), "Underline", |w| format_cells(w, Some(Attr::Underline), None));
-            sep(r, &t);
-            tool(r, &t, "cell-align-left", Err(Glyph::AlignLeft), "Align left", |w| format_cells(w, None, Some(HAlign::Left)));
-            tool(r, &t, "cell-align-center", Err(Glyph::AlignCenter), "Center", |w| format_cells(w, None, Some(HAlign::Center)));
-            tool(r, &t, "cell-align-right", Err(Glyph::AlignRight), "Align right", |w| format_cells(w, None, Some(HAlign::Right)));
         });
-    });
     world.flush();
 }
 
@@ -842,7 +1153,11 @@ fn selected_table(world: &World) -> Option<(cadrs_drawing::SheetId, Table, CellR
 }
 
 /// A table edit from the cell toolbar.
-fn table_op(world: &mut World, label: &str, f: impl FnOnce(&Table, ((usize, usize), (usize, usize))) -> Result<Table, String>) {
+fn table_op(
+    world: &mut World,
+    label: &str,
+    f: impl FnOnce(&Table, ((usize, usize), (usize, usize))) -> Result<Table, String>,
+) {
     notes::commit_edit(world);
     let Some((sheet, t, range)) = selected_table(world) else {
         return;
@@ -851,7 +1166,14 @@ fn table_op(world: &mut World, label: &str, f: impl FnOnce(&Table, ((usize, usiz
         Ok(m) => {
             let (r, c) = (m.n_rows(), m.n_cols());
             let m = notes::fit(world, m);
-            if edit_drawing(world, DrawingOp::SetTable { sheet, table: m, label: label.into() }) {
+            if edit_drawing(
+                world,
+                DrawingOp::SetTable {
+                    sheet,
+                    table: m,
+                    label: label.into(),
+                },
+            ) {
                 let mut ui = world.resource_mut::<NotesUi>();
                 if let Some(s) = ui.cells.as_mut() {
                     // Keep the selection on the table.
@@ -878,10 +1200,17 @@ fn format_cells(world: &mut World, attr: Option<Attr>, align: Option<HAlign>) {
         return;
     };
     let mut m = t.clone();
-    let cells: Vec<(usize, usize)> = (r0..=r1).flat_map(|r| (c0..=c1).map(move |c| (r, c))).filter(|(r, c)| !t.covered(*r, *c)).collect();
+    let cells: Vec<(usize, usize)> = (r0..=r1)
+        .flat_map(|r| (c0..=c1).map(move |c| (r, c)))
+        .filter(|(r, c)| !t.covered(*r, *c))
+        .collect();
     if let Some(a) = attr {
         let all = cells.iter().all(|(r, c)| {
-            t.cells[*r][*c].paragraphs.iter().flat_map(|p| &p.spans).all(|s| s.style.get(a))
+            t.cells[*r][*c]
+                .paragraphs
+                .iter()
+                .flat_map(|p| &p.spans)
+                .all(|s| s.style.get(a))
                 && !t.cells[*r][*c].is_empty()
         });
         for (r, c) in &cells {
@@ -895,7 +1224,14 @@ fn format_cells(world: &mut World, attr: Option<Attr>, align: Option<HAlign>) {
     }
     if m != t {
         let m = notes::fit(world, m);
-        edit_drawing(world, DrawingOp::SetTable { sheet, table: m, label: "Format cells".into() });
+        edit_drawing(
+            world,
+            DrawingOp::SetTable {
+                sheet,
+                table: m,
+                label: "Format cells".into(),
+            },
+        );
     }
 }
 
@@ -910,8 +1246,19 @@ struct TableDialog;
 struct CornerChoice(Corner);
 
 /// The fixed-corner buttons: a small grid with the corner marked.
-pub(crate) fn corner_buttons(c: &mut ChildSpawnerCommands, t: &Theme, prefix: &str, selected: Corner, on: fn(&mut World, Corner)) {
-    c.spawn((t.text("Select fixed corner:", t.font_sm, FontWeight::NORMAL, t.muted_foreground),));
+pub(crate) fn corner_buttons(
+    c: &mut ChildSpawnerCommands,
+    t: &Theme,
+    prefix: &str,
+    selected: Corner,
+    on: fn(&mut World, Corner),
+) {
+    c.spawn((t.text(
+        "Select fixed corner:",
+        t.font_sm,
+        FontWeight::NORMAL,
+        t.muted_foreground,
+    ),));
     c.spawn(Node {
         column_gap: Val::Px(8.0),
         margin: UiRect::top(Val::Px(2.0)),
@@ -919,11 +1266,18 @@ pub(crate) fn corner_buttons(c: &mut ChildSpawnerCommands, t: &Theme, prefix: &s
     })
     .with_children(|r| {
         for corner in Corner::ALL {
-            let name = format!("{prefix}-{}", corner.label().to_lowercase().replace(' ', "-"));
+            let name = format!(
+                "{prefix}-{}",
+                corner.label().to_lowercase().replace(' ', "-")
+            );
             let fg = t.foreground;
             let accent = t.primary;
             r.spawn((
-                Button::new(name).ghost().selected(corner == selected).tooltip(corner.label()).build(t),
+                Button::new(name)
+                    .ghost()
+                    .selected(corner == selected)
+                    .tooltip(corner.label())
+                    .build(t),
                 CornerChoice(corner),
                 observe(move |_: On<Activate>, mut commands: Commands| {
                     commands.queue(move |w: &mut World| on(w, corner));
@@ -1035,7 +1389,10 @@ pub fn open_table_dialog(world: &mut World) {
                 ..default()
             })
             .with_children(|b| {
-                for (name, label, v) in [("table-rows", "Rows", spec.rows), ("table-cols", "Columns", spec.cols)] {
+                for (name, label, v) in [
+                    ("table-rows", "Rows", spec.rows),
+                    ("table-cols", "Columns", spec.cols),
+                ] {
                     b.spawn(Node {
                         align_items: AlignItems::Center,
                         column_gap: Val::Px(8.0),
@@ -1049,12 +1406,33 @@ pub fn open_table_dialog(world: &mut World) {
                                 ..default()
                             },
                         ));
-                        r.spawn(TextInput::new(name).value(v.to_string()).width(Val::Px(60.0)).select_all_on_focus().build(&t));
+                        r.spawn(
+                            TextInput::new(name)
+                                .value(v.to_string())
+                                .width(Val::Px(60.0))
+                                .select_all_on_focus()
+                                .build(&t),
+                        );
                     });
                 }
-                b.spawn(Checkbox::new("table-title-row").label("Title row").checked(spec.title).build(&t));
-                b.spawn(Checkbox::new("table-header-row").label("Header row").checked(spec.header).build(&t));
-                b.spawn(Checkbox::new("table-revision").label("Revision table").checked(spec.revision).build(&t));
+                b.spawn(
+                    Checkbox::new("table-title-row")
+                        .label("Title row")
+                        .checked(spec.title)
+                        .build(&t),
+                );
+                b.spawn(
+                    Checkbox::new("table-header-row")
+                        .label("Header row")
+                        .checked(spec.header)
+                        .build(&t),
+                );
+                b.spawn(
+                    Checkbox::new("table-revision")
+                        .label("Revision table")
+                        .checked(spec.revision)
+                        .build(&t),
+                );
                 corner_buttons(b, &t, "table-corner", spec.fixed, |w, c| {
                     w.resource_mut::<NotesUi>().table_spec.fixed = c;
                     refresh_corner_buttons(w, "table-corner", c);
@@ -1098,7 +1476,13 @@ fn read_table_dialog(
         return;
     }
     for (n, t) in &q_fields {
-        let v = t.value().to_string().trim().parse::<usize>().ok().filter(|v| (1..=50).contains(v));
+        let v = t
+            .value()
+            .to_string()
+            .trim()
+            .parse::<usize>()
+            .ok()
+            .filter(|v| (1..=50).contains(v));
         match (n.as_str(), v) {
             ("table-rows-field", Some(v)) if ui.table_spec.rows != v => ui.table_spec.rows = v,
             ("table-cols-field", Some(v)) if ui.table_spec.cols != v => ui.table_spec.cols = v,
@@ -1135,13 +1519,28 @@ pub fn open_table_properties(world: &mut World, id: TableId) {
         return;
     };
     let (_, hi) = table.rect();
-    let at = screen_of(world, [hi[0], hi[1]]).map(|p| p + Vec2::new(16.0, 0.0)).unwrap_or(Vec2::new(500.0, 200.0));
+    let at = screen_of(world, [hi[0], hi[1]])
+        .map(|p| p + Vec2::new(16.0, 0.0))
+        .unwrap_or(Vec2::new(500.0, 200.0));
     let theme = world.resource::<Theme>().clone();
     let mut commands = world.commands();
     commands
-        .spawn((card_bundle(&theme, "table-properties", at), TablePropsDialog { table: id, corner: table.fixed }))
+        .spawn((
+            card_bundle(&theme, "table-properties", at),
+            TablePropsDialog {
+                table: id,
+                corner: table.fixed,
+            },
+        ))
         .with_children(|c| {
-            header(c, &theme, "Table properties", "table-properties", Some(apply_table_properties), close_table_properties);
+            header(
+                c,
+                &theme,
+                "Table properties",
+                "table-properties",
+                Some(apply_table_properties),
+                close_table_properties,
+            );
             c.spawn(Node {
                 flex_direction: FlexDirection::Column,
                 padding: UiRect::all(Val::Px(8.0)),
@@ -1185,7 +1584,14 @@ fn apply_table_properties(world: &mut World) {
         return;
     };
     if t.fixed != d.corner {
-        edit_drawing(world, DrawingOp::SetTable { sheet, table: t.set_fixed(d.corner), label: "Change fixed corner".into() });
+        edit_drawing(
+            world,
+            DrawingOp::SetTable {
+                sheet,
+                table: t.set_fixed(d.corner),
+                label: "Change fixed corner".into(),
+            },
+        );
     }
     world.resource_mut::<NotesUi>().selected = vec![Item::Table(d.table)];
 }

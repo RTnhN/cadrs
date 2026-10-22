@@ -15,7 +15,9 @@ use std::sync::Arc;
 use serde::{Deserialize, Serialize};
 
 use super::commands::assembly_mut;
-use super::connector::{ConnectorAnchor, EntityRef, ImplicitPoint, MateConnector, resolve_implicit};
+use super::connector::{
+    ConnectorAnchor, EntityRef, ImplicitPoint, MateConnector, resolve_implicit,
+};
 use super::mate::{Mate, MateFeature, MateId, MateKind};
 use super::structure::derive;
 use super::{Assembly, Instance, InstanceId, Pose};
@@ -46,7 +48,13 @@ impl Replicate {
 
 /// The mate id of the `k`th copy of a Replicate `id`'s mate.
 pub fn copy_mate_id(id: MateId, k: usize) -> MateId {
-    MateId(derive(InstanceId(id.0), InstanceId::from_u128(0x7e9_0000 + k as u128)).0)
+    MateId(
+        derive(
+            InstanceId(id.0),
+            InstanceId::from_u128(0x7e9_0000 + k as u128),
+        )
+        .0,
+    )
 }
 
 /// The copy of the seed mate `m` for the `k`th target: the seed's connector moved onto the copy,
@@ -57,14 +65,23 @@ pub fn copy_mate(r: &Replicate, m: &Mate, k: usize) -> Option<Mate> {
     let mut out = m.clone();
     out.connectors[side].instance = inst;
     let other = &m.connectors[1 - side];
-    out.connectors[1 - side] = MateConnector { flip: other.flip ^ target.flip, reorient: other.reorient, edit: other.edit, ..target };
+    out.connectors[1 - side] = MateConnector {
+        flip: other.flip ^ target.flip,
+        reorient: other.reorient,
+        edit: other.edit,
+        ..target
+    };
     Some(out)
 }
 
 /// The assembly with each (not suppressed) Replicate's copied mates added as mates and the
 /// Replicate features themselves left out: what the solver sees.
 pub fn expand(asm: &Assembly) -> Assembly {
-    if !asm.mates.iter().any(|f| matches!(f.kind, MateKind::Replicate(_))) {
+    if !asm
+        .mates
+        .iter()
+        .any(|f| matches!(f.kind, MateKind::Replicate(_)))
+    {
         return asm.clone();
     }
     let mut out = asm.clone();
@@ -77,11 +94,17 @@ pub fn expand(asm: &Assembly) -> Assembly {
         if f.suppressed {
             continue;
         }
-        let Some(seed) = asm.mate(r.seed_mate) else { continue };
+        let Some(seed) = asm.mate(r.seed_mate) else {
+            continue;
+        };
         let Some(m) = seed.mate() else { continue };
         for k in 0..r.instances.len() {
             if let Some(c) = copy_mate(r, m, k) {
-                let mut g = MateFeature::new(copy_mate_id(f.id, k), format!("{} {}", f.name, k + 1), MateKind::Mate(c));
+                let mut g = MateFeature::new(
+                    copy_mate_id(f.id, k),
+                    format!("{} {}", f.name, k + 1),
+                    MateKind::Mate(c),
+                );
                 g.suppressed = seed.suppressed;
                 mates.push(g);
             }
@@ -92,17 +115,34 @@ pub fn expand(asm: &Assembly) -> Assembly {
 }
 
 /// The world frame of a connector at the placements of `asm`.
-fn world(asm: &Assembly, solids: &HashMap<InstanceId, Arc<Solid>>, c: &MateConnector) -> super::connector::ConnectorFrame {
+fn world(
+    asm: &Assembly,
+    solids: &HashMap<InstanceId, Arc<Solid>>,
+    c: &MateConnector,
+) -> super::connector::ConnectorFrame {
     let pose = asm.instance(c.instance).map(|i| i.pose).unwrap_or_default();
-    c.local_frame(solids.get(&c.instance).map(|s| &**s)).moved(&pose)
+    c.local_frame(solids.get(&c.instance).map(|s| &**s))
+        .moved(&pose)
 }
 
 /// Where the copy on `target` goes: the seed moved as the seed mate's other connector would move
 /// onto the target.
-pub fn copy_pose(asm: &Assembly, solids: &HashMap<InstanceId, Arc<Solid>>, seed: &Instance, m: &Mate, side: usize, target: &MateConnector) -> Pose {
+pub fn copy_pose(
+    asm: &Assembly,
+    solids: &HashMap<InstanceId, Arc<Solid>>,
+    seed: &Instance,
+    m: &Mate,
+    side: usize,
+    target: &MateConnector,
+) -> Pose {
     let other = &m.connectors[1 - side];
     let from = world(asm, solids, other);
-    let adjusted = MateConnector { flip: other.flip ^ target.flip, reorient: other.reorient, edit: other.edit, ..*target };
+    let adjusted = MateConnector {
+        flip: other.flip ^ target.flip,
+        reorient: other.reorient,
+        edit: other.edit,
+        ..*target
+    };
     let to = world(asm, solids, &adjusted);
     seed.pose.then(&from.pose().inverse().then(&to.pose()))
 }
@@ -113,42 +153,72 @@ pub fn copy_pose(asm: &Assembly, solids: &HashMap<InstanceId, Arc<Solid>>, seed:
 /// every cylinder of the same radius about a parallel axis. The connector's own place is left
 /// out; each keeps `c`'s owner kind and gets a flip when its axis points the other way.
 pub fn matching_targets(s: &Solid, c: &MateConnector) -> Vec<MateConnector> {
-    let ConnectorAnchor::Implicit { point, owner } = c.anchor else { return Vec::new() };
-    let Some(base) = resolve_implicit(s, &point, &owner) else { return Vec::new() };
+    let ConnectorAnchor::Implicit { point, owner } = c.anchor else {
+        return Vec::new();
+    };
+    let Some(base) = resolve_implicit(s, &point, &owner) else {
+        return Vec::new();
+    };
     let dot = |a: [f64; 3], b: [f64; 3]| a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
     let near = |a: [f64; 3], b: [f64; 3]| (0..3).all(|k| (a[k] - b[k]).abs() < 1e-6);
     let mut out: Vec<MateConnector> = Vec::new();
     let mut push = |p: ImplicitPoint, owner: EntityRef| {
-        let Some(f) = resolve_implicit(s, &p, &owner) else { return };
+        let Some(f) = resolve_implicit(s, &p, &owner) else {
+            return;
+        };
         if near(f.origin, base.origin) || out.iter().any(|q| near(q.frame.origin, f.origin)) {
             return;
         }
-        let mut m = MateConnector { instance: c.instance, anchor: ConnectorAnchor::Implicit { point: p, owner }, frame: f, flip: false, reorient: 0, edit: Default::default() };
+        let mut m = MateConnector {
+            instance: c.instance,
+            anchor: ConnectorAnchor::Implicit { point: p, owner },
+            frame: f,
+            flip: false,
+            reorient: 0,
+            edit: Default::default(),
+        };
         m.flip = dot(f.z, base.z) < 0.0;
         out.push(m);
     };
     match point {
         ImplicitPoint::CircleCenter(e) => {
-            let Some(r) = s.edge(&e).and_then(|x| x.circle).map(|k| k.radius) else { return Vec::new() };
+            let Some(r) = s.edge(&e).and_then(|x| x.circle).map(|k| k.radius) else {
+                return Vec::new();
+            };
             let n = base.z;
             let h = dot(base.origin, n);
             for x in &s.edges {
                 let Some(k) = x.circle else { continue };
-                if (k.radius - r).abs() > 1e-6 || dot(k.normal, n).abs() < 1.0 - 1e-9 || (dot(k.center, n) - h).abs() > 1e-6 {
+                if (k.radius - r).abs() > 1e-6
+                    || dot(k.normal, n).abs() < 1.0 - 1e-9
+                    || (dot(k.center, n) - h).abs() > 1e-6
+                {
                     continue;
                 }
                 // The same owner kind: the rim itself, or the face of the seed's owner kind.
                 let o = match owner {
                     EntityRef::Edge(_) => EntityRef::Edge(x.name),
-                    _ => x.name.faces.iter().copied().find(|f| s.face(f).is_some_and(|ff| ff.plane.is_some())).map(EntityRef::Face).unwrap_or(EntityRef::Edge(x.name)),
+                    _ => x
+                        .name
+                        .faces
+                        .iter()
+                        .copied()
+                        .find(|f| s.face(f).is_some_and(|ff| ff.plane.is_some()))
+                        .map(EntityRef::Face)
+                        .unwrap_or(EntityRef::Edge(x.name)),
                 };
                 push(ImplicitPoint::CircleCenter(x.name), o);
             }
         }
         ImplicitPoint::AxisMiddle(face) => {
-            let Some((_, super::connector::SurfaceKind::Cylinder { radius })) = super::connector::surface_of(s, &EntityRef::Face(face)) else { return Vec::new() };
+            let Some((_, super::connector::SurfaceKind::Cylinder { radius })) =
+                super::connector::surface_of(s, &EntityRef::Face(face))
+            else {
+                return Vec::new();
+            };
             for f in &s.faces {
-                if let Some((fr, super::connector::SurfaceKind::Cylinder { radius: r2 })) = super::connector::surface_of(s, &EntityRef::Face(f.name))
+                if let Some((fr, super::connector::SurfaceKind::Cylinder { radius: r2 })) =
+                    super::connector::surface_of(s, &EntityRef::Face(f.name))
                     && (r2 - radius).abs() < 1e-6
                     && dot(fr.z, base.z).abs() > 1.0 - 1e-9
                 {
@@ -161,7 +231,9 @@ pub fn matching_targets(s: &Solid, c: &MateConnector) -> Vec<MateConnector> {
     // In a stable order: along the part's axes.
     out.sort_by(|a, b| {
         let (p, q) = (a.frame.origin, b.frame.origin);
-        p[0].total_cmp(&q[0]).then(p[1].total_cmp(&q[1])).then(p[2].total_cmp(&q[2]))
+        p[0].total_cmp(&q[0])
+            .then(p[1].total_cmp(&q[1]))
+            .then(p[2].total_cmp(&q[2]))
     });
     out
 }
@@ -179,20 +251,41 @@ pub fn plan(
     mut ids: impl FnMut(usize) -> InstanceId,
     feature: MateId,
 ) -> Result<(Replicate, Vec<Instance>), CommandError> {
-    let seed_inst = asm.instance(seed).ok_or_else(|| CommandError::Invalid("seed instance not found".into()))?;
+    let seed_inst = asm
+        .instance(seed)
+        .ok_or_else(|| CommandError::Invalid("seed instance not found".into()))?;
     if seed_inst.source.is_composite() {
-        return Err(CommandError::Invalid("the seed must be a part instance".into()));
+        return Err(CommandError::Invalid(
+            "the seed must be a part instance".into(),
+        ));
     }
     let resolved = super::resolve_local_connectors(flat, solids);
-    let m = resolved.mate(seed_mate).and_then(|f| f.mate()).cloned().ok_or_else(|| CommandError::Invalid("seed mate not found".into()))?;
-    let side = m.connectors.iter().position(|c| c.instance == seed).ok_or_else(|| CommandError::Invalid("the mate doesn't hold the seed".into()))?;
+    let m = resolved
+        .mate(seed_mate)
+        .and_then(|f| f.mate())
+        .cloned()
+        .ok_or_else(|| CommandError::Invalid("seed mate not found".into()))?;
+    let side = m
+        .connectors
+        .iter()
+        .position(|c| c.instance == seed)
+        .ok_or_else(|| CommandError::Invalid("the mate doesn't hold the seed".into()))?;
     let mut instances = Vec::new();
     for (k, t) in targets.iter().enumerate() {
-        let mut i = Instance::new(ids(k), seed_inst.source, copy_pose(flat, solids, seed_inst, &m, side, t));
+        let mut i = Instance::new(
+            ids(k),
+            seed_inst.source,
+            copy_pose(flat, solids, seed_inst, &m, side, t),
+        );
         i.replicate = Some(feature);
         instances.push(i);
     }
-    let r = Replicate { seed, seed_mate, targets, instances: instances.iter().map(|i| i.id).collect() };
+    let r = Replicate {
+        seed,
+        seed_mate,
+        targets,
+        instances: instances.iter().map(|i| i.id).collect(),
+    };
     Ok((r, instances))
 }
 
@@ -221,12 +314,23 @@ impl Command for SetReplicate {
         if asm.instance(r.seed).is_none() || asm.mate(r.seed_mate).is_none() {
             return Err(CommandError::Invalid("the seed or its mate is gone".into()));
         }
-        if r.targets.len() != r.instances.len() || self.instances.iter().map(|i| i.id).ne(r.instances.iter().copied()) {
+        if r.targets.len() != r.instances.len()
+            || self
+                .instances
+                .iter()
+                .map(|i| i.id)
+                .ne(r.instances.iter().copied())
+        {
             return Err(CommandError::Invalid("a copy per target".into()));
         }
         let id = self.feature.id;
         // The old copies go (kept where they are when they stay).
-        let old: Vec<Instance> = asm.instances.iter().filter(|i| i.replicate == Some(id)).cloned().collect();
+        let old: Vec<Instance> = asm
+            .instances
+            .iter()
+            .filter(|i| i.replicate == Some(id))
+            .cloned()
+            .collect();
         asm.instances.retain(|i| i.replicate != Some(id));
         for mut i in self.instances.iter().cloned() {
             if asm.instance(i.id).is_some() {

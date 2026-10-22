@@ -43,7 +43,9 @@ const MAX_DEPTH: usize = 16;
 pub fn derive(outer: InstanceId, inner: InstanceId) -> InstanceId {
     let a = outer.0.as_u128();
     let b = inner.0.as_u128();
-    let mixed = a.rotate_left(29) ^ b.wrapping_mul(0x9e37_79b9_7f4a_7c15_f39c_c060_5ced_c835) ^ 0x5b4e_d3a1_0000_0000_0000_0000_0000_0001;
+    let mixed = a.rotate_left(29)
+        ^ b.wrapping_mul(0x9e37_79b9_7f4a_7c15_f39c_c060_5ced_c835)
+        ^ 0x5b4e_d3a1_0000_0000_0000_0000_0000_0001;
     InstanceId(Uuid::from_u128(mixed))
 }
 
@@ -126,12 +128,24 @@ fn occurrences_at(doc: &Document, asm: &Assembly, depth: usize) -> Vec<Occurrenc
                 if depth >= MAX_DEPTH {
                     continue;
                 }
-                let Some(child) = doc.element(element).and_then(|e| e.assembly_model()) else { continue };
+                let Some(child) = doc.element(element).and_then(|e| e.assembly_model()) else {
+                    continue;
+                };
                 // A16.2: a rigid subassembly following a Named position of its tab.
-                let followed = inst.follow.filter(|_| !inst.flexible).and_then(|f| child.named_position(f));
-                for (k, o) in occurrences_at(doc, child, depth + 1).into_iter().enumerate() {
-                    let Some(c) = child.instance(o.top) else { continue };
-                    let placed = followed.and_then(|np| np.pose_of(c.id)).unwrap_or_else(|| inst.child_pose(c));
+                let followed = inst
+                    .follow
+                    .filter(|_| !inst.flexible)
+                    .and_then(|f| child.named_position(f));
+                for (k, o) in occurrences_at(doc, child, depth + 1)
+                    .into_iter()
+                    .enumerate()
+                {
+                    let Some(c) = child.instance(o.top) else {
+                        continue;
+                    };
+                    let placed = followed
+                        .and_then(|np| np.pose_of(c.id))
+                        .unwrap_or_else(|| inst.child_pose(c));
                     let in_top = o.in_top.then(&placed);
                     out.push(Occurrence {
                         id: derive(inst.id, o.id),
@@ -159,7 +173,9 @@ fn occurrences_at(doc: &Document, asm: &Assembly, depth: usize) -> Vec<Occurrenc
 /// The id a part of a rigid Part Studio instance has in it (its occurrence is
 /// [`derive`]`(instance, key)`).
 pub fn studio_part_key(part: PartId) -> InstanceId {
-    InstanceId(Uuid::from_u128(part.feature.0.as_u128() ^ (part.index as u128 + 1).wrapping_mul(0x2545_f491_4f6c_dd1d)))
+    InstanceId(Uuid::from_u128(
+        part.feature.0.as_u128() ^ (part.index as u128 + 1).wrapping_mul(0x2545_f491_4f6c_dd1d),
+    ))
 }
 
 /// True if the Assembly tab `container` is `target` or has it inside, at any depth.
@@ -171,7 +187,9 @@ pub fn contains_assembly(doc: &Document, container: ElementId, target: ElementId
         if depth > MAX_DEPTH {
             return true;
         }
-        let Some(asm) = doc.element(el).and_then(|e| e.assembly_model()) else { return false };
+        let Some(asm) = doc.element(el).and_then(|e| e.assembly_model()) else {
+            return false;
+        };
         asm.instances.iter().any(|i| match i.source {
             InstanceSource::Assembly { element } => walk(doc, element, target, depth + 1),
             _ => false,
@@ -219,23 +237,41 @@ pub fn solver_model(doc: &Document, asm: &Assembly) -> Assembly {
 fn solver_model_at(doc: &Document, asm: &Assembly, depth: usize) -> Assembly {
     let occ = occurrences_at(doc, asm, depth);
     let ids: HashSet<InstanceId> = occ.iter().map(|o| o.id).collect();
-    let leaves = |top: InstanceId| -> Vec<InstanceId> { occ.iter().filter(|o| o.top == top).map(|o| o.id).collect() };
+    let leaves = |top: InstanceId| -> Vec<InstanceId> {
+        occ.iter().filter(|o| o.top == top).map(|o| o.id).collect()
+    };
     // What holds a subassembly (its Fix here, a group here): all of it when rigid; when
     // flexible, its base (the parts fixed in its tab, else its first), so the rest keeps its
     // motion.
-    let flexible: HashSet<InstanceId> = asm.instances.iter().filter(|i| i.flexible && i.source.is_assembly()).map(|i| i.id).collect();
+    let flexible: HashSet<InstanceId> = asm
+        .instances
+        .iter()
+        .filter(|i| i.flexible && i.source.is_assembly())
+        .map(|i| i.id)
+        .collect();
     let base = |top: InstanceId| -> Vec<InstanceId> {
         let all: Vec<&Occurrence> = occ.iter().filter(|o| o.top == top).collect();
         if !flexible.contains(&top) {
             return all.iter().map(|o| o.id).collect();
         }
         let fixed: Vec<InstanceId> = all.iter().filter(|o| o.base).map(|o| o.id).collect();
-        if fixed.is_empty() { all.first().map(|o| vec![o.id]).unwrap_or_default() } else { fixed }
+        if fixed.is_empty() {
+            all.first().map(|o| vec![o.id]).unwrap_or_default()
+        } else {
+            fixed
+        }
     };
     let instances: Vec<Instance> = occ
         .iter()
         .map(|o| {
-            let mut i = Instance::new(o.id, InstanceSource::Part { element: o.element, part: o.part }, o.pose);
+            let mut i = Instance::new(
+                o.id,
+                InstanceSource::Part {
+                    element: o.element,
+                    part: o.part,
+                },
+                o.pose,
+            );
             i.index = o.index;
             i.hidden = o.hidden;
             i.fixed = o.fixed && (o.top == o.id || base(o.top).contains(&o.id));
@@ -250,17 +286,30 @@ fn solver_model_at(doc: &Document, asm: &Assembly, depth: usize) -> Assembly {
         }
         mates.push(f);
     }
-    for inst in asm.instances.iter().filter(|i| i.source.is_composite() && !i.suppressed) {
+    for inst in asm
+        .instances
+        .iter()
+        .filter(|i| i.source.is_composite() && !i.suppressed)
+    {
         if !inst.flexible || inst.source.is_studio() {
             let l = leaves(inst.id);
             if l.len() >= 2 {
                 let id = MateId(derive(inst.id, InstanceId(Uuid::from_u128(0x5ab))).0);
-                let name = if inst.source.is_studio() { "Rigid Part Studio" } else { "Rigid subassembly" };
+                let name = if inst.source.is_studio() {
+                    "Rigid Part Studio"
+                } else {
+                    "Rigid subassembly"
+                };
                 mates.push(MateFeature::new(id, name, MateKind::Group { instances: l }));
             }
             continue;
         }
-        let Some(child) = doc.element(inst.source.element()).and_then(|e| e.assembly_model()) else { continue };
+        let Some(child) = doc
+            .element(inst.source.element())
+            .and_then(|e| e.assembly_model())
+        else {
+            continue;
+        };
         if depth >= MAX_DEPTH {
             continue;
         }
@@ -279,27 +328,49 @@ fn solver_model_at(doc: &Document, asm: &Assembly, depth: usize) -> Assembly {
     // Mates to the Origin hold at this level only (A16.3: not carried into a parent).
     let origin_ok = depth == 0;
     mates.retain_mut(|f| match &mut f.kind {
-        MateKind::Mate(m) => m.all_connectors().all(|c| ids.contains(&c.instance) || (origin_ok && c.is_origin())),
+        MateKind::Mate(m) => m
+            .all_connectors()
+            .all(|c| ids.contains(&c.instance) || (origin_ok && c.is_origin())),
         MateKind::Group { instances } => {
             instances.retain(|i| ids.contains(i));
             instances.dedup();
             instances.len() >= 2
         }
-        MateKind::Replicate(r) => ids.contains(&r.seed) && r.instances.iter().all(|i| ids.contains(i)) && r.targets.iter().all(|c| ids.contains(&c.instance)),
+        MateKind::Replicate(r) => {
+            ids.contains(&r.seed)
+                && r.instances.iter().all(|i| ids.contains(i))
+                && r.targets.iter().all(|c| ids.contains(&c.instance))
+        }
         MateKind::Relation(_) | MateKind::Variable(_) => true,
     });
     // P3B.9: a relation holds while its mates do.
     let kept: Vec<MateId> = mates.iter().map(|f| f.id).collect();
-    mates.retain(|f| f.relation().is_none_or(|r| r.mates.iter().all(|m| kept.contains(m))));
+    mates.retain(|f| {
+        f.relation()
+            .is_none_or(|r| r.mates.iter().all(|m| kept.contains(m)))
+    });
     // The assembly's own explicit connectors, for the mates on them (this level only).
-    let connectors = if depth == 0 { asm.connectors.clone() } else { Vec::new() };
-    Assembly { instances, mates, connectors, ..Default::default() }
+    let connectors = if depth == 0 {
+        asm.connectors.clone()
+    } else {
+        Vec::new()
+    };
+    Assembly {
+        instances,
+        mates,
+        connectors,
+        ..Default::default()
+    }
 }
 
 /// Places occurrences (the solver's placements, by occurrence id) in the assembly `element`: a
 /// top-level instance takes its pose; a part of a rigid subassembly moves the subassembly; a part
 /// of a flexible one is placed within it (an override of its tab's placement).
-pub(crate) fn place(doc: &mut Document, element: ElementId, poses: &[(InstanceId, Pose)]) -> Result<(), CommandError> {
+pub(crate) fn place(
+    doc: &mut Document,
+    element: ElementId,
+    poses: &[(InstanceId, Pose)],
+) -> Result<(), CommandError> {
     if poses.is_empty() {
         return Ok(());
     }
@@ -310,16 +381,27 @@ pub(crate) fn place(doc: &mut Document, element: ElementId, poses: &[(InstanceId
 
 /// [`place`] on a copy of an assembly of `doc` (a manipulator's preview, drawn without an undo
 /// step).
-pub fn place_in(doc: &Document, asm: &mut Assembly, poses: &[(InstanceId, Pose)]) -> Result<(), CommandError> {
-    let occ: HashMap<InstanceId, Occurrence> = occurrences(doc, asm).into_iter().map(|o| (o.id, o)).collect();
+pub fn place_in(
+    doc: &Document,
+    asm: &mut Assembly,
+    poses: &[(InstanceId, Pose)],
+) -> Result<(), CommandError> {
+    let occ: HashMap<InstanceId, Occurrence> = occurrences(doc, asm)
+        .into_iter()
+        .map(|o| (o.id, o))
+        .collect();
     let mut done: HashSet<InstanceId> = HashSet::new();
     for (id, pose) in poses {
         if let Some(i) = asm.instance_mut(*id) {
             i.pose = *pose;
             continue;
         }
-        let o = occ.get(id).ok_or_else(|| CommandError::Invalid(format!("instance {id} not found")))?;
-        let Some(s) = asm.instance_mut(o.top) else { continue };
+        let o = occ
+            .get(id)
+            .ok_or_else(|| CommandError::Invalid(format!("instance {id} not found")))?;
+        let Some(s) = asm.instance_mut(o.top) else {
+            continue;
+        };
         if !s.flexible {
             if done.insert(s.id) {
                 s.pose = o.in_top.inverse().then(pose);
@@ -364,7 +446,11 @@ fn store(doc: &mut Document, element: ElementId, asm: Assembly) -> Result<(), Co
 fn fastened_between(a: (InstanceId, Pose), b: (InstanceId, Pose)) -> Mate {
     let here = ConnectorFrame::default();
     let on_b = here.moved(&a.1).moved(&b.1.inverse());
-    Mate::new(MateType::Fastened, MateConnector::at(a.0, here), MateConnector::at(b.0, on_b))
+    Mate::new(
+        MateType::Fastened,
+        MateConnector::at(a.0, here),
+        MateConnector::at(b.0, on_b),
+    )
 }
 
 /// Where an instance of `asm` can take a connector: itself (a part), else its first part.
@@ -376,10 +462,13 @@ fn anchor(occ: &[Occurrence], asm: &Assembly, id: InstanceId) -> Option<(Instanc
     occ.iter().find(|o| o.top == id).map(|o| (o.id, o.pose))
 }
 
-
 /// The next `<n>` of `inst`'s source in `asm`, keeping `inst`'s own when it is free.
 fn free_index(asm: &Assembly, inst: &Instance) -> u32 {
-    if asm.instances.iter().any(|i| i.source == inst.source && i.index == inst.index) {
+    if asm
+        .instances
+        .iter()
+        .any(|i| i.source == inst.source && i.index == inst.index)
+    {
         asm.next_index(&inst.source)
     } else {
         inst.index
@@ -388,13 +477,23 @@ fn free_index(asm: &Assembly, inst: &Instance) -> u32 {
 
 /// Moves the top-level instances `ids` of `parent_el` into its subassembly instance `sub`
 /// (Move to new subassembly, a drop on a subassembly row). Everything keeps its world placement.
-fn move_into(doc: &mut Document, parent_el: ElementId, sub: InstanceId, ids: &[InstanceId]) -> Result<(), CommandError> {
+fn move_into(
+    doc: &mut Document,
+    parent_el: ElementId,
+    sub: InstanceId,
+    ids: &[InstanceId],
+) -> Result<(), CommandError> {
     let mut parent = assembly_of(doc, parent_el)?;
     check_top(&parent, ids)?;
     if ids.contains(&sub) {
-        return Err(CommandError::Invalid("a subassembly can't go into itself".into()));
+        return Err(CommandError::Invalid(
+            "a subassembly can't go into itself".into(),
+        ));
     }
-    let s = parent.instance(sub).cloned().ok_or_else(|| CommandError::Invalid("subassembly not found".into()))?;
+    let s = parent
+        .instance(sub)
+        .cloned()
+        .ok_or_else(|| CommandError::Invalid("subassembly not found".into()))?;
     let InstanceSource::Assembly { element: child_el } = s.source else {
         return Err(CommandError::Invalid("not a subassembly".into()));
     };
@@ -404,16 +503,29 @@ fn move_into(doc: &mut Document, parent_el: ElementId, sub: InstanceId, ids: &[I
         if let Some(InstanceSource::Assembly { element }) = parent.instance(*id).map(|i| i.source)
             && contains_assembly(doc, element, child_el)
         {
-            return Err(CommandError::Invalid("an assembly can't contain itself".into()));
+            return Err(CommandError::Invalid(
+                "an assembly can't contain itself".into(),
+            ));
         }
     }
     let parent_occ = occurrences(doc, &parent);
     let child_occ = occurrences(doc, &child);
     // The moved instances' occurrences keep their ids in the subassembly.
-    let moved_occ: HashSet<InstanceId> = parent_occ.iter().filter(|o| ids.contains(&o.top)).map(|o| o.id).collect();
-    let old_inside: HashMap<InstanceId, InstanceId> = child_occ.iter().map(|o| (derive(sub, o.id), o.id)).collect();
+    let moved_occ: HashSet<InstanceId> = parent_occ
+        .iter()
+        .filter(|o| ids.contains(&o.top))
+        .map(|o| o.id)
+        .collect();
+    let old_inside: HashMap<InstanceId, InstanceId> = child_occ
+        .iter()
+        .map(|o| (derive(sub, o.id), o.id))
+        .collect();
     let to_child = |c: InstanceId| -> Option<InstanceId> {
-        if moved_occ.contains(&c) { Some(c) } else { old_inside.get(&c).copied() }
+        if moved_occ.contains(&c) {
+            Some(c)
+        } else {
+            old_inside.get(&c).copied()
+        }
     };
     let had_children = !child.instances.is_empty();
     let first_old = child.instances.first().map(|i| i.id);
@@ -448,19 +560,35 @@ fn move_into(doc: &mut Document, parent_el: ElementId, sub: InstanceId, ids: &[I
                     map_instances(&mut f, &|c| to_child(c).unwrap_or(c));
                     new_child_mates.push(f);
                 } else {
-                    map_instances(&mut f, &|c| if moved_occ.contains(&c) { derive(sub, c) } else { c });
+                    map_instances(&mut f, &|c| {
+                        if moved_occ.contains(&c) {
+                            derive(sub, c)
+                        } else {
+                            c
+                        }
+                    });
                     keep.push(f);
                 }
             }
             // A Replicate stays at this level.
             MateKind::Replicate(_) => {
-                map_instances(&mut f, &|c| if moved_occ.contains(&c) { derive(sub, c) } else { c });
+                map_instances(&mut f, &|c| {
+                    if moved_occ.contains(&c) {
+                        derive(sub, c)
+                    } else {
+                        c
+                    }
+                });
                 keep.push(f);
             }
             // P3B.9: a relation goes with its mates (below).
             MateKind::Relation(_) | MateKind::Variable(_) => keep.push(f),
             MateKind::Group { instances } => {
-                let inside: Vec<InstanceId> = instances.iter().copied().filter(|i| ids.contains(i)).collect();
+                let inside: Vec<InstanceId> = instances
+                    .iter()
+                    .copied()
+                    .filter(|i| ids.contains(i))
+                    .collect();
                 if inside.is_empty() {
                     keep.push(f);
                     continue;
@@ -471,7 +599,10 @@ fn move_into(doc: &mut Document, parent_el: ElementId, sub: InstanceId, ids: &[I
                 for w in inside.windows(2) {
                     fasten.push((w[0], w[1]));
                 }
-                if with_sub && had_children && let Some(old) = first_old {
+                if with_sub
+                    && had_children
+                    && let Some(old) = first_old
+                {
                     fasten.push((old, inside[0]));
                 }
                 instances.retain(|i| !ids.contains(i));
@@ -486,8 +617,10 @@ fn move_into(doc: &mut Document, parent_el: ElementId, sub: InstanceId, ids: &[I
     }
     // P3B.9: a relation whose mates all went into the subassembly goes there too.
     let moved_mates: Vec<MateId> = new_child_mates.iter().map(|f| f.id).collect();
-    let (with, keep): (Vec<MateFeature>, Vec<MateFeature>) =
-        keep.into_iter().partition(|f| f.relation().is_some_and(|r| r.mates.iter().all(|m| moved_mates.contains(m))));
+    let (with, keep): (Vec<MateFeature>, Vec<MateFeature>) = keep.into_iter().partition(|f| {
+        f.relation()
+            .is_some_and(|r| r.mates.iter().all(|m| moved_mates.contains(m)))
+    });
     parent.mates = keep;
     parent.drop_orphan_relations();
     // In the subassembly's list the moved mates come as Onshape lists them (`ex3-step8.png`:
@@ -499,12 +632,27 @@ fn move_into(doc: &mut Document, parent_el: ElementId, sub: InstanceId, ids: &[I
     if !fasten.is_empty() {
         let child_occ_now = occurrences(doc, &child);
         for (a, b) in fasten {
-            let (Some(a), Some(b)) = (anchor(&child_occ_now, &child, a), anchor(&child_occ_now, &child, b)) else { continue };
+            let (Some(a), Some(b)) = (
+                anchor(&child_occ_now, &child, a),
+                anchor(&child_occ_now, &child, b),
+            ) else {
+                continue;
+            };
             let mut all = parent.mates.clone();
             all.extend(child.mates.iter().cloned());
             let name = next_name(&all, "Fastened");
-            let id = MateId(derive(sub, InstanceId::from_u128(0xfa57_0000 + child.mates.len() as u128)).0);
-            child.mates.push(MateFeature::new(id, name, MateKind::Mate(fastened_between(a, b))));
+            let id = MateId(
+                derive(
+                    sub,
+                    InstanceId::from_u128(0xfa57_0000 + child.mates.len() as u128),
+                )
+                .0,
+            );
+            child.mates.push(MateFeature::new(
+                id,
+                name,
+                MateKind::Mate(fastened_between(a, b)),
+            ));
         }
     }
     super::folders::tidy(&mut parent);
@@ -516,9 +664,18 @@ fn move_into(doc: &mut Document, parent_el: ElementId, sub: InstanceId, ids: &[I
 /// Moves the instances `ids` (ids in the subassembly's tab) of the subassembly instance `sub`
 /// out to `parent_el`, placed at `at` in its list (by default after `sub`). Everything keeps its
 /// world placement; a Fix inside is not carried out (they take `sub`'s).
-fn move_out(doc: &mut Document, parent_el: ElementId, sub: InstanceId, ids: &[InstanceId], at: Option<usize>) -> Result<(), CommandError> {
+fn move_out(
+    doc: &mut Document,
+    parent_el: ElementId,
+    sub: InstanceId,
+    ids: &[InstanceId],
+    at: Option<usize>,
+) -> Result<(), CommandError> {
     let mut parent = assembly_of(doc, parent_el)?;
-    let s = parent.instance(sub).cloned().ok_or_else(|| CommandError::Invalid("subassembly not found".into()))?;
+    let s = parent
+        .instance(sub)
+        .cloned()
+        .ok_or_else(|| CommandError::Invalid("subassembly not found".into()))?;
     let InstanceSource::Assembly { element: child_el } = s.source else {
         return Err(CommandError::Invalid("not a subassembly".into()));
     };
@@ -528,12 +685,20 @@ fn move_out(doc: &mut Document, parent_el: ElementId, sub: InstanceId, ids: &[In
         return Err(CommandError::Invalid("instance id already in use".into()));
     }
     let child_occ = occurrences(doc, &child);
-    let moved_occ: HashSet<InstanceId> = child_occ.iter().filter(|o| ids.contains(&o.top)).map(|o| o.id).collect();
-    let back: HashMap<InstanceId, InstanceId> = moved_occ.iter().map(|x| (derive(sub, *x), *x)).collect();
+    let moved_occ: HashSet<InstanceId> = child_occ
+        .iter()
+        .filter(|o| ids.contains(&o.top))
+        .map(|o| o.id)
+        .collect();
+    let back: HashMap<InstanceId, InstanceId> =
+        moved_occ.iter().map(|x| (derive(sub, *x), *x)).collect();
     // The instances.
     let mut out: Vec<Instance> = Vec::new();
     for id in ids {
-        let c = child.instance(*id).cloned().ok_or_else(|| CommandError::Invalid("instance not found".into()))?;
+        let c = child
+            .instance(*id)
+            .cloned()
+            .ok_or_else(|| CommandError::Invalid("instance not found".into()))?;
         let mut i = c.clone();
         i.pose = s.child_pose(&c).then(&s.pose);
         i.fixed = s.fixed;
@@ -541,7 +706,14 @@ fn move_out(doc: &mut Document, parent_el: ElementId, sub: InstanceId, ids: &[In
         out.push(i);
     }
     child.instances.retain(|i| !ids.contains(&i.id));
-    let at = at.unwrap_or_else(|| parent.instances.iter().position(|i| i.id == sub).map(|p| p + 1).unwrap_or(parent.instances.len()));
+    let at = at.unwrap_or_else(|| {
+        parent
+            .instances
+            .iter()
+            .position(|i| i.id == sub)
+            .map(|p| p + 1)
+            .unwrap_or(parent.instances.len())
+    });
     let at = at.min(parent.instances.len());
     for (k, i) in out.into_iter().enumerate() {
         parent.instances.insert(at + k, i);
@@ -559,19 +731,35 @@ fn move_out(doc: &mut Document, parent_el: ElementId, sub: InstanceId, ids: &[In
         match &mut f.kind {
             MateKind::Mate(m) => {
                 if m.all_connectors().any(|c| moved_occ.contains(&c.instance)) {
-                    map_instances(&mut f, &|c| if moved_occ.contains(&c) { c } else { derive(sub, c) });
+                    map_instances(&mut f, &|c| {
+                        if moved_occ.contains(&c) {
+                            c
+                        } else {
+                            derive(sub, c)
+                        }
+                    });
                     parent.mates.push(f);
                 } else {
                     stay.push(f);
                 }
             }
             MateKind::Replicate(_) => {
-                map_instances(&mut f, &|c| if moved_occ.contains(&c) { c } else { derive(sub, c) });
+                map_instances(&mut f, &|c| {
+                    if moved_occ.contains(&c) {
+                        c
+                    } else {
+                        derive(sub, c)
+                    }
+                });
                 stay.push(f);
             }
             MateKind::Relation(_) | MateKind::Variable(_) => stay.push(f),
             MateKind::Group { instances } => {
-                let leaving: Vec<InstanceId> = instances.iter().copied().filter(|i| ids.contains(i)).collect();
+                let leaving: Vec<InstanceId> = instances
+                    .iter()
+                    .copied()
+                    .filter(|i| ids.contains(i))
+                    .collect();
                 if leaving.is_empty() {
                     stay.push(f);
                     continue;
@@ -583,7 +771,11 @@ fn move_out(doc: &mut Document, parent_el: ElementId, sub: InstanceId, ids: &[In
                 }
                 if outside.len() >= 2 {
                     let id = MateId(derive(sub, InstanceId(f.id.0)).0);
-                    parent.mates.push(MateFeature::new(id, f.name.clone(), MateKind::Group { instances: outside }));
+                    parent.mates.push(MateFeature::new(
+                        id,
+                        f.name.clone(),
+                        MateKind::Group { instances: outside },
+                    ));
                 }
                 if instances.len() >= 2 {
                     stay.push(f);
@@ -595,7 +787,10 @@ fn move_out(doc: &mut Document, parent_el: ElementId, sub: InstanceId, ids: &[In
     // P3B.9: a relation whose mates came out comes out too.
     let out_ids: Vec<MateId> = parent.mates.iter().map(|f| f.id).collect();
     let (out, stay): (Vec<MateFeature>, Vec<MateFeature>) =
-        std::mem::take(&mut child.mates).into_iter().partition(|f| f.relation().is_some_and(|r| r.mates.iter().all(|m| out_ids.contains(m))));
+        std::mem::take(&mut child.mates).into_iter().partition(|f| {
+            f.relation()
+                .is_some_and(|r| r.mates.iter().all(|m| out_ids.contains(m)))
+        });
     child.mates = stay;
     parent.mates.extend(out);
     child.drop_orphan_relations();
@@ -625,7 +820,11 @@ pub struct MoveToNewSubassembly {
 
 impl Command for MoveToNewSubassembly {
     fn label(&self) -> String {
-        if self.instances.is_empty() { "Create empty subassembly".into() } else { "Move to new subassembly".into() }
+        if self.instances.is_empty() {
+            "Create empty subassembly".into()
+        } else {
+            "Move to new subassembly".into()
+        }
     }
     fn scope(&self) -> Scope {
         Scope::Whole
@@ -645,17 +844,26 @@ impl Command for MoveToNewSubassembly {
         };
         let mut tab = Element::assembly(name);
         tab.id = self.new_element;
-        let at = doc.element_index(self.element).map(|i| i + 1).unwrap_or(doc.elements.len());
+        let at = doc
+            .element_index(self.element)
+            .map(|i| i + 1)
+            .unwrap_or(doc.elements.len());
         doc.elements.insert(at, tab);
         // The subassembly instance, where the first moved instance is.
-        let source = InstanceSource::Assembly { element: self.new_element };
+        let source = InstanceSource::Assembly {
+            element: self.new_element,
+        };
         let mut inst = Instance::new(self.instance, source, Pose::IDENTITY);
         inst.index = parent.next_index(&source);
         let pos = parent
             .instances
             .iter()
             .position(|i| self.instances.contains(&i.id))
-            .or_else(|| self.after.and_then(|a| parent.instances.iter().position(|i| i.id == a)).map(|p| p + 1))
+            .or_else(|| {
+                self.after
+                    .and_then(|a| parent.instances.iter().position(|i| i.id == a))
+                    .map(|p| p + 1)
+            })
             .unwrap_or(parent.instances.len());
         assembly_mut(doc, self.element)?.instances.insert(pos, inst);
         if !self.instances.is_empty() {
@@ -734,12 +942,19 @@ impl Command for DissolveSubassembly {
     }
     fn apply(&self, doc: &mut Document) -> Result<(), CommandError> {
         let parent = assembly_of(doc, self.element)?;
-        let s = parent.instance(self.sub).cloned().ok_or_else(|| CommandError::Invalid("subassembly not found".into()))?;
+        let s = parent
+            .instance(self.sub)
+            .cloned()
+            .ok_or_else(|| CommandError::Invalid("subassembly not found".into()))?;
         let child_el = match s.source {
             InstanceSource::Assembly { element } => element,
             _ => return Err(CommandError::Invalid("not a subassembly".into())),
         };
-        let kids: Vec<InstanceId> = assembly_of(doc, child_el)?.instances.iter().map(|i| i.id).collect();
+        let kids: Vec<InstanceId> = assembly_of(doc, child_el)?
+            .instances
+            .iter()
+            .map(|i| i.id)
+            .collect();
         let at = parent.instances.iter().position(|i| i.id == self.sub);
         if !kids.is_empty() {
             move_out(doc, self.element, self.sub, &kids, at)?;
@@ -760,7 +975,10 @@ impl Command for DissolveSubassembly {
                 }
                 instances.len() >= 2
             }
-            MateKind::Mate(_) | MateKind::Replicate(_) | MateKind::Relation(_) | MateKind::Variable(_) => true,
+            MateKind::Mate(_)
+            | MateKind::Replicate(_)
+            | MateKind::Relation(_)
+            | MateKind::Variable(_) => true,
         });
         super::folders::tidy(parent);
         Ok(())
@@ -778,7 +996,11 @@ pub struct SetSubassemblyFlexible {
 
 impl Command for SetSubassemblyFlexible {
     fn label(&self) -> String {
-        if self.flexible { "Make flexible".into() } else { "Make rigid".into() }
+        if self.flexible {
+            "Make flexible".into()
+        } else {
+            "Make rigid".into()
+        }
     }
     fn scope(&self) -> Scope {
         Scope::Element(self.element)
@@ -786,9 +1008,15 @@ impl Command for SetSubassemblyFlexible {
     fn apply(&self, doc: &mut Document) -> Result<(), CommandError> {
         let asm = assembly_mut(doc, self.element)?;
         check_top(asm, &self.instances)?;
-        for i in asm.instances.iter_mut().filter(|i| self.instances.contains(&i.id)) {
+        for i in asm
+            .instances
+            .iter_mut()
+            .filter(|i| self.instances.contains(&i.id))
+        {
             if !i.source.is_assembly() {
-                return Err(CommandError::Invalid("only a subassembly can be flexible".into()));
+                return Err(CommandError::Invalid(
+                    "only a subassembly can be flexible".into(),
+                ));
             }
             i.flexible = self.flexible;
             if !self.flexible {
@@ -813,7 +1041,11 @@ pub struct SetInstancesSuppressed {
 
 impl Command for SetInstancesSuppressed {
     fn label(&self) -> String {
-        if self.suppressed { "Suppress instances".into() } else { "Unsuppress instances".into() }
+        if self.suppressed {
+            "Suppress instances".into()
+        } else {
+            "Unsuppress instances".into()
+        }
     }
     fn scope(&self) -> Scope {
         Scope::Element(self.element)
@@ -821,7 +1053,11 @@ impl Command for SetInstancesSuppressed {
     fn apply(&self, doc: &mut Document) -> Result<(), CommandError> {
         let asm = assembly_mut(doc, self.element)?;
         check_top(asm, &self.instances)?;
-        for i in asm.instances.iter_mut().filter(|i| self.instances.contains(&i.id)) {
+        for i in asm
+            .instances
+            .iter_mut()
+            .filter(|i| self.instances.contains(&i.id))
+        {
             i.suppressed = self.suppressed;
         }
         Ok(())

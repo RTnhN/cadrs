@@ -21,7 +21,11 @@ pub struct FloatBar {
 
 impl FloatBar {
     pub fn new(name: impl Into<Cow<'static, str>>) -> Self {
-        Self { name: name.into(), top: 8.0, prompt: false }
+        Self {
+            name: name.into(),
+            top: 8.0,
+            prompt: false,
+        }
     }
 
     /// Its distance from the area's top (px).
@@ -37,17 +41,36 @@ impl FloatBar {
     }
 
     /// The row and its bar; `content` fills the bar.
-    pub fn build(self, t: &Theme, content: impl FnOnce(&mut ChildSpawner) + Send + Sync + 'static) -> impl Bundle {
+    pub fn build(
+        self,
+        t: &Theme,
+        content: impl FnOnce(&mut ChildSpawner) + Send + Sync + 'static,
+    ) -> impl Bundle {
         let name = self.name.into_owned();
         let (background, padding, radius) = if self.prompt {
-            (t.info_background, UiRect::axes(Val::Px(10.0), Val::Px(4.0)), 4.0)
+            (
+                t.info_background,
+                UiRect::axes(Val::Px(10.0), Val::Px(4.0)),
+                4.0,
+            )
         } else {
-            (t.background, UiRect::new(Val::Px(10.0), Val::Px(4.0), Val::Px(4.0), Val::Px(4.0)), 6.0)
+            (
+                t.background,
+                UiRect::new(Val::Px(10.0), Val::Px(4.0), Val::Px(4.0), Val::Px(4.0)),
+                6.0,
+            )
         };
         let shadow = !self.prompt;
         (
             Name::new(format!("{name}-row")),
-            Node { position_type: PositionType::Absolute, top: Val::Px(self.top), left: Val::Px(0.0), right: Val::Px(0.0), justify_content: JustifyContent::Center, ..default() },
+            Node {
+                position_type: PositionType::Absolute,
+                top: Val::Px(self.top),
+                left: Val::Px(0.0),
+                right: Val::Px(0.0),
+                justify_content: JustifyContent::Center,
+                ..default()
+            },
             Pickable::IGNORE,
             Children::spawn(SpawnWith(move |p: &mut ChildSpawner| {
                 let mut bar = p.spawn((

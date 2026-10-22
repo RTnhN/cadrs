@@ -52,14 +52,20 @@ fn on_add(a: On<Activate>, q: Query<&Name>, mut commands: Commands) {
 
 /// + under Boards: a new board, shown, its name ready to edit.
 pub fn add_board(world: &mut World) {
-    let Some(mut doc) = world.get_resource_mut::<ActiveDocument>() else { return };
-    let Some((el, _)) = active_studio(&doc) else { return };
+    let Some(mut doc) = world.get_resource_mut::<ActiveDocument>() else {
+        return;
+    };
+    let Some((el, _)) = active_studio(&doc) else {
+        return;
+    };
     let mark = doc.history.undo_len();
     if let Err(e) = doc.execute(&AddBoard::new_board(el)) {
         warn!("create board: {e}");
         return;
     }
-    let Some(id) = active_studio(&doc).and_then(|(_, s)| s.active) else { return };
+    let Some(id) = active_studio(&doc).and_then(|(_, s)| s.active) else {
+        return;
+    };
     let target = Target::Board(el, id);
     world.resource_mut::<JustCreated>().0 = Some((target, mark));
     world.resource_mut::<PendingRename>().0 = Some(target);
@@ -68,31 +74,56 @@ pub fn add_board(world: &mut World) {
 
 /// + under Components: a new component, its name ready to edit.
 pub fn add_component(world: &mut World) {
-    let Some(mut doc) = world.get_resource_mut::<ActiveDocument>() else { return };
-    let Some((el, _)) = active_studio(&doc) else { return };
+    let Some(mut doc) = world.get_resource_mut::<ActiveDocument>() else {
+        return;
+    };
+    let Some((el, _)) = active_studio(&doc) else {
+        return;
+    };
     let mark = doc.history.undo_len();
-    if let Err(e) = doc.execute(&AddComponent { element: el, name: None, value: None }) {
+    if let Err(e) = doc.execute(&AddComponent {
+        element: el,
+        name: None,
+        value: None,
+    }) {
         warn!("create component: {e}");
         return;
     }
-    let Some(id) = active_studio(&doc).and_then(|(_, s)| s.components.last().map(|c| c.id)) else { return };
+    let Some(id) = active_studio(&doc).and_then(|(_, s)| s.components.last().map(|c| c.id)) else {
+        return;
+    };
     let target = Target::Component(el, id);
     world.resource_mut::<JustCreated>().0 = Some((target, mark));
     world.resource_mut::<PendingRename>().0 = Some(target);
 }
 
-fn row_target(e: Entity, q_board: &Query<&BoardRow>, q_comp: &Query<&NativeComponentRow>) -> Option<Target> {
+fn row_target(
+    e: Entity,
+    q_board: &Query<&BoardRow>,
+    q_comp: &Query<&NativeComponentRow>,
+) -> Option<Target> {
     if let Ok(r) = q_board.get(e) {
         return Some(Target::Board(r.0, r.1));
     }
     q_comp.get(e).ok().map(|r| Target::Component(r.0, r.1))
 }
 
-fn start_pending_rename(mut pending: ResMut<PendingRename>, q_board: Query<(Entity, &BoardRow)>, q_comp: Query<(Entity, &NativeComponentRow)>, mut commands: Commands) {
+fn start_pending_rename(
+    mut pending: ResMut<PendingRename>,
+    q_board: Query<(Entity, &BoardRow)>,
+    q_comp: Query<(Entity, &NativeComponentRow)>,
+    mut commands: Commands,
+) {
     let Some(target) = pending.0 else { return };
     let row = match target {
-        Target::Board(el, id) => q_board.iter().find(|(_, r)| r.0 == el && r.1 == id).map(|(e, _)| e),
-        Target::Component(el, id) => q_comp.iter().find(|(_, r)| r.0 == el && r.1 == id).map(|(e, _)| e),
+        Target::Board(el, id) => q_board
+            .iter()
+            .find(|(_, r)| r.0 == el && r.1 == id)
+            .map(|(e, _)| e),
+        Target::Component(el, id) => q_comp
+            .iter()
+            .find(|(_, r)| r.0 == el && r.1 == id)
+            .map(|(e, _)| e),
     };
     if let Some(row) = row {
         pending.0 = None;
@@ -110,7 +141,9 @@ fn current_name(world: &World, target: Target) -> Option<String> {
 }
 
 fn begin_rename(world: &mut World, row: Entity, target: Target) {
-    let Some(name) = current_name(world, target) else { return };
+    let Some(name) = current_name(world, target) else {
+        return;
+    };
     let theme = world.resource::<Theme>().clone();
     let mut opts = InlineEditOptions::new("pcb-name-edit");
     opts.width = Val::Px(200.0);
@@ -123,8 +156,15 @@ fn begin_rename(world: &mut World, row: Entity, target: Target) {
     world.flush();
 }
 
-fn on_row_double_click(ev: On<DoubleClick>, q_board: Query<&BoardRow>, q_comp: Query<&NativeComponentRow>, mut commands: Commands) {
-    let Some(target) = row_target(ev.entity, &q_board, &q_comp) else { return };
+fn on_row_double_click(
+    ev: On<DoubleClick>,
+    q_board: Query<&BoardRow>,
+    q_comp: Query<&NativeComponentRow>,
+    mut commands: Commands,
+) {
+    let Some(target) = row_target(ev.entity, &q_board, &q_comp) else {
+        return;
+    };
     let row = ev.entity;
     commands.queue(move |world: &mut World| {
         // A later rename is its own step.
@@ -133,11 +173,18 @@ fn on_row_double_click(ev: On<DoubleClick>, q_board: Query<&BoardRow>, q_comp: Q
     });
 }
 
-fn on_rename_commit(ev: On<InlineEditCommit>, q_board: Query<&BoardRow>, q_comp: Query<&NativeComponentRow>, mut commands: Commands) {
+fn on_rename_commit(
+    ev: On<InlineEditCommit>,
+    q_board: Query<&BoardRow>,
+    q_comp: Query<&NativeComponentRow>,
+    mut commands: Commands,
+) {
     if ev.entity != ev.original_event_target() {
         return;
     }
-    let Some(target) = row_target(ev.entity, &q_board, &q_comp) else { return };
+    let Some(target) = row_target(ev.entity, &q_board, &q_comp) else {
+        return;
+    };
     let value = ev.value.trim().to_string();
     commands.queue(move |world: &mut World| rename(world, target, &value));
 }
@@ -147,10 +194,26 @@ fn rename(world: &mut World, target: Target, value: &str) {
     if value.is_empty() || current_name(world, target).as_deref() == Some(value) {
         return;
     }
-    let Some(mut doc) = world.get_resource_mut::<ActiveDocument>() else { return };
+    let Some(mut doc) = world.get_resource_mut::<ActiveDocument>() else {
+        return;
+    };
     let (r, label) = match target {
-        Target::Board(element, board) => (doc.execute(&RenameBoard { element, board, name: value.into() }), "Create board"),
-        Target::Component(element, component) => (doc.execute(&RenameComponent { element, component, name: value.into() }), "Create component"),
+        Target::Board(element, board) => (
+            doc.execute(&RenameBoard {
+                element,
+                board,
+                name: value.into(),
+            }),
+            "Create board",
+        ),
+        Target::Component(element, component) => (
+            doc.execute(&RenameComponent {
+                element,
+                component,
+                name: value.into(),
+            }),
+            "Create component",
+        ),
     };
     match r {
         Ok(()) => {

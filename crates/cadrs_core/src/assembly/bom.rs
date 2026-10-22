@@ -36,8 +36,8 @@ use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
 
-use super::{Assembly, InstanceId, InstanceSource};
 use super::structure::{derive, occurrences};
+use super::{Assembly, InstanceId, InstanceSource};
 use crate::command::{Command, CommandError, Scope};
 use crate::document::Document;
 use crate::ids::ElementId;
@@ -130,7 +130,13 @@ pub struct BomSettings {
 
 impl Default for BomSettings {
     fn default() -> Self {
-        Self { columns: default_columns(), view: BomView::default(), excluded: Vec::new(), show_excluded: false, top_level_row: false }
+        Self {
+            columns: default_columns(),
+            view: BomView::default(),
+            excluded: Vec::new(),
+            show_excluded: false,
+            top_level_row: false,
+        }
     }
 }
 
@@ -141,7 +147,13 @@ impl BomSettings {
 
     /// The settings with `template`'s columns and view options.
     pub fn with_template(&self, template: &BomTemplate) -> Self {
-        Self { columns: template.columns.clone(), view: template.view, show_excluded: template.show_excluded, top_level_row: template.top_level_row, excluded: self.excluded.clone() }
+        Self {
+            columns: template.columns.clone(),
+            view: template.view,
+            show_excluded: template.show_excluded,
+            top_level_row: template.top_level_row,
+            excluded: self.excluded.clone(),
+        }
     }
 }
 
@@ -169,7 +181,13 @@ impl BomTemplate {
 
     /// A template of `settings`' layout.
     pub fn of(name: impl Into<String>, settings: &BomSettings) -> Self {
-        Self { name: name.into(), columns: settings.columns.clone(), view: settings.view, show_excluded: settings.show_excluded, top_level_row: settings.top_level_row }
+        Self {
+            name: name.into(),
+            columns: settings.columns.clone(),
+            view: settings.view,
+            show_excluded: settings.show_excluded,
+            top_level_row: settings.top_level_row,
+        }
     }
 }
 
@@ -242,7 +260,10 @@ struct Node {
 }
 
 fn merge_into(nodes: &mut Vec<Node>, n: Node, add_count: bool) {
-    match nodes.iter_mut().find(|x| x.owner == n.owner && x.path == n.path) {
+    match nodes
+        .iter_mut()
+        .find(|x| x.owner == n.owner && x.path == n.path)
+    {
         Some(x) => {
             if add_count {
                 x.count += n.count;
@@ -266,19 +287,46 @@ fn merge_into(nodes: &mut Vec<Node>, n: Node, add_count: bool) {
 
 /// The occurrences (in the root's ids, through `wrap`) of every part of the subassembly
 /// instance `inst` whose tab is `child`.
-fn sub_occurrences(doc: &Document, child: &Assembly, inst: InstanceId, wrap: &dyn Fn(InstanceId) -> InstanceId) -> Vec<InstanceId> {
-    occurrences(doc, child).into_iter().map(|o| wrap(derive(inst, o.id))).collect()
+fn sub_occurrences(
+    doc: &Document,
+    child: &Assembly,
+    inst: InstanceId,
+    wrap: &dyn Fn(InstanceId) -> InstanceId,
+) -> Vec<InstanceId> {
+    occurrences(doc, child)
+        .into_iter()
+        .map(|o| wrap(derive(inst, o.id)))
+        .collect()
 }
 
 /// The structured items of `asm` (at `path`, under the root's instance `top`).
-fn structured(doc: &Document, el: ElementId, asm: &Assembly, path: &[ElementId], top: Option<InstanceId>, wrap: &dyn Fn(InstanceId) -> InstanceId, depth: usize) -> Vec<Node> {
+fn structured(
+    doc: &Document,
+    el: ElementId,
+    asm: &Assembly,
+    path: &[ElementId],
+    top: Option<InstanceId>,
+    wrap: &dyn Fn(InstanceId) -> InstanceId,
+    depth: usize,
+) -> Vec<Node> {
     let mut nodes: Vec<Node> = Vec::new();
     for inst in asm.instances.iter().filter(|i| !i.suppressed) {
         let owner = PropertyOwner::from(inst.source);
         let top_id = top.unwrap_or(inst.id);
         match inst.source {
             InstanceSource::Part { .. } => {
-                merge_into(&mut nodes, Node { owner, path: path.to_vec(), count: 1, instances: vec![top_id], occurrences: vec![wrap(inst.id)], children: None }, true);
+                merge_into(
+                    &mut nodes,
+                    Node {
+                        owner,
+                        path: path.to_vec(),
+                        count: 1,
+                        instances: vec![top_id],
+                        occurrences: vec![wrap(inst.id)],
+                        children: None,
+                    },
+                    true,
+                );
             }
             // A rigid Part Studio instance (A2.4): each of its parts is an item.
             InstanceSource::Studio { element, .. } => {
@@ -287,7 +335,9 @@ fn structured(doc: &Document, el: ElementId, asm: &Assembly, path: &[ElementId],
                 }
             }
             InstanceSource::Assembly { element } => {
-                let Some(child) = doc.element(element).and_then(|e| e.assembly_model()) else { continue };
+                let Some(child) = doc.element(element).and_then(|e| e.assembly_model()) else {
+                    continue;
+                };
                 if depth >= MAX_DEPTH {
                     continue;
                 }
@@ -296,18 +346,50 @@ fn structured(doc: &Document, el: ElementId, asm: &Assembly, path: &[ElementId],
                 let occ = sub_occurrences(doc, child, id, wrap);
                 match child.properties.bom_behavior {
                     SubassemblyBom::ComponentsOnly => {
-                        for n in structured(doc, element, child, path, Some(top_id), &inner, depth + 1) {
+                        for n in
+                            structured(doc, element, child, path, Some(top_id), &inner, depth + 1)
+                        {
                             merge_into(&mut nodes, n, true);
                         }
                     }
                     SubassemblyBom::AssemblyOnly => {
-                        merge_into(&mut nodes, Node { owner, path: path.to_vec(), count: 1, instances: vec![top_id], occurrences: occ, children: None }, true);
+                        merge_into(
+                            &mut nodes,
+                            Node {
+                                owner,
+                                path: path.to_vec(),
+                                count: 1,
+                                instances: vec![top_id],
+                                occurrences: occ,
+                                children: None,
+                            },
+                            true,
+                        );
                     }
                     SubassemblyBom::AssemblyAndComponents => {
                         let mut sub_path = path.to_vec();
                         sub_path.push(element);
-                        let kids = structured(doc, element, child, &sub_path, Some(top_id), &inner, depth + 1);
-                        merge_into(&mut nodes, Node { owner, path: path.to_vec(), count: 1, instances: vec![top_id], occurrences: occ, children: Some(kids) }, true);
+                        let kids = structured(
+                            doc,
+                            element,
+                            child,
+                            &sub_path,
+                            Some(top_id),
+                            &inner,
+                            depth + 1,
+                        );
+                        merge_into(
+                            &mut nodes,
+                            Node {
+                                owner,
+                                path: path.to_vec(),
+                                count: 1,
+                                instances: vec![top_id],
+                                occurrences: occ,
+                                children: Some(kids),
+                            },
+                            true,
+                        );
                     }
                 }
             }
@@ -322,20 +404,41 @@ fn structured(doc: &Document, el: ElementId, asm: &Assembly, path: &[ElementId],
 
 /// The items of a rigid Part Studio instance: one per part. A board's components, in a
 /// `structured` BOM, are the board's row's children (as a subassembly's).
-fn studio_nodes(doc: &Document, inst: &super::Instance, element: ElementId, path: &[ElementId], top_id: InstanceId, wrap: &dyn Fn(InstanceId) -> InstanceId, structured: bool) -> Vec<Node> {
+fn studio_nodes(
+    doc: &Document,
+    inst: &super::Instance,
+    element: ElementId,
+    path: &[ElementId],
+    top_id: InstanceId,
+    wrap: &dyn Fn(InstanceId) -> InstanceId,
+    structured: bool,
+) -> Vec<Node> {
     let parts = inst.rigid_parts(doc);
     let node = |part: &crate::ids::PartId| Node {
-        owner: PropertyOwner::Part { element, part: *part },
+        owner: PropertyOwner::Part {
+            element,
+            part: *part,
+        },
         path: path.to_vec(),
         count: 1,
         instances: vec![top_id],
-        occurrences: vec![wrap(derive(inst.id, super::structure::studio_part_key(*part)))],
+        occurrences: vec![wrap(derive(
+            inst.id,
+            super::structure::studio_part_key(*part),
+        ))],
         children: None,
     };
     match parts.split_first() {
-        Some((board, components)) if structured && matches!(inst.source, InstanceSource::Studio { board: Some(_), .. }) => {
+        Some((board, components))
+            if structured
+                && matches!(inst.source, InstanceSource::Studio { board: Some(_), .. }) =>
+        {
             let mut n = node(board);
-            n.occurrences.extend(components.iter().map(|p| wrap(derive(inst.id, super::structure::studio_part_key(*p)))));
+            n.occurrences.extend(
+                components
+                    .iter()
+                    .map(|p| wrap(derive(inst.id, super::structure::studio_part_key(*p)))),
+            );
             let mut kids: Vec<Node> = Vec::new();
             for c in components {
                 merge_into(&mut kids, node(c), true);
@@ -351,18 +454,47 @@ fn studio_nodes(doc: &Document, inst: &super::Instance, element: ElementId, path
 fn item_nodes(asm: &Assembly, el: ElementId, path: &[ElementId]) -> Vec<Node> {
     asm.items
         .iter()
-        .map(|i| Node { owner: PropertyOwner::Item { element: el, item: i.id }, path: path.to_vec(), count: i.quantity, instances: Vec::new(), occurrences: Vec::new(), children: None })
+        .map(|i| Node {
+            owner: PropertyOwner::Item {
+                element: el,
+                item: i.id,
+            },
+            path: path.to_vec(),
+            count: i.quantity,
+            instances: Vec::new(),
+            occurrences: Vec::new(),
+            children: None,
+        })
         .collect()
 }
 
 /// The flattened items of `asm`: every part at any depth, counted over the whole tree.
-fn flattened(doc: &Document, el: ElementId, asm: &Assembly, top: Option<InstanceId>, wrap: &dyn Fn(InstanceId) -> InstanceId, depth: usize, nodes: &mut Vec<Node>) {
+fn flattened(
+    doc: &Document,
+    el: ElementId,
+    asm: &Assembly,
+    top: Option<InstanceId>,
+    wrap: &dyn Fn(InstanceId) -> InstanceId,
+    depth: usize,
+    nodes: &mut Vec<Node>,
+) {
     for inst in asm.instances.iter().filter(|i| !i.suppressed) {
         let owner = PropertyOwner::from(inst.source);
         let top_id = top.unwrap_or(inst.id);
         match inst.source {
             InstanceSource::Part { .. } => {
-                merge_into(nodes, Node { owner, path: Vec::new(), count: 1, instances: vec![top_id], occurrences: vec![wrap(inst.id)], children: None }, true);
+                merge_into(
+                    nodes,
+                    Node {
+                        owner,
+                        path: Vec::new(),
+                        count: 1,
+                        instances: vec![top_id],
+                        occurrences: vec![wrap(inst.id)],
+                        children: None,
+                    },
+                    true,
+                );
             }
             InstanceSource::Studio { element, .. } => {
                 for n in studio_nodes(doc, inst, element, &[], top_id, wrap, false) {
@@ -370,14 +502,27 @@ fn flattened(doc: &Document, el: ElementId, asm: &Assembly, top: Option<Instance
                 }
             }
             InstanceSource::Assembly { element } => {
-                let Some(child) = doc.element(element).and_then(|e| e.assembly_model()) else { continue };
+                let Some(child) = doc.element(element).and_then(|e| e.assembly_model()) else {
+                    continue;
+                };
                 if depth >= MAX_DEPTH {
                     continue;
                 }
                 let id = inst.id;
                 if child.properties.bom_behavior == SubassemblyBom::AssemblyOnly {
                     let occ = sub_occurrences(doc, child, id, wrap);
-                    merge_into(nodes, Node { owner, path: Vec::new(), count: 1, instances: vec![top_id], occurrences: occ, children: None }, true);
+                    merge_into(
+                        nodes,
+                        Node {
+                            owner,
+                            path: Vec::new(),
+                            count: 1,
+                            instances: vec![top_id],
+                            occurrences: occ,
+                            children: None,
+                        },
+                        true,
+                    );
                 } else {
                     let inner = move |x: InstanceId| wrap(derive(id, x));
                     flattened(doc, element, child, Some(top_id), &inner, depth + 1, nodes);
@@ -403,7 +548,11 @@ fn compare_cells(a: &str, b: &str) -> Ordering {
     if let (Some(x), Some(y)) = (parts(a), parts(b)) {
         return x.cmp(&y);
     }
-    let num = |s: &str| s.split_whitespace().next().and_then(|w| w.parse::<f64>().ok());
+    let num = |s: &str| {
+        s.split_whitespace()
+            .next()
+            .and_then(|w| w.parse::<f64>().ok())
+    };
     if let (Some(x), Some(y)) = (num(a), num(b)) {
         return x.total_cmp(&y);
     }
@@ -417,8 +566,17 @@ fn compare_cells(a: &str, b: &str) -> Ordering {
 
 /// The BOM of the assembly `element` with its saved settings. `build_of` gives each Part
 /// Studio's rebuild (for part names, colours and masses); `units` formats the Mass column.
-pub fn compute(doc: &Document, element: ElementId, options: &BomOptions, units: &Units, mut build_of: impl FnMut(ElementId) -> Option<Arc<Build>>) -> Result<Bom, CommandError> {
-    let asm = doc.element(element).and_then(|e| e.assembly_model()).ok_or(CommandError::ElementNotFound(element))?;
+pub fn compute(
+    doc: &Document,
+    element: ElementId,
+    options: &BomOptions,
+    units: &Units,
+    mut build_of: impl FnMut(ElementId) -> Option<Arc<Build>>,
+) -> Result<Bom, CommandError> {
+    let asm = doc
+        .element(element)
+        .and_then(|e| e.assembly_model())
+        .ok_or(CommandError::ElementNotFound(element))?;
     compute_with(doc, element, &asm.bom, options, units, &mut build_of)
 }
 
@@ -431,7 +589,10 @@ pub fn compute_with(
     units: &Units,
     build_of: &mut dyn FnMut(ElementId) -> Option<Arc<Build>>,
 ) -> Result<Bom, CommandError> {
-    let asm = doc.element(element).and_then(|e| e.assembly_model()).ok_or(CommandError::ElementNotFound(element))?;
+    let asm = doc
+        .element(element)
+        .and_then(|e| e.assembly_model())
+        .ok_or(CommandError::ElementNotFound(element))?;
     let id = |x: InstanceId| x;
     let nodes = match settings.view {
         BomView::Structured => structured(doc, element, asm, &[], None, &id, 0),
@@ -463,17 +624,32 @@ pub fn compute_with(
         masses.borrow_mut().insert(o, m);
         m
     };
-    let ctx = Ctx { doc, settings, options, units, build: &build, mass: &mass_of };
+    let ctx = Ctx {
+        doc,
+        settings,
+        options,
+        units,
+        build: &build,
+        mass: &mass_of,
+    };
     let mut rows = Vec::new();
     emit(&ctx, &nodes, 0, None, false, &mut rows);
     // Totals over the top level's rows not suppressed.
-    let top: Vec<&BomRow> = rows.iter().filter(|r| r.depth == 0 && !r.excluded).collect();
+    let top: Vec<&BomRow> = rows
+        .iter()
+        .filter(|r| r.depth == 0 && !r.excluded)
+        .collect();
     let total_quantity = top.iter().map(|r| r.quantity).sum();
-    let total_mass = top.iter().try_fold(0.0, |acc, r| r.unit_mass.map(|m| acc + m * r.quantity as f64));
+    let total_mass = top.iter().try_fold(0.0, |acc, r| {
+        r.unit_mass.map(|m| acc + m * r.quantity as f64)
+    });
     if settings.top_level_row {
         let owner = PropertyOwner::Assembly { element };
         let mut row = BomRow {
-            key: BomRowKey { path: Vec::new(), owner },
+            key: BomRowKey {
+                path: Vec::new(),
+                owner,
+            },
             item: None,
             depth: 0,
             quantity: total_quantity,
@@ -481,15 +657,28 @@ pub fn compute_with(
             top_level: true,
             has_children: false,
             expanded: false,
-            instances: asm.instances.iter().filter(|i| !i.suppressed).map(|i| i.id).collect(),
+            instances: asm
+                .instances
+                .iter()
+                .filter(|i| !i.suppressed)
+                .map(|i| i.id)
+                .collect(),
             occurrences: occurrences(doc, asm).into_iter().map(|o| o.id).collect(),
-            unit_mass: properties::properties(doc, owner).mass_override.or(total_mass),
+            unit_mass: properties::properties(doc, owner)
+                .mass_override
+                .or(total_mass),
             cells: Vec::new(),
         };
         row.cells = columns.iter().map(|c| cell(&ctx, c, &row)).collect();
         rows.insert(0, row);
     }
-    Ok(Bom { columns, labels, rows, total_quantity, total_mass })
+    Ok(Bom {
+        columns,
+        labels,
+        rows,
+        total_quantity,
+        total_mass,
+    })
 }
 
 /// What the rows are made with.
@@ -507,7 +696,10 @@ fn cell(ctx: &Ctx, col: &BomColumn, row: &BomRow) -> String {
         BomColumn::Item if row.top_level => String::new(),
         BomColumn::Item => row.item.clone().unwrap_or_else(|| "–".into()),
         BomColumn::Quantity => row.quantity.to_string(),
-        BomColumn::Property(PropertyKey::Mass) => row.unit_mass.map(|m| format_mass(m, ctx.units)).unwrap_or_default(),
+        BomColumn::Property(PropertyKey::Mass) => row
+            .unit_mass
+            .map(|m| format_mass(m, ctx.units))
+            .unwrap_or_default(),
         BomColumn::Property(k) => {
             let b = (ctx.build)(row.key.owner.element());
             properties::text(ctx.doc, row.key.owner, *k, b.as_deref())
@@ -517,11 +709,21 @@ fn cell(ctx: &Ctx, col: &BomColumn, row: &BomRow) -> String {
 
 /// The rows of `nodes` (and of the expanded ones' children), numbered in list order, sorted
 /// among siblings.
-fn emit(ctx: &Ctx, nodes: &[Node], depth: usize, prefix: Option<&str>, parent_excluded: bool, rows: &mut Vec<BomRow>) {
+fn emit(
+    ctx: &Ctx,
+    nodes: &[Node],
+    depth: usize,
+    prefix: Option<&str>,
+    parent_excluded: bool,
+    rows: &mut Vec<BomRow>,
+) {
     let mut k = 0;
     let mut level: Vec<(BomRow, Option<&Vec<Node>>)> = Vec::new();
     for n in nodes {
-        let key = BomRowKey { path: n.path.clone(), owner: n.owner };
+        let key = BomRowKey {
+            path: n.path.clone(),
+            owner: n.owner,
+        };
         let excluded = parent_excluded || ctx.settings.excluded.contains(&key);
         let item = (!excluded).then(|| {
             k += 1;
@@ -530,7 +732,8 @@ fn emit(ctx: &Ctx, nodes: &[Node], depth: usize, prefix: Option<&str>, parent_ex
                 None => k.to_string(),
             }
         });
-        let expanded = n.children.is_some() && (ctx.options.expand_all || ctx.options.expanded.contains(&key));
+        let expanded =
+            n.children.is_some() && (ctx.options.expand_all || ctx.options.expanded.contains(&key));
         let mut row = BomRow {
             key,
             item,
@@ -545,7 +748,12 @@ fn emit(ctx: &Ctx, nodes: &[Node], depth: usize, prefix: Option<&str>, parent_ex
             unit_mass: (ctx.mass)(n.owner),
             cells: Vec::new(),
         };
-        row.cells = ctx.settings.columns.iter().map(|c| cell(ctx, c, &row)).collect();
+        row.cells = ctx
+            .settings
+            .columns
+            .iter()
+            .map(|c| cell(ctx, c, &row))
+            .collect();
         level.push((row, n.children.as_ref()));
     }
     if let Some((col, asc)) = ctx.options.sort
@@ -581,7 +789,9 @@ impl Bom {
     /// needed (RFC 4180), one line each.
     pub fn to_csv(&self) -> String {
         let mut out = String::new();
-        let line = |cells: &mut dyn Iterator<Item = &String>| cells.map(|c| csv_field(c)).collect::<Vec<_>>().join(",");
+        let line = |cells: &mut dyn Iterator<Item = &String>| {
+            cells.map(|c| csv_field(c)).collect::<Vec<_>>().join(",")
+        };
         out.push_str(&line(&mut self.labels.iter()));
         out.push('\n');
         for r in &self.rows {
@@ -672,7 +882,12 @@ impl Command for SaveBomTemplate {
         if name.is_empty() {
             return Err(CommandError::Invalid("the name can't be empty".into()));
         }
-        let settings = doc.element(self.element).and_then(|e| e.assembly_model()).ok_or(CommandError::ElementNotFound(self.element))?.bom.clone();
+        let settings = doc
+            .element(self.element)
+            .and_then(|e| e.assembly_model())
+            .ok_or(CommandError::ElementNotFound(self.element))?
+            .bom
+            .clone();
         let t = BomTemplate::of(name, &settings);
         let list = &mut doc.properties.bom_templates;
         match list.iter_mut().find(|x| x.name == name) {

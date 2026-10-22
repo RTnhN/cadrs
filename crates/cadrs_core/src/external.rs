@@ -67,7 +67,12 @@ pub struct SourceRef {
 impl SourceRef {
     /// A reference to `element` of `document` at `version`.
     pub fn version(document: Option<DocumentId>, element: ElementId, version: VersionId) -> Self {
-        Self { document, at: RefAt::Version(version), element, pinned: false }
+        Self {
+            document,
+            at: RefAt::Version(version),
+            element,
+            pinned: false,
+        }
     }
 
     /// The source document, `this` for a same-document reference.
@@ -117,7 +122,10 @@ impl LinkedElement {
         if self.version_name.is_empty() {
             format!("{} › {}", self.document_name, self.element.name)
         } else {
-            format!("{} › {} ({})", self.document_name, self.element.name, self.version_name)
+            format!(
+                "{} › {} ({})",
+                self.document_name, self.element.name, self.version_name
+            )
         }
     }
 }
@@ -159,9 +167,13 @@ impl LinkState {
     pub fn message(self) -> Option<&'static str> {
         match self {
             LinkState::Ok => None,
-            LinkState::Trashed => Some("Cannot open a document in the trash. Restore the document from Trash."),
+            LinkState::Trashed => {
+                Some("Cannot open a document in the trash. Restore the document from Trash.")
+            }
             LinkState::Gone => Some("Resource does not exist"),
-            LinkState::Inaccessible => Some("You cannot modify this feature because you cannot access the referenced document"),
+            LinkState::Inaccessible => Some(
+                "You cannot modify this feature because you cannot access the referenced document",
+            ),
         }
     }
 }
@@ -186,8 +198,15 @@ pub enum LinkError {
 impl std::fmt::Display for LinkError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            LinkError::State(s) => write!(f, "{}", s.message().unwrap_or("The document can't be reached")),
-            LinkError::NoVersion => write!(f, "A linked document needs a version. Create a version of it first."),
+            LinkError::State(s) => write!(
+                f,
+                "{}",
+                s.message().unwrap_or("The document can't be reached")
+            ),
+            LinkError::NoVersion => write!(
+                f,
+                "A linked document needs a version. Create a version of it first."
+            ),
             LinkError::NotFound(what) => write!(f, "{what} not found"),
             LinkError::NotLinkable(what) => write!(f, "{what} can't be referenced"),
             LinkError::Circular(path) => write!(f, "Circular reference: {path}"),
@@ -220,7 +239,11 @@ pub fn linked_id(document: DocumentId, element: ElementId, hash: u64) -> Element
 /// Copies `element` of `source` (the document as it is at the referenced point, see
 /// [`Resolver::resolve`]) and everything it depends on, for the reference `r`. `version_name` is
 /// shown with the copies ("V1"; empty at the workspace).
-pub fn snapshot(source: &Document, r: SourceRef, version_name: &str) -> Result<LinkSnapshot, LinkError> {
+pub fn snapshot(
+    source: &Document,
+    r: SourceRef,
+    version_name: &str,
+) -> Result<LinkSnapshot, LinkError> {
     let mut links: Vec<LinkedElement> = Vec::new();
     let root = snap(source, r, version_name, r.element, &mut links, 0)?;
     // The referenced element first.
@@ -231,9 +254,19 @@ pub fn snapshot(source: &Document, r: SourceRef, version_name: &str) -> Result<L
     Ok(LinkSnapshot { root, links })
 }
 
-fn snap(source: &Document, r: SourceRef, version_name: &str, id: ElementId, out: &mut Vec<LinkedElement>, depth: usize) -> Result<ElementId, LinkError> {
+fn snap(
+    source: &Document,
+    r: SourceRef,
+    version_name: &str,
+    id: ElementId,
+    out: &mut Vec<LinkedElement>,
+    depth: usize,
+) -> Result<ElementId, LinkError> {
     if depth > 32 {
-        return Err(LinkError::Circular(format!("{} nests references too deeply", source.name)));
+        return Err(LinkError::Circular(format!(
+            "{} nests references too deeply",
+            source.name
+        )));
     }
     // The source's own link: copied as it is (its id is namespaced already), with a relative
     // document made absolute; and what it needs.
@@ -248,14 +281,23 @@ fn snap(source: &Document, r: SourceRef, version_name: &str, id: ElementId, out:
         }
         return Ok(id);
     }
-    let el = source.element(id).ok_or_else(|| LinkError::NotFound(format!("Element {id} of {}", source.name)))?;
+    let el = source
+        .element(id)
+        .ok_or_else(|| LinkError::NotFound(format!("Element {id} of {}", source.name)))?;
     let mut copy = el.clone();
     match &el.kind {
-        ElementKind::Drawing(_) => return Err(LinkError::NotLinkable(format!("The drawing {}", el.name))),
+        ElementKind::Drawing(_) => {
+            return Err(LinkError::NotLinkable(format!("The drawing {}", el.name)));
+        }
         // A board derived at a version (`docs/PCB_IN_PART_STUDIO.md`): the studio as it was.
         ElementKind::PcbStudio(_) => {}
         // P3F.6: a Render Studio renders its source here; it isn't linked elsewhere.
-        ElementKind::Render(_) => return Err(LinkError::NotLinkable(format!("The Render Studio {}", el.name))),
+        ElementKind::Render(_) => {
+            return Err(LinkError::NotLinkable(format!(
+                "The Render Studio {}",
+                el.name
+            )));
+        }
         ElementKind::PartStudio { .. } => {
             copy.contexts.clear();
             // P3G.4: the copies its Derived features need come too, and their same-document
@@ -282,9 +324,17 @@ fn snap(source: &Document, r: SourceRef, version_name: &str, id: ElementId, out:
             for inst in &mut copy.assembly.instances {
                 let m = |e: ElementId| map.get(&e).copied().unwrap_or(e);
                 inst.source = match inst.source {
-                    InstanceSource::Part { element, part } => InstanceSource::Part { element: m(element), part },
-                    InstanceSource::Assembly { element } => InstanceSource::Assembly { element: m(element) },
-                    InstanceSource::Studio { element, board } => InstanceSource::Studio { element: m(element), board },
+                    InstanceSource::Part { element, part } => InstanceSource::Part {
+                        element: m(element),
+                        part,
+                    },
+                    InstanceSource::Assembly { element } => InstanceSource::Assembly {
+                        element: m(element),
+                    },
+                    InstanceSource::Studio { element, board } => InstanceSource::Studio {
+                        element: m(element),
+                        board,
+                    },
                 };
             }
         }
@@ -296,7 +346,11 @@ fn snap(source: &Document, r: SourceRef, version_name: &str, id: ElementId, out:
     copy.id = new_id;
     if out.iter().all(|x| x.id() != new_id) {
         out.push(LinkedElement {
-            source: SourceRef { element: id, pinned: false, ..r },
+            source: SourceRef {
+                element: id,
+                pinned: false,
+                ..r
+            },
             document_name: source.name.clone(),
             version_name: version_name.to_string(),
             hash,
@@ -329,12 +383,25 @@ pub(crate) fn dependencies(el: &Element) -> Vec<ElementId> {
 
 /// DV1.5: refuses copies that reach `target` of `doc` (its own element at any version), with the
 /// path "Consumer › Assembly → Source › Element → Consumer".
-pub fn check_cycle(doc: &Document, target: ElementId, links: &[LinkedElement], root: Option<&LinkedElement>) -> Result<(), LinkError> {
+pub fn check_cycle(
+    doc: &Document,
+    target: ElementId,
+    links: &[LinkedElement],
+    root: Option<&LinkedElement>,
+) -> Result<(), LinkError> {
     for l in links {
         if l.source.document_or(doc.id) == doc.id && l.source.element == target {
-            let here = doc.elements.iter().find(|e| e.id == target).map(|e| e.name.clone()).unwrap_or_default();
+            let here = doc
+                .elements
+                .iter()
+                .find(|e| e.id == target)
+                .map(|e| e.name.clone())
+                .unwrap_or_default();
             let via = root.unwrap_or(l);
-            return Err(LinkError::Circular(format!("{} › {here} → {} › {} → {}", doc.name, via.document_name, via.element.name, doc.name)));
+            return Err(LinkError::Circular(format!(
+                "{} › {here} → {} › {} → {}",
+                doc.name, via.document_name, via.element.name, doc.name
+            )));
         }
     }
     Ok(())
@@ -414,12 +481,21 @@ impl Command for InsertLinked {
         Scope::Whole
     }
     fn apply(&self, doc: &mut Document) -> Result<(), CommandError> {
-        check_cycle(doc, self.element, &self.snapshot.links, self.snapshot.root_link())?;
+        check_cycle(
+            doc,
+            self.element,
+            &self.snapshot.links,
+            self.snapshot.root_link(),
+        )?;
         add_links(doc, &self.snapshot.links);
         for inst in &self.instances {
             let mut inst = inst.clone();
             inst.link = Some(self.reference);
-            crate::assembly::commands::InsertInstance { element: self.element, instance: inst }.apply(doc)?;
+            crate::assembly::commands::InsertInstance {
+                element: self.element,
+                instance: inst,
+            }
+            .apply(doc)?;
         }
         Ok(())
     }
@@ -463,7 +539,13 @@ pub struct Resolver {
 
 impl Resolver {
     pub fn new(store: Store) -> Self {
-        Self { store, logs: HashMap::new(), current: HashMap::new(), versions: HashMap::new(), reads: 0 }
+        Self {
+            store,
+            logs: HashMap::new(),
+            current: HashMap::new(),
+            versions: HashMap::new(),
+            reads: 0,
+        }
     }
 
     pub fn store(&self) -> &Store {
@@ -521,7 +603,9 @@ impl Resolver {
 
     /// The versions of `document`, oldest first.
     pub fn versions(&mut self, document: DocumentId) -> Vec<Version> {
-        self.log(document).map(|l| l.versions().to_vec()).unwrap_or_default()
+        self.log(document)
+            .map(|l| l.versions().to_vec())
+            .unwrap_or_default()
     }
 
     /// Forgets what was read of `document` (P3G.2: after writing it, as Update all's auto
@@ -538,25 +622,42 @@ impl Resolver {
     }
 
     /// `document` as it was at `version` (read-only, cached).
-    pub fn document_at(&mut self, document: DocumentId, version: VersionId) -> Result<Arc<Document>, LinkError> {
+    pub fn document_at(
+        &mut self,
+        document: DocumentId,
+        version: VersionId,
+    ) -> Result<Arc<Document>, LinkError> {
         let log = self.log(document).ok_or(LinkError::NoVersion)?;
         if let Some(d) = self.versions.get(&(document, version)) {
             return Ok(d.clone());
         }
-        let doc = Arc::new(log.document_at_version(version).ok_or_else(|| LinkError::NotFound("The version".into()))?);
+        let doc = Arc::new(
+            log.document_at_version(version)
+                .ok_or_else(|| LinkError::NotFound("The version".into()))?,
+        );
         self.versions.insert((document, version), doc.clone());
         Ok(doc)
     }
 
     /// Resolves `r` (from `this`, whose own history is `this_log`) into the copies it needs.
-    pub fn resolve(&mut self, r: SourceRef, this: &Document, this_log: Option<&HistoryLog>) -> Result<LinkSnapshot, LinkError> {
+    pub fn resolve(
+        &mut self,
+        r: SourceRef,
+        this: &Document,
+        this_log: Option<&HistoryLog>,
+    ) -> Result<LinkSnapshot, LinkError> {
         let doc_id = r.document_or(this.id);
         let version = r.version_id();
         if doc_id == this.id {
             let v = version.ok_or(LinkError::NoVersion)?;
             let log = this_log.ok_or(LinkError::NoVersion)?;
-            let name = log.version(v).map(|v| v.name().to_string()).unwrap_or_default();
-            let at = log.document_at_version(v).ok_or_else(|| LinkError::NotFound("The version".into()))?;
+            let name = log
+                .version(v)
+                .map(|v| v.name().to_string())
+                .unwrap_or_default();
+            let at = log
+                .document_at_version(v)
+                .ok_or_else(|| LinkError::NotFound("The version".into()))?;
             return snapshot(&at, r, &name);
         }
         match self.state(doc_id) {
@@ -564,7 +665,10 @@ impl Resolver {
             s => return Err(LinkError::State(s)),
         }
         let v = version.ok_or(LinkError::NoVersion)?;
-        let name = self.log(doc_id).and_then(|l| l.version(v).map(|v| v.name().to_string())).unwrap_or_default();
+        let name = self
+            .log(doc_id)
+            .and_then(|l| l.version(v).map(|v| v.name().to_string()))
+            .unwrap_or_default();
         let at = self.document_at(doc_id, v)?;
         snapshot(&at, r, &name)
     }
@@ -572,8 +676,18 @@ impl Resolver {
     /// Makes a version of another document as it is on disk (Create version in the Other
     /// documents browser, DV1.8): its log is started or caught up first. Not undoable: versions
     /// are immutable, and the version belongs to the other document.
-    pub fn create_version(&mut self, document: DocumentId, name: &str, description: &str, now: Timestamp, user: &str) -> Result<VersionId, LinkError> {
-        let file = self.store.load(document).map_err(|_| LinkError::State(self.state(document)))?;
+    pub fn create_version(
+        &mut self,
+        document: DocumentId,
+        name: &str,
+        description: &str,
+        now: Timestamp,
+        user: &str,
+    ) -> Result<VersionId, LinkError> {
+        let file = self
+            .store
+            .load(document)
+            .map_err(|_| LinkError::State(self.state(document)))?;
         let mut log = HistoryLog::load(&self.store, document)
             .ok()
             .flatten()
@@ -582,7 +696,8 @@ impl Resolver {
             log.catch_up(&file.document, now, user);
         }
         let id = log.create_version(name, description, now, user);
-        log.save(&self.store).map_err(|e| LinkError::NotFound(format!("The history ({e})")))?;
+        log.save(&self.store)
+            .map_err(|e| LinkError::NotFound(format!("The history ({e})")))?;
         self.logs.remove(&document);
         Ok(id)
     }
@@ -605,7 +720,10 @@ mod tests {
 
     #[test]
     fn messages_are_onshapes() {
-        assert_eq!(LinkState::Trashed.message(), Some("Cannot open a document in the trash. Restore the document from Trash."));
+        assert_eq!(
+            LinkState::Trashed.message(),
+            Some("Cannot open a document in the trash. Restore the document from Trash.")
+        );
         assert_eq!(LinkState::Gone.message(), Some("Resource does not exist"));
         assert_eq!(LinkState::Ok.message(), None);
     }

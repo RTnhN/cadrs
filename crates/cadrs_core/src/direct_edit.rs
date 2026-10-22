@@ -48,7 +48,12 @@ pub struct DirectEditFeature {
 
 impl Default for DirectEditFeature {
     fn default() -> Self {
-        Self { kind: DirectEditKind::DeleteFace, faces: Vec::new(), distance: 1.0, distance_expr: "1 mm".into() }
+        Self {
+            kind: DirectEditKind::DeleteFace,
+            faces: Vec::new(),
+            distance: 1.0,
+            distance_expr: "1 mm".into(),
+        }
     }
 }
 

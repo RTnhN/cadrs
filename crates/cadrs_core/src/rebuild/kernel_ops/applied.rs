@@ -4,14 +4,14 @@
 use super::*;
 use cadrs_kernel::naming::{self, BodyNames};
 use cadrs_kernel::{
-    Axis, BoolOp, ChamferMeasure, ChamferOpts, ChamferSpec, Curve2, EdgeId, FaceId, FilletProfile, FilletSize, FilletSpec, Kernel, Loop,
-    OpResult, Plane, Profile, Region, RevolveSpec, ShellSpec,
+    Axis, BoolOp, ChamferMeasure, ChamferOpts, ChamferSpec, Curve2, EdgeId, FaceId, FilletProfile,
+    FilletSize, FilletSpec, Kernel, Loop, OpResult, Plane, Profile, Region, RevolveSpec, ShellSpec,
 };
 use nalgebra::{Point2, Point3, Unit, Vector3};
 
 use crate::applied::{
-    ChamferFeature, ChamferMeasurement, ChamferType, EdgeOrFace, FilletControl, FilletFeature, FilletMeasurement,
-    FilletType, HoleFeature, ShellFeature,
+    ChamferFeature, ChamferMeasurement, ChamferType, EdgeOrFace, FilletControl, FilletFeature,
+    FilletMeasurement, FilletType, HoleFeature, ShellFeature,
 };
 use crate::document::EdgeRef;
 use crate::hole::{HoleEnd, HoleStart};
@@ -38,7 +38,8 @@ pub(super) fn edge_ids<'a>(state: &'a State, r: &EdgeRef) -> Option<(&'a PartSta
     for by_name in [true, false] {
         for part in &candidates {
             let solid = &part.part.solid;
-            let distance = |e: &crate::solid::SolidEdge| -> Option<f64> { Some(e.distance(r.seed)) };
+            let distance =
+                |e: &crate::solid::SolidEdge| -> Option<f64> { Some(e.distance(r.seed)) };
             let Ok((i, how)) = solid.resolve_edge(&r.edge, distance) else {
                 continue;
             };
@@ -60,24 +61,35 @@ pub(super) fn edge_ids<'a>(state: &'a State, r: &EdgeRef) -> Option<(&'a PartSta
 
 impl Rebuilder {
     /// The picked edges and faces (a face: all its edges) as kernel edges, grouped by part.
-    fn entity_edges(&self, state: &State, entities: &[EdgeOrFace]) -> Result<Vec<PartEdges>, String> {
+    fn entity_edges(
+        &self,
+        state: &State,
+        entities: &[EdgeOrFace],
+    ) -> Result<Vec<PartEdges>, String> {
         let mut out: Vec<PartEdges> = Vec::new();
-        let push = |part: &PartState, ids: Vec<EdgeId>, out: &mut Vec<PartEdges>| -> Result<(), String> {
-            let Some(body) = self.body_or_skip(part) else { return Ok(()) };
-            let i = match out.iter().position(|g| g.part == part.part.id) {
-                Some(i) => i,
-                None => {
-                    out.push(PartEdges { part: part.part.id, body, edges: Vec::new() });
-                    out.len() - 1
+        let push =
+            |part: &PartState, ids: Vec<EdgeId>, out: &mut Vec<PartEdges>| -> Result<(), String> {
+                let Some(body) = self.body_or_skip(part) else {
+                    return Ok(());
+                };
+                let i = match out.iter().position(|g| g.part == part.part.id) {
+                    Some(i) => i,
+                    None => {
+                        out.push(PartEdges {
+                            part: part.part.id,
+                            body,
+                            edges: Vec::new(),
+                        });
+                        out.len() - 1
+                    }
+                };
+                for e in ids {
+                    if !out[i].edges.contains(&e) {
+                        out[i].edges.push(e);
+                    }
                 }
+                Ok(())
             };
-            for e in ids {
-                if !out[i].edges.contains(&e) {
-                    out[i].edges.push(e);
-                }
-            }
-            Ok(())
-        };
         let mut lost = 0;
         for ent in entities {
             match ent {
@@ -87,7 +99,9 @@ impl Rebuilder {
                 },
                 EdgeOrFace::Face(f) => match face_ids(state, f) {
                     Some((part, faces)) => {
-                        let Some(body) = self.body_or_skip(part) else { continue };
+                        let Some(body) = self.body_or_skip(part) else {
+                            continue;
+                        };
                         let infos = self.kernel.edges(body).map_err(|e| e.to_string())?;
                         let ids: Vec<EdgeId> = infos
                             .iter()
@@ -163,7 +177,8 @@ impl Rebuilder {
                 }
             };
             let mut pieces = pieces;
-            let (kept, dropped): (Vec<Piece>, Vec<Piece>) = pieces.into_iter().partition(|p| keep(self, p.body));
+            let (kept, dropped): (Vec<Piece>, Vec<Piece>) =
+                pieces.into_iter().partition(|p| keep(self, p.body));
             for p in dropped {
                 self.kernel.release(p.body);
             }
@@ -194,11 +209,18 @@ impl Rebuilder {
     fn chain_uses(&self, id: FeatureId, state: &State, groups: &[PartEdges]) -> Vec<FeatureId> {
         let mut out: Vec<FeatureId> = Vec::new();
         for g in groups {
-            let Some(part) = state.part(g.part) else { continue };
+            let Some(part) = state.part(g.part) else {
+                continue;
+            };
             for &e in &g.edges {
-                let chain = self.kernel.tangent_chain(g.body, e).unwrap_or_else(|_| vec![e]);
+                let chain = self
+                    .kernel
+                    .tangent_chain(g.body, e)
+                    .unwrap_or_else(|_| vec![e]);
                 for c in chain {
-                    let Some(name) = part.names.edge(c) else { continue };
+                    let Some(name) = part.names.edge(c) else {
+                        continue;
+                    };
                     for f in name.faces {
                         let f = FeatureId(f.op);
                         if f != id && !out.contains(&f) {
@@ -212,9 +234,16 @@ impl Rebuilder {
     }
 
     /// The Fillet feature (PS14.1–14.5).
-    pub(in crate::rebuild) fn fillet(&mut self, id: FeatureId, x: &FilletFeature, state: &Arc<State>) -> Result<Output, String> {
+    pub(in crate::rebuild) fn fillet(
+        &mut self,
+        id: FeatureId,
+        x: &FilletFeature,
+        state: &Arc<State>,
+    ) -> Result<Output, String> {
         let uses = if x.tangent_propagation && x.kind != FilletType::FullRound {
-            self.entity_edges(state, &x.entities).map(|g| self.chain_uses(id, state, &g)).unwrap_or_default()
+            self.entity_edges(state, &x.entities)
+                .map(|g| self.chain_uses(id, state, &g))
+                .unwrap_or_default()
         } else {
             Vec::new()
         };
@@ -224,7 +253,12 @@ impl Rebuilder {
         })
     }
 
-    fn fillet_inner(&mut self, id: FeatureId, x: &FilletFeature, state: &Arc<State>) -> Result<Output, String> {
+    fn fillet_inner(
+        &mut self,
+        id: FeatureId,
+        x: &FilletFeature,
+        state: &Arc<State>,
+    ) -> Result<Output, String> {
         if let Some(p) = x.problem() {
             return Err(p.into());
         }
@@ -236,11 +270,18 @@ impl Rebuilder {
             return self.variable_fillet(id, x, groups, state);
         }
         let profile = match x.control {
-            FilletControl::Distance if x.asymmetric => FilletProfile::Asymmetric { second: x.second, flip: x.flip_asymmetric },
+            FilletControl::Distance if x.asymmetric => FilletProfile::Asymmetric {
+                second: x.second,
+                flip: x.flip_asymmetric,
+            },
             FilletControl::Distance => FilletProfile::Circular,
-            _ if x.asymmetric => return Err("An asymmetric fillet takes the Distance control".into()),
+            _ if x.asymmetric => {
+                return Err("An asymmetric fillet takes the Distance control".into());
+            }
             FilletControl::Conic => FilletProfile::Conic { rho: x.rho },
-            FilletControl::Curvature => FilletProfile::Curvature { magnitude: x.magnitude },
+            FilletControl::Curvature => FilletProfile::Curvature {
+                magnitude: x.magnitude,
+            },
         };
         let spec = FilletSpec {
             size: match x.measurement {
@@ -258,33 +299,72 @@ impl Rebuilder {
         let bodies = groups.iter().map(|g| (g.part, g.body)).collect();
         if x.smooth_corners {
             // Final (PS14.6): corners where three fillets meet set back and blended.
-            if spec.profile != FilletProfile::Circular || x.measurement != FilletMeasurement::Radius {
-                return Err("Smooth fillet corners take a circular fillet measured by its radius".into());
+            if spec.profile != FilletProfile::Circular || x.measurement != FilletMeasurement::Radius
+            {
+                return Err(
+                    "Smooth fillet corners take a circular fillet measured by its radius".into(),
+                );
             }
             let setback = crate::applied::SMOOTH_SETBACK * x.size;
-            return self.per_part(id, "Fillet", state, bodies, |this, i, body| this.kernel.fillet_smooth(body, &edges[i], &spec, setback));
+            return self.per_part(id, "Fillet", state, bodies, |this, i, body| {
+                this.kernel.fillet_smooth(body, &edges[i], &spec, setback)
+            });
         }
-        self.per_part(id, "Fillet", state, bodies, |this, i, body| this.kernel.fillet_with(body, &edges[i], &spec))
+        self.per_part(id, "Fillet", state, bodies, |this, i, body| {
+            this.kernel.fillet_with(body, &edges[i], &spec)
+        })
     }
 
     /// A partial fillet (P3.11, PS14.6): the one picked edge between its bounds.
-    fn partial_fillet(&mut self, id: FeatureId, x: &FilletFeature, groups: &[PartEdges], spec: &FilletSpec, state: &Arc<State>) -> Result<Output, String> {
-        let [g] = groups else { return Err("A partial fillet takes one edge".into()) };
-        let [edge] = g.edges[..] else { return Err("A partial fillet takes one edge".into()) };
+    fn partial_fillet(
+        &mut self,
+        id: FeatureId,
+        x: &FilletFeature,
+        groups: &[PartEdges],
+        spec: &FilletSpec,
+        state: &Arc<State>,
+    ) -> Result<Output, String> {
+        let [g] = groups else {
+            return Err("A partial fillet takes one edge".into());
+        };
+        let [edge] = g.edges[..] else {
+            return Err("A partial fillet takes one edge".into());
+        };
         let infos = self.kernel.edges(g.body).map_err(|e| e.to_string())?;
-        let info = infos.iter().find(|i| i.id == edge).ok_or("The edge to fillet no longer exists")?;
+        let info = infos
+            .iter()
+            .find(|i| i.id == edge)
+            .ok_or("The edge to fillet no longer exists")?;
         let (from, to) = x.partial_range(info.length)?;
         let spec = *spec;
-        self.per_part(id, "Fillet", state, vec![(g.part, g.body)], |this, _, body| this.kernel.fillet_partial(body, edge, &spec, from, to))
+        self.per_part(
+            id,
+            "Fillet",
+            state,
+            vec![(g.part, g.body)],
+            |this, _, body| this.kernel.fillet_partial(body, edge, &spec, from, to),
+        )
     }
 
     /// A variable fillet (P3.10, PS14.6): per edge of the picked edges' tangent chains, the
     /// radius at its start and end (a picked vertex's radius there, else the fillet's size) and
     /// at its points on edge; without Smooth transition the radius runs linearly between them
     /// (the law sampled finely, since OCCT's law interpolates smoothly through its points).
-    fn variable_fillet(&mut self, id: FeatureId, x: &FilletFeature, groups: Vec<PartEdges>, state: &Arc<State>) -> Result<Output, String> {
-        if x.asymmetric || x.control != FilletControl::Distance || x.measurement != FilletMeasurement::Radius {
-            return Err("A variable fillet takes a radius with the Distance control (not asymmetric)".into());
+    fn variable_fillet(
+        &mut self,
+        id: FeatureId,
+        x: &FilletFeature,
+        groups: Vec<PartEdges>,
+        state: &Arc<State>,
+    ) -> Result<Output, String> {
+        if x.asymmetric
+            || x.control != FilletControl::Distance
+            || x.measurement != FilletMeasurement::Radius
+        {
+            return Err(
+                "A variable fillet takes a radius with the Distance control (not asymmetric)"
+                    .into(),
+            );
         }
         let vertex_at = |v: &crate::applied::VertexRadius| -> Option<(Point3<f64>, f64)> {
             let point = state
@@ -299,7 +379,11 @@ impl Rebuilder {
         for g in &groups {
             let mut all: Vec<EdgeId> = Vec::new();
             for &e in &g.edges {
-                for c in self.kernel.tangent_chain(g.body, e).map_err(|e| e.to_string())? {
+                for c in self
+                    .kernel
+                    .tangent_chain(g.body, e)
+                    .map_err(|e| e.to_string())?
+                {
                     if !all.contains(&c) {
                         all.push(c);
                     }
@@ -308,8 +392,17 @@ impl Rebuilder {
             let infos = self.kernel.edges(g.body).map_err(|e| e.to_string())?;
             let mut part_laws = Vec::new();
             for e in all {
-                let info = infos.iter().find(|i| i.id == e).ok_or("An edge to fillet no longer exists")?;
-                let at = |p: Point3<f64>| vertices.iter().find(|(q, _)| (q - p).norm() < 1e-4).map(|(_, r)| *r).unwrap_or(x.size);
+                let info = infos
+                    .iter()
+                    .find(|i| i.id == e)
+                    .ok_or("An edge to fillet no longer exists")?;
+                let at = |p: Point3<f64>| {
+                    vertices
+                        .iter()
+                        .find(|(q, _)| (q - p).norm() < 1e-4)
+                        .map(|(_, r)| *r)
+                        .unwrap_or(x.size)
+                };
                 let mut radii = vec![(0.0, at(info.start)), (1.0, at(info.end))];
                 for pt in &x.edge_points {
                     if let Some((part, ids)) = edge_ids(state, &pt.edge)
@@ -325,7 +418,10 @@ impl Rebuilder {
                     for w in radii.windows(2) {
                         for k in 0..8 {
                             let f = k as f64 / 8.0;
-                            dense.push((w[0].0 + (w[1].0 - w[0].0) * f, w[0].1 + (w[1].1 - w[0].1) * f));
+                            dense.push((
+                                w[0].0 + (w[1].0 - w[0].0) * f,
+                                w[0].1 + (w[1].1 - w[0].1) * f,
+                            ));
                         }
                     }
                     dense.push(*radii.last().expect("two"));
@@ -337,14 +433,23 @@ impl Rebuilder {
         }
         let bodies = groups.iter().map(|g| (g.part, g.body)).collect();
         let overflow = x.allow_overflow;
-        self.per_part(id, "Fillet", state, bodies, |this, i, body| this.kernel.fillet_variable(body, &laws[i], overflow))
+        self.per_part(id, "Fillet", state, bodies, |this, i, body| {
+            this.kernel.fillet_variable(body, &laws[i], overflow)
+        })
     }
 
     /// The Full round tab (PS14.1): one side face, the center face and the other side face, on
     /// one part.
-    fn full_round(&mut self, id: FeatureId, x: &FilletFeature, state: &Arc<State>) -> Result<Output, String> {
+    fn full_round(
+        &mut self,
+        id: FeatureId,
+        x: &FilletFeature,
+        state: &Arc<State>,
+    ) -> Result<Output, String> {
         let one = |refs: &[crate::document::FaceRef]| -> Result<(PartId, BodyId, FaceId), String> {
-            let r = refs.first().ok_or("Select the side faces and the center face")?;
+            let r = refs
+                .first()
+                .ok_or("Select the side faces and the center face")?;
             let (part, faces) = face_ids(state, r).ok_or("A selected face no longer exists")?;
             let body = part.body.ok_or_else(|| super::super::no_body(part))?;
             let face = *faces.first().ok_or("A selected face no longer exists")?;
@@ -354,23 +459,40 @@ impl Rebuilder {
         if a.0 != c.0 || b.0 != c.0 {
             return Err("The full round's faces must be on one part".into());
         }
-        self.per_part(id, "Full round", state, vec![(c.0, c.1)], |this, _, body| {
-            this.kernel.full_round(body, a.2, c.2, b.2)
-        })
+        self.per_part(
+            id,
+            "Full round",
+            state,
+            vec![(c.0, c.1)],
+            |this, _, body| this.kernel.full_round(body, a.2, c.2, b.2),
+        )
     }
 
     /// The Chamfer feature (PS14.7–14.9).
-    pub(in crate::rebuild) fn chamfer(&mut self, id: FeatureId, x: &ChamferFeature, state: &Arc<State>) -> Result<Output, String> {
+    pub(in crate::rebuild) fn chamfer(
+        &mut self,
+        id: FeatureId,
+        x: &ChamferFeature,
+        state: &Arc<State>,
+    ) -> Result<Output, String> {
         if let Some(p) = x.problem() {
             return Err(p.into());
         }
         let mut groups = self.entity_edges(state, &x.entities)?;
-        let uses = if x.tangent_propagation { self.chain_uses(id, state, &groups) } else { Vec::new() };
+        let uses = if x.tangent_propagation {
+            self.chain_uses(id, state, &groups)
+        } else {
+            Vec::new()
+        };
         if x.tangent_propagation {
             for g in &mut groups {
                 let mut all: Vec<EdgeId> = Vec::new();
                 for &e in &g.edges {
-                    for c in self.kernel.tangent_chain(g.body, e).map_err(|e| e.to_string())? {
+                    for c in self
+                        .kernel
+                        .tangent_chain(g.body, e)
+                        .map_err(|e| e.to_string())?
+                    {
                         if !all.contains(&c) {
                             all.push(c);
                         }
@@ -393,7 +515,11 @@ impl Rebuilder {
             .map(|g| {
                 x.overrides
                     .iter()
-                    .filter_map(|r| edge_ids(state, r).filter(|(p, _)| p.part.id == g.part).map(|(_, ids)| ids))
+                    .filter_map(|r| {
+                        edge_ids(state, r)
+                            .filter(|(p, _)| p.part.id == g.part)
+                            .map(|(_, ids)| ids)
+                    })
                     .flatten()
                     .collect()
             })
@@ -421,7 +547,12 @@ impl Rebuilder {
     }
 
     /// The Shell feature (PS16).
-    pub(in crate::rebuild) fn shell(&mut self, id: FeatureId, x: &ShellFeature, state: &Arc<State>) -> Result<Output, String> {
+    pub(in crate::rebuild) fn shell(
+        &mut self,
+        id: FeatureId,
+        x: &ShellFeature,
+        state: &Arc<State>,
+    ) -> Result<Output, String> {
         if let Some(p) = x.problem() {
             return Err(p.into());
         }
@@ -430,15 +561,23 @@ impl Rebuilder {
         if x.hollow {
             for p in &x.parts {
                 let part = state.part(*p).ok_or("A selected part no longer exists")?;
-                let Some(body) = self.body_or_skip(part) else { continue };
+                let Some(body) = self.body_or_skip(part) else {
+                    continue;
+                };
                 groups.push((*p, body, Vec::new()));
             }
         } else {
             for f in &x.faces {
                 let (part, ids) = face_ids(state, f).ok_or("A face to remove no longer exists")?;
-                let Some(body) = self.body_or_skip(part) else { continue };
+                let Some(body) = self.body_or_skip(part) else {
+                    continue;
+                };
                 match groups.iter_mut().find(|g| g.0 == part.part.id) {
-                    Some(g) => g.2.extend(ids.into_iter().filter(|i| !g.2.contains(i)).collect::<Vec<_>>()),
+                    Some(g) => g.2.extend(
+                        ids.into_iter()
+                            .filter(|i| !g.2.contains(i))
+                            .collect::<Vec<_>>(),
+                    ),
                     None => groups.push((part.part.id, body, ids)),
                 }
             }
@@ -473,23 +612,39 @@ impl Rebuilder {
         let mut groups: Vec<(PartId, BodyId, Vec<cadrs_kernel::FaceId>)> = Vec::new();
         for f in &x.faces {
             let (part, ids) = face_ids(state, f).ok_or("A selected face no longer exists")?;
-            let Some(body) = self.body_or_skip(part) else { continue };
+            let Some(body) = self.body_or_skip(part) else {
+                continue;
+            };
             match groups.iter_mut().find(|g| g.0 == part.part.id) {
-                Some(g) => g.2.extend(ids.into_iter().filter(|i| !g.2.contains(i)).collect::<Vec<_>>()),
+                Some(g) => g.2.extend(
+                    ids.into_iter()
+                        .filter(|i| !g.2.contains(i))
+                        .collect::<Vec<_>>(),
+                ),
                 None => groups.push((part.part.id, body, ids)),
             }
         }
         let faces: Vec<Vec<cadrs_kernel::FaceId>> = groups.iter().map(|g| g.2.clone()).collect();
         let bodies = groups.iter().map(|g| (g.0, g.1)).collect();
         let (kind, distance) = (x.kind, x.distance);
-        self.per_part(id, kind.label(), state, bodies, |this, i, body| match kind {
-            DirectEditKind::DeleteFace => this.kernel.delete_faces(body, &faces[i]),
-            DirectEditKind::Simplify => this.kernel.simplify(body),
-            DirectEditKind::MoveFace => {
-                let spec = cadrs_kernel::OffsetSpec { distance: 0.0, faces: faces[i].iter().map(|f| (*f, distance)).collect(), sharp: true };
-                this.kernel.offset(body, &spec)
-            }
-        })
+        self.per_part(
+            id,
+            kind.label(),
+            state,
+            bodies,
+            |this, i, body| match kind {
+                DirectEditKind::DeleteFace => this.kernel.delete_faces(body, &faces[i]),
+                DirectEditKind::Simplify => this.kernel.simplify(body),
+                DirectEditKind::MoveFace => {
+                    let spec = cadrs_kernel::OffsetSpec {
+                        distance: 0.0,
+                        faces: faces[i].iter().map(|f| (*f, distance)).collect(),
+                        sharp: true,
+                    };
+                    this.kernel.offset(body, &spec)
+                }
+            },
+        )
     }
 
     /// The Hole feature (PS15): a revolved tool per point, subtracted from the parts in scope.
@@ -511,7 +666,11 @@ impl Rebuilder {
             let key = naming::stable_hash(format!("{c:?}").as_bytes());
             let n = f.normal();
             if !points.iter().any(|(k, _, _)| *k == key) {
-                points.push((key, Point3::from(f.origin), Unit::new_normalize(Vector3::new(n[0], n[1], n[2]))));
+                points.push((
+                    key,
+                    Point3::from(f.origin),
+                    Unit::new_normalize(Vector3::new(n[0], n[1], n[2])),
+                ));
             }
         }
         if points.is_empty() {
@@ -525,7 +684,11 @@ impl Rebuilder {
         let scope: Vec<&PartState> = if h.merge_scope.is_empty() {
             solids.clone()
         } else {
-            solids.iter().copied().filter(|p| h.merge_scope.contains(&p.part.id)).collect()
+            solids
+                .iter()
+                .copied()
+                .filter(|p| h.merge_scope.contains(&p.part.id))
+                .collect()
         };
         if scope.is_empty() {
             return Err("There are no parts to cut".into());
@@ -534,15 +697,22 @@ impl Rebuilder {
         let spec = &h.spec;
         // P3.10: the Hole start plane and the Up to entity target, as planes (a curved target
         // face is met where the axis crosses it).
-        let plane_frame = |mp: &crate::pattern::MirrorPlane, what: &str| -> Result<cadrs_sketch::PlaneFrame, String> {
+        let plane_frame = |mp: &crate::pattern::MirrorPlane,
+                           what: &str|
+         -> Result<cadrs_sketch::PlaneFrame, String> {
             let lost = || format!("The {what} no longer exists");
             Ok(match mp {
-                crate::pattern::MirrorPlane::Plane(p) => super::advanced::plane_of(state, p).ok_or_else(lost)?,
+                crate::pattern::MirrorPlane::Plane(p) => {
+                    super::advanced::plane_of(state, p).ok_or_else(lost)?
+                }
                 crate::pattern::MirrorPlane::Face(f) => {
                     let (part, _) = face_ids(state, f).ok_or_else(lost)?;
-                    face_frame(part, f).ok_or_else(|| format!("The {what} must be a plane or a flat face"))?
+                    face_frame(part, f)
+                        .ok_or_else(|| format!("The {what} must be a plane or a flat face"))?
                 }
-                crate::pattern::MirrorPlane::Connector(c) => super::super::connector_frame(before, state, c)?,
+                crate::pattern::MirrorPlane::Connector(c) => {
+                    super::super::connector_frame(before, state, c)?
+                }
             })
         };
         let start_frame = match (spec.start, &h.start_plane) {
@@ -557,23 +727,32 @@ impl Rebuilder {
         }
         let target = match (spec.end, &h.up_to) {
             (HoleEnd::UpToEntity, Some(crate::pattern::MirrorPlane::Face(f))) => {
-                let (part, ids) = face_ids(state, f).ok_or("The face to go up to no longer exists")?;
+                let (part, ids) =
+                    face_ids(state, f).ok_or("The face to go up to no longer exists")?;
                 match face_frame(part, f) {
                     Some(fr) => Some(Target::Plane(fr)),
-                    None => Some(Target::Faces(part.body.ok_or_else(|| super::super::no_body(part))?, ids)),
+                    None => Some(Target::Faces(
+                        part.body.ok_or_else(|| super::super::no_body(part))?,
+                        ids,
+                    )),
                 }
             }
-            (HoleEnd::UpToEntity, Some(p)) => Some(Target::Plane(plane_frame(p, "entity to go up to")?)),
+            (HoleEnd::UpToEntity, Some(p)) => {
+                Some(Target::Plane(plane_frame(p, "entity to go up to")?))
+            }
             (HoleEnd::UpToEntity, None) => return Err("Select a face or plane to go up to".into()),
             _ => None,
         };
         // Where the axis from `o` along `d` crosses a plane (None when parallel to it).
-        let cross = |fr: &cadrs_sketch::PlaneFrame, o: &Point3<f64>, d: &Vector3<f64>| -> Option<f64> {
-            let n = fr.normal();
-            let n = Vector3::new(n[0], n[1], n[2]);
-            let along = n.dot(d);
-            (along.abs() > 1e-9).then(|| (Point3::new(fr.origin[0], fr.origin[1], fr.origin[2]) - o).dot(&n) / along)
-        };
+        let cross =
+            |fr: &cadrs_sketch::PlaneFrame, o: &Point3<f64>, d: &Vector3<f64>| -> Option<f64> {
+                let n = fr.normal();
+                let n = Vector3::new(n[0], n[1], n[2]);
+                let along = n.dot(d);
+                (along.abs() > 1e-9).then(|| {
+                    (Point3::new(fr.origin[0], fr.origin[1], fr.origin[2]) - o).dot(&n) / along
+                })
+            };
         let end_offset = spec.end_offset.as_ref().map_or(0.0, |l| l.value);
         let mut tools: Vec<(BodyId, BodyNames)> = Vec::new();
         let release_all = |this: &mut Self, tools: &[(BodyId, BodyNames)]| {
@@ -593,7 +772,10 @@ impl Rebuilder {
             // Every crossing along the whole line, for whether a point is inside a part.
             let mut all_hits: Vec<f64> = Vec::new();
             for b in &bodies {
-                let found = self.kernel.ray_hits(*b, back, dir.into_inner()).map_err(|e| e.to_string())?;
+                let found = self
+                    .kernel
+                    .ray_hits(*b, back, dir.into_inner())
+                    .map_err(|e| e.to_string())?;
                 hits.extend(found.iter().map(|x| x.t - 1.0).filter(|t| *t >= -1e-7));
                 all_hits.extend(found.iter().map(|x| x.t - 1.0));
             }
@@ -646,7 +828,9 @@ impl Rebuilder {
                         Some(t) if t - end_offset > start + 1e-6 => (t - end_offset - start, false),
                         _ => {
                             release_all(self, &tools);
-                            return Err("A hole's entity to go up to isn't ahead of its start".into());
+                            return Err(
+                                "A hole's entity to go up to isn't ahead of its start".into()
+                            );
                         }
                     }
                 }
@@ -672,7 +856,11 @@ impl Rebuilder {
                 && all_hits.iter().filter(|t| **t < start - 1e-7).count() % 2 == 1;
             let section = spec.section(depth, through, if buried { 0.0 } else { HOLE_ABOVE });
             // The section's plane holds the axis: x radial, y along the hole.
-            let helper = if dir.x.abs() < 0.9 { Vector3::x() } else { Vector3::y() };
+            let helper = if dir.x.abs() < 0.9 {
+                Vector3::x()
+            } else {
+                Vector3::y()
+            };
             let u = Unit::new_normalize(helper - dir.into_inner() * helper.dot(&dir));
             let at = origin + dir.into_inner() * start;
             let plane = Plane {
@@ -697,10 +885,16 @@ impl Rebuilder {
                 }],
             );
             let axis = Axis { origin: at, dir };
-            let made = self.kernel.revolve_with(&profile, &RevolveSpec::solid(axis, None)).and_then(|r| {
-                let body = r.bodies[0];
-                Ok((body, naming::name_body(&self.kernel, body, op, &r.history, &[])?))
-            });
+            let made = self
+                .kernel
+                .revolve_with(&profile, &RevolveSpec::solid(axis, None))
+                .and_then(|r| {
+                    let body = r.bodies[0];
+                    Ok((
+                        body,
+                        naming::name_body(&self.kernel, body, op, &r.history, &[])?,
+                    ))
+                });
             match made {
                 Ok(t) => tools.push(t),
                 Err(e) => {
@@ -713,14 +907,19 @@ impl Rebuilder {
             return Err("The holes don't reach a part".into());
         }
         // The parts the holes reach (by box, then the boolean decides).
-        let tool_boxes: Vec<cadrs_kernel::Aabb> = tools.iter().filter_map(|(b, _)| self.kernel.bounding_box(*b).ok()).collect();
+        let tool_boxes: Vec<cadrs_kernel::Aabb> = tools
+            .iter()
+            .filter_map(|(b, _)| self.kernel.bounding_box(*b).ok())
+            .collect();
         let reached: Vec<PartId> = scope
             .iter()
             .filter(|p| {
                 let Some(pb) = p.body.and_then(|b| self.kernel.bounding_box(b).ok()) else {
                     return false;
                 };
-                tool_boxes.iter().any(|tb| (0..3).all(|i| tb.min[i] <= pb.max[i] && pb.min[i] <= tb.max[i]))
+                tool_boxes
+                    .iter()
+                    .any(|tb| (0..3).all(|i| tb.min[i] <= pb.max[i] && pb.min[i] <= tb.max[i]))
             })
             .map(|p| p.part.id)
             .collect();
@@ -753,27 +952,33 @@ impl Rebuilder {
                 .filter(|p| {
                     p.body
                         .and_then(|b| self.kernel.bounding_box(b).ok())
-                        .is_some_and(|pb| (0..3).all(|i| tb.min[i] <= pb.max[i] && pb.min[i] <= tb.max[i]))
+                        .is_some_and(|pb| {
+                            (0..3).all(|i| tb.min[i] <= pb.max[i] && pb.min[i] <= tb.max[i])
+                        })
                 })
                 .map(|p| p.part.id)
                 .collect(),
             None => Vec::new(),
         };
         let automatic = h.merge_scope.is_empty();
-        self.finish(id, placed, next, op, geoms, PartKind::Solid).map(|mut o| {
-            // P3.8 judge: the parts drilled, for the dialog's default Merge scope.
-            if automatic {
-                o.contacts = Some(Contacts { touches: drilled.clone(), overlaps: drilled });
-            }
-            if skipped > 0 {
-                o.warning = Some(if skipped == 1 {
-                    "1 hole doesn't reach a part in the merge scope".into()
-                } else {
-                    format!("{skipped} holes don't reach a part in the merge scope")
-                });
-            }
-            o
-        })
+        self.finish(id, placed, next, op, geoms, PartKind::Solid)
+            .map(|mut o| {
+                // P3.8 judge: the parts drilled, for the dialog's default Merge scope.
+                if automatic {
+                    o.contacts = Some(Contacts {
+                        touches: drilled.clone(),
+                        overlaps: drilled,
+                    });
+                }
+                if skipped > 0 {
+                    o.warning = Some(if skipped == 1 {
+                        "1 hole doesn't reach a part in the merge scope".into()
+                    } else {
+                        format!("{skipped} holes don't reach a part in the merge scope")
+                    });
+                }
+                o
+            })
     }
 }
 
@@ -792,17 +997,27 @@ pub(super) fn hole_points(before: &[Feature], h: &HoleFeature) -> Result<Vec<Hol
         naming::stable_hash(&bytes)
     };
     let add = |sketch: FeatureId, p: cadrs_sketch::PointId, out: &mut Vec<_>| -> bool {
-        let Some(sk) = before.iter().find(|f| f.id == sketch).and_then(|f| f.sketch()) else {
+        let Some(sk) = before
+            .iter()
+            .find(|f| f.id == sketch)
+            .and_then(|f| f.sketch())
+        else {
             return false;
         };
         let Some(plane) = sk.plane else { return false };
-        let Some(pt) = sk.geometry.points.get(p) else { return false };
+        let Some(pt) = sk.geometry.points.get(p) else {
+            return false;
+        };
         let frame = plane.frame();
         let w = frame.to_world(pt.pos);
         let n = frame.normal();
         let k = key(sketch, p);
         if !out.iter().any(|(x, _, _): &(u64, _, _)| *x == k) {
-            out.push((k, Point3::new(w[0], w[1], w[2]), Unit::new_normalize(Vector3::new(n[0], n[1], n[2]))));
+            out.push((
+                k,
+                Point3::new(w[0], w[1], w[2]),
+                Unit::new_normalize(Vector3::new(n[0], n[1], n[2])),
+            ));
         }
         true
     };

@@ -19,7 +19,6 @@
 //! automatically a moment after they happen, and when the document closes a thumbnail is
 //! rendered (see [`crate::thumbnail`]).
 
-use cadrs_ui::ShortcutKey;
 use bevy::input::ButtonState;
 use bevy::input::keyboard::KeyboardInput;
 use bevy::input_focus::InputFocus;
@@ -32,6 +31,7 @@ use cadrs_core::commands::{
 };
 use cadrs_core::{ElementId, FeatureId};
 use cadrs_ui::Button;
+use cadrs_ui::ShortcutKey;
 use cadrs_ui::input::TextInputField;
 use cadrs_ui::menu::ContextMenuAnchor;
 use cadrs_ui::prelude::*;
@@ -139,7 +139,6 @@ struct DefaultGeometryChildren;
 #[derive(Component)]
 struct DefaultGeometryRow;
 
-
 /// The "Loading…" cover shown briefly while a document opens.
 #[derive(Component)]
 struct LoadingOverlay {
@@ -151,7 +150,11 @@ const LOADING_TIME: f32 = 0.35;
 
 /// Scripted steps wait while the loading cover is up (it takes the pointer and hides the
 /// document).
-fn flag_loading(q: Query<(), With<LoadingOverlay>>, mut pending: ResMut<cadrs_ui::PendingWork>, mut why: ResMut<cadrs_ui::PendingWhy>) {
+fn flag_loading(
+    q: Query<(), With<LoadingOverlay>>,
+    mut pending: ResMut<cadrs_ui::PendingWork>,
+    mut why: ResMut<cadrs_ui::PendingWhy>,
+) {
     if !q.is_empty() {
         pending.0 = true;
         why.add("loading cover");
@@ -206,9 +209,30 @@ struct FeaturesHeader;
 /// button (P3.8, the P3.7 judge: it crowded the icon). Without it, the header is as before.
 #[allow(clippy::type_complexity)]
 fn space_features_header(
-    q_icon: Query<&Node, (With<FeatureErrorIcon>, Without<FeaturesHeader>, Without<FeatureCountLabel>)>,
-    mut q_header: Query<&mut Node, (With<FeaturesHeader>, Without<FeatureErrorIcon>, Without<FeatureCountLabel>)>,
-    mut q_label: Query<&mut Node, (With<FeatureCountLabel>, Without<FeatureErrorIcon>, Without<FeaturesHeader>)>,
+    q_icon: Query<
+        &Node,
+        (
+            With<FeatureErrorIcon>,
+            Without<FeaturesHeader>,
+            Without<FeatureCountLabel>,
+        ),
+    >,
+    mut q_header: Query<
+        &mut Node,
+        (
+            With<FeaturesHeader>,
+            Without<FeatureErrorIcon>,
+            Without<FeatureCountLabel>,
+        ),
+    >,
+    mut q_label: Query<
+        &mut Node,
+        (
+            With<FeatureCountLabel>,
+            Without<FeatureErrorIcon>,
+            Without<FeaturesHeader>,
+        ),
+    >,
 ) {
     let error = q_icon.iter().any(|n| n.display != Display::None);
     let (pad, gap) = if error { (4.0, 6.0) } else { (12.0, 0.0) };
@@ -425,25 +449,40 @@ fn top_bar(root: &mut ChildSpawnerCommands, t: &Theme, doc_name: &str) {
                 .icon_size(20.0)
                 .tooltip("Document menu")
                 .build(t),
-            observe(|a: On<Activate>, theme: Res<Theme>, mut commands: Commands| {
-                open_menu(&mut commands, a.entity, document_menu().build(&theme));
-            }),
-            observe(|ev: On<MenuAction>, q: Query<Entity, With<DocumentName>>, mut commands: Commands| {
-                match ev.item.as_str() {
-                    "document-menu-export" => commands.queue(crate::native_document::open_export),
-                    "document-menu-units" => commands.queue(crate::units_dialog::open_units_dialog),
-                    "document-menu-full-rebuild" => commands.queue(full_rebuild),
-                    // P3D.3: a version of the document as it is.
-                    "document-menu-create-version" => commands.queue(|world: &mut World| crate::linked::open_create_version_dialog(world, crate::linked::VersionTarget::Current)),
-                    "document-menu-rename" => {
-                        // The same as clicking the name.
-                        for e in &q {
-                            commands.trigger(Activate { entity: e });
+            observe(
+                |a: On<Activate>, theme: Res<Theme>, mut commands: Commands| {
+                    open_menu(&mut commands, a.entity, document_menu().build(&theme));
+                },
+            ),
+            observe(
+                |ev: On<MenuAction>,
+                 q: Query<Entity, With<DocumentName>>,
+                 mut commands: Commands| {
+                    match ev.item.as_str() {
+                        "document-menu-export" => {
+                            commands.queue(crate::native_document::open_export)
                         }
+                        "document-menu-units" => {
+                            commands.queue(crate::units_dialog::open_units_dialog)
+                        }
+                        "document-menu-full-rebuild" => commands.queue(full_rebuild),
+                        // P3D.3: a version of the document as it is.
+                        "document-menu-create-version" => commands.queue(|world: &mut World| {
+                            crate::linked::open_create_version_dialog(
+                                world,
+                                crate::linked::VersionTarget::Current,
+                            )
+                        }),
+                        "document-menu-rename" => {
+                            // The same as clicking the name.
+                            for e in &q {
+                                commands.trigger(Activate { entity: e });
+                            }
+                        }
+                        _ => {}
                     }
-                    _ => {}
-                }
-            }),
+                },
+            ),
         ))
         .insert(dark.clone());
         // The document name: click to rename in place.
@@ -543,7 +582,13 @@ fn top_bar(root: &mut ChildSpawnerCommands, t: &Theme, doc_name: &str) {
         }
         // P3G.1 (ER2.2, ER6.2): Create version (see [`crate::linked`]). After the counters, so
         // nothing else in the bar moves.
-        bar.spawn(IconButton::new("document-create-version", "versions").icon_size(18.0).tooltip("Create version").build(t)).insert(dark.clone());
+        bar.spawn(
+            IconButton::new("document-create-version", "versions")
+                .icon_size(18.0)
+                .tooltip("Create version")
+                .build(t),
+        )
+        .insert(dark.clone());
         bar.spawn(Node {
             flex_grow: 1.0,
             ..default()
@@ -564,19 +609,29 @@ fn top_bar(root: &mut ChildSpawnerCommands, t: &Theme, doc_name: &str) {
                     .dropdown_caret()
                     .tooltip("Help")
                     .build(t),
-                observe(|a: On<Activate>, theme: Res<Theme>, mut commands: Commands| {
-                    let menu = Menu::new("help-menu")
-                        .min_width(200.0)
-                        .item(MenuItem::new("help-center", "Help center").icon("help").planned())
-                        .item(
-                            MenuItem::new("help-shortcuts", "Keyboard shortcuts")
-                                .icon("keyboard")
-                                .shortcut("Shift+/"),
-                        )
-                        .separator()
-                        .item(MenuItem::new("help-about", "About cadrs").icon("info").planned());
-                    open_menu(&mut commands, a.entity, menu.build(&theme));
-                }),
+                observe(
+                    |a: On<Activate>, theme: Res<Theme>, mut commands: Commands| {
+                        let menu = Menu::new("help-menu")
+                            .min_width(200.0)
+                            .item(
+                                MenuItem::new("help-center", "Help center")
+                                    .icon("help")
+                                    .planned(),
+                            )
+                            .item(
+                                MenuItem::new("help-shortcuts", "Keyboard shortcuts")
+                                    .icon("keyboard")
+                                    .shortcut("Shift+/"),
+                            )
+                            .separator()
+                            .item(
+                                MenuItem::new("help-about", "About cadrs")
+                                    .icon("info")
+                                    .planned(),
+                            );
+                        open_menu(&mut commands, a.entity, menu.build(&theme));
+                    },
+                ),
                 observe(|ev: On<MenuAction>, mut commands: Commands| {
                     if ev.item == "help-shortcuts" {
                         commands.queue(crate::shortcuts::open_shortcuts);
@@ -591,13 +646,21 @@ fn top_bar(root: &mut ChildSpawnerCommands, t: &Theme, doc_name: &str) {
             });
             // The settings menu (Preferences…). No profile name or avatar: there are no
             // accounts yet (issue #13).
-            r.spawn(Button::new("account").icon("settings").icon_size(20.0).ghost().dropdown_caret().tooltip("Settings").build(t))
-                .insert(dark.clone())
-                .entry::<Node>()
-                .and_modify(|mut n| {
-                    n.padding = UiRect::horizontal(Val::Px(4.0));
-                    n.column_gap = Val::Px(4.0);
-                });
+            r.spawn(
+                Button::new("account")
+                    .icon("settings")
+                    .icon_size(20.0)
+                    .ghost()
+                    .dropdown_caret()
+                    .tooltip("Settings")
+                    .build(t),
+            )
+            .insert(dark.clone())
+            .entry::<Node>()
+            .and_modify(|mut n| {
+                n.padding = UiRect::horizontal(Val::Px(4.0));
+                n.column_gap = Val::Px(4.0);
+            });
         });
     });
 }
@@ -669,23 +732,44 @@ fn right_strip(vp: &mut ChildSpawnerCommands, t: &Theme) {
             ("panel-bom", "bill-of-materials", "Bill of materials", true),
             // P3B.8: Exploded views and Named positions (assemblies only).
             ("panel-exploded-views", "explode", "Exploded views", true),
-            ("panel-named-positions", "named-positions", "Named positions", true),
+            (
+                "panel-named-positions",
+                "named-positions",
+                "Named positions",
+                true,
+            ),
             ("panel-appearance", "appearance", "Appearances", true),
             ("panel-custom-tables", "custom-table", "Custom tables", true),
-            ("panel-configurations", "configurations", "Configurations (not available)", false),
+            (
+                "panel-configurations",
+                "configurations",
+                "Configurations (not available)",
+                false,
+            ),
             // P3I.3: shown once a sheet metal model exists (`crate::sheetmetal_table`).
-            ("panel-sheet-metal", "sheet-metal-table", "Sheet metal table and flat view", true),
+            (
+                "panel-sheet-metal",
+                "sheet-metal-table",
+                "Sheet metal table and flat view",
+                true,
+            ),
             ("panel-variables", "variables", "Variables", true),
             // P3F.5: the Simulation panel (`crate::simulation_ui`; icon-rs has no simulation
             // icon: Thicken's deformed sheet stands in).
             ("panel-simulation", "thicken", "Simulation", true),
         ] {
-            s.spawn(ToolButton::new(name, icon_name).icon_size(18.0).tooltip(tip).disabled(!enabled).build(t))
-                .entry::<Node>()
-                .and_modify(|mut n| {
-                    n.width = Val::Px(28.0);
-                    n.height = Val::Px(30.0);
-                });
+            s.spawn(
+                ToolButton::new(name, icon_name)
+                    .icon_size(18.0)
+                    .tooltip(tip)
+                    .disabled(!enabled)
+                    .build(t),
+            )
+            .entry::<Node>()
+            .and_modify(|mut n| {
+                n.width = Val::Px(28.0);
+                n.height = Val::Px(30.0);
+            });
         }
     });
 }
@@ -712,7 +796,12 @@ fn bottom_right_tools(vp: &mut ChildSpawnerCommands, t: &Theme) {
             ("view-analysis", "constraint-curvature", "Analysis tools"),
             ("view-mass", "mass-properties", "Mass properties"),
         ] {
-            s.spawn(ToolButton::new(name, icon_name).icon_size(18.0).tooltip(tip).build(t));
+            s.spawn(
+                ToolButton::new(name, icon_name)
+                    .icon_size(18.0)
+                    .tooltip(tip)
+                    .build(t),
+            );
         }
     });
 }
@@ -790,7 +879,10 @@ fn tab_bar(root: &mut ChildSpawnerCommands, t: &Theme) {
         // a fade at each end that has more tabs (P3F.3–P3F.4 judge).
         let chevron = |name: &'static str, icon_name: &'static str, tip: &'static str| {
             (
-                IconButton::new(name, icon_name).icon_size(14.0).tooltip(tip).build(t),
+                IconButton::new(name, icon_name)
+                    .icon_size(14.0)
+                    .tooltip(tip)
+                    .build(t),
                 crate::scale_ui::TabStripChevron,
             )
         };
@@ -798,18 +890,31 @@ fn tab_bar(root: &mut ChildSpawnerCommands, t: &Theme) {
         bar.spawn((
             Name::new("tab-folder-nav"),
             crate::tab_folders::TabFolderNav,
-            Node { flex_shrink: 0.0, align_items: AlignItems::Stretch, ..default() },
+            Node {
+                flex_shrink: 0.0,
+                align_items: AlignItems::Stretch,
+                ..default()
+            },
             Pickable::IGNORE,
         ));
-        bar.spawn(chevron("tab-strip-prev", "chevron-left", "Earlier tabs")).insert(dark.clone()).entry::<Node>().and_modify(|mut n| {
-            n.width = Val::Px(20.0);
-            n.height = Val::Auto;
-            n.border_radius = BorderRadius::ZERO;
-            n.display = Display::None;
-        });
+        bar.spawn(chevron("tab-strip-prev", "chevron-left", "Earlier tabs"))
+            .insert(dark.clone())
+            .entry::<Node>()
+            .and_modify(|mut n| {
+                n.width = Val::Px(20.0);
+                n.height = Val::Auto;
+                n.border_radius = BorderRadius::ZERO;
+                n.display = Display::None;
+            });
         bar.spawn((
             Name::new("tab-strip-frame"),
-            Node { flex_grow: 1.0, min_width: Val::Px(0.0), align_items: AlignItems::Stretch, overflow: Overflow::clip(), ..default() },
+            Node {
+                flex_grow: 1.0,
+                min_width: Val::Px(0.0),
+                align_items: AlignItems::Stretch,
+                overflow: Overflow::clip(),
+                ..default()
+            },
             Pickable::IGNORE,
         ))
         .with_children(|f| {
@@ -827,9 +932,16 @@ fn tab_bar(root: &mut ChildSpawnerCommands, t: &Theme) {
                 ScrollPosition::default(),
                 Pickable::IGNORE,
             ));
-            for (name, left) in [("tab-strip-fade-left", true), ("tab-strip-fade-right", false)] {
+            for (name, left) in [
+                ("tab-strip-fade-left", true),
+                ("tab-strip-fade-right", false),
+            ] {
                 let (from, to) = (t.tab_bar, t.tab_bar.with_alpha(0.0));
-                let stops = if left { vec![ColorStop::auto(from), ColorStop::auto(to)] } else { vec![ColorStop::auto(to), ColorStop::auto(from)] };
+                let stops = if left {
+                    vec![ColorStop::auto(from), ColorStop::auto(to)]
+                } else {
+                    vec![ColorStop::auto(to), ColorStop::auto(from)]
+                };
                 f.spawn((
                     Name::new(name),
                     crate::scale_ui::TabStripFade { left },
@@ -848,19 +960,25 @@ fn tab_bar(root: &mut ChildSpawnerCommands, t: &Theme) {
                 ));
             }
         });
-        bar.spawn(chevron("tab-strip-next", "chevron-right", "Later tabs")).insert(dark.clone()).entry::<Node>().and_modify(|mut n| {
-            n.width = Val::Px(20.0);
-            n.height = Val::Auto;
-            n.border_radius = BorderRadius::ZERO;
-            n.display = Display::None;
-        });
+        bar.spawn(chevron("tab-strip-next", "chevron-right", "Later tabs"))
+            .insert(dark.clone())
+            .entry::<Node>()
+            .and_modify(|mut n| {
+                n.width = Val::Px(20.0);
+                n.height = Val::Auto;
+                n.border_radius = BorderRadius::ZERO;
+                n.display = Display::None;
+            });
         // P3E.2 (T1.2): ▾ lists every tab of this level, the hidden ones included.
-        bar.spawn(chevron("tab-overflow", "chevron-down", "All tabs")).insert(dark).entry::<Node>().and_modify(|mut n| {
-            n.width = Val::Px(22.0);
-            n.height = Val::Auto;
-            n.border_radius = BorderRadius::ZERO;
-            n.display = Display::None;
-        });
+        bar.spawn(chevron("tab-overflow", "chevron-down", "All tabs"))
+            .insert(dark)
+            .entry::<Node>()
+            .and_modify(|mut n| {
+                n.width = Val::Px(22.0);
+                n.height = Val::Auto;
+                n.border_radius = BorderRadius::ZERO;
+                n.display = Display::None;
+            });
     });
 }
 
@@ -872,7 +990,11 @@ fn document_menu() -> Menu {
         .min_width(200.0)
         .item(MenuItem::new("document-menu-rename", "Rename document…").icon("edit"))
         .item(MenuItem::new("document-menu-export", "Export document…").icon("file-export"))
-        .item(MenuItem::new("document-menu-copy", "Copy workspace…").icon("copy").planned())
+        .item(
+            MenuItem::new("document-menu-copy", "Copy workspace…")
+                .icon("copy")
+                .planned(),
+        )
         .item(
             MenuItem::new("document-menu-properties", "Properties…")
                 .icon("info")
@@ -882,7 +1004,10 @@ fn document_menu() -> Menu {
         .separator()
         .item(MenuItem::new("document-menu-units", "Workspace units…").icon("measure"))
         .separator()
-        .item(MenuItem::new("document-menu-full-rebuild", "Full rebuild (clear cache)").icon("sync-document"))
+        .item(
+            MenuItem::new("document-menu-full-rebuild", "Full rebuild (clear cache)")
+                .icon("sync-document"),
+        )
         .separator()
         .item(MenuItem::new("document-menu-print", "Print…").planned())
 }
@@ -893,18 +1018,26 @@ fn document_menu() -> Menu {
 /// snapshots, so the open tab is rebuilt from scratch (other tabs when next shown).
 fn full_rebuild(world: &mut World) {
     cadrs_core::rebuild::clear_cache();
-    let stored = world.get_resource::<ActiveDocument>().filter(|d| d.meta.is_some()).map(|d| (d.doc.id, d.active));
+    let stored = world
+        .get_resource::<ActiveDocument>()
+        .filter(|d| d.meta.is_some())
+        .map(|d| (d.doc.id, d.active));
     if let Some((id, active)) = stored {
         let store = world.resource::<crate::DocumentStore>().0.clone();
         match store.load(id) {
             Ok(file) => {
-                let elsewhere = !world.resource::<ActiveDocument>().is_last_saved(&file.document);
+                let elsewhere = !world
+                    .resource::<ActiveDocument>()
+                    .is_last_saved(&file.document);
                 let file = if elsewhere {
                     file
                 } else {
                     let now = world.resource::<crate::AppClock>().now();
                     let user = world.resource::<crate::UserProfile>().id.clone();
-                    if let Err(e) = world.resource_mut::<ActiveDocument>().save_if_changed(&store, now, &user) {
+                    if let Err(e) = world
+                        .resource_mut::<ActiveDocument>()
+                        .save_if_changed(&store, now, &user)
+                    {
                         warn!("cannot save: {e}");
                     }
                     match store.load(id) {
@@ -921,12 +1054,16 @@ fn full_rebuild(world: &mut World) {
                     doc.active = active;
                 }
                 world.insert_resource(doc);
-                world.resource_mut::<crate::linked::LinkStatus>().invalidate();
+                world
+                    .resource_mut::<crate::linked::LinkStatus>()
+                    .invalidate();
             }
             Err(e) => crate::linked::error_toast(world, e.to_string()),
         }
     }
-    world.resource_mut::<crate::parts::PartCache>().rebuild_again();
+    world
+        .resource_mut::<crate::parts::PartCache>()
+        .rebuild_again();
 }
 
 /// `paste`: the name of a tab copied with "Copy to clipboard", offered as "Paste …".
@@ -977,10 +1114,7 @@ fn insert_menu(paste: Option<String>) -> Menu {
         )
         // P3C.1: drawings.
         .item(MenuItem::new("create-drawing", "Create Drawing…").icon("details"))
-        .item(
-            MenuItem::new("create-folder", "Create folder")
-                .icon("folder"),
-        )
+        .item(MenuItem::new("create-folder", "Create folder").icon("folder"))
         .item(
             // P3F.2: STEP and IGES files as new tabs.
             MenuItem::new("import-files", "Import…").icon("file-import"),
@@ -1136,13 +1270,20 @@ fn snapshot_of(doc: &ActiveDocument, view: Option<ElementId>) -> ShellSnapshot {
     let tabs = level
         .iter()
         .filter_map(|n| match n {
-            cadrs_core::tab_tree::TabNode::Tab(id) => doc.doc.element(*id).map(|e| StripEntry::Tab(e.id, e.name.clone(), TabKind::of(&e.kind))),
-            cadrs_core::tab_tree::TabNode::Folder { id, name, .. } => Some(StripEntry::Folder(*id, name.clone(), n.tabs().len())),
+            cadrs_core::tab_tree::TabNode::Tab(id) => doc
+                .doc
+                .element(*id)
+                .map(|e| StripEntry::Tab(e.id, e.name.clone(), TabKind::of(&e.kind))),
+            cadrs_core::tab_tree::TabNode::Folder { id, name, .. } => {
+                Some(StripEntry::Folder(*id, name.clone(), n.tabs().len()))
+            }
         })
         .collect();
     ShellSnapshot {
         tabs,
-        nav: view.map(|f| cadrs_core::tab_tree::folder_path(&layout, f)).unwrap_or_default(),
+        nav: view
+            .map(|f| cadrs_core::tab_tree::folder_path(&layout, f))
+            .unwrap_or_default(),
         active: doc.active_element().map(|e| e.id),
         element: doc
             .active_element()
@@ -1185,7 +1326,10 @@ fn rebuild_tabs(
     );
     // P3E.3a (P3E.2 carried delta): the folder tab that holds the active tab is marked.
     let layout = cadrs_core::tab_tree::layout(&doc.doc);
-    let holds_active = |f: cadrs_core::ElementId| new.active.is_some_and(|a| cadrs_core::tab_tree::tabs_in(&layout, f).contains(&a));
+    let holds_active = |f: cadrs_core::ElementId| {
+        new.active
+            .is_some_and(|a| cadrs_core::tab_tree::tabs_in(&layout, f).contains(&a))
+    };
     commands.entity(strip).with_children(|s| {
         for (entry, node) in new.tabs.iter().zip(names) {
             match entry {
@@ -1217,7 +1361,9 @@ fn rebuild_tabs(
         commands.entity(nav).despawn_children();
         let path = new.nav.clone();
         let t = theme.clone();
-        commands.entity(nav).with_children(|n| crate::tab_folders::spawn_nav(n, &t, &path));
+        commands
+            .entity(nav)
+            .with_children(|n| crate::tab_folders::spawn_nav(n, &t, &path));
     }
 }
 
@@ -1295,7 +1441,9 @@ fn rebuild_element_ui(
                     .with_children(|tb| crate::pcb::toolbar(tb, &t));
             }
             Some((_, TabKind::Render, _)) => {
-                commands.entity(toolbar).with_children(|tb| crate::render_ui::render_toolbar(tb, &t));
+                commands
+                    .entity(toolbar)
+                    .with_children(|tb| crate::render_ui::render_toolbar(tb, &t));
             }
             Some((_, TabKind::PartStudio, true)) => {
                 commands
@@ -1325,7 +1473,9 @@ fn rebuild_element_ui(
             .entity(panel)
             .with_children(|p| crate::pcb::panel(p, &t));
     } else if kind == TabKind::Render {
-        commands.entity(panel).with_children(|p| crate::render_ui::render_panel(p, &t));
+        commands
+            .entity(panel)
+            .with_children(|p| crate::render_ui::render_panel(p, &t));
     } else if kind == TabKind::Assembly {
         commands
             .entity(panel)
@@ -1432,7 +1582,11 @@ fn sync_search_tools(
                 if orig.is_none() {
                     commands.entity(e).try_insert(EnabledColor(base));
                 }
-                let want = if disabled { Color::srgb_u8(0xe4, 0xe4, 0xe4) } else { base };
+                let want = if disabled {
+                    Color::srgb_u8(0xe4, 0xe4, 0xe4)
+                } else {
+                    base
+                };
                 b.set_if_neq(BorderColor::all(want));
             }
         }
@@ -1459,7 +1613,12 @@ pub(crate) fn search_tools(tb: &mut ChildSpawnerCommands, t: &Theme) {
     ))
     .with_children(|s| {
         s.spawn((
-            t.text("Search tools…", t.font_base, FontWeight::MEDIUM, t.tool_foreground),
+            t.text(
+                "Search tools…",
+                t.font_base,
+                FontWeight::MEDIUM,
+                t.tool_foreground,
+            ),
             Node {
                 margin: UiRect::right(Val::Px(2.0)),
                 ..default()
@@ -1503,12 +1662,22 @@ fn part_studio_toolbar(tb: &mut ChildSpawnerCommands, t: &Theme) {
             ("shell", "shell", false, "Shell"),
             ("hole", "hole", false, "Hole"),
             ("thread", "thread", false, "Thread"),
-            ("move-face", "offset", true, "Move face, Delete face, Simplify"),
+            (
+                "move-face",
+                "offset",
+                true,
+                "Move face, Delete face, Simplify",
+            ),
         ],
         &[
             ("pattern", "linear-pattern", true, "Linear pattern"),
             ("mirror", "mirror", false, "Mirror"),
-            ("boolean", "boolean", true, "Boolean (Union, Subtract, Intersect)"),
+            (
+                "boolean",
+                "boolean",
+                true,
+                "Boolean (Union, Subtract, Intersect)",
+            ),
             ("split", "split", true, "Split"),
             ("transform", "transform", true, "Transform"),
             ("composite-part", "composite-part", false, "Composite part"),
@@ -1518,11 +1687,31 @@ fn part_studio_toolbar(tb: &mut ChildSpawnerCommands, t: &Theme) {
         ],
         // P3I.2 (X1): the sheet metal group, where Onshape has it (after the Part Studio's
         // general tools, before custom features).
-        &[("sheet-metal-model", "sheet-metal-model", true, "Sheet metal model")],
-        &[("custom-feature", "custom-feature", false, "Add custom features")],
+        &[(
+            "sheet-metal-model",
+            "sheet-metal-model",
+            true,
+            "Sheet metal model",
+        )],
+        &[(
+            "custom-feature",
+            "custom-feature",
+            false,
+            "Add custom features",
+        )],
         &[
-            ("import", "file-import", false, "Import (a STEP or STL file)"),
-            ("derived", "link", false, "Derived (parts of another Part Studio)"),
+            (
+                "import",
+                "file-import",
+                false,
+                "Import (a STEP or STL file)",
+            ),
+            (
+                "derived",
+                "link",
+                false,
+                "Derived (parts of another Part Studio)",
+            ),
         ],
     ];
     for (i, group) in groups.iter().enumerate() {
@@ -1543,7 +1732,10 @@ fn part_studio_toolbar(tb: &mut ChildSpawnerCommands, t: &Theme) {
             if *name == "revolve" {
                 // P3.4: Revolve works.
                 tb.spawn((
-                    ToolButton::new(*name, *icon_name).dropdown(*dropdown).tooltip(*tip).build(t),
+                    ToolButton::new(*name, *icon_name)
+                        .dropdown(*dropdown)
+                        .tooltip(*tip)
+                        .build(t),
                     observe(|_: On<Activate>, mut commands: Commands| {
                         commands.queue(crate::revolve::begin_revolve);
                     }),
@@ -1553,28 +1745,49 @@ fn part_studio_toolbar(tb: &mut ChildSpawnerCommands, t: &Theme) {
             if *name == "pattern" {
                 // P3.8: Linear, Circular and Curve pattern, from its menu (PS22.1).
                 tb.spawn((
-                    ToolButton::new(*name, *icon_name).dropdown(true).tooltip("Linear, Circular and Curve pattern").build(t),
+                    ToolButton::new(*name, *icon_name)
+                        .dropdown(true)
+                        .tooltip("Linear, Circular and Curve pattern")
+                        .build(t),
                     // The toolbar clips its children: the menu opens at the button's lower left
                     // corner, on its own anchor, which gets the chosen item.
                     observe(
-                        |a: On<Activate>, q: Query<(&ComputedNode, &UiGlobalTransform)>, theme: Res<Theme>, mut commands: Commands| {
+                        |a: On<Activate>,
+                         q: Query<(&ComputedNode, &UiGlobalTransform)>,
+                         theme: Res<Theme>,
+                         mut commands: Commands| {
                             let at = q.get(a.entity).map_or(Vec2::ZERO, |(n, t)| {
                                 let s = n.inverse_scale_factor();
                                 let size = n.size() * s;
                                 t.translation * s + Vec2::new(-size.x / 2.0, size.y / 2.0 + 2.0)
                             });
-                            let anchor = cadrs_ui::menu::open_context_menu(&mut commands, at, pattern_menu().build(&theme));
-                            commands.entity(anchor).observe(|ev: On<MenuAction>, mut commands: Commands| {
-                                let kind = match ev.item.as_str() {
-                                    "pattern-menu-linear" => cadrs_core::pattern::PatternKind::Linear,
-                                    "pattern-menu-circular" => cadrs_core::pattern::PatternKind::Circular,
-                                    "pattern-menu-curve" => cadrs_core::pattern::PatternKind::Curve,
-                                    _ => return,
-                                };
-                                commands.queue(move |world: &mut World| {
-                                    crate::applied::begin(world, crate::applied::AppliedKind::Pattern(kind))
-                                });
-                            });
+                            let anchor = cadrs_ui::menu::open_context_menu(
+                                &mut commands,
+                                at,
+                                pattern_menu().build(&theme),
+                            );
+                            commands.entity(anchor).observe(
+                                |ev: On<MenuAction>, mut commands: Commands| {
+                                    let kind = match ev.item.as_str() {
+                                        "pattern-menu-linear" => {
+                                            cadrs_core::pattern::PatternKind::Linear
+                                        }
+                                        "pattern-menu-circular" => {
+                                            cadrs_core::pattern::PatternKind::Circular
+                                        }
+                                        "pattern-menu-curve" => {
+                                            cadrs_core::pattern::PatternKind::Curve
+                                        }
+                                        _ => return,
+                                    };
+                                    commands.queue(move |world: &mut World| {
+                                        crate::applied::begin(
+                                            world,
+                                            crate::applied::AppliedKind::Pattern(kind),
+                                        )
+                                    });
+                                },
+                            );
                         },
                     ),
                 ));
@@ -1586,27 +1799,41 @@ fn part_studio_toolbar(tb: &mut ChildSpawnerCommands, t: &Theme) {
                 tb.spawn((
                     ToolButton::new(*name, *icon_name).tooltip(*tip).build(t),
                     observe(|_: On<Activate>, mut commands: Commands| {
-                        commands.queue(|world: &mut World| crate::applied::begin(world, crate::applied::AppliedKind::SheetMetal));
+                        commands.queue(|world: &mut World| {
+                            crate::applied::begin(world, crate::applied::AppliedKind::SheetMetal)
+                        });
                     }),
                 ));
                 tb.spawn((
-                    cadrs_ui::IconButton::new("sheet-metal-model-caret", "chevron-down").icon_size(14.0).build(t),
+                    cadrs_ui::IconButton::new("sheet-metal-model-caret", "chevron-down")
+                        .icon_size(14.0)
+                        .build(t),
                     observe(
-                        |a: On<Activate>, q: Query<(&ComputedNode, &UiGlobalTransform)>, theme: Res<Theme>, mut commands: Commands| {
+                        |a: On<Activate>,
+                         q: Query<(&ComputedNode, &UiGlobalTransform)>,
+                         theme: Res<Theme>,
+                         mut commands: Commands| {
                             let at = q.get(a.entity).map_or(Vec2::ZERO, |(n, t)| {
                                 let s = n.inverse_scale_factor();
                                 let size = n.size() * s;
                                 // Under the Sheet metal model button, to its left.
-                                t.translation * s + Vec2::new(-size.x / 2.0 - 32.0, size.y / 2.0 + 2.0)
+                                t.translation * s
+                                    + Vec2::new(-size.x / 2.0 - 32.0, size.y / 2.0 + 2.0)
                             });
-                            let anchor = cadrs_ui::menu::open_context_menu(&mut commands, at, sheet_metal_menu().build(&theme));
+                            let anchor = cadrs_ui::menu::open_context_menu(
+                                &mut commands,
+                                at,
+                                sheet_metal_menu().build(&theme),
+                            );
                             // P3I.4, P3I.5, P3I.9: the built tools start their features.
-                            commands.entity(anchor).observe(|ev: On<MenuAction>, mut commands: Commands| {
-                                let item = ev.item.to_string();
-                                commands.queue(move |world: &mut World| {
-                                    crate::sheetmetal_ui::start_tool(world, &item);
-                                });
-                            });
+                            commands.entity(anchor).observe(
+                                |ev: On<MenuAction>, mut commands: Commands| {
+                                    let item = ev.item.to_string();
+                                    commands.queue(move |world: &mut World| {
+                                        crate::sheetmetal_ui::start_tool(world, &item);
+                                    });
+                                },
+                            );
                         },
                     ),
                 ))
@@ -1621,24 +1848,42 @@ fn part_studio_toolbar(tb: &mut ChildSpawnerCommands, t: &Theme) {
             if *name == "thicken" {
                 // Thicken, and from its menu Fill and Helix (the surfacing and curve tools).
                 tb.spawn((
-                    ToolButton::new(*name, *icon_name).dropdown(true).tooltip("Thicken, Fill, Helix").build(t),
+                    ToolButton::new(*name, *icon_name)
+                        .dropdown(true)
+                        .tooltip("Thicken, Fill, Helix")
+                        .build(t),
                     observe(
-                        |a: On<Activate>, q: Query<(&ComputedNode, &UiGlobalTransform)>, theme: Res<Theme>, mut commands: Commands| {
+                        |a: On<Activate>,
+                         q: Query<(&ComputedNode, &UiGlobalTransform)>,
+                         theme: Res<Theme>,
+                         mut commands: Commands| {
                             let at = q.get(a.entity).map_or(Vec2::ZERO, |(n, t)| {
                                 let s = n.inverse_scale_factor();
                                 let size = n.size() * s;
                                 t.translation * s + Vec2::new(-size.x / 2.0, size.y / 2.0 + 2.0)
                             });
-                            let anchor = cadrs_ui::menu::open_context_menu(&mut commands, at, surfacing_menu().build(&theme));
-                            commands.entity(anchor).observe(|ev: On<MenuAction>, mut commands: Commands| {
-                                let kind = match ev.item.as_str() {
-                                    "surfacing-menu-thicken" => crate::applied::AppliedKind::Thicken,
-                                    "surfacing-menu-fill" => crate::applied::AppliedKind::Fill,
-                                    "surfacing-menu-helix" => crate::applied::AppliedKind::Helix,
-                                    _ => return,
-                                };
-                                commands.queue(move |world: &mut World| crate::applied::begin(world, kind));
-                            });
+                            let anchor = cadrs_ui::menu::open_context_menu(
+                                &mut commands,
+                                at,
+                                surfacing_menu().build(&theme),
+                            );
+                            commands.entity(anchor).observe(
+                                |ev: On<MenuAction>, mut commands: Commands| {
+                                    let kind = match ev.item.as_str() {
+                                        "surfacing-menu-thicken" => {
+                                            crate::applied::AppliedKind::Thicken
+                                        }
+                                        "surfacing-menu-fill" => crate::applied::AppliedKind::Fill,
+                                        "surfacing-menu-helix" => {
+                                            crate::applied::AppliedKind::Helix
+                                        }
+                                        _ => return,
+                                    };
+                                    commands.queue(move |world: &mut World| {
+                                        crate::applied::begin(world, kind)
+                                    });
+                                },
+                            );
                         },
                     ),
                 ));
@@ -1647,25 +1892,44 @@ fn part_studio_toolbar(tb: &mut ChildSpawnerCommands, t: &Theme) {
             if *name == "move-face" {
                 // The direct edits: Move face, and from its menu Delete face and Simplify.
                 tb.spawn((
-                    ToolButton::new(*name, *icon_name).dropdown(true).tooltip(*tip).build(t),
+                    ToolButton::new(*name, *icon_name)
+                        .dropdown(true)
+                        .tooltip(*tip)
+                        .build(t),
                     observe(
-                        |a: On<Activate>, q: Query<(&ComputedNode, &UiGlobalTransform)>, theme: Res<Theme>, mut commands: Commands| {
+                        |a: On<Activate>,
+                         q: Query<(&ComputedNode, &UiGlobalTransform)>,
+                         theme: Res<Theme>,
+                         mut commands: Commands| {
                             let at = q.get(a.entity).map_or(Vec2::ZERO, |(n, t)| {
                                 let s = n.inverse_scale_factor();
                                 let size = n.size() * s;
                                 t.translation * s + Vec2::new(-size.x / 2.0, size.y / 2.0 + 2.0)
                             });
-                            let anchor = cadrs_ui::menu::open_context_menu(&mut commands, at, direct_edit_menu().build(&theme));
-                            commands.entity(anchor).observe(|ev: On<MenuAction>, mut commands: Commands| {
-                                use cadrs_core::direct_edit::DirectEditKind;
-                                let kind = match ev.item.as_str() {
-                                    "direct-edit-menu-move-face" => DirectEditKind::MoveFace,
-                                    "direct-edit-menu-delete-face" => DirectEditKind::DeleteFace,
-                                    "direct-edit-menu-simplify" => DirectEditKind::Simplify,
-                                    _ => return,
-                                };
-                                commands.queue(move |world: &mut World| crate::applied::begin(world, crate::applied::AppliedKind::DirectEdit(kind)));
-                            });
+                            let anchor = cadrs_ui::menu::open_context_menu(
+                                &mut commands,
+                                at,
+                                direct_edit_menu().build(&theme),
+                            );
+                            commands.entity(anchor).observe(
+                                |ev: On<MenuAction>, mut commands: Commands| {
+                                    use cadrs_core::direct_edit::DirectEditKind;
+                                    let kind = match ev.item.as_str() {
+                                        "direct-edit-menu-move-face" => DirectEditKind::MoveFace,
+                                        "direct-edit-menu-delete-face" => {
+                                            DirectEditKind::DeleteFace
+                                        }
+                                        "direct-edit-menu-simplify" => DirectEditKind::Simplify,
+                                        _ => return,
+                                    };
+                                    commands.queue(move |world: &mut World| {
+                                        crate::applied::begin(
+                                            world,
+                                            crate::applied::AppliedKind::DirectEdit(kind),
+                                        )
+                                    });
+                                },
+                            );
                         },
                     ),
                 ));
@@ -1674,7 +1938,10 @@ fn part_studio_toolbar(tb: &mut ChildSpawnerCommands, t: &Theme) {
             if let Some(kind) = crate::applied_dialog::toolbar_kind(name) {
                 // P3.6: Fillet, Chamfer, Shell and Hole.
                 tb.spawn((
-                    ToolButton::new(*name, *icon_name).dropdown(*dropdown).tooltip(*tip).build(t),
+                    ToolButton::new(*name, *icon_name)
+                        .dropdown(*dropdown)
+                        .tooltip(*tip)
+                        .build(t),
                     observe(move |_: On<Activate>, mut commands: Commands| {
                         commands.queue(move |world: &mut World| crate::applied::begin(world, kind));
                     }),
@@ -1719,7 +1986,10 @@ fn part_studio_toolbar(tb: &mut ChildSpawnerCommands, t: &Theme) {
             if *name == "boolean" {
                 // P3.3: the Boolean feature.
                 tb.spawn((
-                    ToolButton::new(*name, *icon_name).dropdown(*dropdown).tooltip(*tip).build(t),
+                    ToolButton::new(*name, *icon_name)
+                        .dropdown(*dropdown)
+                        .tooltip(*tip)
+                        .build(t),
                     observe(|_: On<Activate>, mut commands: Commands| {
                         commands.queue(crate::boolean::begin_boolean);
                     }),
@@ -1762,7 +2032,17 @@ fn direct_edit_menu() -> Menu {
 fn sheet_metal_menu() -> Menu {
     let mut m = Menu::new("sheet-metal-menu").min_width(220.0);
     for (name, label, icon) in crate::sheetmetal_ui::OTHER_TOOLS {
-        m = m.item(MenuItem::new(format!("sheet-metal-menu-{}", name.trim_start_matches("sheet-metal-")), label).icon(icon).disabled(!crate::sheetmetal_ui::tool_built(name)));
+        m = m.item(
+            MenuItem::new(
+                format!(
+                    "sheet-metal-menu-{}",
+                    name.trim_start_matches("sheet-metal-")
+                ),
+                label,
+            )
+            .icon(icon)
+            .disabled(!crate::sheetmetal_ui::tool_built(name)),
+        );
     }
     m
 }
@@ -1808,7 +2088,10 @@ fn assembly_toolbar(tb: &mut ChildSpawnerCommands, t: &Theme) {
             ("mate-width", "mate-width", "Width mate"),
         ],
         // P3F.4 (A1.8): Variable, for mate offsets.
-        &[("relations", "relations", "Relations"), ("asm-variable", "variables", "Variable")],
+        &[
+            ("relations", "relations", "Relations"),
+            ("asm-variable", "variables", "Variable"),
+        ],
         &[
             ("mate-connector", "mate-connector", "Mate connector"),
             ("group", "group", "Group"),
@@ -1825,7 +2108,11 @@ fn assembly_toolbar(tb: &mut ChildSpawnerCommands, t: &Theme) {
             ("measure", "measure", "Measure"),
             ("section-view", "section-view", "Section view"),
             ("display-states", "display-states", "Display states"),
-            ("assembly-properties", "assembly-properties", "Assembly properties"),
+            (
+                "assembly-properties",
+                "assembly-properties",
+                "Assembly properties",
+            ),
             ("assembly-bom", "bill-of-materials", "Bill of materials"),
         ],
     ];
@@ -1837,19 +2124,36 @@ fn assembly_toolbar(tb: &mut ChildSpawnerCommands, t: &Theme) {
             if *name == "display-states" {
                 // P3H.5 (X9): the Display states ▾ menu holds Create Part Studio in context.
                 tb.spawn((
-                    ToolButton::new(*name, *icon_name).dropdown(true).tooltip("Display states, Create Part Studio in context").build(t),
+                    ToolButton::new(*name, *icon_name)
+                        .dropdown(true)
+                        .tooltip("Display states, Create Part Studio in context")
+                        .build(t),
                     observe(
-                        |a: On<Activate>, q: Query<(&ComputedNode, &UiGlobalTransform)>, theme: Res<Theme>, mut commands: Commands| {
+                        |a: On<Activate>,
+                         q: Query<(&ComputedNode, &UiGlobalTransform)>,
+                         theme: Res<Theme>,
+                         mut commands: Commands| {
                             let at = q.get(a.entity).map_or(Vec2::ZERO, |(n, t)| {
                                 let s = n.inverse_scale_factor();
                                 let size = n.size() * s;
                                 t.translation * s + Vec2::new(-size.x / 2.0, size.y / 2.0 + 2.0)
                             });
-                            let anchor = cadrs_ui::menu::open_context_menu(&mut commands, at, crate::assembly::managed_context::display_states_menu().build(&theme));
-                            commands.entity(anchor).observe(|ev: On<MenuAction>, mut commands: Commands| {
-                                let item = ev.item.clone();
-                                commands.queue(move |world: &mut World| crate::assembly::managed_context::on_display_states_item(world, &item));
-                            });
+                            let anchor = cadrs_ui::menu::open_context_menu(
+                                &mut commands,
+                                at,
+                                crate::assembly::managed_context::display_states_menu()
+                                    .build(&theme),
+                            );
+                            commands.entity(anchor).observe(
+                                |ev: On<MenuAction>, mut commands: Commands| {
+                                    let item = ev.item.clone();
+                                    commands.queue(move |world: &mut World| {
+                                        crate::assembly::managed_context::on_display_states_item(
+                                            world, &item,
+                                        )
+                                    });
+                                },
+                            );
                         },
                     ),
                 ));
@@ -1859,7 +2163,18 @@ fn assembly_toolbar(tb: &mut ChildSpawnerCommands, t: &Theme) {
             // `crate::assembly::mate_dialog`); the rest wait for their milestones.
             let on = crate::assembly::mate_dialog::toolbar_type(name).is_some()
                 || crate::assembly::relation_dialog::toolbar_type(name).is_some()
-                || matches!(*name, "group" | "assembly-bom" | "assembly-properties" | "mate-connector" | "replicate" | "named-positions" | "explode" | "relations" | "asm-variable");
+                || matches!(
+                    *name,
+                    "group"
+                        | "assembly-bom"
+                        | "assembly-properties"
+                        | "mate-connector"
+                        | "replicate"
+                        | "named-positions"
+                        | "explode"
+                        | "relations"
+                        | "asm-variable"
+                );
             tb.spawn(
                 ToolButton::new(*name, *icon_name)
                     .disabled(!on)
@@ -1932,7 +2247,11 @@ pub struct FeatureSplit(pub std::collections::HashMap<ElementId, f32>);
 #[derive(Component, Debug, Clone, Copy)]
 struct FeatureSplitter(ElementId);
 
-fn remember_feature_split(ev: On<cadrs_ui::SplitterMoved>, q: Query<&FeatureSplitter>, mut split: ResMut<FeatureSplit>) {
+fn remember_feature_split(
+    ev: On<cadrs_ui::SplitterMoved>,
+    q: Query<&FeatureSplitter>,
+    mut split: ResMut<FeatureSplit>,
+) {
     if let Ok(s) = q.get(ev.entity) {
         split.0.insert(s.0, ev.height);
     }
@@ -1941,157 +2260,181 @@ fn remember_feature_split(ev: On<cadrs_ui::SplitterMoved>, q: Query<&FeatureSpli
 fn feature_list(p: &mut ChildSpawnerCommands, t: &Theme, element: ElementId, height: Option<f32>) {
     // Upper pane: features. Its list scrolls on its own below the filter and the header, as
     // Onshape's does; the divider under it resizes it (kept per tab).
-    let features = p.spawn((
-        Name::new("features-pane"),
-        Node {
-            height: height.map_or(Val::Percent(65.0), Val::Px),
-            flex_shrink: 0.0,
-            flex_direction: FlexDirection::Column,
-            overflow: Overflow::clip(),
-            ..default()
-        },
-    ))
-    .with_children(|pane| {
-        filter_row(pane, t, "feature-filter", "Filter by name or type");
-        pane.spawn((
-            Name::new("features-header"),
-            FeaturesHeader,
+    let features = p
+        .spawn((
+            Name::new("features-pane"),
             Node {
-                height: Val::Px(28.0),
+                height: height.map_or(Val::Percent(65.0), Val::Px),
                 flex_shrink: 0.0,
-                padding: UiRect::new(Val::Px(4.0), Val::Px(12.0), Val::ZERO, Val::ZERO),
-                align_items: AlignItems::Center,
+                flex_direction: FlexDirection::Column,
+                overflow: Overflow::clip(),
                 ..default()
             },
         ))
-        .with_children(|h| {
-            h.spawn((
-                Name::new("features-error"),
-                FeatureErrorIcon,
-                cadrs_ui::icon::icon_in(
-                    "error-filled",
-                    16.0,
-                    t.feature_error,
-                    Node {
-                        // Tight, so "Features (8)" still fits before the header buttons.
-                        margin: UiRect::new(Val::ZERO, Val::Px(3.0), Val::ZERO, Val::ZERO),
-                        display: Display::None,
-                        ..default()
-                    },
-                ),
-                Tooltip::new("A feature has errors: click to select the first one"),
-                Pickable::default(),
-            ));
-            h.spawn((
-                Name::new("features-count"),
-                FeatureCountLabel,
-                t.text("Features (4)", t.font_sm, FontWeight::EXTRA_BOLD, t.foreground),
+        .with_children(|pane| {
+            filter_row(pane, t, "feature-filter", "Filter by name or type");
+            pane.spawn((
+                Name::new("features-header"),
+                FeaturesHeader,
                 Node {
-                    flex_grow: 1.0,
-                    flex_shrink: 1.0,
-                    min_width: Val::Px(0.0),
-                    overflow: Overflow::clip(),
+                    height: Val::Px(28.0),
+                    flex_shrink: 0.0,
+                    padding: UiRect::new(Val::Px(4.0), Val::Px(12.0), Val::ZERO, Val::ZERO),
+                    align_items: AlignItems::Center,
                     ..default()
                 },
-            ));
-            header_button(h, "feature-new-folder", "folder-new", "New folder", t, 0.0);
-            header_button(h, "feature-rollback-pause", "pause", "Pause", t, 4.0);
-            header_button(h, "feature-timer", "stopwatch", "Show regeneration times", t, 4.0);
-        });
-        // P3F.3 (T4.2): the gentle notice past 250 features or 10 parts.
-        crate::scale_ui::notice_row(pane, t);
-        // P3.9: Show dependencies' legend (hidden until used).
-        crate::feature_list::dependency_legend(pane, t);
-        pane.spawn((
-            Name::new("feature-scroll-frame"),
-            Node {
-                flex_grow: 1.0,
-                min_height: Val::Px(0.0),
-                flex_direction: FlexDirection::Column,
-                ..default()
-            },
-        ))
-        .with_children(|frame| {
-        let list = frame.spawn((
-            Name::new("feature-scroll"),
-            bevy::ui_widgets::ScrollArea,
-            cadrs_ui::scrollbar::ScrollGutter(6.0),
-            Node {
-                flex_grow: 1.0,
-                min_height: Val::Px(0.0),
-                flex_direction: FlexDirection::Column,
-                overflow: Overflow::scroll_y(),
-                ..default()
-            },
-        ))
-        .with_children(|scroll| {
-        // The Default geometry tree.
-        scroll.spawn((
-            Name::new("feature-tree"),
-            Node {
-                flex_direction: FlexDirection::Column,
-                flex_shrink: 0.0,
-                ..default()
-            },
-        ))
-        .with_children(|tree| {
-            tree.spawn((
-                TreeItem::new("feature-default-geometry", "Default geometry")
-                    .disclosure(Some(true))
-                    .left(2.0)
-                    .build(t),
-                DefaultGeometryRow,
-            ));
-            tree.spawn((
-                Name::new("default-geometry-children"),
-                DefaultGeometryChildren,
+            ))
+            .with_children(|h| {
+                h.spawn((
+                    Name::new("features-error"),
+                    FeatureErrorIcon,
+                    cadrs_ui::icon::icon_in(
+                        "error-filled",
+                        16.0,
+                        t.feature_error,
+                        Node {
+                            // Tight, so "Features (8)" still fits before the header buttons.
+                            margin: UiRect::new(Val::ZERO, Val::Px(3.0), Val::ZERO, Val::ZERO),
+                            display: Display::None,
+                            ..default()
+                        },
+                    ),
+                    Tooltip::new("A feature has errors: click to select the first one"),
+                    Pickable::default(),
+                ));
+                h.spawn((
+                    Name::new("features-count"),
+                    FeatureCountLabel,
+                    t.text(
+                        "Features (4)",
+                        t.font_sm,
+                        FontWeight::EXTRA_BOLD,
+                        t.foreground,
+                    ),
+                    Node {
+                        flex_grow: 1.0,
+                        flex_shrink: 1.0,
+                        min_width: Val::Px(0.0),
+                        overflow: Overflow::clip(),
+                        ..default()
+                    },
+                ));
+                header_button(h, "feature-new-folder", "folder-new", "New folder", t, 0.0);
+                header_button(h, "feature-rollback-pause", "pause", "Pause", t, 4.0);
+                header_button(
+                    h,
+                    "feature-timer",
+                    "stopwatch",
+                    "Show regeneration times",
+                    t,
+                    4.0,
+                );
+            });
+            // P3F.3 (T4.2): the gentle notice past 250 features or 10 parts.
+            crate::scale_ui::notice_row(pane, t);
+            // P3.9: Show dependencies' legend (hidden until used).
+            crate::feature_list::dependency_legend(pane, t);
+            pane.spawn((
+                Name::new("feature-scroll-frame"),
                 Node {
+                    flex_grow: 1.0,
+                    min_height: Val::Px(0.0),
                     flex_direction: FlexDirection::Column,
                     ..default()
                 },
             ))
-            .with_children(|c| {
-                c.spawn(tree_guide(t, 9.0, 0.0, 94.0));
-                c.spawn(tree_guide_tick(t));
-                c.spawn((
-                    TreeItem::new("feature-origin", "Origin")
-                        // A 7 px ring with a filled centre (`screens/05c`).
-                        .icon("origin", 12.0)
-                        .icon_color(Color::srgb_u8(0x44, 0x44, 0x44))
-                        .left(22.0)
-                        .build(t),
-                    PickRow(Pick::Origin),
+            .with_children(|frame| {
+                let list = frame
+                    .spawn((
+                        Name::new("feature-scroll"),
+                        bevy::ui_widgets::ScrollArea,
+                        cadrs_ui::scrollbar::ScrollGutter(6.0),
+                        Node {
+                            flex_grow: 1.0,
+                            min_height: Val::Px(0.0),
+                            flex_direction: FlexDirection::Column,
+                            overflow: Overflow::scroll_y(),
+                            ..default()
+                        },
+                    ))
+                    .with_children(|scroll| {
+                        // The Default geometry tree.
+                        scroll
+                            .spawn((
+                                Name::new("feature-tree"),
+                                Node {
+                                    flex_direction: FlexDirection::Column,
+                                    flex_shrink: 0.0,
+                                    ..default()
+                                },
+                            ))
+                            .with_children(|tree| {
+                                tree.spawn((
+                                    TreeItem::new("feature-default-geometry", "Default geometry")
+                                        .disclosure(Some(true))
+                                        .left(2.0)
+                                        .build(t),
+                                    DefaultGeometryRow,
+                                ));
+                                tree.spawn((
+                                    Name::new("default-geometry-children"),
+                                    DefaultGeometryChildren,
+                                    Node {
+                                        flex_direction: FlexDirection::Column,
+                                        ..default()
+                                    },
+                                ))
+                                .with_children(|c| {
+                                    c.spawn(tree_guide(t, 9.0, 0.0, 94.0));
+                                    c.spawn(tree_guide_tick(t));
+                                    c.spawn((
+                                        TreeItem::new("feature-origin", "Origin")
+                                            // A 7 px ring with a filled centre (`screens/05c`).
+                                            .icon("origin", 12.0)
+                                            .icon_color(Color::srgb_u8(0x44, 0x44, 0x44))
+                                            .left(22.0)
+                                            .build(t),
+                                        PickRow(Pick::Origin),
+                                    ));
+                                    for k in PlaneKind::ALL {
+                                        let lower = k.name().to_lowercase();
+                                        c.spawn((
+                                            TreeItem::new(format!("feature-{lower}"), k.name())
+                                                .icon("plane", 16.0)
+                                                .left(22.0)
+                                                // Show/hide this plane (S1.4); the eye shows on hover.
+                                                .toggle(
+                                                    format!("feature-{lower}-visibility"),
+                                                    "visible",
+                                                    "hidden",
+                                                    true,
+                                                )
+                                                .build(t),
+                                            PickRow(Pick::Plane(k)),
+                                        ));
+                                    }
+                                });
+                                // The Part Studio's features (sketches), rebuilt by `rebuild_feature_rows`.
+                                tree.spawn((
+                                    Name::new("feature-rows"),
+                                    FeatureRows,
+                                    Node {
+                                        flex_direction: FlexDirection::Column,
+                                        ..default()
+                                    },
+                                ));
+                                // The rollback bar is one of the feature rows (P3.9: it can be dragged between them).
+                            });
+                    })
+                    .id();
+                frame.spawn(cadrs_ui::vertical_scrollbar(
+                    t,
+                    "feature-list-scrollbar",
+                    list,
                 ));
-                for k in PlaneKind::ALL {
-                    let lower = k.name().to_lowercase();
-                    c.spawn((
-                        TreeItem::new(format!("feature-{lower}"), k.name())
-                            .icon("plane", 16.0)
-                            .left(22.0)
-                            // Show/hide this plane (S1.4); the eye shows on hover.
-                            .toggle(format!("feature-{lower}-visibility"), "visible", "hidden", true)
-                            .build(t),
-                        PickRow(Pick::Plane(k)),
-                    ));
-                }
             });
-            // The Part Studio's features (sketches), rebuilt by `rebuild_feature_rows`.
-            tree.spawn((
-                Name::new("feature-rows"),
-                FeatureRows,
-                Node {
-                    flex_direction: FlexDirection::Column,
-                    ..default()
-                },
-            ));
-            // The rollback bar is one of the feature rows (P3.9: it can be dragged between them).
-        });
         })
         .id();
-        frame.spawn(cadrs_ui::vertical_scrollbar(t, "feature-list-scrollbar", list));
-        });
-    })
-    .id();
     p.spawn((
         cadrs_ui::horizontal_splitter(t, "features-splitter", features, 120.0, 60.0),
         FeatureSplitter(element),
@@ -2123,7 +2466,11 @@ fn feature_list(p: &mut ChildSpawnerCommands, t: &Theme, element: ElementId, hei
                 },
             ))
             .id();
-        pane.spawn(cadrs_ui::vertical_scrollbar(t, "parts-list-scrollbar", list));
+        pane.spawn(cadrs_ui::vertical_scrollbar(
+            t,
+            "parts-list-scrollbar",
+            list,
+        ));
     });
 }
 
@@ -2161,137 +2508,177 @@ fn instance_list(p: &mut ChildSpawnerCommands, t: &Theme, assembly_name: &str) {
         },
     ))
     .with_children(|frame| {
-    let list = frame.spawn((
-        Name::new("instances-pane"),
-        bevy::ui_widgets::ScrollArea,
-        cadrs_ui::scrollbar::ScrollGutter(6.0),
-        Node {
-            flex_grow: 1.0,
-            flex_direction: FlexDirection::Column,
-            // A long assembly's lists scroll (Ex2 has 17 instances and 14 mates).
-            min_height: Val::Px(0.0),
-            overflow: Overflow::scroll_y(),
-            ..default()
-        },
-    ))
-    .with_children(|pane| {
-        pane.spawn(Node {
-            height: Val::Px(34.0),
-            flex_shrink: 0.0,
-            padding: UiRect::new(Val::Px(7.0), Val::Px(6.0), Val::Px(4.0), Val::ZERO),
-            align_items: AlignItems::Center,
-            column_gap: Val::Px(6.0),
-            ..default()
-        })
-        .with_children(|r| {
-            r.spawn((icon("filter", 18.0, t.tool_foreground), Pickable::IGNORE));
-            r.spawn(
-                TextInput::new("instance-filter")
-                    .placeholder("Filter by name")
-                    .height(28.0)
-                    .width(Val::Px(118.0))
-                    .build(t),
-            );
-            r.spawn(
-                ToolButton::new("instance-list-view", "list")
-                    .icon_size(18.0)
-                    .selected(true)
-                    .tooltip("List view")
-                    .build(t),
-            );
-        });
-        pane.spawn((
-            Name::new("instances-header"),
-            Node {
-                height: Val::Px(28.0),
-                flex_shrink: 0.0,
-                padding: UiRect::new(Val::Px(4.0), Val::Px(12.0), Val::ZERO, Val::ZERO),
-                align_items: AlignItems::Center,
-                ..default()
-            },
-        ))
-        .with_children(|h| {
-            h.spawn((
-                t.text("Instances (0)", t.font_base, FontWeight::BOLD, t.foreground),
+        let list = frame
+            .spawn((
+                Name::new("instances-pane"),
+                bevy::ui_widgets::ScrollArea,
+                cadrs_ui::scrollbar::ScrollGutter(6.0),
                 Node {
                     flex_grow: 1.0,
+                    flex_direction: FlexDirection::Column,
+                    // A long assembly's lists scroll (Ex2 has 17 instances and 14 mates).
+                    min_height: Val::Px(0.0),
+                    overflow: Overflow::scroll_y(),
                     ..default()
                 },
-                crate::assembly::list::InstanceCount,
-            ));
-            header_button(h, "instance-new-folder", "folder-new", "New folder", t, 0.0);
-        });
-        // P3B.1: the root row selects the whole assembly (Mass properties measures it).
-        pane.spawn((
-            TreeItem::new("instance-root", assembly_name)
-                .icon("assembly", 16.0)
-                .icon_color(t.tool_foreground)
-                .left(4.0)
-                .build(t),
-            PickRow(Pick::Assembly),
-            crate::assembly::list::RootRow,
-        ));
-        pane.spawn((
-            TreeItem::new("instance-origin", "Origin")
-                .icon("origin", 12.0)
-                .muted(true)
-                .left(22.0)
-                .build(t),
-            PickRow(Pick::Origin),
-        ));
-        // The instances' rows (P3B.1, `crate::assembly::list`).
-        pane.spawn((
-            Name::new("instance-rows"),
-            crate::assembly::list::InstanceRows,
-            Node {
-                flex_direction: FlexDirection::Column,
-                ..default()
-            },
-        ));
-        // P3B.8 (A1.7): the Items group, with its + and rows (`crate::assembly::items`).
-        pane.spawn((TreeItem::new("assembly-items", "Items (0)").disclosure(Some(true)).left(2.0).build(t), crate::assembly::items::ItemsHeader, ContextMenuTarget))
-            .with_children(|h| {
-                h.spawn(Node { flex_grow: 1.0, ..default() });
-                h.spawn(IconButton::new("assembly-items-add", "plus").tooltip("Add item").build(t)).entry::<Node>().and_modify(|mut n| {
-                    n.width = Val::Px(18.0);
-                    n.height = Val::Px(18.0);
-                    n.margin.right = Val::Px(8.0);
+            ))
+            .with_children(|pane| {
+                pane.spawn(Node {
+                    height: Val::Px(34.0),
+                    flex_shrink: 0.0,
+                    padding: UiRect::new(Val::Px(7.0), Val::Px(6.0), Val::Px(4.0), Val::ZERO),
+                    align_items: AlignItems::Center,
+                    column_gap: Val::Px(6.0),
+                    ..default()
+                })
+                .with_children(|r| {
+                    r.spawn((icon("filter", 18.0, t.tool_foreground), Pickable::IGNORE));
+                    r.spawn(
+                        TextInput::new("instance-filter")
+                            .placeholder("Filter by name")
+                            .height(28.0)
+                            .width(Val::Px(118.0))
+                            .build(t),
+                    );
+                    r.spawn(
+                        ToolButton::new("instance-list-view", "list")
+                            .icon_size(18.0)
+                            .selected(true)
+                            .tooltip("List view")
+                            .build(t),
+                    );
                 });
-            });
-        pane.spawn((Name::new("item-rows"), crate::assembly::items::ItemRows, Node { flex_direction: FlexDirection::Column, ..default() }));
-        // P3F.5 (A1.7): the simulation's loads (`crate::simulation_ui`).
-        pane.spawn((TreeItem::new("assembly-loads", "Loads (0)").disclosure(Some(true)).left(2.0).build(t), crate::simulation_ui::LoadsHeader));
-        pane.spawn((Name::new("load-rows"), crate::simulation_ui::LoadRows, Node { flex_direction: FlexDirection::Column, ..default() }));
-        // P3B.2: the mates and groups (`crate::assembly::mates_list`).
-        pane.spawn((
-            TreeItem::new("mate-features", "Mate Features (0)").disclosure(Some(true)).left(2.0).build(t),
-            crate::assembly::mates_list::MateFeaturesHeader,
-        ));
-        pane.spawn((
-            Name::new("mate-rows"),
-            crate::assembly::mates_list::MateRows,
-            Node {
-                flex_direction: FlexDirection::Column,
-                ..default()
-            },
-        ));
-        pane.spawn((
-            crate::assembly::list::EmptyHint,
-            Name::new("assembly-empty-hint"),
-            t.text(
-                "Insert parts to start (I)",
-                t.font_base,
-                FontWeight::NORMAL,
-                t.subtle_foreground,
-            ),
-            Node {
-                margin: UiRect::new(Val::Px(8.0), Val::ZERO, Val::Px(10.0), Val::ZERO),
-                ..default()
-            },
-        ));
-    })
-    .id();
-    frame.spawn(cadrs_ui::vertical_scrollbar(t, "instances-scrollbar", list));
+                pane.spawn((
+                    Name::new("instances-header"),
+                    Node {
+                        height: Val::Px(28.0),
+                        flex_shrink: 0.0,
+                        padding: UiRect::new(Val::Px(4.0), Val::Px(12.0), Val::ZERO, Val::ZERO),
+                        align_items: AlignItems::Center,
+                        ..default()
+                    },
+                ))
+                .with_children(|h| {
+                    h.spawn((
+                        t.text("Instances (0)", t.font_base, FontWeight::BOLD, t.foreground),
+                        Node {
+                            flex_grow: 1.0,
+                            ..default()
+                        },
+                        crate::assembly::list::InstanceCount,
+                    ));
+                    header_button(h, "instance-new-folder", "folder-new", "New folder", t, 0.0);
+                });
+                // P3B.1: the root row selects the whole assembly (Mass properties measures it).
+                pane.spawn((
+                    TreeItem::new("instance-root", assembly_name)
+                        .icon("assembly", 16.0)
+                        .icon_color(t.tool_foreground)
+                        .left(4.0)
+                        .build(t),
+                    PickRow(Pick::Assembly),
+                    crate::assembly::list::RootRow,
+                ));
+                pane.spawn((
+                    TreeItem::new("instance-origin", "Origin")
+                        .icon("origin", 12.0)
+                        .muted(true)
+                        .left(22.0)
+                        .build(t),
+                    PickRow(Pick::Origin),
+                ));
+                // The instances' rows (P3B.1, `crate::assembly::list`).
+                pane.spawn((
+                    Name::new("instance-rows"),
+                    crate::assembly::list::InstanceRows,
+                    Node {
+                        flex_direction: FlexDirection::Column,
+                        ..default()
+                    },
+                ));
+                // P3B.8 (A1.7): the Items group, with its + and rows (`crate::assembly::items`).
+                pane.spawn((
+                    TreeItem::new("assembly-items", "Items (0)")
+                        .disclosure(Some(true))
+                        .left(2.0)
+                        .build(t),
+                    crate::assembly::items::ItemsHeader,
+                    ContextMenuTarget,
+                ))
+                .with_children(|h| {
+                    h.spawn(Node {
+                        flex_grow: 1.0,
+                        ..default()
+                    });
+                    h.spawn(
+                        IconButton::new("assembly-items-add", "plus")
+                            .tooltip("Add item")
+                            .build(t),
+                    )
+                    .entry::<Node>()
+                    .and_modify(|mut n| {
+                        n.width = Val::Px(18.0);
+                        n.height = Val::Px(18.0);
+                        n.margin.right = Val::Px(8.0);
+                    });
+                });
+                pane.spawn((
+                    Name::new("item-rows"),
+                    crate::assembly::items::ItemRows,
+                    Node {
+                        flex_direction: FlexDirection::Column,
+                        ..default()
+                    },
+                ));
+                // P3F.5 (A1.7): the simulation's loads (`crate::simulation_ui`).
+                pane.spawn((
+                    TreeItem::new("assembly-loads", "Loads (0)")
+                        .disclosure(Some(true))
+                        .left(2.0)
+                        .build(t),
+                    crate::simulation_ui::LoadsHeader,
+                ));
+                pane.spawn((
+                    Name::new("load-rows"),
+                    crate::simulation_ui::LoadRows,
+                    Node {
+                        flex_direction: FlexDirection::Column,
+                        ..default()
+                    },
+                ));
+                // P3B.2: the mates and groups (`crate::assembly::mates_list`).
+                pane.spawn((
+                    TreeItem::new("mate-features", "Mate Features (0)")
+                        .disclosure(Some(true))
+                        .left(2.0)
+                        .build(t),
+                    crate::assembly::mates_list::MateFeaturesHeader,
+                ));
+                pane.spawn((
+                    Name::new("mate-rows"),
+                    crate::assembly::mates_list::MateRows,
+                    Node {
+                        flex_direction: FlexDirection::Column,
+                        ..default()
+                    },
+                ));
+                pane.spawn((
+                    crate::assembly::list::EmptyHint,
+                    Name::new("assembly-empty-hint"),
+                    t.text(
+                        "Insert parts to start (I)",
+                        t.font_base,
+                        FontWeight::NORMAL,
+                        t.subtle_foreground,
+                    ),
+                    Node {
+                        margin: UiRect::new(Val::Px(8.0), Val::ZERO, Val::Px(10.0), Val::ZERO),
+                        ..default()
+                    },
+                ));
+            })
+            .id();
+        frame.spawn(cadrs_ui::vertical_scrollbar(t, "instances-scrollbar", list));
     });
 }
 
@@ -2350,11 +2737,7 @@ fn auto_save(
     }
 }
 
-fn on_tab_activate(
-    a: On<Activate>,
-    q: Query<&TabButton>,
-    doc: Option<ResMut<ActiveDocument>>,
-) {
+fn on_tab_activate(a: On<Activate>, q: Query<&TabButton>, doc: Option<ResMut<ActiveDocument>>) {
     if let (Ok(tab), Some(mut doc)) = (q.get(a.entity), doc)
         && doc.active != Some(tab.0)
     {
@@ -2408,12 +2791,19 @@ fn on_tab_context_menu(
     // An Assembly tab's menu has the icon column (Delete, Create Drawing) and "Create task…"
     // as `ex3-step13.png` shows it (P3B.4 judge).
     let is_assembly = el.is_some_and(|e| e.assembly_model().is_some());
-    let mut menu = Menu::new("tab-context-menu").side(PopoverSide::Top).min_width(176.0).item_height(20.0);
+    let mut menu = Menu::new("tab-context-menu")
+        .side(PopoverSide::Top)
+        .min_width(176.0)
+        .item_height(20.0);
     if !is_assembly {
         menu = menu.text_only();
     }
     let mut menu = menu
-        .item(MenuItem::new("tab-delete", "Delete").icon("remove-circle").disabled(only_tab))
+        .item(
+            MenuItem::new("tab-delete", "Delete")
+                .icon("remove-circle")
+                .disabled(only_tab),
+        )
         .separator()
         .item(MenuItem::new("tab-open-new", "Open in new window").planned())
         .item(MenuItem::new("tab-rename", "Rename…"))
@@ -2435,27 +2825,56 @@ fn on_tab_context_menu(
         .separator()
         .item(MenuItem::new("tab-move", "Move to document…"))
         // P3E.2 (TD5.3): into a tab folder, out to the top level, or a new folder.
-        .item(MenuItem::new("tab-move-folder", "Move to folder").icon("move-to-folder").submenu(crate::tab_folders::move_to_folder_entries(&doc.doc, tab.0)));
+        .item(
+            MenuItem::new("tab-move-folder", "Move to folder")
+                .icon("move-to-folder")
+                .submenu(crate::tab_folders::move_to_folder_entries(&doc.doc, tab.0)),
+        );
     // P3G.2: a tab's references (ER2.6, ER5.6) and a drawing's Change to version… (D2.10).
     let (has_links, has_sources) = if is_assembly || is_drawing {
         (
-            cadrs_core::link_update::uses(&doc.doc).iter().any(|u| u.site.tab() == tab.0),
-            is_drawing && !cadrs_core::link_update::workspace_uses(&doc.doc, Some(tab.0)).is_empty(),
+            cadrs_core::link_update::uses(&doc.doc)
+                .iter()
+                .any(|u| u.site.tab() == tab.0),
+            is_drawing
+                && !cadrs_core::link_update::workspace_uses(&doc.doc, Some(tab.0)).is_empty(),
         )
     } else {
         (false, false)
     };
     let mut menu = menu;
     if has_links {
-        menu = menu.item(MenuItem::new("tab-update-linked", "Update linked document…").icon("link"));
+        menu =
+            menu.item(MenuItem::new("tab-update-linked", "Update linked document…").icon("link"));
         // P3G.3 (DV1.9): the tab's linked documents, opened read-only at their versions.
         let sources = crate::linked_session::tab_sources(&doc.doc, tab.0);
         match sources.len() {
             0 => {}
-            1 => menu = menu.item(MenuItem::new("tab-open-linked", format!("Open linked document ({})", sources[0].0)).icon("open-external")),
+            1 => {
+                menu = menu.item(
+                    MenuItem::new(
+                        "tab-open-linked",
+                        format!("Open linked document ({})", sources[0].0),
+                    )
+                    .icon("open-external"),
+                )
+            }
             _ => {
-                let items = sources.iter().enumerate().map(|(k, (label, _))| cadrs_ui::menu::MenuEntry::Item(MenuItem::new(format!("tab-open-linked-{}", k + 1), label.clone()))).collect();
-                menu = menu.item(MenuItem::new("tab-open-linked-menu", "Open linked document").icon("open-external").submenu(items));
+                let items = sources
+                    .iter()
+                    .enumerate()
+                    .map(|(k, (label, _))| {
+                        cadrs_ui::menu::MenuEntry::Item(MenuItem::new(
+                            format!("tab-open-linked-{}", k + 1),
+                            label.clone(),
+                        ))
+                    })
+                    .collect();
+                menu = menu.item(
+                    MenuItem::new("tab-open-linked-menu", "Open linked document")
+                        .icon("open-external")
+                        .submenu(items),
+                );
             }
         }
     }
@@ -2464,9 +2883,17 @@ fn on_tab_context_menu(
     }
     let menu = menu
         // P3F.2: a Part Studio's parts, an assembly's instances, a drawing's sheets.
-        .item(MenuItem::new("tab-export", "Export…").icon("file-export").disabled(is_render))
+        .item(
+            MenuItem::new("tab-export", "Export…")
+                .icon("file-export")
+                .disabled(is_render),
+        )
         // P3F.6 (P3.7): the tab's view as a PNG or JPEG.
-        .item(MenuItem::new("tab-export-image", "Export image…").icon("image").disabled(is_drawing || is_render))
+        .item(
+            MenuItem::new("tab-export-image", "Export image…")
+                .icon("image")
+                .disabled(is_drawing || is_render),
+        )
         .item(if is_assembly {
             MenuItem::new("tab-create-task", "Create task…").planned()
         } else {
@@ -2516,7 +2943,10 @@ fn on_tab_menu_action(
         "tab-duplicate" => {
             let new = ElementId::new();
             if doc
-                .execute(&DuplicateElement { source: id, id: new })
+                .execute(&DuplicateElement {
+                    source: id,
+                    id: new,
+                })
                 .is_ok()
             {
                 doc.set_active(new);
@@ -2532,7 +2962,9 @@ fn on_tab_menu_action(
             show_toast(&mut commands, &theme, text);
         }
         "tab-export" if matches!(el.kind, cadrs_core::ElementKind::Drawing(_)) => {
-            commands.queue(move |w: &mut World| crate::drawing::export_dialog::open_drawing_export(w, id));
+            commands.queue(move |w: &mut World| {
+                crate::drawing::export_dialog::open_drawing_export(w, id)
+            });
         }
         // P3F.2: the tab's parts or instances, once its parts are built.
         "tab-export" => {
@@ -2543,8 +2975,11 @@ fn on_tab_menu_action(
             doc.set_active(id);
             commands.queue(|w: &mut World| crate::export_image::open(w, None));
         }
-        "tab-update-linked" => commands.queue(move |w: &mut World| crate::reference_manager::open_for_tab(w, id, false)),
-        "tab-move" => commands.queue(move |w: &mut World| crate::move_document::open_for_tab(w, id)),
+        "tab-update-linked" => commands
+            .queue(move |w: &mut World| crate::reference_manager::open_for_tab(w, id, false)),
+        "tab-move" => {
+            commands.queue(move |w: &mut World| crate::move_document::open_for_tab(w, id))
+        }
         x if x.starts_with("tab-to-") => {
             let x = x.to_string();
             commands.queue(move |w: &mut World| {
@@ -2552,15 +2987,21 @@ fn on_tab_menu_action(
             });
         }
         x if x == "tab-open-linked" || x.starts_with("tab-open-linked-") => {
-            let k = x.strip_prefix("tab-open-linked-").and_then(|k| k.parse::<usize>().ok()).unwrap_or(1);
+            let k = x
+                .strip_prefix("tab-open-linked-")
+                .and_then(|k| k.parse::<usize>().ok())
+                .unwrap_or(1);
             commands.queue(move |w: &mut World| {
-                let sources = crate::linked_session::tab_sources(&w.resource::<ActiveDocument>().doc, id);
+                let sources =
+                    crate::linked_session::tab_sources(&w.resource::<ActiveDocument>().doc, id);
                 if let Some((_, u)) = sources.get(k - 1) {
                     crate::linked_session::open_use(w, *u);
                 }
             });
         }
-        "tab-change-version" => commands.queue(move |w: &mut World| crate::reference_manager::open_for_tab(w, id, true)),
+        "tab-change-version" => {
+            commands.queue(move |w: &mut World| crate::reference_manager::open_for_tab(w, id, true))
+        }
         "tab-create-drawing" => {
             let r = crate::drawing::create_dialog::reference_to(id);
             commands.queue(move |w: &mut World| {
@@ -2578,14 +3019,16 @@ fn deleted_toast(world: &mut World) {
     let mut commands = world.commands();
     let toast = cadrs_ui::show_toast_for(&mut commands, &theme, "Tab deleted.", 3.0);
     let undo = cadrs_ui::toast_action(&mut commands, &theme, toast, "toast-undo", "Undo");
-    commands.entity(undo).insert(observe(|_: On<Activate>, mut commands: Commands| {
-        commands.queue(|world: &mut World| {
-            if let Some(mut d) = world.get_resource_mut::<ActiveDocument>() {
-                d.undo();
-            }
-            cadrs_ui::close_toasts(world);
-        });
-    }));
+    commands
+        .entity(undo)
+        .insert(observe(|_: On<Activate>, mut commands: Commands| {
+            commands.queue(|world: &mut World| {
+                if let Some(mut d) = world.get_resource_mut::<ActiveDocument>() {
+                    d.undo();
+                }
+                cadrs_ui::close_toasts(world);
+            });
+        }));
     world.flush();
 }
 
@@ -2642,7 +3085,9 @@ fn open_properties_dialog(
                     }),
                 ));
                 f.spawn((
-                    Button::new("tab-properties-cancel").label("Cancel").build(t),
+                    Button::new("tab-properties-cancel")
+                        .label("Cancel")
+                        .build(t),
                     observe(
                         |_: On<Activate>,
                          q: Query<Entity, With<PropertiesDialog>>,
@@ -2702,9 +3147,12 @@ fn on_insert_menu_action(
         "create-part-studio" => NewElementKind::PartStudio,
         "create-assembly" => NewElementKind::Assembly,
         "create-pcb-studio" => NewElementKind::PcbStudio,
-        "create-render-studio" => NewElementKind::RenderStudio(crate::render_ui::default_source(&doc)),
+        "create-render-studio" => {
+            NewElementKind::RenderStudio(crate::render_ui::default_source(&doc))
+        }
         "create-drawing" => {
-            commands.queue(|w: &mut World| crate::drawing::create_dialog::open_create_drawing(w, None));
+            commands
+                .queue(|w: &mut World| crate::drawing::create_dialog::open_create_drawing(w, None));
             return;
         }
         // P3E.2 (TD5.3): a new folder in the tab bar's level, named in place.
@@ -2713,7 +3161,9 @@ fn on_insert_menu_action(
             return;
         }
         "import-files" => {
-            commands.queue(|w: &mut World| crate::import_file::start(w, crate::import_file::ImportTarget::ActiveDocument));
+            commands.queue(|w: &mut World| {
+                crate::import_file::start(w, crate::import_file::ImportTarget::ActiveDocument)
+            });
             return;
         }
         "paste-tab" => {
@@ -2856,25 +3306,63 @@ fn on_pick_row_activate(
         if secondary && matches!(row.0, Pick::Feature(_)) {
             selection.0.retain(|p| !matches!(p, Pick::Feature(_)));
         }
-        if !secondary && let Some(doc) = doc.as_ref() && let Some(element) = doc.active {
+        if !secondary
+            && let Some(doc) = doc.as_ref()
+            && let Some(element) = doc.active
+        {
             // Instance rows are direct children in displayed order. Folder headers, mate
             // connectors and other non-pickable rows are deliberately skipped.
-            if let Some((container, children)) = instance_lists.iter().find(|(_, children)| children.contains(&a.entity)) {
-                let order: Vec<Pick> = children.iter().filter_map(|e| q.get(e).ok().map(|r| r.0)).collect();
+            if let Some((container, children)) = instance_lists
+                .iter()
+                .find(|(_, children)| children.contains(&a.entity))
+            {
+                let order: Vec<Pick> = children
+                    .iter()
+                    .filter_map(|e| q.get(e).ok().map(|r| r.0))
+                    .collect();
                 let shift = keys.any_pressed([KeyCode::ShiftLeft, KeyCode::ShiftRight]);
-                let additive = keys.any_pressed([KeyCode::ControlLeft, KeyCode::ControlRight, KeyCode::SuperLeft, KeyCode::SuperRight]);
-                let how = instance_anchor.select((doc.doc.id, element, container), &order, row.0, &selection, shift, additive);
+                let additive = keys.any_pressed([
+                    KeyCode::ControlLeft,
+                    KeyCode::ControlRight,
+                    KeyCode::SuperLeft,
+                    KeyCode::SuperRight,
+                ]);
+                let how = instance_anchor.select(
+                    (doc.doc.id, element, container),
+                    &order,
+                    row.0,
+                    &selection,
+                    shift,
+                    additive,
+                );
                 row_click.pending = Some((row.0, how));
             }
         }
         if let (Pick::Feature(id), false) = (row.0, secondary) {
             let shift = keys.any_pressed([KeyCode::ShiftLeft, KeyCode::ShiftRight]);
-            let ctrl = keys.any_pressed([KeyCode::ControlLeft, KeyCode::ControlRight, KeyCode::SuperLeft, KeyCode::SuperRight]);
+            let ctrl = keys.any_pressed([
+                KeyCode::ControlLeft,
+                KeyCode::ControlRight,
+                KeyCode::SuperLeft,
+                KeyCode::SuperRight,
+            ]);
             let how = match (shift, row_click.anchor) {
                 (true, Some(Pick::Feature(from))) => {
-                    let order: Vec<FeatureId> = doc.as_ref().and_then(|d| d.active_element()).map(|el| el.features().iter().map(|f| f.id).collect()).unwrap_or_default();
-                    match (order.iter().position(|f| *f == from), order.iter().position(|f| *f == id)) {
-                        (Some(a), Some(b)) => crate::viewport::RowSelect::Range(order[a.min(b)..=a.max(b)].iter().map(|f| Pick::Feature(*f)).collect()),
+                    let order: Vec<FeatureId> = doc
+                        .as_ref()
+                        .and_then(|d| d.active_element())
+                        .map(|el| el.features().iter().map(|f| f.id).collect())
+                        .unwrap_or_default();
+                    match (
+                        order.iter().position(|f| *f == from),
+                        order.iter().position(|f| *f == id),
+                    ) {
+                        (Some(a), Some(b)) => crate::viewport::RowSelect::Range(
+                            order[a.min(b)..=a.max(b)]
+                                .iter()
+                                .map(|f| Pick::Feature(*f))
+                                .collect(),
+                        ),
                         _ => crate::viewport::RowSelect::Only,
                     }
                 }
@@ -2899,8 +3387,22 @@ type FeatureRowsKey = (
 
 /// P3G.4 (DV3.5, ER X2): a Derived row's chevron (open or not), its children (with whether each
 /// shows) and its linked icon with the tooltip.
-type DerivedRowKey = (FeatureId, bool, Vec<(crate::derived_ui::DerivedChild, String, &'static str, bool)>, Option<(crate::linked::LinkIcon, String)>);
-type FeatureRowKey = (FeatureId, String, bool, bool, RowKind, Option<String>, bool, Option<String>);
+type DerivedRowKey = (
+    FeatureId,
+    bool,
+    Vec<(crate::derived_ui::DerivedChild, String, &'static str, bool)>,
+    Option<(crate::linked::LinkIcon, String)>,
+);
+type FeatureRowKey = (
+    FeatureId,
+    String,
+    bool,
+    bool,
+    RowKind,
+    Option<String>,
+    bool,
+    Option<String>,
+);
 
 /// A feature that built with a warning (P3.10, PS11.1): Onshape's yellow state, its name and
 /// icon in amber with a warning glyph after the name.
@@ -3005,7 +3507,10 @@ impl RowKind {
     }
 
     fn is_sketch(self) -> bool {
-        matches!(self, RowKind::Sketch | RowKind::ConsumedSketch | RowKind::ReferencedSketch)
+        matches!(
+            self,
+            RowKind::Sketch | RowKind::ConsumedSketch | RowKind::ReferencedSketch
+        )
     }
 }
 
@@ -3037,7 +3542,12 @@ fn rebuild_feature_rows(
         Res<crate::parts::PartOverride>,
         Option<Res<bevy::time::TimeUpdateStrategy>>,
     ),
-    (derived_open, link_status, derived_session, components_open): (Res<crate::derived_ui::DerivedOpen>, Res<crate::linked::LinkStatus>, Option<Res<crate::derived_ui::DerivedSession>>, Res<crate::derived_ui::ComponentsOpen>),
+    (derived_open, link_status, derived_session, components_open): (
+        Res<crate::derived_ui::DerivedOpen>,
+        Res<crate::linked::LinkStatus>,
+        Option<Res<crate::derived_ui::DerivedSession>>,
+        Res<crate::derived_ui::ComponentsOpen>,
+    ),
     mut commands: Commands,
 ) {
     let Some(doc) = doc else {
@@ -3052,9 +3562,16 @@ fn rebuild_feature_rows(
     let all = el.features();
     // P3G.5 (a P3G.4 minor): a new Derived feature waiting for its source in its open dialog is
     // neutral, not a red failed feature.
-    let pending_derived = derived_session.as_ref().filter(|s| s.is_new).map(|s| s.feature).filter(|id| {
-        all.iter().any(|f| f.id == *id && matches!(&f.kind, cadrs_core::FeatureKind::Derived(d) if d.source.is_none()))
-    });
+    let pending_derived = derived_session
+        .as_ref()
+        .filter(|s| s.is_new)
+        .map(|s| s.feature)
+        .filter(|id| {
+            all.iter().any(|f| {
+                f.id == *id
+                    && matches!(&f.kind, cadrs_core::FeatureKind::Derived(d) if d.source.is_none())
+            })
+        });
     let features: Vec<FeatureRowKey> = all
         .iter()
         // A sketch with conflicting constraints shows as an error too (`screens/15`).
@@ -3091,7 +3608,9 @@ fn rebuild_feature_rows(
                 cadrs_core::FeatureKind::Variable(_) => RowKind::Variable,
                 cadrs_core::FeatureKind::SheetMetalModel(_) => RowKind::SheetMetalModel,
                 cadrs_core::FeatureKind::ModifyJoint(_) => RowKind::ModifyJoint,
-                k @ (cadrs_core::FeatureKind::SheetMetalLoft(_) | cadrs_core::FeatureKind::Form(_) | cadrs_core::FeatureKind::TagForm(_)) => {
+                k @ (cadrs_core::FeatureKind::SheetMetalLoft(_)
+                | cadrs_core::FeatureKind::Form(_)
+                | cadrs_core::FeatureKind::TagForm(_)) => {
                     RowKind::Sm9(crate::sheetmetal_p3i9_ui::row_icon(k).unwrap_or("sketch"))
                 }
                 cadrs_core::FeatureKind::SheetMetal(x) => RowKind::SheetMetal(x.icon()),
@@ -3110,16 +3629,24 @@ fn rebuild_feature_rows(
             // A feature the rebuild failed (P3.1): red, with the reason as its tooltip. A
             // sketch in error gets its reason too (P3.2 judge).
             let pending = pending_derived == Some(f.id);
-            let failed = cache.errors.get(&f.id).cloned().filter(|_| !pending).or_else(|| {
-                f.sketch()?;
-                if faces_lost.0.contains(&f.id) {
-                    Some("The face this sketch is on no longer exists".to_string())
-                } else if errors.0.contains(&f.id) {
-                    Some("The sketch has conflicting constraints or broken references".to_string())
-                } else {
-                    None
-                }
-            });
+            let failed = cache
+                .errors
+                .get(&f.id)
+                .cloned()
+                .filter(|_| !pending)
+                .or_else(|| {
+                    f.sketch()?;
+                    if faces_lost.0.contains(&f.id) {
+                        Some("The face this sketch is on no longer exists".to_string())
+                    } else if errors.0.contains(&f.id) {
+                        Some(
+                            "The sketch has conflicting constraints or broken references"
+                                .to_string(),
+                        )
+                    } else {
+                        None
+                    }
+                });
             (
                 f.id,
                 f.name.clone(),
@@ -3138,13 +3665,16 @@ fn rebuild_feature_rows(
         .or(extrude.as_ref().map(|s| s.feature))
         .or(applied.as_ref().map(|s| s.feature));
     // A scripted scenario steps time by hand: its regeneration times are shown fixed.
-    let fixed = strategy.is_some_and(|s| matches!(*s, bevy::time::TimeUpdateStrategy::ManualDuration(_)));
+    let fixed =
+        strategy.is_some_and(|s| matches!(*s, bevy::time::TimeUpdateStrategy::ManualDuration(_)));
     let state = crate::feature_list::list_state(el, &cache, &over, &filter, &deps, &times, fixed);
     // P3G.4: Derived rows' chevrons, children and linked icons.
     let derived_rows: Vec<DerivedRowKey> = all
         .iter()
         .filter_map(|f| {
-            let cadrs_core::FeatureKind::Derived(d) = &f.kind else { return None };
+            let cadrs_core::FeatureKind::Derived(d) = &f.kind else {
+                return None;
+            };
             let open = derived_open.0.contains(&f.id);
             let children = if open {
                 let view = d.board.as_ref().map(|b| b.options.view);
@@ -3153,13 +3683,31 @@ fn rebuild_feature_rows(
                     .into_iter()
                     .map(|(c, n, i)| {
                         let shown = match c {
-                            crate::derived_ui::DerivedChild::Part(p) => !el.part_prop(p).is_some_and(|x| x.hidden),
+                            crate::derived_ui::DerivedChild::Part(p) => {
+                                !el.part_prop(p).is_some_and(|x| x.hidden)
+                            }
                             // A component hidden by the layout view shows as hidden too.
-                            crate::derived_ui::DerivedChild::Component(p) => !el.part_prop(p).is_some_and(|x| x.hidden) && !cache.layout_hidden.contains(&p),
-                            crate::derived_ui::DerivedChild::BoardView(_) => view != Some(cadrs_core::pcb::board3d::BoardView::Layout),
-                            crate::derived_ui::DerivedChild::Components(_) => !cache.derived.get(&f.id).is_some_and(|o| !o.footprints.is_empty() && o.footprints.iter().all(|(p, _)| el.part_prop(*p).is_some_and(|x| x.hidden))),
-                            crate::derived_ui::DerivedChild::Sketch(s) => !cache.hidden_sketches.contains(&s),
-                            crate::derived_ui::DerivedChild::Plane(s) => el.sketch_visibility(s) != Some(false),
+                            crate::derived_ui::DerivedChild::Component(p) => {
+                                !el.part_prop(p).is_some_and(|x| x.hidden)
+                                    && !cache.layout_hidden.contains(&p)
+                            }
+                            crate::derived_ui::DerivedChild::BoardView(_) => {
+                                view != Some(cadrs_core::pcb::board3d::BoardView::Layout)
+                            }
+                            crate::derived_ui::DerivedChild::Components(_) => {
+                                !cache.derived.get(&f.id).is_some_and(|o| {
+                                    !o.footprints.is_empty()
+                                        && o.footprints.iter().all(|(p, _)| {
+                                            el.part_prop(*p).is_some_and(|x| x.hidden)
+                                        })
+                                })
+                            }
+                            crate::derived_ui::DerivedChild::Sketch(s) => {
+                                !cache.hidden_sketches.contains(&s)
+                            }
+                            crate::derived_ui::DerivedChild::Plane(s) => {
+                                el.sketch_visibility(s) != Some(false)
+                            }
                             _ => true,
                         };
                         (c, n, i, shown)
@@ -3170,8 +3718,12 @@ fn rebuild_feature_rows(
             };
             let icon = match (d.source, d.copy) {
                 (Some(r), Some(copy)) => {
-                    let site = cadrs_core::link_update::RefSite::Derived { element: el.id, feature: f.id };
-                    let (tip, icon) = crate::linked::link_badge(&doc.doc, &link_status, &r, copy, site);
+                    let site = cadrs_core::link_update::RefSite::Derived {
+                        element: el.id,
+                        feature: f.id,
+                    };
+                    let (tip, icon) =
+                        crate::linked::link_badge(&doc.doc, &link_status, &r, copy, site);
                     Some((icon, tip))
                 }
                 _ => None,
@@ -3179,7 +3731,13 @@ fn rebuild_feature_rows(
             Some((f.id, open, children, icon))
         })
         .collect();
-    let key = (features, editing, el.folders().to_vec(), state, derived_rows);
+    let key = (
+        features,
+        editing,
+        el.folders().to_vec(),
+        state,
+        derived_rows,
+    );
     if !added && last.as_ref() == Some(&key) {
         return;
     }
@@ -3194,7 +3752,11 @@ fn rebuild_feature_rows(
         }
     }
     for mut n in &mut q_error {
-        let d = if any_invalid { Display::Flex } else { Display::None };
+        let d = if any_invalid {
+            Display::Flex
+        } else {
+            Display::None
+        };
         if n.display != d {
             n.display = d;
         }
@@ -3205,7 +3767,9 @@ fn rebuild_feature_rows(
     commands.entity(container).despawn_children();
     commands.entity(container).with_children(|c| {
         let mut bar_placed = false;
-        for (index, (id, name, valid, under_defined, kind, failed, shown, warning)) in key.0.iter().enumerate() {
+        for (index, (id, name, valid, under_defined, kind, failed, shown, warning)) in
+            key.0.iter().enumerate()
+        {
             // P3.9: the filter hides what doesn't match (a folder with a match shows, open).
             if !state.shows(*id) {
                 continue;
@@ -3230,20 +3794,39 @@ fn rebuild_feature_rows(
                     } else {
                         f.features.len().to_string()
                     };
-                    let mut row = c.spawn(crate::feature_folders::folder_row_counted(&t, f.id, &f.name, count, open, index >= state.bar));
+                    let mut row = c.spawn(crate::feature_folders::folder_row_counted(
+                        &t,
+                        f.id,
+                        &f.name,
+                        count,
+                        open,
+                        index >= state.bar,
+                    ));
                     // Show dependencies (P3.11): a closed folder holding parents or children is
                     // tinted as they would be, so they aren't lost inside it.
                     if !open {
                         let tint = if f.features.iter().any(|x| state.parents.contains(x)) {
-                            Some((crate::feature_list::PARENT_BG, crate::feature_list::PARENT_SWATCH))
+                            Some((
+                                crate::feature_list::PARENT_BG,
+                                crate::feature_list::PARENT_SWATCH,
+                            ))
                         } else if f.features.iter().any(|x| state.children.contains(x)) {
-                            Some((crate::feature_list::CHILD_BG, crate::feature_list::CHILD_SWATCH))
+                            Some((
+                                crate::feature_list::CHILD_BG,
+                                crate::feature_list::CHILD_SWATCH,
+                            ))
                         } else {
                             None
                         };
                         if let Some((bg, stripe)) = tint {
                             row.insert(Visuals {
-                                background: StateColors::new(bg, t.list_hover, t.list_active, Color::NONE).with_selected(t.list_selected),
+                                background: StateColors::new(
+                                    bg,
+                                    t.list_hover,
+                                    t.list_active,
+                                    Color::NONE,
+                                )
+                                .with_selected(t.list_selected),
                                 border: StateColors::all(Color::NONE),
                                 foreground: StateColors::all(t.foreground),
                                 focus_ring: t.focus_ring,
@@ -3266,7 +3849,8 @@ fn rebuild_feature_rows(
                     }
                     row.entry::<Node>().and_modify(|mut n| {
                         n.height = Val::Px(22.0);
-                        n.margin = UiRect::new(Val::Px(2.0), Val::Px(7.0), Val::Px(1.0), Val::Px(1.0));
+                        n.margin =
+                            UiRect::new(Val::Px(2.0), Val::Px(7.0), Val::Px(1.0), Val::Px(1.0));
                         n.padding = UiRect::left(Val::Px(2.0));
                     });
                 }
@@ -3276,7 +3860,8 @@ fn rebuild_feature_rows(
             }
             let edited = editing == Some(*id);
             // P3I.9: a Form hidden with its eye is greyed out too (`form-12.png`).
-            let consumed = *kind == RowKind::ConsumedSketch || (*kind == RowKind::Sm9("sheet-metal-form") && !*shown);
+            let consumed = *kind == RowKind::ConsumedSketch
+                || (*kind == RowKind::Sm9("sheet-metal-form") && !*shown);
             let fg = if inactive {
                 // Rolled back or suppressed (P3.9): grey, whatever else it is.
                 crate::feature_list::ROLLED_BACK_FG
@@ -3303,11 +3888,23 @@ fn rebuild_feature_rows(
             let visuals = Visuals {
                 background: StateColors::new(
                     if edited { t.feature_editing } else { rest },
-                    if edited { t.feature_editing } else { t.list_hover },
-                    if edited { t.feature_editing } else { t.list_active },
+                    if edited {
+                        t.feature_editing
+                    } else {
+                        t.list_hover
+                    },
+                    if edited {
+                        t.feature_editing
+                    } else {
+                        t.list_active
+                    },
                     Color::NONE,
                 )
-                .with_selected(if edited { t.feature_editing } else { t.list_selected }),
+                .with_selected(if edited {
+                    t.feature_editing
+                } else {
+                    t.list_selected
+                }),
                 border: StateColors::all(Color::NONE),
                 foreground: StateColors::all(fg),
                 focus_ring: t.focus_ring,
@@ -3322,14 +3919,22 @@ fn rebuild_feature_rows(
             // P3I.9 (SM20, `form-10.png`): a Form's eye shows or hides its sketch on the flat view.
             if kind.is_sketch() || *kind == RowKind::Sm9("sheet-metal-form") {
                 // The eye shows or hides the sketch (PS1.5); it shows while the row is hovered.
-                let tip = if *shown { format!("Hide {name}") } else { format!("Show {name}") };
+                let tip = if *shown {
+                    format!("Hide {name}")
+                } else {
+                    format!("Show {name}")
+                };
                 item = item
-                    .toggle(format!("{row_name}-visibility"), "visible", "hidden", *shown)
+                    .toggle(
+                        format!("{row_name}-visibility"),
+                        "visible",
+                        "hidden",
+                        *shown,
+                    )
                     .toggle_tooltip(tip);
             }
             let mut row = c.spawn((
-                item
-                    .icon(kind.icon(), 16.0)
+                item.icon(kind.icon(), 16.0)
                     // A failed rebuild tints the icon too (NOTES.md "Errors"); not while its
                     // dialog waits for input (`screens/22`: only the name is red).
                     .icon_color(if inactive {
@@ -3352,7 +3957,11 @@ fn rebuild_feature_rows(
                     )
                     // Bold in the references; ExtraBold draws with the same ink here (Bevy
                     // blends glyph coverage in linear space, so text draws lighter).
-                    .weight(if edited { FontWeight::EXTRA_BOLD } else { FontWeight::MEDIUM })
+                    .weight(if edited {
+                        FontWeight::EXTRA_BOLD
+                    } else {
+                        FontWeight::MEDIUM
+                    })
                     .left(if folder.is_some() { 20.0 } else { 4.0 })
                     .editable()
                     .strikethrough(suppressed)
@@ -3374,8 +3983,14 @@ fn rebuild_feature_rows(
             // (Hidden) is not fully defined"); the viewport draws its curves in the hover orange.
             if kind.is_sketch() && failed.is_none() && warning.is_none() {
                 let hidden = if *shown { "" } else { " (Hidden)" };
-                let status = if *under_defined { "is not fully defined" } else { "is fully defined" };
-                row.insert(cadrs_ui::Tooltip::beside(format!("{name}{hidden} {status}")));
+                let status = if *under_defined {
+                    "is not fully defined"
+                } else {
+                    "is fully defined"
+                };
+                row.insert(cadrs_ui::Tooltip::beside(format!(
+                    "{name}{hidden} {status}"
+                )));
             }
 
             if let Some(f) = folder {
@@ -3419,7 +4034,10 @@ fn rebuild_feature_rows(
                             "warning-filled",
                             14.0,
                             t.warning_icon,
-                            Node { margin: UiRect::left(Val::Px(-2.0)), ..default() },
+                            Node {
+                                margin: UiRect::left(Val::Px(-2.0)),
+                                ..default()
+                            },
                         ),
                         cadrs_ui::Tooltip::new(reason),
                     ))
@@ -3456,15 +4074,27 @@ fn rebuild_feature_rows(
                 } else {
                     ("currently active", t.muted_foreground)
                 };
-                let rule = label.strip_prefix("not ").map_or_else(|| format!("{label} is 0 (false)"), |l| format!("{l} is not 0 (true)"));
+                let rule = label.strip_prefix("not ").map_or_else(
+                    || format!("{label} is 0 (false)"),
+                    |l| format!("{l} is not 0 (true)"),
+                );
                 let tag = row
                     .commands()
                     .spawn((
-                        cadrs_ui::Tag::new(format!("{row_name}-suppression-variable"), label.clone()).color(colour).outline().build(&t),
+                        cadrs_ui::Tag::new(
+                            format!("{row_name}-suppression-variable"),
+                            label.clone(),
+                        )
+                        .color(colour)
+                        .outline()
+                        .build(&t),
                         cadrs_ui::Tooltip::new(format!("Suppressed while {rule} · {when}")),
                     ))
                     // Hoverable for its tooltip; clicks go to the row.
-                    .insert(Pickable { should_block_lower: false, is_hoverable: true })
+                    .insert(Pickable {
+                        should_block_lower: false,
+                        is_hoverable: true,
+                    })
                     .id();
                 row.insert_children(2, &[tag]);
             }
@@ -3473,10 +4103,17 @@ fn rebuild_feature_rows(
             if let Some((_, _, _, Some((icon, tip)))) = derived {
                 let (icon, tip, fid) = (*icon, tip.clone(), *id);
                 let n = format!("{row_name}-linked");
-                row.with_children(|r| crate::linked::spawn_link_icon(r, n, icon, &tip, crate::linked::LinkTarget::Derived(fid)));
+                row.with_children(|r| {
+                    crate::linked::spawn_link_icon(
+                        r,
+                        n,
+                        icon,
+                        &tip,
+                        crate::linked::LinkTarget::Derived(fid),
+                    )
+                });
             }
-            row.entry::<Node>()
-            .and_modify(move |mut n| {
+            row.entry::<Node>().and_modify(move |mut n| {
                 // Onshape's feature rows: a 22 px band inset from the panel edges; a folder's
                 // features indented under it (P3.9).
                 n.height = Val::Px(22.0);
@@ -3500,35 +4137,74 @@ fn rebuild_feature_rows(
                         D::BoardView(_) | D::Components(_) => format!("{row_name}-{kind}"),
                         _ => format!("{row_name}-{kind}-{}", crate::linked::slug(label)),
                     };
-                    let left = if in_folder { 38.0 } else { 26.0 } + if matches!(child, D::Component(_)) { 14.0 } else { 0.0 };
-                    let mut ci = TreeItem::new(cname.clone(), label.clone()).icon(*icon, 14.0).left(left).muted(!shown && !matches!(child, D::BoardView(_)));
+                    let left = if in_folder { 38.0 } else { 26.0 }
+                        + if matches!(child, D::Component(_)) {
+                            14.0
+                        } else {
+                            0.0
+                        };
+                    let mut ci = TreeItem::new(cname.clone(), label.clone())
+                        .icon(*icon, 14.0)
+                        .left(left)
+                        .muted(!shown && !matches!(child, D::BoardView(_)));
                     match child {
                         D::Part(_) | D::Component(_) | D::Sketch(_) | D::Plane(_) => {
-                            let tip = if *shown { format!("Hide {label}") } else { format!("Show {label}") };
-                            ci = ci.toggle(format!("{cname}-visibility"), "visible", "hidden", *shown).toggle_tooltip(tip);
+                            let tip = if *shown {
+                                format!("Hide {label}")
+                            } else {
+                                format!("Show {label}")
+                            };
+                            ci = ci
+                                .toggle(format!("{cname}-visibility"), "visible", "hidden", *shown)
+                                .toggle_tooltip(tip);
                         }
                         // The board's view: 3D model or layout, a segmented control after it.
                         D::BoardView(_) => {}
                         D::Components(f) => {
                             let open = components_open.0.contains(f);
-                            let tip = if *shown { "Hide the components" } else { "Show the components" };
-                            ci = ci.disclosure(Some(open)).toggle(format!("{cname}-visibility"), "visible", "hidden", *shown).toggle_tooltip(tip);
+                            let tip = if *shown {
+                                "Hide the components"
+                            } else {
+                                "Show the components"
+                            };
+                            ci = ci
+                                .disclosure(Some(open))
+                                .toggle(format!("{cname}-visibility"), "visible", "hidden", *shown)
+                                .toggle_tooltip(tip);
                         }
                         D::Connector(_) => {}
                     }
                     let pick = match child {
                         D::Part(p) | D::Component(p) => Pick::Part(*p),
-                        D::Sketch(s) | D::Plane(s) | D::Connector(s) | D::BoardView(s) | D::Components(s) => Pick::Feature(*s),
+                        D::Sketch(s)
+                        | D::Plane(s)
+                        | D::Connector(s)
+                        | D::BoardView(s)
+                        | D::Components(s) => Pick::Feature(*s),
                     };
                     let mut crow = c.spawn((ci.build(&t), *child, PickRow(pick)));
                     if let D::BoardView(_) = child {
                         let seg = cadrs_ui::Segmented::new(format!("{cname}-segments"))
-                            .option("3D", None, "Show the board's 3D model: its solid and its components")
-                            .option("Layout", None, "Show the board's layout on its faces (its components hidden)")
+                            .option(
+                                "3D",
+                                None,
+                                "Show the board's 3D model: its solid and its components",
+                            )
+                            .option(
+                                "Layout",
+                                None,
+                                "Show the board's layout on its faces (its components hidden)",
+                            )
                             .selected(usize::from(!*shown))
                             .build(&t);
                         crow.with_children(|r| {
-                            r.spawn((Node { flex_grow: 1.0, ..default() }, Pickable::IGNORE));
+                            r.spawn((
+                                Node {
+                                    flex_grow: 1.0,
+                                    ..default()
+                                },
+                                Pickable::IGNORE,
+                            ));
                             r.spawn((seg, *child));
                         });
                     }
@@ -3537,7 +4213,8 @@ fn rebuild_feature_rows(
                     }
                     crow.entry::<Node>().and_modify(|mut n| {
                         n.height = Val::Px(22.0);
-                        n.margin = UiRect::new(Val::Px(2.0), Val::Px(7.0), Val::Px(1.0), Val::Px(1.0));
+                        n.margin =
+                            UiRect::new(Val::Px(2.0), Val::Px(7.0), Val::Px(1.0), Val::Px(1.0));
                     });
                 }
             }
@@ -3551,20 +4228,35 @@ fn rebuild_feature_rows(
 
 /// P3D.1 (IR4.6, IR5.1): clicking the Features header's red "!" selects the first failing
 /// feature in list order (fix errors top to bottom, the course's advice), opening its folder.
-fn on_error_icon_click(ev: On<Pointer<Click>>, q: Query<(), With<FeatureErrorIcon>>, mut commands: Commands) {
+fn on_error_icon_click(
+    ev: On<Pointer<Click>>,
+    q: Query<(), With<FeatureErrorIcon>>,
+    mut commands: Commands,
+) {
     if !q.contains(ev.entity) {
         return;
     }
     commands.queue(|world: &mut World| {
-        let Some(first) = first_failing_feature(world) else { return };
+        let Some(first) = first_failing_feature(world) else {
+            return;
+        };
         world.resource_mut::<crate::viewport::Selection>().0 = vec![Pick::Feature(first)];
         // A closed folder holding it opens, so the row shows.
-        let Some(mut doc) = world.get_resource_mut::<ActiveDocument>() else { return };
-        let Some(el) = doc.active_element() else { return };
+        let Some(mut doc) = world.get_resource_mut::<ActiveDocument>() else {
+            return;
+        };
+        let Some(el) = doc.active_element() else {
+            return;
+        };
         let element = el.id;
         let folder = el.folder_of(first).filter(|f| !f.open).map(|f| f.id);
         if let Some(folder) = folder {
-            let _ = doc.execute(&cadrs_core::commands::SetFolder { element, folder, open: Some(true), name: None });
+            let _ = doc.execute(&cadrs_core::commands::SetFolder {
+                element,
+                folder,
+                open: Some(true),
+                name: None,
+            });
         }
     });
 }
@@ -3586,7 +4278,11 @@ pub fn first_failing_feature(world: &World) -> Option<FeatureId> {
     })
 }
 
-fn on_feature_double_click(ev: On<cadrs_ui::DoubleClick>, q: Query<&FeatureRow>, mut commands: Commands) {
+fn on_feature_double_click(
+    ev: On<cadrs_ui::DoubleClick>,
+    q: Query<&FeatureRow>,
+    mut commands: Commands,
+) {
     if let Ok(row) = q.get(ev.entity) {
         let id = row.0;
         commands.queue(move |world: &mut World| edit_feature(world, id));
@@ -3608,8 +4304,15 @@ pub fn reveal_feature(world: &mut World, id: FeatureId) {
         .get_resource::<ActiveDocument>()
         .and_then(|d| d.active_element())
         .and_then(|el| Some((el.id, el.folder_of(id).filter(|f| !f.open)?.id)));
-    if let (Some((element, folder)), Some(mut doc)) = (closed, world.get_resource_mut::<ActiveDocument>()) {
-        let _ = doc.execute(&cadrs_core::commands::SetFolder { element, folder, open: Some(true), name: None });
+    if let (Some((element, folder)), Some(mut doc)) =
+        (closed, world.get_resource_mut::<ActiveDocument>())
+    {
+        let _ = doc.execute(&cadrs_core::commands::SetFolder {
+            element,
+            folder,
+            open: Some(true),
+            name: None,
+        });
     }
     world.insert_resource(RevealFeature { id, frames: 0 });
 }
@@ -3620,7 +4323,12 @@ fn scroll_to_revealed(
     mut commands: Commands,
     reveal: Option<ResMut<RevealFeature>>,
     q_rows: Query<(&FeatureRow, &ComputedNode, &bevy::ui::UiGlobalTransform)>,
-    mut q_scroll: Query<(&Name, &ComputedNode, &bevy::ui::UiGlobalTransform, &mut ScrollPosition)>,
+    mut q_scroll: Query<(
+        &Name,
+        &ComputedNode,
+        &bevy::ui::UiGlobalTransform,
+        &mut ScrollPosition,
+    )>,
 ) {
     let Some(mut reveal) = reveal else { return };
     reveal.frames += 1;
@@ -3632,8 +4340,18 @@ fn scroll_to_revealed(
     if reveal.frames < 3 {
         return;
     }
-    let Some((_, row, row_at)) = q_rows.iter().find(|(r, n, _)| r.0 == reveal.id && n.size().y > 0.0) else { return };
-    let Some((_, list, list_at, mut pos)) = q_scroll.iter_mut().find(|(n, ..)| n.as_str() == "feature-scroll") else { return };
+    let Some((_, row, row_at)) = q_rows
+        .iter()
+        .find(|(r, n, _)| r.0 == reveal.id && n.size().y > 0.0)
+    else {
+        return;
+    };
+    let Some((_, list, list_at, mut pos)) = q_scroll
+        .iter_mut()
+        .find(|(n, ..)| n.as_str() == "feature-scroll")
+    else {
+        return;
+    };
     let s = list.inverse_scale_factor();
     let span = |n: &ComputedNode, at: &bevy::ui::UiGlobalTransform| {
         let half = n.size().y * s / 2.0;
@@ -3711,7 +4429,11 @@ fn on_feature_context_menu(
     doc: Option<Res<ActiveDocument>>,
     session: Option<Res<SketchSession>>,
     extrude: Option<Res<crate::extrude::ExtrudeSession>>,
-    (cache, shown_dims, log): (Res<crate::parts::PartCache>, Res<crate::feature_menu::ShownDimensions>, Res<crate::history_panel::DocLog>),
+    (cache, shown_dims, log): (
+        Res<crate::parts::PartCache>,
+        Res<crate::feature_menu::ShownDimensions>,
+        Res<crate::history_panel::DocLog>,
+    ),
     theme: Res<Theme>,
     mut commands: Commands,
 ) {
@@ -3721,24 +4443,41 @@ fn on_feature_context_menu(
     let editing = session.as_ref().is_some_and(|s| s.feature == row.0)
         || extrude.as_ref().is_some_and(|s| s.feature == row.0);
     // Appearances (P3.5): a sketch's own, a part feature's for the faces it made.
-    let kind = doc
-        .as_ref()
-        .and_then(|d| d.active_element()?.feature(row.0).map(|f| (f.sketch().is_some(), f.is_part_feature())));
+    let kind = doc.as_ref().and_then(|d| {
+        d.active_element()?
+            .feature(row.0)
+            .map(|f| (f.sketch().is_some(), f.is_part_feature()))
+    });
     let is_sketch = kind.is_some_and(|k| k.0);
     let appearance = match kind {
-        Some((true, _)) => Some(MenuItem::new("feature-sketch-appearance", "Edit sketch appearance…").icon("appearance")),
-        Some((_, true)) => Some(MenuItem::new("feature-appearance", "Add appearance to feature…").icon("appearance")),
+        Some((true, _)) => Some(
+            MenuItem::new("feature-sketch-appearance", "Edit sketch appearance…")
+                .icon("appearance"),
+        ),
+        Some((_, true)) => Some(
+            MenuItem::new("feature-appearance", "Add appearance to feature…").icon("appearance"),
+        ),
         _ => None,
     };
     // P3.9: suppression, the rollback bar, folders and dependencies.
     let el = doc.as_ref().and_then(|d| d.active_element());
-    let name = el.and_then(|el| el.feature(row.0)).map(|f| f.name.clone()).unwrap_or_default();
+    let name = el
+        .and_then(|el| el.feature(row.0))
+        .map(|f| f.name.clone())
+        .unwrap_or_default();
     // Suppressed by Suppress (Unsuppress undoes that, not a variable's suppression, IR5.5).
     let suppressed = el.is_some_and(|el| el.suppressed().contains(&row.0));
-    let by_variable = el.and_then(|el| el.feature(row.0)).is_some_and(|f| f.suppress_by.is_some());
+    let by_variable = el
+        .and_then(|el| el.feature(row.0))
+        .is_some_and(|f| f.suppress_by.is_some());
     let can_edit = el.is_some_and(|el| crate::feature_list::editable(el, row.0));
     let bar_at_end = el.is_none_or(|el| el.rollback_index() == el.features().len());
-    let below_this = el.is_some_and(|el| el.features().iter().position(|f| f.id == row.0).is_some_and(|i| el.rollback_index() == i + 1));
+    let below_this = el.is_some_and(|el| {
+        el.features()
+            .iter()
+            .position(|f| f.id == row.0)
+            .is_some_and(|i| el.rollback_index() == i + 1)
+    });
     let in_dialog = session.is_some() || extrude.is_some();
     let shown = !cache.hidden_sketches.contains(&row.0);
     // P3D.1 (IR5.5): the items in the order `ex1-step2.png` shows them.
@@ -3747,15 +4486,24 @@ fn on_feature_context_menu(
         .item_height(22.0)
         .icon_size(14.0)
         .item(MenuItem::new("feature-rename", "Rename"))
-        .item(MenuItem::new("feature-edit", "Edit…").disabled(editing || !can_edit))
-;
+        .item(MenuItem::new("feature-edit", "Edit…").disabled(editing || !can_edit));
     // P3D.4 (IR3.3): Repair on the feature's last healthy regeneration (not a Derived feature's:
     // its source is fixed by its own tab or version, P3G.4).
-    let is_derived = el.and_then(|el| el.feature(row.0)).is_some_and(|f| matches!(f.kind, cadrs_core::FeatureKind::Derived(_)));
+    let is_derived = el
+        .and_then(|el| el.feature(row.0))
+        .is_some_and(|f| matches!(f.kind, cadrs_core::FeatureKind::Derived(_)));
     if !is_derived {
-        menu = menu.item(MenuItem::new("feature-edit-healthy", format!("Edit healthy moment of {name}…")).disabled(
-            editing || !can_edit || !el.is_some_and(|el| crate::repair::has_healthy_moment(&log, el.id, row.0)),
-        ));
+        menu = menu.item(
+            MenuItem::new(
+                "feature-edit-healthy",
+                format!("Edit healthy moment of {name}…"),
+            )
+            .disabled(
+                editing
+                    || !can_edit
+                    || !el.is_some_and(|el| crate::repair::has_healthy_moment(&log, el.id, row.0)),
+            ),
+        );
     }
     // P3G.4 (DV1.9, ER2.4, ER5, ER X2): a Derived feature's reference.
     let derived = el.and_then(|el| match &el.feature(row.0)?.kind {
@@ -3765,11 +4513,24 @@ fn on_feature_context_menu(
     if let Some(d) = &derived {
         match d.source {
             Some(r) if r.at != cadrs_core::external::RefAt::Workspace => {
-                let label = if d.document_name.is_empty() { d.source_name.clone() } else { format!("{} ({})", d.document_name, d.version_name) };
+                let label = if d.document_name.is_empty() {
+                    d.source_name.clone()
+                } else {
+                    format!("{} ({})", d.document_name, d.version_name)
+                };
                 menu = menu
                     .separator()
-                    .item(MenuItem::new("feature-open-linked", format!("Open linked document ({label})")).icon("open-external"))
-                    .item(MenuItem::new("feature-update-linked", "Update linked document…").icon("link"))
+                    .item(
+                        MenuItem::new(
+                            "feature-open-linked",
+                            format!("Open linked document ({label})"),
+                        )
+                        .icon("open-external"),
+                    )
+                    .item(
+                        MenuItem::new("feature-update-linked", "Update linked document…")
+                            .icon("link"),
+                    )
                     .item(if r.pinned {
                         MenuItem::new("feature-unpin-reference", "Unpin reference").icon("location")
                     } else {
@@ -3777,24 +4538,49 @@ fn on_feature_context_menu(
                     });
             }
             Some(_) => {
-                menu = menu.separator().item(MenuItem::new("feature-switch-to-source", format!("Switch to {}", d.source_name)).icon("part-studio")).item(
-                    MenuItem::new("feature-change-to-version", "Change to version…").icon("versions"),
-                );
+                menu = menu
+                    .separator()
+                    .item(
+                        MenuItem::new(
+                            "feature-switch-to-source",
+                            format!("Switch to {}", d.source_name),
+                        )
+                        .icon("part-studio"),
+                    )
+                    .item(
+                        MenuItem::new("feature-change-to-version", "Change to version…")
+                            .icon("versions"),
+                    );
             }
             None => {}
         }
         // A PCB Studio board (`docs/PCB_IN_PART_STUDIO.md` §6): its 3D model or its layout.
         if let Some(b) = &d.board {
             let layout = b.options.view == cadrs_core::pcb::board3d::BoardView::Layout;
-            let workspace = d.source.is_some_and(|r| r.at == cadrs_core::external::RefAt::Workspace && r.document.is_none());
-            let linked = d.source.and_then(|r| doc.as_ref()?.doc.element(r.element)).and_then(|e| e.pcb()).and_then(|s| s.board(b.board)).is_some_and(|sb| sb.outline_link.is_some());
+            let workspace = d.source.is_some_and(|r| {
+                r.at == cadrs_core::external::RefAt::Workspace && r.document.is_none()
+            });
+            let linked = d
+                .source
+                .and_then(|r| doc.as_ref()?.doc.element(r.element))
+                .and_then(|e| e.pcb())
+                .and_then(|s| s.board(b.board))
+                .is_some_and(|sb| sb.outline_link.is_some());
             menu = menu
                 .separator()
-                .item(MenuItem::new("feature-board-edit", "Edit layout").icon("edit").disabled(!workspace || in_dialog))
+                .item(
+                    MenuItem::new("feature-board-edit", "Edit layout")
+                        .icon("edit")
+                        .disabled(!workspace || in_dialog),
+                )
                 .item(if linked {
-                    MenuItem::new("feature-board-unlink", "Break outline link").icon("link").disabled(!workspace)
+                    MenuItem::new("feature-board-unlink", "Break outline link")
+                        .icon("link")
+                        .disabled(!workspace)
                 } else {
-                    MenuItem::new("feature-board-link", "Link outline to a sketch").icon("link").disabled(!workspace || in_dialog)
+                    MenuItem::new("feature-board-link", "Link outline to a sketch")
+                        .icon("link")
+                        .disabled(!workspace || in_dialog)
                 })
                 .item(if layout {
                     MenuItem::new("feature-board-show-3d", "Show 3D model").icon("board-3d")
@@ -3805,22 +4591,45 @@ fn on_feature_context_menu(
     }
     if is_sketch {
         // `docs/PCB_IN_PART_STUDIO.md` §8: a board from the sketch's regions.
-        menu = menu.item(MenuItem::new("feature-create-board", "Create PCB board…").icon("pcb-studio").disabled(editing || in_dialog));
-        menu = menu.item(MenuItem::new("feature-copy-sketch", "Copy sketch")).item(if shown_dims.0.contains(&row.0) {
-            MenuItem::new("feature-hide-dimensions", "Hide dimensions")
-        } else {
-            MenuItem::new("feature-show-dimensions", "Show dimensions").disabled(editing)
-        });
+        menu = menu.item(
+            MenuItem::new("feature-create-board", "Create PCB board…")
+                .icon("pcb-studio")
+                .disabled(editing || in_dialog),
+        );
+        menu = menu
+            .item(MenuItem::new("feature-copy-sketch", "Copy sketch"))
+            .item(if shown_dims.0.contains(&row.0) {
+                MenuItem::new("feature-hide-dimensions", "Hide dimensions")
+            } else {
+                MenuItem::new("feature-show-dimensions", "Show dimensions").disabled(editing)
+            });
         // P3F.2 (P3.2): the sketch flat, for cutting machines.
-        menu = menu.item(MenuItem::new("feature-export-dxf", "Export as DXF/DWG…").icon("file-export"));
+        menu = menu
+            .item(MenuItem::new("feature-export-dxf", "Export as DXF/DWG…").icon("file-export"));
     }
     // P3I.6 (SM14.1, SM15.1): a Sheet metal model's flat pattern, until the flat view's menu (P3I.3).
-    if el.and_then(|el| el.feature(row.0)).is_some_and(|f| matches!(f.kind, cadrs_core::FeatureKind::SheetMetalModel(_))) {
+    if el
+        .and_then(|el| el.feature(row.0))
+        .is_some_and(|f| matches!(f.kind, cadrs_core::FeatureKind::SheetMetalModel(_)))
+    {
         menu = menu
-            .item(MenuItem::new("feature-flat-sketch", "New sketch on flat pattern").icon("sketch").disabled(in_dialog))
-            .item(MenuItem::new("feature-flat-export", "Export DXF/DWG of flat pattern…").icon("flat-pattern"));
+            .item(
+                MenuItem::new("feature-flat-sketch", "New sketch on flat pattern")
+                    .icon("sketch")
+                    .disabled(in_dialog),
+            )
+            .item(
+                MenuItem::new("feature-flat-export", "Export DXF/DWG of flat pattern…")
+                    .icon("flat-pattern"),
+            );
     }
-    menu = menu.separator().item(MenuItem::new("feature-add-to-folder", "Add selection to folder…")).separator();
+    menu = menu
+        .separator()
+        .item(MenuItem::new(
+            "feature-add-to-folder",
+            "Add selection to folder…",
+        ))
+        .separator();
     if is_sketch {
         menu = menu.item(if shown {
             MenuItem::new("feature-hide", "Hide").icon("hidden")
@@ -3829,9 +4638,16 @@ fn on_feature_context_menu(
         });
     }
     menu = menu
-        .item(MenuItem::new("feature-show-all-sketches", "Show all sketches"))
+        .item(MenuItem::new(
+            "feature-show-all-sketches",
+            "Show all sketches",
+        ))
         .separator()
-        .item(MenuItem::new("feature-section-view", "Section view…").icon("section-view").disabled(in_dialog))
+        .item(
+            MenuItem::new("feature-section-view", "Section view…")
+                .icon("section-view")
+                .disabled(in_dialog),
+        )
         .separator()
         .item(if suppressed {
             MenuItem::new("feature-unsuppress", "Unsuppress").disabled(in_dialog)
@@ -3839,16 +4655,40 @@ fn on_feature_context_menu(
             MenuItem::new("feature-suppress", "Suppress").disabled(editing || in_dialog)
         })
         // Suppression driven by a variable (IR5.5) or a configuration (out of scope).
-        .item(MenuItem::new("feature-dynamic-suppression", "Dynamic suppression").submenu({
-            let mut items: Vec<cadrs_ui::menu::MenuEntry> = vec![MenuItem::new("feature-suppress-by-variable", "Suppress by variable…").disabled(editing || in_dialog).into()];
-            if by_variable {
-                items.push(MenuItem::new("feature-remove-suppression-variable", "Remove suppression variable").disabled(in_dialog).into());
-            }
-            items.push(MenuItem::new("feature-suppress-by-configuration", "Suppress by configuration…").planned().into());
-            items
-        }))
+        .item(
+            MenuItem::new("feature-dynamic-suppression", "Dynamic suppression").submenu({
+                let mut items: Vec<cadrs_ui::menu::MenuEntry> = vec![
+                    MenuItem::new("feature-suppress-by-variable", "Suppress by variable…")
+                        .disabled(editing || in_dialog)
+                        .into(),
+                ];
+                if by_variable {
+                    items.push(
+                        MenuItem::new(
+                            "feature-remove-suppression-variable",
+                            "Remove suppression variable",
+                        )
+                        .disabled(in_dialog)
+                        .into(),
+                    );
+                }
+                items.push(
+                    MenuItem::new(
+                        "feature-suppress-by-configuration",
+                        "Suppress by configuration…",
+                    )
+                    .planned()
+                    .into(),
+                );
+                items
+            }),
+        )
         .separator()
-        .item(MenuItem::new("feature-add-comment", "Add comment").icon("comments").planned())
+        .item(
+            MenuItem::new("feature-add-comment", "Add comment")
+                .icon("comments")
+                .planned(),
+        )
         .separator()
         .item(MenuItem::new("feature-zoom-to", "Zoom to selection"))
         .separator()
@@ -3861,7 +4701,11 @@ fn on_feature_context_menu(
     if let Some(item) = appearance {
         menu = menu.separator().item(item);
     }
-    menu = menu.separator().item(MenuItem::new("feature-delete", "Delete").icon("remove-circle").disabled(editing));
+    menu = menu.separator().item(
+        MenuItem::new("feature-delete", "Delete")
+            .icon("remove-circle")
+            .disabled(editing),
+    );
     let anchor = open_context_menu(&mut commands, ev.position, menu.build(&theme));
     commands
         .entity(anchor)
@@ -3885,56 +4729,95 @@ fn on_feature_menu_action(
             commands.queue(move |world: &mut World| crate::repair::edit_healthy_moment(world, id));
         }
         // P3D.1 (IR5.5).
-        "feature-copy-sketch" => commands.queue(move |world: &mut World| crate::feature_menu::copy_sketch(world, id)),
+        "feature-copy-sketch" => {
+            commands.queue(move |world: &mut World| crate::feature_menu::copy_sketch(world, id))
+        }
         "feature-export-dxf" => commands.queue(move |world: &mut World| {
             crate::export_dialog::open(world, crate::export_dialog::ExportSource::Sketch(id))
         }),
         // P3I.6.
-        "feature-flat-sketch" => commands.queue(move |world: &mut World| crate::flat_ui::begin_flat_sketch(world, id, 0)),
-        "feature-flat-export" => commands.queue(move |world: &mut World| match crate::flat_export_dialog::first_part(world, id) {
-            Some(p) => crate::flat_export_dialog::open(world, p),
-            None => {
-                let theme = world.resource::<cadrs_ui::Theme>().clone();
-                let mut commands = world.commands();
-                cadrs_ui::show_notification(&mut commands, &theme, cadrs_ui::Notification::warning("The sheet metal model has no flat pattern part").name("flat-export-toast"));
-                world.flush();
+        "feature-flat-sketch" => {
+            commands.queue(move |world: &mut World| crate::flat_ui::begin_flat_sketch(world, id, 0))
+        }
+        "feature-flat-export" => commands.queue(move |world: &mut World| {
+            match crate::flat_export_dialog::first_part(world, id) {
+                Some(p) => crate::flat_export_dialog::open(world, p),
+                None => {
+                    let theme = world.resource::<cadrs_ui::Theme>().clone();
+                    let mut commands = world.commands();
+                    cadrs_ui::show_notification(
+                        &mut commands,
+                        &theme,
+                        cadrs_ui::Notification::warning(
+                            "The sheet metal model has no flat pattern part",
+                        )
+                        .name("flat-export-toast"),
+                    );
+                    world.flush();
+                }
             }
         }),
-        "feature-show-dimensions" | "feature-hide-dimensions" => {
-            commands.queue(move |world: &mut World| crate::feature_menu::toggle_dimensions(world, id))
-        }
-        "feature-show" => commands.queue(move |world: &mut World| crate::feature_menu::set_sketch_visible(world, id, true)),
-        "feature-hide" => commands.queue(move |world: &mut World| crate::feature_menu::set_sketch_visible(world, id, false)),
+        "feature-show-dimensions" | "feature-hide-dimensions" => commands
+            .queue(move |world: &mut World| crate::feature_menu::toggle_dimensions(world, id)),
+        "feature-show" => commands.queue(move |world: &mut World| {
+            crate::feature_menu::set_sketch_visible(world, id, true)
+        }),
+        "feature-hide" => commands.queue(move |world: &mut World| {
+            crate::feature_menu::set_sketch_visible(world, id, false)
+        }),
         "feature-show-all-sketches" => commands.queue(crate::feature_menu::show_all_sketches),
-        "feature-zoom-to" => commands.queue(move |world: &mut World| crate::feature_menu::zoom_to_feature(world, id)),
+        "feature-zoom-to" => {
+            commands.queue(move |world: &mut World| crate::feature_menu::zoom_to_feature(world, id))
+        }
         // P3E.3a (IR5.5): a section by the feature's plane (a plane feature, a sketch).
-        "feature-section-view" => commands.queue(move |world: &mut World| crate::section_view::open_for_feature(world, id)),
+        "feature-section-view" => commands
+            .queue(move |world: &mut World| crate::section_view::open_for_feature(world, id)),
         "feature-rename" => {
             commands.queue(move |world: &mut World| rename_feature(world, id));
         }
-        "feature-dependencies" => commands.queue(move |world: &mut World| crate::feature_list::show_dependencies(world, id)),
-        "feature-board-edit" => commands.queue(move |world: &mut World| crate::board_in_studio::begin_edit(world, id, 0)),
-        "feature-create-board" => commands.queue(move |world: &mut World| crate::board_in_studio::create_from_sketch(world, id)),
-        "feature-board-unlink" => commands.queue(move |world: &mut World| crate::board_in_studio::unlink_outline(world, id)),
-        "feature-board-link" => commands.queue(move |world: &mut World| crate::board_in_studio::link_outline_menu(world, id)),
-        "feature-board-show-layout" => commands.queue(move |world: &mut World| crate::board_in_studio::set_view(world, id, cadrs_core::pcb::board3d::BoardView::Layout)),
-        "feature-board-show-3d" => commands.queue(move |world: &mut World| crate::board_in_studio::set_view(world, id, cadrs_core::pcb::board3d::BoardView::ThreeD)),
+        "feature-dependencies" => commands
+            .queue(move |world: &mut World| crate::feature_list::show_dependencies(world, id)),
+        "feature-board-edit" => commands
+            .queue(move |world: &mut World| crate::board_in_studio::begin_edit(world, id, 0)),
+        "feature-create-board" => commands
+            .queue(move |world: &mut World| crate::board_in_studio::create_from_sketch(world, id)),
+        "feature-board-unlink" => commands
+            .queue(move |world: &mut World| crate::board_in_studio::unlink_outline(world, id)),
+        "feature-board-link" => commands
+            .queue(move |world: &mut World| crate::board_in_studio::link_outline_menu(world, id)),
+        "feature-board-show-layout" => commands.queue(move |world: &mut World| {
+            crate::board_in_studio::set_view(world, id, cadrs_core::pcb::board3d::BoardView::Layout)
+        }),
+        "feature-board-show-3d" => commands.queue(move |world: &mut World| {
+            crate::board_in_studio::set_view(world, id, cadrs_core::pcb::board3d::BoardView::ThreeD)
+        }),
         // P3G.4: a Derived feature's reference.
         "feature-open-linked" => commands.queue(move |world: &mut World| {
             if let Some(site) = crate::derived_ui::site(world, id) {
                 crate::linked_session::open_site(world, site);
             }
         }),
-        "feature-update-linked" | "feature-change-to-version" => commands.queue(move |world: &mut World| {
-            if let Some(site) = crate::derived_ui::site(world, id) {
-                crate::reference_manager::open(world, crate::reference_manager::Scope::Sites(vec![site]), 1);
-            }
-        }),
+        "feature-update-linked" | "feature-change-to-version" => {
+            commands.queue(move |world: &mut World| {
+                if let Some(site) = crate::derived_ui::site(world, id) {
+                    crate::reference_manager::open(
+                        world,
+                        crate::reference_manager::Scope::Sites(vec![site]),
+                        1,
+                    );
+                }
+            })
+        }
         "feature-pin-reference" | "feature-unpin-reference" => {
             let pinned = ev.item.as_str() == "feature-pin-reference";
             commands.queue(move |world: &mut World| {
                 if let Some(site) = crate::derived_ui::site(world, id) {
-                    let r = world.resource_mut::<ActiveDocument>().execute(&cadrs_core::link_update::SetPinned { sites: vec![site], pinned });
+                    let r = world.resource_mut::<ActiveDocument>().execute(
+                        &cadrs_core::link_update::SetPinned {
+                            sites: vec![site],
+                            pinned,
+                        },
+                    );
                     if let Err(e) = r {
                         crate::linked::error_toast(world, e.to_string());
                     }
@@ -3942,23 +4825,42 @@ fn on_feature_menu_action(
             });
         }
         "feature-switch-to-source" => commands.queue(move |world: &mut World| {
-            if let Some(r) = crate::derived_ui::derived_in_active(world, id).and_then(|d| d.source) {
+            if let Some(r) = crate::derived_ui::derived_in_active(world, id).and_then(|d| d.source)
+            {
                 world.resource_mut::<ActiveDocument>().set_active(r.element);
             }
         }),
-        "feature-suppress" => commands.queue(move |world: &mut World| crate::feature_list::set_suppressed(world, id, true)),
+        "feature-suppress" => commands
+            .queue(move |world: &mut World| crate::feature_list::set_suppressed(world, id, true)),
         // IR5.5: Dynamic suppression ▸ Suppress by variable.
-        "feature-suppress-by-variable" => commands.queue(move |world: &mut World| crate::suppress_variable::open(world, id)),
-        "feature-remove-suppression-variable" => commands.queue(move |world: &mut World| crate::suppress_variable::remove(world, id)),
-        "feature-unsuppress" => commands.queue(move |world: &mut World| crate::feature_list::set_suppressed(world, id, false)),
-        "feature-add-to-folder" => commands.queue(move |world: &mut World| crate::feature_folders::add_selection_to_folder(world, id)),
-        "feature-roll-here" => commands.queue(move |world: &mut World| crate::feature_list::roll_to(world, Some(id))),
-        "feature-roll-end" => commands.queue(|world: &mut World| crate::feature_list::roll_to(world, None)),
+        "feature-suppress-by-variable" => {
+            commands.queue(move |world: &mut World| crate::suppress_variable::open(world, id))
+        }
+        "feature-remove-suppression-variable" => {
+            commands.queue(move |world: &mut World| crate::suppress_variable::remove(world, id))
+        }
+        "feature-unsuppress" => commands
+            .queue(move |world: &mut World| crate::feature_list::set_suppressed(world, id, false)),
+        "feature-add-to-folder" => commands.queue(move |world: &mut World| {
+            crate::feature_folders::add_selection_to_folder(world, id)
+        }),
+        "feature-roll-here" => {
+            commands.queue(move |world: &mut World| crate::feature_list::roll_to(world, Some(id)))
+        }
+        "feature-roll-end" => {
+            commands.queue(|world: &mut World| crate::feature_list::roll_to(world, None))
+        }
         "feature-sketch-appearance" => commands.queue(move |world: &mut World| {
-            crate::appearance::open_appearance_dialog(world, crate::appearance::AppearanceTarget::Sketch(id));
+            crate::appearance::open_appearance_dialog(
+                world,
+                crate::appearance::AppearanceTarget::Sketch(id),
+            );
         }),
         "feature-appearance" => commands.queue(move |world: &mut World| {
-            crate::appearance::open_appearance_dialog(world, crate::appearance::AppearanceTarget::Feature(id));
+            crate::appearance::open_appearance_dialog(
+                world,
+                crate::appearance::AppearanceTarget::Feature(id),
+            );
         }),
         "feature-delete" => {
             commands.queue(move |world: &mut World| {
@@ -3975,7 +4877,10 @@ fn on_feature_menu_action(
                     feature: id,
                     label: format!("Delete {name}"),
                 });
-                world.resource_mut::<crate::viewport::Selection>().0.retain(|p| *p != Pick::Feature(id));
+                world
+                    .resource_mut::<crate::viewport::Selection>()
+                    .0
+                    .retain(|p| *p != Pick::Feature(id));
             });
         }
         _ => {}
@@ -4014,7 +4919,10 @@ fn on_sketch_eye(ev: On<cadrs_ui::TreeRowToggled>, q: Query<&FeatureRow>, mut co
     };
     let sketch = row.0;
     commands.queue(move |world: &mut World| {
-        let shown = !world.resource::<crate::parts::PartCache>().hidden_sketches.contains(&sketch);
+        let shown = !world
+            .resource::<crate::parts::PartCache>()
+            .hidden_sketches
+            .contains(&sketch);
         let Some(mut doc) = world.get_resource_mut::<ActiveDocument>() else {
             return;
         };
@@ -4072,7 +4980,12 @@ fn on_tree_toggle(
             .is_ok_and(|p| p.parent() == ev.entity)
             && (i.name == "chevron-down-medium" || i.name == "chevron-right-medium")
         {
-            i.name = if open { "chevron-down-medium" } else { "chevron-right-medium" }.into();
+            i.name = if open {
+                "chevron-down-medium"
+            } else {
+                "chevron-right-medium"
+            }
+            .into();
         }
     }
 }
@@ -4108,7 +5021,10 @@ fn document_shortcuts(
     q_fields: Query<(), With<TextInputField>>,
     q_dialogs: Query<(), With<cadrs_ui::DialogRoot>>,
     doc: Option<ResMut<ActiveDocument>>,
-    (session, extrude): (Option<Res<SketchSession>>, Option<Res<crate::extrude::ExtrudeSession>>),
+    (session, extrude): (
+        Option<Res<SketchSession>>,
+        Option<Res<crate::extrude::ExtrudeSession>>,
+    ),
     mut commands: Commands,
 ) {
     let Some(mut doc) = doc else {
@@ -4169,7 +5085,9 @@ fn update_undo_buttons(
         .chain(q_redo.iter().map(|(e, d)| (e, d, can_redo)));
     for (e, disabled, enabled) in states {
         if enabled && disabled {
-            commands.entity(e).try_remove::<bevy::ui::InteractionDisabled>();
+            commands
+                .entity(e)
+                .try_remove::<bevy::ui::InteractionDisabled>();
         } else if !enabled && !disabled {
             commands.entity(e).try_insert(bevy::ui::InteractionDisabled);
         }
@@ -4182,8 +5100,21 @@ mod tab_name_tests {
 
     #[test]
     fn tab_names_are_unique() {
-        let names = unique_tab_names(&[("bracket_pair", "part-studio"), ("Bracket pair", "assembly"), ("Part Studio 1", "part-studio"), ("Bracket pair", "assembly")]);
-        assert_eq!(names, ["tab-bracket-pair", "tab-bracket-pair-assembly", "tab-part-studio-1", "tab-bracket-pair-assembly-2"]);
+        let names = unique_tab_names(&[
+            ("bracket_pair", "part-studio"),
+            ("Bracket pair", "assembly"),
+            ("Part Studio 1", "part-studio"),
+            ("Bracket pair", "assembly"),
+        ]);
+        assert_eq!(
+            names,
+            [
+                "tab-bracket-pair",
+                "tab-bracket-pair-assembly",
+                "tab-part-studio-1",
+                "tab-bracket-pair-assembly-2"
+            ]
+        );
     }
 }
 
@@ -4204,22 +5135,60 @@ mod assembly_range_tests {
             .init_resource::<cadrs_ui::menu::LastPointerButton>()
             .add_message::<PickRequest>()
             .add_observer(on_pick_row_activate);
-        let picks: Vec<Pick> = (0..4).map(|_| Pick::Part(cadrs_core::assembly::InstanceId::new().part_id())).collect();
-        let entities: Vec<Entity> = picks.iter().map(|p| app.world_mut().spawn(PickRow(*p)).id()).collect();
+        let picks: Vec<Pick> = (0..4)
+            .map(|_| Pick::Part(cadrs_core::assembly::InstanceId::new().part_id()))
+            .collect();
+        let entities: Vec<Entity> = picks
+            .iter()
+            .map(|p| app.world_mut().spawn(PickRow(*p)).id())
+            .collect();
         let header = app.world_mut().spawn_empty().id();
-        let container = app.world_mut().spawn(crate::assembly::list::InstanceRows).id();
+        let container = app
+            .world_mut()
+            .spawn(crate::assembly::list::InstanceRows)
+            .id();
         // Entity creation order deliberately differs from display order; the last row is
         // outside this tree (for example, a part row in another panel).
-        app.world_mut().entity_mut(container).add_children(&[entities[2], header, entities[0], entities[1]]);
-        app.world_mut().trigger(Activate { entity: entities[2] });
+        app.world_mut().entity_mut(container).add_children(&[
+            entities[2],
+            header,
+            entities[0],
+            entities[1],
+        ]);
+        app.world_mut().trigger(Activate {
+            entity: entities[2],
+        });
         // A plain click toggles the row (Onshape).
-        assert_eq!(app.world_mut().resource_mut::<FeatureRowClick>().pending.take(), Some((picks[2], RowSelect::Toggle)));
+        assert_eq!(
+            app.world_mut()
+                .resource_mut::<FeatureRowClick>()
+                .pending
+                .take(),
+            Some((picks[2], RowSelect::Toggle))
+        );
         app.world_mut().resource_mut::<Selection>().0 = vec![picks[2]];
-        app.world_mut().resource_mut::<ButtonInput<KeyCode>>().press(KeyCode::ShiftRight);
-        app.world_mut().trigger(Activate { entity: entities[1] });
-        assert_eq!(app.world_mut().resource_mut::<FeatureRowClick>().pending.take(), Some((picks[1], RowSelect::Range(vec![picks[2], picks[0], picks[1]]))));
-        app.world_mut().resource_mut::<cadrs_ui::menu::LastPointerButton>().0 = bevy::picking::pointer::PointerButton::Secondary;
-        app.world_mut().trigger(Activate { entity: entities[0] });
+        app.world_mut()
+            .resource_mut::<ButtonInput<KeyCode>>()
+            .press(KeyCode::ShiftRight);
+        app.world_mut().trigger(Activate {
+            entity: entities[1],
+        });
+        assert_eq!(
+            app.world_mut()
+                .resource_mut::<FeatureRowClick>()
+                .pending
+                .take(),
+            Some((
+                picks[1],
+                RowSelect::Range(vec![picks[2], picks[0], picks[1]])
+            ))
+        );
+        app.world_mut()
+            .resource_mut::<cadrs_ui::menu::LastPointerButton>()
+            .0 = bevy::picking::pointer::PointerButton::Secondary;
+        app.world_mut().trigger(Activate {
+            entity: entities[0],
+        });
         assert!(app.world().resource::<FeatureRowClick>().pending.is_none());
         assert_eq!(app.world().resource::<Selection>().0, vec![picks[2]]);
     }
@@ -4234,7 +5203,11 @@ mod layout_tests {
     #[test]
     fn ctrl_z_undoes_on_azerty() {
         let mut active = ActiveDocument::new(cadrs_core::Document::new("Layouts"));
-        active.execute(&RenameDocument { name: "Renamed".into() }).unwrap();
+        active
+            .execute(&RenameDocument {
+                name: "Renamed".into(),
+            })
+            .unwrap();
         let mut keys = ButtonInput::<KeyCode>::default();
         keys.press(KeyCode::ControlLeft);
         let mut app = App::new();
@@ -4245,16 +5218,29 @@ mod layout_tests {
             .add_systems(Update, document_shortcuts);
         let press = |app: &mut App, code: KeyCode, ch: &str| {
             app.world_mut().write_message(KeyboardInput {
-                key_code: code, logical_key: Key::Character(ch.into()),
-                state: ButtonState::Pressed, text: None, repeat: false, window: Entity::PLACEHOLDER,
+                key_code: code,
+                logical_key: Key::Character(ch.into()),
+                state: ButtonState::Pressed,
+                text: None,
+                repeat: false,
+                window: Entity::PLACEHOLDER,
             });
             app.update();
         };
         // AZERTY's W sits on QWERTY's Z: Ctrl+W must not undo.
         press(&mut app, KeyCode::KeyZ, "w");
-        assert_eq!(app.world().resource::<ActiveDocument>().history.undo_len(), 1);
+        assert_eq!(
+            app.world().resource::<ActiveDocument>().history.undo_len(),
+            1
+        );
         press(&mut app, KeyCode::KeyW, "z");
-        assert_eq!(app.world().resource::<ActiveDocument>().history.undo_len(), 0);
-        assert_eq!(app.world().resource::<ActiveDocument>().history.redo_len(), 1);
+        assert_eq!(
+            app.world().resource::<ActiveDocument>().history.undo_len(),
+            0
+        );
+        assert_eq!(
+            app.world().resource::<ActiveDocument>().history.redo_len(),
+            1
+        );
     }
 }

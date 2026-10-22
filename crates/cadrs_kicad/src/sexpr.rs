@@ -31,7 +31,10 @@ pub fn parse(text: &str) -> Result<Sexp, ParseError> {
     let b = text.as_bytes();
     let mut i = 0;
     let mut stack: Vec<Vec<Sexp>> = vec![];
-    let err = |offset, m: &str| ParseError { offset, message: m.into() };
+    let err = |offset, m: &str| ParseError {
+        offset,
+        message: m.into(),
+    };
     loop {
         while i < b.len() && b[i].is_ascii_whitespace() {
             i += 1;
@@ -128,7 +131,9 @@ impl Sexp {
 
     /// The child lists with keyword `name`.
     pub fn all<'a, 'n>(&'a self, name: &'n str) -> impl Iterator<Item = &'a Sexp> + use<'a, 'n> {
-        self.items().iter().filter(move |c| matches!(c, Sexp::List(_)) && c.head() == name)
+        self.items()
+            .iter()
+            .filter(move |c| matches!(c, Sexp::List(_)) && c.head() == name)
     }
 
     /// The first child list with keyword `name`.
@@ -167,7 +172,10 @@ impl Sexp {
 
     /// Whether a bare atom is among the arguments (`(attr smd exclude_from_bom)`).
     pub fn has_atom(&self, name: &str) -> bool {
-        self.items().iter().skip(1).any(|c| matches!(c, Sexp::Atom(a) if a == name))
+        self.items()
+            .iter()
+            .skip(1)
+            .any(|c| matches!(c, Sexp::Atom(a) if a == name))
     }
 }
 
@@ -177,7 +185,10 @@ mod tests {
 
     #[test]
     fn parses_nested_lists_and_strings() {
-        let s = parse(r#"(kicad_sch (version 20250114) (text "a \"b\"\nc" (at 1.5 -2 90)) (hide yes) bold)"#).unwrap();
+        let s = parse(
+            r#"(kicad_sch (version 20250114) (text "a \"b\"\nc" (at 1.5 -2 90)) (hide yes) bold)"#,
+        )
+        .unwrap();
         assert_eq!(s.head(), "kicad_sch");
         assert_eq!(s.get("version"), Some("20250114"));
         let t = s.find("text").unwrap();

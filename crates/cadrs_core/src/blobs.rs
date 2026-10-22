@@ -39,7 +39,11 @@ pub fn hash_of(bytes: &[u8]) -> String {
         // Mix in the length so prefixes of each other differ in both halves.
         h ^ (bytes.len() as u64).wrapping_mul(0x9e37_79b9_7f4a_7c15)
     };
-    format!("{:016x}{:016x}", fnv(0xcbf2_9ce4_8422_2325), fnv(0x6c62_272e_07bb_0142))
+    format!(
+        "{:016x}{:016x}",
+        fnv(0xcbf2_9ce4_8422_2325),
+        fnv(0x6c62_272e_07bb_0142)
+    )
 }
 
 /// Keeps `bytes` in the cache and returns their hash.
@@ -69,7 +73,10 @@ pub fn insert_known(hash: &str, bytes: Vec<u8>) {
 
 /// The hashes of the loaded blobs.
 pub fn hashes() -> Vec<String> {
-    cache().read().map(|c| c.keys().cloned().collect()).unwrap_or_default()
+    cache()
+        .read()
+        .map(|c| c.keys().cloned().collect())
+        .unwrap_or_default()
 }
 
 /// Called with each file [`insert`] adds to the cache (the kernel process sends them to the
@@ -104,8 +111,16 @@ pub fn contains(hash: &str) -> bool {
 /// The file a blob is stored in: `<hash>.<ext>` (the extension is the imported file's, lower
 /// case, for people browsing the folder; the hash alone identifies it).
 pub fn file_name(hash: &str, ext: &str) -> String {
-    let ext: String = ext.chars().filter(|c| c.is_ascii_alphanumeric()).collect::<String>().to_ascii_lowercase();
-    if ext.is_empty() { hash.to_string() } else { format!("{hash}.{ext}") }
+    let ext: String = ext
+        .chars()
+        .filter(|c| c.is_ascii_alphanumeric())
+        .collect::<String>()
+        .to_ascii_lowercase();
+    if ext.is_empty() {
+        hash.to_string()
+    } else {
+        format!("{hash}.{ext}")
+    }
 }
 
 /// The blobs a document's features use: (hash, extension), each once. A linked copy's features
@@ -113,18 +128,32 @@ pub fn file_name(hash: &str, ext: &str) -> String {
 /// Derived feature's source studio's (it rebuilds here too).
 pub fn used_by(doc: &Document) -> Vec<(String, String)> {
     let mut out: Vec<(String, String)> = Vec::new();
-    let all = doc.elements.iter().chain(doc.standard_content.iter().map(|s| &s.element)).chain(doc.linked.iter().map(|l| &l.element));
+    let all = doc
+        .elements
+        .iter()
+        .chain(doc.standard_content.iter().map(|s| &s.element))
+        .chain(doc.linked.iter().map(|l| &l.element));
     for el in all {
         used_in(el.features(), &mut out);
         // A PCB Studio's 3D model files (its boards' footprints and its components').
         if let Some(s) = el.pcb() {
-            let boards = s.boards.iter().filter_map(|b| b.design()).flat_map(|d| d.board.footprints.iter().map(|f| &f.footprint));
-            let parts = s.components.iter().filter_map(|c| c.component.footprint.as_ref());
+            let boards = s
+                .boards
+                .iter()
+                .filter_map(|b| b.design())
+                .flat_map(|d| d.board.footprints.iter().map(|f| &f.footprint));
+            let parts = s
+                .components
+                .iter()
+                .filter_map(|c| c.component.footprint.as_ref());
             for m in boards.chain(parts).flat_map(|f| &f.models) {
                 if let Some(h) = &m.blob
                     && !out.iter().any(|(x, _)| x == h)
                 {
-                    let ext = std::path::Path::new(&m.source).extension().map(|e| e.to_string_lossy().into_owned()).unwrap_or_default();
+                    let ext = std::path::Path::new(&m.source)
+                        .extension()
+                        .map(|e| e.to_string_lossy().into_owned())
+                        .unwrap_or_default();
                     out.push((h.clone(), ext));
                 }
             }
@@ -136,12 +165,21 @@ pub fn used_by(doc: &Document) -> Vec<(String, String)> {
 fn used_in(features: &[crate::document::Feature], out: &mut Vec<(String, String)>) {
     for f in features {
         match &f.kind {
-            FeatureKind::Import(x) if !out.iter().any(|(h, _)| *h == x.blob) => out.push((x.blob.clone(), x.extension())),
-            FeatureKind::Image(x) if !out.iter().any(|(h, _)| *h == x.blob) => out.push((x.blob.clone(), x.extension())),
+            FeatureKind::Import(x) if !out.iter().any(|(h, _)| *h == x.blob) => {
+                out.push((x.blob.clone(), x.extension()))
+            }
+            FeatureKind::Image(x) if !out.iter().any(|(h, _)| *h == x.blob) => {
+                out.push((x.blob.clone(), x.extension()))
+            }
             FeatureKind::Derived(x) => {
                 used_in(&x.studio, out);
                 // A derived board's model files (its layout's footprints).
-                for m in x.board.iter().flat_map(|b| b.layout.footprints.iter()).flat_map(|f| &f.footprint.models) {
+                for m in x
+                    .board
+                    .iter()
+                    .flat_map(|b| b.layout.footprints.iter())
+                    .flat_map(|f| &f.footprint.models)
+                {
                     if let Some(h) = &m.blob
                         && !out.iter().any(|(x, _)| x == h)
                     {
@@ -184,7 +222,9 @@ pub fn load_dir(dir: &Path) -> io::Result<()> {
     };
     for e in entries.flatten() {
         let path = e.path();
-        let Some(stem) = path.file_stem().and_then(|s| s.to_str()) else { continue };
+        let Some(stem) = path.file_stem().and_then(|s| s.to_str()) else {
+            continue;
+        };
         if stem.len() != 32 || contains(stem) || path.extension().is_some_and(|x| x == "tmp") {
             continue;
         }

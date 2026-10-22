@@ -46,7 +46,11 @@ fn glyphs() -> &'static Vec<Glyph> {
                     }
                 }
                 strokes.retain(|s: &Vec<[f64; 2]>| !s.is_empty());
-                Glyph { left, right, strokes }
+                Glyph {
+                    left,
+                    right,
+                    strokes,
+                }
             })
             .collect()
     })
@@ -55,21 +59,29 @@ fn glyphs() -> &'static Vec<Glyph> {
 fn glyph(c: char) -> &'static Glyph {
     let g = glyphs();
     let i = (c as usize).wrapping_sub(32);
-    g.get(i).filter(|_| (c as u32) < 127).unwrap_or(&g[('?' as usize) - 32])
+    g.get(i)
+        .filter(|_| (c as u32) < 127)
+        .unwrap_or(&g[('?' as usize) - 32])
 }
 
 /// The stroke width for a style: its own, else a ninth of the height (an eighth when bold).
 pub fn stroke_width(style: &TextStyle) -> Nm {
-    style.thickness.unwrap_or(if style.bold { style.size.h / 6 } else { style.size.h / 9 })
+    style.thickness.unwrap_or(if style.bold {
+        style.size.h / 6
+    } else {
+        style.size.h / 9
+    })
 }
 
 /// Width of one line of text in nanometres (advance widths, no stroke).
 pub fn line_width(line: &str, style: &TextStyle) -> f64 {
     let k = style.size.w as f64 / CAP;
-    line.chars().map(|c| {
-        let g = glyph(c);
-        (g.right - g.left) * k
-    }).sum()
+    line.chars()
+        .map(|c| {
+            let g = glyph(c);
+            (g.right - g.left) * k
+        })
+        .sum()
 }
 
 /// The text's strokes in its own frame: anchor at the origin, baseline along +X, Y up,
@@ -129,7 +141,10 @@ pub fn strokes(t: &Text) -> Vec<Vec<Pt>> {
             line.into_iter()
                 .map(|[x, y]| {
                     let x = if st.mirrored { -x } else { x };
-                    Pt::new(t.at.x + (x * c - y * s).round() as Nm, t.at.y + (x * s + y * c).round() as Nm)
+                    Pt::new(
+                        t.at.x + (x * c - y * s).round() as Nm,
+                        t.at.y + (x * s + y * c).round() as Nm,
+                    )
                 })
                 .collect()
         })
@@ -154,14 +169,22 @@ mod tests {
     use crate::units::{Size, mm};
 
     fn style() -> TextStyle {
-        TextStyle { size: Size::mm(1.0, 1.0), h_align: HAlign::Left, v_align: VAlign::Bottom, ..Default::default() }
+        TextStyle {
+            size: Size::mm(1.0, 1.0),
+            h_align: HAlign::Left,
+            v_align: VAlign::Bottom,
+            ..Default::default()
+        }
     }
 
     #[test]
     fn capitals_are_the_text_height() {
         let s = local_strokes("E", &style());
         let ys: Vec<f64> = s.iter().flatten().map(|p| p[1]).collect();
-        let (lo, hi) = (ys.iter().cloned().fold(f64::MAX, f64::min), ys.iter().cloned().fold(f64::MIN, f64::max));
+        let (lo, hi) = (
+            ys.iter().cloned().fold(f64::MAX, f64::min),
+            ys.iter().cloned().fold(f64::MIN, f64::max),
+        );
         assert!(lo.abs() < 1.0, "baseline {lo}");
         assert!((hi - mm(1.0) as f64).abs() < 1.0, "cap {hi}");
     }
@@ -172,15 +195,28 @@ mod tests {
         let w = line_width("R1", &st);
         assert!(w > mm(1.0) as f64 && w < mm(2.0) as f64, "{w}");
         st.h_align = HAlign::Right;
-        let xs: Vec<f64> = local_strokes("R1", &st).iter().flatten().map(|p| p[0]).collect();
+        let xs: Vec<f64> = local_strokes("R1", &st)
+            .iter()
+            .flatten()
+            .map(|p| p[0])
+            .collect();
         assert!(xs.iter().all(|x| *x <= 1.0));
         // Turned a quarter: the text runs up from its anchor.
-        let t = Text { text: "led".into(), at: Pt::ZERO, angle: 90.0, style: style(), visible: true };
+        let t = Text {
+            text: "led".into(),
+            at: Pt::ZERO,
+            angle: 90.0,
+            style: style(),
+            visible: true,
+        };
         let b = bounds(&t).unwrap();
         assert!(b.size().h > b.size().w);
         assert!(b.min.y > -mm(0.2));
         // Pointing down reads upwards too (readable), sitting on the same side.
-        let t2 = Text { angle: 270.0, ..t.clone() };
+        let t2 = Text {
+            angle: 270.0,
+            ..t.clone()
+        };
         assert!(bounds(&t2).unwrap().max.y < mm(0.2));
     }
 

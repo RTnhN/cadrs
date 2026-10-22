@@ -28,8 +28,14 @@ pub fn current(world: &World) -> Option<(ElementId, BoardId, Design)> {
 /// Applies `f` to the shown board's design and stores the result as one undo step named
 /// `label`. Errors from `f` (and from the command) come back as a toast. Zones are poured
 /// again whenever the board changed (in the same step): they are always shown filled.
-pub fn commit(world: &mut World, label: &str, f: impl FnOnce(&mut Design) -> Result<(), String>) -> bool {
-    let Some((element, board, mut d)) = current(world) else { return false };
+pub fn commit(
+    world: &mut World,
+    label: &str,
+    f: impl FnOnce(&mut Design) -> Result<(), String>,
+) -> bool {
+    let Some((element, board, mut d)) = current(world) else {
+        return false;
+    };
     let unfilled = |b: &cadrs_eda::board::Board| {
         let mut b = b.clone();
         cadrs_eda::zone::unfill_all(&mut b);
@@ -49,7 +55,12 @@ pub fn commit(world: &mut World, label: &str, f: impl FnOnce(&mut Design) -> Res
         cadrs_eda::zone::adopt_nets(&mut d.board);
         cadrs_eda::zone::fill_all(&mut d.board);
     }
-    let cmd = SetDesign { element, board, design: Box::new(d), label: label.into() };
+    let cmd = SetDesign {
+        element,
+        board,
+        design: Box::new(d),
+        label: label.into(),
+    };
     let r = world.resource_mut::<ActiveDocument>().execute(&cmd);
     if let Err(e) = r {
         toast(world, &e.to_string());
@@ -69,7 +80,10 @@ pub fn toast(world: &mut World, msg: &str) {
 pub fn text_value(world: &mut World, name: &str) -> String {
     let field = format!("{name}-field");
     let mut q = world.query_filtered::<(&Name, &EditableText), With<TextInputField>>();
-    q.iter(world).find(|(n, _)| n.as_str() == field).map(|(_, t)| t.value().to_string()).unwrap_or_default()
+    q.iter(world)
+        .find(|(n, _)| n.as_str() == field)
+        .map(|(_, t)| t.value().to_string())
+        .unwrap_or_default()
 }
 
 /// Sets the text of the text input named `name`.
@@ -86,9 +100,13 @@ pub fn set_text_value(world: &mut World, name: &str, value: &str) {
 /// studio.
 pub fn libraries(world: &World) -> LibraryTable {
     let mut t = shared_libraries(world);
-    let Some((el, _, _)) = world.resource::<Eda2d>().0 else { return t };
+    let Some((el, _, _)) = world.resource::<Eda2d>().0 else {
+        return t;
+    };
     let doc = world.resource::<ActiveDocument>();
-    let Some(e) = doc.doc.element(el) else { return t };
+    let Some(e) = doc.doc.element(el) else {
+        return t;
+    };
     let Some(s) = e.pcb() else { return t };
     let mut lib = Library::new(project_library_name(&e.name), Scope::Project);
     for c in &s.components {
@@ -96,9 +114,15 @@ pub fn libraries(world: &World) -> LibraryTable {
             let mut sym = sym.clone();
             // A symbol without a default footprint takes its component's.
             if let Some(fp) = &c.component.footprint
-                && sym.field(cadrs_eda::symbol::fields::FOOTPRINT).is_none_or(|f| f.value().is_empty())
+                && sym
+                    .field(cadrs_eda::symbol::fields::FOOTPRINT)
+                    .is_none_or(|f| f.value().is_empty())
             {
-                cadrs_eda::lib_edit::set_symbol_field(&mut sym, cadrs_eda::symbol::fields::FOOTPRINT, &format!("{}:{}", lib.name, fp.name()));
+                cadrs_eda::lib_edit::set_symbol_field(
+                    &mut sym,
+                    cadrs_eda::symbol::fields::FOOTPRINT,
+                    &format!("{}:{}", lib.name, fp.name()),
+                );
             }
             lib.put_symbol(sym);
         }
@@ -132,7 +156,9 @@ type Renamed = (String, String);
 /// footprints (by name), and footprints only its board holds (as components of their own). The
 /// copy then names them all in the studio's project library.
 pub fn carry_parts(world: &World, clip: &mut cadrs_eda::sch_edit::SchClip) {
-    let Some((el, _, _)) = world.resource::<Eda2d>().0 else { return };
+    let Some((el, _, _)) = world.resource::<Eda2d>().0 else {
+        return;
+    };
     let doc = world.resource::<ActiveDocument>();
     let Some(e) = doc.doc.element(el) else { return };
     let Some(s) = e.pcb() else { return };
@@ -150,13 +176,31 @@ pub fn carry_parts(world: &World, clip: &mut cadrs_eda::sch_edit::SchClip) {
     let used: Vec<(String, String)> = clip
         .symbols
         .iter()
-        .map(|p| (p.symbol.clone(), p.field(cadrs_eda::symbol::fields::FOOTPRINT).map(|f| f.value().to_string()).unwrap_or_default()))
-        .chain(clip.definitions.iter().map(|d| (d.id.clone(), d.field(cadrs_eda::symbol::fields::FOOTPRINT).map(|f| f.value().to_string()).unwrap_or_default())))
+        .map(|p| {
+            (
+                p.symbol.clone(),
+                p.field(cadrs_eda::symbol::fields::FOOTPRINT)
+                    .map(|f| f.value().to_string())
+                    .unwrap_or_default(),
+            )
+        })
+        .chain(clip.definitions.iter().map(|d| {
+            (
+                d.id.clone(),
+                d.field(cadrs_eda::symbol::fields::FOOTPRINT)
+                    .map(|f| f.value().to_string())
+                    .unwrap_or_default(),
+            )
+        }))
         .collect();
     for (sym, fp) in used {
         if shared.symbol(&sym).is_none() {
             let n = name_of(&sym);
-            if let Some(c) = s.components.iter().find(|c| c.component.symbol.as_ref().is_some_and(|x| x.name() == n)) {
+            if let Some(c) = s
+                .components
+                .iter()
+                .find(|c| c.component.symbol.as_ref().is_some_and(|x| x.name() == n))
+            {
                 take(&c.component);
                 syms.push((sym.clone(), format!("{lib}:{n}")));
             }
@@ -165,19 +209,32 @@ pub fn carry_parts(world: &World, clip: &mut cadrs_eda::sch_edit::SchClip) {
             continue;
         }
         let n = name_of(&fp);
-        if let Some(c) = s.components.iter().find(|c| c.component.footprint.as_ref().is_some_and(|x| x.name() == n)) {
+        if let Some(c) = s.components.iter().find(|c| {
+            c.component
+                .footprint
+                .as_ref()
+                .is_some_and(|x| x.name() == n)
+        }) {
             take(&c.component);
         } else if let Some(f) = here.footprint(&fp) {
             // A footprint only this board holds: a component of its own.
             let mut f = f.clone();
             f.id = n.clone();
-            take(&cadrs_eda::Component { name: n.clone(), symbol: None, footprint: Some(f) });
+            take(&cadrs_eda::Component {
+                name: n.clone(),
+                symbol: None,
+                footprint: Some(f),
+            });
         } else {
             continue;
         }
         fps.push((fp.clone(), format!("{lib}:{n}")));
     }
-    let map = |m: &[(String, String)], id: &str| m.iter().find(|(o, n)| o == id && o != n).map(|(_, n)| n.clone());
+    let map = |m: &[(String, String)], id: &str| {
+        m.iter()
+            .find(|(o, n)| o == id && o != n)
+            .map(|(_, n)| n.clone())
+    };
     clip.rename_parts(&|id| map(&syms, id), &|id| map(&fps, id));
     clip.parts = parts;
     clip.library = lib;
@@ -187,14 +244,28 @@ pub fn carry_parts(world: &World, clip: &mut cadrs_eda::sch_edit::SchClip) {
 /// library, and the ones the studio lacks added to its Components (each an undo step; the
 /// caller folds them into the paste's). Returns the copy as it pastes here and the history
 /// length before any part was added.
-pub fn adopt_parts(world: &mut World, clip: &cadrs_eda::sch_edit::SchClip) -> (cadrs_eda::sch_edit::SchClip, usize) {
+pub fn adopt_parts(
+    world: &mut World,
+    clip: &cadrs_eda::sch_edit::SchClip,
+) -> (cadrs_eda::sch_edit::SchClip, usize) {
     let mark = world.resource::<ActiveDocument>().history.undo_len();
     let mut clip = clip.clone();
-    let Some((el, _, _)) = world.resource::<Eda2d>().0 else { return (clip, mark) };
-    let Some(e) = world.resource::<ActiveDocument>().doc.element(el) else { return (clip, mark) };
-    let Some(s) = e.pcb() else { return (clip, mark) };
+    let Some((el, _, _)) = world.resource::<Eda2d>().0 else {
+        return (clip, mark);
+    };
+    let Some(e) = world.resource::<ActiveDocument>().doc.element(el) else {
+        return (clip, mark);
+    };
+    let Some(s) = e.pcb() else {
+        return (clip, mark);
+    };
     let lib = project_library_name(&e.name);
-    let missing: Vec<cadrs_eda::Component> = clip.parts.iter().filter(|p| !s.components.iter().any(|c| c.component.name == p.name)).cloned().collect();
+    let missing: Vec<cadrs_eda::Component> = clip
+        .parts
+        .iter()
+        .filter(|p| !s.components.iter().any(|c| c.component.name == p.name))
+        .cloned()
+        .collect();
     if !clip.library.is_empty() {
         let from = clip.library.clone();
         let map = |id: &str| cadrs_eda::rename::reprefix(id, &from, &lib);
@@ -203,9 +274,17 @@ pub fn adopt_parts(world: &mut World, clip: &cadrs_eda::sch_edit::SchClip) -> (c
     for mut p in missing {
         // Its symbol's default footprint: its own, as this studio's library has it.
         if let (Some(sym), Some(fp)) = (p.symbol.as_mut(), &p.footprint) {
-            cadrs_eda::lib_edit::set_symbol_field(sym, cadrs_eda::symbol::fields::FOOTPRINT, &format!("{lib}:{}", fp.name()));
+            cadrs_eda::lib_edit::set_symbol_field(
+                sym,
+                cadrs_eda::symbol::fields::FOOTPRINT,
+                &format!("{lib}:{}", fp.name()),
+            );
         }
-        let cmd = cadrs_core::pcb::AddComponent { element: el, name: None, value: Some(Box::new(p)) };
+        let cmd = cadrs_core::pcb::AddComponent {
+            element: el,
+            name: None,
+            value: Some(Box::new(p)),
+        };
         if let Err(e) = world.resource_mut::<ActiveDocument>().execute(&cmd) {
             warn!("paste: add component: {e}");
         }
@@ -216,21 +295,46 @@ pub fn adopt_parts(world: &mut World, clip: &cadrs_eda::sch_edit::SchClip) -> (c
 /// Adds a library part placed on a schematic to the studio's Components (its symbol, and its
 /// default footprint when the symbol names one), unless it is one already: a power port, one
 /// of the studio's own components, or a part of the same name. Returns whether it added one.
-pub fn add_library_component(world: &mut World, element: ElementId, sym: &cadrs_eda::symbol::Symbol) -> bool {
+pub fn add_library_component(
+    world: &mut World,
+    element: ElementId,
+    sym: &cadrs_eda::symbol::Symbol,
+) -> bool {
     if sym.power {
         return false;
     }
     let lib = libraries(world);
     let doc = world.resource::<ActiveDocument>();
-    let Some(e) = doc.doc.element(element) else { return false };
+    let Some(e) = doc.doc.element(element) else {
+        return false;
+    };
     let Some(s) = e.pcb() else { return false };
     let own = format!("{}:", project_library_name(&e.name));
-    if sym.id.starts_with(&own) || s.components.iter().any(|c| c.component.name == sym.name() || c.component.symbol.as_ref().is_some_and(|x| x.name() == sym.name())) {
+    if sym.id.starts_with(&own)
+        || s.components.iter().any(|c| {
+            c.component.name == sym.name()
+                || c.component
+                    .symbol
+                    .as_ref()
+                    .is_some_and(|x| x.name() == sym.name())
+        })
+    {
         return false;
     }
-    let footprint = sym.field(cadrs_eda::symbol::fields::FOOTPRINT).and_then(|f| lib.footprint(f.value())).cloned();
-    let value = cadrs_eda::Component { name: sym.name().to_string(), symbol: Some(sym.clone()), footprint };
-    let cmd = cadrs_core::pcb::AddComponent { element, name: None, value: Some(Box::new(value)) };
+    let footprint = sym
+        .field(cadrs_eda::symbol::fields::FOOTPRINT)
+        .and_then(|f| lib.footprint(f.value()))
+        .cloned();
+    let value = cadrs_eda::Component {
+        name: sym.name().to_string(),
+        symbol: Some(sym.clone()),
+        footprint,
+    };
+    let cmd = cadrs_core::pcb::AddComponent {
+        element,
+        name: None,
+        value: Some(Box::new(value)),
+    };
     match world.resource_mut::<ActiveDocument>().execute(&cmd) {
         Ok(_) => true,
         Err(e) => {
@@ -263,16 +367,25 @@ pub type StripSpec = &'static [Option<(&'static str, &'static str, &'static str,
 
 /// Keeps the right-edge tool strip of the shown mode on screen.
 pub fn sync_strip(world: &mut World, mode: Mode, spec: StripSpec) {
-    let show = world.resource::<Eda2d>().0.is_some_and(|(_, _, m)| m == mode);
+    let show = world
+        .resource::<Eda2d>()
+        .0
+        .is_some_and(|(_, _, m)| m == mode);
     let mut q = world.query::<(Entity, &ToolStrip)>();
     let existing = q.iter(world).find(|(_, s)| s.0 == mode).map(|(e, _)| e);
     match (show, existing) {
         (true, None) => {
             let mut qa = world.query_filtered::<Entity, With<ViewportArea>>();
-            let Some(area) = qa.iter(world).next() else { return };
+            let Some(area) = qa.iter(world).next() else {
+                return;
+            };
             let t = world.resource::<Theme>().clone();
             // On a board in a Part Studio: under the view cube.
-            let top = if world.resource::<Eda2d>().plane().is_some() { 232.0 } else { 48.0 };
+            let top = if world.resource::<Eda2d>().plane().is_some() {
+                232.0
+            } else {
+                48.0
+            };
             let name: Cow<'static, str> = match mode {
                 Mode::Schematic => "eda-schematic-tools".into(),
                 _ => "eda-layout-tools".into(),
@@ -298,10 +411,23 @@ pub fn sync_strip(world: &mut World, mode: Mode, spec: StripSpec) {
                     for item in spec.iter() {
                         match item {
                             Some((name, icon, tip, action)) => {
-                                s.spawn((ToolButton::new(*name, *icon).icon_size(18.0).tooltip(*tip).build(&t), StripButton { mode, action }));
+                                s.spawn((
+                                    ToolButton::new(*name, *icon)
+                                        .icon_size(18.0)
+                                        .tooltip(*tip)
+                                        .build(&t),
+                                    StripButton { mode, action },
+                                ));
                             }
                             None => {
-                                s.spawn((Node { height: Val::Px(1.0), margin: UiRect::vertical(Val::Px(3.0)), ..default() }, BackgroundColor(t.separator)));
+                                s.spawn((
+                                    Node {
+                                        height: Val::Px(1.0),
+                                        margin: UiRect::vertical(Val::Px(3.0)),
+                                        ..default()
+                                    },
+                                    BackgroundColor(t.separator),
+                                ));
                             }
                         }
                     }
@@ -321,7 +447,11 @@ pub fn sync_strip(world: &mut World, mode: Mode, spec: StripSpec) {
 #[derive(Message, Clone, Copy, Debug)]
 pub struct StripAction(pub Mode, pub &'static str);
 
-pub fn on_strip_button(a: On<Activate>, q: Query<&StripButton>, mut out: MessageWriter<StripAction>) {
+pub fn on_strip_button(
+    a: On<Activate>,
+    q: Query<&StripButton>,
+    mut out: MessageWriter<StripAction>,
+) {
     if let Ok(b) = q.get(a.entity) {
         out.write(StripAction(b.mode, b.action));
     }
@@ -330,7 +460,11 @@ pub fn on_strip_button(a: On<Activate>, q: Query<&StripButton>, mut out: Message
 /// Highlights the strip button of the active tool.
 pub fn mark_active(world: &mut World, mode: Mode, active: &str) {
     let mut q = world.query::<(Entity, &StripButton, Has<cadrs_ui::style::Selected>)>();
-    let changes: Vec<(Entity, bool)> = q.iter(world).filter(|(_, b, _)| b.mode == mode).filter_map(|(e, b, sel)| ((b.action == active) != sel).then_some((e, b.action == active))).collect();
+    let changes: Vec<(Entity, bool)> = q
+        .iter(world)
+        .filter(|(_, b, _)| b.mode == mode)
+        .filter_map(|(e, b, sel)| ((b.action == active) != sel).then_some((e, b.action == active)))
+        .collect();
     for (e, on) in changes {
         if on {
             world.entity_mut(e).insert(cadrs_ui::style::Selected);
@@ -343,7 +477,10 @@ pub fn mark_active(world: &mut World, mode: Mode, active: &str) {
 /// Whether keys should go to the canvas: a 2D view of `mode` shown, nothing typed into, no
 /// dialog open.
 pub fn keys_for(world: &mut World, mode: Mode) -> bool {
-    let shown = world.resource::<Eda2d>().0.is_some_and(|(_, _, m)| m == mode);
+    let shown = world
+        .resource::<Eda2d>()
+        .0
+        .is_some_and(|(_, _, m)| m == mode);
     // Typing: a text field has the focus (a closed dialog's button may leave a stale focus).
     let focus = world.resource::<bevy::input_focus::InputFocus>().get();
     let typing = focus.is_some_and(|e| world.get::<cadrs_ui::input::TextInputField>(e).is_some());
@@ -363,6 +500,13 @@ pub fn set_label(world: &mut World, name: &str, value: &str) {
 
 /// The name of the studio the shown view belongs to.
 pub fn studio_name(world: &World) -> String {
-    let Some((el, _, _)) = world.resource::<Eda2d>().0 else { return String::new() };
-    world.resource::<ActiveDocument>().doc.element(el).map(|e| e.name.clone()).unwrap_or_default()
+    let Some((el, _, _)) = world.resource::<Eda2d>().0 else {
+        return String::new();
+    };
+    world
+        .resource::<ActiveDocument>()
+        .doc
+        .element(el)
+        .map(|e| e.name.clone())
+        .unwrap_or_default()
 }

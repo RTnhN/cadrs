@@ -105,13 +105,31 @@ pub fn value_range(calc: BendCalc) -> (f64, f64, bool) {
 /// The value's range error, if it is out of range (the table cell's red and tooltip, X5).
 pub fn value_error(calc: BendCalc, value: f64) -> Option<RangeError> {
     let (min, max, min_exclusive) = value_range(calc);
-    let ok = value.is_finite() && if min_exclusive { value > min } else { value >= min } && value <= max;
-    (!ok).then(|| RangeError { field: calc.label().to_string(), value, min, max, min_exclusive })
+    let ok = value.is_finite()
+        && if min_exclusive {
+            value > min
+        } else {
+            value >= min
+        }
+        && value <= max;
+    (!ok).then(|| RangeError {
+        field: calc.label().to_string(),
+        value,
+        min,
+        max,
+        min_exclusive,
+    })
 }
 
 /// A radius's range error (a bend radius is at least 0).
 pub fn radius_error(radius: f64) -> Option<RangeError> {
-    (!(radius >= 0.0 && radius.is_finite())).then(|| RangeError { field: "Bend radius".into(), value: radius, min: 0.0, max: f64::INFINITY, min_exclusive: false })
+    (!(radius >= 0.0 && radius.is_finite())).then(|| RangeError {
+        field: "Bend radius".into(),
+        value: radius,
+        min: 0.0,
+        max: f64::INFINITY,
+        min_exclusive: false,
+    })
 }
 
 impl ModifyJointFeature {
@@ -152,8 +170,13 @@ impl ModifyJointFeature {
     pub fn edit(&self) -> Option<JointEdit> {
         let joint = self.joint?;
         let change = match self.joint_type {
-            JointType::Bend => JointChange::Bend { radius: (!self.use_model_radius).then_some(self.radius), value: self.bend_value() },
-            JointType::Rip => JointChange::Rip { style: self.rip_style },
+            JointType::Bend => JointChange::Bend {
+                radius: (!self.use_model_radius).then_some(self.radius),
+                value: self.bend_value(),
+            },
+            JointType::Rip => JointChange::Rip {
+                style: self.rip_style,
+            },
             JointType::Tangent => return None,
         };
         Some(JointEdit { joint, change })
@@ -166,7 +189,12 @@ impl ModifyJointFeature {
 
     /// A Modify joint that leaves `joint` as it is now (what a table edit starts from).
     pub fn of_joint(model: FeatureId, joint: &Joint, p: &Params) -> Self {
-        let mut x = ModifyJointFeature { model, joint: Some(joint.id), calc: p.bend_calc, ..Default::default() };
+        let mut x = ModifyJointFeature {
+            model,
+            joint: Some(joint.id),
+            calc: p.bend_calc,
+            ..Default::default()
+        };
         let mv = BendValue::from_params(p);
         x.value = mv.value();
         x.value_expr = value_expr(p.bend_calc, x.value);
@@ -231,7 +259,13 @@ impl TableEdit {
 /// The Modify joint a table edit gives: the joint's own Modify joint (`existing`) changed, or a
 /// new one that keeps the joint as it is (`joint`, `params`: the model as built) but for the
 /// edit.
-pub fn table_edit(model: FeatureId, existing: Option<&ModifyJointFeature>, joint: &Joint, params: &Params, edit: &TableEdit) -> ModifyJointFeature {
+pub fn table_edit(
+    model: FeatureId,
+    existing: Option<&ModifyJointFeature>,
+    joint: &Joint,
+    params: &Params,
+    edit: &TableEdit,
+) -> ModifyJointFeature {
     let mut x = match existing {
         Some(e) => e.clone(),
         None => ModifyJointFeature::of_joint(model, joint, params),
@@ -269,12 +303,22 @@ pub fn table_edit(model: FeatureId, existing: Option<&ModifyJointFeature>, joint
 
 /// The **Bend** or **Jog** feature that made a joint, if one did (SM13.3: the table edits that
 /// feature, not a Modify joint). `ctx` is the joint's model as built.
-pub fn bend_feature_of<'a>(features: &'a [Feature], ctx: &crate::sheetmetal::SheetMetalContext, joint: JointId) -> Option<&'a Feature> {
+pub fn bend_feature_of<'a>(
+    features: &'a [Feature],
+    ctx: &crate::sheetmetal::SheetMetalContext,
+    joint: JointId,
+) -> Option<&'a Feature> {
     let owner = ctx.owner(crate::sheetmetal::PieceKey::Joint(joint));
     if owner == ctx.feature {
         return None;
     }
-    features.iter().find(|f| f.id == owner && matches!(f.kind, FeatureKind::SheetMetalTool(SheetMetalTool::Bend(_) | SheetMetalTool::Jog(_))))
+    features.iter().find(|f| {
+        f.id == owner
+            && matches!(
+                f.kind,
+                FeatureKind::SheetMetalTool(SheetMetalTool::Bend(_) | SheetMetalTool::Jog(_))
+            )
+    })
 }
 
 /// A table edit of a bend a Bend or Jog feature made (SM13.3): that feature with its own
@@ -282,8 +326,15 @@ pub fn bend_feature_of<'a>(features: &'a [Feature], ctx: &crate::sheetmetal::She
 /// Bend feature"). A value typed as a bend allowance or deduction (the model's calculation) is
 /// turned into the K factor that gives it, for this bend's radius, thickness and angle (a Bend
 /// takes a K factor only). Converting such a bend to a rip is refused.
-pub fn bend_feature_edit(feature: &Feature, joint: &Joint, params: &Params, edit: &TableEdit) -> Result<Feature, String> {
-    let Some(b) = joint.bend() else { return Err("Not a bend".into()) };
+pub fn bend_feature_edit(
+    feature: &Feature,
+    joint: &Joint,
+    params: &Params,
+    edit: &TableEdit,
+) -> Result<Feature, String> {
+    let Some(b) = joint.bend() else {
+        return Err("Not a bend".into());
+    };
     let mut f = feature.clone();
     let bf = match &mut f.kind {
         FeatureKind::SheetMetalTool(SheetMetalTool::Bend(x)) => x,
@@ -299,14 +350,27 @@ pub fn bend_feature_edit(feature: &Feature, joint: &Joint, params: &Params, edit
         TableEdit::Value(v, expr) => {
             let k = match params.bend_calc {
                 BendCalc::KFactor if (0.0..=1.0).contains(v) => *v,
-                BendCalc::KFactor => return Err(format!("{}'s K Factor must be between 0 and 1", feature.name)),
+                BendCalc::KFactor => {
+                    return Err(format!(
+                        "{}'s K Factor must be between 0 and 1",
+                        feature.name
+                    ));
+                }
                 calc => {
-                    let typed = if calc == BendCalc::BendAllowance { BendValue::Allowance(*v) } else { BendValue::Deduction(*v) };
+                    let typed = if calc == BendCalc::BendAllowance {
+                        BendValue::Allowance(*v)
+                    } else {
+                        BendValue::Deduction(*v)
+                    };
                     let what = format!("a {} of {}", calc.label().to_lowercase(), plain(*v));
                     match typed.to_calc(BendCalc::KFactor, b.radius, params.thickness, b.angle) {
                         Some(BendValue::KFactor(k)) if (0.0..=1.0).contains(&k) => k,
                         Some(BendValue::KFactor(k)) if k.is_finite() => {
-                            return Err(format!("{what} needs a K Factor of {}; {}'s must be between 0 and 1", plain((k * 1e4).round() / 1e4), feature.name));
+                            return Err(format!(
+                                "{what} needs a K Factor of {}; {}'s must be between 0 and 1",
+                                plain((k * 1e4).round() / 1e4),
+                                feature.name
+                            ));
                         }
                         _ => return Err(format!("No K Factor gives {what}")),
                     }
@@ -314,10 +378,17 @@ pub fn bend_feature_edit(feature: &Feature, joint: &Joint, params: &Params, edit
             };
             bf.use_model_k = false;
             bf.k_factor = k;
-            bf.k_expr = if params.bend_calc == BendCalc::KFactor { expr.clone() } else { plain((k * 1e6).round() / 1e6) };
+            bf.k_expr = if params.bend_calc == BendCalc::KFactor {
+                expr.clone()
+            } else {
+                plain((k * 1e6).round() / 1e6)
+            };
         }
         TableEdit::ConvertToRip | TableEdit::ConvertToBend | TableEdit::RipStyle(_) => {
-            return Err(format!("{} is made by {}: it can't be made a rip", joint.name, feature.name));
+            return Err(format!(
+                "{} is made by {}: it can't be made a rip",
+                joint.name, feature.name
+            ));
         }
     }
     Ok(f)
@@ -330,10 +401,16 @@ pub fn modify_joint_of(features: &[Feature], model: FeatureId, joint: JointId) -
 
 /// Where a new Modify joint of `model` goes: after the model, its Modify joints and `editors`
 /// (the other features that changed it, from its context).
-pub fn insert_index(features: &[Feature], model: FeatureId, editors: &[FeatureId]) -> Option<usize> {
-    let i = features
-        .iter()
-        .rposition(|f| f.id == model || editors.contains(&f.id) || matches!(&f.kind, FeatureKind::ModifyJoint(x) if x.model == model))?;
+pub fn insert_index(
+    features: &[Feature],
+    model: FeatureId,
+    editors: &[FeatureId],
+) -> Option<usize> {
+    let i = features.iter().rposition(|f| {
+        f.id == model
+            || editors.contains(&f.id)
+            || matches!(&f.kind, FeatureKind::ModifyJoint(x) if x.model == model)
+    })?;
     Some(i + 1)
 }
 
@@ -358,17 +435,31 @@ impl Command for PutModifyJoint {
         Scope::Element(self.element)
     }
     fn apply(&self, doc: &mut Document) -> Result<(), CommandError> {
-        let el = doc.element_mut(self.element).ok_or(CommandError::ElementNotFound(self.element))?;
+        let el = doc
+            .element_mut(self.element)
+            .ok_or(CommandError::ElementNotFound(self.element))?;
         let name = el.next_feature_name("Modify joint");
-        let ElementKind::PartStudio { features, rollback, .. } = &mut el.kind else {
+        let ElementKind::PartStudio {
+            features, rollback, ..
+        } = &mut el.kind
+        else {
             return Err(CommandError::Invalid("features need a Part Studio".into()));
         };
         let kind = FeatureKind::ModifyJoint(self.joint.clone());
         if let Some(f) = features.iter_mut().find(|f| f.id == self.feature) {
             f.kind = kind;
         } else {
-            let at = insert_index(features, self.joint.model, &self.after).ok_or_else(|| CommandError::Invalid("the sheet metal model is gone".into()))?;
-            features.insert(at, Feature { id: self.feature, name, kind, suppress_by: None });
+            let at = insert_index(features, self.joint.model, &self.after)
+                .ok_or_else(|| CommandError::Invalid("the sheet metal model is gone".into()))?;
+            features.insert(
+                at,
+                Feature {
+                    id: self.feature,
+                    name,
+                    kind,
+                    suppress_by: None,
+                },
+            );
             if let Some(r) = rollback
                 && *r >= at
             {
@@ -397,7 +488,9 @@ impl Command for SetTableOrder {
         Scope::Element(self.element)
     }
     fn apply(&self, doc: &mut Document) -> Result<(), CommandError> {
-        let el = doc.element_mut(self.element).ok_or(CommandError::ElementNotFound(self.element))?;
+        let el = doc
+            .element_mut(self.element)
+            .ok_or(CommandError::ElementNotFound(self.element))?;
         let f = el
             .features_mut()
             .and_then(|fs| fs.iter_mut().find(|f| f.id == self.model))
@@ -415,8 +508,8 @@ impl Command for SetTableOrder {
 mod tests {
     use super::*;
     use cadrs_sheetmetal::model::Bend;
-    use cadrs_sheetmetal::poly::Seg2;
     use cadrs_sheetmetal::poly::P2;
+    use cadrs_sheetmetal::poly::Seg2;
 
     fn bend(radius: f64, model_radius: bool) -> Joint {
         let s = Seg2::new(P2::new(0.0, 0.0), P2::new(10.0, 0.0));
@@ -425,7 +518,16 @@ mod tests {
             name: "Bend A".into(),
             a: cadrs_sheetmetal::WallId(1),
             b: cadrs_sheetmetal::WallId(2),
-            kind: JointKind::Bend(Bend { on_a: s, on_b: s, angle: 1.0, toward_material: false, radius, model_radius, value: None, hem: false }),
+            kind: JointKind::Bend(Bend {
+                on_a: s,
+                on_b: s,
+                angle: 1.0,
+                toward_material: false,
+                radius,
+                model_radius,
+                value: None,
+                hem: false,
+            }),
         }
     }
 
@@ -441,15 +543,41 @@ mod tests {
         assert_eq!(x.bend_value(), Some(BendValue::KFactor(0.3)));
         assert_eq!(x.problem(), None);
         // Then its radius: the same feature, edited.
-        let y = table_edit(m, Some(&x), &j, &p, &TableEdit::Radius(2.5, "2.5 mm".into()));
-        assert_eq!(y.edit(), Some(JointEdit { joint: JointId(7), change: JointChange::Bend { radius: Some(2.5), value: Some(BendValue::KFactor(0.3)) } }));
+        let y = table_edit(
+            m,
+            Some(&x),
+            &j,
+            &p,
+            &TableEdit::Radius(2.5, "2.5 mm".into()),
+        );
+        assert_eq!(
+            y.edit(),
+            Some(JointEdit {
+                joint: JointId(7),
+                change: JointChange::Bend {
+                    radius: Some(2.5),
+                    value: Some(BendValue::KFactor(0.3))
+                }
+            })
+        );
         // Made a rip and back: the bend's own values are kept.
         let r = table_edit(m, Some(&y), &j, &p, &TableEdit::ConvertToRip);
-        assert_eq!(r.edit().map(|e| e.change), Some(JointChange::Rip { style: RipStyle::EdgeJoint }));
+        assert_eq!(
+            r.edit().map(|e| e.change),
+            Some(JointChange::Rip {
+                style: RipStyle::EdgeJoint
+            })
+        );
         let b = table_edit(m, Some(&r), &j, &p, &TableEdit::ConvertToBend);
         assert_eq!(b.edit(), y.edit());
         // A bend from a fillet keeps its own radius when only its value changes.
-        let own = table_edit(m, None, &bend(4.0, false), &p, &TableEdit::Value(0.4, "0.4".into()));
+        let own = table_edit(
+            m,
+            None,
+            &bend(4.0, false),
+            &p,
+            &TableEdit::Value(0.4, "0.4".into()),
+        );
         assert!(!own.use_model_radius);
         assert_eq!(own.radius, 4.0);
     }
@@ -457,20 +585,40 @@ mod tests {
     #[test]
     fn an_out_of_range_value_is_a_problem_with_its_range() {
         let p = Params::default();
-        let x = table_edit(FeatureId::new(), None, &bend(1.0, true), &p, &TableEdit::Value(1.2, "1.2".into()));
+        let x = table_edit(
+            FeatureId::new(),
+            None,
+            &bend(1.0, true),
+            &p,
+            &TableEdit::Value(1.2, "1.2".into()),
+        );
         assert_eq!(x.problem(), Some("A value is out of range"));
-        assert_eq!(x.range_error().unwrap().message(), "K Factor must be between -1.5 and 1");
+        assert_eq!(
+            x.range_error().unwrap().message(),
+            "K Factor must be between -1.5 and 1"
+        );
         assert!(value_error(BendCalc::KFactor, -1.5).is_none());
         assert!(value_error(BendCalc::BendAllowance, 0.0).is_some());
         assert!(value_error(BendCalc::BendDeduction, 0.0).is_none());
         // A rip doesn't care about the bend values.
-        let r = table_edit(FeatureId::new(), Some(&x), &bend(1.0, true), &p, &TableEdit::ConvertToRip);
+        let r = table_edit(
+            FeatureId::new(),
+            Some(&x),
+            &bend(1.0, true),
+            &p,
+            &TableEdit::ConvertToRip,
+        );
         assert_eq!(r.problem(), None);
     }
 
     #[test]
     fn round_trips_and_reads_old_documents() {
-        let x = ModifyJointFeature { joint: Some(JointId(3)), joint_type: JointType::Rip, rip_style: RipStyle::ButtDirection2, ..Default::default() };
+        let x = ModifyJointFeature {
+            joint: Some(JointId(3)),
+            joint_type: JointType::Rip,
+            rip_style: RipStyle::ButtDirection2,
+            ..Default::default()
+        };
         let back: ModifyJointFeature = ron::from_str(&ron::to_string(&x).unwrap()).unwrap();
         assert_eq!(back, x);
         let old: ModifyJointFeature = ron::from_str("()").unwrap();

@@ -69,28 +69,42 @@ pub(crate) fn layout(kind: &FeatureKind) -> Option<String> {
         ),
         FeatureKind::Mirror(x) => format!("mirror {:?} {:?} {}", x.mirror_type, x.op, x.merge_all),
         FeatureKind::MateConnector(x) => {
-            format!("mate {} {} {:?} {} {} {}", x.flip_primary, x.reorient, x.origin_type, x.realign, x.move_on, x.owner_on)
+            format!(
+                "mate {} {} {:?} {} {} {}",
+                x.flip_primary, x.reorient, x.origin_type, x.realign, x.move_on, x.owner_on
+            )
         }
         _ => return crate::draft_ui::layout(kind),
     })
 }
 
 fn op_name(features: &[Feature], op: cadrs_sketch::OpId) -> String {
-    features.iter().find(|f| f.id.0 == op).map_or("part".into(), |f| f.name.clone())
+    features
+        .iter()
+        .find(|f| f.id.0 == op)
+        .map_or("part".into(), |f| f.name.clone())
 }
 
 fn name_of(features: &[Feature], id: FeatureId) -> String {
-    features.iter().find(|f| f.id == id).map_or("sketch".into(), |f| f.name.clone())
+    features
+        .iter()
+        .find(|f| f.id == id)
+        .map_or("sketch".into(), |f| f.name.clone())
 }
 
 fn edge_label(features: &[Feature], e: &cadrs_sketch::EdgeName) -> String {
-    format!("Edge of {}", op_name(features, crate::parts::edge_maker(features, e)))
+    format!(
+        "Edge of {}",
+        op_name(features, crate::parts::edge_maker(features, e))
+    )
 }
 
 fn direction_label(features: &[Feature], d: &DirectionRef) -> String {
     match d {
         DirectionRef::Edge(r) => edge_label(features, &r.edge),
-        DirectionRef::SketchLine { sketch, .. } => format!("Line of {}", name_of(features, *sketch)),
+        DirectionRef::SketchLine { sketch, .. } => {
+            format!("Line of {}", name_of(features, *sketch))
+        }
         DirectionRef::FaceNormal(f) => format!("Face of {}", op_name(features, f.face.op)),
         DirectionRef::PlaneNormal(p) => crate::viewport::plane_label(features, *p),
         DirectionRef::Connector(c) => c.label(features),
@@ -103,9 +117,15 @@ pub(crate) fn origin_label(features: &[Feature], o: &ConnectorOrigin) -> String 
         ConnectorOrigin::Origin => "Origin".into(),
         ConnectorOrigin::Face(f) => format!("Face of {}", op_name(features, f.face.op)),
         ConnectorOrigin::Edge(e) => edge_label(features, &e.edge),
-        ConnectorOrigin::Vertex(v) => format!("Vertex of {}", op_name(features, v.vertex.faces[0].op)),
-        ConnectorOrigin::SketchPoint { sketch, .. } => format!("Vertex of {}", name_of(features, *sketch)),
-        ConnectorOrigin::SketchCurve { sketch, .. } => format!("Edge of {}", name_of(features, *sketch)),
+        ConnectorOrigin::Vertex(v) => {
+            format!("Vertex of {}", op_name(features, v.vertex.faces[0].op))
+        }
+        ConnectorOrigin::SketchPoint { sketch, .. } => {
+            format!("Vertex of {}", name_of(features, *sketch))
+        }
+        ConnectorOrigin::SketchCurve { sketch, .. } => {
+            format!("Edge of {}", name_of(features, *sketch))
+        }
     }
 }
 
@@ -117,34 +137,81 @@ fn seeds_label(ty: PatternType, verb: &str) -> String {
     }
 }
 
-fn seed_items(features: &[Feature], cache: &PartCache, ty: PatternType, parts: &[cadrs_core::PartId], feats: &[FeatureId], faces: &[cadrs_core::FaceRef]) -> Vec<String> {
+fn seed_items(
+    features: &[Feature],
+    cache: &PartCache,
+    ty: PatternType,
+    parts: &[cadrs_core::PartId],
+    feats: &[FeatureId],
+    faces: &[cadrs_core::FaceRef],
+) -> Vec<String> {
     match ty {
         PatternType::Part => crate::applied::part_names(cache, parts),
         PatternType::Feature => feats.iter().map(|f| name_of(features, *f)).collect(),
-        PatternType::Face => faces.iter().map(|f| format!("Face of {}", op_name(features, f.face.op))).collect(),
+        PatternType::Face => faces
+            .iter()
+            .map(|f| format!("Face of {}", op_name(features, f.face.op)))
+            .collect(),
     }
 }
 
 /// The items of a list.
-pub(crate) fn items(features: &[Feature], cache: &PartCache, kind: &FeatureKind, role: Role) -> Option<Vec<String>> {
+pub(crate) fn items(
+    features: &[Feature],
+    cache: &PartCache,
+    kind: &FeatureKind,
+    role: Role,
+) -> Option<Vec<String>> {
     let parts = |ids: &[cadrs_core::PartId]| crate::applied::part_names(cache, ids);
     Some(match (kind, role) {
-        (FeatureKind::Pattern(x), Role::PatternEntities) => seed_items(features, cache, x.pattern_type, &x.parts, &x.features, &x.faces),
-        (FeatureKind::Pattern(x), Role::PatternDirection) => x.first.direction.iter().map(|d| direction_label(features, d)).collect(),
-        (FeatureKind::Pattern(x), Role::PatternDirection2) => x.second.direction.iter().map(|d| direction_label(features, d)).collect(),
-        (FeatureKind::Pattern(x), Role::PatternAxis) => x.axis.iter().map(|a| crate::revolve::axis_label(features, a)).collect(),
+        (FeatureKind::Pattern(x), Role::PatternEntities) => seed_items(
+            features,
+            cache,
+            x.pattern_type,
+            &x.parts,
+            &x.features,
+            &x.faces,
+        ),
+        (FeatureKind::Pattern(x), Role::PatternDirection) => x
+            .first
+            .direction
+            .iter()
+            .map(|d| direction_label(features, d))
+            .collect(),
+        (FeatureKind::Pattern(x), Role::PatternDirection2) => x
+            .second
+            .direction
+            .iter()
+            .map(|d| direction_label(features, d))
+            .collect(),
+        (FeatureKind::Pattern(x), Role::PatternAxis) => x
+            .axis
+            .iter()
+            .map(|a| crate::revolve::axis_label(features, a))
+            .collect(),
         (FeatureKind::Pattern(x), Role::PatternPath) => x
             .path
             .iter()
             .map(|p| match p {
                 PathRef::Edge(e) => edge_label(features, &e.edge),
-                PathRef::SketchCurve { sketch, .. } => format!("Curve of {}", name_of(features, *sketch)),
+                PathRef::SketchCurve { sketch, .. } => {
+                    format!("Curve of {}", name_of(features, *sketch))
+                }
                 PathRef::Sketch(s) | PathRef::Curve(s) => name_of(features, *s),
             })
             .collect(),
-        (FeatureKind::Pattern(x), Role::SkipList) => x.skipped.iter().map(|i| index_label(*i)).collect(),
+        (FeatureKind::Pattern(x), Role::SkipList) => {
+            x.skipped.iter().map(|i| index_label(*i)).collect()
+        }
         (FeatureKind::Pattern(x), Role::MergeScope) => parts(&x.merge_scope),
-        (FeatureKind::Mirror(x), Role::PatternEntities) => seed_items(features, cache, x.mirror_type, &x.parts, &x.features, &x.faces),
+        (FeatureKind::Mirror(x), Role::PatternEntities) => seed_items(
+            features,
+            cache,
+            x.mirror_type,
+            &x.parts,
+            &x.features,
+            &x.faces,
+        ),
         (FeatureKind::Mirror(x), Role::MirrorPlane) => x
             .plane
             .iter()
@@ -155,12 +222,32 @@ pub(crate) fn items(features: &[Feature], cache: &PartCache, kind: &FeatureKind,
             })
             .collect(),
         (FeatureKind::Mirror(x), Role::MergeScope) => parts(&x.merge_scope),
-        (FeatureKind::MateConnector(x), Role::ConnectorOrigin) => x.origin.iter().map(|o| origin_label(features, o)).collect(),
-        (FeatureKind::MateConnector(x), Role::ConnectorBetween) => x.between.iter().map(|o| origin_label(features, o)).collect(),
-        (FeatureKind::MateConnector(x), Role::ConnectorPrimary) => x.primary_axis.iter().map(|o| origin_label(features, o)).collect(),
-        (FeatureKind::MateConnector(x), Role::ConnectorSecondary) => x.secondary_axis.iter().map(|o| origin_label(features, o)).collect(),
-        (FeatureKind::MateConnector(x), Role::ConnectorAlignment) => x.alignment.iter().map(|d| direction_label(features, d)).collect(),
-        (FeatureKind::MateConnector(x), Role::ConnectorOwner) => parts(&x.owner.into_iter().collect::<Vec<_>>()),
+        (FeatureKind::MateConnector(x), Role::ConnectorOrigin) => {
+            x.origin.iter().map(|o| origin_label(features, o)).collect()
+        }
+        (FeatureKind::MateConnector(x), Role::ConnectorBetween) => x
+            .between
+            .iter()
+            .map(|o| origin_label(features, o))
+            .collect(),
+        (FeatureKind::MateConnector(x), Role::ConnectorPrimary) => x
+            .primary_axis
+            .iter()
+            .map(|o| origin_label(features, o))
+            .collect(),
+        (FeatureKind::MateConnector(x), Role::ConnectorSecondary) => x
+            .secondary_axis
+            .iter()
+            .map(|o| origin_label(features, o))
+            .collect(),
+        (FeatureKind::MateConnector(x), Role::ConnectorAlignment) => x
+            .alignment
+            .iter()
+            .map(|d| direction_label(features, d))
+            .collect(),
+        (FeatureKind::MateConnector(x), Role::ConnectorOwner) => {
+            parts(&x.owner.into_iter().collect::<Vec<_>>())
+        }
         _ => return crate::draft_ui::items(features, cache, kind, role),
     })
 }
@@ -205,37 +292,169 @@ pub(crate) struct ConnectorView {
 /// The mate connector dialog's rows (`ex4-step5.png`): Origin type, Origin entity, Between
 /// entity, Realign (Primary axis, Secondary axis), Move (X, Y, Z translation, Rotation), Owner
 /// entity, and the flip primary / reorient secondary buttons.
-pub(crate) fn connector_rows(b: &mut ChildSpawner, t: &Theme, v: &ConnectorView, field: AppliedField, items_of: &dyn Fn(Role) -> Vec<String>) {
-    let types: Vec<(String, bool)> = OriginType::ALL.iter().map(|o| (o.label().to_string(), true)).collect();
-    select_row(b, t, "mate-connector-origin-type", "", Role::ConnectorOriginType, &types, index_of(&OriginType::ALL, &v.origin_type), None);
-    list(b, t, "mate-connector-origin-field", "Origin entity", Role::ConnectorOrigin, items_of(Role::ConnectorOrigin), field == AppliedField::ConnectorOrigin);
+pub(crate) fn connector_rows(
+    b: &mut ChildSpawner,
+    t: &Theme,
+    v: &ConnectorView,
+    field: AppliedField,
+    items_of: &dyn Fn(Role) -> Vec<String>,
+) {
+    let types: Vec<(String, bool)> = OriginType::ALL
+        .iter()
+        .map(|o| (o.label().to_string(), true))
+        .collect();
+    select_row(
+        b,
+        t,
+        "mate-connector-origin-type",
+        "",
+        Role::ConnectorOriginType,
+        &types,
+        index_of(&OriginType::ALL, &v.origin_type),
+        None,
+    );
+    list(
+        b,
+        t,
+        "mate-connector-origin-field",
+        "Origin entity",
+        Role::ConnectorOrigin,
+        items_of(Role::ConnectorOrigin),
+        field == AppliedField::ConnectorOrigin,
+    );
     if v.origin_type == OriginType::BetweenEntities {
-        list(b, t, "mate-connector-between-field", "Between entity", Role::ConnectorBetween, items_of(Role::ConnectorBetween), field == AppliedField::ConnectorBetween);
+        list(
+            b,
+            t,
+            "mate-connector-between-field",
+            "Between entity",
+            Role::ConnectorBetween,
+            items_of(Role::ConnectorBetween),
+            field == AppliedField::ConnectorBetween,
+        );
     }
     if v.alignment {
         // P3.11 (P3.8 judge): the entity whose direction the primary axis takes.
-        list(b, t, "mate-connector-alignment-field", "Alignment", Role::ConnectorAlignment, items_of(Role::ConnectorAlignment), field == AppliedField::ConnectorAlignment);
+        list(
+            b,
+            t,
+            "mate-connector-alignment-field",
+            "Alignment",
+            Role::ConnectorAlignment,
+            items_of(Role::ConnectorAlignment),
+            field == AppliedField::ConnectorAlignment,
+        );
     }
-    b.spawn(OptionRow::new("mate-connector-realign", "Realign").checked(v.realign).build(t));
+    b.spawn(
+        OptionRow::new("mate-connector-realign", "Realign")
+            .checked(v.realign)
+            .build(t),
+    );
     if v.realign {
-        list(b, t, "mate-connector-primary-field", "Primary axis", Role::ConnectorPrimary, items_of(Role::ConnectorPrimary), field == AppliedField::ConnectorPrimary);
-        list(b, t, "mate-connector-secondary-field", "Secondary axis", Role::ConnectorSecondary, items_of(Role::ConnectorSecondary), field == AppliedField::ConnectorSecondary);
+        list(
+            b,
+            t,
+            "mate-connector-primary-field",
+            "Primary axis",
+            Role::ConnectorPrimary,
+            items_of(Role::ConnectorPrimary),
+            field == AppliedField::ConnectorPrimary,
+        );
+        list(
+            b,
+            t,
+            "mate-connector-secondary-field",
+            "Secondary axis",
+            Role::ConnectorSecondary,
+            items_of(Role::ConnectorSecondary),
+            field == AppliedField::ConnectorSecondary,
+        );
     }
-    b.spawn(OptionRow::new("mate-connector-move", "Move").checked(v.move_on).build(t));
+    b.spawn(
+        OptionRow::new("mate-connector-move", "Move")
+            .checked(v.move_on)
+            .build(t),
+    );
     if v.move_on {
-        number(b, t, "mate-connector-x", "X translation", Role::ConnectorX, &v.texts[0], None);
-        number(b, t, "mate-connector-y", "Y translation", Role::ConnectorY, &v.texts[1], None);
-        number(b, t, "mate-connector-z", "Z translation", Role::ConnectorZ, &v.texts[2], None);
-        number(b, t, "mate-connector-rotation", "Rotation", Role::ConnectorRotation, &v.texts[3], None);
+        number(
+            b,
+            t,
+            "mate-connector-x",
+            "X translation",
+            Role::ConnectorX,
+            &v.texts[0],
+            None,
+        );
+        number(
+            b,
+            t,
+            "mate-connector-y",
+            "Y translation",
+            Role::ConnectorY,
+            &v.texts[1],
+            None,
+        );
+        number(
+            b,
+            t,
+            "mate-connector-z",
+            "Z translation",
+            Role::ConnectorZ,
+            &v.texts[2],
+            None,
+        );
+        number(
+            b,
+            t,
+            "mate-connector-rotation",
+            "Rotation",
+            Role::ConnectorRotation,
+            &v.texts[3],
+            None,
+        );
     }
-    b.spawn(OptionRow::new("mate-connector-owner", "Owner entity").checked(v.owner_on).build(t));
+    b.spawn(
+        OptionRow::new("mate-connector-owner", "Owner entity")
+            .checked(v.owner_on)
+            .build(t),
+    );
     if v.owner_on {
-        list(b, t, "mate-connector-owner-field", v.owner_placeholder, Role::ConnectorOwner, items_of(Role::ConnectorOwner), field == AppliedField::ConnectorOwner);
+        list(
+            b,
+            t,
+            "mate-connector-owner-field",
+            v.owner_placeholder,
+            Role::ConnectorOwner,
+            items_of(Role::ConnectorOwner),
+            field == AppliedField::ConnectorOwner,
+        );
     }
     // The flip primary / reorient secondary buttons (`ex4-step5.png`).
-    b.spawn(Node { align_items: AlignItems::Center, column_gap: Val::Px(4.0), margin: UiRect::new(Val::Px(2.0), Val::ZERO, Val::Px(5.0), Val::Px(2.0)), ..default() }).with_children(|r| {
-        icon_button(r, t, "mate-connector-flip", Role::ConnectorFlip, "flip-direction-up", "Flip primary axis", v.flip);
-        icon_button(r, t, "mate-connector-reorient", Role::ConnectorReorient, "revolve", "Reorient secondary axis (90°)", false);
+    b.spawn(Node {
+        align_items: AlignItems::Center,
+        column_gap: Val::Px(4.0),
+        margin: UiRect::new(Val::Px(2.0), Val::ZERO, Val::Px(5.0), Val::Px(2.0)),
+        ..default()
+    })
+    .with_children(|r| {
+        icon_button(
+            r,
+            t,
+            "mate-connector-flip",
+            Role::ConnectorFlip,
+            "flip-direction-up",
+            "Flip primary axis",
+            v.flip,
+        );
+        icon_button(
+            r,
+            t,
+            "mate-connector-reorient",
+            Role::ConnectorReorient,
+            "revolve",
+            "Reorient secondary axis (90°)",
+            false,
+        );
     });
 }
 
@@ -244,7 +463,9 @@ pub(crate) fn field_after(name: &str, on: bool) -> Option<AppliedField> {
     match name {
         "mate-connector-realign-checkbox" if on => Some(AppliedField::ConnectorPrimary),
         "mate-connector-owner-checkbox" if on => Some(AppliedField::ConnectorOwner),
-        "mate-connector-realign-checkbox" | "mate-connector-owner-checkbox" => Some(AppliedField::ConnectorOrigin),
+        "mate-connector-realign-checkbox" | "mate-connector-owner-checkbox" => {
+            Some(AppliedField::ConnectorOrigin)
+        }
         _ => None,
     }
 }
@@ -253,17 +474,32 @@ pub(crate) fn field_after(name: &str, on: bool) -> Option<AppliedField> {
 // Building
 
 /// A small icon button after a list's header (Create selection, the mate connector button).
-pub(crate) fn icon_button(b: &mut ChildSpawner, t: &Theme, name: &str, role: Role, icon_name: &'static str, tip: &str, selected: bool) {
+pub(crate) fn icon_button(
+    b: &mut ChildSpawner,
+    t: &Theme,
+    name: &str,
+    role: Role,
+    icon_name: &'static str,
+    tip: &str,
+    selected: bool,
+) {
     let mut v = cadrs_ui::button::visuals_for(t, cadrs_ui::ButtonVariant::Ghost);
     v.foreground = cadrs_ui::StateColors::all(Color::srgb_u8(0x1e, 0x1e, 0x1e));
-    b.spawn((role, IconButton::new(name.to_string(), icon_name).icon_size(15.0).tooltip(tip.to_string()).selected(selected).build(t)))
-        .insert(v)
-        .entry::<Node>()
-        .and_modify(|mut n| {
-            n.width = Val::Px(22.0);
-            n.height = Val::Px(22.0);
-            n.flex_shrink = 0.0;
-        });
+    b.spawn((
+        role,
+        IconButton::new(name.to_string(), icon_name)
+            .icon_size(15.0)
+            .tooltip(tip.to_string())
+            .selected(selected)
+            .build(t),
+    ))
+    .insert(v)
+    .entry::<Node>()
+    .and_modify(|mut n| {
+        n.width = Val::Px(22.0);
+        n.height = Val::Px(22.0);
+        n.flex_shrink = 0.0;
+    });
 }
 
 /// A list with a small button beside it.
@@ -278,10 +514,25 @@ fn list_with_button(
     active: bool,
     button: (&str, Role, &'static str, &str, bool),
 ) {
-    b.spawn(Node { align_items: AlignItems::FlexStart, column_gap: Val::Px(2.0), ..default() }).with_children(|r| {
-        r.spawn(Node { flex_grow: 1.0, flex_basis: Val::Px(0.0), min_width: Val::Px(0.0), flex_direction: FlexDirection::Column, ..default() })
-            .with_children(|c| list(c, t, name, placeholder, role, items, active));
-        r.spawn(Node { margin: UiRect::top(Val::Px(4.0)), ..default() }).with_children(|c| {
+    b.spawn(Node {
+        align_items: AlignItems::FlexStart,
+        column_gap: Val::Px(2.0),
+        ..default()
+    })
+    .with_children(|r| {
+        r.spawn(Node {
+            flex_grow: 1.0,
+            flex_basis: Val::Px(0.0),
+            min_width: Val::Px(0.0),
+            flex_direction: FlexDirection::Column,
+            ..default()
+        })
+        .with_children(|c| list(c, t, name, placeholder, role, items, active));
+        r.spawn(Node {
+            margin: UiRect::top(Val::Px(4.0)),
+            ..default()
+        })
+        .with_children(|c| {
             icon_button(c, t, button.0, button.1, button.2, button.3, button.4);
         });
     });
@@ -289,23 +540,65 @@ fn list_with_button(
 
 /// A count as its field shows it: the expression naming a variable (P3F.4), or the number.
 fn count_text(d: &cadrs_core::pattern::LinearDirection) -> String {
-    if d.count_expr.is_empty() { d.count.to_string() } else { d.count_expr.clone() }
+    if d.count_expr.is_empty() {
+        d.count.to_string()
+    } else {
+        d.count_expr.clone()
+    }
 }
 
 /// "Instance count" with its flip button.
-fn count_row(b: &mut ChildSpawner, t: &Theme, name: &str, role: Role, count: String, flip_role: Role, flip: bool) {
-    b.spawn(Node { align_items: AlignItems::Center, column_gap: Val::Px(4.0), ..default() }).with_children(|r| {
-        r.spawn((role, NumberField::new(name.to_string(), "Instance count").text(count).label_width(96.0).build(t)))
-            .entry::<Node>()
-            .and_modify(|mut n| n.flex_grow = 1.0);
-        flip_button_any(r, t, &format!("{name}-flip"), flip_role, flip, "Opposite direction");
+fn count_row(
+    b: &mut ChildSpawner,
+    t: &Theme,
+    name: &str,
+    role: Role,
+    count: String,
+    flip_role: Role,
+    flip: bool,
+) {
+    b.spawn(Node {
+        align_items: AlignItems::Center,
+        column_gap: Val::Px(4.0),
+        ..default()
+    })
+    .with_children(|r| {
+        r.spawn((
+            role,
+            NumberField::new(name.to_string(), "Instance count")
+                .text(count)
+                .label_width(96.0)
+                .build(t),
+        ))
+        .entry::<Node>()
+        .and_modify(|mut n| n.flex_grow = 1.0);
+        flip_button_any(
+            r,
+            t,
+            &format!("{name}-flip"),
+            flip_role,
+            flip,
+            "Opposite direction",
+        );
     });
 }
 
 /// The Skip instances rows: the checkbox, and while on, "Instances to skip" with CLEAR and the
 /// list of grid indices.
-fn skip_rows(b: &mut ChildSpawner, t: &Theme, name: &str, on: bool, items: Vec<String>, active: bool) {
-    b.spawn(OptionRow::new(format!("{name}-skip"), "Skip instances").chevron().checked(on).build(t));
+fn skip_rows(
+    b: &mut ChildSpawner,
+    t: &Theme,
+    name: &str,
+    on: bool,
+    items: Vec<String>,
+    active: bool,
+) {
+    b.spawn(
+        OptionRow::new(format!("{name}-skip"), "Skip instances")
+            .chevron()
+            .checked(on)
+            .build(t),
+    );
     if !on {
         return;
     }
@@ -316,13 +609,30 @@ fn skip_rows(b: &mut ChildSpawner, t: &Theme, name: &str, on: bool, items: Vec<S
         ..default()
     })
     .with_children(|r| {
-        r.spawn(t.text("Instances to skip", t.font_sm, bevy::text::FontWeight::NORMAL, t.muted_foreground));
+        r.spawn(t.text(
+            "Instances to skip",
+            t.font_sm,
+            bevy::text::FontWeight::NORMAL,
+            t.muted_foreground,
+        ));
         r.spawn((
             Role::SkipClear,
-            cadrs_ui::Button::new(format!("{name}-skip-clear")).label("CLEAR").small().ghost().build(t),
+            cadrs_ui::Button::new(format!("{name}-skip-clear"))
+                .label("CLEAR")
+                .small()
+                .ghost()
+                .build(t),
         ));
     });
-    list(b, t, &format!("{name}-skip-field"), "Click instances in the view", Role::SkipList, items, active);
+    list(
+        b,
+        t,
+        &format!("{name}-skip-field"),
+        "Click instances in the view",
+        Role::SkipList,
+        items,
+        active,
+    );
 }
 
 fn op_tabs(b: &mut ChildSpawner, t: &Theme, name: &str, op: BooleanOp) {
@@ -330,18 +640,46 @@ fn op_tabs(b: &mut ChildSpawner, t: &Theme, name: &str, op: BooleanOp) {
     for o in BooleanOp::ALL {
         strip = strip.tab(o.label());
     }
-    b.spawn((Role::OpTab, strip.selected(index_of(&BooleanOp::ALL, &op)).build(t)));
+    b.spawn((
+        Role::OpTab,
+        strip.selected(index_of(&BooleanOp::ALL, &op)).build(t),
+    ));
 }
 
-fn merge_rows(b: &mut ChildSpawner, t: &Theme, name: &str, merge_all: bool, items: Vec<String>, active: bool) {
-    b.spawn(OptionRow::new(format!("{name}-merge-all"), "Merge with all").checked(merge_all).build(t));
+fn merge_rows(
+    b: &mut ChildSpawner,
+    t: &Theme,
+    name: &str,
+    merge_all: bool,
+    items: Vec<String>,
+    active: bool,
+) {
+    b.spawn(
+        OptionRow::new(format!("{name}-merge-all"), "Merge with all")
+            .checked(merge_all)
+            .build(t),
+    );
     if !merge_all {
-        list(b, t, &format!("{name}-merge-scope-field"), "Merge scope", Role::MergeScope, items, active);
+        list(
+            b,
+            t,
+            &format!("{name}-merge-scope-field"),
+            "Merge scope",
+            Role::MergeScope,
+            items,
+            active,
+        );
     }
 }
 
 /// The rows of the dialog's body.
-pub(crate) fn body(b: &mut ChildSpawner, t: &Theme, kind: &FeatureKind, field: AppliedField, items_of: &dyn Fn(Role) -> Vec<String>) {
+pub(crate) fn body(
+    b: &mut ChildSpawner,
+    t: &Theme,
+    kind: &FeatureKind,
+    field: AppliedField,
+    items_of: &dyn Fn(Role) -> Vec<String>,
+) {
     if matches!(kind, FeatureKind::Draft(_)) {
         crate::draft_ui::body(b, t, kind, field, items_of);
         return;
@@ -350,7 +688,14 @@ pub(crate) fn body(b: &mut ChildSpawner, t: &Theme, kind: &FeatureKind, field: A
         crate::transform_ui::body(b, t, kind, field, items_of);
         return;
     }
-    if matches!(kind, FeatureKind::Thicken(_) | FeatureKind::Helix(_) | FeatureKind::Fill(_) | FeatureKind::FlatExtrude(_) | FeatureKind::DirectEdit(_)) {
+    if matches!(
+        kind,
+        FeatureKind::Thicken(_)
+            | FeatureKind::Helix(_)
+            | FeatureKind::Fill(_)
+            | FeatureKind::FlatExtrude(_)
+            | FeatureKind::DirectEdit(_)
+    ) {
         crate::surfacing_ui::body(b, t, kind, field, items_of);
         return;
     }
@@ -359,7 +704,16 @@ pub(crate) fn body(b: &mut ChildSpawner, t: &Theme, kind: &FeatureKind, field: A
         FeatureKind::Pattern(x) => {
             body_column(b, |b| {
                 let types = opts(&PatternType::ALL, |m| m.label(), |_| true);
-                select_row(b, t, &format!("{name}-type"), "", Role::PatternType, &types, index_of(&PatternType::ALL, &x.pattern_type), None);
+                select_row(
+                    b,
+                    t,
+                    &format!("{name}-type"),
+                    "",
+                    Role::PatternType,
+                    &types,
+                    index_of(&PatternType::ALL, &x.pattern_type),
+                    None,
+                );
             });
             if x.pattern_type == PatternType::Part {
                 op_tabs(b, t, name, x.op);
@@ -376,23 +730,98 @@ pub(crate) fn body(b: &mut ChildSpawner, t: &Theme, kind: &FeatureKind, field: A
                         Role::PatternEntities,
                         items_of(Role::PatternEntities),
                         active,
-                        (&format!("{name}-create-selection"), Role::CreateSelectionFaces, "plus", "Create selection", false),
+                        (
+                            &format!("{name}-create-selection"),
+                            Role::CreateSelectionFaces,
+                            "plus",
+                            "Create selection",
+                            false,
+                        ),
                     );
                 } else {
-                    list(b, t, &format!("{name}-entities-field"), &what, Role::PatternEntities, items_of(Role::PatternEntities), active);
+                    list(
+                        b,
+                        t,
+                        &format!("{name}-entities-field"),
+                        &what,
+                        Role::PatternEntities,
+                        items_of(Role::PatternEntities),
+                        active,
+                    );
                 }
                 match x.kind {
                     PatternKind::Linear => {
-                        list(b, t, &format!("{name}-direction-field"), "Direction", Role::PatternDirection, items_of(Role::PatternDirection), field == AppliedField::PatternDirection);
-                        number(b, t, &format!("{name}-distance"), "Distance", Role::PatternDistance, &x.first.distance_expr, None);
-                        count_row(b, t, &format!("{name}-count"), Role::PatternCount, count_text(&x.first), Role::PatternFlip, x.first.flip);
-                        b.spawn(OptionRow::new(format!("{name}-centered"), "Centered").checked(x.first.centered).build(t));
-                        b.spawn(OptionRow::new(format!("{name}-second"), "Second direction").chevron().checked(x.second_on).build(t));
+                        list(
+                            b,
+                            t,
+                            &format!("{name}-direction-field"),
+                            "Direction",
+                            Role::PatternDirection,
+                            items_of(Role::PatternDirection),
+                            field == AppliedField::PatternDirection,
+                        );
+                        number(
+                            b,
+                            t,
+                            &format!("{name}-distance"),
+                            "Distance",
+                            Role::PatternDistance,
+                            &x.first.distance_expr,
+                            None,
+                        );
+                        count_row(
+                            b,
+                            t,
+                            &format!("{name}-count"),
+                            Role::PatternCount,
+                            count_text(&x.first),
+                            Role::PatternFlip,
+                            x.first.flip,
+                        );
+                        b.spawn(
+                            OptionRow::new(format!("{name}-centered"), "Centered")
+                                .checked(x.first.centered)
+                                .build(t),
+                        );
+                        b.spawn(
+                            OptionRow::new(format!("{name}-second"), "Second direction")
+                                .chevron()
+                                .checked(x.second_on)
+                                .build(t),
+                        );
                         if x.second_on {
-                            list(b, t, &format!("{name}-direction2-field"), "Direction", Role::PatternDirection2, items_of(Role::PatternDirection2), field == AppliedField::PatternDirection2);
-                            number(b, t, &format!("{name}-distance2"), "Distance", Role::PatternDistance2, &x.second.distance_expr, None);
-                            count_row(b, t, &format!("{name}-count2"), Role::PatternCount2, count_text(&x.second), Role::PatternFlip2, x.second.flip);
-                            b.spawn(OptionRow::new(format!("{name}-centered2"), "Centered").checked(x.second.centered).build(t));
+                            list(
+                                b,
+                                t,
+                                &format!("{name}-direction2-field"),
+                                "Direction",
+                                Role::PatternDirection2,
+                                items_of(Role::PatternDirection2),
+                                field == AppliedField::PatternDirection2,
+                            );
+                            number(
+                                b,
+                                t,
+                                &format!("{name}-distance2"),
+                                "Distance",
+                                Role::PatternDistance2,
+                                &x.second.distance_expr,
+                                None,
+                            );
+                            count_row(
+                                b,
+                                t,
+                                &format!("{name}-count2"),
+                                Role::PatternCount2,
+                                count_text(&x.second),
+                                Role::PatternFlip2,
+                                x.second.flip,
+                            );
+                            b.spawn(
+                                OptionRow::new(format!("{name}-centered2"), "Centered")
+                                    .checked(x.second.centered)
+                                    .build(t),
+                            );
                         }
                     }
                     PatternKind::Circular => {
@@ -404,36 +833,128 @@ pub(crate) fn body(b: &mut ChildSpawner, t: &Theme, kind: &FeatureKind, field: A
                             Role::PatternAxis,
                             items_of(Role::PatternAxis),
                             field == AppliedField::PatternAxis,
-                            (&format!("{name}-axis-connector"), Role::ConnectorButton, "mate-connector", "Select mate connector", false),
+                            (
+                                &format!("{name}-axis-connector"),
+                                Role::ConnectorButton,
+                                "mate-connector",
+                                "Select mate connector",
+                                false,
+                            ),
                         );
-                        number(b, t, &format!("{name}-angle"), "Angle", Role::PatternAngle, &x.angle_expr, None);
-                        count_row(b, t, &format!("{name}-count"), Role::PatternCount, count_text(&x.first), Role::PatternFlip, x.first.flip);
-                        b.spawn(OptionRow::new(format!("{name}-equal-spacing"), "Equal spacing").checked(x.equal_spacing).build(t));
-                        b.spawn(OptionRow::new(format!("{name}-centered"), "Centered").checked(x.first.centered).build(t));
+                        number(
+                            b,
+                            t,
+                            &format!("{name}-angle"),
+                            "Angle",
+                            Role::PatternAngle,
+                            &x.angle_expr,
+                            None,
+                        );
+                        count_row(
+                            b,
+                            t,
+                            &format!("{name}-count"),
+                            Role::PatternCount,
+                            count_text(&x.first),
+                            Role::PatternFlip,
+                            x.first.flip,
+                        );
+                        b.spawn(
+                            OptionRow::new(format!("{name}-equal-spacing"), "Equal spacing")
+                                .checked(x.equal_spacing)
+                                .build(t),
+                        );
+                        b.spawn(
+                            OptionRow::new(format!("{name}-centered"), "Centered")
+                                .checked(x.first.centered)
+                                .build(t),
+                        );
                     }
                     PatternKind::Curve => {
-                        list(b, t, &format!("{name}-path-field"), "Path to pattern along", Role::PatternPath, items_of(Role::PatternPath), field == AppliedField::PatternPath);
-                        count_row(b, t, &format!("{name}-count"), Role::PatternCount, count_text(&x.first), Role::PatternFlip, x.first.flip);
-                        b.spawn(OptionRow::new(format!("{name}-equal-spacing"), "Equal spacing").checked(x.equal_spacing).build(t));
+                        list(
+                            b,
+                            t,
+                            &format!("{name}-path-field"),
+                            "Path to pattern along",
+                            Role::PatternPath,
+                            items_of(Role::PatternPath),
+                            field == AppliedField::PatternPath,
+                        );
+                        count_row(
+                            b,
+                            t,
+                            &format!("{name}-count"),
+                            Role::PatternCount,
+                            count_text(&x.first),
+                            Role::PatternFlip,
+                            x.first.flip,
+                        );
+                        b.spawn(
+                            OptionRow::new(format!("{name}-equal-spacing"), "Equal spacing")
+                                .checked(x.equal_spacing)
+                                .build(t),
+                        );
                         if !x.equal_spacing {
-                            number(b, t, &format!("{name}-distance"), "Distance", Role::PatternDistance, &x.first.distance_expr, None);
+                            number(
+                                b,
+                                t,
+                                &format!("{name}-distance"),
+                                "Distance",
+                                Role::PatternDistance,
+                                &x.first.distance_expr,
+                                None,
+                            );
                         }
-                        b.spawn(OptionRow::new(format!("{name}-tangent"), "Tangent to curve").checked(x.tangent_to_curve).build(t));
+                        b.spawn(
+                            OptionRow::new(format!("{name}-tangent"), "Tangent to curve")
+                                .checked(x.tangent_to_curve)
+                                .build(t),
+                        );
                     }
                 }
                 if x.pattern_type == PatternType::Feature {
-                    b.spawn(OptionRow::new(format!("{name}-reapply"), "Reapply features").checked(x.reapply).build(t));
+                    b.spawn(
+                        OptionRow::new(format!("{name}-reapply"), "Reapply features")
+                            .checked(x.reapply)
+                            .build(t),
+                    );
                 }
-                skip_rows(b, t, name, x.skip_on, items_of(Role::SkipList), field == AppliedField::SkipList);
+                skip_rows(
+                    b,
+                    t,
+                    name,
+                    x.skip_on,
+                    items_of(Role::SkipList),
+                    field == AppliedField::SkipList,
+                );
                 if x.pattern_type == PatternType::Part && x.op != BooleanOp::New {
-                    merge_rows(b, t, name, x.merge_all, items_of(Role::MergeScope), field == AppliedField::MergeScope);
+                    merge_rows(
+                        b,
+                        t,
+                        name,
+                        x.merge_all,
+                        items_of(Role::MergeScope),
+                        field == AppliedField::MergeScope,
+                    );
                 }
             });
         }
         FeatureKind::Mirror(x) => {
             body_column(b, |b| {
-                let types: Vec<(String, bool)> = PatternType::ALL.iter().map(|m| (m.mirror_label().to_string(), true)).collect();
-                select_row(b, t, "mirror-type", "", Role::PatternType, &types, index_of(&PatternType::ALL, &x.mirror_type), None);
+                let types: Vec<(String, bool)> = PatternType::ALL
+                    .iter()
+                    .map(|m| (m.mirror_label().to_string(), true))
+                    .collect();
+                select_row(
+                    b,
+                    t,
+                    "mirror-type",
+                    "",
+                    Role::PatternType,
+                    &types,
+                    index_of(&PatternType::ALL, &x.mirror_type),
+                    None,
+                );
             });
             if x.mirror_type == PatternType::Part {
                 op_tabs(b, t, "mirror", x.op);
@@ -450,10 +971,24 @@ pub(crate) fn body(b: &mut ChildSpawner, t: &Theme, kind: &FeatureKind, field: A
                         Role::PatternEntities,
                         items_of(Role::PatternEntities),
                         active,
-                        ("mirror-create-selection", Role::CreateSelectionFaces, "plus", "Create selection", false),
+                        (
+                            "mirror-create-selection",
+                            Role::CreateSelectionFaces,
+                            "plus",
+                            "Create selection",
+                            false,
+                        ),
                     );
                 } else {
-                    list(b, t, "mirror-entities-field", &what, Role::PatternEntities, items_of(Role::PatternEntities), active);
+                    list(
+                        b,
+                        t,
+                        "mirror-entities-field",
+                        &what,
+                        Role::PatternEntities,
+                        items_of(Role::PatternEntities),
+                        active,
+                    );
                 }
                 list_with_button(
                     b,
@@ -463,13 +998,30 @@ pub(crate) fn body(b: &mut ChildSpawner, t: &Theme, kind: &FeatureKind, field: A
                     Role::MirrorPlane,
                     items_of(Role::MirrorPlane),
                     field == AppliedField::MirrorPlane,
-                    ("mirror-plane-connector", Role::ConnectorButton, "mate-connector", "Select mate connector", false),
+                    (
+                        "mirror-plane-connector",
+                        Role::ConnectorButton,
+                        "mate-connector",
+                        "Select mate connector",
+                        false,
+                    ),
                 );
                 if x.mirror_type == PatternType::Feature {
-                    b.spawn(OptionRow::new("mirror-reapply", "Reapply features").checked(x.reapply).build(t));
+                    b.spawn(
+                        OptionRow::new("mirror-reapply", "Reapply features")
+                            .checked(x.reapply)
+                            .build(t),
+                    );
                 }
                 if x.mirror_type == PatternType::Part && x.op != BooleanOp::New {
-                    merge_rows(b, t, "mirror", x.merge_all, items_of(Role::MergeScope), field == AppliedField::MergeScope);
+                    merge_rows(
+                        b,
+                        t,
+                        "mirror",
+                        x.merge_all,
+                        items_of(Role::MergeScope),
+                        field == AppliedField::MergeScope,
+                    );
                 }
             });
         }
@@ -481,7 +1033,12 @@ pub(crate) fn body(b: &mut ChildSpawner, t: &Theme, kind: &FeatureKind, field: A
                 move_on: x.move_on,
                 owner_on: x.owner_on,
                 flip: x.flip_primary,
-                texts: [x.offset_expr[0].clone(), x.offset_expr[1].clone(), x.offset_expr[2].clone(), x.rotation_expr.clone()],
+                texts: [
+                    x.offset_expr[0].clone(),
+                    x.offset_expr[1].clone(),
+                    x.offset_expr[2].clone(),
+                    x.rotation_expr.clone(),
+                ],
                 owner_placeholder: "Select owner entity",
             };
             connector_rows(b, t, &v, field, items_of);
@@ -510,9 +1067,13 @@ pub(crate) fn number_text(kind: &FeatureKind, role: Role) -> Option<String> {
 
 pub(crate) fn select_index(kind: &FeatureKind, role: Role) -> Option<usize> {
     Some(match (kind, role) {
-        (FeatureKind::Pattern(x), Role::PatternType) => index_of(&PatternType::ALL, &x.pattern_type),
+        (FeatureKind::Pattern(x), Role::PatternType) => {
+            index_of(&PatternType::ALL, &x.pattern_type)
+        }
         (FeatureKind::Mirror(x), Role::PatternType) => index_of(&PatternType::ALL, &x.mirror_type),
-        (FeatureKind::MateConnector(x), Role::ConnectorOriginType) => index_of(&OriginType::ALL, &x.origin_type),
+        (FeatureKind::MateConnector(x), Role::ConnectorOriginType) => {
+            index_of(&OriginType::ALL, &x.origin_type)
+        }
         _ => return crate::draft_ui::select_index(kind, role),
     })
 }
@@ -535,7 +1096,9 @@ pub(crate) fn select(k: &mut FeatureKind, role: Role, i: usize) {
     match (k, role) {
         (FeatureKind::Pattern(x), Role::PatternType) => x.pattern_type = PatternType::ALL[i.min(2)],
         (FeatureKind::Mirror(x), Role::PatternType) => x.mirror_type = PatternType::ALL[i.min(2)],
-        (FeatureKind::MateConnector(x), Role::ConnectorOriginType) => x.origin_type = OriginType::ALL[i.min(1)],
+        (FeatureKind::MateConnector(x), Role::ConnectorOriginType) => {
+            x.origin_type = OriginType::ALL[i.min(1)]
+        }
         (k, r) => crate::transform_ui::select(k, r, i),
     }
 }
@@ -615,14 +1178,36 @@ pub(crate) fn checkbox(k: &mut FeatureKind, name: &str, on: bool) -> Option<&'st
 
 /// True for the checkboxes of these dialogs.
 pub(crate) fn is_checkbox(name: &str) -> bool {
-    let Some(base) = name.strip_suffix("-checkbox") else { return false };
+    let Some(base) = name.strip_suffix("-checkbox") else {
+        return false;
+    };
     let pattern = ["linear-pattern-", "circular-pattern-", "curve-pattern-"]
         .iter()
-        .any(|p| base.strip_prefix(p).is_some_and(|rest| {
-            matches!(rest, "centered" | "centered2" | "second" | "equal-spacing" | "tangent" | "reapply" | "skip" | "merge-all")
-        }));
+        .any(|p| {
+            base.strip_prefix(p).is_some_and(|rest| {
+                matches!(
+                    rest,
+                    "centered"
+                        | "centered2"
+                        | "second"
+                        | "equal-spacing"
+                        | "tangent"
+                        | "reapply"
+                        | "skip"
+                        | "merge-all"
+                )
+            })
+        });
     pattern
-        || matches!(base, "mirror-merge-all" | "mirror-reapply" | "mate-connector-flip" | "mate-connector-realign" | "mate-connector-move" | "mate-connector-owner")
+        || matches!(
+            base,
+            "mirror-merge-all"
+                | "mirror-reapply"
+                | "mate-connector-flip"
+                | "mate-connector-realign"
+                | "mate-connector-move"
+                | "mate-connector-owner"
+        )
         || crate::transform_ui::is_checkbox(name)
 }
 
@@ -633,12 +1218,16 @@ pub(crate) fn is_count(role: Role) -> bool {
 
 /// Numbers that may be zero or negative (a connector's move).
 pub(crate) fn is_signed(role: Role) -> bool {
-    matches!(role, Role::ConnectorX | Role::ConnectorY | Role::ConnectorZ | Role::ConnectorRotation) || crate::transform_ui::is_signed(role)
+    matches!(
+        role,
+        Role::ConnectorX | Role::ConnectorY | Role::ConnectorZ | Role::ConnectorRotation
+    ) || crate::transform_ui::is_signed(role)
 }
 
 /// A number's quantity: an angle (true) or a length.
 pub(crate) fn is_angle(role: Role) -> bool {
-    matches!(role, Role::PatternAngle | Role::ConnectorRotation) || crate::transform_ui::is_angle(role)
+    matches!(role, Role::PatternAngle | Role::ConnectorRotation)
+        || crate::transform_ui::is_angle(role)
 }
 
 /// The undo label of a number field.
@@ -669,17 +1258,28 @@ pub(crate) fn set_number(k: &mut FeatureKind, role: Role, v: f64, expr: String) 
         // P3F.4: a count typed as an expression naming a variable keeps it (`#bolts`).
         (FeatureKind::Pattern(x), Role::PatternCount) => {
             x.first.count = v.round().max(1.0) as u32;
-            x.first.count_expr = if expr.contains('#') { expr } else { String::new() };
+            x.first.count_expr = if expr.contains('#') {
+                expr
+            } else {
+                String::new()
+            };
         }
         (FeatureKind::Pattern(x), Role::PatternCount2) => {
             x.second.count = v.round().max(1.0) as u32;
-            x.second.count_expr = if expr.contains('#') { expr } else { String::new() };
+            x.second.count_expr = if expr.contains('#') {
+                expr
+            } else {
+                String::new()
+            };
         }
         (FeatureKind::Pattern(x), Role::PatternAngle) => {
             x.angle = v;
             x.angle_expr = expr;
         }
-        (FeatureKind::MateConnector(x), r @ (Role::ConnectorX | Role::ConnectorY | Role::ConnectorZ)) => {
+        (
+            FeatureKind::MateConnector(x),
+            r @ (Role::ConnectorX | Role::ConnectorY | Role::ConnectorZ),
+        ) => {
             let i = match r {
                 Role::ConnectorX => 0,
                 Role::ConnectorY => 1,
@@ -748,7 +1348,10 @@ pub(crate) fn remove(k: &mut FeatureKind, role: Role, i: usize) {
 }
 
 /// The hole's places list (PS15.2): its sketch points, whole sketches and mate connectors.
-pub(crate) fn hole_connector_items(features: &[Feature], x: &cadrs_core::applied::HoleFeature) -> Vec<String> {
+pub(crate) fn hole_connector_items(
+    features: &[Feature],
+    x: &cadrs_core::applied::HoleFeature,
+) -> Vec<String> {
     x.connectors.iter().map(|c| c.label(features)).collect()
 }
 
@@ -758,4 +1361,3 @@ pub(crate) fn remove_hole_connector(x: &mut cadrs_core::applied::HoleFeature, i:
         x.connectors.remove(i);
     }
 }
-

@@ -28,7 +28,10 @@ pub struct Document {
     pub standard_content: Vec<crate::assembly::standard::StandardPart>,
     /// Custom property definitions, part numbering and BOM templates (P3B.6, see
     /// [`crate::properties`]).
-    #[serde(default, skip_serializing_if = "crate::properties::PropertySettings::is_default")]
+    #[serde(
+        default,
+        skip_serializing_if = "crate::properties::PropertySettings::is_default"
+    )]
     pub properties: crate::properties::PropertySettings,
     /// P3G.1 (schema 5): frozen copies of the elements this document references from another
     /// document or at a version, under namespaced ids (see [`crate::external`]). Not tabs:
@@ -124,7 +127,12 @@ pub struct Element {
     /// A Part Studio's **assembly contexts** (P3B.9, X15, `managed-in-context-design.md`;
     /// [`crate::assembly::context`]): snapshots of assemblies around its parts, as reference
     /// geometry. Documents from before several contexts have a single `context`.
-    #[serde(default, alias = "context", deserialize_with = "crate::assembly::context::deserialize_contexts", skip_serializing_if = "Vec::is_empty")]
+    #[serde(
+        default,
+        alias = "context",
+        deserialize_with = "crate::assembly::context::deserialize_contexts",
+        skip_serializing_if = "Vec::is_empty"
+    )]
     pub contexts: Vec<crate::assembly::context::StudioContext>,
     /// The context the Part Studio opens in (one of `contexts`): Onshape keeps the active
     /// context with the workspace, and an import of it sets this. The app's active context is
@@ -133,7 +141,10 @@ pub struct Element {
     pub open_context: Option<crate::assembly::context::ContextNo>,
     /// A Part Studio's or Assembly's simulation setup: its Loads list and mesh (P3F.5,
     /// [`crate::simulation`]).
-    #[serde(default, skip_serializing_if = "crate::simulation::Simulation::is_empty")]
+    #[serde(
+        default,
+        skip_serializing_if = "crate::simulation::Simulation::is_empty"
+    )]
     pub simulation: crate::simulation::Simulation,
     /// Cameras saved under a name (P3E.3a, TD6.5: the view cube menu's Named views…), see
     /// [`crate::named_views`].
@@ -256,7 +267,10 @@ impl Element {
     pub fn suppressed(&self) -> &[FeatureId] {
         match &self.kind {
             ElementKind::PartStudio { suppressed, .. } => suppressed,
-            ElementKind::Assembly | ElementKind::Drawing(_) | ElementKind::PcbStudio(_) | ElementKind::Render(_) => &[],
+            ElementKind::Assembly
+            | ElementKind::Drawing(_)
+            | ElementKind::PcbStudio(_)
+            | ElementKind::Render(_) => &[],
         }
     }
 
@@ -265,7 +279,10 @@ impl Element {
     /// for many features, take [`Self::all_suppressed`] once instead.
     pub fn is_suppressed(&self, feature: FeatureId) -> bool {
         self.suppressed().contains(&feature)
-            || (self.feature(feature).is_some_and(|f| f.suppress_by.is_some()) && self.suppressed_by_variable().contains(&feature))
+            || (self
+                .feature(feature)
+                .is_some_and(|f| f.suppress_by.is_some())
+                && self.suppressed_by_variable().contains(&feature))
     }
 
     /// The features their suppression variable suppresses (IR5.5), with the variables' values
@@ -278,21 +295,30 @@ impl Element {
     pub fn all_suppressed(&self) -> Vec<FeatureId> {
         let by_var = self.suppressed_by_variable();
         let manual = self.suppressed();
-        self.features().iter().map(|f| f.id).filter(|f| manual.contains(f) || by_var.contains(f)).collect()
+        self.features()
+            .iter()
+            .map(|f| f.id)
+            .filter(|f| manual.contains(f) || by_var.contains(f))
+            .collect()
     }
 
     /// The number of features above the rollback bar (P3.9): all of them when it is at the end.
     pub fn rollback_index(&self) -> usize {
         let n = self.features().len();
         match &self.kind {
-            ElementKind::PartStudio { rollback: Some(i), .. } => (*i).min(n),
+            ElementKind::PartStudio {
+                rollback: Some(i), ..
+            } => (*i).min(n),
             _ => n,
         }
     }
 
     /// True if the feature is below the rollback bar.
     pub fn is_rolled_back(&self, feature: FeatureId) -> bool {
-        self.features().iter().position(|f| f.id == feature).is_some_and(|i| i >= self.rollback_index())
+        self.features()
+            .iter()
+            .position(|f| f.id == feature)
+            .is_some_and(|i| i >= self.rollback_index())
     }
 
     /// The features that are built (P3.9): the ones above the rollback bar, without the
@@ -310,7 +336,9 @@ impl Element {
 
     /// The folder a feature is in.
     pub fn folder_of(&self, feature: FeatureId) -> Option<&FeatureFolder> {
-        self.folders().iter().find(|f| f.features.contains(&feature))
+        self.folders()
+            .iter()
+            .find(|f| f.features.contains(&feature))
     }
 
     /// The part settings of a Part Studio (renames, hidden parts).
@@ -331,9 +359,12 @@ impl Element {
     /// A sketch's shown (`Some(true)`) or hidden (`Some(false)`) setting from its eye, if set.
     pub fn sketch_visibility(&self, sketch: FeatureId) -> Option<bool> {
         match &self.kind {
-            ElementKind::PartStudio { sketch_visibility, .. } => {
-                sketch_visibility.iter().find(|(s, _)| *s == sketch).map(|(_, v)| *v)
-            }
+            ElementKind::PartStudio {
+                sketch_visibility, ..
+            } => sketch_visibility
+                .iter()
+                .find(|(s, _)| *s == sketch)
+                .map(|(_, v)| *v),
             _ => None,
         }
     }
@@ -349,14 +380,19 @@ impl Element {
     /// The appearances of single sketch curves (PS9.5).
     pub fn curve_appearances(&self) -> &[(FeatureId, CurveId, crate::appearance::Appearance)] {
         match &self.kind {
-            ElementKind::PartStudio { curve_appearances, .. } => curve_appearances,
+            ElementKind::PartStudio {
+                curve_appearances, ..
+            } => curve_appearances,
             _ => &[],
         }
     }
 
     /// A feature's or sketch's appearance, if it has one.
     pub fn feature_appearance(&self, feature: FeatureId) -> Option<crate::appearance::Appearance> {
-        self.feature_appearances().iter().find(|(f, _)| *f == feature).map(|(_, a)| *a)
+        self.feature_appearances()
+            .iter()
+            .find(|(f, _)| *f == feature)
+            .map(|(_, a)| *a)
     }
 
     /// A part's settings, if it has any.
@@ -450,7 +486,12 @@ pub struct Feature {
 impl Feature {
     /// A feature with no suppression variable.
     pub fn new(id: FeatureId, name: impl Into<String>, kind: FeatureKind) -> Self {
-        Self { id, name: name.into(), kind, suppress_by: None }
+        Self {
+            id,
+            name: name.into(),
+            kind,
+            suppress_by: None,
+        }
     }
 
     /// The sketch parameters, if this is a sketch feature.
@@ -704,17 +745,32 @@ impl Feature {
                 }
             }
             FeatureKind::Boolean(b) => {
-                b.tools.iter().chain(&b.targets).for_each(|p| add(p.feature));
+                b.tools
+                    .iter()
+                    .chain(&b.targets)
+                    .for_each(|p| add(p.feature));
                 if let Some(o) = &b.offset {
                     o.faces.iter().map(face).for_each(&mut add);
                 }
             }
             FeatureKind::DeletePart(d) => d.parts.iter().for_each(|p| add(p.feature)),
             FeatureKind::Fillet(x) => {
-                x.entities.iter().flat_map(|e| e.ops()).for_each(|o| add(FeatureId(o)));
-                x.side1.iter().chain(&x.center).chain(&x.side2).map(face).for_each(&mut add);
+                x.entities
+                    .iter()
+                    .flat_map(|e| e.ops())
+                    .for_each(|o| add(FeatureId(o)));
+                x.side1
+                    .iter()
+                    .chain(&x.center)
+                    .chain(&x.side2)
+                    .map(face)
+                    .for_each(&mut add);
             }
-            FeatureKind::Chamfer(x) => x.entities.iter().flat_map(|e| e.ops()).for_each(|o| add(FeatureId(o))),
+            FeatureKind::Chamfer(x) => x
+                .entities
+                .iter()
+                .flat_map(|e| e.ops())
+                .for_each(|o| add(FeatureId(o))),
             FeatureKind::Shell(x) => {
                 x.faces.iter().map(face).for_each(&mut add);
                 x.parts.iter().for_each(|p| add(p.feature));
@@ -723,17 +779,28 @@ impl Feature {
             FeatureKind::Hole(x) => {
                 x.sketch_ids().into_iter().for_each(&mut add);
                 x.merge_scope.iter().for_each(|p| add(p.feature));
-                x.connectors.iter().filter_map(|c| c.parent()).for_each(&mut add);
+                x.connectors
+                    .iter()
+                    .filter_map(|c| c.parent())
+                    .for_each(&mut add);
                 for p in [&x.start_plane, &x.up_to].into_iter().flatten() {
                     match p {
-                        crate::pattern::MirrorPlane::Plane(PlaneRef::Feature(f)) => add(FeatureId(f.feature)),
+                        crate::pattern::MirrorPlane::Plane(PlaneRef::Feature(f)) => {
+                            add(FeatureId(f.feature))
+                        }
                         crate::pattern::MirrorPlane::Face(f) => add(face(f)),
-                        crate::pattern::MirrorPlane::Connector(c) => c.parent().into_iter().for_each(&mut add),
+                        crate::pattern::MirrorPlane::Connector(c) => {
+                            c.parent().into_iter().for_each(&mut add)
+                        }
                         _ => {}
                     }
                 }
             }
-            FeatureKind::Plane(x) => x.entities.iter().filter_map(|e| e.feature()).for_each(&mut add),
+            FeatureKind::Plane(x) => x
+                .entities
+                .iter()
+                .filter_map(|e| e.feature())
+                .for_each(&mut add),
             FeatureKind::Sweep(x) => {
                 x.sketches().into_iter().for_each(&mut add);
                 x.faces.iter().map(face).for_each(&mut add);
@@ -766,7 +833,9 @@ impl Feature {
             FeatureKind::Split(x) => {
                 x.parts.iter().for_each(|p| add(p.feature));
                 match &x.tool {
-                    Some(crate::advanced::SplitToolRef::Plane(PlaneRef::Feature(f))) => add(FeatureId(f.feature)),
+                    Some(crate::advanced::SplitToolRef::Plane(PlaneRef::Feature(f))) => {
+                        add(FeatureId(f.feature))
+                    }
                     Some(crate::advanced::SplitToolRef::Face(f)) => add(face(f)),
                     Some(crate::advanced::SplitToolRef::Sketch(s)) => add(*s),
                     _ => {}
@@ -782,7 +851,11 @@ impl Feature {
             FeatureKind::Image(x) => x.parents().into_iter().for_each(&mut add),
             FeatureKind::Derived(x) => x.parents().into_iter().for_each(&mut add),
             // P3H.6: the features that made the members (context parts aren't features).
-            FeatureKind::Composite(x) => x.parts.iter().filter(|p| !crate::assembly::context::is_context(p.feature)).for_each(|p| add(p.feature)),
+            FeatureKind::Composite(x) => x
+                .parts
+                .iter()
+                .filter(|p| !crate::assembly::context::is_context(p.feature))
+                .for_each(|p| add(p.feature)),
             FeatureKind::Thicken(x) => x.parents().into_iter().for_each(&mut add),
             FeatureKind::Helix(x) => x.parents().into_iter().for_each(&mut add),
             FeatureKind::Fill(x) => x.parents().into_iter().for_each(&mut add),
@@ -798,7 +871,10 @@ impl Feature {
         match &self.kind {
             FeatureKind::MateConnector(x) => {
                 x.parents().into_iter().for_each(&mut add);
-                x.alignment.iter().filter_map(direction_parent).for_each(&mut add);
+                x.alignment
+                    .iter()
+                    .filter_map(direction_parent)
+                    .for_each(&mut add);
                 if x.owner_on {
                     x.owner.iter().for_each(|p| add(p.feature));
                 }
@@ -808,7 +884,10 @@ impl Feature {
                 x.features.iter().for_each(|f| add(*f));
                 x.faces.iter().map(face).for_each(&mut add);
                 x.merge_scope.iter().for_each(|p| add(p.feature));
-                for d in [&x.first.direction, &x.second.direction].into_iter().flatten() {
+                for d in [&x.first.direction, &x.second.direction]
+                    .into_iter()
+                    .flatten()
+                {
                     direction_parent(d).into_iter().for_each(&mut add);
                 }
                 match &x.axis {
@@ -821,7 +900,8 @@ impl Feature {
                 for p in &x.path {
                     match p {
                         crate::advanced::PathRef::Edge(e) => edge(e).into_iter().for_each(&mut add),
-                        crate::advanced::PathRef::SketchCurve { sketch, .. } | crate::advanced::PathRef::Sketch(sketch) => add(*sketch),
+                        crate::advanced::PathRef::SketchCurve { sketch, .. }
+                        | crate::advanced::PathRef::Sketch(sketch) => add(*sketch),
                         crate::advanced::PathRef::Curve(f) => add(*f),
                     }
                 }
@@ -832,18 +912,26 @@ impl Feature {
                 x.faces.iter().map(face).for_each(&mut add);
                 x.merge_scope.iter().for_each(|p| add(p.feature));
                 match &x.plane {
-                    Some(crate::pattern::MirrorPlane::Plane(PlaneRef::Feature(f))) => add(FeatureId(f.feature)),
+                    Some(crate::pattern::MirrorPlane::Plane(PlaneRef::Feature(f))) => {
+                        add(FeatureId(f.feature))
+                    }
                     Some(crate::pattern::MirrorPlane::Face(f)) => add(face(f)),
-                    Some(crate::pattern::MirrorPlane::Connector(c)) => c.parent().into_iter().for_each(&mut add),
+                    Some(crate::pattern::MirrorPlane::Connector(c)) => {
+                        c.parent().into_iter().for_each(&mut add)
+                    }
                     _ => {}
                 }
             }
             FeatureKind::Draft(x) => {
                 x.faces.iter().map(face).for_each(&mut add);
                 match &x.neutral {
-                    Some(crate::pattern::MirrorPlane::Plane(PlaneRef::Feature(f))) => add(FeatureId(f.feature)),
+                    Some(crate::pattern::MirrorPlane::Plane(PlaneRef::Feature(f))) => {
+                        add(FeatureId(f.feature))
+                    }
                     Some(crate::pattern::MirrorPlane::Face(f)) => add(face(f)),
-                    Some(crate::pattern::MirrorPlane::Connector(c)) => c.parent().into_iter().for_each(&mut add),
+                    Some(crate::pattern::MirrorPlane::Connector(c)) => {
+                        c.parent().into_iter().for_each(&mut add)
+                    }
                     _ => {}
                 }
             }
@@ -859,7 +947,11 @@ impl Feature {
                     Some(AxisRef::Connector(c)) => c.parent().into_iter().for_each(&mut add),
                     None => {}
                 }
-                for c in [&x.from, &x.to, &x.scale_point].into_iter().flatten().chain(x.connectors.iter()) {
+                for c in [&x.from, &x.to, &x.scale_point]
+                    .into_iter()
+                    .flatten()
+                    .chain(x.connectors.iter())
+                {
                     c.parent().into_iter().for_each(&mut add);
                 }
             }
@@ -1031,7 +1123,10 @@ pub fn interior_point(r: &Region) -> Vec2 {
         let [a, b, c] = [t[0], t[1], t[2]].map(|i| verts[i as usize]);
         let area = ((b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x)).abs() / 2.0;
         if area > best.0 {
-            best = (area, Vec2::new((a.x + b.x + c.x) / 3.0, (a.y + b.y + c.y) / 3.0));
+            best = (
+                area,
+                Vec2::new((a.x + b.x + c.x) / 3.0, (a.y + b.y + c.y) / 3.0),
+            );
         }
     }
     best.1
@@ -1087,7 +1182,10 @@ impl EndType {
 
     /// End types that need a picked face, part or vertex.
     pub fn needs_target(self) -> bool {
-        matches!(self, EndType::UpToFace | EndType::UpToPart | EndType::UpToVertex)
+        matches!(
+            self,
+            EndType::UpToFace | EndType::UpToPart | EndType::UpToVertex
+        )
     }
 }
 
@@ -1117,7 +1215,12 @@ pub enum BooleanOp {
 }
 
 impl BooleanOp {
-    pub const ALL: [BooleanOp; 4] = [BooleanOp::New, BooleanOp::Add, BooleanOp::Remove, BooleanOp::Intersect];
+    pub const ALL: [BooleanOp; 4] = [
+        BooleanOp::New,
+        BooleanOp::Add,
+        BooleanOp::Remove,
+        BooleanOp::Intersect,
+    ];
 
     pub fn label(self) -> &'static str {
         match self {
@@ -1419,8 +1522,12 @@ impl ExtrudeFeature {
                 EndType::Blind if !(depth > 0.0 && depth.is_finite()) => {
                     Some("The depth must be greater than zero")
                 }
-                EndType::UpToFace if !matches!(up_to, Some(UpTo::Face(_))) => Some("Select a face to extrude up to"),
-                EndType::UpToPart if !matches!(up_to, Some(UpTo::Part(_))) => Some("Select a part to extrude up to"),
+                EndType::UpToFace if !matches!(up_to, Some(UpTo::Face(_))) => {
+                    Some("Select a face to extrude up to")
+                }
+                EndType::UpToPart if !matches!(up_to, Some(UpTo::Part(_))) => {
+                    Some("Select a part to extrude up to")
+                }
                 EndType::UpToVertex if !matches!(up_to, Some(UpTo::Vertex(_))) => {
                     Some("Select a vertex to extrude up to")
                 }
@@ -1658,9 +1765,15 @@ impl RevolveFeature {
         let angle_ok = |a: f64| a > 0.0 && a <= 360.0 + 1e-9 && a.is_finite();
         let check = |e: EndType, angle: f64, up_to: &Option<UpTo>| -> Option<&'static str> {
             match e {
-                EndType::Blind if !angle_ok(angle) => Some("The angle must be between 0 and 360 degrees"),
-                EndType::UpToFace if !matches!(up_to, Some(UpTo::Face(_))) => Some("Select a face to revolve up to"),
-                EndType::UpToPart if !matches!(up_to, Some(UpTo::Part(_))) => Some("Select a part to revolve up to"),
+                EndType::Blind if !angle_ok(angle) => {
+                    Some("The angle must be between 0 and 360 degrees")
+                }
+                EndType::UpToFace if !matches!(up_to, Some(UpTo::Face(_))) => {
+                    Some("Select a face to revolve up to")
+                }
+                EndType::UpToPart if !matches!(up_to, Some(UpTo::Part(_))) => {
+                    Some("Select a part to revolve up to")
+                }
                 EndType::UpToVertex if !matches!(up_to, Some(UpTo::Vertex(_))) => {
                     Some("Select a vertex to revolve up to")
                 }
@@ -1689,7 +1802,11 @@ pub enum BooleanKind {
 }
 
 impl BooleanKind {
-    pub const ALL: [BooleanKind; 3] = [BooleanKind::Union, BooleanKind::Subtract, BooleanKind::Intersect];
+    pub const ALL: [BooleanKind; 3] = [
+        BooleanKind::Union,
+        BooleanKind::Subtract,
+        BooleanKind::Intersect,
+    ];
 
     pub fn label(self) -> &'static str {
         match self {
@@ -1741,14 +1858,24 @@ fn yes_default() -> bool {
 
 impl Default for BooleanOffset {
     fn default() -> Self {
-        Self { distance: 1.0, expr: "1 mm".into(), flip: false, all: true, faces: Vec::new() }
+        Self {
+            distance: 1.0,
+            expr: "1 mm".into(),
+            flip: false,
+            all: true,
+            faces: Vec::new(),
+        }
     }
 }
 
 impl BooleanOffset {
     /// The signed distance (outward positive).
     pub fn signed(&self) -> f64 {
-        if self.flip { -self.distance } else { self.distance }
+        if self.flip {
+            -self.distance
+        } else {
+            self.distance
+        }
     }
 }
 
@@ -1765,7 +1892,9 @@ impl BooleanFeature {
             }
         }
         match self.op {
-            BooleanKind::Subtract if self.targets.is_empty() => Some("Select the parts to subtract from"),
+            BooleanKind::Subtract if self.targets.is_empty() => {
+                Some("Select the parts to subtract from")
+            }
             BooleanKind::Subtract if self.tools.is_empty() => Some("Select the parts to subtract"),
             BooleanKind::Union | BooleanKind::Intersect if self.tools.len() < 2 => {
                 Some("Select at least two parts")
@@ -1805,7 +1934,10 @@ pub struct PartProps {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub material: Option<crate::material::Material>,
     /// Part number, Description and the other properties (P3B.6, [`crate::properties`]).
-    #[serde(default, skip_serializing_if = "crate::properties::Properties::is_empty")]
+    #[serde(
+        default,
+        skip_serializing_if = "crate::properties::Properties::is_empty"
+    )]
     pub properties: crate::properties::Properties,
 }
 
@@ -1836,7 +1968,15 @@ impl From<PartPropsFile> for PartProps {
         if properties.description.is_none() {
             properties.description = f.description.filter(|d| !d.trim().is_empty());
         }
-        Self { part: f.part, name: f.name, hidden: f.hidden, appearance: f.appearance, faces: f.faces, material: f.material, properties }
+        Self {
+            part: f.part,
+            name: f.name,
+            hidden: f.hidden,
+            appearance: f.appearance,
+            faces: f.faces,
+            material: f.material,
+            properties,
+        }
     }
 }
 

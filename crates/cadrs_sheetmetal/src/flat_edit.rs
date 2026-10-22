@@ -88,17 +88,32 @@ pub(crate) fn part_cuts(m: &Model, part: &FlatPart) -> Vec<ReliefCut> {
 }
 
 /// Remove: cuts `region` (in the flat coordinates of `flat.parts[part]`) out of the sheet.
-pub fn remove(m: &mut Model, flat: &FlatPattern, part: usize, region: &[Polygon]) -> Result<(), FlatEditError> {
+pub fn remove(
+    m: &mut Model,
+    flat: &FlatPattern,
+    part: usize,
+    region: &[Polygon],
+) -> Result<(), FlatEditError> {
     let p = flat.parts.get(part).ok_or(FlatEditError::NoPart)?;
     let a = anchor(p).ok_or(FlatEditError::NoPart)?;
-    let inv = p.placement(a).and_then(|m| m.inverse()).ok_or(FlatEditError::NoPart)?;
-    let touched: f64 = region.iter().flat_map(|r| p.outline.iter().map(move |o| poly::overlap_area(r, o))).sum();
+    let inv = p
+        .placement(a)
+        .and_then(|m| m.inverse())
+        .ok_or(FlatEditError::NoPart)?;
+    let touched: f64 = region
+        .iter()
+        .flat_map(|r| p.outline.iter().map(move |o| poly::overlap_area(r, o)))
+        .sum();
     if touched <= 1e-12 {
         return Err(FlatEditError::MissesMaterial);
     }
     m.flat_cuts.push(FlatCut {
         anchor: a,
-        shapes: region.iter().filter(|r| !r.is_empty()).map(|r| r.map(|q| inv.apply(q))).collect(),
+        shapes: region
+            .iter()
+            .filter(|r| !r.is_empty())
+            .map(|r| r.map(|q| inv.apply(q)))
+            .collect(),
     });
     Ok(())
 }
@@ -110,7 +125,11 @@ fn boundary_distance(p: &Polygon, q: P2) -> f64 {
         .flat_map(|l| (0..l.len()).map(move |i| (l[i], l[(i + 1) % l.len()])))
         .map(|(a, b)| {
             let d = b - a;
-            let t = if d.norm_squared() < 1e-30 { 0.0 } else { ((q - a).dot(&d) / d.norm_squared()).clamp(0.0, 1.0) };
+            let t = if d.norm_squared() < 1e-30 {
+                0.0
+            } else {
+                ((q - a).dot(&d) / d.norm_squared()).clamp(0.0, 1.0)
+            };
             (a + d * t - q).norm()
         })
         .fold(f64::INFINITY, f64::min)
@@ -134,9 +153,18 @@ fn contact(piece: &Polygon, wall: &Polygon, tol: f64) -> usize {
 
 /// Add: grows the part's walls by `region` (in the flat coordinates of `flat.parts[part]`).
 /// Each piece of new material joins the wall whose edge it runs along most.
-pub fn add(m: &mut Model, flat: &FlatPattern, part: usize, region: &[Polygon]) -> Result<(), FlatEditError> {
+pub fn add(
+    m: &mut Model,
+    flat: &FlatPattern,
+    part: usize,
+    region: &[Polygon],
+) -> Result<(), FlatEditError> {
     let p = flat.parts.get(part).ok_or(FlatEditError::NoPart)?;
-    let size = p.bounds().map(|(lo, hi)| (hi - lo).norm()).unwrap_or(1.0).max(1.0);
+    let size = p
+        .bounds()
+        .map(|(lo, hi)| (hi - lo).norm())
+        .unwrap_or(1.0)
+        .max(1.0);
     let tol = (1e-7 * size).max(10.0 * GRID);
     let existing: Vec<Polygon> = p.pieces.iter().map(|pc| pc.polygon.clone()).collect();
     let new = poly::difference(&poly::union(region), &existing);
@@ -157,9 +185,16 @@ pub fn add(m: &mut Model, flat: &FlatPattern, part: usize, region: &[Polygon]) -
             .filter(|(_, c)| *c > 0)
             .ok_or(FlatEditError::Detached)?
             .0;
-        let inv = p.placement(best).and_then(|a| a.inverse()).ok_or(FlatEditError::NoPart)?;
+        let inv = p
+            .placement(best)
+            .and_then(|a| a.inverse())
+            .ok_or(FlatEditError::NoPart)?;
         let params = m.params;
-        let wall = m.walls.iter_mut().find(|w| w.id == best).ok_or(FlatEditError::NoPart)?;
+        let wall = m
+            .walls
+            .iter_mut()
+            .find(|w| w.id == best)
+            .ok_or(FlatEditError::NoPart)?;
         let k = wall.flat_scale(&params);
         let local = piece.map(|q| {
             let l = inv.apply(q);
@@ -170,7 +205,14 @@ pub fn add(m: &mut Model, flat: &FlatPattern, part: usize, region: &[Polygon]) -
             return Err(FlatEditError::SplitsWall);
         };
         // The booleans round to the grid: back onto the exact corners.
-        let exact: Vec<P2> = wall.outline.outer.iter().chain(wall.outline.holes.iter().flatten()).chain(local.outer.iter()).copied().collect();
+        let exact: Vec<P2> = wall
+            .outline
+            .outer
+            .iter()
+            .chain(wall.outline.holes.iter().flatten())
+            .chain(local.outer.iter())
+            .copied()
+            .collect();
         wall.outline = poly::snap_to(one, &exact, 10.0 * GRID);
     }
     Ok(())
@@ -197,12 +239,21 @@ mod tests {
         let c = P2::from((bend.center.a.coords + bend.center.b.coords) / 2.0);
         let d = bend.center.dir();
         let n = poly::perp(d);
-        let slot = Polygon::new(vec![c - d * 2.0 - n * 15.0, c + d * 2.0 - n * 15.0, c + d * 2.0 + n * 15.0, c - d * 2.0 + n * 15.0]);
+        let slot = Polygon::new(vec![
+            c - d * 2.0 - n * 15.0,
+            c + d * 2.0 - n * 15.0,
+            c + d * 2.0 + n * 15.0,
+            c - d * 2.0 + n * 15.0,
+        ]);
         remove(&mut m, &flat, 0, std::slice::from_ref(&slot)).unwrap();
         let after = flatten(&m);
         assert!(after.is_ok(), "{:?}", after.errors);
         let part = &after.parts[0];
-        assert!((before - part.area() - 120.0).abs() < 1e-6, "{}", before - part.area());
+        assert!(
+            (before - part.area() - 120.0).abs() < 1e-6,
+            "{}",
+            before - part.area()
+        );
         // One hole, exactly the slot.
         let holes: Vec<&Vec<P2>> = part.outline.iter().flat_map(|o| o.holes.iter()).collect();
         assert_eq!(holes.len(), 1);
@@ -213,20 +264,40 @@ mod tests {
         let vis: f64 = b.center_visible.iter().map(|s| s.len()).sum();
         assert!((b.center.len() - vis - 4.0).abs() < 1e-6, "{vis}");
         // Each piece learns what it lost: the bend region a 4 × allowance rectangle in (s, u).
-        let cut = part.cuts.iter().find(|c| matches!(c.source, ReliefSource::Flat { .. })).unwrap();
-        let (_, on_bend) = cut.removed.iter().find(|(s, _)| matches!(s, PieceSource::Bend(_))).unwrap();
+        let cut = part
+            .cuts
+            .iter()
+            .find(|c| matches!(c.source, ReliefSource::Flat { .. }))
+            .unwrap();
+        let (_, on_bend) = cut
+            .removed
+            .iter()
+            .find(|(s, _)| matches!(s, PieceSource::Bend(_)))
+            .unwrap();
         let ba = m.joints[0].bend().unwrap().allowance(&m.params).unwrap();
         let (lo, hi) = on_bend[0].bounds().unwrap();
-        assert!(((hi.x - lo.x) - 4.0).abs() < 1e-6 && ((hi.y - lo.y) - ba).abs() < 1e-6, "{lo:?} {hi:?}");
+        assert!(
+            ((hi.x - lo.x) - 4.0).abs() < 1e-6 && ((hi.y - lo.y) - ba).abs() < 1e-6,
+            "{lo:?} {hi:?}"
+        );
         // Removed from both walls too.
-        assert_eq!(cut.removed.iter().filter(|(s, _)| matches!(s, PieceSource::Wall(_))).count(), 2);
+        assert_eq!(
+            cut.removed
+                .iter()
+                .filter(|(s, _)| matches!(s, PieceSource::Wall(_)))
+                .count(),
+            2
+        );
     }
 
     #[test]
     fn a_cut_that_misses_is_refused() {
         let mut m = samples::l_bracket(Params::default(), true).unwrap();
         let flat = flatten(&m);
-        assert_eq!(remove(&mut m, &flat, 0, &[rect(500.0, 500.0, 510.0, 510.0)]), Err(FlatEditError::MissesMaterial));
+        assert_eq!(
+            remove(&mut m, &flat, 0, &[rect(500.0, 500.0, 510.0, 510.0)]),
+            Err(FlatEditError::MissesMaterial)
+        );
         assert!(m.flat_cuts.is_empty());
     }
 
@@ -243,9 +314,16 @@ mod tests {
         let after = flatten(&m);
         assert!(after.is_ok(), "{:?}", after.errors);
         assert!((after.parts[0].area() - before - 80.0).abs() < 1e-6);
-        assert!((m.walls[0].outline.area() - base - 80.0).abs() < 1e-6, "{}", m.walls[0].outline.area());
+        assert!(
+            (m.walls[0].outline.area() - base - 80.0).abs() < 1e-6,
+            "{}",
+            m.walls[0].outline.area()
+        );
         // Floating material is refused.
         let mut m2 = samples::l_bracket(p, true).unwrap();
-        assert_eq!(add(&mut m2, &flat, 0, &[rect(-30.0, -30.0, -20.0, -20.0)]), Err(FlatEditError::Detached));
+        assert_eq!(
+            add(&mut m2, &flat, 0, &[rect(-30.0, -30.0, -20.0, -20.0)]),
+            Err(FlatEditError::Detached)
+        );
     }
 }

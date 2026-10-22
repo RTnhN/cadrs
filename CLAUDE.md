@@ -6,6 +6,8 @@ Onshape-style CAD in Rust + Bevy 0.19.1. Local notes in `docs/` (git-ignored: `P
 ## Commands
 - Build in release everywhere so nothing builds twice: `cargo build -r`,
   `cargo clippy --workspace --all-targets`.
+- Format before committing: `cargo fmt --all` (and `cargo fmt` in `site/`); CI's "Format" job
+  checks it.
 - Tests:
   - `cargo test -r`: the fast tests of the crates without Bevy (about a minute).
   - `cargo test -r -- --ignored`: the slow core tests (each over 5 s).

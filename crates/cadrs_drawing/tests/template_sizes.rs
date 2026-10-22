@@ -33,17 +33,33 @@ fn every_template_has_its_standard_sheet_size() {
         let (short, long) = (short * unit, long * unit);
         let (w, h) = t.format.size_mm();
         let portrait = t.name.contains("_Portrait_");
-        assert_eq!(t.format.orientation == Orientation::Portrait, portrait, "{}", t.name);
-        let (ew, eh) = if portrait { (short, long) } else { (long, short) };
+        assert_eq!(
+            t.format.orientation == Orientation::Portrait,
+            portrait,
+            "{}",
+            t.name
+        );
+        let (ew, eh) = if portrait {
+            (short, long)
+        } else {
+            (long, short)
+        };
         assert!(
             (w - ew).abs() < 1e-9 && (h - eh).abs() < 1e-9,
             "{}: {w} × {h} mm, expected {ew} × {eh} ({prefix})",
             t.name
         );
-        assert!(t.name.ends_with("_INCH.dwt") || t.name.ends_with("_MM.dwt"), "{}", t.name);
+        assert!(
+            t.name.ends_with("_INCH.dwt") || t.name.ends_with("_MM.dwt"),
+            "{}",
+            t.name
+        );
     }
     // The course's template: ANSI_A_INCH is 11 × 8.5 in, landscape.
-    let a = templates.iter().find(|t| t.name == "ANSI_A_INCH.dwt").unwrap();
+    let a = templates
+        .iter()
+        .find(|t| t.name == "ANSI_A_INCH.dwt")
+        .unwrap();
     let (w, h) = a.format.size_mm();
     assert_eq!((w / 25.4, h / 25.4), (11.0, 8.5));
 }

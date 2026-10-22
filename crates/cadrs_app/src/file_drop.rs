@@ -29,7 +29,8 @@ pub struct FileDropPlugin;
 
 impl Plugin for FileDropPlugin {
     fn build(&self, app: &mut App) {
-        app.init_resource::<DropPosition>().add_systems(Update, log_drops);
+        app.init_resource::<DropPosition>()
+            .add_systems(Update, log_drops);
         #[cfg(target_os = "linux")]
         app.add_systems(PreUpdate, (wayland::listen, wayland::deliver).chain());
     }
@@ -46,10 +47,18 @@ fn log_drops(mut drops: MessageReader<FileDragAndDrop>) {
     for d in drops.read() {
         match d {
             FileDragAndDrop::HoveredFile { path_buf, .. } => {
-                info!("DRAG DETECTED: file {} ({})", path_buf.display(), kind(path_buf));
+                info!(
+                    "DRAG DETECTED: file {} ({})",
+                    path_buf.display(),
+                    kind(path_buf)
+                );
             }
             FileDragAndDrop::DroppedFile { path_buf, .. } => {
-                info!("DROP DETECTED: file {} ({})", path_buf.display(), kind(path_buf));
+                info!(
+                    "DROP DETECTED: file {} ({})",
+                    path_buf.display(),
+                    kind(path_buf)
+                );
             }
             FileDragAndDrop::HoveredFileCanceled { .. } => info!("DRAG CANCELLED"),
         }
@@ -59,7 +68,9 @@ fn log_drops(mut drops: MessageReader<FileDragAndDrop>) {
 /// What a dropped file is, by its extension: for the log.
 fn kind(path: &std::path::Path) -> String {
     match path.extension().and_then(|e| e.to_str()) {
-        Some(ext) if cadrs_core::picture::ImageFormat::of_path(path).is_some() => format!("picture, .{ext}"),
+        Some(ext) if cadrs_core::picture::ImageFormat::of_path(path).is_some() => {
+            format!("picture, .{ext}")
+        }
         Some(ext) => format!(".{ext}"),
         None => "no extension".into(),
     }
@@ -73,7 +84,10 @@ pub fn parse_uri_list(text: &str) -> Vec<PathBuf> {
         .filter(|line| !line.is_empty() && !line.starts_with('#'))
         .filter_map(|line| line.strip_prefix("file://"))
         // The authority (empty, or `localhost`) ends at the first `/`, where the path begins.
-        .map(|rest| rest.split_once('/').map_or(rest.to_string(), |(_, path)| format!("/{path}")))
+        .map(|rest| {
+            rest.split_once('/')
+                .map_or(rest.to_string(), |(_, path)| format!("/{path}"))
+        })
         .map(|path| PathBuf::from(percent_decode(&path)))
         .collect()
 }
@@ -85,7 +99,11 @@ fn percent_decode(uri: &str) -> String {
     let mut i = 0;
     while i < bytes.len() {
         let hex = (bytes[i] == b'%' && i + 2 < bytes.len())
-            .then(|| std::str::from_utf8(&bytes[i + 1..i + 3]).ok().and_then(|h| u8::from_str_radix(h, 16).ok()))
+            .then(|| {
+                std::str::from_utf8(&bytes[i + 1..i + 3])
+                    .ok()
+                    .and_then(|h| u8::from_str_radix(h, 16).ok())
+            })
             .flatten();
         match hex {
             Some(b) => {
@@ -138,18 +156,27 @@ mod wayland {
     pub(super) struct Drops(Mutex<Receiver<Event>>);
 
     /// Starts the listener once there is a window on Wayland (at build time there is none).
-    pub(super) fn listen(window: Query<&RawHandleWrapper, With<PrimaryWindow>>, existing: Option<Res<Drops>>, mut commands: Commands) {
+    pub(super) fn listen(
+        window: Query<&RawHandleWrapper, With<PrimaryWindow>>,
+        existing: Option<Res<Drops>>,
+        mut commands: Commands,
+    ) {
         if existing.is_some() {
             return;
         }
         let Ok(handle) = window.single() else { return };
         // Elsewhere winit delivers drops itself.
-        let RawDisplayHandle::Wayland(wayland) = handle.get_display_handle() else { return };
+        let RawDisplayHandle::Wayland(wayland) = handle.get_display_handle() else {
+            return;
+        };
         // Only used to open a second view onto the connection the window owns, which outlives
         // the thread (a send to the gone app ends it).
         let display = wayland.display.as_ptr() as usize;
         let (tx, rx) = channel();
-        if let Err(e) = std::thread::Builder::new().name("wayland-file-drop".into()).spawn(move || run(display, tx)) {
+        if let Err(e) = std::thread::Builder::new()
+            .name("wayland-file-drop".into())
+            .spawn(move || run(display, tx))
+        {
             warn!("file drop: cannot start the Wayland listener: {e}");
             return;
         }
@@ -191,7 +218,13 @@ mod wayland {
         // A registry of our own: the compositor announces every global to each registry, so
         // this sees the seat and the data device manager without touching winit's.
         let _registry = connection.display().get_registry(&handle, ());
-        let mut state = State { seat: None, manager: None, device: None, offer: None, tx };
+        let mut state = State {
+            seat: None,
+            manager: None,
+            device: None,
+            offer: None,
+            tx,
+        };
         loop {
             if queue.blocking_dispatch(&mut state).is_err() {
                 // The connection is gone: the app is closing.
@@ -240,36 +273,79 @@ mod wayland {
     }
 
     impl Dispatch<WlRegistry, ()> for State {
-        fn event(state: &mut Self, registry: &WlRegistry, event: wl_registry::Event, _: &(), _: &Connection, handle: &QueueHandle<Self>) {
-            let wl_registry::Event::Global { name, interface, version } = event else { return };
+        fn event(
+            state: &mut Self,
+            registry: &WlRegistry,
+            event: wl_registry::Event,
+            _: &(),
+            _: &Connection,
+            handle: &QueueHandle<Self>,
+        ) {
+            let wl_registry::Event::Global {
+                name,
+                interface,
+                version,
+            } = event
+            else {
+                return;
+            };
             match interface.as_str() {
                 // Only something to hang a data device on.
-                "wl_seat" if state.seat.is_none() => state.seat = Some(registry.bind(name, version.min(5), handle, ())),
+                "wl_seat" if state.seat.is_none() => {
+                    state.seat = Some(registry.bind(name, version.min(5), handle, ()))
+                }
                 // Version 3 for `finish`, which tells the source the drop was taken (a file
                 // manager may otherwise wait on it).
-                "wl_data_device_manager" => state.manager = Some(registry.bind(name, version.min(3), handle, ())),
+                "wl_data_device_manager" => {
+                    state.manager = Some(registry.bind(name, version.min(3), handle, ()))
+                }
                 _ => {}
             }
         }
     }
 
     impl Dispatch<WlDataDevice, ()> for State {
-        fn event(state: &mut Self, _: &WlDataDevice, event: wl_data_device::Event, _: &(), connection: &Connection, _: &QueueHandle<Self>) {
+        fn event(
+            state: &mut Self,
+            _: &WlDataDevice,
+            event: wl_data_device::Event,
+            _: &(),
+            connection: &Connection,
+            _: &QueueHandle<Self>,
+        ) {
             match event {
                 // A drag entered the window: accepting a type is what shows "copy" rather than
                 // "no" on the pointer.
-                wl_data_device::Event::Enter { serial, id, x, y, .. } => {
+                wl_data_device::Event::Enter {
+                    serial, id, x, y, ..
+                } => {
                     let Some(offer) = id else { return };
-                    let types = state.offer.take().filter(|o| o.offer == offer).map(|o| o.types).unwrap_or_default();
-                    let pending = Offer { offer, types, serial };
+                    let types = state
+                        .offer
+                        .take()
+                        .filter(|o| o.offer == offer)
+                        .map(|o| o.types)
+                        .unwrap_or_default();
+                    let pending = Offer {
+                        offer,
+                        types,
+                        serial,
+                    };
                     info!(
                         "DRAG DETECTED: Wayland drag entered at ({x:.0}, {y:.0}), types {:?}, {}",
                         pending.types,
-                        if pending.has_uris() { "files: accepted" } else { "no files: declined" }
+                        if pending.has_uris() {
+                            "files: accepted"
+                        } else {
+                            "no files: declined"
+                        }
                     );
                     if pending.has_uris() {
                         pending.offer.accept(serial, Some(URI_LIST.to_string()));
-                        pending.offer.set_actions(wl_data_device_manager::DndAction::Copy, wl_data_device_manager::DndAction::Copy);
+                        pending.offer.set_actions(
+                            wl_data_device_manager::DndAction::Copy,
+                            wl_data_device_manager::DndAction::Copy,
+                        );
                     } else {
                         pending.offer.accept(serial, None);
                     }
@@ -282,7 +358,9 @@ mod wayland {
                     if let Some(pending) = &state.offer
                         && pending.has_uris()
                     {
-                        pending.offer.accept(pending.serial, Some(URI_LIST.to_string()));
+                        pending
+                            .offer
+                            .accept(pending.serial, Some(URI_LIST.to_string()));
                         let _ = state.tx.send(Event::At(Vec2::new(x as f32, y as f32)));
                     }
                 }
@@ -293,16 +371,24 @@ mod wayland {
                     }
                 }
                 wl_data_device::Event::Drop => {
-                    let Some(pending) = state.offer.take() else { return };
+                    let Some(pending) = state.offer.take() else {
+                        return;
+                    };
                     if !pending.has_uris() {
-                        info!("DROP DETECTED: Wayland drop of {:?}: no files, ignored", pending.types);
+                        info!(
+                            "DROP DETECTED: Wayland drop of {:?}: no files, ignored",
+                            pending.types
+                        );
                         pending.offer.destroy();
                         return;
                     }
                     match receive(connection, &pending.offer) {
                         Ok(text) => {
                             let paths = super::parse_uri_list(&text);
-                            info!("DROP DETECTED: Wayland drop of {} file(s): {paths:?}", paths.len());
+                            info!(
+                                "DROP DETECTED: Wayland drop of {} file(s): {paths:?}",
+                                paths.len()
+                            );
                             if state.tx.send(Event::Dropped(paths)).is_err() {
                                 return;
                             }
@@ -320,18 +406,34 @@ mod wayland {
 
         // An offer arrives as a new object before the `enter` that uses it: its types are
         // learned here.
-        fn event_created_child(_opcode: u16, handle: &QueueHandle<Self>) -> std::sync::Arc<dyn wayland_client::backend::ObjectData> {
+        fn event_created_child(
+            _opcode: u16,
+            handle: &QueueHandle<Self>,
+        ) -> std::sync::Arc<dyn wayland_client::backend::ObjectData> {
             handle.make_data::<WlDataOffer, ()>(())
         }
     }
 
     impl Dispatch<WlDataOffer, ()> for State {
-        fn event(state: &mut Self, offer: &WlDataOffer, event: wl_data_offer::Event, _: &(), _: &Connection, _: &QueueHandle<Self>) {
+        fn event(
+            state: &mut Self,
+            offer: &WlDataOffer,
+            event: wl_data_offer::Event,
+            _: &(),
+            _: &Connection,
+            _: &QueueHandle<Self>,
+        ) {
             // The source lists its types, one event each, before the drag enters.
             if let wl_data_offer::Event::Offer { mime_type } = event {
                 match &mut state.offer {
                     Some(pending) if pending.offer == *offer => pending.types.push(mime_type),
-                    _ => state.offer = Some(Offer { offer: offer.clone(), types: vec![mime_type], serial: 0 }),
+                    _ => {
+                        state.offer = Some(Offer {
+                            offer: offer.clone(),
+                            types: vec![mime_type],
+                            serial: 0,
+                        })
+                    }
                 }
             }
         }
@@ -346,7 +448,9 @@ mod wayland {
             offer.receive(URI_LIST.to_string(), write.as_fd());
         }
         // The request must reach the compositor before this thread blocks on the read.
-        connection.flush().map_err(|e| std::io::Error::other(format!("flushing the receive request: {e}")))?;
+        connection
+            .flush()
+            .map_err(|e| std::io::Error::other(format!("flushing the receive request: {e}")))?;
         drop(write);
         let mut text = String::new();
         read.read_to_string(&mut text)?;
@@ -365,12 +469,21 @@ mod tests {
     #[test]
     fn a_uri_list_becomes_paths() {
         let list = "file:///home/someone/a.png\r\nfile:///tmp/b.JPG\r\n";
-        assert_eq!(parse_uri_list(list), vec![PathBuf::from("/home/someone/a.png"), PathBuf::from("/tmp/b.JPG")]);
+        assert_eq!(
+            parse_uri_list(list),
+            vec![
+                PathBuf::from("/home/someone/a.png"),
+                PathBuf::from("/tmp/b.JPG")
+            ]
+        );
     }
 
     #[test]
     fn escapes_are_decoded() {
-        assert_eq!(parse_uri_list("file:///tmp/two%20words%2Bmore.png"), vec![PathBuf::from("/tmp/two words+more.png")]);
+        assert_eq!(
+            parse_uri_list("file:///tmp/two%20words%2Bmore.png"),
+            vec![PathBuf::from("/tmp/two words+more.png")]
+        );
     }
 
     // A browser's drag lists URLs too: only local files are taken, and `localhost` keeps the

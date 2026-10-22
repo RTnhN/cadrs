@@ -17,7 +17,9 @@ use std::collections::HashMap;
 
 use cadrs_drawing::view_kinds::ViewCut;
 use cadrs_kernel::naming::{self, BodyNames};
-use cadrs_kernel::{BodyId, BoolOp, Curve2, Extent, Kernel, Loop, Plane, Profile, Region, Tessellation, ViewFrame};
+use cadrs_kernel::{
+    BodyId, BoolOp, Curve2, Extent, Kernel, Loop, Plane, Profile, Region, Tessellation, ViewFrame,
+};
 use nalgebra::{Point2, Point3, Unit};
 
 /// The operation id the cut's faces are named under.
@@ -36,8 +38,18 @@ pub struct Cut {
 
 /// Cuts `bodies` (with their names) for a view with frame `frame`: removes the material nearer
 /// the eye than `cut.depth` inside `cut.polygon` (the whole view when empty).
-pub fn cut_bodies(k: &mut dyn Kernel, bodies: &[(BodyId, &BodyNames)], frame: &ViewFrame, cut: &ViewCut) -> Result<Cut, String> {
-    let mut out = Cut { bodies: Vec::new(), names: Vec::new(), hatch: Vec::new(), temps: Vec::new() };
+pub fn cut_bodies(
+    k: &mut dyn Kernel,
+    bodies: &[(BodyId, &BodyNames)],
+    frame: &ViewFrame,
+    cut: &ViewCut,
+) -> Result<Cut, String> {
+    let mut out = Cut {
+        bodies: Vec::new(),
+        names: Vec::new(),
+        hatch: Vec::new(),
+        temps: Vec::new(),
+    };
     // The parts' extent along the direction of sight and in the view.
     let (mut dmin, mut dmax) = (f64::MAX, f64::MIN);
     let (mut lo, mut hi) = ([f64::MAX; 2], [f64::MIN; 2]);
@@ -72,7 +84,10 @@ pub fn cut_bodies(k: &mut dyn Kernel, bodies: &[(BodyId, &BodyNames)], frame: &V
     let polygon: Vec<[f64; 2]> = if cut.polygon.len() >= 3 {
         cut.polygon.clone()
     } else {
-        let (a, b) = ([lo[0] - margin, lo[1] - margin], [hi[0] + margin, hi[1] + margin]);
+        let (a, b) = (
+            [lo[0] - margin, lo[1] - margin],
+            [hi[0] + margin, hi[1] + margin],
+        );
         vec![a, [b[0], a[1]], b, [a[0], b[1]]]
     };
     // The tool's sketch plane: in front of the parts, facing along the direction of sight.
@@ -100,10 +115,23 @@ pub fn cut_bodies(k: &mut dyn Kernel, bodies: &[(BodyId, &BodyNames)], frame: &V
         pts.reverse();
     }
     let curves: Vec<Curve2> = (0..pts.len())
-        .map(|i| Curve2::Line { a: pts[i], b: pts[(i + 1) % pts.len()], source: Some(i as u64 + 1) })
+        .map(|i| Curve2::Line {
+            a: pts[i],
+            b: pts[(i + 1) % pts.len()],
+            source: Some(i as u64 + 1),
+        })
         .collect();
-    let profile = Profile::new(plane, vec![Region { outer: Loop { curves }, holes: Vec::new(), source: Some(1) }]);
-    let tool_r = k.extrude(&profile, Extent::Blind(cut.depth - start)).map_err(|e| format!("Section cut failed: {e}"))?;
+    let profile = Profile::new(
+        plane,
+        vec![Region {
+            outer: Loop { curves },
+            holes: Vec::new(),
+            source: Some(1),
+        }],
+    );
+    let tool_r = k
+        .extrude(&profile, Extent::Blind(cut.depth - start))
+        .map_err(|e| format!("Section cut failed: {e}"))?;
     let Some(&tool) = tool_r.bodies.first() else {
         return Err("Section cut failed: no tool body".into());
     };
@@ -111,7 +139,8 @@ pub fn cut_bodies(k: &mut dyn Kernel, bodies: &[(BodyId, &BodyNames)], frame: &V
     for b in tool_r.bodies.iter().skip(1) {
         out.temps.push(*b);
     }
-    let tool_names = naming::name_body(k, tool, SECTION_OP, &tool_r.history, &[]).map_err(|e| e.to_string())?;
+    let tool_names =
+        naming::name_body(k, tool, SECTION_OP, &tool_r.history, &[]).map_err(|e| e.to_string())?;
     for (b, names) in bodies {
         let r = match k.boolean(BoolOp::Subtract, *b, &[tool]) {
             Ok(r) => r,
@@ -136,26 +165,46 @@ pub fn cut_bodies(k: &mut dyn Kernel, bodies: &[(BodyId, &BodyNames)], frame: &V
 
 /// The faces of `body` on the cutting plane: planar, facing along the direction of sight, at the
 /// cut's depth.
-fn cap_faces(k: &dyn Kernel, body: BodyId, frame: &ViewFrame, depth: f64) -> Result<Vec<cadrs_kernel::FaceInfo>, String> {
+fn cap_faces(
+    k: &dyn Kernel,
+    body: BodyId,
+    frame: &ViewFrame,
+    depth: f64,
+) -> Result<Vec<cadrs_kernel::FaceInfo>, String> {
     let faces = k.faces(body).map_err(|e| e.to_string())?;
     Ok(faces
         .into_iter()
         .filter(|f| {
             f.plane.as_ref().is_some_and(|p| {
-                p.normal.into_inner().dot(&frame.dir).abs() > 1.0 - 1e-6 && (frame.depth(&p.origin) - depth).abs() < 1e-4
+                p.normal.into_inner().dot(&frame.dir).abs() > 1.0 - 1e-6
+                    && (frame.depth(&p.origin) - depth).abs() < 1e-4
             })
         })
         .collect())
 }
 
 /// The loops of the faces of `body` on the cutting plane (see the module docs).
-fn cap_loops(k: &dyn Kernel, body: BodyId, frame: &ViewFrame, depth: f64) -> Result<Vec<Vec<[f64; 2]>>, String> {
-    let caps: Vec<cadrs_kernel::FaceId> = cap_faces(k, body, frame, depth)?.iter().map(|f| f.id).collect();
+fn cap_loops(
+    k: &dyn Kernel,
+    body: BodyId,
+    frame: &ViewFrame,
+    depth: f64,
+) -> Result<Vec<Vec<[f64; 2]>>, String> {
+    let caps: Vec<cadrs_kernel::FaceId> = cap_faces(k, body, frame, depth)?
+        .iter()
+        .map(|f| f.id)
+        .collect();
     if caps.is_empty() {
         return Ok(Vec::new());
     }
     let mesh = k
-        .tessellate(body, Tessellation { deflection: 0.005, angle: 2.5f64.to_radians() })
+        .tessellate(
+            body,
+            Tessellation {
+                deflection: 0.005,
+                angle: 2.5f64.to_radians(),
+            },
+        )
         .map_err(|e| e.to_string())?;
     Ok(boundary_loops(
         mesh.indices
@@ -197,7 +246,11 @@ impl SectionPlane {
     /// eye than depth 0 is what goes.
     fn frame(&self) -> ViewFrame {
         let n = nalgebra::Vector3::from(self.normal).normalize();
-        let x = if n.x.abs() < 0.9 { nalgebra::Vector3::x() } else { nalgebra::Vector3::y() };
+        let x = if n.x.abs() < 0.9 {
+            nalgebra::Vector3::x()
+        } else {
+            nalgebra::Vector3::y()
+        };
         let mut f = ViewFrame::new(-n, x);
         f.origin = Point3::from(self.origin);
         f
@@ -210,7 +263,10 @@ impl SectionPlane {
 pub fn section_cap(k: &mut dyn Kernel, body: BodyId, plane: &SectionPlane) -> Result<Cap, String> {
     let frame = plane.frame();
     let names = BodyNames::default();
-    let cut = ViewCut { depth: 0.0, polygon: Vec::new() };
+    let cut = ViewCut {
+        depth: 0.0,
+        polygon: Vec::new(),
+    };
     let r = match cut_bodies(k, &[(body, &names)], &frame, &cut) {
         Ok(r) => r,
         // All of it on the removed side: nothing left, so no cap.
@@ -225,16 +281,26 @@ pub fn section_cap(k: &mut dyn Kernel, body: BodyId, plane: &SectionPlane) -> Re
             }
             cap.area += faces.iter().map(|f| f.area).sum::<f64>();
             let ids: Vec<cadrs_kernel::FaceId> = faces.iter().map(|f| f.id).collect();
-            let mesh = k.tessellate(b, Tessellation { deflection: 0.01, angle: 5f64.to_radians() }).map_err(|e| e.to_string())?;
+            let mesh = k
+                .tessellate(
+                    b,
+                    Tessellation {
+                        deflection: 0.01,
+                        angle: 5f64.to_radians(),
+                    },
+                )
+                .map_err(|e| e.to_string())?;
             let tris: Vec<[[f64; 3]; 3]> = mesh
                 .indices
                 .iter()
                 .zip(&mesh.triangle_faces)
                 .filter(|(_, f)| ids.contains(f))
-                .map(|(t, _)| t.map(|i| {
-                    let p = mesh.positions[i as usize];
-                    [p.x, p.y, p.z]
-                }))
+                .map(|(t, _)| {
+                    t.map(|i| {
+                        let p = mesh.positions[i as usize];
+                        [p.x, p.y, p.z]
+                    })
+                })
                 .collect();
             let up = frame.up();
             let to3 = |q: [f64; 2]| {
@@ -251,7 +317,10 @@ pub fn section_cap(k: &mut dyn Kernel, body: BodyId, plane: &SectionPlane) -> Re
                 .into_iter()
                 .map(|l| l.into_iter().map(to3).collect::<Vec<_>>()),
             );
-            cap.triangles.extend(tris.iter().map(|t| t.map(|p| [p[0] as f32, p[1] as f32, p[2] as f32])));
+            cap.triangles.extend(
+                tris.iter()
+                    .map(|t| t.map(|p| [p[0] as f32, p[1] as f32, p[2] as f32])),
+            );
         }
         Ok(())
     })();
@@ -273,7 +342,10 @@ pub struct SectionItem {
 
 /// The caps of `items` cut by `plane`, worked out on the kernel thread (each part's exact body,
 /// placed, cut by the half-space). Parts that fail or that the plane misses are left out.
-pub fn caps(items: Vec<SectionItem>, plane: SectionPlane) -> crate::rebuild::PendingJob<Vec<(crate::ids::PartId, Cap)>> {
+pub fn caps(
+    items: Vec<SectionItem>,
+    plane: SectionPlane,
+) -> crate::rebuild::PendingJob<Vec<(crate::ids::PartId, Cap)>> {
     crate::rebuild::task::run(Caps { items, plane })
 }
 
@@ -293,10 +365,17 @@ impl crate::rebuild::task::Task for Caps {
 }
 
 #[cfg(feature = "brep")]
-fn caps_on(r: &mut crate::rebuild::Rebuilder, items: &[SectionItem], plane: &SectionPlane) -> Vec<(crate::ids::PartId, Cap)> {
+fn caps_on(
+    r: &mut crate::rebuild::Rebuilder,
+    items: &[SectionItem],
+    plane: &SectionPlane,
+) -> Vec<(crate::ids::PartId, Cap)> {
     let mut out = Vec::new();
     for it in items {
-        let Ok(body) = r.placed_body(&it.features, it.part, it.pose.rotation, it.pose.translation) else { continue };
+        let Ok(body) = r.placed_body(&it.features, it.part, it.pose.rotation, it.pose.translation)
+        else {
+            continue;
+        };
         let cap = section_cap(r.kernel_mut(), body, plane);
         r.release_body(body);
         if let Ok(cap) = cap
@@ -309,7 +388,11 @@ fn caps_on(r: &mut crate::rebuild::Rebuilder, items: &[SectionItem], plane: &Sec
 }
 
 #[cfg(not(feature = "brep"))]
-fn caps_on(_r: &mut crate::rebuild::Rebuilder, _items: &[SectionItem], _plane: &SectionPlane) -> Vec<(crate::ids::PartId, Cap)> {
+fn caps_on(
+    _r: &mut crate::rebuild::Rebuilder,
+    _items: &[SectionItem],
+    _plane: &SectionPlane,
+) -> Vec<(crate::ids::PartId, Cap)> {
     Vec::new()
 }
 
@@ -328,7 +411,8 @@ pub fn boundary_loops(tris: impl Iterator<Item = [[f64; 2]; 3]>) -> Vec<Vec<[f64
     // Directed edges of the counter-clockwise triangles, counted.
     let mut edges: HashMap<(usize, usize), usize> = HashMap::new();
     for t in tris {
-        let a2 = (t[1][0] - t[0][0]) * (t[2][1] - t[0][1]) - (t[2][0] - t[0][0]) * (t[1][1] - t[0][1]);
+        let a2 =
+            (t[1][0] - t[0][0]) * (t[2][1] - t[0][1]) - (t[2][0] - t[0][0]) * (t[1][1] - t[0][1]);
         if a2.abs() < 1e-14 {
             continue;
         }
@@ -409,29 +493,75 @@ mod tests {
     fn a_section_through_a_40_mm_cylinder_caps_with_its_circle() {
         use cadrs_kernel::DefaultKernel;
         let mut k = DefaultKernel::new();
-        let circle = Curve2::Circle { center: Point2::new(5.0, -3.0), radius: 20.0, source: Some(1) };
-        let profile = Profile::new(Plane::top(), vec![Region { outer: Loop { curves: vec![circle] }, holes: Vec::new(), source: Some(1) }]);
+        let circle = Curve2::Circle {
+            center: Point2::new(5.0, -3.0),
+            radius: 20.0,
+            source: Some(1),
+        };
+        let profile = Profile::new(
+            Plane::top(),
+            vec![Region {
+                outer: Loop {
+                    curves: vec![circle],
+                },
+                holes: Vec::new(),
+                source: Some(1),
+            }],
+        );
         let body = k.extrude(&profile, Extent::Blind(30.0)).unwrap().bodies[0];
         for normal in [[0.0, 0.0, 1.0], [0.0, 0.0, -1.0]] {
-            let cap = section_cap(&mut k, body, &SectionPlane { origin: [0.0, 0.0, 12.0], normal }).unwrap();
-            assert!((cap.area - 400.0 * std::f64::consts::PI).abs() < 1e-4, "{}", cap.area);
+            let cap = section_cap(
+                &mut k,
+                body,
+                &SectionPlane {
+                    origin: [0.0, 0.0, 12.0],
+                    normal,
+                },
+            )
+            .unwrap();
+            assert!(
+                (cap.area - 400.0 * std::f64::consts::PI).abs() < 1e-4,
+                "{}",
+                cap.area
+            );
             assert!((cap.area - 1256.6371).abs() < 1e-4);
             let tri_area: f64 = cap
                 .triangles
                 .iter()
                 .map(|t| {
-                    let v = |p: [f32; 3]| nalgebra::Vector3::new(p[0] as f64, p[1] as f64, p[2] as f64);
+                    let v =
+                        |p: [f32; 3]| nalgebra::Vector3::new(p[0] as f64, p[1] as f64, p[2] as f64);
                     (v(t[1]) - v(t[0])).cross(&(v(t[2]) - v(t[0]))).norm() / 2.0
                 })
                 .sum();
             assert!((tri_area - cap.area).abs() < 2.0, "{tri_area}");
-            assert!(cap.triangles.iter().flatten().all(|p| (p[2] - 12.0).abs() < 1e-3));
+            assert!(
+                cap.triangles
+                    .iter()
+                    .flatten()
+                    .all(|p| (p[2] - 12.0).abs() < 1e-3)
+            );
             assert_eq!(cap.loops.len(), 1);
-            assert!(cap.loops[0].iter().all(|p| ((p[0] - 5.0).hypot(p[1] + 3.0) - 20.0).abs() < 0.05));
+            assert!(
+                cap.loops[0]
+                    .iter()
+                    .all(|p| ((p[0] - 5.0).hypot(p[1] + 3.0) - 20.0).abs() < 0.05)
+            );
         }
         // The body is still there, whole.
-        assert!((k.mass_properties(body).unwrap().volume - 400.0 * std::f64::consts::PI * 30.0).abs() < 1e-3);
-        let above = section_cap(&mut k, body, &SectionPlane { origin: [0.0, 0.0, 40.0], normal: [0.0, 0.0, 1.0] }).unwrap();
+        assert!(
+            (k.mass_properties(body).unwrap().volume - 400.0 * std::f64::consts::PI * 30.0).abs()
+                < 1e-3
+        );
+        let above = section_cap(
+            &mut k,
+            body,
+            &SectionPlane {
+                origin: [0.0, 0.0, 40.0],
+                normal: [0.0, 0.0, 1.0],
+            },
+        )
+        .unwrap();
         assert!(above.triangles.is_empty() && above.area == 0.0);
     }
 }

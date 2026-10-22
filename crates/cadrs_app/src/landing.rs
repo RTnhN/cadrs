@@ -38,18 +38,18 @@ use cadrs_core::{
     Document, DocumentEntry, DocumentId, DocumentMeta, Filter, FolderId, ItemType, LabelId,
     Library, LibraryCommand, LibraryHistory, SortDir, SortKey,
 };
+use cadrs_ui::icon::icon_in;
 use cadrs_ui::input::{TextInputField, TextInputPlaceholder};
 use cadrs_ui::menu::ContextMenuAnchor;
 use cadrs_ui::prelude::*;
-use cadrs_ui::icon::icon_in;
 use cadrs_ui::{Button, CollapsibleToggled, Icon, ShortcutKey};
 
 use crate::{ActiveDocument, AppClock, AppState, DocumentStore, UserProfile};
 
 #[path = "landing_details.rs"]
 mod details;
-pub use details::{DetailsTab, LandingDetails, Pick};
 pub use details::import_file as import_mesh_document;
+pub use details::{DetailsTab, LandingDetails, Pick};
 
 pub struct LandingPlugin;
 
@@ -203,7 +203,10 @@ fn sync(store: &cadrs_core::Store, before: &Library, after: &Library) {
 
 /// Thumbnail images by document: the lists' small ones, and the details panel's large ones.
 #[derive(Resource, Default)]
-struct Thumbnails(HashMap<DocumentId, Option<Handle<Image>>>, HashMap<DocumentId, Option<Handle<Image>>>);
+struct Thumbnails(
+    HashMap<DocumentId, Option<Handle<Image>>>,
+    HashMap<DocumentId, Option<Handle<Image>>>,
+);
 
 /// The main panel, rebuilt whenever the list changes.
 #[derive(Component)]
@@ -290,7 +293,10 @@ fn filter_name(f: Filter) -> &'static str {
 /// The filter's title: its label, or the label's name (P3E.1).
 fn filter_title(f: Filter, lib: &Library) -> String {
     match f {
-        Filter::Label(id) => lib.label(id).map(|l| l.name.clone()).unwrap_or_else(|| "Label".into()),
+        Filter::Label(id) => lib
+            .label(id)
+            .map(|l| l.name.clone())
+            .unwrap_or_else(|| "Label".into()),
         f => f.label().to_string(),
     }
 }
@@ -332,7 +338,11 @@ fn thumbnail(
     store: &cadrs_core::Store,
     id: DocumentId,
 ) -> Option<Handle<Image>> {
-    thumbs.0.entry(id).or_insert_with(|| thumbnail_image(images, store.read_thumbnail(id)?)).clone()
+    thumbs
+        .0
+        .entry(id)
+        .or_insert_with(|| thumbnail_image(images, store.read_thumbnail(id)?))
+        .clone()
 }
 
 /// The document's large thumbnail (the details panel's; its small one if it has none).
@@ -342,14 +352,22 @@ fn large_thumbnail(
     store: &cadrs_core::Store,
     id: DocumentId,
 ) -> Option<Handle<Image>> {
-    thumbs.1.entry(id).or_insert_with(|| thumbnail_image(images, store.read_thumbnail_large(id)?)).clone()
+    thumbs
+        .1
+        .entry(id)
+        .or_insert_with(|| thumbnail_image(images, store.read_thumbnail_large(id)?))
+        .clone()
 }
 
 /// A decoded thumbnail as an image.
 fn thumbnail_image(images: &mut Assets<Image>, img: image::RgbaImage) -> Option<Handle<Image>> {
     let (w, h) = img.dimensions();
     Some(images.add(Image::new(
-        Extent3d { width: w, height: h, depth_or_array_layers: 1 },
+        Extent3d {
+            width: w,
+            height: h,
+            depth_or_array_layers: 1,
+        },
         TextureDimension::D2,
         img.into_raw(),
         TextureFormat::Rgba8UnormSrgb,
@@ -546,13 +564,21 @@ fn top_bar(p: &mut ChildSpawnerCommands, t: &Theme, state: &LandingState) {
             });
             // The settings menu (Preferences…). No profile name or avatar: there are no
             // accounts yet (issue #13).
-            r.spawn(Button::new("account").icon("settings").icon_size(20.0).ghost().dropdown_caret().tooltip("Settings").build(t))
-                .insert(dark)
-                .entry::<Node>()
-                .and_modify(|mut n| {
-                    n.padding = UiRect::horizontal(Val::Px(4.0));
-                    n.column_gap = Val::Px(4.0);
-                });
+            r.spawn(
+                Button::new("account")
+                    .icon("settings")
+                    .icon_size(20.0)
+                    .ghost()
+                    .dropdown_caret()
+                    .tooltip("Settings")
+                    .build(t),
+            )
+            .insert(dark)
+            .entry::<Node>()
+            .and_modify(|mut n| {
+                n.padding = UiRect::horizontal(Val::Px(4.0));
+                n.column_gap = Val::Px(4.0);
+            });
         });
     });
 }
@@ -604,7 +630,12 @@ fn sidebar(p: &mut ChildSpawnerCommands, t: &Theme, state: &LandingState) {
         };
         // (Shared with me, Teams and Public are left out: documents are on this computer, with
         // no accounts to share with yet. Issue #13.)
-        let before = [Filter::Explore, Filter::OwnedByMe, Filter::RecentlyOpened, Filter::CreatedByMe];
+        let before = [
+            Filter::Explore,
+            Filter::OwnedByMe,
+            Filter::RecentlyOpened,
+            Filter::CreatedByMe,
+        ];
         let filter_item = |s: &mut ChildSpawnerCommands, f: Filter| {
             s.spawn((
                 item(filter_name(f), filter_icon(f), f.label())
@@ -621,7 +652,13 @@ fn sidebar(p: &mut ChildSpawnerCommands, t: &Theme, state: &LandingState) {
         for f in before {
             filter_item(s, f);
         }
-        for (d, name, icon_name, label, empty) in [(Disclosure::Labels, "filter-labels", "tag", "Labels", "No labels")] {
+        for (d, name, icon_name, label, empty) in [(
+            Disclosure::Labels,
+            "filter-labels",
+            "tag",
+            "Labels",
+            "No labels",
+        )] {
             let open = match d {
                 Disclosure::Teams => state.teams_open,
                 Disclosure::Labels => state.labels_open,
@@ -634,10 +671,16 @@ fn sidebar(p: &mut ChildSpawnerCommands, t: &Theme, state: &LandingState) {
                 v.foreground = cadrs_ui::StateColors::all(t.muted_foreground);
                 row.with_children(|r| {
                     r.spawn((
-                        IconButton::new("labels-new", "tag-new").icon_size(16.0).small().tooltip("Create label").build(t),
-                        observe(|_: On<Activate>, mut commands: Commands, theme: Res<Theme>| {
-                            details::open_new_label_dialog(&mut commands, &theme, None);
-                        }),
+                        IconButton::new("labels-new", "tag-new")
+                            .icon_size(16.0)
+                            .small()
+                            .tooltip("Create label")
+                            .build(t),
+                        observe(
+                            |_: On<Activate>, mut commands: Commands, theme: Res<Theme>| {
+                                details::open_new_label_dialog(&mut commands, &theme, None);
+                            },
+                        ),
                     ))
                     .insert(v)
                     .entry::<Node>()
@@ -670,7 +713,12 @@ fn sidebar(p: &mut ChildSpawnerCommands, t: &Theme, state: &LandingState) {
                     ..default()
                 },
             ))
-            .with_child(t.text(empty, t.font_base, FontWeight::NORMAL, t.subtle_foreground));
+            .with_child(t.text(
+                empty,
+                t.font_base,
+                FontWeight::NORMAL,
+                t.subtle_foreground,
+            ));
         }
         filter_item(s, Filter::Trash);
 
@@ -700,16 +748,18 @@ fn sidebar(p: &mut ChildSpawnerCommands, t: &Theme, state: &LandingState) {
                     .outline()
                     .width(Val::Percent(100.0))
                     .build(t),
-                observe(
-                    |_: On<Activate>, store: Res<DocumentStore>| {
-                        let dir = store.0.root().to_path_buf();
-                        let _ = std::fs::create_dir_all(&dir);
-                        let opener = if cfg!(windows) { "explorer" } else { "xdg-open" };
-                        if let Err(e) = std::process::Command::new(opener).arg(&dir).spawn() {
-                            warn!("cannot open {}: {e}", dir.display());
-                        }
-                    },
-                ),
+                observe(|_: On<Activate>, store: Res<DocumentStore>| {
+                    let dir = store.0.root().to_path_buf();
+                    let _ = std::fs::create_dir_all(&dir);
+                    let opener = if cfg!(windows) {
+                        "explorer"
+                    } else {
+                        "xdg-open"
+                    };
+                    if let Err(e) = std::process::Command::new(opener).arg(&dir).spawn() {
+                        warn!("cannot open {}: {e}", dir.display());
+                    }
+                }),
             ));
         });
     });
@@ -739,7 +789,12 @@ fn footer(p: &mut ChildSpawnerCommands, t: &Theme) {
                 justify_content: JustifyContent::Center,
                 ..default()
             })
-            .with_child(t.text(text, t.font_xs, FontWeight::NORMAL, t.muted_foreground));
+            .with_child(t.text(
+                text,
+                t.font_xs,
+                FontWeight::NORMAL,
+                t.muted_foreground,
+            ));
         }
     });
 }
@@ -780,7 +835,11 @@ fn columns(state: &LandingState, labels: bool) -> Vec<Column> {
             .sortable()
             .sort(sort(SortKey::ModifiedBy)),
     );
-    v.push(Column::new("owned-by", "Owned by").sortable().sort(sort(SortKey::OwnedBy)));
+    v.push(
+        Column::new("owned-by", "Owned by")
+            .sortable()
+            .sort(sort(SortKey::OwnedBy)),
+    );
     v
 }
 
@@ -816,7 +875,9 @@ fn rebuild_main(
     let t = theme.clone();
     commands.entity(panel).despawn_related::<Children>();
     let picked = details_state.pick;
-    let folder = state.folder.and_then(|f| lib.lib.folders.iter().find(|x| x.id == f).cloned());
+    let folder = state
+        .folder
+        .and_then(|f| lib.lib.folders.iter().find(|x| x.id == f).cloned());
     let mut entries = lib.lib.view(
         state.filter,
         &user.id,
@@ -849,7 +910,12 @@ fn rebuild_main(
         .collect();
     let has_labels = !lib.lib.labels.is_empty();
     let cols = columns(&state, has_labels);
-    let folders: Vec<(FolderId, String)> = lib.lib.folders.iter().map(|f| (f.id, f.name.clone())).collect();
+    let folders: Vec<(FolderId, String)> = lib
+        .lib
+        .folders
+        .iter()
+        .map(|f| (f.id, f.name.clone()))
+        .collect();
     // Folders are listed above the documents, as in Onshape's list view.
     let folder_rows: Vec<FolderListing> = if folder.is_none()
         && state.item_type.shows_folders()
@@ -860,11 +926,18 @@ fn rebuild_main(
             .lib
             .folders
             .iter()
-            .filter(|f| f.owned_by == user.id && (needle.is_empty() || f.name.to_lowercase().contains(&needle)))
+            .filter(|f| {
+                f.owned_by == user.id
+                    && (needle.is_empty() || f.name.to_lowercase().contains(&needle))
+            })
             .collect();
         v.sort_by(|a, b| cadrs_core::library::natural_cmp(&a.name, &b.name));
         v.into_iter()
-            .map(|f| FolderListing { id: f.id, name: f.name.clone(), date: clock.format(f.created) })
+            .map(|f| FolderListing {
+                id: f.id,
+                name: f.name.clone(),
+                date: clock.format(f.created),
+            })
             .collect()
     } else {
         Vec::new()
@@ -895,8 +968,14 @@ fn rebuild_main(
     let listed_here = state.filter == Filter::OwnedByMe && folder.is_none();
     let visible = match picked {
         None => true,
-        Some(Pick::Doc(id)) => rows.iter().any(|r| r.0.id == id) || (listed_here && recent.iter().any(|r| r.0.id == id)),
-        Some(Pick::Folder(f)) => folder_rows.iter().any(|x| x.id == f) || (listed_here && folders.iter().any(|x| x.0 == f)),
+        Some(Pick::Doc(id)) => {
+            rows.iter().any(|r| r.0.id == id)
+                || (listed_here && recent.iter().any(|r| r.0.id == id))
+        }
+        Some(Pick::Folder(f)) => {
+            folder_rows.iter().any(|x| x.id == f)
+                || (listed_here && folders.iter().any(|x| x.0 == f))
+        }
         Some(Pick::Sample(_)) => state.filter == Filter::Explore,
     };
     let picked = if visible {
@@ -957,7 +1036,10 @@ fn rebuild_main(
         .with_children(|a| {
             if toolbar {
                 details::list_toolbar(a, &t, &state);
-                a.spawn(Node { flex_grow: 1.0, ..default() });
+                a.spawn(Node {
+                    flex_grow: 1.0,
+                    ..default()
+                });
             }
             if show_sections {
                 let mut dark = cadrs_ui::button::visuals_for(&t, cadrs_ui::ButtonVariant::Ghost);
@@ -1007,7 +1089,8 @@ fn rebuild_main(
                 Filter::Label(_) => (
                     "tag",
                     "No documents with this label".into(),
-                    "Give documents this label in the Details panel or with right-click ▸ Labels.".into(),
+                    "Give documents this label in the Details panel or with right-click ▸ Labels."
+                        .into(),
                     false,
                 ),
                 Filter::Trash => (
@@ -1045,7 +1128,14 @@ fn rebuild_main(
             return;
         }
         if state.grid {
-            details::grid(m, &t, &folder_rows_simple(&folder_rows), rows, picked, &labels);
+            details::grid(
+                m,
+                &t,
+                &folder_rows_simple(&folder_rows),
+                rows,
+                picked,
+                &labels,
+            );
             return;
         }
 
@@ -1058,143 +1148,165 @@ fn rebuild_main(
             ..default()
         })
         .with_children(|wrap| {
-        let list = wrap.spawn((
-            Name::new("doc-list"),
-            ScrollArea,
-            Node {
-                flex_grow: 1.0,
-                min_height: Val::Px(0.0),
-                flex_direction: FlexDirection::Column,
-                overflow: Overflow::scroll_y(),
-                padding: UiRect::right(Val::Px(14.0)),
-                ..default()
-            },
-        ))
-        .with_children(|list| {
-            for (i, f) in folder_rows.into_iter().enumerate() {
-                let name_font = t.font(t.font_md, FontWeight::MEDIUM);
-                let fg = t.foreground;
-                let label = format!("folder-name-{i}");
-                let name = f.name.clone();
-                let mut row = TableRow::new(format!("folder-row-{i}"), &cols)
-                    .cell(move |c| {
-                        c.spawn((
-                            Node {
-                                width: Val::Px(60.0),
-                                height: Val::Px(34.0),
-                                flex_shrink: 0.0,
-                                justify_content: JustifyContent::Center,
-                                align_items: AlignItems::Center,
-                                ..default()
-                            },
-                            Pickable::IGNORE,
+            let list = wrap
+                .spawn((
+                    Name::new("doc-list"),
+                    ScrollArea,
+                    Node {
+                        flex_grow: 1.0,
+                        min_height: Val::Px(0.0),
+                        flex_direction: FlexDirection::Column,
+                        overflow: Overflow::scroll_y(),
+                        padding: UiRect::right(Val::Px(14.0)),
+                        ..default()
+                    },
+                ))
+                .with_children(|list| {
+                    for (i, f) in folder_rows.into_iter().enumerate() {
+                        let name_font = t.font(t.font_md, FontWeight::MEDIUM);
+                        let fg = t.foreground;
+                        let label = format!("folder-name-{i}");
+                        let name = f.name.clone();
+                        let mut row =
+                            TableRow::new(format!("folder-row-{i}"), &cols).cell(move |c| {
+                                c.spawn((
+                                    Node {
+                                        width: Val::Px(60.0),
+                                        height: Val::Px(34.0),
+                                        flex_shrink: 0.0,
+                                        justify_content: JustifyContent::Center,
+                                        align_items: AlignItems::Center,
+                                        ..default()
+                                    },
+                                    Pickable::IGNORE,
+                                ))
+                                .with_child((icon("folder", 24.0, fg), Pickable::IGNORE));
+                                c.spawn((
+                                    Name::new(label),
+                                    Text::new(name),
+                                    name_font,
+                                    TextColor(fg),
+                                    TextLayout::no_wrap(),
+                                    cadrs_ui::InheritFg,
+                                    Pickable::IGNORE,
+                                    Node {
+                                        margin: UiRect::left(Val::Px(4.0)),
+                                        ..default()
+                                    },
+                                ));
+                            });
+                        if has_labels {
+                            row = row.cell(|_| {});
+                        }
+                        let row = row
+                            .text_cell(&t, f.date)
+                            .text_cell(&t, "me")
+                            .text_cell(&t, "me")
+                            .selected(picked == Some(Pick::Folder(f.id)));
+                        list.spawn((
+                            row.build(&t),
+                            PickRow(Pick::Folder(f.id)),
+                            cadrs_ui::DoubleClickable,
                         ))
-                        .with_child((icon("folder", 24.0, fg), Pickable::IGNORE));
-                        c.spawn((
-                            Name::new(label),
-                            Text::new(name),
-                            name_font,
-                            TextColor(fg),
-                            TextLayout::no_wrap(),
-                            cadrs_ui::InheritFg,
-                            Pickable::IGNORE,
-                            Node {
-                                margin: UiRect::left(Val::Px(4.0)),
-                                ..default()
-                            },
-                        ));
-                    });
-                if has_labels {
-                    row = row.cell(|_| {});
-                }
-                let row = row
-                    .text_cell(&t, f.date)
-                    .text_cell(&t, "me")
-                    .text_cell(&t, "me")
-                    .selected(picked == Some(Pick::Folder(f.id)));
-                list.spawn((row.build(&t), PickRow(Pick::Folder(f.id)), cadrs_ui::DoubleClickable))
-                    .entry::<Node>()
-                    .and_modify(|mut n| n.height = Val::Px(38.5));
-            }
-            for (i, (e, thumb, date)) in rows.into_iter().enumerate() {
-                let name_font = t.font(t.font_md, FontWeight::MEDIUM);
-                let fg = t.foreground;
-                let tag_color = Color::srgb_u8(0x33, 0x33, 0x33);
-                let tag_font = t.font(t.font_xs, FontWeight::NORMAL);
-                let placeholder = t.subtle_foreground;
-                let name = e.name.clone();
-                // TD3.7: the workspace last opened (P3E.4).
-                let workspace = e.meta.workspace_name().to_string();
-                let name_label = format!("doc-name-{i}");
-                let mut row = TableRow::new(format!("doc-row-{i}"), &cols)
-                    .cell(move |c| {
-                        thumbnail_node(c, thumb, placeholder);
-                        c.spawn((
-                            Name::new(name_label),
-                            Text::new(name),
-                            name_font,
-                            TextColor(fg),
-                            TextLayout::no_wrap(),
-                            cadrs_ui::InheritFg,
-                            Pickable::IGNORE,
-                            Node {
-                                margin: UiRect::left(Val::Px(4.0)),
-                                ..default()
-                            },
-                        ));
-                        c.spawn((
-                            Node {
-                                align_items: AlignItems::Center,
-                                column_gap: Val::Px(2.0),
-                                flex_shrink: 0.0,
-                                ..default()
-                            },
-                            Pickable::IGNORE,
-                        ))
-                        .with_children(|tag| {
-                            tag.spawn((icon("location", 12.0, tag_color), Pickable::IGNORE));
-                            tag.spawn((
-                                Text::new(workspace),
-                                tag_font,
-                                TextColor(tag_color),
+                        .entry::<Node>()
+                        .and_modify(|mut n| n.height = Val::Px(38.5));
+                    }
+                    for (i, (e, thumb, date)) in rows.into_iter().enumerate() {
+                        let name_font = t.font(t.font_md, FontWeight::MEDIUM);
+                        let fg = t.foreground;
+                        let tag_color = Color::srgb_u8(0x33, 0x33, 0x33);
+                        let tag_font = t.font(t.font_xs, FontWeight::NORMAL);
+                        let placeholder = t.subtle_foreground;
+                        let name = e.name.clone();
+                        // TD3.7: the workspace last opened (P3E.4).
+                        let workspace = e.meta.workspace_name().to_string();
+                        let name_label = format!("doc-name-{i}");
+                        let mut row = TableRow::new(format!("doc-row-{i}"), &cols).cell(move |c| {
+                            thumbnail_node(c, thumb, placeholder);
+                            c.spawn((
+                                Name::new(name_label),
+                                Text::new(name),
+                                name_font,
+                                TextColor(fg),
                                 TextLayout::no_wrap(),
+                                cadrs_ui::InheritFg,
                                 Pickable::IGNORE,
+                                Node {
+                                    margin: UiRect::left(Val::Px(4.0)),
+                                    ..default()
+                                },
                             ));
+                            c.spawn((
+                                Node {
+                                    align_items: AlignItems::Center,
+                                    column_gap: Val::Px(2.0),
+                                    flex_shrink: 0.0,
+                                    ..default()
+                                },
+                                Pickable::IGNORE,
+                            ))
+                            .with_children(|tag| {
+                                tag.spawn((icon("location", 12.0, tag_color), Pickable::IGNORE));
+                                tag.spawn((
+                                    Text::new(workspace),
+                                    tag_font,
+                                    TextColor(tag_color),
+                                    TextLayout::no_wrap(),
+                                    Pickable::IGNORE,
+                                ));
+                            });
                         });
-                    });
-                if has_labels {
-                    let chips: Vec<(String, String, [u8; 3])> = e
-                        .meta
-                        .labels
-                        .iter()
-                        .filter_map(|l| labels.iter().find(|x| x.id == *l))
-                        .map(|l| (format!("doc-label-{i}-{}", details::slug(&l.name)), l.name.clone(), l.colour))
-                        .collect();
-                    let tc = t.clone();
-                    row = row.cell(move |c| {
-                        c.spawn((
-                            Node { column_gap: Val::Px(4.0), overflow: Overflow::clip(), ..default() },
-                            Pickable::IGNORE,
+                        if has_labels {
+                            let chips: Vec<(String, String, [u8; 3])> = e
+                                .meta
+                                .labels
+                                .iter()
+                                .filter_map(|l| labels.iter().find(|x| x.id == *l))
+                                .map(|l| {
+                                    (
+                                        format!("doc-label-{i}-{}", details::slug(&l.name)),
+                                        l.name.clone(),
+                                        l.colour,
+                                    )
+                                })
+                                .collect();
+                            let tc = t.clone();
+                            row = row.cell(move |c| {
+                                c.spawn((
+                                    Node {
+                                        column_gap: Val::Px(4.0),
+                                        overflow: Overflow::clip(),
+                                        ..default()
+                                    },
+                                    Pickable::IGNORE,
+                                ))
+                                .with_children(|w| {
+                                    for (name, label, colour) in chips {
+                                        w.spawn(
+                                            cadrs_ui::LabelChip::new(name, label, colour)
+                                                .build(&tc),
+                                        );
+                                    }
+                                });
+                            });
+                        }
+                        let row = row
+                            .text_cell(&t, date)
+                            .text_cell(&t, user.display(&e.meta.modified_by))
+                            .text_cell(&t, user.display(&e.meta.owned_by))
+                            .selected(picked == Some(Pick::Doc(e.id)));
+                        list.spawn((
+                            row.build(&t),
+                            DocRow(e.id),
+                            PickRow(Pick::Doc(e.id)),
+                            cadrs_ui::DoubleClickable,
                         ))
-                        .with_children(|w| {
-                            for (name, label, colour) in chips {
-                                w.spawn(cadrs_ui::LabelChip::new(name, label, colour).build(&tc));
-                            }
-                        });
-                    });
-                }
-                let row = row
-                    .text_cell(&t, date)
-                    .text_cell(&t, user.display(&e.meta.modified_by))
-                    .text_cell(&t, user.display(&e.meta.owned_by))
-                    .selected(picked == Some(Pick::Doc(e.id)));
-                list.spawn((row.build(&t), DocRow(e.id), PickRow(Pick::Doc(e.id)), cadrs_ui::DoubleClickable))
-                    .entry::<Node>()
-                    .and_modify(|mut n| n.height = Val::Px(38.5));
-            }
-        })
-        .id();
-        wrap.spawn(cadrs_ui::vertical_scrollbar(&t, "doc-list-scrollbar", list));
+                        .entry::<Node>()
+                        .and_modify(|mut n| n.height = Val::Px(38.5));
+                    }
+                })
+                .id();
+            wrap.spawn(cadrs_ui::vertical_scrollbar(&t, "doc-list-scrollbar", list));
         });
     });
 }
@@ -1643,7 +1755,10 @@ fn landing_shortcuts(
     mut busy: Local<u8>,
     mut commands: Commands,
 ) {
-    if focus.get().is_some_and(|f| q_fields.contains(f)) || !q_dialogs.is_empty() || !q_menus.is_empty() {
+    if focus.get().is_some_and(|f| q_fields.contains(f))
+        || !q_dialogs.is_empty()
+        || !q_menus.is_empty()
+    {
         // An Enter that a dialog, field or menu took in this frame doesn't open the selection.
         *busy = 2;
         keys_in.clear();
@@ -1662,8 +1777,11 @@ fn landing_shortcuts(
     }
     let ctrl = keys.any_pressed([KeyCode::ControlLeft, KeyCode::ControlRight]);
     let shift = keys.any_pressed([KeyCode::ShiftLeft, KeyCode::ShiftRight]);
-    let pressed: Vec<KeyCode> =
-        keys_in.read().filter(|k| k.state == ButtonState::Pressed).map(|k| k.shortcut_code()).collect();
+    let pressed: Vec<KeyCode> = keys_in
+        .read()
+        .filter(|k| k.state == ButtonState::Pressed)
+        .map(|k| k.shortcut_code())
+        .collect();
     let changed = if ctrl && pressed.contains(&KeyCode::KeyZ) {
         if shift {
             lib.redo(&store.0)
@@ -1724,7 +1842,11 @@ fn on_sort_change(ev: On<TableSortChange>, mut state: ResMut<LandingState>) {
     };
 }
 
-fn on_section_toggled(ev: On<CollapsibleToggled>, q: Query<&Name>, mut state: ResMut<LandingState>) {
+fn on_section_toggled(
+    ev: On<CollapsibleToggled>,
+    q: Query<&Name>,
+    mut state: ResMut<LandingState>,
+) {
     let Ok(name) = q.get(ev.entity) else {
         return;
     };
@@ -1743,22 +1865,22 @@ fn create_menu(t: &Theme, name: &'static str) -> impl Bundle {
     Menu::new(name)
         .strong_icons()
         .item(MenuItem::new("new-document", "Document…").icon("file-new"))
-        .item(
-            MenuItem::new("new-folder", "Folder…").icon("folder-new"),
-        )
+        .item(MenuItem::new("new-folder", "Folder…").icon("folder-new"))
         .separator()
-        .item(
-            MenuItem::new("import-files", "Import files…").icon("file-import"),
-        )
+        .item(MenuItem::new("import-files", "Import files…").icon("file-import"))
         .item(
             MenuItem::new("import-from", "Import from")
                 .icon("cloud-upload")
                 .submenu(vec![
-                    MenuItem::new("import-from-dropbox", "Dropbox…").planned().into(),
+                    MenuItem::new("import-from-dropbox", "Dropbox…")
+                        .planned()
+                        .into(),
                     MenuItem::new("import-from-google-drive", "Google Drive…")
                         .planned()
                         .into(),
-                    MenuItem::new("import-from-onedrive", "OneDrive…").planned().into(),
+                    MenuItem::new("import-from-onedrive", "OneDrive…")
+                        .planned()
+                        .into(),
                 ]),
         )
         .item(MenuItem::new("new-label", "Label…").icon("tag-new"))
@@ -1779,7 +1901,9 @@ fn on_create_menu_action(ev: On<MenuAction>, mut commands: Commands, theme: Res<
         "new-folder" => open_new_folder_dialog(&mut commands, &theme),
         // P3F.2: a STEP or IGES file as a new document.
         "import-files" => {
-            commands.queue(|w: &mut World| crate::import_file::start(w, crate::import_file::ImportTarget::NewDocument));
+            commands.queue(|w: &mut World| {
+                crate::import_file::start(w, crate::import_file::ImportTarget::NewDocument)
+            });
         }
         "new-label" => details::open_new_label_dialog(&mut commands, &theme, None),
         _ => {}
@@ -1848,9 +1972,7 @@ fn on_row_context_menu(
     let menu = if state.filter == Filter::Trash {
         Menu::new("doc-context-menu")
             .item(MenuItem::new("ctx-restore", "Restore").icon("restore"))
-            .item(
-                MenuItem::new("ctx-delete-forever", "Delete permanently…").icon("delete"),
-            )
+            .item(MenuItem::new("ctx-delete-forever", "Delete permanently…").icon("delete"))
             .min_width(190.0)
     } else {
         Menu::new("doc-context-menu")
@@ -1862,27 +1984,56 @@ fn on_row_context_menu(
                 // P3G.1 (ER1.2, ER X8): a folder of the library (the Other documents browser's
                 // locations), or back to the top level.
                 let current = lib.lib.get(row.0).and_then(|e| e.meta.folder);
-                let mut entries: Vec<MenuEntry> = vec![MenuItem::new("ctx-move-top", "Documents (no folder)").checked(current.is_none()).into()];
+                let mut entries: Vec<MenuEntry> = vec![
+                    MenuItem::new("ctx-move-top", "Documents (no folder)")
+                        .checked(current.is_none())
+                        .into(),
+                ];
                 for (i, f) in lib.lib.folders.iter().enumerate() {
-                    entries.push(MenuItem::new(format!("ctx-move-folder-{i}"), f.name.clone()).icon("folder").checked(current == Some(f.id)).into());
+                    entries.push(
+                        MenuItem::new(format!("ctx-move-folder-{i}"), f.name.clone())
+                            .icon("folder")
+                            .checked(current == Some(f.id))
+                            .into(),
+                    );
                 }
-                MenuItem::new("ctx-move", "Move to…").icon("move-to-folder").submenu(entries)
+                MenuItem::new("ctx-move", "Move to…")
+                    .icon("move-to-folder")
+                    .submenu(entries)
             })
             .item({
                 // P3E.1: the labels as checkable items, and "Create new label…".
-                let current = lib.lib.get(row.0).map(|e| e.meta.labels.clone()).unwrap_or_default();
+                let current = lib
+                    .lib
+                    .get(row.0)
+                    .map(|e| e.meta.labels.clone())
+                    .unwrap_or_default();
                 let mut entries: Vec<MenuEntry> = lib
                     .lib
                     .labels_by_name()
                     .iter()
                     // P3E.2 (P3E.1 judge): each label with its colour dot, a check mark on those given.
-                    .map(|l| MenuItem::new(format!("ctx-label-{}", details::slug(&l.name)), l.name.clone()).dot(Color::srgb_u8(l.colour[0], l.colour[1], l.colour[2])).checked(current.contains(&l.id)).into())
+                    .map(|l| {
+                        MenuItem::new(
+                            format!("ctx-label-{}", details::slug(&l.name)),
+                            l.name.clone(),
+                        )
+                        .dot(Color::srgb_u8(l.colour[0], l.colour[1], l.colour[2]))
+                        .checked(current.contains(&l.id))
+                        .into()
+                    })
                     .collect();
                 if !entries.is_empty() {
                     entries.push(MenuEntry::Separator);
                 }
-                entries.push(MenuItem::new("ctx-new-label", "Create new label…").icon("tag-new").into());
-                MenuItem::new("ctx-labels", "Labels").icon("tag").submenu(entries)
+                entries.push(
+                    MenuItem::new("ctx-new-label", "Create new label…")
+                        .icon("tag-new")
+                        .into(),
+                );
+                MenuItem::new("ctx-labels", "Labels")
+                    .icon("tag")
+                    .submenu(entries)
             })
             .item(MenuItem::new("ctx-properties", "Details…").icon("list-details"))
             .separator()
@@ -1916,19 +2067,29 @@ fn on_context_action(
         "ctx-copy" => open_copy_dialog(&mut commands, &theme, &entry),
         "ctx-trash" => open_trash_dialog(&mut commands, &theme, &entry),
         "ctx-delete-forever" => open_purge_dialog(&mut commands, &theme, &entry),
-        "ctx-properties" => commands.queue(move |world: &mut World| details::select(world, Pick::Doc(id), true)),
+        "ctx-properties" => {
+            commands.queue(move |world: &mut World| details::select(world, Pick::Doc(id), true))
+        }
         "ctx-new-label" => details::open_new_label_dialog(&mut commands, &theme, Some(id)),
         m if m.starts_with("ctx-label-") => {
             let slug = m.trim_start_matches("ctx-label-").to_string();
             let store = store.0.clone();
-            commands.queue(move |world: &mut World| details::toggle_label_by_slug(world, &store, id, &slug));
+            commands.queue(move |world: &mut World| {
+                details::toggle_label_by_slug(world, &store, id, &slug)
+            });
         }
         // P3G.1: Move to ▸ a folder (undoable, like the other library commands).
         m if m == "ctx-move-top" || m.starts_with("ctx-move-folder-") => {
-            let folder = m.strip_prefix("ctx-move-folder-").and_then(|i| i.parse::<usize>().ok()).and_then(|i| lib.lib.folders.get(i)).map(|f| f.id);
+            let folder = m
+                .strip_prefix("ctx-move-folder-")
+                .and_then(|i| i.parse::<usize>().ok())
+                .and_then(|i| lib.lib.folders.get(i))
+                .map(|f| f.id);
             let store = store.0.clone();
             commands.queue(move |world: &mut World| {
-                world.resource_mut::<DocLibrary>().execute(&store, &cadrs_core::library::MoveToFolder { id, folder });
+                world
+                    .resource_mut::<DocLibrary>()
+                    .execute(&store, &cadrs_core::library::MoveToFolder { id, folder });
             });
         }
         "ctx-restore" => {
@@ -1986,13 +2147,15 @@ fn undo_toast(world: &mut World, text: String) {
     let mut commands = world.commands();
     let toast = cadrs_ui::show_toast_for(&mut commands, &theme, text, 4.0);
     let undo = cadrs_ui::toast_action(&mut commands, &theme, toast, "toast-undo", "Undo");
-    commands.entity(undo).insert(observe(|_: On<Activate>, mut commands: Commands| {
-        commands.queue(|world: &mut World| {
-            let store = world.resource::<DocumentStore>().0.clone();
-            world.resource_mut::<DocLibrary>().undo(&store);
-            cadrs_ui::close_toasts(world);
-        });
-    }));
+    commands
+        .entity(undo)
+        .insert(observe(|_: On<Activate>, mut commands: Commands| {
+            commands.queue(|world: &mut World| {
+                let store = world.resource::<DocumentStore>().0.clone();
+                world.resource_mut::<DocLibrary>().undo(&store);
+                cadrs_ui::close_toasts(world);
+            });
+        }));
     world.flush();
 }
 
@@ -2092,7 +2255,10 @@ fn confirm_dialog(world: &mut World) {
 
 fn dialog_buttons(p: &mut ChildSpawner, t: &Theme, prefix: &str, ok: &str) {
     p.spawn((
-        Button::new(format!("{prefix}-ok")).label(ok).primary().build(t),
+        Button::new(format!("{prefix}-ok"))
+            .label(ok)
+            .primary()
+            .build(t),
         observe(|_: On<Activate>, mut commands: Commands| {
             commands.queue(confirm_dialog);
         }),
@@ -2173,9 +2339,7 @@ fn open_new_document_dialog(commands: &mut Commands, theme: &Theme) {
                     }),
                 ));
                 f.spawn((
-                    Button::new("new-document-cancel")
-                        .label("Cancel")
-                        .build(t),
+                    Button::new("new-document-cancel").label("Cancel").build(t),
                     observe(|_: On<Activate>, mut commands: Commands| {
                         commands.queue(close_dialogs);
                     }),

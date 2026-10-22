@@ -89,7 +89,10 @@ impl ThickenFeature {
     }
 
     pub fn is_empty(&self) -> bool {
-        self.faces.is_empty() && self.parts.is_empty() && self.regions.is_empty() && self.sketches.is_empty()
+        self.faces.is_empty()
+            && self.parts.is_empty()
+            && self.regions.is_empty()
+            && self.sketches.is_empty()
     }
 
     /// The sketches it thickens regions of (or whole).
@@ -118,7 +121,12 @@ impl ThickenFeature {
     pub fn parents(&self) -> Vec<FeatureId> {
         let mut out = self.sketch_ids();
         out.extend(self.faces.iter().map(|f| FeatureId(f.face.op)));
-        out.extend(self.parts.iter().chain(&self.merge_scope).map(|p| p.feature));
+        out.extend(
+            self.parts
+                .iter()
+                .chain(&self.merge_scope)
+                .map(|p| p.feature),
+        );
         out
     }
 }
@@ -241,7 +249,9 @@ impl Default for HelixFeature {
 impl HelixFeature {
     pub fn problem(&self) -> Option<&'static str> {
         match self.helix_type {
-            HelixType::CylinderCone if self.face.is_none() => return Some("Select a cylindrical or conical face"),
+            HelixType::CylinderCone if self.face.is_none() => {
+                return Some("Select a cylindrical or conical face");
+            }
             HelixType::Axis if self.axis.is_none() => return Some("Select an axis"),
             HelixType::Circle if self.axis.is_none() => return Some("Select a circle"),
             _ => {}
@@ -254,7 +264,9 @@ impl HelixFeature {
         if pitch_needed && self.pitch.partial_cmp(&0.0) != Some(std::cmp::Ordering::Greater) {
             return Some("The pitch must be greater than zero");
         }
-        if self.helix_type == HelixType::Axis && self.radius.partial_cmp(&0.0) != Some(std::cmp::Ordering::Greater) {
+        if self.helix_type == HelixType::Axis
+            && self.radius.partial_cmp(&0.0) != Some(std::cmp::Ordering::Greater)
+        {
             return Some("The radius must be greater than zero");
         }
         None
@@ -267,7 +279,9 @@ impl HelixFeature {
         }
         match &self.axis {
             Some(AxisRef::SketchCurve { sketch, .. }) => out.push(*sketch),
-            Some(AxisRef::Edge(e)) => out.extend([FeatureId(e.edge.faces[0].op), FeatureId(e.edge.faces[1].op)]),
+            Some(AxisRef::Edge(e)) => {
+                out.extend([FeatureId(e.edge.faces[0].op), FeatureId(e.edge.faces[1].op)])
+            }
             Some(AxisRef::Face(f)) => out.push(FeatureId(f.face.op)),
             Some(AxisRef::Connector(c)) => out.extend(c.parent()),
             None => {}
@@ -310,7 +324,11 @@ impl HelixGeom {
         let a = self.axis;
         let x = self.x;
         // y = axis × x: counter-clockwise seen looking down the axis from its tip.
-        let y = [a[1] * x[2] - a[2] * x[1], a[2] * x[0] - a[0] * x[2], a[0] * x[1] - a[1] * x[0]];
+        let y = [
+            a[1] * x[2] - a[2] * x[1],
+            a[2] * x[0] - a[0] * x[2],
+            a[0] * x[1] - a[1] * x[0],
+        ];
         (a, x, y)
     }
 
@@ -359,9 +377,17 @@ impl HelixGeom {
                     let th = |s: f64| self.start_angle + sign * tau * self.turns * s;
                     let (t0, t1) = (th(s0), th(s1));
                     let half = (t1 - t0) / 2.0;
-                    let at = |t: f64, r: f64, z: f64| [0, 1, 2].map(|i| self.origin[i] + a[i] * z + (x[i] * t.cos() + y[i] * t.sin()) * r);
+                    let at = |t: f64, r: f64, z: f64| {
+                        [0, 1, 2].map(|i| {
+                            self.origin[i] + a[i] * z + (x[i] * t.cos() + y[i] * t.sin()) * r
+                        })
+                    };
                     let (z0, z1) = (self.height * s0, self.height * s1);
-                    let poles = vec![at(t0, self.r0, z0), at(t0 + half, self.r0 / half.cos(), (z0 + z1) / 2.0), at(t1, self.r0, z1)];
+                    let poles = vec![
+                        at(t0, self.r0, z0),
+                        at(t0 + half, self.r0 / half.cos(), (z0 + z1) / 2.0),
+                        at(t1, self.r0, z1),
+                    ];
                     return (poles, vec![1.0, half.cos(), 1.0]);
                 }
                 let h = s1 - s0;
@@ -391,9 +417,18 @@ impl HelixGeom {
     pub fn length(&self) -> f64 {
         let pts = {
             let n = ((self.turns.abs() * 720.0).ceil() as usize).max(2);
-            (0..=n).map(|k| self.at(k as f64 / n as f64).0).collect::<Vec<_>>()
+            (0..=n)
+                .map(|k| self.at(k as f64 / n as f64).0)
+                .collect::<Vec<_>>()
         };
-        pts.windows(2).map(|w| ((w[1][0] - w[0][0]).powi(2) + (w[1][1] - w[0][1]).powi(2) + (w[1][2] - w[0][2]).powi(2)).sqrt()).sum()
+        pts.windows(2)
+            .map(|w| {
+                ((w[1][0] - w[0][0]).powi(2)
+                    + (w[1][1] - w[0][1]).powi(2)
+                    + (w[1][2] - w[0][2]).powi(2))
+                .sqrt()
+            })
+            .sum()
     }
 }
 
@@ -411,7 +446,11 @@ pub enum Continuity {
 }
 
 impl Continuity {
-    pub const ALL: [Continuity; 3] = [Continuity::Position, Continuity::Tangency, Continuity::Curvature];
+    pub const ALL: [Continuity; 3] = [
+        Continuity::Position,
+        Continuity::Tangency,
+        Continuity::Curvature,
+    ];
 
     pub fn label(self) -> &'static str {
         match self {
@@ -446,14 +485,18 @@ pub struct FillFeature {
 
 impl FillFeature {
     pub fn problem(&self) -> Option<&'static str> {
-        self.edges.is_empty().then_some("Select edges or curves to fill")
+        self.edges
+            .is_empty()
+            .then_some("Select edges or curves to fill")
     }
 
     pub fn parents(&self) -> Vec<FeatureId> {
         let mut out = Vec::new();
         for e in &self.edges {
             match e {
-                FillEdge::Edge(r) => out.extend([FeatureId(r.edge.faces[0].op), FeatureId(r.edge.faces[1].op)]),
+                FillEdge::Edge(r) => {
+                    out.extend([FeatureId(r.edge.faces[0].op), FeatureId(r.edge.faces[1].op)])
+                }
                 FillEdge::SketchCurve { sketch, .. } => out.push(*sketch),
             }
         }
@@ -484,7 +527,11 @@ mod tests {
     fn a_helix_has_its_length_and_ends() {
         let h = helix(4.0, true);
         let want = 4.0 * ((std::f64::consts::TAU * 10.0).powi(2) + 5.0f64.powi(2)).sqrt();
-        assert!((h.length() - want).abs() / want < 1e-5, "{} vs {want}", h.length());
+        assert!(
+            (h.length() - want).abs() / want < 1e-5,
+            "{} vs {want}",
+            h.length()
+        );
         let (p0, _) = h.at(0.0);
         let (p1, _) = h.at(1.0);
         assert!((p0[0] - 10.0).abs() < 1e-12 && p0[2].abs() < 1e-12);
@@ -497,7 +544,11 @@ mod tests {
 
     /// A rational Bézier's point (homogeneous de Casteljau).
     fn rbez(poles: &[[f64; 3]], w: &[f64], t: f64) -> [f64; 3] {
-        let mut p: Vec<[f64; 4]> = poles.iter().zip(w).map(|(p, w)| [p[0] * w, p[1] * w, p[2] * w, *w]).collect();
+        let mut p: Vec<[f64; 4]> = poles
+            .iter()
+            .zip(w)
+            .map(|(p, w)| [p[0] * w, p[1] * w, p[2] * w, *w])
+            .collect();
         for k in 1..p.len() {
             for i in 0..p.len() - k {
                 p[i] = [0, 1, 2, 3].map(|c| p[i][c] + (p[i + 1][c] - p[i][c]) * t);
@@ -508,7 +559,16 @@ mod tests {
 
     #[test]
     fn its_bezier_pieces_stay_on_it() {
-        for (h, cylinder) in [(helix(2.5, true), true), (HelixGeom { r1: 6.0, ..helix(2.5, false) }, false)] {
+        for (h, cylinder) in [
+            (helix(2.5, true), true),
+            (
+                HelixGeom {
+                    r1: 6.0,
+                    ..helix(2.5, false)
+                },
+                false,
+            ),
+        ] {
             let pieces = h.beziers();
             assert_eq!(pieces.len(), 40);
             let (mut off, mut turn): (f64, f64) = (0.0, 0.0);
@@ -530,18 +590,48 @@ mod tests {
 
     #[test]
     fn thicken_sides() {
-        let t = ThickenFeature { thickness1: 2.0, thickness2: 0.5, ..Default::default() };
+        let t = ThickenFeature {
+            thickness1: 2.0,
+            thickness2: 0.5,
+            ..Default::default()
+        };
         assert_eq!(t.sides(), (2.0, 0.5));
-        assert_eq!(ThickenFeature { flip: true, ..t.clone() }.sides(), (0.5, 2.0));
-        assert_eq!(ThickenFeature { mid_plane: true, ..t.clone() }.sides(), (1.0, 1.0));
-        assert_eq!(ThickenFeature::default().problem(), Some("Select surfaces or faces to thicken"));
+        assert_eq!(
+            ThickenFeature {
+                flip: true,
+                ..t.clone()
+            }
+            .sides(),
+            (0.5, 2.0)
+        );
+        assert_eq!(
+            ThickenFeature {
+                mid_plane: true,
+                ..t.clone()
+            }
+            .sides(),
+            (1.0, 1.0)
+        );
+        assert_eq!(
+            ThickenFeature::default().problem(),
+            Some("Select surfaces or faces to thicken")
+        );
     }
 
     #[test]
     fn helix_turns_and_height() {
-        let h = HelixFeature { path: HelixPath::TurnsAndPitch, revolutions: 20.0, pitch: 2.0, ..Default::default() };
+        let h = HelixFeature {
+            path: HelixPath::TurnsAndPitch,
+            revolutions: 20.0,
+            pitch: 2.0,
+            ..Default::default()
+        };
         assert_eq!(h.turns_and_height(10.0), (20.0, 40.0));
-        let h = HelixFeature { path: HelixPath::Pitch, pitch: 2.0, ..Default::default() };
+        let h = HelixFeature {
+            path: HelixPath::Pitch,
+            pitch: 2.0,
+            ..Default::default()
+        };
         assert_eq!(h.turns_and_height(10.0), (5.0, 10.0));
     }
 }

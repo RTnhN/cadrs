@@ -41,20 +41,56 @@ struct GpuTime {
 impl Gpu {
     fn new() -> Gpu {
         let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle());
-        let adapter = futures_lite::future::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions { power_preference: wgpu::PowerPreference::HighPerformance, ..Default::default() })).expect("no adapter");
+        let adapter = futures_lite::future::block_on(instance.request_adapter(
+            &wgpu::RequestAdapterOptions {
+                power_preference: wgpu::PowerPreference::HighPerformance,
+                ..Default::default()
+            },
+        ))
+        .expect("no adapter");
         let info = adapter.get_info();
         let f64 = adapter.features().contains(wgpu::Features::SHADER_F64);
-        println!("adapter: {} ({:?}, {}), wgpu SHADER_F64: {f64}", info.name, info.backend, info.driver_info);
+        println!(
+            "adapter: {} ({:?}, {}), wgpu SHADER_F64: {f64}",
+            info.name, info.backend, info.driver_info
+        );
         let limits = adapter.limits();
-        let features = if f64 { wgpu::Features::SHADER_F64 } else { wgpu::Features::empty() };
-        let (device, queue) = futures_lite::future::block_on(adapter.request_device(&wgpu::DeviceDescriptor { label: Some("cadrs_gpu"), required_features: features, required_limits: limits, ..Default::default() })).expect("no device");
+        let features = if f64 {
+            wgpu::Features::SHADER_F64
+        } else {
+            wgpu::Features::empty()
+        };
+        let (device, queue) =
+            futures_lite::future::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
+                label: Some("cadrs_gpu"),
+                required_features: features,
+                required_limits: limits,
+                ..Default::default()
+            }))
+            .expect("no device");
         Gpu { device, queue, f64 }
     }
 
     fn pipeline(&self, spv: &[u8], entry: &str) -> wgpu::ComputePipeline {
-        let code: Vec<u32> = spv.chunks_exact(4).map(|b| u32::from_le_bytes([b[0], b[1], b[2], b[3]])).collect();
-        let module = self.device.create_shader_module(wgpu::ShaderModuleDescriptor { label: Some(entry), source: wgpu::ShaderSource::SpirV(Cow::Owned(code)) });
-        self.device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor { label: Some(entry), layout: None, module: &module, entry_point: Some(entry), compilation_options: Default::default(), cache: None })
+        let code: Vec<u32> = spv
+            .chunks_exact(4)
+            .map(|b| u32::from_le_bytes([b[0], b[1], b[2], b[3]]))
+            .collect();
+        let module = self
+            .device
+            .create_shader_module(wgpu::ShaderModuleDescriptor {
+                label: Some(entry),
+                source: wgpu::ShaderSource::SpirV(Cow::Owned(code)),
+            });
+        self.device
+            .create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+                label: Some(entry),
+                layout: None,
+                module: &module,
+                entry_point: Some(entry),
+                compilation_options: Default::default(),
+                cache: None,
+            })
     }
 
     fn wait(&self) {
@@ -63,20 +99,64 @@ impl Gpu {
 
     /// Uploads `uniform` (binding 0) and `inputs` (bindings 1..), runs `entry` over `n`
     /// invocations, reads back the `out_bytes` output (the last binding).
-    fn run(&self, pipe: &wgpu::ComputePipeline, uniform: &[u8], inputs: &[&[u8]], out_bytes: u64, n: u32) -> (Vec<u8>, GpuTime) {
+    fn run(
+        &self,
+        pipe: &wgpu::ComputePipeline,
+        uniform: &[u8],
+        inputs: &[&[u8]],
+        out_bytes: u64,
+        n: u32,
+    ) -> (Vec<u8>, GpuTime) {
         let t0 = Instant::now();
         let d = &self.device;
-        let ub = d.create_buffer_init(&wgpu::util::BufferInitDescriptor { label: None, contents: uniform, usage: wgpu::BufferUsages::UNIFORM });
-        let ins: Vec<_> = inputs.iter().map(|b| d.create_buffer_init(&wgpu::util::BufferInitDescriptor { label: None, contents: b, usage: wgpu::BufferUsages::STORAGE })).collect();
-        let out = d.create_buffer(&wgpu::BufferDescriptor { label: None, size: out_bytes, usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC, mapped_at_creation: false });
-        let read = d.create_buffer(&wgpu::BufferDescriptor { label: None, size: out_bytes, usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST, mapped_at_creation: false });
-        let mut entries = vec![wgpu::BindGroupEntry { binding: 0, resource: ub.as_entire_binding() }];
+        let ub = d.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: None,
+            contents: uniform,
+            usage: wgpu::BufferUsages::UNIFORM,
+        });
+        let ins: Vec<_> = inputs
+            .iter()
+            .map(|b| {
+                d.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                    label: None,
+                    contents: b,
+                    usage: wgpu::BufferUsages::STORAGE,
+                })
+            })
+            .collect();
+        let out = d.create_buffer(&wgpu::BufferDescriptor {
+            label: None,
+            size: out_bytes,
+            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
+            mapped_at_creation: false,
+        });
+        let read = d.create_buffer(&wgpu::BufferDescriptor {
+            label: None,
+            size: out_bytes,
+            usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        let mut entries = vec![wgpu::BindGroupEntry {
+            binding: 0,
+            resource: ub.as_entire_binding(),
+        }];
         for (i, b) in ins.iter().chain([&out]).enumerate() {
-            entries.push(wgpu::BindGroupEntry { binding: i as u32 + 1, resource: b.as_entire_binding() });
+            entries.push(wgpu::BindGroupEntry {
+                binding: i as u32 + 1,
+                resource: b.as_entire_binding(),
+            });
         }
-        let bind = d.create_bind_group(&wgpu::BindGroupDescriptor { label: None, layout: &pipe.get_bind_group_layout(0), entries: &entries });
+        let bind = d.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: None,
+            layout: &pipe.get_bind_group_layout(0),
+            entries: &entries,
+        });
         let groups = n.div_ceil(WG);
-        let (gx, gy) = if groups <= 65535 { (groups, 1) } else { (65535, groups.div_ceil(65535)) };
+        let (gx, gy) = if groups <= 65535 {
+            (groups, 1)
+        } else {
+            (65535, groups.div_ceil(65535))
+        };
         let dispatch = |copy: bool| {
             let mut enc = d.create_command_encoder(&Default::default());
             {
@@ -135,10 +215,26 @@ fn surface() -> (SurfParams, Vec<f64>, Vec<f64>, Vec<f64>) {
         }
     }
     let k = vec![0.0, 0.0, 0.0, 0.0, 0.2, 0.4, 0.6, 0.8, 1.0, 1.0, 1.0, 1.0];
-    (SurfParams { nu: n as u32, nv: n as u32, su: 0, sv: 0 }, ctrl, k.clone(), k)
+    (
+        SurfParams {
+            nu: n as u32,
+            nv: n as u32,
+            su: 0,
+            sv: 0,
+        },
+        ctrl,
+        k.clone(),
+        k,
+    )
 }
 
-fn cpu_nurbs<R: Real + Send + Sync>(p: &SurfParams, c: &[R], ku: &[R], kv: &[R], par: bool) -> Vec<R> {
+fn cpu_nurbs<R: Real + Send + Sync>(
+    p: &SurfParams,
+    c: &[R],
+    ku: &[R],
+    kv: &[R],
+    par: bool,
+) -> Vec<R> {
     let mut out = vec![R::zero(); (p.su * p.sv * 6) as usize];
     let f = |(i, o): (usize, &mut [R])| o.copy_from_slice(&nurbs_sample(p, c, ku, kv, i as u32));
     if par {
@@ -154,7 +250,11 @@ fn nurbs_err(a: &[f64], b: impl Iterator<Item = f64>) -> (f64, f64) {
     let (mut ep, mut en) = (0.0f64, 0.0f64);
     for (i, y) in b.enumerate() {
         let e = (a[i] - y).abs();
-        if i % 6 < 3 { ep = ep.max(e) } else { en = en.max(e) }
+        if i % 6 < 3 {
+            ep = ep.max(e)
+        } else {
+            en = en.max(e)
+        }
     }
     (ep, en)
 }
@@ -164,9 +264,23 @@ fn bench_nurbs(gpu: &Gpu) {
     let c32: Vec<f32> = c64.iter().map(|&x| x as f32).collect();
     let k32: Vec<f32> = ku64.iter().map(|&x| x as f32).collect();
     let pipe = gpu.pipeline(SPV_F32, "nurbs_f32");
-    let pipe64 = SPV_F64.filter(|_| gpu.f64).map(|s| gpu.pipeline(s, "nurbs_f64"));
+    let pipe64 = SPV_F64
+        .filter(|_| gpu.f64)
+        .map(|s| gpu.pipeline(s, "nurbs_f64"));
     println!("\n## NURBS 3x3 rational, 8x8 control points: points + normals (ms)");
-    println!("{:>12} | {:>9} {:>9} | {:>9} {:>9} | {:>9} {:>9} {:>9} | {:>9} {:>9}", "samples", "cpu1 f32", "cpu1 f64", "rayon f32", "rayon f64", "gpu f32", "kern f32", "Msamp/s", "gpu f64", "kern f64");
+    println!(
+        "{:>12} | {:>9} {:>9} | {:>9} {:>9} | {:>9} {:>9} {:>9} | {:>9} {:>9}",
+        "samples",
+        "cpu1 f32",
+        "cpu1 f64",
+        "rayon f32",
+        "rayon f64",
+        "gpu f32",
+        "kern f32",
+        "Msamp/s",
+        "gpu f64",
+        "kern f64"
+    );
     for s in [256u32, 1024, 2048] {
         p.su = s;
         p.sv = s;
@@ -176,24 +290,67 @@ fn bench_nurbs(gpu: &Gpu) {
         let (_, tp32) = ms(|| cpu_nurbs(&p, &c32, &k32, &k32, true));
         let (_, tp64) = ms(|| cpu_nurbs(&p, &c64, &ku64, &kv64, true));
         let u = words(&[p.nu, p.nv, p.su, p.sv]);
-        let _ = gpu.run(&pipe, &u, &[bytemuck::cast_slice(&c32), bytemuck::cast_slice(&k32), bytemuck::cast_slice(&k32)], n as u64 * 24, n); // warm-up
-        let (g, gt) = gpu.run(&pipe, &u, &[bytemuck::cast_slice(&c32), bytemuck::cast_slice(&k32), bytemuck::cast_slice(&k32)], n as u64 * 24, n);
+        let _ = gpu.run(
+            &pipe,
+            &u,
+            &[
+                bytemuck::cast_slice(&c32),
+                bytemuck::cast_slice(&k32),
+                bytemuck::cast_slice(&k32),
+            ],
+            n as u64 * 24,
+            n,
+        ); // warm-up
+        let (g, gt) = gpu.run(
+            &pipe,
+            &u,
+            &[
+                bytemuck::cast_slice(&c32),
+                bytemuck::cast_slice(&k32),
+                bytemuck::cast_slice(&k32),
+            ],
+            n as u64 * 24,
+            n,
+        );
         let g32: &[f32] = bytemuck::cast_slice(&g);
         let (g64t, e64) = match &pipe64 {
             Some(pp) => {
-                let ins: [&[u8]; 3] = [bytemuck::cast_slice(&c64), bytemuck::cast_slice(&ku64), bytemuck::cast_slice(&kv64)];
+                let ins: [&[u8]; 3] = [
+                    bytemuck::cast_slice(&c64),
+                    bytemuck::cast_slice(&ku64),
+                    bytemuck::cast_slice(&kv64),
+                ];
                 let _ = gpu.run(pp, &u, &ins, n as u64 * 48, n);
                 let (g, t) = gpu.run(pp, &u, &ins, n as u64 * 48, n);
-                (Some(t), Some(nurbs_err(&r64, bytemuck::cast_slice::<u8, f64>(&g).iter().copied())))
+                (
+                    Some(t),
+                    Some(nurbs_err(
+                        &r64,
+                        bytemuck::cast_slice::<u8, f64>(&g).iter().copied(),
+                    )),
+                )
             }
             None => (None, None),
         };
         let f = |t: Option<f64>| t.map_or("-".into(), |t| format!("{t:.2}"));
-        println!("{:>12} | {t1_32:>9.2} {t1_64:>9.2} | {tp32:>9.2} {tp64:>9.2} | {:>9.2} {:>9.2} {:>9.0} | {:>9} {:>9}", format!("{s}x{s}"), gt.total, gt.kernel, n as f64 / gt.kernel / 1e3, f(g64t.as_ref().map(|t| t.total)), f(g64t.as_ref().map(|t| t.kernel)));
+        println!(
+            "{:>12} | {t1_32:>9.2} {t1_64:>9.2} | {tp32:>9.2} {tp64:>9.2} | {:>9.2} {:>9.2} {:>9.0} | {:>9} {:>9}",
+            format!("{s}x{s}"),
+            gt.total,
+            gt.kernel,
+            n as f64 / gt.kernel / 1e3,
+            f(g64t.as_ref().map(|t| t.total)),
+            f(g64t.as_ref().map(|t| t.kernel))
+        );
         let (gp, gn) = nurbs_err(&r64, g32.iter().map(|&x| x as f64));
         let (cp, cn) = nurbs_err(&r64, r32.iter().map(|&x| x as f64));
-        let (dp, dn) = nurbs_err(&r32.iter().map(|&x| x as f64).collect::<Vec<_>>(), g32.iter().map(|&x| x as f64));
-        print!("    max err vs CPU f64: gpu f32 point {gp:.2e} mm normal {gn:.2e}; cpu f32 point {cp:.2e} normal {cn:.2e}; gpu f32 vs cpu f32 point {dp:.2e} normal {dn:.2e}");
+        let (dp, dn) = nurbs_err(
+            &r32.iter().map(|&x| x as f64).collect::<Vec<_>>(),
+            g32.iter().map(|&x| x as f64),
+        );
+        print!(
+            "    max err vs CPU f64: gpu f32 point {gp:.2e} mm normal {gn:.2e}; cpu f32 point {cp:.2e} normal {cn:.2e}; gpu f32 vs cpu f32 point {dp:.2e} normal {dn:.2e}"
+        );
         if let Some((a, b)) = e64 {
             print!("; gpu f64 point {a:.2e} normal {b:.2e}");
         }
@@ -236,14 +393,31 @@ fn grid(tris: &[f32], g: u32) -> (GridParams, Vec<u32>, Vec<u32>) {
             hi[k] = hi[k].max(p[k + 1]);
         }
     }
-    let gp = GridParams { gy: g, gz: g, points: 0, _pad: 0, y0: lo[0], z0: lo[1], inv_dy: g as f32 / (hi[0] - lo[0]), inv_dz: g as f32 / (hi[1] - lo[1]) };
+    let gp = GridParams {
+        gy: g,
+        gz: g,
+        points: 0,
+        _pad: 0,
+        y0: lo[0],
+        z0: lo[1],
+        inv_dy: g as f32 / (hi[0] - lo[0]),
+        inv_dz: g as f32 / (hi[1] - lo[1]),
+    };
     let cells = (g * g) as usize;
     let mut lists = vec![Vec::new(); cells];
     for (ti, t) in tris.chunks(9).enumerate() {
         let ys = [t[1], t[4], t[7]];
         let zs = [t[2], t[5], t[8]];
-        let (y0, z0) = cadrs_gpu_kernels::cell_of(&gp, ys.iter().copied().fold(f32::MAX, f32::min), zs.iter().copied().fold(f32::MAX, f32::min));
-        let (y1, z1) = cadrs_gpu_kernels::cell_of(&gp, ys.iter().copied().fold(f32::MIN, f32::max), zs.iter().copied().fold(f32::MIN, f32::max));
+        let (y0, z0) = cadrs_gpu_kernels::cell_of(
+            &gp,
+            ys.iter().copied().fold(f32::MAX, f32::min),
+            zs.iter().copied().fold(f32::MAX, f32::min),
+        );
+        let (y1, z1) = cadrs_gpu_kernels::cell_of(
+            &gp,
+            ys.iter().copied().fold(f32::MIN, f32::max),
+            zs.iter().copied().fold(f32::MIN, f32::max),
+        );
         for cz in z0..=z1 {
             for cy in y0..=y1 {
                 lists[(cz * g + cy) as usize].push(ti as u32);
@@ -271,20 +445,70 @@ fn bench_classify(gpu: &Gpu) {
         (s >> 40) as f32 / (1u64 << 24) as f32
     };
     let ext = RMAJ + RMIN + 5.0;
-    let pts: Vec<f32> = (0..npts).flat_map(|_| [(rnd() * 2.0 - 1.0) * ext, (rnd() * 2.0 - 1.0) * ext, (rnd() * 2.0 - 1.0) * (RMIN + 5.0), 0.0]).collect();
+    let pts: Vec<f32> = (0..npts)
+        .flat_map(|_| {
+            [
+                (rnd() * 2.0 - 1.0) * ext,
+                (rnd() * 2.0 - 1.0) * ext,
+                (rnd() * 2.0 - 1.0) * (RMIN + 5.0),
+                0.0,
+            ]
+        })
+        .collect();
     println!("\n## Point-in-solid, torus mesh, {npts} points, ray parity + (y,z) grid (ms)");
-    println!("{:>8} | {:>7} {:>8} | {:>9} {:>9} | {:>9} {:>9} {:>8} | {:>8} {:>10}", "tris", "grid", "build", "cpu1", "rayon", "gpu", "kernel", "Mpts/s", "gpu!=cpu", "cpu!=exact");
+    println!(
+        "{:>8} | {:>7} {:>8} | {:>9} {:>9} | {:>9} {:>9} {:>8} | {:>8} {:>10}",
+        "tris",
+        "grid",
+        "build",
+        "cpu1",
+        "rayon",
+        "gpu",
+        "kernel",
+        "Mpts/s",
+        "gpu!=cpu",
+        "cpu!=exact"
+    );
     for (nu, nv) in [(250, 100), (500, 200), (1000, 400)] {
         let tris = torus(nu, nv);
         let nt = tris.len() / 9;
         let g = ((nt as f64 / 2.0).sqrt() as u32).max(1);
         let ((mut gp, start, ids), tb) = ms(|| grid(&tris, g));
         gp.points = npts;
-        let cls = |i: usize| classify_point(&gp, &tris, &start, &ids, pts[i * 4], pts[i * 4 + 1], pts[i * 4 + 2]);
+        let cls = |i: usize| {
+            classify_point(
+                &gp,
+                &tris,
+                &start,
+                &ids,
+                pts[i * 4],
+                pts[i * 4 + 1],
+                pts[i * 4 + 2],
+            )
+        };
         let (c1, t1) = ms(|| (0..npts as usize).map(cls).collect::<Vec<u32>>());
-        let (_, tp) = ms(|| (0..npts as usize).into_par_iter().map(cls).collect::<Vec<u32>>());
-        let u = words(&[gp.gy, gp.gz, gp.points, 0, gp.y0.to_bits(), gp.z0.to_bits(), gp.inv_dy.to_bits(), gp.inv_dz.to_bits()]);
-        let ins: [&[u8]; 4] = [bytemuck::cast_slice(&tris), bytemuck::cast_slice(&start), bytemuck::cast_slice(&ids), bytemuck::cast_slice(&pts)];
+        let (_, tp) = ms(|| {
+            (0..npts as usize)
+                .into_par_iter()
+                .map(cls)
+                .collect::<Vec<u32>>()
+        });
+        let u = words(&[
+            gp.gy,
+            gp.gz,
+            gp.points,
+            0,
+            gp.y0.to_bits(),
+            gp.z0.to_bits(),
+            gp.inv_dy.to_bits(),
+            gp.inv_dz.to_bits(),
+        ]);
+        let ins: [&[u8]; 4] = [
+            bytemuck::cast_slice(&tris),
+            bytemuck::cast_slice(&start),
+            bytemuck::cast_slice(&ids),
+            bytemuck::cast_slice(&pts),
+        ];
         let _ = gpu.run(&pipe, &u, &ins, npts as u64 * 4, npts);
         let (gb, gt) = gpu.run(&pipe, &u, &ins, npts as u64 * 4, npts);
         let gv: &[u32] = bytemuck::cast_slice(&gb);
@@ -297,7 +521,13 @@ fn bench_classify(gpu: &Gpu) {
                 ((q * q + z * z < RMIN * RMIN) as u32) != c1[i]
             })
             .count();
-        println!("{nt:>8} | {:>7} {tb:>8.1} | {t1:>9.1} {tp:>9.1} | {:>9.1} {:>9.2} {:>8.0} | {diff:>8} {exact:>10}", format!("{g}x{g}"), gt.total, gt.kernel, npts as f64 / gt.kernel / 1e3);
+        println!(
+            "{nt:>8} | {:>7} {tb:>8.1} | {t1:>9.1} {tp:>9.1} | {:>9.1} {:>9.2} {:>8.0} | {diff:>8} {exact:>10}",
+            format!("{g}x{g}"),
+            gt.total,
+            gt.kernel,
+            npts as f64 / gt.kernel / 1e3
+        );
     }
 }
 

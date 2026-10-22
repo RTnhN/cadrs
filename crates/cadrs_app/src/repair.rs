@@ -34,8 +34,13 @@ use bevy::ui_widgets::Activate;
 use cadrs_core::rebuild::{Build, Pending};
 use cadrs_core::repair::{Reference, outline, references};
 use cadrs_core::{ElementId, Feature, FeatureId};
-use cadrs_ui::menu::{ContextMenuAnchor, ContextMenuRequested, ContextMenuTarget, Menu, MenuAction, MenuItem};
-use cadrs_ui::{Checkbox, CheckboxChange, IconButton, SelectionListItem, SelectionListReplaceable, Theme, ToolButton, open_context_menu};
+use cadrs_ui::menu::{
+    ContextMenuAnchor, ContextMenuRequested, ContextMenuTarget, Menu, MenuAction, MenuItem,
+};
+use cadrs_ui::{
+    Checkbox, CheckboxChange, IconButton, SelectionListItem, SelectionListReplaceable, Theme,
+    ToolButton, open_context_menu,
+};
 
 use crate::camera::{StandardView, ViewState};
 use crate::history_panel::DocLog;
@@ -117,7 +122,11 @@ fn configure_gizmos(mut store: ResMut<GizmoConfigStore>) {
     config.line.width = 12.0;
 }
 
-fn draw_repair_cube_arcs(repair: Res<Repair>, theme: Res<Theme>, mut arcs: Gizmos<RepairCubeArcGizmos>) {
+fn draw_repair_cube_arcs(
+    repair: Res<Repair>,
+    theme: Res<Theme>,
+    mut arcs: Gizmos<RepairCubeArcGizmos>,
+) {
     use crate::view_cube::CubeColors;
     if repair.open {
         crate::view_cube::draw_cube_arcs(&mut arcs, &repair.view, theme.view_cube_arrow());
@@ -232,12 +241,22 @@ struct RepairStripIcon;
 struct RepairBody;
 
 fn target_image(size: UVec2) -> Image {
-    let mut image = Image::new_target_texture(size.x.max(1), size.y.max(1), TextureFormat::Rgba8UnormSrgb, None);
+    let mut image = Image::new_target_texture(
+        size.x.max(1),
+        size.y.max(1),
+        TextureFormat::Rgba8UnormSrgb,
+        None,
+    );
     image.asset_usage = RenderAssetUsages::default();
     image
 }
 
-fn spawn_cameras(mut commands: Commands, mut images: ResMut<Assets<Image>>, theme: Res<Theme>, mut repair: ResMut<Repair>) {
+fn spawn_cameras(
+    mut commands: Commands,
+    mut images: ResMut<Assets<Image>>,
+    theme: Res<Theme>,
+    mut repair: ResMut<Repair>,
+) {
     let image = images.add(target_image(UVec2::new(64, 64)));
     repair.image = Some(image.clone());
     repair.image_size = UVec2::new(64, 64);
@@ -282,14 +301,25 @@ fn spawn_cameras(mut commands: Commands, mut images: ResMut<Assets<Image>>, them
         crate::view_cube::cube_projection(),
         Tonemapping::None,
         DebandDither::Disabled,
-        RenderLayers::from_layers(&[crate::view_cube::CUBE_LAYER, crate::view_cube::REPAIR_CUBE_ARC_LAYER]),
+        RenderLayers::from_layers(&[
+            crate::view_cube::CUBE_LAYER,
+            crate::view_cube::REPAIR_CUBE_ARC_LAYER,
+        ]),
         Transform::default(),
     ));
 }
 
-fn close_on_exit(mut repair: ResMut<Repair>, mut commands: Commands, q: Query<Entity, With<RepairPart>>) {
+fn close_on_exit(
+    mut repair: ResMut<Repair>,
+    mut commands: Commands,
+    q: Query<Entity, With<RepairPart>>,
+) {
     let (image, cube) = (repair.image.clone(), repair.cube_image.clone());
-    *repair = Repair { image, cube_image: cube, ..Repair::default() };
+    *repair = Repair {
+        image,
+        cube_image: cube,
+        ..Repair::default()
+    };
     for e in &q {
         commands.entity(e).try_despawn();
     }
@@ -297,8 +327,15 @@ fn close_on_exit(mut repair: ResMut<Repair>, mut commands: Commands, q: Query<En
 
 /// Opens the Repair panel on history entry `k` of the active Part Studio (IR3.2).
 pub fn open_at(world: &mut World, k: usize) {
-    let label = world.get_resource::<DocLog>().and_then(|l| l.label(k)).unwrap_or_default();
-    open_entry(world, k, format!("{} :: {label}", crate::workspaces::current_name(world)));
+    let label = world
+        .get_resource::<DocLog>()
+        .and_then(|l| l.label(k))
+        .unwrap_or_default();
+    open_entry(
+        world,
+        k,
+        format!("{} :: {label}", crate::workspaces::current_name(world)),
+    );
     world.resource_mut::<Repair>().tab = "Repair";
 }
 
@@ -308,7 +345,11 @@ pub fn open_version(world: &mut World, i: usize) {
     let Some((k, name)) = world
         .get_resource::<DocLog>()
         .and_then(|l| l.log.as_ref())
-        .and_then(|l| l.versions().get(i).map(|v| (v.entry(), v.name().to_string())))
+        .and_then(|l| {
+            l.versions()
+                .get(i)
+                .map(|v| (v.entry(), v.name().to_string()))
+        })
     else {
         return;
     };
@@ -332,7 +373,10 @@ fn open_entry(world: &mut World, k: usize, title: String) {
     else {
         return;
     };
-    let features = state.element(element).map(|e| e.active_features()).unwrap_or_default();
+    let features = state
+        .element(element)
+        .map(|e| e.active_features())
+        .unwrap_or_default();
     let main = world.resource::<ViewportView>().target();
     let mut r = world.resource_mut::<Repair>();
     if !r.open {
@@ -355,10 +399,17 @@ fn open_entry(world: &mut World, k: usize, title: String) {
 /// "Edit healthy moment of <feature>…" (IR3.3): the Repair panel on the feature's last
 /// healthy regeneration, and the feature opened for editing.
 pub fn edit_healthy_moment(world: &mut World, feature: FeatureId) {
-    let Some(element) = world.get_resource::<ActiveDocument>().and_then(|d| d.active_element()).map(|e| e.id) else {
+    let Some(element) = world
+        .get_resource::<ActiveDocument>()
+        .and_then(|d| d.active_element())
+        .map(|e| e.id)
+    else {
         return;
     };
-    let Some(k) = world.get_resource::<DocLog>().and_then(|l| l.last_healthy(element, feature)) else {
+    let Some(k) = world
+        .get_resource::<DocLog>()
+        .and_then(|l| l.last_healthy(element, feature))
+    else {
         return;
     };
     open_at(world, k);
@@ -378,7 +429,9 @@ pub fn close(world: &mut World) {
     r.build = None;
     r.pending = None;
     r.generation += 1;
-    world.resource_mut::<crate::history_panel::HistoryPanel>().repair_pick = false;
+    world
+        .resource_mut::<crate::history_panel::HistoryPanel>()
+        .repair_pick = false;
 }
 
 /// Once the split viewport is laid out, the main view is fitted to its half (the Repair view
@@ -399,7 +452,9 @@ fn fit_on_open(world: &mut World) {
 }
 
 fn poll_build(mut repair: ResMut<Repair>) {
-    let Some(p) = repair.pending.as_mut() else { return };
+    let Some(p) = repair.pending.as_mut() else {
+        return;
+    };
     if let Some(b) = p.poll() {
         repair.build = Some(b);
         repair.pending = None;
@@ -578,12 +633,25 @@ fn sync_strip_icon(
     if !repair.open {
         return;
     }
-    let Some((strip, _)) = q_named.iter().find(|(_, n)| n.as_str() == "right-panel-strip") else {
+    let Some((strip, _)) = q_named
+        .iter()
+        .find(|(_, n)| n.as_str() == "right-panel-strip")
+    else {
         return;
     };
     let icon = commands
-        .spawn((RepairStripIcon, ToolButton::new("panel-repair", "tool").icon_size(18.0).tooltip("Repair").build(&theme)))
-        .insert(cadrs_ui::style::InitState { disabled: false, selected: true, force: None })
+        .spawn((
+            RepairStripIcon,
+            ToolButton::new("panel-repair", "tool")
+                .icon_size(18.0)
+                .tooltip("Repair")
+                .build(&theme),
+        ))
+        .insert(cadrs_ui::style::InitState {
+            disabled: false,
+            selected: true,
+            force: None,
+        })
         .insert(Node {
             width: Val::Px(28.0),
             height: Val::Px(30.0),
@@ -602,7 +670,12 @@ fn on_button(a: On<Activate>, q: Query<&Name>, mut commands: Commands) {
     }
 }
 
-fn on_sync_checkbox(ev: On<CheckboxChange>, q: Query<&Name>, mut repair: ResMut<Repair>, main: Res<ViewportView>) {
+fn on_sync_checkbox(
+    ev: On<CheckboxChange>,
+    q: Query<&Name>,
+    mut repair: ResMut<Repair>,
+    main: Res<ViewportView>,
+) {
     if q.get(ev.entity).is_ok_and(|n| n.as_str() == "repair-sync") {
         repair.sync = ev.checked;
         if ev.checked {
@@ -619,7 +692,9 @@ fn resize_target(
     mut q_image: Query<&mut ImageNode, With<RepairImage>>,
     mut q_cam: Query<&mut RenderTarget, With<RepairCamera>>,
 ) {
-    let Some(node) = q_body.iter().next() else { return };
+    let Some(node) = q_body.iter().next() else {
+        return;
+    };
     let size = node.size().round().as_uvec2();
     if size.x < 4 || size.y < 4 {
         return;
@@ -636,7 +711,10 @@ fn resize_target(
         img.image = handle.clone();
     }
     for mut target in &mut q_cam {
-        *target = RenderTarget::Image(ImageRenderTarget { handle: handle.clone(), scale_factor: scale });
+        *target = RenderTarget::Image(ImageRenderTarget {
+            handle: handle.clone(),
+            scale_factor: scale,
+        });
     }
 }
 
@@ -663,8 +741,14 @@ fn follow_views(mut repair: ResMut<Repair>, mut main: ResMut<ViewportView>) {
 #[allow(clippy::type_complexity)]
 fn sync_cameras(
     repair: Res<Repair>,
-    mut q_cam: Query<(&mut Camera, &mut Transform, &mut Projection), (With<RepairCamera>, Without<RepairCubeCamera>)>,
-    mut q_cube: Query<(&mut Camera, &mut Transform), (With<RepairCubeCamera>, Without<RepairCamera>)>,
+    mut q_cam: Query<
+        (&mut Camera, &mut Transform, &mut Projection),
+        (With<RepairCamera>, Without<RepairCubeCamera>),
+    >,
+    mut q_cube: Query<
+        (&mut Camera, &mut Transform),
+        (With<RepairCubeCamera>, Without<RepairCamera>),
+    >,
 ) {
     let v = repair.view;
     for (mut cam, mut t, mut projection) in &mut q_cam {
@@ -700,7 +784,11 @@ fn sync_meshes(
     mut commands: Commands,
 ) {
     let v = repair.view;
-    let key = [(v.azimuth * 2.0).round() as i32, (v.elevation * 2.0).round() as i32, (v.roll * 2.0).round() as i32];
+    let key = [
+        (v.azimuth * 2.0).round() as i32,
+        (v.elevation * 2.0).round() as i32,
+        (v.roll * 2.0).round() as i32,
+    ];
     let want = repair.open.then_some((repair.generation, key));
     if want == repair.meshed {
         return;
@@ -737,7 +825,11 @@ fn sync_meshes(
     }
 }
 
-fn draw_repair(repair: Res<Repair>, mut edges: Gizmos<RepairEdgeGizmos>, mut highlight: Gizmos<RepairHighlightGizmos>) {
+fn draw_repair(
+    repair: Res<Repair>,
+    mut edges: Gizmos<RepairEdgeGizmos>,
+    mut highlight: Gizmos<RepairHighlightGizmos>,
+) {
     if !repair.open {
         return;
     }
@@ -750,7 +842,11 @@ fn draw_repair(repair: Res<Repair>, mut edges: Gizmos<RepairEdgeGizmos>, mut hig
     }
     // The old geometry of the hovered reference: yellow, as `ex1-step13.png`.
     for l in &repair.highlight {
-        highlight.linestrip(l.iter().map(|p| Vec3::new(p[0] as f32, p[1] as f32, p[2] as f32)), Color::srgb_u8(0xe8, 0xd8, 0x4a));
+        highlight.linestrip(
+            l.iter()
+                .map(|p| Vec3::new(p[0] as f32, p[1] as f32, p[2] as f32)),
+            Color::srgb_u8(0xe8, 0xd8, 0x4a),
+        );
     }
 }
 
@@ -761,27 +857,48 @@ fn draw_repair(repair: Res<Repair>, mut edges: Gizmos<RepairEdgeGizmos>, mut hig
 /// the extrude's and revolve's inputs, the fillet's and chamfer's entities.
 pub fn list_feature(world: &World, list: &str) -> Option<FeatureId> {
     match list {
-        "extrude-regions-field" | "revolve-regions-field" => world.get_resource::<crate::extrude::ExtrudeSession>().map(|s| s.feature),
-        "fillet-entities-field" | "chamfer-entities-field" => world.get_resource::<crate::applied::AppliedSession>().map(|s| s.feature),
+        "extrude-regions-field" | "revolve-regions-field" => world
+            .get_resource::<crate::extrude::ExtrudeSession>()
+            .map(|s| s.feature),
+        "fillet-entities-field" | "chamfer-entities-field" => world
+            .get_resource::<crate::applied::AppliedSession>()
+            .map(|s| s.feature),
         _ => None,
     }
 }
 
 /// The lists Replace reference works on.
-pub const REPLACEABLE_LISTS: [&str; 4] = ["extrude-regions-field", "revolve-regions-field", "fillet-entities-field", "chamfer-entities-field"];
+pub const REPLACEABLE_LISTS: [&str; 4] = [
+    "extrude-regions-field",
+    "revolve-regions-field",
+    "fillet-entities-field",
+    "chamfer-entities-field",
+];
 
 /// Where reference `index` of `feature` was in the Repair panel's state.
-pub fn reference_outline(world: &mut World, feature: FeatureId, reference: &Reference) -> Vec<Vec<cadrs_sketch::Vec3>> {
+pub fn reference_outline(
+    world: &mut World,
+    feature: FeatureId,
+    reference: &Reference,
+) -> Vec<Vec<cadrs_sketch::Vec3>> {
     let tangent = world
         .get_resource::<ActiveDocument>()
-        .and_then(|d| d.active_element()?.feature(feature).map(|f| f.fillet().is_some_and(|x| x.tangent_propagation)))
+        .and_then(|d| {
+            d.active_element()?
+                .feature(feature)
+                .map(|f| f.fillet().is_some_and(|x| x.tangent_propagation))
+        })
         .unwrap_or(false);
     let mut repair = world.resource_mut::<Repair>();
     if !repair.open {
         return Vec::new();
     }
     // The feature's place then (or the end, if it didn't exist yet).
-    let i = repair.features.iter().position(|f| f.id == feature).unwrap_or(repair.features.len());
+    let i = repair
+        .features
+        .iter()
+        .position(|f| f.id == feature)
+        .unwrap_or(repair.features.len());
     let before = repair.parts_before(i);
     outline(&repair.features, &before.parts, reference, tangent)
 }
@@ -792,16 +909,27 @@ fn hovered_reference(world: &mut World) {
         return;
     }
     let mut q = world.query::<(&SelectionListItem, &bevy::picking::hover::Hovered)>();
-    let hovered: Vec<(Entity, usize)> = q.iter(world).filter(|(_, h)| h.get()).map(|(i, _)| (i.list, i.index)).collect();
+    let hovered: Vec<(Entity, usize)> = q
+        .iter(world)
+        .filter(|(_, h)| h.get())
+        .map(|(i, _)| (i.list, i.index))
+        .collect();
     let mut found = None;
     for (list, index) in hovered {
-        let Some(name) = world.get::<Name>(list).map(|n| n.as_str().to_string()) else { continue };
+        let Some(name) = world.get::<Name>(list).map(|n| n.as_str().to_string()) else {
+            continue;
+        };
         if let Some(r) = crate::replace_reference::hovered_old(world, &name) {
             found = Some(r);
             break;
         }
-        let Some(feature) = list_feature(world, &name) else { continue };
-        let Some(f) = world.get_resource::<ActiveDocument>().and_then(|d| d.active_element()?.feature(feature).cloned()) else {
+        let Some(feature) = list_feature(world, &name) else {
+            continue;
+        };
+        let Some(f) = world
+            .get_resource::<ActiveDocument>()
+            .and_then(|d| d.active_element()?.feature(feature).cloned())
+        else {
             continue;
         };
         if let Some(r) = references(&f).get(index) {
@@ -820,11 +948,20 @@ fn hovered_reference(world: &mut World) {
 }
 
 /// While the panel is open, the feature dialogs' lists offer Replace reference (IR4.2).
-fn mark_replaceable(repair: Res<Repair>, q: Query<(Entity, &Name, Option<&SelectionListReplaceable>), With<cadrs_ui::SelectionListState>>, mut commands: Commands) {
+fn mark_replaceable(
+    repair: Res<Repair>,
+    q: Query<
+        (Entity, &Name, Option<&SelectionListReplaceable>),
+        With<cadrs_ui::SelectionListState>,
+    >,
+    mut commands: Commands,
+) {
     for (e, n, r) in &q {
         let want = repair.open && REPLACEABLE_LISTS.contains(&n.as_str());
         if r.map(|r| r.0) != Some(want) {
-            commands.entity(e).try_insert(SelectionListReplaceable(want));
+            commands
+                .entity(e)
+                .try_insert(SelectionListReplaceable(want));
         }
     }
 }
@@ -838,49 +975,87 @@ fn on_body_press(ev: On<Pointer<Press>>, mut repair: ResMut<Repair>) {
     }
 }
 
-fn on_body_drag(ev: On<Pointer<Drag>>, mut repair: ResMut<Repair>, keys: Res<ButtonInput<KeyCode>>, prefs: Res<crate::preferences_ui::LocalPreferences>) {
+fn on_body_drag(
+    ev: On<Pointer<Drag>>,
+    mut repair: ResMut<Repair>,
+    keys: Res<ButtonInput<KeyCode>>,
+    prefs: Res<crate::preferences_ui::LocalPreferences>,
+) {
     use cadrs_core::preferences::ViewAction;
     let d = ev.delta;
     if ev.button == PointerButton::Primary {
         return;
     }
     // P3E.3: the mouse preference's gestures, as in the main view.
-    match prefs.mouse().action(crate::preferences_ui::mouse_button(ev.button), crate::preferences_ui::modifiers(&keys)) {
+    match prefs.mouse().action(
+        crate::preferences_ui::mouse_button(ev.button),
+        crate::preferences_ui::modifiers(&keys),
+    ) {
         Some(ViewAction::Rotate) => repair.view.orbit(d),
         Some(ViewAction::RotateTurntable) => repair.view.orbit_turntable(d),
         Some(ViewAction::Pan) => repair.view.pan(d),
-        Some(ViewAction::Zoom) => repair.view.zoom_at(crate::viewport::DRAG_ZOOM_PER_PX.powf(-d.y), Vec2::ZERO),
+        Some(ViewAction::Zoom) => repair
+            .view
+            .zoom_at(crate::viewport::DRAG_ZOOM_PER_PX.powf(-d.y), Vec2::ZERO),
         None => {}
     }
 }
 
-fn on_body_scroll(ev: On<Pointer<bevy::picking::events::Scroll>>, mut repair: ResMut<Repair>, q: Query<(&ComputedNode, &bevy::ui::UiGlobalTransform), With<RepairBody>>) {
-    let Some((node, t)) = q.iter().next() else { return };
+fn on_body_scroll(
+    ev: On<Pointer<bevy::picking::events::Scroll>>,
+    mut repair: ResMut<Repair>,
+    q: Query<(&ComputedNode, &bevy::ui::UiGlobalTransform), With<RepairBody>>,
+) {
+    let Some((node, t)) = q.iter().next() else {
+        return;
+    };
     let s = node.inverse_scale_factor();
     let center = t.translation * s;
     let cursor = ev.pointer_location.position - center;
-    let lines = if ev.unit == bevy::input::mouse::MouseScrollUnit::Line { ev.y } else { ev.y / 40.0 };
+    let lines = if ev.unit == bevy::input::mouse::MouseScrollUnit::Line {
+        ev.y
+    } else {
+        ev.y / 40.0
+    };
     repair.view.wheel(lines, cursor);
 }
 
-fn on_cube_click(ev: On<Pointer<Click>>, mut repair: ResMut<Repair>, q: Query<(&ComputedNode, &bevy::ui::UiGlobalTransform), With<RepairCubeImage>>) {
+fn on_cube_click(
+    ev: On<Pointer<Click>>,
+    mut repair: ResMut<Repair>,
+    q: Query<(&ComputedNode, &bevy::ui::UiGlobalTransform), With<RepairCubeImage>>,
+) {
     if ev.button != PointerButton::Primary {
         return;
     }
-    let Some((node, t)) = q.iter().next() else { return };
+    let Some((node, t)) = q.iter().next() else {
+        return;
+    };
     let s = node.inverse_scale_factor();
     let top_left = t.translation * s - crate::view_cube::CUBE_WIDGET / 2.0;
-    if let Some(v) = crate::view_cube::view_at_spot(&repair.view, ev.pointer_location.position - top_left) {
+    if let Some(v) =
+        crate::view_cube::view_at_spot(&repair.view, ev.pointer_location.position - top_left)
+    {
         repair.view = v;
     }
 }
 
-fn on_view_menu(ev: On<ContextMenuRequested>, q: Query<(), With<RepairBody>>, mut repair: ResMut<Repair>, theme: Res<Theme>, mut commands: Commands) {
+fn on_view_menu(
+    ev: On<ContextMenuRequested>,
+    q: Query<(), With<RepairBody>>,
+    mut repair: ResMut<Repair>,
+    theme: Res<Theme>,
+    mut commands: Commands,
+) {
     if q.get(ev.entity).is_err() {
         return;
     }
     // The end of a right-drag (an orbit) isn't a right-click.
-    if repair.press.take().is_some_and(|p| p.distance(ev.position) > 3.0) {
+    if repair
+        .press
+        .take()
+        .is_some_and(|p| p.distance(ev.position) > 3.0)
+    {
         return;
     }
     let menu = Menu::new("repair-view-menu")
@@ -890,7 +1065,9 @@ fn on_view_menu(ev: On<ContextMenuRequested>, q: Query<(), With<RepairBody>>, mu
         .item(MenuItem::new("repair-zoom-fit", "Zoom to fit"))
         .item(MenuItem::new("repair-isometric", "Isometric"));
     let anchor = open_context_menu(&mut commands, ev.position, menu.build(&theme));
-    commands.entity(anchor).insert((RepairMenu, DespawnOnExit(AppState::Document)));
+    commands
+        .entity(anchor)
+        .insert((RepairMenu, DespawnOnExit(AppState::Document)));
 }
 
 #[derive(Component)]
@@ -907,14 +1084,23 @@ fn on_item_menu(
     q_item: Query<&SelectionListItem>,
     q_list: Query<(&Name, &cadrs_ui::SelectionListState)>,
     doc: Option<Res<ActiveDocument>>,
-    (extrude, applied): (Option<Res<crate::extrude::ExtrudeSession>>, Option<Res<crate::applied::AppliedSession>>),
+    (extrude, applied): (
+        Option<Res<crate::extrude::ExtrudeSession>>,
+        Option<Res<crate::applied::AppliedSession>>,
+    ),
     log: Res<DocLog>,
     theme: Res<Theme>,
     mut commands: Commands,
 ) {
-    let Ok(item) = q_item.get(ev.entity) else { return };
-    let Ok((name, state)) = q_list.get(item.list) else { return };
-    if !REPLACEABLE_LISTS.contains(&name.as_str()) || !state.red.get(item.index).copied().unwrap_or(false) {
+    let Ok(item) = q_item.get(ev.entity) else {
+        return;
+    };
+    let Ok((name, state)) = q_list.get(item.list) else {
+        return;
+    };
+    if !REPLACEABLE_LISTS.contains(&name.as_str())
+        || !state.red.get(item.index).copied().unwrap_or(false)
+    {
         return;
     }
     let feature = match name.as_str() {
@@ -931,25 +1117,46 @@ fn on_item_menu(
         .min_width(180.0)
         .item_height(22.0)
         .text_only()
-        .item(MenuItem::new("missing-edit-healthy", format!("Edit healthy moment of {fname}…")).disabled(!has_healthy_moment(&log, element, feature)));
+        .item(
+            MenuItem::new(
+                "missing-edit-healthy",
+                format!("Edit healthy moment of {fname}…"),
+            )
+            .disabled(!has_healthy_moment(&log, element, feature)),
+        );
     let anchor = open_context_menu(&mut commands, ev.position, menu.build(&theme));
-    commands.entity(anchor).insert((ItemMenuFor(feature), DespawnOnExit(AppState::Document)));
+    commands
+        .entity(anchor)
+        .insert((ItemMenuFor(feature), DespawnOnExit(AppState::Document)));
 }
 
-fn on_item_menu_action(ev: On<MenuAction>, q: Query<&ItemMenuFor, With<ContextMenuAnchor>>, mut commands: Commands) {
+fn on_item_menu_action(
+    ev: On<MenuAction>,
+    q: Query<&ItemMenuFor, With<ContextMenuAnchor>>,
+    mut commands: Commands,
+) {
     let Ok(f) = q.get(ev.entity) else { return };
     if ev.item.as_str() == "missing-edit-healthy" {
         let feature = f.0;
         commands.queue(move |world: &mut World| {
-            let element = world.get_resource::<ActiveDocument>().and_then(|d| d.active_element()).map(|e| e.id);
-            if let Some(k) = element.and_then(|el| world.resource::<DocLog>().last_healthy(el, feature)) {
+            let element = world
+                .get_resource::<ActiveDocument>()
+                .and_then(|d| d.active_element())
+                .map(|e| e.id);
+            if let Some(k) =
+                element.and_then(|el| world.resource::<DocLog>().last_healthy(el, feature))
+            {
                 open_at(world, k);
             }
         });
     }
 }
 
-fn on_view_menu_action(ev: On<MenuAction>, q: Query<(), (With<RepairMenu>, With<ContextMenuAnchor>)>, mut commands: Commands) {
+fn on_view_menu_action(
+    ev: On<MenuAction>,
+    q: Query<(), (With<RepairMenu>, With<ContextMenuAnchor>)>,
+    mut commands: Commands,
+) {
     if q.get(ev.entity).is_err() {
         return;
     }
@@ -967,14 +1174,21 @@ fn on_view_menu_action(ev: On<MenuAction>, q: Query<(), (With<RepairMenu>, With<
 pub fn zoom_to_fit(world: &mut World) {
     let size = {
         let mut q = world.query_filtered::<&ComputedNode, With<RepairBody>>();
-        q.iter(world).next().map(|n| n.size() * n.inverse_scale_factor())
+        q.iter(world)
+            .next()
+            .map(|n| n.size() * n.inverse_scale_factor())
     };
     let mut r = world.resource_mut::<Repair>();
     let Some(build) = r.build.clone() else { return };
     let pts: Vec<Vec3> = build
         .parts
         .iter()
-        .flat_map(|p| p.solid.positions.iter().map(|q| Vec3::new(q[0] as f32, q[1] as f32, q[2] as f32)))
+        .flat_map(|p| {
+            p.solid
+                .positions
+                .iter()
+                .map(|q| Vec3::new(q[0] as f32, q[1] as f32, q[2] as f32))
+        })
         .collect();
     if let Some(size) = size
         && !pts.is_empty()
@@ -982,7 +1196,11 @@ pub fn zoom_to_fit(world: &mut World) {
         // Fitted below the "Viewing Main :: …" banner, which floats over the view's top
         // (Final regression judge: edit_healthy_moment 08 fitted the rod under it).
         const BANNER: f32 = 48.0;
-        let mut v = r.view.fitted(&pts, Vec2::new(size.x, (size.y - BANNER).max(1.0)), crate::viewport::FIT_FILL);
+        let mut v = r.view.fitted(
+            &pts,
+            Vec2::new(size.x, (size.y - BANNER).max(1.0)),
+            crate::viewport::FIT_FILL,
+        );
         v.pan(Vec2::new(0.0, BANNER / 2.0));
         r.view = v;
     }

@@ -26,17 +26,18 @@
 //! snapshot and refreshes the views' annotations in one [`DrawingOp::Update`] (see [`update`]).
 
 pub mod annotation;
-pub mod assembly;
 pub mod annotation_more;
+pub mod assembly;
+pub mod dwg;
+pub mod dxf;
+pub mod export;
+pub mod flat_view;
 pub mod graphics;
 pub mod note;
+pub mod pdf;
+pub mod raster;
 pub mod rich;
 pub mod sheet_sketch;
-pub mod export;
-pub mod pdf;
-pub mod dxf;
-pub mod dwg;
-pub mod raster;
 pub mod standard;
 pub mod style;
 pub mod table;
@@ -45,16 +46,15 @@ pub mod title_block;
 pub mod update;
 pub mod view;
 pub mod view_kinds;
-pub mod flat_view;
 
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 pub use graphics::{Graphics, sheet_graphics};
 pub use note::{Note, NoteId};
-pub use table::{Table, TableId};
 pub use standard::{Orientation, Projection, Scale, SheetFormat, SheetSize, Standard};
 pub use style::DrawingStyle;
+pub use table::{Table, TableId};
 pub use template::{DrawingUnits, Template, TemplateSource, builtin_templates};
 pub use title_block::{ReferenceProps, TitleProps};
 pub use view::{Frame3, NamedView, View, ViewId, ViewKind};
@@ -275,7 +275,8 @@ impl Drawing {
     /// The dependency hash of the model state view `v` shows: its own, else its part's in the
     /// drawing's source.
     pub fn shown_hash(&self, v: &View) -> Option<u64> {
-        v.source_hash.or_else(|| self.source(v.reference.element)?.hash_of(v.reference.part))
+        v.source_hash
+            .or_else(|| self.source(v.reference.element)?.hash_of(v.reference.part))
     }
 
     /// The views that are out of date (D13.2): `live` gives the workspace's dependency hash of a
@@ -302,7 +303,13 @@ impl Drawing {
             .iter()
             .flat_map(|s| s.tables.iter().map(move |t| (s.id, t)))
             .filter(|(_, t)| {
-                t.bom.as_ref().is_some_and(|b| live(&ObjectRef { element: b.assembly, part: None }).is_some_and(|h| h != b.source_hash))
+                t.bom.as_ref().is_some_and(|b| {
+                    live(&ObjectRef {
+                        element: b.assembly,
+                        part: None,
+                    })
+                    .is_some_and(|h| h != b.source_hash)
+                })
             })
             .map(|(s, t)| (s, t.id))
             .collect()
@@ -325,7 +332,10 @@ impl Drawing {
     }
 
     fn view_mut(&mut self, id: ViewId) -> Option<&mut View> {
-        self.sheets.iter_mut().flat_map(|s| s.views.iter_mut()).find(|v| v.id == id)
+        self.sheets
+            .iter_mut()
+            .flat_map(|s| s.views.iter_mut())
+            .find(|v| v.id == id)
     }
 
     /// Every view whose parent is `id`.
@@ -372,7 +382,14 @@ impl Drawing {
         out
     }
 
-    fn carry_children(&self, id: ViewId, rotation: f64, d: [f64; 2], out: &mut Vec<(ViewId, [f64; 2])>, depth: usize) {
+    fn carry_children(
+        &self,
+        id: ViewId,
+        rotation: f64,
+        d: [f64; 2],
+        out: &mut Vec<(ViewId, [f64; 2])>,
+        depth: usize,
+    ) {
         if depth > 32 {
             return;
         }
@@ -432,7 +449,10 @@ impl Drawing {
                         n.reference = s.reference;
                         n
                     }
-                    None => Sheet::new(self.next_sheet_name(), SheetFormat::new(SheetSize::AnsiA, Orientation::Landscape)),
+                    None => Sheet::new(
+                        self.next_sheet_name(),
+                        SheetFormat::new(SheetSize::AnsiA, Orientation::Landscape),
+                    ),
                 };
                 sheet.id = *id;
                 let i = if self.sheets.is_empty() { 0 } else { at + 1 };
@@ -539,7 +559,11 @@ impl Drawing {
                 if from == to {
                     return Ok(());
                 }
-                let k = self.sheets[from].views.iter().position(|v| v.id == *id).ok_or("no such view")?;
+                let k = self.sheets[from]
+                    .views
+                    .iter()
+                    .position(|v| v.id == *id)
+                    .ok_or("no such view")?;
                 // The view goes (with its annotations, P3C.3); its children stay.
                 let v = self.sheets[from].views.remove(k);
                 let dest = &mut self.sheets[to];
@@ -556,7 +580,9 @@ impl Drawing {
                 }
                 v.annotations.push(annotation.clone());
             }
-            DrawingOp::SetAnnotation { view, annotation, .. } => {
+            DrawingOp::SetAnnotation {
+                view, annotation, ..
+            } => {
                 let v = self.view_mut(*view).ok_or("no such view")?;
                 let a = v
                     .annotations
@@ -584,7 +610,11 @@ impl Drawing {
             }
             DrawingOp::SetNote { sheet, note, .. } => {
                 let i = self.sheet_index(*sheet).ok_or("no such sheet")?;
-                let n = self.sheets[i].notes.iter_mut().find(|n| n.id == note.id).ok_or("no such note")?;
+                let n = self.sheets[i]
+                    .notes
+                    .iter_mut()
+                    .find(|n| n.id == note.id)
+                    .ok_or("no such note")?;
                 *n = note.clone();
             }
             DrawingOp::AddTable { sheet, table } => {
@@ -596,10 +626,18 @@ impl Drawing {
             }
             DrawingOp::SetTable { sheet, table, .. } => {
                 let i = self.sheet_index(*sheet).ok_or("no such sheet")?;
-                let t = self.sheets[i].tables.iter_mut().find(|t| t.id == table.id).ok_or("no such table")?;
+                let t = self.sheets[i]
+                    .tables
+                    .iter_mut()
+                    .find(|t| t.id == table.id)
+                    .ok_or("no such table")?;
                 *t = table.clone();
             }
-            DrawingOp::DeleteSheetItems { sheet, notes, tables } => {
+            DrawingOp::DeleteSheetItems {
+                sheet,
+                notes,
+                tables,
+            } => {
                 let i = self.sheet_index(*sheet).ok_or("no such sheet")?;
                 let s = &mut self.sheets[i];
                 let (n0, t0) = (s.notes.len(), s.tables.len());
@@ -627,7 +665,11 @@ impl Drawing {
             DrawingOp::SetSketchItems { sheet, items, .. } => {
                 let i = self.sheet_index(*sheet).ok_or("no such sheet")?;
                 for it in items {
-                    let x = self.sheets[i].sketch.iter_mut().find(|x| x.id == it.id).ok_or("no such sketch item")?;
+                    let x = self.sheets[i]
+                        .sketch
+                        .iter_mut()
+                        .find(|x| x.id == it.id)
+                        .ok_or("no such sketch item")?;
                     *x = it.clone();
                 }
             }
@@ -663,7 +705,11 @@ impl Drawing {
                     self.apply(op)?;
                 }
             }
-            DrawingOp::Update { sources, views, notes } => {
+            DrawingOp::Update {
+                sources,
+                views,
+                notes,
+            } => {
                 for src in sources {
                     self.apply(&DrawingOp::SetSource(src.clone()))?;
                 }
@@ -674,7 +720,11 @@ impl Drawing {
                 }
                 for (sheet, note) in notes {
                     let i = self.sheet_index(*sheet).ok_or("no such sheet")?;
-                    let n = self.sheets[i].notes.iter_mut().find(|n| n.id == note.id).ok_or("no such note")?;
+                    let n = self.sheets[i]
+                        .notes
+                        .iter_mut()
+                        .find(|n| n.id == note.id)
+                        .ok_or("no such note")?;
                     *n = note.clone();
                 }
             }
@@ -699,56 +749,124 @@ impl Drawing {
 #[derive(Debug, Clone, PartialEq)]
 pub enum DrawingOp {
     /// Adds a sheet after `after` (or at the end), named "SheetN", with its format.
-    InsertSheet { id: SheetId, after: Option<SheetId> },
-    DeleteSheet { id: SheetId },
-    RenameSheet { id: SheetId, name: String },
-    SetSheetProps { id: SheetId, props: SheetProps },
+    InsertSheet {
+        id: SheetId,
+        after: Option<SheetId>,
+    },
+    DeleteSheet {
+        id: SheetId,
+    },
+    RenameSheet {
+        id: SheetId,
+        name: String,
+    },
+    SetSheetProps {
+        id: SheetId,
+        props: SheetProps,
+    },
     SetStyle(DrawingStyle),
     SetLocked(bool),
     /// "Update properties from a template…": the template's drawing properties, units and
     /// projection.
     UpdateFromTemplate(Template),
     /// Places a view on a sheet (the first view sets the sheet's scale and reference).
-    InsertView { sheet: SheetId, view: View },
+    InsertView {
+        sheet: SheetId,
+        view: View,
+    },
     /// Deletes views; their children stay, unaligned.
-    DeleteViews { ids: Vec<ViewId> },
+    DeleteViews {
+        ids: Vec<ViewId>,
+    },
     /// Moves views (their new anchors).
-    MoveViews { moves: Vec<(ViewId, [f64; 2])> },
+    MoveViews {
+        moves: Vec<(ViewId, [f64; 2])>,
+    },
     /// Replaces a view's settings (display, scale, alignment, sketches, rotation…); `label` is
     /// the undo label ("Show hidden lines").
-    SetView { view: View, label: String },
+    SetView {
+        view: View,
+        label: String,
+    },
     /// Move to sheet… (D7.3): the view goes to `sheet`, its children stay.
-    MoveViewToSheet { id: ViewId, sheet: SheetId },
+    MoveViewToSheet {
+        id: ViewId,
+        sheet: SheetId,
+    },
     /// Adds an annotation to a view (P3C.3).
-    AddAnnotation { view: ViewId, annotation: annotation::Annotation },
+    AddAnnotation {
+        view: ViewId,
+        annotation: annotation::Annotation,
+    },
     /// Replaces an annotation (moved text, new attachment, palette, prefix); `label` is the
     /// undo label.
-    SetAnnotation { view: ViewId, annotation: annotation::Annotation, label: String },
-    DeleteAnnotations { ids: Vec<(ViewId, annotation::AnnotationId)> },
+    SetAnnotation {
+        view: ViewId,
+        annotation: annotation::Annotation,
+        label: String,
+    },
+    DeleteAnnotations {
+        ids: Vec<(ViewId, annotation::AnnotationId)>,
+    },
     /// Places a note on a sheet (P3C.4).
-    AddNote { sheet: SheetId, note: Note },
+    AddNote {
+        sheet: SheetId,
+        note: Note,
+    },
     /// Replaces a note (edited text, moved, turned, resized, a leader added); `label` is the undo
     /// label.
-    SetNote { sheet: SheetId, note: Note, label: String },
+    SetNote {
+        sheet: SheetId,
+        note: Note,
+        label: String,
+    },
     /// Places a table on a sheet (P3C.4).
-    AddTable { sheet: SheetId, table: Table },
+    AddTable {
+        sheet: SheetId,
+        table: Table,
+    },
     /// Replaces a table (a cell's text, rows and columns, merges, size, place, fixed corner).
-    SetTable { sheet: SheetId, table: Table, label: String },
+    SetTable {
+        sheet: SheetId,
+        table: Table,
+        label: String,
+    },
     /// Deletes notes and tables of a sheet.
-    DeleteSheetItems { sheet: SheetId, notes: Vec<NoteId>, tables: Vec<TableId> },
+    DeleteSheetItems {
+        sheet: SheetId,
+        notes: Vec<NoteId>,
+        tables: Vec<TableId>,
+    },
     /// Adds sheet sketch items (P3C.7: lines, splines, an inserted DXF, an image).
-    AddSketchItems { sheet: SheetId, items: Vec<sheet_sketch::SketchItem> },
+    AddSketchItems {
+        sheet: SheetId,
+        items: Vec<sheet_sketch::SketchItem>,
+    },
     /// Replaces a sheet sketch item (moved, a grip dragged); `label` is the undo label.
-    SetSketchItems { sheet: SheetId, items: Vec<sheet_sketch::SketchItem>, label: String },
-    DeleteSketchItems { sheet: SheetId, ids: Vec<sheet_sketch::ItemId> },
+    SetSketchItems {
+        sheet: SheetId,
+        items: Vec<sheet_sketch::SketchItem>,
+        label: String,
+    },
+    DeleteSketchItems {
+        sheet: SheetId,
+        ids: Vec<sheet_sketch::ItemId>,
+    },
     /// Records (or replaces) the state of a referenced Part Studio (P3C.6): the first view of a
     /// studio records the workspace as it is.
     SetSource(ModelSource),
     /// Several edits as one (a view inserted together with its studio's state).
-    Batch { ops: Vec<DrawingOp>, label: String },
+    Batch {
+        ops: Vec<DrawingOp>,
+        label: String,
+    },
     /// "Update from this workspace" (D13.2): the studios' new states, the out-of-date views'
     /// new hashes and refreshed annotations, and the notes whose leaders were refreshed.
-    Update { sources: Vec<ModelSource>, views: Vec<ViewUpdate>, notes: Vec<(SheetId, Note)> },
+    Update {
+        sources: Vec<ModelSource>,
+        views: Vec<ViewUpdate>,
+        notes: Vec<(SheetId, Note)>,
+    },
 }
 
 impl DrawingOp {
@@ -763,7 +881,9 @@ impl DrawingOp {
             DrawingOp::SetLocked(true) => "Lock drawing properties".into(),
             DrawingOp::SetLocked(false) => "Unlock drawing properties".into(),
             DrawingOp::UpdateFromTemplate(_) => "Update properties from template".into(),
-            DrawingOp::InsertView { view, .. } => format!("Insert {} view", view.name.trim_end_matches(" view")),
+            DrawingOp::InsertView { view, .. } => {
+                format!("Insert {} view", view.name.trim_end_matches(" view"))
+            }
             DrawingOp::DeleteViews { ids } if ids.len() == 1 => "Delete view".into(),
             DrawingOp::DeleteViews { .. } => "Delete views".into(),
             DrawingOp::MoveViews { .. } => "Move view".into(),
@@ -782,15 +902,19 @@ impl DrawingOp {
                 _ => "Insert sketch entities".into(),
             },
             DrawingOp::SetSketchItems { label, .. } => label.clone(),
-            DrawingOp::DeleteSketchItems { ids, .. } if ids.len() == 1 => "Delete sketch entity".into(),
+            DrawingOp::DeleteSketchItems { ids, .. } if ids.len() == 1 => {
+                "Delete sketch entity".into()
+            }
             DrawingOp::DeleteSketchItems { .. } => "Delete sketch entities".into(),
             DrawingOp::Batch { label, .. } => label.clone(),
             DrawingOp::Update { .. } => "Update from this workspace".into(),
-            DrawingOp::DeleteSheetItems { notes, tables, .. } => match (notes.len(), tables.len()) {
-                (1, 0) => "Delete note".into(),
-                (0, 1) => "Delete table".into(),
-                _ => "Delete notes and tables".into(),
-            },
+            DrawingOp::DeleteSheetItems { notes, tables, .. } => {
+                match (notes.len(), tables.len()) {
+                    (1, 0) => "Delete note".into(),
+                    (0, 1) => "Delete table".into(),
+                    _ => "Delete notes and tables".into(),
+                }
+            }
         }
     }
 }
@@ -819,18 +943,39 @@ mod tests {
         let mut d = ansi_a();
         let first = d.sheets[0].id;
         let a = SheetId::new();
-        d.apply(&DrawingOp::InsertSheet { id: a, after: Some(first) }).unwrap();
+        d.apply(&DrawingOp::InsertSheet {
+            id: a,
+            after: Some(first),
+        })
+        .unwrap();
         assert_eq!(d.sheets[1].name, "Sheet2");
         assert_eq!(d.sheets[1].format, d.sheets[0].format);
-        d.apply(&DrawingOp::RenameSheet { id: a, name: " Handle ".into() }).unwrap();
+        d.apply(&DrawingOp::RenameSheet {
+            id: a,
+            name: " Handle ".into(),
+        })
+        .unwrap();
         assert_eq!(d.sheets[1].name, "Handle");
-        assert!(d.apply(&DrawingOp::RenameSheet { id: a, name: " ".into() }).is_err());
+        assert!(
+            d.apply(&DrawingOp::RenameSheet {
+                id: a,
+                name: " ".into()
+            })
+            .is_err()
+        );
         let b = SheetId::new();
-        d.apply(&DrawingOp::InsertSheet { id: b, after: None }).unwrap();
-        assert_eq!(d.sheets[2].name, "Sheet2", "Sheet2 is free again after the rename");
+        d.apply(&DrawingOp::InsertSheet { id: b, after: None })
+            .unwrap();
+        assert_eq!(
+            d.sheets[2].name, "Sheet2",
+            "Sheet2 is free again after the rename"
+        );
         d.apply(&DrawingOp::DeleteSheet { id: first }).unwrap();
         d.apply(&DrawingOp::DeleteSheet { id: a }).unwrap();
-        assert!(d.apply(&DrawingOp::DeleteSheet { id: b }).is_err(), "keeps the last sheet");
+        assert!(
+            d.apply(&DrawingOp::DeleteSheet { id: b }).is_err(),
+            "keeps the last sheet"
+        );
     }
 
     #[test]
@@ -855,7 +1000,16 @@ mod tests {
         let d = ansi_a();
         let g = sheet_graphics(&d, 0, &ReferenceProps::default());
         let s = g.strings();
-        for label in ["1", "2", "A", "B", "1:1", "1 OF 1", "THIRD ANGLE", "DO NOT SCALE DRAWING"] {
+        for label in [
+            "1",
+            "2",
+            "A",
+            "B",
+            "1:1",
+            "1 OF 1",
+            "THIRD ANGLE",
+            "DO NOT SCALE DRAWING",
+        ] {
             assert!(s.contains(&label), "{label} missing from {s:?}");
         }
         assert!(s.contains(&title_block::DASHES));
@@ -864,7 +1018,11 @@ mod tests {
         let mut d2 = d.clone();
         let mut p = d2.sheets[0].props();
         p.border = false;
-        d2.apply(&DrawingOp::SetSheetProps { id: d2.sheets[0].id, props: p }).unwrap();
+        d2.apply(&DrawingOp::SetSheetProps {
+            id: d2.sheets[0].id,
+            props: p,
+        })
+        .unwrap();
         let g2 = sheet_graphics(&d2, 0, &ReferenceProps::default());
         assert!(!g2.strings().contains(&"B"));
     }
@@ -880,14 +1038,40 @@ mod tests {
         };
         // The first view sets the sheet's scale and reference (D4.2, D4.7).
         let front = View::base(part, NamedView::Front, Scale::new(1, 2), [80.0, 60.0]);
-        d.apply(&DrawingOp::InsertView { sheet, view: front.clone() }).unwrap();
+        d.apply(&DrawingOp::InsertView {
+            sheet,
+            view: front.clone(),
+        })
+        .unwrap();
         assert_eq!(d.sheets[0].scale, Scale::new(1, 2));
         assert_eq!(d.sheets[0].reference, Some(part));
-        let top = projected_view(&front, Placement::Ortho([0.0, 1.0]), d.projection, [85.0, 140.0], None);
-        let right = projected_view(&front, Placement::Ortho([1.0, 0.0]), d.projection, [170.0, 64.0], None);
-        let iso = projected_view(&front, Placement::Iso(1.0, 1.0), d.projection, [200.0, 150.0], None);
+        let top = projected_view(
+            &front,
+            Placement::Ortho([0.0, 1.0]),
+            d.projection,
+            [85.0, 140.0],
+            None,
+        );
+        let right = projected_view(
+            &front,
+            Placement::Ortho([1.0, 0.0]),
+            d.projection,
+            [170.0, 64.0],
+            None,
+        );
+        let iso = projected_view(
+            &front,
+            Placement::Iso(1.0, 1.0),
+            d.projection,
+            [200.0, 150.0],
+            None,
+        );
         for v in [&top, &right, &iso] {
-            d.apply(&DrawingOp::InsertView { sheet, view: v.clone() }).unwrap();
+            d.apply(&DrawingOp::InsertView {
+                sheet,
+                view: v.clone(),
+            })
+            .unwrap();
         }
         assert_eq!(top.anchor, [80.0, 140.0]);
         assert_eq!(right.anchor, [170.0, 60.0]);
@@ -899,33 +1083,66 @@ mod tests {
         assert_eq!(at(right.id), Some([170.0, 65.0]));
         assert_eq!(at(iso.id), None);
         // An aligned child slides only along its fold line.
-        assert_eq!(d.drag_view(top.id, [7.0, 3.0]), vec![(top.id, [80.0, 143.0])]);
+        assert_eq!(
+            d.drag_view(top.id, [7.0, 3.0]),
+            vec![(top.id, [80.0, 143.0])]
+        );
         // Suppressed, it moves freely.
         let mut free = top.clone();
         free.align_suppressed = true;
-        d.apply(&DrawingOp::SetView { view: free, label: "Suppress".into() }).unwrap();
-        assert_eq!(d.drag_view(top.id, [7.0, 3.0]), vec![(top.id, [87.0, 143.0])]);
+        d.apply(&DrawingOp::SetView {
+            view: free,
+            label: "Suppress".into(),
+        })
+        .unwrap();
+        assert_eq!(
+            d.drag_view(top.id, [7.0, 3.0]),
+            vec![(top.id, [87.0, 143.0])]
+        );
         // A new scale on the parent reaches the children that inherit it (not the ones set).
         let mut iso_set = d.view(iso.id).unwrap().1.clone();
         iso_set.scale = Scale::new(1, 4);
         iso_set.scale_inherited = false;
-        d.apply(&DrawingOp::SetView { view: iso_set, label: "Scale".into() }).unwrap();
+        d.apply(&DrawingOp::SetView {
+            view: iso_set,
+            label: "Scale".into(),
+        })
+        .unwrap();
         let mut f = d.view(front.id).unwrap().1.clone();
         f.scale = Scale::new(1, 1);
-        d.apply(&DrawingOp::SetView { view: f, label: "Scale".into() }).unwrap();
+        d.apply(&DrawingOp::SetView {
+            view: f,
+            label: "Scale".into(),
+        })
+        .unwrap();
         assert_eq!(d.view(right.id).unwrap().1.scale, Scale::new(1, 1));
         assert_eq!(d.view(iso.id).unwrap().1.scale, Scale::new(1, 4));
-        assert_eq!(d.sheets[0].scale, Scale::new(1, 1), "the sheet scale follows its first view");
+        assert_eq!(
+            d.sheets[0].scale,
+            Scale::new(1, 1),
+            "the sheet scale follows its first view"
+        );
         // Move to sheet: the view goes, its children stay (D7.3).
         let second = SheetId::new();
-        d.apply(&DrawingOp::InsertSheet { id: second, after: None }).unwrap();
-        d.apply(&DrawingOp::MoveViewToSheet { id: front.id, sheet: second }).unwrap();
+        d.apply(&DrawingOp::InsertSheet {
+            id: second,
+            after: None,
+        })
+        .unwrap();
+        d.apply(&DrawingOp::MoveViewToSheet {
+            id: front.id,
+            sheet: second,
+        })
+        .unwrap();
         assert_eq!(d.view(front.id).unwrap().0, 1);
         assert_eq!(d.view(right.id).unwrap().0, 0);
         // Children on another sheet aren't carried by drags any more.
         assert_eq!(d.drag_view(front.id, [1.0, 1.0]).len(), 1);
         // Delete: the children lose their parent.
-        d.apply(&DrawingOp::DeleteViews { ids: vec![front.id] }).unwrap();
+        d.apply(&DrawingOp::DeleteViews {
+            ids: vec![front.id],
+        })
+        .unwrap();
         assert!(d.view(right.id).unwrap().1.parent.is_none());
         let text = ron::to_string(&d).unwrap();
         let back: Drawing = ron::from_str(&text).unwrap();
@@ -937,17 +1154,40 @@ mod tests {
         use crate::annotation::{Annotation, AnnotationKind, EdgeRef, Shape};
         let mut d = ansi_a();
         let sheet = d.sheets[0].id;
-        let part = ObjectRef { element: Uuid::from_u128(7), part: None };
+        let part = ObjectRef {
+            element: Uuid::from_u128(7),
+            part: None,
+        };
         let front = View::base(part, NamedView::Front, Scale::new(1, 2), [80.0, 60.0]);
-        d.apply(&DrawingOp::InsertView { sheet, view: front.clone() }).unwrap();
-        let edge = EdgeRef { edge: None, face: None, shape: Shape::Circle { center: [0.0, 0.0], radius: 5.0, arc: None } };
+        d.apply(&DrawingOp::InsertView {
+            sheet,
+            view: front.clone(),
+        })
+        .unwrap();
+        let edge = EdgeRef {
+            edge: None,
+            face: None,
+            shape: Shape::Circle {
+                center: [0.0, 0.0],
+                radius: 5.0,
+                arc: None,
+            },
+        };
         let mut a = Annotation::new(AnnotationKind::Centermark(edge));
-        let op = DrawingOp::AddAnnotation { view: front.id, annotation: a.clone() };
+        let op = DrawingOp::AddAnnotation {
+            view: front.id,
+            annotation: a.clone(),
+        };
         assert_eq!(op.label(), "Insert centermark");
         d.apply(&op).unwrap();
         assert!(d.apply(&op).is_err(), "the id is taken");
         a.kind = AnnotationKind::VirtualSharp { a: edge, b: edge };
-        d.apply(&DrawingOp::SetAnnotation { view: front.id, annotation: a.clone(), label: "Edit".into() }).unwrap();
+        d.apply(&DrawingOp::SetAnnotation {
+            view: front.id,
+            annotation: a.clone(),
+            label: "Edit".into(),
+        })
+        .unwrap();
         assert_eq!(d.view(front.id).unwrap().1.annotations, vec![a.clone()]);
         // A projected view starts without its parent's annotations.
         let top = crate::view::projected_view(
@@ -960,12 +1200,28 @@ mod tests {
         assert!(top.annotations.is_empty());
         // Move to sheet: the annotations go with the view (D7.3).
         let second = SheetId::new();
-        d.apply(&DrawingOp::InsertSheet { id: second, after: None }).unwrap();
-        d.apply(&DrawingOp::MoveViewToSheet { id: front.id, sheet: second }).unwrap();
+        d.apply(&DrawingOp::InsertSheet {
+            id: second,
+            after: None,
+        })
+        .unwrap();
+        d.apply(&DrawingOp::MoveViewToSheet {
+            id: front.id,
+            sheet: second,
+        })
+        .unwrap();
         assert_eq!(d.sheets[1].views[0].annotations, vec![a.clone()]);
-        d.apply(&DrawingOp::DeleteAnnotations { ids: vec![(front.id, a.id)] }).unwrap();
+        d.apply(&DrawingOp::DeleteAnnotations {
+            ids: vec![(front.id, a.id)],
+        })
+        .unwrap();
         assert!(d.view(front.id).unwrap().1.annotations.is_empty());
-        assert!(d.apply(&DrawingOp::DeleteAnnotations { ids: vec![(front.id, a.id)] }).is_err());
+        assert!(
+            d.apply(&DrawingOp::DeleteAnnotations {
+                ids: vec![(front.id, a.id)]
+            })
+            .is_err()
+        );
         let back: Drawing = ron::from_str(&ron::to_string(&d).unwrap()).unwrap();
         assert_eq!(back, d);
     }
@@ -979,19 +1235,59 @@ mod tests {
         let src = ModelSource {
             element: el,
             snapshot: "old".into(),
-            parts: vec![PartHash { part: Some(pa), hash: 1 }, PartHash { part: Some(pb), hash: 2 }],
+            parts: vec![
+                PartHash {
+                    part: Some(pa),
+                    hash: 1,
+                },
+                PartHash {
+                    part: Some(pb),
+                    hash: 2,
+                },
+            ],
             assembly: None,
             pinned: false,
         };
         // The first view of a studio records its state with it, as one step.
-        let mut va = View::base(ObjectRef { element: el, part: Some(pa) }, NamedView::Front, Scale::new(1, 1), [50.0, 50.0]);
+        let mut va = View::base(
+            ObjectRef {
+                element: el,
+                part: Some(pa),
+            },
+            NamedView::Front,
+            Scale::new(1, 1),
+            [50.0, 50.0],
+        );
         va.source_hash = src.hash_of(Some(pa));
-        let insert = DrawingOp::InsertView { sheet, view: va.clone() };
+        let insert = DrawingOp::InsertView {
+            sheet,
+            view: va.clone(),
+        };
         let label = insert.label();
-        d.apply(&DrawingOp::Batch { ops: vec![DrawingOp::SetSource(src.clone()), insert], label }).unwrap();
-        let vb = View::base(ObjectRef { element: el, part: Some(pb) }, NamedView::Top, Scale::new(1, 1), [150.0, 50.0]);
-        d.apply(&DrawingOp::InsertView { sheet, view: vb.clone() }).unwrap();
-        assert_eq!(d.shown_hash(&vb), Some(2), "a view without its own hash takes its part's in the source");
+        d.apply(&DrawingOp::Batch {
+            ops: vec![DrawingOp::SetSource(src.clone()), insert],
+            label,
+        })
+        .unwrap();
+        let vb = View::base(
+            ObjectRef {
+                element: el,
+                part: Some(pb),
+            },
+            NamedView::Top,
+            Scale::new(1, 1),
+            [150.0, 50.0],
+        );
+        d.apply(&DrawingOp::InsertView {
+            sheet,
+            view: vb.clone(),
+        })
+        .unwrap();
+        assert_eq!(
+            d.shown_hash(&vb),
+            Some(2),
+            "a view without its own hash takes its part's in the source"
+        );
         // The workspace: part b changed, part a didn't; another studio is irrelevant.
         let live = |r: &ObjectRef| match r.part {
             Some(p) if p == pa => Some(1),
@@ -1002,7 +1298,20 @@ mod tests {
         // Not known yet: nothing is out of date.
         assert!(d.out_of_date(&|_| None).is_empty());
         // Update: the new state, b's new hash.
-        let new = ModelSource { snapshot: "new".into(), parts: vec![PartHash { part: Some(pa), hash: 1 }, PartHash { part: Some(pb), hash: 3 }], ..src };
+        let new = ModelSource {
+            snapshot: "new".into(),
+            parts: vec![
+                PartHash {
+                    part: Some(pa),
+                    hash: 1,
+                },
+                PartHash {
+                    part: Some(pb),
+                    hash: 3,
+                },
+            ],
+            ..src
+        };
         let op = update::update_op(&d, vec![new], &[]);
         d.apply(&op).unwrap();
         assert_eq!(d.source(el).unwrap().snapshot, "new");

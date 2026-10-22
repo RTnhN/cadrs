@@ -19,14 +19,18 @@ use cadrs_core::{Feature, FeatureKind, PartId};
 use cadrs_ui::OptionRow;
 use cadrs_ui::prelude::*;
 
+use crate::ActiveDocument;
 use crate::applied::AppliedField;
 use crate::applied_dialog::{Role, body_column, index_of, list, number, opts, select_row};
 use crate::parts::PartCache;
 use crate::viewport::Pick;
-use crate::ActiveDocument;
 
 /// A new Transform from the selection: its parts, and the field that takes the next picks.
-pub fn initial(doc: &cadrs_core::Document, element: cadrs_core::ElementId, picked: &[Pick]) -> (TransformFeature, AppliedField) {
+pub fn initial(
+    doc: &cadrs_core::Document,
+    element: cadrs_core::ElementId,
+    picked: &[Pick],
+) -> (TransformFeature, AppliedField) {
     let mut parts: Vec<PartId> = Vec::new();
     for p in picked {
         if let Pick::Part(id) = p
@@ -37,21 +41,34 @@ pub fn initial(doc: &cadrs_core::Document, element: cadrs_core::ElementId, picke
     }
     let mut x = TransformFeature::default();
     x.set_picked(doc, element, &parts);
-    let field = if x.picked().is_empty() { AppliedField::TransformParts } else { first_field(x.transform_type) };
+    let field = if x.picked().is_empty() {
+        AppliedField::TransformParts
+    } else {
+        first_field(x.transform_type)
+    };
     (x, field)
 }
 
 /// Adds `parts` (a box selection) to the open Transform's Parts to transform.
 pub fn add_parts(world: &mut World, parts: &[PartId]) {
-    let Some(mut kind) = crate::applied::current(world).map(|f| f.kind) else { return };
-    let FeatureKind::Transform(x) = &mut kind else { return };
+    let Some(mut kind) = crate::applied::current(world).map(|f| f.kind) else {
+        return;
+    };
+    let FeatureKind::Transform(x) = &mut kind else {
+        return;
+    };
     let mut all = x.picked();
     for p in parts {
         if !all.contains(p) {
             all.push(*p);
         }
     }
-    let Some((d, el)) = world.get_resource::<ActiveDocument>().and_then(|d| Some((d, d.active_element()?.id))) else { return };
+    let Some((d, el)) = world
+        .get_resource::<ActiveDocument>()
+        .and_then(|d| Some((d, d.active_element()?.id)))
+    else {
+        return;
+    };
     x.set_picked(&d.doc, el, &all);
     crate::applied::set(world, kind, "Select parts");
 }
@@ -77,13 +94,23 @@ fn toggle<T: PartialEq>(list: &mut Vec<T>, x: T) {
 }
 
 fn set_or_clear<T: PartialEq>(slot: &mut Option<T>, x: T) {
-    *slot = if slot.as_ref() == Some(&x) { None } else { Some(x) };
+    *slot = if slot.as_ref() == Some(&x) {
+        None
+    } else {
+        Some(x)
+    };
 }
 
 /// A pick into the Transform's fields. Returns false if it doesn't fit the field.
 pub fn pick(world: &mut World, kind: &mut FeatureKind, field: AppliedField, pick: Pick) -> bool {
-    let FeatureKind::Transform(x) = kind else { return false };
-    let Some(features) = world.get_resource::<ActiveDocument>().and_then(|d| d.active_element()).map(|e| e.features().to_vec()) else {
+    let FeatureKind::Transform(x) = kind else {
+        return false;
+    };
+    let Some(features) = world
+        .get_resource::<ActiveDocument>()
+        .and_then(|d| d.active_element())
+        .map(|e| e.features().to_vec())
+    else {
         return false;
     };
     let cache = world.resource::<PartCache>();
@@ -94,19 +121,28 @@ pub fn pick(world: &mut World, kind: &mut FeatureKind, field: AppliedField, pick
                 // Its own parts and (P3H.6) the assembly context's.
                 let mut all = x.picked();
                 toggle(&mut all, p);
-                let Some((d, el)) = world.get_resource::<ActiveDocument>().and_then(|d| Some((d, d.active_element()?.id))) else { return false };
+                let Some((d, el)) = world
+                    .get_resource::<ActiveDocument>()
+                    .and_then(|d| Some((d, d.active_element()?.id)))
+                else {
+                    return false;
+                };
                 x.set_picked(&d.doc, el, &all);
             }
             None => return false,
         },
         AppliedField::TransformLine => match crate::pattern::direction_of(&features, cache, pick) {
-            Some(d @ (DirectionRef::Edge(_) | DirectionRef::SketchLine { .. })) => set_or_clear(&mut x.line, d),
+            Some(d @ (DirectionRef::Edge(_) | DirectionRef::SketchLine { .. })) => {
+                set_or_clear(&mut x.line, d)
+            }
             _ => return false,
         },
-        AppliedField::TransformDirection => match crate::pattern::direction_of(&features, cache, pick) {
-            Some(d) => set_or_clear(&mut x.direction, d),
-            None => return false,
-        },
+        AppliedField::TransformDirection => {
+            match crate::pattern::direction_of(&features, cache, pick) {
+                Some(d) => set_or_clear(&mut x.direction, d),
+                None => return false,
+            }
+        }
         AppliedField::TransformFrom => match crate::pattern::connector_of(&features, cache, pick) {
             Some(c) => {
                 set_or_clear(&mut x.from, c);
@@ -125,13 +161,18 @@ pub fn pick(world: &mut World, kind: &mut FeatureKind, field: AppliedField, pick
             Some(a) => set_or_clear(&mut x.axis, a),
             None => return false,
         },
-        AppliedField::TransformScalePoint => match crate::pattern::connector_of(&features, cache, pick) {
-            Some(c) => set_or_clear(&mut x.scale_point, c),
-            None => return false,
-        },
+        AppliedField::TransformScalePoint => {
+            match crate::pattern::connector_of(&features, cache, pick) {
+                Some(c) => set_or_clear(&mut x.scale_point, c),
+                None => return false,
+            }
+        }
         _ => return false,
     }
-    if let (Some(f), Some(mut s)) = (next, world.get_resource_mut::<crate::applied::AppliedSession>()) {
+    if let (Some(f), Some(mut s)) = (
+        next,
+        world.get_resource_mut::<crate::applied::AppliedSession>(),
+    ) {
         s.field = f;
     }
     true
@@ -139,9 +180,23 @@ pub fn pick(world: &mut World, kind: &mut FeatureKind, field: AppliedField, pick
 
 /// What the Transform's fields refer to, shown selected in the view while its dialog is open.
 pub fn references(kind: &FeatureKind, cache: &PartCache) -> Vec<Pick> {
-    let FeatureKind::Transform(x) = kind else { return Vec::new() };
-    let face = |f: &cadrs_core::FaceRef| cache.parts.iter().find(|p| p.solid.face(&f.face).is_some()).map(|p| Pick::Face(p.id, f.face));
-    let edge = |e: &cadrs_core::EdgeRef| cache.parts.iter().find(|p| p.solid.edge(&e.edge).is_some()).map(|p| Pick::Edge(p.id, e.edge));
+    let FeatureKind::Transform(x) = kind else {
+        return Vec::new();
+    };
+    let face = |f: &cadrs_core::FaceRef| {
+        cache
+            .parts
+            .iter()
+            .find(|p| p.solid.face(&f.face).is_some())
+            .map(|p| Pick::Face(p.id, f.face))
+    };
+    let edge = |e: &cadrs_core::EdgeRef| {
+        cache
+            .parts
+            .iter()
+            .find(|p| p.solid.edge(&e.edge).is_some())
+            .map(|p| Pick::Edge(p.id, e.edge))
+    };
     let direction = |d: &DirectionRef| match d {
         DirectionRef::Edge(e) => edge(e),
         DirectionRef::FaceNormal(f) => face(f),
@@ -153,14 +208,23 @@ pub fn references(kind: &FeatureKind, cache: &PartCache) -> Vec<Pick> {
     match x.transform_type {
         TransformType::TranslateByLine => out.extend(x.line.iter().filter_map(direction)),
         TransformType::TranslateByDistance => out.extend(x.direction.iter().filter_map(direction)),
-        TransformType::MateConnectors => out.extend([&x.from, &x.to].into_iter().flatten().filter_map(crate::pattern::connector_pick)),
+        TransformType::MateConnectors => out.extend(
+            [&x.from, &x.to]
+                .into_iter()
+                .flatten()
+                .filter_map(crate::pattern::connector_pick),
+        ),
         TransformType::Rotate => out.extend(x.axis.iter().filter_map(|a| match a {
             AxisRef::SketchCurve { sketch, curve } => Some(Pick::SketchCurve(*sketch, *curve)),
             AxisRef::Edge(e) => edge(e),
             AxisRef::Face(f) => face(f),
             AxisRef::Connector(c) => crate::pattern::connector_pick(c),
         })),
-        TransformType::ScaleUniformly => out.extend(x.scale_point.iter().filter_map(crate::pattern::connector_pick)),
+        TransformType::ScaleUniformly => out.extend(
+            x.scale_point
+                .iter()
+                .filter_map(crate::pattern::connector_pick),
+        ),
         TransformType::TranslateXyz | TransformType::CopyInPlace => {}
     }
     out
@@ -171,7 +235,11 @@ pub fn takes_connectors(kind: &FeatureKind, field: AppliedField) -> bool {
     matches!(kind, FeatureKind::Transform(_))
         && matches!(
             field,
-            AppliedField::TransformFrom | AppliedField::TransformTo | AppliedField::TransformScalePoint | AppliedField::TransformAxis | AppliedField::TransformDirection
+            AppliedField::TransformFrom
+                | AppliedField::TransformTo
+                | AppliedField::TransformScalePoint
+                | AppliedField::TransformAxis
+                | AppliedField::TransformDirection
         )
 }
 
@@ -179,28 +247,44 @@ pub fn takes_connectors(kind: &FeatureKind, field: AppliedField) -> bool {
 // The dialog
 
 pub(crate) fn name(kind: &FeatureKind) -> Option<&'static str> {
-    matches!(kind, FeatureKind::Transform(_)).then_some("transform").or_else(|| crate::surfacing_ui::name(kind))
+    matches!(kind, FeatureKind::Transform(_))
+        .then_some("transform")
+        .or_else(|| crate::surfacing_ui::name(kind))
 }
 
 pub(crate) fn layout(kind: &FeatureKind) -> Option<String> {
     match kind {
-        FeatureKind::Transform(x) => Some(format!("transform {:?} {} {} {} {:?}", x.transform_type, x.copy, x.flip, x.flip_primary, x.secondary)),
+        FeatureKind::Transform(x) => Some(format!(
+            "transform {:?} {} {} {} {:?}",
+            x.transform_type, x.copy, x.flip, x.flip_primary, x.secondary
+        )),
         k => crate::surfacing_ui::layout(k),
     }
 }
 
 fn op_name(features: &[Feature], op: cadrs_sketch::OpId) -> String {
-    features.iter().find(|f| f.id.0 == op).map_or("part".into(), |f| f.name.clone())
+    features
+        .iter()
+        .find(|f| f.id.0 == op)
+        .map_or("part".into(), |f| f.name.clone())
 }
 
 fn name_of(features: &[Feature], id: cadrs_core::FeatureId) -> String {
-    features.iter().find(|f| f.id == id).map_or("sketch".into(), |f| f.name.clone())
+    features
+        .iter()
+        .find(|f| f.id == id)
+        .map_or("sketch".into(), |f| f.name.clone())
 }
 
 fn direction_label(features: &[Feature], d: &DirectionRef) -> String {
     match d {
-        DirectionRef::Edge(r) => format!("Edge of {}", op_name(features, crate::parts::edge_maker(features, &r.edge))),
-        DirectionRef::SketchLine { sketch, .. } => format!("Line of {}", name_of(features, *sketch)),
+        DirectionRef::Edge(r) => format!(
+            "Edge of {}",
+            op_name(features, crate::parts::edge_maker(features, &r.edge))
+        ),
+        DirectionRef::SketchLine { sketch, .. } => {
+            format!("Line of {}", name_of(features, *sketch))
+        }
         DirectionRef::FaceNormal(f) => format!("Face of {}", op_name(features, f.face.op)),
         DirectionRef::PlaneNormal(p) => crate::viewport::plane_label(features, *p),
         DirectionRef::Connector(c) => c.label(features),
@@ -214,16 +298,46 @@ fn connector_label(features: &[Feature], c: &ConnectorRef) -> String {
     }
 }
 
-pub(crate) fn items(features: &[Feature], cache: &PartCache, kind: &FeatureKind, role: Role) -> Option<Vec<String>> {
-    let FeatureKind::Transform(x) = kind else { return crate::surfacing_ui::items(features, cache, kind, role) };
+pub(crate) fn items(
+    features: &[Feature],
+    cache: &PartCache,
+    kind: &FeatureKind,
+    role: Role,
+) -> Option<Vec<String>> {
+    let FeatureKind::Transform(x) = kind else {
+        return crate::surfacing_ui::items(features, cache, kind, role);
+    };
     Some(match role {
-        Role::TransformParts => crate::applied::part_names(cache, &x.parts).into_iter().chain(x.context.iter().map(|c| c.name.clone())).collect(),
-        Role::TransformLine => x.line.iter().map(|d| direction_label(features, d)).collect(),
-        Role::TransformDirection => x.direction.iter().map(|d| direction_label(features, d)).collect(),
-        Role::TransformFrom => x.from.iter().map(|c| connector_label(features, c)).collect(),
+        Role::TransformParts => crate::applied::part_names(cache, &x.parts)
+            .into_iter()
+            .chain(x.context.iter().map(|c| c.name.clone()))
+            .collect(),
+        Role::TransformLine => x
+            .line
+            .iter()
+            .map(|d| direction_label(features, d))
+            .collect(),
+        Role::TransformDirection => x
+            .direction
+            .iter()
+            .map(|d| direction_label(features, d))
+            .collect(),
+        Role::TransformFrom => x
+            .from
+            .iter()
+            .map(|c| connector_label(features, c))
+            .collect(),
         Role::TransformTo => x.to.iter().map(|c| connector_label(features, c)).collect(),
-        Role::TransformAxis => x.axis.iter().map(|a| crate::revolve::axis_label(features, a)).collect(),
-        Role::TransformScalePoint => x.scale_point.iter().map(|c| connector_label(features, c)).collect(),
+        Role::TransformAxis => x
+            .axis
+            .iter()
+            .map(|a| crate::revolve::axis_label(features, a))
+            .collect(),
+        Role::TransformScalePoint => x
+            .scale_point
+            .iter()
+            .map(|c| connector_label(features, c))
+            .collect(),
         _ => return None,
     })
 }
@@ -243,22 +357,78 @@ pub(crate) fn list_field(role: Role) -> Option<AppliedField> {
 
 /// A list with the opposite-direction flip beside it (Translate by line).
 #[allow(clippy::too_many_arguments)]
-fn list_with_flip(b: &mut ChildSpawner, t: &Theme, name: &str, placeholder: &str, role: Role, items: Vec<String>, active: bool, flip: bool) {
-    b.spawn(Node { align_items: AlignItems::FlexStart, column_gap: Val::Px(2.0), ..default() }).with_children(|r| {
-        r.spawn(Node { flex_grow: 1.0, flex_basis: Val::Px(0.0), min_width: Val::Px(0.0), flex_direction: FlexDirection::Column, ..default() })
-            .with_children(|c| list(c, t, name, placeholder, role, items, active));
-        r.spawn(Node { margin: UiRect::top(Val::Px(4.0)), ..default() }).with_children(|c| {
-            crate::extrude_dialog::flip_button_any(c, t, &format!("{name}-flip"), Role::Flip, flip, "Opposite direction");
+fn list_with_flip(
+    b: &mut ChildSpawner,
+    t: &Theme,
+    name: &str,
+    placeholder: &str,
+    role: Role,
+    items: Vec<String>,
+    active: bool,
+    flip: bool,
+) {
+    b.spawn(Node {
+        align_items: AlignItems::FlexStart,
+        column_gap: Val::Px(2.0),
+        ..default()
+    })
+    .with_children(|r| {
+        r.spawn(Node {
+            flex_grow: 1.0,
+            flex_basis: Val::Px(0.0),
+            min_width: Val::Px(0.0),
+            flex_direction: FlexDirection::Column,
+            ..default()
+        })
+        .with_children(|c| list(c, t, name, placeholder, role, items, active));
+        r.spawn(Node {
+            margin: UiRect::top(Val::Px(4.0)),
+            ..default()
+        })
+        .with_children(|c| {
+            crate::extrude_dialog::flip_button_any(
+                c,
+                t,
+                &format!("{name}-flip"),
+                Role::Flip,
+                flip,
+                "Opposite direction",
+            );
         });
     });
 }
 
-pub(crate) fn body(b: &mut ChildSpawner, t: &Theme, kind: &FeatureKind, field: AppliedField, items_of: &dyn Fn(Role) -> Vec<String>) {
-    let FeatureKind::Transform(x) = kind else { return };
+pub(crate) fn body(
+    b: &mut ChildSpawner,
+    t: &Theme,
+    kind: &FeatureKind,
+    field: AppliedField,
+    items_of: &dyn Fn(Role) -> Vec<String>,
+) {
+    let FeatureKind::Transform(x) = kind else {
+        return;
+    };
     body_column(b, |b| {
         let types = opts(&TransformType::ALL, |m| m.label(), |_| true);
-        select_row(b, t, "transform-type", "", Role::TransformType, &types, index_of(&TransformType::ALL, &x.transform_type), None);
-        list(b, t, "transform-parts-field", "Parts to transform", Role::TransformParts, items_of(Role::TransformParts), field == AppliedField::TransformParts);
+        select_row(
+            b,
+            t,
+            "transform-type",
+            "",
+            Role::TransformType,
+            &types,
+            index_of(&TransformType::ALL, &x.transform_type),
+            None,
+        );
+        list(
+            b,
+            t,
+            "transform-parts-field",
+            "Parts to transform",
+            Role::TransformParts,
+            items_of(Role::TransformParts),
+            field == AppliedField::TransformParts,
+        );
         let active = |f: AppliedField| field == f;
         match x.transform_type {
             TransformType::TranslateByLine => list_with_flip(
@@ -272,8 +442,24 @@ pub(crate) fn body(b: &mut ChildSpawner, t: &Theme, kind: &FeatureKind, field: A
                 x.flip,
             ),
             TransformType::TranslateByDistance => {
-                list(b, t, "transform-direction-field", "Direction", Role::TransformDirection, items_of(Role::TransformDirection), active(AppliedField::TransformDirection));
-                number(b, t, "transform-distance", "Distance", Role::TransformDistance, &x.distance_expr, Some(x.flip));
+                list(
+                    b,
+                    t,
+                    "transform-direction-field",
+                    "Direction",
+                    Role::TransformDirection,
+                    items_of(Role::TransformDirection),
+                    active(AppliedField::TransformDirection),
+                );
+                number(
+                    b,
+                    t,
+                    "transform-distance",
+                    "Distance",
+                    Role::TransformDistance,
+                    &x.distance_expr,
+                    Some(x.flip),
+                );
             }
             TransformType::TranslateXyz => {
                 number(b, t, "transform-x", "X", Role::TransformX, &x.dx_expr, None);
@@ -281,18 +467,74 @@ pub(crate) fn body(b: &mut ChildSpawner, t: &Theme, kind: &FeatureKind, field: A
                 number(b, t, "transform-z", "Z", Role::TransformZ, &x.dz_expr, None);
             }
             TransformType::MateConnectors => {
-                list(b, t, "transform-from-field", "From mate connector", Role::TransformFrom, items_of(Role::TransformFrom), active(AppliedField::TransformFrom));
-                list(b, t, "transform-to-field", "To mate connector", Role::TransformTo, items_of(Role::TransformTo), active(AppliedField::TransformTo));
-                b.spawn(Node { align_items: AlignItems::Center, column_gap: Val::Px(4.0), margin: UiRect::new(Val::Px(2.0), Val::ZERO, Val::Px(5.0), Val::Px(2.0)), ..default() })
-                    .with_children(|r| {
-                        crate::pattern_dialog::icon_button(r, t, "transform-flip-primary", Role::TransformFlipPrimary, "flip-direction-up", "Flip primary axis", x.flip_primary);
-                        let tip = format!("Reorient secondary axis ({})", x.secondary.onshape().replace('_', " ").to_lowercase());
-                        crate::pattern_dialog::icon_button(r, t, "transform-reorient", Role::TransformReorient, "revolve", &tip, x.secondary != SecondaryAxis::PlusX);
-                    });
+                list(
+                    b,
+                    t,
+                    "transform-from-field",
+                    "From mate connector",
+                    Role::TransformFrom,
+                    items_of(Role::TransformFrom),
+                    active(AppliedField::TransformFrom),
+                );
+                list(
+                    b,
+                    t,
+                    "transform-to-field",
+                    "To mate connector",
+                    Role::TransformTo,
+                    items_of(Role::TransformTo),
+                    active(AppliedField::TransformTo),
+                );
+                b.spawn(Node {
+                    align_items: AlignItems::Center,
+                    column_gap: Val::Px(4.0),
+                    margin: UiRect::new(Val::Px(2.0), Val::ZERO, Val::Px(5.0), Val::Px(2.0)),
+                    ..default()
+                })
+                .with_children(|r| {
+                    crate::pattern_dialog::icon_button(
+                        r,
+                        t,
+                        "transform-flip-primary",
+                        Role::TransformFlipPrimary,
+                        "flip-direction-up",
+                        "Flip primary axis",
+                        x.flip_primary,
+                    );
+                    let tip = format!(
+                        "Reorient secondary axis ({})",
+                        x.secondary.onshape().replace('_', " ").to_lowercase()
+                    );
+                    crate::pattern_dialog::icon_button(
+                        r,
+                        t,
+                        "transform-reorient",
+                        Role::TransformReorient,
+                        "revolve",
+                        &tip,
+                        x.secondary != SecondaryAxis::PlusX,
+                    );
+                });
             }
             TransformType::Rotate => {
-                list(b, t, "transform-axis-field", "Axis of rotation", Role::TransformAxis, items_of(Role::TransformAxis), active(AppliedField::TransformAxis));
-                number(b, t, "transform-angle", "Angle", Role::TransformAngle, &x.angle_expr, Some(x.flip));
+                list(
+                    b,
+                    t,
+                    "transform-axis-field",
+                    "Axis of rotation",
+                    Role::TransformAxis,
+                    items_of(Role::TransformAxis),
+                    active(AppliedField::TransformAxis),
+                );
+                number(
+                    b,
+                    t,
+                    "transform-angle",
+                    "Angle",
+                    Role::TransformAngle,
+                    &x.angle_expr,
+                    Some(x.flip),
+                );
             }
             TransformType::CopyInPlace => {}
             TransformType::ScaleUniformly => {
@@ -305,11 +547,23 @@ pub(crate) fn body(b: &mut ChildSpawner, t: &Theme, kind: &FeatureKind, field: A
                     items_of(Role::TransformScalePoint),
                     active(AppliedField::TransformScalePoint),
                 );
-                number(b, t, "transform-scale", "Scale", Role::TransformScale, &x.scale_expr, None);
+                number(
+                    b,
+                    t,
+                    "transform-scale",
+                    "Scale",
+                    Role::TransformScale,
+                    &x.scale_expr,
+                    None,
+                );
             }
         }
         if x.transform_type != TransformType::CopyInPlace {
-            b.spawn(OptionRow::new("transform-copy", "Copy part").checked(x.copy).build(t));
+            b.spawn(
+                OptionRow::new("transform-copy", "Copy part")
+                    .checked(x.copy)
+                    .build(t),
+            );
         }
     });
 }
@@ -318,7 +572,9 @@ pub(crate) fn body(b: &mut ChildSpawner, t: &Theme, kind: &FeatureKind, field: A
 // Keeping it in step and input
 
 pub(crate) fn number_text(kind: &FeatureKind, role: Role) -> Option<String> {
-    let FeatureKind::Transform(x) = kind else { return crate::surfacing_ui::number_text(kind, role) };
+    let FeatureKind::Transform(x) = kind else {
+        return crate::surfacing_ui::number_text(kind, role);
+    };
     Some(match role {
         Role::TransformDistance => x.distance_expr.clone(),
         Role::TransformX => x.dx_expr.clone(),
@@ -332,14 +588,18 @@ pub(crate) fn number_text(kind: &FeatureKind, role: Role) -> Option<String> {
 
 pub(crate) fn select_index(kind: &FeatureKind, role: Role) -> Option<usize> {
     match (kind, role) {
-        (FeatureKind::Transform(x), Role::TransformType) => Some(index_of(&TransformType::ALL, &x.transform_type)),
+        (FeatureKind::Transform(x), Role::TransformType) => {
+            Some(index_of(&TransformType::ALL, &x.transform_type))
+        }
         (k, r) => crate::surfacing_ui::select_index(k, r),
     }
 }
 
 pub(crate) fn select(k: &mut FeatureKind, role: Role, i: usize) {
     match (k, role) {
-        (FeatureKind::Transform(x), Role::TransformType) => x.transform_type = TransformType::ALL[i.min(TransformType::ALL.len() - 1)],
+        (FeatureKind::Transform(x), Role::TransformType) => {
+            x.transform_type = TransformType::ALL[i.min(TransformType::ALL.len() - 1)]
+        }
         (k, r) => crate::surfacing_ui::select(k, r, i),
     }
 }
@@ -360,8 +620,14 @@ pub(crate) fn checkbox(k: &mut FeatureKind, name: &str, on: bool) -> Option<&'st
 
 /// Numbers of any sign (lengths, and the angle).
 pub(crate) fn is_signed(role: Role) -> bool {
-    matches!(role, Role::TransformDistance | Role::TransformX | Role::TransformY | Role::TransformZ | Role::TransformAngle)
-        || crate::surfacing_ui::is_signed(role)
+    matches!(
+        role,
+        Role::TransformDistance
+            | Role::TransformX
+            | Role::TransformY
+            | Role::TransformZ
+            | Role::TransformAngle
+    ) || crate::surfacing_ui::is_signed(role)
 }
 
 /// The scale: a plain number greater than zero.
@@ -524,8 +790,14 @@ pub(crate) fn xyz_arrow_pointer(
         inputs.clear();
         return;
     };
-    arrows.hovered = arrows.drag.as_ref().map(|d| d.axis).or_else(|| arrow_at(&arrows, drag.pointer()));
-    let kind = doc.as_ref().and_then(|d| Some(d.doc.element(s.element)?.feature(s.feature)?.kind.clone()));
+    arrows.hovered = arrows
+        .drag
+        .as_ref()
+        .map(|d| d.axis)
+        .or_else(|| arrow_at(&arrows, drag.pointer()));
+    let kind = doc
+        .as_ref()
+        .and_then(|d| Some(d.doc.element(s.element)?.feature(s.feature)?.kind.clone()));
     for input in inputs.read() {
         if input.pointer_id != PointerId::Mouse {
             continue;
@@ -539,7 +811,13 @@ pub(crate) fn xyz_arrow_pointer(
                     let dir_px = view.view.project_vector(AXES[axis]);
                     if dir_px.length() > 0.05 {
                         let start_value = axis_value(x, axis);
-                        arrows.drag = Some(XyzDrag { axis, start: pos, start_value, dir_px, kind: k.clone() });
+                        arrows.drag = Some(XyzDrag {
+                            axis,
+                            start: pos,
+                            start_value,
+                            dir_px,
+                            kind: k.clone(),
+                        });
                         // Not a click that picks a part.
                         grab.0 = true;
                     }
@@ -555,7 +833,12 @@ pub(crate) fn xyz_arrow_pointer(
                     if let FeatureKind::Transform(x) = &mut d.kind
                         && (axis_value(x, d.axis) - v).abs() > 1e-9
                     {
-                        set_axis_value(x, d.axis, v, units.0.with_unit(v, cadrs_sketch::units::Quantity::Length));
+                        set_axis_value(
+                            x,
+                            d.axis,
+                            v,
+                            units.0.with_unit(v, cadrs_sketch::units::Quantity::Length),
+                        );
                     }
                     let want = Some((s.feature, d.kind.clone()));
                     if over.applied != want {
@@ -566,7 +849,9 @@ pub(crate) fn xyz_arrow_pointer(
             PointerAction::Release(PointerButton::Primary) if arrows.drag.is_some() => {
                 commands.queue(|world: &mut World| {
                     world.resource_mut::<crate::parts::PartOverride>().applied = None;
-                    let Some(d) = world.resource_mut::<XyzArrows>().drag.take() else { return };
+                    let Some(d) = world.resource_mut::<XyzArrows>().drag.take() else {
+                        return;
+                    };
                     if crate::applied::current(world).is_some_and(|f| f.kind != d.kind) {
                         let label = format!("Drag {}", AXIS_NAMES[d.axis].to_uppercase());
                         crate::applied::set(world, d.kind, &label);
@@ -613,28 +898,48 @@ pub(crate) fn place_xyz_arrows(
     rect: Res<crate::viewport::ViewportRect>,
     mut arrows: ResMut<XyzArrows>,
     q_area: Query<Entity, With<crate::viewport::ViewportArea>>,
-    mut q: Query<(Entity, &XyzArrowNode, &mut Node, &mut bevy::ui::UiTransform, &mut Visibility)>,
+    mut q: Query<(
+        Entity,
+        &XyzArrowNode,
+        &mut Node,
+        &mut bevy::ui::UiTransform,
+        &mut Visibility,
+    )>,
     mut q_line: Query<(&XyzArrowLine, &mut ImageNode)>,
     mut commands: Commands,
 ) {
-    let anchor = session.as_ref().filter(|s| s.kind == crate::applied::AppliedKind::Transform).and_then(|s| {
-        let kind = match arrows.drag.as_ref() {
-            Some(d) => d.kind.clone(),
-            None => doc.as_ref()?.doc.element(s.element)?.feature(s.feature)?.kind.clone(),
-        };
-        let FeatureKind::Transform(x) = kind else { return None };
-        if x.transform_type != TransformType::TranslateXyz {
-            return None;
-        }
-        // The middle of the box around the parts before they move.
-        let (mut lo, mut hi) = (Vec3::splat(f32::MAX), Vec3::splat(f32::MIN));
-        for p in before.parts.iter().filter(|p| x.parts.contains(&p.id)) {
-            let Some((a, b)) = p.solid.bounds() else { continue };
-            lo = lo.min(Vec3::new(a[0] as f32, a[1] as f32, a[2] as f32));
-            hi = hi.max(Vec3::new(b[0] as f32, b[1] as f32, b[2] as f32));
-        }
-        (lo.x <= hi.x).then(|| (lo + hi) / 2.0 + Vec3::new(x.dx as f32, x.dy as f32, x.dz as f32))
-    });
+    let anchor = session
+        .as_ref()
+        .filter(|s| s.kind == crate::applied::AppliedKind::Transform)
+        .and_then(|s| {
+            let kind = match arrows.drag.as_ref() {
+                Some(d) => d.kind.clone(),
+                None => doc
+                    .as_ref()?
+                    .doc
+                    .element(s.element)?
+                    .feature(s.feature)?
+                    .kind
+                    .clone(),
+            };
+            let FeatureKind::Transform(x) = kind else {
+                return None;
+            };
+            if x.transform_type != TransformType::TranslateXyz {
+                return None;
+            }
+            // The middle of the box around the parts before they move.
+            let (mut lo, mut hi) = (Vec3::splat(f32::MAX), Vec3::splat(f32::MIN));
+            for p in before.parts.iter().filter(|p| x.parts.contains(&p.id)) {
+                let Some((a, b)) = p.solid.bounds() else {
+                    continue;
+                };
+                lo = lo.min(Vec3::new(a[0] as f32, a[1] as f32, a[2] as f32));
+                hi = hi.max(Vec3::new(b[0] as f32, b[1] as f32, b[2] as f32));
+            }
+            (lo.x <= hi.x)
+                .then(|| (lo + hi) / 2.0 + Vec3::new(x.dx as f32, x.dy as f32, x.dz as f32))
+        });
     arrows.base_tip = [0, 1, 2].map(|i| {
         let p = anchor?;
         let d = view.view.project_vector(AXES[i]);
@@ -650,13 +955,20 @@ pub(crate) fn place_xyz_arrows(
         return;
     }
     if q.is_empty() {
-        let Some(area) = q_area.iter().next() else { return };
+        let Some(area) = q_area.iter().next() else {
+            return;
+        };
         for (i, axis) in AXIS_NAMES.iter().enumerate() {
             let e = commands
                 .spawn((
                     Name::new(format!("transform-{axis}-arrow")),
                     XyzArrowNode(i),
-                    Node { position_type: PositionType::Absolute, width: Val::Px(XYZ_ARROW_LEN), height: Val::Px(XYZ_ARROW_LEN), ..default() },
+                    Node {
+                        position_type: PositionType::Absolute,
+                        width: Val::Px(XYZ_ARROW_LEN),
+                        height: Val::Px(XYZ_ARROW_LEN),
+                        ..default()
+                    },
                     bevy::ui::UiTransform::default(),
                     Visibility::Hidden,
                     Pickable::IGNORE,
@@ -668,7 +980,10 @@ pub(crate) fn place_xyz_arrows(
                                 "manipulator-arrow-halo",
                                 XYZ_ARROW_LEN,
                                 Color::srgba_u8(0x3c, 0x46, 0x4e, 0xb0),
-                                Node { position_type: PositionType::Absolute, ..default() },
+                                Node {
+                                    position_type: PositionType::Absolute,
+                                    ..default()
+                                },
                             ),
                             Pickable::IGNORE,
                         ),
@@ -678,7 +993,10 @@ pub(crate) fn place_xyz_arrows(
                                 "manipulator-arrow-line",
                                 XYZ_ARROW_LEN,
                                 axis_color(i, false),
-                                Node { position_type: PositionType::Absolute, ..default() },
+                                Node {
+                                    position_type: PositionType::Absolute,
+                                    ..default()
+                                },
                             ),
                             Pickable::IGNORE,
                         ),
@@ -696,12 +1014,18 @@ pub(crate) fn place_xyz_arrows(
         };
         let u = (tip - base).normalize_or_zero();
         let center = (base + tip) / 2.0 - rect.0.min;
-        let (l, t) = (Val::Px(center.x - XYZ_ARROW_LEN / 2.0), Val::Px(center.y - XYZ_ARROW_LEN / 2.0));
+        let (l, t) = (
+            Val::Px(center.x - XYZ_ARROW_LEN / 2.0),
+            Val::Px(center.y - XYZ_ARROW_LEN / 2.0),
+        );
         if node.left != l || node.top != t {
             node.left = l;
             node.top = t;
         }
-        let want = bevy::ui::UiTransform { rotation: Rot2::radians(u.x.atan2(-u.y)), ..default() };
+        let want = bevy::ui::UiTransform {
+            rotation: Rot2::radians(u.x.atan2(-u.y)),
+            ..default()
+        };
         if *transform != want {
             *transform = want;
         }

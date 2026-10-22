@@ -14,7 +14,9 @@
 
 use cadrs_sketch::{PlaneRef, SketchOp, Vec2};
 
-use crate::applied::{ChamferFeature, ChamferType, EdgeOrFace, FilletFeature, HoleFeature, HolePoint};
+use crate::applied::{
+    ChamferFeature, ChamferType, EdgeOrFace, FilletFeature, HoleFeature, HolePoint,
+};
 use crate::command::CommandError;
 use crate::commands::{AddFeature, AddSketch, EditSketch, RenameFeature, RenamePart};
 use crate::document::{Document, EdgeRef};
@@ -59,7 +61,10 @@ fn points_of(s: &dyn Studio, el: ElementId, f: FeatureId) -> Result<Vec<HolePoin
         .and_then(|f| f.sketch())
         .ok_or_else(|| CommandError::Invalid("sketch not found".into()))?
         .geometry;
-    Ok(g.points.keys().map(|point| HolePoint { sketch: f, point }).collect())
+    Ok(g.points
+        .keys()
+        .map(|point| HolePoint { sketch: f, point })
+        .collect())
 }
 
 /// The edge of the built bar nearest `p`.
@@ -70,11 +75,9 @@ fn edge_at(s: &dyn Studio, el: ElementId, p: [f64; 3]) -> Result<EdgeRef, Comman
         .map(|e| e.features().to_vec())
         .ok_or_else(|| CommandError::Invalid("studio not found".into()))?;
     let build = crate::rebuild::build(&features);
-    let part = build
-        .parts
-        .iter()
-        .find(|q| q.id == PART)
-        .ok_or_else(|| CommandError::Invalid(format!("the bar did not build: {:?}", build.errors)))?;
+    let part = build.parts.iter().find(|q| q.id == PART).ok_or_else(|| {
+        CommandError::Invalid(format!("the bar did not build: {:?}", build.errors))
+    })?;
     let e = part
         .solid
         .edges
@@ -82,7 +85,11 @@ fn edge_at(s: &dyn Studio, el: ElementId, p: [f64; 3]) -> Result<EdgeRef, Comman
         .min_by(|a, b| a.distance(p).total_cmp(&b.distance(p)))
         .filter(|e| e.distance(p) < 1e-3)
         .ok_or_else(|| CommandError::Invalid(format!("no edge at {p:?}")))?;
-    Ok(EdgeRef { part: PART, edge: e.name, seed: p })
+    Ok(EdgeRef {
+        part: PART,
+        edge: e.name,
+        seed: p,
+    })
 }
 
 /// The Ø6 drilled hole's spec.
@@ -95,7 +102,13 @@ pub fn hole_spec() -> HoleSpec {
 
 /// The M6 tapped hole's spec.
 pub fn tap_spec() -> HoleSpec {
-    let mut s = HoleSpec { standard: HoleStandard::Iso, hole_type: HoleType::Tapped, size: "M6".into(), pitch: "M6x1".into(), ..HoleSpec::default() };
+    let mut s = HoleSpec {
+        standard: HoleStandard::Iso,
+        hole_type: HoleType::Tapped,
+        size: "M6".into(),
+        pitch: "M6x1".into(),
+        ..HoleSpec::default()
+    };
     s.end = HoleEnd::ThroughAll;
     s.apply_table();
     s.tapped_depth = Length::mm(TAP_DEPTH);
@@ -106,7 +119,11 @@ pub fn tap_spec() -> HoleSpec {
 pub fn build_in(s: &mut dyn Studio, el: ElementId) -> Result<(), CommandError> {
     let v = Vec2::new;
     let h = WIDTH / 2.0;
-    s.run(&AddSketch { element: el, feature: SKETCH_1, plane: Some(PlaneRef::Top) })?;
+    s.run(&AddSketch {
+        element: el,
+        feature: SKETCH_1,
+        plane: Some(PlaneRef::Top),
+    })?;
     s.run(&EditSketch {
         element: el,
         feature: SKETCH_1,
@@ -126,12 +143,33 @@ pub fn build_in(s: &mut dyn Studio, el: ElementId) -> Result<(), CommandError> {
         (SKETCH_2, HOLE_1, HOLE_X, hole_spec(), "Hole points"),
         (SKETCH_3, HOLE_2, TAP_X, tap_spec(), "Tap points"),
     ] {
-        s.run(&AddSketch { element: el, feature: sk, plane: Some(PlaneRef::Top) })?;
-        s.run(&EditSketch { element: el, feature: sk, op: SketchOp::AddPoint { pos: v(x, 0.0) } })?;
-        s.run(&RenameFeature { element: el, feature: sk, name: name.into() })?;
+        s.run(&AddSketch {
+            element: el,
+            feature: sk,
+            plane: Some(PlaneRef::Top),
+        })?;
+        s.run(&EditSketch {
+            element: el,
+            feature: sk,
+            op: SketchOp::AddPoint { pos: v(x, 0.0) },
+        })?;
+        s.run(&RenameFeature {
+            element: el,
+            feature: sk,
+            name: name.into(),
+        })?;
         let points = points_of(s, el, sk)?;
         // Drilled from the top face (z = 0) down.
-        s.run(&AddFeature::hole(el, hole, HoleFeature { points, merge_scope: vec![PART], spec, ..HoleFeature::default() }))?;
+        s.run(&AddFeature::hole(
+            el,
+            hole,
+            HoleFeature {
+                points,
+                merge_scope: vec![PART],
+                spec,
+                ..HoleFeature::default()
+            },
+        ))?;
     }
     let chamfer_edges = vec![
         EdgeOrFace::Edge(edge_at(s, el, [0.0, -h, -THICK / 2.0])?),
@@ -155,18 +193,32 @@ pub fn build_in(s: &mut dyn Studio, el: ElementId) -> Result<(), CommandError> {
     s.run(&AddFeature::fillet(
         el,
         FILLET_1,
-        FilletFeature { entities: fillet_edges, size: FILLET_R, size_expr: format!("{FILLET_R} mm"), ..FilletFeature::default() },
+        FilletFeature {
+            entities: fillet_edges,
+            size: FILLET_R,
+            size_expr: format!("{FILLET_R} mm"),
+            ..FilletFeature::default()
+        },
     ))?;
-    s.run(&RenamePart { element: el, part: PART, name: PART_NAME.into() })?;
+    s.run(&RenamePart {
+        element: el,
+        part: PART,
+        name: PART_NAME.into(),
+    })?;
     Ok(())
 }
 
 pub mod views {
     //! The bar's drawing.
-    use cadrs_drawing::annotation::{Annotation, AnnotationKind, DimTool, EdgeRef, Pick, Shape, propose, resolve};
+    use cadrs_drawing::annotation::{
+        Annotation, AnnotationKind, DimTool, EdgeRef, Pick, Shape, propose, resolve,
+    };
     use cadrs_drawing::style::TangentEdges;
     use cadrs_drawing::view::{Placement, projected_view};
-    use cadrs_drawing::{Drawing, DrawingOp, NamedView, ObjectRef, Projection, Scale, SheetId, View, ViewId, template};
+    use cadrs_drawing::{
+        Drawing, DrawingOp, NamedView, ObjectRef, Projection, Scale, SheetId, View, ViewId,
+        template,
+    };
 
     use super::*;
     use crate::drawing_source::{StudioState, part_key, source_of};
@@ -186,9 +238,21 @@ pub mod views {
     }
 
     /// Projects `v` of the bar (tests and the sample).
-    pub fn project(features: &[crate::Feature], v: &View) -> Result<std::sync::Arc<crate::views::ViewGeometry>, CommandError> {
-        crate::views::project(features, crate::drawing_source::view_request(&StudioState { features: features.to_vec(), ..Default::default() }, v))
-            .map_err(|e| bad(&e))
+    pub fn project(
+        features: &[crate::Feature],
+        v: &View,
+    ) -> Result<std::sync::Arc<crate::views::ViewGeometry>, CommandError> {
+        crate::views::project(
+            features,
+            crate::drawing_source::view_request(
+                &StudioState {
+                    features: features.to_vec(),
+                    ..Default::default()
+                },
+                v,
+            ),
+        )
+        .map_err(|e| bad(&e))
     }
 
     /// The drawing of the bar in Part Studio `studio` of `doc`.
@@ -198,7 +262,10 @@ pub mod views {
         let state = StudioState::of(el).ok_or_else(|| bad("not a Part Studio"))?;
         let build = crate::rebuild::build(&state.features);
         let source = source_of(studio, &state, &build);
-        let part = ObjectRef { element: studio.0, part: part_key(Some(PART)) };
+        let part = ObjectRef {
+            element: studio.0,
+            part: part_key(Some(PART)),
+        };
         let hash = source.hash_of(part.part);
         let mut d = Drawing::from_template(&t, None);
         d.sources = vec![source];
@@ -207,14 +274,34 @@ pub mod views {
             v.id = id;
             v.source_hash = hash;
             v.tangent_edges = TangentEdges::Solid;
-            d.apply(&DrawingOp::InsertView { sheet: SHEET, view: v.clone() }).map_err(|e| bad(&e))?;
+            d.apply(&DrawingOp::InsertView {
+                sheet: SHEET,
+                view: v.clone(),
+            })
+            .map_err(|e| bad(&e))?;
             Ok(v)
         };
         let mut front = View::base(part, NamedView::Front, Scale::new(1, 1), FRONT_AT);
         front.hidden_lines = true;
         let front = place(&mut d, front, FRONT)?;
-        let top = place(&mut d, projected_view(&front, Placement::Ortho([0.0, 1.0]), Projection::Third, TOP_AT, None), TOP)?;
-        let mut right = projected_view(&front, Placement::Ortho([1.0, 0.0]), Projection::Third, RIGHT_AT, None);
+        let top = place(
+            &mut d,
+            projected_view(
+                &front,
+                Placement::Ortho([0.0, 1.0]),
+                Projection::Third,
+                TOP_AT,
+                None,
+            ),
+            TOP,
+        )?;
+        let mut right = projected_view(
+            &front,
+            Placement::Ortho([1.0, 0.0]),
+            Projection::Third,
+            RIGHT_AT,
+            None,
+        );
         right.hidden_lines = true;
         place(&mut d, right, RIGHT)?;
         let _ = top;
@@ -232,10 +319,19 @@ pub mod views {
                 })
                 .ok_or_else(|| bad(&format!("no end at x = {x}")))
         };
-        let dim = propose(DimTool::Smart, &front, &*g, &[Pick::Edge(end(0.0)?), Pick::Edge(end(LENGTH)?)], [LENGTH / 2.0, -THICK - 14.0])
-            .ok_or_else(|| bad("the length doesn't measure"))?;
-        d.apply(&DrawingOp::AddAnnotation { view: FRONT, annotation: Annotation::new(AnnotationKind::Dimension(dim)) })
-            .map_err(|e| bad(&e))?;
+        let dim = propose(
+            DimTool::Smart,
+            &front,
+            &*g,
+            &[Pick::Edge(end(0.0)?), Pick::Edge(end(LENGTH)?)],
+            [LENGTH / 2.0, -THICK - 14.0],
+        )
+        .ok_or_else(|| bad("the length doesn't measure"))?;
+        d.apply(&DrawingOp::AddAnnotation {
+            view: FRONT,
+            annotation: Annotation::new(AnnotationKind::Dimension(dim)),
+        })
+        .map_err(|e| bad(&e))?;
         Ok(d)
     }
 }
@@ -247,7 +343,10 @@ pub fn document() -> Result<(Document, ElementId, ElementId), CommandError> {
     let id = el.id;
     doc.elements.push(el);
     let mut h = crate::command::History::default();
-    build_in(&mut crate::samples::gear_cover::DocHistory(&mut doc, &mut h), id)?;
+    build_in(
+        &mut crate::samples::gear_cover::DocHistory(&mut doc, &mut h),
+        id,
+    )?;
     let d = views::drawing(&doc, id)?;
     let del = crate::document::Element::drawing(DRAWING_NAME, d);
     let did = del.id;

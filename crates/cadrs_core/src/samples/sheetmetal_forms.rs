@@ -25,12 +25,14 @@
 //! [`studio`] builds one form's features for given variables and thickness (what the Form
 //! feature rebuilds from); [`document`] is the whole library as a document.
 
-
 use cadrs_sketch::{PlaneRef, SketchOp, Vec2};
 
 use crate::command::{CommandError, History};
 use crate::commands::{AddExtrude, AddFeature, AddRevolve, AddSketch, EditSketch, SetExtrude};
-use crate::document::{AxisRef, BooleanFeature, BooleanKind, BooleanOp, Document, Element, ExtrudeFeature, Feature, FeatureKind, Offset, RevolveFeature, RevolveType};
+use crate::document::{
+    AxisRef, BooleanFeature, BooleanKind, BooleanOp, Document, Element, ExtrudeFeature, Feature,
+    FeatureKind, Offset, RevolveFeature, RevolveType,
+};
 use crate::ids::{DocumentId, ElementId, FeatureId, PartId};
 use crate::mate::{ConnectorOrigin, ConnectorRef, MateConnectorFeature};
 use crate::sheetmetal::plain;
@@ -43,7 +45,10 @@ use super::gear_cover::{DocHistory, Studio};
 pub const DOCUMENT: DocumentId = DocumentId::from_u128(0x5390_0000_0000_0000_0000_0000_0000_0100);
 
 fn index(form: LibraryForm) -> u128 {
-    LibraryForm::ALL.iter().position(|f| *f == form).unwrap_or(0) as u128
+    LibraryForm::ALL
+        .iter()
+        .position(|f| *f == form)
+        .unwrap_or(0) as u128
 }
 
 /// The form's Part Studio in the library document.
@@ -77,12 +82,22 @@ fn value(vars: &[FormVariable], name: &str, form: LibraryForm) -> f64 {
     vars.iter()
         .find(|v| v.name == name)
         .map(|v| v.value)
-        .unwrap_or_else(|| form.variables().into_iter().find(|v| v.name == name).map_or(1.0, |v| v.value))
+        .unwrap_or_else(|| {
+            form.variables()
+                .into_iter()
+                .find(|v| v.name == name)
+                .map_or(1.0, |v| v.value)
+        })
 }
 
 fn rect(x0: f64, y0: f64, x1: f64, y1: f64, construction: bool) -> SketchOp {
     SketchOp::AddPolyline {
-        points: vec![Vec2::new(x0, y0), Vec2::new(x1, y0), Vec2::new(x1, y1), Vec2::new(x0, y1)],
+        points: vec![
+            Vec2::new(x0, y0),
+            Vec2::new(x1, y0),
+            Vec2::new(x1, y1),
+            Vec2::new(x0, y1),
+        ],
         closed: true,
         construction,
         label: "Add rectangle",
@@ -90,28 +105,63 @@ fn rect(x0: f64, y0: f64, x1: f64, y1: f64, construction: bool) -> SketchOp {
 }
 
 fn open(points: Vec<Vec2>) -> SketchOp {
-    SketchOp::AddPolyline { points, closed: false, construction: false, label: "Add polyline" }
+    SketchOp::AddPolyline {
+        points,
+        closed: false,
+        construction: false,
+        label: "Add polyline",
+    }
 }
 
 fn poly(points: Vec<Vec2>) -> SketchOp {
-    SketchOp::AddPolyline { points, closed: true, construction: false, label: "Add polyline" }
+    SketchOp::AddPolyline {
+        points,
+        closed: true,
+        construction: false,
+        label: "Add polyline",
+    }
 }
 
 fn circle(r: f64, construction: bool) -> SketchOp {
-    SketchOp::AddCircle { center: Vec2::new(0.0, 0.0), radius: r, construction }
+    SketchOp::AddCircle {
+        center: Vec2::new(0.0, 0.0),
+        radius: r,
+        construction,
+    }
 }
 
 /// A sketch on `plane` with `ops`.
-fn sketch(s: &mut dyn Studio, el: ElementId, id: FeatureId, plane: PlaneRef, ops: Vec<SketchOp>) -> Result<(), CommandError> {
-    s.run(&AddSketch { element: el, feature: id, plane: Some(plane) })?;
+fn sketch(
+    s: &mut dyn Studio,
+    el: ElementId,
+    id: FeatureId,
+    plane: PlaneRef,
+    ops: Vec<SketchOp>,
+) -> Result<(), CommandError> {
+    s.run(&AddSketch {
+        element: el,
+        feature: id,
+        plane: Some(plane),
+    })?;
     for op in ops {
-        s.run(&EditSketch { element: el, feature: id, op })?;
+        s.run(&EditSketch {
+            element: el,
+            feature: id,
+            op,
+        })?;
     }
     Ok(())
 }
 
 /// An extrude (New) of the regions of `sketch` under `seeds`.
-fn extrude(s: &mut dyn Studio, el: ElementId, sk: FeatureId, id: FeatureId, seeds: &[Vec2], set: impl FnOnce(&mut ExtrudeFeature)) -> Result<(), CommandError> {
+fn extrude(
+    s: &mut dyn Studio,
+    el: ElementId,
+    sk: FeatureId,
+    id: FeatureId,
+    seeds: &[Vec2],
+    set: impl FnOnce(&mut ExtrudeFeature),
+) -> Result<(), CommandError> {
     let g = s
         .document()
         .element(el)
@@ -121,12 +171,23 @@ fn extrude(s: &mut dyn Studio, el: ElementId, sk: FeatureId, id: FeatureId, seed
         .ok_or_else(|| CommandError::Invalid("form sketch not found".into()))?;
     let regions = super::region_refs(sk, &g, seeds);
     if regions.len() != seeds.len() {
-        return Err(CommandError::Invalid("a region of the form is missing".into()));
+        return Err(CommandError::Invalid(
+            "a region of the form is missing".into(),
+        ));
     }
     let mut e = super::extrude_of(regions, 1.0);
     set(&mut e);
-    s.run(&AddExtrude { element: el, feature: id, extrude: ExtrudeFeature::default() })?;
-    s.run(&SetExtrude { element: el, feature: id, extrude: e, label: "Extrude".into() })?;
+    s.run(&AddExtrude {
+        element: el,
+        feature: id,
+        extrude: ExtrudeFeature::default(),
+    })?;
+    s.run(&SetExtrude {
+        element: el,
+        feature: id,
+        extrude: e,
+        label: "Extrude".into(),
+    })?;
     Ok(())
 }
 
@@ -137,7 +198,11 @@ fn between(z0: f64, z1: f64) -> impl FnOnce(&mut ExtrudeFeature) {
         e.depth = d;
         e.depth_expr = format!("{} mm", plain(d));
         if z0.abs() > 1e-12 {
-            e.start_offset = Some(Offset { value: z0.abs(), expr: format!("{} mm", plain(z0.abs())), flip: z0 < 0.0 });
+            e.start_offset = Some(Offset {
+                value: z0.abs(),
+                expr: format!("{} mm", plain(z0.abs())),
+                flip: z0 < 0.0,
+            });
         }
     }
 }
@@ -147,7 +212,11 @@ fn between(z0: f64, z1: f64) -> impl FnOnce(&mut ExtrudeFeature) {
 fn drafted(z0: f64, z1: f64) -> impl FnOnce(&mut ExtrudeFeature) {
     move |e: &mut ExtrudeFeature| {
         between(z0, z1)(e);
-        e.draft = Some(crate::draft::ExtrudeDraft { angle: DRAFT, expr: format!("{} deg", plain(DRAFT)), flip: false });
+        e.draft = Some(crate::draft::ExtrudeDraft {
+            angle: DRAFT,
+            expr: format!("{} deg", plain(DRAFT)),
+            flip: false,
+        });
     }
 }
 
@@ -162,7 +231,13 @@ fn scoped(op: BooleanOp, part: PartId, width: f64) -> impl FnOnce(&mut ExtrudeFe
 }
 
 /// A whole-turn revolve (New) about Z of the region of `sketch` under `seed`.
-fn revolve(s: &mut dyn Studio, el: ElementId, sk: FeatureId, id: FeatureId, seed: Vec2) -> Result<(), CommandError> {
+fn revolve(
+    s: &mut dyn Studio,
+    el: ElementId,
+    sk: FeatureId,
+    id: FeatureId,
+    seed: Vec2,
+) -> Result<(), CommandError> {
     let g = s
         .document()
         .element(el)
@@ -172,10 +247,24 @@ fn revolve(s: &mut dyn Studio, el: ElementId, sk: FeatureId, id: FeatureId, seed
         .ok_or_else(|| CommandError::Invalid("form sketch not found".into()))?;
     let regions = super::region_refs(sk, &g, &[seed]);
     if regions.len() != 1 {
-        return Err(CommandError::Invalid("a region of the form is missing".into()));
+        return Err(CommandError::Invalid(
+            "a region of the form is missing".into(),
+        ));
     }
-    let axis = Some(AxisRef::Connector(ConnectorRef::Implicit(ConnectorOrigin::Origin)));
-    s.run(&AddRevolve { element: el, feature: id, revolve: RevolveFeature { regions, axis, kind: RevolveType::Full, op: BooleanOp::New, ..RevolveFeature::default() } })
+    let axis = Some(AxisRef::Connector(ConnectorRef::Implicit(
+        ConnectorOrigin::Origin,
+    )));
+    s.run(&AddRevolve {
+        element: el,
+        feature: id,
+        revolve: RevolveFeature {
+            regions,
+            axis,
+            kind: RevolveType::Full,
+            op: BooleanOp::New,
+            ..RevolveFeature::default()
+        },
+    })
 }
 
 /// The draft of the dimple's and the emboss's walls (degrees).
@@ -228,13 +317,25 @@ impl DimpleSection {
         let tangent = Vec2::new(c.x + rad * n.x, c.y + rad * n.y);
         let off = self.ro - rad;
         let foot = self.wall_at(off, bottom);
-        let mut pts = vec![Vec2::new(c.x, top), Vec2::new(0.0, top), Vec2::new(0.0, below.unwrap_or(bottom))];
+        let mut pts = vec![
+            Vec2::new(c.x, top),
+            Vec2::new(0.0, top),
+            Vec2::new(0.0, below.unwrap_or(bottom)),
+        ];
         if let Some(z) = below {
             pts.push(Vec2::new(foot.x, z));
         }
         pts.push(foot);
         pts.push(tangent);
-        vec![SketchOp::AddArc { center: c, start: tangent, end: Vec2::new(c.x, top), construction: false }, open(pts)]
+        vec![
+            SketchOp::AddArc {
+                center: c,
+                start: tangent,
+                end: Vec2::new(c.x, top),
+                construction: false,
+            },
+            open(pts),
+        ]
     }
 
     /// The outside: down to the sheet's underside (a straight foot below the face).
@@ -264,11 +365,19 @@ impl DimpleSection {
             let (t0, t1) = (DRAFT.to_radians(), std::f64::consts::FRAC_PI_2);
             let f = |th: f64| {
                 let (sn, cs) = th.sin_cos();
-                0.5 * rad * (c.x * c.x * sn + c.x * rad * (th + sn * cs) + rad * rad * (sn - sn.powi(3) / 3.0))
+                0.5 * rad
+                    * (c.x * c.x * sn
+                        + c.x * rad * (th + sn * cs)
+                        + rad * rad * (sn - sn.powi(3) / 3.0))
             };
-            line(Vec2::new(0.0, top), Vec2::new(0.0, bottom)) + line(Vec2::new(0.0, bottom), foot) + line(foot, tangent) + (f(t1) - f(t0)) + line(Vec2::new(c.x, top), Vec2::new(0.0, top))
+            line(Vec2::new(0.0, top), Vec2::new(0.0, bottom))
+                + line(Vec2::new(0.0, bottom), foot)
+                + line(foot, tangent)
+                + (f(t1) - f(t0))
+                + line(Vec2::new(c.x, top), Vec2::new(0.0, top))
         };
-        std::f64::consts::TAU * (moment(self.ro, self.h, 0.0) - moment(self.ro - self.t, self.h - self.t, -self.t))
+        std::f64::consts::TAU
+            * (moment(self.ro, self.h, 0.0) - moment(self.ro - self.t, self.h - self.t, -self.t))
     }
 }
 
@@ -286,7 +395,12 @@ pub struct EmbossSection {
 pub fn emboss(l: f64, w: f64, h: f64, t: f64) -> EmbossSection {
     let h = h.max(t * 1.05);
     let min = 4.0 * t + 2.0 * h * DRAFT.to_radians().tan();
-    EmbossSection { l: l.max(min), w: w.max(min), h, t }
+    EmbossSection {
+        l: l.max(min),
+        w: w.max(min),
+        h,
+        t,
+    }
 }
 
 impl EmbossSection {
@@ -296,7 +410,10 @@ impl EmbossSection {
 
     /// The outside's half sizes at its start (the sheet's underside).
     pub fn outer_base(&self) -> (f64, f64) {
-        (self.l / 2.0 + self.t * self.tan(), self.w / 2.0 + self.t * self.tan())
+        (
+            self.l / 2.0 + self.t * self.tan(),
+            self.w / 2.0 + self.t * self.tan(),
+        )
     }
 
     /// The inside's half sizes at its start (`gap` under the sheet): `t` in from the outer
@@ -315,7 +432,8 @@ impl EmbossSection {
             height / 6.0 * (area(0.0) + 4.0 * area(0.5) + area(1.0))
         };
         let d = self.t / DRAFT.to_radians().cos() - self.t * self.tan();
-        prismoid(self.l / 2.0, self.w / 2.0, self.h) - prismoid(self.l / 2.0 - d, self.w / 2.0 - d, self.h)
+        prismoid(self.l / 2.0, self.w / 2.0, self.h)
+            - prismoid(self.l / 2.0 - d, self.w / 2.0 - d, self.h)
     }
 }
 
@@ -329,12 +447,22 @@ fn symmetric(width: f64) -> impl FnOnce(&mut ExtrudeFeature) {
 }
 
 /// Adds the form's features to the Part Studio `el` (see the module docs).
-pub fn build_in(s: &mut dyn Studio, el: ElementId, form: LibraryForm, vars: &[FormVariable], t: f64) -> Result<(), CommandError> {
+pub fn build_in(
+    s: &mut dyn Studio,
+    el: ElementId,
+    form: LibraryForm,
+    vars: &[FormVariable],
+    t: f64,
+) -> Result<(), CommandError> {
     let v = |n: &str| value(vars, n, form);
     // The variables.
     let mut all = vec![FormVariable::length("thickness", t)];
     for d in form.variables() {
-        all.push(if d.angle { FormVariable::angle(&d.name, v(&d.name)) } else { FormVariable::length(&d.name, v(&d.name)) });
+        all.push(if d.angle {
+            FormVariable::angle(&d.name, v(&d.name))
+        } else {
+            FormVariable::length(&d.name, v(&d.name))
+        });
     }
     for (k, x) in all.iter().enumerate() {
         let mut var = VariableFeature::length(&x.name, &x.expr);
@@ -345,7 +473,12 @@ pub fn build_in(s: &mut dyn Studio, el: ElementId, form: LibraryForm, vars: &[Fo
         if var.value == 0.0 {
             var.value = x.value;
         }
-        s.run(&AddFeature { element: el, feature: fid(form, 0x01 + k as u128), base_name: "Variable".into(), kind: FeatureKind::Variable(var) })?;
+        s.run(&AddFeature {
+            element: el,
+            feature: fid(form, 0x01 + k as u128),
+            base_name: "Variable".into(),
+            kind: FeatureKind::Variable(var),
+        })?;
     }
     let (sk_add, sk_rem) = (fid(form, 0x20), fid(form, 0x30));
     let (add, rem) = (add_part(form).feature, remove_part(form).feature);
@@ -354,7 +487,13 @@ pub fn build_in(s: &mut dyn Studio, el: ElementId, form: LibraryForm, vars: &[Fo
         LibraryForm::Louver => {
             let (l, w, h) = (v("Length"), v("Width"), v("Height").max(t * 1.05));
             let a = v("Angle").clamp(20.0, 85.0).to_radians();
-            sketch(s, el, profile_sketch(form), PlaneRef::Top, vec![rect(-l / 2.0, -w / 2.0, l / 2.0, w / 2.0, true)])?;
+            sketch(
+                s,
+                el,
+                profile_sketch(form),
+                PlaneRef::Top,
+                vec![rect(-l / 2.0, -w / 2.0, l / 2.0, w / 2.0, true)],
+            )?;
             // The hood's section on Right (y, z): an arc about one centre rising from the sheet
             // at y = −w/2 to its level lip (y = w/2, z = h), `t` thick.
             let r = (w * w + h * h) / (2.0 * h);
@@ -365,11 +504,28 @@ pub fn build_in(s: &mut dyn Studio, el: ElementId, form: LibraryForm, vars: &[Fo
             // Outside: the space under the hood's outer surface, down to the sheet's underside,
             // `l` long, its ends cut back at the Angle from the sheet (the end walls' slope).
             let outer = vec![
-                SketchOp::AddArc { center: Vec2::new(cy, cz), start: Vec2::new(w / 2.0, h), end: Vec2::new(-w / 2.0, 0.0), construction: false },
-                open(vec![Vec2::new(-w / 2.0, 0.0), Vec2::new(-w / 2.0, -t), Vec2::new(w / 2.0, -t), Vec2::new(w / 2.0, h)]),
+                SketchOp::AddArc {
+                    center: Vec2::new(cy, cz),
+                    start: Vec2::new(w / 2.0, h),
+                    end: Vec2::new(-w / 2.0, 0.0),
+                    construction: false,
+                },
+                open(vec![
+                    Vec2::new(-w / 2.0, 0.0),
+                    Vec2::new(-w / 2.0, -t),
+                    Vec2::new(w / 2.0, -t),
+                    Vec2::new(w / 2.0, h),
+                ]),
             ];
             sketch(s, el, sk_add, PlaneRef::Right, outer)?;
-            extrude(s, el, sk_add, add, &[Vec2::new(0.0, -t / 2.0)], symmetric(l))?;
+            extrude(
+                s,
+                el,
+                sk_add,
+                add,
+                &[Vec2::new(0.0, -t / 2.0)],
+                symmetric(l),
+            )?;
             let top = h + t + 1.0;
             let wide = w + 2.0 * t + 10.0;
             let taper = |x0: f64| {
@@ -383,14 +539,32 @@ pub fn build_in(s: &mut dyn Studio, el: ElementId, form: LibraryForm, vars: &[Fo
                     Vec2::new(-x0, 0.0),
                 ])
             };
-            sketch(s, el, fid(form, 0x22), PlaneRef::Front, vec![taper(l / 2.0)])?;
-            extrude(s, el, fid(form, 0x22), fid(form, 0x23), &[Vec2::new(0.0, 0.0)], scoped(BooleanOp::Intersect, add_part(form), wide))?;
+            sketch(
+                s,
+                el,
+                fid(form, 0x22),
+                PlaneRef::Front,
+                vec![taper(l / 2.0)],
+            )?;
+            extrude(
+                s,
+                el,
+                fid(form, 0x22),
+                fid(form, 0x23),
+                &[Vec2::new(0.0, 0.0)],
+                scoped(BooleanOp::Intersect, add_part(form), wide),
+            )?;
             // Inside: the space under the hood's underside, open at the lip and below the sheet,
             // its ends cut back `t` (square to the slope) inside the outer ones; taken away, it
             // leaves the hood and its two sloped end walls.
             let x0 = l / 2.0 - t / a.sin();
             let inner = vec![
-                SketchOp::AddArc { center: Vec2::new(cy, cz), start: Vec2::new(w / 2.0, h - t), end: inner_end, construction: false },
+                SketchOp::AddArc {
+                    center: Vec2::new(cy, cz),
+                    start: Vec2::new(w / 2.0, h - t),
+                    end: inner_end,
+                    construction: false,
+                },
                 open(vec![
                     inner_end,
                     Vec2::new(inner_end.x, -t - 1.0),
@@ -401,17 +575,54 @@ pub fn build_in(s: &mut dyn Studio, el: ElementId, form: LibraryForm, vars: &[Fo
             ];
             let cavity = PartId::new(fid(form, 0x25), 0);
             sketch(s, el, fid(form, 0x24), PlaneRef::Right, inner)?;
-            extrude(s, el, fid(form, 0x24), cavity.feature, &[Vec2::new(w / 2.0 + 0.5, -t - 0.5)], symmetric(l + 2.0))?;
+            extrude(
+                s,
+                el,
+                fid(form, 0x24),
+                cavity.feature,
+                &[Vec2::new(w / 2.0 + 0.5, -t - 0.5)],
+                symmetric(l + 2.0),
+            )?;
             sketch(s, el, fid(form, 0x26), PlaneRef::Front, vec![taper(x0)])?;
-            extrude(s, el, fid(form, 0x26), fid(form, 0x27), &[Vec2::new(0.0, 0.0)], scoped(BooleanOp::Intersect, cavity, wide))?;
-            let cut = BooleanFeature { op: BooleanKind::Subtract, tools: vec![cavity], targets: vec![add_part(form)], ..Default::default() };
-            s.run(&AddFeature { element: el, feature: fid(form, 0x28), base_name: "Boolean".into(), kind: FeatureKind::Boolean(cut) })?;
+            extrude(
+                s,
+                el,
+                fid(form, 0x26),
+                fid(form, 0x27),
+                &[Vec2::new(0.0, 0.0)],
+                scoped(BooleanOp::Intersect, cavity, wide),
+            )?;
+            let cut = BooleanFeature {
+                op: BooleanKind::Subtract,
+                tools: vec![cavity],
+                targets: vec![add_part(form)],
+                ..Default::default()
+            };
+            s.run(&AddFeature {
+                element: el,
+                feature: fid(form, 0x28),
+                base_name: "Boolean".into(),
+                kind: FeatureKind::Boolean(cut),
+            })?;
             // The opening: from where the hood's underside clears the sheet to its lip, between
             // the end walls.
             let clear = std::f64::consts::PI - ((r - h) / ri).clamp(-1.0, 1.0).asin();
             let c = (cy + ri * clear.cos()) + w / 2.0 + 0.02 * w;
-            sketch(s, el, sk_rem, PlaneRef::Top, vec![rect(-x0, -w / 2.0 + c, x0, w / 2.0, false)])?;
-            extrude(s, el, sk_rem, rem, &[Vec2::new(0.0, (c + w) / 2.0 - w / 2.0)], between(-t - gap, 0.0))?;
+            sketch(
+                s,
+                el,
+                sk_rem,
+                PlaneRef::Top,
+                vec![rect(-x0, -w / 2.0 + c, x0, w / 2.0, false)],
+            )?;
+            extrude(
+                s,
+                el,
+                sk_rem,
+                rem,
+                &[Vec2::new(0.0, (c + w) / 2.0 - w / 2.0)],
+                between(-t - gap, 0.0),
+            )?;
         }
         LibraryForm::Lance => {
             let (l, w) = (v("Length"), v("Width"));
@@ -419,7 +630,13 @@ pub fn build_in(s: &mut dyn Studio, el: ElementId, form: LibraryForm, vars: &[Fo
             // The ramps rise at the Angle; the Height is kept short enough for both to fit.
             let h = v("Height").max(t * 1.05).min((l / 2.0 - t) * a.tan());
             let run = h / a.tan();
-            sketch(s, el, profile_sketch(form), PlaneRef::Top, vec![rect(-l / 2.0, -w / 2.0, l / 2.0, w / 2.0, true)])?;
+            sketch(
+                s,
+                el,
+                profile_sketch(form),
+                PlaneRef::Top,
+                vec![rect(-l / 2.0, -w / 2.0, l / 2.0, w / 2.0, true)],
+            )?;
             let pts = vec![
                 Vec2::new(-l / 2.0, 0.0),
                 Vec2::new(-l / 2.0 + run, h),
@@ -431,43 +648,140 @@ pub fn build_in(s: &mut dyn Studio, el: ElementId, form: LibraryForm, vars: &[Fo
                 Vec2::new(-l / 2.0, -t),
             ];
             sketch(s, el, sk_add, PlaneRef::Front, vec![poly(pts)])?;
-            extrude(s, el, sk_add, add, &[Vec2::new(0.0, h - t / 2.0)], symmetric(w))?;
+            extrude(
+                s,
+                el,
+                sk_add,
+                add,
+                &[Vec2::new(0.0, h - t / 2.0)],
+                symmetric(w),
+            )?;
             let c = t * 1.5;
-            sketch(s, el, sk_rem, PlaneRef::Top, vec![rect(-l / 2.0 + c, -w / 2.0, l / 2.0 - c, w / 2.0, false)])?;
-            extrude(s, el, sk_rem, rem, &[Vec2::new(0.0, 0.0)], between(-t - gap, 0.0))?;
+            sketch(
+                s,
+                el,
+                sk_rem,
+                PlaneRef::Top,
+                vec![rect(-l / 2.0 + c, -w / 2.0, l / 2.0 - c, w / 2.0, false)],
+            )?;
+            extrude(
+                s,
+                el,
+                sk_rem,
+                rem,
+                &[Vec2::new(0.0, 0.0)],
+                between(-t - gap, 0.0),
+            )?;
         }
         LibraryForm::Dimple => {
             let d = dimple(v("Diameter"), v("Height"), t);
-            sketch(s, el, profile_sketch(form), PlaneRef::Top, vec![circle(d.rb, true)])?;
+            sketch(
+                s,
+                el,
+                profile_sketch(form),
+                PlaneRef::Top,
+                vec![circle(d.rb, true)],
+            )?;
             // Half sections on Front (x, z), turned a whole turn about Z: the outside (wall
             // drafted in, rounded into the top) and the inside, `t` in from it.
             sketch(s, el, sk_add, PlaneRef::Front, d.outer_ops())?;
-            revolve(s, el, sk_add, add, Vec2::new(0.25 * d.cx, 0.5 * (d.h - d.t)))?;
+            revolve(
+                s,
+                el,
+                sk_add,
+                add,
+                Vec2::new(0.25 * d.cx, 0.5 * (d.h - d.t)),
+            )?;
             sketch(s, el, sk_rem, PlaneRef::Front, d.inner_ops(gap))?;
-            revolve(s, el, sk_rem, rem, Vec2::new(0.25 * d.cx, 0.5 * (d.h - 2.0 * d.t - gap)))?;
+            revolve(
+                s,
+                el,
+                sk_rem,
+                rem,
+                Vec2::new(0.25 * d.cx, 0.5 * (d.h - 2.0 * d.t - gap)),
+            )?;
         }
         LibraryForm::Emboss => {
             let e = emboss(v("Length"), v("Width"), v("Height"), t);
-            sketch(s, el, profile_sketch(form), PlaneRef::Top, vec![rect(-e.l / 2.0, -e.w / 2.0, e.l / 2.0, e.w / 2.0, true)])?;
+            sketch(
+                s,
+                el,
+                profile_sketch(form),
+                PlaneRef::Top,
+                vec![rect(-e.l / 2.0, -e.w / 2.0, e.l / 2.0, e.w / 2.0, true)],
+            )?;
             // A boss whose sides are drafted in as they rise, hollowed `t` inside them.
             let (a0, b0) = e.outer_base();
-            sketch(s, el, sk_add, PlaneRef::Top, vec![rect(-a0, -b0, a0, b0, false)])?;
+            sketch(
+                s,
+                el,
+                sk_add,
+                PlaneRef::Top,
+                vec![rect(-a0, -b0, a0, b0, false)],
+            )?;
             extrude(s, el, sk_add, add, &[Vec2::new(0.0, 0.0)], drafted(-t, e.h))?;
             let (a1, b1) = e.inner_base(gap);
-            sketch(s, el, sk_rem, PlaneRef::Top, vec![rect(-a1, -b1, a1, b1, false)])?;
-            extrude(s, el, sk_rem, rem, &[Vec2::new(0.0, 0.0)], drafted(-t - gap, e.h - t))?;
+            sketch(
+                s,
+                el,
+                sk_rem,
+                PlaneRef::Top,
+                vec![rect(-a1, -b1, a1, b1, false)],
+            )?;
+            extrude(
+                s,
+                el,
+                sk_rem,
+                rem,
+                &[Vec2::new(0.0, 0.0)],
+                drafted(-t - gap, e.h - t),
+            )?;
         }
         LibraryForm::ExtrudedHole => {
             let (d, h) = (v("Diameter"), v("Height"));
-            sketch(s, el, profile_sketch(form), PlaneRef::Top, vec![circle(d / 2.0, true)])?;
-            sketch(s, el, sk_add, PlaneRef::Top, vec![circle(d / 2.0 + t, false), circle(d / 2.0, false)])?;
-            extrude(s, el, sk_add, add, &[Vec2::new(d / 2.0 + t / 2.0, 0.0)], between(-t - h, 0.0))?;
+            sketch(
+                s,
+                el,
+                profile_sketch(form),
+                PlaneRef::Top,
+                vec![circle(d / 2.0, true)],
+            )?;
+            sketch(
+                s,
+                el,
+                sk_add,
+                PlaneRef::Top,
+                vec![circle(d / 2.0 + t, false), circle(d / 2.0, false)],
+            )?;
+            extrude(
+                s,
+                el,
+                sk_add,
+                add,
+                &[Vec2::new(d / 2.0 + t / 2.0, 0.0)],
+                between(-t - h, 0.0),
+            )?;
             sketch(s, el, sk_rem, PlaneRef::Top, vec![circle(d / 2.0, false)])?;
-            extrude(s, el, sk_rem, rem, &[Vec2::new(0.0, 0.0)], between(-t - h - gap, gap))?;
+            extrude(
+                s,
+                el,
+                sk_rem,
+                rem,
+                &[Vec2::new(0.0, 0.0)],
+                between(-t - h - gap, gap),
+            )?;
         }
     }
-    let mc = MateConnectorFeature { origin: Some(ConnectorOrigin::Origin), ..Default::default() };
-    s.run(&AddFeature { element: el, feature: origin_connector(form), base_name: "Mate connector".into(), kind: FeatureKind::MateConnector(mc) })?;
+    let mc = MateConnectorFeature {
+        origin: Some(ConnectorOrigin::Origin),
+        ..Default::default()
+    };
+    s.run(&AddFeature {
+        element: el,
+        feature: origin_connector(form),
+        base_name: "Mate connector".into(),
+        kind: FeatureKind::MateConnector(mc),
+    })?;
     let tag = TagFormFeature {
         add: vec![add_part(form)],
         remove: vec![remove_part(form)],
@@ -475,7 +789,12 @@ pub fn build_in(s: &mut dyn Studio, el: ElementId, form: LibraryForm, vars: &[Fo
         origin: Some(ConnectorRef::Feature(origin_connector(form))),
         ..Default::default()
     };
-    s.run(&AddFeature { element: el, feature: fid(form, 0x50), base_name: "Tag".into(), kind: FeatureKind::TagForm(tag) })?;
+    s.run(&AddFeature {
+        element: el,
+        feature: fid(form, 0x50),
+        base_name: "Tag".into(),
+        kind: FeatureKind::TagForm(tag),
+    })?;
     // The names a form author would give them.
     rename(s, el, profile_sketch(form), "Form profile")?;
     rename(s, el, origin_connector(form), "Form origin")?;
@@ -483,18 +802,35 @@ pub fn build_in(s: &mut dyn Studio, el: ElementId, form: LibraryForm, vars: &[Fo
 }
 
 fn rename(s: &mut dyn Studio, el: ElementId, f: FeatureId, name: &str) -> Result<(), CommandError> {
-    s.run(&crate::commands::RenameFeature { element: el, feature: f, name: name.into() })
+    s.run(&crate::commands::RenameFeature {
+        element: el,
+        feature: f,
+        name: name.into(),
+    })
 }
 
 /// One form's Part Studio features for these variables and this sheet thickness.
-pub fn studio(form: LibraryForm, vars: &[FormVariable], thickness: f64) -> Result<Vec<Feature>, CommandError> {
+pub fn studio(
+    form: LibraryForm,
+    vars: &[FormVariable],
+    thickness: f64,
+) -> Result<Vec<Feature>, CommandError> {
     let mut doc = Document::empty(LIBRARY_NAME);
     let mut el = Element::part_studio(form.label());
     el.id = studio_id(form);
     doc.elements.push(el);
     let mut h = History::default();
-    build_in(&mut DocHistory(&mut doc, &mut h), studio_id(form), form, vars, thickness)?;
-    Ok(doc.element(studio_id(form)).map(|e| e.features().to_vec()).unwrap_or_default())
+    build_in(
+        &mut DocHistory(&mut doc, &mut h),
+        studio_id(form),
+        form,
+        vars,
+        thickness,
+    )?;
+    Ok(doc
+        .element(studio_id(form))
+        .map(|e| e.features().to_vec())
+        .unwrap_or_default())
 }
 
 /// The library as a document: one Part Studio per form, at its default sizes and 1 mm thick.
@@ -506,7 +842,13 @@ pub fn document() -> Result<Document, CommandError> {
         let mut el = Element::part_studio(form.label());
         el.id = studio_id(form);
         doc.elements.push(el);
-        build_in(&mut DocHistory(&mut doc, &mut h), studio_id(form), form, &form.variables(), 1.0)?;
+        build_in(
+            &mut DocHistory(&mut doc, &mut h),
+            studio_id(form),
+            form,
+            &form.variables(),
+            1.0,
+        )?;
     }
     Ok(doc)
 }

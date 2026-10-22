@@ -14,7 +14,10 @@
 use cadrs_sketch::region::{region_at, regions};
 use cadrs_sketch::{PlaneRef, Sketch, SketchOp, Vec2};
 
-use crate::document::{BooleanOp, Document, Element, ElementKind, ExtrudeFeature, Feature, FeatureKind, RegionRef, SketchFeature};
+use crate::document::{
+    BooleanOp, Document, Element, ElementKind, ExtrudeFeature, Feature, FeatureKind, RegionRef,
+    SketchFeature,
+};
 use crate::ids::{ElementId, FeatureId, PartId};
 use crate::variables::VariableFeature;
 
@@ -34,7 +37,16 @@ fn sketch(fid: FeatureId, name: String, ops: Vec<SketchOp>) -> Feature {
     for op in ops {
         op.apply(&mut g).expect("fixture sketch");
     }
-    Feature { id: fid, name, kind: FeatureKind::Sketch(SketchFeature { plane: Some(PlaneRef::Top), disable_imprinting: false, geometry: g }), suppress_by: None }
+    Feature {
+        id: fid,
+        name,
+        kind: FeatureKind::Sketch(SketchFeature {
+            plane: Some(PlaneRef::Top),
+            disable_imprinting: false,
+            geometry: g,
+        }),
+        suppress_by: None,
+    }
 }
 
 fn region(sketch: &Feature, seed: Vec2) -> RegionRef {
@@ -47,7 +59,10 @@ fn region(sketch: &Feature, seed: Vec2) -> RegionRef {
 /// Where hole `j` of plate `i` is.
 pub fn hole_center(i: usize, j: usize) -> Vec2 {
     let x0 = i as f64 * PITCH;
-    Vec2::new(x0 + 8.0 + (j % 4) as f64 * 11.0, 8.0 + (j / 4) as f64 * 12.0)
+    Vec2::new(
+        x0 + 8.0 + (j % 4) as f64 * 11.0,
+        8.0 + (j / 4) as f64 * 12.0,
+    )
 }
 
 /// The plate part of plate `i` (its extrude's first part).
@@ -74,7 +89,12 @@ pub fn studio_features(parts: usize, holes: usize) -> Vec<Feature> {
         let s = sketch(
             id(base + 2),
             format!("Plate {} sketch", i + 1),
-            vec![SketchOp::AddPolyline { points: vec![v(x0, 0.0), v(x0 + w, 0.0), v(x0 + w, h), v(x0, h)], closed: true, construction: false, label: "Add rectangle" }],
+            vec![SketchOp::AddPolyline {
+                points: vec![v(x0, 0.0), v(x0 + w, 0.0), v(x0 + w, h), v(x0, h)],
+                closed: true,
+                construction: false,
+                label: "Add rectangle",
+            }],
         );
         let r = region(&s, v(x0 + 1.0, 1.0));
         out.push(s);
@@ -92,7 +112,15 @@ pub fn studio_features(parts: usize, holes: usize) -> Vec<Feature> {
         });
         for j in 0..holes {
             let c = hole_center(i, j);
-            let s = sketch(id(base + 10 + 2 * j as u128), format!("Hole {}.{} sketch", i + 1, j + 1), vec![SketchOp::AddCircle { center: c, radius: HOLE_R, construction: false }]);
+            let s = sketch(
+                id(base + 10 + 2 * j as u128),
+                format!("Hole {}.{} sketch", i + 1, j + 1),
+                vec![SketchOp::AddCircle {
+                    center: c,
+                    radius: HOLE_R,
+                    construction: false,
+                }],
+            );
             let r = region(&s, c);
             out.push(s);
             out.push(Feature {
@@ -115,7 +143,8 @@ pub fn studio_features(parts: usize, holes: usize) -> Vec<Feature> {
 
 /// A plate's volume with its holes (mm³).
 pub fn plate_volume(holes: usize) -> f64 {
-    PLATE.0 * PLATE.1 * THICKNESS - holes as f64 * std::f64::consts::PI * HOLE_R * HOLE_R * HOLE_DEPTH
+    PLATE.0 * PLATE.1 * THICKNESS
+        - holes as f64 * std::f64::consts::PI * HOLE_R * HOLE_R * HOLE_DEPTH
 }
 
 /// A document with `tabs` tabs: the scale studio (10 plates × 11 holes, "Plates"), then Part
@@ -130,7 +159,8 @@ pub fn document(tabs: usize) -> Document {
     doc.elements.push(studio);
     let v = Vec2::new;
     for n in 2..=tabs {
-        let eid = ElementId::from_u128(0x5ca1_e000_0000_0000_0000_0000_0000_0000 | (n as u128) << 8);
+        let eid =
+            ElementId::from_u128(0x5ca1_e000_0000_0000_0000_0000_0000_0000 | (n as u128) << 8);
         if n % 5 == 0 {
             let mut a = Element::assembly(format!("Assembly {}", n / 5));
             a.id = eid;
@@ -140,17 +170,31 @@ pub fn document(tabs: usize) -> Document {
         let mut e = Element::part_studio(format!("Studio {n}"));
         e.id = eid;
         let base = 0x10_0000 + n as u128 * 10;
-        let s = sketch(id(base), "Sketch 1".into(), vec![SketchOp::AddPolyline {
-            points: vec![v(0.0, 0.0), v(20.0 + n as f64, 0.0), v(20.0 + n as f64, 20.0), v(0.0, 20.0)],
-            closed: true,
-            construction: false,
-            label: "Add rectangle",
-        }]);
+        let s = sketch(
+            id(base),
+            "Sketch 1".into(),
+            vec![SketchOp::AddPolyline {
+                points: vec![
+                    v(0.0, 0.0),
+                    v(20.0 + n as f64, 0.0),
+                    v(20.0 + n as f64, 20.0),
+                    v(0.0, 20.0),
+                ],
+                closed: true,
+                construction: false,
+                label: "Add rectangle",
+            }],
+        );
         let r = region(&s, v(1.0, 1.0));
         let x = Feature {
             id: id(base + 1),
             name: "Extrude 1".into(),
-            kind: FeatureKind::Extrude(ExtrudeFeature { regions: vec![r], depth: 10.0, depth_expr: "10 mm".into(), ..ExtrudeFeature::default() }),
+            kind: FeatureKind::Extrude(ExtrudeFeature {
+                regions: vec![r],
+                depth: 10.0,
+                depth_expr: "10 mm".into(),
+                ..ExtrudeFeature::default()
+            }),
             suppress_by: None,
         };
         if let ElementKind::PartStudio { features, .. } = &mut e.kind {

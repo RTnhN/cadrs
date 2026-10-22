@@ -608,8 +608,12 @@ impl crate::components::_proa::variant_spec::ComponentSpec for ButtonRecipe {
         ]
     }
 
-    fn compound_variant_metadata(&self) -> Vec<crate::components::_proa::variant_spec::CompoundVariantMetadata> {
-        use crate::components::_proa::variant_spec::{CompoundVariantConditionMetadata, CompoundVariantMetadata};
+    fn compound_variant_metadata(
+        &self,
+    ) -> Vec<crate::components::_proa::variant_spec::CompoundVariantMetadata> {
+        use crate::components::_proa::variant_spec::{
+            CompoundVariantConditionMetadata, CompoundVariantMetadata,
+        };
 
         let colors = [
             ButtonColor::Primary,

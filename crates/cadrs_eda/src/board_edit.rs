@@ -11,7 +11,10 @@ use crate::units::{Nm, Pt, normalize_deg};
 use uuid::Uuid;
 
 pub fn footprint_index(board: &Board, reference: &str) -> Option<usize> {
-    board.footprints.iter().position(|f| f.reference() == reference)
+    board
+        .footprints
+        .iter()
+        .position(|f| f.reference() == reference)
 }
 
 /// Moves a footprint to `at` (M).
@@ -88,7 +91,11 @@ pub fn start_layer(board: &Board, p: Pt, active: Layer) -> Layer {
         let f = &board.footprints[fi];
         let pad = &f.footprint.pads[pi];
         if pad.kind == PadKind::Smd || pad.kind == PadKind::Connector {
-            return if f.placement.side == Side::Bottom { Layer::BottomCopper } else { Layer::TopCopper };
+            return if f.placement.side == Side::Bottom {
+                Layer::BottomCopper
+            } else {
+                Layer::TopCopper
+            };
         }
     }
     active
@@ -97,13 +104,26 @@ pub fn start_layer(board: &Board, p: Pt, active: Layer) -> Layer {
 /// The net of the copper under `p` on `layer` (pads, tracks, vias), "" when none.
 pub fn net_at(board: &Board, p: Pt, layer: Layer) -> String {
     if let Some((fi, pi)) = pad_at(board, p) {
-        return board.footprints[fi].footprint.pads[pi].net.clone().unwrap_or_default();
+        return board.footprints[fi].footprint.pads[pi]
+            .net
+            .clone()
+            .unwrap_or_default();
     }
-    if let Some(v) = board.vias.iter().find(|v| v.at.dist(p) <= v.diameter as f64 / 2.0) {
+    if let Some(v) = board
+        .vias
+        .iter()
+        .find(|v| v.at.dist(p) <= v.diameter as f64 / 2.0)
+    {
         return v.net.clone();
     }
     // A track ending here that has a net (another one there may be new, without one yet).
-    board.tracks.iter().filter(|t| t.layer == layer && (t.a == p || t.b == p)).map(|t| t.net.clone()).find(|n| !n.is_empty()).unwrap_or_default()
+    board
+        .tracks
+        .iter()
+        .filter(|t| t.layer == layer && (t.a == p || t.b == p))
+        .map(|t| t.net.clone())
+        .find(|n| !n.is_empty())
+        .unwrap_or_default()
 }
 
 /// The 45° path from `a` to `b`: a straight run then a diagonal (or the reverse with
@@ -122,7 +142,10 @@ pub fn posture(a: Pt, b: Pt, diagonal_first: bool) -> Vec<Pt> {
 /// Lays tracks along `pts` on `layer` with the net's track width (from its class unless
 /// `width` is given); the net is taken from the copper at the start. Returns the new ids.
 pub fn route(board: &mut Board, pts: &[Pt], layer: Layer, width: Option<Nm>) -> Vec<Uuid> {
-    let net = pts.first().map(|p| net_at(board, *p, layer)).unwrap_or_default();
+    let net = pts
+        .first()
+        .map(|p| net_at(board, *p, layer))
+        .unwrap_or_default();
     let w = width.unwrap_or_else(|| board.rules.class_of(&net).track_width);
     let mut ids = vec![];
     for s in pts.windows(2) {
@@ -130,7 +153,16 @@ pub fn route(board: &mut Board, pts: &[Pt], layer: Layer, width: Option<Nm>) -> 
             continue;
         }
         let id = Uuid::new_v4();
-        board.tracks.push(Track { id, a: s[0], mid: None, b: s[1], width: w, layer, net: net.clone(), locked: false });
+        board.tracks.push(Track {
+            id,
+            a: s[0],
+            mid: None,
+            b: s[1],
+            width: w,
+            layer,
+            net: net.clone(),
+            locked: false,
+        });
         ids.push(id);
     }
     ids
@@ -141,7 +173,18 @@ pub fn add_via(board: &mut Board, at: Pt, net: &str) -> Uuid {
     let c = board.rules.class_of(net);
     let id = Uuid::new_v4();
     let (diameter, drill) = (c.via_diameter, c.via_drill);
-    board.vias.push(Via { id, at, diameter, drill, kind: ViaKind::Through, from: Layer::TopCopper, to: Layer::BottomCopper, net: net.into(), locked: false, tented: None });
+    board.vias.push(Via {
+        id,
+        at,
+        diameter,
+        drill,
+        kind: ViaKind::Through,
+        from: Layer::TopCopper,
+        to: Layer::BottomCopper,
+        net: net.into(),
+        locked: false,
+        tented: None,
+    });
     id
 }
 
@@ -149,9 +192,16 @@ pub fn add_via(board: &mut Board, at: Pt, net: &str) -> Uuid {
 /// to pads, and up to vias — or, pressing U again (`through_vias`), on through them, the vias
 /// included.
 pub fn select_connected(board: &Board, track: Uuid, through_vias: bool) -> Vec<Uuid> {
-    let Some(start) = board.tracks.iter().position(|t| t.id == track) else { return vec![] };
+    let Some(start) = board.tracks.iter().position(|t| t.id == track) else {
+        return vec![];
+    };
     let on_pad = |p: Pt, layer: Layer| -> bool {
-        pad_at(board, p).is_some_and(|(fi, pi)| board.footprints[fi].placement.layers(board.footprints[fi].footprint.pads[pi].layers).contains(layer))
+        pad_at(board, p).is_some_and(|(fi, pi)| {
+            board.footprints[fi]
+                .placement
+                .layers(board.footprints[fi].footprint.pads[pi].layers)
+                .contains(layer)
+        })
     };
     let mut seen = vec![start];
     let mut vias: Vec<Uuid> = vec![];
@@ -180,14 +230,16 @@ pub fn select_connected(board: &Board, track: Uuid, through_vias: bool) -> Vec<U
             }
         }
     }
-    seen.into_iter().map(|i| board.tracks[i].id).chain(vias).collect()
+    seen.into_iter()
+        .map(|i| board.tracks[i].id)
+        .chain(vias)
+        .collect()
 }
 
 pub fn delete_tracks(board: &mut Board, ids: &[Uuid]) {
     board.tracks.retain(|t| !ids.contains(&t.id));
     board.vias.retain(|v| !ids.contains(&v.id));
 }
-
 
 /// The line width drawings take on `layer` unless told: KiCad's defaults (silkscreen 0.12 mm,
 /// fabrication 0.1, courtyard and outline 0.05, copper 0.2, the rest 0.15).
@@ -205,8 +257,18 @@ pub fn default_width(layer: Layer) -> Nm {
 /// Draws a line, rectangle or circle on `layer` (the Draw tools); returns its id.
 pub fn add_shape(board: &mut Board, geom: crate::graphics::Geom, layer: Layer) -> Uuid {
     let id = Uuid::new_v4();
-    let shape = crate::graphics::Shape { geom, stroke: crate::graphics::Stroke::width(default_width(layer)), fill: crate::graphics::Fill::None };
-    board.shapes.push(crate::board::BoardShape { id, shape, layer, locked: false, net: String::new() });
+    let shape = crate::graphics::Shape {
+        geom,
+        stroke: crate::graphics::Stroke::width(default_width(layer)),
+        fill: crate::graphics::Fill::None,
+    };
+    board.shapes.push(crate::board::BoardShape {
+        id,
+        shape,
+        layer,
+        locked: false,
+        net: String::new(),
+    });
     id
 }
 
@@ -220,8 +282,20 @@ pub fn add_text(board: &mut Board, text: &str, at: Pt, layer: Layer) -> Uuid {
         mirrored: layer.side() == Some(Side::Bottom),
         ..Default::default()
     };
-    let t = crate::graphics::Text { text: text.into(), at, angle: 0.0, style, visible: true };
-    board.texts.push(crate::board::BoardText { id, text: t, layer, locked: false, knockout: false });
+    let t = crate::graphics::Text {
+        text: text.into(),
+        at,
+        angle: 0.0,
+        style,
+        visible: true,
+    };
+    board.texts.push(crate::board::BoardText {
+        id,
+        text: t,
+        layer,
+        locked: false,
+        knockout: false,
+    });
     id
 }
 
@@ -233,8 +307,21 @@ pub fn add_artwork(board: &mut Board, polys: &[Vec<Pt>], layer: Layer) -> Vec<Uu
         .filter(|p| p.len() >= 3)
         .map(|pts| {
             let id = Uuid::new_v4();
-            let shape = crate::graphics::Shape { geom: crate::graphics::Geom::Polyline { pts: pts.clone(), closed: true }, stroke: crate::graphics::Stroke::width(0), fill: crate::graphics::Fill::Outline };
-            board.shapes.push(crate::board::BoardShape { id, shape, layer, locked: false, net: String::new() });
+            let shape = crate::graphics::Shape {
+                geom: crate::graphics::Geom::Polyline {
+                    pts: pts.clone(),
+                    closed: true,
+                },
+                stroke: crate::graphics::Stroke::width(0),
+                fill: crate::graphics::Fill::Outline,
+            };
+            board.shapes.push(crate::board::BoardShape {
+                id,
+                shape,
+                layer,
+                locked: false,
+                net: String::new(),
+            });
             id
         })
         .collect()
@@ -247,14 +334,23 @@ mod tests {
     fn copper_areas_and_text_are_picked_moved_and_reshaped() {
         use crate::units::mm;
         let mut b = Board::default();
-        let square = vec![Pt::mm(0.0, 0.0), Pt::mm(10.0, 0.0), Pt::mm(10.0, 10.0), Pt::mm(0.0, 10.0)];
+        let square = vec![
+            Pt::mm(0.0, 0.0),
+            Pt::mm(10.0, 0.0),
+            Pt::mm(10.0, 10.0),
+            Pt::mm(0.0, 10.0),
+        ];
         let area = add_polygon(&mut b, square, Layer::TopCopper, "LIVE");
         let text = add_text(&mut b, "L", Pt::mm(30.0, 0.0), Layer::TopSilk);
         // A filled area is picked anywhere inside it, not only on its edge.
         assert_eq!(hit(&b, Pt::mm(5.0, 5.0), 0), Some(BoardItem::Shape(area)));
         assert_eq!(b.shapes[0].net, "LIVE");
         // Moved, with the text.
-        move_items(&mut b, &[BoardItem::Shape(area), BoardItem::Text(text)], Pt::mm(1.0, 2.0));
+        move_items(
+            &mut b,
+            &[BoardItem::Shape(area), BoardItem::Text(text)],
+            Pt::mm(1.0, 2.0),
+        );
         assert_eq!(hit(&b, Pt::mm(10.5, 11.5), 0), Some(BoardItem::Shape(area)));
         assert_eq!(b.texts[0].text.at, Pt::mm(31.0, 2.0));
         // A corner dragged out: the area grows that way.
@@ -262,7 +358,12 @@ mod tests {
         move_corner(&mut b, BoardItem::Shape(area), c.0, c.1, Pt::mm(20.0, 20.0));
         assert_eq!(hit(&b, Pt::mm(14.0, 14.0), 0), Some(BoardItem::Shape(area)));
         // A zone's corner too; its fill is taken off to be poured again.
-        let z = crate::zone::add_zone(&mut b, "GND", Layer::BottomCopper, vec![Pt::mm(50.0, 0.0), Pt::mm(60.0, 0.0), Pt::mm(60.0, 10.0)]);
+        let z = crate::zone::add_zone(
+            &mut b,
+            "GND",
+            Layer::BottomCopper,
+            vec![Pt::mm(50.0, 0.0), Pt::mm(60.0, 0.0), Pt::mm(60.0, 10.0)],
+        );
         crate::zone::fill_all(&mut b);
         move_corner(&mut b, BoardItem::Zone(z), 0, 1, Pt::mm(70.0, 0.0));
         let zone = b.zones.iter().find(|x| x.id == z).unwrap();
@@ -274,14 +375,28 @@ mod tests {
     fn a_box_selects_what_is_inside_or_what_it_touches() {
         use crate::units::Bounds;
         let mut b = Board::default();
-        let area = add_polygon(&mut b, vec![Pt::mm(0.0, 0.0), Pt::mm(10.0, 0.0), Pt::mm(10.0, 10.0)], Layer::TopCopper, "");
+        let area = add_polygon(
+            &mut b,
+            vec![Pt::mm(0.0, 0.0), Pt::mm(10.0, 0.0), Pt::mm(10.0, 10.0)],
+            Layer::TopCopper,
+            "",
+        );
         let text = add_text(&mut b, "L", Pt::mm(30.0, 5.0), Layer::TopSilk);
-        let r = Bounds { min: Pt::mm(-1.0, -1.0), max: Pt::mm(12.0, 12.0) };
+        let r = Bounds {
+            min: Pt::mm(-1.0, -1.0),
+            max: Pt::mm(12.0, 12.0),
+        };
         assert_eq!(box_select(&b, r, false), vec![BoardItem::Shape(area)]);
         // Over half of both: a window takes neither, a crossing both.
-        let r = Bounds { min: Pt::mm(5.0, -1.0), max: Pt::mm(30.0, 12.0) };
+        let r = Bounds {
+            min: Pt::mm(5.0, -1.0),
+            max: Pt::mm(30.0, 12.0),
+        };
         assert!(box_select(&b, r, false).is_empty());
-        assert_eq!(box_select(&b, r, true), vec![BoardItem::Shape(area), BoardItem::Text(text)]);
+        assert_eq!(
+            box_select(&b, r, true),
+            vec![BoardItem::Shape(area), BoardItem::Text(text)]
+        );
         // Moved together.
         let found = box_select(&b, r, true);
         move_items(&mut b, &found, Pt::mm(0.0, 5.0));
@@ -294,9 +409,17 @@ mod tests {
         // The AC sensor sample: C1 on top, over PS1 (a large module) on the bottom.
         let b = crate::ac_board::board(&crate::library::LibraryTable::builtin());
         let id = |r: &str| b.footprints[footprint_index(&b, r).unwrap()].id;
-        let at = b.footprints[footprint_index(&b, "C1").unwrap()].placement.at;
-        assert_eq!(hit_from(&b, at, 0, Some(crate::layer::Side::Top)), Some(BoardItem::Footprint(id("C1"))));
-        assert_eq!(hit_from(&b, at, 0, Some(crate::layer::Side::Bottom)), Some(BoardItem::Footprint(id("PS1"))));
+        let at = b.footprints[footprint_index(&b, "C1").unwrap()]
+            .placement
+            .at;
+        assert_eq!(
+            hit_from(&b, at, 0, Some(crate::layer::Side::Top)),
+            Some(BoardItem::Footprint(id("C1")))
+        );
+        assert_eq!(
+            hit_from(&b, at, 0, Some(crate::layer::Side::Bottom)),
+            Some(BoardItem::Footprint(id("PS1")))
+        );
     }
 
     #[test]
@@ -326,7 +449,12 @@ pub enum BoardItem {
 impl BoardItem {
     pub fn id(self) -> Uuid {
         match self {
-            BoardItem::Footprint(i) | BoardItem::Track(i) | BoardItem::Via(i) | BoardItem::Zone(i) | BoardItem::Shape(i) | BoardItem::Text(i) => i,
+            BoardItem::Footprint(i)
+            | BoardItem::Track(i)
+            | BoardItem::Via(i)
+            | BoardItem::Zone(i)
+            | BoardItem::Shape(i)
+            | BoardItem::Text(i) => i,
         }
     }
 }
@@ -334,7 +462,11 @@ impl BoardItem {
 fn seg_dist(p: Pt, a: Pt, b: Pt) -> f64 {
     let (dx, dy) = ((b.x - a.x) as f64, (b.y - a.y) as f64);
     let l2 = dx * dx + dy * dy;
-    let t = if l2 == 0.0 { 0.0 } else { (((p.x - a.x) as f64 * dx + (p.y - a.y) as f64 * dy) / l2).clamp(0.0, 1.0) };
+    let t = if l2 == 0.0 {
+        0.0
+    } else {
+        (((p.x - a.x) as f64 * dx + (p.y - a.y) as f64 * dy) / l2).clamp(0.0, 1.0)
+    };
     (p.x as f64 - (a.x as f64 + t * dx)).hypot(p.y as f64 - (a.y as f64 + t * dy))
 }
 
@@ -346,19 +478,34 @@ pub fn hit(board: &Board, p: Pt, tol: Nm) -> Option<BoardItem> {
 
 /// [`hit`] seen from one side of the board (a 3D view of it from above or below): a footprint on
 /// that side wins over one on the other side under it.
-pub fn hit_from(board: &Board, p: Pt, tol: Nm, side: Option<crate::layer::Side>) -> Option<BoardItem> {
-    if let Some(v) = board.vias.iter().find(|v| v.at.dist(p) <= (v.diameter / 2 + tol) as f64) {
+pub fn hit_from(
+    board: &Board,
+    p: Pt,
+    tol: Nm,
+    side: Option<crate::layer::Side>,
+) -> Option<BoardItem> {
+    if let Some(v) = board
+        .vias
+        .iter()
+        .find(|v| v.at.dist(p) <= (v.diameter / 2 + tol) as f64)
+    {
         return Some(BoardItem::Via(v.id));
     }
     // A pad wins over the track ending on it (one of the side seen first).
     let mut pads: Vec<usize> = (0..board.footprints.len()).collect();
     pads.sort_by_key(|fi| side.is_some_and(|sd| board.footprints[*fi].placement.side != sd));
     for fi in pads {
-        if (0..board.footprints[fi].footprint.pads.len()).any(|pi| poly::contains(&copper::pad_region(board, fi, pi, 0), p)) {
+        if (0..board.footprints[fi].footprint.pads.len())
+            .any(|pi| poly::contains(&copper::pad_region(board, fi, pi, 0), p))
+        {
             return Some(BoardItem::Footprint(board.footprints[fi].id));
         }
     }
-    if let Some(t) = board.tracks.iter().find(|t| seg_dist(p, t.a, t.b) <= (t.width / 2 + tol) as f64) {
+    if let Some(t) = board
+        .tracks
+        .iter()
+        .find(|t| seg_dist(p, t.a, t.b) <= (t.width / 2 + tol) as f64)
+    {
         return Some(BoardItem::Track(t.id));
     }
     let order = |f: &&crate::board::PlacedFootprint| side.is_some_and(|sd| f.placement.side != sd);
@@ -366,9 +513,17 @@ pub fn hit_from(board: &Board, p: Pt, tol: Nm, side: Option<crate::layer::Side>)
     fps.sort_by_key(order);
     for f in fps {
         let mut b: Option<crate::units::Bounds> = None;
-        for s in f.footprint.shapes.iter().filter(|s| matches!(s.layer, Layer::TopCourtyard | Layer::TopFab | Layer::TopSilk)) {
+        for s in f.footprint.shapes.iter().filter(|s| {
+            matches!(
+                s.layer,
+                Layer::TopCourtyard | Layer::TopFab | Layer::TopSilk
+            )
+        }) {
             for q in s.shape.geom.extent() {
-                b = Some(crate::units::Bounds::union(b, crate::units::Bounds::of(f.placement.apply(q))));
+                b = Some(crate::units::Bounds::union(
+                    b,
+                    crate::units::Bounds::of(f.placement.apply(q)),
+                ));
             }
         }
         if b.is_some_and(|b| b.grow(tol).contains(p)) {
@@ -376,20 +531,39 @@ pub fn hit_from(board: &Board, p: Pt, tol: Nm, side: Option<crate::layer::Side>)
         }
     }
     // Text by its box, drawn shapes by their line (the outline's edge, silkscreen art).
-    if let Some(t) = board.texts.iter().rev().find(|t| crate::font::bounds(&t.text).is_some_and(|b| b.grow(tol).contains(p))) {
+    if let Some(t) = board
+        .texts
+        .iter()
+        .rev()
+        .find(|t| crate::font::bounds(&t.text).is_some_and(|b| b.grow(tol).contains(p)))
+    {
         return Some(BoardItem::Text(t.id));
     }
     for s in board.shapes.iter().rev() {
         let (pts, closed) = poly::geom_points(&s.shape.geom);
         let w = s.shape.stroke.width.max(1) + 2 * tol;
-        let r = if closed { poly::stroke_closed(&pts, w) } else { poly::stroke(&pts, w) };
+        let r = if closed {
+            poly::stroke_closed(&pts, w)
+        } else {
+            poly::stroke(&pts, w)
+        };
         // A filled shape (a copper area, a logo) anywhere inside it.
-        let inside = closed && s.shape.fill != crate::graphics::Fill::None && poly::contains(&vec![pts.clone()], p);
+        let inside = closed
+            && s.shape.fill != crate::graphics::Fill::None
+            && poly::contains(&vec![pts.clone()], p);
         if inside || poly::contains(&r, p) {
             return Some(BoardItem::Shape(s.id));
         }
     }
-    board.zones.iter().find(|z| z.outline.iter().any(|r| poly::contains(&vec![r.clone()], p))).map(|z| BoardItem::Zone(z.id))
+    board
+        .zones
+        .iter()
+        .find(|z| {
+            z.outline
+                .iter()
+                .any(|r| poly::contains(&vec![r.clone()], p))
+        })
+        .map(|z| BoardItem::Zone(z.id))
 }
 
 /// Moves items by `d`: tracks and vias, zones (their fills with them), drawn shapes, text,
@@ -406,7 +580,10 @@ pub fn move_items(board: &mut Board, items: &[BoardItem], d: Pt) {
         z.outline.iter_mut().flatten().for_each(|p| *p = *p + d);
         for (_, polys) in &mut z.filled {
             for poly in polys {
-                poly.outer.iter_mut().chain(poly.holes.iter_mut().flatten()).for_each(|p| *p = *p + d);
+                poly.outer
+                    .iter_mut()
+                    .chain(poly.holes.iter_mut().flatten())
+                    .for_each(|p| *p = *p + d);
             }
         }
     }
@@ -433,7 +610,11 @@ pub fn move_track_points(board: &mut Board, net: &str, points: &[Pt], d: Pt) {
             t.b = t.b + d;
         }
     }
-    for v in board.vias.iter_mut().filter(|v| v.net == net && points.contains(&v.at)) {
+    for v in board
+        .vias
+        .iter_mut()
+        .filter(|v| v.net == net && points.contains(&v.at))
+    {
         v.at = v.at + d;
     }
     board.tracks.retain(|t| t.a != t.b);
@@ -443,7 +624,9 @@ pub fn move_track_points(board: &mut Board, net: &str, points: &[Pt], d: Pt) {
 /// pad or via of its net stays on it through a new short track (from there to where the end
 /// went), so nothing comes loose.
 pub fn drag_track(board: &mut Board, id: Uuid, d: Pt) {
-    let Some(t) = board.tracks.iter().find(|t| t.id == id).cloned() else { return };
+    let Some(t) = board.tracks.iter().find(|t| t.id == id).cloned() else {
+        return;
+    };
     if d == Pt::ZERO {
         return;
     }
@@ -451,13 +634,25 @@ pub fn drag_track(board: &mut Board, id: Uuid, d: Pt) {
         b.vias.iter().any(|v| v.net == t.net && v.at == p)
             || pad_at(b, p).is_some_and(|(fi, pi)| {
                 let f = &b.footprints[fi];
-                f.footprint.pads[pi].net.as_deref() == Some(t.net.as_str()) && f.placement.layers(f.footprint.pads[pi].layers).contains(t.layer)
+                f.footprint.pads[pi].net.as_deref() == Some(t.net.as_str())
+                    && f.placement
+                        .layers(f.footprint.pads[pi].layers)
+                        .contains(t.layer)
             })
     };
     let mut stretch = vec![];
     for end in [t.a, t.b] {
         if anchored(board, end) {
-            board.tracks.push(Track { id: Uuid::new_v4(), a: end, mid: None, b: end + d, width: t.width, layer: t.layer, net: t.net.clone(), locked: false });
+            board.tracks.push(Track {
+                id: Uuid::new_v4(),
+                a: end,
+                mid: None,
+                b: end + d,
+                width: t.width,
+                layer: t.layer,
+                net: t.net.clone(),
+                locked: false,
+            });
         } else {
             stretch.push(end);
         }
@@ -465,7 +660,11 @@ pub fn drag_track(board: &mut Board, id: Uuid, d: Pt) {
     if let Some(x) = board.tracks.iter_mut().find(|x| x.id == id) {
         (x.a, x.b) = (t.a + d, t.b + d);
     }
-    for x in board.tracks.iter_mut().filter(|x| x.id != id && x.net == t.net && x.layer == t.layer) {
+    for x in board
+        .tracks
+        .iter_mut()
+        .filter(|x| x.id != id && x.net == t.net && x.layer == t.layer)
+    {
         if stretch.contains(&x.a) {
             x.a = x.a + d;
         }
@@ -482,13 +681,51 @@ pub fn items_center(board: &Board, items: &[BoardItem], grid: Nm) -> Pt {
     use crate::units::Bounds;
     let ids: Vec<Uuid> = items.iter().map(|i| i.id()).collect();
     let mut pts: Vec<Pt> = vec![];
-    pts.extend(board.tracks.iter().filter(|t| ids.contains(&t.id)).flat_map(|t| [t.a, t.b]));
-    pts.extend(board.vias.iter().filter(|v| ids.contains(&v.id)).map(|v| v.at));
-    pts.extend(board.zones.iter().filter(|z| ids.contains(&z.id)).flat_map(|z| z.outline.iter().flatten().copied()));
-    pts.extend(board.shapes.iter().filter(|s| ids.contains(&s.id)).flat_map(|s| poly::geom_points(&s.shape.geom).0));
-    pts.extend(board.texts.iter().filter(|t| ids.contains(&t.id)).map(|t| t.text.at));
-    pts.extend(board.footprints.iter().filter(|f| ids.contains(&f.id)).map(|f| f.placement.at));
-    let b = pts.into_iter().fold(None, |acc, p| Some(Bounds::union(acc, Bounds::of(p))));
+    pts.extend(
+        board
+            .tracks
+            .iter()
+            .filter(|t| ids.contains(&t.id))
+            .flat_map(|t| [t.a, t.b]),
+    );
+    pts.extend(
+        board
+            .vias
+            .iter()
+            .filter(|v| ids.contains(&v.id))
+            .map(|v| v.at),
+    );
+    pts.extend(
+        board
+            .zones
+            .iter()
+            .filter(|z| ids.contains(&z.id))
+            .flat_map(|z| z.outline.iter().flatten().copied()),
+    );
+    pts.extend(
+        board
+            .shapes
+            .iter()
+            .filter(|s| ids.contains(&s.id))
+            .flat_map(|s| poly::geom_points(&s.shape.geom).0),
+    );
+    pts.extend(
+        board
+            .texts
+            .iter()
+            .filter(|t| ids.contains(&t.id))
+            .map(|t| t.text.at),
+    );
+    pts.extend(
+        board
+            .footprints
+            .iter()
+            .filter(|f| ids.contains(&f.id))
+            .map(|f| f.placement.at),
+    );
+    let b = pts
+        .into_iter()
+        .fold(None, |acc, p| Some(Bounds::union(acc, Bounds::of(p))));
     crate::sch_edit::snap(b.map_or(Pt::ZERO, |b| b.center()), grid.max(1))
 }
 
@@ -508,7 +745,11 @@ pub fn rotate_items(board: &mut Board, items: &[BoardItem], center: Pt, deg: f64
         z.filled.clear();
     }
     for s in board.shapes.iter_mut().filter(|s| ids.contains(&s.id)) {
-        let geom = if deg % 90.0 == 0.0 { s.shape.geom.clone() } else { s.shape.geom.rect_as_polyline() };
+        let geom = if deg % 90.0 == 0.0 {
+            s.shape.geom.clone()
+        } else {
+            s.shape.geom.rect_as_polyline()
+        };
         s.shape.geom = geom.map(r);
     }
     for t in board.texts.iter_mut().filter(|t| ids.contains(&t.id)) {
@@ -549,7 +790,9 @@ pub fn flip_items(board: &mut Board, items: &[BoardItem], center: Pt) {
         t.text.style.mirrored = !t.text.style.mirrored;
         t.layer = t.layer.flipped();
     }
-    let fps: Vec<usize> = (0..board.footprints.len()).filter(|&i| ids.contains(&board.footprints[i].id)).collect();
+    let fps: Vec<usize> = (0..board.footprints.len())
+        .filter(|&i| ids.contains(&board.footprints[i].id))
+        .collect();
     for i in fps {
         let at = m(board.footprints[i].placement.at);
         board.footprints[i].placement.at = at;
@@ -562,10 +805,27 @@ pub fn flip_items(board: &mut Board, items: &[BoardItem], center: Pt) {
 pub fn corners(board: &Board, item: BoardItem) -> Vec<(usize, usize, Pt)> {
     use crate::graphics::Geom;
     match item {
-        BoardItem::Zone(id) => board.zones.iter().find(|z| z.id == id).map_or(vec![], |z| z.outline.iter().enumerate().flat_map(|(r, ring)| ring.iter().enumerate().map(move |(i, p)| (r, i, *p))).collect()),
-        BoardItem::Shape(id) => match board.shapes.iter().find(|s| s.id == id).map(|s| &s.shape.geom) {
-            Some(Geom::Polyline { pts, .. }) => pts.iter().enumerate().map(|(i, p)| (0, i, *p)).collect(),
-            Some(Geom::Rect { a, b }) => [*a, Pt::new(b.x, a.y), *b, Pt::new(a.x, b.y)].into_iter().enumerate().map(|(i, p)| (0, i, p)).collect(),
+        BoardItem::Zone(id) => board.zones.iter().find(|z| z.id == id).map_or(vec![], |z| {
+            z.outline
+                .iter()
+                .enumerate()
+                .flat_map(|(r, ring)| ring.iter().enumerate().map(move |(i, p)| (r, i, *p)))
+                .collect()
+        }),
+        BoardItem::Shape(id) => match board
+            .shapes
+            .iter()
+            .find(|s| s.id == id)
+            .map(|s| &s.shape.geom)
+        {
+            Some(Geom::Polyline { pts, .. }) => {
+                pts.iter().enumerate().map(|(i, p)| (0, i, *p)).collect()
+            }
+            Some(Geom::Rect { a, b }) => [*a, Pt::new(b.x, a.y), *b, Pt::new(a.x, b.y)]
+                .into_iter()
+                .enumerate()
+                .map(|(i, p)| (0, i, p))
+                .collect(),
             Some(Geom::Line { a, b }) => vec![(0, 0, *a), (0, 1, *b)],
             _ => vec![],
         },
@@ -575,7 +835,11 @@ pub fn corners(board: &Board, item: BoardItem) -> Vec<(usize, usize, Pt)> {
 
 /// The corner of `item` within `tol` of `p` (the nearest), as (ring, index).
 pub fn corner_at(board: &Board, item: BoardItem, p: Pt, tol: Nm) -> Option<(usize, usize)> {
-    corners(board, item).into_iter().filter(|c| c.2.dist(p) <= tol as f64).min_by(|a, b| a.2.dist(p).total_cmp(&b.2.dist(p))).map(|c| (c.0, c.1))
+    corners(board, item)
+        .into_iter()
+        .filter(|c| c.2.dist(p) <= tol as f64)
+        .min_by(|a, b| a.2.dist(p).total_cmp(&b.2.dist(p)))
+        .map(|c| (c.0, c.1))
 }
 
 /// Moves one corner of a zone or drawn shape to `to` (a rectangle becomes a polygon). A
@@ -592,7 +856,9 @@ pub fn move_corner(board: &mut Board, item: BoardItem, ring: usize, index: usize
             }
         }
         BoardItem::Shape(id) => {
-            let Some(s) = board.shapes.iter_mut().find(|s| s.id == id) else { return };
+            let Some(s) = board.shapes.iter_mut().find(|s| s.id == id) else {
+                return;
+            };
             match &mut s.shape.geom {
                 Geom::Polyline { pts, .. } => {
                     if let Some(p) = pts.get_mut(index) {
@@ -623,7 +889,11 @@ pub fn move_corner(board: &mut Board, item: BoardItem, ring: usize, index: usize
 /// Draws a filled polygon on `layer` (a copper area on a copper layer, on `net`); returns its
 /// id.
 pub fn add_polygon(board: &mut Board, pts: Vec<Pt>, layer: Layer, net: &str) -> Uuid {
-    let id = add_shape(board, crate::graphics::Geom::Polyline { pts, closed: true }, layer);
+    let id = add_shape(
+        board,
+        crate::graphics::Geom::Polyline { pts, closed: true },
+        layer,
+    );
     if let Some(s) = board.shapes.iter_mut().find(|s| s.id == id) {
         s.shape.fill = crate::graphics::Fill::Outline;
         s.net = net.to_string();
@@ -637,16 +907,33 @@ pub fn add_polygon(board: &mut Board, pts: Vec<Pt>, layer: Layer, net: &str) -> 
 pub fn box_select(board: &Board, r: crate::units::Bounds, crossing: bool) -> Vec<BoardItem> {
     use crate::units::Bounds;
     let take = |b: Option<Bounds>| {
-        b.is_some_and(|b| if crossing { b.min.x <= r.max.x && b.max.x >= r.min.x && b.min.y <= r.max.y && b.max.y >= r.min.y } else { r.contains(b.min) && r.contains(b.max) })
+        b.is_some_and(|b| {
+            if crossing {
+                b.min.x <= r.max.x && b.max.x >= r.min.x && b.min.y <= r.max.y && b.max.y >= r.min.y
+            } else {
+                r.contains(b.min) && r.contains(b.max)
+            }
+        })
     };
-    let of = |pts: Vec<Pt>| pts.into_iter().fold(None, |acc, p| Some(Bounds::union(acc, Bounds::of(p))));
+    let of = |pts: Vec<Pt>| {
+        pts.into_iter()
+            .fold(None, |acc, p| Some(Bounds::union(acc, Bounds::of(p))))
+    };
     let mut out = vec![];
     for f in &board.footprints {
         let mut b: Option<Bounds> = None;
         for p in &f.footprint.pads {
-            b = Some(Bounds::union(b, Bounds::of(f.placement.apply(p.at)).grow(p.size.w.max(p.size.h) / 2)));
+            b = Some(Bounds::union(
+                b,
+                Bounds::of(f.placement.apply(p.at)).grow(p.size.w.max(p.size.h) / 2),
+            ));
         }
-        for s in f.footprint.shapes.iter().filter(|s| matches!(s.layer, Layer::TopCourtyard | Layer::TopFab | Layer::TopSilk)) {
+        for s in f.footprint.shapes.iter().filter(|s| {
+            matches!(
+                s.layer,
+                Layer::TopCourtyard | Layer::TopFab | Layer::TopSilk
+            )
+        }) {
             for q in s.shape.geom.extent() {
                 b = Some(Bounds::union(b, Bounds::of(f.placement.apply(q))));
             }
@@ -711,7 +998,10 @@ mod hit_tests {
         let b = &d.board;
         let r1 = footprint_index(b, "R1").unwrap();
         let pad2 = pad_center(b, r1, 1);
-        assert_eq!(hit(b, pad2, 1000), Some(BoardItem::Footprint(b.footprints[r1].id)));
+        assert_eq!(
+            hit(b, pad2, 1000),
+            Some(BoardItem::Footprint(b.footprints[r1].id))
+        );
         let v = &b.vias[0];
         assert_eq!(hit(b, v.at, 1000), Some(BoardItem::Via(v.id)));
         // The middle of the led track, between D1 and R1.
@@ -719,7 +1009,10 @@ mod hit_tests {
         let mid = Pt::new((t.a.x + t.b.x) / 2, (t.a.y + t.b.y) / 2);
         assert_eq!(hit(b, mid, 1000), Some(BoardItem::Track(t.id)));
         // Empty board area: the zone.
-        assert!(matches!(hit(b, Pt::mm(2.0, 2.0), 1000), Some(BoardItem::Zone(_))));
+        assert!(matches!(
+            hit(b, Pt::mm(2.0, 2.0), 1000),
+            Some(BoardItem::Zone(_))
+        ));
         let mut b2 = b.clone();
         delete_items(&mut b2, &[BoardItem::Track(t.id)]);
         assert_eq!(b2.tracks.len(), b.tracks.len() - 1);

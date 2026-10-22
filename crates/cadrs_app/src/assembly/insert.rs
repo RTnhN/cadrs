@@ -18,7 +18,6 @@
 //!   insert is one undo step; Undo (the footer, or Ctrl+Z) removes them one by one; ✕ removes
 //!   all of this dialog's inserts.
 
-use cadrs_ui::ShortcutKey;
 use bevy::asset::RenderAssetUsages;
 use bevy::input::ButtonState;
 use bevy::input::keyboard::KeyboardInput;
@@ -31,6 +30,7 @@ use cadrs_core::assembly::commands::InsertInstance;
 use cadrs_core::assembly::{Instance, InstanceId, InstanceSource, Pose};
 use cadrs_core::parts::PartKind;
 use cadrs_core::{ElementId, PartId};
+use cadrs_ui::ShortcutKey;
 use cadrs_ui::prelude::*;
 use cadrs_ui::{FeatureDialogAccept, FeatureDialogCancel, TabStrip};
 
@@ -44,7 +44,18 @@ impl Plugin for InsertPlugin {
         app.init_resource::<Thumbnails>()
             .add_systems(
                 Update,
-                (read_search, super::insert_linked::read_other_search, super::insert_linked::sync_linked_extra, sync_panels, rebuild_tree, insert_pointer, update_ghosts, sync_counter, insert_keys, end_on_tab_change)
+                (
+                    read_search,
+                    super::insert_linked::read_other_search,
+                    super::insert_linked::sync_linked_extra,
+                    sync_panels,
+                    rebuild_tree,
+                    insert_pointer,
+                    update_ghosts,
+                    sync_counter,
+                    insert_keys,
+                    end_on_tab_change,
+                )
                     .chain()
                     .before(crate::parts::PartsSet)
                     .after(crate::viewport::apply_view_to_camera)
@@ -133,12 +144,20 @@ impl InsertSession {
     /// The source the tree lists: the opened other document, or this one at a version; `None`
     /// for this document's workspace.
     pub fn linked_source(&self) -> Option<&crate::linked::Opened> {
-        if self.other { self.browse.opened.as_ref().filter(|o| o.version.is_some()) } else { self.current.as_ref() }
+        if self.other {
+            self.browse.opened.as_ref().filter(|o| o.version.is_some())
+        } else {
+            self.current.as_ref()
+        }
     }
 
     /// The version graph is showing.
     pub fn graph_open(&self) -> bool {
-        if self.other { self.browse.opened.is_some() && self.browse.graph } else { self.current_graph }
+        if self.other {
+            self.browse.opened.is_some() && self.browse.graph
+        } else {
+            self.current_graph
+        }
     }
 }
 
@@ -175,15 +194,21 @@ struct InsertCount;
 
 /// Thumbnails of parts and studios, by (studio, part) and the rebuild they show.
 #[derive(Resource, Default)]
-pub(crate) struct Thumbnails(std::collections::HashMap<(ElementId, Option<PartId>), (usize, Handle<Image>)>);
+pub(crate) struct Thumbnails(
+    std::collections::HashMap<(ElementId, Option<PartId>), (usize, Handle<Image>)>,
+);
 
 /// Opens the dialog on the active assembly (Insert, I).
 pub fn open_insert_dialog(world: &mut World) {
     if world.contains_resource::<InsertSession>() {
         return;
     }
-    let Some(doc) = world.get_resource::<ActiveDocument>() else { return };
-    let Some(element) = super::active_assembly(doc) else { return };
+    let Some(doc) = world.get_resource::<ActiveDocument>() else {
+        return;
+    };
+    let Some(element) = super::active_assembly(doc) else {
+        return;
+    };
     let mark = doc.history.undo_len();
     let doc_name = doc.doc.name.clone();
     world.insert_resource(InsertSession {
@@ -208,7 +233,9 @@ pub fn open_insert_dialog(world: &mut World) {
     });
     let theme = world.resource::<Theme>().clone();
     let mut q = world.query_filtered::<Entity, With<ViewportArea>>();
-    let Some(area) = q.iter(world).next() else { return };
+    let Some(area) = q.iter(world).next() else {
+        return;
+    };
     let d = world.spawn(dialog(&theme, doc_name)).id();
     world.entity_mut(area).add_child(d);
 }
@@ -238,107 +265,235 @@ fn dialog(t: &Theme, doc_name: String) -> impl Bundle {
                 .entry::<Node>()
                 .and_modify(|mut n| n.height = Val::Px(36.0));
                 // P3B.5: the Standard content tab's panel (see [`super::standard`]).
-                b.spawn((Name::new("std-panel"), super::standard::StdPanelHost, Node { flex_direction: FlexDirection::Column, display: Display::None, ..default() }));
+                b.spawn((
+                    Name::new("std-panel"),
+                    super::standard::StdPanelHost,
+                    Node {
+                        flex_direction: FlexDirection::Column,
+                        display: Display::None,
+                        ..default()
+                    },
+                ));
                 // P3G.1: the Other documents browser (see [`super::insert_linked`]).
-                b.spawn((Name::new("insert-other-panel"), super::insert_linked::InsertOtherPanel, Node { flex_direction: FlexDirection::Column, display: Display::None, ..default() }));
+                b.spawn((
+                    Name::new("insert-other-panel"),
+                    super::insert_linked::InsertOtherPanel,
+                    Node {
+                        flex_direction: FlexDirection::Column,
+                        display: Display::None,
+                        ..default()
+                    },
+                ));
                 // The document and its branch (or the version read, P3G.1), with insert rigid,
                 // Create version and the version graph.
-                b.spawn((Name::new("insert-current-header"), super::insert_linked::InsertCurrentHeader, Node {
-                    padding: UiRect::new(Val::Px(8.0), Val::Px(6.0), Val::Px(6.0), Val::Px(4.0)),
-                    align_items: AlignItems::Center,
-                    column_gap: Val::Px(4.0),
-                    ..default()
-                }))
+                b.spawn((
+                    Name::new("insert-current-header"),
+                    super::insert_linked::InsertCurrentHeader,
+                    Node {
+                        padding: UiRect::new(
+                            Val::Px(8.0),
+                            Val::Px(6.0),
+                            Val::Px(6.0),
+                            Val::Px(4.0),
+                        ),
+                        align_items: AlignItems::Center,
+                        column_gap: Val::Px(4.0),
+                        ..default()
+                    },
+                ))
                 .with_children(|r| {
                     // The name is clipped before the buttons (it never runs under them).
-                    r.spawn(Node { flex_direction: FlexDirection::Column, flex_grow: 1.0, flex_shrink: 1.0, min_width: Val::Px(0.0), overflow: Overflow::clip(), ..default() })
-                        .with_children(|c| {
-                            // Cut with "…" (Final regression review: ex1_start 03 was cut mid-letter).
-                            c.spawn((
-                                Name::new("insert-document-name"),
-                                t.text(doc_name.clone(), 12.0, FontWeight::BOLD, t.foreground),
-                                cadrs_ui::ellipsis::Ellipsis::node(),
-                                cadrs_ui::ellipsis::Ellipsis::default().with_tooltip(),
-                            ))
-                            .insert(TextLayout::no_wrap());
-                            c.spawn(Node { align_items: AlignItems::Center, column_gap: Val::Px(3.0), ..default() })
-                                .with_children(|m| {
-                                    m.spawn(cadrs_ui::icon::icon("branches", 11.0, t.muted_foreground));
-                                    m.spawn((Name::new("insert-branch-label"), t.text("Main", 10.5, FontWeight::NORMAL, t.muted_foreground)));
-                                });
+                    r.spawn(Node {
+                        flex_direction: FlexDirection::Column,
+                        flex_grow: 1.0,
+                        flex_shrink: 1.0,
+                        min_width: Val::Px(0.0),
+                        overflow: Overflow::clip(),
+                        ..default()
+                    })
+                    .with_children(|c| {
+                        // Cut with "…" (Final regression review: ex1_start 03 was cut mid-letter).
+                        c.spawn((
+                            Name::new("insert-document-name"),
+                            t.text(doc_name.clone(), 12.0, FontWeight::BOLD, t.foreground),
+                            cadrs_ui::ellipsis::Ellipsis::node(),
+                            cadrs_ui::ellipsis::Ellipsis::default().with_tooltip(),
+                        ))
+                        .insert(TextLayout::no_wrap());
+                        c.spawn(Node {
+                            align_items: AlignItems::Center,
+                            column_gap: Val::Px(3.0),
+                            ..default()
+                        })
+                        .with_children(|m| {
+                            m.spawn(cadrs_ui::icon::icon("branches", 11.0, t.muted_foreground));
+                            m.spawn((
+                                Name::new("insert-branch-label"),
+                                t.text("Main", 10.5, FontWeight::NORMAL, t.muted_foreground),
+                            ));
                         });
+                    });
                     for (name, icon, tip) in [
                         // P3B.8 (A2.4): a Part Studio row inserts one rigid instance.
-                        ("insert-rigid", "assembly-rigid", "Insert the Part Studio as rigid"),
+                        (
+                            "insert-rigid",
+                            "assembly-rigid",
+                            "Insert the Part Studio as rigid",
+                        ),
                         // P3G.1 (ER3.2, DV1.8): a version made on the fly, and the version graph.
                         ("insert-create-version", "versions", "Create version"),
-                        ("insert-version", "branches", "Version graph: insert from the workspace or a version"),
+                        (
+                            "insert-version",
+                            "branches",
+                            "Version graph: insert from the workspace or a version",
+                        ),
                     ] {
-                        r.spawn(ToolButton::new(name, icon).icon_size(16.0).tooltip(tip).build(t))
-                            .insert(BorderColor::all(Color::srgb_u8(0xd4, 0xd4, 0xd4)))
-                            .entry::<Node>()
-                            .and_modify(|mut n| {
-                                n.width = Val::Px(26.0);
-                                n.height = Val::Px(26.0);
-                                n.border = UiRect::all(Val::Px(1.0));
-                                n.flex_shrink = 0.0;
-                            });
+                        r.spawn(
+                            ToolButton::new(name, icon)
+                                .icon_size(16.0)
+                                .tooltip(tip)
+                                .build(t),
+                        )
+                        .insert(BorderColor::all(Color::srgb_u8(0xd4, 0xd4, 0xd4)))
+                        .entry::<Node>()
+                        .and_modify(|mut n| {
+                            n.width = Val::Px(26.0);
+                            n.height = Val::Px(26.0);
+                            n.border = UiRect::all(Val::Px(1.0));
+                            n.flex_shrink = 0.0;
+                        });
                     }
                 });
                 // P3G.1: the version graph, in place of the list while it is open.
-                b.spawn((Name::new("insert-graph-panel"), super::insert_linked::InsertGraphPanel, Node {
-                    flex_direction: FlexDirection::Column,
-                    display: Display::None,
-                    min_height: Val::Px(150.0),
-                    max_height: Val::Px(420.0),
-                    overflow: Overflow::scroll_y(),
-                    ..default()
-                }));
-                let mut doc_panel = b.spawn((InsertDocPanel, Node { flex_direction: FlexDirection::Column, ..default() }));
+                b.spawn((
+                    Name::new("insert-graph-panel"),
+                    super::insert_linked::InsertGraphPanel,
+                    Node {
+                        flex_direction: FlexDirection::Column,
+                        display: Display::None,
+                        min_height: Val::Px(150.0),
+                        max_height: Val::Px(420.0),
+                        overflow: Overflow::scroll_y(),
+                        ..default()
+                    },
+                ));
+                let mut doc_panel = b.spawn((
+                    InsertDocPanel,
+                    Node {
+                        flex_direction: FlexDirection::Column,
+                        ..default()
+                    },
+                ));
                 let b = &mut doc_panel;
                 b.with_children(|b| {
-                b.spawn(TabStrip::new("insert-kind").compact().tab("Part Studios").tab("Assemblies").tab("Boards").build(t));
-                b.spawn(Node { padding: UiRect::new(Val::Px(6.0), Val::Px(6.0), Val::Px(6.0), Val::Px(4.0)), ..default() })
+                    b.spawn(
+                        TabStrip::new("insert-kind")
+                            .compact()
+                            .tab("Part Studios")
+                            .tab("Assemblies")
+                            .tab("Boards")
+                            .build(t),
+                    );
+                    b.spawn(Node {
+                        padding: UiRect::new(
+                            Val::Px(6.0),
+                            Val::Px(6.0),
+                            Val::Px(6.0),
+                            Val::Px(4.0),
+                        ),
+                        ..default()
+                    })
                     .with_children(|r| {
-                        r.spawn(TextInput::new("insert-search").placeholder("Search Part Studios").height(26.0).width(Val::Percent(100.0)).build(t));
+                        r.spawn(
+                            TextInput::new("insert-search")
+                                .placeholder("Search Part Studios")
+                                .height(26.0)
+                                .width(Val::Percent(100.0))
+                                .build(t),
+                        );
                     });
-                // Type filters: parts and surfaces (sketches and curves come with their inserts).
-                b.spawn((Name::new("insert-filters"), InsertFilters, Node {
-                    padding: UiRect::horizontal(Val::Px(6.0)),
-                    column_gap: Val::Px(2.0),
-                    align_items: AlignItems::Center,
-                    ..default()
-                }))
-                .with_children(|r| {
-                    r.spawn(ToolButton::new("insert-filter-parts", "part").icon_size(16.0).selected(true).tooltip("Parts").build(t));
-                    r.spawn(ToolButton::new("insert-filter-surfaces", "surface").icon_size(16.0).selected(true).tooltip("Surfaces").build(t));
-                    r.spawn(Node { flex_grow: 1.0, ..default() });
-                    r.spawn(ToolButton::new("insert-filter-sketches", "sketch").icon_size(16.0).disabled(true).tooltip("Sketches (not available yet)").build(t));
-                });
-                b.spawn(Node { flex_direction: FlexDirection::Column, min_height: Val::Px(150.0), max_height: Val::Px(330.0), ..default() })
+                    // Type filters: parts and surfaces (sketches and curves come with their inserts).
+                    b.spawn((
+                        Name::new("insert-filters"),
+                        InsertFilters,
+                        Node {
+                            padding: UiRect::horizontal(Val::Px(6.0)),
+                            column_gap: Val::Px(2.0),
+                            align_items: AlignItems::Center,
+                            ..default()
+                        },
+                    ))
+                    .with_children(|r| {
+                        r.spawn(
+                            ToolButton::new("insert-filter-parts", "part")
+                                .icon_size(16.0)
+                                .selected(true)
+                                .tooltip("Parts")
+                                .build(t),
+                        );
+                        r.spawn(
+                            ToolButton::new("insert-filter-surfaces", "surface")
+                                .icon_size(16.0)
+                                .selected(true)
+                                .tooltip("Surfaces")
+                                .build(t),
+                        );
+                        r.spawn(Node {
+                            flex_grow: 1.0,
+                            ..default()
+                        });
+                        r.spawn(
+                            ToolButton::new("insert-filter-sketches", "sketch")
+                                .icon_size(16.0)
+                                .disabled(true)
+                                .tooltip("Sketches (not available yet)")
+                                .build(t),
+                        );
+                    });
+                    b.spawn(Node {
+                        flex_direction: FlexDirection::Column,
+                        min_height: Val::Px(150.0),
+                        max_height: Val::Px(330.0),
+                        ..default()
+                    })
                     .with_children(|frame| {
-                        let tree = frame.spawn((
-                            Name::new("insert-tree"),
-                            InsertTree,
-                            cadrs_ui::WheelScroll,
-                            cadrs_ui::scrollbar::ScrollGutter(12.0),
-                            Node {
-                                flex_direction: FlexDirection::Column,
-                                min_height: Val::Px(150.0),
-                                max_height: Val::Px(330.0),
-                                overflow: Overflow::scroll_y(),
-                                padding: UiRect::vertical(Val::Px(4.0)),
-                                ..default()
-                            },
-                        )).id();
-                        frame.spawn(cadrs_ui::vertical_scrollbar(t, "insert-tree-scrollbar", tree));
+                        let tree = frame
+                            .spawn((
+                                Name::new("insert-tree"),
+                                InsertTree,
+                                cadrs_ui::WheelScroll,
+                                cadrs_ui::scrollbar::ScrollGutter(12.0),
+                                Node {
+                                    flex_direction: FlexDirection::Column,
+                                    min_height: Val::Px(150.0),
+                                    max_height: Val::Px(330.0),
+                                    overflow: Overflow::scroll_y(),
+                                    padding: UiRect::vertical(Val::Px(4.0)),
+                                    ..default()
+                                },
+                            ))
+                            .id();
+                        frame.spawn(cadrs_ui::vertical_scrollbar(
+                            t,
+                            "insert-tree-scrollbar",
+                            tree,
+                        ));
                     });
-                b.spawn(Node {
-                    justify_content: JustifyContent::FlexEnd,
-                    padding: UiRect::new(Val::Px(8.0), Val::Px(10.0), Val::Px(4.0), Val::Px(6.0)),
-                    ..default()
-                })
-                .with_child((Name::new("insert-count"), InsertCount, t.text("Inserted: 0", 11.5, FontWeight::BOLD, t.foreground)));
+                    b.spawn(Node {
+                        justify_content: JustifyContent::FlexEnd,
+                        padding: UiRect::new(
+                            Val::Px(8.0),
+                            Val::Px(10.0),
+                            Val::Px(4.0),
+                            Val::Px(6.0),
+                        ),
+                        ..default()
+                    })
+                    .with_child((
+                        Name::new("insert-count"),
+                        InsertCount,
+                        t.text("Inserted: 0", 11.5, FontWeight::BOLD, t.foreground),
+                    ));
                 });
             })
             .footer(move |f| {
@@ -353,7 +508,14 @@ fn dialog(t: &Theme, doc_name: String) -> impl Bundle {
                 })
                 .insert(BorderColor::all(Color::srgb_u8(0xe4, 0xe4, 0xe4)))
                 .with_children(|r| {
-                    r.spawn(cadrs_ui::Button::new("insert-undo").label("Undo to remove instances").icon("undo").small().ghost().build(t));
+                    r.spawn(
+                        cadrs_ui::Button::new("insert-undo")
+                            .label("Undo to remove instances")
+                            .icon("undo")
+                            .small()
+                            .ghost()
+                            .build(t),
+                    );
                     r.spawn(cadrs_ui::icon::icon("help", 15.0, t.muted_foreground));
                 });
             })
@@ -365,7 +527,11 @@ fn dialog(t: &Theme, doc_name: String) -> impl Bundle {
 /// A tree row: what it inserts, its thumbnail's key, and whether it is a Part Studio row.
 pub(crate) type TreeRow = (Item, Option<(ElementId, Option<PartId>)>, bool);
 
-fn tree_items(doc: &ActiveDocument, parts_of: &mut super::AssemblyParts, s: &InsertSession) -> Vec<TreeRow> {
+fn tree_items(
+    doc: &ActiveDocument,
+    parts_of: &mut super::AssemblyParts,
+    s: &InsertSession,
+) -> Vec<TreeRow> {
     if let Some(src) = s.linked_source() {
         return super::insert_linked::linked_tree_items(&doc.doc, parts_of, s, src);
     }
@@ -376,11 +542,27 @@ fn tree_items(doc: &ActiveDocument, parts_of: &mut super::AssemblyParts, s: &Ins
     let mut out = Vec::new();
     if s.assemblies {
         // A17.2: the other Assembly tabs; not this one, nor one that holds it (no cycles).
-        for el in doc.doc.elements.iter().filter(|e| e.assembly_model().is_some()) {
-            if cadrs_core::assembly::structure::contains_assembly(&doc.doc, el.id, s.element) || !el.name.to_lowercase().contains(&q) {
+        for el in doc
+            .doc
+            .elements
+            .iter()
+            .filter(|e| e.assembly_model().is_some())
+        {
+            if cadrs_core::assembly::structure::contains_assembly(&doc.doc, el.id, s.element)
+                || !el.name.to_lowercase().contains(&q)
+            {
                 continue;
             }
-            out.push((Item { sources: vec![InstanceSource::Assembly { element: el.id }], label: el.name.clone(), rigid: Vec::new(), link: None }, Some((el.id, None)), false));
+            out.push((
+                Item {
+                    sources: vec![InstanceSource::Assembly { element: el.id }],
+                    label: el.name.clone(),
+                    rigid: Vec::new(),
+                    link: None,
+                },
+                Some((el.id, None)),
+                false,
+            ));
         }
         return out;
     }
@@ -388,23 +570,51 @@ fn tree_items(doc: &ActiveDocument, parts_of: &mut super::AssemblyParts, s: &Ins
         // Each PCB Studio's boards designed in cadrs: one rigid instance of the board and its
         // components (the studio's boards as Derived features, `PcbStudio::part_features`).
         for el in doc.doc.elements.iter().filter(|e| e.pcb().is_some()) {
-            let Some(build) = parts_of.build(&doc.doc, el.id) else { continue };
+            let Some(build) = parts_of.build(&doc.doc, el.id) else {
+                continue;
+            };
             for b in el.pcb().map(|p| p.boards.as_slice()).unwrap_or_default() {
                 if !(b.name().to_lowercase().contains(&q) || el.name.to_lowercase().contains(&q)) {
                     continue;
                 }
                 let f = cadrs_core::pcb::board_feature(b.id);
-                let parts: Vec<PartId> = build.parts.iter().filter(|p| p.feature == f).map(|p| p.id).collect();
-                let Some(first) = parts.first().copied() else { continue };
-                let source = InstanceSource::Studio { element: el.id, board: Some(b.id) };
-                out.push((Item { sources: vec![source], label: b.name().to_string(), rigid: parts, link: None }, Some((el.id, Some(first))), false));
+                let parts: Vec<PartId> = build
+                    .parts
+                    .iter()
+                    .filter(|p| p.feature == f)
+                    .map(|p| p.id)
+                    .collect();
+                let Some(first) = parts.first().copied() else {
+                    continue;
+                };
+                let source = InstanceSource::Studio {
+                    element: el.id,
+                    board: Some(b.id),
+                };
+                out.push((
+                    Item {
+                        sources: vec![source],
+                        label: b.name().to_string(),
+                        rigid: parts,
+                        link: None,
+                    },
+                    Some((el.id, Some(first))),
+                    false,
+                ));
             }
         }
         return out;
     }
     // (A PCB Studio's boards are in the Boards tab.)
-    for el in doc.doc.elements.iter().filter(|e| e.assembly_model().is_none() && e.pcb().is_none()) {
-        let Some(build) = parts_of.build(&doc.doc, el.id) else { continue };
+    for el in doc
+        .doc
+        .elements
+        .iter()
+        .filter(|e| e.assembly_model().is_none() && e.pcb().is_none())
+    {
+        let Some(build) = parts_of.build(&doc.doc, el.id) else {
+            continue;
+        };
         let parts: Vec<&cadrs_core::Part> = build
             .parts
             .iter()
@@ -414,26 +624,62 @@ fn tree_items(doc: &ActiveDocument, parts_of: &mut super::AssemblyParts, s: &Ins
             })
             .collect();
         let studio_hit = el.name.to_lowercase().contains(&q);
-        let names: Vec<String> = parts.iter().map(|p| cadrs_core::parts::display_name(p, el.part_props()).to_string()).collect();
+        let names: Vec<String> = parts
+            .iter()
+            .map(|p| cadrs_core::parts::display_name(p, el.part_props()).to_string())
+            .collect();
         // P3G.1 (ER1.4): a part's number and description match too.
         let by_property = |i: usize| {
-            el.part_prop(parts[i].id).is_some_and(|pp| [&pp.properties.part_number, &pp.properties.description].iter().any(|v| v.as_ref().is_some_and(|v| v.to_lowercase().contains(&q))))
+            el.part_prop(parts[i].id).is_some_and(|pp| {
+                [&pp.properties.part_number, &pp.properties.description]
+                    .iter()
+                    .any(|v| v.as_ref().is_some_and(|v| v.to_lowercase().contains(&q)))
+            })
         };
-        let shown: Vec<usize> = (0..parts.len()).filter(|i| studio_hit || names[*i].to_lowercase().contains(&q) || by_property(*i)).collect();
+        let shown: Vec<usize> = (0..parts.len())
+            .filter(|i| studio_hit || names[*i].to_lowercase().contains(&q) || by_property(*i))
+            .collect();
         if shown.is_empty() {
             continue;
         }
-        let all: Vec<InstanceSource> = parts.iter().map(|p| InstanceSource::Part { element: el.id, part: p.id }).collect();
+        let all: Vec<InstanceSource> = parts
+            .iter()
+            .map(|p| InstanceSource::Part {
+                element: el.id,
+                part: p.id,
+            })
+            .collect();
         // A2.4: with Insert as rigid, the studio's row inserts all its parts as one instance.
         let studio_item = if s.rigid {
-            Item { sources: vec![InstanceSource::Studio { element: el.id, board: None }], label: el.name.clone(), rigid: parts.iter().map(|p| p.id).collect(), link: None }
+            Item {
+                sources: vec![InstanceSource::Studio {
+                    element: el.id,
+                    board: None,
+                }],
+                label: el.name.clone(),
+                rigid: parts.iter().map(|p| p.id).collect(),
+                link: None,
+            }
         } else {
-            Item { sources: all, label: el.name.clone(), rigid: Vec::new(), link: None }
+            Item {
+                sources: all,
+                label: el.name.clone(),
+                rigid: Vec::new(),
+                link: None,
+            }
         };
         out.push((studio_item, Some((el.id, None)), true));
         for i in shown {
             out.push((
-                Item { sources: vec![InstanceSource::Part { element: el.id, part: parts[i].id }], label: names[i].clone(), rigid: Vec::new(), link: None },
+                Item {
+                    sources: vec![InstanceSource::Part {
+                        element: el.id,
+                        part: parts[i].id,
+                    }],
+                    label: names[i].clone(),
+                    rigid: Vec::new(),
+                    link: None,
+                },
                 Some((el.id, Some(parts[i].id))),
                 false,
             ));
@@ -462,7 +708,9 @@ pub(crate) fn thumbnail(
 ) -> Option<Handle<Image>> {
     // P3G.1: a linked assembly not inserted yet: seen with its copies.
     let with_links;
-    let d: &cadrs_core::Document = if doc.doc.element(key.0).is_none() && parts_of.linked_extra.iter().any(|l| l.id() == key.0) {
+    let d: &cadrs_core::Document = if doc.doc.element(key.0).is_none()
+        && parts_of.linked_extra.iter().any(|l| l.id() == key.0)
+    {
         with_links = crate::linked::with_links(&doc.doc, &parts_of.linked_extra);
         &with_links
     } else {
@@ -481,8 +729,15 @@ pub(crate) fn thumbnail(
         {
             return Some(h.clone());
         }
-        let list: Vec<(&cadrs_core::Solid, [u8; 3])> =
-            parts.iter().map(|p| (&*p.solid, cadrs_core::appearance::part_appearance(p, &props).rgb)).collect();
+        let list: Vec<(&cadrs_core::Solid, [u8; 3])> = parts
+            .iter()
+            .map(|p| {
+                (
+                    &*p.solid,
+                    cadrs_core::appearance::part_appearance(p, &props).rgb,
+                )
+            })
+            .collect();
         (ptr, cadrs_core::assembly::thumb::render(&list, 72))
     } else {
         let build = parts_of.build(&doc.doc, key.0)?;
@@ -492,19 +747,31 @@ pub(crate) fn thumbnail(
         {
             return Some(h.clone());
         }
-        let props = d.element(key.0).map(|e| e.part_props().to_vec()).unwrap_or_default();
+        let props = d
+            .element(key.0)
+            .map(|e| e.part_props().to_vec())
+            .unwrap_or_default();
         let list: Vec<(&cadrs_core::Solid, [u8; 3])> = build
             .parts
             .iter()
             .filter(|p| key.1.is_none_or(|id| id == p.id))
-            .map(|p| (&*p.solid, cadrs_core::appearance::part_appearance(p, &props).rgb))
+            .map(|p| {
+                (
+                    &*p.solid,
+                    cadrs_core::appearance::part_appearance(p, &props).rgb,
+                )
+            })
             .collect();
         (ptr, cadrs_core::assembly::thumb::render(&list, 72))
     };
     let (ptr, img) = img;
     let (w, h) = img.dimensions();
     let image = Image::new(
-        Extent3d { width: w, height: h, depth_or_array_layers: 1 },
+        Extent3d {
+            width: w,
+            height: h,
+            depth_or_array_layers: 1,
+        },
         TextureDimension::D2,
         img.into_raw(),
         TextureFormat::Rgba8UnormSrgb,
@@ -516,17 +783,34 @@ pub(crate) fn thumbnail(
 }
 
 /// What the tree was built from.
-type TreeKey = Vec<(String, Option<bool>, Option<(ElementId, Option<PartId>)>, bool)>;
+type TreeKey = Vec<(
+    String,
+    Option<bool>,
+    Option<(ElementId, Option<PartId>)>,
+    bool,
+)>;
 
 /// Filter child rows without changing what their Part Studio header inserts. Linked studios
 /// use their snapshot's namespaced element id, so they collapse independently too.
-fn visible_tree_items(items: Vec<TreeRow>, collapsed: &std::collections::HashSet<ElementId>) -> Vec<TreeRow> {
-    items.into_iter().filter(|(_, key, studio)| {
-        *studio || !key.is_some_and(|(element, part)| part.is_some() && collapsed.contains(&element))
-    }).collect()
+fn visible_tree_items(
+    items: Vec<TreeRow>,
+    collapsed: &std::collections::HashSet<ElementId>,
+) -> Vec<TreeRow> {
+    items
+        .into_iter()
+        .filter(|(_, key, studio)| {
+            *studio
+                || !key
+                    .is_some_and(|(element, part)| part.is_some() && collapsed.contains(&element))
+        })
+        .collect()
 }
 
-fn studio_disclosure(studio: bool, key: Option<(ElementId, Option<PartId>)>, s: &InsertSession) -> Option<bool> {
+fn studio_disclosure(
+    studio: bool,
+    key: Option<(ElementId, Option<PartId>)>,
+    s: &InsertSession,
+) -> Option<bool> {
     studio.then(|| key.is_none_or(|(element, _)| !s.collapsed.contains(&element)))
 }
 
@@ -546,11 +830,24 @@ fn rebuild_tree(
         *last = None;
         return;
     };
-    let Some((tree, added)) = q_tree.iter().next().map(|(e, r)| (e, r.is_added())) else { return };
+    let Some((tree, added)) = q_tree.iter().next().map(|(e, r)| (e, r.is_added())) else {
+        return;
+    };
     let items = visible_tree_items(tree_items(&doc, &mut parts_of, &s), &s.collapsed);
     let key: TreeKey = items
         .iter()
-        .map(|(it, k, studio)| (if it.rigid.is_empty() { it.label.clone() } else { format!("{} (rigid)", it.label) }, studio_disclosure(*studio, *k, &s), *k, s.armed.as_ref() == Some(it)))
+        .map(|(it, k, studio)| {
+            (
+                if it.rigid.is_empty() {
+                    it.label.clone()
+                } else {
+                    format!("{} (rigid)", it.label)
+                },
+                studio_disclosure(*studio, *k, &s),
+                *k,
+                s.armed.as_ref() == Some(it),
+            )
+        })
         .collect();
     if !added && last.as_ref() == Some(&key) {
         return;
@@ -562,7 +859,10 @@ fn rebuild_tree(
         n += 1;
         let img = k.and_then(|k| thumbnail(&mut thumbs, &mut images, &doc, &mut parts_of, k));
         let is_asm = item.sources.first().is_some_and(|s| s.is_assembly());
-        let is_board = item.sources.first().is_some_and(|s| matches!(s, InstanceSource::Studio { board: Some(_), .. }));
+        let is_board = item
+            .sources
+            .first()
+            .is_some_and(|s| matches!(s, InstanceSource::Studio { board: Some(_), .. }));
         let slug = slug(&item.label);
         let name = if is_board {
             format!("insert-board-{slug}")
@@ -575,7 +875,12 @@ fn rebuild_tree(
         };
         let armed = s.armed.as_ref() == Some(&item);
         let label = item.label.clone();
-        let rigid_tip = (!item.rigid.is_empty()).then(|| format!("{label}: inserted as one rigid instance ({} parts)", item.rigid.len()));
+        let rigid_tip = (!item.rigid.is_empty()).then(|| {
+            format!(
+                "{label}: inserted as one rigid instance ({} parts)",
+                item.rigid.len()
+            )
+        });
         let row = commands
             .spawn((
                 TreeItem::new(name, label)
@@ -597,12 +902,19 @@ fn rebuild_tree(
         if let Some(img) = img {
             let thumb = commands
                 .spawn((
-                    Node { width: Val::Px(34.0), height: Val::Px(34.0), flex_shrink: 0.0, ..default() },
+                    Node {
+                        width: Val::Px(34.0),
+                        height: Val::Px(34.0),
+                        flex_shrink: 0.0,
+                        ..default()
+                    },
                     ImageNode::new(img),
                     Pickable::IGNORE,
                 ))
                 .id();
-            commands.entity(row).insert_children(if studio { 1 } else { 0 }, &[thumb]);
+            commands
+                .entity(row)
+                .insert_children(if studio { 1 } else { 0 }, &[thumb]);
         } else if is_asm {
             // An empty assembly: a placeholder with the assembly icon (P3B.5 judge).
             let thumb = commands
@@ -621,7 +933,10 @@ fn rebuild_tree(
                     BackgroundColor(Color::srgb_u8(0xf3, 0xf4, 0xf6)),
                     BorderColor::all(Color::srgb_u8(0xd4, 0xd4, 0xd8)),
                     Pickable::IGNORE,
-                    children![(cadrs_ui::icon("assembly", 20.0, t.muted_foreground), Pickable::IGNORE)],
+                    children![(
+                        cadrs_ui::icon("assembly", 20.0, t.muted_foreground),
+                        Pickable::IGNORE
+                    )],
                 ))
                 .id();
             commands.entity(row).insert_children(0, &[thumb]);
@@ -641,7 +956,10 @@ fn rebuild_tree(
                 FontWeight::NORMAL,
                 t.muted_foreground,
             ),
-            Node { margin: UiRect::all(Val::Px(10.0)), ..default() },
+            Node {
+                margin: UiRect::all(Val::Px(10.0)),
+                ..default()
+            },
             ChildOf(tree),
         ));
     }
@@ -649,7 +967,12 @@ fn rebuild_tree(
 }
 
 /// Part Studios | Assemblies (A2.3, A17.2); Current document | Standard content (P3B.5).
-fn on_kind_tab(ev: On<cadrs_ui::TabStripSelect>, q: Query<&Name>, session: Option<ResMut<InsertSession>>, mut commands: Commands) {
+fn on_kind_tab(
+    ev: On<cadrs_ui::TabStripSelect>,
+    q: Query<&Name>,
+    session: Option<ResMut<InsertSession>>,
+    mut commands: Commands,
+) {
     let Some(mut s) = session else { return };
     match q.get(ev.entity).map(|n| n.as_str()) {
         Ok("insert-kind") => {
@@ -686,7 +1009,14 @@ fn on_kind_tab(ev: On<cadrs_ui::TabStripSelect>, q: Query<&Name>, session: Optio
 fn sync_panels(
     session: Option<Res<InsertSession>>,
     mut q: Query<
-        (&mut Node, Has<InsertDocPanel>, Has<super::standard::StdPanelHost>, Has<InsertFilters>, Has<super::insert_linked::InsertOtherPanel>, Has<super::insert_linked::InsertCurrentHeader>),
+        (
+            &mut Node,
+            Has<InsertDocPanel>,
+            Has<super::standard::StdPanelHost>,
+            Has<InsertFilters>,
+            Has<super::insert_linked::InsertOtherPanel>,
+            Has<super::insert_linked::InsertCurrentHeader>,
+        ),
         Or<(
             With<InsertDocPanel>,
             With<super::standard::StdPanelHost>,
@@ -727,7 +1057,11 @@ fn sync_panels(
         "Search Part Studios"
     };
     // The Current document's branch or version (ER3.2: "Main", or the version inserted from).
-    let branch = s.current.as_ref().map(|o| o.version_label()).unwrap_or_else(|| "Main".into());
+    let branch = s
+        .current
+        .as_ref()
+        .map(|o| o.version_label())
+        .unwrap_or_else(|| "Main".into());
     for (name, mut t) in &mut q_text {
         if name.as_str() == "insert-search-placeholder" && t.0 != want {
             t.0 = want.to_string();
@@ -754,19 +1088,32 @@ pub fn slug(label: &str) -> String {
 /// Inserts `item` at `pose` (one command per part, so Undo removes them one by one; a linked
 /// item's parts together with the copies they need, one step, P3G.1).
 fn insert_item(world: &mut World, item: &Item, pose: Pose) {
-    let Some(element) = world.get_resource::<InsertSession>().map(|s| s.element) else { return };
+    let Some(element) = world.get_resource::<InsertSession>().map(|s| s.element) else {
+        return;
+    };
     if let Some(link) = &item.link {
         let instances: Vec<Instance> = item
             .sources
             .iter()
             .map(|src| match src {
-                InstanceSource::Studio { element: el, board: None } => Instance::studio(InstanceId::new(), *el, item.rigid.clone(), pose),
-                InstanceSource::Studio { element: el, board: Some(b) } => Instance::board(InstanceId::new(), *el, *b, item.rigid.clone(), pose),
+                InstanceSource::Studio {
+                    element: el,
+                    board: None,
+                } => Instance::studio(InstanceId::new(), *el, item.rigid.clone(), pose),
+                InstanceSource::Studio {
+                    element: el,
+                    board: Some(b),
+                } => Instance::board(InstanceId::new(), *el, *b, item.rigid.clone(), pose),
                 _ => Instance::new(InstanceId::new(), *src, pose),
             })
             .collect();
         let ids: Vec<InstanceId> = instances.iter().map(|i| i.id).collect();
-        let cmd = cadrs_core::external::InsertLinked { element, snapshot: (*link.snapshot).clone(), instances, reference: link.reference };
+        let cmd = cadrs_core::external::InsertLinked {
+            element,
+            snapshot: (*link.snapshot).clone(),
+            instances,
+            reference: link.reference,
+        };
         let result = world.resource_mut::<ActiveDocument>().execute(&cmd);
         match result {
             Ok(()) => {
@@ -789,8 +1136,14 @@ fn insert_item(world: &mut World, item: &Item, pose: Pose) {
     for src in &item.sources {
         let id = InstanceId::new();
         let instance = match src {
-            InstanceSource::Studio { element: el, board: None } => Instance::studio(id, *el, item.rigid.clone(), pose),
-            InstanceSource::Studio { element: el, board: Some(b) } => Instance::board(id, *el, *b, item.rigid.clone(), pose),
+            InstanceSource::Studio {
+                element: el,
+                board: None,
+            } => Instance::studio(id, *el, item.rigid.clone(), pose),
+            InstanceSource::Studio {
+                element: el,
+                board: Some(b),
+            } => Instance::board(id, *el, *b, item.rigid.clone(), pose),
             _ => Instance::new(id, *src, pose),
         };
         if super::run(world, &InsertInstance { element, instance })
@@ -815,15 +1168,26 @@ fn footprint_middle(world: &mut World, item: &Item) -> Vec3 {
         // A subassembly: its parts where they are in its tab.
         let placed: Vec<(ElementId, PartId, Pose)> = match src {
             InstanceSource::Part { element, part } => vec![(*element, *part, Pose::IDENTITY)],
-            InstanceSource::Studio { element, .. } => item.rigid.iter().map(|p| (*element, *p, Pose::IDENTITY)).collect(),
+            InstanceSource::Studio { element, .. } => item
+                .rigid
+                .iter()
+                .map(|p| (*element, *p, Pose::IDENTITY))
+                .collect(),
             InstanceSource::Assembly { element } => doc
                 .element(*element)
                 .and_then(|e| e.assembly_model())
-                .map(|a| cadrs_core::assembly::structure::occurrences(&doc, a).into_iter().map(|o| (o.element, o.part, o.pose)).collect())
+                .map(|a| {
+                    cadrs_core::assembly::structure::occurrences(&doc, a)
+                        .into_iter()
+                        .map(|o| (o.element, o.part, o.pose))
+                        .collect()
+                })
                 .unwrap_or_default(),
         };
         for (el, part, pose) in placed {
-            let Some(b) = parts_of.build(&doc, el) else { continue };
+            let Some(b) = parts_of.build(&doc, el) else {
+                continue;
+            };
             if let Some(p) = b.part(part) {
                 for q in &p.solid.positions {
                     let w = pose.apply(*q);
@@ -859,8 +1223,14 @@ pub(crate) fn pose_at_pointer(world: &mut World, item: &Item, screen: Vec2) -> P
 }
 
 /// The chevron only changes the source list; it never arms or inserts the studio's parts.
-fn on_studio_toggle(ev: On<cadrs_ui::TreeToggle>, rows: Query<&InsertStudio>, session: Option<ResMut<InsertSession>>) {
-    let (Ok(row), Some(mut s)) = (rows.get(ev.entity), session) else { return };
+fn on_studio_toggle(
+    ev: On<cadrs_ui::TreeToggle>,
+    rows: Query<&InsertStudio>,
+    session: Option<ResMut<InsertSession>>,
+) {
+    let (Ok(row), Some(mut s)) = (rows.get(ev.entity), session) else {
+        return;
+    };
     if !s.collapsed.remove(&row.0) {
         s.collapsed.insert(row.0);
     }
@@ -874,7 +1244,9 @@ fn on_activate(a: On<Activate>, q: Query<&InsertRow>, mut commands: Commands) {
 }
 
 fn arm(world: &mut World, item: Item) {
-    let Some(s) = world.get_resource::<InsertSession>().cloned() else { return };
+    let Some(s) = world.get_resource::<InsertSession>().cloned() else {
+        return;
+    };
     // An item still waiting is inserted where it is in its Part Studio.
     if s.pending
         && let Some(prev) = s.armed.clone()
@@ -963,11 +1335,24 @@ fn update_ghosts(world: &mut World) {
     let ghosts: Vec<Instance> = match &s.armed {
         Some(item) if over => {
             let pose = pose_at_pointer(world, item, pointer);
-            item.sources.iter().enumerate().map(|(k, src)| Instance::new(InstanceId::from_u128(GHOST + k as u128), *src, pose)).collect()
+            item.sources
+                .iter()
+                .enumerate()
+                .map(|(k, src)| Instance::new(InstanceId::from_u128(GHOST + k as u128), *src, pose))
+                .collect()
         }
-        Some(item) if s.pending => {
-            item.sources.iter().enumerate().map(|(k, src)| Instance::new(InstanceId::from_u128(GHOST + k as u128), *src, Pose::IDENTITY)).collect()
-        }
+        Some(item) if s.pending => item
+            .sources
+            .iter()
+            .enumerate()
+            .map(|(k, src)| {
+                Instance::new(
+                    InstanceId::from_u128(GHOST + k as u128),
+                    *src,
+                    Pose::IDENTITY,
+                )
+            })
+            .collect(),
         _ => Vec::new(),
     };
     let mut a = world.resource_mut::<super::AssemblyParts>();
@@ -977,10 +1362,19 @@ fn update_ghosts(world: &mut World) {
 }
 
 /// "Inserted: n": this dialog's inserts still in the assembly (Undo removes them).
-fn sync_counter(session: Option<ResMut<InsertSession>>, doc: Option<Res<ActiveDocument>>, mut q: Query<&mut Text, With<InsertCount>>) {
-    let (Some(mut s), Some(doc)) = (session, doc) else { return };
+fn sync_counter(
+    session: Option<ResMut<InsertSession>>,
+    doc: Option<Res<ActiveDocument>>,
+    mut q: Query<&mut Text, With<InsertCount>>,
+) {
+    let (Some(mut s), Some(doc)) = (session, doc) else {
+        return;
+    };
     let present = |id: &InstanceId| {
-        doc.doc.element(s.element).and_then(|e| e.assembly_model()).is_some_and(|a| a.instance(*id).is_some())
+        doc.doc
+            .element(s.element)
+            .and_then(|e| e.assembly_model())
+            .is_some_and(|a| a.instance(*id).is_some())
     };
     let keep: Vec<InstanceId> = s.inserted.iter().copied().filter(present).collect();
     if keep != s.inserted {
@@ -1010,7 +1404,9 @@ fn insert_keys(
     }
     let typing = focus.get().is_some_and(|e| q_fields.contains(e));
     // Esc while standard content is being placed stops placing (not the dialog).
-    let placing = std_form.as_ref().is_some_and(|f| f.placing || f.autosize_pick);
+    let placing = std_form
+        .as_ref()
+        .is_some_and(|f| f.placing || f.autosize_pick);
     for k in keys.read() {
         if k.state != ButtonState::Pressed {
             continue;
@@ -1029,7 +1425,11 @@ fn insert_keys(
     }
 }
 
-fn end_on_tab_change(session: Option<Res<InsertSession>>, doc: Option<Res<ActiveDocument>>, mut commands: Commands) {
+fn end_on_tab_change(
+    session: Option<Res<InsertSession>>,
+    doc: Option<Res<ActiveDocument>>,
+    mut commands: Commands,
+) {
     if let (Some(s), Some(doc)) = (session, doc)
         && doc.active != Some(s.element)
     {
@@ -1037,13 +1437,21 @@ fn end_on_tab_change(session: Option<Res<InsertSession>>, doc: Option<Res<Active
     }
 }
 
-fn on_accept(ev: On<FeatureDialogAccept>, q: Query<(), With<InsertDialog>>, mut commands: Commands) {
+fn on_accept(
+    ev: On<FeatureDialogAccept>,
+    q: Query<(), With<InsertDialog>>,
+    mut commands: Commands,
+) {
     if q.contains(ev.entity) {
         commands.queue(accept);
     }
 }
 
-fn on_cancel(ev: On<FeatureDialogCancel>, q: Query<(), With<InsertDialog>>, mut commands: Commands) {
+fn on_cancel(
+    ev: On<FeatureDialogCancel>,
+    q: Query<(), With<InsertDialog>>,
+    mut commands: Commands,
+) {
     if q.contains(ev.entity) {
         commands.queue(cancel);
     }
@@ -1051,7 +1459,9 @@ fn on_cancel(ev: On<FeatureDialogCancel>, q: Query<(), With<InsertDialog>>, mut 
 
 /// ✓: an item still waiting goes in at its studio position; the dialog closes.
 pub fn accept(world: &mut World) {
-    let Some(s) = world.get_resource::<InsertSession>().cloned() else { return };
+    let Some(s) = world.get_resource::<InsertSession>().cloned() else {
+        return;
+    };
     // The holes standard content went on stay selected while the dialog is open (for
     // stacking); ✓ clears them.
     if s.std_steps > 0 {
@@ -1067,7 +1477,9 @@ pub fn accept(world: &mut World) {
 
 /// ✕: removes this dialog's inserts and closes it.
 pub fn cancel(world: &mut World) {
-    let Some(s) = world.get_resource::<InsertSession>().cloned() else { return };
+    let Some(s) = world.get_resource::<InsertSession>().cloned() else {
+        return;
+    };
     if !s.inserted.is_empty()
         && let Some(mut doc) = world.get_resource_mut::<ActiveDocument>()
     {
@@ -1087,7 +1499,10 @@ pub fn cancel(world: &mut World) {
 
 fn close(world: &mut World) {
     world.remove_resource::<InsertSession>();
-    if world.get_resource::<super::standard::StdForm>().is_some_and(|f| f.mode == super::standard::StdMode::Insert) {
+    if world
+        .get_resource::<super::standard::StdForm>()
+        .is_some_and(|f| f.mode == super::standard::StdMode::Insert)
+    {
         world.remove_resource::<super::standard::StdForm>();
     }
     world.resource_mut::<super::AssemblyParts>().ghosts.clear();
@@ -1098,7 +1513,12 @@ fn close(world: &mut World) {
     }
 }
 
-fn on_button(a: On<Activate>, q: Query<&Name>, session: Option<Res<InsertSession>>, mut commands: Commands) {
+fn on_button(
+    a: On<Activate>,
+    q: Query<&Name>,
+    session: Option<Res<InsertSession>>,
+    mut commands: Commands,
+) {
     if session.is_none() {
         return;
     }
@@ -1123,7 +1543,9 @@ fn on_button(a: On<Activate>, q: Query<&Name>, session: Option<Res<InsertSession
 fn on_dialog_button(world: &mut World, name: &str) {
     match name {
         "insert-undo" => {
-            let Some(s) = world.get_resource::<InsertSession>().cloned() else { return };
+            let Some(s) = world.get_resource::<InsertSession>().cloned() else {
+                return;
+            };
             if s.inserted.is_empty() {
                 return;
             }
@@ -1143,7 +1565,9 @@ fn on_dialog_button(world: &mut World, name: &str) {
                 s.current_graph = !s.current_graph;
             }
         }
-        "insert-create-version" => crate::linked::open_create_version_dialog(world, crate::linked::VersionTarget::Current),
+        "insert-create-version" => {
+            crate::linked::open_create_version_dialog(world, crate::linked::VersionTarget::Current)
+        }
         "insert-filter-parts" | "insert-filter-surfaces" => {
             if let Some(mut s) = world.get_resource_mut::<InsertSession>() {
                 if name == "insert-filter-parts" {
@@ -1177,10 +1601,31 @@ mod tests {
     fn rows(a: ElementId, b: ElementId) -> Vec<TreeRow> {
         let part = |el, name: &str| {
             let id = PartId::new(cadrs_core::FeatureId::new(), 0);
-            (Item { sources: vec![InstanceSource::Part { element: el, part: id }], label: name.into(), rigid: vec![], link: None }, Some((el, Some(id))), false)
+            (
+                Item {
+                    sources: vec![InstanceSource::Part {
+                        element: el,
+                        part: id,
+                    }],
+                    label: name.into(),
+                    rigid: vec![],
+                    link: None,
+                },
+                Some((el, Some(id))),
+                false,
+            )
         };
         let header = |el, children: &[TreeRow]| {
-            (Item { sources: children.iter().flat_map(|r| r.0.sources.clone()).collect(), label: "Studio".into(), rigid: vec![], link: None }, Some((el, None)), true)
+            (
+                Item {
+                    sources: children.iter().flat_map(|r| r.0.sources.clone()).collect(),
+                    label: "Studio".into(),
+                    rigid: vec![],
+                    link: None,
+                },
+                Some((el, None)),
+                true,
+            )
         };
         let first = vec![part(a, "Part A"), part(a, "Part B")];
         let second = vec![part(b, "Part C")];
@@ -1199,7 +1644,8 @@ mod tests {
         let header = app.world_mut().spawn(InsertStudio(a)).id();
         let armed = items[2].0.clone();
         app.world_mut().resource_mut::<InsertSession>().armed = Some(armed.clone());
-        app.world_mut().trigger(cadrs_ui::TreeToggle { entity: header });
+        app.world_mut()
+            .trigger(cadrs_ui::TreeToggle { entity: header });
         let s = app.world().resource::<InsertSession>();
         assert_eq!(studio_disclosure(true, Some((a, None)), s), Some(false));
         assert_eq!(studio_disclosure(true, Some((b, None)), s), Some(true));
@@ -1208,14 +1654,24 @@ mod tests {
         assert!(!s.pending);
         let visible = visible_tree_items(items.clone(), &s.collapsed);
         assert_eq!(visible.len(), 3);
-        assert_eq!(visible[0].0.sources.len(), 2, "the collapsed header must still insert the whole studio");
+        assert_eq!(
+            visible[0].0.sources.len(),
+            2,
+            "the collapsed header must still insert the whole studio"
+        );
         assert_eq!(visible[2].0.label, "Part C");
         // Filtering or switching kinds does not discard the user's disclosure state.
         app.world_mut().resource_mut::<InsertSession>().query = "Part".into();
         app.world_mut().resource_mut::<InsertSession>().assemblies = true;
         app.world_mut().resource_mut::<InsertSession>().assemblies = false;
-        assert!(app.world().resource::<InsertSession>().collapsed.contains(&a));
-        app.world_mut().trigger(cadrs_ui::TreeToggle { entity: header });
+        assert!(
+            app.world()
+                .resource::<InsertSession>()
+                .collapsed
+                .contains(&a)
+        );
+        app.world_mut()
+            .trigger(cadrs_ui::TreeToggle { entity: header });
         let s = app.world().resource::<InsertSession>();
         assert_eq!(visible_tree_items(items.clone(), &s.collapsed), items);
         assert_eq!(studio_disclosure(true, Some((a, None)), s), Some(true));
@@ -1229,25 +1685,60 @@ mod tests {
         // Pointer traversal queries Window even while bubbling through UI parents.
         // Register a window component without creating an operating-system window.
         let window = app.world_mut().spawn(Window::default()).id();
-        let tree = app.world_mut().query_filtered::<Entity, With<InsertTree>>().single(app.world()).unwrap();
+        let tree = app
+            .world_mut()
+            .query_filtered::<Entity, With<InsertTree>>()
+            .single(app.world())
+            .unwrap();
         assert!(app.world().get::<cadrs_ui::WheelScroll>(tree).is_some());
-        let mut bars = app.world_mut().query::<&cadrs_ui::scrollbar::SlimScrollbar>();
+        let mut bars = app
+            .world_mut()
+            .query::<&cadrs_ui::scrollbar::SlimScrollbar>();
         assert!(bars.iter(app.world()).any(|bar| bar.target == tree));
         app.world_mut().entity_mut(tree).insert(ComputedNode {
-            size: Vec2::new(262.0, 330.0), content_size: Vec2::new(262.0, 2000.0), ..default()
+            size: Vec2::new(262.0, 330.0),
+            content_size: Vec2::new(262.0, 2000.0),
+            ..default()
         });
         let row = app.world_mut().spawn((Node::default(), ChildOf(tree))).id();
-        let target = bevy::camera::RenderTarget::Window(bevy::window::WindowRef::Entity(window)).normalize(None).unwrap();
+        let target = bevy::camera::RenderTarget::Window(bevy::window::WindowRef::Entity(window))
+            .normalize(None)
+            .unwrap();
         let wheel = |app: &mut App, unit, y| {
-            app.world_mut().trigger(Pointer::new(PointerId::Mouse, Location { target: target.clone(), position: Vec2::ZERO }, Scroll {
-                unit, x: 0.0, y, hit: HitData::new(tree, 0.0, None, None), phase: bevy::input::touch::TouchPhase::Moved,
-            }, row));
+            app.world_mut().trigger(Pointer::new(
+                PointerId::Mouse,
+                Location {
+                    target: target.clone(),
+                    position: Vec2::ZERO,
+                },
+                Scroll {
+                    unit,
+                    x: 0.0,
+                    y,
+                    hit: HitData::new(tree, 0.0, None, None),
+                    phase: bevy::input::touch::TouchPhase::Moved,
+                },
+                row,
+            ));
         };
         wheel(&mut app, bevy::input::mouse::MouseScrollUnit::Line, -1.0);
-        assert_eq!(app.world().get::<bevy::ui::ScrollPosition>(tree).unwrap().y, 24.0);
-        wheel(&mut app, bevy::input::mouse::MouseScrollUnit::Pixel, -2000.0);
-        assert_eq!(app.world().get::<bevy::ui::ScrollPosition>(tree).unwrap().y, 1670.0);
+        assert_eq!(
+            app.world().get::<bevy::ui::ScrollPosition>(tree).unwrap().y,
+            24.0
+        );
+        wheel(
+            &mut app,
+            bevy::input::mouse::MouseScrollUnit::Pixel,
+            -2000.0,
+        );
+        assert_eq!(
+            app.world().get::<bevy::ui::ScrollPosition>(tree).unwrap().y,
+            1670.0
+        );
         wheel(&mut app, bevy::input::mouse::MouseScrollUnit::Pixel, 2000.0);
-        assert_eq!(app.world().get::<bevy::ui::ScrollPosition>(tree).unwrap().y, 0.0);
+        assert_eq!(
+            app.world().get::<bevy::ui::ScrollPosition>(tree).unwrap().y,
+            0.0
+        );
     }
 }

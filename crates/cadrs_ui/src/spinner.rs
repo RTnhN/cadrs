@@ -73,8 +73,7 @@ impl Spinner {
 
 fn spin(time: Res<Time>, mut q: Query<(&Spin, &mut UiTransform)>) {
     for (s, mut t) in &mut q {
-        let angle =
-            t.rotation.as_radians() + s.speed * std::f32::consts::TAU * time.delta_secs();
+        let angle = t.rotation.as_radians() + s.speed * std::f32::consts::TAU * time.delta_secs();
         t.rotation = Rot2::radians(angle % std::f32::consts::TAU);
     }
 }

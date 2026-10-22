@@ -61,7 +61,10 @@ impl std::fmt::Display for MeshError {
         match self {
             MeshError::Empty => write!(f, "it has no surface"),
             MeshError::NotClosed(n) => write!(f, "its surface isn't closed ({n} open edges)"),
-            MeshError::NoTetrahedra => write!(f, "no tetrahedra fit inside it (is it thinner than the element size?)"),
+            MeshError::NoTetrahedra => write!(
+                f,
+                "no tetrahedra fit inside it (is it thinner than the element size?)"
+            ),
         }
     }
 }
@@ -92,7 +95,11 @@ pub fn mesh(s: &Surface, h: f64) -> Result<TetMesh, MeshError> {
     for i in 0..=counts[0] {
         for j in 0..=counts[1] {
             for k in 0..=counts[2] {
-                let p = [offset[0] + i as f64 * h, offset[1] + j as f64 * h, offset[2] + k as f64 * h];
+                let p = [
+                    offset[0] + i as f64 * h,
+                    offset[1] + j as f64 * h,
+                    offset[2] + k as f64 * h,
+                ];
                 if index.distance_within_cell(p) >= 0.4 * h && index.inside(p) {
                     pts.push(p);
                 }
@@ -106,7 +113,10 @@ pub fn mesh(s: &Surface, h: f64) -> Result<TetMesh, MeshError> {
     let mut kept: Vec<[u32; 4]> = tets
         .into_iter()
         .filter(|t| {
-            let c = scale(t.iter().fold([0.0; 3], |a, &i| add(a, pts[i as usize])), 0.25);
+            let c = scale(
+                t.iter().fold([0.0; 3], |a, &i| add(a, pts[i as usize])),
+                0.25,
+            );
             index.inside(c)
         })
         .collect();
@@ -185,7 +195,10 @@ pub fn mesh(s: &Surface, h: f64) -> Result<TetMesh, MeshError> {
                 let (x, y) = (t[x], t[y]);
                 edge_node[&(x.min(y), x.max(y))]
             };
-            let tri = BoundaryTri { nodes: [t[a], t[b], t[c], m(a, b), m(b, c), m(c, a)], face: u32::MAX };
+            let tri = BoundaryTri {
+                nodes: [t[a], t[b], t[c], m(a, b), m(b, c), m(c, a)],
+                face: u32::MAX,
+            };
             ((ti, i), tri)
         })
         .collect();
@@ -195,7 +208,15 @@ pub fn mesh(s: &Surface, h: f64) -> Result<TetMesh, MeshError> {
         boundary.push(tri);
     }
 
-    Ok(TetMesh { nodes, corners, tets: tets10, boundary, h, volume, surface_volume: s.volume() })
+    Ok(TetMesh {
+        nodes,
+        corners,
+        tets: tets10,
+        boundary,
+        h,
+        volume,
+        surface_volume: s.volume(),
+    })
 }
 
 /// The CAD face a boundary triangle lies on: the one its three corners share, else the face of
@@ -210,7 +231,13 @@ fn face_of(tri: &BoundaryTri, nodes: &[V3], node_faces: &[Vec<u32>], index: &Sur
     if common.len() == 1 {
         return common[0];
     }
-    let centroid = scale(add(add(nodes[c[0] as usize], nodes[c[1] as usize]), nodes[c[2] as usize]), 1.0 / 3.0);
+    let centroid = scale(
+        add(
+            add(nodes[c[0] as usize], nodes[c[1] as usize]),
+            nodes[c[2] as usize],
+        ),
+        1.0 / 3.0,
+    );
     for reach in [1, 3, 8, 64] {
         if let Some((_, _, t, _)) = index.closest(centroid, reach) {
             let f = index.face[t as usize];
@@ -242,7 +269,10 @@ fn face_without(t: &[u32], i: usize) -> [u32; 3] {
 fn quality(pts: &[V3], t: &[u32; 4]) -> f64 {
     let p = |k: usize| pts[t[k] as usize];
     let v = vol6(p(0), p(1), p(2), p(3)) / 6.0;
-    let l = TET_EDGES.iter().map(|&(a, b)| len(sub(p(a), p(b)))).fold(0.0, f64::max);
+    let l = TET_EDGES
+        .iter()
+        .map(|&(a, b)| len(sub(p(a), p(b))))
+        .fold(0.0, f64::max);
     v / (l * l * l) * (6.0 * 2f64.sqrt())
 }
 
@@ -252,8 +282,15 @@ fn quality(pts: &[V3], t: &[u32; 4]) -> f64 {
 /// tetrahedron across a thin wall (its corners on both sides) is part of the wall and stays.
 fn peel_slivers(pts: &[V3], point_faces: &[Vec<u32>], mut tets: Vec<[u32; 4]>) -> Vec<[u32; 4]> {
     let on_one_face = |t: &[u32; 4]| {
-        let faces = |v: u32| point_faces.get(v as usize).map(Vec::as_slice).unwrap_or(&[]);
-        faces(t[0]).iter().any(|f| t[1..].iter().all(|&v| faces(v).contains(f)))
+        let faces = |v: u32| {
+            point_faces
+                .get(v as usize)
+                .map(Vec::as_slice)
+                .unwrap_or(&[])
+        };
+        faces(t[0])
+            .iter()
+            .any(|f| t[1..].iter().all(|&v| faces(v).contains(f)))
     };
     const FLAT: f64 = 0.02;
     for _ in 0..4 {
@@ -265,7 +302,9 @@ fn peel_slivers(pts: &[V3], point_faces: &[Vec<u32>], mut tets: Vec<[u32; 4]>) -
             }
         }
         let before = tets.len();
-        tets.retain(|t| !(quality(pts, t) < FLAT && on_one_face(t) && (0..4).any(|i| count[&face(t, i)] == 1)));
+        tets.retain(|t| {
+            !(quality(pts, t) < FLAT && on_one_face(t) && (0..4).any(|i| count[&face(t, i)] == 1))
+        });
         if tets.len() == before {
             break;
         }
@@ -321,7 +360,9 @@ fn largest_pieces(pts: &[V3], tets: Vec<[u32; 4]>) -> Vec<[u32; 4]> {
 impl TetMesh {
     /// The boundary triangles on the given CAD faces.
     pub fn on_faces<'a>(&'a self, faces: &'a [u32]) -> impl Iterator<Item = &'a BoundaryTri> + 'a {
-        self.boundary.iter().filter(move |t| faces.contains(&t.face))
+        self.boundary
+            .iter()
+            .filter(move |t| faces.contains(&t.face))
     }
 
     /// A boundary triangle's area vector (outward normal × area), from its corners.
@@ -339,7 +380,10 @@ impl TetMesh {
             .map(|t| {
                 let p = |k: usize| self.nodes[t[k] as usize];
                 let v = vol6(p(0), p(1), p(2), p(3)) / 6.0;
-                let l = TET_EDGES.iter().map(|&(a, b)| len(sub(p(a), p(b)))).fold(0.0, f64::max);
+                let l = TET_EDGES
+                    .iter()
+                    .map(|&(a, b)| len(sub(p(a), p(b))))
+                    .fold(0.0, f64::max);
                 v / (l * l * l) / regular
             })
             .fold(f64::MAX, f64::min)
@@ -363,7 +407,12 @@ mod tests {
         }
         let want = [100.0, 100.0, 1000.0, 1000.0, 1000.0, 1000.0];
         for k in 0..6 {
-            assert!((area[k] - want[k]).abs() < 1e-6, "face {k}: {} vs {}", area[k], want[k]);
+            assert!(
+                (area[k] - want[k]).abs() < 1e-6,
+                "face {k}: {} vs {}",
+                area[k],
+                want[k]
+            );
         }
         // Outward normals.
         for t in &m.boundary {
@@ -379,7 +428,14 @@ mod tests {
     fn an_l_shaped_part_meshes_close_to_its_volume() {
         // An L: [0,20]×[0,10]×[0,5] ∪ [0,10]×[10,20]×[0,5] (volume 1500), as one surface.
         let mut s = Surface::default();
-        let pts: [[f64; 2]; 6] = [[0.0, 0.0], [20.0, 0.0], [20.0, 10.0], [10.0, 10.0], [10.0, 20.0], [0.0, 20.0]];
+        let pts: [[f64; 2]; 6] = [
+            [0.0, 0.0],
+            [20.0, 0.0],
+            [20.0, 10.0],
+            [10.0, 10.0],
+            [10.0, 20.0],
+            [0.0, 20.0],
+        ];
         let base = |z: f64| pts.iter().map(|p| [p[0], p[1], z]).collect::<Vec<_>>();
         s.positions.extend(base(0.0));
         s.positions.extend(base(5.0));

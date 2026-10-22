@@ -39,10 +39,22 @@ pub type P2 = [f64; 2];
 /// One edge of a loop.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Segment {
-    Line { start: P2, end: P2 },
+    Line {
+        start: P2,
+        end: P2,
+    },
     /// `sweep` in degrees, positive counter-clockwise.
-    Arc { start: P2, end: P2, center: P2, radius: f64, sweep: f64 },
-    Circle { center: P2, radius: f64 },
+    Arc {
+        start: P2,
+        end: P2,
+        center: P2,
+        radius: f64,
+        sweep: f64,
+    },
+    Circle {
+        center: P2,
+        radius: f64,
+    },
 }
 
 /// Axis-aligned bounding box.
@@ -54,7 +66,10 @@ pub struct BBox {
 
 impl BBox {
     pub fn empty() -> BBox {
-        BBox { min: [f64::INFINITY; 2], max: [f64::NEG_INFINITY; 2] }
+        BBox {
+            min: [f64::INFINITY; 2],
+            max: [f64::NEG_INFINITY; 2],
+        }
     }
 
     pub fn add(&mut self, p: P2) {
@@ -88,7 +103,10 @@ impl BBox {
 
     /// True if the boxes overlap with positive area.
     pub fn overlaps(&self, o: &BBox) -> bool {
-        self.min[0] < o.max[0] && o.min[0] < self.max[0] && self.min[1] < o.max[1] && o.min[1] < self.max[1]
+        self.min[0] < o.max[0]
+            && o.min[0] < self.max[0]
+            && self.min[1] < o.max[1]
+            && o.min[1] < self.max[1]
     }
 }
 
@@ -123,7 +141,11 @@ pub fn arc_center(a: P2, b: P2, sweep: f64) -> (P2, f64) {
     }
     let radius = chord / (2.0 * half.sin().abs());
     // Signed distance from the chord midpoint to the centre, along the chord's left normal.
-    let d = if sweep.abs() == 180.0 { 0.0 } else { (chord / 2.0) / half.tan() };
+    let d = if sweep.abs() == 180.0 {
+        0.0
+    } else {
+        (chord / 2.0) / half.tan()
+    };
     let n = [-dy / chord, dx / chord];
     ([m[0] + n[0] * d, m[1] + n[1] * d], radius)
 }
@@ -136,7 +158,10 @@ impl Loop {
     /// Closed polygon (or arc chain) through `(x, y, angle)` triples; the first point is
     /// repeated at the end if it isn't already.
     pub fn from_triples(label: u32, pts: &[(f64, f64, f64)]) -> Loop {
-        let mut points: Vec<LoopPoint> = pts.iter().map(|&(x, y, a)| LoopPoint::new(x, y, a)).collect();
+        let mut points: Vec<LoopPoint> = pts
+            .iter()
+            .map(|&(x, y, a)| LoopPoint::new(x, y, a))
+            .collect();
         if let (Some(f), Some(l)) = (points.first().copied(), points.last().copied())
             && points.len() > 1
             && (f.x != l.x || f.y != l.y)
@@ -148,12 +173,27 @@ impl Loop {
 
     /// Axis-aligned rectangle, counter-clockwise, closed.
     pub fn rect(label: u32, x0: f64, y0: f64, x1: f64, y1: f64) -> Loop {
-        Loop::from_triples(label, &[(x0, y0, 0.0), (x1, y0, 0.0), (x1, y1, 0.0), (x0, y1, 0.0), (x0, y0, 0.0)])
+        Loop::from_triples(
+            label,
+            &[
+                (x0, y0, 0.0),
+                (x1, y0, 0.0),
+                (x1, y1, 0.0),
+                (x0, y1, 0.0),
+                (x0, y0, 0.0),
+            ],
+        )
     }
 
     /// Full circle (IDF 3.0 form: centre, then a point on the circle with angle 360).
     pub fn circle(label: u32, cx: f64, cy: f64, r: f64) -> Loop {
-        Loop { label, points: vec![LoopPoint::new(cx, cy, 0.0), LoopPoint::new(cx + r, cy, 360.0)] }
+        Loop {
+            label,
+            points: vec![
+                LoopPoint::new(cx, cy, 0.0),
+                LoopPoint::new(cx + r, cy, 360.0),
+            ],
+        }
     }
 
     /// True if this loop is a single 360° circle.
@@ -170,10 +210,19 @@ impl Loop {
             if ang == 0.0 {
                 Segment::Line { start: a, end: b }
             } else if is_circle_angle(ang) {
-                Segment::Circle { center: a, radius: (b[0] - a[0]).hypot(b[1] - a[1]) }
+                Segment::Circle {
+                    center: a,
+                    radius: (b[0] - a[0]).hypot(b[1] - a[1]),
+                }
             } else {
                 let (center, radius) = arc_center(a, b, ang);
-                Segment::Arc { start: a, end: b, center, radius, sweep: ang }
+                Segment::Arc {
+                    start: a,
+                    end: b,
+                    center,
+                    radius,
+                    sweep: ang,
+                }
             }
         })
     }
@@ -199,7 +248,13 @@ impl Loop {
         for s in self.segments() {
             match s {
                 Segment::Line { start, end } => a += cross(start, end) / 2.0,
-                Segment::Arc { start, end, radius, sweep, .. } => {
+                Segment::Arc {
+                    start,
+                    end,
+                    radius,
+                    sweep,
+                    ..
+                } => {
                     let t = sweep.to_radians();
                     a += cross(start, end) / 2.0 + radius * radius / 2.0 * (t - t.sin());
                 }
@@ -232,14 +287,26 @@ impl Loop {
                     bb.add([center[0] - radius, center[1] - radius]);
                     bb.add([center[0] + radius, center[1] + radius]);
                 }
-                Segment::Arc { start, end, center, radius, sweep } => {
+                Segment::Arc {
+                    start,
+                    end,
+                    center,
+                    radius,
+                    sweep,
+                } => {
                     bb.add(start);
                     bb.add(end);
-                    let a0 = (start[1] - center[1]).atan2(start[0] - center[0]).to_degrees();
+                    let a0 = (start[1] - center[1])
+                        .atan2(start[0] - center[0])
+                        .to_degrees();
                     // Each axis direction k*90° lies on the arc if it is within the sweep.
                     for k in 0..4 {
                         let dir = k as f64 * 90.0;
-                        let rel = if sweep > 0.0 { (dir - a0).rem_euclid(360.0) } else { (a0 - dir).rem_euclid(360.0) };
+                        let rel = if sweep > 0.0 {
+                            (dir - a0).rem_euclid(360.0)
+                        } else {
+                            (a0 - dir).rem_euclid(360.0)
+                        };
                         if rel > 0.0 && rel < sweep.abs() {
                             let (s, c) = sin_cos_deg(dir);
                             bb.add([center[0] + radius * c, center[1] + radius * s]);
@@ -272,11 +339,18 @@ impl Loop {
             .iter()
             .map(|p| {
                 let (x, y) = f(p.x, p.y);
-                let angle = if mirrored && !is_circle_angle(p.angle) { -p.angle } else { p.angle };
+                let angle = if mirrored && !is_circle_angle(p.angle) {
+                    -p.angle
+                } else {
+                    p.angle
+                };
                 LoopPoint { x, y, angle }
             })
             .collect();
-        Loop { label: self.label, points }
+        Loop {
+            label: self.label,
+            points,
+        }
     }
 
     /// The loop with each 360° circle replaced by two 180° arcs (for IDF 2.0).
@@ -300,7 +374,10 @@ impl Loop {
                 i += 1;
             }
         }
-        Loop { label: self.label, points: out }
+        Loop {
+            label: self.label,
+            points: out,
+        }
     }
 }
 

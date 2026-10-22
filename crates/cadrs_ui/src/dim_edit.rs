@@ -32,10 +32,9 @@ pub struct DimEditPlugin;
 
 impl Plugin for DimEditPlugin {
     fn build(&self, app: &mut App) {
-        app.add_observer(on_key).add_observer(on_button_click).add_systems(
-            PostUpdate,
-            style_boxes.before(bevy::ui::UiSystems::Prepare),
-        );
+        app.add_observer(on_key)
+            .add_observer(on_button_click)
+            .add_systems(PostUpdate, style_boxes.before(bevy::ui::UiSystems::Prepare));
     }
 }
 
@@ -192,7 +191,12 @@ impl DimEdit {
                     Name::new(format!("{name}-row")),
                     Node {
                         height: Val::Px(ROW),
-                        padding: UiRect::new(Val::Px(6.0), Val::Px(8.0), Val::Px(0.0), Val::Px(0.0)),
+                        padding: UiRect::new(
+                            Val::Px(6.0),
+                            Val::Px(8.0),
+                            Val::Px(0.0),
+                            Val::Px(0.0)
+                        ),
                         align_items: AlignItems::Center,
                         column_gap: Val::Px(6.0),
                         overflow: Overflow::clip(),
@@ -270,7 +274,12 @@ impl DimEdit {
                     TextLayout::no_wrap(),
                     Node {
                         display: Display::None,
-                        padding: UiRect::new(Val::Px(8.0), Val::Px(8.0), Val::Px(0.0), Val::Px(6.0)),
+                        padding: UiRect::new(
+                            Val::Px(8.0),
+                            Val::Px(8.0),
+                            Val::Px(0.0),
+                            Val::Px(6.0)
+                        ),
                         ..default()
                     },
                 ),

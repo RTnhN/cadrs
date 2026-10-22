@@ -57,7 +57,14 @@ impl Netlist {
 
     /// The net a pin is on: (reference, pin number) → net name.
     pub fn net_of(&self, reference: &str, pin: &str) -> Option<&str> {
-        self.nets.iter().find(|n| n.pins.iter().any(|p| p.reference == reference && p.number == pin)).map(|n| n.name.as_str())
+        self.nets
+            .iter()
+            .find(|n| {
+                n.pins
+                    .iter()
+                    .any(|p| p.reference == reference && p.number == pin)
+            })
+            .map(|n| n.name.as_str())
     }
 }
 
@@ -98,7 +105,11 @@ pub fn on_segment(p: Pt, a: Pt, b: Pt) -> bool {
 
 enum Node {
     Pin(NetPin),
-    Label { text: String, global: bool, sheet: usize },
+    Label {
+        text: String,
+        global: bool,
+        sheet: usize,
+    },
     PowerName(String),
     NoConnect,
     Wire(usize, Uuid),
@@ -115,7 +126,11 @@ pub fn netlist(sch: &Schematic) -> Netlist {
     };
     for (si, sheet) in sch.sheets.iter().enumerate() {
         // Wire segments.
-        let wires: Vec<(usize, Pt, Pt)> = sheet.wires.iter().map(|w| (add(Node::Wire(si, w.id), &mut dsu), w.a, w.b)).collect();
+        let wires: Vec<(usize, Pt, Pt)> = sheet
+            .wires
+            .iter()
+            .map(|w| (add(Node::Wire(si, w.id), &mut dsu), w.a, w.b))
+            .collect();
         // Points that join: each connection point with the node it belongs to.
         let mut points: Vec<(Pt, usize, bool)> = vec![]; // (where, node, may join a wire's middle)
         for &(n, a, b) in &wires {
@@ -148,7 +163,14 @@ pub fn netlist(sch: &Schematic) -> Netlist {
         }
         for l in &sheet.labels {
             let global = !matches!(l.kind, LabelKind::Local);
-            let n = add(Node::Label { text: l.text.text.clone(), global, sheet: si }, &mut dsu);
+            let n = add(
+                Node::Label {
+                    text: l.text.text.clone(),
+                    global,
+                    sheet: si,
+                },
+                &mut dsu,
+            );
             points.push((l.text.at, n, true));
         }
         for nc in &sheet.no_connects {
@@ -187,8 +209,15 @@ pub fn netlist(sch: &Schematic) -> Netlist {
     let mut names: HashMap<(String, Option<usize>), usize> = HashMap::new();
     for (i, node) in nodes.iter().enumerate() {
         let key = match node {
-            Node::Label { text, global: false, sheet } => (text.clone(), Some(*sheet)),
-            Node::Label { text, global: true, .. } | Node::PowerName(text) => (text.clone(), None),
+            Node::Label {
+                text,
+                global: false,
+                sheet,
+            } => (text.clone(), Some(*sheet)),
+            Node::Label {
+                text, global: true, ..
+            }
+            | Node::PowerName(text) => (text.clone(), None),
             _ => continue,
         };
         match names.get(&key) {
@@ -205,12 +234,22 @@ pub fn netlist(sch: &Schematic) -> Netlist {
     let mut local_name: HashMap<usize, String> = HashMap::new();
     for (i, node) in nodes.iter().enumerate() {
         let root = dsu.find(i);
-        let net = groups.entry(root).or_insert_with(|| Net { name: String::new(), pins: vec![], labels: vec![], no_connect: false, wires: vec![] });
+        let net = groups.entry(root).or_insert_with(|| Net {
+            name: String::new(),
+            pins: vec![],
+            labels: vec![],
+            no_connect: false,
+            wires: vec![],
+        });
         match node {
             Node::Pin(p) => net.pins.push(p.clone()),
             Node::Label { text, global, .. } => {
                 net.labels.push(text.clone());
-                let m = if *global { &mut global_name } else { &mut local_name };
+                let m = if *global {
+                    &mut global_name
+                } else {
+                    &mut local_name
+                };
                 m.entry(root).or_insert_with(|| text.clone());
             }
             Node::PowerName(n) => {
@@ -225,7 +264,11 @@ pub fn netlist(sch: &Schematic) -> Netlist {
         if net.pins.is_empty() && net.labels.is_empty() {
             continue;
         }
-        net.pins.sort_by(|a, b| natural(&a.reference).cmp(&natural(&b.reference)).then(natural(&a.number).cmp(&natural(&b.number))));
+        net.pins.sort_by(|a, b| {
+            natural(&a.reference)
+                .cmp(&natural(&b.reference))
+                .then(natural(&a.number).cmp(&natural(&b.number)))
+        });
         net.name = power_name
             .get(&root)
             .or_else(|| global_name.get(&root))
@@ -238,9 +281,15 @@ pub fn netlist(sch: &Schematic) -> Netlist {
                 // A pin with a name of its own drives the name (as in KiCad: "Net-(U1-ANT)"
                 // over a capacitor's unnamed pin); a name that is just the number doesn't count.
                 let named = |p: &&NetPin| !p.name.is_empty() && p.name != "~" && p.name != p.number;
-                let driver = net.part_pins().find(|p| named(p)).or_else(|| net.part_pins().next()).or(net.pins.first());
+                let driver = net
+                    .part_pins()
+                    .find(|p| named(p))
+                    .or_else(|| net.part_pins().next())
+                    .or(net.pins.first());
                 match driver {
-                    Some(p) if lone && named(&p) => format!("unconnected-({}-{}-Pad{})", p.reference, p.name, p.number),
+                    Some(p) if lone && named(&p) => {
+                        format!("unconnected-({}-{}-Pad{})", p.reference, p.name, p.number)
+                    }
                     Some(p) if lone => format!("unconnected-({}-Pad{})", p.reference, p.number),
                     Some(p) if named(&p) => format!("Net-({}-{})", p.reference, p.name),
                     Some(p) => format!("Net-({}-Pad{})", p.reference, p.number),
@@ -256,7 +305,10 @@ pub fn netlist(sch: &Schematic) -> Netlist {
 /// A key that sorts "R2" before "R10".
 pub fn natural(s: &str) -> (String, u64, String) {
     let head: String = s.chars().take_while(|c| !c.is_ascii_digit()).collect();
-    let digits: String = s[head.len()..].chars().take_while(|c| c.is_ascii_digit()).collect();
+    let digits: String = s[head.len()..]
+        .chars()
+        .take_while(|c| c.is_ascii_digit())
+        .collect();
     let rest = s[head.len() + digits.len()..].to_string();
     (head, digits.parse().unwrap_or(0), rest)
 }

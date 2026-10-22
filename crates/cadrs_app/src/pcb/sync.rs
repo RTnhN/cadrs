@@ -16,12 +16,21 @@ pub struct PcbLibrarySync(pub LibrarySync);
 
 /// Runs the sync when the document changed.
 pub fn sync_library(world: &mut World) {
-    let changed = world.get_resource_ref::<ActiveDocument>().is_some_and(|d| d.is_changed());
+    let changed = world
+        .get_resource_ref::<ActiveDocument>()
+        .is_some_and(|d| d.is_changed());
     if !changed {
         return;
     }
-    let Some(store) = world.get_resource::<DocumentStore>().map(|s| s.0.clone()) else { return };
-    let has_studio = world.resource::<ActiveDocument>().doc.elements.iter().any(|e| e.pcb().is_some());
+    let Some(store) = world.get_resource::<DocumentStore>().map(|s| s.0.clone()) else {
+        return;
+    };
+    let has_studio = world
+        .resource::<ActiveDocument>()
+        .doc
+        .elements
+        .iter()
+        .any(|e| e.pcb().is_some());
     if !has_studio {
         return;
     }
@@ -40,7 +49,13 @@ pub fn sync_library(world: &mut World) {
         warn!("PCB library: {:?}", out.errors);
         let theme = world.resource::<Theme>().clone();
         let mut commands = world.commands();
-        show_notification(&mut commands, &theme, Notification::warning(out.errors.join("; ")).name("pcb-library-toast").max_width(560.0));
+        show_notification(
+            &mut commands,
+            &theme,
+            Notification::warning(out.errors.join("; "))
+                .name("pcb-library-toast")
+                .max_width(560.0),
+        );
         world.flush();
     }
 }

@@ -43,7 +43,10 @@ impl Pick {
                 Some(crate::sketch::RIGHT_ID) => "Right",
                 _ => return None,
             },
-            Pick::Query(q) => q.get("operationId").and_then(Value::as_str)?.strip_suffix(".planeOp")?,
+            Pick::Query(q) => q
+                .get("operationId")
+                .and_then(Value::as_str)?
+                .strip_suffix(".planeOp")?,
             Pick::WholeSketch(_) => return None,
         };
         match name {
@@ -58,7 +61,10 @@ impl Pick {
     pub fn is_origin(&self) -> bool {
         match self {
             Pick::Opaque(ids) => ids.first().map(String::as_str) == Some(crate::sketch::ORIGIN_ID),
-            Pick::Query(q) => q.get("operationId").and_then(Value::as_str).is_some_and(|o| o.starts_with("Origin.")),
+            Pick::Query(q) => q
+                .get("operationId")
+                .and_then(Value::as_str)
+                .is_some_and(|o| o.starts_with("Origin.")),
             Pick::WholeSketch(_) => false,
         }
     }
@@ -72,8 +78,16 @@ pub fn picks(param: Option<&Json>) -> Vec<Pick> {
         .into_iter()
         .flatten()
         .map(|q| {
-            let ids = q["deterministicIds"].as_array().into_iter().flatten().filter_map(Json::as_str).map(String::from).collect();
-            let Some(s) = q["queryString"].as_str() else { return Pick::Opaque(ids) };
+            let ids = q["deterministicIds"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .filter_map(Json::as_str)
+                .map(String::from)
+                .collect();
+            let Some(s) = q["queryString"].as_str() else {
+                return Pick::Opaque(ids);
+            };
             if let Some(i) = s.find("qSketchRegion(id + \"") {
                 let rest = &s[i + "qSketchRegion(id + \"".len()..];
                 if let Some(end) = rest.find('"') {
@@ -102,9 +116,18 @@ pub fn sketch_entities(q: &Value, sketch: &str, out: &mut BTreeSet<String>) {
     match q {
         Value::Typed(_, v) => sketch_entities(v, sketch, out),
         Value::Map(m) => {
-            let is_entity = m.iter().any(|(k, v)| k == "queryType" && v.as_str() == Some("SKETCH_ENTITY"));
+            let is_entity = m
+                .iter()
+                .any(|(k, v)| k == "queryType" && v.as_str() == Some("SKETCH_ENTITY"));
             if is_entity
-                && let (Some(op), Some(id)) = (m.iter().find(|(k, _)| k == "operationId").and_then(|(_, v)| v.as_str()), m.iter().find(|(k, _)| k == "sketchEntityId").and_then(|(_, v)| v.as_str()))
+                && let (Some(op), Some(id)) = (
+                    m.iter()
+                        .find(|(k, _)| k == "operationId")
+                        .and_then(|(_, v)| v.as_str()),
+                    m.iter()
+                        .find(|(k, _)| k == "sketchEntityId")
+                        .and_then(|(_, v)| v.as_str()),
+                )
                 && op_feature(op) == sketch
             {
                 out.insert(id.to_string());
@@ -123,8 +146,12 @@ pub fn sketches_in(q: &Value, out: &mut BTreeSet<String>) {
     match q {
         Value::Typed(_, v) => sketches_in(v, out),
         Value::Map(m) => {
-            if m.iter().any(|(k, v)| k == "queryType" && v.as_str() == Some("SKETCH_ENTITY"))
-                && let Some(op) = m.iter().find(|(k, _)| k == "operationId").and_then(|(_, v)| v.as_str())
+            if m.iter()
+                .any(|(k, v)| k == "queryType" && v.as_str() == Some("SKETCH_ENTITY"))
+                && let Some(op) = m
+                    .iter()
+                    .find(|(k, _)| k == "operationId")
+                    .and_then(|(_, v)| v.as_str())
             {
                 out.insert(op_feature(op).to_string());
             }
@@ -139,7 +166,9 @@ pub fn sketches_in(q: &Value, out: &mut BTreeSet<String>) {
 
 /// The cadrs curves of Onshape sketch entities (unknown ones left out).
 fn curves_of(ids: &BTreeSet<String>, map: &SketchMap) -> BTreeSet<CurveId> {
-    ids.iter().filter_map(|i| map.curves.get(i).copied()).collect()
+    ids.iter()
+        .filter_map(|i| map.curves.get(i).copied())
+        .collect()
 }
 
 /// The region of sketch `g` that `curves` describe: the one whose boundary (outer or holes)
@@ -152,7 +181,13 @@ pub fn region_with(sketch: FeatureId, g: &Sketch, curves: &BTreeSet<CurveId>) ->
     if curves.is_empty() {
         return (all.len() == 1).then(|| RegionRef::new(sketch, &all[0]));
     }
-    let boundary = |r: &cadrs_sketch::region::Region| -> BTreeSet<CurveId> { r.curves.iter().chain(r.hole_curves.iter().flatten()).copied().collect() };
+    let boundary = |r: &cadrs_sketch::region::Region| -> BTreeSet<CurveId> {
+        r.curves
+            .iter()
+            .chain(r.hole_curves.iter().flatten())
+            .copied()
+            .collect()
+    };
     all.iter()
         .map(|r| {
             let b = boundary(r);
@@ -160,16 +195,26 @@ pub fn region_with(sketch: FeatureId, g: &Sketch, curves: &BTreeSet<CurveId>) ->
             (r, hits, b.len() - hits)
         })
         .filter(|(_, hits, _)| *hits > 0)
-        .max_by(|(a, ha, xa), (b, hb, xb)| ha.cmp(hb).then(xb.cmp(xa)).then(region_area(b).total_cmp(&region_area(a))))
+        .max_by(|(a, ha, xa), (b, hb, xb)| {
+            ha.cmp(hb)
+                .then(xb.cmp(xa))
+                .then(region_area(b).total_cmp(&region_area(a)))
+        })
         .map(|(r, _, _)| RegionRef::new(sketch, r))
 }
 
 /// How many of `sides` (a sketch line and ±1) region `r` agrees with, if +1 means the region
 /// is on the line's left (going from its start to its end), and if it means the right.
-pub fn side_agreement(g: &Sketch, r: &cadrs_sketch::region::Region, sides: &[(CurveId, f64)]) -> (usize, usize) {
+pub fn side_agreement(
+    g: &Sketch,
+    r: &cadrs_sketch::region::Region,
+    sides: &[(CurveId, f64)],
+) -> (usize, usize) {
     let (mut left, mut right) = (0, 0);
     for (c, sign) in sides {
-        let Some(on_left) = side_of(g, r, *c) else { continue };
+        let Some(on_left) = side_of(g, r, *c) else {
+            continue;
+        };
         let plus_left = *sign > 0.0;
         if on_left == plus_left {
             left += 1;
@@ -183,17 +228,27 @@ pub fn side_agreement(g: &Sketch, r: &cadrs_sketch::region::Region, sides: &[(Cu
 /// Whether region `r` lies on the left of line `c` (at its middle), if `c` is a line on its
 /// boundary.
 fn side_of(g: &Sketch, r: &cadrs_sketch::region::Region, c: CurveId) -> Option<bool> {
-    let pieces = || r.outer_pieces.iter().zip(&r.curves).chain(r.hole_pieces.iter().flatten().zip(r.hole_piece_curves.iter().flatten()));
+    let pieces = || {
+        r.outer_pieces.iter().zip(&r.curves).chain(
+            r.hole_pieces
+                .iter()
+                .flatten()
+                .zip(r.hole_piece_curves.iter().flatten()),
+        )
+    };
     let (a, b) = match g.curves.get(c)?.kind {
         cadrs_sketch::CurveKind::Line { a, b } => (a, b),
         // A circle or arc runs counter-clockwise (as Onshape's do, and cadrs stores arcs): its
         // left is towards its centre. Tested beside the middle of the region's piece of it.
-        cadrs_sketch::CurveKind::Circle { center, .. } | cadrs_sketch::CurveKind::Arc { center, .. } => {
+        cadrs_sketch::CurveKind::Circle { center, .. }
+        | cadrs_sketch::CurveKind::Arc { center, .. } => {
             let ctr = g.points.get(center)?.pos;
-            let m = pieces().filter(|(_, pc)| **pc == c).find_map(|(p, _)| match p {
-                cadrs_sketch::region::Piece::Arc(a) => Some(a.mid()),
-                _ => None,
-            })?;
+            let m = pieces()
+                .filter(|(_, pc)| **pc == c)
+                .find_map(|(p, _)| match p {
+                    cadrs_sketch::region::Piece::Arc(a) => Some(a.mid()),
+                    _ => None,
+                })?;
             let to = ctr - m;
             let len = to.length();
             if len < 1e-9 {
@@ -216,7 +271,12 @@ fn side_of(g: &Sketch, r: &cadrs_sketch::region::Region, c: CurveId) -> Option<b
     let n = cadrs_sketch::Vec2::new(-d.y / len, d.x / len);
     // Test beside the part of the line the region is bounded by (a line can run past it or be
     // split by other curves), else beside the line's middle.
-    let pieces = r.outer_pieces.iter().zip(&r.curves).chain(r.hole_pieces.iter().flatten().zip(r.hole_piece_curves.iter().flatten()));
+    let pieces = r.outer_pieces.iter().zip(&r.curves).chain(
+        r.hole_pieces
+            .iter()
+            .flatten()
+            .zip(r.hole_piece_curves.iter().flatten()),
+    );
     let m = pieces
         .filter(|(_, pc)| **pc == c)
         .map(|(p, _)| (p.start(), p.end()))
@@ -234,8 +294,20 @@ fn side_of(g: &Sketch, r: &cadrs_sketch::region::Region, c: CurveId) -> Option<b
 fn spline_side_of(g: &Sketch, r: &cadrs_sketch::region::Region, c: CurveId) -> Option<bool> {
     use cadrs_sketch::spline;
     let spans = g.spline_spans(c)?;
-    let pieces = r.outer_pieces.iter().zip(&r.curves).chain(r.hole_pieces.iter().flatten().zip(r.hole_piece_curves.iter().flatten()));
-    let piece = pieces.filter(|(_, pc)| **pc == c).map(|(p, _)| *p).max_by(|x, y| x.start().distance(x.end()).total_cmp(&y.start().distance(y.end())))?;
+    let pieces = r.outer_pieces.iter().zip(&r.curves).chain(
+        r.hole_pieces
+            .iter()
+            .flatten()
+            .zip(r.hole_piece_curves.iter().flatten()),
+    );
+    let piece = pieces
+        .filter(|(_, pc)| **pc == c)
+        .map(|(p, _)| *p)
+        .max_by(|x, y| {
+            x.start()
+                .distance(x.end())
+                .total_cmp(&y.start().distance(y.end()))
+        })?;
     let m = match piece {
         cadrs_sketch::region::Piece::Bezier(b) => b.point_at(0.5),
         p => p.start().midpoint(p.end()),
@@ -254,7 +326,9 @@ fn spline_side_of(g: &Sketch, r: &cadrs_sketch::region::Region, c: CurveId) -> O
 /// one), not those its own disambiguation mentions.
 pub fn own_sketch_entity(q: &Value, sketch: &str) -> Option<String> {
     let of = |v: &Value| -> Option<String> {
-        if v.get("queryType")?.as_str()? == "SKETCH_ENTITY" && op_feature(v.get("operationId")?.as_str()?) == sketch {
+        if v.get("queryType")?.as_str()? == "SKETCH_ENTITY"
+            && op_feature(v.get("operationId")?.as_str()?) == sketch
+        {
             v.get("sketchEntityId")?.as_str().map(String::from)
         } else {
             None
@@ -278,12 +352,25 @@ pub fn own_sketch_entity(q: &Value, sketch: &str) -> Option<String> {
 /// curves (or, failing that, half of all named curves): with none such, the face Onshape means
 /// isn't one of cadrs's regions (it can be one Onshape splits differently), and nothing is
 /// returned rather than a wrong region.
-pub fn region_with_sides(sketch: FeatureId, g: &Sketch, curves: &BTreeSet<CurveId>, direct: &BTreeSet<CurveId>, sides: &[(CurveId, f64)], entries: usize) -> Option<RegionRef> {
+pub fn region_with_sides(
+    sketch: FeatureId,
+    g: &Sketch,
+    curves: &BTreeSet<CurveId>,
+    direct: &BTreeSet<CurveId>,
+    sides: &[(CurveId, f64)],
+    entries: usize,
+) -> Option<RegionRef> {
     if (sides.is_empty() && direct.is_empty()) || curves.is_empty() {
         return region_with(sketch, g, curves);
     }
     let all = regions_shared(g);
-    let boundary = |r: &cadrs_sketch::region::Region| -> BTreeSet<CurveId> { r.curves.iter().chain(r.hole_curves.iter().flatten()).copied().collect() };
+    let boundary = |r: &cadrs_sketch::region::Region| -> BTreeSet<CurveId> {
+        r.curves
+            .iter()
+            .chain(r.hole_curves.iter().flatten())
+            .copied()
+            .collect()
+    };
     if std::env::var_os("CADRS_ONSHAPE_DEBUG_REGIONS").is_some() {
         for (i, r) in all.iter().enumerate() {
             let b = boundary(r);
@@ -339,25 +426,48 @@ pub fn region_with_sides(sketch: FeatureId, g: &Sketch, curves: &BTreeSet<CurveI
 ///
 /// (Onshape names a sketch line that lies along a face edge by the edge, so `direct` can miss
 /// some of the lines around the region: the whole is the smallest region that has them all.)
-pub fn pieces_bounded_by(sketch: FeatureId, g: &Sketch, direct: &BTreeSet<CurveId>) -> Vec<RegionRef> {
+pub fn pieces_bounded_by(
+    sketch: FeatureId,
+    g: &Sketch,
+    direct: &BTreeSet<CurveId>,
+) -> Vec<RegionRef> {
     if direct.len() < 3 || g.imprint.is_empty() {
         return Vec::new();
     }
     let all = regions_shared(g);
     let drawn = |r: &cadrs_sketch::region::Region| -> BTreeSet<CurveId> {
-        r.curves.iter().chain(r.hole_curves.iter().flatten()).copied().filter(|c| !cadrs_sketch::is_synthetic(*c)).collect()
+        r.curves
+            .iter()
+            .chain(r.hole_curves.iter().flatten())
+            .copied()
+            .filter(|c| !cadrs_sketch::is_synthetic(*c))
+            .collect()
     };
     if all.iter().any(|r| direct.is_subset(&drawn(r))) {
         return Vec::new();
     }
     let mut bare = g.clone();
     bare.imprint.clear();
-    let Some(whole) = regions_shared(&bare).iter().filter(|r| direct.is_subset(&drawn(r))).min_by(|a, b| region_area(a).total_cmp(&region_area(b))).cloned() else {
+    let Some(whole) = regions_shared(&bare)
+        .iter()
+        .filter(|r| direct.is_subset(&drawn(r)))
+        .min_by(|a, b| region_area(a).total_cmp(&region_area(b)))
+        .cloned()
+    else {
         return Vec::new();
     };
-    let pieces: Vec<RegionRef> = all.iter().map(|r| RegionRef::new(sketch, r)).filter(|r| whole.contains(r.seed)).collect();
-    let sum: f64 = all.iter().filter(|r| whole.contains(RegionRef::new(sketch, r).seed)).map(region_area).sum();
-    if pieces.len() > 1 && (sum - region_area(&whole)).abs() <= 1e-6 * region_area(&whole).max(1.0) {
+    let pieces: Vec<RegionRef> = all
+        .iter()
+        .map(|r| RegionRef::new(sketch, r))
+        .filter(|r| whole.contains(r.seed))
+        .collect();
+    let sum: f64 = all
+        .iter()
+        .filter(|r| whole.contains(RegionRef::new(sketch, r).seed))
+        .map(region_area)
+        .sum();
+    if pieces.len() > 1 && (sum - region_area(&whole)).abs() <= 1e-6 * region_area(&whole).max(1.0)
+    {
         pieces
     } else {
         Vec::new()
@@ -398,28 +508,51 @@ pub enum PatternKind {
 /// The face pattern a face query describes, if it is one we can translate. Faces a later
 /// operation merged or split keep their origin's pattern (cadrs keeps the name of a face a
 /// boolean only trims, and numbers the pieces of a split one).
-pub fn face_pattern(q: &Value, features: &HashMap<String, FeatureId>, sketches: &HashMap<String, (SketchMap, Sketch)>) -> Option<FacePattern> {
+pub fn face_pattern(
+    q: &Value,
+    features: &HashMap<String, FeatureId>,
+    sketches: &HashMap<String, (SketchMap, Sketch)>,
+) -> Option<FacePattern> {
     face_patterns(q, features, sketches).into_iter().next()
 }
 
 /// Every face pattern the query could mean (a merge of several faces gives each).
-pub fn face_patterns(q: &Value, features: &HashMap<String, FeatureId>, sketches: &HashMap<String, (SketchMap, Sketch)>) -> Vec<FacePattern> {
+pub fn face_patterns(
+    q: &Value,
+    features: &HashMap<String, FeatureId>,
+    sketches: &HashMap<String, (SketchMap, Sketch)>,
+) -> Vec<FacePattern> {
     if q.get("entityType").and_then(Value::as_str) != Some("FACE") {
         return Vec::new();
     }
-    let Some(qtype) = q.get("queryType").and_then(Value::as_str) else { return Vec::new() };
+    let Some(qtype) = q.get("queryType").and_then(Value::as_str) else {
+        return Vec::new();
+    };
     if matches!(qtype, "MERGE" | "SPLIT") {
-        return derived(q).iter().flat_map(|d| face_patterns(d, features, sketches)).collect();
+        return derived(q)
+            .iter()
+            .flat_map(|d| face_patterns(d, features, sketches))
+            .collect();
     }
-    let Some(op) = op_of(q) else { return Vec::new() };
-    let Some(&feature) = features.get(op_feature(op)) else { return Vec::new() };
+    let Some(op) = op_of(q) else {
+        return Vec::new();
+    };
+    let Some(&feature) = features.get(op_feature(op)) else {
+        return Vec::new();
+    };
     let (curves, region) = sources(q, sketches);
     let kind = match qtype {
-        "CAP_FACE" => PatternKind::Cap { end: !q.get("isStart").and_then(Value::as_bool).unwrap_or(true), region },
+        "CAP_FACE" => PatternKind::Cap {
+            end: !q.get("isStart").and_then(Value::as_bool).unwrap_or(true),
+            region,
+        },
         "SWEPT_FACE" => PatternKind::Side { curves },
         _ => return Vec::new(),
     };
-    vec![FacePattern { op: feature.0, kind }]
+    vec![FacePattern {
+        op: feature.0,
+        kind,
+    }]
 }
 
 /// What a query was derived from (`derivedFrom`, one or several).
@@ -433,7 +566,10 @@ fn derived(q: &Value) -> Vec<&Value> {
 
 /// The cadrs curve sources (as face names hold them) of the sketch entities a query
 /// mentions, and the region they bound, if they bound one.
-fn sources(q: &Value, sketches: &HashMap<String, (SketchMap, Sketch)>) -> (BTreeSet<u64>, Option<u64>) {
+fn sources(
+    q: &Value,
+    sketches: &HashMap<String, (SketchMap, Sketch)>,
+) -> (BTreeSet<u64>, Option<u64>) {
     let mut srcs = BTreeSet::new();
     sketches_in(q, &mut srcs);
     let mut curves = BTreeSet::new();
@@ -460,34 +596,57 @@ pub struct EdgePattern {
 }
 
 /// The edge pattern an edge query describes, if it is one we can translate.
-pub fn edge_pattern(q: &Value, features: &HashMap<String, FeatureId>, sketches: &HashMap<String, (SketchMap, Sketch)>) -> Option<EdgePattern> {
+pub fn edge_pattern(
+    q: &Value,
+    features: &HashMap<String, FeatureId>,
+    sketches: &HashMap<String, (SketchMap, Sketch)>,
+) -> Option<EdgePattern> {
     if q.get("entityType")?.as_str()? != "EDGE" {
         return None;
     }
     let qtype = q.get("queryType")?.as_str()?;
     match qtype {
-        "MERGE" | "SPLIT" => derived(q).into_iter().find_map(|d| edge_pattern(d, features, sketches)),
+        "MERGE" | "SPLIT" => derived(q)
+            .into_iter()
+            .find_map(|d| edge_pattern(d, features, sketches)),
         "INTERSECT" => {
-            let faces: Vec<Vec<FacePattern>> = derived(q).into_iter().map(|d| face_patterns(d, features, sketches)).collect();
+            let faces: Vec<Vec<FacePattern>> = derived(q)
+                .into_iter()
+                .map(|d| face_patterns(d, features, sketches))
+                .collect();
             match faces.as_slice() {
-                [a, b] if !a.is_empty() && !b.is_empty() => Some(EdgePattern { a: a.clone(), b: b.clone() }),
+                [a, b] if !a.is_empty() && !b.is_empty() => Some(EdgePattern {
+                    a: a.clone(),
+                    b: b.clone(),
+                }),
                 _ => None,
             }
         }
         "CAP_EDGE" | "SWEPT_EDGE" => {
             let op = features.get(op_feature(op_of(q)?))?.0;
             let (curves, _) = sources(q, sketches);
-            let side = |c: u64| FacePattern { op, kind: PatternKind::Side { curves: BTreeSet::from([c]) } };
+            let side = |c: u64| FacePattern {
+                op,
+                kind: PatternKind::Side {
+                    curves: BTreeSet::from([c]),
+                },
+            };
             if qtype == "CAP_EDGE" {
                 let end = !q.get("isStart").and_then(Value::as_bool).unwrap_or(true);
                 Some(EdgePattern {
-                    a: vec![FacePattern { op, kind: PatternKind::Cap { end, region: None } }],
+                    a: vec![FacePattern {
+                        op,
+                        kind: PatternKind::Cap { end, region: None },
+                    }],
                     b: curves.iter().map(|c| side(*c)).collect(),
                 })
             } else {
                 let mut it = curves.iter();
                 let (c1, c2) = (*it.next()?, *it.next()?);
-                Some(EdgePattern { a: vec![side(c1)], b: vec![side(c2)] })
+                Some(EdgePattern {
+                    a: vec![side(c1)],
+                    b: vec![side(c2)],
+                })
             }
         }
         _ => None,
@@ -498,8 +657,12 @@ fn matches(f: &cadrs_kernel::naming::FaceName, pats: &[FacePattern]) -> bool {
     pats.iter().any(|p| {
         p.op == f.op
             && match (&p.kind, f.origin) {
-                (PatternKind::Cap { end, region }, FaceOrigin::Cap { region: r, end: e }) => *end == e && region.is_none_or(|x| x == r),
-                (PatternKind::Side { curves }, FaceOrigin::Side { curve, .. }) => curves.contains(&curve),
+                (PatternKind::Cap { end, region }, FaceOrigin::Cap { region: r, end: e }) => {
+                    *end == e && region.is_none_or(|x| x == r)
+                }
+                (PatternKind::Side { curves }, FaceOrigin::Side { curve, .. }) => {
+                    curves.contains(&curve)
+                }
                 _ => false,
             }
     })
@@ -510,17 +673,33 @@ fn matches(f: &cadrs_kernel::naming::FaceName, pats: &[FacePattern]) -> bool {
 pub fn find_face(parts: &[Part], pat: &FacePattern) -> Option<FaceRef> {
     let exact = |f: &cadrs_kernel::naming::FaceName| matches(f, std::slice::from_ref(pat));
     let loose = |f: &cadrs_kernel::naming::FaceName| match &pat.kind {
-        PatternKind::Cap { end, region: Some(_) } => {
-            let any = FacePattern { op: pat.op, kind: PatternKind::Cap { end: *end, region: None } };
+        PatternKind::Cap {
+            end,
+            region: Some(_),
+        } => {
+            let any = FacePattern {
+                op: pat.op,
+                kind: PatternKind::Cap {
+                    end: *end,
+                    region: None,
+                },
+            };
             matches(f, std::slice::from_ref(&any))
         }
         _ => false,
     };
-    for test in [&exact as &dyn Fn(&cadrs_kernel::naming::FaceName) -> bool, &loose] {
+    for test in [
+        &exact as &dyn Fn(&cadrs_kernel::naming::FaceName) -> bool,
+        &loose,
+    ] {
         for part in parts {
             if let Some(i) = part.solid.faces.iter().position(|f| test(&f.name)) {
                 let seed: Vec3 = part.solid.face_point(i).unwrap_or([0.0; 3]);
-                return Some(FaceRef { part: part.id, face: part.solid.faces[i].name, seed });
+                return Some(FaceRef {
+                    part: part.id,
+                    face: part.solid.faces[i].name,
+                    seed,
+                });
             }
         }
     }
@@ -532,9 +711,19 @@ pub fn find_edge(parts: &[Part], pat: &EdgePattern) -> Option<cadrs_core::docume
     for part in parts {
         for e in &part.solid.edges {
             let [f, g] = e.name.faces;
-            if (matches(&f, &pat.a) && matches(&g, &pat.b)) || (matches(&g, &pat.a) && matches(&f, &pat.b)) {
-                let seed = e.points.get(e.points.len() / 2).copied().unwrap_or([0.0; 3]);
-                return Some(cadrs_core::document::EdgeRef { part: part.id, edge: e.name, seed });
+            if (matches(&f, &pat.a) && matches(&g, &pat.b))
+                || (matches(&g, &pat.a) && matches(&f, &pat.b))
+            {
+                let seed = e
+                    .points
+                    .get(e.points.len() / 2)
+                    .copied()
+                    .unwrap_or([0.0; 3]);
+                return Some(cadrs_core::document::EdgeRef {
+                    part: part.id,
+                    edge: e.name,
+                    seed,
+                });
             }
         }
     }
@@ -543,7 +732,15 @@ pub fn find_edge(parts: &[Part], pat: &EdgePattern) -> Option<cadrs_core::docume
 
 /// The parts a body query names (the bodies an operation made).
 pub fn parts_of(q: &Value, features: &HashMap<String, FeatureId>, parts: &[Part]) -> Vec<PartId> {
-    let Some(op) = op_of(q) else { return Vec::new() };
-    let Some(f) = features.get(op_feature(op)) else { return Vec::new() };
-    parts.iter().filter(|p| p.id.feature == *f).map(|p| p.id).collect()
+    let Some(op) = op_of(q) else {
+        return Vec::new();
+    };
+    let Some(f) = features.get(op_feature(op)) else {
+        return Vec::new();
+    };
+    parts
+        .iter()
+        .filter(|p| p.id.feature == *f)
+        .map(|p| p.id)
+        .collect()
 }

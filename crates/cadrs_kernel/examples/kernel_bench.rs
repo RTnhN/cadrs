@@ -29,10 +29,10 @@
 use std::collections::HashMap;
 use std::time::{Duration, Instant};
 
+use cadrs_kernel::native::NativeKernel;
 use cadrs_kernel::native::draw::Shape;
 use cadrs_kernel::native::math::P3;
 use cadrs_kernel::native::smb;
-use cadrs_kernel::native::NativeKernel;
 use cadrs_kernel::{EdgeId, Kernel, OffsetSpec, Tessellation};
 
 type R<T> = std::result::Result<T, String>;
@@ -72,11 +72,17 @@ fn parse_cases(text: &str) -> R<Vec<Case>> {
                 if toks.len() < 3 {
                     return Err(format!("line {}: case <name> <category>", no + 1));
                 }
-                cur = Some(Case { name: toks[1].into(), category: toks[2].into(), lines: Vec::new() });
+                cur = Some(Case {
+                    name: toks[1].into(),
+                    category: toks[2].into(),
+                    lines: Vec::new(),
+                });
             }
             "end" => cases.extend(cur.take()),
             _ => {
-                let c = cur.as_mut().ok_or(format!("line {}: a command outside a case", no + 1))?;
+                let c = cur
+                    .as_mut()
+                    .ok_or(format!("line {}: a command outside a case", no + 1))?;
                 let (timed, toks) = match toks[0].strip_prefix('*') {
                     Some("") => (true, &toks[1..]),
                     Some(rest) => {
@@ -95,17 +101,32 @@ fn parse_cases(text: &str) -> R<Vec<Case>> {
 }
 
 fn line_of(timed: bool, toks: &[&str]) -> R<Line> {
-    let (out, rest) = if toks.len() >= 3 && toks[1] == "=" { (Some(toks[0].to_string()), &toks[2..]) } else { (None, toks) };
+    let (out, rest) = if toks.len() >= 3 && toks[1] == "=" {
+        (Some(toks[0].to_string()), &toks[2..])
+    } else {
+        (None, toks)
+    };
     let (cmd, args) = rest.split_first().ok_or("an empty command")?;
-    Ok(Line { timed, out, cmd: cmd.to_string(), args: args.iter().map(|s| s.to_string()).collect() })
+    Ok(Line {
+        timed,
+        out,
+        cmd: cmd.to_string(),
+        args: args.iter().map(|s| s.to_string()).collect(),
+    })
 }
 
 /// On-CPU time of all the process's threads (ns).
 fn cpu_ns() -> u64 {
-    let Ok(dir) = std::fs::read_dir("/proc/self/task") else { return 0 };
+    let Ok(dir) = std::fs::read_dir("/proc/self/task") else {
+        return 0;
+    };
     dir.flatten()
         .filter_map(|e| std::fs::read_to_string(e.path().join("schedstat")).ok())
-        .filter_map(|s| s.split_whitespace().next().and_then(|x| x.parse::<u64>().ok()))
+        .filter_map(|s| {
+            s.split_whitespace()
+                .next()
+                .and_then(|x| x.parse::<u64>().ok())
+        })
         .sum()
 }
 
@@ -135,7 +156,14 @@ struct Ctx {
 
 impl Ctx {
     fn new(overhead: u64) -> Self {
-        Self { k: NativeKernel::new(), vars: HashMap::new(), timing: false, wall: Duration::ZERO, cpu: 0, overhead }
+        Self {
+            k: NativeKernel::new(),
+            vars: HashMap::new(),
+            timing: false,
+            wall: Duration::ZERO,
+            cpu: 0,
+            overhead,
+        }
     }
 
     /// Runs `f`, adding its time to the case's when the line is timed.
@@ -155,7 +183,10 @@ impl Ctx {
             && let Ok(i) = i.parse::<usize>()
         {
             return match self.vars.get(v) {
-                Some(Val::List(l)) => l.get(i).cloned().ok_or(format!("{v} has {} elements", l.len())),
+                Some(Val::List(l)) => l
+                    .get(i)
+                    .cloned()
+                    .ok_or(format!("{v} has {} elements", l.len())),
                 _ => Err(format!("{v} isn't a list")),
             };
         }
@@ -198,7 +229,11 @@ impl Ctx {
     fn exec(&mut self, l: &Line) -> R<Option<Val>> {
         self.timing = l.timed;
         let a = &l.args;
-        let arg = |i: usize| a.get(i).map(String::as_str).ok_or(format!("{}: argument {} is missing", l.cmd, i + 1));
+        let arg = |i: usize| {
+            a.get(i)
+                .map(String::as_str)
+                .ok_or(format!("{}: argument {} is missing", l.cmd, i + 1))
+        };
         let e = |x: cadrs_kernel::KernelError| format!("{x:?}");
         let s = |v: Shape| Ok(Some(Val::Shape(v)));
         match l.cmd.as_str() {
@@ -238,7 +273,9 @@ impl Ctx {
             "trotate" => {
                 let sh = self.shape(arg(0)?)?;
                 let [x, y, z, dx, dy, dz, ang] = self.nums(&a[1..])?;
-                s(self.time(|k| k.trotate(&sh, x, y, z, dx, dy, dz, ang)).map_err(e)?)
+                s(self
+                    .time(|k| k.trotate(&sh, x, y, z, dx, dy, dz, ang))
+                    .map_err(e)?)
             }
             "tscale" => {
                 let sh = self.shape(arg(0)?)?;
@@ -271,7 +308,10 @@ impl Ctx {
             "blend" => {
                 let sh = self.shape(arg(0)?)?;
                 let r = self.num(arg(1)?)?;
-                let edges = a[2..].iter().map(|t| self.shape(t)).collect::<R<Vec<_>>>()?;
+                let edges = a[2..]
+                    .iter()
+                    .map(|t| self.shape(t))
+                    .collect::<R<Vec<_>>>()?;
                 let refs: Vec<&Shape> = edges.iter().collect();
                 s(self.time(|k| k.blend(&sh, r, &refs)).map_err(e)?)
             }
@@ -281,7 +321,10 @@ impl Ctx {
                 s(self.time(|k| k.wire(&refs)).map_err(e)?)
             }
             "polyline" => {
-                let pts = a.chunks(3).map(|c| self.nums::<3>(c)).collect::<R<Vec<_>>>()?;
+                let pts = a
+                    .chunks(3)
+                    .map(|c| self.nums::<3>(c))
+                    .collect::<R<Vec<_>>>()?;
                 s(self.time(|k| k.polyline(&pts)).map_err(e)?)
             }
             "prism" => {
@@ -292,7 +335,9 @@ impl Ctx {
             "revol" => {
                 let sh = self.shape(arg(0)?)?;
                 let [x, y, z, dx, dy, dz, ang] = self.nums(&a[1..])?;
-                s(self.time(|k| k.revol(&sh, x, y, z, dx, dy, dz, ang)).map_err(e)?)
+                s(self
+                    .time(|k| k.revol(&sh, x, y, z, dx, dy, dz, ang))
+                    .map_err(e)?)
             }
             "lprops" => {
                 let sh = self.shape(arg(0)?)?;
@@ -311,9 +356,14 @@ impl Ctx {
                 let sh = self.shape(arg(0)?)?;
                 let d = self.num(arg(1)?)?;
                 let arc = arg(2)? == "1";
-                let faces = a[3..].iter().map(|t| self.shape(t)).collect::<R<Vec<_>>>()?;
+                let faces = a[3..]
+                    .iter()
+                    .map(|t| self.shape(t))
+                    .collect::<R<Vec<_>>>()?;
                 let refs: Vec<&Shape> = faces.iter().collect();
-                s(self.time(|k| k.offsetperform(&sh, d, &refs, arc)).map_err(e)?)
+                s(self
+                    .time(|k| k.offsetperform(&sh, d, &refs, arc))
+                    .map_err(e)?)
             }
             "pipe" => {
                 let (sp, pr) = (self.shape(arg(0)?)?, self.shape(arg(1)?)?);
@@ -333,8 +383,11 @@ impl Ctx {
                         _ => Err("buildsweep: section contact correction".to_string()),
                     })
                     .collect::<R<Vec<_>>>()?;
-                let refs: Vec<(&Shape, bool, bool)> = secs.iter().map(|(v, t, r)| (v, *t, *r)).collect();
-                s(self.time(|k| k.buildsweep(&sp, &refs, &mode, dir, tr, solid)).map_err(e)?)
+                let refs: Vec<(&Shape, bool, bool)> =
+                    secs.iter().map(|(v, t, r)| (v, *t, *r)).collect();
+                s(self
+                    .time(|k| k.buildsweep(&sp, &refs, &mode, dir, tr, solid))
+                    .map_err(e)?)
             }
             "depouille" => {
                 // shape dx dy dz (face angle px py pz nx ny nz)…
@@ -347,10 +400,18 @@ impl Ctx {
                             return Err("depouille: face angle px py pz nx ny nz".to_string());
                         }
                         let n = self.nums::<7>(&c[1..])?;
-                        Ok((self.shape(&c[0])?, n[0], [n[1], n[2], n[3]], [n[4], n[5], n[6]]))
+                        Ok((
+                            self.shape(&c[0])?,
+                            n[0],
+                            [n[1], n[2], n[3]],
+                            [n[4], n[5], n[6]],
+                        ))
                     })
                     .collect::<R<Vec<_>>>()?;
-                let refs: Vec<_> = groups.iter().map(|(f, ang, p, n)| (f, *ang, *p, *n)).collect();
+                let refs: Vec<_> = groups
+                    .iter()
+                    .map(|(f, ang, p, n)| (f, *ang, *p, *n))
+                    .collect();
                 s(self.time(|k| k.depouille(&sh, dir, &refs)).map_err(e)?)
             }
             "smb" => {
@@ -358,7 +419,8 @@ impl Ctx {
                 s(Shape::Body(self.time(|k| k.insert(m.body))))
             }
             "stepread" => {
-                let bytes = std::fs::read(arg(0)?).map_err(|x| format!("{}: {x}", arg(0).unwrap_or("")))?;
+                let bytes =
+                    std::fs::read(arg(0)?).map_err(|x| format!("{}: {x}", arg(0).unwrap_or("")))?;
                 let ids = self.time(|k| k.import_step(&bytes)).map_err(e)?;
                 s(match ids.as_slice() {
                     [one] => Shape::Body(*one),
@@ -368,7 +430,16 @@ impl Ctx {
             "stepwrite" => {
                 let ids = match self.shape(arg(0)?)? {
                     Shape::Body(b) => vec![b],
-                    Shape::Compound(v) => v.into_iter().filter_map(|x| if let Shape::Body(b) = x { Some(b) } else { None }).collect(),
+                    Shape::Compound(v) => v
+                        .into_iter()
+                        .filter_map(|x| {
+                            if let Shape::Body(b) = x {
+                                Some(b)
+                            } else {
+                                None
+                            }
+                        })
+                        .collect(),
                     _ => return Err("stepwrite takes bodies".into()),
                 };
                 let bytes = self.time(|k| k.export_step(&ids)).map_err(e)?;
@@ -379,24 +450,52 @@ impl Ctx {
                 // shape radius (x y z)…: the edges through those points.
                 let b = self.body(arg(0)?)?;
                 let r = self.num(arg(1)?)?;
-                let pts = a[2..].chunks(3).map(|c| self.nums::<3>(c).map(|p| P3::new(p[0], p[1], p[2]))).collect::<R<Vec<_>>>()?;
+                let pts = a[2..]
+                    .chunks(3)
+                    .map(|c| self.nums::<3>(c).map(|p| P3::new(p[0], p[1], p[2])))
+                    .collect::<R<Vec<_>>>()?;
                 let ids = pick_edges(self.k.get(b).map_err(e)?, &pts)?;
                 let res = self.time(|k| k.fillet(b, &ids, r)).map_err(e)?;
-                s(Shape::Body(res.bodies.first().copied().ok_or("fillet made nothing")?))
+                s(Shape::Body(
+                    res.bodies.first().copied().ok_or("fillet made nothing")?,
+                ))
             }
             "offset" => {
                 // shape distance: every face moved, edges rounded (SMLib's offset).
                 let b = self.body(arg(0)?)?;
                 let d = self.num(arg(1)?)?;
-                let res = self.time(|k| k.offset(b, &OffsetSpec { distance: d, faces: Vec::new(), sharp: false })).map_err(e)?;
-                s(Shape::Body(res.bodies.first().copied().ok_or("offset made nothing")?))
+                let res = self
+                    .time(|k| {
+                        k.offset(
+                            b,
+                            &OffsetSpec {
+                                distance: d,
+                                faces: Vec::new(),
+                                sharp: false,
+                            },
+                        )
+                    })
+                    .map_err(e)?;
+                s(Shape::Body(
+                    res.bodies.first().copied().ok_or("offset made nothing")?,
+                ))
             }
             "tess" => {
                 // shape chord angle: the chord a fraction of the bounding box's diagonal.
                 let b = self.body(arg(0)?)?;
                 let [rel, angle] = self.nums(&a[1..])?;
                 let chord = rel * self.k.get(b).map_err(e)?.bbox().diagonal();
-                let m = self.time(|k| k.tessellate(b, Tessellation { deflection: chord, angle })).map_err(e)?;
+                let m = self
+                    .time(|k| {
+                        k.tessellate(
+                            b,
+                            Tessellation {
+                                deflection: chord,
+                                angle,
+                            },
+                        )
+                    })
+                    .map_err(e)?;
                 if m.indices.is_empty() {
                     return Err("an empty mesh".into());
                 }
@@ -472,7 +571,11 @@ fn run_once(c: &Case, overhead: u64) -> (Duration, u64, Option<String>) {
 fn median(v: &mut [f64]) -> f64 {
     v.sort_by(f64::total_cmp);
     let n = v.len();
-    if n % 2 == 1 { v[n / 2] } else { 0.5 * (v[n / 2 - 1] + v[n / 2]) }
+    if n % 2 == 1 {
+        v[n / 2]
+    } else {
+        0.5 * (v[n / 2 - 1] + v[n / 2])
+    }
 }
 
 /// The most runs of a fast case.
@@ -507,10 +610,25 @@ fn run(cases: &[Case], only: Option<&str>, reps: usize, budget: f64, min_time: f
         match err {
             // The time to the error, of the one run that failed (0 after a panic).
             Some(m) => {
-                let (w, cpu) = (walls.last().copied().unwrap_or(0.0), cpus.last().copied().unwrap_or(0.0));
-                println!("RESULT\t{}\t{}\terr\t{w:.3}\t{cpu:.3}\t1\t{}", c.name, c.category, m.replace(['\t', '\n'], " "));
+                let (w, cpu) = (
+                    walls.last().copied().unwrap_or(0.0),
+                    cpus.last().copied().unwrap_or(0.0),
+                );
+                println!(
+                    "RESULT\t{}\t{}\terr\t{w:.3}\t{cpu:.3}\t1\t{}",
+                    c.name,
+                    c.category,
+                    m.replace(['\t', '\n'], " ")
+                );
             }
-            None => println!("RESULT\t{}\t{}\tok\t{:.3}\t{:.3}\t{}", c.name, c.category, median(&mut walls), cpus.iter().sum::<f64>() / cpus.len() as f64, walls.len()),
+            None => println!(
+                "RESULT\t{}\t{}\tok\t{:.3}\t{:.3}\t{}",
+                c.name,
+                c.category,
+                median(&mut walls),
+                cpus.iter().sum::<f64>() / cpus.len() as f64,
+                walls.len()
+            ),
         }
     }
 }
@@ -521,12 +639,19 @@ fn prep(cases: &[Case], step_dir: &str) -> R<(String, String)> {
     let (mut ours, mut occt) = (String::new(), String::new());
     let mut written: HashMap<String, String> = HashMap::new();
     for c in cases {
-        let (mut o, mut t) = (format!("case {} {}\n", c.name, c.category), format!("case {} {}\n", c.name, c.category));
+        let (mut o, mut t) = (
+            format!("case {} {}\n", c.name, c.category),
+            format!("case {} {}\n", c.name, c.category),
+        );
         let mut models: HashMap<String, smb::Brep> = HashMap::new();
         let mut ok = true;
         for l in &c.lines {
             let star = if l.timed { "*" } else { "" };
-            let lhs = l.out.as_ref().map(|v| format!("{v} = ")).unwrap_or_default();
+            let lhs = l
+                .out
+                .as_ref()
+                .map(|v| format!("{v} = "))
+                .unwrap_or_default();
             match l.cmd.as_str() {
                 "smb" => {
                     let spec = &l.args[0];
@@ -534,12 +659,18 @@ fn prep(cases: &[Case], step_dir: &str) -> R<(String, String)> {
                     let path = match written.get(spec) {
                         Some(p) => p.clone(),
                         None => {
-                            let base = spec.rsplit('/').next().unwrap_or(spec).replace(['#', '.'], "_");
+                            let base = spec
+                                .rsplit('/')
+                                .next()
+                                .unwrap_or(spec)
+                                .replace(['#', '.'], "_");
                             let path = format!("{step_dir}/{base}.step");
                             let mut k = NativeKernel::new();
                             let id = k.insert(m.body.clone());
                             match k.export_step(&[id]) {
-                                Ok(bytes) => std::fs::write(&path, bytes).map_err(|x| x.to_string())?,
+                                Ok(bytes) => {
+                                    std::fs::write(&path, bytes).map_err(|x| x.to_string())?
+                                }
                                 Err(x) => {
                                     eprintln!("{}: {spec} can't be written as STEP: {x:?}", c.name);
                                     ok = false;
@@ -557,20 +688,35 @@ fn prep(cases: &[Case], step_dir: &str) -> R<(String, String)> {
                 }
                 "smbfillet" => {
                     // r = smbfillet v rad include a-b …
-                    let m = models.get(&l.args[0]).ok_or(format!("{}: smbfillet of an unknown model", c.name))?;
+                    let m = models
+                        .get(&l.args[0])
+                        .ok_or(format!("{}: smbfillet of an unknown model", c.name))?;
                     let include = l.args[2] == "1";
                     let ranges = l.args[3..]
                         .iter()
                         .map(|r| {
                             let (x, y) = r.split_once('-').unwrap_or((r, r));
-                            Ok((x.parse::<usize>().map_err(|e| e.to_string())?, y.parse::<usize>().map_err(|e| e.to_string())?))
+                            Ok((
+                                x.parse::<usize>().map_err(|e| e.to_string())?,
+                                y.parse::<usize>().map_err(|e| e.to_string())?,
+                            ))
                         })
                         .collect::<R<Vec<_>>>()?;
                     let pts: Vec<String> = (0..m.edge_mids.len())
                         .filter(|i| ranges.iter().any(|&(x, y)| (x..=y).contains(i)) == include)
-                        .map(|i| format!("{:.17e} {:.17e} {:.17e}", m.edge_mids[i].x, m.edge_mids[i].y, m.edge_mids[i].z))
+                        .map(|i| {
+                            format!(
+                                "{:.17e} {:.17e} {:.17e}",
+                                m.edge_mids[i].x, m.edge_mids[i].y, m.edge_mids[i].z
+                            )
+                        })
                         .collect();
-                    let line = format!("{star}{lhs}fillet_at {} {} {}\n", l.args[0], l.args[1], pts.join(" "));
+                    let line = format!(
+                        "{star}{lhs}fillet_at {} {} {}\n",
+                        l.args[0],
+                        l.args[1],
+                        pts.join(" ")
+                    );
                     o += &line;
                     t += &line;
                 }
@@ -593,13 +739,21 @@ fn prep(cases: &[Case], step_dir: &str) -> R<(String, String)> {
 
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
-    let flag = |name: &str| args.iter().position(|a| a == name).and_then(|i| args.get(i + 1)).cloned();
+    let flag = |name: &str| {
+        args.iter()
+            .position(|a| a == name)
+            .and_then(|i| args.get(i + 1))
+            .cloned()
+    };
     let usage = "kernel_bench run <cases> [--case NAME] [--reps N] [--budget SECS] | prep <cases> <cadrs out> <occt out> <step dir>";
     let (Some(mode), Some(file)) = (args.first(), args.get(1)) else {
         eprintln!("{usage}");
         std::process::exit(2);
     };
-    let cases = match std::fs::read_to_string(file).map_err(|e| e.to_string()).and_then(|t| parse_cases(&t)) {
+    let cases = match std::fs::read_to_string(file)
+        .map_err(|e| e.to_string())
+        .and_then(|t| parse_cases(&t))
+    {
         Ok(c) => c,
         Err(e) => {
             eprintln!("{file}: {e}");
@@ -609,8 +763,12 @@ fn main() {
     match (mode.as_str(), &args[2..]) {
         ("run", _) => {
             let reps = flag("--reps").and_then(|s| s.parse().ok()).unwrap_or(5);
-            let budget = flag("--budget").and_then(|s| s.parse().ok()).unwrap_or(20.0);
-            let min_time = flag("--min-time").and_then(|s| s.parse().ok()).unwrap_or(1.0);
+            let budget = flag("--budget")
+                .and_then(|s| s.parse().ok())
+                .unwrap_or(20.0);
+            let min_time = flag("--min-time")
+                .and_then(|s| s.parse().ok())
+                .unwrap_or(1.0);
             run(&cases, flag("--case").as_deref(), reps, budget, min_time);
         }
         ("prep", [ours, occt, dir, ..]) => match prep(&cases, dir) {

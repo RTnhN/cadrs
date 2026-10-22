@@ -45,7 +45,9 @@ use cadrs_sketch::{PlaneRef, SketchOp, Vec2};
 use crate::assembly::commands::{InsertInstance, SetInstancesFixed};
 use crate::assembly::{Instance, InstanceId, InstanceSource, Pose};
 use crate::command::{CommandError, History};
-use crate::commands::{AddExtrude, AddSketch, EditSketch, RenameFeature, RenamePart, SetExtrude, SetPartMaterial};
+use crate::commands::{
+    AddExtrude, AddSketch, EditSketch, RenameFeature, RenamePart, SetExtrude, SetPartMaterial,
+};
 use crate::document::{BooleanOp, Document, Element, ExtrudeFeature, Offset};
 use crate::ids::{DocumentId, ElementId, FeatureId, PartId};
 
@@ -64,7 +66,8 @@ const fn iid(n: u128) -> InstanceId {
 }
 
 /// ER Ex2's document ("Exercise: Move to Document", stand-in).
-pub const MOVE_DOCUMENT: DocumentId = DocumentId::from_u128(0x9157_0000_0000_0000_0000_0000_0000_0001);
+pub const MOVE_DOCUMENT: DocumentId =
+    DocumentId::from_u128(0x9157_0000_0000_0000_0000_0000_0000_0001);
 pub const MOVE_DOCUMENT_NAME: &str = "Exercise: Move to Document";
 
 /// The tabs.
@@ -130,11 +133,32 @@ pub const HOLE_CIRCLE_D: f64 = 140.0;
 /// A sketch on Top of `ops` (named `name` when given) and an extrude (New) of the region at
 /// `seed` from z0 to z1.
 #[allow(clippy::too_many_arguments)]
-fn feature(s: &mut dyn Studio, el: ElementId, sketch: FeatureId, extrude: FeatureId, ops: Vec<SketchOp>, seed: Vec2, z: (f64, f64), name: Option<&str>) -> Result<(), CommandError> {
-    s.run(&AddSketch { element: el, feature: sketch, plane: Some(PlaneRef::Top) })?;
-    s.run(&EditSketch { element: el, feature: sketch, op: SketchOp::Batch(ops) })?;
+fn feature(
+    s: &mut dyn Studio,
+    el: ElementId,
+    sketch: FeatureId,
+    extrude: FeatureId,
+    ops: Vec<SketchOp>,
+    seed: Vec2,
+    z: (f64, f64),
+    name: Option<&str>,
+) -> Result<(), CommandError> {
+    s.run(&AddSketch {
+        element: el,
+        feature: sketch,
+        plane: Some(PlaneRef::Top),
+    })?;
+    s.run(&EditSketch {
+        element: el,
+        feature: sketch,
+        op: SketchOp::Batch(ops),
+    })?;
     if let Some(n) = name {
-        s.run(&RenameFeature { element: el, feature: sketch, name: n.into() })?;
+        s.run(&RenameFeature {
+            element: el,
+            feature: sketch,
+            name: n.into(),
+        })?;
     }
     let g = s
         .document()
@@ -145,7 +169,9 @@ fn feature(s: &mut dyn Studio, el: ElementId, sketch: FeatureId, extrude: Featur
         .ok_or_else(|| CommandError::Invalid("sketch not found".into()))?;
     let regions = super::region_refs(sketch, &g, &[seed]);
     if regions.len() != 1 {
-        return Err(CommandError::Invalid("a region of the piston stand-in is missing".into()));
+        return Err(CommandError::Invalid(
+            "a region of the piston stand-in is missing".into(),
+        ));
     }
     let (z0, z1) = z;
     let fmt = |x: f64| format!("{} mm", (x * 1000.0).round() / 1000.0);
@@ -153,19 +179,46 @@ fn feature(s: &mut dyn Studio, el: ElementId, sketch: FeatureId, extrude: Featur
     x.depth_expr = fmt(z1 - z0);
     x.op = BooleanOp::New;
     if z0 != 0.0 {
-        x.start_offset = Some(Offset { value: z0.abs(), expr: fmt(z0.abs()), flip: z0 < 0.0 });
+        x.start_offset = Some(Offset {
+            value: z0.abs(),
+            expr: fmt(z0.abs()),
+            flip: z0 < 0.0,
+        });
     }
-    s.run(&AddExtrude { element: el, feature: extrude, extrude: ExtrudeFeature::default() })?;
-    s.run(&SetExtrude { element: el, feature: extrude, extrude: x, label: "Extrude".into() })?;
+    s.run(&AddExtrude {
+        element: el,
+        feature: extrude,
+        extrude: ExtrudeFeature::default(),
+    })?;
+    s.run(&SetExtrude {
+        element: el,
+        feature: extrude,
+        extrude: x,
+        label: "Extrude".into(),
+    })?;
     Ok(())
 }
 
 fn square(h: f64) -> SketchOp {
-    SketchOp::AddPolyline { points: vec![Vec2::new(-h, -h), Vec2::new(h, -h), Vec2::new(h, h), Vec2::new(-h, h)], closed: true, construction: false, label: "Add rectangle" }
+    SketchOp::AddPolyline {
+        points: vec![
+            Vec2::new(-h, -h),
+            Vec2::new(h, -h),
+            Vec2::new(h, h),
+            Vec2::new(-h, h),
+        ],
+        closed: true,
+        construction: false,
+        label: "Add rectangle",
+    }
 }
 
 fn circle(x: f64, y: f64, d: f64) -> SketchOp {
-    SketchOp::AddCircle { center: Vec2::new(x, y), radius: d / 2.0, construction: false }
+    SketchOp::AddCircle {
+        center: Vec2::new(x, y),
+        radius: d / 2.0,
+        construction: false,
+    }
 }
 
 /// The six holes' centres (on the Ø140 circle at 0°, 60°, …).
@@ -184,15 +237,55 @@ pub fn hole_centres() -> [(f64, f64); 6] {
 /// so it follows the rod when its length (Extrude 3's depth, 28 → 75 in step 13) changes.
 pub fn build_piston(s: &mut dyn Studio, el: ElementId, rod_l: f64) -> Result<(), CommandError> {
     let top = CYLINDER_L + rod_l;
-    feature(s, el, UJOINT_SKETCH, UJOINT_EXTRUDE, vec![square(UJOINT_SIDE / 2.0)], Vec2::new(0.0, 0.0), (-UJOINT_SIDE, 0.0), None)?;
-    feature(s, el, MAIN_SKETCH, CYLINDER_EXTRUDE, vec![circle(0.0, 0.0, CYLINDER_D)], Vec2::new(0.0, 0.0), (0.0, CYLINDER_L), Some("Main Sketch"))?;
+    feature(
+        s,
+        el,
+        UJOINT_SKETCH,
+        UJOINT_EXTRUDE,
+        vec![square(UJOINT_SIDE / 2.0)],
+        Vec2::new(0.0, 0.0),
+        (-UJOINT_SIDE, 0.0),
+        None,
+    )?;
+    feature(
+        s,
+        el,
+        MAIN_SKETCH,
+        CYLINDER_EXTRUDE,
+        vec![circle(0.0, 0.0, CYLINDER_D)],
+        Vec2::new(0.0, 0.0),
+        (0.0, CYLINDER_L),
+        Some("Main Sketch"),
+    )?;
     dimension_main_sketch(s, el)?;
-    feature(s, el, ROD_SKETCH, ROD_EXTRUDE, vec![circle(0.0, 0.0, ROD_D)], Vec2::new(0.0, 0.0), (CYLINDER_L, top), Some("Rod Sketch"))?;
+    feature(
+        s,
+        el,
+        ROD_SKETCH,
+        ROD_EXTRUDE,
+        vec![circle(0.0, 0.0, ROD_D)],
+        Vec2::new(0.0, 0.0),
+        (CYLINDER_L, top),
+        Some("Rod Sketch"),
+    )?;
     eye_on_rod(s, el)?;
-    for (p, n) in [(UJOINT, "UJoint"), (CYLINDER, "Cylinder"), (ROD, "Rod"), (EYE, "Eye")] {
-        s.run(&RenamePart { element: el, part: p, name: n.into() })?;
+    for (p, n) in [
+        (UJOINT, "UJoint"),
+        (CYLINDER, "Cylinder"),
+        (ROD, "Rod"),
+        (EYE, "Eye"),
+    ] {
+        s.run(&RenamePart {
+            element: el,
+            part: p,
+            name: n.into(),
+        })?;
     }
-    s.run(&SetPartMaterial { element: el, parts: vec![UJOINT, CYLINDER, ROD, EYE], material: crate::material::library("Aluminum - 6061") })?;
+    s.run(&SetPartMaterial {
+        element: el,
+        parts: vec![UJOINT, CYLINDER, ROD, EYE],
+        material: crate::material::library("Aluminum - 6061"),
+    })?;
     Ok(())
 }
 
@@ -213,36 +306,75 @@ fn dimension_main_sketch(s: &mut dyn Studio, el: ElementId) -> Result<(), Comman
         .find_map(|(id, k)| matches!(k.kind, CurveKind::Circle { .. }).then_some(id))
         .ok_or_else(|| CommandError::Invalid("Main Sketch has no circle".into()))?;
     let ops = vec![
-        SketchOp::AddConstraints(vec![ConstraintOf::Coincident(PointSpec::At(Vec2::new(0.0, 0.0)), PointSpec::Origin)]),
+        SketchOp::AddConstraints(vec![ConstraintOf::Coincident(
+            PointSpec::At(Vec2::new(0.0, 0.0)),
+            PointSpec::Origin,
+        )]),
         SketchOp::SetDimension {
-            dimension: Dimension { kind: DimensionKind::Diameter { curve }, value: CYLINDER_D, offset: std::f64::consts::FRAC_PI_4, along: 0.0, driven: false },
+            dimension: Dimension {
+                kind: DimensionKind::Diameter { curve },
+                value: CYLINDER_D,
+                offset: std::f64::consts::FRAC_PI_4,
+                along: 0.0,
+                driven: false,
+            },
             moves: vec![],
             radii: vec![],
         },
     ];
-    s.run(&EditSketch { element: el, feature: MAIN_SKETCH, op: SketchOp::Batch(ops) })
+    s.run(&EditSketch {
+        element: el,
+        feature: MAIN_SKETCH,
+        op: SketchOp::Batch(ops),
+    })
 }
 
 /// The Eye: an 8 × 8 square sketched on the Rod's top face, centred on the axis, extruded 8.
 fn eye_on_rod(s: &mut dyn Studio, el: ElementId) -> Result<(), CommandError> {
-    let features = s.document().element(el).map(|e| e.features().to_vec()).unwrap_or_default();
-    let top = crate::parts::cap_name(&features, ROD_EXTRUDE, 0, true).ok_or_else(|| CommandError::Invalid("the Rod has no top face".into()))?;
-    let plane = crate::parts::face_plane(&features, ROD_EXTRUDE, top).ok_or_else(|| CommandError::Invalid("the Rod's top face can't carry a sketch".into()))?;
+    let features = s
+        .document()
+        .element(el)
+        .map(|e| e.features().to_vec())
+        .unwrap_or_default();
+    let top = crate::parts::cap_name(&features, ROD_EXTRUDE, 0, true)
+        .ok_or_else(|| CommandError::Invalid("the Rod has no top face".into()))?;
+    let plane = crate::parts::face_plane(&features, ROD_EXTRUDE, top)
+        .ok_or_else(|| CommandError::Invalid("the Rod's top face can't carry a sketch".into()))?;
     let f = plane.frame();
     // The axis's point on the (level) face, in the face's sketch coordinates.
     let d = [-f.origin[0], -f.origin[1], 0.0];
-    let (cx, cy) = (d[0] * f.u[0] + d[1] * f.u[1] + d[2] * f.u[2], d[0] * f.v[0] + d[1] * f.v[1] + d[2] * f.v[2]);
+    let (cx, cy) = (
+        d[0] * f.u[0] + d[1] * f.u[1] + d[2] * f.u[2],
+        d[0] * f.v[0] + d[1] * f.v[1] + d[2] * f.v[2],
+    );
     let h = EYE_SIDE / 2.0;
     let sq = SketchOp::AddPolyline {
-        points: vec![Vec2::new(cx - h, cy - h), Vec2::new(cx + h, cy - h), Vec2::new(cx + h, cy + h), Vec2::new(cx - h, cy + h)],
+        points: vec![
+            Vec2::new(cx - h, cy - h),
+            Vec2::new(cx + h, cy - h),
+            Vec2::new(cx + h, cy + h),
+            Vec2::new(cx - h, cy + h),
+        ],
         closed: true,
         construction: false,
         label: "Add rectangle",
     };
-    s.run(&AddSketch { element: el, feature: EYE_SKETCH, plane: Some(plane) })?;
+    s.run(&AddSketch {
+        element: el,
+        feature: EYE_SKETCH,
+        plane: Some(plane),
+    })?;
     // The rod's Ø6 top edge would split the square into two regions; the Eye is the whole square.
-    s.run(&crate::commands::SetSketchImprinting { element: el, feature: EYE_SKETCH, disable_imprinting: true })?;
-    s.run(&EditSketch { element: el, feature: EYE_SKETCH, op: SketchOp::Batch(vec![sq]) })?;
+    s.run(&crate::commands::SetSketchImprinting {
+        element: el,
+        feature: EYE_SKETCH,
+        disable_imprinting: true,
+    })?;
+    s.run(&EditSketch {
+        element: el,
+        feature: EYE_SKETCH,
+        op: SketchOp::Batch(vec![sq]),
+    })?;
     let g = s
         .document()
         .element(el)
@@ -256,8 +388,17 @@ fn eye_on_rod(s: &mut dyn Studio, el: ElementId) -> Result<(), CommandError> {
     }
     let mut x = super::extrude_of(regions, EYE_SIDE);
     x.op = BooleanOp::New;
-    s.run(&AddExtrude { element: el, feature: EYE_EXTRUDE, extrude: ExtrudeFeature::default() })?;
-    s.run(&SetExtrude { element: el, feature: EYE_EXTRUDE, extrude: x, label: "Extrude".into() })?;
+    s.run(&AddExtrude {
+        element: el,
+        feature: EYE_EXTRUDE,
+        extrude: ExtrudeFeature::default(),
+    })?;
+    s.run(&SetExtrude {
+        element: el,
+        feature: EYE_EXTRUDE,
+        extrude: x,
+        label: "Extrude".into(),
+    })?;
     Ok(())
 }
 
@@ -276,7 +417,11 @@ pub fn set_diameter(s: &mut dyn Studio, el: ElementId, d: f64) -> Result<(), Com
         .iter()
         .find_map(|(id, x)| matches!(x.kind, DimensionKind::Diameter { .. }).then_some(id))
         .ok_or_else(|| CommandError::Invalid("Main Sketch has no diameter".into()))?;
-    s.run(&EditSketch { element: el, feature: MAIN_SKETCH, op: SketchOp::SetDimensionValue { id, value: d } })
+    s.run(&EditSketch {
+        element: el,
+        feature: MAIN_SKETCH,
+        op: SketchOp::SetDimensionValue { id, value: d },
+    })
 }
 
 /// ER Ex1 step 13 on the stand-in: the Rod's length (Extrude 3's depth) set to `l` (28 → 75).
@@ -290,25 +435,79 @@ pub fn set_rod_length(s: &mut dyn Studio, el: ElementId, l: f64) -> Result<(), C
         .ok_or_else(|| CommandError::Invalid("the Rod's extrude not found".into()))?;
     e.depth = l;
     e.depth_expr = format!("{l} mm");
-    s.run(&SetExtrude { element: el, feature: ROD_EXTRUDE, extrude: e, label: "Extrude".into() })
+    s.run(&SetExtrude {
+        element: el,
+        feature: ROD_EXTRUDE,
+        extrude: e,
+        label: "Extrude".into(),
+    })
 }
 
 /// Builds a Ø`d` × 10 plate with the six holes in the Part Studio `el`.
-pub fn build_plate(s: &mut dyn Studio, el: ElementId, sketch: FeatureId, extrude: FeatureId, d: f64, name: &str) -> Result<(), CommandError> {
+pub fn build_plate(
+    s: &mut dyn Studio,
+    el: ElementId,
+    sketch: FeatureId,
+    extrude: FeatureId,
+    d: f64,
+    name: &str,
+) -> Result<(), CommandError> {
     let mut ops = vec![circle(0.0, 0.0, d)];
-    ops.extend(hole_centres().into_iter().map(|(x, y)| circle(x, y, HOLE_D)));
-    feature(s, el, sketch, extrude, ops, Vec2::new(0.0, 0.0), (0.0, PLATE_T), None)?;
-    s.run(&RenamePart { element: el, part: PartId::new(extrude, 0), name: name.into() })?;
-    s.run(&SetPartMaterial { element: el, parts: vec![PartId::new(extrude, 0)], material: crate::material::library("Aluminum - 6061") })?;
+    ops.extend(
+        hole_centres()
+            .into_iter()
+            .map(|(x, y)| circle(x, y, HOLE_D)),
+    );
+    feature(
+        s,
+        el,
+        sketch,
+        extrude,
+        ops,
+        Vec2::new(0.0, 0.0),
+        (0.0, PLATE_T),
+        None,
+    )?;
+    s.run(&RenamePart {
+        element: el,
+        part: PartId::new(extrude, 0),
+        name: name.into(),
+    })?;
+    s.run(&SetPartMaterial {
+        element: el,
+        parts: vec![PartId::new(extrude, 0)],
+        material: crate::material::library("Aluminum - 6061"),
+    })?;
     Ok(())
 }
 
 /// Places the Piston Assembly's four parts of the studio `studio` in the assembly `asm`.
-pub fn build_piston_assembly(s: &mut dyn Studio, asm: ElementId, studio: ElementId) -> Result<(), CommandError> {
-    for (i, p) in PISTON_INSTANCES.into_iter().zip([UJOINT, CYLINDER, ROD, EYE]) {
-        s.run(&InsertInstance { element: asm, instance: Instance::new(i, InstanceSource::Part { element: studio, part: p }, Pose::IDENTITY) })?;
+pub fn build_piston_assembly(
+    s: &mut dyn Studio,
+    asm: ElementId,
+    studio: ElementId,
+) -> Result<(), CommandError> {
+    for (i, p) in PISTON_INSTANCES
+        .into_iter()
+        .zip([UJOINT, CYLINDER, ROD, EYE])
+    {
+        s.run(&InsertInstance {
+            element: asm,
+            instance: Instance::new(
+                i,
+                InstanceSource::Part {
+                    element: studio,
+                    part: p,
+                },
+                Pose::IDENTITY,
+            ),
+        })?;
     }
-    s.run(&SetInstancesFixed { element: asm, instances: vec![PISTON_INSTANCES[0]], fixed: true })?;
+    s.run(&SetInstancesFixed {
+        element: asm,
+        instances: vec![PISTON_INSTANCES[0]],
+        fixed: true,
+    })?;
     Ok(())
 }
 
@@ -320,13 +519,41 @@ pub fn piston_pose(k: usize) -> Pose {
 
 /// Places the Hexapod in `asm`: the baseplate (fixed), six instances of `piston_source` (an
 /// assembly, here or linked) and the topplate for a rod of length `rod_l`.
-pub fn build_hexapod(s: &mut dyn Studio, asm: ElementId, base: InstanceSource, top: InstanceSource, piston_source: InstanceSource, rod_l: f64) -> Result<(), CommandError> {
-    s.run(&InsertInstance { element: asm, instance: Instance::new(BASE_INSTANCE, base, Pose::IDENTITY) })?;
-    s.run(&InsertInstance { element: asm, instance: Instance::new(TOP_INSTANCE, top, Pose::translation([0.0, 0.0, PLATE_T + UJOINT_SIDE + CYLINDER_L + rod_l + EYE_SIDE])) })?;
+pub fn build_hexapod(
+    s: &mut dyn Studio,
+    asm: ElementId,
+    base: InstanceSource,
+    top: InstanceSource,
+    piston_source: InstanceSource,
+    rod_l: f64,
+) -> Result<(), CommandError> {
+    s.run(&InsertInstance {
+        element: asm,
+        instance: Instance::new(BASE_INSTANCE, base, Pose::IDENTITY),
+    })?;
+    s.run(&InsertInstance {
+        element: asm,
+        instance: Instance::new(
+            TOP_INSTANCE,
+            top,
+            Pose::translation([
+                0.0,
+                0.0,
+                PLATE_T + UJOINT_SIDE + CYLINDER_L + rod_l + EYE_SIDE,
+            ]),
+        ),
+    })?;
     for k in 0..6 {
-        s.run(&InsertInstance { element: asm, instance: Instance::new(piston(k), piston_source, piston_pose(k)) })?;
+        s.run(&InsertInstance {
+            element: asm,
+            instance: Instance::new(piston(k), piston_source, piston_pose(k)),
+        })?;
     }
-    s.run(&SetInstancesFixed { element: asm, instances: vec![BASE_INSTANCE], fixed: true })?;
+    s.run(&SetInstancesFixed {
+        element: asm,
+        instances: vec![BASE_INSTANCE],
+        fixed: true,
+    })?;
     Ok(())
 }
 
@@ -341,22 +568,48 @@ pub fn move_to_document() -> Result<Document, CommandError> {
         (TOPPLATE, TOPPLATE_NAME, true),
         (BASEPLATE, BASEPLATE_NAME, true),
     ] {
-        let mut el = if studio { Element::part_studio(name) } else { Element::assembly(name) };
+        let mut el = if studio {
+            Element::part_studio(name)
+        } else {
+            Element::assembly(name)
+        };
         el.id = id;
         doc.elements.push(el);
     }
     let mut h = History::default();
     let mut s = DocHistory(&mut doc, &mut h);
     build_piston(&mut s, PISTON_STUDIO, ROD_L)?;
-    build_plate(&mut s, BASEPLATE, BASE_SKETCH, BASE_EXTRUDE, BASE_D, BASEPLATE_NAME)?;
-    build_plate(&mut s, TOPPLATE, TOP_SKETCH, TOP_EXTRUDE, TOP_D, TOPPLATE_NAME)?;
+    build_plate(
+        &mut s,
+        BASEPLATE,
+        BASE_SKETCH,
+        BASE_EXTRUDE,
+        BASE_D,
+        BASEPLATE_NAME,
+    )?;
+    build_plate(
+        &mut s,
+        TOPPLATE,
+        TOP_SKETCH,
+        TOP_EXTRUDE,
+        TOP_D,
+        TOPPLATE_NAME,
+    )?;
     build_piston_assembly(&mut s, PISTON_ASSEMBLY, PISTON_STUDIO)?;
     build_hexapod(
         &mut s,
         HEXAPOD,
-        InstanceSource::Part { element: BASEPLATE, part: BASE_PART },
-        InstanceSource::Part { element: TOPPLATE, part: TOP_PART },
-        InstanceSource::Assembly { element: PISTON_ASSEMBLY },
+        InstanceSource::Part {
+            element: BASEPLATE,
+            part: BASE_PART,
+        },
+        InstanceSource::Part {
+            element: TOPPLATE,
+            part: TOP_PART,
+        },
+        InstanceSource::Assembly {
+            element: PISTON_ASSEMBLY,
+        },
         ROD_L,
     )?;
     Ok(doc)
@@ -365,7 +618,10 @@ pub fn move_to_document() -> Result<Document, CommandError> {
 /// The piston's volume for a cylinder of diameter `d` and a rod of length `l` (mm³).
 pub fn piston_volume(d: f64, l: f64) -> f64 {
     use std::f64::consts::PI;
-    UJOINT_SIDE.powi(3) + CYLINDER_L * PI * (d / 2.0).powi(2) + PI * (ROD_D / 2.0).powi(2) * l + EYE_SIDE.powi(3)
+    UJOINT_SIDE.powi(3)
+        + CYLINDER_L * PI * (d / 2.0).powi(2)
+        + PI * (ROD_D / 2.0).powi(2) * l
+        + EYE_SIDE.powi(3)
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -373,14 +629,16 @@ pub fn piston_volume(d: f64, l: f64) -> f64 {
 
 /// ER Ex1's Piston document: Pneumatic Piston and Piston Assembly
 /// (`fixtures/linked_piston_standin.cadrs`).
-pub const PISTON_DOCUMENT: DocumentId = DocumentId::from_u128(0x9157_0000_0000_0000_0000_0000_0000_0002);
+pub const PISTON_DOCUMENT: DocumentId =
+    DocumentId::from_u128(0x9157_0000_0000_0000_0000_0000_0000_0002);
 pub const PISTON_DOCUMENT_NAME: &str = "Linked Document- Piston (stand-in)";
 pub const LINKED_PISTON_STUDIO: ElementId = eid(0x11);
 pub const LINKED_PISTON_ASSEMBLY: ElementId = eid(0x12);
 
 /// ER Ex1's Project document: the Hexapod assembly (the two plates only) and the Topplate and
 /// Baseplate Part Studios (`fixtures/linked_hexapod_standin.cadrs`).
-pub const PROJECT_DOCUMENT: DocumentId = DocumentId::from_u128(0x9157_0000_0000_0000_0000_0000_0000_0003);
+pub const PROJECT_DOCUMENT: DocumentId =
+    DocumentId::from_u128(0x9157_0000_0000_0000_0000_0000_0000_0003);
 pub const PROJECT_DOCUMENT_NAME: &str = "Linked Documents- Project (stand-in)";
 pub const PROJECT_HEXAPOD: ElementId = eid(0x21);
 pub const PROJECT_TOPPLATE: ElementId = eid(0x22);
@@ -422,21 +680,68 @@ pub fn piston_document() -> Result<Document, CommandError> {
 pub fn project_document() -> Result<Document, CommandError> {
     let mut doc = Document::empty(PROJECT_DOCUMENT_NAME);
     doc.id = PROJECT_DOCUMENT;
-    for (id, name, studio) in [(PROJECT_HEXAPOD, HEXAPOD_NAME, false), (PROJECT_TOPPLATE, TOPPLATE_NAME, true), (PROJECT_BASEPLATE, BASEPLATE_NAME, true)] {
-        let mut el = if studio { Element::part_studio(name) } else { Element::assembly(name) };
+    for (id, name, studio) in [
+        (PROJECT_HEXAPOD, HEXAPOD_NAME, false),
+        (PROJECT_TOPPLATE, TOPPLATE_NAME, true),
+        (PROJECT_BASEPLATE, BASEPLATE_NAME, true),
+    ] {
+        let mut el = if studio {
+            Element::part_studio(name)
+        } else {
+            Element::assembly(name)
+        };
         el.id = id;
         doc.elements.push(el);
     }
     let mut h = History::default();
     let mut s = DocHistory(&mut doc, &mut h);
-    build_plate(&mut s, PROJECT_BASEPLATE, BASE_SKETCH, BASE_EXTRUDE, BASE_D, BASEPLATE_NAME)?;
-    build_plate(&mut s, PROJECT_TOPPLATE, TOP_SKETCH, TOP_EXTRUDE, TOP_D, TOPPLATE_NAME)?;
-    s.run(&InsertInstance { element: PROJECT_HEXAPOD, instance: Instance::new(BASE_INSTANCE, InstanceSource::Part { element: PROJECT_BASEPLATE, part: BASE_PART }, Pose::IDENTITY) })?;
+    build_plate(
+        &mut s,
+        PROJECT_BASEPLATE,
+        BASE_SKETCH,
+        BASE_EXTRUDE,
+        BASE_D,
+        BASEPLATE_NAME,
+    )?;
+    build_plate(
+        &mut s,
+        PROJECT_TOPPLATE,
+        TOP_SKETCH,
+        TOP_EXTRUDE,
+        TOP_D,
+        TOPPLATE_NAME,
+    )?;
     s.run(&InsertInstance {
         element: PROJECT_HEXAPOD,
-        instance: Instance::new(TOP_INSTANCE, InstanceSource::Part { element: PROJECT_TOPPLATE, part: TOP_PART }, Pose::translation([0.0, 0.0, PLATE_T + UJOINT_SIDE + CYLINDER_L + ROD_L + EYE_SIDE])),
+        instance: Instance::new(
+            BASE_INSTANCE,
+            InstanceSource::Part {
+                element: PROJECT_BASEPLATE,
+                part: BASE_PART,
+            },
+            Pose::IDENTITY,
+        ),
     })?;
-    s.run(&SetInstancesFixed { element: PROJECT_HEXAPOD, instances: vec![BASE_INSTANCE], fixed: true })?;
+    s.run(&InsertInstance {
+        element: PROJECT_HEXAPOD,
+        instance: Instance::new(
+            TOP_INSTANCE,
+            InstanceSource::Part {
+                element: PROJECT_TOPPLATE,
+                part: TOP_PART,
+            },
+            Pose::translation([
+                0.0,
+                0.0,
+                PLATE_T + UJOINT_SIDE + CYLINDER_L + ROD_L + EYE_SIDE,
+            ]),
+        ),
+    })?;
+    s.run(&SetInstancesFixed {
+        element: PROJECT_HEXAPOD,
+        instances: vec![BASE_INSTANCE],
+        fixed: true,
+    })?;
     Ok(doc)
 }
 
@@ -446,56 +751,114 @@ pub fn piston_part(piston: InstanceId, inner: InstanceId) -> InstanceId {
     crate::assembly::structure::derive(piston, inner)
 }
 
-fn occurrence_solid(doc: &Document, asm: ElementId, occ: InstanceId) -> Result<std::sync::Arc<crate::solid::Solid>, CommandError> {
-    crate::assembly::document_occurrence_solids(doc, asm).remove(&occ).ok_or_else(|| CommandError::Invalid(format!("no part for {occ}")))
+fn occurrence_solid(
+    doc: &Document,
+    asm: ElementId,
+    occ: InstanceId,
+) -> Result<std::sync::Arc<crate::solid::Solid>, CommandError> {
+    crate::assembly::document_occurrence_solids(doc, asm)
+        .remove(&occ)
+        .ok_or_else(|| CommandError::Invalid(format!("no part for {occ}")))
 }
 
 /// The centre of the Ø10 hole edge of `s` at (x, y, z) (part coordinates), as a connector point.
-pub fn hole_connector(s: &crate::solid::Solid, x: f64, y: f64, z: f64) -> Result<crate::assembly::connector::ImplicitConnector, CommandError> {
+pub fn hole_connector(
+    s: &crate::solid::Solid,
+    x: f64,
+    y: f64,
+    z: f64,
+) -> Result<crate::assembly::connector::ImplicitConnector, CommandError> {
     use crate::assembly::connector::{EntityRef, ImplicitPoint, implicit_points};
     let e = s
         .edges
         .iter()
-        .find(|e| e.circle.is_some_and(|c| (c.radius - HOLE_D / 2.0).abs() < 1e-6 && (c.center[0] - x).abs() < 1e-6 && (c.center[1] - y).abs() < 1e-6 && (c.center[2] - z).abs() < 1e-6))
+        .find(|e| {
+            e.circle.is_some_and(|c| {
+                (c.radius - HOLE_D / 2.0).abs() < 1e-6
+                    && (c.center[0] - x).abs() < 1e-6
+                    && (c.center[1] - y).abs() < 1e-6
+                    && (c.center[2] - z).abs() < 1e-6
+            })
+        })
         .ok_or_else(|| CommandError::Invalid(format!("no hole edge at ({x}, {y}, {z})")))?
         .name;
-    implicit_points(s, &EntityRef::Edge(e)).into_iter().find(|p| matches!(p.point, ImplicitPoint::CircleCenter(_))).ok_or_else(|| CommandError::Invalid("no hole centre".into()))
+    implicit_points(s, &EntityRef::Edge(e))
+        .into_iter()
+        .find(|p| matches!(p.point, ImplicitPoint::CircleCenter(_)))
+        .ok_or_else(|| CommandError::Invalid("no hole centre".into()))
 }
 
 /// The centroid of the planar face of `s` whose outward normal is `n`, as a connector point.
-pub fn face_connector(s: &crate::solid::Solid, n: [f64; 3]) -> Result<crate::assembly::connector::ImplicitConnector, CommandError> {
+pub fn face_connector(
+    s: &crate::solid::Solid,
+    n: [f64; 3],
+) -> Result<crate::assembly::connector::ImplicitConnector, CommandError> {
     use crate::assembly::connector::{EntityRef, ImplicitPoint, face_normal, implicit_points};
     let f = s
         .faces
         .iter()
-        .find(|f| face_normal(s, &f.name).is_some_and(|m| (0..3).all(|i| (m[i] - n[i]).abs() < 1e-6)))
+        .find(|f| {
+            face_normal(s, &f.name).is_some_and(|m| (0..3).all(|i| (m[i] - n[i]).abs() < 1e-6))
+        })
         .ok_or_else(|| CommandError::Invalid(format!("no face facing {n:?}")))?
         .name;
-    implicit_points(s, &EntityRef::Face(f)).into_iter().find(|p| matches!(p.point, ImplicitPoint::FaceCentroid(_))).ok_or_else(|| CommandError::Invalid("no face centroid".into()))
+    implicit_points(s, &EntityRef::Face(f))
+        .into_iter()
+        .find(|p| matches!(p.point, ImplicitPoint::FaceCentroid(_)))
+        .ok_or_else(|| CommandError::Invalid("no face centroid".into()))
 }
 
 /// Adds the mate `f` to the assembly `asm`, solved with `mover` doing the moving (as the mate
 /// dialog's ✓ does).
-pub fn add_mate(s: &mut dyn Studio, asm: ElementId, f: crate::assembly::mate::MateFeature, mover: InstanceId) -> Result<(), CommandError> {
+pub fn add_mate(
+    s: &mut dyn Studio,
+    asm: ElementId,
+    f: crate::assembly::mate::MateFeature,
+    mover: InstanceId,
+) -> Result<(), CommandError> {
     use crate::assembly::commands::AddMateFeature;
     use crate::assembly::solver::SolveOptions;
     let doc = s.document().clone();
-    let model = doc.element(asm).and_then(|e| e.assembly_model()).cloned().ok_or(CommandError::ElementNotFound(asm))?;
+    let model = doc
+        .element(asm)
+        .and_then(|e| e.assembly_model())
+        .cloned()
+        .ok_or(CommandError::ElementNotFound(asm))?;
     let solids = crate::assembly::document_occurrence_solids(&doc, asm);
     let mut flat = crate::assembly::structure::solver_model(&doc, &model);
     flat.mates.push(f.clone());
-    let sol = crate::assembly::solve(&flat, &solids, &SolveOptions { movers: vec![mover], snap: Some(f.id), ..Default::default() });
+    let sol = crate::assembly::solve(
+        &flat,
+        &solids,
+        &SolveOptions {
+            movers: vec![mover],
+            snap: Some(f.id),
+            ..Default::default()
+        },
+    );
     if !sol.converged {
-        return Err(CommandError::Invalid(format!("{} doesn't solve (residual {})", f.name, sol.residual)));
+        return Err(CommandError::Invalid(format!(
+            "{} doesn't solve (residual {})",
+            f.name, sol.residual
+        )));
     }
     let poses = sol.changed(&flat);
-    s.run(&AddMateFeature { element: asm, feature: f, poses })
+    s.run(&AddMateFeature {
+        element: asm,
+        feature: f,
+        poses,
+    })
 }
 
 /// ER Ex1 step 6/8: **Revolute k+1** between the k-th baseplate hole's top edge centre and the
 /// bottom-face centre of the UJoint of the Piston Assembly instance `piston` in the assembly
 /// `asm` (the piston moves; the UJoint spans z 10..20 after it).
-pub fn revolute_piston(s: &mut dyn Studio, asm: ElementId, piston: InstanceId, k: usize) -> Result<(), CommandError> {
+pub fn revolute_piston(
+    s: &mut dyn Studio,
+    asm: ElementId,
+    piston: InstanceId,
+    k: usize,
+) -> Result<(), CommandError> {
     use crate::assembly::connector::MateConnector;
     use crate::assembly::mate::{Mate, MateFeature, MateKind, MateType};
     let ujoint = piston_part(piston, PISTON_INSTANCES[0]);
@@ -507,14 +870,28 @@ pub fn revolute_piston(s: &mut dyn Studio, asm: ElementId, piston: InstanceId, k
     let mut c1 = MateConnector::implicit(ujoint, &bottom);
     // The two frames agree once the piston stands on the hole (its bottom faces down).
     c1.flip = hole.frame.z[2] > 0.0;
-    let m = Mate::new(MateType::Revolute, c1, MateConnector::implicit(BASE_INSTANCE, &hole));
+    let m = Mate::new(
+        MateType::Revolute,
+        c1,
+        MateConnector::implicit(BASE_INSTANCE, &hole),
+    );
     let name = next_mate_name(s.document(), asm, "Revolute");
-    add_mate(s, asm, MateFeature::new(revolute_mate(k), name, MateKind::Mate(m)), piston)
+    add_mate(
+        s,
+        asm,
+        MateFeature::new(revolute_mate(k), name, MateKind::Mate(m)),
+        piston,
+    )
 }
 
 /// ER Ex1 step 9/10: **Fastened k+1** between the k-th topplate hole's bottom edge centre and
 /// the top-face centre of the Eye of `piston` (the Topplate moves).
-pub fn fasten_topplate(s: &mut dyn Studio, asm: ElementId, piston: InstanceId, k: usize) -> Result<(), CommandError> {
+pub fn fasten_topplate(
+    s: &mut dyn Studio,
+    asm: ElementId,
+    piston: InstanceId,
+    k: usize,
+) -> Result<(), CommandError> {
     use crate::assembly::connector::MateConnector;
     use crate::assembly::mate::{Mate, MateFeature, MateKind, MateType};
     let eye = piston_part(piston, PISTON_INSTANCES[3]);
@@ -527,11 +904,20 @@ pub fn fasten_topplate(s: &mut dyn Studio, asm: ElementId, piston: InstanceId, k
     c1.flip = hole.frame.z[2] < 0.0;
     let m = Mate::new(MateType::Fastened, c1, MateConnector::implicit(eye, &face));
     let name = next_mate_name(s.document(), asm, "Fastened");
-    add_mate(s, asm, MateFeature::new(fastened_mate(k), name, MateKind::Mate(m)), TOP_INSTANCE)
+    add_mate(
+        s,
+        asm,
+        MateFeature::new(fastened_mate(k), name, MateKind::Mate(m)),
+        TOP_INSTANCE,
+    )
 }
 
 fn next_mate_name(doc: &Document, asm: ElementId, label: &str) -> String {
-    let mates = doc.element(asm).and_then(|e| e.assembly_model()).map(|a| a.mates.clone()).unwrap_or_default();
+    let mates = doc
+        .element(asm)
+        .and_then(|e| e.assembly_model())
+        .map(|a| a.mates.clone())
+        .unwrap_or_default();
     crate::assembly::mate::next_name(&mates, label)
 }
 
@@ -541,15 +927,41 @@ fn next_mate_name(doc: &Document, asm: ElementId, label: &str) -> String {
 /// hole above its baseplate hole.
 pub fn complete_hexapod(s: &mut dyn Studio, asm: ElementId) -> Result<(), CommandError> {
     use crate::assembly::mate::MateType;
-    let model = s.document().element(asm).and_then(|e| e.assembly_model()).cloned().ok_or(CommandError::ElementNotFound(asm))?;
-    let pistons: Vec<InstanceId> = model.instances.iter().filter(|i| i.source.is_assembly()).map(|i| i.id).collect();
-    let hole_of = |p: [f64; 3]| -> Option<usize> { hole_centres().iter().position(|(x, y)| (x - p[0]).abs() < 1e-3 && (y - p[1]).abs() < 1e-3) };
+    let model = s
+        .document()
+        .element(asm)
+        .and_then(|e| e.assembly_model())
+        .cloned()
+        .ok_or(CommandError::ElementNotFound(asm))?;
+    let pistons: Vec<InstanceId> = model
+        .instances
+        .iter()
+        .filter(|i| i.source.is_assembly())
+        .map(|i| i.id)
+        .collect();
+    let hole_of = |p: [f64; 3]| -> Option<usize> {
+        hole_centres()
+            .iter()
+            .position(|(x, y)| (x - p[0]).abs() < 1e-3 && (y - p[1]).abs() < 1e-3)
+    };
     // The holes the pistons already stand on.
     let mut on: Vec<(InstanceId, usize)> = Vec::new();
     for f in &model.mates {
-        let Some(m) = f.mate().filter(|m| m.mate_type == MateType::Revolute) else { continue };
-        let (Some(base), Some(other)) = (m.connectors.iter().find(|c| c.instance == BASE_INSTANCE), m.connectors.iter().find(|c| c.instance != BASE_INSTANCE)) else { continue };
-        if let (Some(k), Some(p)) = (hole_of(base.frame.origin), pistons.iter().find(|p| piston_part(**p, PISTON_INSTANCES[0]) == other.instance)) {
+        let Some(m) = f.mate().filter(|m| m.mate_type == MateType::Revolute) else {
+            continue;
+        };
+        let (Some(base), Some(other)) = (
+            m.connectors.iter().find(|c| c.instance == BASE_INSTANCE),
+            m.connectors.iter().find(|c| c.instance != BASE_INSTANCE),
+        ) else {
+            continue;
+        };
+        if let (Some(k), Some(p)) = (
+            hole_of(base.frame.origin),
+            pistons
+                .iter()
+                .find(|p| piston_part(**p, PISTON_INSTANCES[0]) == other.instance),
+        ) {
             on.push((*p, k));
         }
     }
@@ -557,7 +969,9 @@ pub fn complete_hexapod(s: &mut dyn Studio, asm: ElementId) -> Result<(), Comman
         if on.iter().any(|(q, _)| q == p) {
             continue;
         }
-        let k = (0..6).find(|k| on.iter().all(|(_, j)| j != k)).ok_or_else(|| CommandError::Invalid("more pistons than holes".into()))?;
+        let k = (0..6)
+            .find(|k| on.iter().all(|(_, j)| j != k))
+            .ok_or_else(|| CommandError::Invalid("more pistons than holes".into()))?;
         revolute_piston(s, asm, *p, k)?;
         on.push((*p, k));
     }

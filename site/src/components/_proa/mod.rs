@@ -20,6 +20,7 @@ pub mod tokens;
 pub mod traits;
 pub mod variant_spec;
 
+pub use crate::{render_html, tw, tw_join};
 pub use anatomy::*;
 pub use collection::*;
 pub use component_tree::*;
@@ -32,4 +33,3 @@ pub use state::*;
 pub use theme::*;
 pub use tokens::*;
 pub use variant_spec::*;
-pub use crate::{render_html, tw, tw_join};

@@ -3,10 +3,15 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use cadrs_core::command::CommandError;
 use cadrs_core::appearance::Appearance;
-use cadrs_core::commands::{AddElement, AddExtrude, NewElementKind, RenameFeature, RenamePart, SetExtrude, SetPartAppearance, SetPartMaterial};
-use cadrs_core::document::{BodyType, BooleanOp, Document, EndCondition, EndType, ExtrudeFeature, Offset, ThinWall, UpTo};
+use cadrs_core::command::CommandError;
+use cadrs_core::commands::{
+    AddElement, AddExtrude, NewElementKind, RenameFeature, RenamePart, SetExtrude,
+    SetPartAppearance, SetPartMaterial,
+};
+use cadrs_core::document::{
+    BodyType, BooleanOp, Document, EndCondition, EndType, ExtrudeFeature, Offset, ThinWall, UpTo,
+};
 use cadrs_core::ids::{DocumentId, ElementId, FeatureId};
 use cadrs_core::library::DocumentMeta;
 use cadrs_core::parts::Part;
@@ -45,7 +50,12 @@ pub struct Options {
 
 /// The skip list and progress file of the import a supervisor runs, for the imports it makes
 /// of other documents along the way ([`Options::nested`]).
-static SUPERVISED: std::sync::Mutex<Option<(std::collections::HashSet<String>, Option<std::path::PathBuf>)>> = std::sync::Mutex::new(None);
+static SUPERVISED: std::sync::Mutex<
+    Option<(
+        std::collections::HashSet<String>,
+        Option<std::path::PathBuf>,
+    )>,
+> = std::sync::Mutex::new(None);
 
 impl Options {
     /// The options of an import of another document made during this one (a Derived feature's
@@ -53,15 +63,27 @@ impl Options {
     /// features has the time limit to itself (it isn't counted against the feature that needed
     /// it) and a feature of it that hung is skipped next time.
     pub fn nested(only: Option<String>) -> Self {
-        let (skip, progress) = SUPERVISED.lock().ok().and_then(|s| s.clone()).unwrap_or_default();
-        Options { skip, progress, only, store: None }
+        let (skip, progress) = SUPERVISED
+            .lock()
+            .ok()
+            .and_then(|s| s.clone())
+            .unwrap_or_default();
+        Options {
+            skip,
+            progress,
+            only,
+            store: None,
+        }
     }
 }
 
 /// Runs a nested import ([`Options::nested`]); afterwards the progress file names the feature
 /// that asked for it again (a hang after it must skip that one, not the nested import's last).
 pub(crate) fn nested_import<T>(f: impl FnOnce() -> T) -> T {
-    let path = SUPERVISED.lock().ok().and_then(|s| s.as_ref().and_then(|(_, p)| p.clone()));
+    let path = SUPERVISED
+        .lock()
+        .ok()
+        .and_then(|s| s.as_ref().and_then(|(_, p)| p.clone()));
     let before = path.as_ref().and_then(|p| std::fs::read_to_string(p).ok());
     let out = f();
     if let (Some(p), Some(b)) = (path, before) {
@@ -81,7 +103,11 @@ pub fn import_document(raw: &RawDocument, user: &str, options: &Options) -> Impo
     let json = raw.json().unwrap_or(Value::Null);
     let mut doc = Document::empty(raw.name.clone());
     doc.id = DocumentId::from_u128(stable_u128(&[&raw.id]));
-    let mut report = DocumentReport { name: raw.name.clone(), onshape_id: raw.id.clone(), ..Default::default() };
+    let mut report = DocumentReport {
+        name: raw.name.clone(),
+        onshape_id: raw.id.clone(),
+        ..Default::default()
+    };
     let now = timestamp(json["modifiedAt"].as_str()).unwrap_or(0);
     let mut meta = DocumentMeta::new(user, timestamp(json["createdAt"].as_str()).unwrap_or(now));
     meta.modified = now;
@@ -93,11 +119,20 @@ pub fn import_document(raw: &RawDocument, user: &str, options: &Options) -> Impo
     let mut reports: Vec<Option<ElementReport>> = Vec::new();
     let mut studios = Vec::new();
     for (i, el) in elements.iter().enumerate() {
-        let mut er = ElementReport { name: el.name.clone(), kind: el.kind.clone(), ..Default::default() };
+        let mut er = ElementReport {
+            name: el.name.clone(),
+            kind: el.kind.clone(),
+            ..Default::default()
+        };
         let id = ElementId::from_u128(stable_u128(&[&raw.id, &el.id]));
         match el.kind.as_str() {
             "PARTSTUDIO" => {
-                if let Err(e) = s.run(&AddElement { id, kind: NewElementKind::PartStudio, name: Some(el.name.clone()), after: None }) {
+                if let Err(e) = s.run(&AddElement {
+                    id,
+                    kind: NewElementKind::PartStudio,
+                    name: Some(el.name.clone()),
+                    after: None,
+                }) {
                     er.notes.push(format!("cannot add the tab: {e}"));
                 } else {
                     er.imported = true;
@@ -105,7 +140,14 @@ pub fn import_document(raw: &RawDocument, user: &str, options: &Options) -> Impo
                 }
             }
             "ASSEMBLY" => {
-                if s.run(&AddElement { id, kind: NewElementKind::Assembly, name: Some(el.name.clone()), after: None }).is_ok() {
+                if s.run(&AddElement {
+                    id,
+                    kind: NewElementKind::Assembly,
+                    name: Some(el.name.clone()),
+                    after: None,
+                })
+                .is_ok()
+                {
                     er.imported = true;
                 }
             }
@@ -149,16 +191,31 @@ pub fn import_document(raw: &RawDocument, user: &str, options: &Options) -> Impo
             let el = &elements[i];
             // Its own instance, else that of a studio naming the same context entities (whose
             // parts are then left out, as Onshape's context of it had them).
-            let anchor = crate::assembly::context_anchor(raw, &elements, &el.id).map(|a| (a, id)).or_else(|| {
-                foreign.iter().filter(|(j, _, other)| *j != i && !other.is_disjoint(ids)).find_map(|(j, other_id, _)| crate::assembly::context_anchor(raw, &elements, &elements[*j].id).map(|a| (a, *other_id)))
-            });
+            let anchor = crate::assembly::context_anchor(raw, &elements, &el.id)
+                .map(|a| (a, id))
+                .or_else(|| {
+                    foreign
+                        .iter()
+                        .filter(|(j, _, other)| *j != i && !other.is_disjoint(ids))
+                        .find_map(|(j, other_id, _)| {
+                            crate::assembly::context_anchor(raw, &elements, &elements[*j].id)
+                                .map(|a| (a, *other_id))
+                        })
+                });
             let Some(((asm, inst, pose), left_out)) = anchor else {
                 if let Some(er) = reports[i].as_mut() {
                     er.notes.push("made in context of an assembly that isn't in this document: its in-context features have no context".into());
                 }
                 continue;
             };
-            let ctx = match cadrs_core::assembly::context::snapshot_with(&s.doc, asm, left_out, inst, pose.inverse(), 0) {
+            let ctx = match cadrs_core::assembly::context::snapshot_with(
+                &s.doc,
+                asm,
+                left_out,
+                inst,
+                pose.inverse(),
+                0,
+            ) {
                 Ok(c) => c,
                 Err(e) => {
                     if let Some(er) = reports[i].as_mut() {
@@ -167,25 +224,42 @@ pub fn import_document(raw: &RawDocument, user: &str, options: &Options) -> Impo
                     continue;
                 }
             };
-            let Some(k) = s.doc.element_index(id) else { continue };
+            let Some(k) = s.doc.element_index(id) else {
+                continue;
+            };
             let mut fresh = cadrs_core::Element::part_studio(el.name.clone());
             fresh.id = id;
             // Onshape opens it in that context (the workspace's active one).
             fresh.open_context = Some(ctx.id);
             fresh.contexts = vec![ctx];
             s.doc.elements[k] = fresh;
-            let mut er = ElementReport { name: el.name.clone(), kind: el.kind.clone(), imported: true, ..Default::default() };
+            let mut er = ElementReport {
+                name: el.name.clone(),
+                kind: el.kind.clone(),
+                imported: true,
+                ..Default::default()
+            };
             PartStudio::new(&mut s, id, &raw.id, el, vars.clone(), &mut er, options).run();
             reports[i] = Some(er);
             again = true;
         }
         if again {
-            for e in s.doc.elements.iter_mut().filter(|e| e.assembly_model().is_some()) {
+            for e in s
+                .doc
+                .elements
+                .iter_mut()
+                .filter(|e| e.assembly_model().is_some())
+            {
                 e.assembly = Default::default();
             }
             for (i, el) in elements.iter().enumerate() {
                 if el.kind == "ASSEMBLY" {
-                    reports[i] = Some(ElementReport { name: el.name.clone(), kind: el.kind.clone(), imported: true, ..Default::default() });
+                    reports[i] = Some(ElementReport {
+                        name: el.name.clone(),
+                        kind: el.kind.clone(),
+                        imported: true,
+                        ..Default::default()
+                    });
                 }
             }
             crate::assembly::import_assemblies(&mut s, raw, &elements, &mut reports);
@@ -193,11 +267,20 @@ pub fn import_document(raw: &RawDocument, user: &str, options: &Options) -> Impo
     }
     report.elements.extend(reports.into_iter().flatten());
     if s.doc.elements.is_empty() {
-        s.run(&AddElement { id: ElementId::from_u128(stable_u128(&[&raw.id, "empty"])), kind: NewElementKind::PartStudio, name: Some("Part Studio 1".into()), after: None })
-            .ok();
+        s.run(&AddElement {
+            id: ElementId::from_u128(stable_u128(&[&raw.id, "empty"])),
+            kind: NewElementKind::PartStudio,
+            name: Some("Part Studio 1".into()),
+            after: None,
+        })
+        .ok();
     }
     report.cadrs_id = Some(s.doc.id.0.to_string());
-    Imported { doc: s.doc, meta, report }
+    Imported {
+        doc: s.doc,
+        meta,
+        report,
+    }
 }
 
 /// The Part Studios in an order where a studio another one derives from (in this document)
@@ -236,7 +319,10 @@ fn same_doc_sources(el: &RawElement) -> Vec<String> {
         .collect()
 }
 
-fn derive_order(elements: &[RawElement], studios: &[(usize, ElementId)]) -> Vec<(usize, ElementId)> {
+fn derive_order(
+    elements: &[RawElement],
+    studios: &[(usize, ElementId)],
+) -> Vec<(usize, ElementId)> {
     let sources = |el: &RawElement| -> Vec<String> {
         el.features()
             .and_then(|f| f["features"].as_array().cloned())
@@ -256,7 +342,9 @@ fn derive_order(elements: &[RawElement], studios: &[(usize, ElementId)]) -> Vec<
     let mut out = Vec::new();
     while !left.is_empty() {
         let ready = left.iter().position(|(i, _)| {
-            sources(&elements[*i]).iter().all(|src| !left.iter().any(|(j, _)| elements[*j].id == *src))
+            sources(&elements[*i])
+                .iter()
+                .all(|src| !left.iter().any(|(j, _)| elements[*j].id == *src))
         });
         // A cycle: take them in tab order (the Derived features will report it).
         out.push(left.remove(ready.unwrap_or(0)));
@@ -266,7 +354,11 @@ fn derive_order(elements: &[RawElement], studios: &[(usize, ElementId)]) -> Vec<
 
 /// The imported Part Studio `element` of scraped document `doc` (under `root`): from this run,
 /// else imported now (only that studio and its same-document sources, not saved).
-pub(crate) fn load_source(root: &std::path::Path, doc: &str, element: &str) -> Option<Arc<crate::eval::SourceCtx>> {
+pub(crate) fn load_source(
+    root: &std::path::Path,
+    doc: &str,
+    element: &str,
+) -> Option<Arc<crate::eval::SourceCtx>> {
     if let Some(s) = crate::eval::source(doc, element) {
         return Some(s);
     }
@@ -274,9 +366,13 @@ pub(crate) fn load_source(root: &std::path::Path, doc: &str, element: &str) -> O
     if BUSY.lock().ok()?.contains(&doc.to_string()) {
         return None;
     }
-    let raw = crate::raw::documents(root).into_iter().find(|d| d.id == doc)?;
+    let raw = crate::raw::documents(root)
+        .into_iter()
+        .find(|d| d.id == doc)?;
     BUSY.lock().ok()?.push(doc.to_string());
-    let _ = nested_import(|| import_document(&raw, "import", &Options::nested(Some(element.to_string()))));
+    let _ = nested_import(|| {
+        import_document(&raw, "import", &Options::nested(Some(element.to_string())))
+    });
     BUSY.lock().ok()?.retain(|d| d != doc);
     crate::eval::source(doc, element)
 }
@@ -288,7 +384,10 @@ fn timestamp(s: Option<&str>) -> Option<i64> {
     let mut d = date.split('-').map(|x| x.parse::<i64>());
     let (y, m, day) = (d.next()?.ok()?, d.next()?.ok()?, d.next()?.ok()?);
     let mut t = time.trim_end_matches('Z').split(':');
-    let (hh, mm) = (t.next()?.parse::<i64>().ok()?, t.next()?.parse::<i64>().ok()?);
+    let (hh, mm) = (
+        t.next()?.parse::<i64>().ok()?,
+        t.next()?.parse::<i64>().ok()?,
+    );
     let ss = t.next()?.split('.').next()?.parse::<i64>().ok()?;
     // Days from the civil date (Howard Hinnant's algorithm).
     let y = if m <= 2 { y - 1 } else { y };
@@ -311,11 +410,20 @@ pub struct Var {
 fn variables(elements: &[RawElement]) -> HashMap<String, Var> {
     let mut out = HashMap::new();
     for el in elements.iter().filter(|e| e.kind == "VARIABLESTUDIO") {
-        let Some(v) = read_json(&el.dir.join("variables.json")) else { continue };
+        let Some(v) = read_json(&el.dir.join("variables.json")) else {
+            continue;
+        };
         for set in v.as_array().into_iter().flatten() {
             for var in set["variables"].as_array().into_iter().flatten() {
-                if let (Some(name), Some(expr)) = (var["name"].as_str(), var["expression"].as_str()) {
-                    out.insert(name.to_string(), Var { kind: var["type"].as_str().unwrap_or("ANY").to_string(), expr: expr.to_string() });
+                if let (Some(name), Some(expr)) = (var["name"].as_str(), var["expression"].as_str())
+                {
+                    out.insert(
+                        name.to_string(),
+                        Var {
+                            kind: var["type"].as_str().unwrap_or("ANY").to_string(),
+                            expr: expr.to_string(),
+                        },
+                    );
                 }
             }
         }
@@ -326,7 +434,10 @@ fn variables(elements: &[RawElement]) -> HashMap<String, Var> {
 /// Evaluates an Onshape expression: `#name` variables are replaced by their values (with
 /// units), then cadrs's evaluator reads it. Lengths in mm, angles in degrees.
 pub fn eval_expr(expr: &str, q: Quantity, vars: &HashMap<String, Var>) -> Option<f64> {
-    let table: HashMap<String, String> = vars.iter().map(|(k, v)| (k.clone(), v.expr.clone())).collect();
+    let table: HashMap<String, String> = vars
+        .iter()
+        .map(|(k, v)| (k.clone(), v.expr.clone()))
+        .collect();
     if let Ok(x) = crate::expr::eval(expr, &table) {
         let plain = x.len == 0 && !x.angle;
         return match q {
@@ -365,8 +476,15 @@ fn normalize(expr: &str) -> String {
         // `*` followed by a unit word: drop the `*`.
         if b[i] == b'*' {
             let rest = expr[i + 1..].trim_start();
-            let word: String = rest.chars().take_while(|c| c.is_ascii_alphabetic()).collect();
-            let unit = UNITS.iter().find(|(from, _)| word == *from || word == format!("{from}s")).map(|(_, to)| *to).or((word == "m").then_some("m"));
+            let word: String = rest
+                .chars()
+                .take_while(|c| c.is_ascii_alphabetic())
+                .collect();
+            let unit = UNITS
+                .iter()
+                .find(|(from, _)| word == *from || word == format!("{from}s"))
+                .map(|(_, to)| *to)
+                .or((word == "m").then_some("m"));
             if let Some(u) = unit {
                 out.push(' ');
                 out.push_str(u);
@@ -405,7 +523,12 @@ fn substitute(expr: &str, vars: &HashMap<String, Var>, depth: usize) -> Option<S
         let text = match var.kind.as_str() {
             "LENGTH" => format!("({} mm)", eval(&inner, Quantity::Length).ok()?),
             "ANGLE" => format!("({} deg)", eval(&inner, Quantity::Angle).ok()?),
-            "NUMBER" => format!("({})", eval(&inner, Quantity::Count).or_else(|_| eval(&inner, Quantity::Angle)).ok()?),
+            "NUMBER" => format!(
+                "({})",
+                eval(&inner, Quantity::Count)
+                    .or_else(|_| eval(&inner, Quantity::Angle))
+                    .ok()?
+            ),
             // Anything: a length if it reads as one with units, else a plain number.
             _ => match eval(&inner, Quantity::Length) {
                 Ok(v) if has_unit(&inner) => format!("({v} mm)"),
@@ -419,7 +542,9 @@ fn substitute(expr: &str, vars: &HashMap<String, Var>, depth: usize) -> Option<S
 }
 
 fn has_unit(s: &str) -> bool {
-    ["mm", "cm", "m", "in", "ft", "\""].iter().any(|u| s.contains(u))
+    ["mm", "cm", "m", "in", "ft", "\""]
+        .iter()
+        .any(|u| s.contains(u))
 }
 
 /// A Part Studio being imported.
@@ -436,7 +561,10 @@ pub(crate) struct PartStudio<'a> {
     pub(crate) sketches: HashMap<String, (SketchMap, Sketch)>,
     /// The model as of the last rebuild, and how many features it covers.
     /// (The features it was built from: an edit that keeps their count must rebuild too.)
-    built: Option<(Vec<cadrs_core::document::Feature>, Arc<cadrs_core::rebuild::Build>)>,
+    built: Option<(
+        Vec<cadrs_core::document::Feature>,
+        Arc<cadrs_core::rebuild::Build>,
+    )>,
     pub(crate) options: &'a Options,
     /// Its Derived features' sources (to resolve queries on derived parts).
     pub(crate) derived: crate::eval::DerivedSources,
@@ -458,15 +586,41 @@ impl<'a> PartStudio<'a> {
         report: &'a mut ElementReport,
         options: &'a Options,
     ) -> Self {
-        let context = cadrs_core::assembly::context::parts(&s.doc, el, |_, f| Some(cadrs_core::rebuild::build(f))).0;
-        let model_points = read_json(&raw.dir.join("bodydetails.json")).map(|d| body_topology(&d)).unwrap_or_default();
-        Self { s, el, doc_id, raw, vars, report, features: HashMap::new(), sketches: HashMap::new(), built: None, options, derived: HashMap::new(), context, model_points }
+        let context = cadrs_core::assembly::context::parts(&s.doc, el, |_, f| {
+            Some(cadrs_core::rebuild::build(f))
+        })
+        .0;
+        let model_points = read_json(&raw.dir.join("bodydetails.json"))
+            .map(|d| body_topology(&d))
+            .unwrap_or_default();
+        Self {
+            s,
+            el,
+            doc_id,
+            raw,
+            vars,
+            report,
+            features: HashMap::new(),
+            sketches: HashMap::new(),
+            built: None,
+            options,
+            derived: HashMap::new(),
+            context,
+            model_points,
+        }
     }
 
     /// A query model of `parts` with this studio's features, sketches and derived sources.
     pub(crate) fn model<'m>(&'m self, parts: &'m [Part]) -> crate::eval::Model<'m> {
-        let doc = self.s.doc.element(self.el).map(|e| e.features()).unwrap_or(&[]);
-        crate::eval::Model::new(parts, &self.features, &self.sketches).with_derived(&self.derived).with_doc(doc)
+        let doc = self
+            .s
+            .doc
+            .element(self.el)
+            .map(|e| e.features())
+            .unwrap_or(&[]);
+        crate::eval::Model::new(parts, &self.features, &self.sketches)
+            .with_derived(&self.derived)
+            .with_doc(doc)
     }
 
     /// A JSON file Onshape gave for this Part Studio (`bodydetails.json`, …).
@@ -488,7 +642,12 @@ impl<'a> PartStudio<'a> {
     pub(crate) fn blob(&self, element: &str) -> Option<(String, Vec<u8>)> {
         let doc_dir = self.raw.dir.parent()?;
         let elements = read_json(&doc_dir.join("elements.json"))?;
-        let name = elements.as_array()?.iter().find(|e| e["id"].as_str() == Some(element))?["name"].as_str()?.to_string();
+        let name = elements
+            .as_array()?
+            .iter()
+            .find(|e| e["id"].as_str() == Some(element))?["name"]
+            .as_str()?
+            .to_string();
         let bytes = std::fs::read(doc_dir.join(element).join("blob.bin")).ok()?;
         Some((name, bytes))
     }
@@ -499,7 +658,12 @@ impl<'a> PartStudio<'a> {
 
     /// The parts as the features so far build them.
     pub(crate) fn parts(&mut self) -> Vec<Part> {
-        let feats = self.s.doc.element(self.el).map(|e| e.features().to_vec()).unwrap_or_default();
+        let feats = self
+            .s
+            .doc
+            .element(self.el)
+            .map(|e| e.features().to_vec())
+            .unwrap_or_default();
         let fresh = matches!(&self.built, Some((f, _)) if *f == feats);
         if !fresh {
             // Debugging a rebuild that hangs: the features about to be built, as RON.
@@ -511,11 +675,18 @@ impl<'a> PartStudio<'a> {
             let started = std::time::Instant::now();
             let build = cadrs_core::rebuild::build(&feats);
             if std::env::var_os("CADRS_ONSHAPE_TRACE").is_some() {
-                eprintln!("    rebuild of {} features: {:.3} s", feats.len(), started.elapsed().as_secs_f64());
+                eprintln!(
+                    "    rebuild of {} features: {:.3} s",
+                    feats.len(),
+                    started.elapsed().as_secs_f64()
+                );
             }
             self.built = Some((feats, build));
         }
-        self.built.as_ref().map(|(_, b)| b.parts.clone()).unwrap_or_default()
+        self.built
+            .as_ref()
+            .map(|(_, b)| b.parts.clone())
+            .unwrap_or_default()
     }
 
     /// The frame of mate connector feature `c` in the model as it is now.
@@ -547,7 +718,14 @@ impl<'a> PartStudio<'a> {
             None => Vec::new(),
         };
         if !derived.is_empty() {
-            s += &format!("<{}>", derived.iter().map(|d| self.describe(d)).collect::<Vec<_>>().join(","));
+            s += &format!(
+                "<{}>",
+                derived
+                    .iter()
+                    .map(|d| self.describe(d))
+                    .collect::<Vec<_>>()
+                    .join(",")
+            );
         }
         s
     }
@@ -560,7 +738,13 @@ impl<'a> PartStudio<'a> {
     fn region_curves(
         &mut self,
         q: &crate::query::Value,
-    ) -> Option<(String, FeatureId, SketchMap, cadrs_core::document::SketchFeature, std::collections::BTreeSet<cadrs_sketch::CurveId>)> {
+    ) -> Option<(
+        String,
+        FeatureId,
+        SketchMap,
+        cadrs_core::document::SketchFeature,
+        std::collections::BTreeSet<cadrs_sketch::CurveId>,
+    )> {
         use crate::query::Value as Q;
         let op = q.get("operationId").and_then(Q::as_str)?;
         let sk = refs::op_feature(op).to_string();
@@ -570,7 +754,10 @@ impl<'a> PartStudio<'a> {
         let g = &feature.geometry;
         let mut ids = std::collections::BTreeSet::new();
         refs::sketch_entities(q, &sk, &mut ids);
-        let mut curves: std::collections::BTreeSet<cadrs_sketch::CurveId> = ids.iter().filter_map(|i| map.curves.get(i).copied()).collect();
+        let mut curves: std::collections::BTreeSet<cadrs_sketch::CurveId> = ids
+            .iter()
+            .filter_map(|i| map.curves.get(i).copied())
+            .collect();
         if !g.imprint.is_empty()
             && let Some(plane) = feature.plane
         {
@@ -582,13 +769,20 @@ impl<'a> PartStudio<'a> {
             let model = self.model(&parts);
             for e in edges {
                 for ent in model.eval(e) {
-                    let crate::eval::Ent::Edge(pi, ei) = ent else { continue };
+                    let crate::eval::Ent::Edge(pi, ei) = ent else {
+                        continue;
+                    };
                     let pts: Vec<cadrs_sketch::Vec2> = parts[pi].solid.edges[ei]
                         .points
                         .iter()
                         .filter_map(|p| {
-                            let d = [p[0] - frame.origin[0], p[1] - frame.origin[1], p[2] - frame.origin[2]];
-                            (dot(d, n).abs() < 1e-3).then(|| cadrs_sketch::Vec2::new(dot(d, frame.u), dot(d, frame.v)))
+                            let d = [
+                                p[0] - frame.origin[0],
+                                p[1] - frame.origin[1],
+                                p[2] - frame.origin[2],
+                            ];
+                            (dot(d, n).abs() < 1e-3)
+                                .then(|| cadrs_sketch::Vec2::new(dot(d, frame.u), dot(d, frame.v)))
                         })
                         .collect();
                     if pts.len() < 2 {
@@ -609,12 +803,18 @@ impl<'a> PartStudio<'a> {
     /// the face(s) the sketch lies on, which Onshape offers but cadrs doesn't (a face's own
     /// outline is not a sketch region there). It is that face: the coplanar face whose
     /// outline has the imprinted edges the query names (or the sketch's own face).
-    pub(crate) fn face_region(&mut self, q: &crate::query::Value, notes: &mut Vec<String>) -> Option<FaceOrRegion> {
+    pub(crate) fn face_region(
+        &mut self,
+        q: &crate::query::Value,
+        notes: &mut Vec<String>,
+    ) -> Option<FaceOrRegion> {
         let (_, sid, _, feature, curves) = self.region_curves(q)?;
         let g = &feature.geometry;
         // Drawn curves named too: only when the named face edges can say which face (cadrs found
         // no region with those curves, so they don't bound it; Onshape names neighbours too).
-        let drawn_named = curves.iter().any(|c| g.curves.get(*c).is_some_and(|c| !c.construction));
+        let drawn_named = curves
+            .iter()
+            .any(|c| g.curves.get(*c).is_some_and(|c| !c.construction));
         if drawn_named && !g.imprint.iter().any(|im| curves.contains(&im.id)) {
             return None;
         }
@@ -622,13 +822,21 @@ impl<'a> PartStudio<'a> {
         let frame = plane.frame();
         let n = cross(frame.u, frame.v);
         let parts = self.parts();
-        let wanted: Vec<&cadrs_sketch::Imprint> = g.imprint.iter().filter(|im| curves.contains(&im.id)).collect();
+        let wanted: Vec<&cadrs_sketch::Imprint> = g
+            .imprint
+            .iter()
+            .filter(|im| curves.contains(&im.id))
+            .collect();
         let mut best: Option<(usize, usize, usize)> = None;
         for (pi, part) in parts.iter().enumerate() {
             for (fi, face) in part.solid.faces.iter().enumerate() {
                 let Some(pl) = face.plane else { continue };
                 let fnrm = cross(pl.u, pl.v);
-                let d = [pl.origin[0] - frame.origin[0], pl.origin[1] - frame.origin[1], pl.origin[2] - frame.origin[2]];
+                let d = [
+                    pl.origin[0] - frame.origin[0],
+                    pl.origin[1] - frame.origin[1],
+                    pl.origin[2] - frame.origin[2],
+                ];
                 if dot(fnrm, n) < 1.0 - 1e-6 || dot(d, n).abs() > 1e-3 {
                     continue;
                 }
@@ -641,13 +849,20 @@ impl<'a> PartStudio<'a> {
                         .map(|l| {
                             l.iter()
                                 .map(|p| {
-                                    let d = [p[0] - frame.origin[0], p[1] - frame.origin[1], p[2] - frame.origin[2]];
+                                    let d = [
+                                        p[0] - frame.origin[0],
+                                        p[1] - frame.origin[1],
+                                        p[2] - frame.origin[2],
+                                    ];
                                     cadrs_sketch::Vec2::new(dot(d, frame.u), dot(d, frame.v))
                                 })
                                 .collect()
                         })
                         .collect();
-                    wanted.iter().filter(|im| on_loops(&loops, imprint_point(&im.shape))).count()
+                    wanted
+                        .iter()
+                        .filter(|im| on_loops(&loops, imprint_point(&im.shape)))
+                        .count()
                 };
                 if score > 0 && best.is_none_or(|(s, _, _)| score > s) {
                     best = Some((score, pi, fi));
@@ -658,42 +873,79 @@ impl<'a> PartStudio<'a> {
         let part = &parts[pi];
         let face = &part.solid.faces[fi];
         let to2 = |p: &[f64; 3]| {
-            let d = [p[0] - frame.origin[0], p[1] - frame.origin[1], p[2] - frame.origin[2]];
+            let d = [
+                p[0] - frame.origin[0],
+                p[1] - frame.origin[1],
+                p[2] - frame.origin[2],
+            ];
             cadrs_sketch::Vec2::new(dot(d, frame.u), dot(d, frame.v))
         };
-        let loops: Vec<Vec<cadrs_sketch::Vec2>> = face.loops.iter().map(|l| l.iter().map(to2).collect()).collect();
+        let loops: Vec<Vec<cadrs_sketch::Vec2>> = face
+            .loops
+            .iter()
+            .map(|l| l.iter().map(to2).collect())
+            .collect();
         // The named edges all on one hole of the face: the region inside that hole, which
         // cadrs has once the hole's outline is drawn in the sketch.
-        let outer = (0..loops.len()).max_by(|a, b| polygon_area(&loops[*a]).abs().total_cmp(&polygon_area(&loops[*b]).abs()));
+        let outer = (0..loops.len()).max_by(|a, b| {
+            polygon_area(&loops[*a])
+                .abs()
+                .total_cmp(&polygon_area(&loops[*b]).abs())
+        });
         let hole = (0..loops.len()).filter(|i| Some(*i) != outer).find(|i| {
-            !wanted.is_empty() && wanted.iter().all(|im| on_loops(std::slice::from_ref(&loops[*i]), imprint_point(&im.shape)))
+            !wanted.is_empty()
+                && wanted
+                    .iter()
+                    .all(|im| on_loops(std::slice::from_ref(&loops[*i]), imprint_point(&im.shape)))
         });
         if let Some(h) = hole {
-            let outline: Vec<cadrs_sketch::ImprintShape> =
-                g.imprint.iter().filter(|im| on_loops(std::slice::from_ref(&loops[h]), imprint_point(&im.shape))).map(|im| im.shape).collect();
-            let before: std::collections::HashSet<cadrs_sketch::CurveId> = g.curves.keys().collect();
+            let outline: Vec<cadrs_sketch::ImprintShape> = g
+                .imprint
+                .iter()
+                .filter(|im| on_loops(std::slice::from_ref(&loops[h]), imprint_point(&im.shape)))
+                .map(|im| im.shape)
+                .collect();
+            let before: std::collections::HashSet<cadrs_sketch::CurveId> =
+                g.curves.keys().collect();
             let ops: Vec<cadrs_sketch::SketchOp> = outline.iter().map(drawn).collect();
-            self.s.run(&cadrs_core::commands::EditSketch { element: self.el, feature: sid, op: cadrs_sketch::SketchOp::Batch(ops) }).ok()?;
+            self.s
+                .run(&cadrs_core::commands::EditSketch {
+                    element: self.el,
+                    feature: sid,
+                    op: cadrs_sketch::SketchOp::Batch(ops),
+                })
+                .ok()?;
             let g2 = sketch::sketch_of(self.s, self.el, sid).ok()?;
-            let new: std::collections::BTreeSet<cadrs_sketch::CurveId> = g2.curves.keys().filter(|c| !before.contains(c)).collect();
+            let new: std::collections::BTreeSet<cadrs_sketch::CurveId> =
+                g2.curves.keys().filter(|c| !before.contains(c)).collect();
             let r = refs::region_with(sid, &g2, &new)?;
             notes.push("a region inside a hole of the face was selected: the hole's outline is drawn in the sketch".into());
             return Some(FaceOrRegion::Region(r));
         }
-        Some(FaceOrRegion::Face(cadrs_core::document::FaceRef { part: part.id, face: face.name, seed: part.solid.face_point(fi).unwrap_or([0.0; 3]) }))
+        Some(FaceOrRegion::Face(cadrs_core::document::FaceRef {
+            part: part.id,
+            face: face.name,
+            seed: part.solid.face_point(fi).unwrap_or([0.0; 3]),
+        }))
     }
 
     /// The sketch region a region query picks. Besides the sketch entities around it, the
     /// query may name model edges next to it (a sketch curve crossing the face it is drawn on
     /// is cut by the face's edges, which cadrs imprints on the sketch): those are found in the
     /// model and matched to the sketch's imprinted edges.
-    pub(crate) fn region_of(&mut self, q: &crate::query::Value) -> Vec<cadrs_core::document::RegionRef> {
+    pub(crate) fn region_of(
+        &mut self,
+        q: &crate::query::Value,
+    ) -> Vec<cadrs_core::document::RegionRef> {
         self.region_of_one(q).into_iter().flatten().collect()
     }
 
     /// See [`Self::region_of`]: `Some(regions)` (several when Onshape's one region is cut in
     /// pieces in cadrs).
-    fn region_of_one(&mut self, q: &crate::query::Value) -> Option<Vec<cadrs_core::document::RegionRef>> {
+    fn region_of_one(
+        &mut self,
+        q: &crate::query::Value,
+    ) -> Option<Vec<cadrs_core::document::RegionRef>> {
         use crate::query::Value as Q;
         let (sk, sid, map, feature, curves) = self.region_curves(q)?;
         let g = &feature.geometry;
@@ -702,10 +954,15 @@ impl<'a> PartStudio<'a> {
         let mut sides: Vec<(cadrs_sketch::CurveId, f64)> = Vec::new();
         // The curves the region's own boundary entries name (not the ones nested in their
         // disambiguation, which name neighbours).
-        let mut direct: std::collections::BTreeSet<cadrs_sketch::CurveId> = std::collections::BTreeSet::new();
+        let mut direct: std::collections::BTreeSet<cadrs_sketch::CurveId> =
+            std::collections::BTreeSet::new();
         // How many edges the query lists around the region (its boundary's size in Onshape).
         let mut entries = 0;
-        for d in q.get("disambiguationData").map(Q::items).unwrap_or_default() {
+        for d in q
+            .get("disambiguationData")
+            .map(Q::items)
+            .unwrap_or_default()
+        {
             if d.get("disambiguationType").and_then(Q::as_str) != Some("TOPOLOGY") {
                 continue;
             }
@@ -715,10 +972,22 @@ impl<'a> PartStudio<'a> {
                     Q::Array(pair) => (pair.first(), pair.get(1).and_then(Q::as_f64)),
                     other => (Some(other), None),
                 };
-                let Some(c) = eq.and_then(|eq| refs::own_sketch_entity(eq, &sk)).and_then(|i| map.curves.get(&i).copied()) else { continue };
+                let Some(c) = eq
+                    .and_then(|eq| refs::own_sketch_entity(eq, &sk))
+                    .and_then(|i| map.curves.get(&i).copied())
+                else {
+                    continue;
+                };
                 direct.insert(c);
                 if let Some(sign) = sign {
-                    sides.push((c, if map.reversed.contains(&c) { -sign } else { sign }));
+                    sides.push((
+                        c,
+                        if map.reversed.contains(&c) {
+                            -sign
+                        } else {
+                            sign
+                        },
+                    ));
                 }
             }
         }
@@ -737,17 +1006,34 @@ impl<'a> PartStudio<'a> {
         }
         let r = refs::region_with_sides(sid, g, &curves, &direct, &sides, entries);
         if std::env::var_os("CADRS_ONSHAPE_DEBUG_REGIONS").is_some() {
-            eprintln!("REGIONSKETCH curves {} imprint {:?} regions {} plane {:?}", g.curves.len(), g.imprint.iter().map(|i| i.shape).collect::<Vec<_>>(), cadrs_sketch::region::regions(g).len(), feature.plane.map(|p| std::mem::discriminant(&p)));
-            for (_, c) in &g.curves { eprintln!("   curve {:?} construction {}", c.kind, c.construction); }
-            for (id, p) in &g.points { eprintln!("   point {id:?} {:?}", p.pos); }
+            eprintln!(
+                "REGIONSKETCH curves {} imprint {:?} regions {} plane {:?}",
+                g.curves.len(),
+                g.imprint.iter().map(|i| i.shape).collect::<Vec<_>>(),
+                cadrs_sketch::region::regions(g).len(),
+                feature.plane.map(|p| std::mem::discriminant(&p))
+            );
+            for (_, c) in &g.curves {
+                eprintln!("   curve {:?} construction {}", c.kind, c.construction);
+            }
+            for (id, p) in &g.points {
+                eprintln!("   point {id:?} {:?}", p.pos);
+            }
             if std::env::var_os("CADRS_ONSHAPE_DEBUG_SHAPES").is_some() {
                 for (_, c) in &g.curves {
                     match c.kind {
-                        cadrs_sketch::CurveKind::Line { a, b } => eprintln!("    line {:?} {:?}", g.points[a].pos, g.points[b].pos),
-                        cadrs_sketch::CurveKind::Arc { center, start, end } => {
-                            eprintln!("    arc {:?} {:?} {:?}", g.points[center].pos, g.points[start].pos, g.points[end].pos)
+                        cadrs_sketch::CurveKind::Line { a, b } => {
+                            eprintln!("    line {:?} {:?}", g.points[a].pos, g.points[b].pos)
                         }
-                        cadrs_sketch::CurveKind::Circle { center, radius } => eprintln!("    circle {:?} {radius}", g.points[center].pos),
+                        cadrs_sketch::CurveKind::Arc { center, start, end } => {
+                            eprintln!(
+                                "    arc {:?} {:?} {:?}",
+                                g.points[center].pos, g.points[start].pos, g.points[end].pos
+                            )
+                        }
+                        cadrs_sketch::CurveKind::Circle { center, radius } => {
+                            eprintln!("    circle {:?} {radius}", g.points[center].pos)
+                        }
                         _ => {}
                     }
                 }
@@ -755,11 +1041,22 @@ impl<'a> PartStudio<'a> {
                     eprintln!("    imprint {:?}", im.shape);
                 }
             }
-            let rev: HashMap<cadrs_sketch::CurveId, &String> = map.curves.iter().map(|(k, v)| (*v, k)).collect();
-            let name = |c: &cadrs_sketch::CurveId| rev.get(c).map(|s| s.to_string()).unwrap_or_else(|| format!("{c:?}"));
-            eprintln!("REGION wants {:?}", curves.iter().map(name).collect::<Vec<_>>());
+            let rev: HashMap<cadrs_sketch::CurveId, &String> =
+                map.curves.iter().map(|(k, v)| (*v, k)).collect();
+            let name = |c: &cadrs_sketch::CurveId| {
+                rev.get(c)
+                    .map(|s| s.to_string())
+                    .unwrap_or_else(|| format!("{c:?}"))
+            };
+            eprintln!(
+                "REGION wants {:?}",
+                curves.iter().map(name).collect::<Vec<_>>()
+            );
             if let Some(r) = &r {
-                eprintln!("       got  {:?}", r.curves.iter().map(name).collect::<Vec<_>>());
+                eprintln!(
+                    "       got  {:?}",
+                    r.curves.iter().map(name).collect::<Vec<_>>()
+                );
             }
         }
         r.map(|r| vec![r])
@@ -768,11 +1065,17 @@ impl<'a> PartStudio<'a> {
     /// The error the last rebuild reported for feature `id`, if any.
     pub(crate) fn rebuild_error(&self, id: FeatureId) -> Option<String> {
         let (_, b) = self.built.as_ref()?;
-        b.errors.iter().find(|(f, _)| *f == id).map(|(_, e)| e.clone())
+        b.errors
+            .iter()
+            .find(|(f, _)| *f == id)
+            .map(|(_, e)| e.clone())
     }
 
     /// The face a query refers to, in the model as built so far.
-    pub(crate) fn face_of(&mut self, q: &crate::query::Value) -> Option<cadrs_core::document::FaceRef> {
+    pub(crate) fn face_of(
+        &mut self,
+        q: &crate::query::Value,
+    ) -> Option<cadrs_core::document::FaceRef> {
         let parts = self.parts();
         self.model(&parts).face(q)
     }
@@ -789,7 +1092,12 @@ impl<'a> PartStudio<'a> {
             let name = f["name"].as_str().unwrap_or_default().to_string();
             let kind = f["featureType"].as_str().unwrap_or_default().to_string();
             let fid = f["featureId"].as_str().unwrap_or_default().to_string();
-            let mut fr = FeatureReport { name, kind: kind.clone(), outcome: Outcome::Full, notes: Vec::new() };
+            let mut fr = FeatureReport {
+                name,
+                kind: kind.clone(),
+                outcome: Outcome::Full,
+                notes: Vec::new(),
+            };
             if f["suppressed"].as_bool() == Some(true) {
                 fr.outcome = Outcome::Suppressed;
                 self.report.features.push(fr);
@@ -797,7 +1105,9 @@ impl<'a> PartStudio<'a> {
             }
             if self.options.skip.contains(&fid) {
                 fr.outcome = Outcome::Skipped;
-                fr.notes.push("left out: its rebuild hung or crashed in cadrs (a kernel bug to fix)".into());
+                fr.notes.push(
+                    "left out: its rebuild hung or crashed in cadrs (a kernel bug to fix)".into(),
+                );
                 self.report.features.push(fr);
                 continue;
             }
@@ -830,33 +1140,58 @@ impl<'a> PartStudio<'a> {
                 }
                 _ => {
                     fr.outcome = Outcome::Skipped;
-                    fr.notes.push("no importer for this feature type yet".into());
+                    fr.notes
+                        .push("no importer for this feature type yet".into());
                     Ok(())
                 }
             };
             if let Err(e) = result {
                 fr.outcome = Outcome::Skipped;
                 fr.notes.push(e.to_string());
-                let fails_there = json["featureStates"][&fid]["featureStatus"].as_str() == Some("ERROR");
+                let fails_there =
+                    json["featureStates"][&fid]["featureStatus"].as_str() == Some("ERROR");
                 if fails_there {
                     fr.notes.push("it fails in Onshape too".into());
                 }
                 // A mate connector stays in the list, with no origin to pick one in cadrs: in
                 // error, as it is in Onshape when it fails there too (then that is the import).
                 if kind == "mateConnector" {
-                    let kind = cadrs_core::document::FeatureKind::MateConnector(cadrs_core::mate::MateConnectorFeature::default());
+                    let kind = cadrs_core::document::FeatureKind::MateConnector(
+                        cadrs_core::mate::MateConnectorFeature::default(),
+                    );
                     if self.add(f, &fid, "Mate connector", kind, &mut fr).is_ok() {
-                        fr.outcome = if fails_there { Outcome::Full } else { Outcome::Partial };
-                        fr.notes.push("added without its origin: pick it in cadrs".into());
+                        fr.outcome = if fails_there {
+                            Outcome::Full
+                        } else {
+                            Outcome::Partial
+                        };
+                        fr.notes
+                            .push("added without its origin: pick it in cadrs".into());
                     }
                 }
             }
             if trace {
-                eprintln!("  {:>8.3} s  {} ({}) {:?}", started.elapsed().as_secs_f64(), fr.name, fr.kind, fr.outcome);
+                eprintln!(
+                    "  {:>8.3} s  {} ({}) {:?}",
+                    started.elapsed().as_secs_f64(),
+                    fr.name,
+                    fr.kind,
+                    fr.outcome
+                );
                 if std::env::var_os("CADRS_ONSHAPE_TRACE_PARTS").is_some() {
                     for p in self.parts() {
                         let b = bbox_of(p.solid.positions.iter().copied()).unwrap_or_default();
-                        eprintln!("             {:<12} vol {:>10.1}  box [{:.9} {:.9} {:.9}] .. [{:.9} {:.9} {:.9}]", p.name, p.mass.as_ref().map_or(0.0, |m| m.volume), b[0], b[1], b[2], b[3], b[4], b[5]);
+                        eprintln!(
+                            "             {:<12} vol {:>10.1}  box [{:.9} {:.9} {:.9}] .. [{:.9} {:.9} {:.9}]",
+                            p.name,
+                            p.mass.as_ref().map_or(0.0, |m| m.volume),
+                            b[0],
+                            b[1],
+                            b[2],
+                            b[3],
+                            b[4],
+                            b[5]
+                        );
                     }
                 }
             }
@@ -864,12 +1199,26 @@ impl<'a> PartStudio<'a> {
         }
         self.name_parts();
         let parts = self.parts();
-        crate::eval::set_source(self.doc_id, &self.raw.id, crate::eval::SourceCtx { features: self.features.clone(), sketches: self.sketches.clone(), parts });
+        crate::eval::set_source(
+            self.doc_id,
+            &self.raw.id,
+            crate::eval::SourceCtx {
+                features: self.features.clone(),
+                sketches: self.sketches.clone(),
+                parts,
+            },
+        );
     }
 
     fn variable(&mut self, f: &Value, fr: &mut FeatureReport) {
-        let name = param(f, "name").and_then(|p| p["value"].as_str()).unwrap_or_default().to_string();
-        let kind = param(f, "variableType").and_then(|p| p["value"].as_str()).unwrap_or("ANY").to_string();
+        let name = param(f, "name")
+            .and_then(|p| p["value"].as_str())
+            .unwrap_or_default()
+            .to_string();
+        let kind = param(f, "variableType")
+            .and_then(|p| p["value"].as_str())
+            .unwrap_or("ANY")
+            .to_string();
         let value_param = match kind.as_str() {
             "LENGTH" => "lengthValue",
             "ANGLE" => "angleValue",
@@ -878,8 +1227,15 @@ impl<'a> PartStudio<'a> {
         };
         match param(f, value_param).and_then(|p| p["expression"].as_str()) {
             Some(expr) if !name.is_empty() => {
-                self.vars.insert(name, Var { kind, expr: expr.to_string() });
-                fr.notes.push("cadrs has no variables yet: its value is used where it appears".into());
+                self.vars.insert(
+                    name,
+                    Var {
+                        kind,
+                        expr: expr.to_string(),
+                    },
+                );
+                fr.notes
+                    .push("cadrs has no variables yet: its value is used where it appears".into());
                 fr.outcome = Outcome::Partial;
             }
             _ => {
@@ -889,16 +1245,29 @@ impl<'a> PartStudio<'a> {
         }
     }
 
-    fn sketch(&mut self, f: &Value, fid: &str, sketches: &Value, fr: &mut FeatureReport) -> Result<(), CommandError> {
-        let solved = sketch::Solved::find(sketches, fid).ok_or_else(|| CommandError::Invalid("not in sketches.json".into()))?;
+    fn sketch(
+        &mut self,
+        f: &Value,
+        fid: &str,
+        sketches: &Value,
+        fr: &mut FeatureReport,
+    ) -> Result<(), CommandError> {
+        let solved = sketch::Solved::find(sketches, fid)
+            .ok_or_else(|| CommandError::Invalid("not in sketches.json".into()))?;
         let plane = match sketch::default_plane(f) {
             Some(p) => p,
             None => {
                 // The faces the query could mean, keeping the first whose plane is the one
                 // Onshape's sketch lies on (a query that matches several side faces must not
                 // put the sketch on the wrong one).
-                let (n, o) = sketch::world_plane(&solved).ok_or_else(|| CommandError::Invalid("sketch without a matrix".into()))?;
-                let feats = self.s.doc.element(self.el).map(|e| e.features().to_vec()).unwrap_or_default();
+                let (n, o) = sketch::world_plane(&solved)
+                    .ok_or_else(|| CommandError::Invalid("sketch without a matrix".into()))?;
+                let feats = self
+                    .s
+                    .doc
+                    .element(self.el)
+                    .map(|e| e.features().to_vec())
+                    .unwrap_or_default();
                 let parts = self.parts();
                 let mut by_query = None;
                 // A face the query names that is parallel and close, if none is exact (a model
@@ -909,7 +1278,11 @@ impl<'a> PartStudio<'a> {
                     // A region of another sketch: that sketch's plane.
                     if let Some(op) = q.get("operationId").and_then(crate::query::Value::as_str)
                         && let Some((map, _)) = self.sketches.get(refs::op_feature(op))
-                        && let Some(pl) = feats.iter().find(|x| x.id == map.feature).and_then(|x| x.sketch()).and_then(|x| x.plane)
+                        && let Some(pl) = feats
+                            .iter()
+                            .find(|x| x.id == map.feature)
+                            .and_then(|x| x.sketch())
+                            .and_then(|x| x.plane)
                         && plane_matches(&pl, n, o)
                     {
                         by_query = Some(pl);
@@ -920,7 +1293,9 @@ impl<'a> PartStudio<'a> {
                     let pts = sketch::world_points(&solved);
                     let mut best: Option<(usize, PlaneRef)> = None;
                     for e in model.eval(&q) {
-                        let crate::eval::Ent::Face(pi, fi) = e else { continue };
+                        let crate::eval::Ent::Face(pi, fi) = e else {
+                            continue;
+                        };
                         if let Some(pl) = plane_on(&feats, &parts[pi], fi) {
                             if plane_matches(&pl, n, o) {
                                 let score = points_on_face(&parts[pi], fi, &pts);
@@ -937,21 +1312,61 @@ impl<'a> PartStudio<'a> {
                     }
                     if by_query.is_none() && std::env::var_os("CADRS_ONSHAPE_DEBUG").is_some() {
                         eprintln!("PLANE {} | {}", f["name"], self.describe(&q));
-                        let qop = q.get("operationId").and_then(crate::query::Value::as_str).map(refs::op_feature).and_then(|o| self.features.get(o)).map(|f| f.0);
+                        let qop = q
+                            .get("operationId")
+                            .and_then(crate::query::Value::as_str)
+                            .map(refs::op_feature)
+                            .and_then(|o| self.features.get(o))
+                            .map(|f| f.0);
                         for p in &parts {
                             for face in &p.solid.faces {
                                 if Some(face.name.op) == qop {
-                                    let fp = face.plane.map(|pl| (cross(pl.u, pl.v), dot([o[0] - pl.origin[0], o[1] - pl.origin[1], o[2] - pl.origin[2]], cross(pl.u, pl.v))));
+                                    let fp = face.plane.map(|pl| {
+                                        (
+                                            cross(pl.u, pl.v),
+                                            dot(
+                                                [
+                                                    o[0] - pl.origin[0],
+                                                    o[1] - pl.origin[1],
+                                                    o[2] - pl.origin[2],
+                                                ],
+                                                cross(pl.u, pl.v),
+                                            ),
+                                        )
+                                    });
                                     eprintln!("      op face {:?} {fp:?}", face.name.origin);
                                 }
                             }
                         }
                         let model = self.model(&parts);
                         for e in model.eval(&q) {
-                            let crate::eval::Ent::Face(pi, fi) = e else { continue };
+                            let crate::eval::Ent::Face(pi, fi) = e else {
+                                continue;
+                            };
                             let face = &parts[pi].solid.faces[fi];
-                            let fp = face.plane.map(|pl| (cross(pl.u, pl.v), dot([o[0] - pl.origin[0], o[1] - pl.origin[1], o[2] - pl.origin[2]], cross(pl.u, pl.v))));
-                            eprintln!("      cand {:?} plane(n, dist)={fp:?} face_plane={}; want n={n:?}", face.name.origin, cadrs_core::parts::face_plane(&feats, FeatureId(face.name.op), face.name).is_some());
+                            let fp = face.plane.map(|pl| {
+                                (
+                                    cross(pl.u, pl.v),
+                                    dot(
+                                        [
+                                            o[0] - pl.origin[0],
+                                            o[1] - pl.origin[1],
+                                            o[2] - pl.origin[2],
+                                        ],
+                                        cross(pl.u, pl.v),
+                                    ),
+                                )
+                            });
+                            eprintln!(
+                                "      cand {:?} plane(n, dist)={fp:?} face_plane={}; want n={n:?}",
+                                face.name.origin,
+                                cadrs_core::parts::face_plane(
+                                    &feats,
+                                    FeatureId(face.name.op),
+                                    face.name
+                                )
+                                .is_some()
+                            );
                         }
                     }
                 }
@@ -975,10 +1390,25 @@ impl<'a> PartStudio<'a> {
             parts.extend(self.context.iter().cloned());
             fr.notes.push("in context of an assembly".into());
             if std::env::var_os("CADRS_ONSHAPE_DEBUG_EDGES").is_some() {
-                eprintln!("IN-CONTEXT {}: {} parts, {} of them the context's", f["name"].as_str().unwrap_or_default(), parts.len(), self.context.len());
+                eprintln!(
+                    "IN-CONTEXT {}: {} parts, {} of them the context's",
+                    f["name"].as_str().unwrap_or_default(),
+                    parts.len(),
+                    self.context.len()
+                );
             }
         }
-        let map = sketch::import(self.s, self.el, id, f, &solved, plane, &parts, &self.model_points, fr)?;
+        let map = sketch::import(
+            self.s,
+            self.el,
+            id,
+            f,
+            &solved,
+            plane,
+            &parts,
+            &self.model_points,
+            fr,
+        )?;
         let g = sketch::sketch_of(self.s, self.el, id)?;
         self.features.insert(fid.to_string(), id);
         self.sketches.insert(fid.to_string(), (map, g));
@@ -1001,8 +1431,13 @@ impl<'a> PartStudio<'a> {
             for (fi, f) in part.solid.faces.iter().enumerate() {
                 let Some(pl) = f.plane else { continue };
                 let fnrm = cross(pl.u, pl.v);
-                let d = [o[0] - pl.origin[0], o[1] - pl.origin[1], o[2] - pl.origin[2]];
-                if dot(fnrm, n) > 1.0 - 1e-6 && dot(d, fnrm).abs() < 1e-4
+                let d = [
+                    o[0] - pl.origin[0],
+                    o[1] - pl.origin[1],
+                    o[2] - pl.origin[2],
+                ];
+                if dot(fnrm, n) > 1.0 - 1e-6
+                    && dot(d, fnrm).abs() < 1e-4
                     && let Some(p) = plane_on(&feats, part, fi)
                 {
                     let score = points_on_face(part, fi, &pts);
@@ -1019,17 +1454,38 @@ impl<'a> PartStudio<'a> {
     /// wire operation).
     fn edge_sketch(&self, q: &crate::query::Value) -> Option<FeatureId> {
         let op = q.get("operationId").and_then(crate::query::Value::as_str)?;
-        if !op.ends_with("wireOp") || q.get("entityType").and_then(crate::query::Value::as_str) != Some("EDGE") {
+        if !op.ends_with("wireOp")
+            || q.get("entityType").and_then(crate::query::Value::as_str) != Some("EDGE")
+        {
             return None;
         }
         self.features.get(refs::op_feature(op)).copied()
     }
 
-    fn extrude(&mut self, f: &Value, fid: &str, fr: &mut FeatureReport) -> Result<(), CommandError> {
+    fn extrude(
+        &mut self,
+        f: &Value,
+        fid: &str,
+        fr: &mut FeatureReport,
+    ) -> Result<(), CommandError> {
         let mut x = ExtrudeFeature::default();
-        let text = |id: &str| param(f, id).and_then(|p| p["value"].as_str()).unwrap_or_default().to_string();
-        let flag = |id: &str| param(f, id).and_then(|p| p["value"].as_bool()).unwrap_or(false);
-        let expr = |id: &str| param(f, id).and_then(|p| p["expression"].as_str()).unwrap_or_default().to_string();
+        let text = |id: &str| {
+            param(f, id)
+                .and_then(|p| p["value"].as_str())
+                .unwrap_or_default()
+                .to_string()
+        };
+        let flag = |id: &str| {
+            param(f, id)
+                .and_then(|p| p["value"].as_bool())
+                .unwrap_or(false)
+        };
+        let expr = |id: &str| {
+            param(f, id)
+                .and_then(|p| p["expression"].as_str())
+                .unwrap_or_default()
+                .to_string()
+        };
 
         x.body = match text("bodyType").as_str() {
             "SURFACE" => BodyType::Surface,
@@ -1041,7 +1497,14 @@ impl<'a> PartStudio<'a> {
             let len = |id: &str| eval_expr(&expr(id), Quantity::Length, &self.vars);
             if flag("midplane") {
                 if let Some(t) = len("thickness") {
-                    x.thin = ThinWall { thickness1: t, thickness1_expr: format!("{t} mm"), thickness2: 0.0, thickness2_expr: "0 mm".into(), flip_wall: false, mid_plane: true };
+                    x.thin = ThinWall {
+                        thickness1: t,
+                        thickness1_expr: format!("{t} mm"),
+                        thickness2: 0.0,
+                        thickness2_expr: "0 mm".into(),
+                        flip_wall: false,
+                        mid_plane: true,
+                    };
                 }
             } else if let (Some(t1), Some(t2)) = (len("thickness1"), len("thickness2")) {
                 x.thin = ThinWall {
@@ -1053,7 +1516,8 @@ impl<'a> PartStudio<'a> {
                     mid_plane: false,
                 };
             } else {
-                fr.notes.push("thin walls imported with default thickness".into());
+                fr.notes
+                    .push("thin walls imported with default thickness".into());
             }
         }
         x.op = match text("operationType").as_str() {
@@ -1067,7 +1531,14 @@ impl<'a> PartStudio<'a> {
         }
 
         // What to extrude.
-        let mut entities = refs::picks(param(f, if x.body == BodyType::Surface { "surfaceEntities" } else { "entities" }));
+        let mut entities = refs::picks(param(
+            f,
+            if x.body == BodyType::Surface {
+                "surfaceEntities"
+            } else {
+                "entities"
+            },
+        ));
         if x.body == BodyType::Thin {
             // Open sketch curves given a wall.
             entities.extend(refs::picks(param(f, "wallShape")));
@@ -1116,13 +1587,32 @@ impl<'a> PartStudio<'a> {
                         lost += 1;
                         if std::env::var_os("CADRS_ONSHAPE_DEBUG").is_some() {
                             eprintln!("LOST {} | {}", f["name"], self.describe(q));
-                            let op = q.get("operationId").and_then(crate::query::Value::as_str).unwrap_or_default();
+                            let op = q
+                                .get("operationId")
+                                .and_then(crate::query::Value::as_str)
+                                .unwrap_or_default();
                             let sk = crate::refs::op_feature(op);
                             if let Some((map, g)) = self.sketches.get(sk) {
                                 let mut ids = std::collections::BTreeSet::new();
                                 crate::refs::sketch_entities(q, sk, &mut ids);
-                                let mapped: Vec<String> = ids.iter().map(|i| format!("{i}{}", if map.curves.contains_key(i) { "" } else { "(unmapped)" })).collect();
-                                eprintln!("      wants {mapped:?}; sketch has {} curves, {} regions", g.curves.len(), cadrs_sketch::region::regions(g).len());
+                                let mapped: Vec<String> = ids
+                                    .iter()
+                                    .map(|i| {
+                                        format!(
+                                            "{i}{}",
+                                            if map.curves.contains_key(i) {
+                                                ""
+                                            } else {
+                                                "(unmapped)"
+                                            }
+                                        )
+                                    })
+                                    .collect();
+                                eprintln!(
+                                    "      wants {mapped:?}; sketch has {} curves, {} regions",
+                                    g.curves.len(),
+                                    cadrs_sketch::region::regions(g).len()
+                                );
                             }
                         }
                     }
@@ -1131,10 +1621,16 @@ impl<'a> PartStudio<'a> {
             }
         }
         if x.is_empty() {
-            return Err(CommandError::Invalid(format!("none of its {} selections could be translated", entities.len())));
+            return Err(CommandError::Invalid(format!(
+                "none of its {} selections could be translated",
+                entities.len()
+            )));
         }
         if lost > 0 {
-            fr.notes.push(format!("{lost} of {} selections not translated", entities.len()));
+            fr.notes.push(format!(
+                "{lost} of {} selections not translated",
+                entities.len()
+            ));
         }
 
         // First end.
@@ -1147,8 +1643,13 @@ impl<'a> PartStudio<'a> {
         x.end = end_type;
         x.up_to = up_to;
         if x.end == EndType::Blind {
-            x.depth = eval_expr(&depth, Quantity::Length, &self.vars).ok_or_else(|| CommandError::Invalid(format!("cannot evaluate depth {depth:?}")))?;
-            x.depth_expr = if depth.contains('#') { format!("{} mm", x.depth) } else { depth.clone() };
+            x.depth = eval_expr(&depth, Quantity::Length, &self.vars)
+                .ok_or_else(|| CommandError::Invalid(format!("cannot evaluate depth {depth:?}")))?;
+            x.depth_expr = if depth.contains('#') {
+                format!("{} mm", x.depth)
+            } else {
+                depth.clone()
+            };
             // Onshape takes a negative depth as the other direction.
             if x.depth < 0.0 {
                 x.depth = -x.depth;
@@ -1165,27 +1666,41 @@ impl<'a> PartStudio<'a> {
             x.depth = d;
             x.depth_expr = format!("{d} mm");
             x.flip = flip;
-            fr.notes.retain(|n| !n.starts_with("up-to face not translated"));
+            fr.notes
+                .retain(|n| !n.starts_with("up-to face not translated"));
             fr.notes.push("up to a default plane: blind to it".into());
         }
         if flag("hasOffset")
             && let Some(v) = eval_expr(&expr("offsetDistance"), Quantity::Length, &self.vars)
         {
-            x.offset = Some(Offset { value: v, expr: format!("{v} mm"), flip: flag("offsetOppositeDirection") });
+            x.offset = Some(Offset {
+                value: v,
+                expr: format!("{v} mm"),
+                flip: flag("offsetOppositeDirection"),
+            });
         }
         if flag("startOffset") {
             if text("startOffsetBound") == "BLIND" {
-                if let Some(v) = eval_expr(&expr("startOffsetDistance"), Quantity::Length, &self.vars) {
-                    x.start_offset = Some(Offset { value: v, expr: format!("{v} mm"), flip: flag("startOffsetOppositeDirection") });
+                if let Some(v) =
+                    eval_expr(&expr("startOffsetDistance"), Quantity::Length, &self.vars)
+                {
+                    x.start_offset = Some(Offset {
+                        value: v,
+                        expr: format!("{v} mm"),
+                        flip: flag("startOffsetOppositeDirection"),
+                    });
                 }
             } else {
-                fr.notes.push("start offset to an entity not imported".into());
+                fr.notes
+                    .push("start offset to an entity not imported".into());
             }
         }
         if flag("hasExtrudeDirection") {
             match self.direction_param(f, "extrudeDirection") {
                 Some(d) => x.direction = Some(d),
-                None => fr.notes.push("custom extrude direction not translated".into()),
+                None => fr
+                    .notes
+                    .push("custom extrude direction not translated".into()),
             }
         }
         if flag("hasDraft") {
@@ -1194,8 +1709,13 @@ impl<'a> PartStudio<'a> {
 
         // Second end.
         if flag("hasSecondDirection") && !x.symmetric {
-            let (end, up_to) = self.end_bound(&text("secondDirectionBound"), f, "secondDirectionBound", fr);
-            let mut second = EndCondition { end, up_to, ..x.first_end() };
+            let (end, up_to) =
+                self.end_bound(&text("secondDirectionBound"), f, "secondDirectionBound", fr);
+            let mut second = EndCondition {
+                end,
+                up_to,
+                ..x.first_end()
+            };
             if end == EndType::Blind {
                 let d = expr("secondDirectionDepth");
                 second.depth = eval_expr(&d, Quantity::Length, &self.vars).unwrap_or(x.depth);
@@ -1204,12 +1724,14 @@ impl<'a> PartStudio<'a> {
             // The second direction runs against the first.
             if text("secondDirectionBound") == "UP_TO_SURFACE"
                 && second.up_to.is_none()
-                && let Some((d, flip)) = self.depth_to_plane(&x, f, "secondDirectionBoundEntityFace", !x.flip)
+                && let Some((d, flip)) =
+                    self.depth_to_plane(&x, f, "secondDirectionBoundEntityFace", !x.flip)
                 && flip != x.flip
             {
                 second.depth = d;
                 second.depth_expr = format!("{d} mm");
-                fr.notes.retain(|n| !n.starts_with("up-to face not translated"));
+                fr.notes
+                    .retain(|n| !n.starts_with("up-to face not translated"));
             }
             second.offset = None;
             // Each end's flag turns it against the sketch normal (the second's is on by default,
@@ -1218,13 +1740,22 @@ impl<'a> PartStudio<'a> {
             if flag("oppositeDirection") == flag("secondDirectionOppositeDirection") {
                 // Both ends on the same side of the sketch plane: the body between them, the
                 // nearer end as a starting offset.
-                if x.end == EndType::Blind && second.end == EndType::Blind && x.start_offset.is_none() && (x.depth - second.depth).abs() > 1e-9 {
+                if x.end == EndType::Blind
+                    && second.end == EndType::Blind
+                    && x.start_offset.is_none()
+                    && (x.depth - second.depth).abs() > 1e-9
+                {
                     let (near, far) = (x.depth.min(second.depth), x.depth.max(second.depth));
-                    x.start_offset = Some(Offset { value: near, expr: format!("{near} mm"), flip: false });
+                    x.start_offset = Some(Offset {
+                        value: near,
+                        expr: format!("{near} mm"),
+                        flip: false,
+                    });
                     x.depth = far - near;
                     x.depth_expr = format!("{} mm", x.depth);
                 } else {
-                    fr.notes.push("second end on the first's side not imported".into());
+                    fr.notes
+                        .push("second end on the first's side not imported".into());
                 }
             } else {
                 x.second = Some(second);
@@ -1241,7 +1772,8 @@ impl<'a> PartStudio<'a> {
                 let mut lost = 0;
                 let scope = self.parts_param(f, "booleanScope", &mut lost);
                 if lost > 0 {
-                    fr.notes.push(format!("{lost} merge scope part(s) not translated"));
+                    fr.notes
+                        .push(format!("{lost} merge scope part(s) not translated"));
                 }
                 if std::env::var_os("CADRS_ONSHAPE_DEBUG").is_some() {
                     eprintln!("SCOPE {} {:?}", f["name"], scope);
@@ -1252,27 +1784,54 @@ impl<'a> PartStudio<'a> {
 
         let id = self.feature_id(fid);
         let volume_before = total_volume(&self.parts());
-        self.s.run(&AddExtrude { element: self.el, feature: id, extrude: ExtrudeFeature::default() })?;
-        self.s.run(&SetExtrude { element: self.el, feature: id, extrude: x.clone(), label: "Extrude".into() })?;
+        self.s.run(&AddExtrude {
+            element: self.el,
+            feature: id,
+            extrude: ExtrudeFeature::default(),
+        })?;
+        self.s.run(&SetExtrude {
+            element: self.el,
+            feature: id,
+            extrude: x.clone(),
+            label: "Extrude".into(),
+        })?;
         // A Remove that removes nothing fails in Onshape, so one that does here goes the wrong
         // way: an edge picked as the direction runs the other way in cadrs.
         if x.op == BooleanOp::Remove && x.direction.is_some() {
             self.parts();
-            let unchanged = (total_volume(&self.parts()) - volume_before).abs() < 1e-6 * volume_before.max(1.0);
+            let unchanged =
+                (total_volume(&self.parts()) - volume_before).abs() < 1e-6 * volume_before.max(1.0);
             if unchanged || self.rebuild_error(id).is_some() {
                 let mut flipped = x.clone();
                 flipped.flip = !flipped.flip;
-                self.s.run(&SetExtrude { element: self.el, feature: id, extrude: flipped.clone(), label: "Extrude".into() })?;
+                self.s.run(&SetExtrude {
+                    element: self.el,
+                    feature: id,
+                    extrude: flipped.clone(),
+                    label: "Extrude".into(),
+                })?;
                 self.parts();
-                if self.rebuild_error(id).is_none() && (total_volume(&self.parts()) - volume_before).abs() >= 1e-6 * volume_before.max(1.0) {
+                if self.rebuild_error(id).is_none()
+                    && (total_volume(&self.parts()) - volume_before).abs()
+                        >= 1e-6 * volume_before.max(1.0)
+                {
                     x = flipped;
                 } else {
-                    self.s.run(&SetExtrude { element: self.el, feature: id, extrude: x.clone(), label: "Extrude".into() })?;
+                    self.s.run(&SetExtrude {
+                        element: self.el,
+                        feature: id,
+                        extrude: x.clone(),
+                        label: "Extrude".into(),
+                    })?;
                 }
             }
         }
         if let Some(name) = f["name"].as_str() {
-            self.s.run(&RenameFeature { element: self.el, feature: id, name: name.to_string() })?;
+            self.s.run(&RenameFeature {
+                element: self.el,
+                feature: id,
+                name: name.to_string(),
+            })?;
         }
         self.features.insert(fid.to_string(), id);
         // It must build. Onshape's "Up to face" goes to the face's surface; cadrs's needs the
@@ -1280,18 +1839,28 @@ impl<'a> PartStudio<'a> {
         // one that deep.
         self.parts();
         if self.rebuild_error(id).is_some()
-            && let Some(blind) = self.up_to_as_blind(&x).or_else(|| self.up_to_other_faces(&x, f))
+            && let Some(blind) = self
+                .up_to_as_blind(&x)
+                .or_else(|| self.up_to_other_faces(&x, f))
         {
             if std::env::var_os("CADRS_ONSHAPE_DEBUG").is_some() {
                 eprintln!("UPTO blind depth {} flip {}", blind.depth, blind.flip);
             }
-            self.s.run(&SetExtrude { element: self.el, feature: id, extrude: blind, label: "Extrude".into() })?;
+            self.s.run(&SetExtrude {
+                element: self.el,
+                feature: id,
+                extrude: blind,
+                label: "Extrude".into(),
+            })?;
             self.parts();
             if std::env::var_os("CADRS_ONSHAPE_DEBUG").is_some() {
                 eprintln!("UPTO blind -> {:?}", self.rebuild_error(id));
             }
             if self.rebuild_error(id).is_none() {
-                fr.notes.push("up to face imported as a blind depth (the profile goes past the face's edges)".into());
+                fr.notes.push(
+                    "up to face imported as a blind depth (the profile goes past the face's edges)"
+                        .into(),
+                );
             }
         }
         // Still failing: the other faces the query could mean, as they are (a curved face the
@@ -1299,20 +1868,34 @@ impl<'a> PartStudio<'a> {
         if self.rebuild_error(id).is_some() && x.end == EndType::UpToFace {
             let tried = x.up_to;
             for face in self.up_to_candidates(f) {
-                if tried.as_ref().is_some_and(|t| matches!(t, UpTo::Face(r) if r.part == face.part && r.face == face.face)) {
+                if tried.as_ref().is_some_and(
+                    |t| matches!(t, UpTo::Face(r) if r.part == face.part && r.face == face.face),
+                ) {
                     continue;
                 }
                 let mut y = x.clone();
                 y.up_to = Some(UpTo::Face(face));
-                self.s.run(&SetExtrude { element: self.el, feature: id, extrude: y, label: "Extrude".into() })?;
+                self.s.run(&SetExtrude {
+                    element: self.el,
+                    feature: id,
+                    extrude: y,
+                    label: "Extrude".into(),
+                })?;
                 self.parts();
                 if self.rebuild_error(id).is_none() {
-                    fr.notes.push("up to another face the query names (the first one didn't build)".into());
+                    fr.notes.push(
+                        "up to another face the query names (the first one didn't build)".into(),
+                    );
                     break;
                 }
             }
             if self.rebuild_error(id).is_some() {
-                self.s.run(&SetExtrude { element: self.el, feature: id, extrude: x.clone(), label: "Extrude".into() })?;
+                self.s.run(&SetExtrude {
+                    element: self.el,
+                    feature: id,
+                    extrude: x.clone(),
+                    label: "Extrude".into(),
+                })?;
                 self.parts();
             }
         }
@@ -1336,8 +1919,16 @@ impl<'a> PartStudio<'a> {
         let parts = self.parts();
         if std::env::var_os("CADRS_ONSHAPE_DEBUG").is_some() {
             for fc in &faces {
-                let pl = parts.iter().find(|p| p.id == fc.part).and_then(|p| p.solid.face(&fc.face)).and_then(|x| x.plane);
-                eprintln!("UPTO cand {:?} plane {:?}", fc.face.origin, pl.map(|p| (cross(p.u, p.v), p.origin)));
+                let pl = parts
+                    .iter()
+                    .find(|p| p.id == fc.part)
+                    .and_then(|p| p.solid.face(&fc.face))
+                    .and_then(|x| x.plane);
+                eprintln!(
+                    "UPTO cand {:?} plane {:?}",
+                    fc.face.origin,
+                    pl.map(|p| (cross(p.u, p.v), p.origin))
+                );
             }
         }
         faces.into_iter().find_map(|face| {
@@ -1356,7 +1947,11 @@ impl<'a> PartStudio<'a> {
             for e in self.model(&parts).eval(&q) {
                 if let crate::eval::Ent::Face(pi, fi) = e {
                     let part = &parts[pi];
-                    faces.push(cadrs_core::document::FaceRef { part: part.id, face: part.solid.faces[fi].name, seed: part.solid.face_point(fi).unwrap_or([0.0; 3]) });
+                    faces.push(cadrs_core::document::FaceRef {
+                        part: part.id,
+                        face: part.solid.faces[fi].name,
+                        seed: part.solid.face_point(fi).unwrap_or([0.0; 3]),
+                    });
                 }
             }
         }
@@ -1366,12 +1961,25 @@ impl<'a> PartStudio<'a> {
     /// An "Up to face" extrude to a planar face parallel to its sketch as the blind extrude
     /// that reaches the face's plane.
     fn up_to_as_blind(&mut self, x: &ExtrudeFeature) -> Option<ExtrudeFeature> {
-        let Some(UpTo::Face(target)) = x.up_to else { return None };
+        let Some(UpTo::Face(target)) = x.up_to else {
+            return None;
+        };
         if x.end != EndType::UpToFace || x.symmetric {
             return None;
         }
-        let sketch = x.regions.first().map(|r| r.sketch).or_else(|| x.sketches.first().copied())?;
-        let frame = self.s.doc.element(self.el)?.feature(sketch)?.sketch()?.plane?.frame();
+        let sketch = x
+            .regions
+            .first()
+            .map(|r| r.sketch)
+            .or_else(|| x.sketches.first().copied())?;
+        let frame = self
+            .s
+            .doc
+            .element(self.el)?
+            .feature(sketch)?
+            .sketch()?
+            .plane?
+            .frame();
         let n = cross(frame.u, frame.v);
         let n = if x.flip { [-n[0], -n[1], -n[2]] } else { n };
         let parts = self.parts();
@@ -1381,7 +1989,11 @@ impl<'a> PartStudio<'a> {
         if dot(fnrm, n).abs() < 1.0 - 1e-9 {
             return None;
         }
-        let d = [face.origin[0] - frame.origin[0], face.origin[1] - frame.origin[1], face.origin[2] - frame.origin[2]];
+        let d = [
+            face.origin[0] - frame.origin[0],
+            face.origin[1] - frame.origin[1],
+            face.origin[2] - frame.origin[2],
+        ];
         let t = dot(d, n);
         if t.abs() < 1e-6 {
             return None;
@@ -1400,10 +2012,29 @@ impl<'a> PartStudio<'a> {
     /// For an end "up to" a default plane (parameter `key`): the blind depth from the extrude's
     /// sketch plane to it along its direction (`flip`: against the sketch normal), and the
     /// direction that reaches it.
-    fn depth_to_plane(&self, x: &ExtrudeFeature, f: &Value, key: &str, flip: bool) -> Option<(f64, bool)> {
-        let target = refs::picks(param(f, key)).into_iter().find_map(|p| p.default_plane())?;
-        let sketch = x.regions.first().map(|r| r.sketch).or_else(|| x.sketches.first().copied())?;
-        let from = self.s.doc.element(self.el)?.feature(sketch)?.sketch()?.plane?.frame();
+    fn depth_to_plane(
+        &self,
+        x: &ExtrudeFeature,
+        f: &Value,
+        key: &str,
+        flip: bool,
+    ) -> Option<(f64, bool)> {
+        let target = refs::picks(param(f, key))
+            .into_iter()
+            .find_map(|p| p.default_plane())?;
+        let sketch = x
+            .regions
+            .first()
+            .map(|r| r.sketch)
+            .or_else(|| x.sketches.first().copied())?;
+        let from = self
+            .s
+            .doc
+            .element(self.el)?
+            .feature(sketch)?
+            .sketch()?
+            .plane?
+            .frame();
         let to = target.frame();
         let nt = cross(to.u, to.v);
         let mut d = cross(from.u, from.v);
@@ -1414,7 +2045,11 @@ impl<'a> PartStudio<'a> {
         if along.abs() < 1e-9 {
             return None;
         }
-        let gap = [to.origin[0] - from.origin[0], to.origin[1] - from.origin[1], to.origin[2] - from.origin[2]];
+        let gap = [
+            to.origin[0] - from.origin[0],
+            to.origin[1] - from.origin[1],
+            to.origin[2] - from.origin[2],
+        ];
         let t = dot(gap, nt) / along;
         if t.abs() < 1e-9 {
             return None;
@@ -1423,36 +2058,54 @@ impl<'a> PartStudio<'a> {
     }
 
     /// An end condition: its type and, for "up to", its target.
-    pub(crate) fn end_bound(&mut self, bound: &str, f: &Value, prefix: &str, fr: &mut FeatureReport) -> (EndType, Option<UpTo>) {
+    pub(crate) fn end_bound(
+        &mut self,
+        bound: &str,
+        f: &Value,
+        prefix: &str,
+        fr: &mut FeatureReport,
+    ) -> (EndType, Option<UpTo>) {
         match bound {
             "THROUGH_ALL" => (EndType::ThroughAll, None),
             "UP_TO_NEXT" => (EndType::UpToNext, None),
             "UP_TO_SURFACE" => {
-                let key = if prefix == "endBound" { "endBoundEntityFace" } else { "secondDirectionBoundEntityFace" };
-                let target = refs::picks(param(f, key)).into_iter().find_map(|p| match p {
-                    Pick::Query(q) => self.face_of(&q),
-                    _ => None,
-                });
+                let key = if prefix == "endBound" {
+                    "endBoundEntityFace"
+                } else {
+                    "secondDirectionBoundEntityFace"
+                };
+                let target = refs::picks(param(f, key))
+                    .into_iter()
+                    .find_map(|p| match p {
+                        Pick::Query(q) => self.face_of(&q),
+                        _ => None,
+                    });
                 if std::env::var_os("CADRS_ONSHAPE_TRACE").is_some()
                     && let Some(t) = &target
                 {
                     let parts = self.parts();
                     if let Some(p) = parts.iter().find(|p| p.id == t.part) {
                         let planar = p.solid.face(&t.face).map(|f| f.plane.is_some());
-                        eprintln!("    [up to] face {:?} planar {planar:?}; its part has {} faces", t.face.origin, p.solid.faces.len());
+                        eprintln!(
+                            "    [up to] face {:?} planar {planar:?}; its part has {} faces",
+                            t.face.origin,
+                            p.solid.faces.len()
+                        );
                     }
                 }
                 match target {
                     Some(face) => (EndType::UpToFace, Some(UpTo::Face(face))),
                     None => {
-                        fr.notes.push("up-to face not translated: blind instead".into());
+                        fr.notes
+                            .push("up-to face not translated: blind instead".into());
                         (EndType::Blind, None)
                     }
                 }
             }
             "BLIND" | "SYMMETRIC" | "" => (EndType::Blind, None),
             other => {
-                fr.notes.push(format!("end type {other} not imported: blind instead"));
+                fr.notes
+                    .push(format!("end type {other} not imported: blind instead"));
                 (EndType::Blind, None)
             }
         }
@@ -1462,21 +2115,47 @@ impl<'a> PartStudio<'a> {
     /// centroid, and records how well each matched.
     fn name_parts(&mut self) {
         if std::env::var_os("CADRS_ONSHAPE_DEBUG_FACES").is_some() {
-            let names: HashMap<uuid::Uuid, String> = self.s.doc.element(self.el).map(|e| e.features().iter().map(|f| (f.id.0, f.name.clone())).collect()).unwrap_or_default();
+            let names: HashMap<uuid::Uuid, String> = self
+                .s
+                .doc
+                .element(self.el)
+                .map(|e| {
+                    e.features()
+                        .iter()
+                        .map(|f| (f.id.0, f.name.clone()))
+                        .collect()
+                })
+                .unwrap_or_default();
             for part in self.parts() {
                 let mut planes: HashMap<(i64, i64, i64, i64), Vec<String>> = HashMap::new();
                 for f in &part.solid.faces {
                     let Some(pl) = f.plane else { continue };
                     let n = cross(pl.u, pl.v);
-                    let k = ((n[0] * 1000.0).round() as i64, (n[1] * 1000.0).round() as i64, (n[2] * 1000.0).round() as i64, (dot(n, pl.origin) * 1000.0).round() as i64);
-                    planes.entry(k).or_default().push(format!("{}:{:?}", names.get(&f.name.op).cloned().unwrap_or_default(), f.name.origin).chars().take(60).collect());
+                    let k = (
+                        (n[0] * 1000.0).round() as i64,
+                        (n[1] * 1000.0).round() as i64,
+                        (n[2] * 1000.0).round() as i64,
+                        (dot(n, pl.origin) * 1000.0).round() as i64,
+                    );
+                    planes.entry(k).or_default().push(
+                        format!(
+                            "{}:{:?}",
+                            names.get(&f.name.op).cloned().unwrap_or_default(),
+                            f.name.origin
+                        )
+                        .chars()
+                        .take(60)
+                        .collect(),
+                    );
                 }
                 for (k, v) in planes.iter().filter(|(_, v)| v.len() > 1) {
                     eprintln!("COPLANAR {} {:?}: {} faces {:?}", part.name, k, v.len(), v);
                 }
             }
         }
-        let Some(mp) = read_json(&self.raw.dir.join("massproperties.json")) else { return };
+        let Some(mp) = read_json(&self.raw.dir.join("massproperties.json")) else {
+            return;
+        };
         let parts_json = read_json(&self.raw.dir.join("parts.json")).unwrap_or(Value::Null);
         let details = read_json(&self.raw.dir.join("bodydetails.json")).unwrap_or(Value::Null);
         let parts = self.parts();
@@ -1501,23 +2180,55 @@ impl<'a> PartStudio<'a> {
             .and_then(|f| f["features"].as_array().cloned())
             .unwrap_or_default()
             .iter()
-            .filter(|f| f["featureType"].as_str() == Some("importForeign") && param(f, "createComposite").and_then(|p| p["value"].as_bool()) == Some(true))
+            .filter(|f| {
+                f["featureType"].as_str() == Some("importForeign")
+                    && param(f, "createComposite").and_then(|p| p["value"].as_bool()) == Some(true)
+            })
             .filter_map(|f| {
-                let name = param(f, "compositeName").and_then(|p| p["value"].as_str()).unwrap_or_default().to_string();
+                let name = param(f, "compositeName")
+                    .and_then(|p| p["value"].as_str())
+                    .unwrap_or_default()
+                    .to_string();
                 Some((name, *self.features.get(f["featureId"].as_str()?)?))
             })
             .collect();
-        let mut in_composites: std::collections::HashSet<cadrs_core::ids::PartId> = std::collections::HashSet::new();
+        let mut in_composites: std::collections::HashSet<cadrs_core::ids::PartId> =
+            std::collections::HashSet::new();
         for (pid, b) in mp["bodies"].as_object().into_iter().flatten() {
-            let info = parts_json.as_array().and_then(|a| a.iter().find(|p| p["partId"].as_str() == Some(pid)));
+            let info = parts_json
+                .as_array()
+                .and_then(|a| a.iter().find(|p| p["partId"].as_str() == Some(pid)));
             if info.and_then(|p| p["bodyType"].as_str()) != Some("composite") {
                 continue;
             }
-            let name = info.and_then(|p| p["name"].as_str()).unwrap_or(pid).to_string();
-            let vol = b["volume"].as_array().and_then(|v| v.first()).and_then(Value::as_f64).unwrap_or(0.0) * 1e9;
-            let volume = |p: &&Part| p.mass.as_ref().map(|m| m.volume).unwrap_or_else(|| p.solid.volume());
-            let features: Vec<FeatureId> = imports.iter().filter(|(n, _)| *n == name || imports.len() == 1).map(|(_, f)| *f).collect();
-            let mut mine: Vec<&Part> = parts.iter().filter(|p| features.contains(&p.id.feature) || p.features.iter().any(|f| features.contains(f))).collect();
+            let name = info
+                .and_then(|p| p["name"].as_str())
+                .unwrap_or(pid)
+                .to_string();
+            let vol = b["volume"]
+                .as_array()
+                .and_then(|v| v.first())
+                .and_then(Value::as_f64)
+                .unwrap_or(0.0)
+                * 1e9;
+            let volume = |p: &&Part| {
+                p.mass
+                    .as_ref()
+                    .map(|m| m.volume)
+                    .unwrap_or_else(|| p.solid.volume())
+            };
+            let features: Vec<FeatureId> = imports
+                .iter()
+                .filter(|(n, _)| *n == name || imports.len() == 1)
+                .map(|(_, f)| *f)
+                .collect();
+            let mut mine: Vec<&Part> = parts
+                .iter()
+                .filter(|p| {
+                    features.contains(&p.id.feature)
+                        || p.features.iter().any(|f| features.contains(f))
+                })
+                .collect();
             if mine.is_empty() {
                 // A composite brought in by a Derived feature: the feature whose parts add up to
                 // it best.
@@ -1541,44 +2252,111 @@ impl<'a> PartStudio<'a> {
             }
             in_composites.extend(mine.iter().map(|p| p.id));
             let sum: f64 = mine.iter().map(volume).sum();
-            self.report.parts.push(PartCheck { name, onshape_volume: vol, cadrs_volume: (!mine.is_empty()).then_some(sum), bbox_note: None });
+            self.report.parts.push(PartCheck {
+                name,
+                onshape_volume: vol,
+                cadrs_volume: (!mine.is_empty()).then_some(sum),
+                bbox_note: None,
+            });
         }
         for (pid, b) in mp["bodies"].as_object().into_iter().flatten() {
             if pid == "-all-" {
                 continue;
             }
-            let info = parts_json.as_array().and_then(|a| a.iter().find(|p| p["partId"].as_str() == Some(pid))).cloned();
-            if info.as_ref().is_some_and(|p| p["bodyType"].as_str().is_some_and(|t| t != "solid")) {
+            let info = parts_json
+                .as_array()
+                .and_then(|a| a.iter().find(|p| p["partId"].as_str() == Some(pid)))
+                .cloned();
+            if info
+                .as_ref()
+                .is_some_and(|p| p["bodyType"].as_str().is_some_and(|t| t != "solid"))
+            {
                 continue;
             }
-            let v = |i: usize| b["volume"].as_array().and_then(|v| v.get(i)).and_then(Value::as_f64).unwrap_or(0.0) * 1e9;
-            let body = details["bodies"].as_array().and_then(|a| a.iter().find(|x| x["id"].as_str() == Some(pid)));
-            let bbox = body.and_then(|b| bbox_of(b["vertices"].as_array()?.iter().filter_map(|v| {
-                point_mm(&v["point"])
-            })));
-            onshape.push(Os { pid: pid.clone(), name: info.as_ref().and_then(|p| p["name"].as_str()).unwrap_or(pid).to_string(), volume: v(0), band: (v(1), v(2)), bbox, info, sheet: false });
+            let v = |i: usize| {
+                b["volume"]
+                    .as_array()
+                    .and_then(|v| v.get(i))
+                    .and_then(Value::as_f64)
+                    .unwrap_or(0.0)
+                    * 1e9
+            };
+            let body = details["bodies"]
+                .as_array()
+                .and_then(|a| a.iter().find(|x| x["id"].as_str() == Some(pid)));
+            let bbox = body.and_then(|b| {
+                bbox_of(
+                    b["vertices"]
+                        .as_array()?
+                        .iter()
+                        .filter_map(|v| point_mm(&v["point"])),
+                )
+            });
+            onshape.push(Os {
+                pid: pid.clone(),
+                name: info
+                    .as_ref()
+                    .and_then(|p| p["name"].as_str())
+                    .unwrap_or(pid)
+                    .to_string(),
+                volume: v(0),
+                band: (v(1), v(2)),
+                bbox,
+                info,
+                sheet: false,
+            });
         }
         // Sheet bodies (silkscreen, a PCB's soldermask, …) have no mass properties: their boxes.
         let box_of = |pid: &str| {
-            let body = details["bodies"].as_array().and_then(|a| a.iter().find(|x| x["id"].as_str() == Some(pid)))?;
-            bbox_of(body["vertices"].as_array()?.iter().filter_map(|v| {
-                point_mm(&v["point"])
-            }))
+            let body = details["bodies"]
+                .as_array()
+                .and_then(|a| a.iter().find(|x| x["id"].as_str() == Some(pid)))?;
+            bbox_of(
+                body["vertices"]
+                    .as_array()?
+                    .iter()
+                    .filter_map(|v| point_mm(&v["point"])),
+            )
         };
-        for info in parts_json.as_array().into_iter().flatten().filter(|p| p["bodyType"].as_str() == Some("sheet")) {
-            let Some(pid) = info["partId"].as_str() else { continue };
+        for info in parts_json
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter(|p| p["bodyType"].as_str() == Some("sheet"))
+        {
+            let Some(pid) = info["partId"].as_str() else {
+                continue;
+            };
             if onshape.iter().any(|o| o.pid == pid) {
                 continue;
             }
             let name = info["name"].as_str().unwrap_or(pid).to_string();
-            onshape.push(Os { pid: pid.to_string(), name, volume: 0.0, band: (0.0, 0.0), bbox: box_of(pid), info: Some(info.clone()), sheet: true });
+            onshape.push(Os {
+                pid: pid.to_string(),
+                name,
+                volume: 0.0,
+                band: (0.0, 0.0),
+                bbox: box_of(pid),
+                info: Some(info.clone()),
+                sheet: true,
+            });
         }
         let cadrs: Vec<(usize, f64, Option<[f64; 6]>)> = parts
             .iter()
             .enumerate()
             .filter(|(_, p)| !in_composites.contains(&p.id))
             // The box of its vertices, as Onshape's is (a mesh reaches past them round a curve).
-            .map(|(i, p)| (i, p.mass.as_ref().map(|m| m.volume).unwrap_or_else(|| p.solid.volume()), bbox_of(p.solid.vertices.iter().map(|v| v.point)).or_else(|| bbox_of(p.solid.positions.iter().copied()))))
+            .map(|(i, p)| {
+                (
+                    i,
+                    p.mass
+                        .as_ref()
+                        .map(|m| m.volume)
+                        .unwrap_or_else(|| p.solid.volume()),
+                    bbox_of(p.solid.vertices.iter().map(|v| v.point))
+                        .or_else(|| bbox_of(p.solid.positions.iter().copied())),
+                )
+            })
             .collect();
         if std::env::var_os("CADRS_ONSHAPE_DEBUG").is_some() {
             for o in &onshape {
@@ -1598,7 +2376,11 @@ impl<'a> PartStudio<'a> {
                     (Some(a), Some(b)) => (0..6).map(|k| (a[k] - b[k]).abs()).sum::<f64>(),
                     _ => 0.0,
                 };
-                let size = o.bbox.map(|a| (a[3] - a[0]) + (a[4] - a[1]) + (a[5] - a[2])).unwrap_or(1.0).max(1e-6);
+                let size = o
+                    .bbox
+                    .map(|a| (a[3] - a[0]) + (a[4] - a[1]) + (a[5] - a[2]))
+                    .unwrap_or(1.0)
+                    .max(1e-6);
                 if o.sheet || surface {
                     if o.sheet && surface && o.bbox.is_some() && db / size < 0.2 {
                         pairs.push((db / size, oi, ci));
@@ -1623,7 +2405,11 @@ impl<'a> PartStudio<'a> {
         // order (Onshape numbers parts in the order it reads the file, as the reader here does),
         // when as many are left on each side.
         let mut sheets: Vec<(&str, Vec<usize>)> = Vec::new();
-        for (oi, o) in onshape.iter().enumerate().filter(|(oi, o)| o.sheet && !matched.contains_key(oi)) {
+        for (oi, o) in onshape
+            .iter()
+            .enumerate()
+            .filter(|(oi, o)| o.sheet && !matched.contains_key(oi))
+        {
             match sheets.iter_mut().find(|(n, _)| *n == o.name) {
                 Some((_, v)) => v.push(oi),
                 None => sheets.push((&o.name, vec![oi])),
@@ -1633,12 +2419,25 @@ impl<'a> PartStudio<'a> {
             let cis: Vec<usize> = cadrs
                 .iter()
                 .enumerate()
-                .filter(|(ci, (i, ..))| !used.contains(ci) && parts[*i].kind == cadrs_core::parts::PartKind::Surface && same_product(&parts[*i].name, name))
+                .filter(|(ci, (i, ..))| {
+                    !used.contains(ci)
+                        && parts[*i].kind == cadrs_core::parts::PartKind::Surface
+                        && same_product(&parts[*i].name, name)
+                })
                 .map(|(ci, _)| ci)
                 .collect();
             if std::env::var_os("CADRS_ONSHAPE_DEBUG").is_some() && cis.len() != ois.len() {
-                let surfaces: Vec<&str> = cadrs.iter().filter(|(i, ..)| parts[*i].kind == cadrs_core::parts::PartKind::Surface).map(|(i, ..)| parts[*i].name.as_str()).take(8).collect();
-                eprintln!("SHEETS {name}: {} in Onshape, {} here; surfaces here e.g. {surfaces:?}", ois.len(), cis.len());
+                let surfaces: Vec<&str> = cadrs
+                    .iter()
+                    .filter(|(i, ..)| parts[*i].kind == cadrs_core::parts::PartKind::Surface)
+                    .map(|(i, ..)| parts[*i].name.as_str())
+                    .take(8)
+                    .collect();
+                eprintln!(
+                    "SHEETS {name}: {} in Onshape, {} here; surfaces here e.g. {surfaces:?}",
+                    ois.len(),
+                    cis.len()
+                );
             }
             if cis.len() == ois.len() {
                 for (oi, ci) in ois.into_iter().zip(cis) {
@@ -1656,7 +2455,10 @@ impl<'a> PartStudio<'a> {
             .map(|(oi, ci)| {
                 let part = &parts[cadrs[*ci].0];
                 let ours = bbox_of(part.solid.vertices.iter().map(|v| v.point));
-                (onshape[*oi].pid.clone(), (part.id, offset(onshape[*oi].bbox, ours)))
+                (
+                    onshape[*oi].pid.clone(),
+                    (part.id, offset(onshape[*oi].bbox, ours)),
+                )
             })
             .collect();
         crate::eval::set_part_map(self.doc_id, &self.raw.id, map);
@@ -1664,7 +2466,12 @@ impl<'a> PartStudio<'a> {
         let mut colours: Vec<(Appearance, Vec<cadrs_core::ids::PartId>)> = Vec::new();
         for (oi, o) in onshape.iter().enumerate() {
             let m = matched.get(&oi).map(|ci| &cadrs[*ci]);
-            let mut check = PartCheck { name: o.name.clone(), onshape_volume: o.volume, cadrs_volume: m.map(|c| c.1), bbox_note: None };
+            let mut check = PartCheck {
+                name: o.name.clone(),
+                onshape_volume: o.volume,
+                cadrs_volume: m.map(|c| c.1),
+                bbox_note: None,
+            };
             // Within Onshape's own tolerance band counts as equal.
             if let Some(c) = m
                 && c.1 >= o.band.0.min(o.volume)
@@ -1675,7 +2482,9 @@ impl<'a> PartStudio<'a> {
             // Moved: Onshape's vertices reach outside the part's mesh here (its vertex box can
             // differ without that, where the kernels split a round face's seam differently).
             let inside = |a: [f64; 6], i: usize| {
-                bbox_of(parts[i].solid.positions.iter().copied()).is_some_and(|b| (0..3).all(|k| a[k] >= b[k] - 0.01 && a[k + 3] <= b[k + 3] + 0.01))
+                bbox_of(parts[i].solid.positions.iter().copied()).is_some_and(|b| {
+                    (0..3).all(|k| a[k] >= b[k] - 0.01 && a[k + 3] <= b[k + 3] + 0.01)
+                })
             };
             if let (Some(c), Some(a)) = (m, o.bbox)
                 && let Some(b) = c.2
@@ -1693,10 +2502,26 @@ impl<'a> PartStudio<'a> {
             }
             if let Some(c) = m {
                 let part = &parts[c.0];
-                self.s.run(&RenamePart { element: self.el, part: part.id, name: o.name.clone() }).ok();
-                let material = o.info.as_ref().and_then(|i| i["material"]["displayName"].as_str()).and_then(cadrs_core::material::library);
+                self.s
+                    .run(&RenamePart {
+                        element: self.el,
+                        part: part.id,
+                        name: o.name.clone(),
+                    })
+                    .ok();
+                let material = o
+                    .info
+                    .as_ref()
+                    .and_then(|i| i["material"]["displayName"].as_str())
+                    .and_then(cadrs_core::material::library);
                 if material.is_some() {
-                    self.s.run(&SetPartMaterial { element: self.el, parts: vec![part.id], material }).ok();
+                    self.s
+                        .run(&SetPartMaterial {
+                            element: self.el,
+                            parts: vec![part.id],
+                            material,
+                        })
+                        .ok();
                 }
                 if let Some(a) = o.info.as_ref().and_then(|i| appearance(&i["appearance"])) {
                     match colours.iter_mut().find(|(c, _)| *c == a) {
@@ -1708,7 +2533,13 @@ impl<'a> PartStudio<'a> {
             self.report.parts.push(check);
         }
         for (a, parts) in colours {
-            self.s.run(&SetPartAppearance { element: self.el, parts, appearance: Some(a) }).ok();
+            self.s
+                .run(&SetPartAppearance {
+                    element: self.el,
+                    parts,
+                    appearance: Some(a),
+                })
+                .ok();
         }
     }
 }
@@ -1717,17 +2548,31 @@ impl<'a> PartStudio<'a> {
 /// Onshape named `theirs` (the product's name, which Onshape may give a suffix: "…__NONE").
 fn same_product(ours: &str, theirs: &str) -> bool {
     let base = match ours.rsplit_once(" (") {
-        Some((b, k)) if k.strip_suffix(')').is_some_and(|k| k.parse::<u32>().is_ok()) => b,
+        Some((b, k))
+            if k.strip_suffix(')')
+                .is_some_and(|k| k.parse::<u32>().is_ok()) =>
+        {
+            b
+        }
         _ => ours,
     };
-    theirs == base || theirs.strip_prefix(base).is_some_and(|rest| rest.starts_with("__"))
+    theirs == base
+        || theirs
+            .strip_prefix(base)
+            .is_some_and(|rest| rest.starts_with("__"))
 }
 
 /// How far box `b` sits from box `a` when it is `a` moved (zero otherwise, or without both).
 fn offset(a: Option<[f64; 6]>, b: Option<[f64; 6]>) -> [f64; 3] {
-    let (Some(a), Some(b)) = (a, b) else { return [0.0; 3] };
+    let (Some(a), Some(b)) = (a, b) else {
+        return [0.0; 3];
+    };
     let d = [b[0] - a[0], b[1] - a[1], b[2] - a[2]];
-    if (0..3).all(|k| (b[k + 3] - a[k + 3] - d[k]).abs() < 1e-3) { d } else { [0.0; 3] }
+    if (0..3).all(|k| (b[k + 3] - a[k + 3] - d[k]).abs() < 1e-3) {
+        d
+    } else {
+        [0.0; 3]
+    }
 }
 
 /// An Onshape part appearance (`{"color": {"red", "green", "blue"}, "opacity"}`, 0–255).
@@ -1740,14 +2585,24 @@ fn appearance(v: &Value) -> Option<Appearance> {
 
 /// The model edges a region query names (edges not made by sketch `sketch`), outermost ones:
 /// what they were derived from is not searched further.
-fn model_edges<'q>(q: &'q crate::query::Value, sketch: &str, out: &mut Vec<&'q crate::query::Value>) {
+fn model_edges<'q>(
+    q: &'q crate::query::Value,
+    sketch: &str,
+    out: &mut Vec<&'q crate::query::Value>,
+) {
     use crate::query::Value as Q;
     match q {
         Q::Typed(_, v) => {
             let is_edge = q.get("entityType").and_then(Q::as_str) == Some("EDGE");
             let qtype = q.get("queryType").and_then(Q::as_str).unwrap_or_default();
-            let op = q.get("operationId").and_then(Q::as_str).map(refs::op_feature);
-            if is_edge && !matches!(qtype, "SKETCH_ENTITY" | "IMPRINT") && op.is_some_and(|o| o != sketch) {
+            let op = q
+                .get("operationId")
+                .and_then(Q::as_str)
+                .map(refs::op_feature);
+            if is_edge
+                && !matches!(qtype, "SKETCH_ENTITY" | "IMPRINT")
+                && op.is_some_and(|o| o != sketch)
+            {
                 out.push(q);
                 return;
             }
@@ -1767,21 +2622,43 @@ pub(crate) enum FaceOrRegion {
 
 /// A polygon's signed area.
 fn polygon_area(p: &[cadrs_sketch::Vec2]) -> f64 {
-    (0..p.len()).map(|i| {
-        let (a, b) = (p[i], p[(i + 1) % p.len()]);
-        a.x * b.y - b.x * a.y
-    }).sum::<f64>() / 2.0
+    (0..p.len())
+        .map(|i| {
+            let (a, b) = (p[i], p[(i + 1) % p.len()]);
+            a.x * b.y - b.x * a.y
+        })
+        .sum::<f64>()
+        / 2.0
 }
 
 /// The sketch op drawing an imprinted edge as a sketch curve.
 fn drawn(shape: &cadrs_sketch::ImprintShape) -> cadrs_sketch::SketchOp {
     use cadrs_sketch::{ImprintShape, SketchOp, Vec2};
     match *shape {
-        ImprintShape::Line(a, b) => SketchOp::AddPolyline { points: vec![a, b], closed: false, construction: false, label: "Add line" },
-        ImprintShape::Circle(c, r) => SketchOp::AddCircle { center: c, radius: r, construction: false },
-        ImprintShape::Arc { center, radius, start_angle, sweep } => {
+        ImprintShape::Line(a, b) => SketchOp::AddPolyline {
+            points: vec![a, b],
+            closed: false,
+            construction: false,
+            label: "Add line",
+        },
+        ImprintShape::Circle(c, r) => SketchOp::AddCircle {
+            center: c,
+            radius: r,
+            construction: false,
+        },
+        ImprintShape::Arc {
+            center,
+            radius,
+            start_angle,
+            sweep,
+        } => {
             let at = |t: f64| Vec2::new(center.x + radius * t.cos(), center.y + radius * t.sin());
-            SketchOp::AddArc { center, start: at(start_angle), end: at(start_angle + sweep), construction: false }
+            SketchOp::AddArc {
+                center,
+                start: at(start_angle),
+                end: at(start_angle + sweep),
+                construction: false,
+            }
         }
     }
 }
@@ -1792,7 +2669,12 @@ fn imprint_point(shape: &cadrs_sketch::ImprintShape) -> cadrs_sketch::Vec2 {
     match *shape {
         ImprintShape::Line(a, b) => cadrs_sketch::Vec2::new((a.x + b.x) / 2.0, (a.y + b.y) / 2.0),
         ImprintShape::Circle(c, r) => cadrs_sketch::Vec2::new(c.x + r, c.y),
-        ImprintShape::Arc { center, radius, start_angle, sweep } => {
+        ImprintShape::Arc {
+            center,
+            radius,
+            start_angle,
+            sweep,
+        } => {
             let t = start_angle + sweep / 2.0;
             cadrs_sketch::Vec2::new(center.x + radius * t.cos(), center.y + radius * t.sin())
         }
@@ -1819,7 +2701,12 @@ fn imprint_distance(shape: &cadrs_sketch::ImprintShape, p: cadrs_sketch::Vec2) -
             let t = (((p.x - a.x) * dx + (p.y - a.y) * dy) / len2).clamp(0.0, 1.0);
             p.distance(cadrs_sketch::Vec2::new(a.x + t * dx, a.y + t * dy))
         }
-        ImprintShape::Circle(c, r) | ImprintShape::Arc { center: c, radius: r, .. } => (p.distance(c) - r).abs(),
+        ImprintShape::Circle(c, r)
+        | ImprintShape::Arc {
+            center: c,
+            radius: r,
+            ..
+        } => (p.distance(c) - r).abs(),
     }
 }
 
@@ -1831,7 +2718,9 @@ fn imprint_distance(shape: &cadrs_sketch::ImprintShape, p: cadrs_sketch::Vec2) -
 /// Part Studio `el` name.
 fn in_context_entities(el: &RawElement) -> std::collections::HashSet<String> {
     let mut out = std::collections::HashSet::new();
-    let Some(json) = el.features() else { return out };
+    let Some(json) = el.features() else {
+        return out;
+    };
     for f in json["features"].as_array().into_iter().flatten() {
         for sf in f["subFeatures"].as_array().into_iter().flatten() {
             if param(sf, "isInContext").and_then(|p| p["value"].as_bool()) == Some(true)
@@ -1847,14 +2736,29 @@ fn in_context_entities(el: &RawElement) -> std::collections::HashSet<String> {
 /// Whether Onshape made feature `f` in the context of an assembly: it has "In context entity"
 /// subfeatures (`importForeign` with `isInContext`), whose frozen geometry isn't exported.
 pub(crate) fn is_in_context(f: &Value) -> bool {
-    f["subFeatures"].as_array().into_iter().flatten().any(|sf| param(sf, "isInContext").and_then(|p| p["value"].as_bool()) == Some(true))
+    f["subFeatures"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .any(|sf| param(sf, "isInContext").and_then(|p| p["value"].as_bool()) == Some(true))
 }
 
-fn plane_on(features: &[cadrs_core::document::Feature], part: &Part, fi: usize) -> Option<PlaneRef> {
+fn plane_on(
+    features: &[cadrs_core::document::Feature],
+    part: &Part,
+    fi: usize,
+) -> Option<PlaneRef> {
     let face = &part.solid.faces[fi];
     let frame = face.plane?;
     let maker = FeatureId(face.name.op);
-    let feature = if features.iter().any(|f| f.id == maker && f.is_part_feature()) { maker } else { part.id.feature };
+    let feature = if features
+        .iter()
+        .any(|f| f.id == maker && f.is_part_feature())
+    {
+        maker
+    } else {
+        part.id.feature
+    };
     Some(PlaneRef::Face(cadrs_sketch::FacePlane {
         feature: feature.0,
         face: face.name,
@@ -1868,7 +2772,15 @@ fn plane_on(features: &[cadrs_core::document::Feature], part: &Part, fi: usize) 
 
 /// The total volume of the solid parts (mm³).
 fn total_volume(parts: &[Part]) -> f64 {
-    parts.iter().map(|p| p.mass.as_ref().map(|m| m.volume).unwrap_or_else(|| p.solid.volume())).sum()
+    parts
+        .iter()
+        .map(|p| {
+            p.mass
+                .as_ref()
+                .map(|m| m.volume)
+                .unwrap_or_else(|| p.solid.volume())
+        })
+        .sum()
 }
 
 /// How many of `pts` (world, near the face's plane) lie inside face `fi` of `part` (its
@@ -1877,10 +2789,18 @@ fn points_on_face(part: &Part, fi: usize, pts: &[[f64; 3]]) -> usize {
     let face = &part.solid.faces[fi];
     let Some(frame) = face.plane else { return 0 };
     let to2 = |p: &[f64; 3]| {
-        let d = [p[0] - frame.origin[0], p[1] - frame.origin[1], p[2] - frame.origin[2]];
+        let d = [
+            p[0] - frame.origin[0],
+            p[1] - frame.origin[1],
+            p[2] - frame.origin[2],
+        ];
         (dot(d, frame.u), dot(d, frame.v))
     };
-    let loops: Vec<Vec<(f64, f64)>> = face.loops.iter().map(|l| l.iter().map(to2).collect()).collect();
+    let loops: Vec<Vec<(f64, f64)>> = face
+        .loops
+        .iter()
+        .map(|l| l.iter().map(to2).collect())
+        .collect();
     pts.iter()
         .filter(|p| {
             let (x, y) = to2(p);
@@ -1932,15 +2852,27 @@ fn dot(a: [f64; 3], b: [f64; 3]) -> f64 {
 }
 
 fn cross(a: [f64; 3], b: [f64; 3]) -> [f64; 3] {
-    [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]]
+    [
+        a[1] * b[2] - a[2] * b[1],
+        a[2] * b[0] - a[0] * b[2],
+        a[0] * b[1] - a[1] * b[0],
+    ]
 }
 
 /// A point of Onshape's body details in mm: `{x, y, z}` or `[x, y, z]` (m), as the API versions
 /// give it.
 pub(crate) fn point_mm(p: &Value) -> Option<[f64; 3]> {
     match p {
-        Value::Array(a) => Some([a.first()?.as_f64()? * 1000.0, a.get(1)?.as_f64()? * 1000.0, a.get(2)?.as_f64()? * 1000.0]),
-        _ => Some([p["x"].as_f64()? * 1000.0, p["y"].as_f64()? * 1000.0, p["z"].as_f64()? * 1000.0]),
+        Value::Array(a) => Some([
+            a.first()?.as_f64()? * 1000.0,
+            a.get(1)?.as_f64()? * 1000.0,
+            a.get(2)?.as_f64()? * 1000.0,
+        ]),
+        _ => Some([
+            p["x"].as_f64()? * 1000.0,
+            p["y"].as_f64()? * 1000.0,
+            p["z"].as_f64()? * 1000.0,
+        ]),
     }
 }
 
@@ -1952,7 +2884,11 @@ fn body_topology(details: &Value) -> HashMap<String, Vec<[f64; 3]>> {
     let mut out = HashMap::new();
     // Solids first.
     let mut bodies: Vec<&Value> = details["bodies"].as_array().into_iter().flatten().collect();
-    bodies.sort_by_key(|b| !b["type"].as_str().is_some_and(|t| t.eq_ignore_ascii_case("solid")));
+    bodies.sort_by_key(|b| {
+        !b["type"]
+            .as_str()
+            .is_some_and(|t| t.eq_ignore_ascii_case("solid"))
+    });
     for b in bodies {
         for v in b["vertices"].as_array().into_iter().flatten() {
             if let (Some(id), Some(p)) = (v["id"].as_str(), mm(&v["point"])) {
@@ -1961,7 +2897,12 @@ fn body_topology(details: &Value) -> HashMap<String, Vec<[f64; 3]>> {
         }
         for e in b["edges"].as_array().into_iter().flatten() {
             let g = &e["geometry"];
-            if let (Some(id), Some(a), Some(m), Some(z)) = (e["id"].as_str(), mm(&g["startPoint"]), mm(&g["midPoint"]), mm(&g["endPoint"])) {
+            if let (Some(id), Some(a), Some(m), Some(z)) = (
+                e["id"].as_str(),
+                mm(&g["startPoint"]),
+                mm(&g["midPoint"]),
+                mm(&g["endPoint"]),
+            ) {
                 out.entry(id.to_string()).or_insert_with(|| vec![a, m, z]);
             }
         }
@@ -1971,7 +2912,9 @@ fn body_topology(details: &Value) -> HashMap<String, Vec<[f64; 3]>> {
 
 /// The cadrs id of Onshape version `version` of document `doc`.
 pub fn version_id(doc: &str, version: &str) -> cadrs_core::history_log::VersionId {
-    cadrs_core::history_log::VersionId(uuid::Uuid::from_u128(stable_u128(&[doc, "version", version])))
+    cadrs_core::history_log::VersionId(uuid::Uuid::from_u128(stable_u128(&[
+        doc, "version", version,
+    ])))
 }
 
 /// The imported document's history with Onshape's versions whose Part Studios were scraped
@@ -1980,35 +2923,65 @@ pub fn version_id(doc: &str, version: &str) -> cadrs_core::history_log::VersionI
 /// a prefix of today's, the features since added after them), then today's. So another
 /// document's Derived feature can pin one, as Onshape's does. `None` when no version was scraped
 /// or one isn't a prefix of today's features.
-pub fn history_with_versions(raw: &RawDocument, doc: &Document, meta: &DocumentMeta, user: &str) -> Option<cadrs_core::history_log::HistoryLog> {
+pub fn history_with_versions(
+    raw: &RawDocument,
+    doc: &Document,
+    meta: &DocumentMeta,
+    user: &str,
+) -> Option<cadrs_core::history_log::HistoryLog> {
     let versions_json = read_json(&raw.dir.join("versions.json"))?;
     let mut states: Vec<(i64, String, String, Document)> = Vec::new();
     for v in versions_json.as_array().into_iter().flatten() {
-        let (Some(vid), Some(name)) = (v["id"].as_str(), v["name"].as_str()) else { continue };
-        let Ok(files) = std::fs::read_dir(raw.dir.join("versions").join(vid)) else { continue };
+        let (Some(vid), Some(name)) = (v["id"].as_str(), v["name"].as_str()) else {
+            continue;
+        };
+        let Ok(files) = std::fs::read_dir(raw.dir.join("versions").join(vid)) else {
+            continue;
+        };
         let mut at = doc.clone();
         // One folder per Part Studio, with its feature list at the version.
         for dir in files.flatten() {
-            let Some(el_id) = dir.file_name().to_str().map(String::from) else { continue };
-            let Some(list) = read_json(&dir.path().join("features.json")) else { continue };
+            let Some(el_id) = dir.file_name().to_str().map(String::from) else {
+                continue;
+            };
+            let Some(list) = read_json(&dir.path().join("features.json")) else {
+                continue;
+            };
             let ids: Vec<cadrs_core::ids::FeatureId> = list["features"]
                 .as_array()
                 .into_iter()
                 .flatten()
-                .filter_map(|f| f["featureId"].as_str().or_else(|| f["message"]["featureId"].as_str()))
-                .map(|fid| cadrs_core::ids::FeatureId::from_u128(stable_u128(&[&raw.id, &el_id, fid])))
+                .filter_map(|f| {
+                    f["featureId"]
+                        .as_str()
+                        .or_else(|| f["message"]["featureId"].as_str())
+                })
+                .map(|fid| {
+                    cadrs_core::ids::FeatureId::from_u128(stable_u128(&[&raw.id, &el_id, fid]))
+                })
                 .collect();
             let element = ElementId::from_u128(stable_u128(&[&raw.id, &el_id]));
             let el = at.elements.iter_mut().find(|e| e.id == element)?;
-            let cadrs_core::document::ElementKind::PartStudio { features, .. } = &mut el.kind else { return None };
+            let cadrs_core::document::ElementKind::PartStudio { features, .. } = &mut el.kind
+            else {
+                return None;
+            };
             // Up to the last of its features; every one of them must be there.
             let last = features.iter().rposition(|f| ids.contains(&f.id))?;
-            if ids.iter().any(|id| !features[..=last].iter().any(|f| f.id == *id)) {
+            if ids
+                .iter()
+                .any(|id| !features[..=last].iter().any(|f| f.id == *id))
+            {
                 return None;
             }
             features.truncate(last + 1);
         }
-        states.push((timestamp(v["createdAt"].as_str()).unwrap_or(meta.created), vid.to_string(), name.to_string(), at));
+        states.push((
+            timestamp(v["createdAt"].as_str()).unwrap_or(meta.created),
+            vid.to_string(),
+            name.to_string(),
+            at,
+        ));
     }
     if states.is_empty() {
         return None;
@@ -2019,7 +2992,11 @@ pub fn history_with_versions(raw: &RawDocument, doc: &Document, meta: &DocumentM
         log.catch_up(at, *time, user);
         log.create_version_with_id(version_id(&raw.id, vid), name, "", *time, user);
     }
-    log.catch_up(doc, meta.modified.max(states.last().map_or(0, |s| s.0)), user);
+    log.catch_up(
+        doc,
+        meta.modified.max(states.last().map_or(0, |s| s.0)),
+        user,
+    );
     Some(log)
 }
 
@@ -2032,13 +3009,28 @@ mod tests {
         let vars: HashMap<String, Var> = [
             ("padding", "LENGTH", "5 mm"),
             ("count", "NUMBER", "5"),
-            ("pitch", "ANY", "((42mm*2)-((#padding+#padding)*2))/(#count-1)"),
+            (
+                "pitch",
+                "ANY",
+                "((42mm*2)-((#padding+#padding)*2))/(#count-1)",
+            ),
         ]
         .into_iter()
-        .map(|(n, k, e)| (n.to_string(), Var { kind: k.into(), expr: e.into() }))
+        .map(|(n, k, e)| {
+            (
+                n.to_string(),
+                Var {
+                    kind: k.into(),
+                    expr: e.into(),
+                },
+            )
+        })
         .collect();
         assert_eq!(eval_expr("25 mm", Quantity::Length, &vars), Some(25.0));
-        assert_eq!(eval_expr("#padding * 2", Quantity::Length, &vars), Some(10.0));
+        assert_eq!(
+            eval_expr("#padding * 2", Quantity::Length, &vars),
+            Some(10.0)
+        );
         assert_eq!(eval_expr("#pitch", Quantity::Length, &vars), Some(16.0));
         assert_eq!(eval_expr("#missing", Quantity::Length, &vars), None);
         assert_eq!(eval_expr("9.6*mm", Quantity::Length, &vars), Some(9.6));
@@ -2048,6 +3040,13 @@ mod tests {
     #[test]
     fn timestamps() {
         assert_eq!(timestamp(Some("1970-01-01T00:00:00Z")), Some(0));
-        assert_eq!(timestamp(Some("2026-09-24T15:30:00.000+00:00".replace("+00:00", "Z").as_str())), Some(1_790_263_800));
+        assert_eq!(
+            timestamp(Some(
+                "2026-09-24T15:30:00.000+00:00"
+                    .replace("+00:00", "Z")
+                    .as_str()
+            )),
+            Some(1_790_263_800)
+        );
     }
 }

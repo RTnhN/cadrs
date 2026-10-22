@@ -226,7 +226,9 @@ impl ArcGeom {
     /// Points along the arc, `start` and `end` included, with about one segment per
     /// `max_angle` radians (at least `min_segments`).
     pub fn tessellate(&self, max_angle: f64, min_segments: usize) -> Vec<Vec2> {
-        let n = ((self.sweep.abs() / max_angle).ceil() as usize).max(min_segments).max(1);
+        let n = ((self.sweep.abs() / max_angle).ceil() as usize)
+            .max(min_segments)
+            .max(1);
         (0..=n)
             .map(|i| self.point_at(self.start_angle + self.sweep * i as f64 / n as f64))
             .collect()
@@ -280,14 +282,21 @@ impl EllipseGeom {
 
     /// The ellipse itself (no offset).
     pub fn base(&self) -> Self {
-        Self { offset: 0.0, ..*self }
+        Self {
+            offset: 0.0,
+            ..*self
+        }
     }
 
     /// The gradient direction `(cos t / |a|, sin t / minor)` in the ellipse's axes (outward
     /// whatever the minor radius's sign) and its derivative.
     fn grad(&self, t: f64) -> (Vec2, Vec2) {
         let ra = self.major().max(1e-300);
-        let rb = if self.minor.abs() < 1e-300 { 1e-300 } else { self.minor };
+        let rb = if self.minor.abs() < 1e-300 {
+            1e-300
+        } else {
+            self.minor
+        };
         let (s, c) = t.sin_cos();
         (Vec2::new(c / ra, s / rb), Vec2::new(-s / ra, c / rb))
     }
@@ -307,7 +316,13 @@ impl EllipseGeom {
         let base = self.base();
         (0..=n)
             .map(|i| {
-                let w = if i == 0 || i == n { 1.0 } else if i % 2 == 1 { 4.0 } else { 2.0 };
+                let w = if i == 0 || i == n {
+                    1.0
+                } else if i % 2 == 1 {
+                    4.0
+                } else {
+                    2.0
+                };
                 w * base.tangent_at(i as f64 * h).length()
             })
             .sum::<f64>()
@@ -319,7 +334,11 @@ impl EllipseGeom {
     /// curvature (`b²/a`).
     pub fn offset_is_smooth(&self) -> bool {
         let (a, b) = (self.major(), self.minor.abs());
-        let r = if a >= b { b * b / a.max(1e-300) } else { a * a / b.max(1e-300) };
+        let r = if a >= b {
+            b * b / a.max(1e-300)
+        } else {
+            a * a / b.max(1e-300)
+        };
         self.offset > -r + 1e-9
     }
 
@@ -331,7 +350,11 @@ impl EllipseGeom {
     /// The unit direction of the major axis.
     pub fn u(&self) -> Vec2 {
         let u = self.a.normalize();
-        if u == Vec2::ZERO { Vec2::new(1.0, 0.0) } else { u }
+        if u == Vec2::ZERO {
+            Vec2::new(1.0, 0.0)
+        } else {
+            u
+        }
     }
 
     /// The minor semi-axis vector.
@@ -342,7 +365,11 @@ impl EllipseGeom {
     /// The point at parameter `t` (radians; 0 is the major point).
     pub fn point_at(&self, t: f64) -> Vec2 {
         let p = self.center + self.a * t.cos() + self.b() * t.sin();
-        if self.offset == 0.0 { p } else { p + self.normal_at(t) * self.offset }
+        if self.offset == 0.0 {
+            p
+        } else {
+            p + self.normal_at(t) * self.offset
+        }
     }
 
     /// The derivative of [`EllipseGeom::point_at`] (the direction of travel, counter-clockwise).
@@ -451,7 +478,13 @@ impl EllipseGeom {
     }
 
     /// Points from parameter `t0` to `t1`, both included.
-    pub fn tessellate_range(&self, t0: f64, t1: f64, max_angle: f64, min_segments: usize) -> Vec<Vec2> {
+    pub fn tessellate_range(
+        &self,
+        t0: f64,
+        t1: f64,
+        max_angle: f64,
+        min_segments: usize,
+    ) -> Vec<Vec2> {
         let n = (((t1 - t0).abs() / max_angle).ceil() as usize)
             .max(min_segments)
             .max(1);
@@ -523,7 +556,11 @@ impl EllipseArcGeom {
             return self.t0 + norm_angle(t - self.t0);
         }
         let (a, b) = (self.t0, self.t0 + self.sweep);
-        if self.e.point_at(a).distance(p) <= self.e.point_at(b).distance(p) { a } else { b }
+        if self.e.point_at(a).distance(p) <= self.e.point_at(b).distance(p) {
+            a
+        } else {
+            b
+        }
     }
 
     pub fn closest(&self, p: Vec2) -> Vec2 {
@@ -545,13 +582,15 @@ impl EllipseArcGeom {
 
     /// Points from start to end, both included.
     pub fn tessellate(&self, max_angle: f64, min_segments: usize) -> Vec<Vec2> {
-        self.e.tessellate_range(self.t0, self.t0 + self.sweep, max_angle, min_segments)
+        self.e
+            .tessellate_range(self.t0, self.t0 + self.sweep, max_angle, min_segments)
     }
 
     /// Bounding box `(min, max)` (of its points, sampled finely).
     pub fn bounds(&self) -> (Vec2, Vec2) {
         let pts = self.tessellate(PI / 180.0, 8);
-        pts.iter().fold((pts[0], pts[0]), |(lo, hi), p| (lo.min(*p), hi.max(*p)))
+        pts.iter()
+            .fold((pts[0], pts[0]), |(lo, hi), p| (lo.min(*p), hi.max(*p)))
     }
 }
 
@@ -592,7 +631,11 @@ impl BezierGeom {
     pub fn curvature_at(&self, t: f64) -> f64 {
         let (d1, d2) = (self.tangent_at(t), self.second_at(t));
         let l = d1.length();
-        if l < 1e-12 { 0.0 } else { d1.cross(d2) / (l * l * l) }
+        if l < 1e-12 {
+            0.0
+        } else {
+            d1.cross(d2) / (l * l * l)
+        }
     }
 
     /// The same curve, run the other way.
@@ -626,10 +669,14 @@ impl BezierGeom {
     /// Gauss–Legendre integrates quintics exactly).
     pub fn area_term(&self) -> f64 {
         let x = (0.6_f64).sqrt() / 2.0;
-        [(0.5 - x, 5.0 / 18.0), (0.5, 8.0 / 18.0), (0.5 + x, 5.0 / 18.0)]
-            .iter()
-            .map(|(t, w)| w * self.point_at(*t).cross(self.tangent_at(*t)))
-            .sum::<f64>()
+        [
+            (0.5 - x, 5.0 / 18.0),
+            (0.5, 8.0 / 18.0),
+            (0.5 + x, 5.0 / 18.0),
+        ]
+        .iter()
+        .map(|(t, w)| w * self.point_at(*t).cross(self.tangent_at(*t)))
+        .sum::<f64>()
             / 2.0
     }
 
@@ -639,11 +686,19 @@ impl BezierGeom {
         // The control polygon's total turn bounds the curve's.
         let [a, b, c, d] = self.p;
         let turn = |u: Vec2, v: Vec2| {
-            if u.length() < 1e-12 || v.length() < 1e-12 { 0.0 } else { u.cross(v).atan2(u.dot(v)).abs() }
+            if u.length() < 1e-12 || v.length() < 1e-12 {
+                0.0
+            } else {
+                u.cross(v).atan2(u.dot(v)).abs()
+            }
         };
         let total = turn(b - a, c - b) + turn(c - b, d - c);
-        let n = ((total / max_angle).ceil() as usize).max(min_segments).max(8);
-        (0..=n).map(|i| self.point_at(i as f64 / n as f64)).collect()
+        let n = ((total / max_angle).ceil() as usize)
+            .max(min_segments)
+            .max(8);
+        (0..=n)
+            .map(|i| self.point_at(i as f64 / n as f64))
+            .collect()
     }
 
     /// The parameter of the point nearest `p` (0..1): the best of a sampling, refined by Newton.
@@ -687,10 +742,14 @@ impl BezierGeom {
         (0..n)
             .map(|k| {
                 let (t0, h) = (k as f64 / n as f64, 1.0 / n as f64);
-                [(0.5 - x, 5.0 / 18.0), (0.5, 8.0 / 18.0), (0.5 + x, 5.0 / 18.0)]
-                    .iter()
-                    .map(|(s, w)| w * self.tangent_at(t0 + s * h).length())
-                    .sum::<f64>()
+                [
+                    (0.5 - x, 5.0 / 18.0),
+                    (0.5, 8.0 / 18.0),
+                    (0.5 + x, 5.0 / 18.0),
+                ]
+                .iter()
+                .map(|(s, w)| w * self.tangent_at(t0 + s * h).length())
+                .sum::<f64>()
                     * h
             })
             .sum()
@@ -732,7 +791,11 @@ pub fn arc_through(start: Vec2, end: Vec2, through: Vec2) -> Option<ArcGeom> {
     let ccw = norm_angle(end.angle_from(center) - a0);
     let mid = norm_angle(through.angle_from(center) - a0);
     // Counter-clockwise from start, `through` comes before `end` iff the arc runs ccw.
-    let sweep = if mid < ccw { ccw } else { ccw - std::f64::consts::TAU };
+    let sweep = if mid < ccw {
+        ccw
+    } else {
+        ccw - std::f64::consts::TAU
+    };
     Some(ArcGeom {
         center,
         radius,
@@ -840,9 +903,18 @@ mod tests {
     fn bezier_basics() {
         // A quarter circle's usual cubic: k = 4(√2 − 1)/3.
         let k = 4.0 * (2f64.sqrt() - 1.0) / 3.0;
-        let b = BezierGeom::new([Vec2::new(1.0, 0.0), Vec2::new(1.0, k), Vec2::new(k, 1.0), Vec2::new(0.0, 1.0)]);
+        let b = BezierGeom::new([
+            Vec2::new(1.0, 0.0),
+            Vec2::new(1.0, k),
+            Vec2::new(k, 1.0),
+            Vec2::new(0.0, 1.0),
+        ]);
         // Area of the sector from the origin: ½∮ over the arc plus two radii (which add 0).
-        assert!((b.area_term() - std::f64::consts::FRAC_PI_4).abs() < 3e-4, "{}", b.area_term());
+        assert!(
+            (b.area_term() - std::f64::consts::FRAC_PI_4).abs() < 3e-4,
+            "{}",
+            b.area_term()
+        );
         assert!((b.curvature_at(0.0) - 1.0).abs() < 0.2);
         assert!((b.length() - std::f64::consts::FRAC_PI_2).abs() < 1e-3);
         let (l, r) = (b.sub(0.0, 0.4), b.sub(0.4, 1.0));
@@ -864,15 +936,23 @@ mod tests {
     #[test]
     fn three_point_arc() {
         // Upper half circle from (1,0) to (-1,0) through (0,1): counter-clockwise.
-        let arc = arc_through(Vec2::new(1.0, 0.0), Vec2::new(-1.0, 0.0), Vec2::new(0.0, 1.0))
-            .unwrap();
+        let arc = arc_through(
+            Vec2::new(1.0, 0.0),
+            Vec2::new(-1.0, 0.0),
+            Vec2::new(0.0, 1.0),
+        )
+        .unwrap();
         assert!(arc.center.distance(Vec2::ZERO) < 1e-9);
         assert!(close(arc.radius, 1.0));
         assert!(close(arc.sweep, PI));
         assert!(arc.mid().distance(Vec2::new(0.0, 1.0)) < 1e-9);
         // Through (0,-1) instead: clockwise, the lower half.
-        let arc = arc_through(Vec2::new(1.0, 0.0), Vec2::new(-1.0, 0.0), Vec2::new(0.0, -1.0))
-            .unwrap();
+        let arc = arc_through(
+            Vec2::new(1.0, 0.0),
+            Vec2::new(-1.0, 0.0),
+            Vec2::new(0.0, -1.0),
+        )
+        .unwrap();
         assert!(close(arc.sweep, -PI));
         assert!(arc.mid().distance(Vec2::new(0.0, -1.0)) < 1e-9);
         let ccw = arc.to_ccw();
@@ -913,7 +993,10 @@ mod tests {
     fn arc_distance_and_bounds() {
         let arc = ArcGeom::ccw(Vec2::ZERO, Vec2::new(1.0, 0.0), Vec2::new(0.0, 1.0));
         assert!(close(arc.sweep, PI / 2.0));
-        assert!(close(arc.distance(Vec2::new(2.0, 2.0) * (0.5f64).sqrt()), 1.0));
+        assert!(close(
+            arc.distance(Vec2::new(2.0, 2.0) * (0.5f64).sqrt()),
+            1.0
+        ));
         // Opposite side: nearest is an endpoint.
         assert!(close(arc.distance(Vec2::new(-1.0, 0.0)), 2f64.sqrt()));
         let (lo, hi) = arc.bounds();
@@ -923,8 +1006,23 @@ mod tests {
     #[test]
     fn box_intersection() {
         let (lo, hi) = (Vec2::ZERO, Vec2::new(10.0, 10.0));
-        assert!(segment_hits_box(Vec2::new(-5.0, 5.0), Vec2::new(15.0, 5.0), lo, hi));
-        assert!(!segment_hits_box(Vec2::new(-5.0, 15.0), Vec2::new(15.0, 12.0), lo, hi));
-        assert!(segment_hits_box(Vec2::new(2.0, 2.0), Vec2::new(3.0, 3.0), lo, hi));
+        assert!(segment_hits_box(
+            Vec2::new(-5.0, 5.0),
+            Vec2::new(15.0, 5.0),
+            lo,
+            hi
+        ));
+        assert!(!segment_hits_box(
+            Vec2::new(-5.0, 15.0),
+            Vec2::new(15.0, 12.0),
+            lo,
+            hi
+        ));
+        assert!(segment_hits_box(
+            Vec2::new(2.0, 2.0),
+            Vec2::new(3.0, 3.0),
+            lo,
+            hi
+        ));
     }
 }

@@ -43,7 +43,9 @@ pub fn shortcut_code(physical: KeyCode, logical: &Key) -> KeyCode {
     }
     // ASCII the shortcuts don't name (`!`, `&`, a digit off the number row) matches nothing,
     // so a symbol key can't set off the letter shortcut at its QWERTY position.
-    char_code(c).unwrap_or(KeyCode::Unidentified(bevy::input::keyboard::NativeKeyCode::Unidentified))
+    char_code(c).unwrap_or(KeyCode::Unidentified(
+        bevy::input::keyboard::NativeKeyCode::Unidentified,
+    ))
 }
 
 fn is_number_key(code: KeyCode) -> bool {
@@ -84,9 +86,32 @@ fn is_number_key(code: KeyCode) -> bool {
 fn char_code(c: char) -> Option<KeyCode> {
     use KeyCode as K;
     const LETTERS: [KeyCode; 26] = [
-        K::KeyA, K::KeyB, K::KeyC, K::KeyD, K::KeyE, K::KeyF, K::KeyG, K::KeyH, K::KeyI, K::KeyJ,
-        K::KeyK, K::KeyL, K::KeyM, K::KeyN, K::KeyO, K::KeyP, K::KeyQ, K::KeyR, K::KeyS, K::KeyT,
-        K::KeyU, K::KeyV, K::KeyW, K::KeyX, K::KeyY, K::KeyZ,
+        K::KeyA,
+        K::KeyB,
+        K::KeyC,
+        K::KeyD,
+        K::KeyE,
+        K::KeyF,
+        K::KeyG,
+        K::KeyH,
+        K::KeyI,
+        K::KeyJ,
+        K::KeyK,
+        K::KeyL,
+        K::KeyM,
+        K::KeyN,
+        K::KeyO,
+        K::KeyP,
+        K::KeyQ,
+        K::KeyR,
+        K::KeyS,
+        K::KeyT,
+        K::KeyU,
+        K::KeyV,
+        K::KeyW,
+        K::KeyX,
+        K::KeyY,
+        K::KeyZ,
     ];
     if c.is_ascii_alphabetic() {
         return Some(LETTERS[(c.to_ascii_lowercase() as u8 - b'a') as usize]);
@@ -121,9 +146,15 @@ mod tests {
         assert_eq!(shortcut_code(KeyCode::KeyZ, &ch("z")), KeyCode::KeyZ);
         assert_eq!(shortcut_code(KeyCode::KeyQ, &ch("Q")), KeyCode::KeyQ);
         assert_eq!(shortcut_code(KeyCode::Slash, &ch("?")), KeyCode::Slash);
-        assert_eq!(shortcut_code(KeyCode::BracketLeft, &ch("[")), KeyCode::BracketLeft);
+        assert_eq!(
+            shortcut_code(KeyCode::BracketLeft, &ch("[")),
+            KeyCode::BracketLeft
+        );
         assert_eq!(shortcut_code(KeyCode::Digit1, &ch("!")), KeyCode::Digit1);
-        assert_eq!(shortcut_code(KeyCode::Escape, &Key::Escape), KeyCode::Escape);
+        assert_eq!(
+            shortcut_code(KeyCode::Escape, &Key::Escape),
+            KeyCode::Escape
+        );
         assert_eq!(shortcut_code(KeyCode::Space, &Key::Space), KeyCode::Space);
     }
 
@@ -140,7 +171,10 @@ mod tests {
         // Shift+, types ? on AZERTY: the shortcuts dialog.
         assert_eq!(shortcut_code(KeyCode::KeyM, &ch("?")), KeyCode::Slash);
         // ! sits on QWERTY's / key and names no shortcut.
-        assert!(matches!(shortcut_code(KeyCode::Slash, &ch("!")), KeyCode::Unidentified(_)));
+        assert!(matches!(
+            shortcut_code(KeyCode::Slash, &ch("!")),
+            KeyCode::Unidentified(_)
+        ));
     }
 
     #[test]
@@ -156,6 +190,9 @@ mod tests {
         assert_eq!(shortcut_code(KeyCode::KeyZ, &ch("я")), KeyCode::KeyZ);
         assert_eq!(shortcut_code(KeyCode::KeyQ, &ch("Й")), KeyCode::KeyQ);
         // A dead key falls back to its position.
-        assert_eq!(shortcut_code(KeyCode::BracketLeft, &Key::Dead(Some('^'))), KeyCode::BracketLeft);
+        assert_eq!(
+            shortcut_code(KeyCode::BracketLeft, &Key::Dead(Some('^'))),
+            KeyCode::BracketLeft
+        );
     }
 }

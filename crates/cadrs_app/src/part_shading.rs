@@ -7,7 +7,9 @@ use bevy::asset::embedded_asset;
 use bevy::mesh::MeshVertexBufferLayoutRef;
 use bevy::pbr::{MaterialPipeline, MaterialPipelineKey};
 use bevy::prelude::*;
-use bevy::render::render_resource::{AsBindGroup, Face, RenderPipelineDescriptor, ShaderType, SpecializedMeshPipelineError};
+use bevy::render::render_resource::{
+    AsBindGroup, Face, RenderPipelineDescriptor, ShaderType, SpecializedMeshPipelineError,
+};
 use bevy::shader::ShaderRef;
 
 pub struct PartShadingPlugin;
@@ -42,7 +44,14 @@ pub struct PartShading {
 
 impl PartShading {
     pub fn new(blend: bool, cull_back: bool) -> Self {
-        Self { blend, cull_back, cap: false, translucent: false, unclipped: false, params: PartShadingParams::default() }
+        Self {
+            blend,
+            cull_back,
+            cap: false,
+            translucent: false,
+            unclipped: false,
+            params: PartShadingParams::default(),
+        }
     }
 }
 
@@ -67,7 +76,13 @@ pub struct PartShadingParams {
 
 impl Default for PartShadingParams {
     fn default() -> Self {
-        Self { clip: [Vec4::ZERO; crate::section_view::MAX_PLANES], style: Vec4::new(0.0, 1.0, 0.0, 0.0), analysis: Vec4::ZERO, pull: Vec4::ZERO, bands: [Vec4::ZERO; 6] }
+        Self {
+            clip: [Vec4::ZERO; crate::section_view::MAX_PLANES],
+            style: Vec4::new(0.0, 1.0, 0.0, 0.0),
+            analysis: Vec4::ZERO,
+            pull: Vec4::ZERO,
+            bands: [Vec4::ZERO; 6],
+        }
     }
 }
 
@@ -78,7 +93,9 @@ pub struct PartShadingKey {
 
 impl From<&PartShading> for PartShadingKey {
     fn from(m: &PartShading) -> Self {
-        Self { cull_back: m.cull_back }
+        Self {
+            cull_back: m.cull_back,
+        }
     }
 }
 
@@ -88,7 +105,11 @@ impl Material for PartShading {
     }
 
     fn alpha_mode(&self) -> AlphaMode {
-        if self.blend { AlphaMode::Blend } else { AlphaMode::Opaque }
+        if self.blend {
+            AlphaMode::Blend
+        } else {
+            AlphaMode::Opaque
+        }
     }
 
     fn enable_prepass() -> bool {

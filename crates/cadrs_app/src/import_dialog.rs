@@ -10,15 +10,18 @@
 //! - ✓ or Enter accepts (one undo step, "Insert Import 1"), ✕ or Esc removes a new Import or
 //!   reverts an edit. Every change is a command.
 
-use cadrs_ui::ShortcutKey;
 use bevy::input::ButtonState;
 use bevy::input::keyboard::KeyboardInput;
 use bevy::prelude::*;
 use cadrs_core::commands::{ReplaceFeature, SetFeature};
 use cadrs_core::import::{AddImport, ImportFeature, ImportFormat, ImportUnit};
 use cadrs_core::{ElementId, ElementKind, Feature, FeatureId, FeatureKind};
+use cadrs_ui::ShortcutKey;
 use cadrs_ui::prelude::*;
-use cadrs_ui::{CheckboxChange, FeatureDialogAccept, FeatureDialogCancel, FeatureDialogState, FilePicked, OptionRow, Select, SelectChange};
+use cadrs_ui::{
+    CheckboxChange, FeatureDialogAccept, FeatureDialogCancel, FeatureDialogState, FilePicked,
+    OptionRow, Select, SelectChange,
+};
 
 use crate::parts::PartCache;
 use crate::viewport::ViewportArea;
@@ -123,13 +126,24 @@ pub fn import_dropped(world: &mut World, path: &std::path::Path) {
 fn open_picker(world: &mut World) {
     let theme = world.resource::<Theme>().clone();
     let mut commands = world.commands();
-    cadrs_ui::open_file_picker(&mut commands, &theme, "import-picker", "Import", PICK_TAG, start_dir(), &["step", "stp", "iges", "igs", "stl"]);
+    cadrs_ui::open_file_picker(
+        &mut commands,
+        &theme,
+        "import-picker",
+        "Import",
+        PICK_TAG,
+        start_dir(),
+        &["step", "stp", "iges", "igs", "stl"],
+    );
     world.flush();
 }
 
 /// Opens an existing Import for editing.
 pub fn edit_import(world: &mut World, feature: FeatureId) {
-    if world.get_resource::<ImportSession>().is_some_and(|s| s.feature == feature) {
+    if world
+        .get_resource::<ImportSession>()
+        .is_some_and(|s| s.feature == feature)
+    {
         return;
     }
     if world.contains_resource::<ImportSession>() {
@@ -142,14 +156,26 @@ pub fn edit_import(world: &mut World, feature: FeatureId) {
     let Some(mut doc) = world.get_resource_mut::<ActiveDocument>() else {
         return;
     };
-    let Some(el) = doc.active_element() else { return };
+    let Some(el) = doc.active_element() else {
+        return;
+    };
     let element = el.id;
-    let Some(before) = el.feature(feature).filter(|f| matches!(f.kind, FeatureKind::Import(_))).cloned() else {
+    let Some(before) = el
+        .feature(feature)
+        .filter(|f| matches!(f.kind, FeatureKind::Import(_)))
+        .cloned()
+    else {
         return;
     };
     let mark = doc.history.undo_len();
     doc.discard_since(mark);
-    world.insert_resource(ImportSession { element, feature, is_new: false, mark, before: Some(before) });
+    world.insert_resource(ImportSession {
+        element,
+        feature,
+        is_new: false,
+        mark,
+        before: Some(before),
+    });
 }
 
 fn end(world: &mut World) {
@@ -158,16 +184,31 @@ fn end(world: &mut World) {
 
 fn params(world: &World) -> Option<ImportFeature> {
     let s = world.get_resource::<ImportSession>()?;
-    match &world.get_resource::<ActiveDocument>()?.doc.element(s.element)?.feature(s.feature)?.kind {
+    match &world
+        .get_resource::<ActiveDocument>()?
+        .doc
+        .element(s.element)?
+        .feature(s.feature)?
+        .kind
+    {
         FeatureKind::Import(x) => Some(x.clone()),
         _ => None,
     }
 }
 
 fn set(world: &mut World, x: ImportFeature, label: &str) {
-    let Some(s) = world.get_resource::<ImportSession>().cloned() else { return };
-    let Some(mut doc) = world.get_resource_mut::<ActiveDocument>() else { return };
-    if let Err(e) = doc.execute(&SetFeature { element: s.element, feature: s.feature, kind: FeatureKind::Import(x), label: label.into() }) {
+    let Some(s) = world.get_resource::<ImportSession>().cloned() else {
+        return;
+    };
+    let Some(mut doc) = world.get_resource_mut::<ActiveDocument>() else {
+        return;
+    };
+    if let Err(e) = doc.execute(&SetFeature {
+        element: s.element,
+        feature: s.feature,
+        kind: FeatureKind::Import(x),
+        label: label.into(),
+    }) {
         warn!("cannot change the import: {e}");
     }
 }
@@ -185,7 +226,11 @@ fn on_file_picked(mut msgs: MessageReader<FilePicked>, mut commands: Commands) {
 
 /// Stores the file at `path` and inserts an Import of it (or gives the open Import that file).
 pub fn pick_file(world: &mut World, path: &std::path::Path) {
-    let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("file").to_string();
+    let name = path
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or("file")
+        .to_string();
     let bytes = match std::fs::read(path) {
         Ok(b) => b,
         Err(e) => {
@@ -195,36 +240,77 @@ pub fn pick_file(world: &mut World, path: &std::path::Path) {
     };
     if let Some(old) = params(world) {
         match ImportFeature::from_file(&name, bytes) {
-            Ok(x) => set(world, ImportFeature { y_axis_up: old.y_axis_up, units: old.units, flatten: old.flatten, structure: old.structure, ..x }, "Choose file"),
+            Ok(x) => set(
+                world,
+                ImportFeature {
+                    y_axis_up: old.y_axis_up,
+                    units: old.units,
+                    flatten: old.flatten,
+                    structure: old.structure,
+                    ..x
+                },
+                "Choose file",
+            ),
             Err(e) => warn!("{e}"),
         }
         return;
     }
-    let Some(mut doc) = world.get_resource_mut::<ActiveDocument>() else { return };
-    let Some(element) = doc.active_element().filter(|e| matches!(e.kind, ElementKind::PartStudio { .. })).map(|e| e.id) else {
+    let Some(mut doc) = world.get_resource_mut::<ActiveDocument>() else {
+        return;
+    };
+    let Some(element) = doc
+        .active_element()
+        .filter(|e| matches!(e.kind, ElementKind::PartStudio { .. }))
+        .map(|e| e.id)
+    else {
         return;
     };
     let feature = FeatureId::new();
     let mark = doc.history.undo_len();
-    let cmd = AddImport { element, feature, file_name: name, bytes: std::sync::Arc::new(bytes), y_axis_up: false, units: None };
+    let cmd = AddImport {
+        element,
+        feature,
+        file_name: name,
+        bytes: std::sync::Arc::new(bytes),
+        y_axis_up: false,
+        units: None,
+    };
     if let Err(e) = doc.execute(&cmd) {
         warn!("cannot import: {e}");
         return;
     }
-    world.insert_resource(ImportSession { element, feature, is_new: true, mark, before: None });
+    world.insert_resource(ImportSession {
+        element,
+        feature,
+        is_new: true,
+        mark,
+        before: None,
+    });
 }
 
 /// ✓ / Enter: keeps the Import if it rebuilds.
 pub fn accept(world: &mut World) {
-    let Some(s) = world.get_resource::<ImportSession>().cloned() else { return };
-    let Some(doc) = world.get_resource::<ActiveDocument>() else { return };
-    let Some(el) = doc.doc.element(s.element) else { return };
-    let Some(f) = el.feature(s.feature).filter(|f| f.is_valid()).cloned() else { return };
+    let Some(s) = world.get_resource::<ImportSession>().cloned() else {
+        return;
+    };
+    let Some(doc) = world.get_resource::<ActiveDocument>() else {
+        return;
+    };
+    let Some(el) = doc.doc.element(s.element) else {
+        return;
+    };
+    let Some(f) = el.feature(s.feature).filter(|f| f.is_valid()).cloned() else {
+        return;
+    };
     let features = el.active_features();
     if crate::accept::builds(world, "import", features, f.id, accept) != Some(true) {
         return;
     }
-    let label = if s.is_new { format!("Insert {}", f.name) } else { format!("Edit {}", f.name) };
+    let label = if s.is_new {
+        format!("Insert {}", f.name)
+    } else {
+        format!("Edit {}", f.name)
+    };
     if let Some(mut doc) = world.get_resource_mut::<ActiveDocument>() {
         doc.squash_element_since(s.mark, s.element, label);
     }
@@ -233,8 +319,12 @@ pub fn accept(world: &mut World) {
 
 /// ✕ / Esc: removes a new Import or reverts an edit.
 pub fn cancel(world: &mut World) {
-    let Some(s) = world.get_resource::<ImportSession>().cloned() else { return };
-    let cur = world.get_resource::<ActiveDocument>().and_then(|d| d.doc.element(s.element)?.feature(s.feature).cloned());
+    let Some(s) = world.get_resource::<ImportSession>().cloned() else {
+        return;
+    };
+    let cur = world
+        .get_resource::<ActiveDocument>()
+        .and_then(|d| d.doc.element(s.element)?.feature(s.feature).cloned());
     if let Some(mut doc) = world.get_resource_mut::<ActiveDocument>() {
         let name = cur.as_ref().map(|f| f.name.clone()).unwrap_or_default();
         if s.is_new {
@@ -244,7 +334,11 @@ pub fn cancel(world: &mut World) {
             if let (Some(before), Some(f)) = (s.before.clone(), cur)
                 && f != before
             {
-                let _ = doc.execute(&ReplaceFeature { element: s.element, feature: before, label: format!("Cancel {name}") });
+                let _ = doc.execute(&ReplaceFeature {
+                    element: s.element,
+                    feature: before,
+                    label: format!("Cancel {name}"),
+                });
             }
         }
     }
@@ -281,13 +375,21 @@ fn import_keys(
     }
 }
 
-fn on_accept(ev: On<FeatureDialogAccept>, q: Query<(), With<ImportDialog>>, mut commands: Commands) {
+fn on_accept(
+    ev: On<FeatureDialogAccept>,
+    q: Query<(), With<ImportDialog>>,
+    mut commands: Commands,
+) {
     if q.contains(ev.entity) {
         commands.queue(accept);
     }
 }
 
-fn on_cancel(ev: On<FeatureDialogCancel>, q: Query<(), With<ImportDialog>>, mut commands: Commands) {
+fn on_cancel(
+    ev: On<FeatureDialogCancel>,
+    q: Query<(), With<ImportDialog>>,
+    mut commands: Commands,
+) {
     if q.contains(ev.entity) {
         commands.queue(cancel);
     }
@@ -315,7 +417,10 @@ fn on_option(ev: On<CheckboxChange>, q: Query<&Name>, mut commands: Commands) {
 }
 
 fn on_unit(ev: On<SelectChange>, q: Query<&Name>, mut commands: Commands) {
-    if !q.get(ev.entity).is_ok_and(|n| n.as_str() == "import-units-select") {
+    if !q
+        .get(ev.entity)
+        .is_ok_and(|n| n.as_str() == "import-units-select")
+    {
         return;
     }
     let unit = ImportUnit::ALL[ev.index.min(ImportUnit::ALL.len() - 1)];
@@ -327,7 +432,11 @@ fn on_unit(ev: On<SelectChange>, q: Query<&Name>, mut commands: Commands) {
     });
 }
 
-fn on_choose(a: On<bevy::ui_widgets::Activate>, q: Query<(), With<ChooseFile>>, mut commands: Commands) {
+fn on_choose(
+    a: On<bevy::ui_widgets::Activate>,
+    q: Query<(), With<ChooseFile>>,
+    mut commands: Commands,
+) {
     if q.contains(a.entity) {
         commands.queue(open_picker);
     }
@@ -349,8 +458,16 @@ fn sync_import_dialog(
         }
         return;
     };
-    let Some(f) = doc.doc.element(s.element).and_then(|e| e.feature(s.feature)) else { return };
-    let FeatureKind::Import(x) = &f.kind else { return };
+    let Some(f) = doc
+        .doc
+        .element(s.element)
+        .and_then(|e| e.feature(s.feature))
+    else {
+        return;
+    };
+    let FeatureKind::Import(x) = &f.kind else {
+        return;
+    };
     let error = cache.errors.get(&f.id).cloned();
     let valid = f.is_valid() && error.is_none() && !cache.rebuilding;
     let parts = cache.parts.iter().filter(|p| p.feature == f.id).count();
@@ -360,7 +477,9 @@ fn sync_import_dialog(
         if let Some((e, _)) = built {
             commands.entity(e).try_despawn();
         }
-        let Some(area) = q_area.iter().next() else { return };
+        let Some(area) = q_area.iter().next() else {
+            return;
+        };
         let t = theme.clone();
         let x = x.clone();
         let dialog = commands
@@ -374,34 +493,87 @@ fn sync_import_dialog(
                     .width(340.0)
                     .valid(valid)
                     .body(move |b| {
-                        b.spawn(Node { flex_direction: FlexDirection::Column, row_gap: Val::Px(4.0), ..default() }).with_children(|b| {
-                            b.spawn((Name::new("import-file-row"), Node { align_items: AlignItems::Center, column_gap: Val::Px(8.0), min_height: Val::Px(28.0), ..default() }))
-                                .with_children(|r| {
-                                    r.spawn((cadrs_ui::icon("file-import", 16.0, t.muted_foreground), Pickable::IGNORE));
-                                    // A longer name is cut in the middle (its end and format stay),
-                                    // with the whole name in a tooltip on its cell (#26).
-                                    r.spawn((Name::new("import-file-cell"), Node { flex_grow: 1.0, ..cadrs_ui::ellipsis::Ellipsis::node() })).with_children(|c| {
-                                        c.spawn((
-                                            Name::new("import-file-name"),
-                                            t.text(format!("{} ({})", x.file_name, x.format.label()), t.font_base, FontWeight::MEDIUM, t.foreground),
-                                            cadrs_ui::ellipsis::Ellipsis::middle().with_tooltip(),
-                                            cadrs_ui::ellipsis::Ellipsis::node(),
-                                            Pickable::IGNORE,
-                                        ))
-                                        .insert(TextLayout::no_wrap());
-                                    });
-                                    r.spawn((ChooseFile, cadrs_ui::Button::new("import-choose-file").label("Choose file").small().outline().tooltip("Import another file").build(&t)));
+                        b.spawn(Node {
+                            flex_direction: FlexDirection::Column,
+                            row_gap: Val::Px(4.0),
+                            ..default()
+                        })
+                        .with_children(|b| {
+                            b.spawn((
+                                Name::new("import-file-row"),
+                                Node {
+                                    align_items: AlignItems::Center,
+                                    column_gap: Val::Px(8.0),
+                                    min_height: Val::Px(28.0),
+                                    ..default()
+                                },
+                            ))
+                            .with_children(|r| {
+                                r.spawn((
+                                    cadrs_ui::icon("file-import", 16.0, t.muted_foreground),
+                                    Pickable::IGNORE,
+                                ));
+                                // A longer name is cut in the middle (its end and format stay),
+                                // with the whole name in a tooltip on its cell (#26).
+                                r.spawn((
+                                    Name::new("import-file-cell"),
+                                    Node {
+                                        flex_grow: 1.0,
+                                        ..cadrs_ui::ellipsis::Ellipsis::node()
+                                    },
+                                ))
+                                .with_children(|c| {
+                                    c.spawn((
+                                        Name::new("import-file-name"),
+                                        t.text(
+                                            format!("{} ({})", x.file_name, x.format.label()),
+                                            t.font_base,
+                                            FontWeight::MEDIUM,
+                                            t.foreground,
+                                        ),
+                                        cadrs_ui::ellipsis::Ellipsis::middle().with_tooltip(),
+                                        cadrs_ui::ellipsis::Ellipsis::node(),
+                                        Pickable::IGNORE,
+                                    ))
+                                    .insert(TextLayout::no_wrap());
                                 });
-                            b.spawn(OptionRow::new("import-y-up", "Y axis is up").checked(x.y_axis_up).build(&t));
+                                r.spawn((
+                                    ChooseFile,
+                                    cadrs_ui::Button::new("import-choose-file")
+                                        .label("Choose file")
+                                        .small()
+                                        .outline()
+                                        .tooltip("Import another file")
+                                        .build(&t),
+                                ));
+                            });
+                            b.spawn(
+                                OptionRow::new("import-y-up", "Y axis is up")
+                                    .checked(x.y_axis_up)
+                                    .build(&t),
+                            );
                             if x.format == ImportFormat::Stl {
-                                b.spawn(OptionRow::new("import-units", "Specify units").checked(x.units.is_some()).build(&t));
+                                b.spawn(
+                                    OptionRow::new("import-units", "Specify units")
+                                        .checked(x.units.is_some())
+                                        .build(&t),
+                                );
                                 if let Some(u) = x.units {
-                                    let mut sel = Select::new("import-units-select").bordered().width(Val::Px(150.0));
+                                    let mut sel = Select::new("import-units-select")
+                                        .bordered()
+                                        .width(Val::Px(150.0));
                                     for k in ImportUnit::ALL {
                                         sel = sel.option(k.label(), true);
                                     }
-                                    let i = ImportUnit::ALL.iter().position(|k| *k == u).unwrap_or(0);
-                                    b.spawn(cadrs_ui::form_row(&t, "import-units-row", "Units", 60.0)).with_children(|r| {
+                                    let i =
+                                        ImportUnit::ALL.iter().position(|k| *k == u).unwrap_or(0);
+                                    b.spawn(cadrs_ui::form_row(
+                                        &t,
+                                        "import-units-row",
+                                        "Units",
+                                        60.0,
+                                    ))
+                                    .with_children(|r| {
                                         r.spawn(sel.selected(i).build(&t));
                                     });
                                 }
@@ -411,7 +583,11 @@ fn sync_import_dialog(
                                 1 => "1 part".to_string(),
                                 n => format!("{n} parts"),
                             };
-                            b.spawn((Name::new("import-summary"), t.text(what, t.font_base, FontWeight::NORMAL, t.muted_foreground), Pickable::IGNORE));
+                            b.spawn((
+                                Name::new("import-summary"),
+                                t.text(what, t.font_base, FontWeight::NORMAL, t.muted_foreground),
+                                Pickable::IGNORE,
+                            ));
                         });
                     })
                     .build(&theme),
@@ -421,7 +597,11 @@ fn sync_import_dialog(
         return;
     }
     for (_, _, mut st) in &mut q_dialog {
-        let want = FeatureDialogState { title: f.name.clone(), valid, error: error.is_some() };
+        let want = FeatureDialogState {
+            title: f.name.clone(),
+            valid,
+            error: error.is_some(),
+        };
         if *st != want {
             *st = want;
         }

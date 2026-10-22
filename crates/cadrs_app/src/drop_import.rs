@@ -20,11 +20,11 @@ use std::path::{Path, PathBuf};
 use bevy::picking::pointer::{PointerId, PointerLocation};
 use bevy::prelude::*;
 use bevy::window::{FileDragAndDrop, PrimaryWindow};
+use cadrs_core::FeatureId;
 use cadrs_core::document::ElementKind;
 use cadrs_core::import::ImportFormat;
 use cadrs_core::picture::ImageFormat;
 use cadrs_core::vector_import::{AddVectorSketch, InsertVector, VectorFormat, bounds, read_sketch};
-use cadrs_core::FeatureId;
 use cadrs_sketch::Vec2 as SVec2;
 use cadrs_ui::{Notification, Theme, show_notification};
 
@@ -56,7 +56,10 @@ pub enum DropKind {
 
 impl DropKind {
     pub fn of_path(path: &Path) -> Option<Self> {
-        if path.extension().is_some_and(|e| e.eq_ignore_ascii_case("cadrs")) {
+        if path
+            .extension()
+            .is_some_and(|e| e.eq_ignore_ascii_case("cadrs"))
+        {
             return Some(Self::Native);
         }
         if VectorFormat::of_path(path).is_some() {
@@ -88,8 +91,14 @@ fn page(world: &World) -> Option<Page> {
         AppState::Document => {}
         _ => return Some(Page::Documents),
     }
-    let studio = world.get_resource::<ActiveDocument>()?.active_element().is_some_and(|e| matches!(e.kind, ElementKind::PartStudio { .. }));
-    let sketching = world.get_resource::<State<PartStudioMode>>().is_some_and(|m| *m.get() == PartStudioMode::Sketching) && world.contains_resource::<SketchSession>();
+    let studio = world
+        .get_resource::<ActiveDocument>()?
+        .active_element()
+        .is_some_and(|e| matches!(e.kind, ElementKind::PartStudio { .. }));
+    let sketching = world
+        .get_resource::<State<PartStudioMode>>()
+        .is_some_and(|m| *m.get() == PartStudioMode::Sketching)
+        && world.contains_resource::<SketchSession>();
     Some(match (studio, sketching) {
         (true, true) => Page::Sketch,
         (true, false) => Page::PartStudio,
@@ -115,20 +124,30 @@ pub fn dropped(world: &mut World, paths: Vec<PathBuf>) {
     let Some(page) = page(world) else { return };
     // Where the drag last was (Wayland says; the window's cursor doesn't follow a drag there),
     // else the cursor, else the pointer that moved last (a scenario's).
-    let at = world.resource_mut::<crate::file_drop::DropPosition>().0.take().or_else(|| {
-        let mut q = world.query_filtered::<&Window, With<PrimaryWindow>>();
-        q.iter(world).next().and_then(|w| w.cursor_position())
-    });
+    let at = world
+        .resource_mut::<crate::file_drop::DropPosition>()
+        .0
+        .take()
+        .or_else(|| {
+            let mut q = world.query_filtered::<&Window, With<PrimaryWindow>>();
+            q.iter(world).next().and_then(|w| w.cursor_position())
+        });
     let at = at.or_else(|| {
         let id = world.resource::<crate::tool_input::ActivePointer>().0?;
         let mut q = world.query::<(&PointerId, &PointerLocation)>();
-        q.iter(world).find(|(p, _)| **p == id).and_then(|(_, l)| l.location.as_ref().map(|l| l.position))
+        q.iter(world)
+            .find(|(p, _)| **p == id)
+            .and_then(|(_, l)| l.location.as_ref().map(|l| l.position))
     });
     let mut drawings = Vec::new();
     let mut pictures = Vec::new();
     let mut notes = Vec::new();
     for path in paths {
-        let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("the file").to_string();
+        let name = path
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("the file")
+            .to_string();
         let Some(kind) = DropKind::of_path(&path) else {
             notes.push(Notification::warning(format!(
                 "{name}: drop drawings (SVG, EPS, PDF, DXF, DWG), pictures (PNG, JPEG, GIF), models (STEP, IGES, STL) or native documents (cadrs)"
@@ -137,10 +156,14 @@ pub fn dropped(world: &mut World, paths: Vec<PathBuf>) {
         };
         match (kind, page) {
             (DropKind::Native, Page::Documents) => crate::native_document::import(world, &path),
-            (DropKind::Native, _) => notes.push(Notification::warning("Import native documents from the documents page")),
+            (DropKind::Native, _) => notes.push(Notification::warning(
+                "Import native documents from the documents page",
+            )),
             (DropKind::Drawing, Page::PartStudio | Page::Sketch) => drawings.push(path),
             (DropKind::Picture, Page::PartStudio) => pictures.push(path),
-            (DropKind::Model | DropKind::Mesh, Page::PartStudio) => crate::import_dialog::import_dropped(world, &path),
+            (DropKind::Model | DropKind::Mesh, Page::PartStudio) => {
+                crate::import_dialog::import_dropped(world, &path)
+            }
             (DropKind::Model, Page::Documents) => {
                 let theme = world.resource::<Theme>().clone();
                 let mut commands = world.commands();
@@ -151,14 +174,23 @@ pub fn dropped(world: &mut World, paths: Vec<PathBuf>) {
             (DropKind::Model, Page::OtherTab) => {
                 let theme = world.resource::<Theme>().clone();
                 let mut commands = world.commands();
-                crate::import_file::read(&mut commands, &theme, ImportTarget::ActiveDocument, &path);
+                crate::import_file::read(
+                    &mut commands,
+                    &theme,
+                    ImportTarget::ActiveDocument,
+                    &path,
+                );
                 world.flush();
             }
-            (_, Page::Sketch) => notes.push(Notification::warning(format!("Close the sketch to drop {name} into the Part Studio"))),
-            (DropKind::Drawing | DropKind::Picture, Page::Documents) => {
-                notes.push(Notification::warning(format!("Open a Part Studio to drop {name} into it")))
-            }
-            (_, Page::OtherTab) => notes.push(Notification::warning(format!("Drop {name} into a Part Studio"))),
+            (_, Page::Sketch) => notes.push(Notification::warning(format!(
+                "Close the sketch to drop {name} into the Part Studio"
+            ))),
+            (DropKind::Drawing | DropKind::Picture, Page::Documents) => notes.push(
+                Notification::warning(format!("Open a Part Studio to drop {name} into it")),
+            ),
+            (_, Page::OtherTab) => notes.push(Notification::warning(format!(
+                "Drop {name} into a Part Studio"
+            ))),
         }
     }
     if !pictures.is_empty() {
@@ -172,13 +204,27 @@ pub fn dropped(world: &mut World, paths: Vec<PathBuf>) {
 
 /// Drawings dropped on a Part Studio (each a new sketch) or into the sketch being edited, the
 /// first centred at `at`, the next ones to its right. Returns the notes to show.
-fn insert_drawings(world: &mut World, page: Page, paths: Vec<PathBuf>, at: Option<Vec2>) -> Vec<Notification> {
-    let Some(element) = world.get_resource::<ActiveDocument>().and_then(|d| d.active_element()).map(|e| e.id) else { return vec![] };
+fn insert_drawings(
+    world: &mut World,
+    page: Page,
+    paths: Vec<PathBuf>,
+    at: Option<Vec2>,
+) -> Vec<Notification> {
+    let Some(element) = world
+        .get_resource::<ActiveDocument>()
+        .and_then(|d| d.active_element())
+        .map(|e| e.id)
+    else {
+        return vec![];
+    };
     // The sketch's plane, or the plane facing the view; the point under the pointer on it.
     let (plane, mut at) = match page {
         Page::Sketch => {
             let map = world.resource::<crate::sketch_tools::SketchScreen>().active;
-            (None, at.and_then(|c| map?.to_sketch(c)).unwrap_or(SVec2::ZERO))
+            (
+                None,
+                at.and_then(|c| map?.to_sketch(c)).unwrap_or(SVec2::ZERO),
+            )
         }
         _ => {
             let (plane, [x, y]) = crate::picture::drop_spot(world, at);
@@ -188,7 +234,11 @@ fn insert_drawings(world: &mut World, page: Page, paths: Vec<PathBuf>, at: Optio
     let mut notes = Vec::new();
     let mut first = true;
     for path in paths {
-        let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("the drawing").to_string();
+        let name = path
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("the drawing")
+            .to_string();
         let (geometry, report) = match read_sketch(&path, None, false) {
             Ok(g) => g,
             Err(e) => {
@@ -197,7 +247,9 @@ fn insert_drawings(world: &mut World, page: Page, paths: Vec<PathBuf>, at: Optio
             }
         };
         let Some((lo, hi)) = bounds(&geometry).filter(|_| report.curves() > 0) else {
-            notes.push(Notification::warning(format!("{name} has no lines or curves to insert")));
+            notes.push(Notification::warning(format!(
+                "{name} has no lines or curves to insert"
+            )));
             continue;
         };
         // Side by side: this one's left edge a gap after the last one's right edge.
@@ -206,11 +258,28 @@ fn insert_drawings(world: &mut World, page: Page, paths: Vec<PathBuf>, at: Optio
         }
         let result = match (page, plane) {
             (Page::Sketch, _) => {
-                let Some(feature) = world.get_resource::<SketchSession>().map(|s| s.feature) else { break };
-                world.resource_mut::<ActiveDocument>().execute(&InsertVector { element, feature, file_name: name.clone(), geometry, offset: at })
+                let Some(feature) = world.get_resource::<SketchSession>().map(|s| s.feature) else {
+                    break;
+                };
+                world
+                    .resource_mut::<ActiveDocument>()
+                    .execute(&InsertVector {
+                        element,
+                        feature,
+                        file_name: name.clone(),
+                        geometry,
+                        offset: at,
+                    })
             }
             (_, Some(plane)) => {
-                let cmd = AddVectorSketch { element, feature: FeatureId::new(), plane, file_name: name.clone(), geometry, offset: at };
+                let cmd = AddVectorSketch {
+                    element,
+                    feature: FeatureId::new(),
+                    plane,
+                    file_name: name.clone(),
+                    geometry,
+                    offset: at,
+                };
                 world.resource_mut::<ActiveDocument>().execute(&cmd)
             }
             _ => break,
@@ -218,7 +287,10 @@ fn insert_drawings(world: &mut World, page: Page, paths: Vec<PathBuf>, at: Optio
         match result {
             Ok(()) => {
                 info!("inserted {name}: {report:?}");
-                notes.push(Notification::info(format!("Inserted {name}: {} curves", report.curves())).seconds(5.0));
+                notes.push(
+                    Notification::info(format!("Inserted {name}: {} curves", report.curves()))
+                        .seconds(5.0),
+                );
                 at.x += (hi.x - lo.x) / 2.0 + DROP_GAP;
                 first = false;
             }
@@ -228,7 +300,9 @@ fn insert_drawings(world: &mut World, page: Page, paths: Vec<PathBuf>, at: Optio
     if page == Page::Sketch && !first {
         // As the Insert panel: constraint glyphs only on hover and selection (a drawing's every
         // shared corner had one).
-        world.resource_mut::<crate::sketch::SketchViewSettings>().show_constraints = false;
+        world
+            .resource_mut::<crate::sketch::SketchViewSettings>()
+            .show_constraints = false;
     }
     notes
 }

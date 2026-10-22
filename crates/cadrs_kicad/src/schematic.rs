@@ -3,9 +3,9 @@
 //! KiCad sheets have Y down from the page's top-left corner; symbol libraries have Y up. Placed
 //! symbols' field positions are absolute, their angles relative to the symbol.
 
+use crate::Error;
 use crate::common::{self, YAxis, at_angle, effects, fill, pts, stroke, uuid};
 use crate::sexpr::Sexp;
-use crate::Error;
 use cadrs_eda::graphics::{Geom, Shape, Text};
 use cadrs_eda::schematic::*;
 use cadrs_eda::symbol::*;
@@ -15,21 +15,35 @@ use cadrs_eda::units::{Pt, Size, mm};
 pub fn read_schematic(text: &str, warnings: &mut Vec<String>) -> Result<Schematic, Error> {
     let root = crate::sexpr::parse(text)?;
     if root.head() != "kicad_sch" {
-        return Err(Error::Format(format!("not a schematic: ({} …)", root.head())));
+        return Err(Error::Format(format!(
+            "not a schematic: ({} …)",
+            root.head()
+        )));
     }
-    let lib: Vec<&Sexp> = root.find("lib_symbols").map(|l| l.all("symbol").collect()).unwrap_or_default();
+    let lib: Vec<&Sexp> = root
+        .find("lib_symbols")
+        .map(|l| l.all("symbol").collect())
+        .unwrap_or_default();
     let symbols: Vec<Symbol> = lib.iter().map(|s| read_symbol(s, &lib)).collect();
 
     let paper = read_paper(&root);
     let y = YAxis::page(cadrs_eda::units::to_mm(paper.size.h));
-    let mut sheet = Sheet { id: uuid(&root), name: "Root".into(), paper, ..Default::default() };
+    let mut sheet = Sheet {
+        id: uuid(&root),
+        name: "Root".into(),
+        paper,
+        ..Default::default()
+    };
     if let Some(tb) = root.find("title_block") {
         sheet.title_block = TitleBlock {
             title: tb.get("title").unwrap_or_default().into(),
             date: tb.get("date").unwrap_or_default().into(),
             revision: tb.get("rev").unwrap_or_default().into(),
             company: tb.get("company").unwrap_or_default().into(),
-            comments: tb.all("comment").map(|c| c.str_arg(1).unwrap_or_default().to_string()).collect(),
+            comments: tb
+                .all("comment")
+                .map(|c| c.str_arg(1).unwrap_or_default().to_string())
+                .collect(),
         };
     }
 
@@ -40,8 +54,17 @@ pub fn read_schematic(text: &str, warnings: &mut Vec<String>) -> Result<Schemati
             "wire" | "bus" => {
                 let p = pts(item, y);
                 for w in p.windows(2) {
-                    let wire = Wire { id: uuid(item), a: w[0], b: w[1], stroke: stroke(item) };
-                    if item.head() == "wire" { sheet.wires.push(wire) } else { sheet.buses.push(wire) }
+                    let wire = Wire {
+                        id: uuid(item),
+                        a: w[0],
+                        b: w[1],
+                        stroke: stroke(item),
+                    };
+                    if item.head() == "wire" {
+                        sheet.wires.push(wire)
+                    } else {
+                        sheet.buses.push(wire)
+                    }
                 }
             }
             "junction" => sheet.junctions.push(Junction {
@@ -50,7 +73,10 @@ pub fn read_schematic(text: &str, warnings: &mut Vec<String>) -> Result<Schemati
                 diameter: item.get_f64("diameter").map(mm).unwrap_or(0),
                 color: common::color(item),
             }),
-            "no_connect" => sheet.no_connects.push(NoConnect { id: uuid(item), at: y.child(item, "at").unwrap_or_default() }),
+            "no_connect" => sheet.no_connects.push(NoConnect {
+                id: uuid(item),
+                at: y.child(item, "at").unwrap_or_default(),
+            }),
             "label" | "global_label" | "hierarchical_label" => {
                 let shape = match item.get("shape") {
                     Some("input") => LabelShape::Input,
@@ -64,28 +90,47 @@ pub fn read_schematic(text: &str, warnings: &mut Vec<String>) -> Result<Schemati
                     "hierarchical_label" => LabelKind::Hierarchical(shape),
                     _ => LabelKind::Local,
                 };
-                let fields = item.all("property").map(|p| sheet_field(p, y, None)).collect();
-                sheet.labels.push(Label { id: uuid(item), kind, text: sheet_text(item, y), fields });
+                let fields = item
+                    .all("property")
+                    .map(|p| sheet_field(p, y, None))
+                    .collect();
+                sheet.labels.push(Label {
+                    id: uuid(item),
+                    kind,
+                    text: sheet_text(item, y),
+                    fields,
+                });
             }
-            "text" => sheet.notes.push(Note { id: uuid(item), text: sheet_text(item, y) }),
+            "text" => sheet.notes.push(Note {
+                id: uuid(item),
+                text: sheet_text(item, y),
+            }),
             "polyline" | "rectangle" | "circle" | "arc" | "bezier" => {
                 if let Some(shape) = read_shape(item, y) {
-                    sheet.drawings.push(Drawing { id: uuid(item), shape });
+                    sheet.drawings.push(Drawing {
+                        id: uuid(item),
+                        shape,
+                    });
                 }
             }
-            "version" | "generator" | "generator_version" | "uuid" | "paper" | "title_block" | "lib_symbols"
-            | "sheet_instances" | "symbol_instances" | "embedded_fonts" => {}
+            "version" | "generator" | "generator_version" | "uuid" | "paper" | "title_block"
+            | "lib_symbols" | "sheet_instances" | "symbol_instances" | "embedded_fonts" => {}
             other => *skipped.entry(other).or_default() += 1,
         }
     }
     for (what, n) in skipped {
         warnings.push(format!("schematic: {n} × `{what}` not imported yet"));
     }
-    Ok(Schematic { symbols, sheets: vec![sheet] })
+    Ok(Schematic {
+        symbols,
+        sheets: vec![sheet],
+    })
 }
 
 fn read_paper(root: &Sexp) -> Paper {
-    let Some(p) = root.find("paper") else { return Paper::default() };
+    let Some(p) = root.find("paper") else {
+        return Paper::default();
+    };
     let name = p.str_arg(0).unwrap_or("A4").to_string();
     let (w, h) = match name.as_str() {
         "A5" => (210.0, 148.0),
@@ -102,7 +147,11 @@ fn read_paper(root: &Sexp) -> Paper {
         "E" => (1117.6, 863.6),
         _ => (p.f64_arg(1).unwrap_or(297.0), p.f64_arg(2).unwrap_or(210.0)),
     };
-    let size = if p.has_atom("portrait") { Size::mm(h, w) } else { Size::mm(w, h) };
+    let size = if p.has_atom("portrait") {
+        Size::mm(h, w)
+    } else {
+        Size::mm(w, h)
+    };
     Paper { name, size }
 }
 
@@ -132,21 +181,40 @@ fn sheet_field(p: &Sexp, y: YAxis, placement: Option<&Placement>) -> Field {
     if let Some(pl) = placement {
         let at = text.at;
         // Only the direction and the mirror's effect: the anchor is already on the sheet.
-        text = Placement { at: Pt::ZERO, ..*pl }.text(&text);
+        text = Placement {
+            at: Pt::ZERO,
+            ..*pl
+        }
+        .text(&text);
         text.at = at;
     }
-    Field { name: p.str_arg(0).unwrap_or_default().to_string(), text, show_name: p.flag("show_name") == Some(true) }
+    Field {
+        name: p.str_arg(0).unwrap_or_default().to_string(),
+        text,
+        show_name: p.flag("show_name") == Some(true),
+    }
 }
 
 fn read_placed(item: &Sexp, y: YAxis) -> PlacedSymbol {
-    let lib_id = item.get("lib_name").or_else(|| item.get("lib_id")).unwrap_or_default().to_string();
+    let lib_id = item
+        .get("lib_name")
+        .or_else(|| item.get("lib_id"))
+        .unwrap_or_default()
+        .to_string();
     let mirror = match item.get("mirror") {
         Some("x") => Mirror::X,
         Some("y") => Mirror::Y,
         _ => Mirror::None,
     };
-    let placement = Placement { at: y.child(item, "at").unwrap_or_default(), angle: at_angle(item), mirror };
-    let mut fields: Vec<Field> = item.all("property").map(|p| sheet_field(p, y, Some(&placement))).collect();
+    let placement = Placement {
+        at: y.child(item, "at").unwrap_or_default(),
+        angle: at_angle(item),
+        mirror,
+    };
+    let mut fields: Vec<Field> = item
+        .all("property")
+        .map(|p| sheet_field(p, y, Some(&placement)))
+        .collect();
     // The reference of the root sheet's instance wins over the property (KiCad 7+).
     let inst_ref = item
         .find("instances")
@@ -154,7 +222,10 @@ fn read_placed(item: &Sexp, y: YAxis) -> PlacedSymbol {
         .and_then(|p| p.find("path"))
         .and_then(|p| p.get("reference"))
         .map(str::to_string);
-    if let (Some(r), Some(f)) = (inst_ref, fields.iter_mut().find(|f| f.name == fields::REFERENCE)) {
+    if let (Some(r), Some(f)) = (
+        inst_ref,
+        fields.iter_mut().find(|f| f.name == fields::REFERENCE),
+    ) {
         f.text.text = r;
     }
     PlacedSymbol {
@@ -162,7 +233,10 @@ fn read_placed(item: &Sexp, y: YAxis) -> PlacedSymbol {
         symbol: lib_id,
         placement,
         unit: item.get_f64("unit").unwrap_or(1.0) as u32,
-        style: item.get_f64("convert").or_else(|| item.get_f64("body_style")).unwrap_or(1.0) as u32,
+        style: item
+            .get_f64("convert")
+            .or_else(|| item.get_f64("body_style"))
+            .unwrap_or(1.0) as u32,
         fields,
         in_bom: item.flag("in_bom") != Some(false),
         on_board: item.flag("on_board") != Some(false),
@@ -170,7 +244,12 @@ fn read_placed(item: &Sexp, y: YAxis) -> PlacedSymbol {
         exclude_from_sim: item.flag("exclude_from_sim") == Some(true),
         pin_ids: item
             .all("pin")
-            .filter_map(|p| Some((p.str_arg(0)?.to_string(), uuid::Uuid::parse_str(p.get("uuid")?).ok()?)))
+            .filter_map(|p| {
+                Some((
+                    p.str_arg(0)?.to_string(),
+                    uuid::Uuid::parse_str(p.get("uuid")?).ok()?,
+                ))
+            })
             .collect(),
     }
 }
@@ -190,8 +269,14 @@ fn read_shape(s: &Sexp, y: YAxis) -> Option<Shape> {
             }
             Geom::Polyline { pts: p, closed }
         }
-        "rectangle" => Geom::Rect { a: y.child(s, "start")?, b: y.child(s, "end")? },
-        "circle" => Geom::Circle { center: y.child(s, "center")?, radius: mm(s.get_f64("radius")?) },
+        "rectangle" => Geom::Rect {
+            a: y.child(s, "start")?,
+            b: y.child(s, "end")?,
+        },
+        "circle" => Geom::Circle {
+            center: y.child(s, "center")?,
+            radius: mm(s.get_f64("radius")?),
+        },
         "arc" => {
             let (start, end) = (y.child(s, "start")?, y.child(s, "end")?);
             let mid = match y.child(s, "mid") {
@@ -215,11 +300,17 @@ fn read_shape(s: &Sexp, y: YAxis) -> Option<Shape> {
             if p.len() != 4 {
                 return None;
             }
-            Geom::Bezier { pts: [p[0], p[1], p[2], p[3]] }
+            Geom::Bezier {
+                pts: [p[0], p[1], p[2], p[3]],
+            }
         }
         _ => return None,
     };
-    Some(Shape { geom, stroke: stroke(s), fill: fill(s) })
+    Some(Shape {
+        geom,
+        stroke: stroke(s),
+        fill: fill(s),
+    })
 }
 
 /// A library symbol, `extends` resolved against `lib`.
@@ -279,13 +370,21 @@ pub fn read_symbol(s: &Sexp, lib: &[&Sexp]) -> Symbol {
         let value = p.str_arg(1).unwrap_or_default();
         match name {
             "ki_keywords" => sym.keywords = value.into(),
-            "ki_fp_filters" => sym.footprint_filters = value.split_whitespace().map(str::to_string).collect(),
+            "ki_fp_filters" => {
+                sym.footprint_filters = value.split_whitespace().map(str::to_string).collect()
+            }
             "ki_locked" => sym.units_swappable = false,
             _ => {
                 let (style, visible) = effects(p);
                 let field = Field {
                     name: name.into(),
-                    text: Text { text: value.into(), at: y.child(p, "at").unwrap_or_default(), angle: at_angle(p), style, visible },
+                    text: Text {
+                        text: value.into(),
+                        at: y.child(p, "at").unwrap_or_default(),
+                        angle: at_angle(p),
+                        style,
+                        visible,
+                    },
                     show_name: p.flag("show_name") == Some(true),
                 };
                 match sym.fields.iter_mut().find(|f| f.name == name) {
@@ -318,12 +417,26 @@ pub fn read_symbol(s: &Sexp, lib: &[&Sexp]) -> Symbol {
                     if angle.abs() > 360.0 {
                         angle /= 10.0;
                     }
-                    let text = Text { text: item.str_arg(0).unwrap_or_default().into(), at: y.child(item, "at").unwrap_or_default(), angle, style: st, visible };
-                    sym.graphics.push(SymbolGraphic { item: SymbolItem::Text(text), unit, style });
+                    let text = Text {
+                        text: item.str_arg(0).unwrap_or_default().into(),
+                        at: y.child(item, "at").unwrap_or_default(),
+                        angle,
+                        style: st,
+                        visible,
+                    };
+                    sym.graphics.push(SymbolGraphic {
+                        item: SymbolItem::Text(text),
+                        unit,
+                        style,
+                    });
                 }
                 _ => {
                     if let Some(shape) = read_shape(item, y) {
-                        sym.graphics.push(SymbolGraphic { item: SymbolItem::Shape(shape), unit, style });
+                        sym.graphics.push(SymbolGraphic {
+                            item: SymbolItem::Shape(shape),
+                            unit,
+                            style,
+                        });
                     }
                 }
             }
@@ -359,10 +472,22 @@ fn read_pin(p: &Sexp, unit: u32, style: u32) -> Pin {
         "non_logic" => PinShape::NonLogic,
         _ => PinShape::Line,
     };
-    let text_size = |name: &str| p.find(name).map(|n| effects(n).0.size.h).unwrap_or(mm(1.27));
+    let text_size = |name: &str| {
+        p.find(name)
+            .map(|n| effects(n).0.size.h)
+            .unwrap_or(mm(1.27))
+    };
     Pin {
-        number: p.find("number").and_then(|n| n.str_arg(0)).unwrap_or_default().into(),
-        name: p.find("name").and_then(|n| n.str_arg(0)).unwrap_or_default().into(),
+        number: p
+            .find("number")
+            .and_then(|n| n.str_arg(0))
+            .unwrap_or_default()
+            .into(),
+        name: p
+            .find("name")
+            .and_then(|n| n.str_arg(0))
+            .unwrap_or_default()
+            .into(),
         kind,
         shape,
         at: YAxis::UP.child(p, "at").unwrap_or_default(),

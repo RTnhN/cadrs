@@ -38,7 +38,12 @@ pub type Bez = [Vec2; 4];
 
 impl SplineData {
     pub fn open(points: Vec<PointId>) -> Self {
-        Self { points, periodic: false, start_tangent: None, end_tangent: None }
+        Self {
+            points,
+            periodic: false,
+            start_tangent: None,
+            end_tangent: None,
+        }
     }
 
     /// The spline's spans for these point positions (see [`spans`]).
@@ -52,7 +57,9 @@ impl SplineData {
 pub fn knots(pts: &[Vec2], periodic: bool) -> Vec<f64> {
     let n = pts.len();
     let spans = if periodic { n } else { n.saturating_sub(1) };
-    let mut h: Vec<f64> = (0..spans).map(|i| pts[i].distance(pts[(i + 1) % n]).sqrt().max(1e-9)).collect();
+    let mut h: Vec<f64> = (0..spans)
+        .map(|i| pts[i].distance(pts[(i + 1) % n]).sqrt().max(1e-9))
+        .collect();
     let total: f64 = h.iter().sum();
     if total > 0.0 {
         for v in &mut h {
@@ -84,7 +91,12 @@ pub fn end_derivatives(pts: &[Vec2]) -> (Option<Vec2>, Option<Vec2>) {
 }
 
 /// The derivative at each point (in the normalized parameter) of the C2 cubic through `pts`.
-pub fn derivatives(pts: &[Vec2], periodic: bool, start: Option<Vec2>, end: Option<Vec2>) -> Vec<Vec2> {
+pub fn derivatives(
+    pts: &[Vec2],
+    periodic: bool,
+    start: Option<Vec2>,
+    end: Option<Vec2>,
+) -> Vec<Vec2> {
     let n = pts.len();
     if n < 2 {
         return vec![Vec2::ZERO; n];
@@ -93,7 +105,13 @@ pub fn derivatives(pts: &[Vec2], periodic: bool, start: Option<Vec2>, end: Optio
     // A (dense) linear system per coordinate: row i is the equation for D_i.
     let mut a = vec![vec![0.0; n]; n];
     let mut rhs = vec![Vec2::ZERO; n];
-    let interior = |i: usize, im: usize, ip: usize, hm: f64, hi: f64, a: &mut Vec<Vec<f64>>, rhs: &mut Vec<Vec2>| {
+    let interior = |i: usize,
+                    im: usize,
+                    ip: usize,
+                    hm: f64,
+                    hi: f64,
+                    a: &mut Vec<Vec<f64>>,
+                    rhs: &mut Vec<Vec2>| {
         a[i][im] += hi;
         a[i][i] += 2.0 * (hm + hi);
         a[i][ip] += hm;
@@ -136,7 +154,9 @@ pub fn derivatives(pts: &[Vec2], periodic: bool, start: Option<Vec2>, end: Optio
     }
     solve(a, rhs).unwrap_or_else(|| {
         // Degenerate (coincident points): chords.
-        (0..n).map(|i| pts[(i + 1).min(n - 1)] - pts[i.saturating_sub(1)]).collect()
+        (0..n)
+            .map(|i| pts[(i + 1).min(n - 1)] - pts[i.saturating_sub(1)])
+            .collect()
     })
 }
 
@@ -171,7 +191,9 @@ fn solve(mut a: Vec<Vec<f64>>, mut b: Vec<Vec2>) -> Option<Vec<Vec2>> {
         }
         x[r] = acc / a[r][r];
     }
-    x.iter().all(|v| v.x.is_finite() && v.y.is_finite()).then_some(x)
+    x.iter()
+        .all(|v| v.x.is_finite() && v.y.is_finite())
+        .then_some(x)
 }
 
 /// The cubic Bézier spans of the spline through `pts` (see the module docs).
@@ -185,21 +207,33 @@ pub fn spans(pts: &[Vec2], periodic: bool, start: Option<Vec2>, end: Option<Vec2
     (0..h.len())
         .map(|i| {
             let j = (i + 1) % n;
-            [pts[i], pts[i] + d[i] * (h[i] / 3.0), pts[j] - d[j] * (h[i] / 3.0), pts[j]]
+            [
+                pts[i],
+                pts[i] + d[i] * (h[i] / 3.0),
+                pts[j] - d[j] * (h[i] / 3.0),
+                pts[j],
+            ]
         })
         .collect()
 }
 
 /// The handle positions of an open spline's ends: where the tangent handles are drawn, and
 /// the derivative a handle at `pos` sets (the inverse).
-pub fn handle_positions(pts: &[Vec2], start: Option<Vec2>, end: Option<Vec2>) -> Option<(Vec2, Vec2)> {
+pub fn handle_positions(
+    pts: &[Vec2],
+    start: Option<Vec2>,
+    end: Option<Vec2>,
+) -> Option<(Vec2, Vec2)> {
     let n = pts.len();
     if n < 2 {
         return None;
     }
     let h = knots(pts, false);
     let d = derivatives(pts, false, start, end);
-    Some((pts[0] + d[0] * (h[0] / 3.0), pts[n - 1] - d[n - 1] * (h[n - 2] / 3.0)))
+    Some((
+        pts[0] + d[0] * (h[0] / 3.0),
+        pts[n - 1] - d[n - 1] * (h[n - 2] / 3.0),
+    ))
 }
 
 /// The derivative a handle dragged to `pos` sets at the start (`at_start`) or end.
@@ -209,7 +243,11 @@ pub fn tangent_for_handle(pts: &[Vec2], at_start: bool, pos: Vec2) -> Option<Vec
         return None;
     }
     let h = knots(pts, false);
-    Some(if at_start { (pos - pts[0]) * (3.0 / h[0]) } else { (pts[n - 1] - pos) * (3.0 / h[n - 2]) })
+    Some(if at_start {
+        (pos - pts[0]) * (3.0 / h[0])
+    } else {
+        (pts[n - 1] - pos) * (3.0 / h[n - 2])
+    })
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -238,7 +276,11 @@ pub fn bez_tangent(b: &Bez, t: f64) -> Vec2 {
     }
     let e = bez_second(b, t);
     if e.length() > 1e-12 {
-        return if t < 0.5 { e.normalize() } else { -e.normalize() };
+        return if t < 0.5 {
+            e.normalize()
+        } else {
+            -e.normalize()
+        };
     }
     (b[3] - b[0]).normalize()
 }
@@ -252,7 +294,12 @@ pub fn bez_sub(b: &Bez, t0: f64, t1: f64) -> Bez {
         let p2 = [l(p1[0], p1[1], c), l(p1[1], p1[2], c)];
         l(p2[0], p2[1], e)
     };
-    [blossom(t0, t0, t0), blossom(t0, t0, t1), blossom(t0, t1, t1), blossom(t1, t1, t1)]
+    [
+        blossom(t0, t0, t0),
+        blossom(t0, t0, t1),
+        blossom(t0, t1, t1),
+        blossom(t1, t1, t1),
+    ]
 }
 
 pub fn bez_reversed(b: &Bez) -> Bez {
@@ -261,8 +308,18 @@ pub fn bez_reversed(b: &Bez) -> Bez {
 
 /// `½∫(x dy − y dx)` along the span (exact: 4-point Gauss–Legendre on a degree-5 polynomial).
 pub fn bez_area_term(b: &Bez) -> f64 {
-    const X: [f64; 4] = [-0.861_136_311_594_052_6, -0.339_981_043_584_856_3, 0.339_981_043_584_856_3, 0.861_136_311_594_052_6];
-    const W: [f64; 4] = [0.347_854_845_137_453_9, 0.652_145_154_862_546_1, 0.652_145_154_862_546_1, 0.347_854_845_137_453_9];
+    const X: [f64; 4] = [
+        -0.861_136_311_594_052_6,
+        -0.339_981_043_584_856_3,
+        0.339_981_043_584_856_3,
+        0.861_136_311_594_052_6,
+    ];
+    const W: [f64; 4] = [
+        0.347_854_845_137_453_9,
+        0.652_145_154_862_546_1,
+        0.652_145_154_862_546_1,
+        0.347_854_845_137_453_9,
+    ];
     let mut s = 0.0;
     for k in 0..4 {
         let t = 0.5 * (X[k] + 1.0);
@@ -273,8 +330,18 @@ pub fn bez_area_term(b: &Bez) -> f64 {
 
 /// The span's length (Gauss–Legendre on 8 sub-intervals).
 pub fn bez_length(b: &Bez) -> f64 {
-    const X: [f64; 4] = [-0.861_136_311_594_052_6, -0.339_981_043_584_856_3, 0.339_981_043_584_856_3, 0.861_136_311_594_052_6];
-    const W: [f64; 4] = [0.347_854_845_137_453_9, 0.652_145_154_862_546_1, 0.652_145_154_862_546_1, 0.347_854_845_137_453_9];
+    const X: [f64; 4] = [
+        -0.861_136_311_594_052_6,
+        -0.339_981_043_584_856_3,
+        0.339_981_043_584_856_3,
+        0.861_136_311_594_052_6,
+    ];
+    const W: [f64; 4] = [
+        0.347_854_845_137_453_9,
+        0.652_145_154_862_546_1,
+        0.652_145_154_862_546_1,
+        0.347_854_845_137_453_9,
+    ];
     let m = 8;
     let mut s = 0.0;
     for i in 0..m {
@@ -293,10 +360,16 @@ pub fn bez_tessellate(b: &Bez, min: usize) -> Vec<Vec2> {
     let turn: f64 = (0..2)
         .map(|i| {
             let (u, v) = (b[i + 1] - b[i], b[i + 2] - b[i + 1]);
-            if u.length() < 1e-12 || v.length() < 1e-12 { 0.0 } else { u.cross(v).atan2(u.dot(v)).abs() }
+            if u.length() < 1e-12 || v.length() < 1e-12 {
+                0.0
+            } else {
+                u.cross(v).atan2(u.dot(v)).abs()
+            }
         })
         .sum();
-    let n = ((turn / (std::f64::consts::PI / 72.0)).ceil() as usize).max(min.max(1)).min(min.max(256));
+    let n = ((turn / (std::f64::consts::PI / 72.0)).ceil() as usize)
+        .max(min.max(1))
+        .min(min.max(256));
     (0..=n).map(|i| bez_point(b, i as f64 / n as f64)).collect()
 }
 
@@ -330,7 +403,10 @@ pub fn bez_nearest(b: &Bez, p: Vec2) -> (f64, f64) {
 
 /// The span's bounding box (of its control points, a superset of the curve's).
 pub fn bez_bounds(b: &Bez) -> (Vec2, Vec2) {
-    (b[0].min(b[1]).min(b[2]).min(b[3]), b[0].max(b[1]).max(b[2]).max(b[3]))
+    (
+        b[0].min(b[1]).min(b[2]).min(b[3]),
+        b[0].max(b[1]).max(b[2]).max(b[3]),
+    )
 }
 
 /// Points along whole spans (each span's points, the joints once).
@@ -371,7 +447,12 @@ mod tests {
 
     #[test]
     fn open_spline_runs_through_its_points_with_c2_joints() {
-        let pts = [Vec2::new(0.0, 0.0), Vec2::new(10.0, 5.0), Vec2::new(20.0, -3.0), Vec2::new(35.0, 2.0)];
+        let pts = [
+            Vec2::new(0.0, 0.0),
+            Vec2::new(10.0, 5.0),
+            Vec2::new(20.0, -3.0),
+            Vec2::new(35.0, 2.0),
+        ];
         let sp = spans(&pts, false, None, None);
         assert_eq!(sp.len(), 3);
         let h = knots(&pts, false);
@@ -403,7 +484,9 @@ mod tests {
     #[test]
     fn periodic_spline_through_a_square_is_near_a_circle() {
         // Eight points on a circle of radius 10: a closed spline close to the circle.
-        let pts: Vec<Vec2> = (0..8).map(|k| Vec2::from_angle(k as f64 * std::f64::consts::TAU / 8.0) * 10.0).collect();
+        let pts: Vec<Vec2> = (0..8)
+            .map(|k| Vec2::from_angle(k as f64 * std::f64::consts::TAU / 8.0) * 10.0)
+            .collect();
         let sp = spans(&pts, true, None, None);
         assert_eq!(sp.len(), 8);
         assert!(close(sp[7][3], pts[0], 1e-12));
@@ -428,15 +511,34 @@ mod tests {
         let sd = Vec2::new(-0.03786702121308697, -0.10850606775282601);
         let ed = Vec2::new(0.03787686553832734, -0.11510923356507317);
         let (hs, he) = handle_positions(&pts, Some(sd), Some(ed)).unwrap();
-        assert!(close(hs, Vec2::new(0.003309527329263405, 0.07184859857879489), 1e-9), "{hs:?}");
-        assert!(close(he, Vec2::new(0.0033128087710101997, -0.0026898351938381302), 1e-9), "{he:?}");
+        assert!(
+            close(
+                hs,
+                Vec2::new(0.003309527329263405, 0.07184859857879489),
+                1e-9
+            ),
+            "{hs:?}"
+        );
+        assert!(
+            close(
+                he,
+                Vec2::new(0.0033128087710101997, -0.0026898351938381302),
+                1e-9
+            ),
+            "{he:?}"
+        );
         let back = tangent_for_handle(&pts, true, hs).unwrap();
         assert!(close(back, sd, 1e-12));
     }
 
     #[test]
     fn sub_spans_and_nearest() {
-        let b = [Vec2::new(0.0, 0.0), Vec2::new(1.0, 2.0), Vec2::new(3.0, 2.0), Vec2::new(4.0, 0.0)];
+        let b = [
+            Vec2::new(0.0, 0.0),
+            Vec2::new(1.0, 2.0),
+            Vec2::new(3.0, 2.0),
+            Vec2::new(4.0, 0.0),
+        ];
         let s = bez_sub(&b, 0.25, 0.75);
         assert!(close(s[0], bez_point(&b, 0.25), 1e-12));
         assert!(close(s[3], bez_point(&b, 0.75), 1e-12));
@@ -461,27 +563,55 @@ mod tests {
         use crate::SketchOp;
         // A closed spline on its own is a region, with the spline's exact area.
         let mut s = Sketch::new();
-        let pts: Vec<Vec2> = (0..8).map(|k| Vec2::from_angle(k as f64 * std::f64::consts::TAU / 8.0) * 10.0).collect();
-        SketchOp::AddSpline { points: pts.clone(), periodic: true, start_tangent: None, end_tangent: None, construction: false }
-            .apply(&mut s)
-            .unwrap();
-        let exact: f64 = spans(&pts, true, None, None).iter().map(bez_area_term).sum();
+        let pts: Vec<Vec2> = (0..8)
+            .map(|k| Vec2::from_angle(k as f64 * std::f64::consts::TAU / 8.0) * 10.0)
+            .collect();
+        SketchOp::AddSpline {
+            points: pts.clone(),
+            periodic: true,
+            start_tangent: None,
+            end_tangent: None,
+            construction: false,
+        }
+        .apply(&mut s)
+        .unwrap();
+        let exact: f64 = spans(&pts, true, None, None)
+            .iter()
+            .map(bez_area_term)
+            .sum();
         let r = crate::region::regions(&s);
         assert_eq!(r.len(), 1);
-        assert!((r[0].area() - exact).abs() < 1e-9, "{} {exact}", r[0].area());
+        assert!(
+            (r[0].area() - exact).abs() < 1e-9,
+            "{} {exact}",
+            r[0].area()
+        );
         assert_eq!(s.points.len(), 8);
 
         // An open spline closed by a line; a line across it splits the region in two.
         let mut s = Sketch::new();
-        let pts = [Vec2::new(0.0, 0.0), Vec2::new(10.0, 8.0), Vec2::new(20.0, 0.0)];
-        SketchOp::AddSpline { points: pts.to_vec(), periodic: false, start_tangent: None, end_tangent: None, construction: false }
-            .apply(&mut s)
-            .unwrap();
+        let pts = [
+            Vec2::new(0.0, 0.0),
+            Vec2::new(10.0, 8.0),
+            Vec2::new(20.0, 0.0),
+        ];
+        SketchOp::AddSpline {
+            points: pts.to_vec(),
+            periodic: false,
+            start_tangent: None,
+            end_tangent: None,
+            construction: false,
+        }
+        .apply(&mut s)
+        .unwrap();
         s.add_line(Vec2::new(20.0, 0.0), Vec2::new(0.0, 0.0));
         let whole = crate::region::regions(&s);
         assert_eq!(whole.len(), 1);
         let a = whole[0].area();
-        let exact: f64 = spans(&pts, false, None, None).iter().map(bez_area_term).sum::<f64>();
+        let exact: f64 = spans(&pts, false, None, None)
+            .iter()
+            .map(bez_area_term)
+            .sum::<f64>();
         assert!((a - exact.abs()).abs() < 1e-9, "{a} {exact}");
         s.add_line(Vec2::new(5.0, -1.0), Vec2::new(5.0, 20.0));
         let split = crate::region::regions(&s);
@@ -490,7 +620,12 @@ mod tests {
         assert!((sum - a).abs() < 1e-6, "{sum} {a}");
 
         // Removing the spline removes its points (the ends the line shares stay).
-        let sp = s.curves.iter().find(|(_, c)| matches!(c.kind, crate::CurveKind::Spline { .. })).unwrap().0;
+        let sp = s
+            .curves
+            .iter()
+            .find(|(_, c)| matches!(c.kind, crate::CurveKind::Spline { .. }))
+            .unwrap()
+            .0;
         s.remove_curve(sp);
         assert!(s.splines.is_empty());
         assert!(s.point_at(Vec2::new(10.0, 8.0), 1e-9).is_none());
@@ -502,7 +637,11 @@ mod tests {
         use crate::SketchOp;
         let mut s = Sketch::new();
         SketchOp::AddSpline {
-            points: vec![Vec2::new(0.0, 0.0), Vec2::new(10.0, 8.0), Vec2::new(20.0, 0.0)],
+            points: vec![
+                Vec2::new(0.0, 0.0),
+                Vec2::new(10.0, 8.0),
+                Vec2::new(20.0, 0.0),
+            ],
             periodic: false,
             start_tangent: Some(Vec2::new(0.0, 30.0)),
             end_tangent: None,
@@ -514,11 +653,23 @@ mod tests {
         let back: Sketch = ron::from_str(&text).unwrap();
         assert_eq!(back, s);
         let mid = s.point_at(Vec2::new(10.0, 8.0), 1e-9).unwrap();
-        SketchOp::MovePoints { moves: vec![(mid, Vec2::new(10.0, 12.0))] }.apply(&mut s).unwrap();
+        SketchOp::MovePoints {
+            moves: vec![(mid, Vec2::new(10.0, 12.0))],
+        }
+        .apply(&mut s)
+        .unwrap();
         let id = s.splines.keys().next().unwrap();
         let sp = s.spline_spans(id).unwrap();
         assert!(sp[0][3].distance(Vec2::new(10.0, 12.0)) < 1e-9);
-        let d = bez_deriv(&sp[0], 0.0) / knots(&s.splines[id].points.iter().map(|p| s.pos(*p)).collect::<Vec<_>>(), false)[0];
+        let d = bez_deriv(&sp[0], 0.0)
+            / knots(
+                &s.splines[id]
+                    .points
+                    .iter()
+                    .map(|p| s.pos(*p))
+                    .collect::<Vec<_>>(),
+                false,
+            )[0];
         assert!(d.distance(Vec2::new(0.0, 30.0)) < 1e-9);
     }
 }

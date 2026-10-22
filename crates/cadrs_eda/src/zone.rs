@@ -34,19 +34,46 @@ pub fn add_zone(board: &mut Board, net: &str, layer: Layer, outline: Vec<Pt>) ->
 }
 
 /// Adds a keep-out (a rule area) on `layers` forbidding what `rules` says; returns its id.
-pub fn add_keepout(board: &mut Board, layers: LayerSet, outline: Vec<Pt>, rules: crate::board::Keepout) -> Uuid {
+pub fn add_keepout(
+    board: &mut Board,
+    layers: LayerSet,
+    outline: Vec<Pt>,
+    rules: crate::board::Keepout,
+) -> Uuid {
     let id = Uuid::new_v4();
-    board.zones.push(Zone { id, name: String::new(), net: String::new(), layers, priority: 0, outline: vec![outline], fill: ZoneFill::default(), keepout: Some(rules), locked: false, filled: vec![] });
+    board.zones.push(Zone {
+        id,
+        name: String::new(),
+        net: String::new(),
+        layers,
+        priority: 0,
+        outline: vec![outline],
+        fill: ZoneFill::default(),
+        keepout: Some(rules),
+        locked: false,
+        filled: vec![],
+    });
     id
 }
 
 /// A region's rings as polygons with holes (holes go to the outer ring holding them).
 pub fn to_polygons(r: &Region) -> Vec<Polygon> {
-    let mut outers: Vec<Polygon> = r.iter().filter(|x| poly::ring_area(x) > 0.0).map(|x| Polygon { outer: x.clone(), holes: vec![] }).collect();
+    let mut outers: Vec<Polygon> = r
+        .iter()
+        .filter(|x| poly::ring_area(x) > 0.0)
+        .map(|x| Polygon {
+            outer: x.clone(),
+            holes: vec![],
+        })
+        .collect();
     for h in r.iter().filter(|x| poly::ring_area(x) < 0.0) {
         let inside = |p: &Polygon| poly::contains(&vec![p.outer.clone()], h[0]);
         // The smallest outer ring around the hole.
-        if let Some(o) = outers.iter_mut().filter(|o| inside(o)).min_by(|a, b| poly::ring_area(&a.outer).total_cmp(&poly::ring_area(&b.outer))) {
+        if let Some(o) = outers
+            .iter_mut()
+            .filter(|o| inside(o))
+            .min_by(|a, b| poly::ring_area(&a.outer).total_cmp(&poly::ring_area(&b.outer)))
+        {
             o.holes.push(h.clone());
         }
     }
@@ -69,7 +96,11 @@ pub fn fill_zone(board: &Board, zone: &Zone) -> Vec<(Layer, Vec<Polygon>)> {
     }
     // Inside the board, clear of its edge; a board with no outline yet doesn't clip.
     let region = crate::outline::board_region(board);
-    let board_area = if region.is_empty() { None } else { Some(poly::inflate(&region, -board.rules.copper_edge_clearance)) };
+    let board_area = if region.is_empty() {
+        None
+    } else {
+        Some(poly::inflate(&region, -board.rules.copper_edge_clearance))
+    };
     let clip = |r: &Region| match &board_area {
         Some(b) => poly::intersection(r, b),
         None => r.clone(),
@@ -103,12 +134,19 @@ pub fn fill_zone(board: &Board, zone: &Zone) -> Vec<(Layer, Vec<Polygon>)> {
             }
             // Holes clear everything on every layer.
             if let Some(h) = &c.hole {
-                cut.push(poly::inflate(h, board.rules.hole_clearance.max(zone.fill.clearance) + poly::MAX_ERROR));
+                cut.push(poly::inflate(
+                    h,
+                    board.rules.hole_clearance.max(zone.fill.clearance) + poly::MAX_ERROR,
+                ));
             }
             let Some(shape) = c.on(layer) else { continue };
             let same = !zone.net.is_empty() && c.net == zone.net;
             // Offsets are drawn with chords inside the true curve: clear by one chord error more.
-            let clearance = zone.fill.clearance.max(board.rules.clearance(&zone.net, &c.net)) + poly::MAX_ERROR;
+            let clearance = zone
+                .fill
+                .clearance
+                .max(board.rules.clearance(&zone.net, &c.net))
+                + poly::MAX_ERROR;
             match (&c.item, same) {
                 (Item::Pad(fid, pi), true) => {
                     let f = board.footprints.iter().find(|f| f.id == *fid).unwrap();
@@ -119,17 +157,31 @@ pub fn fill_zone(board: &Board, zone: &Zone) -> Vec<(Layer, Vec<Polygon>)> {
                     };
                     match mode {
                         ZoneConnection::Solid => {}
-                        ZoneConnection::None | ZoneConnection::Inherit => cut.push(poly::inflate(shape, clearance)),
+                        ZoneConnection::None | ZoneConnection::Inherit => {
+                            cut.push(poly::inflate(shape, clearance))
+                        }
                         ZoneConnection::Thermal => {
                             let gap = pad.rules.thermal_gap.unwrap_or(zone.fill.thermal_gap);
-                            let spoke = pad.rules.thermal_spoke.unwrap_or(zone.fill.thermal_spoke).max(zone.fill.min_width);
+                            let spoke = pad
+                                .rules
+                                .thermal_spoke
+                                .unwrap_or(zone.fill.thermal_spoke)
+                                .max(zone.fill.min_width);
                             cut.push(poly::inflate(shape, gap));
                             let center = f.placement.apply(pad.at);
                             let reach = pad.size.w.max(pad.size.h) / 2 + gap + zone.fill.min_width;
-                            let mut s = thermal_spokes(center, f.placement.apply_angle(pad.angle), reach, spoke);
+                            let mut s = thermal_spokes(
+                                center,
+                                f.placement.apply_angle(pad.angle),
+                                reach,
+                                spoke,
+                            );
                             // Spokes stop short of the hole.
                             if let Some(h) = &c.hole {
-                                s = poly::difference(&s, &poly::inflate(h, board.rules.hole_clearance.min(gap)));
+                                s = poly::difference(
+                                    &s,
+                                    &poly::inflate(h, board.rules.hole_clearance.min(gap)),
+                                );
                             }
                             spokes.push(s);
                         }
@@ -147,7 +199,17 @@ pub fn fill_zone(board: &Board, zone: &Zone) -> Vec<(Layer, Vec<Polygon>)> {
             let others: Vec<Region> = items
                 .iter()
                 .filter(|c| c.net != zone.net)
-                .filter_map(|c| c.on(layer).map(|r| poly::inflate(r, zone.fill.clearance.max(board.rules.clearance(&zone.net, &c.net)) + poly::MAX_ERROR)))
+                .filter_map(|c| {
+                    c.on(layer).map(|r| {
+                        poly::inflate(
+                            r,
+                            zone.fill
+                                .clearance
+                                .max(board.rules.clearance(&zone.net, &c.net))
+                                + poly::MAX_ERROR,
+                        )
+                    })
+                })
                 .collect();
             s = poly::difference(&s, &poly::union_all(&others));
             area = poly::union_all(&[area, s]);
@@ -158,7 +220,13 @@ pub fn fill_zone(board: &Board, zone: &Zone) -> Vec<(Layer, Vec<Polygon>)> {
         let mut polys = to_polygons(&area);
         // Islands go only when the net has copper here to keep: a zone on no net, or on a net with
         // nothing on this layer yet, keeps its whole pour (else it would never show filled).
-        let mine: Vec<&Region> = items.iter().filter(|c| !zone.net.is_empty() && c.net == zone.net && !matches!(c.item, Item::Zone(..))).filter_map(|c| c.on(layer)).collect();
+        let mine: Vec<&Region> = items
+            .iter()
+            .filter(|c| {
+                !zone.net.is_empty() && c.net == zone.net && !matches!(c.item, Item::Zone(..))
+            })
+            .filter_map(|c| c.on(layer))
+            .collect();
         if zone.fill.remove_islands && !mine.is_empty() {
             let touching: Vec<Polygon> = polys
                 .iter()
@@ -198,12 +266,23 @@ pub fn fill_all(board: &mut Board) {
 pub fn adopt_nets(board: &mut Board) -> bool {
     let items = copper::items(board);
     let mut changed = false;
-    for z in board.zones.iter_mut().filter(|z| z.keepout.is_none() && z.net.is_empty()) {
+    for z in board
+        .zones
+        .iter_mut()
+        .filter(|z| z.keepout.is_none() && z.net.is_empty())
+    {
         let outline: Region = z.outline.clone();
         let net = items
             .iter()
-            .filter(|c| !c.net.is_empty() && matches!(c.item, Item::Pad(..) | Item::Track(_) | Item::Via(_)))
-            .find(|c| z.layers.copper().iter().any(|l| c.on(l).is_some_and(|r| poly::overlaps(r, &outline))))
+            .filter(|c| {
+                !c.net.is_empty() && matches!(c.item, Item::Pad(..) | Item::Track(_) | Item::Via(_))
+            })
+            .find(|c| {
+                z.layers
+                    .copper()
+                    .iter()
+                    .any(|l| c.on(l).is_some_and(|r| poly::overlaps(r, &outline)))
+            })
             .map(|c| c.net.clone());
         if let Some(n) = net {
             z.net = n;
@@ -224,7 +303,9 @@ pub fn filled_area(z: &Zone, layer: Layer) -> f64 {
         .iter()
         .filter(|(l, _)| *l == layer)
         .flat_map(|(_, p)| p)
-        .map(|pg| poly::ring_area(&pg.outer) + pg.holes.iter().map(|h| poly::ring_area(h)).sum::<f64>())
+        .map(|pg| {
+            poly::ring_area(&pg.outer) + pg.holes.iter().map(|h| poly::ring_area(h)).sum::<f64>()
+        })
         .sum::<f64>()
         / 1e12
 }
@@ -245,10 +326,24 @@ pub fn pour_keepouts(board: &Board, layer: Layer) -> Vec<Region> {
             .collect()
     };
     let forbids = |z: &Zone| z.keepout.is_some_and(|k| k.copper_pour);
-    let mut out: Vec<Region> = board.zones.iter().filter(|z| forbids(z) && z.layers.contains(layer)).map(|z| ring_region(&z.outline)).collect();
+    let mut out: Vec<Region> = board
+        .zones
+        .iter()
+        .filter(|z| forbids(z) && z.layers.contains(layer))
+        .map(|z| ring_region(&z.outline))
+        .collect();
     for f in &board.footprints {
-        for z in f.footprint.zones.iter().filter(|z| forbids(z) && f.placement.layers(z.layers).contains(layer)) {
-            let placed: Vec<Vec<crate::units::Pt>> = z.outline.iter().map(|r| r.iter().map(|p| f.placement.apply(*p)).collect()).collect();
+        for z in f
+            .footprint
+            .zones
+            .iter()
+            .filter(|z| forbids(z) && f.placement.layers(z.layers).contains(layer))
+        {
+            let placed: Vec<Vec<crate::units::Pt>> = z
+                .outline
+                .iter()
+                .map(|r| r.iter().map(|p| f.placement.apply(*p)).collect())
+                .collect();
             out.push(ring_region(&placed));
         }
     }

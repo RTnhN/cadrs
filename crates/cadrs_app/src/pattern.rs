@@ -22,7 +22,6 @@
 //! line, a connector's Z, the origin); a path (edges, sketch curves, a whole sketch); a mirror
 //! plane (a default or Plane feature, a flat face, a connector's XY plane).
 
-use cadrs_ui::ShortcutKey;
 use bevy::input::ButtonState;
 use bevy::input::keyboard::KeyboardInput;
 use bevy::prelude::*;
@@ -32,6 +31,7 @@ use cadrs_core::mate::{ConnectorOrigin, ConnectorRef, MateConnectorFeature};
 use cadrs_core::pattern::{MirrorFeature, MirrorPlane, PatternFeature, PatternKind, PatternType};
 use cadrs_core::{Feature, FeatureId, FeatureKind, VertexRef};
 use cadrs_sketch::{PlaneFrame, PlaneRef};
+use cadrs_ui::ShortcutKey;
 
 use crate::applied::{AppliedField, AppliedKind, AppliedSession, entity_of};
 use crate::parts::PartCache;
@@ -44,7 +44,16 @@ impl Plugin for PatternPlugin {
     fn build(&self, app: &mut App) {
         app.insert_resource(MateConnectorsShown(true)).add_systems(
             Update,
-            (connector_key, sync_connectors_shown, draw_connectors, draw_instance_dots, draw_connector_hover, draw_connector_fields, draw_skip_box, draw_direction_arrows)
+            (
+                connector_key,
+                sync_connectors_shown,
+                draw_connectors,
+                draw_instance_dots,
+                draw_connector_hover,
+                draw_connector_fields,
+                draw_skip_box,
+                draw_direction_arrows,
+            )
                 .after(crate::parts::PartsSet)
                 .run_if(in_state(AppState::Document)),
         );
@@ -57,7 +66,9 @@ pub struct MateConnectorsShown(pub bool);
 
 /// True if `f` is a Mate connector feature.
 pub fn is_connector(features: &[Feature], f: FeatureId) -> bool {
-    features.iter().any(|x| x.id == f && matches!(x.kind, FeatureKind::MateConnector(_)))
+    features
+        .iter()
+        .any(|x| x.id == f && matches!(x.kind, FeatureKind::MateConnector(_)))
 }
 
 fn is_sketch(features: &[Feature], f: FeatureId) -> bool {
@@ -81,8 +92,12 @@ pub fn connector_pick(c: &ConnectorRef) -> Option<Pick> {
             ConnectorOrigin::Face(f) => Some(Pick::Face(f.part, f.face)),
             ConnectorOrigin::Edge(e) => Some(Pick::Edge(e.part, e.edge)),
             ConnectorOrigin::Vertex(v) => Some(Pick::Vertex(v.part, v.vertex)),
-            ConnectorOrigin::SketchPoint { sketch, point } => Some(Pick::SketchPoint(*sketch, *point)),
-            ConnectorOrigin::SketchCurve { sketch, curve } => Some(Pick::SketchCurve(*sketch, *curve)),
+            ConnectorOrigin::SketchPoint { sketch, point } => {
+                Some(Pick::SketchPoint(*sketch, *point))
+            }
+            ConnectorOrigin::SketchCurve { sketch, curve } => {
+                Some(Pick::SketchCurve(*sketch, *curve))
+            }
         },
     }
 }
@@ -98,7 +113,11 @@ pub fn implicit_origin(cache: &PartCache, pick: Pick) -> Option<ConnectorOrigin>
         },
         Pick::Vertex(part, vertex) => {
             let point = cache.part(part)?.solid.vertex(&vertex)?.point;
-            ConnectorOrigin::Vertex(VertexRef { part, vertex, point })
+            ConnectorOrigin::Vertex(VertexRef {
+                part,
+                vertex,
+                point,
+            })
         }
         Pick::SketchPoint(sketch, point) => ConnectorOrigin::SketchPoint { sketch, point },
         // P3B.7 (A22.8): a sketch circle's centre, a line's midpoint.
@@ -158,7 +177,13 @@ fn toggle_seed(
         PatternType::Feature => {
             let f = match pick {
                 Pick::Feature(f) if features.iter().any(|x| x.id == f && x.is_part_feature()) => f,
-                Pick::Face(_, face) if features.iter().any(|x| x.id.0 == face.op && x.is_part_feature()) => FeatureId(face.op),
+                Pick::Face(_, face)
+                    if features
+                        .iter()
+                        .any(|x| x.id.0 == face.op && x.is_part_feature()) =>
+                {
+                    FeatureId(face.op)
+                }
                 _ => return false,
             };
             toggle(feats, f);
@@ -174,10 +199,16 @@ fn toggle_seed(
 }
 
 /// A direction for a pick (PS23.1).
-pub(crate) fn direction_of(features: &[Feature], cache: &PartCache, pick: Pick) -> Option<DirectionRef> {
+pub(crate) fn direction_of(
+    features: &[Feature],
+    cache: &PartCache,
+    pick: Pick,
+) -> Option<DirectionRef> {
     match pick {
         Pick::Plane(_) => plane_of(features, pick).map(DirectionRef::PlaneNormal),
-        Pick::Feature(f) if is_connector(features, f) => Some(DirectionRef::Connector(ConnectorRef::Feature(f))),
+        Pick::Feature(f) if is_connector(features, f) => {
+            Some(DirectionRef::Connector(ConnectorRef::Feature(f)))
+        }
         Pick::Feature(_) => plane_of(features, pick).map(DirectionRef::PlaneNormal),
         Pick::Face(..) => face_ref(cache, pick).map(DirectionRef::FaceNormal),
         Pick::Edge(..) => match entity_of(cache, pick)? {
@@ -192,8 +223,12 @@ pub(crate) fn direction_of(features: &[Feature], cache: &PartCache, pick: Pick) 
 /// An axis for a pick (PS24.1).
 pub(crate) fn axis_of(features: &[Feature], cache: &PartCache, pick: Pick) -> Option<AxisRef> {
     match pick {
-        Pick::Feature(f) if is_connector(features, f) => Some(AxisRef::Connector(ConnectorRef::Feature(f))),
-        Pick::Origin => Some(AxisRef::Connector(ConnectorRef::Implicit(ConnectorOrigin::Origin))),
+        Pick::Feature(f) if is_connector(features, f) => {
+            Some(AxisRef::Connector(ConnectorRef::Feature(f)))
+        }
+        Pick::Origin => Some(AxisRef::Connector(ConnectorRef::Implicit(
+            ConnectorOrigin::Origin,
+        ))),
         Pick::Face(..) => face_ref(cache, pick).map(AxisRef::Face),
         Pick::Edge(..) => match entity_of(cache, pick)? {
             cadrs_core::applied::EdgeOrFace::Edge(e) => Some(AxisRef::Edge(e)),
@@ -208,7 +243,9 @@ pub(crate) fn axis_of(features: &[Feature], cache: &PartCache, pick: Pick) -> Op
 pub fn mirror_plane_of(features: &[Feature], cache: &PartCache, pick: Pick) -> Option<MirrorPlane> {
     match pick {
         Pick::Plane(_) => plane_of(features, pick).map(MirrorPlane::Plane),
-        Pick::Feature(f) if is_connector(features, f) => Some(MirrorPlane::Connector(ConnectorRef::Feature(f))),
+        Pick::Feature(f) if is_connector(features, f) => {
+            Some(MirrorPlane::Connector(ConnectorRef::Feature(f)))
+        }
         Pick::Feature(_) => plane_of(features, pick).map(MirrorPlane::Plane),
         Pick::Face(..) => face_ref(cache, pick).map(MirrorPlane::Face),
         _ => None,
@@ -217,16 +254,25 @@ pub fn mirror_plane_of(features: &[Feature], cache: &PartCache, pick: Pick) -> O
 
 /// A new feature's name, parameters and first field, from what was selected when its button
 /// was clicked.
-pub fn initial(world: &World, kind: AppliedKind, picked: &[Pick]) -> Option<(&'static str, FeatureKind, AppliedField)> {
+pub fn initial(
+    world: &World,
+    kind: AppliedKind,
+    picked: &[Pick],
+) -> Option<(&'static str, FeatureKind, AppliedField)> {
     let doc = world.get_resource::<ActiveDocument>()?;
     let features = doc.active_element()?.features();
     let cache = world.resource::<PartCache>();
     // What the selection holds: parts, features or faces.
-    let seeds = |parts: &mut Vec<cadrs_core::PartId>, feats: &mut Vec<FeatureId>, faces: &mut Vec<FaceRef>| -> PatternType {
+    let seeds = |parts: &mut Vec<cadrs_core::PartId>,
+                 feats: &mut Vec<FeatureId>,
+                 faces: &mut Vec<FaceRef>|
+     -> PatternType {
         let non_sketch: Vec<FeatureId> = picked
             .iter()
             .filter_map(|p| match p {
-                Pick::Feature(f) if features.iter().any(|x| x.id == *f && x.is_part_feature()) => Some(*f),
+                Pick::Feature(f) if features.iter().any(|x| x.id == *f && x.is_part_feature()) => {
+                    Some(*f)
+                }
                 _ => None,
             })
             .collect();
@@ -262,16 +308,29 @@ pub fn initial(world: &World, kind: AppliedKind, picked: &[Pick]) -> Option<(&'s
         AppliedKind::Mirror => {
             let mut x = MirrorFeature::default();
             x.mirror_type = seeds(&mut x.parts, &mut x.features, &mut x.faces);
-            ("Mirror", FeatureKind::Mirror(x), AppliedField::PatternEntities)
+            (
+                "Mirror",
+                FeatureKind::Mirror(x),
+                AppliedField::PatternEntities,
+            )
         }
         AppliedKind::MateConnector => {
             let origin = picked.iter().find_map(|p| implicit_origin(cache, *p));
-            let owner = picked.iter().find(|p| implicit_origin(cache, **p).is_some()).and_then(|p| p.part());
+            let owner = picked
+                .iter()
+                .find(|p| implicit_origin(cache, **p).is_some())
+                .and_then(|p| p.part());
             let field = AppliedField::ConnectorOrigin;
             // A new connector: Move off, Owner entity on (filled from the origin's part, A22.5,
             // P3.11).
             let owner = owner.or_else(|| origin.and_then(|o| o.part()));
-            let x = MateConnectorFeature { origin, move_on: false, owner_on: true, owner, ..MateConnectorFeature::default() };
+            let x = MateConnectorFeature {
+                origin,
+                move_on: false,
+                owner_on: true,
+                owner,
+                ..MateConnectorFeature::default()
+            };
             ("Mate connector", FeatureKind::MateConnector(x), field)
         }
         _ => return None,
@@ -297,20 +356,43 @@ pub fn pick(world: &mut World, kind: &mut FeatureKind, field: AppliedField, pick
         return true;
     }
     match (kind, field) {
-        (FeatureKind::Pattern(x), AppliedField::PatternEntities) => {
-            toggle_seed(&features, cache, x.pattern_type, &mut x.parts, &mut x.features, &mut x.faces, pick)
-        }
-        (FeatureKind::Mirror(x), AppliedField::PatternEntities) => {
-            toggle_seed(&features, cache, x.mirror_type, &mut x.parts, &mut x.features, &mut x.faces, pick)
-        }
-        (FeatureKind::Pattern(x), AppliedField::PatternDirection | AppliedField::PatternDirection2) => {
-            let Some(d) = direction_of(&features, cache, pick) else { return false };
-            let slot = if field == AppliedField::PatternDirection { &mut x.first.direction } else { &mut x.second.direction };
+        (FeatureKind::Pattern(x), AppliedField::PatternEntities) => toggle_seed(
+            &features,
+            cache,
+            x.pattern_type,
+            &mut x.parts,
+            &mut x.features,
+            &mut x.faces,
+            pick,
+        ),
+        (FeatureKind::Mirror(x), AppliedField::PatternEntities) => toggle_seed(
+            &features,
+            cache,
+            x.mirror_type,
+            &mut x.parts,
+            &mut x.features,
+            &mut x.faces,
+            pick,
+        ),
+        (
+            FeatureKind::Pattern(x),
+            AppliedField::PatternDirection | AppliedField::PatternDirection2,
+        ) => {
+            let Some(d) = direction_of(&features, cache, pick) else {
+                return false;
+            };
+            let slot = if field == AppliedField::PatternDirection {
+                &mut x.first.direction
+            } else {
+                &mut x.second.direction
+            };
             *slot = if *slot == Some(d) { None } else { Some(d) };
             true
         }
         (FeatureKind::Pattern(x), AppliedField::PatternAxis) => {
-            let Some(a) = axis_of(&features, cache, pick) else { return false };
+            let Some(a) = axis_of(&features, cache, pick) else {
+                return false;
+            };
             x.axis = if x.axis == Some(a) { None } else { Some(a) };
             true
         }
@@ -322,7 +404,13 @@ pub fn pick(world: &mut World, kind: &mut FeatureKind, field: AppliedField, pick
                 },
                 Pick::SketchCurve(sketch, curve) => PathRef::SketchCurve { sketch, curve },
                 Pick::Feature(f) if is_sketch(&features, f) => PathRef::Sketch(f),
-                Pick::Feature(f) if features.iter().any(|y| y.id == f && matches!(y.kind, FeatureKind::Helix(_))) => PathRef::Curve(f),
+                Pick::Feature(f)
+                    if features
+                        .iter()
+                        .any(|y| y.id == f && matches!(y.kind, FeatureKind::Helix(_))) =>
+                {
+                    PathRef::Curve(f)
+                }
                 _ => return false,
             };
             match x.path.iter().position(|q| match (q, &p) {
@@ -344,7 +432,9 @@ pub fn pick(world: &mut World, kind: &mut FeatureKind, field: AppliedField, pick
             None => false,
         },
         (FeatureKind::Mirror(x), AppliedField::MirrorPlane) => {
-            let Some(p) = mirror_plane_of(&features, cache, pick) else { return false };
+            let Some(p) = mirror_plane_of(&features, cache, pick) else {
+                return false;
+            };
             x.plane = if x.plane == Some(p) { None } else { Some(p) };
             true
         }
@@ -356,7 +446,9 @@ pub fn pick(world: &mut World, kind: &mut FeatureKind, field: AppliedField, pick
             None => false,
         },
         (FeatureKind::MateConnector(x), AppliedField::ConnectorOrigin) => {
-            let Some(o) = implicit_origin(cache, pick) else { return false };
+            let Some(o) = implicit_origin(cache, pick) else {
+                return false;
+            };
             x.origin = if x.origin == Some(o) { None } else { Some(o) };
             x.at = None;
             // The owner follows the first pick (A22.5, P3.11: check it, and change it if needed).
@@ -367,21 +459,43 @@ pub fn pick(world: &mut World, kind: &mut FeatureKind, field: AppliedField, pick
         }
         // P3.11 (P3.8 judge): the Alignment's direction.
         (FeatureKind::MateConnector(x), AppliedField::ConnectorAlignment) => {
-            let Some(d) = direction_of(&features, cache, pick) else { return false };
-            x.alignment = if x.alignment == Some(d) { None } else { Some(d) };
+            let Some(d) = direction_of(&features, cache, pick) else {
+                return false;
+            };
+            x.alignment = if x.alignment == Some(d) {
+                None
+            } else {
+                Some(d)
+            };
             true
         }
         // P3B.7 (A22.4, A22.6, A22.5): the Between entity, the Realign axes, the Owner part.
         (FeatureKind::MateConnector(x), AppliedField::ConnectorBetween) => {
-            let Some(o) = implicit_origin(cache, pick) else { return false };
+            let Some(o) = implicit_origin(cache, pick) else {
+                return false;
+            };
             x.between = if x.between == Some(o) { None } else { Some(o) };
             true
         }
-        (FeatureKind::MateConnector(x), f @ (AppliedField::ConnectorPrimary | AppliedField::ConnectorSecondary)) => {
-            let Some(o) = implicit_origin(cache, pick).filter(|o| !matches!(o, ConnectorOrigin::Origin | ConnectorOrigin::Vertex(_) | ConnectorOrigin::SketchPoint { .. })) else {
+        (
+            FeatureKind::MateConnector(x),
+            f @ (AppliedField::ConnectorPrimary | AppliedField::ConnectorSecondary),
+        ) => {
+            let Some(o) = implicit_origin(cache, pick).filter(|o| {
+                !matches!(
+                    o,
+                    ConnectorOrigin::Origin
+                        | ConnectorOrigin::Vertex(_)
+                        | ConnectorOrigin::SketchPoint { .. }
+                )
+            }) else {
                 return false;
             };
-            let slot = if f == AppliedField::ConnectorPrimary { &mut x.primary_axis } else { &mut x.secondary_axis };
+            let slot = if f == AppliedField::ConnectorPrimary {
+                &mut x.primary_axis
+            } else {
+                &mut x.secondary_axis
+            };
             *slot = if *slot == Some(o) { None } else { Some(o) };
             true
         }
@@ -393,10 +507,18 @@ pub fn pick(world: &mut World, kind: &mut FeatureKind, field: AppliedField, pick
             None => false,
         },
         (FeatureKind::Hole(x), AppliedField::HoleConnectors) => {
-            let Some(c) = connector_of(&features, cache, pick) else { return false };
+            let Some(c) = connector_of(&features, cache, pick) else {
+                return false;
+            };
             let same = |a: &ConnectorRef| match (a, &c) {
-                (ConnectorRef::Implicit(ConnectorOrigin::Face(p)), ConnectorRef::Implicit(ConnectorOrigin::Face(q))) => p.face == q.face,
-                (ConnectorRef::Implicit(ConnectorOrigin::Edge(p)), ConnectorRef::Implicit(ConnectorOrigin::Edge(q))) => p.edge == q.edge,
+                (
+                    ConnectorRef::Implicit(ConnectorOrigin::Face(p)),
+                    ConnectorRef::Implicit(ConnectorOrigin::Face(q)),
+                ) => p.face == q.face,
+                (
+                    ConnectorRef::Implicit(ConnectorOrigin::Edge(p)),
+                    ConnectorRef::Implicit(ConnectorOrigin::Edge(q)),
+                ) => p.edge == q.edge,
                 (a, b) => a == b,
             };
             match x.connectors.iter().position(same) {
@@ -414,8 +536,20 @@ pub fn pick(world: &mut World, kind: &mut FeatureKind, field: AppliedField, pick
 /// What these features' fields refer to, shown selected in the view while the dialog is open.
 pub fn references(kind: &FeatureKind, cache: &PartCache) -> Vec<Pick> {
     let mut out = Vec::new();
-    let face = |f: &FaceRef| cache.parts.iter().find(|p| p.solid.face(&f.face).is_some()).map(|p| Pick::Face(p.id, f.face));
-    let edge = |e: &cadrs_core::EdgeRef| cache.parts.iter().find(|p| p.solid.edge(&e.edge).is_some()).map(|p| Pick::Edge(p.id, e.edge));
+    let face = |f: &FaceRef| {
+        cache
+            .parts
+            .iter()
+            .find(|p| p.solid.face(&f.face).is_some())
+            .map(|p| Pick::Face(p.id, f.face))
+    };
+    let edge = |e: &cadrs_core::EdgeRef| {
+        cache
+            .parts
+            .iter()
+            .find(|p| p.solid.edge(&e.edge).is_some())
+            .map(|p| Pick::Edge(p.id, e.edge))
+    };
     let direction = |d: &DirectionRef| match d {
         DirectionRef::Edge(e) => edge(e),
         DirectionRef::FaceNormal(f) => face(f),
@@ -438,14 +572,18 @@ pub fn references(kind: &FeatureKind, cache: &PartCache) -> Vec<Pick> {
                     }
                 }
                 PatternKind::Circular => out.extend(x.axis.iter().filter_map(|a| match a {
-                    AxisRef::SketchCurve { sketch, curve } => Some(Pick::SketchCurve(*sketch, *curve)),
+                    AxisRef::SketchCurve { sketch, curve } => {
+                        Some(Pick::SketchCurve(*sketch, *curve))
+                    }
                     AxisRef::Edge(e) => edge(e),
                     AxisRef::Face(f) => face(f),
                     AxisRef::Connector(c) => connector_pick(c),
                 })),
                 PatternKind::Curve => out.extend(x.path.iter().filter_map(|p| match p {
                     PathRef::Edge(e) => edge(e),
-                    PathRef::SketchCurve { sketch, curve } => Some(Pick::SketchCurve(*sketch, *curve)),
+                    PathRef::SketchCurve { sketch, curve } => {
+                        Some(Pick::SketchCurve(*sketch, *curve))
+                    }
                     PathRef::Sketch(s) | PathRef::Curve(s) => Some(Pick::Feature(*s)),
                 })),
             }
@@ -463,8 +601,16 @@ pub fn references(kind: &FeatureKind, cache: &PartCache) -> Vec<Pick> {
             }));
         }
         FeatureKind::MateConnector(x) => {
-            let between = if x.origin_type == cadrs_core::mate::OriginType::BetweenEntities { x.between } else { None };
-            let axes = if x.realign { [x.primary_axis, x.secondary_axis] } else { [None, None] };
+            let between = if x.origin_type == cadrs_core::mate::OriginType::BetweenEntities {
+                x.between
+            } else {
+                None
+            };
+            let axes = if x.realign {
+                [x.primary_axis, x.secondary_axis]
+            } else {
+                [None, None]
+            };
             for o in [x.origin, between].into_iter().chain(axes).flatten() {
                 out.extend(connector_pick(&ConnectorRef::Implicit(o)));
             }
@@ -479,9 +625,15 @@ pub fn references(kind: &FeatureKind, cache: &PartCache) -> Vec<Pick> {
 pub fn takes_connectors(kind: &FeatureKind, field: AppliedField) -> bool {
     match (kind, field) {
         (FeatureKind::Pattern(x), AppliedField::PatternAxis) => x.kind == PatternKind::Circular,
-        (FeatureKind::Pattern(_), AppliedField::PatternDirection | AppliedField::PatternDirection2) => true,
+        (
+            FeatureKind::Pattern(_),
+            AppliedField::PatternDirection | AppliedField::PatternDirection2,
+        ) => true,
         (FeatureKind::Mirror(_), AppliedField::MirrorPlane) => true,
-        (FeatureKind::MateConnector(_), AppliedField::ConnectorOrigin | AppliedField::ConnectorBetween) => true,
+        (
+            FeatureKind::MateConnector(_),
+            AppliedField::ConnectorOrigin | AppliedField::ConnectorBetween,
+        ) => true,
         (FeatureKind::Hole(_), AppliedField::HoleConnectors) => true,
         (k, f) => crate::transform_ui::takes_connectors(k, f),
     }
@@ -507,10 +659,17 @@ fn connector_key(
     mut commands: Commands,
 ) {
     for k in keys.read() {
-        if k.state != ButtonState::Pressed || !matches!(k.shortcut_code(), KeyCode::KeyK | KeyCode::KeyM) {
+        if k.state != ButtonState::Pressed
+            || !matches!(k.shortcut_code(), KeyCode::KeyK | KeyCode::KeyM)
+        {
             continue;
         }
-        let shift_alt = buttons.any_pressed([KeyCode::ShiftLeft, KeyCode::ShiftRight, KeyCode::AltLeft, KeyCode::AltRight]);
+        let shift_alt = buttons.any_pressed([
+            KeyCode::ShiftLeft,
+            KeyCode::ShiftRight,
+            KeyCode::AltLeft,
+            KeyCode::AltRight,
+        ]);
         let ctrl = buttons.any_pressed([KeyCode::ControlLeft, KeyCode::ControlRight]);
         if shift_alt || focus.get().is_some() || !q_dialogs.is_empty() || sketch.is_some() {
             continue;
@@ -520,9 +679,13 @@ fn connector_key(
         match (k.shortcut_code(), ctrl) {
             (KeyCode::KeyK, false) if studio || assembly => shown.0 = !shown.0,
             (KeyCode::KeyM, true) if studio => {
-                commands.queue(|world: &mut World| crate::applied::begin(world, AppliedKind::MateConnector));
+                commands.queue(|world: &mut World| {
+                    crate::applied::begin(world, AppliedKind::MateConnector)
+                });
             }
-            (KeyCode::KeyM, true) if assembly => commands.queue(crate::assembly::connector_tool::open_new),
+            (KeyCode::KeyM, true) if assembly => {
+                commands.queue(crate::assembly::connector_tool::open_new)
+            }
             _ => {}
         }
     }
@@ -540,15 +703,26 @@ fn v3(p: [f64; 3]) -> Vec3 {
 }
 
 /// A connector glyph: the disc (rings, a light quarter) in its XY plane and its three axes.
-pub(crate) fn connector_glyph(g: &mut Gizmos<crate::parts::VertexGizmos>, f: &PlaneFrame, scale: f32, highlight: Option<Color>) {
-    let (o, x, y, z) = (v3(f.origin), v3(f.u).normalize_or_zero(), v3(f.v).normalize_or_zero(), v3(f.normal()).normalize_or_zero());
+pub(crate) fn connector_glyph(
+    g: &mut Gizmos<crate::parts::VertexGizmos>,
+    f: &PlaneFrame,
+    scale: f32,
+    highlight: Option<Color>,
+) {
+    let (o, x, y, z) = (
+        v3(f.origin),
+        v3(f.u).normalize_or_zero(),
+        v3(f.v).normalize_or_zero(),
+        v3(f.normal()).normalize_or_zero(),
+    );
     let r = CONNECTOR_PX * scale;
     let rot = Quat::from_mat3(&Mat3::from_cols(x, y, z));
     let iso = Isometry3d::new(o, rot);
     let dark = Color::srgb_u8(0x3a, 0x3f, 0x45);
     let ring = highlight.unwrap_or(Color::WHITE);
     for k in 0..6 {
-        g.circle(iso, r * (0.62 + 0.06 * k as f32), ring).resolution(32);
+        g.circle(iso, r * (0.62 + 0.06 * k as f32), ring)
+            .resolution(32);
     }
     g.circle(iso, r, dark).resolution(32);
     g.circle(iso, r * 0.58, dark).resolution(32);
@@ -603,13 +777,21 @@ fn draw_connector_hover(
     view: Res<ViewportView>,
     mut g: Gizmos<crate::parts::VertexGizmos>,
 ) {
-    let (Some(s), Some(doc)) = (session, doc) else { return };
-    let Some(el) = doc.doc.element(s.element) else { return };
-    let Some(f) = el.feature(s.feature) else { return };
+    let (Some(s), Some(doc)) = (session, doc) else {
+        return;
+    };
+    let Some(el) = doc.doc.element(s.element) else {
+        return;
+    };
+    let Some(f) = el.feature(s.feature) else {
+        return;
+    };
     if !takes_connectors(&f.kind, s.field) {
         return;
     }
-    let Some(pick) = highlight.viewport else { return };
+    let Some(pick) = highlight.viewport else {
+        return;
+    };
     if matches!(pick, Pick::Feature(_)) {
         return;
     }
@@ -626,22 +808,45 @@ fn draw_connector_hover(
         {
             dots.push(c);
         }
-        for e in s.edges.iter().filter(|e| e.name.touches(&face) && e.name.faces[0] != e.name.faces[1]) {
+        for e in s
+            .edges
+            .iter()
+            .filter(|e| e.name.touches(&face) && e.name.faces[0] != e.name.faces[1])
+        {
             dots.push(e.circle.map_or_else(|| e.midpoint(), |c| c.center));
         }
-        dots.extend(s.vertices.iter().filter(|v| v.name.faces.contains(&face)).map(|v| v.point));
+        dots.extend(
+            s.vertices
+                .iter()
+                .filter(|v| v.name.faces.contains(&face))
+                .map(|v| v.point),
+        );
         let v = view.view;
         let rot = Quat::from_rotation_arc(Vec3::Z, v.back());
         for d in dots {
             let at = v3(d);
             for r in [0.8, 1.6, 2.4] {
-                g.circle(Isometry3d::new(at, rot), r * v.scale, Color::srgb_u8(0xf4, 0xf4, 0xf4)).resolution(16);
+                g.circle(
+                    Isometry3d::new(at, rot),
+                    r * v.scale,
+                    Color::srgb_u8(0xf4, 0xf4, 0xf4),
+                )
+                .resolution(16);
             }
-            g.circle(Isometry3d::new(at, rot), 3.2 * v.scale, Color::srgb_u8(0x5a, 0x60, 0x68)).resolution(16);
+            g.circle(
+                Isometry3d::new(at, rot),
+                3.2 * v.scale,
+                Color::srgb_u8(0x5a, 0x60, 0x68),
+            )
+            .resolution(16);
         }
     }
-    let Some(o) = implicit_origin(&cache, pick) else { return };
-    let Ok(frame) = cadrs_core::mate::origin_frame(&o, el.features(), &cache.parts) else { return };
+    let Some(o) = implicit_origin(&cache, pick) else {
+        return;
+    };
+    let Ok(frame) = cadrs_core::mate::origin_frame(&o, el.features(), &cache.parts) else {
+        return;
+    };
     connector_glyph(&mut g, &frame, view.view.scale, Some(crate::parts::HOVER));
 }
 
@@ -659,11 +864,15 @@ fn draw_connector_fields(
     view: Res<ViewportView>,
     mut g: Gizmos<crate::parts::VertexGizmos>,
 ) {
-    let Some(el) = doc.as_ref().and_then(|d| d.active_element()) else { return };
+    let Some(el) = doc.as_ref().and_then(|d| d.active_element()) else {
+        return;
+    };
     let features = el.features();
     // Larger than the connectors on the parts: the field's one connector, its triad readable.
     let scale = view.view.scale * 2.2;
-    let frame_of = |c: &ConnectorRef| cadrs_core::mate::frame(c, features, &cache.parts, &cache.connectors).ok();
+    let frame_of = |c: &ConnectorRef| {
+        cadrs_core::mate::frame(c, features, &cache.parts, &cache.connectors).ok()
+    };
     let mut hover = false;
     let mut picked: Vec<(PlaneFrame, bool)> = Vec::new();
     if let Some(s) = extrude.as_ref()
@@ -692,8 +901,12 @@ fn draw_connector_fields(
     if !hover {
         return;
     }
-    let Some(pick) = highlight.viewport else { return };
-    let Some(c) = connector_of(features, &cache, pick) else { return };
+    let Some(pick) = highlight.viewport else {
+        return;
+    };
+    let Some(c) = connector_of(features, &cache, pick) else {
+        return;
+    };
     if let Some(f) = frame_of(&c) {
         connector_glyph(&mut g, &f, scale, Some(crate::parts::HOVER));
     }
@@ -713,11 +926,14 @@ fn draw_direction_arrows(
     if s.kind != crate::applied::AppliedKind::Loft {
         return;
     }
-    let Some(arrows) = cache.arrows.get(&s.feature) else { return };
+    let Some(arrows) = cache.arrows.get(&s.feature) else {
+        return;
+    };
     let len = 90.0 * view.view.scale;
     for (o, d) in arrows {
         let (o, d) = (v3(*o), v3(*d).normalize_or_zero());
-        g.arrow(o, o + d * len, crate::parts::SELECTED).with_tip_length(14.0 * view.view.scale);
+        g.arrow(o, o + d * len, crate::parts::SELECTED)
+            .with_tip_length(14.0 * view.view.scale);
     }
 }
 
@@ -731,14 +947,23 @@ fn draw_instance_dots(
     view: Res<ViewportView>,
     mut g: Gizmos<crate::parts::VertexGizmos>,
 ) {
-    let (Some(s), Some(doc)) = (session, doc) else { return };
-    let Some(FeatureKind::Pattern(x)) = doc.doc.element(s.element).and_then(|e| e.feature(s.feature)).map(|f| f.kind.clone()) else {
+    let (Some(s), Some(doc)) = (session, doc) else {
+        return;
+    };
+    let Some(FeatureKind::Pattern(x)) = doc
+        .doc
+        .element(s.element)
+        .and_then(|e| e.feature(s.feature))
+        .map(|f| f.kind.clone())
+    else {
         return;
     };
     if !x.skip_on {
         return;
     }
-    let Some(dots) = cache.dots.get(&s.feature) else { return };
+    let Some(dots) = cache.dots.get(&s.feature) else {
+        return;
+    };
     let v = view.view;
     let rot = Quat::from_rotation_arc(Vec3::Z, v.back());
     for d in dots {
@@ -753,16 +978,24 @@ fn draw_instance_dots(
             Color::srgb_u8(0xd8, 0xdc, 0xe0)
         };
         for r in [0.8, 1.6, 2.4, 3.2, 4.0] {
-            g.circle(Isometry3d::new(at, rot), r * v.scale, fill).resolution(20);
+            g.circle(Isometry3d::new(at, rot), r * v.scale, fill)
+                .resolution(20);
         }
-        g.circle(Isometry3d::new(at, rot), 4.8 * v.scale, Color::srgb_u8(0x5a, 0x60, 0x68)).resolution(20);
+        g.circle(
+            Isometry3d::new(at, rot),
+            4.8 * v.scale,
+            Color::srgb_u8(0x5a, 0x60, 0x68),
+        )
+        .resolution(20);
     }
 }
 
 /// P3.11 (P3.8 judge): the pattern being edited has Skip instances on: every instance dot inside
 /// the box from `a` to `b` (viewport offsets) is toggled, as clicking each would (one undo step).
 pub fn skip_dots_in_box(world: &mut World, a: Vec2, b: Vec2) {
-    let Some(s) = world.get_resource::<AppliedSession>() else { return };
+    let Some(s) = world.get_resource::<AppliedSession>() else {
+        return;
+    };
     let pattern = s.feature;
     let view = world.resource::<ViewportView>().view;
     let (lo, hi) = (a.min(b), a.max(b));
@@ -813,14 +1046,22 @@ fn draw_skip_box(
             .and_then(|e| e.feature(s.feature))
             .is_some_and(|f| matches!(&f.kind, FeatureKind::Pattern(x) if x.skip_on))
     });
-    let rect = drag.primary_down().filter(|d| skipping && d.distance(drag.pointer()) >= 4.0).map(|d| (d.min(drag.pointer()), d.max(drag.pointer())));
+    let rect = drag
+        .primary_down()
+        .filter(|d| skipping && d.distance(drag.pointer()) >= 4.0)
+        .map(|d| (d.min(drag.pointer()), d.max(drag.pointer())));
     let Some((lo, hi)) = rect else {
         for (e, _) in &q {
             commands.entity(e).try_despawn();
         }
         return;
     };
-    let (left, top, width, height) = (Val::Px(lo.x), Val::Px(lo.y), Val::Px(hi.x - lo.x), Val::Px(hi.y - lo.y));
+    let (left, top, width, height) = (
+        Val::Px(lo.x),
+        Val::Px(lo.y),
+        Val::Px(hi.x - lo.x),
+        Val::Px(hi.y - lo.y),
+    );
     match q.iter_mut().next() {
         Some((_, mut n)) => {
             if n.left != left || n.top != top || n.width != width || n.height != height {
@@ -834,7 +1075,15 @@ fn draw_skip_box(
             commands.spawn((
                 Name::new("skip-box"),
                 SkipBox,
-                Node { position_type: PositionType::Absolute, left, top, width, height, border: UiRect::all(Val::Px(1.0)), ..default() },
+                Node {
+                    position_type: PositionType::Absolute,
+                    left,
+                    top,
+                    width,
+                    height,
+                    border: UiRect::all(Val::Px(1.0)),
+                    ..default()
+                },
                 BackgroundColor(Color::srgba(0.17, 0.39, 0.75, 0.08)),
                 BorderColor::all(Color::srgb_u8(0x2b, 0x64, 0xc0)),
                 GlobalZIndex(cadrs_ui::z::DIALOG - 30),
@@ -846,7 +1095,12 @@ fn draw_skip_box(
 }
 
 /// The instance dot under a screen offset (within 8 px), for picking.
-pub fn pick_dot(cache: &PartCache, view: &crate::camera::ViewState, offset: Vec2, pattern: FeatureId) -> Option<Pick> {
+pub fn pick_dot(
+    cache: &PartCache,
+    view: &crate::camera::ViewState,
+    offset: Vec2,
+    pattern: FeatureId,
+) -> Option<Pick> {
     let dots = cache.dots.get(&pattern)?;
     dots.iter()
         .map(|d| (view.project(v3(d.at)).distance(offset), d))
@@ -856,7 +1110,11 @@ pub fn pick_dot(cache: &PartCache, view: &crate::camera::ViewState, offset: Vec2
 }
 
 /// The explicit connector under a screen offset (within 8 px of its origin), for picking.
-pub fn pick_connector(cache: &PartCache, view: &crate::camera::ViewState, offset: Vec2) -> Option<Pick> {
+pub fn pick_connector(
+    cache: &PartCache,
+    view: &crate::camera::ViewState,
+    offset: Vec2,
+) -> Option<Pick> {
     cache
         .connectors
         .iter()

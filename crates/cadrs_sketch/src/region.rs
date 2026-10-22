@@ -19,7 +19,9 @@ use std::f64::consts::TAU;
 
 use serde::{Deserialize, Serialize};
 
-use crate::geom::{ArcGeom, BezierGeom, EllipseArcGeom, EllipseGeom, norm_angle, point_in_polygon, polygon_area};
+use crate::geom::{
+    ArcGeom, BezierGeom, EllipseArcGeom, EllipseGeom, norm_angle, point_in_polygon, polygon_area,
+};
 use crate::{CurveId, CurveKind, ImprintShape, Sketch, Vec2};
 
 /// One piece of a region's boundary, in the direction the boundary runs: a straight segment,
@@ -29,7 +31,11 @@ pub enum Piece {
     Line(Vec2, Vec2),
     Arc(ArcGeom),
     /// A piece of an ellipse, from parameter `t0` through `sweep` (signed).
-    Ellipse { g: EllipseGeom, t0: f64, sweep: f64 },
+    Ellipse {
+        g: EllipseGeom,
+        t0: f64,
+        sweep: f64,
+    },
     /// A cubic Bézier curve (or a piece of one, itself a cubic), from its `p[0]` to `p[3]`.
     Bezier(BezierGeom),
 }
@@ -53,7 +59,13 @@ impl Piece {
                 let f = |t: f64| g.point_at(t).cross(g.tangent_at(t));
                 (0..=n)
                     .map(|i| {
-                        let w = if i == 0 || i == n { 1.0 } else if i % 2 == 1 { 4.0 } else { 2.0 };
+                        let w = if i == 0 || i == n {
+                            1.0
+                        } else if i % 2 == 1 {
+                            4.0
+                        } else {
+                            2.0
+                        };
                         w * f(t0 + i as f64 * h)
                     })
                     .sum::<f64>()
@@ -149,7 +161,11 @@ impl Piece {
             Piece::Bezier(g) => {
                 // A handle on the end leaves along the next control point.
                 let d = g.tangent_at(0.0);
-                let d = if d.length() > 1e-12 { d } else { g.p[2] - g.p[0] };
+                let d = if d.length() > 1e-12 {
+                    d
+                } else {
+                    g.p[2] - g.p[0]
+                };
                 (d.normalize(), g.curvature_at(0.0))
             }
         };
@@ -188,7 +204,11 @@ impl Region {
     pub fn area(&self) -> f64 {
         if self.outer_pieces.is_empty() {
             return polygon_area(&self.outer)
-                - self.holes.iter().map(|h| polygon_area(h).abs()).sum::<f64>();
+                - self
+                    .holes
+                    .iter()
+                    .map(|h| polygon_area(h).abs())
+                    .sum::<f64>();
         }
         pieces_area(&self.outer_pieces).abs()
             - self
@@ -388,7 +408,11 @@ impl Carrier {
                 let (lo, hi) = (a0.min(a1), a0.max(a1));
                 for j in 0..N {
                     let (b0, b1) = (pb[j], pb[j + 1]);
-                    if b0.max(b1).x < lo.x || b0.min(b1).x > hi.x || b0.max(b1).y < lo.y || b0.min(b1).y > hi.y {
+                    if b0.max(b1).x < lo.x
+                        || b0.min(b1).x > hi.x
+                        || b0.max(b1).y < lo.y
+                        || b0.min(b1).y > hi.y
+                    {
                         continue;
                     }
                     let (r, q) = (a1 - a0, b1 - b0);
@@ -505,7 +529,9 @@ impl Carrier {
             Carrier::Seg(a, b) => C::L(a, (b - a).normalize()),
             Carrier::Arc(g) => C::O(g.center, g.radius),
             Carrier::Circle(c, r) => C::O(c, r),
-            Carrier::Ellipse(_) | Carrier::EllipseArc(_) | Carrier::Bezier(_) => unreachable!("handled above"),
+            Carrier::Ellipse(_) | Carrier::EllipseArc(_) | Carrier::Bezier(_) => {
+                unreachable!("handled above")
+            }
         };
         match (full(self), full(o)) {
             (C::L(p, d), C::L(q, e)) => {
@@ -669,7 +695,12 @@ fn carriers(s: &Sketch) -> Vec<(CurveId, Carrier)> {
         let c = match im.shape {
             ImprintShape::Line(a, b) => Carrier::Seg(a, b),
             ImprintShape::Circle(c, r) => Carrier::Circle(c, r),
-            ImprintShape::Arc { center, radius, start_angle, sweep } => Carrier::Arc(ArcGeom {
+            ImprintShape::Arc {
+                center,
+                radius,
+                start_angle,
+                sweep,
+            } => Carrier::Arc(ArcGeom {
                 center,
                 radius,
                 start_angle,
@@ -681,12 +712,15 @@ fn carriers(s: &Sketch) -> Vec<(CurveId, Carrier)> {
                 (x.distance(p) < 1e-6 && y.distance(q) < 1e-6)
                     || (x.distance(q) < 1e-6 && y.distance(p) < 1e-6)
             }
-            (Carrier::Circle(x, r), Carrier::Circle(y, q)) => x.distance(y) < 1e-6 && (r - q).abs() < 1e-6,
+            (Carrier::Circle(x, r), Carrier::Circle(y, q)) => {
+                x.distance(y) < 1e-6 && (r - q).abs() < 1e-6
+            }
             (Carrier::Arc(g), Carrier::Arc(h)) => {
                 g.center.distance(h.center) < 1e-6
                     && (g.radius - h.radius).abs() < 1e-6
                     && ((g.start().distance(h.start()) < 1e-6 && g.end().distance(h.end()) < 1e-6)
-                        || (g.start().distance(h.end()) < 1e-6 && g.end().distance(h.start()) < 1e-6))
+                        || (g.start().distance(h.end()) < 1e-6
+                            && g.end().distance(h.start()) < 1e-6))
             }
             _ => false,
         };
@@ -801,7 +835,12 @@ pub fn regions(s: &Sketch) -> Vec<Region> {
     // (A grid of `2 tol` cells finds a vertex within `tol` among the 3×3 cells around.)
     let mut verts: Vec<Vec2> = Vec::new();
     let mut grid: HashMap<(i64, i64), Vec<usize>> = HashMap::new();
-    let cell = |p: Vec2| ((p.x / (2.0 * tol)).floor() as i64, (p.y / (2.0 * tol)).floor() as i64);
+    let cell = |p: Vec2| {
+        (
+            (p.x / (2.0 * tol)).floor() as i64,
+            (p.y / (2.0 * tol)).floor() as i64,
+        )
+    };
     let mut vertex = |p: Vec2| -> usize {
         let (cx, cy) = cell(p);
         let mut best: Option<usize> = None;
@@ -869,13 +908,22 @@ pub fn regions(s: &Sketch) -> Vec<Region> {
     // Overlapping curves (a line drawn along part of another, collinear) give the same piece
     // twice: keep one, a drawn curve's over an imprinted edge's, so the graph stays planar.
     {
-        let mid = |e: &Edge| e.path.get(e.path.len() / 2).copied().unwrap_or_else(|| e.piece.start());
+        let mid = |e: &Edge| {
+            e.path
+                .get(e.path.len() / 2)
+                .copied()
+                .unwrap_or_else(|| e.piece.start())
+        };
         let mut keep: Vec<Edge> = Vec::with_capacity(edges.len());
         for e in edges {
             let same = keep.iter().position(|k| {
                 ((k.from == e.from && k.to == e.to) || (k.from == e.to && k.to == e.from))
                     && (k.piece.length() - e.piece.length()).abs() < tol
-                    && k.path.iter().map(|p| p.distance(mid(&e))).fold(f64::MAX, f64::min) < tol * 10.0
+                    && k.path
+                        .iter()
+                        .map(|p| p.distance(mid(&e)))
+                        .fold(f64::MAX, f64::min)
+                        < tol * 10.0
             });
             match same {
                 Some(i) if imprinted(keep[i].curve) && !imprinted(e.curve) => keep[i] = e,
@@ -1094,12 +1142,21 @@ pub fn regions(s: &Sketch) -> Vec<Region> {
             .filter(|c| !c.construction)
             .flat_map(|c| match c.kind {
                 crate::CurveKind::Line { a, b } => vec![a, b],
-                crate::CurveKind::Arc { start, end, .. } | crate::CurveKind::Spline { start, end } => vec![start, end],
+                crate::CurveKind::Arc { start, end, .. }
+                | crate::CurveKind::Spline { start, end } => vec![start, end],
                 _ => Vec::new(),
             })
             .filter_map(|p| s.points.get(p).map(|p| p.pos))
             .collect();
-        let bound: Vec<bool> = out.iter().map(|r| r.outer_curves.iter().chain(r.hole_curves.iter().flatten()).any(|c| !imprinted(*c))).collect();
+        let bound: Vec<bool> = out
+            .iter()
+            .map(|r| {
+                r.outer_curves
+                    .iter()
+                    .chain(r.hole_curves.iter().flatten())
+                    .any(|c| !imprinted(*c))
+            })
+            .collect();
         // Only when the sketch's own curves bound no region (a lone line from a rim): where they
         // do, the face's outline stays out, as before.
         let lone = !bound.contains(&true);
@@ -1117,18 +1174,37 @@ pub fn regions(s: &Sketch) -> Vec<Region> {
         // A face piece across an imprinted edge from a region the sketch bounds: that region is
         // closed by the face's edge, and in Onshape the face on the other side of it is a region
         // too (an extrude can take both: the profile and the face it rests on).
-        let edges_of = |r: &Region| -> std::collections::HashSet<CurveId> { r.outer_curves.iter().chain(r.hole_curves.iter().flatten()).copied().filter(|c| imprinted(*c)).collect() };
+        let edges_of = |r: &Region| -> std::collections::HashSet<CurveId> {
+            r.outer_curves
+                .iter()
+                .chain(r.hole_curves.iter().flatten())
+                .copied()
+                .filter(|c| imprinted(*c))
+                .collect()
+        };
         // (Its outer edge: a hole the face has through the region is no region.)
-        let bound_edges: std::collections::HashSet<CurveId> = out.iter().zip(&bound).filter(|(_, b)| **b).flat_map(|(r, _)| r.outer_curves.iter().copied().filter(|c| imprinted(*c))).collect();
+        let bound_edges: std::collections::HashSet<CurveId> = out
+            .iter()
+            .zip(&bound)
+            .filter(|(_, b)| **b)
+            .flat_map(|(r, _)| r.outer_curves.iter().copied().filter(|c| imprinted(*c)))
+            .collect();
         let keep: Vec<bool> = out
             .iter()
             .enumerate()
             .map(|(i, r)| {
                 bound[i]
                     || edges_of(r).iter().any(|c| bound_edges.contains(c))
-                    || lone && std::iter::once(&r.outer).chain(r.holes.iter()).any(|poly| drawn_points.iter().any(|p| polyline_distance(poly, *p) < tol))
+                    || lone
+                        && std::iter::once(&r.outer).chain(r.holes.iter()).any(|poly| {
+                            drawn_points
+                                .iter()
+                                .any(|p| polyline_distance(poly, *p) < tol)
+                        })
                     || inner_point(r).is_some_and(|p| {
-                        out.iter().enumerate().any(|(j, q)| j != i && bound[j] && point_in_polygon(p, &q.outer))
+                        out.iter()
+                            .enumerate()
+                            .any(|(j, q)| j != i && bound[j] && point_in_polygon(p, &q.outer))
                             && drawn_loops().iter().any(|q| point_in_polygon(p, &q.outer))
                     })
             })
@@ -1157,7 +1233,10 @@ fn polyline_distance(poly: &[Vec2], p: Vec2) -> f64 {
 /// its edges: triangulating it instead took seconds for a board with 825 holes (ear clipping
 /// bridges each hole into the outline).
 fn inner_point(r: &Region) -> Option<Vec2> {
-    let (lo, hi) = r.outer.iter().fold((f64::MAX, f64::MIN), |(l, h), p| (l.min(p.y), h.max(p.y)));
+    let (lo, hi) = r
+        .outer
+        .iter()
+        .fold((f64::MAX, f64::MIN), |(l, h), p| (l.min(p.y), h.max(p.y)));
     if hi.partial_cmp(&lo) != Some(std::cmp::Ordering::Greater) {
         return None;
     }
@@ -1175,7 +1254,12 @@ fn inner_point(r: &Region) -> Option<Vec2> {
             }
         }
         xs.sort_by(f64::total_cmp);
-        let widest = xs.as_chunks::<2>().0.iter().map(|p| (p[0], p[1])).max_by(|a, b| (a.1 - a.0).total_cmp(&(b.1 - b.0)));
+        let widest = xs
+            .as_chunks::<2>()
+            .0
+            .iter()
+            .map(|p| (p[0], p[1]))
+            .max_by(|a, b| (a.1 - a.0).total_cmp(&(b.1 - b.0)));
         if let Some((x0, x1)) = widest
             && x1 - x0 > 1e-9
         {
@@ -1254,7 +1338,10 @@ mod tests {
         assert!(close(areas[0], half) && close(areas[1], half), "{areas:?}");
         assert!(close(areas[2], 1600.0 - half), "{areas:?}");
         // The ids of imprinted edges are not sketch curves.
-        assert!(r.iter().any(|r| r.curves.iter().any(|c| crate::is_synthetic(*c))));
+        assert!(
+            r.iter()
+                .any(|r| r.curves.iter().any(|c| crate::is_synthetic(*c)))
+        );
         // Without imprinting (the flag clears the imprint): only the circle.
         s.imprint.clear();
         assert_eq!(regions(&s).len(), 1);
@@ -1272,16 +1359,25 @@ mod tests {
         assert_eq!(r.len(), 2, "{r:?}");
         let mut areas: Vec<f64> = r.iter().map(|r| r.area()).collect();
         areas.sort_by(f64::total_cmp);
-        assert!(close(areas[0], 108.0) && close(areas[1], 1600.0 - 108.0), "{areas:?}");
+        assert!(
+            close(areas[0], 108.0) && close(areas[1], 1600.0 - 108.0),
+            "{areas:?}"
+        );
         let small = r.iter().find(|r| close(r.area(), 108.0)).unwrap();
-        assert!(small.curves.iter().all(|c| !crate::is_synthetic(*c)), "the profile's own sides");
+        assert!(
+            small.curves.iter().all(|c| !crate::is_synthetic(*c)),
+            "the profile's own sides"
+        );
         // Two drawn rectangles sharing a corner likewise.
         let mut s = Sketch::new();
         rect(&mut s, 0.0, 0.0, 10.0, 10.0);
         rect(&mut s, 0.0, 0.0, 3.0, 2.0);
         let mut areas: Vec<f64> = regions(&s).iter().map(|r| r.area()).collect();
         areas.sort_by(f64::total_cmp);
-        assert!(areas.len() == 2 && close(areas[0], 6.0) && close(areas[1], 94.0), "{areas:?}");
+        assert!(
+            areas.len() == 2 && close(areas[0], 6.0) && close(areas[1], 94.0),
+            "{areas:?}"
+        );
     }
 
     #[test]
@@ -1291,7 +1387,10 @@ mod tests {
         circle(&mut s, 20.0, 20.0, 5.0);
         let r = regions(&s);
         assert_eq!(r.len(), 2);
-        assert!(r.iter().any(|r| r.holes.len() == 1 && close(r.area(), 1600.0 - PI * 25.0)));
+        assert!(
+            r.iter()
+                .any(|r| r.holes.len() == 1 && close(r.area(), 1600.0 - PI * 25.0))
+        );
         // An edge drawn on top of an imprinted one is used instead.
         poly(&mut s, &[(0.0, 0.0), (40.0, 0.0)], false);
         assert_eq!(regions(&s).len(), 2);
@@ -1302,7 +1401,11 @@ mod tests {
         // A line drawn outward from a point on an imprinted circle (a revolve profile from a
         // hole's rim): the circle's face is a region; without the line it isn't.
         let mut s = Sketch::new();
-        s.imprint = vec![crate::Imprint { id: crate::synthetic_curve(1, 0), shape: crate::ImprintShape::Circle(Vec2::new(7.0, -9.5), 0.3), link: None }];
+        s.imprint = vec![crate::Imprint {
+            id: crate::synthetic_curve(1, 0),
+            shape: crate::ImprintShape::Circle(Vec2::new(7.0, -9.5), 0.3),
+            link: None,
+        }];
         assert_eq!(regions(&s).len(), 0);
         poly(&mut s, &[(7.0, -9.8), (6.62, -9.8)], false);
         let r = regions(&s);
@@ -1317,11 +1420,18 @@ mod tests {
         // below the edge it rests on (Onshape's extrude took both).
         let mut s = Sketch::new();
         imprint_square(&mut s);
-        poly(&mut s, &[(10.0, 40.0), (10.0, 60.0), (30.0, 60.0), (30.0, 40.0)], false);
+        poly(
+            &mut s,
+            &[(10.0, 40.0), (10.0, 60.0), (30.0, 60.0), (30.0, 40.0)],
+            false,
+        );
         let r = regions(&s);
         let mut areas: Vec<f64> = r.iter().map(Region::area).collect();
         areas.sort_by(f64::total_cmp);
-        assert!(areas.len() == 2 && close(areas[0], 400.0) && close(areas[1], 1600.0), "{areas:?}");
+        assert!(
+            areas.len() == 2 && close(areas[0], 400.0) && close(areas[1], 1600.0),
+            "{areas:?}"
+        );
     }
 
     #[test]
@@ -1336,7 +1446,10 @@ mod tests {
         assert_eq!(r.len(), 2, "{r:?}");
         let mut areas: Vec<f64> = r.iter().map(Region::area).collect();
         areas.sort_by(f64::total_cmp);
-        assert!(close(areas[0], 1600.0) && close(areas[1], 3600.0 - 1600.0), "{areas:?}");
+        assert!(
+            close(areas[0], 1600.0) && close(areas[1], 3600.0 - 1600.0),
+            "{areas:?}"
+        );
     }
 
     #[test]
@@ -1387,7 +1500,11 @@ mod tests {
     #[test]
     fn open_chain_has_no_region() {
         let mut s = Sketch::new();
-        poly(&mut s, &[(0.0, 0.0), (10.0, 0.0), (10.0, 10.0), (0.0, 10.0)], false);
+        poly(
+            &mut s,
+            &[(0.0, 0.0), (10.0, 0.0), (10.0, 10.0), (0.0, 10.0)],
+            false,
+        );
         assert!(regions(&s).is_empty());
     }
 
@@ -1447,7 +1564,10 @@ mod tests {
         assert!(square.contains(Vec2::new(2.0, 2.0)));
         // The hole is subtracted exactly.
         assert!((square.area() - (1600.0 - PI * 25.0)).abs() < 1e-9);
-        assert_eq!(region_at(&r, Vec2::new(20.0, 20.0)), r.iter().position(|x| x.curves.len() == 1));
+        assert_eq!(
+            region_at(&r, Vec2::new(20.0, 20.0)),
+            r.iter().position(|x| x.curves.len() == 1)
+        );
     }
 
     #[test]
@@ -1488,7 +1608,11 @@ mod tests {
         // disc and the rectangle minus the right half disc (like exercise 1's plate).
         let mut s = Sketch::new();
         circle(&mut s, 0.0, 0.0, 10.0);
-        poly(&mut s, &[(0.0, 10.0), (30.0, 10.0), (30.0, -10.0), (0.0, -10.0)], false);
+        poly(
+            &mut s,
+            &[(0.0, 10.0), (30.0, 10.0), (30.0, -10.0), (0.0, -10.0)],
+            false,
+        );
         let r = regions(&s);
         let mut areas: Vec<f64> = r.iter().map(|r| r.area()).collect();
         areas.sort_by(f64::total_cmp);

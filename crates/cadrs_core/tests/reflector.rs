@@ -10,7 +10,9 @@ use std::f64::consts::PI;
 
 use cadrs_core::applied::{EdgeOrFace, FilletFeature, HoleFeature, HolePoint};
 use cadrs_core::commands::{AddExtrude, AddFeature, AddSketch, EditSketch, SetExtrude};
-use cadrs_core::document::{AxisRef, BooleanOp, DirectionRef, EdgeRef, EndType, ExtrudeFeature, FaceRef, Offset, UpTo};
+use cadrs_core::document::{
+    AxisRef, BooleanOp, DirectionRef, EdgeRef, EndType, ExtrudeFeature, FaceRef, Offset, UpTo,
+};
 use cadrs_core::hole::{Fit, HoleEnd, HoleSpec, HoleStart, HoleType, Length};
 use cadrs_core::mate::ConnectorRef;
 use cadrs_core::parts::mass_report;
@@ -126,7 +128,11 @@ impl Studio {
     fn new() -> Self {
         let d = rf::document().unwrap();
         let el = d.elements[0].id;
-        Self { d, h: History::default(), el }
+        Self {
+            d,
+            h: History::default(),
+            el,
+        }
     }
 
     fn features(&self) -> Vec<Feature> {
@@ -147,7 +153,15 @@ impl Studio {
     fn add(&mut self, base: &str, kind: FeatureKind) -> FeatureId {
         let feature = FeatureId::new();
         self.h
-            .execute(&mut self.d, &AddFeature { element: self.el, feature, base_name: base.into(), kind })
+            .execute(
+                &mut self.d,
+                &AddFeature {
+                    element: self.el,
+                    feature,
+                    base_name: base.into(),
+                    kind,
+                },
+            )
             .unwrap();
         feature
     }
@@ -155,16 +169,40 @@ impl Studio {
     fn extrude(&mut self, e: ExtrudeFeature) -> FeatureId {
         let f = FeatureId::new();
         self.h
-            .execute(&mut self.d, &AddExtrude { element: self.el, feature: f, extrude: ExtrudeFeature::default() })
+            .execute(
+                &mut self.d,
+                &AddExtrude {
+                    element: self.el,
+                    feature: f,
+                    extrude: ExtrudeFeature::default(),
+                },
+            )
             .unwrap();
         self.h
-            .execute(&mut self.d, &SetExtrude { element: self.el, feature: f, extrude: e, label: "Extrude".into() })
+            .execute(
+                &mut self.d,
+                &SetExtrude {
+                    element: self.el,
+                    feature: f,
+                    extrude: e,
+                    label: "Extrude".into(),
+                },
+            )
             .unwrap();
         f
     }
 
     fn regions(&self, seeds: &[Vec2]) -> Vec<cadrs_core::RegionRef> {
-        let g = self.d.element(self.el).unwrap().feature(rf::FEATURE_SKETCH).unwrap().sketch().unwrap().geometry.clone();
+        let g = self
+            .d
+            .element(self.el)
+            .unwrap()
+            .feature(rf::FEATURE_SKETCH)
+            .unwrap()
+            .sketch()
+            .unwrap()
+            .geometry
+            .clone();
         let r = samples::region_refs(rf::FEATURE_SKETCH, &g, seeds);
         assert_eq!(r.len(), seeds.len());
         r
@@ -178,8 +216,20 @@ fn edges_of(part: &Part, op: FeatureId, sides_only: bool) -> Vec<EdgeOrFace> {
         .edges
         .iter()
         .filter(|e| e.name.faces.iter().all(|f| f.op == op.0))
-        .filter(|e| !sides_only || e.name.faces.iter().all(|f| matches!(f.origin, FaceOrigin::Side { .. })))
-        .map(|e| EdgeOrFace::Edge(EdgeRef { part: part.id, edge: e.name, seed: e.midpoint() }))
+        .filter(|e| {
+            !sides_only
+                || e.name
+                    .faces
+                    .iter()
+                    .all(|f| matches!(f.origin, FaceOrigin::Side { .. }))
+        })
+        .map(|e| {
+            EdgeOrFace::Edge(EdgeRef {
+                part: part.id,
+                edge: e.name,
+                seed: e.midpoint(),
+            })
+        })
         .collect()
 }
 
@@ -189,12 +239,21 @@ fn faces_of(part: &Part, ops: &[FeatureId]) -> Vec<FaceRef> {
         .iter()
         .enumerate()
         .filter(|(_, f)| ops.iter().any(|o| o.0 == f.name.op))
-        .map(|(i, f)| FaceRef { part: part.id, face: f.name, seed: part.solid.face_point(i).unwrap() })
+        .map(|(i, f)| FaceRef {
+            part: part.id,
+            face: f.name,
+            seed: part.solid.face_point(i).unwrap(),
+        })
         .collect()
 }
 
 fn fillet(edges: Vec<EdgeOrFace>, r: f64) -> FeatureKind {
-    FeatureKind::Fillet(FilletFeature { entities: edges, size: r, size_expr: format!("{r} mm"), ..FilletFeature::default() })
+    FeatureKind::Fillet(FilletFeature {
+        entities: edges,
+        size: r,
+        size_expr: format!("{r} mm"),
+        ..FilletFeature::default()
+    })
 }
 
 #[test]
@@ -220,7 +279,11 @@ fn reflector_every_step() {
         .iter()
         .enumerate()
         .find(|(_, f)| f.name.op == rf::REVOLVE_1.0 && f.plane.is_none())
-        .map(|(i, f)| FaceRef { part: part.id, face: f.name, seed: part.solid.face_point(i).unwrap() })
+        .map(|(i, f)| FaceRef {
+            part: part.id,
+            face: f.name,
+            seed: part.solid.face_point(i).unwrap(),
+        })
         .expect("the curved bottom");
     let tri_a = Vec2::new(60.0, -16.0);
     let tri_b = Vec2::new(16.0, -60.0);
@@ -229,7 +292,11 @@ fn reflector_every_step() {
         merge_all: true,
         end: EndType::UpToFace,
         up_to: Some(UpTo::Face(bottom_face)),
-        offset: Some(Offset { value: 10.0, expr: "10 mm".into(), flip: false }),
+        offset: Some(Offset {
+            value: 10.0,
+            expr: "10 mm".into(),
+            flip: false,
+        }),
         flip: true,
         ..samples::extrude_of(s.regions(&[tri_a, tri_b]), 25.0)
     });
@@ -254,18 +321,25 @@ fn reflector_every_step() {
     let r = 6.0f64;
     let corner = |theta: f64| r * r * (1.0 / (theta / 2.0).tan() - (PI - theta) / 2.0);
     let per_triangle_corners = corner(PI / 2.0) + 2.0 * corner(PI / 4.0);
-    let deepest = depth(rf::TRIANGLE_A[0][0], rf::TRIANGLE_A[0][1]).max(depth(rf::TRIANGLE_B[0][0], rf::TRIANGLE_B[0][1]));
+    let deepest = depth(rf::TRIANGLE_A[0][0], rf::TRIANGLE_A[0][1])
+        .max(depth(rf::TRIANGLE_B[0][0], rf::TRIANGLE_B[0][1]));
     let leg = rf::TRIANGLE_A[1][0] - rf::TRIANGLE_A[0][0];
     let perimeter = 2.0 * (2.0 + 2f64.sqrt()) * leg;
     let high = 2.0 * per_triangle_corners * deepest + (1.0 - PI / 4.0) * r * r * perimeter;
-    assert!(added > 0.0 && added < high, "the fillets added {added}, expected 0..{high}");
+    assert!(
+        added > 0.0 && added < high,
+        "the fillets added {added}, expected 0..{high}"
+    );
     // The display mesh (0.05 mm chords) sits up to its deflection off the large curved bottom,
     // so the whole volumes differ by a few 1e-4; the fillets' own addition (the same bottom in
     // both meshes) agrees to 2 %.
     let mesh2 = s.part().solid.volume();
     assert!((v2 - mesh2).abs() < 6e-4 * v2, "OCCT {v2} vs mesh {mesh2}");
     let mesh_added = mesh2 - mesh1;
-    assert!((mesh_added - added).abs() < 0.02 * added, "the fillets added {added}, the mesh says {mesh_added}");
+    assert!(
+        (mesh_added - added).abs() < 0.02 * added,
+        "the fillets added {added}, the mesh says {mesh_added}"
+    );
 
     // Step 3 (PS27.5): Circular pattern 1, Feature pattern of Extrude 2 and Fillet 2 about the
     // Pattern Axis mate connector, 360°, 4, equal spacing, Reapply: three more copies, each
@@ -293,7 +367,11 @@ fn reflector_every_step() {
     spec.start = HoleStart::Part;
     s.add(
         "Hole",
-        FeatureKind::Hole(HoleFeature { connectors: vec![ConnectorRef::Feature(rf::PATTERN_AXIS)], spec, ..HoleFeature::default() }),
+        FeatureKind::Hole(HoleFeature {
+            connectors: vec![ConnectorRef::Feature(rf::PATTERN_AXIS)],
+            spec,
+            ..HoleFeature::default()
+        }),
     );
     let v4 = s.volume();
     close(v3 - v4, blind_volume(46.0, 12.0), tol);
@@ -305,10 +383,38 @@ fn reflector_every_step() {
     let top_name = cadrs_core::parts::cap_name(&features, rf::EXTRUDE_1, 0, true).unwrap();
     let sketch3 = FeatureId::new();
     let plane = cadrs_core::parts::face_plane(&features, rf::EXTRUDE_1, top_name).unwrap();
-    s.h.execute(&mut s.d, &AddSketch { element: s.el, feature: sketch3, plane: Some(plane) }).unwrap();
-    s.h.execute(&mut s.d, &EditSketch { element: s.el, feature: sketch3, op: SketchOp::AddPoint { pos: Vec2::new(0.0, -65.0) } })
-        .unwrap();
-    let point = s.d.element(s.el).unwrap().feature(sketch3).unwrap().sketch().unwrap().geometry.points.keys().next().unwrap();
+    s.h.execute(
+        &mut s.d,
+        &AddSketch {
+            element: s.el,
+            feature: sketch3,
+            plane: Some(plane),
+        },
+    )
+    .unwrap();
+    s.h.execute(
+        &mut s.d,
+        &EditSketch {
+            element: s.el,
+            feature: sketch3,
+            op: SketchOp::AddPoint {
+                pos: Vec2::new(0.0, -65.0),
+            },
+        },
+    )
+    .unwrap();
+    let point =
+        s.d.element(s.el)
+            .unwrap()
+            .feature(sketch3)
+            .unwrap()
+            .sketch()
+            .unwrap()
+            .geometry
+            .points
+            .keys()
+            .next()
+            .unwrap();
     let mut tap = HoleSpec::default();
     tap.hole_type = HoleType::Tapped;
     tap.size = "M10".into();
@@ -320,7 +426,14 @@ fn reflector_every_step() {
     tap.start = HoleStart::Part;
     let hole2 = s.add(
         "Hole",
-        FeatureKind::Hole(HoleFeature { points: vec![HolePoint { sketch: sketch3, point }], spec: tap, ..HoleFeature::default() }),
+        FeatureKind::Hole(HoleFeature {
+            points: vec![HolePoint {
+                sketch: sketch3,
+                point,
+            }],
+            spec: tap,
+            ..HoleFeature::default()
+        }),
     );
     let v5 = s.volume();
     let tapped = blind_volume(8.5, 20.0);
@@ -338,14 +451,21 @@ fn reflector_every_step() {
         .iter()
         .find(|e| {
             let (a, b) = (e.points[0], *e.points.last().unwrap());
-            (a[0] - rf::HALF).abs() < 1e-6 && (b[0] - rf::HALF).abs() < 1e-6 && (a[2] - top).abs() < 1e-6 && (b[2] - top).abs() < 1e-6
+            (a[0] - rf::HALF).abs() < 1e-6
+                && (b[0] - rf::HALF).abs() < 1e-6
+                && (a[2] - top).abs() < 1e-6
+                && (b[2] - top).abs() < 1e-6
         })
         .expect("the top edge of the +x side");
     let (a, b) = (side.points[0], *side.points.last().unwrap());
     let mut lp = PatternFeature::new(PatternKind::Linear);
     lp.pattern_type = PatternType::Face;
     lp.faces = faces;
-    lp.first.direction = Some(DirectionRef::Edge(EdgeRef { part: part.id, edge: side.name, seed: side.midpoint() }));
+    lp.first.direction = Some(DirectionRef::Edge(EdgeRef {
+        part: part.id,
+        edge: side.name,
+        seed: side.midpoint(),
+    }));
     lp.first.flip = b[1] < a[1];
     lp.first.distance = 26.0;
     lp.first.count = 6;
@@ -391,8 +511,18 @@ fn reflector_every_step() {
     let pocket = faces_of(&part, &[e3, f3]);
     assert_eq!(pocket.len(), 9);
     // Create selection → Pocket from its floor finds the same 9 faces.
-    let floor = part.solid.faces.iter().position(|f| f.name.op == e3.0 && matches!(f.name.origin, FaceOrigin::Cap { .. })).unwrap();
-    let mut found: Vec<_> = part.solid.pocket_faces(floor).into_iter().map(|i| part.solid.faces[i].name).collect();
+    let floor = part
+        .solid
+        .faces
+        .iter()
+        .position(|f| f.name.op == e3.0 && matches!(f.name.origin, FaceOrigin::Cap { .. }))
+        .unwrap();
+    let mut found: Vec<_> = part
+        .solid
+        .pocket_faces(floor)
+        .into_iter()
+        .map(|i| part.solid.faces[i].name)
+        .collect();
     let mut want: Vec<_> = pocket.iter().map(|f| f.face).collect();
     found.sort();
     want.sort();
@@ -421,7 +551,11 @@ fn reflector_every_step() {
     let mass = r.mass.expect("a material").mass;
     close(mass, m.volume * 2.705e-6, 1e-12);
     let mesh = done.solid.volume();
-    assert!((m.volume - mesh).abs() < 6e-4 * m.volume, "OCCT {} vs mesh {mesh}", m.volume);
+    assert!(
+        (m.volume - mesh).abs() < 6e-4 * m.volume,
+        "OCCT {} vs mesh {mesh}",
+        m.volume
+    );
     println!(
         "reflector stand-in: V0 {v0:.3}, step drops {:.3} (closed {dv1:.3}), fillets +{added:.3}, pattern {:.3}, \
          hole {:.3}, tapped {:.3}, face pattern {:.3}, pocket {:.3}, rounds +{:.3}, mirror {:.3}; V {:.3} mm³ \
@@ -451,7 +585,8 @@ fn the_fixture_is_current() {
     // `fixtures/reflector_standin.cadrs` is the stand-in document as `rf::document()` builds
     // it. Regenerate it with `CADRS_WRITE_FIXTURES=1 cargo test -p cadrs_core --test reflector`.
     let doc = rf::document().unwrap();
-    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../fixtures/reflector_standin.cadrs");
+    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../fixtures/reflector_standin.cadrs");
     let file = rf::file(doc.clone());
     let text = ron::ser::to_string_pretty(&file, ron::ser::PrettyConfig::default()).unwrap();
     if std::env::var("CADRS_WRITE_FIXTURES").is_ok() {
@@ -459,5 +594,8 @@ fn the_fixture_is_current() {
         std::fs::write(&path, &text).unwrap();
     }
     let stored = cadrs_core::Store::load_path(&path).expect("the fixture loads");
-    assert_eq!(stored.document, doc, "fixtures/reflector_standin.cadrs is out of date");
+    assert_eq!(
+        stored.document, doc,
+        "fixtures/reflector_standin.cadrs is out of date"
+    );
 }

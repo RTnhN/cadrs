@@ -36,16 +36,29 @@ use bevy::picking::hover::Hovered;
 use bevy::prelude::*;
 use bevy::text::FontWeight;
 use bevy::ui_widgets::Activate;
-use cadrs_core::assembly::bom::{self, ApplyBomTemplate, Bom, BomColumn, BomOptions, BomRowKey, BomSettings, BomTemplate, BomView, SaveBomTemplate, SetBomSettings};
-use cadrs_core::properties::{GenerateMissingPartNumbers, PropertyKey, PropertyOwner, PropertyValue, SetProperties};
 use cadrs_core::ElementId;
+use cadrs_core::assembly::bom::{
+    self, ApplyBomTemplate, Bom, BomColumn, BomOptions, BomRowKey, BomSettings, BomTemplate,
+    BomView, SaveBomTemplate, SetBomSettings,
+};
+use cadrs_core::properties::{
+    GenerateMissingPartNumbers, PropertyKey, PropertyOwner, PropertyValue, SetProperties,
+};
 use cadrs_ui::ellipsis::Ellipsis;
-use cadrs_ui::inline_edit::{DoubleClick, DoubleClickable, InlineEdit, InlineEditCommit, InlineEditLabel, InlineEditOptions, begin_inline_edit};
-use cadrs_ui::menu::{ContextMenuAnchor, ContextMenuRequested, Menu, MenuAction, MenuItem, MenuOpenAnchor};
+use cadrs_ui::inline_edit::{
+    DoubleClick, DoubleClickable, InlineEdit, InlineEditCommit, InlineEditLabel, InlineEditOptions,
+    begin_inline_edit,
+};
+use cadrs_ui::menu::{
+    ContextMenuAnchor, ContextMenuRequested, Menu, MenuAction, MenuItem, MenuOpenAnchor,
+};
 use cadrs_ui::name_popup::{NamePopup, NamePopupCommit};
 use cadrs_ui::prelude::*;
 use cadrs_ui::table::TableHeaderCell;
-use cadrs_ui::{Button, Column, ColumnSort, Select, SelectChange, TableBody, TableColumnResize, TableHeader, TableRoot, TableRow, TableSortChange, open_context_menu, open_menu};
+use cadrs_ui::{
+    Button, Column, ColumnSort, Select, SelectChange, TableBody, TableColumnResize, TableHeader,
+    TableRoot, TableRow, TableSortChange, open_context_menu, open_menu,
+};
 
 use crate::appearance::SidePanel;
 use crate::parts::HoverParts;
@@ -59,9 +72,13 @@ impl Plugin for BomPanelPlugin {
         app.init_resource::<BomUi>()
             .add_systems(
                 Update,
-                (bom_trigger, bom_hover, strip_button, sync_row_selection).after(crate::parts::PartsSet).run_if(in_state(AppState::Document)),
+                (bom_trigger, bom_hover, strip_button, sync_row_selection)
+                    .after(crate::parts::PartsSet)
+                    .run_if(in_state(AppState::Document)),
             )
-            .add_systems(OnExit(AppState::Document), |mut ui: ResMut<BomUi>| *ui = BomUi::default())
+            .add_systems(OnExit(AppState::Document), |mut ui: ResMut<BomUi>| {
+                *ui = BomUi::default()
+            })
             .add_observer(on_activate)
             .add_observer(on_double_click)
             .add_observer(on_context_menu)
@@ -146,7 +163,10 @@ enum BomMenuFor {
 
 /// The materials the picker offers (the bundled library, then the document's).
 fn materials(doc: &cadrs_core::Document) -> Vec<cadrs_core::Material> {
-    let mut out: Vec<cadrs_core::Material> = cadrs_core::material::LIBRARY.iter().map(|m| m.material()).collect();
+    let mut out: Vec<cadrs_core::Material> = cadrs_core::material::LIBRARY
+        .iter()
+        .map(|m| m.material())
+        .collect();
     for l in &doc.material_libraries {
         out.extend(l.materials.iter().filter_map(|m| l.material(&m.name)));
     }
@@ -164,11 +184,20 @@ fn compute(world: &mut World, options: &BomOptions) -> Option<(ElementId, Bom)> 
 }
 
 fn options(ui: &BomUi) -> BomOptions {
-    BomOptions { expand_all: false, expanded: ui.expanded.clone(), sort: ui.sort }
+    BomOptions {
+        expand_all: false,
+        expanded: ui.expanded.clone(),
+        sort: ui.sort,
+    }
 }
 
 fn settings(world: &World, element: ElementId) -> Option<BomSettings> {
-    world.get_resource::<ActiveDocument>()?.doc.element(element)?.assembly_model().map(|a| a.bom.clone())
+    world
+        .get_resource::<ActiveDocument>()?
+        .doc
+        .element(element)?
+        .assembly_model()
+        .map(|a| a.bom.clone())
 }
 
 fn run(world: &mut World, cmd: &dyn cadrs_core::Command) -> bool {
@@ -176,10 +205,21 @@ fn run(world: &mut World, cmd: &dyn cadrs_core::Command) -> bool {
 }
 
 fn set_settings(world: &mut World, label: &str, f: impl FnOnce(&mut BomSettings)) {
-    let Some((element, _)) = world.resource::<BomUi>().bom.clone() else { return };
-    let Some(mut s) = settings(world, element) else { return };
+    let Some((element, _)) = world.resource::<BomUi>().bom.clone() else {
+        return;
+    };
+    let Some(mut s) = settings(world, element) else {
+        return;
+    };
     f(&mut s);
-    run(world, &SetBomSettings { element, settings: s, label: label.into() });
+    run(
+        world,
+        &SetBomSettings {
+            element,
+            settings: s,
+            label: label.into(),
+        },
+    );
 }
 
 /// Starts a rebuild when the document, the selection or the view options change.
@@ -193,7 +233,11 @@ fn bom_trigger(
     q_panel: Query<Entity, With<BomPanelRoot>>,
     mut commands: Commands,
 ) {
-    let want = *open == SidePanel::Bom && *kind == ActiveKind::Assembly && doc.as_ref().is_some_and(|d| super::active_assembly(d).is_some());
+    let want = *open == SidePanel::Bom
+        && *kind == ActiveKind::Assembly
+        && doc
+            .as_ref()
+            .is_some_and(|d| super::active_assembly(d).is_some());
     if !want {
         for e in &q_panel {
             commands.entity(e).try_despawn();
@@ -201,7 +245,10 @@ fn bom_trigger(
         return;
     }
     let _ = &selection;
-    let changed = doc.as_ref().is_some_and(|d| d.is_changed()) || ui.is_changed() || open.is_changed() || q_panel.is_empty();
+    let changed = doc.as_ref().is_some_and(|d| d.is_changed())
+        || ui.is_changed()
+        || open.is_changed()
+        || q_panel.is_empty();
     if changed {
         commands.queue(rebuild);
     }
@@ -214,9 +261,16 @@ fn row_picks(row: &bom::BomRow) -> Vec<Pick> {
         return Vec::new();
     }
     if row.depth == 0 {
-        return row.instances.iter().map(|i| Pick::Part(i.part_id())).collect();
+        return row
+            .instances
+            .iter()
+            .map(|i| Pick::Part(i.part_id()))
+            .collect();
     }
-    row.occurrences.iter().map(|o| Pick::Part(super::occurrence_part(*o))).collect()
+    row.occurrences
+        .iter()
+        .map(|o| Pick::Part(super::occurrence_part(*o)))
+        .collect()
 }
 
 /// About how wide `text` is in Inter at 13 px (the table's font), for sizing columns to their
@@ -261,7 +315,9 @@ fn col_width(bom: &Bom, i: usize, widths: &[(BomColumn, f32)]) -> f32 {
             text_width(&r.cells[i], r.top_level) + extra
         })
         .fold(0.0, f32::max);
-    (header.max(cells) + CELL_PAD + 2.0).clamp(COL_MIN, COL_MAX).ceil()
+    (header.max(cells) + CELL_PAD + 2.0)
+        .clamp(COL_MIN, COL_MAX)
+        .ceil()
 }
 
 /// P3B.8 judge (a clipped last header, "Unit of meas"): when the columns fitted to their cells
@@ -274,16 +330,29 @@ fn fit_widths(bom: &Bom, dragged: &[(BomColumn, f32)], widths: &mut [f32], room:
             if dragged.iter().any(|(c, _)| *c == bom.columns[i]) {
                 widths[i]
             } else {
-                (text_width(&bom.labels[i], true) + ARROW_SLOT + CELL_PAD + 2.0).clamp(COL_MIN, COL_MAX).ceil()
+                (text_width(&bom.labels[i], true) + ARROW_SLOT + CELL_PAD + 2.0)
+                    .clamp(COL_MIN, COL_MAX)
+                    .ceil()
             }
         })
         .collect();
     let mut over = widths.iter().sum::<f32>() - room;
     // Take from the widest first, a pixel at a time in bulk steps.
     while over > 0.5 {
-        let Some(k) = (0..widths.len()).filter(|k| widths[*k] > floor[*k] + 0.5).max_by(|a, b| widths[*a].total_cmp(&widths[*b])) else { break };
-        let second = (0..widths.len()).filter(|j| *j != k && widths[*j] > floor[*j] + 0.5).map(|j| widths[j]).fold(floor[k], f32::max);
-        let take = (widths[k] - second).max(1.0).min(widths[k] - floor[k]).min(over);
+        let Some(k) = (0..widths.len())
+            .filter(|k| widths[*k] > floor[*k] + 0.5)
+            .max_by(|a, b| widths[*a].total_cmp(&widths[*b]))
+        else {
+            break;
+        };
+        let second = (0..widths.len())
+            .filter(|j| *j != k && widths[*j] > floor[*j] + 0.5)
+            .map(|j| widths[j])
+            .fold(floor[k], f32::max);
+        let take = (widths[k] - second)
+            .max(1.0)
+            .min(widths[k] - floor[k])
+            .min(over);
         widths[k] -= take;
         over -= take;
     }
@@ -292,13 +361,31 @@ fn fit_widths(bom: &Bom, dragged: &[(BomColumn, f32)], widths: &mut [f32], room:
 /// Rebuilds the panel if what it shows changed.
 fn rebuild(world: &mut World) {
     let ui = world.resource::<BomUi>().clone();
-    let Some((element, bom)) = compute(world, &options(&ui)) else { return };
+    let Some((element, bom)) = compute(world, &options(&ui)) else {
+        return;
+    };
     // The rows' selected look follows the selection without a rebuild (`sync_row_selection`),
     // so a double click's two clicks land on the same cell.
     let selected: Vec<bool> = vec![false; bom.rows.len()];
     let s = settings(world, element).unwrap_or_default();
-    let templates: Vec<String> = world.resource::<ActiveDocument>().doc.properties.bom_templates.iter().map(|t| t.name.clone()).collect();
-    let key = format!("{element:?}{:?}{:?}{s:?}{templates:?}{:?}{:?}", bom.labels, bom.rows.iter().map(|r| (&r.cells, r.excluded, r.expanded, r.has_children, r.depth)).collect::<Vec<_>>(), ui.sort, ui.widths);
+    let templates: Vec<String> = world
+        .resource::<ActiveDocument>()
+        .doc
+        .properties
+        .bom_templates
+        .iter()
+        .map(|t| t.name.clone())
+        .collect();
+    let key = format!(
+        "{element:?}{:?}{:?}{s:?}{templates:?}{:?}{:?}",
+        bom.labels,
+        bom.rows
+            .iter()
+            .map(|r| (&r.cells, r.excluded, r.expanded, r.has_children, r.depth))
+            .collect::<Vec<_>>(),
+        ui.sort,
+        ui.widths
+    );
     let mut q_panel = world.query_filtered::<Entity, With<BomPanelRoot>>();
     let old: Vec<Entity> = q_panel.iter(world).collect();
     {
@@ -317,41 +404,69 @@ fn rebuild(world: &mut World) {
         world.entity_mut(e).despawn();
     }
     let mut q_area = world.query_filtered::<(Entity, &ChildOf), With<ViewportArea>>();
-    let Some((area, parent)) = q_area.iter(world).next().map(|(e, c)| (e, c.parent())) else { return };
+    let Some((area, parent)) = q_area.iter(world).next().map(|(e, c)| (e, c.parent())) else {
+        return;
+    };
     let theme = world.resource::<Theme>().clone();
     let units = world.resource::<ActiveDocument>().doc.units;
     let width = ui.panel_width.unwrap_or(PANEL_W);
-    let panel = spawn_panel(world, &theme, &bom, &s, &selected, &ui, width, scroll, units);
-    let at = world.get::<Children>(parent).and_then(|c| c.iter().position(|e| e == area)).map_or(0, |i| i + 1);
+    let panel = spawn_panel(
+        world, &theme, &bom, &s, &selected, &ui, width, scroll, units,
+    );
+    let at = world
+        .get::<Children>(parent)
+        .and_then(|c| c.iter().position(|e| e == area))
+        .map_or(0, |i| i + 1);
     world.entity_mut(parent).insert_children(at, &[panel]);
 }
 
 #[allow(clippy::too_many_arguments)]
-fn spawn_panel(world: &mut World, t: &Theme, bom: &Bom, s: &BomSettings, selected: &[bool], ui: &BomUi, width: f32, scroll: ScrollPosition, units: cadrs_sketch::units::Units) -> Entity {
+fn spawn_panel(
+    world: &mut World,
+    t: &Theme,
+    bom: &Bom,
+    s: &BomSettings,
+    selected: &[bool],
+    ui: &BomUi,
+    width: f32,
+    scroll: ScrollPosition,
+    units: cadrs_sketch::units::Units,
+) -> Entity {
     // P3H.6 judge: a composite part's row has the composite part icon.
     let composite_rows: Vec<bool> = {
         let doc = world.get_resource::<ActiveDocument>().map(|d| &d.doc);
         bom.rows
             .iter()
             .map(|r| match (doc, r.key.owner) {
-                (Some(d), PropertyOwner::Part { element, part }) => cadrs_core::transform::is_composite_part(d, element, part),
+                (Some(d), PropertyOwner::Part { element, part }) => {
+                    cadrs_core::transform::is_composite_part(d, element, part)
+                }
                 _ => false,
             })
             .collect()
     };
     let sort = ui.sort;
-    let mut widths: Vec<f32> = (0..bom.columns.len()).map(|i| col_width(bom, i, &ui.widths)).collect();
+    let mut widths: Vec<f32> = (0..bom.columns.len())
+        .map(|i| col_width(bom, i, &ui.widths))
+        .collect();
     fit_widths(bom, &ui.widths, &mut widths, width - 14.0);
     let columns: Vec<Column> = bom
         .columns
         .iter()
         .enumerate()
         .map(|(i, c)| {
-            let mut col = Column::new(format!("col-{i}"), bom.labels[i].clone()).width(widths[i]).min_width(COL_MIN).sortable();
+            let mut col = Column::new(format!("col-{i}"), bom.labels[i].clone())
+                .width(widths[i])
+                .min_width(COL_MIN)
+                .sortable();
             if let Some((sc, asc)) = sort
                 && sc == *c
             {
-                col = col.sort(if asc { ColumnSort::Ascending } else { ColumnSort::Descending });
+                col = col.sort(if asc {
+                    ColumnSort::Ascending
+                } else {
+                    ColumnSort::Descending
+                });
             }
             col
         })
@@ -365,14 +480,24 @@ fn spawn_panel(world: &mut World, t: &Theme, bom: &Bom, s: &BomSettings, selecte
             crate::appearance::side_panel_node(t),
         ))
         .id();
-    commands.entity(panel).entry::<Node>().and_modify(move |mut n| n.width = Val::Px(width));
+    commands
+        .entity(panel)
+        .entry::<Node>()
+        .and_modify(move |mut n| n.width = Val::Px(width));
     commands.entity(panel).with_children(|p| {
         // The left edge: drag to resize the panel.
         p.spawn((
             Name::new("bom-panel-resize"),
             BomPanelResize::default(),
             Hovered::default(),
-            Node { position_type: PositionType::Absolute, left: Val::Px(-1.0), top: Val::Px(0.0), bottom: Val::Px(0.0), width: Val::Px(5.0), ..default() },
+            Node {
+                position_type: PositionType::Absolute,
+                left: Val::Px(-1.0),
+                top: Val::Px(0.0),
+                bottom: Val::Px(0.0),
+                width: Val::Px(5.0),
+                ..default()
+            },
             ZIndex(10),
         ));
         crate::appearance::side_panel_header(p, t, "Bill of materials", "bom-panel-close");
@@ -392,96 +517,207 @@ fn spawn_panel(world: &mut World, t: &Theme, bom: &Bom, s: &BomSettings, selecte
         ))
         .with_children(|r| {
             let view = if s.view == BomView::Structured { 0 } else { 1 };
-            r.spawn(Select::new("bom-view").width(Val::Px(120.0)).bordered().option("Structured", true).option("Flattened", true).selected(view).build(t))
-                .entry::<Node>()
-                .and_modify(|mut n| n.flex_grow = 0.0);
-            r.spawn((Button::new("bom-apply-template").icon("custom-table").label("Apply template").small().ghost().build(t), BomToolbarButton));
-            r.spawn((Button::new("bom-add-column").icon("column-add").label("Add column").small().ghost().build(t), BomToolbarButton));
-            r.spawn(Node { flex_grow: 1.0, ..default() });
-            r.spawn((IconButton::new("bom-overflow", "more-horizontal").tooltip("More").build(t), BomToolbarButton));
+            r.spawn(
+                Select::new("bom-view")
+                    .width(Val::Px(120.0))
+                    .bordered()
+                    .option("Structured", true)
+                    .option("Flattened", true)
+                    .selected(view)
+                    .build(t),
+            )
+            .entry::<Node>()
+            .and_modify(|mut n| n.flex_grow = 0.0);
+            r.spawn((
+                Button::new("bom-apply-template")
+                    .icon("custom-table")
+                    .label("Apply template")
+                    .small()
+                    .ghost()
+                    .build(t),
+                BomToolbarButton,
+            ));
+            r.spawn((
+                Button::new("bom-add-column")
+                    .icon("column-add")
+                    .label("Add column")
+                    .small()
+                    .ghost()
+                    .build(t),
+                BomToolbarButton,
+            ));
+            r.spawn(Node {
+                flex_grow: 1.0,
+                ..default()
+            });
+            r.spawn((
+                IconButton::new("bom-overflow", "more-horizontal")
+                    .tooltip("More")
+                    .build(t),
+                BomToolbarButton,
+            ));
         });
         p.spawn((
             Name::new("bom-table"),
             TableRoot,
-            Node { flex_direction: FlexDirection::Column, flex_grow: 1.0, min_height: Val::Px(0.0), min_width: Val::Px(0.0), overflow: Overflow::clip(), ..default() },
+            Node {
+                flex_direction: FlexDirection::Column,
+                flex_grow: 1.0,
+                min_height: Val::Px(0.0),
+                min_width: Val::Px(0.0),
+                overflow: Overflow::clip(),
+                ..default()
+            },
         ))
         .with_children(|tbl| {
-            tbl.spawn(TableHeader::new("bom-header", columns.clone()).height(28.0).double_click_sort().menus().resizable().build(t));
+            tbl.spawn(
+                TableHeader::new("bom-header", columns.clone())
+                    .height(28.0)
+                    .double_click_sort()
+                    .menus()
+                    .resizable()
+                    .build(t),
+            );
             // Both ways: a table wider than the panel scrolls sideways (the header follows).
             let body = tbl
                 .spawn((
                     Name::new("bom-rows"),
                     BomRowsScroll,
                     TableBody,
-                    Node { flex_direction: FlexDirection::Column, flex_grow: 1.0, min_height: Val::Px(0.0), overflow: Overflow::scroll(), ..default() },
+                    Node {
+                        flex_direction: FlexDirection::Column,
+                        flex_grow: 1.0,
+                        min_height: Val::Px(0.0),
+                        overflow: Overflow::scroll(),
+                        ..default()
+                    },
                     scroll,
                 ))
                 .with_children(|rows| {
-                for (ri, row) in bom.rows.iter().enumerate() {
-                    let mut tr = TableRow::new(format!("bom-row-{ri}"), &columns).height(26.0).selected(selected.get(ri).copied().unwrap_or(false));
-                    for (ci, c) in bom.columns.iter().enumerate() {
-                        let text = row.cells[ci].clone();
-                        let muted = row.excluded;
-                        let fg = if muted { t.muted_foreground } else { t.foreground };
-                        let weight = if row.top_level { FontWeight::BOLD } else { FontWeight::MEDIUM };
-                        let font = t.font_base;
-                        let editable = c.editable() && !row.top_level;
-                        let is_text = matches!(c, BomColumn::Property(k) if k.is_text());
-                        let indent = if *c == BomColumn::Item { row.depth as f32 * 12.0 } else { 0.0 };
-                        let caret = (*c == BomColumn::Item && row.has_children).then_some(if row.expanded { "chevron-down" } else { "chevron-right" });
-                        let icon_name = (*c == BomColumn::Property(PropertyKey::Name)).then(|| match row.key.owner {
-                            PropertyOwner::Assembly { .. } => "assembly",
-                            PropertyOwner::Part { .. } if composite_rows.get(ri).copied().unwrap_or(false) => "composite-part",
-                            PropertyOwner::Part { .. } if text.starts_with("Hex") || text.contains(" x ") => "standard-content",
-                            PropertyOwner::Part { .. } => "part",
-                            PropertyOwner::Item { .. } => "tag",
-                        });
-                        let swatch = (*c == BomColumn::Property(PropertyKey::Appearance) && text.starts_with('#')).then(|| {
-                            let h = |i: usize| u8::from_str_radix(&text[i..i + 2], 16).unwrap_or(0);
-                            Color::srgb_u8(h(1), h(3), h(5))
-                        });
-                        let theme = t.clone();
-                        tr = tr.cell(move |cell| {
-                            let mut e = cell.spawn((
-                                Name::new(format!("bom-cell-{ri}-{ci}")),
-                                BomCellRef { row: ri, col: ci },
-                                DoubleClickable,
-                                Node {
-                                    width: Val::Percent(100.0),
-                                    height: Val::Percent(100.0),
-                                    align_items: AlignItems::Center,
-                                    column_gap: Val::Px(4.0),
-                                    padding: UiRect::left(Val::Px(indent)),
-                                    overflow: Overflow::clip(),
-                                    ..default()
+                    for (ri, row) in bom.rows.iter().enumerate() {
+                        let mut tr = TableRow::new(format!("bom-row-{ri}"), &columns)
+                            .height(26.0)
+                            .selected(selected.get(ri).copied().unwrap_or(false));
+                        for (ci, c) in bom.columns.iter().enumerate() {
+                            let text = row.cells[ci].clone();
+                            let muted = row.excluded;
+                            let fg = if muted {
+                                t.muted_foreground
+                            } else {
+                                t.foreground
+                            };
+                            let weight = if row.top_level {
+                                FontWeight::BOLD
+                            } else {
+                                FontWeight::MEDIUM
+                            };
+                            let font = t.font_base;
+                            let editable = c.editable() && !row.top_level;
+                            let is_text = matches!(c, BomColumn::Property(k) if k.is_text());
+                            let indent = if *c == BomColumn::Item {
+                                row.depth as f32 * 12.0
+                            } else {
+                                0.0
+                            };
+                            let caret = (*c == BomColumn::Item && row.has_children).then_some(
+                                if row.expanded {
+                                    "chevron-down"
+                                } else {
+                                    "chevron-right"
                                 },
-                            ));
-                            if editable && is_text {
-                                e.insert(InlineEdit::default());
-                            }
-                            e.with_children(|x| {
-                                if let Some(c) = caret {
-                                    x.spawn((icon(c, 12.0, theme.muted_foreground), Pickable::IGNORE));
-                                }
-                                if let Some(i) = icon_name {
-                                    x.spawn((icon(i, 14.0, theme.tool_foreground), Pickable::IGNORE));
-                                }
-                                if let Some(c) = swatch {
-                                    x.spawn((Node { width: Val::Px(14.0), height: Val::Px(14.0), border: UiRect::all(Val::Px(1.0)), ..default() }, BackgroundColor(c), BorderColor::all(Color::srgba(0.0, 0.0, 0.0, 0.3)), Pickable::IGNORE));
-                                }
-                                x.spawn((theme.text(text, font, weight, fg), Ellipsis::default().with_tooltip(), Ellipsis::node(), InlineEditLabel, Pickable::IGNORE));
+                            );
+                            let icon_name =
+                                (*c == BomColumn::Property(PropertyKey::Name)).then(|| {
+                                    match row.key.owner {
+                                        PropertyOwner::Assembly { .. } => "assembly",
+                                        PropertyOwner::Part { .. }
+                                            if composite_rows.get(ri).copied().unwrap_or(false) =>
+                                        {
+                                            "composite-part"
+                                        }
+                                        PropertyOwner::Part { .. }
+                                            if text.starts_with("Hex") || text.contains(" x ") =>
+                                        {
+                                            "standard-content"
+                                        }
+                                        PropertyOwner::Part { .. } => "part",
+                                        PropertyOwner::Item { .. } => "tag",
+                                    }
+                                });
+                            let swatch = (*c == BomColumn::Property(PropertyKey::Appearance)
+                                && text.starts_with('#'))
+                            .then(|| {
+                                let h =
+                                    |i: usize| u8::from_str_radix(&text[i..i + 2], 16).unwrap_or(0);
+                                Color::srgb_u8(h(1), h(3), h(5))
                             });
-                        });
+                            let theme = t.clone();
+                            tr = tr.cell(move |cell| {
+                                let mut e = cell.spawn((
+                                    Name::new(format!("bom-cell-{ri}-{ci}")),
+                                    BomCellRef { row: ri, col: ci },
+                                    DoubleClickable,
+                                    Node {
+                                        width: Val::Percent(100.0),
+                                        height: Val::Percent(100.0),
+                                        align_items: AlignItems::Center,
+                                        column_gap: Val::Px(4.0),
+                                        padding: UiRect::left(Val::Px(indent)),
+                                        overflow: Overflow::clip(),
+                                        ..default()
+                                    },
+                                ));
+                                if editable && is_text {
+                                    e.insert(InlineEdit::default());
+                                }
+                                e.with_children(|x| {
+                                    if let Some(c) = caret {
+                                        x.spawn((
+                                            icon(c, 12.0, theme.muted_foreground),
+                                            Pickable::IGNORE,
+                                        ));
+                                    }
+                                    if let Some(i) = icon_name {
+                                        x.spawn((
+                                            icon(i, 14.0, theme.tool_foreground),
+                                            Pickable::IGNORE,
+                                        ));
+                                    }
+                                    if let Some(c) = swatch {
+                                        x.spawn((
+                                            Node {
+                                                width: Val::Px(14.0),
+                                                height: Val::Px(14.0),
+                                                border: UiRect::all(Val::Px(1.0)),
+                                                ..default()
+                                            },
+                                            BackgroundColor(c),
+                                            BorderColor::all(Color::srgba(0.0, 0.0, 0.0, 0.3)),
+                                            Pickable::IGNORE,
+                                        ));
+                                    }
+                                    x.spawn((
+                                        theme.text(text, font, weight, fg),
+                                        Ellipsis::default().with_tooltip(),
+                                        Ellipsis::node(),
+                                        InlineEditLabel,
+                                        Pickable::IGNORE,
+                                    ));
+                                });
+                            });
+                        }
+                        rows.spawn((tr.build(t), BomRowRef(ri)));
                     }
-                    rows.spawn((tr.build(t), BomRowRef(ri)));
-                }
                 })
                 .id();
             tbl.spawn(cadrs_ui::horizontal_scrollbar("bom-hscroll", body));
         });
         // A20.9: the totals, with the top-level row.
         if s.top_level_row {
-            let mass = bom.total_mass.map(|m| bom::format_mass(m, &units)).unwrap_or_else(|| "–".into());
+            let mass = bom
+                .total_mass
+                .map(|m| bom::format_mass(m, &units))
+                .unwrap_or_else(|| "–".into());
             p.spawn((
                 Name::new("bom-totals"),
                 Node {
@@ -497,8 +733,18 @@ fn spawn_panel(world: &mut World, t: &Theme, bom: &Bom, s: &BomSettings, selecte
             ))
             .with_children(|f| {
                 f.spawn(t.text("Totals", t.font_base, FontWeight::BOLD, t.foreground));
-                f.spawn(t.text(format!("Quantity {}", bom.total_quantity), t.font_base, FontWeight::MEDIUM, t.foreground));
-                f.spawn(t.text(format!("Mass {mass}"), t.font_base, FontWeight::MEDIUM, t.foreground));
+                f.spawn(t.text(
+                    format!("Quantity {}", bom.total_quantity),
+                    t.font_base,
+                    FontWeight::MEDIUM,
+                    t.foreground,
+                ));
+                f.spawn(t.text(
+                    format!("Mass {mass}"),
+                    t.font_base,
+                    FontWeight::MEDIUM,
+                    t.foreground,
+                ));
             });
         }
     });
@@ -510,7 +756,16 @@ fn spawn_panel(world: &mut World, t: &Theme, bom: &Bom, s: &BomSettings, selecte
 fn bom_hover(q: Query<(&BomRowRef, &Hovered)>, ui: Res<BomUi>, mut hover: ResMut<HoverParts>) {
     let row = q.iter().find(|(_, h)| h.get()).map(|(r, _)| r.0);
     let want: Vec<cadrs_core::PartId> = match (row, &ui.bom) {
-        (Some(r), Some((_, bom))) => bom.rows.get(r).map(|r| r.occurrences.iter().map(|o| super::occurrence_part(*o)).collect()).unwrap_or_default(),
+        (Some(r), Some((_, bom))) => bom
+            .rows
+            .get(r)
+            .map(|r| {
+                r.occurrences
+                    .iter()
+                    .map(|o| super::occurrence_part(*o))
+                    .collect()
+            })
+            .unwrap_or_default(),
         _ => Vec::new(),
     };
     if hover.1 != want {
@@ -520,7 +775,12 @@ fn bom_hover(q: Query<(&BomRowRef, &Hovered)>, ui: Res<BomUi>, mut hover: ResMut
 
 /// A row shows selected while all of its instances are (A20.2's cross-highlight).
 /// (A row whose context menu is open stays highlighted until the menu closes.)
-fn sync_row_selection(selection: Res<Selection>, ui: Res<BomUi>, q: Query<(Entity, &BomRowRef, Has<cadrs_ui::style::Selected>), Without<MenuOpenAnchor>>, mut commands: Commands) {
+fn sync_row_selection(
+    selection: Res<Selection>,
+    ui: Res<BomUi>,
+    q: Query<(Entity, &BomRowRef, Has<cadrs_ui::style::Selected>), Without<MenuOpenAnchor>>,
+    mut commands: Commands,
+) {
     let Some((_, bom)) = &ui.bom else { return };
     for (e, r, has) in &q {
         let want = bom.rows.get(r.0).is_some_and(|row| {
@@ -543,25 +803,57 @@ fn strip_button(kind: Res<ActiveKind>, mut q: Query<(Ref<Name>, &mut Node)>) {
         if !all && !n.is_added() {
             continue;
         }
-        if matches!(n.as_str(), "panel-bom" | "panel-exploded-views" | "panel-named-positions") {
-            node.display = if *kind == ActiveKind::Assembly { Display::Flex } else { Display::None };
+        if matches!(
+            n.as_str(),
+            "panel-bom" | "panel-exploded-views" | "panel-named-positions"
+        ) {
+            node.display = if *kind == ActiveKind::Assembly {
+                Display::Flex
+            } else {
+                Display::None
+            };
         }
     }
 }
 
 fn row_of(world: &World, r: usize) -> Option<bom::BomRow> {
-    world.resource::<BomUi>().bom.as_ref()?.1.rows.get(r).cloned()
+    world
+        .resource::<BomUi>()
+        .bom
+        .as_ref()?
+        .1
+        .rows
+        .get(r)
+        .cloned()
 }
 
 fn column_of(world: &World, c: usize) -> Option<BomColumn> {
-    world.resource::<BomUi>().bom.as_ref()?.1.columns.get(c).copied()
+    world
+        .resource::<BomUi>()
+        .bom
+        .as_ref()?
+        .1
+        .columns
+        .get(c)
+        .copied()
 }
 
 /// A click on a row (its item number): its instances selected (A20.2).
-fn on_activate(a: On<Activate>, q_row: Query<&BomRowRef>, q_name: Query<&Name>, keys: Res<ButtonInput<KeyCode>>, mut commands: Commands) {
+fn on_activate(
+    a: On<Activate>,
+    q_row: Query<&BomRowRef>,
+    q_name: Query<&Name>,
+    keys: Res<ButtonInput<KeyCode>>,
+    mut commands: Commands,
+) {
     if let Ok(r) = q_row.get(a.entity) {
         let r = r.0;
-        let add = keys.any_pressed([KeyCode::ControlLeft, KeyCode::ControlRight, KeyCode::ShiftLeft, KeyCode::ShiftRight]);
+        let add = keys.any_pressed([
+            KeyCode::ControlLeft,
+            KeyCode::ControlRight,
+            KeyCode::ShiftLeft,
+            KeyCode::ShiftRight,
+        ]);
         commands.queue(move |world: &mut World| {
             let Some(row) = row_of(world, r) else { return };
             let picks = row_picks(&row);
@@ -578,26 +870,51 @@ fn on_activate(a: On<Activate>, q_row: Query<&BomRowRef>, q_name: Query<&Name>, 
         });
         return;
     }
-    let Ok(name) = q_name.get(a.entity) else { return };
+    let Ok(name) = q_name.get(a.entity) else {
+        return;
+    };
     let entity = a.entity;
     match name.as_str() {
         "bom-apply-template" => commands.queue(move |world: &mut World| {
-            let templates: Vec<BomTemplate> = world.resource::<ActiveDocument>().doc.properties.bom_templates.clone();
+            let templates: Vec<BomTemplate> = world
+                .resource::<ActiveDocument>()
+                .doc
+                .properties
+                .bom_templates
+                .clone();
             // The layout shown now: the template it matches is checked.
-            let now = world.resource::<BomUi>().bom.as_ref().and_then(|(e, _)| settings(world, *e)).map(|s| BomTemplate::of("", &s));
-            let same = |t: &BomTemplate| now.as_ref().is_some_and(|n| BomTemplate { name: String::new(), ..t.clone() } == *n);
+            let now = world
+                .resource::<BomUi>()
+                .bom
+                .as_ref()
+                .and_then(|(e, _)| settings(world, *e))
+                .map(|s| BomTemplate::of("", &s));
+            let same = |t: &BomTemplate| {
+                now.as_ref().is_some_and(|n| {
+                    BomTemplate {
+                        name: String::new(),
+                        ..t.clone()
+                    } == *n
+                })
+            };
             // The built-in Default first (the default columns), then the saved ones.
             let mut menu = Menu::new("bom-template-menu")
                 .min_width(180.0)
                 .item_height(22.0)
                 .text_only()
-                .item(MenuItem::new("bom-template-default", BomTemplate::DEFAULT_NAME).checked(same(&BomTemplate::builtin_default())))
+                .item(
+                    MenuItem::new("bom-template-default", BomTemplate::DEFAULT_NAME)
+                        .checked(same(&BomTemplate::builtin_default())),
+                )
                 .separator();
             if templates.is_empty() {
-                menu = menu.item(MenuItem::new("bom-template-none", "No saved templates").disabled(true));
+                menu = menu
+                    .item(MenuItem::new("bom-template-none", "No saved templates").disabled(true));
             }
             for (i, t) in templates.iter().enumerate() {
-                menu = menu.item(MenuItem::new(format!("bom-template-{i}"), t.name.clone()).checked(same(t)));
+                menu = menu.item(
+                    MenuItem::new(format!("bom-template-{i}"), t.name.clone()).checked(same(t)),
+                );
             }
             let theme = world.resource::<Theme>().clone();
             let mut c = world.commands();
@@ -605,12 +922,20 @@ fn on_activate(a: On<Activate>, q_row: Query<&BomRowRef>, q_name: Query<&Name>, 
             world.flush();
         }),
         "bom-add-column" => commands.queue(move |world: &mut World| {
-            let Some((element, _)) = world.resource::<BomUi>().bom.clone() else { return };
+            let Some((element, _)) = world.resource::<BomUi>().bom.clone() else {
+                return;
+            };
             let s = settings(world, element).unwrap_or_default();
             let doc = &world.resource::<ActiveDocument>().doc;
-            let mut menu = Menu::new("bom-column-menu").min_width(180.0).item_height(22.0).text_only();
+            let mut menu = Menu::new("bom-column-menu")
+                .min_width(180.0)
+                .item_height(22.0)
+                .text_only();
             for (i, c) in addable(doc).into_iter().enumerate() {
-                menu = menu.item(MenuItem::new(format!("bom-add-col-{i}"), c.label(&doc.properties)).disabled(s.columns.contains(&c)));
+                menu = menu.item(
+                    MenuItem::new(format!("bom-add-col-{i}"), c.label(&doc.properties))
+                        .disabled(s.columns.contains(&c)),
+                );
             }
             let theme = world.resource::<Theme>().clone();
             let mut cm = world.commands();
@@ -618,7 +943,9 @@ fn on_activate(a: On<Activate>, q_row: Query<&BomRowRef>, q_name: Query<&Name>, 
             world.flush();
         }),
         "bom-overflow" => commands.queue(move |world: &mut World| {
-            let Some((element, _)) = world.resource::<BomUi>().bom.clone() else { return };
+            let Some((element, _)) = world.resource::<BomUi>().bom.clone() else {
+                return;
+            };
             let s = settings(world, element).unwrap_or_default();
             let sorted = world.resource::<BomUi>().sort.is_some();
             let menu = Menu::new("bom-overflow-menu")
@@ -628,11 +955,22 @@ fn on_activate(a: On<Activate>, q_row: Query<&BomRowRef>, q_name: Query<&Name>, 
                 .item(MenuItem::new("bom-copy", "Copy table").icon("copy"))
                 .item(MenuItem::new("bom-export-csv", "Export to CSV").icon("file-export"))
                 .separator()
-                .item(if s.show_excluded { MenuItem::new("bom-hide-excluded", "Hide excluded/suppressed") } else { MenuItem::new("bom-show-excluded", "Show excluded/suppressed") })
-                .item(if s.top_level_row { MenuItem::new("bom-hide-top-row", "Hide top-level assembly row") } else { MenuItem::new("bom-show-top-row", "Show top-level assembly row") })
+                .item(if s.show_excluded {
+                    MenuItem::new("bom-hide-excluded", "Hide excluded/suppressed")
+                } else {
+                    MenuItem::new("bom-show-excluded", "Show excluded/suppressed")
+                })
+                .item(if s.top_level_row {
+                    MenuItem::new("bom-hide-top-row", "Hide top-level assembly row")
+                } else {
+                    MenuItem::new("bom-show-top-row", "Show top-level assembly row")
+                })
                 .item(MenuItem::new("bom-reset-sort", "Reset sort").disabled(!sorted))
                 .separator()
-                .item(MenuItem::new("bom-generate-numbers", "Generate missing part numbers").icon("tag-new"))
+                .item(
+                    MenuItem::new("bom-generate-numbers", "Generate missing part numbers")
+                        .icon("tag-new"),
+                )
                 .align_end();
             let theme = world.resource::<Theme>().clone();
             let mut c = world.commands();
@@ -640,8 +978,14 @@ fn on_activate(a: On<Activate>, q_row: Query<&BomRowRef>, q_name: Query<&Name>, 
             world.flush();
         }),
         "assembly-properties" => commands.queue(|world: &mut World| {
-            if let Some(el) = world.get_resource::<ActiveDocument>().and_then(super::active_assembly) {
-                crate::properties_dialog::open_properties_dialog(world, PropertyOwner::Assembly { element: el });
+            if let Some(el) = world
+                .get_resource::<ActiveDocument>()
+                .and_then(super::active_assembly)
+            {
+                crate::properties_dialog::open_properties_dialog(
+                    world,
+                    PropertyOwner::Assembly { element: el },
+                );
             }
         }),
         _ => {}
@@ -651,20 +995,36 @@ fn on_activate(a: On<Activate>, q_row: Query<&BomRowRef>, q_name: Query<&Name>, 
 /// The columns Add column offers: Item, Quantity and every property.
 fn addable(doc: &cadrs_core::Document) -> Vec<BomColumn> {
     let mut out = vec![BomColumn::Item, BomColumn::Quantity];
-    out.extend(doc.properties.all_keys().into_iter().map(BomColumn::Property));
+    out.extend(
+        doc.properties
+            .all_keys()
+            .into_iter()
+            .map(BomColumn::Property),
+    );
     out
 }
 
 /// Double-click: a subassembly's item number expands or collapses it; a text cell is edited in
 /// place; a Material cell opens the material picker.
-fn on_double_click(ev: On<DoubleClick>, q: Query<(&BomCellRef, &UiGlobalTransform, &ComputedNode)>, mut commands: Commands) {
-    let Ok((cell, tf, node)) = q.get(ev.entity) else { return };
+fn on_double_click(
+    ev: On<DoubleClick>,
+    q: Query<(&BomCellRef, &UiGlobalTransform, &ComputedNode)>,
+    mut commands: Commands,
+) {
+    let Ok((cell, tf, node)) = q.get(ev.entity) else {
+        return;
+    };
     let (r, c, entity) = (cell.row, cell.col, ev.entity);
     // Where to open a picker: under the cell (logical px).
     let s = node.inverse_scale_factor();
-    let at = Vec2::new(tf.translation.x - node.size().x / 2.0, tf.translation.y + node.size().y / 2.0) * s;
+    let at = Vec2::new(
+        tf.translation.x - node.size().x / 2.0,
+        tf.translation.y + node.size().y / 2.0,
+    ) * s;
     commands.queue(move |world: &mut World| {
-        let (Some(row), Some(col)) = (row_of(world, r), column_of(world, c)) else { return };
+        let (Some(row), Some(col)) = (row_of(world, r), column_of(world, c)) else {
+            return;
+        };
         if row.top_level {
             return;
         }
@@ -678,19 +1038,34 @@ fn on_double_click(ev: On<DoubleClick>, q: Query<(&BomCellRef, &UiGlobalTransfor
                     None => ui.expanded.push(row.key.clone()),
                 }
             }
-            BomColumn::Property(PropertyKey::Material) if matches!(row.key.owner, PropertyOwner::Part { .. }) => {
+            BomColumn::Property(PropertyKey::Material)
+                if matches!(row.key.owner, PropertyOwner::Part { .. }) =>
+            {
                 let doc = world.resource::<ActiveDocument>().doc.clone();
                 // The part's material now is checked.
                 let current = row.cells[c].trim().to_string();
-                let mut menu = Menu::new("bom-material-picker").min_width(200.0).item_height(20.0).text_only().item(MenuItem::new("bom-material-none", "No material").checked(current.is_empty()));
+                let mut menu = Menu::new("bom-material-picker")
+                    .min_width(200.0)
+                    .item_height(20.0)
+                    .text_only()
+                    .item(
+                        MenuItem::new("bom-material-none", "No material")
+                            .checked(current.is_empty()),
+                    );
                 for (i, m) in materials(&doc).iter().enumerate() {
-                    menu = menu.item(MenuItem::new(format!("bom-material-{i}"), m.name.clone()).checked(m.name == current));
+                    menu = menu.item(
+                        MenuItem::new(format!("bom-material-{i}"), m.name.clone())
+                            .checked(m.name == current),
+                    );
                 }
-                menu = menu.separator().item(MenuItem::new("bom-material-more", "Assign material…"));
+                menu = menu
+                    .separator()
+                    .item(MenuItem::new("bom-material-more", "Assign material…"));
                 let theme = world.resource::<Theme>().clone();
                 let mut cm = world.commands();
                 let anchor = open_context_menu(&mut cm, at, menu.build(&theme));
-                cm.entity(anchor).insert((BomMenuFor::Material(r), DespawnOnExit(AppState::Document)));
+                cm.entity(anchor)
+                    .insert((BomMenuFor::Material(r), DespawnOnExit(AppState::Document)));
                 world.flush();
             }
             BomColumn::Property(k) if k.is_text() => {
@@ -711,12 +1086,25 @@ fn on_commit(ev: On<InlineEditCommit>, q: Query<&BomCellRef>, mut commands: Comm
     let Ok(cell) = q.get(ev.entity) else { return };
     let (r, c, value) = (cell.row, cell.col, ev.value.clone());
     commands.queue(move |world: &mut World| {
-        let (Some(row), Some(BomColumn::Property(k))) = (row_of(world, r), column_of(world, c)) else { return };
+        let (Some(row), Some(BomColumn::Property(k))) = (row_of(world, r), column_of(world, c))
+        else {
+            return;
+        };
         if row.cells[c].trim() == value.trim() {
             return;
         }
-        let label = format!("Edit {}", k.label(&world.resource::<ActiveDocument>().doc.properties));
-        run(world, &SetProperties { owners: vec![row.key.owner], values: vec![(k, PropertyValue::Text(value))], label });
+        let label = format!(
+            "Edit {}",
+            k.label(&world.resource::<ActiveDocument>().doc.properties)
+        );
+        run(
+            world,
+            &SetProperties {
+                owners: vec![row.key.owner],
+                values: vec![(k, PropertyValue::Text(value))],
+                label,
+            },
+        );
     });
 }
 
@@ -760,15 +1148,30 @@ fn on_context_menu(
                 return;
             }
             let has_pn = world.resource::<BomUi>().bom.as_ref().and_then(|(_, b)| {
-                let i = b.columns.iter().position(|c| *c == BomColumn::Property(PropertyKey::PartNumber))?;
+                let i = b
+                    .columns
+                    .iter()
+                    .position(|c| *c == BomColumn::Property(PropertyKey::PartNumber))?;
                 Some(!row.cells[i].is_empty())
             });
-            let has_pn = has_pn.unwrap_or_else(|| !cadrs_core::properties::text(&world.resource::<ActiveDocument>().doc, row.key.owner, PropertyKey::PartNumber, None).is_empty());
+            let has_pn = has_pn.unwrap_or_else(|| {
+                !cadrs_core::properties::text(
+                    &world.resource::<ActiveDocument>().doc,
+                    row.key.owner,
+                    PropertyKey::PartNumber,
+                    None,
+                )
+                .is_empty()
+            });
             // TD9.4 (P3E.5): Switch to the row's Part Studio (its part selected) or subassembly
             // tab; not for standard content (no tab of this document) or an Item.
             let tab = match row.key.owner {
                 PropertyOwner::Item { .. } => None,
-                o => world.resource::<ActiveDocument>().doc.element(o.element()).map(|e| e.name.clone()),
+                o => world
+                    .resource::<ActiveDocument>()
+                    .doc
+                    .element(o.element())
+                    .map(|e| e.name.clone()),
             };
             let switch = match &tab {
                 Some(name) => MenuItem::new("bom-row-switch-to", format!("Switch to {name}")),
@@ -778,39 +1181,69 @@ fn on_context_menu(
                 .min_width(210.0)
                 .item_height(22.0)
                 .text_only()
-                .item(if row.excluded && world.resource::<BomUi>().bom.as_ref().is_some_and(|(e, _)| settings(world, *e).is_some_and(|s| s.excluded.contains(&row.key))) {
-                    MenuItem::new("bom-unsuppress", "Unsuppress in this BOM")
-                } else {
-                    MenuItem::new("bom-suppress", "Suppress from this BOM").disabled(row.excluded)
-                })
+                .item(
+                    if row.excluded
+                        && world
+                            .resource::<BomUi>()
+                            .bom
+                            .as_ref()
+                            .is_some_and(|(e, _)| {
+                                settings(world, *e).is_some_and(|s| s.excluded.contains(&row.key))
+                            })
+                    {
+                        MenuItem::new("bom-unsuppress", "Unsuppress in this BOM")
+                    } else {
+                        MenuItem::new("bom-suppress", "Suppress from this BOM")
+                            .disabled(row.excluded)
+                    },
+                )
                 .item(MenuItem::new("bom-row-properties", "Properties…"))
-                .item(MenuItem::new("bom-row-material", "Assign material…").disabled(row.key.owner.is_assembly()))
-                .item(MenuItem::new("bom-row-part-number", "Generate next part number").disabled(has_pn))
+                .item(
+                    MenuItem::new("bom-row-material", "Assign material…")
+                        .disabled(row.key.owner.is_assembly()),
+                )
+                .item(
+                    MenuItem::new("bom-row-part-number", "Generate next part number")
+                        .disabled(has_pn),
+                )
                 .item(switch);
             let theme = world.resource::<Theme>().clone();
             let mut cm = world.commands();
             let anchor = open_context_menu(&mut cm, at, menu.build(&theme));
-            cm.entity(anchor).insert((BomMenuFor::Row(r), DespawnOnExit(AppState::Document)));
+            cm.entity(anchor)
+                .insert((BomMenuFor::Row(r), DespawnOnExit(AppState::Document)));
             // The row shows selected while its menu is open (closing the menu takes it off).
             if !selected {
-                cm.entity(target).try_insert((cadrs_ui::style::Selected, MenuOpenAnchor));
+                cm.entity(target)
+                    .try_insert((cadrs_ui::style::Selected, MenuOpenAnchor));
             }
             world.flush();
         });
         return;
     }
     if let Ok(h) = q_head.get(ev.entity) {
-        let Some(c) = h.column.strip_prefix("col-").and_then(|x| x.parse::<usize>().ok()) else { return };
+        let Some(c) = h
+            .column
+            .strip_prefix("col-")
+            .and_then(|x| x.parse::<usize>().ok())
+        else {
+            return;
+        };
         // Under the header row, at the column's left edge (not over the header).
         let at = q_node
             .get(ev.entity)
             .map(|(tf, n)| {
                 let s = n.inverse_scale_factor();
-                Vec2::new((tf.translation.x - n.size().x / 2.0) * s, (tf.translation.y + n.size().y / 2.0) * s + 3.0)
+                Vec2::new(
+                    (tf.translation.x - n.size().x / 2.0) * s,
+                    (tf.translation.y + n.size().y / 2.0) * s + 3.0,
+                )
             })
             .unwrap_or(at);
         commands.queue(move |world: &mut World| {
-            let Some((_, bom)) = world.resource::<BomUi>().bom.clone() else { return };
+            let Some((_, bom)) = world.resource::<BomUi>().bom.clone() else {
+                return;
+            };
             let n = bom.columns.len();
             let mut menu = Menu::new("bom-header-menu")
                 .min_width(200.0)
@@ -820,12 +1253,16 @@ fn on_context_menu(
                 .item(MenuItem::new("bom-move-left", "Move left").disabled(c == 0))
                 .item(MenuItem::new("bom-move-right", "Move right").disabled(c + 1 >= n));
             if bom.columns.get(c) == Some(&BomColumn::Property(PropertyKey::PartNumber)) {
-                menu = menu.separator().item(MenuItem::new("bom-generate-numbers", "Generate missing part numbers"));
+                menu = menu.separator().item(MenuItem::new(
+                    "bom-generate-numbers",
+                    "Generate missing part numbers",
+                ));
             }
             let theme = world.resource::<Theme>().clone();
             let mut cm = world.commands();
             let anchor = open_context_menu(&mut cm, at, menu.build(&theme));
-            cm.entity(anchor).insert((BomMenuFor::Column(c), DespawnOnExit(AppState::Document)));
+            cm.entity(anchor)
+                .insert((BomMenuFor::Column(c), DespawnOnExit(AppState::Document)));
             world.flush();
         });
     }
@@ -833,8 +1270,16 @@ fn on_context_menu(
 
 /// Double-clicking a header: sort by it (again: the other way).
 fn on_sort(ev: On<TableSortChange>, mut ui: ResMut<BomUi>) {
-    let Some(i) = ev.column.strip_prefix("col-").and_then(|x| x.parse::<usize>().ok()) else { return };
-    let Some(col) = ui.bom.as_ref().and_then(|(_, b)| b.columns.get(i).copied()) else { return };
+    let Some(i) = ev
+        .column
+        .strip_prefix("col-")
+        .and_then(|x| x.parse::<usize>().ok())
+    else {
+        return;
+    };
+    let Some(col) = ui.bom.as_ref().and_then(|(_, b)| b.columns.get(i).copied()) else {
+        return;
+    };
     ui.sort = Some((col, ev.sort != ColumnSort::Descending));
 }
 
@@ -842,27 +1287,64 @@ fn on_view_select(ev: On<SelectChange>, q: Query<&Name>, mut commands: Commands)
     if q.get(ev.entity).is_ok_and(|n| n.as_str() == "bom-view") {
         let flat = ev.index == 1;
         commands.queue(move |world: &mut World| {
-            set_settings(world, if flat { "BOM: Flattened" } else { "BOM: Structured" }, |s| s.view = if flat { BomView::Flattened } else { BomView::Structured });
+            set_settings(
+                world,
+                if flat {
+                    "BOM: Flattened"
+                } else {
+                    "BOM: Structured"
+                },
+                |s| {
+                    s.view = if flat {
+                        BomView::Flattened
+                    } else {
+                        BomView::Structured
+                    }
+                },
+            );
         });
     }
 }
 
 fn on_template_name(ev: On<NamePopupCommit>, q: Query<&Name>, mut commands: Commands) {
-    if !q.get(ev.entity).is_ok_and(|n| n.as_str() == "bom-template-name") {
+    if !q
+        .get(ev.entity)
+        .is_ok_and(|n| n.as_str() == "bom-template-name")
+    {
         return;
     }
     let name = ev.value.clone();
     commands.queue(move |world: &mut World| {
-        let Some((element, _)) = world.resource::<BomUi>().bom.clone() else { return };
-        if run(world, &SaveBomTemplate { element, name: name.clone() }) {
+        let Some((element, _)) = world.resource::<BomUi>().bom.clone() else {
+            return;
+        };
+        if run(
+            world,
+            &SaveBomTemplate {
+                element,
+                name: name.clone(),
+            },
+        ) {
             let theme = world.resource::<Theme>().clone();
             let mut c = world.commands();
-            cadrs_ui::toast::show_notification(&mut c, &theme, cadrs_ui::toast::Notification::info(format!("Saved template \"{}\"", name.trim())).max_width(TOAST_W).name("bom-toast"));
+            cadrs_ui::toast::show_notification(
+                &mut c,
+                &theme,
+                cadrs_ui::toast::Notification::info(format!("Saved template \"{}\"", name.trim()))
+                    .max_width(TOAST_W)
+                    .name("bom-toast"),
+            );
         }
     });
 }
 
-fn on_menu_action(ev: On<MenuAction>, q_btn: Query<&Name, With<BomToolbarButton>>, q_ctx: Query<&BomMenuFor, With<ContextMenuAnchor>>, q_node: Query<(&UiGlobalTransform, &ComputedNode)>, mut commands: Commands) {
+fn on_menu_action(
+    ev: On<MenuAction>,
+    q_btn: Query<&Name, With<BomToolbarButton>>,
+    q_ctx: Query<&BomMenuFor, With<ContextMenuAnchor>>,
+    q_node: Query<(&UiGlobalTransform, &ComputedNode)>,
+    mut commands: Commands,
+) {
     let item = ev.item.clone();
     if let Ok(for_) = q_ctx.get(ev.entity) {
         let for_ = *for_;
@@ -873,23 +1355,57 @@ fn on_menu_action(ev: On<MenuAction>, q_btn: Query<&Name, With<BomToolbarButton>
         return;
     }
     // Where the button is (the template name popup opens under it).
-    let at = q_node.get(ev.entity).map(|(tf, n)| (tf.translation + Vec2::new(-n.size().x / 2.0, n.size().y / 2.0)) * n.inverse_scale_factor()).unwrap_or(Vec2::new(900.0, 120.0));
+    let at = q_node
+        .get(ev.entity)
+        .map(|(tf, n)| {
+            (tf.translation + Vec2::new(-n.size().x / 2.0, n.size().y / 2.0))
+                * n.inverse_scale_factor()
+        })
+        .unwrap_or(Vec2::new(900.0, 120.0));
     commands.queue(move |world: &mut World| toolbar_action(world, &item, at));
 }
 
 fn toolbar_action(world: &mut World, item: &str, at: Vec2) {
-    let Some((element, _)) = world.resource::<BomUi>().bom.clone() else { return };
+    let Some((element, _)) = world.resource::<BomUi>().bom.clone() else {
+        return;
+    };
     if item == "bom-template-default" {
-        run(world, &ApplyBomTemplate { element, name: BomTemplate::DEFAULT_NAME.into() });
+        run(
+            world,
+            &ApplyBomTemplate {
+                element,
+                name: BomTemplate::DEFAULT_NAME.into(),
+            },
+        );
         return;
     }
-    if let Some(i) = item.strip_prefix("bom-template-").and_then(|x| x.parse::<usize>().ok()) {
-        let Some(name) = world.resource::<ActiveDocument>().doc.properties.bom_templates.get(i).map(|t| t.name.clone()) else { return };
+    if let Some(i) = item
+        .strip_prefix("bom-template-")
+        .and_then(|x| x.parse::<usize>().ok())
+    {
+        let Some(name) = world
+            .resource::<ActiveDocument>()
+            .doc
+            .properties
+            .bom_templates
+            .get(i)
+            .map(|t| t.name.clone())
+        else {
+            return;
+        };
         run(world, &ApplyBomTemplate { element, name });
         return;
     }
-    if let Some(i) = item.strip_prefix("bom-add-col-").and_then(|x| x.parse::<usize>().ok()) {
-        let Some(c) = addable(&world.resource::<ActiveDocument>().doc).get(i).copied() else { return };
+    if let Some(i) = item
+        .strip_prefix("bom-add-col-")
+        .and_then(|x| x.parse::<usize>().ok())
+    {
+        let Some(c) = addable(&world.resource::<ActiveDocument>().doc)
+            .get(i)
+            .copied()
+        else {
+            return;
+        };
         set_settings(world, "Add BOM column", |s| {
             if !s.columns.contains(&c) {
                 s.columns.push(c);
@@ -900,24 +1416,40 @@ fn toolbar_action(world: &mut World, item: &str, at: Vec2) {
     match item {
         "bom-save-template" => {
             let theme = world.resource::<Theme>().clone();
-            let n = world.resource::<ActiveDocument>().doc.properties.bom_templates.len() + 1;
+            let n = world
+                .resource::<ActiveDocument>()
+                .doc
+                .properties
+                .bom_templates
+                .len()
+                + 1;
             // Beside the panel, level with the ⋯ button: the table (its header) stays in view.
-            let mut q_panel = world.query_filtered::<(&UiGlobalTransform, &ComputedNode), With<BomPanelRoot>>();
-            let left = q_panel.iter(world).next().map(|(tf, n)| (tf.translation.x - n.size().x / 2.0) * n.inverse_scale_factor());
+            let mut q_panel =
+                world.query_filtered::<(&UiGlobalTransform, &ComputedNode), With<BomPanelRoot>>();
+            let left = q_panel
+                .iter(world)
+                .next()
+                .map(|(tf, n)| (tf.translation.x - n.size().x / 2.0) * n.inverse_scale_factor());
             let pos = match left {
                 Some(x) => Vec2::new(x - 150.0 - 6.0, at.y - 30.0),
                 None => at - Vec2::new(150.0, 0.0),
             };
             let mut c = world.commands();
-            NamePopup::new("bom-template-name", "Template name", pos).value(format!("BOM template {n}")).spawn(&mut c, &theme);
+            NamePopup::new("bom-template-name", "Template name", pos)
+                .value(format!("BOM template {n}"))
+                .spawn(&mut c, &theme);
             world.flush();
         }
         "bom-copy" => copy_table(world),
         "bom-export-csv" => export_csv(world),
         "bom-show-excluded" => set_settings(world, "Show excluded", |s| s.show_excluded = true),
         "bom-hide-excluded" => set_settings(world, "Hide excluded", |s| s.show_excluded = false),
-        "bom-show-top-row" => set_settings(world, "Show top-level assembly row", |s| s.top_level_row = true),
-        "bom-hide-top-row" => set_settings(world, "Hide top-level assembly row", |s| s.top_level_row = false),
+        "bom-show-top-row" => set_settings(world, "Show top-level assembly row", |s| {
+            s.top_level_row = true
+        }),
+        "bom-hide-top-row" => set_settings(world, "Hide top-level assembly row", |s| {
+            s.top_level_row = false
+        }),
         "bom-reset-sort" => world.resource_mut::<BomUi>().sort = None,
         "bom-generate-numbers" => generate_numbers(world),
         _ => {}
@@ -930,9 +1462,14 @@ fn generate_numbers(world: &mut World) {
     let ui = world.resource::<BomUi>().clone();
     let mut o = options(&ui);
     o.expand_all = true;
-    let Some((_, bom)) = compute(world, &o) else { return };
+    let Some((_, bom)) = compute(world, &o) else {
+        return;
+    };
     let owners = bom.owners();
-    let plan = GenerateMissingPartNumbers { owners: owners.clone() }.plan(&world.resource::<ActiveDocument>().doc);
+    let plan = GenerateMissingPartNumbers {
+        owners: owners.clone(),
+    }
+    .plan(&world.resource::<ActiveDocument>().doc);
     if run(world, &GenerateMissingPartNumbers { owners }) {
         let theme = world.resource::<Theme>().clone();
         let mut c = world.commands();
@@ -941,13 +1478,21 @@ fn generate_numbers(world: &mut World) {
             1 => "Generated 1 part number".to_string(),
             n => format!("Generated {n} part numbers"),
         };
-        cadrs_ui::toast::show_notification(&mut c, &theme, cadrs_ui::toast::Notification::info(text).max_width(TOAST_W).name("bom-toast"));
+        cadrs_ui::toast::show_notification(
+            &mut c,
+            &theme,
+            cadrs_ui::toast::Notification::info(text)
+                .max_width(TOAST_W)
+                .name("bom-toast"),
+        );
     }
 }
 
 /// Copy table (A20.7): tab-separated, on the clipboard.
 fn copy_table(world: &mut World) {
-    let Some((_, bom)) = world.resource::<BomUi>().bom.clone() else { return };
+    let Some((_, bom)) = world.resource::<BomUi>().bom.clone() else {
+        return;
+    };
     let tsv = bom.to_tsv();
     if let Some(mut clip) = world.get_resource_mut::<bevy::clipboard::Clipboard>()
         && let Err(e) = clip.set_text(tsv.clone())
@@ -957,13 +1502,26 @@ fn copy_table(world: &mut World) {
     world.resource_mut::<BomUi>().copied = Some(tsv);
     let theme = world.resource::<Theme>().clone();
     let mut c = world.commands();
-    cadrs_ui::toast::show_notification(&mut c, &theme, cadrs_ui::toast::Notification::info(format!("Copied the table ({} rows)", bom.rows.len())).max_width(TOAST_W).name("bom-toast"));
+    cadrs_ui::toast::show_notification(
+        &mut c,
+        &theme,
+        cadrs_ui::toast::Notification::info(format!("Copied the table ({} rows)", bom.rows.len()))
+            .max_width(TOAST_W)
+            .name("bom-toast"),
+    );
 }
 
 /// Export to CSV (A20.7): "<assembly> BOM.csv" in the export folder.
 fn export_csv(world: &mut World) {
-    let Some((element, bom)) = world.resource::<BomUi>().bom.clone() else { return };
-    let name = world.resource::<ActiveDocument>().doc.element(element).map(|e| e.name.clone()).unwrap_or_else(|| "Assembly".into());
+    let Some((element, bom)) = world.resource::<BomUi>().bom.clone() else {
+        return;
+    };
+    let name = world
+        .resource::<ActiveDocument>()
+        .doc
+        .element(element)
+        .map(|e| e.name.clone())
+        .unwrap_or_else(|| "Assembly".into());
     let dir = crate::export_dir(world);
     let result = (|| -> Result<PathBuf, String> {
         let dir = dir.ok_or("no folder to export to")?;
@@ -984,7 +1542,10 @@ fn export_csv(world: &mut World) {
             // The whole, normalised path goes to the log; the toast names the file.
             let p = std::fs::canonicalize(&p).unwrap_or(p);
             info!("exported {}", p.display());
-            let file = p.file_name().map(|f| f.to_string_lossy().into_owned()).unwrap_or_else(|| p.display().to_string());
+            let file = p
+                .file_name()
+                .map(|f| f.to_string_lossy().into_owned())
+                .unwrap_or_else(|| p.display().to_string());
             let n = cadrs_ui::toast::Notification::info(format!("Exported {file}"));
             world.resource_mut::<BomUi>().last_export = Some(p);
             n
@@ -992,7 +1553,11 @@ fn export_csv(world: &mut World) {
         Err(e) => cadrs_ui::toast::Notification::warning(format!("Export failed: {e}")),
     };
     let mut c = world.commands();
-    cadrs_ui::toast::show_notification(&mut c, &theme, note.seconds(8.0).max_width(TOAST_W).name("bom-toast"));
+    cadrs_ui::toast::show_notification(
+        &mut c,
+        &theme,
+        note.seconds(8.0).max_width(TOAST_W).name("bom-toast"),
+    );
 }
 
 fn context_action(world: &mut World, for_: BomMenuFor, item: &str) {
@@ -1005,11 +1570,22 @@ fn context_action(world: &mut World, for_: BomMenuFor, item: &str) {
                         s.excluded.push(row.key.clone());
                     }
                 }),
-                "bom-unsuppress" => set_settings(world, "Unsuppress in this BOM", |s| s.excluded.retain(|k| *k != row.key)),
-                "bom-row-properties" => crate::properties_dialog::open_properties_dialog(world, row.key.owner),
-                "bom-row-material" => crate::material_dialog::open_material_for(world, vec![row.key.owner]),
+                "bom-unsuppress" => set_settings(world, "Unsuppress in this BOM", |s| {
+                    s.excluded.retain(|k| *k != row.key)
+                }),
+                "bom-row-properties" => {
+                    crate::properties_dialog::open_properties_dialog(world, row.key.owner)
+                }
+                "bom-row-material" => {
+                    crate::material_dialog::open_material_for(world, vec![row.key.owner])
+                }
                 "bom-row-part-number" => {
-                    run(world, &GenerateMissingPartNumbers { owners: vec![row.key.owner] });
+                    run(
+                        world,
+                        &GenerateMissingPartNumbers {
+                            owners: vec![row.key.owner],
+                        },
+                    );
                 }
                 "bom-row-switch-to" => super::menu::switch_to_owner(world, row.key.owner),
                 _ => {}
@@ -1042,12 +1618,24 @@ fn context_action(world: &mut World, for_: BomMenuFor, item: &str) {
             }
             let m = if item == "bom-material-none" {
                 None
-            } else if let Some(i) = item.strip_prefix("bom-material-").and_then(|x| x.parse::<usize>().ok()) {
-                materials(&world.resource::<ActiveDocument>().doc).get(i).cloned()
+            } else if let Some(i) = item
+                .strip_prefix("bom-material-")
+                .and_then(|x| x.parse::<usize>().ok())
+            {
+                materials(&world.resource::<ActiveDocument>().doc)
+                    .get(i)
+                    .cloned()
             } else {
                 return;
             };
-            run(world, &SetProperties { owners: vec![row.key.owner], values: vec![(PropertyKey::Material, PropertyValue::Material(m))], label: "Assign material".into() });
+            run(
+                world,
+                &SetProperties {
+                    owners: vec![row.key.owner],
+                    values: vec![(PropertyKey::Material, PropertyValue::Material(m))],
+                    label: "Assign material".into(),
+                },
+            );
         }
     }
 }
@@ -1055,8 +1643,16 @@ fn context_action(world: &mut World, for_: BomMenuFor, item: &str) {
 /// A header divider dragged (or double-clicked: fit the content again): the column's width is
 /// kept for the next rebuild. The drag already resized the cells, so nothing is rebuilt now.
 fn on_column_resize(ev: On<TableColumnResize>, mut ui: ResMut<BomUi>) {
-    let Some(i) = ev.column.strip_prefix("col-").and_then(|x| x.parse::<usize>().ok()) else { return };
-    let Some(col) = ui.bom.as_ref().and_then(|(_, b)| b.columns.get(i).copied()) else { return };
+    let Some(i) = ev
+        .column
+        .strip_prefix("col-")
+        .and_then(|x| x.parse::<usize>().ok())
+    else {
+        return;
+    };
+    let Some(col) = ui.bom.as_ref().and_then(|(_, b)| b.columns.get(i).copied()) else {
+        return;
+    };
     match ev.width {
         Some(w) => {
             let u = ui.bypass_change_detection();
@@ -1068,15 +1664,38 @@ fn on_column_resize(ev: On<TableColumnResize>, mut ui: ResMut<BomUi>) {
     }
 }
 
-fn on_panel_resize_start(mut ev: On<Pointer<DragStart>>, mut q: Query<(&mut BomPanelResize, &ChildOf)>, q_node: Query<&Node>) {
-    let Ok((mut h, parent)) = q.get_mut(ev.entity) else { return };
+fn on_panel_resize_start(
+    mut ev: On<Pointer<DragStart>>,
+    mut q: Query<(&mut BomPanelResize, &ChildOf)>,
+    q_node: Query<&Node>,
+) {
+    let Ok((mut h, parent)) = q.get_mut(ev.entity) else {
+        return;
+    };
     ev.propagate(false);
-    h.start = q_node.get(parent.parent()).ok().and_then(|n| if let Val::Px(w) = n.width { Some(w) } else { None }).unwrap_or(PANEL_W);
+    h.start = q_node
+        .get(parent.parent())
+        .ok()
+        .and_then(|n| {
+            if let Val::Px(w) = n.width {
+                Some(w)
+            } else {
+                None
+            }
+        })
+        .unwrap_or(PANEL_W);
 }
 
 /// Dragging the panel's left edge: wider to the left (kept for the session).
-fn on_panel_resize_drag(mut ev: On<Pointer<Drag>>, q: Query<(&BomPanelResize, &ChildOf)>, mut q_node: Query<&mut Node, With<BomPanelRoot>>, mut ui: ResMut<BomUi>) {
-    let Ok((h, parent)) = q.get(ev.entity) else { return };
+fn on_panel_resize_drag(
+    mut ev: On<Pointer<Drag>>,
+    q: Query<(&BomPanelResize, &ChildOf)>,
+    mut q_node: Query<&mut Node, With<BomPanelRoot>>,
+    mut ui: ResMut<BomUi>,
+) {
+    let Ok((h, parent)) = q.get(ev.entity) else {
+        return;
+    };
     ev.propagate(false);
     let w = (h.start - ev.distance.x).clamp(320.0, 1200.0).round();
     if let Ok(mut n) = q_node.get_mut(parent.parent()) {

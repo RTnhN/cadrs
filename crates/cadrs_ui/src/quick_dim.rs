@@ -34,10 +34,8 @@ pub struct QuickDimPlugin;
 
 impl Plugin for QuickDimPlugin {
     fn build(&self, app: &mut App) {
-        app.add_observer(on_key).add_systems(
-            PostUpdate,
-            style_boxes.before(bevy::ui::UiSystems::Prepare),
-        );
+        app.add_observer(on_key)
+            .add_systems(PostUpdate, style_boxes.before(bevy::ui::UiSystems::Prepare));
     }
 }
 
@@ -326,16 +324,12 @@ fn style_boxes(
                 selected_text_color: None,
             }
         };
-        if cursor.color != want_cursor.color || cursor.selection_color != want_cursor.selection_color
+        if cursor.color != want_cursor.color
+            || cursor.selection_color != want_cursor.selection_color
         {
             *cursor = want_cursor;
         }
-        let want_border = UiRect::new(
-            Val::Px(bw),
-            Val::Px(bw),
-            Val::Px(bw),
-            Val::Px(bottom),
-        );
+        let want_border = UiRect::new(Val::Px(bw), Val::Px(bw), Val::Px(bw), Val::Px(bottom));
         if node.border != want_border {
             node.border = want_border;
         }

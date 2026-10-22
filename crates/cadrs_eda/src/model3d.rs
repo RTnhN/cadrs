@@ -52,7 +52,12 @@ pub enum Solid {
     /// An axis-aligned box between two corners.
     Box { min: [f64; 3], max: [f64; 3] },
     /// A cylinder from `base` along `axis` (positive direction).
-    Cylinder { base: [f64; 3], axis: Axis, radius: f64, length: f64 },
+    Cylinder {
+        base: [f64; 3],
+        axis: Axis,
+        radius: f64,
+        length: f64,
+    },
 }
 
 /// One coloured primitive.
@@ -70,12 +75,30 @@ pub struct Body {
 
 impl Body {
     pub fn cuboid(&mut self, min: [f64; 3], max: [f64; 3], color: Rgb) -> &mut Self {
-        self.parts.push(Part { solid: Solid::Box { min, max }, color });
+        self.parts.push(Part {
+            solid: Solid::Box { min, max },
+            color,
+        });
         self
     }
 
-    pub fn cylinder(&mut self, base: [f64; 3], axis: Axis, radius: f64, length: f64, color: Rgb) -> &mut Self {
-        self.parts.push(Part { solid: Solid::Cylinder { base, axis, radius, length }, color });
+    pub fn cylinder(
+        &mut self,
+        base: [f64; 3],
+        axis: Axis,
+        radius: f64,
+        length: f64,
+        color: Rgb,
+    ) -> &mut Self {
+        self.parts.push(Part {
+            solid: Solid::Cylinder {
+                base,
+                axis,
+                radius,
+                length,
+            },
+            color,
+        });
         self
     }
 
@@ -85,7 +108,12 @@ impl Body {
         for p in &self.parts {
             let (lo, hi) = match p.solid {
                 Solid::Box { min, max } => (min, max),
-                Solid::Cylinder { base, axis, radius, length } => {
+                Solid::Cylinder {
+                    base,
+                    axis,
+                    radius,
+                    length,
+                } => {
                     let mut lo = [base[0] - radius, base[1] - radius, base[2] - radius];
                     let mut hi = [base[0] + radius, base[1] + radius, base[2] + radius];
                     let k = axis as usize;
@@ -96,7 +124,10 @@ impl Body {
             };
             out = Some(match out {
                 None => (lo, hi),
-                Some((a, b)) => ([a[0].min(lo[0]), a[1].min(lo[1]), a[2].min(lo[2])], [b[0].max(hi[0]), b[1].max(hi[1]), b[2].max(hi[2])]),
+                Some((a, b)) => (
+                    [a[0].min(lo[0]), a[1].min(lo[1]), a[2].min(lo[2])],
+                    [b[0].max(hi[0]), b[1].max(hi[1]), b[2].max(hi[2])],
+                ),
             });
         }
         out
@@ -145,21 +176,80 @@ fn solid_into(m: &mut Mesh, s: &Solid) {
     match *s {
         Solid::Box { min: a, max: b } => {
             let p = |x: f64, y: f64, z: f64| [x, y, z];
-            m.quad([p(a[0], a[1], b[2]), p(b[0], a[1], b[2]), p(b[0], b[1], b[2]), p(a[0], b[1], b[2])], [0.0, 0.0, 1.0]);
-            m.quad([p(a[0], b[1], a[2]), p(b[0], b[1], a[2]), p(b[0], a[1], a[2]), p(a[0], a[1], a[2])], [0.0, 0.0, -1.0]);
-            m.quad([p(a[0], a[1], a[2]), p(b[0], a[1], a[2]), p(b[0], a[1], b[2]), p(a[0], a[1], b[2])], [0.0, -1.0, 0.0]);
-            m.quad([p(b[0], b[1], a[2]), p(a[0], b[1], a[2]), p(a[0], b[1], b[2]), p(b[0], b[1], b[2])], [0.0, 1.0, 0.0]);
-            m.quad([p(a[0], b[1], a[2]), p(a[0], a[1], a[2]), p(a[0], a[1], b[2]), p(a[0], b[1], b[2])], [-1.0, 0.0, 0.0]);
-            m.quad([p(b[0], a[1], a[2]), p(b[0], b[1], a[2]), p(b[0], b[1], b[2]), p(b[0], a[1], b[2])], [1.0, 0.0, 0.0]);
+            m.quad(
+                [
+                    p(a[0], a[1], b[2]),
+                    p(b[0], a[1], b[2]),
+                    p(b[0], b[1], b[2]),
+                    p(a[0], b[1], b[2]),
+                ],
+                [0.0, 0.0, 1.0],
+            );
+            m.quad(
+                [
+                    p(a[0], b[1], a[2]),
+                    p(b[0], b[1], a[2]),
+                    p(b[0], a[1], a[2]),
+                    p(a[0], a[1], a[2]),
+                ],
+                [0.0, 0.0, -1.0],
+            );
+            m.quad(
+                [
+                    p(a[0], a[1], a[2]),
+                    p(b[0], a[1], a[2]),
+                    p(b[0], a[1], b[2]),
+                    p(a[0], a[1], b[2]),
+                ],
+                [0.0, -1.0, 0.0],
+            );
+            m.quad(
+                [
+                    p(b[0], b[1], a[2]),
+                    p(a[0], b[1], a[2]),
+                    p(a[0], b[1], b[2]),
+                    p(b[0], b[1], b[2]),
+                ],
+                [0.0, 1.0, 0.0],
+            );
+            m.quad(
+                [
+                    p(a[0], b[1], a[2]),
+                    p(a[0], a[1], a[2]),
+                    p(a[0], a[1], b[2]),
+                    p(a[0], b[1], b[2]),
+                ],
+                [-1.0, 0.0, 0.0],
+            );
+            m.quad(
+                [
+                    p(b[0], a[1], a[2]),
+                    p(b[0], b[1], a[2]),
+                    p(b[0], b[1], b[2]),
+                    p(b[0], a[1], b[2]),
+                ],
+                [1.0, 0.0, 0.0],
+            );
             let f = |x: f64, y: f64, z: f64| [x as f32, y as f32, z as f32];
             for z in [a[2], b[2]] {
-                m.edges.push(vec![f(a[0], a[1], z), f(b[0], a[1], z), f(b[0], b[1], z), f(a[0], b[1], z), f(a[0], a[1], z)]);
+                m.edges.push(vec![
+                    f(a[0], a[1], z),
+                    f(b[0], a[1], z),
+                    f(b[0], b[1], z),
+                    f(a[0], b[1], z),
+                    f(a[0], a[1], z),
+                ]);
             }
             for (x, y) in [(a[0], a[1]), (b[0], a[1]), (b[0], b[1]), (a[0], b[1])] {
                 m.edges.push(vec![f(x, y, a[2]), f(x, y, b[2])]);
             }
         }
-        Solid::Cylinder { base, axis, radius: r, length: l } => {
+        Solid::Cylinder {
+            base,
+            axis,
+            radius: r,
+            length: l,
+        } => {
             let ring = |k: usize| {
                 let t = std::f64::consts::TAU * k as f64 / SEGMENTS as f64;
                 (t.cos(), t.sin())
@@ -184,7 +274,11 @@ fn solid_into(m: &mut Mesh, s: &Solid) {
                         m.positions.push([p[0] as f32, p[1] as f32, p[2] as f32]);
                         m.normals.push([n[0] as f32, n[1] as f32, n[2] as f32]);
                     }
-                    if dir > 0.0 { m.indices.extend([i, i + 1, i + 2]) } else { m.indices.extend([i, i + 2, i + 1]) }
+                    if dir > 0.0 {
+                        m.indices.extend([i, i + 1, i + 2])
+                    } else {
+                        m.indices.extend([i, i + 2, i + 1])
+                    }
                 }
             }
             for w in [0.0, l] {
@@ -208,7 +302,10 @@ pub fn mesh(body: &Body) -> Vec<Mesh> {
         let i = match out.iter().position(|m| m.color == p.color) {
             Some(i) => i,
             None => {
-                out.push(Mesh { color: p.color, ..Default::default() });
+                out.push(Mesh {
+                    color: p.color,
+                    ..Default::default()
+                });
                 out.len() - 1
             }
         };
@@ -234,23 +331,47 @@ pub fn chip(l: f64, w: f64, h: f64, t: f64, body: Rgb) -> Body {
 /// A chip LED: a white package with a coloured lens on top.
 pub fn chip_led(l: f64, w: f64, h: f64, t: f64) -> Body {
     let mut b = chip(l, w, h * 0.6, t, colors::WHITE);
-    b.cuboid([-l / 2.0 + t, -w / 2.0 * 0.8, h * 0.6], [l / 2.0 - t, w / 2.0 * 0.8, h], colors::LED_RED);
+    b.cuboid(
+        [-l / 2.0 + t, -w / 2.0 * 0.8, h * 0.6],
+        [l / 2.0 - t, w / 2.0 * 0.8, h],
+        colors::LED_RED,
+    );
     b
 }
 
 /// A moulded body `l` × `w` × `h` raised `standoff` off the board, with gull-wing leads:
 /// each lead from (`x`, `y`) on the pad out to the body edge, `lw` wide.
-pub fn gull_wing(l: f64, w: f64, h: f64, standoff: f64, leads: &[(f64, f64)], lw: f64, lead_h: f64) -> Body {
+pub fn gull_wing(
+    l: f64,
+    w: f64,
+    h: f64,
+    standoff: f64,
+    leads: &[(f64, f64)],
+    lw: f64,
+    lead_h: f64,
+) -> Body {
     let mut b = Body::default();
-    b.cuboid([-l / 2.0, -w / 2.0, standoff], [l / 2.0, w / 2.0, h], colors::PLASTIC);
+    b.cuboid(
+        [-l / 2.0, -w / 2.0, standoff],
+        [l / 2.0, w / 2.0, h],
+        colors::PLASTIC,
+    );
     for &(x, y) in leads {
         // Leads leave the body's long sides (|x| beyond the body) or its ends (|y| beyond).
         if x.abs() > l / 2.0 - 1e-9 {
             let (x0, x1) = if x < 0.0 { (x, -l / 2.0) } else { (l / 2.0, x) };
-            b.cuboid([x0.min(x1), y - lw / 2.0, 0.0], [x0.max(x1), y + lw / 2.0, lead_h], colors::TIN);
+            b.cuboid(
+                [x0.min(x1), y - lw / 2.0, 0.0],
+                [x0.max(x1), y + lw / 2.0, lead_h],
+                colors::TIN,
+            );
         } else {
             let (y0, y1) = if y < 0.0 { (y, -w / 2.0) } else { (w / 2.0, y) };
-            b.cuboid([x - lw / 2.0, y0.min(y1), 0.0], [x + lw / 2.0, y0.max(y1), lead_h], colors::TIN);
+            b.cuboid(
+                [x - lw / 2.0, y0.min(y1), 0.0],
+                [x + lw / 2.0, y0.max(y1), lead_h],
+                colors::TIN,
+            );
         }
     }
     b
@@ -259,9 +380,17 @@ pub fn gull_wing(l: f64, w: f64, h: f64, standoff: f64, leads: &[(f64, f64)], lw
 /// A no-lead package (QFN/DFN): a square body with terminal strips under its edges.
 pub fn no_lead(l: f64, w: f64, h: f64, terminals: &[(f64, f64, f64, f64)]) -> Body {
     let mut b = Body::default();
-    b.cuboid([-l / 2.0, -w / 2.0, 0.02], [l / 2.0, w / 2.0, h], colors::PLASTIC);
+    b.cuboid(
+        [-l / 2.0, -w / 2.0, 0.02],
+        [l / 2.0, w / 2.0, h],
+        colors::PLASTIC,
+    );
     for &(x, y, tw, th) in terminals {
-        b.cuboid([x - tw / 2.0, y - th / 2.0, 0.0], [x + tw / 2.0, y + th / 2.0, 0.03], colors::TIN);
+        b.cuboid(
+            [x - tw / 2.0, y - th / 2.0, 0.0],
+            [x + tw / 2.0, y + th / 2.0, 0.03],
+            colors::TIN,
+        );
     }
     b
 }
@@ -275,7 +404,11 @@ pub fn pin_header(pins: &[(f64, f64)], pitch: f64, pin_top: f64) -> Body {
         b.cuboid([x - s, y - s, 0.0], [x + s, y + s, 2.5], colors::PLASTIC);
     }
     for &(x, y) in pins {
-        b.cuboid([x - 0.32, y - 0.32, -3.0], [x + 0.32, y + 0.32, pin_top], colors::GOLD);
+        b.cuboid(
+            [x - 0.32, y - 0.32, -3.0],
+            [x + 0.32, y + 0.32, pin_top],
+            colors::GOLD,
+        );
     }
     b
 }
@@ -285,7 +418,11 @@ pub fn housing(min: [f64; 2], max: [f64; 2], h: f64, pins: &[(f64, f64)], color:
     let mut b = Body::default();
     b.cuboid([min[0], min[1], 0.0], [max[0], max[1], h], color);
     for &(x, y) in pins {
-        b.cuboid([x - 0.32, y - 0.32, -3.0], [x + 0.32, y + 0.32, h - 1.0], colors::TIN);
+        b.cuboid(
+            [x - 0.32, y - 0.32, -3.0],
+            [x + 0.32, y + 0.32, h - 1.0],
+            colors::TIN,
+        );
     }
     b
 }
@@ -304,9 +441,17 @@ pub fn axial(pitch: f64, length: f64, diameter: f64, color: Rgb) -> Body {
     let x0 = (pitch - length) / 2.0;
     b.cylinder([x0, 0.0, r], Axis::X, r, length, color);
     b.cuboid([0.0 - 0.3, -0.3, -3.0], [0.3, 0.3, r], colors::TIN);
-    b.cuboid([pitch - 0.3, -0.3, -3.0], [pitch + 0.3, 0.3, r], colors::TIN);
+    b.cuboid(
+        [pitch - 0.3, -0.3, -3.0],
+        [pitch + 0.3, 0.3, r],
+        colors::TIN,
+    );
     b.cuboid([0.0, -0.3, r - 0.3], [x0, 0.3, r + 0.3], colors::TIN);
-    b.cuboid([x0 + length, -0.3, r - 0.3], [pitch, 0.3, r + 0.3], colors::TIN);
+    b.cuboid(
+        [x0 + length, -0.3, r - 0.3],
+        [pitch, 0.3, r + 0.3],
+        colors::TIN,
+    );
     b
 }
 

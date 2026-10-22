@@ -18,7 +18,9 @@ use bevy::picking::hover::HoverMap;
 use bevy::picking::pointer::{PointerAction, PointerButton, PointerId, PointerInput};
 use bevy::prelude::*;
 use cadrs_core::commands::EditSketch;
-use cadrs_sketch::entity::{chamfer_geometry, corner_lines, fillet_corner, fillet_geometry, max_fillet};
+use cadrs_sketch::entity::{
+    chamfer_geometry, corner_lines, fillet_corner, fillet_geometry, max_fillet,
+};
 use cadrs_sketch::hit::hit_test;
 use cadrs_sketch::{
     ArcGeom, CurveId, CurveKind, DimensionId, DimensionKind, PointId, Sketch, SketchEntity,
@@ -27,8 +29,8 @@ use cadrs_sketch::{
 
 use crate::sketch::{ActiveSketchTool, PartStudioMode, SketchSession, SketchTool};
 use crate::sketch_tools::{
-    DRAG_THRESHOLD, SVec2, ScreenMap, SketchScreen, SketchSelection, SketchToolsSet,
-    over_viewport, session_sketch, world_sketch,
+    DRAG_THRESHOLD, SVec2, ScreenMap, SketchScreen, SketchSelection, SketchToolsSet, over_viewport,
+    session_sketch, world_sketch,
 };
 use crate::viewport::ViewportArea;
 use crate::{ActiveDocument, AppState};
@@ -180,7 +182,11 @@ pub fn nice(v: f64) -> f64 {
 
 /// True if a fillet (lines and arcs, S9.1) or a chamfer (lines, S9.2) can go at `p`.
 fn corner_ok(s: &Sketch, p: PointId, chamfer: bool) -> bool {
-    if chamfer { corner_lines(s, p).is_some() } else { fillet_corner(s, p).is_some() }
+    if chamfer {
+        corner_lines(s, p).is_some()
+    } else {
+        fillet_corner(s, p).is_some()
+    }
 }
 
 /// A new fillet's radius: a fifth of the shorter line (or arc chord), rounded (the fillet must
@@ -232,7 +238,9 @@ fn run(world: &mut World, op: SketchOp) -> Option<(Vec<CurveId>, Vec<DimensionId
 
 /// Makes a slot round `source` (equal to the first of this use, if any).
 fn make_slot(world: &mut World, source: CurveId) {
-    let Some(sk) = world_sketch(world) else { return };
+    let Some(sk) = world_sketch(world) else {
+        return;
+    };
     let (width, first_end) = match sk.curves.get(source).map(|c| c.kind) {
         Some(CurveKind::Line { a, b }) => (nice(sk.pos(a).distance(sk.pos(b)) * 0.25), a),
         Some(CurveKind::Arc { start, .. }) => {
@@ -258,7 +266,9 @@ fn make_slot(world: &mut World, source: CurveId) {
     ) else {
         return;
     };
-    let Some(sk) = world_sketch(world) else { return };
+    let Some(sk) = world_sketch(world) else {
+        return;
+    };
     let cap = curves.into_iter().find(|c| {
         matches!(sk.curves.get(*c).map(|c| c.kind), Some(CurveKind::Arc { center, .. }) if center == first_end)
     });
@@ -272,7 +282,9 @@ fn make_slot(world: &mut World, source: CurveId) {
 /// ones in the same use reuse the first one's size and are linked to it (one "R" or one pair
 /// of distances drives them all).
 fn make_corner(world: &mut World, corner: PointId, chamfer: bool, size: Option<f64>) {
-    let Some(sk) = world_sketch(world) else { return };
+    let Some(sk) = world_sketch(world) else {
+        return;
+    };
     if !corner_ok(sk, corner, chamfer) {
         return;
     }
@@ -307,7 +319,9 @@ fn make_corner(world: &mut World, corner: PointId, chamfer: bool, size: Option<f
         ) else {
             return;
         };
-        let Some(sk) = world_sketch(world) else { return };
+        let Some(sk) = world_sketch(world) else {
+            return;
+        };
         let ext: Vec<CurveId> = curves
             .into_iter()
             .filter(|c| sk.curves[*c].construction)
@@ -353,10 +367,15 @@ fn make_corner(world: &mut World, corner: PointId, chamfer: bool, size: Option<f
     ) else {
         return;
     };
-    let Some(sk) = world_sketch(world) else { return };
-    let arc = curves
-        .into_iter()
-        .find(|c| matches!(sk.curves.get(*c).map(|c| c.kind), Some(CurveKind::Arc { .. })));
+    let Some(sk) = world_sketch(world) else {
+        return;
+    };
+    let arc = curves.into_iter().find(|c| {
+        matches!(
+            sk.curves.get(*c).map(|c| c.kind),
+            Some(CurveKind::Arc { .. })
+        )
+    });
     let radius_dim = dims.first().copied().or_else(|| {
         let f = linked?;
         sk.dimensions
@@ -511,15 +530,23 @@ fn handle_commit(world: &mut World, drag: HandleDrag, cursor: SVec2) {
 
 /// The corner a pick means: a point where two lines meet (for a fillet, lines or arcs), or the
 /// second of two such curves that meet (the first is remembered).
-fn corner_pick(s: &Sketch, t: &mut EntityTools, hit: Option<SketchEntity>, chamfer: bool) -> Option<PointId> {
+fn corner_pick(
+    s: &Sketch,
+    t: &mut EntityTools,
+    hit: Option<SketchEntity>,
+    chamfer: bool,
+) -> Option<PointId> {
     match hit? {
         SketchEntity::Point(p) if corner_ok(s, p, chamfer) => {
             t.first_line = None;
             Some(p)
         }
         SketchEntity::Curve(c)
-            if matches!(s.curves.get(c).map(|c| c.kind), Some(CurveKind::Line { .. }))
-                || (!chamfer && matches!(s.curves.get(c).map(|c| c.kind), Some(CurveKind::Arc { .. }))) =>
+            if matches!(
+                s.curves.get(c).map(|c| c.kind),
+                Some(CurveKind::Line { .. })
+            ) || (!chamfer
+                && matches!(s.curves.get(c).map(|c| c.kind), Some(CurveKind::Arc { .. }))) =>
         {
             match t.first_line.take() {
                 Some(l) if l != c => match shared_corner(s, l, c, chamfer) {
@@ -559,7 +586,10 @@ fn entity_tools_pointer(
         inputs.clear();
         return;
     };
-    let active = matches!(tool.tool, SketchTool::Slot | SketchTool::Fillet | SketchTool::Chamfer);
+    let active = matches!(
+        tool.tool,
+        SketchTool::Slot | SketchTool::Fillet | SketchTool::Chamfer
+    );
     // A new use of the tool: selected entities are used at once (selection first).
     if t.last_tool != tool.tool {
         t.last_tool = tool.tool;
@@ -681,12 +711,25 @@ fn entity_tools_pointer(
 
 /// The size a drag from `corner` to `cursor` (screen px) gives: how far the cursor is from the
 /// corner along the lines (a chamfer's distance), or the fillet whose ends are that far.
-fn live_size(s: &Sketch, map: &ScreenMap, corner: PointId, cursor: Vec2, chamfer: bool) -> Option<f64> {
+fn live_size(
+    s: &Sketch,
+    map: &ScreenMap,
+    corner: PointId,
+    cursor: Vec2,
+    chamfer: bool,
+) -> Option<f64> {
     let c = map.to_sketch(cursor)?;
-    let [(c1, a), (c2, b)] = if chamfer { corner_lines(s, corner)? } else { fillet_corner(s, corner)? };
+    let [(c1, a), (c2, b)] = if chamfer {
+        corner_lines(s, corner)?
+    } else {
+        fillet_corner(s, corner)?
+    };
     let p = s.pos(corner);
     let (pa, pb) = (s.pos(a), s.pos(b));
-    let t = c.distance(p).min(p.distance(pa) * 0.999).min(p.distance(pb) * 0.999);
+    let t = c
+        .distance(p)
+        .min(p.distance(pa) * 0.999)
+        .min(p.distance(pb) * 0.999);
     if t < 1e-6 {
         return None;
     }

@@ -118,10 +118,15 @@ where
     fn save(&self, w: &mut Writer) -> Self::Saved {
         let mut keys: Vec<&K> = self.keys().collect();
         keys.sort();
-        keys.into_iter().map(|k| (k.save(w), self[k].save(w))).collect()
+        keys.into_iter()
+            .map(|k| (k.save(w), self[k].save(w)))
+            .collect()
     }
     fn load(saved: Self::Saved, r: &mut Reader) -> Result<Self, String> {
-        saved.into_iter().map(|(k, v)| Ok((K::load(k, r)?, V::load(v, r)?))).collect()
+        saved
+            .into_iter()
+            .map(|(k, v)| Ok((K::load(k, r)?, V::load(v, r)?)))
+            .collect()
     }
 }
 
@@ -134,11 +139,13 @@ impl Persist for BodyId {
         }
         let i = w.bodies.len() as u32;
         let bytes = w.kernel.write_body(*self).unwrap_or_else(|e| {
-            w.error.get_or_insert_with(|| format!("a body could not be written: {e}"));
+            w.error
+                .get_or_insert_with(|| format!("a body could not be written: {e}"));
             Vec::new()
         });
         let colors = w.kernel.face_colors(*self);
-        w.bodies.push(bincode::serialize(&(bytes, colors)).expect("body bytes and colors serialize"));
+        w.bodies
+            .push(bincode::serialize(&(bytes, colors)).expect("body bytes and colors serialize"));
         w.body_index.insert(*self, i);
         i
     }
@@ -148,8 +155,12 @@ impl Persist for BodyId {
             return Ok(*b);
         }
         let bytes = r.bodies.get(i).ok_or("a body is missing")?;
-        let (bytes, colors): (Vec<u8>, Vec<Option<[u8; 4]>>) = bincode::deserialize(bytes).map_err(|e| format!("body metadata: {e}"))?;
-        let b = r.kernel.read_body(&bytes).map_err(|e| format!("a body could not be read: {e}"))?;
+        let (bytes, colors): (Vec<u8>, Vec<Option<[u8; 4]>>) =
+            bincode::deserialize(bytes).map_err(|e| format!("body metadata: {e}"))?;
+        let b = r
+            .kernel
+            .read_body(&bytes)
+            .map_err(|e| format!("a body could not be read: {e}"))?;
         r.kernel.set_face_colors(b, colors);
         r.loaded[i] = Some(b);
         r.added.push(b);
@@ -165,13 +176,19 @@ struct Table<S> {
 
 impl<S> Default for Table<S> {
     fn default() -> Self {
-        Self { index: HashMap::new(), items: Vec::new() }
+        Self {
+            index: HashMap::new(),
+            items: Vec::new(),
+        }
     }
 }
 
 impl<S> Table<S> {
     fn into_items(self) -> Vec<S> {
-        self.items.into_iter().map(|s| s.expect("every table entry is filled")).collect()
+        self.items
+            .into_iter()
+            .map(|s| s.expect("every table entry is filled"))
+            .collect()
     }
 }
 
@@ -184,7 +201,10 @@ struct Shared<S, T> {
 impl<S, T> Shared<S, T> {
     fn new(saved: Vec<S>) -> Self {
         let n = saved.len();
-        Self { saved: saved.into_iter().map(Some).collect(), built: (0..n).map(|_| None).collect() }
+        Self {
+            saved: saved.into_iter().map(Some).collect(),
+            built: (0..n).map(|_| None).collect(),
+        }
     }
 }
 
@@ -216,7 +236,12 @@ macro_rules! shared {
                 if let Some(Some(a)) = r.$table.built.get(n) {
                     return Ok(a.clone());
                 }
-                let $v: $saved = r.$table.saved.get_mut(n).and_then(Option::take).ok_or("a shared value is missing")?;
+                let $v: $saved = r
+                    .$table
+                    .saved
+                    .get_mut(n)
+                    .and_then(Option::take)
+                    .ok_or("a shared value is missing")?;
                 let value: $t = {
                     let $r = &mut *r;
                     $load
@@ -232,8 +257,20 @@ macro_rules! shared {
 shared!(Solid, solids, Solid, |s, _w| s.clone(), |v, _r| v);
 shared!(BodyNames, names, BodyNames, |s, _w| s.clone(), |v, _r| v);
 shared!(OpGeom, op_geoms, OpGeom, |s, _w| s.clone(), |v, _r| v);
-shared!(PartProps, part_props, PartProps, |s, _w| s.clone(), |v, _r| v);
-shared!(Vec<Feature>, sketch_lists, Vec<Feature>, |s, _w| s.clone(), |v, _r| v);
+shared!(
+    PartProps,
+    part_props,
+    PartProps,
+    |s, _w| s.clone(),
+    |v, _r| v
+);
+shared!(
+    Vec<Feature>,
+    sketch_lists,
+    Vec<Feature>,
+    |s, _w| s.clone(),
+    |v, _r| v
+);
 shared!(
     HashMap<FeatureId, DerivedOutput>,
     derived_maps,
@@ -254,9 +291,18 @@ shared!(
         ops.sort();
         ops.into_iter().map(|op| (*op, s[op].save(w))).collect()
     },
-    |v, r| v.into_iter().map(|(op, g)| Ok((op, Arc::<OpGeom>::load(g, r)?))).collect::<Result<Geoms, String>>()?
+    |v, r| v
+        .into_iter()
+        .map(|(op, g)| Ok((op, Arc::<OpGeom>::load(g, r)?)))
+        .collect::<Result<Geoms, String>>()?
 );
-shared!(State, states, SavedState, |s, w| SavedState::of(s, w), |v, r| v.state(r)?);
+shared!(
+    State,
+    states,
+    SavedState,
+    |s, w| SavedState::of(s, w),
+    |v, r| v.state(r)?
+);
 
 #[derive(Serialize, Deserialize)]
 pub struct SavedPart {
@@ -310,17 +356,31 @@ impl Persist for PartState {
         (self.part.save(w), self.body.save(w), self.names.save(w))
     }
     fn load(s: Self::Saved, r: &mut Reader) -> Result<Self, String> {
-        Ok(PartState { part: Persist::load(s.0, r)?, body: Persist::load(s.1, r)?, names: Persist::load(s.2, r)? })
+        Ok(PartState {
+            part: Persist::load(s.0, r)?,
+            body: Persist::load(s.1, r)?,
+            names: Persist::load(s.2, r)?,
+        })
     }
 }
 
 impl Persist for Stage {
     type Saved = (Vec<SavedPart>, u32, Vec<u32>, bool);
     fn save(&self, w: &mut Writer) -> Self::Saved {
-        (self.before.save(w), self.tool.save(w), self.more.save(w), self.remove)
+        (
+            self.before.save(w),
+            self.tool.save(w),
+            self.more.save(w),
+            self.remove,
+        )
     }
     fn load(s: Self::Saved, r: &mut Reader) -> Result<Self, String> {
-        Ok(Stage { before: Persist::load(s.0, r)?, tool: Persist::load(s.1, r)?, more: Persist::load(s.2, r)?, remove: s.3 })
+        Ok(Stage {
+            before: Persist::load(s.0, r)?,
+            tool: Persist::load(s.1, r)?,
+            more: Persist::load(s.2, r)?,
+            remove: s.3,
+        })
     }
 }
 
@@ -345,7 +405,20 @@ pub struct SavedState {
 impl SavedState {
     fn of(s: &State, w: &mut Writer) -> Self {
         // Every field is named here, so a new field of State can't be left out unnoticed.
-        let State { parts, next_part, next_surface, geoms, planes, connectors, connector_owners, composites, curves, derived, derived_sketches, sheet_metal } = s;
+        let State {
+            parts,
+            next_part,
+            next_surface,
+            geoms,
+            planes,
+            connectors,
+            connector_owners,
+            composites,
+            curves,
+            derived,
+            derived_sketches,
+            sheet_metal,
+        } = s;
         SavedState {
             parts: parts.save(w),
             next_part: *next_part,
@@ -397,7 +470,18 @@ pub struct SavedOutput {
 impl Persist for Output {
     type Saved = SavedOutput;
     fn save(&self, w: &mut Writer) -> SavedOutput {
-        let Output { state, error, warning, contacts, owned, stage, axis, dots, uses, arrows } = self;
+        let Output {
+            state,
+            error,
+            warning,
+            contacts,
+            owned,
+            stage,
+            axis,
+            dots,
+            uses,
+            arrows,
+        } = self;
         SavedOutput {
             state: state.save(w),
             error: error.clone(),
@@ -482,7 +566,11 @@ struct Snapshot {
 impl Rebuilder {
     /// The cached outputs `keys` (those that are cached), with their bodies, as a blob.
     pub fn snapshot(&self, keys: &[u64]) -> Result<Vec<u8>, String> {
-        let mut keys: Vec<u64> = keys.iter().copied().filter(|k| self.entries.contains_key(k)).collect();
+        let mut keys: Vec<u64> = keys
+            .iter()
+            .copied()
+            .filter(|k| self.entries.contains_key(k))
+            .collect();
         keys.sort_unstable();
         keys.dedup();
         let mut w = Writer {
@@ -524,7 +612,9 @@ impl Rebuilder {
         };
         let ron = ron::to_string(&snapshot).map_err(|e| e.to_string())?;
         let solids = bincode::serialize(&snapshot.solids).map_err(|e| e.to_string())?;
-        let mut out = Vec::with_capacity(ron.len() + solids.len() + w.bodies.iter().map(|b| b.len() + 8).sum::<usize>() + 32);
+        let mut out = Vec::with_capacity(
+            ron.len() + solids.len() + w.bodies.iter().map(|b| b.len() + 8).sum::<usize>() + 32,
+        );
         out.extend_from_slice(MAGIC);
         out.extend_from_slice(&FORMAT.to_le_bytes());
         out.extend_from_slice(&(ron.len() as u64).to_le_bytes());
@@ -569,7 +659,15 @@ impl Rebuilder {
                 continue;
             }
             match Output::load(saved, &mut r) {
-                Ok(output) => read.push((key, Entry { output, time: Duration::from_nanos(nanos), last_used: generation, sources: Vec::new() })),
+                Ok(output) => read.push((
+                    key,
+                    Entry {
+                        output,
+                        time: Duration::from_nanos(nanos),
+                        last_used: generation,
+                        sources: Vec::new(),
+                    },
+                )),
                 Err(e) => {
                     for b in r.added {
                         r.kernel.release(b);

@@ -212,7 +212,10 @@ impl ttf_parser::OutlineBuilder for Flatten {
             let t = i as f64 / CUBIC_STEPS as f64;
             let u = 1.0 - t;
             self.push(
-                p0 * (u * u * u) + p1 * (3.0 * u * u * t) + p2 * (3.0 * u * t * t) + p3 * (t * t * t),
+                p0 * (u * u * u)
+                    + p1 * (3.0 * u * u * t)
+                    + p2 * (3.0 * u * t * t)
+                    + p3 * (t * t * t),
             );
         }
     }
@@ -309,11 +312,17 @@ pub fn outlines(s: &Sketch, id: TextId) -> Vec<Vec<Vec2>> {
 
 /// The text a box line or corner belongs to.
 pub fn text_of_curve(s: &Sketch, c: CurveId) -> Option<TextId> {
-    s.texts.iter().find(|(_, t)| t.lines.contains(&c)).map(|(k, _)| k)
+    s.texts
+        .iter()
+        .find(|(_, t)| t.lines.contains(&c))
+        .map(|(k, _)| k)
 }
 
 pub fn text_of_point(s: &Sketch, p: PointId) -> Option<TextId> {
-    s.texts.iter().find(|(_, t)| t.corners.contains(&p)).map(|(k, _)| k)
+    s.texts
+        .iter()
+        .find(|(_, t)| t.corners.contains(&p))
+        .map(|(k, _)| k)
 }
 
 /// The synthetic curve ids of a text's outline pieces: contour `c`, run `r` (the outline is
@@ -322,7 +331,10 @@ pub fn text_of_point(s: &Sketch, p: PointId) -> Option<TextId> {
 pub fn piece_id(text: TextId, contour: usize, run: usize) -> CurveId {
     use slotmap::Key;
     let t = (text.data().as_ffi() & 0xFFF) as u32;
-    crate::synthetic_curve(2 + t, ((contour as u32 & 0x3FFF) << 12) | (run as u32 & 0xFFF))
+    crate::synthetic_curve(
+        2 + t,
+        ((contour as u32 & 0x3FFF) << 12) | (run as u32 & 0xFFF),
+    )
 }
 
 /// Sharper turns than this (radians) start a new run.
@@ -460,7 +472,10 @@ mod tests {
         .unwrap();
         crate::SketchOp::SetDimension {
             dimension: crate::Dimension::new(
-                crate::DimensionKind::Aligned { a: t.corners[0], b: t.corners[3] },
+                crate::DimensionKind::Aligned {
+                    a: t.corners[0],
+                    b: t.corners[3],
+                },
                 20.0,
                 -5.0,
             ),
@@ -492,7 +507,10 @@ mod tests {
         // Edit text: the box keeps its corner and height, and its width follows.
         crate::SketchOp::EditText {
             id,
-            style: TextStyle { bold: true, ..TextStyle::new("ABC") },
+            style: TextStyle {
+                bold: true,
+                ..TextStyle::new("ABC")
+            },
         }
         .apply(&mut s)
         .unwrap();
@@ -509,7 +527,11 @@ mod tests {
         .apply(&mut s)
         .unwrap();
         assert!(s.texts.is_empty() && s.curves.is_empty());
-        assert!(!s.constraints.values().any(|c| matches!(c, ConstraintOf::TextAspect(_))));
+        assert!(
+            !s.constraints
+                .values()
+                .any(|c| matches!(c, ConstraintOf::TextAspect(_)))
+        );
     }
 
     #[test]

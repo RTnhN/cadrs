@@ -22,7 +22,8 @@
 use std::f64::consts::{PI, TAU};
 
 use crate::model::{
-    BuildError, Joint, JointId, JointKind, Model, P3, RipStyle, SharpBuilder, SharpJointKind, Surface, V3, Wall, WallId, letters,
+    BuildError, Joint, JointId, JointKind, Model, P3, RipStyle, SharpBuilder, SharpJointKind,
+    Surface, V3, Wall, WallId, letters,
 };
 use crate::params::Params;
 use crate::poly::{P2, Polygon, Seg2, V2};
@@ -60,7 +61,10 @@ impl FaceIn {
     }
 
     fn local(&self, p: P3) -> P2 {
-        P2::new((p - self.origin).dot(&self.u), (p - self.origin).dot(&self.v))
+        P2::new(
+            (p - self.origin).dot(&self.u),
+            (p - self.origin).dot(&self.v),
+        )
     }
 }
 
@@ -165,8 +169,12 @@ impl ConstructError {
         match self {
             ConstructError::NoWalls => "Nothing to make sheet metal from".into(),
             ConstructError::Build { error, .. } => error.message(),
-            ConstructError::RadiusTooSmall { .. } => "The thickness is larger than an arc's radius on the material side".into(),
-            ConstructError::NotTangent { .. } => "An arc must run smoothly into the curves it meets".into(),
+            ConstructError::RadiusTooSmall { .. } => {
+                "The thickness is larger than an arc's radius on the material side".into()
+            }
+            ConstructError::NotTangent { .. } => {
+                "An arc must run smoothly into the curves it meets".into()
+            }
             ConstructError::NoDepth => "The extrude has no depth".into(),
         }
     }
@@ -262,7 +270,10 @@ fn round_diameter(pts: &[P2]) -> Option<f64> {
     }
     for w in pts.windows(3) {
         let (u, v) = (w[1] - w[0], w[2] - w[1]);
-        if u.norm() < 1e-12 || v.norm() < 1e-12 || u.normalize().dot(&v.normalize()) < (30f64).to_radians().cos() {
+        if u.norm() < 1e-12
+            || v.norm() < 1e-12
+            || u.normalize().dot(&v.normalize()) < (30f64).to_radians().cos()
+        {
             return None;
         }
     }
@@ -276,7 +287,9 @@ fn round_diameter(pts: &[P2]) -> Option<f64> {
     let uy = (sq(a) * (c.x - b.x) + sq(b) * (a.x - c.x) + sq(c) * (b.x - a.x)) / d;
     let centre = P2::new(ux, uy);
     let r = (a - centre).norm();
-    pts.iter().all(|q| ((*q - centre).norm() - r).abs() <= 1e-6 * r.max(1.0)).then_some(2.0 * r)
+    pts.iter()
+        .all(|q| ((*q - centre).norm() - r).abs() <= 1e-6 * r.max(1.0))
+        .then_some(2.0 * r)
 }
 
 fn meet(p: P2, d: V2, q: P2, e: V2) -> Option<P2> {
@@ -321,7 +334,13 @@ struct Laid {
 /// the face gets its sharp corner back, and the bend runs as far as both its walls' edges do. A
 /// round hole between two bends becomes that corner's Round – Sized relief (the hole's diameter,
 /// from the arc it leaves on the walls), so the model folds and flattens as the original did.
-pub fn from_faces(p: Params, faces: &[FaceIn], cyls: &[CylIn], edges: &[EdgeIn], o: &FaceOpts) -> Result<Built, ConstructError> {
+pub fn from_faces(
+    p: Params,
+    faces: &[FaceIn],
+    cyls: &[CylIn],
+    edges: &[EdgeIn],
+    o: &FaceOpts,
+) -> Result<Built, ConstructError> {
     if faces.is_empty() && cyls.is_empty() {
         return Err(ConstructError::NoWalls);
     }
@@ -380,7 +399,8 @@ pub fn from_faces(p: Params, faces: &[FaceIn], cyls: &[CylIn], edges: &[EdgeIn],
                 continue;
             }
             let off = d.axis_origin - c.axis_origin;
-            let coaxial = c.axis.dot(&d.axis).abs() > 1.0 - 1e-9 && (off - c.axis * off.dot(&c.axis)).norm() <= tol;
+            let coaxial = c.axis.dot(&d.axis).abs() > 1.0 - 1e-9
+                && (off - c.axis * off.dot(&c.axis)).norm() <= tol;
             if !coaxial || (d.radius - c.radius).abs() > tol || d.convex != c.convex {
                 continue;
             }
@@ -395,7 +415,12 @@ pub fn from_faces(p: Params, faces: &[FaceIn], cyls: &[CylIn], edges: &[EdgeIn],
 
     // Offsets: the clearance on the material side; with Include bends, enough more that the
     // inside of each bend clears the input's edge by the clearance.
-    let mut laid: Vec<Laid> = faces.iter().map(|_| Laid { offset: sign * o.clearance }).collect();
+    let mut laid: Vec<Laid> = faces
+        .iter()
+        .map(|_| Laid {
+            offset: sign * o.clearance,
+        })
+        .collect();
     if o.include_bends && !o.material_inside {
         let r = p.bend_radius;
         let c = o.clearance;
@@ -403,7 +428,10 @@ pub fn from_faces(p: Params, faces: &[FaceIn], cyls: &[CylIn], edges: &[EdgeIn],
             let e = &edges[i];
             let (fa, fb) = e.faces;
             // Only outside corners: the other face lies behind this one.
-            let centre_b = faces[fb].outline.bounds().map(|(lo, hi)| faces[fb].point(P2::from((lo.coords + hi.coords) / 2.0)));
+            let centre_b = faces[fb]
+                .outline
+                .bounds()
+                .map(|(lo, hi)| faces[fb].point(P2::from((lo.coords + hi.coords) / 2.0)));
             let convex = centre_b.is_some_and(|cb| (cb - e.a).dot(&normals[fa]) < 0.0);
             if !convex {
                 continue;
@@ -430,7 +458,13 @@ pub fn from_faces(p: Params, faces: &[FaceIn], cyls: &[CylIn], edges: &[EdgeIn],
         for (k, slot) in row.iter_mut().enumerate() {
             let (pk, qk) = (l[k], l[(k + 1) % l.len()]);
             for e in edges {
-                let other = if e.faces.0 == fi { e.faces.1 } else if e.faces.1 == fi { e.faces.0 } else { continue };
+                let other = if e.faces.0 == fi {
+                    e.faces.1
+                } else if e.faces.1 == fi {
+                    e.faces.0
+                } else {
+                    continue;
+                };
                 if along(f, pk, qk, e.a, e.b, tol) {
                     *slot = Some(other);
                     break;
@@ -440,12 +474,22 @@ pub fn from_faces(p: Params, faces: &[FaceIn], cyls: &[CylIn], edges: &[EdgeIn],
                 // An edge where a cylinder picked to bend meets this face: its other neighbour.
                 for &ci in &bend_cyls {
                     let c = &cyls[ci];
-                    let (Some(a), Some(b)) = c.neighbours else { continue };
-                    let other = if a == fi { b } else if b == fi { a } else { continue };
+                    let (Some(a), Some(b)) = c.neighbours else {
+                        continue;
+                    };
+                    let other = if a == fi {
+                        b
+                    } else if b == fi {
+                        a
+                    } else {
+                        continue;
+                    };
                     // The loop edge runs along the cylinder (parallel to its axis, at its radius).
                     let (pa, pb) = (f.point(pk), f.point(qk));
                     let par = (pb - pa).normalize().cross(&c.axis).norm() < 1e-6;
-                    let dist = |x: P3| ((x - c.axis_origin) - c.axis * (x - c.axis_origin).dot(&c.axis)).norm();
+                    let dist = |x: P3| {
+                        ((x - c.axis_origin) - c.axis * (x - c.axis_origin).dot(&c.axis)).norm()
+                    };
                     if par && (dist(pa) - c.radius).abs() < 1e-5 * size.max(c.radius) {
                         *slot = Some(other);
                         vrow[k] = Some(ci);
@@ -463,7 +507,10 @@ pub fn from_faces(p: Params, faces: &[FaceIn], cyls: &[CylIn], edges: &[EdgeIn],
     // the next edge along a bend or the next long edge, those short edges are the outline of a
     // corner or bend relief cut into the sheet: they're dropped, so the two lines meet at the
     // sharp corner again, and a round hole between two bends becomes that corner's relief.
-    let r_max = bend_cyls.iter().map(|&ci| cyls[ci].radius).fold(p.bend_radius, f64::max);
+    let r_max = bend_cyls
+        .iter()
+        .map(|&ci| cyls[ci].radius)
+        .fold(p.bend_radius, f64::max);
     let reach = 3.0 * (r_max + t);
     let mut dropped: Vec<Vec<bool>> = Vec::with_capacity(faces.len());
     // Runs between two bends (their cylinders, where, the hole's diameter if round) and runs
@@ -486,7 +533,11 @@ pub fn from_faces(p: Params, faces: &[FaceIn], cyls: &[CylIn], edges: &[EdgeIn],
             for dir in [1usize, n - 1] {
                 let mut run = Vec::new();
                 let mut j = (k + dir) % n;
-                while run.len() < n - 1 && short(j) && off_line(k, l[j]) < reach && off_line(k, l[(j + 1) % n]) < reach {
+                while run.len() < n - 1
+                    && short(j)
+                    && off_line(k, l[j]) < reach
+                    && off_line(k, l[(j + 1) % n]) < reach
+                {
                     run.push(j);
                     j = (j + dir) % n;
                 }
@@ -495,8 +546,13 @@ pub fn from_faces(p: Params, faces: &[FaceIn], cyls: &[CylIn], edges: &[EdgeIn],
                 }
                 // The edges either side meet near the run (a corner to restore), not a sheet's end
                 // running parallel to the bend (a lip's short end is no relief).
-                let (dk, dj) = ((l[(k + 1) % n] - l[k]).normalize(), (l[(j + 1) % n] - l[j]).normalize());
-                let Some(corner) = meet(l[k], dk, l[j], dj) else { continue };
+                let (dk, dj) = (
+                    (l[(k + 1) % n] - l[k]).normalize(),
+                    (l[(j + 1) % n] - l[j]).normalize(),
+                );
+                let Some(corner) = meet(l[k], dk, l[j], dj) else {
+                    continue;
+                };
                 if run.iter().any(|&e| (l[e] - corner).norm() > reach) {
                     continue;
                 }
@@ -510,7 +566,12 @@ pub fn from_faces(p: Params, faces: &[FaceIn], cyls: &[CylIn], edges: &[EdgeIn],
                 }
                 // The run's own vertices (not where it leaves the edges either side): on a
                 // round hole they lie on its circle.
-                let inner: Vec<P2> = run.iter().skip(1).map(|&e| l[e]).filter(|q| off_line(k, *q) > tol && off_line(j, *q) > tol).collect();
+                let inner: Vec<P2> = run
+                    .iter()
+                    .skip(1)
+                    .map(|&e| l[e])
+                    .filter(|q| off_line(k, *q) > tol && off_line(j, *q) > tol)
+                    .collect();
                 let mid = f.point(inner.get(inner.len() / 2).copied().unwrap_or(l[run[0]]));
                 let d = round_diameter(&inner);
                 match via_cyl[fi][j] {
@@ -585,7 +646,17 @@ pub fn from_faces(p: Params, faces: &[FaceIn], cyls: &[CylIn], edges: &[EdgeIn],
         }
         let (v, outline) = if o.material_inside {
             let flip = |q: &P2| P2::new(q.x, -q.y);
-            (-f.v, Polygon::with_holes(pts.iter().map(flip).collect(), f.outline.holes.iter().map(|h| h.iter().map(flip).collect()).collect()))
+            (
+                -f.v,
+                Polygon::with_holes(
+                    pts.iter().map(flip).collect(),
+                    f.outline
+                        .holes
+                        .iter()
+                        .map(|h| h.iter().map(flip).collect())
+                        .collect(),
+                ),
+            )
         } else {
             (f.v, Polygon::with_holes(pts, f.outline.holes.clone()))
         };
@@ -612,7 +683,9 @@ pub fn from_faces(p: Params, faces: &[FaceIn], cyls: &[CylIn], edges: &[EdgeIn],
     }
     for &ci in &bend_cyls {
         let c = &cyls[ci];
-        let (Some(fa), Some(fb)) = c.neighbours else { continue };
+        let (Some(fa), Some(fb)) = c.neighbours else {
+            continue;
+        };
         let Some(line) = plane_line(normals[fa], height(fa), normals[fb], height(fb)) else {
             out.stray_picks.push(c.key);
             continue;
@@ -620,13 +693,20 @@ pub fn from_faces(p: Params, faces: &[FaceIn], cyls: &[CylIn], edges: &[EdgeIn],
         // The bend's inner radius: the cylinder moved out with the walls, less the thickness
         // when the material lies towards the axis.
         let off = laid[fa].offset;
-        let def = if c.convex { c.radius + off } else { c.radius - off };
+        let def = if c.convex {
+            c.radius + off
+        } else {
+            c.radius - off
+        };
         let away = c.convex != o.material_inside;
         let r = if away { def } else { def - t };
         if r <= 0.0 {
             return Err(ConstructError::RadiusTooSmall { key: c.key });
         }
-        let (mut z0, mut z1) = bend_z.iter().find(|(i, _)| *i == ci).map_or(c.z, |(_, z)| *z);
+        let (mut z0, mut z1) = bend_z
+            .iter()
+            .find(|(i, _)| *i == ci)
+            .map_or(c.z, |(_, z)| *z);
         // Where both walls' restored edges run along it (an imported part's relief holes cut
         // the cylinder short; the walls, their corners back, say how long the bend is).
         let za = reach_z.iter().find(|x| x.0 == ci && x.1 == fa).map(|x| x.2);
@@ -642,12 +722,21 @@ pub fn from_faces(p: Params, faces: &[FaceIn], cyls: &[CylIn], edges: &[EdgeIn],
         }
         let a = onto_line(c.axis_origin + c.axis * z0, line);
         let bb = onto_line(c.axis_origin + c.axis * z1, line);
-        let j = b.joint(fa, fb, (a, bb), SharpJointKind::Bend { radius: Some(r), value: None });
+        let j = b.joint(
+            fa,
+            fb,
+            (a, bb),
+            SharpJointKind::Bend {
+                radius: Some(r),
+                value: None,
+            },
+        );
         b.set_joint_id(j, JointId(stable_id(c.key)), Some(names.bend()));
         keys.push(c.key);
     }
     for (i, e) in edges.iter().enumerate() {
-        if bend_edges.contains(&i) || normals[e.faces.0].dot(&normals[e.faces.1]).abs() > 1.0 - 1e-9 {
+        if bend_edges.contains(&i) || normals[e.faces.0].dot(&normals[e.faces.1]).abs() > 1.0 - 1e-9
+        {
             continue;
         }
         let Some(edge) = edge3(e) else { continue };
@@ -673,9 +762,18 @@ pub fn from_faces(p: Params, faces: &[FaceIn], cyls: &[CylIn], edges: &[EdgeIn],
     }
     // The input's round corner holes as those corners' reliefs (Round – Sized, the hole's size).
     for (ka, kb, d) in &round_reliefs {
-        let (Some(ja), Some(jb)) = (out.joint_key_id(*ka), out.joint_key_id(*kb)) else { continue };
-        let relief = crate::params::CornerRelief { kind: crate::params::CornerReliefKind::RoundSized, size: *d, ..p.corner_relief };
-        model.corner_overrides.push(crate::model::CornerOverride { bends: (ja, jb), relief });
+        let (Some(ja), Some(jb)) = (out.joint_key_id(*ka), out.joint_key_id(*kb)) else {
+            continue;
+        };
+        let relief = crate::params::CornerRelief {
+            kind: crate::params::CornerReliefKind::RoundSized,
+            size: *d,
+            ..p.corner_relief
+        };
+        model.corner_overrides.push(crate::model::CornerOverride {
+            bends: (ja, jb),
+            relief,
+        });
     }
     let built = (model.walls.len(), model.joints.len());
 
@@ -684,26 +782,59 @@ pub fn from_faces(p: Params, faces: &[FaceIn], cyls: &[CylIn], edges: &[EdgeIn],
         if bend_cyls.contains(&ci) || absorbed.contains(&ci) {
             continue;
         }
-        let off = c.neighbours.0.or(c.neighbours.1).map_or(sign * o.clearance, |f| laid[f].offset);
-        let def = if c.convex { c.radius + off } else { c.radius - off };
+        let off = c
+            .neighbours
+            .0
+            .or(c.neighbours.1)
+            .map_or(sign * o.clearance, |f| laid[f].offset);
+        let def = if c.convex {
+            c.radius + off
+        } else {
+            c.radius - off
+        };
         let material_outside = c.convex != o.material_inside;
         if def <= 0.0 || (!material_outside && def - t <= 0.0) {
             return Err(ConstructError::RadiusTooSmall { key: c.key });
         }
         let id = WallId(stable_id(c.key));
-        let surface = Surface::Rolled { axis_origin: c.axis_origin, axis: c.axis, start: c.start, radius: def, material_outside };
+        let surface = Surface::Rolled {
+            axis_origin: c.axis_origin,
+            axis: c.axis,
+            start: c.start,
+            radius: def,
+            material_outside,
+        };
         let len = def * c.sweep;
-        model.walls.push(Wall { id, surface, outline: Polygon::rect(P2::new(0.0, c.z.0), P2::new(len, c.z.1)) });
+        model.walls.push(Wall {
+            id,
+            surface,
+            outline: Polygon::rect(P2::new(0.0, c.z.0), P2::new(len, c.z.1)),
+        });
         out.walls.push((c.key, id));
         for (end, nb) in [(0.0, c.neighbours.0), (len, c.neighbours.1)] {
             let Some(fi) = nb else { continue };
-            let Some(wall) = model.walls.iter().find(|w| w.id == WallId(stable_id(faces[fi].key))) else { continue };
-            let (lo, hi) = (surface.point(P2::new(end, c.z.0)), surface.point(P2::new(end, c.z.1)));
+            let Some(wall) = model
+                .walls
+                .iter()
+                .find(|w| w.id == WallId(stable_id(faces[fi].key)))
+            else {
+                continue;
+            };
+            let (lo, hi) = (
+                surface.point(P2::new(end, c.z.0)),
+                surface.point(P2::new(end, c.z.1)),
+            );
             let on_a = Seg2::new(wall.surface.local(lo), wall.surface.local(hi));
             let on_b = Seg2::new(P2::new(end, c.z.0), P2::new(end, c.z.1));
             let jkey = c.key ^ faces[fi].key.rotate_left(17);
             let jid = JointId(stable_id(jkey));
-            model.joints.push(Joint { id: jid, name: names.joint(), a: wall.id, b: id, kind: JointKind::Tangent { on_a, on_b } });
+            model.joints.push(Joint {
+                id: jid,
+                name: names.joint(),
+                a: wall.id,
+                b: id,
+                kind: JointKind::Tangent { on_a, on_b },
+            });
             out.joints.push((jkey, jid));
         }
     }
@@ -718,9 +849,19 @@ pub fn from_faces(p: Params, faces: &[FaceIn], cyls: &[CylIn], edges: &[EdgeIn],
 /// A piece of a sketch chain, in sketch coordinates.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub enum Seg {
-    Line { a: P2, b: P2, key: u64 },
+    Line {
+        a: P2,
+        b: P2,
+        key: u64,
+    },
     /// From `start` (radians) through `sweep` (counter-clockwise when positive).
-    Arc { center: P2, radius: f64, start: f64, sweep: f64, key: u64 },
+    Arc {
+        center: P2,
+        radius: f64,
+        start: f64,
+        sweep: f64,
+        key: u64,
+    },
 }
 
 impl Seg {
@@ -783,8 +924,18 @@ pub struct ChainOpts {
 }
 
 enum Piece {
-    Line { a: P2, b: P2, key: u64 },
-    Arc { center: P2, radius: f64, start: f64, sweep: f64, key: u64 },
+    Line {
+        a: P2,
+        b: P2,
+        key: u64,
+    },
+    Arc {
+        center: P2,
+        radius: f64,
+        start: f64,
+        sweep: f64,
+        key: u64,
+    },
 }
 
 /// How two consecutive pieces meet.
@@ -872,9 +1023,19 @@ pub fn from_chains(p: Params, chains: &[ChainIn], o: &ChainOpts) -> Result<Built
             let mut last = i;
             match &segs[i] {
                 Seg::Line { a, b: bb, key } => {
-                    pieces.push(Piece::Line { a: *a, b: *bb, key: *key });
+                    pieces.push(Piece::Line {
+                        a: *a,
+                        b: *bb,
+                        key: *key,
+                    });
                 }
-                Seg::Arc { center, radius, start, sweep, key } if bend_arc(i) => {
+                Seg::Arc {
+                    center,
+                    radius,
+                    start,
+                    sweep,
+                    key,
+                } if bend_arc(i) => {
                     let _ = (center, start);
                     // The inner radius: the arc's own when the material is outside it.
                     let ccw = *sweep > 0.0;
@@ -883,19 +1044,46 @@ pub fn from_chains(p: Params, chains: &[ChainIn], o: &ChainOpts) -> Result<Built
                     if r <= 0.0 {
                         return Err(ConstructError::RadiusTooSmall { key: *key });
                     }
-                    let Seg::Line { a: na, b: nb, key: nkey } = segs[i + 1].clone() else { unreachable!() };
-                    let Some(Piece::Line { a: pa, b: pb, .. }) = pieces.last_mut() else { unreachable!() };
-                    let sharp = meet(*pa, *pb - *pa, na, nb - na).ok_or(ConstructError::NotTangent { key: *key })?;
+                    let Seg::Line {
+                        a: na,
+                        b: nb,
+                        key: nkey,
+                    } = segs[i + 1].clone()
+                    else {
+                        unreachable!()
+                    };
+                    let Some(Piece::Line { a: pa, b: pb, .. }) = pieces.last_mut() else {
+                        unreachable!()
+                    };
+                    let sharp = meet(*pa, *pb - *pa, na, nb - na)
+                        .ok_or(ConstructError::NotTangent { key: *key })?;
                     *pb = sharp;
                     junctions.push(Junction::Bend(Some(r), *key));
-                    pieces.push(Piece::Line { a: sharp, b: nb, key: nkey });
+                    pieces.push(Piece::Line {
+                        a: sharp,
+                        b: nb,
+                        key: nkey,
+                    });
                     last = i + 1;
                 }
-                Seg::Arc { center, radius, start, sweep, key } => {
+                Seg::Arc {
+                    center,
+                    radius,
+                    start,
+                    sweep,
+                    key,
+                } => {
                     if o.arcs_as_bends.contains(key) {
-                        out.warnings.push("An arc to extrude as a bend must sit between two lines".into());
+                        out.warnings
+                            .push("An arc to extrude as a bend must sit between two lines".into());
                     }
-                    pieces.push(Piece::Arc { center: *center, radius: *radius, start: *start, sweep: *sweep, key: *key });
+                    pieces.push(Piece::Arc {
+                        center: *center,
+                        radius: *radius,
+                        start: *start,
+                        sweep: *sweep,
+                        key: *key,
+                    });
                 }
             }
             // How it meets the next segment (the bend of an arc extruded as a bend is pushed with
@@ -903,14 +1091,21 @@ pub fn from_chains(p: Params, chains: &[ChainIn], o: &ChainOpts) -> Result<Built
             if last + 1 < m && !bend_arc(last + 1) {
                 let (_, e) = segs[last].tangents();
                 let (s, _) = segs[last + 1].tangents();
-                let both_lines = matches!(segs[last], Seg::Line { .. }) && matches!(segs[last + 1], Seg::Line { .. });
+                let both_lines = matches!(segs[last], Seg::Line { .. })
+                    && matches!(segs[last + 1], Seg::Line { .. });
                 let tangent = e.perp(&s).abs() < 1e-6 && e.dot(&s) > 0.0;
                 junctions.push(if both_lines {
-                    if tangent { Junction::Seam } else { Junction::Bend(None, 0) }
+                    if tangent {
+                        Junction::Seam
+                    } else {
+                        Junction::Bend(None, 0)
+                    }
                 } else if tangent {
                     Junction::Tangent
                 } else {
-                    return Err(ConstructError::NotTangent { key: segs[last + 1].key() });
+                    return Err(ConstructError::NotTangent {
+                        key: segs[last + 1].key(),
+                    });
                 });
             }
             i = last + 1;
@@ -919,7 +1114,8 @@ pub fn from_chains(p: Params, chains: &[ChainIn], o: &ChainOpts) -> Result<Built
         let mut k = 0;
         while k + 1 < pieces.len() {
             if junctions[k] == Junction::Seam
-                && let (Piece::Line { a, .. }, Piece::Line { b: nb, .. }) = (&pieces[k], &pieces[k + 1])
+                && let (Piece::Line { a, .. }, Piece::Line { b: nb, .. }) =
+                    (&pieces[k], &pieces[k + 1])
             {
                 let (a, nb) = (*a, *nb);
                 let key = match &pieces[k] {
@@ -952,14 +1148,29 @@ pub fn from_chains(p: Params, chains: &[ChainIn], o: &ChainOpts) -> Result<Built
                     let u = to3v((bb - a) / len.max(1e-300));
                     // Material on the left of the line (seen along the extrude direction's normal):
                     // u × v = n × u, so v = −n; on the right v = n.
-                    let (v, y0, y1) = if left_n { (-n, -o.z1, -o.z0) } else { (n, o.z0, o.z1) };
-                    let w = b.wall(to3(a), u, v, Polygon::rect(P2::new(0.0, y0), P2::new(len, y1)));
+                    let (v, y0, y1) = if left_n {
+                        (-n, -o.z1, -o.z0)
+                    } else {
+                        (n, o.z0, o.z1)
+                    };
+                    let w = b.wall(
+                        to3(a),
+                        u,
+                        v,
+                        Polygon::rect(P2::new(0.0, y0), P2::new(len, y1)),
+                    );
                     let id = WallId(stable_id(key));
                     b.set_wall_id(w, id);
                     out.walls.push((key, id));
                     walls.push((true, w));
                 }
-                Piece::Arc { center, radius, start, sweep, key } => {
+                Piece::Arc {
+                    center,
+                    radius,
+                    start,
+                    sweep,
+                    key,
+                } => {
                     let ccw = (sweep > 0.0) == (n.dot(&sk_n) >= 0.0);
                     let axis = if ccw { n } else { -n };
                     let material_outside = left_n != ccw;
@@ -974,7 +1185,13 @@ pub fn from_chains(p: Params, chains: &[ChainIn], o: &ChainOpts) -> Result<Built
                     rolled.push(Rolled {
                         id,
                         key,
-                        surface: Surface::Rolled { axis_origin: to3(center), axis, start: st, radius, material_outside },
+                        surface: Surface::Rolled {
+                            axis_origin: to3(center),
+                            axis,
+                            start: st,
+                            radius,
+                            material_outside,
+                        },
                         outline: Polygon::rect(P2::new(0.0, z0), P2::new(len, z1)),
                     });
                     walls.push((false, rolled.len() - 1));
@@ -983,28 +1200,58 @@ pub fn from_chains(p: Params, chains: &[ChainIn], o: &ChainOpts) -> Result<Built
         }
         // Joints.
         let count = pieces.len();
-        let mut joins: Vec<(usize, usize, Junction)> = junctions.iter().enumerate().map(|(k, j)| (k, k + 1, *j)).collect();
+        let mut joins: Vec<(usize, usize, Junction)> = junctions
+            .iter()
+            .enumerate()
+            .map(|(k, j)| (k, k + 1, *j))
+            .collect();
         if closing != Junction::Seam {
             joins.push((count - 1, 0, closing));
         }
         for (ka, kb, j) in joins {
             let at = match &pieces[ka] {
                 Piece::Line { b: e, .. } => *e,
-                Piece::Arc { center, radius, start, sweep, .. } => *center + V2::new((start + sweep).cos(), (start + sweep).sin()) * *radius,
+                Piece::Arc {
+                    center,
+                    radius,
+                    start,
+                    sweep,
+                    ..
+                } => *center + V2::new((start + sweep).cos(), (start + sweep).sin()) * *radius,
             };
             let edge = (to3(at) + n * o.z0, to3(at) + n * o.z1);
             match j {
                 Junction::Bend(radius, arc_key) => {
-                    let (Some(&(true, wa)), Some(&(true, wb))) = (walls.get(ka), walls.get(kb)) else { continue };
-                    let jx = b.joint(wa, wb, edge, SharpJointKind::Bend { radius, value: None });
-                    let key = if arc_key != 0 { arc_key } else { pieces_key(&pieces[ka]).rotate_left(7) ^ pieces_key(&pieces[kb]) };
+                    let (Some(&(true, wa)), Some(&(true, wb))) = (walls.get(ka), walls.get(kb))
+                    else {
+                        continue;
+                    };
+                    let jx = b.joint(
+                        wa,
+                        wb,
+                        edge,
+                        SharpJointKind::Bend {
+                            radius,
+                            value: None,
+                        },
+                    );
+                    let key = if arc_key != 0 {
+                        arc_key
+                    } else {
+                        pieces_key(&pieces[ka]).rotate_left(7) ^ pieces_key(&pieces[kb])
+                    };
                     b.set_joint_id(jx, JointId(stable_id(key)), Some(names.bend()));
                     bend_keys.push(key);
                 }
                 Junction::Rip => {
-                    let (Some(&(true, wa)), Some(&(true, wb))) = (walls.get(ka), walls.get(kb)) else { continue };
+                    let (Some(&(true, wa)), Some(&(true, wb))) = (walls.get(ka), walls.get(kb))
+                    else {
+                        continue;
+                    };
                     let jx = b.rip(wa, wb, edge, RipStyle::EdgeJoint);
-                    let key = pieces_key(&pieces[ka]).rotate_left(7) ^ pieces_key(&pieces[kb]) ^ 0x5249_5000;
+                    let key = pieces_key(&pieces[ka]).rotate_left(7)
+                        ^ pieces_key(&pieces[kb])
+                        ^ 0x5249_5000;
                     b.set_joint_id(jx, JointId(stable_id(key)), Some(names.joint()));
                     bend_keys.push(key);
                 }
@@ -1037,7 +1284,11 @@ pub fn from_chains(p: Params, chains: &[ChainIn], o: &ChainOpts) -> Result<Built
     let built = (model.walls.len(), model.joints.len());
     let planar_ids: Vec<WallId> = b.walls.iter().map(|w| w.id.expect("set")).collect();
     for r in &rolled {
-        model.walls.push(Wall { id: r.id, surface: r.surface, outline: r.outline.clone() });
+        model.walls.push(Wall {
+            id: r.id,
+            surface: r.surface,
+            outline: r.outline.clone(),
+        });
         let _ = r.key;
     }
     for tj in tangents {
@@ -1052,17 +1303,39 @@ pub fn from_chains(p: Params, chains: &[ChainIn], o: &ChainOpts) -> Result<Built
                 // On a rolled wall: its start or its end (computed, not by atan2, which can
                 // wrap a start point round to the end).
                 let r = &rolled[i];
-                let Surface::Rolled { axis_origin, axis, start, radius, .. } = r.surface else { unreachable!() };
+                let Surface::Rolled {
+                    axis_origin,
+                    axis,
+                    start,
+                    radius,
+                    ..
+                } = r.surface
+                else {
+                    unreachable!()
+                };
                 let len = r.outline.bounds().map_or(0.0, |(_, hi)| hi.x);
                 let d = lo - axis_origin;
                 let radial = (d - axis * d.dot(&axis)).normalize();
-                let s = if radial.dot(&start) > 1.0 - 1e-9 && (len - radius * TAU).abs() > 1e-9 { 0.0 } else { len };
-                Seg2::new(P2::new(s, (lo - axis_origin).dot(&axis)), P2::new(s, (hi - axis_origin).dot(&axis)))
+                let s = if radial.dot(&start) > 1.0 - 1e-9 && (len - radius * TAU).abs() > 1e-9 {
+                    0.0
+                } else {
+                    len
+                };
+                Seg2::new(
+                    P2::new(s, (lo - axis_origin).dot(&axis)),
+                    P2::new(s, (hi - axis_origin).dot(&axis)),
+                )
             }
         };
         let (on_a, on_b) = (seg(tj.a, wa), seg(tj.b, wb));
         let jid = JointId(stable_id(tj.key));
-        model.joints.push(Joint { id: jid, name: names.joint(), a: wa, b: wb, kind: JointKind::Tangent { on_a, on_b } });
+        model.joints.push(Joint {
+            id: jid,
+            name: names.joint(),
+            a: wa,
+            b: wb,
+            kind: JointKind::Tangent { on_a, on_b },
+        });
         out.joints.push((tj.key, jid));
     }
     out.def = crate::sharp_edit::SharpDef::new(b, &model, built.0, built.1);
@@ -1084,24 +1357,41 @@ mod tests {
     use crate::flat::flatten;
 
     fn params() -> Params {
-        Params { thickness: 2.0, bend_radius: 3.0, k_factor: 0.45, minimal_gap: 0.2, ..Default::default() }
+        Params {
+            thickness: 2.0,
+            bend_radius: 3.0,
+            k_factor: 0.45,
+            minimal_gap: 0.2,
+            ..Default::default()
+        }
     }
 
     /// The six faces of a box `[0,x]×[0,y]×[0,z]` (outward normals) and its twelve edges.
     fn block(x: f64, y: f64, z: f64) -> (Vec<FaceIn>, Vec<EdgeIn>) {
-        let f = |key, origin: P3, u: V3, v: V3, w: f64, h: f64| FaceIn { key, origin, u, v, outline: Polygon::rect(P2::origin(), P2::new(w, h)) };
+        let f = |key, origin: P3, u: V3, v: V3, w: f64, h: f64| FaceIn {
+            key,
+            origin,
+            u,
+            v,
+            outline: Polygon::rect(P2::origin(), P2::new(w, h)),
+        };
         let faces = vec![
-            f(1, P3::new(0.0, y, 0.0), V3::x(), -V3::y(), x, y),                // bottom (−z)
-            f(2, P3::new(0.0, 0.0, z), V3::x(), V3::y(), x, y),                 // top (+z)
-            f(3, P3::new(0.0, 0.0, 0.0), V3::x(), V3::z(), x, z),               // south (−y)
-            f(4, P3::new(x, y, 0.0), -V3::x(), V3::z(), x, z),                  // north (+y)
-            f(5, P3::new(0.0, y, 0.0), -V3::y(), V3::z(), y, z),                // west (−x)
-            f(6, P3::new(x, 0.0, 0.0), V3::y(), V3::z(), y, z),                 // east (+x)
+            f(1, P3::new(0.0, y, 0.0), V3::x(), -V3::y(), x, y), // bottom (−z)
+            f(2, P3::new(0.0, 0.0, z), V3::x(), V3::y(), x, y),  // top (+z)
+            f(3, P3::new(0.0, 0.0, 0.0), V3::x(), V3::z(), x, z), // south (−y)
+            f(4, P3::new(x, y, 0.0), -V3::x(), V3::z(), x, z),   // north (+y)
+            f(5, P3::new(0.0, y, 0.0), -V3::y(), V3::z(), y, z), // west (−x)
+            f(6, P3::new(x, 0.0, 0.0), V3::y(), V3::z(), y, z),  // east (+x)
         ];
         for fc in &faces {
             assert!((fc.normal().norm() - 1.0).abs() < 1e-12);
         }
-        let e = |key, a: P3, b: P3, fa, fb| EdgeIn { key, a, b, faces: (fa, fb) };
+        let e = |key, a: P3, b: P3, fa, fb| EdgeIn {
+            key,
+            a,
+            b,
+            faces: (fa, fb),
+        };
         let edges = vec![
             e(10, P3::new(0.0, 0.0, 0.0), P3::new(x, 0.0, 0.0), 0, 2),
             e(11, P3::new(0.0, y, 0.0), P3::new(x, y, 0.0), 0, 3),
@@ -1125,7 +1415,12 @@ mod tests {
         let b = from_faces(params(), &faces, &[], &edges, &FaceOpts::default()).expect("builds");
         assert_eq!(b.model.walls.len(), 6);
         assert_eq!(b.model.joints.len(), 12);
-        assert!(b.model.joints.iter().all(|j| matches!(j.kind, JointKind::Rip { .. })));
+        assert!(
+            b.model
+                .joints
+                .iter()
+                .all(|j| matches!(j.kind, JointKind::Rip { .. }))
+        );
         assert_eq!(b.model.joints[0].name, "Joint A");
         let f = flatten(&b.model);
         assert!(f.is_ok(), "{:?}", f.errors);
@@ -1136,10 +1431,19 @@ mod tests {
     fn picked_edges_bend_in_pick_order_and_a_loop_closing_pick_stays_a_rip() {
         let (faces, edges) = block(100.0, 60.0, 40.0);
         // Bottom to its four sides, then the south–west corner (whose walls are joined already).
-        let o = FaceOpts { bends: vec![10, 11, 12, 13, 18], ..Default::default() };
+        let o = FaceOpts {
+            bends: vec![10, 11, 12, 13, 18],
+            ..Default::default()
+        };
         let b = from_faces(params(), &faces, &[], &edges, &o).expect("builds");
         assert_eq!(b.loop_picks, vec![18]);
-        let bends: Vec<&str> = b.model.joints.iter().filter(|j| j.bend().is_some()).map(|j| j.name.as_str()).collect();
+        let bends: Vec<&str> = b
+            .model
+            .joints
+            .iter()
+            .filter(|j| j.bend().is_some())
+            .map(|j| j.name.as_str())
+            .collect();
         assert_eq!(bends, ["Bend A", "Bend B", "Bend C", "Bend D"]);
         assert!(b.model.validate().is_empty(), "{:?}", b.model.validate());
         let f = flatten(&b.model);
@@ -1152,9 +1456,29 @@ mod tests {
     fn two_pick_orders_give_two_flats() {
         let (faces, edges) = block(100.0, 60.0, 40.0);
         // A: bottom–south, then south–east, then bottom–east (closes a loop: a rip).
-        let a = from_faces(params(), &faces, &[], &edges, &FaceOpts { bends: vec![10, 19, 13], ..Default::default() }).unwrap();
+        let a = from_faces(
+            params(),
+            &faces,
+            &[],
+            &edges,
+            &FaceOpts {
+                bends: vec![10, 19, 13],
+                ..Default::default()
+            },
+        )
+        .unwrap();
         // B: bottom–east first, then bottom–south, then south–east (now the rip).
-        let b = from_faces(params(), &faces, &[], &edges, &FaceOpts { bends: vec![13, 10, 19], ..Default::default() }).unwrap();
+        let b = from_faces(
+            params(),
+            &faces,
+            &[],
+            &edges,
+            &FaceOpts {
+                bends: vec![13, 10, 19],
+                ..Default::default()
+            },
+        )
+        .unwrap();
         assert_eq!(a.loop_picks, vec![13]);
         assert_eq!(b.loop_picks, vec![19]);
         let (fa, fb) = (flatten(&a.model), flatten(&b.model));
@@ -1170,12 +1494,18 @@ mod tests {
     #[test]
     fn clearance_moves_the_walls_out_and_keeps_the_sharps() {
         let (faces, edges) = block(100.0, 60.0, 40.0);
-        let o = FaceOpts { clearance: 5.0, bends: vec![10], ..Default::default() };
+        let o = FaceOpts {
+            clearance: 5.0,
+            bends: vec![10],
+            ..Default::default()
+        };
         let b = from_faces(params(), &faces, &[], &edges, &o).expect("builds");
         assert!(b.model.validate().is_empty());
         // The bottom wall is at z = −5 and 110 × 70 (before its bend trims it).
         let bottom = b.model.wall(WallId(stable_id(1))).unwrap();
-        let Surface::Planar { origin, .. } = bottom.surface else { panic!() };
+        let Surface::Planar { origin, .. } = bottom.surface else {
+            panic!()
+        };
         assert!((origin.z + 5.0).abs() < 1e-9);
         let (lo, hi) = bottom.outline.bounds().unwrap();
         assert!(((hi.x - lo.x) - 110.0).abs() < 1e-6, "{lo} {hi}");
@@ -1184,10 +1514,16 @@ mod tests {
     #[test]
     fn include_bends_moves_the_walls_out_by_the_bend_clearance() {
         let (faces, edges) = block(100.0, 60.0, 40.0);
-        let o = FaceOpts { include_bends: true, bends: vec![10], ..Default::default() };
+        let o = FaceOpts {
+            include_bends: true,
+            bends: vec![10],
+            ..Default::default()
+        };
         let b = from_faces(params(), &faces, &[], &edges, &o).expect("builds");
         let bottom = b.model.wall(WallId(stable_id(1))).unwrap();
-        let Surface::Planar { origin, .. } = bottom.surface else { panic!() };
+        let Surface::Planar { origin, .. } = bottom.surface else {
+            panic!()
+        };
         let d = 3.0 * (1.0 - (std::f64::consts::FRAC_PI_4).cos());
         assert!((origin.z + d).abs() < 1e-9, "{}", origin.z);
     }
@@ -1206,42 +1542,122 @@ mod tests {
         ]);
         let faces = vec![
             // The bottom face (outward −z): (x, −y) coordinates.
-            FaceIn { key: 1, origin: P3::origin(), u: V3::x(), v: -V3::y(), outline: l.map(|q| P2::new(q.x, -q.y)) },
+            FaceIn {
+                key: 1,
+                origin: P3::origin(),
+                u: V3::x(),
+                v: -V3::y(),
+                outline: l.map(|q| P2::new(q.x, -q.y)),
+            },
             // Inner walls on y = 30 (x 30..60) and x = 30 (y 30..60), normals into the notch.
-            FaceIn { key: 2, origin: P3::new(30.0, 30.0, 0.0), u: V3::x(), v: -V3::z(), outline: Polygon::rect(P2::new(0.0, -40.0), P2::new(30.0, 0.0)) },
-            FaceIn { key: 3, origin: P3::new(30.0, 30.0, 0.0), u: -V3::z(), v: V3::y(), outline: Polygon::rect(P2::new(-40.0, 0.0), P2::new(0.0, 30.0)) },
+            FaceIn {
+                key: 2,
+                origin: P3::new(30.0, 30.0, 0.0),
+                u: V3::x(),
+                v: -V3::z(),
+                outline: Polygon::rect(P2::new(0.0, -40.0), P2::new(30.0, 0.0)),
+            },
+            FaceIn {
+                key: 3,
+                origin: P3::new(30.0, 30.0, 0.0),
+                u: -V3::z(),
+                v: V3::y(),
+                outline: Polygon::rect(P2::new(-40.0, 0.0), P2::new(0.0, 30.0)),
+            },
         ];
         for f in &faces[1..] {
             assert!(f.normal().x > 0.5 || f.normal().y > 0.5);
         }
         let edges = vec![
-            EdgeIn { key: 10, a: P3::new(30.0, 30.0, 0.0), b: P3::new(60.0, 30.0, 0.0), faces: (0, 1) },
-            EdgeIn { key: 11, a: P3::new(30.0, 30.0, 0.0), b: P3::new(30.0, 60.0, 0.0), faces: (0, 2) },
-            EdgeIn { key: 12, a: P3::new(30.0, 30.0, 0.0), b: P3::new(30.0, 30.0, 40.0), faces: (1, 2) },
+            EdgeIn {
+                key: 10,
+                a: P3::new(30.0, 30.0, 0.0),
+                b: P3::new(60.0, 30.0, 0.0),
+                faces: (0, 1),
+            },
+            EdgeIn {
+                key: 11,
+                a: P3::new(30.0, 30.0, 0.0),
+                b: P3::new(30.0, 60.0, 0.0),
+                faces: (0, 2),
+            },
+            EdgeIn {
+                key: 12,
+                a: P3::new(30.0, 30.0, 0.0),
+                b: P3::new(30.0, 30.0, 40.0),
+                faces: (1, 2),
+            },
         ];
-        let o = FaceOpts { bends: vec![10, 11], ..Default::default() };
+        let o = FaceOpts {
+            bends: vec![10, 11],
+            ..Default::default()
+        };
         let b = from_faces(params(), &faces, &[], &edges, &o).expect("builds");
         let f = flatten(&b.model);
-        assert!(f.errors.iter().any(|e| matches!(e, crate::FlatError::Collision { .. })), "{:?}", f.errors);
+        assert!(
+            f.errors
+                .iter()
+                .any(|e| matches!(e, crate::FlatError::Collision { .. })),
+            "{:?}",
+            f.errors
+        );
     }
 
     fn chain_opts(depth: f64) -> ChainOpts {
-        ChainOpts { origin: P3::origin(), x: V3::x(), y: V3::y(), z0: 0.0, z1: depth, dir: V3::z(), flip_side: false, arcs_as_bends: vec![], edits: vec![] }
+        ChainOpts {
+            origin: P3::origin(),
+            x: V3::x(),
+            y: V3::y(),
+            z0: 0.0,
+            z1: depth,
+            dir: V3::z(),
+            flip_side: false,
+            arcs_as_bends: vec![],
+            edits: vec![],
+        }
     }
 
     #[test]
     fn an_open_u_extrudes_into_three_walls_and_two_bends() {
         let segs = vec![
-            Seg::Line { a: P2::new(0.0, 30.0), b: P2::new(0.0, 0.0), key: 1 },
-            Seg::Line { a: P2::new(0.0, 0.0), b: P2::new(50.0, 0.0), key: 2 },
-            Seg::Line { a: P2::new(50.0, 0.0), b: P2::new(50.0, 30.0), key: 3 },
+            Seg::Line {
+                a: P2::new(0.0, 30.0),
+                b: P2::new(0.0, 0.0),
+                key: 1,
+            },
+            Seg::Line {
+                a: P2::new(0.0, 0.0),
+                b: P2::new(50.0, 0.0),
+                key: 2,
+            },
+            Seg::Line {
+                a: P2::new(50.0, 0.0),
+                b: P2::new(50.0, 30.0),
+                key: 3,
+            },
         ];
-        let b = from_chains(params(), &[ChainIn { segs, closed: false }], &chain_opts(40.0)).expect("builds");
+        let b = from_chains(
+            params(),
+            &[ChainIn {
+                segs,
+                closed: false,
+            }],
+            &chain_opts(40.0),
+        )
+        .expect("builds");
         assert_eq!(b.model.walls.len(), 3);
-        assert_eq!(b.model.joints.iter().filter(|j| j.bend().is_some()).count(), 2);
+        assert_eq!(
+            b.model.joints.iter().filter(|j| j.bend().is_some()).count(),
+            2
+        );
         assert!(b.model.validate().is_empty(), "{:?}", b.model.validate());
         // The material is inside the U: the bends turn towards it.
-        assert!(b.model.joints.iter().all(|j| j.bend().is_some_and(|x| x.toward_material)));
+        assert!(
+            b.model
+                .joints
+                .iter()
+                .all(|j| j.bend().is_some_and(|x| x.toward_material))
+        );
         let f = flatten(&b.model);
         assert!(f.is_ok());
         let (lo, hi) = f.parts[0].bounds().unwrap();
@@ -1256,15 +1672,45 @@ mod tests {
     fn an_arc_extrudes_as_a_rolled_wall_or_as_a_bend() {
         // A line, a quarter arc of radius 10 turning left, a line.
         let segs = vec![
-            Seg::Line { a: P2::new(0.0, 0.0), b: P2::new(40.0, 0.0), key: 1 },
-            Seg::Arc { center: P2::new(40.0, 10.0), radius: 10.0, start: -FRAC_PI_2, sweep: FRAC_PI_2, key: 2 },
-            Seg::Line { a: P2::new(50.0, 10.0), b: P2::new(50.0, 40.0), key: 3 },
+            Seg::Line {
+                a: P2::new(0.0, 0.0),
+                b: P2::new(40.0, 0.0),
+                key: 1,
+            },
+            Seg::Arc {
+                center: P2::new(40.0, 10.0),
+                radius: 10.0,
+                start: -FRAC_PI_2,
+                sweep: FRAC_PI_2,
+                key: 2,
+            },
+            Seg::Line {
+                a: P2::new(50.0, 10.0),
+                b: P2::new(50.0, 40.0),
+                key: 3,
+            },
         ];
-        let chain = ChainIn { segs, closed: false };
-        let rolled = from_chains(params(), std::slice::from_ref(&chain), &chain_opts(20.0)).expect("rolled");
+        let chain = ChainIn {
+            segs,
+            closed: false,
+        };
+        let rolled =
+            from_chains(params(), std::slice::from_ref(&chain), &chain_opts(20.0)).expect("rolled");
         assert_eq!(rolled.model.walls.len(), 3);
-        assert_eq!(rolled.model.joints.iter().filter(|j| matches!(j.kind, JointKind::Tangent { .. })).count(), 2);
-        assert!(rolled.model.validate().is_empty(), "{:?}", rolled.model.validate());
+        assert_eq!(
+            rolled
+                .model
+                .joints
+                .iter()
+                .filter(|j| matches!(j.kind, JointKind::Tangent { .. }))
+                .count(),
+            2
+        );
+        assert!(
+            rolled.model.validate().is_empty(),
+            "{:?}",
+            rolled.model.validate()
+        );
         let f = flatten(&rolled.model);
         assert!(f.is_ok(), "{:?}", f.errors);
         // Material inside the turn (left): the arc's inside is the definition surface's other
@@ -1278,10 +1724,19 @@ mod tests {
         o.arcs_as_bends = vec![2];
         let bent = from_chains(params(), &[chain], &o).expect("as a bend");
         assert_eq!(bent.model.walls.len(), 2);
-        let bend = bent.model.joints.iter().find_map(|j| j.bend()).expect("a bend");
+        let bend = bent
+            .model
+            .joints
+            .iter()
+            .find_map(|j| j.bend())
+            .expect("a bend");
         // Inner radius: 10 − 2 (the material is inside the arc).
         assert!((bend.radius - 8.0).abs() < 1e-9);
-        assert!(bent.model.validate().is_empty(), "{:?}", bent.model.validate());
+        assert!(
+            bent.model.validate().is_empty(),
+            "{:?}",
+            bent.model.validate()
+        );
         let f = flatten(&bent.model);
         let (lo, hi) = f.parts[0].bounds().unwrap();
         let along = (hi.x - lo.x).max(hi.y - lo.y);
@@ -1291,19 +1746,59 @@ mod tests {
 
     #[test]
     fn a_closed_rectangle_is_ripped_where_it_closes() {
-        let p = [P2::new(0.0, 0.0), P2::new(40.0, 0.0), P2::new(40.0, 30.0), P2::new(0.0, 30.0)];
-        let segs = (0..4).map(|i| Seg::Line { a: p[i], b: p[(i + 1) % 4], key: 1 + i as u64 }).collect();
-        let b = from_chains(params(), &[ChainIn { segs, closed: true }], &chain_opts(20.0)).expect("builds");
-        assert_eq!(b.model.joints.iter().filter(|j| j.bend().is_some()).count(), 3);
-        assert_eq!(b.model.joints.iter().filter(|j| matches!(j.kind, JointKind::Rip { .. })).count(), 1);
+        let p = [
+            P2::new(0.0, 0.0),
+            P2::new(40.0, 0.0),
+            P2::new(40.0, 30.0),
+            P2::new(0.0, 30.0),
+        ];
+        let segs = (0..4)
+            .map(|i| Seg::Line {
+                a: p[i],
+                b: p[(i + 1) % 4],
+                key: 1 + i as u64,
+            })
+            .collect();
+        let b = from_chains(
+            params(),
+            &[ChainIn { segs, closed: true }],
+            &chain_opts(20.0),
+        )
+        .expect("builds");
+        assert_eq!(
+            b.model.joints.iter().filter(|j| j.bend().is_some()).count(),
+            3
+        );
+        assert_eq!(
+            b.model
+                .joints
+                .iter()
+                .filter(|j| matches!(j.kind, JointKind::Rip { .. }))
+                .count(),
+            1
+        );
         let f = flatten(&b.model);
         assert!(f.is_ok(), "{:?}", f.errors);
     }
 
     #[test]
     fn a_tight_arc_on_the_material_side_fails() {
-        let segs = vec![Seg::Arc { center: P2::origin(), radius: 1.5, start: 0.0, sweep: PI, key: 9 }];
-        let e = from_chains(params(), &[ChainIn { segs, closed: false }], &chain_opts(10.0)).unwrap_err();
+        let segs = vec![Seg::Arc {
+            center: P2::origin(),
+            radius: 1.5,
+            start: 0.0,
+            sweep: PI,
+            key: 9,
+        }];
+        let e = from_chains(
+            params(),
+            &[ChainIn {
+                segs,
+                closed: false,
+            }],
+            &chain_opts(10.0),
+        )
+        .unwrap_err();
         assert_eq!(e, ConstructError::RadiusTooSmall { key: 9 });
     }
 }

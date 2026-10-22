@@ -282,7 +282,8 @@ impl DrawingStyle {
                 match key {
                     "units" => self.units = UNIT_CHOICES[i],
                     "decimal_separator" => {
-                        self.decimal_separator = [DecimalSeparator::Period, DecimalSeparator::Comma][i]
+                        self.decimal_separator =
+                            [DecimalSeparator::Period, DecimalSeparator::Comma][i]
                     }
                     "precision" => self.precision = i as u8,
                     "tolerance_precision" => self.tolerance_precision = i as u8,
@@ -306,8 +307,11 @@ impl DrawingStyle {
                     "note_text_height" => self.note_text_height = preset(key),
                     "leader_arrow" => self.leader_arrow = ARROWS[i],
                     "tangent_edges" => {
-                        self.tangent_edges =
-                            [TangentEdges::Hidden, TangentEdges::Solid, TangentEdges::Phantom][i]
+                        self.tangent_edges = [
+                            TangentEdges::Hidden,
+                            TangentEdges::Solid,
+                            TangentEdges::Phantom,
+                        ][i]
                     }
                     "centermark_size" => self.centermark_size = preset(key),
                     "centerline_extension" => self.centerline_extension = preset(key),
@@ -315,7 +319,8 @@ impl DrawingStyle {
                         self.virtual_sharp = [VirtualSharp::Mark, VirtualSharp::Extension][i]
                     }
                     "date_format" => {
-                        self.date_format = [DateFormat::Iso, DateFormat::Us, DateFormat::European][i]
+                        self.date_format =
+                            [DateFormat::Iso, DateFormat::Us, DateFormat::European][i]
                     }
                     "table_text_height" => self.table_text_height = preset(key),
                     "table_row_height" => self.table_row_height = preset(key),
@@ -331,7 +336,12 @@ impl DrawingStyle {
     pub fn options(&self, key: &str) -> Vec<String> {
         let decimals = || (0..=6u8).map(decimals_label).collect::<Vec<_>>();
         let angles = || (0..=4u8).map(decimals_label).collect::<Vec<_>>();
-        let units = || UNIT_CHOICES.iter().map(|u| unit_plural(*u).to_string()).collect();
+        let units = || {
+            UNIT_CHOICES
+                .iter()
+                .map(|u| unit_plural(*u).to_string())
+                .collect()
+        };
         let arrows = || {
             ["Filled", "Open", "Closed", "Dot", "Slash"]
                 .map(String::from)
@@ -344,7 +354,9 @@ impl DrawingStyle {
                 decimals()
             }
             "angular_precision" => angles(),
-            "dual_location" => ["Top", "Bottom", "Left", "Right"].map(String::from).to_vec(),
+            "dual_location" => ["Top", "Bottom", "Left", "Right"]
+                .map(String::from)
+                .to_vec(),
             "dim_arrow" | "leader_arrow" => arrows(),
             "tangent_edges" => ["Hidden", "Solid", "Phantom"].map(String::from).to_vec(),
             "virtual_sharp" => ["Mark", "Extension lines"].map(String::from).to_vec(),
@@ -408,7 +420,10 @@ fn length_presets(key: &str) -> &'static [f64] {
     const ROW: &[f64] = &[5.0, 6.35, 7.0, 8.0, 10.0];
     match key {
         "dim_text_height" | "note_text_height" | "table_text_height" => TEXT,
-        "dim_arrow_length" | "extension_gap" | "extension_beyond" | "centermark_size"
+        "dim_arrow_length"
+        | "extension_gap"
+        | "extension_beyond"
+        | "centermark_size"
         | "centerline_extension" => SMALL,
         "table_row_height" => ROW,
         _ => &[],
@@ -538,35 +553,125 @@ use StyleSection as S;
 /// Every setting, in panel order.
 pub const FIELDS: &[StyleField] = &[
     f("units", S::UnitsPrecision, "Primary", "Units"),
-    f("decimal_separator", S::UnitsPrecision, "Primary", "Decimal separator"),
+    f(
+        "decimal_separator",
+        S::UnitsPrecision,
+        "Primary",
+        "Decimal separator",
+    ),
     f("precision", S::UnitsPrecision, "Primary", "Precision"),
-    f("tolerance_precision", S::UnitsPrecision, "Primary", "Tolerance precision"),
-    f("angular_precision", S::UnitsPrecision, "Primary", "Angular precision"),
-    f("show_dual", S::UnitsPrecision, "Dual", "Show dual dimensions"),
-    f("show_dual_unit", S::UnitsPrecision, "Dual", "Show dual unit"),
-    f("dual_location", S::UnitsPrecision, "Dual", "Dimension location"),
+    f(
+        "tolerance_precision",
+        S::UnitsPrecision,
+        "Primary",
+        "Tolerance precision",
+    ),
+    f(
+        "angular_precision",
+        S::UnitsPrecision,
+        "Primary",
+        "Angular precision",
+    ),
+    f(
+        "show_dual",
+        S::UnitsPrecision,
+        "Dual",
+        "Show dual dimensions",
+    ),
+    f(
+        "show_dual_unit",
+        S::UnitsPrecision,
+        "Dual",
+        "Show dual unit",
+    ),
+    f(
+        "dual_location",
+        S::UnitsPrecision,
+        "Dual",
+        "Dimension location",
+    ),
     f("dual_units", S::UnitsPrecision, "Dual", "Units"),
     f("dual_precision", S::UnitsPrecision, "Dual", "Precision"),
-    f("dual_tolerance_precision", S::UnitsPrecision, "Dual", "Tolerance precision"),
-    f("length_leading_zeros", S::UnitsPrecision, "Leading and trailing zeros", "Length leading zeros"),
-    f("length_trailing_zeros", S::UnitsPrecision, "Leading and trailing zeros", "Length trailing zeros"),
-    f("angle_leading_zeros", S::UnitsPrecision, "Leading and trailing zeros", "Angle leading zeros"),
-    f("angle_trailing_zeros", S::UnitsPrecision, "Leading and trailing zeros", "Angle trailing zeros"),
-    f("tolerance_leading_zeros", S::UnitsPrecision, "Leading and trailing zeros", "Tolerance leading zeros"),
-    f("tolerance_trailing_zeros", S::UnitsPrecision, "Leading and trailing zeros", "Tolerance trailing zeros"),
+    f(
+        "dual_tolerance_precision",
+        S::UnitsPrecision,
+        "Dual",
+        "Tolerance precision",
+    ),
+    f(
+        "length_leading_zeros",
+        S::UnitsPrecision,
+        "Leading and trailing zeros",
+        "Length leading zeros",
+    ),
+    f(
+        "length_trailing_zeros",
+        S::UnitsPrecision,
+        "Leading and trailing zeros",
+        "Length trailing zeros",
+    ),
+    f(
+        "angle_leading_zeros",
+        S::UnitsPrecision,
+        "Leading and trailing zeros",
+        "Angle leading zeros",
+    ),
+    f(
+        "angle_trailing_zeros",
+        S::UnitsPrecision,
+        "Leading and trailing zeros",
+        "Angle trailing zeros",
+    ),
+    f(
+        "tolerance_leading_zeros",
+        S::UnitsPrecision,
+        "Leading and trailing zeros",
+        "Tolerance leading zeros",
+    ),
+    f(
+        "tolerance_trailing_zeros",
+        S::UnitsPrecision,
+        "Leading and trailing zeros",
+        "Tolerance trailing zeros",
+    ),
     f("dim_text_height", S::Dimensions, "Text", "Text height"),
     f("dim_arrow", S::Dimensions, "Arrows", "Arrow style"),
     f("dim_arrow_length", S::Dimensions, "Arrows", "Arrow length"),
-    f("extension_gap", S::Dimensions, "Extension lines", "Gap from geometry"),
-    f("extension_beyond", S::Dimensions, "Extension lines", "Extension beyond"),
+    f(
+        "extension_gap",
+        S::Dimensions,
+        "Extension lines",
+        "Gap from geometry",
+    ),
+    f(
+        "extension_beyond",
+        S::Dimensions,
+        "Extension lines",
+        "Extension beyond",
+    ),
     f("note_text_height", S::Annotations, "Notes", "Text height"),
     f("leader_arrow", S::Annotations, "Leaders", "Arrow style"),
     f("hidden_lines", S::Views, "Display", "Show hidden lines"),
     f("tangent_edges", S::Views, "Display", "Tangent edges"),
     f("show_threads", S::Views, "Display", "Show threads"),
-    f("centermark_size", S::Construction, "Centermarks", "Mark size"),
-    f("centerline_extension", S::Construction, "Centerlines", "Extension"),
-    f("virtual_sharp", S::Construction, "Virtual sharps", "Display"),
+    f(
+        "centermark_size",
+        S::Construction,
+        "Centermarks",
+        "Mark size",
+    ),
+    f(
+        "centerline_extension",
+        S::Construction,
+        "Centerlines",
+        "Extension",
+    ),
+    f(
+        "virtual_sharp",
+        S::Construction,
+        "Virtual sharps",
+        "Display",
+    ),
     f("date_format", S::Formats, "Dates", "Date format"),
     f("table_text_height", S::Tables, "Text", "Text height"),
     f("table_row_height", S::Tables, "Rows", "Row height"),
@@ -591,7 +696,12 @@ mod tests {
                     let n = s.options(fld.key).len();
                     assert!(n >= 2, "{}", fld.key);
                     s.set(fld.key, FieldValue::Choice(n - 1)).unwrap();
-                    assert_eq!(s.get(fld.key), Some(FieldValue::Choice(n - 1)), "{}", fld.key);
+                    assert_eq!(
+                        s.get(fld.key),
+                        Some(FieldValue::Choice(n - 1)),
+                        "{}",
+                        fld.key
+                    );
                     assert!(s.set(fld.key, FieldValue::Choice(n)).is_err());
                 }
             }
@@ -624,7 +734,10 @@ mod tests {
         let p = DecimalSeparator::Period;
         assert_eq!(format_number(0.25, 3, false, true, p), ".250");
         assert_eq!(format_number(0.25, 3, true, false, p), "0.25");
-        assert_eq!(format_number(8.25, 2, true, true, DecimalSeparator::Comma), "8,25");
+        assert_eq!(
+            format_number(8.25, 2, true, true, DecimalSeparator::Comma),
+            "8,25"
+        );
         assert_eq!(format_number(-0.0001, 2, true, true, p), "0.00");
         assert_eq!(format_number(12.0, 2, true, false, p), "12");
     }

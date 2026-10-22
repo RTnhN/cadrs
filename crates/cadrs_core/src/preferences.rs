@@ -45,10 +45,26 @@ pub struct Modifiers {
 }
 
 impl Modifiers {
-    pub const NONE: Modifiers = Modifiers { shift: false, ctrl: false, alt: false };
-    pub const SHIFT: Modifiers = Modifiers { shift: true, ctrl: false, alt: false };
-    pub const CTRL: Modifiers = Modifiers { shift: false, ctrl: true, alt: false };
-    pub const ALT: Modifiers = Modifiers { shift: false, ctrl: false, alt: true };
+    pub const NONE: Modifiers = Modifiers {
+        shift: false,
+        ctrl: false,
+        alt: false,
+    };
+    pub const SHIFT: Modifiers = Modifiers {
+        shift: true,
+        ctrl: false,
+        alt: false,
+    };
+    pub const CTRL: Modifiers = Modifiers {
+        shift: false,
+        ctrl: true,
+        alt: false,
+    };
+    pub const ALT: Modifiers = Modifiers {
+        shift: false,
+        ctrl: false,
+        alt: true,
+    };
 
     /// True if every key `self` names is held in `held`.
     fn held_in(self, held: Modifiers) -> bool {
@@ -114,7 +130,11 @@ pub struct Binding {
 }
 
 const fn bind(button: MouseButton, modifiers: Modifiers, action: ViewAction) -> Binding {
-    Binding { button, modifiers, action }
+    Binding {
+        button,
+        modifiers,
+        action,
+    }
 }
 
 use MouseButton::{Middle, Right};
@@ -160,7 +180,12 @@ pub enum MousePreset {
 }
 
 impl MousePreset {
-    pub const ALL: [MousePreset; 4] = [MousePreset::Onshape, MousePreset::SolidWorks, MousePreset::Inventor, MousePreset::Creo];
+    pub const ALL: [MousePreset; 4] = [
+        MousePreset::Onshape,
+        MousePreset::SolidWorks,
+        MousePreset::Inventor,
+        MousePreset::Creo,
+    ];
 
     pub fn label(self) -> &'static str {
         match self {
@@ -241,7 +266,10 @@ fn default_mcp_port() -> u16 {
 
 impl Default for McpPreferences {
     fn default() -> Self {
-        Self { enabled: false, port: DEFAULT_MCP_PORT }
+        Self {
+            enabled: false,
+            port: DEFAULT_MCP_PORT,
+        }
     }
 }
 
@@ -263,8 +291,12 @@ pub struct Preferences {
     pub ui_scale: u16,
 }
 
-fn default_rotation_snap_degrees() -> f64 { 45.0 }
-fn default_rotation_snap_tolerance_degrees() -> f64 { 10.0 }
+fn default_rotation_snap_degrees() -> f64 {
+    45.0
+}
+fn default_rotation_snap_tolerance_degrees() -> f64 {
+    10.0
+}
 
 impl Default for Preferences {
     fn default() -> Self {
@@ -288,20 +320,31 @@ fn default_ui_scale() -> u16 {
 impl Preferences {
     /// The interface's scale as a factor (1 is the display's own), kept within the sizes offered.
     pub fn ui_scale_factor(&self) -> f32 {
-        f32::from(self.ui_scale.clamp(UI_SCALES[0], UI_SCALES[UI_SCALES.len() - 1])) / 100.0
+        f32::from(
+            self.ui_scale
+                .clamp(UI_SCALES[0], UI_SCALES[UI_SCALES.len() - 1]),
+        ) / 100.0
     }
 }
 
 impl Preferences {
     pub fn rotation_snap_tolerance_degrees(&self) -> f64 {
-        if self.rotation_snap_tolerance_degrees.is_finite() && (0.0..=90.0).contains(&self.rotation_snap_tolerance_degrees) {
+        if self.rotation_snap_tolerance_degrees.is_finite()
+            && (0.0..=90.0).contains(&self.rotation_snap_tolerance_degrees)
+        {
             self.rotation_snap_tolerance_degrees
-        } else { default_rotation_snap_tolerance_degrees() }
+        } else {
+            default_rotation_snap_tolerance_degrees()
+        }
     }
     pub fn rotation_snap_degrees(&self) -> f64 {
-        if self.rotation_snap_degrees.is_finite() && (0.0..=180.0).contains(&self.rotation_snap_degrees) {
+        if self.rotation_snap_degrees.is_finite()
+            && (0.0..=180.0).contains(&self.rotation_snap_degrees)
+        {
             self.rotation_snap_degrees
-        } else { default_rotation_snap_degrees() }
+        } else {
+            default_rotation_snap_degrees()
+        }
     }
     /// The preferences file in a store root.
     pub fn path(root: &Path) -> PathBuf {
@@ -311,12 +354,16 @@ impl Preferences {
     /// Reads the preferences from a store root; the defaults when there is no file or it can't
     /// be read.
     pub fn load(root: &Path) -> Self {
-        std::fs::read_to_string(Self::path(root)).ok().and_then(|s| ron::from_str(&s).ok()).unwrap_or_default()
+        std::fs::read_to_string(Self::path(root))
+            .ok()
+            .and_then(|s| ron::from_str(&s).ok())
+            .unwrap_or_default()
     }
 
     /// Writes the preferences into a store root.
     pub fn save(&self, root: &Path) -> io::Result<()> {
-        let text = ron::ser::to_string_pretty(self, ron::ser::PrettyConfig::default()).map_err(io::Error::other)?;
+        let text = ron::ser::to_string_pretty(self, ron::ser::PrettyConfig::default())
+            .map_err(io::Error::other)?;
         std::fs::create_dir_all(root)?;
         let path = Self::path(root);
         let tmp = path.with_extension("tmp");
@@ -367,30 +414,61 @@ mod tests {
     fn sheets_pan_with_the_rotate_and_pan_gestures() {
         // D2.2: Onshape's sheet pans with a right or a middle drag.
         let p = MousePreset::Onshape;
-        assert_eq!(p.sheet_action(Right, Modifiers::NONE), Some(SheetAction::Pan));
-        assert_eq!(p.sheet_action(Middle, Modifiers::NONE), Some(SheetAction::Pan));
-        assert_eq!(p.sheet_action(Middle, Modifiers::SHIFT), Some(SheetAction::Zoom));
+        assert_eq!(
+            p.sheet_action(Right, Modifiers::NONE),
+            Some(SheetAction::Pan)
+        );
+        assert_eq!(
+            p.sheet_action(Middle, Modifiers::NONE),
+            Some(SheetAction::Pan)
+        );
+        assert_eq!(
+            p.sheet_action(Middle, Modifiers::SHIFT),
+            Some(SheetAction::Zoom)
+        );
         let p = MousePreset::SolidWorks;
         assert_eq!(p.sheet_action(Right, Modifiers::NONE), None);
-        assert_eq!(p.sheet_action(Middle, Modifiers::NONE), Some(SheetAction::Pan));
+        assert_eq!(
+            p.sheet_action(Middle, Modifiers::NONE),
+            Some(SheetAction::Pan)
+        );
     }
 
     #[test]
     fn gestures_read_for_the_preferences() {
-        assert_eq!(MousePreset::Onshape.gestures(Pan), vec!["Middle drag", "Ctrl+Right drag"]);
-        assert_eq!(MousePreset::SolidWorks.gestures(Zoom), vec!["Scroll wheel", "Shift+Middle drag"]);
+        assert_eq!(
+            MousePreset::Onshape.gestures(Pan),
+            vec!["Middle drag", "Ctrl+Right drag"]
+        );
+        assert_eq!(
+            MousePreset::SolidWorks.gestures(Zoom),
+            vec!["Scroll wheel", "Shift+Middle drag"]
+        );
         assert_eq!(MousePreset::Creo.gestures(Rotate), vec!["Middle drag"]);
     }
 
     #[test]
     fn invalid_snap_preferences_use_the_default_without_affecting_other_choices() {
         for value in [-1.0, 181.0, f64::NAN, f64::INFINITY] {
-            let p = Preferences { rotation_snap_degrees: value, ..Preferences::default() };
+            let p = Preferences {
+                rotation_snap_degrees: value,
+                ..Preferences::default()
+            };
             assert_eq!(p.rotation_snap_degrees(), 45.0);
         }
-        assert_eq!(Preferences { rotation_snap_degrees: 0.0, ..Preferences::default() }.rotation_snap_degrees(), 0.0);
+        assert_eq!(
+            Preferences {
+                rotation_snap_degrees: 0.0,
+                ..Preferences::default()
+            }
+            .rotation_snap_degrees(),
+            0.0
+        );
         for value in [-1.0, 91.0, f64::NAN, f64::INFINITY] {
-            let p = Preferences { rotation_snap_tolerance_degrees: value, ..Preferences::default() };
+            let p = Preferences {
+                rotation_snap_tolerance_degrees: value,
+                ..Preferences::default()
+            };
             assert_eq!(p.rotation_snap_tolerance_degrees(), 10.0);
         }
     }
@@ -400,12 +478,27 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("cadrs-prefs-test-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         assert_eq!(Preferences::load(&dir), Preferences::default());
-        let p = Preferences { mouse: MousePreset::SolidWorks, mcp: McpPreferences { enabled: true, port: 7700 }, rotation_snap_degrees: 22.5, rotation_snap_tolerance_degrees: 15.0, ui_scale: 125 };
+        let p = Preferences {
+            mouse: MousePreset::SolidWorks,
+            mcp: McpPreferences {
+                enabled: true,
+                port: 7700,
+            },
+            rotation_snap_degrees: 22.5,
+            rotation_snap_tolerance_degrees: 15.0,
+            ui_scale: 125,
+        };
         p.save(&dir).unwrap();
         assert_eq!(Preferences::load(&dir), p);
         // A file from before the MCP server reads with it off.
         std::fs::write(Preferences::path(&dir), "(mouse: Creo)").unwrap();
-        assert_eq!(Preferences::load(&dir), Preferences { mouse: MousePreset::Creo, ..Preferences::default() });
+        assert_eq!(
+            Preferences::load(&dir),
+            Preferences {
+                mouse: MousePreset::Creo,
+                ..Preferences::default()
+            }
+        );
         // An unreadable file reads as the defaults.
         std::fs::write(Preferences::path(&dir), "not ron").unwrap();
         assert_eq!(Preferences::load(&dir), Preferences::default());
@@ -419,6 +512,13 @@ mod tests {
         assert_eq!(p.ui_scale_factor(), 1.0);
         assert_eq!(Preferences { ui_scale: 150, ..p }.ui_scale_factor(), 1.5);
         // Out of range: the nearest size offered.
-        assert_eq!(Preferences { ui_scale: 1000, ..p }.ui_scale_factor(), 2.0);
+        assert_eq!(
+            Preferences {
+                ui_scale: 1000,
+                ..p
+            }
+            .ui_scale_factor(),
+            2.0
+        );
     }
 }

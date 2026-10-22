@@ -12,7 +12,15 @@ pub type IdMap<'a> = &'a dyn Fn(&str) -> Option<String>;
 
 /// Renames the symbol ids `sym` maps and the footprint ids `fp` maps throughout `d`.
 pub fn rename_parts(d: &mut Design, sym: IdMap, fp: IdMap) {
-    rename_in_schematic(&mut d.schematic.symbols, d.schematic.sheets.iter_mut().flat_map(|s| s.symbols.iter_mut()), sym, fp);
+    rename_in_schematic(
+        &mut d.schematic.symbols,
+        d.schematic
+            .sheets
+            .iter_mut()
+            .flat_map(|s| s.symbols.iter_mut()),
+        sym,
+        fp,
+    );
     for f in &mut d.board.footprints {
         if let Some(n) = fp(&f.footprint.id) {
             f.footprint.id = n;
@@ -22,7 +30,12 @@ pub fn rename_parts(d: &mut Design, sym: IdMap, fp: IdMap) {
 
 /// Renames the ids in symbol definitions and in symbols placed from them (a schematic's, or a
 /// clipboard's).
-pub fn rename_in_schematic<'a>(defs: &mut [Symbol], placed: impl Iterator<Item = &'a mut PlacedSymbol>, sym: IdMap, fp: IdMap) {
+pub fn rename_in_schematic<'a>(
+    defs: &mut [Symbol],
+    placed: impl Iterator<Item = &'a mut PlacedSymbol>,
+    sym: IdMap,
+    fp: IdMap,
+) {
     let footprint = |f: &mut crate::symbol::Field| {
         if f.name == fields::FOOTPRINT
             && let Some(n) = fp(&f.text.text)
@@ -57,14 +70,34 @@ mod tests {
     #[test]
     fn ids_follow_a_rename() {
         let mut d = crate::getting_started::gs16(&crate::library::LibraryTable::builtin());
-        let r = d.schematic.sheets[0].symbols.iter().find(|s| s.reference() == "R1").unwrap();
-        let (old_sym, old_fp) = (r.symbol.clone(), r.field(fields::FOOTPRINT).unwrap().value().to_string());
-        rename_parts(&mut d, &|id| (id == old_sym).then(|| "Proj:R_new".into()), &|id| (id == old_fp).then(|| "Proj:FP_new".into()));
-        let r = d.schematic.sheets[0].symbols.iter().find(|s| s.reference() == "R1").unwrap();
+        let r = d.schematic.sheets[0]
+            .symbols
+            .iter()
+            .find(|s| s.reference() == "R1")
+            .unwrap();
+        let (old_sym, old_fp) = (
+            r.symbol.clone(),
+            r.field(fields::FOOTPRINT).unwrap().value().to_string(),
+        );
+        rename_parts(
+            &mut d,
+            &|id| (id == old_sym).then(|| "Proj:R_new".into()),
+            &|id| (id == old_fp).then(|| "Proj:FP_new".into()),
+        );
+        let r = d.schematic.sheets[0]
+            .symbols
+            .iter()
+            .find(|s| s.reference() == "R1")
+            .unwrap();
         assert_eq!(r.symbol, "Proj:R_new");
         assert_eq!(r.field(fields::FOOTPRINT).unwrap().value(), "Proj:FP_new");
         assert!(d.schematic.symbol("Proj:R_new").is_some());
-        assert!(d.board.footprints.iter().any(|f| f.footprint.id == "Proj:FP_new"));
+        assert!(
+            d.board
+                .footprints
+                .iter()
+                .any(|f| f.footprint.id == "Proj:FP_new")
+        );
         assert_eq!(reprefix("A:x", "A", "B").as_deref(), Some("B:x"));
         assert_eq!(reprefix("C:x", "A", "B"), None);
     }

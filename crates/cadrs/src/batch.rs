@@ -42,11 +42,18 @@ pub fn all_scenarios() -> Vec<String> {
 /// The batch the arguments ask for, if they use `--jobs`, `--scenarios` or `--all`; `Err` for
 /// a bad value. Other arguments are left to [`cadrs_harness::HarnessOptions`].
 pub fn parse(args: &[String]) -> Option<Result<Batch, String>> {
-    if !args.iter().any(|a| matches!(a.as_str(), "--jobs" | "--scenarios" | "--all")) {
+    if !args
+        .iter()
+        .any(|a| matches!(a.as_str(), "--jobs" | "--scenarios" | "--all"))
+    {
         return None;
     }
     Some((|| {
-        let mut b = Batch { scenarios: Vec::new(), jobs: 4, pass: Vec::new() };
+        let mut b = Batch {
+            scenarios: Vec::new(),
+            jobs: 4,
+            pass: Vec::new(),
+        };
         let mut all = false;
         let mut it = args.iter();
         while let Some(a) = it.next() {
@@ -54,20 +61,37 @@ pub fn parse(args: &[String]) -> Option<Result<Batch, String>> {
                 "--headless" => {}
                 "--jobs" => {
                     let v = it.next().ok_or("--jobs needs a number")?;
-                    b.jobs = v.parse::<usize>().map_err(|_| format!("bad --jobs {v:?}"))?.max(1);
+                    b.jobs = v
+                        .parse::<usize>()
+                        .map_err(|_| format!("bad --jobs {v:?}"))?
+                        .max(1);
                 }
                 "--scenarios" => {
-                    let v = it.next().ok_or("--scenarios needs a comma-separated list")?;
-                    b.scenarios.extend(v.split(',').map(str::trim).filter(|s| !s.is_empty()).map(String::from));
+                    let v = it
+                        .next()
+                        .ok_or("--scenarios needs a comma-separated list")?;
+                    b.scenarios.extend(
+                        v.split(',')
+                            .map(str::trim)
+                            .filter(|s| !s.is_empty())
+                            .map(String::from),
+                    );
                 }
-                "--scenario" => b.scenarios.push(it.next().ok_or("--scenario needs a name")?.clone()),
+                "--scenario" => b
+                    .scenarios
+                    .push(it.next().ok_or("--scenario needs a name")?.clone()),
                 "--all" => all = true,
                 "--window-size" => {
                     b.pass.push(a.clone());
-                    b.pass.push(it.next().ok_or("--window-size needs WxH")?.clone());
+                    b.pass
+                        .push(it.next().ok_or("--window-size needs WxH")?.clone());
                 }
                 "--no-cursor" => b.pass.push(a.clone()),
-                other => return Err(format!("{other:?} can't be used with --jobs/--scenarios/--all")),
+                other => {
+                    return Err(format!(
+                        "{other:?} can't be used with --jobs/--scenarios/--all"
+                    ));
+                }
             }
         }
         if all {
@@ -90,20 +114,33 @@ pub fn run(b: &Batch) -> i32 {
         }
     };
     let start = Instant::now();
-    let queue = Mutex::new(b.scenarios.iter().cloned().collect::<std::collections::VecDeque<_>>());
+    let queue = Mutex::new(
+        b.scenarios
+            .iter()
+            .cloned()
+            .collect::<std::collections::VecDeque<_>>(),
+    );
     let failed: Mutex<Vec<(String, String)>> = Mutex::new(Vec::new());
     let jobs = b.jobs.min(b.scenarios.len());
-    eprintln!("rendering {} scenario(s), {jobs} at a time", b.scenarios.len());
+    eprintln!(
+        "rendering {} scenario(s), {jobs} at a time",
+        b.scenarios.len()
+    );
     std::thread::scope(|s| {
         for _ in 0..jobs {
             s.spawn(|| {
                 loop {
-                    let Some(name) = queue.lock().unwrap().pop_front() else { break };
+                    let Some(name) = queue.lock().unwrap().pop_front() else {
+                        break;
+                    };
                     let t = Instant::now();
                     let out = Command::new(&exe)
                         .args(["--headless", "--scenario", &name])
                         .args(&b.pass)
-                        .env("RUST_LOG", std::env::var("RUST_LOG").unwrap_or_else(|_| "warn".into()))
+                        .env(
+                            "RUST_LOG",
+                            std::env::var("RUST_LOG").unwrap_or_else(|_| "warn".into()),
+                        )
                         .stdout(Stdio::null())
                         .stderr(Stdio::piped())
                         .output();
@@ -112,7 +149,10 @@ pub fn run(b: &Batch) -> i32 {
                         Ok(o) if o.status.success() => eprintln!("  ok   {name} ({secs:.1} s)"),
                         Ok(o) => {
                             eprintln!("  FAIL {name} ({secs:.1} s, {})", o.status);
-                            failed.lock().unwrap().push((name, String::from_utf8_lossy(&o.stderr).into_owned()));
+                            failed
+                                .lock()
+                                .unwrap()
+                                .push((name, String::from_utf8_lossy(&o.stderr).into_owned()));
                         }
                         Err(e) => {
                             eprintln!("  FAIL {name}: {e}");
@@ -153,12 +193,20 @@ mod tests {
     #[test]
     fn parses_batches_and_leaves_single_runs_alone() {
         assert!(parse(&args("--headless --scenario smoke")).is_none());
-        let b = parse(&args("--headless --jobs 3 --scenarios a,b --scenario c --no-cursor")).unwrap().unwrap();
+        let b = parse(&args(
+            "--headless --jobs 3 --scenarios a,b --scenario c --no-cursor",
+        ))
+        .unwrap()
+        .unwrap();
         assert_eq!(b.scenarios, ["a", "b", "c"]);
         assert_eq!(b.jobs, 3);
         assert_eq!(b.pass, ["--no-cursor"]);
         assert!(parse(&args("--jobs x --all")).unwrap().is_err());
-        assert!(parse(&args("--jobs 2 --out d --scenario a")).unwrap().is_err());
+        assert!(
+            parse(&args("--jobs 2 --out d --scenario a"))
+                .unwrap()
+                .is_err()
+        );
         let all = parse(&args("--all")).unwrap().unwrap();
         assert!(all.scenarios.iter().any(|s| s == "smoke"));
         assert_eq!(all.jobs, 4);

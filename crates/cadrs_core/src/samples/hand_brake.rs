@@ -36,7 +36,9 @@
 //! is fixed, so the fixture is regenerated exactly (see `cadrs_core/tests/hand_brake.rs`).
 
 use cadrs_sketch::constraint::{ConstraintOf, CurveSpec, Orient, PointSpec};
-use cadrs_sketch::{CurveId, CurveKind, Dimension, DimensionKind, PlaneRef, PointId, Sketch, SketchOp, Vec2};
+use cadrs_sketch::{
+    CurveId, CurveKind, Dimension, DimensionKind, PlaneRef, PointId, Sketch, SketchOp, Vec2,
+};
 
 use crate::applied::{EdgeOrFace, FilletFeature, HoleFeature, HolePoint};
 use crate::command::{CommandError, History};
@@ -89,8 +91,20 @@ pub struct MainValues {
     pub end_hole: f64,
 }
 
-pub const BEFORE: MainValues = MainValues { length: 225.0, bar: 20.0, offset: 15.0, spacing: 100.0, end_hole: 8.25 };
-pub const AFTER: MainValues = MainValues { length: 250.0, bar: 25.0, offset: 25.0, spacing: 125.0, end_hole: 15.0 };
+pub const BEFORE: MainValues = MainValues {
+    length: 225.0,
+    bar: 20.0,
+    offset: 15.0,
+    spacing: 100.0,
+    end_hole: 8.25,
+};
+pub const AFTER: MainValues = MainValues {
+    length: 250.0,
+    bar: 25.0,
+    offset: 25.0,
+    spacing: 125.0,
+    end_hole: 15.0,
+};
 
 // The values D14.4 keeps.
 pub const SMALL_HOLE: f64 = 5.5;
@@ -174,7 +188,11 @@ impl MainGeometry {
             c1,
             c2,
             c0: v(c1.x - SMALL_DX, c1.y),
-            holes: [v(m.offset, y), v(m.offset + m.spacing / 2.0, y), v(m.offset + m.spacing, y)],
+            holes: [
+                v(m.offset, y),
+                v(m.offset + m.spacing / 2.0, y),
+                v(m.offset + m.spacing, y),
+            ],
             mid_left: v(0.0, y),
             top: v(c1.x, 0.0),
             low: v(c2.x - END_R / sl, c2.y),
@@ -183,27 +201,46 @@ impl MainGeometry {
 }
 
 fn line(points: Vec<Vec2>, construction: bool) -> SketchOp {
-    SketchOp::AddPolyline { points, closed: false, construction, label: "Add line" }
+    SketchOp::AddPolyline {
+        points,
+        closed: false,
+        construction,
+        label: "Add line",
+    }
 }
 
 fn circle(c: Vec2, d: f64) -> SketchOp {
-    SketchOp::AddCircle { center: c, radius: d / 2.0, construction: false }
+    SketchOp::AddCircle {
+        center: c,
+        radius: d / 2.0,
+        construction: false,
+    }
 }
 
 fn circle_id(g: &Sketch, c: Vec2, r: f64) -> Option<CurveId> {
     g.curves.iter().find_map(|(id, k)| match k.kind {
-        CurveKind::Circle { center, radius } if (radius - r).abs() < 1e-6 && g.pos(center).distance(c) < 1e-6 => Some(id),
+        CurveKind::Circle { center, radius }
+            if (radius - r).abs() < 1e-6 && g.pos(center).distance(c) < 1e-6 =>
+        {
+            Some(id)
+        }
         _ => None,
     })
 }
 
 fn arc_id(g: &Sketch) -> Option<CurveId> {
-    g.curves.iter().find_map(|(id, k)| matches!(k.kind, CurveKind::Arc { .. }).then_some(id))
+    g.curves
+        .iter()
+        .find_map(|(id, k)| matches!(k.kind, CurveKind::Arc { .. }).then_some(id))
 }
 
 fn line_id(g: &Sketch, a: Vec2, b: Vec2) -> Option<CurveId> {
     g.curves.iter().find_map(|(id, k)| match k.kind {
-        CurveKind::Line { a: s, b: e } if g.pos(s).distance(a) < 1e-6 && g.pos(e).distance(b) < 1e-6 => Some(id),
+        CurveKind::Line { a: s, b: e }
+            if g.pos(s).distance(a) < 1e-6 && g.pos(e).distance(b) < 1e-6 =>
+        {
+            Some(id)
+        }
         _ => None,
     })
 }
@@ -216,7 +253,12 @@ pub fn main_geometry(m: MainValues) -> SketchOp {
         // (counter-clockwise from the lower edge's end round the bottom to the upper edge's).
         line(vec![g.p5, g.p1, g.p0, g.p2, g.p3], false),
         line(vec![g.p4, g.p5], false),
-        SketchOp::AddArc { center: g.c2, start: g.p4, end: g.p3, construction: false },
+        SketchOp::AddArc {
+            center: g.c2,
+            start: g.p4,
+            end: g.p3,
+            construction: false,
+        },
         circle(g.c1, LARGE_HOLE),
         circle(g.c2, m.end_hole),
         circle(g.c0, m.end_hole),
@@ -247,28 +289,52 @@ pub fn main_constraints(g: &Sketch, m: MainValues) -> Result<SketchOp, CommandEr
         ConstraintOf::Tangent(between(p.p2, p.p3), between(p.p4, p.p3)),
         ConstraintOf::Tangent(between(p.p4, p.p5), between(p.p4, p.p3)),
         ConstraintOf::Horizontal(Orient::Points(at(p.c0), at(p.c1))),
-        ConstraintOf::Equal(CurveSpec::Circle(p.c0, small), CurveSpec::Circle(p.c2, small)),
+        ConstraintOf::Equal(
+            CurveSpec::Circle(p.c0, small),
+            CurveSpec::Circle(p.c2, small),
+        ),
         ConstraintOf::Vertical(Orient::Line(between(p.c1, p.top))),
         ConstraintOf::PointOnCurve(at(p.top), between(p.p0, p.p2)),
         ConstraintOf::Midpoint(at(p.mid_left), between(p.p1, p.p0)),
         ConstraintOf::Horizontal(Orient::Line(between(p.holes[0], p.holes[2]))),
         ConstraintOf::Horizontal(Orient::Points(at(p.holes[0]), at(p.mid_left))),
         ConstraintOf::Midpoint(at(p.holes[1]), between(p.holes[0], p.holes[2])),
-        ConstraintOf::Equal(CurveSpec::Circle(p.holes[1], SMALL_HOLE / 2.0), CurveSpec::Circle(p.holes[0], SMALL_HOLE / 2.0)),
-        ConstraintOf::Equal(CurveSpec::Circle(p.holes[2], SMALL_HOLE / 2.0), CurveSpec::Circle(p.holes[0], SMALL_HOLE / 2.0)),
+        ConstraintOf::Equal(
+            CurveSpec::Circle(p.holes[1], SMALL_HOLE / 2.0),
+            CurveSpec::Circle(p.holes[0], SMALL_HOLE / 2.0),
+        ),
+        ConstraintOf::Equal(
+            CurveSpec::Circle(p.holes[2], SMALL_HOLE / 2.0),
+            CurveSpec::Circle(p.holes[0], SMALL_HOLE / 2.0),
+        ),
         ConstraintOf::Horizontal(Orient::Line(between(p.c2, p.low))),
         ConstraintOf::PointOnCurve(at(p.low), between(p.p4, p.p5)),
     ];
     let missing = |what: &str| CommandError::Invalid(format!("Main Sketch: no {what}"));
-    let pt = |q: Vec2, what: &str| -> Result<PointId, CommandError> { g.point_at(q, 1e-6).ok_or_else(|| missing(what)) };
+    let pt = |q: Vec2, what: &str| -> Result<PointId, CommandError> {
+        g.point_at(q, 1e-6).ok_or_else(|| missing(what))
+    };
     let dim = |kind: DimensionKind, value: f64, offset: f64| SketchOp::SetDimension {
-        dimension: Dimension { kind, value, offset, along: 0.0, driven: false },
+        dimension: Dimension {
+            kind,
+            value,
+            offset,
+            along: 0.0,
+            driven: false,
+        },
         moves: vec![],
         radii: vec![],
     };
-    let (p0, p1) = (pt(p.p0, "top-left corner")?, pt(p.p1, "bottom-left corner")?);
+    let (p0, p1) = (
+        pt(p.p0, "top-left corner")?,
+        pt(p.p1, "bottom-left corner")?,
+    );
     let p5 = pt(p.p5, "step")?;
-    let (c1, c2, c0) = (pt(p.c1, "large hole")?, pt(p.c2, "end hole")?, pt(p.c0, "small circle")?);
+    let (c1, c2, c0) = (
+        pt(p.c1, "large hole")?,
+        pt(p.c2, "end hole")?,
+        pt(p.c0, "small circle")?,
+    );
     let (h0, h2) = (pt(p.holes[0], "first hole")?, pt(p.holes[2], "last hole")?);
     let large = circle_id(g, p.c1, LARGE_HOLE / 2.0).ok_or_else(|| missing("Ø25.4 circle"))?;
     let end = circle_id(g, p.c2, small).ok_or_else(|| missing("end hole circle"))?;
@@ -276,7 +342,8 @@ pub fn main_constraints(g: &Sketch, m: MainValues) -> Result<SketchOp, CommandEr
     let arc = arc_id(g).ok_or_else(|| missing("R16 arc"))?;
     let vertical = line_id(g, p.c1, p.top).ok_or_else(|| missing("vertical"))?;
     let upper = line_id(g, p.p2, p.p3).ok_or_else(|| missing("upper edge"))?;
-    let level = line_id(g, p.c2, p.low).ok_or_else(|| missing("horizontal through the end hole"))?;
+    let level =
+        line_id(g, p.c2, p.low).ok_or_else(|| missing("horizontal through the end hole"))?;
     let lower = line_id(g, p.p4, p.p5).ok_or_else(|| missing("lower edge"))?;
     use cadrs_sketch::constraint::CurveRef as C;
     let d45 = std::f64::consts::FRAC_PI_4;
@@ -285,8 +352,16 @@ pub fn main_constraints(g: &Sketch, m: MainValues) -> Result<SketchOp, CommandEr
         dim(DimensionKind::Horizontal { a: p0, b: c1 }, m.length, 22.0),
         dim(DimensionKind::Vertical { a: p0, b: p1 }, m.bar, -14.0),
         dim(DimensionKind::Horizontal { a: p0, b: h0 }, m.offset, 12.0),
-        dim(DimensionKind::Horizontal { a: h0, b: h2 }, m.spacing, 12.0 + m.bar / 2.0),
-        dim(DimensionKind::Diameter { curve: first }, SMALL_HOLE, -2.0 * d45),
+        dim(
+            DimensionKind::Horizontal { a: h0, b: h2 },
+            m.spacing,
+            12.0 + m.bar / 2.0,
+        ),
+        dim(
+            DimensionKind::Diameter { curve: first },
+            SMALL_HOLE,
+            -2.0 * d45,
+        ),
         dim(DimensionKind::Diameter { curve: large }, LARGE_HOLE, d45),
         dim(DimensionKind::Diameter { curve: end }, m.end_hole, d45),
         dim(DimensionKind::Radius { curve: arc }, END_R, -d45),
@@ -297,14 +372,24 @@ pub fn main_constraints(g: &Sketch, m: MainValues) -> Result<SketchOp, CommandEr
         dim(DimensionKind::Horizontal { a: c1, b: c2 }, END_DX, -70.0),
         dim(DimensionKind::Vertical { a: c1, b: c2 }, END_DY, 70.0),
         dim(
-            DimensionKind::Angle { a: C::Curve(vertical), b: C::Curve(upper), flip_a: true, flip_b: false },
+            DimensionKind::Angle {
+                a: C::Curve(vertical),
+                b: C::Curve(upper),
+                flip_a: true,
+                flip_b: false,
+            },
             UPPER_ANGLE,
             40.0,
         ),
         dim(
             // Between the lower edge and the horizontal through the end hole, below the arm
             // (the 36° of `ex3-step4.png`, outside the plate).
-            DimensionKind::Angle { a: C::Curve(level), b: C::Curve(lower), flip_a: false, flip_b: false },
+            DimensionKind::Angle {
+                a: C::Curve(level),
+                b: C::Curve(lower),
+                flip_a: false,
+                flip_b: false,
+            },
             LOWER_ANGLE,
             40.0,
         ),
@@ -322,22 +407,29 @@ fn sketch_geometry(s: &dyn Studio, el: ElementId, f: FeatureId) -> Result<Sketch
 }
 
 fn rename(s: &mut dyn Studio, el: ElementId, f: FeatureId, name: &str) -> Result<(), CommandError> {
-    s.run(&RenameFeature { element: el, feature: f, name: name.into() })
+    s.run(&RenameFeature {
+        element: el,
+        feature: f,
+        name: name.into(),
+    })
 }
 
 /// The edge of part `part` nearest `p` (mm).
-fn edge_at(s: &dyn Studio, el: ElementId, part: PartId, p: [f64; 3]) -> Result<EdgeRef, CommandError> {
+fn edge_at(
+    s: &dyn Studio,
+    el: ElementId,
+    part: PartId,
+    p: [f64; 3],
+) -> Result<EdgeRef, CommandError> {
     let features = s
         .document()
         .element(el)
         .map(|e| e.features().to_vec())
         .ok_or_else(|| CommandError::Invalid("studio not found".into()))?;
     let build = crate::rebuild::build(&features);
-    let q = build
-        .parts
-        .iter()
-        .find(|q| q.id == part)
-        .ok_or_else(|| CommandError::Invalid(format!("the part did not build: {:?}", build.errors)))?;
+    let q = build.parts.iter().find(|q| q.id == part).ok_or_else(|| {
+        CommandError::Invalid(format!("the part did not build: {:?}", build.errors))
+    })?;
     let e = q
         .solid
         .edges
@@ -345,7 +437,11 @@ fn edge_at(s: &dyn Studio, el: ElementId, part: PartId, p: [f64; 3]) -> Result<E
         .min_by(|a, b| a.distance(p).total_cmp(&b.distance(p)))
         .filter(|e| e.distance(p) < 1e-3)
         .ok_or_else(|| CommandError::Invalid(format!("no edge at {p:?}")))?;
-    Ok(EdgeRef { part, edge: e.name, seed: p })
+    Ok(EdgeRef {
+        part,
+        edge: e.name,
+        seed: p,
+    })
 }
 
 /// Hole 1's spec: ISO counterbore, clearance `size` Normal, through all.
@@ -375,10 +471,22 @@ pub fn build_in(s: &mut dyn Studio, el: ElementId) -> Result<(), CommandError> {
     let m = BEFORE;
     let g = MainGeometry::of(m);
     // Main Sketch, fully defined.
-    s.run(&AddSketch { element: el, feature: MAIN_SKETCH, plane: Some(PlaneRef::Front) })?;
-    s.run(&EditSketch { element: el, feature: MAIN_SKETCH, op: main_geometry(m) })?;
+    s.run(&AddSketch {
+        element: el,
+        feature: MAIN_SKETCH,
+        plane: Some(PlaneRef::Front),
+    })?;
+    s.run(&EditSketch {
+        element: el,
+        feature: MAIN_SKETCH,
+        op: main_geometry(m),
+    })?;
     let op = main_constraints(&sketch_geometry(s, el, MAIN_SKETCH)?, m)?;
-    s.run(&EditSketch { element: el, feature: MAIN_SKETCH, op })?;
+    s.run(&EditSketch {
+        element: el,
+        feature: MAIN_SKETCH,
+        op,
+    })?;
     rename(s, el, MAIN_SKETCH, "Main Sketch")?;
     // Extrude 1: the plate (a point in the bar left of the first hole).
     extrude(s, el, MAIN_SKETCH, EXTRUDE_1, &[v(3.0, -3.0)], |e| {
@@ -398,7 +506,11 @@ pub fn build_in(s: &mut dyn Studio, el: ElementId) -> Result<(), CommandError> {
         },
     ))?;
     // Sketch 2 / Extrude 2: the grip bar, on Right (sketch x = Y, y = Z).
-    s.run(&AddSketch { element: el, feature: SKETCH_2, plane: Some(PlaneRef::Right) })?;
+    s.run(&AddSketch {
+        element: el,
+        feature: SKETCH_2,
+        plane: Some(PlaneRef::Right),
+    })?;
     // Two half circles meeting at 45° and 225° (not one circle): a circle's seam lies along its
     // sketch's +x, which is the grip's silhouette in the Top view, and OCCT's hidden-line removal
     // loses pieces of an outline that runs along a seam.
@@ -411,8 +523,18 @@ pub fn build_in(s: &mut dyn Studio, el: ElementId) -> Result<(), CommandError> {
         element: el,
         feature: SKETCH_2,
         op: SketchOp::Batch(vec![
-            SketchOp::AddArc { center: c, start: a, end: b, construction: false },
-            SketchOp::AddArc { center: c, start: b, end: a, construction: false },
+            SketchOp::AddArc {
+                center: c,
+                start: a,
+                end: b,
+                construction: false,
+            },
+            SketchOp::AddArc {
+                center: c,
+                start: b,
+                end: a,
+                construction: false,
+            },
         ]),
     })?;
     extrude(s, el, SKETCH_2, EXTRUDE_2, &[v(GRIP_Y, GRIP_Z)], |e| {
@@ -427,24 +549,40 @@ pub fn build_in(s: &mut dyn Studio, el: ElementId) -> Result<(), CommandError> {
         });
     })?;
     // Sketch 3 / Extrude 3: the slot, on Top (sketch x = X, y = Y), removed from the grip.
-    s.run(&AddSketch { element: el, feature: SKETCH_3, plane: Some(PlaneRef::Top) })?;
+    s.run(&AddSketch {
+        element: el,
+        feature: SKETCH_3,
+        plane: Some(PlaneRef::Top),
+    })?;
     s.run(&EditSketch {
         element: el,
         feature: SKETCH_3,
         op: SketchOp::AddPolyline {
-            points: vec![v(0.0, -THICKNESS), v(220.0, -THICKNESS), v(220.0, 0.0), v(0.0, 0.0)],
+            points: vec![
+                v(0.0, -THICKNESS),
+                v(220.0, -THICKNESS),
+                v(220.0, 0.0),
+                v(0.0, 0.0),
+            ],
             closed: true,
             construction: false,
             label: "Add rectangle",
         },
     })?;
-    extrude(s, el, SKETCH_3, EXTRUDE_3, &[v(100.0, -THICKNESS / 2.0)], |e| {
-        e.op = BooleanOp::Remove;
-        e.merge_scope = vec![GRIP];
-        e.symmetric = true;
-        e.depth = 60.0;
-        e.depth_expr = "60 mm".into();
-    })?;
+    extrude(
+        s,
+        el,
+        SKETCH_3,
+        EXTRUDE_3,
+        &[v(100.0, -THICKNESS / 2.0)],
+        |e| {
+            e.op = BooleanOp::Remove;
+            e.merge_scope = vec![GRIP];
+            e.symmetric = true;
+            e.depth = 60.0;
+            e.depth_expr = "60 mm".into();
+        },
+    )?;
     // Plane 1: Front, 20 towards −Y.
     s.run(&AddFeature {
         element: el,
@@ -458,28 +596,63 @@ pub fn build_in(s: &mut dyn Studio, el: ElementId) -> Result<(), CommandError> {
             ..PlaneFeature::default()
         }),
     })?;
-    let features = s.document().element(el).map(|e| e.features().to_vec()).unwrap_or_default();
-    let plane = crate::parts::plane_feature_ref(&features, PLANE_1).ok_or_else(|| CommandError::Invalid("Plane 1 did not build".into()))?;
+    let features = s
+        .document()
+        .element(el)
+        .map(|e| e.features().to_vec())
+        .unwrap_or_default();
+    let plane = crate::parts::plane_feature_ref(&features, PLANE_1)
+        .ok_or_else(|| CommandError::Invalid("Plane 1 did not build".into()))?;
     // Sketch 4 / Hole 1.
-    s.run(&AddSketch { element: el, feature: SKETCH_4, plane: Some(plane) })?;
+    s.run(&AddSketch {
+        element: el,
+        feature: SKETCH_4,
+        plane: Some(plane),
+    })?;
     s.run(&EditSketch {
         element: el,
         feature: SKETCH_4,
-        op: SketchOp::Batch(GRIP_HOLES.iter().map(|x| SketchOp::AddPoint { pos: v(*x, GRIP_Z) }).collect()),
+        op: SketchOp::Batch(
+            GRIP_HOLES
+                .iter()
+                .map(|x| SketchOp::AddPoint { pos: v(*x, GRIP_Z) })
+                .collect(),
+        ),
     })?;
-    let points = sketch_geometry(s, el, SKETCH_4)?.points.keys().map(|point| HolePoint { sketch: SKETCH_4, point }).collect();
+    let points = sketch_geometry(s, el, SKETCH_4)?
+        .points
+        .keys()
+        .map(|point| HolePoint {
+            sketch: SKETCH_4,
+            point,
+        })
+        .collect();
     s.run(&AddFeature::hole(
         el,
         HOLE_1,
-        HoleFeature { points, merge_scope: vec![GRIP], spec: hole_spec(HOLE_SIZE_BEFORE), renamed: true, ..HoleFeature::default() },
+        HoleFeature {
+            points,
+            merge_scope: vec![GRIP],
+            spec: hole_spec(HOLE_SIZE_BEFORE),
+            renamed: true,
+            ..HoleFeature::default()
+        },
     ))?;
     rename(s, el, HOLE_1, "Hole 1")?;
     // The course's names (the Main Sketch was Sketch 1).
     rename(s, el, SKETCH_2, "Sketch 2")?;
     rename(s, el, SKETCH_3, "Sketch 3")?;
     rename(s, el, SKETCH_4, "Sketch 4")?;
-    s.run(&RenamePart { element: el, part: PLATE, name: PLATE_NAME.into() })?;
-    s.run(&RenamePart { element: el, part: GRIP, name: GRIP_NAME.into() })?;
+    s.run(&RenamePart {
+        element: el,
+        part: PLATE,
+        name: PLATE_NAME.into(),
+    })?;
+    s.run(&RenamePart {
+        element: el,
+        part: GRIP,
+        name: GRIP_NAME.into(),
+    })?;
     Ok(())
 }
 
@@ -500,10 +673,17 @@ pub fn course_edits(s: &mut dyn Studio, el: ElementId) -> Result<(), CommandErro
         let id = g
             .dimensions
             .iter()
-            .find(|(_, d)| (d.value - from).abs() < 1e-9 && matches!(d.kind, DimensionKind::Diameter { .. }) == dia)
+            .find(|(_, d)| {
+                (d.value - from).abs() < 1e-9
+                    && matches!(d.kind, DimensionKind::Diameter { .. }) == dia
+            })
             .map(|(id, _)| id)
             .ok_or_else(|| bad(&format!("no dimension {from}")))?;
-        s.run(&EditSketch { element: el, feature: MAIN_SKETCH, op: SketchOp::SetDimensionValue { id, value: to } })?;
+        s.run(&EditSketch {
+            element: el,
+            feature: MAIN_SKETCH,
+            op: SketchOp::SetDimensionValue { id, value: to },
+        })?;
     }
     // The small circle: the circle left of the large hole at its height.
     let g = sketch_geometry(s, el, MAIN_SKETCH)?;
@@ -512,9 +692,18 @@ pub fn course_edits(s: &mut dyn Studio, el: ElementId) -> Result<(), CommandErro
     s.run(&EditSketch {
         element: el,
         feature: MAIN_SKETCH,
-        op: SketchOp::Delete { curves: vec![small], points: vec![], dimensions: vec![], constraints: vec![] },
+        op: SketchOp::Delete {
+            curves: vec![small],
+            points: vec![],
+            dimensions: vec![],
+            constraints: vec![],
+        },
     })?;
-    let features = s.document().element(el).map(|e| e.features().to_vec()).unwrap_or_default();
+    let features = s
+        .document()
+        .element(el)
+        .map(|e| e.features().to_vec())
+        .unwrap_or_default();
     let mut e = features
         .iter()
         .find(|f| f.id == EXTRUDE_2)
@@ -525,11 +714,26 @@ pub fn course_edits(s: &mut dyn Studio, el: ElementId) -> Result<(), CommandErro
         second.depth = GRIP_SECOND_AFTER;
         second.depth_expr = "175 mm".into();
     }
-    s.run(&crate::commands::SetExtrude { element: el, feature: EXTRUDE_2, extrude: e, label: "Depth".into() })?;
-    let mut h = features.iter().find(|f| f.id == HOLE_1).and_then(|f| f.hole()).cloned().ok_or_else(|| bad("no Hole 1"))?;
+    s.run(&crate::commands::SetExtrude {
+        element: el,
+        feature: EXTRUDE_2,
+        extrude: e,
+        label: "Depth".into(),
+    })?;
+    let mut h = features
+        .iter()
+        .find(|f| f.id == HOLE_1)
+        .and_then(|f| f.hole())
+        .cloned()
+        .ok_or_else(|| bad("no Hole 1"))?;
     h.spec.size = HOLE_SIZE_AFTER.into();
     h.spec.apply_table();
-    s.run(&crate::commands::SetFeature { element: el, feature: HOLE_1, kind: FeatureKind::Hole(h), label: "Size".into() })?;
+    s.run(&crate::commands::SetFeature {
+        element: el,
+        feature: HOLE_1,
+        kind: FeatureKind::Hole(h),
+        label: "Size".into(),
+    })?;
     Ok(())
 }
 

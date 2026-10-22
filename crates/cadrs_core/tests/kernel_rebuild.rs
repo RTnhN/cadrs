@@ -8,9 +8,9 @@
 use std::f64::consts::PI;
 use std::time::{Duration, Instant};
 
+use cadrs_core::FeatureId;
 use cadrs_core::document::{ExtrudeFeature, Feature, FeatureKind, RegionRef, SketchFeature};
 use cadrs_core::rebuild::Rebuilder;
-use cadrs_core::FeatureId;
 use cadrs_sketch::region::{region_at, regions};
 use cadrs_sketch::{PlaneRef, Sketch, SketchOp, Vec2};
 
@@ -88,7 +88,11 @@ fn close(actual: f64, expected: f64, tol: f64) {
 #[test]
 fn rectangle_100x60x25() {
     let mut g = Sketch::new();
-    polyline(&mut g, &[v(0.0, 0.0), v(100.0, 0.0), v(100.0, 60.0), v(0.0, 60.0)], true);
+    polyline(
+        &mut g,
+        &[v(0.0, 0.0), v(100.0, 0.0), v(100.0, 60.0), v(0.0, 60.0)],
+        true,
+    );
     let s = sketch("Sketch 1", PlaneRef::Top, g);
     let e = extrude("Extrude 1", &s, &[v(50.0, 30.0)], 25.0);
     let build = Rebuilder::new().rebuild(&[s, e]);
@@ -112,7 +116,11 @@ fn control_arm_sketch() -> Sketch {
     let mut g = Sketch::new();
     circle(&mut g, v(0.0, 0.0), HUB_R);
     circle(&mut g, v(0.0, 0.0), BORE_R);
-    polyline(&mut g, &[v(-22.5, -5.0), v(22.5, -5.0), v(22.5, 5.0), v(-22.5, 5.0)], true);
+    polyline(
+        &mut g,
+        &[v(-22.5, -5.0), v(22.5, -5.0), v(22.5, 5.0), v(-22.5, 5.0)],
+        true,
+    );
     for side in [1.0, -1.0] {
         let cx = side * X;
         circle(&mut g, v(cx, 0.0), EYE_R);
@@ -141,7 +149,12 @@ fn control_arm_both_new() {
         &[v(0.0, 26.0), v(60.0, 0.0), v(107.5 + 14.0, 0.0)],
         40.0,
     );
-    let e2 = extrude("Extrude 2", &s, &[v(-60.0, 0.0), v(-107.5 - 14.0, 0.0)], 25.0);
+    let e2 = extrude(
+        "Extrude 2",
+        &s,
+        &[v(-60.0, 0.0), v(-107.5 - 14.0, 0.0)],
+        25.0,
+    );
     let build = Rebuilder::new().rebuild(&[s, e1, e2]);
     assert!(build.errors.is_empty(), "{:?}", build.errors);
     assert_eq!(build.parts.len(), 2);
@@ -183,7 +196,12 @@ fn twenty_feature_rebuild_time() {
         .unwrap();
         circle(&mut g, v(x + 15.0, 10.0), 4.0);
         let s = sketch(&format!("Sketch {}", i + 1), PlaneRef::Top, g);
-        let e = extrude(&format!("Extrude {}", i + 1), &s, &[v(x + 3.0, 10.0)], 10.0 + i as f64);
+        let e = extrude(
+            &format!("Extrude {}", i + 1),
+            &s,
+            &[v(x + 3.0, 10.0)],
+            10.0 + i as f64,
+        );
         features.push(s);
         features.push(e);
     }
@@ -194,7 +212,9 @@ fn twenty_feature_rebuild_time() {
     let cpu_start = thread_cpu_time();
     let build = rb.rebuild(&features);
     let cold = start.elapsed();
-    let cold_cpu = thread_cpu_time().zip(cpu_start).map(|(end, start)| end - start);
+    let cold_cpu = thread_cpu_time()
+        .zip(cpu_start)
+        .map(|(end, start)| end - start);
     assert!(build.errors.is_empty(), "{:?}", build.errors);
     assert_eq!(build.parts.len(), 10);
     assert_eq!(build.computed, 10);
@@ -225,8 +245,15 @@ fn twenty_feature_rebuild_time() {
     // wall clock still has to stay within a loose bound.
     match cold_cpu {
         Some(cpu) => {
-            assert!(cpu < budget, "rebuild took {cpu:?} of CPU time (budget {budget:?})");
-            assert!(cold < budget * 10, "rebuild took {cold:?} of wall time (bound {:?})", budget * 10);
+            assert!(
+                cpu < budget,
+                "rebuild took {cpu:?} of CPU time (budget {budget:?})"
+            );
+            assert!(
+                cold < budget * 10,
+                "rebuild took {cold:?} of wall time (bound {:?})",
+                budget * 10
+            );
         }
         None => assert!(cold < budget, "rebuild took {cold:?} (budget {budget:?})"),
     }
@@ -248,7 +275,11 @@ fn thread_cpu_time() -> Option<Duration> {
 #[test]
 fn failed_features_report_errors() {
     let mut g = Sketch::new();
-    polyline(&mut g, &[v(0.0, 0.0), v(10.0, 0.0), v(10.0, 10.0), v(0.0, 10.0)], true);
+    polyline(
+        &mut g,
+        &[v(0.0, 0.0), v(10.0, 0.0), v(10.0, 10.0), v(0.0, 10.0)],
+        true,
+    );
     let s = sketch("Sketch 1", PlaneRef::Top, g);
     let good = extrude("Extrude 1", &s, &[v(5.0, 5.0)], 5.0);
     let mut gone = extrude("Extrude 2", &s, &[v(5.0, 5.0)], 5.0);
@@ -289,11 +320,19 @@ fn worker_thread_builds() {
 #[test]
 fn pocket_faces_look_out_of_the_part() {
     let mut g = Sketch::new();
-    polyline(&mut g, &[v(0.0, 0.0), v(100.0, 0.0), v(100.0, 60.0), v(0.0, 60.0)], true);
+    polyline(
+        &mut g,
+        &[v(0.0, 0.0), v(100.0, 0.0), v(100.0, 60.0), v(0.0, 60.0)],
+        true,
+    );
     let s1 = sketch("Sketch 1", PlaneRef::Top, g);
     let e1 = extrude("Extrude 1", &s1, &[v(50.0, 30.0)], 25.0);
     let mut g = Sketch::new();
-    polyline(&mut g, &[v(40.0, 20.0), v(60.0, 20.0), v(60.0, 40.0), v(40.0, 40.0)], true);
+    polyline(
+        &mut g,
+        &[v(40.0, 20.0), v(60.0, 20.0), v(60.0, 40.0), v(40.0, 40.0)],
+        true,
+    );
     let s2 = sketch("Sketch 2", PlaneRef::Top, g);
     let mut e2 = extrude("Extrude 2", &s2, &[v(50.0, 30.0)], 10.0);
     if let FeatureKind::Extrude(x) = &mut e2.kind {
@@ -302,12 +341,22 @@ fn pocket_faces_look_out_of_the_part() {
     let pocket = e2.id;
     let build = Rebuilder::new().rebuild(&[s1, e1, s2, e2]);
     assert!(build.errors.is_empty(), "{:?}", build.errors);
-    close(build.parts[0].mass.unwrap().volume, 150_000.0 - 4_000.0, 1e-6);
+    close(
+        build.parts[0].mass.unwrap().volume,
+        150_000.0 - 4_000.0,
+        1e-6,
+    );
     let solid = &build.parts[0].solid;
     let ceiling = solid
         .faces
         .iter()
-        .find(|f| f.name.op == pocket.0 && matches!(f.name.origin, cadrs_kernel::naming::FaceOrigin::Cap { end: true, .. }))
+        .find(|f| {
+            f.name.op == pocket.0
+                && matches!(
+                    f.name.origin,
+                    cadrs_kernel::naming::FaceOrigin::Cap { end: true, .. }
+                )
+        })
         .expect("the pocket's ceiling");
     let n = ceiling.plane.expect("planar").normal();
     close(n[2], -1.0, 1e-9);

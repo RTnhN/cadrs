@@ -17,7 +17,6 @@
 //! - The fillet's radius (or width) has an arrow manipulator on the first edge: dragging it
 //!   changes the value live (PS14.5).
 
-use cadrs_ui::ShortcutKey;
 use bevy::input::ButtonState;
 use bevy::input::keyboard::KeyboardInput;
 use bevy::prelude::*;
@@ -27,6 +26,7 @@ use cadrs_core::applied::{
 use cadrs_core::commands::{AddFeature, ReplaceFeature, SetFeature};
 use cadrs_core::document::{EdgeRef, FaceRef};
 use cadrs_core::{ElementId, ElementKind, Feature, FeatureId, FeatureKind, Part, PartId};
+use cadrs_ui::ShortcutKey;
 
 use crate::parts::{PartCache, PickFilter};
 use crate::viewport::{Pick, PickRequest, Selection};
@@ -42,7 +42,16 @@ impl Plugin for AppliedPlugin {
             .init_resource::<crate::transform_ui::XyzArrows>()
             .add_systems(
                 Update,
-                (crate::sheetmetal_ui::sm_flip_arrow_pointer, applied_picks, applied_keys, radius_arrow_pointer, crate::transform_ui::xyz_arrow_pointer, crate::applied_dialog::sync_applied_dialog, crate::draft_ui::sync_fillet_entries, crate::sheetmetal_ui::sync_numbers)
+                (
+                    crate::sheetmetal_ui::sm_flip_arrow_pointer,
+                    applied_picks,
+                    applied_keys,
+                    radius_arrow_pointer,
+                    crate::transform_ui::xyz_arrow_pointer,
+                    crate::applied_dialog::sync_applied_dialog,
+                    crate::draft_ui::sync_fillet_entries,
+                    crate::sheetmetal_ui::sync_numbers,
+                )
                     .chain()
                     .after(crate::viewport::apply_view_to_camera)
                     .before(crate::parts::PartsSet)
@@ -50,14 +59,28 @@ impl Plugin for AppliedPlugin {
             )
             .add_systems(
                 Update,
-                (roll_back_for_overrides, roll_back_to_edited, crate::extrude_dialog::sync_final_buttons, update_before_parts, default_hole_scope, show_references, draw_references, draw_sketch_point_picks)
+                (
+                    roll_back_for_overrides,
+                    roll_back_to_edited,
+                    crate::extrude_dialog::sync_final_buttons,
+                    update_before_parts,
+                    default_hole_scope,
+                    show_references,
+                    draw_references,
+                    draw_sketch_point_picks,
+                )
                     .chain()
                     .after(crate::parts::PartsSet)
                     .run_if(in_state(AppState::Document)),
             )
             .add_systems(
                 PostUpdate,
-                (place_radius_arrow, crate::sheetmetal_ui::place_sm_flip_arrow, crate::transform_ui::place_xyz_arrows, crate::draft_ui::place_radius_labels)
+                (
+                    place_radius_arrow,
+                    crate::sheetmetal_ui::place_sm_flip_arrow,
+                    crate::transform_ui::place_xyz_arrows,
+                    crate::draft_ui::place_radius_labels,
+                )
                     .before(bevy::ui::UiSystems::Layout)
                     .run_if(in_state(AppState::Document)),
             )
@@ -128,9 +151,15 @@ impl AppliedKind {
             FeatureKind::Helix(_) => Some(Self::Helix),
             FeatureKind::Fill(_) => Some(Self::Fill),
             FeatureKind::SheetMetalModel(_) => Some(Self::SheetMetal),
-            k @ (FeatureKind::SheetMetalLoft(_) | FeatureKind::Form(_) | FeatureKind::TagForm(_)) => crate::sheetmetal_p3i9_ui::Sm9Kind::of(k).map(Self::Sm9),
-            FeatureKind::SheetMetal(x) => Some(Self::SmFeature(crate::sheetmetal_features_ui::SmTool::of(x))),
-            FeatureKind::SheetMetalTool(x) => Some(Self::SheetMetalTool(crate::sheetmetal_tools_ui::SmTool::of(x))),
+            k @ (FeatureKind::SheetMetalLoft(_)
+            | FeatureKind::Form(_)
+            | FeatureKind::TagForm(_)) => crate::sheetmetal_p3i9_ui::Sm9Kind::of(k).map(Self::Sm9),
+            FeatureKind::SheetMetal(x) => Some(Self::SmFeature(
+                crate::sheetmetal_features_ui::SmTool::of(x),
+            )),
+            FeatureKind::SheetMetalTool(x) => Some(Self::SheetMetalTool(
+                crate::sheetmetal_tools_ui::SmTool::of(x),
+            )),
             FeatureKind::FlatExtrude(_) => Some(Self::FlatExtrude),
             FeatureKind::DirectEdit(x) => Some(Self::DirectEdit(x.kind)),
             _ => None,
@@ -278,11 +307,28 @@ impl AppliedSession {
         };
         let planes = [true; 3];
         match self.field {
-            AppliedField::Entities => PickFilter { faces: true, edges: true, ..none },
-            AppliedField::Overrides => PickFilter { edges: true, ..none },
-            AppliedField::Faces | AppliedField::MergeScope => PickFilter { faces: true, edges: true, ..none },
-            AppliedField::Points => PickFilter { sketch_points: true, ..none },
-            AppliedField::Side1 | AppliedField::Center | AppliedField::Side2 => PickFilter { faces: true, ..none },
+            AppliedField::Entities => PickFilter {
+                faces: true,
+                edges: true,
+                ..none
+            },
+            AppliedField::Overrides => PickFilter {
+                edges: true,
+                ..none
+            },
+            AppliedField::Faces | AppliedField::MergeScope => PickFilter {
+                faces: true,
+                edges: true,
+                ..none
+            },
+            AppliedField::Points => PickFilter {
+                sketch_points: true,
+                ..none
+            },
+            AppliedField::Side1 | AppliedField::Center | AppliedField::Side2 => PickFilter {
+                faces: true,
+                ..none
+            },
             AppliedField::PlaneEntities => PickFilter {
                 origin: true,
                 planes,
@@ -295,19 +341,62 @@ impl AppliedSession {
                 skip_op: None,
                 ..none
             },
-            AppliedField::Profile => PickFilter { faces: true, planar_only: true, regions: true, ..none },
-            AppliedField::Path => PickFilter { edges: true, sketch_curves: true, ..none },
-            AppliedField::LockDirection => PickFilter { planes, plane_features: true, faces: true, planar_only: true, edges: true, ..none },
-            AppliedField::LoftStartDirection | AppliedField::LoftEndDirection => {
-                PickFilter { planes, plane_features: true, faces: true, planar_only: true, edges: true, sketch_curves: true, connectors: true, ..none }
-            }
+            AppliedField::Profile => PickFilter {
+                faces: true,
+                planar_only: true,
+                regions: true,
+                ..none
+            },
+            AppliedField::Path => PickFilter {
+                edges: true,
+                sketch_curves: true,
+                ..none
+            },
+            AppliedField::LockDirection => PickFilter {
+                planes,
+                plane_features: true,
+                faces: true,
+                planar_only: true,
+                edges: true,
+                ..none
+            },
+            AppliedField::LoftStartDirection | AppliedField::LoftEndDirection => PickFilter {
+                planes,
+                plane_features: true,
+                faces: true,
+                planar_only: true,
+                edges: true,
+                sketch_curves: true,
+                connectors: true,
+                ..none
+            },
             // P3.10 (PS20.1): non-planar faces are profiles too.
-            AppliedField::Profiles => PickFilter { faces: true, regions: true, sketch_points: true, edges: true, ..none },
-            AppliedField::SplitParts => PickFilter { faces: true, edges: true, ..none },
-            AppliedField::SplitTool => PickFilter { planes, plane_features: true, faces: true, ..none },
+            AppliedField::Profiles => PickFilter {
+                faces: true,
+                regions: true,
+                sketch_points: true,
+                edges: true,
+                ..none
+            },
+            AppliedField::SplitParts => PickFilter {
+                faces: true,
+                edges: true,
+                ..none
+            },
+            AppliedField::SplitTool => PickFilter {
+                planes,
+                plane_features: true,
+                faces: true,
+                ..none
+            },
             // P3.8. Seeds: parts (any face or edge), features (the faces they made) or faces;
             // the faces and edges a pattern made itself are fine to pick for its seeds too.
-            AppliedField::PatternEntities => PickFilter { faces: true, edges: true, skip_op: None, ..none },
+            AppliedField::PatternEntities => PickFilter {
+                faces: true,
+                edges: true,
+                skip_op: None,
+                ..none
+            },
             AppliedField::PatternDirection | AppliedField::PatternDirection2 => PickFilter {
                 planes,
                 plane_features: true,
@@ -318,10 +407,28 @@ impl AppliedSession {
                 connectors: true,
                 ..none
             },
-            AppliedField::PatternAxis => PickFilter { origin: true, faces: true, edges: true, sketch_curves: true, connectors: true, ..none },
-            AppliedField::PatternPath => PickFilter { edges: true, sketch_curves: true, ..none },
+            AppliedField::PatternAxis => PickFilter {
+                origin: true,
+                faces: true,
+                edges: true,
+                sketch_curves: true,
+                connectors: true,
+                ..none
+            },
+            AppliedField::PatternPath => PickFilter {
+                edges: true,
+                sketch_curves: true,
+                ..none
+            },
             AppliedField::SkipList => none,
-            AppliedField::MirrorPlane => PickFilter { planes, plane_features: true, faces: true, planar_only: true, connectors: true, ..none },
+            AppliedField::MirrorPlane => PickFilter {
+                planes,
+                plane_features: true,
+                faces: true,
+                planar_only: true,
+                connectors: true,
+                ..none
+            },
             AppliedField::ConnectorOrigin | AppliedField::ConnectorBetween => PickFilter {
                 origin: true,
                 faces: true,
@@ -331,25 +438,76 @@ impl AppliedSession {
                 skip_op: None,
                 ..none
             },
-            AppliedField::ConnectorPrimary | AppliedField::ConnectorSecondary => {
-                PickFilter { faces: true, edges: true, sketch_curves: true, skip_op: None, ..none }
-            }
-            AppliedField::ConnectorOwner => PickFilter { faces: true, edges: true, skip_op: None, ..none },
-            AppliedField::HoleConnectors => PickFilter { origin: true, faces: true, edges: true, connectors: true, ..none },
-            AppliedField::ConnectorAlignment => {
-                PickFilter { planes, plane_features: true, faces: true, planar_only: true, edges: true, sketch_curves: true, connectors: true, ..none }
-            }
-            AppliedField::DraftNeutral | AppliedField::HoleStartPlane => {
-                PickFilter { planes, plane_features: true, faces: true, planar_only: true, connectors: true, ..none }
-            }
-            AppliedField::HoleUpTo => PickFilter { planes, plane_features: true, faces: true, connectors: true, ..none },
-            AppliedField::DraftFaces => PickFilter { faces: true, ..none },
-            AppliedField::FilletVertices => PickFilter { edges: true, ..none },
-            AppliedField::FilletEdgePoints => PickFilter { edges: true, ..none },
+            AppliedField::ConnectorPrimary | AppliedField::ConnectorSecondary => PickFilter {
+                faces: true,
+                edges: true,
+                sketch_curves: true,
+                skip_op: None,
+                ..none
+            },
+            AppliedField::ConnectorOwner => PickFilter {
+                faces: true,
+                edges: true,
+                skip_op: None,
+                ..none
+            },
+            AppliedField::HoleConnectors => PickFilter {
+                origin: true,
+                faces: true,
+                edges: true,
+                connectors: true,
+                ..none
+            },
+            AppliedField::ConnectorAlignment => PickFilter {
+                planes,
+                plane_features: true,
+                faces: true,
+                planar_only: true,
+                edges: true,
+                sketch_curves: true,
+                connectors: true,
+                ..none
+            },
+            AppliedField::DraftNeutral | AppliedField::HoleStartPlane => PickFilter {
+                planes,
+                plane_features: true,
+                faces: true,
+                planar_only: true,
+                connectors: true,
+                ..none
+            },
+            AppliedField::HoleUpTo => PickFilter {
+                planes,
+                plane_features: true,
+                faces: true,
+                connectors: true,
+                ..none
+            },
+            AppliedField::DraftFaces => PickFilter {
+                faces: true,
+                ..none
+            },
+            AppliedField::FilletVertices => PickFilter {
+                edges: true,
+                ..none
+            },
+            AppliedField::FilletEdgePoints => PickFilter {
+                edges: true,
+                ..none
+            },
             // The parts' faces and edges pick the parts (the Transform keeps their names, so its
             // own op never shows on them).
-            AppliedField::TransformParts => PickFilter { faces: true, edges: true, skip_op: None, ..none },
-            AppliedField::TransformLine => PickFilter { edges: true, sketch_curves: true, ..none },
+            AppliedField::TransformParts => PickFilter {
+                faces: true,
+                edges: true,
+                skip_op: None,
+                ..none
+            },
+            AppliedField::TransformLine => PickFilter {
+                edges: true,
+                sketch_curves: true,
+                ..none
+            },
             AppliedField::TransformDirection => PickFilter {
                 planes,
                 plane_features: true,
@@ -360,7 +518,9 @@ impl AppliedSession {
                 connectors: true,
                 ..none
             },
-            AppliedField::TransformFrom | AppliedField::TransformTo | AppliedField::TransformScalePoint => PickFilter {
+            AppliedField::TransformFrom
+            | AppliedField::TransformTo
+            | AppliedField::TransformScalePoint => PickFilter {
                 origin: true,
                 faces: true,
                 edges: true,
@@ -369,13 +529,40 @@ impl AppliedSession {
                 connectors: true,
                 ..none
             },
-            AppliedField::TransformAxis => PickFilter { origin: true, faces: true, edges: true, sketch_curves: true, connectors: true, ..none },
-            AppliedField::ThickenEntities => PickFilter { faces: true, regions: true, ..none },
-            AppliedField::HelixEntity => PickFilter { faces: true, edges: true, sketch_curves: true, connectors: true, ..none },
-            AppliedField::FillEdges => PickFilter { edges: true, sketch_curves: true, ..none },
+            AppliedField::TransformAxis => PickFilter {
+                origin: true,
+                faces: true,
+                edges: true,
+                sketch_curves: true,
+                connectors: true,
+                ..none
+            },
+            AppliedField::ThickenEntities => PickFilter {
+                faces: true,
+                regions: true,
+                ..none
+            },
+            AppliedField::HelixEntity => PickFilter {
+                faces: true,
+                edges: true,
+                sketch_curves: true,
+                connectors: true,
+                ..none
+            },
+            AppliedField::FillEdges => PickFilter {
+                edges: true,
+                sketch_curves: true,
+                ..none
+            },
             AppliedField::Sm9(f) => crate::sheetmetal_p3i9_ui::pick_filter(f, none),
-            AppliedField::FlatRegions => PickFilter { regions: true, ..none },
-            AppliedField::DirectEditFaces => PickFilter { faces: true, ..none },
+            AppliedField::FlatRegions => PickFilter {
+                regions: true,
+                ..none
+            },
+            AppliedField::DirectEditFaces => PickFilter {
+                faces: true,
+                ..none
+            },
             f @ AppliedField::SmTool(_) => crate::sheetmetal_tools_ui::pick_filter(f, none),
             f => crate::sheetmetal_ui::pick_filter(f, cadrs_core::document::EndType::Blind, none)
                 .or_else(|| crate::sheetmetal_features_ui::pick_filter(f, none))
@@ -418,7 +605,10 @@ pub fn begin(world: &mut World, kind: AppliedKind) {
     let points: Vec<HolePoint> = picked
         .iter()
         .filter_map(|p| match p {
-            Pick::SketchPoint(sketch, point) => Some(HolePoint { sketch: *sketch, point: *point }),
+            Pick::SketchPoint(sketch, point) => Some(HolePoint {
+                sketch: *sketch,
+                point: *point,
+            }),
             _ => None,
         })
         .collect();
@@ -434,14 +624,22 @@ pub fn begin(world: &mut World, kind: AppliedKind) {
     let advanced = crate::advanced::initial(world, kind, &picked)
         .or_else(|| crate::pattern::initial(world, kind, &picked))
         .or_else(|| crate::surfacing_ui::initial(world, kind, &picked))
-        .or_else(|| (kind == AppliedKind::SheetMetal).then(|| crate::sheetmetal_ui::initial(world, &picked)).flatten())
+        .or_else(|| {
+            (kind == AppliedKind::SheetMetal)
+                .then(|| crate::sheetmetal_ui::initial(world, &picked))
+                .flatten()
+        })
         .or_else(|| match kind {
             AppliedKind::Sm9(k) => crate::sheetmetal_p3i9_ui::initial(world, k, &picked),
             AppliedKind::SmFeature(t) => crate::sheetmetal_features_ui::initial(world, t, &picked),
             _ => None,
         })
         .or_else(|| crate::sheetmetal_tools_ui::initial(world, kind, &picked))
-        .or_else(|| (kind == AppliedKind::FlatExtrude).then(|| crate::flat_ui::initial(world, &picked)).flatten())
+        .or_else(|| {
+            (kind == AppliedKind::FlatExtrude)
+                .then(|| crate::flat_ui::initial(world, &picked))
+                .flatten()
+        })
         .or_else(|| crate::direct_edit_ui::initial(world, kind, &picked));
     let Some(mut doc) = world.get_resource_mut::<ActiveDocument>() else {
         return;
@@ -455,25 +653,54 @@ pub fn begin(world: &mut World, kind: AppliedKind) {
     };
     let sketches: Vec<FeatureId> = sketches
         .into_iter()
-        .filter(|s| doc.active_element().and_then(|e| e.feature(*s)).is_some_and(|f| f.sketch().is_some()))
+        .filter(|s| {
+            doc.active_element()
+                .and_then(|e| e.feature(*s))
+                .is_some_and(|f| f.sketch().is_some())
+        })
         .collect();
     let feature = FeatureId::new();
     let mark = doc.history.undo_len();
     let (add, field) = match kind {
         AppliedKind::Fillet => (
-            AddFeature::fillet(element, feature, FilletFeature { entities, ..FilletFeature::default() }),
+            AddFeature::fillet(
+                element,
+                feature,
+                FilletFeature {
+                    entities,
+                    ..FilletFeature::default()
+                },
+            ),
             AppliedField::Entities,
         ),
         AppliedKind::Chamfer => (
-            AddFeature::chamfer(element, feature, ChamferFeature { entities, ..ChamferFeature::default() }),
+            AddFeature::chamfer(
+                element,
+                feature,
+                ChamferFeature {
+                    entities,
+                    ..ChamferFeature::default()
+                },
+            ),
             AppliedField::Entities,
         ),
         AppliedKind::Shell => (
-            AddFeature::shell(element, feature, ShellFeature { faces, ..ShellFeature::default() }),
+            AddFeature::shell(
+                element,
+                feature,
+                ShellFeature {
+                    faces,
+                    ..ShellFeature::default()
+                },
+            ),
             AppliedField::Faces,
         ),
         AppliedKind::Hole => {
-            let mut h = HoleFeature { points, sketches, ..HoleFeature::default() };
+            let mut h = HoleFeature {
+                points,
+                sketches,
+                ..HoleFeature::default()
+            };
             // A new hole in a document in inches starts from the inch table.
             if doc.doc.units.length == cadrs_sketch::units::LengthUnit::Inch {
                 h.spec.standard = cadrs_core::hole::HoleStandard::Ansi;
@@ -483,7 +710,11 @@ pub fn begin(world: &mut World, kind: AppliedKind) {
         }
         AppliedKind::Draft => (
             AddFeature::draft(element, feature, crate::draft_ui::initial(&picked, &faces)),
-            if faces.is_empty() { AppliedField::DraftNeutral } else { AppliedField::DraftFaces },
+            if faces.is_empty() {
+                AppliedField::DraftNeutral
+            } else {
+                AppliedField::DraftFaces
+            },
         ),
         AppliedKind::Transform => {
             let (x, field) = crate::transform_ui::initial(&doc.doc, element, &picked);
@@ -505,8 +736,18 @@ pub fn begin(world: &mut World, kind: AppliedKind) {
         | AppliedKind::SheetMetalTool(_)
         | AppliedKind::FlatExtrude
         | AppliedKind::DirectEdit(_) => {
-            let Some((base, kind, field)) = advanced else { return };
-            (AddFeature { element, feature, base_name: base.into(), kind }, field)
+            let Some((base, kind, field)) = advanced else {
+                return;
+            };
+            (
+                AddFeature {
+                    element,
+                    feature,
+                    base_name: base.into(),
+                    kind,
+                },
+                field,
+            )
         }
     };
     if let Err(e) = doc.execute(&add) {
@@ -518,7 +759,10 @@ pub fn begin(world: &mut World, kind: AppliedKind) {
 
 /// Opens an existing applied feature for editing.
 pub fn edit(world: &mut World, feature: FeatureId) {
-    if world.get_resource::<AppliedSession>().is_some_and(|s| s.feature == feature) {
+    if world
+        .get_resource::<AppliedSession>()
+        .is_some_and(|s| s.feature == feature)
+    {
         return;
     }
     if world.contains_resource::<AppliedSession>() {
@@ -549,7 +793,13 @@ pub fn edit(world: &mut World, feature: FeatureId) {
     let mark = doc.history.undo_len();
     doc.discard_since(mark);
     let field = match kind {
-        AppliedKind::Fillet if before.fillet().is_some_and(|x| x.kind == FilletType::FullRound) => AppliedField::Side1,
+        AppliedKind::Fillet
+            if before
+                .fillet()
+                .is_some_and(|x| x.kind == FilletType::FullRound) =>
+        {
+            AppliedField::Side1
+        }
         AppliedKind::Fillet | AppliedKind::Chamfer => AppliedField::Entities,
         AppliedKind::Shell => AppliedField::Faces,
         AppliedKind::Hole => AppliedField::Points,
@@ -569,12 +819,23 @@ pub fn edit(world: &mut World, feature: FeatureId) {
             _ => AppliedField::SmParts,
         },
         AppliedKind::Sm9(_) => crate::sheetmetal_p3i9_ui::first_field(&before.kind),
-        AppliedKind::SmFeature(_) => AppliedField::Smf(crate::sheetmetal_features_ui::SmfField::Edges),
+        AppliedKind::SmFeature(_) => {
+            AppliedField::Smf(crate::sheetmetal_features_ui::SmfField::Edges)
+        }
         AppliedKind::SheetMetalTool(t) => crate::sheetmetal_tools_ui::first_field(t),
         AppliedKind::FlatExtrude => AppliedField::FlatRegions,
         AppliedKind::DirectEdit(_) => AppliedField::DirectEditFaces,
     };
-    start(world, element, feature, kind, false, mark, Some(before), field);
+    start(
+        world,
+        element,
+        feature,
+        kind,
+        false,
+        mark,
+        Some(before),
+        field,
+    );
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -600,7 +861,11 @@ fn start(
         show_final: false,
         scope_auto: is_new && kind == AppliedKind::Hole,
         // P3I.9: the loft's General open, Material and Relief closed (its help dialog).
-        sections: if matches!(kind, AppliedKind::Sm9(_)) { [true, true, false, false] } else { [true; 4] },
+        sections: if matches!(kind, AppliedKind::Sm9(_)) {
+            [true, true, false, false]
+        } else {
+            [true; 4]
+        },
     });
     // The hole's sketch stays shown while its points are picked (it isn't consumed yet).
     world.resource_mut::<crate::parts::PartOverride>().editing = Some(feature);
@@ -617,7 +882,12 @@ fn end(world: &mut World) {
 /// The feature being edited.
 pub fn current(world: &World) -> Option<Feature> {
     let s = world.get_resource::<AppliedSession>()?;
-    world.get_resource::<ActiveDocument>()?.doc.element(s.element)?.feature(s.feature).cloned()
+    world
+        .get_resource::<ActiveDocument>()?
+        .doc
+        .element(s.element)?
+        .feature(s.feature)
+        .cloned()
 }
 
 /// Replaces the feature's parameters (a command).
@@ -628,14 +898,21 @@ pub fn set(world: &mut World, kind: FeatureKind, label: &str) {
     let Some(mut doc) = world.get_resource_mut::<ActiveDocument>() else {
         return;
     };
-    if let Err(e) = doc.execute(&SetFeature { element: s.element, feature: s.feature, kind, label: label.into() }) {
+    if let Err(e) = doc.execute(&SetFeature {
+        element: s.element,
+        feature: s.feature,
+        kind,
+        label: label.into(),
+    }) {
         warn!("cannot change the feature: {e}");
     }
 }
 
 /// Changes the feature's parameters with `f` (one command, if anything changed).
 pub fn change_kind(world: &mut World, label: &str, f: impl FnOnce(&mut FeatureKind)) {
-    let Some(feature) = current(world) else { return };
+    let Some(feature) = current(world) else {
+        return;
+    };
     let mut k = feature.kind.clone();
     f(&mut k);
     if k != feature.kind {
@@ -653,7 +930,11 @@ pub fn accept(world: &mut World) {
     };
     // A feature that doesn't rebuild is kept (red in the list with its reason, as Onshape keeps
     // the funnel's failing Shell, `ex4-step10.png`); an edit before it can fix it (PS21.11).
-    let label = if s.is_new { format!("Insert {}", f.name) } else { format!("Edit {}", f.name) };
+    let label = if s.is_new {
+        format!("Insert {}", f.name)
+    } else {
+        format!("Edit {}", f.name)
+    };
     if let Some(mut doc) = world.get_resource_mut::<ActiveDocument>() {
         // A new sheet metal feature that uses a sketch shown by its eye (E1: Sketch 1 shown to
         // pick a bend line) hides it again, as Onshape does: the sketch goes back to the
@@ -662,10 +943,18 @@ pub fn accept(world: &mut World) {
             let shown: Vec<FeatureId> = f
                 .input_sketches()
                 .into_iter()
-                .filter(|k| doc.doc.element(s.element).is_some_and(|el| el.sketch_visibility(*k) == Some(true)))
+                .filter(|k| {
+                    doc.doc
+                        .element(s.element)
+                        .is_some_and(|el| el.sketch_visibility(*k) == Some(true))
+                })
                 .collect();
             for sketch in shown {
-                let _ = doc.execute(&cadrs_core::commands::SetSketchVisibility { element: s.element, sketch, visible: None });
+                let _ = doc.execute(&cadrs_core::commands::SetSketchVisibility {
+                    element: s.element,
+                    sketch,
+                    visible: None,
+                });
             }
         }
         doc.squash_element_since(s.mark, s.element, label);
@@ -692,7 +981,11 @@ pub fn cancel(world: &mut World) {
             if let (Some(before), Some(f)) = (s.before.clone(), cur)
                 && f != before
             {
-                let _ = doc.execute(&ReplaceFeature { element: s.element, feature: before, label: format!("Cancel {name}") });
+                let _ = doc.execute(&ReplaceFeature {
+                    element: s.element,
+                    feature: before,
+                    label: format!("Cancel {name}"),
+                });
             }
         }
     }
@@ -809,7 +1102,9 @@ fn applied_picks(
                     }
                 }
                 (FeatureKind::Hole(x), AppliedField::Points) => match pick {
-                    Pick::SketchPoint(sketch, point) => toggle(&mut x.points, HolePoint { sketch, point }),
+                    Pick::SketchPoint(sketch, point) => {
+                        toggle(&mut x.points, HolePoint { sketch, point })
+                    }
                     // PS15.2: a Mate connector picked in the list or the view is a place too.
                     Pick::Feature(f) => {
                         let features = world
@@ -818,7 +1113,10 @@ fn applied_picks(
                             .map(|e| e.features().to_vec())
                             .unwrap_or_default();
                         if crate::pattern::is_connector(&features, f) {
-                            toggle(&mut x.connectors, cadrs_core::mate::ConnectorRef::Feature(f));
+                            toggle(
+                                &mut x.connectors,
+                                cadrs_core::mate::ConnectorRef::Feature(f),
+                            );
                         } else {
                             toggle(&mut x.sketches, f);
                         }
@@ -829,8 +1127,13 @@ fn applied_picks(
                     Some(part) => toggle(&mut x.merge_scope, part),
                     None => return,
                 },
-                (FeatureKind::Fillet(x), AppliedField::Side1 | AppliedField::Center | AppliedField::Side2) => {
-                    let Some(EdgeOrFace::Face(face)) = entity else { return };
+                (
+                    FeatureKind::Fillet(x),
+                    AppliedField::Side1 | AppliedField::Center | AppliedField::Side2,
+                ) => {
+                    let Some(EdgeOrFace::Face(face)) = entity else {
+                        return;
+                    };
                     let (list, next) = match field {
                         AppliedField::Side1 => (&mut x.side1, AppliedField::Center),
                         AppliedField::Center => (&mut x.center, AppliedField::Side2),
@@ -846,7 +1149,13 @@ fn applied_picks(
                         }
                     }
                 }
-                (k @ (FeatureKind::Plane(_) | FeatureKind::Sweep(_) | FeatureKind::Loft(_) | FeatureKind::Split(_)), _) => {
+                (
+                    k @ (FeatureKind::Plane(_)
+                    | FeatureKind::Sweep(_)
+                    | FeatureKind::Loft(_)
+                    | FeatureKind::Split(_)),
+                    _,
+                ) => {
                     if !crate::advanced::pick(world, k, field, pick) {
                         return;
                     }
@@ -854,8 +1163,14 @@ fn applied_picks(
                 // P3.10: the Draft, the hole's start plane and Up to entity, a variable fillet's
                 // vertices and points on edge.
                 (k @ FeatureKind::Draft(_), _)
-                | (k @ FeatureKind::Hole(_), AppliedField::HoleStartPlane | AppliedField::HoleUpTo)
-                | (k @ FeatureKind::Fillet(_), AppliedField::FilletVertices | AppliedField::FilletEdgePoints) => {
+                | (
+                    k @ FeatureKind::Hole(_),
+                    AppliedField::HoleStartPlane | AppliedField::HoleUpTo,
+                )
+                | (
+                    k @ FeatureKind::Fillet(_),
+                    AppliedField::FilletVertices | AppliedField::FilletEdgePoints,
+                ) => {
                     if !crate::draft_ui::pick(world, k, field, pick) {
                         return;
                     }
@@ -865,7 +1180,10 @@ fn applied_picks(
                         return;
                     }
                 }
-                (k @ (FeatureKind::Thicken(_) | FeatureKind::Helix(_) | FeatureKind::Fill(_)), _) => {
+                (
+                    k @ (FeatureKind::Thicken(_) | FeatureKind::Helix(_) | FeatureKind::Fill(_)),
+                    _,
+                ) => {
                     if !crate::surfacing_ui::pick(world, k, field, pick) {
                         return;
                     }
@@ -875,7 +1193,12 @@ fn applied_picks(
                         return;
                     }
                 }
-                (k @ (FeatureKind::SheetMetalLoft(_) | FeatureKind::Form(_) | FeatureKind::TagForm(_)), AppliedField::Sm9(f)) => {
+                (
+                    k @ (FeatureKind::SheetMetalLoft(_)
+                    | FeatureKind::Form(_)
+                    | FeatureKind::TagForm(_)),
+                    AppliedField::Sm9(f),
+                ) => {
                     if !crate::sheetmetal_p3i9_ui::pick(world, k, f, pick) {
                         return;
                     }
@@ -901,7 +1224,12 @@ fn applied_picks(
                     }
                 }
                 // P3.8 (and a hole's mate connectors, PS15.2).
-                (k @ (FeatureKind::Pattern(_) | FeatureKind::Mirror(_) | FeatureKind::MateConnector(_)), _)
+                (
+                    k @ (FeatureKind::Pattern(_)
+                    | FeatureKind::Mirror(_)
+                    | FeatureKind::MateConnector(_)),
+                    _,
+                )
                 | (k @ FeatureKind::Hole(_), AppliedField::HoleConnectors) => {
                     if !crate::pattern::pick(world, k, field, pick) {
                         return;
@@ -947,7 +1275,11 @@ fn applied_keys(
 
 /// While the chamfer's Direction overrides (or a variable fillet's vertices and points, P3.10)
 /// take picks, the view shows the parts before it, so the edges it rounds can be picked again.
-fn roll_back_for_overrides(session: Option<Res<AppliedSession>>, composite: Option<Res<crate::composite_ui::CompositeSession>>, mut over: ResMut<crate::parts::PartOverride>) {
+fn roll_back_for_overrides(
+    session: Option<Res<AppliedSession>>,
+    composite: Option<Res<crate::composite_ui::CompositeSession>>,
+    mut over: ResMut<crate::parts::PartOverride>,
+) {
     // P3H.6: the Composite part dialog sets the view itself.
     if composite.is_some() {
         return;
@@ -956,14 +1288,25 @@ fn roll_back_for_overrides(session: Option<Res<AppliedSession>>, composite: Opti
     // P3I.2: a Convert's faces to exclude and edges to bend are picked on the part it consumes.
     let want = session
         .as_ref()
-        .filter(|s| matches!(s.field, AppliedField::Overrides | AppliedField::FilletVertices | AppliedField::FilletEdgePoints))
+        .filter(|s| {
+            matches!(
+                s.field,
+                AppliedField::Overrides
+                    | AppliedField::FilletVertices
+                    | AppliedField::FilletEdgePoints
+            )
+        })
         .map(|s| s.feature);
     if over.rolled_back != want {
         over.rolled_back = want;
     }
     // P3I.2 judge: they are picked on the part as it was, with the folded model translucent
     // over it and updating with each pick (`02-sheet-metal-model/t0101.0.png`).
-    let staged = session.filter(|s| !s.show_final && matches!(s.field, AppliedField::SmExclude | AppliedField::SmBends)).map(|s| s.feature);
+    let staged = session
+        .filter(|s| {
+            !s.show_final && matches!(s.field, AppliedField::SmExclude | AppliedField::SmBends)
+        })
+        .map(|s| s.feature);
     if over.staged != staged {
         over.staged = staged;
     }
@@ -977,7 +1320,10 @@ fn roll_back_to_edited(
     boolean: Option<Res<crate::boolean::BooleanSession>>,
     doc: Option<Res<ActiveDocument>>,
     mut over: ResMut<crate::parts::PartOverride>,
-    (sketch, composite): (Option<Res<crate::sketch::SketchSession>>, Option<Res<crate::composite_ui::CompositeSession>>),
+    (sketch, composite): (
+        Option<Res<crate::sketch::SketchSession>>,
+        Option<Res<crate::composite_ui::CompositeSession>>,
+    ),
 ) {
     // P3H.6: the Composite part dialog sets the view itself.
     if composite.is_some() {
@@ -992,7 +1338,8 @@ fn roll_back_to_edited(
     {
         let want = doc.as_ref().and_then(|d| {
             let el = d.doc.element(x.element)?;
-            (!x.show_final && crate::feature_list::last_built(el) != Some(x.feature)).then_some(x.feature)
+            (!x.show_final && crate::feature_list::last_built(el) != Some(x.feature))
+                .then_some(x.feature)
         });
         if over.rollback_to != want {
             over.rollback_to = want;
@@ -1006,7 +1353,8 @@ fn roll_back_to_edited(
     {
         let want = doc.as_ref().and_then(|d| {
             let el = d.doc.element(x.element)?;
-            (!x.show_final && crate::feature_list::last_built(el) != Some(x.feature)).then_some(x.feature)
+            (!x.show_final && crate::feature_list::last_built(el) != Some(x.feature))
+                .then_some(x.feature)
         });
         if over.rollback_to != want {
             over.rollback_to = want;
@@ -1046,7 +1394,12 @@ fn roll_back_to_edited(
 }
 
 /// The parts before the feature being edited (cached on the rebuild thread).
-fn update_before_parts(session: Option<Res<AppliedSession>>, doc: Option<Res<ActiveDocument>>, mut before: ResMut<BeforeParts>, mut cache: ResMut<PartCache>) {
+fn update_before_parts(
+    session: Option<Res<AppliedSession>>,
+    doc: Option<Res<ActiveDocument>>,
+    mut before: ResMut<BeforeParts>,
+    mut cache: ResMut<PartCache>,
+) {
     let (Some(s), Some(doc)) = (session, doc) else {
         if before.key.is_some() {
             *before = BeforeParts::default();
@@ -1057,9 +1410,13 @@ fn update_before_parts(session: Option<Res<AppliedSession>>, doc: Option<Res<Act
         }
         return;
     };
-    let Some(el) = doc.doc.element(s.element) else { return };
+    let Some(el) = doc.doc.element(s.element) else {
+        return;
+    };
     let features = el.active_features();
-    let Some(i) = features.iter().position(|f| f.id == s.feature) else { return };
+    let Some(i) = features.iter().position(|f| f.id == s.feature) else {
+        return;
+    };
     let upstream = &features[..i];
     let key = {
         use std::hash::{Hash, Hasher};
@@ -1079,12 +1436,23 @@ fn update_before_parts(session: Option<Res<AppliedSession>>, doc: Option<Res<Act
 
 /// A new hole's Merge scope defaults to the part its points drill (P3.8 judge; Onshape fills
 /// the field with the drilled part), once, as soon as the rebuild knows it.
-fn default_hole_scope(session: Option<Res<AppliedSession>>, cache: Res<PartCache>, mut commands: Commands) {
-    let Some(s) = session.filter(|s| s.scope_auto) else { return };
+fn default_hole_scope(
+    session: Option<Res<AppliedSession>>,
+    cache: Res<PartCache>,
+    mut commands: Commands,
+) {
+    let Some(s) = session.filter(|s| s.scope_auto) else {
+        return;
+    };
     if cache.rebuilding {
         return;
     }
-    let Some(drilled) = cache.contacts.get(&s.feature).map(|c| c.overlaps.clone()).filter(|d| !d.is_empty()) else {
+    let Some(drilled) = cache
+        .contacts
+        .get(&s.feature)
+        .map(|c| c.overlaps.clone())
+        .filter(|d| !d.is_empty())
+    else {
         return;
     };
     commands.queue(move |world: &mut World| {
@@ -1092,7 +1460,9 @@ fn default_hole_scope(session: Option<Res<AppliedSession>>, cache: Res<PartCache
             s.scope_auto = false;
         }
         let Some(f) = current(world) else { return };
-        let FeatureKind::Hole(mut h) = f.kind else { return };
+        let FeatureKind::Hole(mut h) = f.kind else {
+            return;
+        };
         if h.merge_scope.is_empty() {
             h.merge_scope = drilled;
             set(world, FeatureKind::Hole(h), "Merge scope");
@@ -1112,7 +1482,10 @@ fn show_references(
     // Red only when the rebuild fails (walls that cross), not while parameters are missing.
     let fails = session.as_ref().zip(doc.as_ref()).is_some_and(|(s, d)| {
         cache.errors.contains_key(&s.feature)
-            && d.doc.element(s.element).and_then(|e| e.feature(s.feature)).is_some_and(|f| f.is_valid())
+            && d.doc
+                .element(s.element)
+                .and_then(|e| e.feature(s.feature))
+                .is_some_and(|f| f.is_valid())
     });
     let (Some(s), Some(doc)) = (session, doc) else {
         if *failed != crate::parts::FailedReferences::default() {
@@ -1120,7 +1493,11 @@ fn show_references(
         }
         return;
     };
-    let Some(f) = doc.doc.element(s.element).and_then(|e| e.feature(s.feature)) else {
+    let Some(f) = doc
+        .doc
+        .element(s.element)
+        .and_then(|e| e.feature(s.feature))
+    else {
         return;
     };
     let mut want: Vec<Pick> = Vec::new();
@@ -1128,18 +1505,45 @@ fn show_references(
         FeatureKind::Shell(x) if x.hollow => want.extend(x.parts.iter().map(|p| Pick::Part(*p))),
         // The points (the merge scope's parts stay as they are, `ex3-step5.png`).
         FeatureKind::Hole(x) => {
-            want.extend(x.points.iter().map(|p| Pick::SketchPoint(p.sketch, p.point)));
+            want.extend(
+                x.points
+                    .iter()
+                    .map(|p| Pick::SketchPoint(p.sketch, p.point)),
+            );
             // P3.11 (P3.6 judge): a whole sketch's points are marked as picked points are.
-            let features = doc.doc.element(s.element).map(|e| e.features()).unwrap_or(&[]);
+            let features = doc
+                .doc
+                .element(s.element)
+                .map(|e| e.features())
+                .unwrap_or(&[]);
             for sk in &x.sketches {
-                if let Some(g) = features.iter().find(|f| f.id == *sk).and_then(|f| f.sketch()) {
-                    want.extend(cadrs_core::hole::hole_vertices(&g.geometry).into_iter().map(|p| Pick::SketchPoint(*sk, p)));
+                if let Some(g) = features
+                    .iter()
+                    .find(|f| f.id == *sk)
+                    .and_then(|f| f.sketch())
+                {
+                    want.extend(
+                        cadrs_core::hole::hole_vertices(&g.geometry)
+                            .into_iter()
+                            .map(|p| Pick::SketchPoint(*sk, p)),
+                    );
                 }
             }
-            want.extend(x.connectors.iter().filter_map(crate::pattern::connector_pick));
+            want.extend(
+                x.connectors
+                    .iter()
+                    .filter_map(crate::pattern::connector_pick),
+            );
         }
-        k @ (FeatureKind::Plane(_) | FeatureKind::Sweep(_) | FeatureKind::Loft(_) | FeatureKind::Split(_)) => {
-            let features = doc.doc.element(s.element).map(|e| e.features()).unwrap_or(&[]);
+        k @ (FeatureKind::Plane(_)
+        | FeatureKind::Sweep(_)
+        | FeatureKind::Loft(_)
+        | FeatureKind::Split(_)) => {
+            let features = doc
+                .doc
+                .element(s.element)
+                .map(|e| e.features())
+                .unwrap_or(&[]);
             want.extend(crate::advanced::references(k, &cache, features));
         }
         k @ (FeatureKind::Pattern(_) | FeatureKind::Mirror(_) | FeatureKind::MateConnector(_)) => {
@@ -1147,11 +1551,21 @@ fn show_references(
         }
         k @ FeatureKind::Draft(_) => want.extend(crate::draft_ui::references(k, &cache)),
         k @ FeatureKind::Transform(_) => want.extend(crate::transform_ui::references(k, &cache)),
-        k @ (FeatureKind::Thicken(_) | FeatureKind::Helix(_) | FeatureKind::Fill(_)) => want.extend(crate::surfacing_ui::references(k, &cache)),
-        k @ FeatureKind::SheetMetalModel(_) => want.extend(crate::sheetmetal_ui::references(k, &cache)),
-        k @ (FeatureKind::SheetMetalLoft(_) | FeatureKind::Form(_)) => want.extend(crate::sheetmetal_p3i9_ui::references(k, &cache)),
-        k @ FeatureKind::SheetMetal(_) => want.extend(crate::sheetmetal_features_ui::references(k, &cache)),
-        k @ FeatureKind::SheetMetalTool(_) => want.extend(crate::sheetmetal_tools_ui::references(k, &cache)),
+        k @ (FeatureKind::Thicken(_) | FeatureKind::Helix(_) | FeatureKind::Fill(_)) => {
+            want.extend(crate::surfacing_ui::references(k, &cache))
+        }
+        k @ FeatureKind::SheetMetalModel(_) => {
+            want.extend(crate::sheetmetal_ui::references(k, &cache))
+        }
+        k @ (FeatureKind::SheetMetalLoft(_) | FeatureKind::Form(_)) => {
+            want.extend(crate::sheetmetal_p3i9_ui::references(k, &cache))
+        }
+        k @ FeatureKind::SheetMetal(_) => {
+            want.extend(crate::sheetmetal_features_ui::references(k, &cache))
+        }
+        k @ FeatureKind::SheetMetalTool(_) => {
+            want.extend(crate::sheetmetal_tools_ui::references(k, &cache))
+        }
         _ => {}
     }
     // P3.10: a hole's start plane and Up to entity, a variable fillet's vertices.
@@ -1165,16 +1579,31 @@ fn show_references(
     let mut ops: Vec<cadrs_sketch::OpId> = Vec::new();
     if fails {
         let (entities, faces): (Vec<PartId>, Vec<cadrs_sketch::OpId>) = match &f.kind {
-            FeatureKind::Fillet(x) => (x.entities.iter().map(|e| e.part()).collect(), x.entities.iter().map(|e| e.op()).collect()),
-            FeatureKind::Chamfer(x) => (x.entities.iter().map(|e| e.part()).collect(), x.entities.iter().map(|e| e.op()).collect()),
+            FeatureKind::Fillet(x) => (
+                x.entities.iter().map(|e| e.part()).collect(),
+                x.entities.iter().map(|e| e.op()).collect(),
+            ),
+            FeatureKind::Chamfer(x) => (
+                x.entities.iter().map(|e| e.part()).collect(),
+                x.entities.iter().map(|e| e.op()).collect(),
+            ),
             FeatureKind::Shell(x) if x.hollow => (x.parts.clone(), Vec::new()),
-            FeatureKind::Shell(x) => (x.faces.iter().map(|f| f.part).collect(), x.faces.iter().map(|f| f.face.op).collect()),
-            FeatureKind::DirectEdit(x) => (x.faces.iter().map(|f| f.part).collect(), x.faces.iter().map(|f| f.face.op).collect()),
+            FeatureKind::Shell(x) => (
+                x.faces.iter().map(|f| f.part).collect(),
+                x.faces.iter().map(|f| f.face.op).collect(),
+            ),
+            FeatureKind::DirectEdit(x) => (
+                x.faces.iter().map(|f| f.part).collect(),
+                x.faces.iter().map(|f| f.face.op).collect(),
+            ),
             FeatureKind::Pattern(cadrs_core::pattern::PatternFeature { faces, .. })
             | FeatureKind::Mirror(cadrs_core::pattern::MirrorFeature { faces, .. })
                 if !faces.is_empty() =>
             {
-                (faces.iter().map(|f| f.part).collect(), faces.iter().map(|f| f.face.op).collect())
+                (
+                    faces.iter().map(|f| f.part).collect(),
+                    faces.iter().map(|f| f.face.op).collect(),
+                )
             }
             _ => (want.iter().filter_map(|p| p.part()).collect(), Vec::new()),
         };
@@ -1191,8 +1620,12 @@ fn show_references(
     }
     // The faces it refers to keep the selection tint over the red (the shell's faces to remove).
     let refs: Vec<Pick> = match &f.kind {
-        FeatureKind::Shell(x) if fails && !x.hollow => x.faces.iter().map(|g| Pick::Face(g.part, g.face)).collect(),
-        FeatureKind::DirectEdit(x) if fails => x.faces.iter().map(|g| Pick::Face(g.part, g.face)).collect(),
+        FeatureKind::Shell(x) if fails && !x.hollow => {
+            x.faces.iter().map(|g| Pick::Face(g.part, g.face)).collect()
+        }
+        FeatureKind::DirectEdit(x) if fails => {
+            x.faces.iter().map(|g| Pick::Face(g.part, g.face)).collect()
+        }
         _ => Vec::new(),
     };
     let want_failed = crate::parts::FailedReferences(fails, parts, ops, refs);
@@ -1225,7 +1658,11 @@ fn draw_references(
     let (Some(s), Some(doc)) = (session, doc) else {
         return;
     };
-    let Some(f) = doc.doc.element(s.element).and_then(|e| e.feature(s.feature)) else {
+    let Some(f) = doc
+        .doc
+        .element(s.element)
+        .and_then(|e| e.feature(s.feature))
+    else {
         return;
     };
     let v3 = |p: &[f64; 3]| Vec3::new(p[0] as f32, p[1] as f32, p[2] as f32);
@@ -1240,29 +1677,58 @@ fn draw_references(
     }
     let (entities, propagate): (Vec<EdgeOrFace>, bool) = match &f.kind {
         FeatureKind::Fillet(x) if x.kind == FilletType::FullRound => (
-            x.side1.iter().chain(&x.center).chain(&x.side2).map(|f| EdgeOrFace::Face(*f)).collect(),
+            x.side1
+                .iter()
+                .chain(&x.center)
+                .chain(&x.side2)
+                .map(|f| EdgeOrFace::Face(*f))
+                .collect(),
             false,
         ),
         FeatureKind::Fillet(x) => (x.entities.clone(), x.tangent_propagation),
         FeatureKind::Chamfer(x) => (
-            x.entities.iter().copied().chain(x.overrides.iter().map(|e| EdgeOrFace::Edge(*e))).collect(),
+            x.entities
+                .iter()
+                .copied()
+                .chain(x.overrides.iter().map(|e| EdgeOrFace::Edge(*e)))
+                .collect(),
             x.tangent_propagation,
         ),
-        FeatureKind::Shell(x) if !x.hollow => (x.faces.iter().map(|f| EdgeOrFace::Face(*f)).collect(), false),
-        FeatureKind::Draft(x) => (x.faces.iter().map(|f| EdgeOrFace::Face(*f)).collect(), false),
-        FeatureKind::DirectEdit(x) => (x.faces.iter().map(|f| EdgeOrFace::Face(*f)).collect(), false),
+        FeatureKind::Shell(x) if !x.hollow => (
+            x.faces.iter().map(|f| EdgeOrFace::Face(*f)).collect(),
+            false,
+        ),
+        FeatureKind::Draft(x) => (
+            x.faces.iter().map(|f| EdgeOrFace::Face(*f)).collect(),
+            false,
+        ),
+        FeatureKind::DirectEdit(x) => (
+            x.faces.iter().map(|f| EdgeOrFace::Face(*f)).collect(),
+            false,
+        ),
         k @ FeatureKind::SheetMetalModel(_) => (crate::sheetmetal_ui::drawn_references(k), false),
-        k @ FeatureKind::SheetMetal(_) => (crate::sheetmetal_features_ui::drawn_references(k), false),
+        k @ FeatureKind::SheetMetal(_) => {
+            (crate::sheetmetal_features_ui::drawn_references(k), false)
+        }
         _ => return,
     };
     for e in &entities {
-        let Some(part) = before.parts.iter().find(|p| p.id == e.part()).or_else(|| before.parts.first()) else {
+        let Some(part) = before
+            .parts
+            .iter()
+            .find(|p| p.id == e.part())
+            .or_else(|| before.parts.first())
+        else {
             continue;
         };
         let solid = &part.solid;
         match e {
             EdgeOrFace::Edge(r) => {
-                let names = if propagate { tangent_chain(solid, &r.edge) } else { vec![r.edge] };
+                let names = if propagate {
+                    tangent_chain(solid, &r.edge)
+                } else {
+                    vec![r.edge]
+                };
                 for n in names {
                     if let Some(edge) = solid.edge(&n) {
                         g.linestrip(edge.points.iter().map(v3), color);
@@ -1307,7 +1773,8 @@ fn draw_sketch_point_picks(
             };
             let at = Vec3::new(p[0] as f32, p[1] as f32, p[2] as f32);
             for r in [0.8, 1.6, 2.4, 3.2, 4.2] {
-                g.circle(Isometry3d::new(at, rot), r * v.scale, color).resolution(20);
+                g.circle(Isometry3d::new(at, rot), r * v.scale, color)
+                    .resolution(20);
             }
         }
     }
@@ -1315,7 +1782,10 @@ fn draw_sketch_point_picks(
 
 /// An edge and the edges tangent-connected to it on the display mesh (their polylines meet end
 /// to end, running on within 1°): what tangent propagation adds.
-pub fn tangent_chain(solid: &cadrs_core::Solid, edge: &cadrs_sketch::EdgeName) -> Vec<cadrs_sketch::EdgeName> {
+pub fn tangent_chain(
+    solid: &cadrs_core::Solid,
+    edge: &cadrs_sketch::EdgeName,
+) -> Vec<cadrs_sketch::EdgeName> {
     let Some(start) = solid.edge(edge) else {
         return vec![*edge];
     };
@@ -1334,7 +1804,10 @@ pub fn tangent_chain(solid: &cadrs_core::Solid, edge: &cadrs_sketch::EdgeName) -
         if n < 2 || dist(pts[0], pts[n - 1]) < 1e-6 {
             return Vec::new();
         }
-        vec![(pts[0], unit(sub(pts[1], pts[0]))), (pts[n - 1], unit(sub(pts[n - 2], pts[n - 1])))]
+        vec![
+            (pts[0], unit(sub(pts[1], pts[0]))),
+            (pts[n - 1], unit(sub(pts[n - 2], pts[n - 1]))),
+        ]
     };
     let cos = (1.0f64).to_radians().cos();
     let mut chain = vec![start.name];
@@ -1395,8 +1868,16 @@ fn arrow_size(k: &FeatureKind) -> Option<f64> {
         FeatureKind::Fillet(f) => Some(f.size),
         FeatureKind::Plane(p) if p.kind == cadrs_core::plane::PlaneType::Offset => Some(p.offset),
         // P3I.2: a sheet metal Extrude's depth.
-        FeatureKind::SheetMetalModel(x) if x.operation == cadrs_core::sheetmetal::SheetMetalOp::Extrude => Some(x.depth),
-        FeatureKind::DirectEdit(x) if x.kind == cadrs_core::direct_edit::DirectEditKind::MoveFace => Some(x.distance),
+        FeatureKind::SheetMetalModel(x)
+            if x.operation == cadrs_core::sheetmetal::SheetMetalOp::Extrude =>
+        {
+            Some(x.depth)
+        }
+        FeatureKind::DirectEdit(x)
+            if x.kind == cadrs_core::direct_edit::DirectEditKind::MoveFace =>
+        {
+            Some(x.distance)
+        }
         _ => None,
     }
 }
@@ -1447,7 +1928,12 @@ fn radius_arrow_pointer(
 ) {
     use bevy::picking::pointer::{PointerAction, PointerButton, PointerId};
     let move_face = AppliedKind::DirectEdit(cadrs_core::direct_edit::DirectEditKind::MoveFace);
-    let Some(s) = session.filter(|s| matches!(s.kind, AppliedKind::Fillet | AppliedKind::Plane | AppliedKind::SheetMetal) || s.kind == move_face) else {
+    let Some(s) = session.filter(|s| {
+        matches!(
+            s.kind,
+            AppliedKind::Fillet | AppliedKind::Plane | AppliedKind::SheetMetal
+        ) || s.kind == move_face
+    }) else {
         inputs.clear();
         return;
     };
@@ -1457,7 +1943,9 @@ fn radius_arrow_pointer(
         p.distance(a + ab * t) <= 8.0
     };
     arrow.hovered = arrow.base_tip.is_some_and(|bt| near(drag.pointer(), bt));
-    let kind = doc.as_ref().and_then(|d| Some(d.doc.element(s.element)?.feature(s.feature)?.kind.clone()));
+    let kind = doc
+        .as_ref()
+        .and_then(|d| Some(d.doc.element(s.element)?.feature(s.feature)?.kind.clone()));
     for input in inputs.read() {
         if input.pointer_id != PointerId::Mouse {
             continue;
@@ -1465,14 +1953,25 @@ fn radius_arrow_pointer(
         let pos = input.location.position;
         match input.action {
             PointerAction::Press(PointerButton::Primary) => {
-                if let (Some(bt), Some(k), Some((_, dir))) = (arrow.base_tip, kind.clone(), arrow.axis)
+                if let (Some(bt), Some(k), Some((_, dir))) =
+                    (arrow.base_tip, kind.clone(), arrow.axis)
                     && near(pos, bt)
                     && let Some(size) = arrow_size(&k)
                 {
                     let dir_px = view.view.project_vector(dir);
                     if dir_px.length() > 0.05 {
-                        let sign = if arrow_signed(&k) && size < 0.0 { -1.0 } else { 1.0 };
-                        arrow.drag = Some(RadiusDrag { start: pos, start_size: size, dir_px, sign, kind: k });
+                        let sign = if arrow_signed(&k) && size < 0.0 {
+                            -1.0
+                        } else {
+                            1.0
+                        };
+                        arrow.drag = Some(RadiusDrag {
+                            start: pos,
+                            start_size: size,
+                            dir_px,
+                            sign,
+                            kind: k,
+                        });
                     }
                 }
             }
@@ -1490,7 +1989,13 @@ fn radius_arrow_pointer(
                         size
                     };
                     if arrow_size(&d.kind).is_some_and(|v| (size - v).abs() > 1e-9) {
-                        set_arrow_size(&mut d.kind, size, units.0.with_unit(size, cadrs_sketch::units::Quantity::Length));
+                        set_arrow_size(
+                            &mut d.kind,
+                            size,
+                            units
+                                .0
+                                .with_unit(size, cadrs_sketch::units::Quantity::Length),
+                        );
                     }
                     let want = Some((s.feature, d.kind.clone()));
                     if over.applied != want {
@@ -1501,10 +2006,17 @@ fn radius_arrow_pointer(
             PointerAction::Release(PointerButton::Primary) if arrow.drag.is_some() => {
                 commands.queue(|world: &mut World| {
                     world.resource_mut::<crate::parts::PartOverride>().applied = None;
-                    let Some(d) = world.resource_mut::<RadiusArrow>().drag.take() else { return };
+                    let Some(d) = world.resource_mut::<RadiusArrow>().drag.take() else {
+                        return;
+                    };
                     if current(world).is_some_and(|f| f.kind != d.kind) {
                         let label = match &d.kind {
-                            FeatureKind::Fillet(f) if f.measurement == cadrs_core::applied::FilletMeasurement::Width => "Drag width",
+                            FeatureKind::Fillet(f)
+                                if f.measurement
+                                    == cadrs_core::applied::FilletMeasurement::Width =>
+                            {
+                                "Drag width"
+                            }
                             FeatureKind::Fillet(_) => "Drag radius",
                             FeatureKind::SheetMetalModel(_) => "Drag depth",
                             FeatureKind::DirectEdit(_) => "Drag distance",
@@ -1540,81 +2052,150 @@ fn place_radius_arrow(
     rect: Res<crate::viewport::ViewportRect>,
     mut arrow: ResMut<RadiusArrow>,
     q_area: Query<Entity, With<crate::viewport::ViewportArea>>,
-    mut q: Query<(Entity, &mut Node, &mut bevy::ui::UiTransform, &mut Visibility), With<RadiusArrowNode>>,
+    mut q: Query<
+        (
+            Entity,
+            &mut Node,
+            &mut bevy::ui::UiTransform,
+            &mut Visibility,
+        ),
+        With<RadiusArrowNode>,
+    >,
     mut q_line: Query<&mut ImageNode, With<RadiusArrowLine>>,
     mut commands: Commands,
 ) {
     let dragged = arrow.drag.as_ref().and_then(|d| arrow_size(&d.kind));
     // An Offset plane: at the new plane's origin, along the offset (its base plane's normal,
     // reversed by the flip).
-    let plane_target = session.as_ref().filter(|s| s.kind == AppliedKind::Plane).and_then(|s| {
-        let x = match &doc.as_ref()?.doc.element(s.element)?.feature(s.feature)?.kind {
-            FeatureKind::Plane(x) if x.kind == cadrs_core::plane::PlaneType::Offset => x.clone(),
-            _ => return None,
-        };
-        let base = match x.entities.first()? {
-            cadrs_core::plane::PlaneEntity::Plane(p) => p.frame(),
-            cadrs_core::plane::PlaneEntity::Face(f) => before.parts.iter().find(|p| p.id == f.part)?.solid.face(&f.face)?.plane?,
-            _ => return None,
-        };
-        let n = base.normal();
-        let dir = Vec3::new(n[0] as f32, n[1] as f32, n[2] as f32).normalize_or_zero() * if x.flip { -1.0 } else { 1.0 };
-        let o = Vec3::new(base.origin[0] as f32, base.origin[1] as f32, base.origin[2] as f32);
-        Some((o + dir * dragged.unwrap_or(x.offset) as f32, dir))
-    });
-    let target = plane_target.or_else(|| session.as_ref().filter(|s| s.kind == AppliedKind::Fillet).and_then(|s| {
-        let f = doc.as_ref()?.doc.element(s.element)?.feature(s.feature)?.fillet()?.clone();
-        if f.kind != FilletType::Edge {
-            return None;
-        }
-        let first = f.entities.iter().find_map(|e| match e {
-            EdgeOrFace::Edge(r) => Some(*r),
-            _ => None,
-        })?;
-        let part = before.parts.iter().find(|p| p.id == first.part)?;
-        let edge = part.solid.edge(&first.edge)?;
-        let mid = edge.midpoint();
-        // Out of the corner: the sum of the two faces' outward normals (planar faces), else
-        // straight up.
-        let n = first
-            .edge
-            .faces
-            .iter()
-            .filter_map(|x| part.solid.face(x)?.plane)
-            .map(|pl| {
-                let v = pl.normal();
-                Vec3::new(v[0] as f32, v[1] as f32, v[2] as f32).normalize_or_zero()
+    let plane_target = session
+        .as_ref()
+        .filter(|s| s.kind == AppliedKind::Plane)
+        .and_then(|s| {
+            let x = match &doc
+                .as_ref()?
+                .doc
+                .element(s.element)?
+                .feature(s.feature)?
+                .kind
+            {
+                FeatureKind::Plane(x) if x.kind == cadrs_core::plane::PlaneType::Offset => {
+                    x.clone()
+                }
+                _ => return None,
+            };
+            let base = match x.entities.first()? {
+                cadrs_core::plane::PlaneEntity::Plane(p) => p.frame(),
+                cadrs_core::plane::PlaneEntity::Face(f) => {
+                    before
+                        .parts
+                        .iter()
+                        .find(|p| p.id == f.part)?
+                        .solid
+                        .face(&f.face)?
+                        .plane?
+                }
+                _ => return None,
+            };
+            let n = base.normal();
+            let dir = Vec3::new(n[0] as f32, n[1] as f32, n[2] as f32).normalize_or_zero()
+                * if x.flip { -1.0 } else { 1.0 };
+            let o = Vec3::new(
+                base.origin[0] as f32,
+                base.origin[1] as f32,
+                base.origin[2] as f32,
+            );
+            Some((o + dir * dragged.unwrap_or(x.offset) as f32, dir))
+        });
+    let target = plane_target.or_else(|| {
+        session
+            .as_ref()
+            .filter(|s| s.kind == AppliedKind::Fillet)
+            .and_then(|s| {
+                let f = doc
+                    .as_ref()?
+                    .doc
+                    .element(s.element)?
+                    .feature(s.feature)?
+                    .fillet()?
+                    .clone();
+                if f.kind != FilletType::Edge {
+                    return None;
+                }
+                let first = f.entities.iter().find_map(|e| match e {
+                    EdgeOrFace::Edge(r) => Some(*r),
+                    _ => None,
+                })?;
+                let part = before.parts.iter().find(|p| p.id == first.part)?;
+                let edge = part.solid.edge(&first.edge)?;
+                let mid = edge.midpoint();
+                // Out of the corner: the sum of the two faces' outward normals (planar faces), else
+                // straight up.
+                let n = first
+                    .edge
+                    .faces
+                    .iter()
+                    .filter_map(|x| part.solid.face(x)?.plane)
+                    .map(|pl| {
+                        let v = pl.normal();
+                        Vec3::new(v[0] as f32, v[1] as f32, v[2] as f32).normalize_or_zero()
+                    })
+                    .fold(Vec3::ZERO, |a, b| a + b);
+                let dir = if n.length() > 1e-3 {
+                    n.normalize()
+                } else {
+                    Vec3::Z
+                };
+                // It stands off the edge by the size, so it moves with the value (and with the pointer
+                // while dragged: the drag maps pointer travel along it to mm 1:1).
+                let size = dragged.unwrap_or(f.size) as f32;
+                Some((
+                    Vec3::new(mid[0] as f32, mid[1] as f32, mid[2] as f32) + dir * size,
+                    dir,
+                ))
             })
-            .fold(Vec3::ZERO, |a, b| a + b);
-        let dir = if n.length() > 1e-3 { n.normalize() } else { Vec3::Z };
-        // It stands off the edge by the size, so it moves with the value (and with the pointer
-        // while dragged: the drag maps pointer travel along it to mm 1:1).
-        let size = dragged.unwrap_or(f.size) as f32;
-        Some((Vec3::new(mid[0] as f32, mid[1] as f32, mid[2] as f32) + dir * size, dir))
-    }));
-    // P3I.2: a sheet metal Extrude's depth, at the end of its first curve's sweep.
-    let sm_target = session.as_ref().filter(|s| s.kind == AppliedKind::SheetMetal).and_then(|s| {
-        let el = doc.as_ref()?.doc.element(s.element)?;
-        let FeatureKind::SheetMetalModel(x) = &el.feature(s.feature)?.kind else { return None };
-        crate::sheetmetal_ui::depth_arrow(el.features(), x, dragged.unwrap_or(x.depth))
     });
+    // P3I.2: a sheet metal Extrude's depth, at the end of its first curve's sweep.
+    let sm_target = session
+        .as_ref()
+        .filter(|s| s.kind == AppliedKind::SheetMetal)
+        .and_then(|s| {
+            let el = doc.as_ref()?.doc.element(s.element)?;
+            let FeatureKind::SheetMetalModel(x) = &el.feature(s.feature)?.kind else {
+                return None;
+            };
+            crate::sheetmetal_ui::depth_arrow(el.features(), x, dragged.unwrap_or(x.depth))
+        });
     // Move face: on the first face (on the parts before it), standing off it by the distance,
     // pointing the way the face moves (along its outward normal, or against it when negative:
     // then it stays on the same side of the face, turned end for end, its head at the face).
-    let face_target = session.as_ref().filter(|s| matches!(s.kind, AppliedKind::DirectEdit(_))).and_then(|s| {
-        let FeatureKind::DirectEdit(x) = &doc.as_ref()?.doc.element(s.element)?.feature(s.feature)?.kind else { return None };
-        if x.kind != cadrs_core::direct_edit::DirectEditKind::MoveFace {
-            return None;
-        }
-        let first = x.faces.first()?;
-        let solid = &before.parts.iter().find(|p| p.id == first.part)?.solid;
-        let i = solid.faces.iter().position(|f| f.name == first.face)?;
-        let (p, n) = (solid.face_point(i)?, solid.face_normal(i)?);
-        let normal = Vec3::new(n[0] as f32, n[1] as f32, n[2] as f32).normalize_or_zero();
-        let distance = dragged.unwrap_or(x.distance) as f32;
-        let dir = if distance < 0.0 { -normal } else { normal };
-        Some((Vec3::new(p[0] as f32, p[1] as f32, p[2] as f32) + normal * distance, dir))
-    });
+    let face_target = session
+        .as_ref()
+        .filter(|s| matches!(s.kind, AppliedKind::DirectEdit(_)))
+        .and_then(|s| {
+            let FeatureKind::DirectEdit(x) = &doc
+                .as_ref()?
+                .doc
+                .element(s.element)?
+                .feature(s.feature)?
+                .kind
+            else {
+                return None;
+            };
+            if x.kind != cadrs_core::direct_edit::DirectEditKind::MoveFace {
+                return None;
+            }
+            let first = x.faces.first()?;
+            let solid = &before.parts.iter().find(|p| p.id == first.part)?.solid;
+            let i = solid.faces.iter().position(|f| f.name == first.face)?;
+            let (p, n) = (solid.face_point(i)?, solid.face_normal(i)?);
+            let normal = Vec3::new(n[0] as f32, n[1] as f32, n[2] as f32).normalize_or_zero();
+            let distance = dragged.unwrap_or(x.distance) as f32;
+            let dir = if distance < 0.0 { -normal } else { normal };
+            Some((
+                Vec3::new(p[0] as f32, p[1] as f32, p[2] as f32) + normal * distance,
+                dir,
+            ))
+        });
     let target = target.or(sm_target).or(face_target);
     let arrow_name = if plane_target.is_some() {
         "plane-offset-arrow"
@@ -1626,13 +2207,23 @@ fn place_radius_arrow(
         "fillet-arrow"
     };
     arrow.axis = target;
-    let inverted = face_target.is_some_and(|_| dragged.or_else(|| {
-        let s = session.as_ref()?;
-        match &doc.as_ref()?.doc.element(s.element)?.feature(s.feature)?.kind {
-            FeatureKind::DirectEdit(x) => Some(x.distance),
-            _ => None,
-        }
-    }).is_some_and(|d| d < 0.0));
+    let inverted = face_target.is_some_and(|_| {
+        dragged
+            .or_else(|| {
+                let s = session.as_ref()?;
+                match &doc
+                    .as_ref()?
+                    .doc
+                    .element(s.element)?
+                    .feature(s.feature)?
+                    .kind
+                {
+                    FeatureKind::DirectEdit(x) => Some(x.distance),
+                    _ => None,
+                }
+            })
+            .is_some_and(|d| d < 0.0)
+    });
     let placed = target.and_then(|(p, dir)| {
         let d = view.view.project_vector(dir);
         (d.length() >= 0.05).then(|| {
@@ -1649,12 +2240,19 @@ fn place_radius_arrow(
         return;
     };
     if q.is_empty() {
-        let Some(area) = q_area.iter().next() else { return };
+        let Some(area) = q_area.iter().next() else {
+            return;
+        };
         let e = commands
             .spawn((
                 Name::new(arrow_name),
                 RadiusArrowNode,
-                Node { position_type: PositionType::Absolute, width: Val::Px(ARROW_LEN), height: Val::Px(ARROW_LEN), ..default() },
+                Node {
+                    position_type: PositionType::Absolute,
+                    width: Val::Px(ARROW_LEN),
+                    height: Val::Px(ARROW_LEN),
+                    ..default()
+                },
                 bevy::ui::UiTransform::default(),
                 Visibility::Hidden,
                 Pickable::IGNORE,
@@ -1666,7 +2264,10 @@ fn place_radius_arrow(
                             "manipulator-arrow-halo",
                             ARROW_LEN,
                             Color::srgba_u8(0x3c, 0x46, 0x4e, 0xb0),
-                            Node { position_type: PositionType::Absolute, ..default() },
+                            Node {
+                                position_type: PositionType::Absolute,
+                                ..default()
+                            },
                         ),
                         Pickable::IGNORE,
                     ),
@@ -1676,7 +2277,10 @@ fn place_radius_arrow(
                             "manipulator-arrow-line",
                             ARROW_LEN,
                             Color::WHITE,
-                            Node { position_type: PositionType::Absolute, ..default() },
+                            Node {
+                                position_type: PositionType::Absolute,
+                                ..default()
+                            },
                         ),
                         Pickable::IGNORE,
                     ),
@@ -1689,18 +2293,28 @@ fn place_radius_arrow(
     let u = (tip - base).normalize_or_zero();
     let center = (base + tip) / 2.0 - rect.0.min;
     for (_, mut node, mut transform, mut vis) in &mut q {
-        let (l, t) = (Val::Px(center.x - ARROW_LEN / 2.0), Val::Px(center.y - ARROW_LEN / 2.0));
+        let (l, t) = (
+            Val::Px(center.x - ARROW_LEN / 2.0),
+            Val::Px(center.y - ARROW_LEN / 2.0),
+        );
         if node.left != l || node.top != t {
             node.left = l;
             node.top = t;
         }
-        let want = bevy::ui::UiTransform { rotation: Rot2::radians(u.x.atan2(-u.y)), ..default() };
+        let want = bevy::ui::UiTransform {
+            rotation: Rot2::radians(u.x.atan2(-u.y)),
+            ..default()
+        };
         if *transform != want {
             *transform = want;
         }
         vis.set_if_neq(Visibility::Inherited);
     }
-    let c = if arrow.hovered || arrow.drag.is_some() { Color::srgb_u8(0xff, 0xb4, 0x5a) } else { Color::WHITE };
+    let c = if arrow.hovered || arrow.drag.is_some() {
+        Color::srgb_u8(0xff, 0xb4, 0x5a)
+    } else {
+        Color::WHITE
+    };
     for mut img in &mut q_line {
         if img.color != c {
             img.color = c;
@@ -1710,5 +2324,7 @@ fn place_radius_arrow(
 
 /// The part names a Parts field shows.
 pub fn part_names(cache: &PartCache, ids: &[PartId]) -> Vec<String> {
-    ids.iter().map(|p| cache.part_name(*p).unwrap_or("Part").to_string()).collect()
+    ids.iter()
+        .map(|p| cache.part_name(*p).unwrap_or("Part").to_string())
+        .collect()
 }

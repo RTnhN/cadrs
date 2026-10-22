@@ -16,8 +16,8 @@ use std::collections::{HashMap, HashSet};
 
 use crate::solve::Source;
 use crate::{
-    ConstraintId, ConstraintOf, CurveId, CurveKind, CurveRef, DimensionId, DimensionKind, Orient, PointId, PointRef,
-    Sketch, Vec2,
+    ConstraintId, ConstraintOf, CurveId, CurveKind, CurveRef, DimensionId, DimensionKind, Orient,
+    PointId, PointRef, Sketch, Vec2,
 };
 
 // ---------------------------------------------------------------------------------------------
@@ -40,13 +40,20 @@ impl LooseEndGroup {
     /// The middle of the group's ends (where the view zooms to).
     pub fn center(&self) -> Vec2 {
         let n = self.ends.len().max(1) as f64;
-        let (x, y) = self.ends.iter().fold((0.0, 0.0), |(x, y), e| (x + e.pos.x, y + e.pos.y));
+        let (x, y) = self
+            .ends
+            .iter()
+            .fold((0.0, 0.0), |(x, y), e| (x + e.pos.x, y + e.pos.y));
         Vec2::new(x / n, y / n)
     }
 
     /// The row's label: "Loose end", "Loose ends (2)".
     pub fn label(&self) -> String {
-        if self.ends.len() == 1 { "Loose end".into() } else { format!("Loose ends ({})", self.ends.len()) }
+        if self.ends.len() == 1 {
+            "Loose end".into()
+        } else {
+            format!("Loose ends ({})", self.ends.len())
+        }
     }
 }
 
@@ -76,7 +83,9 @@ pub fn loose_ends_within(s: &Sketch, cluster: f64) -> Vec<LooseEndGroup> {
         if c.construction {
             continue;
         }
-        let Some((a, b)) = s.curve_ends(id) else { continue };
+        let Some((a, b)) = s.curve_ends(id) else {
+            continue;
+        };
         for p in [a, b] {
             if !count.contains_key(&p) {
                 ends.push(p);
@@ -93,10 +102,18 @@ pub fn loose_ends_within(s: &Sketch, cluster: f64) -> Vec<LooseEndGroup> {
     for c in s.constraints.values() {
         match *c {
             ConstraintOf::Coincident(PointRef::Point(a), PointRef::Point(b)) => {
-                if count.contains_key(&b) || s.curves.values().any(|k| !k.construction && crate::curve_points(&k.kind).contains(&b)) {
+                if count.contains_key(&b)
+                    || s.curves
+                        .values()
+                        .any(|k| !k.construction && crate::curve_points(&k.kind).contains(&b))
+                {
                     held.insert(a);
                 }
-                if count.contains_key(&a) || s.curves.values().any(|k| !k.construction && crate::curve_points(&k.kind).contains(&a)) {
+                if count.contains_key(&a)
+                    || s.curves
+                        .values()
+                        .any(|k| !k.construction && crate::curve_points(&k.kind).contains(&a))
+                {
                     held.insert(b);
                 }
             }
@@ -116,9 +133,14 @@ pub fn loose_ends_within(s: &Sketch, cluster: f64) -> Vec<LooseEndGroup> {
         // sketch lies on: joined.
         let own: Vec<CurveId> = s.curves_at(p).collect();
         let on_curve = s.curves.iter().any(|(k, c)| {
-            !c.construction && !own.contains(&k) && distance_to_curve(s, k, pos).is_some_and(|d| d < 1e-6)
+            !c.construction
+                && !own.contains(&k)
+                && distance_to_curve(s, k, pos).is_some_and(|d| d < 1e-6)
         });
-        let on_imprint = s.imprint.iter().any(|i| distance_to_imprint(&i.shape, pos) < 1e-6);
+        let on_imprint = s
+            .imprint
+            .iter()
+            .any(|i| distance_to_imprint(&i.shape, pos) < 1e-6);
         if on_curve || on_imprint {
             continue;
         }
@@ -153,7 +175,9 @@ fn distance_to_curve(s: &Sketch, c: CurveId, p: Vec2) -> Option<f64> {
         CurveKind::Line { a, b } => crate::geom::dist_point_segment(p, s.pos(a), s.pos(b)),
         CurveKind::Circle { center, radius } => (s.pos(center).distance(p) - radius).abs(),
         CurveKind::Arc { .. } => s.arc_geom(c)?.distance(p),
-        CurveKind::Ellipse { .. } | CurveKind::EllipseOffset { .. } => s.ellipse_geom(c)?.distance(p),
+        CurveKind::Ellipse { .. } | CurveKind::EllipseOffset { .. } => {
+            s.ellipse_geom(c)?.distance(p)
+        }
         CurveKind::EllipseArc { .. } => s.ellipse_arc_geom(c)?.distance(p),
         CurveKind::Spline { .. } => crate::spline::nearest(&s.spline_spans(c)?, p)?.2,
         CurveKind::Bezier { .. } => s.bezier_geom(c)?.distance(p),
@@ -249,8 +273,16 @@ impl EntityNames {
 
     pub fn name(&self, e: EntityRef) -> String {
         match e {
-            EntityRef::Curve(c) => self.curves.get(&c).cloned().unwrap_or_else(|| "Curve".into()),
-            EntityRef::Point(p) => self.points.get(&p).cloned().unwrap_or_else(|| "Point".into()),
+            EntityRef::Curve(c) => self
+                .curves
+                .get(&c)
+                .cloned()
+                .unwrap_or_else(|| "Curve".into()),
+            EntityRef::Point(p) => self
+                .points
+                .get(&p)
+                .cloned()
+                .unwrap_or_else(|| "Point".into()),
             EntityRef::Origin => "Origin".into(),
             EntityRef::XAxis => "X axis".into(),
             EntityRef::YAxis => "Y axis".into(),
@@ -345,7 +377,14 @@ impl ItemType {
 
     /// True for the dimension types.
     pub fn is_dimension(self) -> bool {
-        matches!(self, ItemType::Distance | ItemType::Angle | ItemType::Radius | ItemType::Diameter | ItemType::Count)
+        matches!(
+            self,
+            ItemType::Distance
+                | ItemType::Angle
+                | ItemType::Radius
+                | ItemType::Diameter
+                | ItemType::Count
+        )
     }
 }
 
@@ -487,7 +526,11 @@ pub fn items(s: &Sketch, conflicting: &[Source]) -> Vec<Item> {
             id: ItemId::Shared(p),
             ty: ItemType::Coincident,
             name: name(ItemType::Coincident),
-            mode: if source.is_some() { Mode::External } else { Mode::Internal },
+            mode: if source.is_some() {
+                Mode::External
+            } else {
+                Mode::Internal
+            },
             source,
             entities,
             status: Status::Solved,
@@ -497,10 +540,14 @@ pub fn items(s: &Sketch, conflicting: &[Source]) -> Vec<Item> {
         if s.quiet.constraints.contains(&id) {
             continue;
         }
-        let Some(ty) = constraint_type(c) else { continue };
+        let Some(ty) = constraint_type(c) else {
+            continue;
+        };
         let mut entities: Vec<EntityRef> = Vec::new();
         match *c {
-            ConstraintOf::Horizontal(Orient::Line(l)) | ConstraintOf::Vertical(Orient::Line(l)) => entities.push(l.into()),
+            ConstraintOf::Horizontal(Orient::Line(l)) | ConstraintOf::Vertical(Orient::Line(l)) => {
+                entities.push(l.into())
+            }
             _ => {
                 entities.extend(c.curves().into_iter().map(EntityRef::from));
                 entities.extend(c.points().into_iter().map(EntityRef::from));
@@ -521,14 +568,19 @@ pub fn items(s: &Sketch, conflicting: &[Source]) -> Vec<Item> {
             ty,
             name: name(ty),
             entities,
-            mode: if source.is_some() { Mode::External } else { Mode::Internal },
+            mode: if source.is_some() {
+                Mode::External
+            } else {
+                Mode::Internal
+            },
             status,
             source,
         });
     }
     for (id, d) in &s.dimensions {
         let ty = dimension_type(&d.kind);
-        let mut entities: Vec<EntityRef> = d.kind.curves().into_iter().map(EntityRef::Curve).collect();
+        let mut entities: Vec<EntityRef> =
+            d.kind.curves().into_iter().map(EntityRef::Curve).collect();
         entities.extend(d.kind.points().into_iter().map(EntityRef::Point));
         let source = source_of(&entities);
         let status = if conflict.contains(&Source::Dimension(id)) {
@@ -543,7 +595,11 @@ pub fn items(s: &Sketch, conflicting: &[Source]) -> Vec<Item> {
             ty,
             name: name(ty),
             entities,
-            mode: if source.is_some() { Mode::External } else { Mode::Internal },
+            mode: if source.is_some() {
+                Mode::External
+            } else {
+                Mode::Internal
+            },
             status,
             source,
         });
@@ -567,7 +623,10 @@ impl Filter {
         (self.types.is_empty() || self.types.contains(&item.ty))
             && (self.modes.is_empty() || self.modes.contains(&item.mode))
             && (self.statuses.is_empty() || self.statuses.contains(&item.status))
-            && self.entities.as_ref().is_none_or(|set| item.entities.iter().any(|e| set.contains(e)))
+            && self
+                .entities
+                .as_ref()
+                .is_none_or(|set| item.entities.iter().any(|e| set.contains(e)))
     }
 }
 
@@ -613,7 +672,13 @@ mod tests {
         let mut s = Sketch::new();
         polyline(
             &mut s,
-            &[v(0.0, 0.0), v(30.0, 0.0), v(30.0, 20.0), v(0.0, 20.0), v(0.0, 0.508)],
+            &[
+                v(0.0, 0.0),
+                v(30.0, 0.0),
+                v(30.0, 20.0),
+                v(0.0, 20.0),
+                v(0.0, 0.508),
+            ],
             false,
             false,
         );
@@ -635,7 +700,10 @@ mod tests {
         assert_eq!(pair.label(), "Loose ends (2)");
         let mut ys: Vec<f64> = pair.ends.iter().map(|e| e.pos.y).collect();
         ys.sort_by(f64::total_cmp);
-        assert!((ys[0] - 0.0).abs() < 1e-9 && (ys[1] - 0.508).abs() < 1e-9, "{ys:?}");
+        assert!(
+            (ys[0] - 0.0).abs() < 1e-9 && (ys[1] - 0.508).abs() < 1e-9,
+            "{ys:?}"
+        );
         assert!(pair.center().distance(v(0.0, 0.254)) < 1e-9);
     }
 
@@ -646,7 +714,10 @@ mod tests {
         let a = s.point_at(v(0.0, 0.0), 1e-9).unwrap();
         let b = s.point_at(v(0.0, 0.508), 1e-9).unwrap();
         SketchOp::AddConstraint {
-            constraints: vec![ConstraintOf::Coincident(PointRef::Point(a), PointRef::Point(b))],
+            constraints: vec![ConstraintOf::Coincident(
+                PointRef::Point(a),
+                PointRef::Point(b),
+            )],
             label: "Add coincident",
         }
         .apply(&mut s)
@@ -659,10 +730,21 @@ mod tests {
     #[test]
     fn a_closed_rectangle_has_no_loose_ends() {
         let mut s = Sketch::new();
-        polyline(&mut s, &[v(0.0, 0.0), v(40.0, 0.0), v(40.0, 25.0), v(0.0, 25.0)], true, false);
+        polyline(
+            &mut s,
+            &[v(0.0, 0.0), v(40.0, 0.0), v(40.0, 25.0), v(0.0, 25.0)],
+            true,
+            false,
+        );
         assert!(loose_ends(&s).is_empty());
         // Circles have no ends; a line ending on another line (a T) is joined.
-        SketchOp::AddCircle { center: v(20.0, 12.0), radius: 5.0, construction: false }.apply(&mut s).unwrap();
+        SketchOp::AddCircle {
+            center: v(20.0, 12.0),
+            radius: 5.0,
+            construction: false,
+        }
+        .apply(&mut s)
+        .unwrap();
         polyline(&mut s, &[v(20.0, 0.0), v(20.0, -10.0)], false, false);
         let groups = loose_ends(&s);
         assert_eq!(groups.len(), 1, "only the stub's far end: {groups:?}");
@@ -673,7 +755,12 @@ mod tests {
     fn construction_geometry_is_ignored() {
         let mut s = Sketch::new();
         // An open construction chain: no loose ends.
-        polyline(&mut s, &[v(0.0, 0.0), v(10.0, 0.0), v(10.0, 10.0)], false, true);
+        polyline(
+            &mut s,
+            &[v(0.0, 0.0), v(10.0, 0.0), v(10.0, 10.0)],
+            false,
+            true,
+        );
         assert!(loose_ends(&s).is_empty());
         // A regular line ending on a construction line's end is still loose there.
         polyline(&mut s, &[v(10.0, 10.0), v(0.0, 10.0)], false, false);
@@ -687,9 +774,26 @@ mod tests {
     #[test]
     fn errors_filter_lists_exactly_the_conflicting_set_and_all_of_it() {
         let mut s = Sketch::new();
-        SketchOp::AddCircle { center: v(0.0, 0.0), radius: 15.0, construction: false }.apply(&mut s).unwrap();
-        SketchOp::AddCircle { center: v(0.0, 0.0), radius: 10.0, construction: false }.apply(&mut s).unwrap();
-        polyline(&mut s, &[v(20.0, 0.0), v(40.0, 0.0), v(40.0, 10.0)], false, false);
+        SketchOp::AddCircle {
+            center: v(0.0, 0.0),
+            radius: 15.0,
+            construction: false,
+        }
+        .apply(&mut s)
+        .unwrap();
+        SketchOp::AddCircle {
+            center: v(0.0, 0.0),
+            radius: 10.0,
+            construction: false,
+        }
+        .apply(&mut s)
+        .unwrap();
+        polyline(
+            &mut s,
+            &[v(20.0, 0.0), v(40.0, 0.0), v(40.0, 10.0)],
+            false,
+            false,
+        );
         let ids: Vec<CurveId> = s.curves.keys().collect();
         for (c, d) in [(ids[0], 30.0), (ids[1], 20.0)] {
             SketchOp::SetDimension {
@@ -700,11 +804,16 @@ mod tests {
             .apply(&mut s)
             .unwrap();
         }
-        SketchOp::AddConstraints(vec![ConstraintSpec::Horizontal(Orient::Line(CurveSpec::Id(ids[2])))])
-            .apply(&mut s)
-            .unwrap();
+        SketchOp::AddConstraints(vec![ConstraintSpec::Horizontal(Orient::Line(
+            CurveSpec::Id(ids[2]),
+        ))])
+        .apply(&mut s)
+        .unwrap();
         SketchOp::AddConstraint {
-            constraints: vec![ConstraintOf::Equal(CurveRef::Curve(ids[0]), CurveRef::Curve(ids[1]))],
+            constraints: vec![ConstraintOf::Equal(
+                CurveRef::Curve(ids[0]),
+                CurveRef::Curve(ids[1]),
+            )],
             label: "Add equal",
         }
         .apply(&mut s)
@@ -713,7 +822,10 @@ mod tests {
         assert!(!report.conflicting.is_empty(), "the Equal can't hold");
         let set = crate::solve::conflict_set(&s, &report.conflicting);
         let all = items(&s, &set);
-        let errors = Filter { statuses: [Status::Error].into(), ..Filter::default() };
+        let errors = Filter {
+            statuses: [Status::Error].into(),
+            ..Filter::default()
+        };
         let listed: HashSet<Source> = all
             .iter()
             .filter(|i| errors.matches(i))
@@ -729,18 +841,29 @@ mod tests {
         // them lets the rest solve), the solver's own pick among them; not the Horizontal.
         assert_eq!(listed.len(), 3, "{listed:?}");
         assert!(report.conflicting.iter().all(|c| listed.contains(c)));
-        let names_of = |src: &Source| all.iter().find(|i| match (i.id, *src) {
-            (ItemId::Constraint(a), Source::Constraint(b)) => a == b,
-            (ItemId::Dimension(a), Source::Dimension(b)) => a == b,
-            _ => false,
-        }).map(|i| i.name.clone()).unwrap();
+        let names_of = |src: &Source| {
+            all.iter()
+                .find(|i| match (i.id, *src) {
+                    (ItemId::Constraint(a), Source::Constraint(b)) => a == b,
+                    (ItemId::Dimension(a), Source::Dimension(b)) => a == b,
+                    _ => false,
+                })
+                .map(|i| i.name.clone())
+                .unwrap()
+        };
         let mut red: Vec<String> = listed.iter().map(names_of).collect();
         red.sort();
         assert_eq!(red, ["Diameter 1", "Diameter 2", "Equal 1"]);
         // The names: one of each, numbered from 1; the shared corner is Coincident 1.
         let names: Vec<&str> = all.iter().map(|i| i.name.as_str()).collect();
-        assert!(names.contains(&"Equal 1") && names.contains(&"Horizontal 1"), "{names:?}");
-        assert!(names.contains(&"Diameter 1") && names.contains(&"Diameter 2"), "{names:?}");
+        assert!(
+            names.contains(&"Equal 1") && names.contains(&"Horizontal 1"),
+            "{names:?}"
+        );
+        assert!(
+            names.contains(&"Diameter 1") && names.contains(&"Diameter 2"),
+            "{names:?}"
+        );
         assert!(names.contains(&"Coincident 1"), "{names:?}");
         let equal = all.iter().find(|i| i.name == "Equal 1").unwrap();
         let en = EntityNames::new(&s);

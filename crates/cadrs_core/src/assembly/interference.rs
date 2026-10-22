@@ -46,7 +46,14 @@ pub fn items(doc: &Document, asm: &Assembly) -> Vec<Item> {
         .into_iter()
         .filter_map(|o| {
             let features = doc.element(o.element)?.active_part_features();
-            Some(Item { occurrence: o.id, top: o.top, view_part: o.view_part, features, part: o.part, pose: o.pose })
+            Some(Item {
+                occurrence: o.id,
+                top: o.top,
+                view_part: o.view_part,
+                features,
+                part: o.part,
+                pose: o.pose,
+            })
         })
         .collect()
 }
@@ -92,16 +99,23 @@ impl crate::rebuild::task::Task for Check {
 
 /// [`check`], waiting for the result.
 pub fn check_now(items: Vec<Item>, among: Vec<InstanceId>) -> Result<Vec<Clash>, String> {
-    check(items, among).wait().unwrap_or_else(|| Err("The kernel thread stopped".into()))
+    check(items, among)
+        .wait()
+        .unwrap_or_else(|| Err("The kernel thread stopped".into()))
 }
 
 #[cfg(feature = "brep")]
-fn run(r: &mut crate::rebuild::Rebuilder, items: &[Item], among: &[InstanceId]) -> Result<Vec<Clash>, String> {
+fn run(
+    r: &mut crate::rebuild::Rebuilder,
+    items: &[Item],
+    among: &[InstanceId],
+) -> Result<Vec<Clash>, String> {
     let pairs = pairs(items, among);
     let mut needed: Vec<usize> = pairs.iter().flat_map(|(a, b)| [*a, *b]).collect();
     needed.sort_unstable();
     needed.dedup();
-    let mut bodies: std::collections::HashMap<usize, cadrs_kernel::BodyId> = std::collections::HashMap::new();
+    let mut bodies: std::collections::HashMap<usize, cadrs_kernel::BodyId> =
+        std::collections::HashMap::new();
     let mut boxes = std::collections::HashMap::new();
     let mut result = Ok(());
     for k in needed {
@@ -121,16 +135,25 @@ fn run(r: &mut crate::rebuild::Rebuilder, items: &[Item], among: &[InstanceId]) 
     }
     let mut out = Vec::new();
     if result.is_ok() {
-        let meet = |a: &([f64; 3], [f64; 3]), b: &([f64; 3], [f64; 3])| (0..3).all(|i| a.0[i] <= b.1[i] + 1e-6 && b.0[i] <= a.1[i] + 1e-6);
+        let meet = |a: &([f64; 3], [f64; 3]), b: &([f64; 3], [f64; 3])| {
+            (0..3).all(|i| a.0[i] <= b.1[i] + 1e-6 && b.0[i] <= a.1[i] + 1e-6)
+        };
         for (i, j) in pairs {
             if let (Some(a), Some(b)) = (boxes.get(&i), boxes.get(&j))
                 && !meet(a, b)
             {
                 continue;
             }
-            let (Some(a), Some(b)) = (bodies.get(&i), bodies.get(&j)) else { continue };
+            let (Some(a), Some(b)) = (bodies.get(&i), bodies.get(&j)) else {
+                continue;
+            };
             match r.common_volume_mesh(*a, *b) {
-                Ok((v, triangles)) if v > MIN_VOLUME => out.push(Clash { a: items[i].view_part, b: items[j].view_part, volume: v, triangles }),
+                Ok((v, triangles)) if v > MIN_VOLUME => out.push(Clash {
+                    a: items[i].view_part,
+                    b: items[j].view_part,
+                    volume: v,
+                    triangles,
+                }),
                 Ok(_) => {}
                 Err(e) => {
                     result = Err(e);
@@ -148,15 +171,27 @@ fn run(r: &mut crate::rebuild::Rebuilder, items: &[Item], among: &[InstanceId]) 
 }
 
 #[cfg(not(feature = "brep"))]
-fn run(_r: &mut crate::rebuild::Rebuilder, _items: &[Item], _among: &[InstanceId]) -> Result<Vec<Clash>, String> {
+fn run(
+    _r: &mut crate::rebuild::Rebuilder,
+    _items: &[Item],
+    _among: &[InstanceId],
+) -> Result<Vec<Clash>, String> {
     Err("Check interference needs the solid-modelling kernel".into())
 }
 
 /// P3B.9 (X15 Export…): STEP files of assembly parts (`items`, each with its product name), as
 /// they are placed in the assembly (turned −90° about X first with `y_up`); one file per part
 /// (`individual`) or one with them all. Runs on the kernel thread.
-pub fn export_step(items: Vec<(Item, String)>, y_up: bool, individual: bool) -> PendingJob<Result<Vec<crate::export::StepFile>, String>> {
-    crate::rebuild::task::run(ExportStep { items, y_up, individual })
+pub fn export_step(
+    items: Vec<(Item, String)>,
+    y_up: bool,
+    individual: bool,
+) -> PendingJob<Result<Vec<crate::export::StepFile>, String>> {
+    crate::rebuild::task::run(ExportStep {
+        items,
+        y_up,
+        individual,
+    })
 }
 
 /// [`export_step`] as a [`crate::rebuild::task::Task`].
@@ -176,11 +211,20 @@ impl crate::rebuild::task::Task for ExportStep {
 }
 
 #[cfg(feature = "brep")]
-fn export_run(r: &mut crate::rebuild::Rebuilder, items: &[(Item, String)], y_up: bool, individual: bool) -> Result<Vec<crate::export::StepFile>, String> {
+fn export_run(
+    r: &mut crate::rebuild::Rebuilder,
+    items: &[(Item, String)],
+    y_up: bool,
+    individual: bool,
+) -> Result<Vec<crate::export::StepFile>, String> {
     if items.is_empty() {
         return Err("No parts to export".into());
     }
-    let turn = if y_up { Pose::rotation_about([0.0; 3], [1.0, 0.0, 0.0], -std::f64::consts::FRAC_PI_2) } else { Pose::IDENTITY };
+    let turn = if y_up {
+        Pose::rotation_about([0.0; 3], [1.0, 0.0, 0.0], -std::f64::consts::FRAC_PI_2)
+    } else {
+        Pose::IDENTITY
+    };
     let mut bodies = Vec::new();
     let mut result = Ok(());
     for (it, _) in items {
@@ -194,14 +238,21 @@ fn export_run(r: &mut crate::rebuild::Rebuilder, items: &[(Item, String)], y_up:
         }
     }
     let files = result.and_then(|_| {
-        let groups: Vec<Vec<usize>> = if individual { (0..items.len()).map(|k| vec![k]).collect() } else { vec![(0..items.len()).collect()] };
+        let groups: Vec<Vec<usize>> = if individual {
+            (0..items.len()).map(|k| vec![k]).collect()
+        } else {
+            vec![(0..items.len()).collect()]
+        };
         groups
             .into_iter()
             .map(|g| {
                 let ids: Vec<cadrs_kernel::BodyId> = g.iter().map(|k| bodies[*k]).collect();
                 let names: Vec<&str> = g.iter().map(|k| items[*k].1.as_str()).collect();
                 let bytes = r.step_of(&ids, &names)?;
-                Ok(crate::export::StepFile { part: (g.len() == 1).then(|| names[0].to_string()), bytes })
+                Ok(crate::export::StepFile {
+                    part: (g.len() == 1).then(|| names[0].to_string()),
+                    bytes,
+                })
             })
             .collect::<Result<Vec<_>, String>>()
     });
@@ -212,6 +263,11 @@ fn export_run(r: &mut crate::rebuild::Rebuilder, items: &[(Item, String)], y_up:
 }
 
 #[cfg(not(feature = "brep"))]
-fn export_run(_r: &mut crate::rebuild::Rebuilder, _items: &[(Item, String)], _y_up: bool, _individual: bool) -> Result<Vec<crate::export::StepFile>, String> {
+fn export_run(
+    _r: &mut crate::rebuild::Rebuilder,
+    _items: &[(Item, String)],
+    _y_up: bool,
+    _individual: bool,
+) -> Result<Vec<crate::export::StepFile>, String> {
     Err("STEP export needs the solid-modelling kernel".into())
 }

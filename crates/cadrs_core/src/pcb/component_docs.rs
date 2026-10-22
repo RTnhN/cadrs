@@ -60,18 +60,32 @@ pub struct ComponentDocument {
 
 /// The live (not trashed) component document of `package` / `part_number` in `lib`, if any (the
 /// newest one if there are several).
-pub fn find_component_document(lib: &Library, package: &str, part_number: &str) -> Option<(DocumentId, ComponentKey)> {
+pub fn find_component_document(
+    lib: &Library,
+    package: &str,
+    part_number: &str,
+) -> Option<(DocumentId, ComponentKey)> {
     lib.entries
         .iter()
         .filter(|e| e.meta.trashed.is_none())
-        .filter_map(|e| e.meta.pcb_component.as_ref().filter(|k| k.is(package, part_number)).map(|k| (e.meta.created, e.id, k.clone())))
+        .filter_map(|e| {
+            e.meta
+                .pcb_component
+                .as_ref()
+                .filter(|k| k.is(package, part_number))
+                .map(|k| (e.meta.created, e.id, k.clone()))
+        })
         .max_by_key(|(t, _, _)| *t)
         .map(|(_, id, k)| (id, k))
 }
 
 /// Every live component document of `lib`.
 pub fn component_documents(lib: &Library) -> Vec<(DocumentId, ComponentKey)> {
-    lib.entries.iter().filter(|e| e.meta.trashed.is_none()).filter_map(|e| e.meta.pcb_component.clone().map(|k| (e.id, k))).collect()
+    lib.entries
+        .iter()
+        .filter(|e| e.meta.trashed.is_none())
+        .filter_map(|e| e.meta.pcb_component.clone().map(|k| (e.id, k)))
+        .collect()
 }
 
 /// The folder new component documents go in (see the module docs): `chosen` when it exists, made
@@ -79,19 +93,38 @@ pub fn component_documents(lib: &Library) -> Vec<(DocumentId, ComponentKey)> {
 /// library's folders when one is made. Holds the store's library lock from reading the folders
 /// to writing them, so two callers can't both make the folder (it runs on the kernel thread, next
 /// to the main thread's library edits).
-pub fn ensure_folder(store: &Store, chosen: Option<&super::FolderRef>, user: &str, now: Timestamp) -> Result<FolderEntry, StoreError> {
+pub fn ensure_folder(
+    store: &Store,
+    chosen: Option<&super::FolderRef>,
+    user: &str,
+    now: Timestamp,
+) -> Result<FolderEntry, StoreError> {
     let lock = store.lock_library();
     let (before, _) = store.list();
     let found = match chosen {
         Some(f) => before.folders.iter().find(|x| x.id == f.id).cloned(),
-        None => before.folders.iter().find(|x| x.name == DEFAULT_COMPONENT_FOLDER).cloned(),
+        None => before
+            .folders
+            .iter()
+            .find(|x| x.name == DEFAULT_COMPONENT_FOLDER)
+            .cloned(),
     };
     if let Some(f) = found {
         return Ok(f);
     }
     let entry = match chosen {
-        Some(f) => FolderEntry { id: f.id, name: f.name.clone(), created: now, owned_by: user.to_string() },
-        None => FolderEntry { id: FolderId::new(), name: DEFAULT_COMPONENT_FOLDER.into(), created: now, owned_by: user.to_string() },
+        Some(f) => FolderEntry {
+            id: f.id,
+            name: f.name.clone(),
+            created: now,
+            owned_by: user.to_string(),
+        },
+        None => FolderEntry {
+            id: FolderId::new(),
+            name: DEFAULT_COMPONENT_FOLDER.into(),
+            created: now,
+            owned_by: user.to_string(),
+        },
     };
     let mut after = before.clone();
     after.folders.push(entry.clone());
@@ -104,21 +137,36 @@ mod tests {
     use super::*;
     use crate::library::{DocumentEntry, DocumentMeta};
 
-    fn entry(name: &str, created: Timestamp, key: Option<ComponentKey>, trashed: bool) -> DocumentEntry {
+    fn entry(
+        name: &str,
+        created: Timestamp,
+        key: Option<ComponentKey>,
+        trashed: bool,
+    ) -> DocumentEntry {
         let mut meta = DocumentMeta::new("u", created);
         meta.pcb_component = key;
         meta.trashed = trashed.then_some(created + 1);
-        DocumentEntry { id: DocumentId::new(), name: name.into(), meta }
+        DocumentEntry {
+            id: DocumentId::new(),
+            name: name.into(),
+            meta,
+        }
     }
 
     fn key(p: &str) -> ComponentKey {
-        ComponentKey { package: p.into(), part_number: "PN".into(), studio: ElementId::from_u128(1), part: PartId::new(crate::ids::FeatureId::from_u128(2), 0) }
+        ComponentKey {
+            package: p.into(),
+            part_number: "PN".into(),
+            studio: ElementId::from_u128(1),
+            part: PartId::new(crate::ids::FeatureId::from_u128(2), 0),
+        }
     }
 
     #[test]
     fn finds_by_key_not_name_and_skips_the_trash() {
         let mut lib = Library::default();
-        lib.entries.push(entry("renamed", 10, Some(key("SOT23")), false));
+        lib.entries
+            .push(entry("renamed", 10, Some(key("SOT23")), false));
         lib.entries.push(entry("SOT23", 20, None, false));
         lib.entries.push(entry("old", 30, Some(key("SOT23")), true));
         let (id, k) = find_component_document(&lib, "SOT23", "PN").unwrap();
@@ -129,8 +177,13 @@ mod tests {
     }
 
     fn temp_store(tag: &str) -> Store {
-        let n = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos();
-        Store::new(std::env::temp_dir().join(format!("cadrs-compdocs-{tag}-{}-{n}", std::process::id())))
+        let n = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        Store::new(
+            std::env::temp_dir().join(format!("cadrs-compdocs-{tag}-{}-{n}", std::process::id())),
+        )
     }
 
     #[test]
@@ -139,12 +192,20 @@ mod tests {
         // "PCB Components" folder, the same for all.
         let store = temp_store("ensure");
         let ids: Vec<FolderId> = std::thread::scope(|s| {
-            let jobs: Vec<_> = (0..8).map(|_| s.spawn(|| ensure_folder(&store, None, "u", 1).unwrap().id)).collect();
+            let jobs: Vec<_> = (0..8)
+                .map(|_| s.spawn(|| ensure_folder(&store, None, "u", 1).unwrap().id))
+                .collect();
             jobs.into_iter().map(|j| j.join().unwrap()).collect()
         });
         assert!(ids.iter().all(|i| *i == ids[0]));
         let lib = store.list().0;
-        assert_eq!(lib.folders.iter().filter(|f| f.name == DEFAULT_COMPONENT_FOLDER).count(), 1);
+        assert_eq!(
+            lib.folders
+                .iter()
+                .filter(|f| f.name == DEFAULT_COMPONENT_FOLDER)
+                .count(),
+            1
+        );
         let _ = std::fs::remove_dir_all(store.root());
     }
 
@@ -156,14 +217,22 @@ mod tests {
         let (before, _) = store.list();
         let made = ensure_folder(&store, None, "u", 1).unwrap();
         let mut after = before.clone();
-        after.folders.push(FolderEntry { id: FolderId::new(), name: "Mine".into(), created: 2, owned_by: "u".into() });
+        after.folders.push(FolderEntry {
+            id: FolderId::new(),
+            name: "Mine".into(),
+            created: 2,
+            owned_by: "u".into(),
+        });
         store.sync(&before, &after).unwrap();
         let names: Vec<String> = store.list().0.folders.into_iter().map(|f| f.name).collect();
         assert_eq!(names, ["Mine", DEFAULT_COMPONENT_FOLDER]);
         // Deleting a folder (undo of New folder) from the same stale copy keeps it too.
         store.sync(&after, &before).unwrap();
         let lib = store.list().0;
-        assert_eq!(lib.folders.iter().map(|f| f.id).collect::<Vec<_>>(), [made.id]);
+        assert_eq!(
+            lib.folders.iter().map(|f| f.id).collect::<Vec<_>>(),
+            [made.id]
+        );
         let _ = std::fs::remove_dir_all(store.root());
     }
 }

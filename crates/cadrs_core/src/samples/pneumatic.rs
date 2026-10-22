@@ -24,7 +24,9 @@ use cadrs_sketch::{PlaneRef, SketchOp, Vec2};
 
 use crate::appearance::Appearance;
 use crate::command::{CommandError, History};
-use crate::commands::{AddExtrude, AddSketch, EditSketch, RenamePart, SetExtrude, SetPartAppearance, SetPartMaterial};
+use crate::commands::{
+    AddExtrude, AddSketch, EditSketch, RenamePart, SetExtrude, SetPartAppearance, SetPartMaterial,
+};
 use crate::document::{BooleanOp, Document, ExtrudeFeature, Offset};
 use crate::ids::{ElementId, FeatureId, PartId};
 use crate::material::Material;
@@ -90,12 +92,21 @@ fn v(x: f64, y: f64) -> Vec2 {
 }
 
 fn circle(x: f64, y: f64, d: f64) -> SketchOp {
-    SketchOp::AddCircle { center: v(x, y), radius: d / 2.0 * IN, construction: false }
+    SketchOp::AddCircle {
+        center: v(x, y),
+        radius: d / 2.0 * IN,
+        construction: false,
+    }
 }
 
 fn square(half: f64) -> SketchOp {
     SketchOp::AddPolyline {
-        points: vec![v(-half, -half), v(half, -half), v(half, half), v(-half, half)],
+        points: vec![
+            v(-half, -half),
+            v(half, -half),
+            v(half, half),
+            v(-half, half),
+        ],
         closed: true,
         construction: false,
         label: "Add rectangle",
@@ -104,7 +115,9 @@ fn square(half: f64) -> SketchOp {
 
 /// The four flange holes (Ø0.375 at (±0.95, ±0.95)).
 fn flange_holes() -> Vec<SketchOp> {
-    [(1.0, 1.0), (-1.0, 1.0), (-1.0, -1.0), (1.0, -1.0)].map(|(sx, sy)| circle(sx * ROD_XY, sy * ROD_XY, 0.375)).to_vec()
+    [(1.0, 1.0), (-1.0, 1.0), (-1.0, -1.0), (1.0, -1.0)]
+        .map(|(sx, sy)| circle(sx * ROD_XY, sy * ROD_XY, 0.375))
+        .to_vec()
 }
 
 /// The six Ø0.266 screw holes on r 0.55.
@@ -130,8 +143,16 @@ struct Ex<'a> {
 }
 
 fn feature(s: &mut dyn Studio, el: ElementId, e: Ex) -> Result<(), CommandError> {
-    s.run(&AddSketch { element: el, feature: e.sketch, plane: Some(PlaneRef::Top) })?;
-    s.run(&EditSketch { element: el, feature: e.sketch, op: SketchOp::Batch(e.ops) })?;
+    s.run(&AddSketch {
+        element: el,
+        feature: e.sketch,
+        plane: Some(PlaneRef::Top),
+    })?;
+    s.run(&EditSketch {
+        element: el,
+        feature: e.sketch,
+        op: SketchOp::Batch(e.ops),
+    })?;
     let g = s
         .document()
         .element(el)
@@ -141,7 +162,9 @@ fn feature(s: &mut dyn Studio, el: ElementId, e: Ex) -> Result<(), CommandError>
         .ok_or_else(|| CommandError::Invalid("sketch not found".into()))?;
     let regions = super::region_refs(e.sketch, &g, &[v(e.seed.0, e.seed.1)]);
     if regions.len() != 1 {
-        return Err(CommandError::Invalid("a region of the stand-in is missing".into()));
+        return Err(CommandError::Invalid(
+            "a region of the stand-in is missing".into(),
+        ));
     }
     let (z0, z1) = e.z;
     let fmt = |x: f64| format!("{} in", (x * 1000.0).round() / 1000.0);
@@ -150,10 +173,23 @@ fn feature(s: &mut dyn Studio, el: ElementId, e: Ex) -> Result<(), CommandError>
     x.op = e.op;
     x.merge_scope = e.scope.to_vec();
     if z0 != 0.0 {
-        x.start_offset = Some(Offset { value: z0.abs() * IN, expr: fmt(z0.abs()), flip: z0 < 0.0 });
+        x.start_offset = Some(Offset {
+            value: z0.abs() * IN,
+            expr: fmt(z0.abs()),
+            flip: z0 < 0.0,
+        });
     }
-    s.run(&AddExtrude { element: el, feature: e.feature, extrude: ExtrudeFeature::default() })?;
-    s.run(&SetExtrude { element: el, feature: e.feature, extrude: x, label: "Extrude".into() })?;
+    s.run(&AddExtrude {
+        element: el,
+        feature: e.feature,
+        extrude: ExtrudeFeature::default(),
+    })?;
+    s.run(&SetExtrude {
+        element: el,
+        feature: e.feature,
+        extrude: x,
+        label: "Extrude".into(),
+    })?;
     Ok(())
 }
 
@@ -169,25 +205,133 @@ pub fn build_in(s: &mut dyn Studio, el: ElementId) -> Result<(), CommandError> {
     let mut rear = vec![square(1.25)];
     rear.extend(flange_holes());
     let list = [
-        Ex { sketch: id(0x11), feature: BARREL_E, ops: vec![circle(0.0, 0.0, 2.0), circle(0.0, 0.0, 1.75)], seed: (0.93, 0.0), z: (0.75, 5.75), op: New, scope: &[] },
-        Ex { sketch: id(0x21), feature: TOP_CAP_E, ops: top, seed: (0.0, 0.9), z: (5.75, 6.5), op: New, scope: &[] },
-        Ex { sketch: id(0x23), feature: TOP_SPIGOT_E, ops: vec![circle(0.0, 0.0, 1.5), circle(0.0, 0.0, 0.5)], seed: (0.5, 0.0), z: (5.25, 5.75), op: Add, scope: &[TOP_CAP] },
-        Ex { sketch: id(0x31), feature: ROD_E, ops: vec![circle(ROD_XY, ROD_XY, 0.375)], seed: (ROD_XY, ROD_XY), z: (-0.5, 7.0), op: New, scope: &[] },
-        Ex { sketch: id(0x41), feature: PISTON_E, ops: vec![circle(0.0, 0.0, 1.5)], seed: (0.0, 0.0), z: (1.25, 2.0), op: New, scope: &[] },
-        Ex { sketch: id(0x43), feature: PISTON_ROD_E, ops: vec![circle(0.0, 0.0, 0.5)], seed: (0.0, 0.0), z: (2.0, 8.0), op: Add, scope: &[PISTON_ROD] },
-        Ex { sketch: id(0x51), feature: PLATE_E, ops: plate, seed: (0.4, 0.2), z: (6.5, 6.625), op: New, scope: &[] },
-        Ex { sketch: id(0x61), feature: ORING_125_E, ops: ring(1.5), seed: (0.8, 0.0), z: (0.75, 0.875), op: New, scope: &[] },
-        Ex { sketch: id(0x71), feature: ORING_185_E, ops: ring(1.5), seed: (0.8, 0.0), z: (1.25, 1.435), op: New, scope: &[] },
-        Ex { sketch: id(0x81), feature: REAR_CAP_E, ops: rear, seed: (0.0, 0.0), z: (0.0, 0.75), op: New, scope: &[] },
-        Ex { sketch: id(0x83), feature: REAR_SPIGOT_E, ops: vec![circle(0.0, 0.0, 1.5)], seed: (0.0, 0.0), z: (0.75, 1.25), op: Add, scope: &[REAR_CAP] },
-        Ex { sketch: id(0x85), feature: RECESS_E, ops: vec![circle(0.0, 0.0, 1.0)], seed: (0.0, 0.0), z: (0.0, 0.1), op: Remove, scope: &[REAR_CAP] },
-        Ex { sketch: id(0x91), feature: MOUNT_E, ops: vec![circle(0.0, 0.0, 1.0)], seed: (0.0, 0.0), z: (-0.4, 0.1), op: New, scope: &[] },
+        Ex {
+            sketch: id(0x11),
+            feature: BARREL_E,
+            ops: vec![circle(0.0, 0.0, 2.0), circle(0.0, 0.0, 1.75)],
+            seed: (0.93, 0.0),
+            z: (0.75, 5.75),
+            op: New,
+            scope: &[],
+        },
+        Ex {
+            sketch: id(0x21),
+            feature: TOP_CAP_E,
+            ops: top,
+            seed: (0.0, 0.9),
+            z: (5.75, 6.5),
+            op: New,
+            scope: &[],
+        },
+        Ex {
+            sketch: id(0x23),
+            feature: TOP_SPIGOT_E,
+            ops: vec![circle(0.0, 0.0, 1.5), circle(0.0, 0.0, 0.5)],
+            seed: (0.5, 0.0),
+            z: (5.25, 5.75),
+            op: Add,
+            scope: &[TOP_CAP],
+        },
+        Ex {
+            sketch: id(0x31),
+            feature: ROD_E,
+            ops: vec![circle(ROD_XY, ROD_XY, 0.375)],
+            seed: (ROD_XY, ROD_XY),
+            z: (-0.5, 7.0),
+            op: New,
+            scope: &[],
+        },
+        Ex {
+            sketch: id(0x41),
+            feature: PISTON_E,
+            ops: vec![circle(0.0, 0.0, 1.5)],
+            seed: (0.0, 0.0),
+            z: (1.25, 2.0),
+            op: New,
+            scope: &[],
+        },
+        Ex {
+            sketch: id(0x43),
+            feature: PISTON_ROD_E,
+            ops: vec![circle(0.0, 0.0, 0.5)],
+            seed: (0.0, 0.0),
+            z: (2.0, 8.0),
+            op: Add,
+            scope: &[PISTON_ROD],
+        },
+        Ex {
+            sketch: id(0x51),
+            feature: PLATE_E,
+            ops: plate,
+            seed: (0.4, 0.2),
+            z: (6.5, 6.625),
+            op: New,
+            scope: &[],
+        },
+        Ex {
+            sketch: id(0x61),
+            feature: ORING_125_E,
+            ops: ring(1.5),
+            seed: (0.8, 0.0),
+            z: (0.75, 0.875),
+            op: New,
+            scope: &[],
+        },
+        Ex {
+            sketch: id(0x71),
+            feature: ORING_185_E,
+            ops: ring(1.5),
+            seed: (0.8, 0.0),
+            z: (1.25, 1.435),
+            op: New,
+            scope: &[],
+        },
+        Ex {
+            sketch: id(0x81),
+            feature: REAR_CAP_E,
+            ops: rear,
+            seed: (0.0, 0.0),
+            z: (0.0, 0.75),
+            op: New,
+            scope: &[],
+        },
+        Ex {
+            sketch: id(0x83),
+            feature: REAR_SPIGOT_E,
+            ops: vec![circle(0.0, 0.0, 1.5)],
+            seed: (0.0, 0.0),
+            z: (0.75, 1.25),
+            op: Add,
+            scope: &[REAR_CAP],
+        },
+        Ex {
+            sketch: id(0x85),
+            feature: RECESS_E,
+            ops: vec![circle(0.0, 0.0, 1.0)],
+            seed: (0.0, 0.0),
+            z: (0.0, 0.1),
+            op: Remove,
+            scope: &[REAR_CAP],
+        },
+        Ex {
+            sketch: id(0x91),
+            feature: MOUNT_E,
+            ops: vec![circle(0.0, 0.0, 1.0)],
+            seed: (0.0, 0.0),
+            z: (-0.4, 0.1),
+            op: New,
+            scope: &[],
+        },
     ];
     for e in list {
         feature(s, el, e)?;
     }
     for (part, name) in PARTS {
-        s.run(&RenamePart { element: el, part, name: name.into() })?;
+        s.run(&RenamePart {
+            element: el,
+            part,
+            name: name.into(),
+        })?;
     }
     let al = crate::material::library("Aluminum - 6061");
     let steel = crate::material::library("Steel");
@@ -199,7 +343,11 @@ pub fn build_in(s: &mut dyn Studio, el: ElementId) -> Result<(), CommandError> {
         (vec![BARREL], pc),
         (vec![ORING_125, ORING_185], nbr),
     ] {
-        s.run(&SetPartMaterial { element: el, parts, material: m })?;
+        s.run(&SetPartMaterial {
+            element: el,
+            parts,
+            material: m,
+        })?;
     }
     // Looks: the clear barrel, dark steel, black rubber.
     for (parts, a) in [
@@ -208,7 +356,11 @@ pub fn build_in(s: &mut dyn Studio, el: ElementId) -> Result<(), CommandError> {
         (vec![PISTON_ROD], Appearance::rgb(64, 84, 82)),
         (vec![ORING_125, ORING_185], Appearance::rgb(44, 44, 46)),
     ] {
-        s.run(&SetPartAppearance { element: el, parts, appearance: Some(a) })?;
+        s.run(&SetPartAppearance {
+            element: el,
+            parts,
+            appearance: Some(a),
+        })?;
     }
     Ok(())
 }

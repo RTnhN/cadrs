@@ -14,7 +14,9 @@ use cadrs_core::commands::SetSuppressByVariable;
 use cadrs_core::variables::{self, SuppressByVariable};
 use cadrs_sketch::units::{Quantity, Units, VarValue};
 use cadrs_ui::prelude::*;
-use cadrs_ui::{Button, Checkbox, CheckboxChange, CheckboxState, DialogClose, Select, SelectState, form_row};
+use cadrs_ui::{
+    Button, Checkbox, CheckboxChange, CheckboxState, DialogClose, Select, SelectState, form_row,
+};
 
 use crate::{ActiveDocument, AppState};
 
@@ -38,7 +40,11 @@ fn hint(feature: &str, invert: bool) -> String {
 /// A variable's value as the picker shows it ("1", "40 mm", "30 deg").
 fn value_text(v: VarValue, units: &Units) -> String {
     match v.quantity {
-        Quantity::Length => format!("{} {}", units.value(v.value, Quantity::Length), units.length.symbol()),
+        Quantity::Length => format!(
+            "{} {}",
+            units.value(v.value, Quantity::Length),
+            units.length.symbol()
+        ),
         Quantity::Angle => format!("{} deg", units.value(v.value, Quantity::Angle)),
         Quantity::Count => {
             let s = format!("{:.6}", v.value);
@@ -49,21 +55,37 @@ fn value_text(v: VarValue, units: &Units) -> String {
 
 /// Opens the dialog for `feature`, set to its current suppression variable if it has one.
 pub fn open(world: &mut World, feature: FeatureId) {
-    let Some(doc) = world.get_resource::<ActiveDocument>() else { return };
-    let Some(el) = doc.active_element() else { return };
+    let Some(doc) = world.get_resource::<ActiveDocument>() else {
+        return;
+    };
+    let Some(el) = doc.active_element() else {
+        return;
+    };
     let Some(f) = el.feature(feature) else { return };
     let units = doc.doc.units;
     // The variables that build above it (a suppressed Variable defines nothing).
     let suppressed = el.all_suppressed();
-    let building: Vec<cadrs_core::Feature> = el.features().iter().filter(|g| g.id == feature || !suppressed.contains(&g.id)).cloned().collect();
+    let building: Vec<cadrs_core::Feature> = el
+        .features()
+        .iter()
+        .filter(|g| g.id == feature || !suppressed.contains(&g.id))
+        .cloned()
+        .collect();
     let scope = variables::in_scope(&building, feature, &units);
     let current = f.suppress_by.clone();
     let feature_name = f.name.clone();
     let names: Vec<String> = scope.iter().map(|(n, _)| n.clone()).collect();
-    let options: Vec<String> = scope.iter().map(|(n, v)| format!("#{n}  ({})", value_text(*v, &units))).collect();
+    let options: Vec<String> = scope
+        .iter()
+        .map(|(n, v)| format!("#{n}  ({})", value_text(*v, &units)))
+        .collect();
     let selected = current
         .as_ref()
-        .and_then(|r| cadrs_sketch::units::variable_names(&r.expr).into_iter().next())
+        .and_then(|r| {
+            cadrs_sketch::units::variable_names(&r.expr)
+                .into_iter()
+                .next()
+        })
         .and_then(|n| names.iter().position(|x| *x == n))
         .unwrap_or(0);
     let invert = current.as_ref().is_some_and(|r| r.invert);
@@ -79,7 +101,12 @@ pub fn open(world: &mut World, feature: FeatureId) {
                 if empty {
                     b.spawn((
                         Name::new("suppress-variable-none"),
-                        t.text(format!("No variables are defined above {feature_name}."), t.font_base, FontWeight::NORMAL, t.muted_foreground),
+                        t.text(
+                            format!("No variables are defined above {feature_name}."),
+                            t.font_base,
+                            FontWeight::NORMAL,
+                            t.muted_foreground,
+                        ),
                     ));
                     return;
                 }
@@ -87,40 +114,64 @@ pub fn open(world: &mut World, feature: FeatureId) {
                 for o in &options {
                     select = select.option(o.clone(), true);
                 }
-                b.spawn(form_row(t, "suppress-variable-row", "Variable", 110.0)).with_child(select.selected(selected).build(t));
+                b.spawn(form_row(t, "suppress-variable-row", "Variable", 110.0))
+                    .with_child(select.selected(selected).build(t));
                 // The hint follows the box (fix round 1: it read the default rule whatever).
                 let name = feature_name.clone();
                 b.spawn((
-                    Checkbox::new("suppress-variable-invert").label("Suppress when true (not 0)").checked(invert).build(t),
-                    observe(move |ev: On<CheckboxChange>, mut q: Query<(&Name, &mut Text)>| {
-                        for (n, mut text) in &mut q {
-                            if n.as_str() == "suppress-variable-hint" {
-                                text.0 = hint(&name, ev.checked);
+                    Checkbox::new("suppress-variable-invert")
+                        .label("Suppress when true (not 0)")
+                        .checked(invert)
+                        .build(t),
+                    observe(
+                        move |ev: On<CheckboxChange>, mut q: Query<(&Name, &mut Text)>| {
+                            for (n, mut text) in &mut q {
+                                if n.as_str() == "suppress-variable-hint" {
+                                    text.0 = hint(&name, ev.checked);
+                                }
                             }
-                        }
-                    }),
+                        },
+                    ),
                 ));
                 b.spawn((
                     Name::new("suppress-variable-hint"),
-                    t.text(hint(&feature_name, invert), t.font_sm, FontWeight::NORMAL, t.muted_foreground),
-                    Node { margin: UiRect::top(Val::Px(6.0)), ..default() },
+                    t.text(
+                        hint(&feature_name, invert),
+                        t.font_sm,
+                        FontWeight::NORMAL,
+                        t.muted_foreground,
+                    ),
+                    Node {
+                        margin: UiRect::top(Val::Px(6.0)),
+                        ..default()
+                    },
                 ));
             })
             .footer(move |f| {
                 let t = &tf;
                 f.spawn((
-                    Button::new("suppress-variable-ok").label("OK").primary().disabled(empty).build(t),
+                    Button::new("suppress-variable-ok")
+                        .label("OK")
+                        .primary()
+                        .disabled(empty)
+                        .build(t),
                     observe(|_: On<Activate>, mut commands: Commands| {
                         commands.queue(accept);
                     }),
                 ));
                 f.spawn((
-                    Button::new("suppress-variable-cancel").label("Cancel").build(t),
-                    observe(|_: On<Activate>, q: Query<Entity, With<SuppressVariableDialog>>, mut commands: Commands| {
-                        for e in &q {
-                            commands.trigger(DialogClose { entity: e });
-                        }
-                    }),
+                    Button::new("suppress-variable-cancel")
+                        .label("Cancel")
+                        .build(t),
+                    observe(
+                        |_: On<Activate>,
+                         q: Query<Entity, With<SuppressVariableDialog>>,
+                         mut commands: Commands| {
+                            for e in &q {
+                                commands.trigger(DialogClose { entity: e });
+                            }
+                        },
+                    ),
                 ));
             })
             .build(&theme),
@@ -133,7 +184,11 @@ pub fn open(world: &mut World, feature: FeatureId) {
 /// OK: the picked variable becomes the feature's suppression variable (one undo step).
 fn accept(world: &mut World) {
     let mut q = world.query::<(Entity, &SuppressVariableDialog)>();
-    let Some((dialog, feature, names)) = q.iter(world).next().map(|(e, d)| (e, d.feature, d.names.clone())) else {
+    let Some((dialog, feature, names)) = q
+        .iter(world)
+        .next()
+        .map(|(e, d)| (e, d.feature, d.names.clone()))
+    else {
         return;
     };
     let (mut selected, mut invert) = (0, false);
@@ -145,8 +200,13 @@ fn accept(world: &mut World) {
             _ => {}
         }
     }
-    let Some(name) = names.get(selected) else { return };
-    let rule = SuppressByVariable { invert, ..SuppressByVariable::variable(name) };
+    let Some(name) = names.get(selected) else {
+        return;
+    };
+    let rule = SuppressByVariable {
+        invert,
+        ..SuppressByVariable::variable(name)
+    };
     set(world, feature, Some(rule));
     world.trigger(DialogClose { entity: dialog });
 }
@@ -157,9 +217,15 @@ pub fn remove(world: &mut World, feature: FeatureId) {
 }
 
 fn set(world: &mut World, feature: FeatureId, rule: Option<SuppressByVariable>) {
-    let Some(mut doc) = world.get_resource_mut::<ActiveDocument>() else { return };
+    let Some(mut doc) = world.get_resource_mut::<ActiveDocument>() else {
+        return;
+    };
     let Some(element) = doc.active else { return };
-    if let Err(e) = doc.execute(&SetSuppressByVariable { element, feature, rule }) {
+    if let Err(e) = doc.execute(&SetSuppressByVariable {
+        element,
+        feature,
+        rule,
+    }) {
         warn!("suppress by variable: {e}");
     }
 }

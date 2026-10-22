@@ -23,8 +23,12 @@ pub enum EnvironmentPreset {
 }
 
 impl EnvironmentPreset {
-    pub const ALL: [EnvironmentPreset; 4] =
-        [EnvironmentPreset::Studio, EnvironmentPreset::SoftLight, EnvironmentPreset::Outdoor, EnvironmentPreset::Sunset];
+    pub const ALL: [EnvironmentPreset; 4] = [
+        EnvironmentPreset::Studio,
+        EnvironmentPreset::SoftLight,
+        EnvironmentPreset::Outdoor,
+        EnvironmentPreset::Sunset,
+    ];
 
     pub fn label(self) -> &'static str {
         match self {
@@ -50,7 +54,12 @@ pub struct ConeLight {
 impl ConeLight {
     fn new(dir: V3, radius_deg: f32, radiance: V3) -> Self {
         let cos_max = radius_deg.to_radians().cos();
-        ConeLight { dir: dir.normalize(), cos_max, radiance, solid_angle: 2.0 * std::f32::consts::PI * (1.0 - cos_max) }
+        ConeLight {
+            dir: dir.normalize(),
+            cos_max,
+            radiance,
+            solid_angle: 2.0 * std::f32::consts::PI * (1.0 - cos_max),
+        }
     }
 
     pub fn contains(&self, d: V3) -> bool {
@@ -96,7 +105,8 @@ enum Backdrop {
 impl Environment {
     /// The environment turned `rotation` degrees about Z (moves the lights round the model).
     pub fn new(preset: EnvironmentPreset, rotation: f32) -> Self {
-        let l = |az: f32, el: f32, r: f32, rad: V3| ConeLight::new(toward(az + rotation, el), r, rad);
+        let l =
+            |az: f32, el: f32, r: f32, rad: V3| ConeLight::new(toward(az + rotation, el), r, rad);
         match preset {
             EnvironmentPreset::Studio => Environment {
                 preset,
@@ -110,7 +120,10 @@ impl Environment {
                 zenith: V3::splat(0.45),
                 horizon: V3::splat(0.40),
                 ground: V3::splat(0.22),
-                backdrop: Backdrop::Sweep { center: v3(0.965, 0.968, 0.975), edge: v3(0.80, 0.82, 0.85) },
+                backdrop: Backdrop::Sweep {
+                    center: v3(0.965, 0.968, 0.975),
+                    edge: v3(0.80, 0.82, 0.85),
+                },
             },
             EnvironmentPreset::SoftLight => Environment {
                 preset,
@@ -118,7 +131,10 @@ impl Environment {
                 zenith: V3::splat(1.35),
                 horizon: V3::splat(0.75),
                 ground: V3::splat(0.28),
-                backdrop: Backdrop::Sweep { center: v3(0.985, 0.985, 0.985), edge: v3(0.90, 0.90, 0.91) },
+                backdrop: Backdrop::Sweep {
+                    center: v3(0.985, 0.985, 0.985),
+                    edge: v3(0.90, 0.90, 0.91),
+                },
             },
             EnvironmentPreset::Outdoor => Environment {
                 preset,

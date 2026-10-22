@@ -63,14 +63,21 @@ struct Jobs {
     freed: std::sync::Condvar,
 }
 
-static JOBS: Jobs = Jobs { running: std::sync::Mutex::new(0), freed: std::sync::Condvar::new() };
+static JOBS: Jobs = Jobs {
+    running: std::sync::Mutex::new(0),
+    freed: std::sync::Condvar::new(),
+};
 
 /// Holds one of the `CADRS_JOBS` slots until dropped.
 struct JobSlot;
 
 impl JobSlot {
     fn take() -> Self {
-        let max = std::env::var("CADRS_JOBS").ok().and_then(|v| v.parse::<usize>().ok()).unwrap_or(4).max(1);
+        let max = std::env::var("CADRS_JOBS")
+            .ok()
+            .and_then(|v| v.parse::<usize>().ok())
+            .unwrap_or(4)
+            .max(1);
         let mut n = JOBS.running.lock().unwrap();
         while *n >= max {
             n = JOBS.freed.wait(n).unwrap();
@@ -103,7 +110,9 @@ fn run_scenario_with(name: &str, extra: &[&std::ffi::OsStr]) -> Option<PathBuf> 
         Ok(out) => out,
         Err(first) => match render_and_compare(name, extra) {
             Ok(out) => {
-                eprintln!("golden {name}: FLAKY, matched on the second render; the first render:\n{first}");
+                eprintln!(
+                    "golden {name}: FLAKY, matched on the second render; the first render:\n{first}"
+                );
                 out
             }
             Err(second) => panic!("{second}"),
@@ -164,7 +173,9 @@ fn render_and_compare(name: &str, extra: &[&std::ffi::OsStr]) -> Result<Option<P
     }
 
     if actual != expected {
-        return Err(format!("scenario {name} produced a different set of screenshots: {actual:?} vs {expected:?}"));
+        return Err(format!(
+            "scenario {name} produced a different set of screenshots: {actual:?} vs {expected:?}"
+        ));
     }
 
     let mut failures = Vec::new();
@@ -727,10 +738,26 @@ fn golden_reload_roundtrip() {
     );
     // The right-edge panel strip (a narrow column the whole-frame fraction can't see) is rebuilt
     // for the Part Studio: no assembly buttons carried over.
-    let strip = |p: &Path| image::open(p).unwrap().to_rgb8().view(1560, 40, 40, 920).to_image();
-    let (a, b) = (strip(&out.join("01-before-closing.png")), strip(&out.join("03-reopened-matches-01.png")));
-    let n = a.pixels().zip(b.pixels()).filter(|(p, q)| (0..3).any(|c| p[c].abs_diff(q[c]) > CHANNEL_TOLERANCE)).count();
-    assert!(n < 20, "the reopened document's right panel strip differs from the one closed ({n} pixels)");
+    let strip = |p: &Path| {
+        image::open(p)
+            .unwrap()
+            .to_rgb8()
+            .view(1560, 40, 40, 920)
+            .to_image()
+    };
+    let (a, b) = (
+        strip(&out.join("01-before-closing.png")),
+        strip(&out.join("03-reopened-matches-01.png")),
+    );
+    let n = a
+        .pixels()
+        .zip(b.pixels())
+        .filter(|(p, q)| (0..3).any(|c| p[c].abs_diff(q[c]) > CHANNEL_TOLERANCE))
+        .count();
+    assert!(
+        n < 20,
+        "the reopened document's right panel strip differs from the one closed ({n} pixels)"
+    );
     // A new app instance on the same documents shows the same thing.
     let data = out.join("data");
     let Some(relaunch) = run_scenario_with(
@@ -838,7 +865,10 @@ fn golden_perf_500() {
             &out.join("01-500-entities-zoom-to-fit.png"),
             &out.join("02-after-dragging-a-corner.png"),
         );
-        assert!(d < 0.0005, "the drag changed the sketch ({d:.5} of the pixels differ)");
+        assert!(
+            d < 0.0005,
+            "the drag changed the sketch ({d:.5} of the pixels differ)"
+        );
     }
 }
 
@@ -1282,10 +1312,15 @@ fn golden_course_pcad_render() {
         return;
     }
     let path = workspace().join("target/exports/course_pcad_render/Control Arm.png");
-    let img = image::open(&path).unwrap_or_else(|e| panic!("{}: {e}", path.display())).to_rgba8();
+    let img = image::open(&path)
+        .unwrap_or_else(|e| panic!("{}: {e}", path.display()))
+        .to_rgba8();
     assert_eq!(img.dimensions(), (1920, 1080));
     let (mean, variance) = luminance_stats(&img);
-    assert!(variance > 0.005, "a blank-looking render: luminance variance {variance}");
+    assert!(
+        variance > 0.005,
+        "a blank-looking render: luminance variance {variance}"
+    );
     assert!(mean > 0.3 && mean < 0.95, "luminance mean {mean}");
 }
 
@@ -1302,7 +1337,10 @@ fn golden_course_pcad_export_image() {
         ("Control Arm view.png", Some((1280, 720))),
         ("Control Arm view.jpg", Some((800, 600))),
         ("Control Arm transparent.png", None),
-        ("Cylinder assembly - Exploded view 1.png", Some((1920, 1080))),
+        (
+            "Cylinder assembly - Exploded view 1.png",
+            Some((1920, 1080)),
+        ),
     ] {
         let img = image::open(dir.join(file)).unwrap_or_else(|e| panic!("{file}: {e}"));
         if let Some(size) = size {
@@ -1312,16 +1350,26 @@ fn golden_course_pcad_export_image() {
         assert!(variance > 0.001, "{file}: blank");
     }
     // The transparent one is clear around the model.
-    let t = image::open(dir.join("Control Arm transparent.png")).unwrap().to_rgba8();
+    let t = image::open(dir.join("Control Arm transparent.png"))
+        .unwrap()
+        .to_rgba8();
     assert_eq!(t.get_pixel(0, 0)[3], 0);
     assert!(t.pixels().any(|p| p[3] == 255));
 }
 
 /// The largest frame time (ms) in a `perf-<label>.txt` report ("… max 12.34 ms …").
 fn perf_max(out: &Path, label: &str) -> f64 {
-    let text = std::fs::read_to_string(out.join(format!("perf-{label}.txt"))).unwrap_or_else(|e| panic!("perf-{label}.txt: {e}"));
-    let after = text.split("max ").nth(1).unwrap_or_else(|| panic!("no max in {text}"));
-    after.split_whitespace().next().and_then(|v| v.parse().ok()).unwrap_or_else(|| panic!("bad max in {text}"))
+    let text = std::fs::read_to_string(out.join(format!("perf-{label}.txt")))
+        .unwrap_or_else(|e| panic!("perf-{label}.txt: {e}"));
+    let after = text
+        .split("max ")
+        .nth(1)
+        .unwrap_or_else(|| panic!("no max in {text}"));
+    after
+        .split_whitespace()
+        .next()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or_else(|| panic!("bad max in {text}"))
 }
 
 #[test]
@@ -1330,14 +1378,22 @@ fn golden_course_tips_scale() {
     // P3F.3 (T4.2, X7): the scale fixture's timings, from the app's own measurements. A debug
     // build (and the golden suite's parallel apps) is given 8×; the release numbers are the
     // article's (they are also checked on CPU time in `cadrs_core/tests/scale.rs`).
-    let Some(out) = run_scenario("course_tips_scale") else { return };
+    let Some(out) = run_scenario("course_tips_scale") else {
+        return;
+    };
     let k = if cfg!(debug_assertions) { 8.0 } else { 1.0 };
     // The background rebuild (everything below the first plate): no frame freezes.
     let background = perf_max(&out, "background");
-    assert!(background < 50.0 * k, "a frame took {background} ms during the background rebuild");
+    assert!(
+        background < 50.0 * k,
+        "a frame took {background} ms during the background rebuild"
+    );
     // A tab switch to a small studio.
     let switch = perf_max(&out, "switch");
-    assert!(switch < 100.0 * k, "the tab switch took a {switch} ms frame");
+    assert!(
+        switch < 100.0 * k,
+        "the tab switch took a {switch} ms frame"
+    );
     // Editing the last feature rebuilt only it.
     let last = std::fs::read_to_string(out.join("perf-edit-last-rebuilds.txt")).unwrap();
     assert!(last.lines().any(|l| l.contains("1 computed")), "{last}");
@@ -1346,7 +1402,10 @@ fn golden_course_tips_scale() {
     let open = perf_max(&out, "open");
     assert!(open < 2000.0 * k, "opening took a {open} ms frame");
     let rebuilds = std::fs::read_to_string(out.join("perf-open-rebuilds.txt")).unwrap();
-    assert!(rebuilds.lines().any(|l| l.contains("120 computed")), "{rebuilds}");
+    assert!(
+        rebuilds.lines().any(|l| l.contains("120 computed")),
+        "{rebuilds}"
+    );
 }
 
 // Stage 3G: P3G.1 (external references, version-pinned links, Other documents in Insert).
@@ -1697,8 +1756,15 @@ fn golden_course_asm_mate_dialog_options() {
         return;
     };
     // A6.11: Solve re-seats the magnet the edit left floating (the two frames were identical).
-    let f = diff_fraction(&out.join("07-a6.11-edit-moves-this-mate-only.png"), &out.join("08-a6.11-solve-moves-the-magnet-too.png"));
-    assert!(f > 0.001, "Solve changed nothing: {:.4}% of pixels differ", f * 100.0);
+    let f = diff_fraction(
+        &out.join("07-a6.11-edit-moves-this-mate-only.png"),
+        &out.join("08-a6.11-solve-moves-the-magnet-too.png"),
+    );
+    assert!(
+        f > 0.001,
+        "Solve changed nothing: {:.4}% of pixels differ",
+        f * 100.0
+    );
 }
 
 #[test]

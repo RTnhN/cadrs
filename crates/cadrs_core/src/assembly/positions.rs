@@ -23,7 +23,7 @@ use uuid::Uuid;
 use super::commands::assembly_mut;
 use super::connector::MateConnector;
 use super::mate::{Dof, MateId, MateKind};
-use super::solver::{Drive, SolveOptions, Solution};
+use super::solver::{Drive, Solution, SolveOptions};
 use super::{Assembly, InstanceId, Pose};
 use crate::command::{Command, CommandError, Scope};
 use crate::document::Document;
@@ -79,7 +79,10 @@ impl NamedPosition {
 
     /// Its value of a mate's DOF.
     pub fn value(&self, mate: MateId, dof: Dof) -> Option<f64> {
-        self.values.iter().find(|v| v.mate == mate && v.dof == dof).map(|v| v.value)
+        self.values
+            .iter()
+            .find(|v| v.mate == mate && v.dof == dof)
+            .map(|v| v.value)
     }
 }
 
@@ -103,26 +106,51 @@ pub fn next_name(asm: &Assembly) -> String {
 /// The value of every DOF of the assembly's own mates (not suppressed) at the placements of
 /// `flat` (the solver's model, [`super::structure::solver_model`]; its connectors resolved on
 /// `solids`). `own` limits them to the mates of the assembly itself.
-pub fn mate_values(flat: &Assembly, solids: &HashMap<InstanceId, Arc<Solid>>, own: &[MateId]) -> Vec<MateValue> {
+pub fn mate_values(
+    flat: &Assembly,
+    solids: &HashMap<InstanceId, Arc<Solid>>,
+    own: &[MateId],
+) -> Vec<MateValue> {
     let model = super::resolve_local_connectors(flat, solids);
     let world = |c: &MateConnector| {
-        let pose = model.instance(c.instance).map(|i| i.pose).unwrap_or_default();
-        c.local_frame(solids.get(&c.instance).map(|s| &**s)).moved(&pose)
+        let pose = model
+            .instance(c.instance)
+            .map(|i| i.pose)
+            .unwrap_or_default();
+        c.local_frame(solids.get(&c.instance).map(|s| &**s))
+            .moved(&pose)
     };
     let mut out = Vec::new();
-    for f in model.mates.iter().filter(|f| !f.suppressed && own.contains(&f.id)) {
+    for f in model
+        .mates
+        .iter()
+        .filter(|f| !f.suppressed && own.contains(&f.id))
+    {
         let MateKind::Mate(m) = &f.kind else { continue };
         let (a, g) = (world(&m.connectors[0]), m.target(&world(&m.connectors[1])));
         for d in m.mate_type.dof() {
-            out.push(MateValue { mate: f.id, dof: *d, value: super::mate::dof_value(&a, &g, *d) });
+            out.push(MateValue {
+                mate: f.id,
+                dof: *d,
+                value: super::mate::dof_value(&a, &g, *d),
+            });
         }
     }
     out
 }
 
 /// A named position of the assembly `element` at its current placements (named `name`).
-pub fn capture(doc: &Document, element: ElementId, id: NamedPositionId, name: &str, solids: &HashMap<InstanceId, Arc<Solid>>) -> Result<NamedPosition, CommandError> {
-    let asm = doc.element(element).and_then(|e| e.assembly_model()).ok_or(CommandError::ElementNotFound(element))?;
+pub fn capture(
+    doc: &Document,
+    element: ElementId,
+    id: NamedPositionId,
+    name: &str,
+    solids: &HashMap<InstanceId, Arc<Solid>>,
+) -> Result<NamedPosition, CommandError> {
+    let asm = doc
+        .element(element)
+        .and_then(|e| e.assembly_model())
+        .ok_or(CommandError::ElementNotFound(element))?;
     let flat = super::structure::solver_model(doc, asm);
     let own: Vec<MateId> = asm.mates.iter().map(|m| m.id).collect();
     Ok(NamedPosition {
@@ -136,14 +164,31 @@ pub fn capture(doc: &Document, element: ElementId, id: NamedPositionId, name: &s
 /// **Apply** a named position: the solver's placements with every stored mate value held
 /// (`flat` is the solver's model). Each mate with values is snapped in turn, then the whole
 /// assembly is solved with all of them.
-pub fn solve_to(flat: &Assembly, solids: &HashMap<InstanceId, Arc<Solid>>, position: &NamedPosition) -> Solution {
+pub fn solve_to(
+    flat: &Assembly,
+    solids: &HashMap<InstanceId, Arc<Solid>>,
+    position: &NamedPosition,
+) -> Solution {
     let drives: Vec<Drive> = position
         .values
         .iter()
-        .filter(|v| flat.mate(v.mate).is_some_and(|f| !f.suppressed && f.mate().is_some_and(|m| m.mate_type.dof().contains(&v.dof))))
-        .map(|v| Drive { mate: v.mate, dof: v.dof, value: v.value })
+        .filter(|v| {
+            flat.mate(v.mate).is_some_and(|f| {
+                !f.suppressed && f.mate().is_some_and(|m| m.mate_type.dof().contains(&v.dof))
+            })
+        })
+        .map(|v| Drive {
+            mate: v.mate,
+            dof: v.dof,
+            value: v.value,
+        })
         .collect();
-    let movers: Vec<InstanceId> = flat.instances.iter().filter(|i| !i.fixed).map(|i| i.id).collect();
+    let movers: Vec<InstanceId> = flat
+        .instances
+        .iter()
+        .filter(|i| !i.fixed)
+        .map(|i| i.id)
+        .collect();
     let mut model = flat.clone();
     let mut mates: Vec<MateId> = Vec::new();
     for d in &drives {
@@ -153,7 +198,16 @@ pub fn solve_to(flat: &Assembly, solids: &HashMap<InstanceId, Arc<Solid>>, posit
     }
     let mut last = None;
     for m in mates {
-        let sol = super::solve(&model, solids, &SolveOptions { movers: movers.clone(), snap: Some(m), drives: drives.clone(), ..Default::default() });
+        let sol = super::solve(
+            &model,
+            solids,
+            &SolveOptions {
+                movers: movers.clone(),
+                snap: Some(m),
+                drives: drives.clone(),
+                ..Default::default()
+            },
+        );
         for (id, p) in &sol.poses {
             if let Some(i) = model.instance_mut(*id) {
                 i.pose = *p;
@@ -162,8 +216,23 @@ pub fn solve_to(flat: &Assembly, solids: &HashMap<InstanceId, Arc<Solid>>, posit
         last = Some(sol);
     }
     match last {
-        Some(_) => super::solve(&model, solids, &SolveOptions { movers, drives, ..Default::default() }),
-        None => super::solve(&model, solids, &SolveOptions { movers, ..Default::default() }),
+        Some(_) => super::solve(
+            &model,
+            solids,
+            &SolveOptions {
+                movers,
+                drives,
+                ..Default::default()
+            },
+        ),
+        None => super::solve(
+            &model,
+            solids,
+            &SolveOptions {
+                movers,
+                ..Default::default()
+            },
+        ),
     }
 }
 
@@ -183,10 +252,16 @@ impl Command for SetNamedPosition {
     }
     fn apply(&self, doc: &mut Document) -> Result<(), CommandError> {
         if self.position.name.trim().is_empty() {
-            return Err(CommandError::Invalid("a named position needs a name".into()));
+            return Err(CommandError::Invalid(
+                "a named position needs a name".into(),
+            ));
         }
         let asm = assembly_mut(doc, self.element)?;
-        match asm.named_positions.iter_mut().find(|p| p.id == self.position.id) {
+        match asm
+            .named_positions
+            .iter_mut()
+            .find(|p| p.id == self.position.id)
+        {
             Some(slot) => *slot = self.position.clone(),
             None => asm.named_positions.push(self.position.clone()),
         }
@@ -240,17 +315,29 @@ impl Command for SetFollowPosition {
             .and_then(|e| e.assembly_model())
             .and_then(|a| a.instance(self.instance))
             .map(|i| i.source)
-            .ok_or_else(|| CommandError::Invalid(format!("instance {} not found", self.instance)))?;
+            .ok_or_else(|| {
+                CommandError::Invalid(format!("instance {} not found", self.instance))
+            })?;
         let super::InstanceSource::Assembly { element: child } = src else {
-            return Err(CommandError::Invalid("only a subassembly follows a named position".into()));
+            return Err(CommandError::Invalid(
+                "only a subassembly follows a named position".into(),
+            ));
         };
         if let Some(f) = self.follow
-            && doc.element(child).and_then(|e| e.assembly_model()).and_then(|a| a.named_position(f)).is_none()
+            && doc
+                .element(child)
+                .and_then(|e| e.assembly_model())
+                .and_then(|a| a.named_position(f))
+                .is_none()
         {
-            return Err(CommandError::Invalid("the subassembly has no such named position".into()));
+            return Err(CommandError::Invalid(
+                "the subassembly has no such named position".into(),
+            ));
         }
         let asm = assembly_mut(doc, self.element)?;
-        let i = asm.instance_mut(self.instance).ok_or_else(|| CommandError::Invalid("instance not found".into()))?;
+        let i = asm
+            .instance_mut(self.instance)
+            .ok_or_else(|| CommandError::Invalid("instance not found".into()))?;
         i.follow = self.follow;
         if self.follow.is_some() {
             i.flexible = false;

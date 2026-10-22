@@ -10,7 +10,8 @@ const CURVE_STEPS: usize = 12;
 
 /// The SVG's shapes as polygons (mm, Y up), relative to the drawing's top-left corner.
 pub fn svg_polygons(svg: &str) -> Result<Vec<Vec<Pt>>, String> {
-    let tree = usvg::Tree::from_str(svg, &usvg::Options::default()).map_err(|e| format!("not an SVG drawing: {e}"))?;
+    let tree = usvg::Tree::from_str(svg, &usvg::Options::default())
+        .map_err(|e| format!("not an SVG drawing: {e}"))?;
     let mut out = vec![];
     collect(tree.root(), &mut out);
     if out.is_empty() {
@@ -55,7 +56,10 @@ fn collect(g: &usvg::Group, out: &mut Vec<Vec<Pt>>) {
                             for k in 1..=CURVE_STEPS {
                                 let u = k as f32 / CURVE_STEPS as f32;
                                 let v = 1.0 - u;
-                                cur.push(pt(v * v * last.0 + 2.0 * v * u * c.x + u * u * a.x, v * v * last.1 + 2.0 * v * u * c.y + u * u * a.y));
+                                cur.push(pt(
+                                    v * v * last.0 + 2.0 * v * u * c.x + u * u * a.x,
+                                    v * v * last.1 + 2.0 * v * u * c.y + u * u * a.y,
+                                ));
                             }
                             last = (a.x, a.y);
                         }
@@ -63,8 +67,12 @@ fn collect(g: &usvg::Group, out: &mut Vec<Vec<Pt>>) {
                             for k in 1..=CURVE_STEPS {
                                 let u = k as f32 / CURVE_STEPS as f32;
                                 let v = 1.0 - u;
-                                let (b0, b1, b2, b3) = (v * v * v, 3.0 * v * v * u, 3.0 * v * u * u, u * u * u);
-                                cur.push(pt(b0 * last.0 + b1 * c1.x + b2 * c2.x + b3 * a.x, b0 * last.1 + b1 * c1.y + b2 * c2.y + b3 * a.y));
+                                let (b0, b1, b2, b3) =
+                                    (v * v * v, 3.0 * v * v * u, 3.0 * v * u * u, u * u * u);
+                                cur.push(pt(
+                                    b0 * last.0 + b1 * c1.x + b2 * c2.x + b3 * a.x,
+                                    b0 * last.1 + b1 * c1.y + b2 * c2.y + b3 * a.y,
+                                ));
                             }
                             last = (a.x, a.y);
                         }
@@ -80,9 +88,15 @@ fn collect(g: &usvg::Group, out: &mut Vec<Vec<Pt>>) {
 
 /// Polygons moved so their box's top-left corner sits at `at`.
 pub fn placed_at(polys: &[Vec<Pt>], at: Pt) -> Vec<Vec<Pt>> {
-    let (min_x, max_y) = polys.iter().flatten().fold((i64::MAX, i64::MIN), |(x, y), p| (x.min(p.x), y.max(p.y)));
+    let (min_x, max_y) = polys
+        .iter()
+        .flatten()
+        .fold((i64::MAX, i64::MIN), |(x, y), p| (x.min(p.x), y.max(p.y)));
     let d = at - Pt::new(min_x, max_y);
-    polys.iter().map(|ps| ps.iter().map(|p| *p + d).collect()).collect()
+    polys
+        .iter()
+        .map(|ps| ps.iter().map(|p| *p + d).collect())
+        .collect()
 }
 
 #[cfg(test)]
@@ -96,8 +110,14 @@ mod tests {
         assert_eq!(polys.len(), 2);
         let xs: Vec<f64> = polys[0].iter().map(|p| p.x as f64 / 1e6).collect();
         let ys: Vec<f64> = polys[0].iter().map(|p| p.y as f64 / 1e6).collect();
-        let (x0, x1) = (xs.iter().cloned().fold(f64::MAX, f64::min), xs.iter().cloned().fold(f64::MIN, f64::max));
-        assert!((x0 - 1.0).abs() < 1e-3 && (x1 - 5.0).abs() < 1e-3, "{x0} {x1}");
+        let (x0, x1) = (
+            xs.iter().cloned().fold(f64::MAX, f64::min),
+            xs.iter().cloned().fold(f64::MIN, f64::max),
+        );
+        assert!(
+            (x0 - 1.0).abs() < 1e-3 && (x1 - 5.0).abs() < 1e-3,
+            "{x0} {x1}"
+        );
         // Y up: the rectangle's top (SVG y = 1) is at -1.
         assert!(ys.iter().any(|y| (y + 1.0).abs() < 1e-3));
         let placed = placed_at(&polys, Pt::mm(100.0, -50.0));
@@ -110,7 +130,8 @@ mod tests {
     fn the_d4_logo_reads() {
         let polys = svg_polygons(include_str!("../../../fixtures/eda/d4_logo.svg")).unwrap();
         assert_eq!(polys.len(), 3);
-        let w = polys.iter().flatten().map(|p| p.x).max().unwrap() - polys.iter().flatten().map(|p| p.x).min().unwrap();
+        let w = polys.iter().flatten().map(|p| p.x).max().unwrap()
+            - polys.iter().flatten().map(|p| p.x).min().unwrap();
         assert!((w as f64 / 1e6 - 5.609).abs() < 0.01, "{w}");
     }
 }

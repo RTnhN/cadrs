@@ -21,7 +21,9 @@ impl Plugin for WindowTitlePlugin {
 /// The title for the app in `state`, with the open document's name and its tab's name and type.
 pub fn title(state: AppState, doc: Option<(&str, Option<(&str, &str)>)>) -> String {
     match (state, doc) {
-        (AppState::Document, Some((doc, Some((tab, kind))))) => format!("{doc} – {tab} ({kind}) – cadrs"),
+        (AppState::Document, Some((doc, Some((tab, kind))))) => {
+            format!("{doc} – {tab} ({kind}) – cadrs")
+        }
         (AppState::Document, Some((doc, None))) => format!("{doc} – cadrs"),
         (AppState::Landing, _) => "Documents – cadrs".into(),
         _ => "cadrs".into(),
@@ -33,9 +35,13 @@ fn sync_window_title(
     doc: Option<Res<ActiveDocument>>,
     mut windows: Query<&mut Window, With<PrimaryWindow>>,
 ) {
-    let Ok(mut window) = windows.single_mut() else { return };
+    let Ok(mut window) = windows.single_mut() else {
+        return;
+    };
     let doc = doc.as_deref();
-    let tab = doc.and_then(|d| d.active_element()).map(|el| (el.name.as_str(), crate::tab_manager::tab_type(el)));
+    let tab = doc
+        .and_then(|d| d.active_element())
+        .map(|el| (el.name.as_str(), crate::tab_manager::tab_type(el)));
     let want = title(*state.get(), doc.map(|d| (d.doc.name.as_str(), tab)));
     if window.title != want {
         window.title = want;
@@ -50,10 +56,16 @@ mod tests {
     fn the_title_names_what_is_open() {
         assert_eq!(title(AppState::Landing, None), "Documents – cadrs");
         assert_eq!(
-            title(AppState::Document, Some(("Bracket", Some(("Part Studio 1", "Part Studio"))))),
+            title(
+                AppState::Document,
+                Some(("Bracket", Some(("Part Studio 1", "Part Studio"))))
+            ),
             "Bracket – Part Studio 1 (Part Studio) – cadrs"
         );
-        assert_eq!(title(AppState::Document, Some(("Bracket", None))), "Bracket – cadrs");
+        assert_eq!(
+            title(AppState::Document, Some(("Bracket", None))),
+            "Bracket – cadrs"
+        );
         assert_eq!(title(AppState::Document, None), "cadrs");
     }
 }

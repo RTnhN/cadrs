@@ -144,12 +144,16 @@ impl Symbol {
 
     /// The pins drawn for `unit` in body `style`.
     pub fn unit_pins(&self, unit: u32, style: u32) -> impl Iterator<Item = &Pin> {
-        self.pins.iter().filter(move |p| (p.unit == 0 || p.unit == unit) && (p.style == 0 || p.style == style))
+        self.pins
+            .iter()
+            .filter(move |p| (p.unit == 0 || p.unit == unit) && (p.style == 0 || p.style == style))
     }
 
     /// The graphics drawn for `unit` in body `style`.
     pub fn unit_graphics(&self, unit: u32, style: u32) -> impl Iterator<Item = &SymbolGraphic> {
-        self.graphics.iter().filter(move |g| (g.unit == 0 || g.unit == unit) && (g.style == 0 || g.style == style))
+        self.graphics
+            .iter()
+            .filter(move |g| (g.unit == 0 || g.unit == unit) && (g.style == 0 || g.style == style))
     }
 
     /// The name after the library prefix.
@@ -159,13 +163,33 @@ impl Symbol {
 }
 
 fn new_field(name: &str, value: &str, at: Pt, h: crate::graphics::HAlign, visible: bool) -> Field {
-    let style = crate::graphics::TextStyle { h_align: h, ..Default::default() };
-    Field { name: name.into(), text: Text { text: value.into(), at, angle: 0.0, style, visible }, show_name: false }
+    let style = crate::graphics::TextStyle {
+        h_align: h,
+        ..Default::default()
+    };
+    Field {
+        name: name.into(),
+        text: Text {
+            text: value.into(),
+            at,
+            angle: 0.0,
+            style,
+            visible,
+        },
+        show_name: false,
+    }
 }
 
 /// A pin: number, name, type, where wires connect (mm), the direction towards the body, length
 /// (mm).
-pub fn pin(number: &str, name: &str, kind: PinType, at: (f64, f64), angle: f64, length: f64) -> Pin {
+pub fn pin(
+    number: &str,
+    name: &str,
+    kind: PinType,
+    at: (f64, f64),
+    angle: f64,
+    length: f64,
+) -> Pin {
     Pin {
         number: number.into(),
         name: name.into(),
@@ -190,11 +214,23 @@ pub fn new_symbol(name: &str, prefix: &str, description: &str) -> Symbol {
     Symbol {
         id: name.into(),
         fields: vec![
-            new_field(fields::REFERENCE, &format!("{prefix}?"), Pt::mm(2.54, 1.27), HAlign::Left, true),
+            new_field(
+                fields::REFERENCE,
+                &format!("{prefix}?"),
+                Pt::mm(2.54, 1.27),
+                HAlign::Left,
+                true,
+            ),
             new_field(fields::VALUE, name, Pt::mm(2.54, -1.27), HAlign::Left, true),
             new_field(fields::FOOTPRINT, "", Pt::ZERO, HAlign::Center, false),
             new_field(fields::DATASHEET, "~", Pt::ZERO, HAlign::Center, false),
-            new_field(fields::DESCRIPTION, description, Pt::ZERO, HAlign::Center, false),
+            new_field(
+                fields::DESCRIPTION,
+                description,
+                Pt::ZERO,
+                HAlign::Center,
+                false,
+            ),
         ],
         keywords: String::new(),
         footprint_filters: vec![],

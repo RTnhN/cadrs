@@ -4,14 +4,19 @@
 use cadrs_sketch::{CurveId, PlaneRef, PointId};
 use serde::{Deserialize, Serialize};
 
-use crate::document::{BodyType, BooleanOp, DirectionRef, EdgeRef, FaceRef, RegionRef, ThinWall, VertexRef};
+use crate::document::{
+    BodyType, BooleanOp, DirectionRef, EdgeRef, FaceRef, RegionRef, ThinWall, VertexRef,
+};
 use crate::ids::{FeatureId, PartId};
 
 /// One piece of a sweep path (PS19.2): a part edge, a sketch curve, or every curve of a sketch.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub enum PathRef {
     Edge(EdgeRef),
-    SketchCurve { sketch: FeatureId, curve: CurveId },
+    SketchCurve {
+        sketch: FeatureId,
+        curve: CurveId,
+    },
     Sketch(FeatureId),
     /// A curve feature's curve (a Helix, `crate::surfacing`).
     Curve(FeatureId),
@@ -30,7 +35,11 @@ pub enum ProfileControl {
 }
 
 impl ProfileControl {
-    pub const ALL: [ProfileControl; 3] = [ProfileControl::None, ProfileControl::KeepOrientation, ProfileControl::LockDirection];
+    pub const ALL: [ProfileControl; 3] = [
+        ProfileControl::None,
+        ProfileControl::KeepOrientation,
+        ProfileControl::LockDirection,
+    ];
 
     pub fn label(self) -> &'static str {
         match self {
@@ -75,10 +84,15 @@ impl SweepFeature {
     /// The sketches it sweeps regions of (or whole) and takes path curves from.
     pub fn sketches(&self) -> Vec<FeatureId> {
         let mut v: Vec<FeatureId> = self.regions.iter().map(|r| r.sketch).collect();
-        for s in self.sketches.iter().copied().chain(self.path.iter().filter_map(|p| match p {
-            PathRef::SketchCurve { sketch, .. } | PathRef::Sketch(sketch) => Some(*sketch),
-            PathRef::Edge(_) | PathRef::Curve(_) => None,
-        })) {
+        for s in self
+            .sketches
+            .iter()
+            .copied()
+            .chain(self.path.iter().filter_map(|p| match p {
+                PathRef::SketchCurve { sketch, .. } | PathRef::Sketch(sketch) => Some(*sketch),
+                PathRef::Edge(_) | PathRef::Curve(_) => None,
+            }))
+        {
             if !v.contains(&s) {
                 v.push(s);
             }
@@ -104,7 +118,10 @@ impl SweepFeature {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum LoftProfile {
     /// Regions of one sketch (joined into one contour: "Faces of Sketch 2").
-    Regions { sketch: FeatureId, regions: Vec<RegionRef> },
+    Regions {
+        sketch: FeatureId,
+        regions: Vec<RegionRef>,
+    },
     /// A whole sketch.
     Sketch(FeatureId),
     /// A planar part face.
@@ -119,9 +136,9 @@ impl LoftProfile {
     /// The sketch it comes from, if any.
     pub fn sketch(&self) -> Option<FeatureId> {
         match self {
-            LoftProfile::Regions { sketch, .. } | LoftProfile::Sketch(sketch) | LoftProfile::SketchPoint { sketch, .. } => {
-                Some(*sketch)
-            }
+            LoftProfile::Regions { sketch, .. }
+            | LoftProfile::Sketch(sketch)
+            | LoftProfile::SketchPoint { sketch, .. } => Some(*sketch),
             _ => None,
         }
     }
@@ -170,7 +187,10 @@ impl LoftCondition {
 
     /// Conditions that take a picked direction.
     pub fn takes_direction(self) -> bool {
-        matches!(self, LoftCondition::NormalDirection | LoftCondition::TangentDirection)
+        matches!(
+            self,
+            LoftCondition::NormalDirection | LoftCondition::TangentDirection
+        )
     }
 
     /// Conditions cadrs builds (all of them since P3.10; the Match ones need a face profile at
@@ -251,19 +271,32 @@ impl LoftFeature {
             return Some("Select at least two profiles");
         }
         let n = self.profiles.len();
-        let point = |p: &LoftProfile| matches!(p, LoftProfile::SketchPoint { .. } | LoftProfile::Vertex(_));
-        if self.profiles.iter().enumerate().any(|(i, p)| point(p) && i != 0 && i + 1 != n) {
+        let point =
+            |p: &LoftProfile| matches!(p, LoftProfile::SketchPoint { .. } | LoftProfile::Vertex(_));
+        if self
+            .profiles
+            .iter()
+            .enumerate()
+            .any(|(i, p)| point(p) && i != 0 && i + 1 != n)
+        {
             return Some("A point can only be the first or last profile");
         }
-        for (c, m) in [(self.start, self.start_magnitude), (self.end, self.end_magnitude)] {
+        for (c, m) in [
+            (self.start, self.start_magnitude),
+            (self.end, self.end_magnitude),
+        ] {
             if !c.available() {
-                return Some("Match tangent and Match curvature need a face profile's neighbours (not available yet)");
+                return Some(
+                    "Match tangent and Match curvature need a face profile's neighbours (not available yet)",
+                );
             }
             if c.has_magnitude() && !(m > 0.0 && m.is_finite()) {
                 return Some("The magnitude must be greater than zero");
             }
         }
-        if (self.start.takes_direction() && self.start_direction.is_none()) || (self.end.takes_direction() && self.end_direction.is_none()) {
+        if (self.start.takes_direction() && self.start_direction.is_none())
+            || (self.end.takes_direction() && self.end_direction.is_none())
+        {
             return Some("Select a direction for the profile condition");
         }
         None

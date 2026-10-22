@@ -161,18 +161,29 @@ fn run_script_commands(mut msgs: MessageReader<ScriptCommand>, mut commands: Com
         }
         // P3I.8 (SM17): the legacy C-channel's STEP file (`samples::sheetmetal_legacy`).
         if let Some(path) = m.0.strip_prefix("sm-legacy-step ") {
-            write_step(path.trim(), cadrs_core::samples::StepFixture::SheetMetalLegacy);
+            write_step(
+                path.trim(),
+                cadrs_core::samples::StepFixture::SheetMetalLegacy,
+            );
             continue;
         }
         // P3I.8 (SM17): the legacy Case (an open box, round corner reliefs as the lesson's).
         if let Some(path) = m.0.strip_prefix("sm-legacy-case-step ") {
-            write_step(path.trim(), cadrs_core::samples::StepFixture::SheetMetalLegacyCase);
+            write_step(
+                path.trim(),
+                cadrs_core::samples::StepFixture::SheetMetalLegacyCase,
+            );
             continue;
         }
         // P3I.8 (SM18): the Heating Mantle master's depth, edited in its own studio.
-        if let Some(n) = m.0.strip_prefix("sm-topdown-depth ").and_then(|n| n.trim().parse::<f64>().ok()) {
+        if let Some(n) =
+            m.0.strip_prefix("sm-topdown-depth ")
+                .and_then(|n| n.trim().parse::<f64>().ok())
+        {
             commands.queue(move |world: &mut World| {
-                let Some(mut doc) = world.get_resource_mut::<ActiveDocument>() else { return };
+                let Some(mut doc) = world.get_resource_mut::<ActiveDocument>() else {
+                    return;
+                };
                 if let Err(e) = cadrs_core::samples::sheetmetal_topdown::set_depth(&mut *doc, n) {
                     warn!("sm-topdown-depth: {e}");
                 }
@@ -188,7 +199,8 @@ fn run_script_commands(mut msgs: MessageReader<ScriptCommand>, mut commands: Com
         // P3I.7: flat pattern drawings (see [`crate::drawing::flat_views::script`]).
         if let Some(rest) = m.0.strip_prefix("flat-drawing ") {
             let arg = rest.trim().to_string();
-            commands.queue(move |world: &mut World| crate::drawing::flat_views::script(world, &arg));
+            commands
+                .queue(move |world: &mut World| crate::drawing::flat_views::script(world, &arg));
             continue;
         }
         // P3I.9: the sheet metal loft and form set-ups (see [`crate::sheetmetal_p3i9_ui::script`]).
@@ -218,7 +230,9 @@ fn run_script_commands(mut msgs: MessageReader<ScriptCommand>, mut commands: Com
         // P3G.5: the exercises' stand-ins (see [`crate::linked_exercises`]).
         if let Some(rest) = m.0.strip_prefix("linked-fixture ") {
             let arg = rest.trim().to_string();
-            commands.queue(move |world: &mut World| crate::linked_exercises::fixture_script(world, &arg));
+            commands.queue(move |world: &mut World| {
+                crate::linked_exercises::fixture_script(world, &arg)
+            });
             continue;
         }
         if let Some(rest) = m.0.strip_prefix("linked-ex ") {
@@ -245,7 +259,11 @@ fn run_script_commands(mut msgs: MessageReader<ScriptCommand>, mut commands: Com
         // " (2)" from an earlier run. Only folders under `target/`.
         if let Some(dir) = m.0.strip_prefix("clear-dir ") {
             let dir = std::path::PathBuf::from(dir.trim());
-            if dir.starts_with("target") && !dir.components().any(|c| matches!(c, std::path::Component::ParentDir)) {
+            if dir.starts_with("target")
+                && !dir
+                    .components()
+                    .any(|c| matches!(c, std::path::Component::ParentDir))
+            {
                 let _ = std::fs::remove_dir_all(&dir);
                 let _ = std::fs::create_dir_all(&dir);
             } else {
@@ -267,17 +285,26 @@ fn run_script_commands(mut msgs: MessageReader<ScriptCommand>, mut commands: Com
         }
         // P3F.5 judge: pause a solve once meshed (`off` lets it go on).
         if let Some(v) = m.0.strip_prefix("sim-hold ") {
-            crate::simulation_ui::SIM_HOLD.store(v.trim() == "on", std::sync::atomic::Ordering::Relaxed);
+            crate::simulation_ui::SIM_HOLD
+                .store(v.trim() == "on", std::sync::atomic::Ordering::Relaxed);
             continue;
         }
         // P3F.6: pause a final render after N samples (`off` lets it finish).
         if let Some(n) = m.0.strip_prefix("render-hold ") {
             let n = n.trim().parse::<u32>().ok();
-            commands.queue(move |world: &mut World| world.resource::<crate::render_ui::RenderState>().set_hold(n));
+            commands.queue(move |world: &mut World| {
+                world
+                    .resource::<crate::render_ui::RenderState>()
+                    .set_hold(n)
+            });
             continue;
         }
         if let Some(ms) = m.0.strip_prefix("rebuild-budget ") {
-            let budget = ms.trim().parse::<u64>().ok().map(std::time::Duration::from_millis);
+            let budget = ms
+                .trim()
+                .parse::<u64>()
+                .ok()
+                .map(std::time::Duration::from_millis);
             commands.insert_resource(crate::parts::RebuildBudget(budget));
             continue;
         }
@@ -301,7 +328,13 @@ fn run_script_commands(mut msgs: MessageReader<ScriptCommand>, mut commands: Com
             let name = name.trim().to_string();
             commands.queue(move |world: &mut World| {
                 let (lib, _) = world.resource::<crate::DocumentStore>().0.list();
-                let id = lib.entries.iter().find(|e| (e.id.to_string() == name || e.name == name) && e.meta.trashed.is_none()).map(|e| e.id);
+                let id = lib
+                    .entries
+                    .iter()
+                    .find(|e| {
+                        (e.id.to_string() == name || e.name == name) && e.meta.trashed.is_none()
+                    })
+                    .map(|e| e.id);
                 match id {
                     Some(id) => crate::move_document::open_document(world, id),
                     None => warn!("open-document: no document {name:?}"),
@@ -312,7 +345,9 @@ fn run_script_commands(mut msgs: MessageReader<ScriptCommand>, mut commands: Com
         // `ui-scale <percent>`: Preferences › UI scale (issue #12), saved like the dialog's OK.
         if let Some(p) = m.0.strip_prefix("ui-scale ") {
             let percent = p.trim().parse::<u16>().unwrap_or(100);
-            commands.queue(move |world: &mut World| crate::preferences_ui::set_ui_scale(world, percent));
+            commands.queue(move |world: &mut World| {
+                crate::preferences_ui::set_ui_scale(world, percent)
+            });
             continue;
         }
         // `drop-file <path>`: the file dropped on the window (as from a file manager).
@@ -324,12 +359,16 @@ fn run_script_commands(mut msgs: MessageReader<ScriptCommand>, mut commands: Com
                     .iter(world)
                     .next()
                     .unwrap_or(Entity::PLACEHOLDER);
-                world.write_message(bevy::window::FileDragAndDrop::DroppedFile { window, path_buf });
+                world
+                    .write_message(bevy::window::FileDragAndDrop::DroppedFile { window, path_buf });
             });
             continue;
         }
         if let Some(rest) = m.0.strip_prefix("view ") {
-            let v: Vec<f32> = rest.split_whitespace().filter_map(|w| w.parse().ok()).collect();
+            let v: Vec<f32> = rest
+                .split_whitespace()
+                .filter_map(|w| w.parse().ok())
+                .collect();
             commands.queue(move |world: &mut World| {
                 let mut view = world.resource_mut::<crate::viewport::ViewportView>();
                 let mut to = view.target();
@@ -348,23 +387,39 @@ fn run_script_commands(mut msgs: MessageReader<ScriptCommand>, mut commands: Com
         }
         // `rename-part <old name> = <new name>`: renames a part of the active Part Studio.
         if let Some(rest) = m.0.trim().strip_prefix("rename-part ") {
-            let (old, new) = rest.split_once('=').map_or((rest.trim(), ""), |(a, b)| (a.trim(), b.trim()));
+            let (old, new) = rest
+                .split_once('=')
+                .map_or((rest.trim(), ""), |(a, b)| (a.trim(), b.trim()));
             let (old, new) = (old.to_string(), new.to_string());
             commands.queue(move |world: &mut World| {
-                let part = world.resource::<crate::parts::PartCache>().parts.iter().find(|p| p.name == old).map(|p| p.id);
-                let Some(mut doc) = world.get_resource_mut::<crate::ActiveDocument>() else { return };
+                let part = world
+                    .resource::<crate::parts::PartCache>()
+                    .parts
+                    .iter()
+                    .find(|p| p.name == old)
+                    .map(|p| p.id);
+                let Some(mut doc) = world.get_resource_mut::<crate::ActiveDocument>() else {
+                    return;
+                };
                 let (Some(part), Some(element)) = (part, doc.active) else {
                     warn!("rename-part: no part {old:?}");
                     return;
                 };
-                if let Err(e) = doc.execute(&cadrs_core::commands::RenamePart { element, part, name: new }) {
+                if let Err(e) = doc.execute(&cadrs_core::commands::RenamePart {
+                    element,
+                    part,
+                    name: new,
+                }) {
                     warn!("rename-part: {e}");
                 }
             });
             continue;
         }
         let mut parts = m.0.split_whitespace();
-        match (parts.next(), parts.next().and_then(|n| n.parse::<usize>().ok())) {
+        match (
+            parts.next(),
+            parts.next().and_then(|n| n.parse::<usize>().ok()),
+        ) {
             (Some("populate-sketch"), Some(n)) => {
                 commands.queue(move |world: &mut World| populate_sketch(world, n));
             }
@@ -514,13 +569,21 @@ fn add_sketch(world: &mut World, spec: &str) {
     while i < rest.len() {
         match rest[i] {
             "rect" => {
-                let (Some(x0), Some(y0), Some(x1), Some(y1)) =
-                    (num(rest.get(i + 1)), num(rest.get(i + 2)), num(rest.get(i + 3)), num(rest.get(i + 4)))
-                else {
+                let (Some(x0), Some(y0), Some(x1), Some(y1)) = (
+                    num(rest.get(i + 1)),
+                    num(rest.get(i + 2)),
+                    num(rest.get(i + 3)),
+                    num(rest.get(i + 4)),
+                ) else {
                     warn!("sketch: bad rect in {spec:?}");
                     return;
                 };
-                let corners = [SVec2::new(x0, y0), SVec2::new(x1, y0), SVec2::new(x1, y1), SVec2::new(x0, y1)];
+                let corners = [
+                    SVec2::new(x0, y0),
+                    SVec2::new(x1, y0),
+                    SVec2::new(x1, y1),
+                    SVec2::new(x0, y1),
+                ];
                 ops.push(SketchOp::AddPolyline {
                     points: corners.to_vec(),
                     closed: true,
@@ -592,7 +655,11 @@ fn add_sketch(world: &mut World, spec: &str) {
                     return;
                 }
                 ops.push(SketchOp::AddPolyline {
-                    points: vec![SVec2::new(v[0], v[1]), SVec2::new(v[2], v[3]), SVec2::new(v[4], v[5])],
+                    points: vec![
+                        SVec2::new(v[0], v[1]),
+                        SVec2::new(v[2], v[3]),
+                        SVec2::new(v[4], v[5]),
+                    ],
                     closed: true,
                     construction: false,
                     label: "Add triangle",
@@ -616,8 +683,11 @@ fn add_sketch(world: &mut World, spec: &str) {
                 i += 7;
             }
             "circle" => {
-                let (Some(cx), Some(cy), Some(r)) = (num(rest.get(i + 1)), num(rest.get(i + 2)), num(rest.get(i + 3)))
-                else {
+                let (Some(cx), Some(cy), Some(r)) = (
+                    num(rest.get(i + 1)),
+                    num(rest.get(i + 2)),
+                    num(rest.get(i + 3)),
+                ) else {
                     warn!("sketch: bad circle in {spec:?}");
                     return;
                 };
@@ -634,7 +704,9 @@ fn add_sketch(world: &mut World, spec: &str) {
                     warn!("sketch: bad point in {spec:?}");
                     return;
                 };
-                ops.push(SketchOp::AddPoint { pos: SVec2::new(x, y) });
+                ops.push(SketchOp::AddPoint {
+                    pos: SVec2::new(x, y),
+                });
                 i += 3;
             }
             other => {
@@ -650,11 +722,19 @@ fn add_sketch(world: &mut World, spec: &str) {
         return;
     };
     let feature = FeatureId::new();
-    if let Err(e) = doc.execute(&AddSketch { element, feature, plane: Some(plane) }) {
+    if let Err(e) = doc.execute(&AddSketch {
+        element,
+        feature,
+        plane: Some(plane),
+    }) {
         warn!("sketch: {e}");
         return;
     }
-    if let Err(e) = doc.execute(&EditSketch { element, feature, op: SketchOp::Batch(ops) }) {
+    if let Err(e) = doc.execute(&EditSketch {
+        element,
+        feature,
+        op: SketchOp::Batch(ops),
+    }) {
         warn!("sketch: {e}");
     }
 }
@@ -683,8 +763,13 @@ fn gear_cover(world: &mut World) {
         ..doc.doc.units
     };
     let steps: [&dyn cadrs_core::Command; 3] = [
-        &RenameDocument { name: "Jackhammer (stand-in)".into() },
-        &RenameElement { id: element, name: "Gear Cover".into() },
+        &RenameDocument {
+            name: "Jackhammer (stand-in)".into(),
+        },
+        &RenameElement {
+            id: element,
+            name: "Gear Cover".into(),
+        },
         &SetUnits { units },
     ];
     for c in steps {
@@ -730,8 +815,13 @@ fn ujoint_flange(world: &mut World) {
         ..doc.doc.units
     };
     let steps: [&dyn cadrs_core::Command; 3] = [
-        &RenameDocument { name: "Universal Joint Drawing (stand-in)".into() },
-        &RenameElement { id: element, name: "Universal Joint".into() },
+        &RenameDocument {
+            name: "Universal Joint Drawing (stand-in)".into(),
+        },
+        &RenameElement {
+            id: element,
+            name: "Universal Joint".into(),
+        },
         &SetUnits { units },
     ];
     for c in steps {
@@ -758,10 +848,15 @@ fn ujoint_drawing(world: &mut World) {
     };
     match cadrs_core::samples::ujoint_drawing::drawing(&doc.doc, studio) {
         Ok(d) => {
-            let el = cadrs_core::Element::drawing(cadrs_core::samples::ujoint_drawing::DRAWING_NAME, d);
+            let el =
+                cadrs_core::Element::drawing(cadrs_core::samples::ujoint_drawing::DRAWING_NAME, d);
             let id = el.id;
             let after = Some(studio);
-            if let Err(e) = doc.execute(&InsertElement { element: el, after, label: "Create Drawing".into() }) {
+            if let Err(e) = doc.execute(&InsertElement {
+                element: el,
+                after,
+                label: "Create Drawing".into(),
+            }) {
                 warn!("ujoint-drawing: {e}");
             }
             doc.set_active(id);
@@ -781,10 +876,18 @@ fn bar_drawing(world: &mut World) {
     let Some(element) = doc.active_element().map(|e| e.id) else {
         return;
     };
-    let units = cadrs_sketch::units::Units { length: cadrs_sketch::units::LengthUnit::Millimeter, ..doc.doc.units };
+    let units = cadrs_sketch::units::Units {
+        length: cadrs_sketch::units::LengthUnit::Millimeter,
+        ..doc.doc.units
+    };
     let steps: [&dyn cadrs_core::Command; 3] = [
-        &RenameDocument { name: "Bar (P3C.8)".into() },
-        &RenameElement { id: element, name: bar::STUDIO_NAME.into() },
+        &RenameDocument {
+            name: "Bar (P3C.8)".into(),
+        },
+        &RenameElement {
+            id: element,
+            name: bar::STUDIO_NAME.into(),
+        },
         &SetUnits { units },
     ];
     for c in steps {
@@ -801,7 +904,11 @@ fn bar_drawing(world: &mut World) {
         Ok(d) => {
             let el = cadrs_core::Element::drawing(bar::DRAWING_NAME, d);
             let id = el.id;
-            if let Err(e) = doc.execute(&InsertElement { element: el, after: Some(element), label: "Create Drawing".into() }) {
+            if let Err(e) = doc.execute(&InsertElement {
+                element: el,
+                after: Some(element),
+                label: "Create Drawing".into(),
+            }) {
                 warn!("bar-drawing: {e}");
             }
             doc.set_active(id);
@@ -825,8 +932,13 @@ fn hand_brake(world: &mut World) {
         ..doc.doc.units
     };
     let steps: [&dyn cadrs_core::Command; 3] = [
-        &RenameDocument { name: hb::DOCUMENT_NAME.into() },
-        &RenameElement { id: element, name: hb::STUDIO_NAME.into() },
+        &RenameDocument {
+            name: hb::DOCUMENT_NAME.into(),
+        },
+        &RenameElement {
+            id: element,
+            name: hb::STUDIO_NAME.into(),
+        },
         &SetUnits { units },
     ];
     for c in steps {
@@ -848,7 +960,11 @@ fn hand_brake(world: &mut World) {
         Ok(d) => {
             let el = cadrs_core::Element::drawing(hb::DRAWING_NAME, d);
             let after = Some(element);
-            if let Err(e) = doc.execute(&InsertElement { element: el, after, label: "Create Drawing".into() }) {
+            if let Err(e) = doc.execute(&InsertElement {
+                element: el,
+                after,
+                label: "Create Drawing".into(),
+            }) {
                 warn!("hand-brake: {e}");
             }
             doc.set_active(element);
@@ -884,8 +1000,13 @@ fn reflector(world: &mut World) {
         ..doc.doc.units
     };
     let steps: [&dyn cadrs_core::Command; 3] = [
-        &RenameDocument { name: "Rocket Guidance System (stand-in)".into() },
-        &RenameElement { id: element, name: "Reflector".into() },
+        &RenameDocument {
+            name: "Rocket Guidance System (stand-in)".into(),
+        },
+        &RenameElement {
+            id: element,
+            name: "Reflector".into(),
+        },
         &SetUnits { units },
     ];
     for c in steps {
@@ -909,8 +1030,13 @@ fn bracket(world: &mut World) {
         return;
     };
     let steps: [&dyn cadrs_core::Command; 2] = [
-        &RenameDocument { name: "Bracket (stand-in)".into() },
-        &RenameElement { id: element, name: "Bracket".into() },
+        &RenameDocument {
+            name: "Bracket (stand-in)".into(),
+        },
+        &RenameElement {
+            id: element,
+            name: "Bracket".into(),
+        },
     ];
     for c in steps {
         if let Err(e) = doc.execute(c) {
@@ -959,7 +1085,9 @@ fn sm_e4_rework(world: &mut World) {
     let Some(element) = doc.active_element().map(|e| e.id) else {
         return;
     };
-    if let Err(e) = cadrs_core::samples::sheetmetal_exercises::rework_after_finish(&mut *doc, element) {
+    if let Err(e) =
+        cadrs_core::samples::sheetmetal_exercises::rework_after_finish(&mut *doc, element)
+    {
         warn!("sm-e4-rework: {e}");
     }
 }
@@ -1020,15 +1148,36 @@ fn control_arm_sketch(world: &mut World) {
             warn!("control-arm-sketch: {e}");
         }
     };
-    run(&mut doc, &AddSketch { element, feature: sketch, plane: Some(cadrs_sketch::PlaneRef::Top) });
-    run(&mut doc, &EditSketch { element, feature: sketch, op: cadrs_core::samples::control_arm_geometry() });
+    run(
+        &mut doc,
+        &AddSketch {
+            element,
+            feature: sketch,
+            plane: Some(cadrs_sketch::PlaneRef::Top),
+        },
+    );
+    run(
+        &mut doc,
+        &EditSketch {
+            element,
+            feature: sketch,
+            op: cadrs_core::samples::control_arm_geometry(),
+        },
+    );
     let g = doc
         .active_element()
         .and_then(|e| e.feature(sketch))
         .and_then(|f| f.sketch())
         .map(|s| s.geometry.clone())
         .unwrap_or_default();
-    run(&mut doc, &EditSketch { element, feature: sketch, op: cadrs_core::samples::control_arm_constraints(&g) });
+    run(
+        &mut doc,
+        &EditSketch {
+            element,
+            feature: sketch,
+            op: cadrs_core::samples::control_arm_constraints(&g),
+        },
+    );
 }
 
 /// Adds the Control Arm's sketch and two extrudes through the command layer; with `add`, the
@@ -1049,8 +1198,22 @@ fn control_arm_with(world: &mut World, add: bool) {
             warn!("control-arm: {e}");
         }
     };
-    run(&mut doc, &AddSketch { element, feature: sketch, plane: Some(cadrs_sketch::PlaneRef::Top) });
-    run(&mut doc, &EditSketch { element, feature: sketch, op: samples::control_arm_geometry() });
+    run(
+        &mut doc,
+        &AddSketch {
+            element,
+            feature: sketch,
+            plane: Some(cadrs_sketch::PlaneRef::Top),
+        },
+    );
+    run(
+        &mut doc,
+        &EditSketch {
+            element,
+            feature: sketch,
+            op: samples::control_arm_geometry(),
+        },
+    );
     let geometry = |doc: &ActiveDocument| {
         doc.active_element()
             .and_then(|e| e.feature(sketch))
@@ -1059,48 +1222,93 @@ fn control_arm_with(world: &mut World, add: bool) {
             .unwrap_or_default()
     };
     if let Some(op) = samples::eye_hole_dimension(&geometry(&doc)) {
-        run(&mut doc, &EditSketch { element, feature: sketch, op });
+        run(
+            &mut doc,
+            &EditSketch {
+                element,
+                feature: sketch,
+                op,
+            },
+        );
     }
     for (seeds, depth) in [
         (&samples::EXTRUDE_1_SEEDS[..], samples::EXTRUDE_1_DEPTH),
         (&samples::EXTRUDE_2_SEEDS[..], samples::EXTRUDE_2_DEPTH),
     ] {
         let feature = FeatureId::new();
-        run(&mut doc, &AddExtrude { element, feature, extrude: cadrs_core::ExtrudeFeature::default() });
+        run(
+            &mut doc,
+            &AddExtrude {
+                element,
+                feature,
+                extrude: cadrs_core::ExtrudeFeature::default(),
+            },
+        );
         let regions = samples::region_refs(sketch, &geometry(&doc), seeds);
         let mut extrude = samples::extrude_of(regions, depth);
         if add && depth == samples::EXTRUDE_2_DEPTH {
             extrude.op = cadrs_core::BooleanOp::Add;
         }
-        run(&mut doc, &SetExtrude { element, feature, extrude, label: "Extrude".into() });
+        run(
+            &mut doc,
+            &SetExtrude {
+                element,
+                feature,
+                extrude,
+                label: "Extrude".into(),
+            },
+        );
     }
 }
 
 fn part_look(world: &mut World, spec: &str) {
     let mut words = spec.splitn(3, ' ');
-    let (Some(n), Some(colour)) = (words.next().and_then(|n| n.parse::<usize>().ok()), words.next()) else {
+    let (Some(n), Some(colour)) = (
+        words.next().and_then(|n| n.parse::<usize>().ok()),
+        words.next(),
+    ) else {
         warn!("part-look: expected `<n> <#rrggbb|-> [material]`");
         return;
     };
     let material = words.next().map(str::trim).filter(|m| !m.is_empty());
-    let Some(part) = n.checked_sub(1).and_then(|i| world.resource::<crate::parts::PartCache>().parts.get(i).map(|p| p.id)) else {
+    let Some(part) = n.checked_sub(1).and_then(|i| {
+        world
+            .resource::<crate::parts::PartCache>()
+            .parts
+            .get(i)
+            .map(|p| p.id)
+    }) else {
         warn!("part-look: no part {n}");
         return;
     };
-    let Some(mut doc) = world.get_resource_mut::<ActiveDocument>() else { return };
-    let Some(element) = doc.active_element().map(|e| e.id) else { return };
+    let Some(mut doc) = world.get_resource_mut::<ActiveDocument>() else {
+        return;
+    };
+    let Some(element) = doc.active_element().map(|e| e.id) else {
+        return;
+    };
     // `#rrggbbaa`: with an opacity (a see-through part).
     let (colour, alpha) = match colour.trim_start_matches('#') {
         h if h.len() == 8 => (&h[..6], u8::from_str_radix(&h[6..], 16).ok()),
         _ => (colour, None),
     };
-    if let Some(a) = cadrs_core::Appearance::from_hex(colour).map(|a| alpha.map_or(a, |x| a.with_alpha(x))) {
-        let _ = doc.execute(&cadrs_core::commands::SetPartAppearance { element, parts: vec![part], appearance: Some(a) });
+    if let Some(a) =
+        cadrs_core::Appearance::from_hex(colour).map(|a| alpha.map_or(a, |x| a.with_alpha(x)))
+    {
+        let _ = doc.execute(&cadrs_core::commands::SetPartAppearance {
+            element,
+            parts: vec![part],
+            appearance: Some(a),
+        });
     }
     if let Some(m) = material {
         match cadrs_core::material::library(m) {
             Some(mat) => {
-                let _ = doc.execute(&cadrs_core::commands::SetPartMaterial { element, parts: vec![part], material: Some(mat) });
+                let _ = doc.execute(&cadrs_core::commands::SetPartMaterial {
+                    element,
+                    parts: vec![part],
+                    material: Some(mat),
+                });
             }
             None => warn!("part-look: no material {m:?}"),
         }
@@ -1162,10 +1370,18 @@ fn pcb_board(world: &mut World, spec: &str) {
     let Some(element) = doc.active_element().map(|e| e.id) else {
         return;
     };
-    let units = cadrs_sketch::units::Units { length: cadrs_sketch::units::LengthUnit::Millimeter, ..doc.doc.units };
+    let units = cadrs_sketch::units::Units {
+        length: cadrs_sketch::units::LengthUnit::Millimeter,
+        ..doc.doc.units
+    };
     let steps: [&dyn cadrs_core::Command; 3] = [
-        &RenameDocument { name: format!("{} (IDF)", pcb.name()) },
-        &RenameElement { id: element, name: pcb.name().to_string() },
+        &RenameDocument {
+            name: format!("{} (IDF)", pcb.name()),
+        },
+        &RenameElement {
+            id: element,
+            name: pcb.name().to_string(),
+        },
         &SetUnits { units },
     ];
     for c in steps {
@@ -1202,8 +1418,13 @@ fn open_gasket(world: &mut World) {
     };
     let mut file = cadrs_core::samples::gear_cover::file(doc);
     // Made by the user two hours ago (so its Start sorts before what the scenario does).
-    let now = world.get_resource::<crate::AppClock>().map_or(0, |c| c.now());
-    let user = world.get_resource::<crate::UserProfile>().map(|u| u.id.clone()).unwrap_or_default();
+    let now = world
+        .get_resource::<crate::AppClock>()
+        .map_or(0, |c| c.now());
+    let user = world
+        .get_resource::<crate::UserProfile>()
+        .map(|u| u.id.clone())
+        .unwrap_or_default();
     file.meta = cadrs_core::DocumentMeta::new(&user, now - 7_200);
     if let Some(store) = world.get_resource::<crate::DocumentStore>()
         && let Err(e) = store.0.save(&file.document, &file.meta)
@@ -1271,38 +1492,75 @@ fn write_step(path: &str, sample: cadrs_core::samples::StepFixture) {
 
 /// A thumbnail of `doc`'s first Part Studio (the store's placeholder otherwise).
 pub(crate) fn studio_thumbnail(doc: &cadrs_core::Document) -> Option<image::RgbaImage> {
-    let el = doc.elements.iter().find(|e| matches!(e.kind, cadrs_core::ElementKind::PartStudio { .. }))?;
+    let el = doc
+        .elements
+        .iter()
+        .find(|e| matches!(e.kind, cadrs_core::ElementKind::PartStudio { .. }))?;
     let build = cadrs_core::rebuild::build(el.features());
-    let list: Vec<(&cadrs_core::Solid, [u8; 3])> =
-        build.parts.iter().map(|p| (&*p.solid, cadrs_core::appearance::part_appearance(p, el.part_props()).rgb)).collect();
+    let list: Vec<(&cadrs_core::Solid, [u8; 3])> = build
+        .parts
+        .iter()
+        .map(|p| {
+            (
+                &*p.solid,
+                cadrs_core::appearance::part_appearance(p, el.part_props()).rgb,
+            )
+        })
+        .collect();
     (!list.is_empty()).then(|| cadrs_core::assembly::thumb::render(&list, 96))
 }
 
 /// P3G.2: adds "Drawing 1" to the open document, with a 1:1 Front view of the block `element`
 /// (a Part Studio or its linked copy) on an ANSI A sheet, through the command layer.
 fn add_front_view_drawing(world: &mut World, element: cadrs_core::ElementId) {
-    add_front_view_drawing_of(world, element, Some(cadrs_core::samples::linked_block::PART), [110.0, 140.0]);
+    add_front_view_drawing_of(
+        world,
+        element,
+        Some(cadrs_core::samples::linked_block::PART),
+        [110.0, 140.0],
+    );
 }
 
 /// P3G.3: as [`add_front_view_drawing`], of `part` of `element` (the whole studio with `None`),
 /// the view centred at `at` on the sheet.
-pub(crate) fn add_front_view_drawing_of(world: &mut World, element: cadrs_core::ElementId, part_id: Option<cadrs_core::PartId>, at: [f64; 2]) {
+pub(crate) fn add_front_view_drawing_of(
+    world: &mut World,
+    element: cadrs_core::ElementId,
+    part_id: Option<cadrs_core::PartId>,
+    at: [f64; 2],
+) {
     use cadrs_drawing::{Drawing, DrawingOp, NamedView, ObjectRef, Scale, View, template};
     let doc = world.resource::<crate::ActiveDocument>().doc.clone();
-    let Some(t) = template::builtin("ANSI_A_MM.dwt") else { return };
+    let Some(t) = template::builtin("ANSI_A_MM.dwt") else {
+        return;
+    };
     let mut d = Drawing::from_template(&t, None);
     let sheet = d.sheets[0].id;
-    let Some(src) = cadrs_core::drawing_source::live_source(&doc, element) else { return };
-    let part = ObjectRef { element: element.0, part: cadrs_core::drawing_source::part_key(part_id) };
+    let Some(src) = cadrs_core::drawing_source::live_source(&doc, element) else {
+        return;
+    };
+    let part = ObjectRef {
+        element: element.0,
+        part: cadrs_core::drawing_source::part_key(part_id),
+    };
     let mut v = View::base(part, NamedView::Front, Scale::new(1, 1), at);
     v.source_hash = src.hash_of(part.part);
-    if d.apply(&DrawingOp::SetSource(src)).is_err() || d.apply(&DrawingOp::InsertView { sheet, view: v }).is_err() {
+    if d.apply(&DrawingOp::SetSource(src)).is_err()
+        || d.apply(&DrawingOp::InsertView { sheet, view: v }).is_err()
+    {
         return;
     }
     let el = cadrs_core::Element::drawing("Drawing 1", d);
     let id = el.id;
     let mut active = world.resource_mut::<crate::ActiveDocument>();
-    if active.execute(&cadrs_core::commands::InsertElement { element: el, after: None, label: "Create Drawing".into() }).is_ok() {
+    if active
+        .execute(&cadrs_core::commands::InsertElement {
+            element: el,
+            after: None,
+            label: "Create Drawing".into(),
+        })
+        .is_ok()
+    {
         active.set_active(id);
     }
 }
@@ -1327,7 +1585,12 @@ fn linked_block(world: &mut World, arg: &str) {
             let folder = cadrs_core::FolderId::from_u128(0x3a61_0000_0000_0000_0000_0000_0000_0f01);
             if lib.folders.iter().all(|f| f.id != folder) {
                 let mut after = lib.clone();
-                after.folders.push(cadrs_core::FolderEntry { id: folder, name: "Linked parts".into(), created: now - 7_200, owned_by: user.clone() });
+                after.folders.push(cadrs_core::FolderEntry {
+                    id: folder,
+                    name: "Linked parts".into(),
+                    created: now - 7_200,
+                    owned_by: user.clone(),
+                });
                 if let Err(e) = store.sync(&lib, &after) {
                     warn!("linked-block: {e}");
                 }
@@ -1366,13 +1629,24 @@ fn linked_block(world: &mut World, arg: &str) {
             world.insert_resource(doc);
         }
         Some("edit") => {
-            world.resource_mut::<crate::linked::LinkStatus>().invalidate();
-            let Ok(file) = store.load(lb::DOCUMENT) else { return };
+            world
+                .resource_mut::<crate::linked::LinkStatus>()
+                .invalidate();
+            let Ok(file) = store.load(lb::DOCUMENT) else {
+                return;
+            };
             let mut a = file.document;
             let mut h = cadrs_core::History::default();
             // `linked-block edit 55`: another depth (P3G.2); 40 by default.
-            let depth: f64 = words.next().and_then(|w| w.parse().ok()).unwrap_or(lb::EDITED_HEIGHT);
-            if let Err(e) = lb::set_height(&mut cadrs_core::samples::gear_cover::DocHistory(&mut a, &mut h), lb::STUDIO, depth) {
+            let depth: f64 = words
+                .next()
+                .and_then(|w| w.parse().ok())
+                .unwrap_or(lb::EDITED_HEIGHT);
+            if let Err(e) = lb::set_height(
+                &mut cadrs_core::samples::gear_cover::DocHistory(&mut a, &mut h),
+                lb::STUDIO,
+                depth,
+            ) {
                 warn!("linked-block edit: {e}");
                 return;
             }
@@ -1383,7 +1657,12 @@ fn linked_block(world: &mut World, arg: &str) {
                 let _ = store.write_thumbnail(a.id, &img);
             }
             if let Ok(Some(mut log)) = HistoryLog::load(&store, lb::DOCUMENT) {
-                log.record(&a, Origin::Command("Edit Extrude 1".into()), now - 60, &user);
+                log.record(
+                    &a,
+                    Origin::Command("Edit Extrude 1".into()),
+                    now - 60,
+                    &user,
+                );
                 log.create_version("", &format!("Depth {depth}"), now - 30, &user);
                 let _ = log.save(&store);
             }
@@ -1393,7 +1672,9 @@ fn linked_block(world: &mut World, arg: &str) {
                 file.meta.trashed = Some(now);
                 let _ = store.save(&file.document, &file.meta);
             }
-            world.resource_mut::<crate::linked::LinkStatus>().invalidate();
+            world
+                .resource_mut::<crate::linked::LinkStatus>()
+                .invalidate();
         }
         Some("purge") => {
             let (lib, _) = store.list();
@@ -1402,7 +1683,9 @@ fn linked_block(world: &mut World, arg: &str) {
             if let Err(e) = store.sync(&lib, &after) {
                 warn!("linked-block purge: {e}");
             }
-            world.resource_mut::<crate::linked::LinkStatus>().invalidate();
+            world
+                .resource_mut::<crate::linked::LinkStatus>()
+                .invalidate();
         }
         // P3G.1 (DV1.5): "Cycle partner", whose assembly "Top" holds B's Assembly 1 at B's newest
         // version, with a version of its own: inserting it into B's Assembly 1 is circular.
@@ -1412,10 +1695,16 @@ fn linked_block(world: &mut World, arg: &str) {
                 warn!("linked-block cycle: B has no versions");
                 return;
             };
-            let Some(v) = log.versions().last().cloned() else { return };
-            let Some(b) = log.document_at_version(v.id()) else { return };
+            let Some(v) = log.versions().last().cloned() else {
+                return;
+            };
+            let Some(b) = log.document_at_version(v.id()) else {
+                return;
+            };
             let r = SourceRef::version(Some(lb::CONSUMER), lb::CONSUMER_ASSEMBLY, v.id());
-            let Ok(snap) = snapshot(&b, r, v.name()) else { return };
+            let Ok(snap) = snapshot(&b, r, v.name()) else {
+                return;
+            };
             let mut c = cadrs_core::Document::empty("Cycle partner");
             c.id = cadrs_core::DocumentId::from_u128(0x3a61_0000_0000_0000_0000_0000_0000_0500);
             let top = cadrs_core::Element::assembly("Top");
@@ -1427,7 +1716,15 @@ fn linked_block(world: &mut World, arg: &str) {
                 cadrs_core::assembly::Pose::IDENTITY,
             );
             let mut h = cadrs_core::History::default();
-            if let Err(e) = h.execute(&mut c, &InsertLinked { element: top_id, snapshot: snap, instances: vec![inst], reference: r }) {
+            if let Err(e) = h.execute(
+                &mut c,
+                &InsertLinked {
+                    element: top_id,
+                    snapshot: snap,
+                    instances: vec![inst],
+                    reference: r,
+                },
+            ) {
                 warn!("linked-block cycle: {e}");
                 return;
             }
@@ -1441,7 +1738,9 @@ fn linked_block(world: &mut World, arg: &str) {
             let _ = clog.save(&store);
         }
         Some("versions") => {
-            let Ok(d) = lb::versions_document() else { return };
+            let Ok(d) = lb::versions_document() else {
+                return;
+            };
             let meta = cadrs_core::DocumentMeta::new(&user, now - 600);
             if let Err(e) = store.create(&d, &meta) {
                 warn!("linked-block versions: {e}");
@@ -1451,9 +1750,18 @@ fn linked_block(world: &mut World, arg: &str) {
             world.insert_resource(doc);
         }
         Some("height") => {
-            let depth: f64 = words.next().and_then(|w| w.parse().ok()).unwrap_or(lb::EDITED_HEIGHT);
-            let Some(mut doc) = world.get_resource_mut::<crate::ActiveDocument>() else { return };
-            let studio = if doc.doc.element(lb::VERSIONS_STUDIO).is_some() { lb::VERSIONS_STUDIO } else { lb::STUDIO };
+            let depth: f64 = words
+                .next()
+                .and_then(|w| w.parse().ok())
+                .unwrap_or(lb::EDITED_HEIGHT);
+            let Some(mut doc) = world.get_resource_mut::<crate::ActiveDocument>() else {
+                return;
+            };
+            let studio = if doc.doc.element(lb::VERSIONS_STUDIO).is_some() {
+                lb::VERSIONS_STUDIO
+            } else {
+                lb::STUDIO
+            };
             if let Err(e) = lb::set_height(&mut *doc, studio, depth) {
                 warn!("linked-block height: {e}");
             }
@@ -1461,7 +1769,9 @@ fn linked_block(world: &mut World, arg: &str) {
         Some("consumer") => {
             use cadrs_core::external::{InsertLinked, SourceRef};
             let n: usize = words.next().and_then(|w| w.parse().ok()).unwrap_or(3);
-            let Some(v) = crate::linked::resolver(world).0.latest(lb::DOCUMENT) else { return };
+            let Some(v) = crate::linked::resolver(world).0.latest(lb::DOCUMENT) else {
+                return;
+            };
             let r = SourceRef::version(Some(lb::DOCUMENT), lb::STUDIO, v.id());
             let doc = world.resource::<crate::ActiveDocument>().doc.clone();
             let snap = match crate::linked::resolver(world).0.resolve(r, &doc, None) {
@@ -1471,29 +1781,52 @@ fn linked_block(world: &mut World, arg: &str) {
                     return;
                 }
             };
-            let mut next = doc.element(lb::CONSUMER_ASSEMBLY).and_then(|e| e.assembly_model()).map(|a| a.instances.len() as f64).unwrap_or(0.0);
+            let mut next = doc
+                .element(lb::CONSUMER_ASSEMBLY)
+                .and_then(|e| e.assembly_model())
+                .map(|a| a.instances.len() as f64)
+                .unwrap_or(0.0);
             let instances: Vec<cadrs_core::assembly::Instance> = (0..n)
                 .map(|_| {
                     let x = next * 70.0;
                     next += 1.0;
                     cadrs_core::assembly::Instance::new(
                         cadrs_core::assembly::InstanceId::new(),
-                        cadrs_core::assembly::InstanceSource::Part { element: snap.root, part: lb::PART },
+                        cadrs_core::assembly::InstanceSource::Part {
+                            element: snap.root,
+                            part: lb::PART,
+                        },
                         cadrs_core::assembly::Pose::translation([x, 0.0, 0.0]),
                     )
                 })
                 .collect();
-            if let Err(e) = world.resource_mut::<crate::ActiveDocument>().execute(&InsertLinked { element: lb::CONSUMER_ASSEMBLY, snapshot: snap, instances, reference: r }) {
+            if let Err(e) = world
+                .resource_mut::<crate::ActiveDocument>()
+                .execute(&InsertLinked {
+                    element: lb::CONSUMER_ASSEMBLY,
+                    snapshot: snap,
+                    instances,
+                    reference: r,
+                })
+            {
                 warn!("linked-block consumer: {e}");
             }
         }
         Some("chain") => {
             use cadrs_core::external::{InsertLinked, SourceRef, snapshot};
-            let Ok(Some(alog)) = HistoryLog::load(&store, lb::DOCUMENT) else { return };
-            let Some(va) = alog.versions().first().cloned() else { return };
-            let Some(a) = alog.document_at_version(va.id()) else { return };
+            let Ok(Some(alog)) = HistoryLog::load(&store, lb::DOCUMENT) else {
+                return;
+            };
+            let Some(va) = alog.versions().first().cloned() else {
+                return;
+            };
+            let Some(a) = alog.document_at_version(va.id()) else {
+                return;
+            };
             let ra = SourceRef::version(Some(lb::DOCUMENT), lb::STUDIO, va.id());
-            let Ok(snap) = snapshot(&a, ra, va.name()) else { return };
+            let Ok(snap) = snapshot(&a, ra, va.name()) else {
+                return;
+            };
             let mut b = cadrs_core::Document::empty("Block sub");
             b.id = cadrs_core::DocumentId::from_u128(0x3a61_0000_0000_0000_0000_0000_0000_0600);
             let mut sub = cadrs_core::Element::assembly("Sub");
@@ -1502,11 +1835,22 @@ fn linked_block(world: &mut World, arg: &str) {
             b.elements.push(sub);
             let inst = cadrs_core::assembly::Instance::new(
                 cadrs_core::assembly::InstanceId::new(),
-                cadrs_core::assembly::InstanceSource::Part { element: snap.root, part: lb::PART },
+                cadrs_core::assembly::InstanceSource::Part {
+                    element: snap.root,
+                    part: lb::PART,
+                },
                 cadrs_core::assembly::Pose::IDENTITY,
             );
             let mut h = cadrs_core::History::default();
-            if let Err(e) = h.execute(&mut b, &InsertLinked { element: sub_id, snapshot: snap, instances: vec![inst], reference: ra }) {
+            if let Err(e) = h.execute(
+                &mut b,
+                &InsertLinked {
+                    element: sub_id,
+                    snapshot: snap,
+                    instances: vec![inst],
+                    reference: ra,
+                },
+            ) {
                 warn!("linked-block chain: {e}");
                 return;
             }
@@ -1519,13 +1863,25 @@ fn linked_block(world: &mut World, arg: &str) {
             let vb = blog.create_version("V1", "Sub with the block", now - 1_700, &user);
             let _ = blog.save(&store);
             let rb = SourceRef::version(Some(b.id), sub_id, vb);
-            let Ok(snap_b) = snapshot(&b, rb, "V1") else { return };
+            let Ok(snap_b) = snapshot(&b, rb, "V1") else {
+                return;
+            };
             let inst = cadrs_core::assembly::Instance::new(
                 cadrs_core::assembly::InstanceId::new(),
-                cadrs_core::assembly::InstanceSource::Assembly { element: snap_b.root },
+                cadrs_core::assembly::InstanceSource::Assembly {
+                    element: snap_b.root,
+                },
                 cadrs_core::assembly::Pose::IDENTITY,
             );
-            if let Err(e) = world.resource_mut::<crate::ActiveDocument>().execute(&InsertLinked { element: lb::CONSUMER_ASSEMBLY, snapshot: snap_b, instances: vec![inst], reference: rb }) {
+            if let Err(e) = world
+                .resource_mut::<crate::ActiveDocument>()
+                .execute(&InsertLinked {
+                    element: lb::CONSUMER_ASSEMBLY,
+                    snapshot: snap_b,
+                    instances: vec![inst],
+                    reference: rb,
+                })
+            {
                 warn!("linked-block chain: {e}");
             }
         }
@@ -1533,11 +1889,19 @@ fn linked_block(world: &mut World, arg: &str) {
         // version (a second consumer for Where used).
         Some("second-consumer") => {
             use cadrs_core::external::{InsertLinked, SourceRef, snapshot};
-            let Ok(Some(alog)) = HistoryLog::load(&store, lb::DOCUMENT) else { return };
-            let Some(va) = alog.versions().first().cloned() else { return };
-            let Some(a) = alog.document_at_version(va.id()) else { return };
+            let Ok(Some(alog)) = HistoryLog::load(&store, lb::DOCUMENT) else {
+                return;
+            };
+            let Some(va) = alog.versions().first().cloned() else {
+                return;
+            };
+            let Some(a) = alog.document_at_version(va.id()) else {
+                return;
+            };
             let ra = SourceRef::version(Some(lb::DOCUMENT), lb::STUDIO, va.id());
-            let Ok(snap) = snapshot(&a, ra, va.name()) else { return };
+            let Ok(snap) = snapshot(&a, ra, va.name()) else {
+                return;
+            };
             let mut d = cadrs_core::Document::empty("Block user 2");
             d.id = cadrs_core::DocumentId::from_u128(0x3a61_0000_0000_0000_0000_0000_0000_0700);
             let asm = cadrs_core::Element::assembly("Assembly 1");
@@ -1545,34 +1909,67 @@ fn linked_block(world: &mut World, arg: &str) {
             d.elements.push(asm);
             let inst = cadrs_core::assembly::Instance::new(
                 cadrs_core::assembly::InstanceId::new(),
-                cadrs_core::assembly::InstanceSource::Part { element: snap.root, part: lb::PART },
+                cadrs_core::assembly::InstanceSource::Part {
+                    element: snap.root,
+                    part: lb::PART,
+                },
                 cadrs_core::assembly::Pose::IDENTITY,
             );
             let mut h = cadrs_core::History::default();
-            if h.execute(&mut d, &InsertLinked { element: asm_id, snapshot: snap, instances: vec![inst], reference: ra }).is_ok()
+            if h.execute(
+                &mut d,
+                &InsertLinked {
+                    element: asm_id,
+                    snapshot: snap,
+                    instances: vec![inst],
+                    reference: ra,
+                },
+            )
+            .is_ok()
                 && let Err(e) = store.create(&d, &cadrs_core::DocumentMeta::new(&user, now - 900))
             {
                 warn!("linked-block second-consumer: {e}");
             }
         }
         Some("open-sub") => {
-            let Ok(file) = store.load(cadrs_core::DocumentId::from_u128(0x3a61_0000_0000_0000_0000_0000_0000_0600)) else { return };
+            let Ok(file) = store.load(cadrs_core::DocumentId::from_u128(
+                0x3a61_0000_0000_0000_0000_0000_0000_0600,
+            )) else {
+                return;
+            };
             let mut doc = crate::ActiveDocument::stored(file.document, file.meta);
-            doc.set_active(cadrs_core::ElementId::from_u128(0x3a61_0000_0000_0000_0000_0000_0000_0601));
+            doc.set_active(cadrs_core::ElementId::from_u128(
+                0x3a61_0000_0000_0000_0000_0000_0000_0601,
+            ));
             world.insert_resource(doc);
         }
         Some("drawing") => {
             let doc = world.resource::<crate::ActiveDocument>().doc.clone();
-            let Some(copy) = doc.linked.iter().find(|l| l.source.element == lb::STUDIO).map(|l| l.id()) else { return };
+            let Some(copy) = doc
+                .linked
+                .iter()
+                .find(|l| l.source.element == lb::STUDIO)
+                .map(|l| l.id())
+            else {
+                return;
+            };
             add_front_view_drawing(world, copy);
         }
         Some("versions-instance") => {
             let inst = cadrs_core::assembly::Instance::new(
                 cadrs_core::assembly::InstanceId::new(),
-                cadrs_core::assembly::InstanceSource::Part { element: lb::VERSIONS_STUDIO, part: lb::PART },
+                cadrs_core::assembly::InstanceSource::Part {
+                    element: lb::VERSIONS_STUDIO,
+                    part: lb::PART,
+                },
                 cadrs_core::assembly::Pose::IDENTITY,
             );
-            if let Err(e) = world.resource_mut::<crate::ActiveDocument>().execute(&cadrs_core::assembly::commands::InsertInstance { element: lb::VERSIONS_ASSEMBLY, instance: inst }) {
+            if let Err(e) = world.resource_mut::<crate::ActiveDocument>().execute(
+                &cadrs_core::assembly::commands::InsertInstance {
+                    element: lb::VERSIONS_ASSEMBLY,
+                    instance: inst,
+                },
+            ) {
                 warn!("linked-block versions-instance: {e}");
             }
         }
@@ -1584,30 +1981,85 @@ fn linked_block(world: &mut World, arg: &str) {
             use cadrs_core::assembly::connector::{ConnectorFrame, MateConnector};
             use cadrs_core::assembly::mate::{Mate, MateFeature, MateId, MateKind, MateType};
             let doc = world.resource::<crate::ActiveDocument>().doc.clone();
-            let Some(model) = doc.element(lb::VERSIONS_ASSEMBLY).and_then(|e| e.assembly_model()).cloned() else { return };
-            let (Some(v1), Some(ws)) = (model.instances.iter().find(|i| i.link.is_some()), model.instances.iter().find(|i| i.link.is_none())) else { return };
+            let Some(model) = doc
+                .element(lb::VERSIONS_ASSEMBLY)
+                .and_then(|e| e.assembly_model())
+                .cloned()
+            else {
+                return;
+            };
+            let (Some(v1), Some(ws)) = (
+                model.instances.iter().find(|i| i.link.is_some()),
+                model.instances.iter().find(|i| i.link.is_none()),
+            ) else {
+                return;
+            };
             let (v1, ws) = (v1.id, ws.id);
-            let top = doc.element(lb::VERSIONS_STUDIO).and_then(|e| e.feature(lb::EXTRUDE)).and_then(|f| f.extrude()).map(|e| e.depth).unwrap_or(lb::HEIGHT);
-            let ws_pose = model.instance(ws).map(|i| i.pose).unwrap_or(cadrs_core::assembly::Pose::IDENTITY);
+            let top = doc
+                .element(lb::VERSIONS_STUDIO)
+                .and_then(|e| e.feature(lb::EXTRUDE))
+                .and_then(|f| f.extrude())
+                .map(|e| e.depth)
+                .unwrap_or(lb::HEIGHT);
+            let ws_pose = model
+                .instance(ws)
+                .map(|i| i.pose)
+                .unwrap_or(cadrs_core::assembly::Pose::IDENTITY);
             let mut active = world.resource_mut::<crate::ActiveDocument>();
-            let _ = active.execute(&SetInstancesFixed { element: lb::VERSIONS_ASSEMBLY, instances: vec![ws], fixed: true });
-            let bottom = ConnectorFrame { origin: [25.0, 15.0, 0.0], ..ConnectorFrame::default() };
-            let top = ConnectorFrame { origin: [25.0, 15.0, top], ..ConnectorFrame::default() };
-            let m = Mate::new(MateType::Fastened, MateConnector::at(v1, bottom), MateConnector::at(ws, top));
+            let _ = active.execute(&SetInstancesFixed {
+                element: lb::VERSIONS_ASSEMBLY,
+                instances: vec![ws],
+                fixed: true,
+            });
+            let bottom = ConnectorFrame {
+                origin: [25.0, 15.0, 0.0],
+                ..ConnectorFrame::default()
+            };
+            let top = ConnectorFrame {
+                origin: [25.0, 15.0, top],
+                ..ConnectorFrame::default()
+            };
+            let m = Mate::new(
+                MateType::Fastened,
+                MateConnector::at(v1, bottom),
+                MateConnector::at(ws, top),
+            );
             let f = MateFeature::new(MateId::new(), "Fastened 1", MateKind::Mate(m));
             // The V1 block lands on the workspace block: its pose is the workspace one moved up.
             let mut pose = ws_pose;
             pose.translation[2] += top.origin[2];
-            if let Err(e) = active.execute(&AddMateFeature { element: lb::VERSIONS_ASSEMBLY, feature: f, poses: vec![(v1, pose)] }) {
+            if let Err(e) = active.execute(&AddMateFeature {
+                element: lb::VERSIONS_ASSEMBLY,
+                feature: f,
+                poses: vec![(v1, pose)],
+            }) {
                 warn!("linked-block mate: {e}");
             }
         }
         // P3G.2 (DV2.3): the Block part's part number in the open document's workspace.
         Some("part-number") => {
-            use cadrs_core::properties::{PropertyKey, PropertyOwner, PropertyValue, SetProperties};
+            use cadrs_core::properties::{
+                PropertyKey, PropertyOwner, PropertyValue, SetProperties,
+            };
             let n = words.next().unwrap_or("BLK-002").to_string();
-            let studio = if world.resource::<crate::ActiveDocument>().doc.element(lb::VERSIONS_STUDIO).is_some() { lb::VERSIONS_STUDIO } else { lb::STUDIO };
-            let cmd = SetProperties { owners: vec![PropertyOwner::Part { element: studio, part: lb::PART }], values: vec![(PropertyKey::PartNumber, PropertyValue::Text(n))], label: "Set part number".into() };
+            let studio = if world
+                .resource::<crate::ActiveDocument>()
+                .doc
+                .element(lb::VERSIONS_STUDIO)
+                .is_some()
+            {
+                lb::VERSIONS_STUDIO
+            } else {
+                lb::STUDIO
+            };
+            let cmd = SetProperties {
+                owners: vec![PropertyOwner::Part {
+                    element: studio,
+                    part: lb::PART,
+                }],
+                values: vec![(PropertyKey::PartNumber, PropertyValue::Text(n))],
+                label: "Set part number".into(),
+            };
             if let Err(e) = world.resource_mut::<crate::ActiveDocument>().execute(&cmd) {
                 warn!("linked-block part-number: {e}");
             }

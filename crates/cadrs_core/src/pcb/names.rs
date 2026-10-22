@@ -48,4 +48,3 @@ pub fn role_of(name: &str) -> Option<PartRole> {
         (n.contains("board") || n.contains("pcb")).then_some(PartRole::Board)
     }
 }
-

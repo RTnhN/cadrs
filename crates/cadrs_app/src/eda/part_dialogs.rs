@@ -48,23 +48,59 @@ fn close_all(w: &mut World) {
 
 fn spawn_dialog(w: &mut World, d: Dialog) {
     let theme = w.resource::<Theme>().clone();
-    w.spawn((d.build(&theme), PartDialog, DespawnOnExit(AppState::Document)));
+    w.spawn((
+        d.build(&theme),
+        PartDialog,
+        DespawnOnExit(AppState::Document),
+    ));
 }
 
 fn row(p: &mut ChildSpawner, t: &Theme, label: &str, f: impl FnOnce(&mut ChildSpawner)) {
-    p.spawn(Node { align_items: AlignItems::Center, column_gap: Val::Px(10.0), height: Val::Px(32.0), ..default() }).with_children(|r| {
-        r.spawn((t.text(label, t.font_base, FontWeight::MEDIUM, t.muted_foreground), Node { width: Val::Px(150.0), ..default() }));
+    p.spawn(Node {
+        align_items: AlignItems::Center,
+        column_gap: Val::Px(10.0),
+        height: Val::Px(32.0),
+        ..default()
+    })
+    .with_children(|r| {
+        r.spawn((
+            t.text(label, t.font_base, FontWeight::MEDIUM, t.muted_foreground),
+            Node {
+                width: Val::Px(150.0),
+                ..default()
+            },
+        ));
         f(r);
     });
 }
 
-fn text_row(p: &mut ChildSpawner, t: &Theme, label: &str, name: &'static str, value: String, width: f32) {
+fn text_row(
+    p: &mut ChildSpawner,
+    t: &Theme,
+    label: &str,
+    name: &'static str,
+    value: String,
+    width: f32,
+) {
     row(p, t, label, |r| {
-        r.spawn(TextInput::new(name).value(value).width(Val::Px(width)).height(26.0).build(t));
+        r.spawn(
+            TextInput::new(name)
+                .value(value)
+                .width(Val::Px(width))
+                .height(26.0)
+                .build(t),
+        );
     });
 }
 
-fn select_row(p: &mut ChildSpawner, t: &Theme, label: &str, name: &'static str, options: &[&str], selected: usize) {
+fn select_row(
+    p: &mut ChildSpawner,
+    t: &Theme,
+    label: &str,
+    name: &'static str,
+    options: &[&str],
+    selected: usize,
+) {
     row(p, t, label, |r| {
         let mut s = Select::new(name).bordered().width(Val::Px(200.0));
         for o in options {
@@ -82,7 +118,9 @@ fn ok_cancel(f: &mut ChildSpawner, t: &Theme, ok: &'static str, run: fn(&mut Wor
         }),
     ));
     f.spawn((
-        cadrs_ui::Button::new(format!("{ok}-cancel")).label("Cancel").build(t),
+        cadrs_ui::Button::new(format!("{ok}-cancel"))
+            .label("Cancel")
+            .build(t),
         observe(|_: On<Activate>, mut commands: Commands| {
             commands.queue(close_all);
         }),
@@ -91,12 +129,16 @@ fn ok_cancel(f: &mut ChildSpawner, t: &Theme, ok: &'static str, run: fn(&mut Wor
 
 fn select_index(w: &mut World, name: &str) -> usize {
     let mut q = w.query::<(&Name, &SelectState)>();
-    q.iter(w).find(|(n, _)| n.as_str() == name).map_or(0, |(_, s)| s.selected)
+    q.iter(w)
+        .find(|(n, _)| n.as_str() == name)
+        .map_or(0, |(_, s)| s.selected)
 }
 
 fn checkbox(w: &mut World, name: &str) -> bool {
     let mut q = w.query::<(&Name, &CheckboxState)>();
-    q.iter(w).find(|(n, _)| n.as_str() == name).is_some_and(|(_, s)| s.checked)
+    q.iter(w)
+        .find(|(n, _)| n.as_str() == name)
+        .is_some_and(|(_, s)| s.checked)
 }
 
 fn length(w: &mut World, name: &str, unit: Unit) -> Result<Nm, String> {
@@ -129,7 +171,12 @@ const PIN_TYPES: [(&str, PinType); 12] = [
     ("Open emitter", PinType::OpenEmitter),
     ("Unconnected", PinType::NoConnect),
 ];
-const ORIENTATIONS: [(&str, Orientation); 4] = [("Right", Orientation::Right), ("Left", Orientation::Left), ("Up", Orientation::Up), ("Down", Orientation::Down)];
+const ORIENTATIONS: [(&str, Orientation); 4] = [
+    ("Right", Orientation::Right),
+    ("Left", Orientation::Left),
+    ("Up", Orientation::Up),
+    ("Down", Orientation::Down),
+];
 
 /// Pin properties: a new pin (`None`) or pin `i`.
 pub fn open_pin(w: &mut World, i: Option<usize>) {
@@ -139,8 +186,22 @@ pub fn open_pin(w: &mut World, i: Option<usize>) {
     w.insert_resource(Editing(i));
     let props = match &existing {
         Some(p) => {
-            let o = ORIENTATIONS.iter().find(|(_, o)| o.angle() == p.angle).map_or(Orientation::Right, |x| x.1);
-            PinProps { name: p.name.clone(), number: p.number.clone(), kind: p.kind, shape: p.shape, at: p.at, orientation: o, length: p.length, name_size: p.name_size, number_size: p.number_size, visible: p.visible }
+            let o = ORIENTATIONS
+                .iter()
+                .find(|(_, o)| o.angle() == p.angle)
+                .map_or(Orientation::Right, |x| x.1);
+            PinProps {
+                name: p.name.clone(),
+                number: p.number.clone(),
+                kind: p.kind,
+                shape: p.shape,
+                at: p.at,
+                orientation: o,
+                length: p.length,
+                name_size: p.name_size,
+                number_size: p.number_size,
+                visible: p.visible,
+            }
         }
         None => {
             let n = s.pins.len() + 1;
@@ -156,14 +217,62 @@ pub fn open_pin(w: &mut World, i: Option<usize>) {
             .width(460.0)
             .body(move |p| {
                 text_row(p, &t, "Pin name", "eda-pin-name", props.name.clone(), 160.0);
-                text_row(p, &t, "Pin number", "eda-pin-number", props.number.clone(), 160.0);
-                let ti = PIN_TYPES.iter().position(|(_, k)| *k == props.kind).unwrap_or(4);
-                select_row(p, &t, "Electrical type", "eda-pin-type", &PIN_TYPES.map(|x| x.0), ti);
-                let oi = ORIENTATIONS.iter().position(|(_, o)| *o == props.orientation).unwrap_or(0);
-                select_row(p, &t, "Orientation", "eda-pin-orientation", &ORIENTATIONS.map(|x| x.0), oi);
-                text_row(p, &t, "X position (mils)", "eda-pin-x", mils(props.at.x), 120.0);
-                text_row(p, &t, "Y position (mils)", "eda-pin-y", mils(props.at.y), 120.0);
-                text_row(p, &t, "Pin length (mils)", "eda-pin-length", mils(props.length), 120.0);
+                text_row(
+                    p,
+                    &t,
+                    "Pin number",
+                    "eda-pin-number",
+                    props.number.clone(),
+                    160.0,
+                );
+                let ti = PIN_TYPES
+                    .iter()
+                    .position(|(_, k)| *k == props.kind)
+                    .unwrap_or(4);
+                select_row(
+                    p,
+                    &t,
+                    "Electrical type",
+                    "eda-pin-type",
+                    &PIN_TYPES.map(|x| x.0),
+                    ti,
+                );
+                let oi = ORIENTATIONS
+                    .iter()
+                    .position(|(_, o)| *o == props.orientation)
+                    .unwrap_or(0);
+                select_row(
+                    p,
+                    &t,
+                    "Orientation",
+                    "eda-pin-orientation",
+                    &ORIENTATIONS.map(|x| x.0),
+                    oi,
+                );
+                text_row(
+                    p,
+                    &t,
+                    "X position (mils)",
+                    "eda-pin-x",
+                    mils(props.at.x),
+                    120.0,
+                );
+                text_row(
+                    p,
+                    &t,
+                    "Y position (mils)",
+                    "eda-pin-y",
+                    mils(props.at.y),
+                    120.0,
+                );
+                text_row(
+                    p,
+                    &t,
+                    "Pin length (mils)",
+                    "eda-pin-length",
+                    mils(props.length),
+                    120.0,
+                );
             })
             .footer(move |f| ok_cancel(f, &tf, "eda-pin-ok", accept_pin)),
     );
@@ -175,7 +284,11 @@ fn accept_pin(w: &mut World) {
     let number = ui::text_value(w, "eda-pin-number");
     let kind = PIN_TYPES[select_index(w, "eda-pin-type").min(11)].1;
     let orientation = ORIENTATIONS[select_index(w, "eda-pin-orientation").min(3)].1;
-    let (x, y, len) = (length(w, "eda-pin-x", Unit::Mil), length(w, "eda-pin-y", Unit::Mil), length(w, "eda-pin-length", Unit::Mil));
+    let (x, y, len) = (
+        length(w, "eda-pin-x", Unit::Mil),
+        length(w, "eda-pin-y", Unit::Mil),
+        length(w, "eda-pin-length", Unit::Mil),
+    );
     close_all(w);
     commit(w, if i.is_some() { "Edit pin" } else { "Add pin" }, |c| {
         let mut p = PinProps::new(&name, &number, Pt::new(x?, y?), orientation);
@@ -190,7 +303,10 @@ fn accept_pin(w: &mut World) {
         }
         let off = cadrs_eda::lib_edit::off_grid_pins(s);
         if !off.is_empty() {
-            return Err(format!("Pin {} is off the 50 mil grid: it couldn't connect to wires", off.join(", ")));
+            return Err(format!(
+                "Pin {} is off the 50 mil grid: it couldn't connect to wires",
+                off.join(", ")
+            ));
         }
         Ok(())
     });
@@ -203,7 +319,12 @@ pub fn open_symbol_props(w: &mut World) {
     let Some((_, _, c)) = current(w) else { return };
     let s = c.symbol.unwrap();
     let get = |n: &str| s.field(n).map_or(String::new(), |f| f.value().to_string());
-    let (name, reference, value, footprint) = (s.name().to_string(), cadrs_eda::sch_edit::prefix(&get(fields::REFERENCE)).to_string(), get(fields::VALUE), get(fields::FOOTPRINT));
+    let (name, reference, value, footprint) = (
+        s.name().to_string(),
+        cadrs_eda::sch_edit::prefix(&get(fields::REFERENCE)).to_string(),
+        get(fields::VALUE),
+        get(fields::FOOTPRINT),
+    );
     let (keywords, names, numbers) = (s.keywords.clone(), s.show_pin_names, s.show_pin_numbers);
     let lib = ui::project_library_name(&ui::studio_name(w));
     let t = w.resource::<Theme>().clone();
@@ -228,8 +349,20 @@ pub fn open_symbol_props(w: &mut World) {
 }
 
 fn accept_symbol_props(w: &mut World) {
-    let v: Vec<String> = ["eda-sym-name", "eda-sym-ref", "eda-sym-value", "eda-sym-footprint", "eda-sym-keywords"].iter().map(|n| ui::text_value(w, n)).collect();
-    let (numbers, names) = (checkbox(w, "eda-sym-pin-numbers"), checkbox(w, "eda-sym-pin-names"));
+    let v: Vec<String> = [
+        "eda-sym-name",
+        "eda-sym-ref",
+        "eda-sym-value",
+        "eda-sym-footprint",
+        "eda-sym-keywords",
+    ]
+    .iter()
+    .map(|n| ui::text_value(w, n))
+    .collect();
+    let (numbers, names) = (
+        checkbox(w, "eda-sym-pin-numbers"),
+        checkbox(w, "eda-sym-pin-names"),
+    );
     close_all(w);
     commit(w, "Symbol properties", |c| {
         let s = c.symbol.as_mut().unwrap();
@@ -249,12 +382,18 @@ fn accept_symbol_props(w: &mut World) {
 // ---------------------------------------------------------------------------------------------
 // Pads (GS24)
 
-const PAD_KINDS: [(&str, PadKind); 3] = [("Through-hole", PadKind::ThroughHole), ("SMD", PadKind::Smd), ("NPTH, mechanical", PadKind::NonPlated)];
+const PAD_KINDS: [(&str, PadKind); 3] = [
+    ("Through-hole", PadKind::ThroughHole),
+    ("SMD", PadKind::Smd),
+    ("NPTH, mechanical", PadKind::NonPlated),
+];
 const PAD_SHAPES: [&str; 4] = ["Circular", "Rectangular", "Oval", "Rounded rectangle"];
 
 pub fn open_pad(w: &mut World, i: usize) {
     let Some((_, _, c)) = current(w) else { return };
-    let Some(pad) = c.footprint.unwrap().pads.get(i).cloned() else { return };
+    let Some(pad) = c.footprint.unwrap().pads.get(i).cloned() else {
+        return;
+    };
     w.insert_resource(Editing(Some(i)));
     let t = w.resource::<Theme>().clone();
     let tf = t.clone();
@@ -264,8 +403,25 @@ pub fn open_pad(w: &mut World, i: usize) {
             .title("Pad properties")
             .width(460.0)
             .body(move |p| {
-                text_row(p, &t, "Pad number", "eda-pad-number", pad.number.clone(), 120.0);
-                select_row(p, &t, "Pad type", "eda-pad-type", &PAD_KINDS.map(|x| x.0), PAD_KINDS.iter().position(|(_, k)| *k == pad.kind).unwrap_or(0));
+                text_row(
+                    p,
+                    &t,
+                    "Pad number",
+                    "eda-pad-number",
+                    pad.number.clone(),
+                    120.0,
+                );
+                select_row(
+                    p,
+                    &t,
+                    "Pad type",
+                    "eda-pad-type",
+                    &PAD_KINDS.map(|x| x.0),
+                    PAD_KINDS
+                        .iter()
+                        .position(|(_, k)| *k == pad.kind)
+                        .unwrap_or(0),
+                );
                 let si = match pad.shape {
                     PadShape::Circle => 0,
                     PadShape::Rect => 1,
@@ -273,18 +429,55 @@ pub fn open_pad(w: &mut World, i: usize) {
                     _ => 3,
                 };
                 select_row(p, &t, "Pad shape", "eda-pad-shape", &PAD_SHAPES, si);
-                text_row(p, &t, "Position X (mm)", "eda-pad-x", mm_text(pad.at.x), 120.0);
-                text_row(p, &t, "Position Y (mm)", "eda-pad-y", mm_text(pad.at.y), 120.0);
-                text_row(p, &t, "Size X (mm)", "eda-pad-w", mm_text(pad.size.w), 120.0);
-                text_row(p, &t, "Size Y (mm)", "eda-pad-h", mm_text(pad.size.h), 120.0);
-                text_row(p, &t, "Hole diameter (mm)", "eda-pad-drill", pad.drill.map_or(String::new(), |d| mm_text(d.size.w)), 120.0);
+                text_row(
+                    p,
+                    &t,
+                    "Position X (mm)",
+                    "eda-pad-x",
+                    mm_text(pad.at.x),
+                    120.0,
+                );
+                text_row(
+                    p,
+                    &t,
+                    "Position Y (mm)",
+                    "eda-pad-y",
+                    mm_text(pad.at.y),
+                    120.0,
+                );
+                text_row(
+                    p,
+                    &t,
+                    "Size X (mm)",
+                    "eda-pad-w",
+                    mm_text(pad.size.w),
+                    120.0,
+                );
+                text_row(
+                    p,
+                    &t,
+                    "Size Y (mm)",
+                    "eda-pad-h",
+                    mm_text(pad.size.h),
+                    120.0,
+                );
+                text_row(
+                    p,
+                    &t,
+                    "Hole diameter (mm)",
+                    "eda-pad-drill",
+                    pad.drill.map_or(String::new(), |d| mm_text(d.size.w)),
+                    120.0,
+                );
             })
             .footer(move |f| ok_cancel(f, &tf, "eda-pad-ok", accept_pad)),
     );
 }
 
 fn accept_pad(w: &mut World) {
-    let Some(i) = w.resource::<Editing>().0 else { return };
+    let Some(i) = w.resource::<Editing>().0 else {
+        return;
+    };
     let number = ui::text_value(w, "eda-pad-number");
     let kind = PAD_KINDS[select_index(w, "eda-pad-type").min(2)].1;
     let shape = match select_index(w, "eda-pad-shape") {
@@ -293,9 +486,16 @@ fn accept_pad(w: &mut World) {
         2 => PadShape::Oval,
         _ => PadShape::RoundRect { ratio: 0.25 },
     };
-    let vals: Vec<Result<Nm, String>> = ["eda-pad-x", "eda-pad-y", "eda-pad-w", "eda-pad-h"].iter().map(|n| length(w, n, Unit::Mm)).collect();
+    let vals: Vec<Result<Nm, String>> = ["eda-pad-x", "eda-pad-y", "eda-pad-w", "eda-pad-h"]
+        .iter()
+        .map(|n| length(w, n, Unit::Mm))
+        .collect();
     let drill_text = ui::text_value(w, "eda-pad-drill");
-    let drill = if drill_text.trim().is_empty() { Ok(None) } else { eval(&drill_text, Unit::Mm).map(Some) };
+    let drill = if drill_text.trim().is_empty() {
+        Ok(None)
+    } else {
+        eval(&drill_text, Unit::Mm).map(Some)
+    };
     close_all(w);
     commit(w, "Pad properties", |c| {
         let f = c.footprint.as_mut().unwrap();
@@ -307,7 +507,14 @@ fn accept_pad(w: &mut World) {
         p.at = Pt::new(v[0], v[1]);
         p.size = Size::new(v[2], v[3]);
         let d = drill?;
-        p.drill = if kind == PadKind::Smd { None } else { d.map(|d| Drill { size: Size::new(d, d), offset: Pt::ZERO }) };
+        p.drill = if kind == PadKind::Smd {
+            None
+        } else {
+            d.map(|d| Drill {
+                size: Size::new(d, d),
+                offset: Pt::ZERO,
+            })
+        };
         p.layers = match kind {
             PadKind::Smd => LayerSet::of(&[Layer::TopCopper, Layer::TopMask, Layer::TopPaste]),
             PadKind::NonPlated => LayerSet::of(&[Layer::TopMask, Layer::BottomMask]),
@@ -320,12 +527,21 @@ fn accept_pad(w: &mut World) {
 // ---------------------------------------------------------------------------------------------
 // Footprint properties (GS24)
 
-const MOUNTS: [(&str, MountKind); 3] = [("Through hole", MountKind::ThroughHole), ("SMD", MountKind::Smd), ("Unspecified", MountKind::Unspecified)];
+const MOUNTS: [(&str, MountKind); 3] = [
+    ("Through hole", MountKind::ThroughHole),
+    ("SMD", MountKind::Smd),
+    ("Unspecified", MountKind::Unspecified),
+];
 
 pub fn open_footprint_props(w: &mut World) {
     let Some((_, _, c)) = current(w) else { return };
     let f = c.footprint.unwrap();
-    let (name, value, mount) = (f.name().to_string(), f.field(fields::VALUE).map_or(String::new(), |v| v.text.text.text.clone()), f.attrs.mount);
+    let (name, value, mount) = (
+        f.name().to_string(),
+        f.field(fields::VALUE)
+            .map_or(String::new(), |v| v.text.text.text.clone()),
+        f.attrs.mount,
+    );
     let t = w.resource::<Theme>().clone();
     let tf = t.clone();
     spawn_dialog(
@@ -336,7 +552,14 @@ pub fn open_footprint_props(w: &mut World) {
             .body(move |p| {
                 text_row(p, &t, "Footprint name", "eda-fp-name", name, 340.0);
                 text_row(p, &t, "Value", "eda-fp-value", value, 340.0);
-                select_row(p, &t, "Component type", "eda-fp-type", &MOUNTS.map(|x| x.0), MOUNTS.iter().position(|(_, m)| *m == mount).unwrap_or(0));
+                select_row(
+                    p,
+                    &t,
+                    "Component type",
+                    "eda-fp-type",
+                    &MOUNTS.map(|x| x.0),
+                    MOUNTS.iter().position(|(_, m)| *m == mount).unwrap_or(0),
+                );
             })
             .footer(move |f| ok_cancel(f, &tf, "eda-fp-ok", accept_footprint_props)),
     );
@@ -365,8 +588,12 @@ fn accept_footprint_props(w: &mut World) {
 
 pub fn open_rect(w: &mut World, i: usize) {
     let Some((_, _, c)) = current(w) else { return };
-    let Some(s) = c.footprint.unwrap().shapes.get(i).cloned() else { return };
-    let Geom::Rect { a, b } = s.shape.geom else { return };
+    let Some(s) = c.footprint.unwrap().shapes.get(i).cloned() else {
+        return;
+    };
+    let Geom::Rect { a, b } = s.shape.geom else {
+        return;
+    };
     w.insert_resource(Editing(Some(i)));
     let width = s.shape.stroke.width;
     let t = w.resource::<Theme>().clone();
@@ -381,20 +608,47 @@ pub fn open_rect(w: &mut World, i: usize) {
                 text_row(p, &t, "Start Y (mm)", "eda-rect-y0", mm_text(a.y), 120.0);
                 text_row(p, &t, "End X (mm)", "eda-rect-x1", mm_text(b.x), 120.0);
                 text_row(p, &t, "End Y (mm)", "eda-rect-y1", mm_text(b.y), 120.0);
-                text_row(p, &t, "Line width (mm)", "eda-rect-width", mm_text(width), 120.0);
+                text_row(
+                    p,
+                    &t,
+                    "Line width (mm)",
+                    "eda-rect-width",
+                    mm_text(width),
+                    120.0,
+                );
             })
             .footer(move |f| ok_cancel(f, &tf, "eda-rect-ok", accept_rect)),
     );
 }
 
 fn accept_rect(w: &mut World) {
-    let Some(i) = w.resource::<Editing>().0 else { return };
-    let v: Vec<Result<Nm, String>> = ["eda-rect-x0", "eda-rect-y0", "eda-rect-x1", "eda-rect-y1", "eda-rect-width"].iter().map(|n| length(w, n, Unit::Mm)).collect();
+    let Some(i) = w.resource::<Editing>().0 else {
+        return;
+    };
+    let v: Vec<Result<Nm, String>> = [
+        "eda-rect-x0",
+        "eda-rect-y0",
+        "eda-rect-x1",
+        "eda-rect-y1",
+        "eda-rect-width",
+    ]
+    .iter()
+    .map(|n| length(w, n, Unit::Mm))
+    .collect();
     close_all(w);
     commit(w, "Rectangle properties", |c| {
         let v: Vec<Nm> = v.into_iter().collect::<Result<_, _>>()?;
-        let s = c.footprint.as_mut().unwrap().shapes.get_mut(i).ok_or("The shape is gone")?;
-        s.shape.geom = Geom::Rect { a: Pt::new(v[0], v[1]), b: Pt::new(v[2], v[3]) };
+        let s = c
+            .footprint
+            .as_mut()
+            .unwrap()
+            .shapes
+            .get_mut(i)
+            .ok_or("The shape is gone")?;
+        s.shape.geom = Geom::Rect {
+            a: Pt::new(v[0], v[1]),
+            b: Pt::new(v[2], v[3]),
+        };
         s.shape.stroke.width = v[4];
         Ok(())
     });
@@ -406,7 +660,11 @@ fn accept_rect(w: &mut World) {
 pub fn open_model(w: &mut World) {
     let Some((_, _, c)) = current(w) else { return };
     let f = c.footprint.unwrap();
-    let m = f.models.first().cloned().unwrap_or_else(|| cadrs_eda::footprint::Model3d::file(&format!("{}.step", f.name())));
+    let m = f
+        .models
+        .first()
+        .cloned()
+        .unwrap_or_else(|| cadrs_eda::footprint::Model3d::file(&format!("{}.step", f.name())));
     let t = w.resource::<Theme>().clone();
     let tf = t.clone();
     spawn_dialog(
@@ -415,26 +673,68 @@ pub fn open_model(w: &mut World) {
             .title("3D model")
             .width(560.0)
             .body(move |p| {
-                text_row(p, &t, "Model file", "eda-model-path", m.source.clone(), 340.0);
+                text_row(
+                    p,
+                    &t,
+                    "Model file",
+                    "eda-model-path",
+                    m.source.clone(),
+                    340.0,
+                );
                 let tb = t.clone();
                 row(p, &t, "", move |r| {
                     r.spawn((
-                        cadrs_ui::Button::new("eda-model-browse").label("Browse…").build(&tb),
+                        cadrs_ui::Button::new("eda-model-browse")
+                            .label("Browse…")
+                            .build(&tb),
                         observe(|_: On<Activate>, mut commands: Commands| {
                             commands.queue(browse_model);
                         }),
                     ));
                 });
                 for (k, axis) in ["x", "y", "z"].iter().enumerate() {
-                    let name: &'static str = ["eda-model-offset-x", "eda-model-offset-y", "eda-model-offset-z"][k];
-                    text_row(p, &t, &format!("Offset {axis} (mm)"), name, format!("{}", m.offset[k]), 100.0);
+                    let name: &'static str = [
+                        "eda-model-offset-x",
+                        "eda-model-offset-y",
+                        "eda-model-offset-z",
+                    ][k];
+                    text_row(
+                        p,
+                        &t,
+                        &format!("Offset {axis} (mm)"),
+                        name,
+                        format!("{}", m.offset[k]),
+                        100.0,
+                    );
                 }
                 for (k, axis) in ["x", "y", "z"].iter().enumerate() {
-                    let name: &'static str = ["eda-model-rot-x", "eda-model-rot-y", "eda-model-rot-z"][k];
-                    text_row(p, &t, &format!("Rotation {axis} (°)"), name, format!("{}", m.rotation[k]), 100.0);
+                    let name: &'static str =
+                        ["eda-model-rot-x", "eda-model-rot-y", "eda-model-rot-z"][k];
+                    text_row(
+                        p,
+                        &t,
+                        &format!("Rotation {axis} (°)"),
+                        name,
+                        format!("{}", m.rotation[k]),
+                        100.0,
+                    );
                 }
-                text_row(p, &t, "Scale", "eda-model-scale", format!("{}", m.scale[0]), 100.0);
-                text_row(p, &t, "Opacity", "eda-model-opacity", format!("{}", m.opacity), 100.0);
+                text_row(
+                    p,
+                    &t,
+                    "Scale",
+                    "eda-model-scale",
+                    format!("{}", m.scale[0]),
+                    100.0,
+                );
+                text_row(
+                    p,
+                    &t,
+                    "Opacity",
+                    "eda-model-opacity",
+                    format!("{}", m.opacity),
+                    100.0,
+                );
             })
             .footer(move |f| ok_cancel(f, &tf, "eda-model-ok", accept_model)),
     );
@@ -442,16 +742,36 @@ pub fn open_model(w: &mut World) {
 
 fn accept_model(w: &mut World) {
     let path = ui::text_value(w, "eda-model-path");
-    let num = |w: &mut World, n: &str| ui::text_value(w, n).trim().parse::<f64>().map_err(|_| format!("{n}: not a number"));
-    let off = [num(w, "eda-model-offset-x"), num(w, "eda-model-offset-y"), num(w, "eda-model-offset-z")];
-    let rot = [num(w, "eda-model-rot-x"), num(w, "eda-model-rot-y"), num(w, "eda-model-rot-z")];
+    let num = |w: &mut World, n: &str| {
+        ui::text_value(w, n)
+            .trim()
+            .parse::<f64>()
+            .map_err(|_| format!("{n}: not a number"))
+    };
+    let off = [
+        num(w, "eda-model-offset-x"),
+        num(w, "eda-model-offset-y"),
+        num(w, "eda-model-offset-z"),
+    ];
+    let rot = [
+        num(w, "eda-model-rot-x"),
+        num(w, "eda-model-rot-y"),
+        num(w, "eda-model-rot-z"),
+    ];
     let (scale, opacity) = (num(w, "eda-model-scale"), num(w, "eda-model-opacity"));
     close_all(w);
     commit(w, "3D model", |c| {
         let [ox, oy, oz] = off;
         let [rx, ry, rz] = rot;
         let s = scale?;
-        cadrs_eda::lib_edit::set_model(c.footprint.as_mut().unwrap(), path.trim(), [ox?, oy?, oz?], [rx?, ry?, rz?], [s, s, s], opacity?.clamp(0.0, 1.0));
+        cadrs_eda::lib_edit::set_model(
+            c.footprint.as_mut().unwrap(),
+            path.trim(),
+            [ox?, oy?, oz?],
+            [rx?, ry?, rz?],
+            [s, s, s],
+            opacity?.clamp(0.0, 1.0),
+        );
         Ok(())
     });
 }
@@ -461,13 +781,24 @@ fn browse_model(w: &mut World) {
     let theme = w.resource::<Theme>().clone();
     let dir = std::env::current_dir().unwrap_or_default();
     let mut c = w.commands();
-    cadrs_ui::file_picker::open_file_picker(&mut c, &theme, "eda-model-picker", "Choose a 3D model", "eda-model-file", dir, &["step", "stp", "wrl", "obj"]);
+    cadrs_ui::file_picker::open_file_picker(
+        &mut c,
+        &theme,
+        "eda-model-picker",
+        "Choose a 3D model",
+        "eda-model-file",
+        dir,
+        &["step", "stp", "wrl", "obj"],
+    );
     w.flush();
 }
 
 /// A picked model file is stored with the document (a blob) and linked to the footprint's
 /// model at once; the dialog's offset and rotation still apply on OK.
-fn on_model_picked(mut msgs: MessageReader<cadrs_ui::file_picker::FilePicked>, mut commands: Commands) {
+fn on_model_picked(
+    mut msgs: MessageReader<cadrs_ui::file_picker::FilePicked>,
+    mut commands: Commands,
+) {
     for m in msgs.read() {
         if m.tag != "eda-model-file" {
             continue;
@@ -481,7 +812,10 @@ fn on_model_picked(mut msgs: MessageReader<cadrs_ui::file_picker::FilePicked>, m
                     return;
                 }
             };
-            let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+            let name = path
+                .file_name()
+                .map(|n| n.to_string_lossy().into_owned())
+                .unwrap_or_default();
             let hash = cadrs_core::blobs::insert(bytes);
             let linked = commit(w, "3D model file", |c| {
                 let f = c.footprint.as_mut().unwrap();
@@ -501,14 +835,22 @@ fn on_model_picked(mut msgs: MessageReader<cadrs_ui::file_picker::FilePicked>, m
 }
 
 pub fn register(app: &mut App) {
-    app.add_systems(Update, (on_model_picked, refresh_pin_table).run_if(in_state(AppState::Document)));
+    app.add_systems(
+        Update,
+        (on_model_picked, refresh_pin_table).run_if(in_state(AppState::Document)),
+    );
 }
 
 // ---------------------------------------------------------------------------------------------
 // Pin table (symbol editor): every pin as a row; a quick "add pins" list
 
 /// Which side of the body a pin sits on, and the direction it points (into the body).
-const SIDES: [(&str, f64); 4] = [("Left", 0.0), ("Right", 180.0), ("Top", 270.0), ("Bottom", 90.0)];
+const SIDES: [(&str, f64); 4] = [
+    ("Left", 0.0),
+    ("Right", 180.0),
+    ("Top", 270.0),
+    ("Bottom", 90.0),
+];
 
 #[derive(Clone, Debug)]
 struct PinRow {
@@ -528,7 +870,10 @@ struct PinTable {
 }
 
 fn side_of(angle: f64) -> usize {
-    SIDES.iter().position(|(_, a)| (angle.rem_euclid(360.0) - a).abs() < 1.0).unwrap_or(0)
+    SIDES
+        .iter()
+        .position(|(_, a)| (angle.rem_euclid(360.0) - a).abs() < 1.0)
+        .unwrap_or(0)
 }
 
 pub fn open_pin_table(w: &mut World) {
@@ -538,9 +883,22 @@ pub fn open_pin_table(w: &mut World) {
         .pins
         .iter()
         .enumerate()
-        .map(|(i, p)| PinRow { orig: Some(i), number: p.number.clone(), name: p.name.clone(), kind: PIN_TYPES.iter().position(|(_, k)| *k == p.kind).unwrap_or(4), side: side_of(p.angle) })
+        .map(|(i, p)| PinRow {
+            orig: Some(i),
+            number: p.number.clone(),
+            name: p.name.clone(),
+            kind: PIN_TYPES
+                .iter()
+                .position(|(_, k)| *k == p.kind)
+                .unwrap_or(4),
+            side: side_of(p.angle),
+        })
         .collect();
-    w.insert_resource(PinTable { rows, generation: 0, shown: None });
+    w.insert_resource(PinTable {
+        rows,
+        generation: 0,
+        shown: None,
+    });
     let t = w.resource::<Theme>().clone();
     let tf = t.clone();
     spawn_dialog(
@@ -573,7 +931,10 @@ pub fn open_pin_table(w: &mut World) {
 
 /// The rows as edited in the dialog.
 fn read_pin_rows(w: &mut World) -> Vec<PinRow> {
-    let rows = w.get_resource::<PinTable>().map(|t| t.rows.clone()).unwrap_or_default();
+    let rows = w
+        .get_resource::<PinTable>()
+        .map(|t| t.rows.clone())
+        .unwrap_or_default();
     rows.into_iter()
         .enumerate()
         .map(|(i, r)| PinRow {
@@ -590,9 +951,21 @@ fn add_pin_rows(w: &mut World) {
     let mut rows = read_pin_rows(w);
     let text = ui::text_value(w, "eda-pins-add");
     let side = select_index(w, "eda-pins-add-side");
-    for item in text.split([',', ';']).map(str::trim).filter(|s| !s.is_empty()) {
-        let (number, name) = item.split_once(char::is_whitespace).map_or((item, item), |(a, b)| (a, b.trim()));
-        rows.push(PinRow { orig: None, number: number.into(), name: name.into(), kind: 4, side });
+    for item in text
+        .split([',', ';'])
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+    {
+        let (number, name) = item
+            .split_once(char::is_whitespace)
+            .map_or((item, item), |(a, b)| (a, b.trim()));
+        rows.push(PinRow {
+            orig: None,
+            number: number.into(),
+            name: name.into(),
+            kind: 4,
+            side,
+        });
     }
     ui::set_text_value(w, "eda-pins-add", "");
     let mut t = w.resource_mut::<PinTable>();
@@ -612,34 +985,66 @@ fn delete_pin_row(w: &mut World, i: usize) {
 
 /// Rebuilds the rows when they change.
 fn refresh_pin_table(world: &mut World) {
-    let Some(t) = world.get_resource::<PinTable>() else { return };
+    let Some(t) = world.get_resource::<PinTable>() else {
+        return;
+    };
     if t.shown == Some(t.generation) {
         return;
     }
     let (rows, generation) = (t.rows.clone(), t.generation);
     let mut q = world.query::<(Entity, &Name)>();
-    let Some(list) = q.iter(world).find(|(_, n)| n.as_str() == "eda-pins-list").map(|(e, _)| e) else { return };
+    let Some(list) = q
+        .iter(world)
+        .find(|(_, n)| n.as_str() == "eda-pins-list")
+        .map(|(e, _)| e)
+    else {
+        return;
+    };
     world.resource_mut::<PinTable>().shown = Some(generation);
     let th = world.resource::<Theme>().clone();
     let mut commands = world.commands();
     commands.entity(list).despawn_children();
     commands.entity(list).with_children(|l| {
         for (i, r) in rows.into_iter().enumerate() {
-            l.spawn(Node { column_gap: Val::Px(6.0), align_items: AlignItems::Center, ..default() }).with_children(|row| {
-                row.spawn(TextInput::new(format!("eda-pins-{i}-number")).value(r.number).width(Val::Px(70.0)).height(24.0).build(&th));
-                row.spawn(TextInput::new(format!("eda-pins-{i}-name")).value(r.name).width(Val::Px(170.0)).height(24.0).build(&th));
-                let mut k = Select::new(format!("eda-pins-{i}-type")).bordered().width(Val::Px(150.0));
+            l.spawn(Node {
+                column_gap: Val::Px(6.0),
+                align_items: AlignItems::Center,
+                ..default()
+            })
+            .with_children(|row| {
+                row.spawn(
+                    TextInput::new(format!("eda-pins-{i}-number"))
+                        .value(r.number)
+                        .width(Val::Px(70.0))
+                        .height(24.0)
+                        .build(&th),
+                );
+                row.spawn(
+                    TextInput::new(format!("eda-pins-{i}-name"))
+                        .value(r.name)
+                        .width(Val::Px(170.0))
+                        .height(24.0)
+                        .build(&th),
+                );
+                let mut k = Select::new(format!("eda-pins-{i}-type"))
+                    .bordered()
+                    .width(Val::Px(150.0));
                 for (n, _) in PIN_TYPES {
                     k = k.option(n, true);
                 }
                 row.spawn(k.selected(r.kind).build(&th));
-                let mut s = Select::new(format!("eda-pins-{i}-side")).bordered().width(Val::Px(100.0));
+                let mut s = Select::new(format!("eda-pins-{i}-side"))
+                    .bordered()
+                    .width(Val::Px(100.0));
                 for (n, _) in SIDES {
                     s = s.option(n, true);
                 }
                 row.spawn(s.selected(r.side).build(&th));
                 row.spawn((
-                    ToolButton::new(format!("eda-pins-{i}-delete"), "delete").icon_size(14.0).tooltip("Delete this pin").build(&th),
+                    ToolButton::new(format!("eda-pins-{i}-delete"), "delete")
+                        .icon_size(14.0)
+                        .tooltip("Delete this pin")
+                        .build(&th),
                     observe(move |_: On<Activate>, mut commands: Commands| {
                         commands.queue(move |w: &mut World| delete_pin_row(w, i));
                     }),
@@ -662,7 +1067,12 @@ fn accept_pin_table(w: &mut World) {
             if r.number.trim().is_empty() {
                 continue;
             }
-            let mut p = r.orig.and_then(|i| s.pins.get(i).cloned()).unwrap_or_else(|| cadrs_eda::symbol::pin("", "", PinType::Passive, (0.0, 0.0), 0.0, 2.54));
+            let mut p = r
+                .orig
+                .and_then(|i| s.pins.get(i).cloned())
+                .unwrap_or_else(|| {
+                    cadrs_eda::symbol::pin("", "", PinType::Passive, (0.0, 0.0), 0.0, 2.54)
+                });
             p.number = r.number.trim().into();
             p.name = r.name.trim().into();
             p.kind = PIN_TYPES[r.kind.min(PIN_TYPES.len() - 1)].1;
@@ -684,8 +1094,14 @@ fn accept_pin_table(w: &mut World) {
 fn array_source(w: &mut World) -> Option<usize> {
     let (_, _, c) = current(w)?;
     let f = c.footprint?;
-    let sel = w.resource::<super::part_tools::PartState>().fp_selection.clone();
-    f.pads.iter().position(|p| sel.contains(&p.id)).or(f.pads.len().checked_sub(1))
+    let sel = w
+        .resource::<super::part_tools::PartState>()
+        .fp_selection
+        .clone();
+    f.pads
+        .iter()
+        .position(|p| sel.contains(&p.id))
+        .or(f.pads.len().checked_sub(1))
 }
 
 pub fn open_pad_array(w: &mut World) {
@@ -714,15 +1130,40 @@ pub fn open_pad_array(w: &mut World) {
 }
 
 fn accept_pad_array(w: &mut World) {
-    let Some(from) = w.resource::<Editing>().0 else { return };
+    let Some(from) = w.resource::<Editing>().0 else {
+        return;
+    };
     let circle = select_index(w, "eda-array-shape") == 1;
-    let count = ui::text_value(w, "eda-array-count").trim().parse::<usize>().map_err(|_| "Pads in all: a whole number".to_string());
-    let (dx, dy) = (length(w, "eda-array-dx", Unit::Mm), length(w, "eda-array-dy", Unit::Mm));
-    let angle = ui::text_value(w, "eda-array-angle").trim().parse::<f64>().map_err(|_| "Angle step: a number".to_string());
+    let count = ui::text_value(w, "eda-array-count")
+        .trim()
+        .parse::<usize>()
+        .map_err(|_| "Pads in all: a whole number".to_string());
+    let (dx, dy) = (
+        length(w, "eda-array-dx", Unit::Mm),
+        length(w, "eda-array-dy", Unit::Mm),
+    );
+    let angle = ui::text_value(w, "eda-array-angle")
+        .trim()
+        .parse::<f64>()
+        .map_err(|_| "Angle step: a number".to_string());
     close_all(w);
     commit(w, "Pad array", |c| {
-        let shape = if circle { cadrs_eda::lib_edit::ArrayShape::Circle { center: Pt::ZERO, angle: angle? } } else { cadrs_eda::lib_edit::ArrayShape::Line { step: Pt::new(dx?, dy?) } };
-        cadrs_eda::lib_edit::pad_array(c.footprint.as_mut().unwrap(), from, count?.clamp(1, 1000), shape);
+        let shape = if circle {
+            cadrs_eda::lib_edit::ArrayShape::Circle {
+                center: Pt::ZERO,
+                angle: angle?,
+            }
+        } else {
+            cadrs_eda::lib_edit::ArrayShape::Line {
+                step: Pt::new(dx?, dy?),
+            }
+        };
+        cadrs_eda::lib_edit::pad_array(
+            c.footprint.as_mut().unwrap(),
+            from,
+            count?.clamp(1, 1000),
+            shape,
+        );
         Ok(())
     });
 }
@@ -736,15 +1177,32 @@ pub fn open_renumber(w: &mut World) {
             .title("Renumber pads")
             .width(460.0)
             .body(move |p| {
-                text_row(p, &t, "First number", "eda-renumber-first", "1".into(), 100.0);
-                select_row(p, &t, "Order", "eda-renumber-order", &["Counter-clockwise (ICs)", "Row by row from the top left"], 0);
+                text_row(
+                    p,
+                    &t,
+                    "First number",
+                    "eda-renumber-first",
+                    "1".into(),
+                    100.0,
+                );
+                select_row(
+                    p,
+                    &t,
+                    "Order",
+                    "eda-renumber-order",
+                    &["Counter-clockwise (ICs)", "Row by row from the top left"],
+                    0,
+                );
             })
             .footer(move |f| ok_cancel(f, &tf, "eda-renumber-ok", accept_renumber)),
     );
 }
 
 fn accept_renumber(w: &mut World) {
-    let first = ui::text_value(w, "eda-renumber-first").trim().parse::<u32>().map_err(|_| "First number: a whole number".to_string());
+    let first = ui::text_value(w, "eda-renumber-first")
+        .trim()
+        .parse::<u32>()
+        .map_err(|_| "First number: a whole number".to_string());
     let ccw = select_index(w, "eda-renumber-order") == 0;
     close_all(w);
     commit(w, "Renumber pads", |c| {

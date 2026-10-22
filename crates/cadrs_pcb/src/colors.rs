@@ -102,9 +102,13 @@ pub fn component_kind(package: &str) -> ComponentKind {
         ComponentKind::Connector
     } else if has(&["SOT", "SOD", "DO-", "TO-", "DIODE", "LED"]) {
         ComponentKind::Discrete
-    } else if has(&["QFP", "QFN", "BGA", "SOIC", "SOP", "DIP", "PLCC", "LCC", "DFN", "CSP"]) {
+    } else if has(&[
+        "QFP", "QFN", "BGA", "SOIC", "SOP", "DIP", "PLCC", "LCC", "DFN", "CSP",
+    ]) {
         ComponentKind::Ic
-    } else if has(&["0201", "0402", "0603", "0805", "1206", "1210", "2010", "2512", "RES", "CAP", "IND"]) {
+    } else if has(&[
+        "0201", "0402", "0603", "0805", "1206", "1210", "2010", "2512", "RES", "CAP", "IND",
+    ]) {
         ComponentKind::Passive
     } else {
         ComponentKind::Other
@@ -152,16 +156,24 @@ mod tests {
         // boxes); only small discretes are white.
         for k in [Ic, Passive, Connector, Crystal, Switch, Other] {
             let (s, v) = sat_val(k.color());
-            assert!(s >= 0.85 && v >= 0.85, "{k:?}: saturation {s:.2}, value {v:.2}");
+            assert!(
+                s >= 0.85 && v >= 0.85,
+                "{k:?}: saturation {s:.2}, value {v:.2}"
+            );
         }
         let (s, v) = sat_val(Discrete.color());
         assert!(s < 0.1 && v > 0.9);
         // Red, yellow, cyan and blue are all there.
         let hue = |c: Rgba| {
             let [r, g, b] = [c[0], c[1], c[2]].map(|v| v as f64);
-            (3f64.sqrt() * (g - b)).atan2(2.0 * r - g - b).to_degrees().rem_euclid(360.0)
+            (3f64.sqrt() * (g - b))
+                .atan2(2.0 * r - g - b)
+                .to_degrees()
+                .rem_euclid(360.0)
         };
-        let hues: Vec<f64> = [Crystal, Passive, Ic, Connector].map(|k| hue(k.color())).to_vec();
+        let hues: Vec<f64> = [Crystal, Passive, Ic, Connector]
+            .map(|k| hue(k.color()))
+            .to_vec();
         assert!(hues[0] < 10.0 || hues[0] > 350.0, "red {hues:?}");
         assert!((40.0..70.0).contains(&hues[1]), "yellow {hues:?}");
         assert!((170.0..215.0).contains(&hues[2]), "cyan {hues:?}");

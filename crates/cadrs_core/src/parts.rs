@@ -69,7 +69,9 @@ pub fn display_name<'a>(part: &'a Part, props: &'a [PartProps]) -> &'a str {
 /// Volume, surface area and centre of mass of several parts together (the Mass and section
 /// properties panel's "Parts to measure", X7): the sums, and the volume-weighted centre (the
 /// area-weighted one for surfaces only). `None` if a part has no exact properties.
-pub fn combined_mass<'a>(parts: impl IntoIterator<Item = &'a Part>) -> Option<cadrs_kernel::MassProperties> {
+pub fn combined_mass<'a>(
+    parts: impl IntoIterator<Item = &'a Part>,
+) -> Option<cadrs_kernel::MassProperties> {
     let mut volume = 0.0;
     let mut area = 0.0;
     let mut moment = nalgebra::Vector3::zeros();
@@ -128,12 +130,18 @@ pub struct MassOfMaterial {
 
 /// The material a part has, if any.
 pub fn material(part: PartId, props: &[PartProps]) -> Option<&crate::material::Material> {
-    props.iter().find(|p| p.part == part).and_then(|p| p.material.as_ref())
+    props
+        .iter()
+        .find(|p| p.part == part)
+        .and_then(|p| p.material.as_ref())
 }
 
 /// The material a part has, else the one of the part a pattern or mirror copied it from
 /// (P3.8, PS9.6).
-pub fn part_material<'a>(part: &'a Part, props: &'a [PartProps]) -> Option<&'a crate::material::Material> {
+pub fn part_material<'a>(
+    part: &'a Part,
+    props: &'a [PartProps],
+) -> Option<&'a crate::material::Material> {
     material(part.id, props)
         .or_else(|| material(part.source?, props))
         .or_else(|| part.derived.as_ref()?.material.as_ref())
@@ -174,8 +182,18 @@ pub fn mass_report(parts: &[&Part], props: &[PartProps]) -> Option<MassReport> {
     for p in parts {
         let m = p.mass?;
         // A mass override (P3B.6) stands for the density that gives it.
-        let own = |id: PartId| props.iter().find(|x| x.part == id).and_then(|x| x.properties.mass_override);
-        let rho = own(p.id).or_else(|| own(p.source?)).or_else(|| p.derived.as_ref()?.properties.mass_override).filter(|_| m.volume > 0.0).map(|kg| kg / m.volume).or_else(|| part_material(p, props).map(|mat| mat.density_kg_mm3()));
+        let own = |id: PartId| {
+            props
+                .iter()
+                .find(|x| x.part == id)
+                .and_then(|x| x.properties.mass_override)
+        };
+        let rho = own(p.id)
+            .or_else(|| own(p.source?))
+            .or_else(|| p.derived.as_ref()?.properties.mass_override)
+            .filter(|_| m.volume > 0.0)
+            .map(|kg| kg / m.volume)
+            .or_else(|| part_material(p, props).map(|mat| mat.density_kg_mm3()));
         match rho {
             Some(rho) => {
                 mass += rho * m.volume;
@@ -215,18 +233,34 @@ pub struct MassOptions {
 }
 
 /// [`mass_report`] with the panel's options (P3.10, X7).
-pub fn mass_report_with(parts: &[&Part], props: &[PartProps], opts: MassOptions) -> Option<MassReport> {
+pub fn mass_report_with(
+    parts: &[&Part],
+    props: &[PartProps],
+    opts: MassOptions,
+) -> Option<MassReport> {
     let mut r = mass_report(parts, props)?;
     if let Some(m) = opts.override_mass.filter(|m| *m > 0.0 && m.is_finite()) {
         r.mass = Some(match r.mass {
-            Some(x) => MassOfMaterial { mass: m, center_of_mass: x.center_of_mass, inertia: x.inertia * (m / x.mass) },
+            Some(x) => MassOfMaterial {
+                mass: m,
+                center_of_mass: x.center_of_mass,
+                inertia: x.inertia * (m / x.mass),
+            },
             // No materials: a uniform density m / V over all the parts.
             None => {
                 let geo = combined_mass(parts.iter().copied())?;
                 let rho = m / geo.volume.max(1e-300);
                 let c = geo.center_of_mass;
-                let inertia = parts.iter().filter_map(|p| p.mass).map(|x| x.inertia_about(c) * rho).sum();
-                MassOfMaterial { mass: m, center_of_mass: c, inertia }
+                let inertia = parts
+                    .iter()
+                    .filter_map(|p| p.mass)
+                    .map(|x| x.inertia_about(c) * rho)
+                    .sum();
+                MassOfMaterial {
+                    mass: m,
+                    center_of_mass: c,
+                    inertia,
+                }
             }
         });
     }
@@ -241,7 +275,9 @@ pub fn mass_report_with(parts: &[&Part], props: &[PartProps], opts: MassOptions)
     // Round-off (a product of ~1e-12 against moments of ~1e4) reads as zero.
     if let Some(x) = r.mass.as_mut() {
         let scale = x.inertia.iter().fold(0.0f64, |a, v| a.max(v.abs()));
-        x.inertia = x.inertia.map(|v| if v.abs() <= 1e-12 * scale { 0.0 } else { v });
+        x.inertia = x
+            .inertia
+            .map(|v| if v.abs() <= 1e-12 * scale { 0.0 } else { v });
     }
     Some(r)
 }
@@ -254,7 +290,8 @@ impl Solid {
         let face_base = self.faces.len();
         self.positions.extend(other.positions);
         self.normals.extend(other.normals);
-        self.indices.extend(other.indices.into_iter().map(|i| i + base));
+        self.indices
+            .extend(other.indices.into_iter().map(|i| i + base));
         self.faces.extend(other.faces.into_iter().map(|mut f| {
             f.first_triangle += tri_base;
             f
@@ -293,7 +330,12 @@ pub fn sketch_consumed(features: &[Feature], sketch: FeatureId) -> bool {
 fn part_with(features: &[Feature], extrude: FeatureId, face: Option<&FaceName>) -> Option<Part> {
     let i = features.iter().position(|f| f.id == extrude)?;
     let build = rebuild::build(&features[..=i]);
-    let mine = || build.parts.iter().filter(|p| p.feature == extrude || p.features.contains(&extrude));
+    let mine = || {
+        build
+            .parts
+            .iter()
+            .filter(|p| p.feature == extrude || p.features.contains(&extrude))
+    };
     face.and_then(|n| mine().find(|p| p.solid.face(n).is_some()))
         .or_else(|| mine().next())
         .cloned()
@@ -314,9 +356,18 @@ pub fn face_frame(features: &[Feature], extrude: FeatureId, face: &FaceName) -> 
 
 /// The name of a cap of the part `extrude` made: of its `index`-th region (in the extrude's
 /// list), at the far end (`end`) or on the sketch plane.
-pub fn cap_name(features: &[Feature], extrude: FeatureId, index: usize, end: bool) -> Option<FaceName> {
+pub fn cap_name(
+    features: &[Feature],
+    extrude: FeatureId,
+    index: usize,
+    end: bool,
+) -> Option<FaceName> {
     let e = features.iter().find(|f| f.id == extrude)?.extrude()?;
-    Some(crate::solid::cap_name(extrude.0, e.regions.get(index)?.key(), end))
+    Some(crate::solid::cap_name(
+        extrude.0,
+        e.regions.get(index)?.key(),
+        end,
+    ))
 }
 
 /// A sketch plane on a face of the part `extrude` made, its axes turned upright
@@ -325,9 +376,15 @@ pub fn face_plane(features: &[Feature], extrude: FeatureId, face: FaceName) -> O
     // A piece of the face a later feature split off (a cut through it: `split` > 0) exists only
     // after that feature: then it is found in the parts `features` build (as the sketch's
     // regeneration finds it, [`regenerate`]).
-    let part = part_with(features, extrude, Some(&face)).filter(|p| p.solid.face(&face).is_some()).or_else(|| {
-        rebuild::build(features).parts.iter().find(|p| p.solid.face(&face).is_some()).cloned()
-    })?;
+    let part = part_with(features, extrude, Some(&face))
+        .filter(|p| p.solid.face(&face).is_some())
+        .or_else(|| {
+            rebuild::build(features)
+                .parts
+                .iter()
+                .find(|p| p.solid.face(&face).is_some())
+                .cloned()
+        })?;
     let named = part.solid.canonical_face(&face);
     let i = part.solid.faces.iter().position(|f| f.name == named)?;
     let frame = part.solid.face_plane_as(i, &face)?;
@@ -349,7 +406,9 @@ pub fn face_plane(features: &[Feature], extrude: FeatureId, face: FaceName) -> O
 pub fn plane_feature_ref(features: &[Feature], plane: FeatureId) -> Option<PlaneRef> {
     let i = features.iter().position(|f| f.id == plane)?;
     let frame = *rebuild::build(&features[..=i]).planes.get(&plane)?;
-    Some(PlaneRef::Feature(cadrs_sketch::FeaturePlane::new(plane.0, frame)))
+    Some(PlaneRef::Feature(cadrs_sketch::FeaturePlane::new(
+        plane.0, frame,
+    )))
 }
 
 /// Moves every sketch on a face to where its face is now (after an edit changed the part).
@@ -363,7 +422,10 @@ pub fn refresh_face_planes(features: &mut [Feature]) {
 /// True when the sketch `features[i]` sits on a part face whose extrude is gone (S20.2: the
 /// sketch is in error). Cheap enough to ask every frame (no solid is built).
 pub fn sketch_face_lost(features: &[Feature], i: usize) -> bool {
-    let Some(PlaneRef::Face(fp)) = features.get(i).and_then(|f| f.sketch()).and_then(|s| s.plane)
+    let Some(PlaneRef::Face(fp)) = features
+        .get(i)
+        .and_then(|f| f.sketch())
+        .and_then(|s| s.plane)
     else {
         return false;
     };
@@ -415,7 +477,9 @@ fn solid_for_face<'a>(
 /// The face a sketch plane is on, if it resolves (see the module docs): its index and whether
 /// its name must be repaired.
 fn face_of(solid: &Solid, fp: &FacePlane) -> Option<(usize, bool)> {
-    let (i, m) = solid.resolve_face(&fp.face, Some(&fp.frame()), fp.seed).ok()?;
+    let (i, m) = solid
+        .resolve_face(&fp.face, Some(&fp.frame()), fp.seed)
+        .ok()?;
     // Only a planar face can carry a sketch.
     solid.faces[i].plane?;
     Some((i, m != cadrs_kernel::naming::Match::Exact))
@@ -441,7 +505,10 @@ pub fn regenerate(features: &mut [Feature]) {
 /// [`regenerate`] with extra reference solids by feature id and the assembly context they are in
 /// (P3B.9: a Part Studio's assembly contexts, [`crate::assembly::context`]), which sketch faces
 /// and links may name.
-pub fn regenerate_with(features: &mut [Feature], context: &[(FeatureId, u32, std::sync::Arc<Solid>)]) {
+pub fn regenerate_with(
+    features: &mut [Feature],
+    context: &[(FeatureId, u32, std::sync::Arc<Solid>)],
+) {
     for i in 0..features.len() {
         let needs_parts = features[i].sketch().is_some_and(|sk| {
             matches!(sk.plane, Some(PlaneRef::Face(_) | PlaneRef::Feature(_)))
@@ -498,11 +565,17 @@ pub fn regenerate_with(features: &mut [Feature], context: &[(FeatureId, u32, std
         // may lie in the same plane); else the studio's own parts.
         let imprint = match plane {
             PlaneRef::Face(fp) if !sk.disable_imprinting => {
-                let on = context.iter().find(|(f, ..)| f.0 == fp.feature).map(|(_, c, _)| *c);
+                let on = context
+                    .iter()
+                    .find(|(f, ..)| f.0 == fp.feature)
+                    .map(|(_, c, _)| *c);
                 let own: Vec<(FeatureId, &Solid)> = refs
                     .iter()
                     .copied()
-                    .filter(|(f, _)| !crate::assembly::context::is_context(*f) || on.is_some_and(|n| context.iter().any(|(g, c, _)| g == f && *c == n)))
+                    .filter(|(f, _)| {
+                        !crate::assembly::context::is_context(*f)
+                            || on.is_some_and(|n| context.iter().any(|(g, c, _)| g == f && *c == n))
+                    })
                     .collect();
                 crate::links::imprint(&own, &frame)
             }
@@ -531,15 +604,25 @@ pub fn regenerate_with(features: &mut [Feature], context: &[(FeatureId, u32, std
             // A Plane feature's trace follows the plane (S12.10).
             let stored = link;
             let link = match link {
-                cadrs_sketch::Link::Plane(PlaneRef::Feature(fp)) => match build.planes.get(&FeatureId(fp.feature)) {
-                    Some(f) => cadrs_sketch::Link::Plane(PlaneRef::Feature(cadrs_sketch::FeaturePlane::new(fp.feature, *f))),
-                    None => link,
-                },
+                cadrs_sketch::Link::Plane(PlaneRef::Feature(fp)) => {
+                    match build.planes.get(&FeatureId(fp.feature)) {
+                        Some(f) => cadrs_sketch::Link::Plane(PlaneRef::Feature(
+                            cadrs_sketch::FeaturePlane::new(fp.feature, *f),
+                        )),
+                        None => link,
+                    }
+                }
                 l => l,
             };
             // A flat pattern's line (P3I.6, SM14): where the flat has it now.
             if let cadrs_sketch::Link::FlatLine { model, part, bend } = link {
-                let shape = crate::sheetmetal_flat::flat_line(&build.sheet_metal, FeatureId(model), part as usize, bend, &at);
+                let shape = crate::sheetmetal_flat::flat_line(
+                    &build.sheet_metal,
+                    FeatureId(model),
+                    part as usize,
+                    bend,
+                    &at,
+                );
                 let ok = match (target, shape) {
                     (LinkTarget::Curve(c), Some(shape)) => g.set_projected(c, shape),
                     _ => false,
@@ -587,12 +670,23 @@ pub fn regenerate_with(features: &mut [Feature], context: &[(FeatureId, u32, std
 /// leave the offset on its far side.
 fn follow_links(old: &cadrs_sketch::Sketch, moved: cadrs_sketch::Sketch) -> cadrs_sketch::Sketch {
     use cadrs_sketch::CurveKind;
-    let changed: std::collections::HashMap<cadrs_sketch::PointId, (cadrs_sketch::Vec2, cadrs_sketch::Vec2)> = moved
+    let changed: std::collections::HashMap<
+        cadrs_sketch::PointId,
+        (cadrs_sketch::Vec2, cadrs_sketch::Vec2),
+    > = moved
         .points
         .iter()
-        .filter_map(|(k, p)| old.points.get(k).filter(|o| o.pos != p.pos).map(|o| (k, (o.pos, p.pos))))
+        .filter_map(|(k, p)| {
+            old.points
+                .get(k)
+                .filter(|o| o.pos != p.pos)
+                .map(|o| (k, (o.pos, p.pos)))
+        })
         .collect();
-    let far = changed.values().map(|(a, b)| a.distance(*b)).fold(0.0, f64::max);
+    let far = changed
+        .values()
+        .map(|(a, b)| a.distance(*b))
+        .fold(0.0, f64::max);
     let steps = ((far / 0.5).ceil() as usize).clamp(1, 64);
     let mut prev = old.clone();
     for k in 1..=steps {
@@ -605,10 +699,18 @@ fn follow_links(old: &cadrs_sketch::Sketch, moved: cadrs_sketch::Sketch) -> cadr
             };
         }
         for (id, c) in s.curves.iter_mut() {
-            let (Some(o), Some(q)) = (old.curves.get(id), prev.curves.get(id)) else { continue };
+            let (Some(o), Some(q)) = (old.curves.get(id), prev.curves.get(id)) else {
+                continue;
+            };
             c.kind = match (o.kind, c.kind) {
                 // A used circle's radius changes with its source.
-                (CurveKind::Circle { radius: r0, .. }, CurveKind::Circle { center, radius: r1 }) if r0 != r1 => CurveKind::Circle { center, radius: r0 + (r1 - r0) * t },
+                (
+                    CurveKind::Circle { radius: r0, .. },
+                    CurveKind::Circle { center, radius: r1 },
+                ) if r0 != r1 => CurveKind::Circle {
+                    center,
+                    radius: r0 + (r1 - r0) * t,
+                },
                 _ if o.kind == c.kind => q.kind,
                 (_, kind) => kind,
             };

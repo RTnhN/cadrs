@@ -136,7 +136,10 @@ fn resolve_cursor(
         .iter()
         .find(|(_, _, s, g)| s.is_some_and(|s| s.dragging()) || g.is_some_and(|g| g.dragging()))
         .map(|(_, c, ..)| c.0);
-    let hovered = q_hover_cursor.iter().find(|(h, ..)| h.get()).map(|(_, c, ..)| c.0);
+    let hovered = q_hover_cursor
+        .iter()
+        .find(|(h, ..)| h.get())
+        .map(|(_, c, ..)| c.0);
     let kind = dragged
         .or(request.capture)
         .or(hovered)

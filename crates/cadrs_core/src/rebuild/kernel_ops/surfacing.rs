@@ -42,12 +42,25 @@ impl Rebuilder {
     // -----------------------------------------------------------------------------------------
     // Thicken
 
-    pub(in crate::rebuild) fn thicken(&mut self, before: &[Feature], id: FeatureId, x: &ThickenFeature, state: &Arc<State>) -> Result<Output, String> {
+    pub(in crate::rebuild) fn thicken(
+        &mut self,
+        before: &[Feature],
+        id: FeatureId,
+        x: &ThickenFeature,
+        state: &Arc<State>,
+    ) -> Result<Output, String> {
         if let Some(p) = x.problem() {
             return Err(p.into());
         }
         let (along, against) = x.sides();
-        let mut spec = ThickenSpec { bodies: Vec::new(), faces: Vec::new(), profiles: Vec::new(), along, against, source: id.0.as_u128() as u64 };
+        let mut spec = ThickenSpec {
+            bodies: Vec::new(),
+            faces: Vec::new(),
+            profiles: Vec::new(),
+            along,
+            against,
+            source: id.0.as_u128() as u64,
+        };
         let mut missing = 0;
         let mut consumed: Vec<PartId> = Vec::new();
         for p in &x.parts {
@@ -67,7 +80,11 @@ impl Rebuilder {
                         continue;
                     };
                     for face in ids {
-                        spec.faces.push(FaceInput { body, face, source: 0 });
+                        spec.faces.push(FaceInput {
+                            body,
+                            face,
+                            source: 0,
+                        });
                     }
                     if part.part.kind == PartKind::Surface && !consumed.contains(&part.part.id) {
                         consumed.push(part.part.id);
@@ -83,9 +100,19 @@ impl Rebuilder {
             return Err("The selected surfaces or faces no longer exist".into());
         }
         let op = id.0;
-        let r = self.kernel.thicken_surfaces(&spec).map_err(|e| format!("Thicken failed: {e}"))?;
-        let tool = self.name_new(state, op, &r).map_err(|e| format!("Thicken failed: {e}"))?;
-        let merge = Merge { op: x.op, merge_all: x.merge_all, scope: &x.merge_scope, surface: false };
+        let r = self
+            .kernel
+            .thicken_surfaces(&spec)
+            .map_err(|e| format!("Thicken failed: {e}"))?;
+        let tool = self
+            .name_new(state, op, &r)
+            .map_err(|e| format!("Thicken failed: {e}"))?;
+        let merge = Merge {
+            op: x.op,
+            merge_all: x.merge_all,
+            scope: &x.merge_scope,
+            surface: false,
+        };
         let geoms = state.geoms.clone();
         let mut o = self.combine(id, &merge, tool, state, geoms)?;
         if !x.keep_tools && !consumed.is_empty() {
@@ -94,7 +121,9 @@ impl Rebuilder {
             o.state = Arc::new(next);
         }
         if missing > 0 {
-            o.warning = o.warning.or(Some("A selected surface or face no longer exists".into()));
+            o.warning = o
+                .warning
+                .or(Some("A selected surface or face no longer exists".into()));
         }
         Ok(o)
     }
@@ -103,15 +132,25 @@ impl Rebuilder {
     // Helix
 
     /// The helix's geometry from its inputs.
-    fn helix_geom(&self, before: &[Feature], state: &State, x: &HelixFeature) -> Result<HelixGeom, String> {
+    fn helix_geom(
+        &self,
+        before: &[Feature],
+        state: &State,
+        x: &HelixFeature,
+    ) -> Result<HelixGeom, String> {
         let lost = || "The helix's face or axis no longer exists".to_string();
         let start_angle = x.start_angle.to_radians();
         match x.helix_type {
             HelixType::CylinderCone => {
-                let f = x.face.as_ref().ok_or("Select a cylindrical or conical face")?;
+                let f = x
+                    .face
+                    .as_ref()
+                    .ok_or("Select a cylindrical or conical face")?;
                 let (part, _) = face_ids(state, f).ok_or_else(lost)?;
                 let solid = &part.part.solid;
-                let (i, _) = solid.resolve_face(&f.face, None, Some(f.seed)).map_err(|_| lost())?;
+                let (i, _) = solid
+                    .resolve_face(&f.face, None, Some(f.seed))
+                    .map_err(|_| lost())?;
                 let face = &solid.faces[i];
                 let (o, d) = face.axis.ok_or("The face must be cylindrical or conical")?;
                 let d = unit(d);
@@ -121,7 +160,10 @@ impl Rebuilder {
                     return Err("The face has no boundary".into());
                 }
                 let t = |p: &Vec3| dot(sub(*p, o), d);
-                let (tmin, tmax) = pts.iter().map(t).fold((f64::MAX, f64::MIN), |(a, b), v| (a.min(v), b.max(v)));
+                let (tmin, tmax) = pts
+                    .iter()
+                    .map(t)
+                    .fold((f64::MAX, f64::MIN), |(a, b), v| (a.min(v), b.max(v)));
                 let height = tmax - tmin;
                 if height < 1e-6 {
                     return Err("The face has no height along its axis".into());
@@ -132,9 +174,16 @@ impl Rebuilder {
                         .filter(|p| (t(p) - t0).abs() < 1e-6 * (1.0 + height))
                         .map(|p| norm(sub(sub(*p, o), scale(d, t(p)))))
                         .collect();
-                    if near.is_empty() { None } else { Some(near.iter().sum::<f64>() / near.len() as f64) }
+                    if near.is_empty() {
+                        None
+                    } else {
+                        Some(near.iter().sum::<f64>() / near.len() as f64)
+                    }
                 };
-                let (rmin, rmax) = (radius_near(tmin).ok_or_else(lost)?, radius_near(tmax).ok_or_else(lost)?);
+                let (rmin, rmax) = (
+                    radius_near(tmin).ok_or_else(lost)?,
+                    radius_near(tmax).ok_or_else(lost)?,
+                );
                 // It starts at the end on the sketch plane of the extrude (or revolve) that made
                 // the face, with angle 0 along that sketch's x axis.
                 let frame = state.geoms.get(&f.face.op).and_then(|g| g.sketch_frame());
@@ -150,11 +199,25 @@ impl Rebuilder {
                 if x.flip {
                     start_low = !start_low;
                 }
-                let (origin, axis, r0, r1) = if start_low { (lo, d, rmin, rmax) } else { (hi, scale(d, -1.0), rmax, rmin) };
+                let (origin, axis, r0, r1) = if start_low {
+                    (lo, d, rmin, rmax)
+                } else {
+                    (hi, scale(d, -1.0), rmax, rmin)
+                };
                 let (turns, h) = x.turns_and_height(height);
                 // Past the face's end (Turns and pitch): a cone keeps its taper.
                 let r_end = r0 + (r1 - r0) * h / height;
-                Ok(HelixGeom { origin, axis, x: x_ref, r0, r1: r_end, height: h, turns, start_angle, clockwise: x.clockwise })
+                Ok(HelixGeom {
+                    origin,
+                    axis,
+                    x: x_ref,
+                    r0,
+                    r1: r_end,
+                    height: h,
+                    turns,
+                    start_angle,
+                    clockwise: x.clockwise,
+                })
             }
             HelixType::Axis | HelixType::Circle => {
                 let a = x.axis.as_ref().ok_or("Select an axis")?;
@@ -162,7 +225,12 @@ impl Rebuilder {
                 let d0 = [ax.dir.x, ax.dir.y, ax.dir.z];
                 let d = if x.flip { scale(d0, -1.0) } else { d0 };
                 let origin = [ax.origin.x, ax.origin.y, ax.origin.z];
-                let radius = if x.helix_type == HelixType::Circle { self.circle_radius(before, state, a).ok_or("Select a circle")? } else { x.radius };
+                let radius = if x.helix_type == HelixType::Circle {
+                    self.circle_radius(before, state, a)
+                        .ok_or("Select a circle")?
+                } else {
+                    x.radius
+                };
                 let (turns, h) = x.turns_and_height(x.height);
                 Ok(HelixGeom {
                     origin,
@@ -199,7 +267,13 @@ impl Rebuilder {
         }
     }
 
-    pub(in crate::rebuild) fn helix(&mut self, before: &[Feature], id: FeatureId, x: &HelixFeature, state: &Arc<State>) -> Result<Output, String> {
+    pub(in crate::rebuild) fn helix(
+        &mut self,
+        before: &[Feature],
+        id: FeatureId,
+        x: &HelixFeature,
+        state: &Arc<State>,
+    ) -> Result<Output, String> {
         if let Some(p) = x.problem() {
             return Err(p.into());
         }
@@ -226,7 +300,13 @@ impl Rebuilder {
     // -----------------------------------------------------------------------------------------
     // Fill
 
-    pub(in crate::rebuild) fn fill(&mut self, before: &[Feature], id: FeatureId, x: &FillFeature, state: &Arc<State>) -> Result<Output, String> {
+    pub(in crate::rebuild) fn fill(
+        &mut self,
+        before: &[Feature],
+        id: FeatureId,
+        x: &FillFeature,
+        state: &Arc<State>,
+    ) -> Result<Output, String> {
         if let Some(p) = x.problem() {
             return Err(p.into());
         }
@@ -247,34 +327,59 @@ impl Rebuilder {
                     }
                 }
                 FillEdge::SketchCurve { sketch, curve } => {
-                    let sk = before.iter().find(|f| f.id == *sketch).and_then(|f| f.sketch()).ok_or_else(lost)?;
+                    let sk = before
+                        .iter()
+                        .find(|f| f.id == *sketch)
+                        .and_then(|f| f.sketch())
+                        .ok_or_else(lost)?;
                     let frame = sk.plane.ok_or_else(lost)?.frame();
                     let plane = cadrs_kernel::Plane {
                         origin: Point3::from(frame.origin),
                         x_dir: Unit::new_normalize(Vector3::from(frame.u)),
                         normal: Unit::new_normalize(Vector3::from(frame.normal())),
                     };
-                    for c in super::advanced::sketch_curves2(&sk.geometry, *curve).ok_or_else(lost)? {
+                    for c in
+                        super::advanced::sketch_curves2(&sk.geometry, *curve).ok_or_else(lost)?
+                    {
                         curves.push(FillCurve::Sketch { plane, curve: c });
                     }
                 }
             }
         }
         let op = id.0;
-        let r = self.kernel.fill(&FillSpec { curves, source: op.as_u128() as u64 }).map_err(|e| format!("Fill failed: {e}"))?;
-        let tool = self.name_new(state, op, &r).map_err(|e| format!("Fill failed: {e}"))?;
+        let r = self
+            .kernel
+            .fill(&FillSpec {
+                curves,
+                source: op.as_u128() as u64,
+            })
+            .map_err(|e| format!("Fill failed: {e}"))?;
+        let tool = self
+            .name_new(state, op, &r)
+            .map_err(|e| format!("Fill failed: {e}"))?;
         if x.add {
             // Sewn with the surfaces in the merge scope (or those the fill meets, and the ones
             // they meet in turn): a solid when they close.
-            let scope: Vec<PartId> = if x.merge_scope.is_empty() { self.connected_surfaces(state, &touched) } else { x.merge_scope.clone() };
+            let scope: Vec<PartId> = if x.merge_scope.is_empty() {
+                self.connected_surfaces(state, &touched)
+            } else {
+                x.merge_scope.clone()
+            };
             let bodies: Vec<BodyId> = scope.iter().filter_map(|p| state.part(*p)?.body).collect();
             if !bodies.is_empty() {
                 let mut all = bodies.clone();
                 all.push(tool.0);
                 if let Ok(sewn) = self.kernel.sew_solid(&all, 1e-3) {
-                    let solid = self.name_new(state, op, &sewn).map_err(|e| format!("Fill failed: {e}"))?;
+                    let solid = self
+                        .name_new(state, op, &sewn)
+                        .map_err(|e| format!("Fill failed: {e}"))?;
                     self.kernel.release(tool.0);
-                    let merge = Merge { op: BooleanOp::New, merge_all: false, scope: &[], surface: false };
+                    let merge = Merge {
+                        op: BooleanOp::New,
+                        merge_all: false,
+                        scope: &[],
+                        surface: false,
+                    };
                     let geoms = state.geoms.clone();
                     let mut o = self.combine(id, &merge, solid, state, geoms)?;
                     let mut next = (*o.state).clone();
@@ -284,28 +389,52 @@ impl Rebuilder {
                 }
             }
         }
-        let merge = Merge { op: BooleanOp::New, merge_all: false, scope: &[], surface: true };
+        let merge = Merge {
+            op: BooleanOp::New,
+            merge_all: false,
+            scope: &[],
+            surface: true,
+        };
         let geoms = state.geoms.clone();
         let mut o = self.combine(id, &merge, tool, state, geoms)?;
         if x.add {
-            o.warning = Some("The fill doesn't close the surfaces it meets: it is a surface of its own".into());
+            o.warning = Some(
+                "The fill doesn't close the surfaces it meets: it is a surface of its own".into(),
+            );
         }
         Ok(o)
     }
 
     /// The surface parts connected to `seed` (sharing boundary points), `seed` included.
     fn connected_surfaces(&self, state: &State, seed: &[PartId]) -> Vec<PartId> {
-        let surfaces: Vec<&PartState> = state.parts.iter().filter(|p| p.part.kind == PartKind::Surface).collect();
+        let surfaces: Vec<&PartState> = state
+            .parts
+            .iter()
+            .filter(|p| p.part.kind == PartKind::Surface)
+            .collect();
         let ends = |p: &PartState| -> Vec<Vec3> {
-            p.part.solid.edges.iter().flat_map(|e| [e.points[0], *e.points.last().unwrap_or(&e.points[0])]).collect()
+            p.part
+                .solid
+                .edges
+                .iter()
+                .flat_map(|e| [e.points[0], *e.points.last().unwrap_or(&e.points[0])])
+                .collect()
         };
         let mut out: Vec<PartId> = seed.to_vec();
         loop {
-            let pts: Vec<Vec3> = surfaces.iter().filter(|p| out.contains(&p.part.id)).flat_map(|p| ends(p)).collect();
+            let pts: Vec<Vec3> = surfaces
+                .iter()
+                .filter(|p| out.contains(&p.part.id))
+                .flat_map(|p| ends(p))
+                .collect();
             let more: Vec<PartId> = surfaces
                 .iter()
                 .filter(|p| !out.contains(&p.part.id))
-                .filter(|p| ends(p).iter().any(|q| pts.iter().any(|r| norm(sub(*q, *r)) < 1e-4)))
+                .filter(|p| {
+                    ends(p)
+                        .iter()
+                        .any(|q| pts.iter().any(|r| norm(sub(*q, *r)) < 1e-4))
+                })
                 .map(|p| p.part.id)
                 .collect();
             if more.is_empty() {

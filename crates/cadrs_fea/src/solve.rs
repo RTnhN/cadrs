@@ -83,7 +83,11 @@ pub struct Options {
 
 impl Default for Options {
     fn default() -> Self {
-        Self { target_elements: 6000, element_size: None, cancel: None }
+        Self {
+            target_elements: 6000,
+            element_size: None,
+            cancel: None,
+        }
     }
 }
 
@@ -129,8 +133,14 @@ impl std::fmt::Display for FeaError {
             FeaError::Mesh { body, error } => write!(f, "{body} couldn't be meshed: {error}."),
             FeaError::NoFixed => write!(f, "Nothing holds the model: add a Fixed load."),
             FeaError::EmptyLoad(l) => write!(f, "{l} has no faces on the mesh."),
-            FeaError::Unbonded(b) => write!(f, "{b}: the two parts don't touch, so they can't be bonded."),
-            FeaError::Free(b) => write!(f, "{b} is free to move: fix it or connect it with a Simulation connection."),
+            FeaError::Unbonded(b) => write!(
+                f,
+                "{b}: the two parts don't touch, so they can't be bonded."
+            ),
+            FeaError::Free(b) => write!(
+                f,
+                "{b} is free to move: fix it or connect it with a Simulation connection."
+            ),
             FeaError::Solver(e) => write!(f, "The solver failed: {e}."),
             FeaError::Cancelled => write!(f, "Cancelled."),
         }
@@ -175,12 +185,20 @@ pub struct Solution {
 impl Solution {
     /// The largest displacement magnitude (mm).
     pub fn max_displacement(&self) -> f64 {
-        self.bodies.iter().flat_map(|b| b.displacement.iter()).map(|u| len(*u)).fold(0.0, f64::max)
+        self.bodies
+            .iter()
+            .flat_map(|b| b.displacement.iter())
+            .map(|u| len(*u))
+            .fold(0.0, f64::max)
     }
 
     /// The largest von Mises stress (MPa).
     pub fn max_von_mises(&self) -> f64 {
-        self.bodies.iter().flat_map(|b| b.von_mises.iter()).copied().fold(0.0, f64::max)
+        self.bodies
+            .iter()
+            .flat_map(|b| b.von_mises.iter())
+            .copied()
+            .fold(0.0, f64::max)
     }
 
     /// The element of `body` containing `p` and `p`'s volume coordinates in it (the nearest
@@ -226,19 +244,29 @@ impl Solution {
         let b = &self.bodies[body];
         let n = element::shape(l);
         let t = b.mesh.tets[ti];
-        Some((0..10).fold([0.0; 3], |acc, k| add(acc, scale(b.displacement[t[k] as usize], n[k]))))
+        Some((0..10).fold([0.0; 3], |acc, k| {
+            add(acc, scale(b.displacement[t[k] as usize], n[k]))
+        }))
     }
 }
 
 fn check(opts: &Options) -> Result<(), FeaError> {
-    if opts.cancel.as_ref().is_some_and(|c| c.load(Ordering::Relaxed)) {
+    if opts
+        .cancel
+        .as_ref()
+        .is_some_and(|c| c.load(Ordering::Relaxed))
+    {
         return Err(FeaError::Cancelled);
     }
     Ok(())
 }
 
 /// Solves the linear static problem.
-pub fn solve(model: &Model, opts: &Options, progress: &(dyn Fn(Stage, f32) + Sync)) -> Result<Solution, FeaError> {
+pub fn solve(
+    model: &Model,
+    opts: &Options,
+    progress: &(dyn Fn(Stage, f32) + Sync),
+) -> Result<Solution, FeaError> {
     let t0 = Instant::now();
     if model.bodies.is_empty() {
         return Err(FeaError::NoBodies);
@@ -269,12 +297,20 @@ pub fn solve(model: &Model, opts: &Options, progress: &(dyn Fn(Stage, f32) + Syn
         let tris: Vec<(usize, &BoundaryTri)> = load
             .targets
             .iter()
-            .flat_map(|(b, faces)| meshes.get(*b).into_iter().flat_map(move |m| m.on_faces(faces).map(move |t| (*b, t))))
+            .flat_map(|(b, faces)| {
+                meshes
+                    .get(*b)
+                    .into_iter()
+                    .flat_map(move |m| m.on_faces(faces).map(move |t| (*b, t)))
+            })
             .collect();
         if tris.is_empty() {
             return Err(FeaError::EmptyLoad(load.name.clone()));
         }
-        let area: f64 = tris.iter().map(|(b, t)| len(meshes[*b].area_vector(t))).sum();
+        let area: f64 = tris
+            .iter()
+            .map(|(b, t)| len(meshes[*b].area_vector(t)))
+            .sum();
         for (b, t) in &tris {
             let m = &meshes[*b];
             let av = m.area_vector(t);
@@ -307,7 +343,9 @@ pub fn solve(model: &Model, opts: &Options, progress: &(dyn Fn(Stage, f32) + Syn
     let mut bonded_nodes = Vec::new();
     let mut linked: Vec<(usize, usize)> = Vec::new();
     for bond in &model.bonds {
-        let (Some(ma), Some(mb)) = (meshes.get(bond.a), meshes.get(bond.b)) else { continue };
+        let (Some(ma), Some(mb)) = (meshes.get(bond.a), meshes.get(bond.b)) else {
+            continue;
+        };
         // Both ways: each side's surface nodes follow the other side's faces, so neither mesh
         // can open or overlap between the other's nodes (a one-way tie leaves a stress spike
         // along the joint when the meshes don't match).
@@ -324,7 +362,10 @@ pub fn solve(model: &Model, opts: &Options, progress: &(dyn Fn(Stage, f32) + Syn
         linked.push((bond.a, bond.b));
         for (slave, master, found) in [(bond.a, bond.b, ab), (bond.b, bond.a, ba)] {
             for (s, masters) in found {
-                ties.push(Tie { slave: offset[slave] + s as usize, masters: masters.map(|(n, w)| (offset[master] + n as usize, w)) });
+                ties.push(Tie {
+                    slave: offset[slave] + s as usize,
+                    masters: masters.map(|(n, w)| (offset[master] + n as usize, w)),
+                });
             }
         }
     }
@@ -360,9 +401,23 @@ pub fn solve(model: &Model, opts: &Options, progress: &(dyn Fn(Stage, f32) + Syn
             n_free += 1;
         }
     }
-    let e_max = model.bodies.iter().map(|b| b.material.youngs).fold(0.0, f64::max);
+    let e_max = model
+        .bodies
+        .iter()
+        .map(|b| b.material.youngs)
+        .fold(0.0, f64::max);
     let penalty = 1e4 * e_max * h;
-    let (k, nd) = assemble(&meshes, &offset, &model.bodies, &ties, &free_index, n_free, penalty, opts, progress)?;
+    let (k, nd) = assemble(
+        &meshes,
+        &offset,
+        &model.bodies,
+        &ties,
+        &free_index,
+        n_free,
+        penalty,
+        opts,
+        progress,
+    )?;
     let assemble_seconds = t1.elapsed().as_secs_f64();
     check(opts)?;
 
@@ -385,14 +440,23 @@ pub fn solve(model: &Model, opts: &Options, progress: &(dyn Fn(Stage, f32) + Syn
     let mut elements = 0;
     for (bi, m) in meshes.into_iter().enumerate() {
         let mat = model.bodies[bi].material;
-        let disp: Vec<V3> = (0..m.nodes.len()).map(|n| {
-            let g = offset[bi] + n;
-            [u[3 * g], u[3 * g + 1], u[3 * g + 2]]
-        }).collect();
+        let disp: Vec<V3> = (0..m.nodes.len())
+            .map(|n| {
+                let g = offset[bi] + n;
+                [u[3 * g], u[3 * g + 1], u[3 * g + 2]]
+            })
+            .collect();
         let stress = nodal_stress(&m, &disp, mat);
         let von_mises = stress.iter().map(|s| element::von_mises(*s)).collect();
         elements += m.tets.len();
-        bodies.push(BodyResult { name: model.bodies[bi].name.clone(), mesh: m, displacement: disp, stress, von_mises, material: Some(mat) });
+        bodies.push(BodyResult {
+            name: model.bodies[bi].name.clone(),
+            mesh: m,
+            displacement: disp,
+            stress,
+            von_mises,
+            material: Some(mat),
+        });
     }
     let sol = Solution {
         bodies,
@@ -409,9 +473,22 @@ pub fn solve(model: &Model, opts: &Options, progress: &(dyn Fn(Stage, f32) + Syn
         },
     };
     // A mechanism the factorization didn't catch shows as absurd displacements.
-    let size = sol.bodies.iter().filter_map(|b| b.mesh.nodes.iter().try_fold(([f64::MAX; 3], [f64::MIN; 3]), |(lo, hi), p| {
-        Some(([lo[0].min(p[0]), lo[1].min(p[1]), lo[2].min(p[2])], [hi[0].max(p[0]), hi[1].max(p[1]), hi[2].max(p[2])]))
-    })).map(|(lo, hi)| len(sub(hi, lo))).fold(0.0, f64::max);
+    let size = sol
+        .bodies
+        .iter()
+        .filter_map(|b| {
+            b.mesh
+                .nodes
+                .iter()
+                .try_fold(([f64::MAX; 3], [f64::MIN; 3]), |(lo, hi), p| {
+                    Some((
+                        [lo[0].min(p[0]), lo[1].min(p[1]), lo[2].min(p[2])],
+                        [hi[0].max(p[0]), hi[1].max(p[1]), hi[2].max(p[2])],
+                    ))
+                })
+        })
+        .map(|(lo, hi)| len(sub(hi, lo)))
+        .fold(0.0, f64::max);
     if sol.max_displacement() > 1e6 * size.max(1.0) {
         return Err(FeaError::Free("A part".into()));
     }
@@ -423,12 +500,19 @@ fn mesh_bodies(model: &Model, opts: &Options) -> Result<Vec<TetMesh>, FeaError> 
     let volume: f64 = model.bodies.iter().map(|b| b.surface.volume().abs()).sum();
     let target = opts.target_elements.max(10) as f64;
     // A Delaunay mesh of a cubic lattice has about 5.5 tetrahedra per cell.
-    let mut h = opts.element_size.unwrap_or_else(|| (5.5 * volume / target).cbrt());
+    let mut h = opts
+        .element_size
+        .unwrap_or_else(|| (5.5 * volume / target).cbrt());
     let run = |h: f64| -> Result<Vec<TetMesh>, FeaError> {
         model
             .bodies
             .par_iter()
-            .map(|b| mesh::mesh(&b.surface, h).map_err(|error| FeaError::Mesh { body: b.name.clone(), error }))
+            .map(|b| {
+                mesh::mesh(&b.surface, h).map_err(|error| FeaError::Mesh {
+                    body: b.name.clone(),
+                    error,
+                })
+            })
             .collect()
     };
     let mut meshes = run(h)?;
@@ -457,7 +541,11 @@ struct Tie {
 /// The boundary nodes of `a` lying on `b`'s surface (within `tol`, on faces facing each other),
 /// each with the 6 nodes of `b`'s triangle there and their shape-function weights.
 fn tie_nodes(a: &TetMesh, b: &TetMesh, tol: f64) -> Vec<(u32, [(u32, f64); 6])> {
-    let corner_tris: Vec<[u32; 3]> = b.boundary.iter().map(|t| [t.nodes[0], t.nodes[1], t.nodes[2]]).collect();
+    let corner_tris: Vec<[u32; 3]> = b
+        .boundary
+        .iter()
+        .map(|t| [t.nodes[0], t.nodes[1], t.nodes[2]])
+        .collect();
     let faces: Vec<u32> = (0..b.boundary.len() as u32).collect();
     let index = SurfaceIndex::new(&b.nodes, &corner_tris, &faces, b.h.max(tol * 4.0));
     // Outward normals of a's boundary triangles at each of their nodes.
@@ -473,7 +561,9 @@ fn tie_nodes(a: &TetMesh, b: &TetMesh, tol: f64) -> Vec<(u32, [(u32, f64); 6])> 
     let mut out = Vec::new();
     for v in keys {
         let p = a.nodes[v as usize];
-        let Some((d, _, tri, w)) = index.closest(p, 1) else { continue };
+        let Some((d, _, tri, w)) = index.closest(p, 1) else {
+            continue;
+        };
         if d > tol {
             continue;
         }
@@ -524,7 +614,9 @@ fn assemble(
         }
     }
     for tie in ties {
-        let group: Vec<usize> = std::iter::once(tie.slave).chain(tie.masters.iter().map(|m| m.0)).collect();
+        let group: Vec<usize> = std::iter::once(tie.slave)
+            .chain(tie.masters.iter().map(|m| m.0))
+            .collect();
         for &x in &group {
             for &y in &group {
                 if x >= y {
@@ -564,7 +656,10 @@ fn assemble(
     }
     // A nested-dissection order of the free dofs (each node's together), offered to the
     // factorization next to the minimum-degree one.
-    let coords: Vec<V3> = meshes.iter().flat_map(|m| m.nodes.iter().copied()).collect();
+    let coords: Vec<V3> = meshes
+        .iter()
+        .flat_map(|m| m.nodes.iter().copied())
+        .collect();
     let nd: Vec<usize> = nested_dissection(&coords, &adj)
         .iter()
         .flat_map(|&n| (0..3).map(move |a| 3 * n as usize + a))
@@ -621,7 +716,9 @@ fn assemble(
     }
     for tie in ties {
         // Penalty on (u_s − Σ wₖ u_mₖ)² per axis.
-        let c: Vec<(usize, f64)> = std::iter::once((tie.slave, 1.0)).chain(tie.masters.iter().map(|&(n, w)| (n, -w))).collect();
+        let c: Vec<(usize, f64)> = std::iter::once((tie.slave, 1.0))
+            .chain(tie.masters.iter().map(|&(n, w)| (n, -w)))
+            .collect();
         for &(x, cx) in &c {
             for &(y, cy) in &c {
                 if x < y {
@@ -655,25 +752,50 @@ fn factor_and_solve(
     use faer::sparse::linalg::cholesky::{SymmetricOrdering, factorize_symbolic_cholesky};
     let n = k.nrows();
     let failed = |e: faer::sparse::FaerError| FeaError::Solver(format!("{e:?}"));
-    let amd = factorize_symbolic_cholesky(k.symbolic(), faer::Side::Lower, SymmetricOrdering::Amd, Default::default()).map_err(failed)?;
+    let amd = factorize_symbolic_cholesky(
+        k.symbolic(),
+        faer::Side::Lower,
+        SymmetricOrdering::Amd,
+        Default::default(),
+    )
+    .map_err(failed)?;
     let symbolic = if nd.len() == n {
         let mut inv = vec![0usize; n];
         for (new, &old) in nd.iter().enumerate() {
             inv[old] = new;
         }
         let perm = faer::perm::PermRef::new_checked(nd, &inv, n);
-        let dissected = factorize_symbolic_cholesky(k.symbolic(), faer::Side::Lower, SymmetricOrdering::Custom(perm), Default::default()).map_err(failed)?;
-        if (dissected.len_val() as f64) < 1.6 * amd.len_val() as f64 { dissected } else { amd }
+        let dissected = factorize_symbolic_cholesky(
+            k.symbolic(),
+            faer::Side::Lower,
+            SymmetricOrdering::Custom(perm),
+            Default::default(),
+        )
+        .map_err(failed)?;
+        if (dissected.len_val() as f64) < 1.6 * amd.len_val() as f64 {
+            dissected
+        } else {
+            amd
+        }
     } else {
         amd
     };
     check(opts)?;
     let par = factor_parallelism();
     let mut l_values = vec![0.0f64; symbolic.len_val()];
-    let mut mem = MemBuffer::try_new(symbolic.factorize_numeric_llt_scratch::<f64>(par, Default::default()))
-        .map_err(|_| FeaError::Solver("out of memory".into()))?;
+    let mut mem =
+        MemBuffer::try_new(symbolic.factorize_numeric_llt_scratch::<f64>(par, Default::default()))
+            .map_err(|_| FeaError::Solver("out of memory".into()))?;
     let llt = symbolic
-        .factorize_numeric_llt(&mut l_values, k.as_ref(), faer::Side::Lower, Default::default(), par, MemStack::new(&mut mem), Default::default())
+        .factorize_numeric_llt(
+            &mut l_values,
+            k.as_ref(),
+            faer::Side::Lower,
+            Default::default(),
+            par,
+            MemStack::new(&mut mem),
+            Default::default(),
+        )
         .map_err(|_| FeaError::Free("A part".into()))?;
     drop(mem);
     check(opts)?;
@@ -684,7 +806,8 @@ fn factor_and_solve(
             b[(f, 0)] = rhs[d];
         }
     }
-    let mut mem = MemBuffer::try_new(symbolic.solve_in_place_scratch::<f64>(1, par)).map_err(|_| FeaError::Solver("out of memory".into()))?;
+    let mut mem = MemBuffer::try_new(symbolic.solve_in_place_scratch::<f64>(1, par))
+        .map_err(|_| FeaError::Solver("out of memory".into()))?;
     llt.solve_in_place_with_conj(faer::Conj::No, b.as_mut(), par, MemStack::new(&mut mem));
     Ok((0..n).map(|i| b[(i, 0)]).collect())
 }
@@ -699,7 +822,9 @@ fn nodal_stress(m: &TetMesh, u: &[V3], mat: Material) -> Vec<[f64; 6]> {
             let x: [V3; 4] = std::array::from_fn(|k| m.nodes[t[k] as usize]);
             let (gl, _) = element::grad_l(&x);
             let ue: [V3; 10] = std::array::from_fn(|k| u[t[k] as usize]);
-            std::array::from_fn(|n| element::stress(element::strain(&gl, NODE_L[n], &ue), lambda, mu))
+            std::array::from_fn(|n| {
+                element::stress(element::strain(&gl, NODE_L[n], &ue), lambda, mu)
+            })
         })
         .collect();
     let mut sum = vec![[0.0; 6]; m.nodes.len()];
@@ -713,7 +838,10 @@ fn nodal_stress(m: &TetMesh, u: &[V3], mat: Material) -> Vec<[f64; 6]> {
             count[n] += 1;
         }
     }
-    sum.into_iter().zip(count).map(|(s, c)| s.map(|v| v / c.max(1) as f64)).collect()
+    sum.into_iter()
+        .zip(count)
+        .map(|(s, c)| s.map(|v| v / c.max(1) as f64))
+        .collect()
 }
 
 /// The threads to factor with: at most four (`CADRS_FEA_THREADS` overrides; 1 = sequential).
@@ -722,7 +850,11 @@ fn nodal_stress(m: &TetMesh, u: &[V3], mat: Material) -> Vec<[f64; 6]> {
 /// cantilever: 3.2 s on one thread, 2.3 s on four, 9.4 s on all twelve with the machine loaded).
 fn factor_parallelism() -> faer::Par {
     let cores = std::thread::available_parallelism().map_or(1, |n| n.get());
-    match std::env::var("CADRS_FEA_THREADS").ok().and_then(|v| v.parse::<usize>().ok()).unwrap_or(cores.min(4)) {
+    match std::env::var("CADRS_FEA_THREADS")
+        .ok()
+        .and_then(|v| v.parse::<usize>().ok())
+        .unwrap_or(cores.min(4))
+    {
         0 | 1 => faer::Par::Seq,
         n => faer::Par::rayon(n),
     }
@@ -759,17 +891,23 @@ fn nested_dissection(coords: &[V3], lower_adj: &[Vec<u32>]) -> Vec<u32> {
                 hi[k] = hi[k].max(p[k]);
             }
         }
-        let axis = (0..3).max_by(|&a, &b| (hi[a] - lo[a]).total_cmp(&(hi[b] - lo[b]))).unwrap();
+        let axis = (0..3)
+            .max_by(|&a, &b| (hi[a] - lo[a]).total_cmp(&(hi[b] - lo[b])))
+            .unwrap();
         let mut nodes = nodes;
         let m = nodes.len() / 2;
-        nodes.select_nth_unstable_by(m, |a, b| coords[*a as usize][axis].total_cmp(&coords[*b as usize][axis]));
+        nodes.select_nth_unstable_by(m, |a, b| {
+            coords[*a as usize][axis].total_cmp(&coords[*b as usize][axis])
+        });
         let right = nodes.split_off(m);
         let left = nodes;
         stamp += 1;
         for &v in &left {
             mark[v as usize] = stamp;
         }
-        let (sep, rest): (Vec<u32>, Vec<u32>) = right.into_iter().partition(|&v| adj[v as usize].iter().any(|&w| mark[w as usize] == stamp));
+        let (sep, rest): (Vec<u32>, Vec<u32>) = right
+            .into_iter()
+            .partition(|&v| adj[v as usize].iter().any(|&w| mark[w as usize] == stamp));
         stack.push((sep, true));
         stack.push((rest, false));
         stack.push((left, false));

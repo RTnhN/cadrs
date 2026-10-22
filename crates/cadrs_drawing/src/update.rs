@@ -15,8 +15,8 @@
 //! deletes it. Text follows the live references, keeping its place relative to the geometry.
 
 use crate::annotation::{
-    Annotation, AnnotationKind, CenterlineKind, CircleCenterline, DimKind, EdgeRef, ModelData, Pick, PointRef, Shape,
-    ViewModel, hole_of, is_dangling, measure, resolve, resolve_point,
+    Annotation, AnnotationKind, CenterlineKind, CircleCenterline, DimKind, EdgeRef, ModelData,
+    Pick, PointRef, Shape, ViewModel, hole_of, is_dangling, measure, resolve, resolve_point,
 };
 
 type P2 = [f64; 2];
@@ -44,8 +44,12 @@ fn slots(a: &mut AnnotationKind) -> Vec<Slot<'_>> {
             CenterlineKind::Points { a, b } => vec![Slot::Point(a), Slot::Point(b)],
             CenterlineKind::Lines { a, b } => vec![Slot::Edge(a), Slot::Edge(b)],
         },
-        AnnotationKind::CircleCenterline(CircleCenterline::ThreePoints(p)) => p.iter_mut().map(Slot::Point).collect(),
-        AnnotationKind::CircleCenterline(CircleCenterline::CenterPoint { center, on }) => vec![Slot::Point(center), Slot::Point(on)],
+        AnnotationKind::CircleCenterline(CircleCenterline::ThreePoints(p)) => {
+            p.iter_mut().map(Slot::Point).collect()
+        }
+        AnnotationKind::CircleCenterline(CircleCenterline::CenterPoint { center, on }) => {
+            vec![Slot::Point(center), Slot::Point(on)]
+        }
         AnnotationKind::VirtualSharp { a, b } => vec![Slot::Edge(a), Slot::Edge(b)],
         AnnotationKind::Dimension(d) => match &mut d.kind {
             DimKind::Diameter(e) | DimKind::Radius(e) => vec![Slot::Edge(e)],
@@ -53,8 +57,12 @@ fn slots(a: &mut AnnotationKind) -> Vec<Slot<'_>> {
             DimKind::Angle { a, b } => vec![Slot::Edge(a), Slot::Edge(b)],
         },
         AnnotationKind::HoleCallout(hc) => vec![Slot::Edge(&mut hc.edge)],
-        AnnotationKind::Baseline(b) => std::iter::once(pick_slot(&mut b.base)).chain(b.targets.iter_mut().map(pick_slot)).collect(),
-        AnnotationKind::Ordinate(o) => std::iter::once(Slot::Point(&mut o.origin)).chain(o.points.iter_mut().map(Slot::Point)).collect(),
+        AnnotationKind::Baseline(b) => std::iter::once(pick_slot(&mut b.base))
+            .chain(b.targets.iter_mut().map(pick_slot))
+            .collect(),
+        AnnotationKind::Ordinate(o) => std::iter::once(Slot::Point(&mut o.origin))
+            .chain(o.points.iter_mut().map(Slot::Point))
+            .collect(),
         AnnotationKind::ChamferDim(c) => vec![Slot::Edge(&mut c.edge)],
         AnnotationKind::ArcLength(a) => vec![Slot::Edge(&mut a.edge)],
         AnnotationKind::FeatureControl(f) => f.edge.iter_mut().map(Slot::Edge).collect(),
@@ -119,7 +127,12 @@ fn take_from(view: &View, m: &dyn ViewModel, s: &mut Slot) {
 /// of `ex3-step9.png` meet). A dangling dimension keeps the value it last measured. The text
 /// moves with the annotation's live references (their mean displacement), so it keeps its
 /// place relative to the geometry.
-pub fn refreshed(view: &View, old: Option<&dyn ViewModel>, new: &dyn ViewModel, a: &Annotation) -> Annotation {
+pub fn refreshed(
+    view: &View,
+    old: Option<&dyn ViewModel>,
+    new: &dyn ViewModel,
+    a: &Annotation,
+) -> Annotation {
     let mut out = a.clone();
     // How far the references that resolve in both models moved.
     let mut moves: Vec<P2> = Vec::new();
@@ -135,14 +148,19 @@ pub fn refreshed(view: &View, old: Option<&dyn ViewModel>, new: &dyn ViewModel, 
         [0.0, 0.0]
     } else {
         let k = moves.len() as f64;
-        [moves.iter().map(|m| m[0]).sum::<f64>() / k, moves.iter().map(|m| m[1]).sum::<f64>() / k]
+        [
+            moves.iter().map(|m| m[0]).sum::<f64>() / k,
+            moves.iter().map(|m| m[1]).sum::<f64>() / k,
+        ]
     };
     let dangling = is_dangling(view, new, a);
     // The value it showed (for a dimension that dangles now).
     let last = match (&a.kind, dangling) {
         (AnnotationKind::Dimension(dim), true) => match old {
             Some(o) if !is_dangling(view, o, a) => measure(view, o, dim).map(|m| m.value),
-            _ => dim.last.or_else(|| measure(view, &ModelData::default(), dim).map(|m| m.value)),
+            _ => dim
+                .last
+                .or_else(|| measure(view, &ModelData::default(), dim).map(|m| m.value)),
         },
         _ => None,
     };
@@ -177,7 +195,9 @@ pub fn refreshed(view: &View, old: Option<&dyn ViewModel>, new: &dyn ViewModel, 
         }
         AnnotationKind::HoleCallout(hc) => {
             hc.text = [hc.text[0] + d[0], hc.text[1] + d[1]];
-            if let Some(h) = hole_of(new, &hc.edge).or_else(|| old.and_then(|o| hole_of(o, &hc.edge))) {
+            if let Some(h) =
+                hole_of(new, &hc.edge).or_else(|| old.and_then(|o| hole_of(o, &hc.edge)))
+            {
                 hc.last = Some(h.clone());
             }
         }
@@ -191,7 +211,12 @@ fn refresh_point(view: &View, m: &dyn ViewModel, p: &mut PointRef) {
 }
 
 /// A note's leader after an update (like [`refreshed`]).
-pub fn refreshed_leader(view: &View, old: Option<&dyn ViewModel>, new: &dyn ViewModel, l: &Leader) -> Leader {
+pub fn refreshed_leader(
+    view: &View,
+    old: Option<&dyn ViewModel>,
+    new: &dyn ViewModel,
+    l: &Leader,
+) -> Leader {
     let mut out = *l;
     let m = if !leader_dangles(view, new, l) {
         Some(new)
@@ -231,22 +256,36 @@ pub fn update_op(
             .and_then(|s| s.hash_of(v.reference.part))
             .or(v.source_hash);
         // Callouts (P3C.5) follow their occurrences in the assembly's new state.
-        let old_asm = d.source(v.reference.element).and_then(|s| s.assembly.as_ref());
-        let new_asm = sources.iter().find(|s| s.element == v.reference.element).and_then(|s| s.assembly.as_ref()).or(old_asm);
+        let old_asm = d
+            .source(v.reference.element)
+            .and_then(|s| s.assembly.as_ref());
+        let new_asm = sources
+            .iter()
+            .find(|s| s.element == v.reference.element)
+            .and_then(|s| s.assembly.as_ref())
+            .or(old_asm);
         let sheet = d.view(*id).and_then(|(i, _)| d.sheets.get(i));
-        let boms: Vec<&crate::assembly::BomData> = sheet.map(|s| s.tables.iter().filter_map(|t| t.bom.as_ref()).collect()).unwrap_or_default();
+        let boms: Vec<&crate::assembly::BomData> = sheet
+            .map(|s| s.tables.iter().filter_map(|t| t.bom.as_ref()).collect())
+            .unwrap_or_default();
         let annotations = v
             .annotations
             .iter()
             .map(|a| match &a.kind {
                 AnnotationKind::Callout(c) => Annotation {
                     id: a.id,
-                    kind: AnnotationKind::Callout(crate::assembly::refresh_callout(v, old_asm, new_asm, &boms, c)),
+                    kind: AnnotationKind::Callout(crate::assembly::refresh_callout(
+                        v, old_asm, new_asm, &boms, c,
+                    )),
                 },
                 _ => refreshed(v, *old, *new, a),
             })
             .collect();
-        out.push(crate::ViewUpdate { id: *id, source_hash, annotations });
+        out.push(crate::ViewUpdate {
+            id: *id,
+            source_hash,
+            annotations,
+        });
     }
     let mut notes = Vec::new();
     for s in &d.sheets {
@@ -264,15 +303,19 @@ pub fn update_op(
             }
         }
     }
-    crate::DrawingOp::Update { sources, views: out, notes }
+    crate::DrawingOp::Update {
+        sources,
+        views: out,
+        notes,
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::annotation::{
-        AnnotationKind, DimFormat, Dimension, ModelData, ModelEdge, Orient, PointOf, Shape, annotation_graphics, is_dangling,
-        measure,
+        AnnotationKind, DimFormat, Dimension, ModelData, ModelEdge, Orient, PointOf, Shape,
+        annotation_graphics, is_dangling, measure,
     };
     use crate::standard::Scale;
     use crate::view::NamedView;
@@ -282,8 +325,15 @@ mod tests {
     use uuid::Uuid;
 
     fn name(k: u64) -> EdgeName {
-        let f = |i: u64| FaceName { op: OpId::from_u128(1), origin: FaceOrigin::Unnamed { index: i as u32 }, split: 0 };
-        EdgeName { faces: [f(k), f(k + 100)], index: 0 }
+        let f = |i: u64| FaceName {
+            op: OpId::from_u128(1),
+            origin: FaceOrigin::Unnamed { index: i as u32 },
+            split: 0,
+        };
+        EdgeName {
+            faces: [f(k), f(k + 100)],
+            index: 0,
+        }
     }
 
     /// A circle of radius `r` at (x, 0) seen face-on in a front view, as model data.
@@ -294,7 +344,15 @@ mod tests {
                 [x + r * t.cos(), 0.0, r * t.sin()]
             })
             .collect();
-        m.edges.insert(name(k), ModelEdge::Circle { center: [x, 0.0, 0.0], normal: [0.0, 1.0, 0.0], radius: r, points: pts });
+        m.edges.insert(
+            name(k),
+            ModelEdge::Circle {
+                center: [x, 0.0, 0.0],
+                normal: [0.0, 1.0, 0.0],
+                radius: r,
+                points: pts,
+            },
+        );
         m.projection.edges.push(ProjEdge {
             visibility: ProjVisibility::Visible,
             class: ProjClass::Sharp,
@@ -307,17 +365,32 @@ mod tests {
                 full: true,
             },
             points: vec![[x + r, 0.0].into(), [x - r, 0.0].into()],
-            source: Some(ProjSource { edge_name: Some(name(k)), ..Default::default() }),
+            source: Some(ProjSource {
+                edge_name: Some(name(k)),
+                ..Default::default()
+            }),
         });
     }
 
     fn centre(m: &ModelData, i: usize) -> Pick {
         let e = EdgeRef::of(&m.projection.edges[i]);
-        Pick::Point(PointRef { edge: e, of: PointOf::Center, hint: [0.0, 0.0] })
+        Pick::Point(PointRef {
+            edge: e,
+            of: PointOf::Center,
+            hint: [0.0, 0.0],
+        })
     }
 
     fn view() -> View {
-        View::base(ObjectRef { element: Uuid::nil(), part: None }, NamedView::Front, Scale::new(1, 1), [100.0, 100.0])
+        View::base(
+            ObjectRef {
+                element: Uuid::nil(),
+                part: None,
+            },
+            NamedView::Front,
+            Scale::new(1, 1),
+            [100.0, 100.0],
+        )
     }
 
     #[test]
@@ -329,23 +402,41 @@ mod tests {
         circle(&mut old, 2, 75.0, 8.0);
         circle(&mut old, 3, 29.0, 12.7);
         let dim = Annotation::new(AnnotationKind::Dimension(Dimension {
-            kind: DimKind::Distance { a: centre(&old, 0), b: centre(&old, 1), orient: Orient::Horizontal },
+            kind: DimKind::Distance {
+                a: centre(&old, 0),
+                b: centre(&old, 1),
+                orient: Orient::Horizontal,
+            },
             text: [40.0, 30.0],
             format: DimFormat::default(),
             last: None,
         }));
-        let AnnotationKind::Dimension(d) = &dim.kind else { unreachable!() };
+        let AnnotationKind::Dimension(d) = &dim.kind else {
+            unreachable!()
+        };
         assert_eq!(measure(&v, &old, d).unwrap().value, 75.0);
         // New model: circle 1 is gone, 2 moved to x 100, and a new circle sits where 1 was.
         let mut new = ModelData::default();
         circle(&mut new, 2, 100.0, 8.0);
         circle(&mut new, 3, 54.0, 12.7);
         circle(&mut new, 9, 0.0, 4.125);
-        assert!(is_dangling(&v, &new, &dim), "circle 1's name no longer resolves");
+        assert!(
+            is_dangling(&v, &new, &dim),
+            "circle 1's name no longer resolves"
+        );
         let up = refreshed(&v, Some(&old), &new, &dim);
         // Never re-bound to the circle now at the same place: the name is kept.
-        let AnnotationKind::Dimension(ud) = &up.kind else { unreachable!() };
-        let DimKind::Distance { a: Pick::Point(pa), b: Pick::Point(pb), .. } = &ud.kind else { unreachable!() };
+        let AnnotationKind::Dimension(ud) = &up.kind else {
+            unreachable!()
+        };
+        let DimKind::Distance {
+            a: Pick::Point(pa),
+            b: Pick::Point(pb),
+            ..
+        } = &ud.kind
+        else {
+            unreachable!()
+        };
         assert_eq!(pa.edge.edge, Some(name(1)));
         // Only the dead end is frozen, exactly where it was (x 0, where every other reference to
         // circle 1 stays too); the live end follows its circle to x 100. It shows its last value.
@@ -356,14 +447,26 @@ mod tests {
         assert!(g.dangling);
         assert_eq!(g.texts[0].text, "75.00");
         // A centermark on the same deleted circle stays at the same point: they coincide.
-        let cm = Annotation::new(AnnotationKind::Centermark(EdgeRef::of(&old.projection.edges[0])));
+        let cm = Annotation::new(AnnotationKind::Centermark(EdgeRef::of(
+            &old.projection.edges[0],
+        )));
         let ucm = refreshed(&v, Some(&old), &new, &cm);
-        let AnnotationKind::Centermark(e) = &ucm.kind else { unreachable!() };
-        assert_eq!(e.shape.circle().unwrap().0, pa.edge.shape.circle().unwrap().0);
+        let AnnotationKind::Centermark(e) = &ucm.kind else {
+            unreachable!()
+        };
+        assert_eq!(
+            e.shape.circle().unwrap().0,
+            pa.edge.shape.circle().unwrap().0
+        );
         let gcm = annotation_graphics(&DrawingStyle::default(), &v, &new, &ucm).unwrap();
-        assert!(gcm.dangling && !gcm.fills.is_empty(), "a dangling centermark is a filled dot");
+        assert!(
+            gcm.dangling && !gcm.fills.is_empty(),
+            "a dangling centermark is a filled dot"
+        );
         // Its text moved with it (its live end moved 25).
-        let AnnotationKind::Dimension(ud2) = &up.kind else { unreachable!() };
+        let AnnotationKind::Dimension(ud2) = &up.kind else {
+            unreachable!()
+        };
         assert_eq!(ud2.text, [65.0, 30.0]);
         // Re-attached (the grip dragged onto circle 3's centre): measured again, not dangling.
         let mut re = up.clone();
@@ -373,7 +476,9 @@ mod tests {
             *a = centre(&new, 1);
         }
         assert!(!is_dangling(&v, &new, &re));
-        let AnnotationKind::Dimension(rd) = &re.kind else { unreachable!() };
+        let AnnotationKind::Dimension(rd) = &re.kind else {
+            unreachable!()
+        };
         assert_eq!(measure(&v, &new, rd).unwrap().value, 46.0);
         let g = annotation_graphics(&DrawingStyle::default(), &v, &new, &re).unwrap();
         assert!(!g.dangling);
@@ -395,9 +500,20 @@ mod tests {
         circle(&mut new, 2, 100.0, 7.5);
         assert!(!is_dangling(&v, &new, &dia));
         let up = refreshed(&v, Some(&old), &new, &dia);
-        let AnnotationKind::Dimension(d) = &up.kind else { unreachable!() };
-        let DimKind::Diameter(e) = &d.kind else { unreachable!() };
-        assert_eq!(e.shape, Shape::Circle { center: [100.0, 0.0], radius: 7.5, arc: None });
+        let AnnotationKind::Dimension(d) = &up.kind else {
+            unreachable!()
+        };
+        let DimKind::Diameter(e) = &d.kind else {
+            unreachable!()
+        };
+        assert_eq!(
+            e.shape,
+            Shape::Circle {
+                center: [100.0, 0.0],
+                radius: 7.5,
+                arc: None
+            }
+        );
         let g = annotation_graphics(&DrawingStyle::default(), &v, &new, &up).unwrap();
         assert_eq!(g.texts[0].text, "Ø15.00");
     }

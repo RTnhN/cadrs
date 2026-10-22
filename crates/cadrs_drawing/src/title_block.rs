@@ -138,7 +138,12 @@ pub fn size(sheet: SheetSize) -> (f64, f64) {
 pub fn placement(inner: Rect, sheet: SheetSize) -> Rect {
     let (w, h) = size(sheet);
     let w = w.min(inner.width());
-    Rect::new(inner.max[0] - w, inner.min[1], inner.max[0], inner.min[1] + h)
+    Rect::new(
+        inner.max[0] - w,
+        inner.min[1],
+        inner.max[0],
+        inner.min[1] + h,
+    )
 }
 
 /// Draws the title block into `rect`.
@@ -197,27 +202,36 @@ pub fn draw(g: &mut Graphics, rect: Rect, ctx: &TitleContext, units: DrawingUnit
         DrawingUnits::Inch => ["TOLERANCES:", "X.XX ±.01  X.XXX ±.005", "ANGLES ±0.5°"],
         DrawingUnits::Millimeter => ["GENERAL TOLERANCES:", "ISO 2768-m", "ANGLES ±0.5°"],
     };
-    let lines = ["UNLESS OTHERWISE SPECIFIED:", unit_line, tol[0], tol[1], tol[2]];
+    let lines = [
+        "UNLESS OTHERWISE SPECIFIED:",
+        unit_line,
+        tol[0],
+        tol[1],
+        tol[2],
+    ];
     let lh = (2.0 * r - 2.0 * pad) / lines.len() as f64;
     for (i, s) in lines.iter().enumerate() {
         g.text(
-            GText::new([x(0.0) + pad, y(5.0) - pad - lh * i as f64], cap.min(lh * 0.8), *s)
-                .align(Align::TopLeft),
+            GText::new(
+                [x(0.0) + pad, y(5.0) - pad - lh * i as f64],
+                cap.min(lh * 0.8),
+                *s,
+            )
+            .align(Align::TopLeft),
         );
     }
     caption(g, 0.0, 3.0, "MATERIAL");
     value(g, 0.0, c1, 2.0, 3.0, 2.2, &val(TitleField::Material));
     value(g, 0.0, c1, 1.0, 2.0, 2.2, "DO NOT SCALE DRAWING");
     caption(g, 0.0, 1.0, "PROJECTION");
-    projection_symbol(
-        g,
-        [x(c1 * 0.5), y(0.42)],
-        r * 0.55,
-        ctx.projection,
-    );
+    projection_symbol(g, [x(c1 * 0.5), y(0.42)], r * 0.55, ctx.projection);
     g.text(
-        GText::new([x(c1) - pad, y(0.0) + pad], cap, val(TitleField::Projection))
-            .align(Align::BottomRight),
+        GText::new(
+            [x(c1) - pad, y(0.0) + pad],
+            cap,
+            val(TitleField::Projection),
+        )
+        .align(Align::BottomRight),
     );
 
     // Middle column.
@@ -226,8 +240,18 @@ pub fn draw(g: &mut Graphics, rect: Rect, ctx: &TitleContext, units: DrawingUnit
     g.text(GText::new([x(mid(cn, c2)), y(4.5)], cap, "DATE").align(Align::Center));
     for (k, label, name, date) in [
         (3.0, "DRAWN", TitleField::DrawnBy, TitleField::DrawnDate),
-        (2.0, "CHECKED", TitleField::CheckedBy, TitleField::CheckedDate),
-        (1.0, "APPROVED", TitleField::ApprovedBy, TitleField::ApprovedDate),
+        (
+            2.0,
+            "CHECKED",
+            TitleField::CheckedBy,
+            TitleField::CheckedDate,
+        ),
+        (
+            1.0,
+            "APPROVED",
+            TitleField::ApprovedBy,
+            TitleField::ApprovedDate,
+        ),
     ] {
         caption(g, c1, k + 1.0, label);
         value(g, c1, cn, k, k + 1.0, 1.9, &val(name));
@@ -254,8 +278,12 @@ pub fn draw(g: &mut Graphics, rect: Rect, ctx: &TitleContext, units: DrawingUnit
             .bold(),
     );
     g.text(
-        GText::new([x(mid(c2, 1.0)), y(2.7)], fit(&description, 2.5, false), description)
-            .align(Align::Center),
+        GText::new(
+            [x(mid(c2, 1.0)), y(2.7)],
+            fit(&description, 2.5, false),
+            description,
+        )
+        .align(Align::Center),
     );
     caption(g, c2, 2.0, "SIZE");
     value(g, c2, cs, 1.0, 2.0, 4.0, &val(TitleField::Size));
@@ -297,11 +325,7 @@ pub fn projection_symbol(g: &mut Graphics, center: [f64; 2], h: f64, projection:
     g.circle([circ_cx, cy], small, Weight::Thin);
     // Centre lines through both views.
     let ext = h * 0.12;
-    g.line(
-        [left - ext, cy],
-        [left + total + ext, cy],
-        Weight::Center,
-    );
+    g.line([left - ext, cy], [left + total + ext, cy], Weight::Center);
     g.line(
         [circ_cx, cy - big - ext],
         [circ_cx, cy + big + ext],
@@ -390,7 +414,10 @@ mod tests {
             for o in Orientation::ALL {
                 let inner = frame(SheetFormat::new(s, o)).inner;
                 let r = placement(inner, s);
-                assert!(r.width() <= inner.width() && r.height() < inner.height() / 2.0, "{s:?} {o:?}");
+                assert!(
+                    r.width() <= inner.width() && r.height() < inner.height() / 2.0,
+                    "{s:?} {o:?}"
+                );
             }
         }
     }
@@ -402,7 +429,13 @@ mod tests {
             projection_symbol(&mut g, [0.0, 0.0], 10.0, p);
             g.circles[0].center[0]
         };
-        assert!(side(Projection::Third) > 0.0, "third angle: circles on the right");
-        assert!(side(Projection::First) < 0.0, "first angle: circles on the left");
+        assert!(
+            side(Projection::Third) > 0.0,
+            "third angle: circles on the right"
+        );
+        assert!(
+            side(Projection::First) < 0.0,
+            "first angle: circles on the left"
+        );
     }
 }

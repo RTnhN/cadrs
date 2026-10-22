@@ -222,7 +222,12 @@ pub enum TextCase {
 }
 
 impl TextCase {
-    pub const ALL: [TextCase; 4] = [TextCase::AsIs, TextCase::Upper, TextCase::Lower, TextCase::Title];
+    pub const ALL: [TextCase; 4] = [
+        TextCase::AsIs,
+        TextCase::Upper,
+        TextCase::Lower,
+        TextCase::Title,
+    ];
 
     pub fn label(self) -> &'static str {
         match self {
@@ -243,7 +248,10 @@ impl TextCase {
                 .map(|w| {
                     let mut c = w.chars();
                     match c.next() {
-                        Some(f) => f.to_uppercase().chain(c.flat_map(char::to_lowercase)).collect(),
+                        Some(f) => f
+                            .to_uppercase()
+                            .chain(c.flat_map(char::to_lowercase))
+                            .collect(),
                         None => String::new(),
                     }
                 })
@@ -266,7 +274,11 @@ pub struct Field {
 
 impl Field {
     pub fn new(prop: Prop) -> Self {
-        Self { prop, case: TextCase::AsIs, date: None }
+        Self {
+            prop,
+            case: TextCase::AsIs,
+            date: None,
+        }
     }
 
     /// The field's chip label in the editor ("Part: Name", "Sheet: Scale").
@@ -310,7 +322,9 @@ pub struct RichText {
 
 impl Default for RichText {
     fn default() -> Self {
-        Self { paragraphs: vec![Paragraph::default()] }
+        Self {
+            paragraphs: vec![Paragraph::default()],
+        }
     }
 }
 
@@ -324,7 +338,10 @@ impl RichText {
                     spans: if l.is_empty() {
                         Vec::new()
                     } else {
-                        vec![Span { content: Inline::Text(l.to_string()), style: CharStyle::default() }]
+                        vec![Span {
+                            content: Inline::Text(l.to_string()),
+                            style: CharStyle::default(),
+                        }]
                     },
                     ..Default::default()
                 })
@@ -474,10 +491,14 @@ pub fn resolve_field(f: &Field, ctx: &FieldContext) -> String {
             DrawingProp::SheetName => Some(d.sheet_name.clone()),
             DrawingProp::SheetNumber => Some((d.sheet_index + 1).to_string()),
             DrawingProp::SheetCount => Some(d.sheet_count.max(1).to_string()),
-            DrawingProp::SheetOf => Some(format!("{} of {}", d.sheet_index + 1, d.sheet_count.max(1))),
+            DrawingProp::SheetOf => {
+                Some(format!("{} of {}", d.sheet_index + 1, d.sheet_count.max(1)))
+            }
             DrawingProp::SheetSize => Some(d.size.letter().to_string()),
             DrawingProp::DrawingName => Some(d.drawing_name.clone()),
-            DrawingProp::Date => d.date.map(|dt| format_date(dt, f.date.unwrap_or(d.date_format))),
+            DrawingProp::Date => d
+                .date
+                .map(|dt| format_date(dt, f.date.unwrap_or(d.date_format))),
             DrawingProp::Projection => Some(d.projection.label().to_string()),
             DrawingProp::Units => Some(d.units.label().to_string()),
             DrawingProp::DrawnBy => d.title.drawn_by.clone(),
@@ -527,10 +548,15 @@ impl Flat {
             if i > 0 {
                 items.push((Item::Break, CharStyle::default()));
             }
-            paras.push(ParaStyle { align: p.align, list: p.list });
+            paras.push(ParaStyle {
+                align: p.align,
+                list: p.list,
+            });
             for s in &p.spans {
                 match &s.content {
-                    Inline::Text(txt) => items.extend(txt.chars().map(|c| (Item::Char(c), s.style))),
+                    Inline::Text(txt) => {
+                        items.extend(txt.chars().map(|c| (Item::Char(c), s.style)))
+                    }
                     Inline::Field(f) => items.push((Item::Field(*f), s.style)),
                 }
             }
@@ -560,10 +586,19 @@ impl Flat {
                     apply(&mut cur, self.paras.get(k));
                 }
                 Item::Char(c) => match cur.spans.last_mut() {
-                    Some(Span { content: Inline::Text(t), style: s }) if s == style => t.push(*c),
-                    _ => cur.spans.push(Span { content: Inline::Text(c.to_string()), style: *style }),
+                    Some(Span {
+                        content: Inline::Text(t),
+                        style: s,
+                    }) if s == style => t.push(*c),
+                    _ => cur.spans.push(Span {
+                        content: Inline::Text(c.to_string()),
+                        style: *style,
+                    }),
                 },
-                Item::Field(f) => cur.spans.push(Span { content: Inline::Field(*f), style: *style }),
+                Item::Field(f) => cur.spans.push(Span {
+                    content: Inline::Field(*f),
+                    style: *style,
+                }),
             }
         }
         paragraphs.push(cur);
@@ -572,7 +607,10 @@ impl Flat {
 
     /// The paragraph of flat position `pos`.
     pub fn para_of(&self, pos: usize) -> usize {
-        self.items[..pos.min(self.items.len())].iter().filter(|(i, _)| *i == Item::Break).count()
+        self.items[..pos.min(self.items.len())]
+            .iter()
+            .filter(|(i, _)| *i == Item::Break)
+            .count()
     }
 
     /// The flat range of paragraph `p` (without its break).
@@ -607,7 +645,12 @@ impl Editor {
     pub fn new(t: &RichText) -> Self {
         let flat = Flat::of(t);
         let n = flat.items.len();
-        let mut e = Self { flat, caret: n, anchor: n, style: CharStyle::default() };
+        let mut e = Self {
+            flat,
+            caret: n,
+            anchor: n,
+            style: CharStyle::default(),
+        };
         e.style = e.style_at(n);
         e
     }
@@ -630,8 +673,13 @@ impl Editor {
     }
 
     fn style_at(&self, pos: usize) -> CharStyle {
-        let before = self.flat.items[..pos].iter().rev().find(|(i, _)| *i != Item::Break);
-        let after = self.flat.items[pos..].iter().find(|(i, _)| *i != Item::Break);
+        let before = self.flat.items[..pos]
+            .iter()
+            .rev()
+            .find(|(i, _)| *i != Item::Break);
+        let after = self.flat.items[pos..]
+            .iter()
+            .find(|(i, _)| *i != Item::Break);
         before.or(after).map(|(_, s)| *s).unwrap_or_default()
     }
 
@@ -718,13 +766,21 @@ impl Editor {
 
     pub fn left(&mut self, extend: bool) {
         let r = self.selection();
-        let to = if !extend && !r.is_empty() { r.start } else { self.caret.saturating_sub(1) };
+        let to = if !extend && !r.is_empty() {
+            r.start
+        } else {
+            self.caret.saturating_sub(1)
+        };
         self.set_caret(to, extend);
     }
 
     pub fn right(&mut self, extend: bool) {
         let r = self.selection();
-        let to = if !extend && !r.is_empty() { r.end } else { self.caret + 1 };
+        let to = if !extend && !r.is_empty() {
+            r.end
+        } else {
+            self.caret + 1
+        };
         self.set_caret(to, extend);
     }
 
@@ -742,7 +798,10 @@ impl Editor {
     /// Whether the selection (or, with none, the typing style) has `a`.
     pub fn has(&self, a: Attr) -> bool {
         let r = self.selection();
-        let mut chars = self.flat.items[r].iter().filter(|(i, _)| *i != Item::Break).peekable();
+        let mut chars = self.flat.items[r]
+            .iter()
+            .filter(|(i, _)| *i != Item::Break)
+            .peekable();
         if chars.peek().is_none() {
             return self.style.get(a);
         }
@@ -814,7 +873,10 @@ pub const FACE_BOLD: u16 = 800;
 /// The face a style is drawn with: (weight, italic). Bold italic uses the bundled ExtraBold
 /// Italic; plain italic Inter Italic (regular weight, there is no Medium Italic).
 pub fn face(style: &CharStyle) -> (u16, bool) {
-    (if style.bold { FACE_BOLD } else { FACE_REGULAR }, style.italic)
+    (
+        if style.bold { FACE_BOLD } else { FACE_REGULAR },
+        style.italic,
+    )
 }
 
 thread_local! {
@@ -836,9 +898,18 @@ pub fn advance(c: char, style: &CharStyle) -> f64 {
     let a = ttf_parser::Face::parse(data, 0)
         .ok()
         .map(|f| {
-            let cap = f.capital_height().filter(|c| *c > 0).map_or(f.units_per_em() as f64 * 0.727, |c| c as f64);
-            let space = f.glyph_index(' ').and_then(|g| f.glyph_hor_advance(g)).unwrap_or(f.units_per_em() / 4) as f64;
-            let adv = f.glyph_index(c).and_then(|g| f.glyph_hor_advance(g)).map_or(space, |a| a as f64);
+            let cap = f
+                .capital_height()
+                .filter(|c| *c > 0)
+                .map_or(f.units_per_em() as f64 * 0.727, |c| c as f64);
+            let space = f
+                .glyph_index(' ')
+                .and_then(|g| f.glyph_hor_advance(g))
+                .unwrap_or(f.units_per_em() / 4) as f64;
+            let adv = f
+                .glyph_index(c)
+                .and_then(|g| f.glyph_hor_advance(g))
+                .map_or(space, |a| a as f64);
             adv / cap
         })
         .unwrap_or(0.6);
@@ -918,7 +989,13 @@ pub fn layout(text: &RichText, ctx: &FieldContext, h: f64, wrap: Option<f64>) ->
 /// As [`layout`]; with `break_words` false a word longer than the line stays whole (it runs
 /// past the wrap width) instead of breaking anywhere: table cells, which size their columns to
 /// their longest word ([`crate::table::Table::column_mins`]).
-pub fn layout_with(text: &RichText, ctx: &FieldContext, h: f64, wrap: Option<f64>, break_words: bool) -> RichLayout {
+pub fn layout_with(
+    text: &RichText,
+    ctx: &FieldContext,
+    h: f64,
+    wrap: Option<f64>,
+    break_words: bool,
+) -> RichLayout {
     let flat = Flat::of(text);
     let mut out = RichLayout::default();
     let mut stops: Vec<Option<Stop>> = vec![None; flat.items.len() + 1];
@@ -928,7 +1005,11 @@ pub fn layout_with(text: &RichText, ctx: &FieldContext, h: f64, wrap: Option<f64
     let mut lines_out: Vec<OutLine> = Vec::new();
     for (pi, para) in flat.paras.iter().enumerate() {
         let range = flat.para_range(pi);
-        number = if para.list == ListKind::Numbered { number + 1 } else { 0 };
+        number = if para.list == ListKind::Numbered {
+            number + 1
+        } else {
+            0
+        };
         let atoms: Vec<Atom> = flat.items[range.clone()]
             .iter()
             .enumerate()
@@ -940,7 +1021,15 @@ pub fn layout_with(text: &RichText, ctx: &FieldContext, h: f64, wrap: Option<f64
                     Item::Break => (String::new(), false),
                 };
                 let w = width(&text, st) * ah;
-                Atom { index: range.start + k, space: text == " ", text, style: *st, h: ah, w, field }
+                Atom {
+                    index: range.start + k,
+                    space: text == " ",
+                    text,
+                    style: *st,
+                    h: ah,
+                    w,
+                    field,
+                }
             })
             .collect();
         let marker = match para.list {
@@ -949,7 +1038,11 @@ pub fn layout_with(text: &RichText, ctx: &FieldContext, h: f64, wrap: Option<f64
             ListKind::Numbered => Some(format!("{number}.")),
         };
         let first_style = atoms.first().map(|a| a.style).unwrap_or_default();
-        let indent = if marker.is_some() { INDENT * first_style.height.unwrap_or(h) } else { 0.0 };
+        let indent = if marker.is_some() {
+            INDENT * first_style.height.unwrap_or(h)
+        } else {
+            0.0
+        };
         let room = wrap.map(|w| (w - indent).max(h));
         // Greedy breaking at spaces (a word longer than the line breaks anywhere, unless
         // `break_words` is off: then it stays whole).
@@ -981,8 +1074,15 @@ pub fn layout_with(text: &RichText, ctx: &FieldContext, h: f64, wrap: Option<f64
             cur.push(a);
         }
         for (li, line) in lines.into_iter().enumerate() {
-            let lh = line.iter().map(|a| a.h).fold(first_style.height.unwrap_or(h), f64::max);
-            let m = if li == 0 { marker.clone().map(|m| (m, first_style)) } else { None };
+            let lh = line
+                .iter()
+                .map(|a| a.h)
+                .fold(first_style.height.unwrap_or(h), f64::max);
+            let m = if li == 0 {
+                marker.clone().map(|m| (m, first_style))
+            } else {
+                None
+            };
             lines_out.push((line, lh, para.align, indent, m));
         }
         // The break's own stop is placed at the end of the paragraph's last line (below).
@@ -996,7 +1096,9 @@ pub fn layout_with(text: &RichText, ctx: &FieldContext, h: f64, wrap: Option<f64
     for (l, _, _, indent, _) in &lines_out {
         widest = widest.max(indent + line_width(l));
     }
-    let box_w = wrap.unwrap_or(widest).max(widest.min(wrap.unwrap_or(f64::MAX)));
+    let box_w = wrap
+        .unwrap_or(widest)
+        .max(widest.min(wrap.unwrap_or(f64::MAX)));
     let mut para_end_stop: Vec<(usize, Stop)> = Vec::new();
     for (line, lh, align, indent, marker) in &lines_out {
         let baseline = y_top - lh;
@@ -1036,7 +1138,11 @@ pub fn layout_with(text: &RichText, ctx: &FieldContext, h: f64, wrap: Option<f64
             let mut buf = String::new();
             let mut buf_x = x;
             for r in run {
-                stops[r.index] = Some(Stop { x: px, baseline, height: ah });
+                stops[r.index] = Some(Stop {
+                    x: px,
+                    baseline,
+                    height: ah,
+                });
                 for c in r.text.chars() {
                     let cw = advance(c, &r.style) * ah;
                     if let Some(sym) = Symbol::of(c) {
@@ -1087,7 +1193,10 @@ pub fn layout_with(text: &RichText, ctx: &FieldContext, h: f64, wrap: Option<f64
                 out.strokes.push(vec![[x, y], [x + vis, y]]);
             }
             if a.field {
-                out.fields.push(([x - 0.1 * ah, baseline - 0.3 * ah], [x + rw + 0.1 * ah, baseline + 1.25 * ah]));
+                out.fields.push((
+                    [x - 0.1 * ah, baseline - 0.3 * ah],
+                    [x + rw + 0.1 * ah, baseline + 1.25 * ah],
+                ));
             }
             x += rw;
             i = j;
@@ -1095,16 +1204,33 @@ pub fn layout_with(text: &RichText, ctx: &FieldContext, h: f64, wrap: Option<f64
         // The stop after the line's last atom.
         if let Some(last) = line.last() {
             let end = last.index + 1;
-            para_end_stop.push((end, Stop { x, baseline, height: *lh }));
+            para_end_stop.push((
+                end,
+                Stop {
+                    x,
+                    baseline,
+                    height: *lh,
+                },
+            ));
         } else {
             // An empty paragraph: its stop is where its text would start.
-            para_end_stop.push((usize::MAX, Stop { x: x0, baseline, height: *lh }));
+            para_end_stop.push((
+                usize::MAX,
+                Stop {
+                    x: x0,
+                    baseline,
+                    height: *lh,
+                },
+            ));
         }
         y_top -= lh * LINE;
     }
     // Stops at line ends and paragraph breaks: a position without a stop takes the end of the
     // line before it; an empty paragraph's the start of its line.
-    let mut empty = para_end_stop.iter().filter(|(k, _)| *k == usize::MAX).map(|(_, s)| *s);
+    let mut empty = para_end_stop
+        .iter()
+        .filter(|(k, _)| *k == usize::MAX)
+        .map(|(_, s)| *s);
     for (k, s) in &para_end_stop {
         if *k != usize::MAX && *k < stops.len() && stops[*k].is_none() {
             stops[*k] = Some(*s);
@@ -1119,7 +1245,11 @@ pub fn layout_with(text: &RichText, ctx: &FieldContext, h: f64, wrap: Option<f64
             stops[r.start] = Some(s);
         }
     }
-    let first = Stop { x: 0.0, baseline: -h, height: h };
+    let first = Stop {
+        x: 0.0,
+        baseline: -h,
+        height: h,
+    };
     let mut last = first;
     out.stops = stops
         .into_iter()
@@ -1156,7 +1286,10 @@ mod tests {
     use super::*;
 
     fn ctx_with<'a>(r: &'a ReferenceProps, d: &'a DrawingContext) -> FieldContext<'a> {
-        FieldContext { reference: r, drawing: d }
+        FieldContext {
+            reference: r,
+            drawing: d,
+        }
     }
 
     #[test]
@@ -1202,8 +1335,17 @@ mod tests {
         let d2 = DrawingContext::default();
         assert_eq!(resolve_field(&date, &ctx_with(&r, &d2)), DASHES);
         // A dashed field fills in once the property is set.
-        let r2 = ReferenceProps { part_number: Some("UJ-100".into()), ..r.clone() };
-        assert_eq!(resolve_field(&Field::new(Prop::Reference(RefProp::PartNumber)), &ctx_with(&r2, &d)), "UJ-100");
+        let r2 = ReferenceProps {
+            part_number: Some("UJ-100".into()),
+            ..r.clone()
+        };
+        assert_eq!(
+            resolve_field(
+                &Field::new(Prop::Reference(RefProp::PartNumber)),
+                &ctx_with(&r2, &d)
+            ),
+            "UJ-100"
+        );
     }
 
     #[test]
@@ -1223,7 +1365,10 @@ mod tests {
         let t = e.text();
         assert_eq!(t.paragraphs.len(), 2);
         assert_eq!(t.paragraphs[0].spans.len(), 2);
-        assert_eq!(t.paragraphs[0].spans[0].content, Inline::Text("Hello ".into()));
+        assert_eq!(
+            t.paragraphs[0].spans[0].content,
+            Inline::Text("Hello ".into())
+        );
         assert!(t.paragraphs[0].spans[1].style.bold);
         assert_eq!(t.paragraphs[1].list, ListKind::Bullet);
         assert_eq!(t.paragraphs[0].list, ListKind::None);
@@ -1270,7 +1415,10 @@ mod tests {
         let wrapped = layout(&t, &c, 3.0, Some(w / 3.0));
         assert!(wrapped.height > 2.0 * one.height);
         for p in &wrapped.pieces {
-            assert!(p.pos[0] + width(p.text.trim_end(), &CharStyle::default()) * 3.0 <= w / 3.0 + 1e-6, "{p:?}");
+            assert!(
+                p.pos[0] + width(p.text.trim_end(), &CharStyle::default()) * 3.0 <= w / 3.0 + 1e-6,
+                "{p:?}"
+            );
         }
         // Centred text sits in the middle of the wrap width.
         let mut centred = RichText::plain("AB");

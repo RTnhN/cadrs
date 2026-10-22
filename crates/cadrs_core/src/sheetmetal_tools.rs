@@ -86,7 +86,11 @@ pub enum AngleControl {
 }
 
 impl AngleControl {
-    pub const ALL: [AngleControl; 3] = [AngleControl::BendAngle, AngleControl::AlignToGeometry, AngleControl::AngleFromDirection];
+    pub const ALL: [AngleControl; 3] = [
+        AngleControl::BendAngle,
+        AngleControl::AlignToGeometry,
+        AngleControl::AngleFromDirection,
+    ];
 
     pub fn label(self) -> &'static str {
         match self {
@@ -154,11 +158,17 @@ impl BendFeature {
         if self.face.is_none() {
             return Some("Select a sheet metal face to bend");
         }
-        if self.control != AngleControl::AlignToGeometry && !(self.angle >= 1.0 && self.angle <= 359.0) {
+        if self.control != AngleControl::AlignToGeometry
+            && !(self.angle >= 1.0 && self.angle <= 359.0)
+        {
             return Some("The bend angle must be between 1 and 359 degrees");
         }
         if self.control != AngleControl::BendAngle && self.reference.is_none() {
-            return Some(if self.control == AngleControl::AlignToGeometry { "Select what to align to" } else { "Select a direction" });
+            return Some(if self.control == AngleControl::AlignToGeometry {
+                "Select what to align to"
+            } else {
+                "Select a direction"
+            });
         }
         if !self.use_model_radius && !(self.radius > 0.0) {
             return Some("The bend radius must be greater than 0");
@@ -194,7 +204,11 @@ pub enum JogBounding {
 }
 
 impl JogBounding {
-    pub const ALL: [JogBounding; 3] = [JogBounding::Blind, JogBounding::UpToEntity, JogBounding::Thickness];
+    pub const ALL: [JogBounding; 3] = [
+        JogBounding::Blind,
+        JogBounding::UpToEntity,
+        JogBounding::Thickness,
+    ];
 
     pub fn label(self) -> &'static str {
         match self {
@@ -252,9 +266,15 @@ impl JogFeature {
             return Some(p);
         }
         match self.bounding {
-            JogBounding::Blind if !(self.offset > 0.0) => Some("The jog offset must be greater than 0"),
-            JogBounding::UpToEntity if self.up_to.is_none() => Some("Select the entity to jog up to"),
-            JogBounding::Thickness if !(self.factor > 0.0) => Some("The thickness factor must be greater than 0"),
+            JogBounding::Blind if !(self.offset > 0.0) => {
+                Some("The jog offset must be greater than 0")
+            }
+            JogBounding::UpToEntity if self.up_to.is_none() => {
+                Some("Select the entity to jog up to")
+            }
+            JogBounding::Thickness if !(self.factor > 0.0) => {
+                Some("The thickness factor must be greater than 0")
+            }
             _ => None,
         }
     }
@@ -280,7 +300,14 @@ pub struct TabFeature {
 
 impl Default for TabFeature {
     fn default() -> Self {
-        TabFeature { regions: Vec::new(), sketches: Vec::new(), flanges: Vec::new(), offset: 0.0, offset_expr: "0 mm".into(), scope: Vec::new() }
+        TabFeature {
+            regions: Vec::new(),
+            sketches: Vec::new(),
+            flanges: Vec::new(),
+            offset: 0.0,
+            offset_expr: "0 mm".into(),
+            scope: Vec::new(),
+        }
     }
 }
 
@@ -319,8 +346,17 @@ pub struct CornerFeature {
 
 impl Default for CornerFeature {
     fn default() -> Self {
-        let relief = CornerRelief { kind: CornerReliefKind::RectangleScaled, scale: 1.5, size: 3.0 };
-        CornerFeature { corner: None, relief, scale_expr: "1.5".into(), size_expr: "3 mm".into() }
+        let relief = CornerRelief {
+            kind: CornerReliefKind::RectangleScaled,
+            scale: 1.5,
+            size: 3.0,
+        };
+        CornerFeature {
+            corner: None,
+            relief,
+            scale_expr: "1.5".into(),
+            size_expr: "3 mm".into(),
+        }
     }
 }
 
@@ -355,7 +391,10 @@ pub struct BendReliefFeature {
 
 impl Default for BendReliefFeature {
     fn default() -> Self {
-        let relief = BendRelief { width_scale: 2.0, ..BendRelief::default() };
+        let relief = BendRelief {
+            width_scale: 2.0,
+            ..BendRelief::default()
+        };
         BendReliefFeature {
             end: None,
             relief,
@@ -460,10 +499,14 @@ impl CornerBreakFeature {
             return Some("The second radius must be greater than 0");
         }
         if self.chamfer {
-            if !(self.distance > 0.0) || (self.chamfer_type == ChamferType::TwoDistances && !(self.distance2 > 0.0)) {
+            if !(self.distance > 0.0)
+                || (self.chamfer_type == ChamferType::TwoDistances && !(self.distance2 > 0.0))
+            {
                 return Some("The distance must be greater than 0");
             }
-            if self.chamfer_type == ChamferType::DistanceAngle && !(self.angle > 0.0 && self.angle < 180.0) {
+            if self.chamfer_type == ChamferType::DistanceAngle
+                && !(self.angle > 0.0 && self.angle < 180.0)
+            {
                 return Some("The angle must be between 0 and 180 degrees");
             }
         }
@@ -531,7 +574,9 @@ impl SheetMetalTool {
             "sheet-metal-jog" => SheetMetalTool::Jog(JogFeature::default()),
             "sheet-metal-corner" => SheetMetalTool::Corner(CornerFeature::default()),
             "sheet-metal-bend-relief" => SheetMetalTool::BendRelief(BendReliefFeature::default()),
-            "sheet-metal-corner-break" => SheetMetalTool::CornerBreak(CornerBreakFeature::default()),
+            "sheet-metal-corner-break" => {
+                SheetMetalTool::CornerBreak(CornerBreakFeature::default())
+            }
             _ => return None,
         })
     }
@@ -600,10 +645,24 @@ mod tests {
     #[test]
     fn defaults_follow_the_dialogs_and_round_trip() {
         let b = BendFeature::default();
-        assert_eq!((b.angle, b.alignment, b.use_model_radius, b.use_model_k), (90.0, BendAlignment::BendLine, true, true));
+        assert_eq!(
+            (b.angle, b.alignment, b.use_model_radius, b.use_model_k),
+            (90.0, BendAlignment::BendLine, true, true)
+        );
         let j = JogFeature::default();
-        assert_eq!((j.anchor, j.preserve_material, j.bounding), (JogAnchor::Inside, true, JogBounding::Blind));
-        for name in ["sheet-metal-finish", "sheet-metal-tab", "sheet-metal-bend", "sheet-metal-jog", "sheet-metal-corner", "sheet-metal-bend-relief", "sheet-metal-corner-break"] {
+        assert_eq!(
+            (j.anchor, j.preserve_material, j.bounding),
+            (JogAnchor::Inside, true, JogBounding::Blind)
+        );
+        for name in [
+            "sheet-metal-finish",
+            "sheet-metal-tab",
+            "sheet-metal-bend",
+            "sheet-metal-jog",
+            "sheet-metal-corner",
+            "sheet-metal-bend-relief",
+            "sheet-metal-corner-break",
+        ] {
             let t = SheetMetalTool::for_tool(name).unwrap();
             assert_eq!(t.icon(), name);
             assert!(t.problem().is_some(), "{name}: nothing picked yet");

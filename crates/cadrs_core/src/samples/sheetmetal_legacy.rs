@@ -33,7 +33,14 @@ pub const THICKNESS: f64 = 2.0;
 pub const RADIUS: f64 = 3.0;
 pub const DEPTH: f64 = 100.0;
 /// The chain on Front (x, z): lip, side, base, side, lip.
-pub const CHAIN: [(f64, f64); 6] = [(10.0, 40.0), (0.0, 40.0), (0.0, 0.0), (60.0, 0.0), (60.0, 40.0), (50.0, 40.0)];
+pub const CHAIN: [(f64, f64); 6] = [
+    (10.0, 40.0),
+    (0.0, 40.0),
+    (0.0, 0.0),
+    (60.0, 0.0),
+    (60.0, 40.0),
+    (50.0, 40.0),
+];
 
 pub const SKETCH: FeatureId = FeatureId::from_u128(0x5317_0000_0000_0000_0000_0000_0000_0001);
 pub const MODEL: FeatureId = FeatureId::from_u128(0x5317_0000_0000_0000_0000_0000_0000_0002);
@@ -41,16 +48,35 @@ pub const PART: PartId = PartId::new(MODEL, 0);
 
 /// The model's settings.
 pub fn params() -> cadrs_sheetmetal::Params {
-    cadrs_sheetmetal::Params { thickness: THICKNESS, bend_radius: RADIUS, k_factor: 0.45, ..SheetMetalModelFeature::default_params() }
+    cadrs_sheetmetal::Params {
+        thickness: THICKNESS,
+        bend_radius: RADIUS,
+        k_factor: 0.45,
+        ..SheetMetalModelFeature::default_params()
+    }
 }
 
 /// The channel's features: its sketch and its Sheet metal model (Extrude).
 pub fn channel() -> Vec<Feature> {
     let mut g = Sketch::new();
-    SketchOp::AddPolyline { points: CHAIN.iter().map(|(x, y)| Vec2::new(*x, *y)).collect(), closed: false, construction: false, label: "Add line" }
-        .apply(&mut g)
-        .expect("a chain");
-    let sketch = Feature { id: SKETCH, name: "Sketch 1".into(), kind: FeatureKind::Sketch(SketchFeature { plane: Some(PlaneRef::Front), disable_imprinting: false, geometry: g }), suppress_by: None };
+    SketchOp::AddPolyline {
+        points: CHAIN.iter().map(|(x, y)| Vec2::new(*x, *y)).collect(),
+        closed: false,
+        construction: false,
+        label: "Add line",
+    }
+    .apply(&mut g)
+    .expect("a chain");
+    let sketch = Feature {
+        id: SKETCH,
+        name: "Sketch 1".into(),
+        kind: FeatureKind::Sketch(SketchFeature {
+            plane: Some(PlaneRef::Front),
+            disable_imprinting: false,
+            geometry: g,
+        }),
+        suppress_by: None,
+    };
     let p = params();
     let x = SheetMetalModelFeature {
         operation: SheetMetalOp::Extrude,
@@ -61,7 +87,12 @@ pub fn channel() -> Vec<Feature> {
         exprs: SheetMetalExprs::of(&p),
         ..Default::default()
     };
-    let model = Feature { id: MODEL, name: "Sheet metal model 1".into(), kind: FeatureKind::SheetMetalModel(x), suppress_by: None };
+    let model = Feature {
+        id: MODEL,
+        name: "Sheet metal model 1".into(),
+        kind: FeatureKind::SheetMetalModel(x),
+        suppress_by: None,
+    };
     vec![sketch, model]
 }
 
@@ -70,10 +101,21 @@ pub fn channel() -> Vec<Feature> {
 pub fn step(r: &mut Rebuilder) -> Result<Vec<u8>, String> {
     let features = Arc::new(channel());
     let el = ElementId::from_u128(0x5317);
-    let item = ExportItem { features, part: PART, name: "Channel".into(), pose: None, source: (el, PART), source_name: "Channel".into() };
+    let item = ExportItem {
+        features,
+        part: PART,
+        name: "Channel".into(),
+        pose: None,
+        source: (el, PART),
+        source_name: "Channel".into(),
+    };
     let req = ExportRequest::new(ModelFormat::Step, "Channel", vec![item]);
     let files = r.export_files(&req)?;
-    files.into_iter().next().map(|f| f.bytes).ok_or_else(|| "no file".into())
+    files
+        .into_iter()
+        .next()
+        .map(|f| f.bytes)
+        .ok_or_else(|| "no file".into())
 }
 
 pub const CASE_SKETCH: FeatureId = FeatureId::from_u128(0x5317_0000_0000_0000_0000_0000_0000_0011);
@@ -110,15 +152,42 @@ pub fn case_round() -> Vec<Feature> {
 fn case_of(p: cadrs_sheetmetal::Params) -> Vec<Feature> {
     let (w, d, h) = CASE;
     let mut g = Sketch::new();
-    SketchOp::AddPolyline { points: vec![Vec2::new(0.0, 0.0), Vec2::new(w, 0.0), Vec2::new(w, d), Vec2::new(0.0, d)], closed: true, construction: false, label: "Add rectangle" }
-        .apply(&mut g)
-        .expect("a rectangle");
-    let region = cadrs_sketch::region::regions(&g).into_iter().next().expect("the rectangle's region");
-    let sketch = Feature { id: CASE_SKETCH, name: "Sketch 1".into(), kind: FeatureKind::Sketch(SketchFeature { plane: Some(PlaneRef::Top), disable_imprinting: false, geometry: g }), suppress_by: None };
+    SketchOp::AddPolyline {
+        points: vec![
+            Vec2::new(0.0, 0.0),
+            Vec2::new(w, 0.0),
+            Vec2::new(w, d),
+            Vec2::new(0.0, d),
+        ],
+        closed: true,
+        construction: false,
+        label: "Add rectangle",
+    }
+    .apply(&mut g)
+    .expect("a rectangle");
+    let region = cadrs_sketch::region::regions(&g)
+        .into_iter()
+        .next()
+        .expect("the rectangle's region");
+    let sketch = Feature {
+        id: CASE_SKETCH,
+        name: "Sketch 1".into(),
+        kind: FeatureKind::Sketch(SketchFeature {
+            plane: Some(PlaneRef::Top),
+            disable_imprinting: false,
+            geometry: g,
+        }),
+        suppress_by: None,
+    };
     let block = Feature {
         id: CASE_BLOCK,
         name: "Extrude 1".into(),
-        kind: FeatureKind::Extrude(ExtrudeFeature { regions: vec![RegionRef::new(CASE_SKETCH, &region)], depth: h, depth_expr: format!("{h} mm"), ..Default::default() }),
+        kind: FeatureKind::Extrude(ExtrudeFeature {
+            regions: vec![RegionRef::new(CASE_SKETCH, &region)],
+            depth: h,
+            depth_expr: format!("{h} mm"),
+            ..Default::default()
+        }),
         suppress_by: None,
     };
     // A session of its own: `case_step` runs this on the rebuild worker, which
@@ -126,17 +195,44 @@ fn case_of(p: cadrs_sheetmetal::Params) -> Vec<Feature> {
     let b = Rebuilder::new().rebuild(&[sketch.clone(), block.clone()]);
     let part = b.parts.first().expect("the block");
     let s = &part.solid;
-    let top = (0..s.faces.len()).find(|i| s.faces[*i].plane.is_some_and(|p| p.normal()[2] > 0.999)).expect("the top");
-    let bottom = (0..s.faces.len()).find(|i| s.faces[*i].plane.is_some_and(|p| p.normal()[2] < -0.999)).expect("the bottom");
-    let top = crate::document::FaceRef { part: part.id, face: s.faces[top].name, seed: s.faces[top].center.unwrap_or([w / 2.0, d / 2.0, h]) };
+    let top = (0..s.faces.len())
+        .find(|i| s.faces[*i].plane.is_some_and(|p| p.normal()[2] > 0.999))
+        .expect("the top");
+    let bottom = (0..s.faces.len())
+        .find(|i| s.faces[*i].plane.is_some_and(|p| p.normal()[2] < -0.999))
+        .expect("the bottom");
+    let top = crate::document::FaceRef {
+        part: part.id,
+        face: s.faces[top].name,
+        seed: s.faces[top].center.unwrap_or([w / 2.0, d / 2.0, h]),
+    };
     let bends = s
         .face_edges(&s.faces[bottom].name)
         .into_iter()
         .filter_map(|e| s.edge(&e))
-        .map(|e| EdgeOrFace::Edge(EdgeRef { part: part.id, edge: e.name, seed: e.points[e.points.len() / 2] }))
+        .map(|e| {
+            EdgeOrFace::Edge(EdgeRef {
+                part: part.id,
+                edge: e.name,
+                seed: e.points[e.points.len() / 2],
+            })
+        })
         .collect();
-    let x = SheetMetalModelFeature { operation: SheetMetalOp::Convert, parts: vec![part.id], exclude: vec![top], bends, params: p, exprs: SheetMetalExprs::of(&p), ..Default::default() };
-    let model = Feature { id: CASE_MODEL, name: "Sheet metal model 1".into(), kind: FeatureKind::SheetMetalModel(x), suppress_by: None };
+    let x = SheetMetalModelFeature {
+        operation: SheetMetalOp::Convert,
+        parts: vec![part.id],
+        exclude: vec![top],
+        bends,
+        params: p,
+        exprs: SheetMetalExprs::of(&p),
+        ..Default::default()
+    };
+    let model = Feature {
+        id: CASE_MODEL,
+        name: "Sheet metal model 1".into(),
+        kind: FeatureKind::SheetMetalModel(x),
+        suppress_by: None,
+    };
     vec![sketch, block, model]
 }
 
@@ -153,8 +249,19 @@ pub fn case_round_step(r: &mut Rebuilder) -> Result<Vec<u8>, String> {
 fn case_step_of(r: &mut Rebuilder, features: Vec<Feature>) -> Result<Vec<u8>, String> {
     let features = Arc::new(features);
     let el = ElementId::from_u128(0x5317);
-    let item = ExportItem { features, part: CASE_PART, name: "Case".into(), pose: None, source: (el, CASE_PART), source_name: "Case".into() };
+    let item = ExportItem {
+        features,
+        part: CASE_PART,
+        name: "Case".into(),
+        pose: None,
+        source: (el, CASE_PART),
+        source_name: "Case".into(),
+    };
     let req = ExportRequest::new(ModelFormat::Step, "Case", vec![item]);
     let files = r.export_files(&req)?;
-    files.into_iter().next().map(|f| f.bytes).ok_or_else(|| "no file".into())
+    files
+        .into_iter()
+        .next()
+        .map(|f| f.bytes)
+        .ok_or_else(|| "no file".into())
 }

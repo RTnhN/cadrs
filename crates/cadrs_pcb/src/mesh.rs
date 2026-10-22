@@ -38,24 +38,46 @@ impl BodyMesh {
         BodyMesh {
             positions: self.positions.iter().map(p).collect(),
             normals: self.normals.iter().map(n).collect(),
-            edges: self.edges.iter().map(|e| e.iter().map(p).collect()).collect(),
+            edges: self
+                .edges
+                .iter()
+                .map(|e| e.iter().map(p).collect())
+                .collect(),
             ..self.clone()
         }
     }
 
     /// The box around the body, if it has any vertex.
     pub fn bounds(&self) -> Option<([f32; 3], [f32; 3])> {
-        BoardMesh { bodies: vec![self.clone()], warnings: vec![] }.bounds()
+        BoardMesh {
+            bodies: vec![self.clone()],
+            warnings: vec![],
+        }
+        .bounds()
     }
 
     /// The body split into two by the direction its faces face: those facing up (the top) and
     /// the rest (the sides and the bottom). The component view colours them apart (PCB11.8: a
     /// dark red top, bright red sides). Edges go with the sides.
     pub fn split_top(&self) -> (BodyMesh, BodyMesh) {
-        let mut top = BodyMesh { positions: vec![], normals: vec![], indices: vec![], edges: vec![], ..self.clone() };
-        let mut rest = BodyMesh { positions: vec![], normals: vec![], indices: vec![], edges: self.edges.clone(), ..self.clone() };
+        let mut top = BodyMesh {
+            positions: vec![],
+            normals: vec![],
+            indices: vec![],
+            edges: vec![],
+            ..self.clone()
+        };
+        let mut rest = BodyMesh {
+            positions: vec![],
+            normals: vec![],
+            indices: vec![],
+            edges: self.edges.clone(),
+            ..self.clone()
+        };
         for t in self.indices.chunks(3) {
-            let up = t.iter().all(|i| self.normals.get(*i as usize).is_some_and(|n| n[2] > 0.7));
+            let up = t
+                .iter()
+                .all(|i| self.normals.get(*i as usize).is_some_and(|n| n[2] > 0.7));
             let dst = if up { &mut top } else { &mut rest };
             for i in t {
                 dst.indices.push(dst.positions.len() as u32);
@@ -68,7 +90,13 @@ impl BodyMesh {
 }
 
 /// A part's display mesh (a custom representation, X10) as a body, in the part's frame.
-pub fn solid_body(solid: &cadrs_core::Solid, name: &str, class: BodyClass, color: Rgba, item: Option<ItemId>) -> BodyMesh {
+pub fn solid_body(
+    solid: &cadrs_core::Solid,
+    name: &str,
+    class: BodyClass,
+    color: Rgba,
+    item: Option<ItemId>,
+) -> BodyMesh {
     let f = |p: &[f64; 3]| [p[0] as f32, p[1] as f32, p[2] as f32];
     BodyMesh {
         name: name.to_string(),
@@ -78,15 +106,24 @@ pub fn solid_body(solid: &cadrs_core::Solid, name: &str, class: BodyClass, color
         positions: solid.positions.iter().map(f).collect(),
         normals: solid.normals.iter().map(f).collect(),
         indices: solid.indices.clone(),
-        edges: solid.edges.iter().map(|e| e.points.iter().map(f).collect()).collect(),
+        edges: solid
+            .edges
+            .iter()
+            .map(|e| e.points.iter().map(f).collect())
+            .collect(),
     }
 }
 
 /// A package's generic box (From ECAD data) in the package frame, for the component view
 /// (PCB4.5, PCB11.8).
-pub fn package_mesh_in(kernel: &mut dyn Kernel, pkg: &cadrs_idf::Package) -> Result<BodyMesh, String> {
+pub fn package_mesh_in(
+    kernel: &mut dyn Kernel,
+    pkg: &cadrs_idf::Package,
+) -> Result<BodyMesh, String> {
     let body = crate::geometry::package_body(kernel, pkg).map_err(|e| e.to_string())?;
-    let m = kernel.tessellate(body, tessellation()).map_err(|e| e.to_string());
+    let m = kernel
+        .tessellate(body, tessellation())
+        .map_err(|e| e.to_string());
     kernel.release(body);
     let m = m?;
     let f = |p: &nalgebra::Point3<f64>| [p.x as f32, p.y as f32, p.z as f32];
@@ -97,9 +134,17 @@ pub fn package_mesh_in(kernel: &mut dyn Kernel, pkg: &cadrs_idf::Package) -> Res
         color: class.color(),
         item: None,
         positions: m.positions.iter().map(f).collect(),
-        normals: m.normals.iter().map(|n| [n.x as f32, n.y as f32, n.z as f32]).collect(),
+        normals: m
+            .normals
+            .iter()
+            .map(|n| [n.x as f32, n.y as f32, n.z as f32])
+            .collect(),
         indices: m.indices.iter().flatten().copied().collect(),
-        edges: m.edges.iter().map(|(_, pts)| pts.iter().map(f).collect()).collect(),
+        edges: m
+            .edges
+            .iter()
+            .map(|(_, pts)| pts.iter().map(f).collect())
+            .collect(),
     })
 }
 
@@ -124,7 +169,10 @@ impl BoardMesh {
         let mut it = self.bodies.iter().flat_map(|b| b.positions.iter());
         let first = *it.next()?;
         Some(it.fold((first, first), |(lo, hi), p| {
-            ([lo[0].min(p[0]), lo[1].min(p[1]), lo[2].min(p[2])], [hi[0].max(p[0]), hi[1].max(p[1]), hi[2].max(p[2])])
+            (
+                [lo[0].min(p[0]), lo[1].min(p[1]), lo[2].min(p[2])],
+                [hi[0].max(p[0]), hi[1].max(p[1]), hi[2].max(p[2])],
+            )
         }))
     }
 
@@ -137,13 +185,19 @@ impl BoardMesh {
 /// How finely boards are tessellated: 0.02 mm and 5° (holes and rounded corners stay round at
 /// board scale).
 pub fn tessellation() -> Tessellation {
-    Tessellation { deflection: 0.02, angle: std::f64::consts::PI / 36.0 }
+    Tessellation {
+        deflection: 0.02,
+        angle: std::f64::consts::PI / 36.0,
+    }
 }
 
 /// Builds and tessellates every body of `pcb` in `kernel`, releasing the bodies afterwards.
 pub fn board_mesh_in(kernel: &mut dyn Kernel, pcb: &PcbBoard) -> Result<BoardMesh, String> {
     let g = crate::board_geometry(kernel, pcb).map_err(|e| e.to_string())?;
-    let mut out = BoardMesh { bodies: Vec::with_capacity(g.bodies.len()), warnings: g.warnings.clone() };
+    let mut out = BoardMesh {
+        bodies: Vec::with_capacity(g.bodies.len()),
+        warnings: g.warnings.clone(),
+    };
     let f = |p: &nalgebra::Point3<f64>| [p.x as f32, p.y as f32, p.z as f32];
     for b in &g.bodies {
         match kernel.tessellate(b.body, tessellation()) {
@@ -153,9 +207,17 @@ pub fn board_mesh_in(kernel: &mut dyn Kernel, pcb: &PcbBoard) -> Result<BoardMes
                 color: b.color,
                 item: b.item,
                 positions: m.positions.iter().map(f).collect(),
-                normals: m.normals.iter().map(|n| [n.x as f32, n.y as f32, n.z as f32]).collect(),
+                normals: m
+                    .normals
+                    .iter()
+                    .map(|n| [n.x as f32, n.y as f32, n.z as f32])
+                    .collect(),
                 indices: m.indices.iter().flatten().copied().collect(),
-                edges: m.edges.iter().map(|(_, pts)| pts.iter().map(f).collect()).collect(),
+                edges: m
+                    .edges
+                    .iter()
+                    .map(|(_, pts)| pts.iter().map(f).collect())
+                    .collect(),
             }),
             Err(e) => out.warnings.push(format!("{}: {e}", b.name)),
         }
@@ -176,7 +238,12 @@ pub use cadrs_core::pcb::model::model_motion;
 /// A footprint model's generated body ([`cadrs_eda::model3d`]) as display meshes in the package
 /// frame, one per colour, named `name` and tagged with the component's class and item. Empty
 /// when the model has no generated body.
-pub fn generated_bodies(m: &cadrs_eda::footprint::Model3d, name: &str, class: BodyClass, item: Option<ItemId>) -> Vec<BodyMesh> {
+pub fn generated_bodies(
+    m: &cadrs_eda::footprint::Model3d,
+    name: &str,
+    class: BodyClass,
+    item: Option<ItemId>,
+) -> Vec<BodyMesh> {
     let Some(body) = &m.body else { return vec![] };
     let motion = model_motion(m, 1.0);
     let alpha = (m.opacity.clamp(0.0, 1.0) * 255.0).round() as u8;
@@ -202,7 +269,14 @@ pub fn generated_bodies(m: &cadrs_eda::footprint::Model3d, name: &str, class: Bo
 pub use cadrs_core::pcb::model::file_meshes;
 
 /// A model file's meshes (from [`file_meshes`]) as display meshes in the package frame.
-pub fn file_bodies(meshes: &[cadrs_eda::model3d::Mesh], unit: f64, m: &cadrs_eda::footprint::Model3d, name: &str, class: BodyClass, item: Option<ItemId>) -> Vec<BodyMesh> {
+pub fn file_bodies(
+    meshes: &[cadrs_eda::model3d::Mesh],
+    unit: f64,
+    m: &cadrs_eda::footprint::Model3d,
+    name: &str,
+    class: BodyClass,
+    item: Option<ItemId>,
+) -> Vec<BodyMesh> {
     let motion = model_motion(m, unit);
     let alpha = (m.opacity.clamp(0.0, 1.0) * 255.0).round() as u8;
     meshes

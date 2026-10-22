@@ -17,7 +17,9 @@ use cadrs_sketch::{PlaneRef, SketchOp, Vec2};
 use super::gear_cover::Studio;
 use crate::applied::{EdgeOrFace, FilletFeature};
 use crate::command::CommandError;
-use crate::commands::{AddExtrude, AddFeature, AddSketch, CreateFolder, EditSketch, RenamePart, SetExtrude};
+use crate::commands::{
+    AddExtrude, AddFeature, AddSketch, CreateFolder, EditSketch, RenamePart, SetExtrude,
+};
 use crate::document::{BooleanOp, EdgeRef, ExtrudeFeature, Offset};
 use crate::ids::{ElementId, FeatureId, PartId};
 
@@ -29,7 +31,18 @@ pub const SKETCH_1: FeatureId = id(1);
 pub const EXTRUDE_1: FeatureId = id(2);
 pub const SKETCH_2: FeatureId = id(3);
 /// Extrude 2 … Extrude 11.
-pub const BOSSES: [FeatureId; 10] = [id(10), id(11), id(12), id(13), id(14), id(15), id(16), id(17), id(18), id(19)];
+pub const BOSSES: [FeatureId; 10] = [
+    id(10),
+    id(11),
+    id(12),
+    id(13),
+    id(14),
+    id(15),
+    id(16),
+    id(17),
+    id(18),
+    id(19),
+];
 pub const FILLET_1: FeatureId = id(4);
 pub const FILLET_2: FeatureId = id(5);
 pub const FOLDER: FeatureId = id(6);
@@ -43,7 +56,11 @@ pub const BOSS_R: f64 = 6.0;
 /// Where the bosses go, in order (Extrude 2 first), and their heights above the plate.
 pub fn bosses() -> Vec<(Vec2, f64)> {
     let mut out = Vec::new();
-    for (k, (x, y)) in [-40.0, -20.0, 0.0, 20.0, 40.0].iter().flat_map(|x| [(*x, -18.0), (*x, 18.0)]).enumerate() {
+    for (k, (x, y)) in [-40.0, -20.0, 0.0, 20.0, 40.0]
+        .iter()
+        .flat_map(|x| [(*x, -18.0), (*x, 18.0)])
+        .enumerate()
+    {
         out.push((Vec2::new(x, y), 5.0 + k as f64));
     }
     out
@@ -52,12 +69,21 @@ pub fn bosses() -> Vec<(Vec2, f64)> {
 /// Adds the bracket to the Part Studio `el`.
 pub fn build_in(s: &mut dyn Studio, el: ElementId) -> Result<(), CommandError> {
     let v = Vec2::new;
-    s.run(&AddSketch { element: el, feature: SKETCH_1, plane: Some(PlaneRef::Top) })?;
+    s.run(&AddSketch {
+        element: el,
+        feature: SKETCH_1,
+        plane: Some(PlaneRef::Top),
+    })?;
     s.run(&EditSketch {
         element: el,
         feature: SKETCH_1,
         op: SketchOp::AddPolyline {
-            points: vec![v(-HALF_X, -HALF_Y), v(HALF_X, -HALF_Y), v(HALF_X, HALF_Y), v(-HALF_X, HALF_Y)],
+            points: vec![
+                v(-HALF_X, -HALF_Y),
+                v(HALF_X, -HALF_Y),
+                v(HALF_X, HALF_Y),
+                v(-HALF_X, HALF_Y),
+            ],
             closed: true,
             construction: false,
             label: "Add rectangle",
@@ -67,37 +93,92 @@ pub fn build_in(s: &mut dyn Studio, el: ElementId) -> Result<(), CommandError> {
         e.depth = PLATE;
         e.depth_expr = "10 mm".into();
     })?;
-    s.run(&AddSketch { element: el, feature: SKETCH_2, plane: Some(PlaneRef::Top) })?;
+    s.run(&AddSketch {
+        element: el,
+        feature: SKETCH_2,
+        plane: Some(PlaneRef::Top),
+    })?;
     for (c, _) in bosses() {
-        s.run(&EditSketch { element: el, feature: SKETCH_2, op: SketchOp::AddCircle { center: c, radius: BOSS_R, construction: false } })?;
+        s.run(&EditSketch {
+            element: el,
+            feature: SKETCH_2,
+            op: SketchOp::AddCircle {
+                center: c,
+                radius: BOSS_R,
+                construction: false,
+            },
+        })?;
     }
     for ((c, h), f) in bosses().into_iter().zip(BOSSES) {
         extrude(s, el, SKETCH_2, f, c, |e| {
             e.op = BooleanOp::Add;
             e.depth = h;
             e.depth_expr = format!("{h} mm");
-            e.start_offset = Some(Offset { value: PLATE, expr: "10 mm".into(), flip: false });
+            e.start_offset = Some(Offset {
+                value: PLATE,
+                expr: "10 mm".into(),
+                flip: false,
+            });
         })?;
     }
     // The fillets, on the edges as they are built.
-    let corners: Vec<[f64; 3]> =
-        [(-1.0, -1.0), (1.0, -1.0), (1.0, 1.0), (-1.0, 1.0)].iter().map(|(x, y)| [x * HALF_X, y * HALF_Y, PLATE / 2.0]).collect();
+    let corners: Vec<[f64; 3]> = [(-1.0, -1.0), (1.0, -1.0), (1.0, 1.0), (-1.0, 1.0)]
+        .iter()
+        .map(|(x, y)| [x * HALF_X, y * HALF_Y, PLATE / 2.0])
+        .collect();
     let entities = edges(s, el, &corners)?;
-    s.run(&AddFeature::fillet(el, FILLET_1, FilletFeature { entities, size: 5.0, size_expr: "5 mm".into(), ..FilletFeature::default() }))?;
+    s.run(&AddFeature::fillet(
+        el,
+        FILLET_1,
+        FilletFeature {
+            entities,
+            size: 5.0,
+            size_expr: "5 mm".into(),
+            ..FilletFeature::default()
+        },
+    ))?;
     let entities = edges(s, el, &[[0.0, -HALF_Y, PLATE]])?;
-    s.run(&AddFeature::fillet(el, FILLET_2, FilletFeature { entities, size: 1.0, size_expr: "1 mm".into(), ..FilletFeature::default() }))?;
-    s.run(&RenamePart { element: el, part: PART, name: "Bracket".into() })?;
+    s.run(&AddFeature::fillet(
+        el,
+        FILLET_2,
+        FilletFeature {
+            entities,
+            size: 1.0,
+            size_expr: "1 mm".into(),
+            ..FilletFeature::default()
+        },
+    ))?;
+    s.run(&RenamePart {
+        element: el,
+        part: PART,
+        name: "Bracket".into(),
+    })?;
     let mut folder = vec![SKETCH_2];
     folder.extend(BOSSES);
-    s.run(&CreateFolder { element: el, folder: FOLDER, name: Some("Bosses".into()), features: folder })?;
+    s.run(&CreateFolder {
+        element: el,
+        folder: FOLDER,
+        name: Some("Bosses".into()),
+        features: folder,
+    })?;
     Ok(())
 }
 
 /// The part's edges nearest `points` (each within 1 µm).
-fn edges(s: &dyn Studio, el: ElementId, points: &[[f64; 3]]) -> Result<Vec<EdgeOrFace>, CommandError> {
-    let features = s.document().element(el).map(|e| e.features().to_vec()).unwrap_or_default();
+fn edges(
+    s: &dyn Studio,
+    el: ElementId,
+    points: &[[f64; 3]],
+) -> Result<Vec<EdgeOrFace>, CommandError> {
+    let features = s
+        .document()
+        .element(el)
+        .map(|e| e.features().to_vec())
+        .unwrap_or_default();
     let build = crate::rebuild::build(&features);
-    let part = build.part(PART).ok_or_else(|| CommandError::Invalid("the bracket didn't build".into()))?;
+    let part = build
+        .part(PART)
+        .ok_or_else(|| CommandError::Invalid("the bracket didn't build".into()))?;
     points
         .iter()
         .map(|p| {
@@ -108,7 +189,11 @@ fn edges(s: &dyn Studio, el: ElementId, points: &[[f64; 3]]) -> Result<Vec<EdgeO
                 .min_by(|a, b| a.distance(*p).total_cmp(&b.distance(*p)))
                 .filter(|e| e.distance(*p) < 1e-3)
                 .ok_or_else(|| CommandError::Invalid(format!("no edge at {p:?}")))?;
-            Ok(EdgeOrFace::Edge(EdgeRef { part: part.id, edge: e.name, seed: *p }))
+            Ok(EdgeOrFace::Edge(EdgeRef {
+                part: part.id,
+                edge: e.name,
+                seed: *p,
+            }))
         })
         .collect()
 }
@@ -130,12 +215,23 @@ fn extrude(
         .ok_or_else(|| CommandError::Invalid("sketch not found".into()))?;
     let regions = super::region_refs(sketch, &g, &[seed]);
     if regions.len() != 1 {
-        return Err(CommandError::Invalid("a region of the bracket is missing".into()));
+        return Err(CommandError::Invalid(
+            "a region of the bracket is missing".into(),
+        ));
     }
     let mut e = super::extrude_of(regions, 10.0);
     set(&mut e);
-    s.run(&AddExtrude { element: el, feature, extrude: ExtrudeFeature::default() })?;
-    s.run(&SetExtrude { element: el, feature, extrude: e, label: "Extrude".into() })?;
+    s.run(&AddExtrude {
+        element: el,
+        feature,
+        extrude: ExtrudeFeature::default(),
+    })?;
+    s.run(&SetExtrude {
+        element: el,
+        feature,
+        extrude: e,
+        label: "Extrude".into(),
+    })?;
     Ok(())
 }
 
@@ -146,7 +242,11 @@ pub fn blocks_in(s: &mut dyn Studio, el: ElementId, n: usize) -> Result<(), Comm
     for k in 0..n {
         let (sketch, feature) = (id(0x1000 + 2 * k as u128), id(0x1001 + 2 * k as u128));
         let x = k as f64 * 15.0;
-        s.run(&AddSketch { element: el, feature: sketch, plane: Some(PlaneRef::Top) })?;
+        s.run(&AddSketch {
+            element: el,
+            feature: sketch,
+            plane: Some(PlaneRef::Top),
+        })?;
         s.run(&EditSketch {
             element: el,
             feature: sketch,

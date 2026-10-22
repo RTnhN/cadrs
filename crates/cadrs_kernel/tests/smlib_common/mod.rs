@@ -20,7 +20,10 @@ pub struct Model {
 
 /// The path of a suite's model.
 pub fn data(suite: &str, file: &str) -> String {
-    format!("{}/tests/data/smlib/{suite}/{file}", env!("CARGO_MANIFEST_DIR"))
+    format!(
+        "{}/tests/data/smlib/{suite}/{file}",
+        env!("CARGO_MANIFEST_DIR")
+    )
 }
 
 /// Reads `file` of `suite`: an `.smb`, or B-rep `brep` of an `.smp` (`file#brep`).
@@ -39,7 +42,12 @@ pub fn model(suite: &str, file: &str) -> Result<Model, String> {
     } else {
         smb::read_brep(&bytes)?
     };
-    Ok(Model { body: b.body, edge_mids: b.edge_mids, edge_ends: b.edge_ends, face_centroids: b.face_centroids })
+    Ok(Model {
+        body: b.body,
+        edge_mids: b.edge_mids,
+        edge_ends: b.edge_ends,
+        face_centroids: b.face_centroids,
+    })
 }
 
 fn size(body: &Body) -> f64 {
@@ -62,10 +70,18 @@ pub fn pick_edges(body: &Body, pts: &[P3]) -> Vec<EdgeId> {
             })
             .collect();
         d.sort_by(|a, b| a.0.total_cmp(&b.0));
-        let Some(&(d1, best)) = d.first() else { panic!("no edges to pick from") };
-        assert!(d1 <= 1e-4 * s, "edge pick {k}: no edge passes through {m:?} (nearest {d1:.3e} off)");
+        let Some(&(d1, best)) = d.first() else {
+            panic!("no edges to pick from")
+        };
+        assert!(
+            d1 <= 1e-4 * s,
+            "edge pick {k}: no edge passes through {m:?} (nearest {d1:.3e} off)"
+        );
         if let Some(&(d2, other)) = d.get(1) {
-            assert!(d2 > d1 + 1e-7 * s, "edge pick {k}: edges {best} and {other} both pass through {m:?}");
+            assert!(
+                d2 > d1 + 1e-7 * s,
+                "edge pick {k}: edges {best} and {other} both pass through {m:?}"
+            );
         }
         if !ids.contains(&EdgeId(best as u64)) {
             ids.push(EdgeId(best as u64));
@@ -81,12 +97,24 @@ pub fn pick_faces(body: &Body, pts: &[P3]) -> Vec<FaceId> {
     let cents = smb::face_centroids(body);
     let mut ids = Vec::new();
     for (k, m) in pts.iter().enumerate() {
-        let mut d: Vec<(f64, usize)> = cents.iter().enumerate().map(|(f, c)| ((c - m).norm(), f)).collect();
+        let mut d: Vec<(f64, usize)> = cents
+            .iter()
+            .enumerate()
+            .map(|(f, c)| ((c - m).norm(), f))
+            .collect();
         d.sort_by(|a, b| a.0.total_cmp(&b.0));
-        let Some(&(d1, best)) = d.first() else { panic!("no faces to pick from") };
-        assert!(d1 <= 1e-4 * s, "face pick {k}: no face's centroid is at {m:?} (nearest {d1:.3e} off)");
+        let Some(&(d1, best)) = d.first() else {
+            panic!("no faces to pick from")
+        };
+        assert!(
+            d1 <= 1e-4 * s,
+            "face pick {k}: no face's centroid is at {m:?} (nearest {d1:.3e} off)"
+        );
         if let Some(&(d2, other)) = d.get(1) {
-            assert!(d2 > d1 + 1e-7 * s, "face pick {k}: faces {best} and {other} both have their centroid at {m:?}");
+            assert!(
+                d2 > d1 + 1e-7 * s,
+                "face pick {k}: faces {best} and {other} both have their centroid at {m:?}"
+            );
         }
         if !ids.contains(&FaceId(best as u64)) {
             ids.push(FaceId(best as u64));
@@ -98,18 +126,33 @@ pub fn pick_faces(body: &Body, pts: &[P3]) -> Vec<FaceId> {
 /// The points of the model's edges `ranges` name (index ranges, inclusive; all others when
 /// `include` is false).
 pub fn edge_points(m: &Model, ranges: &[(usize, usize)], include: bool) -> Vec<P3> {
-    (0..m.edge_mids.len()).filter(|i| ranges.iter().any(|&(a, b)| (a..=b).contains(i)) == include).map(|i| m.edge_mids[i]).collect()
+    (0..m.edge_mids.len())
+        .filter(|i| ranges.iter().any(|&(a, b)| (a..=b).contains(i)) == include)
+        .map(|i| m.edge_mids[i])
+        .collect()
 }
 
 /// The model's edges `idx` names, as body edges.
 pub fn edges(m: &Model, idx: &[usize]) -> Result<Vec<EdgeId>, String> {
-    let pts = idx.iter().map(|&i| m.edge_mids.get(i).copied().ok_or(format!("no edge {i}"))).collect::<Result<Vec<_>, _>>()?;
+    let pts = idx
+        .iter()
+        .map(|&i| m.edge_mids.get(i).copied().ok_or(format!("no edge {i}")))
+        .collect::<Result<Vec<_>, _>>()?;
     Ok(pick_edges(&m.body, &pts))
 }
 
 /// The model's faces `idx` names, as body faces.
 pub fn faces(m: &Model, idx: &[usize]) -> Result<Vec<FaceId>, String> {
-    let pts = idx.iter().map(|&i| m.face_centroids.get(i).copied().flatten().ok_or(format!("no face {i}"))).collect::<Result<Vec<_>, _>>()?;
+    let pts = idx
+        .iter()
+        .map(|&i| {
+            m.face_centroids
+                .get(i)
+                .copied()
+                .flatten()
+                .ok_or(format!("no face {i}"))
+        })
+        .collect::<Result<Vec<_>, _>>()?;
     Ok(pick_faces(&m.body, &pts))
 }
 
@@ -130,7 +173,9 @@ pub struct Expect {
 pub const REL_TOL: f64 = 1e-4;
 
 fn planar(b: &Body) -> bool {
-    b.faces.iter().all(|f| matches!(f.surf, Surface::Plane { .. }))
+    b.faces
+        .iter()
+        .all(|f| matches!(f.surf, Surface::Plane { .. }))
 }
 
 /// Non-degenerate edges.
@@ -176,24 +221,38 @@ pub fn check_result(input: &Body, out: &Body, e: &Expect) -> Result<(), String> 
         let nl: i64 = out.faces.iter().map(|f| f.loops.len() as i64).sum();
         let chi = v - ne + nf - (nl - nf);
         if chi % 2 != 0 || chi > 2 * out.shells.len() as i64 {
-            return Err(format!("Euler characteristic {chi} with {} shells", out.shells.len()));
+            return Err(format!(
+                "Euler characteristic {chi} with {} shells",
+                out.shells.len()
+            ));
         }
     } else if !out.solids.is_empty() {
         return Err("a solid, SMLib gives none".into());
     }
-    if let Some(n) = e.faces && planar(input) && out.faces.len() != n {
+    if let Some(n) = e.faces
+        && planar(input)
+        && out.faces.len() != n
+    {
         return Err(format!("{} faces, SMLib gives {n}", out.faces.len()));
     }
-    if let Some(n) = e.edges && planar(input) && edge_count(out) != n {
+    if let Some(n) = e.edges
+        && planar(input)
+        && edge_count(out) != n
+    {
         return Err(format!("{} edges, SMLib gives {n}", edge_count(out)));
     }
     if e.volume.is_some() || e.area.is_some() {
         let m = cadrs_kernel::native::mass::body_mass(out);
-        for (what, ours, theirs) in [("volume", m.volume, e.volume), ("area", m.surface_area, e.area)] {
+        for (what, ours, theirs) in [
+            ("volume", m.volume, e.volume),
+            ("area", m.surface_area, e.area),
+        ] {
             if let Some(t) = theirs {
                 let rel = (ours - t).abs() / t.abs().max(1e-9);
                 if !(rel <= REL_TOL) {
-                    return Err(format!("{what} {ours:.6}, SMLib gives {t:.6} ({rel:.1e} off)"));
+                    return Err(format!(
+                        "{what} {ours:.6}, SMLib gives {t:.6} ({rel:.1e} off)"
+                    ));
                 }
             }
         }
@@ -203,5 +262,8 @@ pub fn check_result(input: &Body, out: &Body, e: &Expect) -> Result<(), String> 
 
 /// A known failure (listed in `tools/smlib_known_failures/<suite>.txt`) must still fail.
 pub fn known_failure(r: Result<(), String>, suite: &str, name: &str) {
-    assert!(r.is_err(), "a known failure now passes: remove `{name}` from tools/smlib_known_failures/{suite}.txt");
+    assert!(
+        r.is_err(),
+        "a known failure now passes: remove `{name}` from tools/smlib_known_failures/{suite}.txt"
+    );
 }

@@ -25,14 +25,31 @@ use crate::ids::{ElementId, PartId};
 /// The context of the Part Studio `studio` created in `assembly` at the assembly's Origin: every
 /// part of the assembly (at any depth) that isn't from `studio`, in assembly coordinates. Numbered
 /// 0 (see [`snapshot_origin_as`]).
-pub fn snapshot_origin(doc: &Document, assembly: ElementId, studio: ElementId) -> Result<StudioContext, CommandError> {
+pub fn snapshot_origin(
+    doc: &Document,
+    assembly: ElementId,
+    studio: ElementId,
+) -> Result<StudioContext, CommandError> {
     snapshot_origin_as(doc, assembly, studio, 0, super::Pose::IDENTITY)
 }
 
 /// [`snapshot_origin`] as the studio's context `id`, the studio's origin at `origin` in the
 /// assembly (the Origin, or a mate connector's frame, MC2.9).
-pub fn snapshot_origin_as(doc: &Document, assembly: ElementId, studio: ElementId, id: ContextNo, origin: super::Pose) -> Result<StudioContext, CommandError> {
-    snapshot_with(doc, assembly, studio, InstanceId::ORIGIN, origin.inverse(), id)
+pub fn snapshot_origin_as(
+    doc: &Document,
+    assembly: ElementId,
+    studio: ElementId,
+    id: ContextNo,
+    origin: super::Pose,
+) -> Result<StudioContext, CommandError> {
+    snapshot_with(
+        doc,
+        assembly,
+        studio,
+        InstanceId::ORIGIN,
+        origin.inverse(),
+        id,
+    )
 }
 
 pub use super::context::resnapshot;
@@ -43,7 +60,12 @@ pub fn origin_pose(doc: &Document, ctx: &StudioContext) -> Option<super::Pose> {
     if ctx.instance == InstanceId::ORIGIN {
         return Some(ctx.origin);
     }
-    Some(doc.element(ctx.assembly)?.assembly_model()?.instance(ctx.instance)?.pose)
+    Some(
+        doc.element(ctx.assembly)?
+            .assembly_model()?
+            .instance(ctx.instance)?
+            .pose,
+    )
 }
 
 /// The name of the context's origin ("Origin", or the instance's name).
@@ -51,7 +73,10 @@ pub fn origin_name(doc: &Document, ctx: &StudioContext) -> Option<String> {
     if ctx.instance == InstanceId::ORIGIN {
         return Some("Origin".into());
     }
-    let inst = doc.element(ctx.assembly)?.assembly_model()?.instance(ctx.instance)?;
+    let inst = doc
+        .element(ctx.assembly)?
+        .assembly_model()?
+        .instance(ctx.instance)?;
     Some(inst.name(&super::source_part_name(doc, &inst.source, None)))
 }
 
@@ -77,7 +102,11 @@ impl Command for CreateStudioInContext {
         Scope::Whole
     }
     fn apply(&self, doc: &mut Document) -> Result<(), CommandError> {
-        if doc.element(self.assembly).and_then(|e| e.assembly_model()).is_none() {
+        if doc
+            .element(self.assembly)
+            .and_then(|e| e.assembly_model())
+            .is_none()
+        {
             return Err(CommandError::Invalid("not an Assembly".into()));
         }
         if doc.element(self.studio).is_some() {
@@ -91,7 +120,9 @@ impl Command for CreateStudioInContext {
         let mut el = Element::part_studio(name);
         el.id = self.studio;
         el.contexts = vec![ctx];
-        let at = doc.element_index(self.assembly).map_or(doc.elements.len(), |i| i + 1);
+        let at = doc
+            .element_index(self.assembly)
+            .map_or(doc.elements.len(), |i| i + 1);
         doc.elements.insert(at, el);
         crate::commands::refresh_studio(doc, self.studio);
         Ok(())
@@ -112,13 +143,20 @@ pub struct InsertFromStudio {
 impl InsertFromStudio {
     /// The assembly the parts go into.
     pub fn assembly(&self, doc: &Document) -> Option<ElementId> {
-        doc.element(self.studio)?.contexts.first().map(|c| c.assembly)
+        doc.element(self.studio)?
+            .contexts
+            .first()
+            .map(|c| c.assembly)
     }
 }
 
 impl Command for InsertFromStudio {
     fn label(&self) -> String {
-        if self.parts.len() == 1 { "Insert part".into() } else { format!("Insert {} parts", self.parts.len()) }
+        if self.parts.len() == 1 {
+            "Insert part".into()
+        } else {
+            format!("Insert {} parts", self.parts.len())
+        }
     }
     fn scope(&self) -> Scope {
         // The assembly (found from the studio's context).
@@ -128,16 +166,29 @@ impl Command for InsertFromStudio {
         let ctx = doc
             .element(self.studio)
             .and_then(|e| e.contexts.first().cloned())
-            .ok_or_else(|| CommandError::Invalid("the Part Studio has no assembly context".into()))?;
+            .ok_or_else(|| {
+                CommandError::Invalid("the Part Studio has no assembly context".into())
+            })?;
         if self.parts.is_empty() {
             return Err(CommandError::Invalid("pick the parts to insert".into()));
         }
         if self.parts.len() != self.instances.len() {
             return Err(CommandError::Invalid("one instance id per part".into()));
         }
-        let pose = origin_pose(doc, &ctx).ok_or_else(|| CommandError::Invalid("the context's origin is gone".into()))?;
+        let pose = origin_pose(doc, &ctx)
+            .ok_or_else(|| CommandError::Invalid("the context's origin is gone".into()))?;
         for (part, id) in self.parts.iter().zip(&self.instances) {
-            let insert = InsertInstance { element: ctx.assembly, instance: Instance::new(*id, InstanceSource::Part { element: self.studio, part: *part }, pose) };
+            let insert = InsertInstance {
+                element: ctx.assembly,
+                instance: Instance::new(
+                    *id,
+                    InstanceSource::Part {
+                        element: self.studio,
+                        part: *part,
+                    },
+                    pose,
+                ),
+            };
             insert.apply(doc)?;
         }
         // MC3.3: the first part of the studio in the assembly becomes the primary instance of
@@ -145,7 +196,11 @@ impl Command for InsertFromStudio {
         if let Some(first) = self.instances.first()
             && let Some(el) = doc.element_mut(self.studio)
         {
-            for c in el.contexts.iter_mut().filter(|c| c.assembly == ctx.assembly && c.instance == InstanceId::ORIGIN) {
+            for c in el
+                .contexts
+                .iter_mut()
+                .filter(|c| c.assembly == ctx.assembly && c.instance == InstanceId::ORIGIN)
+            {
                 c.instance = *first;
             }
         }

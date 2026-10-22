@@ -35,16 +35,19 @@ use bevy::input::keyboard::KeyboardInput;
 use bevy::prelude::*;
 use bevy::text::FontWeight;
 use bevy::ui_widgets::Activate;
-use cadrs_core::derived::{AddDerived, DerivedBoard, DerivedFeature, DerivedPlacement, DerivedSelection, SetDerived};
-use cadrs_core::pcb::BoardId;
-use cadrs_core::pcb::board3d::{BoardAnchor, BoardSeat, BoardView, ComponentFilter};
+use cadrs_core::derived::{
+    AddDerived, DerivedBoard, DerivedFeature, DerivedPlacement, DerivedSelection, SetDerived,
+};
 use cadrs_core::external::{RefAt, SourceRef};
 use cadrs_core::mate::{ConnectorOrigin, ConnectorRef};
+use cadrs_core::pcb::BoardId;
+use cadrs_core::pcb::board3d::{BoardAnchor, BoardSeat, BoardView, ComponentFilter};
 use cadrs_core::{ElementId, ElementKind, Feature, FeatureId, FeatureKind, PartId};
 use cadrs_ui::prelude::*;
 use cadrs_ui::{
-    CheckboxChange, FeatureDialogAccept, FeatureDialogCancel, FeatureDialogState, OpenedHeader, OptionRow, SelectionList, SelectionListActivate,
-    SelectionListRemove, TabStrip, TabStripSelect, VersionGraphSelect,
+    CheckboxChange, FeatureDialogAccept, FeatureDialogCancel, FeatureDialogState, OpenedHeader,
+    OptionRow, SelectionList, SelectionListActivate, SelectionListRemove, TabStrip, TabStripSelect,
+    VersionGraphSelect,
 };
 
 use crate::history_panel::DocLog;
@@ -61,7 +64,13 @@ impl Plugin for DerivedPlugin {
             .add_observer(on_board_view_segment)
             .add_systems(
                 Update,
-                (derived_picks, derived_keys, read_search, sync_dialog, sync_source_list)
+                (
+                    derived_picks,
+                    derived_keys,
+                    read_search,
+                    sync_dialog,
+                    sync_source_list,
+                )
                     .chain()
                     .before(crate::parts::PartsSet)
                     .run_if(in_state(AppState::Document)),
@@ -160,7 +169,14 @@ fn on_rail_insert(a: On<Activate>, q: Query<&Name>, mut commands: Commands) {
         return;
     }
     commands.queue(|world: &mut World| {
-        let kind = world.get_resource::<ActiveDocument>().and_then(|d| d.active_element().map(|e| (e.assembly_model().is_some(), matches!(e.kind, ElementKind::PartStudio { .. }))));
+        let kind = world.get_resource::<ActiveDocument>().and_then(|d| {
+            d.active_element().map(|e| {
+                (
+                    e.assembly_model().is_some(),
+                    matches!(e.kind, ElementKind::PartStudio { .. }),
+                )
+            })
+        });
         match kind {
             Some((true, _)) => crate::assembly::insert::open_insert_dialog(world),
             Some((_, true)) => begin_derived(world),
@@ -187,11 +203,24 @@ pub fn begin_derived(world: &mut World) {
         return;
     }
     close_other_sessions(world);
-    let Some(mut doc) = world.get_resource_mut::<ActiveDocument>() else { return };
-    let Some(element) = doc.active_element().filter(|e| matches!(e.kind, ElementKind::PartStudio { .. })).map(|e| e.id) else { return };
+    let Some(mut doc) = world.get_resource_mut::<ActiveDocument>() else {
+        return;
+    };
+    let Some(element) = doc
+        .active_element()
+        .filter(|e| matches!(e.kind, ElementKind::PartStudio { .. }))
+        .map(|e| e.id)
+    else {
+        return;
+    };
     let feature = FeatureId::new();
     let mark = doc.history.undo_len();
-    if let Err(e) = doc.execute(&AddDerived { element, feature, derived: DerivedFeature::default(), links: Vec::new() }) {
+    if let Err(e) = doc.execute(&AddDerived {
+        element,
+        feature,
+        derived: DerivedFeature::default(),
+        links: Vec::new(),
+    }) {
         let m = e.to_string();
         linked::toast(world, m);
         return;
@@ -201,27 +230,52 @@ pub fn begin_derived(world: &mut World) {
 
 /// Reopens a Derived feature's dialog (DV3.6).
 pub fn edit_derived(world: &mut World, feature: FeatureId) {
-    if world.get_resource::<DerivedSession>().is_some_and(|s| s.feature == feature) {
+    if world
+        .get_resource::<DerivedSession>()
+        .is_some_and(|s| s.feature == feature)
+    {
         return;
     }
     if world.contains_resource::<DerivedSession>() {
         finish(world);
     }
     close_other_sessions(world);
-    let Some(doc) = world.get_resource::<ActiveDocument>() else { return };
-    let Some(el) = doc.active_element() else { return };
+    let Some(doc) = world.get_resource::<ActiveDocument>() else {
+        return;
+    };
+    let Some(el) = doc.active_element() else {
+        return;
+    };
     let element = el.id;
-    let Some(before) = el.feature(feature).filter(|f| matches!(f.kind, FeatureKind::Derived(_))).cloned() else { return };
+    let Some(before) = el
+        .feature(feature)
+        .filter(|f| matches!(f.kind, FeatureKind::Derived(_)))
+        .cloned()
+    else {
+        return;
+    };
     let mark = doc.history.undo_len();
     start(world, element, feature, false, mark, Some(before));
 }
 
-fn start(world: &mut World, element: ElementId, feature: FeatureId, is_new: bool, mark: usize, before: Option<Feature>) {
+fn start(
+    world: &mut World,
+    element: ElementId,
+    feature: FeatureId,
+    is_new: bool,
+    mark: usize,
+    before: Option<Feature>,
+) {
     world.resource_mut::<crate::viewport::Selection>().0.clear();
-    let d = world.resource::<ActiveDocument>().doc.element(element).and_then(|e| e.feature(feature)).and_then(|f| match &f.kind {
-        FeatureKind::Derived(d) => Some((**d).clone()),
-        _ => None,
-    });
+    let d = world
+        .resource::<ActiveDocument>()
+        .doc
+        .element(element)
+        .and_then(|e| e.feature(feature))
+        .and_then(|f| match &f.kind {
+            FeatureKind::Derived(d) => Some((**d).clone()),
+            _ => None,
+        });
     let this = world.resource::<ActiveDocument>().doc.id;
     let (picking, tab) = match d.as_ref().and_then(|d| d.source) {
         None => (true, 0),
@@ -254,7 +308,12 @@ fn end(world: &mut World) {
 
 fn current(world: &World) -> Option<(DerivedSession, Feature, DerivedFeature)> {
     let s = world.get_resource::<DerivedSession>()?.clone();
-    let f = world.get_resource::<ActiveDocument>()?.doc.element(s.element)?.feature(s.feature)?.clone();
+    let f = world
+        .get_resource::<ActiveDocument>()?
+        .doc
+        .element(s.element)?
+        .feature(s.feature)?
+        .clone();
     let d = match &f.kind {
         FeatureKind::Derived(d) => (**d).clone(),
         _ => return None,
@@ -264,9 +323,22 @@ fn current(world: &World) -> Option<(DerivedSession, Feature, DerivedFeature)> {
 
 /// Sets the feature's parameters (with the copies a new source needs); a refusal (DV3.7,
 /// DV1.5) shows as a red toast.
-fn set(world: &mut World, d: DerivedFeature, links: Vec<cadrs_core::external::LinkedElement>, label: &str) -> bool {
-    let Some(s) = world.get_resource::<DerivedSession>().cloned() else { return false };
-    let r = world.resource_mut::<ActiveDocument>().execute(&SetDerived { element: s.element, feature: s.feature, derived: d, links, label: label.into() });
+fn set(
+    world: &mut World,
+    d: DerivedFeature,
+    links: Vec<cadrs_core::external::LinkedElement>,
+    label: &str,
+) -> bool {
+    let Some(s) = world.get_resource::<DerivedSession>().cloned() else {
+        return false;
+    };
+    let r = world.resource_mut::<ActiveDocument>().execute(&SetDerived {
+        element: s.element,
+        feature: s.feature,
+        derived: d,
+        links,
+        label: label.into(),
+    });
     match r {
         Ok(()) => true,
         Err(e) => {
@@ -279,14 +351,20 @@ fn set(world: &mut World, d: DerivedFeature, links: Vec<cadrs_core::external::Li
 /// Points the feature at `r` (a Part Studio picked in the source picker, or a PCB Studio's
 /// `board`).
 pub fn set_source(world: &mut World, r: SourceRef, board: Option<BoardId>) {
-    let Some((_, _, old)) = current(world) else { return };
+    let Some((_, _, old)) = current(world) else {
+        return;
+    };
     let doc = world.resource::<ActiveDocument>().doc.clone();
     let log = world.resource::<DocLog>().log.clone();
     let mut base = old.clone();
     // Another Part Studio or board: its own parts and connectors, so what was picked of the old
     // one goes.
     let same_board = old.board.as_ref().map(|b| b.board) == board;
-    if old.source.is_none_or(|o| o.element != r.element || o.document_or(doc.id) != r.document_or(doc.id)) || !same_board {
+    if old
+        .source
+        .is_none_or(|o| o.element != r.element || o.document_or(doc.id) != r.document_or(doc.id))
+        || !same_board
+    {
         base.selection = DerivedSelection::default();
         base.placement = DerivedPlacement::BaseOrigin;
         base.board = board.map(|b| Box::new(DerivedBoard::new(b, "", Default::default())));
@@ -313,15 +391,26 @@ pub fn set_source(world: &mut World, r: SourceRef, board: Option<BoardId>) {
 
 /// ✓ / Enter: keeps the feature if it builds.
 pub fn accept(world: &mut World) {
-    let Some((s, f, _)) = current(world) else { return };
+    let Some((s, f, _)) = current(world) else {
+        return;
+    };
     if !f.is_valid() {
         return;
     }
-    let features = world.resource::<ActiveDocument>().doc.element(s.element).map(|e| e.active_features()).unwrap_or_default();
+    let features = world
+        .resource::<ActiveDocument>()
+        .doc
+        .element(s.element)
+        .map(|e| e.active_features())
+        .unwrap_or_default();
     if crate::accept::builds(world, "derived", features, f.id, accept) != Some(true) {
         return;
     }
-    let label = if s.is_new { format!("Insert {}", f.name) } else { format!("Edit {}", f.name) };
+    let label = if s.is_new {
+        format!("Insert {}", f.name)
+    } else {
+        format!("Edit {}", f.name)
+    };
     let mut doc = world.resource_mut::<ActiveDocument>();
     if !doc.squash_since(s.mark, label.clone()) {
         doc.squash_element_since(s.mark, s.element, label);
@@ -331,7 +420,9 @@ pub fn accept(world: &mut World) {
 
 /// ✕ / Esc: takes back everything the dialog did (a new feature is removed).
 pub fn cancel(world: &mut World) {
-    let Some(s) = world.get_resource::<DerivedSession>().cloned() else { return };
+    let Some(s) = world.get_resource::<DerivedSession>().cloned() else {
+        return;
+    };
     let mut doc = world.resource_mut::<ActiveDocument>();
     while doc.history.undo_len() > s.mark {
         if doc.undo().is_none() {
@@ -354,7 +445,11 @@ pub fn finish(world: &mut World) {
 // ---------------------------------------------------------------------------------------------
 // Input
 
-fn derived_picks(mut picks: MessageReader<PickRequest>, session: Option<Res<DerivedSession>>, mut commands: Commands) {
+fn derived_picks(
+    mut picks: MessageReader<PickRequest>,
+    session: Option<Res<DerivedSession>>,
+    mut commands: Commands,
+) {
     let Some(s) = session else {
         picks.clear();
         return;
@@ -365,7 +460,9 @@ fn derived_picks(mut picks: MessageReader<PickRequest>, session: Option<Res<Deri
             continue;
         }
         commands.queue(move |world: &mut World| {
-            let Some((s, _, mut d)) = current(world) else { return };
+            let Some((s, _, mut d)) = current(world) else {
+                return;
+            };
             let c = match pick {
                 Pick::Origin => ConnectorRef::Implicit(ConnectorOrigin::Origin),
                 Pick::Feature(id) => {
@@ -397,7 +494,13 @@ fn derived_picks(mut picks: MessageReader<PickRequest>, session: Option<Res<Deri
     }
 }
 
-fn derived_keys(mut keys: MessageReader<KeyboardInput>, session: Option<Res<DerivedSession>>, q_dialogs: Query<(), With<cadrs_ui::DialogRoot>>, q_focus: Res<bevy::input_focus::InputFocus>, mut commands: Commands) {
+fn derived_keys(
+    mut keys: MessageReader<KeyboardInput>,
+    session: Option<Res<DerivedSession>>,
+    q_dialogs: Query<(), With<cadrs_ui::DialogRoot>>,
+    q_focus: Res<bevy::input_focus::InputFocus>,
+    mut commands: Commands,
+) {
     if session.is_none() {
         keys.clear();
         return;
@@ -414,13 +517,21 @@ fn derived_keys(mut keys: MessageReader<KeyboardInput>, session: Option<Res<Deri
     }
 }
 
-fn on_accept(ev: On<FeatureDialogAccept>, q: Query<(), With<DerivedDialog>>, mut commands: Commands) {
+fn on_accept(
+    ev: On<FeatureDialogAccept>,
+    q: Query<(), With<DerivedDialog>>,
+    mut commands: Commands,
+) {
     if q.contains(ev.entity) {
         commands.queue(accept);
     }
 }
 
-fn on_cancel(ev: On<FeatureDialogCancel>, q: Query<(), With<DerivedDialog>>, mut commands: Commands) {
+fn on_cancel(
+    ev: On<FeatureDialogCancel>,
+    q: Query<(), With<DerivedDialog>>,
+    mut commands: Commands,
+) {
     if q.contains(ev.entity) {
         commands.queue(cancel);
     }
@@ -435,10 +546,15 @@ fn on_tab(ev: On<TabStripSelect>, q: Query<&Name>, mut commands: Commands) {
                 s.source_tab = i.min(1);
             }
         }),
-        "derived-board-components" | "derived-board-seat" | "derived-board-anchor" | "derived-board-view" => {
+        "derived-board-components"
+        | "derived-board-seat"
+        | "derived-board-anchor"
+        | "derived-board-view" => {
             let which = name.as_str().to_string();
             commands.queue(move |world: &mut World| {
-                let Some((_, _, mut d)) = current(world) else { return };
+                let Some((_, _, mut d)) = current(world) else {
+                    return;
+                };
                 let Some(b) = d.board.as_mut() else { return };
                 let o = &mut b.options;
                 let label = match which.as_str() {
@@ -447,7 +563,11 @@ fn on_tab(ev: On<TabStripSelect>, q: Query<&Name>, mut commands: Commands) {
                         "Components"
                     }
                     "derived-board-seat" => {
-                        o.seat = if i == 0 { BoardSeat::Bottom } else { BoardSeat::Top };
+                        o.seat = if i == 0 {
+                            BoardSeat::Bottom
+                        } else {
+                            BoardSeat::Top
+                        };
                         "Board face"
                     }
                     "derived-board-anchor" => {
@@ -459,7 +579,9 @@ fn on_tab(ev: On<TabStripSelect>, q: Query<&Name>, mut commands: Commands) {
                             1 => BoardAnchor::Origin,
                             2 => BoardAnchor::Center,
                             // The first footprint on the board, till another is picked.
-                            _ => match b.layout.footprints.iter().find(|f| cadrs_core::pcb::model::shown_model(&f.footprint).is_some()) {
+                            _ => match b.layout.footprints.iter().find(|f| {
+                                cadrs_core::pcb::model::shown_model(&f.footprint).is_some()
+                            }) {
                                 Some(f) => BoardAnchor::Footprint(f.id),
                                 None => return,
                             },
@@ -467,7 +589,11 @@ fn on_tab(ev: On<TabStripSelect>, q: Query<&Name>, mut commands: Commands) {
                         "Board point"
                     }
                     _ => {
-                        o.view = if i == 0 { BoardView::ThreeD } else { BoardView::Layout };
+                        o.view = if i == 0 {
+                            BoardView::ThreeD
+                        } else {
+                            BoardView::Layout
+                        };
                         "Board view"
                     }
                 };
@@ -475,12 +601,20 @@ fn on_tab(ev: On<TabStripSelect>, q: Query<&Name>, mut commands: Commands) {
             });
         }
         "derived-placement" => commands.queue(move |world: &mut World| {
-            let Some((_, _, mut d)) = current(world) else { return };
-            let want = if i == 0 { DerivedPlacement::BaseOrigin } else { DerivedPlacement::BaseConnector(None) };
+            let Some((_, _, mut d)) = current(world) else {
+                return;
+            };
+            let want = if i == 0 {
+                DerivedPlacement::BaseOrigin
+            } else {
+                DerivedPlacement::BaseConnector(None)
+            };
             if std::mem::discriminant(&d.placement) != std::mem::discriminant(&want) {
                 // The source's first mate connector by default.
                 d.placement = match want {
-                    DerivedPlacement::BaseConnector(_) => DerivedPlacement::BaseConnector(source_connectors(&d).first().map(|(c, _)| *c)),
+                    DerivedPlacement::BaseConnector(_) => DerivedPlacement::BaseConnector(
+                        source_connectors(&d).first().map(|(c, _)| *c),
+                    ),
                     x => x,
                 };
                 set(world, d, Vec::new(), "Placement");
@@ -490,7 +624,13 @@ fn on_tab(ev: On<TabStripSelect>, q: Query<&Name>, mut commands: Commands) {
     }
 }
 
-fn on_check(ev: On<CheckboxChange>, q: Query<&Name>, q_parent: Query<&ChildOf>, q_rows: Query<&EntityRow>, mut commands: Commands) {
+fn on_check(
+    ev: On<CheckboxChange>,
+    q: Query<&Name>,
+    q_parent: Query<&ChildOf>,
+    q_rows: Query<&EntityRow>,
+    mut commands: Commands,
+) {
     let Ok(name) = q.get(ev.entity) else { return };
     let on = ev.checked;
     let which = name.as_str().to_string();
@@ -506,7 +646,9 @@ fn on_check(ev: On<CheckboxChange>, q: Query<&Name>, q_parent: Query<&ChildOf>, 
         }
     }
     commands.queue(move |world: &mut World| {
-        let Some((_, _, mut d)) = current(world) else { return };
+        let Some((_, _, mut d)) = current(world) else {
+            return;
+        };
         let label = match (which.as_str(), key) {
             ("derived-all-checkbox", _) => {
                 d.selection.all = on;
@@ -557,11 +699,21 @@ fn on_check(ev: On<CheckboxChange>, q: Query<&Name>, q_parent: Query<&ChildOf>, 
 }
 
 #[allow(clippy::too_many_arguments)]
-fn on_button(a: On<Activate>, q: Query<&Name>, q_studio: Query<&StudioPick>, q_base: Query<&BasePick>, q_anchor: Query<&AnchorPick>, session: Option<Res<DerivedSession>>, mut commands: Commands) {
+fn on_button(
+    a: On<Activate>,
+    q: Query<&Name>,
+    q_studio: Query<&StudioPick>,
+    q_base: Query<&BasePick>,
+    q_anchor: Query<&AnchorPick>,
+    session: Option<Res<DerivedSession>>,
+    mut commands: Commands,
+) {
     let Some(s) = session else { return };
     if let Ok(p) = q_anchor.get(a.entity).copied() {
         commands.queue(move |world: &mut World| {
-            let Some((_, _, mut d)) = current(world) else { return };
+            let Some((_, _, mut d)) = current(world) else {
+                return;
+            };
             let Some(b) = d.board.as_mut() else { return };
             b.options.anchor = BoardAnchor::Footprint(p.0);
             set(world, d, Vec::new(), "Board point");
@@ -574,7 +726,9 @@ fn on_button(a: On<Activate>, q: Query<&Name>, q_studio: Query<&StudioPick>, q_b
     }
     if let Ok(b) = q_base.get(a.entity).copied() {
         commands.queue(move |world: &mut World| {
-            let Some((_, _, mut d)) = current(world) else { return };
+            let Some((_, _, mut d)) = current(world) else {
+                return;
+            };
             d.placement = DerivedPlacement::BaseConnector(Some(b.0));
             set(world, d, Vec::new(), "Base mate connector");
         });
@@ -602,28 +756,49 @@ fn on_button(a: On<Activate>, q: Query<&Name>, q_studio: Query<&StudioPick>, q_b
                 s.current_graph = !s.current_graph;
             }
         }),
-        "derived-current-create-version" => commands.queue(|world: &mut World| linked::open_create_version_dialog(world, VersionTarget::Current)),
+        "derived-current-create-version" => commands.queue(|world: &mut World| {
+            linked::open_create_version_dialog(world, VersionTarget::Current)
+        }),
         "derived-other-create-version" | "derived-other-no-version-create" => {
             if let Some(d) = opened {
-                commands.queue(move |world: &mut World| linked::open_create_version_dialog(world, VersionTarget::Other(d, Owner::Derived)));
+                commands.queue(move |world: &mut World| {
+                    linked::open_create_version_dialog(
+                        world,
+                        VersionTarget::Other(d, Owner::Derived),
+                    )
+                });
             }
         }
         _ => {}
     }
 }
 
-fn on_graph_pick(ev: On<VersionGraphSelect>, session: Option<Res<DerivedSession>>, mut commands: Commands) {
-    if session.is_none() || (ev.graph != "derived-current-graph-view" && ev.graph != "derived-other-graph-view") {
+fn on_graph_pick(
+    ev: On<VersionGraphSelect>,
+    session: Option<Res<DerivedSession>>,
+    mut commands: Commands,
+) {
+    if session.is_none()
+        || (ev.graph != "derived-current-graph-view" && ev.graph != "derived-other-graph-view")
+    {
         return;
     }
     let other = ev.graph == "derived-other-graph-view";
     let index = ev.index;
     commands.queue(move |world: &mut World| {
-        let Some(s) = world.get_resource::<DerivedSession>().cloned() else { return };
-        let document = if other { s.browse.opened.as_ref().map(|o| o.document) } else { Some(world.resource::<ActiveDocument>().doc.id) };
+        let Some(s) = world.get_resource::<DerivedSession>().cloned() else {
+            return;
+        };
+        let document = if other {
+            s.browse.opened.as_ref().map(|o| o.document)
+        } else {
+            Some(world.resource::<ActiveDocument>().doc.id)
+        };
         let Some(document) = document else { return };
         let (_, picks) = linked::version_graph(world, "x", document, None);
-        let Some(pick) = picks.get(index).copied() else { return };
+        let Some(pick) = picks.get(index).copied() else {
+            return;
+        };
         if other {
             if let GraphPick::Version(v) = pick {
                 linked::open_in(world, Owner::Derived, document, Some(v));
@@ -648,7 +823,9 @@ fn on_graph_pick(ev: On<VersionGraphSelect>, session: Option<Res<DerivedSession>
 }
 
 fn on_list_activate(ev: On<SelectionListActivate>, q: Query<&Name>, mut commands: Commands) {
-    if q.get(ev.entity).is_ok_and(|n| n.as_str() == "derived-locations") {
+    if q.get(ev.entity)
+        .is_ok_and(|n| n.as_str() == "derived-locations")
+    {
         commands.queue(|world: &mut World| {
             if let Some(mut s) = world.get_resource_mut::<DerivedSession>() {
                 s.picks = PickTarget::Locations;
@@ -662,14 +839,18 @@ fn on_list_remove(ev: On<SelectionListRemove>, q: Query<&Name>, mut commands: Co
     let i = ev.index;
     match n.as_str() {
         "derived-locations" => commands.queue(move |world: &mut World| {
-            let Some((_, _, mut d)) = current(world) else { return };
+            let Some((_, _, mut d)) = current(world) else {
+                return;
+            };
             if i < d.locations.len() {
                 d.locations.remove(i);
                 set(world, d, Vec::new(), "Remove location");
             }
         }),
         "derived-base-field" => commands.queue(|world: &mut World| {
-            let Some((_, _, mut d)) = current(world) else { return };
+            let Some((_, _, mut d)) = current(world) else {
+                return;
+            };
             d.placement = DerivedPlacement::BaseConnector(None);
             set(world, d, Vec::new(), "Base mate connector");
         }),
@@ -678,9 +859,15 @@ fn on_list_remove(ev: On<SelectionListRemove>, q: Query<&Name>, mut commands: Co
 }
 
 /// The Other documents search field.
-fn read_search(q: Query<(&Name, &bevy::text::EditableText)>, session: Option<ResMut<DerivedSession>>) {
+fn read_search(
+    q: Query<(&Name, &bevy::text::EditableText)>,
+    session: Option<ResMut<DerivedSession>>,
+) {
     let Some(mut s) = session else { return };
-    if let Some((_, t)) = q.iter().find(|(n, _)| n.as_str() == "derived-other-search-field") {
+    if let Some((_, t)) = q
+        .iter()
+        .find(|(n, _)| n.as_str() == "derived-other-search-field")
+    {
         let v = t.value().to_string();
         if s.browse.search != v {
             s.browse.search = v;
@@ -693,7 +880,11 @@ fn read_search(q: Query<(&Name, &bevy::text::EditableText)>, session: Option<Res
 
 /// The source's explicit mate connectors (the Base mate connector's choices).
 fn source_connectors(d: &DerivedFeature) -> Vec<(ConnectorRef, String)> {
-    d.studio.iter().filter(|f| matches!(f.kind, FeatureKind::MateConnector(_))).map(|f| (ConnectorRef::Feature(f.id), f.name.clone())).collect()
+    d.studio
+        .iter()
+        .filter(|f| matches!(f.kind, FeatureKind::MateConnector(_)))
+        .map(|f| (ConnectorRef::Feature(f.id), f.name.clone()))
+        .collect()
 }
 
 /// A location's label.
@@ -706,7 +897,9 @@ fn location_label(features: &[Feature], c: &ConnectorRef) -> String {
 
 /// The source card's name and subtitle ("Block", "Block source · V1").
 fn source_text(doc: &cadrs_core::Document, d: &DerivedFeature) -> (String, String) {
-    let Some(r) = d.source else { return (String::new(), String::new()) };
+    let Some(r) = d.source else {
+        return (String::new(), String::new());
+    };
     let this = r.document_or(doc.id) == doc.id;
     let sub = match (this, r.at) {
         (true, RefAt::Workspace) => "This document · Main (follows the tab)".to_string(),
@@ -728,32 +921,78 @@ fn studio_rows(world: &World, s: &DerivedSession) -> Vec<SourceRow> {
     let doc = &world.resource::<ActiveDocument>().doc;
     // (tab, its label, the board) per source.
     let sources = |d: &cadrs_core::Document| -> Vec<(ElementId, String, Option<BoardId>, String)> {
-        let mut v: Vec<(ElementId, String, Option<BoardId>, String)> =
-            d.elements.iter().filter(|e| matches!(e.kind, ElementKind::PartStudio { .. }) && e.id != s.element).map(|e| (e.id, e.name.clone(), None, String::new())).collect();
+        let mut v: Vec<(ElementId, String, Option<BoardId>, String)> = d
+            .elements
+            .iter()
+            .filter(|e| matches!(e.kind, ElementKind::PartStudio { .. }) && e.id != s.element)
+            .map(|e| (e.id, e.name.clone(), None, String::new()))
+            .collect();
         for e in &d.elements {
             let Some(pcb) = e.pcb() else { continue };
             // (An IDF board comes too: its outline and package boxes, read-only.)
             for b in &pcb.boards {
-                let studio = if b.design().is_some() { e.name.clone() } else { format!("{} · IDF, read-only", e.name) };
+                let studio = if b.design().is_some() {
+                    e.name.clone()
+                } else {
+                    format!("{} · IDF, read-only", e.name)
+                };
                 v.push((e.id, b.name().to_string(), Some(b.id), studio));
             }
         }
         v
     };
-    let sub = |studio: &str, rest: &str| if studio.is_empty() { rest.to_string() } else { format!("{studio} · {rest}") };
+    let sub = |studio: &str, rest: &str| {
+        if studio.is_empty() {
+            rest.to_string()
+        } else {
+            format!("{studio} · {rest}")
+        }
+    };
     if s.source_tab == 0 {
         return match &s.current {
-            None => sources(doc).into_iter().map(|(e, n, b, st)| (n, sub(&st, "Main · follows the tab"), SourceRef { document: None, at: RefAt::Workspace, element: e, pinned: false }, b)).collect(),
+            None => sources(doc)
+                .into_iter()
+                .map(|(e, n, b, st)| {
+                    (
+                        n,
+                        sub(&st, "Main · follows the tab"),
+                        SourceRef {
+                            document: None,
+                            at: RefAt::Workspace,
+                            element: e,
+                            pinned: false,
+                        },
+                        b,
+                    )
+                })
+                .collect(),
             Some(o) => {
-                let Some((v, vn)) = o.version.clone() else { return Vec::new() };
-                sources(&o.doc).into_iter().map(|(e, n, b, st)| (n, sub(&st, &vn), SourceRef::version(None, e, v), b)).collect()
+                let Some((v, vn)) = o.version.clone() else {
+                    return Vec::new();
+                };
+                sources(&o.doc)
+                    .into_iter()
+                    .map(|(e, n, b, st)| (n, sub(&st, &vn), SourceRef::version(None, e, v), b))
+                    .collect()
             }
         };
     }
     match &s.browse.opened {
         Some(o) => {
-            let Some((v, vn)) = o.version.clone() else { return Vec::new() };
-            sources(&o.doc).into_iter().map(|(e, n, b, st)| (n, sub(&st, &vn), SourceRef::version(Some(o.document), e, v), b)).collect()
+            let Some((v, vn)) = o.version.clone() else {
+                return Vec::new();
+            };
+            sources(&o.doc)
+                .into_iter()
+                .map(|(e, n, b, st)| {
+                    (
+                        n,
+                        sub(&st, &vn),
+                        SourceRef::version(Some(o.document), e, v),
+                        b,
+                    )
+                })
+                .collect()
         }
         None => Vec::new(),
     }
@@ -817,19 +1056,40 @@ fn view(world: &World) -> Option<(View, bool)> {
     } else if d.source.is_some() && !d.selection.all {
         let build = cadrs_core::rebuild::build(&d.studio);
         for p in &build.parts {
-            entities.push((EntityKey::Part(p.id), cadrs_core::parts::display_name(p, &d.props).to_string(), "part", d.selection.parts.contains(&p.id)));
+            entities.push((
+                EntityKey::Part(p.id),
+                cadrs_core::parts::display_name(p, &d.props).to_string(),
+                "part",
+                d.selection.parts.contains(&p.id),
+            ));
         }
         for x in &d.studio {
             let (k, icon, on) = match &x.kind {
-                FeatureKind::Sketch(_) => (EntityKey::Sketch(x.id), "sketch", d.selection.sketches.contains(&x.id)),
-                FeatureKind::Plane(_) => (EntityKey::Plane(x.id), "plane", d.selection.planes.contains(&x.id)),
-                FeatureKind::MateConnector(_) => (EntityKey::Connector(x.id), "mate-connector", d.selection.connectors.contains(&x.id)),
+                FeatureKind::Sketch(_) => (
+                    EntityKey::Sketch(x.id),
+                    "sketch",
+                    d.selection.sketches.contains(&x.id),
+                ),
+                FeatureKind::Plane(_) => (
+                    EntityKey::Plane(x.id),
+                    "plane",
+                    d.selection.planes.contains(&x.id),
+                ),
+                FeatureKind::MateConnector(_) => (
+                    EntityKey::Connector(x.id),
+                    "mate-connector",
+                    d.selection.connectors.contains(&x.id),
+                ),
                 _ => continue,
             };
             entities.push((k, x.name.clone(), icon, on));
         }
     }
-    let current_label = s.current.as_ref().map(|o| o.version_label()).unwrap_or_else(|| "Main".into());
+    let current_label = s
+        .current
+        .as_ref()
+        .map(|o| o.version_label())
+        .unwrap_or_else(|| "Main".into());
     let placement = match d.placement {
         DerivedPlacement::BaseOrigin => None,
         DerivedPlacement::BaseConnector(c) => Some(c.map(|c| c.label(&d.studio))),
@@ -840,11 +1100,22 @@ fn view(world: &World) -> Option<(View, bool)> {
         source_tab: s.source_tab,
         current_label,
         current_graph: s.current_graph,
-        browse_opened: s.browse.opened.as_ref().map(|o| (o.document, o.name.clone(), o.version_label(), o.version.is_some())),
+        browse_opened: s.browse.opened.as_ref().map(|o| {
+            (
+                o.document,
+                o.name.clone(),
+                o.version_label(),
+                o.version.is_some(),
+            )
+        }),
         browse_location: s.browse.location,
         browse_graph: s.browse.graph,
         searching: !s.browse.search.trim().is_empty(),
-        studios: if s.picking { studio_rows(world, &s) } else { Vec::new() },
+        studios: if s.picking {
+            studio_rows(world, &s)
+        } else {
+            Vec::new()
+        },
         source: source_text(doc, &d),
         board: d.board.as_ref().map(|b| {
             use cadrs_core::pcb::board3d::{BoardAnchor as A, on_board};
@@ -856,8 +1127,16 @@ fn view(world: &World) -> Option<(View, bool)> {
                 .iter()
                 .filter(|f| cadrs_core::pcb::model::shown_model(&f.footprint).is_some())
                 .map(|f| {
-                    let value = f.footprint.field(cadrs_eda::symbol::fields::VALUE).map(|v| v.text.text.text.clone()).unwrap_or_default();
-                    let mut label = if value.is_empty() { f.reference().to_string() } else { format!("{} {value}", f.reference()) };
+                    let value = f
+                        .footprint
+                        .field(cadrs_eda::symbol::fields::VALUE)
+                        .map(|v| v.text.text.text.clone())
+                        .unwrap_or_default();
+                    let mut label = if value.is_empty() {
+                        f.reference().to_string()
+                    } else {
+                        format!("{} {value}", f.reference())
+                    };
                     if f.placement.side == cadrs_eda::layer::Side::Bottom {
                         label.push_str(" (bottom)");
                     }
@@ -870,7 +1149,10 @@ fn view(world: &World) -> Option<(View, bool)> {
                 })
                 .collect();
             BoardRows {
-                components: ComponentFilter::ALL.iter().position(|c| *c == o.components).unwrap_or(0),
+                components: ComponentFilter::ALL
+                    .iter()
+                    .position(|c| *c == o.components)
+                    .unwrap_or(0),
                 skins: o.skins,
                 seat: usize::from(o.seat == BoardSeat::Top),
                 anchor: match o.anchor {
@@ -886,13 +1168,20 @@ fn view(world: &World) -> Option<(View, bool)> {
                     A::Footprint(id) => Some(id),
                     _ => None,
                 },
-                on_sketch: b.on_sketch.map(|f| el.feature(f).map_or_else(|| "its sketch".to_string(), |f| f.name.clone())),
+                on_sketch: b.on_sketch.map(|f| {
+                    el.feature(f)
+                        .map_or_else(|| "its sketch".to_string(), |f| f.name.clone())
+                }),
             }
         }),
         linked: d.source.is_some_and(|r| r.at != RefAt::Workspace),
         all: d.selection.all,
         entities,
-        locations: d.locations.iter().map(|c| location_label(el.features(), c)).collect(),
+        locations: d
+            .locations
+            .iter()
+            .map(|c| location_label(el.features(), c))
+            .collect(),
         locations_active: s.picks == PickTarget::Locations,
         placement,
         bases: source_connectors(&d),
@@ -920,7 +1209,9 @@ fn sync_dialog(world: &mut World, mut last: Local<Option<View>>) {
         Some(e) => e,
         None => {
             let mut qa = world.query_filtered::<Entity, With<ViewportArea>>();
-            let Some(area) = qa.iter(world).next() else { return };
+            let Some(area) = qa.iter(world).next() else {
+                return;
+            };
             let tf = theme.clone();
             let e = world
                 .spawn((
@@ -932,11 +1223,30 @@ fn sync_dialog(world: &mut World, mut last: Local<Option<View>>) {
                         .width(300.0)
                         .body_padding(UiRect::ZERO)
                         .body(|p| {
-                            p.spawn((DerivedBody, Name::new("derived-body"), Node { flex_direction: FlexDirection::Column, width: Val::Percent(100.0), ..default() }));
+                            p.spawn((
+                                DerivedBody,
+                                Name::new("derived-body"),
+                                Node {
+                                    flex_direction: FlexDirection::Column,
+                                    width: Val::Percent(100.0),
+                                    ..default()
+                                },
+                            ));
                         })
                         .footer(move |f| {
-                            f.spawn(Node { flex_grow: 1.0, ..default() });
-                            f.spawn((Name::new("derived-help"), cadrs_ui::icon("help-filled", 14.0, Color::srgb_u8(0xa8, 0xa8, 0xa8)), Tooltip::new(HELP)));
+                            f.spawn(Node {
+                                flex_grow: 1.0,
+                                ..default()
+                            });
+                            f.spawn((
+                                Name::new("derived-help"),
+                                cadrs_ui::icon(
+                                    "help-filled",
+                                    14.0,
+                                    Color::srgb_u8(0xa8, 0xa8, 0xa8),
+                                ),
+                                Tooltip::new(HELP),
+                            ));
                             let _ = &tf;
                         })
                         .build(&theme),
@@ -947,14 +1257,20 @@ fn sync_dialog(world: &mut World, mut last: Local<Option<View>>) {
             e
         }
     };
-    let want = FeatureDialogState { title: v.title.clone(), valid, error: false };
+    let want = FeatureDialogState {
+        title: v.title.clone(),
+        valid,
+        error: false,
+    };
     if let Some(mut st) = world.get_mut::<FeatureDialogState>(dialog)
         && *st != want
     {
         *st = want;
     }
     let mut qb = world.query_filtered::<Entity, With<DerivedBody>>();
-    let Some(body) = qb.iter(world).next() else { return };
+    let Some(body) = qb.iter(world).next() else {
+        return;
+    };
     if last.as_ref() == Some(&v) {
         return;
     }
@@ -971,19 +1287,45 @@ fn sync_dialog(world: &mut World, mut last: Local<Option<View>>) {
     let doc_name = world.resource::<ActiveDocument>().doc.name.clone();
     let this_id = world.resource::<ActiveDocument>().doc.id;
     let current_graph = if v.picking && v.source_tab == 0 && v.current_graph {
-        let sel = session.current.as_ref().and_then(|o| o.version.as_ref().map(|x| x.0));
+        let sel = session
+            .current
+            .as_ref()
+            .and_then(|o| o.version.as_ref().map(|x| x.0));
         Some(linked::version_graph(world, "derived-current-graph-view", this_id, sel).0)
     } else {
         None
     };
-    let other_graph = match (&session.browse.opened, v.picking && v.source_tab == 1 && session.browse.graph) {
-        (Some(o), true) => Some(linked::version_graph(world, "derived-other-graph-view", o.document, o.version.as_ref().map(|x| x.0)).0),
+    let other_graph = match (
+        &session.browse.opened,
+        v.picking && v.source_tab == 1 && session.browse.graph,
+    ) {
+        (Some(o), true) => Some(
+            linked::version_graph(
+                world,
+                "derived-other-graph-view",
+                o.document,
+                o.version.as_ref().map(|x| x.0),
+            )
+            .0,
+        ),
         _ => None,
     };
     let t = theme.clone();
     let vv = v.clone();
     let mut commands = world.commands();
-    commands.entity(body).with_children(|p| spawn_body(p, &t, &vv, &session, &doc_name, &list, &thumbs, current_graph, other_graph));
+    commands.entity(body).with_children(|p| {
+        spawn_body(
+            p,
+            &t,
+            &vv,
+            &session,
+            &doc_name,
+            &list,
+            &thumbs,
+            current_graph,
+            other_graph,
+        )
+    });
     world.flush();
     *last = Some(v);
 }
@@ -996,7 +1338,10 @@ fn section(p: &mut ChildSpawnerCommands, t: &Theme, name: &str, label: &str) {
     p.spawn((
         Name::new(name.to_string()),
         t.text(label, t.font_sm, FontWeight::BOLD, t.muted_foreground),
-        Node { margin: UiRect::new(Val::Px(6.0), Val::Px(4.0), Val::Px(8.0), Val::Px(3.0)), ..default() },
+        Node {
+            margin: UiRect::new(Val::Px(6.0), Val::Px(4.0), Val::Px(8.0), Val::Px(3.0)),
+            ..default()
+        },
     ));
 }
 
@@ -1014,10 +1359,35 @@ fn spawn_body(
 ) {
     // Source.
     if v.picking {
-        p.spawn(TabStrip::new("derived-source-tabs").compact().equal().tab("Current document").tab("Other documents").selected(v.source_tab).build(t));
-        p.spawn((Name::new("derived-source-panel"), Node { flex_direction: FlexDirection::Column, padding: UiRect::all(Val::Px(4.0)), ..default() })).with_children(|c| {
+        p.spawn(
+            TabStrip::new("derived-source-tabs")
+                .compact()
+                .equal()
+                .tab("Current document")
+                .tab("Other documents")
+                .selected(v.source_tab)
+                .build(t),
+        );
+        p.spawn((
+            Name::new("derived-source-panel"),
+            Node {
+                flex_direction: FlexDirection::Column,
+                padding: UiRect::all(Val::Px(4.0)),
+                ..default()
+            },
+        ))
+        .with_children(|c| {
             if v.source_tab == 0 {
-                c.spawn(OpenedHeader::new("derived-current", doc_name.to_string(), v.current_label.clone()).back(false).graph_open(v.current_graph).build(t));
+                c.spawn(
+                    OpenedHeader::new(
+                        "derived-current",
+                        doc_name.to_string(),
+                        v.current_label.clone(),
+                    )
+                    .back(false)
+                    .graph_open(v.current_graph)
+                    .build(t),
+                );
                 if let Some(g) = current_graph {
                     c.spawn(g.build(t));
                 } else {
@@ -1027,7 +1397,11 @@ fn spawn_body(
                 match &s.browse.opened {
                     None => linked::spawn_browser(c, t, Owner::Derived, &s.browse, list, thumbs),
                     Some(o) => {
-                        c.spawn(OpenedHeader::new("derived-other", o.name.clone(), o.version_label()).graph_open(s.browse.graph).build(t));
+                        c.spawn(
+                            OpenedHeader::new("derived-other", o.name.clone(), o.version_label())
+                                .graph_open(s.browse.graph)
+                                .build(t),
+                        );
                         if o.version.is_none() {
                             linked::spawn_no_version(c, t, Owner::Derived);
                         } else if let Some(g) = other_graph {
@@ -1040,8 +1414,18 @@ fn spawn_body(
             }
         });
         if !v.source.0.is_empty() {
-            p.spawn(Node { justify_content: JustifyContent::FlexEnd, padding: UiRect::new(Val::Px(6.0), Val::Px(6.0), Val::Px(0.0), Val::Px(4.0)), ..default() })
-                .with_child(cadrs_ui::Button::new("derived-change-source").label("Keep current source").small().outline().build(t));
+            p.spawn(Node {
+                justify_content: JustifyContent::FlexEnd,
+                padding: UiRect::new(Val::Px(6.0), Val::Px(6.0), Val::Px(0.0), Val::Px(4.0)),
+                ..default()
+            })
+            .with_child(
+                cadrs_ui::Button::new("derived-change-source")
+                    .label("Keep current source")
+                    .small()
+                    .outline()
+                    .build(t),
+            );
         }
         return;
     }
@@ -1057,20 +1441,73 @@ fn spawn_body(
             ..default()
         },
         BorderColor::all(t.border),
-        Tooltip::new(if v.linked { "Referenced at a version: it changes only when you update it" } else { "A tab of this document: its edits show here at once" }),
+        Tooltip::new(if v.linked {
+            "Referenced at a version: it changes only when you update it"
+        } else {
+            "A tab of this document: its edits show here at once"
+        }),
     ))
     .with_children(|r| {
-        r.spawn(cadrs_ui::icon(if v.board.is_some() { "pcb-studio" } else { "part-studio" }, 16.0, t.muted_foreground));
-        r.spawn(Node { flex_direction: FlexDirection::Column, flex_grow: 1.0, min_width: Val::Px(0.0), overflow: Overflow::clip(), ..default() }).with_children(|c| {
+        r.spawn(cadrs_ui::icon(
+            if v.board.is_some() {
+                "pcb-studio"
+            } else {
+                "part-studio"
+            },
+            16.0,
+            t.muted_foreground,
+        ));
+        r.spawn(Node {
+            flex_direction: FlexDirection::Column,
+            flex_grow: 1.0,
+            min_width: Val::Px(0.0),
+            overflow: Overflow::clip(),
+            ..default()
+        })
+        .with_children(|c| {
             // Cut with "…" before Change (P3G.5 judge).
-            let cut = || (TextLayout::no_wrap(), cadrs_ui::ellipsis::Ellipsis::default(), cadrs_ui::ellipsis::Ellipsis::node());
-            c.spawn((Name::new("derived-source-name"), t.text(v.source.0.clone(), t.font_base, FontWeight::BOLD, t.foreground))).insert(cut());
-            c.spawn((Name::new("derived-source-version"), t.text(v.source.1.clone(), t.font_sm, FontWeight::NORMAL, t.muted_foreground))).insert(cut());
+            let cut = || {
+                (
+                    TextLayout::no_wrap(),
+                    cadrs_ui::ellipsis::Ellipsis::default(),
+                    cadrs_ui::ellipsis::Ellipsis::node(),
+                )
+            };
+            c.spawn((
+                Name::new("derived-source-name"),
+                t.text(
+                    v.source.0.clone(),
+                    t.font_base,
+                    FontWeight::BOLD,
+                    t.foreground,
+                ),
+            ))
+            .insert(cut());
+            c.spawn((
+                Name::new("derived-source-version"),
+                t.text(
+                    v.source.1.clone(),
+                    t.font_sm,
+                    FontWeight::NORMAL,
+                    t.muted_foreground,
+                ),
+            ))
+            .insert(cut());
         });
         if v.linked {
-            r.spawn((Name::new("derived-source-link"), cadrs_ui::icon("link", 14.0, Color::srgb_u8(0x26, 0x26, 0x26))));
+            r.spawn((
+                Name::new("derived-source-link"),
+                cadrs_ui::icon("link", 14.0, Color::srgb_u8(0x26, 0x26, 0x26)),
+            ));
         }
-        r.spawn(cadrs_ui::Button::new("derived-change-source").label("Change").small().outline().tooltip("Pick another Part Studio, board or version").build(t));
+        r.spawn(
+            cadrs_ui::Button::new("derived-change-source")
+                .label("Change")
+                .small()
+                .outline()
+                .tooltip("Pick another Part Studio, board or version")
+                .build(t),
+        );
     });
     if let Some(b) = &v.board {
         spawn_board_options(p, t, v, b);
@@ -1078,8 +1515,17 @@ fn spawn_body(
     }
     // Derive.
     section(p, t, "derived-derive-label", "Derive");
-    p.spawn(Node { flex_direction: FlexDirection::Column, padding: UiRect::horizontal(Val::Px(4.0)), ..default() }).with_children(|c| {
-        c.spawn(OptionRow::new("derived-all", "Part Studio (every part, sketch and plane)").checked(v.all).build(t));
+    p.spawn(Node {
+        flex_direction: FlexDirection::Column,
+        padding: UiRect::horizontal(Val::Px(4.0)),
+        ..default()
+    })
+    .with_children(|c| {
+        c.spawn(
+            OptionRow::new("derived-all", "Part Studio (every part, sketch and plane)")
+                .checked(v.all)
+                .build(t),
+        );
         for (k, label, icon, on) in &v.entities {
             let kind = match k {
                 EntityKey::Part(_) => "part",
@@ -1088,32 +1534,103 @@ fn spawn_body(
                 EntityKey::Connector(_) => "connector",
                 EntityKey::Footprint(_) => "footprint",
             };
-            c.spawn((EntityRow(*k), OptionRow::new(format!("derived-{kind}-{}", linked::slug(label)), label.clone()).icon(icon).checked(*on).build(t)));
+            c.spawn((
+                EntityRow(*k),
+                OptionRow::new(
+                    format!("derived-{kind}-{}", linked::slug(label)),
+                    label.clone(),
+                )
+                .icon(icon)
+                .checked(*on)
+                .build(t),
+            ));
         }
     });
     // Locations.
     section(p, t, "derived-locations-label", "Locations");
-    p.spawn(Node { flex_direction: FlexDirection::Column, padding: UiRect::horizontal(Val::Px(4.0)), ..default() }).with_children(|c| {
-        c.spawn(SelectionList::new("derived-locations").placeholder("Mate connectors (the origin when empty)").items(v.locations.clone()).active(v.locations_active).build(t));
+    p.spawn(Node {
+        flex_direction: FlexDirection::Column,
+        padding: UiRect::horizontal(Val::Px(4.0)),
+        ..default()
+    })
+    .with_children(|c| {
+        c.spawn(
+            SelectionList::new("derived-locations")
+                .placeholder("Mate connectors (the origin when empty)")
+                .items(v.locations.clone())
+                .active(v.locations_active)
+                .build(t),
+        );
     });
     // Placement.
     section(p, t, "derived-placement-label", "Placement");
-    p.spawn(TabStrip::new("derived-placement").compact().equal().tab("Base origin").tab("Base mate connector").selected(usize::from(v.placement.is_some())).build(t));
+    p.spawn(
+        TabStrip::new("derived-placement")
+            .compact()
+            .equal()
+            .tab("Base origin")
+            .tab("Base mate connector")
+            .selected(usize::from(v.placement.is_some()))
+            .build(t),
+    );
     if let Some(chosen) = &v.placement {
-        p.spawn(Node { flex_direction: FlexDirection::Column, padding: UiRect::new(Val::Px(4.0), Val::Px(4.0), Val::Px(4.0), Val::Px(0.0)), row_gap: Val::Px(2.0), ..default() }).with_children(|c| {
-            c.spawn(SelectionList::new("derived-base-field").placeholder("Base mate connector").items(chosen.iter().cloned().collect()).active(false).build(t));
+        p.spawn(Node {
+            flex_direction: FlexDirection::Column,
+            padding: UiRect::new(Val::Px(4.0), Val::Px(4.0), Val::Px(4.0), Val::Px(0.0)),
+            row_gap: Val::Px(2.0),
+            ..default()
+        })
+        .with_children(|c| {
+            c.spawn(
+                SelectionList::new("derived-base-field")
+                    .placeholder("Base mate connector")
+                    .items(chosen.iter().cloned().collect())
+                    .active(false)
+                    .build(t),
+            );
             if v.bases.is_empty() {
-                c.spawn((t.text("The source has no mate connectors", t.font_sm, FontWeight::NORMAL, t.muted_foreground), Node { margin: UiRect::all(Val::Px(4.0)), ..default() }));
+                c.spawn((
+                    t.text(
+                        "The source has no mate connectors",
+                        t.font_sm,
+                        FontWeight::NORMAL,
+                        t.muted_foreground,
+                    ),
+                    Node {
+                        margin: UiRect::all(Val::Px(4.0)),
+                        ..default()
+                    },
+                ));
             }
             for (cref, name) in &v.bases {
-                c.spawn((linked_location_row(format!("derived-base-{}", linked::slug(name)), name.clone(), t), BasePick(*cref)));
+                c.spawn((
+                    linked_location_row(
+                        format!("derived-base-{}", linked::slug(name)),
+                        name.clone(),
+                        t,
+                    ),
+                    BasePick(*cref),
+                ));
             }
         });
     }
     // Options.
-    p.spawn(Node { flex_direction: FlexDirection::Column, padding: UiRect::new(Val::Px(4.0), Val::Px(4.0), Val::Px(8.0), Val::Px(6.0)), ..default() }).with_children(|c| {
-        c.spawn(OptionRow::new("derived-include-connectors", "Include mate connectors").checked(v.include_connectors).build(t));
-        c.spawn(OptionRow::new("derived-include-properties", "Include properties").checked(v.include_properties).build(t));
+    p.spawn(Node {
+        flex_direction: FlexDirection::Column,
+        padding: UiRect::new(Val::Px(4.0), Val::Px(4.0), Val::Px(8.0), Val::Px(6.0)),
+        ..default()
+    })
+    .with_children(|c| {
+        c.spawn(
+            OptionRow::new("derived-include-connectors", "Include mate connectors")
+                .checked(v.include_connectors)
+                .build(t),
+        );
+        c.spawn(
+            OptionRow::new("derived-include-properties", "Include properties")
+                .checked(v.include_properties)
+                .build(t),
+        );
     });
 }
 
@@ -1121,28 +1638,82 @@ fn spawn_body(
 /// §4.1): what it shows, which components come in, where it goes and how it sits there.
 fn spawn_board_options(p: &mut ChildSpawnerCommands, t: &Theme, v: &View, b: &BoardRows) {
     section(p, t, "derived-board-view-label", "Show");
-    p.spawn(TabStrip::new("derived-board-view").compact().equal().tab("3D model").tab("Layout").selected(b.view).build(t));
+    p.spawn(
+        TabStrip::new("derived-board-view")
+            .compact()
+            .equal()
+            .tab("3D model")
+            .tab("Layout")
+            .selected(b.view)
+            .build(t),
+    );
     section(p, t, "derived-components-label", "Components");
-    p.spawn(TabStrip::new("derived-board-components").compact().equal().tab("All").tab("Top").tab("Bottom").tab("None").selected(b.components).build(t));
+    p.spawn(
+        TabStrip::new("derived-board-components")
+            .compact()
+            .equal()
+            .tab("All")
+            .tab("Top")
+            .tab("Bottom")
+            .tab("None")
+            .selected(b.components)
+            .build(t),
+    );
     // A list scrolled with a scrollbar beside it (a board has dozens of footprints).
-    p.spawn(Node { flex_direction: FlexDirection::Column, max_height: Val::Px(260.0), ..default() }).with_children(|frame| {
+    p.spawn(Node {
+        flex_direction: FlexDirection::Column,
+        max_height: Val::Px(260.0),
+        ..default()
+    })
+    .with_children(|frame| {
         let list = frame
             .spawn((
                 Name::new("derived-footprints"),
                 bevy::ui_widgets::ScrollArea,
                 cadrs_ui::scrollbar::ScrollGutter(8.0),
-                Node { flex_direction: FlexDirection::Column, padding: UiRect::new(Val::Px(4.0), Val::Px(4.0), Val::Px(4.0), Val::Px(0.0)), max_height: Val::Px(260.0), overflow: Overflow::scroll_y(), ..default() },
+                Node {
+                    flex_direction: FlexDirection::Column,
+                    padding: UiRect::new(Val::Px(4.0), Val::Px(4.0), Val::Px(4.0), Val::Px(0.0)),
+                    max_height: Val::Px(260.0),
+                    overflow: Overflow::scroll_y(),
+                    ..default()
+                },
             ))
             .with_children(|c| {
                 for (id, label, on, blocked) in &b.footprints {
-                    c.spawn((EntityRow(EntityKey::Footprint(*id)), OptionRow::new(format!("derived-footprint-{}", linked::slug(label)), label.clone()).icon("chip").checked(*on).disabled(*blocked).build(t)));
+                    c.spawn((
+                        EntityRow(EntityKey::Footprint(*id)),
+                        OptionRow::new(
+                            format!("derived-footprint-{}", linked::slug(label)),
+                            label.clone(),
+                        )
+                        .icon("chip")
+                        .checked(*on)
+                        .disabled(*blocked)
+                        .build(t),
+                    ));
                 }
             })
             .id();
-        frame.spawn(cadrs_ui::vertical_scrollbar(t, "derived-footprints-scrollbar", list));
+        frame.spawn(cadrs_ui::vertical_scrollbar(
+            t,
+            "derived-footprints-scrollbar",
+            list,
+        ));
     });
-    p.spawn(Node { flex_direction: FlexDirection::Column, padding: UiRect::horizontal(Val::Px(4.0)), ..default() })
-        .with_child(OptionRow::new("derived-board-off-board", "Include parts placed off the board").checked(b.off_board).build(t));
+    p.spawn(Node {
+        flex_direction: FlexDirection::Column,
+        padding: UiRect::horizontal(Val::Px(4.0)),
+        ..default()
+    })
+    .with_child(
+        OptionRow::new(
+            "derived-board-off-board",
+            "Include parts placed off the board",
+        )
+        .checked(b.off_board)
+        .build(t),
+    );
     section(p, t, "derived-locations-label", "Locations");
     if let Some(sk) = &b.on_sketch {
         p.spawn((
@@ -1152,11 +1723,37 @@ fn spawn_board_options(p: &mut ChildSpawnerCommands, t: &Theme, v: &View, b: &Bo
         ))
         .insert(TextLayout::new(bevy::text::Justify::Left, bevy::text::LineBreak::WordBoundary));
     }
-    p.spawn(Node { flex_direction: FlexDirection::Column, padding: UiRect::horizontal(Val::Px(4.0)), ..default() }).with_children(|c| {
-        c.spawn(SelectionList::new("derived-locations").placeholder("Mate connectors (the origin when empty)").items(v.locations.clone()).active(v.locations_active).build(t));
+    p.spawn(Node {
+        flex_direction: FlexDirection::Column,
+        padding: UiRect::horizontal(Val::Px(4.0)),
+        ..default()
+    })
+    .with_children(|c| {
+        c.spawn(
+            SelectionList::new("derived-locations")
+                .placeholder("Mate connectors (the origin when empty)")
+                .items(v.locations.clone())
+                .active(v.locations_active)
+                .build(t),
+        );
     });
-    section(p, t, "derived-board-anchor-label", "Board point on the location");
-    p.spawn(TabStrip::new("derived-board-anchor").compact().equal().tab("Fixed").tab("Origin").tab("Centre").tab("Footprint").selected(b.anchor).build(t));
+    section(
+        p,
+        t,
+        "derived-board-anchor-label",
+        "Board point on the location",
+    );
+    p.spawn(
+        TabStrip::new("derived-board-anchor")
+            .compact()
+            .equal()
+            .tab("Fixed")
+            .tab("Origin")
+            .tab("Centre")
+            .tab("Footprint")
+            .selected(b.anchor)
+            .build(t),
+    );
     let hint = match b.anchor {
         0 => "Where the outline's centre was: outline edits don't move the board",
         1 => "The layout's origin (0, 0)",
@@ -1167,24 +1764,73 @@ fn spawn_board_options(p: &mut ChildSpawnerCommands, t: &Theme, v: &View, b: &Bo
     p.spawn((
         Name::new("derived-board-anchor-hint"),
         t.text(hint, t.font_sm, FontWeight::NORMAL, t.muted_foreground),
-        Node { margin: UiRect::new(Val::Px(8.0), Val::Px(6.0), Val::Px(3.0), Val::Px(0.0)), max_width: Val::Percent(100.0), ..default() },
+        Node {
+            margin: UiRect::new(Val::Px(8.0), Val::Px(6.0), Val::Px(3.0), Val::Px(0.0)),
+            max_width: Val::Percent(100.0),
+            ..default()
+        },
     ))
-    .insert(TextLayout::new(bevy::text::Justify::Left, bevy::text::LineBreak::WordBoundary));
+    .insert(TextLayout::new(
+        bevy::text::Justify::Left,
+        bevy::text::LineBreak::WordBoundary,
+    ));
     if b.anchor == 3 {
-        p.spawn((Name::new("derived-board-anchor-footprints"), Node { flex_direction: FlexDirection::Column, padding: UiRect::new(Val::Px(4.0), Val::Px(4.0), Val::Px(3.0), Val::Px(0.0)), max_height: Val::Px(140.0), overflow: Overflow::scroll_y(), ..default() }))
-            .with_children(|c| {
-                for (id, label, _, _) in &b.footprints {
-                    let mut row = c.spawn((cadrs_ui::location_row(format!("derived-anchor-{}", linked::slug(label)), "chip", label.clone(), t), AnchorPick(*id)));
-                    if b.anchor_footprint == Some(*id) {
-                        row.insert(cadrs_ui::style::Selected);
-                    }
+        p.spawn((
+            Name::new("derived-board-anchor-footprints"),
+            Node {
+                flex_direction: FlexDirection::Column,
+                padding: UiRect::new(Val::Px(4.0), Val::Px(4.0), Val::Px(3.0), Val::Px(0.0)),
+                max_height: Val::Px(140.0),
+                overflow: Overflow::scroll_y(),
+                ..default()
+            },
+        ))
+        .with_children(|c| {
+            for (id, label, _, _) in &b.footprints {
+                let mut row = c.spawn((
+                    cadrs_ui::location_row(
+                        format!("derived-anchor-{}", linked::slug(label)),
+                        "chip",
+                        label.clone(),
+                        t,
+                    ),
+                    AnchorPick(*id),
+                ));
+                if b.anchor_footprint == Some(*id) {
+                    row.insert(cadrs_ui::style::Selected);
                 }
-            });
+            }
+        });
     }
-    section(p, t, "derived-board-seat-label", "Board face on the location");
-    p.spawn(TabStrip::new("derived-board-seat").compact().equal().tab("Bottom face").tab("Top face").selected(b.seat).build(t));
-    p.spawn(Node { flex_direction: FlexDirection::Column, padding: UiRect::new(Val::Px(4.0), Val::Px(4.0), Val::Px(8.0), Val::Px(6.0)), ..default() }).with_children(|c| {
-        c.spawn(OptionRow::new("derived-board-skins", "Show the mask, copper and silkscreen").checked(b.skins).build(t));
+    section(
+        p,
+        t,
+        "derived-board-seat-label",
+        "Board face on the location",
+    );
+    p.spawn(
+        TabStrip::new("derived-board-seat")
+            .compact()
+            .equal()
+            .tab("Bottom face")
+            .tab("Top face")
+            .selected(b.seat)
+            .build(t),
+    );
+    p.spawn(Node {
+        flex_direction: FlexDirection::Column,
+        padding: UiRect::new(Val::Px(4.0), Val::Px(4.0), Val::Px(8.0), Val::Px(6.0)),
+        ..default()
+    })
+    .with_children(|c| {
+        c.spawn(
+            OptionRow::new(
+                "derived-board-skins",
+                "Show the mask, copper and silkscreen",
+            )
+            .checked(b.skins)
+            .build(t),
+        );
     });
 }
 
@@ -1193,21 +1839,63 @@ fn linked_location_row(name: String, label: String, t: &Theme) -> impl Bundle {
 }
 
 fn studio_list(c: &mut ChildSpawnerCommands, t: &Theme, rows: &[SourceRow]) {
-    c.spawn((Name::new("derived-studios"), Node { flex_direction: FlexDirection::Column, max_height: Val::Px(320.0), overflow: Overflow::scroll_y(), ..default() })).with_children(|l| {
+    c.spawn((
+        Name::new("derived-studios"),
+        Node {
+            flex_direction: FlexDirection::Column,
+            max_height: Val::Px(320.0),
+            overflow: Overflow::scroll_y(),
+            ..default()
+        },
+    ))
+    .with_children(|l| {
         if rows.is_empty() {
-            l.spawn((t.text("No other Part Studios or boards", t.font_sm, FontWeight::NORMAL, t.muted_foreground), Node { margin: UiRect::all(Val::Px(8.0)), ..default() }));
+            l.spawn((
+                t.text(
+                    "No other Part Studios or boards",
+                    t.font_sm,
+                    FontWeight::NORMAL,
+                    t.muted_foreground,
+                ),
+                Node {
+                    margin: UiRect::all(Val::Px(8.0)),
+                    ..default()
+                },
+            ));
         }
         let mut heading: Option<bool> = None;
         for (label, sub, r, board) in rows {
             // "Part Studios", then "Boards".
             if heading != Some(board.is_some()) {
                 heading = Some(board.is_some());
-                let (name, text) = if board.is_some() { ("derived-heading-boards", "Boards") } else { ("derived-heading-studios", "Part Studios") };
-                l.spawn((Name::new(name), t.text(text, t.font_sm, FontWeight::BOLD, t.muted_foreground), Node { margin: UiRect::new(Val::Px(6.0), Val::Px(4.0), Val::Px(6.0), Val::Px(2.0)), ..default() }));
+                let (name, text) = if board.is_some() {
+                    ("derived-heading-boards", "Boards")
+                } else {
+                    ("derived-heading-studios", "Part Studios")
+                };
+                l.spawn((
+                    Name::new(name),
+                    t.text(text, t.font_sm, FontWeight::BOLD, t.muted_foreground),
+                    Node {
+                        margin: UiRect::new(Val::Px(6.0), Val::Px(4.0), Val::Px(6.0), Val::Px(2.0)),
+                        ..default()
+                    },
+                ));
             }
-            let (prefix, icon) = if board.is_some() { ("derived-board", "pcb-studio") } else { ("derived-studio", "part-studio") };
+            let (prefix, icon) = if board.is_some() {
+                ("derived-board", "pcb-studio")
+            } else {
+                ("derived-studio", "part-studio")
+            };
             l.spawn((
-                cadrs_ui::DocumentRow::new(format!("{prefix}-{}", linked::slug(label)), label.clone(), sub.clone()).icon(icon).tooltip(format!("Derive {label}")).build(t),
+                cadrs_ui::DocumentRow::new(
+                    format!("{prefix}-{}", linked::slug(label)),
+                    label.clone(),
+                    sub.clone(),
+                )
+                .icon(icon)
+                .tooltip(format!("Derive {label}"))
+                .build(t),
                 StudioPick(*r, *board),
             ));
         }
@@ -1227,22 +1915,35 @@ fn sync_source_list(world: &mut World, mut last: Local<Option<(Browse, u64)>>) {
     }
     let browse = s.browse.clone();
     let generation = world.resource::<linked::LibrarySnapshot>().generation;
-    if last.as_ref().is_some_and(|(b, g)| b == &browse && *g == generation) {
+    if last
+        .as_ref()
+        .is_some_and(|(b, g)| b == &browse && *g == generation)
+    {
         return;
     }
-    let refresh = last.as_ref().is_some_and(|(b, g)| b.location == browse.location && (b.search != browse.search || *g != generation));
+    let refresh = last.as_ref().is_some_and(|(b, g)| {
+        b.location == browse.location && (b.search != browse.search || *g != generation)
+    });
     *last = Some((browse.clone(), generation));
     if !refresh {
         return;
     }
     let mut qn = world.query::<(Entity, &Name, &ChildOf)>();
-    let Some((node, parent)) = qn.iter(world).find(|(_, n, _)| n.as_str() == "derived-other-list").map(|(e, _, p)| (e, p.parent())) else { return };
+    let Some((node, parent)) = qn
+        .iter(world)
+        .find(|(_, n, _)| n.as_str() == "derived-other-list")
+        .map(|(e, _, p)| (e, p.parent()))
+    else {
+        return;
+    };
     let list = linked::browser_list(world, &browse);
     let thumbs = linked::browser_thumbs(world, &list.rows);
     let theme = world.resource::<Theme>().clone();
     world.entity_mut(node).despawn();
     let mut commands = world.commands();
-    commands.entity(parent).with_children(|p| linked::spawn_browser_list(p, &theme, Owner::Derived, &browse, &list, &thumbs));
+    commands.entity(parent).with_children(|p| {
+        linked::spawn_browser_list(p, &theme, Owner::Derived, &browse, &list, &thumbs)
+    });
     world.flush();
 }
 
@@ -1253,20 +1954,45 @@ fn sync_source_list(world: &mut World, mut last: Local<Option<(Browse, u64)>>) {
 /// (`docs/PCB_IN_PART_STUDIO.md` §6) lists each copy's board, then a row that switches it
 /// between its 3D model and its layout (`view`), then "Components (n)", open (`components_open`)
 /// with the components under it.
-pub fn children(cache: &crate::parts::PartCache, feature: FeatureId, view: Option<BoardView>, components_open: bool) -> Vec<(DerivedChild, String, &'static str)> {
-    let Some(out) = cache.derived.get(&feature) else { return Vec::new() };
+pub fn children(
+    cache: &crate::parts::PartCache,
+    feature: FeatureId,
+    view: Option<BoardView>,
+    components_open: bool,
+) -> Vec<(DerivedChild, String, &'static str)> {
+    let Some(out) = cache.derived.get(&feature) else {
+        return Vec::new();
+    };
     let mut v = Vec::new();
-    let name = |p: &PartId| cache.parts.iter().find(|x| x.id == *p).map(|part| cadrs_core::parts::display_name(part, &cache.props).to_string());
+    let name = |p: &PartId| {
+        cache
+            .parts
+            .iter()
+            .find(|x| x.id == *p)
+            .map(|part| cadrs_core::parts::display_name(part, &cache.props).to_string())
+    };
     if let Some(view) = view {
         for b in &out.boards {
             if let Some(n) = name(&b.part) {
                 v.push((DerivedChild::Part(b.part), n, "pcb-studio"));
             }
         }
-        v.push((DerivedChild::BoardView(feature), "View".to_string(), if view == BoardView::Layout { "pcb-studio" } else { "board-3d" }));
+        v.push((
+            DerivedChild::BoardView(feature),
+            "View".to_string(),
+            if view == BoardView::Layout {
+                "pcb-studio"
+            } else {
+                "board-3d"
+            },
+        ));
         if !out.footprints.is_empty() {
             // (Short: the row has its eye and chevron too.)
-            v.push((DerivedChild::Components(feature), format!("Parts ({})", out.footprints.len()), "chip"));
+            v.push((
+                DerivedChild::Components(feature),
+                format!("Parts ({})", out.footprints.len()),
+                "chip",
+            ));
             if components_open {
                 for (p, _) in &out.footprints {
                     if let Some(n) = name(p) {
@@ -1314,7 +2040,11 @@ pub enum DerivedChild {
 pub struct ComponentsOpen(pub HashSet<FeatureId>);
 
 /// The "Components (n)" group's chevron.
-fn on_components_disclosure(ev: On<cadrs_ui::TreeToggle>, q: Query<&DerivedChild>, mut commands: Commands) {
+fn on_components_disclosure(
+    ev: On<cadrs_ui::TreeToggle>,
+    q: Query<&DerivedChild>,
+    mut commands: Commands,
+) {
     if let Ok(DerivedChild::Components(f)) = q.get(ev.entity).copied() {
         commands.queue(move |world: &mut World| {
             let mut o = world.resource_mut::<ComponentsOpen>();
@@ -1334,9 +2064,19 @@ pub fn toggle_open(world: &mut World, feature: FeatureId) {
 }
 
 /// A derived board's 3D | Layout segments in the Feature list.
-pub fn on_board_view_segment(e: On<cadrs_ui::SegmentedSelect>, q: Query<&DerivedChild>, mut commands: Commands) {
-    let Ok(DerivedChild::BoardView(f)) = q.get(e.entity).copied() else { return };
-    let view = if e.index == 1 { BoardView::Layout } else { BoardView::ThreeD };
+pub fn on_board_view_segment(
+    e: On<cadrs_ui::SegmentedSelect>,
+    q: Query<&DerivedChild>,
+    mut commands: Commands,
+) {
+    let Ok(DerivedChild::BoardView(f)) = q.get(e.entity).copied() else {
+        return;
+    };
+    let view = if e.index == 1 {
+        BoardView::Layout
+    } else {
+        BoardView::ThreeD
+    };
     commands.queue(move |w: &mut World| {
         let now = derived_board_ref(w, f).map(|b| b.options.view);
         if now.is_some_and(|v| v != view) {
@@ -1347,30 +2087,88 @@ pub fn on_board_view_segment(e: On<cadrs_ui::SegmentedSelect>, q: Query<&Derived
 
 /// The eye of a derived part (hide or show it) or sketch (its visibility).
 pub fn toggle_child(world: &mut World, child: DerivedChild) {
-    let Some(element) = world.resource::<ActiveDocument>().active_element().map(|e| e.id) else { return };
+    let Some(element) = world
+        .resource::<ActiveDocument>()
+        .active_element()
+        .map(|e| e.id)
+    else {
+        return;
+    };
     match child {
         DerivedChild::Part(p) | DerivedChild::Component(p) => {
-            let hidden = world.resource::<ActiveDocument>().active_element().and_then(|e| e.part_prop(p)).is_some_and(|x| x.hidden);
-            let _ = world.resource_mut::<ActiveDocument>().execute(&cadrs_core::commands::SetPartsHidden { element, parts: vec![p], hidden: !hidden });
+            let hidden = world
+                .resource::<ActiveDocument>()
+                .active_element()
+                .and_then(|e| e.part_prop(p))
+                .is_some_and(|x| x.hidden);
+            let _ = world.resource_mut::<ActiveDocument>().execute(
+                &cadrs_core::commands::SetPartsHidden {
+                    element,
+                    parts: vec![p],
+                    hidden: !hidden,
+                },
+            );
         }
         DerivedChild::BoardView(f) => {
-            let layout = derived_in_active(world, f).and_then(|d| d.board).is_some_and(|b| b.options.view == BoardView::Layout);
-            crate::board_in_studio::set_view(world, f, if layout { BoardView::ThreeD } else { BoardView::Layout });
+            let layout = derived_in_active(world, f)
+                .and_then(|d| d.board)
+                .is_some_and(|b| b.options.view == BoardView::Layout);
+            crate::board_in_studio::set_view(
+                world,
+                f,
+                if layout {
+                    BoardView::ThreeD
+                } else {
+                    BoardView::Layout
+                },
+            );
         }
         DerivedChild::Components(f) => {
             // Hide them all, or show them all when they're all hidden.
-            let parts: Vec<PartId> = world.resource::<crate::parts::PartCache>().derived.get(&f).map(|o| o.footprints.iter().map(|(p, _)| *p).collect()).unwrap_or_default();
+            let parts: Vec<PartId> = world
+                .resource::<crate::parts::PartCache>()
+                .derived
+                .get(&f)
+                .map(|o| o.footprints.iter().map(|(p, _)| *p).collect())
+                .unwrap_or_default();
             let el = world.resource::<ActiveDocument>().active_element();
-            let all_hidden = !parts.is_empty() && parts.iter().all(|p| el.and_then(|e| e.part_prop(*p)).is_some_and(|x| x.hidden));
-            let _ = world.resource_mut::<ActiveDocument>().execute(&cadrs_core::commands::SetPartsHidden { element, parts, hidden: !all_hidden });
+            let all_hidden = !parts.is_empty()
+                && parts
+                    .iter()
+                    .all(|p| el.and_then(|e| e.part_prop(*p)).is_some_and(|x| x.hidden));
+            let _ = world.resource_mut::<ActiveDocument>().execute(
+                &cadrs_core::commands::SetPartsHidden {
+                    element,
+                    parts,
+                    hidden: !all_hidden,
+                },
+            );
         }
         DerivedChild::Plane(s) => {
-            let shown = world.resource::<ActiveDocument>().active_element().is_none_or(|e| e.sketch_visibility(s) != Some(false));
-            let _ = world.resource_mut::<ActiveDocument>().execute(&cadrs_core::commands::SetSketchVisibility { element, sketch: s, visible: Some(!shown) });
+            let shown = world
+                .resource::<ActiveDocument>()
+                .active_element()
+                .is_none_or(|e| e.sketch_visibility(s) != Some(false));
+            let _ = world.resource_mut::<ActiveDocument>().execute(
+                &cadrs_core::commands::SetSketchVisibility {
+                    element,
+                    sketch: s,
+                    visible: Some(!shown),
+                },
+            );
         }
         DerivedChild::Sketch(s) => {
-            let shown = !world.resource::<crate::parts::PartCache>().hidden_sketches.contains(&s);
-            let _ = world.resource_mut::<ActiveDocument>().execute(&cadrs_core::commands::SetSketchVisibility { element, sketch: s, visible: Some(!shown) });
+            let shown = !world
+                .resource::<crate::parts::PartCache>()
+                .hidden_sketches
+                .contains(&s);
+            let _ = world.resource_mut::<ActiveDocument>().execute(
+                &cadrs_core::commands::SetSketchVisibility {
+                    element,
+                    sketch: s,
+                    visible: Some(!shown),
+                },
+            );
         }
         _ => {}
     }
@@ -1385,7 +2183,10 @@ fn on_child_eye(ev: On<cadrs_ui::TreeRowToggled>, q: Query<&DerivedChild>, mut c
 /// The site of the Derived feature `feature` in the active tab (for the reference menus).
 pub fn site(world: &World, feature: FeatureId) -> Option<cadrs_core::link_update::RefSite> {
     let el = world.resource::<ActiveDocument>().active_element()?.id;
-    Some(cadrs_core::link_update::RefSite::Derived { element: el, feature })
+    Some(cadrs_core::link_update::RefSite::Derived {
+        element: el,
+        feature,
+    })
 }
 
 /// The Derived feature `feature` of the active tab, if it is one.
@@ -1398,11 +2199,15 @@ pub fn derived_ref(world: &World, feature: FeatureId) -> Option<&DerivedFeature>
     let doc = world.resource::<ActiveDocument>();
     let el = doc.active_element()?;
     // (An assembly's board instance: its board as its PCB Studio derives it.)
-    cadrs_core::derived::derived_of(&doc.doc, el.id, feature).or_else(|| crate::board_in_studio::instance_board(doc, feature).map(|(_, _, d)| d))
+    cadrs_core::derived::derived_of(&doc.doc, el.id, feature)
+        .or_else(|| crate::board_in_studio::instance_board(doc, feature).map(|(_, _, d)| d))
 }
 
 /// The derived board of the Derived feature `feature` in the shown Part Studio.
-pub fn derived_board_ref(world: &World, feature: FeatureId) -> Option<&cadrs_core::derived::DerivedBoard> {
+pub fn derived_board_ref(
+    world: &World,
+    feature: FeatureId,
+) -> Option<&cadrs_core::derived::DerivedBoard> {
     derived_ref(world, feature)?.board.as_deref()
 }
 
@@ -1410,7 +2215,8 @@ pub fn derived_board_ref(world: &World, feature: FeatureId) -> Option<&cadrs_cor
 // Scenario set-ups
 
 /// Document "Block derived", its Part Studios.
-pub const HOST_DOC: cadrs_core::DocumentId = cadrs_core::DocumentId::from_u128(0x3a61_0000_0000_0000_0000_0000_0000_0600);
+pub const HOST_DOC: cadrs_core::DocumentId =
+    cadrs_core::DocumentId::from_u128(0x3a61_0000_0000_0000_0000_0000_0000_0600);
 pub const HOST: ElementId = ElementId::from_u128(0x3a61_0000_0000_0000_0000_0000_0000_0601);
 pub const PLATE: ElementId = ElementId::from_u128(0x3a61_0000_0000_0000_0000_0000_0000_0602);
 /// The host's mate connector at (0, 0, 100).
@@ -1438,7 +2244,12 @@ fn connector_at(offset: [f64; 3], owner: Option<PartId>) -> FeatureKind {
 fn rect_op(x0: f64, y0: f64, x1: f64, y1: f64) -> cadrs_sketch::SketchOp {
     use cadrs_sketch::Vec2;
     cadrs_sketch::SketchOp::AddPolyline {
-        points: vec![Vec2::new(x0, y0), Vec2::new(x1, y0), Vec2::new(x1, y1), Vec2::new(x0, y1)],
+        points: vec![
+            Vec2::new(x0, y0),
+            Vec2::new(x1, y0),
+            Vec2::new(x1, y1),
+            Vec2::new(x0, y1),
+        ],
         closed: true,
         construction: false,
         label: "Add rectangle",
@@ -1451,23 +2262,67 @@ pub fn source_document() -> Result<cadrs_core::Document, cadrs_core::CommandErro
     use cadrs_core::samples::linked_block as lb;
     let mut a = lb::document()?;
     let mut h = cadrs_core::History::default();
-    h.execute(&mut a, &cadrs_core::commands::AddSketch { element: lb::STUDIO, feature: RECT, plane: Some(cadrs_sketch::PlaneRef::Top) })?;
-    h.execute(&mut a, &cadrs_core::commands::EditSketch { element: lb::STUDIO, feature: RECT, op: rect_op(0.0, -20.0, 20.0, -10.0) })?;
-    h.execute(&mut a, &cadrs_core::commands::AddFeature { element: lb::STUDIO, feature: TOP, base_name: "Mate connector".into(), kind: connector_at([25.0, 15.0, 25.0], Some(lb::PART)) })?;
+    h.execute(
+        &mut a,
+        &cadrs_core::commands::AddSketch {
+            element: lb::STUDIO,
+            feature: RECT,
+            plane: Some(cadrs_sketch::PlaneRef::Top),
+        },
+    )?;
+    h.execute(
+        &mut a,
+        &cadrs_core::commands::EditSketch {
+            element: lb::STUDIO,
+            feature: RECT,
+            op: rect_op(0.0, -20.0, 20.0, -10.0),
+        },
+    )?;
+    h.execute(
+        &mut a,
+        &cadrs_core::commands::AddFeature {
+            element: lb::STUDIO,
+            feature: TOP,
+            base_name: "Mate connector".into(),
+            kind: connector_at([25.0, 15.0, 25.0], Some(lb::PART)),
+        },
+    )?;
     // "Plane 1", 40 above Top (a Plane feature to derive, DV3.2).
     let plane = cadrs_core::plane::PlaneFeature {
-        entities: vec![cadrs_core::plane::PlaneEntity::Plane(cadrs_sketch::PlaneRef::Top)],
+        entities: vec![cadrs_core::plane::PlaneEntity::Plane(
+            cadrs_sketch::PlaneRef::Top,
+        )],
         offset: 40.0,
         offset_expr: "40 mm".into(),
         ..Default::default()
     };
-    h.execute(&mut a, &cadrs_core::commands::AddFeature { element: lb::STUDIO, feature: PLANE1, base_name: "Plane".into(), kind: FeatureKind::Plane(plane) })?;
+    h.execute(
+        &mut a,
+        &cadrs_core::commands::AddFeature {
+            element: lb::STUDIO,
+            feature: PLANE1,
+            base_name: "Plane".into(),
+            kind: FeatureKind::Plane(plane),
+        },
+    )?;
     use cadrs_core::properties::{PropertyKey, PropertyOwner, PropertyValue, SetProperties};
     h.execute(
         &mut a,
         &SetProperties {
-            owners: vec![PropertyOwner::Part { element: lb::STUDIO, part: lb::PART }],
-            values: vec![(PropertyKey::PartNumber, PropertyValue::Text("BLK-001".into())), (PropertyKey::Description, PropertyValue::Text("Block, 50 × 30 × 25".into()))],
+            owners: vec![PropertyOwner::Part {
+                element: lb::STUDIO,
+                part: lb::PART,
+            }],
+            values: vec![
+                (
+                    PropertyKey::PartNumber,
+                    PropertyValue::Text("BLK-001".into()),
+                ),
+                (
+                    PropertyKey::Description,
+                    PropertyValue::Text("Block, 50 × 30 × 25".into()),
+                ),
+            ],
             label: "Properties".into(),
         },
     )?;
@@ -1486,15 +2341,57 @@ pub fn host_document() -> Result<cadrs_core::Document, cadrs_core::CommandError>
     plate.id = PLATE;
     b.elements.push(plate);
     let mut h = cadrs_core::History::default();
-    h.execute(&mut b, &cadrs_core::commands::AddFeature { element: HOST, feature: LOC, base_name: "Mate connector".into(), kind: connector_at([0.0, 0.0, 100.0], None) })?;
+    h.execute(
+        &mut b,
+        &cadrs_core::commands::AddFeature {
+            element: HOST,
+            feature: LOC,
+            base_name: "Mate connector".into(),
+            kind: connector_at([0.0, 0.0, 100.0], None),
+        },
+    )?;
     let s = FeatureId::from_u128(0x3a61_0000_0000_0000_0000_0000_0000_0611);
     let e = FeatureId::from_u128(0x3a61_0000_0000_0000_0000_0000_0000_0612);
-    h.execute(&mut b, &cadrs_core::commands::AddSketch { element: PLATE, feature: s, plane: Some(cadrs_sketch::PlaneRef::Top) })?;
-    h.execute(&mut b, &cadrs_core::commands::EditSketch { element: PLATE, feature: s, op: rect_op(-50.0, -30.0, 50.0, 30.0) })?;
-    let g = b.element(PLATE).and_then(|x| x.feature(s)).and_then(|f| f.sketch()).map(|k| k.geometry.clone()).ok_or_else(|| cadrs_core::CommandError::Invalid("plate sketch".into()))?;
+    h.execute(
+        &mut b,
+        &cadrs_core::commands::AddSketch {
+            element: PLATE,
+            feature: s,
+            plane: Some(cadrs_sketch::PlaneRef::Top),
+        },
+    )?;
+    h.execute(
+        &mut b,
+        &cadrs_core::commands::EditSketch {
+            element: PLATE,
+            feature: s,
+            op: rect_op(-50.0, -30.0, 50.0, 30.0),
+        },
+    )?;
+    let g = b
+        .element(PLATE)
+        .and_then(|x| x.feature(s))
+        .and_then(|f| f.sketch())
+        .map(|k| k.geometry.clone())
+        .ok_or_else(|| cadrs_core::CommandError::Invalid("plate sketch".into()))?;
     let regions = cadrs_core::samples::region_refs(s, &g, &[cadrs_sketch::Vec2::new(0.0, 0.0)]);
-    h.execute(&mut b, &cadrs_core::commands::AddExtrude { element: PLATE, feature: e, extrude: Default::default() })?;
-    h.execute(&mut b, &cadrs_core::commands::SetExtrude { element: PLATE, feature: e, extrude: cadrs_core::samples::extrude_of(regions, 10.0), label: "Extrude".into() })?;
+    h.execute(
+        &mut b,
+        &cadrs_core::commands::AddExtrude {
+            element: PLATE,
+            feature: e,
+            extrude: Default::default(),
+        },
+    )?;
+    h.execute(
+        &mut b,
+        &cadrs_core::commands::SetExtrude {
+            element: PLATE,
+            feature: e,
+            extrude: cadrs_core::samples::extrude_of(regions, 10.0),
+            label: "Extrude".into(),
+        },
+    )?;
     Ok(b)
 }
 
@@ -1519,7 +2416,12 @@ pub fn script(world: &mut World, arg: &str) {
             let folder = cadrs_core::FolderId::from_u128(0x3a61_0000_0000_0000_0000_0000_0000_0f01);
             if lib.folders.iter().all(|f| f.id != folder) {
                 let mut after = lib.clone();
-                after.folders.push(cadrs_core::FolderEntry { id: folder, name: "Linked parts".into(), created: now - 7_200, owned_by: user.clone() });
+                after.folders.push(cadrs_core::FolderEntry {
+                    id: folder,
+                    name: "Linked parts".into(),
+                    created: now - 7_200,
+                    owned_by: user.clone(),
+                });
                 if let Err(e) = store.sync(&lib, &after) {
                     warn!("derived setup: {e}");
                 }
@@ -1546,17 +2448,38 @@ pub fn script(world: &mut World, arg: &str) {
             world.insert_resource(doc);
         }
         "dv1" => {
-            let Ok(Some(log)) = HistoryLog::load(&store, lb::DOCUMENT) else { return };
-            let Some(v1) = log.versions().first().map(|v| v.id()) else { return };
+            let Ok(Some(log)) = HistoryLog::load(&store, lb::DOCUMENT) else {
+                return;
+            };
+            let Some(v1) = log.versions().first().map(|v| v.id()) else {
+                return;
+            };
             let doc = world.resource::<ActiveDocument>().doc.clone();
-            let d = DerivedFeature { locations: vec![ConnectorRef::Implicit(ConnectorOrigin::Origin), ConnectorRef::Feature(LOC)], ..DerivedFeature::default() };
+            let d = DerivedFeature {
+                locations: vec![
+                    ConnectorRef::Implicit(ConnectorOrigin::Origin),
+                    ConnectorRef::Feature(LOC),
+                ],
+                ..DerivedFeature::default()
+            };
             let got = {
                 let mut res = linked::resolver(world);
-                cadrs_core::derived::resolve(&mut res.0, &doc, None, d, SourceRef::version(Some(lb::DOCUMENT), lb::STUDIO, v1))
+                cadrs_core::derived::resolve(
+                    &mut res.0,
+                    &doc,
+                    None,
+                    d,
+                    SourceRef::version(Some(lb::DOCUMENT), lb::STUDIO, v1),
+                )
             };
             match got {
                 Ok(g) => {
-                    if let Err(e) = world.resource_mut::<ActiveDocument>().execute(&AddDerived { element: HOST, feature: DERIVED, derived: g.derived, links: g.links }) {
+                    if let Err(e) = world.resource_mut::<ActiveDocument>().execute(&AddDerived {
+                        element: HOST,
+                        feature: DERIVED,
+                        derived: g.derived,
+                        links: g.links,
+                    }) {
                         warn!("derived dv1: {e}");
                     }
                 }
@@ -1564,11 +2487,19 @@ pub fn script(world: &mut World, arg: &str) {
             }
         }
         "edit" => {
-            world.resource_mut::<crate::linked::LinkStatus>().invalidate();
-            let Ok(file) = store.load(lb::DOCUMENT) else { return };
+            world
+                .resource_mut::<crate::linked::LinkStatus>()
+                .invalidate();
+            let Ok(file) = store.load(lb::DOCUMENT) else {
+                return;
+            };
             let mut a = file.document;
             let mut h = cadrs_core::History::default();
-            if let Err(e) = lb::set_height(&mut cadrs_core::samples::gear_cover::DocHistory(&mut a, &mut h), lb::STUDIO, lb::EDITED_HEIGHT) {
+            if let Err(e) = lb::set_height(
+                &mut cadrs_core::samples::gear_cover::DocHistory(&mut a, &mut h),
+                lb::STUDIO,
+                lb::EDITED_HEIGHT,
+            ) {
                 warn!("derived edit: {e}");
                 return;
             }
@@ -1576,7 +2507,12 @@ pub fn script(world: &mut World, arg: &str) {
             meta.modified = now;
             let _ = store.save(&a, &meta);
             if let Ok(Some(mut log)) = HistoryLog::load(&store, lb::DOCUMENT) {
-                log.record(&a, Origin::Command("Edit Extrude 1".into()), now - 60, &user);
+                log.record(
+                    &a,
+                    Origin::Command("Edit Extrude 1".into()),
+                    now - 60,
+                    &user,
+                );
                 log.create_version("", "Depth 40", now - 30, &user);
                 let _ = log.save(&store);
             }
@@ -1585,39 +2521,114 @@ pub fn script(world: &mut World, arg: &str) {
             let s = FeatureId::from_u128(0x3a61_0000_0000_0000_0000_0000_0000_0621);
             let e = FeatureId::from_u128(0x3a61_0000_0000_0000_0000_0000_0000_0622);
             let mut doc = world.resource_mut::<ActiveDocument>();
-            let _ = doc.execute(&cadrs_core::commands::AddSketch { element: HOST, feature: s, plane: Some(cadrs_sketch::PlaneRef::Top) });
-            let _ = doc.execute(&cadrs_core::commands::EditSketch { element: HOST, feature: s, op: cadrs_sketch::SketchOp::AddCircle { center: cadrs_sketch::Vec2::new(0.0, 0.0), radius: 5.0, construction: false } });
-            let Some(g) = doc.doc.element(HOST).and_then(|x| x.feature(s)).and_then(|f| f.sketch()).map(|k| k.geometry.clone()) else { return };
-            let regions = cadrs_core::samples::region_refs(s, &g, &[cadrs_sketch::Vec2::new(0.0, 0.0)]);
-            let _ = doc.execute(&cadrs_core::commands::AddExtrude { element: HOST, feature: e, extrude: Default::default() });
-            let x = cadrs_core::document::ExtrudeFeature { op: cadrs_core::document::BooleanOp::Remove, ..cadrs_core::samples::extrude_of(regions, 150.0) };
-            let _ = doc.execute(&cadrs_core::commands::SetExtrude { element: HOST, feature: e, extrude: x, label: "Extrude".into() });
+            let _ = doc.execute(&cadrs_core::commands::AddSketch {
+                element: HOST,
+                feature: s,
+                plane: Some(cadrs_sketch::PlaneRef::Top),
+            });
+            let _ = doc.execute(&cadrs_core::commands::EditSketch {
+                element: HOST,
+                feature: s,
+                op: cadrs_sketch::SketchOp::AddCircle {
+                    center: cadrs_sketch::Vec2::new(0.0, 0.0),
+                    radius: 5.0,
+                    construction: false,
+                },
+            });
+            let Some(g) = doc
+                .doc
+                .element(HOST)
+                .and_then(|x| x.feature(s))
+                .and_then(|f| f.sketch())
+                .map(|k| k.geometry.clone())
+            else {
+                return;
+            };
+            let regions =
+                cadrs_core::samples::region_refs(s, &g, &[cadrs_sketch::Vec2::new(0.0, 0.0)]);
+            let _ = doc.execute(&cadrs_core::commands::AddExtrude {
+                element: HOST,
+                feature: e,
+                extrude: Default::default(),
+            });
+            let x = cadrs_core::document::ExtrudeFeature {
+                op: cadrs_core::document::BooleanOp::Remove,
+                ..cadrs_core::samples::extrude_of(regions, 150.0)
+            };
+            let _ = doc.execute(&cadrs_core::commands::SetExtrude {
+                element: HOST,
+                feature: e,
+                extrude: x,
+                label: "Extrude".into(),
+            });
         }
         "extrude-sketch" => {
-            let Some(sk) = world.resource::<crate::parts::PartCache>().derived_sketches.iter().find(|f| f.name.starts_with("Sketch 2")).cloned() else {
+            let Some(sk) = world
+                .resource::<crate::parts::PartCache>()
+                .derived_sketches
+                .iter()
+                .find(|f| f.name.starts_with("Sketch 2"))
+                .cloned()
+            else {
                 warn!("derived extrude-sketch: no derived Sketch 2");
                 return;
             };
             let Some(geo) = sk.sketch() else { return };
-            let seed = geo.geometry.points.iter().map(|(_, p)| p.pos).fold(cadrs_sketch::Vec2::new(0.0, 0.0), |a, p| cadrs_sketch::Vec2::new(a.x + p.x / 4.0, a.y + p.y / 4.0));
+            let seed = geo
+                .geometry
+                .points
+                .iter()
+                .map(|(_, p)| p.pos)
+                .fold(cadrs_sketch::Vec2::new(0.0, 0.0), |a, p| {
+                    cadrs_sketch::Vec2::new(a.x + p.x / 4.0, a.y + p.y / 4.0)
+                });
             let regions = cadrs_core::samples::region_refs(sk.id, &geo.geometry, &[seed]);
             let e = FeatureId::from_u128(0x3a61_0000_0000_0000_0000_0000_0000_0631);
             let mut doc = world.resource_mut::<ActiveDocument>();
-            let _ = doc.execute(&cadrs_core::commands::AddExtrude { element: HOST, feature: e, extrude: Default::default() });
-            let _ = doc.execute(&cadrs_core::commands::SetExtrude { element: HOST, feature: e, extrude: cadrs_core::samples::extrude_of(regions, 5.0), label: "Extrude".into() });
+            let _ = doc.execute(&cadrs_core::commands::AddExtrude {
+                element: HOST,
+                feature: e,
+                extrude: Default::default(),
+            });
+            let _ = doc.execute(&cadrs_core::commands::SetExtrude {
+                element: HOST,
+                feature: e,
+                extrude: cadrs_core::samples::extrude_of(regions, 5.0),
+                label: "Extrude".into(),
+            });
             // P3G.5 (a P3G.4 minor): a material, so its mass panel is filled.
-            let _ = doc.execute(&cadrs_core::commands::SetPartMaterial { element: HOST, parts: vec![cadrs_core::PartId::new(e, 0)], material: cadrs_core::material::library("Aluminum - 6061") });
+            let _ = doc.execute(&cadrs_core::commands::SetPartMaterial {
+                element: HOST,
+                parts: vec![cadrs_core::PartId::new(e, 0)],
+                material: cadrs_core::material::library("Aluminum - 6061"),
+            });
         }
         "plate-derives-host" => {
             let doc = world.resource::<ActiveDocument>().doc.clone();
             let got = {
                 let mut res = linked::resolver(world);
-                cadrs_core::derived::resolve(&mut res.0, &doc, None, DerivedFeature::default(), SourceRef { document: None, at: RefAt::Workspace, element: HOST, pinned: false })
+                cadrs_core::derived::resolve(
+                    &mut res.0,
+                    &doc,
+                    None,
+                    DerivedFeature::default(),
+                    SourceRef {
+                        document: None,
+                        at: RefAt::Workspace,
+                        element: HOST,
+                        pinned: false,
+                    },
+                )
             };
             match got {
                 Ok(g) => {
                     let f = FeatureId::from_u128(0x3a61_0000_0000_0000_0000_0000_0000_0641);
-                    if let Err(e) = world.resource_mut::<ActiveDocument>().execute(&AddDerived { element: PLATE, feature: f, derived: g.derived, links: g.links }) {
+                    if let Err(e) = world.resource_mut::<ActiveDocument>().execute(&AddDerived {
+                        element: PLATE,
+                        feature: f,
+                        derived: g.derived,
+                        links: g.links,
+                    }) {
                         warn!("derived plate-derives-host: {e}");
                     }
                 }

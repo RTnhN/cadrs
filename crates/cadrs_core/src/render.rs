@@ -38,7 +38,12 @@ pub enum RenderEnvironment {
 }
 
 impl RenderEnvironment {
-    pub const ALL: [RenderEnvironment; 4] = [RenderEnvironment::Studio, RenderEnvironment::SoftLight, RenderEnvironment::Outdoor, RenderEnvironment::Sunset];
+    pub const ALL: [RenderEnvironment; 4] = [
+        RenderEnvironment::Studio,
+        RenderEnvironment::SoftLight,
+        RenderEnvironment::Outdoor,
+        RenderEnvironment::Sunset,
+    ];
 
     pub fn preset(self) -> EnvironmentPreset {
         match self {
@@ -65,7 +70,11 @@ pub enum RenderBackground {
 }
 
 impl RenderBackground {
-    pub const ALL: [RenderBackground; 3] = [RenderBackground::Environment, RenderBackground::White, RenderBackground::Transparent];
+    pub const ALL: [RenderBackground; 3] = [
+        RenderBackground::Environment,
+        RenderBackground::White,
+        RenderBackground::Transparent,
+    ];
 
     pub fn label(self) -> &'static str {
         match self {
@@ -81,7 +90,11 @@ impl RenderBackground {
 pub enum RenderView {
     /// The source tab's view when it was captured: azimuth, elevation and roll (degrees, as
     /// the 3D view's camera).
-    Current { azimuth: f32, elevation: f32, roll: f32 },
+    Current {
+        azimuth: f32,
+        elevation: f32,
+        roll: f32,
+    },
     Isometric,
     #[default]
     Trimetric,
@@ -123,7 +136,11 @@ impl RenderView {
     /// (azimuth, elevation, roll) in degrees, as the 3D view's standard views.
     pub fn angles(self) -> (f32, f32, f32) {
         match self {
-            RenderView::Current { azimuth, elevation, roll } => (azimuth, elevation, roll),
+            RenderView::Current {
+                azimuth,
+                elevation,
+                roll,
+            } => (azimuth, elevation, roll),
             RenderView::Isometric => (45.0, 35.264_39, 0.0),
             RenderView::Trimetric => (30.0, 30.0, 0.0),
             RenderView::Front => (0.0, 0.0, 0.0),
@@ -142,10 +159,20 @@ impl RenderView {
         let back = [a.sin() * e.cos(), -a.cos() * e.cos(), e.sin()];
         // Screen right with no roll is horizontal; up = back × right.
         let r0 = [a.cos(), a.sin(), 0.0];
-        let cross = |u: [f32; 3], v: [f32; 3]| [u[1] * v[2] - u[2] * v[1], u[2] * v[0] - u[0] * v[2], u[0] * v[1] - u[1] * v[0]];
+        let cross = |u: [f32; 3], v: [f32; 3]| {
+            [
+                u[1] * v[2] - u[2] * v[1],
+                u[2] * v[0] - u[0] * v[2],
+                u[0] * v[1] - u[1] * v[0],
+            ]
+        };
         let u0 = cross(back, r0);
         let (s, c) = roll.to_radians().sin_cos();
-        let right = [r0[0] * c + u0[0] * s, r0[1] * c + u0[1] * s, r0[2] * c + u0[2] * s];
+        let right = [
+            r0[0] * c + u0[0] * s,
+            r0[1] * c + u0[1] * s,
+            r0[2] * c + u0[2] * s,
+        ];
         (back, cross(back, right))
     }
 }
@@ -213,7 +240,12 @@ pub const RESOLUTIONS: [(u32, u32, &str); 5] = [
 ];
 
 /// The sample counts offered (samples, label).
-pub const QUALITIES: [(u32, &str); 4] = [(16, "Draft (16 samples)"), (64, "Good (64 samples)"), (256, "High (256 samples)"), (1024, "Best (1024 samples)")];
+pub const QUALITIES: [(u32, &str); 4] = [
+    (16, "Draft (16 samples)"),
+    (64, "Good (64 samples)"),
+    (256, "High (256 samples)"),
+    (1024, "Best (1024 samples)"),
+];
 
 /// A Render Studio tab's settings (`None` for other tabs).
 pub fn studio(doc: &Document, element: ElementId) -> Option<&RenderStudio> {
@@ -241,14 +273,29 @@ impl Command for SetRenderStudio {
     }
     fn apply(&self, doc: &mut Document) -> Result<(), CommandError> {
         if let Some(s) = self.studio.source
-            && !doc.element(s).is_some_and(|e| matches!(e.kind, ElementKind::PartStudio { .. } | ElementKind::Assembly))
+            && !doc.element(s).is_some_and(|e| {
+                matches!(
+                    e.kind,
+                    ElementKind::PartStudio { .. } | ElementKind::Assembly
+                )
+            })
         {
-            return Err(CommandError::Invalid("a render needs a Part Studio or an Assembly".into()));
+            return Err(CommandError::Invalid(
+                "a render needs a Part Studio or an Assembly".into(),
+            ));
         }
-        if self.studio.width == 0 || self.studio.height == 0 || self.studio.width > 8192 || self.studio.height > 8192 {
-            return Err(CommandError::Invalid("the size must be 1 to 8192 pixels".into()));
+        if self.studio.width == 0
+            || self.studio.height == 0
+            || self.studio.width > 8192
+            || self.studio.height > 8192
+        {
+            return Err(CommandError::Invalid(
+                "the size must be 1 to 8192 pixels".into(),
+            ));
         }
-        let el = doc.element_mut(self.element).ok_or(CommandError::ElementNotFound(self.element))?;
+        let el = doc
+            .element_mut(self.element)
+            .ok_or(CommandError::ElementNotFound(self.element))?;
         match &mut el.kind {
             ElementKind::Render(r) => {
                 **r = self.studio.clone();
@@ -297,14 +344,23 @@ fn plastic_roughness(name: &str) -> f32 {
 /// A face's PBR material: its appearance's colour and opacity, finished by the part's material.
 /// `explicit` is true when the colour was chosen (a face, feature or part appearance), not the
 /// default palette colour: a metal without a chosen colour shows the metal's own.
-pub fn pbr(appearance: Appearance, explicit: bool, material: Option<&crate::material::Material>) -> cadrs_render::Material {
+pub fn pbr(
+    appearance: Appearance,
+    explicit: bool,
+    material: Option<&crate::material::Material>,
+) -> cadrs_render::Material {
     let opacity = appearance.alpha as f32 / 255.0;
     match material.map(|m| (m, metal(&m.name))) {
         Some((_, Some((colour, roughness)))) => {
             let rgb = if explicit { appearance.rgb } else { colour };
             cadrs_render::Material::from_srgb(rgb, 1.0, roughness, opacity)
         }
-        Some((m, None)) => cadrs_render::Material::from_srgb(appearance.rgb, 0.0, plastic_roughness(&m.name), opacity),
+        Some((m, None)) => cadrs_render::Material::from_srgb(
+            appearance.rgb,
+            0.0,
+            plastic_roughness(&m.name),
+            opacity,
+        ),
         None => cadrs_render::Material::from_srgb(appearance.rgb, 0.0, 0.42, opacity),
     }
 }
@@ -314,14 +370,22 @@ pub fn describe(part: &Part, props: &[PartProps]) -> String {
     match crate::parts::part_material(part, props) {
         Some(m) => match metal(&m.name) {
             Some((_, r)) => format!("{}: metal, roughness {r:.2}", m.name),
-            None => format!("{}: dielectric, roughness {:.2}", m.name, plastic_roughness(&m.name)),
+            None => format!(
+                "{}: dielectric, roughness {:.2}",
+                m.name,
+                plastic_roughness(&m.name)
+            ),
         },
         None => "No material: dielectric, roughness 0.42".into(),
     }
 }
 
 /// The parts shown (not hidden) as the path tracer's scene.
-pub fn scene(parts: &[Part], props: &[PartProps], appearances: &[(FeatureId, Appearance)]) -> cadrs_render::Scene {
+pub fn scene(
+    parts: &[Part],
+    props: &[PartProps],
+    appearances: &[(FeatureId, Appearance)],
+) -> cadrs_render::Scene {
     let mut b = cadrs_render::SceneBuilder::new();
     for part in parts {
         if props.iter().any(|p| p.part == part.id && p.hidden) {
@@ -329,20 +393,35 @@ pub fn scene(parts: &[Part], props: &[PartProps], appearances: &[(FeatureId, App
         }
         let s = &part.solid;
         let material = crate::parts::part_material(part, props);
-        let own_colour = props.iter().any(|p| (p.part == part.id || Some(p.part) == part.source) && p.appearance.is_some());
+        let own_colour = props
+            .iter()
+            .any(|p| (p.part == part.id || Some(p.part) == part.source) && p.appearance.is_some());
         // Each face's material, by triangle.
         let mut tri_material = vec![u32::MAX; s.indices.len() / 3];
         for f in &s.faces {
             let (a, source) = appearance::face_appearance(part, &f.name, props, appearances);
             let explicit = own_colour || source != appearance::Source::Part;
             let m = b.material(pbr(a, explicit, material));
-            for k in f.first_triangle..(f.first_triangle + f.triangle_count).min(tri_material.len()) {
+            for k in f.first_triangle..(f.first_triangle + f.triangle_count).min(tri_material.len())
+            {
                 tri_material[k] = m;
             }
         }
-        let fallback = b.material(pbr(appearance::part_appearance(part, props), own_colour, material));
-        let pos: Vec<[f32; 3]> = s.positions.iter().map(|p| [p[0] as f32, p[1] as f32, p[2] as f32]).collect();
-        let nrm: Vec<[f32; 3]> = s.normals.iter().map(|n| [n[0] as f32, n[1] as f32, n[2] as f32]).collect();
+        let fallback = b.material(pbr(
+            appearance::part_appearance(part, props),
+            own_colour,
+            material,
+        ));
+        let pos: Vec<[f32; 3]> = s
+            .positions
+            .iter()
+            .map(|p| [p[0] as f32, p[1] as f32, p[2] as f32])
+            .collect();
+        let nrm: Vec<[f32; 3]> = s
+            .normals
+            .iter()
+            .map(|n| [n[0] as f32, n[1] as f32, n[2] as f32])
+            .collect();
         b.add_mesh(&pos, &nrm, &s.indices, |k| match tri_material.get(k) {
             Some(&m) if m != u32::MAX => m,
             _ => fallback,
@@ -365,7 +444,11 @@ pub fn source_parts(
     match &el.kind {
         ElementKind::PartStudio { .. } => {
             let b = build_of(source)?;
-            Some((b.parts.clone(), el.part_props().to_vec(), el.feature_appearances().to_vec()))
+            Some((
+                b.parts.clone(),
+                el.part_props().to_vec(),
+                el.feature_appearances().to_vec(),
+            ))
         }
         ElementKind::Assembly => {
             let (parts, props) = crate::assembly::instance_parts(doc, &el.assembly, &mut build_of);
@@ -410,18 +493,34 @@ pub fn settings(r: &RenderStudio, width: u32, height: u32, samples: u32) -> cadr
 pub fn camera(r: &RenderStudio, scene: &cadrs_render::Scene, aspect: f32) -> cadrs_render::Camera {
     let (back, up) = r.view.frame();
     let bounds = scene.bounds().unwrap_or(([-50.0; 3], [50.0; 3]));
-    let projection = if r.perspective { cadrs_render::Projection::Perspective { fov_y: 30.0 } } else { cadrs_render::Projection::Orthographic { height: 1.0 } };
+    let projection = if r.perspective {
+        cadrs_render::Projection::Perspective { fov_y: 30.0 }
+    } else {
+        cadrs_render::Projection::Orthographic { height: 1.0 }
+    };
     cadrs_render::Camera::fit(bounds, back, up, projection, aspect, 0.08)
 }
 
 /// Renders a studio's source at its size and samples on `threads` threads (tests and scripted
 /// runs; the app renders progressively).
-pub fn render(doc: &Document, r: &RenderStudio, build_of: impl FnMut(ElementId) -> Option<Arc<Build>>, threads: usize) -> Option<image::RgbaImage> {
+pub fn render(
+    doc: &Document,
+    r: &RenderStudio,
+    build_of: impl FnMut(ElementId) -> Option<Arc<Build>>,
+    threads: usize,
+) -> Option<image::RgbaImage> {
     let (parts, props, appearances) = source_parts(doc, r.source?, build_of)?;
     let scene = Arc::new(scene(&parts, &props, &appearances));
     let cam = camera(r, &scene, r.width as f32 / r.height as f32);
     let cancel = std::sync::atomic::AtomicBool::new(false);
-    cadrs_render::render(scene, cam, settings(r, r.width, r.height, r.samples), threads, &cancel, |_, _| {})
+    cadrs_render::render(
+        scene,
+        cam,
+        settings(r, r.width, r.height, r.samples),
+        threads,
+        &cancel,
+        |_, _| {},
+    )
 }
 
 #[cfg(test)]
@@ -435,7 +534,10 @@ mod tests {
         assert!((b[1] + 1.0).abs() < 1e-6 && (u[2] - 1.0).abs() < 1e-6);
         // Top: from +Z with +Y up.
         let (b, u) = RenderView::Top.frame();
-        assert!((b[2] - 1.0).abs() < 1e-6 && (u[1] - 1.0).abs() < 1e-5, "{u:?}");
+        assert!(
+            (b[2] - 1.0).abs() < 1e-6 && (u[1] - 1.0).abs() < 1e-5,
+            "{u:?}"
+        );
         // Isometric: equal components.
         let (b, _) = RenderView::Isometric.frame();
         assert!((b[0] - b[2]).abs() < 1e-4 && (b[0] + b[1]).abs() < 1e-4);

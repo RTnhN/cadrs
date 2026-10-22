@@ -31,8 +31,16 @@ pub struct ScalePlugin;
 impl Plugin for ScalePlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<RebuildLog>()
-            .add_systems(Update, sync_scale_notice.run_if(in_state(AppState::Document)))
-            .add_systems(PostUpdate, (pad_strip_end, keep_active_tab_in_view, sync_tab_overflow).chain().after(bevy::ui::UiSystems::Layout))
+            .add_systems(
+                Update,
+                sync_scale_notice.run_if(in_state(AppState::Document)),
+            )
+            .add_systems(
+                PostUpdate,
+                (pad_strip_end, keep_active_tab_in_view, sync_tab_overflow)
+                    .chain()
+                    .after(bevy::ui::UiSystems::Layout),
+            )
             .add_observer(on_strip_wheel)
             .add_observer(on_chevron);
     }
@@ -86,8 +94,13 @@ pub fn notice_row(p: &mut ChildSpawnerCommands, t: &Theme) {
 /// geometry (the origin and three planes), so the notice says so (P3F.3–P3F.4 judge).
 pub fn notice(features: usize, parts: usize) -> Option<String> {
     (features > FEATURE_BUDGET || parts > PART_BUDGET).then(|| {
-        let plural = |n: usize, one: &str, many: &str| format!("{n} {}", if n == 1 { one } else { many });
-        format!("Large studio: {}\n(excluding default geometry),\n{}. Consider splitting it.", plural(features, "feature", "features"), plural(parts, "part", "parts"))
+        let plural =
+            |n: usize, one: &str, many: &str| format!("{n} {}", if n == 1 { one } else { many });
+        format!(
+            "Large studio: {}\n(excluding default geometry),\n{}. Consider splitting it.",
+            plural(features, "feature", "features"),
+            plural(parts, "part", "parts")
+        )
     })
 }
 
@@ -95,7 +108,10 @@ pub fn notice(features: usize, parts: usize) -> Option<String> {
 /// parts are not the studio's, and a closed composite's members are not in the build's parts
 /// (the composite is one part).
 pub fn listed_parts(parts: &[cadrs_core::Part]) -> usize {
-    parts.iter().filter(|p| !cadrs_core::assembly::context::is_context(p.feature)).count()
+    parts
+        .iter()
+        .filter(|p| !cadrs_core::assembly::context::is_context(p.feature))
+        .count()
 }
 
 fn sync_scale_notice(
@@ -104,17 +120,31 @@ fn sync_scale_notice(
     mut q_row: Query<&mut Node, With<ScaleNotice>>,
     mut q_text: Query<&mut Text, With<ScaleNoticeText>>,
 ) {
-    let want = doc.as_ref().and_then(|d| d.active_element()).and_then(|e| match e.kind {
-        // A derived board's components (mesh parts, `docs/PCB_IN_PART_STUDIO.md`) cost little
-        // and aren't modelled: they don't count.
-        ElementKind::PartStudio { .. } => {
-            let components = cache.derived.values().map(|o| o.footprints.len()).sum::<usize>();
-            notice(e.features().len(), listed_parts(&cache.parts).saturating_sub(components))
-        }
-        _ => None,
-    });
+    let want = doc
+        .as_ref()
+        .and_then(|d| d.active_element())
+        .and_then(|e| match e.kind {
+            // A derived board's components (mesh parts, `docs/PCB_IN_PART_STUDIO.md`) cost little
+            // and aren't modelled: they don't count.
+            ElementKind::PartStudio { .. } => {
+                let components = cache
+                    .derived
+                    .values()
+                    .map(|o| o.footprints.len())
+                    .sum::<usize>();
+                notice(
+                    e.features().len(),
+                    listed_parts(&cache.parts).saturating_sub(components),
+                )
+            }
+            _ => None,
+        });
     for mut n in &mut q_row {
-        let d = if want.is_some() { Display::Flex } else { Display::None };
+        let d = if want.is_some() {
+            Display::Flex
+        } else {
+            Display::None
+        };
         if n.display != d {
             n.display = d;
         }
@@ -155,11 +185,26 @@ pub struct TabStripFade {
 }
 
 /// The strip's tabs: document tabs and (P3E.2) folder tabs, each with the document tab it is.
-type StripTabs<'w, 's> = Query<'w, 's, (Option<&'static crate::document::TabButton>, &'static ComputedNode, &'static UiGlobalTransform), Or<(With<crate::document::TabButton>, With<crate::tab_folders::FolderTab>)>>;
+type StripTabs<'w, 's> = Query<
+    'w,
+    's,
+    (
+        Option<&'static crate::document::TabButton>,
+        &'static ComputedNode,
+        &'static UiGlobalTransform,
+    ),
+    Or<(
+        With<crate::document::TabButton>,
+        With<crate::tab_folders::FolderTab>,
+    )>,
+>;
 
 /// The tabs' left edges in the strip's content (logical px from its start) and the strip's
 /// scroll range.
-fn tab_edges(strip: (&ComputedNode, &UiGlobalTransform, &ScrollPosition), q_tabs: &StripTabs) -> (Vec<f32>, f32) {
+fn tab_edges(
+    strip: (&ComputedNode, &UiGlobalTransform, &ScrollPosition),
+    q_tabs: &StripTabs,
+) -> (Vec<f32>, f32) {
     let (node, at, pos) = strip;
     let s = node.inverse_scale_factor();
     let strip_left = at.translation.x * s - node.size().x * s / 2.0;
@@ -178,7 +223,12 @@ pub fn step_to_edge(edges: &[f32], max: f32, x: f32, forward: bool) -> f32 {
     let target = if forward {
         edges.iter().copied().find(|e| *e > x + 1.0).unwrap_or(max)
     } else {
-        edges.iter().rev().copied().find(|e| *e < x - 1.0).unwrap_or(0.0)
+        edges
+            .iter()
+            .rev()
+            .copied()
+            .find(|e| *e < x - 1.0)
+            .unwrap_or(0.0)
     };
     target.clamp(0.0, max)
 }
@@ -190,8 +240,12 @@ fn on_strip_wheel(
     mut q_strip: Query<(&ComputedNode, &UiGlobalTransform, &mut ScrollPosition)>,
     q_tabs: StripTabs,
 ) {
-    let Some(strip) = strip_of(ev.entity, &q_names) else { return };
-    let Ok((node, at, mut pos)) = q_strip.get_mut(strip) else { return };
+    let Some(strip) = strip_of(ev.entity, &q_names) else {
+        return;
+    };
+    let Ok((node, at, mut pos)) = q_strip.get_mut(strip) else {
+        return;
+    };
     ev.propagate(false);
     let d = if ev.x.abs() > ev.y.abs() { ev.x } else { ev.y };
     if d == 0.0 {
@@ -215,7 +269,12 @@ fn on_strip_wheel(
 fn on_chevron(
     a: On<bevy::ui_widgets::Activate>,
     q: Query<&Name, With<TabStripChevron>>,
-    mut q_strip: Query<(&Name, &ComputedNode, &UiGlobalTransform, &mut ScrollPosition)>,
+    mut q_strip: Query<(
+        &Name,
+        &ComputedNode,
+        &UiGlobalTransform,
+        &mut ScrollPosition,
+    )>,
     q_tabs: StripTabs,
 ) {
     let Ok(name) = q.get(a.entity) else { return };
@@ -224,7 +283,10 @@ fn on_chevron(
         return;
     }
     let forward = name.as_str() == "tab-strip-next";
-    let Some((_, node, at, mut pos)) = q_strip.iter_mut().find(|(n, ..)| n.as_str() == "tab-strip") else { return };
+    let Some((_, node, at, mut pos)) = q_strip.iter_mut().find(|(n, ..)| n.as_str() == "tab-strip")
+    else {
+        return;
+    };
     let (edges, max) = tab_edges((node, at, &pos), &q_tabs);
     pos.x = step_to_edge(&edges, max, pos.x, forward);
 }
@@ -234,11 +296,19 @@ fn on_chevron(
 fn sync_tab_overflow(
     q_strip: Query<(&Name, &ComputedNode, &UiGlobalTransform, &ScrollPosition)>,
     mut q_chevrons: Query<&mut Node, (With<TabStripChevron>, Without<TabStripFade>)>,
-    mut q_fades: Query<(&TabStripFade, &mut Visibility, &mut Node, &mut BackgroundGradient)>,
+    mut q_fades: Query<(
+        &TabStripFade,
+        &mut Visibility,
+        &mut Node,
+        &mut BackgroundGradient,
+    )>,
     q_tabs: StripTabs,
     theme: Res<Theme>,
 ) {
-    let Some((_, node, strip_at, pos)) = q_strip.iter().find(|(n, ..)| n.as_str() == "tab-strip") else { return };
+    let Some((_, node, strip_at, pos)) = q_strip.iter().find(|(n, ..)| n.as_str() == "tab-strip")
+    else {
+        return;
+    };
     let s = node.inverse_scale_factor();
     let max = ((node.content_size().x - node.size().x) * s).max(0.0);
     // The room the tabs have without the chevrons (they and P3E.2's ▾ take 62 px when shown),
@@ -247,7 +317,11 @@ fn sync_tab_overflow(
     let room = node.size().x * s + if chevrons_shown { 62.0 } else { 0.0 };
     let overflow = node.content_size().x * s > room + 0.5;
     for mut n in &mut q_chevrons {
-        let d = if overflow { Display::Flex } else { Display::None };
+        let d = if overflow {
+            Display::Flex
+        } else {
+            Display::None
+        };
         if n.display != d {
             n.display = d;
         }
@@ -255,13 +329,40 @@ fn sync_tab_overflow(
     // P3E.2 (judge r1, keeping P3F.6's rule that no clipped stub tab shows bare): a tab cut by
     // an end of the view is veiled by that end's fade, solid over the cut tab and fading out
     // past it.
-    let (view_l, view_r) = (strip_at.translation.x * s - node.size().x * s / 2.0, strip_at.translation.x * s + node.size().x * s / 2.0);
-    let spans: Vec<(f32, f32)> = q_tabs.iter().map(|(_, n, t)| (t.translation.x * s - n.size().x * s / 2.0, t.translation.x * s + n.size().x * s / 2.0)).collect();
-    let cut_left = spans.iter().filter(|(l, r)| *l < view_l - 0.5 && *r > view_l + 0.5).map(|(_, r)| r - view_l).fold(0.0f32, f32::max);
-    let cut_right = spans.iter().filter(|(l, r)| *l < view_r - 0.5 && *r > view_r + 0.5).map(|(l, _)| view_r - l).fold(0.0f32, f32::max);
+    let (view_l, view_r) = (
+        strip_at.translation.x * s - node.size().x * s / 2.0,
+        strip_at.translation.x * s + node.size().x * s / 2.0,
+    );
+    let spans: Vec<(f32, f32)> = q_tabs
+        .iter()
+        .map(|(_, n, t)| {
+            (
+                t.translation.x * s - n.size().x * s / 2.0,
+                t.translation.x * s + n.size().x * s / 2.0,
+            )
+        })
+        .collect();
+    let cut_left = spans
+        .iter()
+        .filter(|(l, r)| *l < view_l - 0.5 && *r > view_l + 0.5)
+        .map(|(_, r)| r - view_l)
+        .fold(0.0f32, f32::max);
+    let cut_right = spans
+        .iter()
+        .filter(|(l, r)| *l < view_r - 0.5 && *r > view_r + 0.5)
+        .map(|(l, _)| view_r - l)
+        .fold(0.0f32, f32::max);
     for (f, mut v, mut n, mut g) in &mut q_fades {
-        let show = if f.left { pos.x > 0.5 } else { pos.x < max - 0.5 };
-        v.set_if_neq(if show { Visibility::Inherited } else { Visibility::Hidden });
+        let show = if f.left {
+            pos.x > 0.5
+        } else {
+            pos.x < max - 0.5
+        };
+        v.set_if_neq(if show {
+            Visibility::Inherited
+        } else {
+            Visibility::Hidden
+        });
         let cut = if f.left { cut_left } else { cut_right };
         let width = if cut > 0.5 { cut + 24.0 } else { 36.0 };
         if n.width != Val::Px(width) {
@@ -269,9 +370,17 @@ fn sync_tab_overflow(
             let (from, to) = (theme.tab_bar, theme.tab_bar.with_alpha(0.0));
             let solid = (width - 24.0).max(0.0);
             let stops = if f.left {
-                vec![ColorStop::px(from, 0.0), ColorStop::px(from, solid), ColorStop::px(to, width)]
+                vec![
+                    ColorStop::px(from, 0.0),
+                    ColorStop::px(from, solid),
+                    ColorStop::px(to, width),
+                ]
             } else {
-                vec![ColorStop::px(to, 0.0), ColorStop::px(from, 24.0), ColorStop::px(from, width)]
+                vec![
+                    ColorStop::px(to, 0.0),
+                    ColorStop::px(from, 24.0),
+                    ColorStop::px(from, width),
+                ]
             };
             *g = BackgroundGradient(vec![LinearGradient::to_right(stops).into()]);
         }
@@ -283,8 +392,21 @@ fn sync_tab_overflow(
 /// to the end it shows whole tabs from the left (the room is left over after the last tab, as
 /// on a bar that isn't full) instead of a cut tab veiled by the fade.
 #[allow(clippy::type_complexity)]
-fn pad_strip_end(mut q_strip: Query<(&ComputedNode, &UiGlobalTransform, &ScrollPosition, &mut Node), With<crate::document::TabStrip>>, q_tabs: StripTabs) {
-    let Some((node, at, pos, mut n)) = q_strip.iter_mut().next() else { return };
+fn pad_strip_end(
+    mut q_strip: Query<
+        (
+            &ComputedNode,
+            &UiGlobalTransform,
+            &ScrollPosition,
+            &mut Node,
+        ),
+        With<crate::document::TabStrip>,
+    >,
+    q_tabs: StripTabs,
+) {
+    let Some((node, at, pos, mut n)) = q_strip.iter_mut().next() else {
+        return;
+    };
     let s = node.inverse_scale_factor();
     let pad = match n.padding.right {
         Val::Px(p) => p,
@@ -295,7 +417,11 @@ fn pad_strip_end(mut q_strip: Query<(&ComputedNode, &UiGlobalTransform, &ScrollP
     let want = if bare_max <= 0.5 {
         0.0
     } else {
-        edges.iter().copied().find(|e| *e >= bare_max - 0.5).map_or(0.0, |e| (e - bare_max).max(0.0))
+        edges
+            .iter()
+            .copied()
+            .find(|e| *e >= bare_max - 0.5)
+            .map_or(0.0, |e| (e - bare_max).max(0.0))
     };
     if (want - pad).abs() > 0.5 {
         n.padding.right = Val::Px(want);
@@ -309,16 +435,35 @@ fn keep_active_tab_in_view(
     doc: Option<Res<ActiveDocument>>,
     mut last: Local<Option<(cadrs_core::ElementId, usize, i32)>>,
     q_tabs: StripTabs,
-    mut q_strip: Query<(&Name, &ComputedNode, &UiGlobalTransform, &mut ScrollPosition)>,
+    mut q_strip: Query<(
+        &Name,
+        &ComputedNode,
+        &UiGlobalTransform,
+        &mut ScrollPosition,
+    )>,
 ) {
     let Some(doc) = doc else { return };
     let Some(active) = doc.active else { return };
     // P3E.2: also when the bar opens another folder (the tab's place changes).
-    let Some((tab_node, tab_at)) = q_tabs.iter().find(|(b, ..)| b.is_some_and(|b| b.0 == active)).map(|(_, n, t)| (*n, *t)) else { return };
-    let Some((_, strip_node, strip_at, mut pos)) = q_strip.iter_mut().find(|(n, ..)| n.as_str() == "tab-strip") else { return };
+    let Some((tab_node, tab_at)) = q_tabs
+        .iter()
+        .find(|(b, ..)| b.is_some_and(|b| b.0 == active))
+        .map(|(_, n, t)| (*n, *t))
+    else {
+        return;
+    };
+    let Some((_, strip_node, strip_at, mut pos)) =
+        q_strip.iter_mut().find(|(n, ..)| n.as_str() == "tab-strip")
+    else {
+        return;
+    };
     // P3E.2: also when the bar opens another folder (the tab's place changes) and when the
     // strip's width changes (the chevrons appear, the Tab manager docks).
-    let key = (active, doc.doc.elements.len() + q_tabs.iter().count() * 1000, strip_node.size().x.round() as i32);
+    let key = (
+        active,
+        doc.doc.elements.len() + q_tabs.iter().count() * 1000,
+        strip_node.size().x.round() as i32,
+    );
     if *last == Some(key) {
         return;
     }
@@ -336,7 +481,13 @@ fn keep_active_tab_in_view(
     // edge that brings its right edge in.
     let edges: Vec<f32> = q_tabs
         .iter()
-        .map(|(_, n, t)| ((t.translation.x - strip_at.translation.x) * s - n.size().x * s / 2.0 + half_strip + pos.x - 1.0).max(0.0))
+        .map(|(_, n, t)| {
+            ((t.translation.x - strip_at.translation.x) * s - n.size().x * s / 2.0
+                + half_strip
+                + pos.x
+                - 1.0)
+                .max(0.0)
+        })
         .collect();
     if left < -half_strip {
         pos.x = (pos.x + left + half_strip - 1.0).clamp(0.0, max);
@@ -344,7 +495,11 @@ fn keep_active_tab_in_view(
         let need = pos.x + right - half_strip;
         let mut sorted = edges;
         sorted.sort_by(f32::total_cmp);
-        pos.x = sorted.into_iter().find(|e| *e >= need - 0.5).unwrap_or(max).clamp(0.0, max);
+        pos.x = sorted
+            .into_iter()
+            .find(|e| *e >= need - 0.5)
+            .unwrap_or(max)
+            .clamp(0.0, max);
     }
 }
 
@@ -359,12 +514,22 @@ pub struct RebuildLog(pub Vec<(usize, usize, std::time::Duration)>);
 /// clears it.
 pub fn write_report(world: &mut World, label: &str) {
     // Scenarios export to `<out>/exports`; the report goes beside the screenshots.
-    let dir = world.get_resource::<crate::ExportDirOverride>().and_then(|d| d.0.clone()).unwrap_or_else(|| std::path::PathBuf::from("target"));
-    let dir = if dir.ends_with("exports") { dir.parent().map(|p| p.to_path_buf()).unwrap_or(dir) } else { dir };
+    let dir = world
+        .get_resource::<crate::ExportDirOverride>()
+        .and_then(|d| d.0.clone())
+        .unwrap_or_else(|| std::path::PathBuf::from("target"));
+    let dir = if dir.ends_with("exports") {
+        dir.parent().map(|p| p.to_path_buf()).unwrap_or(dir)
+    } else {
+        dir
+    };
     let log = std::mem::take(&mut world.resource_mut::<RebuildLog>().0);
     let mut s = String::new();
     for (features, computed, t) in &log {
-        s.push_str(&format!("rebuild of {features} features: {computed} computed in {:.1} ms\n", t.as_secs_f64() * 1e3));
+        s.push_str(&format!(
+            "rebuild of {features} features: {computed} computed in {:.1} ms\n",
+            t.as_secs_f64() * 1e3
+        ));
     }
     let _ = std::fs::create_dir_all(&dir);
     if let Err(e) = std::fs::write(dir.join(format!("perf-{label}-rebuilds.txt")), s) {

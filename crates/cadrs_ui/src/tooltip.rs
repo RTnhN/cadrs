@@ -27,8 +27,14 @@ pub struct TooltipPlugin;
 impl Plugin for TooltipPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<TooltipState>()
-            .add_systems(PostUpdate, update_tooltips.before(bevy::ui::UiSystems::Prepare))
-            .add_systems(PostUpdate, keep_on_screen.after(bevy::ui::UiSystems::Layout));
+            .add_systems(
+                PostUpdate,
+                update_tooltips.before(bevy::ui::UiSystems::Prepare),
+            )
+            .add_systems(
+                PostUpdate,
+                keep_on_screen.after(bevy::ui::UiSystems::Layout),
+            );
     }
 }
 
@@ -138,10 +144,7 @@ impl Tooltip {
 
     /// The keycaps of the shortcut: `Shift+S` → `["shift", "s"]`.
     pub fn keycaps(&self) -> Vec<String> {
-        self.shortcut
-            .as_deref()
-            .map(keycaps)
-            .unwrap_or_default()
+        self.shortcut.as_deref().map(keycaps).unwrap_or_default()
     }
 }
 
@@ -164,8 +167,22 @@ fn split_shortcut(text: &str) -> Option<(&str, &str)> {
     let open = body.rfind(" (")?;
     let (label, keys) = (&body[..open], &body[open + 2..]);
     const NAMED: [&str; 16] = [
-        "Ctrl", "Shift", "Alt", "Enter", "Esc", "Escape", "Delete", "Del", "Space", "Tab",
-        "Backspace", "Up", "Down", "Left", "Right", "Cmd",
+        "Ctrl",
+        "Shift",
+        "Alt",
+        "Enter",
+        "Esc",
+        "Escape",
+        "Delete",
+        "Del",
+        "Space",
+        "Tab",
+        "Backspace",
+        "Up",
+        "Down",
+        "Left",
+        "Right",
+        "Cmd",
     ];
     let ok = !keys.is_empty()
         && keys.split('+').all(|k| {
@@ -343,17 +360,31 @@ fn update_tooltips(
                     Text::new(title),
                     t.font(t.font_sm, FontWeight::BOLD),
                     TextColor(ink),
-                    Node { margin: UiRect::bottom(Val::Px(2.0)), ..default() },
+                    Node {
+                        margin: UiRect::bottom(Val::Px(2.0)),
+                        ..default()
+                    },
                     Pickable::IGNORE,
                 ));
                 for (term, what) in rows {
-                    b.spawn((Node { column_gap: Val::Px(8.0), ..default() }, Pickable::IGNORE)).with_children(|r| {
+                    b.spawn((
+                        Node {
+                            column_gap: Val::Px(8.0),
+                            ..default()
+                        },
+                        Pickable::IGNORE,
+                    ))
+                    .with_children(|r| {
                         r.spawn((
                             Text::new(term),
                             t.font(t.font_sm, FontWeight::SEMIBOLD),
                             TextColor(ink),
                             TextLayout::no_wrap(),
-                            Node { width: Val::Px(104.0), flex_shrink: 0.0, ..default() },
+                            Node {
+                                width: Val::Px(104.0),
+                                flex_shrink: 0.0,
+                                ..default()
+                            },
                             Pickable::IGNORE,
                         ));
                         r.spawn((
@@ -370,7 +401,10 @@ fn update_tooltips(
         state.bubble = Some(bubble);
         return;
     }
-    if matches!(tooltip.style, TooltipStyle::Error | TooltipStyle::ErrorBeside) {
+    if matches!(
+        tooltip.style,
+        TooltipStyle::Error | TooltipStyle::ErrorBeside
+    ) {
         // Left-aligned under the element, a little in from its left edge, and no wider. A small
         // element, such as an icon, gets a 220 px bubble below and to the right of it, clear of
         // the icon itself (gpui-component's tooltips sit offset from what they explain).
@@ -382,9 +416,16 @@ fn update_tooltips(
         } else if small {
             (center.x + size.x / 2.0 + 6.0, center.y + size.y / 2.0 + 8.0)
         } else {
-            (center.x - size.x / 2.0 + inset, center.y + size.y / 2.0 + 4.0)
+            (
+                center.x - size.x / 2.0 + inset,
+                center.y + size.y / 2.0 + 4.0,
+            )
         };
-        let width = if small || beside { 220.0 } else { (size.x - inset).max(120.0) };
+        let width = if small || beside {
+            220.0
+        } else {
+            (size.x - inset).max(120.0)
+        };
         let bubble = commands
             .spawn((
                 Name::new("tooltip"),
@@ -420,7 +461,10 @@ fn update_tooltips(
                     t.font(t.font_sm, FontWeight::MEDIUM),
                     TextColor(Color::srgb_u8(0x1f, 0x23, 0x28)),
                     // Wrapped to the bubble's width (the element's).
-                    TextLayout::new(bevy::text::Justify::Left, bevy::text::LineBreak::WordBoundary),
+                    TextLayout::new(
+                        bevy::text::Justify::Left,
+                        bevy::text::LineBreak::WordBoundary,
+                    ),
                     Pickable::IGNORE,
                 ));
             })
@@ -431,9 +475,17 @@ fn update_tooltips(
     // Below the element, centred; or beside it, centred on its height.
     let beside = tooltip.style == TooltipStyle::Beside;
     let (left, top, shift) = if beside {
-        (center.x + size.x / 2.0 + 4.0, center.y, Val2::new(Val::Px(0.0), Val::Percent(-50.0)))
+        (
+            center.x + size.x / 2.0 + 4.0,
+            center.y,
+            Val2::new(Val::Px(0.0), Val::Percent(-50.0)),
+        )
     } else {
-        (center.x, center.y + size.y / 2.0 + 6.0, Val2::new(Val::Percent(-50.0), Val::Px(0.0)))
+        (
+            center.x,
+            center.y + size.y / 2.0 + 6.0,
+            Val2::new(Val::Percent(-50.0), Val::Px(0.0)),
+        )
     };
     let bubble = commands
         .spawn((
@@ -481,9 +533,20 @@ struct CardOwnerLeft(f32);
 #[allow(clippy::type_complexity)]
 fn keep_on_screen(
     windows: Query<&Window>,
-    mut q: Query<(&mut Node, &ComputedNode, &UiGlobalTransform, Option<&TooltipOwnerLeft>, Option<&CardOwnerLeft>), With<TooltipBubble>>,
+    mut q: Query<
+        (
+            &mut Node,
+            &ComputedNode,
+            &UiGlobalTransform,
+            Option<&TooltipOwnerLeft>,
+            Option<&CardOwnerLeft>,
+        ),
+        With<TooltipBubble>,
+    >,
 ) {
-    let Some(w) = windows.iter().next() else { return };
+    let Some(w) = windows.iter().next() else {
+        return;
+    };
     let width = w.width();
     for (mut node, computed, t, owner_left, card) in &mut q {
         let scale = computed.inverse_scale_factor();
@@ -563,6 +626,11 @@ mod tests {
         assert_eq!(t.text, "Linear pattern (beta)");
         assert!(t.shortcut.is_none());
         assert!(Tooltip::new("Documents").shortcut.is_none());
-        assert_eq!(Tooltip::new("Keyboard shortcuts").shortcut("Shift+/").keycaps(), ["shift", "/"]);
+        assert_eq!(
+            Tooltip::new("Keyboard shortcuts")
+                .shortcut("Shift+/")
+                .keycaps(),
+            ["shift", "/"]
+        );
     }
 }

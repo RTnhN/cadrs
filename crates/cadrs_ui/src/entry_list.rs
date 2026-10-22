@@ -110,7 +110,12 @@ fn group_colors(t: &Theme, active: bool) -> (Color, Color) {
 /// A small grey icon button's look (the chevron and the ✕), inserted over the button's own.
 fn small_button(t: &Theme) -> impl Bundle {
     let mut ghost = visuals_for(t, crate::ButtonVariant::Ghost);
-    ghost.foreground = StateColors::new(Color::srgb_u8(0x55, 0x55, 0x55), t.foreground, t.foreground, t.disabled_foreground);
+    ghost.foreground = StateColors::new(
+        Color::srgb_u8(0x55, 0x55, 0x55),
+        t.foreground,
+        t.foreground,
+        t.disabled_foreground,
+    );
     ghost.background = StateColors::all(Color::NONE);
     (
         ghost,
@@ -136,7 +141,13 @@ pub struct EntryGroup {
 
 impl EntryGroup {
     pub fn new(name: impl Into<Cow<'static, str>>, caption: impl Into<String>) -> Self {
-        Self { name: name.into(), caption: caption.into(), action: None, active: false, content: None }
+        Self {
+            name: name.into(),
+            caption: caption.into(),
+            action: None,
+            active: false,
+            content: None,
+        }
     }
 
     /// A link at the caption's right ("CLEAR").
@@ -158,7 +169,13 @@ impl EntryGroup {
 
     pub fn build(self, theme: &Theme) -> impl Bundle {
         let t = theme.clone();
-        let EntryGroup { name, caption, action, active, content } = self;
+        let EntryGroup {
+            name,
+            caption,
+            action,
+            active,
+            content,
+        } = self;
         let action_name = format!("{name}-action");
         let (bg, border) = group_colors(&t, active);
         (
@@ -178,13 +195,21 @@ impl EntryGroup {
             Children::spawn(SpawnWith(move |p: &mut ChildSpawner| {
                 let group = p.target_entity();
                 p.spawn((
-                    Node { height: Val::Px(16.0), align_items: AlignItems::Center, padding: UiRect::left(Val::Px(2.0)), ..default() },
+                    Node {
+                        height: Val::Px(16.0),
+                        align_items: AlignItems::Center,
+                        padding: UiRect::left(Val::Px(2.0)),
+                        ..default()
+                    },
                     Pickable::IGNORE,
                 ))
                 .with_children(|h| {
                     h.spawn((
                         t.text(caption, 10.0, FontWeight::NORMAL, t.muted_foreground),
-                        Node { flex_grow: 1.0, ..default() },
+                        Node {
+                            flex_grow: 1.0,
+                            ..default()
+                        },
                         Pickable::IGNORE,
                     ));
                     if let Some(label) = action {
@@ -193,9 +218,15 @@ impl EntryGroup {
                             EntryButton::Action(group),
                             WidgetButton,
                             Hovered::default(),
-                            Node { padding: UiRect::horizontal(Val::Px(4.0)), ..default() },
+                            Node {
+                                padding: UiRect::horizontal(Val::Px(4.0)),
+                                ..default()
+                            },
                         ))
-                        .with_child((t.text(label, 9.5, FontWeight::SEMIBOLD, t.muted_foreground), Pickable::IGNORE));
+                        .with_child((
+                            t.text(label, 9.5, FontWeight::SEMIBOLD, t.muted_foreground),
+                            Pickable::IGNORE,
+                        ));
                     }
                 });
                 if let Some(f) = content {
@@ -216,7 +247,12 @@ pub struct Entry {
 
 impl Entry {
     pub fn new(name: impl Into<Cow<'static, str>>, title: impl Into<String>) -> Self {
-        Self { name: name.into(), title: title.into(), open: true, content: None }
+        Self {
+            name: name.into(),
+            title: title.into(),
+            open: true,
+            content: None,
+        }
     }
 
     pub fn open(mut self, open: bool) -> Self {
@@ -232,36 +268,85 @@ impl Entry {
 
     pub fn build(self, theme: &Theme) -> impl Bundle {
         let t = theme.clone();
-        let Entry { name, title, open, content } = self;
-        let (toggle, title_name, remove, content_name) =
-            (format!("{name}-toggle"), format!("{name}-title"), format!("{name}-remove"), format!("{name}-content"));
+        let Entry {
+            name,
+            title,
+            open,
+            content,
+        } = self;
+        let (toggle, title_name, remove, content_name) = (
+            format!("{name}-toggle"),
+            format!("{name}-title"),
+            format!("{name}-remove"),
+            format!("{name}-content"),
+        );
         (
             Name::new(name.into_owned()),
-            EntryState { title: title.clone(), open },
-            Node { flex_direction: FlexDirection::Column, flex_shrink: 0.0, ..default() },
+            EntryState {
+                title: title.clone(),
+                open,
+            },
+            Node {
+                flex_direction: FlexDirection::Column,
+                flex_shrink: 0.0,
+                ..default()
+            },
             Children::spawn(SpawnWith(move |p: &mut ChildSpawner| {
                 let entry = p.target_entity();
-                p.spawn((Node { height: Val::Px(20.0), align_items: AlignItems::Center, ..default() }, Pickable::IGNORE))
-                    .with_children(|h| {
-                        h.spawn((Button::new(toggle).ghost().tooltip(if open { "Collapse" } else { "Expand" }).build(&t), EntryButton::Toggle(entry)))
-                            .insert(small_button(&t))
-                            .with_child((
-                            EntryChevron(entry),
-                            icon(if open { "chevron-down" } else { "chevron-right" }, 11.0, Color::srgb_u8(0x55, 0x55, 0x55)),
-                            Pickable::IGNORE,
-                        ));
-                        h.spawn((
-                            Name::new(title_name),
-                            EntryTitle(entry),
-                            Ellipsis::default(),
-                            t.text(title, t.font_base, FontWeight::NORMAL, t.tool_foreground),
-                            Node { flex_grow: 1.0, margin: UiRect::left(Val::Px(2.0)), ..Ellipsis::node() },
-                            Pickable::IGNORE,
-                        ))
-                        .insert(TextLayout::new(Justify::Left, LineBreak::NoWrap));
-                        h.spawn((Button::new(remove).icon("close").icon_size(10.0).ghost().tooltip("Remove").build(&t), EntryButton::Remove(entry)))
-                            .insert(small_button(&t));
-                    });
+                p.spawn((
+                    Node {
+                        height: Val::Px(20.0),
+                        align_items: AlignItems::Center,
+                        ..default()
+                    },
+                    Pickable::IGNORE,
+                ))
+                .with_children(|h| {
+                    h.spawn((
+                        Button::new(toggle)
+                            .ghost()
+                            .tooltip(if open { "Collapse" } else { "Expand" })
+                            .build(&t),
+                        EntryButton::Toggle(entry),
+                    ))
+                    .insert(small_button(&t))
+                    .with_child((
+                        EntryChevron(entry),
+                        icon(
+                            if open {
+                                "chevron-down"
+                            } else {
+                                "chevron-right"
+                            },
+                            11.0,
+                            Color::srgb_u8(0x55, 0x55, 0x55),
+                        ),
+                        Pickable::IGNORE,
+                    ));
+                    h.spawn((
+                        Name::new(title_name),
+                        EntryTitle(entry),
+                        Ellipsis::default(),
+                        t.text(title, t.font_base, FontWeight::NORMAL, t.tool_foreground),
+                        Node {
+                            flex_grow: 1.0,
+                            margin: UiRect::left(Val::Px(2.0)),
+                            ..Ellipsis::node()
+                        },
+                        Pickable::IGNORE,
+                    ))
+                    .insert(TextLayout::new(Justify::Left, LineBreak::NoWrap));
+                    h.spawn((
+                        Button::new(remove)
+                            .icon("close")
+                            .icon_size(10.0)
+                            .ghost()
+                            .tooltip("Remove")
+                            .build(&t),
+                        EntryButton::Remove(entry),
+                    ))
+                    .insert(small_button(&t));
+                });
                 let mut c = p.spawn((
                     Name::new(content_name),
                     EntryContent(entry),
@@ -280,12 +365,20 @@ impl Entry {
     }
 }
 
-fn on_entry_button(ev: On<Activate>, q: Query<&EntryButton>, mut q_state: Query<&mut EntryState>, mut commands: Commands) {
+fn on_entry_button(
+    ev: On<Activate>,
+    q: Query<&EntryButton>,
+    mut q_state: Query<&mut EntryState>,
+    mut commands: Commands,
+) {
     match q.get(ev.entity) {
         Ok(EntryButton::Toggle(e)) => {
             if let Ok(mut s) = q_state.get_mut(*e) {
                 s.open = !s.open;
-                commands.trigger(EntryToggled { entity: *e, open: s.open });
+                commands.trigger(EntryToggled {
+                    entity: *e,
+                    open: s.open,
+                });
             }
         }
         Ok(EntryButton::Remove(e)) => commands.trigger(EntryRemove { entity: *e }),
@@ -295,16 +388,25 @@ fn on_entry_button(ev: On<Activate>, q: Query<&EntryButton>, mut q_state: Query<
 }
 
 /// A click in a group (bubbled up from its rows) makes it take the next pick.
-fn on_group_click(click: On<Pointer<Click>>, q: Query<(), With<EntryGroupState>>, mut commands: Commands) {
+fn on_group_click(
+    click: On<Pointer<Click>>,
+    q: Query<(), With<EntryGroupState>>,
+    mut commands: Commands,
+) {
     if click.button == PointerButton::Primary && q.contains(click.entity) {
-        commands.trigger(EntryGroupActivate { entity: click.entity });
+        commands.trigger(EntryGroupActivate {
+            entity: click.entity,
+        });
     }
 }
 
 #[allow(clippy::type_complexity)]
 fn sync_entries(
     theme: Res<Theme>,
-    q_groups: Query<(&EntryGroupState, &mut BackgroundColor, &mut BorderColor), Changed<EntryGroupState>>,
+    q_groups: Query<
+        (&EntryGroupState, &mut BackgroundColor, &mut BorderColor),
+        Changed<EntryGroupState>,
+    >,
     q_entries: Query<(Entity, &EntryState), Changed<EntryState>>,
     mut q_title: Query<(&EntryTitle, &mut Text)>,
     mut q_chevron: Query<(&EntryChevron, &mut Icon)>,
@@ -323,7 +425,11 @@ fn sync_entries(
         }
         for (c, mut i) in &mut q_chevron {
             if c.0 == e {
-                let want = if s.open { "chevron-down" } else { "chevron-right" };
+                let want = if s.open {
+                    "chevron-down"
+                } else {
+                    "chevron-right"
+                };
                 if i.name != want {
                     i.name = want.into();
                 }

@@ -40,7 +40,12 @@ impl StudioState {
         }
         let off = el.all_suppressed();
         Some(Self {
-            features: el.features().iter().filter(|f| !off.contains(&f.id)).cloned().collect(),
+            features: el
+                .features()
+                .iter()
+                .filter(|f| !off.contains(&f.id))
+                .cloned()
+                .collect(),
             props: el.part_props().to_vec(),
             appearances: el.feature_appearances().to_vec(),
         })
@@ -115,7 +120,9 @@ pub fn part_hash(parts: &[Part], state: &StudioState, part: Option<PartId>) -> O
             if p.features.contains(&f.id)
                 && let Some(h) = f.hole()
             {
-                bytes.extend_from_slice(format!("{:?}", crate::views::hole_info(&h.spec)).as_bytes());
+                bytes.extend_from_slice(
+                    format!("{:?}", crate::views::hole_info(&h.spec)).as_bytes(),
+                );
             }
             if p.features.contains(&f.id)
                 && let Some((_, a)) = state.appearances.iter().find(|(id, _)| *id == f.id)
@@ -136,7 +143,12 @@ pub fn part_hashes(build: &Build, state: &StudioState) -> Vec<PartHash> {
         .parts
         .iter()
         .filter(|p| p.kind == crate::parts::PartKind::Solid)
-        .filter_map(|p| part_hash(&build.parts, state, Some(p.id)).map(|hash| PartHash { part: part_key(Some(p.id)), hash }))
+        .filter_map(|p| {
+            part_hash(&build.parts, state, Some(p.id)).map(|hash| PartHash {
+                part: part_key(Some(p.id)),
+                hash,
+            })
+        })
         .collect();
     if let Some(hash) = part_hash(&build.parts, state, None) {
         out.push(PartHash { part: None, hash });
@@ -146,7 +158,13 @@ pub fn part_hashes(build: &Build, state: &StudioState) -> Vec<PartHash> {
 
 /// A drawing source from a studio's state and its build.
 pub fn source_of(element: ElementId, state: &StudioState, build: &Build) -> ModelSource {
-    ModelSource { element: element.0, snapshot: state.to_snapshot(), parts: part_hashes(build, state), assembly: None, pinned: false }
+    ModelSource {
+        element: element.0,
+        snapshot: state.to_snapshot(),
+        parts: part_hashes(build, state),
+        assembly: None,
+        pinned: false,
+    }
 }
 
 /// The workspace state of Part Studio `element` of `doc` as a drawing source (rebuilds it on
@@ -177,7 +195,9 @@ pub fn live_hash(doc: &Document, r: &cadrs_drawing::ObjectRef) -> Option<u64> {
 pub fn out_of_date(doc: &Document, d: &cadrs_drawing::Drawing) -> Vec<cadrs_drawing::ViewId> {
     let mut cache: std::collections::HashMap<uuid::Uuid, Option<ModelSource>> = Default::default();
     let mut live = |r: &cadrs_drawing::ObjectRef| -> Option<u64> {
-        let src = cache.entry(r.element).or_insert_with(|| live_source(doc, ElementId(r.element)));
+        let src = cache
+            .entry(r.element)
+            .or_insert_with(|| live_source(doc, ElementId(r.element)));
         src.as_ref().map(|s| s.hash_of(r.part).unwrap_or(GONE))
     };
     let hashes: Vec<(cadrs_drawing::ObjectRef, Option<u64>)> = d
@@ -193,9 +213,15 @@ pub fn out_of_date(doc: &Document, d: &cadrs_drawing::Drawing) -> Vec<cadrs_draw
 /// shaded) from `state`.
 pub fn view_request(state: &StudioState, v: &cadrs_drawing::View) -> crate::views::ViewRequest {
     crate::views::ViewRequest {
-        part: v.reference.part.map(|(f, index)| PartId { feature: FeatureId(f), index }),
+        part: v.reference.part.map(|(f, index)| PartId {
+            feature: FeatureId(f),
+            index,
+        }),
         frame: v.frame.view_frame(),
-        options: cadrs_kernel::ProjectOptions { tolerance: 0.01, hidden: true },
+        options: cadrs_kernel::ProjectOptions {
+            tolerance: 0.01,
+            hidden: true,
+        },
         shaded: v.shaded,
         props: state.props.clone(),
         appearances: state.appearances.clone(),
@@ -225,7 +251,10 @@ pub fn update_now(doc: &Document, d: &cadrs_drawing::Drawing) -> Option<cadrs_dr
         // An assembly view (P3C.5): projected from the assembly's old and new states.
         if crate::drawing_assembly::is_assembly(doc, element) {
             use crate::drawing_assembly::{AssemblyState, project};
-            let old = d.source(element.0).and_then(|s| AssemblyState::parse(&s.snapshot)).and_then(|st| project(&st, v).ok());
+            let old = d
+                .source(element.0)
+                .and_then(|s| AssemblyState::parse(&s.snapshot))
+                .and_then(|st| project(&st, v).ok());
             let new = project(&AssemblyState::of(doc, element)?, v).ok()?;
             models.push((*id, old, new));
             continue;
@@ -238,9 +267,19 @@ pub fn update_now(doc: &Document, d: &cadrs_drawing::Drawing) -> Option<cadrs_dr
         let new = crate::views::project(&live.features, view_request(&live, v)).ok()?;
         models.push((*id, old, new));
     }
-    let refs: Vec<(cadrs_drawing::ViewId, Option<&dyn ViewModel>, &dyn ViewModel)> = models
+    let refs: Vec<(
+        cadrs_drawing::ViewId,
+        Option<&dyn ViewModel>,
+        &dyn ViewModel,
+    )> = models
         .iter()
-        .map(|(id, old, new)| (*id, old.as_deref().map(|g| g as &dyn ViewModel), &**new as &dyn ViewModel))
+        .map(|(id, old, new)| {
+            (
+                *id,
+                old.as_deref().map(|g| g as &dyn ViewModel),
+                &**new as &dyn ViewModel,
+            )
+        })
         .collect();
     let op = cadrs_drawing::update::update_op(d, sources, &refs);
     Some(with_bom_tables(doc, d, op))
@@ -248,7 +287,11 @@ pub fn update_now(doc: &Document, d: &cadrs_drawing::Drawing) -> Option<cadrs_dr
 
 /// An update `op` together with the BOM tables of the assemblies it updates (P3C.5, D14.8):
 /// each out-of-date BOM table gets the workspace's rows, in one undoable step.
-pub fn with_bom_tables(doc: &Document, d: &cadrs_drawing::Drawing, op: cadrs_drawing::DrawingOp) -> cadrs_drawing::DrawingOp {
+pub fn with_bom_tables(
+    doc: &Document,
+    d: &cadrs_drawing::Drawing,
+    op: cadrs_drawing::DrawingOp,
+) -> cadrs_drawing::DrawingOp {
     use cadrs_drawing::DrawingOp;
     let tables = bom_updates(doc, d);
     if tables.is_empty() {
@@ -256,30 +299,66 @@ pub fn with_bom_tables(doc: &Document, d: &cadrs_drawing::Drawing, op: cadrs_dra
     }
     let label = op.label();
     let mut ops = vec![op];
-    ops.extend(tables.into_iter().map(|(sheet, table)| DrawingOp::SetTable { sheet, table, label: label.clone() }));
+    ops.extend(
+        tables
+            .into_iter()
+            .map(|(sheet, table)| DrawingOp::SetTable {
+                sheet,
+                table,
+                label: label.clone(),
+            }),
+    );
     DrawingOp::Batch { ops, label }
 }
 
 /// The out-of-date BOM tables of `d` with the workspace's rows (waits for the rebuilds).
-pub fn bom_updates(doc: &Document, d: &cadrs_drawing::Drawing) -> Vec<(cadrs_drawing::SheetId, cadrs_drawing::Table)> {
+pub fn bom_updates(
+    doc: &Document,
+    d: &cadrs_drawing::Drawing,
+) -> Vec<(cadrs_drawing::SheetId, cadrs_drawing::Table)> {
     let mut hashes: std::collections::HashMap<uuid::Uuid, Option<u64>> = Default::default();
     let mut live = |r: &cadrs_drawing::ObjectRef| -> Option<u64> {
-        *hashes.entry(r.element).or_insert_with(|| live_source(doc, ElementId(r.element)).and_then(|s| s.hash_of(None)))
+        *hashes
+            .entry(r.element)
+            .or_insert_with(|| live_source(doc, ElementId(r.element)).and_then(|s| s.hash_of(None)))
     };
     let known: Vec<(uuid::Uuid, Option<u64>)> = d
         .sheets
         .iter()
         .flat_map(|s| s.tables.iter())
         .filter_map(|t| t.bom.as_ref().map(|b| b.assembly))
-        .map(|a| (a, live(&cadrs_drawing::ObjectRef { element: a, part: None })))
+        .map(|a| {
+            (
+                a,
+                live(&cadrs_drawing::ObjectRef {
+                    element: a,
+                    part: None,
+                }),
+            )
+        })
         .collect();
-    let stale = d.stale_boms(&|r| known.iter().find(|(a, _)| *a == r.element).and_then(|(_, h)| *h));
+    let stale = d.stale_boms(&|r| {
+        known
+            .iter()
+            .find(|(a, _)| *a == r.element)
+            .and_then(|(_, h)| *h)
+    });
     let mut out = Vec::new();
     for (sheet, id) in stale {
-        let Some(t) = d.sheet(sheet).and_then(|s| s.tables.iter().find(|t| t.id == id)) else { continue };
+        let Some(t) = d
+            .sheet(sheet)
+            .and_then(|s| s.tables.iter().find(|t| t.id == id))
+        else {
+            continue;
+        };
         let Some(b) = &t.bom else { continue };
-        if let Ok(data) = crate::drawing_assembly::live_bom(doc, ElementId(b.assembly), b.kind, b.order) {
-            out.push((sheet, cadrs_drawing::assembly::refreshed_bom_table(t, data, &d.style)));
+        if let Ok(data) =
+            crate::drawing_assembly::live_bom(doc, ElementId(b.assembly), b.kind, b.order)
+        {
+            out.push((
+                sheet,
+                cadrs_drawing::assembly::refreshed_bom_table(t, data, &d.style),
+            ));
         }
     }
     out
@@ -294,7 +373,11 @@ mod tests {
         let mut doc = Document::new("Doc");
         let el = doc.elements[0].id;
         let mut h = crate::History::default();
-        crate::samples::drawing_bracket::build_in(&mut crate::samples::gear_cover::DocHistory(&mut doc, &mut h), el).unwrap();
+        crate::samples::drawing_bracket::build_in(
+            &mut crate::samples::gear_cover::DocHistory(&mut doc, &mut h),
+            el,
+        )
+        .unwrap();
         let s = StudioState::of(doc.element(el).unwrap()).unwrap();
         assert_eq!(StudioState::parse(&s.to_snapshot()), Some(s));
     }

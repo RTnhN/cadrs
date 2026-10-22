@@ -176,7 +176,11 @@ impl Column {
         if grid {
             n.border = UiRect::right(Val::Px(1.0));
         }
-        (n, BackgroundColor(self.background.unwrap_or(Color::NONE)), BorderColor::all(theme.row_separator))
+        (
+            n,
+            BackgroundColor(self.background.unwrap_or(Color::NONE)),
+            BorderColor::all(theme.row_separator),
+        )
     }
 }
 
@@ -285,7 +289,11 @@ impl TableHeader {
                 height: Val::Px(height),
                 flex_shrink: 0.0,
                 align_items: AlignItems::Center,
-                border: if grid { UiRect::new(Val::ZERO, Val::ZERO, Val::Px(1.0), Val::Px(1.0)) } else { UiRect::bottom(Val::Px(2.0)) },
+                border: if grid {
+                    UiRect::new(Val::ZERO, Val::ZERO, Val::Px(1.0), Val::Px(1.0))
+                } else {
+                    UiRect::bottom(Val::Px(2.0))
+                },
                 // Scrolled sideways with its [`TableBody`] (not by the wheel itself).
                 overflow: Overflow {
                     x: OverflowAxis::Scroll,
@@ -294,7 +302,11 @@ impl TableHeader {
                 ..default()
             },
             ScrollPosition::default(),
-            BorderColor::all(if grid { theme.row_separator } else { Color::srgb_u8(0xd0, 0xd0, 0xd0) }),
+            BorderColor::all(if grid {
+                theme.row_separator
+            } else {
+                Color::srgb_u8(0xd0, 0xd0, 0xd0)
+            }),
             Children::spawn(SpawnWith(move |p: &mut ChildSpawner| {
                 let n = columns.len();
                 for (i, col) in columns.into_iter().enumerate() {
@@ -311,7 +323,8 @@ impl TableHeader {
                     ));
                     if grid {
                         // A bordered table centres its headers over its centred cells.
-                        cell.entry::<Node>().and_modify(|mut n| n.justify_content = JustifyContent::Center);
+                        cell.entry::<Node>()
+                            .and_modify(|mut n| n.justify_content = JustifyContent::Center);
                     }
                     if col.sortable || menus {
                         cell.insert(TableHeaderCell {
@@ -632,7 +645,11 @@ fn on_resize_start(
 
 /// The node a column resize reaches: the nearest [`TableRoot`] above the header row, or the
 /// header row's parent.
-fn table_root(header: Entity, q_parent: &Query<&ChildOf>, q_root: &Query<(), With<TableRoot>>) -> Option<Entity> {
+fn table_root(
+    header: Entity,
+    q_parent: &Query<&ChildOf>,
+    q_root: &Query<(), With<TableRoot>>,
+) -> Option<Entity> {
     let mut e = header;
     for _ in 0..16 {
         if q_root.contains(e) {
@@ -682,7 +699,12 @@ fn on_resize_drag(
     // Every row is as wide as the header's columns.
     let total: f32 = q_children
         .get(header)
-        .map(|cs| cs.iter().filter_map(|c| q_cells.get(c).ok()).map(|(_, n)| px_width(n)).sum())
+        .map(|cs| {
+            cs.iter()
+                .filter_map(|c| q_cells.get(c).ok())
+                .map(|(_, n)| px_width(n))
+                .sum()
+        })
         .unwrap_or(0.0);
     for e in q_children.iter_descendants(root) {
         if let Ok(mut n) = q_rows.get_mut(e) {
@@ -739,7 +761,10 @@ fn on_resize_double_click(
 /// The divider shows in the accent colour, full height, while hovered or dragged.
 #[allow(clippy::type_complexity)]
 fn resize_handle_look(
-    q: Query<(&TableResizeHandle, &Hovered, &Children), Or<(Changed<Hovered>, Changed<TableResizeHandle>)>>,
+    q: Query<
+        (&TableResizeHandle, &Hovered, &Children),
+        Or<(Changed<Hovered>, Changed<TableResizeHandle>)>,
+    >,
     mut q_line: Query<(&mut Node, &mut BackgroundColor), With<ResizeLine>>,
 ) {
     for (h, hovered, children) in &q {
@@ -799,11 +824,7 @@ fn sync_header_scroll(
     }
 }
 
-fn on_header_activate(
-    ev: On<Activate>,
-    q: Query<&TableHeaderCell>,
-    mut commands: Commands,
-) {
+fn on_header_activate(ev: On<Activate>, q: Query<&TableHeaderCell>, mut commands: Commands) {
     let Ok(cell) = q.get(ev.entity) else {
         return;
     };

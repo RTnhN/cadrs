@@ -17,9 +17,9 @@ use smlib_common::*;
 mod kinds;
 use kinds::*;
 
+use cadrs_kernel::native::NativeKernel;
 use cadrs_kernel::native::draw::{Ax3, Shape};
 use cadrs_kernel::native::math::{P3, V3};
-use cadrs_kernel::native::NativeKernel;
 use cadrs_kernel::{BodyId, BodyKind, BoolOp, Chain, ExtrudeSpec, Kernel, Plane, Profile};
 use nalgebra::Unit;
 
@@ -30,23 +30,44 @@ use nalgebra::Unit;
 fn test_face(upper: bool) -> Profile {
     let tri = polygon(&[[1.0, 5.0], [4.0, 5.0], [1.0, 8.0]]);
     let r = if upper {
-        region(polygon(&[[0.0, 0.0], [5.0, 5.0], [5.0, 10.0], [0.0, 10.0]]), vec![tri])
+        region(
+            polygon(&[[0.0, 0.0], [5.0, 5.0], [5.0, 10.0], [0.0, 10.0]]),
+            vec![tri],
+        )
     } else {
-        region(polygon(&[[0.0, 0.0], [10.0, 0.0], [10.0, 5.0], [5.0, 5.0], [5.0, 10.0], [0.0, 10.0]]), vec![tri, circle([6.0, 2.5], 1.5)])
+        region(
+            polygon(&[
+                [0.0, 0.0],
+                [10.0, 0.0],
+                [10.0, 5.0],
+                [5.0, 5.0],
+                [5.0, 10.0],
+                [0.0, 10.0],
+            ]),
+            vec![tri, circle([6.0, 2.5], 1.5)],
+        )
     };
     Profile::new(Plane::top(), vec![r])
 }
 
 /// An open chain of segments in the test B-rep's plane.
 fn chain(segs: &[([f64; 2], [f64; 2])]) -> Chain {
-    Chain { curves: segs.iter().map(|&(a, b)| seg(a, b)).collect(), source: None }
+    Chain {
+        curves: segs.iter().map(|&(a, b)| seg(a, b)).collect(),
+        source: None,
+    }
 }
 
 /// A profile's curves swept into sheets (a surface extrude): SMLib's edges swept higher.
 fn surface_sweep(k: &mut NativeKernel, p: &Profile, m: Move) -> Result<BodyId, String> {
-    let Move::Trans(v) = m else { return Err("SMLib's edge sweeps here are translations".into()) };
+    let Move::Trans(v) = m else {
+        return Err("SMLib's edge sweeps here are translations".into());
+    };
     let v = V3::from(v);
-    let spec = ExtrudeSpec { body: BodyKind::Surface, ..ExtrudeSpec::blind(Unit::new_normalize(v), v.norm()) };
+    let spec = ExtrudeSpec {
+        body: BodyKind::Surface,
+        ..ExtrudeSpec::blind(Unit::new_normalize(v), v.norm())
+    };
     one(k.extrude_with(p, &spec).map_err(kerr)?)
 }
 
@@ -62,7 +83,10 @@ fn vertices(pts: &[[f64; 3]], m: Move, reps: usize, w: &Want) -> Result<(), Stri
 fn edges(m: Move, w: &Want) -> Result<(), String> {
     let mut k = NativeKernel::new();
     let mut p = test_face(false);
-    p.chains = vec![chain(&[([0.0, 0.0], [5.0, 5.0])]), chain(&[([10.0, 0.0], [15.0, 2.0])])];
+    p.chains = vec![
+        chain(&[([0.0, 0.0], [5.0, 5.0])]),
+        chain(&[([10.0, 0.0], [15.0, 2.0])]),
+    ];
     let b = surface_sweep(&mut k, &p, m)?;
     check_body(&k, b, w)
 }
@@ -81,7 +105,11 @@ fn whole_test_brep(m: Move, solid: &Want, sheet: &Want, wire: &Want) -> Result<(
     let mut k = NativeKernel::new();
     let b = m.sweep_profile(&mut k, &test_face(false))?;
     check_body(&k, b, solid)?;
-    let p = Profile { plane: Plane::top(), regions: vec![], chains: vec![chain(&[([10.0, 0.0], [15.0, 2.0])])] };
+    let p = Profile {
+        plane: Plane::top(),
+        regions: vec![],
+        chains: vec![chain(&[([10.0, 0.0], [15.0, 2.0])])],
+    };
     let s = surface_sweep(&mut k, &p, m)?;
     check_body(&k, s, sheet)?;
     let wr = point_sweeps(&mut k, &[[-5.0, 0.0, 0.0]], m, 1)?;
@@ -96,10 +124,27 @@ fn sphere(c: [f64; 3], r: f64, m: Move, w: &Want) -> Result<(), String> {
     let cv = P3::from(c);
     let d = ax.dir.into_inner();
     let out = (cv - ax.origin) - d * (cv - ax.origin).dot(&d);
-    let pl = Plane { origin: cv, x_dir: Unit::new_normalize(out), normal: Unit::new_normalize(out.cross(&d)) };
-    let mut pieces = vec![m.sweep_profile(&mut k, &Profile::new(pl, vec![region(circle([0.0, 0.0], r), vec![])]))?];
+    let pl = Plane {
+        origin: cv,
+        x_dir: Unit::new_normalize(out),
+        normal: Unit::new_normalize(out.cross(&d)),
+    };
+    let mut pieces = vec![m.sweep_profile(
+        &mut k,
+        &Profile::new(pl, vec![region(circle([0.0, 0.0], r), vec![])]),
+    )?];
     if !m.full() {
-        let s0 = body_of(k.psphere_on(&Ax3 { origin: cv, z: V3::z(), x: V3::x() }, r).map_err(kerr)?)?;
+        let s0 = body_of(
+            k.psphere_on(
+                &Ax3 {
+                    origin: cv,
+                    z: V3::z(),
+                    x: V3::x(),
+                },
+                r,
+            )
+            .map_err(kerr)?,
+        )?;
         let s1 = body_of(m.apply(&mut k, &Shape::Body(s0))?)?;
         pieces.extend([s0, s1]);
     }
@@ -109,7 +154,13 @@ fn sphere(c: [f64; 3], r: f64, m: Move, w: &Want) -> Result<(), String> {
 
 /// A box's six faces (planar faces of the draw harness).
 fn box_faces(k: &NativeKernel, lo: [f64; 3], s: [f64; 3]) -> Result<Vec<Shape>, String> {
-    let c = |i: u8, j: u8, l: u8| [lo[0] + s[0] * i as f64, lo[1] + s[1] * j as f64, lo[2] + s[2] * l as f64];
+    let c = |i: u8, j: u8, l: u8| {
+        [
+            lo[0] + s[0] * i as f64,
+            lo[1] + s[1] * j as f64,
+            lo[2] + s[2] * l as f64,
+        ]
+    };
     let quads = [
         [(0, 0, 0), (0, 1, 0), (0, 1, 1), (0, 0, 1)],
         [(1, 0, 0), (1, 1, 0), (1, 1, 1), (1, 0, 1)],
@@ -121,7 +172,11 @@ fn box_faces(k: &NativeKernel, lo: [f64; 3], s: [f64; 3]) -> Result<Vec<Shape>, 
     quads
         .iter()
         .map(|q| {
-            let pts: Vec<[f64; 3]> = q.iter().chain(&q[..1]).map(|&(i, j, l)| c(i, j, l)).collect();
+            let pts: Vec<[f64; 3]> = q
+                .iter()
+                .chain(&q[..1])
+                .map(|&(i, j, l)| c(i, j, l))
+                .collect();
             k.mkplane(&k.polyline(&pts).map_err(kerr)?).map_err(kerr)
         })
         .collect()
@@ -129,13 +184,24 @@ fn box_faces(k: &NativeKernel, lo: [f64; 3], s: [f64; 3]) -> Result<Vec<Shape>, 
 
 /// A box (less a box inside it) swept whole: the solid at both ends and every face's sweep
 /// (faces the motion slides in their own plane sweep nothing), united.
-fn boxes(outer: ([f64; 3], [f64; 3]), cavity: Option<([f64; 3], [f64; 3])>, m: Move, w: &Want) -> Result<(), String> {
+fn boxes(
+    outer: ([f64; 3], [f64; 3]),
+    cavity: Option<([f64; 3], [f64; 3])>,
+    m: Move,
+    w: &Want,
+) -> Result<(), String> {
     let mut k = NativeKernel::new();
     let (lo, s) = outer;
-    let mut solid = body_of(k.box_at(lo[0], lo[1], lo[2], s[0], s[1], s[2]).map_err(kerr)?)?;
+    let mut solid = body_of(
+        k.box_at(lo[0], lo[1], lo[2], s[0], s[1], s[2])
+            .map_err(kerr)?,
+    )?;
     let mut fs = box_faces(&k, lo, s)?;
     if let Some((lo, s)) = cavity {
-        let inner = body_of(k.box_at(lo[0], lo[1], lo[2], s[0], s[1], s[2]).map_err(kerr)?)?;
+        let inner = body_of(
+            k.box_at(lo[0], lo[1], lo[2], s[0], s[1], s[2])
+                .map_err(kerr)?,
+        )?;
         solid = one(k.boolean(BoolOp::Subtract, solid, &[inner]).map_err(kerr)?)?;
         fs.extend(box_faces(&k, lo, s)?);
     }
@@ -159,155 +225,541 @@ fn boxes(outer: ([f64; 3], [f64; 3]), cavity: Option<([f64; 3], [f64; 3])>, m: M
 /// SMLib sweep 1, Translate Vertices higher, Edges same (smSweepTest.cpp:1363): translated by (0, 0, 10), 3 times; SMLib asserts no counts. cadrs: each of its 1 vertices swept into 3 edges (Phase 1b: wires) (SMLib also copies the edges; not converted)
 #[test]
 fn case_01_translate_vertices_higher_edges_same() {
-    vertices(&[[-5.0, 0.0, 0.0]], Move::Trans([0.0, 0.0, 10.0]), 3, &Want { edges: Some(3), length: Some(30.0), ..WIRE }).unwrap();
+    vertices(
+        &[[-5.0, 0.0, 0.0]],
+        Move::Trans([0.0, 0.0, 10.0]),
+        3,
+        &Want {
+            edges: Some(3),
+            length: Some(30.0),
+            ..WIRE
+        },
+    )
+    .unwrap();
 }
 
 /// SMLib sweep 3, Translate Vertices higher (smSweepTest.cpp:1474): translated by (0, 0, 10); SMLib asserts 2 faces, 25 edges, 26 vertices (14 wire, 10 lamina, 1 manifold edges), 1 regions, 2 shells. cadrs: each of its 13 vertices swept into an edge (Phase 1b: wires)
 #[test]
 fn case_03_translate_vertices_higher() {
-    vertices(&[[0.0, 0.0, 0.0], [10.0, 0.0, 0.0], [10.0, 5.0, 0.0], [5.0, 5.0, 0.0], [5.0, 10.0, 0.0], [0.0, 10.0, 0.0], [1.0, 5.0, 0.0], [4.0, 5.0, 0.0], [1.0, 8.0, 0.0], [4.5, 2.5, 0.0], [3.5, 8.5, 0.0], [15.0, 2.0, 0.0], [-5.0, 0.0, 0.0]], Move::Trans([0.0, 0.0, 10.0]), 1, &Want { edges: Some(13), length: Some(130.0), ..WIRE }).unwrap();
+    vertices(
+        &[
+            [0.0, 0.0, 0.0],
+            [10.0, 0.0, 0.0],
+            [10.0, 5.0, 0.0],
+            [5.0, 5.0, 0.0],
+            [5.0, 10.0, 0.0],
+            [0.0, 10.0, 0.0],
+            [1.0, 5.0, 0.0],
+            [4.0, 5.0, 0.0],
+            [1.0, 8.0, 0.0],
+            [4.5, 2.5, 0.0],
+            [3.5, 8.5, 0.0],
+            [15.0, 2.0, 0.0],
+            [-5.0, 0.0, 0.0],
+        ],
+        Move::Trans([0.0, 0.0, 10.0]),
+        1,
+        &Want {
+            edges: Some(13),
+            length: Some(130.0),
+            ..WIRE
+        },
+    )
+    .unwrap();
 }
 
 /// SMLib sweep 5, Translate Edges higher (smSweepTest.cpp:1577): translated by (0, 0, 10); SMLib asserts 14 faces, 35 edges, 24 vertices (0 wire, 14 lamina, 17 manifold edges), 1 regions, 2 shells. cadrs: the face's boundary, the splitting edge and the wire edge as sheets (12 faces)
 #[test]
 fn case_05_translate_edges_higher() {
-    edges(Move::Trans([0.0, 0.0, 10.0]), &Want { area: Some(721.2365126688865), ..SHEET }).unwrap();
+    edges(
+        Move::Trans([0.0, 0.0, 10.0]),
+        &Want {
+            area: Some(721.2365126688865),
+            ..SHEET
+        },
+    )
+    .unwrap();
 }
 
 /// SMLib sweep 7, Translate 2 faces high (smSweepTest.cpp:1673): translated by (0, 0, 10); SMLib asserts 15 faces, 34 edges, 26 vertices (2 wire, 0 lamina, 28 manifold edges), 3 regions, 5 shells. cadrs: its face (both halves) as a solid; SMLib's counts hold its wire edge, vertex shell and the faces inside
 #[test]
 fn case_07_translate_2_faces_high() {
-    faces(false, Move::Trans([0.0, 0.0, 10.0]), &Want { volume: Some(634.3141652942297), area: Some(723.5370195377325), ..SOLID }).unwrap();
+    faces(
+        false,
+        Move::Trans([0.0, 0.0, 10.0]),
+        &Want {
+            volume: Some(634.3141652942297),
+            area: Some(723.5370195377325),
+            ..SOLID
+        },
+    )
+    .unwrap();
 }
 
 /// SMLib sweep 8, Translate Whole-Brep, non-manifold Faces/Wire/Vertex (smSweepTest.cpp:1731): translated by (0, 0, 10); SMLib asserts 15 faces, 36 edges, 26 vertices (1 wire, 3 lamina, 31 manifold edges), 2 regions, 3 shells. cadrs: the face as a solid, the wire edge as a sheet, the vertex shell as a wire (Phase 1b)
 #[test]
 fn case_08_translate_whole_brep_non_manifold_faces_wire_vertex() {
-    whole_test_brep(Move::Trans([0.0, 0.0, 10.0]), &Want { volume: Some(634.3141652942297), area: Some(723.5370195377325), ..SOLID }, &Want { faces: Some(1), edges: Some(4), area: Some(53.85164807134504), ..SHEET }, &Want { edges: Some(1), length: Some(10.0), ..WIRE }).unwrap();
+    whole_test_brep(
+        Move::Trans([0.0, 0.0, 10.0]),
+        &Want {
+            volume: Some(634.3141652942297),
+            area: Some(723.5370195377325),
+            ..SOLID
+        },
+        &Want {
+            faces: Some(1),
+            edges: Some(4),
+            area: Some(53.85164807134504),
+            ..SHEET
+        },
+        &Want {
+            edges: Some(1),
+            length: Some(10.0),
+            ..WIRE
+        },
+    )
+    .unwrap();
 }
 
 /// SMLib sweep 10, Rotate Vertices higher 3x (smSweepTest.cpp:1839): turned 30° about the axis through (-10, 0, 0) along (0, 1, 0); SMLib asserts 2 faces, 25 edges, 26 vertices (14 wire, 10 lamina, 1 manifold edges), 1 regions, 2 shells. cadrs: each of its 13 vertices swept into an edge (Phase 1b: wires)
 #[test]
 fn case_10_rotate_vertices_higher_3x() {
-    vertices(&[[0.0, 0.0, 0.0], [10.0, 0.0, 0.0], [10.0, 5.0, 0.0], [5.0, 5.0, 0.0], [5.0, 10.0, 0.0], [0.0, 10.0, 0.0], [1.0, 5.0, 0.0], [4.0, 5.0, 0.0], [1.0, 8.0, 0.0], [4.5, 2.5, 0.0], [3.5, 8.5, 0.0], [15.0, 2.0, 0.0], [-5.0, 0.0, 0.0]], Move::Rot { o: [-10.0, 0.0, 0.0], d: [0.0, 1.0, 0.0], deg: 30.0 }, 1, &Want { edges: Some(13), length: Some(96.342174710087), ..WIRE }).unwrap();
+    vertices(
+        &[
+            [0.0, 0.0, 0.0],
+            [10.0, 0.0, 0.0],
+            [10.0, 5.0, 0.0],
+            [5.0, 5.0, 0.0],
+            [5.0, 10.0, 0.0],
+            [0.0, 10.0, 0.0],
+            [1.0, 5.0, 0.0],
+            [4.0, 5.0, 0.0],
+            [1.0, 8.0, 0.0],
+            [4.5, 2.5, 0.0],
+            [3.5, 8.5, 0.0],
+            [15.0, 2.0, 0.0],
+            [-5.0, 0.0, 0.0],
+        ],
+        Move::Rot {
+            o: [-10.0, 0.0, 0.0],
+            d: [0.0, 1.0, 0.0],
+            deg: 30.0,
+        },
+        1,
+        &Want {
+            edges: Some(13),
+            length: Some(96.342174710087),
+            ..WIRE
+        },
+    )
+    .unwrap();
 }
 
 /// SMLib sweep 11, Rotate Vertices higher full circle (smSweepTest.cpp:1895): turned 360° about the axis through (-10, 0, 0) along (0, 1, 0); SMLib asserts 2 faces, 25 edges, 13 vertices (14 wire, 10 lamina, 1 manifold edges), 1 regions, 2 shells. cadrs: each of its 13 vertices swept into an edge (Phase 1b: wires)
 #[test]
 fn case_11_rotate_vertices_higher_full_circle() {
-    vertices(&[[0.0, 0.0, 0.0], [10.0, 0.0, 0.0], [10.0, 5.0, 0.0], [5.0, 5.0, 0.0], [5.0, 10.0, 0.0], [0.0, 10.0, 0.0], [1.0, 5.0, 0.0], [4.0, 5.0, 0.0], [1.0, 8.0, 0.0], [4.5, 2.5, 0.0], [3.5, 8.5, 0.0], [15.0, 2.0, 0.0], [-5.0, 0.0, 0.0]], Move::Rot { o: [-10.0, 0.0, 0.0], d: [0.0, 1.0, 0.0], deg: 360.0 }, 1, &Want { edges: Some(13), length: Some(1156.1060965210438), ..WIRE }).unwrap();
+    vertices(
+        &[
+            [0.0, 0.0, 0.0],
+            [10.0, 0.0, 0.0],
+            [10.0, 5.0, 0.0],
+            [5.0, 5.0, 0.0],
+            [5.0, 10.0, 0.0],
+            [0.0, 10.0, 0.0],
+            [1.0, 5.0, 0.0],
+            [4.0, 5.0, 0.0],
+            [1.0, 8.0, 0.0],
+            [4.5, 2.5, 0.0],
+            [3.5, 8.5, 0.0],
+            [15.0, 2.0, 0.0],
+            [-5.0, 0.0, 0.0],
+        ],
+        Move::Rot {
+            o: [-10.0, 0.0, 0.0],
+            d: [0.0, 1.0, 0.0],
+            deg: 360.0,
+        },
+        1,
+        &Want {
+            edges: Some(13),
+            length: Some(1156.1060965210438),
+            ..WIRE
+        },
+    )
+    .unwrap();
 }
 
 /// SMLib sweep 14, Rotate Vertices higher 3x (smSweepTest.cpp:2061): turned 30° about the axis through (-10, 0, 0) along (0, 1, 0); SMLib asserts 2 faces, 25 edges, 26 vertices (14 wire, 10 lamina, 1 manifold edges), 1 regions, 2 shells. cadrs: each of its 13 vertices swept into an edge (Phase 1b: wires)
 #[test]
 fn case_14_rotate_vertices_higher_3x() {
-    vertices(&[[0.0, 0.0, 0.0], [10.0, 0.0, 0.0], [10.0, 5.0, 0.0], [5.0, 5.0, 0.0], [5.0, 10.0, 0.0], [0.0, 10.0, 0.0], [1.0, 5.0, 0.0], [4.0, 5.0, 0.0], [1.0, 8.0, 0.0], [4.5, 2.5, 0.0], [3.5, 8.5, 0.0], [15.0, 2.0, 0.0], [-5.0, 0.0, 0.0]], Move::Rot { o: [-10.0, 0.0, 0.0], d: [0.0, 1.0, 0.0], deg: 30.0 }, 1, &Want { edges: Some(13), length: Some(96.342174710087), ..WIRE }).unwrap();
+    vertices(
+        &[
+            [0.0, 0.0, 0.0],
+            [10.0, 0.0, 0.0],
+            [10.0, 5.0, 0.0],
+            [5.0, 5.0, 0.0],
+            [5.0, 10.0, 0.0],
+            [0.0, 10.0, 0.0],
+            [1.0, 5.0, 0.0],
+            [4.0, 5.0, 0.0],
+            [1.0, 8.0, 0.0],
+            [4.5, 2.5, 0.0],
+            [3.5, 8.5, 0.0],
+            [15.0, 2.0, 0.0],
+            [-5.0, 0.0, 0.0],
+        ],
+        Move::Rot {
+            o: [-10.0, 0.0, 0.0],
+            d: [0.0, 1.0, 0.0],
+            deg: 30.0,
+        },
+        1,
+        &Want {
+            edges: Some(13),
+            length: Some(96.342174710087),
+            ..WIRE
+        },
+    )
+    .unwrap();
 }
 
 /// SMLib sweep 19, Rotate 1 Face higher (smSweepTest.cpp:2344): turned 90° about the axis through (-5, -5, 0) along (-1, 1, 0); SMLib asserts 15 faces, 34 edges, 26 vertices (2 wire, 0 lamina, 28 manifold edges), 3 regions, 5 shells. cadrs: its face (both halves) as a solid; SMLib's counts hold its wire edge, vertex shell and the faces inside
 #[test]
 fn case_19_rotate_1_face_higher() {
-    faces(false, Move::Rot { o: [-5.0, -5.0, 0.0], d: [-1.0, 1.0, 0.0], deg: 90.0 }, &Want { volume: Some(1292.0250193392474), area: Some(1359.7279332574847), ..SOLID }).unwrap();
+    faces(
+        false,
+        Move::Rot {
+            o: [-5.0, -5.0, 0.0],
+            d: [-1.0, 1.0, 0.0],
+            deg: 90.0,
+        },
+        &Want {
+            volume: Some(1292.0250193392474),
+            area: Some(1359.7279332574847),
+            ..SOLID
+        },
+    )
+    .unwrap();
 }
 
 /// SMLib sweep 20, Rotate 1 Face higher ax through corner (smSweepTest.cpp:2409): turned 90° about the axis through (0, 0, 0) along (-1, 1, 0); SMLib asserts 15 faces, 33 edges, 23 vertices (2 wire, 0 lamina, 28 manifold edges), 3 regions, 4 shells. cadrs: its face (both halves) as a solid; SMLib's counts hold its wire edge, vertex shell and the faces inside
 #[test]
 fn case_20_rotate_1_face_higher_ax_through_corner() {
-    faces(false, Move::Rot { o: [0.0, 0.0, 0.0], d: [-1.0, 1.0, 0.0], deg: 90.0 }, &Want { volume: Some(587.4791237347727), area: Some(696.9895425708424), ..SOLID }).unwrap();
+    faces(
+        false,
+        Move::Rot {
+            o: [0.0, 0.0, 0.0],
+            d: [-1.0, 1.0, 0.0],
+            deg: 90.0,
+        },
+        &Want {
+            volume: Some(587.4791237347727),
+            area: Some(696.9895425708424),
+            ..SOLID
+        },
+    )
+    .unwrap();
 }
 
 /// SMLib sweep 21, Rotate 1 Face higher ax through edge (smSweepTest.cpp:2471): turned 90° about the axis through (0, 0, 0) along (0, 1, 0); SMLib asserts 9 faces, 24 edges, 19 vertices (2 wire, 4 lamina, 17 manifold edges), 2 regions, 3 shells. cadrs: its face 0 (the half with the triangle) as a solid; SMLib's counts hold its wire edge, vertex shell and the faces inside
 #[test]
 fn case_21_rotate_1_face_higher_ax_through_edge() {
-    faces(true, Move::Rot { o: [0.0, 0.0, 0.0], d: [0.0, 1.0, 0.0], deg: 90.0 }, &Want { volume: Some(116.76252695842066), area: Some(185.8270530677387), ..SOLID }).unwrap();
+    faces(
+        true,
+        Move::Rot {
+            o: [0.0, 0.0, 0.0],
+            d: [0.0, 1.0, 0.0],
+            deg: 90.0,
+        },
+        &Want {
+            volume: Some(116.76252695842066),
+            area: Some(185.8270530677387),
+            ..SOLID
+        },
+    )
+    .unwrap();
 }
 
 /// SMLib sweep 22, Rotate 1 Face higher FULL (smSweepTest.cpp:2533): turned 360° about the axis through (-5, -5, 0) along (-1, 1, 0); SMLib asserts 13 faces, 23 edges, 15 vertices (2 wire, 0 lamina, 8 manifold edges), 5 regions, 7 shells. cadrs: its face (both halves) as a solid; SMLib's counts hold its wire edge, vertex shell and the faces inside
 #[test]
 fn case_22_rotate_1_face_higher_full() {
-    faces(false, Move::Rot { o: [-5.0, -5.0, 0.0], d: [-1.0, 1.0, 0.0], deg: 360.0 }, &Want { volume: Some(5168.1000773569895), area: Some(4931.4604007945545), ..SOLID }).unwrap();
+    faces(
+        false,
+        Move::Rot {
+            o: [-5.0, -5.0, 0.0],
+            d: [-1.0, 1.0, 0.0],
+            deg: 360.0,
+        },
+        &Want {
+            volume: Some(5168.1000773569895),
+            area: Some(4931.4604007945545),
+            ..SOLID
+        },
+    )
+    .unwrap();
 }
 
 /// SMLib sweep 23, Rotate 1 Face higher FULL ax through corner (smSweepTest.cpp:2601): turned 360° about the axis through (0, 0, 0) along (-1, 1, 0); SMLib asserts 9 faces, 19 edges, 15 vertices (2 wire, 4 lamina, 6 manifold edges), 3 regions, 4 shells. cadrs: its face 0 (the half with the triangle) as a solid; SMLib's counts hold its wire edge, vertex shell and the faces inside
 #[test]
 fn case_23_rotate_1_face_higher_full_ax_through_corner() {
-    faces(true, Move::Rot { o: [0.0, 0.0, 0.0], d: [-1.0, 1.0, 0.0], deg: 360.0 }, &Want { volume: Some(1228.457132400788), area: Some(1304.1598823681788), ..SOLID }).unwrap();
+    faces(
+        true,
+        Move::Rot {
+            o: [0.0, 0.0, 0.0],
+            d: [-1.0, 1.0, 0.0],
+            deg: 360.0,
+        },
+        &Want {
+            volume: Some(1228.457132400788),
+            area: Some(1304.1598823681788),
+            ..SOLID
+        },
+    )
+    .unwrap();
 }
 
 /// SMLib sweep 24, Rotate 1 Face higher FULL ax through edge (smSweepTest.cpp:2668): turned 360° about the axis through (0, 0, 0) along (0, 1, 0); SMLib asserts 8 faces, 18 edges, 15 vertices (2 wire, 5 lamina, 5 manifold edges), 3 regions, 5 shells. cadrs: its face 0 (the half with the triangle) as a solid; SMLib's counts hold its wire edge, vertex shell and the faces inside
 #[test]
 fn case_24_rotate_1_face_higher_full_ax_through_edge() {
-    faces(true, Move::Rot { o: [0.0, 0.0, 0.0], d: [0.0, 1.0, 0.0], deg: 360.0 }, &Want { volume: Some(467.05010783368266), area: Some(479.3082122709548), ..SOLID }).unwrap();
+    faces(
+        true,
+        Move::Rot {
+            o: [0.0, 0.0, 0.0],
+            d: [0.0, 1.0, 0.0],
+            deg: 360.0,
+        },
+        &Want {
+            volume: Some(467.05010783368266),
+            area: Some(479.3082122709548),
+            ..SOLID
+        },
+    )
+    .unwrap();
 }
 
 /// SMLib sweep 25, Rotate whole Brep (smSweepTest.cpp:2735): turned 45° about the axis through (-15, 0, 0) along (0, 1, 0); SMLib asserts 3 faces, 5 edges, 4 vertices (0 wire, 0 lamina, 5 manifold edges), 2 regions, 2 shells. cadrs: the ball of radius 4 at (8, 0, 0) swept: a torus piece and two half balls (Pappus).
 #[test]
 fn case_25_rotate_whole_brep() {
-    sphere([8.0, 0.0, 0.0], 4.0, Move::Rot { o: [-15.0, 0.0, 0.0], d: [0.0, 1.0, 0.0], deg: 45.0 }, &Want { volume: Some(1176.08617800655), area: Some(655.0637322798573), ..SOLID }).unwrap();
+    sphere(
+        [8.0, 0.0, 0.0],
+        4.0,
+        Move::Rot {
+            o: [-15.0, 0.0, 0.0],
+            d: [0.0, 1.0, 0.0],
+            deg: 45.0,
+        },
+        &Want {
+            volume: Some(1176.08617800655),
+            area: Some(655.0637322798573),
+            ..SOLID
+        },
+    )
+    .unwrap();
 }
 
 /// SMLib sweep 26, Translate whole Brep: hollow box (smSweepTest.cpp:2787): translated by (11, 22, 33); SMLib asserts 12 faces, 24 edges, 14 vertices (0 wire, 0 lamina, 24 manifold edges), 2 regions, 2 shells. cadrs: the box less the box inside it (`my_make_hollow_box`, smSweepTest.cpp:399) swept: a zonotope, the cavity swallowed.
 #[test]
 fn case_26_translate_whole_brep_hollow_box() {
-    boxes(([0.0, 0.0, 0.0], [10.0, 8.0, 6.0]), Some(([1.0, 1.0, 0.5], [8.0, 6.0, 5.0])), Move::Trans([11.0, 22.0, 33.0]), &Want { faces: Some(12), edges: Some(24), volume: Some(4967.999999999996), area: Some(2020.9431218216844), ..SOLID }).unwrap();
+    boxes(
+        ([0.0, 0.0, 0.0], [10.0, 8.0, 6.0]),
+        Some(([1.0, 1.0, 0.5], [8.0, 6.0, 5.0])),
+        Move::Trans([11.0, 22.0, 33.0]),
+        &Want {
+            faces: Some(12),
+            edges: Some(24),
+            volume: Some(4967.999999999996),
+            area: Some(2020.9431218216844),
+            ..SOLID
+        },
+    )
+    .unwrap();
 }
 
 /// SMLib sweep 27, Rotate whole Brep (smSweepTest.cpp:2829): turned 45° about the axis through (0, 0, 0) along (0, 0, 1); SMLib asserts 8 faces, 14 edges, 8 vertices (0 wire, 0 lamina, 14 manifold edges), 2 regions, 2 shells. cadrs: the ball of radius 4 at (8, 0, 0) swept: a torus piece and two half balls (Pappus).
 #[test]
 fn case_27_rotate_whole_brep() {
-    sphere([8.0, 0.0, 0.0], 4.0, Move::Rot { o: [0.0, 0.0, 0.0], d: [0.0, 0.0, 1.0], deg: 45.0 }, &Want { volume: Some(583.9099139411885), area: Some(358.9756002471765), ..SOLID }).unwrap();
+    sphere(
+        [8.0, 0.0, 0.0],
+        4.0,
+        Move::Rot {
+            o: [0.0, 0.0, 0.0],
+            d: [0.0, 0.0, 1.0],
+            deg: 45.0,
+        },
+        &Want {
+            volume: Some(583.9099139411885),
+            area: Some(358.9756002471765),
+            ..SOLID
+        },
+    )
+    .unwrap();
 }
 
 /// SMLib sweep 28, Rotate whole Brep: self-intersect (smSweepTest.cpp:2830): turned 345° about the axis through (0, 0, 0) along (0, 0, 1); SMLib asserts 8 faces, 14 edges, 8 vertices (0 wire, 0 lamina, 14 manifold edges), 2 regions, 2 shells. cadrs: the ball of radius 4 at (8, 0, 0) swept: the torus less the gap's wedge plus the end balls' parts in it (a numeric integral); SMLib's sweep overlaps itself and isn't resolved, so its area isn't the swept solid's.
 #[test]
 fn case_28_rotate_whole_brep_self_intersect() {
-    sphere([8.0, 0.0, 0.0], 4.0, Move::Rot { o: [0.0, 0.0, 0.0], d: [0.0, 0.0, 1.0], deg: 345.0 }, &Want { volume: Some(2523.933767388182), ..SOLID }).unwrap();
+    sphere(
+        [8.0, 0.0, 0.0],
+        4.0,
+        Move::Rot {
+            o: [0.0, 0.0, 0.0],
+            d: [0.0, 0.0, 1.0],
+            deg: 345.0,
+        },
+        &Want {
+            volume: Some(2523.933767388182),
+            ..SOLID
+        },
+    )
+    .unwrap();
 }
 
 /// SMLib sweep 29, Rotate whole Brep FULL (smSweepTest.cpp:2831): turned 360° about the axis through (0, 0, 0) along (0, 0, 1); SMLib asserts 2 faces, 4 edges, 2 vertices (0 wire, 0 lamina, 4 manifold edges), 2 regions, 2 shells. cadrs: the ball of radius 4 at (8, 0, 0) swept: a torus (Pappus).
 #[test]
 fn case_29_rotate_whole_brep_full() {
-    sphere([8.0, 0.0, 0.0], 4.0, Move::Rot { o: [0.0, 0.0, 0.0], d: [0.0, 0.0, 1.0], deg: 360.0 }, &Want { volume: Some(2526.6187266788756), area: Some(1263.3093633394378), ..SOLID }).unwrap();
+    sphere(
+        [8.0, 0.0, 0.0],
+        4.0,
+        Move::Rot {
+            o: [0.0, 0.0, 0.0],
+            d: [0.0, 0.0, 1.0],
+            deg: 360.0,
+        },
+        &Want {
+            volume: Some(2526.6187266788756),
+            area: Some(1263.3093633394378),
+            ..SOLID
+        },
+    )
+    .unwrap();
 }
 
 /// SMLib sweep 30, Translate whole Brep: block with internal Edges (smSweepTest.cpp:2914): translated by (-5, 10, -25); SMLib asserts 18 faces, 37 edges, 21 vertices (0 wire, 0 lamina, 37 manifold edges), 2 regions, 2 shells. cadrs: the block of `my_make_block_with_lines` (smSweepTest.cpp:288; its lines inside faces change no geometry and aren't built, so SMLib's counts, which hold them, aren't compared) swept: a zonotope, 12 faces and 24 edges.
 #[test]
 fn case_30_translate_whole_brep_block_with_internal_edges() {
-    boxes(([8.0, 0.0, 0.0], [4.0, 3.0, 1.5]), None, Move::Trans([-5.0, 10.0, -25.0]), &Want { faces: Some(12), edges: Some(24), volume: Some(400.49999999999994), area: Some(446.9181973556606), ..SOLID }).unwrap();
+    boxes(
+        ([8.0, 0.0, 0.0], [4.0, 3.0, 1.5]),
+        None,
+        Move::Trans([-5.0, 10.0, -25.0]),
+        &Want {
+            faces: Some(12),
+            edges: Some(24),
+            volume: Some(400.49999999999994),
+            area: Some(446.9181973556606),
+            ..SOLID
+        },
+    )
+    .unwrap();
 }
 
 /// SMLib sweep 31, Rotate whole Brep: block with internal Edges (smSweepTest.cpp:2955): turned 90° about the axis through (40, 20, 0) along (-20, 50, 10); SMLib asserts 18 faces, 37 edges, 21 vertices (0 wire, 0 lamina, 37 manifold edges), 2 regions, 2 shells. cadrs: the block of `my_make_block_with_lines` (smSweepTest.cpp:288; its lines inside faces change no geometry and aren't built, so SMLib's counts, which hold them, aren't compared) turned: each face revolved about an axis off its plane (no closed form: only checked to be a valid solid).
 #[test]
 fn case_31_rotate_whole_brep_block_with_internal_edges() {
-    boxes(([8.0, 0.0, 0.0], [4.0, 3.0, 1.5]), None, Move::Rot { o: [40.0, 20.0, 0.0], d: [-20.0, 50.0, 10.0], deg: 90.0 }, &SOLID).unwrap();
+    boxes(
+        ([8.0, 0.0, 0.0], [4.0, 3.0, 1.5]),
+        None,
+        Move::Rot {
+            o: [40.0, 20.0, 0.0],
+            d: [-20.0, 50.0, 10.0],
+            deg: 90.0,
+        },
+        &SOLID,
+    )
+    .unwrap();
 }
 
 /// SMLib sweep 32, Rotate whole Brep: block with internal Edges FULL (smSweepTest.cpp:2956): turned 360° about the axis through (40, 20, 0) along (-20, 50, 10); SMLib asserts 9 faces, 18 edges, 9 vertices (0 wire, 0 lamina, 18 manifold edges), 2 regions, 2 shells. cadrs: the block of `my_make_block_with_lines` (smSweepTest.cpp:288; its lines inside faces change no geometry and aren't built, so SMLib's counts, which hold them, aren't compared) turned whole: each face revolved about an axis off its plane (a numeric integral for the volume).
 #[test]
 fn case_32_rotate_whole_brep_block_with_internal_edges_full() {
-    known_failure(boxes(([8.0, 0.0, 0.0], [4.0, 3.0, 1.5]), None, Move::Rot { o: [40.0, 20.0, 0.0], d: [-20.0, 50.0, 10.0], deg: 360.0 }, &Want { volume: Some(2885.219209831614), ..SOLID }), "sweeps", "case_32_rotate_whole_brep_block_with_internal_edges_full");
+    known_failure(
+        boxes(
+            ([8.0, 0.0, 0.0], [4.0, 3.0, 1.5]),
+            None,
+            Move::Rot {
+                o: [40.0, 20.0, 0.0],
+                d: [-20.0, 50.0, 10.0],
+                deg: 360.0,
+            },
+            &Want {
+                volume: Some(2885.219209831614),
+                ..SOLID
+            },
+        ),
+        "sweeps",
+        "case_32_rotate_whole_brep_block_with_internal_edges_full",
+    );
 }
 
 /// SMLib sweep 33, Rotate sphere with pole on silhouette 45 degrees (smSweepTest.cpp:3007): turned 45° about the axis through (0, 0, 0) along (1, 0, 0); SMLib asserts 4 faces, 6 edges, 4 vertices (0 wire, 0 lamina, 6 manifold edges), 2 regions, 2 shells. cadrs: the ball of radius 1 at (0, 0, 5) swept: a torus piece and two half balls (Pappus).
 #[test]
 fn case_33_rotate_sphere_with_pole_on_silhouette_45_degrees() {
-    sphere([0.0, 0.0, 5.0], 1.0, Move::Rot { o: [0.0, 0.0, 0.0], d: [1.0, 0.0, 0.0], deg: 45.0 }, &Want { volume: Some(16.525795706148088), area: Some(37.24038161708256), ..SOLID }).unwrap();
+    sphere(
+        [0.0, 0.0, 5.0],
+        1.0,
+        Move::Rot {
+            o: [0.0, 0.0, 0.0],
+            d: [1.0, 0.0, 0.0],
+            deg: 45.0,
+        },
+        &Want {
+            volume: Some(16.525795706148088),
+            area: Some(37.24038161708256),
+            ..SOLID
+        },
+    )
+    .unwrap();
 }
 
 /// SMLib sweep 34, Rotate sphere with pole on silhouette FULL (smSweepTest.cpp:3008): turned 360° about the axis through (0, 0, 0) along (1, 0, 0); SMLib asserts 2 faces, 4 edges, 2 vertices (0 wire, 0 lamina, 4 manifold edges), 2 regions, 2 shells. cadrs: the ball of radius 1 at (0, 0, 5) swept: a torus (Pappus).
 #[test]
 fn case_34_rotate_sphere_with_pole_on_silhouette_full() {
-    sphere([0.0, 0.0, 5.0], 1.0, Move::Rot { o: [0.0, 0.0, 0.0], d: [1.0, 0.0, 0.0], deg: 360.0 }, &Want { volume: Some(98.69604401089359), area: Some(197.39208802178717), ..SOLID }).unwrap();
+    sphere(
+        [0.0, 0.0, 5.0],
+        1.0,
+        Move::Rot {
+            o: [0.0, 0.0, 0.0],
+            d: [1.0, 0.0, 0.0],
+            deg: 360.0,
+        },
+        &Want {
+            volume: Some(98.69604401089359),
+            area: Some(197.39208802178717),
+            ..SOLID
+        },
+    )
+    .unwrap();
 }
 
 /// SMLib sweep `my_test_dosweep_null_region` (smSweepTest.cpp:3187): a corner of a 16 box swept along (1,1,0)/√2 · 7, 1 to 3 times (SMLib asserts 12 + n edges, 8 + n vertices: the box and n wire edges). cadrs: the corner swept into a wire 3 times (Phase 1b).
 #[test]
 fn null_region_vertex() {
-    vertices(&[[0.0, 0.0, 0.0]], Move::Trans([4.949747468305833, 4.949747468305833, 0.0]), 3, &Want { edges: Some(3), length: Some(21.0), ..WIRE }).unwrap();
+    vertices(
+        &[[0.0, 0.0, 0.0]],
+        Move::Trans([4.949747468305833, 4.949747468305833, 0.0]),
+        3,
+        &Want {
+            edges: Some(3),
+            length: Some(21.0),
+            ..WIRE
+        },
+    )
+    .unwrap();
 }
 
 /// SMLib sweep `my_test_dosweep_null_region` (smSweepTest.cpp:3187): the hollow box (`my_make_hollow_box`) swept whole along (1,1,0)/√2 · 7 (SMLib asserts no counts: its merge is off). cadrs: a hexagonal prism (8 faces, 18 edges) with the part of the cavity the walls never cross left as a void (6 faces, 12 edges): the cavity's points whose path back stays in it.
 #[test]
 fn null_region_hollow() {
-    boxes(([0.0, 0.0, 0.0], [10.0, 8.0, 6.0]), Some(([1.0, 1.0, 0.5], [8.0, 6.0, 5.0])), Move::Trans([4.949747468305833, 4.949747468305833, 0.0]), &Want { faces: Some(14), edges: Some(30), volume: Some(998.5550493584376), area: Some(685.60303038033), ..SOLID }).unwrap();
+    boxes(
+        ([0.0, 0.0, 0.0], [10.0, 8.0, 6.0]),
+        Some(([1.0, 1.0, 0.5], [8.0, 6.0, 5.0])),
+        Move::Trans([4.949747468305833, 4.949747468305833, 0.0]),
+        &Want {
+            faces: Some(14),
+            edges: Some(30),
+            volume: Some(998.5550493584376),
+            area: Some(685.60303038033),
+            ..SOLID
+        },
+    )
+    .unwrap();
 }

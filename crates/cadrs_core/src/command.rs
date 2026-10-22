@@ -266,7 +266,10 @@ impl History {
             (Snapshot::ElementName { id: x, .. }, Snapshot::ElementName { id: y, .. }) => x == y,
             _ => false,
         };
-        if !steps.iter().all(|e| same_scope(&e.before, &steps[0].before)) {
+        if !steps
+            .iter()
+            .all(|e| same_scope(&e.before, &steps[0].before))
+        {
             return false;
         }
         let before = steps[0].before.clone();
@@ -361,10 +364,30 @@ mod scope_tests {
         let mut h = History::default();
         let ps = doc.elements[0].id;
         let f = FeatureId::new();
-        h.execute(&mut doc, &AddSketch { element: ps, feature: f, plane: None })
-            .unwrap();
-        h.execute(&mut doc, &RenameDocument { name: "Bracket v2".into() }).unwrap();
-        h.execute(&mut doc, &RenameElement { id: ps, name: "Plate".into() }).unwrap();
+        h.execute(
+            &mut doc,
+            &AddSketch {
+                element: ps,
+                feature: f,
+                plane: None,
+            },
+        )
+        .unwrap();
+        h.execute(
+            &mut doc,
+            &RenameDocument {
+                name: "Bracket v2".into(),
+            },
+        )
+        .unwrap();
+        h.execute(
+            &mut doc,
+            &RenameElement {
+                id: ps,
+                name: "Plate".into(),
+            },
+        )
+        .unwrap();
         // Cancelling the sketch drops only its own step.
         let removed = h.discard_element_since(&mut doc, 0, ps);
         assert_eq!(removed, vec![0]);
@@ -386,9 +409,17 @@ mod scope_tests {
         let mut h = History::default();
         let ps = doc.elements[0].id;
         let f = FeatureId::new();
-        h.execute(&mut doc, &AddSketch { element: ps, feature: f, plane: None })
+        h.execute(
+            &mut doc,
+            &AddSketch {
+                element: ps,
+                feature: f,
+                plane: None,
+            },
+        )
+        .unwrap();
+        h.execute(&mut doc, &RenameDocument { name: "B".into() })
             .unwrap();
-        h.execute(&mut doc, &RenameDocument { name: "B".into() }).unwrap();
         let (idx, pushed) = h.squash_element_since(0, ps, "Insert Sketch 1");
         assert_eq!((idx, pushed), (vec![0], true));
         assert_eq!(h.undo_label(), Some("Insert Sketch 1"));

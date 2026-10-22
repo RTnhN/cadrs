@@ -11,15 +11,18 @@
 //! a wire body (`Kernel::sweep_body`), an edge or wire swept a sheet.
 #![allow(dead_code)]
 
+use cadrs_kernel::native::NativeKernel;
 use cadrs_kernel::native::draw::Shape;
 use cadrs_kernel::native::features::prism_along;
 use cadrs_kernel::native::math::{P3, V3};
 use cadrs_kernel::native::topo::Body;
-use cadrs_kernel::native::NativeKernel;
-use cadrs_kernel::{Axis, BodyId, BoolOp, Curve2, Extent, Kernel, KernelError, Loop, Motion, OpResult, Plane, Profile, Region};
+use cadrs_kernel::{
+    Axis, BodyId, BoolOp, Curve2, Extent, Kernel, KernelError, Loop, Motion, OpResult, Plane,
+    Profile, Region,
+};
 use nalgebra::{Point2, Unit};
 
-use super::{check_result, edge_count, invalid, Expect, REL_TOL};
+use super::{Expect, REL_TOL, check_result, edge_count, invalid};
 
 /// What a result is.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -45,9 +48,22 @@ pub struct Want {
     pub length: Option<f64>,
 }
 
-pub const SOLID: Want = Want { kind: Kind::Solid, faces: None, edges: None, volume: None, area: None, length: None };
-pub const SHEET: Want = Want { kind: Kind::Sheet, ..SOLID };
-pub const WIRE: Want = Want { kind: Kind::Wire, ..SOLID };
+pub const SOLID: Want = Want {
+    kind: Kind::Solid,
+    faces: None,
+    edges: None,
+    volume: None,
+    area: None,
+    length: None,
+};
+pub const SHEET: Want = Want {
+    kind: Kind::Sheet,
+    ..SOLID
+};
+pub const WIRE: Want = Want {
+    kind: Kind::Wire,
+    ..SOLID
+};
 
 pub fn kerr(e: KernelError) -> String {
     format!("{e:?}")
@@ -79,22 +95,43 @@ fn counts(b: &Body, w: &Want) -> Result<(), String> {
 
 /// The total length of a body's edges.
 fn edges_length(b: &Body) -> f64 {
-    b.edges.iter().filter(|e| !e.degenerate).map(|e| e.curve.length(e.t[0].min(e.t[1]), e.t[0].max(e.t[1]))).sum()
+    b.edges
+        .iter()
+        .filter(|e| !e.degenerate)
+        .map(|e| e.curve.length(e.t[0].min(e.t[1]), e.t[0].max(e.t[1])))
+        .sum()
 }
 
 /// Checks a body against `w`: valid (the full check), of the kind, and `w`'s values.
 pub fn check_body(k: &NativeKernel, id: BodyId, w: &Want) -> Result<(), String> {
     let b = k.get(id).map_err(kerr)?;
     match w.kind {
-        Kind::Solid => check_result(b, b, &Expect { volume: w.volume, area: w.area, solid: Some(true), ..Expect::default() })?,
+        Kind::Solid => check_result(
+            b,
+            b,
+            &Expect {
+                volume: w.volume,
+                area: w.area,
+                solid: Some(true),
+                ..Expect::default()
+            },
+        )?,
         Kind::Sheet => {
             if let Some(i) = invalid(b) {
                 return Err(i);
             }
             if !b.solids.is_empty() || b.faces.is_empty() || b.shells.iter().all(|s| s.closed) {
-                return Err(format!("not a sheet ({} solids, {} faces)", b.solids.len(), b.faces.len()));
+                return Err(format!(
+                    "not a sheet ({} solids, {} faces)",
+                    b.solids.len(),
+                    b.faces.len()
+                ));
             }
-            near("area", cadrs_kernel::native::mass::body_mass(b).surface_area, w.area)?;
+            near(
+                "area",
+                cadrs_kernel::native::mass::body_mass(b).surface_area,
+                w.area,
+            )?;
         }
         Kind::Wire => {
             if let Some(i) = invalid(b) {
@@ -168,13 +205,20 @@ pub enum Move {
     Trans([f64; 3]),
     /// About the axis through `o` along `d`, by `deg` degrees (counter-clockwise seen from the
     /// tip of `d`).
-    Rot { o: [f64; 3], d: [f64; 3], deg: f64 },
+    Rot {
+        o: [f64; 3],
+        d: [f64; 3],
+        deg: f64,
+    },
 }
 
 impl Move {
     pub fn axis(&self) -> Option<Axis> {
         match *self {
-            Move::Rot { o, d, .. } => Some(Axis { origin: P3::from(o), dir: Unit::new_normalize(V3::from(d)) }),
+            Move::Rot { o, d, .. } => Some(Axis {
+                origin: P3::from(o),
+                dir: Unit::new_normalize(V3::from(d)),
+            }),
             Move::Trans(_) => None,
         }
     }
@@ -186,7 +230,9 @@ impl Move {
     pub fn motion(&self) -> Motion {
         match *self {
             Move::Trans(v) => Motion::translation(V3::from(v)),
-            Move::Rot { deg, .. } => Motion::rotation(&self.axis().expect("a rotation"), deg.to_radians()),
+            Move::Rot { deg, .. } => {
+                Motion::rotation(&self.axis().expect("a rotation"), deg.to_radians())
+            }
         }
     }
 
@@ -194,7 +240,9 @@ impl Move {
     pub fn sweep(&self, k: &mut NativeKernel, s: &Shape) -> Result<Shape, String> {
         match *self {
             Move::Trans(v) => k.prism(s, v[0], v[1], v[2]),
-            Move::Rot { o, d, deg } => k.revol(s, o[0], o[1], o[2], d[0], d[1], d[2], deg.min(360.0)),
+            Move::Rot { o, d, deg } => {
+                k.revol(s, o[0], o[1], o[2], d[0], d[1], d[2], deg.min(360.0))
+            }
         }
         .map_err(kerr)
     }
@@ -221,7 +269,11 @@ impl Move {
                     prism_along(k, p, v)
                 }
             }
-            Move::Rot { deg, .. } => k.revolve(p, self.axis().expect("a rotation"), deg.min(360.0).to_radians()),
+            Move::Rot { deg, .. } => k.revolve(
+                p,
+                self.axis().expect("a rotation"),
+                deg.min(360.0).to_radians(),
+            ),
         };
         one(r.map_err(kerr)?)
     }
@@ -229,7 +281,12 @@ impl Move {
 
 /// Points swept `reps` times each (SMLib's vertices swept into edges, `SetRepetitions`): the
 /// draw harness's `prism`/`revol` of a vertex, again from where the last one ended.
-pub fn point_sweeps(k: &mut NativeKernel, pts: &[[f64; 3]], m: Move, reps: usize) -> Result<Shape, String> {
+pub fn point_sweeps(
+    k: &mut NativeKernel,
+    pts: &[[f64; 3]],
+    m: Move,
+    reps: usize,
+) -> Result<Shape, String> {
     let mut out = Vec::new();
     for p in pts {
         let mut at = Shape::Vertex(P3::from(*p));
@@ -243,35 +300,71 @@ pub fn point_sweeps(k: &mut NativeKernel, pts: &[[f64; 3]], m: Move, reps: usize
 
 /// SMLib's `CreateCylindricalBox(len, r_in, r_out, a0, a1)` (angles in degrees, about the world
 /// z from x): cadrs's `Kernel::cylindrical_box`.
-pub fn cylindrical_box_deg(k: &mut NativeKernel, len: f64, r_in: f64, r_out: f64, a0: f64, a1: f64) -> Result<BodyId, KernelError> {
-    let spec = cadrs_kernel::CylindricalBox { frame: Plane::top(), length: len, inner_radius: r_in, outer_radius: r_out, start_angle: a0.to_radians(), end_angle: a1.to_radians() };
+pub fn cylindrical_box_deg(
+    k: &mut NativeKernel,
+    len: f64,
+    r_in: f64,
+    r_out: f64,
+    a0: f64,
+    a1: f64,
+) -> Result<BodyId, KernelError> {
+    let spec = cadrs_kernel::CylindricalBox {
+        frame: Plane::top(),
+        length: len,
+        inner_radius: r_in,
+        outer_radius: r_out,
+        start_angle: a0.to_radians(),
+        end_angle: a1.to_radians(),
+    };
     Ok(k.cylindrical_box(&spec)?.bodies[0])
 }
 
 /// A line in plane coordinates.
 pub fn seg(a: [f64; 2], b: [f64; 2]) -> Curve2 {
-    Curve2::Line { a: Point2::new(a[0], a[1]), b: Point2::new(b[0], b[1]), source: None }
+    Curve2::Line {
+        a: Point2::new(a[0], a[1]),
+        b: Point2::new(b[0], b[1]),
+        source: None,
+    }
 }
 
 /// A closed polygon.
 pub fn polygon(pts: &[[f64; 2]]) -> Loop {
-    Loop { curves: (0..pts.len()).map(|i| seg(pts[i], pts[(i + 1) % pts.len()])).collect() }
+    Loop {
+        curves: (0..pts.len())
+            .map(|i| seg(pts[i], pts[(i + 1) % pts.len()]))
+            .collect(),
+    }
 }
 
 /// A whole circle.
 pub fn circle(c: [f64; 2], r: f64) -> Loop {
-    Loop { curves: vec![Curve2::Circle { center: Point2::new(c[0], c[1]), radius: r, source: None }] }
+    Loop {
+        curves: vec![Curve2::Circle {
+            center: Point2::new(c[0], c[1]),
+            radius: r,
+            source: None,
+        }],
+    }
 }
 
 pub fn region(outer: Loop, holes: Vec<Loop>) -> Region {
-    Region { outer, holes, source: None }
+    Region {
+        outer,
+        holes,
+        source: None,
+    }
 }
 
 /// The plane through `o` with axes `x` and `y` (made orthonormal).
 pub fn plane(o: [f64; 3], x: [f64; 3], y: [f64; 3]) -> Plane {
     let x = V3::from(x).normalize();
     let n = x.cross(&V3::from(y)).normalize();
-    Plane { origin: P3::from(o), x_dir: Unit::new_normalize(x), normal: Unit::new_normalize(n) }
+    Plane {
+        origin: P3::from(o),
+        x_dir: Unit::new_normalize(x),
+        normal: Unit::new_normalize(n),
+    }
 }
 
 /// A solid of several pieces united (one boolean with all the tools).

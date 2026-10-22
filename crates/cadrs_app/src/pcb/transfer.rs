@@ -32,7 +32,10 @@ use cadrs_core::pcb::{BoardSource, SyncPlaneChoice};
 use cadrs_core::rebuild::PendingJob;
 use cadrs_idf::IdfVersion;
 use cadrs_pcb::sync::{SyncOutcome, SyncSourceTab};
-use cadrs_ui::{Button, Dialog, DialogClose, Notification, RadioGroup, RadioGroupState, Select, SelectState, Theme, show_notification};
+use cadrs_ui::{
+    Button, Dialog, DialogClose, Notification, RadioGroup, RadioGroupState, Select, SelectState,
+    Theme, show_notification,
+};
 
 use crate::{ActiveDocument, AppClock, AppState};
 
@@ -51,7 +54,13 @@ fn close<T: Component>(world: &mut World) {
 }
 
 fn label(t: &Theme, text: &str) -> impl Bundle {
-    (t.text(text, t.font_sm, FontWeight::NORMAL, t.foreground), Node { margin: UiRect::new(Val::ZERO, Val::ZERO, Val::Px(6.0), Val::Px(4.0)), ..default() })
+    (
+        t.text(text, t.font_sm, FontWeight::NORMAL, t.foreground),
+        Node {
+            margin: UiRect::new(Val::ZERO, Val::ZERO, Val::Px(6.0), Val::Px(4.0)),
+            ..default()
+        },
+    )
 }
 
 fn toast(world: &mut World, n: Notification) -> Entity {
@@ -75,18 +84,34 @@ pub fn open_sync_dialog(world: &mut World) {
     if q.iter(world).next().is_some() {
         return;
     }
-    let Some(doc) = world.get_resource::<ActiveDocument>() else { return };
-    let Some((el, s)) = super::active_studio(doc) else { return };
+    let Some(doc) = world.get_resource::<ActiveDocument>() else {
+        return;
+    };
+    let Some((el, s)) = super::active_studio(doc) else {
+        return;
+    };
     let tabs = cadrs_pcb::sync::sources(&doc.doc);
     // A board synced before: its tab and plane; else the first assembly.
     let shown = world.resource::<super::PcbUi>().shown_board(el, s);
-    let last = shown.and_then(|b| s.board(b)).and_then(|b| match &b.source {
-        BoardSource::Mcad(m) => Some((m.element, m.plane)),
-        // P3H.6: a board Create assembly was run on: its assembly, Top plane.
-        _ => s.generated.iter().rev().find(|g| g.board == b.id).map(|g| (g.assembly, SyncPlaneChoice::Top)),
-    });
-    let source = last.and_then(|(e, _)| tabs.iter().position(|t| t.element == e)).or_else(|| tabs.iter().position(|t| t.label.ends_with("(Assembly)"))).unwrap_or(0);
-    let plane = last.and_then(|(_, p)| SyncPlaneChoice::ALL.iter().position(|q| *q == p)).unwrap_or(0);
+    let last = shown
+        .and_then(|b| s.board(b))
+        .and_then(|b| match &b.source {
+            BoardSource::Mcad(m) => Some((m.element, m.plane)),
+            // P3H.6: a board Create assembly was run on: its assembly, Top plane.
+            _ => s
+                .generated
+                .iter()
+                .rev()
+                .find(|g| g.board == b.id)
+                .map(|g| (g.assembly, SyncPlaneChoice::Top)),
+        });
+    let source = last
+        .and_then(|(e, _)| tabs.iter().position(|t| t.element == e))
+        .or_else(|| tabs.iter().position(|t| t.label.ends_with("(Assembly)")))
+        .unwrap_or(0);
+    let plane = last
+        .and_then(|(_, p)| SyncPlaneChoice::ALL.iter().position(|q| *q == p))
+        .unwrap_or(0);
     let theme = world.resource::<Theme>().clone();
     let (tb, tf) = (theme.clone(), theme.clone());
     let labels: Vec<String> = tabs.iter().map(|t| t.label.clone()).collect();
@@ -97,7 +122,10 @@ pub fn open_sync_dialog(world: &mut World) {
             .body(move |b| {
                 let t = &tb;
                 b.spawn(label(t, "Select part studio or assembly to use:"));
-                let mut sel = Select::new("pcb-sync-source").bordered().width(Val::Percent(100.0)).selected(source);
+                let mut sel = Select::new("pcb-sync-source")
+                    .bordered()
+                    .width(Val::Percent(100.0))
+                    .selected(source);
                 if labels.is_empty() {
                     sel = sel.option("No Part Studio or assembly in this document", false);
                 }
@@ -106,12 +134,18 @@ pub fn open_sync_dialog(world: &mut World) {
                 }
                 b.spawn(sel.build(t));
                 b.spawn(label(t, "Top face of board part is parallel to:"));
-                let mut planes = Select::new("pcb-sync-plane").bordered().width(Val::Percent(100.0)).selected(plane);
+                let mut planes = Select::new("pcb-sync-plane")
+                    .bordered()
+                    .width(Val::Percent(100.0))
+                    .selected(plane);
                 for p in SyncPlaneChoice::ALL {
                     planes = planes.option(p.label(), true);
                 }
                 b.spawn(planes.build(t));
-                b.spawn(Node { height: Val::Px(6.0), ..default() });
+                b.spawn(Node {
+                    height: Val::Px(6.0),
+                    ..default()
+                });
             })
             .footer(move |f| {
                 let t = &tf;
@@ -136,11 +170,17 @@ pub fn open_sync_dialog(world: &mut World) {
 
 fn select_index(world: &mut World, name: &str) -> usize {
     let mut q = world.query::<(&Name, &SelectState)>();
-    q.iter(world).find(|(n, _)| n.as_str() == name).map_or(0, |(_, s)| s.selected)
+    q.iter(world)
+        .find(|(n, _)| n.as_str() == name)
+        .map_or(0, |(_, s)| s.selected)
 }
 
 /// Scripted steps wait while a sync runs.
-fn flag_syncing(q: Query<(), With<RunningSync>>, mut pending: ResMut<cadrs_ui::PendingWork>, mut why: ResMut<cadrs_ui::PendingWhy>) {
+fn flag_syncing(
+    q: Query<(), With<RunningSync>>,
+    mut pending: ResMut<cadrs_ui::PendingWork>,
+    mut why: ResMut<cadrs_ui::PendingWhy>,
+) {
     if !q.is_empty() {
         pending.0 = true;
         why.add("PCB sync");
@@ -156,13 +196,22 @@ struct RunningSync {
 fn accept_sync(world: &mut World) {
     let tabs = {
         let mut q = world.query::<&SyncDialog>();
-        let Some(d) = q.iter(world).next() else { return };
+        let Some(d) = q.iter(world).next() else {
+            return;
+        };
         d.0.clone()
     };
-    let (si, pi) = (select_index(world, "pcb-sync-source"), select_index(world, "pcb-sync-plane"));
+    let (si, pi) = (
+        select_index(world, "pcb-sync-source"),
+        select_index(world, "pcb-sync-plane"),
+    );
     close::<SyncDialog>(world);
     let Some(tab) = tabs.get(si) else {
-        toast(world, Notification::warning("There is no Part Studio or assembly to sync").name("pcb-sync-toast"));
+        toast(
+            world,
+            Notification::warning("There is no Part Studio or assembly to sync")
+                .name("pcb-sync-toast"),
+        );
         return;
     };
     let plane = SyncPlaneChoice::ALL[pi.min(2)];
@@ -173,17 +222,32 @@ fn accept_sync(world: &mut World) {
 /// scenario's `pcb-sync`).
 pub fn start_sync(world: &mut World, source: ElementId, plane: SyncPlaneChoice) {
     let plan = {
-        let Some(doc) = world.get_resource::<ActiveDocument>() else { return };
-        let Some((el, s)) = super::active_studio(doc) else { return };
+        let Some(doc) = world.get_resource::<ActiveDocument>() else {
+            return;
+        };
+        let Some((el, s)) = super::active_studio(doc) else {
+            return;
+        };
         let shown = world.resource::<super::PcbUi>().shown_board(el, s);
         cadrs_pcb::sync::plan(&doc.doc, el, source, plane, shown)
     };
     match plan {
         Ok(p) => {
-            world.spawn((Name::new("pcb-sync-running"), RunningSync { pending: cadrs_pcb::sync::run(p) }, DespawnOnExit(AppState::Document)));
+            world.spawn((
+                Name::new("pcb-sync-running"),
+                RunningSync {
+                    pending: cadrs_pcb::sync::run(p),
+                },
+                DespawnOnExit(AppState::Document),
+            ));
         }
         Err(e) => {
-            toast(world, Notification::warning(format!("Couldn't sync: {e}")).name("pcb-sync-toast").max_width(640.0));
+            toast(
+                world,
+                Notification::warning(format!("Couldn't sync: {e}"))
+                    .name("pcb-sync-toast")
+                    .max_width(640.0),
+            );
         }
     }
 }
@@ -191,7 +255,9 @@ pub fn start_sync(world: &mut World, source: ElementId, plane: SyncPlaneChoice) 
 /// Puts finished syncs into the studio (one undo step) and says what happened.
 fn finish_syncs(q: Query<(Entity, &RunningSync)>, mut commands: Commands) {
     for (e, run) in &q {
-        let Some(result) = run.pending.poll() else { continue };
+        let Some(result) = run.pending.poll() else {
+            continue;
+        };
         let result = result.unwrap_or_else(|| Err("The kernel thread stopped".into()));
         commands.entity(e).despawn();
         commands.queue(move |world: &mut World| finish_sync(world, result));
@@ -202,24 +268,42 @@ fn finish_sync(world: &mut World, result: Result<SyncOutcome, String>) {
     let o = match result {
         Ok(o) => o,
         Err(e) => {
-            toast(world, Notification::warning(format!("Couldn't sync: {e}")).name("pcb-sync-toast").max_width(640.0));
+            toast(
+                world,
+                Notification::warning(format!("Couldn't sync: {e}"))
+                    .name("pcb-sync-toast")
+                    .max_width(640.0),
+            );
             return;
         }
     };
     let el = o.command.element;
     let run = world.resource_mut::<ActiveDocument>().execute(&o.command);
     if let Err(e) = run {
-        toast(world, Notification::warning(format!("Couldn't sync: {e}")).name("pcb-sync-toast").max_width(640.0));
+        toast(
+            world,
+            Notification::warning(format!("Couldn't sync: {e}"))
+                .name("pcb-sync-toast")
+                .max_width(640.0),
+        );
         return;
     }
     let name = {
         let doc = world.resource::<ActiveDocument>();
-        doc.doc.element(el).and_then(|e| e.pcb()).and_then(|s| s.active_board()).map(|b| (b.id, b.name().to_string()))
+        doc.doc
+            .element(el)
+            .and_then(|e| e.pcb())
+            .and_then(|s| s.active_board())
+            .map(|b| (b.id, b.name().to_string()))
     };
     if let Some((id, n)) = name {
         super::show_board(world, el, id);
         let msg = cadrs_pcb::sync::message(&o, &n);
-        let note = if o.unrecognised.is_empty() && o.warnings.is_empty() { Notification::info(msg).seconds(4.0) } else { Notification::info(msg).seconds(8.0) };
+        let note = if o.unrecognised.is_empty() && o.warnings.is_empty() {
+            Notification::info(msg).seconds(4.0)
+        } else {
+            Notification::info(msg).seconds(8.0)
+        };
         toast(world, note.name("pcb-sync-toast").max_width(640.0));
     }
 }
@@ -245,17 +329,35 @@ pub fn open_export_dialog(world: &mut World) {
             .body(move |b| {
                 let t = &tb;
                 b.spawn(label(t, "Write to IDF Version:"));
-                b.spawn(RadioGroup::new("pcb-export-version").option("pcb-export-idf2", "IDF 2.0").option("pcb-export-idf3", "IDF 3.0").selected(Some(1)).build(t));
+                b.spawn(
+                    RadioGroup::new("pcb-export-version")
+                        .option("pcb-export-idf2", "IDF 2.0")
+                        .option("pcb-export-idf3", "IDF 3.0")
+                        .selected(Some(1))
+                        .build(t),
+                );
                 b.spawn((
                     Name::new("pcb-export-note"),
-                    t.text("IDF 2.0 files are written without keep-in and keep-out areas.", t.font_sm, FontWeight::NORMAL, t.muted_foreground),
-                    Node { margin: UiRect::top(Val::Px(6.0)), max_width: Val::Percent(100.0), ..default() },
+                    t.text(
+                        "IDF 2.0 files are written without keep-in and keep-out areas.",
+                        t.font_sm,
+                        FontWeight::NORMAL,
+                        t.muted_foreground,
+                    ),
+                    Node {
+                        margin: UiRect::top(Val::Px(6.0)),
+                        max_width: Val::Percent(100.0),
+                        ..default()
+                    },
                 ));
             })
             .footer(move |f| {
                 let t = &tf;
                 f.spawn((
-                    Button::new("pcb-export-ok").label("Export").primary().build(t),
+                    Button::new("pcb-export-ok")
+                        .label("Export")
+                        .primary()
+                        .build(t),
                     observe(|_: On<Activate>, mut commands: Commands| {
                         commands.queue(accept_export);
                     }),
@@ -279,21 +381,37 @@ pub fn unique_zip(dir: &Path, stem: &str) -> PathBuf {
     if !first.exists() {
         return first;
     }
-    (2..).map(|n| dir.join(format!("{stem} ({n}).zip"))).find(|p| !p.exists()).expect("an unused name")
+    (2..)
+        .map(|n| dir.join(format!("{stem} ({n}).zip")))
+        .find(|p| !p.exists())
+        .expect("an unused name")
 }
 
 /// The IDF header date (`yyyy/mm/dd.hh:mm:ss`) of the app's clock.
 fn idf_date(world: &World) -> String {
-    let clock = world.get_resource::<AppClock>().copied().unwrap_or_else(AppClock::system);
+    let clock = world
+        .get_resource::<AppClock>()
+        .copied()
+        .unwrap_or_else(AppClock::system);
     let t = clock.now() + clock.utc_offset;
-    chrono::DateTime::from_timestamp(t, 0).map(|d| d.format("%Y/%m/%d.%H:%M:%S").to_string()).unwrap_or_else(|| cadrs_idf::DEFAULT_DATE.to_string())
+    chrono::DateTime::from_timestamp(t, 0)
+        .map(|d| d.format("%Y/%m/%d.%H:%M:%S").to_string())
+        .unwrap_or_else(|| cadrs_idf::DEFAULT_DATE.to_string())
 }
 
 fn accept_export(world: &mut World) {
     let version = {
         let mut q = world.query::<(&Name, &RadioGroupState)>();
-        let i = q.iter(world).find(|(n, _)| n.as_str() == "pcb-export-version").and_then(|(_, s)| s.selected).unwrap_or(1);
-        if i == 0 { IdfVersion::V2 } else { IdfVersion::V3 }
+        let i = q
+            .iter(world)
+            .find(|(n, _)| n.as_str() == "pcb-export-version")
+            .and_then(|(_, s)| s.selected)
+            .unwrap_or(1);
+        if i == 0 {
+            IdfVersion::V2
+        } else {
+            IdfVersion::V3
+        }
     };
     close::<ExportDialog>(world);
     export_shown(world, version);
@@ -301,38 +419,67 @@ fn accept_export(world: &mut World) {
 
 /// Writes the shown board as `<board>.zip` (see the module docs) and says where.
 pub fn export_shown(world: &mut World, version: IdfVersion) {
-    let Some((_, _, b)) = super::shown(world) else { return };
+    let Some((_, _, b)) = super::shown(world) else {
+        return;
+    };
     let mut board = b.board.clone();
     board.header.date = idf_date(world);
-    let dir = world.get_resource::<crate::ExportDirOverride>().and_then(|d| d.0.clone()).or_else(cadrs_core::export::default_dir);
+    let dir = world
+        .get_resource::<crate::ExportDirOverride>()
+        .and_then(|d| d.0.clone())
+        .or_else(cadrs_core::export::default_dir);
     let Some(dir) = dir else {
-        toast(world, Notification::warning("Nowhere to save the export").name("pcb-export-toast"));
+        toast(
+            world,
+            Notification::warning("Nowhere to save the export").name("pcb-export-toast"),
+        );
         return;
     };
     let bytes = cadrs_idf::write_zip(&board, &b.library, version);
     let path = unique_zip(&dir, &cadrs_idf::safe_file_name(&board.name));
     let written = std::fs::create_dir_all(&dir).and_then(|_| std::fs::write(&path, &bytes));
     if let Err(e) = written {
-        toast(world, Notification::warning(format!("Export failed: {}: {e}", path.display())).name("pcb-export-toast").max_width(640.0));
+        toast(
+            world,
+            Notification::warning(format!("Export failed: {}: {e}", path.display()))
+                .name("pcb-export-toast")
+                .max_width(640.0),
+        );
         return;
     }
     info!("exported {}", path.display());
-    let emn = cadrs_idf::zip_entries(&bytes).ok().and_then(|e| e.into_iter().find(|(n, _)| n.ends_with(".emn"))).map(|(n, d)| (n, String::from_utf8_lossy(&d).into_owned()));
-    let file = path.file_name().map(|f| f.to_string_lossy().into_owned()).unwrap_or_default();
-    let note = Notification::info(format!("Exported {file} (IDF {}) to {}", version.as_str(), dir.display())).seconds(10.0).name("pcb-export-toast").max_width(640.0);
+    let emn = cadrs_idf::zip_entries(&bytes)
+        .ok()
+        .and_then(|e| e.into_iter().find(|(n, _)| n.ends_with(".emn")))
+        .map(|(n, d)| (n, String::from_utf8_lossy(&d).into_owned()));
+    let file = path
+        .file_name()
+        .map(|f| f.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    let note = Notification::info(format!(
+        "Exported {file} (IDF {}) to {}",
+        version.as_str(),
+        dir.display()
+    ))
+    .seconds(10.0)
+    .name("pcb-export-toast")
+    .max_width(640.0);
     let t = toast(world, note);
     if let Some((name, text)) = emn {
         let theme = world.resource::<Theme>().clone();
         let mut commands = world.commands();
-        let open = cadrs_ui::toast_action(&mut commands, &theme, t, "pcb-export-open-emn", "Open .emn");
+        let open =
+            cadrs_ui::toast_action(&mut commands, &theme, t, "pcb-export-open-emn", "Open .emn");
         let file = name.rsplit('/').next().unwrap_or(&name).to_string();
-        commands.entity(open).insert(observe(move |_: On<Activate>, mut commands: Commands| {
-            let (file, text) = (file.clone(), text.clone());
-            commands.queue(move |world: &mut World| {
-                cadrs_ui::close_toasts(world);
-                open_emn_viewer(world, &file, &text);
-            });
-        }));
+        commands
+            .entity(open)
+            .insert(observe(move |_: On<Activate>, mut commands: Commands| {
+                let (file, text) = (file.clone(), text.clone());
+                commands.queue(move |world: &mut World| {
+                    cadrs_ui::close_toasts(world);
+                    open_emn_viewer(world, &file, &text);
+                });
+            }));
         world.flush();
     }
 }
@@ -365,9 +512,15 @@ pub fn open_emn_viewer(world: &mut World, file: &str, text: &str) {
             .width(560.0)
             .body(move |b| {
                 let t = &tb;
-                b.spawn(cadrs_ui::TextInput::new("pcb-emn-find").placeholder("Find").width(Val::Px(220.0)).height(26.0).build(t))
-                    .entry::<Node>()
-                    .and_modify(|mut n| n.margin = UiRect::bottom(Val::Px(6.0)));
+                b.spawn(
+                    cadrs_ui::TextInput::new("pcb-emn-find")
+                        .placeholder("Find")
+                        .width(Val::Px(220.0))
+                        .height(26.0)
+                        .build(t),
+                )
+                .entry::<Node>()
+                .and_modify(|mut n| n.margin = UiRect::bottom(Val::Px(6.0)));
                 b.spawn((
                     Name::new("pcb-emn-scroll"),
                     EmnScroll,
@@ -388,10 +541,27 @@ pub fn open_emn_viewer(world: &mut World, file: &str, text: &str) {
                         c.spawn((
                             Name::new("pcb-emn-line"),
                             EmnLine(i),
-                            Node { height: Val::Px(EMN_LINE), flex_shrink: 0.0, padding: UiRect::horizontal(Val::Px(2.0)), ..default() },
+                            Node {
+                                height: Val::Px(EMN_LINE),
+                                flex_shrink: 0.0,
+                                padding: UiRect::horizontal(Val::Px(2.0)),
+                                ..default()
+                            },
                             BackgroundColor(Color::NONE),
                         ))
-                        .with_child((Name::new("pcb-emn-text"), t.text(if l.is_empty() { " ".to_string() } else { l.clone() }, 12.0, FontWeight::NORMAL, t.foreground)));
+                        .with_child((
+                            Name::new("pcb-emn-text"),
+                            t.text(
+                                if l.is_empty() {
+                                    " ".to_string()
+                                } else {
+                                    l.clone()
+                                },
+                                12.0,
+                                FontWeight::NORMAL,
+                                t.foreground,
+                            ),
+                        ));
                     }
                 });
             })
@@ -411,7 +581,9 @@ pub fn open_emn_viewer(world: &mut World, file: &str, text: &str) {
 
 /// Enter in the viewer's Find field.
 fn on_emn_find(ev: On<cadrs_ui::TextSubmit>, q: Query<&Name>, mut commands: Commands) {
-    if q.get(ev.entity).is_ok_and(|n| n.as_str() == "pcb-emn-find-field") {
+    if q.get(ev.entity)
+        .is_ok_and(|n| n.as_str() == "pcb-emn-find-field")
+    {
         let term = ev.value.clone();
         commands.queue(move |w: &mut World| find_in_emn(w, &term));
     }
@@ -428,7 +600,11 @@ pub fn find_in_emn(world: &mut World, term: &str) {
         let mut rows: Vec<(usize, Entity)> = q.iter(world).map(|(l, c)| (l.0, c[0])).collect();
         rows.sort();
         for (i, child) in rows {
-            if !term.is_empty() && texts.get(world, child).is_ok_and(|t| t.0.to_lowercase().contains(&term)) {
+            if !term.is_empty()
+                && texts
+                    .get(world, child)
+                    .is_ok_and(|t| t.0.to_lowercase().contains(&term))
+            {
                 found = Some(i);
                 break;
             }
@@ -438,7 +614,11 @@ pub fn find_in_emn(world: &mut World, term: &str) {
     let highlight = Color::srgb_u8(0x9c, 0xc8, 0xf5);
     let mut q = world.query::<(&EmnLine, &mut BackgroundColor)>();
     for (l, mut bg) in q.iter_mut(world) {
-        bg.set_if_neq(BackgroundColor(if Some(l.0) == hit { highlight } else { Color::NONE }));
+        bg.set_if_neq(BackgroundColor(if Some(l.0) == hit {
+            highlight
+        } else {
+            Color::NONE
+        }));
     }
     if let Some(i) = hit {
         let mut q = world.query_filtered::<&mut ScrollPosition, With<EmnScroll>>();

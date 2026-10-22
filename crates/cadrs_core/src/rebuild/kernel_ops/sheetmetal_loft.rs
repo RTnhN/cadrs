@@ -40,9 +40,13 @@ fn piece_points(pc: &Piece, tol: f64) -> Vec<cadrs_sketch::Vec2> {
         Piece::Line(a, b) => vec![*a, *b],
         Piece::Arc(g) => {
             let n = arc_pieces(g.radius, g.sweep, tol);
-            (0..=n).map(|k| g.point_at(g.start_angle + g.sweep * k as f64 / n as f64)).collect()
+            (0..=n)
+                .map(|k| g.point_at(g.start_angle + g.sweep * k as f64 / n as f64))
+                .collect()
         }
-        Piece::Ellipse { g, t0, sweep } => (0..=32).map(|k| g.point_at(t0 + sweep * k as f64 / 32.0)).collect(),
+        Piece::Ellipse { g, t0, sweep } => (0..=32)
+            .map(|k| g.point_at(t0 + sweep * k as f64 / 32.0))
+            .collect(),
         Piece::Bezier(b) => (0..=32).map(|k| b.point_at(k as f64 / 32.0)).collect(),
     }
 }
@@ -116,24 +120,47 @@ pub(crate) fn along(p: &ProfileIn, t: f64) -> P3 {
 /// The guides the dialog's manipulators use, as the feature's `arrows`: a count header
 /// `([connections, profile 1 points, profile 2 points, closed], 0)`, each connection
 /// `(point on profile 1, point on profile 2)`, then each profile's points `(point, 0)`.
-pub fn encode_guides(p1: &ProfileIn, p2: &ProfileIn, connections: &[ConnectionIn]) -> Vec<(Vec3, Vec3)> {
+pub fn encode_guides(
+    p1: &ProfileIn,
+    p2: &ProfileIn,
+    connections: &[ConnectionIn],
+) -> Vec<(Vec3, Vec3)> {
     let a = |p: P3| [p.x, p.y, p.z];
-    let mut v = vec![([connections.len() as f64, p1.points.len() as f64, p2.points.len() as f64], [f64::from(u8::from(p1.closed)), 0.0, 0.0])];
+    let mut v = vec![(
+        [
+            connections.len() as f64,
+            p1.points.len() as f64,
+            p2.points.len() as f64,
+        ],
+        [f64::from(u8::from(p1.closed)), 0.0, 0.0],
+    )];
     v.extend(connections.iter().map(|c| (a(c.a), a(c.b))));
-    v.extend(p1.points.iter().chain(&p2.points).map(|p| (a(*p), [0.0; 3])));
+    v.extend(
+        p1.points
+            .iter()
+            .chain(&p2.points)
+            .map(|p| (a(*p), [0.0; 3])),
+    );
     v
 }
 
 impl Rebuilder {
     /// A loft profile as a polyline (or a point).
-    fn loft_profile(&self, before: &[Feature], state: &State, items: &[LoftItem], tol: f64) -> Result<ProfileIn, String> {
+    fn loft_profile(
+        &self,
+        before: &[Feature],
+        state: &State,
+        items: &[LoftItem],
+        tol: f64,
+    ) -> Result<ProfileIn, String> {
         let lost = || "A loft profile no longer exists".to_string();
         let mut lines: Vec<Vec<P3>> = Vec::new();
         let mut curves: Vec<(FeatureId, Vec<cadrs_sketch::CurveId>)> = Vec::new();
-        let sketch = |s: FeatureId| -> Option<(&crate::document::SketchFeature, cadrs_sketch::PlaneFrame)> {
-            let sk = before.iter().find(|f| f.id == s)?.sketch()?;
-            Some((sk, sk.plane?.frame()))
-        };
+        let sketch =
+            |s: FeatureId| -> Option<(&crate::document::SketchFeature, cadrs_sketch::PlaneFrame)> {
+                let sk = before.iter().find(|f| f.id == s)?.sketch()?;
+                Some((sk, sk.plane?.frame()))
+            };
         for it in items {
             match it {
                 LoftItem::SketchPoint { sketch: s, point } => {
@@ -145,7 +172,12 @@ impl Rebuilder {
                 }
                 LoftItem::Vertex(v) => {
                     let part = state.part(v.part).ok_or_else(lost)?;
-                    let q = part.part.solid.vertex(&v.vertex).map(|x| x.point).unwrap_or(v.point);
+                    let q = part
+                        .part
+                        .solid
+                        .vertex(&v.vertex)
+                        .map(|x| x.point)
+                        .unwrap_or(v.point);
                     if items.len() == 1 {
                         return Ok(ProfileIn::point(p3(q)));
                     }
@@ -160,7 +192,10 @@ impl Rebuilder {
                         pts.extend(reg.outer.iter().map(|q| p3(frame.to_world(*q))));
                     } else {
                         for pc in &reg.outer_pieces {
-                            let mut ps: Vec<P3> = piece_points(pc, tol).into_iter().map(|q| p3(frame.to_world(q))).collect();
+                            let mut ps: Vec<P3> = piece_points(pc, tol)
+                                .into_iter()
+                                .map(|q| p3(frame.to_world(q)))
+                                .collect();
                             if !pts.is_empty() {
                                 ps.remove(0);
                             }
@@ -173,7 +208,9 @@ impl Rebuilder {
                 LoftItem::Face(f) => {
                     let (part, _) = face_ids(state, f).ok_or_else(lost)?;
                     let solid = &part.part.solid;
-                    let (i, _) = solid.resolve_face(&f.face, None, Some(f.seed)).map_err(|_| lost())?;
+                    let (i, _) = solid
+                        .resolve_face(&f.face, None, Some(f.seed))
+                        .map_err(|_| lost())?;
                     let face = &solid.faces[i];
                     let size = |l: &Vec<[f64; 3]>| {
                         let (mut lo, mut hi) = ([f64::MAX; 3], [f64::MIN; 3]);
@@ -185,7 +222,11 @@ impl Rebuilder {
                         }
                         (0..3).map(|k| (hi[k] - lo[k]).powi(2)).sum::<f64>()
                     };
-                    let outer = face.loops.iter().max_by(|a, b| size(a).total_cmp(&size(b))).ok_or_else(lost)?;
+                    let outer = face
+                        .loops
+                        .iter()
+                        .max_by(|a, b| size(a).total_cmp(&size(b)))
+                        .ok_or_else(lost)?;
                     let mut pts: Vec<P3> = outer.iter().map(|p| p3(*p)).collect();
                     if let Some(f0) = pts.first().copied() {
                         pts.push(f0);
@@ -199,7 +240,9 @@ impl Rebuilder {
                 LoftItem::Edge(e) => {
                     let (part, _) = super::applied::edge_ids(state, e).ok_or_else(lost)?;
                     let solid = &part.part.solid;
-                    let (i, _) = solid.resolve_edge(&e.edge, |x| Some(x.distance(e.seed))).map_err(|_| lost())?;
+                    let (i, _) = solid
+                        .resolve_edge(&e.edge, |x| Some(x.distance(e.seed)))
+                        .map_err(|_| lost())?;
                     lines.push(solid.edges[i].points.iter().map(|p| p3(*p)).collect());
                 }
             }
@@ -211,8 +254,14 @@ impl Rebuilder {
             for ch in crate::rebuild::sketch_chains(s, &g) {
                 let mut pts: Vec<P3> = Vec::new();
                 for (pc, _) in &ch.pieces {
-                    let mut ps: Vec<P3> = piece_points(pc, tol).into_iter().map(|q| p3(frame.to_world(q))).collect();
-                    if !pts.is_empty() && !ps.is_empty() && (ps[0] - pts[pts.len() - 1]).norm() > 1e-6 {
+                    let mut ps: Vec<P3> = piece_points(pc, tol)
+                        .into_iter()
+                        .map(|q| p3(frame.to_world(q)))
+                        .collect();
+                    if !pts.is_empty()
+                        && !ps.is_empty()
+                        && (ps[0] - pts[pts.len() - 1]).norm() > 1e-6
+                    {
                         // A piece running the other way.
                         if (ps[ps.len() - 1] - pts[pts.len() - 1]).norm() <= 1e-6 {
                             ps.reverse();
@@ -230,9 +279,17 @@ impl Rebuilder {
             }
         }
         if lines.is_empty() {
-            return Err(if items.len() > 1 { "A point profile must be a single point".into() } else { lost() });
+            return Err(if items.len() > 1 {
+                "A point profile must be a single point".into()
+            } else {
+                lost()
+            });
         }
-        let size = lines.iter().flatten().map(|p| p.coords.norm()).fold(1.0, f64::max);
+        let size = lines
+            .iter()
+            .flatten()
+            .map(|p| p.coords.norm())
+            .fold(1.0, f64::max);
         let n = lines.len();
         let (points, closed) = join(lines, 1e-6 * size);
         if points.len() < 2 {
@@ -242,7 +299,14 @@ impl Rebuilder {
         Ok(ProfileIn { points, closed })
     }
 
-    pub(in crate::rebuild) fn sheet_metal_loft(&mut self, before: &[Feature], id: FeatureId, name: &str, x: &SheetMetalLoftFeature, state: &Arc<State>) -> Result<Output, String> {
+    pub(in crate::rebuild) fn sheet_metal_loft(
+        &mut self,
+        before: &[Feature],
+        id: FeatureId,
+        name: &str,
+        x: &SheetMetalLoftFeature,
+        state: &Arc<State>,
+    ) -> Result<Output, String> {
         if let Some(p) = x.problem() {
             return Err(p.into());
         }
@@ -250,11 +314,27 @@ impl Rebuilder {
         let target: Option<SheetMetalContext> = match x.op {
             SmLoftOp::New => None,
             SmLoftOp::Add => {
-                let ctxs: Vec<&SheetMetalContext> = state.sheet_metal.iter().filter(|c| c.active && x.merge_scope.iter().any(|p| c.parts.iter().any(|(q, _)| q == p))).collect();
+                let ctxs: Vec<&SheetMetalContext> = state
+                    .sheet_metal
+                    .iter()
+                    .filter(|c| {
+                        c.active
+                            && x.merge_scope
+                                .iter()
+                                .any(|p| c.parts.iter().any(|(q, _)| q == p))
+                    })
+                    .collect();
                 match ctxs.as_slice() {
                     [c] => Some((*c).clone()),
-                    [] => return Err("The merge scope must be a part of an active sheet metal model".into()),
-                    _ => return Err("The merge scope can only take the parts of one active sheet metal model".into()),
+                    [] => {
+                        return Err(
+                            "The merge scope must be a part of an active sheet metal model".into(),
+                        );
+                    }
+                    _ => return Err(
+                        "The merge scope can only take the parts of one active sheet metal model"
+                            .into(),
+                    ),
                 }
             }
         };
@@ -272,10 +352,24 @@ impl Rebuilder {
             let t = c.model.params.thickness;
             for prof in [&mut p1, &mut p2] {
                 let shift = c.model.walls.iter().find_map(|w| {
-                    let cadrs_sheetmetal::model::Surface::Planar { origin, u, v } = w.surface else { return None };
+                    let cadrs_sheetmetal::model::Surface::Planar { origin, u, v } = w.surface
+                    else {
+                        return None;
+                    };
                     let n = u.cross(&v).normalize();
-                    let size = w.outline.bounds().map(|(lo, hi)| (hi - lo).norm()).unwrap_or(1.0).max(1.0);
-                    let on = |d: f64| prof.points.len() >= 2 && prof.points.iter().all(|q| ((*q - origin).dot(&n) - d).abs() <= 1e-6 * size);
+                    let size = w
+                        .outline
+                        .bounds()
+                        .map(|(lo, hi)| (hi - lo).norm())
+                        .unwrap_or(1.0)
+                        .max(1.0);
+                    let on = |d: f64| {
+                        prof.points.len() >= 2
+                            && prof
+                                .points
+                                .iter()
+                                .all(|q| ((*q - origin).dot(&n) - d).abs() <= 1e-6 * size)
+                    };
                     if on(0.0) {
                         return None;
                     }
@@ -289,7 +383,15 @@ impl Rebuilder {
             }
         }
         let connections: Vec<ConnectionIn> = if x.connections_on {
-            x.connections.iter().filter(|c| c.is_complete()).map(|c| ConnectionIn { a: along(&p1, c.t1), b: along(&p2, c.t2), rip: c.rip }).collect()
+            x.connections
+                .iter()
+                .filter(|c| c.is_complete())
+                .map(|c| ConnectionIn {
+                    a: along(&p1, c.t1),
+                    b: along(&p2, c.t2),
+                    rip: c.rip,
+                })
+                .collect()
         } else {
             Vec::new()
         };
@@ -300,16 +402,42 @@ impl Rebuilder {
                 .walls
                 .iter()
                 .filter_map(|w| {
-                    let cadrs_sheetmetal::model::Surface::Planar { origin, u, v } = w.surface else { return None };
+                    let cadrs_sheetmetal::model::Surface::Planar { origin, u, v } = w.surface
+                    else {
+                        return None;
+                    };
                     let n = u.cross(&v).normalize();
-                    let size = w.outline.bounds().map(|(lo, hi)| (hi - lo).norm()).unwrap_or(1.0);
-                    let on = |p: &ProfileIn| p.points.len() >= 2 && p.points.iter().filter(|q| ((*q - origin).dot(&n)).abs() <= 1e-6 * size.max(1.0)).count() >= 2;
-                    (on(&p1) || on(&p2)).then(|| Attach { wall: w.id, origin, u, v, outline: w.outline.clone() })
+                    let size = w
+                        .outline
+                        .bounds()
+                        .map(|(lo, hi)| (hi - lo).norm())
+                        .unwrap_or(1.0);
+                    let on = |p: &ProfileIn| {
+                        p.points.len() >= 2
+                            && p.points
+                                .iter()
+                                .filter(|q| ((*q - origin).dot(&n)).abs() <= 1e-6 * size.max(1.0))
+                                .count()
+                                >= 2
+                    };
+                    (on(&p1) || on(&p2)).then(|| Attach {
+                        wall: w.id,
+                        origin,
+                        u,
+                        v,
+                        outline: w.outline.clone(),
+                    })
                 })
                 .collect(),
             None => Vec::new(),
         };
-        let opts = LoftOpts { flip_side: x.flip_thickness, connections, bends: true, key: key_of(&id), attach };
+        let opts = LoftOpts {
+            flip_side: x.flip_thickness,
+            connections,
+            bends: true,
+            key: key_of(&id),
+            attach,
+        };
         let built = loft(params, &p1, &p2, &opts).map_err(|e| e.message())?;
         let arrows = encode_guides(&p1, &p2, &built.strip.connections);
         let warning = built.warnings.first().cloned();
@@ -337,8 +465,16 @@ impl Rebuilder {
                 self.refold(id, name, state, &[], None, ctx, &[])?
             }
             Some(c) => {
-                let ci = state.sheet_metal.iter().position(|x| x.feature == c.feature).expect("found");
-                let scope_wall = c.parts.iter().find(|(p, _)| x.merge_scope.contains(p)).and_then(|(_, ws)| ws.first().copied());
+                let ci = state
+                    .sheet_metal
+                    .iter()
+                    .position(|x| x.feature == c.feature)
+                    .expect("found");
+                let scope_wall = c
+                    .parts
+                    .iter()
+                    .find(|(p, _)| x.merge_scope.contains(p))
+                    .and_then(|(_, ws)| ws.first().copied());
                 let built = &built;
                 self.edit_sheet_metal(id, name, state, ci, |ctx| {
                     let m = &ctx.model;
@@ -347,11 +483,20 @@ impl Rebuilder {
                     let mut namer = JointNamer::default();
                     namer.taken = m.joints.iter().map(|j| j.name.clone()).collect();
                     // The model walls it joins keep their ids (and lose the band their bend takes).
-                    let real = |id: WallId| built.attached.iter().find(|a| a.stand_in == id).map(|a| a.wall);
+                    let real = |id: WallId| {
+                        built
+                            .attached
+                            .iter()
+                            .find(|a| a.stand_in == id)
+                            .map(|a| a.wall)
+                    };
                     let mut trims = Vec::new();
                     for a in &built.attached {
                         if let Some(w) = m.wall(a.wall) {
-                            let cut = cadrs_sheetmetal::poly::difference(std::slice::from_ref(&w.outline), std::slice::from_ref(&a.outline));
+                            let cut = cadrs_sheetmetal::poly::difference(
+                                std::slice::from_ref(&w.outline),
+                                std::slice::from_ref(&a.outline),
+                            );
                             if !cut.is_empty() {
                                 trims.push((a.wall, cut));
                             }
@@ -390,7 +535,14 @@ impl Rebuilder {
                     {
                         def.merges.push((a.id, w));
                     }
-                    def.push(name, StepEdit::AddWalls { walls, joints, trims });
+                    def.push(
+                        name,
+                        StepEdit::AddWalls {
+                            walls,
+                            joints,
+                            trims,
+                        },
+                    );
                     Ok(None)
                 })?
             }
@@ -410,10 +562,20 @@ mod tests {
     #[test]
     fn polylines_join_end_to_end() {
         let p = |x: f64, y: f64| P3::new(x, y, 0.0);
-        let (l, closed) = join(vec![vec![p(0.0, 0.0), p(1.0, 0.0)], vec![p(1.0, 1.0), p(1.0, 0.0)], vec![p(0.0, 0.0), p(1.0, 1.0)]], 1e-9);
+        let (l, closed) = join(
+            vec![
+                vec![p(0.0, 0.0), p(1.0, 0.0)],
+                vec![p(1.0, 1.0), p(1.0, 0.0)],
+                vec![p(0.0, 0.0), p(1.0, 1.0)],
+            ],
+            1e-9,
+        );
         assert!(closed);
         assert_eq!(l.len(), 3);
-        let q = ProfileIn { points: vec![p(0.0, 0.0), p(2.0, 0.0)], closed: false };
+        let q = ProfileIn {
+            points: vec![p(0.0, 0.0), p(2.0, 0.0)],
+            closed: false,
+        };
         assert!((along(&q, 0.25) - p(0.5, 0.0)).norm() < 1e-12);
     }
 }

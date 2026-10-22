@@ -2,8 +2,10 @@
 
 mod applied;
 mod drawing;
+pub use applied::{
+    CreateFolder, MoveFeatures, SetFeature, SetFolder, UnpackFolder, normalize_folders,
+};
 pub use drawing::{EditDrawing, InsertElement};
-pub use applied::{CreateFolder, MoveFeatures, SetFeature, SetFolder, UnpackFolder, normalize_folders};
 mod list;
 pub use list::{DeleteFolder, SetRollback, SetSuppressByVariable, SetSuppressed};
 
@@ -121,9 +123,16 @@ impl Command for AddElement {
             NewElementKind::PcbStudio => Element::pcb_studio(name),
             NewElementKind::RenderStudio(source) => {
                 if let Some(s) = source
-                    && !doc.element(s).is_some_and(|e| matches!(e.kind, ElementKind::PartStudio { .. } | ElementKind::Assembly))
+                    && !doc.element(s).is_some_and(|e| {
+                        matches!(
+                            e.kind,
+                            ElementKind::PartStudio { .. } | ElementKind::Assembly
+                        )
+                    })
                 {
-                    return Err(CommandError::Invalid("a render needs a Part Studio or an Assembly".into()));
+                    return Err(CommandError::Invalid(
+                        "a render needs a Part Studio or an Assembly".into(),
+                    ));
                 }
                 Element::render_studio(name, source)
             }
@@ -239,10 +248,19 @@ fn part_studio_features(
 
 /// Inserts a new feature at the rollback bar (P3.9: at the end while the bar is at the end), and
 /// keeps the bar below it.
-fn insert_feature(doc: &mut Document, element: ElementId, feature: Feature) -> Result<(), CommandError> {
-    let el = doc.element_mut(element).ok_or(CommandError::ElementNotFound(element))?;
+fn insert_feature(
+    doc: &mut Document,
+    element: ElementId,
+    feature: Feature,
+) -> Result<(), CommandError> {
+    let el = doc
+        .element_mut(element)
+        .ok_or(CommandError::ElementNotFound(element))?;
     let at = el.rollback_index();
-    let ElementKind::PartStudio { features, rollback, .. } = &mut el.kind else {
+    let ElementKind::PartStudio {
+        features, rollback, ..
+    } = &mut el.kind
+    else {
         return Err(CommandError::Invalid("features need a Part Studio".into()));
     };
     features.insert(at, feature);
@@ -288,12 +306,16 @@ impl Command for AddSketch {
             return Err(CommandError::Invalid("feature id already in use".into()));
         }
         let name = el.next_feature_name("Sketch");
-        insert_feature(doc, self.element, Feature {
-            id: self.feature,
-            name,
-            kind: FeatureKind::Sketch(SketchFeature::new(self.plane)),
-            suppress_by: None,
-        })?;
+        insert_feature(
+            doc,
+            self.element,
+            Feature {
+                id: self.feature,
+                name,
+                kind: FeatureKind::Sketch(SketchFeature::new(self.plane)),
+                suppress_by: None,
+            },
+        )?;
         refresh(doc, self.element);
         Ok(())
     }
@@ -407,7 +429,9 @@ impl Command for MoveFeature {
             .position(|f| f.id == self.feature)
             .ok_or_else(|| CommandError::Invalid("feature not found".into()))?;
         if self.to >= features.len() {
-            return Err(CommandError::Invalid("no such place in the feature list".into()));
+            return Err(CommandError::Invalid(
+                "no such place in the feature list".into(),
+            ));
         }
         let f = features.remove(i);
         features.insert(self.to, f);
@@ -536,7 +560,10 @@ pub fn refresh_studio(doc: &mut Document, element: ElementId) {
     crate::assembly::context::refresh_targets(doc, element);
     let units = doc.units;
     // P3F.4: variables first, so the sketches regenerate with the dimensions they drive.
-    let suppressed = doc.element(element).map(|e| e.suppressed().to_vec()).unwrap_or_default();
+    let suppressed = doc
+        .element(element)
+        .map(|e| e.suppressed().to_vec())
+        .unwrap_or_default();
     if let Ok(features) = part_studio_features(doc, element) {
         crate::variables::refresh(features, &suppressed, &units);
         crate::parts::regenerate_with(features, &context);
@@ -566,12 +593,16 @@ impl Command for AddExtrude {
             return Err(CommandError::Invalid("feature id already in use".into()));
         }
         let name = el.next_feature_name("Extrude");
-        insert_feature(doc, self.element, Feature {
-            id: self.feature,
-            name,
-            kind: FeatureKind::Extrude(self.extrude.clone()),
-            suppress_by: None,
-        })?;
+        insert_feature(
+            doc,
+            self.element,
+            Feature {
+                id: self.feature,
+                name,
+                kind: FeatureKind::Extrude(self.extrude.clone()),
+                suppress_by: None,
+            },
+        )?;
         Ok(())
     }
 }
@@ -603,7 +634,12 @@ impl Command for SetExtrude {
 
 /// Sets an extrude's parameters without the depth check (the end type may make the depth
 /// irrelevant): any change from the Extrude dialog.
-fn set_extrude_unchecked(doc: &mut Document, element: ElementId, feature: FeatureId, e: &ExtrudeFeature) -> Result<(), CommandError> {
+fn set_extrude_unchecked(
+    doc: &mut Document,
+    element: ElementId,
+    feature: FeatureId,
+    e: &ExtrudeFeature,
+) -> Result<(), CommandError> {
     *part_studio_features(doc, element)?
         .iter_mut()
         .find(|f| f.id == feature)
@@ -636,12 +672,16 @@ impl Command for AddRevolve {
             return Err(CommandError::Invalid("feature id already in use".into()));
         }
         let name = el.next_feature_name("Revolve");
-        insert_feature(doc, self.element, Feature {
-            id: self.feature,
-            name,
-            kind: FeatureKind::Revolve(self.revolve.clone()),
-            suppress_by: None,
-        })?;
+        insert_feature(
+            doc,
+            self.element,
+            Feature {
+                id: self.feature,
+                name,
+                kind: FeatureKind::Revolve(self.revolve.clone()),
+                suppress_by: None,
+            },
+        )?;
         Ok(())
     }
 }
@@ -671,7 +711,8 @@ impl Command for SetRevolve {
             .iter_mut()
             .find(|f| f.id == self.feature)
             .and_then(|f| f.revolve_mut())
-            .ok_or_else(|| CommandError::Invalid("revolve not found".into()))? = self.revolve.clone();
+            .ok_or_else(|| CommandError::Invalid("revolve not found".into()))? =
+            self.revolve.clone();
         refresh(doc, self.element);
         Ok(())
     }
@@ -733,7 +774,11 @@ impl Command for SetPartDescription {
         Scope::Element(self.element)
     }
     fn apply(&self, doc: &mut Document) -> Result<(), CommandError> {
-        let d = self.description.as_ref().map(|d| d.trim().to_string()).filter(|d| !d.is_empty());
+        let d = self
+            .description
+            .as_ref()
+            .map(|d| d.trim().to_string())
+            .filter(|d| !d.is_empty());
         let props = part_props(doc, self.element)?;
         part_prop(props, self.part).properties.description = d;
         props.retain(|p| !p.is_default());
@@ -751,7 +796,11 @@ pub struct SetPartsHidden {
 
 impl Command for SetPartsHidden {
     fn label(&self) -> String {
-        if self.hidden { "Hide parts".into() } else { "Show parts".into() }
+        if self.hidden {
+            "Hide parts".into()
+        } else {
+            "Show parts".into()
+        }
     }
     fn scope(&self) -> Scope {
         Scope::Element(self.element)
@@ -845,7 +894,12 @@ impl Command for SetFeatureAppearance {
         let el = doc
             .element_mut(self.element)
             .ok_or(CommandError::ElementNotFound(self.element))?;
-        let ElementKind::PartStudio { appearances, features, .. } = &mut el.kind else {
+        let ElementKind::PartStudio {
+            appearances,
+            features,
+            ..
+        } = &mut el.kind
+        else {
             return Err(CommandError::Invalid("not a Part Studio".into()));
         };
         if !features.iter().any(|f| f.id == self.feature) {
@@ -879,7 +933,12 @@ impl Command for SetCurveAppearance {
         let el = doc
             .element_mut(self.element)
             .ok_or(CommandError::ElementNotFound(self.element))?;
-        let ElementKind::PartStudio { curve_appearances, features, .. } = &mut el.kind else {
+        let ElementKind::PartStudio {
+            curve_appearances,
+            features,
+            ..
+        } = &mut el.kind
+        else {
             return Err(CommandError::Invalid("not a Part Studio".into()));
         };
         let exists = features
@@ -972,7 +1031,9 @@ impl Command for SetMaterialLibraries {
     fn apply(&self, doc: &mut Document) -> Result<(), CommandError> {
         for (i, l) in self.libraries.iter().enumerate() {
             if l.name.trim().is_empty() || self.libraries[..i].iter().any(|o| o.name == l.name) {
-                return Err(CommandError::Invalid("library names must be unique and not empty".into()));
+                return Err(CommandError::Invalid(
+                    "library names must be unique and not empty".into(),
+                ));
             }
         }
         doc.material_libraries = self.libraries.clone();
@@ -1004,7 +1065,10 @@ impl Command for SetSketchVisibility {
         let el = doc
             .element_mut(self.element)
             .ok_or(CommandError::ElementNotFound(self.element))?;
-        let ElementKind::PartStudio { sketch_visibility, .. } = &mut el.kind else {
+        let ElementKind::PartStudio {
+            sketch_visibility, ..
+        } = &mut el.kind
+        else {
             return Err(CommandError::Invalid("not a Part Studio".into()));
         };
         sketch_visibility.retain(|(s, _)| *s != self.sketch);
@@ -1039,12 +1103,26 @@ impl AddFeature {
     /// An Import feature ("Import N"); see also [`crate::import::AddImport`], which takes the
     /// file's bytes.
     pub fn import(element: ElementId, feature: FeatureId, x: crate::import::ImportFeature) -> Self {
-        Self { element, feature, base_name: "Import".into(), kind: FeatureKind::Import(x) }
+        Self {
+            element,
+            feature,
+            base_name: "Import".into(),
+            kind: FeatureKind::Import(x),
+        }
     }
 
     /// A Derived feature ("Derived N").
-    pub fn derived(element: ElementId, feature: FeatureId, x: crate::derived::DerivedFeature) -> Self {
-        Self { element, feature, base_name: "Derived".into(), kind: FeatureKind::Derived(Box::new(x)) }
+    pub fn derived(
+        element: ElementId,
+        feature: FeatureId,
+        x: crate::derived::DerivedFeature,
+    ) -> Self {
+        Self {
+            element,
+            feature,
+            base_name: "Derived".into(),
+            kind: FeatureKind::Derived(Box::new(x)),
+        }
     }
 
     /// A Delete part feature ("Delete part N").
@@ -1078,12 +1156,16 @@ impl Command for AddFeature {
             FeatureKind::Variable(v) if !v.name.is_empty() => format!("#{}", v.name),
             _ => el.next_feature_name(&self.base_name),
         };
-        insert_feature(doc, self.element, Feature {
-            id: self.feature,
-            name,
-            kind: self.kind.clone(),
-            suppress_by: None,
-        })?;
+        insert_feature(
+            doc,
+            self.element,
+            Feature {
+                id: self.feature,
+                name,
+                kind: self.kind.clone(),
+                suppress_by: None,
+            },
+        )?;
         refresh(doc, self.element);
         Ok(())
     }
@@ -1110,7 +1192,8 @@ impl Command for SetBoolean {
             .iter_mut()
             .find(|f| f.id == self.feature)
             .and_then(|f| f.boolean_mut())
-            .ok_or_else(|| CommandError::Invalid("boolean not found".into()))? = self.boolean.clone();
+            .ok_or_else(|| CommandError::Invalid("boolean not found".into()))? =
+            self.boolean.clone();
         refresh(doc, self.element);
         Ok(())
     }
@@ -1165,7 +1248,10 @@ mod tests {
         let text = ron::to_string(&d).unwrap();
         let back: Document = ron::from_str(&text).unwrap();
         assert_eq!(back.units, inch);
-        let old = text.replace(",units:(length:Inch,mass:Kilogram,decimals:2,angle_decimals:3)", "");
+        let old = text.replace(
+            ",units:(length:Inch,mass:Kilogram,decimals:2,angle_decimals:3)",
+            "",
+        );
         assert_ne!(old, text);
         let back: Document = ron::from_str(&old).unwrap();
         assert_eq!(back.units, Units::default());
@@ -1191,8 +1277,15 @@ mod tests {
         let mut h = History::default();
         let ps = d.elements[0].id;
         let f = FeatureId::new();
-        h.execute(&mut d, &AddSketch { element: ps, feature: f, plane: None })
-            .unwrap();
+        h.execute(
+            &mut d,
+            &AddSketch {
+                element: ps,
+                feature: f,
+                plane: None,
+            },
+        )
+        .unwrap();
         h.execute(
             &mut d,
             &RenameFeature {
@@ -1434,14 +1527,25 @@ mod tests {
         let mut h = History::default();
         let f = FeatureId::new();
         let mark = h.undo_len();
-        h.execute(&mut d, &AddSketch { element: ps, feature: f, plane: None })
-            .unwrap();
+        h.execute(
+            &mut d,
+            &AddSketch {
+                element: ps,
+                feature: f,
+                plane: None,
+            },
+        )
+        .unwrap();
         let feat = d.element(ps).unwrap().feature(f).unwrap();
         assert_eq!(feat.name, "Sketch 1");
         assert!(!feat.is_valid());
         h.execute(
             &mut d,
-            &SetSketchPlane { element: ps, feature: f, plane: Some(PlaneRef::Top) },
+            &SetSketchPlane {
+                element: ps,
+                feature: f,
+                plane: Some(PlaneRef::Top),
+            },
         )
         .unwrap();
         assert!(d.element(ps).unwrap().feature(f).unwrap().is_valid());
@@ -1464,17 +1568,32 @@ mod tests {
         let mut h = History::default();
         let f = FeatureId::new();
         let mark = h.undo_len();
-        h.execute(&mut d, &AddSketch { element: ps, feature: f, plane: None })
-            .unwrap();
         h.execute(
             &mut d,
-            &SetSketchPlane { element: ps, feature: f, plane: Some(PlaneRef::Right) },
+            &AddSketch {
+                element: ps,
+                feature: f,
+                plane: None,
+            },
+        )
+        .unwrap();
+        h.execute(
+            &mut d,
+            &SetSketchPlane {
+                element: ps,
+                feature: f,
+                plane: Some(PlaneRef::Right),
+            },
         )
         .unwrap();
         assert!(h.squash_since(mark, "Insert Sketch 1"));
         h.execute(
             &mut d,
-            &DeleteFeature { element: ps, feature: f, label: "Cancel Sketch 1".into() },
+            &DeleteFeature {
+                element: ps,
+                feature: f,
+                label: "Cancel Sketch 1".into(),
+            },
         )
         .unwrap();
         assert!(d.element(ps).unwrap().features().is_empty());
@@ -1483,8 +1602,15 @@ mod tests {
         // A cancelled session with nothing worth keeping can simply be discarded.
         let mark = h.undo_len();
         let g = FeatureId::new();
-        h.execute(&mut d, &AddSketch { element: ps, feature: g, plane: None })
-            .unwrap();
+        h.execute(
+            &mut d,
+            &AddSketch {
+                element: ps,
+                feature: g,
+                plane: None,
+            },
+        )
+        .unwrap();
         h.undo(&mut d);
         h.discard_since(mark);
         assert_eq!(h.undo_len(), mark);
@@ -1501,16 +1627,31 @@ mod tests {
         let f = FeatureId::new();
         h.execute(
             &mut d,
-            &AddSketch { element: ps, feature: f, plane: Some(PlaneRef::Top) },
+            &AddSketch {
+                element: ps,
+                feature: f,
+                plane: Some(PlaneRef::Top),
+            },
         )
         .unwrap();
         let before = d.element(ps).unwrap().feature(f).unwrap().clone();
         let mark = h.undo_len();
-        h.execute(&mut d, &SetSketchPlane { element: ps, feature: f, plane: None })
-            .unwrap();
         h.execute(
             &mut d,
-            &SetSketchPlane { element: ps, feature: f, plane: Some(PlaneRef::Front) },
+            &SetSketchPlane {
+                element: ps,
+                feature: f,
+                plane: None,
+            },
+        )
+        .unwrap();
+        h.execute(
+            &mut d,
+            &SetSketchPlane {
+                element: ps,
+                feature: f,
+                plane: Some(PlaneRef::Front),
+            },
         )
         .unwrap();
         assert!(h.squash_since(mark, "Edit Sketch 1"));
@@ -1522,18 +1663,33 @@ mod tests {
         // Cancelling an edit puts the old feature back.
         h.execute(
             &mut d,
-            &ReplaceFeature { element: ps, feature: before, label: "Cancel Sketch 1".into() },
+            &ReplaceFeature {
+                element: ps,
+                feature: before,
+                label: "Cancel Sketch 1".into(),
+            },
         )
         .unwrap();
         assert_eq!(sketch_plane(&d, ps, f), Some(PlaneRef::Top));
         // An edit that changed nothing leaves no undo step.
         let n = h.undo_len();
         let mark = h.undo_len();
-        h.execute(&mut d, &SetSketchPlane { element: ps, feature: f, plane: None })
-            .unwrap();
         h.execute(
             &mut d,
-            &SetSketchPlane { element: ps, feature: f, plane: Some(PlaneRef::Top) },
+            &SetSketchPlane {
+                element: ps,
+                feature: f,
+                plane: None,
+            },
+        )
+        .unwrap();
+        h.execute(
+            &mut d,
+            &SetSketchPlane {
+                element: ps,
+                feature: f,
+                plane: Some(PlaneRef::Top),
+            },
         )
         .unwrap();
         assert!(h.squash_since(mark, "Edit Sketch 1"));
@@ -1547,37 +1703,73 @@ mod tests {
         let mut h = History::default();
         let ids: Vec<FeatureId> = (0..3).map(|_| FeatureId::new()).collect();
         for &f in &ids {
-            h.execute(&mut d, &AddSketch { element: ps, feature: f, plane: None })
-                .unwrap();
+            h.execute(
+                &mut d,
+                &AddSketch {
+                    element: ps,
+                    feature: f,
+                    plane: None,
+                },
+            )
+            .unwrap();
         }
         assert_eq!(feature_names(&d, ps), ["Sketch 1", "Sketch 2", "Sketch 3"]);
         // Deleting Sketch 1 does not free its number while higher ones exist.
         h.execute(
             &mut d,
-            &DeleteFeature { element: ps, feature: ids[0], label: "Delete".into() },
+            &DeleteFeature {
+                element: ps,
+                feature: ids[0],
+                label: "Delete".into(),
+            },
         )
         .unwrap();
         let f = FeatureId::new();
-        h.execute(&mut d, &AddSketch { element: ps, feature: f, plane: None })
-            .unwrap();
+        h.execute(
+            &mut d,
+            &AddSketch {
+                element: ps,
+                feature: f,
+                plane: None,
+            },
+        )
+        .unwrap();
         assert_eq!(feature_names(&d, ps), ["Sketch 2", "Sketch 3", "Sketch 4"]);
         // Renamed features do not count.
         h.execute(
             &mut d,
-            &RenameFeature { element: ps, feature: f, name: " Base ".into() },
+            &RenameFeature {
+                element: ps,
+                feature: f,
+                name: " Base ".into(),
+            },
         )
         .unwrap();
         assert_eq!(feature_names(&d, ps)[2], "Base");
         // Sketches only live in Part Studios.
         let asm = d.elements[1].id;
         assert!(
-            h.execute(&mut d, &AddSketch { element: asm, feature: FeatureId::new(), plane: None })
-                .is_err()
+            h.execute(
+                &mut d,
+                &AddSketch {
+                    element: asm,
+                    feature: FeatureId::new(),
+                    plane: None
+                }
+            )
+            .is_err()
         );
         // Ids must be unique.
         assert!(
-            h.execute(&mut d, &AddSketch { element: ps, feature: f, plane: None })
-                .is_err()
+            h.execute(
+                &mut d,
+                &AddSketch {
+                    element: ps,
+                    feature: f,
+                    plane: None
+                }
+            )
+            .is_err()
         );
     }
 
@@ -1587,14 +1779,33 @@ mod tests {
         let ps = d.elements[0].id;
         let mut h = History::default();
         let f = FeatureId::new();
-        h.execute(&mut d, &AddSketch { element: ps, feature: f, plane: None })
-            .unwrap();
         h.execute(
             &mut d,
-            &SetSketchImprinting { element: ps, feature: f, disable_imprinting: true },
+            &AddSketch {
+                element: ps,
+                feature: f,
+                plane: None,
+            },
         )
         .unwrap();
-        let s = |d: &Document| d.element(ps).unwrap().feature(f).unwrap().sketch().unwrap().clone();
+        h.execute(
+            &mut d,
+            &SetSketchImprinting {
+                element: ps,
+                feature: f,
+                disable_imprinting: true,
+            },
+        )
+        .unwrap();
+        let s = |d: &Document| {
+            d.element(ps)
+                .unwrap()
+                .feature(f)
+                .unwrap()
+                .sketch()
+                .unwrap()
+                .clone()
+        };
         assert!(s(&d).disable_imprinting);
         h.undo(&mut d);
         assert!(!s(&d).disable_imprinting);
@@ -1605,10 +1816,22 @@ mod tests {
         let mut d = doc();
         let ps = d.elements[0].id;
         let mut h = History::default();
-        h.execute(&mut d, &AddSketch { element: ps, feature: FeatureId::new(), plane: None })
-            .unwrap();
-        h.execute(&mut d, &RenameDocument { name: "Other".into() })
-            .unwrap();
+        h.execute(
+            &mut d,
+            &AddSketch {
+                element: ps,
+                feature: FeatureId::new(),
+                plane: None,
+            },
+        )
+        .unwrap();
+        h.execute(
+            &mut d,
+            &RenameDocument {
+                name: "Other".into(),
+            },
+        )
+        .unwrap();
         assert!(!h.squash_since(0, "x"));
         assert_eq!(h.undo_len(), 2);
     }
@@ -1673,7 +1896,13 @@ mod tests {
     }
 
     fn geometry(d: &Document, e: ElementId, f: FeatureId) -> &cadrs_sketch::Sketch {
-        &d.element(e).unwrap().feature(f).unwrap().sketch().unwrap().geometry
+        &d.element(e)
+            .unwrap()
+            .feature(f)
+            .unwrap()
+            .sketch()
+            .unwrap()
+            .geometry
     }
 
     #[test]
@@ -1782,14 +2011,21 @@ mod tests {
             }),
         )
         .unwrap();
-        let id = geometry(&d, element, feature).dimensions.keys().next().unwrap();
+        let id = geometry(&d, element, feature)
+            .dimensions
+            .keys()
+            .next()
+            .unwrap();
         let length = |d: &Document| {
             let g = geometry(d, element, feature);
             g.pos(a).distance(g.pos(b))
         };
         // Edit the value.
-        h.execute(&mut d, &edit(SketchOp::SetDimensionValue { id, value: 25.4 }))
-            .unwrap();
+        h.execute(
+            &mut d,
+            &edit(SketchOp::SetDimensionValue { id, value: 25.4 }),
+        )
+        .unwrap();
         assert!((length(&d) - 25.4).abs() < 1e-6);
         assert_eq!(h.undo_label(), Some("Edit dimension"));
         // Move the label.
@@ -1826,9 +2062,13 @@ mod tests {
         assert!((length(&d) - 10.0).abs() < 1e-6);
         // An invalid value is refused and changes nothing.
         let before = d.clone();
-        assert!(h
-            .execute(&mut d, &edit(SketchOp::SetDimensionValue { id, value: 0.0 }))
-            .is_err());
+        assert!(
+            h.execute(
+                &mut d,
+                &edit(SketchOp::SetDimensionValue { id, value: 0.0 })
+            )
+            .is_err()
+        );
         assert_eq!(d, before);
     }
 
@@ -1871,7 +2111,11 @@ mod tests {
         // The dialog opens with nothing selected: invalid, no part.
         h.execute(
             &mut d,
-            &AddExtrude { element, feature: ex, extrude: ExtrudeFeature::default() },
+            &AddExtrude {
+                element,
+                feature: ex,
+                extrude: ExtrudeFeature::default(),
+            },
         )
         .unwrap();
         let f = d.element(element).unwrap().feature(ex).unwrap().clone();
@@ -1906,29 +2150,65 @@ mod tests {
         params.flip = true;
         h.execute(
             &mut d,
-            &SetExtrude { element, feature: ex, extrude: params.clone(), label: "Depth".into() },
+            &SetExtrude {
+                element,
+                feature: ex,
+                extrude: params.clone(),
+                label: "Depth".into(),
+            },
         )
         .unwrap();
-        let (lo, _) = parts(d.element(element).unwrap().features())[0].solid.bounds().unwrap();
+        let (lo, _) = parts(d.element(element).unwrap().features())[0]
+            .solid
+            .bounds()
+            .unwrap();
         assert!((lo[2] + 12.5).abs() < 1e-9);
         // A zero depth is refused.
-        let bad = ExtrudeFeature { depth: 0.0, ..params.clone() };
+        let bad = ExtrudeFeature {
+            depth: 0.0,
+            ..params.clone()
+        };
         assert!(
-            h.execute(&mut d, &SetExtrude { element, feature: ex, extrude: bad, label: "x".into() })
-                .is_err()
+            h.execute(
+                &mut d,
+                &SetExtrude {
+                    element,
+                    feature: ex,
+                    extrude: bad,
+                    label: "x".into()
+                }
+            )
+            .is_err()
         );
         // Undo steps back through each edit, then removes the extrude.
         assert_eq!(h.undo(&mut d).as_deref(), Some("Depth"));
-        let e = d.element(element).unwrap().feature(ex).unwrap().extrude().unwrap().clone();
+        let e = d
+            .element(element)
+            .unwrap()
+            .feature(ex)
+            .unwrap()
+            .extrude()
+            .unwrap()
+            .clone();
         assert_eq!((e.depth, e.flip), (25.0, false));
         h.undo(&mut d);
         h.undo(&mut d);
         assert!(d.element(element).unwrap().feature(ex).is_none());
-        assert!(!sketch_consumed(d.element(element).unwrap().features(), sketch));
+        assert!(!sketch_consumed(
+            d.element(element).unwrap().features(),
+            sketch
+        ));
         h.redo(&mut d);
         h.redo(&mut d);
         h.redo(&mut d);
-        let e = d.element(element).unwrap().feature(ex).unwrap().extrude().unwrap().clone();
+        let e = d
+            .element(element)
+            .unwrap()
+            .feature(ex)
+            .unwrap()
+            .extrude()
+            .unwrap()
+            .clone();
         assert_eq!(e, params);
         // A second extrude is "Extrude 2" and makes Part 2.
         let ex2 = FeatureId::new();
@@ -1936,8 +2216,15 @@ mod tests {
             regions: vec![region_of(&d, element, sketch)],
             ..ExtrudeFeature::default()
         };
-        h.execute(&mut d, &AddExtrude { element, feature: ex2, extrude })
-            .unwrap();
+        h.execute(
+            &mut d,
+            &AddExtrude {
+                element,
+                feature: ex2,
+                extrude,
+            },
+        )
+        .unwrap();
         let features = d.element(element).unwrap().features();
         assert_eq!(features[2].name, "Extrude 2");
         assert_eq!(parts(features)[1].name, "Part 2");
@@ -1954,39 +2241,76 @@ mod tests {
             regions: vec![region_of(&d, element, sketch)],
             ..ExtrudeFeature::default()
         };
-        h.execute(&mut d, &AddExtrude { element, feature: ex, extrude: params.clone() })
-            .unwrap();
+        h.execute(
+            &mut d,
+            &AddExtrude {
+                element,
+                feature: ex,
+                extrude: params.clone(),
+            },
+        )
+        .unwrap();
         let features = d.element(element).unwrap().features().to_vec();
-        let top = face_plane(&features, ex, crate::parts::cap_name(&features, ex, 0, true).unwrap()).unwrap();
+        let top = face_plane(
+            &features,
+            ex,
+            crate::parts::cap_name(&features, ex, 0, true).unwrap(),
+        )
+        .unwrap();
         let frame = top.frame();
         assert!((frame.normal()[2] - 1.0).abs() < 1e-9);
         assert!((frame.origin[2] - 25.0).abs() < 1e-9);
         // Sketch 2 on the top face, with a circle.
         let s2 = FeatureId::new();
-        h.execute(&mut d, &AddSketch { element, feature: s2, plane: Some(top) })
-            .unwrap();
-        assert_eq!(
-            d.element(element).unwrap().features()[2].name,
-            "Sketch 2"
-        );
+        h.execute(
+            &mut d,
+            &AddSketch {
+                element,
+                feature: s2,
+                plane: Some(top),
+            },
+        )
+        .unwrap();
+        assert_eq!(d.element(element).unwrap().features()[2].name, "Sketch 2");
         // Deepening the extrude moves the face, and the sketch with it.
         params.depth = 40.0;
         h.execute(
             &mut d,
-            &SetExtrude { element, feature: ex, extrude: params, label: "Depth".into() },
+            &SetExtrude {
+                element,
+                feature: ex,
+                extrude: params,
+                label: "Depth".into(),
+            },
         )
         .unwrap();
-        let plane = d.element(element).unwrap().feature(s2).unwrap().sketch().unwrap().plane;
+        let plane = d
+            .element(element)
+            .unwrap()
+            .feature(s2)
+            .unwrap()
+            .sketch()
+            .unwrap()
+            .plane;
         let f = plane.unwrap().frame();
         assert!((f.origin[2] - 40.0).abs() < 1e-9, "{f:?}");
         assert!(f.to_world(Vec2::new(10.0, 5.0)) == [10.0, 5.0, 40.0]);
         // Undo puts it back.
         h.undo(&mut d);
-        let plane = d.element(element).unwrap().feature(s2).unwrap().sketch().unwrap().plane;
+        let plane = d
+            .element(element)
+            .unwrap()
+            .feature(s2)
+            .unwrap()
+            .sketch()
+            .unwrap()
+            .plane;
         assert!((plane.unwrap().frame().origin[2] - 25.0).abs() < 1e-9);
         // A side face is a sketch plane too: the front face (y = 0) faces -Y.
         let features = d.element(element).unwrap().features().to_vec();
-        let solid = crate::parts::part_of(&features, features[1].id).unwrap().solid;
+        let solid = crate::parts::part_of(&features, features[1].id)
+            .unwrap()
+            .solid;
         let front = solid
             .faces
             .iter()

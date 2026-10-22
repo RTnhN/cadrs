@@ -31,15 +31,19 @@ const ON_AXIS: f64 = 1e-6;
 /// itself a copy mirrored there.
 pub fn mirrored_in(s: &Sketch, axis: CurveRef, c: CurveId) -> bool {
     let c = CurveRef::Curve(c);
-    s.constraints
-        .values()
-        .any(|x| matches!(*x, ConstraintOf::SymmetricCurves(a, b, l) if l == axis && (a == c || b == c)))
+    s.constraints.values().any(
+        |x| matches!(*x, ConstraintOf::SymmetricCurves(a, b, l) if l == axis && (a == c || b == c)),
+    )
 }
 
 /// Mirrors `curves` in the line (or sketch axis) `axis`. Returns the copies (source, copy) in
 /// order. Curves already mirrored in it (and their copies) are left alone, so mirroring them
 /// again doesn't stack copies.
-pub fn mirror(s: &mut Sketch, axis: CurveRef, curves: &[CurveId]) -> Result<Vec<(CurveId, CurveId)>, String> {
+pub fn mirror(
+    s: &mut Sketch,
+    axis: CurveRef,
+    curves: &[CurveId],
+) -> Result<Vec<(CurveId, CurveId)>, String> {
     let Some((p0, p1)) = crate::dimension::line_ends(s, axis) else {
         return Err("the mirror line is not a line".into());
     };
@@ -47,7 +51,11 @@ pub fn mirror(s: &mut Sketch, axis: CurveRef, curves: &[CurveId]) -> Result<Vec<
         return Err("the mirror line has no length".into());
     }
     let mut map: HashMap<PointId, PointId> = HashMap::new();
-    let curves: Vec<CurveId> = curves.iter().copied().filter(|c| !mirrored_in(s, axis, *c)).collect();
+    let curves: Vec<CurveId> = curves
+        .iter()
+        .copied()
+        .filter(|c| !mirrored_in(s, axis, *c))
+        .collect();
     let sources: Vec<CurveId> = curves.clone();
     let mut image = |s: &mut Sketch, p: PointId| -> PointId {
         if let Some(q) = map.get(&p) {
@@ -82,13 +90,18 @@ pub fn mirror(s: &mut Sketch, axis: CurveRef, curves: &[CurveId]) -> Result<Vec<
         let mut spline_copy = None;
         let kind = match curve.kind {
             CurveKind::Spline { start, end } => {
-                let Some(mut d) = s.splines.get(c).cloned() else { continue };
+                let Some(mut d) = s.splines.get(c).cloned() else {
+                    continue;
+                };
                 let u = (p1 - p0).normalize();
                 let reflect = |v: Vec2| u * (2.0 * v.dot(u)) - v;
                 d.points = d.points.iter().map(|p| image(s, *p)).collect();
                 d.start_tangent = d.start_tangent.map(reflect);
                 d.end_tangent = d.end_tangent.map(reflect);
-                let k = CurveKind::Spline { start: image(s, start), end: image(s, end) };
+                let k = CurveKind::Spline {
+                    start: image(s, start),
+                    end: image(s, end),
+                };
                 spline_copy = Some(d);
                 k
             }
@@ -111,19 +124,34 @@ pub fn mirror(s: &mut Sketch, axis: CurveRef, curves: &[CurveId]) -> Result<Vec<
                 end: image(s, start),
             },
             // Mirroring turns the minor axis to the major axis's other side: the same ellipse.
-            CurveKind::Ellipse { center, major, minor } => CurveKind::Ellipse {
+            CurveKind::Ellipse {
+                center,
+                major,
+                minor,
+            } => CurveKind::Ellipse {
                 center: image(s, center),
                 major: image(s, major),
                 minor,
             },
-            CurveKind::EllipseOffset { center, major, minor, distance } => CurveKind::EllipseOffset {
+            CurveKind::EllipseOffset {
+                center,
+                major,
+                minor,
+                distance,
+            } => CurveKind::EllipseOffset {
                 center: image(s, center),
                 major: image(s, major),
                 minor,
                 distance,
             },
             // The same ellipse, turned around like an arc.
-            CurveKind::EllipseArc { center, major, minor, start, end } => CurveKind::EllipseArc {
+            CurveKind::EllipseArc {
+                center,
+                major,
+                minor,
+                start,
+                end,
+            } => CurveKind::EllipseArc {
                 center: image(s, center),
                 major: image(s, major),
                 minor,
@@ -309,11 +337,14 @@ impl OffsetShape {
                 sweep: std::f64::consts::TAU,
             }
             .tessellate(std::f64::consts::PI / 90.0, 16),
-            OffsetShape::Ellipse { center, major, minor, distance } => {
-                crate::geom::EllipseGeom::new(s.pos(center), s.pos(major), minor)
-                    .with_offset(distance)
-                    .tessellate(std::f64::consts::PI / 90.0, 16)
-            }
+            OffsetShape::Ellipse {
+                center,
+                major,
+                minor,
+                distance,
+            } => crate::geom::EllipseGeom::new(s.pos(center), s.pos(major), minor)
+                .with_offset(distance)
+                .tessellate(std::f64::consts::PI / 90.0, 16),
         }
     }
 }
@@ -336,14 +367,22 @@ pub fn offset_geometry(
         let curve = s.curves.get(c).ok_or("the curve is gone")?;
         out.push(match curve.kind {
             CurveKind::Line { a, b } => {
-                let (p, q) = if reversed { (s.pos(b), s.pos(a)) } else { (s.pos(a), s.pos(b)) };
+                let (p, q) = if reversed {
+                    (s.pos(b), s.pos(a))
+                } else {
+                    (s.pos(a), s.pos(b))
+                };
                 let n = (q - p).normalize().perp();
                 OffsetShape::Line(p + n * side, q + n * side)
             }
             CurveKind::Arc { center, .. } => {
                 let g = s.arc_geom(c).ok_or("not an arc")?;
                 // Running counter-clockwise, left is toward the center.
-                let r = if reversed { g.radius + side } else { g.radius - side };
+                let r = if reversed {
+                    g.radius + side
+                } else {
+                    g.radius - side
+                };
                 if r <= 1e-9 {
                     return Err("the offset is larger than the arc's radius".into());
                 }
@@ -353,7 +392,11 @@ pub fn offset_geometry(
                 }
             }
             CurveKind::Circle { center, radius } => {
-                let r = if reversed { radius + side } else { radius - side };
+                let r = if reversed {
+                    radius + side
+                } else {
+                    radius - side
+                };
                 if r <= 1e-9 {
                     return Err("the offset is larger than the circle's radius".into());
                 }
@@ -361,7 +404,17 @@ pub fn offset_geometry(
             }
             // P3.7: an ellipse's offset is an offset curve of the same ellipse (not an ellipse);
             // offsetting an offset ellipse offsets that ellipse further.
-            CurveKind::Ellipse { center, major, minor } | CurveKind::EllipseOffset { center, major, minor, .. } => {
+            CurveKind::Ellipse {
+                center,
+                major,
+                minor,
+            }
+            | CurveKind::EllipseOffset {
+                center,
+                major,
+                minor,
+                ..
+            } => {
                 let d0 = match curve.kind {
                     CurveKind::EllipseOffset { distance, .. } => distance,
                     _ => 0.0,
@@ -369,16 +422,31 @@ pub fn offset_geometry(
                 // The parameter runs counter-clockwise for a positive minor radius; left of a
                 // counter-clockwise run is inside.
                 let ccw = minor > 0.0;
-                let d = if ccw != reversed { d0 - side } else { d0 + side };
-                let g = crate::geom::EllipseGeom::new(s.pos(center), s.pos(major), minor).with_offset(d);
+                let d = if ccw != reversed {
+                    d0 - side
+                } else {
+                    d0 + side
+                };
+                let g = crate::geom::EllipseGeom::new(s.pos(center), s.pos(major), minor)
+                    .with_offset(d);
                 if !g.offset_is_smooth() {
-                    return Err("the offset is larger than the ellipse's smallest radius of curvature".into());
+                    return Err(
+                        "the offset is larger than the ellipse's smallest radius of curvature"
+                            .into(),
+                    );
                 }
-                OffsetShape::Ellipse { center, major, minor, distance: d }
+                OffsetShape::Ellipse {
+                    center,
+                    major,
+                    minor,
+                    distance: d,
+                }
             }
             CurveKind::Spline { .. } => return Err("a spline can't be offset yet".into()),
             CurveKind::Bezier { .. } => return Err("a Bézier curve can't be offset".into()),
-            CurveKind::EllipseArc { .. } => return Err("an elliptical arc can't be offset yet".into()),
+            CurveKind::EllipseArc { .. } => {
+                return Err("an elliptical arc can't be offset yet".into());
+            }
         });
     }
     // Where consecutive pieces meet (chains of lines and arcs).
@@ -386,8 +454,10 @@ pub fn offset_geometry(
     let closed = n > 1 && {
         let first = s.curve_ends(chain[0].0);
         let last = s.curve_ends(chain[n - 1].0);
-        let start_of = |e: Option<(PointId, PointId)>, rev: bool| e.map(|(a, b)| if rev { b } else { a });
-        let end_of = |e: Option<(PointId, PointId)>, rev: bool| e.map(|(a, b)| if rev { a } else { b });
+        let start_of =
+            |e: Option<(PointId, PointId)>, rev: bool| e.map(|(a, b)| if rev { b } else { a });
+        let end_of =
+            |e: Option<(PointId, PointId)>, rev: bool| e.map(|(a, b)| if rev { a } else { b });
         // (The same point, or separate ones at the same place: a used loop.)
         match (start_of(first, chain[0].1), end_of(last, chain[n - 1].1)) {
             (Some(p), Some(q)) => p == q || s.pos(p).distance(s.pos(q)) < 1e-7,
@@ -401,8 +471,16 @@ pub fn offset_geometry(
         // direction. A reversed arc enters at its end and leaves at its start.
         let reversed_i = chain[i].1 && matches!(out[i], OffsetShape::Arc { .. });
         let reversed_j = chain[j].1 && matches!(out[j], OffsetShape::Arc { .. });
-        let end_i = if reversed_i { start_of_shape(&out[i], s) } else { end_of_shape(&out[i], s) };
-        let start_j = if reversed_j { end_of_shape(&out[j], s) } else { start_of_shape(&out[j], s) };
+        let end_i = if reversed_i {
+            start_of_shape(&out[i], s)
+        } else {
+            end_of_shape(&out[i], s)
+        };
+        let start_j = if reversed_j {
+            end_of_shape(&out[j], s)
+        } else {
+            start_of_shape(&out[j], s)
+        };
         let (Some(e), Some(st)) = (end_i, start_j) else {
             continue;
         };
@@ -411,8 +489,16 @@ pub fn offset_geometry(
         } else {
             meeting_point(s, &out[i], &out[j], e.midpoint(st)).unwrap_or(e.midpoint(st))
         };
-        if reversed_i { set_start(&mut out[i], s, meet); } else { set_end(&mut out[i], s, meet); }
-        if reversed_j { set_end(&mut out[j], s, meet); } else { set_start(&mut out[j], s, meet); }
+        if reversed_i {
+            set_start(&mut out[i], s, meet);
+        } else {
+            set_end(&mut out[i], s, meet);
+        }
+        if reversed_j {
+            set_end(&mut out[j], s, meet);
+        } else {
+            set_start(&mut out[j], s, meet);
+        }
     }
     Ok(out)
 }
@@ -463,7 +549,11 @@ fn set_start(sh: &mut OffsetShape, _s: &Sketch, p: Vec2) {
             let new0 = (p - geom.center).angle();
             let sweep = crate::geom::norm_angle(a1 - new0);
             geom.start_angle = new0;
-            geom.sweep = if sweep < 1e-9 { std::f64::consts::TAU } else { sweep };
+            geom.sweep = if sweep < 1e-9 {
+                std::f64::consts::TAU
+            } else {
+                sweep
+            };
         }
         OffsetShape::Circle { .. } | OffsetShape::Ellipse { .. } => {}
     }
@@ -475,7 +565,11 @@ fn set_end(sh: &mut OffsetShape, _s: &Sketch, p: Vec2) {
         OffsetShape::Arc { geom, .. } => {
             let new1 = (p - geom.center).angle();
             let sweep = crate::geom::norm_angle(new1 - geom.start_angle);
-            geom.sweep = if sweep < 1e-9 { std::f64::consts::TAU } else { sweep };
+            geom.sweep = if sweep < 1e-9 {
+                std::f64::consts::TAU
+            } else {
+                sweep
+            };
         }
         OffsetShape::Circle { .. } | OffsetShape::Ellipse { .. } => {}
     }
@@ -521,11 +615,24 @@ pub fn offset(
                 }
             }
             OffsetShape::Circle { center, radius } => CurveKind::Circle { center, radius },
-            OffsetShape::Ellipse { center, major, minor, distance } => CurveKind::EllipseOffset { center, major, minor, distance },
+            OffsetShape::Ellipse {
+                center,
+                major,
+                minor,
+                distance,
+            } => CurveKind::EllipseOffset {
+                center,
+                major,
+                minor,
+                distance,
+            },
         };
         let id = s.curves.insert(Curve { kind, construction });
         if matches!(kind, CurveKind::Line { .. }) {
-            s.add_constraint(ConstraintOf::Parallel(CurveRef::Curve(src), CurveRef::Curve(id)));
+            s.add_constraint(ConstraintOf::Parallel(
+                CurveRef::Curve(src),
+                CurveRef::Curve(id),
+            ));
         }
         made.push(id);
     }
@@ -591,15 +698,22 @@ pub fn scale(s: &mut Sketch, center: Vec2, factor: f64) -> Result<(), String> {
 /// well (S13.3: "the first dimension scales the whole sketch"), in the same step, about
 /// [`scale_center`]. Not when something in the sketch is fixed (a Fix, or a curve Used from
 /// outside the sketch, which can't move), or for an angle.
-pub fn set_value_op(s: &Sketch, id: crate::DimensionId, value: f64, first: bool) -> crate::SketchOp {
+pub fn set_value_op(
+    s: &Sketch,
+    id: crate::DimensionId,
+    value: f64,
+    first: bool,
+) -> crate::SketchOp {
     let set = crate::SketchOp::SetDimensionValue { id, value };
     let Some(d) = s.dimensions.get(id) else {
         return set;
     };
-    let fixed = s
-        .constraints
-        .values()
-        .any(|c| matches!(c, ConstraintOf::FixPoint(_) | ConstraintOf::FixCurve(_) | ConstraintOf::Use(..)));
+    let fixed = s.constraints.values().any(|c| {
+        matches!(
+            c,
+            ConstraintOf::FixPoint(_) | ConstraintOf::FixCurve(_) | ConstraintOf::Use(..)
+        )
+    });
     let measured = crate::dimension::measure(s, d.kind).unwrap_or(0.0);
     if !first || fixed || d.kind.quantity() != crate::units::Quantity::Length || measured <= 1e-9 {
         return set;
@@ -623,11 +737,13 @@ pub fn scale_center(s: &Sketch, d: &DimensionKind) -> Vec2 {
                 .any(|r| matches!(r, CurveRef::XAxis | CurveRef::YAxis))
     }) || matches!(
         d,
-        DimensionKind::PointLine { p: PointRef::Origin, .. }
-            | DimensionKind::PointLine {
-                line: CurveRef::XAxis | CurveRef::YAxis,
-                ..
-            }
+        DimensionKind::PointLine {
+            p: PointRef::Origin,
+            ..
+        } | DimensionKind::PointLine {
+            line: CurveRef::XAxis | CurveRef::YAxis,
+            ..
+        }
     );
     if attached {
         return Vec2::ZERO;
@@ -646,7 +762,11 @@ pub fn scale_center(s: &Sketch, d: &DimensionKind) -> Vec2 {
             ) => {
                 return s.pos(center);
             }
-            Some(CurveKind::Line { a, .. } | CurveKind::Spline { start: a, .. } | CurveKind::Bezier { a, .. }) => return s.pos(a),
+            Some(
+                CurveKind::Line { a, .. }
+                | CurveKind::Spline { start: a, .. }
+                | CurveKind::Bezier { a, .. },
+            ) => return s.pos(a),
             None => {}
         }
     }
@@ -749,17 +869,32 @@ mod tests {
         let mut s = Sketch::new();
         let axis = line(&mut s, v(0.0, -50.0), v(0.0, 50.0), true);
         let l = line(&mut s, v(10.0, 0.0), v(30.0, 20.0), false);
-        let m = SketchOp::Mirror { axis: CurveRef::Curve(axis), curves: vec![l] };
+        let m = SketchOp::Mirror {
+            axis: CurveRef::Curve(axis),
+            curves: vec![l],
+        };
         m.apply(&mut s).unwrap();
         let copy = s.curves.keys().find(|k| *k != axis && *k != l).unwrap();
         let (curves, constraints) = (s.curves.len(), s.constraints.len());
         // The source, its copy, or both: nothing to mirror.
         for again in [vec![l], vec![copy], vec![l, copy]] {
-            assert!(SketchOp::Mirror { axis: CurveRef::Curve(axis), curves: again }.apply(&mut s.clone()).is_err());
+            assert!(
+                SketchOp::Mirror {
+                    axis: CurveRef::Curve(axis),
+                    curves: again
+                }
+                .apply(&mut s.clone())
+                .is_err()
+            );
         }
         // A new curve among them is still mirrored, on its own.
         let n = line(&mut s, v(5.0, 30.0), v(15.0, 40.0), false);
-        SketchOp::Mirror { axis: CurveRef::Curve(axis), curves: vec![l, copy, n] }.apply(&mut s).unwrap();
+        SketchOp::Mirror {
+            axis: CurveRef::Curve(axis),
+            curves: vec![l, copy, n],
+        }
+        .apply(&mut s)
+        .unwrap();
         assert_eq!(s.curves.len(), curves + 2);
         assert_eq!(s.constraints.len(), constraints + 1);
     }
@@ -781,7 +916,11 @@ mod tests {
         ends.sort_by(|p, q| p.y.total_cmp(&q.y));
         assert!(ends[0].distance(v(-10.0, 0.0)) < 1e-9 && ends[1].distance(v(-30.0, 20.0)) < 1e-9);
         assert!(s.constraints.values().any(|c| *c
-            == ConstraintOf::SymmetricCurves(CurveRef::Curve(l), CurveRef::Curve(copy), CurveRef::YAxis)));
+            == ConstraintOf::SymmetricCurves(
+                CurveRef::Curve(l),
+                CurveRef::Curve(copy),
+                CurveRef::YAxis
+            )));
         // The copy follows its source.
         let end = s.point_at(v(30.0, 20.0), 1e-9).unwrap();
         SketchOp::MovePoints {
@@ -790,22 +929,34 @@ mod tests {
         .apply(&mut s)
         .unwrap();
         let p = s.pos(end);
-        assert!([a, b].iter().any(|q| s.pos(*q).distance(v(-p.x, p.y)) < 1e-6));
+        assert!(
+            [a, b]
+                .iter()
+                .any(|q| s.pos(*q).distance(v(-p.x, p.y)) < 1e-6)
+        );
     }
 
     #[test]
     fn plane_axes_are_line_picks_for_constraints() {
-        use crate::constraint::{ConstraintKind, Fit, fit};
         use crate::SketchEntity as E;
+        use crate::constraint::{ConstraintKind, Fit, fit};
         let mut s = Sketch::new();
         let l1 = line(&mut s, v(2.0, 1.0), v(5.0, 5.0), false);
         let l2 = line(&mut s, v(-2.0, 1.0), v(-6.0, 5.0), false);
-        let Fit::Complete(cs) = fit(ConstraintKind::Symmetric, &s, &[E::YAxis, E::Curve(l1), E::Curve(l2)]) else {
+        let Fit::Complete(cs) = fit(
+            ConstraintKind::Symmetric,
+            &s,
+            &[E::YAxis, E::Curve(l1), E::Curve(l2)],
+        ) else {
             panic!("symmetric about the Y axis")
         };
         assert_eq!(
             cs,
-            vec![ConstraintOf::SymmetricCurves(CurveRef::Curve(l1), CurveRef::Curve(l2), CurveRef::YAxis)]
+            vec![ConstraintOf::SymmetricCurves(
+                CurveRef::Curve(l1),
+                CurveRef::Curve(l2),
+                CurveRef::YAxis
+            )]
         );
         assert!(matches!(
             fit(ConstraintKind::Parallel, &s, &[E::Curve(l1), E::XAxis]),
@@ -883,7 +1034,10 @@ mod tests {
         .unwrap();
         let (l0, l1) = crate::dimension::line_ends(&s, CurveRef::Curve(axis)).unwrap();
         let (pa, pb) = (s.pos(a), s.pos(b));
-        assert!(mirror_point(pa, l0, l1).distance(pb) < 1e-7, "{pa:?} {pb:?}");
+        assert!(
+            mirror_point(pa, l0, l1).distance(pb) < 1e-7,
+            "{pa:?} {pb:?}"
+        );
         let geo = |c: CurveId| match s.curves[c].kind {
             CurveKind::Circle { center, radius } => (s.pos(center), radius),
             _ => unreachable!(),
@@ -896,8 +1050,8 @@ mod tests {
 
     #[test]
     fn symmetric_fit_takes_the_axis_first() {
-        use crate::constraint::{ConstraintKind, Fit, fit};
         use crate::SketchEntity as E;
+        use crate::constraint::{ConstraintKind, Fit, fit};
         let mut s = Sketch::new();
         let axis = line(&mut s, v(0.0, 0.0), v(0.0, 10.0), false);
         fix(&mut s, axis);
@@ -912,7 +1066,10 @@ mod tests {
             Fit::Complete(_)
         ));
         // A line and a point are not the same type; a point first is not an axis.
-        assert_eq!(fit(k, &s, &[E::Curve(axis), E::Curve(l1), E::Point(p)]), Fit::Invalid);
+        assert_eq!(
+            fit(k, &s, &[E::Curve(axis), E::Curve(l1), E::Point(p)]),
+            Fit::Invalid
+        );
         assert_eq!(fit(k, &s, &[E::Point(p)]), Fit::Invalid);
         // Solving two lines symmetric.
         let Fit::Complete(cs) = fit(k, &s, &[E::Curve(axis), E::Curve(l1), E::Curve(l2)]) else {
@@ -927,7 +1084,11 @@ mod tests {
         let (a1, b1) = s.curve_ends(l1).unwrap();
         for q in [a1, b1] {
             let m = mirror_point(s.pos(q), v(0.0, 0.0), v(0.0, 10.0));
-            assert!(s.curve_points(l2).iter().any(|x| s.pos(*x).distance(m) < 1e-7));
+            assert!(
+                s.curve_points(l2)
+                    .iter()
+                    .any(|x| s.pos(*x).distance(m) < 1e-7)
+            );
         }
     }
 
@@ -956,7 +1117,9 @@ mod tests {
         assert!((crate::dimension::measure(&s, d.kind).unwrap() - 7.0).abs() < 1e-9);
         // Changing the distance moves the offset line (it stays parallel).
         let id = s.dimensions.keys().next().unwrap();
-        SketchOp::SetDimensionValue { id, value: 12.0 }.apply(&mut s).unwrap();
+        SketchOp::SetDimensionValue { id, value: 12.0 }
+            .apply(&mut s)
+            .unwrap();
         let copy = s.curves.keys().find(|k| *k != l).unwrap();
         let (a, b) = s.curve_ends(copy).unwrap();
         assert!((s.pos(a).y + 12.0).abs() < 1e-7 && (s.pos(b).y + 12.0).abs() < 1e-7);
@@ -985,7 +1148,11 @@ mod tests {
         let inner = s.curves.keys().find(|k| *k != arc).unwrap();
         let g = s.arc_geom(inner).unwrap();
         assert!((g.radius - 35.0).abs() < 1e-9 && g.center.distance(v(0.0, 200.0)) < 1e-9);
-        assert_eq!(s.curve_points(inner)[0], s.curve_points(arc)[0], "shares the center");
+        assert_eq!(
+            s.curve_points(inner)[0],
+            s.curve_points(arc)[0],
+            "shares the center"
+        );
         let d = *s.dimensions.values().next().unwrap();
         assert!(d.kind.radial(&s));
         assert!((crate::dimension::measure(&s, d.kind).unwrap() - 40.0).abs() < 1e-9);
@@ -1009,7 +1176,9 @@ mod tests {
         let (chain, closed) = chain_of(&s, c);
         assert!(closed);
         let out = offset_geometry(&s, &chain, 3.0, false).unwrap();
-        assert!(matches!(out[0], OffsetShape::Circle { radius, .. } if (radius - 13.0).abs() < 1e-12));
+        assert!(
+            matches!(out[0], OffsetShape::Circle { radius, .. } if (radius - 13.0).abs() < 1e-12)
+        );
         assert!(offset_geometry(&s, &chain, 30.0, true).is_err());
     }
 
@@ -1022,19 +1191,41 @@ mod tests {
     #[test]
     fn offset_ellipse_makes_an_offset_curve() {
         let mut s = Sketch::new();
-        SketchOp::AddEllipse { center: v(0.0, 0.0), major: v(3.0, 0.0), minor: 2.0, construction: false }
-            .apply(&mut s)
-            .unwrap();
+        SketchOp::AddEllipse {
+            center: v(0.0, 0.0),
+            major: v(3.0, 0.0),
+            minor: 2.0,
+            construction: false,
+        }
+        .apply(&mut s)
+        .unwrap();
         let e = s.curves.keys().next().unwrap();
         let (chain, closed) = chain_of(&s, e);
         assert!(closed);
         // Running counter-clockwise, left is inside.
-        SketchOp::Offset { chain, distance: 0.125, left: true, label: (0.0, 0.0) }.apply(&mut s).unwrap();
+        SketchOp::Offset {
+            chain,
+            distance: 0.125,
+            left: true,
+            label: (0.0, 0.0),
+        }
+        .apply(&mut s)
+        .unwrap();
         let rim = s.curves.keys().find(|k| *k != e).unwrap();
-        let CurveKind::EllipseOffset { center, major, minor, distance } = s.curves[rim].kind else {
+        let CurveKind::EllipseOffset {
+            center,
+            major,
+            minor,
+            distance,
+        } = s.curves[rim].kind
+        else {
             panic!("an offset ellipse");
         };
-        assert_eq!((center, major), (s.curve_points(e)[0], s.curve_points(e)[1]), "shares the ellipse's points");
+        assert_eq!(
+            (center, major),
+            (s.curve_points(e)[0], s.curve_points(e)[1]),
+            "shares the ellipse's points"
+        );
         assert!((minor - 2.0).abs() < 1e-12 && (distance + 0.125).abs() < 1e-12);
         let g = s.ellipse_geom(rim).unwrap();
         assert!((g.point_at(0.0) - v(2.875, 0.0)).length() < 1e-12);
@@ -1045,29 +1236,58 @@ mod tests {
         let mut regions = crate::region::regions(&s);
         regions.sort_by(|a, b| a.area().total_cmp(&b.area()));
         assert_eq!(regions.len(), 2);
-        assert!((regions[0].area() - (l * d - std::f64::consts::PI * d * d)).abs() < 1e-9, "{}", regions[0].area());
+        assert!(
+            (regions[0].area() - (l * d - std::f64::consts::PI * d * d)).abs() < 1e-9,
+            "{}",
+            regions[0].area()
+        );
         assert!((regions[1].area() - (area - l * d + std::f64::consts::PI * d * d)).abs() < 1e-9);
         // The dimension drives it.
         let dim = s.dimensions.keys().next().unwrap();
-        assert!((crate::dimension::measure(&s, s.dimensions[dim].kind).unwrap() - 0.125).abs() < 1e-12);
-        SketchOp::SetDimensionValue { id: dim, value: 0.2 }.apply(&mut s).unwrap();
-        assert!(matches!(s.curves[rim].kind, CurveKind::EllipseOffset { distance, .. } if (distance + 0.2).abs() < 1e-12));
+        assert!(
+            (crate::dimension::measure(&s, s.dimensions[dim].kind).unwrap() - 0.125).abs() < 1e-12
+        );
+        SketchOp::SetDimensionValue {
+            id: dim,
+            value: 0.2,
+        }
+        .apply(&mut s)
+        .unwrap();
+        assert!(
+            matches!(s.curves[rim].kind, CurveKind::EllipseOffset { distance, .. } if (distance + 0.2).abs() < 1e-12)
+        );
         // The ellipse's minor radius changes: the offset follows.
-        SketchOp::SetDimensionValue { id: dim, value: 0.125 }.apply(&mut s).unwrap();
+        SketchOp::SetDimensionValue {
+            id: dim,
+            value: 0.125,
+        }
+        .apply(&mut s)
+        .unwrap();
         if let CurveKind::Ellipse { minor, .. } = &mut s.curves[e].kind {
             *minor = 2.5;
         }
         crate::solve::solve(&mut s);
-        assert!(matches!(s.curves[rim].kind, CurveKind::EllipseOffset { minor, .. } if (minor - 2.5).abs() < 1e-12));
+        assert!(
+            matches!(s.curves[rim].kind, CurveKind::EllipseOffset { minor, .. } if (minor - 2.5).abs() < 1e-12)
+        );
         if let CurveKind::Ellipse { minor, .. } = &mut s.curves[e].kind {
             *minor = 2.0;
         }
         crate::solve::solve(&mut s);
         // An offset of the offset, 0.05 outward (the Funnel's Sketch 2).
         let (chain, _) = chain_of(&s, rim);
-        SketchOp::Offset { chain, distance: 0.05, left: false, label: (0.0, 0.0) }.apply(&mut s).unwrap();
+        SketchOp::Offset {
+            chain,
+            distance: 0.05,
+            left: false,
+            label: (0.0, 0.0),
+        }
+        .apply(&mut s)
+        .unwrap();
         let band = s.curves.keys().find(|k| *k != e && *k != rim).unwrap();
-        assert!(matches!(s.curves[band].kind, CurveKind::EllipseOffset { distance, .. } if (distance + 0.075).abs() < 1e-12));
+        assert!(
+            matches!(s.curves[band].kind, CurveKind::EllipseOffset { distance, .. } if (distance + 0.075).abs() < 1e-12)
+        );
         let (chain, _) = chain_of(&s, e);
         assert!(offset_geometry(&s, &chain, 1.4, true).is_err());
         assert!(offset_geometry(&s, &chain, 1.3, true).is_ok());
@@ -1100,7 +1320,9 @@ mod tests {
         assert_eq!(s.curves.len(), 4);
         // Both offsets follow a new distance.
         let id = s.dimensions.keys().next().unwrap();
-        SketchOp::SetDimensionValue { id, value: 8.0 }.apply(&mut s).unwrap();
+        SketchOp::SetDimensionValue { id, value: 8.0 }
+            .apply(&mut s)
+            .unwrap();
         assert!(s.point_at(v(32.0, 8.0), 1e-6).is_some(), "{:?}", s.points);
         // A tangent chain: a line and an arc continuing it.
         let mut s = Sketch::new();
@@ -1134,11 +1356,24 @@ mod tests {
             let b = v(20.0, 0.0);
             let c = v(30.0, 10.0);
             let d = v(30.0, 30.0);
-            let first = if reverse_lines { line(&mut s, b, a, false) } else { line(&mut s, a, b, false) };
+            let first = if reverse_lines {
+                line(&mut s, b, a, false)
+            } else {
+                line(&mut s, a, b, false)
+            };
             SketchOp::AddArc {
-                center: v(20.0, 10.0), start: b, end: c, construction: false,
-            }.apply(&mut s).unwrap();
-            let last = if reverse_lines { line(&mut s, d, c, false) } else { line(&mut s, c, d, false) };
+                center: v(20.0, 10.0),
+                start: b,
+                end: c,
+                construction: false,
+            }
+            .apply(&mut s)
+            .unwrap();
+            let last = if reverse_lines {
+                line(&mut s, d, c, false)
+            } else {
+                line(&mut s, c, d, false)
+            };
             // Picking either end may traverse the stored CCW arc backwards.
             for seed in [first, last] {
                 let (chain, closed) = chain_of(&s, seed);
@@ -1146,19 +1381,37 @@ mod tests {
                 assert_eq!(chain.len(), 3);
                 for left in [false, true] {
                     let shapes = offset_geometry(&s, &chain, 2.0, left).unwrap();
-                    let OffsetShape::Arc { geom, .. } = shapes[1] else { panic!("missing arc") };
-                    assert!((geom.sweep - std::f64::consts::FRAC_PI_2).abs() < 1e-8, "{chain:?}: {geom:?}");
+                    let OffsetShape::Arc { geom, .. } = shapes[1] else {
+                        panic!("missing arc")
+                    };
+                    assert!(
+                        (geom.sweep - std::f64::consts::FRAC_PI_2).abs() < 1e-8,
+                        "{chain:?}: {geom:?}"
+                    );
                     let endpoints = [geom.start(), geom.end()];
                     for shape in [shapes[0], shapes[2]] {
-                        let OffsetShape::Line(p, q) = shape else { panic!("missing line") };
-                        assert!(endpoints.iter().any(|e| e.distance(p).min(e.distance(q)) < 1e-8));
+                        let OffsetShape::Line(p, q) = shape else {
+                            panic!("missing line")
+                        };
+                        assert!(
+                            endpoints
+                                .iter()
+                                .any(|e| e.distance(p).min(e.distance(q)) < 1e-8)
+                        );
                         let tangent = (q - p).normalize();
-                        let joint = endpoints.iter().find(|e| e.distance(p).min(e.distance(q)) < 1e-8).unwrap();
+                        let joint = endpoints
+                            .iter()
+                            .find(|e| e.distance(p).min(e.distance(q)) < 1e-8)
+                            .unwrap();
                         assert!(tangent.dot(*joint - geom.center).abs() < 1e-8);
                     }
                     let mut placed = s.clone();
                     let made = offset(&mut placed, &chain, 2.0, left, (2.0, 0.0)).unwrap();
-                    assert!((placed.arc_geom(made[1]).unwrap().sweep - std::f64::consts::FRAC_PI_2).abs() < 1e-8);
+                    assert!(
+                        (placed.arc_geom(made[1]).unwrap().sweep - std::f64::consts::FRAC_PI_2)
+                            .abs()
+                            < 1e-8
+                    );
                 }
             }
         }
@@ -1166,8 +1419,8 @@ mod tests {
 
     #[test]
     fn new_symmetric_and_offset_edits_move_only_the_second_entity() {
-        use crate::constraint::{ConstraintKind, Fit, fit};
         use crate::SketchEntity as E;
+        use crate::constraint::{ConstraintKind, Fit, fit};
         // Nothing fixed: applying Symmetric keeps the first line and the axis where they are.
         let mut s = Sketch::new();
         let axis = line(&mut s, v(0.0, 0.0), v(0.0, 10.0), true);
@@ -1197,7 +1450,9 @@ mod tests {
             .map(|p| s.pos(p))
             .collect();
         assert_eq!(before, after, "the first line and the axis stay");
-        assert!(s.point_at(v(10.0, 0.0), 1e-7).is_some() && s.point_at(v(4.0, 8.0), 1e-7).is_some());
+        assert!(
+            s.point_at(v(10.0, 0.0), 1e-7).is_some() && s.point_at(v(4.0, 8.0), 1e-7).is_some()
+        );
         // Nothing fixed: typing an offset distance moves the copy, not the source.
         let mut s = Sketch::new();
         let l = line(&mut s, v(0.0, 0.0), v(40.0, 0.0), false);
@@ -1210,9 +1465,15 @@ mod tests {
         .apply(&mut s)
         .unwrap();
         let id = s.dimensions.keys().next().unwrap();
-        SketchOp::SetDimensionValue { id, value: 12.0 }.apply(&mut s).unwrap();
+        SketchOp::SetDimensionValue { id, value: 12.0 }
+            .apply(&mut s)
+            .unwrap();
         let (a, b) = s.curve_ends(l).unwrap();
-        assert_eq!((s.pos(a), s.pos(b)), (v(0.0, 0.0), v(40.0, 0.0)), "the source stays");
+        assert_eq!(
+            (s.pos(a), s.pos(b)),
+            (v(0.0, 0.0), v(40.0, 0.0)),
+            "the source stays"
+        );
         assert!(s.point_at(v(0.0, 12.0), 1e-7).is_some());
     }
 
@@ -1235,7 +1496,11 @@ mod tests {
         .unwrap();
         assert_eq!(s.line_length(l), Some(40.0));
         assert!(s.point_at(v(20.0, 0.0), 1e-9).is_some());
-        assert!(s.curves.values().any(|c| matches!(c.kind, CurveKind::Circle { radius, .. } if radius == 10.0)));
+        assert!(
+            s.curves
+                .values()
+                .any(|c| matches!(c.kind, CurveKind::Circle { radius, .. } if radius == 10.0))
+        );
     }
 }
 
@@ -1252,24 +1517,67 @@ pub fn paste(dst: &mut Sketch, src: &Sketch, offset: Vec2) -> Vec<CurveId> {
     let mut curves: HashMap<CurveId, CurveId> = HashMap::new();
     for (k, c) in &src.curves {
         let kind = match c.kind {
-            CurveKind::Line { a, b } => CurveKind::Line { a: points[&a], b: points[&b] },
-            CurveKind::Circle { center, radius } => CurveKind::Circle { center: points[&center], radius },
-            CurveKind::Arc { center, start, end } => CurveKind::Arc { center: points[&center], start: points[&start], end: points[&end] },
-            CurveKind::Ellipse { center, major, minor } => CurveKind::Ellipse { center: points[&center], major: points[&major], minor },
-            CurveKind::EllipseOffset { center, major, minor, distance } => {
-                CurveKind::EllipseOffset { center: points[&center], major: points[&major], minor, distance }
-            }
-            CurveKind::EllipseArc { center, major, minor, start, end } => CurveKind::EllipseArc {
+            CurveKind::Line { a, b } => CurveKind::Line {
+                a: points[&a],
+                b: points[&b],
+            },
+            CurveKind::Circle { center, radius } => CurveKind::Circle {
+                center: points[&center],
+                radius,
+            },
+            CurveKind::Arc { center, start, end } => CurveKind::Arc {
+                center: points[&center],
+                start: points[&start],
+                end: points[&end],
+            },
+            CurveKind::Ellipse {
+                center,
+                major,
+                minor,
+            } => CurveKind::Ellipse {
+                center: points[&center],
+                major: points[&major],
+                minor,
+            },
+            CurveKind::EllipseOffset {
+                center,
+                major,
+                minor,
+                distance,
+            } => CurveKind::EllipseOffset {
+                center: points[&center],
+                major: points[&major],
+                minor,
+                distance,
+            },
+            CurveKind::EllipseArc {
+                center,
+                major,
+                minor,
+                start,
+                end,
+            } => CurveKind::EllipseArc {
                 center: points[&center],
                 major: points[&major],
                 minor,
                 start: points[&start],
                 end: points[&end],
             },
-            CurveKind::Spline { start, end } => CurveKind::Spline { start: points[&start], end: points[&end] },
-            CurveKind::Bezier { a, c1, c2, b } => CurveKind::Bezier { a: points[&a], c1: points[&c1], c2: points[&c2], b: points[&b] },
+            CurveKind::Spline { start, end } => CurveKind::Spline {
+                start: points[&start],
+                end: points[&end],
+            },
+            CurveKind::Bezier { a, c1, c2, b } => CurveKind::Bezier {
+                a: points[&a],
+                c1: points[&c1],
+                c2: points[&c2],
+                b: points[&b],
+            },
         };
-        let new = dst.curves.insert(crate::Curve { kind, construction: c.construction });
+        let new = dst.curves.insert(crate::Curve {
+            kind,
+            construction: c.construction,
+        });
         if let Some(d) = src.splines.get(k) {
             let mut d = d.clone();
             d.points = d.points.iter().map(|p| points[p]).collect();
@@ -1287,7 +1595,10 @@ pub fn paste(dst: &mut Sketch, src: &Sketch, offset: Vec2) -> Vec<CurveId> {
         other => Some(other),
     };
     for c in src.constraints.values() {
-        if matches!(c, ConstraintOf::Use(..) | ConstraintOf::Pierce(..) | ConstraintOf::TextAspect(_)) {
+        if matches!(
+            c,
+            ConstraintOf::Use(..) | ConstraintOf::Pierce(..) | ConstraintOf::TextAspect(_)
+        ) {
             continue;
         }
         if let Some(m) = c.map(pref, cref) {
@@ -1313,15 +1624,32 @@ mod paste_tests {
     fn paste_copies_geometry_constraints_and_dimensions() {
         let mut src = Sketch::new();
         let v = Vec2::new;
-        SketchOp::AddPolyline { points: vec![v(0.0, 0.0), v(10.0, 0.0), v(10.0, 5.0), v(0.0, 5.0)], closed: true, construction: false, label: "r" }
-            .apply(&mut src)
-            .unwrap();
+        SketchOp::AddPolyline {
+            points: vec![v(0.0, 0.0), v(10.0, 0.0), v(10.0, 5.0), v(0.0, 5.0)],
+            closed: true,
+            construction: false,
+            label: "r",
+        }
+        .apply(&mut src)
+        .unwrap();
         let bottom = src.curves.keys().next().unwrap();
-        src.constraints.insert(ConstraintOf::Horizontal(crate::Orient::Line(CurveRef::Curve(bottom))));
+        src.constraints
+            .insert(ConstraintOf::Horizontal(crate::Orient::Line(
+                CurveRef::Curve(bottom),
+            )));
         let (a, b) = src.curve_ends(bottom).unwrap();
-        src.dimensions.insert(Dimension::new(DimensionKind::Horizontal { a, b }, 10.0, -3.0));
+        src.dimensions.insert(Dimension::new(
+            DimensionKind::Horizontal { a, b },
+            10.0,
+            -3.0,
+        ));
         let mut dst = Sketch::new();
-        SketchOp::Paste { sketch: Box::new(src.clone()), offset: v(20.0, 0.0) }.apply(&mut dst).unwrap();
+        SketchOp::Paste {
+            sketch: Box::new(src.clone()),
+            offset: v(20.0, 0.0),
+        }
+        .apply(&mut dst)
+        .unwrap();
         assert_eq!(dst.curves.len(), 4);
         assert_eq!(dst.constraints.len(), 1);
         assert_eq!(dst.dimensions.len(), 1);

@@ -32,7 +32,13 @@ use super::{ImportFeature, ImportFormat};
 /// The names of the `n` pieces of an imported part named `name`: the name, then
 /// "<name> (2)", "<name> (3)", ….
 pub fn piece_names(name: &str, n: usize) -> impl Iterator<Item = String> + '_ {
-    (0..n).map(move |k| if k == 0 { name.to_string() } else { format!("{name} ({})", k + 1) })
+    (0..n).map(move |k| {
+        if k == 0 {
+            name.to_string()
+        } else {
+            format!("{name} ({})", k + 1)
+        }
+    })
 }
 
 /// What an Import read with its structure makes ([`ImportFeature::structure`]).
@@ -79,15 +85,22 @@ impl ImportPlan {
     /// An assembly: some part used more than once, or placed away from the origin.
     pub fn is_assembly(&self) -> bool {
         let moved = self.occurrences.iter().any(|o| o.pose != Pose::IDENTITY);
-        let repeated = (0..self.parts.len()).any(|p| self.occurrences.iter().filter(|o| o.part == p).count() > 1);
+        let repeated = (0..self.parts.len())
+            .any(|p| self.occurrences.iter().filter(|o| o.part == p).count() > 1);
         moved || repeated
     }
 
     /// How many parts the Part Studio gets in `mode`.
     pub fn part_count(&self, mode: ImportMode) -> usize {
         match mode {
-            ImportMode::Parts | ImportMode::AtOrigin => self.parts.iter().map(|p| p.solids.max(1)).sum(),
-            ImportMode::Flatten => self.occurrences.iter().map(|o| self.parts.get(o.part).map_or(1, |p| p.solids.max(1))).sum(),
+            ImportMode::Parts | ImportMode::AtOrigin => {
+                self.parts.iter().map(|p| p.solids.max(1)).sum()
+            }
+            ImportMode::Flatten => self
+                .occurrences
+                .iter()
+                .map(|o| self.parts.get(o.part).map_or(1, |p| p.solids.max(1)))
+                .sum(),
         }
     }
 
@@ -108,10 +121,16 @@ impl ImportPlan {
     pub fn entry_names(&self, mode: ImportMode) -> Vec<(usize, String)> {
         let base = |i: usize| -> String {
             let n = self.parts.get(i).map(|p| p.name.trim()).unwrap_or("");
-            if n.is_empty() { format!("Part {}", i + 1) } else { n.to_string() }
+            if n.is_empty() {
+                format!("Part {}", i + 1)
+            } else {
+                n.to_string()
+            }
         };
         match mode {
-            ImportMode::Parts | ImportMode::AtOrigin => (0..self.parts.len()).map(|i| (i, base(i))).collect(),
+            ImportMode::Parts | ImportMode::AtOrigin => {
+                (0..self.parts.len()).map(|i| (i, base(i))).collect()
+            }
             ImportMode::Flatten => {
                 let mut seen = vec![0usize; self.parts.len()];
                 let mut out = Vec::new();
@@ -137,7 +156,9 @@ impl ImportPlan {
         self.parts
             .iter()
             .map(|p| {
-                let ids = (0..p.solids.max(1)).map(|j| PartId::new(feature, k + j as u32)).collect();
+                let ids = (0..p.solids.max(1))
+                    .map(|j| PartId::new(feature, k + j as u32))
+                    .collect();
                 k += p.solids.max(1) as u32;
                 ids
             })
@@ -157,7 +178,10 @@ pub enum ImportAs {
 /// The file name without its folder and extension.
 pub fn stem(file_name: &str) -> String {
     let p = std::path::Path::new(file_name);
-    p.file_stem().map(|s| s.to_string_lossy().into_owned()).filter(|s| !s.is_empty()).unwrap_or_else(|| "Import".into())
+    p.file_stem()
+        .map(|s| s.to_string_lossy().into_owned())
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| "Import".into())
 }
 
 /// `name`, or `name (2)`, … : a tab name not in `taken`.
@@ -165,7 +189,10 @@ fn unique_name(name: &str, taken: &[String]) -> String {
     if !taken.iter().any(|t| t == name) {
         return name.to_string();
     }
-    (2..).map(|n| format!("{name} ({n})")).find(|c| !taken.iter().any(|t| t == c)).expect("a free name")
+    (2..)
+        .map(|n| format!("{name} ({n})"))
+        .find(|c| !taken.iter().any(|t| t == c))
+        .expect("a free name")
 }
 
 /// Ids for the tabs an import makes (fresh ones, or fixed ones for tests and scenarios).
@@ -180,14 +207,26 @@ pub struct ImportIds {
 
 impl ImportIds {
     pub fn fresh() -> Self {
-        Self { studio: ElementId::new(), assembly: ElementId::new(), feature: FeatureId::new(), instance_base: uuid::Uuid::new_v4().as_u128() & !0xffff }
+        Self {
+            studio: ElementId::new(),
+            assembly: ElementId::new(),
+            feature: FeatureId::new(),
+            instance_base: uuid::Uuid::new_v4().as_u128() & !0xffff,
+        }
     }
 }
 
 /// The tabs importing `plan` (the file `file_name`, contents `data`) adds to `doc`: a Part
 /// Studio named after the file, and with [`ImportAs::Assembly`] an Assembly tab. The file's
 /// bytes go into the blob cache ([`crate::blobs`]), and are saved with the document.
-pub fn import_elements(doc: &Document, plan: &ImportPlan, file_name: &str, data: impl Into<Vec<u8>>, how: ImportAs, ids: ImportIds) -> Vec<Element> {
+pub fn import_elements(
+    doc: &Document,
+    plan: &ImportPlan,
+    file_name: &str,
+    data: impl Into<Vec<u8>>,
+    how: ImportAs,
+    ids: ImportIds,
+) -> Vec<Element> {
     let mode = match how {
         ImportAs::PartStudio => ImportMode::Flatten,
         ImportAs::Assembly => ImportMode::Parts,
@@ -222,7 +261,11 @@ pub fn import_elements(doc: &Document, plan: &ImportPlan, file_name: &str, data:
     }
     let mut out = vec![studio.clone()];
     if how == ImportAs::Assembly {
-        let asm_name = if plan.name.trim().is_empty() || plan.name.trim() == base { format!("{base} Assembly") } else { plan.name.trim().to_string() };
+        let asm_name = if plan.name.trim().is_empty() || plan.name.trim() == base {
+            format!("{base} Assembly")
+        } else {
+            plan.name.trim().to_string()
+        };
         let mut taken = taken;
         taken.push(studio.name.clone());
         let mut asm = Element::assembly(unique_name(&asm_name, &taken));
@@ -233,11 +276,19 @@ pub fn import_elements(doc: &Document, plan: &ImportPlan, file_name: &str, data:
         for o in &plan.occurrences {
             // The part sits in its Part Studio where its first occurrence is: the instance is
             // placed relative to that.
-            let first = plan.occurrences.iter().find(|x| x.part == o.part).map_or(Pose::IDENTITY, |x| x.pose);
+            let first = plan
+                .occurrences
+                .iter()
+                .find(|x| x.part == o.part)
+                .map_or(Pose::IDENTITY, |x| x.pose);
             let pose = first.inverse().then(&o.pose);
             for part in ids_of.get(o.part).cloned().unwrap_or_default() {
-                let source = InstanceSource::Part { element: ids.studio, part };
-                let mut inst = Instance::new(InstanceId::from_u128(ids.instance_base + n), source, pose);
+                let source = InstanceSource::Part {
+                    element: ids.studio,
+                    part,
+                };
+                let mut inst =
+                    Instance::new(InstanceId::from_u128(ids.instance_base + n), source, pose);
                 n += 1;
                 inst.appearance = o.color;
                 inst.index = model.next_index(&source);
@@ -307,7 +358,13 @@ pub fn file_is_y_up(elements: &mut [Element]) {
 
 /// A new document holding an imported file (the documents page's Create ▸ Import files…),
 /// named after the file.
-pub fn imported_document(plan: &ImportPlan, file_name: &str, data: impl Into<Vec<u8>>, how: ImportAs, ids: ImportIds) -> Document {
+pub fn imported_document(
+    plan: &ImportPlan,
+    file_name: &str,
+    data: impl Into<Vec<u8>>,
+    how: ImportAs,
+    ids: ImportIds,
+) -> Document {
     let mut doc = Document::empty(stem(file_name));
     let elements = import_elements(&doc, plan, file_name, data, how, ids);
     doc.elements.extend(elements);
@@ -323,11 +380,35 @@ mod tests {
         ImportPlan {
             format: ImportFormat::Step,
             name: "Bracket set".into(),
-            parts: vec![PlanPart { name: "Bracket".into(), solids: 1 }, PlanPart { name: "".into(), solids: 2 }],
+            parts: vec![
+                PlanPart {
+                    name: "Bracket".into(),
+                    solids: 1,
+                },
+                PlanPart {
+                    name: "".into(),
+                    solids: 2,
+                },
+            ],
             occurrences: vec![
-                PlanOccurrence { color: None, part: 0, pose: Pose::IDENTITY, name: "Bracket <1>".into() },
-                PlanOccurrence { color: None, part: 0, pose: moved, name: "Bracket <2>".into() },
-                PlanOccurrence { color: None, part: 1, pose: Pose::IDENTITY, name: "".into() },
+                PlanOccurrence {
+                    color: None,
+                    part: 0,
+                    pose: Pose::IDENTITY,
+                    name: "Bracket <1>".into(),
+                },
+                PlanOccurrence {
+                    color: None,
+                    part: 0,
+                    pose: moved,
+                    name: "Bracket <2>".into(),
+                },
+                PlanOccurrence {
+                    color: None,
+                    part: 1,
+                    pose: Pose::IDENTITY,
+                    name: "".into(),
+                },
             ],
         }
     }
@@ -338,16 +419,34 @@ mod tests {
         assert!(p.is_assembly());
         assert_eq!(p.part_count(ImportMode::Parts), 3);
         assert_eq!(p.part_count(ImportMode::Flatten), 4);
-        assert_eq!(p.part_names(ImportMode::Parts), ["Bracket", "Part 2", "Part 2 (2)"]);
-        assert_eq!(p.part_names(ImportMode::Flatten), ["Bracket <1>", "Bracket <2>", "Part 2", "Part 2 (2)"]);
+        assert_eq!(
+            p.part_names(ImportMode::Parts),
+            ["Bracket", "Part 2", "Part 2 (2)"]
+        );
+        assert_eq!(
+            p.part_names(ImportMode::Flatten),
+            ["Bracket <1>", "Bracket <2>", "Part 2", "Part 2 (2)"]
+        );
     }
 
     #[test]
     fn keep_structure_adds_a_studio_and_an_assembly_as_one_step() {
         let p = plan();
         let mut doc = Document::new("Doc");
-        let ids = ImportIds { studio: ElementId::from_u128(1), assembly: ElementId::from_u128(2), feature: FeatureId::from_u128(3), instance_base: 0x100 };
-        let els = import_elements(&doc, &p, "/tmp/Brackets.step", "ISO-10303-21;", ImportAs::Assembly, ids);
+        let ids = ImportIds {
+            studio: ElementId::from_u128(1),
+            assembly: ElementId::from_u128(2),
+            feature: FeatureId::from_u128(3),
+            instance_base: 0x100,
+        };
+        let els = import_elements(
+            &doc,
+            &p,
+            "/tmp/Brackets.step",
+            "ISO-10303-21;",
+            ImportAs::Assembly,
+            ids,
+        );
         assert_eq!(els.len(), 2);
         assert_eq!(els[0].name, "Brackets");
         assert_eq!(els[1].name, "Bracket set");
@@ -355,12 +454,32 @@ mod tests {
         // 2 instances of the bracket and one of each solid of the second part.
         assert_eq!(asm.instances.len(), 4);
         assert_eq!(asm.instances[1].pose.translation, [100.0, 0.0, 0.0]);
-        assert_eq!(asm.instances[1].source, InstanceSource::Part { element: ids.studio, part: PartId::new(ids.feature, 0) });
-        assert_eq!(asm.instances[3].source, InstanceSource::Part { element: ids.studio, part: PartId::new(ids.feature, 2) });
+        assert_eq!(
+            asm.instances[1].source,
+            InstanceSource::Part {
+                element: ids.studio,
+                part: PartId::new(ids.feature, 0)
+            }
+        );
+        assert_eq!(
+            asm.instances[3].source,
+            InstanceSource::Part {
+                element: ids.studio,
+                part: PartId::new(ids.feature, 2)
+            }
+        );
         assert!(asm.instances[0].fixed && !asm.instances[1].fixed);
         let mut history = crate::History::default();
         let before = doc.clone();
-        history.execute(&mut doc, &ImportFile { file_name: "Brackets.step".into(), elements: els }).unwrap();
+        history
+            .execute(
+                &mut doc,
+                &ImportFile {
+                    file_name: "Brackets.step".into(),
+                    elements: els,
+                },
+            )
+            .unwrap();
         assert_eq!(doc.elements.len(), before.elements.len() + 2);
         history.undo(&mut doc);
         assert_eq!(doc, before);
@@ -369,12 +488,23 @@ mod tests {
     #[test]
     fn flatten_makes_one_studio_named_after_the_file() {
         let p = plan();
-        let doc = imported_document(&p, "Brackets.STP", "x", ImportAs::PartStudio, ImportIds::fresh());
+        let doc = imported_document(
+            &p,
+            "Brackets.STP",
+            "x",
+            ImportAs::PartStudio,
+            ImportIds::fresh(),
+        );
         assert_eq!(doc.name, "Brackets");
         assert_eq!(doc.elements.len(), 1);
         assert_eq!(doc.elements[0].part_props().len(), 4);
-        let FeatureKind::Import(f) = &doc.elements[0].features()[0].kind else { panic!() };
+        let FeatureKind::Import(f) = &doc.elements[0].features()[0].kind else {
+            panic!()
+        };
         assert_eq!(f.structure, Some(ImportMode::Flatten));
-        assert_eq!(crate::blobs::get(&f.blob).as_deref().map(|b| &b[..]), Some(&b"x"[..]));
+        assert_eq!(
+            crate::blobs::get(&f.blob).as_deref().map(|b| &b[..]),
+            Some(&b"x"[..])
+        );
     }
 }

@@ -16,34 +16,34 @@ pub mod bom;
 pub mod connectivity;
 pub mod copper;
 pub mod drc;
+pub mod erc;
 pub mod expr;
 pub mod fab;
-pub mod lib_edit;
-pub mod model3d;
-pub mod obj;
-pub mod erc;
 pub mod font;
+pub mod footprint;
+pub mod forward;
+pub mod geom;
 pub mod getting_started;
 pub mod graphic_import;
-pub mod forward;
-pub mod outline;
-pub mod power_monitor;
-pub mod zone;
-pub mod sch_edit;
-pub mod footprint;
-pub mod geom;
 pub mod graphics;
 pub mod layer;
+pub mod lib_edit;
 pub mod library;
+pub mod model3d;
+pub mod obj;
+pub mod outline;
 pub mod poly;
-pub mod render;
+pub mod power_monitor;
 pub mod rename;
+pub mod render;
+pub mod sch_edit;
 pub mod schematic;
 pub mod skin;
 pub mod symbol;
 pub mod units;
 pub mod view;
 pub mod wrl;
+pub mod zone;
 
 use serde::{Deserialize, Serialize};
 
@@ -66,7 +66,11 @@ impl Design {
     /// schematic editing works on sheet 0.
     pub fn ensure_sheet(&mut self) {
         if self.schematic.sheets.is_empty() {
-            self.schematic.sheets.push(schematic::Sheet { id: uuid::Uuid::new_v4(), name: "Root".into(), ..Default::default() });
+            self.schematic.sheets.push(schematic::Sheet {
+                id: uuid::Uuid::new_v4(),
+                name: "Root".into(),
+                ..Default::default()
+            });
         }
     }
 }
@@ -82,6 +86,10 @@ pub struct Component {
 
 impl Component {
     pub fn new(name: impl Into<String>) -> Component {
-        Component { name: name.into(), symbol: None, footprint: None }
+        Component {
+            name: name.into(),
+            symbol: None,
+            footprint: None,
+        }
     }
 }

@@ -30,9 +30,9 @@ pub mod positions;
 pub mod relation;
 pub mod replace;
 pub mod replicate;
-pub mod structure;
 pub mod solver;
 pub mod standard;
+pub mod structure;
 pub mod thumb;
 pub mod vars;
 
@@ -114,7 +114,10 @@ impl Pose {
 
     /// A translation by `t`.
     pub fn translation(t: Vec3) -> Self {
-        Self { translation: t, ..Self::IDENTITY }
+        Self {
+            translation: t,
+            ..Self::IDENTITY
+        }
     }
 
     /// A turn by `angle` (radians, right-handed) about the axis through `point` along `axis`.
@@ -134,15 +137,24 @@ impl Pose {
         // p ↦ R (p − point) + point.
         let pt = Vector3::from(point);
         let t = pt - Self::matrix(&rot) * pt;
-        Self { rotation: rot, translation: [t.x, t.y, t.z] }
+        Self {
+            rotation: rot,
+            translation: [t.x, t.y, t.z],
+        }
     }
 
     fn from_matrix(m: Matrix3<f64>) -> [[f64; 3]; 3] {
-        [[m[(0, 0)], m[(0, 1)], m[(0, 2)]], [m[(1, 0)], m[(1, 1)], m[(1, 2)]], [m[(2, 0)], m[(2, 1)], m[(2, 2)]]]
+        [
+            [m[(0, 0)], m[(0, 1)], m[(0, 2)]],
+            [m[(1, 0)], m[(1, 1)], m[(1, 2)]],
+            [m[(2, 0)], m[(2, 1)], m[(2, 2)]],
+        ]
     }
 
     fn matrix(r: &[[f64; 3]; 3]) -> Matrix3<f64> {
-        Matrix3::new(r[0][0], r[0][1], r[0][2], r[1][0], r[1][1], r[1][2], r[2][0], r[2][1], r[2][2])
+        Matrix3::new(
+            r[0][0], r[0][1], r[0][2], r[1][0], r[1][1], r[1][2], r[2][0], r[2][1], r[2][2],
+        )
     }
 
     fn clean(mut r: [[f64; 3]; 3]) -> [[f64; 3]; 3] {
@@ -177,20 +189,31 @@ impl Pose {
     /// This pose followed by `after`: `p ↦ after(self(p))`.
     pub fn then(&self, after: &Pose) -> Pose {
         let r = after.rotation_matrix() * self.rotation_matrix();
-        let t = after.rotation_matrix() * Vector3::from(self.translation) + Vector3::from(after.translation);
-        Pose { rotation: Self::clean(Self::from_matrix(r)), translation: [t.x, t.y, t.z] }
+        let t = after.rotation_matrix() * Vector3::from(self.translation)
+            + Vector3::from(after.translation);
+        Pose {
+            rotation: Self::clean(Self::from_matrix(r)),
+            translation: [t.x, t.y, t.z],
+        }
     }
 
     /// The inverse placement.
     pub fn inverse(&self) -> Pose {
         let rt = self.rotation_matrix().transpose();
         let t = -(rt * Vector3::from(self.translation));
-        Pose { rotation: Self::from_matrix(rt), translation: [t.x, t.y, t.z] }
+        Pose {
+            rotation: Self::from_matrix(rt),
+            translation: [t.x, t.y, t.z],
+        }
     }
 
     /// A plane frame moved by this pose.
     pub fn frame(&self, f: &PlaneFrame) -> PlaneFrame {
-        PlaneFrame { origin: self.apply(f.origin), u: self.rotate(f.u), v: self.rotate(f.v) }
+        PlaneFrame {
+            origin: self.apply(f.origin),
+            u: self.rotate(f.u),
+            v: self.rotate(f.v),
+        }
     }
 }
 
@@ -217,7 +240,9 @@ impl InstanceSource {
     /// The Part Studio or Assembly tab it comes from.
     pub fn element(&self) -> ElementId {
         match self {
-            InstanceSource::Part { element, .. } | InstanceSource::Assembly { element } | InstanceSource::Studio { element, .. } => *element,
+            InstanceSource::Part { element, .. }
+            | InstanceSource::Assembly { element }
+            | InstanceSource::Studio { element, .. } => *element,
         }
     }
 
@@ -314,27 +339,65 @@ impl Instance {
 
     /// A rigid instance of the whole Part Studio `element` (A2.4) with `parts`.
     pub fn studio(id: InstanceId, element: ElementId, parts: Vec<PartId>, pose: Pose) -> Self {
-        Self { parts, ..Self::new(id, InstanceSource::Studio { element, board: None }, pose) }
+        Self {
+            parts,
+            ..Self::new(
+                id,
+                InstanceSource::Studio {
+                    element,
+                    board: None,
+                },
+                pose,
+            )
+        }
     }
 
     /// The parts a rigid instance moves as one: a Part Studio instance's listed parts; a
     /// board's, the board's parts as they are now ([`crate::pcb::PcbStudio::board_parts`]).
     pub fn rigid_parts<'a>(&'a self, doc: &Document) -> std::borrow::Cow<'a, [PartId]> {
         match self.source {
-            InstanceSource::Studio { element, board: Some(b) } => std::borrow::Cow::Owned(doc.element(element).and_then(|e| e.pcb()).map(|s| s.board_parts(b)).unwrap_or_default()),
+            InstanceSource::Studio {
+                element,
+                board: Some(b),
+            } => std::borrow::Cow::Owned(
+                doc.element(element)
+                    .and_then(|e| e.pcb())
+                    .map(|s| s.board_parts(b))
+                    .unwrap_or_default(),
+            ),
             _ => std::borrow::Cow::Borrowed(&self.parts),
         }
     }
 
     /// A rigid instance of the board `board` of the PCB Studio `element` (§9): the board and
     /// its components.
-    pub fn board(id: InstanceId, element: ElementId, board: crate::pcb::BoardId, parts: Vec<PartId>, pose: Pose) -> Self {
-        Self { parts, ..Self::new(id, InstanceSource::Studio { element, board: Some(board) }, pose) }
+    pub fn board(
+        id: InstanceId,
+        element: ElementId,
+        board: crate::pcb::BoardId,
+        parts: Vec<PartId>,
+        pose: Pose,
+    ) -> Self {
+        Self {
+            parts,
+            ..Self::new(
+                id,
+                InstanceSource::Studio {
+                    element,
+                    board: Some(board),
+                },
+                pose,
+            )
+        }
     }
 
     /// Its placement of its subassembly's instance `child` (an override when flexible).
     pub fn child_pose(&self, child: &Instance) -> Pose {
-        self.overrides.iter().find(|(i, _)| *i == child.id).map(|(_, p)| *p).unwrap_or(child.pose)
+        self.overrides
+            .iter()
+            .find(|(i, _)| *i == child.id)
+            .map(|(_, p)| *p)
+            .unwrap_or(child.pose)
     }
 
     /// Its name, `<part name> <n>`, from the source part's current name.
@@ -361,7 +424,10 @@ pub struct Assembly {
     pub mate_folders: Vec<crate::document::FeatureFolder>,
     /// The assembly's own properties: Part number, Description, …, its Subassembly BOM
     /// behavior (P3B.6, [`crate::properties`]).
-    #[serde(default, skip_serializing_if = "crate::properties::Properties::is_empty")]
+    #[serde(
+        default,
+        skip_serializing_if = "crate::properties::Properties::is_empty"
+    )]
     pub properties: crate::properties::Properties,
     /// Its BOM's columns, view and suppressed rows (P3B.6, [`bom`]).
     #[serde(default, skip_serializing_if = "bom::BomSettings::is_default")]
@@ -394,7 +460,10 @@ impl Assembly {
             && self.items.is_empty()
     }
 
-    pub fn local_connector(&self, id: connector::LocalConnectorId) -> Option<&connector::LocalConnector> {
+    pub fn local_connector(
+        &self,
+        id: connector::LocalConnectorId,
+    ) -> Option<&connector::LocalConnector> {
         self.connectors.iter().find(|c| c.id == id)
     }
 
@@ -437,7 +506,10 @@ impl Assembly {
     /// Drops the relations whose mates are gone (after a delete).
     pub fn drop_orphan_relations(&mut self) {
         let ids: Vec<mate::MateId> = self.mates.iter().map(|f| f.id).collect();
-        self.retain_mates(|f| f.relation().is_none_or(|r| r.mates.iter().all(|m| ids.contains(m))));
+        self.retain_mates(|f| {
+            f.relation()
+                .is_none_or(|r| r.mates.iter().all(|m| ids.contains(m)))
+        });
     }
 
     /// Keeps the mate features `keep` says to, the assembly's own mate connectors staying where
@@ -467,7 +539,13 @@ impl Assembly {
 
     /// The number the next instance of `source` gets: one more than the highest in use.
     pub fn next_index(&self, source: &InstanceSource) -> u32 {
-        self.instances.iter().filter(|i| i.source == *source).map(|i| i.index).max().unwrap_or(0) + 1
+        self.instances
+            .iter()
+            .filter(|i| i.source == *source)
+            .map(|i| i.index)
+            .max()
+            .unwrap_or(0)
+            + 1
     }
 
     /// The number `inst` gets in a document `doc`: one more than the highest of every instance
@@ -476,13 +554,22 @@ impl Assembly {
     /// sequence (Part 1 <1> in the workspace, <2> at V1, <3> at V2).
     pub fn next_index_of(&self, doc: crate::ids::DocumentId, inst: &Instance) -> u32 {
         let key = identity(doc, inst);
-        self.instances.iter().filter(|i| identity(doc, i) == key).map(|i| i.index).max().unwrap_or(0) + 1
+        self.instances
+            .iter()
+            .filter(|i| identity(doc, i) == key)
+            .map(|i| i.index)
+            .max()
+            .unwrap_or(0)
+            + 1
     }
 }
 
 /// What numbers an instance: the source document, the source element (in that document) and
 /// the part, and the kind of source.
-fn identity(doc: crate::ids::DocumentId, inst: &Instance) -> (crate::ids::DocumentId, ElementId, Option<PartId>, u8) {
+fn identity(
+    doc: crate::ids::DocumentId,
+    inst: &Instance,
+) -> (crate::ids::DocumentId, ElementId, Option<PartId>, u8) {
     let kind = match inst.source {
         InstanceSource::Part { .. } => 0,
         InstanceSource::Assembly { .. } => 1,
@@ -491,7 +578,9 @@ fn identity(doc: crate::ids::DocumentId, inst: &Instance) -> (crate::ids::Docume
     };
     // A board's instances are numbered apart from the other boards' of its PCB Studio.
     let part = match inst.source {
-        InstanceSource::Studio { board: Some(b), .. } => Some(PartId::new(crate::pcb::board_feature(b), 0)),
+        InstanceSource::Studio { board: Some(b), .. } => {
+            Some(PartId::new(crate::pcb::board_feature(b), 0))
+        }
         _ => inst.source.part(),
     };
     match inst.link {
@@ -506,22 +595,48 @@ pub fn source_part_name(doc: &Document, source: &InstanceSource, build: Option<&
     let (element, part) = match *source {
         InstanceSource::Part { element, part } => (element, part),
         InstanceSource::Assembly { element } => {
-            return doc.element(element).map(|e| e.name.clone()).unwrap_or_else(|| "Assembly".into());
+            return doc
+                .element(element)
+                .map(|e| e.name.clone())
+                .unwrap_or_else(|| "Assembly".into());
         }
-        InstanceSource::Studio { element, board: None } => {
-            return doc.element(element).map(|e| e.name.clone()).unwrap_or_else(|| "Part Studio".into());
+        InstanceSource::Studio {
+            element,
+            board: None,
+        } => {
+            return doc
+                .element(element)
+                .map(|e| e.name.clone())
+                .unwrap_or_else(|| "Part Studio".into());
         }
         // A board: its name.
-        InstanceSource::Studio { element, board: Some(b) } => {
-            return doc.element(element).and_then(|e| e.pcb()).and_then(|s| s.board(b)).map(|b| b.name().to_string()).unwrap_or_else(|| "Board".into());
+        InstanceSource::Studio {
+            element,
+            board: Some(b),
+        } => {
+            return doc
+                .element(element)
+                .and_then(|e| e.pcb())
+                .and_then(|s| s.board(b))
+                .map(|b| b.name().to_string())
+                .unwrap_or_else(|| "Board".into());
         }
     };
     let props = doc.element(element).map(|e| e.part_props()).unwrap_or(&[]);
-    if let Some(n) = props.iter().find(|p| p.part == part).and_then(|p| p.name.clone()) {
+    if let Some(n) = props
+        .iter()
+        .find(|p| p.part == part)
+        .and_then(|p| p.name.clone())
+    {
         return n;
     }
     build
-        .and_then(|b| b.names.iter().find(|(p, _)| *p == part).map(|(_, n)| n.clone()))
+        .and_then(|b| {
+            b.names
+                .iter()
+                .find(|(p, _)| *p == part)
+                .map(|(_, n)| n.clone())
+        })
         .unwrap_or_else(|| "Part".into())
 }
 
@@ -570,13 +685,20 @@ pub fn transform_solid(s: &Solid, pose: &Pose) -> Solid {
         a.plane = a.plane.map(|fr| pose.frame(&fr));
     }
     // Its pictures (an Image feature's, a derived board's skins) with it.
-    out.images = s.images.iter().map(|i| i.mapped(|q| pose.apply(q))).collect();
+    out.images = s
+        .images
+        .iter()
+        .map(|i| i.mapped(|q| pose.apply(q)))
+        .collect();
     out
 }
 
 /// Mass properties moved by `pose`: the same volume and area, the centre moved, and the
 /// inertia tensor turned with the part (`R J Rᵀ`, still about the centre of mass).
-pub fn transform_mass(m: &cadrs_kernel::MassProperties, pose: &Pose) -> cadrs_kernel::MassProperties {
+pub fn transform_mass(
+    m: &cadrs_kernel::MassProperties,
+    pose: &Pose,
+) -> cadrs_kernel::MassProperties {
     let r = pose.rotation_matrix();
     let c = pose.apply([m.center_of_mass.x, m.center_of_mass.y, m.center_of_mass.z]);
     cadrs_kernel::MassProperties {
@@ -611,9 +733,15 @@ pub fn instance_parts(
         let Some(src) = build.part(part) else {
             continue;
         };
-        let name = format!("{} <{}>", source_part_name(doc, &InstanceSource::Part { element, part }, Some(&build)), o.index);
+        let name = format!(
+            "{} <{}>",
+            source_part_name(doc, &InstanceSource::Part { element, part }, Some(&build)),
+            o.index
+        );
         let id = o.view_part;
-        let src_props = doc.element(element).and_then(|e| crate::parts::effective_props(src, e.part_props()));
+        let src_props = doc
+            .element(element)
+            .and_then(|e| crate::parts::effective_props(src, e.part_props()));
         let mut p = PartProps::new(id);
         p.name = Some(name.clone());
         p.hidden = o.hidden;
@@ -623,7 +751,10 @@ pub fn instance_parts(
             p.material = sp.material;
             p.properties = sp.properties;
         }
-        if let Some(a) = o.appearance { p.appearance = Some(a); p.faces.clear(); }
+        if let Some(a) = o.appearance {
+            p.appearance = Some(a);
+            p.faces.clear();
+        }
         parts.push(Part {
             id,
             feature: src.feature,
@@ -696,20 +827,34 @@ pub fn solve(
 /// [`structure::solver_model`]) with a connector whose entity is gone from its part (`solids`,
 /// by occurrence): its face or edge was lost in an update, or the part itself. Suppressed mates
 /// are skipped. Such a mate is an error; it doesn't hold its instances at the stored frame.
-pub fn lost_mates(asm: &Assembly, solids: &std::collections::HashMap<InstanceId, Arc<Solid>>) -> Vec<mate::MateId> {
+pub fn lost_mates(
+    asm: &Assembly,
+    solids: &std::collections::HashMap<InstanceId, Arc<Solid>>,
+) -> Vec<mate::MateId> {
     asm.mates
         .iter()
         .filter(|f| !f.suppressed)
-        .filter(|f| f.mate().is_some_and(|m| m.all_connectors().any(|c| !c.resolves(solids.get(&c.instance).map(|s| &**s)))))
+        .filter(|f| {
+            f.mate().is_some_and(|m| {
+                m.all_connectors()
+                    .any(|c| !c.resolves(solids.get(&c.instance).map(|s| &**s)))
+            })
+        })
         .map(|f| f.id)
         .collect()
 }
 
 /// The source solids of every occurrence of the assembly `element` of `doc`, each Part Studio
 /// (or linked copy) rebuilt once.
-pub fn document_occurrence_solids(doc: &Document, element: ElementId) -> std::collections::HashMap<InstanceId, Arc<Solid>> {
-    let Some(asm) = doc.element(element).and_then(|e| e.assembly_model()) else { return Default::default() };
-    let mut builds: std::collections::HashMap<ElementId, Arc<Build>> = std::collections::HashMap::new();
+pub fn document_occurrence_solids(
+    doc: &Document,
+    element: ElementId,
+) -> std::collections::HashMap<InstanceId, Arc<Solid>> {
+    let Some(asm) = doc.element(element).and_then(|e| e.assembly_model()) else {
+        return Default::default();
+    };
+    let mut builds: std::collections::HashMap<ElementId, Arc<Build>> =
+        std::collections::HashMap::new();
     occurrence_solids(doc, asm, |e| {
         if let Some(b) = builds.get(&e) {
             return Some(b.clone());
@@ -728,14 +873,28 @@ pub fn document_occurrence_solids(doc: &Document, element: ElementId) -> std::co
 /// left out, so it doesn't hold anything at its old frame. Returns those lost mates. Nothing
 /// moves when the solve doesn't converge.
 pub fn resolve_after_update(doc: &mut Document, element: ElementId) -> Vec<mate::MateId> {
-    let Some(asm) = doc.element(element).and_then(|e| e.assembly_model()).cloned() else { return Vec::new() };
-    if !asm.mates.iter().any(|f| f.mate().is_some() && !f.suppressed) {
+    let Some(asm) = doc
+        .element(element)
+        .and_then(|e| e.assembly_model())
+        .cloned()
+    else {
+        return Vec::new();
+    };
+    if !asm
+        .mates
+        .iter()
+        .any(|f| f.mate().is_some() && !f.suppressed)
+    {
         return Vec::new();
     }
     let solids = document_occurrence_solids(doc, element);
     let mut model = structure::solver_model(doc, &asm);
     let lost = lost_mates(&model, &solids);
-    model.mates.retain(|f| !lost.contains(&f.id) && f.relation().is_none_or(|r| r.mates.iter().all(|m| !lost.contains(m))));
+    model.mates.retain(|f| {
+        !lost.contains(&f.id)
+            && f.relation()
+                .is_none_or(|r| r.mates.iter().all(|m| !lost.contains(m)))
+    });
     let sol = solve(&model, &solids, &solver::SolveOptions::default());
     if sol.converged {
         let poses = sol.changed(&model);
@@ -762,11 +921,16 @@ pub fn drag(
 /// the other entity is on the face, not past its edges), then the one nearest to tangent. So a
 /// roller dragged along a flat top, a fillet and a slope, or a pin along a curved slot and round
 /// its end, stays in contact with the chain. Mates without propagation keep their picks.
-pub fn propagate_tangents(asm: &Assembly, solids: &std::collections::HashMap<InstanceId, Arc<Solid>>) -> Assembly {
+pub fn propagate_tangents(
+    asm: &Assembly,
+    solids: &std::collections::HashMap<InstanceId, Arc<Solid>>,
+) -> Assembly {
     use connector::{ConnectorAnchor, EntityRef, MateConnector};
     let mut out = asm.clone();
     for f in &mut out.mates {
-        let mate::MateKind::Mate(m) = &mut f.kind else { continue };
+        let mate::MateKind::Mate(m) = &mut f.kind else {
+            continue;
+        };
         if m.mate_type != mate::MateType::Tangent || !m.propagate {
             continue;
         }
@@ -774,10 +938,24 @@ pub fn propagate_tangents(asm: &Assembly, solids: &std::collections::HashMap<Ins
         // Each side's candidates: (connector, world frame).
         let options = |c: &MateConnector| -> Vec<(MateConnector, connector::ConnectorFrame)> {
             let mut list = vec![*c];
-            if let (ConnectorAnchor::Surface { entity: EntityRef::Face(face), .. }, Some(s)) = (c.anchor, solids.get(&c.instance)) {
+            if let (
+                ConnectorAnchor::Surface {
+                    entity: EntityRef::Face(face),
+                    ..
+                },
+                Some(s),
+            ) = (c.anchor, solids.get(&c.instance))
+            {
                 for g in connector::tangent_faces(s, &face).into_iter().skip(1) {
                     if let Some((frame, kind)) = connector::surface_of(s, &EntityRef::Face(g)) {
-                        list.push(MateConnector { frame, anchor: ConnectorAnchor::Surface { entity: EntityRef::Face(g), kind }, ..*c });
+                        list.push(MateConnector {
+                            frame,
+                            anchor: ConnectorAnchor::Surface {
+                                entity: EntityRef::Face(g),
+                                kind,
+                            },
+                            ..*c
+                        });
                     }
                 }
             }
@@ -795,17 +973,37 @@ pub fn propagate_tangents(asm: &Assembly, solids: &std::collections::HashMap<Ins
         // How far the contact would fall off the candidate face: the point of its (unbounded)
         // surface nearest the other entity, measured to the face's triangles. Only for a side
         // with a choice.
-        let off_face = |c: &MateConnector, f: &connector::ConnectorFrame, other: [f64; 3], choice: bool| -> f64 {
-            let (true, ConnectorAnchor::Surface { entity: EntityRef::Face(face), kind }, Some(s)) = (choice, c.anchor, solids.get(&c.instance)) else {
+        let off_face = |c: &MateConnector,
+                        f: &connector::ConnectorFrame,
+                        other: [f64; 3],
+                        choice: bool|
+         -> f64 {
+            let (
+                true,
+                ConnectorAnchor::Surface {
+                    entity: EntityRef::Face(face),
+                    kind,
+                },
+                Some(s),
+            ) = (choice, c.anchor, solids.get(&c.instance))
+            else {
                 return 0.0;
             };
             // Along a cylinder's axis the contact runs the length of the face: measure at the
             // face's middle, so only the way round counts.
             let other = match kind {
                 connector::SurfaceKind::Cylinder { .. } => {
-                    let d = [other[0] - f.origin[0], other[1] - f.origin[1], other[2] - f.origin[2]];
+                    let d = [
+                        other[0] - f.origin[0],
+                        other[1] - f.origin[1],
+                        other[2] - f.origin[2],
+                    ];
                     let t = d[0] * f.z[0] + d[1] * f.z[1] + d[2] * f.z[2];
-                    [other[0] - f.z[0] * t, other[1] - f.z[1] * t, other[2] - f.z[2] * t]
+                    [
+                        other[0] - f.z[0] * t,
+                        other[1] - f.z[1] * t,
+                        other[2] - f.z[2] * t,
+                    ]
                 }
                 _ => other,
             };
@@ -816,12 +1014,16 @@ pub fn propagate_tangents(asm: &Assembly, solids: &std::collections::HashMap<Ins
         let mut best: Option<(f64, MateConnector, MateConnector)> = None;
         for (ca, fa) in &a {
             for (cb, fb) in &b {
-                let (Some(ka), Some(kb)) = (ca.surface_kind(), cb.surface_kind()) else { continue };
+                let (Some(ka), Some(kb)) = (ca.surface_kind(), cb.surface_kind()) else {
+                    continue;
+                };
                 if !solver::tangent_supported(ka, kb) {
                     continue;
                 }
                 let e = solver::tangent_error(ka, fa, kb, fb, m.flip);
-                let score = off_face(ca, fa, fb.origin, choose_a) + off_face(cb, fb, fa.origin, choose_b) + 0.25 * e;
+                let score = off_face(ca, fa, fb.origin, choose_a)
+                    + off_face(cb, fb, fa.origin, choose_b)
+                    + 0.25 * e;
                 if best.as_ref().is_none_or(|(bs, ..)| score < bs - 1e-9) {
                     best = Some((score, *ca, *cb));
                 }
@@ -852,13 +1054,20 @@ pub fn local_connector_frame(
     solids: &std::collections::HashMap<InstanceId, Arc<Solid>>,
 ) -> Option<(InstanceId, connector::ConnectorFrame)> {
     let l = asm.local_connector(id)?;
-    Some((l.connector.instance, l.connector.local_frame(solids.get(&l.connector.instance).map(|s| &**s))))
+    Some((
+        l.connector.instance,
+        l.connector
+            .local_frame(solids.get(&l.connector.instance).map(|s| &**s)),
+    ))
 }
 
 /// The mates' connectors on the assembly's own explicit connectors ([`connector::ConnectorAnchor::Local`])
 /// replaced by fixed frames where those connectors are now (the mate's own flip, reorient and
 /// edits on top); a connector whose explicit connector was deleted keeps its last frame.
-pub fn resolve_local_connectors(asm: &Assembly, solids: &std::collections::HashMap<InstanceId, Arc<Solid>>) -> Assembly {
+pub fn resolve_local_connectors(
+    asm: &Assembly,
+    solids: &std::collections::HashMap<InstanceId, Arc<Solid>>,
+) -> Assembly {
     use connector::{ConnectorAnchor, MateConnector};
     // P3B.8: a Replicate's copied mates are solved as mates.
     let mut out = replicate::expand(asm);
@@ -900,7 +1109,13 @@ pub fn aligned_with_z(pose: &Pose, at: Vec3, axis: Vec3, fallback: Vec3, anti: b
         let f = Vector3::from(fallback);
         // The fallback made perpendicular to the axis.
         let f = f - a * f.dot(&a);
-        let f = if f.norm() < 1e-9 { a.cross(&Vector3::x()).try_normalize(1e-9).unwrap_or(Vector3::y()) } else { f.normalize() };
+        let f = if f.norm() < 1e-9 {
+            a.cross(&Vector3::x())
+                .try_normalize(1e-9)
+                .unwrap_or(Vector3::y())
+        } else {
+            f.normalize()
+        };
         Pose::rotation_about(at, [f.x, f.y, f.z], std::f64::consts::PI)
     } else {
         let k = a.cross(&b);
@@ -918,9 +1133,16 @@ pub fn rotated(pose: &Pose, at: Vec3, axis: Vec3, angle: f64) -> Pose {
 /// Mass properties of instances (or of the whole assembly: every instance), in assembly
 /// coordinates: see [`crate::parts::mass_report`] (sums, the mass-weighted centre, and the
 /// inertia about it by the parallel-axis theorem).
-pub fn mass_report(parts: &[Part], props: &[PartProps], instances: &[InstanceId]) -> Option<crate::parts::MassReport> {
+pub fn mass_report(
+    parts: &[Part],
+    props: &[PartProps],
+    instances: &[InstanceId],
+) -> Option<crate::parts::MassReport> {
     // A subassembly instance is all of its parts.
-    let list: Vec<&Part> = parts.iter().filter(|p| instances.contains(&InstanceId::of_part(p.id))).collect();
+    let list: Vec<&Part> = parts
+        .iter()
+        .filter(|p| instances.contains(&InstanceId::of_part(p.id)))
+        .collect();
     crate::parts::mass_report(&list, props)
 }
 
@@ -937,12 +1159,22 @@ mod tests {
     #[test]
     fn half_turns_are_exact_and_compose() {
         let r = Pose::rotation_about([0.0; 3], [1.0, 0.0, 0.0], std::f64::consts::PI);
-        assert_eq!(r.rotation, [[1.0, 0.0, 0.0], [0.0, -1.0, 0.0], [0.0, 0.0, -1.0]]);
+        assert_eq!(
+            r.rotation,
+            [[1.0, 0.0, 0.0], [0.0, -1.0, 0.0], [0.0, 0.0, -1.0]]
+        );
         let t = Pose::translation([0.0, -44.45, 0.0]);
         let both = t.then(&r);
         close(both.apply([0.0, 54.1, 28.9]), [0.0, -(54.1 - 44.45), -28.9]);
-        close(both.inverse().apply(both.apply([1.0, 2.0, 3.0])), [1.0, 2.0, 3.0]);
-        let q = Pose::rotation_about([1.0, 1.0, 0.0], [0.0, 0.0, 1.0], std::f64::consts::FRAC_PI_2);
+        close(
+            both.inverse().apply(both.apply([1.0, 2.0, 3.0])),
+            [1.0, 2.0, 3.0],
+        );
+        let q = Pose::rotation_about(
+            [1.0, 1.0, 0.0],
+            [0.0, 0.0, 1.0],
+            std::f64::consts::FRAC_PI_2,
+        );
         close(q.apply([2.0, 1.0, 5.0]), [1.0, 2.0, 5.0]);
     }
 }

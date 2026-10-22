@@ -88,18 +88,40 @@ pub fn move_cost(p: &Params, l: u32, dx: i32, dy: i32) -> u32 {
         return p.diag + extra;
     }
     let against = (h && dy != 0) || (v && dx != 0);
-    if against { p.ortho + p.wrong_way } else { p.ortho }
+    if against {
+        p.ortho + p.wrong_way
+    } else {
+        p.ortho
+    }
 }
 
 /// The eight steps around a cell, straight ones first.
-pub const STEPS: [(i32, i32); 8] = [(1, 0), (-1, 0), (0, 1), (0, -1), (1, 1), (-1, 1), (1, -1), (-1, -1)];
+pub const STEPS: [(i32, i32); 8] = [
+    (1, 0),
+    (-1, 0),
+    (0, 1),
+    (0, -1),
+    (1, 1),
+    (-1, 1),
+    (1, -1),
+    (-1, -1),
+];
 
 /// One relaxation of cell `i` for `net`: the least of its distance and each neighbour's plus
 /// the cost of the move into it. `dist` holds the net's grid from `base`. A diagonal step may
 /// not cut a corner past a cell the net can't use; a via needs the cell free for the net on
 /// both layers and the via site (`via_owner`, one per `x, y`) free for it.
 #[allow(clippy::too_many_arguments)]
-pub fn relax_cell(p: &Params, net: u32, i: u32, owner: &[u32], via_owner: &[u32], cong: &[u32], base: u32, dist: &[u32]) -> u32 {
+pub fn relax_cell(
+    p: &Params,
+    net: u32,
+    i: u32,
+    owner: &[u32],
+    via_owner: &[u32],
+    cong: &[u32],
+    base: u32,
+    dist: &[u32],
+) -> u32 {
     let mut best = dist[(base + i) as usize];
     if !passable(owner[i as usize], net) {
         return best;
@@ -195,11 +217,27 @@ mod tests {
     use super::*;
 
     fn params(nx: u32, ny: u32, nl: u32) -> Params {
-        Params { nx, ny, nl, slots: 1, ortho: 10, diag: 14, via: 50, wrong_way: 0, ..Default::default() }
+        Params {
+            nx,
+            ny,
+            nl,
+            slots: 1,
+            ortho: 10,
+            diag: 14,
+            via: 50,
+            wrong_way: 0,
+            ..Default::default()
+        }
     }
 
     /// Relaxes every cell until nothing changes (the GPU's loop, on the CPU).
-    fn wavefront(p: &Params, net: u32, owner: &[u32], via_owner: &[u32], sources: &[u32]) -> Vec<u32> {
+    fn wavefront(
+        p: &Params,
+        net: u32,
+        owner: &[u32],
+        via_owner: &[u32],
+        sources: &[u32],
+    ) -> Vec<u32> {
         let cong = vec![0; p.cells() as usize];
         let mut dist = vec![INF; p.cells() as usize];
         for &s in sources {
