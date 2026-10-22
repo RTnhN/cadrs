@@ -391,27 +391,9 @@ impl<L: DataLoader> WebRenderSync<L> for HomePage {
                         </div>
                     </div>
                 </section>
-                <section id="features" class="scroll-mt-14 border-y border-border bg-muted/30">
-                    <div class="mx-auto max-w-6xl px-4 py-14 sm:px-6 md:py-20">
-                        <div class="max-w-2xl">
-                            {Badge {
-                                variant: BadgeVariant::Outline,
-                                class: Some("rounded-full bg-background"),
-                                children: Some("Features"),
-                            }}
-                            <h2 class="mt-5 text-balance text-3xl font-semibold tracking-tight text-foreground md:text-4xl">
-                                "From sketch to assembly to drawing"
-                            </h2>
-                            <p class="mt-5 text-pretty text-lg leading-8 text-muted-foreground">
-                                "Every change goes through undo, every feature can be edited later, and the kernel runs in a process of its own, so a crash costs a rebuild, not your work."
-                            </p>
-                        </div>
-                        <div class="mt-10 grid gap-4 md:grid-cols-2 lg:grid-cols-3">{Features}</div>
-                    </div>
-                </section>
                 <section
                     id="download"
-                    class="mx-auto grid max-w-6xl scroll-mt-14 gap-6 px-4 py-14 sm:px-6 md:py-20 lg:grid-cols-2"
+                    class="mx-auto grid max-w-6xl scroll-mt-20 gap-6 px-4 pb-14 sm:px-6 md:pb-20 lg:grid-cols-2"
                 >
                     {Downloads}
                     <div id="build" class="min-w-0 scroll-mt-20">
@@ -449,6 +431,24 @@ impl<L: DataLoader> WebRenderSync<L> for HomePage {
                                 }}
                             }),
                         }}
+                    </div>
+                </section>
+                <section id="features" class="scroll-mt-14 border-y border-border bg-muted/30">
+                    <div class="mx-auto max-w-6xl px-4 py-14 sm:px-6 md:py-20">
+                        <div class="max-w-2xl">
+                            {Badge {
+                                variant: BadgeVariant::Outline,
+                                class: Some("rounded-full bg-background"),
+                                children: Some("Features"),
+                            }}
+                            <h2 class="mt-5 text-balance text-3xl font-semibold tracking-tight text-foreground md:text-4xl">
+                                "From sketch to assembly to drawing"
+                            </h2>
+                            <p class="mt-5 text-pretty text-lg leading-8 text-muted-foreground">
+                                "Every change goes through undo, every feature can be edited later, and the kernel runs in a process of its own, so a crash costs a rebuild, not your work."
+                            </p>
+                        </div>
+                        <div class="mt-10 grid gap-4 md:grid-cols-2 lg:grid-cols-3">{Features}</div>
                     </div>
                 </section>
             </main>
@@ -504,12 +504,6 @@ impl<L: DataLoader, B: WriteBuf> MdRenderSync<L, B> for HomePage {
 
             From sketch to part to PCB, in one document: [watch the 90\-second demo](https://youtu.be/qT1FKZqUAxA)\.
 
-            ## From sketch to assembly to drawing
-
-            Every change goes through undo, every feature can be edited later, and the kernel runs in a process of its own, so a crash costs a rebuild, not your work\.
-
-            {Features}
-
             {Downloads}
 
             ## Build from source
@@ -519,6 +513,12 @@ impl<L: DataLoader, B: WriteBuf> MdRenderSync<L, B> for HomePage {
                 git clone https://github.com/rvdende/cadrs
                 cd cadrs
                 cargo run --release
+
+            ## From sketch to assembly to drawing
+
+            Every change goes through undo, every feature can be edited later, and the kernel runs in a process of its own, so a crash costs a rebuild, not your work\.
+
+            {Features}
 
             Source: https://github.com/rvdende/cadrs
 

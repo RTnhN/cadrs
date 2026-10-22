@@ -78,9 +78,21 @@ jobs:
         working-directory: site
         run: cargo install --locked --git "$PROA_REPO" --rev "${{ steps.proa.outputs.rev }}" proa-cli --bin proa
 
+      # The Cargo registry only: rust-cache prunes target directories, which deletes the
+      # ownership markers `proa build` keeps in target/proa-rsjs.
       - uses: Swatinem/rust-cache@v2
         with:
+          prefix-key: v1-registry
           workspaces: site -> target
+          cache-targets: false
+
+      # proa builds in target/proa-rsjs, kept whole. An exact key (no fallback) means a change
+      # to the site's own code reuses the compiled dependencies, and old build plans never pile up.
+      - name: Cache the linked build
+        uses: actions/cache@v4
+        with:
+          path: site/target/proa-rsjs
+          key: proa-rsjs-${{ runner.os }}-${{ hashFiles('site/Cargo.lock', 'site/rust-toolchain.toml') }}-${{ steps.proa.outputs.rev }}
 
       - name: Build and export
         run: site/export.sh

@@ -745,6 +745,9 @@
   .pb-6 {
     padding-bottom: calc(var(--spacing) * 6);
   }
+  .pb-14 {
+    padding-bottom: calc(var(--spacing) * 14);
+  }
   .text-2xl {
     font-size: var(--text-2xl);
     line-height: var(--tw-leading, var(--text-2xl--line-height));
@@ -1225,6 +1228,9 @@
     }
     .md\:py-20 {
       padding-block: calc(var(--spacing) * 20);
+    }
+    .md\:pb-20 {
+      padding-bottom: calc(var(--spacing) * 20);
     }
     .md\:text-4xl {
       font-size: var(--text-4xl);
