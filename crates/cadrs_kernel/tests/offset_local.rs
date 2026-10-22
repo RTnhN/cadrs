@@ -350,15 +350,65 @@ fn slab_of_a_face_round_a_pole_along_its_seam() {
     let bytes = std::fs::read(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/data/smlib/offset/OffsetBoxSphOnCorner.smb")).unwrap();
     let b = cadrs_kernel::native::smb::read_brep(&bytes).unwrap().body;
     let fi = 10;
-    let s = &b.faces[fi].surf;
-    // The sphere: its two poles (u = 0, 1) a diameter apart, the centre between them.
-    let (p0, p1) = (s.eval(0.0, 0.3), s.eval(1.0, 0.3));
-    let (c, r) = (p0 + (p1 - p0) * 0.5, (p1 - p0).norm() * 0.5);
-    assert!((0..=8).all(|i| ((s.eval(0.1 * i as f64 + 0.05, 0.37) - c).norm() - r).abs() < 1e-6 * r), "not a sphere");
+    // The sphere (read as one, or as the B-spline: its poles at u = 0 and 1 a diameter apart).
+    let r = match &b.faces[fi].surf {
+        Surface::Sphere { r, .. } => *r,
+        s => {
+            let (p0, p1) = (s.eval(0.0, 0.3), s.eval(1.0, 0.3));
+            let (c, r) = (p0 + (p1 - p0) * 0.5, (p1 - p0).norm() * 0.5);
+            assert!((0..=8).all(|i| ((s.eval(0.1 * i as f64 + 0.05, 0.37) - c).norm() - r).abs() < 1e-6 * r), "not a sphere");
+            r
+        }
+    };
     let t = 2.54;
     let slab = cadrs_kernel::native::slab::face_slab(&b, fi, -t).unwrap();
     assert_eq!(slab.check_with(CheckLevel::Full), Vec::<String>::new());
     let want = mass::face_area(&b, fi).0 * ((r - t) / r).powi(2);
     let got = (0..slab.faces.len()).map(|f| mass::face_area(&slab, f).0).fold(f64::NAN, |best, a| if (a - want).abs() < (best - want).abs() || best.is_nan() { a } else { best });
     assert!((got - want).abs() < 1e-4 * want, "offset face {got}, want {want}");
+}
+
+/// A sourced rectangle (each side a curve with its own id), for naming.
+fn named_rect(w: f64, h: f64) -> Loop {
+    let c = [Point2::new(0.0, 0.0), Point2::new(w, 0.0), Point2::new(w, h), Point2::new(0.0, h)];
+    Loop { curves: (0..4).map(|i| Curve2::Line { a: c[i], b: c[(i + 1) % 4], source: Some(i as u64 + 1) }).collect() }
+}
+
+/// Persistent names through offsets and shells: a 10 × 20 × 30 box offset by 2 rounded keeps
+/// each face's name once (its offset), and names its 12 edge tubes and 8 corner balls from the
+/// edges and vertices; offset sharp, the same six names and nothing new. Shelled 1 thick with
+/// its top open, the top's name is on the walls' rim (what is left of the top) and each other
+/// face's name on two faces (its outer side and the inner wall offset from it). (The offset's history used to say face i came from
+/// face i, whatever the union of its pieces had numbered them.)
+#[test]
+fn names_survive_offsets_and_shells() {
+    use cadrs_kernel::naming::{self, FaceName, FaceOrigin};
+    let op = |n: u128| uuid::Uuid::from_u128(n);
+    let mut k = NativeKernel::new();
+    let r = k.extrude(&Profile::new(Plane::top(), vec![Region { outer: named_rect(10.0, 20.0), holes: vec![], source: None }]), Extent::Blind(30.0)).unwrap();
+    let b = one(r.clone());
+    let names = naming::name_body(&k, b, op(1), &r.history, &[]).unwrap();
+    assert!(names.faces.iter().all(|n| n.is_stable()));
+    let check = |k: &NativeKernel, r: &OpResult, edges: usize, verts: usize, twice: bool, rim: Option<FaceName>| {
+        let out = r.bodies[0];
+        let got = naming::name_body(k, out, op(2), &r.history, &[(b, &names)]).unwrap();
+        assert!(got.faces.iter().all(|n| n.is_stable()), "{:?}", got.faces);
+        for n in &names.faces {
+            // (The open face's name stays on the walls' rim, what is left of it.)
+            let want = if Some(*n) == rim { 1 } else if twice { 2 } else { 1 };
+            // (Two faces from one are its pieces: split 1 and 2.)
+            assert_eq!(got.faces.iter().filter(|g| g.base() == n.base()).count(), want, "{n:?} in {:?}", got.faces);
+        }
+        let count = |f: &dyn Fn(&FaceOrigin) -> bool| got.faces.iter().filter(|n| f(&n.origin)).count();
+        assert_eq!(count(&|o| matches!(o, FaceOrigin::FromEdge { .. })), edges);
+        assert_eq!(count(&|o| matches!(o, FaceOrigin::FromVertex { .. })), verts);
+    };
+    let rounded = k.offset(b, &OffsetSpec { distance: 2.0, faces: vec![], sharp: false }).unwrap();
+    check(&k, &rounded, 12, 8, false, None);
+    let sharp = k.offset(b, &OffsetSpec { distance: 2.0, faces: vec![], sharp: true }).unwrap();
+    check(&k, &sharp, 0, 0, false, None);
+    let top = face_at(&k, b, Vector3::z(), 30.0);
+    let shelled = k.shell_with(b, &ShellSpec { remove: vec![top], thickness: 1.0, outward: false, hollow: false, sharp: false }).unwrap();
+    let top_name = names.faces[top.0 as usize];
+    check(&k, &shelled, 0, 0, true, Some(top_name));
 }

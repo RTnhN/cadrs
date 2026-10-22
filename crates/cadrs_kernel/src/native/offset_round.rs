@@ -469,6 +469,16 @@ pub fn shell(k: &mut NativeKernel, body: BodyId, spec: &ShellSpec) -> Result<OpR
             rounded()?
         }
     };
+    // The walls' faces the booleans couldn't trace (the cavity's, the grown body's): the kept
+    // faces' offsets (modified) and the rounds (generated), from where they lie.
+    let mut result = result;
+    let dist: Vec<f64> = (0..b.faces.len()).map(|f| if remove.contains(&f) { f64::NAN } else if spec.outward { t } else { -t }).collect();
+    let found = offset_sources(&b, body, &result.body, &dist);
+    for (s, f) in result.src.iter_mut().zip(found) {
+        if s.is_empty() {
+            *s = f;
+        }
+    }
     let v1 = super::mass::body_mass(&result.body).volume;
     if std::env::var("CADRS_SHELL_DEBUG").is_ok() {
         eprintln!("shell: body {v0} result {v1} solids {} faces {}", result.body.solids.len(), result.body.faces.len());
@@ -477,6 +487,70 @@ pub fn shell(k: &mut NativeKernel, body: BodyId, spec: &ShellSpec) -> Result<OpR
         return Err(KernelError::OperationFailed("the shell came out wrong".into()));
     }
     Ok(result.into_result(k, body))
+}
+
+/// What each face of `out` came from, when `out` is bounded by offsets of `b`'s faces by `dist`
+/// (a face not offset at `f64::NAN`) and their rounds: the faces whose offset surface it lies on
+/// ([`FaceSrc::Input`], the face moved: modified), else the edge or vertex its round is about
+/// ([`FaceSrc::New`], generated: it lies the distance from that edge or vertex). Names survive
+/// an offset however its pieces were united. Empty for a face that is neither.
+pub fn offset_sources(b: &Body, input: BodyId, out: &Body, dist: &[f64]) -> Vec<Vec<super::blend::FaceSrc>> {
+    use super::blend::FaceSrc;
+    let size = 1.0 + b.bbox().diagonal();
+    let moved: Vec<Option<Surface>> = b
+        .faces
+        .iter()
+        .zip(dist)
+        .map(|(f, d)| if d.is_nan() { None } else if *d == 0.0 { Some(f.surf.clone()) } else { super::local::offset_surface(&f.surf, f.sense, *d) })
+        .collect();
+    let reach = dist.iter().filter(|d| !d.is_nan()).fold(0.0f64, |m, d| m.max(d.abs()));
+    out.faces
+        .iter()
+        .map(|f| {
+            // A point of the face: the middle of its outer loop in (u, v), on its surface.
+            let mut sum = P2::origin();
+            let mut n = 0.0;
+            for c in f.loops.first().into_iter().flatten() {
+                let e = &out.edges[c.edge];
+                for i in 0..8 {
+                    let q = c.pc.point(e.t[0] + (e.t[1] - e.t[0]) * (i as f64 + 0.5) / 8.0);
+                    sum += q.coords.xy();
+                    n += 1.0;
+                }
+            }
+            if n == 0.0 {
+                return Vec::new();
+            }
+            let p = f.surf.eval(sum.x / n, sum.y / n);
+            // (Offsets of splines are fits.)
+            let near = |s: &Surface| s.distance(&p) < if matches!(s, Surface::Nurbs(_)) { 1e-5 } else { 1e-7 } * size;
+            let faces: Vec<FaceSrc> = (0..b.faces.len()).filter(|&fi| moved[fi].as_ref().is_some_and(&near)).map(FaceSrc::Input).collect();
+            if !faces.is_empty() || reach == 0.0 {
+                return faces;
+            }
+            // A round: the edge it lies the distance from (nearest within the edge, not at an
+            // end: a corner's ball is that far from its edges' ends too), else the vertex.
+            let tol = 1e-6 * size;
+            let off = |d: f64| (d - reach).abs();
+            let edge = (0..b.edges.len())
+                .filter(|&e| !b.edges[e].degenerate)
+                .filter_map(|e| {
+                    let ed = &b.edges[e];
+                    let t = ed.curve.closest(&p, ed.t[0], ed.t[1]);
+                    let inside = (t - ed.t[0]).abs().min((ed.t[1] - t).abs()) > 1e-9 * (ed.t[1] - ed.t[0]).abs();
+                    inside.then(|| (e, off((ed.curve.point(t) - p).norm())))
+                })
+                .filter(|x| x.1 < tol)
+                .min_by(|a, c| a.1.total_cmp(&c.1));
+            if let Some((e, _)) = edge {
+                return vec![FaceSrc::New(Origin::FromEdge { body: input, edge: EdgeId(e as u64) })];
+            }
+            (0..b.verts.len())
+                .find(|&v| off((b.verts[v].p - p).norm()) < tol)
+                .map(|v| vec![FaceSrc::New(Origin::FromVertex { body: input, vertex: VertexId(v as u64) })])
+                .unwrap_or_default()
+        })
+        .collect()
 }
 
 /// A large box beyond the plane through `o` along the normal `n`.

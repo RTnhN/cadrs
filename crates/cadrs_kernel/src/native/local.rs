@@ -1304,12 +1304,24 @@ pub fn offset(k: &mut NativeKernel, body: BodyId, spec: &OffsetSpec) -> Result<O
     if (grow && !shrink && v1 < v0 - 1e-9) || (shrink && !grow && v1 > v0 + 1e-9) || v1 <= 0.0 {
         return Err(KernelError::OperationFailed("the offset turned the body inside out".into()));
     }
-    let nf = out.faces.len();
+    // History: each face the offset of input faces (modified) or a round of an edge or vertex
+    // (generated); an input face with no offset left (vanished, or inside the rounds) deleted.
+    let srcs = super::offset_round::offset_sources(&b, body, &out, &dist);
     let id = k.insert(out);
-    let history = History {
-        modified: (0..nf.min(b.faces.len())).map(|i| (FaceId(i as u64), InputFace { body, face: FaceId(i as u64) })).collect(),
-        ..Default::default()
-    };
+    let mut history = History::default();
+    let mut kept = vec![false; b.faces.len()];
+    for (f, src) in srcs.iter().enumerate() {
+        for s in src {
+            match s {
+                super::blend::FaceSrc::Input(i) => {
+                    kept[*i] = true;
+                    history.modified.push((FaceId(f as u64), InputFace { body, face: FaceId(*i as u64) }));
+                }
+                super::blend::FaceSrc::New(o) => history.generated.push((FaceId(f as u64), *o)),
+            }
+        }
+    }
+    history.deleted = (0..b.faces.len()).filter(|&i| !kept[i]).map(|i| InputFace { body, face: FaceId(i as u64) }).collect();
     Ok(OpResult { bodies: vec![id], history })
 }
 
