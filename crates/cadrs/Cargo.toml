@@ -14,9 +14,12 @@ cadrs_harness.workspace = true
 cadrs_ui.workspace = true
 
 [features]
-default = ["gpu"]
+default = ["gpu", "profiler"]
 # The kernel's GPU compute (see cadrs_kernel's `gpu` feature); `CADRS_GPU=0` turns it off.
 gpu = ["cadrs_core/gpu"]
+# A span for every system and schedule run, so the frame panel and `get_frame_stats` show
+# where a frame's CPU time goes (`cadrs_app::frame_profile`); `debug` keeps the systems' names.
+profiler = ["bevy/trace", "bevy/debug"]
 # Faster dev builds: Bevy as a shared library (`cargo run -F dev`). Not for shipped builds.
 dev = ["bevy/dynamic_linking"]
 # The app's tests (they build the whole app): a plain `cargo test` leaves them out.

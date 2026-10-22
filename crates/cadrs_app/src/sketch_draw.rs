@@ -362,6 +362,62 @@ fn dashes(pts: &[SVec2], dash: f64, gap: f64) -> Vec<Vec<SVec2>> {
 
 /// Splits a polyline by a dash pattern: alternating drawn and skipped lengths (mm), starting
 /// with a drawn one. The pattern runs on around corners.
+/// How far outside the view the dashes go on (px), so none stop short at its edge.
+const DASH_CLIP_MARGIN_PX: f32 = 16.0;
+
+/// The pieces of a polyline (sketch coordinates) that lie in `clip` on the screen, each cut at
+/// the box's edges.
+fn visible_runs(pts: &[SVec2], map: &ScreenMap, clip: Rect) -> Vec<Vec<SVec2>> {
+    let mut runs = Vec::new();
+    let mut cur: Vec<SVec2> = Vec::new();
+    for w in pts.windows(2) {
+        let (a, b) = (map.to_screen(w[0]), map.to_screen(w[1]));
+        let Some((t0, t1)) = clip_segment(a, b, clip) else {
+            if cur.len() > 1 {
+                runs.push(std::mem::take(&mut cur));
+            }
+            cur.clear();
+            continue;
+        };
+        let at = |t: f32, end: SVec2| if t <= 0.0 || t >= 1.0 { end } else { map.to_sketch(a.lerp(b, t)).unwrap_or(end) };
+        if t0 > 0.0 || cur.is_empty() {
+            if cur.len() > 1 {
+                runs.push(std::mem::take(&mut cur));
+            }
+            cur = vec![at(t0, w[0])];
+        }
+        cur.push(at(t1, w[1]));
+        if t1 < 1.0 {
+            runs.push(std::mem::take(&mut cur));
+        }
+    }
+    if cur.len() > 1 {
+        runs.push(cur);
+    }
+    runs
+}
+
+/// The part of the segment `a`–`b` inside `clip`, as parameters along it (Liang–Barsky).
+fn clip_segment(a: Vec2, b: Vec2, clip: Rect) -> Option<(f32, f32)> {
+    let d = b - a;
+    let (mut t0, mut t1) = (0.0f32, 1.0f32);
+    for (p, q) in [(-d.x, a.x - clip.min.x), (d.x, clip.max.x - a.x), (-d.y, a.y - clip.min.y), (d.y, clip.max.y - a.y)] {
+        if p == 0.0 {
+            if q < 0.0 {
+                return None;
+            }
+        } else {
+            let r = q / p;
+            if p < 0.0 {
+                t0 = t0.max(r);
+            } else {
+                t1 = t1.min(r);
+            }
+        }
+    }
+    (t0 <= t1).then_some((t0, t1))
+}
+
 fn dash_pattern(pts: &[SVec2], pattern: &[f64]) -> Vec<Vec<SVec2>> {
     let mut out = Vec::new();
     if pattern.is_empty() || pattern.iter().sum::<f64>() <= 1e-12 {
@@ -596,7 +652,7 @@ fn draw_sketches(
             let pick = crate::viewport::Pick::SketchCurve(f.id, c);
             outlined.contains(&c) || plane_highlight.is_hovered(pick) || picked_features.contains(pick)
         };
-        draw_accepted(&sk.geometry, plane, &map, &skip, (whole, error, color, &curve_color, &outlined), &mut accepted, &mut accepted_dots, &mut hidden);
+        draw_accepted(&sk.geometry, plane, &map, rect.0, &skip, (whole, error, color, &curve_color, &outlined), &mut accepted, &mut accepted_dots, &mut hidden);
         // P3D.1 (IR5.5): the feature menu's Show dimensions.
         if shown_dims.0.contains(&f.id) {
             let knock = |_: SVec2| knockout(false);
@@ -2349,6 +2405,7 @@ fn draw_accepted(
     s: &Sketch,
     plane: PlaneRef,
     map: &ScreenMap,
+    viewport: Rect,
     skip: &dyn Fn(cadrs_sketch::CurveId) -> bool,
     (selected, error, color, curve_color, outlined): (bool, bool, Option<Color>, &dyn Fn(cadrs_sketch::CurveId) -> Option<Color>, &dyn Fn(cadrs_sketch::CurveId) -> bool),
     g: &mut Gizmos<SketchAcceptedGizmos>,
@@ -2385,8 +2442,12 @@ fn draw_accepted(
         }
         let px = |v: f64| v / ppm as f64;
         let pattern = if c.construction { [px(12.0), px(4.0), px(2.0), px(4.0)].to_vec() } else { vec![px(8.0), px(5.0)] };
-        for d in dash_pattern(&pts, &pattern) {
-            hidden.linestrip(d.into_iter().map(|p| world(&frame, p)), own.unwrap_or(edge).with_alpha(0.7));
+        // Only along what is in the view: a 100 m contour line zoomed in to a house was a
+        // million dashes a frame.
+        for run in visible_runs(&pts, map, viewport.inflate(DASH_CLIP_MARGIN_PX)) {
+            for d in dash_pattern(&run, &pattern) {
+                hidden.linestrip(d.into_iter().map(|p| world(&frame, p)), own.unwrap_or(edge).with_alpha(0.7));
+            }
         }
     }
     for id in s.texts.keys() {
@@ -2937,6 +2998,24 @@ fn sync_box_select(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn only_what_is_in_the_view_is_dashed() {
+        // 1 mm a pixel, the sketch origin at the screen's.
+        let map = ScreenMap { plane: PlaneRef::Top, origin: Vec2::ZERO, x: Vec2::X, y: Vec2::Y, w: Vec2::ZERO };
+        let view = Rect::new(0.0, 0.0, 100.0, 100.0);
+        // A long line across the view, a turn far outside it, and back in through the top.
+        let pts = [SVec2::new(-1000.0, 50.0), SVec2::new(1000.0, 50.0), SVec2::new(1000.0, -500.0), SVec2::new(50.0, -500.0), SVec2::new(50.0, 20.0)];
+        let runs = visible_runs(&pts, &map, view);
+        assert_eq!(runs.len(), 2, "{runs:?}");
+        let near = |p: SVec2, x: f64, y: f64| (p.x - x).abs() < 1e-3 && (p.y - y).abs() < 1e-3;
+        assert!(near(runs[0][0], 0.0, 50.0) && near(runs[0][1], 100.0, 50.0), "{runs:?}");
+        assert!(near(runs[1][0], 50.0, 0.0) && near(runs[1][1], 50.0, 20.0), "{runs:?}");
+        // All inside: the polyline as it is.
+        let inside = [SVec2::new(10.0, 10.0), SVec2::new(20.0, 10.0), SVec2::new(20.0, 30.0)];
+        assert_eq!(visible_runs(&inside, &map, view), vec![inside.to_vec()]);
+        assert!(visible_runs(&[SVec2::new(-10.0, -10.0), SVec2::new(-5.0, -20.0)], &map, view).is_empty());
+    }
 
     #[test]
     fn dashes_split_a_line() {

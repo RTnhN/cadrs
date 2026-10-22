@@ -88,6 +88,7 @@ pub const SHORTCUTS: &[(usize, &str, &str, u8)] = &[
     (3, "Ctrl+←", "Rotate 5° (any arrow)", 0),
     (3, "Ctrl+Shift+←", "Pan (any arrow)", 0),
     (3, "P", "Show or hide planes", 0),
+    (3, "F12", "Show or hide the frame rate", 0),
     (3, "Shift+P", "Hide construction geometry", OFF),
     (3, "Shift+I", "Isolate", OFF),
     (3, "Shift+T", "Transparent", OFF),
