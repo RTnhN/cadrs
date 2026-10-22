@@ -430,6 +430,8 @@ pub fn chain_keys(features: &[Feature]) -> Vec<u64> {
             continue;
         }
         let below = parent_below(features, i).or_else(|| var_errors.iter().find(|(id, _)| *id == f.id).map(|(_, w)| w.clone()));
+        // As the rebuild: a feature that crashed the kernel process fails without being computed.
+        let below = below.or_else(|| process::is_poisoned(key).then(|| process::CRASHED.to_string()));
         if let Some(why) = &below {
             key = chain_key_str(key, why);
         }
