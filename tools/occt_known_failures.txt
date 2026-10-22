@@ -6,7 +6,7 @@
 
 # case_9 2d cases: a line and a B-spline coincide within 5e-13 over 143 mm; OCCT finds one crossing, we an overlap.
 
-blend complex_a2  # topology mismatch before the blend: our `explode s e` leaves out CCH_indushem.rle's degenerated edge, which OCCT's lists, so the script's s_26 is past our 25 edges (W1d)
+blend complex_a2  # the loft's surface isn't valid (a weight along v isn't positive)
 blend complex_a3  # the loft's surface isn't valid (a weight along v isn't positive)
 blend complex_a4  # the area differs from OCCT's
 blend complex_a7  # the edges blended aren't the shape's (the script's edges come from another shape)
@@ -22,14 +22,8 @@ blend complex_f1  # a boolean leaves an open shell
 blend complex_f2  # the blends of two edges overlap: the size is too large for the face between them (OCCT builds it)
 blend complex_g8  # a boolean leaves an open shell
 blend complex_g9  # the blend is too large for the faces at the edge (OCCT builds it)
-blend simple_c7  # topology mismatch before the blend: our `explode s e` leaves out the degenerated edge at the partial cone's apex, which OCCT's lists, so the script's s_7 is past our 6 edges (W1d)
-blend simple_c8  # topology mismatch before the blend: our `explode s e` leaves out the degenerated edge at the partial cone's apex, which OCCT's lists, so the script's s_7 is past our 6 edges (W1d)
-blend simple_c9  # the area differs from OCCT's
+blend simple_c8  # the blend tool's path needs more than 4000 sections (the local fillet's corner doesn't close: a p-curve a period off)
 blend simple_d1  # the blend tool runs out of its budget of sections
-blend simple_e1  # topology mismatch before the blend: our `explode s e` leaves out the degenerated edge at the sphere zone's pole, which OCCT's lists, so the script's s_7 is past our 6 edges (W1d)
-blend simple_e2  # topology mismatch before the blend: our `explode s e` leaves out the degenerated edge at the sphere zone's pole, which OCCT's lists, so the script's s_7 is past our 6 edges (W1d)
-blend simple_e4  # topology mismatch before the blend: our `explode s e` leaves out the degenerated edge at the sphere zone's pole, which OCCT's lists, so the script's s_7 is past our 6 edges (W1d)
-blend simple_h7  # the blend tool runs out of its budget of sections
 blend simple_h9  # a boolean leaves an open shell
 blend simple_k4  # the area differs from OCCT's
 blend simple_p4  # a boolean builds a face that doesn't close (a p-curve gap)
@@ -63,8 +57,6 @@ blend tolblend_simple_c2  # the blend's section degenerates along the edge
 blend tolblend_simple_c3  # the blend's section degenerates along the edge
 blend tolblend_simple_c5  # the blend's section degenerates along the edge
 blend tolblend_simple_d2  # a boolean's result has an edge used by three faces (refused, not manifold)
-blend tolblend_simple_d9  # a boolean leaves an open shell
-blend tolblend_simple_e1  # a boolean leaves an open shell
 blend tolblend_simple_e3  # the blend tool runs out of its budget of sections
 blend tolblend_simple_e4  # the blend tool runs out of its budget of sections
 blend tolblend_simple_e5  # the blend tool runs out of its budget of sections
@@ -211,8 +203,6 @@ blend simple_g4  # unsupported: faces bounded by rational or high-degree B-splin
 blend simple_g5  # unsupported: faces bounded by rational or high-degree B-splines
 blend simple_g6  # unsupported: faces bounded by rational or high-degree B-splines
 blend simple_h3  # a boolean's result has an edge used by three faces (refused, not manifold)
-blend simple_h4  # topology mismatch before the blend: our `explode s e` leaves out the degenerated edges where the revolved profile touches its axis, which OCCT's lists, so the script's s_10 is past our 9 edges (W1d)
-blend simple_h5  # topology mismatch before the blend: our `explode s e` leaves out the degenerated edges where the revolved profile touches its axis, which OCCT's lists, so the script's s_10 is past our 9 edges (W1d)
 blend simple_j6  # the area differs from OCCT's
 boolean bopcut_2d_d5  # the length differs from OCCT's
 offset wire_closed_inside_0_005_a4  # the result's vertex count differs from OCCT's (a B-spline wire's offset is split at other points)
@@ -473,19 +463,8 @@ blend tolblend_simple_f3
 blend tolblend_simple_f8
 # blend: the measured property differs from OCCT's.
 blend bfuseblend_b7
-blend buildevol_a3
-blend buildevol_b4
-blend simple_a7
-blend simple_a8
-blend simple_i1
-blend simple_i2
-blend simple_i4
-blend simple_i6
-blend tolblend_simple_a1
 # blend: the kernel's variable fillet (fillet_variable) takes only straight edges between planes.
 blend buildevol_c8
-blend buildevol_d9
-blend buildevol_e2
 blend buildevol_f1
 blend buildevol_f2
 blend buildevol_f5
@@ -504,13 +483,11 @@ blend buildevol_k6
 blend buildevol_k8
 # blend: the operation fails.
 blend bfuseblend_b6
-blend buildevol_b3  # topology mismatch before the blend: our `explode s e` leaves out the degenerated edge at the partial cone's apex, which OCCT's lists, so the script's s_7 is past our 6 edges (W1d)
-blend buildevol_b9  # topology mismatch before the blend: our `explode s e` leaves out the degenerated edge at the sphere zone's pole, which OCCT's lists, so the script's s_7 is past our 6 edges (W1d)
-blend buildevol_d6  # topology mismatch before the blend: our `explode s e` leaves out the degenerated edges where the revolved profile touches its axis, which OCCT's lists, so the script's s_10 is past our 9 edges (W1d)
+blend buildevol_b3  # the area differs from OCCT's (by 1.02 %)
+blend buildevol_d6  # unsupported: variable fillets between curved faces (the local fillet's result doesn't close)
 blend complex_c2
 blend complex_h4
-blend encoderegularity_a1  # topology mismatch before the blend: our `explode m e` leaves out CFI901_congefjw.rle's 2 degenerated edges, which OCCT's lists, so the script's m_41 is past our 40 edges (W1d)
-blend encoderegularity_a5  # topology mismatch before the blend: our `explode m e` leaves out CFI901_congefkc.rle's 2 degenerated edges, which OCCT's lists, so the script's m_31 is past our 30 edges (W1d)
+blend encoderegularity_a5  # the loft's surface isn't valid (a weight along v isn't positive)
 blend simple_r4
 blend simple_r5
 blend tolblend_simple_a4  # the blend's boolean leaves an edge used by three faces (refused, not manifold)
@@ -537,8 +514,6 @@ blend tolblend_buildvol_a3
 blend tolblend_buildvol_a4
 blend tolblend_buildvol_a9
 # offset: the measured property differs from OCCT's.
-offset faces_type_i_m4
-offset faces_type_i_m5
 offset faces_type_i_m6
 offset faces_type_i_m8
 # offset: a boolean of the feature fails (open shell).
@@ -680,3 +655,5 @@ evolved voluved_agt003
 
 # evolved: a profile arc swept round square corners: the boolean of the corner's torus with the sides' cylinders, tangent along the profile, fails.
 evolved voluved_agt008
+blend buildevol_d8  # the fillet's ball is lost where it rolls between a 270° revolution's end plane and its cone up to the apex (the script's edge by OCCT's order, which counts the apex's degenerate edge; it passed before only on the wrong edge)
+blend simple_h8  # as buildevol_d8, with a constant radius

@@ -1334,13 +1334,19 @@ fn hole_corner(b: &Body, efs: &[EdgeFillet], here: &[(usize, usize)], v: usize) 
     if here.iter().enumerate().any(|(h, &(i, _))| fan.iter().all(|x| x.0 != efs[i].e) || here[..h].iter().any(|&(o, _)| efs[o].e == efs[i].e)) {
         return Err(unsupported("a fillet corner on an edge closed at its vertex"));
     }
-    // Round fillets on convex edges only: the patch bulges out towards the vertex.
-    if here.iter().any(|&(i, _)| efs[i].k[0] > 0.0 || efs[i].flat) || fan.iter().any(|&(e, _)| strip_of(e).is_none() && edge_convexity(b, e) != Some(true)) {
+    // Round fillets, every edge at the vertex convex (the patch bulges out towards the vertex)
+    // or every one concave (it bulges into the corner's room, towards the vertex too); an edge
+    // left as it is may also join its faces smoothly.
+    let convex = efs[here[0].0].k[0] < 0.0;
+    debug(|| format!("vertex {v}: fan {:?}, convexity {:?}, lengths {:?}", fan, fan.iter().map(|&(e, _)| edge_convexity(b, e)).collect::<Vec<_>>(), fan.iter().map(|&(e, _)| ed_len(b, e)).collect::<Vec<_>>()));
+    if here.iter().any(|&(i, _)| (efs[i].k[0] < 0.0) != convex || efs[i].flat) || fan.iter().any(|&(e, _)| strip_of(e).is_none() && edge_convexity(b, e) == Some(!convex)) {
         return Err(unsupported("a fillet corner of this kind"));
     }
     let end_balls: Vec<Ball> = here.iter().map(|&(i, j)| efs[i].end_ball(b, j)).collect::<Result<_>>()?;
     let m = fan.len();
     let mut need = 0.0f64;
+    // How far along each edge left as it is a rail crosses it.
+    let mut need_on: HashMap<usize, f64> = HashMap::new();
     for i in 0..m {
         let (l, f) = fan[i];
         let r = fan[(i + 1) % m].0;
@@ -1356,10 +1362,20 @@ fn hole_corner(b: &Body, efs: &[EdgeFillet], here: &[(usize, usize)], v: usize) 
                 let sharp = if strip_of(l).is_some() { r } else { l };
                 let (i, j) = here[h];
                 let s = &efs[i];
-                let x = rail_exit(b, s, j, side(h), &end_balls[h], Which::Edge(sharp))?.ok_or_else(|| unsupported("a fillet corner whose rail misses the edge beside it"))?;
+                let Some(x) = rail_exit(b, s, j, side(h), &end_balls[h], Which::Edge(sharp))? else {
+                    // Beside an edge between faces that join smoothly the rail may run on past
+                    // the vertex without meeting it: nothing to set back from there.
+                    if edge_convexity(b, sharp).is_none() {
+                        continue;
+                    }
+                    return Err(unsupported("a fillet corner whose rail misses the edge beside it"));
+                };
                 let se = &b.edges[sharp];
                 let ts = se.curve.closest(&x.ball.q[side(h)].p, se.t[0], se.t[1]);
-                need = need.max(dist_along(b, s.e, v, x.t)).max(dist_along(b, sharp, v, ts));
+                let on = dist_along(b, sharp, v, ts);
+                need = need.max(dist_along(b, s.e, v, x.t)).max(on);
+                let n = need_on.entry(sharp).or_default();
+                *n = n.max(on);
             }
             (None, None) => {}
         }
@@ -1374,11 +1390,19 @@ fn hole_corner(b: &Body, efs: &[EdgeFillet], here: &[(usize, usize)], v: usize) 
         let ball = s.ball_from(b, &s.mid, s.tm, t).ok_or_else(|| failed("corner", "the fillet's ball is lost at a set-back corner"))?;
         ends.push(End::Hole { c: usize::MAX, t, ball });
     }
-    if fan.iter().any(|&(e, _)| strip_of(e).is_none() && param_at(b, e, v, d).is_none_or(|_| d > 0.9 * ed_len(b, e))) {
-        return Err(unsupported("a fillet corner set back past an edge's end"));
+    debug(|| format!("vertex {v}: setback {d} (need {need})"));
+    // Each other edge's setback: short of its far end, but past where a rail crosses it.
+    let mut ds: HashMap<usize, f64> = HashMap::new();
+    for &(e, _) in fan.iter().filter(|&&(e, _)| strip_of(e).is_none()) {
+        let (len, on) = (ed_len(b, e), need_on.get(&e).copied().unwrap_or(0.0));
+        let de = if d <= 0.9 * len { d } else { 0.5 * (on + 0.9 * len) };
+        if !(de > on) || param_at(b, e, v, de).is_none() {
+            return Err(unsupported("a fillet corner set back past an edge's end"));
+        }
+        ds.insert(e, de);
     }
     debug(|| format!("vertex {v}: set-back corner of edges {:?} round {:?}, setback {d}", here.iter().map(|&(i, _)| efs[i].e).collect::<Vec<_>>(), fan));
-    Ok((Hole { v, fan, d }, ends))
+    Ok((Hole { v, fan, d: ds }, ends))
 }
 
 /// A bilinearly blended (Coons) patch on four boundary curves, as a B-spline surface through
@@ -1647,7 +1671,8 @@ struct Hole {
     v: usize,
     /// The edges round the vertex in turn, each with the face between it and the next.
     fan: Vec<(usize, usize)>,
-    d: f64,
+    /// The setback along each edge left as it is.
+    d: HashMap<usize, f64>,
 }
 
 /// The triangle closing a corner of three chamfers, some cutting and some filling (each
@@ -2551,7 +2576,7 @@ fn hole_face(b: &Body, nb: &mut Body, h: &Hole, vtol: f64, out: &mut Pieces, inp
         if out.hole_ends.contains_key(&(v, e)) {
             continue;
         }
-        let t = param_at(b, e, v, h.d).ok_or_else(|| failed("corner", "a fillet corner's setback is past an edge's end"))?;
+        let t = h.d.get(&e).and_then(|&d| param_at(b, e, v, d)).ok_or_else(|| failed("corner", "a fillet corner's setback is past an edge's end"))?;
         let x = vertex_on_boundary(nb, f, &b.edges[e].point(t), vtol).ok_or_else(|| failed("corner", "a fillet corner's setback point isn't on its edge"))?;
         points.insert(e, x);
     }
@@ -2605,7 +2630,8 @@ fn hole_face(b: &Body, nb: &mut Body, h: &Hole, vtol: f64, out: &mut Pieces, inp
     let normal = |i: usize, p: &P3| -> V3 {
         match &rim[i].2 {
             Side::Face(f) => geom::contact(&b.faces[*f], geom::foot(&b.faces[*f], p, None)).n,
-            // A convex fillet's surface faces away from its ball's centre.
+            // Along the fillet's surface (a convex one faces away from its ball's centre, a
+            // concave one towards it: either way, as the rim leans into the hole).
             Side::Strip(ball) => (p - ball.c).normalize(),
         }
     };
@@ -4583,7 +4609,25 @@ fn trim(b: &Body, input: BodyId, p: &Plan, size: f64, fit_tol: f64, vtol: f64, c
         let arcs: Vec<usize> = c.edges.iter().map(|&e| out.section_edges[&SectionKey::Corner(c.v, e)]).collect();
         let m = c.contacts.iter().map(|x| x.1.p - c.c).fold(V3::zeros(), |a, d| a + d.normalize());
         let x = if m.norm() > tol::ROUNDOFF { m.normalize() } else { (c.contacts[0].1.p - c.c).normalize() };
-        let z = any_perp(&x);
+        // The poles (±z) as far from the patch as they go: a patch reaching round a pole would
+        // wrap its loop once round in u.
+        let dirs: Vec<V3> = arcs
+            .iter()
+            .flat_map(|&a| {
+                let ed = &nb.edges[a];
+                (0..=4).map(move |i| ed.point(ed.t[0] + (ed.t[1] - ed.t[0]) * i as f64 / 4.0))
+            })
+            .filter_map(|p| (p - c.c).try_normalize(tol::DEGENERATE))
+            .collect();
+        let worst = |z: &V3| dirs.iter().map(|d| d.dot(z).abs()).fold(0.0, f64::max);
+        let z0 = any_perp(&x);
+        let z1 = x.cross(&z0);
+        // (Turned only where the patch comes within 25° of a pole.)
+        let z = if worst(&z0) < 0.9 {
+            z0
+        } else {
+            (0..36).map(|i| z0 * (PI * i as f64 / 36.0).cos() + z1 * (PI * i as f64 / 36.0).sin()).min_by(|p, q| worst(p).total_cmp(&worst(q))).unwrap_or(z0)
+        };
         let surf = Surface::Sphere { f: Frame { o: c.c, x, y: z.cross(&x), z }, r: (c.contacts[0].1.p - c.c).norm() };
         let vi = super::blend::vertex_index(b, c.v);
         out.new_faces.push(NewFace { surf, edges: arcs, src: FaceSrc::New(Origin::FromVertex { body: input, vertex: VertexId(vi as u64) }), u_period: None, beside: c.contacts[0].0, pcurves: Vec::new() });

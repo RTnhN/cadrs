@@ -137,3 +137,22 @@ fn cross_hole_fillet() {
     let removed = v0 - k.mass_properties(out).unwrap().volume;
     assert!((1880.0..2040.0).contains(&removed), "{removed}");
 }
+
+/// A degenerate edge among the picked ones (OCCT's `explode` lists a cone's apex; blend
+/// encoderegularity_a5 picks two pole edges) is passed over, as OCCT's blend does.
+#[test]
+fn degenerate_picked_edge_is_passed_over() {
+    let mut k = NativeKernel::new();
+    let s = k.pcone_a(None, 50.0, 0.0, 120.0, 90.0).unwrap();
+    let es = k.explode_edges(&s).unwrap();
+    let (draw::Shape::Body(b), draw::Shape::BodyEdge(_, apex), draw::Shape::BodyEdge(_, arc)) = (&s, &es[0], &es[2]) else { panic!("not a body's edges") };
+    assert!(k.get(*b).unwrap().edges()[apex.0 as usize].degenerate);
+    let area = |k: &mut NativeKernel, edges: &[EdgeId]| {
+        let r = k.fillet(*b, edges, 10.0).unwrap();
+        k.mass_properties(r.bodies[0]).unwrap().surface_area
+    };
+    let both = area(&mut k, &[*apex, *arc]);
+    let one = area(&mut k, &[*arc]);
+    assert!((both - one).abs() < 1e-9 * one, "{both} {one}");
+    assert!(k.fillet(*b, &[*apex], 10.0).is_err());
+}

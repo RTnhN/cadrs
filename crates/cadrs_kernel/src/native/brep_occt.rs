@@ -1087,6 +1087,9 @@ struct Builder<'a> {
     /// Vertices outside any edge (a compound's), placed.
     free_points: Vec<P3>,
     warnings: Vec<String>,
+    /// The file's degenerate edges (left out): how many edges were made before each, and its
+    /// point, for OCCT's exploration order.
+    degenerate: Vec<(usize, P3)>,
 }
 
 impl Builder<'_> {
@@ -1116,6 +1119,12 @@ impl Builder<'_> {
         let sh = &self.f.shapes[s];
         let Kind::Edge(c3, degenerate, ref pcs) = sh.kind else { return None };
         if degenerate {
+            let at = self.xb.body.edges.len();
+            if let Some(&(_, vs, l)) = sh.subs.first()
+                && let Some(v) = self.vertex(vs, &loc.then(&self.f.locs[l]))
+            {
+                self.degenerate.push((at, self.xb.body.verts[v].p));
+            }
             return None;
         }
         let (mut v0, mut v1) = (None, None);
@@ -1590,9 +1599,11 @@ pub struct BrepRead {
     /// The faces' body (solids, then sheets); None when the file has no faces.
     pub body: Option<Body>,
     /// The middle points of the body's edges in OCCT's exploration order (the order of first
-    /// use, depth first, as `TopExp_Explorer` meets them; degenerate edges left out). The faces
+    /// use, depth first, as `TopExp_Explorer` meets them; a degenerate edge at its vertex). The faces
     /// keep the file's order.
     pub edge_order: Vec<P3>,
+    /// The degenerate edges' places in `edge_order` (their vertices' points there).
+    pub degenerate_order: Vec<usize>,
     /// Edges outside faces (a wire's or a compound's): curve and parameter range.
     pub free_edges: Vec<(Curve, f64, f64)>,
     /// Whether the free edges are in wires (else loose edges).
@@ -1616,7 +1627,7 @@ pub fn read_ordered(bytes: &[u8]) -> R<BrepRead> {
     bound_unbounded_planes(&mut f);
     let mut xb = XBuilder::new();
     xb.trust_orientation = true;
-    let mut b = Builder { f: &f, xb, verts: HashMap::new(), edges: HashMap::new(), free_faces: Vec::new(), free_edges: Vec::new(), wires: false, free_points: Vec::new(), warnings: Vec::new() };
+    let mut b = Builder { f: &f, xb, verts: HashMap::new(), edges: HashMap::new(), free_faces: Vec::new(), free_edges: Vec::new(), wires: false, free_points: Vec::new(), warnings: Vec::new(), degenerate: Vec::new() };
     let (o, s, l) = f.root;
     b.visit(s, o, &f.locs[l]);
     let free = std::mem::take(&mut b.free_faces);
@@ -1628,7 +1639,21 @@ pub fn read_ordered(bytes: &[u8]) -> R<BrepRead> {
         let ed = &b.xb.body.edges[e];
         (ed.curve.clone(), ed.t[0], ed.t[1])
     }).collect();
-    let mids: Vec<P3> = b.xb.body.edges.iter().map(|e| e.point(e.mid_t())).collect();
+    // The edges' middles in order, the degenerate ones' points where they came.
+    let mut mids: Vec<P3> = Vec::new();
+    let mut degenerate_order: Vec<usize> = Vec::new();
+    let mut pending = b.degenerate.iter().peekable();
+    for (i, e) in b.xb.body.edges.iter().enumerate() {
+        while let Some(&(_, p)) = pending.next_if(|x| x.0 <= i) {
+            degenerate_order.push(mids.len());
+            mids.push(p);
+        }
+        mids.push(e.point(e.mid_t()));
+    }
+    for &(_, p) in pending {
+        degenerate_order.push(mids.len());
+        mids.push(p);
+    }
     let has_faces = !b.xb.faces.is_empty();
     // Straight from the file when that gives a valid body; else rebuilt.
     let direct = if has_faces && std::env::var_os("CADRS_OCCT_REBUILD").is_none() {
@@ -1713,7 +1738,7 @@ pub fn read_ordered(bytes: &[u8]) -> R<BrepRead> {
             return Err(format!("no faces or edges read ({})", warnings.join("; ")));
         }
     }
-    Ok(BrepRead { body, edge_order: mids, free_edges, wires: b.wires, points, loose_points, warnings })
+    Ok(BrepRead { body, edge_order: mids, degenerate_order, free_edges, wires: b.wires, points, loose_points, warnings })
 }
 
 /// Reads an OCCT BRep text file into a body and the problems met: its solids, then sheets,

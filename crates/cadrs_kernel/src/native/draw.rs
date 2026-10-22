@@ -126,6 +126,9 @@ pub struct NbShapes {
 struct OcctOrder {
     edges: Vec<P3>,
     faces: Vec<P3>,
+    /// The edges (indices into `edges`) OCCT makes degenerate (a vertex on a revolution's
+    /// axis): matched where the body has such edges too, else left out.
+    degenerate: Vec<usize>,
 }
 
 thread_local! {
@@ -154,6 +157,7 @@ fn revolved_order(ax: &Ax3, r1: f64, r2: f64, h: f64) -> OcctOrder {
     OcctOrder {
         edges: vec![w(-rhi, 0.0, hi), w((r1 + r2) / 2.0, 0.0, (lo + hi) / 2.0), w(-rlo, 0.0, lo)],
         faces: vec![w(0.0, (r1 + r2) / 2.0, (lo + hi) / 2.0), w(0.0, 0.0, hi), w(0.0, 0.0, lo)],
+        degenerate: vec![],
     }
 }
 
@@ -210,7 +214,7 @@ fn one_axis_order(ax: &Ax3, bot: (f64, f64), top: (f64, f64), mid: (f64, f64), c
         faces.push(w(r, 0.0, z));
         faces.push(w(r, angle, z));
     }
-    OcctOrder { edges, faces }
+    OcctOrder { edges, faces, degenerate: vec![] }
 }
 
 /// OCCT's order for a face swept along a path (BRepSweep): the shell holds each wire edge's
@@ -228,6 +232,7 @@ fn sweep_order(loops: &[Vec<DEdge>], at: &dyn Fn(&P3, f64) -> P3, swept: &dyn Fn
         }
     };
     let mut faces: Vec<P3> = Vec::new();
+    let mut degenerate: Vec<usize> = Vec::new();
     let mid = |e: &DEdge| e.curve.point(0.5 * (e.t0 + e.t1));
     for l in loops {
         for e in l {
@@ -240,6 +245,10 @@ fn sweep_order(loops: &[Vec<DEdge>], at: &dyn Fn(&P3, f64) -> P3, swept: &dyn Fn
             for v in [a, b] {
                 if swept(&v) {
                     add(&mut edges, at(&v, 0.5));
+                } else if !edges.iter().any(|q| (q - v).norm() < 1e-9 * (1.0 + v.coords.norm())) {
+                    // A vertex on the axis: OCCT's degenerate edge there (BRepSweep_Rotation).
+                    degenerate.push(edges.len());
+                    edges.push(v);
                 }
             }
             add(&mut edges, m);
@@ -258,7 +267,7 @@ fn sweep_order(loops: &[Vec<DEdge>], at: &dyn Fn(&P3, f64) -> P3, swept: &dyn Fn
             faces.push(at(&c, s));
         }
     }
-    OcctOrder { edges, faces }
+    OcctOrder { edges, faces, degenerate }
 }
 
 fn err(m: &str) -> KernelError {
@@ -830,7 +839,7 @@ impl NativeKernel {
             w(xm, y0, z0), w(xm, y0, z1), w(xm, y1, z0), w(xm, y1, z1),
         ];
         let faces = vec![w(x0, ym, zm), w(x1, ym, zm), w(xm, y0, zm), w(xm, y1, zm), w(xm, ym, z0), w(xm, ym, z1)];
-        set_order(r.bodies[0], OcctOrder { edges, faces });
+        set_order(r.bodies[0], OcctOrder { edges, faces, degenerate: vec![] });
         Ok(Shape::Body(r.bodies[0]))
     }
 
@@ -1325,7 +1334,7 @@ impl NativeKernel {
             let mut es: Vec<DEdge> = r.free_edges.into_iter().map(|(curve, t0, t1)| DEdge { curve, t0, t1 }).collect();
             return Ok(if es.len() == 1 && !r.wires { Shape::Edge(es.remove(0)) } else { Shape::Wire(es) });
         };
-        let edges = r.edge_order;
+        let (edges, degenerate) = (r.edge_order, r.degenerate_order);
         let nf = body.faces.len();
         let b = self.insert(body);
         let infos = self.faces(b)?;
@@ -1339,7 +1348,7 @@ impl NativeKernel {
                     s.eval(u, v)
                 })
                 .collect();
-            set_order(b, OcctOrder { edges, faces });
+            set_order(b, OcctOrder { edges, faces, degenerate });
         }
         Ok(Shape::Body(b))
     }
@@ -1499,7 +1508,67 @@ impl NativeKernel {
             Shape::Body(b) => !self.get(*b)?.faces.is_empty(),
             _ => false,
         };
-        self.buildsweep(spine, &[(profile, false, false)], "CF", [0.0, 0.0, 1.0], 'M', solid)
+        let out = self.buildsweep(spine, &[(profile, false, false)], "CF", [0.0, 0.0, 1.0], 'M', solid)?;
+        if let (Shape::Face { plane, loops }, Shape::Body(b)) = (profile, &out)
+            && let [outer] = &loops[..]
+        {
+            let (path, _) = self.path_of(spine)?;
+            let reversed = plane.normal.dot(&path[0].dir(0.0)) < 0.0;
+            if let Some(o) = self.pipe_order(*b, outer, reversed) {
+                set_order(*b, o);
+            }
+        }
+        Ok(out)
+    }
+
+    /// OCCT's order for a face of one loop piped from where it sits (BRepFill_Pipe, through
+    /// BRepFill_Sweep): the start face, each lateral face in the order the loop is explored
+    /// (backwards from its first edge when the face looks back along the spine: `reversed`),
+    /// then the end face; a lateral face's wire is the edge swept from the profile edge's first
+    /// vertex, the profile edge at the start, the edge swept from its last vertex, the profile
+    /// edge at the end. Found on the body itself: `None` when its start isn't the profile.
+    fn pipe_order(&self, b: BodyId, outer: &[DEdge], reversed: bool) -> Option<OcctOrder> {
+        let body = self.get(b).ok()?;
+        let infos = self.faces(b).ok()?;
+        let size = body.verts.iter().fold(Bbox::empty(), |mut bb, v| {
+            bb.add(&v.p);
+            bb
+        });
+        let tol = super::tol::CONFUSION * (1.0 + size.diagonal());
+        let mid = |i: usize| body.edges[i].point(body.edges[i].mid_t());
+        let near_edge = |p: &P3| (0..body.edges.len()).filter(|&i| !body.edges[i].degenerate).min_by(|&x, &y| (mid(x) - p).norm().total_cmp(&(mid(y) - p).norm())).filter(|&i| (mid(i) - p).norm() < tol);
+        let near_vert = |p: &P3| (0..body.verts.len()).find(|&v| (body.verts[v].p - p).norm() < tol);
+        let n = outer.len();
+        let walk: Vec<usize> = if reversed { std::iter::once(0).chain((1..n).rev()).collect() } else { (0..n).collect() };
+        let ef = body.edge_faces();
+        let starts: Vec<usize> = walk.iter().map(|&k| near_edge(&outer[k].curve.point(0.5 * (outer[k].t0 + outer[k].t1)))).collect::<Option<_>>()?;
+        // The start face holds every start edge.
+        let cap = (0..body.faces.len()).find(|&f| starts.iter().all(|&e| ef[e].contains(&f)))?;
+        let mut edges: Vec<usize> = starts.clone();
+        let mut faces = vec![cap];
+        let push = |edges: &mut Vec<usize>, e: usize| {
+            if !edges.contains(&e) {
+                edges.push(e);
+            }
+        };
+        for (j, &k) in walk.iter().enumerate() {
+            let s = starts[j];
+            let lat = *ef[s].iter().find(|&&f| f != cap)?;
+            faces.push(lat);
+            let ring: Vec<usize> = body.faces[lat].loops.iter().flatten().map(|c| c.edge).filter(|&e| e != s && !body.edges[e].degenerate).collect();
+            let (v0, v1) = (near_vert(&outer[k].start())?, near_vert(&outer[k].end())?);
+            let swept_from = |v: usize| ring.iter().copied().find(|&e| body.edges[e].v.contains(&v));
+            let a = swept_from(v0)?;
+            let z = if v1 == v0 { a } else { swept_from(v1)? };
+            let end = ring.iter().copied().find(|&e| e != a && e != z)?;
+            push(&mut edges, a);
+            push(&mut edges, z);
+            push(&mut edges, end);
+        }
+        let end_cap = (0..body.faces.len()).find(|f| !faces.contains(f))?;
+        faces.push(end_cap);
+        let all = (0..body.edges.len()).filter(|&i| !body.edges[i].degenerate).count();
+        (edges.len() == all && faces.len() == body.faces.len()).then(|| OcctOrder { edges: edges.into_iter().map(mid).collect(), faces: faces.into_iter().map(|f| infos[f].center).collect(), degenerate: vec![] })
     }
 
     /// `mksweep spine; setsweep mode; addsweep section [-T] [-R]; buildsweep result [-M|-C|-R]
@@ -1999,14 +2068,28 @@ impl NativeKernel {
         let tris: Vec<[P3; 3]> = quads.iter().flat_map(|q| [[q[0], q[1], q[2]], [q[0], q[2], q[3]]]).collect();
         let size = (dx.abs() + dy.abs() + dz.abs()).max(1e-9);
         let b = crate::Kernel::mesh_solid(self, &tris, 1e-9 * size)?;
-        let mid = |a: P3, b: P3| P3::from((a.coords + b.coords) / 2.0);
-        let edges = vec![
-            mid(c(0, 0, 0), c(0, 0, 1)), mid(c(0, 0, 1), c(0, 1, 1)), mid(c(0, 1, 0), c(0, 1, 1)), mid(c(0, 0, 0), c(0, 1, 0)),
-            mid(c(1, 0, 0), c(1, 0, 1)), mid(c(1, 0, 1), c(1, 1, 1)), mid(c(1, 1, 0), c(1, 1, 1)), mid(c(1, 0, 0), c(1, 1, 0)),
-            mid(c(0, 0, 0), c(1, 0, 0)), mid(c(0, 0, 1), c(1, 0, 1)), mid(c(0, 1, 0), c(1, 1, 0)), mid(c(0, 1, 1), c(1, 1, 1)),
+        let pairs = [
+            (c(0, 0, 0), c(0, 0, 1)), (c(0, 0, 1), c(0, 1, 1)), (c(0, 1, 0), c(0, 1, 1)), (c(0, 0, 0), c(0, 1, 0)),
+            (c(1, 0, 0), c(1, 0, 1)), (c(1, 0, 1), c(1, 1, 1)), (c(1, 1, 0), c(1, 1, 1)), (c(1, 0, 0), c(1, 1, 0)),
+            (c(0, 0, 0), c(1, 0, 0)), (c(0, 0, 1), c(1, 0, 1)), (c(0, 1, 0), c(1, 1, 0)), (c(0, 1, 1), c(1, 1, 1)),
         ];
-        let faces = quads.iter().map(|q| P3::from(q.iter().fold(V3::zeros(), |a, p| a + p.coords) / 4.0)).collect();
-        set_order(b, OcctOrder { edges, faces });
+        // A top narrowed to a line or a point has no edges of zero length (OCCT's
+        // BRepPrim_GWedge::HasEdge), and its sides meet in one edge there, counted once; a top of
+        // no area is no face.
+        let tol = super::tol::REL * size;
+        let mut edges: Vec<P3> = Vec::new();
+        for (a, b) in pairs {
+            let m = P3::from((a.coords + b.coords) / 2.0);
+            if (a - b).norm() > tol && !edges.iter().any(|q| (q - m).norm() <= tol) {
+                edges.push(m);
+            }
+        }
+        let faces = quads
+            .iter()
+            .filter(|q| (q[1] - q[0]).cross(&(q[3] - q[0])).norm() + (q[1] - q[2]).cross(&(q[3] - q[2])).norm() > tol * size)
+            .map(|q| P3::from(q.iter().fold(V3::zeros(), |a, p| a + p.coords) / 4.0))
+            .collect();
+        set_order(b, OcctOrder { edges, faces, degenerate: vec![] });
         Ok(Shape::Body(b))
     }
 
@@ -2942,7 +3025,7 @@ impl NativeKernel {
                 let body = self.get(*b)?.transformed(m);
                 let nb = self.insert(body);
                 if let Some(o) = order_of(*b) {
-                    set_order(nb, OcctOrder { edges: o.edges.iter().map(|p| m.point(p)).collect(), faces: o.faces.iter().map(|p| m.point(p)).collect() });
+                    set_order(nb, OcctOrder { edges: o.edges.iter().map(|p| m.point(p)).collect(), faces: o.faces.iter().map(|p| m.point(p)).collect(), degenerate: o.degenerate.clone() });
                 }
                 Shape::Body(nb)
             }
@@ -3017,9 +3100,29 @@ impl NativeKernel {
             if std::env::var_os("CADRS_ORDER_DEBUG").is_some() {
                 eprintln!("explode e: OCCT order has {} edges, the body {} ({} not degenerate)", o.edges.len(), body.edges.len(), ids.len());
             }
+            let mid = |i: usize| body.edges[i].point(body.edges[i].mid_t());
             if o.edges.len() == ids.len() {
-                let mid = |i: usize| body.edges[i].point(body.edges[i].mid_t());
                 ids = o.edges.iter().map(|p| *ids.iter().min_by(|&&x, &&y| (mid(x) - p).norm().total_cmp(&(mid(y) - p).norm())).unwrap()).collect();
+            } else if o.edges.len() > ids.len() && o.edges.len() <= body.edges.len() {
+                // Some of OCCT's degenerate edges (a cone's apex) but not all of ours: each
+                // reference point takes the nearest edge not yet taken, when that takes every edge
+                // that isn't degenerate.
+                let mut taken: Vec<usize> = Vec::new();
+                for p in &o.edges {
+                    if let Some(i) = (0..body.edges.len()).filter(|i| !taken.contains(i)).min_by(|&x, &y| (mid(x) - p).norm().total_cmp(&(mid(y) - p).norm())) {
+                        taken.push(i);
+                    }
+                }
+                if ids.iter().all(|i| taken.contains(i)) {
+                    ids = taken;
+                } else if o.edges.len() - o.degenerate.len() == ids.len() {
+                    // The body has none of them: the order without.
+                    let kept: Vec<&P3> = o.edges.iter().enumerate().filter(|(i, _)| !o.degenerate.contains(i)).map(|(_, p)| p).collect();
+                    ids = kept.iter().map(|p| *ids.iter().min_by(|&&x, &&y| (mid(x) - *p).norm().total_cmp(&(mid(y) - *p).norm())).unwrap()).collect();
+                }
+            } else if o.edges.len() - o.degenerate.len() == ids.len() {
+                let kept: Vec<&P3> = o.edges.iter().enumerate().filter(|(i, _)| !o.degenerate.contains(i)).map(|(_, p)| p).collect();
+                ids = kept.iter().map(|p| *ids.iter().min_by(|&&x, &&y| (mid(x) - *p).norm().total_cmp(&(mid(y) - *p).norm())).unwrap()).collect();
             }
         }
         Ok(ids.into_iter().map(|i| Shape::BodyEdge(b, EdgeId(i as u64))).collect())
@@ -4449,6 +4552,90 @@ fn foot_param(e: &DEdge, p: &P3) -> Option<f64> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Each exploded edge's middle point (a degenerate edge's: its vertex), and whether it is
+    /// degenerate.
+    fn exploded(k: &NativeKernel, s: &Shape) -> Vec<(P3, bool)> {
+        let Shape::Body(b) = s else { panic!("not a body") };
+        let body = k.get(*b).unwrap();
+        k.explode_edges(s)
+            .unwrap()
+            .iter()
+            .map(|e| {
+                let Shape::BodyEdge(_, id) = e else { panic!("not an edge") };
+                let ed = &body.edges[id.0 as usize];
+                (ed.point(ed.mid_t()), ed.degenerate)
+            })
+            .collect()
+    }
+
+    fn near(p: &P3, q: [f64; 3]) -> bool {
+        (p - P3::from(q)).norm() < 1e-6
+    }
+
+    /// A wedge whose top narrows to a line (`wedge s 40 100 100 0`): OCCT's 9 edges, its sides'
+    /// common edge at the top counted once and the top's zero-length edges left out, so s_5 is
+    /// the edge along z at (40, 0) (blend simple_a7).
+    #[test]
+    fn wedge_narrowed_to_a_line_explodes_as_occt() {
+        let mut k = NativeKernel::new();
+        let s = k.wedge(40.0, 100.0, 100.0, [0.0, 0.0, 0.0, 100.0]).unwrap();
+        let es = exploded(&k, &s);
+        assert_eq!(es.len(), 9);
+        assert!(near(&es[4].0, [40.0, 0.0, 50.0]), "{:?}", es[4]);
+        assert!(near(&es[8].0, [20.0, 0.0, 100.0]), "{:?}", es[8]);
+    }
+
+    /// A quarter cone up to its apex (`pcone s 50 0 120 90`): OCCT lists the apex's degenerate
+    /// edge first, so s_3 is the base's arc (blend simple_c9).
+    #[test]
+    fn partial_cone_explodes_with_its_apex_edge() {
+        let mut k = NativeKernel::new();
+        let s = k.pcone_a(None, 50.0, 0.0, 120.0, 90.0).unwrap();
+        let es = exploded(&k, &s);
+        assert_eq!(es.len(), 7);
+        assert!(es[0].1 && near(&es[0].0, [0.0, 0.0, 120.0]), "{:?}", es[0]);
+        let r = std::f64::consts::FRAC_1_SQRT_2 * 50.0;
+        assert!(near(&es[2].0, [r, r, 0.0]), "{:?}", es[2]);
+    }
+
+    /// A face revolved 270° whose wire runs along the axis: a degenerate edge where each lateral
+    /// face meets the axis, the axis edge once (11 edges; blend simple_h4's s_10 is the slant's
+    /// copy at the end).
+    #[test]
+    fn revolution_touching_its_axis_explodes_as_occt() {
+        let mut k = NativeKernel::new();
+        let w1 = k.ellipse([0.0, 0.0, 0.0], None, None, 15.0, 10.0);
+        let w1 = k.mkedge(&w1, 0.0, std::f64::consts::FRAC_PI_2);
+        let w1 = k.trotate(&w1, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 90.0).unwrap();
+        let w2 = k.polyline(&[[0.0, 0.0, 10.0], [0.0, 0.0, -10.0], [25.0, 0.0, -10.0], [15.0, 0.0, 0.0]]).unwrap();
+        let w = k.wire(&[&w1, &w2]).unwrap();
+        let w = k.mkplane(&w).unwrap();
+        let s = k.revol(&w, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 270.0).unwrap();
+        let es = exploded(&k, &s);
+        assert_eq!(es.len(), 11);
+        assert!(es[1].1 && es[4].1 && !es[9].1);
+        assert!(near(&es[9].0, [0.0, -20.0, -5.0]), "{:?}", es[9]);
+    }
+
+    /// A triangle piped along a quarter circle, its face looking back along the spine: OCCT
+    /// explores the loop backwards from its first edge, start face first, so s_4 is the edge
+    /// swept from the triangle's first vertex (blend simple_i1).
+    #[test]
+    fn pipe_explodes_as_occt() {
+        let mut k = NativeKernel::new();
+        let w = k.circle(-20.0, 0.0, 0.0, 20.0);
+        let w = k.mkedge(&w, 0.0, std::f64::consts::FRAC_PI_2);
+        let w = k.wire(&[&w]).unwrap();
+        let profile = k.polyline(&[[0.0, 0.0, 0.0], [10.0, 0.0, 0.0], [5.0, 0.0, 5.0], [0.0, 0.0, 0.0]]).unwrap();
+        let profile = k.mkplane(&profile).unwrap();
+        let s = k.pipe(&w, &profile).unwrap();
+        let es = exploded(&k, &s);
+        assert_eq!(es.len(), 9);
+        assert!(near(&es[0].0, [5.0, 0.0, 0.0]) && near(&es[1].0, [2.5, 0.0, 2.5]), "{:?}", &es[..2]);
+        let h = 20.0 * std::f64::consts::FRAC_1_SQRT_2;
+        assert!(near(&es[3].0, [h - 20.0, h, 0.0]), "{:?}", es[3]);
+    }
 
     /// A script's sub-shape past the end of an explode is a "topology mismatch" failure, not an
     /// index out of bounds (review 4: 17 blend known failures panicked in their test code).

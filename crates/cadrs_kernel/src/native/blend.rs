@@ -702,6 +702,16 @@ fn sharp_edges(b: &Body, edges: &[EdgeId]) -> Result<Vec<EdgeId>> {
     Ok(kept)
 }
 
+/// The picked edges less degenerate ones (a pole's, an apex's): OCCT's blends pass over them
+/// (`BRepFilletAPI` adds no contour for one), and there's nothing to round there.
+fn real_edges(b: &Body, edges: &[EdgeId]) -> Result<Vec<EdgeId>> {
+    let kept: Vec<EdgeId> = edges.iter().copied().filter(|e| b.edges.get(e.0 as usize).is_none_or(|ed| !ed.degenerate)).collect();
+    if kept.is_empty() && !edges.is_empty() {
+        return Err(KernelError::InvalidParameter("A degenerate edge can't be blended".into()));
+    }
+    Ok(kept)
+}
+
 /// Whether the solid is convex round vertex `v`: every edge there convex.
 fn vertex_convex(b: &Body, v: usize) -> bool {
     b.edges.iter().enumerate().filter(|(_, x)| !x.degenerate && x.v.contains(&v)).all(|(i, _)| edge_convex(b, i) == Some(true))
@@ -1302,6 +1312,7 @@ pub fn fillet(k: &mut NativeKernel, body: BodyId, edges: &[EdgeId], spec: &Fille
     if !(r > 0.0) {
         return Err(KernelError::InvalidParameter("The fillet's size must be positive".into()));
     }
+    let edges = &real_edges(k.get(body)?, edges)?[..];
     let mut all: Vec<EdgeId> = Vec::new();
     for &e in edges {
         let chain = if spec.propagate { k.tangent_chain(body, e)? } else { vec![e] };
@@ -1433,6 +1444,7 @@ fn check_overflow(k: &NativeKernel, body: BodyId, edges: &[EdgeId], r: &OpResult
 pub fn chamfer(k: &mut NativeKernel, body: BodyId, edges: &[EdgeId], opts: &ChamferOpts) -> Result<OpResult> {
     let spec = opts.spec;
     let b = (**k.get(body)?).clone();
+    let edges = &real_edges(&b, edges)?[..];
     // (Local trimming passes over edges whose faces join smoothly.)
     let sharp = sharp_edges(&b, edges)?;
     // Equal distances where the faces meet at a constant angle: by local trimming, as the
@@ -1730,6 +1742,9 @@ pub fn fillet_partial(k: &mut NativeKernel, body: BodyId, edge: EdgeId, spec: &F
 /// through sections at the law's points (and past the edge's ends).
 pub fn fillet_variable(k: &mut NativeKernel, body: BodyId, laws: &[FilletLaw], _allow_overflow: bool) -> Result<OpResult> {
     let b = (**k.get(body)?).clone();
+    let real = real_edges(&b, &laws.iter().map(|l| l.edge).collect::<Vec<_>>())?;
+    let laws: Vec<FilletLaw> = laws.iter().filter(|l| real.contains(&l.edge)).cloned().collect();
+    let laws = &laws[..];
     // By local trimming first (any edge and faces), then the tool for straight edges between
     // flat faces.
     if laws.iter().all(|l| (l.edge.0 as usize) < b.edges.len() && !l.radii.is_empty()) && std::env::var_os("CADRS_NO_LOCAL_FILLET").is_none() {
