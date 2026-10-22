@@ -353,6 +353,7 @@ fn spawn_shell(
                         .with_children(|vp| {
                             crate::viewport::spawn_viewport_overlay(vp, &t);
                             crate::rebuild_indicator::spawn_rebuild_indicator(vp, &t);
+                            crate::frame_stats::spawn_frame_stats(vp, &t);
                             crate::view_cube::spawn_view_cube(vp, &t, cube.0.clone());
                             right_strip(vp, &t);
                             bottom_right_tools(vp, &t);

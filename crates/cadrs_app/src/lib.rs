@@ -49,6 +49,7 @@ pub mod move_document;
 pub mod tab_folders;
 pub mod tab_manager;
 pub mod rebuild_indicator;
+pub mod frame_stats;
 pub mod reference_manager;
 pub mod manipulator;
 pub mod mass_props;
@@ -611,7 +612,7 @@ impl Plugin for CadrsAppPlugin {
                 shortcuts::ShortcutsPlugin,
                 script::ScriptPlugin,
             ))
-            .add_plugins((rebuild_indicator::RebuildIndicatorPlugin, accept::AcceptPlugin))
+            .add_plugins((rebuild_indicator::RebuildIndicatorPlugin, accept::AcceptPlugin, frame_stats::FrameStatsPlugin))
             .add_plugins((
                 parts::PartsPlugin,
                 parts_list::PartsListPlugin,

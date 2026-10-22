@@ -42,6 +42,7 @@ pub enum Call {
     CreateDocument(CreateDocument),
     OpenDocument(OpenDocument),
     GetDocument,
+    GetFrameStats,
     AddPartStudio(AddPartStudio),
     AddSketch(AddSketch),
     Extrude(Extrude),
@@ -207,6 +208,12 @@ impl Cadrs {
         (with any rebuild errors) and parts (volume in mm³, bounding box in mm).")]
     async fn get_document(&self) -> Result<CallToolResult, ErrorData> {
         self.call(Call::GetDocument).await
+    }
+
+    #[tool(description = "The app's frame rate over the last two seconds: fps, the number of frames, and \
+        frame times in ms (mean, median, 95th percentile, max). F12 shows the same in the 3D view.")]
+    async fn get_frame_stats(&self) -> Result<CallToolResult, ErrorData> {
+        self.call(Call::GetFrameStats).await
     }
 
     #[tool(description = "Create a drawing of a Part Studio and open it as a tab: its front, top, side and \

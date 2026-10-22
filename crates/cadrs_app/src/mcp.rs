@@ -167,6 +167,7 @@ fn run(world: &mut World, call: &Call) -> Result<Value, String> {
         Call::CreateDocument(p) => create_document(world, &p.name),
         Call::OpenDocument(p) => open_document(world, &p.name),
         Call::GetDocument => describe(world),
+        Call::GetFrameStats => Ok(world.resource::<crate::frame_stats::FrameStats>().describe()),
         Call::AddPartStudio(p) => add_part_studio(world, p),
         Call::AddSketch(p) => add_sketch(world, p),
         Call::Extrude(p) => extrude(world, p),
