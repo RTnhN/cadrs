@@ -7,54 +7,40 @@ Rust, no OpenCASCADE). New features wait until the release blockers are done.
 
 ### Real documents rebuild at least as well as on main (OCCT)
 
-All 149 stored documents (173 Part Studios) were rebuilt headlessly with kernel-10 at `bdf82f3`
-and with main's OCCT kernel. Neither crashed or hung.
+All 149 stored documents (173 Part Studios) are rebuilt headlessly with kernel-10 and with main's
+OCCT kernel and compared per feature. Neither crashes or hangs.
 
-| | Feature errors | Total rebuild time |
+| | Feature errors | New vs main |
 |---|---|---|
-| kernel-10 | 140 | 840 s |
-| main | 106 | 423 s |
-
-- 63 errors in 28 Part Studios are new on kernel-10; many are cascades of a first failure.
-- 29 of main's errors are fixed on kernel-10.
+| kernel-10 at `bdf82f3` (first run) | 140 | 63 in 28 Part Studios |
+| kernel-10 at `dc8d23f` | ~84 | 4 |
+| main (OCCT) | 106 | — |
 
 Done when no Part Studio has an error that main doesn't also have, and none rebuilds much slower.
 Rebuild a single document with `cadrs --document "<name>" --check`.
 
-- [ ] Sketch loops rejected as "not closed", with gaps down to 7e-5 mm:
-  - d4 desk device v2 and v3, Extrude 1 (Transform 1, Sketch 23 and Extrude 32 cascade from it);
-  - d4_desk_device_test, Extrude 18;
-  - emax gt2815/05, Extrude 3;
-  - squish_bottle_adapter, Extrude 6.
-- [ ] Booleans that leave an open shell:
-  - Modeling Practice Drawings 93;
-  - babygatefix;
-  - cable_mount;
-  - d4 desk device v2/v3, Extrude 16;
-  - ekgpulse bracket;
-  - gridfinity die tap 2x2;
-  - potentiometer knob;
-  - racingrigrumble;
-  - squish_bottle_adapter;
-  - trimmer;
-  - weller led block.
-- [ ] Booleans that leave an edge used by 3 faces: 32mm pvc pipe snap, gridfinity die tap 2x2 (Mirror 1), rianatest.
-- [ ] A boolean face that doesn't close (p-curve 1.1e2 off its edge): Dr Browns cap.
-- [ ] Fillets and chamfers refused where OCCT builds them:
-  - babygatefix, Fillet 4 ("too large");
-  - plant_pot_dish_square, Fillet 1 ("too large");
-  - stroller / wheel, Chamfer 1 ("tangent: nothing to blend").
-- [ ] References that no longer resolve (persistent naming against the new kernel's topology):
-  - mate connectors in alu_extrusion_parts, cable organizer and desk_current_sensor_gadget;
-  - selected faces in pibox / piboxv7 and t20 esp32 mount.
-- [ ] Mesh import "not consistently oriented or not manifold": mirror_test, Import 1.
-- [ ] Slow rebuilds (kernel-10 vs main):
-  - pibox / nightlight_sphere: 161 s vs 14 s;
-  - ekgpulse / bracket Copy 1: 106 s vs 24 s;
-  - gridfinity tap handle holder: 40 s vs 3.7 s;
-  - innerdoor_honda92: 12 s vs 0.5 s;
-  - gearlevertest: 16 s vs 0.9 s;
-  - racingrigrumble: 15 s vs 1.4 s.
+Fixed (dropped from the list): open sketch loops (d4 desk device v2/v3, d4_desk_device_test, emax,
+squish's profile), the open-shell and 3-face booleans, plant_pot's extrude direction, the stroller,
+pvc and rianatest blends, references (mate connectors, pibox thicken, t20, trimmer's unnamed
+faces), mirror_test's mesh import.
+
+Still new against main:
+- [ ] kids cart / pedal, Sketch 5 ("the face this sketch is on no longer exists"): a regression
+  from f81316d's boolean changes.
+- [ ] squish_bottle_adapter, Extrude 6: the union leaves an open shell. The tool sits 7e-5 mm off
+  the thread faces; the boolean must honour the edge tolerance the profile now carries.
+- [ ] Dr Browns cap, Fillet 1: the blend's boolean against a spindle torus whose hole loop
+  straddles the face's seam.
+- [ ] cable organizer Copy 2, Fillet 2: two full rounds meeting at a corner (R = half a 3 mm rib).
+  It now fails with a clear error; supporting meeting full rounds is real fillet work.
+  (Main fails this studio's Fillet 1, which kernel-10 builds.)
+
+Differences without errors, still to check:
+- [ ] Part counts that differ from main (garbage_cabinet 7 vs 3, TubeAdapter 3 vs 1 from chamfer
+  slivers, racingrigrumble 10 vs 8, trimmer's Boolean 1 13 vs 12, and others in compare runs).
+- [ ] Small volume differences (pibox mount 1802.4 vs 1800.1 mm³, stroller chamfer 1429 vs 762 mm³).
+- [ ] Rebuild time: 896 s locally against main's 423 s on gray. pico2, nightlight_sphere,
+  ekgpulse, squish and trimmer are still 2–5× slower.
 - [ ] Add a document check to the release process. A small headless runner rebuilds every
   document and compares against a saved result. Private documents stay out of the repo; only
   minimal dumped bodies go in as regression fixtures.
