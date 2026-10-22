@@ -659,6 +659,38 @@ fn rail_exit(b: &Body, ef: &EdgeFillet, j: usize, k: usize, end_ball: &Ball, whi
     Ok(best.map(|x| x.1))
 }
 
+/// Exit `x` of rail k (found away from the vertex) moved back to where the rail first meets
+/// its face's boundary, when it runs along an edge of the face up to there (the face steps away
+/// at a vertex the rail passes through, and the rail then lies on the face's edge): the rail
+/// really leaves the face at that vertex.
+fn first_contact(b: &Body, ef: &EdgeFillet, k: usize, x: Exit) -> Exit {
+    let fi = ef.faces[k];
+    let tol = 1e-6 * (1.0 + ef.r());
+    let span = x.t - ef.tm;
+    let on = |t: f64, from: &Ball, t0: f64| -> Option<(bool, Ball)> {
+        let bl = ef.ball_from(b, from, t0, t)?;
+        Some((on_boundary(b, fi, &bl.q[k].p, tol), bl))
+    };
+    // Along the boundary just before the exit?
+    let Some((true, _)) = on(x.t - 0.01 * span, &x.ball, x.t) else { return x };
+    // Bisect between the middle (inside) and the exit's neighbourhood (on the boundary).
+    let (mut lo, mut lo_ball) = (ef.tm, ef.mid);
+    let (mut hi, mut hi_ball) = (x.t - 0.01 * span, x.ball);
+    if !matches!(on(lo, &lo_ball, lo), Some((false, _))) {
+        return x;
+    }
+    for _ in 0..60 {
+        let m = 0.5 * (lo + hi);
+        match on(m, &lo_ball, lo) {
+            Some((true, bl)) => (hi, hi_ball) = (m, bl),
+            Some((false, bl)) => (lo, lo_ball) = (m, bl),
+            None => return x,
+        }
+    }
+    debug(|| format!("edge {}: rail {k} runs along its face's edge from {:?}", ef.e, hi_ball.q[k].p));
+    Exit { ball: hi_ball, t: hi, ..x }
+}
+
 /// The free end j of fillet `ef`: where each rail leaves its face (across an edge at the
 /// vertex there, else the nearest other edge of the face).
 fn free_end(b: &Body, ef: &EdgeFillet, j: usize) -> Result<[Exit; 2]> {
@@ -708,7 +740,7 @@ fn free_end(b: &Body, ef: &EdgeFillet, j: usize) -> Result<[Exit; 2]> {
             // face there: a step in it).
             let y = match found {
                 Some(f) => f.1,
-                None => crossing(k, false)?.ok_or_else(|| unsupported("a rail that doesn't leave its face"))?,
+                None => first_contact(b, ef, k, crossing(k, false)?.ok_or_else(|| unsupported("a rail that doesn't leave its face"))?),
             };
             if k == 0 { [y, x] } else { [x, y] }
         }
@@ -1375,6 +1407,12 @@ fn end_chain(b: &Body, ef: &EdgeFillet, j: usize, exits: &[Exit; 2]) -> Result<V
             debug(|| format!("edge {} end {j}: the cut on face {cur} crosses none of its edges (exits into {} and {})", ef.e, exits[0].into, exits[1].into));
             return Err(unsupported("a fillet end that doesn't cross an edge round its vertex"));
         };
+        // Reaching the other rail's exit (where that rail leaves its face at a vertex of this
+        // one's edge): the cut ends there, on this face.
+        if (mark.p - exits[1].ball.q[1].p).norm() < 1e-6 * (1.0 + ef.r()) && !links.is_empty() {
+            debug(|| format!("edge {} end {j}: the cut reaches the other rail's exit on face {cur}", ef.e));
+            return Ok(links);
+        }
         (guess, tg) = (mark.ball, mark.t);
         debug(|| format!("edge {} end {j}: the cut crosses edge {d} at {:?} (w {}) onto face {after}", ef.e, mark.p, mark.w));
         crossed.push(d);
@@ -2264,6 +2302,9 @@ struct Pieces {
     /// At a patched corner (vertex, strip): the halves of the strip's curve across and the
     /// vertex between them.
     patch_halves: HashMap<(usize, usize), (usize, usize, usize)>,
+    /// Faces a rail runs right along an edge of (the strip takes the whole face): they go
+    /// whole, uncut.
+    consumed: std::collections::HashSet<usize>,
 }
 
 /// Traces the strip's curve on face `g`'s surface from `a` to `z` (both on it) in the strip's
@@ -2543,6 +2584,23 @@ impl StripRails<'_> {
     /// Rail k from vertex v0 (parameter t0) to v1 (t1): a cut in its face, an edge of the strip.
     #[allow(clippy::too_many_arguments)]
     fn rail(&self, nb: &mut Body, k: usize, (v0, t0): (usize, f64), (v1, t1): (usize, f64), fe: &mut Vec<usize>, given: &mut Vec<(usize, Curve)>, out: &mut Pieces) {
+        // Along an edge of the face from end to end (the strip takes the whole face): that
+        // edge is the rail.
+        let fi = self.ef.faces[k];
+        let rail_at = |s: f64| self.st.rails[k].point(t0 + (t1 - t0) * s);
+        let along = nb.faces[fi].loops.iter().flatten().map(|c| c.edge).find(|&e| {
+            let ed = &nb.edges[e];
+            !ed.degenerate && (ed.v == [v0, v1] || ed.v == [v1, v0]) && [0.25, 0.5, 0.75].iter().all(|&s| {
+                let p = rail_at(s);
+                (ed.point(ed.curve.closest(&p, ed.t[0], ed.t[1])) - p).norm() < self.vtol.max(ed.tol)
+            })
+        });
+        if let Some(e) = along {
+            debug(|| format!("edge {}: rail {k} runs along edge {e} of face {fi}: the strip takes the face", self.ef.e));
+            out.consumed.insert(fi);
+            fe.push(e);
+            return;
+        }
         let e = add_edge(nb, self.st.rails[k].clone(), t0, t1, v0, v1);
         out.cuts.entry(self.ef.faces[k]).or_default().push(e);
         fe.push(e);
@@ -3071,24 +3129,29 @@ pub fn chamfer_offsets(b: &Body, e: usize, d: [f64; 2]) -> Option<[f64; 2]> {
 
 /// The angle between edge e's faces' directions away from it, if the same all along it.
 pub(crate) fn chamfer_angle(b: &Body, e: usize) -> Option<f64> {
-    let ed = b.edges.get(e)?;
-    let [(f1, c1), (f2, _)] = sides(b, e).ok()?;
     let mut theta: Option<f64> = None;
     for s in [0.2, 0.5, 0.8] {
-        let t = ed.t[0] + (ed.t[1] - ed.t[0]) * s;
-        let dir = ed.curve.tangent(t).normalize() * if c1 { 1.0 } else { -1.0 };
-        let w = |fi: usize, along: V3| -> Option<V3> {
-            let c = coedge_of(b, fi, e)?;
-            let q = c.pc.point(t);
-            Some(geom::contact(&b.faces[fi], P2::new(q.x, q.y)).n.cross(&along))
-        };
-        let th = w(f1, dir)?.angle(&w(f2, -dir)?);
+        let th = angle_at(b, e, s)?;
         if theta.is_some_and(|x| (x - th).abs() > 1e-9) {
             return None;
         }
         theta = Some(th);
     }
     theta
+}
+
+/// The angle between edge e's faces' directions away from it, a fraction `s` along it.
+fn angle_at(b: &Body, e: usize, s: f64) -> Option<f64> {
+    let ed = b.edges.get(e)?;
+    let [(f1, c1), (f2, _)] = sides(b, e).ok()?;
+    let t = ed.t[0] + (ed.t[1] - ed.t[0]) * s;
+    let dir = ed.curve.tangent(t).normalize() * if c1 { 1.0 } else { -1.0 };
+    let w = |fi: usize, along: V3| -> Option<V3> {
+        let c = coedge_of(b, fi, e)?;
+        let q = c.pc.point(t);
+        Some(geom::contact(&b.faces[fi], P2::new(q.x, q.y)).n.cross(&along))
+    };
+    Some(w(f1, dir)?.angle(&w(f2, -dir)?))
 }
 
 /// The fillet along each edge with its radius law (fraction along the edge, radius; linear
@@ -3951,7 +4014,7 @@ fn assemble(mut nb: Body, out: &Pieces, picked: &[usize], size: f64) -> Result<(
         }
     }
     while let Some(pi) = stack.pop() {
-        if !out.cuts.contains_key(&pieces[pi].0) {
+        if !out.cuts.contains_key(&pieces[pi].0) && !out.consumed.contains(&pieces[pi].0) {
             return Err(failed("the fillet's trimming leaks into faces it doesn't touch"));
         }
         for c in pieces[pi].1.loops.iter().flatten() {
@@ -3967,7 +4030,7 @@ fn assemble(mut nb: Body, out: &Pieces, picked: &[usize], size: f64) -> Result<(
         }
     }
     for &fi in out.cuts.keys() {
-        if pieces.iter().zip(&removed).all(|((f, _), &rm)| *f != fi || rm) {
+        if !out.consumed.contains(&fi) && pieces.iter().zip(&removed).all(|((f, _), &rm)| *f != fi || rm) {
             return Err(failed("the fillet consumes a whole face"));
         }
     }
@@ -4210,6 +4273,24 @@ mod tests {
         assert_eq!(out.faces.len(), 6 + 12);
     }
 
+    /// A chamfer as wide as the face beside it (SMLib's box1x1x2): the rail on that face runs
+    /// along its far edge, so the chamfer takes the whole face, that edge its own.
+    #[test]
+    fn a_chamfer_takes_a_whole_face() {
+        use crate::native::draw::Shape;
+        let mut k = NativeKernel::new();
+        let Shape::Body(id) = k.box_(1.0, 1.0, 2.0).unwrap() else { unreachable!() };
+        let b = (**k.get(id).unwrap()).clone();
+        let e = edge_near(&b, P3::new(0.5, 0.0, 2.0));
+        let r = chamfer_radius(&b, e, 1.0).unwrap();
+        let (out, _) = fillet_edges_laws(&b, id, &[(e, vec![(0.0, r), (1.0, r)])], true).map_err(|e| format!("{e}")).unwrap();
+        assert_eq!(out.check_with(CheckLevel::Full), Vec::<String>::new());
+        assert_eq!(out.faces.len(), 6);
+        let id2 = k.insert(out);
+        let v = k.mass_properties(id2).unwrap().volume;
+        assert!((v - 1.5).abs() < 1e-9, "{v}");
+    }
+
     /// Every edge of a box chamfered at once: at each corner the three chamfers' planes meet
     /// in a point (the box cut by every chamfer's plane). Each edge's prism of d²/2 less, at
     /// each corner, the three pairs' overlaps (d³/3 each) plus the three's (d³/4): 2d²(a + b +
@@ -4231,10 +4312,11 @@ mod tests {
     }
 
     /// A block with a slot along the far end of its front face, under the top (OCCT blend
-    /// simple Y2, Y4): the top front edge's fillet ends past the slot, its rail on the front
-    /// face leaving it into the slot (over an edge away from the end vertex), so the end cut
-    /// runs down the slot's faces (and, wider than the slot, across its floor) from the end
-    /// face to that rail. The cut on a face holding the strip's straight lines (the slot's top
+    /// simple Y2, Y3, Y4): the top front edge's fillet ends past the slot, its rail on the
+    /// front face leaving it into the slot (over an edge away from the end vertex), so the end
+    /// cut runs down the slot's faces (and, wider than the slot, across its floor) from the end
+    /// face to that rail. At r 20 the rail meets the slot's corner and runs on along its
+    /// floor's edge: it leaves the face at the corner, where the cut ends. The cut on a face holding the strip's straight lines (the slot's top
     /// and floor) once overran its end and folded back.
     #[test]
     fn a_fillet_end_cut_down_a_step() {
@@ -4246,7 +4328,7 @@ mod tests {
         let b = (**k.get(id).unwrap()).clone();
         let v0 = k.mass_properties(id).unwrap().volume;
         let e = edge_near(&b, P3::new(50.0, 0.0, 100.0));
-        for r in [15.0, 25.0] {
+        for r in [15.0, 20.0, 25.0] {
             let (out, _) = fillet_edges(&b, id, &[e], r).map_err(|e| format!("{e}")).unwrap();
             assert_eq!(out.check_with(CheckLevel::Full), Vec::<String>::new());
             let id2 = k.insert(out);

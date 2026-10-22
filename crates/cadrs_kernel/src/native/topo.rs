@@ -27,6 +27,90 @@ use super::surface::Surface;
 /// ([`super::tol::CONFUSION`]).
 pub const TOL_MIN: f64 = super::tol::CONFUSION;
 
+/// Whether a closed shell (as a body of its own) points out by ray parity, without integrating:
+/// at points just off a few of its faces, along their normals, the one behind the face
+/// inside and the one in front outside. A face's normal here is the one its volume integral
+/// takes ([`super::mass`]): the surface's, turned round where its outer loop runs clockwise in
+/// (u, v). `Some(true)` when every probe says so, `Some(false)`
+/// when every one says the opposite, else `None` (a thin wall or grazing rays: the volume
+/// decides).
+fn parity_orientation(shell: &Body) -> Option<bool> {
+    let polys: Vec<Vec<Vec<P2>>> = shell.faces.iter().map(|f| super::classify::face_polygons(shell, f)).collect();
+    let cls = super::classify::Classifier::new(shell, &polys);
+    let size = shell.bbox().diagonal();
+    let mut verdict: Option<bool> = None;
+    let mut probes = 0;
+    for (fi, f) in shell.faces.iter().enumerate() {
+        if probes == 8 {
+            break;
+        }
+        // A point well inside the face's domain: of a grid over its (u, v) box, the one
+        // farthest from the loops (by the metric-scaled polygon).
+        let ps = &polys[fi];
+        let (mut lo, mut hi) = (P2::new(f64::INFINITY, f64::INFINITY), P2::new(f64::NEG_INFINITY, f64::NEG_INFINITY));
+        for q in ps.iter().flatten() {
+            lo = P2::new(lo.x.min(q.x), lo.y.min(q.y));
+            hi = P2::new(hi.x.max(q.x), hi.y.max(q.y));
+        }
+        if !(lo.x < hi.x && lo.y < hi.y) {
+            continue;
+        }
+        let (mu, mv) = f.surf.metric();
+        let n = 9;
+        let mut best: Option<(f64, P2)> = None;
+        for i in 1..n {
+            for j in 1..n {
+                let uv = P2::new(lo.x + (hi.x - lo.x) * i as f64 / n as f64, lo.y + (hi.y - lo.y) * j as f64 / n as f64);
+                let inside = ps.first().is_some_and(|o| point_in_polygon(&uv, o)) && !ps.iter().skip(1).any(|h| point_in_polygon(&uv, h));
+                if !inside {
+                    continue;
+                }
+                let d = ps
+                    .iter()
+                    .flat_map(|l| (0..l.len()).map(move |k| (l[k], l[(k + 1) % l.len()])))
+                    .map(|(a, b)| {
+                        let (a, b, x) = (P2::new(a.x * mu, a.y * mv), P2::new(b.x * mu, b.y * mv), P2::new(uv.x * mu, uv.y * mv));
+                        let ab = b - a;
+                        let s = ((x - a).dot(&ab) / ab.norm_squared().max(1e-300)).clamp(0.0, 1.0);
+                        (a + ab * s - x).norm()
+                    })
+                    .fold(f64::INFINITY, f64::min);
+                if best.is_none_or(|b| d > b.0) {
+                    best = Some((d, uv));
+                }
+            }
+        }
+        let Some((room, uv)) = best else { continue };
+        let normal = f.surf.normal(uv.x, uv.y);
+        if !(normal.norm() > 0.5) {
+            continue;
+        }
+        let Some(outer) = ps.first() else { continue };
+        let twice: f64 = (0..outer.len()).map(|k| { let (a, b) = (outer[k], outer[(k + 1) % outer.len()]); a.x * b.y - b.x * a.y }).sum();
+        if twice == 0.0 {
+            continue;
+        }
+        let out = normal.normalize() * twice.signum();
+        let p = f.surf.eval(uv.x, uv.y);
+        let eps = (1e-4 * size).min(0.1 * room);
+        if !(eps > 1e-9 * size) {
+            continue;
+        }
+        let (behind, front) = (cls.parity_inside(&(p - out * eps)), cls.parity_inside(&(p + out * eps)));
+        let this = match (behind, front) {
+            (true, false) => true,
+            (false, true) => false,
+            _ => return None,
+        };
+        if verdict.is_some_and(|v| v != this) {
+            return None;
+        }
+        verdict = Some(this);
+        probes += 1;
+    }
+    verdict
+}
+
 /// How thorough [`Body::check_with`] is.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum CheckLevel {
@@ -609,6 +693,10 @@ impl Body {
             for si in 0..self.solids.len() {
                 let faces = self.solid_faces(si);
                 let sub = super::kernel::subset(self, &faces, true);
+                // Ray parity settles the orientation where it can; else the exact volume.
+                if parity_orientation(&sub) == Some(true) {
+                    continue;
+                }
                 let v = super::mass::body_mass(&sub).volume;
                 if !(v > 0.0) {
                     errs.push(format!("solid {si} encloses a volume of {v:.3e} (its faces point in)"));
@@ -1085,7 +1173,7 @@ impl Body {
             }
             let shell = |sh: usize| super::kernel::subset(self, &self.shells[sh].faces, true);
             let out = shell(*outer);
-            let v = super::mass::body_mass(&out).volume;
+            let v = if parity_orientation(&out) == Some(true) { 1.0 } else { super::mass::body_mass(&out).volume };
             if !(v > 0.0) {
                 errs.push(format!("solid {si}: its outer shell {outer} encloses a volume of {v:.3e}"));
                 continue;
@@ -1093,7 +1181,7 @@ impl Body {
             let polys: Vec<Vec<Vec<P2>>> = out.faces.iter().map(|f| super::classify::face_polygons(&out, f)).collect();
             for &sh in voids {
                 let void = shell(sh);
-                let v = super::mass::body_mass(&void).volume;
+                let v = if parity_orientation(&void) == Some(false) { -1.0 } else { super::mass::body_mass(&void).volume };
                 if !(v < 0.0) {
                     errs.push(format!("solid {si}: void shell {sh} encloses a volume of {v:.3e} (its faces must point into the void)"));
                 }
@@ -1772,5 +1860,31 @@ mod kind_tests {
         assert!(k.revolve(&p, normal, 1.0).is_err());
         let across = Axis { origin: Point3::new(1.5, 0.0, -1.0), dir: Vector3::y_axis() };
         assert!(k.revolve(&p, across, 1.0).is_err());
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::native::draw::Shape;
+    use crate::native::kernel::NativeKernel;
+
+    /// The volume test settles a solid's orientation by ray parity (a box), and reports an
+    /// inside-out solid with its exact volume as before.
+    #[test]
+    fn an_inside_out_solid_is_reported_with_its_volume() {
+        let mut k = NativeKernel::new();
+        let Shape::Body(id) = k.box_(10.0, 20.0, 30.0).unwrap() else { unreachable!() };
+        let mut b = (**k.get(id).unwrap()).clone();
+        assert_eq!(b.check(), Vec::<String>::new());
+        for f in &mut b.faces {
+            f.sense = !f.sense;
+            for l in &mut f.loops {
+                l.reverse();
+                for c in l.iter_mut() {
+                    c.fwd = !c.fwd;
+                }
+            }
+        }
+        assert_eq!(b.check(), vec!["solid 0 encloses a volume of -6.000e3 (its faces point in)".to_string()]);
     }
 }
