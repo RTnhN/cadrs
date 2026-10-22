@@ -20,11 +20,3 @@ offset_08_boolean_trees_result
 # spline is a fit). SMLib's 407.3193 is its own approximation: its two end faces differ (42.244,
 # 41.931) and it measures the input 6.4e-4 over its exact 591.836.
 offset_06_off_extrusion
-# Rounded inward shell: the input reads as SMLib's and every slab builds (the corner spline's,
-# round its pole, with its seam offset onto the offset surface's seam), but the tubes round two
-# concave edges on the open face (23, 24) fail in the boolean (an edge of three faces, an open
-# shell); without them the cavity is 1063994, SMLib's 1063395.
-offset_03_offsetboxsphoncorner
-# Inward shell of InsetCone: the body less the cavity (flush with the open cone face) is empty;
-# the sharp cavity with the cone moved out has a non-manifold seam.
-offset_16_insetcone

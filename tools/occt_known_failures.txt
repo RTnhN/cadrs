@@ -374,7 +374,6 @@ offset faces_type_i_f2
 offset faces_type_i_f3
 offset faces_type_i_f4
 offset faces_type_i_f5
-offset faces_type_i_g2
 offset faces_type_i_g4
 offset faces_type_i_g5
 offset faces_type_i_i5
@@ -403,8 +402,6 @@ offset shape_type_i_c_v2
 offset shape_type_i_c_v8
 offset shape_type_i_c_w1
 offset shape_type_i_c_w6
-offset shape_type_i_d2
-offset shape_type_i_d3
 offset shape_type_i_d4
 offset shape_type_i_d5
 offset shape_type_i_d6

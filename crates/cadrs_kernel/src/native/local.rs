@@ -605,6 +605,39 @@ pub fn replace_surfaces_in(b: &Body, surfs: &[Surface], domains: &[Option<UvBox>
                 at = Some(P2::new(q.x, q.y));
                 nl.push(Coedge { edge: c.edge, fwd: c.fwd, pc });
             }
+            // A pole's point edge on a new periodic surface (a B-spline cone become a cone): no
+            // projection gives its p-curve. It runs from where the loop arrives at the pole to
+            // where it leaves, across the turn the loop needs to close (the coedges after it a
+            // period on).
+            if surf != b.faces[fi].surf && (surf.u_periodic() || surf.v_periodic())
+                && let Some(k) = nl.iter().position(|c| out.edges[c.edge].degenerate)
+            {
+                let n = nl.len();
+                let end_of = |c: &Coedge| {
+                    let (_, t1) = super::topo::co_range(&out.edges[c.edge], c.fwd);
+                    c.pc.point(t1)
+                };
+                let start_of = |c: &Coedge| {
+                    let (t0, _) = super::topo::co_range(&out.edges[c.edge], c.fwd);
+                    c.pc.point(t0)
+                };
+                let period = |d: f64, periodic: bool| if periodic { (d / TAU).round() * TAU } else { 0.0 };
+                let g = start_of(&nl[0]) - end_of(&nl[n - 1]);
+                let (gu, gv) = (period(g.x, surf.u_periodic()), period(g.y, surf.v_periodic()));
+                if gu != 0.0 || gv != 0.0 {
+                    for c in nl.iter_mut().skip(k + 1) {
+                        c.pc = c.pc.transformed(&Affine::translation(V3::new(gu, gv, 0.0)));
+                    }
+                }
+                let a = if k > 0 { end_of(&nl[k - 1]) } else { end_of(&nl[n - 1]) - V3::new(gu, gv, 0.0) };
+                let z = if k + 1 < n { start_of(&nl[k + 1]) } else { start_of(&nl[0]) };
+                let e = &out.edges[nl[k].edge];
+                let (t0, t1) = super::topo::co_range(e, nl[k].fwd);
+                if (t1 - t0).abs() > 0.0 {
+                    let d = (z - a) / (t1 - t0);
+                    nl[k].pc = Curve::Line { o: P3::new(a.x - d.x * t0, a.y - d.y * t0, 0.0), d: V3::new(d.x, d.y, 0.0) };
+                }
+            }
             out.faces[fi].loops[li] = nl;
         }
     }
@@ -881,7 +914,7 @@ pub fn offset_surface(s: &Surface, sense: bool, d: f64) -> Option<Surface> {
     // A B-spline that is a plane, cylinder, cone or sphere: its exact offset (a fit of a
     // cone's offset would have to pass its apex).
     if let Surface::Nurbs(n) = s
-        && let Some(a) = super::recognize::surface(n)
+        && let Some(a) = super::recognize::surface_through_poles(n)
     {
         let ((u0, u1), (v0, v1)) = n.range();
         let (u, v) = ((u0 + u1) / 2.0, (v0 + v1) / 2.0);

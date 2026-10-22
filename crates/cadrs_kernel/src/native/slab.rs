@@ -151,8 +151,15 @@ pub fn face_slab(b: &Body, fi: usize, d: f64) -> Result<Body> {
     let f = &b.faces[fi];
     // A B-spline face that is a plane, cylinder, cone or sphere is slabbed as one: its offset
     // is exact, and its poles (a cone's apex as a collapsed side) are ones the build knows.
+    let seamless = {
+        let mut seen = std::collections::HashSet::new();
+        f.loops.iter().flatten().all(|c| seen.insert(c.edge))
+    };
     let (surf, sense) = match &f.surf {
-        Surface::Nurbs(n) => match super::recognize::surface(n) {
+        // (Through its poles only when no edge is the B-spline's seam: a recognised surface's own
+        // seam lies elsewhere, and a loop running out along the B-spline's and back would be a
+        // slit on it.)
+        Surface::Nurbs(n) => match if seamless { super::recognize::surface_through_poles(n) } else { super::recognize::surface(n) } {
             Some(a) => {
                 let at = f.loops.iter().flatten().map(|c| &b.edges[c.edge]).find(|e| !e.degenerate).map(|e| e.point(e.mid_t()));
                 match at {

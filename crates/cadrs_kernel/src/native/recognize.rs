@@ -96,7 +96,19 @@ fn extrusion(n: &NurbsSurface) -> Option<Surface> {
 /// The plane, cylinder, cone, sphere or torus a B-spline surface is, if it is one (checked:
 /// every sample lies on the surface returned, by its own distance).
 pub fn surface(n: &NurbsSurface) -> Option<Surface> {
-    let cand = candidate(n).or_else(|| torus(n)).or_else(|| extrusion(n))?;
+    surface_with(n, false)
+}
+
+/// [`surface`], also when a side of the B-spline collapses to a point (a cone's apex, a
+/// sphere's pole): the normals there are rounding noise and are left out, and the sections
+/// taken where they have a radius. (The offsets take it; the readers don't yet, since an
+/// analytic cone in place of its patch changes what the SSI finds across its seam.)
+pub fn surface_through_poles(n: &NurbsSurface) -> Option<Surface> {
+    surface_with(n, true)
+}
+
+fn surface_with(n: &NurbsSurface, poles: bool) -> Option<Surface> {
+    let cand = candidate(n, poles).or_else(|| torus(n)).or_else(|| extrusion(n))?;
     let ((u0, u1), (v0, v1)) = n.range();
     let mut bb = Bbox::empty();
     let m = 10;
@@ -163,7 +175,7 @@ fn torus(n: &NurbsSurface) -> Option<Surface> {
     None
 }
 
-fn candidate(n: &NurbsSurface) -> Option<Surface> {
+fn candidate(n: &NurbsSurface, poles: bool) -> Option<Surface> {
     let ((u0, u1), (v0, v1)) = n.range();
     let m = 12;
     let mut pts = Vec::new();
@@ -173,7 +185,12 @@ fn candidate(n: &NurbsSurface) -> Option<Surface> {
             let (u, v) = (u0 + (u1 - u0) * i as f64 / m as f64, v0 + (v1 - v0) * j as f64 / m as f64);
             let d = n.ders2(u, v);
             pts.push(P3::from(d[0]));
-            if let Some(nn) = d[1].cross(&d[2]).try_normalize(1e-12) {
+            // (Not at a pole or apex, where a derivative vanishes and the cross product is
+            // rounding noise.)
+            let c = d[1].cross(&d[2]);
+            if (!poles || c.norm() > 1e-9 * d[1].norm_squared().max(d[2].norm_squared()))
+                && let Some(nn) = c.try_normalize(1e-12)
+            {
                 nrms.push((P3::from(d[0]), nn));
             }
         }
@@ -261,12 +278,24 @@ fn candidate(n: &NurbsSurface) -> Option<Surface> {
         let (lo, hi) = hs.iter().fold((f64::INFINITY, f64::NEG_INFINITY), |(a, b), &h| (a.min(h), b.max(h)));
         hi - lo < tol
     };
-    let (s0, s1) = if flat(&row_u(0)) && flat(&row_u(m)) {
-        (section(&row_u(0))?, section(&row_u(m))?)
-    } else if flat(&row_v(0)) && flat(&row_v(m)) {
-        (section(&row_v(0))?, section(&row_v(m))?)
-    } else {
-        return None;
+    // (Through poles, two whose circles have a radius: a cone's row at its apex is a point.)
+    type Section = (P3, f64, f64);
+    let sections = |by_u: bool| -> Option<(Section, Section)> {
+        let rows: &[usize] = if poles { &[0, m / 2, m] } else { &[0, m] };
+        if !rows.iter().all(|&i| if by_u { flat(&row_u(i)) } else { flat(&row_v(i)) }) {
+            return None;
+        }
+        let secs: Vec<Option<Section>> = rows.iter().map(|&i| if by_u { section(&row_u(i)) } else { section(&row_v(i)) }).collect();
+        if !poles {
+            return Some((secs[0]?, secs[1]?));
+        }
+        let secs: Vec<Section> = secs.into_iter().flatten().filter(|s| s.1 > tol).collect();
+        (secs.len() >= 2).then(|| (secs[0], secs[secs.len() - 1]))
+    };
+    let (s0, s1) = match (poles, flat(&row_u(0)) && flat(&row_u(m))) {
+        (true, _) => sections(true).or_else(|| sections(false))?,
+        (false, true) => sections(true)?,
+        (false, false) => sections(false)?,
     };
     let world = |c: &P3, h: f64| P3::from(frame.x * c.x + frame.y * c.y + a * h);
     let (c0, c1) = (world(&s0.0, s0.2), world(&s1.0, s1.2));

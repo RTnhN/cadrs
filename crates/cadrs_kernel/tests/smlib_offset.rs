@@ -95,7 +95,7 @@ fn offset_02_offsetboxwithboss() {
 /// SMLib offset demo 3 (smOffsetTest.cpp:813, `ShellBrep`): `OffsetBoxSphOnCorner.smb` shelled inward, 2.54 thick, face 0 open (SMLib: corners rounded, `bExtendCorners` FALSE).
 #[test]
 fn offset_03_offsetboxsphoncorner() {
-    known_failure(shell("OffsetBoxSphOnCorner.smb", -2.54, &[0], false, 0.00184942046666, &Expect { volume: Some(134379.316229), area: Some(106929.897864), faces: Some(26), edges: Some(72), solid: Some(true), ..Expect::default() }), "offset", "offset_03_offsetboxsphoncorner");
+    shell("OffsetBoxSphOnCorner.smb", -2.54, &[0], false, 0.00184942046666, &Expect { volume: Some(134379.316229), area: Some(106929.897864), faces: Some(26), edges: Some(72), solid: Some(true), ..Expect::default() }).unwrap();
 }
 
 /// SMLib offset demo 4 (smOffsetTest.cpp:823, `my_test_offset`): `off_extrusion.smb` offset by 0.3.
@@ -186,7 +186,7 @@ fn offset_15b_offset_bracket2() {
 /// SMLib offset demo 16 (smOffsetTest.cpp:1004, `ShellBrep`): `InsetCone.smb` shelled inward, 12.7 thick, face 0 open (SMLib: corners rounded, `bExtendCorners` FALSE).
 #[test]
 fn offset_16_insetcone() {
-    known_failure(shell("InsetCone.smb", -12.7, &[0], false, 0.000932782069757, &Expect { volume: Some(147937.388284), area: Some(28231.2051063), faces: Some(3), edges: Some(4), solid: Some(true), ..Expect::default() }), "offset", "offset_16_insetcone");
+    shell("InsetCone.smb", -12.7, &[0], false, 0.000932782069757, &Expect { volume: Some(147937.388284), area: Some(28231.2051063), faces: Some(3), edges: Some(4), solid: Some(true), ..Expect::default() }).unwrap();
 }
 
 /// SMLib offset demo 17 (smOffsetTest.cpp:1024, `ShellBrep`): `InsetTaperedExtrude.smb` shelled inward, 12.7 thick, face 2 open.
