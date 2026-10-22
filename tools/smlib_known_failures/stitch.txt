@@ -2,8 +2,3 @@
 
 # The stitched part less the cylinder: "the boolean left an open shell".
 stitch_4_cut
-
-# Full check: stitched p-curves stray from their edges beyond the edges' tolerances (W6b:
-# tolerances not fitted to the read p-curves' gaps).
-stitch_1_fillet_ts_0001
-stitch_2_fillet_ts_0005

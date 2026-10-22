@@ -356,7 +356,8 @@ pub fn sew(k: &mut NativeKernel, bodies: &[BodyId], tol: f64) -> Result<OpResult
 }
 
 /// Faces sewn into one sheet: coincident vertices and edges merged, the faces oriented
-/// consistently (the sheet may stay open), one shell per edge-connected piece and no solids.
+/// consistently (the sheet may stay open), one shell per edge-connected piece and no solids;
+/// p-curves off their edges refitted and the tolerances fitted to the gaps left.
 pub fn sew_faces(mut b: Body, tol: f64) -> Result<Body> {
     let tol = tol.max(1e-7);
     // Merge coincident vertices.
@@ -513,8 +514,14 @@ pub fn sew_faces(mut b: Body, tol: f64) -> Result<Body> {
         })
         .collect();
     b.solids.clear();
-    // Sewn within `tol`: the merged vertices and edges carry the gaps they close.
+    // Sewn within `tol`: the merged vertices and edges carry the gaps they close. Then OCCT's
+    // SameParameter step (`BRepBuilderAPI_Sewing::SameParameterShape`, on by default): a
+    // p-curve that strays from its edge further than that is projected again where that
+    // strays less, and the tolerances grow (within `tol`) to the gaps left, searched for along
+    // each edge rather than sampled.
     b.fit_tolerances(tol);
+    super::heal::refit_pcurves(&mut b, 0.0);
+    b.fit_tolerances_searched(tol);
     Ok(b)
 }
 

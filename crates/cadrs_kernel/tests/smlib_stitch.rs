@@ -85,13 +85,13 @@ fn stitch_then_cut(file: &str, tols: &[f64], tool: &str) -> Result<(), String> {
 /// SMLib stitching 1: `fillet_ts.smb` stitched at 0.001 (SMLib leaves 4 lamina edges).
 #[test]
 fn stitch_1_fillet_ts_0001() {
-    known_failure(stitch_open("fillet_ts.smb", 0.001, 4), "stitch", "stitch_1_fillet_ts_0001");
+    stitch_open("fillet_ts.smb", 0.001, 4).unwrap();
 }
 
 /// SMLib stitching 2: `fillet_ts.smb` stitched at 0.001 then 0.005: closed, SMLib's volume 924.828575 and area 605.235965.
 #[test]
 fn stitch_2_fillet_ts_0005() {
-    known_failure(stitch_closed("fillet_ts.smb", &[0.001, 0.005], &Expect { volume: Some(924.82857533), area: Some(605.235964878), solid: Some(true), ..Expect::default() }), "stitch", "stitch_2_fillet_ts_0005");
+    stitch_closed("fillet_ts.smb", &[0.001, 0.005], &Expect { volume: Some(924.82857533), area: Some(605.235964878), solid: Some(true), ..Expect::default() }).unwrap();
 }
 
 /// SMLib stitching 3: `fillet_cut.smb` (the cylinder cut from the stitched part) reads as a solid.

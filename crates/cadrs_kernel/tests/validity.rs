@@ -186,13 +186,12 @@ fn finds_voids_outside_or_inside_out() {
     finds(&with_void(inner, false), "must point into the void");
 }
 
-#[test]
-fn finds_a_pcurve_off_its_edge_between_samples() {
+/// A 10 × 10 × 2 box with one straight edge's p-curve on a planar face replaced by a polyline
+/// with a 0.01 bump between the fast check's first two samples (10 % and 25 % along it).
+fn box_with_a_bumped_pcurve() -> Body {
     let mut k = NativeKernel::new();
     let id = extrude(&mut k, region(rect(0.0, 0.0, 10.0, 10.0), vec![]), 2.0);
     let mut b = body(&k, id);
-    // A straight edge's p-curve on a planar face replaced by a polyline with a 0.01 bump
-    // between the fast check's first two samples (10 % and 25 % along it).
     let (fi, li, ci) = b
         .faces
         .iter()
@@ -212,8 +211,26 @@ fn finds_a_pcurve_off_its_edge_between_samples() {
     let knots = vec![t0, t0, t(0.12), t(0.17), t(0.22), t1, t1];
     let cps = vec![h(a), h(at(0.12)), h(bump), h(at(0.22)), h(z)];
     b.faces[fi].loops[li][ci].pc = Curve::Nurbs(std::sync::Arc::new(NurbsCurve { degree: 1, knots, cps }));
+    b
+}
+
+#[test]
+fn finds_a_pcurve_off_its_edge_between_samples() {
+    let b = box_with_a_bumped_pcurve();
     assert!(b.check().is_empty(), "the fast check samples past the bump: {:?}", b.check());
     finds(&b, "p-curve off the edge");
+}
+
+#[test]
+fn sewing_refits_pcurves_off_their_edges() {
+    // Sewing ends with OCCT's SameParameter: a p-curve off its edge (here between the fast
+    // check's samples) is projected again rather than kept, so the sewn body passes the full
+    // check without its edges' tolerances raised to the bump.
+    let b = box_with_a_bumped_pcurve();
+    let sewn = cadrs_kernel::native::surfacing::sew_faces(b, 1e-6).unwrap();
+    valid(&sewn);
+    let worst = sewn.edges.iter().map(|e| e.tol).fold(0.0, f64::max);
+    assert!(worst < 1e-4, "an edge's tolerance raised to {worst:e}");
 }
 
 /// Faces `faces` of body `id` alone, as a sheet body in `k`.

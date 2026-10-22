@@ -808,16 +808,6 @@ boolean bopfuse_complex_h1
 blend complex_a5
 # Full check: faces of the shell cross (the notch's offset wall pierces the top), W6b.
 offset shape_type_i_c_v7
-# Full check: sewn models keep the read p-curves' gaps without fitted tolerances, W6b reader/sewing.
-sewing tol_0_01_r6
-sewing tol_0_01_w2
-sewing tol_0_01_w8
-sewing tol_100_a7
-sewing tol_100_b8
-sewing tol_100_b9
-sewing tol_1_g4
-sewing tol_1_j8
-sewing tol_1_n6
 # Full check: the input's faces cross (RevolutionFG.rle's panels interpenetrate): the input, not the command (W6b reader).
 heal split_closed_faces_e4
 heal split_closed_faces_e9

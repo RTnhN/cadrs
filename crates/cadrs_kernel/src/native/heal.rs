@@ -547,6 +547,15 @@ fn pc_gap(b: &Body, surf: &Surface, c: &Coedge) -> f64 {
 /// `tolerance`) by projecting the edge onto the face again, when that strays less; then fits
 /// the tolerances to the gaps left (`fit_tolerances_searched`).
 pub fn same_parameter(b: &mut Body, tolerance: f64) {
+    refit_pcurves(b, tolerance);
+    b.fit_tolerances_searched(f64::INFINITY);
+    cover_loop_gaps(b);
+}
+
+/// The refitting of [`same_parameter`] alone: each p-curve that strays from its edge by more
+/// than the edge's tolerance (and `tolerance`) projected again where that strays less. The
+/// tolerances are left as they are.
+pub fn refit_pcurves(b: &mut Body, tolerance: f64) {
     for fi in 0..b.faces.len() {
         for li in 0..b.faces[fi].loops.len() {
             for k in 0..b.faces[fi].loops[li].len() {
@@ -569,8 +578,6 @@ pub fn same_parameter(b: &mut Body, tolerance: f64) {
             }
         }
     }
-    b.fit_tolerances_searched(f64::INFINITY);
-    cover_loop_gaps(b);
 }
 
 /// Raises each vertex's tolerance to cover the gaps its loops leave in (u, v) where one coedge
