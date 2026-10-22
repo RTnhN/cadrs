@@ -292,6 +292,9 @@
   .mt-2 {
     margin-top: calc(var(--spacing) * 2);
   }
+  .mt-3 {
+    margin-top: calc(var(--spacing) * 3);
+  }
   .mt-4 {
     margin-top: calc(var(--spacing) * 4);
   }
@@ -436,6 +439,12 @@
   }
   .cursor-pointer {
     cursor: pointer;
+  }
+  .scroll-mt-14 {
+    scroll-margin-top: calc(var(--spacing) * 14);
+  }
+  .scroll-mt-20 {
+    scroll-margin-top: calc(var(--spacing) * 20);
   }
   .flex-col {
     flex-direction: column;
@@ -1203,9 +1212,6 @@
     }
   }
   @media (width >= 40rem) {
-    .sm\:flex-row {
-      flex-direction: row;
-    }
     .sm\:px-6 {
       padding-inline: calc(var(--spacing) * 6);
     }

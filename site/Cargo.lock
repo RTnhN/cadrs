@@ -229,6 +229,7 @@ dependencies = [
  "dotenvy",
  "heapless",
  "http-body-util",
+ "icon-rs",
  "proa_actions",
  "proa_core",
  "proa_fonts",
@@ -868,6 +869,11 @@ dependencies = [
  "tracing",
  "windows-registry",
 ]
+
+[[package]]
+name = "icon-rs"
+version = "0.4.1"
+source = "git+https://github.com/rvdende/icon-rs?rev=99f03976d094d7422a6ddaa181d625b99d488da6#99f03976d094d7422a6ddaa181d625b99d488da6"
 
 [[package]]
 name = "icu_collections"

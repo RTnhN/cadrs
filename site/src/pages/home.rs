@@ -1,6 +1,6 @@
 use std::sync::OnceLock;
 
-use proa_core::{perf_ok, DataLoader, WebContext, WebRenderSync, WriteError};
+use proa_core::{perf_ok, DataLoader, StaticRaw, WebContext, WebRenderSync, WriteError};
 use proa_core::{MdRenderSync, WriteBuf};
 use proa_macros::html_sync;
 use proa_macros::md_sync;
@@ -178,16 +178,57 @@ fn link_button(size: ButtonSize, variant: ButtonVariant) -> ButtonStyle {
     })
 }
 
+/// The icon-rs platform icons, with their ink set to `currentColor` so each takes its button's
+/// text colour.
+struct PlatformIcons {
+    windows: String,
+    linux: String,
+    macos: String,
+}
+
+fn platform_icons() -> &'static PlatformIcons {
+    static ICONS: OnceLock<PlatformIcons> = OnceLock::new();
+    ICONS.get_or_init(|| PlatformIcons {
+        windows: icon_rs::PLATFORM_WINDOWS.current_color(),
+        linux: icon_rs::PLATFORM_LINUX.current_color(),
+        macos: icon_rs::PLATFORM_MACOS.current_color(),
+    })
+}
+
+/// One button per desktop platform: the latest release for Windows and Linux, and the build
+/// notes for macOS, which has no release build.
+struct PlatformButtons;
+
+impl<L: DataLoader> WebRenderSync<L> for PlatformButtons {
+    fn render(self, cx: &mut WebContext<L>) -> Result<(), WriteError> {
+        let release = release();
+        let icons = platform_icons();
+        let (windows, linux) = (release.windows.as_str(), release.linux.as_str());
+        html_sync! {
+            <div class="flex flex-wrap gap-3">
+                <a href={windows} class={link_button(ButtonSize::Lg, ButtonVariant::Solid)}>
+                    {StaticRaw(icons.windows.as_str())}
+                    "Windows"
+                </a>
+                <a href={linux} class={link_button(ButtonSize::Lg, ButtonVariant::Solid)}>
+                    {StaticRaw(icons.linux.as_str())}
+                    "Linux"
+                </a>
+                <a href="#build" class={link_button(ButtonSize::Lg, ButtonVariant::Outline)}>
+                    {StaticRaw(icons.macos.as_str())}
+                    "macOS"
+                </a>
+            </div>
+        }
+        .render(cx)
+    }
+}
+
 struct Downloads;
 
 impl<L: DataLoader> WebRenderSync<L> for Downloads {
     fn render(self, cx: &mut WebContext<L>) -> Result<(), WriteError> {
-        let release = release();
-        let (latest, linux, windows) = (
-            release.label.as_str(),
-            release.linux.as_str(),
-            release.windows.as_str(),
-        );
+        let latest = release().label.as_str();
         html_sync! {
             {Card {
                 class: Some("min-w-0"),
@@ -202,22 +243,9 @@ impl<L: DataLoader> WebRenderSync<L> for Downloads {
                     {CardContent {
                         class: Some("flex flex-col gap-4"),
                         children: Some(html_sync! {
-                            <div class="flex flex-wrap gap-3">
-                                <a
-                                    href={linux}
-                                    class={link_button(ButtonSize::Lg, ButtonVariant::Solid)}
-                                >
-                                    "Linux (x86_64)"
-                                </a>
-                                <a
-                                    href={windows}
-                                    class={link_button(ButtonSize::Lg, ButtonVariant::Outline)}
-                                >
-                                    "Windows (x86_64)"
-                                </a>
-                            </div>
+                            {PlatformButtons}
                             <p class="text-sm leading-6 text-muted-foreground">
-                                "Every release, with SHA-256 checksums, is on "
+                                "Windows and Linux builds are for 64-bit x86. Every release, with SHA-256 checksums, is on "
                                 <a
                                     href="https://github.com/rvdende/cadrs/releases"
                                     class="font-medium text-primary underline-offset-4 hover:underline"
@@ -300,20 +328,24 @@ impl<L: DataLoader> WebRenderSync<L> for HomePage {
                             <p class="mt-6 max-w-lg text-pretty text-lg leading-8 text-muted-foreground">
                                 "Sketch on a plane, constrain and dimension, build parts from features, put them together in assemblies, and make drawings from them. cadrs follows Onshape's workflow, with a Bevy UI and an OpenCASCADE kernel, and runs on your own machine."
                             </p>
-                            <div class="mt-8 flex flex-col gap-3 sm:flex-row">
+                            <div class="mt-8">{PlatformButtons}</div>
+                            <p class="mt-3 text-sm text-muted-foreground">
+                                {release().label.as_str()}
+                                " for 64-bit Windows and Linux. On a Mac, "
                                 <a
-                                    href="#download"
-                                    class={link_button(ButtonSize::Lg, ButtonVariant::Solid)}
+                                    href="#build"
+                                    class="font-medium text-primary underline-offset-4 hover:underline"
                                 >
-                                    "Download cadrs"
+                                    "build from source"
                                 </a>
+                                ". "
                                 <a
                                     href="https://github.com/rvdende/cadrs"
-                                    class={link_button(ButtonSize::Lg, ButtonVariant::Outline)}
+                                    class="font-medium text-primary underline-offset-4 hover:underline"
                                 >
                                     "View the source"
                                 </a>
-                            </div>
+                            </p>
                             <p class="mt-6 flex items-start gap-3 text-sm leading-6 text-muted-foreground">
                                 {Badge {
                                     variant: BadgeVariant::Warning,
@@ -373,7 +405,7 @@ impl<L: DataLoader> WebRenderSync<L> for HomePage {
                         </div>
                     </div>
                 </section>
-                <section id="features" class="border-y border-border bg-muted/30">
+                <section id="features" class="scroll-mt-14 border-y border-border bg-muted/30">
                     <div class="mx-auto max-w-6xl px-4 py-14 sm:px-6 md:py-20">
                         <div class="max-w-2xl">
                             {Badge {
@@ -393,43 +425,45 @@ impl<L: DataLoader> WebRenderSync<L> for HomePage {
                 </section>
                 <section
                     id="download"
-                    class="mx-auto grid max-w-6xl gap-6 px-4 py-14 sm:px-6 md:py-20 lg:grid-cols-2"
+                    class="mx-auto grid max-w-6xl scroll-mt-14 gap-6 px-4 py-14 sm:px-6 md:py-20 lg:grid-cols-2"
                 >
                     {Downloads}
-                    {Card {
-                        class: Some("min-w-0"),
-                        children: Some(html_sync! {
-                            {CardHeader {
-                                class: None,
-                                children: Some(html_sync! {
-                                    {CardTitle {
-                                        class: Some("text-lg"),
-                                        children: Some("Build from source"),
-                                    }}
-                                    {CardDescription {
-                                        class: None,
-                                        children: Some("A Rust toolchain, CMake and a C++ compiler. The first build compiles OpenCASCADE, which takes several minutes."),
-                                    }}
-                                }),
-                            }}
-                            {CardContent {
-                                class: Some("flex flex-col gap-4"),
-                                children: Some(html_sync! {
-                                    <pre class="overflow-x-auto rounded-lg border border-border bg-muted/50 p-4 text-sm leading-6">
-                                        <code>
-                                            "git clone https://github.com/rvdende/cadrs\ncd cadrs\ncargo run --release"
-                                        </code>
-                                    </pre>
-                                    <a
-                                        href="https://github.com/rvdende/cadrs#building"
-                                        class="text-sm font-medium text-primary underline-offset-4 hover:underline"
-                                    >
-                                        "Full build notes"
-                                    </a>
-                                }),
-                            }}
-                        }),
-                    }}
+                    <div id="build" class="min-w-0 scroll-mt-20">
+                        {Card {
+                            class: Some("h-full"),
+                            children: Some(html_sync! {
+                                {CardHeader {
+                                    class: None,
+                                    children: Some(html_sync! {
+                                        {CardTitle {
+                                            class: Some("text-lg"),
+                                            children: Some("Build from source"),
+                                        }}
+                                        {CardDescription {
+                                            class: None,
+                                            children: Some("A Rust toolchain, CMake and a C++ compiler. The first build compiles OpenCASCADE, which takes several minutes."),
+                                        }}
+                                    }),
+                                }}
+                                {CardContent {
+                                    class: Some("flex flex-col gap-4"),
+                                    children: Some(html_sync! {
+                                        <pre class="overflow-x-auto rounded-lg border border-border bg-muted/50 p-4 text-sm leading-6">
+                                            <code>
+                                                "git clone https://github.com/rvdende/cadrs\ncd cadrs\ncargo run --release"
+                                            </code>
+                                        </pre>
+                                        <a
+                                            href="https://github.com/rvdende/cadrs#building"
+                                            class="text-sm font-medium text-primary underline-offset-4 hover:underline"
+                                        >
+                                            "Full build notes"
+                                        </a>
+                                    }),
+                                }}
+                            }),
+                        }}
+                    </div>
                 </section>
             </main>
             <footer class="border-t border-border">
