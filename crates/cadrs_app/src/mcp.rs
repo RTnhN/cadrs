@@ -175,6 +175,7 @@ fn run(world: &mut World, call: &Call) -> Result<Value, String> {
             Ok(stats)
         }
         Call::AddPartStudio(p) => add_part_studio(world, p),
+        Call::AddAssembly(p) => add_assembly(world, p),
         Call::AddSketch(p) => add_sketch(world, p),
         Call::Extrude(p) => extrude(world, p),
         Call::Screenshot(_) | Call::RunScenario(_) => Err("handled by run_calls".into()),
@@ -651,6 +652,16 @@ fn add_part_studio(world: &mut World, p: &tools::AddPartStudio) -> Result<Value,
     d.execute(&AddElement { id, kind: NewElementKind::PartStudio, name: p.name.clone(), after }).map_err(|e| e.to_string())?;
     d.set_active(id);
     describe(world)
+}
+
+/// A new, empty Assembly tab after the active one. It is not made active: the active Part
+/// Studio's tools keep working on it.
+fn add_assembly(world: &mut World, p: &tools::AddPartStudio) -> Result<Value, String> {
+    let mut d = doc_mut(world)?;
+    let id = ElementId::new();
+    let after = d.active;
+    d.execute(&AddElement { id, kind: NewElementKind::Assembly, name: p.name.clone(), after }).map_err(|e| e.to_string())?;
+    describe_assembly(&d, id)
 }
 
 fn plane_ref(p: Plane) -> PlaneRef {
@@ -1416,6 +1427,12 @@ mod tests {
         let doc = delete_tab(&mut world, "Assembly 1").unwrap();
         assert_eq!(doc["tabs"].as_array().unwrap().len(), 1);
         assert!(delete_tab(&mut world, "Part Studio 1").is_err(), "the last tab stays");
+
+        // A new, empty assembly; the Part Studio stays active.
+        let site = run(&mut world, &Call::AddAssembly(p(json!({ "name": "Site" })))).unwrap();
+        assert_eq!(site["instances"].as_array().unwrap().len(), 0);
+        let asm = insert_instance(&mut world, &p(json!({ "assembly": "Site", "part_studio": "Part Studio 1" }))).unwrap();
+        assert_eq!(asm["instances"].as_array().unwrap().len(), 1);
     }
 
     /// Ground sections 5 m apart (three lines and the ground as one spline), lofted pair by pair:

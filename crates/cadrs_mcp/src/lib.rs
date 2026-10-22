@@ -44,6 +44,7 @@ pub enum Call {
     GetDocument,
     GetFrameStats,
     AddPartStudio(AddPartStudio),
+    AddAssembly(AddPartStudio),
     AddSketch(AddSketch),
     Extrude(Extrude),
     Screenshot(Screenshot),
@@ -259,6 +260,13 @@ impl Cadrs {
     #[tool(description = "Add a Part Studio tab to the open document and make it the active tab.")]
     async fn add_part_studio(&self, Parameters(p): Parameters<AddPartStudio>) -> Result<CallToolResult, ErrorData> {
         self.call(Call::AddPartStudio(p)).await
+    }
+
+    #[tool(description = "Add an empty Assembly tab to the open document (name omitted: the next default, \
+        \"Assembly 2\"). insert_instance puts Part Studios or parts into it. Returns the assembly as \
+        get_assembly does.")]
+    async fn add_assembly(&self, Parameters(p): Parameters<AddPartStudio>) -> Result<CallToolResult, ErrorData> {
+        self.call(Call::AddAssembly(p)).await
     }
 
     #[tool(description = "Add a sketch on a default plane (Top, Front or Right) of a Part Studio, with rectangles, \
