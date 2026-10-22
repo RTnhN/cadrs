@@ -21,20 +21,26 @@ const MAX_PIECES: f64 = 4096.0;
 pub type Q = [f64; NQ];
 
 /// The integrand at (u, v) relative to `shift`: area terms (scaled by |N|) and volume terms
-/// (by the vector N = Su × Sv; the divergence theorem turns them into volume integrals).
+/// (by the vector N = Su × Sv; the divergence theorem turns them into volume integrals). With
+/// `ALL` false only the volume's (`out[4]`, the same to the bit): this and the integrators
+/// below take `ALL` so [`body_volume`] runs the same arithmetic for the one quantity.
 #[inline]
-fn integrand(s: &Surface, u: f64, v: f64, shift: &V3, out: &mut Q, w: f64) {
+fn integrand<const ALL: bool>(s: &Surface, u: f64, v: f64, shift: &V3, out: &mut Q, w: f64) {
     let (p, su, sv) = s.d1(u, v);
-    accumulate(&p, &su, &sv, shift, out, w);
+    accumulate::<ALL>(&p, &su, &sv, shift, out, w);
 }
 
 /// [`integrand`] from the point and first derivatives.
 #[inline]
-fn accumulate(p: &P3, su: &V3, sv: &V3, shift: &V3, out: &mut Q, w: f64) {
+fn accumulate<const ALL: bool>(p: &P3, su: &V3, sv: &V3, shift: &V3, out: &mut Q, w: f64) {
     let n = su.cross(sv);
-    let a = n.norm() * w;
     let (x, y, z) = (p.x - shift.x, p.y - shift.y, p.z - shift.z);
     let (nx, ny, nz) = (n.x * w, n.y * w, n.z * w);
+    if !ALL {
+        out[4] += (x * nx + y * ny + z * nz) / 3.0;
+        return;
+    }
+    let a = n.norm() * w;
     out[0] += a;
     out[1] += x * a;
     out[2] += y * a;
@@ -114,7 +120,7 @@ const GAUSS4: Gauss = Gauss {
 
 /// H(u, v) for all quantities, weighted by `w` (the outer quadrature weight × v'(t)).
 #[allow(clippy::too_many_arguments)]
-fn inner(s: &Surface, u0: f64, u: f64, v: f64, shift: &V3, w: f64, acc: &mut Q, scratch: &mut Vec<f64>) {
+fn inner<const ALL: bool>(s: &Surface, u0: f64, u: f64, v: f64, shift: &V3, w: f64, acc: &mut Q, scratch: &mut Vec<f64>) {
     if (u - u0).abs() < tol::TINY {
         return;
     }
@@ -132,9 +138,9 @@ fn inner(s: &Surface, u0: f64, u: f64, v: f64, shift: &V3, w: f64, acc: &mut Q, 
             match &iso {
                 Some(iso) => {
                     let (p, su, sv) = iso.d1(m + r * x);
-                    accumulate(&p, &su, &sv, shift, acc, w * gw * r);
+                    accumulate::<ALL>(&p, &su, &sv, shift, acc, w * gw * r);
                 }
-                None => integrand(s, m + r * x, v, shift, acc, w * gw * r),
+                None => integrand::<ALL>(s, m + r * x, v, shift, acc, w * gw * r),
             }
         }
     }
@@ -147,18 +153,18 @@ fn ruled_in_v(s: &Surface) -> bool {
 }
 
 /// G(u, v) = ∫_{v0}^{v} h(u, s) ds for all quantities, weighted by `w`.
-fn inner_v(s: &Surface, u: f64, v0: f64, v: f64, shift: &V3, w: f64, acc: &mut Q) {
+fn inner_v<const ALL: bool>(s: &Surface, u: f64, v0: f64, v: f64, shift: &V3, w: f64, acc: &mut Q) {
     if (v - v0).abs() < tol::TINY {
         return;
     }
     let (m, r) = ((v0 + v) * 0.5, (v - v0) * 0.5);
     for (x, gw) in GAUSS8.x.iter().zip(GAUSS8.w) {
-        integrand(s, u, m + r * x, shift, acc, w * gw * r);
+        integrand::<ALL>(s, u, m + r * x, shift, acc, w * gw * r);
     }
 }
 
 /// Face integrals with the inner integral along v: ∫∫ h = −∮ G du.
-fn face_integrals_v(body: &Body, f: &Face, shift: &V3) -> Q {
+fn face_integrals_v<const ALL: bool>(body: &Body, f: &Face, shift: &V3) -> Q {
     let mut acc = [0.0; NQ];
     let mut v_ref = f64::INFINITY;
     for l in &f.loops {
@@ -223,7 +229,7 @@ fn face_integrals_v(body: &Body, f: &Face, shift: &V3) -> Q {
                     if duv.x == 0.0 {
                         continue;
                     }
-                    inner_v(&f.surf, uv.x, v_ref, uv.y, shift, -gw * r * duv.x, &mut acc);
+                    inner_v::<ALL>(&f.surf, uv.x, v_ref, uv.y, shift, -gw * r * duv.x, &mut acc);
                 }
             }
         }
@@ -282,7 +288,7 @@ fn iso_rectangle(body: &Body, f: &Face) -> Option<([f64; 4], f64)> {
 /// The face integrals over an iso-rectangle of a B-spline surface: a tensor Gauss rule on each
 /// knot span (the integrand is polynomial along polynomial directions, smooth along rational
 /// ones).
-fn rect_integrals(s: &Surface, ns: &super::nurbs::NurbsSurface, r: [f64; 4], shift: &V3) -> Q {
+fn rect_integrals<const ALL: bool>(s: &Surface, ns: &super::nurbs::NurbsSurface, r: [f64; 4], shift: &V3) -> Q {
     let mut acc = [0.0; NQ];
     let (bu, bv) = ns.breaks();
     let cut = |ks: Vec<f64>, a: f64, b: f64| -> Vec<f64> {
@@ -313,19 +319,24 @@ fn rect_integrals(s: &Surface, ns: &super::nurbs::NurbsSurface, r: [f64; 4], shi
     }
     let _ = bu;
     let mut scratch = Vec::with_capacity(64);
-    run_jobs(s, &jobs, shift, &mut acc, &mut scratch);
+    run_jobs::<ALL>(s, &jobs, shift, &mut acc, &mut scratch);
     acc
 }
 
 /// The 14 face integrals of a face, relative to `shift`, oriented by its sense.
 pub fn face_integrals(body: &Body, f: &Face, shift: &V3) -> Q {
+    face_integrals_of::<true>(body, f, shift)
+}
+
+/// [`face_integrals`], or with `ALL` false only the volume's (`[4]`; the others zero).
+fn face_integrals_of<const ALL: bool>(body: &Body, f: &Face, shift: &V3) -> Q {
     if ruled_in_v(&f.surf) && !matches!(f.surf, Surface::Plane { .. }) {
-        return face_integrals_v(body, f, shift);
+        return face_integrals_v::<ALL>(body, f, shift);
     }
     if let Surface::Nurbs(ns) = &f.surf
         && ns.du <= 3 && ns.dv <= 3
             && let Some((r, orient)) = iso_rectangle(body, f) {
-                let mut acc = rect_integrals(&f.surf, ns, r, shift);
+                let mut acc = rect_integrals::<ALL>(&f.surf, ns, r, shift);
                 for q in acc.iter_mut() {
                     *q *= orient;
                 }
@@ -408,14 +419,14 @@ pub fn face_integrals(body: &Body, f: &Face, shift: &V3) -> Q {
                     if let Some(jobs) = jobs.as_mut() {
                         jobs.push([u_ref, uv.x, uv.y, gw * r * dv]);
                     } else {
-                        inner(&f.surf, u_ref, uv.x, uv.y, shift, gw * r * dv, &mut acc, &mut scratch);
+                        inner::<ALL>(&f.surf, u_ref, uv.x, uv.y, shift, gw * r * dv, &mut acc, &mut scratch);
                     }
                 }
             }
         }
     }
     if let Some(jobs) = jobs {
-        run_jobs(&f.surf, &jobs, shift, &mut acc, &mut scratch);
+        run_jobs::<ALL>(&f.surf, &jobs, shift, &mut acc, &mut scratch);
     }
     if !f.sense {
         for q in acc.iter_mut().take(4) {
@@ -504,7 +515,7 @@ pub fn gpu_active() -> bool {
 
 /// The inner integrals `[u0, u, v, w]` of a face, summed into `acc`: on the GPU when the kernel
 /// is built with it, one is there and there are enough jobs; else here.
-fn run_jobs(s: &Surface, jobs: &[[f64; 4]], shift: &V3, acc: &mut Q, scratch: &mut Vec<f64>) {
+fn run_jobs<const ALL: bool>(s: &Surface, jobs: &[[f64; 4]], shift: &V3, acc: &mut Q, scratch: &mut Vec<f64>) {
     #[cfg(feature = "gpu")]
     if jobs.len() >= GPU_MIN_JOBS && GPU_ON.load(std::sync::atomic::Ordering::Relaxed) {
         if let (Surface::Nurbs(ns), Some(gpu)) = (s, cadrs_gpu::get()) {
@@ -525,8 +536,25 @@ fn run_jobs(s: &Surface, jobs: &[[f64; 4]], shift: &V3, acc: &mut Q, scratch: &m
         }
     }
     for j in jobs {
-        inner(s, j[0], j[1], j[2], shift, j[3], acc, scratch);
+        inner::<ALL>(s, j[0], j[1], j[2], shift, j[3], acc, scratch);
     }
+}
+
+/// [`body_mass`]'s volume, to the bit, for a fraction of the work: only the volume's integrand.
+/// (Booleans and offsets weigh solids by it to drop slivers and check orientation.)
+pub fn body_volume(body: &Body) -> f64 {
+    if !body.is_solid() {
+        return 0.0;
+    }
+    let bb = body.bbox();
+    let shift = if bb.is_empty() { V3::zeros() } else { bb.center().coords };
+    let faces: Vec<usize> = (0..body.faces.len()).collect();
+    let qs: Vec<f64> = faces.par_iter().map(|&i| face_integrals_of::<false>(body, &body.faces[i], &shift)[4]).collect();
+    let mut v = 0.0;
+    for q in qs {
+        v += q;
+    }
+    v
 }
 
 /// Mass properties of a body (solids; a body without solids is a sheet: area only).

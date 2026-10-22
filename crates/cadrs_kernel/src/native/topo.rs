@@ -866,7 +866,7 @@ impl Body {
                 if parity_orientation(&sub) == Some(true) {
                     continue;
                 }
-                let v = super::mass::body_mass(&sub).volume;
+                let v = super::mass::body_volume(&sub);
                 if !(v > 0.0) {
                     errs.push(format!("solid {si} encloses a volume of {v:.3e} (its faces point in)"));
                 }
@@ -1342,7 +1342,7 @@ impl Body {
             }
             let shell = |sh: usize| super::kernel::subset(self, &self.shells[sh].faces, true);
             let out = shell(*outer);
-            let v = if parity_orientation(&out) == Some(true) { 1.0 } else { super::mass::body_mass(&out).volume };
+            let v = if parity_orientation(&out) == Some(true) { 1.0 } else { super::mass::body_volume(&out) };
             if !(v > 0.0) {
                 errs.push(format!("solid {si}: its outer shell {outer} encloses a volume of {v:.3e}"));
                 continue;
@@ -1350,7 +1350,7 @@ impl Body {
             let polys: Vec<Vec<Vec<P2>>> = out.faces.iter().map(|f| super::classify::face_polygons(&out, f)).collect();
             for &sh in voids {
                 let void = shell(sh);
-                let v = if parity_orientation(&void) == Some(false) { -1.0 } else { super::mass::body_mass(&void).volume };
+                let v = if parity_orientation(&void) == Some(false) { -1.0 } else { super::mass::body_volume(&void) };
                 if !(v < 0.0) {
                     errs.push(format!("solid {si}: void shell {sh} encloses a volume of {v:.3e} (its faces must point into the void)"));
                 }

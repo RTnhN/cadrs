@@ -1212,49 +1212,53 @@ pub trait Kernel {
     /// every edge reached from it through vertices where the two edges' tangents are parallel
     /// (within [`TANGENT_ANGLE`]). In id order.
     fn tangent_chain(&self, body: BodyId, edge: EdgeId) -> Result<Vec<EdgeId>> {
-        let edges = self.edges(body)?;
-        let vertices = self.vertices(body)?;
-        let tol = naming::joint_tolerance(&edges);
-        let get = |id: EdgeId| edges.iter().find(|e| e.id == id);
-        if get(edge).is_none() {
-            return Err(KernelError::InvalidParameter(format!("unknown {edge:?}")));
+        tangent_chain_of(&self.edges(body)?, &self.vertices(body)?, edge)
+    }
+}
+
+/// [`Kernel::tangent_chain`] over a body's edges and vertices (their lengths aren't used: a
+/// kernel may leave them out).
+pub(crate) fn tangent_chain_of(edges: &[EdgeInfo], vertices: &[VertexInfo], edge: EdgeId) -> Result<Vec<EdgeId>> {
+    let tol = naming::joint_tolerance(edges);
+    let get = |id: EdgeId| edges.iter().find(|e| e.id == id);
+    if get(edge).is_none() {
+        return Err(KernelError::InvalidParameter(format!("unknown {edge:?}")));
+    }
+    // The tangent of an edge where it touches the point `p` (either end of a closed edge).
+    let tangents_at = |e: &EdgeInfo, p: Point3<f64>| -> Vec<nalgebra::Vector3<f64>> {
+        let mut t = Vec::new();
+        if (e.start - p).norm() < tol {
+            t.push(e.start_tangent);
         }
-        // The tangent of an edge where it touches the point `p` (either end of a closed edge).
-        let tangents_at = |e: &EdgeInfo, p: Point3<f64>| -> Vec<nalgebra::Vector3<f64>> {
-            let mut t = Vec::new();
-            if (e.start - p).norm() < tol {
-                t.push(e.start_tangent);
-            }
-            if (e.end - p).norm() < tol {
-                t.push(e.end_tangent);
-            }
-            t
-        };
-        let cos = TANGENT_ANGLE.cos();
-        let mut chain = vec![edge];
-        let mut todo = vec![edge];
-        while let Some(cur) = todo.pop() {
-            let Some(e) = get(cur) else { continue };
-            for v in vertices.iter().filter(|v| v.edges.contains(&cur)) {
-                let mine = tangents_at(e, v.point);
-                for &other in &v.edges {
-                    if chain.contains(&other) {
-                        continue;
-                    }
-                    let Some(o) = get(other) else { continue };
-                    let tangent = tangents_at(o, v.point)
-                        .iter()
-                        .any(|t| mine.iter().any(|m| m.dot(t).abs() >= cos));
-                    if tangent {
-                        chain.push(other);
-                        todo.push(other);
-                    }
+        if (e.end - p).norm() < tol {
+            t.push(e.end_tangent);
+        }
+        t
+    };
+    let cos = TANGENT_ANGLE.cos();
+    let mut chain = vec![edge];
+    let mut todo = vec![edge];
+    while let Some(cur) = todo.pop() {
+        let Some(e) = get(cur) else { continue };
+        for v in vertices.iter().filter(|v| v.edges.contains(&cur)) {
+            let mine = tangents_at(e, v.point);
+            for &other in &v.edges {
+                if chain.contains(&other) {
+                    continue;
+                }
+                let Some(o) = get(other) else { continue };
+                let tangent = tangents_at(o, v.point)
+                    .iter()
+                    .any(|t| mine.iter().any(|m| m.dot(t).abs() >= cos));
+                if tangent {
+                    chain.push(other);
+                    todo.push(other);
                 }
             }
         }
-        chain.sort_by_key(|e| e.0);
-        Ok(chain)
     }
+    chain.sort_by_key(|e| e.0);
+    Ok(chain)
 }
 
 /// How far apart (radians) two edges' tangents may be at a shared vertex and still count as

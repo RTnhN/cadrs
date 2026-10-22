@@ -439,7 +439,7 @@ pub(crate) fn sweep_spines(faces: &[MergedFace], chains: &[Vec<Piece>], plane: P
         let (mut these, mut at) = sweep_spine(faces, chains, plane, &spine, frames, join, solid)?;
         if std::env::var("CADRS_SWEEP_DEBUG").is_ok() {
             for t in &these {
-                eprintln!("piece: volume {} faces {} solids {} check {:?}", crate::native::mass::body_mass(&t.body).volume, t.body.faces.len(), t.body.solids.len(), t.body.check());
+                eprintln!("piece: volume {} faces {} solids {} check {:?}", crate::native::mass::body_volume(&t.body), t.body.faces.len(), t.body.solids.len(), t.body.check());
                 for (fi, f) in t.body.faces.iter().enumerate() {
                     let q = crate::native::mass::face_integrals(&t.body, f, &V3::zeros());
                     let pcs: Vec<String> = f.loops.iter().flatten().map(|c| match &c.pc { Curve::Line { d, .. } => format!("L({:.2e},{:.2e})", d.x, d.y), Curve::Nurbs(n) => format!("N{}", n.cps.len()), _ => "?".into() }).collect();
@@ -498,7 +498,7 @@ pub(crate) fn sweep_spines(faces: &[MergedFace], chains: &[Vec<Piece>], plane: P
             compound(acc, p)
         };
         if std::env::var("CADRS_SWEEP_DEBUG").is_ok() {
-            eprintln!("join: volume {} faces {}", crate::native::mass::body_mass(&acc.body).volume, acc.body.faces.len());
+            eprintln!("join: volume {} faces {}", crate::native::mass::body_volume(&acc.body), acc.body.faces.len());
         }
     }
     // A closed path: the last piece's end cap meets the first piece's start cap.

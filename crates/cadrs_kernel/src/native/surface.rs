@@ -14,7 +14,9 @@
 //! The natural normal is Su × Sv; for the analytic surfaces it points away from the axis
 //! (outward from the material of a solid cylinder etc.).
 
-use std::sync::Arc;
+use std::cell::RefCell;
+use std::rc::Rc;
+use std::sync::{Arc, Weak};
 
 use super::curve::Curve;
 use super::math::*;
@@ -338,16 +340,8 @@ impl Surface {
             Some(h) => h,
             None => {
                 let at = |i: usize, j: usize| (u0 + (u1 - u0) * i as f64 / n as f64, v0 + (v1 - v0) * j as f64 / n as f64);
-                let d: Vec<Vec<f64>> = (0..=n)
-                    .map(|i| {
-                        (0..=n)
-                            .map(|j| {
-                                let (a, b) = at(i, j);
-                                (self.eval(a, b) - p).norm_squared()
-                            })
-                            .collect()
-                    })
-                    .collect();
+                let grid = self.grid_points(n, &at);
+                let d: Vec<Vec<f64>> = (0..=n).map(|i| grid[i * (n + 1)..(i + 1) * (n + 1)].iter().map(|g| (g - p).norm_squared()).collect()).collect();
                 for i in 0..=n {
                     for j in 0..=n {
                         let lowest = (i.saturating_sub(1)..=(i + 1).min(n)).all(|a| (j.saturating_sub(1)..=(j + 1).min(n)).all(|b| d[a][b] >= d[i][j]));
@@ -484,6 +478,45 @@ impl Surface {
             }
         }
         (u, v)
+    }
+
+    /// The points of [`Self::project_grid`]'s (n + 1)² grid, row by row (`at` gives a node's
+    /// parameters). They don't depend on the point projected, and a B-spline surface is
+    /// projected unhinted many times over (fitting p-curves, seeding intersections): its grids
+    /// are kept, per thread, for the last few surfaces (known by their `Arc`; the `Weak` held
+    /// keeps the allocation, so no other surface can come to share its address).
+    fn grid_points(&self, n: usize, at: &dyn Fn(usize, usize) -> (f64, f64)) -> Rc<[P3]> {
+        let compute = || -> Rc<[P3]> {
+            (0..=n)
+                .flat_map(|i| (0..=n).map(move |j| (i, j)))
+                .map(|(i, j)| {
+                    let (a, b) = at(i, j);
+                    self.eval(a, b)
+                })
+                .collect()
+        };
+        let Surface::Nurbs(ns) = self else { return compute() };
+        /// The grids kept per thread.
+        const KEPT: usize = 8;
+        type Kept = Vec<(Weak<NurbsSurface>, usize, Rc<[P3]>)>;
+        thread_local! {
+            static GRIDS: RefCell<(Kept, usize)> = const { RefCell::new((Vec::new(), 0)) };
+        }
+        let key = Arc::as_ptr(ns);
+        if let Some(g) = GRIDS.with_borrow(|(kept, _)| kept.iter().find(|(w, m, _)| *m == n && std::ptr::eq(w.as_ptr(), key)).map(|k| k.2.clone())) {
+            return g;
+        }
+        let g = compute();
+        GRIDS.with_borrow_mut(|(kept, next)| {
+            let entry = (Arc::downgrade(ns), n, g.clone());
+            if kept.len() < KEPT {
+                kept.push(entry);
+            } else {
+                kept[*next] = entry;
+                *next = (*next + 1) % KEPT;
+            }
+        });
+        g
     }
 
     fn clamp_u(&self, u: f64, u0: f64, u1: f64) -> f64 {

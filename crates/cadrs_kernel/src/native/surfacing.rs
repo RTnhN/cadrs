@@ -340,7 +340,7 @@ pub fn sew(k: &mut NativeKernel, bodies: &[BodyId], tol: f64) -> Result<OpResult
     if b.solids.is_empty() {
         return Err(invalid("The surfaces don't close"));
     }
-    let mut v = super::mass::body_mass(&b).volume;
+    let mut v = super::mass::body_volume(&b);
     if v < 0.0 {
         for f in &mut b.faces {
             Body::reverse_face(f);

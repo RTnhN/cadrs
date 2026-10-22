@@ -7,6 +7,9 @@ use super::math::*;
 use super::nurbs::NurbsCurve;
 use super::tol;
 
+/// How many pieces [`Curve::closest`] samples its range in before Newton.
+pub const CLOSEST_SAMPLES: usize = 64;
+
 /// An exact curve with its parametrization `t ↦ point`; an edge uses it over `[t0, t1]`.
 #[derive(Debug, Clone, PartialEq)]
 #[allow(missing_docs, reason = "the fields are the symbols of each variant's formula")]
@@ -138,6 +141,26 @@ impl Curve {
         }
     }
 
+    /// Whether [`Self::length`] over [t0, t1] exceeds `l`: decided by a chord polygon when that
+    /// alone exceeds `l` (with room for the integral's error; a polygon is never longer than
+    /// its arc), else by the length itself.
+    pub fn longer_than(&self, t0: f64, t1: f64, l: f64) -> bool {
+        if let Curve::Nurbs(_) | Curve::Ellipse { .. } = self {
+            const N: usize = 8;
+            let mut poly = 0.0;
+            let mut prev = self.point(t0);
+            for i in 1..=N {
+                let q = self.point(t0 + (t1 - t0) * i as f64 / N as f64);
+                poly += (q - prev).norm();
+                prev = q;
+            }
+            if poly > l * (1.0 + tol::REL_POINT) {
+                return true;
+            }
+        }
+        self.length(t0, t1) > l
+    }
+
     /// The parameter of the point of the curve nearest `p`, in [t0, t1] (periodic curves:
     /// unwrapped into the range when possible).
     pub fn closest(&self, p: &P3, t0: f64, t1: f64) -> f64 {
@@ -148,13 +171,34 @@ impl Curve {
                 let a = v.dot(y).atan2(v.dot(x));
                 clamp_periodic(a, t0, t1)
             }
+            _ => self.closest_from(p, t0, t1, &self.closest_samples(t0, t1)),
+        }
+    }
+
+    /// The samples [`Self::closest`] starts from over [t0, t1] (none for lines and circles):
+    /// to give [`Self::closest_from`] when projecting many points onto one range.
+    pub fn closest_samples(&self, t0: f64, t1: f64) -> [P3; CLOSEST_SAMPLES + 1] {
+        let mut out = [P3::origin(); CLOSEST_SAMPLES + 1];
+        if !matches!(self, Curve::Line { .. } | Curve::Circle { .. }) {
+            for (i, q) in out.iter_mut().enumerate() {
+                *q = self.point(t0 + (t1 - t0) * i as f64 / CLOSEST_SAMPLES as f64);
+            }
+        }
+        out
+    }
+
+    /// [`Self::closest`] with its samples over [t0, t1] taken already ([`Self::closest_samples`]
+    /// of the same range): the same answer.
+    pub fn closest_from(&self, p: &P3, t0: f64, t1: f64, samples: &[P3]) -> f64 {
+        match self {
+            Curve::Line { .. } | Curve::Circle { .. } => self.closest(p, t0, t1),
             _ => {
                 // Sample then Newton.
-                let n = 64;
+                let n = CLOSEST_SAMPLES;
                 let mut best = (f64::INFINITY, t0);
-                for i in 0..=n {
+                for (i, q) in samples.iter().enumerate().take(n + 1) {
                     let t = t0 + (t1 - t0) * i as f64 / n as f64;
-                    let d = (self.point(t) - p).norm_squared();
+                    let d = (q - p).norm_squared();
                     if d < best.0 {
                         best = (d, t);
                     }
@@ -329,6 +373,30 @@ pub(crate) fn conic_nurbs(c: P3, x: V3, y: V3, t0: f64, t1: f64) -> NurbsCurve {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Projections from samples taken once answer as [`Curve::closest`], and the chord bound
+    /// of [`Curve::longer_than`] as the length, on a wavy B-spline, an ellipse and a line.
+    #[test]
+    fn presampled_closest_and_length_bound_match() {
+        let poles: Vec<P3> = (0..9).map(|i| P3::new(i as f64, (i as f64 * 1.3).sin() * 2.0, (i as f64 * 0.7).cos())).collect();
+        let curves = [
+            Curve::nurbs(NurbsCurve::interpolate(&poles, &(0..9).map(|i| i as f64 / 8.0).collect::<Vec<_>>(), 3, None, None)),
+            Curve::Ellipse { c: P3::new(1.0, 2.0, 3.0), x: V3::x(), y: V3::z(), a: 5.0, b: 2.0 },
+            Curve::Line { o: P3::origin(), d: V3::new(0.6, 0.8, 0.0) },
+        ];
+        for c in &curves {
+            for (t0, t1) in [(0.0, 1.0), (0.2, 0.65), (0.0, 0.001)] {
+                let samples = c.closest_samples(t0, t1);
+                for k in 0..50 {
+                    let p = P3::new(-2.0 + 0.23 * k as f64, 3.0 - 0.17 * k as f64, (k as f64).sin());
+                    assert_eq!(c.closest(&p, t0, t1).to_bits(), c.closest_from(&p, t0, t1, &samples).to_bits());
+                }
+                for l in [1e-4, 1e-3, 0.5, 3.0, 50.0] {
+                    assert_eq!(c.longer_than(t0, t1, l), c.length(t0, t1) > l, "{c:?} {t0} {t1} {l}");
+                }
+            }
+        }
+    }
 
     #[test]
     fn circle_length_and_closest() {

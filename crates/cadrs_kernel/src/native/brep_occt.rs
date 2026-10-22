@@ -1707,7 +1707,7 @@ pub fn read_ordered(bytes: &[u8]) -> R<BrepRead> {
         for si in 0..x.solids.len() {
             let faces = x.solid_faces(si);
             let sub = super::kernel::subset(&x, &faces, true);
-            if super::mass::body_mass(&sub).volume < 0.0 {
+            if super::mass::body_volume(&sub) < 0.0 {
                 for f in faces {
                     Body::reverse_face(&mut x.faces[f]);
                 }
@@ -1791,7 +1791,7 @@ mod tests {
     fn reads_a_box() {
         let (b, w) = read(BOX.as_bytes()).unwrap();
         assert_eq!((b.verts.len(), b.edges.len(), b.faces.len(), b.solids.len()), (8, 12, 6, 1), "{w:?}");
-        let v = super::super::mass::body_mass(&b).volume;
+        let v = super::super::mass::body_volume(&b);
         assert!((v - 6.0).abs() < 1e-9, "{v}");
     }
 

@@ -15,11 +15,11 @@
 //! until the runs have taken `--min-time` (default 1 s; at most 200 runs), but no more once they
 //! have taken `--budget` (default 20 s), and prints a line per case: `RESULT <name> <category>
 //! ok|err <wall ms> <cpu ms> <runs> [message]`, for the timed lines' sum the median wall time and
-//! the mean CPU time. CPU time is the process's (all its threads, from
-//! `/proc/self/task/*/schedstat`, less what reading it costs), so under load it stays comparable
-//! while the wall time doesn't; the kernel updates it at each tick (1 ms) for a running thread,
-//! hence the mean over many runs of a fast case. Threads: rayon's pool, `RAYON_NUM_THREADS=1`
-//! for one.
+//! the mean CPU time (for a case that fails, the failing run's times up to its error). CPU time
+//! is the process's (all its threads, from `/proc/self/task/*/schedstat`, less what reading it
+//! costs), so under load it stays comparable while the wall time doesn't; the kernel updates it
+//! at each tick (1 ms) for a running thread, hence the mean over many runs of a fast case.
+//! Threads: rayon's pool, `RAYON_NUM_THREADS=1` for one.
 //!
 //! **prep** resolves what OCCT can't read: `v = smb file[#n]` (an SMLib model) becomes
 //! `v = stepread <step dir>/….step` (the model written as STEP), and `r = smbfillet v rad
@@ -452,15 +452,21 @@ fn pick_edges(body: &cadrs_kernel::native::topo::Body, pts: &[P3]) -> R<Vec<Edge
 }
 
 /// One run of a case: the timed lines' wall and CPU time.
-fn run_once(c: &Case, overhead: u64) -> R<(Duration, u64)> {
+/// One run of a case: the timed lines' wall and CPU time, up to and including a line that fails,
+/// and that line's error.
+fn run_once(c: &Case, overhead: u64) -> (Duration, u64, Option<String>) {
     let mut ctx = Ctx::new(overhead);
     for l in &c.lines {
-        let v = ctx.exec(l).map_err(|m| format!("{}: {m}", l.cmd))?;
-        if let (Some(name), Some(v)) = (&l.out, v) {
-            ctx.vars.insert(name.clone(), v);
+        match ctx.exec(l) {
+            Ok(v) => {
+                if let (Some(name), Some(v)) = (&l.out, v) {
+                    ctx.vars.insert(name.clone(), v);
+                }
+            }
+            Err(m) => return (ctx.wall, ctx.cpu, Some(format!("{}: {m}", l.cmd))),
         }
     }
-    Ok((ctx.wall, ctx.cpu))
+    (ctx.wall, ctx.cpu, None)
 }
 
 fn median(v: &mut [f64]) -> f64 {
@@ -484,19 +490,26 @@ fn run(cases: &[Case], only: Option<&str>, reps: usize, budget: f64, min_time: f
                 break;
             }
             match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| run_once(c, overhead))) {
-                Ok(Ok((w, cpu))) => {
+                Ok((w, cpu, failed)) => {
                     walls.push(w.as_secs_f64() * 1e3);
                     cpus.push(cpu as f64 * 1e-6);
+                    err = failed;
                 }
-                Ok(Err(m)) => err = Some(m),
-                Err(_) => err = Some("panic".into()),
+                Err(_) => {
+                    (walls, cpus) = (Vec::new(), Vec::new());
+                    err = Some("panic".into());
+                }
             }
             if err.is_some() {
                 break;
             }
         }
         match err {
-            Some(m) => println!("RESULT\t{}\t{}\terr\t0\t0\t0\t{}", c.name, c.category, m.replace(['\t', '\n'], " ")),
+            // The time to the error, of the one run that failed (0 after a panic).
+            Some(m) => {
+                let (w, cpu) = (walls.last().copied().unwrap_or(0.0), cpus.last().copied().unwrap_or(0.0));
+                println!("RESULT\t{}\t{}\terr\t{w:.3}\t{cpu:.3}\t1\t{}", c.name, c.category, m.replace(['\t', '\n'], " "));
+            }
             None => println!("RESULT\t{}\t{}\tok\t{:.3}\t{:.3}\t{}", c.name, c.category, median(&mut walls), cpus.iter().sum::<f64>() / cpus.len() as f64, walls.len()),
         }
     }

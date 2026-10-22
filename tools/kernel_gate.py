@@ -41,7 +41,9 @@ and flagged slow above --slow seconds (60). With a baseline (--baseline FILE, el
 SLOW-REGRESSION when it takes more than 3 times and more than 5 s longer than its baseline time
 scaled by the run's load: the median ratio of this run's durations to the baseline's over the
 cases of at least 1 s, when that is above 1. (libtest reports wall time only, per test; the tests share one process,
-so a test's CPU time isn't measurable, and the median ratio stands in for the load.)
+so a test's CPU time isn't measurable, and the median ratio stands in for the load.) A case so
+marked is run again alone, and stays a SLOW-REGRESSION only when it is slow alone too: a short
+case can wait seconds for rayon's pool while the other tests' long parallel jobs hold it.
 --write-baseline FILE writes this run's durations as the next baseline when the gate passes;
 --make-baseline RESULTS FILE writes one from an earlier results.json; the baseline records the
 commit measured (the results' own, else --commit: one is required).
@@ -356,6 +358,26 @@ def slow_regressions(tests, base):
     return load
 
 
+def confirm_slow(tests, exes, crate, env):
+    """Runs each case marked slow again on its own (one test thread): a case slow only because
+    the run's other tests held rayon's pool (a short case waits behind their long parallel jobs)
+    is cleared, with both times kept (t["slow_rerun"]). One that is slow alone stays marked."""
+    for t in tests:
+        sr = t.get("slow_regression")
+        if not sr or t["binary"] not in exes:
+            continue
+        t0 = time.time()
+        try:
+            subprocess.run([exes[t["binary"]], "--exact", t["name"], "--include-ignored", "--test-threads=1"], cwd=crate, env=env, capture_output=True, timeout=max(60.0, 2 * t["duration"]))
+        except subprocess.TimeoutExpired:
+            pass
+        alone = time.time() - t0
+        t["slow_rerun"] = round(alone, 3)
+        if not (alone > SLOW_RATIO * sr["expected"] and alone - sr["expected"] > SLOW_MARGIN):
+            log("  %s %s: %.1f s in the run, %.1f s alone: not a slow regression" % (t["binary"], t["name"], t["duration"], alone))
+            t["slow_cleared"] = t.pop("slow_regression")
+
+
 def rate_of(c):
     good = c["pass"] + c["STALE"] + c["STALE-IGNORE"]
     return "%.1f" % (100.0 * good / c["run"]) if c["run"] else "-"
@@ -398,6 +420,7 @@ def summary(res):
         for t in bad:
             out.append("  %s %s (%.1f s)%s" % (t["binary"], t["name"], t["duration"], ": " + t["message"] if t.get("message") and cls != "STALE" else ""))
     regs = [t for t in tests if t.get("slow_regression")]
+    cleared = [t for t in tests if t.get("slow_cleared")]
     out.append("")
     if res.get("baseline"):
         out.append("SLOW-REGRESSION (%d)%s  [baseline %s, this run's load ratio %.2f]" % (len(regs), ":" if regs else "", res["baseline"], res.get("load_ratio", 1.0)))
@@ -405,7 +428,9 @@ def summary(res):
         out.append("SLOW-REGRESSION: no baseline")
     for t in sorted(regs, key=lambda t: -t["duration"]):
         sr = t["slow_regression"]
-        out.append("  %s %s: %.1f s, baseline %.1f s (%.1f s at this run's load)" % (t["binary"], t["name"], t["duration"], sr["baseline"], sr["expected"]))
+        out.append("  %s %s: %.1f s, baseline %.1f s (%.1f s at this run's load); %.1f s alone" % (t["binary"], t["name"], t["duration"], sr["baseline"], sr["expected"], t.get("slow_rerun", float("nan"))))
+    if cleared:
+        out.append("  (slow in the run but not alone, so not counted: %s)" % ", ".join("%s %s %.1f s / %.1f s alone" % (t["binary"], t["name"], t["duration"], t["slow_rerun"]) for t in cleared))
     for c in res.get("checks", []):
         out.append("")
         out.append("CHECK %s: %s" % ("ok" if c["ok"] else "FAILED", c["name"]))
@@ -533,6 +558,7 @@ def main():
         base = json.load(open(base_path))
         res["baseline"] = "%s (%s)" % (base_path, base.get("commit") or "?")
         res["load_ratio"] = round(slow_regressions(res["tests"], base["durations"]), 3)
+        confirm_slow(res["tests"], exes, crate, env)
     elif a.baseline:
         log("no baseline at %s: no SLOW-REGRESSION check" % a.baseline)
     json.dump(res, open(path, "w"), indent=0)

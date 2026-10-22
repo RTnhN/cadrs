@@ -377,8 +377,8 @@ fn glue_shared(a: &Body, b: &Body) -> Option<Body> {
 /// Whether `g`, `a` and `b` glued, holds their volumes together (they only touched: a glue
 /// across an overlap would count it twice).
 fn additive(g: &Body, a: &Body, b: &Body) -> bool {
-    let (va, vb) = (super::mass::body_mass(a).volume, super::mass::body_mass(b).volume);
-    (super::mass::body_mass(g).volume - va - vb).abs() <= tol::POINT * (va.abs() + vb.abs())
+    let (va, vb) = (super::mass::body_volume(a), super::mass::body_volume(b));
+    (super::mass::body_volume(g) - va - vb).abs() <= tol::POINT * (va.abs() + vb.abs())
 }
 
 /// `a` less `b`, `None` when nothing is left.

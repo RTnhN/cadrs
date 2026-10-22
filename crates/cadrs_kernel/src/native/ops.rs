@@ -225,7 +225,7 @@ pub fn face_tool(k: &mut NativeKernel, body: BodyId, faces: &[FaceId], source: u
     b.faces.extend(cap_faces);
     b.shells = vec![Shell { faces: (0..b.faces.len()).collect(), closed: true }];
     b.solids = vec![Solid { shells: vec![0] }];
-    let mut v = super::mass::body_mass(&b).volume;
+    let mut v = super::mass::body_volume(&b);
     if v < 0.0 {
         for f in &mut b.faces {
             Body::reverse_face(f);

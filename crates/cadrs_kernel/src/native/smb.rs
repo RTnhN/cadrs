@@ -1114,7 +1114,7 @@ mod tests {
         let b = read_brep(&fixture("offset/OffsetBoxSphOnCorner.smb")).unwrap();
         solid(&b, "OffsetBoxSphOnCorner");
         // SMLib's (its props of the file): volume 1197773.92576, the face 12187.311.
-        let v = super::super::mass::body_mass(&b.body).volume;
+        let v = super::super::mass::body_volume(&b.body);
         assert!((v - 1197773.92576).abs() < 1e-6 * v, "volume {v}");
         let big = (0..b.body.faces.len()).filter(|&f| matches!(b.body.faces[f].surf, Surface::Nurbs(_))).map(|f| super::super::mass::face_area(&b.body, f).0).fold(0.0, f64::max);
         assert!((big - 12187.311).abs() < 1e-4 * big, "the corner face's area {big}");

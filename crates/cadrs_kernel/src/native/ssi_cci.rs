@@ -5,6 +5,8 @@
 //! short counts), and pairs where each piece lies on the other curve are overlaps, reported by
 //! where the overlap begins and ends.
 
+use std::collections::HashMap;
+
 use super::curve::Curve;
 use super::math::*;
 use super::tol;
@@ -41,7 +43,9 @@ fn halves(c: &Curve, p: &Piece) -> [Piece; 2] {
 
 /// The nearest points of `a` on [a0, a1] and `b` on [b0, b1] from (s, t): Newton on the squared
 /// distance, clamped to the ranges (an end of one curve, then the nearest point of the other).
-fn nearest(a: &Curve, (a0, a1): (f64, f64), b: &Curve, (b0, b1): (f64, f64), mut s: f64, mut t: f64) -> (f64, f64) {
+/// (`sa`, `sb`: the curves' [`Curve::closest_samples`] over those ranges, taken once.)
+#[allow(clippy::too_many_arguments)]
+fn nearest(a: &Curve, (a0, a1): (f64, f64), b: &Curve, (b0, b1): (f64, f64), mut s: f64, mut t: f64, sa: &[P3], sb: &[P3]) -> (f64, f64) {
     for _ in 0..60 {
         let (p, pa, paa) = a.d2(s);
         let (q, qb, qbb) = b.d2(t);
@@ -52,9 +56,9 @@ fn nearest(a: &Curve, (a0, a1): (f64, f64), b: &Curve, (b0, b1): (f64, f64), mut
         let (ns, nt) = ((s + ds).clamp(a0, a1), (t + dt).clamp(b0, b1));
         // Clamped on one curve's end: the other's nearest point to it.
         let (ns, nt) = if ns != s + ds && nt == t + dt {
-            (ns, b.closest(&a.point(ns), b0, b1))
+            (ns, b.closest_from(&a.point(ns), b0, b1, sb))
         } else if nt != t + dt && ns == s + ds {
-            (a.closest(&b.point(nt), a0, a1), nt)
+            (a.closest_from(&b.point(nt), a0, a1, sa), nt)
         } else {
             (ns, nt)
         };
@@ -68,11 +72,19 @@ fn nearest(a: &Curve, (a0, a1): (f64, f64), b: &Curve, (b0, b1): (f64, f64), mut
     (s, t)
 }
 
-/// Whether every sample of the piece of `c` lies within `tol` of `o` over its range.
-fn lies_on(c: &Curve, p: &Piece, o: &Curve, (o0, o1): (f64, f64), tol: f64) -> bool {
+/// Whether every sample of the piece of `c` lies within `tol` of `o` over its range. `memo`
+/// keeps each sample's answer by its parameter: a piece is tested against every piece of the
+/// other curve its box meets, and halving a piece reuses three of its five samples, so most
+/// samples recur (and each costs a closest-point search over the whole of `o`).
+/// (`samples`: `o`'s [`Curve::closest_samples`] over its range, taken once.)
+#[allow(clippy::too_many_arguments)]
+fn lies_on(c: &Curve, p: &Piece, o: &Curve, (o0, o1): (f64, f64), tol: f64, memo: &mut HashMap<u64, bool>, samples: &[P3]) -> bool {
     (0..=4).all(|i| {
-        let q = c.point(p.t0 + (p.t1 - p.t0) * i as f64 / 4.0);
-        (o.point(o.closest(&q, o0, o1)) - q).norm() <= tol
+        let t = p.t0 + (p.t1 - p.t0) * i as f64 / 4.0;
+        *memo.entry(t.to_bits()).or_insert_with(|| {
+            let q = c.point(t);
+            (o.point(o.closest_from(&q, o0, o1, samples)) - q).norm() <= tol
+        })
     })
 }
 
@@ -96,18 +108,20 @@ pub fn curve_curve(a: &Curve, a0: f64, a1: f64, b: &Curve, b0: f64, b1: f64, tol
     let mut out: Vec<(f64, f64)> = Vec::new();
     let mut overlap = false;
     let mut budget = 200_000usize;
+    let (mut memo_a, mut memo_b) = (HashMap::new(), HashMap::new());
+    let (samples_a, samples_b) = (a.closest_samples(ra.0, ra.1), b.closest_samples(rb.0, rb.1));
     while let Some((x, y)) = stack.pop() {
         if !x.bb.grow(tol).overlaps(&y.bb) {
             continue;
         }
         budget = budget.saturating_sub(1);
         // An overlap: each piece on the other curve.
-        if lies_on(a, &x, b, rb, tol) && lies_on(b, &y, a, ra, tol) {
+        if lies_on(a, &x, b, rb, tol, &mut memo_a, &samples_b) && lies_on(b, &y, a, ra, tol, &mut memo_b, &samples_a) {
             overlap = true;
             continue;
         }
         if (x.size <= small && y.size <= small) || budget == 0 {
-            let (s, t) = nearest(a, ra, b, rb, 0.5 * (x.t0 + x.t1), 0.5 * (y.t0 + y.t1));
+            let (s, t) = nearest(a, ra, b, rb, 0.5 * (x.t0 + x.t1), 0.5 * (y.t0 + y.t1), &samples_a, &samples_b);
             // (A gap of exactly the tolerance counts: the rounding of its computation aside.)
             if (a.point(s) - b.point(t)).norm() <= tol * (1.0 + tol::REL) {
                 out.push((s, t));
@@ -128,27 +142,28 @@ pub fn curve_curve(a: &Curve, a0: f64, a1: f64, b: &Curve, b0: f64, b1: f64, tol
         // The overlaps' ends: each curve's ends lying on the other.
         for ta in [ra.0, ra.1] {
             let p = a.point(ta);
-            let tb = b.closest(&p, rb.0, rb.1);
+            let tb = b.closest_from(&p, rb.0, rb.1, &samples_b);
             if (b.point(tb) - p).norm() <= tol {
                 out.push((ta, tb));
             }
         }
         for tb in [rb.0, rb.1] {
             let q = b.point(tb);
-            let ta = a.closest(&q, ra.0, ra.1);
+            let ta = a.closest_from(&q, ra.0, ra.1, &samples_a);
             if (a.point(ta) - q).norm() <= tol {
                 out.push((ta, tb));
             }
         }
     }
     // One point per crossing (many small pairs solve to it).
-    let mut uniq: Vec<(f64, f64)> = Vec::new();
+    // (Each kept point's position with it: a near-overlap leaves tens of thousands to sift.)
+    let mut uniq: Vec<(f64, f64, P3)> = Vec::new();
     for (s, t) in out {
         let p = a.point(s);
-        if !uniq.iter().any(|&(s2, _)| (a.point(s2) - p).norm() <= tol) {
-            uniq.push((s, t));
+        if !uniq.iter().any(|(_, _, q)| (q - p).norm() <= tol) {
+            uniq.push((s, t, p));
         }
     }
     uniq.sort_by(|x, y| x.0.total_cmp(&y.0));
-    uniq
+    uniq.into_iter().map(|(s, t, _)| (s, t)).collect()
 }

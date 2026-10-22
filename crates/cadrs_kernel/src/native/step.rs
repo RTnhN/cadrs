@@ -1981,7 +1981,7 @@ fn build_shapes(m: &mut Model, shapes: &[(u64, u64, Affine)], warnings: &mut Vec
         for si in 0..b.solids.len() {
             let faces = b.solid_faces(si);
             let sub = super::kernel::subset(&b, &faces, true);
-            if super::mass::body_mass(&sub).volume < 0.0 {
+            if super::mass::body_volume(&sub) < 0.0 {
                 for f in faces {
                     Body::reverse_face(&mut b.faces[f]);
                 }
@@ -2689,7 +2689,7 @@ END-ISO-10303-21;
         assert_eq!(m.parts.len(), 1);
         let b = &m.parts[0].body;
         assert_eq!(b.solids.len(), 1, "{:?}", m.warnings);
-        let v = super::super::mass::body_mass(b).volume;
+        let v = super::super::mass::body_volume(b);
         assert!((v - 1.0 / 6.0).abs() < 1e-9, "{v}");
     }
 

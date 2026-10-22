@@ -436,7 +436,7 @@ pub fn face_slab(b: &Body, fi: usize, d: f64) -> Result<Body> {
     if !issues.is_empty() || body.solids.is_empty() {
         return Err(KernelError::InvalidResult { op: "slab", why: format!("the face's slab isn't valid: {}", issues.first().map_or("no solid", |s| s.as_str())) });
     }
-    let volume = crate::native::mass::body_mass(&body).volume;
+    let volume = crate::native::mass::body_volume(&body);
     if volume <= 0.0 {
         return Err(KernelError::InvalidResult { op: "slab", why: "the face's slab has no volume".into() });
     }

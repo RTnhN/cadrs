@@ -316,7 +316,7 @@ fn combine_all(mut acc: Body, mut todo: Vec<(Body, String)>, op: BoolOp) -> Resu
                 Ok(r) => {
                     acc = r;
                     if std::env::var("CADRS_SHELL_DEBUG").is_ok() {
-                        eprintln!("after {what}: {:.6} solids {}", crate::native::mass::body_mass(&acc).volume, acc.solids.len());
+                        eprintln!("after {what}: {:.6} solids {}", crate::native::mass::body_volume(&acc), acc.solids.len());
                     }
                 }
                 Err(e) => {
@@ -357,7 +357,7 @@ pub fn shell(k: &mut NativeKernel, body: BodyId, spec: &ShellSpec) -> Result<OpR
         return Err(too_thick());
     }
     let cur = Tracked::of(b.clone());
-    let v0 = crate::native::mass::body_mass(&b).volume;
+    let v0 = crate::native::mass::body_volume(&b);
     let result = if !spec.outward {
         // The cavity: kept faces moved in by t, removed faces moved out past the body, or,
         // failing that (a spline wall's offset doesn't reach that far), where they are (the
@@ -370,7 +370,7 @@ pub fn shell(k: &mut NativeKernel, body: BodyId, spec: &ShellSpec) -> Result<OpR
         // shares that face with the body, which the boolean may not settle).
         let concave = (0..b.edges.len()).any(|e| !b.edges[e].degenerate && convex(&b, e) == Some(false));
         let sharp = |x: &Vec<f64>| super::sharp::offset_sharp(&b, x).and_then(|c| {
-            if crate::native::mass::body_mass(&c).volume > 0.0 { Ok(c) } else { Err(KernelError::TooLarge { op: "shell", why: "the inset is empty".into() }) }
+            if crate::native::mass::body_volume(&c) > 0.0 { Ok(c) } else { Err(KernelError::TooLarge { op: "shell", why: "the inset is empty".into() }) }
         });
         let regions = || cavity_by_regions(&b, &remove, t);
         let ways: Vec<Box<dyn Fn() -> Result<Body>>> = if (concave || crossing) && !spec.sharp {
@@ -390,7 +390,7 @@ pub fn shell(k: &mut NativeKernel, body: BodyId, spec: &ShellSpec) -> Result<OpR
                     }
                     out.body.solids[0].shells.sort();
                 }
-                let v1 = crate::native::mass::body_mass(&out.body).volume;
+                let v1 = crate::native::mass::body_volume(&out.body);
                 if v1 <= tol::ROUNDOFF || v1 > v0 + tol::ROUNDOFF {
                     return Err(KernelError::InvalidResult { op: "shell", why: "the shell came out wrong".into() });
                 }
@@ -480,7 +480,7 @@ pub fn shell(k: &mut NativeKernel, body: BodyId, spec: &ShellSpec) -> Result<OpR
             *s = f;
         }
     }
-    let v1 = crate::native::mass::body_mass(&result.body).volume;
+    let v1 = crate::native::mass::body_volume(&result.body);
     if std::env::var("CADRS_SHELL_DEBUG").is_ok() {
         eprintln!("shell: body {v0} result {v1} solids {} faces {}", result.body.solids.len(), result.body.faces.len());
     }

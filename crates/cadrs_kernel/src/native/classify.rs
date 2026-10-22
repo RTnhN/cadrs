@@ -63,6 +63,70 @@ pub fn in_face(polys: &[Vec<P2>], surf: &Surface, uv: P2, tol: f64) -> InFace {
     if inside { InFace::Inside } else { InFace::Outside }
 }
 
+/// A face's polygons with their boxes, for [`in_face`] on many points: in (u, v) and in the
+/// surface's metric (as [`in_face`] scales them), each polygon's and all of them together.
+pub struct FacePolys<'a> {
+    polys: &'a [Vec<P2>],
+    /// Per polygon: its (u, v) box and its scaled box, as (min x, max x, min y, max y).
+    boxes: Vec<([f64; 4], [f64; 4])>,
+    range: ((f64, f64), (f64, f64)),
+}
+
+impl<'a> FacePolys<'a> {
+    pub fn new(polys: &'a [Vec<P2>], surf: &Surface) -> Self {
+        let (mu, mv) = surf.metric();
+        let boxes = polys
+            .iter()
+            .map(|p| {
+                let mut b = [f64::INFINITY, f64::NEG_INFINITY, f64::INFINITY, f64::NEG_INFINITY];
+                let mut m = b;
+                for q in p {
+                    b = [b[0].min(q.x), b[1].max(q.x), b[2].min(q.y), b[3].max(q.y)];
+                    let (x, y) = (q.x * mu, q.y * mv);
+                    m = [m[0].min(x), m[1].max(x), m[2].min(y), m[3].max(y)];
+                }
+                (b, m)
+            })
+            .collect();
+        FacePolys { polys, boxes, range: uv_range(polys) }
+    }
+
+    /// [`periodic_candidates`] for these polygons.
+    pub fn candidates(&self, s: &Surface, u: f64, v: f64) -> Vec<P2> {
+        periodic_candidates_in(s, u, v, self.range)
+    }
+
+    /// [`in_face`], the same answer: a polygon whose boxes the point lies well outside (in the
+    /// metric beyond `tol` of every side, and in (u, v) outside, where the crossings to its right
+    /// are even) can neither hold it on its boundary nor flip its parity, and is skipped.
+    pub fn in_face(&self, surf: &Surface, uv: P2, tol: f64) -> InFace {
+        let (mu, mv) = surf.metric();
+        let q = P2::new(uv.x * mu, uv.y * mv);
+        let mut inside = false;
+        for (p, (b, m)) in self.polys.iter().zip(&self.boxes) {
+            let gm = tol * (1.0 + tol::REL) + tol::REL_FINE * (1.0 + q.x.abs().max(q.y.abs()) + m[1].abs().max(m[0].abs()).max(m[3].abs()).max(m[2].abs()));
+            let gb = tol::REL_FINE * (1.0 + uv.x.abs().max(uv.y.abs()) + b[1].abs().max(b[0].abs()).max(b[3].abs()).max(b[2].abs()));
+            let far_m = q.x < m[0] - gm || q.x > m[1] + gm || q.y < m[2] - gm || q.y > m[3] + gm;
+            let far_b = uv.x < b[0] - gb || uv.x > b[1] + gb || uv.y < b[2] - gb || uv.y > b[3] + gb;
+            if far_m && far_b {
+                continue;
+            }
+            let n = p.len();
+            for i in 0..n {
+                let (a, b) = (p[i], p[(i + 1) % n]);
+                let (a, b) = (P2::new(a.x * mu, a.y * mv), P2::new(b.x * mu, b.y * mv));
+                if seg_dist2(&q, &a, &b) < tol {
+                    return InFace::Boundary;
+                }
+            }
+            if point_in_polygon(&uv, p) {
+                inside = !inside;
+            }
+        }
+        if inside { InFace::Inside } else { InFace::Outside }
+    }
+}
+
 /// Parameters t where the line o + t·d meets the surface (all of them, any sign), with the
 /// (u, v) there.
 pub fn ray_surface(s: &Surface, o: &P3, d: &V3, tmin: f64, tmax: f64) -> Vec<(f64, f64, f64)> {
@@ -282,6 +346,11 @@ pub fn ray_hits(body: &Body, polys: &[Vec<Vec<P2>>], o: &P3, d: &V3) -> Vec<(f64
 
 /// The (u, v) shifted by whole periods into the face's uv box.
 pub fn periodic_candidates(s: &Surface, u: f64, v: f64, polys: &[Vec<P2>]) -> Vec<P2> {
+    periodic_candidates_in(s, u, v, uv_range(polys))
+}
+
+/// The (u, v) ranges the polygons span.
+fn uv_range(polys: &[Vec<P2>]) -> ((f64, f64), (f64, f64)) {
     let mut ub = (f64::INFINITY, f64::NEG_INFINITY);
     let mut vb = (f64::INFINITY, f64::NEG_INFINITY);
     for p in polys {
@@ -290,6 +359,11 @@ pub fn periodic_candidates(s: &Surface, u: f64, v: f64, polys: &[Vec<P2>]) -> Ve
             vb = (vb.0.min(q.y), vb.1.max(q.y));
         }
     }
+    (ub, vb)
+}
+
+/// [`periodic_candidates`] with the polygons' (u, v) ranges known.
+fn periodic_candidates_in(s: &Surface, u: f64, v: f64, (ub, vb): ((f64, f64), (f64, f64))) -> Vec<P2> {
     let us: Vec<f64> = if s.u_periodic() {
         let mut v = Vec::new();
         for k in -2..=2 {
@@ -347,7 +421,7 @@ pub fn parity_inside(body: &Body, polys: &[Vec<Vec<P2>>], p: &P3) -> bool {
 /// the projections.
 pub struct Classifier<'a> {
     body: &'a Body,
-    polys: &'a [Vec<Vec<P2>>],
+    polys: Vec<FacePolys<'a>>,
     boxes: Vec<Bbox>,
     bbox: Bbox,
     starts: Vec<Option<(f64, f64)>>,
@@ -372,6 +446,7 @@ impl<'a> Classifier<'a> {
                 (!uv.is_empty()).then(|| (uv.center().x, uv.center().y))
             })
             .collect();
+        let polys = polys.iter().zip(&body.faces).map(|(p, f)| FacePolys::new(p, &f.surf)).collect();
         Classifier { body, polys, boxes, bbox, starts }
     }
 
@@ -397,8 +472,8 @@ impl<'a> Classifier<'a> {
             }
             let (u, v) = self.project(fi, p, tol);
             if (f.surf.eval(u, v) - p).norm() <= tol {
-                for uv in periodic_candidates(&f.surf, u, v, &self.polys[fi]) {
-                    if in_face(&self.polys[fi], &f.surf, uv, tol) != InFace::Outside {
+                for uv in self.polys[fi].candidates(&f.surf, u, v) {
+                    if self.polys[fi].in_face(&f.surf, uv, tol) != InFace::Outside {
                         return crate::PointClass::OnBoundary;
                     }
                 }
@@ -450,8 +525,8 @@ impl<'a> Classifier<'a> {
                         bad = true;
                         break 'faces;
                     }
-                    for uv in periodic_candidates(&f.surf, u, v, &self.polys[fi]) {
-                        match in_face(&self.polys[fi], &f.surf, uv, 1e-7) {
+                    for uv in self.polys[fi].candidates(&f.surf, u, v) {
+                        match self.polys[fi].in_face(&f.surf, uv, 1e-7) {
                             InFace::Inside => {
                                 count += 1;
                                 break;
@@ -524,4 +599,47 @@ fn ray_meets_box(o: &P3, d: &V3, b: &Bbox) -> bool {
         }
     }
     true
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The boxed polygons answer as [`in_face`] does, on points inside, outside, near and on the
+    /// boundary of an outer polygon with a hole, on a plane and a (scaled) cylinder.
+    #[test]
+    fn boxed_polygons_match_in_face() {
+        let outer: Vec<P2> = (0..40).map(|i| {
+            let a = i as f64 * TAU / 40.0;
+            P2::new(2.0 + 1.5 * a.cos() * (1.0 + 0.3 * (3.0 * a).sin()), 0.5 + a.sin())
+        }).collect();
+        let hole: Vec<P2> = (0..12).map(|i| {
+            let a = -(i as f64) * TAU / 12.0;
+            P2::new(2.2 + 0.3 * a.cos(), 0.6 + 0.2 * a.sin())
+        }).collect();
+        let polys = vec![outer, hole];
+        let f = Frame::world();
+        for surf in [Surface::Plane { f }, Surface::Cylinder { f, r: 7.0 }] {
+            let fp = FacePolys::new(&polys, &surf);
+            let mut seed = 12345u64;
+            let mut rnd = || {
+                seed = seed.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+                (seed >> 11) as f64 / (1u64 << 53) as f64
+            };
+            let mut pts: Vec<P2> = (0..4000).map(|_| P2::new(-1.0 + 6.0 * rnd(), -2.0 + 5.0 * rnd())).collect();
+            // On and just off the polygons' corners and sides.
+            for p in &polys {
+                for w in p.windows(2) {
+                    let m = P2::from((w[0].coords + w[1].coords) * 0.5);
+                    pts.extend([w[0], m, m + V2::new(1e-8, 0.0), m + V2::new(0.0, -3e-8)]);
+                }
+            }
+            for uv in pts {
+                for tol in [1e-7, 1e-3] {
+                    assert_eq!(fp.in_face(&surf, uv, tol), in_face(&polys, &surf, uv, tol), "{uv:?} tol {tol}");
+                }
+                assert_eq!(fp.candidates(&surf, uv.x, uv.y), periodic_candidates(&surf, uv.x, uv.y, &polys));
+            }
+        }
+    }
 }

@@ -1111,7 +1111,7 @@ pub fn replace_faces(k: &mut NativeKernel, body: BodyId, faces: &[FaceReplacemen
     if let Some(e) = errs.first() {
         return Err(KernelError::InvalidResult { op: "replace faces", why: format!("the replaced faces don't close: {e}") });
     }
-    if super::mass::body_mass(&out).volume <= 0.0 {
+    if super::mass::body_volume(&out) <= 0.0 {
         return Err(KernelError::InvalidResult { op: "replace faces", why: "the replaced faces turn the body inside out".into() });
     }
     let nf = out.faces.len();
@@ -1166,7 +1166,7 @@ pub fn move_faces(k: &mut NativeKernel, body: BodyId, faces: &[FaceId], motion: 
     if !out.check_with(super::topo::CheckLevel::Full).is_empty() {
         return Err(too_far("a face would run into another face"));
     }
-    if super::mass::body_mass(&out).volume <= 0.0 {
+    if super::mass::body_volume(&out) <= 0.0 {
         return Err(too_far("the body would turn inside out"));
     }
     let nf = out.faces.len();

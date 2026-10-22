@@ -882,7 +882,7 @@ fn orient_shells(b: &mut Body) {
             }
             let faces = b.shells[si].faces.clone();
             let sub = super::kernel::subset(b, &faces, true);
-            let v = super::mass::body_mass(&sub).volume;
+            let v = super::mass::body_volume(&sub);
             // The outer shell encloses a positive volume, a void a negative one.
             if (k == 0 && v < 0.0) || (k > 0 && v > 0.0) {
                 for f in faces {
@@ -917,7 +917,7 @@ mod tests {
     }
 
     fn volume(b: &Body) -> f64 {
-        crate::native::mass::body_mass(b).volume
+        crate::native::mass::body_volume(b)
     }
 
     /// A cylinder (a whole turn) split by angle, split closed, made revolution and B-spline:

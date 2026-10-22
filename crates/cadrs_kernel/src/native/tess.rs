@@ -30,6 +30,44 @@ use super::topo::{co_range, Body, Coedge, Face};
 use crate::{BodyId, EdgeId, FaceId, KernelError, Result, Tessellation, TriMesh, VertexId};
 use super::tol;
 
+/// A fast hasher (FxHash's mix) for the mesher's sets of vertex indices and coordinates, probed
+/// for every triangle in every refinement round: SipHash's guard against chosen keys isn't
+/// needed there, and the sets are only probed, never iterated, so no order depends on it.
+#[derive(Default, Clone, Copy)]
+struct FxHasher(u64);
+
+impl FxHasher {
+    #[inline]
+    fn add(&mut self, w: u64) {
+        self.0 = (self.0.rotate_left(5) ^ w).wrapping_mul(0x517c_c1b7_2722_0a95);
+    }
+}
+
+impl std::hash::Hasher for FxHasher {
+    fn finish(&self) -> u64 {
+        self.0
+    }
+    fn write(&mut self, bytes: &[u8]) {
+        for chunk in bytes.chunks(8) {
+            let mut b = [0u8; 8];
+            b[..chunk.len()].copy_from_slice(chunk);
+            self.add(u64::from_le_bytes(b));
+        }
+    }
+    fn write_u64(&mut self, n: u64) {
+        self.add(n);
+    }
+    fn write_usize(&mut self, n: usize) {
+        self.add(n as u64);
+    }
+}
+
+type FastSet<T> = HashSet<T, std::hash::BuildHasherDefault<FxHasher>>;
+
+/// A triangle the refinement still has to check: its corners' ids sorted, its index in the
+/// triangulation, its corners, and which of its sides are on the boundary.
+type Unchecked = ([usize; 3], usize, [Vx; 3], [bool; 3]);
+
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct FaceMesh {
     pub positions: Vec<P3>,
@@ -781,7 +819,7 @@ fn pair(a: usize, b: usize) -> (usize, usize) {
 /// Which inner faces of the triangulation are inside the face: by parity of the boundary
 /// segments crossed from the hull (`flip` holds the segments that bound; a slit, crossed both
 /// ways, doesn't).
-fn classify(cdt: &Cdt, flip: &HashSet<(usize, usize)>) -> Vec<bool> {
+fn classify(cdt: &Cdt, flip: &FastSet<(usize, usize)>) -> Vec<bool> {
     let mut state: Vec<i8> = vec![-1; cdt.num_inner_faces() + 1];
     let mut queue = VecDeque::new();
     for face in cdt.inner_faces() {
@@ -817,11 +855,32 @@ fn classify(cdt: &Cdt, flip: &HashSet<(usize, usize)>) -> Vec<bool> {
 /// boundary segments `cons` (between `verts`) wind.
 fn classify_winding(cdt: &Cdt, verts: &[Vx], cons: &[[usize; 2]]) -> Vec<bool> {
     let mut inside = vec![false; cdt.num_inner_faces() + 1];
+    // The segments by the band of y they span, in buckets: a centroid's count runs over the
+    // segments of its bucket (only a segment spanning its y can count), not every segment.
+    let (ylo, yhi) = cons.iter().flat_map(|c| c.map(|i| verts[i].at.y)).fold((f64::INFINITY, f64::NEG_INFINITY), |(l, h), y| (l.min(y), h.max(y)));
+    let nb = (cons.len() / 2).clamp(1, 1024);
+    let width = (yhi - ylo) / nb as f64;
+    let bucket = |y: f64| -> usize { if width > 0.0 { (((y - ylo) / width).floor().max(0.0) as usize).min(nb - 1) } else { 0 } };
+    let mut buckets: Vec<Vec<usize>> = vec![Vec::new(); nb];
+    for (k, &[i, j]) in cons.iter().enumerate() {
+        let (a, b) = (verts[i].at.y, verts[j].at.y);
+        // (A segment with a coordinate that isn't a number counts for no point.)
+        if a.is_nan() || b.is_nan() {
+            continue;
+        }
+        for bk in buckets.iter_mut().take(bucket(a.max(b)) + 1).skip(bucket(a.min(b))) {
+            bk.push(k);
+        }
+    }
     for face in cdt.inner_faces() {
         let [a, b, c] = face.positions();
         let (x, y) = ((a.x + b.x + c.x) / 3.0, (a.y + b.y + c.y) / 3.0);
+        if !(y >= ylo && y <= yhi) {
+            continue;
+        }
         let mut w = 0i32;
-        for &[i, j] in cons {
+        for &k in &buckets[bucket(y)] {
+            let [i, j] = cons[k];
             let (p, q) = (verts[i].at, verts[j].at);
             let side = (q.x - p.x) * (y - p.y) - (x - p.x) * (q.y - p.y);
             if p.y <= y && q.y > y && side > 0.0 {
@@ -997,7 +1056,7 @@ pub fn mesh_face_with(body: &Body, f: &Face, es: &[(Vec<f64>, Vec<P3>)], p: &Tes
             }
         }
     }
-    let flip: HashSet<(usize, usize)> = count.into_iter().filter(|&(_, n)| n % 2 == 1).map(|(k, _)| k).collect();
+    let flip: FastSet<(usize, usize)> = count.into_iter().filter(|&(_, n)| n % 2 == 1).map(|(k, _)| k).collect();
     let setup = Setup { dom: &dom, f, verts, cons, flip, n_boundary, scale, extent, tol, prof: prof.then_some(t_start) };
     let m = triangulate(&setup, p, true);
     if prof {
@@ -1025,7 +1084,7 @@ struct Setup<'a> {
     f: &'a Face,
     verts: Vec<Vx>,
     cons: Vec<[usize; 2]>,
-    flip: HashSet<(usize, usize)>,
+    flip: FastSet<(usize, usize)>,
     n_boundary: usize,
     scale: (f64, f64),
     extent: f64,
@@ -1086,14 +1145,19 @@ fn triangulate(s: &Setup, p: &TessParams, refine: bool) -> FaceMesh {
     // Refinement: split the triangles that miss a control, a round at a time, until none do.
     // Only interior points are added (inside triangles or on interior sides).
     let min_len = (1e-3 * p.chord).min(1e-4 * extent).max(tol);
-    let mut ok: HashSet<[usize; 3]> = HashSet::new();
+    let mut ok: FastSet<[usize; 3]> = FastSet::default();
+    // The same by the triangle's index in the triangulation, where it was found good: most
+    // triangles keep their index from round to round, so most are told good by one look-up in
+    // this array instead of the set (a triangle at that index now with other corners isn't).
+    let mut ok_at: Vec<[usize; 3]> = Vec::new();
     for _ in 0..if refine { 64 } else { 0 } {
         if cdt.num_vertices() >= max_verts {
             break;
         }
         let inside = sides(&cdt);
         // The triangles still to check (corners, which sides are boundary), checked in parallel.
-        let todo: Vec<([usize; 3], [Vx; 3], [bool; 3])> = cdt
+        ok_at.resize(cdt.num_inner_faces() + 1, [usize::MAX; 3]);
+        let todo: Vec<Unchecked> = cdt
             .inner_faces()
             .filter(|face| inside[face.fix().index()])
             .filter_map(|face| {
@@ -1101,7 +1165,12 @@ fn triangulate(s: &Setup, p: &TessParams, refine: bool) -> FaceMesh {
                 let ids = vs.map(|v| v.fix().index());
                 let mut key = ids;
                 key.sort_unstable();
+                let fi = face.fix().index();
+                if ok_at[fi] == key {
+                    return None;
+                }
                 if ok.contains(&key) {
+                    ok_at[fi] = key;
                     return None;
                 }
                 let mut cons = [false; 3];
@@ -1113,13 +1182,13 @@ fn triangulate(s: &Setup, p: &TessParams, refine: bool) -> FaceMesh {
                         }
                     }
                 }
-                Some((key, vs.map(|v| *v.data()), cons))
+                Some((key, fi, vs.map(|v| *v.data()), cons))
             })
             .collect();
-        let splits: Vec<Option<P2>> = todo.par_iter().map(|(_, v, cons)| split_point(dom, v, *cons, p, min_len)).collect();
-        let mut proposed: HashSet<(u64, u64)> = HashSet::new();
+        let splits: Vec<Option<P2>> = todo.par_iter().map(|(_, _, v, cons)| split_point(dom, v, *cons, p, min_len)).collect();
+        let mut proposed: FastSet<(u64, u64)> = FastSet::default();
         let mut at: Vec<P2> = Vec::new();
-        for ((key, _, _), q) in todo.iter().zip(splits) {
+        for ((key, fi, _, _), q) in todo.iter().zip(splits) {
             match q {
                 Some(q) => {
                     if proposed.insert((q.x.to_bits(), q.y.to_bits())) {
@@ -1128,6 +1197,7 @@ fn triangulate(s: &Setup, p: &TessParams, refine: bool) -> FaceMesh {
                 }
                 None => {
                     ok.insert(*key);
+                    ok_at[*fi] = *key;
                 }
             }
         }

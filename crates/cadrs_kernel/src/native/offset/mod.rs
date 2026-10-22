@@ -52,8 +52,8 @@ pub fn offset(k: &mut NativeKernel, body: BodyId, spec: &OffsetSpec) -> Result<O
     } else {
         round::offset_rounded(&b, &dist)?
     };
-    let v0 = crate::native::mass::body_mass(&b).volume;
-    let v1 = crate::native::mass::body_mass(&out).volume;
+    let v0 = crate::native::mass::body_volume(&b);
+    let v1 = crate::native::mass::body_volume(&out);
     let grow = dist.iter().any(|d| *d > 0.0);
     let shrink = dist.iter().any(|d| *d < 0.0);
     if (grow && !shrink && v1 < v0 - tol::ROUNDOFF) || (shrink && !grow && v1 > v0 + tol::ROUNDOFF) || v1 <= 0.0 {

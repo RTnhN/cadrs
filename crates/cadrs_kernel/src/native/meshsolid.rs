@@ -229,7 +229,7 @@ pub fn mesh_solid(triangles: &[[P3; 3]], tol: f64) -> Result<Body, String> {
     let nf = body.faces.len();
     body.shells.push(Shell { faces: (0..nf).collect(), closed: true });
     body.solids.push(Solid { shells: vec![0] });
-    if super::mass::body_mass(&body).volume < 0.0 {
+    if super::mass::body_volume(&body) < 0.0 {
         for f in &mut body.faces {
             Body::reverse_face(f);
         }
@@ -264,10 +264,10 @@ mod tests {
         assert!(b.check().is_empty(), "{:?}", b.check());
         assert_eq!(b.faces.len(), 6);
         assert_eq!(b.edges.len(), 12);
-        assert!((super::super::mass::body_mass(&b).volume - 1000.0).abs() < 1e-9);
+        assert!((super::super::mass::body_volume(&b) - 1000.0).abs() < 1e-9);
         // Inside out: reversed back.
         let inv: Vec<[P3; 3]> = tris.iter().map(|t| [t[0], t[2], t[1]]).collect();
-        assert!((super::super::mass::body_mass(&mesh_solid(&inv, 1e-6).unwrap()).volume - 1000.0).abs() < 1e-9);
+        assert!((super::super::mass::body_volume(&mesh_solid(&inv, 1e-6).unwrap()) - 1000.0).abs() < 1e-9);
         assert!(mesh_solid(&tris[..20], 1e-6).is_err());
     }
 }

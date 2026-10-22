@@ -20,11 +20,15 @@ use super::tol;
 pub struct Entry {
     pub body: Arc<Body>,
     polys: OnceLock<Vec<Vec<Vec<P2>>>>,
+    /// What [`Kernel::faces`] and [`Kernel::edges`] report (face areas and edge lengths are
+    /// integrals: a rebuild asks for them over the same bodies many times).
+    faces: OnceLock<Vec<FaceInfo>>,
+    edges: OnceLock<Vec<EdgeInfo>>,
 }
 
 impl Entry {
     pub fn new(body: Body) -> Self {
-        Self { body: Arc::new(body), polys: OnceLock::new() }
+        Self { body: Arc::new(body), polys: OnceLock::new(), faces: OnceLock::new(), edges: OnceLock::new() }
     }
     pub fn polys(&self) -> &Vec<Vec<Vec<P2>>> {
         self.polys.get_or_init(|| self.body.faces.iter().map(|f| classify::face_polygons(&self.body, f)).collect())
@@ -297,6 +301,12 @@ pub fn face_info(b: &Body, fi: usize) -> FaceInfo {
 }
 
 pub fn edge_infos(b: &Body) -> Vec<EdgeInfo> {
+    edge_infos_with(b, true)
+}
+
+/// [`edge_infos`], with each edge's length (an adaptive integral along a B-spline: most of the
+/// work) or 0 when `lengths` is false, for the queries that don't read it.
+fn edge_infos_with(b: &Body, lengths: bool) -> Vec<EdgeInfo> {
     let ef = b.edge_faces();
     b.edges
         .iter()
@@ -320,7 +330,7 @@ pub fn edge_infos(b: &Body) -> Vec<EdgeInfo> {
             EdgeInfo {
                 id: EdgeId(ei as u64),
                 faces,
-                length: if e.degenerate { 0.0 } else { e.curve.length(t0, t1) },
+                length: if e.degenerate || !lengths { 0.0 } else { e.curve.length(t0, t1) },
                 curve: curve_kind(e),
                 start: b.verts[e.v[0]].p,
                 end: b.verts[e.v[1]].p,
@@ -845,13 +855,29 @@ impl Kernel for NativeKernel {
     }
 
     fn faces(&self, body: BodyId) -> Result<Vec<FaceInfo>> {
-        let b = self.get(body)?;
+        let e = self.entry(body)?;
         use rayon::prelude::*;
-        Ok((0..b.faces.len()).into_par_iter().map(|i| face_info(b, i)).collect())
+        Ok(e.faces.get_or_init(|| (0..e.body.faces.len()).into_par_iter().map(|i| face_info(&e.body, i)).collect()).clone())
     }
 
     fn edges(&self, body: BodyId) -> Result<Vec<EdgeInfo>> {
-        Ok(edge_infos(self.get(body)?))
+        let e = self.entry(body)?;
+        Ok(e.edges.get_or_init(|| edge_infos(&e.body)).clone())
+    }
+
+    fn overlaps(&mut self, a: BodyId, b: BodyId) -> Result<bool> {
+        // [`Kernel::overlaps`] with the intersection's volume alone (the same number as its
+        // mass properties', for a fraction of the work).
+        let r = self.boolean(BoolOp::Intersect, a, &[b])?;
+        let v = self.get(r.bodies[0]).map(|x| super::mass::body_volume(x)).unwrap_or(0.0);
+        self.release(r.bodies[0]);
+        Ok(v > tol::ROUNDOFF)
+    }
+
+    fn tangent_chain(&self, body: BodyId, edge: EdgeId) -> Result<Vec<EdgeId>> {
+        // (The edges without their lengths: the chain doesn't read them, and rebuilds ask for
+        // chains over bodies of many B-spline edges again and again.)
+        crate::tangent_chain_of(&edge_infos_with(self.get(body)?, false), &self.vertices(body)?, edge)
     }
 
     fn vertices(&self, body: BodyId) -> Result<Vec<VertexInfo>> {
@@ -1016,4 +1042,40 @@ pub(crate) fn dump(op: &str, b: &Body, params: &str) {
     let _ = std::fs::write(base.with_extension("body"), super::bodyio::write(b));
     let _ = std::fs::write(base.with_extension("txt"), params);
     eprintln!("dump: {op}-{n:03} {params}");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The session's shortcuts answer as the trait's defaults do: the tangent chain over edges
+    /// without their lengths, faces and edges kept per body, and `overlaps` by the volume alone.
+    #[test]
+    fn shortcuts_match_the_defaults() {
+        let dir = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/data/smlib/fillets");
+        for name in ["blade_hub.smb", "cyl_on_box_w_fillet.smb", "Heart.smb", "box_diff_3cyls.smb"] {
+            let b = super::super::smb::read_brep(&std::fs::read(format!("{dir}/{name}")).unwrap()).unwrap().body;
+            let mut k = NativeKernel::new();
+            let id = k.insert(b);
+            let (edges, vertices) = (k.edges(id).unwrap(), k.vertices(id).unwrap());
+            assert_eq!(edges, edge_infos(k.get(id).unwrap()), "{name}");
+            assert_eq!(k.edges(id).unwrap(), edges, "{name}");
+            assert_eq!(k.faces(id).unwrap(), k.faces(id).unwrap(), "{name}");
+            for e in edges.iter().step_by(3) {
+                assert_eq!(k.tangent_chain(id, e.id).unwrap(), crate::tangent_chain_of(&edges, &vertices, e.id).unwrap(), "{name} {:?}", e.id);
+            }
+        }
+        // `overlaps` of a model with a box across it.
+        for name in ["cyl_on_box_w_fillet.smb", "box_diff_3cyls.smb"] {
+            let b = super::super::smb::read_brep(&std::fs::read(format!("{dir}/{name}")).unwrap()).unwrap().body;
+            let bb = b.bbox();
+            let mut k = NativeKernel::new();
+            let id = k.insert(b);
+            let c = bb.center();
+            let d = bb.max - bb.min;
+            let Ok(super::super::draw::Shape::Body(tool)) = k.box_at(c.x - 0.1 * d.x, c.y - 0.2 * d.y, c.z - 0.3 * d.z, d.x, d.y, d.z) else { panic!("no box") };
+            let full = k.boolean(BoolOp::Intersect, id, &[tool]).and_then(|r| k.mass_properties(r.bodies[0])).map(|m| m.volume > tol::ROUNDOFF);
+            assert_eq!(k.overlaps(id, tool).ok(), full.ok(), "{name}");
+        }
+    }
 }

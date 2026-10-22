@@ -425,7 +425,7 @@ fn tangent_along_shared_edge(pool: &Pool, fa: &WFace, fb: &WFace, ea: &[usize], 
             !e.degenerate
                 && (e.t[1] - e.t[0]).abs() > 0.0
                 && edge_on_surface(e, &g.surf, pool.tol)
-                && e.curve.length(e.t[0], e.t[1]) > 1e-3
+                && e.curve.longer_than(e.t[0], e.t[1], 1e-3)
                 && [0.25, 0.5, 0.75].iter().all(|k| tangent_at(f, g, &e.curve.point(e.t[0] + (e.t[1] - e.t[0]) * k)))
         })
     };
@@ -1164,7 +1164,7 @@ fn run(a: &Body, b: &Body, mode: Mode, opts: RunOpts) -> Result<BoolOut> {
             let lies = |edges: &[usize], g: &WFace| {
                 edges.iter().any(|&x| {
                     let e = &pool.edges[x];
-                    !e.degenerate && e.curve.length(e.t[0].min(e.t[1]), e.t[0].max(e.t[1])) > 1e-3 && edge_on_surface(e, &g.surf, pool.tol)
+                    !e.degenerate && e.curve.longer_than(e.t[0].min(e.t[1]), e.t[0].max(e.t[1]), 1e-3) && edge_on_surface(e, &g.surf, pool.tol)
                 })
             };
             lies(&face_edges[fa], &faces[fb]) || lies(&face_edges[fb], &faces[fa])
@@ -2007,7 +2007,7 @@ fn drop_empty_solids(b: &mut Body, from: &mut Vec<Vec<(usize, usize)>>, pairs: &
         origins.iter().filter(|o| o.0 == 0).any(|&(_, x)| origins.iter().any(|&(w, y)| w == 1 && pairs.contains(&(x, y))))
     };
     let volumes: Vec<Option<f64>> = (0..b.solids.len())
-        .map(|si| suspect(si).then(|| super::mass::body_mass(&super::kernel::subset(b, &b.solid_faces(si), true)).volume))
+        .map(|si| suspect(si).then(|| super::mass::body_volume(&super::kernel::subset(b, &b.solid_faces(si), true))))
         .collect();
     let empty: Vec<usize> = (0..b.solids.len()).filter(|&si| volumes[si].is_some_and(|v| v.abs() <= tol::REL * size * size * size)).collect();
     if empty.is_empty() {

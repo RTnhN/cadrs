@@ -463,7 +463,7 @@ mod tests {
                     if piece.solids.is_empty() {
                         continue;
                     }
-                    let v = super::super::mass::body_mass(&piece).volume;
+                    let v = super::super::mass::body_volume(&piece);
                     vol += v;
                     let defl = (piece.bbox().diagonal() * 2e-4).max(1e-4);
                     let (fm, _) = super::super::tess::mesh_body(&piece, defl, 0.1);
@@ -479,7 +479,7 @@ mod tests {
                     }
                     // A closed, consistently oriented shell's volume doesn't move with it.
                     let moved = piece.transformed(&Affine::translation(nalgebra::Vector3::new(1000.0, -700.0, 300.0)));
-                    let vm = super::super::mass::body_mass(&moved).volume;
+                    let vm = super::super::mass::body_volume(&moved);
                     if (vm - v).abs() > 1e-6 * v.abs().max(1.0) {
                         let bb = piece.bbox();
                         problems.push(format!("volume {v:.6} moved {vm:.6} (box {:.1?})", bb.max - bb.min));

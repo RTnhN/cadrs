@@ -115,6 +115,9 @@ pub fn basis_ders(span: usize, u: f64, p: usize, d: usize, knots: &[f64]) -> Vec
 const MAXP: usize = 7;
 /// The highest derivative they take without allocating.
 const MAXD: usize = 2;
+/// The largest degree [`Basis`] takes in fixed arrays of its own width ([`Wide`]): the high
+/// degrees of lofts and blends' fits, evaluated millions of times by projections.
+const WIDEP: usize = 15;
 
 /// Basis values and derivatives in a fixed array: `[k][j]`, the k-th derivative of the j-th
 /// non-zero function.
@@ -126,18 +129,35 @@ type Fixed = [[f64; MAXP + 1]; MAXD + 1];
 /// so its tables are just as large as they need to be.
 fn basis_ders_fixed(span: usize, u: f64, p: usize, d: usize, knots: &[f64]) -> Fixed {
     match p {
-        0 => basis_ders_n::<1>(span, u, d, knots),
-        1 => basis_ders_n::<2>(span, u, d, knots),
-        2 => basis_ders_n::<3>(span, u, d, knots),
-        3 => basis_ders_n::<4>(span, u, d, knots),
-        4 => basis_ders_n::<5>(span, u, d, knots),
-        5 => basis_ders_n::<6>(span, u, d, knots),
-        6 => basis_ders_n::<7>(span, u, d, knots),
-        _ => basis_ders_n::<8>(span, u, d, knots),
+        0 => basis_ders_n::<1, { MAXP + 1 }>(span, u, d, knots),
+        1 => basis_ders_n::<2, { MAXP + 1 }>(span, u, d, knots),
+        2 => basis_ders_n::<3, { MAXP + 1 }>(span, u, d, knots),
+        3 => basis_ders_n::<4, { MAXP + 1 }>(span, u, d, knots),
+        4 => basis_ders_n::<5, { MAXP + 1 }>(span, u, d, knots),
+        5 => basis_ders_n::<6, { MAXP + 1 }>(span, u, d, knots),
+        6 => basis_ders_n::<7, { MAXP + 1 }>(span, u, d, knots),
+        _ => basis_ders_n::<8, { MAXP + 1 }>(span, u, d, knots),
     }
 }
 
-fn basis_ders_n<const N: usize>(span: usize, u: f64, d: usize, knots: &[f64]) -> Fixed {
+/// [`basis_ders_fixed`] for `MAXP < p <= WIDEP`.
+type Wide = [[f64; WIDEP + 1]; MAXD + 1];
+
+fn basis_ders_wide(span: usize, u: f64, p: usize, d: usize, knots: &[f64]) -> Wide {
+    match p {
+        8 => basis_ders_n::<9, { WIDEP + 1 }>(span, u, d, knots),
+        9 => basis_ders_n::<10, { WIDEP + 1 }>(span, u, d, knots),
+        10 => basis_ders_n::<11, { WIDEP + 1 }>(span, u, d, knots),
+        11 => basis_ders_n::<12, { WIDEP + 1 }>(span, u, d, knots),
+        12 => basis_ders_n::<13, { WIDEP + 1 }>(span, u, d, knots),
+        13 => basis_ders_n::<14, { WIDEP + 1 }>(span, u, d, knots),
+        14 => basis_ders_n::<15, { WIDEP + 1 }>(span, u, d, knots),
+        _ => basis_ders_n::<16, { WIDEP + 1 }>(span, u, d, knots),
+    }
+}
+
+/// A2.3 for degree `N - 1`, into rows `W` wide (`W >= N`).
+fn basis_ders_n<const N: usize, const W: usize>(span: usize, u: f64, d: usize, knots: &[f64]) -> [[f64; W]; MAXD + 1] {
     let p = N - 1;
     let mut ndu = [[0.0; N]; N];
     let mut left = [0.0; N];
@@ -156,7 +176,7 @@ fn basis_ders_n<const N: usize>(span: usize, u: f64, d: usize, knots: &[f64]) ->
         ndu[j][j] = saved;
     }
     let d = d.min(p);
-    let mut ders = [[0.0; MAXP + 1]; MAXD + 1];
+    let mut ders = [[0.0; W]; MAXD + 1];
     for j in 0..=p {
         ders[0][j] = ndu[j][p];
     }
@@ -276,6 +296,7 @@ impl BasisAt for B1 {
 /// Basis function values and derivatives, in fixed arrays when the degree allows.
 enum Basis {
     Fixed(Fixed),
+    Wide(Wide),
     Heap(Vec<Vec<f64>>),
 }
 
@@ -288,7 +309,13 @@ impl BasisAt for Basis {
 
 impl Basis {
     fn new(span: usize, u: f64, p: usize, d: usize, knots: &[f64]) -> Self {
-        if p <= MAXP && d <= MAXD { Basis::Fixed(basis_ders_fixed(span, u, p, d, knots)) } else { Basis::Heap(basis_ders(span, u, p, d, knots)) }
+        if p <= MAXP && d <= MAXD {
+            Basis::Fixed(basis_ders_fixed(span, u, p, d, knots))
+        } else if p <= WIDEP && d <= MAXD {
+            Basis::Wide(basis_ders_wide(span, u, p, d, knots))
+        } else {
+            Basis::Heap(basis_ders(span, u, p, d, knots))
+        }
     }
 
     /// The k-th derivative of the j-th non-zero function.
@@ -296,6 +323,7 @@ impl Basis {
     fn at(&self, k: usize, j: usize) -> f64 {
         match self {
             Basis::Fixed(b) => b[k][j],
+            Basis::Wide(b) => b[k][j],
             Basis::Heap(b) => b[k][j],
         }
     }
@@ -1019,9 +1047,13 @@ impl NurbsSurface {
         // Homogeneous derivatives A[k][l].
         let mut a = [[H::zeros(); 3]; 3];
         let mut fixed = [H::zeros(); MAXP + 1];
+        let mut wide;
         let mut heap = Vec::new();
         let temp: &mut [H] = if self.dv <= MAXP {
             &mut fixed[..=self.dv]
+        } else if self.dv <= WIDEP {
+            wide = [H::zeros(); WIDEP + 1];
+            &mut wide[..=self.dv]
         } else {
             heap.resize(self.dv + 1, H::zeros());
             &mut heap
@@ -1314,8 +1346,9 @@ mod tests {
     use super::*;
 
     /// The allocation-free evaluators (`Basis`, `ders_upto`, `hders_fixed`) give the values of
-    /// A2.3/A4.4 computed with [`basis_ders`]'s vectors, to the bit, for a rational surface and
-    /// curve of low degree and one above `MAXP` (the vector path).
+    /// A2.3/A4.4 computed with [`basis_ders`]'s vectors, to the bit, for rational surfaces and a
+    /// curve of low degree, of degrees above `MAXP` (the wide arrays) and above `WIDEP` (the
+    /// vector path).
     #[test]
     fn fixed_evaluators_match_the_allocating_ones() {
         fn reference(s: &NurbsSurface, u: f64, v: f64) -> [V3; 6] {
@@ -1363,7 +1396,8 @@ mod tests {
             k.extend(vec![1.0; p + 1]);
             k
         };
-        for (du, dv) in [(2, 3), (3, 1), (13, 2)] {
+        // (Degrees up to `MAXP`, up to `WIDEP`, and above: the three evaluators' paths.)
+        for (du, dv) in [(2, 3), (3, 1), (13, 2), (2, 12), (17, 9)] {
             let (nu, nv) = (du + 4, dv + 3);
             let cps: Vec<Vec<H>> = (0..nu)
                 .map(|i| (0..nv).map(|j| {

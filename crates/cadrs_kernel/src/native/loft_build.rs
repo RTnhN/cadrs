@@ -630,7 +630,7 @@ fn assemble_rows(rows: Vec<Vec<NurbsSurface>>, closed_u: bool, closed_v: bool, s
     if solid {
         b.solids.push(Solid { shells: vec![0] });
         // Outward: flip everything if the volume came out negative.
-        if super::mass::body_mass(&b).volume < 0.0 {
+        if super::mass::body_volume(&b) < 0.0 {
             for f in &mut b.faces {
                 Body::reverse_face(f);
             }
