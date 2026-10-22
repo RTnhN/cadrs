@@ -702,9 +702,19 @@ fn inner_core(b: &Body, remove: &[usize], t: f64, round_still: bool) -> Result<B
     combine_all(b.clone(), pieces, BoolOp::Subtract)
 }
 
-/// The region within t inside a curved face (a cylinder's band).
+/// The region within t inside a curved face (a cylinder's band). A convex round (a cylinder
+/// or sphere bulging out) at least t thick inside collapses onto its axis or centre: the cavity
+/// is sharp there, its walls the planes the round is tangent to moved in by t, so the round's
+/// part is the block between those planes and their offsets ([`collapsed_round`]).
 fn face_band(b: &Body, fi: usize, t: f64) -> Result<Body> {
     let f = &b.faces[fi];
+    let convex = f.surf.frame().is_some_and(|fr| f.sense == fr.right_handed());
+    match &f.surf {
+        Surface::Cylinder { r, .. } | Surface::Sphere { r, .. } if convex && t >= r * (1.0 - 1e-9) => {
+            return collapsed_round(b, fi, t)?.ok_or(KernelError::Unsupported("a shell thicker than a round's radius"));
+        }
+        _ => {}
+    }
     if let Surface::Cylinder { f: fr, r } = &f.surf {
         // The ring between r and r ∓ t behind the face.
         let outward = f.sense == fr.right_handed();
@@ -717,6 +727,86 @@ fn face_band(b: &Body, fi: usize, t: f64) -> Result<Body> {
         }
     }
     super::slab::face_slab(b, fi, -t)
+}
+
+/// A convex round's part of a shell's walls when the shell is at least as thick as the round's
+/// radius: the block between the planes the round is tangent to along its edges and those
+/// planes moved in by t (a box edge's round: the t × t square at the edge, along it; a box
+/// corner's ball: the t cube at the corner). Holds the round and what lies between it and its
+/// neighbours' moved planes. Only for a cylinder over a rectangle of angle (under a half turn)
+/// and height, and a sphere's octant (bounded by three great circles square to each other);
+/// None for another face.
+fn collapsed_round(b: &Body, fi: usize, t: f64) -> Result<Option<Body>> {
+    let f = &b.faces[fi];
+    // Planes' normals e_i (at distance r from the centre point o): the block's corners are
+    // o + Σ a_i·(dual of e_i) with a_i ∈ {r − t, r}.
+    let corner = |e: &[V3], a: &[f64]| -> Option<V3> {
+        match e {
+            [e0, e1] => {
+                // α e0 + β e1 with α + β g = a0, α g + β = a1.
+                let g = e0.dot(e1);
+                let det = 1.0 - g * g;
+                (det > 1e-9).then(|| e0 * ((a[0] - g * a[1]) / det) + e1 * ((a[1] - g * a[0]) / det))
+            }
+            [e0, e1, e2] => Some(e0 * a[0] + e1 * a[1] + e2 * a[2]),
+            _ => None,
+        }
+    };
+    let cycle = |lo: f64, hi: f64| [[lo, lo], [hi, lo], [hi, hi], [lo, hi]];
+    match &f.surf {
+        Surface::Cylinder { f: fr, r } => {
+            let Some((lo, hi, u0, u1)) = cylinder_domain(b, fi) else { return Ok(None) };
+            if u1 - u0 >= PI - 1e-9 {
+                return Ok(None);
+            }
+            let radial = |u: f64| fr.x * u.cos() + fr.y * u.sin();
+            let e = [radial(u0), radial(u1)];
+            let mut c = [P3::origin(); 8];
+            for (k, a) in cycle(r - t, *r).iter().enumerate() {
+                let Some(q) = corner(&e, a) else { return Ok(None) };
+                c[k] = fr.o + fr.z * lo + q;
+                c[k + 4] = fr.o + fr.z * hi + q;
+            }
+            Ok(Some(super::blend::hexahedron(&c)?))
+        }
+        Surface::Sphere { f: fr, r } => {
+            // The planes of its edges, which must hold the centre.
+            let o = fr.o;
+            let mut normals: Vec<V3> = Vec::new();
+            let mut mid = V3::zeros();
+            for co in f.loops.iter().flatten() {
+                let e = &b.edges[co.edge];
+                if e.degenerate {
+                    continue;
+                }
+                let Curve::Circle { c: cc, x, y, r: rc } = &e.curve else { return Ok(None) };
+                if (cc - o).norm() > 1e-7 * (1.0 + r) || (rc - r).abs() > 1e-7 * (1.0 + r) {
+                    return Ok(None);
+                }
+                let n = x.cross(y).normalize();
+                if !normals.iter().any(|m| m.cross(&n).norm() < 1e-9) {
+                    normals.push(n);
+                }
+                mid += (e.point(e.mid_t()) - o).normalize();
+            }
+            let [n1, n2, n3] = normals[..] else { return Ok(None) };
+            if n1.dot(&n2).abs() > 1e-9 || n2.dot(&n3).abs() > 1e-9 || n3.dot(&n1).abs() > 1e-9 {
+                return Ok(None);
+            }
+            // The octant's axes: each plane's normal towards the face.
+            let side = |n: V3| if n.dot(&mid) >= 0.0 { n } else { -n };
+            let e = [side(n1), side(n2), side(n3)];
+            let mut c = [P3::origin(); 8];
+            for (k, a) in cycle(r - t, *r).iter().enumerate() {
+                for (z, off) in [(r - t, 0), (*r, 4)] {
+                    let Some(q) = corner(&e, &[a[0], a[1], z]) else { return Ok(None) };
+                    c[k + off] = o + q;
+                }
+            }
+            Ok(Some(super::blend::hexahedron(&c)?))
+        }
+        _ => Ok(None),
+    }
 }
 
 /// The points of a concave cylindrical face's slab nearer the face than its axis: the wedge
@@ -733,39 +823,12 @@ fn cylinder_wedge(b: &Body, fi: usize) -> Result<Option<Body>> {
 /// the axis) swept along the axis. None unless the face spans whole axial lines between two
 /// circles square to the axis (its domain a rectangle in angle and height).
 fn cylinder_band(b: &Body, fi: usize, r0: f64, r1: f64) -> Result<Option<Body>> {
-    let f = &b.faces[fi];
-    let Surface::Cylinder { f: fr, r } = &f.surf else { return Ok(None) };
-    let size = 1.0 + r + fr.o.coords.norm();
-    let rect = f.loops.iter().flatten().all(|c| {
-        let e = &b.edges[c.edge];
-        e.degenerate
-            || match &e.curve {
-                Curve::Line { d, .. } => d.normalize().cross(&fr.z).norm() < 1e-9,
-                Curve::Circle { c: cc, x, y, r: rc } => {
-                    let w = cc - fr.o;
-                    x.cross(y).normalize().cross(&fr.z).norm() < 1e-9 && (w - fr.z * w.dot(&fr.z)).norm() < 1e-7 * size && (rc - r).abs() < 1e-7 * size
-                }
-                _ => false,
-            }
-    });
-    if !rect {
-        return Ok(None);
-    }
-    let sub = super::kernel::subset(b, &[fi], false);
-    let (lo, hi) = super::kernel::extent_along(&sub, &fr.o, &fr.z);
+    let Surface::Cylinder { f: fr, .. } = &b.faces[fi].surf else { return Ok(None) };
+    let Some((lo, hi, u0, u1)) = cylinder_domain(b, fi) else { return Ok(None) };
     let plane = Plane { origin: fr.o + fr.z * lo, x_dir: nalgebra::Unit::new_normalize(fr.x), normal: nalgebra::Unit::new_normalize(fr.z) };
     let circ = |rr: f64| Loop { curves: vec![Curve2::Circle { center: nalgebra::Point2::origin(), radius: rr, source: None }] };
-    // The face's angular range (its p-curves' u), as angles in the plane (whose y is z × x:
-    // the frame's y for a right-handed frame, else the other way).
-    let (mut u0, mut u1) = (f64::INFINITY, f64::NEG_INFINITY);
-    for c in f.loops.iter().flatten() {
-        let e = &b.edges[c.edge];
-        for i in 0..=8 {
-            let q = c.pc.point(e.t[0] + (e.t[1] - e.t[0]) * i as f64 / 8.0);
-            u0 = u0.min(q.x);
-            u1 = u1.max(q.x);
-        }
-    }
+    // The angles in the plane (whose y is z × x: the frame's y for a right-handed frame, else
+    // the other way).
     let whole = !(u1 - u0 < TAU - 1e-9);
     let (u0, u1) = if fr.right_handed() { (u0, u1) } else { (-u1, -u0) };
     let o = nalgebra::Point2::origin();
@@ -802,4 +865,40 @@ fn cylinder_band(b: &Body, fi: usize, r0: f64, r1: f64) -> Result<Option<Body>> 
     let mf = super::profile::merge_regions(&regions)?;
     let kind = super::sweep::Prism { plane, dir: fr.z };
     Ok(Some(super::sweep::sweep_full(&mf, &[], &kind, 0.0, hi - lo, false, true)?.body))
+}
+
+/// A cylindrical face's heights along its axis and angles (its p-curves' u), when it spans
+/// whole axial lines between two circles square to the axis (its domain a rectangle in angle
+/// and height): (lo, hi, u0, u1).
+fn cylinder_domain(b: &Body, fi: usize) -> Option<(f64, f64, f64, f64)> {
+    let f = &b.faces[fi];
+    let Surface::Cylinder { f: fr, r } = &f.surf else { return None };
+    let size = 1.0 + r + fr.o.coords.norm();
+    let rect = f.loops.iter().flatten().all(|c| {
+        let e = &b.edges[c.edge];
+        e.degenerate
+            || match &e.curve {
+                Curve::Line { d, .. } => d.normalize().cross(&fr.z).norm() < 1e-9,
+                Curve::Circle { c: cc, x, y, r: rc } => {
+                    let w = cc - fr.o;
+                    x.cross(y).normalize().cross(&fr.z).norm() < 1e-9 && (w - fr.z * w.dot(&fr.z)).norm() < 1e-7 * size && (rc - r).abs() < 1e-7 * size
+                }
+                _ => false,
+            }
+    });
+    if !rect {
+        return None;
+    }
+    let sub = super::kernel::subset(b, &[fi], false);
+    let (lo, hi) = super::kernel::extent_along(&sub, &fr.o, &fr.z);
+    let (mut u0, mut u1) = (f64::INFINITY, f64::NEG_INFINITY);
+    for c in f.loops.iter().flatten() {
+        let e = &b.edges[c.edge];
+        for i in 0..=8 {
+            let q = c.pc.point(e.t[0] + (e.t[1] - e.t[0]) * i as f64 / 8.0);
+            u0 = u0.min(q.x);
+            u1 = u1.max(q.x);
+        }
+    }
+    Some((lo, hi, u0, u1))
 }

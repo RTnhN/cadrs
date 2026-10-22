@@ -1944,8 +1944,24 @@ pub fn offset(k: &mut NativeKernel, body: BodyId, spec: &OffsetSpec) -> Result<O
             *x = *d;
         }
     }
+    // Move face (some faces moved, the rest kept): a move that would change the body's
+    // topology isn't one the sharp offset makes (a hole's wall moved onto or past its axis, a
+    // face run into one it doesn't border): refused cleanly rather than a wrong body.
+    let moving = spec.distance == 0.0 && spec.faces.iter().any(|(_, d)| *d != 0.0);
+    let too_far = |why: &str| KernelError::InvalidParameter(format!("The faces can't move that far: {why}"));
+    if moving
+        && spec.faces.iter().any(|(f, d)| {
+            b.faces.get(f.0 as usize).is_some_and(|face| *d != 0.0 && matches!(face.surf, Surface::Cylinder { .. } | Surface::Cone { .. } | Surface::Sphere { .. } | Surface::Torus { .. }) && offset_surface(&face.surf, face.sense, *d).is_none())
+        })
+    {
+        return Err(too_far("a face would shrink to nothing"));
+    }
     let out = if spec.sharp || dist.iter().all(|d| *d == 0.0) {
-        offset_sharp(&b, &dist)?
+        let out = offset_sharp(&b, &dist)?;
+        if moving && !out.check_with(super::topo::CheckLevel::Full).is_empty() {
+            return Err(too_far("a face would run into another face"));
+        }
+        out
     } else if dist.iter().all(|d| *d <= 0.0) {
         super::offset_round::inset_rounded(&b, &dist)?
     } else {

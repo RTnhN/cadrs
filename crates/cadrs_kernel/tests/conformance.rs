@@ -2190,10 +2190,6 @@ pub fn shell_around_a_counterbore(k: &mut dyn Kernel) {
     close(volume(k, s), body - cavity, 1e-6);
 }
 
-// Not in the list below yet: the native shell can't offset rounds whose inward offset
-// collapses onto their axes ("offsetting this kind of face"); it came from main with the OCCT
-// backend's fix. Add it to the list when the native shell handles it.
-#[allow(dead_code)]
 pub fn shell_rounded_cube_at_the_radius(k: &mut dyn Kernel) {
     // A 10 mm cube with R2 on every edge, shelled with the top open as thick as the rounds and
     // thicker. The rounds' inward offsets collapse onto their axes, so the cavity is a sharp
@@ -3262,7 +3258,7 @@ macro_rules! conformance {
                 extrude_a_face, union_merges_coplanar_faces, union_merges_flush_cylinders, union_merges_cylinders_across_sketches, revolve_torus, revolve_types,
                 revolve_up_to, revolve_surface_and_thin, face_axes_and_edge_circles, revolve_a_face,
                 inertia_tensor, fillet_cube_all_edges, fillet_width, fillet_overflow,
-                chamfer_options, shell_options, shell_around_a_counterbore, edge_face_radius,
+                chamfer_options, shell_options, shell_around_a_counterbore, shell_rounded_cube_at_the_radius, edge_face_radius,
                 fillet_sections, full_round, offset_ellipse_profiles, sweep_along_paths, sweep_around_a_circle,
                 loft_sections_and_conditions, split_by_plane_and_face, mirror_and_motions,
                 face_tools, classify_points, split_faces_by_plane, project_view, section_cut,

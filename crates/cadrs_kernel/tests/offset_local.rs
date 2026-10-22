@@ -708,3 +708,25 @@ fn sharp_offset_drops_a_slope_its_neighbours_cross_over() {
     assert!(issues.is_empty(), "{issues:?}");
     close(volume(&k, off), 2460.0, 1e-9);
 }
+
+/// Move face refuses moves that would change the body's topology (main's `check_face_moves`
+/// guarded OCCT's offset, which crashed on them): a hole's wall moved onto or past its axis,
+/// a hole grown through the block's side, a side moved into the hole. Moves that keep the
+/// topology still work, to closed forms.
+#[test]
+fn move_face_refuses_topology_changes() {
+    let mut k = NativeKernel::new();
+    let b = prism(&mut k, polygon(&[(-10.0, -10.0), (10.0, -10.0), (10.0, 10.0), (-10.0, 10.0)]), vec![circle((0.0, 0.0), 3.0)], 10.0);
+    let wall = k.faces(b).unwrap().into_iter().find(|f| f.kind == SurfaceKind::Cylinder).unwrap().id;
+    let side = face_at(&k, b, Vector3::x(), 10.0);
+    let moved = |k: &mut NativeKernel, f: FaceId, d: f64| k.offset(b, &OffsetSpec { distance: 0.0, faces: vec![(f, d)], sharp: true });
+    // The hole's radius 3 → 1 and → 8; the side in by 5.
+    for (f, d, want) in [(wall, 2.0, 4000.0 - PI * 10.0), (wall, -5.0, 4000.0 - PI * 640.0), (side, -5.0, 3000.0 - PI * 90.0)] {
+        let out = one(moved(&mut k, f, d).unwrap());
+        close(volume(&k, out), want, 1e-9);
+    }
+    for (f, d) in [(wall, 3.0), (wall, 4.0), (wall, -8.0), (side, -8.0)] {
+        let r = moved(&mut k, f, d);
+        assert!(matches!(r, Err(KernelError::InvalidParameter(_))), "{f:?} by {d}: {r:?}");
+    }
+}
