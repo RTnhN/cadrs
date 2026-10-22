@@ -10,6 +10,7 @@ use crate::components::{
     Card, CardContent, CardDescription, CardHeader, CardTitle, Icon, IconSize, Separator,
     SeparatorOrientation,
 };
+use crate::github::GithubButton;
 use crate::icons::IconRs;
 use crate::theme::ThemeSwitcher;
 
@@ -302,17 +303,7 @@ impl<L: DataLoader> WebRenderSync<L> for HomePage {
                             }}
                         </a>
                         {ThemeSwitcher}
-                        <a
-                            href="https://github.com/rvdende/cadrs"
-                            class={link_button(ButtonSize::Sm, ButtonVariant::Outline)}
-                        >
-                            {Icon {
-                                icon: IconRs(icon_rs::GITHUB),
-                                size: Some(IconSize::Sm),
-                                class: None,
-                            }}
-                            "GitHub"
-                        </a>
+                        {GithubButton}
                     </div>
                 </nav>
             </header>

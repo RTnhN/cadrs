@@ -11,6 +11,7 @@ mod components;
 mod config;
 mod endpoints;
 mod error;
+mod github;
 mod icons;
 mod layouts;
 mod pages;

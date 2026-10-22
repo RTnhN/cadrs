@@ -11,8 +11,8 @@ rust-version = "1.93"
 anyhow = "1"
 axum = "0.7.9"
 dotenvy = "0.15"
-# Platform, theme, heart and GitHub icons from 0.4.3, which is on GitHub but not yet on crates.io.
-icon-rs = { git = "https://github.com/rvdende/icon-rs", rev = "64faae90ed0f12b698f536fcd8f4b6c016dfbac8" }
+# Platform, theme, heart, star and GitHub icons from 0.4.4, which is on GitHub but not yet on crates.io.
+icon-rs = { git = "https://github.com/rvdende/icon-rs", rev = "5b6d1918238bb50c152f2273b526332052c3426e" }
 proa_core = { version = "0.3.0" }
 proa_fonts = { version = "0.1.0", features = ["render"] }
 proa_fonts_macros = { version = "0.1.0" }

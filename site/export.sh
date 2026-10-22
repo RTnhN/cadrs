@@ -15,15 +15,20 @@ base_path="${2-/cadrs}"
 # RUSTFLAGS replaces them for this stable-toolchain build.
 export RUSTFLAGS=""
 
-# Download links point at the latest release when its tag is known.
+# From the GitHub API: the latest release, which the download links point at, and the star
+# count the GitHub button shows until the page fetches a fresh one.
+auth=()
+[[ -n "${GITHUB_TOKEN:-}" ]] && auth=(-H "Authorization: Bearer $GITHUB_TOKEN")
+api() { curl -fsSL "${auth[@]}" "https://api.github.com/repos/rvdende/cadrs$1" || true; }
 if [[ -z "${CADRS_RELEASE:-}" ]]; then
-    auth=()
-    [[ -n "${GITHUB_TOKEN:-}" ]] && auth=(-H "Authorization: Bearer $GITHUB_TOKEN")
-    CADRS_RELEASE="$(curl -fsSL "${auth[@]}" https://api.github.com/repos/rvdende/cadrs/releases/latest \
-        | sed -n 's/^  "tag_name": "\(.*\)",$/\1/p')" || true
+    CADRS_RELEASE="$(api /releases/latest | sed -n 's/^  "tag_name": "\(.*\)",$/\1/p')"
 fi
-export CADRS_RELEASE="${CADRS_RELEASE:-}"
+if [[ -z "${CADRS_STARS:-}" ]]; then
+    CADRS_STARS="$(api "" | sed -n 's/^  "stargazers_count": \([0-9]*\),$/\1/p')"
+fi
+export CADRS_RELEASE="${CADRS_RELEASE:-}" CADRS_STARS="${CADRS_STARS:-}"
 echo "release: ${CADRS_RELEASE:-unknown (links go to the releases page)}"
+echo "stars: ${CADRS_STARS:-unknown (the page fetches them)}"
 
 proa build --locked --artifact-out target/site/cadrs-site
 proa export --bin target/site/cadrs-site --out "$out" --base-path "$base_path"

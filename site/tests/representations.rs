@@ -17,6 +17,8 @@ mod components;
 mod endpoints;
 #[path = "../src/error.rs"]
 mod error;
+#[path = "../src/github.rs"]
+mod github;
 #[path = "../src/icons.rs"]
 mod icons;
 #[path = "../src/layouts/mod.rs"]

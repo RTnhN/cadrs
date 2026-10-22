@@ -6,10 +6,10 @@
 set -euo pipefail
 cd "$(dirname "$0")"
 
-proa fmt src/pages src/layouts src/theme.rs
+proa fmt src/pages src/layouts src/github.rs src/theme.rs
 
 # Files whose modules are all the site's own.
-rustfmt --edition 2021 build.rs src/app.rs src/config.rs src/error.rs src/icons.rs \
+rustfmt --edition 2021 build.rs src/app.rs src/config.rs src/error.rs src/github.rs src/icons.rs \
     src/routes.rs src/static_assets.rs src/theme.rs src/endpoints/*.rs src/layouts/*.rs src/pages/*.rs \
     tests/smoke.rs
 
