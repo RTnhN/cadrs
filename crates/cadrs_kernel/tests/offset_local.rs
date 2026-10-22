@@ -1,5 +1,4 @@
-//! Regressions for offsets, shells and local operations (`native::local`, `native::offset_round`,
-//! `native::slab`) through the `Kernel` trait, checked against closed forms.
+//! Regressions for offsets, shells and local operations (`native::local` and `native::offset`) through the `Kernel` trait, checked against closed forms.
 
 use std::f64::consts::PI;
 
@@ -285,7 +284,7 @@ fn extrusion_loop_n(fi: usize, li: usize, in_plane: bool) -> Vec<(cadrs_kernel::
 #[test]
 fn wire_offset_takes_reversed_edges() {
     use cadrs_kernel::native::curve::Curve;
-    use cadrs_kernel::native::offset2d::offset_wire;
+    use cadrs_kernel::native::offset::wire::offset_wire;
     let wire = extrusion_loop(0, true);
     assert!(wire.iter().any(|e| matches!(e.0, Curve::Nurbs(_))) && wire.iter().any(|e| e.1 > e.2), "a spline and a reversed edge");
     for d in [0.3, -0.3, 1.0] {
@@ -302,7 +301,7 @@ fn wire_offset_takes_reversed_edges() {
 /// loop at every distance, its area growing with the distance.
 #[test]
 fn wire_offset_trims_a_swallowtail() {
-    use cadrs_kernel::native::offset2d::offset_wire;
+    use cadrs_kernel::native::offset::wire::offset_wire;
     let wire = extrusion_loop(0, true);
     let area = |d: f64| -> f64 {
         let loops = offset_wire(&wire, d).unwrap_or_else(|e| panic!("offset by {d}: {e:?}"));
@@ -350,7 +349,7 @@ fn slab_of_a_face_with_a_cone_like_apex() {
     let fi = 11;
     let apex = cadrs_kernel::native::math::P3::new(12.0, -8.0, 0.0);
     assert!(b.faces[fi].loops.iter().flatten().any(|c| b.edges[c.edge].degenerate && (b.verts[b.edges[c.edge].v[0]].p - apex).norm() < 1e-9), "face {fi} has no pole at the apex");
-    let slab = cadrs_kernel::native::slab::face_slab(&b, fi, 0.3).unwrap();
+    let slab = cadrs_kernel::native::offset::slab::face_slab(&b, fi, 0.3).unwrap();
     assert_eq!(slab.check_with(CheckLevel::Full), Vec::<String>::new());
     // The fan: a closed edge 0.3 from the apex all round.
     let fan = slab.edges.iter().any(|e| !e.degenerate && e.v[0] == e.v[1] && (0..8).all(|i| ((e.point(e.t[0] + (e.t[1] - e.t[0]) * i as f64 / 8.0) - apex).norm() - 0.3).abs() < 1e-6));
@@ -380,7 +379,7 @@ fn slab_of_a_face_round_a_pole_along_its_seam() {
         }
     };
     let t = 2.54;
-    let slab = cadrs_kernel::native::slab::face_slab(&b, fi, -t).unwrap();
+    let slab = cadrs_kernel::native::offset::slab::face_slab(&b, fi, -t).unwrap();
     assert_eq!(slab.check_with(CheckLevel::Full), Vec::<String>::new());
     let want = mass::face_area(&b, fi).0 * ((r - t) / r).powi(2);
     let got = (0..slab.faces.len()).map(|f| mass::face_area(&slab, f).0).fold(f64::NAN, |best, a| if (a - want).abs() < (best - want).abs() || best.is_nan() { a } else { best });
@@ -439,10 +438,10 @@ fn names_survive_offsets_and_shells() {
 /// holes out), × 9.7, is the volume to the inset spline's fit.
 #[test]
 fn rounded_inset_of_an_extrusion_is_its_eroded_profile() {
-    use cadrs_kernel::native::offset2d::offset_wire;
+    use cadrs_kernel::native::offset::wire::offset_wire;
     let bytes = std::fs::read(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/data/smlib/offset/off_extrusion.smb")).unwrap();
     let b = cadrs_kernel::native::smb::read_brep(&bytes).unwrap().body;
-    let area = |loops: &[Vec<cadrs_kernel::native::offset2d::Piece2>]| -> f64 {
+    let area = |loops: &[Vec<cadrs_kernel::native::offset::wire::Piece2>]| -> f64 {
         let mut a = 0.0;
         for p in loops.iter().flatten() {
             for k in 0..400 {

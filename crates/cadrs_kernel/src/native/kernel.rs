@@ -578,7 +578,7 @@ impl Kernel for NativeKernel {
     }
 
     fn offset(&mut self, body: BodyId, spec: &OffsetSpec) -> Result<OpResult> {
-        let r = super::local::offset(self, body, spec);
+        let r = super::offset::offset(self, body, spec);
         self.colored(r)
     }
 
@@ -599,14 +599,14 @@ impl Kernel for NativeKernel {
 
     fn shell(&mut self, body: BodyId, remove: &[FaceId], thickness: f64) -> Result<OpResult> {
         dump("shell", self.get(body)?, &format!("remove {remove:?} thickness {thickness}"));
-        let r = super::offset_round::shell(self, body, &ShellSpec { remove: remove.to_vec(), thickness, outward: false, hollow: false, sharp: false });
+        let r = super::offset::round::shell(self, body, &ShellSpec { remove: remove.to_vec(), thickness, outward: false, hollow: false, sharp: false });
         let r = self.dumped(&r);
         self.colored(r)
     }
 
     fn shell_with(&mut self, body: BodyId, spec: &ShellSpec) -> Result<OpResult> {
         dump("shell", self.get(body)?, &format!("{spec:?}"));
-        let r = super::offset_round::shell(self, body, spec);
+        let r = super::offset::round::shell(self, body, spec);
         let r = self.dumped(&r);
         self.colored(r)
     }

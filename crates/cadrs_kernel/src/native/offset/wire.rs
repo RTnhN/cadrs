@@ -15,10 +15,10 @@
 //!    the distance, loops of the offset curves).
 //! 4. Neighbouring pieces of one curve are joined again and the pieces chained into loops.
 
-use super::curve::Curve;
-use super::math::*;
-use super::nurbs::NurbsCurve;
-use super::tol;
+use crate::native::curve::Curve;
+use crate::native::math::*;
+use crate::native::nurbs::NurbsCurve;
+use crate::native::tol;
 use crate::{KernelError, Result};
 use std::f64::consts::PI;
 
@@ -1282,7 +1282,7 @@ fn edge_box(e: &Piece2) -> Bbox {
         && n.cps.iter().all(|h| h.w > 0.0)
     {
         for h in &n.cps {
-            b.add(&super::nurbs::dehom(h));
+            b.add(&crate::native::nurbs::dehom(h));
         }
         return b;
     }
@@ -1406,13 +1406,13 @@ mod tests {
     /// The quadratic B-spline through (0,0) … (6,1) with simple knots at 1 and 2.
     fn quadratic() -> NurbsCurve {
         let poles = [(0.0, 0.0), (1.0, 2.0), (3.0, 2.0), (4.0, 0.0), (6.0, 1.0)];
-        let cps = poles.iter().map(|&(x, y)| super::super::nurbs::hom(&P3::new(x, y, 0.0), 1.0)).collect();
+        let cps = poles.iter().map(|&(x, y)| crate::native::nurbs::hom(&P3::new(x, y, 0.0), 1.0)).collect();
         NurbsCurve::new(2, vec![0.0, 0.0, 0.0, 1.0, 2.0, 3.0, 3.0, 3.0], cps).unwrap()
     }
 
     /// A quarter of the unit circle as a rational quadratic, counter-clockwise from (1, 0).
     fn quarter_circle() -> Curve {
-        let h = |x: f64, y: f64, w: f64| super::super::nurbs::hom(&P3::new(x, y, 0.0), w);
+        let h = |x: f64, y: f64, w: f64| crate::native::nurbs::hom(&P3::new(x, y, 0.0), w);
         Curve::nurbs(NurbsCurve::new(2, vec![0.0, 0.0, 0.0, 1.0, 1.0, 1.0], vec![h(1.0, 0.0, 1.0), h(1.0, 1.0, 0.5f64.sqrt()), h(0.0, 1.0, 1.0)]).unwrap())
     }
 

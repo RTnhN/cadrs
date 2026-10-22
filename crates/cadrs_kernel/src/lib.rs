@@ -58,7 +58,7 @@ pub mod types;
 pub mod testkit {
     pub use crate::native::{
         blend, boolean, brep_occt, classify, curve, draw, evolved, exchange, face_build, features, iges, kernel, local, mass, math, nurbs,
-        offset2d, offset_round, oracle, profile, silhouette, slab, smb, ssi, ssi_numeric, step, surface, surfacing, tess, topo, unify, xbuild,
+        offset, oracle, profile, silhouette, smb, ssi, ssi_numeric, step, surface, surfacing, tess, topo, unify, xbuild,
     };
 }
 

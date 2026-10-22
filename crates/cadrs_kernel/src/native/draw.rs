@@ -1154,7 +1154,7 @@ impl NativeKernel {
                     // Nearly planar (within its tolerance, as OCCT's FindSurface): offset in the
                     // plane fitting it best, the wire projected onto it.
                     let pts: Vec<P3> = edges.iter().flat_map(|e| (0..=16).map(move |i| e.curve.point(e.t0 + (e.t1 - e.t0) * i as f64 / 16.0))).collect();
-                    let (o, n) = super::offset2d::best_plane(&pts, 1e-2).ok_or_else(|| err("mkoffset: the wire isn't planar"))?;
+                    let (o, n) = super::offset::wire::best_plane(&pts, 1e-2).ok_or_else(|| err("mkoffset: the wire isn't planar"))?;
                     Plane { origin: o, x_dir: nalgebra::Unit::new_normalize(ax2_x(&n)), normal: nalgebra::Unit::new_normalize(n) }
                 } else {
                     Plane { origin: P3::new(0.0, 0.0, z), x_dir: V3::x_axis(), normal: V3::z_axis() }
@@ -1165,7 +1165,7 @@ impl NativeKernel {
         let mt = to_w.m.transpose();
         let to_l = Affine { m: mt, t: -(mt * to_w.t) };
         let local: Vec<(Curve, f64, f64)> = edges.iter().map(|e| (e.curve.transformed(&to_l), e.t0, e.t1)).collect();
-        let loops = super::offset2d::offset_wire(&local, d)?;
+        let loops = super::offset::wire::offset_wire(&local, d)?;
         let wires: Vec<Shape> = loops
             .into_iter()
             .map(|l| Shape::Wire(l.into_iter().map(|p| DEdge { curve: p.c.transformed(&to_w), t0: p.t0, t1: p.t1 }).collect()))
@@ -1899,7 +1899,7 @@ impl NativeKernel {
 
     /// `offset name surface d`: the surface moved `d` along its normal (Su × Sv).
     pub fn offset_surf(&self, s: &DSurface, d: f64) -> Result<DSurface> {
-        let o = super::local::offset_surface(&s.s, true, d).ok_or(KernelError::Unsupported("this offset surface"))?;
+        let o = super::offset::sharp::offset_surface(&s.s, true, d).ok_or(KernelError::Unsupported("this offset surface"))?;
         let base = match &s.base {
             Some((b, d0)) => (b.clone(), d0 + d),
             None => (s.s.clone(), d),
@@ -1930,7 +1930,7 @@ impl NativeKernel {
         let domain = domain.map(|(u, v)| (clamp(u, pu0, pu1, s.s.u_periodic()), clamp(v, pv0, pv1, s.s.v_periodic())));
         // An offset past its base's Bézier range: the base extended there, offset.
         let reoffset = match (&s.base, domain) {
-            (Some((b, d)), Some(dom)) => super::face_build::extended_past(b, dom).and_then(|e| super::local::offset_surface(&e, true, *d)),
+            (Some((b, d)), Some(dom)) => super::face_build::extended_past(b, dom).and_then(|e| super::offset::sharp::offset_surface(&e, true, *d)),
             _ => None,
         };
         let sheet = super::face_build::face_from_surface(reoffset.as_ref().unwrap_or(&s.s), domain)?;

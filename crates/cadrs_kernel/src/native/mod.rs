@@ -67,14 +67,12 @@ internal! {
     math;
     meshsolid;
     nurbs;
-    offset2d;
-    offset_round;
+    offset;
     ops;
     pcurve;
     profile;
     recognize;
     silhouette;
-    slab;
     smb;
     split;
     split_area;

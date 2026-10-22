@@ -46,7 +46,7 @@ fn slab(face: &Body, d: f64) -> Result<Body> {
             let kind = super::sweep::Prism { plane, dir };
             Ok(super::sweep::sweep_full(&[mf], &[], &kind, 0.0, d.abs(), false, true)?.body)
         }
-        _ => super::slab::face_slab(face, 0, d),
+        _ => super::offset::slab::face_slab(face, 0, d),
     }
 }
 
@@ -175,7 +175,7 @@ fn thicken_sheet(k: &mut NativeKernel, sheets: &[Body], spec: &ThickenSpec) -> O
         if d < tol::ROUNDOFF {
             continue;
         }
-        let r = super::offset_round::shell(k, tid, &ShellSpec { remove: caps.clone(), thickness: d, outward: out, hollow: false, sharp: false }).ok()?;
+        let r = super::offset::round::shell(k, tid, &ShellSpec { remove: caps.clone(), thickness: d, outward: out, hollow: false, sharp: false }).ok()?;
         parts.push(r.bodies[0]);
     }
     let body = match parts.as_slice() {
