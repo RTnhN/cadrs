@@ -14,9 +14,3 @@ offset_05_off_extrusion
 # which offsets to a closed curve with a fan of normals to it), but unions of the torus slabs and
 # the balls fail in the boolean (an edge of three faces, open shells).
 offset_08_boolean_trees_result
-# Rounded inset with a face kept: a valid solid with SMLib's face and edge counts (15, 39) whose
-# geometry is the exact erosion: its section is 41.95986 at both ends (the 2D offsets of the
-# profile's loops), so its volume is 41.95986 × 9.7 = 407.0106; ours is 407.0099 (the inset
-# spline is a fit). SMLib's 407.3193 is its own approximation: its two end faces differ (42.244,
-# 41.931) and it measures the input 6.4e-4 over its exact 591.836.
-offset_06_off_extrusion

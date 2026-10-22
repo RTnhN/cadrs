@@ -297,6 +297,14 @@ class Oracle:
 
 # --- Known failures ------------------------------------------------------------------------
 
+# Cases whose SMLib volume and area are SMLib's own approximations, off by more than the 1e-4
+# they are compared to: compared on the counts, solidity and validity only. Why, with the exact
+# values ours are checked against elsewhere (tests/offset_local.rs), in each note.
+APPROXIMATE = {
+    ("offset", "offset_06_off_extrusion"): "SMLib's volume (407.3193) and area are its approximation: it measures the input 6.4e-4 over its exact 591.836 (a 59.1836 section, 10 deep) and gives the inset's two ends different areas (42.244, 41.931) where the erosion's are both 41.95986, its volume 41.95986 × 9.7 = 407.0106 (ours 407.0099, the inset spline a fit): volume and area not compared",
+}
+
+
 def known_failures(suite):
     """{name: slow} from tools/smlib_known_failures/<suite>.txt."""
     out = {}
@@ -387,6 +395,12 @@ def generate(root, suite, oracle):
             else:
                 c.note = "SMLib (the oracle) fails: %s" % r.get("status", "?")
         oracle.save()
+    for c in cases:
+        why = APPROXIMATE.get((suite, c.name))
+        if why:
+            c.expect.pop("volume", None)
+            c.expect.pop("area", None)
+            c.note = (c.note + "; " if c.note else "") + why
     nmodels = copy_fixtures(root, suite, cases)
     out = [
         "//! SMLib's %s tests (NVIDIA usd-brep `tests/prog_test/src/%s`, Apache-2.0; %s" % (

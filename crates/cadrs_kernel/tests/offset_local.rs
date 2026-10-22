@@ -255,6 +255,11 @@ fn draft_moves_a_seam_out_of_a_hole() {
 /// line) as a wire offset takes it: each edge in the loop's direction, a reversed one as a
 /// decreasing parameter range, in the face's plane (or as it is in space).
 fn extrusion_loop(fi: usize, in_plane: bool) -> Vec<(cadrs_kernel::native::curve::Curve, f64, f64)> {
+    extrusion_loop_n(fi, 0, in_plane)
+}
+
+/// [`extrusion_loop`] of the face's loop `li`.
+fn extrusion_loop_n(fi: usize, li: usize, in_plane: bool) -> Vec<(cadrs_kernel::native::curve::Curve, f64, f64)> {
     use cadrs_kernel::native::math::Affine;
     let bytes = std::fs::read(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/data/smlib/offset/off_extrusion.smb")).unwrap();
     let b = cadrs_kernel::native::smb::read_brep(&bytes).unwrap().body;
@@ -263,7 +268,7 @@ fn extrusion_loop(fi: usize, in_plane: bool) -> Vec<(cadrs_kernel::native::curve
     let fr = Frame::from_z(fr.o, fr.x.cross(&fr.y));
     let m = nalgebra::Matrix3::from_rows(&[fr.x.transpose(), fr.y.transpose(), fr.z.transpose()]);
     let to_plane = Affine { m, t: -(m * fr.o.coords) };
-    f.loops[0]
+    f.loops[li]
         .iter()
         .map(|c| {
             let e = &b.edges[c.edge];
@@ -425,4 +430,33 @@ fn names_survive_offsets_and_shells() {
     let shelled = k.shell_with(b, &ShellSpec { remove: vec![top], thickness: 1.0, outward: false, hollow: false, sharp: false }).unwrap();
     let top_name = names.faces[top.0 as usize];
     check(&k, &shelled, 0, 0, true, Some(top_name));
+}
+
+/// SMLib's offset demo 6, checked against the exact erosion (SMLib's own volume is its
+/// approximation): off_extrusion (a profile 10 deep: an outer loop of B-splines, an arc and a
+/// line, a square hole and a round one) inset 0.3 with its end face 0 kept is the profile eroded
+/// by 0.3, 9.7 deep. The eroded section from the 2D offsets of its loops (the outer one in, the
+/// holes out), × 9.7, is the volume to the inset spline's fit.
+#[test]
+fn rounded_inset_of_an_extrusion_is_its_eroded_profile() {
+    use cadrs_kernel::native::offset2d::offset_wire;
+    let bytes = std::fs::read(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/data/smlib/offset/off_extrusion.smb")).unwrap();
+    let b = cadrs_kernel::native::smb::read_brep(&bytes).unwrap().body;
+    let area = |loops: &[Vec<cadrs_kernel::native::offset2d::Piece2>]| -> f64 {
+        let mut a = 0.0;
+        for p in loops.iter().flatten() {
+            for k in 0..400 {
+                let (x, y) = (p.c.point(p.t0 + (p.t1 - p.t0) * k as f64 / 400.0), p.c.point(p.t0 + (p.t1 - p.t0) * (k + 1) as f64 / 400.0));
+                a += 0.5 * (x.x * y.y - y.x * x.y);
+            }
+        }
+        a.abs()
+    };
+    let n = b.faces[0].loops.len();
+    assert_eq!(n, 3);
+    let section = area(&offset_wire(&extrusion_loop_n(0, 0, true), -0.3).unwrap()) - (1..n).map(|li| area(&offset_wire(&extrusion_loop_n(0, li, true), 0.3).unwrap())).sum::<f64>();
+    let mut k = NativeKernel::new();
+    let id = k.insert(b);
+    let out = one(k.offset(id, &OffsetSpec { distance: -0.3, faces: vec![(FaceId(0), 0.0)], sharp: false }).unwrap());
+    close(volume(&k, out), section * 9.7, 1e-5);
 }
