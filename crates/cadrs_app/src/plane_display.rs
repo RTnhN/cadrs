@@ -390,20 +390,45 @@ fn place_plane_feature_labels(
         Without<AffineInner>,
     >,
     mut q_inner: Query<(&ComputedNode, &mut UiTransform, &mut TextColor), With<AffineInner>>,
+    mut last: Local<Option<(crate::camera::ViewState, Rect, u64, Vec<(FeatureId, Vec2)>)>>,
 ) {
     let v = view.view;
+    // Placing the labels picks the parts along rays from each corner: skipped while nothing it
+    // depends on (the view, the parts, the labels and their sizes) changed.
+    let sizes: Vec<(FeatureId, Vec2)> = q
+        .iter()
+        .filter_map(|(l, children, ..)| {
+            let n = q_inner.get(*children.first()?).ok()?.0;
+            Some((l.feature, n.size()))
+        })
+        .collect();
+    let key = (v, rect.0, cache.generation, sizes);
+    if last.as_ref() == Some(&key) {
+        return;
+    }
+    *last = Some(key);
     // The screen boxes of the labels placed so far: a label doesn't go over another
     // (`course_ps12_planes` 14: Plane 3's moved label met Plane 1's).
     let mut placed: Vec<Rect> = Vec::new();
     let mut labels: Vec<_> = q.iter_mut().collect();
-    // In feature-list order (the earlier plane keeps its place).
-    let order = |f: FeatureId| {
-        doc.as_deref()
-            .and_then(|d| d.active_element())
-            .and_then(|el| el.features().iter().position(|g| g.id == f))
-            .unwrap_or(usize::MAX)
-    };
-    labels.sort_by_key(|(l, ..)| order(l.feature));
+    // In feature-list order (the earlier plane keeps its place). The positions are looked up
+    // once: a search of the feature list per comparison cost milliseconds a frame in a big Part
+    // Studio.
+    if labels.is_empty() {
+        return;
+    }
+    let order: std::collections::HashMap<FeatureId, usize> = doc
+        .as_deref()
+        .and_then(|d| d.active_element())
+        .map(|el| {
+            el.features()
+                .iter()
+                .enumerate()
+                .map(|(i, g)| (g.id, i))
+                .collect()
+        })
+        .unwrap_or_default();
+    labels.sort_by_key(|(l, ..)| order.get(&l.feature).copied().unwrap_or(usize::MAX));
     for (label, children, mut node, mut transform, mut vis) in labels {
         let Some(&child) = children.first() else {
             continue;
