@@ -1035,6 +1035,16 @@ fn glue_touching_caps(b: &Body, tol: f64) -> Option<(Body, Vec<usize>)> {
     (out.solids.len() == 1 && out.shells.iter().all(|s| s.closed)).then_some((out, keep))
 }
 
+/// Each span's box of a spline edge of more than two spans (grown by the larger of `tol` and
+/// the edge's tolerance), else none.
+fn span_boxes_of(ed: &WEdge, tol: f64) -> Option<Vec<Bbox>> {
+    if ed.degenerate || !matches!(ed.curve, Curve::Nurbs(_)) {
+        return None;
+    }
+    let ps = ed.curve.pieces(ed.t[0].min(ed.t[1]), ed.t[0].max(ed.t[1]));
+    (ps.len() > 2).then(|| ps.windows(2).map(|w| curve_bbox(&ed.curve, w[0], w[1]).grow(tol.max(ed.tol))).collect())
+}
+
 /// Faces of `b` on a periodic surface whose seam edge runs across one of their holes (an
 /// earlier operation left the seam whole where a hole opened over it): the seam is cut at the
 /// hole's two vertices on it, its piece inside the hole dropped and the hole's two halves joined
@@ -1633,6 +1643,9 @@ fn run(a: &Body, b: &Body, mode: Mode, opts: RunOpts) -> Result<BoolOut> {
     // Edges of one body lying on a face of the other (imprinted as cuts once split).
     let mut on_face: Vec<Vec<usize>> = vec![Vec::new(); faces.len()];
     let ftree = super::bvh::Bvh::new(faces.iter().map(|f| f.bbox).collect());
+    // Per spline edge of many spans, each span's box (grown by the run's tolerance): made when
+    // first wanted, the edge's own box over a face's.
+    let span_boxes: Vec<std::sync::OnceLock<Option<Vec<Bbox>>>> = (0..ne).map(|_| std::sync::OnceLock::new()).collect();
     for e in 0..ne {
         if pool.edges[e].degenerate {
             continue;
@@ -1649,6 +1662,13 @@ fn run(a: &Body, b: &Body, mode: Mode, opts: RunOpts) -> Result<BoolOut> {
                 if !on_face[fi].contains(&e) {
                     on_face[fi].push(e);
                 }
+                continue;
+            }
+            // A spline edge whose spans' boxes (their control points' hulls) all keep off the
+            // face's box meets it nowhere: no search along it (each a few hundred projections).
+            if let Some(boxes) = span_boxes[e].get_or_init(|| span_boxes_of(&ed, run_tol))
+                && !boxes.iter().any(|b| b.overlaps(&faces[fi].bbox))
+            {
                 continue;
             }
             for t in ssi::curve_surface(&ed.curve, ed.t[0], ed.t[1], &faces[fi].surf) {
@@ -3001,6 +3021,11 @@ pub fn assemble_shells(b: &mut Body) -> Result<()> {
 /// cross the shell an even number of times when they do. None when the votes don't settle it.
 fn shell_points_out(b: &Body, faces: &[usize], polys: &[Vec<Vec<P2>>]) -> Option<bool> {
     let size = b.bbox().diagonal().max(tol::ROUNDOFF);
+    // Rays against this shell's faces only, each where the line comes to its box.
+    let mut boxes = vec![Bbox::empty(); b.faces.len()];
+    for &f in faces {
+        boxes[f] = b.face_bbox(f);
+    }
     let (mut out, mut inward) = (0, 0);
     for &f in faces.iter().take(3) {
         let fc = &b.faces[f];
@@ -3009,8 +3034,8 @@ fn shell_points_out(b: &Body, faces: &[usize], polys: &[Vec<Vec<P2>>]) -> Option
         let n = fc.surf.normal(uv.x, uv.y) * if fc.sense { 1.0 } else { -1.0 };
         let (t1, t2) = (any_perpendicular(&n), n.cross(&any_perpendicular(&n)));
         for d in [n, (n + t1 * 0.3).normalize(), (n + t2 * 0.3).normalize()] {
-            let hits = classify::ray_hits(b, polys, &p, &d);
-            let k = hits.iter().filter(|(t, hf, _)| *t > 1e-7 * size && faces.contains(hf)).count();
+            let hits = classify::ray_hits_among(b, polys, faces, Some(&boxes), &p, &d);
+            let k = hits.iter().filter(|(t, _, _)| *t > 1e-7 * size).count();
             if k % 2 == 0 {
                 out += 1;
             } else {

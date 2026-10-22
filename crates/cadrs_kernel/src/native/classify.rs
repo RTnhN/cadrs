@@ -418,11 +418,24 @@ pub(crate) static POINTS: std::sync::atomic::AtomicU64 = std::sync::atomic::Atom
 
 /// Every crossing of the line with the faces of the body: (t, face, point), sorted by t.
 pub fn ray_hits(body: &Body, polys: &[Vec<Vec<P2>>], o: &P3, d: &V3) -> Vec<(f64, usize, P3)> {
+    let all: Vec<usize> = (0..body.faces.len()).collect();
+    ray_hits_among(body, polys, &all, None, o, d)
+}
+
+/// [`ray_hits`] with the faces `among` only, each skipped where the line keeps off its box
+/// (`boxes`, the faces' [`Body::face_bbox`]es by face index, when given).
+pub fn ray_hits_among(body: &Body, polys: &[Vec<Vec<P2>>], among: &[usize], boxes: Option<&[Bbox]>, o: &P3, d: &V3) -> Vec<(f64, usize, P3)> {
     RAYS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     let bb = body.bbox().grow(1.0);
     let span = bb.diagonal() + (bb.center() - o).norm();
     let mut out = Vec::new();
-    for (fi, f) in body.faces.iter().enumerate() {
+    for &fi in among {
+        let f = &body.faces[fi];
+        if let Some(bx) = boxes
+            && !line_meets_box(o, d, &bx[fi].grow(tol::POINT + tol::REL * span))
+        {
+            continue;
+        }
         for (t, u, v) in ray_surface(&f.surf, o, d, -span, span) {
             let uvs = periodic_candidates(&f.surf, u, v, &polys[fi]);
             for uv in uvs {
@@ -438,6 +451,29 @@ pub fn ray_hits(body: &Body, polys: &[Vec<Vec<P2>>], o: &P3, d: &V3) -> Vec<(f64
     // drop exact duplicates on the same face.
     out.dedup_by(|a, b| a.1 == b.1 && (a.0 - b.0).abs() < tol::ROUNDOFF);
     out
+}
+
+/// Whether the whole line through `o` along `d` meets the box.
+fn line_meets_box(o: &P3, d: &V3, b: &Bbox) -> bool {
+    if b.is_empty() {
+        return false;
+    }
+    let (mut lo, mut hi) = (f64::NEG_INFINITY, f64::INFINITY);
+    for k in 0..3 {
+        if d[k].abs() < tol::TINY {
+            if o[k] < b.min[k] || o[k] > b.max[k] {
+                return false;
+            }
+            continue;
+        }
+        let (t0, t1) = ((b.min[k] - o[k]) / d[k], (b.max[k] - o[k]) / d[k]);
+        lo = lo.max(t0.min(t1));
+        hi = hi.min(t0.max(t1));
+        if lo > hi {
+            return false;
+        }
+    }
+    true
 }
 
 /// The (u, v) shifted by whole periods into the face's uv box.

@@ -1573,6 +1573,37 @@ fn curve_curve_closed(a: &Curve, a0: f64, a1: f64, b: &Curve, b0: f64, b1: f64, 
 mod tests {
     use super::*;
 
+    /// A spline band running 7e-5 off a cylinder all along (a thread's root on its tube, the
+    /// sweep's approximation a hair inside): no intersection, found without cutting the pair
+    /// down to the smallest cells (the distance is all but constant over the band, which its
+    /// second differences show).
+    #[test]
+    fn band_a_hair_off_a_cylinder() {
+        let f = Frame::world();
+        let cyl = Surface::Cylinder { f, r: 18.375 };
+        let band = Surface::Nurbs(Arc::new(Surface::Cylinder { f, r: 18.375 - 7e-5 }.to_nurbs((0.0, 1.2), (-3.0, -1.0))));
+        let bb = Bbox { min: P3::new(-20.0, -20.0, -4.0), max: P3::new(20.0, 20.0, 0.0) };
+        let r = surface_surface_tol(&band, ((0.0, 1.2), (-3.0, -1.0)), &cyl, ((0.0, TAU), (-5.0, 1.0)), &bb, tol::POINT);
+        assert!(r.curves.is_empty() && r.coincident.is_empty(), "{} curves, {} coincident", r.curves.len(), r.coincident.len());
+        assert!(r.work < 20_000, "{} cell pairs", r.work);
+    }
+
+    /// A spline plate pierced by a thin cylinder whose axis runs between the plate's samples:
+    /// the distance to the cylinder kinks at its axis, so the samples' second differences
+    /// don't bound it there, and the pair must not be culled on them (tube adapter: a small
+    /// hole lost, the boolean left open).
+    #[test]
+    fn thin_cylinder_through_a_spline_plate() {
+        let f = Frame::world();
+        let plate = Surface::Nurbs(Arc::new(Surface::Plane { f }.to_nurbs((-10.0, 10.0), (-10.0, 10.0))));
+        let bb = Bbox { min: P3::new(-11.0, -11.0, -2.0), max: P3::new(11.0, 11.0, 2.0) };
+        for (x, y) in [(1.3, 0.7), (0.3125, 0.3125), (5.3125, -2.8125), (-0.15625, 0.46875)] {
+            let cyl = Surface::Cylinder { f: Frame { o: P3::new(x, y, 0.0), ..f }, r: 0.02 };
+            let r = surface_surface_tol(&plate, ((-10.0, 10.0), (-10.0, 10.0)), &cyl, ((0.0, TAU), (-1.0, 1.0)), &bb, tol::POINT);
+            assert_eq!(r.curves.len(), 1, "axis at ({x}, {y}): {} curves", r.curves.len());
+        }
+    }
+
     /// A line through a patch of a surface of revolution (no implicit distance) between two of
     /// its samples: both crossings, from the search over the surface.
     #[test]

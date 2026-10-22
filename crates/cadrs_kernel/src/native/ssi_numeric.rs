@@ -296,20 +296,59 @@ fn apart(a: &Cell, b: &Cell, tol: f64) -> bool {
 }
 
 /// Whether the exact (1-Lipschitz) distance of `dom` keeps the cell `c` off it: every sample on
-/// one side, farther than the cell can stray from its nearest sample.
+/// one side, farther than the cell can stray from its nearest sample; or every sample on one
+/// side by more than the distance's own interpolation error over the cell (from its second
+/// differences across the samples, as a cell's `sag` is taken from the surface's). The second
+/// catches a face running a hair off the surface all along (a thread's root 7e-5 off its tube:
+/// the distance is all but constant over it), which the first leaves to be cut down to the
+/// smallest cells.
 fn off_exact(dom: &Dom, c: &Cell, tol: f64) -> bool {
     if !dom.exact {
         return false;
     }
-    let mut sign = 0.0;
-    for p in &c.pts {
-        let Some(d) = dom.s.signed_distance(p) else { return false };
-        if d.abs() <= c.reach + tol || (sign != 0.0 && d.signum() != sign) {
-            return false;
-        }
-        sign = d.signum();
+    let mut g = [0.0; 9];
+    for (k, p) in c.pts.iter().enumerate() {
+        let Some(x) = dom.s.signed_distance(p) else { return false };
+        g[k] = x;
     }
-    true
+    let (lo, hi) = g.iter().fold((f64::INFINITY, f64::NEG_INFINITY), |(lo, hi), &x| (lo.min(x), hi.max(x)));
+    // Every sample on one side by more than the cell's reach.
+    if lo > c.reach + tol || hi < -(c.reach + tol) {
+        return true;
+    }
+    // Every sample on one side by more than g's interpolation error over the cell: the second
+    // differences along u and v are h² g'' there, and the bilinear interpolant of g strays
+    // from g by at most (h_u² |g_uu| + h_v² |g_vv|) / 8, taken twice over (as the cell's `sag`
+    // is). That bounds it only where g is smooth all over the cell and its curvature changes
+    // little across it: the cell well clear of the distance's kinks (else a small hole's axis
+    // between two samples goes unseen).
+    if lo <= tol && hi >= -tol {
+        return false;
+    }
+    let at = |i: usize, j: usize| g[i * 3 + j];
+    let duu = (0..3).map(|j| (at(0, j) - 2.0 * at(1, j) + at(2, j)).abs()).fold(0.0, f64::max);
+    let dvv = (0..3).map(|i| (at(i, 0) - 2.0 * at(i, 1) + at(i, 2)).abs()).fold(0.0, f64::max);
+    let slack = (duu + dvv) / 4.0 + tol;
+    (lo > slack || hi < -slack) && c.pts.iter().all(|p| kink_clearance(dom.s, p) > 2.0 * c.size + c.reach)
+}
+
+/// How far `p` is from where the exact distance of `s` has a kink (a cylinder's axis, a
+/// sphere's centre, a torus's core circle and axis): the distance is smooth only clear of it.
+fn kink_clearance(s: &Surface, p: &P3) -> f64 {
+    match s {
+        Surface::Plane { .. } => f64::INFINITY,
+        Surface::Cylinder { f, .. } => {
+            let l = f.local(p);
+            l.x.hypot(l.y)
+        }
+        Surface::Sphere { f, .. } => (p - f.o).norm(),
+        Surface::Torus { f, rmaj, .. } => {
+            let l = f.local(p);
+            let rho = l.x.hypot(l.y);
+            (rho - rmaj).hypot(l.z).min(rho)
+        }
+        _ => 0.0,
+    }
 }
 
 /// The two halves of a cell, cut across its longer side.
