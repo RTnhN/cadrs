@@ -19,9 +19,10 @@ crates/cadrs_kernel/
   src/projection.rs   # drawing-view projection types and source matching (P3C.2)
   src/native/          # the B-rep kernel (see "The native kernel" below)
   src/backend/mod.rs   # `backend::native::NativeKernel` (also `cadrs_kernel::DefaultKernel`)
-  tests/conformance.rs # the conformance suite, 83 cases
+  tests/conformance.rs # the conformance suite, 84 cases
   tests/occt_*.rs, smlib_*.rs # suites generated from OCCT's and SMLib's tests (see "Tests")
   tests/fuzz_readers.rs # property tests: no input panics a reader or a B-spline constructor
+  tests/exchange_corpus.rs # OCCT's dataset STEP and IGES files read and checked (needs the dataset)
   tests/native_debug.rs # reproductions and timings (several replay CADRS_DUMP_DIR dumps)
 ```
 There's no Bevy dependency. `cadrs_core` depends on `cadrs_kernel`, and features rebuild through it
@@ -448,8 +449,16 @@ one STEP file with their product names), used by `assembly::interference::{check
 
 The native reader and writer are `native::step` and `native::iges`, sharing `native::xbuild`,
 which rebuilds the files' faces into valid bodies (p-curves fitted where a file has none; faces
-sewn by their edges). On 638 real files (OCCT's samples, Onshape, FreeCAD, KiCad) 624 read to
-valid solids; the others have non-manifold edges or gaps in the files themselves. FreeCAD reads
+sewn by their edges). `tests/exchange_corpus.rs` reads every STEP and IGES file of OCCT's public
+dataset (389: OCCT's samples and its bug-report files, many broken on purpose) and checks each
+part (valid topology within the file's own tolerance, each solid's volume positive, equal to its
+tessellation's within 1 % and unchanged by a move, no face dropped): 261 read clean, 183 of them
+with solids. The other 128 are listed in the test with the first problem each hits (the commonest:
+edge ends off their vertices, p-curves off their edges, no shape the readers support), and the
+test fails when a listed file reads clean or an unlisted one doesn't. The gate runs it (it needs
+the dataset, so CI's per-push subset doesn't). An earlier count, 624 of 638 files from OCCT's
+samples, Onshape, FreeCAD and KiCad, was taken on a corpus that isn't in the repository; it is
+superseded by this one. FreeCAD reads
 our STEP and IGES exports as valid solids with the same volume and area to about 1e-14.
 
 **Mesh files are ours**, not a backend's: `exchange::write_stl_binary`, `write_stl_ascii` and
