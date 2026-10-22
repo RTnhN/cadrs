@@ -311,7 +311,6 @@ offset faces_type_i_f2  # the volume differs from OCCT's
 offset faces_type_i_f3  # the moved faces don't close: a face's loop crosses itself in (u, v)
 offset faces_type_i_f4  # a boolean leaves an open shell
 offset faces_type_i_f5  # the moved faces don't close: a face's loop crosses itself in (u, v)
-offset faces_type_i_g4  # the volume differs from OCCT's
 offset faces_type_i_g5  # a boolean leaves an open shell
 offset faces_type_i_i5  # the volume differs from OCCT's
 offset faces_type_i_j5  # the volume differs from OCCT's
@@ -334,12 +333,8 @@ offset shape_type_i_c_i4  # the moved faces don't close: a face's loop crosses i
 offset shape_type_i_c_i5  # the volume differs from OCCT's
 offset shape_type_i_c_v2  # the moved faces don't close: a face's loop crosses itself in (u, v)
 offset shape_type_i_c_w1  # the moved faces don't close: a face's loop crosses itself in (u, v)
-offset shape_type_i_d4  # the moved faces don't close: a p-curve gap
-offset shape_type_i_d5  # the moved faces don't close: a p-curve gap
 offset shape_type_i_d6  # moved faces no longer meet along an edge
 offset shape_type_i_d7  # moved faces no longer meet along an edge
-offset shape_type_i_e3  # the moved faces don't close: a solid inside out
-offset shape_type_i_e4  # the moved faces don't close: a solid inside out
 offset shape_type_i_g2  # the moved faces no longer meet at a corner
 offset shape_type_i_g4  # unsupported: faces bounded by rational or high-degree B-splines
 offset faces_type_i_k6  # the volume differs from OCCT's

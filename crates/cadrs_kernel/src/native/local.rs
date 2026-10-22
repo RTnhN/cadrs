@@ -881,6 +881,24 @@ pub fn replace_surfaces_in(b: &Body, surfs: &[Surface], domains: &[Option<UvBox>
                 at = Some(P2::new(q.x, q.y));
                 nl.push(Coedge { edge: c.edge, fwd: c.fwd, pc });
             }
+            // On a periodic surface changed in place (its frame kept: an offset, not a turn), each
+            // p-curve a whole number of periods from where it was, so the loop keeps the old
+            // one's layout (projections land a seam's two uses on the same side of it).
+            let in_place = surf != b.faces[fi].surf && std::mem::discriminant(&surf) == std::mem::discriminant(&b.faces[fi].surf) && surf.frame().is_some() && surf.frame() == b.faces[fi].surf.frame();
+            if in_place && (surf.u_periodic() || surf.v_periodic()) && nl.len() == lp.len() {
+                for i in 0..nl.len() {
+                    let e = nl[i].edge;
+                    if e >= b.edges.len() || out.edges[e].degenerate || b.edges[e].degenerate {
+                        continue;
+                    }
+                    let d = lp[i].pc.point(b.edges[e].mid_t()) - nl[i].pc.point(out.edges[e].mid_t());
+                    let period = |x: f64, periodic: bool| if periodic { (x / TAU).round() * TAU } else { 0.0 };
+                    let (du, dv) = (period(d.x, surf.u_periodic()), period(d.y, surf.v_periodic()));
+                    if du != 0.0 || dv != 0.0 {
+                        nl[i].pc = nl[i].pc.transformed(&Affine::translation(V3::new(du, dv, 0.0)));
+                    }
+                }
+            }
             // A pole's point edge on a new periodic surface (a B-spline cone become a cone), or
             // on a face whose seam moved: no projection gives its p-curve. It runs from where
             // the loop arrives at the pole to where it leaves, across the turn the loop needs to

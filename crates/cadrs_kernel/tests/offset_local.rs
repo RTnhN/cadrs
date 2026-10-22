@@ -789,3 +789,25 @@ fn move_face_moves_a_boss_and_refuses_topology_changes() {
     let mirror = Motion::reflection(Point3::new(10.0, 10.0, 0.0), Vector3::x_axis());
     assert!(matches!(k.move_faces(part, &faces, &mirror), Err(KernelError::InvalidParameter(_))));
 }
+
+/// Sharp offsets of a whole sphere and of a sphere cut by a plane (OCCT's offset
+/// shape_type_i_e3/e4/d4): the sphere's seam keeps its two sides when the sphere grows or shrinks
+/// (its p-curves were projected onto one side, leaving a loop that encloses nothing).
+#[test]
+fn sharp_offset_of_a_sphere_keeps_its_seam() {
+    use cadrs_kernel::native::draw::Shape;
+    let mut k = NativeKernel::new();
+    let Shape::Body(ball) = k.psphere(15.0).unwrap() else { panic!("a sphere body") };
+    for d in [1.0, -1.0] {
+        let r = one(k.offset(ball, &OffsetSpec { distance: d, faces: vec![], sharp: true }).unwrap());
+        close(volume(&k, r), 4.0 / 3.0 * PI * (15.0f64 + d).powi(3), 1e-6);
+        assert!(k.get(r).unwrap().check_with(cadrs_kernel::native::CheckLevel::Full).is_empty());
+    }
+    // Below latitude 60°: a sphere and a plane; grown by 1 the cap's plane rises by 1.
+    let Shape::Body(zone) = k.psphere_zone(None, 15.0, -90.0, 60.0, 360.0).unwrap() else { panic!("a sphere body") };
+    let r = one(k.offset(zone, &OffsetSpec { distance: 1.0, faces: vec![], sharp: true }).unwrap());
+    let (rr, h) = (16.0f64, 15.0 * 60f64.to_radians().sin() + 1.0);
+    // The ball of radius 16 less its cap above z = h.
+    let cap = PI * (rr - h).powi(2) * (3.0 * rr - (rr - h)) / 3.0;
+    close(volume(&k, r), 4.0 / 3.0 * PI * rr.powi(3) - cap, 1e-6);
+}
