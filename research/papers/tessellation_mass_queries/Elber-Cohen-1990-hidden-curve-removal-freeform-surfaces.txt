@@ -1,0 +1,589 @@
+                                                                                            ~     ComputerGraphics, Volume24, Number4, August1990
+
+
+
+                                   Hidden Curve Removal for Free Form Surfaces*
+
+                                                                   Gershon Elber and Elaine Cohen
+                                                                          Computer Science Department
+                                                                              University of Utah
+
+
+Abstract                                                                                               In [16,1,8,21,26] the idea of quantitative invisibility
+                                                                                                    and the use of critical points was developed. Crit-
+This paper describes a hidden curve algorithm specifically                                          ical points are intersection points between projected
+designed for sculptured surfaces. A technique is described                                          polygon primitives. The technique was extended to
+to extract the visible curves for a given scene without the                                         bi-quadratic patches in [12]. The primitives are subdi-
+need to approximate the surface by polygons. This algo-                                             vided at each critical point which guarantees that the
+rithm produces higher quality results than polygon based                                            interior of each segment has homogeneous visibility. A
+algorithms, as most of the output set has an exact represen-                                        segment's visibility is then tested by firing a ray from
+tation. Surface coherence is used to speed up the process.                                          the eye to an interior point of the segment.
+Although designed for sculptured surfaces, this algorithm
+is also suitable for polygonal data.                                                                  While the same basic approach is used here, it is
+                                                                                                    extended to apply to arbitrary nonuniform rational
+  C R Categories and Subject Descriptors: 1.3.5                                                     B-spline (NURBS) surfaces (the primitives). By not
+[Computer Graphics]: Computational Geometry and
+Object Modeling. 1.3.7 [ C o m p u t e r Graphics]: Three-                                          using polygonal approximations, the algorithm elimi-
+Dimensional Graphics and Realism.                                                                   nates the vast amount of data resulting from the ap-
+                                                                                                    proximation of surfaces by polygons. The algorithm
+  Additional Key Words and Phrases: hidden curve re-                                                presented here has several stages (including extracting
+moval, curve-curve intersection, visibility propagation.                                            curves of interest, splitting at critical points, and vis-
+                                                                                                    ibility testing). Surface coherence is used extensively
+                                                                                                    to reduce the number of ray tests one needs to perform
+                                                                                                    to detect curve visibility, in a similar way to that for
+1        Introduction
+                                                                                                    polygons[10,11].
+
+Hidden line removal is one of the earliest computer                                                    The trade-off is a reduced number of primitives in
+graphics problems; yet new algorithms appear every                                                  exchange for a higher complexity of the operations be-
+year [16,1,8,21,4,15,17,18,20,22,23,24,26]. Usually they                                            tween them. Driving the output directly from the sur-
+are developed for polygonal data, so sculptured sur-                                                face results in high quality images (Figure 1). Only
+faces must be preprocessed and approximated as large                                                silhouette curves need to be approximated, but they
+collections of polygons. The result displays the polygo-                                            can be approximated at a much higher resolution than
+nized models accurately, but original model informa-                                                with pre-polygonized surfaces. Figure I compares the
+tion is lost [4,18,20] (see figure 1).                                                              two, after adaptive subdivision has been used to obtain
+                                                                                                    the polygonal approximations.
+     * T h i s w o r k was s u p p o r t e d i n p a r t b y D A R P A (N00014-88-K-                   Section 2 defines the required elements for present-
+0689). All o p i n i o n s , findings, c o n c l u s i o n s o r r e c o m m e n d a t i o n s
+e x p r e s s e d i n this d o c u m e n t are t h o s e o f t h e a u t h o r s a n d do n o t     ing the algorithm and also introduces the basic hid-
+n e c e s s a r i l y reflect t h e views of t h e s p o n s o r i n g a g e n c i e s .            den curve algorithm. Section 3 briefly explains how
+                                                                                                    the curves of interest are extracted from the surface.
+Permission to copy without fee all or part of this material is granted
+provided that the copies are not made or distributed for direct                                     Usually four types of curves are useful: the surface
+commercial advantage, the ACM copyright notice and the title of the                                 boundary curves, curves along C 1 discontinuities in
+publication and its date appear, and notice is given that copying is by
+                                                                                                    the surface (if any), iso-parametric curves, and silhou-
+permission of the Association for Computing Machinery. To copy
+otherwise, or to republish, requires a fee and/or specific permission.                              ette curves. Section 4 addresses the 2D curve-curve
+
+
+
+
+ ©1990                     ACM-0-89791-344-2/90/008/0095                             $00.75                                                                 95
+O          SIGGRAPH '90, Dallas, August 6-10, 1990
+
+
+
+
+      Figure 1: Left: 1930 polygons, middle: 4215 polygons, right: 2 N U R B S surfaces (56 rational patches)
+
+
+intersection problems specific to this algorithm. Sec-              3. Let P be the map to the projection plane,
+tion 5 presents issues in visibility testing arising from              P ( x , y , z) = (x,y,O). The subscript P
+a surface-ray intersection algorithm. Computation of                   will usually denote the mapped entity,
+surface-ray intersections is relatively expensive, espe-               e.g., c p = P(C).
+cially when polygonal approximations to the surfaces
+have not been used, so methods to speed the compu-             We consider only simple surfaces whose projected
+tation are described. Section 6 discusses extensions to      curves are simple curves. Also, intersection between
+this algorithm for trimmed surfaces. A more in depth         surfaces are restricted to lie along boundaries. If not,
+treatment of the above issues can be found in [14].          the surfaces should be intersected using the appropri-
+  All the images/comparison examples shown in this           ate boolean operations, and trimmed surfaces should
+paper, were generated using nonuniform, rational B-          be created. Figure 9 has surfaces which interpenetrate,
+spline (NURB) surfaces as implemented in the Alpha_l         and so boundaries between them are unknown and vis-
+system.                                                      ibility cannot be always correctly determined.
+                                                               Suppose surface S = S(u, v) E C l, then N(u, v) =
+                                                             ~Sxg'S
+                                                             0"-~ ~ is normal to the surface S. Unless otherwise
+2     The Basic Algorithm                                    specified, all surfaces with which we deal are assumed
+                                                             to be C 1 continuous, and their parametrizations are
+Let the view orientation be normalized so that the view      assumed to be such that N(u, v) ~ O. If p is a point
+point V is on the positive z-axis at ~ and the image is      on the surface S, then it is the image of a point in
+projected onto the plane z = 0, which will be referred       parameter space, so we write p = S(u p, vP).
+to as the projection plane or the screen. All other views
+can easily be preprocessed into this view.                        D e f i n i t i o n 2.2
+
+     D e f i n i t i o n 2.1                                         1. A silhouette point of a surface is a point
+                                                                        p on the surface whose normal has a zero
+        1. A non-self-intersecting surface is called                    z-component, i.e. Nz(u p, vP) _-- O.
+           a simple surface.                                         2. A silhouette curve of surface S is an
+        2. A non-self-intersecting curve is called a                    ordered set of silhouette points Q c S
+           simple curve.                                                forming a continuous curve such that
+
+
+96
+                                                                     ~   ComputerGraphics,Volume24, Number4, August1990
+
+
+
+         V p E Q, a n d V e > O, 3 q E S such                                 D e f i n i t i o n 2.4
+         that N z ( u q, v ' ) # O, and l i p - qll < e.
+                                                                                 1. Surface boundary curves and surface sil-
+      3. I f 3 D C S that is the image of an open                                   houette curves are defined to be active
+         disk such that V d E D, N z ( u ~, v a) = O,                               curves.
+         we say that S has a silhouette surface
+         and the above definition of the silhouette                              2. The framework ~bs of a surface S is the
+         curve is simply its boundary.                                              set of all its active curves. Set ¢ ~ =
+                                                                                     p(¢s).
+  We will not consider surfaces with silhouette sub-                             3. A n y curve which is not active is defined
+surfaces in them. Surfaces that do contain silhouette                               to be a passive curve. For example, an
+surfaces may be preprocessed by trimming out the sil-                               isoparametric curve is passive.
+houette sub-surfaces (see Section 6).
+                                                                            Clearly active curves are those curves at which visi-
+    L e m m a 2.1 A surface S cart be decom-                              bility of all curves can change when crossing them.
+    posed into silhouette curves and disjoint re-
+    gions whose boundaries are surface bound-                                 L e m m a 2.3 Let C be a curve in the scene.
+    aries and/or silhouette curves.                                           I f Cp does not intersect UseS,, then all points
+                                                                              p E C have the same invisibility count.
+   P r o o f : Consider a point p e S, Nz(uP, vP) ¢ O,
+and the set of points which can be reached from p by
+                                                                               C o r o l l a r y 2.1 Given a curve C, let {C~}
+continuous paths in the surface that do not cross any
+                                                                               denote the collection of sub-curves of Cp re-
+silhouette curves. Let t h a t set be Rp, and let Rq be a
+                                                                               sulting from subdividing Cp at each of its in-
+similar set for point q E S,q ~ R p, if such a point q
+                                                                               tersection points with UseSe, and let C ~ be
+exists. Clearly R v 1"7R q = $, for if there exists point
+                                                                               each pre-image, i.e., C i C C. For each C i,
+r E R p N R q, then there exists a continuous path from
+                                                                               all points p E C i have the same invisibility
+p to r and from r to q, and hence from p to q. But this
+                                                                               count, except possibly the two endpoints.
+contradicts the way we picked q. Call the collection of
+path connected regions T¢.
+                                                                             The proof of lemma 2.3 can be found in [14]. Corol-
+   For our proofs we require that the projection opera-                   lary 2.1 suggests an algorithmic way of testing visibility
+tion be bijective between each R E 7~ and its projected                   of curves in a scene. Obviously many projected curves
+image.                                                                    will intersect with some projected frameworks, but the
+                                                                          number of times they do is finite and usually small.
+     L e m m a 2 . 2 Let R E 7~ and rl,r2 E R.                            For each of the subdivided curves, only one point in
+     Then, g z ( u r l , v r , ) Y , ( u r a , vr~) > O, i.e. they        its open interval needs to be tested for its invisibility
+     have the same sign at both rl and r~.                                count. As noted in [2,11], silhouette curves can overlap;
+                                                                          that is, a silhouette curve can be G 1 continuous and
+   P r o o f i Since there exists a continuous path from                  still have cusps in its projection (called a curtain fold
+rl to r2 totally in R, Nz along that path can have no                     [2]). Since the visibility of the silhouette curves may
+zeros so Nz has the same sign at both rl and r2.                          change at curtain folds, they must be split at these
+  We define invisibility as invisibility count of zero                    points.
+where:                                                                       Using Corollary 2.1, we can define the basic algo-
+                                                                          rithm:
+     D e f i n i t i o n 2.3 The invisibility count of a
+     point p is the number of intersections of the                           . Extract all curves of interest from the given sur-
+     half-open ray ~ from the view point V to the                              face(s) in the scene. This results in at least the
+     point p has with sculptured surfaces in the                               framework of each surface, but can also include
+     scene.                                                                    passive curves such as isoparametric curves.
+
+   We will concentrate our discussion on determining                         . Split each passive and active curve C at each point
+visibility only (i.e. where the count is zero), although                       where its projection Cp intersects with any ¢~
+one may use our algorithm to detect quantative invis-                          and where c s is closer to the viewer.
+ibility [6].
+                                                                             . For each curve that results from the previous
+  Two types of curves are dealt with:                                          stage, fire a ray in the view direction through an
+                                                                                                                                    97
+               SIGGRAPH '90, Dallas, August 6-10, 1990
+
+
+
+
+                                  C 1 Discontinuity and Silhouette
+
+
+                                                                                                    l i l l i              n
+
+
+    Bo~mdary                                                                                           n a    o    u   I
+                                                                                  I                - Iso-paramertic
+                     Silhouette   ~
+                                                      G 1 Discontin~ty
+
+      Figure 2: Four curve types in surface display.
+                                                                                ...
+                                                                               mmUmml|ii/|i
+       arbitrary interior point and find the invisibility                      niumimminn
+       count of that point.
+
+    4. If the invisibility count of the point is zero, then
+                                                                               |-----Sill|Nil
+       curve is shown, otherwise it is hidden.
+
+   Based on Corollary 2.1, the evaluation of the invis-
+                                                                                                /mii/ml
+ibility count picks an arbitrary point p in the interior                   Figure 3: Pawn extracted curves, in u - v space.
+of curve C, and determines the visibility of all of C us-
+ing the invisibility count of p. Curves are always split
+at tangent intersections, since they could potentially                      The silhouette curves are not isoparametric curves
+change visibility at those points. A technique is used in                usually (Figure 3), and in general, there is no compu-
+[16,1,8,21,26] of splitting a line into segments anytime                 tationally feasible way to represent t h e m exactly. An
+it intersects with any projected polygon boundary to                     approximation technique must be used in this case, and
+make the segment visibility homogeneous. In the next                     a piecewise linear curve is the simplest choice.
+sections, we will describe the different stages for ar-                    One method of extracting the silhouette curves of a
+bitrary sculptured surfaces. This algorithm, although                    surface is to subdivide the surface up to a given e toler-
+conceptually simple, does require accurate computa-                      ance and fetch all the surface pieces with silhouettes on
+tion in nonrobust numerical situations. We discuss our                   them. We seek methods using subdivision and spline
+approaches to simplifying the operations and to reduc-                   properties to identify regions with silhouettes. To solve
+ing the number of times these complex operations must                    this problem we are interested only in the z component
+be performed.                                                            of g(u, v),
+
+
+3       Curve Extraction
+                                                                          N,(u,v) = 0=(u,v)00 (u,v)0 _ 0y(,v)0u 0=(u,v)0 (1)
+The four types of curves which we display are bound-                        Now if the first term on the right side of equation 1
+ary curves, iso-parametric curves, curves along C 1 dis-                 is positive everywhere and the second negative every-
+continuities in the surface, and silhouette curves (see                  where, Nn is positive everywhere.
+Figure 2). All but the last type are view independent.
+   Extraction of the first three types of curves is usually                   L e m m a 3.1 Given a scalar B.spline surface
+extremely simple since these curves are isoparametric.                                   n--I m--I
+For example, Figure 3 shows the same pawn as in Fig-
+                                                                               a(u,v) = E      E     aijB',~.,~'.(u)BL'.,'.(v)'
+ure 1. We assumed the surfaces are C 1 continuous,
+                                                                                         j=0   i=0
+but if some are not, they must be subdivided at the
+appropriate isoparametric values. This creates a new                          then oa(u,v)
+                                                                                     ou    > 0 whenever ai+lj - aij > 0
+boundary and two new surfaces on which the algorithm
+is then correct. This splitting stage is only added when
+tangent plane discontinuities are present.                                 P r o o f : Consider partial derivative of o" with respect
+
+
+98
+                                                                                       ~ ' Computer Graphics, Volume 24, Number 4, August t 990
+
+
+
+                                                                                             vergence, because the subsurface pieces are relatively
+                                                                                             flat (from the flatness test during the subdivisions).
+                                                                                             Figure 6 shows the pawn object with the resulting po-
+                                                                                             tential silhouette sub-surfaces from another view (left),
+                                                                                             and improved (right). The result is a piecewise linear
+                                                                                             approximation of the real silhouette which is accurate
+                                                                                             on its vertices. One can adaptively improve the middle
+                                                                                             of each segment until the distance between the previ-
+                                                                                             ous and new are within tolerance. By including this
+                                                                                             improvement stage, we now have curve which has a
+                                                                                             high degree of accuracy, both in its resolution (num-
+                                                                                             ber of points) and accuracy of each point.
+
+
+
+                                                                                              4     Curve-Curve             Intersection
+   Figure 4: Adaptive silhouette extraction, in R 3.
+                                                                                             Curve-curve intersection is not a problem specific to
+                                                                                             hidden curve removal algorithms. The solution to
+                                                                                             the curve-curve intersection problem is generally not
+                                                                                             available in analytic form, and some kind of subdivi-
+                                                                                             sion or iterative technique is used to determine those
+                                                                                             points [5,19,28]. We do not want to be restricted to a
+                                                                                             specific curve type or order, but would like as general
+                                                                                             a solution as possible. While the subdivision process
+                                                                                             guarantees convergence to all intersections, it is slow,
+                     Figure 5: Tangent CCI.                                                  and so effort is invested in finding methods to eliminate
+                                                                                             unnecessary subdivisions.
+
+to u.                                                                                           The algorithm used here is based on combining as-
+                                                                                              pects of methods described in [5,19,28]. Strips (rotated
+  (90"   n--1           m--2                                                                  bounding boxes) were used to bound the curves during
+  0"-~ = E ( k - -    1) E     ai+l--"fi" "~ai"-"J B i , k - l ( U ) B j , t ( v ) .          the subdivision process. However, instead of carrying
+          j=O            i:O    Ti+k -- Ti+l
+                                                                                              out all the subdivisions and then doing all the numer-
+                                                                                              ical improvement, the subdivision is alternated with a
+   Since the blending functions B are nonnegative, and                                        Newton's method at such point in the process that we
+the difference ri+k - ri+l > 0, if ai+l,j - ai,j > 0, for                                     can guarantee a unique intersection using cone tests
+all i and j, ~ will be positive everywhere.                                                   (see [27]).
+   Lemma 3.1, and an analogous version for ~aa, can be                                           It is required that we find the intersections between
+used on the x and y coordinate functions to provide                                           curves which are tangent to each other. Many inter-
+a simple test for ruling out the existence of silhou-                                         sections between iso-parametric curves and silhouettes
+ette curves in a surface. Needing only O ( m n ) first or-                                    are of this kind. For example, figure 5 is an enlarge-
+der differences, it cart act as an additional termination                                     ment of one such problem region in figure 1. If two
+condition for the subdivision. Figure 4 shows such an                                         curves have the same tangent line at their intersec-
+adaptive subdivision for a surface with three silhouette                                      tion point, the e selected as the error measure for the
+curves.                                                                                       computation method affects the results. If it is too
+                                                                                              small, then the method may miss the intersection; if it
+   One must trace the linear silhouette curve segments
+                                                                                              is too big, several (approximated) intersection points
+resulting from the subdivision process and connect
+                                                                                              may result close to each other, where only one actu-
+them to form a piecewise linear approximations of the
+                                                                                              ally exists. When surfaces have been approximated by
+real continuous silhouettes. This solution frequently
+                                                                                              polygons exactly the same problem occurs. However,
+results in only poor approximations or else the pro-
+                                                                                              crossing of active curves in the projection plane must
+cess is time consuming. To improve the quality of
+                                                                                              be detected since the visibility may change at such in-
+each point obtained from the subdivision, a numerical
+                                                                                              tersections (Lemma 2.3).
+technique is applied to make its approximation more
+accurate. The secant method is used with good con-                                                In this specific case most of the tangential curve in-
+
+                                                                                                                                                      99
+              SIGGRAPH '90, Dallas, August 6-10, 1990
+
+
+
+
+          Figure 6: Sub-surfaces, p o t e n t i a l l y with silhouette, f r o m different view (left), a n d improved (right).
+
+
+tersection can be considered in a simpler framework.
+Consider two p a r a m e t r i c space curves t h a t m a p o n t o
+curves in R 3 intersecting at simultaneous tangencies.
+In m o s t cases (see Figure 5) one of the curves is a sil-
+h o u e t t e curve and the o t h e r is isoparametric. Hence
+considering the intersection in p a r a m e t r i c space re-
+duces it to the p r o b l e m of intersecting a planar curve
+with a s t r a i g h t line.
+    A n o t h e r n u m e r i c a l instability m a y arise when deal-
+ing with curves whose p r o j e c t i o n s are identical or have
+identical subcurves. If the curves are e x a c t l y the same,
+one can b e eliminated. If two distinct curves p r o j e c t
+onto the same curve in the image space, b u t have
+different orders, knot vectors, or p a r a m e t r i c continu-
+ity, there is c u r r e n t l y n o stable, c o m p u t a t i o n a l l y feasi-   Figure 7: M o n o t o n e curves have multiple intersection
+ble m e t h o d for analytically d e t e r m i n i n g t h a t the two
+curves are identical. Instead a heuristic threshold on
+the m a x i m u m n u m b e r of valid intersections is used.                      this order have been developed, m a i n l y for straight
+This solution causes some overhead which might be                                  line segments [15,9,22,24]. T h e y improve the average
+r e d u c e d by analytical d e t e c t i o n of such cases.                       case order to O(NlogN), b u t have the same worst case
+   Given a curve-curve intersector, finding all the in-                            b e h a v i o r of O ( N 2 ) . E x t e n d i n g this n o t i o n for an arbi-
+tersections a m o n g N curves the s t r a i g h t f o r w a r d way of            t r a r y curve t y p e e n v i r o n m e n t is c o m p l e x since curves,
+intersecting each curves against all the others is O ( N 2 ) ,                     unlike lines, m a y intersect m o r e t h a n once. In fact,
+which is the worst case possible. Usually one can do                               two spline curves can be c o n t i n u o u s and have n o zeros
+much b e t t e r . Sweep algorithms to sort and improve                            in their first and second derivatives, b u t can intersect
+                                                                                   multiple times, as Figure 7 d e m o n s t r a t e s .
+
+
+
+100
+                                                                 ~ ' ComputerGraphics, Volume24, Number4, August 1990
+
+
+
+   Although the current implementation of this algo-                      To use this coherence, the curve adjacencies of defini-
+rithm uses a simplified bounding box sweep, research                   tion 5.1 must be determined and kept during the curve-
+in this area is in progress. More on this can be found                 curve intersection stage. Each time a curve is split, all
+in [3].                                                                the information on the splitting and split curves must
+                                                                       be kept, in addition to the z level ordering relation be-
+                                                                       tween them. Although, this might look time consum-
+                                                                       ing, it is not. Each time a curve is split (a relatively
+5     Surface-ray                     intersection                     complex operation), a constant number of adjacency
+                                                                       pointers is updated. By doing so, one can derive a
+Finding intersections of rays with surfaces occur fre-                 set of rules by which the visibility is propagated so
+quently in graphics and geometry problems, in particu-                 fewer rays need be fired. The following corollary is
+lax in the ray-tracing rendering technique[25,29]. Usu-                only a subset of such rules and which will be sufficient
+ally freeform surfaces are first approximated into poly-               to demonstrate its power:
+gons or preprocessed into small simplified pieces. Both
+strategies require a relatively large amount of memory.
+                                                                            C o r o l l a r y 5.1 I f 0 is an active curve, ¢ E
+Since only a partial invisibility count is needed, we
+                                                                            T o u c h i n g ( q ) , and 7 is split into 71 and
+need not solve for the exact intersection point.
+                                                                            72 such that ")'1,72 E Touching(rT), 71 =
+                                                                            Prey(72) then (see Figure 8 for all refer-
+     L e m m a 5.1 Let S be a path connected con-                           ence8)
+     tinuous surface with no silhouette curves, g
+     p ( ¢ S ) is a simple curve, then S is visible rel-                       I. I f ~7 is a silhouette curve of the surface
+     ative to itself, and therefore, all curves be-                               a, and a has only one silhouette, then ~7
+     longing to S are totally visible relative to it.                             is visible relative ~o a. See h.
+                                                                               2. I f 17 is a visible silhouette curve, at least
+                                                                                  one of 71, 72 is visible. See a, b and c.
+   P r o o f : Since S has no silhouette curves, c s (defini-
+                                                                                  I f 7 is a passive curve or the scene has
+tion 2.4) consists only of S boundary curves, and ~ has
+                                                                                  only closed models, then exactly one of
+exactly one element. Since p ( ¢ S ) is a simple curve, P
+                                                                                  71, "Y2 is visible. See c.
+is bijective on the interior of its whole domain.
+                                                                               3. I f ~ is visible but not a silhouette curve,
+   By making use of this lemma we can reduce signif-                              then exactly one of 71 , 72 is visible. See
+icantly the number of subdivisions required to solve                              i.
+the surface-ray intersection. When resolving the visi-
+bility of a given point p often one can use lemma 5.1,                         4. I r e is passive curve and 77 is a boundary
+and decide on p-visibility much sooner than using only                            curve (but not a silhouette), and both
+a subdivision technique. This decision can be made                                have the same z at the touching point,
+even if the exact intersection point of the ray from V                            then ¢ has the same visibility as 7. See
+to p with the surface S is unknown. Using curve visi-                             f.
+bility propagation and surface coherence, the number                           5. I f rl E Touching(~b), both are boundary
+of rays that need to be fired can be reduced.                                     curves, and both ~ and ¢ have the same
+                                                                                  z at their touching point, then ~1 and ¢
+                                                                                  have the same visibility. See g.
+      D e f i n i t i o n 5.1 For a curve l?, Touching(l?)
+      is the set @ a l l curves, other than 13, that have
+      one endpoint of their projections lying on ~p.                      Proof.'  All the above conclusions result directly
+                                                                        from lemma 2.3.
+      I f a curve o~ is split into oq and o~ at the
+      parametric value where P ( o 0 intersected with                     Each of these cases is simple by itself, but in combi-
+      P(fl), such that cq has a lower parametric                        nation they form powerful visibility propagation tools.
+      range than o~2, then:                                             Corollary 5.1- 2 is unique, in that one needs more in-
+                                                                        formation so the visibility of the adjacent curve can be
+          1. as is the next curve o r a l ,        and will be          resolved. A visible silhouette on closed objects must
+             denoted as c~2 = N e x t ( a 1 ) .                         bound two regions, exactly one of which is visible, so
+                                                                        only a single adjacent curve should be tested for visi-
+          2. oil is the previous curve of o~2, and will
+                                                                        bility to classify the regions. For open objects, if a sil-
+             be denoted as gel = Prcv(c~2).
+                                                                        houette curve splits a boundary curve, both subcurves
+          3. oq, o~2 E T o u c h i n g ( f l ) .                        may be visible (see a, Figure 8).
+                                                                                                                                   I01
+G     SIGGRAPH '90, Dallas, August 6-10, 1990
+
+
+
+
+                                        a                                     b               2.1
+
+                                                                                                 2.2
+
+          4.2                                               C
+
+
+
+
+      g
+
+
+
+
+                                                                      i 3.1
+
+
+                                                                3.2
+
+
+
+            Figure 8: The curves visibility is propagated - firing 2 rays is enough for all curves.
+
+
+
+
+                                Figure 9: A h i d d e n curve view of the t e a p o t .
+102
+                                                         ~     ComputerGraphics, Volume24, Number4, August1990
+                                                                II II II||
+
+
+
+
+                 Propagation      No propagation
+                 act.    pas.     tel.   act. pas.
+                 rays    rays    time    rays rays
+     discont       9      14      5.5     19   96
+     saddle        2       2       8       8   54
+     wiggle       11       7      4.5     21   95
+      pawn        12      68    i 1.9     17 ~ 152
+
+     Table 1: Visibility propagation comparison.
+
+
+   We shall use Figure 8 to demonstrate the propaga-
+tion ability. Assume the framework curves are given in
+in the following order: the silhouette curve following
+by boundary curves 1, 4, 2, 3.
+   The visibility of each curve in the framework is
+checked first. Using Corollary 5.1, since only one sil-
+houette curves exists, by result 1, it is visible. As
+this object is open, no propagation to the boundary
+curves is allowed. A ray is fired to test the visibility of
+boundary curve 1, and it is found to be visible. Using
+resutt 5.1-5, curves 2.1 (through i , Figure 8) and 4.1
+(through 2) are found to be visible. The next frame-
+work curve with unknown visibility is 4 which has been
+split into two, 4.1 and 4.2. The first half (4.1) visibility
+is already known, so only one ray for the second half
+(4.2) is fired, and which find it to be visibile as well.
+Using result 5.1-5 curve 4.2 (through 3) sets curve 3.2
+to be visible, which in turn sets 3.1 (through 4), using
+result 5.1-3, to be invisible. Since 3.1 touches curve
+2.2 (at 5), at its end, 2.2 is also set, using result 5.1-5,
+to be invisible.
+   Instead of firing 8 rays, for the 8 active curves in the
+saddle surface (1, 2.1, 2.2, 3.1, 3.2, 4.1, 4.2 boundary                         Figure 10: Support of trimmed surfaces.
+curves, and one silhouette), only 2 were fired. The
+question on the optimal way to order these curves
+                                                                     ative time to test the visibility of all the curves. Note
+is still open. But the improvement in this specific
+                                                                     the relation between the two is not linear mainly be-
+case in much greater. Using result 5.1-4, since all the
+                                                                     cause of the cache used.
+iso-parametric curves touch boundary curves at the
+same z value, they inherit their visibility from that
+of the boundary. Using result 5.1-3, the visibility of
+the boundary curves is propagated to the interior iso-                6          Trimmed         Surfaces
+parametric pieces, so no ray need to be fired for any
+iso-parametric curve.
+                                                                     An important issue to address is the support of
+   In addition to all the above, if the number of surfaces           trimmed surfaces. A careful look in the teapot (Fig-
+is small, a cache of the subdivided surfaces can be han-             ure 9) uncovers a problem with the design near its
+dled. If a surface was subdivided once for given ray, all            handle/body joint. The model was originally done by
+but the last few steps will be identical for nearby rays.            juxtaposing the surface descriptions for the handle and
+The main problem with this approach is the amount of                 body without trimming the surfaces, so the handle and
+memory it may require, and so it may be useful only                  the body surfaces interpenetrate. Curves which should
+if the scene consists of a small number of surfaces.                 be hidden at the joint are visible, since this algorithm
+                                                                     cannot detect such cases.
+  Table 1 compares this propagation in terms of num-
+ber of rays fired for active and passive curve and rel-                      Using trimmed surfaces in the model and in the al-
+
+                                                                                                                            103
+             SIGGRAPH '90, Dallas, August 6-10, 1990
+
+
+
+gorithm eliminates this difficulty. The modifications               [12] C. Hornung, W. Lellek, P. Pehwald, and W. Strasser. An
+necessary in our algorithm to support trimmed surfaces                   Area-Oriented Analytical Visiblity Method for Displaying
+                                                                         Parametrically Defined Tensor-Product Surfaces. Com-
+were small and occurred in two stages of the algorithm.                  puter Aided Geometric Design, 2 (1985) 197-205.
+                                                                    [13] J. Foley and A. VanDam. Fundamental of Interactive Com-
+     . The curve extraction stage needs to trim the ex-                  puter Graphics.
+       tracted curves against the trimming curves in the            [14] G. Elber and E. Cohen.     Hidden Curve Removal for
+       parametric space.                                                 Untrimmed and Trimmed NURB Surfaces. Technical re-
+                                                                         port No. 89-019, Computer Science, University of Utah.
+     .   The surface-ray intersection stage should test if          [15] R. Guting. New Algorithm for Special Cases of the Hid-
+         the point on surface S that hides the tested point              den Line Elimination Problem. Computer Vision, Graph-
+         is in a trimmed part of S. The trimming curves                  ics, emd Image Processing 40, 188-204 (1987).
+         should be propagated through in the subdivision            [16] I. Sutherland, R. Sproull, aaxd R. Schumacker A Char-
+         process, and a totally trimmed out surface can be               acterization of ten Hidden-Surface Algorithms. Computer
+                                                                         Surveys, Vol. 6, No. 1, Mar. 1974, pp. 1-55.
+         another termination condition for the subdivision.
+                                                                    [17] T. Kamada and S. Kawal. An Enhanced Treatment of Hid-
+                                                                         den Lines. ACM Transaction on Graphics, Vol 6, No. 4,
+   Figure 10 shows the results of the modified algo-                     October 1987, Pages 308-323.
+rithm.                                                              [18] J. Kripac. Classification of edges and its application in
+                                                                         determining visibility. Computer Aided Design, Volume
+                                                                         17, Number 1, January/February 1985.
+                                                                    [19] J. Lane and R. Riesenfeld. A Theoretical Development for
+7         Acknowledgements                                               the Computer Generation and Display of Piecewise Polyno-
+                                                                         mial Surfaces. IEEE Transaction on pattern analysis and
+                                                                         machine intelligence, vol. PAMI-2, No. 1, January 1980.
+Particular thanks to the Alpha_l group for all their
+help and support in this research.                                  [20] L. Li. Hidden-line algorithm for curved surfaces. Computer
+                                                                         Aided Design, Volume 20, No. 8, October 1988, Pages 466-
+                                                                         470.
+                                                                    [21] P. Loutrel. A Solution to the Hidden.line Problem for Com-
+References                                                               puter Drawn Polyhedra IEEE Transactions on Computers,
+                                                                         Vol. C-19, No. 3, 205-213, March 1970.
+ [1] A. Appel. The Notion of quantitative Invisibility and the
+     Machine Rendering of Solids Proceedings ACM National           [22] M. Mckenna. Worst-Case Optimal Hidden-Surface Re-
+     Conference 1967.                                                    moval. ACM Transaction on Graphics, Vol 6, No. 1, Jan-
+                                                                         uary 1987, Pages 19-28.
+ [2] J. Blinn. A scan line algorithm for displaying parametricaly
+     defined surfaces. Computer Graplfics 12.3. 1977.               [23] C. Montani and M. Re. Vector and Raster Hidden-Surface
+                                                                         Removal Using Parallel Connected Stripes. It~EE Com-
+ [3] 13. Bruderlin, E. Cohen, and G. Elber. A Plane-Sweep                puter Graphics and Application, July 1987, pp 14-23.
+     Hidden-Surface Algorithm for Curved Surfaces. Technical
+     report No. 90-006, Computer Science, University of Utah.       [24] O. Nltrrnl. A Fast Line-Sweep Algorithm for Hidden Line
+                                                                         Elimination. BIT 25 (1985), pp 466-472.
+ [4] C. Sequin and P. Wensley. Visible Feature Return at Ob-
+     ject Resolution. IEEE Computer Graphics and Applica-           [25] J. Peterson. PRT - A High Quality linage Systhesis System
+     tion, May 1985, pp 27-50.                                           for B-spline Sin-faces. MS thesis, Computer Science Dept.,
+                                                                         University of Utah, Dec. 1987.
+ [5] E. Cohen, T. Lyche, and R. Riesenfeld. Discrete B-splines
+     and subdivision Techniques in Computer-Aided Geometric         [26] J. Rank_in. A Geometric Hidden-Line Processing Algo-
+     Design and Computer Graphics. Computer Graphics and                 rithm. Comput. & Graphics Vol. 11, No. 1, pp. 11-19. 1987.
+     Image Processing, 14, 87-111 (1980).                           [27] T. Sederberg and R. Meyers. Loop Detection in Surface
+    [6] D. Griswold and M. Cohen. Automatic Illustration of 3D           Patch Intersections. Computer Aided Geometric Design 5,
+        Geometric Models: Lines. Proceedings of the 1990 Sympo-          pp 161-171, 1988.
+        siurn on Interactive 3D Graphics.                           [28] T. Sederberg and S. PaJwy. Comparison of Three Curve
+    [7] V. Fuson. Application of a Hidden Line Algorithm to Sur-         Intersection Algorithms. Computer Aided Design, Volume
+        face Visualization. MS thesis, Computer Science, Univer-         18, Number 1, January/February 1986.
+        sity of Utah, 1984.                                         [29] M. Sweeney. Ray Tracing Free-Form B-Spline Surfaces.
+    [8] R. Galimberti and U. Monta~aari. An algorithm for Hidden         IEEE Computer Graphics and Application, Februaury
+        Line Elimination CACM 12, 4, 206, April 1969.                    1986, pp 41-49.
+ [9] G. Hamliu and C. W. Gear. Raster-scan hidden surface
+     algorithm techniques Computer Graphics, Vol 11, pp 206-
+     213, 1977.
+[10] C. Hormmg. An Approach to a Calculation-MinimizedHid-
+     den Line Algorithm. Computer & Graphics, Vol 6, No 3,
+     pp 121-126, 1982.
+[11] C. Hornung. A Method for Solving the Visibility Problem
+     IEEE CG&A July 1984, pp. 26-33.
+
+ 104
+

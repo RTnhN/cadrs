@@ -1,0 +1,1543 @@
+An Efficient Surface Intersection Algorithm
+Based on Lower-Dimensional Formulation
+SHANKAR KRISHNAN
+and
+DINESH MANOCHA
+University of North Carolina, Chapel Hill
+
+
+We present an efficient algorithm to compute the intersection of algebraic and NURBS
+surfaces. Our approach is based on combining the marching methods with the algebraic
+formulation. In particular, we propose a matrix representation for the intersection curve and
+compute it accurately using matrix computations. We present algorithms to compute a start
+point on each component of the intersection curve (both open and closed components), detect
+the presence of singularities, and find all the curve branches near the singularity. We also
+suggest methods to compute the step size during tracing to prevent component jumping. The
+algorithm runs an order of magnitude faster than previously published robust algorithms. The
+complexity of the algorithm is output sensitive.
+Categories and Subject Descriptors: I.3.5 [Computer Graphics]: Computational Geometry
+and Object Modeling—surfaces and object representations; J.6 [Computer Applications]:
+Computer-Aided Engineering
+General Terms: Algorithms
+Additional Key Words and Phrases: Algebriac curve, curve-surface intersection, curve tracing,
+eigenvalues, loop detection, matrices, singular points, surface-surface intersection
+
+
+
+
+1. INTRODUCTION
+Evaluating the intersection of parametric and algebraic surfaces is a
+recurring operation in computer graphics, geometric and solid modeling,
+and computer-aided design. An efficient surface intersection algorithm that
+is numerically reliable, accepts general surface models, and operates with-
+out human supervision is critical to boundary-representation solid model-
+
+
+This work was supported in part by an Alfred P. Sloan Foundation Fellowship, ARO contract
+P-34982-MA, NSF grant CCR-9319957, NSF grant CCR-9625217, ONR contract N00014-94-1-
+0738, ARPA contract DABT63-93-C-0048, and NSF/ARPA Center for Computer Graphics and
+Scientific Visualization.
+Authors’ addresses: S. Krishnan and D. Manocha, Department of Computer Science, CB #3175
+Sitterson Hall, University of North Carolina, Chapel Hill, NC 27599-3175; email:
+^krishnas@cs.unc.edu&; ^manocha@cs.unc.edu&; (http://www.cs.unc.edu/;geom).
+Permission to make digital / hard copy of part or all of this work for personal or classroom use
+is granted without fee provided that the copies are not made or distributed for profit or
+commercial advantage, the copyright notice, the title of the publication, and its date appear,
+and notice is given that copying is by permission of the ACM, Inc. To copy otherwise, to
+republish, to post on servers, or to redistribute to lists, requires prior specific permission
+and / or a fee.
+© 1997 ACM 0730-0301/97/0100 –0074 $03.50
+
+ACM Transactions on Graphics, Vol. 16, No. 1, January 1997, Pages 74 –106.
+                                       Surface Intersection Algorithm            •      75
+
+ing. Computation of intersections between surfaces is also required in
+automatic finite-element mesh generation of three-dimensional solids, sim-
+ulation of manufacturing processes such as tool path generation, interfer-
+ence and feature detection, hidden surface removal, visibility computations,
+and scientific visualization. Intersection of algebraic and NURBS (Non-
+Uniform Rational B-Splines) surfaces has been listed as one of the most
+fundamental problems in the integration of geometric and solid modeling
+systems [Hoffmann 1989; Requicha and Rossignac 1992].
+   The intersection of two surfaces can be complicated in general, with a
+number of closed loops and self-intersections (singularities). A good surface
+intersection algorithm should, in theory, be able to detect all such features
+of the intersection curve and trace them correctly in an efficient manner.
+Surface intersection has been an active area of research for more than
+three decades. The different approaches can be categorized into subdivi-
+sion, lattice evaluation, analytic methods, and marching methods. How-
+ever, none of them are able to balance the three conflicting goals of
+accuracy, robustness, and efficiency [Hoffmann 1989; Pratt 1986; Requicha
+and Rossignac 1992]. The robustness of the algorithm refers to the detec-
+tion of all curve segments, closed loops, and singularities assuming no
+numerical errors. The surface intersection problem gets further compli-
+cated due to numerical errors present in all finite-precision computations
+[Hoffmann 1989]. The accuracy characterizes numerical stability of the
+algorithm in the context of floating point arithmetic. Intersection algo-
+rithms must be efficient since they are applied frequently during the design
+process. As a result, many of the commercial CAD (Computer-Aided De-
+sign) systems, such as CATIA, use polyhedral approximations for intersec-
+tion and boundary computations. These methods suffer from incorrect
+results and data proliferation. Therefore, it is desirable to design an
+algorithm that is as robust and efficient as possible, minimizing the
+potential for missed loops and other curve features which plague many of
+the present schemes.
+
+
+   Main Results. We present algorithms for efficient computation of sur-
+face intersection. Depending on the application requirement, the algorithm
+can be fine-tuned to provide better robustness guarantees at the expense of
+execution time. The algorithm has been implemented using double-preci-
+sion arithmetic. Given combinations of NURBS surfaces, the algorithm
+decomposes them into Bézier patches. It uses spatial techniques such as
+bounding-box tests and linear programming to reduce the number of
+pairwise intersections. Given a pair of Bézier and/or algebraic surfaces, it
+finds a starting point on each component of the intersection curve, decom-
+poses the domain, marches along the curve choosing appropriate step sizes
+to prevent component jumping, and finds the singularities and all branches
+at each singularity. It has been applied to the intersection of high-degree
+parametric surfaces and performs well.
+                                ACM Transactions on Graphics, Vol. 16, No. 1, January 1997.
+76        •      S. Krishnan and D. Manocha
+
+1.1 Previous Work
+There is a significant body of literature addressing the surface intersection
+problem. Some recent surveys include Patrikalakis [1993], Pratt [1986],
+and Hoffmann [1989]. Surface intersection algorithms can be broadly
+classified into four major categories: subdivision, lattice evaluation, ana-
+lytic methods, and marching methods. More recently, techniques have been
+designed that combine features of different categories. These are generally
+referred to as hybrid methods.
+  Subdivision Methods. The basic idea of these methods is to decompose
+the problem recursively into similar problems which are much simpler.
+Decomposition continues until a desired level of simplicity is achieved and
+then the corresponding intersection is obtained directly. The last step is to
+merge all the individual curves to get the final solution. This approach has
+the flavor of the divide-and-conquer paradigm used extensively in algorith-
+mic design. Subdivisions are based on the geometric properties of the
+control polytopes [Lane and Riesenfeld 1980; Geisow 1983; Lasser 1986].
+These methods are convergent in the limit but if used for high-precision
+results lead to data proliferation and are consequently slow. In case
+subdivision is stopped at some finite steps, it may miss small loops or lead
+to incorrect connectivity in the presence of singularities. The robustness of
+this approach can be improved by posing the problem algebraically and
+using interval arithmetic [Snyder 1992].
+  Lattice Evaluation. These techniques decompose surface intersection
+into a series of lower geometric complexity problems such as curve-surface
+intersections [Rossignac and Requicha 1987]. This is followed by connecting
+the discrete points into curves. Determination of the discrete step size to
+guarantee robust solutions is hard. Further, these techniques can be slow
+and suffer from robustness problems in terms of finding all the small loops
+and singularities.
+   Analytic Methods. Analytic methods are based on explicit representa-
+tion of the intersection curve and have been restricted to low degree
+intersections [Sederberg 1983; Sarraga 1983]. Another alternative to the
+analytic methods is the use of geometric methods developed by Piegl [1989].
+In this paper, Piegl uses geometric principles to compute the intersection of
+quadric surfaces very accurately. However, the algorithm cannot be easily
+extended to the general intersection problem.
+  Marching Methods. These are by far the most widely used1 because of
+their generality and ease of implementation. The basic advantage of this
+technique is its generality, allowing intersection of arbitrary parametric
+surfaces such as offsets and blends. The idea behind marching methods
+involves analytic formulation of the intersection curve, determination of a
+start point on each component, and the use of local geometry to trace out
+
+1
+    Farouki 1986; Bajaj et al. 1988; Barnhill and Kersey 1990; Kriezis et al. 1990b.
+
+ACM Transactions on Graphics, Vol. 16, No. 1, January 1997.
+                                          Surface Intersection Algorithm            •      77
+
+the curve. The intersection curve can be defined implicitly as an algebraic
+set based on the surface equations, as a curve of zero distance between the
+two surfaces, or as a vector field [Hoffmann 1990; Kriezis et al. 1990b;
+Cheng 1989]. Tracing can be done on the intersection curve in higher
+dimensions or on its projection in the plane. According to Hoffmann [1990],
+the projection results in a high-degree formulation and its computation can
+be inefficient and numerically unreliable. To circumvent these problems, a
+representation based on an unevaluated determinant was introduced in
+Manocha and Canny [1991].
+   The components of an intersection curve consist of boundary segments
+and closed loops. Start points on the boundary segments are obtained by
+curve-surface intersections [Sederberg and Nishita 1991]. Many techniques
+have appeared over the last few years to detect closed loops on the
+intersection curve.2 They are based on bounds on Gauss maps, and subdi-
+vide each surface until sufficient conditions for the nonexistence of loops
+are satisfied. These algorithms work very well to isolate cases with no loops
+only if the surfaces are relatively flat. However, in the presence of small
+loops or singularities, the algorithm becomes slow.
+   Most algorithms use the local geometry of the curve coupled with
+quasi-Newton methods [Bajaj et al. 1988; Barnhill and Kersey 1990] for
+tracing. These methods do not converge well sometimes [Field and Field
+1992], and many issues related to choice of step size to prevent component
+jumping are still open. Therefore, most implementations use very conserva-
+tive step sizes for tracing and this slows down the algorithm. Overall,
+current tracing algorithms are not considered robust [Snyder 1992].
+   The singularities on the intersection curve can be classified in terms of
+solutions of algebraic equations. However, no methods are known in the
+literature that can efficiently compute them for high degree surfaces (such
+as bicubic patches) and classify the curve branches in their neighborhood.
+
+1.2 Overview of Our Algorithm
+Our algorithm formulates the intersection problem algebraically, computes
+the projection of the intersection curve as an algebraic plane curve, and
+evaluates it. The projection is represented as the singular set of a bivariate
+matrix polynomial and the algorithm uses matrix computations to trace the
+curve. Tracing is a geometric operation and evaluating the curve in the
+plane reduces its geometric complexity. The loops of the intersection curve
+are characterized algebraically and computed using curve–surface intersec-
+tions followed by complex tracing. The tracing algorithm employs domain
+decomposition and the use of inverse power iterations. Domain decomposi-
+tion provides a natural procedure to compute the step size and prevent
+component jumping. This is a major advantage of our tracing algorithm
+since incorrect connectivity of the various curve components was considered
+a flaw in traditional marching methods. We also show that we need not
+
+2
+ Sederberg and Meyers 1988; Hohmeyer 1991; Kriezis et al. 1990a; Zundel and Sederberg
+1993.
+
+                                   ACM Transactions on Graphics, Vol. 16, No. 1, January 1997.
+78      •      S. Krishnan and D. Manocha
+
+
+
+
+                            Fig. 1.   Intersection of the Utah teapots.
+
+
+require the computation of singular points before the tracing step. Our
+algorithm can detect the presence of singularities during the tracing
+process. The accuracy of the result is improved by performing minimization
+on a distance-based energy function. To speed up the algorithm we also use
+existing simple geometric tests to isolate cases consisting of no loops or
+singularities. Figure 1 shows the intersections of two teapots (Utah tea-
+pots) and the intersection curve in space between them. Each teapot is
+composed of 32 Bézier patches. In all the figures displaying intersection
+curves, we have used spheres of a small constant radius to represent the
+curve clearly as traced out by the algorithm. Because of perspective
+projection, some of the spheres appear much larger than others.
+   The rest of the article is organized in the following manner. We review
+the problem formulation and the representation of the intersection curve in
+terms of matrices in Section 2. The special case handling of parameteriza-
+tions with base points is discussed in Section 3. Section 4 describes
+algorithms to compute start points on every curve component including
+loops. The tracing algorithm using domain decomposition is presented in
+Section 5. Methods for identification of singularities on the intersection
+curve are given both in Sections 5 and 6. Section 7 outlines the main issues
+concerning robustness and efficiency, and the contributions of our algo-
+rithm. Application of our intersection algorithm to large-sized models is
+presented in Section 8. This is followed by a discussion on the performance
+of our algorithm on these models in Section 9. We finally conclude in
+Section 10.
+
+2. BACKGROUND
+Most of the commercial CAD systems use tensor-product surfaces to repre-
+sent their models, though recently triangular surfaces and other represen-
+tations are gaining importance. Initially we present the algorithm for
+computing the intersection of two general Bézier surfaces. Later we gener-
+alize this to compute the intersection of NURBS models. We present the
+intersection algorithm for parametric surfaces. The algorithm can be di-
+ACM Transactions on Graphics, Vol. 16, No. 1, January 1997.
+                                                 Surface Intersection Algorithm          •      79
+
+
+
+
+     Fig. 2.   Intersection curve and its planar preimages [Manocha and Canny 1991].
+
+rectly applied to implicit algebraic surfaces as well. The problem of surface
+intersection corresponds to computing an accurate representation of the
+intersection curve. The difficulty of the problem lies both in the algebraic
+and the geometric complexity of the intersection curve. The degree of the
+curve resulting from the intersection of rational parametric surfaces can be
+very high, and computing an accurate representation is nontrivial. For
+example, the degree of the intersection curve of two tensor-product bicubic
+Bézier surfaces can be as high as 324. In terms of geometric complexities,
+the curve may have multiple components, small loops, singularities, and
+multiple branches at the singularities. Our approach is based on the exact
+representation of the intersection curve. It is a well-known result in
+algebraic geometry that the intersection space curve has a one-to-one
+correspondence with an algebraic plane curve (except for a finite number of
+points). The plane curves with one-to-one correspondence with the intersec-
+tion curve in space are shown in Figure 2. We represent the plane curve as
+an unevaluated determinant [Manocha and Canny 1991].
+  Matrix Formulation. In this article, we assume that the parametric
+surface is given in the form of a tensor product Bézier patch. A tensor
+product patch is of the form
+
+
+                        F ~ s, t ! 5   SO O
+                                        m   n
+
+
+
+                                       i50 j50
+                                                                        D
+                                                 V ijB i,m~ s ! B j,n~ t ! ,
+
+
+                                        ACM Transactions on Graphics, Vol. 16, No. 1, January 1997.
+80      •      S. Krishnan and D. Manocha
+
+where Vij 5 ( xij, yij, zij, wij) are the control point coordinates and Bi,m(s) 5
+ i ) s (1 2 s)
+(m    i        m2i
+                      is the Bernstein polynomial. Many of the algorithms
+presented in this article assume polynomials represented in the power
+basis instead of the Bernstein basis. Therefore, to convert from the Bern-
+stein to the power basis, we perform the domain transformations
+
+                                          s                                 t
+                      s# 5 g ~ s ! 5             ,      t# 5 g ~ t ! 5             .    (1)
+                                       ~1 2 s!                           ~1 2 t!
+
+  However, this transformation is unstable when s and t are close to 1.0.
+Since we use eigenvalue methods to evaluate the intersection curve, the
+inverse transformation is applied in the final step to bring the domain back
+to [0.0, 1.0]. Given two Bézier surfaces,
+
+                    F ~ s, t ! 5 ~ X ~ s, t ! , Y ~ s, t ! , Z ~ s, t ! , W ~ s, t !!
+
+                   G ~ u, v ! 5 ~ #           # ~ u, v ! , Z# ~ u, v ! , #
+                                 X ~ u, v ! , Y                          W ~ u, v !!
+
+in homogeneous coordinates, implicitize F(s, t) to the form f( x, y, z, w) 5
+0 [Sederberg 1983; Hoffmann 1989] and substitute the parameterization of
+G(u, v) into f to get an algebraic plane curve of the form
+
+                     f~ #           # ~ u, v ! , Z# ~ u, v ! , #
+                       X ~ u, v ! , Y                          W ~ u, v !! 5 0.         (2)
+
+   This corresponds to an algebraic plane curve birationally equivalent to
+the original intersection curve. However, its degree is rather high and leads
+to efficiency and accuracy problems [Hoffmann 1989]. Instead of explicitly
+computing the plane curve, we use numerically stable algorithms like
+eigenvalue and Singular Value Decomposition (SVD) computation.
+   The implicit representation of the patch is obtained by eliminating s and
+t from
+
+     xW~s, t! 2 X~s, t! 5 0, yW~s, t! 2 Y~s, t! 5 0, zW~s, t! 2 Z~s, t! 5 0             (3)
+
+using resultants [Sederberg 1983]. There are different formulations of
+resultants for tensor product surfaces and triangular surfaces. It turns out
+that the resultant of these three equations can always be expressed as the
+determinant of a matrix [Dixon 1908]. Let us denote that matrix as M      # ( x, y,
+z, w). Furthermore, each entry of the matrix is of the form a ij x 1 b ij y 1
+                              # ( x, y, z, w) is a function of the degrees of the
+c ij z 1 d ij w. The order of M
+equations. In particular, for tensor product surfaces of the form s m t n , the
+order of the matrix is 2mn and for triangular surfaces of degree n the order
+is 2n 2 2 n. The determinant of the resulting matrix corresponds to the
+implicit representation of the parametric surface. We substitute the param-
+eterization of G(u, v) into this matrix and obtain a representation of the
+form M(u, v), where each entry is a polynomial in u and v. This substitu-
+ACM Transactions on Graphics, Vol. 16, No. 1, January 1997.
+                                                                   Surface Intersection Algorithm          •     81
+
+tion is very simple because every entry of the matrix is just a linear term.
+The degree of each polynomial corresponds to the degree of G(u, v).
+
+   Matrix Computations. We denote the determinant of the matrix M(u, v)
+as D(u, v). D u (u, v) and D v (u, v) represent the first-order partial
+derivatives with respect to u and v. To be able to trace through the
+intersection curve we need to evaluate D(u 1 , v 1 ), D u (u 1 , v 1 ), and D v (u 1 ,
+v 1 ) for a given point (u 1 , v 1 ) accurately and efficiently. To compute the
+first and higher-order partials, we use a simple variation of Gaussian
+elimination [Manocha and Canny 1991]. The basic idea is to compute the
+partial derivative of each matrix entry at the beginning of computation and
+update the derivative information with each step of Gaussian elimination.
+In this case, we modify the matrix structure such that each entry consists
+of a tuple Gij (u 1 , v 1 ) 5 ( g ij (u 1 , v 1 ), g uij (u 1 , v 1 ), g vij (u 1 , v 1 )), where g uij (u 1 ,
+v 1 ) and g vij (u 1 , v 1 ) represent the partial derivatives of g ij (u, v) with
+respect to u and v, respectively, at (u1, v1). The resulting matrix structure is
+of the form
+
+
+
+                                            3                                                      4
+                                                 G 11~ u 1 , v 1! · · · G 1n~ u 1 , v 1!
+                    # ~ u 1 , v 1! 5                    ·                      ·
+                    M                                   ·         ···          ·                       .       (4)
+                                                        ·                      ·
+                                                 G n1~ u 1 , v 1! · · · G nn~ u 1 , v 1!
+
+  To compute D(u 1 , v 1 ), D u (u 1 , v 1 ), and D v (u 1 , v 1 ), we perform Gaussian
+elimination. We consider the matrix formed by the first entry of each tuple
+[equivalent to M(u 1 , v 1 )] and proceed to compute its determinant using
+Gaussian elimination. As a side effect we change the entry in the other
+tuples. Assume we are operating on the ith and kth rows of the matrix. A
+typical step of Gaussian elimination is of the form
+
+                                                           g ki
+                                       #g kj 5 g kj 2             g ij        g kj 5 g# kj ,                   (5)
+                                                           g ii
+where g kj represents the element in the kth row and jth column of the
+matrix. In the new formulation this step is replaced by
+
+                                         g ki
+                    g# kj 5 g kj 2              g ij ,
+                                         g ii
+
+                                         ~ g ukig ij 1 g kig uij! g ii 2 ~ g kig ij! g uii
+                    g# ukj 5 g ukj 2                                                           ,
+                                                                  ~ g ii! 2
+
+                                         ~ g vkig ij 1 g kig vij! g ii 2 ~ g kig ij! g vii
+                    #g 5 g 2
+                      v
+                      kj
+                                v
+                                kj                                                             ,               (6)
+                                                                  ~ g ii! 2
+
+                    g kj 5 g# kj ,
+
+                    g ukj 5 g# ukj ,
+                                                         ACM Transactions on Graphics, Vol. 16, No. 1, January 1997.
+82      •      S. Krishnan and D. Manocha
+
+                  g vkj 5 g# vkj .
+
+  We make a choice for the pivot element based on the first tuple (i.e., g ij
+entry). After Gaussian elimination is complete, we compute D(u 1 , v 1 ),
+D u (u 1 , v 1 ), and D v (u 1 , v 1 ) as
+
+
+                                              Pg,
+                                               n
+
+                          D ~ u 1 , v 1! 5             ii
+                                              i51
+
+
+
+
+                                                             O gg ,
+                                                             n    u
+                                                                  ii
+                        D u~ u 1 , v 1! 5 D ~ u 1 , v 1!
+                                                            i51   ii
+
+
+
+
+                                                             O gg .
+                                                             n    v
+                                                                  ii
+                         D v~ u 1 , v 1! 5 D ~ u 1 , v 1!                         (7)
+                                                            i51   ii
+
+
+
+   This procedure can be easily extended to compute the higher-order
+partial derivatives as well. Furthermore, the analysis of Gaussian elimina-
+tion may be used to analyze the numerical accuracy of partial derivatives
+computation. Another method is to compute the tangent direction in (u, v,
+s, t) space and project it onto one of the parametric domains. However, our
+original method is more consistent with our other subalgorithms, and we do
+not lose much on efficiency by adopting it.
+
+
+
+3. PARAMETERIZATIONS WITH BASE POINTS
+The base points of a parameterization are the common solutions of the
+equations:
+
+                                     X ~ s, t ! 5 0,        Y ~ s, t ! 5 0,
+                                                                                  (8)
+                                     Z ~ s, t ! 5 0,        W ~ s, t ! 5 0.
+
+   The base points also include common solutions at infinity. In general,
+any faithful parameterization of a rational surface whose algebraic degree
+is not a perfect square has base points. Consider a base point p 5 (s9, t9).
+By definition,
+
+                 X ~ s9, t9 ! 5 Y ~ s9, t9 ! 5 Z ~ s9, t9 ! 5 W ~ s9, t9 ! 5 0.
+
+  It is therefore obvious that (s9, t9) is a nontrivial solution to Equation (3).
+Further, this is a solution irrespective of the values of x, y, or z. Therefore,
+the resultant of this set of equations is identically zero.
+ACM Transactions on Graphics, Vol. 16, No. 1, January 1997.
+                                           Surface Intersection Algorithm            •      83
+
+3.1 Checking for Base Points
+The most obvious way to identify whether the given parameterization
+contains base points is to compute all the common solutions of Equation (8).
+The basic idea is to find all the solutions to two of the equations (say,
+X(s, t) 5 Y(s, t) 5 0). Each element of the solution set (assuming a finite
+set) is tested for satisfiability by substituting in the other two equations to
+recover the base points. However, this method cannot detect parameteriza-
+tions that are very close to having base points (we call it the near base
+point case). The implicit form of the surface is highly error-prone if the
+parameterization contains near base points. Further, recovering the im-
+plicit form of the surface is not possible from this method.
+   It was mentioned earlier that in the presence of base points, the result-
+ant of Equation (3) is identically zero (independent of the values of x, y, or
+z). Therefore, the matrix M     # ( x, y, z, w) (whose determinant gives the
+resultant) is always singular (rank deficient). SVD is a popular method for
+finding the rank of a matrix. We substitute random values for x, y, and z
+(making sure they do not lie on the original surface) in the matrix and
+perform SVD. If it contains zero singular values, it implies that the given
+parameterization contains base points. This method can also identify
+parameterizations with near base points. In such cases, some singular
+values of the matrix M   # ( x, y, z, w) are very close to zero. We treat near
+base point cases as if they contain base points (by zeroing the correspond-
+ing singular values).
+
+3.2 Computing the Implicit Form
+The resultant [determinant of M  # ( x, y, z, w)] provides the implicit repre-
+sentation of the surface of its parameterization does not contain base
+points. However, in their presence, the resultant method will not work. It
+was shown in Manocha [1992] that the maximum rank submatrix (a
+nonvanishing minor) contains the implicit form as a factor in such cases.
+Therefore, in order to obtain the implicit representation of the surface, we
+have to find the rank submatrix. This can be achieved by performing
+Gaussian elimination on the original matrix. Substitution of the parame-
+terization of G(u, v) into this minor gives us the planar projection of the
+intersection curve. It must be observed that the rank submatrix could
+contain extraneous factors (other than the implicit form) which must be
+eliminated by testing the solutions obtained with the original set of surface
+equations.
+
+4. INTERSECTION COMPUTATION
+The intersection curve in the domain of G(u, v) is defined as the singular
+set of the matrix polynomial M(u, v). In other words, it consists of all
+points (u 1 , v 1 ) [ [0, 1] 3 [0, 1] such that M(u 1 , v 1 ) is singular.
+Corresponding to each point (u 1 , v 1 ) there exists a point (s 1 , t 1 ) [ [0, 1] 3
+[0, 1] in the domain of F(s, t). Given a point (u 1 , v 1 ) in the domain of
+G(u 1 , v 1 ), (s 1 , t 1 ) can be computed from a vector in the kernel of M(u 1 , v 1 )
+                                    ACM Transactions on Graphics, Vol. 16, No. 1, January 1997.
+84      •      S. Krishnan and D. Manocha
+
+[Dixon 1908]. The main advantages of this matrix representation are its
+efficiency and accuracy. Although the singular set is defined in terms of a
+determinant, we use algorithms based on eigenvalues and singular values
+for numerical stability. Efficient and accurate algorithms for computing the
+eigendecomposition and SVD are well known [Golub and Van Loan 1989],
+and good implementations are available as part of numerical libraries such
+as EISPACK and LAPACK.
+
+4.1 Curve-Surface Intersections
+The algorithms for computing start points on the intersection curve and
+decomposing the intersection curve for robust tracing are based on Bézier
+curve–surface intersections. There are many algorithms known for comput-
+ing these intersections based on subdivision properties of control polytopes.
+Their convergence can be improved by Bézier clipping [Sederberg and
+Nishita 1991]. We use some recent algorithms for these intersections based
+on eigenvalue computations [Manocha 1994b]. Given a surface F(s, t), we
+compute its implicit representation as described in the previous section and
+obtain a matrix formulation M  # ( x, y, z, w). We substitute the parameter-
+ization of the curve, say, G(u) 5 (X # (u), Y
+                                            # (u), Z# (u), W
+                                                           # (u)) of degree d, and
+obtain a univariate matrix polynomial M(u). The problem of intersection
+computation reduces to computing the roots of the matrix polynomial M(u).
+Each entry of the matrix polynomial is expressed in the Bernstein basis.
+We divide the polynomial by (1 2 u) d and use a reparameterization of the
+form #u 5 (u/(1 2 u)) to obtain a representation in the power basis. Direct
+conversion from Bernstein to power basis can introduce numerical prob-
+lems [Farouki and Rajan 1987]. The resulting matrix M(u# ) can be repre-
+sented as
+
+                  M ~ u# ! 5 u# dM d 1 u# d21M d21 1 · · · 1 u# M 1 1 M 0 ,    (9)
+
+where M i s are matrices of order 2mn with numeric entries. Furthermore,
+the roots of the matrix polynomial, M(u), have one-to-one correspondence
+with the eigendecomposition of
+
+
+
+
+                            3                                        4
+                                 0    I 2mn    0    ···      0
+                                 ·       ·     ·      ·       ·
+                                 ·       ·     ·      ·       ·
+                      C5         ·       ·     ·      ·       ·          ,    (10)
+                                 0      0      0    ···    I 2mn
+                                2M# 0 2M  # 1 2M# 2 · · · 2M # d21
+
+where M  # i 5 M21d Mi [Gohberg et al. 1982]. In case Md is singular or
+ill-conditioned, the intersection problem is reduced to a generalized eigen-
+value problem [Manocha 1994b]. Algorithms to compute all the eigenvalues
+are based on QR orthogonal transformations [Golub and Van Loan 1989].
+They compute all the real as well as complex eigenvalues. Algorithms to
+compute eigenvalues in a subset of the real or complex domain are
+presented in Manocha and Krishnan [1997] and are based on algebraic
+ACM Transactions on Graphics, Vol. 16, No. 1, January 1997.
+                                             Surface Intersection Algorithm           •      85
+
+
+
+
+                   Fig. 3.   Various components of intersection curve.
+
+
+pruning. If there are few intersections (two or three in the domain), the
+pruning approach is about an order of magnitude faster than the QR
+algorithm.
+
+4.2 Start Points
+The marching algorithm needs start points on each component of the
+intersection curve. These components can be classified into open and closed
+components. Open components have an intersection with one of the bound-
+ary curves of the surface as shown in Figure 3. These are points on the
+plane curve where one of the parameter values is 0 or 1. The other
+components are closed loops. The start points on the open components are
+computed using curve–surface intersections. In particular, we substitute
+u 5 0, u 5 1, v 5 0, and v 5 1 into the representation of the intersection
+curve, M(u, v), and compute the intersections by algebraic pruning.
+  The difficulty in identifying start points on closed components lies in the
+fact that loops have no simple characterization such as the one for open
+components. However, we show that we can use a simple algebraic property
+which will guide us to some point on every loop. We describe our idea of
+loop detection in detail next.
+
+4.3 Loop Detection
+A number of algorithms have appeared on finding loops in surface intersec-
+tion.3 They are based on geometric properties of the surfaces and arrive at
+a sufficient criterion for two surfaces to have no loop intersections. The first
+such condition was developed by Sinha [Klassen et al. 1985]. It was proved
+that two surface patches cannot intersect in a loop if their corresponding
+Gauss maps do not overlap. Gauss maps are basically the projections of the
+normal vector field of the surface on a unit sphere. Techniques for approx-
+imating the Gauss map using bounding cones was introduced in Sederberg
+and Meyers [1988].
+
+3
+ Sederberg and Meyers 1988; Hohmeyer 1991; Kriezis et al. 1990a; Zundel and Sederberg
+1993.
+
+                                     ACM Transactions on Graphics, Vol. 16, No. 1, January 1997.
+86      •      S. Krishnan and D. Manocha
+
+
+
+
+                          Fig. 4.   Two surfaces intersecting in a loop.
+
+
+  Hohmeyer [1991] reduced the problem of detecting overlap of Gauss maps
+to a linear programming problem. A pseudonormal patch (Fs 3 Ft ) is
+evaluated for each parametric surface as another Bézier patch and the
+control points are used to check for a separating plane. Linear program-
+ming can be done in linear time (in fixed dimensions), and some very fast
+practical algorithms have been designed [Seidel 1990]. If the two surfaces
+do not satisfy the test, the patches are subdivided and the algorithm is
+applied recursively. The algorithms of Hohmeyer [1991] and Zundel and
+Sederberg [1993] work very well in practice in isolating intersections with
+no loops, but only if the surfaces are relatively flat. If the intersection curve
+has a singularity or a small loop, it may take too many levels of subdivision
+to detect it. Furthermore, the loop detection criterion is based on the
+normals of the patches and their computation is expensive for rational
+patches at every level of subdivision. The normal patch for a rational patch
+of degree m (in u) and n (in v) is of degree 3m (in u) and 3n (in v)
+[Hohmeyer 1991]. For example, eight levels of subdivision were required
+for the intersection of the two patches shown in Figure 4.
+  We initially use Hohmeyer’s algorithm based on Gauss maps and linear
+programming to check for absence of loops [Hohmeyer 1991]. If the loop
+detection criterion is not satisfied, we use the algorithm presented in the
+following for computing start points on the loops.
+  The intersection curve is an algebraic plane curve in the complex
+projective plane defined by u and v. We are, however, interested in finding
+only the part that lies in the portion of the real plane defined by (u, v) [
+[0, 1] 3 [0, 1]. If we relax this restriction so that one of the variables, say,
+v, can take complex values, the intersection curve is defined as a continu-
+ACM Transactions on Graphics, Vol. 16, No. 1, January 1997.
+                                         Surface Intersection Algorithm            •      87
+
+ous set consisting of real and complex components. Before we give our loop
+characterization, some basic definitions have to be introduced.
+   Definition 1. Turning points are points on the intersection curve where
+the tangent vector, as projected in the (u, v) space, is parallel to the u or v
+parameter axes. In other words, one of the partial derivatives (with respect
+to u or v) of the intersection curve is 0. For example, u-turning points are
+points where the tangent is parallel to the v axis. We classify u-turning
+points into left u-turning points and right u-turning points. A point (u 1 , v 1 )
+is a left u-turning point if the curve goes into the complex domain in the left
+neighborhood of u 1 (u 5 u 1 2 d , where d is a small positive value). A point
+(u 1 , v 1 ) is a right u-turning point if the curve goes into the complex domain
+in the right neighborhood of u 1 (u 5 u 1 1 d ).
+  Definition 2. Isoparametric curves are curves lying on a parametric
+patch (surface) where one of the parameters of the patch (u or v) remains
+constant.
+  LEMMA 1. If the intersection curve in the real domain [0, 1] 3 [0, 1]
+consists of a closed component, then two arbitrary complex conjugate paths
+meet at one of the real points (corresponding to a turning point) on the loop.
+   PROOF. The proof is based on Bezout’s theorem which states that if f and
+g are two algebraic curves of degree m and n, respectively, then f and g
+intersect in exactly mn points in the complex domain counted properly, or
+they have a common component. Using Bezout’s theorem and the fact that
+the intersection curve forms a continuous set in the complex domain, the
+lemma can be proved.
+   Let us consider two surfaces that intersect in a loop in the real domain,
+like the ones shown in Figure 4. All isoparametric curves on a surface have
+the same degree, namely, the degree of the other parameter defining the
+surface. Therefore, the number of intersections of the intersection curve
+with any isoparametric curve must be fixed in complex space (the Bezout
+bound). Figure 5(a) illustrates the argument. The line L1 intersects the
+intersection curve at two different real points. As we move the line from L1
+to L2, the two intersection points come closer, and at line L2, both of them
+coincide to form a double root maintaining the intersection count constant.
+This double root also corresponds to a u-turning point. At L3 there are no
+real intersections. Since the intersection curve is continuous in the complex
+domain, the double root must now be complex values and occur in conjugate
+pairs (in a real algebraic curve). Now if the sweep is started from L3
+towards L2, the complex conjugate components come closer together, and
+at line L2 their imaginary part vanishes to yield a double root. The double
+root is a real point on the loop (or any other open component with a turning
+point). e
+  The domain of the intersection curve in the complex space is shown in
+Figure 5(b). The third axis corresponds to the imaginary components of v.
+It represents a continuous component of the intersection curve. The dark
+                                  ACM Transactions on Graphics, Vol. 16, No. 1, January 1997.
+88      •      S. Krishnan and D. Manocha
+
+
+
+
+              Fig. 5.   (a) Characterization of loops; (b) tracing in complex space.
+
+
+curve is the intersection curve in the complex space and the white curve is
+the part of the curve that lies in the real plane.
+  We need one start point on each loop to trace it. So we restrict ourselves
+to u-turning points. Henceforth, we use the term turning points to denote
+u-turning points. Our domain has changed from the real plane to a
+three-dimensional space formed by u, v r , and v i , where v r and v i are the
+real and imaginary values of v. To compute the turning points on the curve,
+the algorithm combines curve–surface intersections and complex tracing.
+We could compute the complex solutions of the curve M(0, v) 5 0 using
+eigendecomposition. Unfortunately, these are not the only complex paths
+that could lead to a turning point. There could be complex paths starting
+from right turning points of some other component of the intersection
+curve. This can be illustrated by considering the intersection between a
+bicubic patch and a plane (see Figure 6). The curve M(0, v) 5 0 is a cubic
+curve with two real solutions inside the domain. This implies that there
+cannot be any complex solution to this equation. Therefore, the left turning
+point on the loop is connected in complex space to the right turning point of
+another component. So we use the following strategy to complete a sweep of
+the complex paths from u 5 0 to u 5 1.
+  Since complex solutions occur in conjugate pairs (in a real algebraic
+equation), we restrict ourselves to complex paths whose imaginary parts
+are strictly positive. When a complex path touches the real plane, the
+imaginary part (of v) must reach some small constant value e before
+reducing to zero. These are precisely the common points of the curve and
+the plane v i 5 e . In other words, we are trying to find all the real solutions
+to the equation detM(u, v r 1 i e ) 5 0. Expanding the expression and
+collecting the real and imaginary terms we can write
+
+                            det ~ M r~ u, v r! 1 iM i~ u, v r!! 5 0.                   (11)
+ACM Transactions on Graphics, Vol. 16, No. 1, January 1997.
+                                                     Surface Intersection Algorithm            •      89
+
+
+
+
+                         Fig. 6.   Intersection of plane with bicubic patch.
+
+
+It is easy to show that the solutions (u, v r ) satisfying Equation (11) also
+satisfy the solution of detP(u, v r ) 5 0, where
+
+
+                          P ~ u, v r! 5   F   M r~ u, v r!
+                                              M i~ u, v r!
+                                                             2M i~ u, v r!
+                                                             M r~ u, v r!
+                                                                           .G                      (12)
+
+As before, the solutions to Equation (12) can be posed as the singular set of
+matrix P(u, v r ). The singular set of P(u, v r ) is a discrete point set. The
+order of the matrix P(u, v r ) is twice that of M(u, v). Therefore, there are
+twice as many paths to trace in general. If the patches are of order m 3 n
+and p 3 q, then at most 2mnp paths have to be traced.
+   Initially, we form the companion matrix of P(u, v r ), C p , similar to the
+one in Equation (10). We compute all the eigenvalues of C p at u 5 0 (we
+expect all of them to be complex). We use them as starting points and trace
+all the paths in the increasing u direction until they either cross the u 5 1
+plane or become real. All the real values of v r are points lying very close to
+the turning points of the intersection curve. They are denoted by (u r , v r ).
+Then (u r , v r ) is used as an initial guess to converge to the turning point
+using inverse power iterations.
+   When complex tracing is done, all the turning points that could poten-
+tially lead to loops are obtained. The details of tracing using inverse power
+iterations are presented in the next section. Figure 6 shows an intersection
+of a plane with a bicubic patch. The intersection contains a number of open
+components and a loop. The complex tracing idea was applied here, and a
+point on the loop was found.
+
+5. TRACING
+Given the start points, we evaluate the curve using our tracing algorithm.
+There are a number of algorithms proposed for tracing.4 Given a point on
+the curve, an approximate value of the next point is obtained by taking a
+
+4
+    Bajaj et al. 1988; Barnhill and Kersey 1990; Cheng 1989; Kriezis et al. 1990b.
+
+                                              ACM Transactions on Graphics, Vol. 16, No. 1, January 1997.
+90      •      S. Krishnan and D. Manocha
+
+small step size in a direction determined by the local geometry of the curve.
+Given the approximate value, these algorithms use local iterative methods
+such as Newton’s method to trace back on the curve.
+  The three main problems with tracing algorithms are [Field and Field
+1992; Snyder 1992]:
+(1) converging back on the curve;
+(2) component jumping;
+(3) inability to handle singularities and multiple branches.
+The convergence problems arising from the behavior of Newton’s method
+are highlighted in Field and Field [1992]. It is rather difficult to predict the
+convergence of Newton’s method on high degree equations corresponding to
+the intersection. Component jumping can occur when two components of
+the curve are relatively close to each other as shown in Figure 7(a). In this
+case, the tracing algorithm can jump from point A on component C1 to
+point B on component C2. Most implementations circumvent this problem
+by choosing very small and conservative step sizes. But this still cannot
+guarantee correctness and, moreover, slows down the algorithm. No effi-
+cient algorithms are known for handling singularities on the intersection
+curve of high degree surfaces.
+  We present an efficient tracing algorithm that can resolve all the issues
+most of the time. In particular, we introduce a technique called domain
+decomposition and tracing based on inverse power iterations. Singularities
+are also handled efficiently under well-placed assumptions.
+
+5.1 Domain Decomposition
+After performing curve–surface intersection and loop detection, a sequence
+of points is obtained on the curve ((u, v) [ [0, 1] 3 [0, 1]) which either
+corresponds to starting points on open components or some points on loops.
+Using these points, the intersection curve is traced completely without
+missing any important curve features. The idea behind domain decomposi-
+tion is that if there are only two boundary points inside a domain with no
+loops, these points belong to the same component of the intersection curve.
+Further, there exists exactly one component of the intersection curve inside
+this domain. Therefore, the purpose of the algorithm is to subdivide the
+original domain into smaller subdomains such that each subdomain con-
+tains exactly one curve component.
+   We now describe the working of domain decomposition. The input into
+the domain decomposition routine is a rectangular domain, specified as
+[L u , H u ] 3 [L v , H v ], and a set of points, S, on the intersection curve inside
+this domain. S covers all the components of the intersection curve inside
+the domain. If the cardinality of S is two, then we are assured of a single
+curve component inside the domain and the decomposition terminates.
+   If the cardinality of S is greater than two, the algorithm subdivides the
+domain along isoparametric lines determined by the parametric values of
+points of S. The isoparametric lines chosen at every point could either be a
+ACM Transactions on Graphics, Vol. 16, No. 1, January 1997.
+                                              Surface Intersection Algorithm            •      91
+
+
+
+
+Fig. 7. (a) Component jumping; (b) first-level decomposition; (c) second-level decomposition;
+(d) tracing step.
+
+u-isoline ( u 5 u 1 ) or a v-isoline (v 5 v 1 ). The algorithm arbitrarily chooses
+the v-isoline to subdivide the domain. If subdivision is not possible (all the
+points in S have v coordinates as L v or H v ), then u-isoline is chosen for
+subdivision. In the process, new points corresponding to the intersections of
+the isoparametric lines with the intersection curve are generated and
+inserted into the appropriate subdomains. Domain decomposition is then
+applied recursively to each subdomain.
+  Subdivision of domains is not carried out indefinitely. If the dimensions
+of a domain become smaller than a specified tolerance, the subdivision is
+stopped and checked for singularities. Informally, singularities are points
+on the intersection curve where the curve self-intersects. A more formal
+treatment of singularities is given in the next section. In the presence of
+singularities (except for cusps), no level of decomposition can produce
+subdomains with one simple curve component unless the singular point is
+                                       ACM Transactions on Graphics, Vol. 16, No. 1, January 1997.
+92        •     S. Krishnan and D. Manocha
+
+determined accurately. If domain decomposition is unable to isolate single
+curves in a domain after repeated levels of subdivision, then one of two
+cases can occur.
+
+—Curve has a singularity, or
+—Two components of the intersection curve are very close.
+
+At this point, minimization of an energy function E(u, v, s, t) distin-
+guishes the two cases.
+
+                   E ~ u, v, s, t ! 5 ~ D ~ u, v, s, t ! 2 1 N ~ u, v, s, t ! 2 ! ,        (13)
+
+where
+
+                            D ~ u, v, s, t ! 5 uF ~ s, t ! 2 G ~ u, v ! u                  (14)
+
+and
+
+     N ~ u, v, s, t ! 5 u ~ F s~ s, t ! 3 F t~ s, t !! 3 ~ G u~ u, v ! 3 G v~ u, v !! u.   (15)
+
+u z u refers to the length operator and 3, the cross product of two vectors.
+The minimization is applied with the midpoint of the region given as the
+initial guess. A minimum value of zero corresponds to a singularity. A
+nonzero minimum value means that the curve has two very close compo-
+nents. If there is a singularity, then subdivision is done at the singular
+point and domain decomposition is performed at each subdomain. Singu-
+larities are unstable points and are very sensitive to small input perturba-
+tions and floating point errors. Therefore, the algorithm reports a singular-
+ity if the minimum value obtained is smaller than a user-specified value.
+    The pseudocode for the domain decomposition algorithm is as follows.
+
+  DomainDecomposition (domain, Xsectiono points, tolerance).
+      (1) If (there are only two Xsection opoints) trace the curve inside the region and
+          return.
+      (2) If (region size is smaller than tolerance)
+          Apply singularity criterion.
+          If there is a singularity
+             Subdivide the domain at the singular point along both axes.
+             Find all intersection points along the subdivided curves.
+             For each subregion, do DomainDecomposition(subregion, newo points, toler-
+             ance).
+             Return.
+      (3) If (domain convergence is slow)
+             Divide the domain at midpoint of one of the parameters.
+             Compute the intersections of the curve with the dividing line.
+             For each of the two subregions, do DomainDecomposition(subregion,
+             newopoints, tolerance).
+             Return.
+
+ACM Transactions on Graphics, Vol. 16, No. 1, January 1997.
+                                          Surface Intersection Algorithm            •      93
+
+
+
+
+                   Fig. 8.   Application of domain decomposition.
+
+
+   else
+     Divide the domain along isoparametric lines from every Xsectionopoints. For
+     the point (L u , v 1 ), the corresponding line is v 5 v 1 .
+     Compute the intersection of the curve with each such line.
+     For each subregion, do DomainDecomposition(subregion, newopoints, toler-
+     ance).
+     Return.
+
+  At the end of the DomainDecomposition algorithm, a set of curves traced
+inside each region is obtained. Some of these are parts of the same curve
+component. By matching their endpoints, they are connected appropriately
+to obtain the original intersection curve in the [0, 1] 3 [0, 1] domain. This
+algorithm guarantees
+
+—No component jumping—tracing is performed only inside a region that is
+ guaranteed to contain just one curve.
+—Singularity detection—During all stages of the algorithm, singular points
+ are always bracketed. It is possible to miss some singular points, how-
+ ever, if they are not well separated.
+
+   The decomposition algorithm has been highlighted on tensor product
+surfaces in Figures 7(b), 7(c), and 8. Typically, the algorithm uses one or
+two levels of decomposition. However in a few cases, the number of levels
+may be more. These cases arise only in the presence of singularities or close
+components. In that case, the geometry of the curve is not simple and
+imposes a lower bound on the complexity of any robust algorithm. The
+decomposition step is similar in nature to that of subdivision or interval
+arithmetic-based algorithms. However, subdivision is done only for separat-
+ing the components and not for evaluating them to a certain accuracy. For
+almost all cases, domain decomposition performs fewer levels of decomposi-
+tion. Subdivision and interval arithmetic-based algorithms perform a num-
+ber of decompositions as a function of the accuracy parameter. The algo-
+rithm has been implemented and tested on a wide variety of intersections
+                                   ACM Transactions on Graphics, Vol. 16, No. 1, January 1997.
+94      •      S. Krishnan and D. Manocha
+
+
+
+
+Fig. 9. (a) Intersection curve components lying close to each other; (b) two patches intersect-
+ing in a singularity.
+
+
+and it is an order of magnitude faster than previously known robust
+algorithms (like interval arithmetic).
+   Figures 8 and 9 show the power of domain decomposition. It can take
+care of arbitrary intersections. Figure 9(a) shows the intersection of two
+patches where the intersection curves come very close to each other. Figure
+9(b) shows two patches intersecting in a singularity. Domain decomposition
+was able to detect the presence of singularity in the second case, and traced
+all the branches correctly.
+   The previously given algorithm is used to partition the domain of the
+curve into regions with a single curve component. Its complexity is a
+function of the number of components and the separation of the compo-
+nents into various regions. For most practical cases, there are a few
+well-separated components in the real domain and the algorithm performs
+well for such cases. In many ways the underlying philosophy is rather
+similar to cylindrical algebraic decomposition [Collins 1975] based algo-
+rithms for partitioning the domain into regions. Our algorithm uses an
+efficient and accurate zero-dimensional solver [Manocha 1994a] and works
+well using finite precision arithmetic. On the other hand, the algorithms
+based on algebraic decomposition [Arnon 1983] compute all the extremal
+points and turning points using purely symbolic methods and exact arith-
+metic. Even though this method guarantees that the solution is always
+topologically reliable, it is impractical because of the large memory require-
+ments and poor efficiency.
+  5.1.1 Convergence. Figure 10 provides a comparison between ordinary
+bisection and domain decomposition. It can be seen that in the case
+depicted by the figure, our method performs much better than bisection. In
+fact, on an average, domain decomposition achieves the desired level of
+subdivision much faster than bisection. This is because our method is a
+form of guided subdivision as opposed to blind partitioning adopted by
+bisection.
+  However, there are instances when the algorithm does not reduce the
+region size appreciably. This usually happens when the intersections are
+ACM Transactions on Graphics, Vol. 16, No. 1, January 1997.
+                                             Surface Intersection Algorithm            •      95
+
+
+
+
+                Fig. 10.   Comparing domain decomposition and bisection.
+
+
+very close to the corners of the region. One such example is described in
+Figure 11. However, these cases can be detected easily. When such in-
+stances are encountered, bisection is performed once on the domain to
+break the symmetry (of points in set S). Domain decomposition is then
+performed on each half. The step size of tracing is determined by the size of
+each region.
+
+5.2 Tracing in Lower Dimension
+After domain decomposition, the entire domain ([0, 1] 3 [0, 1]) is subdi-
+vided into smaller regions each with at most one curve segment. Further,
+domain decomposition returns the two endpoints of the curve inside the
+region. Starting from one of the endpoints, the tracing algorithm computes
+successive curve points using the local geometry of the curve until the other
+endpoint is reached. Let the component be C. Given a point Q1 5 (u 1 , v 1 )
+the skeleton of the tracing algorithm is given in the following.
+
+—Compute D u (u 1 , v 1 ) and D v (u 1 , v 1 ), the partial derivatives of the curve
+ with respect to u and v, respectively. These are the components of the
+ vector normal to the plane curve. Methods to compute the partial
+ derivatives were described in Section 2 on matrix computations.
+—Given the normal vector, find the unit vector corresponding to the
+ tangent. Let this vector be (t u , t v ).
+—Find an approximate point Q2 5 (u 2 , v 2 ), where u 2 5 u 1 1 t u p S, and
+ v 2 5 v 1 1 t v p S, where S is the step size.
+—Using (u 2 , v 2 ), converge back to the curve at Q3 5 (u 2 , v 3 ), if ut u u . ut v u,
+ or to Q3 5 (u 3 , v 2 ), if ut v u . ut u u, using inverse power iterations.
+
+A single tracing step is shown in Figure 7(d). The two main components of
+the tracing algorithm are choosing the step size and tracing back to the
+curve component using inverse power iterations. We explain each of them
+in detail. For the rest of the analysis we assume that Q3 5 (u 2 , v 3 ).
+                                      ACM Transactions on Graphics, Vol. 16, No. 1, January 1997.
+96      •       S. Krishnan and D. Manocha
+
+
+
+
+                 Fig. 11.   Case of slow convergence of domain decomposition.
+
+
+  Power Iterations. Power iterations are a fundamental technique for
+computing the eigenvalues and eigenvectors of a matrix. Given a diagonal-
+izable matrix A, we can find X(5[x1 , x2 , . . . , xn ]) such that X21 AX 5
+Diag( l 1 , l 2 , . . . , l n ) and u l 1 u . u l 2 u $ . . . $ u l n u. Given a unit vector q0,
+the power method produces a sequence of vectors qk as follows:
+
+                   z k 5 Aq k21;         q k 5 z k/iz ki `;      s k 5 q Tk Aq k ,
+
+where izk i ` refers to the infinity norm of the vector zk . s k converges to the
+largest eigenvalue l1 and qk converges to the corresponding eigenvector x1.
+  In the tracing algorithm, we compute the eigenvalue of M(u 2 , v) which is
+closest to v 2 [Figure 7(d)]. As a result, we compute the companion matrix C
+from M(u 2 , v) [see Equation (10)] and set s 5 v 2 . In our application, we
+need to compute the smallest eigenvalue of the matrix C 2 sI. The smallest
+eigenvalue of C 2 sI corresponds to the largest eigenvalue of (C 2 sI) 21 .
+Instead of computing the inverse explicitly (which is numerically unstable),
+we use inverse power iterations. Given an initial unit vector q0, we
+generate a sequence of vectors qk as
+
+            Solve ~ C 2 sI ! z k 5 q k21;         q k 5 z k/iz ki `;           s k 5 q Tk Cq k .
+
+  To solve the matrix system efficiently, we perform LU decomposition of
+the matrix (C 2 sI) using Gaussian elimination. We also make use of the
+structure of the matrix to reduce the complexity of LU decomposition.
+Given s, let B 5 C 2 sI. B is of the form:
+
+
+
+
+                                 1                                     2
+                                     a 1I n I n   0   ···    0
+                                      ··
+                                         ·  · · ·
+                            B5                                             ,
+                                       0      0 · · · a 1I n I n
+                                      P1 P2 P3 · · · Pm
+
+ACM Transactions on Graphics, Vol. 16, No. 1, January 1997.
+                                         Surface Intersection Algorithm            •      97
+
+where a1 is a function of s, and Pi s are n 3 n matrices which are functions
+of Mi s and s. The LU decomposition of B has the form:
+
+
+
+
+                                            21                             2
+                                                       1
+
+
+                1
+                    a 1I n  0     ··· 0          In      In · · · 0
+                                                      a1
+                      0    a 1I n · · · 0
+           B5        ··                           0    In   ··· 0              ,
+                        ·  ···                   ··
+                     R1     R2 · · · Lm             · ···
+                                                  0    0    · · · Um
+where Lm and Um correspond to the LU decomposition of Rm . Ri s can be
+easily computed from the Pi s. The order of B is 2mnd. However, the LU
+decomposition takes only 1 ⁄ 3 d(2mn) 3 operations. This structure is utilized
+in solving the lower and upper triangular systems at each step as well.
+   A key property of inverse power iteration is that it converges to the
+eigenvalue closest to s. The initial vector q0 is chosen randomly. In case the
+closest eigenvalue to s is a complex conjugate pair, the power method
+involving real operations does not converge to any real value. In such cases,
+the tracing algorithm chooses a smaller step size for computation. The
+inverse iteration terminates when the eigenvalue and its corresponding
+eigenvector converge to within a specified tolerance. We refine the solution
+obtained from inverse power iterations using minimization methods on the
+distance function D(u, v, s, t) defined in Equation (14). Inverse power
+iterations followed by a few minimization steps give very good accuracy in
+practice.
+   Step Size Computation. The step size S is chosen to prevent component
+jumping. Also, to avoid component jumping the following constraints are
+imposed on Q2. Let the closest distance of Q2 to the domain boundary be D
+as shown in Figure 7(d). As a result, any point on any other component of
+the curve is at least D away. Furthermore, the distance d from Q2 to C is at
+most S (this statement is not true in regions of very high curvature or
+cusps, and are handled separately). If d , D, the inverse power iteration
+guarantees that after the convergence of power iteration the resulting point
+is still on C. Therefore, an upper bound on the choice of step size is given by
+the condition d , S , D. We initially choose a value of S and check whether
+S , D. If this constraint is not satisfied, we refine the value of S using a
+binary search over the range [0, S]. Thus making use of domain decompo-
+sition and inverse power iterations, we ensure that there is no component
+jumping during tracing. It is possible to compute less conservative step
+sizes by using higher-order derivatives of the intersection curve [Dokken
+1985; Dokken et al. 1989]. However, we feel that the complexity of comput-
+ing higher-order derivatives is much more than tracing with a smaller step
+size.
+   In the next section, detection of cusps during tracing is discussed. As we
+see, cusps in the plane curve need not necessarily correspond to a singular
+point on the intersection curve (in space), and are therefore much more
+difficult to handle accurately.
+                                  ACM Transactions on Graphics, Vol. 16, No. 1, January 1997.
+98      •      S. Krishnan and D. Manocha
+
+
+
+
+                          Fig. 12.   Teapot handles intersecting at tacnode.
+
+
+6. SINGULARITIES
+In this section, we describe algorithms to detect cusps. Cusps are points on
+the curve that cannot be readily detected by the domain decomposition
+algorithm. Therefore some more work has to be done to detect the presence
+of cusps. The tracing algorithm evaluates an algebraic plane curve (D(u, v) 5
+0). Singularities on the plane curve D(u, v) 5 0 are characterized by the
+common solutions of D(u, v) 5 Du(u, v) 5 Dv(u, v) 5 0. Algebraically the
+singularities are classified by the number of branches or places the curve has
+at that point [Abhyankar and Bajaj 1988]. Cusps have only one branch
+whereas nodes and loops have more than one branch.
+   Singularities on the intersection curve correspond to points where the
+tangent vector is undefined. The tangent to the intersection curve is
+obtained by taking the cross-product of the surface normals at that point.
+As a result, the preimages of singular points on the intersection curve I are
+the common solutions of
+
+F ~ s, t ! 5 G ~ u, v !
+
+              ~ F s~ s, t ! 3 F t~ s, t !! 3 ~ G u~ u, v ! 3 G v~ u, v !! 5 ~ 0 0 0 ! T.   (16)
+
+The curve I may have more than one branch at the singularity. The nodes
+on the intersection curve and the plane curve are related by the following
+lemma. See Figure 12.
+
+  LEMMA 2. If the surface has no self-intersections, a node on the plane
+curve D(u, v) 5 0 corresponds to a node on the intersection curve I.
+
+  PROOF. A patch is said to be faithfully parameterized if the mapping
+from parametric space to the surface is bijective. In other words, there are
+no self-intersections on the surface.
+  Let Q be a singular point of the curve in the domain and P be its image
+on I. Corresponding to each branch of P, there is a sequence of points on
+the curve D(u, v) 5 0 converging to Q. The images of these points on the
+intersection curve converge onto P. The one-to-one mapping would imply
+ACM Transactions on Graphics, Vol. 16, No. 1, January 1997.
+                                                Surface Intersection Algorithm           •      99
+
+that there are different branches in the neighborhood of P as well.
+Therefore, P corresponds to a node. e
+   However, there is no direct relationship between cusps on the plane curve
+and those on the intersection curve. In particular, D(u, v) 5 0 may have cusps
+but I need not have cusps and vice versa. Since we are evaluating the plane
+curve, we compute all the singularities and the branches.
+   In general the problem of computing the singularities in the intersection
+curve of high degree surfaces in floating point arithmetic can be numeri-
+cally unstable [Farouki and Rajan 1987]. Algorithms based on exact arith-
+metic and birational transformations have been proposed in Abhyankar
+and Bajaj [1988]. However they are computationally very slow. Our algo-
+rithms are based on the local geometry of the curve and the properties of
+the representation M(u, v). The algorithm proposed here assumes that all
+the singular points on the curve are geometrically isolated and well apart.
+In a design process, the designer often tends to use operations that result
+in singular intersections. Our algorithm can handle these situations well as
+long as the designer generates singular points that are separated by a
+specified tolerance.
+
+6.1 Detection of Cusps
+The previous section described a method of detecting nodal singularities
+during domain decomposition. Domain decomposition made use of the fact
+that any region with just two boundary intersections consists of a single
+curve component. However this curve could contain cusps that introduce
+problems during tracing. Cusps on the plane curve are computed based on
+the following lemma.
+  LEMMA 3. Given a singular point (u 1 , v 1 ) on the curve, one of the
+following must be true,
+—M(u 1 , v 1 ) has more than one zero singular value, or
+—the entries g unn (u 1 , v 1 ) and g vnn (u 1 , v 1 ) obtained after performing Gauss-
+ ian elimination of M(u 1 , v 1 ) are both zero.
+   PROOF. In Section 2 it was shown that using a slight variant of Gauss-
+ian elimination, D(u 1 , v 1 ) 5 ) ni50 g ii and D u (u 1 , v 1 ) 5 D(u 1 , v 1 ) ni50
+( g uii /g ii ). It is a well-known fact that if complete pivoting is used during
+Gaussian elimination, then for i , j, g ii $ g jj .
+   Since (u 1 , v 1 ) is a point on the curve, D(u 1 , v 1 ) 5 0. Therefore, at least
+g nn (u 1 , v 1 ) 5 0. In addition, since (u 1 , v 1 ) is also a singular point, D u (u 1 ,
+v 1 ) 5 D v (u 1 , v 1 ) 5 0. Thus,
+
+
+                P g ~ u , v ! 5 P g ~ u , v ! O gg ~~ uu ,, vv !! 5 0.
+                 n                  n                    n     u
+                                                               ii   1   1
+                      ii   1   1           ii   1    1
+                i50                i50                   i50   ii   1   1
+
+
+This implies one of two cases:
+                                        ACM Transactions on Graphics, Vol. 16, No. 1, January 1997.
+100       •     S. Krishnan and D. Manocha
+
+—at least another g ii (u 1 , v 1 ) 5 0, i Þ n, or
+—g unn (u 1 , v 1 ) 5 g vnn (u 1 , v 1 ) 5 0.
+The latter case satisfies the second part of the lemma. If the former is true,
+then M(u 1 , v 1 ) must be rank deficient by at least two. This is equivalent to
+two or more singular values being zero. e
+  The tracing algorithm computes the partial derivatives at each stage and
+checks for the conditions in Lemma 3. If one of them is approximately
+satisfied, we conjecture that we are near a cusp. Tracing is then abandoned
+on this path and started from the other endpoint. If the curve has a cusp in
+this region, the paths from the two endpoints meet at this cusp. Once the
+two paths come close (as demanded by the application) to each other, the
+tracing step size is progressively reduced. Once the two paths are close
+enough (smaller than specified tolerance), the cusp point is obtained by
+minimizing an energy function. The energy function is determined by the
+condition satisfied in Lemma 3. For example, if the second condition is
+satisfied, the energy function is E(u, v) 5 ( g unn (u, v)) 2 1 ( g vnn (u, v)) 2 .
+
+7. ROBUSTNESS AND EFFICIENCY
+The two most important considerations in the design of any surface
+intersection algorithm are robustness and efficiency. There is a clear
+tradeoff between these two, since the larger the robustness enhancement
+computations, the slower the execution time of the algorithm. Although it is
+almost impossible to provide an algorithm that can satisfy both completely,
+one must at least aim towards an algorithm that can provide a good
+fraction of both in most cases and can be fine-tuned according to the
+requirements of the application.
+  Our algorithm has been tested on a number of models, and we have
+obtained encouraging results. There are no benchmarks available to test its
+efficiency, but our algorithm compares favorably to many of the published
+timings. For example, it performs an order of magnitude faster than
+techniques such as interval arithmetic. Snyder [1992] reports that a
+difference operation (CSG operation) between a bumpy sphere and a
+cylinder using trimmed parametric surfaces takes an order of a few
+minutes on an HP workstation. We can perform such operations on similar
+solids (such as generalized prisms, cylinders, spheres, etc.) in a few seconds
+on the same machine. It is also possible for us to perform extra work in
+order to give more robust results.
+  In order to guarantee robustness, a general intersection algorithm must
+be able to determine the conditioning of the problem. The conditioning
+becomes more significant because of errors introduced by numerical compu-
+tations. If the input data changes by e, the output results will change by a
+function d(e). For very small values of e, there may exist a constant k such
+that d(e) ' ke [Hoffmann 1989]. If k is small, the problem is said to be
+well-conditioned. A large value of k signifies an ill-conditioned problem.
+The value k is called the condition number. However, it is nontrivial to
+ACM Transactions on Graphics, Vol. 16, No. 1, January 1997.
+                                       Surface Intersection Algorithm            •     101
+
+calculate k for surface intersection problems. Because of such difficulties,
+we restrict ourselves to robustness issues for well-conditioned problems
+only.
+  We identify four main areas in our algorithm where robustness enhanc-
+ing modifications can be made. They are
+—Tracing: We perform tracing after domain decomposition. It is shown
+ that when using inverse power iterations, convergence back to the curve
+ is guaranteed except in places of very high curvature (or cusps). In such
+ situations, we reduce the step size by half and repeat the process.
+ Robustness can be enhanced by reducing the minimum step size.
+—Component jumping: Domain decomposition is adopted to prevent compo-
+ nent jumping. Robustness is determined by the extent to which subdivi-
+ sion is accomplished. It is possible to control this effectively based on the
+ requirement of the application.
+—Singularities: The accurate detection of all the singular points is contin-
+ gent on the assumption that the singular points are separated and well
+ apart. This assumption is not unreasonable for most of the practical
+ applications, but a pathological case violating this condition can be
+ created.
+—Loop identification: We identify loops by performing curve–surface inter-
+ section and complex tracing. The number of paths to be traced grows as a
+ cubic function of the degree of a patch. In most practical examples it is
+ enough to trace a small fraction of the paths, but to ensure absolute
+ robustness, all the paths have to be traced.
+
+8. LARGE-SCALE MODELS
+The algorithms in Sections 3 through 5 deal with the intersection of a pair
+of Bézier or algebraic surfaces only. Most models consist of tens or hun-
+dreds of such surface patches. To compute the intersections of these models
+we compute the intersection of each overlapping pair.
+   Typically only a small percentage of the O(N 2 ) possible surface pairs
+intersects. Our algorithm prunes out most of the nonintersecting combina-
+tions using spatial techniques based on bounding boxes and linear pro-
+gramming.
+—Initially the axis-aligned rectangular bounding boxes are computed for
+ each Bézier surface for both models. Each of these bounding boxes is then
+ projected on each of the three axes to obtain three sets of intervals. We
+ denote them by x-lists, y-lists, and z-lists. The x-lists are sorted first and
+ all the nonintersecting pairs are discarded. The y-lists of the remaining
+ pairs are again sorted to check for overlaps. This is repeated for the
+ z-lists as well. The pairs that remain at the end of this operation have
+ intersecting bounding boxes.
+—The Bézier patches are contained in the convex hull of their control
+ points. Given all the pairs of surfaces obtained after bounding box tests,
+ a test for separating planes between their control polytopes is performed
+                                 ACM Transactions on Graphics, Vol. 16, No. 1, January 1997.
+102       •      S. Krishnan and D. Manocha
+
+
+
+
+      Fig. 13.   (a) Intersecting goblets; (b) intersecting scissors. (Courtesy of Alpha_1)
+
+
+                   Table I.   Performance Statistics of Intersection Algorithm
+
+                                                                    Timing (in sec.)
+
+                 Number of          Number of          Curve-Surface
+   Model          patches          intersections        intersection        Tracing      Total
+   Teapot             32                  8                   0.4              2.6        3.5
+   Goblet             72                 57                   2.4              4.9        7.8
+   Scissor           505                 82                   3.1              7.8       11.6
+
+
+
+  using linear programming. The existence of a separating plane implies
+  that the surface pairs have no intersection.
+  After execution of these two steps, the intersection algorithm is applied
+to each existing pair. The intersection of each patch pair results in a
+(possibly empty) set of open components and loops. The open components
+could be part of a larger curve in the model. Two open components are
+spliced together if an endpoint of one is coincident with an endpoint of the
+other (actually the test is made over a small disk of influence). Finally, a
+piecewise representation of each component of the intersection curve is
+obtained for the original models. The results of the intersection algorithm
+on large models such as goblets and scissors are shown in Figure 13.
+
+9. IMPLEMENTATION AND PERFORMANCE
+The algorithm has been implemented and its performance measured on a
+number of models. The algorithm uses existing EISPACK and LAPACK
+routines for some of the matrix computations. At each stage of the algo-
+rithm, we can compute bounds on the accuracy of the results obtained
+based on the accuracy and convergence of the numerical methods adopted,
+such as eigenvalue computation, power iteration, and Gaussian elimina-
+tion. The algorithm was run on a high-end SGI Onyx workstation with a
+peak floating-point (MFLOP) rating of 98.1. In Table I we have highlighted
+the algorithm’s performance on different models. The second column indi-
+cates the number of patches in each model, and the third column corre-
+sponds to the number of patch pair intersections after linear programming.
+We believe that a number of optimization techniques can be incorporated in
+ACM Transactions on Graphics, Vol. 16, No. 1, January 1997.
+                                            Surface Intersection Algorithm            •     103
+
+
+
+
+       Fig. 14.   Examples of CSG solids generated by use of intersection algorithm.
+
+
+      Table II.   Performance of Intersection Algorithm in Generation of CSG Solids
+
+                                                                                  Number
+                     Number of         Number of            Running              of patches
+    Model            CSG opns.           ints.            time (in sec.)         (in B-Rep)
+   Fig. 14(a)            20                112                  47                   137
+   Fig. 14(b)             5                 38                  19                    89
+   Fig. 14(c)             5                 23                  15                   116
+   Fig. 14(d)            27                141                  68                   169
+   Fig. 14(e)            10                 52                  35                    69
+   Fig. 14(f)            21                118                  38                   146
+
+
+our implementation to give better results. Unfortunately, there are no
+existing benchmarks available to test our algorithm. Further, there are
+very few published performance results on surface intersection algorithms.
+   The intersection algorithm has also been used to compute Boolean
+combinations of solids (Constructive Solid Geometry—CSG) [Krishnan and
+Manocha 1996]. CSG is one of the more important representation schemes
+in solid modeling. CSG defines solids as Boolean combinations of primitive
+solids, and usually stores them in binary trees. The leaves of the tree have
+the primitive solids (such as prisms, spheres, and cylinders) and the
+internal nodes have the Boolean operators (union, difference, and intersec-
+tion). Our system has been applied to a number of industrial models
+(including that of a real world submarine model provided by Electric Boat
+Division, General Dynamics). Figure 14 shows some of the solids generated
+by our system. Table II describes the performance of the intersection
+algorithm for the solids in Figure 14.
+                                      ACM Transactions on Graphics, Vol. 16, No. 1, January 1997.
+104       •      S. Krishnan and D. Manocha
+
+
+
+
+      Fig. 15.   Parts of submarine storage and handling room—pivot and torpedo model.
+
+
+ Figure 15 shows two of the bigger models generated by our system.
+Details of these models are given in the following.
+—Pivot model: The complete pivot model is generated from 168 CSG trees.
+ The height of these trees varies from about 3 to 30. It consists of about
+ 4400 trimmed patches (some of whose degree is 5 3 2).
+—Torpedo model: This model consists of 71 CSG trees and its boundary
+ representation is made up of about 650 trimmed patches. The surface of
+ the torpedo consists of surfaces of revolution of degree as high as 11 3 2.
+
+10. CONCLUSION
+We have presented an efficient algorithm for evaluating the surface inter-
+section of parametric surface models. The algorithm has been implemented
+in floating point arithmetic and performs well in practice. Its main charac-
+teristics are computation of start points, loop detection based on complex
+tracing, robust tracing without component jumping, and evaluation of all
+singular points. At the same time its overall performance on large-scale
+models is fast enough for current CAD systems.
+
+ACKNOWLEDGMENTS
+We are grateful to E. Cohen, R. Fish, and R. Riesenfeld for the goblet and
+scissor models. These models were created using the Alpha-1 CAD system.
+We thank Mike Hohmeyer for lending his implementation of Seidel’s linear
+programming algorithm. We are also very grateful to G. Angelini, J.
+Boudreaux, and K. Fast of Electric Boat division of General Dynamics for
+providing us with a CSG model of a submarine storage and handling room.
+
+REFERENCES
+
+ABHYANKAR, S. S. AND BAJAJ, C. 1988. Automatic parameterizations of rational curves and
+ surfaces iii: Algebraic plane curves. Comput. Aided Geom. Des. 5, 309 –321.
+ARNON, D. S. 1983. Topologically reliable display of algebraic curves. Comput. Graph. 17,
+ 219 –227.
+BAJAJ, C. L., HOFFMANN, C. M., HOPCROFT, J. E. H., AND LYNCH, R. E. 1988. Tracing surface
+ intersections. Comput. Aided Geom. Des. 5, 285–307.
+BARNHILL, R. E., AND KERSEY, S. N. 1990. A marching method for parametric surface/surface
+ intersection. Comput. Aided Geom. Des. 7, 257–280.
+
+ACM Transactions on Graphics, Vol. 16, No. 1, January 1997.
+                                            Surface Intersection Algorithm            •     105
+
+CHENG, K. P. 1989. Using plane vector fields to obtain all the intersection curves of two
+  general surfaces. In Theory and Practice of Geometric Modeling, Springer, New York,
+  187–204.
+COLLINS, G. E. 1975. Quantifier elimination for real closed fields by cylindrical algebraic
+  decomposition. In Lecture Notes in Computer Science, number 33, Springer-Verlag.
+DIXON, A. L. 1908. The eliminant of three quantics in two independent variables. Proc.
+  London Math. Soc. 6, 49 – 69, 209 –236.
+DOKKEN, T. 1985. Finding intersections of b-spline represented geometries using recursive
+  subdivision techniques. Comput. Aided Geom. Des. 2, 189 –195.
+DOKKEN, T., SKYTT, V., AND YTREHUS, A. M. 1989. Recursive subdivision and iteration in
+  intersections and related problems. In Mathematical Methods in Computer-Aided Geometric
+  Design, Academic Press, 207–214.
+FAROUKI, R. T. 1986. The characterization of parametric surface sections. Comput. Vis.
+  Graph. Image Process. 33, 209 –236.
+FAROUKI, R. T. AND RAJAN, V. T. 1987. On the numerical condition of polynomials in
+  Bernstein form. Comput. Aided Geom. Des. 4, 191–216.
+FIELD, D. A., AND FIELD, R. 1992. A new family of curves for industrial applications. Tech.
+  Rep. GMR-7571, General Motors Research Laboratories.
+GEISOW, A. 1983. Surface interrogations. School of Computing Studies and Accountancy,
+  University of East Anglia, Ph.D. thesis.
+GOHBERG, I., LANCASTER, P., AND RODMAN, L. 1982. Matrix Polynomials. Academic Press,
+  New York.
+GOLUB, G. H., AND VAN LOAN, C. F. 1989. Matrix Computations. John Hopkins Press,
+  Baltimore.
+HOFFMANN, C. M. 1989. Geometric and Solid Modeling. Morgan-Kaufmann, San Mateo, CA.
+HOFFMANN, C. M. 1990. A dimensionality paradigm for surface interrogations. Comput.
+  Aided Geom. Des. 7, 517–532.
+HOHMEYER, M. E. 1991. A surface intersection algorithm based on loop detection. Int.
+  J. Comput. Geom. Appl. 1, 4, 473– 490. Special issue on Solid Modeling.
+KLASSEN, E., SINHA, P., AND WANG, K. K. 1985. Exploiting topological and geometric
+  properties for selective subdivision. In Proceedings of ACM Symposium on Computational
+  Geometry, 39 – 45.
+KRIEZIS, G. A., PATRIKALAKIS, N. M., AND WOLTER, F. E. 1990b. Topological and differential
+  equation methods for surface intersections. Comput. Aided Des. 24, 1, 41–55.
+KRIEZIS, G. A., PRAKASH, P. V., AND PATRIKALAKIS, N. M. 1990a. Method for intersecting
+  algebraic surfaces with rational polynomial patches. Comput. Aided Des. 22, 10, 645– 654.
+KRISHNAN, S., AND MANOCHA, D. 1996. Efficient representations and techniques for comput-
+  ing b-rep’s of csg models with nurbs primitives. In Proceedings of CSG’96, Information
+  Geometers, Ltd, 101–122.
+LANE, J. M., AND RIESENFELD, R. F. 1980. A theoretical development for the computer
+  generation and display of piecewise polynomial surfaces. IEEE Trans. Pattern Anal. Mach.
+  Intell. 2, 1, 150 –159.
+LASSER, D. 1986. Intersection of parametric surfaces in the Bernstein-Bezier representa-
+  tion. Comput. Aided Des. 18, 4, 186 –192.
+MANOCHA, D. 1992. Algebraic and numeric techniques for modeling and robotics. Computer
+  Science Division, Department of Electrical Engineering and Computer Science, University of
+  California, Berkeley, May, Ph.D. thesis.
+MANOCHA, D. 1994a. Computing selected solutions of polynomial equations. In Proceedings
+  of International Symposium on Symbolic and Algebraic Computation (Oxford, England),
+  ACM Press, New York, 1– 8.
+MANOCHA, D. 1994b. Solving systems of polynomial equations. IEEE Comput. Graph. Appl.
+  (March) 46 –55. Special Issue on Solid Modeling.
+MANOCHA, D. AND CANNY, J. F. 1991. A new approach for surface intersection. Int. J. Com-
+  put. Geom. Appl. 1, 4, 491–516. Special issue on Solid Modeling.
+MANOCHA, D. AND KRISHNAN, S. 1997. Algebraic pruning: A fast technique for curve and
+  surface intersections. Comput. Aided Geom. Des. (to appear).
+
+                                      ACM Transactions on Graphics, Vol. 16, No. 1, January 1997.
+106       •     S. Krishnan and D. Manocha
+
+PATRIKALAKIS, N. M. 1993. Surface-to-surface intersections. IEEE Comput. Graph. Appl. 13,
+  1, 89 –95.
+PIEGL, L. 1989. Geometric method of intersecting natural quadrics represented in trimmed
+  surface form. Comput. Aided Des. 21, 4, 201–212.
+PRATT, M. J. 1986. Surface/surface intersection problems. In The Mathematics of Surfaces
+  II, J. A. Gregory, ed., Claredon Press, Oxford, 117–142.
+REQUICHA, A. A. G. AND ROSSIGNAC, J. R. 1992. Solid modeling and beyond. IEEE Comput.
+  Graph. Appl. (Sept.), 31– 44.
+ROSSIGNAC, J. R. AND REQUICHA, A. A. G. 1987. Piecewise-circular curves for geometric
+  modeling. IBM J. Res. Dev. 31, 3, 296 –313.
+SARRAGA, R. F. 1983. Algebraic methods for intersection. Comput. Vis. Graph. Image
+  Process. 22, 222–238.
+SEDERBERG, T. W. 1983. Implicit and parametric curves and surfaces. Purdue University,
+  Ph.D. thesis.
+SEDERBERG, T. W. AND MEYERS, R. J. 1988. Loop detection in surface patch intersections.
+  Comput. Aided Geom. Des. 5, 161–171.
+SEDERBERG, T. W. AND NISHITA, T. 1991. Geometric hermite approximation of surface patch
+  intersection curves. Comput. Aided Geom. Des. 8, 97–114.
+SEIDEL, R. 1990. Linear programming and convex hulls made easy. In Proceedings of the 6th
+  Annual ACM Conference on Computational Geometry (Berkeley, CA), 211–215.
+SNYDER, J. 1992. Interval arithmetic for computer graphics. In Proceedings of ACM Sig-
+  graph (Chicago, IL) 121–130.
+ZUNDEL, A. AND SEDERBERG, T. 1993. Using pyramidal surfaces to detect and isolate surface/
+  surface intersections. In SIAM Conference on Geometric Design (Tempe, AZ).
+
+Received February 1996; revised August 1996; September 1996
+
+
+
+
+ACM Transactions on Graphics, Vol. 16, No. 1, January 1997.
+
