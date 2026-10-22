@@ -26,6 +26,7 @@ mod sch_dialogs;
 pub mod ui;
 pub mod schematic_tools;
 
+use cadrs_ui::ShortcutKey;
 use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
 
@@ -593,7 +594,7 @@ pub(crate) fn navigate(
     for k in key_events {
         // In the Layout, F flips what is selected (`layout_tools`); with nothing, it fits.
         let flips = key.2 == Mode::Layout && !layout.selection.is_empty();
-        if k.state == bevy::input::ButtonState::Pressed && !typing && !flips && k.key_code == KeyCode::KeyF && !ctrl && !shift {
+        if k.state == bevy::input::ButtonState::Pressed && !typing && !flips && k.shortcut_code() == KeyCode::KeyF && !ctrl && !shift {
             commands.queue(fit);
         }
     }

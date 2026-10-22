@@ -22,6 +22,7 @@
 //!   properties… changes the fixed corner.
 //! - Delete removes the selected notes and tables. Every change goes through the command layer.
 
+use cadrs_ui::ShortcutKey;
 use std::sync::Arc;
 
 use bevy::input::keyboard::{Key, KeyboardInput};
@@ -1406,7 +1407,7 @@ fn notes_keys(
         if in_editor {
             let cell = matches!(ui.edit.as_ref().map(|e| e.target), Some(EditTarget::Cell { .. }));
             let e = &mut ui.edit.as_mut().unwrap().editor;
-            match k.key_code {
+            match k.shortcut_code() {
                 KeyCode::Escape => {
                     commands.queue(commit_edit);
                 }
@@ -1445,7 +1446,7 @@ fn notes_keys(
         if ctrl || ann.tool != AnnTool::None {
             continue;
         }
-        match k.key_code {
+        match k.shortcut_code() {
             KeyCode::Tab if ui.cells.is_some() => {
                 commands.queue(move |w: &mut World| tab_cell(w, shift));
             }

@@ -217,6 +217,30 @@ pub fn extrude_of(regions: Vec<RegionRef>, depth: f64) -> ExtrudeFeature {
 
 pub mod bracket;
 pub mod bracket_pair;
+
+/// A sample's STEP file built on the rebuild session, by its name (the app's script commands
+/// `step-fixture`, `sm-legacy-step`, `sm-legacy-case-step`): a [`crate::rebuild::task::Task`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub enum StepFixture {
+    /// [`bracket_pair::step`].
+    BracketPair,
+    /// [`sheetmetal_legacy::step`].
+    SheetMetalLegacy,
+    /// [`sheetmetal_legacy::case_round_step`].
+    SheetMetalLegacyCase,
+}
+
+impl crate::rebuild::task::Task for StepFixture {
+    const NAME: &'static str = "sample-step";
+    type Output = Result<Vec<u8>, String>;
+    fn run(self, r: &mut crate::rebuild::Rebuilder) -> Self::Output {
+        match self {
+            StepFixture::BracketPair => bracket_pair::step(r),
+            StepFixture::SheetMetalLegacy => sheetmetal_legacy::step(r),
+            StepFixture::SheetMetalLegacyCase => sheetmetal_legacy::case_round_step(r),
+        }
+    }
+}
 pub mod conrod;
 pub mod design_intent;
 pub mod flange;

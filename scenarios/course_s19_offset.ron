@@ -1,11 +1,12 @@
 // T1 / S19.1: the Offset tool (O): "pick an entity or a loop. Dragging a piece picks the whole
-// chain. Click the arrow to flip the side. Click to place, then type the distance." (Compare
+// chain. Move across the source to choose the side. Click to place, then type the distance." (Compare
 // training/intro-to-sketching/ex2-step8.png.) A line, an arc, a circle and an L-shaped chain.
 // - The line, picked from above: the offset preview follows the cursor's distance, with an arrow
-//   pointing to its side; clicking the arrow flips it below. Clicking elsewhere places it and
+//   pointing to its side; moving below the source flips it below. Clicking places it and
 //   opens the distance box: 8 typed. The offset line is parallel, its distance a driving
 //   dimension.
-// - The arc, picked from inside: inward, 6. The circle, from outside: outward, 5.
+// - Fresh Offset sessions for the arc (inward, 6) and circle (outward, 5), so their
+//   independent distances are not linked to the preceding session's driving dimension.
 // - Pressing on the L and dragging picks the whole chain (both lines); its offset keeps one
 //   distance at the corner, 5.
 Scenario(
@@ -47,15 +48,18 @@ Scenario(
         MoveWorld(-30, 48),
         Wait(3),
         Screenshot("03-offset-preview-with-arrow"),
-        Click(world(-37.5, 51.5)),
-        Screenshot("04-arrow-clicked-side-flipped"),
-        Click(world(-30, 51)),
+        MoveWorld(-30, 32),
+        Wait(2),
+        Screenshot("04-cursor-crossed-side"),
+        Click(world(-30, 32)),
         Screenshot("05-placed-distance-box"),
         Type("8"),
         Key("Enter"),
         MoveTo(1400, 850),
         Wait(2),
         Screenshot("06-line-offset-8-below"),
+        Key("Escape"),
+        Key("O"),
         Click(world(30, 44.5)),
         MoveWorld(22, 37),
         Wait(3),
@@ -63,6 +67,8 @@ Scenario(
         Click(world(22, 37)),
         Type("6"),
         Key("Enter"),
+        Key("Escape"),
+        Key("O"),
         Click(world(30, -17.5)),
         MoveWorld(18, -18),
         Wait(3),
@@ -70,6 +76,8 @@ Scenario(
         Click(world(18, -18)),
         Type("5"),
         Key("Enter"),
+        Key("Escape"),
+        Key("O"),
         Press(world(-45, -15)),
         MoveWorld(-45, -18),
         Wait(2),

@@ -17,6 +17,7 @@
 //!   Properties dialog open it on property owners ([`open_material_for`]): ✓ sets their
 //!   Material property ([`cadrs_core::properties::SetProperties`]), wherever the part lives.
 
+use cadrs_ui::ShortcutKey;
 use bevy::input::ButtonState;
 use bevy::input::keyboard::KeyboardInput;
 use bevy::prelude::*;
@@ -499,7 +500,7 @@ fn material_keys(
         return;
     }
     for k in keys.read() {
-        if k.state == ButtonState::Pressed && k.key_code == KeyCode::Escape {
+        if k.state == ButtonState::Pressed && k.shortcut_code() == KeyCode::Escape {
             commands.queue(|world: &mut World| {
                 match world.get_resource_mut::<MaterialSession>() {
                     Some(mut s) if s.open => s.open = false,

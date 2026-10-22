@@ -2,8 +2,8 @@
 //! overlap, and by how much. Every part at any depth ([`super::structure::occurrences`]) is its
 //! Part Studio's exact kernel body moved to its placement; each pair whose bounding boxes meet is
 //! intersected (the kernel's boolean **Intersect**) and the pair interferes when the shared solid
-//! has a volume (touching faces share none). Runs on the kernel thread
-//! ([`crate::rebuild::run_on_worker`]).
+//! has a volume (touching faces share none). Runs on the kernel, as a
+//! [`crate::rebuild::task::Task`].
 
 use serde::{Deserialize, Serialize};
 
@@ -17,7 +17,7 @@ use crate::rebuild::PendingJob;
 pub const MIN_VOLUME: f64 = 1e-6;
 
 /// One part to check: its Part Studio's features, the part, and where it is.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct Item {
     /// Its occurrence id (the solver's), its top-level instance and its part in the view.
     pub occurrence: InstanceId,
@@ -35,7 +35,7 @@ pub struct Clash {
     pub b: PartId,
     pub volume: f64,
     /// The shared volume's triangles (assembly coordinates), to draw it (Final part 3).
-    #[serde(default, skip)]
+    #[serde(default)]
     pub triangles: Vec<[[f32; 3]; 3]>,
 }
 
@@ -72,7 +72,22 @@ pub fn pairs(items: &[Item], among: &[InstanceId]) -> Vec<(usize, usize)> {
 
 /// Checks `items` on the kernel thread: the clashes, largest first.
 pub fn check(items: Vec<Item>, among: Vec<InstanceId>) -> PendingJob<Result<Vec<Clash>, String>> {
-    crate::rebuild::run_on_worker(move |r| run(r, &items, &among))
+    crate::rebuild::task::run(Check { items, among })
+}
+
+/// [`check`] as a [`crate::rebuild::task::Task`].
+#[derive(Serialize, Deserialize)]
+pub(crate) struct Check {
+    items: Vec<Item>,
+    among: Vec<InstanceId>,
+}
+
+impl crate::rebuild::task::Task for Check {
+    const NAME: &'static str = "interference-check";
+    type Output = Result<Vec<Clash>, String>;
+    fn run(self, r: &mut crate::rebuild::Rebuilder) -> Self::Output {
+        run(r, &self.items, &self.among)
+    }
 }
 
 /// [`check`], waiting for the result.
@@ -141,7 +156,23 @@ fn run(_r: &mut crate::rebuild::Rebuilder, _items: &[Item], _among: &[InstanceId
 /// they are placed in the assembly (turned −90° about X first with `y_up`); one file per part
 /// (`individual`) or one with them all. Runs on the kernel thread.
 pub fn export_step(items: Vec<(Item, String)>, y_up: bool, individual: bool) -> PendingJob<Result<Vec<crate::export::StepFile>, String>> {
-    crate::rebuild::run_on_worker(move |r| export_run(r, &items, y_up, individual))
+    crate::rebuild::task::run(ExportStep { items, y_up, individual })
+}
+
+/// [`export_step`] as a [`crate::rebuild::task::Task`].
+#[derive(Serialize, Deserialize)]
+pub(crate) struct ExportStep {
+    items: Vec<(Item, String)>,
+    y_up: bool,
+    individual: bool,
+}
+
+impl crate::rebuild::task::Task for ExportStep {
+    const NAME: &'static str = "interference-export-step";
+    type Output = Result<Vec<crate::export::StepFile>, String>;
+    fn run(self, r: &mut crate::rebuild::Rebuilder) -> Self::Output {
+        export_run(r, &self.items, self.y_up, self.individual)
+    }
 }
 
 #[cfg(feature = "brep")]

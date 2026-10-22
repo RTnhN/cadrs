@@ -35,6 +35,9 @@ repository = "https://github.com/rvdende/cadrs"
 bevy = { version = "0.19.1", features = ["bevy_dev_tools"] }
 serde = { version = "1", features = ["derive", "rc"] }
 ron = "0.12"
+# The kernel process's messages (`cadrs_core::rebuild::process`): self-describing, so the
+# documents' optional fields round-trip.
+rmp-serde = "1.3"
 uuid = { version = "1", features = ["v4", "serde"] }
 # The autorouter's GPU search (cadrs_router): the wgpu Bevy uses, taking SPIR-V from rust-gpu.
 wgpu = { version = "29", default-features = false, features = ["std", "parking_lot", "spirv", "vulkan", "metal", "dx12"] }
@@ -50,6 +53,8 @@ directories = "6"
 wayland-client = "0.31"
 wayland-backend = { version = "0.3", features = ["client_system"] }
 raw-window-handle = "0.6"
+# The window icon (cadrs_app::app_icon); the version Bevy uses.
+winit = { version = "0.30", default-features = false }
 earcutr = "0.4"
 proptest = "1"
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }

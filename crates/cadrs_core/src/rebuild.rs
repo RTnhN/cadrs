@@ -48,13 +48,17 @@ use crate::parts::{Part, PartKind};
 
 /// Import and export jobs on the worker (P3F.2).
 pub mod exchange;
+/// The kernel in a process of its own, so a crash in it isn't the app's.
+pub mod process;
+/// Work on the kernel session as named requests, which can run in the kernel process.
+pub mod task;
 #[cfg(feature = "brep")]
 pub mod persist;
 #[cfg(feature = "brep")]
 pub mod session;
 
 /// The result of rebuilding a feature list.
-#[derive(Debug, Clone, Default, PartialEq)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct Build {
     /// Every part, in the order they were made ("Part 1", "Part 2", …).
     pub parts: Vec<Part>,
@@ -139,6 +143,10 @@ pub struct Stage {
     #[serde(default)]
     pub remove: bool,
 }
+
+/// More faces than a CAD body has: an imported mesh's facets (as the kernel's own limit for
+/// merging faces). Checks only for the dialogs' sake skip such a part.
+const HUGE_FACES: usize = 10_000;
 
 /// The parts an extrude's new body meets (before its boolean).
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
@@ -578,6 +586,7 @@ impl Rebuilder {
             let total = features[..last.map_or(0, |l| l + 1)].iter().filter(|f| f.is_part_feature()).count();
             PROGRESS_DONE.store(0, Ordering::Relaxed);
             PROGRESS_TOTAL.store(total, Ordering::Relaxed);
+            process::emit(&process::Event::Progress(0, total));
         }
         for i in 0..last.map_or(0, |l| l + 1) {
             let f = &features[i];
@@ -590,6 +599,9 @@ impl Rebuilder {
             // chain key covers only what is above, so this outcome gets a key of its own (a
             // result cached while the parent was missing altogether must not stand for it).
             let below = parent_below(features, i).or_else(|| var_errors.iter().find(|(id, _)| *id == f.id).map(|(_, w)| w.clone()));
+            // A feature that crashed the kernel process isn't computed again (until it, or a
+            // feature above it, changes: its key changes).
+            let below = below.or_else(|| process::is_poisoned(key).then(|| process::CRASHED.to_string()));
             if let Some(why) = &below {
                 key = chain_key_str(key, why);
             }
@@ -618,7 +630,10 @@ impl Rebuilder {
                         dots: None,
                         uses: Vec::new(),
                     },
-                    None => self.compute_noting_meshes(&features[..i], f, &state),
+                    None => {
+                        let _computing = process::computing(key, f);
+                        self.compute_noting_meshes(&features[..i], f, &state)
+                    }
                 };
                 let sources = match &f.kind {
                     FeatureKind::Derived(_) => derived_source_keys(std::slice::from_ref(f)),
@@ -635,7 +650,8 @@ impl Rebuilder {
                 );
             }
             if report {
-                PROGRESS_DONE.fetch_add(1, Ordering::Relaxed);
+                let done = PROGRESS_DONE.fetch_add(1, Ordering::Relaxed) + 1;
+                process::emit(&process::Event::Progress(done, PROGRESS_TOTAL.load(Ordering::Relaxed)));
             }
             let entry = self.entries.get_mut(&key).expect("just inserted");
             entry.last_used = generation;
@@ -1847,11 +1863,11 @@ mod kernel_ops {
         ) -> Result<Output, String> {
             let op = id.0;
             let surface = e.surface;
-            let contacts = if surface {
-                Contacts::default()
-            } else {
-                self.contacts(tool.0, state)
-            };
+            // A New only needs them while its dialog may be open (it picks Add once its body
+            // touches a part), and they cost a boolean with each part near it (10 s by a
+            // 265 000-facet mesh, issue #11).
+            let wanted = !surface && (e.op != BooleanOp::New || self.stage_for == Some(id));
+            let contacts = if wanted { self.contacts(tool.0, state, e.op == BooleanOp::New) } else { Contacts::default() };
             // The dialog's preview of a Remove: the material it takes out of the parts.
             let removed = (self.stage_for == Some(id) && e.op == BooleanOp::Remove && !surface)
                 .then(|| self.removed_volume(id, &tool, &Self::scope(e, state, &contacts), state, &geoms));
@@ -1878,7 +1894,7 @@ mod kernel_ops {
                     })
                 });
                 o.stage = stage.or(cut);
-                o.contacts = Some(contacts);
+                o.contacts = (wanted || surface).then_some(contacts);
                 o
             })
         }
@@ -2277,8 +2293,9 @@ mod kernel_ops {
             self.split_named(body, op, names, &HashMap::new())
         }
 
-        /// Which parts the new body touches (Add) and overlaps (Remove, Intersect).
-        fn contacts(&mut self, tool: BodyId, state: &State) -> Contacts {
+        /// Which parts the new body touches (Add) and overlaps (Remove, Intersect). `only_ui`:
+        /// only for the dialog (a New picking Add by itself), so huge parts are left out.
+        fn contacts(&mut self, tool: BodyId, state: &State, only_ui: bool) -> Contacts {
             let mut out = Contacts::default();
             let Ok(tb) = self.kernel.bounding_box(tool) else {
                 return out;
@@ -2293,16 +2310,17 @@ mod kernel_ops {
                 if apart {
                     continue;
                 }
-                // Touching or overlapping: their union is one solid.
-                if self.kernel.joins(b, tool).unwrap_or(false) {
-                    out.touches.push(p.part.id);
+                // A huge part (a mesh's facets) took 15 s, on every change of a New extrude's
+                // depth beside an imported STL (issue #11): a New doesn't join it by itself.
+                if only_ui && self.kernel.faces(b).is_ok_and(|f| f.len() > HUGE_FACES) {
+                    continue;
                 }
-                if let Ok(r) = self.kernel.boolean(BoolOp::Intersect, b, &[tool]) {
-                    let v = self.kernel.mass_properties(r.bodies[0]).map(|m| m.volume).unwrap_or(0.0);
-                    self.kernel.release(r.bodies[0]);
-                    if v > 1e-9 {
-                        out.overlaps.push(p.part.id);
-                    }
+                // Overlapping, else touching: their union is one solid.
+                if self.kernel.overlaps(b, tool).unwrap_or(false) {
+                    out.overlaps.push(p.part.id);
+                    out.touches.push(p.part.id);
+                } else if self.kernel.joins(b, tool).unwrap_or(false) {
+                    out.touches.push(p.part.id);
                 }
             }
             out
@@ -3139,6 +3157,13 @@ enum Job {
     },
     /// P3B.9: work on the kernel session (interference, assembly export), see [`run_on_worker`].
     Run(Box<dyn FnOnce(&mut Rebuilder) + Send>),
+    /// A [`task::Task`] for the kernel process: its name and encoded parameters, and what to do
+    /// with its encoded output (`None`: it failed).
+    Task {
+        name: &'static str,
+        input: Vec<u8>,
+        done: Box<dyn FnOnce(Option<Vec<u8>>) + Send>,
+    },
     Project {
         features: Vec<Feature>,
         request: Box<crate::views::ViewRequest>,
@@ -3160,7 +3185,8 @@ fn worker() -> &'static Mutex<mpsc::Sender<Job>> {
         let (tx, rx) = mpsc::channel::<Job>();
         std::thread::Builder::new()
             .name("cadrs-rebuild".into())
-            .spawn(move || run(rx))
+            // With the kernel in its own process, this thread hands the jobs to it.
+            .spawn(move || if process::enabled() { process::run_remote(rx) } else { run(rx) })
             .expect("failed to start the rebuild thread");
         Mutex::new(tx)
     })
@@ -3225,6 +3251,15 @@ fn run(rx: mpsc::Receiver<Job>) {
                     rebuilder = Rebuilder::new();
                 }
             }
+            Job::Task { name, input, done } => {
+                match catch_unwind(AssertUnwindSafe(|| task::run_named(name, &input, &mut rebuilder))) {
+                    Ok(out) => done(out.ok()),
+                    Err(_) => {
+                        rebuilder = Rebuilder::new();
+                        done(None);
+                    }
+                }
+            }
             Job::Project { features, request, reply, cancelled } => {
                 // Nobody waits for it any more (the view was deleted or changed again).
                 if cancelled.load(Ordering::Relaxed) {
@@ -3284,19 +3319,57 @@ pub fn run_on_worker<T: Send + 'static>(f: impl FnOnce(&mut Rebuilder) -> T + Se
     PendingJob { rx: Mutex::new(rx) }
 }
 
+/// Runs `f` on a thread of its own, for work that only needs rebuilds ([`build`]) besides its own
+/// (they queue on the worker, wherever the kernel runs).
+pub fn run_in_background<T: Send + 'static>(f: impl FnOnce() -> T + Send + 'static) -> PendingJob<T> {
+    let (reply, rx) = mpsc::channel();
+    std::thread::spawn(move || {
+        let _ = reply.send(f());
+    });
+    PendingJob { rx: Mutex::new(rx) }
+}
+
 /// Works out the stage of feature `id` (an Add's or a Remove's change, [`Rebuilder::stage_of`])
 /// on the kernel thread: the feature list's hover shows it.
 pub fn request_stage(features: Vec<Feature>, id: FeatureId) -> PendingJob<Option<Stage>> {
-    run_on_worker(move |r| r.stage_of(&features, id))
+    task::run(StageOf { features: process::Features::of(features), id })
+}
+
+/// [`request_stage`] as a [`task::Task`].
+#[derive(Serialize, Deserialize)]
+pub(crate) struct StageOf {
+    features: process::Features,
+    id: FeatureId,
+}
+
+impl task::Task for StageOf {
+    const NAME: &'static str = "stage-of";
+    type Output = Option<Stage>;
+    fn run(self, r: &mut Rebuilder) -> Option<Stage> {
+        r.stage_of(&self.features.into_list(), self.id)
+    }
 }
 
 /// The Document menu's Full rebuild: drops everything the rebuild thread has cached (it starts
 /// a new kernel session) and no longer restores the session snapshots written so far, so the
 /// next rebuild of each Part Studio (and its Derived sources) computes every feature.
 pub fn clear_cache() {
-    session::forget_written();
     // Later requests queue behind it, so they find the new session.
-    let _ = run_on_worker(|r| *r = Rebuilder::new());
+    let _ = task::run(ClearCache);
+}
+
+/// [`clear_cache`] as a [`task::Task`] (the snapshots written are the kernel process's).
+#[derive(Serialize, Deserialize)]
+pub(crate) struct ClearCache;
+
+impl task::Task for ClearCache {
+    const NAME: &'static str = "clear-cache";
+    type Output = ();
+    fn run(self, r: &mut Rebuilder) {
+        #[cfg(feature = "brep")]
+        session::forget_written();
+        *r = Rebuilder::new();
+    }
 }
 
 /// Rebuilds `features` (from the cache, mostly) and writes their session snapshot now, instead
@@ -3305,13 +3378,29 @@ pub fn clear_cache() {
 /// Nothing is written without a snapshot store ([`session::set_store`]).
 #[cfg(feature = "brep")]
 pub fn save_snapshot_now(features: Vec<Feature>) {
-    run_on_worker(move |r| {
-        r.rebuild(&features);
-        if let Some(save) = r.plan_save(&features) {
-            r.save_snapshot(save);
+    task::run(SaveSnapshotNow { features }).wait();
+}
+
+/// [`save_snapshot_now`] as a [`task::Task`].
+#[derive(Serialize, Deserialize)]
+pub(crate) struct SaveSnapshotNow {
+    features: Vec<Feature>,
+}
+
+impl task::Task for SaveSnapshotNow {
+    const NAME: &'static str = "save-snapshot-now";
+    type Output = ();
+    fn run(self, r: &mut Rebuilder) {
+        #[cfg(feature = "brep")]
+        {
+            r.rebuild(&self.features);
+            if let Some(save) = r.plan_save(&self.features) {
+                r.save_snapshot(save);
+            }
         }
-    })
-    .wait();
+        #[cfg(not(feature = "brep"))]
+        let _ = (r, self.features);
+    }
 }
 
 /// P3B.9: kernel bodies of placed parts, for work across Part Studios (an assembly's

@@ -19,6 +19,7 @@
 //! Every change goes through the command layer; the arrow drag previews through
 //! [`PartOverride`] and records one step when released.
 
+use cadrs_ui::ShortcutKey;
 use bevy::input::ButtonState;
 use bevy::input::keyboard::KeyboardInput;
 use bevy::input_focus::InputFocus;
@@ -253,6 +254,10 @@ struct Preselected {
 
 /// The planar part faces, sketch regions and whole sketches in the selection, and whether
 /// solid material lies right beyond (and behind) them. `None` when none is selected.
+/// More faces than a CAD part has: an imported mesh's facets (as the kernel's limit for merging
+/// faces).
+const HUGE_PART_FACES: usize = 10_000;
+
 fn preselected(world: &World) -> Option<Preselected> {
     let cache = world.resource::<PartCache>();
     let doc = world.get_resource::<ActiveDocument>();
@@ -288,7 +293,11 @@ fn preselected(world: &World) -> Option<Preselected> {
     if out.faces.is_empty() && out.regions.is_empty() && out.sketches.is_empty() {
         return None;
     }
-    let solid = |at: Vec3| cache.parts.iter().filter(|q| q.kind == cadrs_core::PartKind::Solid).any(|q| inside(&q.solid, at));
+    // A huge part (an imported mesh's facets) doesn't choose for it: a new extrude beside or
+    // through an STL starts as a plain New (issue #11).
+    let solid = |at: Vec3| {
+        cache.parts.iter().filter(|q| q.kind == cadrs_core::PartKind::Solid && q.solid.faces.len() <= HUGE_PART_FACES).any(|q| inside(&q.solid, at))
+    };
     out.blocked_out = !probes.is_empty() && probes.iter().all(|(p, n)| solid(*p + *n * 0.05));
     out.blocked_in = probes.iter().all(|(p, n)| solid(*p - *n * 0.05));
     Some(out)
@@ -422,14 +431,14 @@ pub fn accept_extrude(world: &mut World) {
     let Some(f) = current(world, &s).filter(|f| f.is_valid()) else {
         return;
     };
-    // The rebuild with these parameters must succeed (the kernel may refuse a depth): wait for
-    // it rather than trust the parts on screen, which may be a frame old.
+    // The rebuild with these parameters must succeed (the kernel may refuse a depth): ask for
+    // it rather than trust the parts on screen, which may be a frame old (this comes back when
+    // it is done).
     let features = world
         .get_resource::<ActiveDocument>()
         .and_then(|d| Some(d.doc.element(s.element)?.active_features()))
         .unwrap_or_default();
-    let build = cadrs_core::rebuild::build(&features);
-    if build.error(f.id).is_some() {
+    if crate::accept::builds(world, "extrude", features, f.id, accept_extrude) != Some(true) {
         return;
     }
     let label = if s.is_new {
@@ -895,7 +904,7 @@ fn extrude_keys(
         {
             continue;
         }
-        match k.key_code {
+        match k.shortcut_code() {
             KeyCode::KeyE
                 if shift
                     && session.is_none()

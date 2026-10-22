@@ -11,6 +11,9 @@
 //! [--sketch <name>]` rebuilds a stored
 //! document and reports the features in error or warning, in detail (see [`check`]).
 //!
+//! `cadrs --kernel-process <port> <token>` is the geometry kernel the app starts for itself
+//! (`cadrs_core::rebuild::process`); `CADRS_KERNEL=thread` keeps the kernel in the app instead.
+//!
 //! Documents live in `--data-dir`, else `CADRS_DATA_DIR`, else the platform data dir
 //! (`~/.local/share/cadrs/documents`, `%APPDATA%\cadrs\documents`). Scenarios use a fresh
 //! `<out dir>/data` instead, a fixed clock and a fixed user, so their screenshots are
@@ -27,6 +30,7 @@ const SCENARIO_NOW: i64 = 1_790_263_800;
 
 mod batch;
 mod check;
+mod install;
 
 /// Every way to run cadrs (`-h`, `--help`).
 const HELP: &str = "\
@@ -42,6 +46,9 @@ Usage:
       Rebuilds a stored document without a window and reports its features in error or warning.
   cadrs --headless --jobs N (--scenarios a,b,... | --all)
       Renders many scenarios, N at a time, each in its own process.
+  cadrs --install
+      Installs this build for the current user, with a launcher entry (Linux, macOS, Windows;
+      `cargo install-local`).
 
 Documents live in --data-dir, else $CADRS_DATA_DIR, else the platform data dir
 (~/.local/share/cadrs/documents on Linux).";
@@ -49,9 +56,35 @@ Documents live in --data-dir, else $CADRS_DATA_DIR, else the platform data dir
 fn main() -> AppExit {
     // `--jobs N` / `--scenarios a,b` / `--all`: many scenarios in parallel child processes.
     let args: Vec<String> = std::env::args().skip(1).collect();
+    // The kernel process this executable starts for itself (`cadrs_core::rebuild::process`).
+    cadrs_app::register_kernel_tasks();
+    if args.first().map(String::as_str) == Some(cadrs_core::rebuild::process::ARG) {
+        return AppExit::from_code(cadrs_core::rebuild::process::main(&args[1..]) as u8);
+    }
+    // The kernel runs in a process of its own, so a crash in it costs a rebuild, not the app
+    // (`CADRS_KERNEL=thread` keeps it on a thread of this process, for debugging).
+    if std::env::var("CADRS_KERNEL").as_deref() != Ok("thread")
+        && let Ok(exe) = std::env::current_exe()
+    {
+        cadrs_core::rebuild::process::use_process(exe, Vec::new());
+    }
     if args.iter().any(|a| a == "-h" || a == "--help") {
         println!("{HELP}");
         return AppExit::Success;
+    }
+    // `--install`: installs this build for the user, with a launcher entry (`install.rs`;
+    // `--install-desktop` is its older name).
+    if args.iter().any(|a| a == "--install" || a == "--install-desktop") {
+        return match install::run() {
+            Ok(dir) => {
+                println!("Installed cadrs to {}", dir.display());
+                AppExit::Success
+            }
+            Err(e) => {
+                eprintln!("{e}");
+                AppExit::from_code(1)
+            }
+        };
     }
     // `--list-documents`: the store's documents with their ids, no window.
     if let Some(code) = check::list_documents(&args) {

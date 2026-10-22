@@ -3,6 +3,7 @@
 //!
 //! | Dropped | Documents page | Part Studio | Sketch being edited | Other tabs |
 //! |---|---|---|---|---|
+//! | Native: cadrs | a new library copy | (note) | (note) | (note) |
 //! | Drawing: SVG, EPS, PS, PDF, AI, DXF, DWG | (note) | a new sketch of it | its curves added | (note) |
 //! | Picture: PNG, JPEG, GIF | (note) | an Image ([`crate::picture`]) | (note) | (note) |
 //! | Model: STEP, IGES | a new document ([`crate::import_file`]) | an Import ([`crate::import_dialog`]) | (note) | new tabs ([`crate::import_file`]) |
@@ -45,6 +46,7 @@ impl Plugin for DropImportPlugin {
 /// What a dropped file is.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DropKind {
+    Native,
     Drawing,
     Picture,
     /// STEP or IGES.
@@ -54,6 +56,9 @@ pub enum DropKind {
 
 impl DropKind {
     pub fn of_path(path: &Path) -> Option<Self> {
+        if path.extension().is_some_and(|e| e.eq_ignore_ascii_case("cadrs")) {
+            return Some(Self::Native);
+        }
         if VectorFormat::of_path(path).is_some() {
             return Some(Self::Drawing);
         }
@@ -126,11 +131,13 @@ pub fn dropped(world: &mut World, paths: Vec<PathBuf>) {
         let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("the file").to_string();
         let Some(kind) = DropKind::of_path(&path) else {
             notes.push(Notification::warning(format!(
-                "{name}: drop drawings (SVG, EPS, PDF, DXF, DWG), pictures (PNG, JPEG, GIF) or models (STEP, IGES, STL)"
+                "{name}: drop drawings (SVG, EPS, PDF, DXF, DWG), pictures (PNG, JPEG, GIF), models (STEP, IGES, STL) or native documents (cadrs)"
             )));
             continue;
         };
         match (kind, page) {
+            (DropKind::Native, Page::Documents) => crate::native_document::import(world, &path),
+            (DropKind::Native, _) => notes.push(Notification::warning("Import native documents from the documents page")),
             (DropKind::Drawing, Page::PartStudio | Page::Sketch) => drawings.push(path),
             (DropKind::Picture, Page::PartStudio) => pictures.push(path),
             (DropKind::Model | DropKind::Mesh, Page::PartStudio) => crate::import_dialog::import_dropped(world, &path),
@@ -253,6 +260,7 @@ mod tests {
         assert_eq!(k("bracket.step"), Some(DropKind::Model));
         assert_eq!(k("bracket.igs"), Some(DropKind::Model));
         assert_eq!(k("bracket.stl"), Some(DropKind::Mesh));
+        assert_eq!(k("project.CADRS"), Some(DropKind::Native));
         assert_eq!(k("notes.txt"), None);
     }
 }

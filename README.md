@@ -1,6 +1,6 @@
 # cadrs
 
-[![CI](https://img.shields.io/github/check-runs/rvdende/cadrs/main?label=CI&logo=github)](https://github.com/rvdende/cadrs/actions/workflows/ci.yml)
+[![CI](https://github.com/rvdende/cadrs/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/rvdende/cadrs/actions/workflows/ci.yml)
 [![License: MIT OR Apache-2.0](https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue.svg)](#license)
 [![Rust](https://img.shields.io/badge/rust-stable%20%C2%B7%20edition%202024-orange.svg)](https://www.rust-lang.org)
 [![Bevy](https://img.shields.io/badge/bevy-0.19-232326.svg)](https://bevyengine.org)
@@ -48,6 +48,22 @@ build parts from features, put them together in assemblies, and make drawings fr
 
 ![cadrs: a pneumatic cylinder assembly with its instances, subassemblies and fasteners](.github/images/assembly.png)
 
+## Native documents
+
+Use the document menu’s **Export document…** to write a **cadrs native document (`.cadrs`)**.
+It includes the current editable tabs, features, settings, and embedded source assets,
+including edits not yet autosaved. Saved versions, undo history, and rebuild caches are excluded.
+Frozen linked content is included; the original external documents are not bundled.
+
+On the documents page, choose **Create ▸ Import files…**, or drop a `.cadrs` file onto the
+page. Import creates and opens a new library copy; edits autosave to the library, not back to
+the imported file. Export again to share an updated copy.
+
+The file is a ZIP containing `manifest.ron` (archive format `cadrs`, version 1), the existing
+versioned `document.ron`, required assets in `blobs/`, and optional thumbnails. Readers limit
+packages to 16,384 entries and 512 MiB of uncompressed data. Legacy plain text `.cadrs`
+documents remain importable. Existing destination files are never overwritten.
+
 ## Building
 
 You need a stable Rust toolchain ([rustup](https://rustup.rs)) and a C compiler (a few
@@ -68,8 +84,18 @@ cd cadrs
 cargo run --release
 ```
 
-On macOS, the Xcode command line tools (`xcode-select --install`) are enough; it builds and
-runs natively on Apple Silicon (Metal).
+To install the checkout for your user, with a launcher entry and the app icon:
+
+```sh
+cargo install-local
+```
+
+This builds in release and copies the app and its libraries to `~/.local/opt/cadrs` with
+`~/.local/bin/cadrs` and a `cadrs.desktop` entry (Linux), to `~/Applications/cadrs.app` (macOS),
+or to `%LOCALAPPDATA%\Programs\cadrs` with a Start Menu shortcut (Windows). Run it again to
+update the installed copy.
+
+On macOS, the Xcode command line tools (`xcode-select --install`) are enough; it builds and runs natively on Apple Silicon (Metal).
 
 Documents are stored in your platform's data folder (on Linux, `~/.local/share/cadrs/`).
 

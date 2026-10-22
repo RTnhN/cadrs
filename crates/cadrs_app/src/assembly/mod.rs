@@ -34,7 +34,8 @@
 //!   listed under its row.
 //! - P3H.6: **box select** in the view ([`box_select`]; window left to right, crossing right to
 //!   left), for grouping a generated PCB assembly's components.
-//! - Keys: **I** opens Insert, **M** a Fastened mate, **Y** hides the instance under the pointer,
+//! - Keys: **Delete** / **Backspace** removes selected instances, **I** opens Insert,
+//!   **M** a Fastened mate, **Y** hides the instance under the pointer,
 //!   **Shift+Y** shows every hidden instance (A4.5), **J** shows or hides all mates, **H** toggles
 //!   show mates mode (A14), **Ctrl+C** / **Ctrl+V** copy the selected instance and paste it at
 //!   the pointer (A15.13).
@@ -69,6 +70,7 @@ pub mod studio_edit;
 pub mod triad;
 pub mod where_used;
 
+use cadrs_ui::ShortcutKey;
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -550,6 +552,15 @@ pub fn run(world: &mut World, cmd: &dyn cadrs_core::Command) -> bool {
     }
 }
 
+/// Shared by the instance menu and keyboard: remove placements in one undo step, retaining
+/// their source parts and clearing picks of the removed instances only after success.
+fn delete_instances(world: &mut World, element: ElementId, instances: Vec<InstanceId>) {
+    if instances.is_empty() || !run(world, &cadrs_core::assembly::commands::DeleteInstances { element, instances: instances.clone() }) {
+        return;
+    }
+    world.resource_mut::<Selection>().0.retain(|p| instance_of(p).is_none_or(|i| !instances.contains(&i)));
+}
+
 /// A selection to make once the view shows `element` (Switch to: the source part is selected
 /// in its Part Studio, after the tab change cleared the selection).
 #[derive(Resource, Debug, Clone, Default)]
@@ -582,7 +593,7 @@ fn prune_selection(doc: Option<Res<ActiveDocument>>, cache: Res<PartCache>, mut 
     }
 }
 
-/// I (Insert), Y (hide the instance under the pointer) and Shift+Y (show all instances).
+/// Assembly shortcuts, including deletion of the selected instances through undo/redo.
 #[allow(clippy::too_many_arguments)]
 fn assembly_keys(
     mut keys_in: MessageReader<KeyboardInput>,
@@ -590,6 +601,7 @@ fn assembly_keys(
     focus: Res<InputFocus>,
     q_fields: Query<(), With<TextInputField>>,
     q_dialogs: Query<(), With<cadrs_ui::DialogRoot>>,
+    q_features: Query<(), With<cadrs_ui::FeatureDialogState>>,
     doc: Option<Res<ActiveDocument>>,
     highlight: Res<PlaneHighlight>,
     insert: Option<Res<insert::InsertSession>>,
@@ -624,7 +636,7 @@ fn assembly_keys(
         }
         // Ctrl+C / Ctrl+V: the instance clipboard (A15.13).
         if ctrl && !shift {
-            match k.key_code {
+            match k.shortcut_code() {
                 KeyCode::KeyC => {
                     commands.queue(|world: &mut World| {
                         let selected = selected_instances(world.resource::<Selection>());
@@ -649,8 +661,8 @@ fn assembly_keys(
             continue;
         }
         // The mate, Group and Animate dialogs: Enter accepts, Esc cancels.
-        if k.key_code == KeyCode::Escape || k.key_code == KeyCode::Enter {
-            let esc = k.key_code == KeyCode::Escape;
+        if k.shortcut_code() == KeyCode::Escape || k.shortcut_code() == KeyCode::Enter {
+            let esc = k.shortcut_code() == KeyCode::Escape;
             commands.queue(move |world: &mut World| {
                 if world.contains_resource::<animate::AnimateSession>() {
                     world.remove_resource::<animate::AnimateSession>();
@@ -677,7 +689,13 @@ fn assembly_keys(
             });
             continue;
         }
-        match k.key_code {
+        match k.shortcut_code() {
+            KeyCode::Delete | KeyCode::Backspace if !k.repeat && insert.is_none() && q_features.is_empty() => {
+                commands.queue(move |world: &mut World| {
+                    let instances = selected_instances(world.resource::<Selection>());
+                    delete_instances(world, element, instances);
+                });
+            }
             KeyCode::KeyM if !shift => {
                 commands.queue(|world: &mut World| mate_dialog::open_mate_dialog(world, cadrs_core::assembly::mate::MateType::Fastened));
             }
@@ -728,4 +746,95 @@ pub fn view_parts(cache: &PartCache, instances: &[InstanceId]) -> Vec<PartId> {
 /// The part id an instance has in the view.
 pub fn part_of(i: InstanceId) -> PartId {
     i.part_id()
+}
+
+#[cfg(test)]
+mod deletion_tests {
+    use super::*;
+    use cadrs_core::assembly::InstanceSource;
+
+    fn scene() -> (App, ElementId, [InstanceId; 3]) {
+        let mut doc = cadrs_core::Document::new("Delete instances");
+        let (studio, assembly) = (doc.elements[0].id, doc.elements[1].id);
+        let source = PartId::new(FeatureId::new(), 0);
+        let child = Element::assembly("Subassembly");
+        let child_id = child.id;
+        doc.elements.push(child);
+        let ids = [InstanceId::new(), InstanceId::new(), InstanceId::new()];
+        doc.elements[1].assembly.instances = vec![
+            Instance::new(ids[0], InstanceSource::Part { element: studio, part: source }, Pose::IDENTITY),
+            Instance::new(ids[1], InstanceSource::Assembly { element: child_id }, Pose::IDENTITY),
+            Instance::new(ids[2], InstanceSource::Part { element: studio, part: source }, Pose::IDENTITY),
+        ];
+        let mut active = ActiveDocument::new(doc);
+        active.active = Some(assembly);
+        let mut app = App::new();
+        app.add_message::<KeyboardInput>()
+            .insert_resource(active)
+            .insert_resource(Selection(vec![Pick::Part(ids[0].part_id())]))
+            .init_resource::<ButtonInput<KeyCode>>()
+            .init_resource::<InputFocus>()
+            .init_resource::<PlaneHighlight>()
+            .add_systems(Update, assembly_keys);
+        (app, assembly, ids)
+    }
+
+    fn press(app: &mut App, code: KeyCode, repeat: bool) {
+        app.world_mut().write_message(KeyboardInput {
+            key_code: code, logical_key: bevy::input::keyboard::Key::Delete,
+            state: ButtonState::Pressed, text: None, repeat, window: Entity::PLACEHOLDER,
+        });
+        app.update();
+    }
+
+    #[test]
+    fn delete_and_backspace_remove_selected_instances_in_one_undo_step() {
+        for key in [KeyCode::Delete, KeyCode::Backspace] {
+            let (mut app, element, ids) = scene();
+            let before = app.world().resource::<ActiveDocument>().doc.clone();
+            let face = cadrs_sketch::FaceName::new(ids[0].0, cadrs_sketch::FaceOrigin::Unnamed { index: 0 });
+            app.world_mut().resource_mut::<Selection>().0 = vec![
+                Pick::Part(ids[0].part_id()), Pick::Face(ids[0].part_id(), face),
+                Pick::Part(PartId::new(FeatureId(ids[1].0), 1)),
+            ];
+            press(&mut app, key, false);
+            let active = app.world().resource::<ActiveDocument>();
+            let remaining = &active.doc.element(element).unwrap().assembly.instances;
+            assert_eq!(remaining.len(), 1);
+            assert_eq!(remaining[0].id, ids[2]);
+            assert_eq!(active.doc.elements[0], before.elements[0], "source studio must remain intact");
+            assert_eq!(active.doc.elements[2], before.elements[2], "source subassembly must remain intact");
+            assert_eq!(active.history.undo_len(), 1);
+            assert!(app.world().resource::<Selection>().0.is_empty());
+            let mut active = app.world_mut().resource_mut::<ActiveDocument>();
+            assert!(active.undo().is_some());
+            assert_eq!(active.doc, before);
+            assert!(active.redo().is_some());
+            assert_eq!(active.doc.element(element).unwrap().assembly.instances.len(), 1);
+        }
+    }
+
+    #[test]
+    fn deletion_shortcut_respects_focus_dialogs_repeats_and_empty_selection() {
+        for guard in 0..7 {
+            let (mut app, _, _) = scene();
+            let before = app.world().resource::<ActiveDocument>().doc.clone();
+            match guard {
+                0 => app.world_mut().resource_mut::<Selection>().0.clear(),
+                1 => {
+                    let field = app.world_mut().spawn(TextInputField).id();
+                    app.insert_resource(InputFocus::from_entity(field));
+                }
+                2 => { app.world_mut().spawn(cadrs_ui::DialogRoot); }
+                3 => { app.world_mut().spawn(cadrs_ui::FeatureDialogState { title: "Insert".into(), valid: true, error: false }); }
+                4 => app.world_mut().resource_mut::<ButtonInput<KeyCode>>().press(KeyCode::ControlLeft),
+                5 => { let studio = before.elements[0].id; app.world_mut().resource_mut::<ActiveDocument>().active = Some(studio); }
+                _ => {},
+            }
+            press(&mut app, KeyCode::Delete, guard == 6);
+            let active = app.world().resource::<ActiveDocument>();
+            assert_eq!(active.doc, before, "guard {guard}");
+            assert_eq!(active.history.undo_len(), 0, "guard {guard}");
+        }
+    }
 }

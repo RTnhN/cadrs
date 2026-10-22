@@ -13,6 +13,9 @@ Onshape-style CAD in Rust + Bevy 0.19.1. Local notes in `docs/` (git-ignored: `P
   - `cargo test -r -p cadrs -F app-tests --test golden -- --ignored`: the golden screenshot tests
     (slow, GPU; `CADRS_BLESS=1` records new baselines).
 - Headless scenario: `cargo run -r -- --headless --scenario <name>` → `target/scenarios/<name>/`.
+- The app runs the kernel in a process of its own (`cadrs_core::rebuild::process`, so an
+  OpenCASCADE crash costs a rebuild, not the app); `CADRS_KERNEL=thread` keeps it in-process for
+  debugging. Kernel work besides rebuilds is a named `rebuild::task::Task`, not a closure.
 - Windowed run from a shell with no display: prefix `WAYLAND_DISPLAY=wayland-1 XDG_RUNTIME_DIR=/run/user/1000`.
 - Windows exe: `cargo build -r --target x86_64-pc-windows-gnu` (MinGW is installed).
 - Autorouter GPU shader: after changing `crates/cadrs_router_kernels`, rebuild its SPIR-V with

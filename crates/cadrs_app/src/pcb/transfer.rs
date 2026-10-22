@@ -230,7 +230,7 @@ fn finish_sync(world: &mut World, result: Result<SyncOutcome, String>) {
 #[derive(Component)]
 struct ExportDialog;
 
-/// Opens Export ECAD files (the toolbar's download button).
+/// Opens Export ECAD files (the toolbar's export button).
 pub fn open_export_dialog(world: &mut World) {
     let mut q = world.query_filtered::<(), With<ExportDialog>>();
     if q.iter(world).next().is_some() || super::shown(world).is_none() {

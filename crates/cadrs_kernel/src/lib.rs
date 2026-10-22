@@ -848,6 +848,15 @@ pub trait Kernel {
         Ok(joined)
     }
 
+    /// Whether two solid bodies overlap with volume: their intersection has some. Only asks the
+    /// question (the parts a new body's Remove cuts), like [`Kernel::joins`].
+    fn overlaps(&mut self, a: BodyId, b: BodyId) -> Result<bool> {
+        let r = self.boolean(BoolOp::Intersect, a, &[b])?;
+        let v = self.mass_properties(r.bodies[0]).map(|m| m.volume).unwrap_or(0.0);
+        self.release(r.bodies[0]);
+        Ok(v > 1e-9)
+    }
+
     /// A tight axis-aligned bounding box of the body's exact geometry.
     fn bounding_box(&self, body: BodyId) -> Result<Aabb>;
 
@@ -855,6 +864,19 @@ pub trait Kernel {
     /// `t` (hits behind the origin have negative `t`). Up to next uses it to find what lies
     /// ahead of a profile.
     fn ray_hits(&self, body: BodyId, origin: Point3<f64>, dir: Vector3<f64>) -> Result<Vec<RayHit>>;
+    /// Writes bodies as OpenCASCADE text BREP (geometry only, one compound). No backend
+    /// writes it yet: the native kernel returns [`KernelError::Unsupported`].
+    fn export_brep(&self, _bodies: &[BodyId]) -> Result<Vec<u8>> {
+        Err(KernelError::Unsupported("OpenCASCADE BREP export"))
+    }
+    /// Imported surface colors, in face order; absent entries keep the application's palette.
+    /// Empty when the backend keeps no colors.
+    fn face_colors(&self, _body: BodyId) -> Vec<Option<[u8; 4]>> {
+        Vec::new()
+    }
+    /// Sets a body's surface colors, in face order (see [`Kernel::face_colors`]). Ignored when
+    /// the backend keeps no colors.
+    fn set_face_colors(&mut self, _body: BodyId, _colors: Vec<Option<[u8; 4]>>) {}
     /// Writes bodies to a STEP AP214 file (exact B-rep: analytic and B-spline geometry, one
     /// `MANIFOLD_SOLID_BREP` per solid), named "Body 1", "Body 2", ... in order.
     /// [`Kernel::import_step`] reads it back with the same geometry within the file's

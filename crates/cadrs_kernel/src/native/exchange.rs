@@ -88,7 +88,7 @@ pub fn import_model(k: &mut NativeKernel, format: ExchangeFormat, bytes: &[u8]) 
         let id = k.insert(p.body);
         parts.push(ImportedPart { body: id, name: p.name });
     }
-    let occurrences = m.occurrences.into_iter().map(|o| ImportedOccurrence { part: o.part, placement: Motion { linear: o.placement.m, translation: o.placement.t }, name: o.name }).collect();
+    let occurrences = m.occurrences.into_iter().map(|o| ImportedOccurrence { color: None, part: o.part, placement: Motion { linear: o.placement.m, translation: o.placement.t }, name: o.name }).collect();
     Ok(ImportedModel { name: m.name, parts, occurrences })
 }
 

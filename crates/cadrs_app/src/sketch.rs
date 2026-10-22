@@ -19,6 +19,7 @@
 //! Every change goes through the command layer ([`ActiveDocument::execute`]). Tools (M4 on)
 //! plug into [`ActiveSketchTool`]; Esc first leaves the active tool, then clears the selection.
 
+use cadrs_ui::ShortcutKey;
 use bevy::input::ButtonState;
 use bevy::input::keyboard::KeyboardInput;
 use bevy::input_focus::InputFocus;
@@ -737,7 +738,7 @@ fn modeling_keys(
             continue;
         }
         let part_studio = *kind == crate::viewport::ActiveKind::PartStudio;
-        match k.key_code {
+        match k.shortcut_code() {
             KeyCode::KeyS if shift && part_studio => commands.queue(begin_sketch),
             KeyCode::Escape if !selection.0.is_empty() => selection.0.clear(),
             KeyCode::Delete | KeyCode::Backspace if part_studio => {
@@ -837,7 +838,7 @@ pub(crate) fn sketch_keys(
             continue;
         }
         if text.open.is_some() {
-            match k.key_code {
+            match k.shortcut_code() {
                 KeyCode::Enter | KeyCode::NumpadEnter => {
                     commands.queue(crate::sketch_text::accept_open)
                 }
@@ -846,7 +847,7 @@ pub(crate) fn sketch_keys(
             }
             continue;
         }
-        match k.key_code {
+        match k.shortcut_code() {
             // Shift+Enter accepts and starts the next sketch ("accept and repeat").
             KeyCode::Enter | KeyCode::NumpadEnter if shift => {
                 commands.queue(|world: &mut World| {
@@ -861,6 +862,8 @@ pub(crate) fn sketch_keys(
             KeyCode::Enter | KeyCode::NumpadEnter | KeyCode::Escape if matches!(draw.state, DrawState::Spline { .. }) => {
                 commands.queue(crate::sketch_tools::finish_spline_world)
             }
+            // Enter ends the Mirror tool rather than the sketch.
+            KeyCode::Enter | KeyCode::NumpadEnter if tool.tool == SketchTool::Mirror => tool.tool = SketchTool::Select,
             KeyCode::Enter | KeyCode::NumpadEnter => commands.queue(accept_sketch),
             KeyCode::Escape => {
                 // Esc ends what the tool is drawing (a line chain), then leaves the tool, then
@@ -1277,7 +1280,7 @@ fn on_tool_button(
             }
             tool.tool = if tool.tool == t { SketchTool::Select } else { t };
         }
-        SketchToolButton::Construction => tool.construction = !tool.construction,
+        SketchToolButton::Construction => commands.queue(crate::sketch_tools::toggle_construction),
         // Disabled: not available yet.
         SketchToolButton::Other(_) => {}
         SketchToolButton::InsertDxf => commands.queue(crate::sketch_dxf::open),
@@ -1707,7 +1710,7 @@ pub fn sketch_toolbar(tb: &mut ChildSpawnerCommands, t: &Theme) {
                 B::Tool(T::Fillet),
             ),
             ("sketch-trim", "trim", true, "Trim (M)", B::Tool(T::Trim)),
-            ("sketch-offset", "offset", true, "Offset (O)", B::Tool(T::Offset)),
+            ("sketch-offset", "offset", true, "Offset (O): pick curves, then click empty space or press Enter", B::Tool(T::Offset)),
             ("sketch-mirror", "mirror", false, "Mirror", B::Tool(T::Mirror)),
             (
                 "sketch-pattern",
@@ -1799,10 +1802,14 @@ fn tool_visuals(t: &Theme) -> Visuals {
     }
 }
 
-/// Enables the sketch tools once the sketch has a plane and marks the active tool.
-#[allow(clippy::type_complexity)]
+/// Enables the sketch tools once the sketch has a plane and marks the active tool. Like
+/// Onshape, the Construction button is lit for a selection that is all construction geometry,
+/// else for the mode new geometry is drawn in.
+#[allow(clippy::type_complexity, clippy::too_many_arguments)]
 pub(crate) fn sync_sketch_toolbar(
     session: Option<Res<SketchSession>>,
+    doc: Option<Res<ActiveDocument>>,
+    selection: Option<Res<crate::sketch_tools::SketchSelection>>,
     tool: Res<ActiveSketchTool>,
     mut q: Query<(
         Entity,
@@ -1817,6 +1824,13 @@ pub(crate) fn sync_sketch_toolbar(
     mut commands: Commands,
 ) {
     let enabled = session.as_ref().is_some_and(|s| !s.waiting_for_plane);
+    let construction = {
+        let sketch = crate::sketch_tools::session_sketch(session.as_deref(), doc.as_deref());
+        let curves = selection
+            .as_deref()
+            .map_or_else(Vec::new, |s| crate::sketch_tools::curve_ids(&s.0));
+        crate::sketch_tools::all_construction(sketch, &curves).unwrap_or(tool.construction)
+    };
     // One disabled grey for unavailable tools in both toolbars (`screens/05a`, `08a`: #999);
     // the whole toolbar is lighter only while the sketch waits for its plane.
     let grey = if session.is_some() && !enabled {
@@ -1862,7 +1876,7 @@ pub(crate) fn sync_sketch_toolbar(
         }
         let want = match b {
             SketchToolButton::Tool(t) => tool.tool.family() == t.family(),
-            SketchToolButton::Construction => tool.construction,
+            SketchToolButton::Construction => construction,
             SketchToolButton::Other(_) | SketchToolButton::InsertDxf => false,
         };
         if want && !selected {
@@ -2167,6 +2181,39 @@ mod tests {
         assert_eq!(curves(w), [3]);
         w.resource_mut::<ActiveDocument>().undo();
         assert_eq!(w.resource::<ActiveDocument>().doc, after);
+    }
+
+    /// The Construction button and Q (issue #45, like Onshape): with a curve selected they make
+    /// it construction geometry as one undoable command, leaving the mode alone; with nothing
+    /// selected they flip the mode for new geometry.
+    #[test]
+    fn construction_toggles_the_selection_or_the_mode() {
+        use crate::sketch_tools::{SketchSelection, toggle_construction, world_sketch};
+        use cadrs_sketch::SketchEntity;
+        let mut app = app();
+        app.init_resource::<SketchSelection>();
+        let w = app.world_mut();
+        begin_sketch(w);
+        set_plane(w, Some(PlaneRef::Top));
+        draw_line(w);
+        let curve = world_sketch(w).unwrap().curves.keys().next().unwrap();
+        let is_construction = |w: &World| world_sketch(w).unwrap().curves[curve].construction;
+
+        toggle_construction(w);
+        assert!(w.resource::<ActiveSketchTool>().construction);
+        assert!(!is_construction(w));
+
+        w.resource_mut::<SketchSelection>().0 = vec![SketchEntity::Curve(curve)];
+        toggle_construction(w);
+        assert!(is_construction(w));
+        assert!(w.resource::<ActiveSketchTool>().construction, "the mode is left alone");
+        w.resource_mut::<ActiveDocument>().undo();
+        assert!(!is_construction(w));
+        w.resource_mut::<ActiveDocument>().redo();
+        assert!(is_construction(w));
+        // All construction already: back to regular geometry.
+        toggle_construction(w);
+        assert!(!is_construction(w));
     }
 
     #[test]

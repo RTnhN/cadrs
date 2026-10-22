@@ -50,6 +50,7 @@ pub fn derive(outer: InstanceId, inner: InstanceId) -> InstanceId {
 /// A part placed in an assembly, at any depth.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Occurrence {
+    pub appearance: Option<crate::appearance::Appearance>,
     /// Its id in the assembly (see [`derive`]).
     pub id: InstanceId,
     /// The top-level instance it belongs to.
@@ -95,6 +96,7 @@ fn occurrences_at(doc: &Document, asm: &Assembly, depth: usize) -> Vec<Occurrenc
                 pose: inst.pose,
                 in_top: Pose::IDENTITY,
                 in_child: Pose::IDENTITY,
+                appearance: inst.appearance,
                 hidden: inst.hidden,
                 fixed: inst.fixed,
                 base: false,
@@ -112,6 +114,7 @@ fn occurrences_at(doc: &Document, asm: &Assembly, depth: usize) -> Vec<Occurrenc
                         pose: inst.pose,
                         in_top: Pose::IDENTITY,
                         in_child: Pose::IDENTITY,
+                        appearance: inst.appearance,
                         hidden: inst.hidden,
                         fixed: inst.fixed,
                         base: false,
@@ -140,6 +143,7 @@ fn occurrences_at(doc: &Document, asm: &Assembly, depth: usize) -> Vec<Occurrenc
                         pose: in_top.then(&inst.pose),
                         in_top,
                         in_child: o.in_top,
+                        appearance: inst.appearance.or(o.appearance),
                         hidden: inst.hidden || o.hidden,
                         fixed: inst.fixed,
                         base: c.fixed,

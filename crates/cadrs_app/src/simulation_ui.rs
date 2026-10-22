@@ -28,6 +28,7 @@
 //! - **Assemblies**: the Instances list's **Loads (n)** lists the loads (`load-row-<k>`;
 //!   double-click to edit); a mate with **Simulation connection** checked bonds its parts.
 
+use cadrs_ui::ShortcutKey;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
@@ -1079,7 +1080,7 @@ fn load_keys(mut keys: MessageReader<KeyboardInput>, session: Option<Res<LoadSes
         return;
     }
     for k in keys.read() {
-        if k.state == ButtonState::Pressed && k.key_code == KeyCode::Escape && focus.get().is_none() {
+        if k.state == ButtonState::Pressed && k.shortcut_code() == KeyCode::Escape && focus.get().is_none() {
             commands.queue(close_session);
         }
     }

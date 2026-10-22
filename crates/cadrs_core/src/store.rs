@@ -236,6 +236,11 @@ impl Store {
     /// Reads a `document.ron` only (listing the documents doesn't need their files).
     fn read_path(path: &Path) -> Result<DocumentFile, StoreError> {
         let text = std::fs::read_to_string(path)?;
+        Self::parse_document(&text)
+    }
+
+    /// Parses a document using the same migrations as library storage.
+    pub fn parse_document(text: &str) -> Result<DocumentFile, StoreError> {
         // A current file parses in one typed pass (milliseconds). Probing its version first was
         // far slower: ron skips the fields the probe doesn't name value by value, which took
         // seconds for a big document. So only a file that isn't current is probed and migrated.

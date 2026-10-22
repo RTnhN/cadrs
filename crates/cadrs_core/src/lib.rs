@@ -12,6 +12,7 @@ pub mod applied;
 pub mod appearance;
 pub mod blob_store;
 pub mod blobs;
+pub mod native;
 pub mod command;
 pub mod commands;
 pub mod derived;

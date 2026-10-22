@@ -11,6 +11,7 @@
 //! ✕ or Esc removes it (or reverts an edit). Every change is a command; accepting squashes them
 //! into one undo step, as the Extrude dialog does.
 
+use cadrs_ui::ShortcutKey;
 use bevy::input::ButtonState;
 use bevy::input::keyboard::KeyboardInput;
 use bevy::prelude::*;
@@ -236,7 +237,7 @@ pub fn accept(world: &mut World) {
         .get_resource::<ActiveDocument>()
         .and_then(|d| Some(d.doc.element(s.element)?.active_features()))
         .unwrap_or_default();
-    if cadrs_core::rebuild::build(&features).error(f.id).is_some() {
+    if crate::accept::builds(world, "boolean", features, f.id, accept) != Some(true) {
         return;
     }
     let label = if s.is_new { format!("Insert {}", f.name) } else { format!("Edit {}", f.name) };
@@ -380,7 +381,7 @@ fn boolean_keys(
         if k.state != ButtonState::Pressed || !q_dialogs.is_empty() {
             continue;
         }
-        match k.key_code {
+        match k.shortcut_code() {
             KeyCode::Enter | KeyCode::NumpadEnter => commands.queue(accept),
             KeyCode::Escape => commands.queue(cancel),
             _ => {}

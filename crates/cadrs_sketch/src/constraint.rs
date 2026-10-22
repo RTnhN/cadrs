@@ -69,6 +69,10 @@ pub enum PointSpec {
     /// The point held where a link puts it (a used part vertex; see
     /// [`Sketch::add_projected_point`](crate::Sketch::add_projected_point)).
     Linked(crate::Link),
+    /// The point at a line's or arc's midpoint. [`crate::SketchOp::AddConstraints`] adds one
+    /// there (held by a Midpoint constraint) when there is none, so a point can be aligned with
+    /// a midpoint (#34).
+    Midpoint(CurveId),
 }
 
 /// A curve a constraint spec refers to.
@@ -308,6 +312,7 @@ fn resolve_point(s: &Sketch, p: PointSpec) -> Option<PointRef> {
         PointSpec::Origin => Some(PointRef::Origin),
         PointSpec::Point(id) => s.points.contains_key(id).then_some(PointRef::Point(id)),
         PointSpec::Linked(link) => s.linked_point(link).map(PointRef::Point),
+        PointSpec::Midpoint(c) => s.point_at(s.curve_mid(c)?, MERGE_EPS).map(PointRef::Point),
     }
 }
 
@@ -501,6 +506,8 @@ fn classify(s: &Sketch, e: crate::SketchEntity) -> Option<Pick> {
         },
         // A used part vertex: its point.
         E::Link(l) => Pick::Point(PointRef::Point(s.linked_point(l)?)),
+        E::XAxis => Pick::Line(CurveRef::XAxis),
+        E::YAxis => Pick::Line(CurveRef::YAxis),
         E::Dimension(_) | E::Constraint(_) | E::Text(_) => return None,
     })
 }

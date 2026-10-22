@@ -21,6 +21,7 @@
 //! - A right-click on an annotation opens its menu (Edit… for hole callouts, Delete); the
 //!   dimension palette and the Hole callout dialog are in [`super::dim_palette`].
 
+use cadrs_ui::ShortcutKey;
 use std::sync::Arc;
 
 use bevy::asset::RenderAssetUsages;
@@ -975,7 +976,7 @@ fn annotation_keys(
         if k.state != bevy::input::ButtonState::Pressed || typing || !q_dialogs.is_empty() || !q_menus.is_empty() || ctrl || alt {
             continue;
         }
-        let tool = match (k.key_code, shift) {
+        let tool = match (k.shortcut_code(), shift) {
             (KeyCode::KeyD, false) => Some(AnnTool::Dimension(DimTool::Smart)),
             (KeyCode::KeyR, true) => Some(AnnTool::Dimension(DimTool::Radial)),
             (KeyCode::KeyD, true) => Some(AnnTool::Dimension(DimTool::Diameter)),
@@ -990,7 +991,7 @@ fn annotation_keys(
             });
             continue;
         }
-        match k.key_code {
+        match k.shortcut_code() {
             // A line chain or spline being drawn ends first (see `sheet_items`).
             KeyCode::Escape if items.drawing() => {}
             KeyCode::Escape => {

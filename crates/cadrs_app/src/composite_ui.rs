@@ -11,6 +11,7 @@
 //!
 //! Names: `composite-dialog`, `composite-parts-field`, `composite-closed(-checkbox)`.
 
+use cadrs_ui::ShortcutKey;
 use bevy::input::ButtonState;
 use bevy::input::keyboard::KeyboardInput;
 use bevy::prelude::*;
@@ -183,7 +184,7 @@ pub fn accept(world: &mut World) {
     let Some(s) = world.get_resource::<CompositeSession>().cloned() else { return };
     let Some(f) = current(world, &s).filter(|f| f.is_valid()) else { return };
     let features = world.get_resource::<ActiveDocument>().and_then(|d| Some(d.doc.element(s.element)?.active_features())).unwrap_or_default();
-    if cadrs_core::rebuild::build(&features).error(f.id).is_some() {
+    if crate::accept::builds(world, "composite", features, f.id, accept) != Some(true) {
         return;
     }
     let label = if s.is_new { format!("Insert {}", f.name) } else { format!("Edit {}", f.name) };
@@ -276,7 +277,7 @@ fn composite_keys(
         if k.state != ButtonState::Pressed || !q_dialogs.is_empty() || focus.get().is_some() {
             continue;
         }
-        match k.key_code {
+        match k.shortcut_code() {
             KeyCode::Enter | KeyCode::NumpadEnter => commands.queue(accept),
             KeyCode::Escape => commands.queue(cancel),
             _ => {}

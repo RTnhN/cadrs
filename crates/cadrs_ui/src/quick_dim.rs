@@ -15,6 +15,7 @@
 //!
 //! The owner positions the box: its node is absolutely positioned; set `left`/`top`.
 
+use crate::shortcut_key::ShortcutKey;
 use std::borrow::Cow;
 
 use bevy::ecs::lifecycle::HookContext;
@@ -243,7 +244,7 @@ fn on_key(
     if ev.input.state != ButtonState::Pressed {
         return;
     }
-    match ev.input.key_code {
+    match ev.input.shortcut_code() {
         KeyCode::Enter | KeyCode::NumpadEnter => {
             ev.propagate(false);
             commands.trigger(QuickDimCommit {

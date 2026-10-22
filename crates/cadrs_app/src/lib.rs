@@ -18,6 +18,7 @@ pub mod document;
 pub mod drawing;
 pub mod eda;
 pub mod draft_ui;
+pub mod accept;
 pub mod boolean;
 pub mod board_fit;
 pub mod board_in_studio;
@@ -33,6 +34,8 @@ pub mod revolve_dialog;
 pub mod gallery;
 pub mod history_panel;
 pub mod drop_import;
+pub mod app_icon;
+pub mod window_title;
 pub mod file_drop;
 pub mod image_dialog;
 pub mod import_dialog;
@@ -68,6 +71,7 @@ pub mod sheetmetal_table;
 pub mod sheetmetal_p3i9_ui;
 pub mod sheetmetal_tools_ui;
 pub mod flat_ui;
+pub mod direct_edit_ui;
 pub mod flat_export_dialog;
 pub mod sketch_dxf;
 pub mod surfacing_ui;
@@ -78,6 +82,7 @@ pub mod plane_display;
 pub mod region_select;
 pub mod render_ui;
 pub mod export_image;
+pub mod native_document;
 pub mod repair;
 pub mod replace_reference;
 pub mod selection_readout;
@@ -236,6 +241,12 @@ pub struct ExportDirOverride(pub Option<std::path::PathBuf>);
 /// (every scenario and headless run sets it to its output folder, so they never write into the
 /// user's Downloads), else the Downloads folder. Shown relative to the working directory when it
 /// is under it.
+/// Makes the app's kernel work known to the kernel process (in the app and in the kernel
+/// process alike: [`cadrs_core::rebuild::task::register`]).
+pub fn register_kernel_tasks() {
+    cadrs_pcb::sync::register_tasks();
+}
+
 pub fn export_dir(world: &World) -> Option<std::path::PathBuf> {
     let env = std::env::var_os("CADRS_EXPORT_DIR").filter(|d| !d.is_empty()).map(std::path::PathBuf::from);
     let dir = env
@@ -600,7 +611,7 @@ impl Plugin for CadrsAppPlugin {
                 shortcuts::ShortcutsPlugin,
                 script::ScriptPlugin,
             ))
-            .add_plugins(rebuild_indicator::RebuildIndicatorPlugin)
+            .add_plugins((rebuild_indicator::RebuildIndicatorPlugin, accept::AcceptPlugin))
             .add_plugins((
                 parts::PartsPlugin,
                 parts_list::PartsListPlugin,
@@ -630,7 +641,8 @@ impl Plugin for CadrsAppPlugin {
             .add_plugins(sheetmetal_tools_ui::SheetMetalToolsPlugin)
             .add_plugins((tab_folders::TabFoldersPlugin, tab_manager::TabManagerPlugin, analysis::AnalysisPlugin, preferences_ui::PreferencesPlugin, manipulator::ManipulatorPlugin, mcp::McpPlugin))
             .add_plugins((variables_ui::VariablesPlugin, scale_ui::ScalePlugin, threads_ui::ThreadsPlugin, simulation_ui::SimulationPlugin, render_ui::RenderUiPlugin, export_image::ExportImagePlugin))
-            .add_plugins((import_dialog::ImportDialogPlugin, import_file::ImportFilePlugin, picture::PicturePlugin, file_drop::FileDropPlugin, drop_import::DropImportPlugin, image_dialog::ImageDialogPlugin))
+            .add_plugins(native_document::NativeDocumentPlugin)
+            .add_plugins((import_dialog::ImportDialogPlugin, import_file::ImportFilePlugin, picture::PicturePlugin, file_drop::FileDropPlugin, drop_import::DropImportPlugin, image_dialog::ImageDialogPlugin, app_icon::AppIconPlugin, window_title::WindowTitlePlugin))
             .init_resource::<ExportDirOverride>()
             // A long menu that has to be capped keeps clear of the tab strip (Final part 3:
             // `course_asm_triad` 08, `course_asm_std_bulk_edit` 02).
@@ -644,6 +656,7 @@ impl Plugin for CadrsAppPlugin {
 /// Derived features load other documents from the store (Onshape import).
 fn set_document_loader(store: Res<DocumentStore>) {
     cadrs_core::derived::set_document_loader(Some(cadrs_core::derived::store_loader(store.0.clone())));
+    cadrs_core::rebuild::process::set_documents(Some(store.0.root().to_path_buf()));
 }
 
 fn flush_deleted(store: Res<DocumentStore>) {

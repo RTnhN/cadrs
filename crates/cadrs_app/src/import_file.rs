@@ -4,6 +4,9 @@
 //! Import feature ([`cadrs_core::import::ImportFeature`], read with its assembly structure),
 //! which the Part Studio's Import dialog ([`crate::import_dialog`]) edits like any other.
 //!
+//! Native `.cadrs` files on the documents page bypass geometry conversion and create an
+//! editable library copy through [`crate::native_document`].
+//!
 //! 1. The in-app file picker (`cadrs_ui::file_picker`) lists `.step`, `.stp`, `.iges` and
 //!    `.igs` files, starting in `$CADRS_IMPORT_DIR`, else the Downloads folder.
 //! 2. The kernel reads the file on its thread ([`cadrs_core::rebuild::exchange::plan_import`]):
@@ -107,6 +110,7 @@ pub fn start(world: &mut World, target: ImportTarget) {
     let mut exts: Vec<&str> = ImportFormat::EXCHANGE_EXTENSIONS.to_vec();
     if matches!(target, ImportTarget::NewDocument) {
         exts.push("stl");
+        exts.push("cadrs");
     }
     cadrs_ui::file_picker::open_file_picker(&mut commands, &theme, "import-picker", "Import", target.tag(), start_dir(), &exts);
     world.flush();
@@ -119,6 +123,11 @@ fn on_file_picked(mut msgs: MessageReader<cadrs_ui::FilePicked>, theme: Res<Them
             "import-here" => ImportTarget::ActiveDocument,
             _ => continue,
         };
+        if matches!(target, ImportTarget::NewDocument) && m.path.extension().is_some_and(|e| e.eq_ignore_ascii_case("cadrs")) {
+            let path = m.path.clone();
+            commands.queue(move |w: &mut World| crate::native_document::import(w, &path));
+            continue;
+        }
         // An STL mesh as a new document: the documents page's undoable import (P3E.1).
         if matches!(target, ImportTarget::NewDocument) && m.path.extension().is_some_and(|e| e.eq_ignore_ascii_case("stl")) {
             let path = m.path.clone();

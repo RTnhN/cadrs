@@ -19,7 +19,7 @@ use crate::ids::{FeatureId, PartId};
 use crate::parts::Part;
 
 /// What to project.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct ViewRequest {
     /// One part, or every part of the studio.
     pub part: Option<PartId>,
@@ -43,7 +43,7 @@ pub struct ViewRequest {
 /// A shaded triangle in the view's 2D frame (model mm) with a colour per corner (linear RGBA)
 /// and each corner's depth along the direction of sight (larger is farther), so the drawing can
 /// depth-test the faces instead of painting them in order.
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct ShadedTriangle {
     pub points: [[f64; 2]; 3],
     pub colors: [[f32; 4]; 3],
@@ -51,7 +51,7 @@ pub struct ShadedTriangle {
 }
 
 /// A projected view.
-#[derive(Debug, Clone, Default, PartialEq)]
+#[derive(Debug, Clone, Default, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct ViewGeometry {
     /// The edges, each with its source edge's or face's persistent name where known.
     pub projection: Projection,

@@ -18,6 +18,7 @@
 //!   Standard, Category, Class and Component fixed; Size and Length change every selected
 //!   instance at once (**Update**, then ✓).
 
+use cadrs_ui::ShortcutKey;
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -677,7 +678,7 @@ fn std_keys(
         if k.state != ButtonState::Pressed || typing {
             continue;
         }
-        match k.key_code {
+        match k.shortcut_code() {
             KeyCode::KeyA if form.placing => form.flip = !form.flip,
             // Esc (stops placing) is the Insert dialog's key handler's.
             _ => {}

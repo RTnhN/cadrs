@@ -51,10 +51,9 @@ pub struct PartsPlugin;
 pub struct PartsSet;
 
 /// Parts drawn as hovered besides the one under the pointer (an assembly's mate row hovered in
-/// the list highlights its instances, A14.2); `.1`: a BOM row hovered (A20.2); `.2`: what a box
-/// being dragged in the view will select (P3H.6 judge: pre-highlighted as the sketch box does).
+/// the list highlights its instances, A14.2); `.1`: a BOM row hovered (A20.2).
 #[derive(Resource, Debug, Clone, Default, PartialEq)]
-pub struct HoverParts(pub Vec<PartId>, pub Vec<PartId>, pub Vec<PartId>);
+pub struct HoverParts(pub Vec<PartId>, pub Vec<PartId>);
 
 impl Plugin for PartsPlugin {
     fn build(&self, app: &mut App) {
@@ -1090,8 +1089,10 @@ pub fn hidden_sketches(el: &cadrs_core::Element, features: &[Feature], editing: 
 fn set_snapshot_store(store: Res<crate::DocumentStore>) {
     let Some(dir) = store.0.root().parent().map(|p| p.join("cache").join("session")) else {
         cadrs_core::rebuild::session::set_store(None);
+        cadrs_core::rebuild::process::set_snapshots(None);
         return;
     };
+    cadrs_core::rebuild::process::set_snapshots(Some(dir.clone()));
     let disk = cadrs_core::blob_store::DiskStore::new(dir);
     cadrs_core::rebuild::session::set_store(Some(std::sync::Arc::new(disk.clone())));
     std::thread::spawn(move || disk.prune(std::time::Duration::from_secs(30 * 24 * 3600), 2 << 30));
@@ -1598,12 +1599,16 @@ pub fn part_lines_culled(part: &Part, view: &ViewState, cull: bool) -> Vec<Vec<V
     let cull = cull && part.kind == cadrs_core::PartKind::Solid;
     // The mesh's normal, not the plane frame's: a face a cut left keeps its tool's frame, whose
     // normal points into the material (the U-joint flange's pockets lost visible edges).
-    let faces_away = |f: &FaceName| {
-        s.face(f).filter(|x| x.plane.is_some() && x.triangle_count > 0).is_some_and(|x| {
+    let away = |x: &cadrs_core::solid::SolidFace| {
+        x.plane.is_some() && x.triangle_count > 0 && {
             let n = s.indices.get(3 * x.first_triangle).and_then(|&i| s.normals.get(i as usize));
             n.is_some_and(|n| v3(*n).dot(back) < -1e-4)
-        })
+        }
     };
+    // By name from one pass, not `Solid::face` per edge: that scans the faces, and an imported
+    // mesh's every facet is a face (an STL of 48 000 triangles froze the app: issue #11).
+    let by_name: HashMap<FaceName, bool> = if cull { s.faces.iter().map(|x| (x.name, away(x))).collect() } else { HashMap::new() };
+    let faces_away = |f: &FaceName| by_name.get(f).copied().unwrap_or_else(|| s.face(f).is_some_and(away));
     let mut out: Vec<Vec<Vec3>> = s
         .edges
         .iter()
@@ -1984,7 +1989,6 @@ fn draw_part_edges(
         let part_hovered = highlight.is_hovered(Pick::Part(part.id))
             || hover_parts.0.contains(&part.id)
             || hover_parts.1.contains(&part.id)
-            || hover_parts.2.contains(&part.id)
             || list_feature.is_some_and(|f| !feature_faces && part.features.contains(&f));
         if let Some(c) = cache.xray(part) {
             // The body an Add adds or the material a Remove takes out: its edges over
@@ -2000,12 +2004,10 @@ fn draw_part_edges(
         } else if preview {
             // Edges between faces facing the viewer are dark; the others show faintly through.
             let back = v.back();
-            let faces_viewer = |t: &FaceName| {
-                part.solid
-                    .face(t)
-                    .and_then(|f| f.plane)
-                    .is_none_or(|p| v3(p.normal()).dot(back) > 1e-4)
-            };
+            // The faces by name from one pass (issue #11: per edge, `Solid::face` scans them all).
+            let by_name: HashMap<FaceName, &cadrs_core::solid::SolidFace> = part.solid.faces.iter().map(|f| (f.name, f)).collect();
+            let face = |t: &FaceName| by_name.get(t).copied().or_else(|| part.solid.face(t));
+            let faces_viewer = |t: &FaceName| face(t).and_then(|f| f.plane).is_none_or(|p| v3(p.normal()).dot(back) > 1e-4);
             for e in part.solid.edges.iter().filter(|e| !e.smooth) {
                 // The edges on the sketch plane lie under the selected region's outline.
                 let on_start = e
@@ -2018,7 +2020,7 @@ fn draw_part_edges(
                 // 14, P3.4 judge).
                 let end_cap_on_outline = e.name.faces.iter().any(|f| {
                     matches!(f.origin, FaceOrigin::Cap { end: true, .. })
-                        && part.solid.face(f).and_then(|x| x.plane).is_some_and(|p| v3(p.normal()).normalize().dot(back).abs() > 0.999)
+                        && face(f).and_then(|x| x.plane).is_some_and(|p| v3(p.normal()).normalize().dot(back).abs() > 0.999)
                 });
                 if on_start || end_cap_on_outline {
                     continue;
@@ -2302,7 +2304,7 @@ fn tint_selection(
     } else {
         cache
             .shown()
-            .filter(|p| highlight.is_hovered(Pick::Part(p.id)) || hover_parts.0.contains(&p.id) || hover_parts.1.contains(&p.id) || hover_parts.2.contains(&p.id))
+            .filter(|p| highlight.is_hovered(Pick::Part(p.id)) || hover_parts.0.contains(&p.id) || hover_parts.1.contains(&p.id))
             .filter(|p| !selection.contains(Pick::Part(p.id)))
             .flat_map(|p| p.solid.faces.iter().map(move |f| Pick::Face(p.id, f.name)))
             .collect()

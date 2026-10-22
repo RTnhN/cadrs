@@ -14,6 +14,7 @@
 //! harness alike). The viewport only reacts while the pointer is over the `viewport-area` UI
 //! node, so panels and menus on top of it keep their clicks.
 
+use cadrs_ui::ShortcutKey;
 use std::collections::HashMap;
 
 use bevy::camera::ScalingMode;
@@ -1421,7 +1422,7 @@ fn view_shortcuts(
             continue;
         }
         // Arrows: rotate (15°, Shift 90°, Ctrl 5°) or, with Ctrl+Shift, pan.
-        let arrow = match k.key_code {
+        let arrow = match k.shortcut_code() {
             KeyCode::ArrowLeft => Some(Vec2::new(-1.0, 0.0)),
             KeyCode::ArrowRight => Some(Vec2::new(1.0, 0.0)),
             KeyCode::ArrowUp => Some(Vec2::new(0.0, -1.0)),
@@ -1444,7 +1445,7 @@ fn view_shortcuts(
             continue;
         }
         let standard = if shift {
-            match k.key_code {
+            match k.shortcut_code() {
                 KeyCode::Digit1 => Some(StandardView::Front),
                 KeyCode::Digit2 => Some(StandardView::Back),
                 KeyCode::Digit3 => Some(StandardView::Left),
@@ -1466,7 +1467,7 @@ fn view_shortcuts(
             view.animate_to(to);
             continue;
         }
-        match k.key_code {
+        match k.shortcut_code() {
             // A board's layout edited in the view: normal to the board, from the top (N) or the
             // bottom (Shift+N).
             KeyCode::KeyN if *kind == ActiveKind::PartStudio && let Some(h) = eda2d.plane() => {
@@ -1725,7 +1726,17 @@ fn update_hover(
     ),
     (zoom_window, section_arrow, eda2d, fit): (Option<Res<crate::view_options::ZoomWindow>>, Res<crate::section_view::SectionArrow>, Res<crate::eda::Eda2d>, Res<crate::board_fit::FitState>),
     mut last: Local<Option<(Vec2, crate::parts::PickFilter, Option<Pick>)>>,
+    box_select: Option<Res<crate::assembly::box_select::AssemblyBox>>,
 ) {
+    // A box drag only updates its rectangle. Avoid picking and rebuilding hover tints for
+    // every part the pointer crosses; normal hover resumes once the drag ends.
+    if box_select.is_some_and(|b| b.active()) {
+        *last = None;
+        if highlight.viewport.is_some() || highlight.list.is_some() {
+            *highlight = PlaneHighlight::default();
+        }
+        return;
+    }
     // While a sketch has its plane, planes no longer react to the pointer (the sketch tools
     // own it); while it waits for one, planes highlight as pick candidates.
     let filter = pick_override.0.or(pick_filter(planes.0, session.as_deref(), extrude.as_deref(), applied.as_deref(), create.as_deref()));

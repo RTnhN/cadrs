@@ -20,6 +20,7 @@
 //!   under the typed name (a document edit, undone like any other,
 //!   [`cadrs_core::named_views`]), a click on a row restores it, ✕ deletes it.
 
+use cadrs_ui::ShortcutKey;
 use bevy::camera::{CameraProjection, SubCameraView};
 use bevy::input::ButtonState;
 use bevy::input::keyboard::KeyboardInput;
@@ -334,7 +335,7 @@ fn zoom_window_input(
         keys.clear();
         return;
     };
-    if keys.read().any(|k| k.state == ButtonState::Pressed && k.key_code == KeyCode::Escape) {
+    if keys.read().any(|k| k.state == ButtonState::Pressed && k.shortcut_code() == KeyCode::Escape) {
         commands.remove_resource::<ZoomWindow>();
         return;
     }

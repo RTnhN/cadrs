@@ -27,17 +27,28 @@ use crate::{
 /// mirrored point this close to an existing point shares it.
 const ON_AXIS: f64 = 1e-6;
 
-/// Mirrors `curves` in the line `axis`. Returns the copies (source, copy) in order.
-pub fn mirror(s: &mut Sketch, axis: CurveId, curves: &[CurveId]) -> Result<Vec<(CurveId, CurveId)>, String> {
-    let Some(CurveKind::Line { a, b }) = s.curves.get(axis).map(|c| c.kind) else {
+/// True if curve `c` already has a mirror image in `axis`: it was mirrored there, or is
+/// itself a copy mirrored there.
+pub fn mirrored_in(s: &Sketch, axis: CurveRef, c: CurveId) -> bool {
+    let c = CurveRef::Curve(c);
+    s.constraints
+        .values()
+        .any(|x| matches!(*x, ConstraintOf::SymmetricCurves(a, b, l) if l == axis && (a == c || b == c)))
+}
+
+/// Mirrors `curves` in the line (or sketch axis) `axis`. Returns the copies (source, copy) in
+/// order. Curves already mirrored in it (and their copies) are left alone, so mirroring them
+/// again doesn't stack copies.
+pub fn mirror(s: &mut Sketch, axis: CurveRef, curves: &[CurveId]) -> Result<Vec<(CurveId, CurveId)>, String> {
+    let Some((p0, p1)) = crate::dimension::line_ends(s, axis) else {
         return Err("the mirror line is not a line".into());
     };
-    let (p0, p1) = (s.pos(a), s.pos(b));
     if p0.distance(p1) < 1e-9 {
         return Err("the mirror line has no length".into());
     }
     let mut map: HashMap<PointId, PointId> = HashMap::new();
-    let sources: Vec<CurveId> = curves.to_vec();
+    let curves: Vec<CurveId> = curves.iter().copied().filter(|c| !mirrored_in(s, axis, *c)).collect();
+    let sources: Vec<CurveId> = curves.clone();
     let mut image = |s: &mut Sketch, p: PointId| -> PointId {
         if let Some(q) = map.get(&p) {
             return *q;
@@ -61,8 +72,8 @@ pub fn mirror(s: &mut Sketch, axis: CurveId, curves: &[CurveId]) -> Result<Vec<(
         q
     };
     let mut out = Vec::new();
-    for &c in curves {
-        if c == axis {
+    for &c in &curves {
+        if CurveRef::Curve(c) == axis {
             continue;
         }
         let Some(curve) = s.curves.get(c).copied() else {
@@ -136,7 +147,7 @@ pub fn mirror(s: &mut Sketch, axis: CurveId, curves: &[CurveId]) -> Result<Vec<(
         s.add_constraint(ConstraintOf::SymmetricCurves(
             CurveRef::Curve(c),
             CurveRef::Curve(copy),
-            CurveRef::Curve(axis),
+            axis,
         ));
         out.push((c, copy));
     }
@@ -148,11 +159,11 @@ pub fn mirror(s: &mut Sketch, axis: CurveId, curves: &[CurveId]) -> Result<Vec<(
 
 /// A free end (used by one curve only) of a line or arc, not being mirrored, whose carrier
 /// passes through `m` and which is near it (within a quarter of the curve's size).
-fn free_end_near(s: &Sketch, m: Vec2, skip: &[CurveId], axis: CurveId) -> Option<PointId> {
+fn free_end_near(s: &Sketch, m: Vec2, skip: &[CurveId], axis: CurveRef) -> Option<PointId> {
     let tol = 1e-6 * (1.0 + m.length());
     let mut best: Option<(PointId, f64)> = None;
     for (k, c) in &s.curves {
-        if skip.contains(&k) || k == axis {
+        if skip.contains(&k) || CurveRef::Curve(k) == axis {
             continue;
         }
         let (on_carrier, size) = match c.kind {
@@ -386,7 +397,12 @@ pub fn offset_geometry(
     let joints = if closed { n } else { n.saturating_sub(1) };
     for i in 0..joints {
         let j = (i + 1) % n;
-        let (end_i, start_j) = (end_of_shape(&out[i], s), start_of_shape(&out[j], s));
+        // Lines already follow chain traversal, but arcs retain their stored CCW
+        // direction. A reversed arc enters at its end and leaves at its start.
+        let reversed_i = chain[i].1 && matches!(out[i], OffsetShape::Arc { .. });
+        let reversed_j = chain[j].1 && matches!(out[j], OffsetShape::Arc { .. });
+        let end_i = if reversed_i { start_of_shape(&out[i], s) } else { end_of_shape(&out[i], s) };
+        let start_j = if reversed_j { end_of_shape(&out[j], s) } else { start_of_shape(&out[j], s) };
         let (Some(e), Some(st)) = (end_i, start_j) else {
             continue;
         };
@@ -395,8 +411,8 @@ pub fn offset_geometry(
         } else {
             meeting_point(s, &out[i], &out[j], e.midpoint(st)).unwrap_or(e.midpoint(st))
         };
-        set_end(&mut out[i], s, meet);
-        set_start(&mut out[j], s, meet);
+        if reversed_i { set_start(&mut out[i], s, meet); } else { set_end(&mut out[i], s, meet); }
+        if reversed_j { set_end(&mut out[j], s, meet); } else { set_start(&mut out[j], s, meet); }
     }
     Ok(out)
 }
@@ -684,7 +700,7 @@ mod tests {
         .unwrap();
         let arc = s.curves.keys().find(|k| s.arc_geom(*k).is_some()).unwrap();
         SketchOp::Mirror {
-            axis,
+            axis: CurveRef::Curve(axis),
             curves: vec![l, arc],
         }
         .apply(&mut s)
@@ -729,6 +745,75 @@ mod tests {
     }
 
     #[test]
+    fn mirroring_again_stacks_no_copies() {
+        let mut s = Sketch::new();
+        let axis = line(&mut s, v(0.0, -50.0), v(0.0, 50.0), true);
+        let l = line(&mut s, v(10.0, 0.0), v(30.0, 20.0), false);
+        let m = SketchOp::Mirror { axis: CurveRef::Curve(axis), curves: vec![l] };
+        m.apply(&mut s).unwrap();
+        let copy = s.curves.keys().find(|k| *k != axis && *k != l).unwrap();
+        let (curves, constraints) = (s.curves.len(), s.constraints.len());
+        // The source, its copy, or both: nothing to mirror.
+        for again in [vec![l], vec![copy], vec![l, copy]] {
+            assert!(SketchOp::Mirror { axis: CurveRef::Curve(axis), curves: again }.apply(&mut s.clone()).is_err());
+        }
+        // A new curve among them is still mirrored, on its own.
+        let n = line(&mut s, v(5.0, 30.0), v(15.0, 40.0), false);
+        SketchOp::Mirror { axis: CurveRef::Curve(axis), curves: vec![l, copy, n] }.apply(&mut s).unwrap();
+        assert_eq!(s.curves.len(), curves + 2);
+        assert_eq!(s.constraints.len(), constraints + 1);
+    }
+
+    #[test]
+    fn mirror_in_a_plane_axis() {
+        // #31: an edge-on default plane (the sketch Y axis) as the mirror line.
+        let mut s = Sketch::new();
+        let l = line(&mut s, v(10.0, 0.0), v(30.0, 20.0), false);
+        SketchOp::Mirror {
+            axis: CurveRef::YAxis,
+            curves: vec![l],
+        }
+        .apply(&mut s)
+        .unwrap();
+        let copy = s.curves.keys().find(|k| *k != l).unwrap();
+        let (a, b) = s.curve_ends(copy).unwrap();
+        let mut ends = [s.pos(a), s.pos(b)];
+        ends.sort_by(|p, q| p.y.total_cmp(&q.y));
+        assert!(ends[0].distance(v(-10.0, 0.0)) < 1e-9 && ends[1].distance(v(-30.0, 20.0)) < 1e-9);
+        assert!(s.constraints.values().any(|c| *c
+            == ConstraintOf::SymmetricCurves(CurveRef::Curve(l), CurveRef::Curve(copy), CurveRef::YAxis)));
+        // The copy follows its source.
+        let end = s.point_at(v(30.0, 20.0), 1e-9).unwrap();
+        SketchOp::MovePoints {
+            moves: vec![(end, v(40.0, 25.0))],
+        }
+        .apply(&mut s)
+        .unwrap();
+        let p = s.pos(end);
+        assert!([a, b].iter().any(|q| s.pos(*q).distance(v(-p.x, p.y)) < 1e-6));
+    }
+
+    #[test]
+    fn plane_axes_are_line_picks_for_constraints() {
+        use crate::constraint::{ConstraintKind, Fit, fit};
+        use crate::SketchEntity as E;
+        let mut s = Sketch::new();
+        let l1 = line(&mut s, v(2.0, 1.0), v(5.0, 5.0), false);
+        let l2 = line(&mut s, v(-2.0, 1.0), v(-6.0, 5.0), false);
+        let Fit::Complete(cs) = fit(ConstraintKind::Symmetric, &s, &[E::YAxis, E::Curve(l1), E::Curve(l2)]) else {
+            panic!("symmetric about the Y axis")
+        };
+        assert_eq!(
+            cs,
+            vec![ConstraintOf::SymmetricCurves(CurveRef::Curve(l1), CurveRef::Curve(l2), CurveRef::YAxis)]
+        );
+        assert!(matches!(
+            fit(ConstraintKind::Parallel, &s, &[E::Curve(l1), E::XAxis]),
+            Fit::Complete(_)
+        ));
+    }
+
+    #[test]
     fn mirror_shares_points_on_the_axis_and_existing_points() {
         let mut s = Sketch::new();
         let axis = line(&mut s, v(0.0, 0.0), v(0.0, 100.0), true);
@@ -739,7 +824,7 @@ mod tests {
         let lone = line(&mut s, v(60.0, 50.0), v(80.0, 90.0), false);
         let before = s.points.len();
         SketchOp::Mirror {
-            axis,
+            axis: CurveRef::Curve(axis),
             curves: vec![base, side],
         }
         .apply(&mut s)
@@ -1039,6 +1124,44 @@ mod tests {
             _ => panic!("{shapes:?}"),
         }
         let _ = ArcGeom::ccw(v(0.0, 0.0), v(1.0, 0.0), v(0.0, 1.0));
+    }
+
+    #[test]
+    fn offset_tangent_line_arc_line_preserves_quarter_arc_in_both_directions() {
+        for reverse_lines in [false, true] {
+            let mut s = Sketch::new();
+            let a = v(0.0, 0.0);
+            let b = v(20.0, 0.0);
+            let c = v(30.0, 10.0);
+            let d = v(30.0, 30.0);
+            let first = if reverse_lines { line(&mut s, b, a, false) } else { line(&mut s, a, b, false) };
+            SketchOp::AddArc {
+                center: v(20.0, 10.0), start: b, end: c, construction: false,
+            }.apply(&mut s).unwrap();
+            let last = if reverse_lines { line(&mut s, d, c, false) } else { line(&mut s, c, d, false) };
+            // Picking either end may traverse the stored CCW arc backwards.
+            for seed in [first, last] {
+                let (chain, closed) = chain_of(&s, seed);
+                assert!(!closed);
+                assert_eq!(chain.len(), 3);
+                for left in [false, true] {
+                    let shapes = offset_geometry(&s, &chain, 2.0, left).unwrap();
+                    let OffsetShape::Arc { geom, .. } = shapes[1] else { panic!("missing arc") };
+                    assert!((geom.sweep - std::f64::consts::FRAC_PI_2).abs() < 1e-8, "{chain:?}: {geom:?}");
+                    let endpoints = [geom.start(), geom.end()];
+                    for shape in [shapes[0], shapes[2]] {
+                        let OffsetShape::Line(p, q) = shape else { panic!("missing line") };
+                        assert!(endpoints.iter().any(|e| e.distance(p).min(e.distance(q)) < 1e-8));
+                        let tangent = (q - p).normalize();
+                        let joint = endpoints.iter().find(|e| e.distance(p).min(e.distance(q)) < 1e-8).unwrap();
+                        assert!(tangent.dot(*joint - geom.center).abs() < 1e-8);
+                    }
+                    let mut placed = s.clone();
+                    let made = offset(&mut placed, &chain, 2.0, left, (2.0, 0.0)).unwrap();
+                    assert!((placed.arc_geom(made[1]).unwrap().sweep - std::f64::consts::FRAC_PI_2).abs() < 1e-8);
+                }
+            }
+        }
     }
 
     #[test]

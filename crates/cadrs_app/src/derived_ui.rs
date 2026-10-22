@@ -27,6 +27,7 @@
 //!
 //! Stand-in icon (see `docs/icon-migration.md`): Derived is `file-import`.
 
+use cadrs_ui::ShortcutKey;
 use std::collections::HashSet;
 
 use bevy::input::ButtonState;
@@ -317,7 +318,7 @@ pub fn accept(world: &mut World) {
         return;
     }
     let features = world.resource::<ActiveDocument>().doc.element(s.element).map(|e| e.active_features()).unwrap_or_default();
-    if cadrs_core::rebuild::build(&features).error(f.id).is_some() {
+    if crate::accept::builds(world, "derived", features, f.id, accept) != Some(true) {
         return;
     }
     let label = if s.is_new { format!("Insert {}", f.name) } else { format!("Edit {}", f.name) };
@@ -405,7 +406,7 @@ fn derived_keys(mut keys: MessageReader<KeyboardInput>, session: Option<Res<Deri
         if k.state != ButtonState::Pressed || !q_dialogs.is_empty() || q_focus.get().is_some() {
             continue;
         }
-        match k.key_code {
+        match k.shortcut_code() {
             KeyCode::Enter | KeyCode::NumpadEnter => commands.queue(accept),
             KeyCode::Escape => commands.queue(cancel),
             _ => {}

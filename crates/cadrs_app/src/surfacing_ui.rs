@@ -371,7 +371,7 @@ pub(crate) fn number_text(kind: &FeatureKind, role: Role) -> Option<String> {
         (FeatureKind::Helix(x), Role::HelixHeight) => x.height_expr.clone(),
         (FeatureKind::Helix(x), Role::HelixRadius) => x.radius_expr.clone(),
         (FeatureKind::Helix(x), Role::HelixStartAngle) => x.start_angle_expr.clone(),
-        _ => return None,
+        (k, r) => return crate::direct_edit_ui::number_text(k, r),
     })
 }
 
@@ -442,7 +442,7 @@ pub(crate) fn checkbox(k: &mut FeatureKind, name: &str, on: bool) -> Option<&'st
 
 /// Numbers that may be zero or of any sign (the second thickness may be 0; the start angle).
 pub(crate) fn is_signed(role: Role) -> bool {
-    matches!(role, Role::ThickenThickness2 | Role::HelixStartAngle)
+    matches!(role, Role::ThickenThickness2 | Role::HelixStartAngle) || crate::direct_edit_ui::is_signed(role)
 }
 
 /// The revolutions: a plain number greater than zero.
@@ -463,7 +463,7 @@ pub(crate) fn number_label(role: Role) -> Option<&'static str> {
         Role::HelixHeight => "Height",
         Role::HelixRadius => "Radius",
         Role::HelixStartAngle => "Start angle",
-        _ => return None,
+        r => return crate::direct_edit_ui::number_label(r),
     })
 }
 
@@ -476,7 +476,7 @@ pub(crate) fn set_number(k: &mut FeatureKind, role: Role, v: f64, expr: String) 
         (FeatureKind::Helix(x), Role::HelixHeight) => (&mut x.height, &mut x.height_expr),
         (FeatureKind::Helix(x), Role::HelixRadius) => (&mut x.radius, &mut x.radius_expr),
         (FeatureKind::Helix(x), Role::HelixStartAngle) => (&mut x.start_angle, &mut x.start_angle_expr),
-        _ => return,
+        (k, r) => return crate::direct_edit_ui::set_number(k, r, v, expr),
     };
     *value = v;
     *text = expr;
@@ -490,7 +490,7 @@ pub(crate) fn flip(k: &mut FeatureKind, role: Role) {
     match k {
         FeatureKind::Thicken(x) => x.flip = !x.flip,
         FeatureKind::Helix(x) => x.flip = !x.flip,
-        _ => {}
+        k => crate::direct_edit_ui::flip(k, role),
     }
 }
 

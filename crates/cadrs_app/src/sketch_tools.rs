@@ -35,6 +35,7 @@
 //! the cursor passes over are "woken" and offer alignment guides afterwards. Quick dimensions
 //! record driving dimensions, which the solver keeps (M6).
 
+use cadrs_ui::ShortcutKey;
 use std::collections::VecDeque;
 
 use bevy::input::ButtonState;
@@ -152,6 +153,18 @@ impl ScreenMap {
     pub fn to_screen64(&self, p: SVec2) -> SVec2 {
         let s = self.to_screen(p);
         SVec2::new(s.x as f64, s.y as f64)
+    }
+
+    /// The sketch axis under a screen position, on a Top, Front or Right sketch: there the
+    /// other two default planes cut the sketch plane along its axes (seen edge-on), and are
+    /// picked as line references (mirror lines, dimensions, constraints; #31).
+    pub fn axis_at(&self, pos: Vec2) -> Option<SketchEntity> {
+        if !matches!(self.plane, PlaneRef::Top | PlaneRef::Front | PlaneRef::Right) {
+            return None;
+        }
+        let half = crate::viewport::PLANE_HALF as f64;
+        cadrs_sketch::hit::axis_hit(SVec2::new(pos.x as f64, pos.y as f64), half, |p| self.to_screen64(p))
+            .map(|h| h.entity)
     }
 
     /// The sketch point under a screen position, or `None` when the plane is seen edge-on (or,
@@ -450,6 +463,9 @@ pub struct SketchDraw {
     pub woken: Vec<PointRef>,
     /// Recently hovered lines (parallel/perpendicular guides come from these).
     pub woken_curves: Vec<CurveId>,
+    /// Lines and arcs whose midpoint was recently hovered (alignment guides come from these
+    /// midpoints too, #34).
+    pub woken_mids: Vec<CurveId>,
     /// The points placed so far for the shape in progress, with their inferred constraints.
     pending: Vec<(SVec2, Vec<Placed>)>,
     /// Constraints already worked out for the shape in progress (an aligned rectangle's first
@@ -475,6 +491,9 @@ pub struct SketchDraw {
     pub drag_snap: Option<DragSnap>,
     /// A spline end handle being dragged: the spline, which end, and where the handle is.
     pub spline_handle: Option<SplineHandle>,
+    /// What a box selection in progress would select, drawn as selected while it is dragged
+    /// (the Mirror tool's: the curves it would mirror).
+    pub box_preview: Vec<SketchEntity>,
 }
 
 /// A spline's end handle (its tangent there, [`cadrs_sketch::spline`]).
@@ -621,6 +640,7 @@ fn reset_tools(
     draw.inference = None;
     draw.woken.clear();
         draw.woken_curves.clear();
+    draw.woken_mids.clear();
     draw.pending.clear();
     draw.cursor = None;
     draw.label_drag = None;
@@ -653,6 +673,7 @@ fn reset_on_tool_change(
         draw.pending.clear();
         draw.woken.clear();
         draw.woken_curves.clear();
+        draw.woken_mids.clear();
         close_quick_dims(&mut flow, &mut commands);
     }
 }
@@ -678,7 +699,7 @@ fn prune_selection(
         SketchEntity::Constraint(c) => sketch.constraints.contains_key(c),
         SketchEntity::Text(t) => sketch.texts.contains_key(t),
         // A part vertex: drawn while it exists (`sketch_links`).
-        SketchEntity::Origin | SketchEntity::Link(_) => true,
+        SketchEntity::Origin | SketchEntity::Link(_) | SketchEntity::XAxis | SketchEntity::YAxis => true,
     };
     if !selection.0.iter().all(exists) {
         selection.0.retain(exists);
@@ -778,6 +799,7 @@ pub fn tool_context(state: DrawState, draw: &SketchDraw, suppress: bool) -> Tool
         hv_from_anchor: hv,
         woken: draw.woken.clone(),
         woken_curves: draw.woken_curves.clone(),
+        woken_mids: draw.woken_mids.clone(),
         suppress: suppress || sizing,
         ..ToolContext::default()
     }
@@ -885,6 +907,7 @@ pub(crate) fn sketch_pointer(
                     _ => vertex_at(pos).or(hit),
                 }
             })
+            .or_else(|| map.axis_at(pos))
     };
     let mut drag_moved = false;
     for input in inputs.read() {
@@ -949,16 +972,24 @@ pub(crate) fn sketch_pointer(
                         sketch,
                         grab,
                         analysis.conflicting_sources(),
+                        &selection.0,
                     );
                     drag_moved = draw.drag.is_some();
                     continue;
                 }
+                // The Mirror tool boxes the curves to mirror once its line is picked (#37).
+                let boxes = select
+                    || (tool.tool == SketchTool::Mirror
+                        && crate::sketch_edit_tools::mirror_axis(sketch, &selection).is_some());
                 if let DrawState::Idle = draw.state
-                    && tool.tool == SketchTool::Select
+                    && boxes
                     && let Some(p) = draw.press
                     && !p.began
-                    // A part vertex under the press doesn't stop a box selection.
-                    && matches!(p.hit, None | Some(SketchEntity::Link(_)))
+                    // A part vertex or an axis under the press doesn't stop a box selection.
+                    && matches!(
+                        p.hit,
+                        None | Some(SketchEntity::Link(_) | SketchEntity::XAxis | SketchEntity::YAxis)
+                    )
                     && p.screen.distance(pos) > DRAG_THRESHOLD
                 {
                     draw.state = DrawState::BoxSelect { start: p.screen };
@@ -1078,17 +1109,29 @@ pub(crate) fn sketch_pointer(
                     }
                     continue;
                 }
+                // A selection box: left to right takes what is inside it, right to left what
+                // it crosses too (`box_select.md`).
+                let in_box = |start: Vec2| {
+                    box_select(
+                        sketch,
+                        SVec2::new(start.x as f64, start.y as f64),
+                        SVec2::new(pos.x as f64, pos.y as f64),
+                        pos.x < start.x,
+                        |p| map.to_screen64(p),
+                    )
+                };
+                if tool.tool == SketchTool::Mirror
+                    && let DrawState::BoxSelect { start } = draw.state
+                {
+                    // #37: every curve in the box is mirrored at once.
+                    let found = in_box(start);
+                    crate::sketch_edit_tools::mirror_box(sketch, &selection, &found, &mut commands, target);
+                    draw.state = DrawState::Idle;
+                    continue;
+                }
                 if tool.tool == SketchTool::Select {
                     if let DrawState::BoxSelect { start } = draw.state {
-                        let crossing = pos.x < start.x;
-                        let found = box_select(
-                            sketch,
-                            SVec2::new(start.x as f64, start.y as f64),
-                            SVec2::new(pos.x as f64, pos.y as f64),
-                            crossing,
-                            |p| map.to_screen64(p),
-                        );
-                        for e in found {
+                        for e in in_box(start) {
                             if !selection.contains(e) {
                                 selection.0.push(e);
                             }
@@ -1207,6 +1250,24 @@ pub(crate) fn sketch_pointer(
         }
     }
     draw.over_viewport = over;
+    draw.box_preview = match (draw.state, draw.cursor_screen) {
+        (DrawState::BoxSelect { start }, Some(pos)) => {
+            let found = box_select(
+                sketch,
+                SVec2::new(start.x as f64, start.y as f64),
+                SVec2::new(pos.x as f64, pos.y as f64),
+                pos.x < start.x,
+                |p| map.to_screen64(p),
+            );
+            match crate::sketch_edit_tools::mirror_axis(sketch, &selection) {
+                Some(axis) if tool.tool == SketchTool::Mirror => {
+                    crate::sketch_edit_tools::mirror_targets(sketch, axis, &found).into_iter().map(SketchEntity::Curve).collect()
+                }
+                _ => found,
+            }
+        }
+        _ => Vec::new(),
+    };
     // A drag follows the pointer (once per frame, from where the last frame left it). A
     // dragged point infers like a placed one (S11.4): it snaps to points, curves and
     // alignments with the origin and recently hovered points (not with itself).
@@ -1216,7 +1277,9 @@ pub(crate) fn sketch_pointer(
         && let Some(mut t) = d.target(c)
     {
         let mut snap = None;
+        // A selection dragged as one doesn't snap.
         if let SketchEntity::Point(p) = d.entity
+            && d.group.is_empty()
             && !suppress
             && d.base.points.contains_key(p)
         {
@@ -1291,8 +1354,19 @@ pub(crate) fn sketch_pointer(
                         infer::wake(&mut draw.woken, PointRef::Point(k), WOKEN_MAX)
                     }
                     Some(Kind::Origin) => infer::wake(&mut draw.woken, PointRef::Origin, WOKEN_MAX),
+                    // Passing over a midpoint wakes it for alignment guides, and its line for
+                    // parallel/perpendicular ones.
+                    Some(Kind::Midpoint(k)) => {
+                        infer::wake(&mut draw.woken_mids, k, WOKEN_MAX);
+                        if matches!(
+                            snap_sketch.curves.get(k).map(|c| c.kind),
+                            Some(CurveKind::Line { .. })
+                        ) {
+                            infer::wake(&mut draw.woken_curves, k, WOKEN_MAX)
+                        }
+                    }
                     // Passing over a line wakes it for parallel/perpendicular guides.
-                    Some(Kind::OnCurve(cadrs_sketch::CurveRef::Curve(k)) | Kind::Midpoint(k))
+                    Some(Kind::OnCurve(cadrs_sketch::CurveRef::Curve(k)))
                         if matches!(
                             snap_sketch.curves.get(k).map(|c| c.kind),
                             Some(CurveKind::Line { .. })
@@ -1318,6 +1392,7 @@ pub(crate) fn sketch_pointer(
         PointRef::Origin => true,
     });
     draw.woken_curves.retain(|c| snap_sketch.curves.contains_key(*c));
+    draw.woken_mids.retain(|c| snap_sketch.curves.contains_key(*c));
     track_sweep(&mut draw);
     track_sides(&mut draw);
     let dragged = draw.drag.as_ref().map(|d| d.entity);
@@ -2268,25 +2343,89 @@ fn execute_with(
 
 pub(crate) fn execute(
     commands: &mut Commands,
+    target: (cadrs_core::ElementId, cadrs_core::FeatureId),
+    op: SketchOp,
+) {
+    commands.queue(move |world: &mut World| execute_now(world, target, op));
+}
+
+/// [`execute`], on the world.
+pub(crate) fn execute_now(
+    world: &mut World,
     (element, feature): (cadrs_core::ElementId, cadrs_core::FeatureId),
     op: SketchOp,
 ) {
-    commands.queue(move |world: &mut World| {
-        // Geometry snapped to part edges uses them (`cadrs_sketch::external`).
-        let op = match world.get_resource::<ExternalSnap>().and_then(|x| x.get(feature)) {
-            Some((base, ext)) => ext.commit(base, op),
-            None => op,
-        };
-        if let Some(mut doc) = world.get_resource_mut::<ActiveDocument>()
-            && let Err(e) = doc.execute(&EditSketch {
-                element,
-                feature,
-                op,
-            })
-        {
-            warn!("sketch edit failed: {e}");
+    // Geometry snapped to part edges uses them (`cadrs_sketch::external`).
+    let op = match world.get_resource::<ExternalSnap>().and_then(|x| x.get(feature)) {
+        Some((base, ext)) => ext.commit(base, op),
+        None => op,
+    };
+    if let Some(mut doc) = world.get_resource_mut::<ActiveDocument>()
+        && let Err(e) = doc.execute(&EditSketch {
+            element,
+            feature,
+            op,
+        })
+    {
+        warn!("sketch edit failed: {e}");
+    }
+}
+
+/// The Construction button and Q, like Onshape's (issue #45): with curves selected, makes
+/// them all construction geometry (or all regular, when they are construction already) as one
+/// command; with nothing selected, or while drawing, flips construction for new geometry.
+pub(crate) fn toggle_construction(world: &mut World) {
+    let Some(s) = world
+        .get_resource::<SketchSession>()
+        .filter(|s| !s.waiting_for_plane)
+    else {
+        return;
+    };
+    let target = (s.element, s.feature);
+    let curves = world
+        .get_resource::<SketchSelection>()
+        .map_or_else(Vec::new, |s| curve_ids(&s.0));
+    let drawing = world
+        .get_resource::<SketchDraw>()
+        .is_some_and(|d| d.state.is_drawing());
+    if curves.is_empty() || drawing {
+        if let Some(mut tool) = world.get_resource_mut::<ActiveSketchTool>() {
+            tool.construction = !tool.construction;
         }
-    });
+        return;
+    }
+    let Some(all) = all_construction(world_sketch(world), &curves) else {
+        return;
+    };
+    execute_now(
+        world,
+        target,
+        SketchOp::SetConstruction {
+            curves,
+            construction: !all,
+        },
+    );
+}
+
+/// The curves among `entities`.
+pub(crate) fn curve_ids(entities: &[SketchEntity]) -> Vec<CurveId> {
+    entities
+        .iter()
+        .filter_map(|e| match e {
+            SketchEntity::Curve(c) => Some(*c),
+            _ => None,
+        })
+        .collect()
+}
+
+/// Whether `curves` are all construction geometry; `None` without a sketch or curves.
+pub(crate) fn all_construction(sketch: Option<&Sketch>, curves: &[CurveId]) -> Option<bool> {
+    let sk = sketch?;
+    (!curves.is_empty()).then(|| {
+        curves
+            .iter()
+            .all(|c| sk.curves.get(*c).is_some_and(|c| c.construction))
+    })
 }
 
 pub(crate) fn world_sketch(world: &World) -> Option<&Sketch> {
@@ -2331,7 +2470,6 @@ fn sketch_edit_keys(
     q_dialogs: Query<(), With<cadrs_ui::DialogRoot>>,
     session: Option<Res<SketchSession>>,
     doc: Option<Res<ActiveDocument>>,
-    mut tool: ResMut<ActiveSketchTool>,
     mut draw: ResMut<SketchDraw>,
     mut selection: ResMut<SketchSelection>,
     flow: Res<QuickDimFlow>,
@@ -2374,7 +2512,7 @@ fn sketch_edit_keys(
         }
         if ctrl {
             // Ctrl+A selects all the sketch's geometry.
-            if k.key_code == KeyCode::KeyA
+            if k.shortcut_code() == KeyCode::KeyA
                 && !shift
                 && let Some(sk) = sketch
             {
@@ -2382,7 +2520,7 @@ fn sketch_edit_keys(
             }
             continue;
         }
-        match k.key_code {
+        match k.shortcut_code() {
             KeyCode::Delete | KeyCode::Backspace if !selection.0.is_empty() => {
                 let mut curves = Vec::new();
                 let mut points = Vec::new();
@@ -2400,8 +2538,11 @@ fn sketch_edit_keys(
                                 curves.push(tx.lines[0]);
                             }
                         }
-                        // The origin and part vertices cannot be deleted.
-                        SketchEntity::Origin | SketchEntity::Link(_) => {}
+                        // The origin, part vertices and the axes cannot be deleted.
+                        SketchEntity::Origin
+                        | SketchEntity::Link(_)
+                        | SketchEntity::XAxis
+                        | SketchEntity::YAxis => {}
                     }
                 }
                 // A point selected together with its curve goes with the curve; on its own,
@@ -2423,31 +2564,7 @@ fn sketch_edit_keys(
                     },
                 );
             }
-            KeyCode::KeyQ if !shift => {
-                let curves: Vec<CurveId> = selection
-                    .0
-                    .iter()
-                    .filter_map(|e| match e {
-                        SketchEntity::Curve(c) => Some(*c),
-                        _ => None,
-                    })
-                    .collect();
-                if curves.is_empty() || draw.state.is_drawing() {
-                    tool.construction = !tool.construction;
-                } else if let Some(sk) = sketch {
-                    let all = curves
-                        .iter()
-                        .all(|c| sk.curves.get(*c).is_some_and(|c| c.construction));
-                    execute(
-                        &mut commands,
-                        target,
-                        SketchOp::SetConstruction {
-                            curves,
-                            construction: !all,
-                        },
-                    );
-                }
-            }
+            KeyCode::KeyQ if !shift => commands.queue(toggle_construction),
             KeyCode::KeyA if shift => {
                 if let DrawState::Line {
                     prev: prev @ Some(_),
@@ -2498,7 +2615,7 @@ pub(crate) fn clear_regions_on_space(
 ) {
     let typing = focus.get().is_some_and(|e| q_fields.contains(e));
     for k in keys_in.read() {
-        if k.state == ButtonState::Pressed && !typing && k.key_code == KeyCode::Space {
+        if k.state == ButtonState::Pressed && !typing && k.shortcut_code() == KeyCode::Space {
             regions.0.clear();
         }
     }
@@ -2884,7 +3001,7 @@ fn on_quick_dim_commit(
             // Not a length: keep the box open.
             return;
         };
-        apply_quick_dim(world, open.target, v);
+        if !apply_quick_dim(world, open.target, v) { return; }
         let frame = world.resource::<bevy::diagnostic::FrameCount>().0;
         let mut flow = world.resource_mut::<QuickDimFlow>();
         flow.open = None;
@@ -2924,26 +3041,26 @@ fn on_quick_dim_cancel(
 
 /// Sets a quick dimension: moves the geometry (there is no solver yet) and records the
 /// driving dimension, as one undoable command.
-fn apply_quick_dim(world: &mut World, target: QuickDimTarget, v: f64) {
+fn apply_quick_dim(world: &mut World, target: QuickDimTarget, v: f64) -> bool {
     let Some(s) = world.get_resource::<SketchSession>() else {
-        return;
+        return false;
     };
     let (element, feature) = (s.element, s.feature);
     let Some(map) = world.resource::<SketchScreen>().active else {
-        return;
+        return false;
     };
     let Some(sketch) = world_sketch(world) else {
-        return;
+        return false;
     };
     let Some(op) = quick_dim_op(sketch, target, v, map.px_per_mm() as f64) else {
-        return;
+        return false;
     };
     // P3D.1 (IR5.3): an offset distance that can't be made is refused with a warning.
     if let QuickDimTarget::Dim(id) = target
         && crate::sketch_edit_tools::offset_value_fails(sketch, id, &op)
     {
         crate::sketch_edit_tools::offset_failed_toast(world);
-        return;
+        return false;
     }
     // The free end of a line or tangent arc just drawn (a chain continues from it).
     let moved_end = target.fixed_curve().and_then(|(c, fixed)| {
@@ -2959,7 +3076,7 @@ fn apply_quick_dim(world: &mut World, target: QuickDimTarget, v: f64) {
         })
     {
         warn!("cannot set the dimension: {e}");
-        return;
+        return false;
     }
     // The line tool's chain goes on from where that end is now.
     if let Some((p, old)) = moved_end
@@ -2972,6 +3089,7 @@ fn apply_quick_dim(world: &mut World, target: QuickDimTarget, v: f64) {
             *start = new;
         }
     }
+    true
 }
 
 /// The edit that gives `target` the value `v` (mm). `px_per_mm` places the dimension line a

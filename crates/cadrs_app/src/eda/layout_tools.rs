@@ -33,6 +33,7 @@
 //!   right-click or a double-click. Zones are poured again with every change to the board
 //!   (in the same undo step), so they always show filled.
 
+use cadrs_ui::ShortcutKey;
 use bevy::input::ButtonState;
 use bevy::input::keyboard::KeyboardInput;
 use bevy::prelude::*;
@@ -824,13 +825,13 @@ fn handle_keys(world: &mut World, keys: Vec<KeyboardInput>) {
             continue;
         }
         if ctrl {
-            if shift && k.key_code == KeyCode::KeyM {
+            if shift && k.shortcut_code() == KeyCode::KeyM {
                 set_tool(world, Tool::Measure { a: None, b: None });
             }
             continue;
         }
         let pointer = world.resource::<EdaPointer>().at;
-        match k.key_code {
+        match k.shortcut_code() {
             KeyCode::Escape => {
                 let busy = !matches!(world.resource::<LayoutState>().tool, Tool::Select) || world.resource::<LayoutState>().moving.is_some();
                 set_tool(world, Tool::Select);
@@ -899,7 +900,7 @@ fn handle_keys(world: &mut World, keys: Vec<KeyboardInput>) {
                 if let (Some(fp), Some(from)) = (fp, anchor) {
                     let mut s = world.resource_mut::<LayoutState>();
                     s.selection = vec![BoardItem::Footprint(fp)];
-                    s.moving = Some(Moving { fp, from, drag: k.key_code == KeyCode::KeyD, on_release: false, items: vec![], corner: None, points: None, track: None });
+                    s.moving = Some(Moving { fp, from, drag: k.shortcut_code() == KeyCode::KeyD, on_release: false, items: vec![], corner: None, points: None, track: None });
                 }
             }
             // The properties of the footprint or shape under the pointer (else the selected one).
@@ -908,7 +909,7 @@ fn handle_keys(world: &mut World, keys: Vec<KeyboardInput>) {
             // together about their middle, else the footprint under the pointer (or selected),
             // else the one selected item.
             KeyCode::KeyR | KeyCode::KeyF => {
-                let rotate = k.key_code == KeyCode::KeyR;
+                let rotate = k.shortcut_code() == KeyCode::KeyR;
                 let sel = world.resource::<LayoutState>().selection.clone();
                 let fp = (sel.len() <= 1).then(|| target_footprint(world, pointer)).flatten();
                 if let Some(fp) = fp {

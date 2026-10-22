@@ -8,7 +8,7 @@
 //!   feature list or the view) or a planar face (the view).
 //! - **File name**: the tab's name to start with; a file holding one part gets " - <part>".
 //! - **Format**: for 3D models **STEP** (AP214, exact B-rep with product names), **IGES**
-//!   (5.3, solids), **STL** and **OBJ** (meshes); for a sketch or a face **DXF** and **DWG**.
+//!   (5.3, solids), experimental OpenCASCADE **BREP**, **STL** and **OBJ** (meshes); for a sketch or a face **DXF** and **DWG**.
 //!   Parasolid is not offered (a proprietary format). DWG goes through the drawings' external
 //!   converter and is disabled, saying what to install, without one.
 //! - **STL**: Binary or Text. **STL and OBJ**: the **Units** (Millimeter … Foot) and the
@@ -72,6 +72,7 @@ impl ExportSource {
 pub enum Fmt {
     Step,
     Iges,
+    Brep,
     Stl,
     Obj,
     Dxf,
@@ -79,13 +80,14 @@ pub enum Fmt {
 }
 
 impl Fmt {
-    const MODELS: [Fmt; 4] = [Fmt::Step, Fmt::Iges, Fmt::Stl, Fmt::Obj];
+    const MODELS: [Fmt; 5] = [Fmt::Step, Fmt::Iges, Fmt::Stl, Fmt::Obj, Fmt::Brep];
     const FLAT: [Fmt; 2] = [Fmt::Dxf, Fmt::Dwg];
 
     fn label(self) -> &'static str {
         match self {
             Fmt::Step => "STEP",
             Fmt::Iges => "IGES",
+            Fmt::Brep => "BREP",
             Fmt::Stl => "STL",
             Fmt::Obj => "OBJ",
             Fmt::Dxf => "DXF",
@@ -97,6 +99,7 @@ impl Fmt {
         match self {
             Fmt::Step => "step",
             Fmt::Iges => "iges",
+            Fmt::Brep => "brep",
             Fmt::Stl => "stl",
             Fmt::Obj => "obj",
             Fmt::Dxf => "dxf",
@@ -289,6 +292,7 @@ pub fn open(world: &mut World, source: ExportSource) {
                             let tip = match f {
                                 Fmt::Step => "STEP AP214: exact solids with part names".to_string(),
                                 Fmt::Iges => "IGES 5.3: exact solids".to_string(),
+                                Fmt::Brep => "Experimental OpenCASCADE BREP geometry".to_string(),
                                 Fmt::Stl => "STL mesh, for 3D printing".to_string(),
                                 Fmt::Obj => "Wavefront OBJ mesh".to_string(),
                                 Fmt::Dxf => "DXF in millimetres at full size, for cutting machines".to_string(),
@@ -323,6 +327,9 @@ pub fn open(world: &mut World, source: ExportSource) {
                             });
                         }
                     });
+                });
+                b.spawn(row("export-brep-warning")).with_children(|g| {
+                    g.spawn((Name::new("export-brep-warning-text"), t.text("Experimental: OpenCASCADE BREP export will be removed if cadrs switches to a different geometry kernel. This format contains geometry only, without editable features, part names, or assembly structure. Use STEP for portable geometry or .cadrs to keep your editable document.", t.font_sm, FontWeight::NORMAL, t.feature_error), Node { width: full(), ..default() })).insert(TextLayout::default());
                 });
                 b.spawn(row("export-version-row")).with_children(|g| {
                     label(g, t, "Version");
@@ -484,11 +491,13 @@ fn sync_rows(
     let custom = q_sel.iter().any(|(n, s)| n.as_str() == "export-resolution" && s.selected == RESOLUTIONS.len());
     for (n, mut node) in &mut q_rows {
         let show = match n.as_str() {
+            "export-brep-warning" => d.format == Fmt::Brep,
+            "export-assembly" => matches!(d.source, ExportSource::Assembly(_)) && d.format.is_brep(),
             "export-version-row" => d.format.is_brep(),
             "export-stl-row" => d.format == Fmt::Stl,
             "export-mesh-row" => d.format.is_mesh(),
             "export-tolerance-row" => d.format.is_mesh() && custom,
-            "export-dxf-row" => !d.format.is_brep() && !d.format.is_mesh(),
+            "export-dxf-row" => d.source.is_flat(),
             "export-options-row" => !d.source.is_flat(),
             _ => continue,
         };
@@ -662,7 +671,7 @@ fn start_export(world: &mut World) {
     let base = field(world, "export-name-field").trim().to_string();
     let folder = field(world, "export-folder-field").trim().to_string();
     let y_up = checked(world, "export-y-up");
-    let assembly = checked(world, "export-assembly");
+    let assembly = checked(world, "export-assembly") && spec.format.is_brep();
     let individual = checked(world, "export-individual") && !assembly;
     let units = UNITS[select(world, "export-units").min(UNITS.len() - 1)].1;
     let res = select(world, "export-resolution");
@@ -717,6 +726,7 @@ fn start_export(world: &mut World) {
             let format = match f {
                 Fmt::Step => ModelFormat::Step,
                 Fmt::Iges => ModelFormat::Iges,
+                Fmt::Brep => ModelFormat::Brep,
                 Fmt::Stl => ModelFormat::Stl { binary },
                 _ => ModelFormat::Obj,
             };

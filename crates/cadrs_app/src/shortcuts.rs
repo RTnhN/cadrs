@@ -6,6 +6,7 @@
 //! listed struck through, like Onshape's disabled ones. [`SHORTCUTS`] is also what the tests
 //! check the key handlers against.
 
+use cadrs_ui::ShortcutKey;
 use bevy::input::ButtonState;
 use bevy::input::keyboard::KeyboardInput;
 use bevy::input_focus::InputFocus;
@@ -300,7 +301,7 @@ fn open_on_key(
     let ctrl = keys.any_pressed([KeyCode::ControlLeft, KeyCode::ControlRight]);
     for k in keys_in.read() {
         if k.state == ButtonState::Pressed
-            && k.key_code == KeyCode::Slash
+            && k.shortcut_code() == KeyCode::Slash
             && shift
             && !ctrl
             && !typing
@@ -472,6 +473,36 @@ fn dialog_keycap(t: &Theme, key: String, off: bool) -> impl Bundle {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Issue #32: handlers match `shortcut_code()`, which follows the keyboard layout, never the
+    /// physical `key_code` (on AZERTY the key labelled Z is `KeyW`).
+    #[test]
+    fn handlers_match_layout_aware_keys() {
+        // Spelled in two parts so this test does not find itself.
+        const NEEDLE: &str = concat!(".key", "_code");
+        fn scan(dir: &std::path::Path, hits: &mut Vec<String>) {
+            for entry in std::fs::read_dir(dir).unwrap() {
+                let path = entry.unwrap().path();
+                if path.is_dir() {
+                    scan(&path, hits);
+                } else if path.extension().is_some_and(|e| e == "rs")
+                    && !path.ends_with("shortcut_key.rs")
+                {
+                    let text = std::fs::read_to_string(&path).unwrap();
+                    for (i, line) in text.lines().enumerate() {
+                        if line.contains(NEEDLE) {
+                            hits.push(format!("{}:{}", path.display(), i + 1));
+                        }
+                    }
+                }
+            }
+        }
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+        let mut hits = Vec::new();
+        scan(&root.join("src"), &mut hits);
+        scan(&root.join("../cadrs_ui/src"), &mut hits);
+        assert!(hits.is_empty(), "use ShortcutKey::shortcut_code() instead of {NEEDLE}: {hits:#?}");
+    }
 
     #[test]
     fn tabs_and_search() {

@@ -158,7 +158,12 @@ pub fn part_appearance(part: &Part, props: &[PartProps]) -> Appearance {
     own(part.id)
         .or_else(|| own(part.source?))
         .or_else(|| part.derived.as_ref()?.appearance)
-        .or_else(|| part.solid.looks.first().map(|(_, a)| *a))
+        .or_else(|| {
+            // Partial face styles must leave unstyled faces at the palette color, including
+            // after a transform or pattern changes the imported faces' names.
+            if part.solid.looks.len() < part.solid.faces.len() { None }
+            else { part.solid.looks.first().map(|(_, a)| *a) }
+        })
         .unwrap_or_else(|| default_appearance(part, props))
 }
 
@@ -217,7 +222,7 @@ pub fn face_appearance(
 /// True if any face of the part has its own or a feature's appearance (it is drawn per face).
 pub fn has_face_overrides(part: &Part, props: &[PartProps], features: &[(FeatureId, Appearance)]) -> bool {
     props.iter().any(|p| p.part == part.id && !p.faces.is_empty())
-        || (part.solid.looks.len() > 1 && !props.iter().any(|p| p.part == part.id && p.appearance.is_some()))
+        || (!part.solid.looks.is_empty() && !props.iter().any(|p| p.part == part.id && p.appearance.is_some()))
         || features
             .iter()
             .any(|(f, _)| part.solid.faces.iter().any(|x| x.name.op == f.0))

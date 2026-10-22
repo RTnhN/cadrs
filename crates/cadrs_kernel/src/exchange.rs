@@ -60,6 +60,8 @@ pub struct ImportedPart {
 /// instance's name (empty when the file gives none).
 #[derive(Debug, Clone, PartialEq)]
 pub struct ImportedOccurrence {
+    /// Instance-level surface color overriding the source part.
+    pub color: Option<[u8; 4]>,
     /// The index of the part in [`ImportedModel::parts`].
     pub part: usize,
     /// Where the part is placed.

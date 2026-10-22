@@ -17,6 +17,7 @@
 //!   sketch's dimension expressions); a variable used above its definition fails that feature
 //!   in the rebuild, with why ([`cadrs_core::variables::check`]).
 
+use cadrs_ui::ShortcutKey;
 use bevy::input::ButtonState;
 use bevy::input::keyboard::KeyboardInput;
 use bevy::input_focus::InputFocus;
@@ -455,7 +456,7 @@ fn variable_keys(
         if k.state != ButtonState::Pressed || !q_dialogs.is_empty() || focus.get().is_some() {
             continue;
         }
-        match k.key_code {
+        match k.shortcut_code() {
             KeyCode::Enter | KeyCode::NumpadEnter => commands.queue(accept),
             KeyCode::Escape => commands.queue(cancel),
             _ => {}

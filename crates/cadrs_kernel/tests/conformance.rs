@@ -2190,6 +2190,26 @@ pub fn shell_around_a_counterbore(k: &mut dyn Kernel) {
     close(volume(k, s), body - cavity, 1e-6);
 }
 
+// Not in the list below yet: the native shell can't offset rounds whose inward offset
+// collapses onto their axes ("offsetting this kind of face"); it came from main with the OCCT
+// backend's fix. Add it to the list when the native shell handles it.
+#[allow(dead_code)]
+pub fn shell_rounded_cube_at_the_radius(k: &mut dyn Kernel) {
+    // A 10 mm cube with R2 on every edge, shelled with the top open as thick as the rounds and
+    // thicker. The rounds' inward offsets collapse onto their axes, so the cavity is a sharp
+    // box: (10 − 2t)² across and 10 − t deep. The outside keeps its rounds (8 sphere corners).
+    let b = plate(k, 0.0, 0.0, 10.0, 10.0, 0.0, 10.0);
+    let all: Vec<EdgeId> = k.edges(b).unwrap().iter().map(|e| e.id).collect();
+    let f = one(k.fillet_with(b, &all, &FilletSpec::radius(2.0)).unwrap());
+    let rounded = volume(k, f);
+    for t in [2.0, 2.5] {
+        let top_face = face_at(k, f, Vector3::z(), 10.0);
+        let s = one(k.shell_with(f, &ShellSpec { remove: vec![top_face], thickness: t, outward: false, hollow: false, sharp: false }).unwrap());
+        close(rounded - volume(k, s), (10.0 - 2.0 * t) * (10.0 - 2.0 * t) * (10.0 - t), 1e-6);
+        assert_eq!(k.faces(s).unwrap().iter().filter(|f| f.kind == SurfaceKind::Sphere).count(), 8);
+    }
+}
+
 pub fn edge_face_radius(k: &mut dyn Kernel) {
     // P3.6: a cylinder's face knows its radius.
     let cyl = one(k.extrude(&top(vec![region(circle(p(0.0, 0.0), 7.5))]), Extent::Blind(10.0)).unwrap());

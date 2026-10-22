@@ -17,6 +17,7 @@
 //! - The fillet's radius (or width) has an arrow manipulator on the first edge: dragging it
 //!   changes the value live (PS14.5).
 
+use cadrs_ui::ShortcutKey;
 use bevy::input::ButtonState;
 use bevy::input::keyboard::KeyboardInput;
 use bevy::prelude::*;
@@ -103,6 +104,8 @@ pub enum AppliedKind {
     SheetMetalTool(crate::sheetmetal_tools_ui::SmTool),
     /// P3I.6: the flat pattern extrude (`crate::flat_ui`).
     FlatExtrude,
+    /// Move face, Delete face and Simplify (`crate::direct_edit_ui`).
+    DirectEdit(cadrs_core::direct_edit::DirectEditKind),
 }
 
 impl AppliedKind {
@@ -129,6 +132,7 @@ impl AppliedKind {
             FeatureKind::SheetMetal(x) => Some(Self::SmFeature(crate::sheetmetal_features_ui::SmTool::of(x))),
             FeatureKind::SheetMetalTool(x) => Some(Self::SheetMetalTool(crate::sheetmetal_tools_ui::SmTool::of(x))),
             FeatureKind::FlatExtrude(_) => Some(Self::FlatExtrude),
+            FeatureKind::DirectEdit(x) => Some(Self::DirectEdit(x.kind)),
             _ => None,
         }
     }
@@ -229,6 +233,8 @@ pub enum AppliedField {
     SmTool(u8),
     /// P3I.6: the flat pattern extrude's regions.
     FlatRegions,
+    /// The faces a Move face, Delete face or Simplify works on.
+    DirectEditFaces,
 }
 
 /// The applied feature whose dialog is open.
@@ -369,6 +375,7 @@ impl AppliedSession {
             AppliedField::FillEdges => PickFilter { edges: true, sketch_curves: true, ..none },
             AppliedField::Sm9(f) => crate::sheetmetal_p3i9_ui::pick_filter(f, none),
             AppliedField::FlatRegions => PickFilter { regions: true, ..none },
+            AppliedField::DirectEditFaces => PickFilter { faces: true, ..none },
             f @ AppliedField::SmTool(_) => crate::sheetmetal_tools_ui::pick_filter(f, none),
             f => crate::sheetmetal_ui::pick_filter(f, cadrs_core::document::EndType::Blind, none)
                 .or_else(|| crate::sheetmetal_features_ui::pick_filter(f, none))
@@ -434,7 +441,8 @@ pub fn begin(world: &mut World, kind: AppliedKind) {
             _ => None,
         })
         .or_else(|| crate::sheetmetal_tools_ui::initial(world, kind, &picked))
-        .or_else(|| (kind == AppliedKind::FlatExtrude).then(|| crate::flat_ui::initial(world, &picked)).flatten());
+        .or_else(|| (kind == AppliedKind::FlatExtrude).then(|| crate::flat_ui::initial(world, &picked)).flatten())
+        .or_else(|| crate::direct_edit_ui::initial(world, kind, &picked));
     let Some(mut doc) = world.get_resource_mut::<ActiveDocument>() else {
         return;
     };
@@ -495,7 +503,8 @@ pub fn begin(world: &mut World, kind: AppliedKind) {
         | AppliedKind::Sm9(_)
         | AppliedKind::SmFeature(_)
         | AppliedKind::SheetMetalTool(_)
-        | AppliedKind::FlatExtrude => {
+        | AppliedKind::FlatExtrude
+        | AppliedKind::DirectEdit(_) => {
             let Some((base, kind, field)) = advanced else { return };
             (AddFeature { element, feature, base_name: base.into(), kind }, field)
         }
@@ -563,6 +572,7 @@ pub fn edit(world: &mut World, feature: FeatureId) {
         AppliedKind::SmFeature(_) => AppliedField::Smf(crate::sheetmetal_features_ui::SmfField::Edges),
         AppliedKind::SheetMetalTool(t) => crate::sheetmetal_tools_ui::first_field(t),
         AppliedKind::FlatExtrude => AppliedField::FlatRegions,
+        AppliedKind::DirectEdit(_) => AppliedField::DirectEditFaces,
     };
     start(world, element, feature, kind, false, mark, Some(before), field);
 }
@@ -885,6 +895,11 @@ fn applied_picks(
                         return;
                     }
                 }
+                (k @ FeatureKind::DirectEdit(_), _) => {
+                    if !crate::direct_edit_ui::pick(world, k, field, pick) {
+                        return;
+                    }
+                }
                 // P3.8 (and a hole's mate connectors, PS15.2).
                 (k @ (FeatureKind::Pattern(_) | FeatureKind::Mirror(_) | FeatureKind::MateConnector(_)), _)
                 | (k @ FeatureKind::Hole(_), AppliedField::HoleConnectors) => {
@@ -919,7 +934,7 @@ fn applied_keys(
         if k.state != ButtonState::Pressed || !q_dialogs.is_empty() || focus.get().is_some() {
             continue;
         }
-        match k.key_code {
+        match k.shortcut_code() {
             KeyCode::Enter | KeyCode::NumpadEnter => commands.queue(accept),
             KeyCode::Escape => commands.queue(cancel),
             _ => {}
@@ -1154,6 +1169,7 @@ fn show_references(
             FeatureKind::Chamfer(x) => (x.entities.iter().map(|e| e.part()).collect(), x.entities.iter().map(|e| e.op()).collect()),
             FeatureKind::Shell(x) if x.hollow => (x.parts.clone(), Vec::new()),
             FeatureKind::Shell(x) => (x.faces.iter().map(|f| f.part).collect(), x.faces.iter().map(|f| f.face.op).collect()),
+            FeatureKind::DirectEdit(x) => (x.faces.iter().map(|f| f.part).collect(), x.faces.iter().map(|f| f.face.op).collect()),
             FeatureKind::Pattern(cadrs_core::pattern::PatternFeature { faces, .. })
             | FeatureKind::Mirror(cadrs_core::pattern::MirrorFeature { faces, .. })
                 if !faces.is_empty() =>
@@ -1176,6 +1192,7 @@ fn show_references(
     // The faces it refers to keep the selection tint over the red (the shell's faces to remove).
     let refs: Vec<Pick> = match &f.kind {
         FeatureKind::Shell(x) if fails && !x.hollow => x.faces.iter().map(|g| Pick::Face(g.part, g.face)).collect(),
+        FeatureKind::DirectEdit(x) if fails => x.faces.iter().map(|g| Pick::Face(g.part, g.face)).collect(),
         _ => Vec::new(),
     };
     let want_failed = crate::parts::FailedReferences(fails, parts, ops, refs);
@@ -1233,6 +1250,7 @@ fn draw_references(
         ),
         FeatureKind::Shell(x) if !x.hollow => (x.faces.iter().map(|f| EdgeOrFace::Face(*f)).collect(), false),
         FeatureKind::Draft(x) => (x.faces.iter().map(|f| EdgeOrFace::Face(*f)).collect(), false),
+        FeatureKind::DirectEdit(x) => (x.faces.iter().map(|f| EdgeOrFace::Face(*f)).collect(), false),
         k @ FeatureKind::SheetMetalModel(_) => (crate::sheetmetal_ui::drawn_references(k), false),
         k @ FeatureKind::SheetMetal(_) => (crate::sheetmetal_features_ui::drawn_references(k), false),
         _ => return,
@@ -1344,7 +1362,8 @@ pub fn tangent_chain(solid: &cadrs_core::Solid, edge: &cadrs_sketch::EdgeName) -
 }
 
 // ---------------------------------------------------------------------------------------------
-// The fillet's radius arrow (PS14.5) and the Offset plane's distance arrow (P3.7, PS12.2)
+// The fillet's radius arrow (PS14.5), the Offset plane's distance arrow (P3.7, PS12.2) and the
+// Move face's distance arrow
 
 /// The fillet dialog's arrow manipulator (and the Plane dialog's, for an Offset plane): where it
 /// is on screen and a drag in progress.
@@ -1363,6 +1382,9 @@ pub struct RadiusDrag {
     start: Vec2,
     start_size: f64,
     dir_px: Vec2,
+    /// The value grows along the arrow (1), or shrinks (−1: a Move face's arrow pointing the
+    /// way a negative distance moves the face).
+    sign: f64,
     /// The feature's parameters as dragged.
     pub kind: FeatureKind,
 }
@@ -1374,8 +1396,15 @@ fn arrow_size(k: &FeatureKind) -> Option<f64> {
         FeatureKind::Plane(p) if p.kind == cadrs_core::plane::PlaneType::Offset => Some(p.offset),
         // P3I.2: a sheet metal Extrude's depth.
         FeatureKind::SheetMetalModel(x) if x.operation == cadrs_core::sheetmetal::SheetMetalOp::Extrude => Some(x.depth),
+        FeatureKind::DirectEdit(x) if x.kind == cadrs_core::direct_edit::DirectEditKind::MoveFace => Some(x.distance),
         _ => None,
     }
+}
+
+/// A Move face's distance may go either way (inward when negative); the other sizes stay above
+/// zero.
+fn arrow_signed(k: &FeatureKind) -> bool {
+    matches!(k, FeatureKind::DirectEdit(_))
 }
 
 fn set_arrow_size(k: &mut FeatureKind, v: f64, expr: String) {
@@ -1391,6 +1420,10 @@ fn set_arrow_size(k: &mut FeatureKind, v: f64, expr: String) {
         FeatureKind::SheetMetalModel(x) => {
             x.depth = v;
             x.depth_expr = expr;
+        }
+        FeatureKind::DirectEdit(x) => {
+            x.distance = v;
+            x.distance_expr = expr;
         }
         _ => {}
     }
@@ -1413,7 +1446,8 @@ fn radius_arrow_pointer(
     mut commands: Commands,
 ) {
     use bevy::picking::pointer::{PointerAction, PointerButton, PointerId};
-    let Some(s) = session.filter(|s| matches!(s.kind, AppliedKind::Fillet | AppliedKind::Plane | AppliedKind::SheetMetal)) else {
+    let move_face = AppliedKind::DirectEdit(cadrs_core::direct_edit::DirectEditKind::MoveFace);
+    let Some(s) = session.filter(|s| matches!(s.kind, AppliedKind::Fillet | AppliedKind::Plane | AppliedKind::SheetMetal) || s.kind == move_face) else {
         inputs.clear();
         return;
     };
@@ -1437,7 +1471,8 @@ fn radius_arrow_pointer(
                 {
                     let dir_px = view.view.project_vector(dir);
                     if dir_px.length() > 0.05 {
-                        arrow.drag = Some(RadiusDrag { start: pos, start_size: size, dir_px, kind: k });
+                        let sign = if arrow_signed(&k) && size < 0.0 { -1.0 } else { 1.0 };
+                        arrow.drag = Some(RadiusDrag { start: pos, start_size: size, dir_px, sign, kind: k });
                     }
                 }
             }
@@ -1445,8 +1480,15 @@ fn radius_arrow_pointer(
                 if let Some(d) = arrow.drag.as_mut() {
                     let along = (pos - d.start).dot(d.dir_px.normalize()) / d.dir_px.length();
                     let step = crate::extrude::snap_step(d.dir_px.length());
-                    let size = ((d.start_size + along as f64) / step).round() * step;
-                    let size = size.max(step);
+                    let size = ((d.start_size + d.sign * along as f64) / step).round() * step;
+                    // A face moved by nothing isn't a change: the drag passes over zero.
+                    let size = if !arrow_signed(&d.kind) {
+                        size.max(step)
+                    } else if size.abs() < step / 2.0 {
+                        if d.start_size < 0.0 { -step } else { step }
+                    } else {
+                        size
+                    };
                     if arrow_size(&d.kind).is_some_and(|v| (size - v).abs() > 1e-9) {
                         set_arrow_size(&mut d.kind, size, units.0.with_unit(size, cadrs_sketch::units::Quantity::Length));
                     }
@@ -1465,6 +1507,7 @@ fn radius_arrow_pointer(
                             FeatureKind::Fillet(f) if f.measurement == cadrs_core::applied::FilletMeasurement::Width => "Drag width",
                             FeatureKind::Fillet(_) => "Drag radius",
                             FeatureKind::SheetMetalModel(_) => "Drag depth",
+                            FeatureKind::DirectEdit(_) => "Drag distance",
                             _ => "Drag offset",
                         };
                         set(world, d.kind, label);
@@ -1555,20 +1598,47 @@ fn place_radius_arrow(
         let FeatureKind::SheetMetalModel(x) = &el.feature(s.feature)?.kind else { return None };
         crate::sheetmetal_ui::depth_arrow(el.features(), x, dragged.unwrap_or(x.depth))
     });
-    let target = target.or(sm_target);
+    // Move face: on the first face (on the parts before it), standing off it by the distance,
+    // pointing the way the face moves (along its outward normal, or against it when negative:
+    // then it stays on the same side of the face, turned end for end, its head at the face).
+    let face_target = session.as_ref().filter(|s| matches!(s.kind, AppliedKind::DirectEdit(_))).and_then(|s| {
+        let FeatureKind::DirectEdit(x) = &doc.as_ref()?.doc.element(s.element)?.feature(s.feature)?.kind else { return None };
+        if x.kind != cadrs_core::direct_edit::DirectEditKind::MoveFace {
+            return None;
+        }
+        let first = x.faces.first()?;
+        let solid = &before.parts.iter().find(|p| p.id == first.part)?.solid;
+        let i = solid.faces.iter().position(|f| f.name == first.face)?;
+        let (p, n) = (solid.face_point(i)?, solid.face_normal(i)?);
+        let normal = Vec3::new(n[0] as f32, n[1] as f32, n[2] as f32).normalize_or_zero();
+        let distance = dragged.unwrap_or(x.distance) as f32;
+        let dir = if distance < 0.0 { -normal } else { normal };
+        Some((Vec3::new(p[0] as f32, p[1] as f32, p[2] as f32) + normal * distance, dir))
+    });
+    let target = target.or(sm_target).or(face_target);
     let arrow_name = if plane_target.is_some() {
         "plane-offset-arrow"
     } else if sm_target.is_some() {
         "sm-depth-arrow"
+    } else if face_target.is_some() {
+        "move-face-arrow"
     } else {
         "fillet-arrow"
     };
     arrow.axis = target;
+    let inverted = face_target.is_some_and(|_| dragged.or_else(|| {
+        let s = session.as_ref()?;
+        match &doc.as_ref()?.doc.element(s.element)?.feature(s.feature)?.kind {
+            FeatureKind::DirectEdit(x) => Some(x.distance),
+            _ => None,
+        }
+    }).is_some_and(|d| d < 0.0));
     let placed = target.and_then(|(p, dir)| {
         let d = view.view.project_vector(dir);
         (d.length() >= 0.05).then(|| {
             let b = rect.to_screen(view.view.project(p));
-            (b, b + d.normalize() * ARROW_LEN)
+            let len = d.normalize() * ARROW_LEN;
+            if inverted { (b - len, b) } else { (b, b + len) }
         })
     });
     arrow.base_tip = placed;

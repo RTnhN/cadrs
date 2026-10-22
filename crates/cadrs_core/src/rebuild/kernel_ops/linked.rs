@@ -73,15 +73,17 @@ impl Rebuilder {
         match x.format {
             // IGES, and STEP with its assembly structure: the XDE reader (`import.rs`).
             ImportFormat::Iges => bodies = self.read_structured(x, &bytes, x.structure.unwrap_or(ImportMode::Flatten))?,
-            ImportFormat::Step if x.structure.is_some() => {
-                bodies = self.read_structured(x, &bytes, x.structure.unwrap_or(ImportMode::Flatten))?;
-            }
             ImportFormat::Step => {
-                let made = self.kernel.import_step(&bytes).map_err(|e| format!("Import failed: {e}"))?;
-                let counts: Vec<usize> = made.iter().map(|b| self.kernel.faces(*b).map(|f| f.len()).unwrap_or(0)).collect();
-                let occurrences = crate::import::step_occurrences(&String::from_utf8_lossy(&bytes));
-                let names = crate::import::assign_names(&counts, &occurrences, &x.stem());
-                bodies = made.into_iter().zip(names).collect();
+                bodies = self.read_structured(x, &bytes, x.structure.unwrap_or(ImportMode::Flatten))?;
+                if x.structure.is_none() {
+                    // Preserve the ordinary STEP import's solid-before-surface ordering and
+                    // naming, while sharing the color-aware reader with structured imports.
+                    bodies.sort_by_key(|(body, _)| self.kernel.solid_count(*body).unwrap_or(0) == 0);
+                    let counts: Vec<_> = bodies.iter().map(|(body, _)| self.kernel.faces(*body).map(|f| f.len()).unwrap_or(0)).collect();
+                    let occurrences = crate::import::step_occurrences(&String::from_utf8_lossy(&bytes));
+                    let names = crate::import::assign_names(&counts, &occurrences, &x.stem());
+                    for ((_, name), original) in bodies.iter_mut().zip(names) { *name = original; }
+                }
             }
             ImportFormat::Stl => {
                 let tris = crate::import::parse_stl(&bytes)?;

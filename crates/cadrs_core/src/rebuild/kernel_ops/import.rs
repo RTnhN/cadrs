@@ -34,7 +34,7 @@ impl Rebuilder {
         };
         let mut placed: Vec<BodyId> = Vec::new();
         let mut failed = None;
-        for (part, placement, what) in &wanted {
+        for (occurrence, (part, placement, what)) in wanted.iter().enumerate() {
             let body = originals[*part];
             // A copy even where nothing moves, so every placed body is its own.
             let moved = if *placement == Motion::identity() {
@@ -43,7 +43,16 @@ impl Rebuilder {
                 self.kernel.transform_motion(body, placement)
             };
             match moved {
-                Ok(r) => placed.push(r.bodies[0]),
+                Ok(r) => {
+                    let body = r.bodies[0];
+                    if mode == ImportMode::Flatten {
+                        if let Some(color) = model.occurrences.get(occurrence).and_then(|o| o.color) {
+                            let n = self.kernel.faces(body).map_err(|e| e.to_string())?.len();
+                            self.kernel.set_face_colors(body, vec![Some(color); n]);
+                        }
+                    }
+                    placed.push(body);
+                },
                 Err(e) => {
                     failed = Some(format!("Placing {what} failed: {e}"));
                     break;

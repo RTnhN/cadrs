@@ -16,7 +16,7 @@ use std::path::{Path, PathBuf};
 use crate::ids::PartId;
 
 /// What to export.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct StepRequest {
     /// The parts, with the names their STEP products get (their names in the Parts list).
     pub parts: Vec<(PartId, String)>,
@@ -27,7 +27,7 @@ pub struct StepRequest {
 }
 
 /// One STEP file's contents.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct StepFile {
     /// The part's name when the file holds one part, else `None`.
     pub part: Option<String>,
